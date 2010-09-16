@@ -1,4 +1,4 @@
-/*	$OpenBSD: gus_isa.c,v 1.4 2004/06/13 21:49:24 niklas Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD: gus.c,v 1.51 1998/01/25 23:48:06 mycroft Exp $	*/
 
 /*-

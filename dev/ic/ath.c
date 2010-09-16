@@ -221,7 +221,8 @@ ath_attach(u_int16_t devid, struct ath_softc *sc)
 	bcopy(sc->sc_dev.dv_xname, ifp->if_xname, IFNAMSIZ);
 	sc->sc_flags &= ~ATH_ATTACHED;	/* make sure that it's not attached */
 
-	ah = ath_hal_attach(devid, sc, sc->sc_st, sc->sc_sh, &status);
+	ah = ath_hal_attach(devid, sc, sc->sc_st, sc->sc_sh, sc->sc_64bit,
+	    &status);
 	if (ah == NULL) {
 		printf("%s: unable to attach hardware; HAL status %d\n",
 			ifp->if_xname, status);

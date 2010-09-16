@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_trace.c,v 1.4 2007/01/15 23:19:05 jsg Exp $	*/
+/*	$OpenBSD: db_trace.c,v 1.3 2005/03/31 02:53:48 tedu Exp $	*/
 /*	$NetBSD: db_trace.c,v 1.1 2003/04/26 18:39:27 fvdl Exp $	*/
 
 /* 

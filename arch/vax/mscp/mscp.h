@@ -1,4 +1,4 @@
-/*	$OpenBSD: mscp.h,v 1.5 2003/06/02 23:27:57 millert Exp $	*/
+/*	$OpenBSD: mscp.h,v 1.4 2000/04/27 03:14:46 bjc Exp $	*/
 /*	$NetBSD: mscp.h,v 1.6 1999/05/29 19:11:16 ragge Exp $	*/
 
 /*

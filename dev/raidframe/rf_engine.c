@@ -1,4 +1,4 @@
-/*	$OpenBSD: rf_engine.c,v 1.15 2003/04/27 11:22:54 ho Exp $	*/
+/*	$OpenBSD: rf_engine.c,v 1.14 2003/01/19 14:32:00 tdeval Exp $	*/
 /*	$NetBSD: rf_engine.c,v 1.10 2000/08/20 16:51:03 thorpej Exp $	*/
 
 /*

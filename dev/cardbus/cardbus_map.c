@@ -1,4 +1,4 @@
-/*	$OpenBSD: cardbus_map.c,v 1.7 2006/07/31 11:06:27 mickey Exp $	*/
+/*	$OpenBSD: cardbus_map.c,v 1.6 2006/06/21 11:27:03 fkr Exp $	*/
 /*	$NetBSD: cardbus_map.c,v 1.10 2000/03/07 00:31:46 mycroft Exp $	*/
 
 /*

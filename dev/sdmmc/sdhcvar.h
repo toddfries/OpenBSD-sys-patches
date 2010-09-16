@@ -1,4 +1,4 @@
-/*	$OpenBSD: sdhcvar.h,v 1.2 2006/07/17 20:48:27 fgsch Exp $	*/
+/*	$OpenBSD: sdhcvar.h,v 1.1 2006/05/28 17:21:14 uwe Exp $	*/
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>

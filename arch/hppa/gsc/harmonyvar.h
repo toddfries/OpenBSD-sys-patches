@@ -1,4 +1,4 @@
-/*	$OpenBSD: harmonyvar.h,v 1.8 2003/08/15 13:25:53 mickey Exp $	*/
+/*	$OpenBSD: harmonyvar.h,v 1.7 2003/06/02 19:54:29 jason Exp $	*/
 
 /*
  * Copyright (c) 2003 Jason L. Wright (jason@thought.net)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: i2cvar.h,v 1.10 2006/02/08 23:15:58 dlg Exp $	*/
+/*	$OpenBSD: i2cvar.h,v 1.9 2006/01/01 20:52:25 deraadt Exp $	*/
 /*	$NetBSD: i2cvar.h,v 1.1 2003/09/30 00:35:31 thorpej Exp $	*/
 
 /*

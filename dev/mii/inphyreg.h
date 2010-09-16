@@ -1,4 +1,4 @@
-/*	$OpenBSD: inphyreg.h,v 1.4 2003/10/22 09:39:29 jmc Exp $	*/
+/*	$OpenBSD: inphyreg.h,v 1.3 2001/04/17 01:19:22 jason Exp $	*/
 /*	$NetBSD: inphyreg.h,v 1.1 1998/08/11 00:00:28 thorpej Exp $	*/
 
 /*-

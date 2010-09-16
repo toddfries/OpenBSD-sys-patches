@@ -247,7 +247,7 @@ espsearch:
 		 * What happens here is that if the esp driver has not been
 		 * configured, then this returns a NULL pointer. Then when the
 		 * esp actually gets configured, it does the opposing test, and
-		 * if the sc->sc_dma field in it's softc is NULL, then tries to
+		 * if the sc->sc_dma field in its softc is NULL, then tries to
 		 * find the matching dma driver.
 		 *
 		 */

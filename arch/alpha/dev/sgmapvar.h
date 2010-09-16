@@ -1,4 +1,4 @@
-/* $OpenBSD: sgmapvar.h,v 1.4 2006/04/04 21:18:43 brad Exp $ */
+/* $OpenBSD: sgmapvar.h,v 1.3 2006/03/20 01:00:58 martin Exp $ */
 /* $NetBSD: sgmapvar.h,v 1.10 1998/08/14 16:50:02 thorpej Exp $ */
 
 /*-

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vaddrs.h,v 1.7 2005/04/17 18:47:51 miod Exp $	*/
+/*	$OpenBSD: vaddrs.h,v 1.6 2003/04/23 19:34:07 miod Exp $	*/
 /*	$NetBSD: vaddrs.h,v 1.8 1997/03/10 23:54:41 pk Exp $ */
 
 /*

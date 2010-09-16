@@ -1,4 +1,4 @@
-/*	$OpenBSD: ctreg.h,v 1.7 2005/11/18 00:09:15 miod Exp $	*/
+/*	$OpenBSD: ctreg.h,v 1.6 2004/04/12 22:12:32 jmc Exp $	*/
 /*	$NetBSD: ctreg.h,v 1.6 1996/02/09 18:00:35 scottr Exp $	*/
 
 /*

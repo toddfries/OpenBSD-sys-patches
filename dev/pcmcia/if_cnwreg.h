@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_cnwreg.h,v 1.2 2000/02/01 17:21:48 fgsch Exp $	*/
+/*	$OpenBSD$	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.

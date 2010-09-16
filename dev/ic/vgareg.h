@@ -1,4 +1,4 @@
-/* $OpenBSD: vgareg.h,v 1.3 2004/04/02 04:39:50 deraadt Exp $ */
+/* $OpenBSD: vgareg.h,v 1.2 2001/03/14 02:49:22 mickey Exp $ */
 /* $NetBSD: vgareg.h,v 1.2 1998/05/28 16:48:41 drochner Exp $ */
 
 /*

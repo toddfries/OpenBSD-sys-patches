@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpu_isapnp.c,v 1.6 2002/11/28 23:24:53 mickey Exp $	*/
+/*	$OpenBSD: mpu_isapnp.c,v 1.5 2002/03/14 01:26:56 millert Exp $	*/
 
 #include "midi.h"
 

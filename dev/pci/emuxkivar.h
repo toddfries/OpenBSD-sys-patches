@@ -1,4 +1,4 @@
-/*	$OpenBSD: emuxkivar.h,v 1.7 2005/11/30 22:17:47 brad Exp $	*/
+/*	$OpenBSD: emuxkivar.h,v 1.6 2003/04/26 08:01:42 jmc Exp $	*/
 /*	$NetBSD: emuxkivar.h,v 1.1 2001/10/17 18:39:41 jdolecek Exp $	*/
 
 /*-

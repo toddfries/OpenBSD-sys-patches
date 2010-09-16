@@ -1,4 +1,4 @@
-/*	$OpenBSD: cgfourteenreg.h,v 1.4 2005/03/15 18:50:43 miod Exp $	*/
+/*	$OpenBSD: cgfourteenreg.h,v 1.3 2002/08/21 20:27:35 miod Exp $	*/
 /*	$NetBSD: cgfourteenreg.h,v 1.1 1996/09/30 22:41:02 abrown Exp $ */
 
 /*

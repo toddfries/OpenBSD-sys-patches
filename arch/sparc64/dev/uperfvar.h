@@ -1,4 +1,4 @@
-/*	$OpenBSD: uperfvar.h,v 1.4 2003/06/02 20:02:49 jason Exp $	*/
+/*	$OpenBSD: uperfvar.h,v 1.3 2002/04/08 17:49:42 jason Exp $	*/
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)

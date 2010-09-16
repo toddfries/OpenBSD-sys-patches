@@ -1,4 +1,4 @@
-/*	$OpenBSD: arc4.c,v 1.1 2003/10/07 07:07:14 markus Exp $	*/
+/*	$OpenBSD: $	*/
 /*
  * Copyright (c) 2003 Markus Friedl <markus@openbsd.org>
  *

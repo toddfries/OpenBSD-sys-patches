@@ -1,4 +1,4 @@
-;	$OpenBSD: osiop.ss,v 1.1 2003/01/08 02:11:38 krw Exp $	
+;	$OpenBSD$	
 ;	$NetBSD: osiop.ss,v 1.1 2001/04/30 04:47:51 tsutsui Exp $
 
 ;

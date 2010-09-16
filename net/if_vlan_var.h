@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vlan_var.h,v 1.18 2006/02/09 00:05:55 reyk Exp $	*/
+/*	$OpenBSD: if_vlan_var.h,v 1.17 2006/01/05 14:57:24 norby Exp $	*/
 
 /*
  * Copyright 1998 Massachusetts Institute of Technology

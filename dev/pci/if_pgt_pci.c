@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pgt_pci.c,v 1.9 2006/11/18 20:44:40 grange Exp $  */
+/*	$OpenBSD: if_pgt_pci.c,v 1.8 2006/11/10 20:20:04 damien Exp $  */
 
 /*
  * Copyright (c) 2006 Marcus Glocker <mglocker@openbsd.org>

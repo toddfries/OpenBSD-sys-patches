@@ -1,4 +1,4 @@
-/*	$OpenBSD: fp.S,v 1.7 2004/11/02 18:54:45 pefo Exp $	*/
+/*	$OpenBSD: fp.S,v 1.6 2004/10/30 14:48:59 pefo Exp $	*/
 /*
  * Copyright (c) 1992, 1993
  *	The Regents of the University of California.  All rights reserved.

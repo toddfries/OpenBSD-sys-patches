@@ -1,4 +1,4 @@
-/* $OpenBSD: clockvar.h,v 1.2 2004/08/18 13:29:46 aoyama Exp $ */
+/* $OpenBSD: clockvar.h,v 1.1 2004/04/21 15:23:58 aoyama Exp $ */
 /* $NetBSD: clockvar.h,v 1.1 2000/01/05 08:49:02 nisimura Exp $ */
 
 /*-

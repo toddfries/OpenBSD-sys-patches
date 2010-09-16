@@ -1,4 +1,4 @@
-/*	$OpenBSD: bwtwo.c,v 1.34 2006/12/03 16:38:12 miod Exp $	*/
+/*	$OpenBSD: bwtwo.c,v 1.33 2006/06/02 20:00:54 miod Exp $	*/
 /*	$NetBSD: bwtwo.c,v 1.33 1997/05/24 20:16:02 pk Exp $ */
 
 /*

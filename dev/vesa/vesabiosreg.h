@@ -1,4 +1,4 @@
-/* $OpenBSD: vesabiosreg.h,v 1.1 2006/11/27 18:04:28 gwk Exp $ */
+/* $OpenBSD$ */
 
 /*
  * Written by M. Drochner

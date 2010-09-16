@@ -1,4 +1,4 @@
-/*	$OpenBSD: krpc.h,v 1.5 2002/03/14 01:27:13 millert Exp $	*/
+/*	$OpenBSD: krpc.h,v 1.4 2001/11/14 23:37:33 mickey Exp $	*/
 /*	$NetBSD: krpc.h,v 1.4 1995/12/19 23:07:11 cgd Exp $	*/
 
 #include <sys/cdefs.h>

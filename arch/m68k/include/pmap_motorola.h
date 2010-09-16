@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap_motorola.h,v 1.15 2006/06/24 13:22:14 miod Exp $	*/
+/*	$OpenBSD: pmap_motorola.h,v 1.14 2006/06/17 16:29:10 miod Exp $	*/
 
 /* 
  * Copyright (c) 1987 Carnegie-Mellon University

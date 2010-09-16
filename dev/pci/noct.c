@@ -1,4 +1,4 @@
-/*	$OpenBSD: noct.c,v 1.17 2006/06/29 21:34:51 deraadt Exp $	*/
+/*	$OpenBSD: noct.c,v 1.16 2004/05/04 16:59:31 grange Exp $	*/
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)

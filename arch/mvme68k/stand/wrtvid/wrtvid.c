@@ -1,4 +1,4 @@
-/*	$OpenBSD: wrtvid.c,v 1.6 2004/12/27 15:23:46 drahn Exp $ */
+/*	$OpenBSD: wrtvid.c,v 1.5 2003/08/16 17:46:08 deraadt Exp $ */
 
 /*
  * Copyright (c) 1995 Dale Rahn <drahn@openbsd.org>

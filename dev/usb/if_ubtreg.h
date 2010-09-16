@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ubtreg.h,v 1.1 2005/01/14 12:21:02 grange Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * ng_ubt_var.h

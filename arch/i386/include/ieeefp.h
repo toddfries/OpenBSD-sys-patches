@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieeefp.h,v 1.2 2000/08/05 22:07:31 niklas Exp $	*/
+/*	$OpenBSD$	*/
 
 /* 
  * Written by J.T. Conklin, Apr 6, 1995

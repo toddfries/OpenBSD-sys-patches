@@ -1,4 +1,4 @@
-/*	$OpenBSD: isavar.h,v 1.52 2007/01/06 20:17:43 miod Exp $	*/
+/*	$OpenBSD: isavar.h,v 1.51 2004/02/03 09:25:02 mickey Exp $	*/
 /*	$NetBSD: isavar.h,v 1.26 1997/06/06 23:43:57 thorpej Exp $	*/
 
 /*-

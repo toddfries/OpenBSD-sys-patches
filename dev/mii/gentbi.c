@@ -1,4 +1,4 @@
-/*	$OpenBSD: gentbi.c,v 1.3 2005/03/26 04:40:09 krw Exp $	*/
+/*	$OpenBSD: gentbi.c,v 1.2 2004/10/08 00:37:55 brad Exp $	*/
 /*	$NetBSD: gentbi.c,v 1.12 2004/04/11 15:40:56 thorpej Exp $	*/
 
 /*-

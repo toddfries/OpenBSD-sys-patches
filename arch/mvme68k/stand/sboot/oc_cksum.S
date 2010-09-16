@@ -1,4 +1,4 @@
-|	$OpenBSD: oc_cksum.S,v 1.4 2003/06/04 16:36:14 deraadt Exp $
+|	$OpenBSD: oc_cksum.S,v 1.3 1996/04/28 10:49:42 deraadt Exp $
 
 | Copyright (c) 1988 Regents of the University of California.
 | All rights reserved.

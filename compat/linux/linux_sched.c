@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_sched.c,v 1.5 2004/11/23 19:08:52 miod Exp $	*/
+/*	$OpenBSD: linux_sched.c,v 1.4 2004/06/13 21:49:23 niklas Exp $	*/
 /*	$NetBSD: linux_sched.c,v 1.6 2000/05/28 05:49:05 thorpej Exp $	*/
 
 /*-

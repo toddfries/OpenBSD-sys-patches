@@ -34,7 +34,7 @@
 
 #if defined(LIBC_SCCS)
 	.text
-	.asciz "$OpenBSD: alloca.S,v 1.1 2004/02/03 12:09:47 mickey Exp $"
+	.asciz "$OpenBSD: alloca.S,v 1.4 2003/06/02 23:27:47 millert Exp $"
 #endif
 
 /* like alloc, but automatic free in return */

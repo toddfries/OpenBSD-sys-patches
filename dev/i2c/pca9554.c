@@ -45,8 +45,8 @@ struct pcagpio_softc {
 	struct gpio_chipset_tag sc_gpio_gc;
         gpio_pin_t sc_gpio_pins[PCAGPIO_NPINS];
 
-	struct sensor sc_sensor[PCAGPIO_NPINS];
-	struct sensordev sc_sensordev;
+	struct ksensor sc_sensor[PCAGPIO_NPINS];
+	struct ksensordev sc_sensordev;
 };
 
 int	pcagpio_match(struct device *, void *, void *);

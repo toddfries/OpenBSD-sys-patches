@@ -1,4 +1,4 @@
-/*	$OpenBSD: apic.c,v 1.3 2007/01/15 23:19:05 jsg Exp $	*/
+/*	$OpenBSD: apic.c,v 1.2 2006/05/29 20:40:55 miod Exp $	*/
 /* $NetBSD: apic.c,v 1.1 2003/02/26 21:26:11 fvdl Exp $ */
 
 /*-

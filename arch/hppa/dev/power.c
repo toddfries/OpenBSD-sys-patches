@@ -1,4 +1,4 @@
-/*	$OpenBSD: power.c,v 1.5 2004/06/11 12:53:09 mickey Exp $	*/
+/*	$OpenBSD: power.c,v 1.4 2003/12/20 21:49:04 miod Exp $	*/
 
 /*
  * Copyright (c) 2003 Michael Shalayeff

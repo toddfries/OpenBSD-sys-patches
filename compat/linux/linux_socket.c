@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_socket.c,v 1.35 2006/03/05 21:48:56 miod Exp $	*/
+/*	$OpenBSD: linux_socket.c,v 1.34 2005/11/21 18:16:37 millert Exp $	*/
 /*	$NetBSD: linux_socket.c,v 1.14 1996/04/05 00:01:50 christos Exp $	*/
 
 /*

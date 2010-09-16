@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sisreg.h,v 1.26 2006/07/10 03:06:28 brad Exp $ */
+/*	$OpenBSD: if_sisreg.h,v 1.25 2006/03/25 03:21:56 brad Exp $ */
 /*
  * Copyright (c) 1997, 1998, 1999
  *	Bill Paul <wpaul@ee.columbia.edu>.  All rights reserved.

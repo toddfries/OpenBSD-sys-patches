@@ -1,4 +1,4 @@
-/*	$OpenBSD: pxa2x0_clock.c,v 1.5 2007/01/11 07:24:52 robert Exp $ */
+/*	$OpenBSD: pxa2x0_clock.c,v 1.4 2006/03/07 22:12:46 uwe Exp $ */
 
 /*
  * Copyright (c) 2005 Dale Rahn <drahn@openbsd.org>

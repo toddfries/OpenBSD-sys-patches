@@ -51,8 +51,8 @@ struct owtemp_softc {
 	void *			sc_onewire;
 	u_int64_t		sc_rom;
 
-	struct sensor		sc_sensor;
-	struct sensordev	sc_sensordev;
+	struct ksensor		sc_sensor;
+	struct ksensordev	sc_sensordev;
 	struct rwlock		sc_lock;
 };
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mk48txx.c,v 1.4 2002/06/09 00:07:10 nordin Exp $	*/
+/*	$OpenBSD: mk48txx.c,v 1.3 2002/03/19 01:48:47 jason Exp $	*/
 /*	$NetBSD: mk48txx.c,v 1.7 2001/04/08 17:05:10 tsutsui Exp $ */
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.

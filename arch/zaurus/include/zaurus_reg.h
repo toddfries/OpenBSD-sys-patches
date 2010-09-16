@@ -1,4 +1,4 @@
-/*	$OpenBSD: zaurus_reg.h,v 1.8 2006/11/25 18:10:29 uwe Exp $	*/
+/*	$OpenBSD: zaurus_reg.h,v 1.7 2005/12/14 14:39:38 uwe Exp $	*/
 /*	$NetBSD: lubbock_reg.h,v 1.1 2003/06/18 10:51:15 bsh Exp $ */
 
 /*

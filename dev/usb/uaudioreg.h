@@ -1,4 +1,4 @@
-/*	$OpenBSD: uaudioreg.h,v 1.11 2003/05/19 05:27:00 nate Exp $ */
+/*	$OpenBSD: uaudioreg.h,v 1.10 2002/07/25 04:07:32 nate Exp $ */
 /*	$NetBSD: uaudioreg.h,v 1.11 2002/10/23 02:32:37 christos Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmparam.h,v 1.3 2005/04/11 15:13:01 deraadt Exp $	*/
+/*	$OpenBSD: vmparam.h,v 1.2 2004/11/28 01:36:38 mickey Exp $	*/
 /*	$NetBSD: vmparam.h,v 1.18 2003/05/21 18:04:44 thorpej Exp $	*/
 
 /*

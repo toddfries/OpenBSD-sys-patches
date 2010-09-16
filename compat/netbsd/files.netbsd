@@ -1,4 +1,4 @@
-#	$OpenBSD: files.netbsd,v 1.8 2001/09/21 15:31:59 art Exp $
+#	$OpenBSD: files.netbsd,v 1.7 1999/11/10 15:55:22 mickey Exp $
 #
 # Config.new file description for machine-independent NetBSD compat code.
 # Included by ports that need it.

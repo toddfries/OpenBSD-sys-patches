@@ -1,4 +1,4 @@
-/*	$OpenBSD: bktr_audio.c,v 1.8 2006/12/21 02:44:55 krw Exp $	*/
+/*	$OpenBSD: bktr_audio.c,v 1.7 2005/12/07 12:39:23 mickey Exp $	*/
 /* $FreeBSD: src/sys/dev/bktr/bktr_audio.c,v 1.8 2000/10/31 13:09:56 roger Exp $ */
 /*
  * This is part of the Driver for Video Capture Cards (Frame grabbers)

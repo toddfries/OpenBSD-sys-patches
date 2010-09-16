@@ -1,4 +1,4 @@
-/* $OpenBSD: vgavar.h,v 1.8 2002/07/12 20:17:03 mickey Exp $ */
+/* $OpenBSD: vgavar.h,v 1.7 2002/03/14 03:16:05 millert Exp $ */
 /* $NetBSD: vgavar.h,v 1.4 2000/06/17 07:11:50 soda Exp $ */
 
 /*

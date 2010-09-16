@@ -1,4 +1,4 @@
-/*	$OpenBSD: rgephyreg.h,v 1.2 2004/10/28 23:37:11 pvalchev Exp $	*/
+/*	$OpenBSD: rgephyreg.h,v 1.1 2004/06/05 05:49:29 pvalchev Exp $	*/
 /*
  * Copyright (c) 2003
  *	Bill Paul <wpaul@windriver.com>.  All rights reserved.

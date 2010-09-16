@@ -1,4 +1,4 @@
-/*	$OpenBSD: biosdev.h,v 1.30 2003/09/16 03:43:11 fgsch Exp $	*/
+/*	$OpenBSD: biosdev.h,v 1.28 2003/05/31 00:15:29 weingart Exp $	*/
 
 /*
  * Copyright (c) 1996 Michael Shalayeff

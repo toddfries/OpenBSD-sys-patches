@@ -1,4 +1,4 @@
-/* $OpenBSD: gusreg.h,v 1.5 2001/01/29 05:30:31 mickey Exp $ */
+/* $OpenBSD: gusreg.h,v 1.4 1998/04/26 21:02:43 provos Exp $ */
 /* $NetBSD: gusreg.h,v 1.6 1997/10/09 07:57:22 jtc Exp $ */
 
 /*-

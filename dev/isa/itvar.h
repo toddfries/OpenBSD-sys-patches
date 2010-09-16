@@ -80,8 +80,8 @@ struct it_softc {
 	bus_space_tag_t it_iot;
 	bus_space_handle_t it_ioh;
 
-	struct sensor sensors[IT_NUM_SENSORS];
-	struct sensordev sensordev;
+	struct ksensor sensors[IT_NUM_SENSORS];
+	struct ksensordev sensordev;
 	u_int numsensors;
 	void (*refresh_sensor_data)(struct it_softc *);
 

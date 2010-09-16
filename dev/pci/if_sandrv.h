@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sandrv.h,v 1.4 2005/04/01 21:42:36 canacar Exp $	*/
+/*	$OpenBSD: if_sandrv.h,v 1.3 2004/07/16 15:11:45 alex Exp $	*/
 
 /*-
  * Copyright (c) 2001-2004 Sangoma Technologies (SAN)

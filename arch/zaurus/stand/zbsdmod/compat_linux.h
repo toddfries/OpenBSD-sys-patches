@@ -1,4 +1,4 @@
-/*	$OpenBSD: compat_linux.h,v 1.5 2006/01/15 17:58:27 deraadt Exp $	*/
+/*	$OpenBSD: compat_linux.h,v 1.4 2006/01/10 18:17:15 jolan Exp $	*/
 
 /*
  * Copyright (c) 2005 Uwe Stuehler <uwe@bsdx.de>

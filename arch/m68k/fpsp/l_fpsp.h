@@ -38,7 +38,7 @@
 *	l_fpsp.h --- stack frame offsets for library version of FPSP
 *
 *	This file is derived from fpsp.h.  All equates that refer
-*	to the fsave frame and it's bits are removed with the
+*	to the fsave frame and its bits are removed with the
 *	exception of ETEMP, WBTEMP, DTAG and STAG which are simulated
 *	in the library version.  Equates for the exception frame are
 *	also not needed.  Some of the equates that are only used in

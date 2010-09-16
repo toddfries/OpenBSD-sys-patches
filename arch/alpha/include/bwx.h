@@ -1,4 +1,4 @@
-/* $OpenBSD: bwx.h,v 1.4 2002/05/10 10:13:27 art Exp $ */
+/* $OpenBSD: bwx.h,v 1.3 2001/11/04 23:00:11 art Exp $ */
 /* $NetBSD: bwx.h,v 1.3 2000/06/08 02:55:37 thorpej Exp $ */
 
 /*-

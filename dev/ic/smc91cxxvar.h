@@ -1,4 +1,4 @@
-/*	$OpenBSD: smc91cxxvar.h,v 1.6 2006/02/24 01:48:27 brad Exp $	*/
+/*	$OpenBSD: smc91cxxvar.h,v 1.5 2006/01/23 14:42:55 martin Exp $	*/
 /*	$NetBSD: smc91cxxvar.h,v 1.4 1997/10/15 05:56:13 explorer Exp $	*/
 
 /*-

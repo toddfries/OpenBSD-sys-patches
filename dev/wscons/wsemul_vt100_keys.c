@@ -1,4 +1,4 @@
-/* $OpenBSD: wsemul_vt100_keys.c,v 1.2 2004/04/02 04:39:51 deraadt Exp $ */
+/* $OpenBSD: wsemul_vt100_keys.c,v 1.1 2000/05/16 23:49:11 mickey Exp $ */
 /* $NetBSD: wsemul_vt100_keys.c,v 1.3 1999/04/22 20:06:02 mycroft Exp $ */
 
 /*

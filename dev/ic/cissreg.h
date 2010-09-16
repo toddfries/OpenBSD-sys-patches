@@ -1,4 +1,4 @@
-/*	$OpenBSD: cissreg.h,v 1.8 2006/08/28 03:22:37 mickey Exp $	*/
+/*	$OpenBSD: cissreg.h,v 1.7 2006/08/28 02:56:33 mickey Exp $	*/
 
 /*
  * Copyright (c) 2005,2006 Michael Shalayeff

@@ -1,4 +1,4 @@
-/*	$OpenBSD: piixreg.h,v 1.3 2006/01/03 22:39:03 grange Exp $	*/
+/*	$OpenBSD: piixreg.h,v 1.2 2005/12/28 20:10:44 grange Exp $	*/
 
 /*
  * Copyright (c) 2005 Alexander Yurchenko <grange@openbsd.org>

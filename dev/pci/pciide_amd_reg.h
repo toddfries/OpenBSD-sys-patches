@@ -1,4 +1,4 @@
-/*	$OpenBSD: pciide_amd_reg.h,v 1.8 2004/09/24 07:38:38 grange Exp $ 	*/
+/*	$OpenBSD: pciide_amd_reg.h,v 1.7 2004/03/12 19:10:07 grange Exp $ 	*/
 /*	$NetBSD: pciide_amd_reg.h,v 1.2 2000/07/06 15:08:11 bouyer Exp $	*/
 
 /*

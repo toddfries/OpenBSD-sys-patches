@@ -350,7 +350,7 @@ ext2fs_reload_vnode(struct vnode *vp, void *args) {
 	/*
 	 * Step 5: invalidate all cached file data.
 	 */
-	if (vget(vp, LK_EXCLUSIVE  | LK_INTERLOCK, era->p))
+	if (vget(vp, LK_EXCLUSIVE, era->p))
 		return (0);
 	
 	if (vinvalbuf(vp, 0, era->cred, era->p, 0, 0))
@@ -506,7 +506,10 @@ ext2fs_mountfs(devvp, mp, p)
 		return (error);
 	if (vcount(devvp) > 1 && devvp != rootvp)
 		return (EBUSY);
-	if ((error = vinvalbuf(devvp, V_SAVE, cred, p, 0, 0)) != 0)
+	vn_lock(devvp, LK_EXCLUSIVE | LK_RETRY, p);
+	error = vinvalbuf(devvp, V_SAVE, cred, p, 0, 0);
+	VOP_UNLOCK(devvp, 0, p);
+	if (error)
 		return (error);
 
 	ronly = (mp->mnt_flag & MNT_RDONLY) != 0;
@@ -752,11 +755,10 @@ ext2fs_sync_vnode(struct vnode *vp, void *args)
 	    ((ip->i_flag & (IN_ACCESS | IN_CHANGE | IN_MODIFIED | IN_UPDATE)) == 0 &&
 		LIST_EMPTY(&vp->v_dirtyblkhd)) ||
 	    esa->waitfor == MNT_LAZY) {
-		simple_unlock(&vp->v_interlock);
 		return (0);
 	}
 
-	if (vget(vp, LK_EXCLUSIVE | LK_NOWAIT | LK_INTERLOCK, esa->p))
+	if (vget(vp, LK_EXCLUSIVE | LK_NOWAIT, esa->p))
 		return (0);
 
 	if ((error = VOP_FSYNC(vp, esa->cred, esa->waitfor, esa->p)) != 0)

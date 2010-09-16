@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sis.c,v 1.76 2006/12/03 16:23:41 grange Exp $ */
+/*	$OpenBSD: if_sis.c,v 1.75 2006/12/03 16:12:22 grange Exp $ */
 /*
  * Copyright (c) 1997, 1998, 1999
  *	Bill Paul <wpaul@ctr.columbia.edu>.  All rights reserved.

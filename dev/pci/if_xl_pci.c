@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_xl_pci.c,v 1.22 2006/08/10 20:10:19 brad Exp $	*/
+/*	$OpenBSD: if_xl_pci.c,v 1.21 2005/08/09 04:10:12 mickey Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999

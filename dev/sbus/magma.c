@@ -1,4 +1,4 @@
-/*	$OpenBSD: magma.c,v 1.15 2005/07/09 22:23:15 miod Exp $	*/
+/*	$OpenBSD: magma.c,v 1.14 2005/03/08 21:56:23 martin Exp $	*/
 /*
  * magma.c
  *

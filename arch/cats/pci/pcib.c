@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcib.c,v 1.3 2006/03/17 20:48:46 miod Exp $	*/
+/*	$OpenBSD: pcib.c,v 1.2 2004/05/19 04:11:31 drahn Exp $	*/
 /*	$NetBSD: pcib.c,v 1.4 2003/01/01 01:25:34 thorpej Exp $	*/
 
 /*-

@@ -1,4 +1,4 @@
-/*	$OpenBSD: zaurus_audio.c,v 1.8 2005/08/18 13:23:02 robert Exp $	*/
+/*	$OpenBSD: zaurus_audio.c,v 1.7 2005/05/26 03:52:07 pascoe Exp $	*/
 
 /*
  * Copyright (c) 2005 Christopher Pascoe <pascoe@openbsd.org>

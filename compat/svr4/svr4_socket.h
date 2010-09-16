@@ -1,4 +1,4 @@
-/*	$OpenBSD: svr4_socket.h,v 1.2 2002/03/14 01:26:51 millert Exp $	*/
+/*	$OpenBSD: svr4_socket.h,v 1.1 1996/04/21 22:18:25 deraadt Exp $	*/
 /*	$NetBSD: svr4_socket.h,v 1.1 1996/04/11 12:43:31 christos Exp $	*/
 
 /*

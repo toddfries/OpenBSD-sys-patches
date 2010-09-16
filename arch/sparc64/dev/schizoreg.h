@@ -1,4 +1,4 @@
-/*	$OpenBSD: schizoreg.h,v 1.18 2007/01/20 16:26:53 kettenis Exp $	*/
+/*	$OpenBSD: schizoreg.h,v 1.17 2007/01/14 16:18:56 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)

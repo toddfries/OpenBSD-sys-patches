@@ -694,7 +694,6 @@ _pmap_kenter_pa(vaddr_t va, paddr_t pa, vm_prot_t prot, int flags, int cache)
 	struct pte_desc *pted;
 	int s;
 	pmap_t pm;
-	struct pted_pv_head *pvh;
 
 	pm = pmap_kernel();
 
@@ -717,9 +716,8 @@ _pmap_kenter_pa(vaddr_t va, paddr_t pa, vm_prot_t prot, int flags, int cache)
 		pmap_vp_enter(pm, va, pted);
 	}
 
-	pvh = pmap_find_pvh(pa);
 	if (cache == PMAP_CACHE_DEFAULT) {
-		if (pvh != NULL)
+		if (pa < 0x80000000 || pmap_find_pvh(pa) != NULL)
 			cache = PMAP_CACHE_WB; /* managed memory is cacheable */
 		else
 			cache = PMAP_CACHE_CI;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ichwdt.c,v 1.2 2005/12/17 21:05:50 grange Exp $	*/
+/*	$OpenBSD: ichwdt.c,v 1.1 2005/05/02 17:26:00 grange Exp $	*/
 
 /*
  * Copyright (c) 2004, 2005 Alexander Yurchenko <grange@openbsd.org>

@@ -1,4 +1,4 @@
-/*	$OpenBSD: wds.c,v 1.23 2006/11/28 23:59:45 dlg Exp $	*/
+/*	$OpenBSD: wds.c,v 1.22 2005/12/03 17:13:22 krw Exp $	*/
 /*	$NetBSD: wds.c,v 1.13 1996/11/03 16:20:31 mycroft Exp $	*/
 
 #undef	WDSDIAG

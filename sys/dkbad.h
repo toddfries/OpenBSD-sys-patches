@@ -1,4 +1,4 @@
-/*	$OpenBSD: dkbad.h,v 1.4 2003/06/02 23:28:21 millert Exp $	*/
+/*	$OpenBSD: dkbad.h,v 1.3 1999/07/20 03:23:04 csapuntz Exp $	*/
 /*	$NetBSD: dkbad.h,v 1.10 1994/12/25 13:14:21 pk Exp $	*/
 
 /*-

@@ -1899,7 +1899,7 @@ uvm_swap_io(pps, startslot, npages, flags)
 			SWAP_KEY_GET(sdp, key);	/* add reference */
 
 			/* mark for async writes */
-			tpps[i]->pqflags |= PQ_ENCRYPT;
+			atomic_setbits_int(&tpps[i]->pg_flags, PQ_ENCRYPT);
 			swap_encrypt(key, src, dst, block, 1 << PAGE_SHIFT);
 			src += 1 << PAGE_SHIFT;
 			dst += 1 << PAGE_SHIFT;

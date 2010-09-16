@@ -1,4 +1,4 @@
-/*	$OpenBSD: pxe.h,v 1.2 2004/09/20 17:51:07 miod Exp $ */
+/*	$OpenBSD: pxe.h,v 1.1 2004/03/19 13:48:18 tom Exp $ */
 /*	$NetBSD: pxe.h,v 1.1 2002/02/16 03:37:40 thorpej Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: wscons_machdep.c,v 1.2 2006/08/27 16:55:41 miod Exp $	*/
+/*	$OpenBSD: wscons_machdep.c,v 1.1 2006/07/29 14:18:57 miod Exp $	*/
 /*
  * Copyright (c) 2006 Miodrag Vallat.
  *

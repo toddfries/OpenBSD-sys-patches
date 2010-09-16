@@ -1,4 +1,4 @@
-/*	$OpenBSD: hp98265reg.h,v 1.1 2004/08/03 21:46:56 miod Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD: hp98265reg.h,v 1.1 2003/08/01 01:18:45 tsutsui Exp $	*/
 
 /*

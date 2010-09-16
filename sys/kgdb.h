@@ -1,4 +1,4 @@
-/*	$OpenBSD: kgdb.h,v 1.5 2005/11/13 17:50:45 fgsch Exp $	*/
+/*	$OpenBSD: kgdb.h,v 1.4 2003/06/02 23:28:21 millert Exp $	*/
 /*	$NetBSD: kgdb.h,v 1.5 1998/09/13 14:46:24 christos Exp $	*/
 
 /*

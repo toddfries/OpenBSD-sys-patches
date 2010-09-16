@@ -1,4 +1,4 @@
-/*	$OpenBSD: dcphy.c,v 1.18 2006/12/27 19:11:08 kettenis Exp $	*/
+/*	$OpenBSD: dcphy.c,v 1.17 2006/08/05 17:01:34 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999

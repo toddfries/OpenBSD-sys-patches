@@ -1,4 +1,4 @@
-/*	$OpenBSD: netbsd_stat.c,v 1.17 2004/07/09 23:52:02 millert Exp $	*/
+/*	$OpenBSD: netbsd_stat.c,v 1.16 2003/08/15 20:32:16 tedu Exp $	*/
 /*
  * Copyright (c) 1989, 1993
  *	The Regents of the University of California.  All rights reserved.

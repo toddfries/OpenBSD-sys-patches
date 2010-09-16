@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.37 2006/10/21 16:01:54 krw Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.36 2006/09/24 22:43:00 krw Exp $	*/
 /*
  * Copyright (c) 1998 Steve Murphree, Jr.
  * Copyright (c) 1995 Dale Rahn.

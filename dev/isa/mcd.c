@@ -1,4 +1,4 @@
-/*	$OpenBSD: mcd.c,v 1.41 2006/09/26 23:33:04 krw Exp $ */
+/*	$OpenBSD: mcd.c,v 1.40 2006/08/13 16:24:13 krw Exp $ */
 /*	$NetBSD: mcd.c,v 1.60 1998/01/14 12:14:41 drochner Exp $	*/
 
 /*

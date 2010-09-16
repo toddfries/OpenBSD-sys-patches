@@ -1,4 +1,4 @@
-/*	$OpenBSD: vigra.c,v 1.10 2006/12/17 22:18:16 miod Exp $	*/
+/*	$OpenBSD: vigra.c,v 1.9 2006/06/02 20:00:56 miod Exp $	*/
 
 /*
  * Copyright (c) 2002, 2003, Miodrag Vallat.

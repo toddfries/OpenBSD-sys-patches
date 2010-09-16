@@ -1,4 +1,4 @@
-/* $OpenBSD: vesafbvar.h,v 1.1 2006/11/27 18:04:28 gwk Exp $ */
+/* $OpenBSD$ */
 
 /*-
  * Copyright (c) 2006 Jared D. McNeill <jmcneill@invisible.ca>

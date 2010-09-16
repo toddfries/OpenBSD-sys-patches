@@ -1,4 +1,4 @@
-/*	$OpenBSD: atwreg.h,v 1.4 2004/07/25 00:16:35 millert Exp $	*/
+/*	$OpenBSD: atwreg.h,v 1.3 2004/07/15 16:09:20 millert Exp $	*/
 /*	$NetBSD: atwreg.h,v 1.10 2004/07/23 05:01:29 dyoung Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: opl_cmpci.c,v 1.3 2006/07/27 07:45:54 deraadt Exp $	*/
+/*	$OpenBSD: opl_cmpci.c,v 1.2 2006/07/27 05:55:03 miod Exp $	*/
 
 /*
  * Copyright (c) 1998 The NetBSD Foundation, Inc.

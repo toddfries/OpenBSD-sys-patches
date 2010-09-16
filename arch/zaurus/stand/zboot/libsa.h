@@ -1,4 +1,4 @@
-/*	$OpenBSD: libsa.h,v 1.3 2005/05/24 20:38:20 uwe Exp $	*/
+/*	$OpenBSD: libsa.h,v 1.2 2005/01/10 21:10:57 uwe Exp $	*/
 
 /*
  * Copyright (c) 2005 Uwe Stuehler <uwe@bsdx.de>

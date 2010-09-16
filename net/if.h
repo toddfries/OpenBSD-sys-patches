@@ -65,7 +65,7 @@
  * packet input routine.
  *
  * Routines exist for locating interfaces by their addresses
- * or for locating a interface on a certain network, as well as more general
+ * or for locating an interface on a certain network, as well as more general
  * routing and gateway routines maintaining information used to locate
  * interfaces.  These routines live in the files if.c and route.c
  */

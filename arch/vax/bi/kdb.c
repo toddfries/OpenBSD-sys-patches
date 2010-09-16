@@ -1,4 +1,4 @@
-/*	$OpenBSD: kdb.c,v 1.9 2006/01/17 20:26:14 miod Exp $ */
+/*	$OpenBSD: kdb.c,v 1.8 2002/08/09 20:26:44 jsyn Exp $ */
 /*	$NetBSD: kdb.c,v 1.26 2001/11/13 12:51:34 lukem Exp $ */
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.

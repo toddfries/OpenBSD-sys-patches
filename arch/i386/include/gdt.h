@@ -1,4 +1,4 @@
-/*	$OpenBSD: gdt.h,v 1.10 2004/06/13 21:49:16 niklas Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD: gdt.h,v 1.7.10.6 2002/08/19 01:22:36 sommerfeld Exp $	*/
 
 /*-

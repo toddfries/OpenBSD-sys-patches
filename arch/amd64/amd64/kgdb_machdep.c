@@ -1,4 +1,4 @@
-/*	$OpenBSD: kgdb_machdep.c,v 1.1 2005/11/13 17:51:52 fgsch Exp $	*/
+/*	$OpenBSD$	*/
 /*
  * Copyright (c) 2005 Federico G. Schwindt
  *

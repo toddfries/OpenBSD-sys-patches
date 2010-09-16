@@ -1,4 +1,4 @@
-/*	$OpenBSD: frnd.c,v 1.8 2003/04/10 17:27:58 mickey Exp $	*/
+/*	$OpenBSD: frnd.c,v 1.7 2002/09/20 19:26:59 mickey Exp $	*/
 /*
   (c) Copyright 1986 HEWLETT-PACKARD COMPANY
   To anyone who acknowledges that this file is provided "AS IS"

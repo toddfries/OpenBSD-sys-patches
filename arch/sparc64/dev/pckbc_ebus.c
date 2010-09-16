@@ -1,4 +1,4 @@
-/*	$OpenBSD: pckbc_ebus.c,v 1.7 2004/11/02 21:17:39 miod Exp $	*/
+/*	$OpenBSD: pckbc_ebus.c,v 1.6 2003/12/16 15:08:50 jason Exp $	*/
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)

@@ -2,6 +2,7 @@
 
 NOPROG=
 NOMAN=
+CC=${HOSTCC}
 
 # PCI capable systems only
 .if (${MACHINE_ARCH} == "powerpc") || (${MACHINE} == "alpha") || \

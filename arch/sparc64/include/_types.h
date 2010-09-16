@@ -124,5 +124,6 @@ typedef	void *			__wctype_t;
 #define __HAVE_DEVICE_REGISTER
 #define __HAVE_GENERIC_SOFT_INTERRUPTS
 #define	__HAVE_MUTEX
+#define __HAVE_TIMECOUNTER
 
 #endif	/* _SPARC64__TYPES_H_ */

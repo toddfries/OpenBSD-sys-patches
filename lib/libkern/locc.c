@@ -1,4 +1,4 @@
-/*	$OpenBSD: locc.c,v 1.5 2004/08/07 00:38:32 deraadt Exp $	*/
+/*	$OpenBSD: locc.c,v 1.4 2003/06/02 23:28:08 millert Exp $	*/
 /*	$NetBSD: locc.c,v 1.2 1994/10/26 06:42:29 cgd Exp $	*/
 
 /*

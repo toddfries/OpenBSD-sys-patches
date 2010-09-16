@@ -1,4 +1,4 @@
-/*	$OpenBSD: cgsix.c,v 1.56 2006/12/17 22:18:16 miod Exp $	*/
+/*	$OpenBSD: cgsix.c,v 1.55 2006/12/02 11:21:37 miod Exp $	*/
 
 /*
  * Copyright (c) 2001 Jason L. Wright (jason@thought.net)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pciide_acer_reg.h,v 1.7 2004/09/24 07:38:38 grange Exp $	*/
+/*	$OpenBSD: pciide_acer_reg.h,v 1.6 2003/09/28 21:01:43 grange Exp $	*/
 /*	$NetBSD: pciide_acer_reg.h,v 1.4 2001/07/26 20:02:22 bouyer Exp $	*/
 
 /*

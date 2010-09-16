@@ -1,4 +1,4 @@
-/* $OpenBSD: shared_intr.c,v 1.15 2006/06/15 20:08:29 brad Exp $ */
+/* $OpenBSD: shared_intr.c,v 1.14 2006/01/29 10:47:35 martin Exp $ */
 /* $NetBSD: shared_intr.c,v 1.13 2000/03/19 01:46:18 thorpej Exp $ */
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cac_eisa.c,v 1.2 2001/11/05 17:25:58 art Exp $	*/
+/*	$OpenBSD: cac_eisa.c,v 1.1 2000/12/17 21:35:03 mickey Exp $	*/
 /*	$NetBSD: cac_eisa.c,v 1.1 2000/09/01 12:15:20 ad Exp $	*/
 
 /*-

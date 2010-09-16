@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpbios_intr_fixup.c,v 1.3 2006/07/17 21:56:39 deraadt Exp $	*/
+/*	$OpenBSD: mpbios_intr_fixup.c,v 1.2 2006/07/17 19:15:45 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2006 Mark Kettenis

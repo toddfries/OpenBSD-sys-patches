@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_mc_obio.c,v 1.6 2006/06/24 13:23:27 miod Exp $	*/
+/*	$OpenBSD: if_mc_obio.c,v 1.5 2004/12/15 06:48:24 martin Exp $	*/
 /*	$NetBSD: if_mc_obio.c,v 1.13 2004/03/26 12:15:46 wiz Exp $	*/
 
 /*-

@@ -1,4 +1,4 @@
-/*	$OpenBSD: obiovar.h,v 1.2 2006/10/07 20:52:40 miod Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD: obiovar.h,v 1.1 2006/09/01 21:26:18 uwe Exp $	*/
 
 /*-

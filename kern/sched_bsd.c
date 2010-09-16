@@ -1,4 +1,4 @@
-/*	$OpenBSD: sched_bsd.c,v 1.10 2007/02/06 18:42:37 art Exp $	*/
+/*	$OpenBSD: sched_bsd.c,v 1.9 2006/11/29 12:24:18 miod Exp $	*/
 /*	$NetBSD: kern_synch.c,v 1.37 1996/04/22 01:38:37 christos Exp $	*/
 
 /*-

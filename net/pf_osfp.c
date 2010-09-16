@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_osfp.c,v 1.12 2006/12/13 18:14:10 itojun Exp $ */
+/*	$OpenBSD: pf_osfp.c,v 1.11 2006/12/13 05:10:15 itojun Exp $ */
 
 /*
  * Copyright (c) 2003 Mike Frantzen <frantzen@w4g.org>

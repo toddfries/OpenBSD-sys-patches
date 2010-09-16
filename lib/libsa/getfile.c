@@ -1,4 +1,4 @@
-/*	$OpenBSD: getfile.c,v 1.5 2003/08/11 06:23:09 deraadt Exp $	*/
+/*	$OpenBSD: getfile.c,v 1.4 2003/06/02 23:28:09 millert Exp $	*/
 /*	$NetBSD: getfile.c,v 1.6 1996/10/14 04:49:21 cgd Exp $	*/
 
 /*-

@@ -1,4 +1,4 @@
-/*	$OpenBSD: lock_machdep.c,v 1.3 2006/09/19 11:06:33 jsg Exp $	*/
+/*	$OpenBSD: lock_machdep.c,v 1.2 2004/06/13 21:49:15 niklas Exp $	*/
 /* $NetBSD: lock_machdep.c,v 1.1.2.3 2000/05/03 14:40:30 sommerfeld Exp $ */
 
 /*-

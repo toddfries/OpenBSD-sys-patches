@@ -1,4 +1,4 @@
-/*	$OpenBSD: spx_timer.h,v 1.3 2003/06/02 23:28:16 millert Exp $	*/
+/*	$OpenBSD: spx_timer.h,v 1.2 1996/10/26 09:34:57 mickey Exp $	*/
 
 /*-
  *

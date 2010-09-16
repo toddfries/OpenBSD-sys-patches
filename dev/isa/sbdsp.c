@@ -1,4 +1,4 @@
-/*	$OpenBSD: sbdsp.c,v 1.25 2006/12/29 13:04:37 pedro Exp $	*/
+/*	$OpenBSD: sbdsp.c,v 1.24 2005/04/15 13:05:14 mickey Exp $	*/
 
 /*
  * Copyright (c) 1991-1993 Regents of the University of California.

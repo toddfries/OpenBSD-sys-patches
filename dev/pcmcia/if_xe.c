@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_xe.c,v 1.32 2006/03/25 22:41:46 djm Exp $	*/
+/*	$OpenBSD: if_xe.c,v 1.31 2005/11/23 11:39:37 mickey Exp $	*/
 
 /*
  * Copyright (c) 1999 Niklas Hallqvist, Brandon Creighton, Job de Haas

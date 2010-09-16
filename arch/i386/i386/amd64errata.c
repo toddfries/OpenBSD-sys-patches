@@ -1,4 +1,4 @@
-/*	$OpenBSD: amd64errata.c,v 1.1 2007/02/17 17:38:37 tom Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD: errata.c,v 1.6 2007/02/05 21:05:45 ad Exp $	*/
 
 /*-

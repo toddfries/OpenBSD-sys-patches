@@ -1,4 +1,4 @@
-/*	$OpenBSD: regnum.h,v 1.3 2004/08/10 20:28:13 deraadt Exp $ */
+/*	$OpenBSD: regnum.h,v 1.2 2004/08/09 14:57:26 pefo Exp $ */
 
 /*
  * Copyright (c) 2001-2002 Opsycon AB  (www.opsycon.se / www.opsycon.com)

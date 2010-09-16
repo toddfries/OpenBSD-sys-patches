@@ -1,4 +1,4 @@
-/*	$OpenBSD: gusvar.h,v 1.5 2002/03/14 03:16:05 millert Exp $	*/
+/*	$OpenBSD: gusvar.h,v 1.4 2002/03/14 01:26:56 millert Exp $	*/
 /*	$NetBSD: gus.c,v 1.51 1998/01/25 23:48:06 mycroft Exp $	*/
 
 /*-

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpuswitch.S,v 1.6 2005/09/22 04:14:44 drahn Exp $	*/
+/*	$OpenBSD: cpuswitch.S,v 1.5 2004/12/30 23:43:42 drahn Exp $	*/
 /*	$NetBSD: cpuswitch.S,v 1.41 2003/11/15 08:44:18 scw Exp $	*/
 
 /*

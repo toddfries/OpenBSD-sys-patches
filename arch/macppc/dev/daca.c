@@ -1,4 +1,4 @@
-/*	$OpenBSD: daca.c,v 1.3 2005/11/20 19:54:05 brad Exp $	*/
+/*	$OpenBSD: daca.c,v 1.2 2005/11/05 04:26:22 brad Exp $	*/
 /*	$Id: daca.c,v 1.3 2005/11/20 19:54:05 brad Exp $	*/
 
 /*-

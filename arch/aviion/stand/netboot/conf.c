@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.1 2006/05/16 22:48:18 miod Exp $ */
+/*	$OpenBSD: conf.c,v 1.3 1999/09/27 19:30:01 smurph Exp $ */
 
 #include <sys/types.h>
 #include <netinet/in.h>

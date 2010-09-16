@@ -1,4 +1,4 @@
-/* $OpenBSD: tsreg.h,v 1.4 2006/01/04 10:32:10 martin Exp $ */
+/* $OpenBSD: tsreg.h,v 1.3 2005/12/13 01:16:11 martin Exp $ */
 /* $NetBSD: tsreg.h,v 1.1 1999/06/29 06:46:47 ross Exp $ */
 
 /*-

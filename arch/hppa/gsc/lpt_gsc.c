@@ -1,4 +1,4 @@
-/*	$OpenBSD: lpt_gsc.c,v 1.11 2004/09/14 22:32:01 mickey Exp $	*/
+/*	$OpenBSD: lpt_gsc.c,v 1.10 2004/02/13 21:28:19 mickey Exp $	*/
 
 /*
  * Copyright (c) 1998 Michael Shalayeff

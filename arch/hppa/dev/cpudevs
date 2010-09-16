@@ -1,4 +1,4 @@
-$OpenBSD: cpudevs,v 1.43 2006/12/18 13:43:42 mickey Exp $
+$OpenBSD: cpudevs,v 1.42 2006/12/18 12:50:45 mickey Exp $
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff

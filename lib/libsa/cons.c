@@ -1,4 +1,4 @@
-/*	$OpenBSD: cons.c,v 1.11 2003/08/11 06:23:09 deraadt Exp $	*/
+/*	$OpenBSD: cons.c,v 1.10 2003/06/02 23:28:09 millert Exp $	*/
 
 /*
  * Copyright (c) 1988 University of Utah.

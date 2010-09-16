@@ -1,4 +1,4 @@
-/*	$OpenBSD: ofcons.c,v 1.13 2004/11/29 12:50:05 jsg Exp $	*/
+/*	$OpenBSD: ofcons.c,v 1.12 2004/01/03 14:08:53 espie Exp $	*/
 /*	$NetBSD: ofcons.c,v 1.3 1996/10/13 01:38:11 christos Exp $	*/
 
 /*

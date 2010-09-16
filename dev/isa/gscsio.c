@@ -1,4 +1,4 @@
-/*	$OpenBSD: gscsio.c,v 1.8 2006/01/05 10:43:15 grange Exp $	*/
+/*	$OpenBSD: gscsio.c,v 1.7 2006/01/01 20:52:26 deraadt Exp $	*/
 /*
  * Copyright (c) 2004 Alexander Yurchenko <grange@openbsd.org>
  *

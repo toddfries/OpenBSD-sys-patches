@@ -1,4 +1,4 @@
-/*	$OpenBSD: intrdefs.h,v 1.4 2007/02/01 20:39:42 art Exp $	*/
+/*	$OpenBSD: intrdefs.h,v 1.3 2006/03/12 02:34:39 brad Exp $	*/
 /*	$NetBSD: intrdefs.h,v 1.2 2003/05/04 22:01:56 fvdl Exp $	*/
 
 #ifndef _i386_INTRDEFS_H

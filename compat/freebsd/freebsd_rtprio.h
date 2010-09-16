@@ -1,4 +1,4 @@
-/*	$OpenBSD: freebsd_rtprio.h,v 1.3 1996/08/02 20:34:47 niklas Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * Copyright (c) 1994, Henrik Vestergaard Draboel

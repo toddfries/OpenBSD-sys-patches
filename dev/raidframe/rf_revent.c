@@ -1,4 +1,4 @@
-/*	$OpenBSD: rf_revent.c,v 1.10 2002/12/16 07:01:05 tdeval Exp $	*/
+/*	$OpenBSD: rf_revent.c,v 1.9 2000/08/08 16:07:45 peter Exp $	*/
 /*	$NetBSD: rf_revent.c,v 1.7 2000/05/30 02:04:29 oster Exp $	*/
 
 /*

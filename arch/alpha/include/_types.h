@@ -120,5 +120,6 @@ typedef	void *			__wctype_t;
 
 /* Feature test macros */
 #define __HAVE_DEVICE_REGISTER
+#define __HAVE_CPUINFO
 
 #endif	/* _ALPHA__TYPES_H_ */

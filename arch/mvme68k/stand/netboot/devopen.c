@@ -1,4 +1,4 @@
-/*	$OpenBSD: devopen.c,v 1.2 2002/03/14 03:15:56 millert Exp $ */
+/*	$OpenBSD: devopen.c,v 1.1 1996/05/16 02:52:05 chuck Exp $ */
 
 #include <sys/param.h>
 #include <stand.h>

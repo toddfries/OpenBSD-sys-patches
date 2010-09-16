@@ -1,4 +1,4 @@
-/*	$OpenBSD: hpux_exec.h,v 1.1 2004/07/09 21:48:21 mickey Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * Copyright (c) 2004 Michael Shalayeff.  All rights reserved.

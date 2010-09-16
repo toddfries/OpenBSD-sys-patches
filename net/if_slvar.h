@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_slvar.h,v 1.12 2003/12/07 15:41:27 markus Exp $	*/
+/*	$OpenBSD: if_slvar.h,v 1.11 2003/06/02 23:28:12 millert Exp $	*/
 /*	$NetBSD: if_slvar.h,v 1.16 1996/05/07 02:40:46 thorpej Exp $	*/
 
 /*-

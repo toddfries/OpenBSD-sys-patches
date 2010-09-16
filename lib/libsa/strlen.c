@@ -1,4 +1,4 @@
-/*	$OpenBSD: strlen.c,v 1.4 2003/08/11 06:23:09 deraadt Exp $	*/
+/*	$OpenBSD: strlen.c,v 1.3 2003/06/02 23:28:10 millert Exp $	*/
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.

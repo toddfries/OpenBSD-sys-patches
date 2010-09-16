@@ -1,4 +1,4 @@
-/*	$OpenBSD: macepcibridge.c,v 1.11 2006/12/14 17:36:12 kettenis Exp $ */
+/*	$OpenBSD: macepcibridge.c,v 1.10 2006/03/13 20:10:49 brad Exp $ */
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB (www.opsycon.se)

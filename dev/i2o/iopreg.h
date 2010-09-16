@@ -1,4 +1,4 @@
-/*	$OpenBSD: iopreg.h,v 1.1 2001/06/25 23:04:30 niklas Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD$	*/
 
 /*-

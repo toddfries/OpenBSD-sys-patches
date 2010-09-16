@@ -1,4 +1,4 @@
-/* $OpenBSD: tsp_pci.c,v 1.3 2002/03/14 01:26:27 millert Exp $ */
+/* $OpenBSD: tsp_pci.c,v 1.2 2001/11/06 19:53:13 miod Exp $ */
 /* $NetBSD: tsp_pci.c,v 1.1 1999/06/29 06:46:47 ross Exp $ */
 
 /*-

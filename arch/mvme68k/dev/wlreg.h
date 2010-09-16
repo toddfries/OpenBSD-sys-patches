@@ -1,4 +1,4 @@
-/*	$OpenBSD: wlreg.h,v 1.3 2003/06/04 16:36:14 deraadt Exp $ */
+/*	$OpenBSD: wlreg.h,v 1.2 1997/02/22 12:09:19 deraadt Exp $ */
 
 /*
  * Copyright (c) 1995 Dale Rahn. All rights reserved.

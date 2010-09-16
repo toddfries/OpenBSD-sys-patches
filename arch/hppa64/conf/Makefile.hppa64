@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.hppa64,v 1.3 2006/07/27 05:58:11 miod Exp $
+#	$OpenBSD: Makefile.hppa64,v 1.2 2006/06/01 21:46:27 pascoe Exp $
 
 # Makefile for OpenBSD
 #

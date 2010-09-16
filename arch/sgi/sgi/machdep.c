@@ -91,7 +91,9 @@ extern char kernel_text[];
 extern int makebootdev(const char *, int);
 extern void stacktrace(void);
 
+#ifdef DEBUG
 void dump_tlb(void);
+#endif
 
 /* the following is used externally (sysctl_hw) */
 char	machine[] = MACHINE;		/* machine "architecture" */
@@ -1119,6 +1121,7 @@ rm7k_watchintr(trapframe)
 	return(0);
 }
 
+#ifdef DEBUG
 /*
  *	Dump TLB contents.
  */
@@ -1166,3 +1169,4 @@ char *attr[] = {
 		bios_printf("\n");
 	}
 }
+#endif

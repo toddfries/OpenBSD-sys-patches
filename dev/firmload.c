@@ -1,4 +1,4 @@
-/*	$OpenBSD: firmload.c,v 1.8 2006/06/27 03:51:29 pedro Exp $	*/
+/*	$OpenBSD: firmload.c,v 1.7 2006/01/19 17:49:50 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2004 Theo de Raadt <deraadt@openbsd.org>

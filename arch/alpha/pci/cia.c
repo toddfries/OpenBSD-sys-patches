@@ -1,4 +1,4 @@
-/* $OpenBSD: cia.c,v 1.23 2006/12/14 17:36:12 kettenis Exp $ */
+/* $OpenBSD: cia.c,v 1.22 2006/03/16 22:32:44 miod Exp $ */
 /* $NetBSD: cia.c,v 1.56 2000/06/29 08:58:45 mrg Exp $ */
 
 /*-

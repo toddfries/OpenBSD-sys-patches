@@ -1,4 +1,4 @@
-/* $OpenBSD: xfs_dev-bsd.c,v 1.10 2004/01/18 21:46:54 beck Exp $
+/* $OpenBSD$
 
  * Copyright (c) 2004 Bob Beck
  * Copyright (c) 1995 - 2003 Kungliga Tekniska Högskolan

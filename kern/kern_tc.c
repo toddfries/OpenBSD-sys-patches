@@ -326,6 +326,7 @@ tc_setclock(struct timespec *ts)
 	/* XXX fiddle all the little crinkly bits around the fiords... */
 	tc_windup();
 	if (timestepwarnings) {
+		bintime2timespec(&bt2, &ts2);
 		log(LOG_INFO, "Time stepped from %ld.%09ld to %ld.%09ld\n",
 		    (long)ts2.tv_sec, ts2.tv_nsec,
 		    (long)ts->tv_sec, ts->tv_nsec);

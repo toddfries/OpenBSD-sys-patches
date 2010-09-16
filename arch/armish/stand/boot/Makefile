@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.4 2006/07/29 15:01:49 kettenis Exp $
+#	$OpenBSD: Makefile,v 1.3 2006/07/29 00:48:52 deraadt Exp $
 
 NOMAN=
 

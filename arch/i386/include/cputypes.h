@@ -1,4 +1,4 @@
-/*	$OpenBSD: cputypes.h,v 1.10 2003/12/29 08:14:18 grange Exp $	*/
+/*	$OpenBSD: cputypes.h,v 1.9 2002/03/30 09:42:28 mickey Exp $	*/
 /*	$NetBSD: cputypes.h,v 1.10 1997/10/18 04:51:03 mikel Exp $	*/
 
 /*

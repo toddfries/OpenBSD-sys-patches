@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip.h,v 1.12 2006/04/27 02:19:32 tedu Exp $	*/
+/*	$OpenBSD: ip.h,v 1.11 2005/12/10 01:30:14 deraadt Exp $	*/
 /*	$NetBSD: ip.h,v 1.9 1995/05/15 01:22:44 cgd Exp $	*/
 
 /*

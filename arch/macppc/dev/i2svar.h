@@ -1,4 +1,4 @@
-/*	$OpenBSD: i2svar.h,v 1.3 2005/11/19 01:07:00 kettenis Exp $	*/
+/*	$OpenBSD: i2svar.h,v 1.2 2005/10/31 00:26:07 joris Exp $	*/
 /*	$Id: i2svar.h,v 1.3 2005/11/19 01:07:00 kettenis Exp $	*/
 
 /*-

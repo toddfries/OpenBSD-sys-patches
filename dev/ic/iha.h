@@ -1,4 +1,4 @@
-/*	$OpenBSD: iha.h,v 1.15 2004/01/19 00:44:33 krw Exp $ */
+/*	$OpenBSD: iha.h,v 1.14 2003/10/21 18:58:49 jmc Exp $ */
 /*-------------------------------------------------------------------------
  *
  * Device driver for the INI-9XXXU/UW or INIC-940/950  PCI SCSI Controller.

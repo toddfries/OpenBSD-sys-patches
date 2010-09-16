@@ -1,4 +1,4 @@
-/*	$OpenBSD: mfs_vfsops.c,v 1.34 2006/06/25 15:01:54 sturm Exp $	*/
+/*	$OpenBSD: mfs_vfsops.c,v 1.33 2006/06/14 20:01:50 sturm Exp $	*/
 /*	$NetBSD: mfs_vfsops.c,v 1.10 1996/02/09 22:31:28 christos Exp $	*/
 
 /*

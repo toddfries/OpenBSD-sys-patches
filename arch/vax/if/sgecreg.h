@@ -35,7 +35,7 @@
 
 
 /* Driver for SGEC (second generation Ethernet controller) chip, type DC-541,
-   found on the KA670 (and prob ably other) CPU.
+   found on the KA670 (and probably other) CPU.
 
    17 May 1998...Jay Maynard, jmaynard@phoenix.net
 */

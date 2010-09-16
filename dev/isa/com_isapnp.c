@@ -1,4 +1,4 @@
-/*	$OpenBSD: com_isapnp.c,v 1.2 2003/06/02 23:28:02 millert Exp $	*/
+/*	$OpenBSD: com_isapnp.c,v 1.1 2001/09/30 00:11:57 art Exp $	*/
 /*
  * Copyright (c) 1997 - 1999, Jason Downs.  All rights reserved.
  *

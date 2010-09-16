@@ -1,4 +1,4 @@
-/*       $OpenBSD: vfs_sync.c,v 1.42 2006/11/18 10:19:59 jmc Exp $  */
+/*       $OpenBSD: vfs_sync.c,v 1.41 2006/06/25 15:01:54 sturm Exp $  */
 
 /*
  *  Portions of this code are:

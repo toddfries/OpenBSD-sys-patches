@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.hp300,v 1.39 2006/07/27 05:58:11 miod Exp $
+#	$OpenBSD: Makefile.hp300,v 1.38 2005/09/27 22:05:36 miod Exp $
 #	$NetBSD: Makefile.hp300,v 1.54 1997/04/01 23:16:41 scottr Exp $
 
 # Makefile for OpenBSD

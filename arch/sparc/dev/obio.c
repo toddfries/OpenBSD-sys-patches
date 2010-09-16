@@ -1,4 +1,4 @@
-/*	$OpenBSD: obio.c,v 1.16 2004/09/29 07:35:11 miod Exp $	*/
+/*	$OpenBSD: obio.c,v 1.15 2003/06/02 18:47:58 deraadt Exp $	*/
 /*	$NetBSD: obio.c,v 1.37 1997/07/29 09:58:11 fair Exp $	*/
 
 /*

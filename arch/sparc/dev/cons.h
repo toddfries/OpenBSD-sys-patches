@@ -1,4 +1,4 @@
-/*	$OpenBSD: cons.h,v 1.1 2002/08/12 10:44:04 miod Exp $	*/
+/*	$OpenBSD$	*/
 
 struct consdev;
 struct zs_chanstate;

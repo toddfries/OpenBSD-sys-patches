@@ -1,4 +1,4 @@
-/*	$OpenBSD: sunkbd.c,v 1.21 2005/11/11 16:44:51 miod Exp $	*/
+/*	$OpenBSD: sunkbd.c,v 1.20 2005/05/14 15:25:20 miod Exp $	*/
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)

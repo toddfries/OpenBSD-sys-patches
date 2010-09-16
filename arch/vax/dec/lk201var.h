@@ -1,4 +1,4 @@
-/*	$OpenBSD: lk201var.h,v 1.7 2006/08/05 22:05:55 miod Exp $	*/
+/*	$OpenBSD: lk201var.h,v 1.6 2006/07/31 21:57:05 miod Exp $	*/
 /* $NetBSD: lk201var.h,v 1.2 1998/10/22 17:55:20 drochner Exp $ */
 
 /*

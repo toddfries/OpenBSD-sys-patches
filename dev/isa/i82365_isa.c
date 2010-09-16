@@ -1,4 +1,4 @@
-/*	$OpenBSD: i82365_isa.c,v 1.20 2005/03/25 16:41:18 mickey Exp $	*/
+/*	$OpenBSD: i82365_isa.c,v 1.19 2005/01/27 17:03:23 millert Exp $	*/
 /*	$NetBSD: i82365_isa.c,v 1.11 1998/06/09 07:25:00 thorpej Exp $	*/
 
 /*

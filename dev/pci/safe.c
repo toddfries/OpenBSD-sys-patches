@@ -1,4 +1,4 @@
-/*	$OpenBSD: safe.c,v 1.21 2007/02/28 22:16:55 deraadt Exp $	*/
+/*	$OpenBSD: safe.c,v 1.20 2006/06/29 21:34:51 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 2003 Sam Leffler, Errno Consulting

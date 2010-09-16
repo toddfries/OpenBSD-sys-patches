@@ -231,7 +231,8 @@ struct ath_softc {
 				sc_doani : 1,	/* dynamic noise immunity */
 				sc_veol : 1,	/* tx VEOL support */
 				sc_softled : 1,	/* GPIO software LED */
-				sc_probing : 1;	/* probing AP on beacon miss */
+				sc_probing : 1,	/* probing AP on beacon miss */
+				sc_64bit : 1;	/* indicates PCI Express */
 	u_int			sc_nchan;	/* number of valid channels */
 	const HAL_RATE_TABLE	*sc_rates[IEEE80211_MODE_MAX];
 	const HAL_RATE_TABLE	*sc_currates;	/* current rate table */

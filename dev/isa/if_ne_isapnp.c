@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ne_isapnp.c,v 1.11 2006/10/20 17:02:24 brad Exp $	*/
+/*	$OpenBSD: if_ne_isapnp.c,v 1.10 2006/10/20 16:54:01 brad Exp $	*/
 /*	$NetBSD: if_ne_isapnp.c,v 1.7 1998/07/23 19:30:45 christos Exp $	*/
 
 /*-

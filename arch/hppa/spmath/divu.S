@@ -1,4 +1,4 @@
-/*	$OpenBSD: divu.S,v 1.10 2005/01/23 18:01:30 mickey Exp $	*/
+/*	$OpenBSD: divu.S,v 1.9 2003/01/23 20:25:21 mickey Exp $	*/
 /*
   (c) Copyright 1986 HEWLETT-PACKARD COMPANY
   To anyone who acknowledges that this file is provided "AS IS"

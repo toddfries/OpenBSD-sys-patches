@@ -1,4 +1,4 @@
-/*	$OpenBSD: vxreg.h,v 1.9 2006/02/06 17:19:31 jmc Exp $ */
+/*	$OpenBSD: vxreg.h,v 1.8 2004/05/26 21:15:31 miod Exp $ */
 
 /*
  * Copyright (c) 1999 Steve Murphree, Jr. All rights reserved.

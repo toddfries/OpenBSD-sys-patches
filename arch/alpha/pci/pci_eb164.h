@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_eb164.h,v 1.4 2004/06/28 02:28:43 aaron Exp $	*/
+/*	$OpenBSD: pci_eb164.h,v 1.3 2002/03/14 01:26:27 millert Exp $	*/
 /*	$NetBSD: pci_eb164.h,v 1.1 1996/11/11 21:08:13 cgd Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: p9100.c,v 1.44 2007/02/25 18:14:48 miod Exp $	*/
+/*	$OpenBSD: p9100.c,v 1.43 2007/02/18 18:40:35 miod Exp $	*/
 
 /*
  * Copyright (c) 2003, 2005, 2006, Miodrag Vallat.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ralreg.h,v 1.12 2006/11/13 20:06:38 damien Exp $  */
+/*	$OpenBSD: if_ralreg.h,v 1.11 2006/08/09 07:40:52 damien Exp $  */
 
 /*-
  * Copyright (c) 2005, 2006

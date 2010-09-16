@@ -1,4 +1,4 @@
-/*	$OpenBSD: pciide_pdc202xx_reg.h,v 1.14 2006/06/24 07:51:30 jsg Exp $	*/
+/*	$OpenBSD: pciide_pdc202xx_reg.h,v 1.13 2006/02/10 21:45:41 kettenis Exp $	*/
 /*	$NetBSD: pciide_pdc202xx_reg.h,v 1.5 2001/07/05 08:38:27 toshii Exp $ */
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: dev_net.c,v 1.4 2006/05/16 22:52:09 miod Exp $ */
+/*	$OpenBSD: dev_net.c,v 1.3 1999/01/11 05:11:46 millert Exp $ */
 
 /*
  * Copyright (c) 1995 Gordon W. Ross

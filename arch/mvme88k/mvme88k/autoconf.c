@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.35 2006/11/28 16:56:50 dlg Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.34 2006/05/02 21:43:09 miod Exp $	*/
 /*
  * Copyright (c) 1998 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur

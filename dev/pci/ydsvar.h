@@ -1,4 +1,4 @@
-/*	$OpenBSD: ydsvar.h,v 1.6 2004/12/20 12:29:36 deraadt Exp $	*/
+/*	$OpenBSD: ydsvar.h,v 1.5 2003/05/14 09:04:59 jason Exp $	*/
 /*	$NetBSD$	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcdevs_data.h,v 1.8 2006/03/13 22:00:42 miod Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.

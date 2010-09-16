@@ -1,4 +1,4 @@
-/*	$OpenBSD: spec_subr.c,v 1.2 2006/06/02 20:49:08 pedro Exp $	*/
+/*	$OpenBSD: spec_subr.c,v 1.1 2006/06/02 20:25:09 pedro Exp $	*/
 
 /*
  * Copyright (c) 2006 Pedro Martelletto <pedro@openbsd.org>

@@ -1,4 +1,4 @@
-/*	$OpenBSD: onewire_subr.c,v 1.2 2007/02/28 22:31:32 deraadt Exp $	*/
+/*	$OpenBSD: onewire_subr.c,v 1.1 2006/03/04 16:27:03 grange Exp $	*/
 
 /*
  * Copyright (c) 2006 Alexander Yurchenko <grange@openbsd.org>

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcscpreg.h,v 1.2 2001/02/14 05:11:21 fgsch Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD$	*/
 
 /*-

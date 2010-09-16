@@ -1,4 +1,4 @@
-/*	$OpenBSD: hilvar.h,v 1.10 2006/11/05 14:39:32 miod Exp $	*/
+/*	$OpenBSD: hilvar.h,v 1.9 2005/12/22 07:09:52 miod Exp $	*/
 /*
  * Copyright (c) 2003, Miodrag Vallat.
  * All rights reserved.

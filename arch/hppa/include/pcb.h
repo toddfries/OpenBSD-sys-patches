@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcb.h,v 1.10 2005/03/26 20:04:37 mickey Exp $	*/
+/*	$OpenBSD: pcb.h,v 1.9 2004/06/08 22:00:25 mickey Exp $	*/
 
 /*
  * Copyright (c) 1999-2004 Michael Shalayeff

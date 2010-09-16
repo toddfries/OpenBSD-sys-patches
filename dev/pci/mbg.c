@@ -37,9 +37,9 @@ struct mbg_softc {
 	bus_space_tag_t		sc_iot;
 	bus_space_handle_t	sc_ioh;
 
-	struct sensor		sc_timedelta;
-	struct sensor		sc_signal;
-	struct sensordev	sc_sensordev;
+	struct ksensor		sc_timedelta;
+	struct ksensor		sc_signal;
+	struct ksensordev	sc_sensordev;
 	u_int8_t		sc_status;
 
 	int			(*sc_read)(struct mbg_softc *, int cmd,

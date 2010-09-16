@@ -1,4 +1,4 @@
-/*	$OpenBSD: rlphy.c,v 1.27 2007/01/27 20:55:14 miod Exp $	*/
+/*	$OpenBSD: rlphy.c,v 1.26 2006/12/27 19:11:09 kettenis Exp $	*/
 
 /*
  * Copyright (c) 1998, 1999 Jason L. Wright (jason@thought.net)

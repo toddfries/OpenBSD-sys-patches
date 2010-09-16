@@ -1,4 +1,4 @@
-/*	$OpenBSD: pdqvar.h,v 1.18 2006/03/25 22:41:43 djm Exp $	*/
+/*	$OpenBSD: pdqvar.h,v 1.17 2005/11/23 11:30:14 mickey Exp $	*/
 /*	$NetBSD: pdqvar.h,v 1.11 1996/10/25 21:33:37 cgd Exp $	*/
 
 /*-

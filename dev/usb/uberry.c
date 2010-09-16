@@ -1,4 +1,4 @@
-/*	$OpenBSD: uberry.c,v 1.2 2006/11/29 19:55:37 miod Exp $	*/
+/*	$OpenBSD: uberry.c,v 1.1 2006/11/27 11:38:43 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 2006 Theo de Raadt <deraadt@openbsd.org>

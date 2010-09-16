@@ -1,4 +1,4 @@
-/*	$OpenBSD: dp857xreg.h,v 1.3 2003/06/09 16:34:22 deraadt Exp $ */
+/*	$OpenBSD: dp857xreg.h,v 1.2 2002/03/14 01:26:54 millert Exp $ */
 
 /*
  * Copyright (c) 1996 Per Fogelstrom

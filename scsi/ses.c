@@ -51,7 +51,7 @@ void	ses_attach(struct device *, struct device *, void *);
 int	ses_detach(struct device *, int);
 
 struct ses_sensor {
-	struct sensor		se_sensor;
+	struct ksensor		se_sensor;
 	u_int8_t		se_type;
 	struct ses_status	*se_stat;
 
@@ -83,7 +83,7 @@ struct ses_softc {
 	TAILQ_HEAD(, ses_slot)	sc_slots;
 #endif
 	TAILQ_HEAD(, ses_sensor) sc_sensors;
-	struct sensordev	sc_sensordev;
+	struct ksensordev	sc_sensordev;
 };
 
 struct cfattach ses_ca = {

@@ -1,4 +1,4 @@
-/* $OpenBSD: wdcevent.h,v 1.4 2003/09/28 21:01:43 grange Exp $ */
+/* $OpenBSD: wdcevent.h,v 1.3 2002/12/22 18:24:45 grange Exp $ */
 
 /*
  * Copyright (c) 2001 Constantine Sapuntzakis

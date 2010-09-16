@@ -26,6 +26,7 @@
 #define MMC_SET_RELATIVE_ADDR   	3	/* R1 */
 #define MMC_SELECT_CARD			7	/* R1 */
 #define MMC_SEND_CSD			9	/* R2 */
+#define MMC_STOP_TRANSMISSION		12	/* R1B */
 #define MMC_SEND_STATUS			13	/* R1 */
 #define MMC_SET_BLOCKLEN		16	/* R1 */
 #define MMC_READ_BLOCK_SINGLE		17	/* R1 */

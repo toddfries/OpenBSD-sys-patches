@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.11 2007/01/02 16:29:27 tom Exp $	*/
+/*	$OpenBSD: conf.c,v 1.10 2006/10/12 15:49:58 krw Exp $	*/
 
 /*
  * Copyright (c) 2004 Tom Cosgrove

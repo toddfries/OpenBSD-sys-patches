@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.amd64,v 1.10 2006/11/07 09:09:42 otto Exp $
+#	$OpenBSD: Makefile.amd64,v 1.9 2006/07/27 05:58:11 miod Exp $
 
 # Makefile for OpenBSD
 #

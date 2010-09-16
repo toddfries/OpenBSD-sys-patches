@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK,v 1.17 2006/02/12 19:55:39 miod Exp $
+#	$OpenBSD: RAMDISK,v 1.16 2005/12/27 20:05:34 drahn Exp $
 
 machine	cats	arm
 

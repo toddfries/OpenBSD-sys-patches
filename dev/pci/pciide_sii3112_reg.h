@@ -1,4 +1,4 @@
-/*	$OpenBSD: pciide_sii3112_reg.h,v 1.5 2006/02/10 21:45:41 kettenis Exp $	*/
+/*	$OpenBSD: pciide_sii3112_reg.h,v 1.4 2005/11/14 13:00:29 mickey Exp $	*/
 /*	$NetBSD: pciide_sii3112_reg.h,v 1.1 2003/03/20 04:22:50 thorpej Exp $	*/
 
 /*

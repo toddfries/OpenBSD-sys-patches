@@ -1,4 +1,4 @@
-/*	$OpenBSD: ultrix_pathname.c,v 1.9 2003/06/02 23:28:01 millert Exp $	*/
+/*	$OpenBSD: ultrix_pathname.c,v 1.8 2002/08/23 15:39:31 art Exp $	*/
 /*	$NetBSD: ultrix_pathname.c,v 1.2 1996/04/07 17:23:07 jonathan Exp $	*/
 
 /*

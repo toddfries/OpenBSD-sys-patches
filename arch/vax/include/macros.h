@@ -1,4 +1,4 @@
-/*	$OpenBSD: macros.h,v 1.14 2006/11/06 21:31:36 miod Exp $ */
+/*	$OpenBSD: macros.h,v 1.13 2006/02/22 22:16:07 miod Exp $ */
 /*	$NetBSD: macros.h,v 1.20 2000/07/19 01:02:52 matt Exp $	*/
 
 /*

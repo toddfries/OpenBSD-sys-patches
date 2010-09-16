@@ -1,4 +1,4 @@
-/*	$OpenBSD: pciide_nforce_reg.h,v 1.3 2004/09/24 07:38:38 grange Exp $	*/
+/*	$OpenBSD: pciide_nforce_reg.h,v 1.2 2003/12/12 13:00:38 grange Exp $	*/
 
 /*
  * Copyright (c) 2003 Alexander Yurchenko <grange@openbsd.org>

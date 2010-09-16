@@ -1,4 +1,4 @@
-/*	$OpenBSD: reloc.h,v 1.1 2006/11/10 02:39:47 drahn Exp $	*/
+/*	$OpenBSD: reloc.h,v 1.2 2006/05/26 20:22:04 miod Exp $	*/
 /* Processor specific relocation types */
 
 #define	R_SH_NONE				0

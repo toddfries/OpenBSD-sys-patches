@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_mcreg.h,v 1.2 2004/12/15 06:48:24 martin Exp $	*/
+/*	$OpenBSD: if_mcreg.h,v 1.1 1998/05/08 22:15:32 gene Exp $	*/
 /*	NetBSD: if_mcreg.h,v 1.3 2004/03/26 12:15:46 wiz Exp $	*/
 
 /*-

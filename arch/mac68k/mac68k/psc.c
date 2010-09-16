@@ -1,4 +1,4 @@
-/*	$OpenBSD: psc.c,v 1.6 2004/12/14 14:50:55 martin Exp $	*/
+/*	$OpenBSD: psc.c,v 1.5 2004/12/08 20:35:03 miod Exp $	*/
 /*	$NetBSD: psc.c,v 1.8 2004/03/26 12:15:46 wiz Exp $	*/
 
 

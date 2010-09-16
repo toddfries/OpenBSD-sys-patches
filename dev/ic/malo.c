@@ -1773,6 +1773,13 @@ skip:
 	}
 
 	malo_mem_write4(sc, sc->sc_RxPdRdPtr, rxRdPtr);
+
+	/*
+	 * In HostAP mode, ieee80211_input() will enqueue packets in if_snd
+	 * without calling if_start().
+	 */
+	if (!IFQ_IS_EMPTY(&ifp->if_snd) && !(ifp->if_flags & IFF_OACTIVE))
+		(*ifp->if_start)(ifp);
 }
 
 int

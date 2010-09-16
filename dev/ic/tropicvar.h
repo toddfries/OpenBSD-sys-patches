@@ -1,4 +1,4 @@
-/*	$OpenBSD: tropicvar.h,v 1.3 2002/03/14 01:26:55 millert Exp $	*/
+/*	$OpenBSD: tropicvar.h,v 1.2 2001/08/19 15:07:30 miod Exp $	*/
 /*	$NetBSD: tropicvar.h,v 1.4 1999/10/17 23:53:45 cgd Exp $	*/
 
 /* 

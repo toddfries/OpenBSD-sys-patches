@@ -1,4 +1,4 @@
-/*	$OpenBSD: tvrx.c,v 1.1 2006/04/14 21:05:43 miod Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * Copyright (c) 2006, Miodrag Vallat.

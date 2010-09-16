@@ -1,4 +1,4 @@
-/*	$OpenBSD: devopen.c,v 1.3 2002/06/11 09:36:23 hugh Exp $ */
+/*	$OpenBSD: devopen.c,v 1.2 2000/10/04 04:09:01 bjc Exp $ */
 /*	$NetBSD: devopen.c,v 1.10 2002/05/24 21:40:59 ragge Exp $ */
 /*
  * Copyright (c) 1997 Ludd, University of Lule}, Sweden.

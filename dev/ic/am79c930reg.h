@@ -1,4 +1,4 @@
-/* $OpenBSD: am79c930reg.h,v 1.5 2003/10/21 18:58:48 jmc Exp $ */
+/* $OpenBSD: am79c930reg.h,v 1.4 2002/06/03 20:01:36 deraadt Exp $ */
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.

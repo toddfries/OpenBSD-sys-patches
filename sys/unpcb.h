@@ -1,4 +1,4 @@
-/*	$OpenBSD: unpcb.h,v 1.7 2006/11/17 08:33:20 claudio Exp $	*/
+/*	$OpenBSD: unpcb.h,v 1.6 2003/06/02 23:28:22 millert Exp $	*/
 /*	$NetBSD: unpcb.h,v 1.6 1994/06/29 06:46:08 cgd Exp $	*/
 
 /*

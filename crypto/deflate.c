@@ -1,4 +1,4 @@
-/* $OpenBSD: deflate.c,v 1.4 2005/03/24 11:43:40 hshoexer Exp $ */
+/* $OpenBSD: deflate.c,v 1.3 2001/08/20 02:45:22 hugh Exp $ */
 
 /*
  * Copyright (c) 2001 Jean-Jacques Bernard-Gundol (jj@wabbitt.org)

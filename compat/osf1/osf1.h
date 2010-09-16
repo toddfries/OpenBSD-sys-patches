@@ -1,4 +1,4 @@
-/*	$OpenBSD: osf1.h,v 1.3 2002/03/14 01:26:50 millert Exp $	*/
+/*	$OpenBSD: osf1.h,v 1.2 2001/07/09 05:15:24 fgsch Exp $	*/
 /*	$NetBSD: osf1.h,v 1.20 1999/05/10 21:41:07 cgd Exp $	*/
 
 /*

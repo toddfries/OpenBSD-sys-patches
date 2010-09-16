@@ -342,9 +342,9 @@ _dmamap_sync(t, map, addr, size, op)
 	bus_size_t size;
 	int op;
 {
-#define SYNC_R 0
-#define SYNC_W 1
-#define SYNC_X 2
+#define SYNC_R 0	/* WB invalidate, WT invalidate */
+#define SYNC_W 1	/* WB writeback + invalidate, WT unaffected */
+#define SYNC_X 2	/* WB writeback + invalidate, WT invalidate */
 	int nsegs;
 	int curseg;
 

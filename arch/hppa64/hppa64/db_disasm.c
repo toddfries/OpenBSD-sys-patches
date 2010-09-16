@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_disasm.c,v 1.2 2006/02/06 17:19:31 jmc Exp $	*/
+/*	$OpenBSD: db_disasm.c,v 1.1 2005/04/01 10:40:47 mickey Exp $	*/
 
 /* TODO parse 64bit insns or rewrite */
 

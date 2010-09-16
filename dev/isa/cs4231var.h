@@ -1,4 +1,4 @@
-/* $OpenBSD: cs4231var.h,v 1.3 2002/03/14 01:26:56 millert Exp $ */
+/* $OpenBSD: cs4231var.h,v 1.2 1996/03/08 16:42:53 niklas Exp $ */
 /* $NetBSD: cs4231var.h,v 1.2 1996/02/05 02:21:51 jtc Exp $ */
 
 /*-

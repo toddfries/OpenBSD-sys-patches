@@ -1,4 +1,4 @@
-/*	$OpenBSD: gscpm.c,v 1.6 2006/12/12 23:14:27 dim Exp $	*/
+/*	$OpenBSD: gscpm.c,v 1.5 2006/12/11 20:57:40 deraadt Exp $	*/
 /*
  * Copyright (c) 2004 Alexander Yurchenko <grange@openbsd.org>
  *

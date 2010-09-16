@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfsproto.h,v 1.6 2003/11/28 01:02:28 tedu Exp $	*/
+/*	$OpenBSD: nfsproto.h,v 1.5 2003/06/02 23:28:20 millert Exp $	*/
 /*	$NetBSD: nfsproto.h,v 1.1 1996/02/18 11:54:06 fvdl Exp $	*/
 
 /*

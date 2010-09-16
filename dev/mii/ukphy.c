@@ -1,4 +1,4 @@
-/*	$OpenBSD: ukphy.c,v 1.18 2006/03/05 01:11:37 brad Exp $	*/
+/*	$OpenBSD: ukphy.c,v 1.17 2006/02/12 00:13:01 maja Exp $	*/
 /*	$NetBSD: ukphy.c,v 1.9 2000/02/02 23:34:57 thorpej Exp $	*/
 
 /*-

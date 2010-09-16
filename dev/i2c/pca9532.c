@@ -1,4 +1,4 @@
-/*	$OpenBSD: pca9532.c,v 1.2 2006/06/17 23:00:47 drahn Exp $ */
+/*	$OpenBSD: pca9532.c,v 1.1 2006/06/17 04:43:01 drahn Exp $ */
 /*
  * Copyright (c) 2006 Dale Rahn <drahn@openbsd.org>
  *

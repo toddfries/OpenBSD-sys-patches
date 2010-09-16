@@ -277,7 +277,7 @@ out:
  * is ELF and valid for the target platform.
  *
  * WARNING:  This is NOT a ELF ABI function and
- * as such it's use should be restricted.
+ * as such its use should be restricted.
  */
 int
 __elf_is_okay__(ehdr)
@@ -344,7 +344,7 @@ __elf_fdnlist(fd, list)
 	}
 
 	/*
-	 * Find the symbol table entry and it's corresponding
+	 * Find the symbol table entry and its corresponding
 	 * string table entry.	Version 1.1 of the ABI states
 	 * that there is only one symbol table but that this
 	 * could change in the future.

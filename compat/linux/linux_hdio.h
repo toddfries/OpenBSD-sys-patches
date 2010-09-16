@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_hdio.h,v 1.1 2001/04/09 06:53:45 tholo Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD: linux_hdio.h,v 1.1 2000/12/10 14:12:17 fvdl Exp $	*/
 
 /*

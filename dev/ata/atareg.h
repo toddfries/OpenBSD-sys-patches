@@ -1,4 +1,4 @@
-/*	$OpenBSD: atareg.h,v 1.13 2005/08/10 15:22:39 jsg Exp $	*/
+/*	$OpenBSD: atareg.h,v 1.12 2004/09/24 07:15:22 grange Exp $	*/
 /*	$NetBSD: atareg.h,v 1.5 1999/01/18 20:06:24 bouyer Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/* $OpenBSD: dec_2100_a50.c,v 1.18 2006/11/28 16:56:50 dlg Exp $ */
+/* $OpenBSD: dec_2100_a50.c,v 1.17 2005/05/09 21:55:12 martin Exp $ */
 /* $NetBSD: dec_2100_a50.c,v 1.43 2000/05/22 20:13:31 thorpej Exp $ */
 
 /*

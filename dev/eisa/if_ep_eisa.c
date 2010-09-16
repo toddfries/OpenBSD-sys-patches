@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ep_eisa.c,v 1.22 2006/06/17 17:58:39 brad Exp $	*/
+/*	$OpenBSD: if_ep_eisa.c,v 1.21 2006/05/30 21:44:07 miod Exp $	*/
 /*	$NetBSD: if_ep_eisa.c,v 1.13 1997/04/18 00:50:33 cgd Exp $	*/
 
 /*

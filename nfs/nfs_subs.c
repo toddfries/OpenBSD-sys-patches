@@ -527,13 +527,6 @@ static short *nfsrv_v3errmap[] = {
 
 extern struct proc *nfs_iodwant[NFS_MAXASYNCDAEMON];
 extern struct nfsrtt nfsrtt;
-extern struct nfsstats nfsstats;
-extern nfstype nfsv2_type[9];
-extern nfstype nfsv3_type[9];
-extern struct nfsnodehashhead *nfsnodehashtbl;
-extern u_long nfsnodehash;
-
-LIST_HEAD(nfsnodehashhead, nfsnode);
 
 struct pool nfsreqpl;
 

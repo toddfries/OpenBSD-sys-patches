@@ -1,4 +1,4 @@
-/*	$OpenBSD: kthread.h,v 1.3 2002/03/14 03:16:12 millert Exp $	*/
+/*	$OpenBSD: kthread.h,v 1.2 2002/03/14 01:27:14 millert Exp $	*/
 /*	$NetBSD: kthread.h,v 1.2 1998/11/14 00:08:49 thorpej Exp $	*/
 
 /*-

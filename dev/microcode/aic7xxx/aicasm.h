@@ -1,4 +1,4 @@
-/* $OpenBSD: aicasm.h,v 1.6 2003/12/24 23:27:55 krw Exp $ */
+/* $OpenBSD: aicasm.h,v 1.5 2002/06/30 18:25:58 smurph Exp $ */
 /*	$NetBSD: aicasm.h,v 1.2 2003/04/19 19:26:10 fvdl Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: com_obio.c,v 1.1 2005/07/17 12:22:42 miod Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * Copyright (c) 2005, Miodrag Vallat.

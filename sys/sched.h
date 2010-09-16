@@ -1,4 +1,4 @@
-/*	$OpenBSD: sched.h,v 1.14 2007/02/03 16:48:23 miod Exp $	*/
+/*	$OpenBSD: sched.h,v 1.13 2005/06/17 22:33:34 niklas Exp $	*/
 /* $NetBSD: sched.h,v 1.2 1999/02/28 18:14:58 ross Exp $ */
 
 /*-

@@ -1,4 +1,4 @@
-/*	$OpenBSD: boot.c,v 1.19 2005/05/30 01:41:33 deraadt Exp $	*/
+/*	$OpenBSD: boot.c,v 1.18 2005/05/30 01:31:12 deraadt Exp $	*/
 /*	$NetBSD: boot.c,v 1.10 1997/01/18 01:58:33 cgd Exp $	*/
 
 /*

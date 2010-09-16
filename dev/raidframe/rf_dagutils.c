@@ -1,4 +1,4 @@
-/*	$OpenBSD: rf_dagutils.c,v 1.4 2002/12/16 07:01:03 tdeval Exp $	*/
+/*	$OpenBSD: rf_dagutils.c,v 1.3 2000/01/07 14:50:20 peter Exp $	*/
 /*	$NetBSD: rf_dagutils.c,v 1.6 1999/12/09 02:26:09 oster Exp $	*/
 
 /*

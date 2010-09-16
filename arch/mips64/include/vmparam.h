@@ -105,13 +105,10 @@
 #define VM_MAX_ADDRESS		((vaddr_t)0x80000000)
 #define VM_MIN_KERNEL_ADDRESS	((vaddr_t)0xc0000000)
 #endif
+#define	VM_MAX_KERNEL_ADDRESS	((vaddr_t)-PAGE_SIZE)
 
 #define	VM_NFREELIST		1
 #define	VM_FREELIST_DEFAULT	0
-
-/* Kernel page table size is variable. */
-extern vaddr_t virtual_end;
-#define VM_MAX_KERNEL_ADDRESS	virtual_end
 
 /* virtual sizes (bytes) for various kernel submaps */
 #define VM_PHYS_SIZE		(USRIOSIZE*PAGE_SIZE)

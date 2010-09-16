@@ -1,4 +1,4 @@
-/* * $OpenBSD: freebsd_ptrace.h,v 1.4 2003/06/02 23:28:00 millert Exp $*/
+/* * $OpenBSD: freebsd_ptrace.h,v 1.3 2002/03/14 01:26:49 millert Exp $*/
 /*-
  * Copyright (c) 1984, 1993
  *	The Regents of the University of California.  All rights reserved.

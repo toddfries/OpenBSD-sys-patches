@@ -272,7 +272,7 @@ struct pmap {
 	union descriptor *pm_ldt;	/* user-set LDT */
 	int pm_ldt_len;			/* number of LDT entries */
 	int pm_ldt_sel;			/* LDT selector */
-	uint32_t pm_cpus;		/* mask oc CPUs using map */
+	uint32_t pm_cpus;		/* mask of CPUs using map */
 };
 
 /* pm_flags */

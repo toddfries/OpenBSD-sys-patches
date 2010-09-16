@@ -1,4 +1,4 @@
-/*	$OpenBSD: cacvar.h,v 1.3 2003/03/06 22:31:21 mickey Exp $	*/
+/*	$OpenBSD: cacvar.h,v 1.2 2002/03/14 01:26:54 millert Exp $	*/
 /*	$NetBSD: cacvar.h,v 1.7 2000/10/19 14:28:47 ad Exp $	*/
 
 /*-

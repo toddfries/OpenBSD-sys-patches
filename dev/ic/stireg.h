@@ -1,4 +1,4 @@
-/*	$OpenBSD: stireg.h,v 1.11 2005/10/29 11:54:07 miod Exp $	*/
+/*	$OpenBSD: stireg.h,v 1.10 2005/01/24 19:20:04 miod Exp $	*/
 
 /*
  * Copyright (c) 2000 Michael Shalayeff

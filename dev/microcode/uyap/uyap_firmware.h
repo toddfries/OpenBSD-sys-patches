@@ -1,4 +1,4 @@
-/*	$OpenBSD: uyap_firmware.h,v 1.2 2004/12/19 15:20:13 deraadt Exp $ */
+/*	$OpenBSD: uyap_firmware.h,v 1.1 2001/12/17 01:39:08 deraadt Exp $ */
 /*	$NetBSD: uyap_firmware.h,v 1.2 2001/01/16 03:10:09 augustss Exp $	*/
 
 /*

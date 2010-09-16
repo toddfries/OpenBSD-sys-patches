@@ -1,4 +1,4 @@
-#	$OpenBSD: files.armish,v 1.10 2006/09/27 06:33:03 grange Exp $
+#	$OpenBSD: files.armish,v 1.9 2006/07/14 20:41:30 miod Exp $
 
 maxpartitions   16
 maxusers	2 8 64

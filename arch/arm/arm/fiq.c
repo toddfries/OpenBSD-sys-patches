@@ -1,4 +1,4 @@
-/*	$OpenBSD: fiq.c,v 1.1 2004/02/01 05:09:48 drahn Exp $	*/
+/*	$OpenBSD: fiq.c,v 1.2 2004/01/29 16:17:11 drahn Exp $	*/
 /*	$NetBSD: fiq.c,v 1.5 2002/04/03 23:33:27 thorpej Exp $	*/
 
 /*

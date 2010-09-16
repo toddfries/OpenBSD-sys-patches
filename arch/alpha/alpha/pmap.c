@@ -4108,9 +4108,9 @@ pmap_tlb_shootdown(pmap_t pmap, vaddr_t va, pt_entry_t pte)
 			 * TBIA[P].
 			 */
 			if (pq->pq_pte & PG_ASM)
-				ipinum = ALPHA_IPI_TBIA;
+				ipinum = ALPHA_IPI_SHOOTDOWN;
 			else
-				ipinum = ALPHA_IPI_TBIAP;
+				ipinum = ALPHA_IPI_IMB;
 			alpha_send_ipi(i, ipinum);
 		} else {
 			pj->pj_pmap = pmap;

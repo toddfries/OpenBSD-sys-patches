@@ -1,4 +1,4 @@
-/*	$OpenBSD: ki2cvar.h,v 1.4 2005/12/13 19:21:45 kettenis Exp $	*/
+/*	$OpenBSD: ki2cvar.h,v 1.3 2005/11/14 22:29:35 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 2001 Tsubai Masanari.  All rights reserved.

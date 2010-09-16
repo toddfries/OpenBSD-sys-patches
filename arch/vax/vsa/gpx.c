@@ -1,4 +1,4 @@
-/*	$OpenBSD: gpx.c,v 1.16 2006/11/29 19:08:22 miod Exp $	*/
+/*	$OpenBSD: gpx.c,v 1.15 2006/11/29 12:13:54 miod Exp $	*/
 /*
  * Copyright (c) 2006 Miodrag Vallat.
  *

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ioprbs.c,v 1.11 2006/11/28 23:59:45 dlg Exp $	*/
+/*	$OpenBSD: ioprbs.c,v 1.10 2005/12/04 04:05:25 krw Exp $	*/
 
 /*
  * Copyright (c) 2001 Niklas Hallqvist

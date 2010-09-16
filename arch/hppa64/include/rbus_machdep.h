@@ -1,4 +1,4 @@
-/*	$OpenBSD: rbus_machdep.h,v 1.2 2005/05/24 19:39:50 martin Exp $	*/
+/*	$OpenBSD: rbus_machdep.h,v 1.1 2005/04/01 10:40:48 mickey Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff

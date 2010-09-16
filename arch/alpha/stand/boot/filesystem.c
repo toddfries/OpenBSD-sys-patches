@@ -1,4 +1,4 @@
-/*	$OpenBSD: filesystem.c,v 1.4 1997/05/05 06:01:52 millert Exp $	*/
+/*	$OpenBSD: filesystem.c,v 1.3 1996/10/30 22:40:43 niklas Exp $	*/
 /*	$NetBSD: filesystem.c,v 1.3 1997/04/06 08:40:35 cgd Exp $	*/
 
 /*

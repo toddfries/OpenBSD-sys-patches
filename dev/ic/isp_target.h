@@ -1,4 +1,4 @@
-/*	$OpenBSD: isp_target.h,v 1.11 2002/08/17 17:42:04 mjacob Exp $	*/
+/*	$OpenBSD: isp_target.h,v 1.10 2002/05/17 01:33:50 mjacob Exp $	*/
 
 /* @(#)isp_target.h 1.3 */
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: gpiovar.h,v 1.3 2006/01/14 12:33:49 grange Exp $	*/
+/*	$OpenBSD: gpiovar.h,v 1.2 2006/01/05 11:52:24 grange Exp $	*/
 
 /*
  * Copyright (c) 2004, 2006 Alexander Yurchenko <grange@openbsd.org>

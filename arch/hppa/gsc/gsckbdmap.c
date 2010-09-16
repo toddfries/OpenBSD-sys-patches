@@ -1,4 +1,4 @@
-/*	$OpenBSD: gsckbdmap.c,v 1.19 2006/12/05 21:28:02 otto Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * THIS FILE IS AUTOMAGICALLY GENERATED.  DO NOT EDIT.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ncr5380sbc.c,v 1.19 2006/12/10 16:15:37 miod Exp $	*/
+/*	$OpenBSD: ncr5380sbc.c,v 1.18 2005/11/12 20:29:45 brad Exp $	*/
 /*	$NetBSD: ncr5380sbc.c,v 1.13 1996/10/13 01:37:25 christos Exp $	*/
 
 /*

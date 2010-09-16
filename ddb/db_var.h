@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_var.h,v 1.9 2006/07/06 18:14:48 miod Exp $	*/
+/*	$OpenBSD: db_var.h,v 1.8 2003/06/28 01:52:18 tedu Exp $	*/
 
 /*
  * Copyright (c) 1996 Michael Shalayeff.  All rights reserved.

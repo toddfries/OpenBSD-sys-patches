@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_ioctl.h,v 1.7 2006/06/27 20:55:51 reyk Exp $	*/
+/*	$OpenBSD: ieee80211_ioctl.h,v 1.6 2006/06/23 21:34:15 reyk Exp $	*/
 /*	$NetBSD: ieee80211_ioctl.h,v 1.7 2004/04/30 22:51:04 dyoung Exp $	*/
 
 /*-

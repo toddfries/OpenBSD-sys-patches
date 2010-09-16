@@ -1,4 +1,4 @@
-/*	$OpenBSD: sem.h,v 1.19 2005/12/13 00:35:23 millert Exp $	*/
+/*	$OpenBSD: sem.h,v 1.18 2004/07/15 11:24:46 millert Exp $	*/
 /*	$NetBSD: sem.h,v 1.8 1996/02/09 18:25:29 christos Exp $	*/
 
 /*

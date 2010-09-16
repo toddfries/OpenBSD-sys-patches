@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_fddi.h,v 1.6 2003/06/02 23:28:12 millert Exp $	*/
+/*	$OpenBSD: if_fddi.h,v 1.5 2002/06/09 05:08:37 itojun Exp $	*/
 /*	$NetBSD: if_fddi.h,v 1.2 1995/08/19 04:35:28 cgd Exp $	*/
 
 /*

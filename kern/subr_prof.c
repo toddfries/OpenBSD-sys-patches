@@ -201,6 +201,7 @@ addupc_intr(struct proc *p, u_long pc)
 
 	prof->pr_addr = pc;
 	prof->pr_ticks++;
+	atomic_setbits_int(&p->p_flag, P_OWEUPC);
 	need_proftick(p);
 }
 

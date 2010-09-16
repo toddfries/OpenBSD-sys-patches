@@ -1,4 +1,4 @@
-/* $OpenBSD: pci_eb64plus_intr.s,v 1.2 2003/01/08 17:26:21 miod Exp $ */
+/* $OpenBSD: pci_eb64plus_intr.s,v 1.1 2002/01/23 03:20:41 ericj Exp $ */
 /* $NetBSD: pci_eb64plus_intr.s,v 1.2 1997/09/02 13:19:43 thorpej Exp $ */
 
 /*

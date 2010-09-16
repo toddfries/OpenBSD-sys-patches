@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_break.c,v 1.13 2006/03/13 06:23:20 jsg Exp $	*/
+/*	$OpenBSD: db_break.c,v 1.12 2002/05/16 13:01:41 art Exp $	*/
 /*	$NetBSD: db_break.c,v 1.7 1996/03/30 22:30:03 christos Exp $	*/
 
 /* 

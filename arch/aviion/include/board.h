@@ -1,4 +1,4 @@
-/*	$OpenBSD: board.h,v 1.2 2006/05/21 12:22:03 miod Exp $	*/
+/*	$OpenBSD: board.h,v 1.1 2006/05/20 12:04:54 miod Exp $	*/
 /*
  * Copyright (c) 2006, Miodrag Vallat
  *

@@ -148,7 +148,7 @@ gre_input2(m , hlen, proto)
 			/* WCCP/GRE:
 			 *   So far as I can see (and test) it seems that Cisco's WCCP
 			 *   GRE tunnel is precisely a IP-in-GRE tunnel that differs
-			 *   only in it's protocol number.  At least, it works for me.
+			 *   only in its protocol number.  At least, it works for me.
 			 *
 			 *   The Internet Draft can be found if you look for
 			 *     draft-forster-wrec-wccp-v1-00.txt

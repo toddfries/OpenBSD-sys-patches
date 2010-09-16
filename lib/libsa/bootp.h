@@ -1,4 +1,4 @@
-/*	$OpenBSD: bootp.h,v 1.5 2003/08/11 06:23:09 deraadt Exp $	*/
+/*	$OpenBSD: bootp.h,v 1.4 1996/12/08 15:15:46 niklas Exp $	*/
 /*	$NetBSD: bootp.h,v 1.3 1996/09/26 23:22:01 cgd Exp $	*/
 
 /*

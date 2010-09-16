@@ -1,4 +1,4 @@
-/*	$OpenBSD: auconv.h,v 1.6 2002/05/06 02:34:57 nate Exp $ */
+/*	$OpenBSD: auconv.h,v 1.5 2002/03/14 01:26:51 millert Exp $ */
 /*	$NetBSD: auconv.h,v 1.5 1999/11/01 18:12:19 augustss Exp $	*/
 
 /*-

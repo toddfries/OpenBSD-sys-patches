@@ -1,4 +1,4 @@
-/*	$OpenBSD: sbusvar.h,v 1.8 2006/06/02 20:00:56 miod Exp $	*/
+/*	$OpenBSD: sbusvar.h,v 1.7 2005/03/05 01:44:52 miod Exp $	*/
 /*	$NetBSD: sbusvar.h,v 1.7 1999/06/05 05:30:43 mrg Exp $ */
 
 /*-

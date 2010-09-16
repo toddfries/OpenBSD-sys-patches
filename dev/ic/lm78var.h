@@ -137,8 +137,8 @@ struct lm_sensor {
 struct lm_softc {
 	struct device sc_dev;
 
-	struct sensor sensors[WB_MAX_SENSORS];
-	struct sensordev sensordev;
+	struct ksensor sensors[WB_MAX_SENSORS];
+	struct ksensordev sensordev;
 	struct lm_sensor *lm_sensors;
 	u_int numsensors;
 	void (*refresh_sensor_data) (struct lm_softc *);

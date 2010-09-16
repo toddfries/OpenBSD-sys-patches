@@ -1,4 +1,4 @@
-/*	$OpenBSD: mutex.S,v 1.2 2006/11/18 22:48:15 miod Exp $	*/
+/*	$OpenBSD: mutex.S,v 1.1 2005/12/03 19:01:14 miod Exp $	*/
 
 /*
  * Copyright (c) 2005, Miodrag Vallat.

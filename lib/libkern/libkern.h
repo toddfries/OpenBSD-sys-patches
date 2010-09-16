@@ -1,4 +1,4 @@
-/*	$OpenBSD: libkern.h,v 1.22 2004/08/07 00:38:32 deraadt Exp $	*/
+/*	$OpenBSD: libkern.h,v 1.21 2004/06/21 22:55:04 itojun Exp $	*/
 /*	$NetBSD: libkern.h,v 1.7 1996/03/14 18:52:08 christos Exp $	*/
 
 /*-

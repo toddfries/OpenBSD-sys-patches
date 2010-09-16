@@ -1,4 +1,4 @@
-/*	$OpenBSD: sbcreg.h,v 1.2 1997/03/08 16:16:59 briggs Exp $	*/
+/*	$OpenBSD: sbcreg.h,v 1.1 1996/05/26 19:02:10 briggs Exp $	*/
 /*	$NetBSD: sbcreg.h,v 1.2 1997/03/01 20:18:59 scottr Exp $	*/
 
 /*

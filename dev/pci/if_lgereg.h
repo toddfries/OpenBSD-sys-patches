@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_lgereg.h,v 1.6 2006/05/28 00:20:21 brad Exp $	*/
+/*	$OpenBSD: if_lgereg.h,v 1.5 2005/12/17 07:31:27 miod Exp $	*/
 /*
  * Copyright (c) 2001 Wind River Systems
  * Copyright (c) 1997, 1998, 1999, 2000, 2001

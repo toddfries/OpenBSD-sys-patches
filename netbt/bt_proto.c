@@ -1,4 +1,4 @@
-/*	$OpenBSD: bt_proto.c,v 1.1 2005/01/14 12:04:02 grange Exp $	*/
+/*	$OpenBSD$	*/
 /*
  * Copyright (c) 2004 Alexander Yurchenko <grange@openbsd.org>
  *

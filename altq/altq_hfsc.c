@@ -1,4 +1,4 @@
-/*	$OpenBSD: altq_hfsc.c,v 1.23 2006/03/04 22:40:15 brad Exp $	*/
+/*	$OpenBSD: altq_hfsc.c,v 1.22 2005/10/17 08:43:35 henning Exp $	*/
 /*	$KAME: altq_hfsc.c,v 1.17 2002/11/29 07:48:33 kjc Exp $	*/
 
 /*

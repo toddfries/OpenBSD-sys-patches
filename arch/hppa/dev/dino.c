@@ -1,4 +1,4 @@
-/*	$OpenBSD: dino.c,v 1.20 2007/01/11 21:59:52 miod Exp $	*/
+/*	$OpenBSD: dino.c,v 1.19 2006/12/18 18:49:46 miod Exp $	*/
 
 /*
  * Copyright (c) 2003-2005 Michael Shalayeff

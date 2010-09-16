@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_hangman.c,v 1.27 2006/07/07 12:42:13 mickey Exp $	*/
+/*	$OpenBSD: db_hangman.c,v 1.26 2006/03/13 06:23:20 jsg Exp $	*/
 
 /*
  * Copyright (c) 1996 Theo de Raadt, Michael Shalayeff

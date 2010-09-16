@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wi_pci.c,v 1.43 2006/11/26 19:46:28 deraadt Exp $	*/
+/*	$OpenBSD: if_wi_pci.c,v 1.42 2005/10/31 05:37:13 jsg Exp $	*/
 
 /*
  * Copyright (c) 2001-2003 Todd C. Miller <Todd.Miller@courtesan.com>

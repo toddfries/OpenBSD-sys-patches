@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_san_xilinx.c,v 1.18 2006/04/20 20:31:12 miod Exp $	*/
+/*	$OpenBSD: if_san_xilinx.c,v 1.17 2005/12/13 05:56:22 canacar Exp $	*/
 
 /*-
  * Copyright (c) 2001-2004 Sangoma Technologies (SAN)

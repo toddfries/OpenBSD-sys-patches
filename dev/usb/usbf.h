@@ -1,4 +1,4 @@
-/*	$OpenBSD: usbf.h,v 1.1 2006/11/26 01:36:23 uwe Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>

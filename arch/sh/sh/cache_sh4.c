@@ -112,6 +112,10 @@ sh4_cache_config(void)
 #if defined(SH4_CACHE_DISABLE_DCACHE)
 	r &= ~SH4_CCR_OCE;
 #endif
+#if !defined (SH4_CACHE_WT)
+#define	SH4_CACHE_WB_U0_P0_P3
+#define	SH4_CACHE_WB_P1
+#endif
 #if defined(SH4_CACHE_WB_U0_P0_P3)
 	r &= ~SH4_CCR_WT;
 #endif

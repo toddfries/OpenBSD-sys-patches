@@ -1,4 +1,4 @@
-/*	$OpenBSD: iso_rrip.h,v 1.4 2003/06/02 23:28:05 millert Exp $	*/
+/*	$OpenBSD: iso_rrip.h,v 1.3 2002/03/14 01:27:03 millert Exp $	*/
 /*	$NetBSD: iso_rrip.h,v 1.3 1994/06/29 06:32:02 cgd Exp $	*/
 
 /*-

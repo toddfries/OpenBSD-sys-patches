@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_machdep.h,v 1.5 2005/04/19 15:23:34 miod Exp $	*/
+/*	$OpenBSD: db_machdep.h,v 1.4 2005/01/05 15:49:30 miod Exp $	*/
 /*	$NetBSD: db_machdep.h,v 1.5 2001/11/22 18:00:00 thorpej Exp $	*/
 
 /*

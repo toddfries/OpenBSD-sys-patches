@@ -1,4 +1,4 @@
-/*	$OpenBSD: irq_dispatch.S,v 1.6 2005/12/27 20:05:34 drahn Exp $	*/
+/*	$OpenBSD: irq_dispatch.S,v 1.5 2005/05/27 20:14:30 uwe Exp $	*/
 /*	$NetBSD: irq_dispatch.S,v 1.5 2003/10/30 08:57:24 scw Exp $	*/
 
 /*

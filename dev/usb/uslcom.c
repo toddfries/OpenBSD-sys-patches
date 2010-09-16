@@ -1,4 +1,4 @@
-/*	$OpenBSD: uslcom.c,v 1.4 2007/02/17 01:47:47 jsg Exp $	*/
+/*	$OpenBSD: uslcom.c,v 1.3 2006/06/23 06:27:12 miod Exp $	*/
 
 /*
  * Copyright (c) 2006 Jonathan Gray <jsg@openbsd.org>

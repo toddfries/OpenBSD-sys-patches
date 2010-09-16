@@ -31,7 +31,7 @@
 
 *******************************************************************************/
 
-/* $OpenBSD: ixgb_ids.h,v 1.2 2006/06/22 04:50:31 brad Exp $ */
+/* $OpenBSD: ixgb_ids.h,v 1.1 2005/11/14 23:25:43 brad Exp $ */
 
 #ifndef _IXGB_IDS_H_
 #define _IXGB_IDS_H_

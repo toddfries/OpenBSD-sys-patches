@@ -1237,7 +1237,7 @@ bridgeintr_frame(struct bridge_softc *sc, struct mbuf *m)
 
 	/*
 	 * If interface is learning, and if source address
-	 * is not broadcast or multicast, record it's address.
+	 * is not broadcast or multicast, record its address.
 	 */
 	if ((ifl->bif_flags & IFBIF_LEARNING) &&
 	    (eh.ether_shost[0] & 1) == 0 &&

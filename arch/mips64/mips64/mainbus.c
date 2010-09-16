@@ -1,4 +1,4 @@
-/*	$OpenBSD: mainbus.c,v 1.4 2005/01/31 21:35:50 grange Exp $ */
+/*	$OpenBSD: mainbus.c,v 1.3 2004/08/10 20:15:47 deraadt Exp $ */
 
 /*
  * Copyright (c) 2001-2003 Opsycon AB  (www.opsycon.se / www.opsycon.com)

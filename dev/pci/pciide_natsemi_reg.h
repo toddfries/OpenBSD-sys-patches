@@ -1,4 +1,4 @@
-/*	$OpenBSD: pciide_natsemi_reg.h,v 1.6 2004/09/24 07:38:38 grange Exp $	*/
+/*	$OpenBSD: pciide_natsemi_reg.h,v 1.5 2004/02/02 19:38:43 grange Exp $	*/
 
 /*
  * Copyright (c) 2001 Jason L. Wright (jason@thought.net)

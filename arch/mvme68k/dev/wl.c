@@ -1,4 +1,4 @@
-/*	$OpenBSD: wl.c,v 1.18 2005/11/24 22:43:16 miod Exp $ */
+/*	$OpenBSD: wl.c,v 1.17 2004/07/30 22:29:45 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Dale Rahn. All rights reserved.

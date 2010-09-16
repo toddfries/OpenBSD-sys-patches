@@ -1,4 +1,4 @@
-/*	$OpenBSD: intio.c,v 1.6 2007/01/06 20:10:57 miod Exp $	*/
+/*	$OpenBSD: intio.c,v 1.5 2007/01/06 20:09:12 miod Exp $	*/
 /*	$NetBSD: intio.c,v 1.2 1997/01/30 09:18:54 thorpej Exp $	*/
 
 /*-

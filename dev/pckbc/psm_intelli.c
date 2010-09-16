@@ -344,7 +344,7 @@ int data;
 
 		if (sc->dx || sc->dy || dz || changed)
 			wsmouse_input(sc->sc_wsmousedev,
-				      sc->buttons, sc->dx, sc->dy, dz,
+				      sc->buttons, sc->dx, sc->dy, dz, 0,
 				      WSMOUSE_INPUT_DELTA);
 		break;
 	}

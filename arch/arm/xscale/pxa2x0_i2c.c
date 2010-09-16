@@ -1,4 +1,4 @@
-/*	$OpenBSD: pxa2x0_i2c.c,v 1.2 2005/05/26 03:52:07 pascoe Exp $	*/
+/*	$OpenBSD: pxa2x0_i2c.c,v 1.1 2005/04/15 00:06:21 pascoe Exp $	*/
 
 /*
  * Copyright (c) 2005 Christopher Pascoe <pascoe@openbsd.org>

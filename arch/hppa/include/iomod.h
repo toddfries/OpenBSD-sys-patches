@@ -1,4 +1,4 @@
-/*	$OpenBSD: iomod.h,v 1.17 2005/04/07 00:21:51 mickey Exp $	*/
+/*	$OpenBSD: iomod.h,v 1.16 2004/04/07 18:24:19 mickey Exp $	*/
 
 /*
  * Copyright (c) 2000-2004 Michael Shalayeff

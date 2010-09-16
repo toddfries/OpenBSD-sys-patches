@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_rln_isa.c,v 1.2 2002/03/14 01:26:56 millert Exp $	*/
+/*	$OpenBSD: if_rln_isa.c,v 1.1 1999/07/31 06:10:04 d Exp $	*/
 
 /*
  * David Leonard <d@openbsd.org>, 1999. Public domain.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cacheinfo.c,v 1.3 2006/05/09 13:02:29 mickey Exp $	*/
+/*	$OpenBSD$	*/
 
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.

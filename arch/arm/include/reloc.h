@@ -1,4 +1,4 @@
-/*	$OpenBSD: reloc.h,v 1.2 2006/05/26 20:22:04 miod Exp $	*/
+/*	$OpenBSD$	*/
 /* Processor specific relocation types */
 
 #define R_ARM_NONE		0

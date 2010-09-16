@@ -1,4 +1,4 @@
-/*	$OpenBSD: putchar.c,v 1.1 1996/05/16 02:25:39 chuck Exp $ */
+/*	$OpenBSD$ */
 
 /*
  * putchar: easier to do this with outstr than to add more macros to

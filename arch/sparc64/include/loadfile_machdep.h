@@ -1,4 +1,4 @@
-/*	$OpenBSD: loadfile_machdep.h,v 1.1 2001/09/06 19:31:35 jason Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD: loadfile_machdep.h,v 1.3 2000/08/16 08:16:58 mrg Exp $	 */
 
 /*-

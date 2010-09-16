@@ -1,4 +1,4 @@
-/*	$OpenBSD: OSFpal.c,v 1.7 2004/12/01 20:55:07 deraadt Exp $	*/
+/*	$OpenBSD: OSFpal.c,v 1.6 2001/05/16 00:38:15 deraadt Exp $	*/
 /*	$NetBSD: OSFpal.c,v 1.4 1996/10/13 03:00:24 christos Exp $	*/
 
 /*

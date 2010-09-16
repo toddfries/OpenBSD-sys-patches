@@ -271,7 +271,8 @@ wsintr(chan)
 				sc->dy = (signed char)code;
 				if (sc->sc_wsmousedev != NULL)
 					wsmouse_input(sc->sc_wsmousedev,
-					    sc->buttons, sc->dx, sc->dy, 0, 0);
+					    sc->buttons, sc->dx, sc->dy, 0, 0,
+					    WSMOUSE_INPUT_DELTA);
 				sc->sc_msreport = 0;
 			}
 #else

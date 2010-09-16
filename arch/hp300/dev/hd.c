@@ -1,4 +1,4 @@
-/*	$OpenBSD: hd.c,v 1.45 2007/02/28 20:19:05 miod Exp $	*/
+/*	$OpenBSD: hd.c,v 1.44 2007/02/22 17:20:17 miod Exp $	*/
 /*	$NetBSD: rd.c,v 1.33 1997/07/10 18:14:08 kleink Exp $	*/
 
 /*

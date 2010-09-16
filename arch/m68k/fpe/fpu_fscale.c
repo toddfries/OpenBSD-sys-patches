@@ -1,4 +1,4 @@
-/*	$OpenBSD: fpu_fscale.c,v 1.8 2006/06/11 20:43:28 miod Exp $	*/
+/*	$OpenBSD: fpu_fscale.c,v 1.7 2006/01/30 21:23:23 miod Exp $	*/
 /*	$NetBSD: fpu_fscale.c,v 1.11 2003/07/15 02:43:10 lukem Exp $	*/
 
 /*

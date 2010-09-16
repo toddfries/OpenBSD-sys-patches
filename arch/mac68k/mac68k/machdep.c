@@ -2135,6 +2135,7 @@ get_mapping(void)
 	return load_addr;	/* Return physical address of logical 0 */
 }
 
+#ifdef DEBUG
 /*
  * Debugging code for locore page-traversal routine.
  */
@@ -2158,6 +2159,7 @@ printstar(void)
 				movl sp@+,a1;
 				movl sp@+,a0");
 }
+#endif
 
 /*
  * Console bell callback; modularizes the console terminal emulator

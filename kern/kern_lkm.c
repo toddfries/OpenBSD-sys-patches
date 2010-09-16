@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_lkm.c,v 1.43 2006/11/15 17:25:40 jmc Exp $	*/
+/*	$OpenBSD: kern_lkm.c,v 1.42 2005/11/28 00:14:28 jsg Exp $	*/
 /*	$NetBSD: kern_lkm.c,v 1.31 1996/03/31 21:40:27 christos Exp $	*/
 
 /*

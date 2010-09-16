@@ -1,5 +1,5 @@
 /* XXX - DSR */
-/*	$OpenBSD: apmvar.h,v 1.1 2004/01/28 01:39:39 mickey Exp $	*/
+/*	$OpenBSD: apmvar.h,v 1.15 2002/03/14 01:26:33 millert Exp $	*/
 
 /*
  *  Copyright (c) 1995 John T. Kohl

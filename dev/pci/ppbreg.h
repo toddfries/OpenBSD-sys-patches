@@ -1,4 +1,4 @@
-/*	$OpenBSD: ppbreg.h,v 1.2 2001/11/14 21:04:46 mickey Exp $	*/
+/*	$OpenBSD: ppbreg.h,v 1.1 1996/04/18 23:48:09 niklas Exp $	*/
 /*	$NetBSD: ppbreg.h,v 1.3 2001/07/06 18:07:16 mcr Exp $	*/
 
 /*

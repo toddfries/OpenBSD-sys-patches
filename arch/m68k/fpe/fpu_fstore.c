@@ -1,4 +1,4 @@
-/*	$OpenBSD: fpu_fstore.c,v 1.6 2006/06/11 20:43:28 miod Exp $	*/
+/*	$OpenBSD: fpu_fstore.c,v 1.5 2006/01/30 21:23:23 miod Exp $	*/
 /*	$NetBSD: fpu_fstore.c,v 1.8 2003/07/15 02:43:10 lukem Exp $	*/
 
 /*

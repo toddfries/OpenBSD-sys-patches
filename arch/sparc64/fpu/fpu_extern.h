@@ -1,4 +1,4 @@
-/*	$OpenBSD: fpu_extern.h,v 1.5 2006/06/21 19:24:38 jason Exp $	*/
+/*	$OpenBSD: fpu_extern.h,v 1.4 2002/08/03 15:22:06 jason Exp $	*/
 /*	$NetBSD: fpu_extern.h,v 1.4 2000/08/03 18:32:08 eeh Exp $	*/
 
 /*-

@@ -1,4 +1,4 @@
-/* $OpenBSD: debug.s,v 1.3 2006/04/13 14:37:26 brad Exp $ */
+/* $OpenBSD: debug.s,v 1.2 2000/11/08 19:16:58 ericj Exp $ */
 /* $NetBSD: debug.s,v 1.5 1999/06/18 18:11:56 thorpej Exp $ */
 
 /*-

@@ -144,8 +144,8 @@ struct mfi_softc {
 
 	struct mfi_ccb_list	sc_ccb_freeq;
 
-	struct sensor		*sc_sensors;
-	struct sensordev	sc_sensordev;
+	struct ksensor		*sc_sensors;
+	struct ksensordev	sc_sensordev;
 };
 
 int	mfi_attach(struct mfi_softc *sc);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ioccom.h,v 1.4 2006/05/18 21:27:25 miod Exp $	*/
+/*	$OpenBSD: ioccom.h,v 1.3 2003/06/02 23:28:21 millert Exp $	*/
 /*	$NetBSD: ioccom.h,v 1.4 1994/10/30 21:49:56 cgd Exp $	*/
 
 /*-

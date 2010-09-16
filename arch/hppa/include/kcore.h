@@ -1,4 +1,4 @@
-/*	$OpenBSD: kcore.h,v 1.2 2004/04/07 18:24:19 mickey Exp $	*/
+/*	$OpenBSD: kcore.h,v 1.1 1999/04/20 19:44:04 mickey Exp $	*/
 
 /*
  * Copyright (c) 1999 Michael Shalayeff

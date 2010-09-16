@@ -1,4 +1,4 @@
-/*	$OpenBSD: rf3000reg.h,v 1.2 2004/07/25 00:15:47 millert Exp $	*/
+/*	$OpenBSD$	*/
 /*      $NetBSD: rf3000reg.h,v 1.3 2004/07/21 04:25:22 dyoung Exp $        */
 
 /*

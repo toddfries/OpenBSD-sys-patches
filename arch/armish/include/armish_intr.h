@@ -1,4 +1,4 @@
-/*	$OpenBSD: armish_intr.h,v 1.2 2006/06/15 21:35:30 drahn Exp $ */
+/*	$OpenBSD: armish_intr.h,v 1.1 2006/05/29 17:13:19 drahn Exp $ */
 /*	$NetBSD: i80321_intr.h,v 1.4 2003/07/05 06:53:08 dogcow Exp $ */
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ciss_pci.c,v 1.10 2006/09/20 19:45:16 brad Exp $	*/
+/*	$OpenBSD: ciss_pci.c,v 1.9 2005/12/13 15:56:01 brad Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff

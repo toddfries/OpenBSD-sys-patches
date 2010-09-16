@@ -1,4 +1,4 @@
-/*	$OpenBSD: netbsd_machdep.h,v 1.4 2002/03/14 01:26:27 millert Exp $	*/
+/*	$OpenBSD: netbsd_machdep.h,v 1.3 2001/01/15 12:02:36 art Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995 Carnegie-Mellon University.

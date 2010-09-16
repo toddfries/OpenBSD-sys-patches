@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_mecreg.h,v 1.1 2004/08/10 07:30:57 mickey Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD: if_mecreg.h,v 1.2 2004/07/11 03:13:04 tsutsui Exp $	*/
 
 /*

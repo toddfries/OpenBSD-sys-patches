@@ -1,4 +1,4 @@
-/*	$OpenBSD: led.c,v 1.12 2006/08/01 18:09:40 deraadt Exp $	*/
+/*	$OpenBSD: led.c,v 1.11 2006/03/04 12:38:58 miod Exp $	*/
 
 /*
  * Copyright (c) 1998 Jason L. Wright (jason@thought.net)

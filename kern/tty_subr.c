@@ -1,4 +1,4 @@
-/*	$OpenBSD: tty_subr.c,v 1.18 2005/12/21 12:43:49 jsg Exp $	*/
+/*	$OpenBSD: tty_subr.c,v 1.17 2003/06/02 04:00:16 deraadt Exp $	*/
 /*	$NetBSD: tty_subr.c,v 1.13 1996/02/09 19:00:43 christos Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: tumbler.c,v 1.3 2005/11/05 04:26:22 brad Exp $	*/
+/*	$OpenBSD: tumbler.c,v 1.2 2005/10/31 01:20:46 brad Exp $	*/
 
 /*-
  * Copyright (c) 2001,2003 Tsubai Masanari.  All rights reserved.

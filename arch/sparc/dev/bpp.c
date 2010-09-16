@@ -1,4 +1,4 @@
-/*	$OpenBSD: bpp.c,v 1.4 2003/06/03 21:09:02 deraadt Exp $	*/
+/*	$OpenBSD: bpp.c,v 1.3 2002/03/14 01:26:42 millert Exp $	*/
 
 /*
  * Copyright (c) 1997, Jason Downs.  All rights reserved.

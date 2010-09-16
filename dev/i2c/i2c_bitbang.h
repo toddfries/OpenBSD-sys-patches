@@ -1,4 +1,4 @@
-/*	$OpenBSD: i2c_bitbang.h,v 1.3 2006/01/13 23:56:46 grange Exp $	*/
+/*	$OpenBSD: i2c_bitbang.h,v 1.1 2004/05/23 17:33:43 grange Exp $	*/
 /*	$NetBSD: i2c_bitbang.h,v 1.1 2003/09/30 00:35:31 thorpej Exp $	*/
 
 /*

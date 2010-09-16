@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpivar.h,v 1.35 2007/02/19 23:42:39 jordan Exp $	*/
+/*	$OpenBSD: acpivar.h,v 1.34 2007/01/31 23:30:51 gwk Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *

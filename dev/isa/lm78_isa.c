@@ -1,4 +1,4 @@
-/*	$OpenBSD: lm78_isa.c,v 1.1 2006/01/28 11:25:17 kettenis Exp $	*/
+/*	$OpenBSD: lm_isa.c,v 1.10 2006/01/26 22:07:14 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006 Mark Kettenis

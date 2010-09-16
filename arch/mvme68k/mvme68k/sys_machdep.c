@@ -1,4 +1,4 @@
-/*	$OpenBSD: sys_machdep.c,v 1.19 2005/12/17 07:31:26 miod Exp $ */
+/*	$OpenBSD: sys_machdep.c,v 1.18 2005/08/01 11:54:25 miod Exp $ */
 
 /*
  * Copyright (c) 1982, 1986, 1993

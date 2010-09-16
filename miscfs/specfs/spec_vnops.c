@@ -261,8 +261,6 @@ spec_read(v)
 		return (error);
 
 	case VBLK:
-		if (uio->uio_resid == 0)
-			return (0);
 		if (uio->uio_offset < 0)
 			return (EINVAL);
 		bsize = BLKDEV_IOSIZE;

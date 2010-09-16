@@ -1,4 +1,4 @@
-/*	$OpenBSD: aic79xx_inline.h,v 1.4 2004/08/23 20:16:01 marco Exp $	*/
+/*	$OpenBSD: aic79xx_inline.h,v 1.3 2004/08/06 01:29:19 marco Exp $	*/
 
 /*
  * Copyright (c) 2004 Milos Urbanek, Kenneth R. Westerback & Marco Peereboom

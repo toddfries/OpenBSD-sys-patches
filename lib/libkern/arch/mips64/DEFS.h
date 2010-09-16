@@ -1,3 +1,3 @@
-/*	$OpenBSD: DEFS.h,v 1.1 2004/08/11 10:29:59 pefo Exp $ */
+/*	$OpenBSD: DEFS.h,v 1.2 1997/11/07 15:57:14 niklas Exp $ */
 
 #include <machine/asm.h>

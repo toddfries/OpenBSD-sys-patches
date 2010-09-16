@@ -1,4 +1,4 @@
-/*	$OpenBSD: cia_bus_mem.c,v 1.8 2001/11/06 19:53:13 miod Exp $	*/
+/*	$OpenBSD: cia_bus_mem.c,v 1.7 2001/02/06 19:26:39 art Exp $	*/
 /*	$NetBSD: cia_bus_mem.c,v 1.7 1996/11/25 03:46:09 cgd Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*      $OpenBSD: if_atm.c,v 1.13 2006/06/17 10:22:06 henning Exp $       */
+/*      $OpenBSD: if_atm.c,v 1.12 2005/04/16 14:28:57 deraadt Exp $       */
 
 /*
  *

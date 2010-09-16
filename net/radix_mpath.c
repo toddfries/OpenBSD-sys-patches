@@ -1,4 +1,4 @@
-/*	$OpenBSD: radix_mpath.c,v 1.7 2006/06/18 12:03:19 pascoe Exp $	*/
+/*	$OpenBSD: radix_mpath.c,v 1.6 2006/06/18 11:47:45 pascoe Exp $	*/
 /*	$KAME: radix_mpath.c,v 1.13 2002/10/28 21:05:59 itojun Exp $	*/
 
 /*

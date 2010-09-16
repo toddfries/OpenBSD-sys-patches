@@ -1,4 +1,4 @@
-/*	$OpenBSD: mouse.h,v 1.2 1996/10/13 00:55:50 downsj Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD: mouse.h,v 1.4 1994/10/27 04:16:10 cgd Exp $	*/
 
 /*-

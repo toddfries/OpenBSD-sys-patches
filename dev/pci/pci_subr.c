@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_subr.c,v 1.21 2007/02/21 13:08:22 dlg Exp $	*/
+/*	$OpenBSD: pci_subr.c,v 1.19 2006/06/01 11:17:31 brad Exp $	*/
 /*	$NetBSD: pci_subr.c,v 1.19 1996/10/13 01:38:29 christos Exp $	*/
 
 /*

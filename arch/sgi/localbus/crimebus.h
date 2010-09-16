@@ -1,4 +1,4 @@
-/*	$OpenBSD: crimebus.h,v 1.4 2004/08/11 09:14:07 xsa Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB (www.opsycon.se).

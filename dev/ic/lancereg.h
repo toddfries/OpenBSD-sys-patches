@@ -1,4 +1,4 @@
-/*	$OpenBSD: lancereg.h,v 1.1 2005/07/28 01:31:22 brad Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD: lancereg.h,v 1.11 2003/11/02 11:07:45 wiz Exp $	*/
 
 /*-

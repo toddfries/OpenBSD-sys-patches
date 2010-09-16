@@ -1,4 +1,4 @@
-/*	$OpenBSD: bpf_filter.c,v 1.18 2006/10/28 06:34:19 otto Exp $	*/
+/*	$OpenBSD: bpf_filter.c,v 1.17 2006/02/27 14:32:49 otto Exp $	*/
 /*	$NetBSD: bpf_filter.c,v 1.12 1996/02/13 22:00:00 christos Exp $	*/
 
 /*

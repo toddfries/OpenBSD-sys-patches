@@ -1,4 +1,4 @@
-/*	$OpenBSD: usb_quirks.c,v 1.26 2007/01/01 22:27:00 deraadt Exp $ */
+/*	$OpenBSD: usb_quirks.c,v 1.25 2006/11/11 14:39:22 jolan Exp $ */
 /*	$NetBSD: usb_quirks.c,v 1.45 2003/05/10 17:47:14 hamajima Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usb_quirks.c,v 1.30 2003/01/02 04:15:55 imp Exp $	*/
 

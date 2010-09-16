@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus_space.c,v 1.5 2007/01/06 20:11:01 miod Exp $	*/
+/*	$OpenBSD: bus_space.c,v 1.4 2006/06/24 13:20:17 miod Exp $	*/
 /*	$NetBSD: bus_space.c,v 1.6 2002/09/27 15:36:02 provos Exp $	*/
 
 /*-

@@ -1,4 +1,4 @@
-/*	$OpenBSD: shpcic_machdep.c,v 1.3 2006/10/19 03:39:54 drahn Exp $	*/
+/*	$OpenBSD: shpcic_machdep.c,v 1.3 2006/10/19 03:37:54 drahn Exp $	*/
 /*	$NetBSD: shpcic_machdep.c,v 1.1 2006/09/01 21:26:18 uwe Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ts102.c,v 1.18 2006/08/11 18:57:35 miod Exp $	*/
+/*	$OpenBSD: ts102.c,v 1.17 2006/06/02 20:00:54 miod Exp $	*/
 /*
  * Copyright (c) 2003, 2004, Miodrag Vallat.
  *

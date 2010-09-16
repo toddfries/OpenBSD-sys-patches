@@ -1,4 +1,4 @@
-/*	$OpenBSD: exception.h,v 1.4 2004/09/16 07:25:24 miod Exp $ */
+/*	$OpenBSD: exception.h,v 1.3 2004/08/10 20:28:13 deraadt Exp $ */
 
 /*
  * Copyright (c) 1998-2003 Opsycon AB (www.opsycon.se)

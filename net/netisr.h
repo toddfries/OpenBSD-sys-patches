@@ -1,4 +1,4 @@
-/*	$OpenBSD: netisr.h,v 1.23 2005/06/08 07:13:24 henning Exp $	*/
+/*	$OpenBSD: netisr.h,v 1.22 2005/06/07 02:45:11 henning Exp $	*/
 /*	$NetBSD: netisr.h,v 1.12 1995/08/12 23:59:24 mycroft Exp $	*/
 
 /*

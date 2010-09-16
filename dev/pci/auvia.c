@@ -1,4 +1,4 @@
-/*	$OpenBSD: auvia.c,v 1.33 2005/05/06 01:45:22 miod Exp $ */
+/*	$OpenBSD: auvia.c,v 1.32 2005/04/16 21:57:23 mickey Exp $ */
 /*	$NetBSD: auvia.c,v 1.7 2000/11/15 21:06:33 jdolecek Exp $	*/
 
 /*-

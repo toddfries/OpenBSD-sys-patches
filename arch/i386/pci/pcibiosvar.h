@@ -86,7 +86,7 @@ struct pcibios_intr_routing {
 /*
  * $PIR header.  Reference:
  *
- *	http://www.microsoft.com/HWDEV/busbios/PCIIRQ.htm
+ *	http://www.microsoft.com/whdc/archive/pciirq.mspx
  */
 struct pcibios_pir_header {
 	u_int32_t	signature;		/* $PIR */

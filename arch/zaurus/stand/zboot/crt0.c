@@ -1,4 +1,4 @@
-/*	$OpenBSD: crt0.c,v 1.1 2005/04/16 17:22:44 uwe Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * Copyright (c) 2005 Uwe Stuehler <uwe@bsdx.de>

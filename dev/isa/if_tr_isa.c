@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tr_isa.c,v 1.3 2002/03/14 01:26:56 millert Exp $	*/
+/*	$OpenBSD: if_tr_isa.c,v 1.2 2001/11/05 17:25:58 art Exp $	*/
 /*	$NetBSD: if_tr_isa.c,v 1.4 1999/04/30 15:29:24 bad Exp $	*/
 
 #undef TRISADEBUG

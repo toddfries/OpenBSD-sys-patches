@@ -1,4 +1,4 @@
-/*	$OpenBSD: uperf_sbus.c,v 1.7 2003/06/27 01:50:52 jason Exp $	*/
+/*	$OpenBSD: uperf_sbus.c,v 1.6 2003/06/02 18:32:41 jason Exp $	*/
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)

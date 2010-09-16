@@ -1,4 +1,4 @@
-/*	$OpenBSD: gpioow.c,v 1.2 2006/06/23 06:27:11 miod Exp $	*/
+/*	$OpenBSD: gpioow.c,v 1.1 2006/03/04 16:27:03 grange Exp $	*/
 
 /*
  * Copyright (c) 2006 Alexander Yurchenko <grange@openbsd.org>

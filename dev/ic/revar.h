@@ -1,4 +1,4 @@
-/*	$OpenBSD: revar.h,v 1.5 2006/11/28 20:04:02 brad Exp $	*/
+/*	$OpenBSD: revar.h,v 1.4 2006/09/19 07:23:02 mickey Exp $	*/
 
 /*
  * Copyright (c) 2005 Peter Valchev <pvalchev@openbsd.org>

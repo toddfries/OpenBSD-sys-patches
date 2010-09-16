@@ -1,4 +1,4 @@
-/*	$OpenBSD: awi_wep.c,v 1.13 2005/02/21 11:16:00 dlg Exp $	*/
+/*	$OpenBSD: awi_wep.c,v 1.12 2004/11/23 21:12:23 fgsch Exp $	*/
 /*	$NetBSD: awi_wep.c,v 1.2 2000/07/04 14:47:58 onoe Exp $	*/
 
 /*

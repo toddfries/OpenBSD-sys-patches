@@ -1,4 +1,4 @@
-/*	$OpenBSD: netbsd_getdents.c,v 1.9 2005/05/26 00:33:45 pedro Exp $	*/
+/*	$OpenBSD: netbsd_getdents.c,v 1.8 2003/06/02 23:28:00 millert Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1989, 1993

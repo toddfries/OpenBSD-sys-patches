@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vgevar.h,v 1.3 2006/05/28 00:20:21 brad Exp $	*/
+/*	$OpenBSD: if_vgevar.h,v 1.2 2006/05/20 02:39:31 brad Exp $	*/
 /*	$FreeBSD: if_vgevar.h,v 1.1 2004/09/10 20:57:45 wpaul Exp $	*/
 /*
  * Copyright (c) 2004

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ether.h,v 1.13 2002/06/09 16:26:10 itojun Exp $ */
+/*	$OpenBSD: ip_ether.h,v 1.12 2002/03/14 01:27:11 millert Exp $ */
 /*
  * The author of this code is Angelos D. Keromytis (angelos@adk.gr)
  *

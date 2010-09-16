@@ -1,4 +1,4 @@
-/*	$OpenBSD: copystr.S,v 1.2 2006/11/15 19:48:29 miod Exp $	*/
+/*	$OpenBSD: copystr.S,v 1.1 2004/02/01 05:09:48 drahn Exp $	*/
 /*	$NetBSD: copystr.S,v 1.8 2002/10/13 14:54:48 bjh21 Exp $	*/
 
 /*

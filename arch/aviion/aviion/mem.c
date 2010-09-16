@@ -1,4 +1,4 @@
-/*	$OpenBSD: mem.c,v 1.1.1.1 2006/04/18 12:42:03 miod Exp $ */
+/*	$OpenBSD: mem.c,v 1.22 2004/08/02 08:35:00 miod Exp $ */
 
 /*
  * Copyright (c) 1988 University of Utah.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_cnw.c,v 1.16 2006/03/25 22:41:46 djm Exp $	*/
+/*	$OpenBSD: if_cnw.c,v 1.15 2005/01/27 17:04:55 millert Exp $	*/
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
  * All rights reserved.

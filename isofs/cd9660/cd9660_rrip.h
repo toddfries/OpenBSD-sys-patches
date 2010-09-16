@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd9660_rrip.h,v 1.3 2003/06/02 23:28:05 millert Exp $	*/
+/*	$OpenBSD: cd9660_rrip.h,v 1.2 1997/02/24 14:30:50 niklas Exp $	*/
 /*	$NetBSD: cd9660_rrip.h,v 1.6 1994/12/13 22:33:24 mycroft Exp $	*/
 
 /*-

@@ -1,4 +1,4 @@
-/*	$OpenBSD: xd.c,v 1.34 2007/02/15 00:53:26 krw Exp $	*/
+/*	$OpenBSD: xd.c,v 1.33 2006/12/03 16:40:43 miod Exp $	*/
 /*	$NetBSD: xd.c,v 1.37 1997/07/29 09:58:16 fair Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: fmsvar.h,v 1.5 2002/05/29 14:30:21 mickey Exp $ */
+/*	$OpenBSD: fmsvar.h,v 1.4 2002/05/28 04:19:53 mickey Exp $ */
 /*	$NetBSD: fmsvar.h,v 1.1 1999/11/01 21:54:12 augustss Exp $	*/
 
 /*-

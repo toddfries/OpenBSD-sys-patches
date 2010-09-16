@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.1.1.1 2006/04/25 15:54:13 miod Exp $	*/
+/*	$OpenBSD: conf.c,v 1.30 2004/02/10 01:31:21 millert Exp $	*/
 
 /*-
  * Copyright (c) 1991 The Regents of the University of California.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vsmsvar.h,v 1.1 2006/08/27 16:52:15 miod Exp $	*/
+/*	$OpenBSD$	*/
 /*
  * Copyright (c) 1992, 1993
  *	The Regents of the University of California.  All rights reserved.

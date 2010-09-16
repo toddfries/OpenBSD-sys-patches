@@ -1,4 +1,4 @@
-/*	$OpenBSD: cardslotvar.h,v 1.3 2005/09/19 19:05:39 fgsch Exp $	*/
+/*	$OpenBSD: cardslotvar.h,v 1.2 2002/03/14 01:26:53 millert Exp $	*/
 /*	$NetBSD: cardslotvar.h,v 1.5 2000/03/13 23:52:38 soren Exp $	*/
 
 /*

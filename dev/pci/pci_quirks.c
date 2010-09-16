@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_quirks.c,v 1.3 2006/03/19 22:30:26 brad Exp $	*/
+/*	$OpenBSD: pci_quirks.c,v 1.2 2000/03/28 03:43:54 mickey Exp $	*/
 /*	$NetBSD: pci_quirks.c,v 1.1 1998/05/31 06:03:44 cgd Exp $	*/
 
 /*

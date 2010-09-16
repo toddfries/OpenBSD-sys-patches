@@ -1,4 +1,4 @@
-/*	$OpenBSD: process_machdep.c,v 1.3 2005/05/18 16:44:41 miod Exp $ */
+/*	$OpenBSD: process_machdep.c,v 1.2 2005/05/16 11:47:16 miod Exp $ */
 
 /*
  * Copyright (c) 1993 The Regents of the University of California.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pctr.h,v 1.12 2003/05/27 23:52:01 fgsch Exp $	*/
+/*	$OpenBSD: pctr.h,v 1.11 2001/06/05 05:05:38 pvalchev Exp $	*/
 
 /*
  * Pentium performance counter driver for OpenBSD.

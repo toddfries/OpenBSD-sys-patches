@@ -1,4 +1,4 @@
-/*	$OpenBSD: bktr_reg.h,v 1.9 2006/02/05 23:52:58 jakemsr Exp $	*/
+/*	$OpenBSD: bktr_reg.h,v 1.8 2005/11/21 18:16:41 millert Exp $	*/
 /*
  * $FreeBSD: src/sys/dev/bktr/bktr_reg.h,v 1.42 2000/10/31 13:09:56 roger Exp $
  *

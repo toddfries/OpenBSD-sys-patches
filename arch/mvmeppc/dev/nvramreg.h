@@ -49,7 +49,7 @@
  * 
  * This chip is 8k in size.
  * The first TOD clock starts at offset 0x1FF8. The following structure
- * describes last 2K of it's 8K address space. The first 6K of the NVRAM
+ * describes last 2K of its 8K address space. The first 6K of the NVRAM
  * space is used for various things as follows:
  * 	0000-0fff	User Area
  *	1000-10ff	Networking Area 

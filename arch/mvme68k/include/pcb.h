@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcb.h,v 1.6 2003/10/09 21:48:48 miod Exp $ */
+/*	$OpenBSD: pcb.h,v 1.5 2003/06/02 23:27:50 millert Exp $ */
 
 /*
  * Copyright (c) 1988 University of Utah.

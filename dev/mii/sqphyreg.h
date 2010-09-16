@@ -1,4 +1,4 @@
-/*	$OpenBSD: sqphyreg.h,v 1.3 2003/10/22 09:39:29 jmc Exp $	*/
+/*	$OpenBSD: sqphyreg.h,v 1.2 1999/03/09 00:02:45 jason Exp $	*/
 /*	$NetBSD: sqphyreg.h,v 1.1 1998/11/03 23:51:29 thorpej Exp $	*/
 
 /*-

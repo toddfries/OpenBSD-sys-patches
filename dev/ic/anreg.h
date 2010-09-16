@@ -1,4 +1,4 @@
-/*	$OpenBSD: anreg.h,v 1.10 2006/01/09 21:19:47 jsg Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD: anreg.h,v 1.11 2005/01/15 11:01:46 dyoung Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999

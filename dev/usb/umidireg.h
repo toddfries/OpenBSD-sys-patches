@@ -1,4 +1,4 @@
-/*	$OpenBSD: umidireg.h,v 1.5 2004/10/01 04:08:46 jsg Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD: umidireg.h,v 1.3 2003/12/04 13:57:31 keihan Exp $	*/
 /*
  * Copyright (c) 2001 The NetBSD Foundation, Inc.

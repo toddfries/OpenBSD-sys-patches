@@ -1,4 +1,4 @@
-/*	$OpenBSD: led.h,v 1.6 2003/06/02 18:40:59 jason Exp $	*/
+/*	$OpenBSD: led.h,v 1.5 2002/03/14 01:26:43 millert Exp $	*/
 
 /*
  * Copyright (c) 1998 Jason L. Wright (jason@thought.net)

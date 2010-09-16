@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ral.c,v 1.89 2007/02/19 17:22:02 deraadt Exp $	*/
+/*	$OpenBSD: if_ral.c,v 1.88 2007/01/02 14:43:50 claudio Exp $	*/
 
 /*-
  * Copyright (c) 2005, 2006

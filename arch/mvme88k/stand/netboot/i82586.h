@@ -1,4 +1,4 @@
-/*	$OpenBSD: i82586.h,v 1.2 1998/08/22 08:37:58 smurph Exp $ */
+/*	$OpenBSD: i82586.h,v 1.3 1996/04/28 10:49:21 deraadt Exp $ */
 
 /*-
  * Copyright (c) 1995 Theo de Raadt

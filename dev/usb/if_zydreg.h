@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_zydreg.h,v 1.19 2006/11/30 19:28:07 damien Exp $	*/
+/*	$OpenBSD: if_zydreg.h,v 1.18 2006/11/30 17:45:40 damien Exp $	*/
 
 /*-
  * Copyright (c) 2006 by Damien Bergamini <damien.bergamini@free.fr>

@@ -1,4 +1,4 @@
-#	$OpenBSD: files.mvme68k,v 1.29 2006/04/21 22:21:53 miod Exp $
+#	$OpenBSD: files.mvme68k,v 1.28 2005/11/27 14:19:07 miod Exp $
 
 # config file for mvme68k
 

@@ -1,4 +1,4 @@
-/*      $OpenBSD: neoreg.h,v 1.2 2004/11/22 04:27:14 deraadt Exp $       */
+/*      $OpenBSD: neoreg.h,v 1.1 2000/04/13 00:10:52 csapuntz Exp $       */
 
 /*
  * Copyright (c) 1999 Cameron Grant <gandalf@vilnya.demon.co.uk>

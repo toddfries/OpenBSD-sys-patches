@@ -30,7 +30,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$OpenBSD: quad.h,v 1.9 2004/11/28 07:23:41 mickey Exp $
+ *	$OpenBSD: quad.h,v 1.6 2004/11/28 07:09:13 mickey Exp $
  */
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ahareg.h,v 1.4 2002/06/07 20:41:06 niklas Exp $	*/
+/*	$OpenBSD: ahareg.h,v 1.3 1996/05/07 07:36:05 deraadt Exp $	*/
 typedef u_int8_t physaddr[3];
 typedef u_int8_t physlen[3];
 #define	ltophys	_lto3b

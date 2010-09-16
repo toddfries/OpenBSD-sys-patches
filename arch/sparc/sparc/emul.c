@@ -1,4 +1,4 @@
-/*	$OpenBSD: emul.c,v 1.3 2002/03/14 01:26:44 millert Exp $	*/
+/*	$OpenBSD: emul.c,v 1.2 2000/02/21 21:05:59 art Exp $	*/
 /*	$NetBSD: emul.c,v 1.3 1997/07/29 09:42:01 fair Exp $	*/
 
 /*

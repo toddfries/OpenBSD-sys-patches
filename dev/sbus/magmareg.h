@@ -1,4 +1,4 @@
-/*	$OpenBSD: magmareg.h,v 1.8 2006/03/04 13:00:55 miod Exp $	*/
+/*	$OpenBSD: magmareg.h,v 1.7 2003/03/27 17:39:05 jason Exp $	*/
 
 /* magmareg.h
  *

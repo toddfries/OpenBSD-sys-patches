@@ -1,4 +1,4 @@
-/*	$OpenBSD: moscom.c,v 1.2 2006/10/26 06:02:43 jsg Exp $	*/
+/*	$OpenBSD: moscom.c,v 1.1 2006/10/26 04:14:09 jsg Exp $	*/
 
 /*
  * Copyright (c) 2006 Jonathan Gray <jsg@openbsd.org>

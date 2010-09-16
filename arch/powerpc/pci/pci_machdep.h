@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.h,v 1.15 2006/05/10 00:07:40 brad Exp $	*/
+/*	$OpenBSD: pci_machdep.h,v 1.14 2002/09/15 09:01:59 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1996 Carnegie-Mellon University.

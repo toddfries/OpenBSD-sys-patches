@@ -1,4 +1,4 @@
-/*	$OpenBSD: isagpio.c,v 1.3 2006/04/01 08:32:52 grange Exp $	*/
+/*	$OpenBSD: isagpio.c,v 1.2 2006/03/27 07:16:04 grange Exp $	*/
 
 /*
  * Copyright (c) 2006 Oleg Safiullin <form@pdp-11.org.ru>

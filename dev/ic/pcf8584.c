@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcf8584.c,v 1.7 2006/06/22 08:33:43 deraadt Exp $ */
+/*	$OpenBSD: pcf8584.c,v 1.6 2006/06/21 15:58:19 deraadt Exp $ */
 
 /*
  * Copyright (c) 2006 David Gwynne <dlg@openbsd.org>

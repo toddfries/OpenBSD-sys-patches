@@ -1,4 +1,4 @@
-/*	$OpenBSD: setjmp.h,v 1.1 2005/04/01 10:40:48 mickey Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * machine/setjmp.h: machine dependent setjmp-related information.

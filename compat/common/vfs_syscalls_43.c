@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_syscalls_43.c,v 1.27 2005/05/26 01:15:12 pedro Exp $	*/
+/*	$OpenBSD: vfs_syscalls_43.c,v 1.26 2005/05/26 00:33:45 pedro Exp $	*/
 /*	$NetBSD: vfs_syscalls_43.c,v 1.4 1996/03/14 19:31:52 christos Exp $	*/
 
 /*

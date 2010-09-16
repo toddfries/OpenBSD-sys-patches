@@ -1,4 +1,4 @@
-/*	$OpenBSD: audio.c,v 1.54 2007/01/07 13:35:51 miod Exp $	*/
+/*	$OpenBSD: audio.c,v 1.53 2006/11/29 13:34:31 miod Exp $	*/
 /*	$NetBSD: audio.c,v 1.119 1999/11/09 16:50:47 augustss Exp $	*/
 
 /*

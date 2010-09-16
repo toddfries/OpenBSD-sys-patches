@@ -1,4 +1,4 @@
-/*	$OpenBSD: reloc.h,v 1.4 2006/05/07 15:38:05 miod Exp $	*/
+/*	$OpenBSD: reloc.h,v 1.3 2006/05/07 15:36:40 miod Exp $	*/
 /* 
  * Copyright (c) 2001 Artur Grabowski <art@openbsd.org>
  *   

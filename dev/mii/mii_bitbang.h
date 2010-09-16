@@ -1,4 +1,4 @@
-/*	$OpenBSD: mii_bitbang.h,v 1.2 2002/03/14 01:26:57 millert Exp $	*/
+/*	$OpenBSD: mii_bitbang.h,v 1.1 2001/03/11 02:48:19 aaron Exp $	*/
 /*	$NetBSD$	*/
 
 /*-

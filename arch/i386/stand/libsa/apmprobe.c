@@ -1,4 +1,4 @@
-/*	$OpenBSD: apmprobe.c,v 1.14 2005/11/14 23:50:26 martin Exp $	*/
+/*	$OpenBSD: apmprobe.c,v 1.13 2004/03/11 17:41:23 tom Exp $	*/
 
 /*
  * Copyright (c) 1997-2000 Michael Shalayeff

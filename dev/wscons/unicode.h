@@ -1,4 +1,4 @@
-/* $OpenBSD: unicode.h,v 1.1 2000/05/16 23:49:10 mickey Exp $ */
+/* $OpenBSD$ */
 /* $NetBSD: unicode.h,v 1.1 1999/02/20 18:20:02 drochner Exp $ */
 
 /*

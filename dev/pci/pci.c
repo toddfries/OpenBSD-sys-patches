@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci.c,v 1.49 2006/12/14 17:36:12 kettenis Exp $	*/
+/*	$OpenBSD: pci.c,v 1.48 2006/12/11 19:47:37 kettenis Exp $	*/
 /*	$NetBSD: pci.c,v 1.31 1997/06/06 23:48:04 thorpej Exp $	*/
 
 /*

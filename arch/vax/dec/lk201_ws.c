@@ -1,4 +1,4 @@
-/*	$OpenBSD: lk201_ws.c,v 1.10 2006/08/27 16:50:43 miod Exp $	*/
+/*	$OpenBSD: lk201_ws.c,v 1.9 2006/08/05 22:05:55 miod Exp $	*/
 /* $NetBSD: lk201_ws.c,v 1.2 1998/10/22 17:55:20 drochner Exp $ */
 
 /*

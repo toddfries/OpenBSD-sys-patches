@@ -1,4 +1,4 @@
-/*	$OpenBSD: fga.c,v 1.15 2006/02/22 22:32:12 miod Exp $	*/
+/*	$OpenBSD: fga.c,v 1.14 2004/09/29 07:35:11 miod Exp $	*/
 
 /*
  * Copyright (c) 1999 Jason L. Wright (jason@thought.net)

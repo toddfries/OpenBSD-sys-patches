@@ -542,7 +542,8 @@ zts_irq(void *v)
 	}
 
 	if (down || sc->sc_buttons != down) {
-		wsmouse_input(sc->sc_wsmousedev, down, tp.x, tp.y, 0 /* z */,
+		wsmouse_input(sc->sc_wsmousedev, down, tp.x, tp.y,
+		    0 /* z */, 0 /* w */,
 		    WSMOUSE_INPUT_ABSOLUTE_X | WSMOUSE_INPUT_ABSOLUTE_Y |
 		    WSMOUSE_INPUT_ABSOLUTE_Z);
 		sc->sc_buttons = down;

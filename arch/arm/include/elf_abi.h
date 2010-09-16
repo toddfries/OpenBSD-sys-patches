@@ -1,4 +1,4 @@
-/*	$OpenBSD: elf_abi.h,v 1.1 2004/02/01 05:09:49 drahn Exp $ */
+/*	$OpenBSD$ */
 #ifndef _ARM_ELF_ABI_H
 #define _ARM_ELF_ABI_H
 

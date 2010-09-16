@@ -1,4 +1,4 @@
-/*	$OpenBSD: amd756.c,v 1.4 2006/09/19 11:06:34 jsg Exp $	*/
+/*	$OpenBSD: amd756.c,v 1.3 2002/03/14 01:26:33 millert Exp $	*/
 /*	$NetBSD$	*/
 
 /*-

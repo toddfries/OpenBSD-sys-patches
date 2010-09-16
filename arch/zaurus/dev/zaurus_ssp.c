@@ -1,4 +1,4 @@
-/*	$OpenBSD: zaurus_ssp.c,v 1.6 2005/04/08 21:58:49 uwe Exp $	*/
+/*	$OpenBSD: zaurus_ssp.c,v 1.5 2005/02/22 21:53:03 uwe Exp $	*/
 
 /*
  * Copyright (c) 2005 Uwe Stuehler <uwe@bsdx.de>

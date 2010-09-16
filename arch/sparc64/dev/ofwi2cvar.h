@@ -1,4 +1,4 @@
-/*	$OpenBSD: ofwi2cvar.h,v 1.2 2006/02/09 12:16:25 dlg Exp $	*/
+/*	$OpenBSD: ofwi2cvar.h,v 1.1 2006/01/02 01:58:55 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2006 Theo de Raadt

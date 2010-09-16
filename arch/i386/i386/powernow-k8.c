@@ -1,4 +1,4 @@
-/*	$OpenBSD: powernow-k8.c,v 1.21 2006/12/20 17:50:40 gwk Exp $ */
+/*	$OpenBSD: powernow-k8.c,v 1.20 2006/12/12 23:14:27 dim Exp $ */
 
 /*
  * Copyright (c) 2004 Martin Végiard.

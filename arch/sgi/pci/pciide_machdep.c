@@ -1,4 +1,4 @@
-/*	$OpenBSD: pciide_machdep.c,v 1.3 2005/01/31 21:35:50 grange Exp $ */
+/*	$OpenBSD: pciide_machdep.c,v 1.2 2004/08/10 19:16:18 deraadt Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)

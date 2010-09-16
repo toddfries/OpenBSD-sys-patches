@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_machdep.c,v 1.58 2006/11/29 12:47:49 mickey Exp $	*/
+/*	$OpenBSD: vm_machdep.c,v 1.57 2006/11/29 12:26:13 miod Exp $	*/
 
 /*
  * Copyright (c) 1999-2004 Michael Shalayeff

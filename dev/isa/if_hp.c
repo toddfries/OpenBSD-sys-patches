@@ -1,4 +1,4 @@
-/*    $OpenBSD: if_hp.c,v 1.17 2006/04/16 00:46:32 pascoe Exp $       */
+/*    $OpenBSD: if_hp.c,v 1.16 2006/03/25 22:41:44 djm Exp $       */
 /*    $NetBSD: if_hp.c,v 1.21 1995/12/24 02:31:31 mycroft Exp $       */
 
 /* XXX THIS DRIVER IS BROKEN.  IT WILL NOT EVEN COMPILE. */

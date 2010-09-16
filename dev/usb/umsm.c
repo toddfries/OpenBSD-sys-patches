@@ -1,4 +1,4 @@
-/*	$OpenBSD: umsm.c,v 1.6 2007/01/30 01:22:53 jsg Exp $	*/
+/*	$OpenBSD: umsm.c,v 1.5 2007/01/13 19:54:21 stevesk Exp $	*/
 
 /*
  * Copyright (c) 2006 Jonathan Gray <jsg@openbsd.org>

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_rtw_cardbus.c,v 1.11 2006/10/12 16:35:52 grange Exp $	*/
+/*	$OpenBSD: if_rtw_cardbus.c,v 1.10 2006/06/21 11:27:03 fkr Exp $	*/
 /* $NetBSD: if_rtw_cardbus.c,v 1.4 2004/12/20 21:05:34 dyoung Exp $ */
 
 /*-

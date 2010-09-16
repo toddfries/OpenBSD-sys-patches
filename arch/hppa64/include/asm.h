@@ -1,4 +1,4 @@
-/*	$OpenBSD: asm.h,v 1.1 2005/04/01 10:40:48 mickey Exp $	*/
+/*	$OpenBSD$	*/
 
 /* 
  * Copyright (c) 1990,1991,1994 The University of Utah and

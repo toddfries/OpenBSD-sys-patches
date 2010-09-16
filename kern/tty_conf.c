@@ -1,4 +1,4 @@
-/*	$OpenBSD: tty_conf.c,v 1.11 2006/08/03 16:13:24 mbalmer Exp $	*/
+/*	$OpenBSD: tty_conf.c,v 1.10 2006/06/01 20:10:28 mbalmer Exp $	*/
 /*	$NetBSD: tty_conf.c,v 1.18 1996/05/19 17:17:55 jonathan Exp $	*/
 
 /*-

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcmciareg.h,v 1.6 2003/06/26 00:35:07 mickey Exp $	*/
+/*	$OpenBSD: pcmciareg.h,v 1.5 2000/06/06 00:56:25 fgsch Exp $	*/
 /*	$NetBSD: pcmciareg.h,v 1.6 1998/08/13 15:00:02 nathanw Exp $	*/
 
 /*

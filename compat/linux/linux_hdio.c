@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_hdio.c,v 1.5 2002/03/14 01:26:50 millert Exp $	*/
+/*	$OpenBSD: linux_hdio.c,v 1.4 2002/02/13 19:08:06 art Exp $	*/
 /*	$NetBSD: linux_hdio.c,v 1.1 2000/12/10 14:12:17 fvdl Exp $	*/
 
 /*

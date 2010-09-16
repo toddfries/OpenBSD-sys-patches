@@ -1,4 +1,4 @@
-/*	$OpenBSD: cyreg.h,v 1.8 2002/09/14 15:00:02 art Exp $	*/
+/*	$OpenBSD: cyreg.h,v 1.7 2002/03/14 01:26:54 millert Exp $	*/
 /*	$FreeBSD: cyreg.h,v 1.1 1995/07/05 12:15:51 bde Exp $	*/
 
 /*-

@@ -1,4 +1,4 @@
-/*	$OpenBSD: dcreg.h,v 1.42 2005/05/22 03:47:16 martin Exp $ */
+/*	$OpenBSD: dcreg.h,v 1.41 2005/01/02 13:39:21 brad Exp $ */
 
 /*
  * Copyright (c) 1997, 1998, 1999

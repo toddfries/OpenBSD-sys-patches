@@ -1,4 +1,4 @@
-/*	$OpenBSD: via.c,v 1.28 2006/06/30 15:12:47 miod Exp $	*/
+/*	$OpenBSD: via.c,v 1.27 2006/01/16 21:48:22 miod Exp $	*/
 /*	$NetBSD: via.c,v 1.62 1997/09/10 04:38:48 scottr Exp $	*/
 
 /*-

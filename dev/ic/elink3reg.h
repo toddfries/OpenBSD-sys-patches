@@ -1,4 +1,4 @@
-/*	$OpenBSD: elink3reg.h,v 1.15 2005/02/17 18:07:36 jfb Exp $	*/
+/*	$OpenBSD: elink3reg.h,v 1.14 2003/10/21 18:58:49 jmc Exp $	*/
 /*	$NetBSD: elink3reg.h,v 1.13 1997/04/27 09:42:34 veego Exp $	*/
 
 /*

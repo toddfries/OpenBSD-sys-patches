@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.1 2006/10/06 21:48:50 mickey Exp $
+#	$OpenBSD$
 
 .if !make(libdep) && !make(sadep) && !make(salibdir) && !make(kernlibdir) && !make(obj) && !make(clean) && !make(cleandir)
 .BEGIN:

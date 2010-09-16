@@ -1,4 +1,4 @@
-/*	$OpenBSD: mfs_vnops.c,v 1.27 2007/02/07 15:20:39 jmc Exp $	*/
+/*	$OpenBSD: mfs_vnops.c,v 1.26 2006/03/28 13:18:17 pedro Exp $	*/
 /*	$NetBSD: mfs_vnops.c,v 1.8 1996/03/17 02:16:32 christos Exp $	*/
 
 /*

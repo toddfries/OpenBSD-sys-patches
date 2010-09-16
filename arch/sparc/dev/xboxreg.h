@@ -1,4 +1,4 @@
-/*	$OpenBSD: xboxreg.h,v 1.2 2003/06/02 18:40:59 jason Exp $	*/
+/*	$OpenBSD: xboxreg.h,v 1.1 1999/04/18 03:24:26 jason Exp $	*/
 
 /*
  * Copyright (c) 1999 Jason L. Wright (jason@thought.net)

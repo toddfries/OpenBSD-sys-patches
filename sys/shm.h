@@ -1,4 +1,4 @@
-/*	$OpenBSD: shm.h,v 1.20 2005/12/13 00:35:23 millert Exp $	*/
+/*	$OpenBSD: shm.h,v 1.19 2004/07/15 11:24:46 millert Exp $	*/
 /*	$NetBSD: shm.h,v 1.20 1996/04/09 20:55:35 cgd Exp $	*/
 
 /*

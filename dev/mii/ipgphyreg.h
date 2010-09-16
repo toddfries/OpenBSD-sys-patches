@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipgphyreg.h,v 1.1 2006/07/12 19:05:50 brad Exp $	*/
+/*	$OpenBSD$	*/
 
 /*-
  * Copyright (c) 2006, Pyun YongHyeon

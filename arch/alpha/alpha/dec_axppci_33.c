@@ -1,4 +1,4 @@
-/* $OpenBSD: dec_axppci_33.c,v 1.19 2006/11/28 16:56:50 dlg Exp $ */
+/* $OpenBSD: dec_axppci_33.c,v 1.18 2005/05/09 21:55:12 martin Exp $ */
 /* $NetBSD: dec_axppci_33.c,v 1.44 2000/05/22 20:13:32 thorpej Exp $ */
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uba_common.h,v 1.4 2003/11/10 21:05:06 miod Exp $	*/
+/*	$OpenBSD: uba_common.h,v 1.3 2003/06/02 23:27:58 millert Exp $	*/
 /*	$NetBSD: uba_common.h,v 1.2 1999/06/21 16:23:01 ragge Exp $ */
 /*-
  * Copyright (c) 1982, 1986 The Regents of the University of California.

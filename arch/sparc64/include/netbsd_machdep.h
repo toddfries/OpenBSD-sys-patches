@@ -1,4 +1,4 @@
-/*	$OpenBSD: netbsd_machdep.h,v 1.2 2002/03/14 01:26:45 millert Exp $	*/
+/*	$OpenBSD: netbsd_machdep.h,v 1.1 2001/09/06 10:45:41 art Exp $	*/
 
 #ifndef _NETBSD_MACHDEP_H
 #define _NETBSD_MACHDEP_H

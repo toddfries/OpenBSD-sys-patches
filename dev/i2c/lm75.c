@@ -61,8 +61,8 @@ struct lmtemp_softc {
 	int	sc_model;
 	int	sc_bits;
 
-	struct sensor sc_sensor;
-	struct sensordev sc_sensordev;
+	struct ksensor sc_sensor;
+	struct ksensordev sc_sensordev;
 };
 
 int  lmtemp_match(struct device *, void *, void *);

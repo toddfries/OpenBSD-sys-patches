@@ -1,4 +1,4 @@
-/*	$OpenBSD: esovar.h,v 1.3 2002/06/09 02:31:20 mickey Exp $	*/
+/*	$OpenBSD: esovar.h,v 1.2 2002/03/14 01:26:58 millert Exp $	*/
 /*	$NetBSD: esovar.h,v 1.2 1999/08/02 17:37:43 augustss Exp $	*/
 
 /*

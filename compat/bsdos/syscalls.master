@@ -1,4 +1,4 @@
-	$OpenBSD: syscalls.master,v 1.17 2006/09/22 15:29:57 pedro Exp $
+	$OpenBSD: syscalls.master,v 1.16 2005/06/17 20:39:14 millert Exp $
 
 ; OpenBSD COMPAT_BSDOS system call name/number "master" file.
 ; (See syscalls.conf to see what it is processed into.)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rf_chaindecluster.c,v 1.4 2002/12/16 07:01:03 tdeval Exp $	*/
+/*	$OpenBSD: rf_chaindecluster.c,v 1.3 2000/01/11 18:02:20 peter Exp $	*/
 /*	$NetBSD: rf_chaindecluster.c,v 1.4 2000/01/07 03:40:56 oster Exp $	*/
 
 /*

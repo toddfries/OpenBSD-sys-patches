@@ -1,4 +1,4 @@
-/*      $OpenBSD: wdcvar.h,v 1.39 2006/05/03 02:18:47 jsg Exp $     */
+/*      $OpenBSD: wdcvar.h,v 1.38 2006/02/10 21:45:41 kettenis Exp $     */
 /*	$NetBSD: wdcvar.h,v 1.17 1999/04/11 20:50:29 bouyer Exp $	*/
 
 /*-

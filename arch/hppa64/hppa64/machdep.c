@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.4 2006/01/10 19:21:14 martin Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.3 2005/10/26 18:35:45 martin Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff

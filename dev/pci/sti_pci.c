@@ -1,4 +1,4 @@
-/*	$OpenBSD: sti_pci.c,v 1.5 2007/01/12 22:02:35 miod Exp $	*/
+/*	$OpenBSD: sti_pci.c,v 1.4 2007/01/11 22:06:40 miod Exp $	*/
 
 /*
  * Copyright (c) 2006, 2007 Miodrag Vallat.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: aacvar.h,v 1.7 2006/05/07 20:12:41 tedu Exp $	*/
+/*	$OpenBSD: aacvar.h,v 1.6 2006/04/22 02:36:26 brad Exp $	*/
 
 /*-
  * Copyright (c) 2000 Michael Smith

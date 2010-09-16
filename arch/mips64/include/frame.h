@@ -1,4 +1,4 @@
-/*	$OpenBSD: frame.h,v 1.4 2004/09/27 17:42:23 pefo Exp $ */
+/*	$OpenBSD: frame.h,v 1.3 2004/08/10 20:28:13 deraadt Exp $ */
 
 /*
  * Copyright (c) 1998-2003 Opsycon AB (www.opsycon.se)

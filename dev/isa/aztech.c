@@ -1,4 +1,4 @@
-/* $OpenBSD: aztech.c,v 1.4 2002/01/23 20:30:38 mickey Exp $ */
+/* $OpenBSD: aztech.c,v 1.3 2002/01/02 19:36:51 mickey Exp $ */
 /* $RuOBSD: aztech.c,v 1.11 2001/10/20 13:23:47 pva Exp $ */
 
 /*

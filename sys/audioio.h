@@ -1,4 +1,4 @@
-/*	$OpenBSD: audioio.h,v 1.16 2005/12/14 13:59:04 fgsch Exp $	*/
+/*	$OpenBSD: audioio.h,v 1.15 2004/01/31 17:00:50 jmc Exp $	*/
 /*	$NetBSD: audioio.h,v 1.24 1998/08/13 06:28:41 mrg Exp $	*/
 
 /*

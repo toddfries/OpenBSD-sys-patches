@@ -1,4 +1,4 @@
-/*	$OpenBSD: openprom.c,v 1.11 2003/06/02 23:27:56 millert Exp $	*/
+/*	$OpenBSD: openprom.c,v 1.10 2003/03/07 14:54:49 jason Exp $	*/
 /*	$NetBSD: openprom.c,v 1.4 2002/01/10 06:21:53 briggs Exp $ */
 
 /*

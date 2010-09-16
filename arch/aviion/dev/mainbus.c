@@ -1,4 +1,4 @@
-/*	$OpenBSD: mainbus.c,v 1.2 2006/05/21 12:22:02 miod Exp $ */
+/*	$OpenBSD: mainbus.c,v 1.1.1.1 2006/05/09 18:13:53 miod Exp $ */
 /*
  * Copyright (c) 1998 Steve Murphree, Jr.
  * Copyright (c) 2004, Miodrag Vallat.

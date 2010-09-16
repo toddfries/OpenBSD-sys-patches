@@ -1,4 +1,4 @@
-/*	$OpenBSD: asm_single.h,v 1.3 2001/01/15 19:50:37 deraadt Exp $	*/
+/*	$OpenBSD: asm_single.h,v 1.2 1998/04/25 07:09:06 d Exp $	*/
 /*	$NetBSD: asm_single.h,v 1.1 1996/09/16 06:03:58 leo Exp $	*/
 
 /*

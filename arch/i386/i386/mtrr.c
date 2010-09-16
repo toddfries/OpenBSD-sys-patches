@@ -1,4 +1,4 @@
-/* $OpenBSD: mtrr.c,v 1.9 2006/11/29 20:03:20 dim Exp $ */
+/* $OpenBSD: mtrr.c,v 1.8 2006/09/19 11:06:33 jsg Exp $ */
 /*-
  * Copyright (c) 1999 Michael Smith <msmith@freebsd.org>
  * Copyright (c) 1999 Brian Fundakowski Feldman

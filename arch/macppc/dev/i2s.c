@@ -1,4 +1,4 @@
-/*	$OpenBSD: i2s.c,v 1.6 2006/01/08 18:11:03 kettenis Exp $	*/
+/*	$OpenBSD: i2s.c,v 1.5 2005/12/11 20:56:01 kettenis Exp $	*/
 /*	$NetBSD: i2s.c,v 1.1 2003/12/27 02:19:34 grant Exp $	*/
 
 /*-

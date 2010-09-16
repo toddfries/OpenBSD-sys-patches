@@ -1,4 +1,4 @@
-/*	$OpenBSD: landiskreg.h,v 1.3 2007/01/15 22:22:19 martin Exp $	*/
+/*	$OpenBSD: landiskreg.h,v 1.2 2006/12/18 22:11:29 martin Exp $	*/
 /*	$NetBSD: landiskreg.h,v 1.1 2006/09/01 21:26:18 uwe Exp $	*/
 
 /*-

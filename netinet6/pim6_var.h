@@ -1,4 +1,4 @@
-/*	$OpenBSD: pim6_var.h,v 1.8 2006/07/06 02:56:58 brad Exp $	*/
+/*	$OpenBSD: pim6_var.h,v 1.7 2004/11/10 03:38:52 mcbride Exp $	*/
 /*	$KAME: pim6_var.h,v 1.8 2000/06/06 08:07:43 jinmei Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_re_pci.c,v 1.19 2006/11/28 20:04:02 brad Exp $	*/
+/*	$OpenBSD: if_re_pci.c,v 1.18 2006/11/06 20:10:58 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2005 Peter Valchev <pvalchev@openbsd.org>

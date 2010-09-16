@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.49 2006/05/08 14:03:35 miod Exp $	*/
+/*	$OpenBSD: locore.S,v 1.48 2006/05/06 22:16:28 miod Exp $	*/
 /*
  * Copyright (c) 2005, Miodrag Vallat.
  * Copyright (c) 1998 Steve Murphree, Jr.

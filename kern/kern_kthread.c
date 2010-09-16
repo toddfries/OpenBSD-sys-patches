@@ -83,7 +83,7 @@ kthread_create(void (*func)(void *), void *arg,
 	/*
 	 * Mark it as a system process.
 	 */
-	p2->p_flag |= P_SYSTEM;
+	atomic_setbits_int(&p2->p_flag, P_SYSTEM);
 
 	/* Name it as specified. */
 	va_start(ap, fmt);

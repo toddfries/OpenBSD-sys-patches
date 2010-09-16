@@ -1,4 +1,4 @@
-/*	$OpenBSD: siovar.h,v 1.12 2004/06/28 02:28:43 aaron Exp $	*/
+/*	$OpenBSD: siovar.h,v 1.11 2002/03/14 03:15:50 millert Exp $	*/
 /*	$NetBSD: siovar.h,v 1.5 1996/10/23 04:12:34 cgd Exp $	*/
 
 /*

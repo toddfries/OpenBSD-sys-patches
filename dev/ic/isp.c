@@ -2254,7 +2254,7 @@ isp_scan_loop(struct ispsoftc *isp)
 				continue;
 			/*
 			 * We found this WWN elsewhere- it's changed
-			 * loopids then. We don't change it's actual
+			 * loopids then. We don't change its actual
 			 * position in our cached port database- we
 			 * just change the actual loop ID we'd use.
 			 */
@@ -5769,7 +5769,7 @@ isp_setdfltparm(struct ispsoftc *isp, int channel)
 
 		/*
 		 * We default to Wide/Fast for versions less than a 1040
-		 * (unless it's SBus).
+		 * (unless its SBus).
 		 */
 		if (IS_ULTRA3(isp)) {
 			off = ISP_80M_SYNCPARMS >> 8;

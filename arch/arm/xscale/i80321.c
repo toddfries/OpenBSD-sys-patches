@@ -1,4 +1,4 @@
-/*	$OpenBSD: i80321.c,v 1.5 2006/12/14 17:36:12 kettenis Exp $	*/
+/*	$OpenBSD: i80321.c,v 1.4 2006/06/02 01:33:55 drahn Exp $	*/
 /*	$NetBSD: i80321.c,v 1.18 2006/02/25 02:28:56 wiz Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: lcore_access.S,v 1.9 2005/12/20 07:06:26 miod Exp $ */
+/*	$OpenBSD: lcore_access.S,v 1.8 2004/10/20 12:49:15 pefo Exp $ */
 
 /*
  * Copyright (c) 2001-2003 Opsycon AB  (www.opsycon.se / www.opsycon.com)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: m88410.h,v 1.12 2005/12/12 20:36:32 miod Exp $ */
+/*	$OpenBSD: m88410.h,v 1.11 2005/04/30 16:42:37 miod Exp $ */
 /*
  * Copyright (c) 2001 Steve Murphree, Jr.
  * All rights reserved.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: flash.c,v 1.17 2005/12/17 07:31:26 miod Exp $ */
+/*	$OpenBSD: flash.c,v 1.16 2005/11/24 22:43:16 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt

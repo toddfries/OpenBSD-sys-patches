@@ -1,4 +1,4 @@
-/*	$OpenBSD: cmd_i386.c,v 1.29 2006/09/18 21:14:15 mpf Exp $	*/
+/*	$OpenBSD: cmd_i386.c,v 1.28 2004/03/09 19:12:12 tom Exp $	*/
 
 /*
  * Copyright (c) 1997-1999 Michael Shalayeff

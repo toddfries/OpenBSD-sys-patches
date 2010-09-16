@@ -408,9 +408,9 @@ done:
 
 	if (subr == (long)k_intr || subr == (long)k_general) {
 		if (subr == (long)k_intr)
-			(*pr)("<-> KERNEL INTERRUPT <->\n");
+			(*pr)("(KERNEL INTERRUPT)\n");
 		else
-			(*pr)("<-> KERNEL TRAP <->\n");
+			(*pr)("(KERNEL TRAP)\n");
 		sp = *(register_t *)sp;
 		pc = ((struct trap_frame *)sp)->pc;
 		ra = ((struct trap_frame *)sp)->ra;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: bktr_os.c,v 1.25 2007/02/11 20:29:22 miod Exp $	*/
+/*	$OpenBSD: bktr_os.c,v 1.24 2006/02/05 23:52:58 jakemsr Exp $	*/
 /* $FreeBSD: src/sys/dev/bktr/bktr_os.c,v 1.20 2000/10/20 08:16:53 roger Exp $ */
 
 /*

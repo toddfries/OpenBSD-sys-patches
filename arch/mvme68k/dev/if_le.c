@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_le.c,v 1.31 2006/01/11 07:21:58 miod Exp $ */
+/*	$OpenBSD: if_le.c,v 1.30 2005/11/24 22:43:16 miod Exp $ */
 
 /*-
  * Copyright (c) 1982, 1992, 1993

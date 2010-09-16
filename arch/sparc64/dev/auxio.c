@@ -1,4 +1,4 @@
-/*	$OpenBSD: auxio.c,v 1.7 2005/03/09 18:41:48 miod Exp $	*/
+/*	$OpenBSD: auxio.c,v 1.6 2004/10/01 18:18:49 jason Exp $	*/
 /*	$NetBSD: auxio.c,v 1.1 2000/04/15 03:08:13 mrg Exp $	*/
 
 /*

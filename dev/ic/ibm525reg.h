@@ -1,4 +1,4 @@
-/*	$OpenBSD: ibm525reg.h,v 1.1 2005/07/19 09:34:14 miod Exp $	*/
+/*	$OpenBSD$	*/
 /*
  * Copyright (c) 2005, Miodrag Vallat.
  *

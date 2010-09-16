@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcireg.h,v 1.32 2006/07/31 11:06:33 mickey Exp $	*/
+/*	$OpenBSD: pcireg.h,v 1.31 2006/06/01 11:17:31 brad Exp $	*/
 /*	$NetBSD: pcireg.h,v 1.26 2000/05/10 16:58:42 thorpej Exp $	*/
 
 /*

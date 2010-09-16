@@ -1,4 +1,4 @@
-# 	$OpenBSD: Makefile,v 1.4 2005/05/06 03:06:04 marco Exp $
+# 	$OpenBSD: Makefile,v 1.3 2005/05/06 02:20:24 uwe Exp $
 #	$NetBSD: Makefile,v 1.1 2001/06/12 08:32:46 chris Exp $
 
 # Makefile for cats tags file and boot blocks

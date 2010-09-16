@@ -1,4 +1,4 @@
-/*	$OpenBSD: softdep.h,v 1.13 2006/10/16 15:51:26 tom Exp $	*/
+/*	$OpenBSD: softdep.h,v 1.12 2006/07/11 21:17:58 mickey Exp $	*/
 
 /*
  * Copyright 1998, 2000 Marshall Kirk McKusick. All Rights Reserved.

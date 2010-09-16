@@ -71,7 +71,6 @@ adosfs_ahashget(mp, an)
 				return (NULL);
 			if (ABLKTOINO(ap->block) == an) {
 				vp = ATOV(ap);
-				simple_lock(&vp->v_interlock);
 				if (!vget(vp, LK_EXCLUSIVE, p))
 					return (vp);
 				break;

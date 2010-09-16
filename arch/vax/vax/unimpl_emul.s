@@ -1,4 +1,4 @@
-/*	$OpenBSD: unimpl_emul.s,v 1.8 2005/05/06 18:55:02 miod Exp $	*/
+/*	$OpenBSD: unimpl_emul.s,v 1.7 2005/05/06 00:57:39 miod Exp $	*/
 /*	$NetBSD: unimpl_emul.s,v 1.2 2000/08/14 11:16:52 ragge Exp $	*/
 
 /*

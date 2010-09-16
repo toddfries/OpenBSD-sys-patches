@@ -1111,7 +1111,7 @@ loop:
 		    (SCARG(uap, options) & (SVR4_WSTOPPED|SVR4_WCONTINUED)))) {
 			DPRINTF(("jobcontrol %d\n", p->p_pid));
 			if (((SCARG(uap, options) & SVR4_WNOWAIT)) == 0)
-				p->p_flag |= P_WAITED;
+				atomic_setbits_int(&p->p_flag, P_WAITED);
 			*retval = 0;
 			return (svr4_setinfo(p, W_STOPCODE(p->p_xstat),
 			   SCARG(uap, info)));

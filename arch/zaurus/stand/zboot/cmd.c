@@ -397,7 +397,7 @@ Xstty(void)
 		    cnspeed(dev, -1));
 	else {
 		sp = 0;
-		for (cp = cmd.argv[2]; *cp && isdigit(*cp); cp++)
+		for (cp = cmd.argv[2]; isdigit(*cp); cp++)
 			sp = sp * 10 + (*cp - '0');
 		cnspeed(dev, sp);
 	}

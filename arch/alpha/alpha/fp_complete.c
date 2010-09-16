@@ -1,4 +1,4 @@
-/*	$OpenBSD: fp_complete.c,v 1.7 2006/02/25 03:58:56 deraadt Exp $	*/
+/*	$OpenBSD: fp_complete.c,v 1.5 2006/02/23 23:54:56 miod Exp $	*/
 /*	$NetBSD: fp_complete.c,v 1.5 2002/01/18 22:15:56 ross Exp $	*/
 
 /*-

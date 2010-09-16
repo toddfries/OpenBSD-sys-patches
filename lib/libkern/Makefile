@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.18 2004/11/28 07:20:25 mickey Exp $
+#	$OpenBSD: Makefile,v 1.17 2004/05/07 14:42:27 millert Exp $
 
 LIB=	kern
 NOPIC=

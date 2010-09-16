@@ -1,4 +1,4 @@
-/*	$OpenBSD: scanc.c,v 1.5 2004/08/07 00:38:33 deraadt Exp $	*/
+/*	$OpenBSD: scanc.c,v 1.4 2003/06/02 23:28:08 millert Exp $	*/
 /*	$NetBSD: scanc.c,v 1.3 1996/03/14 18:52:16 christos Exp $	*/
 
 /*

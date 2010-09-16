@@ -1,4 +1,4 @@
-/*	$OpenBSD: bioscons.c,v 1.2 2007/01/02 16:34:16 tom Exp $	*/
+/*	$OpenBSD: bioscons.c,v 1.1 2004/02/03 12:09:47 mickey Exp $	*/
 
 /*
  * Copyright (c) 1997-1999 Michael Shalayeff

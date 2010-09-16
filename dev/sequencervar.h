@@ -1,4 +1,4 @@
-/*	$OpenBSD: sequencervar.h,v 1.3 2002/03/14 01:26:52 millert Exp $	*/
+/*	$OpenBSD: sequencervar.h,v 1.2 2000/06/26 22:43:45 art Exp $	*/
 /*	$NetBSD: sequencervar.h,v 1.5 1998/11/25 22:17:07 augustss Exp $	*/
 
 /*

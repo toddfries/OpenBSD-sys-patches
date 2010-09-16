@@ -1,4 +1,4 @@
-/*	$OpenBSD: userret.h,v 1.3 2005/12/13 00:18:19 jsg Exp $	*/
+/*	$OpenBSD: userret.h,v 1.2 2004/06/22 01:16:50 art Exp $	*/
 /*	$NetBSD: userret.h,v 1.1 2003/04/26 18:39:49 fvdl Exp $	*/
 
 /*

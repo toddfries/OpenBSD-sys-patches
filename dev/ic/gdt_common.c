@@ -1,4 +1,4 @@
-/*	$OpenBSD: gdt_common.c,v 1.37 2006/11/28 23:59:45 dlg Exp $	*/
+/*	$OpenBSD: gdt_common.c,v 1.36 2006/05/08 19:52:13 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000, 2003 Niklas Hallqvist.  All rights reserved.

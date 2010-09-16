@@ -1,4 +1,4 @@
-/*	$OpenBSD: kcore.h,v 1.2 2001/05/15 01:43:14 millert Exp $	*/
+/*	$OpenBSD: kcore.h,v 1.1 1996/04/19 16:08:13 niklas Exp $	*/
 /*	$NetBSD: kcore.h,v 1.1 1996/03/10 21:55:18 leo Exp $	*/
 
 /*

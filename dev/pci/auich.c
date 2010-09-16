@@ -1,4 +1,4 @@
-/*	$OpenBSD: auich.c,v 1.63 2006/12/29 13:04:37 pedro Exp $	*/
+/*	$OpenBSD: auich.c,v 1.62 2006/08/19 19:06:51 brad Exp $	*/
 
 /*
  * Copyright (c) 2000,2001 Michael Shalayeff

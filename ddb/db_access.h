@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_access.h,v 1.5 2002/03/14 01:26:51 millert Exp $	*/
+/*	$OpenBSD: db_access.h,v 1.4 1996/04/21 22:18:54 deraadt Exp $	*/
 /*	$NetBSD: db_access.h,v 1.6 1994/10/09 08:29:57 mycroft Exp $	*/
 
 /* 

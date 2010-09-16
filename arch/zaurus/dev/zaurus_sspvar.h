@@ -1,4 +1,4 @@
-/*	$OpenBSD: zaurus_sspvar.h,v 1.3 2005/04/08 21:58:49 uwe Exp $	*/
+/*	$OpenBSD: zaurus_sspvar.h,v 1.2 2005/01/31 02:22:17 uwe Exp $	*/
 
 /*
  * Copyright (c) 2005 Uwe Stuehler <uwe@bsdx.de>

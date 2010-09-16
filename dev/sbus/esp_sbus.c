@@ -288,7 +288,7 @@ espattach_sbus(struct device *parent, struct device *self, void *aux)
 	 * What happens here is that if the dma driver has not been
 	 * configured, then this returns a NULL pointer. Then when the
 	 * dma actually gets configured, it does the opposing test, and
-	 * if the sc->sc_esp field in it's softc is NULL, then tries to
+	 * if the sc->sc_esp field in its softc is NULL, then tries to
 	 * find the matching esp driver.
 	 */
 	esc->sc_dma = (struct lsi64854_softc *)

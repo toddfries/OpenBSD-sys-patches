@@ -1,4 +1,4 @@
-/*	$OpenBSD: rf_configure.h,v 1.5 2002/12/16 07:01:03 tdeval Exp $	*/
+/*	$OpenBSD: rf_configure.h,v 1.4 2002/05/22 21:22:32 tdeval Exp $	*/
 /*	$NetBSD: rf_configure.h,v 1.4 1999/03/02 03:18:49 oster Exp $	*/
 
 /*

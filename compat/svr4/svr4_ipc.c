@@ -1,4 +1,4 @@
-/*	$OpenBSD: svr4_ipc.c,v 1.9 2002/03/14 01:26:51 millert Exp $	*/
+/*	$OpenBSD: svr4_ipc.c,v 1.8 2001/11/02 00:27:05 millert Exp $	*/
 /*	$NetBSD: svr4_ipc.c,v 1.3 1997/03/30 17:21:02 christos Exp $	*/
 
 /*

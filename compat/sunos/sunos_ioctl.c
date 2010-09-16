@@ -1,4 +1,4 @@
-/*	$OpenBSD: sunos_ioctl.c,v 1.16 2004/09/19 21:34:43 mickey Exp $	*/
+/*	$OpenBSD: sunos_ioctl.c,v 1.15 2004/02/01 15:39:38 miod Exp $	*/
 /*	$NetBSD: sunos_ioctl.c,v 1.23 1996/03/14 19:33:46 christos Exp $	*/
 
 /*

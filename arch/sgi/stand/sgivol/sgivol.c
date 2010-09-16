@@ -1,4 +1,4 @@
-/*	$OpenBSD: sgivol.c,v 1.7 2005/08/01 19:34:50 jmc Exp $	*/
+/*	$OpenBSD: sgivol.c,v 1.6 2005/08/01 18:00:30 kettenis Exp $	*/
 /*	$NetBSD: sgivol.c,v 1.8 2003/11/08 04:59:00 sekiya Exp $	*/
 
 /*-

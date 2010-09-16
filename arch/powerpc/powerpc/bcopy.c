@@ -1,4 +1,4 @@
-/*	$OpenBSD: bcopy.c,v 1.5 2003/10/15 02:43:09 drahn Exp $	*/
+/*	$OpenBSD: bcopy.c,v 1.4 2003/06/02 23:27:53 millert Exp $	*/
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
  * All rights reserved.

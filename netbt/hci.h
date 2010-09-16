@@ -1,4 +1,4 @@
-/*	$OpenBSD: hci.h,v 1.3 2005/07/15 21:16:40 grange Exp $	*/
+/*	$OpenBSD: hci.h,v 1.2 2005/01/17 18:12:49 mickey Exp $	*/
 
 /*
  * ng_hci.h

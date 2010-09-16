@@ -866,7 +866,7 @@ bha_done(sc, ccb)
 }
 
 /*
- * Find the board and find it's irq/drq
+ * Find the board and find its irq/drq
  */
 int
 bha_find(iot, ioh, sc)

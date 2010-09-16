@@ -40,8 +40,8 @@ struct tsl_softc {
 	i2c_tag_t sc_tag;
 	i2c_addr_t sc_addr;
 
-	struct sensor sc_sensor;
-	struct sensordev sc_sensordev;
+	struct ksensor sc_sensor;
+	struct ksensordev sc_sensordev;
 };
 
 int	tsl_match(struct device *, void *, void *);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: gallant12x22.h,v 1.3 2003/06/02 23:28:04 millert Exp $ */
+/*	$OpenBSD: gallant12x22.h,v 1.2 2002/05/09 08:59:03 maja Exp $ */
 /* 	$NetBSD: gallant12x22.h,v 1.2 1999/05/18 21:51:58 ad Exp $ */
 
 /*

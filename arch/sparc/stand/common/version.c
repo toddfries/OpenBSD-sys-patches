@@ -1,4 +1,4 @@
-/*	$OpenBSD: version.c,v 1.3 2002/08/12 00:25:26 art Exp $	*/
+/*	$OpenBSD: version.c,v 1.2 1999/06/22 15:30:03 jason Exp $	*/
 /*	$NetBSD: version.c,v 1.4 1995/09/16 23:20:39 pk Exp $ */
 
 /*

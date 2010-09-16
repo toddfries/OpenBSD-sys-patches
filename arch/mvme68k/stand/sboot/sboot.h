@@ -1,4 +1,4 @@
-/*	$OpenBSD: sboot.h,v 1.8 2002/03/14 03:15:56 millert Exp $ */
+/*	$OpenBSD: sboot.h,v 1.7 2002/03/14 01:26:38 millert Exp $ */
 
 /*
  * Copyright (c) 1995 Charles D. Cranor and Seth Widoff

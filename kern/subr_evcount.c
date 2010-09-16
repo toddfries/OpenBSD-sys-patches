@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_evcount.c,v 1.8 2006/10/17 10:29:50 grange Exp $ */
+/*	$OpenBSD: subr_evcount.c,v 1.7 2005/12/09 09:09:52 jsg Exp $ */
 /*
  * Copyright (c) 2004 Artur Grabowski <art@openbsd.org>
  * Copyright (c) 2004 Aaron Campbell <aaron@openbsd.org>

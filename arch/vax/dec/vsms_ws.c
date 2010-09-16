@@ -127,7 +127,7 @@ lkms_input(void *vsc, int data)
 		else
 			sc->dy = data;
 		wsmouse_input(sc->sc_wsmousedev, sc->buttons,
-		    sc->dx, sc->dy, 0, WSMOUSE_INPUT_DELTA);
+		    sc->dx, sc->dy, 0, 0, WSMOUSE_INPUT_DELTA);
 	}
 
 	return (1);

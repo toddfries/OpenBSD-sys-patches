@@ -1,4 +1,4 @@
-/*	$OpenBSD: audiovar.h,v 1.9 2002/08/26 16:20:04 mickey Exp $	*/
+/*	$OpenBSD: audiovar.h,v 1.8 2000/05/24 13:44:18 ho Exp $	*/
 /*	$NetBSD: audiovar.h,v 1.18 1998/03/03 09:16:16 augustss Exp $	*/
 
 /*

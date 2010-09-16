@@ -1,4 +1,4 @@
-/*	$OpenBSD: adw.c,v 1.31 2006/11/28 23:59:45 dlg Exp $ */
+/*	$OpenBSD: adw.c,v 1.30 2005/12/03 16:53:15 krw Exp $ */
 /* $NetBSD: adw.c,v 1.23 2000/05/27 18:24:50 dante Exp $	 */
 
 /*

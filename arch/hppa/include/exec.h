@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec.h,v 1.9 2003/11/07 16:41:01 mickey Exp $	*/
+/*	$OpenBSD: exec.h,v 1.8 2002/10/24 19:28:20 mickey Exp $	*/
 
 /* 
  * Copyright (c) 1994, The University of Utah and

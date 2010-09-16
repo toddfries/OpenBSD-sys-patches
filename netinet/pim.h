@@ -1,4 +1,4 @@
-/*	$OpenBSD: pim.h,v 1.2 2006/04/27 02:19:32 tedu Exp $	*/
+/*	$OpenBSD: pim.h,v 1.1 2005/01/14 14:51:28 mcbride Exp $	*/
 /*	$NetBSD: pim.h,v 1.1 2004/09/04 23:32:29 manu Exp $	*/
 
 /*

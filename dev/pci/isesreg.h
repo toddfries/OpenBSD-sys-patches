@@ -1,4 +1,4 @@
-/*	$OpenBSD: isesreg.h,v 1.9 2003/06/07 11:31:24 ho Exp $ $	*/
+/*	$OpenBSD: isesreg.h,v 1.8 2001/09/21 19:41:13 ho Exp $ $	*/
 
 /*
  * Copyright (c) 2000 Håkan Olsson (ho@crt.se)

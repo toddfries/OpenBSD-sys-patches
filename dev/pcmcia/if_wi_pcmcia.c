@@ -1,4 +1,4 @@
-/* $OpenBSD: if_wi_pcmcia.c,v 1.66 2006/11/26 19:46:28 deraadt Exp $ */
+/* $OpenBSD: if_wi_pcmcia.c,v 1.65 2006/04/20 20:31:13 miod Exp $ */
 /* $NetBSD: if_wi_pcmcia.c,v 1.14 2001/11/26 04:34:56 ichiro Exp $ */
 
 /*

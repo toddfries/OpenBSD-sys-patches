@@ -1,4 +1,4 @@
-/*	$OpenBSD: syslog.h,v 1.12 2006/01/06 18:53:06 millert Exp $	*/
+/*	$OpenBSD: syslog.h,v 1.11 2003/08/24 01:27:07 avsm Exp $	*/
 /*	$NetBSD: syslog.h,v 1.14 1996/04/03 20:46:44 christos Exp $	*/
 
 /*

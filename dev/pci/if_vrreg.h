@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vrreg.h,v 1.17 2006/02/05 18:23:37 brad Exp $	*/
+/*	$OpenBSD: if_vrreg.h,v 1.16 2005/12/07 22:48:39 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998

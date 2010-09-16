@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd9660_extern.h,v 1.8 2003/06/02 23:28:05 millert Exp $	*/
+/*	$OpenBSD: cd9660_extern.h,v 1.7 2002/03/14 01:27:03 millert Exp $	*/
 /*	$NetBSD: cd9660_extern.h,v 1.1 1997/01/24 00:24:53 cgd Exp $	*/
 
 /*-

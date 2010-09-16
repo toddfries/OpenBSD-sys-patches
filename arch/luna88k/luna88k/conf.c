@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.4 2007/02/09 14:26:09 aoyama Exp $	*/
+/*	$OpenBSD: conf.c,v 1.3 2007/01/29 14:18:00 aoyama Exp $	*/
 
 /*-
  * Copyright (c) 1991 The Regents of the University of California.

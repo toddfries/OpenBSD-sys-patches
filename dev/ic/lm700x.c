@@ -1,4 +1,4 @@
-/*	$OpenBSD: lm700x.c,v 1.2 2001/12/06 16:28:18 mickey Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * Copyright (c) 2001 Vladimir Popov <jumbo@narod.ru>

@@ -1,4 +1,4 @@
-/*	$OpenBSD: acphy.c,v 1.6 2006/12/27 19:11:08 kettenis Exp $	*/
+/*	$OpenBSD: acphy.c,v 1.5 2005/03/26 04:40:09 krw Exp $	*/
 /*	$NetBSD: acphy.c,v 1.13 2003/04/29 01:49:33 thorpej Exp $	*/
 
 /*

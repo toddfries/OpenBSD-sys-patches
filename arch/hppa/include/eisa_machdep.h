@@ -1,4 +1,4 @@
-/*	$OpenBSD: eisa_machdep.h,v 1.3 2004/04/07 18:24:19 mickey Exp $	*/
+/*	$OpenBSD: eisa_machdep.h,v 1.2 2003/08/07 19:47:33 mickey Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff

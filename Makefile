@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.29 2006/10/06 22:18:16 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.28 2006/05/29 17:22:48 drahn Exp $
 #	$NetBSD: Makefile,v 1.5 1995/09/15 21:05:21 pk Exp $
 
 SUBDIR=	dev/microcode \

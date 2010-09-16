@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6_cksum.c,v 1.14 2006/11/17 01:11:23 itojun Exp $	*/
+/*	$OpenBSD: in6_cksum.c,v 1.13 2003/11/16 20:30:07 avsm Exp $	*/
 /*	$KAME: in6_cksum.c,v 1.10 2000/12/03 00:53:59 itojun Exp $	*/
 
 /*

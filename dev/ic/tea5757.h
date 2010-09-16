@@ -1,4 +1,4 @@
-/*	$OpenBSD: tea5757.h,v 1.3 2002/01/07 18:32:19 mickey Exp $	*/
+/*	$OpenBSD: tea5757.h,v 1.2 2001/12/06 16:28:18 mickey Exp $	*/
 /* $RuOBSD: tea5757.h,v 1.2 2001/10/18 16:51:36 pva Exp $ */
 
 /*

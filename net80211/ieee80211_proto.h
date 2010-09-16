@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_proto.h,v 1.11 2006/12/25 19:24:27 reyk Exp $	*/
+/*	$OpenBSD: ieee80211_proto.h,v 1.10 2006/11/03 19:02:08 damien Exp $	*/
 /*	$NetBSD: ieee80211_proto.h,v 1.3 2003/10/13 04:23:56 dyoung Exp $	*/
 
 /*-

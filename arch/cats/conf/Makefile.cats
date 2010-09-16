@@ -1,5 +1,5 @@
-#	$OpenBSD: Makefile.cats,v 1.6 2006/07/27 05:58:11 miod Exp $
-#	$OpenBSD: Makefile.cats,v 1.6 2006/07/27 05:58:11 miod Exp $
+#	$OpenBSD: Makefile.cats,v 1.5 2006/06/01 21:46:27 pascoe Exp $
+#	$OpenBSD: Makefile.cats,v 1.5 2006/06/01 21:46:27 pascoe Exp $
 #	$NetBSD: Makefile.i386,v 1.67 1996/05/11 16:12:11 mycroft Exp $
 
 # Makefile for OpenBSD

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_lockf.c,v 1.12 2005/11/20 21:55:15 pedro Exp $	*/
+/*	$OpenBSD: vfs_lockf.c,v 1.11 2005/03/15 03:47:58 tedu Exp $	*/
 /*	$NetBSD: vfs_lockf.c,v 1.7 1996/02/04 02:18:21 christos Exp $	*/
 
 /*

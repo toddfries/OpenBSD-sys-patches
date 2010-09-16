@@ -106,8 +106,8 @@ struct adt_softc {
 	u_int8_t sc_conf;
 	struct adt_chip *chip;
 
-	struct sensor sc_sensor[ADT_NUM_SENSORS];
-	struct sensordev sc_sensordev;
+	struct ksensor sc_sensor[ADT_NUM_SENSORS];
+	struct ksensordev sc_sensordev;
 };
 
 int	adt_match(struct device *, void *, void *);

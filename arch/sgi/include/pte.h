@@ -1,2 +1,2 @@
-/*	$OpenBSD: pte.h,v 1.4 2004/09/20 20:03:19 miod Exp $	*/
+/*	$OpenBSD: pte.h,v 1.3 2004/09/16 07:25:26 miod Exp $	*/
 #include <mips64/pte.h>

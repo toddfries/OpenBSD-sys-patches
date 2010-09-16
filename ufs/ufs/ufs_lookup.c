@@ -1,4 +1,4 @@
-/*	$OpenBSD: ufs_lookup.c,v 1.36 2006/11/17 11:09:00 pedro Exp $	*/
+/*	$OpenBSD: ufs_lookup.c,v 1.35 2005/12/28 20:48:18 pedro Exp $	*/
 /*	$NetBSD: ufs_lookup.c,v 1.7 1996/02/09 22:36:06 christos Exp $	*/
 
 /*

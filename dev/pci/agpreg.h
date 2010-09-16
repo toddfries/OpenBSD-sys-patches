@@ -1,4 +1,4 @@
-/*	$OpenBSD: agpreg.h,v 1.6 2006/02/11 21:15:21 matthieu Exp $	*/
+/*	$OpenBSD: agpreg.h,v 1.5 2006/02/03 19:24:42 millert Exp $	*/
 /*	$NetBSD: agpreg.h,v 1.1 2001/09/10 10:01:02 fvdl Exp $	*/
 
 /*-

@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec_ecoff.h,v 1.7 2002/03/14 01:27:14 millert Exp $	*/
+/*	$OpenBSD: exec_ecoff.h,v 1.6 2001/06/22 14:11:00 deraadt Exp $	*/
 /*	$NetBSD: exec_ecoff.h,v 1.9 1996/05/09 23:42:08 cgd Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_lmcvar.h,v 1.10 2006/03/25 22:41:45 djm Exp $ */
+/*	$OpenBSD: if_lmcvar.h,v 1.9 2006/03/16 21:36:58 miod Exp $ */
 /*	$NetBSD: if_lmcvar.h,v 1.1 1999/03/25 03:32:43 explorer Exp $	*/
 
 /*-

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rccosb4reg.h,v 1.3 2005/11/23 09:24:57 mickey Exp $	*/
+/*	$OpenBSD: rccosb4reg.h,v 1.2 2005/10/27 20:01:13 mickey Exp $	*/
 
 /*
  * Copyright (c) 2004,2005 Michael Shalayeff

@@ -1,4 +1,4 @@
-/*	$OpenBSD: gus.c,v 1.29 2006/03/04 12:42:23 miod Exp $	*/
+/*	$OpenBSD: gus.c,v 1.28 2005/10/19 22:52:02 fgsch Exp $	*/
 /*	$NetBSD: gus.c,v 1.51 1998/01/25 23:48:06 mycroft Exp $	*/
 
 /*-

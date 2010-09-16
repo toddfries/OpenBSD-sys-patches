@@ -341,7 +341,7 @@ ext2fs_alloccg(ip, cg, bpref, size)
 	error = bread(ip->i_devvp, fsbtodb(fs,
 		fs->e2fs_gd[cg].ext2bgd_b_bitmap),
 		(int)fs->e2fs_bsize, NOCRED, &bp);
-	if (error) {
+	if (error || fs->e2fs_gd[cg].ext2bgd_nbfree == 0) {
 		brelse(bp);
 		return (0);
 	}

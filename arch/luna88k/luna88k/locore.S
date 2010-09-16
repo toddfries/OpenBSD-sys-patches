@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.13 2007/01/12 21:41:53 aoyama Exp $	*/
+/*	$OpenBSD: locore.S,v 1.12 2006/05/15 21:40:04 miod Exp $	*/
 /*
  * Copyright (c) 1998 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur

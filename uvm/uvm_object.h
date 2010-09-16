@@ -74,14 +74,9 @@ struct uvm_object {
  * maps.
  */
 #define UVM_OBJ_KERN		(-2)
-#define	UVM_OBJ_KERN_INTRSAFE	(-3)
 
 #define	UVM_OBJ_IS_KERN_OBJECT(uobj)					\
-	((uobj)->uo_refs == UVM_OBJ_KERN ||				\
-	 (uobj)->uo_refs == UVM_OBJ_KERN_INTRSAFE)
-
-#define	UVM_OBJ_IS_INTRSAFE_OBJECT(uobj)				\
-	((uobj)->uo_refs == UVM_OBJ_KERN_INTRSAFE)
+	((uobj)->uo_refs == UVM_OBJ_KERN)
 
 #ifdef _KERNEL
 

@@ -1,4 +1,4 @@
-/* $OpenBSD: pci_bwx_bus_io_chipdep.c,v 1.5 2003/09/02 17:25:21 miod Exp $ */
+/* $OpenBSD: pci_bwx_bus_io_chipdep.c,v 1.4 2002/03/14 01:26:27 millert Exp $ */
 /* $NetBSD: pcs_bus_io_common.c,v 1.14 1996/12/02 22:19:35 cgd Exp $ */
 
 /*

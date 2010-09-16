@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee.h,v 1.2 2006/05/04 19:28:43 miod Exp $ */
+/*	$OpenBSD: ieee.h,v 1.1 2004/04/26 12:34:05 miod Exp $ */
 /*
  * Copyright (c) 1992, 1993
  *	The Regents of the University of California.  All rights reserved.

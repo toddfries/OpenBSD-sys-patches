@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieeefp.h,v 1.1 2004/04/26 12:34:05 miod Exp $ */
+/*	$OpenBSD: ieeefp.h,v 1.4 2003/10/11 22:08:57 miod Exp $ */
 /*
  * Copyright (c) 1996 Nivas Madhur
  * All rights reserved.

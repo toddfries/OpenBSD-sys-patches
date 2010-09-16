@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_disasm.c,v 1.14 2003/12/21 15:17:29 miod Exp $	*/
+/*	$OpenBSD: db_disasm.c,v 1.13 2003/10/15 01:06:13 drahn Exp $	*/
 /*
  * Copyright (c) 1996, 2001, 2003 Dale Rahn. All rights reserved.
  *

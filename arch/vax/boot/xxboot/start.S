@@ -1,4 +1,4 @@
-/*	$OpenBSD: start.S,v 1.2 2003/11/07 10:16:45 jmc Exp $ */
+/*	$OpenBSD: start.S,v 1.1 2002/06/11 09:36:24 hugh Exp $ */
 /*	$NetBSD: start.S,v 1.1 2002/02/24 01:04:26 matt Exp $ */
 /*
  * Copyright (c) 1995 Ludd, University of Lule}, Sweden.

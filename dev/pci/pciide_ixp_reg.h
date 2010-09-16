@@ -1,4 +1,4 @@
-/* 	$OpenBSD: pciide_ixp_reg.h,v 1.1 2005/09/14 06:13:22 jsg Exp $	*/
+/* 	$OpenBSD$	*/
 /* $NetBSD: pciide_ixp_reg.h,v 1.2 2005/02/27 00:27:33 perry Exp $ */
 
 /*

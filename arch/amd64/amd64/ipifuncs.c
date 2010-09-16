@@ -86,7 +86,11 @@ void (*ipifunc[X86_NIPI])(struct cpu_info *) =
 	pmap_do_tlb_shootdown,
 	x86_64_reload_mtrr,
 	gdt_reload_cpu,
+#ifdef DDB
 	x86_ipi_db,
+#else
+	NULL,
+#endif
 };
 
 void

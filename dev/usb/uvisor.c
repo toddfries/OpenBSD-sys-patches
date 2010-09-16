@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvisor.c,v 1.27 2006/06/23 06:27:12 miod Exp $	*/
+/*	$OpenBSD: uvisor.c,v 1.26 2006/06/21 01:23:05 jsg Exp $	*/
 /*	$NetBSD: uvisor.c,v 1.21 2003/08/03 21:59:26 nathanw Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: clock.h,v 1.6 2006/08/27 16:55:41 miod Exp $ */
+/*	$OpenBSD: clock.h,v 1.5 2002/03/14 01:26:48 millert Exp $ */
 /*	$NetBSD: clock.h,v 1.4 1999/09/06 19:52:53 ragge Exp $ */
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.

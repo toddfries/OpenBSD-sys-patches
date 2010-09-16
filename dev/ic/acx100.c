@@ -1,4 +1,4 @@
-/*	$OpenBSD: acx100.c,v 1.18 2007/02/28 09:26:26 claudio Exp $ */
+/*	$OpenBSD: acx100.c,v 1.17 2006/12/17 21:45:49 claudio Exp $ */
 
 /*
  * Copyright (c) 2006 Jonathan Gray <jsg@openbsd.org>

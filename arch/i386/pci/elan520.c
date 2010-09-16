@@ -1,4 +1,4 @@
-/*	$OpenBSD: elan520.c,v 1.12 2006/12/12 23:14:27 dim Exp $	*/
+/*	$OpenBSD: elan520.c,v 1.11 2005/10/21 19:34:34 grange Exp $	*/
 /*	$NetBSD: elan520.c,v 1.4 2002/10/02 05:47:15 thorpej Exp $	*/
 
 /*-

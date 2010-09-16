@@ -1,4 +1,4 @@
-/*	$OpenBSD: etherfun.c,v 1.6 2003/08/19 10:22:30 deraadt Exp $ */
+/*	$OpenBSD: etherfun.c,v 1.5 2001/09/20 17:02:30 mpech Exp $ */
 
 /*
  *

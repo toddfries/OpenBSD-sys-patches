@@ -1,4 +1,4 @@
-/*	$OpenBSD: clock.c,v 1.24 2006/12/10 16:12:41 miod Exp $	*/
+/*	$OpenBSD: clock.c,v 1.23 2006/06/26 20:21:02 kettenis Exp $	*/
 /*	$NetBSD: clock.c,v 1.52 1997/05/24 20:16:05 pk Exp $ */
 
 /*

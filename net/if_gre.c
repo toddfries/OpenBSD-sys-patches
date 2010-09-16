@@ -1,4 +1,4 @@
-/*      $OpenBSD: if_gre.c,v 1.41 2006/05/28 04:30:16 claudio Exp $ */
+/*      $OpenBSD: if_gre.c,v 1.40 2006/03/25 22:41:47 djm Exp $ */
 /*	$NetBSD: if_gre.c,v 1.9 1999/10/25 19:18:11 drochner Exp $ */
 
 /*

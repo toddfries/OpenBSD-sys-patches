@@ -1,4 +1,4 @@
-/*	$OpenBSD: cl.c,v 1.52 2006/05/08 14:36:10 miod Exp $ */
+/*	$OpenBSD: cl.c,v 1.51 2006/04/15 22:29:49 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Dale Rahn. All rights reserved.

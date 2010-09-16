@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvscom.c,v 1.8 2006/06/23 06:27:12 miod Exp $ */
+/*	$OpenBSD: uvscom.c,v 1.7 2005/08/01 05:41:54 brad Exp $ */
 /*	$NetBSD: uvscom.c,v 1.9 2003/02/12 15:36:20 ichiro Exp $	*/
 /*-
  * Copyright (c) 2001-2002, Shunsuke Akiyama <akiyama@jp.FreeBSD.org>.

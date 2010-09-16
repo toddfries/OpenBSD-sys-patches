@@ -1,4 +1,4 @@
-/*	$OpenBSD: vgafb.c,v 1.50 2007/03/06 19:13:13 miod Exp $	*/
+/*	$OpenBSD: vgafb.c,v 1.49 2007/01/13 21:03:23 miod Exp $	*/
 
 /*
  * Copyright (c) 2001 Jason L. Wright (jason@thought.net)

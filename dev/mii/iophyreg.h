@@ -1,4 +1,4 @@
-/*	$OpenBSD: iophyreg.h,v 1.1 1999/10/12 16:59:29 jason Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD: iophyreg.h,v 1.2 1999/09/16 05:58:18 soren Exp $	*/
 
 /*

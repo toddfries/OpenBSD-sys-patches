@@ -145,8 +145,8 @@ char	*clockfreq(long freq);
 /* Openprom V2 style boot path */
 struct device;
 struct bootpath {
+	int	node;
 	char	name[16];	/* name of this node */
-	char	compatible[16];	/* "compatible" name of this node */
 	long	val[3];		/* up to three optional values */
 	struct device *dev;	/* device that recognised this component */
 };

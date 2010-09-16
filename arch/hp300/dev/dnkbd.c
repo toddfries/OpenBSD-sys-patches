@@ -734,7 +734,7 @@ dnevent_mouse(struct dnkbd_softc *sc, u_int8_t *dat)
 	
 	wsmouse_input(sc->sc_wsmousedev,
 	    (~dat[0] & (DNBUTTON_L | DNBUTTON_M | DNBUTTON_R)) >> 4,
-	    (int8_t)dat[1], (int8_t)dat[2], 0, WSMOUSE_INPUT_DELTA);
+	    (int8_t)dat[1], (int8_t)dat[2], 0, 0, WSMOUSE_INPUT_DELTA);
 }
 #endif
 

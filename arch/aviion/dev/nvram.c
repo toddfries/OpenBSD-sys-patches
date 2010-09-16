@@ -1,4 +1,4 @@
-/*	$OpenBSD: nvram.c,v 1.4 2006/07/17 04:21:30 miod Exp $ */
+/*	$OpenBSD: nvram.c,v 1.3 2006/06/19 21:10:19 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt

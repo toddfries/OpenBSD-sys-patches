@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysconreg.h,v 1.7 2004/07/30 19:02:06 miod Exp $ */
+/*	$OpenBSD: sysconreg.h,v 1.6 2004/04/24 19:51:48 miod Exp $ */
 
 /*
  * Copyright (c) 2004, Miodrag Vallat.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: malo.h,v 1.9 2006/11/24 20:45:33 mglocker Exp $ */
+/*	$OpenBSD: malo.h,v 1.8 2006/11/07 21:39:32 mglocker Exp $ */
 
 /*
  * Copyright (c) 2006 Claudio Jeker <claudio@openbsd.org>

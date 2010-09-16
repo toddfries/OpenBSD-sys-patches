@@ -1,4 +1,4 @@
-/*      $OpenBSD: wdc_isa.c,v 1.12 2006/08/26 14:55:35 jsg Exp $     */
+/*      $OpenBSD: wdc_isa.c,v 1.11 2004/01/15 17:51:42 miod Exp $     */
 /*	$NetBSD: wdc_isa.c,v 1.15 1999/05/19 14:41:25 bouyer Exp $ */
 
 /*-

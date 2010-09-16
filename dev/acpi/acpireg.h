@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpireg.h,v 1.12 2006/12/12 18:07:25 mk Exp $	*/
+/*	$OpenBSD: acpireg.h,v 1.11 2006/10/12 19:17:26 marco Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  * Copyright (c) 2005 Marco Peereboom <marco@openbsd.org>

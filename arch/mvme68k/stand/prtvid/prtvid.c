@@ -1,4 +1,4 @@
-/*	$OpenBSD: prtvid.c,v 1.6 2004/12/27 15:23:45 drahn Exp $	*/
+/*	$OpenBSD: prtvid.c,v 1.5 2003/08/16 17:46:08 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1995 Dale Rahn <drahn@openbsd.org>

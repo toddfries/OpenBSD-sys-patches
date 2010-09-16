@@ -1,4 +1,4 @@
-/*	$OpenBSD: ad1848reg.h,v 1.6 1999/03/08 22:54:33 jason Exp $	*/
+/*	$OpenBSD: ad1848reg.h,v 1.5 1998/04/26 21:03:12 provos Exp $	*/
 /*	$NetBSD: ad1848reg.h,v 1.4 1997/05/07 20:23:53 augustss Exp $	*/
 
 /*

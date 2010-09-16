@@ -1,4 +1,4 @@
-/*	$OpenBSD: lca.c,v 1.19 2006/12/14 17:36:12 kettenis Exp $	*/
+/*	$OpenBSD: lca.c,v 1.18 2006/03/16 22:32:44 miod Exp $	*/
 /*	$NetBSD: lca.c,v 1.14 1996/12/05 01:39:35 cgd Exp $	*/
 
 /*-

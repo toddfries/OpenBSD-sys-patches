@@ -1,4 +1,4 @@
-/*	$OpenBSD: netbsd_machdep.c,v 1.11 2005/08/06 12:10:25 miod Exp $	*/
+/*	$OpenBSD: netbsd_machdep.c,v 1.10 2003/08/10 00:03:21 miod Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995, 1996 Carnegie-Mellon University.

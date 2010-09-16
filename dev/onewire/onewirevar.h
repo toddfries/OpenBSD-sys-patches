@@ -1,4 +1,4 @@
-/*	$OpenBSD: onewirevar.h,v 1.4 2006/10/08 21:12:51 grange Exp $	*/
+/*	$OpenBSD: onewirevar.h,v 1.3 2006/09/30 15:52:21 grange Exp $	*/
 
 /*
  * Copyright (c) 2006 Alexander Yurchenko <grange@openbsd.org>

@@ -1,4 +1,4 @@
-/* $OpenBSD: spc.c,v 1.12 2005/11/14 21:51:55 miod Exp $ */
+/* $OpenBSD: spc.c,v 1.11 2004/12/22 21:11:12 miod Exp $ */
 /* $NetBSD: spc.c,v 1.2 2003/11/17 14:37:59 tsutsui Exp $ */
 
 /*

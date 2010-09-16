@@ -1,4 +1,4 @@
-;	$OpenBSD: milli.S,v 1.1 2005/04/01 10:45:29 mickey Exp $
+;	$OpenBSD$
 ;
 ;  (c) Copyright 1986 HEWLETT-PACKARD COMPANY
 ;

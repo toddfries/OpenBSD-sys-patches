@@ -1,4 +1,4 @@
-/*	$OpenBSD: cninit.c,v 1.6 2003/06/02 23:28:01 millert Exp $	*/
+/*	$OpenBSD: cninit.c,v 1.5 2002/06/12 03:57:16 miod Exp $	*/
 /*	$NetBSD: cninit.c,v 1.2 1995/04/11 22:08:10 pk Exp $	*/
 
 /*

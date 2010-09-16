@@ -1,4 +1,4 @@
-/*	$OpenBSD: sbicreg.h,v 1.6 2003/06/02 23:27:50 millert Exp $ */
+/*	$OpenBSD: sbicreg.h,v 1.5 2003/02/11 19:20:26 mickey Exp $ */
 
 /*
  * Copyright (c) 1990 The Regents of the University of California.

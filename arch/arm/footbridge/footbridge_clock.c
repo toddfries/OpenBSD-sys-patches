@@ -1,4 +1,4 @@
-/*	$OpenBSD: footbridge_clock.c,v 1.8 2007/01/11 07:24:52 robert Exp $	*/
+/*	$OpenBSD: footbridge_clock.c,v 1.7 2004/09/16 21:52:46 miod Exp $	*/
 /*	$NetBSD: footbridge_clock.c,v 1.17 2003/03/23 14:12:25 chris Exp $	*/
 
 /*

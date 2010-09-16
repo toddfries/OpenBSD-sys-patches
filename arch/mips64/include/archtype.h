@@ -1,4 +1,4 @@
-/*	$OpenBSD: archtype.h,v 1.5 2006/07/29 13:21:03 jasper Exp $	*/
+/*	$OpenBSD: archtype.h,v 1.4 2004/10/05 13:07:44 pefo Exp $	*/
 /*
  * Copyright (c) 1997-2004 Opsycon AB, Sweden (www.opsycon.se)
  *

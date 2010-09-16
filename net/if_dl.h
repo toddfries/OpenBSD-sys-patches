@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_dl.h,v 1.6 2003/06/02 23:28:12 millert Exp $	*/
+/*	$OpenBSD: if_dl.h,v 1.5 2002/03/14 01:27:09 millert Exp $	*/
 /*	$NetBSD: if_dl.h,v 1.8 1995/03/26 20:30:13 jtc Exp $	*/
 
 /*

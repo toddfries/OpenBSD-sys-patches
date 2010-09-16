@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.3 2004/10/09 21:15:21 mickey Exp $
+#	$OpenBSD: Makefile,v 1.2 2004/08/24 15:33:25 tom Exp $
 #
 
 PROG=	cdbr

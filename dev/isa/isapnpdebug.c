@@ -1,4 +1,4 @@
-/*	$OpenBSD: isapnpdebug.c,v 1.3 2002/12/15 13:17:04 henning Exp $	*/
+/*	$OpenBSD: isapnpdebug.c,v 1.2 1997/12/25 09:22:40 downsj Exp $	*/
 /*	$NetBSD: isapnpdebug.c,v 1.4 1997/08/03 08:12:23 mikel Exp $	*/
 
 /*

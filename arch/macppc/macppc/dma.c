@@ -1,4 +1,4 @@
-/*	$OpenBSD: dma.c,v 1.24 2005/12/17 07:31:26 miod Exp $	*/
+/*	$OpenBSD: dma.c,v 1.23 2005/10/26 18:57:51 martin Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-

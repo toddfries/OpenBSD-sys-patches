@@ -182,7 +182,7 @@ struct wi_usb_softc {
 	void			*wi_info;
 	void			*wi_rxframe;
 
-	/* prevent multpile outstanding USB requests */
+	/* prevent multiple outstanding USB requests */
 	int			wi_lock;
 	int			wi_lockwait;
 

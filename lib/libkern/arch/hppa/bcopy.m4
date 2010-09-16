@@ -1,4 +1,4 @@
-define(_rcsid,``$OpenBSD: bcopy.m4,v 1.15 2005/08/01 12:10:26 miod Exp $'')dnl
+define(_rcsid,``$OpenBSD: bcopy.m4,v 1.14 2003/06/04 04:44:21 deraadt Exp $'')dnl
 dnl
 dnl
 dnl  This is the source file for bcopy.S, spcopy.S

@@ -1,4 +1,4 @@
-/*	$OpenBSD: anvar.h,v 1.21 2006/02/20 11:13:57 jsg Exp $	*/
+/*	$OpenBSD: anvar.h,v 1.20 2006/01/30 11:41:00 jsg Exp $	*/
 /*	$NetBSD: anvar.h,v 1.10 2005/02/27 00:27:00 perry Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999

@@ -285,6 +285,4 @@ typedef const struct hp300_bus_space_tag *bus_space_tag_t;
 #define	BUS_SPACE_BARRIER_READ	0x01		/* force read barrier */
 #define	BUS_SPACE_BARRIER_WRITE	0x02		/* force write barrier */
 
-#define	BUS_SPACE_ALIGNED_POINTER(p, t)	ALIGNED_POINTER(p, t)
-
 #endif /* _HP300_BUS_H_ */

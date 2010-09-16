@@ -1,4 +1,4 @@
-/*	$OpenBSD: ax88190.c,v 1.2 2003/06/25 17:35:36 miod Exp $	*/
+/*	$OpenBSD: ax88190.c,v 1.1 2001/08/18 16:15:39 aaron Exp $	*/
 /*	$NetBSD$	*/
 
 /*-

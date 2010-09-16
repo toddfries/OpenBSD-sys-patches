@@ -1,4 +1,4 @@
-/*	$OpenBSD: psychoreg.h,v 1.11 2006/02/06 17:19:31 jmc Exp $	*/
+/*	$OpenBSD: psychoreg.h,v 1.10 2003/03/27 16:27:27 jason Exp $	*/
 /*	$NetBSD: psychoreg.h,v 1.6.4.2 2001/09/13 01:14:40 thorpej Exp $ */
 
 /*

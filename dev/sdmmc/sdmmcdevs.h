@@ -1,4 +1,4 @@
-/*	$OpenBSD: sdmmcdevs.h,v 1.7 2006/12/20 19:33:58 deraadt Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: start.S,v 1.1 2004/08/23 14:22:40 pefo Exp $ */
+/*	$OpenBSD$ */
 
 /*
  * Copyright (c) 2001 Opsycon AB (www.opsycon.se)

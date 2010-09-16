@@ -1,4 +1,4 @@
-/*	$OpenBSD: close.c,v 1.8 2003/08/11 06:23:09 deraadt Exp $	*/
+/*	$OpenBSD: close.c,v 1.7 2003/06/02 23:28:09 millert Exp $	*/
 /*	$NetBSD: close.c,v 1.5 1995/09/06 19:53:29 pk Exp $	*/
 
 /*-

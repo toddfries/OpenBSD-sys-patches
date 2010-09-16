@@ -1,4 +1,4 @@
-/*	$OpenBSD: nd6_nbr.c,v 1.42.2.1 2008/03/21 20:38:33 brad Exp $	*/
+/*	$OpenBSD: nd6_nbr.c,v 1.42 2006/11/17 01:11:23 itojun Exp $	*/
 /*	$KAME: nd6_nbr.c,v 1.61 2001/02/10 16:06:14 jinmei Exp $	*/
 
 /*
@@ -193,10 +193,13 @@ nd6_ns_input(m, off, icmp6len)
 	 */
 	/* (1) and (3) check. */
 #if NCARP > 0
-	if (ifp->if_carp && ifp->if_type != IFT_CARP) 
-		ifa = carp_iamatch6(ifp->if_carp, &taddr6);
-	if (!ifa) 
+	if (ifp->if_type == IFT_CARP) {
 		ifa = (struct ifaddr *)in6ifa_ifpwithaddr(ifp, &taddr6);
+		if (ifa && !carp_iamatch6(ifp, ifa))
+			ifa = NULL;
+	} else {
+		ifa = (struct ifaddr *)in6ifa_ifpwithaddr(ifp, &taddr6);
+	}
 #else
 	ifa = (struct ifaddr *)in6ifa_ifpwithaddr(ifp, &taddr6);
 #endif
@@ -679,8 +682,6 @@ nd6_na_input(m, off, icmp6len)
 			 * affect the status of associated prefixes..
 			 */
 			pfxlist_onlink_check();
-			if ((rt->rt_flags & RTF_LLINFO) == 0)
-				goto freeit;	/* ln is gone */
 		}
 	} else {
 		int llchange;

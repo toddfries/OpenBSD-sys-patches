@@ -1,4 +1,4 @@
-/*	$OpenBSD: rf_paritylog.h,v 1.3 2002/12/16 07:01:04 tdeval Exp $	*/
+/*	$OpenBSD: rf_paritylog.h,v 1.2 1999/02/16 00:03:05 niklas Exp $	*/
 /*	$NetBSD: rf_paritylog.h,v 1.3 1999/02/05 00:06:14 oster Exp $	*/
 
 /*

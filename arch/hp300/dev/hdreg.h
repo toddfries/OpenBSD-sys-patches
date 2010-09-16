@@ -1,4 +1,4 @@
-/*	$OpenBSD: hdreg.h,v 1.5 2005/11/18 00:09:15 miod Exp $	*/
+/*	$OpenBSD: hdreg.h,v 1.4 2005/11/15 07:02:36 miod Exp $	*/
 /*	$NetBSD: rdreg.h,v 1.7 1996/02/09 18:00:37 scottr Exp $	*/
 
 /*

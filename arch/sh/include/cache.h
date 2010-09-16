@@ -1,4 +1,4 @@
-/*	$OpenBSD: cache.h,v 1.2 2007/03/05 21:48:21 miod Exp $	*/
+/*	$OpenBSD: cache.h,v 1.1.1.1 2006/10/06 21:02:55 miod Exp $	*/
 /*	$NetBSD: cache.h,v 1.7 2006/01/21 00:46:36 uwe Exp $	*/
 
 /*-

@@ -1,4 +1,4 @@
-/*	$OpenBSD: opti82c558.c,v 1.7 2006/09/19 11:06:34 jsg Exp $	*/
+/*	$OpenBSD: opti82c558.c,v 1.6 2002/03/14 01:26:33 millert Exp $	*/
 /*	$NetBSD: opti82c558.c,v 1.2 2000/07/18 11:24:09 soda Exp $	*/
 
 /*-

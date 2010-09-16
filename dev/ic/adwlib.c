@@ -1,4 +1,4 @@
-/*	$OpenBSD: adwlib.c,v 1.20 2004/06/24 09:07:39 itojun Exp $ */
+/*	$OpenBSD: adwlib.c,v 1.19 2004/01/09 21:32:23 brad Exp $ */
 /* $NetBSD: adwlib.c,v 1.20 2000/07/04 04:17:03 itojun Exp $        */
 
 /*

@@ -1,4 +1,4 @@
-/* $OpenBSD: ncr.c,v 1.21 2006/12/13 21:12:58 miod Exp $ */
+/* $OpenBSD: ncr.c,v 1.20 2006/11/28 23:59:45 dlg Exp $ */
 /*	$NetBSD: ncr.c,v 1.32 2000/06/25 16:00:43 ragge Exp $	*/
 
 /*-

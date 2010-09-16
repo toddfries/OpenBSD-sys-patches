@@ -1,4 +1,4 @@
-/*	$OpenBSD: lkm.h,v 1.11 2002/01/09 18:20:52 ericj Exp $	*/
+/*	$OpenBSD: lkm.h,v 1.10 2002/01/07 19:23:32 ericj Exp $	*/
 /*	$NetBSD: lkm.h,v 1.12 1996/02/09 18:25:13 christos Exp $	*/
 
 /*

@@ -2,6 +2,7 @@
 
 NOPROG=
 NOMAN=
+CC=${HOSTCC}
 
 .if (${MACHINE} == "i386")
 

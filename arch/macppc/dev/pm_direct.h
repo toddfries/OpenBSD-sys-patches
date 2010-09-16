@@ -1,4 +1,4 @@
-/*	$OpenBSD: pm_direct.h,v 1.11 2007/02/18 19:33:48 gwk Exp $	*/
+/*	$OpenBSD: pm_direct.h,v 1.10 2007/02/12 21:01:11 gwk Exp $	*/
 /*	$NetBSD: pm_direct.h,v 1.5 1999/07/12 15:54:55 tsubai Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: usbf_subr.c,v 1.3 2007/02/13 18:32:57 drahn Exp $	*/
+/*	$OpenBSD: usbf_subr.c,v 1.2 2007/02/07 16:26:49 drahn Exp $	*/
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>

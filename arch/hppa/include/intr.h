@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.20 2006/03/12 03:14:36 brad Exp $	*/
+/*	$OpenBSD: intr.h,v 1.19 2005/04/19 15:29:47 mickey Exp $	*/
 
 /*
  * Copyright (c) 2002-2004 Michael Shalayeff

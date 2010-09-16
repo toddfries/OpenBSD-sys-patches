@@ -1,4 +1,4 @@
-/*	$OpenBSD: va-m88k.h,v 1.9 2006/04/09 03:07:53 deraadt Exp $	*/
+/*	$OpenBSD: va-m88k.h,v 1.8 2006/01/06 18:53:05 millert Exp $	*/
 
 /* Define __gnuc_va_list.  */
 

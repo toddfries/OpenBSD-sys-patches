@@ -1,4 +1,4 @@
-/*	$OpenBSD: i80321_clock.c,v 1.6 2007/01/11 07:24:52 robert Exp $ */
+/*	$OpenBSD: i80321_clock.c,v 1.5 2006/08/24 21:32:19 deraadt Exp $ */
 
 /*
  * Copyright (c) 2006 Dale Rahn <drahn@openbsd.org>

@@ -1,4 +1,4 @@
-/*	$OpenBSD: gdt_pci.c,v 1.20 2006/02/24 00:04:27 brad Exp $	*/
+/*	$OpenBSD: gdt_pci.c,v 1.19 2003/08/06 21:08:06 millert Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Niklas Hallqvist.  All rights reserved.

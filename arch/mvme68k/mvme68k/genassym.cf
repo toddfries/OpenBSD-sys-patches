@@ -1,4 +1,4 @@
-#	$OpenBSD: genassym.cf,v 1.20 2004/09/29 07:34:42 miod Exp $
+#	$OpenBSD: genassym.cf,v 1.19 2004/07/30 09:50:17 miod Exp $
 
 #
 # Copyright (c) 1995 Theo de Raadt

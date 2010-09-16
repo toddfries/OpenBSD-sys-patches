@@ -1,4 +1,4 @@
-/*	$OpenBSD: ioctl.c,v 1.5 2003/08/11 06:23:09 deraadt Exp $	*/
+/*	$OpenBSD: ioctl.c,v 1.4 2003/06/02 23:28:09 millert Exp $	*/
 /*	$NetBSD: ioctl.c,v 1.4 1994/10/30 21:48:24 cgd Exp $	*/
 
 /*-

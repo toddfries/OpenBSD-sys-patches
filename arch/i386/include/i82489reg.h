@@ -1,4 +1,4 @@
-/*	$OpenBSD: i82489reg.h,v 1.2 2004/06/13 21:49:16 niklas Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD: i82489reg.h,v 1.1.2.1 2000/02/20 16:30:27 sommerfeld Exp $	*/
 
 /*-

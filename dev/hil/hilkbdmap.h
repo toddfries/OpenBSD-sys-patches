@@ -1,4 +1,4 @@
-/*	$OpenBSD: hilkbdmap.h,v 1.3 2005/05/07 22:42:30 miod Exp $	*/
+/*	$OpenBSD: hilkbdmap.h,v 1.2 2005/01/18 18:52:31 miod Exp $	*/
 /*
  * Copyright (c) 2003, Miodrag Vallat.
  * All rights reserved.

@@ -101,10 +101,12 @@ db_examine(db_addr_t addr, char *fmt, int count)
 				size = 4;
 				width = 12;
 				break;
+#ifdef __LP64__
 			case 'q':	/* quad-word */
 				size = 8;
 				width = 20;
 				break;
+#endif
 			case 'a':	/* address */
 				db_printf("= 0x%lx\n", (long)addr);
 				break;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipx_tun.c,v 1.3 2003/06/02 23:28:16 millert Exp $	*/
+/*	$OpenBSD: ipx_tun.c,v 1.2 1996/10/26 09:34:54 mickey Exp $	*/
 
 /*-
  *

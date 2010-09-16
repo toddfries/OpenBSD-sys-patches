@@ -1127,7 +1127,7 @@ iha_data_over_run(pScb)
 }
 
 /*
- * iha_next_state - process the current SCB as requested in it's 
+ * iha_next_state - process the current SCB as requested in its 
  *                  SCB_NxtStat member.
  */
 int

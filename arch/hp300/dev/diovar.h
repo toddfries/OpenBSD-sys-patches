@@ -1,4 +1,4 @@
-/*	$OpenBSD: diovar.h,v 1.6 2004/09/29 07:35:52 miod Exp $	*/
+/*	$OpenBSD: diovar.h,v 1.5 2002/03/14 03:15:52 millert Exp $	*/
 /*	$NetBSD: diovar.h,v 1.3 1997/05/05 21:01:33 thorpej Exp $	*/
 
 /*-

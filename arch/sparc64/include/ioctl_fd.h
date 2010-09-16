@@ -1,4 +1,4 @@
-/*	$OpenBSD: ioctl_fd.h,v 1.1 2005/03/09 18:41:49 miod Exp $	*/
+/*	$OpenBSD: ioctl_fd.h,v 1.1 1997/06/24 09:50:58 downsj Exp $	*/
 /*	from: ioctl_fd.h,v 1.4 1995/06/29 03:49:32 jtk Exp 	*/
 
 /*

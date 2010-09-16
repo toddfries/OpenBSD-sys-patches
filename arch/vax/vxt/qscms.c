@@ -1,4 +1,4 @@
-/*	$OpenBSD: qscms.c,v 1.1 2006/08/27 16:55:41 miod Exp $	*/
+/*	$OpenBSD$	*/
 /*	from OpenBSD: qscms.c,v 1.6 2006/07/31 18:50:13 miod Exp	*/
 /*
  * Copyright (c) 2006 Miodrag Vallat.

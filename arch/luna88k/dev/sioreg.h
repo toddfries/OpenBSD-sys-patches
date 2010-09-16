@@ -1,4 +1,4 @@
-/* $OpenBSD: sioreg.h,v 1.1 2004/04/21 15:23:55 aoyama Exp $ */
+/* $OpenBSD$ */
 /* $NetBSD: sioreg.h,v 1.1 2000/01/05 08:48:55 nisimura Exp $ */
 /*
  * Copyright (c) 1992 OMRON Corporation.

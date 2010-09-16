@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.1 2006/05/16 22:48:18 miod Exp $
+#	$OpenBSD$
 
 LIB_SA_DIR=${S}/arch/aviion/stand/libsa
 

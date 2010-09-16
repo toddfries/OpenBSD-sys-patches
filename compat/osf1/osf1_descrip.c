@@ -1,4 +1,4 @@
-/* $OpenBSD: osf1_descrip.c,v 1.8 2002/02/13 19:08:06 art Exp $ */
+/* $OpenBSD: osf1_descrip.c,v 1.7 2001/10/26 12:03:27 art Exp $ */
 /* $NetBSD: osf1_descrip.c,v 1.5 1999/06/26 01:24:41 cgd Exp $ */
 
 /*

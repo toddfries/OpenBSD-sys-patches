@@ -1,4 +1,4 @@
-/*	$OpenBSD: lseek.c,v 1.7 2003/08/11 06:23:09 deraadt Exp $	*/
+/*	$OpenBSD: lseek.c,v 1.6 2003/06/02 23:28:09 millert Exp $	*/
 /*	$NetBSD: lseek.c,v 1.3 1996/06/21 20:09:03 pk Exp $	*/
 
 /*-

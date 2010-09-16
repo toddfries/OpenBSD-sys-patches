@@ -1,4 +1,4 @@
-/*	$OpenBSD: namei.h,v 1.16 2005/07/20 17:01:14 miod Exp $	*/
+/*	$OpenBSD: namei.h,v 1.15 2005/06/18 18:09:43 millert Exp $	*/
 /*	$NetBSD: namei.h,v 1.11 1996/02/09 18:25:20 christos Exp $	*/
 
 /*

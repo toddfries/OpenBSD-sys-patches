@@ -77,7 +77,7 @@ acpibat_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
-	if ((sc->sc_bat_present = res.v_integer & STA_BATTERY) != 0) {
+	if ((sc->sc_bat_present = aml_val2int(&res) & STA_BATTERY) != 0) {
 		acpibat_getbif(sc);
 		acpibat_getbst(sc);
 		printf(": %s: model: %s serial: %s type: %s oem: %s\n",

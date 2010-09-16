@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.28 2004/12/28 05:18:25 mickey Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.27 2004/10/26 21:27:53 mickey Exp $	*/
 
 /*
  * Copyright (c) 1998-2003 Michael Shalayeff

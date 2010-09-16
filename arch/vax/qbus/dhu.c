@@ -1,4 +1,4 @@
-/*	$OpenBSD: dhu.c,v 1.12 2004/09/19 21:34:42 mickey Exp $	*/
+/*	$OpenBSD: dhu.c,v 1.11 2004/07/07 23:10:45 deraadt Exp $	*/
 /*	$NetBSD: dhu.c,v 1.19 2000/06/04 06:17:01 matt Exp $	*/
 /*
  * Copyright (c) 2003, Hugh Graham.

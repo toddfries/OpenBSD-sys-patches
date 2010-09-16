@@ -50,7 +50,7 @@
 
 #include <sys/time.h>
 #include <sys/queue.h>
-#include <sys/lock.h>
+#include <sys/rwlock.h>
 
 struct buf;
 struct disklabel;
@@ -73,7 +73,7 @@ struct diskstats {
 
 struct disk {
 	TAILQ_ENTRY(disk) dk_link;	/* link in global disklist */
-	struct lock	dk_lock;	/* disk lock */
+	struct rwlock	dk_lock;	/* disk lock */
 	char		*dk_name;	/* disk name */
 	int		dk_flags;	/* disk flags */
 #define DKF_CONSTRUCTED  0x0001

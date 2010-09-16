@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsi_message.h,v 1.8 2006/05/11 00:45:59 krw Exp $	*/
+/*	$OpenBSD: scsi_message.h,v 1.7 2004/10/17 05:36:43 krw Exp $	*/
 
 /* Messages (1 byte) */		     /* I/T (M)andatory or (O)ptional */
 #define MSG_CMDCOMPLETE		0x00 /* M/M */

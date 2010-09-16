@@ -1,4 +1,4 @@
-/*	$OpenBSD: cmpcireg.h,v 1.2 2006/07/27 00:45:59 brad Exp $	*/
+/*	$OpenBSD: cmpcireg.h,v 1.1 2000/04/27 02:19:41 millert Exp $	*/
 /*	$NetBSD: cmpcireg.h,v 1.7 2005/12/11 12:22:48 christos Exp $	*/
 
 /*

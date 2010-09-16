@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_ipc_23.c,v 1.5 2004/07/15 11:25:59 millert Exp $	*/
+/*	$OpenBSD: kern_ipc_23.c,v 1.4 2004/06/21 23:50:35 tholo Exp $	*/
 
 /*
  * Copyright (c) 2004 Todd C. Miller <Todd.Miller@courtesan.com>

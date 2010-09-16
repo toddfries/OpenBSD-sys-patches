@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.9 2005/05/06 11:16:47 pedro Exp $
+#	$OpenBSD: Makefile,v 1.8 2005/05/06 02:52:45 marco Exp $
 
 S=${.CURDIR}/../..
 .include "$S/kern/Make.tags.inc"

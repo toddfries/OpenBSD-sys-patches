@@ -1,4 +1,4 @@
-#	$OpenBSD: files.m68k,v 1.17 2007/02/05 05:46:11 miod Exp $
+#	$OpenBSD: files.m68k,v 1.16 2006/11/29 13:22:05 miod Exp $
 #	$NetBSD: files.m68k,v 1.18 1997/06/06 23:15:28 veego Exp $
 #
 file	arch/m68k/m68k/bcopy.s

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_san_common.h,v 1.8 2005/11/08 20:23:42 canacar Exp $	*/
+/*	$OpenBSD: if_san_common.h,v 1.7 2005/04/01 21:42:36 canacar Exp $	*/
 
 /*-
  * Copyright (c) 2001-2004 Sangoma Technologies (SAN)

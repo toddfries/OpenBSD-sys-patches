@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tribm_isa.c,v 1.3 2002/03/14 01:26:56 millert Exp $	*/
+/*	$OpenBSD: if_tribm_isa.c,v 1.2 2001/11/05 17:25:58 art Exp $	*/
 /*	$NetBSD: if_tribm_isa.c,v 1.2 1999/03/22 23:01:37 bad Exp $	*/
 
 /*

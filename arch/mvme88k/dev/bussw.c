@@ -1,4 +1,4 @@
-/*	$OpenBSD: bussw.c,v 1.17 2006/05/08 14:36:10 miod Exp $ */
+/*	$OpenBSD: bussw.c,v 1.16 2005/07/18 02:43:25 fgsch Exp $ */
 /*
  * Copyright (c) 1999 Steve Murphree, Jr.
  *

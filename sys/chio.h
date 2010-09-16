@@ -1,4 +1,4 @@
-/*	$OpenBSD: chio.h,v 1.7 2006/05/31 03:01:44 beck Exp $	*/
+/*	$OpenBSD: chio.h,v 1.6 2003/03/28 11:42:28 mickey Exp $	*/
 /*	$NetBSD: chio.h,v 1.8 1996/04/03 00:25:21 thorpej Exp $	*/
 
 /*

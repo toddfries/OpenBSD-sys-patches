@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_print.c,v 1.10 2006/03/13 06:23:20 jsg Exp $	*/
+/*	$OpenBSD: db_print.c,v 1.9 2003/07/08 16:57:20 mickey Exp $	*/
 /*	$NetBSD: db_print.c,v 1.5 1996/02/05 01:57:11 christos Exp $	*/
 
 /* 

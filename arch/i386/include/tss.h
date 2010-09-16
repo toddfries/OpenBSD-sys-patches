@@ -1,4 +1,4 @@
-/*	$OpenBSD: tss.h,v 1.7 2006/04/27 15:37:53 mickey Exp $	*/
+/*	$OpenBSD: tss.h,v 1.6 2003/06/02 23:27:47 millert Exp $	*/
 /*	$NetBSD: tss.h,v 1.6 1995/10/11 04:20:28 mycroft Exp $	*/
 
 /*-

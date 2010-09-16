@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfsdiskless.h,v 1.8 2003/06/02 23:28:20 millert Exp $	*/
+/*	$OpenBSD: nfsdiskless.h,v 1.7 2002/03/14 01:27:13 millert Exp $	*/
 /*	$NetBSD: nfsdiskless.h,v 1.9 1996/02/18 11:54:00 fvdl Exp $	*/
 
 /*

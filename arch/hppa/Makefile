@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.6 2005/05/06 11:16:47 pedro Exp $
+#	$OpenBSD: Makefile,v 1.5 2005/05/06 03:17:29 marco Exp $
 
 # Makefile for hppa tags file and boot blocks
 

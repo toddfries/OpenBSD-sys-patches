@@ -1,4 +1,4 @@
-/*	$OpenBSD: rasops_bitops.h,v 1.3 2003/02/12 20:53:59 henric Exp $ */
+/*	$OpenBSD: rasops_bitops.h,v 1.2 2002/07/27 22:17:49 miod Exp $ */
 /* 	$NetBSD: rasops_bitops.h,v 1.6 2000/04/12 14:22:30 pk Exp $	*/
 
 /*-

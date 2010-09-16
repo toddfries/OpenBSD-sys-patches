@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_cuereg.h,v 1.7 2006/03/07 04:41:19 krw Exp $ */
+/*	$OpenBSD: if_cuereg.h,v 1.6 2004/05/19 11:37:00 brad Exp $ */
 /*	$NetBSD: if_cuereg.h,v 1.14 2001/01/21 22:09:24 augustss Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999, 2000

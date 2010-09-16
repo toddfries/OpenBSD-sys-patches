@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu_subr.c,v 1.2 2005/11/26 22:40:31 kettenis Exp $	*/
+/*	$OpenBSD: cpu_subr.c,v 1.1 2005/11/08 20:30:47 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2005 Mark Kettenis

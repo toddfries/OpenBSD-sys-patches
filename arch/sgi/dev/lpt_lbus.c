@@ -1,4 +1,4 @@
-/*	$OpenBSD: lpt_lbus.c,v 1.4 2005/01/31 21:35:50 grange Exp $	*/
+/*	$OpenBSD: lpt_lbus.c,v 1.3 2004/08/10 19:16:18 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1993, 1994 Charles Hannum.

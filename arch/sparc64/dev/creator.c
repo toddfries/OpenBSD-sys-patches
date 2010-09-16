@@ -1,4 +1,4 @@
-/*	$OpenBSD: creator.c,v 1.39 2007/03/06 23:10:26 kettenis Exp $	*/
+/*	$OpenBSD: creator.c,v 1.38 2006/12/17 22:18:16 miod Exp $	*/
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)

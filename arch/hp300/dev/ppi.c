@@ -1,4 +1,4 @@
-/*	$OpenBSD: ppi.c,v 1.16 2006/04/13 20:08:12 miod Exp $	*/
+/*	$OpenBSD: ppi.c,v 1.15 2006/01/19 23:54:41 miod Exp $	*/
 /*	$NetBSD: ppi.c,v 1.13 1997/04/02 22:37:33 scottr Exp $	*/
 
 /*

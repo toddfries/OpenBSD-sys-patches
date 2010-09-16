@@ -942,7 +942,7 @@ NON_LEAF(Mips5k_IOSyncDCache, FRAMESZ(CF_SZ+2*REGSZ), ra)
 	REG_S	a0, CF_ARGSZ(sp)		# save args
 	beqz	a2, SyncRD			# Sync PREREAD
 	REG_S	a1, CF_ARGSZ+REGSZ(sp)
-	addiu	a2, 1
+	addiu	a2, -1
 	bnez	a2, SyncRDWB			# Sync PREWRITE+PREREAD
 	nop
 

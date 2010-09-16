@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_var.h,v 1.18 2006/11/15 18:59:37 damien Exp $	*/
+/*	$OpenBSD: ieee80211_var.h,v 1.17 2006/10/19 10:55:56 tom Exp $	*/
 /*	$NetBSD: ieee80211_var.h,v 1.7 2004/05/06 03:07:10 dyoung Exp $	*/
 
 /*-

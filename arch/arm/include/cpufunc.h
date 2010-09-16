@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpufunc.h,v 1.3 2006/07/12 17:29:55 miod Exp $	*/
+/*	$OpenBSD: cpufunc.h,v 1.2 2004/05/19 03:17:07 drahn Exp $	*/
 /*	$NetBSD: cpufunc.h,v 1.29 2003/09/06 09:08:35 rearnsha Exp $	*/
 
 /*

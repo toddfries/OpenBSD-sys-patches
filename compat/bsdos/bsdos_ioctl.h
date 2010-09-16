@@ -1,4 +1,4 @@
-/*	$OpenBSD: bsdos_ioctl.h,v 1.3 2003/06/17 21:56:25 millert Exp $	*/
+/*	$OpenBSD: bsdos_ioctl.h,v 1.2 2003/06/03 01:52:41 millert Exp $	*/
 
 /*
  * Copyright (c) 1999 Todd C. Miller <Todd.Miller@courtesan.com>

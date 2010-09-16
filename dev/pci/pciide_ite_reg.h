@@ -1,4 +1,4 @@
-/*	$OpenBSD: pciide_ite_reg.h,v 1.1 2003/12/20 08:03:55 grange Exp $	*/
+/*	$OpenBSD$	*/
 /*
  * Copyright (c) 2003 Alexander Yurchenko <grange@openbsd.org>
  *

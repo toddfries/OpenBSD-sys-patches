@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ne_pci.c,v 1.16 2006/10/20 17:02:24 brad Exp $	*/
+/*	$OpenBSD: if_ne_pci.c,v 1.15 2006/10/20 16:54:01 brad Exp $	*/
 /*	$NetBSD: if_ne_pci.c,v 1.8 1998/07/05 00:51:24 jonathan Exp $	*/
 
 /*-

@@ -1,4 +1,4 @@
-/*	$OpenBSD: radix.c,v 1.21 2006/06/18 11:47:45 pascoe Exp $	*/
+/*	$OpenBSD: radix.c,v 1.20 2006/02/06 17:37:28 jmc Exp $	*/
 /*	$NetBSD: radix.c,v 1.20 2003/08/07 16:32:56 agc Exp $	*/
 
 /*

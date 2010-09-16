@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntohl.S,v 1.3 2003/06/02 23:28:08 millert Exp $	*/
+/*	$OpenBSD: ntohl.S,v 1.2 1996/09/27 06:47:47 mickey Exp $	*/
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.

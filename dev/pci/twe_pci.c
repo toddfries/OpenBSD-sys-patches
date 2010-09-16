@@ -1,4 +1,4 @@
-/*	$OpenBSD: twe_pci.c,v 1.12 2006/08/25 04:35:03 brad Exp $	*/
+/*	$OpenBSD: twe_pci.c,v 1.11 2006/07/31 10:00:15 mickey Exp $	*/
 
 /*
  * Copyright (c) 2000 Michael Shalayeff

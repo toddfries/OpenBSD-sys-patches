@@ -1,4 +1,4 @@
-/*	$OpenBSD: esoreg.h,v 1.1 1999/08/04 23:38:03 niklas Exp $	*/
+/*	$OpenBSD: esoreg.h,v 1.1 1999/07/12 15:13:31 kleink Exp $	*/
 /*	$NetBSD: esoreg.h,v 1.1 1999/07/12 15:13:31 kleink Exp $	*/
 
 /*

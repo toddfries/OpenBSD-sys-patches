@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.h,v 1.3 2004/07/02 17:37:18 miod Exp $	*/
+/*	$OpenBSD: conf.h,v 1.2 2003/04/16 17:34:48 miod Exp $	*/
 /*
  * Copyright (c) 2002, Miodrag Vallat.
  * All rights reserved.

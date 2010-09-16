@@ -1,4 +1,4 @@
-/* $OpenBSD: pckbdreg.h,v 1.2 2003/10/22 09:44:22 jmc Exp $ */
+/* $OpenBSD: pckbdreg.h,v 1.1 2000/11/13 20:12:35 aaron Exp $ */
 /* $NetBSD: pckbdreg.h,v 1.2 1998/04/07 13:43:16 hannken Exp $ */
 
 /*

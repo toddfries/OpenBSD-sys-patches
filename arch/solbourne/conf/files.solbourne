@@ -1,4 +1,4 @@
-#	$OpenBSD: files.solbourne,v 1.2 2006/06/19 15:13:35 deraadt Exp $
+#	$OpenBSD: files.solbourne,v 1.1 2005/04/19 21:30:17 miod Exp $
 
 # Kernel configuration rules for OpenBSD/solbourne.
 # Most device definitions and files rules are imported from

@@ -1,4 +1,4 @@
-/* $OpenBSD: mfi_pci.c,v 1.11 2006/08/06 04:40:08 brad Exp $ */
+/* $OpenBSD: mfi_pci.c,v 1.10 2006/08/06 03:58:36 brad Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  *

@@ -1,4 +1,4 @@
-/*	$OpenBSD: michael.c,v 1.1 2006/03/21 18:40:54 reyk Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * Copyright (c) 2005, 2006 Reyk Floeter <reyk@openbsd.org>

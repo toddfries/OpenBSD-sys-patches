@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec.h,v 1.2 2006/11/10 20:34:06 drahn Exp $	*/
+/*	$OpenBSD: exec.h,v 1.1.1.1 2006/10/06 21:02:55 miod Exp $	*/
 /*	$NetBSD: elf_machdep.h,v 1.8 2002/04/28 17:10:34 uch Exp $	*/
 
 #define __LDPGSZ	4096

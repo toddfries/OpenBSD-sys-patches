@@ -1,4 +1,4 @@
-/*	$OpenBSD: dev_i386.c,v 1.2 2004/08/21 18:53:38 tom Exp $	*/
+/*	$OpenBSD: dev_i386.c,v 1.1 2004/02/03 12:09:47 mickey Exp $	*/
 
 /*
  * Copyright (c) 1996-1999 Michael Shalayeff

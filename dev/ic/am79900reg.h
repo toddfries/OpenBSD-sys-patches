@@ -1,4 +1,4 @@
-/*	$OpenBSD: am79900reg.h,v 1.1 2005/07/28 01:31:22 brad Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD: am79900reg.h,v 1.7 2005/02/27 00:27:00 perry Exp $	*/
 
 /*-

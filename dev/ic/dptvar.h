@@ -1,4 +1,4 @@
-/*	$OpenBSD: dptvar.h,v 1.2 2002/03/14 01:26:54 millert Exp $	*/
+/*	$OpenBSD: dptvar.h,v 1.1 1999/11/30 07:55:56 cmetz Exp $	*/
 /*	$NetBSD: dptvar.h,v 1.5 1999/10/23 16:26:32 ad Exp $	*/
 
 /*

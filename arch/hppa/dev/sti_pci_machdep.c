@@ -1,4 +1,4 @@
-/*	$OpenBSD: sti_pci_machdep.c,v 1.1 2007/01/11 22:06:39 miod Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * Copyright (c) 2007 Miodrag Vallat.

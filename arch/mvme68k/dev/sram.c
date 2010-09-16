@@ -1,4 +1,4 @@
-/*	$OpenBSD: sram.c,v 1.17 2005/11/25 19:19:39 miod Exp $ */
+/*	$OpenBSD: sram.c,v 1.16 2005/11/24 22:43:16 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt

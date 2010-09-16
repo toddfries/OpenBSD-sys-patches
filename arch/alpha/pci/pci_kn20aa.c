@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_kn20aa.c,v 1.22 2006/06/15 20:08:29 brad Exp $	*/
+/*	$OpenBSD: pci_kn20aa.c,v 1.21 2006/01/29 10:47:35 martin Exp $	*/
 /*	$NetBSD: pci_kn20aa.c,v 1.21 1996/11/17 02:05:27 cgd Exp $	*/
 
 /*

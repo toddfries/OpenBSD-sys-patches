@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpu401.c,v 1.10 2006/04/07 22:41:33 jsg Exp $	*/
+/*	$OpenBSD: mpu401.c,v 1.9 2004/01/09 21:32:24 brad Exp $	*/
 /*	$NetBSD: mpu401.c,v 1.3 1998/11/25 22:17:06 augustss Exp $	*/
 
 /*

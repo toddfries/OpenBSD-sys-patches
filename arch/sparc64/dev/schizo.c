@@ -1,4 +1,4 @@
-/*	$OpenBSD: schizo.c,v 1.47 2007/02/23 22:15:36 kettenis Exp $	*/
+/*	$OpenBSD: schizo.c,v 1.46 2007/02/23 21:52:01 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: atavar.h,v 1.18 2004/09/24 07:05:44 grange Exp $	*/
+/*	$OpenBSD: atavar.h,v 1.17 2003/10/21 09:57:04 jmc Exp $	*/
 /*	$NetBSD: atavar.h,v 1.13 1999/03/10 13:11:43 bouyer Exp $	*/
 
 /*

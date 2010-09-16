@@ -1,4 +1,4 @@
-/*	$OpenBSD: atomic.h,v 1.5 2007/02/19 17:18:42 deraadt Exp $	*/
+/*	$OpenBSD: atomic.h,v 1.4 2007/02/06 17:13:33 art Exp $	*/
 /*	$NetBSD: atomic.h,v 1.1 2003/04/26 18:39:37 fvdl Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtl80x9reg.h,v 1.2 2003/10/21 18:58:49 jmc Exp $	*/
+/*	$OpenBSD: rtl80x9reg.h,v 1.1 1998/11/06 06:34:36 fgsch Exp $	*/
 /*	$NetBSD: rtl80x9reg.h,v 1.2 1998/10/31 00:31:43 thorpej Exp $	*/
 
 /*-

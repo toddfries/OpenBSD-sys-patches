@@ -1,3 +1,3 @@
-/*	$OpenBSD: spinlock.h,v 1.1 2004/08/06 21:12:19 pefo Exp $	*/
+/*	$OpenBSD: spinlock.h,v 1.2 1999/01/26 20:33:06 imp Exp $	*/
 
 #include <mips64/spinlock.h>

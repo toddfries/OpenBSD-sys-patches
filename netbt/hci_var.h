@@ -1,4 +1,4 @@
-/*	$OpenBSD: hci_var.h,v 1.2 2005/01/17 18:12:49 mickey Exp $	*/
+/*	$OpenBSD: hci_var.h,v 1.1 2005/01/14 12:04:02 grange Exp $	*/
 
 /*
  * ng_btsocket_hci_raw.h

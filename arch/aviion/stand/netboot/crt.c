@@ -1,4 +1,4 @@
-/*	$OpenBSD: crt.c,v 1.2 2006/05/20 22:38:33 miod Exp $ */
+/*	$OpenBSD: crt.c,v 1.1 2006/05/16 22:48:18 miod Exp $ */
 
 #include <sys/types.h>
 #include <machine/prom.h>

@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_file.c,v 1.23 2006/09/25 07:12:57 otto Exp $	*/
+/*	$OpenBSD: linux_file.c,v 1.22 2003/08/13 04:01:37 tedu Exp $	*/
 /*	$NetBSD: linux_file.c,v 1.15 1996/05/20 01:59:09 fvdl Exp $	*/
 
 /*

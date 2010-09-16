@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus_space_asm_generic.S,v 1.1 2004/02/01 05:09:48 drahn Exp $	*/
+/*	$OpenBSD: bus_space_asm_generic.S,v 1.2 2004/01/29 16:17:11 drahn Exp $	*/
 /*	$NetBSD: bus_space_asm_generic.S,v 1.3 2003/03/27 19:46:14 mycroft Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: disk.c,v 1.11 2003/06/02 23:27:44 millert Exp $	*/
+/*	$OpenBSD: disk.c,v 1.10 2001/09/16 01:34:32 art Exp $	*/
 /*	$NetBSD: disk.c,v 1.6 1997/04/06 08:40:33 cgd Exp $	*/
 
 /*

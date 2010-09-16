@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.5 2006/08/17 06:31:10 miod Exp $
+#	$OpenBSD: Makefile,v 1.4 2005/02/20 15:33:30 miod Exp $
 
 PROG=	uboot
 

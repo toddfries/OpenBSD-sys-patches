@@ -1,4 +1,4 @@
-$OpenBSD: usbdevs,v 1.268 2007/03/03 12:40:31 deraadt Exp $
+$OpenBSD: usbdevs,v 1.270 2007/03/27 03:06:18 ckuethe Exp $
 /* $NetBSD: usbdevs,v 1.322 2003/05/10 17:47:14 hamajima Exp $ */
 
 /*
@@ -465,6 +465,7 @@ vendor RALINK		0x148f	Ralink Technology
 vendor CONCEPTRONIC2	0x14b2	Conceptronic
 vendor PLANEX3		0x14ea	Planex Communications
 vendor SILICONPORTALS	0x1527	Silicon Portals
+vendor UBLOX		0x1546	U-blox
 vendor OQO		0x1557	OQO
 vendor UMEDIA		0x157e	U-MEDIA Communications
 vendor FIBERLINE	0x1582	Fiberline
@@ -675,6 +676,7 @@ product ALTEC ASC495		0xff05	ASC495 Speakers
 
 /* Ambit Microsystems products */
 product AMBIT WLAN		0x0302	WLAN
+product AMBIT NTL_250		0x6098	NTL 250 cable modem
 
 /* American Power Conversion products */
 product APC UPSPRO500		0x0002	Back-UPS Pro 500
@@ -1133,6 +1135,7 @@ product FTDI MHAM_DB9		0xeeed	DB9
 product FTDI MHAM_RS232		0xeeee	RS232
 product FTDI MHAM_Y9		0xeeef	Y9
 product FTDI COASTAL_TNCX	0xf448	Coastal ChipWorks TNC-X
+product FTDI ITM_TOUCH		0xf9e9	ITM Touchscreen 
 product FTDI LCD_MX200		0xfa01	Matrix Orbital MX200 Series LCD
 product FTDI LCD_LK202_24	0xfa03	Matrix Orbital LK202-24 LCD
 product FTDI LCD_LK204_24	0xfa04	Matrix Orbital LK204-24 LCD
@@ -2232,6 +2235,9 @@ product TSUNAMI SM2000		0x1111	SM-2000
 
 /* TwinMOS products */
 product TWINMOS G240		0xa006	G240
+
+/* U-blox AG */
+product UBLOX ANTARIS4		0x01a4	ANTARIS4 GPS
 
 /* U-MEDIA Communications products */
 product UMEDIA AR5523_1		0x3006	AR5523

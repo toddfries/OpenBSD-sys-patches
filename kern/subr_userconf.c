@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_userconf.c,v 1.34 2005/12/09 09:09:52 jsg Exp $	*/
+/*	$OpenBSD: subr_userconf.c,v 1.33 2003/06/02 21:14:47 maja Exp $	*/
 
 /*
  * Copyright (c) 1996-2001 Mats O Jansson <moj@stacken.kth.se>

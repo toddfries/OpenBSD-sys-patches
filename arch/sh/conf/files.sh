@@ -1,4 +1,4 @@
-#	$OpenBSD: files.sh,v 1.1.1.1 2006/10/06 21:02:55 miod Exp $
+#	$OpenBSD$
 #	$NetBSD: files.sh3,v 1.32 2005/12/11 12:18:58 christos Exp $
 
 file	arch/sh/sh/cache.c

@@ -538,7 +538,6 @@ user_fault:
 		uvmexp.softs++;
 		p->p_md.md_astpending = 0;
 		if (p->p_flag & P_OWEUPC) {
-			p->p_flag &= ~P_OWEUPC;
 			KERNEL_PROC_LOCK(p);
 			ADDUPROF(p);
 			KERNEL_PROC_UNLOCK(p);
@@ -1055,7 +1054,6 @@ m88110_user_fault:
 		uvmexp.softs++;
 		p->p_md.md_astpending = 0;
 		if (p->p_flag & P_OWEUPC) {
-			p->p_flag &= ~P_OWEUPC;
 			KERNEL_PROC_LOCK(p);
 			ADDUPROF(p);
 			KERNEL_PROC_UNLOCK(p);

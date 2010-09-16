@@ -1,4 +1,4 @@
-/*	$OpenBSD: via8231reg.h,v 1.4 2005/10/26 21:38:28 mickey Exp $	*/
+/*	$OpenBSD: via8231reg.h,v 1.3 2005/10/26 01:41:36 mickey Exp $	*/
 
 /*
  * Copyright (c) 2005, by Michael Shalayeff

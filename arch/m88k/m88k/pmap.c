@@ -657,9 +657,7 @@ pmap_bootstrap(vaddr_t load_start)
 	vaddr = pmap_map(0, 0, s_text, VM_PROT_WRITE | VM_PROT_READ, CACHE_INH);
 
 	/* map the kernel text read only */
-	vaddr = pmap_map(s_text, s_text, e_text,
-	    VM_PROT_WRITE | VM_PROT_READ,	/* shouldn't it be RO? XXX*/
-	    0);
+	vaddr = pmap_map(s_text, s_text, e_text, VM_PROT_READ, 0);
 
 	vaddr = pmap_map(vaddr, e_text, (paddr_t)kmap,
 	    VM_PROT_WRITE | VM_PROT_READ, 0);

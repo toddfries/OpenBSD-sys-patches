@@ -1,4 +1,4 @@
-/*	$OpenBSD: syscallargs.h,v 1.99 2006/09/22 17:36:17 pedro Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * System call argument lists.

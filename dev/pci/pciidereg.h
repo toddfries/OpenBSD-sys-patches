@@ -1,4 +1,4 @@
-/*	$OpenBSD: pciidereg.h,v 1.7 2004/10/17 08:44:41 grange Exp $	*/
+/*	$OpenBSD: pciidereg.h,v 1.6 2004/09/24 07:38:38 grange Exp $	*/
 /*	$NetBSD: pciidereg.h,v 1.6 2000/11/14 18:42:58 thorpej Exp $	*/
 
 /*

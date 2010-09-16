@@ -35,8 +35,8 @@ struct ciss_softc {
 	void		*sc_sh;
 	struct proc	*sc_thread;
 	int		sc_flush;
-	struct sensor	*sensors;
-	struct sensordev sensordev;
+	struct ksensor	*sensors;
+	struct ksensordev sensordev;
 
 	u_int	sc_flags;
 #define	CISS_BIO	0x0001

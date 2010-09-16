@@ -104,6 +104,7 @@
 #include <sys/conf.h>
 #include <sys/core.h>
 #include <sys/kcore.h>
+#include <sys/reboot.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -375,6 +376,14 @@ sh_startup()
 	    ptoa(uvmexp.free) / 1024);
 	printf("using %d buffers containing %u bytes (%uK) of memory\n",
 	    nbuf, bufpages * PAGE_SIZE, bufpages * PAGE_SIZE / 1024);
+
+	if (boothowto & RB_CONFIG) {
+#ifdef BOOT_CONFIG
+		user_config();
+#else
+		printf("kernel does not support -c; continuing..\n");
+#endif 
+	}
 }
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_le_ioasic.c,v 1.11 2002/05/02 22:56:06 miod Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD: if_le_ioasic.c,v 1.18 2001/11/13 06:26:10 lukem Exp $	*/
 
 /*

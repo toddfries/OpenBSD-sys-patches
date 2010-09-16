@@ -1,4 +1,4 @@
-/*	$OpenBSD: twe.c,v 1.27 2006/12/29 13:04:37 pedro Exp $	*/
+/*	$OpenBSD: twe.c,v 1.26 2006/11/28 23:59:45 dlg Exp $	*/
 
 /*
  * Copyright (c) 2000-2002 Michael Shalayeff.  All rights reserved.

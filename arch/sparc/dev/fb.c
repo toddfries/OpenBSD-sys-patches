@@ -1,4 +1,4 @@
-/*	$OpenBSD: fb.c,v 1.43 2006/12/03 22:10:30 miod Exp $	*/
+/*	$OpenBSD: fb.c,v 1.42 2006/12/03 16:41:56 miod Exp $	*/
 /*	$NetBSD: fb.c,v 1.23 1997/07/07 23:30:22 pk Exp $ */
 
 /*

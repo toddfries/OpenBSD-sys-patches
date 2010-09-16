@@ -1,4 +1,4 @@
-/*	$OpenBSD: aac_tables.h,v 1.4 2006/07/21 19:11:11 mickey Exp $	*/
+/*	$OpenBSD: aac_tables.h,v 1.3 2005/11/18 05:39:10 nate Exp $	*/
 
 /*-
  * Copyright (c) 2000 Michael Smith

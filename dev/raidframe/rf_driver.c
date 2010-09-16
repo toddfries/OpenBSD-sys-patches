@@ -1,4 +1,4 @@
-/*	$OpenBSD: rf_driver.c,v 1.11 2002/12/16 07:01:03 tdeval Exp $	*/
+/*	$OpenBSD: rf_driver.c,v 1.10 2002/08/09 15:10:20 tdeval Exp $	*/
 /*	$NetBSD: rf_driver.c,v 1.37 2000/06/04 02:05:13 oster Exp $	*/
 
 /*

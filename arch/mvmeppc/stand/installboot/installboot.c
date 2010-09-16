@@ -1,4 +1,4 @@
-/*	$OpenBSD: installboot.c,v 1.5 2003/06/01 17:00:38 deraadt Exp $ */
+/*	$OpenBSD: installboot.c,v 1.4 2002/03/14 03:15:58 millert Exp $ */
 /*	$NetBSD: installboot.c,v 1.5 1995/11/17 23:23:50 gwr Exp $ */
 
 /*

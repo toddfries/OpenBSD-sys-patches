@@ -1,4 +1,4 @@
-/*	$OpenBSD: bnxfw.h,v 1.2 2006/08/10 04:01:52 brad Exp $	*/
+/*	$OpenBSD: bnxfw.h,v 1.1 2006/06/26 05:37:05 brad Exp $	*/
 
 /*-
  * Copyright (c) 2006 Broadcom Corporation

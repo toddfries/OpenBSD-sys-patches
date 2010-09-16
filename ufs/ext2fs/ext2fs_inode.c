@@ -148,7 +148,7 @@ out:
 	 * so that it can be reused immediately.
 	 */
 	if (ip->i_e2din == NULL || ip->i_e2fs_dtime != 0)
-		vrecycle(vp, NULL, p);
+		vrecycle(vp, p);
 	return (error);
 }   
 

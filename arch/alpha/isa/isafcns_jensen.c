@@ -1,4 +1,4 @@
-/*	$OpenBSD: isafcns_jensen.c,v 1.7 2002/06/25 21:33:21 miod Exp $	*/
+/*	$OpenBSD: isafcns_jensen.c,v 1.6 2002/03/14 01:26:27 millert Exp $	*/
 /*	$NetBSD: isafcns_jensen.c,v 1.4 1996/10/13 02:59:54 christos Exp $	*/
 
 /*

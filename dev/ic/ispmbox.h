@@ -1,4 +1,4 @@
-/*     $OpenBSD: ispmbox.h,v 1.19 2003/03/03 18:38:10 mjacob Exp $ */
+/*     $OpenBSD: ispmbox.h,v 1.18 2002/08/17 17:41:26 mjacob Exp $ */
 /*
  * Mailbox and Queue Entry Definitions for for Qlogic ISP SCSI adapters.
  *

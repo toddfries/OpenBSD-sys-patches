@@ -139,7 +139,6 @@ userret(struct proc *p)
 		astpending = 0;
 		uvmexp.softs++;
 		if (p->p_flag & P_OWEUPC) {
-			p->p_flag &= ~P_OWEUPC;
 			ADDUPROF(p);
 		}
 		if (want_resched)

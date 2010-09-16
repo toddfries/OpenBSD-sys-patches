@@ -1,4 +1,4 @@
-/*	$OpenBSD: apecs_pci.c,v 1.10 2006/03/26 20:23:08 brad Exp $	*/
+/*	$OpenBSD: apecs_pci.c,v 1.9 2002/03/14 01:26:27 millert Exp $	*/
 /*	$NetBSD: apecs_pci.c,v 1.10 1996/11/13 21:13:25 cgd Exp $	*/
 
 /*

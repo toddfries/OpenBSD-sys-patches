@@ -1,4 +1,4 @@
-/*	$OpenBSD: uscanner.c,v 1.22 2006/11/01 03:37:24 tedu Exp $ */
+/*	$OpenBSD: uscanner.c,v 1.21 2006/07/01 10:33:12 miod Exp $ */
 /*	$NetBSD: uscanner.c,v 1.40 2003/01/27 00:32:44 wiz Exp $	*/
 
 /*

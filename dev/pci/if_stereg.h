@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_stereg.h,v 1.10 2005/12/17 07:31:27 miod Exp $ */
+/*	$OpenBSD: if_stereg.h,v 1.9 2005/04/21 06:48:05 fgsch Exp $ */
 /*
  * Copyright (c) 1997, 1998, 1999
  *	Bill Paul <wpaul@ctr.columbia.edu>.  All rights reserved.

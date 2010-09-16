@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsi_tape.h,v 1.7 1998/01/07 17:28:38 deraadt Exp $	*/
+/*	$OpenBSD: scsi_tape.h,v 1.6 1997/04/14 04:09:13 downsj Exp $	*/
 /*	$NetBSD: scsi_tape.h,v 1.9 1996/05/24 02:04:47 thorpej Exp $	*/
 
 /*

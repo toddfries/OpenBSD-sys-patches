@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.4 2005/05/24 20:38:20 uwe Exp $	*/
+/*	$OpenBSD: conf.c,v 1.3 2005/05/09 14:09:20 uwe Exp $	*/
 
 /*
  * Copyright (c) 1996 Michael Shalayeff

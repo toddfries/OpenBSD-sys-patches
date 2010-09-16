@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.9 2006/03/19 01:47:24 martin Exp $ */
+/*	$OpenBSD: param.h,v 1.8 2005/10/13 19:47:12 miod Exp $ */
 /*
  * Copyright (c) 1999 Steve Murphree, Jr.
  * Copyright (c) 1988 University of Utah.

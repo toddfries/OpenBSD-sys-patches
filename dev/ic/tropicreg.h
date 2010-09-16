@@ -1,4 +1,4 @@
-/*	$OpenBSD: tropicreg.h,v 1.2 2003/10/21 18:58:50 jmc Exp $	*/
+/*	$OpenBSD: tropicreg.h,v 1.1 1999/12/27 21:51:35 fgsch Exp $	*/
 /*	$NetBSD: tropicreg.h,v 1.3 1999/10/17 23:53:45 cgd Exp $	*/
 
 /* 

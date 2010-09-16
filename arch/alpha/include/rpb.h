@@ -1,4 +1,4 @@
-/* $OpenBSD: rpb.h,v 1.10 2004/01/13 06:21:09 deraadt Exp $ */
+/* $OpenBSD: rpb.h,v 1.9 2000/11/08 21:27:24 ericj Exp $ */
 /* $NetBSD: rpb.h,v 1.38 2000/07/06 23:29:13 thorpej Exp $ */
 
 /*

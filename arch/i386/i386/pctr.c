@@ -1,4 +1,4 @@
-/*	$OpenBSD: pctr.c,v 1.22 2006/11/29 20:03:20 dim Exp $	*/
+/*	$OpenBSD: pctr.c,v 1.21 2006/09/19 11:06:33 jsg Exp $	*/
 
 /*
  * Pentium performance counter driver for OpenBSD.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipx_input.c,v 1.21 2006/03/05 21:48:57 miod Exp $	*/
+/*	$OpenBSD: ipx_input.c,v 1.20 2006/03/04 22:40:16 brad Exp $	*/
 
 /*-
  *

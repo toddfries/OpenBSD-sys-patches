@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.4 2006/11/12 19:37:01 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.3 2006/10/11 17:19:06 drahn Exp $
 
 PROG=	boot
 SRCS=	srt0.S conf.c devs.c getsecs.c scifcons.c delay.c

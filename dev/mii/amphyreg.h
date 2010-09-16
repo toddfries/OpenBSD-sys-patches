@@ -1,4 +1,4 @@
-/*	$OpenBSD: amphyreg.h,v 1.2 2003/10/22 09:39:29 jmc Exp $	*/
+/*	$OpenBSD: amphyreg.h,v 1.1 2000/10/17 15:59:10 jason Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999

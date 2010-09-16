@@ -1,4 +1,4 @@
-/*	$OpenBSD: midi_if.h,v 1.6 2006/04/07 22:41:32 jsg Exp $	*/
+/*	$OpenBSD: midi_if.h,v 1.5 2002/03/15 01:20:04 millert Exp $	*/
 /*	$NetBSD: midi_if.h,v 1.3 1998/11/25 22:17:07 augustss Exp $	*/
 
 /*

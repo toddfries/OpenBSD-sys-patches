@@ -1,4 +1,4 @@
-/*	$OpenBSD: lcore_ddb.S,v 1.8 2005/12/20 07:06:26 miod Exp $ */
+/*	$OpenBSD: lcore_ddb.S,v 1.7 2004/09/27 19:16:06 pefo Exp $ */
 
 /*
  * Copyright (c) 2001-2003 Opsycon AB  (www.opsycon.se / www.opsycon.com)

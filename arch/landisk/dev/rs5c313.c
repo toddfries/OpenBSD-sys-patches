@@ -1,4 +1,4 @@
-/*	$OpenBSD: rs5c313.c,v 1.2 2006/10/23 20:26:25 miod Exp $	*/
+/*	$OpenBSD: rs5c313.c,v 1.1 2006/10/07 20:52:40 miod Exp $	*/
 /*	$NetBSD: rs5c313.c,v 1.1 2006/09/07 01:12:00 uwe Exp $	*/
 /*	$NetBSD: rs5c313_landisk.c,v 1.1 2006/09/07 01:55:03 uwe Exp $	*/
 

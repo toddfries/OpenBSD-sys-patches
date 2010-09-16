@@ -1,4 +1,4 @@
-/*	$OpenBSD: i8259.h,v 1.4 2006/04/14 22:26:46 weingart Exp $	*/
+/*	$OpenBSD: i8259.h,v 1.3 2006/04/14 21:52:47 weingart Exp $	*/
 /*	$NetBSD: i8259.h,v 1.3 2003/05/04 22:01:56 fvdl Exp $	*/
 
 /*-

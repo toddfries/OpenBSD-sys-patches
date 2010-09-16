@@ -1,4 +1,4 @@
-/*	$OpenBSD: com_pcmcia.c,v 1.46 2006/05/28 16:49:46 fkr Exp $	*/
+/*	$OpenBSD: com_pcmcia.c,v 1.45 2006/04/20 20:31:13 miod Exp $	*/
 /*	$NetBSD: com_pcmcia.c,v 1.15 1998/08/22 17:47:58 msaitoh Exp $	*/
 
 /*

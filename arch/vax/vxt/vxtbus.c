@@ -1,4 +1,4 @@
-/*	$OpenBSD: vxtbus.c,v 1.2 2006/08/30 19:23:57 miod Exp $	*/
+/*	$OpenBSD: vxtbus.c,v 1.1 2006/08/27 16:55:41 miod Exp $	*/
 /*
  * Copyright (c) 2006 Miodrag Vallat.
  *

@@ -1,4 +1,4 @@
-/* $OpenBSD: reloc.h,v 1.1 2004/02/10 14:30:05 drahn Exp $ */
+/* $OpenBSD: reloc.h,v 1.1 2003/04/17 03:42:14 drahn Exp $ */
 
 /*
  * Copyright (c) 2002,2003 Dale Rahn

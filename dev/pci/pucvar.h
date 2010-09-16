@@ -1,4 +1,4 @@
-/*	$OpenBSD: pucvar.h,v 1.5 2006/07/31 11:06:33 mickey Exp $	*/
+/*	$OpenBSD: pucvar.h,v 1.4 2002/02/17 19:24:38 deraadt Exp $	*/
 /*	$NetBSD: pucvar.h,v 1.2 1999/02/06 06:29:54 cgd Exp $	*/
 
 /*

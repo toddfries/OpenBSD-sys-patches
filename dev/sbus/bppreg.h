@@ -1,4 +1,4 @@
-/*	$OpenBSD: bppreg.h,v 1.1 2007/02/28 18:48:35 miod Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD: bppreg.h,v 1.1 1998/09/21 21:20:48 pk Exp $ */
 
 /*-

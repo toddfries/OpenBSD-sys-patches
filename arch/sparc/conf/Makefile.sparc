@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.sparc,v 1.36 2006/07/27 05:58:12 miod Exp $
+#	$OpenBSD: Makefile.sparc,v 1.35 2006/06/01 21:46:28 pascoe Exp $
 # 	$NetBSD: Makefile.sparc,v 1.32.4.1 1996/06/12 20:26:32 pk Exp $
 
 # Makefile for OpenBSD

@@ -13,6 +13,7 @@ file	arch/powerpc/powerpc/process_machdep.c
 file	arch/powerpc/powerpc/sys_machdep.c
 file	arch/powerpc/powerpc/trap.c
 file	arch/powerpc/powerpc/vm_machdep.c
+file	arch/powerpc/powerpc/mutex.S
 
 file	arch/powerpc/ddb/db_memrw.c			ddb
 file	arch/powerpc/ddb/db_disasm.c			ddb

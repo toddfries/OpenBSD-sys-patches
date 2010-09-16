@@ -92,7 +92,7 @@ typedef struct pmap {
 #define	PV_CACHED	0x0002		/* Page has been cached */
 #define	PV_ATTR_MOD	0x0004
 #define	PV_ATTR_REF	0x0008
-#define	PV_PRESERVE (PV_UNCACHED|PV_CACHED|PV_ATTR_MOD|PV_ATTR_REF)
+#define	PV_PRESERVE	(PV_ATTR_MOD | PV_ATTR_REF)
 
 extern	struct pmap kernel_pmap_store;
 

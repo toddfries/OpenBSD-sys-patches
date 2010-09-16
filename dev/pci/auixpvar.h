@@ -1,4 +1,4 @@
-/* $OpenBSD: auixpvar.h,v 1.1 2005/08/07 20:08:45 mickey Exp $ */
+/* $OpenBSD$ */
 /* $NetBSD: auixpvar.h,v 1.3 2005/01/12 15:54:34 kent Exp $*/
 
 /*

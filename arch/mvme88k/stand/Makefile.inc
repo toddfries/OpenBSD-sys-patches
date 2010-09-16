@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.10 2006/05/16 22:52:07 miod Exp $
+#	$OpenBSD: Makefile.inc,v 1.9 2005/12/30 02:03:49 millert Exp $
 
 MDEC_DIR?=/usr/mdec
 CFLAGS+=-Wall -Werror -fno-stack-protector -mmemcpy

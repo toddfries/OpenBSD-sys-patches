@@ -1,4 +1,4 @@
-/*	$OpenBSD: freebsd_exec.h,v 1.7 2004/04/15 00:22:42 tedu Exp $	*/
+/*	$OpenBSD: freebsd_exec.h,v 1.6 2003/06/02 23:28:00 millert Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993

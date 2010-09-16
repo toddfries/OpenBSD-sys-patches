@@ -1,4 +1,4 @@
-/*	$OpenBSD: sgec.c,v 1.15 2006/08/31 22:10:57 miod Exp $	*/
+/*	$OpenBSD: sgec.c,v 1.14 2006/08/30 19:28:11 miod Exp $	*/
 /*      $NetBSD: sgec.c,v 1.5 2000/06/04 02:14:14 matt Exp $ */
 /*
  * Copyright (c) 1999 Ludd, University of Lule}, Sweden. All rights reserved.

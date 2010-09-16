@@ -1,4 +1,4 @@
-/*	$OpenBSD: memprobe.c,v 1.5 2006/09/18 21:15:33 mpf Exp $	*/
+/*	$OpenBSD: memprobe.c,v 1.4 2005/05/28 05:47:33 weingart Exp $	*/
 
 /*
  * Copyright (c) 1997-1999 Michael Shalayeff

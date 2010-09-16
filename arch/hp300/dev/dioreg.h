@@ -1,4 +1,4 @@
-/*	$OpenBSD: dioreg.h,v 1.4 2007/01/07 15:12:19 miod Exp $	*/
+/*	$OpenBSD: dioreg.h,v 1.3 2005/01/15 21:13:08 miod Exp $	*/
 /*	$NetBSD: dioreg.h,v 1.3 1997/01/30 09:18:40 thorpej Exp $	*/
 
 /*-

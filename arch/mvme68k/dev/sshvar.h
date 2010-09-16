@@ -1,4 +1,4 @@
-/*	$OpenBSD: sshvar.h,v 1.5 2004/07/30 22:29:45 miod Exp $ */
+/*	$OpenBSD: sshvar.h,v 1.4 2004/07/30 09:50:15 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt

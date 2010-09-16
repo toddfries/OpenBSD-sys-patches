@@ -743,10 +743,12 @@ sdhc_read_data(struct sdhc_host *hp, u_char *datap, int datalen)
 {
 	while (datalen > 0) {
 		if (datalen > 3) {
-			*((u_int32_t *)datap)++ = HREAD4(hp, SDHC_DATA);
+			*((u_int32_t *)datap) = HREAD4(hp, SDHC_DATA);
+			datap += 4;
 			datalen -= 4;
 		} else if (datalen > 1) {
-			*((u_int16_t *)datap)++ = HREAD2(hp, SDHC_DATA);
+			*((u_int16_t *)datap) = HREAD2(hp, SDHC_DATA);
+			datap += 2;
 			datalen -= 2;
 		} else {
 			*datap++ = HREAD1(hp, SDHC_DATA);

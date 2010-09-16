@@ -1,4 +1,4 @@
-/*	$OpenBSD: rndvar.h,v 1.19 2003/11/03 18:24:28 tedu Exp $	*/
+/*	$OpenBSD: rndvar.h,v 1.18 2003/06/02 19:24:22 mickey Exp $	*/
 
 /*
  * Copyright (c) 1996,2000 Michael Shalayeff.

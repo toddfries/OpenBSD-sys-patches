@@ -1,4 +1,4 @@
-/*	$OpenBSD: bpf.h,v 1.33 2006/03/25 22:41:47 djm Exp $	*/
+/*	$OpenBSD: bpf.h,v 1.32 2005/11/03 20:00:18 reyk Exp $	*/
 /*	$NetBSD: bpf.h,v 1.15 1996/12/13 07:57:33 mikel Exp $	*/
 
 /*

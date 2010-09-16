@@ -1,4 +1,4 @@
-/*	$OpenBSD: lca_bus_io.c,v 1.5 2001/11/06 19:53:13 miod Exp $	*/
+/*	$OpenBSD: lca_bus_io.c,v 1.4 2001/02/16 16:02:53 jason Exp $	*/
 /* $NetBSD: lca_bus_io.c,v 1.8 1997/09/02 13:19:31 thorpej Exp $ */
 
 /*

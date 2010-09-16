@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211.c,v 1.20 2006/12/25 19:24:26 reyk Exp $	*/
+/*	$OpenBSD: ieee80211.c,v 1.19 2006/12/20 08:13:56 grange Exp $	*/
 /*	$NetBSD: ieee80211.c,v 1.19 2004/06/06 05:45:29 dyoung Exp $	*/
 
 /*-

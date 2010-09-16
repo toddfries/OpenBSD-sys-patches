@@ -1,4 +1,4 @@
-/*	$OpenBSD: ecma167-udf.h,v 1.6 2006/07/04 01:11:29 pedro Exp $	*/
+/*	$OpenBSD: ecma167-udf.h,v 1.5 2006/06/22 00:48:31 pedro Exp $	*/
 
 /*
  * Copyright (c) 2001, 2002 Scott Long <scottl@freebsd.org>

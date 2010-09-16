@@ -1,4 +1,4 @@
-/*	$OpenBSD: amd8131reg.h,v 1.1 2005/05/24 00:51:27 brad Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD: amd8131reg.h,v 1.1 2004/04/18 18:34:22 fvdl Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: aoa.c,v 1.3 2005/11/19 00:44:38 kettenis Exp $	*/
+/*	$OpenBSD: aoa.c,v 1.2 2005/11/05 04:26:22 brad Exp $	*/
 /*	$Id: aoa.c,v 1.3 2005/11/19 00:44:38 kettenis Exp $	*/
 
 /*-

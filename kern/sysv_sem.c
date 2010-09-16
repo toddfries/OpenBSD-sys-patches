@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysv_sem.c,v 1.33 2006/08/10 17:03:48 millert Exp $	*/
+/*	$OpenBSD: sysv_sem.c,v 1.32 2004/07/15 11:24:46 millert Exp $	*/
 /*	$NetBSD: sysv_sem.c,v 1.26 1996/02/09 19:00:25 christos Exp $	*/
 
 /*

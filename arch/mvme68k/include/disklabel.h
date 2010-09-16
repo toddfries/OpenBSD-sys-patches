@@ -1,4 +1,4 @@
-/*	$OpenBSD: disklabel.h,v 1.8 2003/06/03 21:09:01 deraadt Exp $	*/
+/*	$OpenBSD: disklabel.h,v 1.7 2003/02/24 22:13:09 miod Exp $	*/
 
 /*
  * Copyright (c) 1996 Nivas Madhur

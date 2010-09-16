@@ -1,4 +1,4 @@
-/*	$OpenBSD: sunos_exec.c,v 1.18 2005/12/30 19:46:55 miod Exp $	*/
+/*	$OpenBSD: sunos_exec.c,v 1.17 2003/06/02 15:54:31 deraadt Exp $	*/
 /*	$NetBSD: sunos_exec.c,v 1.11 1996/05/05 12:01:47 briggs Exp $	*/
 
 /*

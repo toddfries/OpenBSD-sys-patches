@@ -128,7 +128,6 @@ userret(struct proc *p, register_t pc, u_quad_t oticks)
 	if (astpending) {
 		astpending = 0;
 		if (p->p_flag & P_OWEUPC) {
-			p->p_flag &= ~P_OWEUPC;
 			ADDUPROF(p);
 		}
 	}

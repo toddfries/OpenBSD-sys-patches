@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ze_vsbus.c,v 1.4 2006/08/30 19:28:13 miod Exp $	*/
+/*	$OpenBSD: if_ze_vsbus.c,v 1.3 2003/11/07 10:16:45 jmc Exp $	*/
 /*      $NetBSD: if_ze_vsbus.c,v 1.5 2000/07/26 21:50:49 matt Exp $ */
 /*
  * Copyright (c) 1999 Ludd, University of Lule}, Sweden. All rights reserved.

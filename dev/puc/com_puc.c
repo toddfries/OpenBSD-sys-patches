@@ -1,4 +1,4 @@
-/*	$OpenBSD: com_puc.c,v 1.14 2006/11/05 17:18:14 martin Exp $	*/
+/*	$OpenBSD: com_puc.c,v 1.13 2006/07/31 11:06:36 mickey Exp $	*/
 
 /*
  * Copyright (c) 1997 - 1999, Jason Downs.  All rights reserved.

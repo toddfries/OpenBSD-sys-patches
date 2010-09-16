@@ -1,5 +1,5 @@
 #! /usr/bin/awk -f
-#	$OpenBSD: devlist2h.awk,v 1.4 2006/08/10 23:44:16 miod Exp $
+#	$OpenBSD: devlist2h.awk,v 1.3 2005/05/13 14:54:44 miod Exp $
 #
 # Copyright (c) 2003, Miodrag Vallat.
 # All rights reserved.

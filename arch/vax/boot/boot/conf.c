@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.3 2002/06/11 09:36:23 hugh Exp $ */
+/*	$OpenBSD: conf.c,v 1.2 2000/10/04 04:36:29 bjc Exp $ */
 /*	$NetBSD: conf.c,v 1.10 2000/06/15 19:53:23 ragge Exp $ */
 /*
  * Copyright (c) 1994 Ludd, University of Lule}, Sweden.

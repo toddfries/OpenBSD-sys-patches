@@ -1,4 +1,4 @@
-/*	$OpenBSD: regnum.h,v 1.1 2004/08/06 21:12:19 pefo Exp $ */
+/*	$OpenBSD: regnum.h,v 1.2 1998/01/28 13:46:29 pefo Exp $ */
 
 /* Use Mips generic include file */
 

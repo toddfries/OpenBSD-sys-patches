@@ -6,6 +6,7 @@ all: siop.out osiop.out oosiop.out
 PROG=	ncr53cxxx
 MKSHARE=no
 MAN=
+CC=${HOSTCC}
 
 .include <bsd.prog.mk>
 

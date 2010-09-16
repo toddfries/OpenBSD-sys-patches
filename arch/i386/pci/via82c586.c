@@ -1,4 +1,4 @@
-/*	$OpenBSD: via82c586.c,v 1.10 2006/09/19 11:06:34 jsg Exp $	*/
+/*	$OpenBSD: via82c586.c,v 1.9 2002/03/14 01:26:33 millert Exp $	*/
 /*	$NetBSD: via82c586.c,v 1.2 2000/07/18 11:24:09 soda Exp $	*/
 
 /*-

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.9 2004/09/21 05:51:15 miod Exp $ */
+/*	$OpenBSD: cpu.c,v 1.8 2004/09/20 10:29:57 pefo Exp $ */
 
 /*
  * Copyright (c) 1997-2004 Opsycon AB (www.opsycon.se)

@@ -174,7 +174,7 @@ extern	int want_resched;	/* resched() was called */
  * buffer pages are invalid.  On the sparc, request an ast to send us
  * through trap(), marking the proc as needing a profiling tick.
  */
-#define	need_proftick(p)	((p)->p_flag |= P_OWEUPC, want_ast = 1)
+#define	need_proftick(p)	do { want_ast = 1; } while (0)
 
 /*
  * Notify the current process (p) that it has a signal pending,

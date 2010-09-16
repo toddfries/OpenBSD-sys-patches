@@ -1,4 +1,4 @@
-/*	$OpenBSD: process_machdep.c,v 1.13 2005/05/26 04:34:51 kettenis Exp $	*/
+/*	$OpenBSD: process_machdep.c,v 1.12 2005/05/10 11:32:51 mickey Exp $	*/
 
 /*
  * Copyright (c) 1999-2004 Michael Shalayeff

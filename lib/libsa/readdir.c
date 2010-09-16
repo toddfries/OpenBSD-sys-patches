@@ -1,4 +1,4 @@
-/*	$OpenBSD: readdir.c,v 1.8 2006/10/11 20:56:59 deraadt Exp $	*/
+/*	$OpenBSD: readdir.c,v 1.7 2003/08/11 06:23:09 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1996 Michael Shalayeff

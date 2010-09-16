@@ -1,4 +1,4 @@
-/*	$OpenBSD: Locore.c,v 1.10 2003/10/15 02:43:09 drahn Exp $	*/
+/*	$OpenBSD: Locore.c,v 1.9 2003/05/12 08:46:05 jason Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996 Wolfgang Solfrank.

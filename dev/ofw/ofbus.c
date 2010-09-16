@@ -1,4 +1,4 @@
-/*	$OpenBSD: ofbus.c,v 1.14 2004/11/29 12:50:05 jsg Exp $	*/
+/*	$OpenBSD: ofbus.c,v 1.13 2003/10/31 04:08:10 drahn Exp $	*/
 /*	$NetBSD: ofbus.c,v 1.3 1996/10/13 01:38:11 christos Exp $	*/
 
 /*

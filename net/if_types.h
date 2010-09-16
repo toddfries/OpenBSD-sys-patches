@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_types.h,v 1.18 2005/01/14 12:04:02 grange Exp $	*/
+/*	$OpenBSD: if_types.h,v 1.17 2004/11/18 16:49:57 mpf Exp $	*/
 /*	$NetBSD: if_types.h,v 1.17 2000/10/26 06:51:31 onoe Exp $	*/
 
 /*

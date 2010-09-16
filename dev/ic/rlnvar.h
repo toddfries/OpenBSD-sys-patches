@@ -1,4 +1,4 @@
-/*	$OpenBSD: rlnvar.h,v 1.7 2002/06/09 03:14:18 todd Exp $	*/
+/*	$OpenBSD: rlnvar.h,v 1.5 2002/03/14 01:26:55 millert Exp $	*/
 /*
  * David Leonard <d@openbsd.org>, 1999. Public domain.
  *

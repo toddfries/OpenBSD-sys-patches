@@ -1,4 +1,4 @@
-/*	$OpenBSD: miidevs.h,v 1.88 2006/11/28 18:20:03 brad Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.

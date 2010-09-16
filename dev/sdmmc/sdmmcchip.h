@@ -1,4 +1,4 @@
-/*	$OpenBSD: sdmmcchip.h,v 1.2 2006/07/18 04:10:35 uwe Exp $	*/
+/*	$OpenBSD: sdmmcchip.h,v 1.1 2006/05/28 17:21:14 uwe Exp $	*/
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>

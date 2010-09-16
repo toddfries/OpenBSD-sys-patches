@@ -1,4 +1,4 @@
-/*	$OpenBSD: sony8x16.h,v 1.3 2006/08/06 16:00:46 miod Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD: sony8x16.h,v 1.8 2005/12/11 12:24:12 christos Exp $	*/
 /*
  * Copyright (c) 1992, 1993

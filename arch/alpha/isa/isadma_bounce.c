@@ -1,4 +1,4 @@
-/*	$OpenBSD: isadma_bounce.c,v 1.6 2006/05/12 20:48:19 brad Exp $	*/
+/*	$OpenBSD: isadma_bounce.c,v 1.5 2002/06/25 21:33:21 miod Exp $	*/
 /* $NetBSD: isadma_bounce.c,v 1.3 2000/06/29 09:02:57 mrg Exp $ */
 
 /*-

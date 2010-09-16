@@ -1,4 +1,4 @@
-/*	$OpenBSD: bhareg.h,v 1.2 2003/10/21 18:58:49 jmc Exp $	*/
+/*	$OpenBSD: bhareg.h,v 1.1 2002/01/24 22:38:03 mickey Exp $	*/
 /*	$NetBSD: bhareg.h,v 1.12 1998/08/17 00:26:33 mycroft Exp $	*/
 
 /*-

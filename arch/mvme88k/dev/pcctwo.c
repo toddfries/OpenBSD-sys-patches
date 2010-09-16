@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcctwo.c,v 1.29 2006/05/08 14:36:10 miod Exp $ */
+/*	$OpenBSD: pcctwo.c,v 1.28 2006/04/27 20:19:28 miod Exp $ */
 /*
  * Copyright (c) 1995 Theo de Raadt
  * All rights reserved.

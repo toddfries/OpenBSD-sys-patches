@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_atureg.h,v 1.28 2006/07/18 18:20:17 mk Exp $ */
+/*	$OpenBSD: if_atureg.h,v 1.27 2006/06/27 04:21:13 jsg Exp $ */
 /*
  * Copyright (c) 2003
  *	Daan Vreeken <Danovitsch@Vitsch.net>.  All rights reserved.

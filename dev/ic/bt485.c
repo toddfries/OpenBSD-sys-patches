@@ -1,4 +1,4 @@
-/* $OpenBSD: bt485.c,v 1.12 2002/11/09 22:51:48 miod Exp $ */
+/* $OpenBSD: bt485.c,v 1.11 2002/08/02 16:13:07 millert Exp $ */
 /* $NetBSD: bt485.c,v 1.2 2000/04/02 18:55:01 nathanw Exp $ */
 
 /*

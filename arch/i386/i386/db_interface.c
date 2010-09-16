@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_interface.c,v 1.23 2006/11/29 22:40:13 miod Exp $	*/
+/*	$OpenBSD: db_interface.c,v 1.22 2006/10/24 19:03:10 marco Exp $	*/
 /*	$NetBSD: db_interface.c,v 1.22 1996/05/03 19:42:00 christos Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vxt.c,v 1.1 2006/08/27 16:55:41 miod Exp $	*/
+/*	$OpenBSD$	*/
 /*
  * Copyright (c) 1998 Ludd, University of Lule}, Sweden.
  * All rights reserved.

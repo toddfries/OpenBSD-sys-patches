@@ -1,4 +1,4 @@
-/*	$OpenBSD: ns16550.c,v 1.2 2006/07/29 15:01:49 kettenis Exp $	*/
+/*	$OpenBSD: ns16550.c,v 1.1 2006/07/28 17:12:06 kettenis Exp $	*/
 /*	$NetBSD: ns16550.c,v 1.3 2005/12/24 20:07:03 perry Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mtio.h,v 1.8 2007/01/05 00:42:47 krw Exp $	*/
+/*	$OpenBSD: mtio.h,v 1.7 2006/06/01 05:42:01 krw Exp $	*/
 /*	$NetBSD: mtio.h,v 1.14 1997/04/15 06:50:19 lukem Exp $	*/
 
 /*

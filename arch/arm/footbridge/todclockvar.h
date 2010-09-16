@@ -1,4 +1,4 @@
-/*	$OpenBSD: todclockvar.h,v 1.3 2006/05/26 20:34:01 miod Exp $	*/
+/*	$OpenBSD: todclockvar.h,v 1.2 2004/05/19 03:17:07 drahn Exp $	*/
 /*	$NetBSD: todclockvar.h,v 1.1 2002/02/10 12:26:00 chris Exp $	*/
 
 /*

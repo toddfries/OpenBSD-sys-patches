@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcic2.c,v 1.7 2005/11/23 11:39:37 mickey Exp $	*/
+/*	$OpenBSD: tcic2.c,v 1.6 2004/07/22 15:11:37 miod Exp $	*/
 /*	$NetBSD: tcic2.c,v 1.3 2000/01/13 09:38:17 joda Exp $	*/
 
 #undef	TCICDEBUG

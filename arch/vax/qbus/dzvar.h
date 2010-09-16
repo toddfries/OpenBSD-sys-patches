@@ -1,4 +1,4 @@
-/*	$OpenBSD: dzvar.h,v 1.6 2004/07/07 23:10:46 deraadt Exp $	*/
+/*	$OpenBSD: dzvar.h,v 1.5 2003/06/02 23:27:58 millert Exp $	*/
 /*	$NetBSD: dzvar.h,v 1.8 2000/06/04 02:14:12 matt Exp $	*/
 /*
  * Copyright (c) 1996  Ken C. Wellsch.  All rights reserved.

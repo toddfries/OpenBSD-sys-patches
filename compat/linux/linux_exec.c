@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_exec.c,v 1.25 2006/01/19 17:54:52 mickey Exp $	*/
+/*	$OpenBSD: linux_exec.c,v 1.24 2005/12/30 19:46:55 miod Exp $	*/
 /*	$NetBSD: linux_exec.c,v 1.13 1996/04/05 00:01:10 christos Exp $	*/
 
 /*-

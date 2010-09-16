@@ -1,4 +1,4 @@
-/*	$OpenBSD: svr4_ioctl.h,v 1.5 2002/03/14 01:26:51 millert Exp $	*/
+/*	$OpenBSD: svr4_ioctl.h,v 1.4 1997/11/04 07:45:35 niklas Exp $	*/
 /*	$NetBSD: svr4_ioctl.h,v 1.5 1996/04/11 12:54:43 christos Exp $	 */
 
 /*

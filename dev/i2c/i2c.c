@@ -1,4 +1,4 @@
-/*	$OpenBSD: i2c.c,v 1.14 2006/02/26 20:24:46 deraadt Exp $	*/
+/*	$OpenBSD: i2c.c,v 1.13 2006/02/08 23:15:58 dlg Exp $	*/
 /*	$NetBSD: i2c.c,v 1.1 2003/09/30 00:35:31 thorpej Exp $	*/
 
 /*

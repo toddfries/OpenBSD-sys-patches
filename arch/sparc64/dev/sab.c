@@ -1,4 +1,4 @@
-/*	$OpenBSD: sab.c,v 1.19 2006/05/28 22:41:44 jason Exp $	*/
+/*	$OpenBSD: sab.c,v 1.18 2006/05/28 17:10:52 jason Exp $	*/
 
 /*
  * Copyright (c) 2001 Jason L. Wright (jason@thought.net)

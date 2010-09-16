@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipx_pcb.h,v 1.6 2003/06/02 23:28:16 millert Exp $	*/
+/*	$OpenBSD: ipx_pcb.h,v 1.5 2002/03/14 03:16:12 millert Exp $	*/
 
 /*-
  *

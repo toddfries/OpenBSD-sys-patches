@@ -1,5 +1,5 @@
 #! /usr/bin/awk -f
-#	$OpenBSD: makemap.awk,v 1.6 2005/05/23 21:33:03 miod Exp $
+#	$OpenBSD: makemap.awk,v 1.5 2005/05/19 17:49:54 miod Exp $
 #
 # Copyright (c) 2005, Miodrag Vallat
 #
@@ -31,7 +31,7 @@
 #
 
 BEGIN {
-	rcsid = "$OpenBSD: makemap.awk,v 1.6 2005/05/23 21:33:03 miod Exp $"
+	rcsid = "$OpenBSD: makemap.awk,v 1.5 2005/05/19 17:49:54 miod Exp $"
 	ifdepth = 0
 	ignore = 0
 	declk = 0

@@ -81,6 +81,11 @@ device	ums: hid, wsmousedev
 attach	ums at uhidbus
 file	dev/usb/ums.c			ums
 
+# USB Touchscreen
+device	uts: wsmousedev
+attach	uts at uhub
+file	dev/usb/uts.c			uts
+
 # Cypress microcontroller based serial adpaters
 device	ucycom: hid, ucombus
 attach	ucycom at uhidbus

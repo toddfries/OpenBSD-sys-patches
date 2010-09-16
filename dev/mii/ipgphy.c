@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipgphy.c,v 1.7 2006/12/31 15:04:33 krw Exp $	*/
+/*	$OpenBSD: ipgphy.c,v 1.6 2006/12/30 23:04:39 kettenis Exp $	*/
 
 /*-
  * Copyright (c) 2006, Pyun YongHyeon <yongari@FreeBSD.org>

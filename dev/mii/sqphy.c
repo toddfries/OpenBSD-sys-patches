@@ -1,4 +1,4 @@
-/*	$OpenBSD: sqphy.c,v 1.15 2006/12/27 19:11:09 kettenis Exp $	*/
+/*	$OpenBSD: sqphy.c,v 1.14 2005/02/05 04:28:23 brad Exp $	*/
 /*	$NetBSD: sqphy.c,v 1.17 2000/02/02 23:34:57 thorpej Exp $	*/
 
 /*-

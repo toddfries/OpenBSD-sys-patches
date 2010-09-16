@@ -1,4 +1,4 @@
-/*	$OpenBSD: pi2c.c,v 1.5 2006/01/01 20:52:25 deraadt Exp $	*/
+/*	$OpenBSD: pi2c.c,v 1.4 2005/11/28 23:56:51 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2005 Mark Kettenis

@@ -1,4 +1,4 @@
-/*	$OpenBSD: safte.h,v 1.6 2006/01/08 06:28:42 dlg Exp $ */
+/*	$OpenBSD: safte.h,v 1.5 2005/08/22 04:23:58 david Exp $ */
 
 /*
  * Copyright (c) 2005 David Gwynne <dlg@openbsd.org>

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_an_pci.c,v 1.16 2006/03/10 00:27:56 jsg Exp $	*/
+/*	$OpenBSD: if_an_pci.c,v 1.15 2006/01/30 11:41:00 jsg Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999

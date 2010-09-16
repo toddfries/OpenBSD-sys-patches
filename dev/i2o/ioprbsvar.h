@@ -1,4 +1,4 @@
-/*	$OpenBSD: ioprbsvar.h,v 1.2 2005/09/15 05:33:39 krw Exp $	*/
+/*	$OpenBSD: ioprbsvar.h,v 1.1 2001/06/29 06:05:03 niklas Exp $	*/
 
 /*
  * Copyright (c) 2001 Niklas Hallqvist

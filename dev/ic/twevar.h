@@ -1,4 +1,4 @@
-/*	$OpenBSD: twevar.h,v 1.7 2005/09/15 05:33:39 krw Exp $	*/
+/*	$OpenBSD: twevar.h,v 1.6 2003/06/02 19:24:22 mickey Exp $	*/
 
 /*
  * Copyright (c) 2000 Michael Shalayeff

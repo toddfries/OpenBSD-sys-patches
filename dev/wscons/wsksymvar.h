@@ -1,4 +1,4 @@
-/*	$OpenBSD: wsksymvar.h,v 1.5 2006/05/29 20:23:13 miod Exp $	*/
+/*	$OpenBSD: wsksymvar.h,v 1.4 2002/03/14 01:27:03 millert Exp $	*/
 /*	$NetBSD: wsksymvar.h,v 1.8.4.1 2000/07/07 09:50:21 hannken Exp $ */
 
 /*-

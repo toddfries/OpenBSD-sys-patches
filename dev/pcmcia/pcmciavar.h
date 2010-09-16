@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcmciavar.h,v 1.20 2005/11/23 11:39:37 mickey Exp $	*/
+/*	$OpenBSD: pcmciavar.h,v 1.19 2005/08/05 18:21:04 fgsch Exp $	*/
 /*	$NetBSD: pcmciavar.h,v 1.5 1998/07/19 17:28:17 christos Exp $	*/
 
 /*

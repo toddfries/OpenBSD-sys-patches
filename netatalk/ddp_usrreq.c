@@ -1,4 +1,4 @@
-/*	$OpenBSD: ddp_usrreq.c,v 1.7 2003/09/02 16:57:29 tedu Exp $	*/
+/*	$OpenBSD: ddp_usrreq.c,v 1.6 2002/03/14 01:27:10 millert Exp $	*/
 
 /*
  * Copyright (c) 1990,1994 Regents of The University of Michigan.

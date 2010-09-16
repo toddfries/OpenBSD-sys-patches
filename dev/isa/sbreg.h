@@ -1,4 +1,4 @@
-/*	$OpenBSD: sbreg.h,v 1.6 2002/07/02 19:38:55 nate Exp $	*/
+/*	$OpenBSD: sbreg.h,v 1.5 2002/06/06 20:58:07 aaron Exp $	*/
 /*	$NetBSD: sbreg.h,v 1.24 1997/08/24 23:24:51 augustss Exp $	*/
 
 /*

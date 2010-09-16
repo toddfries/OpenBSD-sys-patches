@@ -1,4 +1,4 @@
-/*	$OpenBSD: ofrtc.c,v 1.6 2004/11/29 12:50:05 jsg Exp $	*/
+/*	$OpenBSD: ofrtc.c,v 1.5 2002/03/14 01:26:58 millert Exp $	*/
 /*	$NetBSD: ofrtc.c,v 1.3 1996/10/13 01:38:14 christos Exp $	*/
 
 /*

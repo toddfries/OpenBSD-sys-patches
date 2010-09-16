@@ -1,4 +1,4 @@
-/*	$OpenBSD: memset.c,v 1.5 2004/08/07 00:38:32 deraadt Exp $	*/
+/*	$OpenBSD: memset.c,v 1.4 2003/06/02 23:28:08 millert Exp $	*/
 /*	$NetBSD: memset.c,v 1.6 1998/03/27 05:35:47 cgd Exp $	*/
 
 /*-

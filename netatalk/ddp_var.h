@@ -1,4 +1,4 @@
-/*	$OpenBSD: ddp_var.h,v 1.1 1997/07/23 03:39:54 denny Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * Copyright (c) 1990,1994 Regents of The University of Michigan.

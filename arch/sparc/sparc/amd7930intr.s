@@ -1,4 +1,4 @@
-/*	$OpenBSD: amd7930intr.s,v 1.9 2004/09/29 07:35:13 miod Exp $	*/
+/*	$OpenBSD: amd7930intr.s,v 1.8 2003/06/02 23:27:55 millert Exp $	*/
 /*	$NetBSD: amd7930intr.s,v 1.10 1997/03/11 01:03:07 pk Exp $	*/
 /*
  * Copyright (c) 1995 Rolf Grossmann.

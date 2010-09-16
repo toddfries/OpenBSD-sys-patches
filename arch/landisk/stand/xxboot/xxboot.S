@@ -1,4 +1,4 @@
-/*	$OpenBSD: xxboot.S,v 1.1 2006/11/08 17:46:56 deraadt Exp $	*/
+/*	$OpenBSD: xxboot.S,v 1.1 2006/10/06 21:48:50 mickey Exp $	*/
 /*	$NetBSD: xxboot.S,v 1.1 2006/09/01 21:26:19 uwe Exp $	*/
 
 /*-

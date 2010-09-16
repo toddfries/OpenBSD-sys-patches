@@ -1,4 +1,4 @@
-/*	$OpenBSD: lp.c,v 1.10 2004/07/30 22:29:45 miod Exp $ */
+/*	$OpenBSD: lp.c,v 1.9 2004/07/02 17:57:29 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt

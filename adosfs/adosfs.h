@@ -1,4 +1,4 @@
-/*	$OpenBSD: adosfs.h,v 1.12 2003/11/13 17:23:57 drahn Exp $	*/
+/*	$OpenBSD: adosfs.h,v 1.11 2002/03/14 01:26:25 millert Exp $	*/
 /*	$NetBSD: adosfs.h,v 1.12 1996/10/08 22:18:02 thorpej Exp $	*/
 
 /*

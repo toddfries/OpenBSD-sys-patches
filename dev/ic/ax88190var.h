@@ -1,4 +1,4 @@
-/*	$OpenBSD: ax88190var.h,v 1.1 2001/08/18 16:15:39 aaron Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD$	*/
 
 /*-

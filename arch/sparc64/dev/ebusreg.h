@@ -79,6 +79,14 @@ struct ebus_ranges {
 	u_int32_t	size;
 };
 
+struct ebus_mainbus_ranges {
+	u_int32_t	child_hi;
+	u_int32_t	child_lo;
+	u_int32_t	phys_hi;
+	u_int32_t	phys_lo;
+	u_int32_t	size;
+};
+
 struct ebus_interrupt_map {
 	u_int32_t	hi;		/* high phys addr mask */
 	u_int32_t	lo;		/* low phys addr mask */

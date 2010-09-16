@@ -1,4 +1,4 @@
-/* $OpenBSD: amltypes.h,v 1.25 2007/02/06 18:56:31 jordan Exp $ */
+/* $OpenBSD: amltypes.h,v 1.24 2007/01/23 04:05:58 jordan Exp $ */
 /*
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
  *

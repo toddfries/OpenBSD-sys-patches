@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_enc.c,v 1.45 2006/12/12 15:08:36 reyk Exp $	*/
+/*	$OpenBSD: if_enc.c,v 1.44 2006/06/28 12:02:26 claudio Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and 

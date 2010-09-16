@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipx_usrreq.c,v 1.15 2006/03/05 21:48:57 miod Exp $	*/
+/*	$OpenBSD: ipx_usrreq.c,v 1.14 2004/01/03 14:08:54 espie Exp $	*/
 
 /*-
  *

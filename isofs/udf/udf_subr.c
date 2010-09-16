@@ -1,4 +1,4 @@
-/*	$OpenBSD: udf_subr.c,v 1.11 2006/07/11 22:02:08 pedro Exp $	*/
+/*	$OpenBSD: udf_subr.c,v 1.10 2006/07/11 16:24:09 pedro Exp $	*/
 
 /*
  * Copyright (c) 2006, Miodrag Vallat

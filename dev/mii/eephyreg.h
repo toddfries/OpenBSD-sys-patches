@@ -1,4 +1,4 @@
-/*	$OpenBSD: eephyreg.h,v 1.5 2006/11/28 18:29:29 brad Exp $	*/
+/*	$OpenBSD: eephyreg.h,v 1.4 2003/08/01 04:46:13 nate Exp $	*/
 /*
  * Principal Author: Parag Patel
  * Copyright (c) 2001

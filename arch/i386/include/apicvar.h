@@ -1,4 +1,4 @@
-/*	$OpenBSD: apicvar.h,v 1.3 2006/05/09 18:41:22 kettenis Exp $	*/
+/*	$OpenBSD: apicvar.h,v 1.2 2004/06/13 21:49:16 niklas Exp $	*/
 /* $NetBSD: apicvar.h,v 1.1.2.3 2000/02/27 20:25:00 sommerfeld Exp $ */
 
 /*-

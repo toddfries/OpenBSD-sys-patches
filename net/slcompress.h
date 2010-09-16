@@ -1,4 +1,4 @@
-/*	$OpenBSD: slcompress.h,v 1.7 2003/06/02 23:28:12 millert Exp $	*/
+/*	$OpenBSD: slcompress.h,v 1.6 2002/06/14 21:35:00 todd Exp $	*/
 /*	$NetBSD: slcompress.h,v 1.11 1997/05/17 21:12:11 christos Exp $	*/
 
 /*

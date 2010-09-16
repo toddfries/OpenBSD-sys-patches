@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd9660_lookup.c,v 1.12 2006/01/25 21:15:55 mickey Exp $	*/
+/*	$OpenBSD: cd9660_lookup.c,v 1.11 2003/06/02 23:28:05 millert Exp $	*/
 /*	$NetBSD: cd9660_lookup.c,v 1.18 1997/05/08 16:19:59 mycroft Exp $	*/
 
 /*-

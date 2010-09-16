@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.8 2005/08/10 16:58:42 todd Exp $
+#	$OpenBSD: Makefile,v 1.7 2001/01/16 15:36:36 art Exp $
 #	$NetBSD: Makefile,v 1.12 1997/04/17 07:27:49 thorpej Exp $
 
 S=	${.CURDIR}/../../../..

@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.h,v 1.2 2007/01/29 14:18:00 aoyama Exp $	*/
+/*	$OpenBSD: conf.h,v 1.1 2004/05/07 15:08:25 aoyama Exp $	*/
 /*
  * Copyright (c) 2004, Miodrag Vallat.
  * All rights reserved.

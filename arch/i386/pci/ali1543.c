@@ -1,4 +1,4 @@
-/*	$OpenBSD: ali1543.c,v 1.2 2002/05/02 17:46:00 mickey Exp $	*/
+/*	$OpenBSD: ali1543.c,v 1.1 2001/10/25 19:03:49 mickey Exp $	*/
 /*	$NetBSD: ali1543.c,v 1.2 2001/09/13 14:00:52 tshiozak Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipx_outputfl.c,v 1.8 2006/03/05 21:48:57 miod Exp $	*/
+/*	$OpenBSD: ipx_outputfl.c,v 1.7 2003/12/10 07:22:43 itojun Exp $	*/
 
 /*-
  *

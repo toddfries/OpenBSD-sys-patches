@@ -1,4 +1,4 @@
-/* $OpenBSD: if_bcereg.h,v 1.3 2006/11/08 01:32:00 brad Exp $ */
+/* $OpenBSD: if_bcereg.h,v 1.2 2006/02/24 00:57:49 brad Exp $ */
 /* $NetBSD: if_bcereg.h,v 1.3 2003/09/29 01:53:02 mrg Exp $	 */
 
 /*

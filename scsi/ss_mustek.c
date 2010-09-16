@@ -1,4 +1,4 @@
-/*	$OpenBSD: ss_mustek.c,v 1.14 2006/11/28 16:56:50 dlg Exp $	*/
+/*	$OpenBSD: ss_mustek.c,v 1.13 2006/05/11 00:45:59 krw Exp $	*/
 /*	$NetBSD: ss_mustek.c,v 1.4 1996/05/05 19:52:57 christos Exp $	*/
 
 /*

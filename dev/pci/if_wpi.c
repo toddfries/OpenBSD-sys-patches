@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wpi.c,v 1.38 2007/01/03 18:19:06 claudio Exp $	*/
+/*	$OpenBSD: if_wpi.c,v 1.37 2006/11/26 11:14:22 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 2006

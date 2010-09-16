@@ -1,4 +1,4 @@
-/*	$OpenBSD: arcbios.c,v 1.4 2004/10/20 12:49:15 pefo Exp $	*/
+/*	$OpenBSD: arcbios.c,v 1.3 2004/09/16 18:54:48 pefo Exp $	*/
 /*-
  * Copyright (c) 1996 M. Warner Losh.  All rights reserved.
  * Copyright (c) 1996-2004 Opsycon AB.  All rights reserved.

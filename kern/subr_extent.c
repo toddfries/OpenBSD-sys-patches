@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_extent.c,v 1.33 2006/06/04 22:47:16 miod Exp $	*/
+/*	$OpenBSD: subr_extent.c,v 1.32 2006/03/16 22:14:28 miod Exp $	*/
 /*	$NetBSD: subr_extent.c,v 1.7 1996/11/21 18:46:34 cgd Exp $	*/
 
 /*-

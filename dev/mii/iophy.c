@@ -1,4 +1,4 @@
-/*	$OpenBSD: iophy.c,v 1.13 2006/12/27 19:11:08 kettenis Exp $	*/
+/*	$OpenBSD: iophy.c,v 1.12 2005/02/19 06:00:04 brad Exp $	*/
 /*	$NetBSD: iophy.c,v 1.8 2000/02/02 23:34:56 thorpej Exp $	*/
 
 /*

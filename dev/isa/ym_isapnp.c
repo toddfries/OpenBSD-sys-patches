@@ -1,4 +1,4 @@
-/*	$OpenBSD: ym_isapnp.c,v 1.8 2002/03/14 01:26:57 millert Exp $ */
+/*	$OpenBSD: ym_isapnp.c,v 1.7 1999/08/05 05:32:41 deraadt Exp $ */
 
 
 /*

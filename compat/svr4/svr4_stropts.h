@@ -1,4 +1,4 @@
-/*	$OpenBSD: svr4_stropts.h,v 1.5 2002/03/14 01:26:51 millert Exp $	*/
+/*	$OpenBSD: svr4_stropts.h,v 1.4 1997/02/13 19:45:25 niklas Exp $	*/
 /*	$NetBSD: svr4_stropts.h,v 1.9 1996/10/28 08:46:38 fvdl Exp $	 */
 
 /*

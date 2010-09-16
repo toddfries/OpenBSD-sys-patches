@@ -1,4 +1,4 @@
-/*	$OpenBSD: smc83c170var.h,v 1.1 2005/05/10 01:16:32 brad Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD: smc83c170var.h,v 1.9 2005/02/04 02:10:37 perry Exp $	*/
 
 /*-

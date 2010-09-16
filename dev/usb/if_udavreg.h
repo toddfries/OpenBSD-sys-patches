@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_udavreg.h,v 1.4 2006/03/07 04:41:19 krw Exp $ */
+/*	$OpenBSD: if_udavreg.h,v 1.3 2005/01/30 13:22:58 dlg Exp $ */
 /*	$NetBSD: if_udavreg.h,v 1.2 2003/09/04 15:17:39 tsutsui Exp $	*/
 /*	$nabe: if_udavreg.h,v 1.2 2003/08/21 16:26:40 nabe Exp $	*/
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: fhc.c,v 1.12 2004/10/01 18:18:49 jason Exp $	*/
+/*	$OpenBSD: fhc.c,v 1.11 2004/09/28 18:37:43 jason Exp $	*/
 
 /*
  * Copyright (c) 2004 Jason L. Wright (jason@thought.net)

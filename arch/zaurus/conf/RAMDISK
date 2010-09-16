@@ -98,6 +98,11 @@ upl*		at uhub?		# Prolific PL2301/PL2302 host-to-host
 umass*		at uhub?		# USB Mass Storage devices
 scsibus*	at umass?
 
+# SD/MMC support
+pxammc0		at pxaip?		# MMC/SD/SDIO controller
+sdmmc*		at pxammc?		# SD/MMC bus
+scsibus*	at sdmmc?		# SCSI emulation
+
 sd*		at scsibus?
 #st*		at scsibus?
 cd*		at scsibus?

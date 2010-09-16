@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_exreg.h,v 1.1 1997/09/11 21:30:49 gene Exp $	*/
+/*	$OpenBSD$	*/
 /*
  * Copyright (c) 1996, Javier Martín Rueda (jmrueda@diatel.upm.es)
  * All rights reserved.

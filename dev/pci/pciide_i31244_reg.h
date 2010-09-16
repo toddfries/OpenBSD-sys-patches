@@ -1,4 +1,4 @@
-/*	$OpenBSD: pciide_i31244_reg.h,v 1.2 2006/11/19 20:09:59 brad Exp $	*/
+/*	$OpenBSD: pciide_i31244_reg.h,v 1.1 2003/06/07 20:00:32 grange Exp $	*/
 /*	$NetBSD: pciide_i31244_reg.h,v 1.2 2005/02/11 21:12:32 rearnsha Exp $	*/
 
 /*

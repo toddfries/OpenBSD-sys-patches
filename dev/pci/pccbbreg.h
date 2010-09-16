@@ -1,4 +1,4 @@
-/*	$OpenBSD: pccbbreg.h,v 1.9 2006/04/26 21:21:53 brad Exp $	*/
+/*	$OpenBSD: pccbbreg.h,v 1.8 2005/10/02 18:14:26 fgsch Exp $	*/
 /*	$NetBSD: pccbbreg.h,v 1.5 2000/06/07 09:02:47 haya Exp $	*/
 /*
  * Copyright (c) 1999 HAYAKAWA Koichi.  All rights reserved.

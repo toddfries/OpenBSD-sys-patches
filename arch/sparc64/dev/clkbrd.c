@@ -1,4 +1,4 @@
-/*	$OpenBSD: clkbrd.c,v 1.5 2004/10/01 18:18:49 jason Exp $	*/
+/*	$OpenBSD: clkbrd.c,v 1.4 2004/09/29 17:43:33 jason Exp $	*/
 
 /*
  * Copyright (c) 2004 Jason L. Wright (jason@thought.net)

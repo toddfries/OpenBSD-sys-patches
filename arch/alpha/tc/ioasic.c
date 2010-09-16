@@ -1,4 +1,4 @@
-/* $OpenBSD: ioasic.c,v 1.12 2006/03/04 12:33:17 miod Exp $ */
+/* $OpenBSD: ioasic.c,v 1.11 2004/06/28 02:28:43 aaron Exp $ */
 /* $NetBSD: ioasic.c,v 1.34 2000/07/18 06:10:06 thorpej Exp $ */
 
 /*-

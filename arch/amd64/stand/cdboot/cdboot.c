@@ -1,4 +1,4 @@
-/*	$OpenBSD: cdboot.c,v 1.1 2004/08/24 15:34:59 tom Exp $	*/
+/*	$OpenBSD: boot.c,v 1.32 2004/06/24 22:32:26 tom Exp $	*/
 
 /*
  * Copyright (c) 2003 Dale Rahn

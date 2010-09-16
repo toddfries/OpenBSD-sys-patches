@@ -1,4 +1,4 @@
-/*	$OpenBSD: in_cksum.S,v 1.2 2005/05/01 05:42:43 brad Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD: in_cksum.S,v 1.2 2001/08/10 20:53:11 eeh Exp $ */
 
 /*

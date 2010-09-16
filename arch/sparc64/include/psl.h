@@ -1,4 +1,4 @@
-/*	$OpenBSD: psl.h,v 1.22 2006/12/14 15:10:32 kettenis Exp $	*/
+/*	$OpenBSD: psl.h,v 1.21 2006/05/20 14:18:35 miod Exp $	*/
 /*	$NetBSD: psl.h,v 1.20 2001/04/13 23:30:05 thorpej Exp $ */
 
 /*

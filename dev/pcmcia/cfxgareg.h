@@ -1,4 +1,4 @@
-/*	$OpenBSD: cfxgareg.h,v 1.5 2006/11/28 12:01:27 miod Exp $	*/
+/*	$OpenBSD: cfxgareg.h,v 1.4 2006/11/27 19:31:46 miod Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006, Matthieu Herrb and Miodrag Vallat

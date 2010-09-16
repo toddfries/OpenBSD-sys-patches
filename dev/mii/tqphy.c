@@ -1,4 +1,4 @@
-/*	$OpenBSD: tqphy.c,v 1.11 2006/12/27 19:11:09 kettenis Exp $	*/
+/*	$OpenBSD: tqphy.c,v 1.10 2005/02/19 06:00:04 brad Exp $	*/
 /*	$NetBSD: tqphy.c,v 1.9 2000/02/02 23:34:57 thorpej Exp $	*/
 
 /*

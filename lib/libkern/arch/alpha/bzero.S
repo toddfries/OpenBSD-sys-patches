@@ -1,4 +1,4 @@
-/*	$OpenBSD: bzero.S,v 1.2 1996/10/31 00:43:16 niklas Exp $	*/
+/*	$OpenBSD: bzero.S,v 1.2 1996/10/17 04:26:24 cgd Exp $	*/
 /*	$NetBSD: bzero.S,v 1.2 1996/10/17 04:26:24 cgd Exp $	*/
 
 /*

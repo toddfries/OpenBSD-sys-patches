@@ -1,4 +1,4 @@
-/*	$OpenBSD: nofnvar.h,v 1.6 2003/06/02 19:08:58 jason Exp $	*/
+/*	$OpenBSD: nofnvar.h,v 1.5 2002/09/24 18:33:26 jason Exp $	*/
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)

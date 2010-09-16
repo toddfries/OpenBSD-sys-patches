@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.67 2007/02/18 14:18:28 krw Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.66 2007/02/18 13:49:22 krw Exp $	*/
 /*	$NetBSD: disksubr.c,v 1.21 1996/05/03 19:42:03 christos Exp $	*/
 
 /*

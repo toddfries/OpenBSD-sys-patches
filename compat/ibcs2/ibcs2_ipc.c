@@ -1,4 +1,4 @@
-/*	$OpenBSD: ibcs2_ipc.c,v 1.7 2002/03/14 01:26:50 millert Exp $	*/
+/*	$OpenBSD: ibcs2_ipc.c,v 1.6 2001/11/06 19:53:17 miod Exp $	*/
 /*	$NetBSD: ibcs2_ipc.c,v 1.7 1997/01/18 01:51:41 mycroft Exp $	*/
 
 /*

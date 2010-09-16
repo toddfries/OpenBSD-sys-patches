@@ -1,4 +1,4 @@
-/* $OpenBSD: dsdt.c,v 1.85 2007/02/27 20:22:23 deraadt Exp $ */
+/* $OpenBSD: dsdt.c,v 1.86 2007/03/23 05:43:46 jordan Exp $ */
 /*
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
  *
@@ -3070,6 +3070,11 @@ aml_parseref(struct aml_scope *scope, int opcode, struct aml_value *res)
 		aml_parseterm(scope, res);
 		aml_parsetarget(scope, tmparg, NULL);
 
+		while (tmparg->type == AML_OBJTYPE_OBJREF) {
+			if (tmparg->v_objref.index != -1)
+		    		break;
+			tmparg = tmparg->v_objref.ref;
+		}
 		aml_setvalue(scope, tmparg, res, 0);
 		break;
 	case AMLOP_REFOF:
@@ -3448,9 +3453,6 @@ aml_parse_resource(int length, uint8_t *buffer,
 
 	return 0;
 }
-
-void	aml_foreachpkg(struct aml_value *, int,
-	    void (*fn)(struct aml_value *, void *), void *);
 
 void
 aml_foreachpkg(struct aml_value *pkg, int start, 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: qereg.h,v 1.7 2003/06/02 18:40:59 jason Exp $	*/
+/*	$OpenBSD: qereg.h,v 1.6 2001/01/30 07:17:07 jason Exp $	*/
 
 /*
  * Copyright (c) 1998, 2000 Jason L. Wright.

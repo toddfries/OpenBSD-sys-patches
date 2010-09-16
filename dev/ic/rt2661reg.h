@@ -1,4 +1,4 @@
-/*	$OpenBSD: rt2661reg.h,v 1.9 2006/08/09 07:46:37 damien Exp $	*/
+/*	$OpenBSD: rt2661reg.h,v 1.8 2006/06/18 18:44:04 damien Exp $	*/
 
 /*-
  * Copyright (c) 2006

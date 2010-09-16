@@ -1,4 +1,4 @@
-/*	$OpenBSD: netfread.c,v 1.1 2004/01/28 00:27:44 miod Exp $	*/
+/*	$OpenBSD: netfread.c,v 1.3 2004/01/24 21:12:38 miod Exp $	*/
 
 /*
  * bug routines -- assumes that the necessary sections of memory

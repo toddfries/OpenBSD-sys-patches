@@ -174,7 +174,7 @@ extern int mmumod;
  * early in locore.s after the machine type has been detected.
  *
  * Note that whenever the macros defined below evaluate to expressions
- * involving variables, the kernel will perform slighly worse due to the
+ * involving variables, the kernel will perform slightly worse due to the
  * extra memory references they'll generate.
  */
 #if   defined(SUN4M) && defined(SUN4C) && defined(SUN4)

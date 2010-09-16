@@ -1,4 +1,4 @@
-/*	$OpenBSD: obio.c,v 1.1 2005/04/20 01:00:16 miod Exp $	*/
+/*	$OpenBSD$	*/
 /*	OpenBSD: obio.c,v 1.16 2004/09/29 07:35:11 miod Exp 	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vectors_88110.S,v 1.4 2006/05/15 05:34:57 miod Exp $	*/
+/*	$OpenBSD: vectors_88110.S,v 1.3 2006/05/08 14:03:35 miod Exp $	*/
 /*
  * Mach Operating System
  * Copyright (c) 1991, 1992 Carnegie Mellon University

@@ -1,4 +1,4 @@
-/*	$OpenBSD: devreg.c,v 1.1.1.1 2006/10/06 21:02:55 miod Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD: devreg.c,v 1.6 2006/03/04 01:13:35 uwe Exp $	*/
 
 /*-

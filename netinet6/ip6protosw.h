@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6protosw.h,v 1.7 2003/06/02 23:28:16 millert Exp $	*/
+/*	$OpenBSD: ip6protosw.h,v 1.6 2002/03/15 01:20:04 millert Exp $	*/
 /*	$KAME: ip6protosw.h,v 1.22 2001/02/08 18:02:08 itojun Exp $	*/
 
 /*

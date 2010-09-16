@@ -319,7 +319,7 @@ int data;
 
 		if (sc->dx || dy || changed)
 			wsmouse_input(sc->sc_wsmousedev,
-				      sc->buttons, sc->dx, dy, 0,
+				      sc->buttons, sc->dx, dy, 0, 0,
 				      WSMOUSE_INPUT_DELTA);
 		break;
 	}

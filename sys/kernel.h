@@ -1,4 +1,4 @@
-/*	$OpenBSD: kernel.h,v 1.11 2004/07/28 17:15:12 tholo Exp $	*/
+/*	$OpenBSD: kernel.h,v 1.10 2004/06/13 21:49:28 niklas Exp $	*/
 /*	$NetBSD: kernel.h,v 1.11 1995/03/03 01:24:16 cgd Exp $	*/
 
 /*-

@@ -42,6 +42,10 @@ file arch/zaurus/dev/zaurus_scoop.c		scoop
 attach pxapcic at pxaip with pxapcic_scoop
 file arch/zaurus/dev/scoop_pcic.c		pxapcic_scoop
 
+# SD/MMC socket controller
+attach pxammc at pxaip with pxammc_scoop
+file arch/zaurus/dev/scoop_mmc.c		pxammc_scoop
+
 # Dedicated SSP unit for ADC, touch screen, and backlight
 device zssp
 attach zssp at pxaip
@@ -100,6 +104,11 @@ include "dev/usb/files.usb"
 
 # Media Independent Interface (mii)
 include "dev/mii/files.mii"
+
+#
+# Machine-independent SD/MMC drivers
+#
+include "dev/sdmmc/files.sdmmc"
 
 #
 # Machine-independent 1-Wire drivers

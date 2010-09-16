@@ -1,4 +1,4 @@
-/*	$OpenBSD: pxe_net.h,v 1.1 2004/03/19 13:48:18 tom Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD$	*/
 
 /*-

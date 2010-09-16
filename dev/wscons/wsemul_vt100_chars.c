@@ -1,4 +1,4 @@
-/* $OpenBSD: wsemul_vt100_chars.c,v 1.5 2007/01/07 13:31:36 miod Exp $ */
+/* $OpenBSD: wsemul_vt100_chars.c,v 1.4 2004/04/02 04:39:51 deraadt Exp $ */
 /* $NetBSD: wsemul_vt100_chars.c,v 1.4 1999/02/20 18:20:02 drochner Exp $ */
 
 /*

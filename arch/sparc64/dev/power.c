@@ -1,4 +1,4 @@
-/*	$OpenBSD: power.c,v 1.3 2006/06/21 22:55:38 jason Exp $	*/
+/*	$OpenBSD: power.c,v 1.2 2006/06/16 22:21:22 jason Exp $	*/
 
 /*
  * Copyright (c) 2006 Jason L. Wright (jason@thought.net)

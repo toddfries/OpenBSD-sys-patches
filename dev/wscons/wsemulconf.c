@@ -1,4 +1,4 @@
-/* $OpenBSD: wsemulconf.c,v 1.6 2006/12/09 20:06:48 miod Exp $ */
+/* $OpenBSD: wsemulconf.c,v 1.5 2002/01/03 21:58:59 jason Exp $ */
 /* $NetBSD: wsemulconf.c,v 1.4 2000/01/05 11:19:37 drochner Exp $ */
 
 /*

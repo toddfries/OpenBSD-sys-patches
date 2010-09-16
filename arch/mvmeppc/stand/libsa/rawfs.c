@@ -1,4 +1,4 @@
-/*	$OpenBSD: rawfs.c,v 1.2 2002/03/14 01:26:41 millert Exp $ */
+/*	$OpenBSD: rawfs.c,v 1.1 2001/06/26 21:58:08 smurph Exp $ */
 
 /*
  * Copyright (c) 1995 Gordon W. Ross

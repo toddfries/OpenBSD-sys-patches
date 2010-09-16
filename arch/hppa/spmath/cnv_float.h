@@ -1,4 +1,4 @@
-/*	$OpenBSD: cnv_float.h,v 1.9 2003/04/10 17:27:58 mickey Exp $	*/
+/*	$OpenBSD: cnv_float.h,v 1.8 2002/09/20 19:26:59 mickey Exp $	*/
 /*
   (c) Copyright 1986 HEWLETT-PACKARD COMPANY
   To anyone who acknowledges that this file is provided "AS IS"

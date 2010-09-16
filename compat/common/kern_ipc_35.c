@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_ipc_35.c,v 1.3 2004/07/15 11:00:12 millert Exp $	*/
+/*	$OpenBSD: kern_ipc_35.c,v 1.2 2004/07/14 23:45:11 millert Exp $	*/
 
 /*
  * Copyright (c) 2004 Todd C. Miller <Todd.Miller@courtesan.com>

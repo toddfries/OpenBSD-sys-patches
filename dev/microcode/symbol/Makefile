@@ -2,6 +2,7 @@
 
 NOPROG=
 NOMAN=
+CC=${HOSTCC}
 
 # pcmcia capable systems only
 .if (${MACHINE} == "i386") || (${MACHINE} == "macppc") || \

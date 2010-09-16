@@ -1,4 +1,4 @@
-/*	$OpenBSD: pasreg.h,v 1.3 2003/02/11 19:20:27 mickey Exp $	*/
+/*	$OpenBSD: pasreg.h,v 1.2 1997/11/07 08:07:06 niklas Exp $	*/
 /*	$NetBSD: pasreg.h,v 1.2 1995/03/15 18:45:58 brezak Exp $	*/
 
 /* Port addresses and bit fields for the Media Vision Pro AudioSpectrum

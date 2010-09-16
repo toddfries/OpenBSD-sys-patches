@@ -1,4 +1,4 @@
-/*	$OpenBSD: nvramreg.h,v 1.4 2003/06/02 23:27:50 millert Exp $ */
+/*	$OpenBSD: nvramreg.h,v 1.3 1996/04/28 11:03:26 deraadt Exp $ */
 
 /*
  * Copyright (c) 1992, 1993

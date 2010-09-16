@@ -1,4 +1,4 @@
-/* $OpenBSD: osf1_socket.c,v 1.1 2000/08/04 15:47:55 ericj Exp $ */
+/* $OpenBSD$ */
 /* $NetBSD: osf1_socket.c,v 1.4 1999/05/10 01:58:37 cgd Exp $ */
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: zbsdmod.c,v 1.7 2005/05/02 02:45:29 uwe Exp $	*/
+/*	$OpenBSD: zbsdmod.c,v 1.7 2005/05/02 02:34:06 uwe Exp $	*/
 
 /*
  * Copyright (c) 2005 Uwe Stuehler <uwe@bsdx.de>

@@ -1,4 +1,4 @@
-/*	$OpenBSD: zaurus_apm.c,v 1.13 2006/12/12 23:14:28 dim Exp $	*/
+/*	$OpenBSD: zaurus_apm.c,v 1.12 2005/12/22 00:38:48 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2005 Uwe Stuehler <uwe@bsdx.de>

@@ -1,4 +1,4 @@
-/*	$OpenBSD: hpux_machdep.c,v 1.2 2005/03/26 20:37:24 mickey Exp $	*/
+/*	$OpenBSD: hpux_machdep.c,v 1.1 2005/03/26 20:04:37 mickey Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff

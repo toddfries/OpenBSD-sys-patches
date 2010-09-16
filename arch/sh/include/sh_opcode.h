@@ -1,4 +1,4 @@
-/*	$OpenBSD: sh_opcode.h,v 1.1.1.1 2006/10/06 21:02:55 miod Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD: sh_opcode.h,v 1.3 2002/04/28 17:10:36 uch Exp $ */
 
 typedef union {

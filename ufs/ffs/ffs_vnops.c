@@ -161,9 +161,6 @@ struct vnodeopv_desc ffs_fifoop_opv_desc =
 int doclusterread = 1;
 int doclusterwrite = 1;
 
-#define VN_KNOTE(vp, b) \
-	KNOTE((struct klist *)&vp->v_selectinfo.vsi_selinfo.si_note, (b))
-
 /*
  * Vnode op for reading.
  */

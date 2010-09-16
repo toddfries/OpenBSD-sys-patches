@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_signal.c,v 1.12 2003/02/25 09:10:27 tedu Exp $	*/
+/*	$OpenBSD: linux_signal.c,v 1.11 2001/08/09 14:15:22 niklas Exp $	*/
 /*	$NetBSD: linux_signal.c,v 1.10 1996/04/04 23:51:36 christos Exp $	*/
 
 /*

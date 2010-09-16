@@ -1,4 +1,4 @@
-/*	$OpenBSD: softfloat-macros.h,v 1.1 2002/04/28 20:55:14 pvalchev Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD: softfloat-macros.h,v 1.1 2001/04/26 03:10:47 ross Exp $	*/
 
 /*

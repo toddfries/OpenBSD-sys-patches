@@ -1,4 +1,4 @@
-/*	$OpenBSD: scf.c,v 1.10 2006/03/15 20:03:06 miod Exp $	*/
+/*	$OpenBSD: scf.c,v 1.9 2006/03/04 12:38:58 miod Exp $	*/
 
 /*
  * Copyright (c) 1999 Jason L. Wright (jason@thought.net)

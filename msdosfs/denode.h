@@ -288,7 +288,6 @@ int	msdosfs_strategy(void *);
 int	msdosfs_print(void *);
 int	msdosfs_islocked(void *);
 int	msdosfs_advlock(void *);
-int	msdosfs_reallocblks(void *);
 int	msdosfs_pathconf(void *);
 
 /*

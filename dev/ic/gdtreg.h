@@ -1,4 +1,4 @@
-/*	$OpenBSD: gdtreg.h,v 1.4 2006/05/07 23:18:59 marco Exp $	*/
+/*	$OpenBSD: gdtreg.h,v 1.3 2003/06/03 20:49:28 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Niklas Hallqvist.  All rights reserved.

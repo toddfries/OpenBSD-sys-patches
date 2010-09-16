@@ -1,4 +1,4 @@
-/*	$OpenBSD: dinode.h,v 1.11 2005/12/19 15:18:01 pedro Exp $	*/
+/*	$OpenBSD: dinode.h,v 1.10 2005/06/18 18:09:43 millert Exp $	*/
 /*	$NetBSD: dinode.h,v 1.7 1995/06/15 23:22:48 cgd Exp $	*/
 
 /*

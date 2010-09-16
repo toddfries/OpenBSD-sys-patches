@@ -1,4 +1,4 @@
-/*	$OpenBSD: netbsd_exec.c,v 1.12 2006/01/19 17:54:54 mickey Exp $	 */
+/*	$OpenBSD: netbsd_exec.c,v 1.11 2004/04/15 00:22:42 tedu Exp $	 */
 /*	$NetBSD: svr4_exec.c,v 1.16 1995/10/14 20:24:20 christos Exp $	 */
 
 /*

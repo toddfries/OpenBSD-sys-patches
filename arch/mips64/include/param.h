@@ -131,9 +131,6 @@
 void delay(int);
 void nanodelay(int);
 #endif
-
-#else /* !_KERNEL */
-#define	DELAY(n)	{ int N = (n); while (--N > 0); }
 #endif /* !_KERNEL */
 
 #endif /* !_MIPS_PARAM_H_ */

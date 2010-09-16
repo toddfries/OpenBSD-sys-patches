@@ -1,4 +1,4 @@
-/*	$OpenBSD: bsd_openprom.h,v 1.5 2005/09/08 15:25:55 martin Exp $	*/
+/*	$OpenBSD: bsd_openprom.h,v 1.4 2003/06/02 23:27:56 millert Exp $	*/
 /*	$NetBSD: bsd_openprom.h,v 1.2 2000/03/13 23:52:34 soren Exp $ */
 
 /*

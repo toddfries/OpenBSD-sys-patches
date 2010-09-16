@@ -47,8 +47,8 @@ struct admtt_softc {
 	i2c_addr_t	sc_addr;
 	int		sc_fanmul;
 
-	struct sensor	sc_sensor[ADMTT_NUM_SENSORS];
-	struct sensordev sc_sensordev;
+	struct ksensor	sc_sensor[ADMTT_NUM_SENSORS];
+	struct ksensordev sc_sensordev;
 };
 
 int	admtt_match(struct device *, void *, void *);

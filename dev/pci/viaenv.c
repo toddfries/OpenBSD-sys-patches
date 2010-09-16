@@ -69,8 +69,8 @@ struct viaenv_softc {
 
 	int     sc_fan_div[2];	/* fan RPM divisor */
 
-	struct sensor sc_data[VIANUMSENSORS];
-	struct sensordev sc_sensordev;
+	struct ksensor sc_data[VIANUMSENSORS];
+	struct ksensordev sc_sensordev;
 };
 
 int  viaenv_match(struct device *, void *, void *);

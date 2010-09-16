@@ -1,4 +1,4 @@
-/*	$OpenBSD: nhpib.c,v 1.4 2006/08/17 06:31:10 miod Exp $	*/
+/*	$OpenBSD: nhpib.c,v 1.3 2005/04/22 00:42:16 miod Exp $	*/
 /*	$NetBSD: nhpib.c,v 1.5 1995/08/05 16:47:46 thorpej Exp $	*/
 
 /*

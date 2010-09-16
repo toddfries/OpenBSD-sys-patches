@@ -1,3 +1,3 @@
-/*	$OpenBSD: version.c,v 1.3 2006/05/16 22:52:55 miod Exp $ */
+/*	$OpenBSD: version.c,v 1.2 1998/12/15 06:09:51 smurph Exp $ */
 
 char *version = "1.3";

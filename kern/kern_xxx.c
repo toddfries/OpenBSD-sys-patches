@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_xxx.c,v 1.10 2005/11/28 00:14:29 jsg Exp $	*/
+/*	$OpenBSD: kern_xxx.c,v 1.9 2003/08/15 20:32:18 tedu Exp $	*/
 /*	$NetBSD: kern_xxx.c,v 1.32 1996/04/22 01:38:41 christos Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cgthree.c,v 1.43 2006/12/17 22:18:16 miod Exp $	*/
+/*	$OpenBSD: cgthree.c,v 1.42 2006/07/25 21:23:32 miod Exp $	*/
 
 /*
  * Copyright (c) 2001 Jason L. Wright (jason@thought.net)

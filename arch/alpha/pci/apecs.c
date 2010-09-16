@@ -1,4 +1,4 @@
-/*	$OpenBSD: apecs.c,v 1.20 2006/12/14 17:36:12 kettenis Exp $	*/
+/*	$OpenBSD: apecs.c,v 1.19 2006/03/16 22:32:44 miod Exp $	*/
 /*	$NetBSD: apecs.c,v 1.16 1996/12/05 01:39:34 cgd Exp $	*/
 
 /*-

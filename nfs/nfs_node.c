@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_node.c,v 1.32 2006/05/07 20:12:41 tedu Exp $	*/
+/*	$OpenBSD: nfs_node.c,v 1.31 2006/01/09 12:43:16 pedro Exp $	*/
 /*	$NetBSD: nfs_node.c,v 1.16 1996/02/18 11:53:42 fvdl Exp $	*/
 
 /*

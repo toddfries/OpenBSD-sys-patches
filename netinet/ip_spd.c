@@ -1,4 +1,4 @@
-/* $OpenBSD: ip_spd.c,v 1.53 2007/02/14 00:53:48 jsg Exp $ */
+/* $OpenBSD: ip_spd.c,v 1.52 2006/06/16 16:49:40 henning Exp $ */
 /*
  * The author of this code is Angelos D. Keromytis (angelos@cis.upenn.edu)
  *

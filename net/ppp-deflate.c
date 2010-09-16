@@ -1,4 +1,4 @@
-/*	$OpenBSD: ppp-deflate.c,v 1.7 2002/09/13 00:12:07 deraadt Exp $	*/
+/*	$OpenBSD: ppp-deflate.c,v 1.6 2002/03/14 01:27:10 millert Exp $	*/
 /*	$NetBSD: ppp-deflate.c,v 1.1 1996/03/15 02:28:09 paulus Exp $	*/
 
 /*

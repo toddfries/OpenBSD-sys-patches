@@ -1,4 +1,4 @@
-/* $OpenBSD: vesafb.c,v 1.4 2007/02/18 19:19:02 gwk Exp $ */
+/* $OpenBSD: vesafb.c,v 1.3 2007/01/28 20:28:50 gwk Exp $ */
 
 /*-
  * Copyright (c) 2006 Jared D. McNeill <jmcneill@invisible.ca>

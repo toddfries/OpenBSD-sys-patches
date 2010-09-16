@@ -82,7 +82,7 @@ typedef struct {
  *
  * The cd_private tag should be used by the MD layer to keep a free list
  * of these structures. Code outside of this driver can then use this
- * to identify it's own unit structures. That is, when not on the MD
+ * to identify its own unit structures. That is, when not on the MD
  * layer's freelist, the MD layer should shove into it the identifier
  * that the outer layer has for it- passed in on an initial QIN_HBA_REG
  * call (see below).

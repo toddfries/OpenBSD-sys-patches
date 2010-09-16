@@ -1,4 +1,4 @@
-/*	$OpenBSD: fpu_calcea.c,v 1.11 2006/01/30 21:23:22 miod Exp $	*/
+/*	$OpenBSD: fpu_calcea.c,v 1.10 2006/01/16 22:08:26 miod Exp $	*/
 /*	$NetBSD: fpu_calcea.c,v 1.16 2004/02/13 11:36:14 wiz Exp $	*/
 
 /*

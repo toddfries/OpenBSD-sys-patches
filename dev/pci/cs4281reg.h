@@ -1,4 +1,4 @@
-/*	$OpenBSD: cs4281reg.h,v 1.2 2001/02/09 21:15:23 aaron Exp $ */
+/*	$OpenBSD: cs4281reg.h,v 1.1 2001/01/13 19:53:50 aaron Exp $ */
 /*	$Tera: cs4281reg.h,v 1.9 2000/12/31 10:52:25 tacha Exp $	*/
 
 /*

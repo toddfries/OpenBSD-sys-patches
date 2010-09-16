@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_rtw_pci.c,v 1.7 2005/09/08 12:44:55 jsg Exp $	*/
+/*	$OpenBSD: if_rtw_pci.c,v 1.6 2005/08/09 04:10:12 mickey Exp $	*/
 /*	$NetBSD: if_rtw_pci.c,v 1.1 2004/09/26 02:33:36 dyoung Exp $	*/
 
 /*-

@@ -1,4 +1,4 @@
-/*	$OpenBSD: maci2c.c,v 1.9 2006/02/14 20:54:45 kettenis Exp $	*/
+/*	$OpenBSD: maci2c.c,v 1.8 2006/02/08 23:15:58 dlg Exp $	*/
 
 /*
  * Copyright (c) 2005 Mark Kettenis

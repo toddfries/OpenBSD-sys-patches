@@ -1,4 +1,4 @@
-/*	$OpenBSD: in_var.h,v 1.9 2006/03/05 21:48:56 miod Exp $	*/
+/*	$OpenBSD: in_var.h,v 1.8 2005/01/15 09:09:27 pascoe Exp $	*/
 /*	$NetBSD: in_var.h,v 1.16 1996/02/13 23:42:15 christos Exp $	*/
 
 /*

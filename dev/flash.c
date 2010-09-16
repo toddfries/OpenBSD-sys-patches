@@ -1,4 +1,4 @@
-/*	$OpenBSD: flash.c,v 1.2 2007/02/15 00:53:26 krw Exp $	*/
+/*	$OpenBSD: flash.c,v 1.1 2006/11/25 14:32:00 uwe Exp $	*/
 
 /*
  * Copyright (c) 2005 Uwe Stuehler <uwe@openbsd.org>

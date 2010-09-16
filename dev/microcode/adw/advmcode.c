@@ -1,4 +1,4 @@
-/*	$OpenBSD: advmcode.c,v 1.1 2005/09/06 02:18:20 krw Exp $	*/
+/*	$OpenBSD: advmcode.c,v 1.4 2003/10/21 18:58:48 jmc Exp $	*/
 /*      $NetBSD: advmcode.c,v 1.3 1998/09/26 16:02:57 dante Exp $        */
 
 /*

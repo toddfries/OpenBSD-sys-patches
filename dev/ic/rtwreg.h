@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtwreg.h,v 1.13 2006/01/05 05:40:35 jsg Exp $	*/
+/*	$OpenBSD: rtwreg.h,v 1.12 2006/01/05 05:36:06 jsg Exp $	*/
 /*	$NetBSD: rtwreg.h,v 1.12 2005/01/16 11:50:43 dyoung Exp $	*/
 /*-
  * Copyright (c) 2004, 2005 David Young.  All rights reserved.

@@ -1,4 +1,4 @@
-#	$OpenBSD: M188,v 1.28 2006/05/28 11:09:56 miod Exp $
+#	$OpenBSD: M188,v 1.27 2006/05/02 21:43:07 miod Exp $
 
 machine mvme88k m88k
 

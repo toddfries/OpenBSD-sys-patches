@@ -1,4 +1,4 @@
-/* $OpenBSD: tcds.c,v 1.4 2004/06/28 02:28:43 aaron Exp $ */
+/* $OpenBSD: tcds.c,v 1.3 2003/09/26 21:43:31 miod Exp $ */
 /* $NetBSD: tcds.c,v 1.3 2001/11/13 06:26:10 lukem Exp $ */
 
 /*-

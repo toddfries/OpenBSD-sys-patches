@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6_gif.h,v 1.5 2007/02/10 15:34:22 claudio Exp $	*/
+/*	$OpenBSD: in6_gif.h,v 1.4 2002/03/14 01:27:11 millert Exp $	*/
 /*	$KAME: in6_gif.h,v 1.5 2000/04/14 08:36:03 itojun Exp $	*/
 
 /*

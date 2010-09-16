@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_mp.c,v 1.4 2004/07/20 20:18:53 art Exp $	*/
+/*	$OpenBSD: db_mp.c,v 1.3 2004/06/21 22:41:11 andreas Exp $	*/
 
 /*
  * Copyright (c) 2003, 2004 Andreas Gunnarsson <andreas@openbsd.org>

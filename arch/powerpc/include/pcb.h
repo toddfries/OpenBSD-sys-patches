@@ -65,8 +65,6 @@ struct md_coredump {
 };
 
 #ifdef	_KERNEL
-extern struct pcb *curpcb;
-extern struct pmap *curpm;
 extern struct proc *fpuproc;
 int  setfault(faultbuf *env);
 #endif

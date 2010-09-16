@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ah.c,v 1.89 2007/02/14 00:53:48 jsg Exp $ */
+/*	$OpenBSD: ip_ah.c,v 1.88 2007/02/08 15:25:30 itojun Exp $ */
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and

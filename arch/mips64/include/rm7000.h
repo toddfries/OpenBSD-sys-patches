@@ -1,4 +1,4 @@
-/*	$OpenBSD: rm7000.h,v 1.2 2005/01/31 21:35:49 grange Exp $ */
+/*	$OpenBSD: rm7000.h,v 1.1 2005/01/18 15:03:38 grange Exp $ */
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)

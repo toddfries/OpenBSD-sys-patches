@@ -1,4 +1,4 @@
-/*	$OpenBSD: __eabi.c,v 1.4 2002/03/14 01:27:07 millert Exp $	*/
+/*	$OpenBSD: __eabi.c,v 1.3 2001/07/09 03:58:50 mickey Exp $	*/
 /*	$NetBSD: __main.c,v 1.3 1994/10/26 06:42:13 cgd Exp $	*/
 
 /*

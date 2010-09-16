@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtwvar.h,v 1.22 2006/06/27 04:25:12 jsg Exp $	*/
+/*	$OpenBSD: rtwvar.h,v 1.21 2006/01/05 05:36:06 jsg Exp $	*/
 /*	$NetBSD: rtwvar.h,v 1.10 2004/12/26 22:37:57 mycroft Exp $	*/
 
 /*-

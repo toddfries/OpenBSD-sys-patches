@@ -1,4 +1,4 @@
-/*	$OpenBSD: ueaglevar.h,v 1.1 2005/04/16 14:55:10 damien Exp $	*/
+/*	$OpenBSD$	*/
 
 /*-
  * Copyright (c) 2003-2005

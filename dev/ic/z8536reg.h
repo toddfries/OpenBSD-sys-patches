@@ -1,4 +1,4 @@
-/*	$OpenBSD: z8536reg.h,v 1.2 2003/06/09 16:34:22 deraadt Exp $ */
+/*	$OpenBSD: z8536reg.h,v 1.1 1997/04/10 17:13:53 pefo Exp $ */
 
 /*
  * Copyright (c) 1997 Per Fogelstrom

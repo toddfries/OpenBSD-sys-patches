@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.3 2006/11/08 20:03:32 drahn Exp $
+#	$OpenBSD: Makefile,v 1.2 2006/11/08 18:05:30 deraadt Exp $
 
 MAN=	xxboot.8
 

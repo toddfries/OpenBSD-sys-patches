@@ -1,4 +1,4 @@
-/* $OpenBSD: tsp_dma.c,v 1.5 2006/04/04 21:20:40 brad Exp $ */
+/* $OpenBSD: tsp_dma.c,v 1.4 2006/03/20 01:00:58 martin Exp $ */
 /* $NetBSD: tsp_dma.c,v 1.1 1999/06/29 06:46:47 ross Exp $ */
 
 /*-

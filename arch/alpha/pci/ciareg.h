@@ -1,4 +1,4 @@
-/* $OpenBSD: ciareg.h,v 1.9 2000/11/08 20:59:25 ericj Exp $ */
+/* $OpenBSD$ */
 /* $NetBSD: ciareg.h,v 1.22 1998/06/06 20:40:14 thorpej Exp $ */
 
 /*

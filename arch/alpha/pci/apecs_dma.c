@@ -1,4 +1,4 @@
-/* $OpenBSD: apecs_dma.c,v 1.5 2006/04/04 21:20:40 brad Exp $ */
+/* $OpenBSD: apecs_dma.c,v 1.4 2006/03/20 01:00:58 martin Exp $ */
 /* $NetBSD: apecs_dma.c,v 1.13 2000/06/29 08:58:45 mrg Exp $ */
 
 /*-

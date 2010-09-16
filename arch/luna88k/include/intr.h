@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.5 2006/03/13 19:43:22 brad Exp $	*/
+/*	$OpenBSD: intr.h,v 1.4 2005/10/12 20:53:20 miod Exp $	*/
 /*
  * Copyright (C) 2000 Steve Murphree, Jr.
  * All rights reserved.

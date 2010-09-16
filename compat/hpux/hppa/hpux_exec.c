@@ -1,4 +1,4 @@
-/*	$OpenBSD: hpux_exec.c,v 1.3 2005/12/30 19:46:53 miod Exp $	*/
+/*	$OpenBSD: hpux_exec.c,v 1.2 2005/03/12 18:38:52 mickey Exp $	*/
 
 /*
  * Copyright (c) 2004 Michael Shalayeff.  All rights reserved.

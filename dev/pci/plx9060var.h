@@ -1,4 +1,4 @@
-/*	$OpenBSD: plx9060var.h,v 1.2 2002/03/14 01:26:59 millert Exp $	*/
+/*	$OpenBSD: plx9060var.h,v 1.1 2001/06/21 13:21:50 nate Exp $	*/
 /*	$NetBSD$	*/
 
 /*-

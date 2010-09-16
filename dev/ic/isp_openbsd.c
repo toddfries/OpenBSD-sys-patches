@@ -479,7 +479,7 @@ isp_wdog(void *arg)
 
 	/*
 	 * We've decided this command is dead. Make sure we're not trying
-	 * to kill a command that's already dead by getting it's handle and
+	 * to kill a command that's already dead by getting its handle and
 	 * and seeing whether it's still alive.
 	 */
 	ISP_LOCK(isp);

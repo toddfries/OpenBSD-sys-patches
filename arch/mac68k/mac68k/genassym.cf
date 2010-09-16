@@ -1,4 +1,4 @@
-#	$OpenBSD: genassym.cf,v 1.14 2006/01/01 13:14:44 miod Exp $
+#	$OpenBSD: genassym.cf,v 1.13 2003/06/02 23:27:49 millert Exp $
 #	$NetBSD: genassym.cf,v 1.7 1998/01/06 08:46:16 thorpej Exp $
 
 #

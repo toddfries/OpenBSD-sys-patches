@@ -1,4 +1,4 @@
-/*	$OpenBSD: bold8x16-iso1.h,v 1.1 2002/05/09 08:59:03 maja Exp $ */
+/*	$OpenBSD$ */
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.

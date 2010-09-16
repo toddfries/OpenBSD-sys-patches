@@ -1,4 +1,4 @@
-/*	$OpenBSD: lofnvar.h,v 1.9 2003/06/02 19:08:58 jason Exp $	*/
+/*	$OpenBSD: lofnvar.h,v 1.8 2002/09/24 18:33:26 jason Exp $	*/
 
 /*
  * Copyright (c) 2001-2002 Jason L. Wright (jason@thought.net)

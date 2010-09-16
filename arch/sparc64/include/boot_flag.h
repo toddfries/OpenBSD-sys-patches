@@ -1,4 +1,4 @@
-/*	$OpenBSD: boot_flag.h,v 1.1 2001/08/18 16:19:28 jason Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD: boot_flag.h,v 1.3 2001/07/01 02:56:21 gmcgarry Exp $	*/
 
 /*-

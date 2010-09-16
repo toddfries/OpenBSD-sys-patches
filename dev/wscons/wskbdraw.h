@@ -1,4 +1,4 @@
-/*	$OpenBSD: wskbdraw.h,v 1.1 2005/01/18 18:52:32 miod Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * Copyright (c) 2005, Miodrag Vallat

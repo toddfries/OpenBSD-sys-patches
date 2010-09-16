@@ -1,4 +1,4 @@
-/*	$OpenBSD: sparc64.h,v 1.6 2003/12/17 03:51:48 jason Exp $	*/
+/*	$OpenBSD: sparc64.h,v 1.5 2003/12/16 20:00:16 jason Exp $	*/
 /*	$NetBSD: sparc64.h,v 1.3 2000/10/20 05:47:03 mrg Exp $	*/
 
 /*

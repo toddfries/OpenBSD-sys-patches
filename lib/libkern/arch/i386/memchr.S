@@ -1,4 +1,4 @@
-/*	$OpenBSD: memchr.S,v 1.1 1997/11/04 19:08:06 chuck Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * Written by J.T. Conklin <jtc@netbsd.org>.

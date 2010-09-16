@@ -119,7 +119,7 @@ cttyioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 		return (EINVAL);
 	if (cmd == TIOCNOTTY) {
 		if (!SESS_LEADER(p)) {
-			p->p_flag &= ~P_CONTROLT;
+			atomic_clearbits_int(&p->p_flag, P_CONTROLT);
 			return (0);
 		} else
 			return (EINVAL);

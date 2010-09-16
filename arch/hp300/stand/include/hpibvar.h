@@ -1,4 +1,4 @@
-/*	$OpenBSD: hpibvar.h,v 1.4 2006/08/17 06:31:10 miod Exp $	*/
+/*	$OpenBSD: hpibvar.h,v 1.3 2005/11/23 07:15:58 miod Exp $	*/
 /*	$NetBSD: hpibvar.h,v 1.4 1994/10/26 07:27:24 cgd Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_disasm.c,v 1.14 2006/09/19 11:06:33 jsg Exp $	*/
+/*	$OpenBSD: db_disasm.c,v 1.13 2006/05/11 13:21:11 mickey Exp $	*/
 /*	$NetBSD: db_disasm.c,v 1.11 1996/05/03 19:41:58 christos Exp $	*/
 
 /*

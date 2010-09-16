@@ -1,4 +1,4 @@
-/*	$OpenBSD: blf.c,v 1.6 2005/03/24 11:43:40 hshoexer Exp $	*/
+/*	$OpenBSD: blf.c,v 1.5 2003/04/09 21:23:51 markus Exp $	*/
 
 /*
  * Blowfish block cipher for OpenBSD

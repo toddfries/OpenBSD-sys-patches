@@ -255,7 +255,6 @@ uvmexp_print(int (*pr)(const char *, ...))
 	    uvmexp.swpages, uvmexp.swpginuse, uvmexp.swpgonly, uvmexp.paging);
 
 	(*pr)("  kernel pointers:\n");
-	(*pr)("    objs(kern/kmem)=%p/%p\n", uvm.kernel_object,
-	    uvmexp.kmem_object);
+	(*pr)("    objs(kern)=%p\n", uvm.kernel_object);
 }
 #endif

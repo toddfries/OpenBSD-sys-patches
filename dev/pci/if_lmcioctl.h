@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_lmcioctl.h,v 1.6 2005/11/07 00:29:21 brad Exp $ */
+/*	$OpenBSD: if_lmcioctl.h,v 1.5 2005/11/05 11:49:01 brad Exp $ */
 /*	$Id: if_lmcioctl.h,v 1.6 2005/11/07 00:29:21 brad Exp $	*/
 
 /*

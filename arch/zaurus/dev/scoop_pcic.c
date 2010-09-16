@@ -1,4 +1,4 @@
-/*	$OpenBSD: scoop_pcic.c,v 1.1 2005/07/01 23:51:55 uwe Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * Copyright (c) 2005 Uwe Stuehler <uwe@bsdx.de>

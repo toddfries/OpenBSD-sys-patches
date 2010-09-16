@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_trtcm_isa.c,v 1.4 2006/03/05 21:48:56 miod Exp $	*/
+/*	$OpenBSD: if_trtcm_isa.c,v 1.3 2002/03/14 01:26:56 millert Exp $	*/
 /*	$NetBSD: if_trtcm_isa.c,v 1.3 1999/04/30 15:29:24 bad Exp $	*/
 
 #undef TRTCMISADEBUG

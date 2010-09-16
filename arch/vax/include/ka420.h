@@ -1,4 +1,4 @@
-/*	$OpenBSD: ka420.h,v 1.4 2006/07/25 21:11:08 miod Exp $ */
+/*	$OpenBSD: ka420.h,v 1.3 2000/04/26 03:08:41 bjc Exp $ */
 /*	$NetBSD: ka420.h,v 1.2 1998/06/07 18:34:09 ragge Exp $ */
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.

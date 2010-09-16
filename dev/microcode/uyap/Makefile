@@ -2,6 +2,7 @@
 
 NOPROG=
 NOMAN=
+CC=${HOSTCC}
 
 # USB capable systems only
 .if (${MACHINE} == "i386") || (${MACHINE} == "amd64") || \

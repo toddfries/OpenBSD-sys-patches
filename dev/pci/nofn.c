@@ -1,4 +1,4 @@
-/*	$OpenBSD: nofn.c,v 1.15 2006/06/29 21:34:51 deraadt Exp $	*/
+/*	$OpenBSD: nofn.c,v 1.14 2005/08/09 04:10:13 mickey Exp $	*/
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)

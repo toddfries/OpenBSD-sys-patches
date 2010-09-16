@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_cdcereg.h,v 1.1 2004/07/20 20:30:09 dhartmei Exp $ */
+/*	$OpenBSD$ */
 
 /*
  * Copyright (c) 1997, 1998, 1999, 2000-2003 Bill Paul <wpaul@windriver.com>

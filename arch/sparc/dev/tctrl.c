@@ -1,4 +1,4 @@
-/*	$OpenBSD: tctrl.c,v 1.18 2006/10/27 17:52:38 miod Exp $	*/
+/*	$OpenBSD: tctrl.c,v 1.17 2006/09/17 22:26:37 miod Exp $	*/
 /*	$NetBSD: tctrl.c,v 1.2 1999/08/11 00:46:06 matt Exp $	*/
 
 /*-

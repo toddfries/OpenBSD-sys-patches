@@ -1,4 +1,4 @@
-/*	$OpenBSD: stp_sbus.c,v 1.7 2006/06/02 20:00:56 miod Exp $	*/
+/*	$OpenBSD: stp_sbus.c,v 1.6 2004/03/02 23:10:17 miod Exp $	*/
 /*	$NetBSD: stp4020.c,v 1.23 2002/06/01 23:51:03 lukem Exp $	*/
 
 /*-

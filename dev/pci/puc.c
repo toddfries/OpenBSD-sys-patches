@@ -1,4 +1,4 @@
-/*	$OpenBSD: puc.c,v 1.11 2006/12/28 20:52:36 miod Exp $	*/
+/*	$OpenBSD: puc.c,v 1.10 2006/08/01 20:10:29 jolan Exp $	*/
 /*	$NetBSD: puc.c,v 1.3 1999/02/06 06:29:54 cgd Exp $	*/
 
 /*

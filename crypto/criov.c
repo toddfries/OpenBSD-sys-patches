@@ -1,4 +1,4 @@
-/*      $OpenBSD: criov.c,v 1.16 2006/12/29 13:04:37 pedro Exp $	*/
+/*      $OpenBSD: criov.c,v 1.15 2006/11/19 22:13:47 jmc Exp $	*/
 
 /*
  * Copyright (c) 1999 Theo de Raadt

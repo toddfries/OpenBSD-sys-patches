@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieeefp.h,v 1.2 2004/08/10 20:28:13 deraadt Exp $	*/
+/*	$OpenBSD: ieeefp.h,v 1.1 2004/08/06 20:56:02 pefo Exp $	*/
 
 /*
  * Written by J.T. Conklin, Apr 11, 1995

@@ -1,4 +1,4 @@
-/*	$OpenBSD: grf_mv.c,v 1.33 2007/01/12 13:52:07 martin Exp $	*/
+/*	$OpenBSD: grf_mv.c,v 1.32 2006/02/26 22:23:15 martin Exp $	*/
 /*	$NetBSD: grf_nubus.c,v 1.62 2001/01/22 20:27:02 briggs Exp $	*/
 
 /*

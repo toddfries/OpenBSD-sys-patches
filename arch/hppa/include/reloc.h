@@ -1,4 +1,4 @@
-/*	$OpenBSD: reloc.h,v 1.3 2004/05/22 04:25:42 mickey Exp $	*/
+/*	$OpenBSD: reloc.h,v 1.2 2004/04/07 18:24:19 mickey Exp $	*/
 
 /*
  * Copyright (c) 1999 Michael Shalayeff

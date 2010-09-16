@@ -1,4 +1,4 @@
-/*	$OpenBSD: srt0.S,v 1.10 2005/04/07 00:21:51 mickey Exp $	*/
+/*	$OpenBSD: srt0.S,v 1.9 2004/04/07 18:24:20 mickey Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff

@@ -503,7 +503,7 @@ tpms_intr(struct uhidev *addr, void *ibuf, unsigned int len)
 	if ((dx != 0 || dy != 0 || dz != 0 || buttons != sc->sc_buttons) &&
 	    sc->sc_wsmousedev != NULL) {
 		s = spltty();
-		wsmouse_input(sc->sc_wsmousedev, buttons, dx, -dy, dz,
+		wsmouse_input(sc->sc_wsmousedev, buttons, dx, -dy, dz, 0,
 		    WSMOUSE_INPUT_DELTA);
 		splx(s);
 	}

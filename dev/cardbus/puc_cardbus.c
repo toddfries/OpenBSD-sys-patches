@@ -1,4 +1,4 @@
-/*	$OpenBSD: puc_cardbus.c,v 1.2 2006/10/12 16:35:52 grange Exp $	*/
+/*	$OpenBSD: puc_cardbus.c,v 1.1 2006/07/31 11:06:27 mickey Exp $	*/
 
 /*
  * Copyright (c) 2006 Michael Shalayeff

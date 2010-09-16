@@ -1,4 +1,4 @@
-/*	$OpenBSD: gdtvar.h,v 1.12 2006/05/07 23:18:59 marco Exp $	*/
+/*	$OpenBSD: gdtvar.h,v 1.11 2006/05/07 20:34:09 marco Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Niklas Hallqvist.  All rights reserved.

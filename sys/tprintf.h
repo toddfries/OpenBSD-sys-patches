@@ -1,4 +1,4 @@
-/*	$OpenBSD: tprintf.h,v 1.6 2003/08/24 01:27:07 avsm Exp $	*/
+/*	$OpenBSD: tprintf.h,v 1.5 2003/06/02 23:28:22 millert Exp $	*/
 /*	$NetBSD: tprintf.h,v 1.10 1996/04/09 20:55:43 cgd Exp $	*/
 
 /*-

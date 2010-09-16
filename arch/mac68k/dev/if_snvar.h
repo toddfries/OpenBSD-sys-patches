@@ -1,4 +1,4 @@
-/*    $OpenBSD: if_snvar.h,v 1.14 2006/06/24 13:23:27 miod Exp $      */
+/*    $OpenBSD: if_snvar.h,v 1.13 2005/07/23 23:28:58 martin Exp $      */
 /*    $NetBSD: if_snvar.h,v 1.8 1997/04/25 03:40:09 briggs Exp $      */
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: libbug.h,v 1.4 2003/08/20 00:25:59 deraadt Exp $ */
+/*	$OpenBSD: libbug.h,v 1.3 2002/03/14 03:15:56 millert Exp $ */
 
 /*
  * prototypes and such.   note that get/put char are in stand.h

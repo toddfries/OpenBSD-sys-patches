@@ -1,4 +1,4 @@
-/*	$OpenBSD: rln.c,v 1.18 2006/03/25 22:41:43 djm Exp $	*/
+/*	$OpenBSD: rln.c,v 1.17 2005/11/07 03:20:00 brad Exp $	*/
 /*
  * David Leonard <d@openbsd.org>, 1999. Public Domain.
  *

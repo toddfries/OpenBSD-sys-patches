@@ -1,4 +1,4 @@
-/*	$OpenBSD: bereg.h,v 1.12 2003/06/02 18:40:59 jason Exp $	*/
+/*	$OpenBSD: bereg.h,v 1.11 2002/08/08 03:32:00 jason Exp $	*/
 
 /*
  * Copyright (c) 1998 Theo de Raadt and Jason L. Wright.

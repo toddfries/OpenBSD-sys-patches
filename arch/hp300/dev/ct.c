@@ -175,6 +175,7 @@ ctattach(parent, self, aux)
 	struct hpibbus_attach_args *ha = aux;
 
 	if (ctident(parent, sc, ha) == 0) {
+		/* can't happen */
 		printf("\n%s: didn't respond to describe command!\n",
 		    sc->sc_dev.dv_xname);
 		return;
@@ -225,6 +226,8 @@ ctident(parent, sc, ha)
 	 * So far, so good.  Get drive parameters.  Note command
 	 * is always issued to unit 0.
 	 */
+	bzero(&desc, sizeof(desc));
+	stat = 0;
 	cmd[0] = C_SUNIT(0);
 	cmd[1] = C_SVOL(0);
 	cmd[2] = C_DESC;
@@ -232,20 +235,21 @@ ctident(parent, sc, ha)
 	hpibrecv(parent->dv_unit, ha->ha_slave, C_EXEC, &desc, sizeof(desc));
 	hpibrecv(parent->dv_unit, ha->ha_slave, C_QSTAT, &stat, sizeof(stat));
 
+	if (desc.d_name == 0 && stat != 0)
+		return (0);
+
 	bzero(name, sizeof(name));
-	if (stat == 0) {
-		n = desc.d_name;
-		for (i = 5; i >= 0; i--) {
-			name[i] = (n & 0xf) + '0';
-			n >>= 4;
-		}
+	n = desc.d_name;
+	for (i = 5; i >= 0; i--) {
+		name[i] = (n & 0xf) + '0';
+		n >>= 4;
 	}
 
 	switch (ha->ha_id) {
 	case CT7946ID:
 		if (bcmp(name, "079450", 6) == 0)
 			return (0);		/* not really a 7946 */
-		/* fall into... */
+		/* FALLTHROUGH */
 	case CT9144ID:
 	case CT9145ID:
 		type = CT9144;

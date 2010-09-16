@@ -1,4 +1,4 @@
-/*	$OpenBSD: 3c990img.h,v 1.5 2002/07/11 20:27:04 jason Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * Copyright 1999-2002 3Com Corporation.  All Rights Reserved.    

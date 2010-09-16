@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.h,v 1.33 2004/08/06 22:39:12 deraadt Exp $	*/
+/*	$OpenBSD: pmap.h,v 1.32 2004/07/13 14:51:29 tedu Exp $	*/
 
 /*
  * Copyright (c) 2002-2004 Michael Shalayeff

@@ -1,4 +1,4 @@
-/*	$OpenBSD: autri.c,v 1.18 2006/04/07 22:41:33 jsg Exp $	*/
+/*	$OpenBSD: autri.c,v 1.17 2006/02/22 18:12:24 brad Exp $	*/
 
 /*
  * Copyright (c) 2001 SOMEYA Yoshihiko and KUROSAWA Takahiro.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcicreg.h,v 1.1.1.1 2006/10/06 21:02:55 miod Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD: pcicreg.h,v 1.2 2005/12/11 12:18:58 christos Exp $	*/
 
 /*-

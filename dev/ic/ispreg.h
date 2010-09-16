@@ -1,4 +1,4 @@
-/*	$OpenBSD: ispreg.h,v 1.13 2003/10/21 18:58:49 jmc Exp $ */
+/*	$OpenBSD: ispreg.h,v 1.12 2002/05/17 01:35:19 mjacob Exp $ */
 /*
  * Machine Independent (well, as best as possible) register
  * definitions for Qlogic ISP SCSI adapters.

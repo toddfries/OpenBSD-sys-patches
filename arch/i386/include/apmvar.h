@@ -1,4 +1,4 @@
-/*	$OpenBSD: apmvar.h,v 1.15 2002/03/14 01:26:33 millert Exp $	*/
+/*	$OpenBSD: apmvar.h,v 1.14 2001/12/14 17:07:40 mickey Exp $	*/
 
 /*
  *  Copyright (c) 1995 John T. Kohl

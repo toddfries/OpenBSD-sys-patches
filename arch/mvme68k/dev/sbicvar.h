@@ -1,4 +1,4 @@
-/*	$OpenBSD: sbicvar.h,v 1.7 2004/07/02 17:57:29 miod Exp $ */
+/*	$OpenBSD: sbicvar.h,v 1.6 2003/06/02 23:27:50 millert Exp $ */
 
 /*
  * Copyright (c) 1990 The Regents of the University of California.

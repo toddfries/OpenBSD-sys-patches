@@ -1,4 +1,4 @@
-/* $OpenBSD: acpiec.c,v 1.18 2007/02/21 20:46:57 marco Exp $ */
+/* $OpenBSD: acpiec.c,v 1.17 2007/02/21 04:12:47 marco Exp $ */
 /*
  * Copyright (c) 2006 Can Erkin Acar <canacar@openbsd.org>
  *

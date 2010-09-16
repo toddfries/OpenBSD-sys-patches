@@ -1,4 +1,4 @@
-/*	$OpenBSD: bsd-comp.c,v 1.6 2003/06/02 23:28:11 millert Exp $	*/
+/*	$OpenBSD: bsd-comp.c,v 1.5 2002/03/14 01:27:09 millert Exp $	*/
 /*	$NetBSD: bsd-comp.c,v 1.6 1996/10/13 02:10:58 christos Exp $	*/
 
 /* Because this code is derived from the 4.3BSD compress source:

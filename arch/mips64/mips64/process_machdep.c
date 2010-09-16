@@ -1,4 +1,4 @@
-/*	$OpenBSD: process_machdep.c,v 1.6 2005/12/17 14:56:31 kettenis Exp $	*/
+/*	$OpenBSD: process_machdep.c,v 1.5 2005/01/31 21:35:50 grange Exp $	*/
 
 /*
  * Copyright (c) 1994 Adam Glass

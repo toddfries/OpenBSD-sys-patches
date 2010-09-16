@@ -1,4 +1,4 @@
-/*	$OpenBSD: sys_pipe.c,v 1.51 2006/11/17 09:21:52 jmc Exp $	*/
+/*	$OpenBSD: sys_pipe.c,v 1.50 2005/12/13 10:33:14 jsg Exp $	*/
 
 /*
  * Copyright (c) 1996 John S. Dyson

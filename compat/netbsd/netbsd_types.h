@@ -1,4 +1,4 @@
-/*	$OpenBSD: netbsd_types.h,v 1.4 2003/06/02 23:28:00 millert Exp $	*/
+/*	$OpenBSD: netbsd_types.h,v 1.3 1999/09/17 15:03:18 kstailey Exp $	*/
 
 /*-
  * Copyright (c) 1982, 1986, 1991, 1993, 1994

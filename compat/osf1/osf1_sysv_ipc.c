@@ -1,4 +1,4 @@
-/* $OpenBSD: osf1_sysv_ipc.c,v 1.1 2000/08/04 15:47:55 ericj Exp $ */
+/* $OpenBSD$ */
 /* $NetBSD: osf1_sysv_ipc.c,v 1.1 1999/05/04 04:59:21 cgd Exp $ */
 
 /*

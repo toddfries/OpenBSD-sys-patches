@@ -1,4 +1,4 @@
-/*	$OpenBSD: asp.c,v 1.14 2005/06/09 18:01:36 mickey Exp $	*/
+/*	$OpenBSD: asp.c,v 1.13 2004/04/07 18:24:19 mickey Exp $	*/
 
 /*
  * Copyright (c) 1998-2003 Michael Shalayeff

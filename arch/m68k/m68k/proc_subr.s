@@ -1,4 +1,4 @@
-/*	$OpenBSD: proc_subr.s,v 1.2 2003/06/02 23:27:48 millert Exp $	*/
+/*	$OpenBSD: proc_subr.s,v 1.1 1997/07/06 07:46:28 downsj Exp $	*/
 /*	$NetBSD: proc_subr.s,v 1.2 1997/04/25 02:22:01 thorpej Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pxa2x0_space.c,v 1.3 2005/07/18 02:43:24 fgsch Exp $ */
+/*	$OpenBSD: pxa2x0_space.c,v 1.2 2005/01/02 19:52:36 drahn Exp $ */
 /*	$NetBSD: pxa2x0_space.c,v 1.5 2004/06/07 19:45:22 nathanw Exp $ */
 
 /*

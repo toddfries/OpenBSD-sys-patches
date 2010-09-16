@@ -1,4 +1,4 @@
-/*	$OpenBSD: ext2fs_lookup.c,v 1.21 2005/12/28 20:48:17 pedro Exp $	*/
+/*	$OpenBSD: ext2fs_lookup.c,v 1.20 2005/12/16 15:37:24 pedro Exp $	*/
 /*	$NetBSD: ext2fs_lookup.c,v 1.16 2000/08/03 20:29:26 thorpej Exp $	*/
 
 /* 

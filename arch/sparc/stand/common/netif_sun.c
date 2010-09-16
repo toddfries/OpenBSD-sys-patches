@@ -1,4 +1,4 @@
-/*	$OpenBSD: netif_sun.c,v 1.1 1997/09/17 10:46:18 downsj Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD: netif_sun.c,v 1.2 1995/09/18 21:31:48 pk Exp $	*/
 
 /*

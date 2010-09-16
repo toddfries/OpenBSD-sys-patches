@@ -1,4 +1,4 @@
-/*	$OpenBSD: boot.c,v 1.7 2005/08/01 19:58:13 kettenis Exp $ */
+/*	$OpenBSD: boot.c,v 1.6 2005/04/27 04:37:33 deraadt Exp $ */
 
 /*
  * Copyright (c) 2004 Opsycon AB, www.opsycon.se.

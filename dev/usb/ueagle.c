@@ -1,4 +1,4 @@
-/*	$OpenBSD: ueagle.c,v 1.12 2006/09/16 13:31:04 damien Exp $	*/
+/*	$OpenBSD: ueagle.c,v 1.11 2006/06/23 06:27:11 miod Exp $	*/
 
 /*-
  * Copyright (c) 2003-2006

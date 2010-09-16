@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exit_43.c,v 1.7 2003/06/02 23:27:59 millert Exp $	*/
+/*	$OpenBSD: kern_exit_43.c,v 1.6 2002/01/16 20:50:17 miod Exp $	*/
 /*	$NetBSD: kern_exit_43.c,v 1.3 1995/10/07 06:26:20 mycroft Exp $	*/
 
 /*

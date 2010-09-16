@@ -98,7 +98,7 @@ db_stack_trace_print(db_expr_t addr, int have_addr, db_expr_t count,
 			frame = tf->tf_r14;
 			callpc = tf->tf_spc;
 
-			(*print)("<EXPEVT %03x; SSR=%08x> at ",
+			(*print)("(EXPEVT %03x; SSR=%08x) at ",
 				 tf->tf_expevt, tf->tf_ssr);
 			db_printsym(callpc, DB_STGY_PROC, print);
 			(*print)("\n");

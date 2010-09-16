@@ -1,4 +1,4 @@
-/*	$OpenBSD: hil_gsc.c,v 1.5 2005/12/22 07:09:52 miod Exp $	*/
+/*	$OpenBSD: hil_gsc.c,v 1.4 2004/02/13 21:28:19 mickey Exp $	*/
 /*
  * Copyright (c) 2003, Miodrag Vallat.
  * All rights reserved.

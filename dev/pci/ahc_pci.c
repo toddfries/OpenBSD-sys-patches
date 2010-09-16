@@ -1,4 +1,4 @@
-/*	$OpenBSD: ahc_pci.c,v 1.50 2006/07/11 18:48:27 kettenis Exp $	*/
+/*	$OpenBSD: ahc_pci.c,v 1.49 2005/08/09 04:10:10 mickey Exp $	*/
 /*
  * Product specific probe and attach routines for:
  *      3940, 2940, aic7895, aic7890, aic7880,

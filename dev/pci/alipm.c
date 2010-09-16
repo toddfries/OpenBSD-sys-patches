@@ -1,4 +1,4 @@
-/*	$OpenBSD: alipm.c,v 1.11 2006/12/11 18:16:37 deraadt Exp $	*/
+/*	$OpenBSD: alipm.c,v 1.10 2006/05/09 18:49:56 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2005 Mark Kettenis

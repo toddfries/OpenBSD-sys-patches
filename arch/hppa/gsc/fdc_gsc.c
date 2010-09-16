@@ -1,4 +1,4 @@
-/*	$OpenBSD: fdc_gsc.c,v 1.5 2004/04/07 18:24:19 mickey Exp $	*/
+/*	$OpenBSD: fdc_gsc.c,v 1.4 2003/10/30 19:25:12 mickey Exp $	*/
 
 /*
  * Copyright (c) 1998 Michael Shalayeff

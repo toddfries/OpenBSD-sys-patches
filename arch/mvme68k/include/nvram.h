@@ -1,4 +1,4 @@
-/*	$OpenBSD: nvram.h,v 1.5 2003/06/02 05:09:14 deraadt Exp $ */
+/*	$OpenBSD: nvram.h,v 1.4 1997/03/31 00:24:03 downsj Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt

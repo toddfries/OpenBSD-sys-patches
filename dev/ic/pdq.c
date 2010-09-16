@@ -1,4 +1,4 @@
-/*	$OpenBSD: pdq.c,v 1.13 2007/02/14 00:53:48 jsg Exp $	*/
+/*	$OpenBSD: pdq.c,v 1.12 2002/06/02 22:49:59 deraadt Exp $	*/
 /*	$NetBSD: pdq.c,v 1.9 1996/10/13 01:37:26 christos Exp $	*/
 
 /*-

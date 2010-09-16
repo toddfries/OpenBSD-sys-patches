@@ -1,4 +1,4 @@
-/*	$OpenBSD: gemreg.h,v 1.12 2006/11/25 01:26:37 brad Exp $	*/
+/*	$OpenBSD: gemreg.h,v 1.11 2005/08/01 05:45:03 brad Exp $	*/
 /*	$NetBSD: gemreg.h,v 1.1 2001/09/16 00:11:43 eeh Exp $ */
 
 /*

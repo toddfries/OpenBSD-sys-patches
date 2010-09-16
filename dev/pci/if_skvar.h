@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_skvar.h,v 1.2 2005/12/22 20:54:47 brad Exp $	*/
+/*	$OpenBSD: if_skvar.h,v 1.1 2005/09/20 00:24:04 brad Exp $	*/
 /*	$NetBSD: if_skvar.h,v 1.6 2005/05/30 04:35:22 christos Exp $	*/
 
 /*-
@@ -33,7 +33,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
-/*	$OpenBSD: if_skvar.h,v 1.2 2005/12/22 20:54:47 brad Exp $	*/
+/*	$OpenBSD: if_skvar.h,v 1.1 2005/09/20 00:24:04 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999, 2000

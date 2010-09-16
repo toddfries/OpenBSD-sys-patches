@@ -1,4 +1,4 @@
-/*	$OpenBSD: sunkbdmap.c,v 1.1 2005/05/14 15:25:20 miod Exp $	*/
+/*	$OpenBSD: sunkbd.c,v 1.19 2005/02/28 20:32:34 miod Exp $	*/
 
 /*
  * Copyright (c) 2002, 2003 Miodrag Vallat.

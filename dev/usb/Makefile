@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.2 2005/05/09 05:08:32 miod Exp $
+#	$OpenBSD: Makefile,v 1.1 1999/08/13 05:28:03 fgsch Exp $
 #	$NetBSD: Makefile.usbdevs,v 1.2 1999/01/07 22:18:23 augustss Exp $
 
 AWK=	awk

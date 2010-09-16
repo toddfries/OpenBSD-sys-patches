@@ -1,4 +1,4 @@
-/*	$OpenBSD: cacheinfo.h,v 1.1 2004/01/28 01:39:39 mickey Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD: cacheinfo.h,v 1.1 2003/04/25 21:54:30 fvdl Exp $	*/
 
 #ifndef _X86_CACHEINFO_H

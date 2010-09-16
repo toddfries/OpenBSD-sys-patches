@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_art.h,v 1.5 2005/10/26 09:26:56 claudio Exp $ */
+/*	$OpenBSD: if_art.h,v 1.4 2005/08/27 13:32:01 claudio Exp $ */
 
 /*
  * Copyright (c) 2005  Internet Business Solutions AG, Zurich, Switzerland

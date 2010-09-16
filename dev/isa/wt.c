@@ -1,4 +1,4 @@
-/*	$OpenBSD: wt.c,v 1.17 2006/06/01 05:42:01 krw Exp $	*/
+/*	$OpenBSD: wt.c,v 1.16 2002/05/24 13:31:11 art Exp $	*/
 /*	$NetBSD: wt.c,v 1.33 1996/05/12 23:54:22 mycroft Exp $	*/
 
 /*

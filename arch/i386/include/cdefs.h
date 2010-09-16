@@ -1,4 +1,4 @@
-/*	$OpenBSD: cdefs.h,v 1.9 2005/11/24 20:46:45 deraadt Exp $	*/
+/*	$OpenBSD: cdefs.h,v 1.8 2003/04/17 03:42:14 drahn Exp $	*/
 
 /*
  * Written by J.T. Conklin <jtc@wimsey.com> 01/17/95.

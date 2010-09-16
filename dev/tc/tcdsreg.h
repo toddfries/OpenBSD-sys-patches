@@ -1,4 +1,4 @@
-/* $OpenBSD: tcdsreg.h,v 1.1 2002/05/02 22:56:06 miod Exp $ */
+/* $OpenBSD$ */
 /* $NetBSD: tcdsreg.h,v 1.1 2000/07/04 02:22:20 nisimura Exp $ */
 
 /*

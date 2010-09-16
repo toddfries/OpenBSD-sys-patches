@@ -1,4 +1,4 @@
-/*	$OpenBSD: bt445.c,v 1.1 2003/06/17 21:21:31 miod Exp $	*/
+/*	$OpenBSD$	*/
 /*
  * Copyright (c) 2003, Miodrag Vallat.
  *

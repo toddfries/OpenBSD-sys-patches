@@ -1,4 +1,4 @@
-/*	$OpenBSD: etherfun.h,v 1.3 2006/05/16 22:52:26 miod Exp $	*/
+/*	$OpenBSD: etherfun.h,v 1.2 2001/07/04 08:09:31 niklas Exp $	*/
 
 /*
  *

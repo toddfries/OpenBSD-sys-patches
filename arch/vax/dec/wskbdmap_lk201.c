@@ -1,4 +1,4 @@
-/*	$OpenBSD: wskbdmap_lk201.c,v 1.7 2006/11/27 16:10:41 miod Exp $	*/
+/*	$OpenBSD: wskbdmap_lk201.c,v 1.6 2006/11/01 19:53:40 miod Exp $	*/
 /* $NetBSD: wskbdmap_lk201.c,v 1.4 2000/12/02 16:57:41 ragge Exp $ */
 
 #include <sys/types.h>

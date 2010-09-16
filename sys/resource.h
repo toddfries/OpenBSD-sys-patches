@@ -1,4 +1,4 @@
-/*	$OpenBSD: resource.h,v 1.7 2003/12/11 23:02:30 millert Exp $	*/
+/*	$OpenBSD: resource.h,v 1.6 2003/12/11 22:55:22 millert Exp $	*/
 /*	$NetBSD: resource.h,v 1.14 1996/02/09 18:25:27 christos Exp $	*/
 
 /*

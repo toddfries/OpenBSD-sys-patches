@@ -1,4 +1,4 @@
-/* $OpenBSD: aic7xxx.reg,v 1.10 2004/08/01 01:36:23 krw Exp $ */
+/* $OpenBSD: aic7xxx.reg,v 1.9 2004/02/08 00:38:09 krw Exp $ */
 /*
  * Aic7xxx register and scratch ram definitions.
  *

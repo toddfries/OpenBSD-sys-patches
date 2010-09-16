@@ -1,4 +1,4 @@
-/*	$OpenBSD: elroy.c,v 1.4 2006/12/14 17:36:12 kettenis Exp $	*/
+/*	$OpenBSD: elroy.c,v 1.3 2006/03/13 20:10:49 brad Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff

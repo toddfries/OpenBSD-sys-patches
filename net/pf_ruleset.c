@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_ruleset.c,v 1.1 2006/10/27 13:56:51 mcbride Exp $ */
+/*	$OpenBSD$ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier

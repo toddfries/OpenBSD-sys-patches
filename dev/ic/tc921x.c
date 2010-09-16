@@ -1,4 +1,4 @@
-/*	$OpenBSD: tc921x.c,v 1.2 2003/10/21 18:58:49 jmc Exp $	*/
+/*	$OpenBSD: tc921x.c,v 1.1 2002/04/25 04:56:59 mickey Exp $	*/
 
 /*
  * Copyright (c) 2001, 2002 Vladimir Popov <jumbo@narod.ru>.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sbic.c,v 1.17 2005/12/03 18:09:37 krw Exp $ */
+/*	$OpenBSD: sbic.c,v 1.16 2004/12/25 23:02:24 miod Exp $ */
 /*	$NetBSD: sbic.c,v 1.2 1996/04/23 16:32:54 chuck Exp $	*/
 
 /*

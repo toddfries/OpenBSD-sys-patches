@@ -1,4 +1,4 @@
-/*	$OpenBSD: sgc.c,v 1.5 2007/01/06 20:10:57 miod Exp $	*/
+/*	$OpenBSD: sgc.c,v 1.4 2007/01/06 20:09:12 miod Exp $	*/
 
 /*
  * Copyright (c) 2005, Miodrag Vallat

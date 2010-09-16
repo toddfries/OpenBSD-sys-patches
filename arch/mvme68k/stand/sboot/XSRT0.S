@@ -1,4 +1,4 @@
-/*	$OpenBSD: XSRT0.S,v 1.5 2003/06/04 16:36:14 deraadt Exp $ */
+/*	$OpenBSD: XSRT0.S,v 1.4 1996/05/29 15:22:59 chuck Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt

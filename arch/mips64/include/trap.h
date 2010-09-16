@@ -1,4 +1,4 @@
-/*      $OpenBSD: trap.h,v 1.7 2006/06/06 17:42:28 miod Exp $	*/
+/*      $OpenBSD: trap.h,v 1.6 2005/08/07 07:29:44 miod Exp $	*/
 
 /*
  * Copyright (c) 1988 University of Utah.

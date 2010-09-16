@@ -1,4 +1,4 @@
-/*	$OpenBSD: amdpm.c,v 1.20 2006/12/11 18:16:37 deraadt Exp $	*/
+/*	$OpenBSD: amdpm.c,v 1.19 2006/11/28 16:17:57 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2006 Alexander Yurchenko <grange@openbsd.org>

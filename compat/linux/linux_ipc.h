@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_ipc.h,v 1.3 2000/07/23 22:35:38 jasoni Exp $	*/
+/*	$OpenBSD: linux_ipc.h,v 1.2 1996/04/17 05:23:53 mickey Exp $	*/
 /*	$NetBSD: linux_ipc.h,v 1.1 1995/02/28 23:25:47 fvdl Exp $	*/
 
 /*

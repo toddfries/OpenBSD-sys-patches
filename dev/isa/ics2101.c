@@ -1,4 +1,4 @@
-/* $OpenBSD: ics2101.c,v 1.6 2003/04/10 10:11:24 miod Exp $ */
+/* $OpenBSD: ics2101.c,v 1.5 2002/03/14 01:26:56 millert Exp $ */
 /* $NetBSD: ics2101.c,v 1.6 1997/10/09 07:57:23 jtc Exp $ */
 
 /*-

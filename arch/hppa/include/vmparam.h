@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmparam.h,v 1.33 2006/06/04 17:21:24 miod Exp $	*/
+/*	$OpenBSD: vmparam.h,v 1.32 2005/04/11 15:13:01 deraadt Exp $	*/
 
 /* 
  * Copyright (c) 1988-1994, The University of Utah and

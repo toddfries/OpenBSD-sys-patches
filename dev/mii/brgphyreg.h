@@ -1,4 +1,4 @@
-/*	$OpenBSD: brgphyreg.h,v 1.9 2007/01/30 02:35:16 krw Exp $	*/
+/*	$OpenBSD: brgphyreg.h,v 1.8 2003/10/22 09:39:29 jmc Exp $	*/
 
 /*
  * Copyright (c) 2000

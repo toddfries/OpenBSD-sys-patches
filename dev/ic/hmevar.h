@@ -1,4 +1,4 @@
-/*	$OpenBSD: hmevar.h,v 1.9 2006/12/21 22:13:36 jason Exp $	*/
+/*	$OpenBSD: hmevar.h,v 1.8 2004/08/08 19:01:20 brad Exp $	*/
 /*	$NetBSD: hmevar.h,v 1.6 2000/09/28 10:56:57 tsutsui Exp $	*/
 
 /*-

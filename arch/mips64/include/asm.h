@@ -1,4 +1,4 @@
-/*	$OpenBSD: asm.h,v 1.7 2004/10/20 12:49:15 pefo Exp $ */
+/*	$OpenBSD: asm.h,v 1.6 2004/09/27 20:39:27 pefo Exp $ */
 
 /*
  * Copyright (c) 2001-2002 Opsycon AB  (www.opsycon.se / www.opsycon.com)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: clock.c,v 1.13 2004/07/30 22:29:44 miod Exp $ */
+/*	$OpenBSD: clock.c,v 1.12 2004/07/30 10:02:42 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt

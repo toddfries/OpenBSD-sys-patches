@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpbiosvar.h,v 1.7 2007/01/23 21:17:18 kettenis Exp $	*/
+/*	$OpenBSD: mpbiosvar.h,v 1.6 2006/11/11 21:47:52 kettenis Exp $	*/
 /* $NetBSD: mpbiosvar.h,v 1.1.2.3 2000/02/29 13:17:20 sommerfeld Exp $ */
 
 /*-

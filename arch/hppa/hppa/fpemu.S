@@ -1,4 +1,4 @@
-/*	$OpenBSD: fpemu.S,v 1.12 2004/06/02 18:31:14 mickey Exp $	*/
+/*	$OpenBSD: fpemu.S,v 1.11 2004/04/21 07:36:03 mickey Exp $	*/
 
 /*
  * Copyright (c) 2000-2004 Michael Shalayeff

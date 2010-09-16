@@ -1,4 +1,4 @@
-/* $OpenBSD: mcclock_ioasic.c,v 1.6 2002/05/02 22:56:06 miod Exp $ */
+/* $OpenBSD$ */
 /* $NetBSD: mcclock_ioasic.c,v 1.9 2000/07/04 02:37:51 nisimura Exp $ */
 
 /*

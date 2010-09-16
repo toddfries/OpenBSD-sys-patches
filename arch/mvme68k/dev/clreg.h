@@ -1,4 +1,4 @@
-/*	$OpenBSD: clreg.h,v 1.6 2003/06/03 21:09:01 deraadt Exp $ */
+/*	$OpenBSD: clreg.h,v 1.5 1997/04/02 05:25:46 rahnds Exp $ */
 
 /*
  * Copyright (c) 1995 Dale Rahn. All rights reserved.

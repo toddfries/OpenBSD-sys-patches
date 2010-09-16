@@ -1,4 +1,4 @@
-/*	$OpenBSD: psychovar.h,v 1.6 2003/05/16 06:59:12 henric Exp $	*/
+/*	$OpenBSD: psychovar.h,v 1.5 2003/02/17 01:29:20 henric Exp $	*/
 /*	$NetBSD: psychovar.h,v 1.6 2001/07/20 00:07:13 eeh Exp $	*/
 
 /*

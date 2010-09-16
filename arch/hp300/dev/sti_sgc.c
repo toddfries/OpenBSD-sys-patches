@@ -1,4 +1,4 @@
-/*	$OpenBSD: sti_sgc.c,v 1.13 2007/01/11 21:58:04 miod Exp $	*/
+/*	$OpenBSD: sti_sgc.c,v 1.12 2007/01/06 20:10:57 miod Exp $	*/
 
 /*
  * Copyright (c) 2005, Miodrag Vallat

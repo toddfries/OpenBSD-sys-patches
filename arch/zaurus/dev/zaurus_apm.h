@@ -1,4 +1,4 @@
-/*	$OpenBSD: zaurus_apm.h,v 1.1 2005/04/11 03:21:03 uwe Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * Copyright (c) 2005 Uwe Stuehler <uwe@bsdx.de>

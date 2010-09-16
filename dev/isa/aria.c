@@ -1,4 +1,4 @@
-/*	$OpenBSD: aria.c,v 1.13 2006/05/11 18:50:18 miod Exp $ */
+/*	$OpenBSD: aria.c,v 1.12 2006/03/14 19:26:30 miod Exp $ */
 
 /*
  * Copyright (c) 1995, 1996 Roland C. Dowdeswell.  All rights reserved.

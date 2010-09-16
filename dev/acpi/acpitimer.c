@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpitimer.c,v 1.6 2007/02/22 07:01:41 jordan Exp $	*/
+/*	$OpenBSD: acpitimer.c,v 1.5 2007/02/20 22:10:27 marco Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *

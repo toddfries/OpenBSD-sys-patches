@@ -1,4 +1,4 @@
-/*	$OpenBSD: ichreg.h,v 1.7 2005/12/18 12:09:04 grange Exp $	*/
+/*	$OpenBSD: ichreg.h,v 1.6 2005/12/18 10:49:49 grange Exp $	*/
 
 /*
  * Copyright (c) 2004, 2005 Alexander Yurchenko <grange@openbsd.org>

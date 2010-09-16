@@ -1,4 +1,4 @@
-/*	$OpenBSD: xlreg.h,v 1.19 2004/05/30 23:49:39 brad Exp $	*/
+/*	$OpenBSD: xlreg.h,v 1.18 2004/05/19 12:11:34 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998

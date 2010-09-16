@@ -1,4 +1,4 @@
-/* $OpenBSD: com_cardbus.c,v 1.26 2006/10/12 16:35:51 grange Exp $ */
+/* $OpenBSD: com_cardbus.c,v 1.25 2006/06/02 20:11:48 fkr Exp $ */
 /* $NetBSD: com_cardbus.c,v 1.4 2000/04/17 09:21:59 joda Exp $ */
 
 /*

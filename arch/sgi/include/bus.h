@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus.h,v 1.5 2006/05/27 00:29:55 krw Exp $	*/
+/*	$OpenBSD: bus.h,v 1.4 2005/01/02 19:33:11 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB Sweden.  All rights reserved.

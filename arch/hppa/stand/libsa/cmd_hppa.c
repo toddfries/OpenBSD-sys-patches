@@ -1,4 +1,4 @@
-/*	$OpenBSD: cmd_hppa.c,v 1.8 2004/04/07 18:24:20 mickey Exp $	*/
+/*	$OpenBSD: cmd_hppa.c,v 1.7 2003/04/16 07:20:50 mickey Exp $	*/
 
 /*
  * Copyright (c) 2002 Miodrag Vallat

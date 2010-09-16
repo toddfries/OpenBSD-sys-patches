@@ -1,4 +1,4 @@
-/*	$OpenBSD: p9000.h,v 1.3 2006/12/27 18:54:02 miod Exp $	*/
+/*	$OpenBSD: p9000.h,v 1.2 2005/04/02 23:27:25 miod Exp $	*/
 /*
  * Copyright (c) 2003, Miodrag Vallat.
  *

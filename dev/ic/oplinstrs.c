@@ -1,4 +1,4 @@
-/*	$OpenBSD: oplinstrs.c,v 1.3 2005/11/21 18:16:39 millert Exp $	*/
+/*	$OpenBSD: oplinstrs.c,v 1.2 2001/05/01 02:21:42 mickey Exp $	*/
 
 #include <sys/param.h>
 #include <sys/systm.h>

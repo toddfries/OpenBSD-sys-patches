@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec.h,v 1.2 2004/02/27 17:41:25 deraadt Exp $	*/
+/*	$OpenBSD: exec.h,v 1.1 2004/01/28 01:39:39 mickey Exp $	*/
 /*
  * Written by Artur Grabowski <art@openbsd.org> Public Domain
  */

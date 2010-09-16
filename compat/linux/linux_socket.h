@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_socket.h,v 1.7 2002/11/27 07:30:36 ish Exp $	*/
+/*	$OpenBSD: linux_socket.h,v 1.6 2001/06/21 01:43:57 itojun Exp $	*/
 /*	$NetBSD: linux_socket.h,v 1.3 1995/05/28 10:16:34 mycroft Exp $	*/
 
 /*

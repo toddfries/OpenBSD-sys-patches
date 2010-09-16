@@ -1,4 +1,4 @@
-/*	$OpenBSD: ns16550reg.h,v 1.5 2003/06/02 23:28:02 millert Exp $	*/
+/*	$OpenBSD: ns16550reg.h,v 1.4 1998/05/14 05:56:21 downsj Exp $	*/
 /*	$NetBSD: ns16550reg.h,v 1.4 1994/10/27 04:18:43 cgd Exp $	*/
 
 /*-

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sa11x0_var.h,v 1.3 2005/01/04 02:08:41 drahn Exp $ */
+/*	$OpenBSD: sa11x0_var.h,v 1.2 2005/01/02 19:52:36 drahn Exp $ */
 /*      $NetBSD: sa11x0_var.h,v 1.4 2003/04/14 14:18:41 rjs Exp $        */
 
 /*-

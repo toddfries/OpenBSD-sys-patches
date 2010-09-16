@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipx_cksum.c,v 1.6 2003/12/10 07:22:43 itojun Exp $	*/
+/*	$OpenBSD: ipx_cksum.c,v 1.5 2003/06/02 23:28:16 millert Exp $	*/
 
 /*-
  *

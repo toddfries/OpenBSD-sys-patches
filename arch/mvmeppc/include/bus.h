@@ -1,5 +1,5 @@
 /*      $NetBSD: bus.h,v 1.6 2001/06/15 15:50:05 nonaka Exp $        */
-/*	$OpenBSD: bus.h,v 1.3 2003/11/25 21:16:44 drahn Exp $	*/
+/*	$OpenBSD: bus.h,v 1.2 2002/06/08 15:49:57 miod Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997, 1998, 2001 The NetBSD Foundation, Inc.

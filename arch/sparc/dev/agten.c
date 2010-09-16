@@ -1,4 +1,4 @@
-/*	$OpenBSD: agten.c,v 1.10 2006/06/02 20:00:54 miod Exp $	*/
+/*	$OpenBSD: agten.c,v 1.9 2005/03/23 17:16:34 miod Exp $	*/
 /*
  * Copyright (c) 2002, 2003, Miodrag Vallat.
  * All rights reserved.

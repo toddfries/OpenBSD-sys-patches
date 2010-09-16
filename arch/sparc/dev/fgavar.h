@@ -1,4 +1,4 @@
-/*	$OpenBSD: fgavar.h,v 1.4 2004/09/29 07:35:11 miod Exp $	*/
+/*	$OpenBSD: fgavar.h,v 1.3 2003/06/02 18:40:59 jason Exp $	*/
 
 /*
  * Copyright (c) 1999 Jason L. Wright (jason@thought.net)

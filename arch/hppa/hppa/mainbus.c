@@ -1,4 +1,4 @@
-/*	$OpenBSD: mainbus.c,v 1.63 2005/10/26 18:35:44 martin Exp $	*/
+/*	$OpenBSD: mainbus.c,v 1.62 2005/04/07 00:21:51 mickey Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff

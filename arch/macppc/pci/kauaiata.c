@@ -1,4 +1,4 @@
-/*	$OpenBSD: kauaiata.c,v 1.9 2007/03/01 21:28:56 drahn Exp $ */
+/*	$OpenBSD: kauaiata.c,v 1.8 2007/02/05 06:46:56 drahn Exp $ */
 
 /*
  * Copyright (c) 2003 Dale Rahn

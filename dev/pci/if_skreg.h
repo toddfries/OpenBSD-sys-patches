@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_skreg.h,v 1.44 2007/02/26 20:27:17 kettenis Exp $	*/
+/*	$OpenBSD: if_skreg.h,v 1.43 2007/02/10 22:49:46 kettenis Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999, 2000

@@ -1,4 +1,4 @@
-# 	$OpenBSD: Makefile,v 1.1 2006/05/29 17:22:48 drahn Exp $
+# 	$OpenBSD: Makefile,v 1.3 2005/05/06 02:20:24 uwe Exp $
 #	$NetBSD: Makefile,v 1.1 2001/06/12 08:32:46 chris Exp $
 
 # Makefile for armish tags file and boot blocks

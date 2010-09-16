@@ -1,4 +1,4 @@
-/*	$OpenBSD: build.c,v 1.3 2006/08/17 08:32:30 damien Exp $	*/
+/*	$OpenBSD: build.c,v 1.2 2006/06/16 22:27:53 niallo Exp $	*/
 
 /*-
  * Copyright (c) 2006

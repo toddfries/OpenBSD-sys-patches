@@ -1,4 +1,4 @@
-/*	$OpenBSD: harmony.c,v 1.25 2006/05/20 01:58:27 mickey Exp $	*/
+/*	$OpenBSD: harmony.c,v 1.24 2005/04/16 21:54:32 mickey Exp $	*/
 
 /*
  * Copyright (c) 2003 Jason L. Wright (jason@thought.net)

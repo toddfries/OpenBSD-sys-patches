@@ -1,4 +1,4 @@
-/*	$OpenBSD: isabr.c,v 1.2 2007/01/14 17:54:45 miod Exp $	*/
+/*	$OpenBSD: isabr.c,v 1.1 2007/01/06 20:17:43 miod Exp $	*/
 
 /*
  * Copyright (c) 2007 Miodrag Vallat.

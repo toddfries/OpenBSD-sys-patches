@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcic2var.h,v 1.4 2005/11/23 11:39:37 mickey Exp $	*/
+/*	$OpenBSD: tcic2var.h,v 1.3 2004/01/15 17:51:42 miod Exp $	*/
 /*	$NetBSD: tcic2var.h,v 1.1 1999/03/23 20:04:14 bad Exp $	*/
 
 /*

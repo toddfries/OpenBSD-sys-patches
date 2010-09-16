@@ -1,4 +1,4 @@
-/*	$OpenBSD: eephy.c,v 1.40 2007/02/11 21:29:24 kettenis Exp $	*/
+/*	$OpenBSD: eephy.c,v 1.39 2007/01/05 21:40:45 kettenis Exp $	*/
 /*
  * Principal Author: Parag Patel
  * Copyright (c) 2001

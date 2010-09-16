@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_fcntl.h,v 1.3 2002/02/04 20:04:52 provos Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD: linux_fcntl.h,v 1.1 1995/02/28 23:25:40 fvdl Exp $	*/
 
 /*

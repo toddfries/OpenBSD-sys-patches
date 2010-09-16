@@ -1,4 +1,4 @@
-/*	$OpenBSD: oosiop.c,v 1.5 2006/11/28 23:59:45 dlg Exp $	*/
+/*	$OpenBSD: oosiop.c,v 1.4 2004/03/14 19:23:33 miod Exp $	*/
 /*	$NetBSD: oosiop.c,v 1.4 2003/10/29 17:45:55 tsutsui Exp $	*/
 
 /*

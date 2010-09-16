@@ -1,4 +1,4 @@
-/*	$OpenBSD: ffs.S,v 1.2 1996/09/27 06:47:45 mickey Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * Written by J.T. Conklin <jtc@netbsd.org>.

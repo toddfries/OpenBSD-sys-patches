@@ -1788,11 +1788,11 @@ mfi_create_sensors(struct mfi_softc *sc)
 	if (ssc == NULL)
 		return (1);
 
-	sc->sc_sensors = malloc(sizeof(struct sensor) * sc->sc_ld_cnt,
+	sc->sc_sensors = malloc(sizeof(struct ksensor) * sc->sc_ld_cnt,
 	    M_DEVBUF, M_WAITOK);
 	if (sc->sc_sensors == NULL)
 		return (1);
-	bzero(sc->sc_sensors, sizeof(struct sensor) * sc->sc_ld_cnt);	
+	bzero(sc->sc_sensors, sizeof(struct ksensor) * sc->sc_ld_cnt);	
 
 	strlcpy(sc->sc_sensordev.xname, DEVNAME(sc),
 	    sizeof(sc->sc_sensordev.xname));

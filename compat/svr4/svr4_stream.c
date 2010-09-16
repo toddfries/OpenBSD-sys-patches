@@ -1,4 +1,4 @@
-/*	$OpenBSD: svr4_stream.c,v 1.19 2005/11/21 18:16:38 millert Exp $	 */
+/*	$OpenBSD: svr4_stream.c,v 1.18 2003/11/23 17:14:21 avsm Exp $	 */
 /*	$NetBSD: svr4_stream.c,v 1.19 1996/12/22 23:00:03 fvdl Exp $	 */
 
 /*

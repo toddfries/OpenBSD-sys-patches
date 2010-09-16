@@ -1,4 +1,4 @@
-/*	$OpenBSD: midi.c,v 1.16 2006/12/21 02:28:47 krw Exp $	*/
+/*	$OpenBSD: midi.c,v 1.15 2006/11/01 03:37:23 tedu Exp $	*/
 
 /*
  * Copyright (c) 2003, 2004 Alexandre Ratchov

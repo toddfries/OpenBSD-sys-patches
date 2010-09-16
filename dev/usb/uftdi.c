@@ -1,4 +1,4 @@
-/*	$OpenBSD: uftdi.c,v 1.33 2007/03/03 12:40:31 deraadt Exp $ 	*/
+/*	$OpenBSD: uftdi.c,v 1.32 2007/02/07 23:51:51 jsg Exp $ 	*/
 /*	$NetBSD: uftdi.c,v 1.14 2003/02/23 04:20:07 simonb Exp $	*/
 
 /*

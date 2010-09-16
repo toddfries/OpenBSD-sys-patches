@@ -1,4 +1,4 @@
-/*	$OpenBSD: strchr.c,v 1.3 2004/05/06 01:12:05 deraadt Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * Copyright (c) 2004 Daniel Hartmeier
@@ -31,7 +31,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: strchr.c,v 1.3 2004/05/06 01:12:05 deraadt Exp $";
+static char *rcsid = "$OpenBSD$";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/types.h>

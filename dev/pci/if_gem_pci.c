@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_gem_pci.c,v 1.27 2006/12/21 22:13:36 jason Exp $	*/
+/*	$OpenBSD: if_gem_pci.c,v 1.26 2006/11/25 17:47:40 brad Exp $	*/
 /*	$NetBSD: if_gem_pci.c,v 1.1 2001/09/16 00:11:42 eeh Exp $ */
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: wd.c,v 1.53 2007/02/15 00:53:26 krw Exp $ */
+/*	$OpenBSD: wd.c,v 1.54 2007/03/25 18:05:49 deraadt Exp $ */
 /*	$NetBSD: wd.c,v 1.193 1999/02/28 17:15:27 explorer Exp $ */
 
 /*
@@ -638,6 +638,7 @@ wdrestart(void *v)
 	    DEBUG_XFERS);
 
 	s = splbio();
+	disk_unbusy(&wd->sc_dk, 0, (bp->b_flags & B_READ));
 	__wdstart(v, bp);
 	splx(s);
 }

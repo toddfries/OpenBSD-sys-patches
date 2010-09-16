@@ -1,4 +1,4 @@
-/* $OpenBSD: i80321_intr.c,v 1.9 2006/12/20 14:27:58 drahn Exp $ */
+/* $OpenBSD: i80321_intr.c,v 1.8 2006/07/02 02:51:13 drahn Exp $ */
 
 /*
  * Copyright (c) 2006 Dale Rahn <drahn@openbsd.org>

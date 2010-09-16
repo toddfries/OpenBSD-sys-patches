@@ -1,4 +1,4 @@
-/*	$OpenBSD: xmphyreg.h,v 1.5 2002/05/04 11:30:06 fgsch Exp $	*/
+/*	$OpenBSD$	*/
 /*
  * Copyright (c) 2000
  *	Bill Paul <wpaul@ee.columbia.edu>.  All rights reserved.

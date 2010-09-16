@@ -1,4 +1,4 @@
-/*	$OpenBSD: fdvar.h,v 1.2 2006/08/17 01:37:41 krw Exp $	*/
+/*	$OpenBSD: fdvar.h,v 1.1 2005/03/09 18:41:49 miod Exp $	*/
 /*	$NetBSD: fdvar.h,v 1.12 2003/07/11 12:09:13 pk Exp $	*/
 
 /*-

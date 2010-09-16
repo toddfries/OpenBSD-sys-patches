@@ -1,4 +1,4 @@
-/*	$OpenBSD: altq_rio.c,v 1.9 2003/01/07 00:29:28 cloder Exp $	*/
+/*	$OpenBSD: altq_rio.c,v 1.8 2002/12/16 17:27:20 henning Exp $	*/
 /*	$KAME: altq_rio.c,v 1.8 2000/12/14 08:12:46 thorpej Exp $	*/
 
 /*

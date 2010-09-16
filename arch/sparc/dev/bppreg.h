@@ -1,4 +1,4 @@
-/*	$OpenBSD: bppreg.h,v 1.3 2003/06/03 21:09:02 deraadt Exp $	*/
+/*	$OpenBSD: bppreg.h,v 1.2 2001/07/04 08:43:28 niklas Exp $	*/
 
 /*
  * Copyright (c) 1997, Jason Downs.  All rights reserved.

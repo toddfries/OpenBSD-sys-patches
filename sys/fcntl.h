@@ -1,4 +1,4 @@
-/*	$OpenBSD: fcntl.h,v 1.10 2005/12/13 00:35:23 millert Exp $	*/
+/*	$OpenBSD: fcntl.h,v 1.9 2003/06/02 23:28:21 millert Exp $	*/
 /*	$NetBSD: fcntl.h,v 1.8 1995/03/26 20:24:12 jtc Exp $	*/
 
 /*-

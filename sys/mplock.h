@@ -1,4 +1,4 @@
-/*	$OpenBSD: mplock.h,v 1.8 2005/06/17 22:33:34 niklas Exp $	*/
+/*	$OpenBSD: mplock.h,v 1.7 2005/05/29 03:20:42 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2004 Niklas Hallqvist.  All rights reserved.

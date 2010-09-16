@@ -179,16 +179,56 @@ atomic_loadlatch_ulong(__volatile unsigned long *ulp, unsigned long v)
 	return (v0);
 }
 
+/*
+ * atomic_setbits_int:
+ *
+ *	Atomically set bits in a `unsigned int'.
+ */
 static __inline void
 atomic_setbits_int(__volatile unsigned int *uip, unsigned int v)
 {
-	*uip |= v;
+	unsigned int t0;
+
+	__asm __volatile(
+		"# BEGIN atomic_setbits_ulong\n"
+		"1:	ldl_l	%0, %3		\n"
+		"	or	%0, %2, %0	\n"
+		"	stl_c	%0, %1		\n"
+		"	beq	%0, 2f		\n"
+		"	mb			\n"
+		"	br	3f		\n"
+		"2:	br	1b		\n"
+		"3:				\n"
+		"	# END atomic_setbits_int"
+		: "=&r" (t0), "=m" (*uip)
+		: "r" (v), "m" (*uip)
+		: "memory");
 }
 
+/*
+ * atomic_clearbits_int:
+ *
+ *	Atomically clear bits in a `unsigned int'.
+ */
 static __inline void
 atomic_clearbits_int(__volatile unsigned int *uip, unsigned int v)
 {
-	*uip &= ~v;
+	unsigned int t0;
+
+	__asm __volatile(
+		"# BEGIN atomic_clearbits_int\n"
+		"1:	ldl_l	%0, %3		\n"
+		"	and	%0, %2, %0	\n"
+		"	stl_c	%0, %1		\n"
+		"	beq	%0, 2f		\n"
+		"	mb			\n"
+		"	br	3f		\n"
+		"2:	br	1b		\n"
+		"3:				\n"
+		"	# END atomic_clearbits_int"
+		: "=&r" (t0), "=m" (*uip)
+		: "r" (~v), "m" (*uip)
+		: "memory");
 }
 
 #endif /* defined(_KERNEL) */

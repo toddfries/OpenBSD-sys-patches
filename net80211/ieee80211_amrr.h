@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_amrr.h,v 1.3 2006/06/17 19:34:31 damien Exp $	*/
+/*	$OpenBSD: ieee80211_amrr.h,v 1.2 2006/06/17 19:26:00 damien Exp $	*/
 
 /*-
  * Copyright (c) 2006

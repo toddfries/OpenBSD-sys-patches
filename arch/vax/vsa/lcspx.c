@@ -1,4 +1,4 @@
-/*	$OpenBSD: lcspx.c,v 1.11 2006/11/29 12:13:54 miod Exp $	*/
+/*	$OpenBSD: lcspx.c,v 1.10 2006/08/27 16:55:41 miod Exp $	*/
 /*
  * Copyright (c) 2006 Miodrag Vallat.
  *

@@ -1,4 +1,4 @@
-/*	$OpenBSD: dz_uba.c,v 1.6 2006/07/29 17:06:27 miod Exp $	*/
+/*	$OpenBSD: dz_uba.c,v 1.5 2004/07/09 15:57:16 deraadt Exp $	*/
 /*	$NetBSD: dz_uba.c,v 1.11 2000/06/04 06:17:02 matt Exp $ */
 /*
  * Copyright (c) 1998 Ludd, University of Lule}, Sweden. All rights reserved.

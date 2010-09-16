@@ -432,7 +432,7 @@ void dc_pci_attach(parent, self, aux)
 		break;
 	}
 	if (found == 0) {
-		/* This shouldn't happen if probe has done it's job... */
+		/* This shouldn't happen if probe has done its job... */
 		printf(": unknown device: %x:%x\n",
 		    PCI_VENDOR(pa->pa_id), PCI_PRODUCT(pa->pa_id));
 		goto fail_2;

@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK,v 1.14 2006/10/18 19:11:54 brad Exp $
+#	$OpenBSD: RAMDISK,v 1.13 2005/05/01 17:19:34 david Exp $
 #
 
 machine		sgi mips64

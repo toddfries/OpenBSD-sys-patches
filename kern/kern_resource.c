@@ -229,10 +229,10 @@ dosetrlimit(struct proc *p, u_int which, struct rlimit *limp)
 	    limp->rlim_max > alimp->rlim_max)
 		if ((error = suser(p, 0)) != 0)
 			return (error);
-	if (p->p_limit->p_refcnt > 1 &&
-	    (p->p_limit->p_lflags & PL_SHAREMOD) == 0) {
-		p->p_limit->p_refcnt--;
-		p->p_limit = limcopy(p->p_limit);
+	if (p->p_p->ps_limit->p_refcnt > 1 &&
+	    (p->p_p->ps_limit->p_lflags & PL_SHAREMOD) == 0) {
+		p->p_p->ps_limit->p_refcnt--;
+		p->p_p->ps_limit = limcopy(p->p_p->ps_limit);
 		alimp = &p->p_rlimit[which];
 	}
 

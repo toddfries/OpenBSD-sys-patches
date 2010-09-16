@@ -1,4 +1,4 @@
-$OpenBSD: tcdevs,v 1.7 2002/05/03 20:27:44 miod Exp $
+$OpenBSD: tcdevs,v 1.6 2002/05/02 22:56:06 miod Exp $
 /* $NetBSD: tcdevs,v 1.17 2000/12/17 13:56:05 ad Exp $ */
 
 /*

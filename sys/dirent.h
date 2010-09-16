@@ -1,4 +1,4 @@
-/*	$OpenBSD: dirent.h,v 1.8 2006/08/17 12:40:11 jmc Exp $	*/
+/*	$OpenBSD: dirent.h,v 1.7 2005/12/13 00:35:23 millert Exp $	*/
 /*	$NetBSD: dirent.h,v 1.12 1996/04/09 20:55:25 cgd Exp $	*/
 
 /*-

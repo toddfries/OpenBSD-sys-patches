@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.3 2006/07/30 20:46:30 drahn Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.2 2006/07/29 16:08:20 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2006 Mark Kettenis

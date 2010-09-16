@@ -1,4 +1,4 @@
-/*	$OpenBSD: central.c,v 1.4 2004/09/27 17:28:03 jason Exp $	*/
+/*	$OpenBSD: central.c,v 1.3 2004/09/24 20:49:57 jason Exp $	*/
 
 /*
  * Copyright (c) 2004 Jason L. Wright (jason@thought.net)

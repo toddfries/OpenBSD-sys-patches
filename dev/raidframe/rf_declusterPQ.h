@@ -1,4 +1,4 @@
-/*	$OpenBSD: rf_declusterPQ.h,v 1.3 2002/12/16 07:01:03 tdeval Exp $	*/
+/*	$OpenBSD: rf_declusterPQ.h,v 1.2 1999/02/16 00:02:35 niklas Exp $	*/
 /*	$NetBSD: rf_declusterPQ.h,v 1.3 1999/02/05 00:06:09 oster Exp $	*/
 
 /*

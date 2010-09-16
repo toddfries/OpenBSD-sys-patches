@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.11 2007/02/06 22:39:13 dlg Exp $	*/
+/*	$OpenBSD: conf.c,v 1.10 2007/01/15 23:19:05 jsg Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995 Charles M. Hannum.  All rights reserved.

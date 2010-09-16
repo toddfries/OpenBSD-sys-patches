@@ -1,4 +1,4 @@
-/*	$OpenBSD: sys_machdep.c,v 1.2 2005/08/01 15:43:12 miod Exp $	*/
+/*	$OpenBSD: sys_machdep.c,v 1.1 2004/08/06 20:56:03 pefo Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993

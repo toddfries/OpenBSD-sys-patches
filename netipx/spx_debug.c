@@ -1,4 +1,4 @@
-/*	$OpenBSD: spx_debug.c,v 1.7 2003/06/02 23:28:16 millert Exp $	*/
+/*	$OpenBSD: spx_debug.c,v 1.6 2000/01/15 18:52:14 fgsch Exp $	*/
 
 /*-
  *

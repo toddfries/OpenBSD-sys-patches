@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$OpenBSD: wdt50x.h,v 1.1 1999/04/28 23:21:05 alex Exp $
+ *	$OpenBSD$
  */
 
 #ifndef WDT_H

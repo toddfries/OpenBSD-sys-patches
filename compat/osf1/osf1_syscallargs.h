@@ -1,4 +1,4 @@
-/*	$OpenBSD: osf1_syscallargs.h,v 1.12 2004/05/28 18:31:12 tedu Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * System call argument lists.

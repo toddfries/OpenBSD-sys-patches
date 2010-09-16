@@ -1,4 +1,4 @@
-/*	$OpenBSD: ucycom.c,v 1.4 2006/08/24 12:14:23 jason Exp $	*/
+/*	$OpenBSD: ucycom.c,v 1.3 2006/08/18 23:08:45 jason Exp $	*/
 /*	$NetBSD: ucycom.c,v 1.3 2005/08/05 07:27:47 skrll Exp $	*/
 
 /*

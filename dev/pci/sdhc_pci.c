@@ -1,4 +1,4 @@
-/*	$OpenBSD: sdhc_pci.c,v 1.5 2006/07/19 20:58:45 fgsch Exp $	*/
+/*	$OpenBSD: sdhc_pci.c,v 1.4 2006/07/18 17:28:14 fgsch Exp $	*/
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>

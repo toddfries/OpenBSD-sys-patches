@@ -141,8 +141,8 @@ struct ami_softc {
 	}			sc_hdr[AMI_BIG_MAX_LDRIVES];
 	struct ami_rawsoftc	*sc_rawsoftcs;
 
-	struct sensor		*sc_sensors;
-	struct sensordev	sc_sensordev;
+	struct ksensor		*sc_sensors;
+	struct ksensordev	sc_sensordev;
 	struct ami_big_diskarray *sc_bd;
 };
 

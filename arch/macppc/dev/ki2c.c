@@ -1,4 +1,4 @@
-/*	$OpenBSD: ki2c.c,v 1.13 2006/06/19 22:42:33 miod Exp $	*/
+/*	$OpenBSD: ki2c.c,v 1.12 2006/01/01 20:52:25 deraadt Exp $	*/
 /*	$NetBSD: ki2c.c,v 1.1 2003/12/27 02:19:34 grant Exp $	*/
 
 /*-

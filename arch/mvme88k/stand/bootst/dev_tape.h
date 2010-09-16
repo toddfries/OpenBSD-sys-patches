@@ -1,4 +1,4 @@
-/*	$OpenBSD: dev_tape.h,v 1.2 2002/03/14 01:26:40 millert Exp $ */
+/*	$OpenBSD: dev_tape.h,v 1.1 1998/12/15 06:09:51 smurph Exp $ */
 
 int	tape_open(struct open_file *, ...);
 int	tape_close(struct open_file *);

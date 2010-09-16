@@ -1,4 +1,4 @@
-/*	$OpenBSD: boot.c,v 1.1 2006/05/16 22:48:18 miod Exp $ */
+/*	$OpenBSD: boot.c,v 1.6 2003/06/04 04:11:37 deraadt Exp $ */
 
 /*-
  * Copyright (c) 1995 Theo de Raadt

@@ -1,4 +1,4 @@
-/*	$OpenBSD: dev_hppa64.h,v 1.1 2005/04/01 10:40:48 mickey Exp $	*/
+/*	$OpenBSD: dev_hppa.h,v 1.8 2003/08/11 06:51:45 mickey Exp $	*/
 
 
 #define IOPGSHIFT	11

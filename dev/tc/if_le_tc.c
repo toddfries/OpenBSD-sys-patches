@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_le_tc.c,v 1.7 2005/10/11 06:03:18 martin Exp $	*/
+/*	$OpenBSD: if_le_tc.c,v 1.6 2002/05/02 22:56:06 miod Exp $	*/
 /*	$NetBSD: if_le_tc.c,v 1.12 2001/11/13 06:26:10 lukem Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: fbvar.h,v 1.6 2006/03/12 22:53:02 miod Exp $	*/
+/*	$OpenBSD: fbvar.h,v 1.4 2005/03/07 16:44:52 miod Exp $	*/
 /*	$NetBSD: fbvar.h,v 1.9 1997/07/07 23:31:30 pk Exp $ */
 
 /*

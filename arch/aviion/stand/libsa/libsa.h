@@ -1,4 +1,4 @@
-/*	$OpenBSD: libsa.h,v 1.1 2006/05/16 22:48:18 miod Exp $	*/
+/*	$OpenBSD: libsa.h,v 1.3 2002/03/14 01:26:40 millert Exp $	*/
 
 /*
  * libsa prototypes 

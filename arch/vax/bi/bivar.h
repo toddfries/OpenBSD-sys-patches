@@ -1,4 +1,4 @@
-/*	$OpenBSD: bivar.h,v 1.6 2002/06/11 09:36:23 hugh Exp $ */
+/*	$OpenBSD$ */
 /*	$NetBSD: bivar.h,v 1.8 2000/07/26 12:41:40 ragge Exp $ */
 /*
  * Copyright (c) 1996, 1999 Ludd, University of Lule}, Sweden.

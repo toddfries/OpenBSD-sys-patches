@@ -1,4 +1,4 @@
-/*	$OpenBSD: xform.c,v 1.30 2007/02/19 08:55:41 hshoexer Exp $	*/
+/*	$OpenBSD: xform.c,v 1.29 2005/05/25 05:47:53 markus Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and

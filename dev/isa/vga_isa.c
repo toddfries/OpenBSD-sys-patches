@@ -1,4 +1,4 @@
-/* $OpenBSD: vga_isa.c,v 1.8 2002/03/14 01:26:56 millert Exp $ */
+/* $OpenBSD: vga_isa.c,v 1.7 2000/11/15 20:17:38 aaron Exp $ */
 /* $NetBSD: vga_isa.c,v 1.3 1998/06/12 18:45:48 drochner Exp $ */
 
 /*

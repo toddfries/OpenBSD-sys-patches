@@ -1,4 +1,4 @@
-/*	$OpenBSD: midwayvar.h,v 1.12 2003/10/21 18:58:49 jmc Exp $	*/
+/*	$OpenBSD: midwayvar.h,v 1.11 2002/03/15 01:20:04 millert Exp $	*/
 
 /*
  *

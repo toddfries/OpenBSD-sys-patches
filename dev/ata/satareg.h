@@ -1,4 +1,4 @@
-/*	$OpenBSD: satareg.h,v 1.1 2004/10/17 17:18:06 grange Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD: satareg.h,v 1.3 2004/05/23 23:07:59 wiz Exp $	*/
 
 /*-

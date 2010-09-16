@@ -1,4 +1,4 @@
-/*	$OpenBSD: gidt.h,v 1.1 2004/03/21 21:37:41 tom Exp $	*/
+/*	$OpenBSD: gidt.S,v 1.1 2004/02/03 12:09:47 mickey Exp $	*/
 
 /*
  * Copyright (c) 2004 Tom Cosgrove

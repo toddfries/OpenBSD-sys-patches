@@ -1,4 +1,4 @@
-/*	$OpenBSD: asm_macro.h,v 1.3 2005/12/03 16:52:16 miod Exp $ */
+/*	$OpenBSD: asm_macro.h,v 1.2 2005/04/30 16:42:36 miod Exp $ */
 /*
  * Mach Operating System
  * Copyright (c) 1993-1991 Carnegie Mellon University

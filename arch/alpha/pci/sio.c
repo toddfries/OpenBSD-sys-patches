@@ -1,4 +1,4 @@
-/*	$OpenBSD: sio.c,v 1.31 2006/01/02 05:21:26 brad Exp $	*/
+/*	$OpenBSD: sio.c,v 1.30 2004/12/06 19:51:41 brad Exp $	*/
 /*	$NetBSD: sio.c,v 1.15 1996/12/05 01:39:36 cgd Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: hmevar.h,v 1.12 2006/06/02 20:00:54 miod Exp $	*/
+/*	$OpenBSD: hmevar.h,v 1.11 2004/09/28 00:21:23 brad Exp $	*/
 
 /*
  * Copyright (c) 1998 Jason L. Wright (jason@thought.net)

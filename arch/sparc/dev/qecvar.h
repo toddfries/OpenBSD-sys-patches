@@ -1,4 +1,4 @@
-/*	$OpenBSD: qecvar.h,v 1.11 2006/06/02 20:00:54 miod Exp $	*/
+/*	$OpenBSD: qecvar.h,v 1.10 2003/06/02 15:54:22 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1998 Theo de Raadt and Jason L. Wright.

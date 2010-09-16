@@ -1,4 +1,4 @@
-/*	$OpenBSD: ad1848.c,v 1.32 2005/05/22 19:40:51 art Exp $	*/
+/*	$OpenBSD: ad1848.c,v 1.31 2005/04/15 13:05:14 mickey Exp $	*/
 /*	$NetBSD: ad1848.c,v 1.45 1998/01/30 02:02:38 augustss Exp $	*/
 
 /*

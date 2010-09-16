@@ -1,4 +1,4 @@
-/*	$OpenBSD: aic7xxx.c,v 1.73 2006/07/30 14:21:14 krw Exp $	*/
+/*	$OpenBSD: aic7xxx.c,v 1.72 2006/02/06 17:29:10 jmc Exp $	*/
 /*	$NetBSD: aic7xxx.c,v 1.108 2003/11/02 11:07:44 wiz Exp $	*/
 
 /*

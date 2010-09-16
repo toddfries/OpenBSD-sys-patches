@@ -1,4 +1,4 @@
-/*	$OpenBSD: qe.c,v 1.20 2006/06/21 18:08:47 jason Exp $	*/
+/*	$OpenBSD: qe.c,v 1.19 2006/06/02 20:00:56 miod Exp $	*/
 /*	$NetBSD: qe.c,v 1.16 2001/03/30 17:30:18 christos Exp $	*/
 
 /*-

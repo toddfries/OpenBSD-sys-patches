@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.8 2006/04/15 17:36:47 miod Exp $	*/
+/*	$OpenBSD: locore.s,v 1.7 2006/03/23 02:29:35 ray Exp $	*/
 /*	OpenBSD: locore.s,v 1.64 2005/04/17 18:47:50 miod Exp 	*/
 
 /*

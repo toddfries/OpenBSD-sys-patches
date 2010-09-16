@@ -1,4 +1,4 @@
-/*	$OpenBSD: spifvar.h,v 1.4 2006/06/02 20:00:54 miod Exp $	*/
+/*	$OpenBSD: spifvar.h,v 1.3 2003/06/02 18:40:59 jason Exp $	*/
 
 /*
  * Copyright (c) 1999 Jason L. Wright (jason@thought.net)

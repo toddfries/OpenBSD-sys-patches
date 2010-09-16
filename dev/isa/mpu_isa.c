@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpu_isa.c,v 1.3 2003/01/29 20:35:13 mickey Exp $	*/
+/*	$OpenBSD: mpu_isa.c,v 1.2 2003/01/29 20:32:23 mickey Exp $	*/
 
 /*
  * Copyright (c) 2002 Sergey Smitienko. All rights reserved.

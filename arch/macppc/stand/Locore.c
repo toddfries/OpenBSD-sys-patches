@@ -1,4 +1,4 @@
-/*	$OpenBSD: Locore.c,v 1.11 2006/12/05 20:30:26 gwk Exp $	*/
+/*	$OpenBSD: Locore.c,v 1.10 2006/10/10 20:21:10 mbalmer Exp $	*/
 /*	$NetBSD: Locore.c,v 1.1 1997/04/16 20:29:11 thorpej Exp $	*/
 
 /*

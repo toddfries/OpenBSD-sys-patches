@@ -1,4 +1,4 @@
-/*	$OpenBSD: mii_physubr.c,v 1.32 2007/02/10 22:36:18 kettenis Exp $	*/
+/*	$OpenBSD: mii_physubr.c,v 1.31 2006/12/30 09:36:21 kettenis Exp $	*/
 /*	$NetBSD: mii_physubr.c,v 1.20 2001/04/13 23:30:09 thorpej Exp $	*/
 
 /*-

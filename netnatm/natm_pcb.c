@@ -1,4 +1,4 @@
-/*	$OpenBSD: natm_pcb.c,v 1.7 2006/03/05 21:48:57 miod Exp $	*/
+/*	$OpenBSD: natm_pcb.c,v 1.6 2006/03/04 22:40:16 brad Exp $	*/
 
 /*
  *

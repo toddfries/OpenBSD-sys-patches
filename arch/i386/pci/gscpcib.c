@@ -1,4 +1,4 @@
-/*	$OpenBSD: gscpcib.c,v 1.5 2006/12/11 20:57:40 deraadt Exp $	*/
+/*	$OpenBSD: gscpcib.c,v 1.4 2006/01/05 15:32:46 grange Exp $	*/
 /*
  * Copyright (c) 2004 Alexander Yurchenko <grange@openbsd.org>
  *

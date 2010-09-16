@@ -1,4 +1,4 @@
-/*      $OpenBSD: atapiscsi.c,v 1.77 2007/02/14 00:53:47 jsg Exp $     */
+/*      $OpenBSD: atapiscsi.c,v 1.76 2006/11/28 23:59:45 dlg Exp $     */
 
 /*
  * This code is derived from code with the copyright below.

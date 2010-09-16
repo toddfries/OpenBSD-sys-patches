@@ -1,4 +1,4 @@
-/*	$OpenBSD: isp_sbus.c,v 1.8 2006/06/02 20:00:56 miod Exp $	*/
+/*	$OpenBSD: isp_sbus.c,v 1.7 2005/03/02 17:10:03 miod Exp $	*/
 /* $NetBSD: isp_sbus.c,v 1.46 2001/09/26 20:53:14 eeh Exp $ */
 
 /*

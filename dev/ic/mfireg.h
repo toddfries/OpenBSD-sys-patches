@@ -1,4 +1,4 @@
-/* $OpenBSD: mfireg.h,v 1.24 2006/06/19 19:05:45 marco Exp $ */
+/* $OpenBSD: mfireg.h,v 1.23 2006/05/26 00:53:54 marco Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  *

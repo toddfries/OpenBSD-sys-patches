@@ -90,8 +90,8 @@ struct aps_softc {
 	bus_space_tag_t aps_iot;
 	bus_space_handle_t aps_ioh;
 
-	struct sensor sensors[APS_NUM_SENSORS];
-	struct sensordev sensordev;
+	struct ksensor sensors[APS_NUM_SENSORS];
+	struct ksensordev sensordev;
 	void (*refresh_sensor_data)(struct aps_softc *);
 
 	struct sensor_rec aps_data;

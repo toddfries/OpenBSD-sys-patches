@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcf8584var.h,v 1.3 2006/06/22 08:33:43 deraadt Exp $ */
+/*	$OpenBSD: pcf8584var.h,v 1.2 2006/06/14 01:15:17 deraadt Exp $ */
 
 /*
  * Copyright (c) 2006 David Gwynne <dlg@openbsd.org>

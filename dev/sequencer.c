@@ -1,4 +1,4 @@
-/*	$OpenBSD: sequencer.c,v 1.12 2007/02/13 08:05:37 jsg Exp $	*/
+/*	$OpenBSD: sequencer.c,v 1.11 2005/11/21 18:16:38 millert Exp $	*/
 /*	$NetBSD: sequencer.c,v 1.13 1998/11/25 22:17:07 augustss Exp $	*/
 
 /*

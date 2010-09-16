@@ -1,4 +1,4 @@
-/* $OpenBSD: lcd.c,v 1.3 2007/02/09 14:26:09 aoyama Exp $ */
+/* $OpenBSD: lcd.c,v 1.2 2007/01/29 14:18:00 aoyama Exp $ */
 /* $NetBSD: lcd.c,v 1.2 2000/01/07 05:13:08 nisimura Exp $ */
 
 /*-

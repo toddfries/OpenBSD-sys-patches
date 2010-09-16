@@ -1,4 +1,4 @@
-/*	$OpenBSD: safte.c,v 1.33 2007/02/21 22:37:38 deanna Exp $ */
+/*	$OpenBSD: safte.c,v 1.34 2007/03/22 16:55:31 deraadt Exp $ */
 
 /*
  * Copyright (c) 2005 David Gwynne <dlg@openbsd.org>
@@ -50,7 +50,7 @@ void	safte_attach(struct device *, struct device *, void *);
 int	safte_detach(struct device *, int);
 
 struct safte_sensor {
-	struct sensor		se_sensor;
+	struct ksensor		se_sensor;
 	enum {
 		SAFTE_T_FAN,
 		SAFTE_T_PWRSUP,
@@ -71,7 +71,7 @@ struct safte_softc {
 
 	int			sc_nsensors;
 	struct safte_sensor	*sc_sensors;
-	struct sensordev	sc_sensordev;
+	struct ksensordev	sc_sensordev;
 
 	int			sc_celsius;
 	int			sc_ntemps;
@@ -112,7 +112,7 @@ safte_match(struct device *parent, void *match, void *aux)
 	struct scsi_inquiry_data	inqbuf;
 	struct scsi_inquiry		cmd;
 	struct safte_inq		*si = (struct safte_inq *)&inqbuf.extra;
-	int				flags;
+	int				length, flags;
 
 	if (inq == NULL)
 		return (0);
@@ -127,14 +127,15 @@ safte_match(struct device *parent, void *match, void *aux)
 	    (inq->response_format & SID_ANSII) != 2)
 		return (0);
 
+	length = inq->additional_length + SAFTE_EXTRA_OFFSET;
+	if (length < SAFTE_INQ_LEN)
+		return (0);
+	if (length > sizeof(inqbuf))
+		length = sizeof(inqbuf);
+
 	memset(&cmd, 0, sizeof(cmd));
 	cmd.opcode = INQUIRY;
-	cmd.length = inq->additional_length + SAFTE_EXTRA_OFFSET;
-	if (cmd.length < SAFTE_INQ_LEN)
-		return (0);
-
-	if (cmd.length > sizeof(inqbuf))
-		cmd.length = sizeof(inqbuf);
+	_lto2b(length, cmd.length);
 
 	memset(&inqbuf, 0, sizeof(inqbuf));
 	memset(&inqbuf.extra, ' ', sizeof(inqbuf.extra));
@@ -144,7 +145,7 @@ safte_match(struct device *parent, void *match, void *aux)
 		flags |= SCSI_AUTOCONF;
 
 	if (scsi_scsi_cmd(sa->sa_sc_link, (struct scsi_generic *)&cmd,
-	    sizeof(cmd), (u_char *)&inqbuf, cmd.length, 2, 10000, NULL,
+	    sizeof(cmd), (u_char *)&inqbuf, length, 2, 10000, NULL,
 	    flags) != 0)
 		return (0);
 

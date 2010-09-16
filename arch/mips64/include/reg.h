@@ -1,4 +1,4 @@
-/*	$OpenBSD: reg.h,v 1.2 2005/08/07 07:29:44 miod Exp $	*/
+/*	$OpenBSD: reg.h,v 1.1 2004/08/06 20:56:02 pefo Exp $	*/
 
 /*
  * Copyright (c) 1988 University of Utah.

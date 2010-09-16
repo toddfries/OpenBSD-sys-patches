@@ -1,4 +1,4 @@
-/*	$OpenBSD: iommuvar.h,v 1.9 2003/06/11 03:16:12 henric Exp $	*/
+/*	$OpenBSD: iommuvar.h,v 1.8 2003/03/06 08:26:08 henric Exp $	*/
 /*	$NetBSD: iommuvar.h,v 1.9 2001/10/07 20:30:41 eeh Exp $	*/
 
 /*

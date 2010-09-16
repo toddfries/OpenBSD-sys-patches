@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_fxp_pci.c,v 1.49 2006/11/05 02:47:01 brad Exp $	*/
+/*	$OpenBSD: if_fxp_pci.c,v 1.48 2006/07/01 21:48:08 brad Exp $	*/
 
 /*
  * Copyright (c) 1995, David Greenman

@@ -1,4 +1,4 @@
-/*	$OpenBSD: procfs.h,v 1.23 2005/12/11 21:30:31 miod Exp $	*/
+/*	$OpenBSD: procfs.h,v 1.22 2003/09/23 16:51:13 millert Exp $	*/
 /*	$NetBSD: procfs.h,v 1.17 1996/02/12 15:01:41 christos Exp $	*/
 
 /*

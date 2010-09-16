@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpireg.h,v 1.31 2006/09/21 08:35:39 dlg Exp $ */
+/*	$OpenBSD: mpireg.h,v 1.30 2006/09/18 13:01:26 dlg Exp $ */
 
 /*
  * Copyright (c) 2005 David Gwynne <dlg@openbsd.org>

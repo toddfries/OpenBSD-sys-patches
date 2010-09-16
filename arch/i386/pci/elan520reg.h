@@ -1,4 +1,4 @@
-/*	$OpenBSD: elan520reg.h,v 1.2 2004/06/05 15:06:22 grange Exp $	*/
+/*	$OpenBSD: elan520reg.h,v 1.1 2003/01/21 17:02:29 markus Exp $	*/
 /*	$NetBSD: elan520reg.h,v 1.1 2002/08/12 01:03:14 thorpej Exp $	*/
 
 /*-

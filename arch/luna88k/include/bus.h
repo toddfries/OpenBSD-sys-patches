@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus.h,v 1.3 2005/04/04 13:09:52 aoyama Exp $	*/
+/*	$OpenBSD: bus.h,v 1.2 2004/08/11 06:09:07 miod Exp $	*/
 /*	$NetBSD: bus.h,v 1.9 1998/01/13 18:32:15 scottr Exp $	*/
 
 /*-

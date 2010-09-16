@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_qereg.h,v 1.7 2003/06/02 23:27:57 millert Exp $	*/
+/*	$OpenBSD: if_qereg.h,v 1.6 2003/02/04 02:03:51 hugh Exp $	*/
 /*	$NetBSD: if_qereg.h,v 1.6 2001/06/19 13:42:18 wiz Exp $ */
 /*
  * Copyright (c) 1988 Regents of the University of California.

@@ -1,4 +1,4 @@
-/* $OpenBSD: omrasops.c,v 1.4 2006/11/29 19:08:22 miod Exp $ */
+/* $OpenBSD: omrasops.c,v 1.3 2006/08/06 13:04:33 miod Exp $ */
 /* $NetBSD: omrasops.c,v 1.1 2000/01/05 08:48:56 nisimura Exp $ */
 
 /*-

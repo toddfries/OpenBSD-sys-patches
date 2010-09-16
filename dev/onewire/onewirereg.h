@@ -1,4 +1,4 @@
-/*	$OpenBSD: onewirereg.h,v 1.1 2006/03/04 16:27:03 grange Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * Copyright (c) 2006 Alexander Yurchenko <grange@openbsd.org>

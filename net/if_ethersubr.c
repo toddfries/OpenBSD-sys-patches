@@ -401,7 +401,8 @@ ether_output(ifp0, m0, dst, rt0)
 		    sizeof(eh->ether_shost));
 
 #if NCARP > 0
-	if (ifp0 != ifp && ifp0->if_type == IFT_CARP) {
+	if (ifp0 != ifp && ifp0->if_type == IFT_CARP &&
+	    !(ifp0->if_flags & IFF_LINK1)) {
 		bcopy((caddr_t)((struct arpcom *)ifp0)->ac_enaddr,
 		    (caddr_t)eh->ether_shost, sizeof(eh->ether_shost));
 	}
@@ -595,10 +596,19 @@ ether_input(ifp, eh, m)
 #endif /* NVLAN > 0 */
 
 #if NCARP > 0
-	if (ifp->if_carp && ifp->if_type != IFT_CARP &&
-	    (carp_input(m, (u_int8_t *)&eh->ether_shost,
-	    (u_int8_t *)&eh->ether_dhost, eh->ether_type) == 0))
-		return;
+	if (ifp->if_carp) {
+		if (ifp->if_type != IFT_CARP &&
+		    (carp_input(m, (u_int8_t *)&eh->ether_shost,
+		    (u_int8_t *)&eh->ether_dhost, eh->ether_type) == 0))
+			return;
+		/* Always clear multicast flags if received on a carp address */
+		else if (ifp->if_type == IFT_CARP &&
+		    ifp->if_flags & IFF_LINK2 &&
+		    m->m_flags & (M_BCAST|M_MCAST) &&
+		    !bcmp(((struct arpcom *)ifp)->ac_enaddr,
+		    (caddr_t)eh->ether_dhost, ETHER_ADDR_LEN))
+			m->m_flags &= ~(M_BCAST|M_MCAST);
+	}
 #endif /* NCARP > 0 */
 
 	ac = (struct arpcom *)ifp;

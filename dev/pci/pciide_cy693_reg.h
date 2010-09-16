@@ -1,4 +1,4 @@
-/*	$OpenBSD: pciide_cy693_reg.h,v 1.7 2004/10/17 18:16:12 grange Exp $	*/
+/*	$OpenBSD: pciide_cy693_reg.h,v 1.6 2004/09/24 07:38:38 grange Exp $	*/
 /*	$NetBSD: pciide_cy693_reg.h,v 1.4 2000/05/15 08:46:01 bouyer Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: wssvar.h,v 1.2 2002/03/14 01:26:57 millert Exp $	*/
+/*	$OpenBSD: wssvar.h,v 1.1 1998/04/26 21:02:38 provos Exp $	*/
 /*	$NetBSD: wssvar.h,v 1.1 1998/01/19 22:18:25 augustss Exp $	*/
 
 /*

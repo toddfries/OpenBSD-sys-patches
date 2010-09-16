@@ -1,4 +1,4 @@
-/*	$OpenBSD: powerpc.h,v 1.8 2005/12/17 07:31:26 miod Exp $	*/
+/*	$OpenBSD: powerpc.h,v 1.7 2005/10/09 14:01:11 drahn Exp $	*/
 /*	$NetBSD: powerpc.h,v 1.1 1996/09/30 16:34:30 ws Exp $	*/
 
 /*

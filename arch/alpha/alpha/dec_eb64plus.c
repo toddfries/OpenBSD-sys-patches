@@ -37,8 +37,6 @@
 #include <sys/termios.h>
 #include <dev/cons.h>
 
-#include <uvm/uvm_extern.h>
-
 #include <machine/rpb.h>
 #include <machine/autoconf.h>
 #include <machine/cpuconf.h>

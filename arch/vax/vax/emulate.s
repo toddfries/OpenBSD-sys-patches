@@ -1,4 +1,4 @@
-/*	$OpenBSD: emulate.s,v 1.4 2003/06/02 23:27:58 millert Exp $ */
+/*	$OpenBSD: emulate.s,v 1.3 1997/09/10 12:04:44 maja Exp $ */
 /*	$NetBSD: emulate.s,v 1.2 1997/03/15 16:14:25 ragge Exp $ */
 /*
  * Copyright (c) 1986, 1987 The Regents of the University of California.

@@ -1,4 +1,4 @@
-#	$OpenBSD: genassym.cf,v 1.7 2006/11/18 22:49:43 miod Exp $
+#	$OpenBSD: genassym.cf,v 1.6 2006/04/17 16:08:01 miod Exp $
 #
 # Copyright (c) 1982, 1990 The Regents of the University of California.
 # All rights reserved.

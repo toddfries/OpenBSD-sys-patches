@@ -1,4 +1,4 @@
-/*	$OpenBSD: wdscreg.h,v 1.2 2003/06/02 23:27:50 millert Exp $ */
+/*	$OpenBSD: wdscreg.h,v 1.1 1996/04/28 11:24:49 deraadt Exp $ */
 
 /*
  * Copyright (c) 1994 Christian E. Hopps

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ubareg.h,v 1.11 2003/11/10 21:05:06 miod Exp $ */
+/*	$OpenBSD: ubareg.h,v 1.10 2003/06/02 23:27:58 millert Exp $ */
 /*	$NetBSD: ubareg.h,v 1.11 2000/01/24 02:40:36 matt Exp $ */
 
 /*-

@@ -1,4 +1,4 @@
-/*	$OpenBSD: bt_input.c,v 1.2 2006/03/04 22:40:16 brad Exp $	*/
+/*	$OpenBSD: bt_input.c,v 1.1 2005/01/14 12:04:02 grange Exp $	*/
 /*
  * Copyright (c) 2004 Alexander Yurchenko <grange@openbsd.org>
  *

@@ -1,4 +1,4 @@
-/*	$OpenBSD: consinit.c,v 1.10 2005/04/26 15:16:20 miod Exp $	*/
+/*	$OpenBSD: consinit.c,v 1.9 2004/09/13 20:31:25 deraadt Exp $	*/
 /*	$NetBSD: consinit.c,v 1.9 2000/10/20 05:32:35 mrg Exp $	*/
 
 /*-

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_xgereg.h,v 1.4 2007/02/27 22:39:39 kettenis Exp $	*/
+/*	$OpenBSD: if_xgereg.h,v 1.3 2007/02/27 22:18:53 kettenis Exp $	*/
 /*	$NetBSD: if_xgereg.h,v 1.1 2005/09/09 10:30:27 ragge Exp $	*/
 
 /*

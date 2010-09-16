@@ -1,4 +1,4 @@
-/*	$OpenBSD: harmonyreg.h,v 1.5 2003/06/02 19:54:29 jason Exp $	*/
+/*	$OpenBSD: harmonyreg.h,v 1.4 2003/03/12 09:06:11 mickey Exp $	*/
 
 /*
  * Copyright (c) 2003 Jason L. Wright (jason@thought.net)

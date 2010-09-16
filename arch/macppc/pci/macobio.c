@@ -1,4 +1,4 @@
-/*	$OpenBSD: macobio.c,v 1.17 2006/06/19 22:42:35 miod Exp $	*/
+/*	$OpenBSD: macobio.c,v 1.16 2006/02/14 23:05:28 kettenis Exp $	*/
 /*	$NetBSD: obio.c,v 1.6 1999/05/01 10:36:08 tsubai Exp $	*/
 
 /*-

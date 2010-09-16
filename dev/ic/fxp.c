@@ -377,6 +377,7 @@ fxp_attach(struct fxp_softc *sc, const char *intrstr)
 		bus_dmamem_unmap(sc->sc_dmat, (caddr_t)sc->sc_ctrl,
 		    sizeof(struct fxp_ctrl));
 		bus_dmamem_free(sc->sc_dmat, &sc->sc_cb_seg, sc->sc_cb_nseg);
+		goto fail;
 	}
 
 	for (i = 0; i < FXP_NTXCB; i++) {

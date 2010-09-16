@@ -1,4 +1,4 @@
-/* $OpenBSD: cia_dma.c,v 1.7 2006/04/04 21:20:40 brad Exp $ */
+/* $OpenBSD: cia_dma.c,v 1.6 2006/03/20 01:00:58 martin Exp $ */
 /* $NetBSD: cia_dma.c,v 1.16 2000/06/29 08:58:46 mrg Exp $ */
 
 /*-

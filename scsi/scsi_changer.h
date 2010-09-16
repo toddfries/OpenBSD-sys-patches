@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsi_changer.h,v 1.5 2006/12/21 02:05:46 krw Exp $	*/
+/*	$OpenBSD: scsi_changer.h,v 1.4 2006/05/31 03:01:44 beck Exp $	*/
 /*	$NetBSD: scsi_changer.h,v 1.7 1996/04/03 00:25:48 thorpej Exp $	*/
 
 /*

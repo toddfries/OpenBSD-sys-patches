@@ -1,4 +1,4 @@
-/*	$OpenBSD: mc.c,v 1.17 2005/11/24 22:43:16 miod Exp $ */
+/*	$OpenBSD: mc.c,v 1.16 2004/07/30 22:29:45 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt

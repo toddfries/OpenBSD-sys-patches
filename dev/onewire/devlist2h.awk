@@ -1,4 +1,4 @@
-# $OpenBSD: devlist2h.awk,v 1.4 2007/02/28 22:31:32 deraadt Exp $
+# $OpenBSD: devlist2h.awk,v 1.3 2006/03/10 14:36:32 grange Exp $
 
 #
 # Copyright (c) 2006 Alexander Yurchenko <grange@openbsd.org>

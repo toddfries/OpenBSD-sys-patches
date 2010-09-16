@@ -1,4 +1,4 @@
-/*	$OpenBSD: rf_raidframe.h,v 1.6 2002/12/16 07:01:05 tdeval Exp $	*/
+/*	$OpenBSD: rf_raidframe.h,v 1.5 2000/08/08 16:07:44 peter Exp $	*/
 /*	$NetBSD: rf_raidframe.h,v 1.11 2000/05/28 00:48:31 oster Exp $	*/
 
 /*

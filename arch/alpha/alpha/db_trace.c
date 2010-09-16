@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_trace.c,v 1.14 2003/10/18 20:14:40 jmc Exp $	*/
+/*	$OpenBSD: db_trace.c,v 1.13 2003/06/03 21:09:01 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1997 Niklas Hallqvist.  All rights reserved.

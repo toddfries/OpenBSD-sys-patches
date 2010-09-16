@@ -123,6 +123,12 @@ IDTVEC(doreti)
 
 #include "pccom.h"
 
+IDTVEC(softast)
+	movl	$IPL_SOFTAST,%eax
+	movl	%eax,CPL
+	sti
+	jmp	*%esi
+
 IDTVEC(softtty)
 #if NPCCOM > 0
 	movl	$IPL_SOFTTTY,%eax

@@ -61,8 +61,8 @@ struct admlc_softc {
 	i2c_tag_t	sc_tag;
 	i2c_addr_t	sc_addr;
 
-	struct sensor	sc_sensor[ADMLC_NUM_SENSORS];
-	struct sensordev sc_sensordev;
+	struct ksensor	sc_sensor[ADMLC_NUM_SENSORS];
+	struct ksensordev sc_sensordev;
 	int		sc_fan1mul;
 	int		sc_fan2mul;
 };
@@ -184,7 +184,7 @@ admlc_attach(struct device *parent, struct device *self, void *aux)
 }
 
 static void
-fanval(struct sensor *sens, int mul, u_int8_t data)
+fanval(struct ksensor *sens, int mul, u_int8_t data)
 {
 	int tmp = data * mul;
 

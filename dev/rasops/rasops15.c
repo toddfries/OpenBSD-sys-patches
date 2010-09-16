@@ -1,4 +1,4 @@
-/*	$OpenBSD: rasops15.c,v 1.5 2006/01/08 17:18:05 miod Exp $	*/
+/*	$OpenBSD: rasops15.c,v 1.4 2002/07/27 22:17:49 miod Exp $	*/
 /*	$NetBSD: rasops15.c,v 1.7 2000/04/12 14:22:29 pk Exp $	*/
 
 /*-

@@ -1,4 +1,4 @@
-/*	$OpenBSD: dzkbd.c,v 1.12 2006/08/27 16:50:43 miod Exp $	*/
+/*	$OpenBSD: dzkbd.c,v 1.11 2006/08/05 22:05:55 miod Exp $	*/
 /*	$NetBSD: dzkbd.c,v 1.1 2000/12/02 17:03:55 ragge Exp $	*/
 
 /*

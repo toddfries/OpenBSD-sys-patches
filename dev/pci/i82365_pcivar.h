@@ -1,4 +1,4 @@
-/*	$OpenBSD: i82365_pcivar.h,v 1.5 2002/03/14 03:16:06 millert Exp $ */
+/*	$OpenBSD: i82365_pcivar.h,v 1.4 2002/03/14 01:26:58 millert Exp $ */
 /*	$NetBSD: i82365_pcivar.h,v 1.2 2000/02/22 16:04:47 thorpej Exp $	*/
 
 /*

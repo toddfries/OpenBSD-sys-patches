@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_crypto.c,v 1.9 2006/12/29 15:45:56 reyk Exp $	*/
+/*	$OpenBSD: ieee80211_crypto.c,v 1.8 2006/06/18 18:39:41 damien Exp $	*/
 /*	$NetBSD: ieee80211_crypto.c,v 1.5 2003/12/14 09:56:53 dyoung Exp $	*/
 
 /*-

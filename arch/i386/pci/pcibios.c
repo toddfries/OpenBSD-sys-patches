@@ -371,7 +371,7 @@ pcibios_get_status(struct pcibios_softc *sc, u_int32_t *rev_maj,
 		return (PCIBIOS_SERVICE_NOT_PRESENT);	/* XXX */
 
 	/*
-	 * Fill in the various pieces if info we're looking for.
+	 * Fill in the various pieces of info we're looking for.
 	 */
 	*mech1 = ax & 1;
 	*mech2 = ax & (1 << 1);

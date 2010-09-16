@@ -1,4 +1,4 @@
-/*	$OpenBSD: com_lbus.c,v 1.4 2004/10/20 12:49:15 pefo Exp $ */
+/*	$OpenBSD: com_lbus.c,v 1.3 2004/08/11 15:13:35 deraadt Exp $ */
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)

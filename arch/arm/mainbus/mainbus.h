@@ -1,4 +1,4 @@
-/*	$OpenBSD: mainbus.h,v 1.1 2004/02/01 05:09:49 drahn Exp $	*/
+/*	$OpenBSD: mainbus.h,v 1.1 2004/01/15 01:19:51 drahn Exp $	*/
 /* $NetBSD: mainbus.h,v 1.1 2001/02/24 19:38:02 reinoud Exp $ */
 
 /*

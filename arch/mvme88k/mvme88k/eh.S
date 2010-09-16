@@ -1,4 +1,4 @@
-/*	$OpenBSD: eh.S,v 1.66 2006/11/19 11:08:55 miod Exp $	*/
+/*	$OpenBSD: eh.S,v 1.65 2006/11/18 22:53:11 miod Exp $	*/
 /*
  * Copyright (c) 2006, Miodrag Vallat
  *

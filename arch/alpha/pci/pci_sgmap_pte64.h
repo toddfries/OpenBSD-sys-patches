@@ -1,4 +1,4 @@
-/* $OpenBSD: pci_sgmap_pte64.h,v 1.3 2001/03/21 17:26:39 art Exp $ */
+/* $OpenBSD: pci_sgmap_pte64.h,v 1.2 2000/11/08 20:59:25 ericj Exp $ */
 /* $NetBSD: pci_sgmap_pte64.h,v 1.2 1997/06/06 23:59:29 thorpej Exp $ */
 
 /*-

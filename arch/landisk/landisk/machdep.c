@@ -177,13 +177,6 @@ landisk_startup(int howto, char *_esym)
 		Debugger();
 	}
 #endif
-	if (boothowto & RB_CONFIG) {
-#ifdef BOOT_CONFIG
-		user_config();
-#else
-		printf("kernel does not support -c; continuing..\n");
-#endif 
-	}
 
 	/* Jump to main */
 	__asm volatile(

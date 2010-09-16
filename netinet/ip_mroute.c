@@ -1850,7 +1850,7 @@ encap_send(struct ip *ip, struct vif *vifp, struct mbuf *m)
 	}
 
 	/*
-	 * copy the old packet & pullup it's IP header into the
+	 * copy the old packet & pullup its IP header into the
 	 * new mbuf so we can modify it.  Try to fill the new
 	 * mbuf since if we don't the ethernet driver will.
 	 */

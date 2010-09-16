@@ -1,4 +1,4 @@
-/*	$OpenBSD: stdarg.h,v 1.2 2006/01/06 18:53:05 millert Exp $	*/
+/*	$OpenBSD: stdarg.h,v 1.1 2004/04/26 12:34:05 miod Exp $	*/
 
 #ifndef _M88K_STDARGS_H_
 #define _M88K_STDARGS_H_

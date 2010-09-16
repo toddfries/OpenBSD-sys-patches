@@ -1,4 +1,4 @@
-/* $OpenBSD: vfs_getcwd.c,v 1.9 2006/05/17 12:52:12 pedro Exp $ */
+/* $OpenBSD: vfs_getcwd.c,v 1.8 2006/05/01 21:50:48 pedro Exp $ */
 /* $NetBSD: vfs_getcwd.c,v 1.3.2.3 1999/07/11 10:24:09 sommerfeld Exp $ */
 
 /*

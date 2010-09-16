@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.1 2004/08/11 10:29:59 pefo Exp $
+#	$OpenBSD: Makefile.inc,v 1.10 2003/06/01 17:00:31 deraadt Exp $
 #	$NetBSD: Makefile.inc,v 1.4 1996/04/13 01:17:46 cgd Exp $
 #
 #	There are likely more that we will notice when we go native

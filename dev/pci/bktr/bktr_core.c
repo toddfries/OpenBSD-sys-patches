@@ -810,13 +810,7 @@ common_bktr_intr( void *arg )
 		}
 
 		/* If someone has a select() on /dev/vbi, inform them */
-#ifndef __OpenBSD__
-		if (bktr->vbi_select.si_pid) {
-#else
-		if (bktr->vbi_select.si_selpid) {
-#endif
-			selwakeup(&bktr->vbi_select);
-		}
+		selwakeup(&bktr->vbi_select);
 	}
 
 

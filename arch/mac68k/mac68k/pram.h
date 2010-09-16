@@ -4,7 +4,7 @@
 /*
  * RTC toolkit version 1.08b, copyright 1995, erik vogan
  *
- * All rights and privledges to this code hereby donated
+ * All rights and privileges to this code hereby donated
  * to the ALICE group for use in NetBSD.  see the copyright
  * below for more info...
  */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_syscalls_25.c,v 1.12 2006/06/25 15:01:53 sturm Exp $	*/
+/*	$OpenBSD: vfs_syscalls_25.c,v 1.11 2006/06/14 20:01:50 sturm Exp $	*/
 
 /*
  * Copyright (c) 1989, 1993

@@ -1,4 +1,4 @@
-/*	$OpenBSD: unixsys.S,v 1.4 2004/01/13 23:54:07 millert Exp $	*/
+/*	$OpenBSD: unixsys.S,v 1.3 2003/06/03 20:22:12 mickey Exp $	*/
 
 /*
  * Copyright (c) 1997 Michael Shalayeff

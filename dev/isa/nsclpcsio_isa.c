@@ -176,8 +176,8 @@ struct nsclpcsio_softc {
 	struct gpio_pin sc_gpio_pins[SIO_GPIO_NPINS];
 
 	/* TMS and VLM */
-	struct sensor sensors[SIO_NUM_SENSORS];
-	struct sensordev sensordev;
+	struct ksensor sensors[SIO_NUM_SENSORS];
+	struct ksensordev sensordev;
 };
 
 #define GPIO_READ(sc, reg) \

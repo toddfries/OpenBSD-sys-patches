@@ -1,4 +1,4 @@
-/*	$OpenBSD: miivar.h,v 1.27 2006/12/28 09:24:27 kettenis Exp $	*/
+/*	$OpenBSD: miivar.h,v 1.26 2005/11/06 09:27:19 brad Exp $	*/
 /*	$NetBSD: miivar.h,v 1.17 2000/03/06 20:56:57 thorpej Exp $	*/
 
 /*-

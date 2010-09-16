@@ -1,4 +1,4 @@
-/*	$OpenBSD: macepcimap.c,v 1.3 2004/09/09 22:11:39 pefo Exp $ */
+/*	$OpenBSD: macepcimap.c,v 1.2 2004/08/11 15:13:35 deraadt Exp $ */
 /*	$NetBSD: pci_mace.c,v 1.2 2004/01/19 10:28:28 sekiya Exp $	*/
 
 /*

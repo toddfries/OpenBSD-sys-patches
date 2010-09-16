@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.1 2006/05/16 22:48:18 miod Exp $
+#	$OpenBSD: Makefile,v 1.13 2005/09/11 13:36:00 deraadt Exp $
 
 SIZE?=	size
 

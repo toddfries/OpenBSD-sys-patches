@@ -1,4 +1,4 @@
-/*	$OpenBSD: z8530sc.c,v 1.3 2003/06/02 23:27:55 millert Exp $	*/
+/*	$OpenBSD: z8530sc.c,v 1.2 2002/03/14 01:26:45 millert Exp $	*/
 /*	$NetBSD: z8530sc.c,v 1.15 2001/07/07 15:53:22 thorpej Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ral_pci.c,v 1.8 2006/11/18 20:44:40 grange Exp $  */
+/*	$OpenBSD: if_ral_pci.c,v 1.7 2006/10/22 12:14:44 damien Exp $  */
 
 /*-
  * Copyright (c) 2005, 2006

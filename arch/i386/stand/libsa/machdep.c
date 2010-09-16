@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.35 2004/03/19 13:48:18 tom Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.34 2003/08/11 06:23:09 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2004 Tom Cosgrove

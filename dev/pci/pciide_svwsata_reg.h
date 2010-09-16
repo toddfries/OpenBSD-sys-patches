@@ -1,4 +1,4 @@
-/*	$OpenBSD: pciide_svwsata_reg.h,v 1.4 2006/02/10 21:45:41 kettenis Exp $	*/
+/*	$OpenBSD: pciide_svwsata_reg.h,v 1.3 2005/10/21 10:52:32 grange Exp $	*/
 
 /*
  * Copyright (c) 2005 Mark Kettenis

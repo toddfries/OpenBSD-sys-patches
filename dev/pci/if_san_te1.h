@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_san_te1.h,v 1.5 2005/04/01 21:42:36 canacar Exp $	*/
+/*	$OpenBSD: if_san_te1.h,v 1.4 2004/12/07 06:10:24 mcbride Exp $	*/
 
 /*-
  * Copyright (c) 2001-2004 Sangoma Technologies (SAN)

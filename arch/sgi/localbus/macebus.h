@@ -1,4 +1,4 @@
-/*	$OpenBSD: macebus.h,v 1.7 2005/12/19 21:37:48 miod Exp $	*/
+/*	$OpenBSD: macebus.h,v 1.6 2005/01/24 20:44:37 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB (www.opsycon.com).

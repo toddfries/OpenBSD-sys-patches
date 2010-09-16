@@ -230,7 +230,7 @@ mmsintr(void *arg)
 
 	if (dx || dy || changed)
 		wsmouse_input(sc->sc_wsmousedev,
-			      buttons, dx, dy, 0, WSMOUSE_INPUT_DELTA);
+			      buttons, dx, dy, 0, 0, WSMOUSE_INPUT_DELTA);
 
 	return -1;
 }

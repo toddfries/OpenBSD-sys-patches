@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_blkio.h,v 1.1 2001/04/09 06:53:44 tholo Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD: linux_blkio.h,v 1.2 2001/01/18 17:48:04 tv Exp $	*/
 
 /*

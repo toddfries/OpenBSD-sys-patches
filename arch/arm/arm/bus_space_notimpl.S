@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus_space_notimpl.S,v 1.1 2004/02/01 05:09:48 drahn Exp $	*/
+/*	$OpenBSD: bus_space_notimpl.S,v 1.2 2004/01/29 16:17:11 drahn Exp $	*/
 /*	$NetBSD: bus_space_notimpl.S,v 1.2 2001/09/10 02:20:19 reinoud Exp $	*/
 
 /*

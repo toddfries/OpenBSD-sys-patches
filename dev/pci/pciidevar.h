@@ -1,4 +1,4 @@
-/*	$OpenBSD: pciidevar.h,v 1.16 2004/10/17 19:00:46 grange Exp $	*/
+/*	$OpenBSD: pciidevar.h,v 1.15 2004/10/17 18:47:08 grange Exp $	*/
 /*	$NetBSD: pciidevar.h,v 1.6 2001/01/12 16:04:00 bouyer Exp $	*/
 
 /*

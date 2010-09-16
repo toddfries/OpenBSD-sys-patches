@@ -60,13 +60,13 @@ struct siop_common_xfer {
 	u_int32_t pad1;			/*  36 */
 	u_int32_t id;			/*  40 */
 	struct scsi_generic xscmd; 	/*  44 */
-	scr_table_t t_msgin;		/*  56 */
-	scr_table_t t_extmsgin;		/*  64 */
-	scr_table_t t_extmsgdata; 	/*  72 */
-	scr_table_t t_msgout;		/*  80 */
-	scr_table_t cmd;		/*  88 */
-	scr_table_t t_status;		/*  96 */
-	scr_table_t data[SIOP_NSG]; 	/* 104 */
+	scr_table_t t_msgin;		/*  60 */
+	scr_table_t t_extmsgin;		/*  68 */
+	scr_table_t t_extmsgdata; 	/*  76 */
+	scr_table_t t_msgout;		/*  84 */
+	scr_table_t cmd;		/*  92 */
+	scr_table_t t_status;		/* 100 */
+	scr_table_t data[SIOP_NSG]; 	/* 108 */
 } __packed;
 
 /* status can hold the SCSI_* status values, and 2 additional values: */

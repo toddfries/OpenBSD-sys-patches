@@ -1,4 +1,4 @@
-#	$OpenBSD: files.sparc64,v 1.77 2007/03/07 06:23:02 miod Exp $
+#	$OpenBSD: files.sparc64,v 1.81 2007/04/10 19:03:10 kettenis Exp $
 #	$NetBSD: files.sparc64,v 1.50 2001/08/10 20:53:50 eeh Exp $
 
 # maxpartitions must be first item in files.${ARCH}
@@ -87,7 +87,12 @@ file	arch/sparc64/dev/psycho.c		psycho
 device	schizo: pcibus
 attach	schizo at mainbus
 file	arch/sparc64/dev/schizo.c		schizo
-file	arch/sparc64/dev/pci_machdep.c		psycho | schizo
+
+device	pyro: pcibus
+attach	pyro at mainbus
+file	arch/sparc64/dev/pyro.c			pyro
+
+file	arch/sparc64/dev/pci_machdep.c		psycho | schizo | pyro
 
 attach	hme at pci with hme_pci
 file	dev/pci/if_hme_pci.c			hme_pci
@@ -101,7 +106,9 @@ file	arch/sparc64/dev/iommu.c		sbus | psycho
 
 device	ebus {[addr = -1]}: pcibus
 attach	ebus at pci
+attach	ebus at mainbus with ebus_mainbus
 file	arch/sparc64/dev/ebus.c			ebus
+file	arch/sparc64/dev/ebus_mainbus.c		ebus_mainbus
 
 attach	uperf at ebus with uperf_ebus
 file	arch/sparc64/dev/uperf_ebus.c		uperf_ebus
@@ -110,9 +117,6 @@ device	clock: mk48txx
 attach	clock at mainbus, sbus with clock_sbus
 attach	clock at ebus with clock_ebus
 attach	clock at fhc with clock_fhc
-
-device	rtc
-attach	rtc at ebus with rtc_ebus
 
 device	timer
 attach	timer at mainbus, sbus
@@ -130,6 +134,10 @@ attach	auxio at ebus with auxio_ebus
 attach	auxio at sbus with auxio_sbus
 file	arch/sparc64/dev/auxio.c		auxio
 
+device	bbc
+attach	bbc at ebus
+file	arch/sparc64/dev/bbc.c			bbc
+
 device	beeper
 attach	beeper at ebus
 file	arch/sparc64/dev/beeper.c		beeper
@@ -138,6 +146,10 @@ device	beep
 attach	beep at ebus
 file	arch/sparc64/dev/beep.c			beep
 
+device	pmc
+attach	pmc at ebus
+file	arch/sparc64/dev/pmc.c			pmc
+
 device	ppm
 attach	ppm at ebus
 file	arch/sparc64/dev/ppm.c			ppm
@@ -145,6 +157,10 @@ file	arch/sparc64/dev/ppm.c			ppm
 device	power
 attach	power at ebus
 file	arch/sparc64/dev/power.c		power
+
+device	rtc
+attach	rtc at ebus
+file	arch/sparc64/dev/rtc.c			rtc
 
 device	sab {}
 attach	sab at ebus

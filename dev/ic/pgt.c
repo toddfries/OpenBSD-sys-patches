@@ -1,4 +1,4 @@
-/*	$OpenBSD: pgt.c,v 1.41 2007/02/14 20:09:20 claudio Exp $  */
+/*	$OpenBSD: pgt.c,v 1.40 2006/12/30 22:43:01 claudio Exp $  */
 
 /*
  * Copyright (c) 2006 Claudio Jeker <claudio@openbsd.org>

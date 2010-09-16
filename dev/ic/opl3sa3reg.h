@@ -1,4 +1,4 @@
-/*	$OpenBSD: opl3sa3reg.h,v 1.1 1999/10/06 12:48:32 fgsch Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD: opl3sa3reg.h,v 1.1 1999/10/05 03:38:17 itohy Exp $	*/
 
 /*-

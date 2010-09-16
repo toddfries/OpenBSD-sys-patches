@@ -1,4 +1,4 @@
-/*	$OpenBSD: rf_pq.h,v 1.3 2002/12/16 07:01:04 tdeval Exp $	*/
+/*	$OpenBSD: rf_pq.h,v 1.2 1999/02/16 00:03:10 niklas Exp $	*/
 /*	$NetBSD: rf_pq.h,v 1.3 1999/02/05 00:06:15 oster Exp $	*/
 
 /*

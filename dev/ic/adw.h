@@ -1,4 +1,4 @@
-/*	$OpenBSD: adw.h,v 1.9 2002/03/14 01:26:53 millert Exp $ */
+/*	$OpenBSD: adw.h,v 1.8 2001/11/05 17:25:58 art Exp $ */
 /*      $NetBSD: adw.h,v 1.9 2000/05/26 15:13:43 dante Exp $        */
 
 /*

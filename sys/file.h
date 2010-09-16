@@ -1,4 +1,4 @@
-/*	$OpenBSD: file.h,v 1.24 2006/03/26 17:47:10 mickey Exp $	*/
+/*	$OpenBSD: file.h,v 1.23 2003/09/23 16:51:13 millert Exp $	*/
 /*	$NetBSD: file.h,v 1.11 1995/03/26 20:24:13 jtc Exp $	*/
 
 /*

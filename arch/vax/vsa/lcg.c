@@ -1,4 +1,4 @@
-/*	$OpenBSD: lcg.c,v 1.10 2006/11/29 12:13:54 miod Exp $	*/
+/*	$OpenBSD: lcg.c,v 1.9 2006/08/22 21:05:03 miod Exp $	*/
 /*
  * Copyright (c) 2006 Miodrag Vallat.
  *

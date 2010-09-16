@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpuvar.h,v 1.6 2005/09/08 15:25:55 martin Exp $	*/
+/*	$OpenBSD: cpuvar.h,v 1.5 2003/11/03 07:01:33 david Exp $	*/
 /*	$NetBSD: cpuvar.h,v 1.2 1999/11/06 20:18:13 eeh Exp $ */
 
 /*

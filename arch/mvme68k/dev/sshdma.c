@@ -1,4 +1,4 @@
-/*	$OpenBSD: sshdma.c,v 1.14 2006/11/28 23:59:45 dlg Exp $ */
+/*	$OpenBSD: sshdma.c,v 1.13 2006/03/15 20:20:40 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt

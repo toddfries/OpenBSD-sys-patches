@@ -1,4 +1,4 @@
-/*	$OpenBSD: pciide_piix_reg.h,v 1.11 2006/04/25 09:09:42 jsg Exp $	*/
+/*	$OpenBSD: pciide_piix_reg.h,v 1.10 2006/04/02 01:36:07 jsg Exp $	*/
 /*	$NetBSD: pciide_piix_reg.h,v 1.5 2001/01/05 15:29:40 bouyer Exp $	*/
 
 /*

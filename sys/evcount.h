@@ -1,4 +1,4 @@
-/*	$OpenBSD: evcount.h,v 1.2 2004/09/29 07:37:07 miod Exp $ */
+/*	$OpenBSD: evcount.h,v 1.1 2004/06/28 01:34:46 aaron Exp $ */
 /*
  * Copyright (c) 2004 Artur Grabowski <art@openbsd.org>
  * Copyright (c) 2004 Aaron Campbell <aaron@openbsd.org>

@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse_args.c,v 1.6 2003/08/20 00:25:34 deraadt Exp $ */
+/*	$OpenBSD: parse_args.c,v 1.5 2003/06/04 16:36:14 deraadt Exp $ */
 
 /*-
  * Copyright (c) 1995 Theo de Raadt

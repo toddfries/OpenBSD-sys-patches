@@ -1,4 +1,4 @@
-\	$OpenBSD: bootblk.fth,v 1.3 2003/08/28 23:47:31 jason Exp $
+\	$OpenBSD: bootblk.fth,v 1.2 2003/08/26 19:55:21 drahn Exp $
 \	$NetBSD: bootblk.fth,v 1.3 2001/08/15 20:10:24 eeh Exp $
 \
 \	IEEE 1275 Open Firmware Boot Block

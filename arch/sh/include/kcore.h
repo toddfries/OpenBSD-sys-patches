@@ -1,4 +1,4 @@
-/*	$OpenBSD: kcore.h,v 1.1 2007/03/03 21:37:27 miod Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * Copyright (c) 2007 Miodrag Vallat.

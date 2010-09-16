@@ -1,4 +1,4 @@
-/*	$OpenBSD: reg.h,v 1.11 2004/04/07 18:24:19 mickey Exp $	*/
+/*	$OpenBSD: reg.h,v 1.10 2003/09/25 22:10:58 mickey Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff

@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.h,v 1.14 2005/12/31 18:13:45 miod Exp $	*/
+/*	$OpenBSD: autoconf.h,v 1.13 2005/12/30 18:14:12 miod Exp $	*/
 /*	$NetBSD: autoconf.h,v 1.4 1997/04/01 03:03:56 scottr Exp $	*/
 
 /*-

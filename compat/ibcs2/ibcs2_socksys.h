@@ -1,4 +1,4 @@
-/*	$OpenBSD: ibcs2_socksys.h,v 1.4 2002/03/14 01:26:50 millert Exp $	*/
+/*	$OpenBSD: ibcs2_socksys.h,v 1.3 1996/08/02 20:35:10 niklas Exp $	*/
 /*	$NetBSD: ibcs2_socksys.h,v 1.2 1996/05/03 17:05:30 christos Exp $	*/
 
 /*

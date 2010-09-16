@@ -1,4 +1,4 @@
-/*	$OpenBSD: ukbd.c,v 1.27 2007/02/11 20:29:22 miod Exp $	*/
+/*	$OpenBSD: ukbd.c,v 1.26 2007/01/13 07:43:15 miod Exp $	*/
 /*      $NetBSD: ukbd.c,v 1.85 2003/03/11 16:44:00 augustss Exp $        */
 
 /*

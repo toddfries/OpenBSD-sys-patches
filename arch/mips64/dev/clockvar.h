@@ -1,4 +1,4 @@
-/*	$OpenBSD: clockvar.h,v 1.3 2005/01/31 21:25:20 grange Exp $	*/
+/*	$OpenBSD: clockvar.h,v 1.2 2004/08/10 20:28:13 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995 Carnegie-Mellon University.

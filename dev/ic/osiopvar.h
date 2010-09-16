@@ -111,9 +111,9 @@ struct osiop_ds {
 	u_int8_t msgout[8];
 	u_int8_t msgbuf[8];
 	u_int8_t stat[8];
-	
+
 	struct scsi_generic scsi_cmd;	/* DMA'able copy of xs->cmd */
-	u_int32_t pad[1+4];		/* pad to 256 bytes */
+	u_int32_t pad[1+3];		/* pad to 256 bytes */
 } __packed;
 
 /* status can hold the SCSI_* status values, and 2 additional values: */

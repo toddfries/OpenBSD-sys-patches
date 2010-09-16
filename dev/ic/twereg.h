@@ -28,7 +28,7 @@
 /*
  * most of the meaning for registers were taken from
  * freebsd driver, which in turn got 'em from linux.
- * it seems those got 'em from windows driver, in it's turn.
+ * it seems those got 'em from windows driver, in turn.
  */
 
 

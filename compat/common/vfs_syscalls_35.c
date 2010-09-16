@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_syscalls_35.c,v 1.3 2004/07/14 18:57:57 millert Exp $	*/
+/*	$OpenBSD: vfs_syscalls_35.c,v 1.2 2004/07/14 18:00:48 millert Exp $	*/
 
 /*
  * Copyright (c) 1989, 1993

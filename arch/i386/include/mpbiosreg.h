@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpbiosreg.h,v 1.3 2005/11/23 09:24:52 mickey Exp $	*/
+/*	$OpenBSD: mpbiosreg.h,v 1.2 2004/06/13 21:49:16 niklas Exp $	*/
 /* $NetBSD: mpbiosreg.h,v 1.1.2.3 2000/02/29 13:17:51 sommerfeld Exp $ */
 
 /*-

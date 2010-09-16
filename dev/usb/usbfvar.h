@@ -1,4 +1,4 @@
-/*	$OpenBSD: usbfvar.h,v 1.1 2006/11/25 18:10:29 uwe Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>

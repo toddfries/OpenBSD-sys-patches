@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wireg.h,v 1.38 2005/10/18 13:37:48 fgsch Exp $	*/
+/*	$OpenBSD: if_wireg.h,v 1.37 2005/10/17 10:55:07 fgsch Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999

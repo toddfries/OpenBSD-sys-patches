@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec_olf.h,v 1.8 2001/06/22 14:11:00 deraadt Exp $	*/
+/*	$OpenBSD: exec_olf.h,v 1.7 1997/05/05 23:25:17 etheisen Exp $	*/
 /*
  * Copyright (c) 1996 Erik Theisen.  All rights reserved.
  *

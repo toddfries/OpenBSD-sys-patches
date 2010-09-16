@@ -1,4 +1,4 @@
-/*	$OpenBSD: mc146818reg.h,v 1.7 2003/10/21 18:58:49 jmc Exp $	*/
+/*	$OpenBSD: mc146818reg.h,v 1.6 2002/03/14 01:26:54 millert Exp $	*/
 /*	$NetBSD: mc146818reg.h,v 1.1 1995/05/04 19:31:18 cgd Exp $	*/
 
 /*

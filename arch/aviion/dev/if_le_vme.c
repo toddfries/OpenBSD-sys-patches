@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_le_vme.c,v 1.1.1.1 2006/05/09 18:24:32 miod Exp $	*/
+/*	$OpenBSD$	*/
 
 /*-
  * Copyright (c) 1982, 1992, 1993

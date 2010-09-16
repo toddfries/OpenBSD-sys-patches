@@ -1,4 +1,4 @@
-/*	$OpenBSD: procfs_vnops.c,v 1.38 2006/03/05 21:48:56 miod Exp $	*/
+/*	$OpenBSD: procfs_vnops.c,v 1.37 2005/12/11 21:30:31 miod Exp $	*/
 /*	$NetBSD: procfs_vnops.c,v 1.40 1996/03/16 23:52:55 christos Exp $	*/
 
 /*

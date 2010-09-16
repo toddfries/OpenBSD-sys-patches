@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC.MP,v 1.7 2007/01/27 22:41:40 kettenis Exp $
+#	$OpenBSD: GENERIC.MP,v 1.6 2006/11/27 18:50:59 marco Exp $
 #
 #	GENERIC.MP - sample multiprocessor kernel
 #

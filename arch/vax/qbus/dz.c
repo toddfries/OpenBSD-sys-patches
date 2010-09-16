@@ -1,4 +1,4 @@
-/*	$OpenBSD: dz.c,v 1.14 2006/08/05 16:58:47 miod Exp $	*/
+/*	$OpenBSD: dz.c,v 1.13 2006/07/29 17:06:27 miod Exp $	*/
 /*	$NetBSD: dz.c,v 1.23 2000/06/04 02:14:12 matt Exp $	*/
 /*
  * Copyright (c) 1996  Ken C. Wellsch.  All rights reserved.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: itecons.c,v 1.1 2005/04/01 10:40:48 mickey Exp $	*/
+/*	$OpenBSD: itecons.c,v 1.8 2004/04/07 18:24:20 mickey Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff

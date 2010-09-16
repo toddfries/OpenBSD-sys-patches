@@ -1,4 +1,4 @@
-/*	$OpenBSD: raw_cb.h,v 1.6 2003/06/02 23:28:12 millert Exp $	*/
+/*	$OpenBSD: raw_cb.h,v 1.5 2003/05/13 02:09:47 jason Exp $	*/
 /*	$NetBSD: raw_cb.h,v 1.9 1996/02/13 22:00:41 christos Exp $	*/
 
 /*

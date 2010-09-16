@@ -175,6 +175,10 @@ sys_clock_gettime(struct proc *p, void *v, register_t *retval)
 	case CLOCK_MONOTONIC:
 		nanouptime(&ats);
 		break;
+	case CLOCK_PROF:
+		ats.tv_sec = p->p_rtime.tv_sec;
+		ats.tv_nsec = p->p_rtime.tv_usec * 1000;
+		break;
 	default:
 		return (EINVAL);
 	}
@@ -206,9 +210,7 @@ sys_clock_settime(struct proc *p, void *v, register_t *retval)
 		if ((error = settime(&ats)) != 0)
 			return (error);
 		break;
-	case CLOCK_MONOTONIC:
-		return (EINVAL);	/* read-only clock */
-	default:
+	default:	/* Other clocks are read-only */
 		return (EINVAL);
 	}
 

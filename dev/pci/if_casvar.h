@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_casvar.h,v 1.3 2007/02/27 21:19:40 kettenis Exp $	*/
+/*	$OpenBSD: if_casvar.h,v 1.2 2007/02/25 21:54:52 kettenis Exp $	*/
 
 /*
  *

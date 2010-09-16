@@ -1,4 +1,4 @@
-/*	$OpenBSD: sunos_syscalls.c,v 1.18 2004/07/09 23:56:33 millert Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * System call names.

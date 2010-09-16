@@ -1,4 +1,4 @@
-/*	$OpenBSD: uha.c,v 1.9 2006/11/28 23:59:45 dlg Exp $	*/
+/*	$OpenBSD: uha.c,v 1.8 2005/12/03 16:53:16 krw Exp $	*/
 /*	$NetBSD: uha.c,v 1.3 1996/10/13 01:37:29 christos Exp $	*/
 
 #undef UHADEBUG

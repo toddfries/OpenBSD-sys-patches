@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sandrv.c,v 1.11 2006/04/20 20:31:12 miod Exp $	*/
+/*	$OpenBSD: if_sandrv.c,v 1.10 2005/04/01 21:42:36 canacar Exp $	*/
 
 /*-
  * Copyright (c) 2001-2004 Sangoma Technologies (SAN)

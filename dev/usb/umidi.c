@@ -1,4 +1,4 @@
-/*	$OpenBSD: umidi.c,v 1.16 2006/06/23 06:27:12 miod Exp $	*/
+/*	$OpenBSD: umidi.c,v 1.15 2006/04/07 22:41:33 jsg Exp $	*/
 /*	$NetBSD: umidi.c,v 1.16 2002/07/11 21:14:32 augustss Exp $	*/
 /*
  * Copyright (c) 2001 The NetBSD Foundation, Inc.

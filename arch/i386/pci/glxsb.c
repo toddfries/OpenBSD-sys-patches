@@ -1,4 +1,4 @@
-/*	$OpenBSD: glxsb.c,v 1.7 2007/02/12 14:31:45 tom Exp $	*/
+/*	$OpenBSD: glxsb.c,v 1.6 2007/01/19 19:59:09 tom Exp $	*/
 
 /*
  * Copyright (c) 2006 Tom Cosgrove <tom@openbsd.org>

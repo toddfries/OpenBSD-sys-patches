@@ -1,4 +1,4 @@
-/*	$OpenBSD: cp0access.S,v 1.5 2004/10/20 12:49:15 pefo Exp $ */
+/*	$OpenBSD: cp0access.S,v 1.4 2004/09/10 08:58:27 pefo Exp $ */
 
 /*
  * Copyright (c) 2001-2003 Opsycon AB  (www.opsycon.se / www.opsycon.com)

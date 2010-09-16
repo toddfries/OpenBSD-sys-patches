@@ -1,4 +1,4 @@
-/*	$OpenBSD: com_obio.c,v 1.4 2006/06/16 01:31:35 drahn Exp $	*/
+/*	$OpenBSD: com_obio.c,v 1.3 2006/06/01 18:46:05 drahn Exp $	*/
 /*	$NetBSD: com_obio.c,v 1.9 2005/12/11 12:17:09 christos Exp $	*/
 
 /*-

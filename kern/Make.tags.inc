@@ -1,4 +1,4 @@
-#	$OpenBSD: Make.tags.inc,v 1.9 2005/07/14 02:09:46 uwe Exp $
+#	$OpenBSD: Make.tags.inc,v 1.8 2004/11/22 17:08:38 pat Exp $
 
 # Common files for "make tags".
 # Included by the Makefile for each architecture.

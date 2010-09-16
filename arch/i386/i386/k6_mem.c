@@ -1,4 +1,4 @@
-/* $OpenBSD: k6_mem.c,v 1.7 2006/06/10 18:00:48 gwk Exp $ */
+/* $OpenBSD: k6_mem.c,v 1.6 2006/05/11 13:21:11 mickey Exp $ */
 /*-
  * Copyright (c) 1999 Brian Fundakowski Feldman
  * All rights reserved.

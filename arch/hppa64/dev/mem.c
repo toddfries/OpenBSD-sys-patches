@@ -1,4 +1,4 @@
-/*	$OpenBSD: mem.c,v 1.3 2005/11/28 20:13:08 martin Exp $	*/
+/*	$OpenBSD: mem.c,v 1.2 2005/05/22 01:38:09 mickey Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff

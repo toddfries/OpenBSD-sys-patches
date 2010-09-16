@@ -1275,7 +1275,7 @@ st_read(st, buf, size, flags)
 }
 
 /*
- * Ask the drive what it's min and max blk sizes are.
+ * Ask the drive what its min and max blk sizes are.
  */
 int
 st_read_block_limits(st, flags)

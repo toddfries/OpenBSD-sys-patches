@@ -1,4 +1,4 @@
-/*	$OpenBSD: spx.h,v 1.8 2003/10/26 17:01:11 avsm Exp $	*/
+/*	$OpenBSD: spx.h,v 1.7 2003/06/02 23:28:16 millert Exp $	*/
 
 /*-
  *

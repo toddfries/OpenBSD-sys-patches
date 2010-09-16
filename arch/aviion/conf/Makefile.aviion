@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.aviion,v 1.2 2006/07/27 05:58:11 miod Exp $
+#	$OpenBSD: Makefile.aviion,v 1.1.1.1 2006/05/09 18:12:01 miod Exp $
 #
 # Makefile for OpenBSD
 #

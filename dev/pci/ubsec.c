@@ -1,4 +1,4 @@
-/*	$OpenBSD: ubsec.c,v 1.138 2006/12/29 13:04:37 pedro Exp $	*/
+/*	$OpenBSD: ubsec.c,v 1.137 2006/06/29 21:34:51 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2000 Jason L. Wright (jason@thought.net)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_run.h,v 1.8 2003/02/12 14:41:07 jason Exp $	*/
+/*	$OpenBSD: db_run.h,v 1.7 2002/03/14 01:26:51 millert Exp $	*/
 /*	$NetBSD: db_run.h,v 1.3 1996/02/05 01:57:14 christos Exp $	*/
 
 /* 

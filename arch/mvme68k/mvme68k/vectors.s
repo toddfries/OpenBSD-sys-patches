@@ -1,4 +1,4 @@
-/*	$OpenBSD: vectors.s,v 1.10 2004/03/02 22:55:55 miod Exp $ */
+/*	$OpenBSD: vectors.s,v 1.9 2004/01/27 16:16:27 miod Exp $ */
 
 | Copyright (c) 1995 Theo de Raadt
 |

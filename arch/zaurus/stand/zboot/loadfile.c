@@ -1,5 +1,5 @@
 /* $NetBSD: loadfile.c,v 1.10 2000/12/03 02:53:04 tsutsui Exp $ */
-/* $OpenBSD: loadfile.c,v 1.3 2005/05/24 20:38:20 uwe Exp $ */
+/* $OpenBSD: loadfile.c,v 1.2 2005/01/24 22:20:33 uwe Exp $ */
 
 /*-
  * Copyright (c) 1997 The NetBSD Foundation, Inc.

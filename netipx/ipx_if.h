@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipx_if.h,v 1.6 2003/06/02 23:28:16 millert Exp $	*/
+/*	$OpenBSD: ipx_if.h,v 1.5 2003/05/14 02:02:56 itojun Exp $	*/
 
 /*-
  *

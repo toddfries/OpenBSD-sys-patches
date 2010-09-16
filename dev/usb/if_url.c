@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_url.c,v 1.34 2007/02/11 20:29:22 miod Exp $ */
+/*	$OpenBSD: if_url.c,v 1.33 2006/07/14 23:07:26 brad Exp $ */
 /*	$NetBSD: if_url.c,v 1.6 2002/09/29 10:19:21 martin Exp $	*/
 /*
  * Copyright (c) 2001, 2002

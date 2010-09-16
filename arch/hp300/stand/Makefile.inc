@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.8 2006/08/17 06:31:08 miod Exp $
+#	$OpenBSD: Makefile.inc,v 1.7 2006/04/14 21:02:54 miod Exp $
 #	$NetBSD: Makefile.inc,v 1.7 1997/05/12 07:43:18 thorpej Exp $
 
 BINDIR=			/usr/mdec

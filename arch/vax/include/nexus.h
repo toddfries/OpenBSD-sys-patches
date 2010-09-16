@@ -1,4 +1,4 @@
-/*	$OpenBSD: nexus.h,v 1.13 2006/08/27 16:55:41 miod Exp $	*/
+/*	$OpenBSD: nexus.h,v 1.12 2006/07/20 19:15:34 miod Exp $	*/
 /*	$NetBSD: nexus.h,v 1.17 2000/06/04 17:58:19 ragge Exp $	*/
 
 /*-

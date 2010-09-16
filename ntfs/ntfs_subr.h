@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntfs_subr.h,v 1.3 2003/05/20 03:36:42 tedu Exp $	*/
+/*	$OpenBSD: ntfs_subr.h,v 1.2 2003/05/20 03:23:12 mickey Exp $	*/
 /*	$NetBSD: ntfs_subr.h,v 1.1 2002/12/23 17:38:33 jdolecek Exp $	*/
 
 /*-

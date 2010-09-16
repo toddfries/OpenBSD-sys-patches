@@ -1,4 +1,4 @@
-/*	$OpenBSD: dmavar.h,v 1.7 2005/11/17 23:56:02 miod Exp $	*/
+/*	$OpenBSD: dmavar.h,v 1.6 2003/06/02 23:27:44 millert Exp $	*/
 /*	$NetBSD: dmavar.h,v 1.9 1997/04/01 03:10:59 scottr Exp $	*/
 
 /*

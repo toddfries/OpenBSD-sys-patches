@@ -1,4 +1,4 @@
-/*	$OpenBSD: ncr53c9x.c,v 1.33 2006/11/28 23:59:45 dlg Exp $	*/
+/*	$OpenBSD: ncr53c9x.c,v 1.32 2006/06/26 22:16:23 miod Exp $	*/
 /*     $NetBSD: ncr53c9x.c,v 1.56 2000/11/30 14:41:46 thorpej Exp $    */
 
 /*

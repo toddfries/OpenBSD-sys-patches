@@ -12,6 +12,7 @@ SRCS=	${GENSRCS} ${CSRCS}
 CLEANFILES+= ${GENSRCS} ${GENHDRS} y.output
 DPADD+=	${LIBL}
 LDADD+=	-ll
+CC=${HOSTCC}
 
 # Correct path for kernel builds
 # Don't rely on the kernel's .depend file

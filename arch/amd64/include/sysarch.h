@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysarch.h,v 1.3 2004/02/27 23:45:55 deraadt Exp $	*/
+/*	$OpenBSD: sysarch.h,v 1.2 2004/02/26 01:46:49 deraadt Exp $	*/
 /*	$NetBSD: sysarch.h,v 1.1 2003/04/26 18:39:48 fvdl Exp $	*/
 
 #ifndef _AMD64_SYSARCH_H_

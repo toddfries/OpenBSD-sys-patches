@@ -1,4 +1,4 @@
-/*	$OpenBSD: random.s,v 1.5 2007/01/14 19:13:35 otto Exp $ */
+/*	$OpenBSD: random.s,v 1.4 2005/05/06 18:55:02 miod Exp $ */
 /*	$NetBSD: random.S,v 1.4 2007/01/14 13:26:18 ragge Exp $	*/
 
 /*

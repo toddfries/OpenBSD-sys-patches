@@ -96,7 +96,6 @@ pflogattach(int npflog)
 	LIST_INIT(&pflogif_list);
 	for (i = 0; i < PFLOGIFS_MAX; i++)
 		pflogifs[i] = NULL;
-	(void) pflog_clone_create(&pflog_cloner, 0);
 	if_clone_attach(&pflog_cloner);
 }
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: apcdmareg.h,v 1.2 2003/06/02 18:53:18 jason Exp $	*/
+/*	$OpenBSD: apcdmareg.h,v 1.1 2001/10/01 03:31:03 jason Exp $	*/
 
 /*
  * Copyright (c) 2001 Jason L. Wright (jason@thought.net)

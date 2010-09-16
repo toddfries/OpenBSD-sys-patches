@@ -1,4 +1,4 @@
-/*	$OpenBSD: rgephy.c,v 1.24 2007/01/21 22:37:56 kettenis Exp $	*/
+/*	$OpenBSD: rgephy.c,v 1.23 2006/12/31 15:04:33 krw Exp $	*/
 /*
  * Copyright (c) 2003
  *	Bill Paul <wpaul@windriver.com>.  All rights reserved.

@@ -202,6 +202,10 @@ zrc0		at pxaip?		# Zaurus remote control
 wskbd*		at zrc? mux 1
 flash0		at pxaip?		# NAND flash memory
 
+pxammc0		at pxaip?		# MMC/SD/SDIO controller
+sdmmc*		at pxammc?		# SD/MMC bus
+scsibus*	at sdmmc?		# SCSI emulation
+
 # 1-Wire devices
 option ONEWIREVERBOSE
 owid*	at onewire?			# ID

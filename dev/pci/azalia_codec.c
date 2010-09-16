@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia_codec.c,v 1.18 2006/07/23 20:23:51 brad Exp $	*/
+/*	$OpenBSD: azalia_codec.c,v 1.17 2006/07/20 23:51:48 brad Exp $	*/
 /*	$NetBSD: azalia_codec.c,v 1.8 2006/05/10 11:17:27 kent Exp $	*/
 
 /*-

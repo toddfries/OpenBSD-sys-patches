@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieeefp.h,v 1.2 2002/05/22 20:04:55 miod Exp $	*/
+/*	$OpenBSD: ieeefp.h,v 1.1 2002/03/11 02:05:22 miod Exp $	*/
 
 /* 
  * Written by Miodrag Vallat.  Public domain.

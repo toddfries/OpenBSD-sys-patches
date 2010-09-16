@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpbiosreg.h,v 1.1 2004/01/28 01:39:39 mickey Exp $	*/
+/*	$OpenBSD$	*/
 /* 	$NetBSD: mpbiosreg.h,v 1.3 2003/03/04 23:27:32 fvdl Exp $ */
 
 /*-

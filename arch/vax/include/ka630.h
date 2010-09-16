@@ -1,4 +1,4 @@
-/*	$OpenBSD: ka630.h,v 1.6 2003/06/02 23:27:57 millert Exp $ */
+/*	$OpenBSD: ka630.h,v 1.5 2002/06/11 09:36:24 hugh Exp $ */
 /*	$NetBSD: ka630.h,v 1.5 2000/07/19 01:01:58 matt Exp $ */
 /*-
  * Copyright (c) 1986, 1988 The Regents of the University of California.

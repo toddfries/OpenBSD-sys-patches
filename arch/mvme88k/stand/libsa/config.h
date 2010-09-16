@@ -1,4 +1,4 @@
-/*	$OpenBSD: config.h,v 1.4 2003/06/04 21:47:59 deraadt Exp $	*/
+/*	$OpenBSD: config.h,v 1.3 2001/07/04 08:09:29 niklas Exp $	*/
 
 
 /*

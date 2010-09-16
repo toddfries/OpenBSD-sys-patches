@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.3 2004/08/10 21:11:42 pefo Exp $ */
+/*	$OpenBSD: param.h,v 1.2 2004/08/10 18:51:29 deraadt Exp $ */
 
 /*
  * Copyright (c) 2003 Opsycon AB  (www.opsycon.se / www.opsycon.com)

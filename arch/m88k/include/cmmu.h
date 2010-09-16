@@ -1,4 +1,4 @@
-/*	$OpenBSD: cmmu.h,v 1.17 2007/02/11 12:49:35 miod Exp $ */
+/*	$OpenBSD: cmmu.h,v 1.16 2005/12/11 21:45:28 miod Exp $ */
 /*
  * Mach Operating System
  * Copyright (c) 1993-1992 Carnegie Mellon University

@@ -1,4 +1,4 @@
-/* $OpenBSD: asm_2300.h,v 1.3 2003/02/28 20:47:32 mjacob Exp $ */
+/* $OpenBSD: asm_2300.h,v 1.2 2002/05/17 01:23:13 mjacob Exp $ */
 /*
  * Copyright (C) 2001 Qlogic, Inc.
  * All rights reserved.

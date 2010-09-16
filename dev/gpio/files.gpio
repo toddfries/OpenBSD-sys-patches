@@ -1,4 +1,4 @@
-# $OpenBSD: files.gpio,v 1.6 2006/03/04 16:27:03 grange Exp $
+# $OpenBSD: files.gpio,v 1.5 2006/01/14 13:55:14 grange Exp $
 
 define	gpio {offset, mask}
 

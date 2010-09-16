@@ -1,4 +1,4 @@
-/*	$OpenBSD: rf_reconutil.h,v 1.3 2002/12/16 07:01:05 tdeval Exp $	*/
+/*	$OpenBSD: rf_reconutil.h,v 1.2 1999/02/16 00:03:24 niklas Exp $	*/
 /*	$NetBSD: rf_reconutil.h,v 1.3 1999/02/05 00:06:17 oster Exp $	*/
 
 /*

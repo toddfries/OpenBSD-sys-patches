@@ -1,4 +1,4 @@
-/*	$OpenBSD: ra.c,v 1.3 2002/06/11 09:36:23 hugh Exp $ */
+/*	$OpenBSD$ */
 /*	$NetBSD: ra.c,v 1.11 2002/06/04 15:13:55 ragge Exp $ */
 /*
  * Copyright (c) 1995 Ludd, University of Lule}, Sweden.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: clock_md.c,v 1.8 2005/01/31 21:25:21 grange Exp $ */
+/*	$OpenBSD: clock_md.c,v 1.7 2004/10/20 12:49:15 pefo Exp $ */
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)

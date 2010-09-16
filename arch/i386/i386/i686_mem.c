@@ -1,4 +1,4 @@
-/* $OpenBSD: i686_mem.c,v 1.9 2006/09/19 11:06:33 jsg Exp $ */
+/* $OpenBSD: i686_mem.c,v 1.8 2006/05/27 04:08:57 gwk Exp $ */
 /*-
  * Copyright (c) 1999 Michael Smith <msmith@freebsd.org>
  * All rights reserved.

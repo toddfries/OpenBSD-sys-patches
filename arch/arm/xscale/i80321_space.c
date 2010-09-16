@@ -1,4 +1,4 @@
-/*	$OpenBSD: i80321_space.c,v 1.4 2006/06/01 03:46:01 drahn Exp $	*/
+/*	$OpenBSD: i80321_space.c,v 1.3 2006/05/31 05:43:49 drahn Exp $	*/
 /*	$NetBSD: i80321_space.c,v 1.9 2005/11/24 13:08:32 yamt Exp $	*/
 
 /*

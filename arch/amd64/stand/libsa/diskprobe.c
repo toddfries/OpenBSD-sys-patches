@@ -1,4 +1,4 @@
-/*	$OpenBSD: diskprobe.c,v 1.4 2006/09/26 23:33:04 krw Exp $	*/
+/*	$OpenBSD: diskprobe.c,v 1.3 2004/08/21 18:53:38 tom Exp $	*/
 
 /*
  * Copyright (c) 1997 Tobias Weingartner

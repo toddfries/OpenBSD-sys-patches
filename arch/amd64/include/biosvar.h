@@ -1,5 +1,5 @@
 /* XXX - DSR */
-/*	$OpenBSD: biosvar.h,v 1.7 2006/05/20 22:36:33 deraadt Exp $	*/
+/*	$OpenBSD: biosvar.h,v 1.6 2006/05/08 22:51:18 gwk Exp $	*/
 
 /*
  * Copyright (c) 1997-1999 Michael Shalayeff

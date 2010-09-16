@@ -1,4 +1,4 @@
-/*	$OpenBSD: z8530tty.c,v 1.12 2006/04/29 19:55:31 naddy Exp $	*/
+/*	$OpenBSD: z8530tty.c,v 1.11 2006/04/27 19:43:02 deraadt Exp $	*/
 /*	$NetBSD: z8530tty.c,v 1.77 2001/05/30 15:24:24 lukem Exp $	*/
 
 /*-

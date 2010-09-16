@@ -278,6 +278,12 @@ tcx_ioctl(void *dev, u_long cmd, caddr_t data, int flags, struct proc *p)
 		wdf->depth = sc->sc_sunfb.sf_depth;
 		wdf->cmsize = sc->sc_cplane == NULL ? 256 : 0;
 		break;
+	case WSDISPLAYIO_GETSUPPORTEDDEPTH:
+		if (sc->sc_cplane != NULL)
+			*(u_int *)data = WSDISPLAYIO_DEPTH_24_32;
+		else
+			return (-1);
+		break;
 	case WSDISPLAYIO_LINEBYTES:
 		if (sc->sc_cplane == NULL)
 			*(u_int *)data = sc->sc_sunfb.sf_linebytes;

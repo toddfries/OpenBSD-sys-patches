@@ -1,4 +1,4 @@
-/*	$OpenBSD: rf_openbsd.h,v 1.5 2002/12/16 07:01:04 tdeval Exp $	*/
+/*	$OpenBSD: rf_openbsd.h,v 1.4 2000/08/08 16:07:43 peter Exp $	*/
 
 /*
  * Copyright (c) 1996, 1997, 1998 The NetBSD Foundation, Inc.

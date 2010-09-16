@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpustate.h,v 1.6 2004/10/20 12:49:15 pefo Exp $ */
+/*	$OpenBSD: cpustate.h,v 1.5 2004/09/10 10:38:51 miod Exp $ */
 
 /*
  * Copyright (c) 2002-2003 Opsycon AB  (www.opsycon.se / www.opsycon.com)

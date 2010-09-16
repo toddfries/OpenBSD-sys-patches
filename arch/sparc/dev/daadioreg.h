@@ -1,4 +1,4 @@
-/*	$OpenBSD: daadioreg.h,v 1.2 2003/06/02 18:40:59 jason Exp $	*/
+/*	$OpenBSD: daadioreg.h,v 1.1 1999/07/23 19:11:24 jason Exp $	*/
 
 /*
  * Copyright (c) 1999 Jason L. Wright (jason@thought.net)

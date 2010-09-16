@@ -1,4 +1,4 @@
-/*	$OpenBSD: amdiic.c,v 1.5 2006/09/28 18:19:14 grange Exp $	*/
+/*	$OpenBSD: amdiic.c,v 1.4 2006/01/15 10:06:06 grange Exp $	*/
 
 /*
  * Copyright (c) 2005 Alexander Yurchenko <grange@openbsd.org>

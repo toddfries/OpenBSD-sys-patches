@@ -1,4 +1,4 @@
-/*	$OpenBSD: simplelock.h,v 1.11 2004/06/13 21:49:28 niklas Exp $	*/
+/*	$OpenBSD$	*/
 
 #ifndef _SIMPLELOCK_H_
 #define _SIMPLELOCK_H_

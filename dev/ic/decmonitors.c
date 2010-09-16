@@ -1,4 +1,4 @@
-/* $OpenBSD: decmonitors.c,v 1.2 2001/07/04 09:03:01 niklas Exp $ */
+/* $OpenBSD$ */
 
 /*-
  * Copyright (c) 1998, 1999 The NetBSD Foundation, Inc.

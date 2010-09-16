@@ -1,4 +1,4 @@
-/*	$OpenBSD: ffs_softdep_stub.c,v 1.14 2006/06/21 10:01:10 mickey Exp $	*/
+/*	$OpenBSD: ffs_softdep_stub.c,v 1.13 2006/06/19 22:52:23 miod Exp $	*/
 
 /*
  * Copyright 1998 Marshall Kirk McKusick. All Rights Reserved.

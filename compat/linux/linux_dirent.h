@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_dirent.h,v 1.3 2002/10/28 03:39:30 fgsch Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD: linux_dirent.h,v 1.3 1995/10/07 06:26:59 mycroft Exp $	*/
 
 /*

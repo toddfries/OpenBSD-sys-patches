@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_iwireg.h,v 1.25 2006/08/19 11:07:45 damien Exp $	*/
+/*	$OpenBSD: if_iwireg.h,v 1.24 2006/04/02 20:30:20 dim Exp $	*/
 
 /*-
  * Copyright (c) 2004-2006

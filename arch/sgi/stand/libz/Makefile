@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.2 2004/09/16 18:54:49 pefo Exp $
+#	$OpenBSD: Makefile,v 1.1 2004/08/23 14:22:40 pefo Exp $
 
 S=${.CURDIR}/../../../..
 ZDST=${.OBJDIR}

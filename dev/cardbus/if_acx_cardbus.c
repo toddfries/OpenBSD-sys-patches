@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_acx_cardbus.c,v 1.11 2006/11/10 20:20:04 damien Exp $  */
+/*	$OpenBSD: if_acx_cardbus.c,v 1.10 2006/10/12 16:35:52 grange Exp $  */
 
 /*
  * Copyright (c) 2006 Claudio Jeker <claudio@openbsd.org>

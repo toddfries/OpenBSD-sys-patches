@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec.h,v 1.1 2004/10/18 19:05:36 grange Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * Copyright (c) 1996-2004 Per Fogelstrom, Opsycon AB

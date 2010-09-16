@@ -364,8 +364,8 @@ allocsys(caddr_t v)
 	}
 	/* Restrict to at most 30% filled kvm */
 	if (nbuf * MAXBSIZE >
-	    (VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS) * 3 / 10)
-		nbuf = (VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS) /
+	    (KERNEND - KERNBASE) * 3 / 10)
+		nbuf = (KERNEND - KERNBASE) /
 		    MAXBSIZE * 3 / 10;
 
 	/* More buffer pages than fits into the buffers is senseless.  */

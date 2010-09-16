@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus.h,v 1.24 2005/01/09 06:58:51 mickey Exp $	*/
+/*	$OpenBSD: bus.h,v 1.23 2004/04/07 18:24:19 mickey Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff

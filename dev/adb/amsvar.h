@@ -1,4 +1,4 @@
-/*	$OpenBSD: amsvar.h,v 1.1 2006/01/18 23:21:17 miod Exp $	*/
+/*	$OpenBSD: amsvar.h,v 1.2 2002/03/14 01:26:36 millert Exp $	*/
 /*	$NetBSD: amsvar.h,v 1.4 1999/06/17 06:59:05 tsubai Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ioctl_compat.h,v 1.4 2003/06/02 23:28:21 millert Exp $	*/
+/*	$OpenBSD: ioctl_compat.h,v 1.3 2002/02/06 01:55:04 jasoni Exp $	*/
 /*	$NetBSD: ioctl_compat.h,v 1.10 1995/03/31 03:10:15 christos Exp $	*/
 
 /*

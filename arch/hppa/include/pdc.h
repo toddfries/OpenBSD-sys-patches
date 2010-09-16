@@ -1,4 +1,4 @@
-/*	$OpenBSD: pdc.h,v 1.32 2005/05/24 22:26:16 mickey Exp $	*/
+/*	$OpenBSD: pdc.h,v 1.31 2005/04/07 00:21:51 mickey Exp $	*/
 
 /*
  * Copyright (c) 1990 mt Xinu, Inc.  All rights reserved.

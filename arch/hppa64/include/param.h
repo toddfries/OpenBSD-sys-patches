@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.8 2006/08/12 17:54:38 krw Exp $	*/
+/*	$OpenBSD: param.h,v 1.7 2006/03/19 01:47:23 martin Exp $	*/
 
 /* 
  * Copyright (c) 1988-1994, The University of Utah and

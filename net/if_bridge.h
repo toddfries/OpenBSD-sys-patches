@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bridge.h,v 1.31 2006/12/11 22:11:48 reyk Exp $	*/
+/*	$OpenBSD: if_bridge.h,v 1.30 2006/12/03 13:41:19 reyk Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Jason L. Wright (jason@thought.net)

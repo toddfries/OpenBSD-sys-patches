@@ -1,4 +1,4 @@
-/*	$OpenBSD: pio.h,v 1.1 2004/01/28 01:39:39 mickey Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD: pio.h,v 1.2 2003/02/27 11:22:46 fvdl Exp $	*/
 
 /*-

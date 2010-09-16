@@ -1,4 +1,4 @@
-/*	$OpenBSD: clock.c,v 1.1 2006/05/16 22:48:18 miod Exp $	*/
+/*	$OpenBSD: clock.c,v 1.3 2001/07/04 08:09:29 niklas Exp $	*/
 
 
 #include <sys/types.h>

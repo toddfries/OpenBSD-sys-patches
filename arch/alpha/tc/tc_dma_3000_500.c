@@ -1,4 +1,4 @@
-/* $OpenBSD: tc_dma_3000_500.c,v 1.2 2006/04/04 21:20:40 brad Exp $ */
+/* $OpenBSD: tc_dma_3000_500.c,v 1.1 2002/05/02 22:56:06 miod Exp $ */
 /* $NetBSD: tc_dma_3000_500.c,v 1.13 2001/07/19 06:40:03 thorpej Exp $ */
 
 /*-

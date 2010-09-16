@@ -1,4 +1,4 @@
-/*	$OpenBSD: rpcv2.h,v 1.6 2003/06/02 23:28:20 millert Exp $	*/
+/*	$OpenBSD: rpcv2.h,v 1.5 2002/06/11 15:45:44 hin Exp $	*/
 /*	$NetBSD: rpcv2.h,v 1.8 1996/02/18 11:54:11 fvdl Exp $	*/
 
 /*

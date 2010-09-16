@@ -1,4 +1,4 @@
-/*	$OpenBSD: rf_reconbuffer.c,v 1.4 2002/12/16 07:01:05 tdeval Exp $	*/
+/*	$OpenBSD: rf_reconbuffer.c,v 1.3 2000/08/08 16:07:44 peter Exp $	*/
 /*	$NetBSD: rf_reconbuffer.c,v 1.4 2000/03/13 23:52:36 soren Exp $	*/
 
 /*

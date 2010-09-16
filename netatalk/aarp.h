@@ -1,4 +1,4 @@
-/*	$OpenBSD: aarp.h,v 1.1 1997/07/23 03:39:51 denny Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * Copyright (c) 1990,1991 Regents of The University of Michigan.

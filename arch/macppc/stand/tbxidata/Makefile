@@ -1,4 +1,4 @@
-#       $OpenBSD: Makefile,v 1.1 2001/10/03 17:10:06 drahn Exp $
+#       $OpenBSD: Makefile,v 1.1 2001/09/01 15:34:13 drahn Exp $
 
 NOMACHINE=
 FILES=	bsd.tbxi 

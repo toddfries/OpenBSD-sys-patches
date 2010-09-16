@@ -1,4 +1,4 @@
-/*	$OpenBSD: boot.c,v 1.11 2003/06/02 23:27:51 millert Exp $ */
+/*	$OpenBSD: boot.c,v 1.10 1997/04/22 16:01:19 gvf Exp $ */
 /*	$NetBSD: boot.c,v 1.2 1995/09/23 03:42:52 gwr Exp $ */
 
 /*-

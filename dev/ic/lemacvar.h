@@ -1,4 +1,4 @@
-/*      $OpenBSD: lemacvar.h,v 1.3 2006/12/21 22:17:56 jason Exp $ */
+/*      $OpenBSD: lemacvar.h,v 1.2 2003/10/21 18:58:49 jmc Exp $ */
 /*      $NetBSD: lemacvar.h,v 1.6 2001/06/13 10:46:03 wiz Exp $ */
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: in_cksum.c,v 1.2 2005/05/05 14:28:34 miod Exp $	*/
+/*	$OpenBSD: in_cksum.c,v 1.1 2005/05/04 22:31:48 miod Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996 Wolfgang Solfrank.

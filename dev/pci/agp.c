@@ -1,4 +1,4 @@
-/* $OpenBSD: agp.c,v 1.5 2007/01/30 21:12:14 dim Exp $ */
+/* $OpenBSD: agp.c,v 1.4 2007/01/03 14:05:00 deraadt Exp $ */
 /*-
  * Copyright (c) 2000 Doug Rabson
  * All rights reserved.

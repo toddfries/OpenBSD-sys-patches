@@ -1,4 +1,4 @@
-/*	$OpenBSD: upa.c,v 1.5 2007/03/05 18:58:30 kettenis Exp $	*/
+/*	$OpenBSD: upa.c,v 1.4 2003/06/02 20:02:49 jason Exp $	*/
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)

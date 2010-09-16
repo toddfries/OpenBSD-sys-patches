@@ -1,4 +1,4 @@
-/* $OpenBSD: asc.c,v 1.22 2003/06/05 12:27:02 deraadt Exp $ */
+/* $OpenBSD: asc.c,v 1.21 2002/05/02 22:56:06 miod Exp $ */
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.

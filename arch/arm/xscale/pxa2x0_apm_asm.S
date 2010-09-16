@@ -1,4 +1,4 @@
-/*	$OpenBSD: pxa2x0_apm_asm.S,v 1.2 2006/10/19 10:55:56 tom Exp $	*/
+/*	$OpenBSD: pxa2x0_apm_asm.S,v 1.1 2005/02/22 21:53:03 uwe Exp $	*/
 
 /*
  * Copyright (c) 2005 Uwe Stuehler <uwe@openbsd.org>

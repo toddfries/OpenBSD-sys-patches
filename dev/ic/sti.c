@@ -1,4 +1,4 @@
-/*	$OpenBSD: sti.c,v 1.53 2007/01/12 22:02:33 miod Exp $	*/
+/*	$OpenBSD: sti.c,v 1.52 2007/01/11 22:02:03 miod Exp $	*/
 
 /*
  * Copyright (c) 2000-2003 Michael Shalayeff

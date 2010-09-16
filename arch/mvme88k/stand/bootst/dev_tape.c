@@ -1,4 +1,4 @@
-/*	$OpenBSD: dev_tape.c,v 1.3 2006/05/16 22:52:09 miod Exp $ */
+/*	$OpenBSD: dev_tape.c,v 1.2 2002/03/14 03:15:57 millert Exp $ */
 
 /*
  * Copyright (c) 1993 Paul Kranenburg

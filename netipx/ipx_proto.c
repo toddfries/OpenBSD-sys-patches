@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipx_proto.c,v 1.6 2003/06/02 23:28:16 millert Exp $	*/
+/*	$OpenBSD: ipx_proto.c,v 1.5 2001/05/25 22:08:24 itojun Exp $	*/
 
 /*-
  *

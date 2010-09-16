@@ -1,4 +1,4 @@
-/*	$OpenBSD: seagate.c,v 1.20 2006/11/28 23:59:45 dlg Exp $	*/
+/*	$OpenBSD: seagate.c,v 1.19 2005/12/03 17:13:22 krw Exp $	*/
 
 /*
  * ST01/02, Future Domain TMC-885, TMC-950 SCSI driver

@@ -59,4 +59,13 @@
 #define DIOCGPDINFO	_IOR('d', 114, struct disklabel)/* get physical */
 #define DIOCRLDINFO	_IO('d', 115)			/* reload disklabel */
 
+struct dk_inquiry {
+	char		vendor[64];
+	char		product[128];
+	char		revision[64];
+	char		serial[64];
+};
+
+#define DIOCINQ		_IOR('d', 116, struct dk_inquiry)
+
 #endif /* _SYS_DKIO_H_ */

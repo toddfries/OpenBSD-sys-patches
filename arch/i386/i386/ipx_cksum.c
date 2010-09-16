@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipx_cksum.c,v 1.5 2006/09/19 11:06:33 jsg Exp $	*/
+/*	$OpenBSD: ipx_cksum.c,v 1.4 2006/05/11 13:21:11 mickey Exp $	*/
 
 /*-
  * Copyright (c) 1994, 1995 Charles M. Hannum.  All rights reserved.

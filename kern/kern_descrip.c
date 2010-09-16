@@ -430,7 +430,7 @@ restart:
 				error = EBADF;
 				goto out;
 			}
-			p->p_flag |= P_ADVLOCK;
+			atomic_setbits_int(&p->p_flag, P_ADVLOCK);
 			error = (VOP_ADVLOCK(vp, (caddr_t)p, F_SETLK, &fl, flg));
 			goto out;
 
@@ -439,7 +439,7 @@ restart:
 				error = EBADF;
 				goto out;
 			}
-			p->p_flag |= P_ADVLOCK;
+			atomic_setbits_int(&p->p_flag, P_ADVLOCK);
 			error = (VOP_ADVLOCK(vp, (caddr_t)p, F_SETLK, &fl, flg));
 			goto out;
 

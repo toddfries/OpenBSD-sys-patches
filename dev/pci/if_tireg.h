@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tireg.h,v 1.25 2006/08/16 02:37:00 brad Exp $	*/
+/*	$OpenBSD: if_tireg.h,v 1.24 2006/07/18 01:24:46 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999

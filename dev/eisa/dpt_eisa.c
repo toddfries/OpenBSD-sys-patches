@@ -1,4 +1,4 @@
-/*	$OpenBSD: dpt_eisa.c,v 1.3 2003/10/21 10:27:12 jmc Exp $	*/
+/*	$OpenBSD: dpt_eisa.c,v 1.2 2002/03/14 01:26:53 millert Exp $	*/
 /*	$NetBSD: dpt_eisa.c,v 1.2 1999/10/18 21:59:19 ad Exp $	*/
 
 /*

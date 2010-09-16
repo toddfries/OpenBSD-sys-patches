@@ -1,4 +1,4 @@
-/*	$OpenBSD: natm.h,v 1.6 2002/03/14 01:27:12 millert Exp $	*/
+/*	$OpenBSD: natm.h,v 1.5 1997/10/11 01:32:08 angelos Exp $	*/
 
 /*
  *

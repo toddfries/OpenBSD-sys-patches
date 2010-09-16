@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_txpreg.h,v 1.37 2004/11/16 23:39:56 jason Exp $ */
+/*	$OpenBSD: if_txpreg.h,v 1.36 2004/05/31 19:25:00 mcbride Exp $ */
 
 /*
  * Copyright (c) 2001 Aaron Campbell <aaron@monkey.org>.

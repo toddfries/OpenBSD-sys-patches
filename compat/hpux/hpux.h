@@ -1,4 +1,4 @@
-/*	$OpenBSD: hpux.h,v 1.14 2004/09/19 22:03:16 mickey Exp $	*/
+/*	$OpenBSD: hpux.h,v 1.13 2004/07/11 01:15:51 mickey Exp $	*/
 /*	$NetBSD: hpux.h,v 1.11 1997/04/01 19:58:58 scottr Exp $	*/
 
 /*

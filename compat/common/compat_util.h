@@ -1,4 +1,4 @@
-/*	$OpenBSD: compat_util.h,v 1.7 2002/03/14 01:26:49 millert Exp $	*/
+/*	$OpenBSD: compat_util.h,v 1.6 2001/11/06 19:53:17 miod Exp $	*/
 /*	$NetBSD: compat_util.h,v 1.1 1995/06/24 20:16:05 christos Exp $	*/
 
 /*

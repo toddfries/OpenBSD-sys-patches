@@ -1,4 +1,4 @@
-/*	$OpenBSD: spx_usrreq.c,v 1.25 2006/03/05 21:48:57 miod Exp $	*/
+/*	$OpenBSD: spx_usrreq.c,v 1.24 2005/11/26 04:33:27 marco Exp $	*/
 
 /*-
  *

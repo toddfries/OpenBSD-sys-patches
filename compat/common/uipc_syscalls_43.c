@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_syscalls_43.c,v 1.7 2003/06/02 23:27:59 millert Exp $	*/
+/*	$OpenBSD: uipc_syscalls_43.c,v 1.6 1998/12/20 23:51:31 millert Exp $	*/
 /*	$NetBSD: uipc_syscalls_43.c,v 1.5 1996/03/14 19:31:50 christos Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cdefs.h,v 1.2 2005/11/24 20:46:48 deraadt Exp $ */
+/*	$OpenBSD: cdefs.h,v 1.1 2004/08/06 21:12:18 pefo Exp $ */
 
 /* Use Mips generic include file */
 

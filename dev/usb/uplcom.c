@@ -1,4 +1,4 @@
-/*	$OpenBSD: uplcom.c,v 1.32 2006/08/04 06:49:13 brad Exp $	*/
+/*	$OpenBSD: uplcom.c,v 1.31 2006/07/01 04:23:31 jsg Exp $	*/
 /*	$NetBSD: uplcom.c,v 1.29 2002/09/23 05:51:23 simonb Exp $	*/
 /*
  * Copyright (c) 2001 The NetBSD Foundation, Inc.

@@ -1,4 +1,4 @@
-/* $OpenBSD: esadsp.h,v 1.2 2003/06/26 00:53:43 mickey Exp $ */
+/* $OpenBSD: esadsp.h,v 1.1 2002/04/08 01:47:33 frantzen Exp $ */
 /* $NetBSD: esadsp.h,v 1.4 2002/01/07 07:33:09 jmcneill Exp $ */
 
 /*

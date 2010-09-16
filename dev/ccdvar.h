@@ -181,30 +181,6 @@ struct ccdgeom {
 };
 
 /*
- * A concatenated disk is described after initialization by this structure.
- */
-struct ccd_softc {
-	struct disk	sc_dkdev;		/* generic disk device info */
-	struct ccdgeom	sc_geom;		/* pseudo geometry info */
-	struct ccdcinfo	*sc_cinfo;		/* component info */
-	struct ccdiinfo	*sc_itable;		/* interleave table */
-	char		sc_xname[8];		/* XXX external name */
-	size_t		sc_size;		/* size of ccd */
-	int		sc_flags;		/* flags */
-	int		sc_cflags;		/* copy of ccd_flags */
-	int		sc_ileave;		/* interleave */
-	u_int		sc_nccdisks;		/* # of components */
-	u_int		sc_nccunits;		/* # of components for data */
-};
-
-/* sc_flags */
-#define CCDF_INITED	0x01	/* unit has been initialized */
-#define CCDF_WLABEL	0x02	/* label area is writable */
-#define CCDF_LABELLING	0x04	/* unit is currently being labelled */
-#define CCDF_WANTED	0x40	/* someone is waiting to obtain a lock */
-#define CCDF_LOCKED	0x80	/* unit is locked */
-
-/*
  * Before you can use a unit, it must be configured with CCDIOCSET.
  * The configuration persists across opens and closes of the device;
  * a CCDIOCCLR must be used to reset a configuration.  An attempt to

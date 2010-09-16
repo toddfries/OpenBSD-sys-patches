@@ -1,4 +1,4 @@
-/*	$OpenBSD: frodo.c,v 1.11 2007/01/14 17:54:45 miod Exp $	*/
+/*	$OpenBSD: frodo.c,v 1.10 2007/01/06 20:17:43 miod Exp $	*/
 /*	$NetBSD: frodo.c,v 1.5 1999/07/31 21:15:20 thorpej Exp $	*/
 
 /*-

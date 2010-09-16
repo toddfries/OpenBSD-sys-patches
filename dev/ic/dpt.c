@@ -430,7 +430,7 @@ dpt_init(sc, intrstr)
 
 /*
  * Our 'shutdownhook' to cleanly shut down the HBA. The HBA must flush 
- * all data from it's cache and mark array groups as clean.
+ * all data from its cache and mark array groups as clean.
  */
 void
 dpt_shutdown(xxx_sc)

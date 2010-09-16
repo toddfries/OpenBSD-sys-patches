@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_write_cmd.c,v 1.8 2006/03/13 06:23:20 jsg Exp $	*/
+/*	$OpenBSD: db_write_cmd.c,v 1.7 2002/05/16 13:01:41 art Exp $	*/
 /*	$NetBSD: db_write_cmd.c,v 1.6 1996/02/05 01:57:25 christos Exp $	*/
 
 /* 

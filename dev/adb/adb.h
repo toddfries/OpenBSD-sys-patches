@@ -139,7 +139,7 @@ typedef struct {
 } ADBDataBlock;
 
 int	adbprint(void *, const char *);
-int	adb_op_sync(Ptr, Ptr, Ptr, short);
+int	adb_op_sync(Ptr, short);
 int	set_adb_info(ADBSetInfoBlock *, int);
 
 #endif	/* _KERNEL */

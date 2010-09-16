@@ -1,4 +1,4 @@
-/*	$OpenBSD: stdarg.h,v 1.4 2006/01/06 18:53:06 millert Exp $ */
+/*	$OpenBSD: stdarg.h,v 1.3 2004/02/26 17:21:59 drahn Exp $ */
 /*
  * Copyright (c) 2003, 2004  Marc espie <espie@openbsd.org>
  *

@@ -1,4 +1,4 @@
-/*	$OpenBSD: i2o.h,v 1.7 2004/04/12 22:12:32 jmc Exp $	*/
+/*	$OpenBSD: i2o.h,v 1.6 2003/10/21 10:32:08 jmc Exp $	*/
 /*	$NetBSD: i2o.h,v 1.3 2001/03/20 13:01:48 ad Exp $	*/
 
 /*-

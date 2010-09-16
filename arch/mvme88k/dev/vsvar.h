@@ -1,4 +1,4 @@
-/*	$OpenBSD: vsvar.h,v 1.18 2005/12/27 21:38:13 miod Exp $	*/
+/*	$OpenBSD: vsvar.h,v 1.17 2004/09/06 06:25:28 miod Exp $	*/
 /*
  * Copyright (c) 2004, Miodrag Vallat.
  * Copyright (c) 1999 Steve Murphree, Jr.

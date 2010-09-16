@@ -253,7 +253,7 @@ lm75probe(void)
 		thigh = iicprobew(LM77Thigh) & mask;
 	}
 
-	/* a real LM75/LM75A/LM77 repeats it's registers.... */
+	/* a real LM75/LM75A/LM77 repeats its registers.... */
 	for (i = 0x08; i <= 0xf8; i += 8) {
 		if (conf != iicprobenc(LM75CONF + i) ||
 		    thyst != (iicprobew(LM75Thyst + i) & mask) ||

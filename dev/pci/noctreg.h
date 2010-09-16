@@ -1,4 +1,4 @@
-/*	$OpenBSD: noctreg.h,v 1.8 2003/06/02 19:08:58 jason Exp $	*/
+/*	$OpenBSD: noctreg.h,v 1.7 2003/02/11 19:20:28 mickey Exp $	*/
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)

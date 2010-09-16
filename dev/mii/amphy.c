@@ -1,4 +1,4 @@
-/*	$OpenBSD: amphy.c,v 1.15 2006/12/31 15:04:33 krw Exp $	*/
+/*	$OpenBSD: amphy.c,v 1.14 2006/12/27 19:11:08 kettenis Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999

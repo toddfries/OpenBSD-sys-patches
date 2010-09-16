@@ -1,4 +1,4 @@
-/*	$OpenBSD: saveregs.S,v 1.3 2003/06/02 23:28:09 millert Exp $	*/
+/*	$OpenBSD: saveregs.S,v 1.2 1997/11/07 15:57:40 niklas Exp $	*/
 /*	$NetBSD: saveregs.S,v 1.2 1994/10/26 06:40:07 cgd Exp $	*/
 
 /*

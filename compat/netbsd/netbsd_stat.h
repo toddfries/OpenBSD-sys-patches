@@ -1,4 +1,4 @@
-/*	$OpenBSD: netbsd_stat.h,v 1.6 2005/11/09 14:14:06 martin Exp $	*/
+/*	$OpenBSD: netbsd_stat.h,v 1.5 2004/07/13 21:04:29 millert Exp $	*/
 
 /*-
  * Copyright (c) 1982, 1986, 1989, 1993

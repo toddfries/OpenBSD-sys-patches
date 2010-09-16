@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_expr.c,v 1.8 2006/03/13 06:23:20 jsg Exp $	*/
+/*	$OpenBSD: db_expr.c,v 1.7 2001/11/06 19:53:18 miod Exp $	*/
 /*	$NetBSD: db_expr.c,v 1.5 1996/02/05 01:56:58 christos Exp $	*/
 
 /* 

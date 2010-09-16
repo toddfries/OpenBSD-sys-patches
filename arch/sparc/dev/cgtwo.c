@@ -1,4 +1,4 @@
-/*	$OpenBSD: cgtwo.c,v 1.36 2006/12/03 16:40:06 miod Exp $	*/
+/*	$OpenBSD: cgtwo.c,v 1.35 2006/12/03 16:38:13 miod Exp $	*/
 /*	$NetBSD: cgtwo.c,v 1.22 1997/05/24 20:16:12 pk Exp $ */
 
 /*

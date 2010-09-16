@@ -1,4 +1,4 @@
-/*	$OpenBSD: sab82532reg.h,v 1.3 2003/06/02 20:02:49 jason Exp $	*/
+/*	$OpenBSD: sab82532reg.h,v 1.2 2002/04/08 17:49:42 jason Exp $	*/
 
 /*
  * Copyright (c) 2001 Jason L. Wright (jason@thought.net)

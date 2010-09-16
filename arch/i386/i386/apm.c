@@ -351,7 +351,7 @@ apm_resume(struct apm_softc *sc, struct apmregs *regs)
 	/* they say that some machines may require reinitializing the clock */
 	initrtclock();
 
-	inittodr(time.tv_sec);
+	inittodr(time_second);
 	/* lower bit in cx means pccard was powered down */
 	dopowerhooks(PWR_RESUME);
 	apm_record_event(sc, regs->bx);
@@ -464,7 +464,7 @@ apm_handle_event(struct apm_softc *sc, struct apmregs *regs)
 		break;
 	case APM_UPDATE_TIME:
 		DPRINTF(("update time, please\n"));
-		inittodr(time.tv_sec);
+		inittodr(time_second);
 		apm_record_event(sc, regs->bx);
 		break;
 	case APM_CRIT_SUSPEND_REQ:

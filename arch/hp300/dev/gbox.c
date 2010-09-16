@@ -1,4 +1,4 @@
-/*	$OpenBSD: gbox.c,v 1.15 2007/01/07 15:13:52 miod Exp $	*/
+/*	$OpenBSD: gbox.c,v 1.14 2006/08/11 18:33:13 miod Exp $	*/
 
 /*
  * Copyright (c) 2005, Miodrag Vallat

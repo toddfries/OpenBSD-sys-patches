@@ -1,4 +1,4 @@
-/*	$OpenBSD: musycc_obsd.c,v 1.9 2006/01/25 11:02:54 claudio Exp $ */
+/*	$OpenBSD: musycc_obsd.c,v 1.8 2005/08/27 13:32:01 claudio Exp $ */
 
 /*
  * Copyright (c) 2004,2005  Internet Business Solutions AG, Zurich, Switzerland

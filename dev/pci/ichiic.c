@@ -1,4 +1,4 @@
-/*	$OpenBSD: ichiic.c,v 1.17 2006/09/28 18:19:14 grange Exp $	*/
+/*	$OpenBSD: ichiic.c,v 1.16 2006/08/19 19:13:33 brad Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006 Alexander Yurchenko <grange@openbsd.org>

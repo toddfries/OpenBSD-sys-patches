@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.h,v 1.9 2005/12/11 21:45:28 miod Exp $	*/
+/*	$OpenBSD: pmap.h,v 1.8 2005/12/03 19:06:08 miod Exp $	*/
 /*
  * Mach Operating System
  * Copyright (c) 1991 Carnegie Mellon University

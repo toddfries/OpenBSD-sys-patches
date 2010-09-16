@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_magic.s,v 1.2 2003/04/17 03:42:14 drahn Exp $	*/
+/*	$OpenBSD: db_magic.s,v 1.1 1996/05/04 14:33:00 mickey Exp $	*/
 
 /*
  * Mach Operating System

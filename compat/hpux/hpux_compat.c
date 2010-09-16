@@ -1,4 +1,4 @@
-/*	$OpenBSD: hpux_compat.c,v 1.28 2004/07/09 21:33:44 mickey Exp $	*/
+/*	$OpenBSD: hpux_compat.c,v 1.27 2004/06/24 19:35:23 tholo Exp $	*/
 /*	$NetBSD: hpux_compat.c,v 1.35 1997/05/08 16:19:48 mycroft Exp $	*/
 
 /*

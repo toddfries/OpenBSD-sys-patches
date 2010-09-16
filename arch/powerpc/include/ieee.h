@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee.h,v 1.4 2003/06/02 23:27:53 millert Exp $	*/
+/*	$OpenBSD: ieee.h,v 1.3 1997/10/13 10:53:45 pefo Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993

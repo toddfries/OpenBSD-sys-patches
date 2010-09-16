@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap_bootstrap.c,v 1.1.1.1 2006/05/07 15:55:55 miod Exp $	*/
+/*	$OpenBSD: pmap_bootstrap.c,v 1.2 2004/08/01 17:44:17 miod Exp $	*/
 /*
  * Copyright (c) 2001-2004, Miodrag Vallat
  * Copyright (c) 1998-2001 Steve Murphree, Jr.

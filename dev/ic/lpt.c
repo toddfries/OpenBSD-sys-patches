@@ -1,4 +1,4 @@
-/*	$OpenBSD: lpt.c,v 1.5 2002/03/14 01:26:54 millert Exp $ */
+/*	$OpenBSD: lpt.c,v 1.4 2000/07/21 17:41:02 mickey Exp $ */
 /*	$NetBSD: lpt.c,v 1.42 1996/10/21 22:41:14 thorpej Exp $	*/
 
 /*

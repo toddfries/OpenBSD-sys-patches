@@ -1,4 +1,4 @@
-/*	$OpenBSD: pccbbvar.h,v 1.12 2006/10/12 16:35:51 grange Exp $	*/
+/*	$OpenBSD: pccbbvar.h,v 1.11 2006/06/21 11:27:03 fkr Exp $	*/
 /*	$NetBSD: pccbbvar.h,v 1.13 2000/06/08 10:28:29 haya Exp $	*/
 /*
  * Copyright (c) 1999 HAYAKAWA Koichi.  All rights reserved.

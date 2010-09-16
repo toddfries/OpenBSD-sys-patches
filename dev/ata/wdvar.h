@@ -1,4 +1,4 @@
-/*	$OpenBSD: wdvar.h,v 1.11 2004/09/24 07:05:44 grange Exp $	*/
+/*	$OpenBSD: wdvar.h,v 1.10 2003/10/21 09:57:04 jmc Exp $	*/
 /*	$NetBSD: wdvar.h,v 1.3 1998/11/11 19:38:27 bouyer Exp $	*/
 
 /*

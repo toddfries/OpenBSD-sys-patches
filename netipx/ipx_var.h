@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipx_var.h,v 1.6 2003/06/02 23:28:16 millert Exp $	*/
+/*	$OpenBSD: ipx_var.h,v 1.5 2000/01/17 00:34:00 fgsch Exp $	*/
 
 /*-
  *

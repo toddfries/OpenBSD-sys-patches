@@ -1,4 +1,4 @@
-/*	$OpenBSD: lpt_puc.c,v 1.4 2006/07/31 11:06:36 mickey Exp $	*/
+/*	$OpenBSD: lpt_puc.c,v 1.3 2002/03/14 01:27:01 millert Exp $	*/
 /*	$NetBSD: lpt_puc.c,v 1.1 1998/06/26 18:52:41 cgd Exp $	*/
 
 /*

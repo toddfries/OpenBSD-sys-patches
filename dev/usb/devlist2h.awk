@@ -1,5 +1,5 @@
 #! /usr/bin/awk -f
-#	$OpenBSD: devlist2h.awk,v 1.10 2007/02/28 22:51:07 deraadt Exp $
+#	$OpenBSD: devlist2h.awk,v 1.9 2007/02/28 22:30:55 deraadt Exp $
 #	$NetBSD: devlist2h.awk,v 1.9 2001/01/18 20:28:22 jdolecek Exp $
 #
 # Copyright (c) 1995, 1996 Christopher G. Demetriou

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pdqreg.h,v 1.9 2002/06/02 22:50:00 deraadt Exp $	*/
+/*	$OpenBSD: pdqreg.h,v 1.8 2001/04/06 04:42:06 csapuntz Exp $	*/
 /*	$NetBSD: pdqreg.h,v 1.6 1996/08/28 16:01:29 cgd Exp $	*/
 
 /*-

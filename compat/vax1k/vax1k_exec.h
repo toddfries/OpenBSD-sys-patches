@@ -1,4 +1,4 @@
-/*	$OpenBSD: vax1k_exec.h,v 1.2 2002/03/14 01:26:51 millert Exp $	*/
+/*	$OpenBSD: vax1k_exec.h,v 1.1 2001/11/14 14:37:22 hugh Exp $	*/
 /*	$NetBSD: vax1k_exec.h,v 1.1 1998/08/21 13:25:47 ragge Exp $	*/
 
 /*-

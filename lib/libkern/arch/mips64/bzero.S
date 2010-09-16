@@ -1,4 +1,4 @@
-/*	$OpenBSD: bzero.S,v 1.6 2004/10/08 14:42:09 pefo Exp $	*/
+/*	$OpenBSD: bzero.S,v 1.5 2004/09/21 10:42:37 miod Exp $	*/
 /*-
  * Copyright (c) 1991, 1993
  *      The Regents of the University of California.  All rights reserved.

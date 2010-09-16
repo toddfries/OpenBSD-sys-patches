@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.zaurus,v 1.7 2006/07/27 05:58:12 miod Exp $
+#	$OpenBSD: Makefile.zaurus,v 1.6 2006/06/01 21:46:28 pascoe Exp $
 #	$NetBSD: Makefile.i386,v 1.67 1996/05/11 16:12:11 mycroft Exp $
 
 # Makefile for OpenBSD

@@ -1,4 +1,4 @@
-/*	$OpenBSD: est.c,v 1.27 2006/12/22 01:34:46 dim Exp $ */
+/*	$OpenBSD: est.c,v 1.26 2006/12/21 22:31:07 dim Exp $ */
 /*
  * Copyright (c) 2003 Michael Eriksson.
  * All rights reserved.

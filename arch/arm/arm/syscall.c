@@ -1,4 +1,4 @@
-/*	$OpenBSD: syscall.c,v 1.8 2006/12/27 17:49:26 drahn Exp $	*/
+/*	$OpenBSD: syscall.c,v 1.7 2006/12/24 20:30:35 miod Exp $	*/
 /*	$NetBSD: syscall.c,v 1.24 2003/11/14 19:03:17 scw Exp $	*/
 
 /*-

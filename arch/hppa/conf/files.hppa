@@ -1,4 +1,4 @@
-#	$OpenBSD: files.hppa,v 1.61 2007/01/11 22:06:36 miod Exp $
+#	$OpenBSD: files.hppa,v 1.60 2006/09/27 06:33:03 grange Exp $
 #
 # hppa-specific configuration info
 

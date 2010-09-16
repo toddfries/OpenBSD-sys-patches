@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ubt.c,v 1.6 2005/11/24 14:31:40 grange Exp $	*/
+/*	$OpenBSD: if_ubt.c,v 1.5 2005/11/09 05:57:23 brad Exp $	*/
 
 /*
  * ng_ubt.c

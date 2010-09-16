@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus.h,v 1.13 2007/02/07 03:20:37 dlg Exp $	*/
+/*	$OpenBSD: bus.h,v 1.12 2005/06/08 19:08:23 drahn Exp $	*/
 
 /*
  * Copyright (c) 1997 Per Fogelstrom.  All rights reserved.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: presto.c,v 1.6 2006/09/24 20:29:52 krw Exp $	*/
+/*	$OpenBSD: presto.c,v 1.5 2006/08/14 01:04:58 krw Exp $	*/
 /*
  * Copyright (c) 2003, Miodrag Vallat.
  * All rights reserved.

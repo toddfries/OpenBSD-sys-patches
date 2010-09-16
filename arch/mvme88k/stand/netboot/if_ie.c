@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ie.c,v 1.8 2006/05/16 22:52:09 miod Exp $ */
+/*	$OpenBSD: if_ie.c,v 1.7 2003/06/04 16:36:15 deraadt Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt

@@ -1,4 +1,4 @@
-/* 	$OpenBSD: _types.h,v 1.1 2006/01/06 18:50:10 millert Exp $	*/
+/* 	$OpenBSD$	*/
 
 #ifndef _ZAURUS__TYPES_H_
 #define	_ZAURUS__TYPES_H_

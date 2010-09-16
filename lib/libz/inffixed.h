@@ -1,4 +1,4 @@
-/*	$OpenBSD: inffixed.h,v 1.3 2003/12/16 23:57:48 millert Exp $	*/
+/*	$OpenBSD: inffixed.h,v 1.3 2003/12/16 22:33:02 henning Exp $	*/
     /* inffixed.h -- table for decoding fixed codes
      * Generated automatically by makefixed().
      */

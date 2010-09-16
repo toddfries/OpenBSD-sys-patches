@@ -1,4 +1,4 @@
-/*	$OpenBSD: ext2fs_bswap.c,v 1.3 2005/10/06 17:43:14 pedro Exp $	*/
+/*	$OpenBSD: ext2fs_bswap.c,v 1.2 2001/09/18 09:12:36 art Exp $	*/
 /*	$NetBSD: ext2fs_bswap.c,v 1.6 2000/07/24 00:23:10 mycroft Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: termios.c,v 1.2 2005/05/24 20:38:20 uwe Exp $	*/
+/*	$OpenBSD: termios.c,v 1.1 2005/05/12 05:10:30 uwe Exp $	*/
 
 /*-
  * Copyright (c) 1989, 1993

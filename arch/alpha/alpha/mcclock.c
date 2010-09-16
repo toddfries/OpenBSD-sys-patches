@@ -1,4 +1,4 @@
-/*	$OpenBSD: mcclock.c,v 1.5 2002/03/14 01:26:26 millert Exp $	*/
+/*	$OpenBSD: mcclock.c,v 1.4 2001/04/14 22:18:03 mjacob Exp $	*/
 /*	$NetBSD: mcclock.c,v 1.4 1996/10/13 02:59:41 christos Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: gidt.S,v 1.32 2006/12/26 19:30:44 tom Exp $	*/
+/*	$OpenBSD: gidt.S,v 1.31 2005/05/31 23:08:47 jmc Exp $	*/
 
 /*
  * Copyright (c) 1997 Michael Shalayeff

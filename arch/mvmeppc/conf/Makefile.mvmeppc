@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.mvmeppc,v 1.22 2006/07/27 05:58:11 miod Exp $
+#	$OpenBSD: Makefile.mvmeppc,v 1.21 2006/06/01 21:46:27 pascoe Exp $
 #
 # Makefile for OpenBSD PowerPC
 #

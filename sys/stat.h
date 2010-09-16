@@ -1,4 +1,4 @@
-/*	$OpenBSD: stat.h,v 1.16 2005/12/13 00:35:23 millert Exp $	*/
+/*	$OpenBSD: stat.h,v 1.15 2005/06/18 18:09:43 millert Exp $	*/
 /*	$NetBSD: stat.h,v 1.20 1996/05/16 22:17:49 cgd Exp $	*/
 
 /*-

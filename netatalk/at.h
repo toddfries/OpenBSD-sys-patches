@@ -1,4 +1,4 @@
-/*	$OpenBSD: at.h,v 1.3 2003/05/14 02:02:55 itojun Exp $	*/
+/*	$OpenBSD: at.h,v 1.2 1997/09/06 14:49:02 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1990,1991 Regents of The University of Michigan.

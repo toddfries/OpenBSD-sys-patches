@@ -242,4 +242,7 @@ void			acpi_poll_notify(void);
 
 void			aml_hashopcodes(void);
 
+void	aml_foreachpkg(struct aml_value *, int,
+	    void (*fn)(struct aml_value *, void *), void *);
+
 #endif /* __DEV_ACPI_DSDT_H__ */

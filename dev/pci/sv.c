@@ -1,4 +1,4 @@
-/*      $OpenBSD: sv.c,v 1.21 2005/09/11 18:17:08 mickey Exp $ */
+/*      $OpenBSD: sv.c,v 1.20 2005/08/09 04:10:13 mickey Exp $ */
 
 /*
  * Copyright (c) 1998 Constantine Paul Sapuntzakis

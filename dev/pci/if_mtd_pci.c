@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_mtd_pci.c,v 1.10 2005/08/09 04:10:12 mickey Exp $	*/
+/*	$OpenBSD: if_mtd_pci.c,v 1.9 2003/09/29 10:05:07 miod Exp $	*/
 
 /*
  * Copyright (c) 2003 Oleg Safiullin <form@pdp11.org.ru>

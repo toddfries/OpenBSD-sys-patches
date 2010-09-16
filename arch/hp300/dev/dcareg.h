@@ -1,4 +1,4 @@
-/*	$OpenBSD: dcareg.h,v 1.7 2005/12/28 21:13:40 miod Exp $	*/
+/*	$OpenBSD: dcareg.h,v 1.6 2003/06/02 23:27:44 millert Exp $	*/
 /*	$NetBSD: dcareg.h,v 1.6 1996/02/24 00:55:02 thorpej Exp $	*/
 
 /*

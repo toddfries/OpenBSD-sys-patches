@@ -1,4 +1,4 @@
-/*	$OpenBSD: mgx.c,v 1.12 2007/02/18 18:38:54 miod Exp $	*/
+/*	$OpenBSD: mgx.c,v 1.11 2006/06/02 20:00:54 miod Exp $	*/
 /*
  * Copyright (c) 2003, Miodrag Vallat.
  * All rights reserved.

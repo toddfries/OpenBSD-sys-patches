@@ -1,4 +1,4 @@
-/*	$OpenBSD: luphy.c,v 1.3 2005/04/15 00:44:39 brad Exp $	*/
+/*	$OpenBSD: luphy.c,v 1.2 2005/04/15 00:05:52 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 2004 Marius Strobl

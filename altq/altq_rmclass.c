@@ -1,4 +1,4 @@
-/*	$OpenBSD: altq_rmclass.c,v 1.12 2006/03/04 22:40:15 brad Exp $	*/
+/*	$OpenBSD: altq_rmclass.c,v 1.11 2003/10/17 19:13:01 henning Exp $	*/
 /*	$KAME: altq_rmclass.c,v 1.10 2001/02/09 07:20:40 kjc Exp $	*/
 
 /*

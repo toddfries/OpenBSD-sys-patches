@@ -1,4 +1,4 @@
-/*	$OpenBSD: strncasecmp.c,v 1.4 2004/08/07 00:38:33 deraadt Exp $	*/
+/*	$OpenBSD: strncasecmp.c,v 1.3 1998/06/27 01:21:09 mickey Exp $	*/
 
 /*
  * Copyright (c) 1994 Christian E. Hopps

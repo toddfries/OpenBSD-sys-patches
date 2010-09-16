@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmevar.h,v 1.2 2006/05/21 12:22:02 miod Exp $	*/
+/*	$OpenBSD: vmevar.h,v 1.1.1.1 2006/05/09 18:17:37 miod Exp $	*/
 /*
  * Copyright (c) 2006, Miodrag Vallat
  *

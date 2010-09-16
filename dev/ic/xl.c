@@ -1,4 +1,4 @@
-/*	$OpenBSD: xl.c,v 1.76 2006/08/10 20:10:18 brad Exp $	*/
+/*	$OpenBSD: xl.c,v 1.75 2006/08/10 18:40:54 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999

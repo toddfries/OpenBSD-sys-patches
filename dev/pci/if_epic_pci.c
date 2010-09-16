@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_epic_pci.c,v 1.5 2006/04/20 20:31:12 miod Exp $	*/
+/*	$OpenBSD: if_epic_pci.c,v 1.4 2005/12/15 23:17:23 krw Exp $	*/
 /*	$NetBSD: if_epic_pci.c,v 1.28 2005/02/27 00:27:32 perry Exp $	*/
 
 /*-

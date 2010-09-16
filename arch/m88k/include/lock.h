@@ -1,6 +1,6 @@
 #ifndef	_M88K_LOCK_H_
 #define	_M88K_LOCK_H_
-/*	$OpenBSD: lock.h,v 1.2 2006/11/18 22:47:13 miod Exp $	*/
+/*	$OpenBSD: lock.h,v 1.1 2005/12/03 19:04:06 miod Exp $	*/
 
 /*
  * Copyright (c) 2005, Miodrag Vallat.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: nviic.c,v 1.9 2006/12/11 18:16:37 deraadt Exp $ */
+/*	$OpenBSD: nviic.c,v 1.8 2006/11/06 04:00:15 brad Exp $ */
 
 /*
  * Copyright (c) 2005 David Gwynne <dlg@openbsd.org>

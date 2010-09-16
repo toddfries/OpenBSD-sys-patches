@@ -950,7 +950,7 @@ struct ncr_softc *sc;
 	 * loosing it means we lost the target...
 	 * Also REQ needs to be asserted here to indicate that the bus-phase
 	 * is valid. When the target does not supply REQ within a 'reasonable'
-	 * amount of time, it's probably lost in it's own maze of twisting
+	 * amount of time, it's probably lost in its own maze of twisting
 	 * passages, we have to reset the bus to free it.
 	 */
 	if (GET_5380_REG(NCR5380_IDSTAT) & SC_S_BSY)

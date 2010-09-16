@@ -1,4 +1,4 @@
-/*	$OpenBSD: clockvar.h,v 1.2 2006/04/27 20:21:19 miod Exp $ */
+/*	$OpenBSD: clockvar.h,v 1.1 2006/04/19 22:09:40 miod Exp $ */
 /*
  * Copyright (c) 1999 Steve Murphree, Jr.
  * Copyright (c) 1995 Theo de Raadt

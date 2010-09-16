@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_uathvar.h,v 1.4 2006/12/03 16:09:21 damien Exp $	*/
+/*	$OpenBSD: if_uathvar.h,v 1.3 2006/09/20 19:47:17 damien Exp $	*/
 
 /*-
  * Copyright (c) 2006

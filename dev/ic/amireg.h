@@ -1,4 +1,4 @@
-/*	$OpenBSD: amireg.h,v 1.27 2006/06/09 04:27:10 marco Exp $	*/
+/*	$OpenBSD: amireg.h,v 1.26 2006/04/26 07:53:22 dlg Exp $	*/
 
 /*
  * Copyright (c) 2000 Michael Shalayeff

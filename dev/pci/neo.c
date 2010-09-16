@@ -1,4 +1,4 @@
-/*      $OpenBSD: neo.c,v 1.19 2005/08/09 04:10:13 mickey Exp $       */
+/*      $OpenBSD: neo.c,v 1.18 2004/12/12 06:50:20 deraadt Exp $       */
 
 /*
  * Copyright (c) 1999 Cameron Grant <gandalf@vilnya.demon.co.uk>

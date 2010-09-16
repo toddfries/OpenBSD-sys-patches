@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpuprobe.c,v 1.1 2004/06/26 05:19:37 tom Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * Copyright (c) 2004 Tom Cosgrove <tom.cosgrove@arches-consulting.com>

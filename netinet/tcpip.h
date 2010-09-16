@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcpip.h,v 1.6 2003/06/02 23:28:15 millert Exp $	*/
+/*	$OpenBSD: tcpip.h,v 1.5 2001/06/09 07:03:45 angelos Exp $	*/
 /*	$NetBSD: tcpip.h,v 1.6 1995/11/21 01:07:44 cgd Exp $	*/
 
 /*

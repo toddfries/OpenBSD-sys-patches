@@ -1,4 +1,4 @@
-/*	$OpenBSD: hil_machdep.h,v 1.2 2003/06/02 23:27:46 millert Exp $	*/
+/*	$OpenBSD: hil_machdep.h,v 1.1 2003/02/11 19:43:33 miod Exp $	*/
 
 /*
  * Copyright (c) 1988 University of Utah.

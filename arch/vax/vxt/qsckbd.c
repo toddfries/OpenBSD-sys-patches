@@ -1,4 +1,4 @@
-/*	$OpenBSD: qsckbd.c,v 1.1 2006/08/27 16:55:41 miod Exp $	*/
+/*	$OpenBSD$	*/
 /*	from OpenBSD: dzkbd.c,v 1.11 2006/08/05 22:05:55 miod Exp */
 /*
  * Copyright (c) 2006 Miodrag Vallat.

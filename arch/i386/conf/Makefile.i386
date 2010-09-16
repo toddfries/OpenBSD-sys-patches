@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.i386,v 1.45 2006/11/29 22:40:11 miod Exp $
+#	$OpenBSD: Makefile.i386,v 1.44 2006/07/27 05:58:11 miod Exp $
 
 # Makefile for OpenBSD
 #

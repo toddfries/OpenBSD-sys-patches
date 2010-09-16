@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_file64.c,v 1.6 2003/08/03 18:08:03 deraadt Exp $	*/
+/*	$OpenBSD: linux_file64.c,v 1.5 2003/08/02 18:37:06 deraadt Exp $	*/
 /*	$NetBSD: linux_file64.c,v 1.2 2000/12/12 22:24:56 jdolecek Exp $	*/
 
 /*-

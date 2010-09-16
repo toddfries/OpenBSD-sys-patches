@@ -1,4 +1,4 @@
-/* $OpenBSD: acpibtn.c,v 1.15 2006/12/26 23:58:08 marco Exp $ */
+/* $OpenBSD: acpibtn.c,v 1.14 2006/12/21 11:23:41 deraadt Exp $ */
 /*
  * Copyright (c) 2005 Marco Peereboom <marco@openbsd.org>
  *

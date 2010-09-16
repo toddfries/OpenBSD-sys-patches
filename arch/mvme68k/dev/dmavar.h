@@ -1,4 +1,4 @@
-/*	$OpenBSD: dmavar.h,v 1.4 2003/06/02 23:27:50 millert Exp $ */
+/*	$OpenBSD: dmavar.h,v 1.3 1996/04/28 11:24:43 deraadt Exp $ */
 
 /*
  * Copyright (c) 1982, 1990 The Regents of the University of California.

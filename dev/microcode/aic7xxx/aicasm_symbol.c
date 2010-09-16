@@ -1,4 +1,4 @@
-/* $OpenBSD: aicasm_symbol.c,v 1.9 2003/12/24 23:27:55 krw Exp $ */
+/* $OpenBSD: aicasm_symbol.c,v 1.8 2003/10/20 17:22:13 deraadt Exp $ */
 /*	$NetBSD: aicasm_symbol.c,v 1.4 2003/07/14 15:42:40 lukem Exp $	*/
 
 /*

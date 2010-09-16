@@ -1,4 +1,4 @@
-/*	$OpenBSD: pxe_net.c,v 1.1 2004/03/21 21:37:41 tom Exp $	*/
+/*	$OpenBSD: pxe_net.c,v 1.1 2004/03/19 13:48:18 tom Exp $	*/
 /*	$NetBSD: dev_net.c,v 1.4 2003/03/12 13:15:08 drochner Exp $	*/
 
 /*-

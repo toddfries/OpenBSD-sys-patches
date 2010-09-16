@@ -1,4 +1,4 @@
-/*	$OpenBSD: svr4_acl.h,v 1.1 1997/02/13 19:45:16 niklas Exp $	*/
+/*	$OpenBSD: svr4_acl.h,v 1.1 1996/12/06 03:23:30 christos Exp $	*/
 /*	$NetBSD: svr4_acl.h,v 1.1 1996/12/06 03:23:30 christos Exp $	*/
 
 /*

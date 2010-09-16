@@ -1,5 +1,5 @@
 #	from: @(#)Makefile	8.1 (Berkeley) 6/10/93
-#	$OpenBSD: Makefile,v 1.13 2006/05/16 22:52:24 miod Exp $
+#	$OpenBSD: Makefile,v 1.12 2006/01/10 07:20:09 deraadt Exp $
 
 S=	${.CURDIR}/../../../..
 DEFS=

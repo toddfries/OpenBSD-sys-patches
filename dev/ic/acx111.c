@@ -1,4 +1,4 @@
-/*	$OpenBSD: acx111.c,v 1.15 2007/02/28 09:26:26 claudio Exp $ */
+/*	$OpenBSD: acx111.c,v 1.14 2006/12/08 00:04:10 mglocker Exp $ */
 
 /*
  * Copyright (c) 2006 Jonathan Gray <jsg@openbsd.org>

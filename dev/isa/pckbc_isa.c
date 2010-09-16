@@ -1,4 +1,4 @@
-/*	$OpenBSD: pckbc_isa.c,v 1.4 2004/04/02 04:39:51 deraadt Exp $	*/
+/*	$OpenBSD: pckbc_isa.c,v 1.3 2002/03/14 01:26:56 millert Exp $	*/
 /*	$NetBSD: pckbc_isa.c,v 1.2 2000/03/23 07:01:35 thorpej Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: hildevs_data.h,v 1.4 2006/08/10 23:48:06 miod Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.

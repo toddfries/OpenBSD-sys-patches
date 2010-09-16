@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wpireg.h,v 1.12 2006/11/13 20:06:38 damien Exp $	*/
+/*	$OpenBSD: if_wpireg.h,v 1.11 2006/08/28 19:47:43 damien Exp $	*/
 
 /*-
  * Copyright (c) 2006

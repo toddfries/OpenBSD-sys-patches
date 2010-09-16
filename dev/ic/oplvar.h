@@ -1,4 +1,4 @@
-/*	$OpenBSD: oplvar.h,v 1.4 2006/07/27 05:55:00 miod Exp $	*/
+/*	$OpenBSD: oplvar.h,v 1.3 2002/03/14 01:26:55 millert Exp $	*/
 /*	$NetBSD: oplvar.h,v 1.3 1998/11/25 22:17:06 augustss Exp $	*/
 
 /*

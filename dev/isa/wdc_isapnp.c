@@ -1,4 +1,4 @@
-/*	$OpenBSD: wdc_isapnp.c,v 1.7 2002/03/14 01:26:56 millert Exp $	*/
+/*	$OpenBSD: wdc_isapnp.c,v 1.6 2001/07/08 06:41:37 fgsch Exp $	*/
 /*	$NetBSD: wdc_isapnp.c,v 1.13 1999/03/22 10:00:12 mycroft Exp $	*/
 
 /*-

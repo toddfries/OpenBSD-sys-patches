@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vge.c,v 1.32 2006/12/04 14:35:20 reyk Exp $	*/
+/*	$OpenBSD: if_vge.c,v 1.31 2006/11/23 02:00:54 brad Exp $	*/
 /*	$FreeBSD: if_vge.c,v 1.3 2004/09/11 22:13:25 wpaul Exp $	*/
 /*
  * Copyright (c) 2004

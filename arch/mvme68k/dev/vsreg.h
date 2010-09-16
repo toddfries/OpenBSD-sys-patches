@@ -1,4 +1,4 @@
-/*	$OpenBSD: vsreg.h,v 1.7 2006/12/21 02:28:47 krw Exp $ */
+/*	$OpenBSD: vsreg.h,v 1.6 2005/12/17 07:31:26 miod Exp $ */
 /*
  * Copyright (c) 1999 Steve Murphree, Jr.
  * Copyright (c) 1990 The Regents of the University of California.

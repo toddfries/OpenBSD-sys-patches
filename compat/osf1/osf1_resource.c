@@ -1,4 +1,4 @@
-/* $OpenBSD: osf1_resource.c,v 1.1 2000/08/04 15:47:55 ericj Exp $ */
+/* $OpenBSD$ */
 /* $NetBSD: osf1_resource.c,v 1.1 1999/05/01 05:41:56 cgd Exp $ */
 
 /*

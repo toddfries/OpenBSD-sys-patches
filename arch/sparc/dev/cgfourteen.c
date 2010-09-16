@@ -357,6 +357,12 @@ cgfourteen_ioctl(void *dev, u_long cmd, caddr_t data, int flags, struct proc *p)
 		wdf->depth = sc->sc_32 ? 32 : 8;
 		wdf->cmsize = sc->sc_32 ? 0 : 256;
 		break;
+	case WSDISPLAYIO_GETSUPPORTEDDEPTH:
+		if (sc->sc_32)
+			*(u_int *)data = WSDISPLAYIO_DEPTH_24_32;
+		else
+			return (-1);
+		break;
 	case WSDISPLAYIO_LINEBYTES:
 		if (sc->sc_32)
 			*(u_int *)data = sc->sc_sunfb.sf_linebytes * 4;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntfsmount.h,v 1.3 2006/05/29 20:40:58 miod Exp $	*/
+/*	$OpenBSD: ntfsmount.h,v 1.2 2003/05/20 03:23:12 mickey Exp $	*/
 /*	$NetBSD: ntfsmount.h,v 1.1 2002/12/23 17:38:34 jdolecek Exp $	*/
 
 /*-

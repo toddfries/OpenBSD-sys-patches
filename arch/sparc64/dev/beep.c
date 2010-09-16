@@ -1,4 +1,4 @@
-/*	$OpenBSD: beep.c,v 1.3 2006/05/29 03:26:54 jason Exp $	*/
+/*	$OpenBSD: beep.c,v 1.2 2006/05/29 00:17:25 jason Exp $	*/
 
 /*
  * Copyright (c) 2006 Jason L. Wright (jason@thought.net)

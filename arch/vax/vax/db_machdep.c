@@ -199,7 +199,7 @@ db_write_bytes(addr, size, data)
 void
 Debugger()
 {
-	splsave = splx(0xe);
+	splsave = _splset(0xe);
 	mtpr(0xf, PR_SIRR); /* beg for debugger */
 	splx(splsave);
 }

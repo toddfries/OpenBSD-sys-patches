@@ -334,5 +334,5 @@ hilms_callback(struct hildev_softc *dev, u_int buflen, u_int8_t *buf)
 	
 	if (sc->sc_wsmousedev != NULL)
 		wsmouse_input(sc->sc_wsmousedev,
-		    sc->sc_buttonstate, dx, dy, dz, flags);
+		    sc->sc_buttonstate, dx, dy, dz, 0, flags);
 }

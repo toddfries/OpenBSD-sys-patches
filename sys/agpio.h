@@ -1,4 +1,4 @@
-/*	$OpenBSD: agpio.h,v 1.1 2002/07/12 20:17:03 mickey Exp $	*/
+/*	$OpenBSD$	*/
 
 /*-
  * Copyright (c) 2000 Doug Rabson

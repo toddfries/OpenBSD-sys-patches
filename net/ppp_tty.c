@@ -1,4 +1,4 @@
-/*	$OpenBSD: ppp_tty.c,v 1.20 2003/12/10 07:22:42 itojun Exp $	*/
+/*	$OpenBSD: ppp_tty.c,v 1.19 2003/09/23 16:51:13 millert Exp $	*/
 /*	$NetBSD: ppp_tty.c,v 1.12 1997/03/24 21:23:10 christos Exp $	*/
 
 /*

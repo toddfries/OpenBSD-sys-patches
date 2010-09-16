@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.7 2002/04/29 01:02:28 hugh Exp $
+#	$OpenBSD: Makefile.inc,v 1.6 1997/06/19 18:23:24 grr Exp $
 #	$NetBSD: Makefile.inc,v 1.2 1997/01/23 22:29:09 cgd Exp $
 #
 #	Configuration variables (default values are below):

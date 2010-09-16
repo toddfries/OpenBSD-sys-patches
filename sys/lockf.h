@@ -1,4 +1,4 @@
-/*	$OpenBSD: lockf.h,v 1.7 2005/03/10 17:26:10 tedu Exp $	*/
+/*	$OpenBSD: lockf.h,v 1.6 2004/01/14 19:34:05 grange Exp $	*/
 /*	$NetBSD: lockf.h,v 1.5 1994/06/29 06:44:33 cgd Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rf_mcpair.h,v 1.4 2002/12/16 07:01:04 tdeval Exp $	*/
+/*	$OpenBSD: rf_mcpair.h,v 1.3 1999/07/30 14:45:32 peter Exp $	*/
 /*	$NetBSD: rf_mcpair.h,v 1.4 1999/03/14 21:53:31 oster Exp $	*/
 
 /*

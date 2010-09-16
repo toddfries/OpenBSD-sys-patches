@@ -1,4 +1,4 @@
-/*	$OpenBSD: aarp.c,v 1.7 2006/04/25 05:52:43 tedu Exp $	*/
+/*	$OpenBSD: aarp.c,v 1.6 2006/03/04 22:40:16 brad Exp $	*/
 
 /*
  * Copyright (c) 1990,1991 Regents of The University of Michigan.

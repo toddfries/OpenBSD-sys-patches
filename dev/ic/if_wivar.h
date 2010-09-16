@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wivar.h,v 1.28 2006/06/27 09:48:02 reyk Exp $	*/
+/*	$OpenBSD: if_wivar.h,v 1.27 2005/10/31 05:37:13 jsg Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999

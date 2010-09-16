@@ -1,4 +1,4 @@
-/*	$OpenBSD: freebsd_file.c,v 1.25 2006/06/25 15:01:53 sturm Exp $	*/
+/*	$OpenBSD: freebsd_file.c,v 1.24 2006/06/14 20:01:50 sturm Exp $	*/
 /*	$NetBSD: freebsd_file.c,v 1.3 1996/05/03 17:03:09 christos Exp $	*/
 
 /*

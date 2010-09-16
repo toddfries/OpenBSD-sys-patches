@@ -1,4 +1,4 @@
-/*	$OpenBSD: piixpm.c,v 1.25 2006/12/11 18:16:37 deraadt Exp $	*/
+/*	$OpenBSD: piixpm.c,v 1.24 2006/09/28 18:19:14 grange Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006 Alexander Yurchenko <grange@openbsd.org>

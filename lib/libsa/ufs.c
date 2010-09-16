@@ -145,6 +145,7 @@ read_inode(ino_t inumber, struct open_file *f)
 		for (level = 0; level < NIADDR; level++)
 			fp->f_blkno[level] = -1;
 		fp->f_buf_blkno = -1;
+		fp->f_seekp = 0;
 	}
 out:
 	free(buf, fs->fs_bsize);

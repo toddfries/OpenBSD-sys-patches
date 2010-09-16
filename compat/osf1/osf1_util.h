@@ -1,4 +1,4 @@
-/* 	$OpenBSD: osf1_util.h,v 1.3 2000/08/04 15:47:55 ericj Exp $	*/
+/* 	$OpenBSD$	*/
 /*	$NetBSD: osf1_util.h,v 1.4 1999/04/23 05:55:13 cgd Exp $	*/
 
 #ifndef _COMPAT_OSF1_OSF1_UTIL_H_

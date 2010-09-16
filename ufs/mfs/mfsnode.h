@@ -1,4 +1,4 @@
-/*	$OpenBSD: mfsnode.h,v 1.11 2003/09/23 16:51:13 millert Exp $	*/
+/*	$OpenBSD: mfsnode.h,v 1.10 2003/06/02 23:28:23 millert Exp $	*/
 /*	$NetBSD: mfsnode.h,v 1.3 1996/02/09 22:31:31 christos Exp $	*/
 
 /*

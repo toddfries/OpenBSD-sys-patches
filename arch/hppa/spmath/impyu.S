@@ -1,4 +1,4 @@
-/*	$OpenBSD: impyu.S,v 1.11 2005/01/23 18:01:30 mickey Exp $	*/
+/*	$OpenBSD: impyu.S,v 1.10 2003/04/10 17:27:58 mickey Exp $	*/
 /*
   (c) Copyright 1986 HEWLETT-PACKARD COMPANY
   To anyone who acknowledges that this file is provided "AS IS"

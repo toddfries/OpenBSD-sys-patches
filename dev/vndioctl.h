@@ -1,4 +1,4 @@
-/*	$OpenBSD: vndioctl.h,v 1.6 2004/06/20 18:03:03 pedro Exp $	*/
+/*	$OpenBSD: vndioctl.h,v 1.5 2003/06/02 23:28:01 millert Exp $	*/
 /*	$NetBSD: vndioctl.h,v 1.5 1995/01/25 04:46:30 cgd Exp $	*/
 
 /*

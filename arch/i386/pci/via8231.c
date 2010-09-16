@@ -1,4 +1,4 @@
-/*	$OpenBSD: via8231.c,v 1.7 2006/09/19 11:06:34 jsg Exp $	*/
+/*	$OpenBSD: via8231.c,v 1.6 2005/10/27 16:41:06 mickey Exp $	*/
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.

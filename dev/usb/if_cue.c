@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_cue.c,v 1.32 2007/02/11 20:29:22 miod Exp $ */
+/*	$OpenBSD: if_cue.c,v 1.31 2006/06/23 06:27:11 miod Exp $ */
 /*	$NetBSD: if_cue.c,v 1.40 2002/07/11 21:14:26 augustss Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999, 2000

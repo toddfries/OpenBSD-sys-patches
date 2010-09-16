@@ -1,4 +1,4 @@
-/*	$OpenBSD: xdr_subs.h,v 1.8 2003/06/02 23:28:20 millert Exp $	*/
+/*	$OpenBSD: xdr_subs.h,v 1.7 1999/02/06 23:07:47 millert Exp $	*/
 /*	$NetBSD: xdr_subs.h,v 1.11 1996/02/18 11:54:12 fvdl Exp $	*/
 
 /*

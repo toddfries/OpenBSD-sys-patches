@@ -41,7 +41,7 @@
  */
 
 /*
- * The goo that binds the floppy controller to it's devices.
+ * The goo that binds the floppy controller to its devices.
  */
 
 enum fdc_state {

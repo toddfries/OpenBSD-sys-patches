@@ -1,4 +1,4 @@
-/*	$OpenBSD: boot.c,v 1.16 2006/08/30 20:02:13 miod Exp $ */
+/*	$OpenBSD: boot.c,v 1.15 2006/08/24 20:29:38 miod Exp $ */
 /*	$NetBSD: boot.c,v 1.18 2002/05/31 15:58:26 ragge Exp $ */
 /*-
  * Copyright (c) 1982, 1986 The Regents of the University of California.

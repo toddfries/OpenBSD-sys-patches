@@ -1,4 +1,4 @@
-/*	$OpenBSD: an.c,v 1.53 2007/01/03 18:16:43 claudio Exp $	*/
+/*	$OpenBSD: an.c,v 1.52 2006/06/25 18:50:51 mickey Exp $	*/
 /*	$NetBSD: an.c,v 1.34 2005/06/20 02:49:18 atatat Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999

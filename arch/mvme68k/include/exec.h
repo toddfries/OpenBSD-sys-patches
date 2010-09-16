@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec.h,v 1.8 2003/10/09 21:48:48 miod Exp $ */
+/*	$OpenBSD: exec.h,v 1.7 2001/01/22 14:51:04 art Exp $ */
 
 /*
  * Copyright (c) 1993 Christopher G. Demetriou

@@ -1,4 +1,4 @@
-/*	$OpenBSD: memcmp.S,v 1.1 2000/06/16 19:56:54 millert Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * Written by J.T. Conklin <jtc@netbsd.org>.

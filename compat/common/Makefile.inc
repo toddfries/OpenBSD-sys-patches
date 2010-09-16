@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.7 2002/07/14 09:20:24 mdw Exp $
+#	$OpenBSD: Makefile.inc,v 1.6 1997/05/30 09:40:57 niklas Exp $
 #	$NetBSD: Makefile.inc,v 1.5 1996/05/20 17:23:59 mrg Exp $
 #
 #	NOTE: $S must correspond to the top of the 'sys' tree

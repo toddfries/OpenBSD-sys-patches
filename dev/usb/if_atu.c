@@ -499,7 +499,7 @@ atu_start_ibss(struct atu_softc *sc)
 		return err;
 	}
 
-	/* Wait for the adapter to do it's thing */
+	/* Wait for the adapter to do its thing */
 	err = atu_wait_completion(sc, CMD_START_IBSS, NULL);
 	if (err) {
 		DPRINTF(("%s: error waiting for start_ibss\n",
@@ -1032,7 +1032,7 @@ atu_external_firmware(void *arg)
 	}
 
 	/*
-	 * The SMC2662w V.4 seems to require some time to do it's thing with
+	 * The SMC2662w V.4 seems to require some time to do its thing with
 	 * the external firmware... 20 ms isn't enough, but 21 ms works 100
 	 * times out of 100 tries. We'll wait a bit longer just to be sure
 	 */

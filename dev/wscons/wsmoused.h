@@ -1,4 +1,4 @@
-/* $OpenBSD: wsmoused.h,v 1.7 2006/12/02 18:16:14 miod Exp $ */
+/* $OpenBSD: wsmoused.h,v 1.6 2006/11/29 19:11:17 miod Exp $ */
 
 /*
  * Copyright (c) 2001 Jean-Baptiste Marchand, Julien Montagne and Jerome Verdon

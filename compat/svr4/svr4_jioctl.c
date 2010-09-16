@@ -1,4 +1,4 @@
-/*	$OpenBSD: svr4_jioctl.c,v 1.2 2002/03/14 01:26:51 millert Exp $	 */
+/*	$OpenBSD: svr4_jioctl.c,v 1.1 1997/11/04 07:45:33 niklas Exp $	 */
 
 /*
  * Copyright (c) 1997 Niklas Hallqvist

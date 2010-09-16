@@ -1,4 +1,4 @@
-/*	$OpenBSD: svr4_sockio.c,v 1.10 2006/03/05 21:48:56 miod Exp $	 */
+/*	$OpenBSD: svr4_sockio.c,v 1.9 2004/06/22 23:52:18 jfb Exp $	 */
 /*	$NetBSD: svr4_sockio.c,v 1.10 1996/05/03 17:09:15 christos Exp $	 */
 
 /*

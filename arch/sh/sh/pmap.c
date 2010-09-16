@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.6 2007/03/05 21:48:23 miod Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.5 2007/03/05 21:47:55 miod Exp $	*/
 /*	$NetBSD: pmap.c,v 1.55 2006/08/07 23:19:36 tsutsui Exp $	*/
 
 /*-

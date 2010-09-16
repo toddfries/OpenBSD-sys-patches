@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpufunc.c,v 1.7 2006/06/15 21:35:30 drahn Exp $	*/
+/*	$OpenBSD: cpufunc.c,v 1.6 2006/05/29 17:01:42 drahn Exp $	*/
 /*	$NetBSD: cpufunc.c,v 1.65 2003/11/05 12:53:15 scw Exp $	*/
 
 /*

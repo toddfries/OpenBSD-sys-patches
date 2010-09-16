@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec_elf.h,v 1.42 2006/10/06 20:58:17 miod Exp $	*/
+/*	$OpenBSD: exec_elf.h,v 1.41 2006/01/06 18:53:05 millert Exp $	*/
 /*
  * Copyright (c) 1995, 1996 Erik Theisen.  All rights reserved.
  *

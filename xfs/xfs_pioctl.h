@@ -1,4 +1,4 @@
-/*	$OpenBSD: xfs_pioctl.h,v 1.5 2003/09/08 05:46:08 beck Exp $	*/
+/*	$OpenBSD: xfs_pioctl.h,v 1.4 2000/09/11 14:26:53 art Exp $	*/
 /*
  * Copyright (c) 1995 - 2000 Kungliga Tekniska Högskolan
  * (Royal Institute of Technology, Stockholm, Sweden).

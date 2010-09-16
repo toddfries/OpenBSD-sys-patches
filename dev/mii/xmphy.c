@@ -1,4 +1,4 @@
-/*	$OpenBSD: xmphy.c,v 1.17 2006/12/31 15:04:33 krw Exp $	*/
+/*	$OpenBSD: xmphy.c,v 1.16 2006/10/07 23:44:51 brad Exp $	*/
 
 /*
  * Copyright (c) 2000

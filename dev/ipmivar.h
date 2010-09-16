@@ -104,7 +104,7 @@ struct ipmi_softc {
 	struct ipmi_bmc_args	*sc_iowait_args;
 
 	struct ipmi_sensor	*current_sensor;
-	struct sensordev	sc_sensordev;
+	struct ksensordev	sc_sensordev;
 };
 
 struct ipmi_thread {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: macectrl.S,v 1.5 2004/09/27 18:52:01 pefo Exp $ */
+/*	$OpenBSD: macectrl.S,v 1.4 2004/09/10 08:58:27 pefo Exp $ */
 
 /*
  * Copyright (c) 2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)

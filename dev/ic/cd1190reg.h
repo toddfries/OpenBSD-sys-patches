@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd1190reg.h,v 1.3 2003/10/21 18:58:49 jmc Exp $	*/
+/*	$OpenBSD: cd1190reg.h,v 1.2 2001/07/04 09:03:00 niklas Exp $	*/
 
 /*
  * Copyright (c) 1998 Iain Hibbert.

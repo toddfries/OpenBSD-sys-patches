@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_machdep.h,v 1.8 2005/04/19 15:23:37 miod Exp $ */
+/*	$OpenBSD: db_machdep.h,v 1.7 2005/01/31 21:35:49 grange Exp $ */
 
 /*
  * Copyright (c) 1998-2003 Opsycon AB (www.opsycon.se)

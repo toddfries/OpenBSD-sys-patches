@@ -1,4 +1,4 @@
-#	$OpenBSD: MVME167,v 1.24 2006/06/24 14:07:06 miod Exp $
+#	$OpenBSD: MVME167,v 1.23 2006/04/21 22:21:53 miod Exp $
 
 machine		mvme68k m68k
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: tlbhandler.S,v 1.13 2006/03/04 19:33:21 miod Exp $ */
+/*	$OpenBSD: tlbhandler.S,v 1.12 2005/12/20 07:06:26 miod Exp $ */
 
 /*
  * Copyright (c) 1995-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)

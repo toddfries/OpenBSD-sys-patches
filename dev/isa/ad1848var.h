@@ -1,4 +1,4 @@
-/*	$OpenBSD: ad1848var.h,v 1.12 2002/03/14 03:16:05 millert Exp $	*/
+/*	$OpenBSD: ad1848var.h,v 1.11 2002/03/14 01:26:56 millert Exp $	*/
 /*	$NetBSD: ad1848var.h,v 1.22 1998/01/19 22:18:26 augustss Exp $	*/
 
 /*

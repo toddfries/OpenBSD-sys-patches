@@ -1,4 +1,4 @@
-/*	$OpenBSD: emuxkireg.h,v 1.5 2006/02/06 22:12:39 jmc Exp $	*/
+/*	$OpenBSD: emuxkireg.h,v 1.4 2005/11/30 22:17:47 brad Exp $	*/
 /*	$NetBSD: emuxkireg.h,v 1.1 2001/10/17 18:39:41 jdolecek Exp $	*/
 
 /*-

@@ -1,4 +1,4 @@
-/*	$OpenBSD: hifn7751.c,v 1.152 2006/06/29 21:34:51 deraadt Exp $	*/
+/*	$OpenBSD: hifn7751.c,v 1.151 2006/01/04 00:02:29 brad Exp $	*/
 
 /*
  * Invertex AEON / Hifn 7751 driver

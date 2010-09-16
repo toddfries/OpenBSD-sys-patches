@@ -1,4 +1,4 @@
-/* $OpenBSD: tc_conf.h,v 1.8 2004/06/28 02:28:43 aaron Exp $ */
+/* $OpenBSD: tc_conf.h,v 1.7 2002/05/02 22:56:06 miod Exp $ */
 /* $NetBSD: tc_conf.h,v 1.10 2000/06/04 19:14:29 cgd Exp $ */
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_re_cardbus.c,v 1.11 2006/11/28 20:04:02 brad Exp $	*/
+/*	$OpenBSD: if_re_cardbus.c,v 1.10 2006/10/12 16:35:52 grange Exp $	*/
 
 /*
  * Copyright (c) 2005 Peter Valchev <pvalchev@openbsd.org>

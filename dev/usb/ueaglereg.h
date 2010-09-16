@@ -1,4 +1,4 @@
-/*	$OpenBSD: ueaglereg.h,v 1.2 2005/04/19 08:21:47 damien Exp $	*/
+/*	$OpenBSD$	*/
 
 /*-
  * Copyright (c) 2003-2005

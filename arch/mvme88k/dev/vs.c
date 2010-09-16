@@ -1,4 +1,4 @@
-/*	$OpenBSD: vs.c,v 1.64 2006/12/01 19:36:09 miod Exp $	*/
+/*	$OpenBSD: vs.c,v 1.63 2006/11/28 23:59:45 dlg Exp $	*/
 
 /*
  * Copyright (c) 2004, Miodrag Vallat.

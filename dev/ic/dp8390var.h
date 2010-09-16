@@ -1,4 +1,4 @@
-/*	$OpenBSD: dp8390var.h,v 1.11 2006/10/20 18:12:50 brad Exp $	*/
+/*	$OpenBSD: dp8390var.h,v 1.10 2006/10/10 00:09:07 brad Exp $	*/
 /*	$NetBSD: dp8390var.h,v 1.8 1998/08/12 07:19:09 scottr Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*     $OpenBSD: ieee80211_regdomain.h,v 1.8 2005/12/18 17:59:59 reyk Exp $ */
+/*     $OpenBSD: ieee80211_regdomain.h,v 1.7 2005/02/23 14:26:53 reyk Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Reyk Floeter <reyk@openbsd.org>

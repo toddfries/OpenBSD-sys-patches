@@ -1,4 +1,4 @@
-/*	$OpenBSD: macepcibrvar.h,v 1.3 2004/10/20 12:49:15 pefo Exp $ */
+/*	$OpenBSD: macepcibrvar.h,v 1.2 2004/08/10 19:16:18 deraadt Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB (www.opsycon.se)

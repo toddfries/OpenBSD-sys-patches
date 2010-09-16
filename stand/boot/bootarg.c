@@ -1,4 +1,4 @@
-/*	$OpenBSD: bootarg.c,v 1.10 2003/08/11 06:23:07 deraadt Exp $	*/
+/*	$OpenBSD: bootarg.c,v 1.9 2003/06/02 20:20:54 mickey Exp $	*/
 
 /*
  * Copyright (c) 1997,1998 Michael Shalayeff

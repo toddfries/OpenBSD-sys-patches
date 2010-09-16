@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.5 2003/06/01 17:00:31 deraadt Exp $
+#	$OpenBSD: Makefile.inc,v 1.4 2002/09/06 22:59:58 art Exp $
 #	$NetBSD: Makefile.inc,v 1.4 2000/11/01 19:37:20 thorpej Exp $
 
 SRCS+=  __main.c \

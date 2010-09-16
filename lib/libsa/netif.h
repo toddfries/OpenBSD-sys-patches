@@ -1,4 +1,4 @@
-/*	$OpenBSD: netif.h,v 1.5 2003/06/01 17:00:33 deraadt Exp $	*/
+/*	$OpenBSD: netif.h,v 1.4 2002/03/14 01:27:07 millert Exp $	*/
 /*	$NetBSD: netif.h,v 1.4 1995/09/14 23:45:30 pk Exp $	*/
 
 #ifndef __SYS_LIBNETBOOT_NETIF_H

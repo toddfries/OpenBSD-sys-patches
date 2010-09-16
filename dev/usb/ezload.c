@@ -1,4 +1,4 @@
-/*	$OpenBSD: ezload.c,v 1.8 2005/04/14 19:07:02 damien Exp $ */
+/*	$OpenBSD: ezload.c,v 1.7 2004/12/19 15:20:13 deraadt Exp $ */
 /*	$NetBSD: ezload.c,v 1.5 2002/07/11 21:14:25 augustss Exp $	*/
 
 /*

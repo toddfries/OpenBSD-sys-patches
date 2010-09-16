@@ -1,3 +1,3 @@
-/* $OpenBSD: endian.h,v 1.15 2004/04/26 14:31:11 miod Exp $ */
+/* $OpenBSD$ */
 /* public domain */
 #include <m88k/endian.h>

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vsbus.h,v 1.9 2006/12/13 21:11:23 miod Exp $ */
+/*	$OpenBSD: vsbus.h,v 1.8 2004/07/07 23:10:45 deraadt Exp $ */
 /*	$NetBSD: vsbus.h,v 1.13 2000/06/25 16:00:46 ragge Exp $ */
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.

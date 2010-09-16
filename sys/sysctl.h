@@ -329,6 +329,7 @@ struct kinfo_proc {
 #define	EMULNAMELEN	7
 		char	e_emul[EMULNAMELEN+1];	/* syscall emulation name */
 	        rlim_t	e_maxrss;
+		struct plimit *e_limit;
 	} kp_eproc;
 };
 

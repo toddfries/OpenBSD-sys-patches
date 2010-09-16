@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfsrtt.h,v 1.6 2003/06/02 23:28:20 millert Exp $	*/
+/*	$OpenBSD: nfsrtt.h,v 1.5 2001/06/25 03:28:15 csapuntz Exp $	*/
 /*	$NetBSD: nfsrtt.h,v 1.4 1996/02/18 11:54:07 fvdl Exp $	*/
 
 /*

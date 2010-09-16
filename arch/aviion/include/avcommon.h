@@ -1,4 +1,4 @@
-/*	$OpenBSD: avcommon.h,v 1.2 2006/05/21 22:43:54 miod Exp $	*/
+/*	$OpenBSD: avcommon.h,v 1.1 2006/05/21 12:22:03 miod Exp $	*/
 /*
  * Copyright (c) 1999 Steve Murphree, Jr.
  * All rights reserved.

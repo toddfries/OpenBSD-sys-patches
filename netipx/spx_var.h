@@ -1,4 +1,4 @@
-/*	$OpenBSD: spx_var.h,v 1.4 2003/06/02 23:28:16 millert Exp $	*/
+/*	$OpenBSD: spx_var.h,v 1.3 1996/11/25 08:20:03 mickey Exp $	*/
 
 /*-
  *

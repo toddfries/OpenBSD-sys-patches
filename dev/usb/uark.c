@@ -1,4 +1,4 @@
-/*	$OpenBSD: uark.c,v 1.1 2006/08/14 08:30:22 jsg Exp $	*/
+/*	$OpenBSD: uark.c,v 1.3 2006/06/23 06:27:12 miod Exp $	*/
 
 /*
  * Copyright (c) 2006 Jonathan Gray <jsg@openbsd.org>

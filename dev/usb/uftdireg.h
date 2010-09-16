@@ -1,4 +1,4 @@
-/*	$OpenBSD: uftdireg.h,v 1.11 2006/06/16 06:28:25 deraadt Exp $ 	*/
+/*	$OpenBSD: uftdireg.h,v 1.10 2005/03/12 21:38:48 tdeval Exp $ 	*/
 /*	$NetBSD: uftdireg.h,v 1.6 2002/07/11 21:14:28 augustss Exp $ */
 
 /*

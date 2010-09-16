@@ -1,4 +1,4 @@
-/*	$OpenBSD: isadma.c,v 1.30 2006/04/27 15:17:19 mickey Exp $	*/
+/*	$OpenBSD: isadma.c,v 1.29 2005/11/23 10:00:12 mpf Exp $	*/
 /*	$NetBSD: isadma.c,v 1.32 1997/09/05 01:48:33 thorpej Exp $	*/
 
 /*-

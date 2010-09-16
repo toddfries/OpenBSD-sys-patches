@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bnxreg.h,v 1.20 2007/03/05 11:13:10 reyk Exp $	*/
+/*	$OpenBSD: if_bnxreg.h,v 1.19 2007/03/03 11:17:48 reyk Exp $	*/
 
 /*-
  * Copyright (c) 2006 Broadcom Corporation

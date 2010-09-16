@@ -1,4 +1,4 @@
-/*	$OpenBSD: ext2fs.h,v 1.11 2005/10/04 22:46:22 pedro Exp $	*/
+/*	$OpenBSD: ext2fs.h,v 1.10 2005/04/30 13:58:55 niallo Exp $	*/
 /*	$NetBSD: ext2fs.h,v 1.10 2000/01/28 16:00:23 bouyer Exp $	*/
 
 /*

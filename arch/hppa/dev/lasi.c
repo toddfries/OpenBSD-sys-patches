@@ -1,4 +1,4 @@
-/*	$OpenBSD: lasi.c,v 1.22 2004/09/15 20:11:28 mickey Exp $	*/
+/*	$OpenBSD: lasi.c,v 1.21 2004/09/15 01:10:06 mickey Exp $	*/
 
 /*
  * Copyright (c) 1998-2003 Michael Shalayeff

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.2 1998/08/22 08:52:55 smurph Exp $
+#	$OpenBSD:	$
 WRTVID_BASE_DIR=${S}/arch/mvme88k/stand/wrtvid
 
 WRTVID_DIR!= cd ${WRTVID_BASE_DIR}; \

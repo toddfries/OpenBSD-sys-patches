@@ -1,4 +1,4 @@
-/*	$OpenBSD: tropic.c,v 1.12 2006/07/09 22:10:05 mk Exp $	*/
+/*	$OpenBSD: tropic.c,v 1.11 2006/03/25 22:41:43 djm Exp $	*/
 /*	$NetBSD: tropic.c,v 1.6 1999/12/17 08:26:31 fvdl Exp $	*/
 
 /* 

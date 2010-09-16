@@ -1,4 +1,4 @@
-/*	$OpenBSD: topcatreg.h,v 1.2 2005/01/24 21:36:39 miod Exp $	*/
+/*	$OpenBSD: topcatreg.h,v 1.1 2005/01/14 22:39:26 miod Exp $	*/
 /*	$NetBSD: grf_tcreg.h,v 1.6 1994/10/26 07:24:06 cgd Exp $	*/
 
 /*

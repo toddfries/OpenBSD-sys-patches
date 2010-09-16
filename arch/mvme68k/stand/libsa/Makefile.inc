@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.6 2003/08/16 17:46:57 deraadt Exp $
+#	$OpenBSD: Makefile.inc,v 1.5 1997/10/20 00:33:46 deraadt Exp $
 
 LIB_SA_DIR=${S}/arch/mvme68k/stand/libsa
 

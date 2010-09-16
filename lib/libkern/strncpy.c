@@ -1,4 +1,4 @@
-/*	$OpenBSD: strncpy.c,v 1.7 2004/11/28 07:23:41 mickey Exp $	*/
+/*	$OpenBSD: strncpy.c,v 1.5 2004/11/28 07:16:54 mickey Exp $	*/
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -33,7 +33,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: strncpy.c,v 1.7 2004/11/28 07:23:41 mickey Exp $";
+static char *rcsid = "$OpenBSD: strncpy.c,v 1.5 2004/11/28 07:16:54 mickey Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #if !defined(_KERNEL) && !defined(_STANDALONE)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: bzero.S,v 1.1 2006/11/17 22:32:38 miod Exp $	*/
+/*	$OpenBSD$	*/
 /*
  * Mach Operating System
  * Copyright (c) 1993-1992 Carnegie Mellon University

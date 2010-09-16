@@ -114,7 +114,6 @@ ast(struct trapframe *tf)
 #endif	
 
 	if (p->p_flag & P_OWEUPC) {
-		p->p_flag &= ~P_OWEUPC;
 		ADDUPROF(p);
 	}
 

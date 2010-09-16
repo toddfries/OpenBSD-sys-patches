@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.7 2006/10/30 18:28:57 jmc Exp $
+#	$OpenBSD: Makefile,v 1.6 2005/05/24 20:38:20 uwe Exp $
 
 MAN=	boot.8
 MANSUBDIR=zaurus

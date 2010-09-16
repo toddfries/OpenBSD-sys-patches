@@ -714,9 +714,9 @@ db_lock(addr, have_addr, count, modif)
 	}
 
 	l = (struct lock *)addr;
-	db_printf("interlock=%x flags=%x\n waitcount=%x sharecount=%x "
+	db_printf("flags=%x\n waitcount=%x sharecount=%x "
 	    "exclusivecount=%x\n wmesg=%s recurselevel=%x\n",
-	    l->lk_interlock.lock_data, l->lk_flags, l->lk_waitcount,
+	    l->lk_flags, l->lk_waitcount,
 	    l->lk_sharecount, l->lk_exclusivecount, l->lk_wmesg,
 	    l->lk_recurselevel);
 #else

@@ -1,4 +1,4 @@
-/*	$OpenBSD: tablet.h,v 1.3 2003/06/02 23:28:22 millert Exp $	*/
+/*	$OpenBSD: tablet.h,v 1.2 1996/03/03 12:12:25 niklas Exp $	*/
 /*	$NetBSD: tablet.h,v 1.10 1996/02/09 18:25:43 christos Exp $	*/
 
 /*-

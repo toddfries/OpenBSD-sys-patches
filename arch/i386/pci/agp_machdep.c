@@ -1,4 +1,4 @@
-/*	$OpenBSD: agp_machdep.c,v 1.7 2006/05/15 08:27:19 dim Exp $	*/
+/*	$OpenBSD: agp_machdep.c,v 1.6 2006/02/11 21:15:21 matthieu Exp $	*/
 
 /*
  * Copyright (c) 2002 Michael Shalayeff

@@ -1,4 +1,4 @@
-/*	$OpenBSD: promdev.c,v 1.9 2003/08/14 17:13:57 deraadt Exp $	*/
+/*	$OpenBSD: promdev.c,v 1.8 2003/06/01 17:00:39 deraadt Exp $	*/
 /*	$NetBSD: promdev.c,v 1.16 1995/11/14 15:04:01 pk Exp $ */
 
 /*

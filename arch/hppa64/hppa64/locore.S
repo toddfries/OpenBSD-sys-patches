@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.5 2006/01/10 19:22:45 martin Exp $	*/
+/*	$OpenBSD: locore.S,v 1.4 2005/05/21 22:58:28 mickey Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff

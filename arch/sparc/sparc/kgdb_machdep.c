@@ -1,4 +1,4 @@
-/*	$OpenBSD: kgdb_machdep.c,v 1.8 2005/11/13 17:50:45 fgsch Exp $ */
+/*	$OpenBSD: kgdb_machdep.c,v 1.7 2003/06/02 23:27:55 millert Exp $ */
 /*	$NetBSD: kgdb_machdep.c,v 1.1 1997/08/31 21:22:45 pk Exp $ */
 /*-
  * Copyright (c) 1997 The NetBSD Foundation, Inc.

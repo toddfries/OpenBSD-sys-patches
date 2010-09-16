@@ -1,4 +1,4 @@
-/*	$OpenBSD: svr4_jioctl.h,v 1.1 1997/11/04 07:45:34 niklas Exp $	 */
+/*	$OpenBSD: svr4_ncr.c,v 1.2 1996/10/17 19:15:50 niklas Exp $	 */
 
 /*
  * Copyright (c) 1997 Niklas Hallqvist

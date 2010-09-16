@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcivar.h,v 1.52 2007/02/23 21:34:32 deraadt Exp $	*/
+/*	$OpenBSD: pcivar.h,v 1.51 2007/01/02 19:22:38 mbalmer Exp $	*/
 /*	$NetBSD: pcivar.h,v 1.23 1997/06/06 23:48:05 thorpej Exp $	*/
 
 /*
@@ -69,6 +69,8 @@ struct pci_softc;
  */
 #if defined(__alpha__)
 #include <alpha/pci/pci_machdep.h>
+#elif defined(xen)
+#include <machine/pci_machdep.h>
 #elif defined(__i386__)
 #include <i386/pci/pci_machdep.h>
 #elif defined(__cats__)

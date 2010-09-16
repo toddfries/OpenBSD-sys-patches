@@ -1,4 +1,4 @@
-/*	$OpenBSD: clock.c,v 1.21 2004/04/07 18:24:19 mickey Exp $	*/
+/*	$OpenBSD: clock.c,v 1.20 2003/12/12 19:42:47 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1998-2003 Michael Shalayeff

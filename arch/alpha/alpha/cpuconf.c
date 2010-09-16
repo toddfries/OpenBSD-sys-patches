@@ -172,7 +172,7 @@ static const struct cpuinit cpuinit[] = {
 	cpu_notsupp(ST_EB66, "DEC_EB66"),
 	cpu_init(ST_EB64P, dec_eb64plus_init, "DEC_EB64PLUS"),
 	cpu_notsupp(ST_ALPHABOOK1, "DEC_ALPHABOOK1"),
-	cpu_notsupp(ST_DEC_4100, "DEC_KN300"),
+	cpu_init(ST_DEC_4100, dec_kn300_init, "DEC_KN300"),
 	cpu_notsupp(ST_DEC_EV45_PBP, "EV45 Passive Backplane Board"),
 	cpu_notsupp(ST_DEC_2100A_A500, "DEC_2100A_A500"),
 	cpu_init(ST_EB164, dec_eb164_init, "DEC_EB164"),

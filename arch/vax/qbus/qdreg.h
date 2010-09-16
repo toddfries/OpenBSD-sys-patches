@@ -1,4 +1,4 @@
-/*	$OpenBSD: qdreg.h,v 1.4 2006/07/31 18:01:16 miod Exp $	*/
+/*	$OpenBSD: qdreg.h,v 1.3 2003/09/26 21:43:31 miod Exp $	*/
 /*	$NetBSD: qdreg.h,v 1.1 1998/03/21 10:02:39 ragge Exp $	*/
 /*-
  * Copyright (c) 1982, 1986 The Regents of the University of California.

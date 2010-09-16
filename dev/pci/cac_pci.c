@@ -1,4 +1,4 @@
-/*	$OpenBSD: cac_pci.c,v 1.10 2005/08/09 04:10:10 mickey Exp $	*/
+/*	$OpenBSD: cac_pci.c,v 1.9 2003/03/06 22:31:23 mickey Exp $	*/
 /*	$NetBSD: cac_pci.c,v 1.10 2001/01/10 16:48:04 ad Exp $	*/
 
 /*-

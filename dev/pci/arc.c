@@ -1,4 +1,4 @@
-/*	$OpenBSD: arc.c,v 1.58 2007/02/20 17:06:23 thib Exp $ */
+/*	$OpenBSD: arc.c,v 1.60 2007/03/27 11:22:59 jmc Exp $ */
 
 /*
  * Copyright (c) 2006 David Gwynne <dlg@openbsd.org>
@@ -384,8 +384,8 @@ struct arc_softc {
 	struct rwlock		sc_lock;
 	volatile int		sc_talking;
 
-	struct sensor		*sc_sensors;
-	struct sensordev	sc_sensordev;
+	struct ksensor		*sc_sensors;
+	struct ksensordev	sc_sensordev;
 	int			sc_nsensors;
 };
 #define DEVNAME(_s)		((_s)->sc_dev.dv_xname)
@@ -710,7 +710,7 @@ arc_scsi_cmd(struct scsi_xfer *xs)
 
 	bcopy(xs->cmd, cmd->cdb, xs->cmdlen);
 
-	/* we've built the command, lets put it on the hw */
+	/* we've built the command, let's put it on the hw */
 	bus_dmamap_sync(sc->sc_dmat, ARC_DMA_MAP(sc->sc_requests),
 	    ccb->ccb_offset, ARC_MAX_IOCMDLEN,
 	    BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
@@ -1102,9 +1102,9 @@ arc_bio_inq(struct arc_softc *sc, struct bioc_inq *bi)
 			goto out;
 
 		/*
-		 * i cant find an easy way to see if the volume exists or not
-		 * except to say that if it has no capacity then it isnt there.
-		 * ignore passthru volumes, bioc_vol doesnt understand them.
+		 * I can't find an easy way to see if the volume exists or not
+		 * except to say that if it has no capacity then it isn't there.
+		 * Ignore passthru volumes, bioc_vol doesn't understand them.
 		 */
 		if (volinfo->capacity != 0 &&
 		    volinfo->raid_level != ARC_FW_VOL_RAIDLEVEL_PASSTHRU)
@@ -1536,9 +1536,9 @@ arc_create_sensors(void *xsc, void *arg)
 	}
 	sc->sc_nsensors = bi.bi_novol;
 
-	sc->sc_sensors = malloc(sizeof(struct sensor) * sc->sc_nsensors,
+	sc->sc_sensors = malloc(sizeof(struct ksensor) * sc->sc_nsensors,
 	    M_DEVBUF, M_WAITOK);
-	bzero(sc->sc_sensors, sizeof(struct sensor) * sc->sc_nsensors);
+	bzero(sc->sc_sensors, sizeof(struct ksensor) * sc->sc_nsensors);
 
 	strlcpy(sc->sc_sensordev.xname, DEVNAME(sc),
 	    sizeof(sc->sc_sensordev.xname));

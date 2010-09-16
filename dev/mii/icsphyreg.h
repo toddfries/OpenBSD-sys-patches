@@ -1,4 +1,4 @@
-/*	$OpenBSD: icsphyreg.h,v 1.2 1999/03/09 00:02:44 jason Exp $	*/
+/*	$OpenBSD: icsphyreg.h,v 1.1 1998/11/11 19:34:46 jason Exp $	*/
 /*	$NetBSD: icsphyreg.h,v 1.1 1998/11/02 23:46:20 thorpej Exp $	*/
 
 /*-

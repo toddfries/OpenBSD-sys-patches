@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.1 2004/08/23 14:22:40 pefo Exp $ */
+/*	$OpenBSD: conf.c,v 1.2 1997/07/21 06:58:12 pefo Exp $ */
 
 /*
  * Copyright (c) 1997 Per Fogelstrom

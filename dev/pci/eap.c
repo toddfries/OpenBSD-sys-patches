@@ -1,4 +1,4 @@
-/*      $OpenBSD: eap.c,v 1.29 2006/04/07 22:41:33 jsg Exp $ */
+/*      $OpenBSD: eap.c,v 1.28 2005/08/09 04:10:11 mickey Exp $ */
 /*	$NetBSD: eap.c,v 1.46 2001/09/03 15:07:37 reinoud Exp $ */
 
 /*

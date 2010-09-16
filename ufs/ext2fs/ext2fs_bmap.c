@@ -1,4 +1,4 @@
-/*	$OpenBSD: ext2fs_bmap.c,v 1.12 2006/10/03 19:49:06 pedro Exp $	*/
+/*	$OpenBSD: ext2fs_bmap.c,v 1.11 2005/07/03 20:14:01 drahn Exp $	*/
 /*	$NetBSD: ext2fs_bmap.c,v 1.5 2000/03/30 12:41:11 augustss Exp $	*/
 
 /*

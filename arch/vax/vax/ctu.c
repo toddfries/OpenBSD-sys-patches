@@ -1,4 +1,4 @@
-/*	$OpenBSD: ctu.c,v 1.9 2006/01/20 23:27:26 miod Exp $ */
+/*	$OpenBSD: ctu.c,v 1.8 2005/11/24 04:53:59 brad Exp $ */
 /*	$NetBSD: ctu.c,v 1.10 2000/03/23 06:46:44 thorpej Exp $ */
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.

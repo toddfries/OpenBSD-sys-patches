@@ -1,4 +1,4 @@
-/*	$OpenBSD: sboot.c,v 1.9 2003/08/19 10:22:30 deraadt Exp $ */
+/*	$OpenBSD: sboot.c,v 1.8 2003/06/04 16:36:14 deraadt Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt

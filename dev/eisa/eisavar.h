@@ -1,4 +1,4 @@
-/*	$OpenBSD: eisavar.h,v 1.12 2003/12/12 22:56:46 hshoexer Exp $	*/
+/*	$OpenBSD: eisavar.h,v 1.11 2002/12/20 01:56:32 mickey Exp $	*/
 /*	$NetBSD: eisavar.h,v 1.11 1997/06/06 23:30:07 thorpej Exp $	*/
 
 /*

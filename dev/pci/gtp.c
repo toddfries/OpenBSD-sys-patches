@@ -1,4 +1,4 @@
-/*	$OpenBSD: gtp.c,v 1.3 2006/04/20 20:30:29 miod Exp $	*/
+/*	$OpenBSD: gtp.c,v 1.2 2005/08/09 04:10:11 mickey Exp $	*/
 
 /*
  * Copyright (c) 2002 Vladimir Popov <jumbo@narod.ru>

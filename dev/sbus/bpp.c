@@ -1,4 +1,4 @@
-/*	$OpenBSD: bpp.c,v 1.1 2007/02/28 18:48:35 miod Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD: bpp.c,v 1.25 2005/12/11 12:23:44 christos Exp $ */
 
 /*-

@@ -112,7 +112,7 @@ struct scb {
 
 /*
  * This struct is used when setting up interrupt vectors dynamically.
- * It put a opaque 32 bit quanity on the stack and also has a placeholder
+ * It puts a opaque 32 bit quantity on the stack and also has a placeholder
  * for evcount structure.
  */
 struct ivec_dsp {

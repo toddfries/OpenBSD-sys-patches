@@ -1,4 +1,4 @@
-/*	$OpenBSD: fault.c,v 1.9 2006/12/24 20:30:35 miod Exp $	*/
+/*	$OpenBSD: fault.c,v 1.8 2006/05/26 17:06:39 miod Exp $	*/
 /*	$NetBSD: fault.c,v 1.46 2004/01/21 15:39:21 skrll Exp $	*/
 
 /*

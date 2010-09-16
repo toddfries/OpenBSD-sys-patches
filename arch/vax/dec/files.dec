@@ -1,4 +1,4 @@
-#	$OpenBSD: files.dec,v 1.4 2006/08/27 16:52:15 miod Exp $
+#	$OpenBSD: files.dec,v 1.3 2005/07/02 09:28:39 miod Exp $
 #	$NetBSD: files.dec,v 1.4 1999/08/04 07:17:51 nisimura Exp $
 #
 # Config file and device description for machine-independent

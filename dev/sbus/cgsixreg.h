@@ -1,4 +1,4 @@
-/*	$OpenBSD: cgsixreg.h,v 1.9 2006/06/02 20:00:56 miod Exp $	*/
+/*	$OpenBSD: cgsixreg.h,v 1.8 2003/06/18 17:35:30 miod Exp $	*/
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)

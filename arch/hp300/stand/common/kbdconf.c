@@ -1,4 +1,4 @@
-/*	$OpenBSD: kbdconf.c,v 1.1 1997/07/14 08:14:24 downsj Exp $	*/
+/*	$OpenBSD: kbdconf.c,v 1.2 1997/07/13 07:21:50 downsj Exp $	*/
 /*	$NetBSD: kbdconf.c,v 1.1 1997/04/14 19:00:12 thorpej Exp $	*/
 
 /*-

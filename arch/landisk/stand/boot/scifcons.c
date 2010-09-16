@@ -1,4 +1,4 @@
-/*	$OpenBSD: scifcons.c,v 1.2 2006/10/10 05:26:54 miod Exp $	*/
+/*	$OpenBSD: scifcons.c,v 1.1 2006/10/06 21:48:50 mickey Exp $	*/
 /*	$NetBSD: scifcons.c,v 1.1 2006/09/01 21:26:18 uwe Exp $ */
 /*	NetBSD: scif.c,v 1.38 2004/12/13 02:14:13 chs Exp */
 

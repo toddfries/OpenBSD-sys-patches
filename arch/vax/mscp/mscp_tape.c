@@ -1,4 +1,4 @@
-/*	$OpenBSD: mscp_tape.c,v 1.9 2006/03/15 20:04:36 miod Exp $ */
+/*	$OpenBSD: mscp_tape.c,v 1.8 2002/06/08 08:50:26 art Exp $ */
 /*	$NetBSD: mscp_tape.c,v 1.16 2001/11/13 07:38:28 lukem Exp $ */
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.

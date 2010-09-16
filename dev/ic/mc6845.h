@@ -1,4 +1,4 @@
-/*	$OpenBSD: mc6845.h,v 1.5 2005/12/12 12:35:49 mickey Exp $	*/
+/*	$OpenBSD: mc6845.h,v 1.4 2003/10/21 18:58:49 jmc Exp $	*/
 
 /*
  * Copyright (c) 1992, 1995 Hellmuth Michaelis and Joerg Wunsch.

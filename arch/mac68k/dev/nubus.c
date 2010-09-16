@@ -308,7 +308,7 @@ nubus_video_resource(slot)
 
 /*
  * Probe a given nubus slot.  If a card is there and we can get the
- * format block from it's clutching decl. ROMs, fill the format block
+ * format block from its clutching decl. ROMs, fill the format block
  * and return non-zero.  If we can't find a card there with a valid
  * decl. ROM, return 0.
  *

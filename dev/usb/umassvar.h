@@ -1,4 +1,4 @@
-/*	$OpenBSD: umassvar.h,v 1.8 2005/04/01 06:41:13 pascoe Exp $ */
+/*	$OpenBSD: umassvar.h,v 1.7 2004/07/21 07:43:41 dlg Exp $ */
 /*	$NetBSD: umassvar.h,v 1.20 2003/09/08 19:31:01 mycroft Exp $	*/
 /*-
  * Copyright (c) 1999 MAEKAWA Masahide <bishop@rr.iij4u.or.jp>,

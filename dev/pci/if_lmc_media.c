@@ -1,4 +1,4 @@
-/* $OpenBSD: if_lmc_media.c,v 1.16 2005/11/07 00:29:21 brad Exp $ */
+/* $OpenBSD: if_lmc_media.c,v 1.15 2005/11/05 11:49:01 brad Exp $ */
 /* $Id: if_lmc_media.c,v 1.16 2005/11/07 00:29:21 brad Exp $ */
 
 /*-

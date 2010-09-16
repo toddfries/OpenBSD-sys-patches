@@ -1,4 +1,4 @@
-/*	$OpenBSD: armreg.h,v 1.3 2006/05/29 17:01:42 drahn Exp $	*/
+/*	$OpenBSD: armreg.h,v 1.2 2004/12/30 23:30:14 drahn Exp $	*/
 /*	$NetBSD: armreg.h,v 1.27 2003/09/06 08:43:02 rearnsha Exp $	*/
 
 /*

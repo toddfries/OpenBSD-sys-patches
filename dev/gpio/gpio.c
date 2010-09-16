@@ -1,4 +1,4 @@
-/*	$OpenBSD: gpio.c,v 1.7 2006/03/26 18:48:17 grange Exp $	*/
+/*	$OpenBSD: gpio.c,v 1.6 2006/01/14 12:33:49 grange Exp $	*/
 
 /*
  * Copyright (c) 2004, 2006 Alexander Yurchenko <grange@openbsd.org>

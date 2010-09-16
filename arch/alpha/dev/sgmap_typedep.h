@@ -1,4 +1,4 @@
-/* $OpenBSD: sgmap_typedep.h,v 1.2 2002/03/14 01:26:26 millert Exp $ */
+/* $OpenBSD: sgmap_typedep.h,v 1.1 2001/03/21 17:26:38 art Exp $ */
 /* $NetBSD: sgmap_typedep.h,v 1.4 1998/06/04 01:22:52 thorpej Exp $ */
 
 /*-

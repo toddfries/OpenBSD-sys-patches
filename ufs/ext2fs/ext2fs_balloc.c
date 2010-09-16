@@ -1,4 +1,4 @@
-/*	$OpenBSD: ext2fs_balloc.c,v 1.13 2003/06/02 23:28:22 millert Exp $	*/
+/*	$OpenBSD: ext2fs_balloc.c,v 1.12 2003/05/26 18:33:16 tedu Exp $	*/
 /*	$NetBSD: ext2fs_balloc.c,v 1.10 2001/07/04 21:16:01 chs Exp $	*/
 
 /*

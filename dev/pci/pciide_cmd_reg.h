@@ -1,4 +1,4 @@
-/*	$OpenBSD: pciide_cmd_reg.h,v 1.9 2004/09/24 07:38:38 grange Exp $	*/
+/*	$OpenBSD: pciide_cmd_reg.h,v 1.8 2003/09/28 21:01:43 grange Exp $	*/
 /*	$NetBSD: pciide_cmd_reg.h,v 1.9 2000/08/02 20:23:46 bouyer Exp $	*/
 
 /*

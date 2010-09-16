@@ -1,4 +1,4 @@
-/*      $OpenBSD: profile.h,v 1.7 2003/06/02 23:27:57 millert Exp $ */
+/*      $OpenBSD: profile.h,v 1.6 2000/04/26 03:08:42 bjc Exp $ */
 /*      $NetBSD: profile.h,v 1.5 1995/12/31 12:15:58 ragge Exp $ */
 /*
  * Copyright (c) 1992 The Regents of the University of California.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ce4231.c,v 1.21 2005/09/08 15:25:54 martin Exp $	*/
+/*	$OpenBSD: ce4231.c,v 1.20 2005/07/09 22:23:15 miod Exp $	*/
 
 /*
  * Copyright (c) 1999 Jason L. Wright (jason@thought.net)

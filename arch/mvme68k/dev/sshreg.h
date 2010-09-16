@@ -1,4 +1,4 @@
-/*	$OpenBSD: sshreg.h,v 1.5 2005/11/21 21:52:45 miod Exp $ */
+/*	$OpenBSD: sshreg.h,v 1.4 2003/06/02 23:27:50 millert Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt

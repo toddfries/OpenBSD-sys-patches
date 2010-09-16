@@ -1,4 +1,4 @@
-/*	$OpenBSD: disk.h,v 1.1 2004/02/03 12:09:47 mickey Exp $	*/
+/*	$OpenBSD: disk.h,v 1.3 2003/06/04 17:04:05 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1997 Tobias Weingartner

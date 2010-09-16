@@ -1,4 +1,4 @@
-/*	$OpenBSD: macgpio.c,v 1.5 2006/06/19 22:42:33 miod Exp $	*/
+/*	$OpenBSD: macgpio.c,v 1.4 2006/02/14 23:05:28 kettenis Exp $	*/
 /*	$NetBSD: gpio.c,v 1.2 2001/02/27 05:16:33 matt Exp $	*/
 
 /*-

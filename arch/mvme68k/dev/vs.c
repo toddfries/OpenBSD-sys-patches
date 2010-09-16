@@ -1,4 +1,4 @@
-/*	$OpenBSD: vs.c,v 1.20 2006/06/02 18:53:56 miod Exp $ */
+/*	$OpenBSD: vs.c,v 1.19 2005/12/03 18:09:37 krw Exp $ */
 
 /*
  * Copyright (c) 1999 Steve Murphree, Jr.

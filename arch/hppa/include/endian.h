@@ -1,4 +1,4 @@
-/*	$OpenBSD: endian.h,v 1.10 2005/12/13 00:35:23 millert Exp $	*/
+/*	$OpenBSD: endian.h,v 1.9 2004/06/28 14:37:54 mickey Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff

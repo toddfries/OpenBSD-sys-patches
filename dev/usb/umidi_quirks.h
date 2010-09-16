@@ -1,4 +1,4 @@
-/*	$OpenBSD: umidi_quirks.h,v 1.3 2002/06/11 07:49:57 nate Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD: umidi_quirks.h,v 1.2 2001/09/29 22:00:47 tshiozak Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uhci_cardbus.c,v 1.5 2006/10/12 16:35:52 grange Exp $	*/
+/*	$OpenBSD: uhci_cardbus.c,v 1.4 2006/07/12 06:26:34 jolan Exp $	*/
 
 /*
  * Copyright (c) 1998 The NetBSD Foundation, Inc.

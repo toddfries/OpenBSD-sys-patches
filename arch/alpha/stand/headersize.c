@@ -1,4 +1,4 @@
-/*	$OpenBSD: headersize.c,v 1.8 2005/08/10 16:58:42 todd Exp $	*/
+/*	$OpenBSD: headersize.c,v 1.7 2001/01/15 12:07:35 art Exp $	*/
 /*	$NetBSD: headersize.c,v 1.5 1996/09/23 04:32:59 cgd Exp $	*/
 
 /*

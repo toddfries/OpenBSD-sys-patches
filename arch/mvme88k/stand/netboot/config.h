@@ -1,4 +1,4 @@
-/*	$OpenBSD: config.h,v 1.3 2003/06/04 04:11:37 deraadt Exp $ */
+/*	$OpenBSD: config.h,v 1.2 1999/05/29 04:41:48 smurph Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt

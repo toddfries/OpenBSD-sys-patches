@@ -1,4 +1,4 @@
-/*	$OpenBSD: lebuffer.c,v 1.6 2006/06/02 20:00:54 miod Exp $	*/
+/*	$OpenBSD: lebuffer.c,v 1.5 2002/03/14 01:26:43 millert Exp $	*/
 /*	$NetBSD: lebuffer.c,v 1.3 1997/05/24 20:16:28 pk Exp $ */
 
 /*

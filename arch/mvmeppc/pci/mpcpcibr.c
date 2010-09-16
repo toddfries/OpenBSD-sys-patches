@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpcpcibr.c,v 1.18 2006/12/14 17:36:12 kettenis Exp $ */
+/*	$OpenBSD: mpcpcibr.c,v 1.17 2005/11/07 02:19:46 brad Exp $ */
 
 /*
  * Copyright (c) 2001 Steve Murphree, Jr.

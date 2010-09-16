@@ -1,4 +1,4 @@
-/*	$OpenBSD: inode.h,v 1.34 2006/10/29 00:53:37 thib Exp $	*/
+/*	$OpenBSD: inode.h,v 1.33 2006/06/14 20:01:50 sturm Exp $	*/
 /*	$NetBSD: inode.h,v 1.8 1995/06/15 23:22:50 cgd Exp $	*/
 
 /*

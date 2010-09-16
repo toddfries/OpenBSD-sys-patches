@@ -1,4 +1,4 @@
-/*	$OpenBSD: qsphyreg.h,v 1.3 2003/10/22 09:39:29 jmc Exp $	*/
+/*	$OpenBSD: qsphyreg.h,v 1.2 1999/03/09 00:02:45 jason Exp $	*/
 /*	$NetBSD: qsphyreg.h,v 1.1 1998/08/11 00:01:03 thorpej Exp $	*/
 
 /*-

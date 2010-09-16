@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.14 2005/12/27 18:31:10 miod Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.13 2005/04/21 00:15:42 deraadt Exp $	*/
 /*
  * Copyright (c) 1996, 1997 Per Fogelstrom
  * Copyright (c) 1995 Theo de Raadt

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ariareg.h,v 1.1 1996/05/04 13:29:33 deraadt Exp $ */
+/*	$OpenBSD$ */
 
 /*
  * Copyright (c) 1995, 1996 Roland C. Dowdeswell.  All rights reserved.

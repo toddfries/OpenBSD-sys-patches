@@ -1,4 +1,4 @@
-/*	$OpenBSD: fpu_implode.c,v 1.5 2003/06/02 23:27:54 millert Exp $	*/
+/*	$OpenBSD: fpu_implode.c,v 1.4 2002/03/14 01:26:43 millert Exp $	*/
 /*	$NetBSD: fpu_implode.c,v 1.3 1996/03/14 19:41:59 christos Exp $ */
 
 /*

@@ -1,4 +1,4 @@
-/* $OpenBSD: esp.c,v 1.2 2006/12/31 21:10:37 gwk Exp $ */
+/* $OpenBSD: esp.c,v 1.1 2006/12/14 21:52:04 gwk Exp $ */
 
 /*-
  * Copyright (c) 1997, 1998 The NetBSD Foundation, Inc.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ascvar.h,v 1.7 2005/04/24 22:25:13 martin Exp $	*/
+/*	$OpenBSD: ascvar.h,v 1.6 2003/09/23 16:51:11 millert Exp $	*/
 /*	$NetBSD: ascvar.h,v 1.3 1997/02/24 05:47:34 scottr Exp $	*/
 
 /*

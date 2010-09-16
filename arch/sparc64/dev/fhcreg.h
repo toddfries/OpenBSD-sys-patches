@@ -1,4 +1,4 @@
-/*	$OpenBSD: fhcreg.h,v 1.3 2004/09/28 16:26:03 jason Exp $	*/
+/*	$OpenBSD: fhcreg.h,v 1.2 2004/09/27 18:15:32 jason Exp $	*/
 
 /*
  * Copyright (c) 2004 Jason L. Wright (jason@thought.net).

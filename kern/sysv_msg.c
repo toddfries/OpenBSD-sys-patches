@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysv_msg.c,v 1.19 2005/12/13 10:33:14 jsg Exp $	*/
+/*	$OpenBSD: sysv_msg.c,v 1.18 2004/07/15 11:24:46 millert Exp $	*/
 /*	$NetBSD: sysv_msg.c,v 1.19 1996/02/09 19:00:18 christos Exp $	*/
 
 /*

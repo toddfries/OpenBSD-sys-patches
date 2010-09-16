@@ -1,4 +1,4 @@
-/*	$OpenBSD: usb_mem.h,v 1.11 2005/06/10 04:11:48 martin Exp $ */
+/*	$OpenBSD: usb_mem.h,v 1.10 2003/07/08 13:19:09 nate Exp $ */
 /*	$NetBSD: usb_mem.h,v 1.20 2003/05/03 18:11:42 wiz Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usb_mem.h,v 1.9 1999/11/17 22:33:47 n_hibma Exp $	*/
 

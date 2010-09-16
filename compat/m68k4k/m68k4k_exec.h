@@ -1,4 +1,4 @@
-/*	$OpenBSD: m68k4k_exec.h,v 1.2 2002/03/14 01:26:50 millert Exp $	*/
+/*	$OpenBSD: m68k4k_exec.h,v 1.1 1997/01/13 11:07:53 niklas Exp $	*/
 /*	$NetBSD: m68k4k_exec.h,v 1.1 1996/09/10 22:01:21 thorpej Exp $	*/
 
 /*-

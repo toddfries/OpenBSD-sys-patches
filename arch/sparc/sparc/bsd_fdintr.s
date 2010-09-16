@@ -1,4 +1,4 @@
-/*	$OpenBSD: bsd_fdintr.s,v 1.11 2004/09/29 07:35:13 miod Exp $	*/
+/*	$OpenBSD: bsd_fdintr.s,v 1.10 2004/09/22 22:12:59 miod Exp $	*/
 /*	$NetBSD: bsd_fdintr.s,v 1.11 1997/04/07 21:00:36 pk Exp $ */
 
 /*

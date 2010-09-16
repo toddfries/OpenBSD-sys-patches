@@ -1,4 +1,4 @@
-/*	$OpenBSD: cachectl.c,v 1.1 2005/08/01 11:54:24 miod Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD: sys_machdep.c,v 1.17 1997/05/19 10:15:00 veego Exp $	*/
 
 /*

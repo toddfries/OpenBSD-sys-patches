@@ -1,4 +1,4 @@
-/*	$OpenBSD: bugio.h,v 1.16 2006/05/02 21:43:08 miod Exp $ */
+/*	$OpenBSD: bugio.h,v 1.15 2005/12/11 21:45:31 miod Exp $ */
 
 #ifndef __MACHINE_BUGIO_H__
 #define __MACHINE_BUGIO_H__

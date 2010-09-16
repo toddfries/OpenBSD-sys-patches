@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_watch.c,v 1.9 2006/03/13 06:23:20 jsg Exp $ */
+/*	$OpenBSD: db_watch.c,v 1.8 2002/02/27 17:37:05 pefo Exp $ */
 /*	$NetBSD: db_watch.c,v 1.9 1996/03/30 22:30:12 christos Exp $	*/
 
 /* 

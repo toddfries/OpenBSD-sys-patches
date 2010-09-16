@@ -1,4 +1,4 @@
-/*	$OpenBSD: mips_opcode.h,v 1.1 2004/08/06 21:12:19 pefo Exp $ */
+/*	$OpenBSD: mips_opcode.h,v 1.2 1998/01/28 13:46:19 pefo Exp $ */
 
 /* Use Mips generic include file */
 

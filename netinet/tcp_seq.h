@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_seq.h,v 1.5 2003/06/02 23:28:14 millert Exp $	*/
+/*	$OpenBSD: tcp_seq.h,v 1.4 2003/05/12 00:48:52 jason Exp $	*/
 /*	$NetBSD: tcp_seq.h,v 1.6 1995/03/26 20:32:35 jtc Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_misc.h,v 1.3 2003/07/23 17:42:09 tedu Exp $	*/
+/*	$OpenBSD: linux_misc.h,v 1.2 2002/03/14 01:26:50 millert Exp $	*/
 /*	$NetBSD: linux_misc.h,v 1.3 1999/05/13 00:31:57 thorpej Exp $	*/
 
 /*-

@@ -1,4 +1,4 @@
-/*	$OpenBSD: prom.h,v 1.16 2006/05/16 22:51:28 miod Exp $ */
+/*	$OpenBSD: prom.h,v 1.15 2005/12/11 21:45:31 miod Exp $ */
 /*
  * Copyright (c) 1998 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur

@@ -1,4 +1,4 @@
-/*	$OpenBSD: piix.c,v 1.8 2006/09/19 11:06:34 jsg Exp $	*/
+/*	$OpenBSD: piix.c,v 1.7 2003/03/28 23:12:33 mickey Exp $	*/
 /*	$NetBSD: piix.c,v 1.1 1999/11/17 01:21:20 thorpej Exp $	*/
 
 /*-

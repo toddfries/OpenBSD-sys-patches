@@ -1,4 +1,4 @@
-/*	$OpenBSD: mkboot.c,v 1.1 2005/04/01 10:40:49 mickey Exp $	*/
+/*	$OpenBSD: mkboot.c,v 1.14 2003/08/11 06:51:45 mickey Exp $	*/
 
 /*
  * Copyright (c) 1990, 1993
@@ -39,7 +39,7 @@ static char copyright[] =
 #endif /* not lint */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: mkboot.c,v 1.1 2005/04/01 10:40:49 mickey Exp $";
+static char rcsid[] = "$OpenBSD: mkboot.c,v 1.14 2003/08/11 06:51:45 mickey Exp $";
 #endif /* not lint */
 #endif
 

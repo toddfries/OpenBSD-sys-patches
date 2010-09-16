@@ -87,7 +87,7 @@ static RF_AccessState_t DefaultStates[] = {
 #if	(defined(__NetBSD__) || defined(__OpenBSD__)) && !defined(_KERNEL)
 /*
  * XXX Gross hack to shutup gcc -- It complains that DefaultStates is not
- * used when compiling this in userland... I hate to burst it's bubble, but
+ * used when compiling this in userland... I hate to burst its bubble, but
  * DefaultStates is used all over the place here in the initialization of
  * lots of data structures. GO
  */

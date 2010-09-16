@@ -1,4 +1,4 @@
-/*	$OpenBSD: midwayreg.h,v 1.9 2003/10/21 18:58:49 jmc Exp $	*/
+/*	$OpenBSD: midwayreg.h,v 1.8 1999/06/06 15:39:16 deraadt Exp $	*/
 
 /*
  * m i d w a y r e g . h

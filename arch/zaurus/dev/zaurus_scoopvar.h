@@ -27,6 +27,7 @@ void	scoop_charge_battery(int, int);
 void	scoop_discharge_battery(int);
 void	scoop_check_mcr(void);
 void	scoop_set_headphone(int);
+void	scoop_set_sdmmc_power(int);
 void	scoop_akin_pullup(int);
 void	scoop_suspend(void);
 void	scoop_resume(void);

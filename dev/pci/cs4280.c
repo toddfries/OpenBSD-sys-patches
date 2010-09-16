@@ -1,4 +1,4 @@
-/*	$OpenBSD: cs4280.c,v 1.25 2006/04/07 22:41:33 jsg Exp $	*/
+/*	$OpenBSD: cs4280.c,v 1.24 2005/11/29 05:42:17 tedu Exp $	*/
 /*	$NetBSD: cs4280.c,v 1.5 2000/06/26 04:56:23 simonb Exp $	*/
 
 /*

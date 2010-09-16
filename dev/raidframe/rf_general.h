@@ -1,4 +1,4 @@
-/*	$OpenBSD: rf_general.h,v 1.6 2003/04/27 11:22:54 ho Exp $	*/
+/*	$OpenBSD: rf_general.h,v 1.5 2002/12/16 07:01:04 tdeval Exp $	*/
 /*	$NetBSD: rf_general.h,v 1.5 2000/03/03 02:04:48 oster Exp $	*/
 
 /*

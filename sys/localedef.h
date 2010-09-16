@@ -1,4 +1,4 @@
-/*	$OpenBSD: localedef.h,v 1.3 1996/04/21 22:31:47 deraadt Exp $	*/
+/*	$OpenBSD: localedef.h,v 1.2 1996/03/03 12:11:56 niklas Exp $	*/
 /*	$NetBSD: localedef.h,v 1.4 1996/04/09 20:55:31 cgd Exp $	*/
 
 /*

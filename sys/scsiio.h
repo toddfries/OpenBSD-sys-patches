@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsiio.h,v 1.8 2006/11/27 18:32:33 dlg Exp $	*/
+/*	$OpenBSD: scsiio.h,v 1.7 2006/07/23 02:50:20 dlg Exp $	*/
 /*	$NetBSD: scsiio.h,v 1.3 1994/06/29 06:45:09 cgd Exp $	*/
 
 #ifndef _SYS_SCSIIO_H_

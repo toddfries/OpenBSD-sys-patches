@@ -1,4 +1,4 @@
-/*	$OpenBSD: xfs_extern.h,v 1.6 2003/09/28 04:33:44 millert Exp $	*/
+/*	$OpenBSD: xfs_extern.h,v 1.5 2002/06/07 04:10:32 hin Exp $	*/
 /*
  * Copyright (c) 1998 Kungliga Tekniska Högskolan
  * (Royal Institute of Technology, Stockholm, Sweden).

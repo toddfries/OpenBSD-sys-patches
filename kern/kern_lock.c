@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_lock.c,v 1.24 2007/02/14 00:53:48 jsg Exp $	*/
+/*	$OpenBSD: kern_lock.c,v 1.26 2007/04/11 12:06:37 miod Exp $	*/
 
 /* 
  * Copyright (c) 1995
@@ -68,16 +68,6 @@ void playback_stacktrace(int *, int);
 #define COUNT(lkp, p, cpu_id, x)
 #endif /* LOCKDEBUG || DIAGNOSTIC */ /* } */
 
-#define	INTERLOCK_ACQUIRE(lkp, flags)					\
-do {									\
-	simple_lock(&(lkp)->lk_interlock);				\
-} while (/*CONSTCOND*/ 0)
-
-#define	INTERLOCK_RELEASE(lkp, flags)					\
-do {									\
-	simple_unlock(&(lkp)->lk_interlock);				\
-} while (/*CONSTCOND*/ 0)
-
 #ifdef DDB /* { */
 #ifdef MULTIPROCESSOR
 int simple_lock_debugger = 1;	/* more serious on MP */
@@ -104,10 +94,9 @@ do {									\
 		else							\
 			(lkp)->lk_waitcount++;				\
 		/* XXX Cast away volatile. */				\
-		error = ltsleep((drain) ?				\
+		error = tsleep((drain) ?				\
 		    (void *)&(lkp)->lk_flags : (void *)(lkp),		\
-		    (lkp)->lk_prio, (lkp)->lk_wmesg, (lkp)->lk_timo,	\
-		    &(lkp)->lk_interlock);				\
+		    (lkp)->lk_prio, (lkp)->lk_wmesg, (lkp)->lk_timo);	\
 		if ((drain) == 0)					\
 			(lkp)->lk_waitcount--;				\
 		if (error)						\
@@ -190,7 +179,6 @@ lockinit(struct lock *lkp, int prio, char *wmesg, int timo, int flags)
 {
 
 	bzero(lkp, sizeof(struct lock));
-	simple_lock_init(&lkp->lk_interlock);
 	lkp->lk_flags = flags & LK_EXTFLG_MASK;
 	lkp->lk_lockholder = LK_NOPROC;
 	lkp->lk_prio = prio;
@@ -210,12 +198,10 @@ lockstatus(struct lock *lkp)
 {
 	int lock_type = 0;
 
-	INTERLOCK_ACQUIRE(lkp, lkp->lk_flags);
 	if (lkp->lk_exclusivecount != 0)
 		lock_type = LK_EXCLUSIVE;
 	else if (lkp->lk_sharecount != 0)
 		lock_type = LK_SHARED;
-	INTERLOCK_RELEASE(lkp, lkp->lk_flags);
 	return (lock_type);
 }
 
@@ -236,10 +222,6 @@ lockmgr(__volatile struct lock *lkp, u_int flags, struct simplelock *interlkp)
 	struct proc *p = curproc;
 
 	error = 0;
-
-	INTERLOCK_ACQUIRE(lkp, lkp->lk_flags);
-	if (flags & LK_INTERLOCK)
-		simple_unlock(interlkp);
 	extflags = (flags | lkp->lk_flags) & LK_EXTFLG_MASK;
 
 #ifdef DIAGNOSTIC
@@ -287,7 +269,7 @@ lockmgr(__volatile struct lock *lkp, u_int flags, struct simplelock *interlkp)
 			 * If just polling, check to see if we will block.
 			 */
 			if ((extflags & LK_NOWAIT) && (lkp->lk_flags &
-			    (LK_HAVE_EXCL | LK_WANT_EXCL | LK_WANT_UPGRADE))) {
+			    (LK_HAVE_EXCL | LK_WANT_EXCL))) {
 				error = EBUSY;
 				break;
 			}
@@ -295,7 +277,7 @@ lockmgr(__volatile struct lock *lkp, u_int flags, struct simplelock *interlkp)
 			 * Wait for exclusive locks and upgrades to clear.
 			 */
 			ACQUIRE(lkp, error, extflags, 0, lkp->lk_flags &
-			    (LK_HAVE_EXCL | LK_WANT_EXCL | LK_WANT_UPGRADE));
+			    (LK_HAVE_EXCL | LK_WANT_EXCL));
 			if (error)
 				break;
 			lkp->lk_sharecount++;
@@ -308,9 +290,7 @@ lockmgr(__volatile struct lock *lkp, u_int flags, struct simplelock *interlkp)
 		 */
 		lkp->lk_sharecount++;
 		COUNT(lkp, p, cpu_id, 1);
-		/* FALLTHROUGH */
 
-	case LK_DOWNGRADE:
 		if (WEHOLDIT(lkp, pid, cpu_id) == 0 ||
 		    lkp->lk_exclusivecount == 0)
 			panic("lockmgr: not holding exclusive lock");
@@ -325,61 +305,6 @@ lockmgr(__volatile struct lock *lkp, u_int flags, struct simplelock *interlkp)
 		DONTHAVEIT(lkp);
 		WAKEUP_WAITER(lkp);
 		break;
-
-	case LK_UPGRADE:
-		/*
-		 * Upgrade a shared lock to an exclusive one. If another
-		 * shared lock has already requested an upgrade to an
-		 * exclusive lock, our shared lock is released and an
-		 * exclusive lock is requested (which will be granted
-		 * after the upgrade). If we return an error, the file
-		 * will always be unlocked.
-		 */
-		if (WEHOLDIT(lkp, pid, cpu_id) || lkp->lk_sharecount <= 0)
-			panic("lockmgr: upgrade exclusive lock");
-		lkp->lk_sharecount--;
-		COUNT(lkp, p, cpu_id, -1);
-		/*
-		 * If we are just polling, check to see if we will block.
-		 */
-		if ((extflags & LK_NOWAIT) &&
-		    ((lkp->lk_flags & LK_WANT_UPGRADE) ||
-		     lkp->lk_sharecount > 1)) {
-			error = EBUSY;
-			break;
-		}
-		if ((lkp->lk_flags & LK_WANT_UPGRADE) == 0) {
-			/*
-			 * We are first shared lock to request an upgrade, so
-			 * request upgrade and wait for the shared count to
-			 * drop to zero, then take exclusive lock.
-			 */
-			lkp->lk_flags |= LK_WANT_UPGRADE;
-			ACQUIRE(lkp, error, extflags, 0, lkp->lk_sharecount);
-			lkp->lk_flags &= ~LK_WANT_UPGRADE;
-			if (error)
-				break;
-			lkp->lk_flags |= LK_HAVE_EXCL;
-			SETHOLDER(lkp, pid, cpu_id);
-#if defined(LOCKDEBUG)
-			lkp->lk_lock_file = file;
-			lkp->lk_lock_line = line;
-#endif
-			HAVEIT(lkp);
-			if (lkp->lk_exclusivecount != 0)
-				panic("lockmgr: non-zero exclusive count");
-			lkp->lk_exclusivecount = 1;
-			COUNT(lkp, p, cpu_id, 1);
-			break;
-		}
-		/*
-		 * Someone else has requested upgrade. Release our shared
-		 * lock, awaken upgrade requestor if we are the last shared
-		 * lock, then request an exclusive lock.
-		 */
-		if (lkp->lk_sharecount == 0)
-			WAKEUP_WAITER(lkp);
-		/* FALLTHROUGH */
 
 	case LK_EXCLUSIVE:
 		if (WEHOLDIT(lkp, pid, cpu_id)) {
@@ -401,7 +326,7 @@ lockmgr(__volatile struct lock *lkp, u_int flags, struct simplelock *interlkp)
 		 * If we are just polling, check to see if we will sleep.
 		 */
 		if ((extflags & LK_NOWAIT) && ((lkp->lk_flags &
-		     (LK_HAVE_EXCL | LK_WANT_EXCL | LK_WANT_UPGRADE)) ||
+		     (LK_HAVE_EXCL | LK_WANT_EXCL)) ||
 		     lkp->lk_sharecount != 0)) {
 			error = EBUSY;
 			break;
@@ -417,8 +342,7 @@ lockmgr(__volatile struct lock *lkp, u_int flags, struct simplelock *interlkp)
 		/*
 		 * Wait for shared locks and upgrades to finish.
 		 */
-		ACQUIRE(lkp, error, extflags, 0, lkp->lk_sharecount != 0 ||
-		       (lkp->lk_flags & LK_WANT_UPGRADE));
+		ACQUIRE(lkp, error, extflags, 0, lkp->lk_sharecount != 0);
 		lkp->lk_flags &= ~LK_WANT_EXCL;
 		if (error)
 			break;
@@ -477,14 +401,14 @@ lockmgr(__volatile struct lock *lkp, u_int flags, struct simplelock *interlkp)
 		 * If we are just polling, check to see if we will sleep.
 		 */
 		if ((extflags & LK_NOWAIT) && ((lkp->lk_flags &
-		     (LK_HAVE_EXCL | LK_WANT_EXCL | LK_WANT_UPGRADE)) ||
+		     (LK_HAVE_EXCL | LK_WANT_EXCL)) ||
 		     lkp->lk_sharecount != 0 || lkp->lk_waitcount != 0)) {
 			error = EBUSY;
 			break;
 		}
 		ACQUIRE(lkp, error, extflags, 1,
 		    ((lkp->lk_flags &
-		     (LK_HAVE_EXCL | LK_WANT_EXCL | LK_WANT_UPGRADE)) ||
+		     (LK_HAVE_EXCL | LK_WANT_EXCL)) ||
 		     lkp->lk_sharecount != 0 ||
 		     lkp->lk_waitcount != 0));
 		if (error)
@@ -501,19 +425,17 @@ lockmgr(__volatile struct lock *lkp, u_int flags, struct simplelock *interlkp)
 		break;
 
 	default:
-		INTERLOCK_RELEASE(lkp, lkp->lk_flags);
 		panic("lockmgr: unknown locktype request %d",
 		    flags & LK_TYPE_MASK);
 		/* NOTREACHED */
 	}
 	if ((lkp->lk_flags & LK_WAITDRAIN) != 0 &&
 	    ((lkp->lk_flags &
-	    (LK_HAVE_EXCL | LK_WANT_EXCL | LK_WANT_UPGRADE)) == 0 &&
+	    (LK_HAVE_EXCL | LK_WANT_EXCL)) == 0 &&
 	    lkp->lk_sharecount == 0 && lkp->lk_waitcount == 0)) {
 		lkp->lk_flags &= ~LK_WAITDRAIN;
 		wakeup((void *)&lkp->lk_flags);
 	}
-	INTERLOCK_RELEASE(lkp, lkp->lk_flags);
 	return (error);
 }
 
@@ -900,13 +822,13 @@ _kernel_proc_lock(struct proc *p)
 {
 	SCHED_ASSERT_UNLOCKED();
 	__mp_lock(&kernel_lock);
-	p->p_flag |= P_BIGLOCK;
+	atomic_setbits_int(&p->p_flag, P_BIGLOCK);
 }
 
 void
 _kernel_proc_unlock(struct proc *p)
 {
-	p->p_flag &= ~P_BIGLOCK;
+	atomic_clearbits_int(&p->p_flag, P_BIGLOCK);
 	__mp_unlock(&kernel_lock);
 }
 

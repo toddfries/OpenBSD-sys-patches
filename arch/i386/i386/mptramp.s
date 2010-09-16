@@ -1,4 +1,4 @@
-/*	$OpenBSD: mptramp.s,v 1.8 2007/02/20 21:15:01 tom Exp $	*/
+/*	$OpenBSD: mptramp.s,v 1.5 2006/03/14 14:44:37 mickey Exp $	*/
 
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.

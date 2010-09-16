@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sm_nubus.c,v 1.1 2006/01/29 15:58:20 martin Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD: if_sm_nubus.c,v 1.2 2000/08/01 13:08:39 briggs Exp $	*/
 
 /*

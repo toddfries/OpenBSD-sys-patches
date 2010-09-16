@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpbios.c,v 1.21 2007/02/20 21:15:01 tom Exp $	*/
+/*	$OpenBSD: mpbios.c,v 1.20 2007/01/23 21:17:18 kettenis Exp $	*/
 /*	$NetBSD: mpbios.c,v 1.2 2002/10/01 12:56:57 fvdl Exp $	*/
 
 /*-

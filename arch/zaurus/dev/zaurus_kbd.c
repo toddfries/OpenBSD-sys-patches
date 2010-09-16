@@ -1,4 +1,4 @@
-/* $OpenBSD: zaurus_kbd.c,v 1.28 2005/12/21 20:36:03 deraadt Exp $ */
+/* $OpenBSD: zaurus_kbd.c,v 1.27 2005/12/20 18:53:09 deraadt Exp $ */
 /*
  * Copyright (c) 2005 Dale Rahn <drahn@openbsd.org>
  *

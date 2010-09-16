@@ -64,7 +64,7 @@ struct pool_cache {
 	struct pool_cache_group
 			*pc_allocfrom;	/* group to allocate from */
 	struct pool_cache_group
-			*pc_freeto;	/* grop to free to */
+			*pc_freeto;	/* group to free to */
 	struct pool	*pc_pool;	/* parent pool */
 	struct simplelock pc_slock;	/* mutex */
 

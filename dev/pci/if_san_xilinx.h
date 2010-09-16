@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_san_xilinx.h,v 1.4 2004/07/16 15:11:45 alex Exp $	*/
+/*	$OpenBSD: if_san_xilinx.h,v 1.3 2004/06/28 01:16:30 mcbride Exp $	*/
 
 /*-
  * Copyright (c) 2001-2004 Sangoma Technologies (SAN)

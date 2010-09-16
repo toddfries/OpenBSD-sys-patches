@@ -465,19 +465,15 @@ vn_lock(struct vnode *vp, int flags, struct proc *p)
 		flags |= LK_CANRECURSE;
 	
 	do {
-		if ((flags & LK_INTERLOCK) == 0)
-			simple_lock(&vp->v_interlock);
 		if (vp->v_flag & VXLOCK) {
 			vp->v_flag |= VXWANT;
-			simple_unlock(&vp->v_interlock);
 			tsleep(vp, PINOD, "vn_lock", 0);
 			error = ENOENT;
 		} else {
-			error = VOP_LOCK(vp, flags | LK_INTERLOCK, p);
+			error = VOP_LOCK(vp, flags, p);
 			if (error == 0)
 				return (error);
 		}
-		flags &= ~LK_INTERLOCK;
 	} while (flags & LK_RETRY);
 	return (error);
 }

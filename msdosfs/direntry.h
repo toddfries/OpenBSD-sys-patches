@@ -1,4 +1,4 @@
-/*	$OpenBSD: direntry.h,v 1.6 2002/03/14 01:27:09 millert Exp $	*/
+/*	$OpenBSD: direntry.h,v 1.5 1998/01/11 20:39:05 provos Exp $	*/
 /*	$NetBSD: direntry.h,v 1.13 1997/10/17 11:23:45 ws Exp $	*/
 
 /*-

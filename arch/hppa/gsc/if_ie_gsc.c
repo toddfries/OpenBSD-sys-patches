@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ie_gsc.c,v 1.25 2004/10/28 19:13:30 mickey Exp $	*/
+/*	$OpenBSD: if_ie_gsc.c,v 1.24 2004/04/07 18:24:19 mickey Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff

@@ -1,4 +1,4 @@
-/*	$OpenBSD: netbsd_misc.c,v 1.15 2007/01/16 17:52:18 thib Exp $	*/
+/*	$OpenBSD: netbsd_misc.c,v 1.14 2004/11/23 19:08:54 miod Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1989, 1991, 1993

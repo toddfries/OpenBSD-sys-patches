@@ -1,4 +1,4 @@
-/*	$OpenBSD: in_cksum.c,v 1.3 2004/04/07 18:24:19 mickey Exp $	*/
+/*	$OpenBSD: in_cksum.c,v 1.2 2003/02/18 19:01:50 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2000 Michael Shalayeff

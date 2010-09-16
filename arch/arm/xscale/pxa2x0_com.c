@@ -1,4 +1,4 @@
-/*	$OpenBSD: pxa2x0_com.c,v 1.7 2005/07/18 00:50:19 uwe Exp $ */
+/*	$OpenBSD: pxa2x0_com.c,v 1.6 2005/06/16 21:06:55 uwe Exp $ */
 /*	$NetBSD: pxa2x0_com.c,v 1.4 2003/07/15 00:24:55 lukem Exp $	*/
 
 /*

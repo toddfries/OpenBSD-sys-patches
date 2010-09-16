@@ -1,5 +1,5 @@
 %{
-/*	$OpenBSD: aicasm_macro_gram.y,v 1.3 2006/12/23 21:08:01 krw Exp $	*/
+/*	$OpenBSD: aicasm_macro_gram.y,v 1.2 2003/12/24 23:27:55 krw Exp $	*/
 /*	$NetBSD: aicasm_macro_gram.y,v 1.1 2003/04/19 19:26:11 fvdl Exp $	*/
 
 /*

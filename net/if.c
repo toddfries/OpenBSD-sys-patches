@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.c,v 1.155 2007/02/14 00:53:48 jsg Exp $	*/
+/*	$OpenBSD: if.c,v 1.156 2007/03/18 23:23:17 mpf Exp $	*/
 /*	$NetBSD: if.c,v 1.35 1996/05/07 05:26:04 thorpej Exp $	*/
 
 /*
@@ -1329,6 +1329,7 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 			return (EINVAL);
 	        switch (ifp->if_type) {
 		case IFT_ETHER:
+		case IFT_CARP:
 		case IFT_FDDI:
 		case IFT_XETHER:
 		case IFT_ISO88025:
@@ -1787,6 +1788,7 @@ if_setgroupattribs(caddr_t data)
 {
 	struct ifgroupreq	*ifgr = (struct ifgroupreq *)data;
 	struct ifg_group	*ifg;
+	struct ifg_member	*ifgm;
 	int			 demote;
 
 	TAILQ_FOREACH(ifg, &ifg_head, ifg_next)
@@ -1802,6 +1804,10 @@ if_setgroupattribs(caddr_t data)
 
 	ifg->ifg_carp_demoted += demote;
 
+	TAILQ_FOREACH(ifgm, &ifg->ifg_members, ifgm_next)
+		if (ifgm->ifgm_ifp->if_ioctl)
+			ifgm->ifgm_ifp->if_ioctl(ifgm->ifgm_ifp,
+			    SIOCSIFGATTR, data);
 	return (0);
 }
 

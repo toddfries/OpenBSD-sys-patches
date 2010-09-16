@@ -1,4 +1,4 @@
-/* 	$OpenBSD: compat_dir.c,v 1.4 2003/08/14 16:55:24 fgsch Exp $	*/
+/* 	$OpenBSD: compat_dir.c,v 1.3 2002/03/14 01:26:49 millert Exp $	*/
 
 /*
  * Copyright (c) 2000 Constantine Sapuntzakis

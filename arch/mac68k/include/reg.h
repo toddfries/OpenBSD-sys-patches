@@ -1,4 +1,4 @@
-/*	$OpenBSD: reg.h,v 1.5 2001/08/25 11:37:26 espie Exp $	*/
+/*	$OpenBSD: reg.h,v 1.4 1997/11/30 06:12:35 gene Exp $	*/
 /*	$NetBSD: reg.h,v 1.10 1996/05/05 06:18:00 briggs Exp $	*/
 
 #ifndef _MAC68K_REG_H_

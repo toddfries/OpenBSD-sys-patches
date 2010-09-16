@@ -1,4 +1,4 @@
-/*   $OpenBSD: eh_common.S,v 1.22 2007/02/11 12:39:33 miod Exp $	*/
+/*   $OpenBSD: eh_common.S,v 1.21 2006/11/19 19:36:40 miod Exp $	*/
 /*
  * Mach Operating System
  * Copyright (c) 1993-1991 Carnegie Mellon University

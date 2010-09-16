@@ -1,4 +1,4 @@
-/*	$OpenBSD: clock.c,v 1.17 2006/06/19 15:13:35 deraadt Exp $ */
+/*	$OpenBSD: clock.c,v 1.16 2005/05/02 18:17:52 grange Exp $ */
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)

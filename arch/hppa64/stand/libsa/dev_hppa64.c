@@ -1,4 +1,4 @@
-/*	$OpenBSD: dev_hppa64.c,v 1.2 2005/05/29 18:53:54 miod Exp $	*/
+/*	$OpenBSD: dev_hppa64.c,v 1.1 2005/04/01 10:40:48 mickey Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff

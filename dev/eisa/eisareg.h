@@ -1,4 +1,4 @@
-/*	$OpenBSD: eisareg.h,v 1.4 1996/05/05 12:42:24 deraadt Exp $	*/
+/*	$OpenBSD: eisareg.h,v 1.3 1996/04/21 22:20:42 deraadt Exp $	*/
 /*	$NetBSD: eisareg.h,v 1.3 1996/04/09 22:46:13 cgd Exp $	*/
 
 /*

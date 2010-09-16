@@ -1,4 +1,4 @@
-/* $OpenBSD: atmel_at76c505_rfmd.h,v 1.1 2005/03/07 13:48:15 dlg Exp $ */
+/* $OpenBSD$ */
 
 /*
  *   Target:  AT76C505 with RFMD radio

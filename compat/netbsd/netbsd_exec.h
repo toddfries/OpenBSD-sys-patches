@@ -1,4 +1,4 @@
-/*	$OpenBSD: netbsd_exec.h,v 1.3 2003/06/02 23:28:00 millert Exp $	*/
+/*	$OpenBSD: netbsd_exec.h,v 1.2 2002/03/14 01:26:50 millert Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993

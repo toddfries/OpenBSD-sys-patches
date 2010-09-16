@@ -230,16 +230,16 @@ USB_ATTACH(umodem)
 				cmd = (usb_cdc_cm_descriptor_t *)desc;
 				sc->sc_cm_cap = cmd->bmCapabilities;
 				sc->sc_data_iface_no = cmd->bDataInterface;
-			break;
+				break;
 			case UDESCSUB_CDC_ACM:
 				acmd = (usb_cdc_acm_descriptor_t *)desc;
 				sc->sc_acm_cap = acmd->bmCapabilities;
-			break;
+				break;
 			case UDESCSUB_CDC_UNION:
 				uniond = (usb_cdc_union_descriptor_t *)desc;
 				sc->sc_data_iface_no =
 				    uniond->bSlaveInterface[0];
-			break;
+				break;
 			}
 		}
 		desc = usb_desc_iter_next(&iter);

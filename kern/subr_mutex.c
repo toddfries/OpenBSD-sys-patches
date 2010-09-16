@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_mutex.c,v 1.2 2006/06/04 19:08:03 miod Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * Copyright (c) 2004 Artur Grabowski <art@openbsd.org>

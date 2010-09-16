@@ -1,4 +1,4 @@
-/* $OpenBSD: ip_id.c,v 1.13 2004/06/21 23:50:37 tholo Exp $ */
+/* $OpenBSD: ip_id.c,v 1.12 2004/03/22 04:37:20 deraadt Exp $ */
 
 /*
  * Copyright 1998 Niels Provos <provos@citi.umich.edu>

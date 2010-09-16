@@ -1,4 +1,4 @@
-/*	$OpenBSD: wdt.c,v 1.14 2006/11/25 20:47:17 mbalmer Exp $	*/
+/*	$OpenBSD: wdt.c,v 1.13 2006/07/09 21:44:06 mk Exp $	*/
 
 /*-
  * Copyright (c) 1998,1999 Alex Nash

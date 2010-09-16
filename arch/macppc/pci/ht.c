@@ -1,4 +1,4 @@
-/*	$OpenBSD: ht.c,v 1.10 2006/12/14 17:36:12 kettenis Exp $	*/
+/*	$OpenBSD: ht.c,v 1.9 2006/03/13 20:10:49 brad Exp $	*/
 
 /*
  * Copyright (c) 2005 Mark Kettenis

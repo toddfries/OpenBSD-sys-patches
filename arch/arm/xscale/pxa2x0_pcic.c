@@ -1,4 +1,4 @@
-/*	$OpenBSD: pxa2x0_pcic.c,v 1.17 2005/12/14 15:08:51 uwe Exp $	*/
+/*	$OpenBSD: pxa2x0_pcic.c,v 1.16 2005/12/13 05:35:54 uwe Exp $	*/
 
 /*
  * Copyright (c) 2005 Dale Rahn <drahn@openbsd.org>

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mbr.S,v 1.20 2004/02/10 00:35:15 tom Exp $	*/
+/*	$OpenBSD: mbr.S,v 1.19 2004/01/05 00:08:23 tom Exp $	*/
 
 /*
  * Copyright (c) 1997 Michael Shalayeff and Tobias Weingartner

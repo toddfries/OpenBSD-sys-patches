@@ -1,4 +1,4 @@
-/*	$OpenBSD: mavb.c,v 1.6 2005/04/15 13:05:14 mickey Exp $	*/
+/*	$OpenBSD: mavb.c,v 1.5 2005/01/24 20:44:37 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2005 Mark Kettenis

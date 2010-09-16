@@ -1,4 +1,4 @@
-/*	$OpenBSD: endian.h,v 1.2 2005/12/13 00:35:23 millert Exp $	*/
+/*	$OpenBSD: endian.h,v 1.1 2001/08/18 04:16:40 jason Exp $	*/
 
 #ifndef _SPARC64_ENDIAN_H_
 #define _SPARC64_ENDIAN_H_

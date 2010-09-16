@@ -1,4 +1,4 @@
-/*	$OpenBSD: espvar.h,v 1.6 2006/06/02 20:00:54 miod Exp $	*/
+/*	$OpenBSD: espvar.h,v 1.5 1997/08/08 08:25:02 downsj Exp $	*/
 /*	$NetBSD: espvar.h,v 1.19 1997/02/27 01:16:21 thorpej Exp $	*/
 
 /*

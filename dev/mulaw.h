@@ -1,4 +1,4 @@
-/*	$OpenBSD: mulaw.h,v 1.12 2005/04/14 01:24:20 pascoe Exp $ */
+/*	$OpenBSD: mulaw.h,v 1.11 2004/02/23 23:59:21 deraadt Exp $ */
 /*	$NetBSD: mulaw.h,v 1.11 1999/11/01 18:12:19 augustss Exp $	*/
 
 /*-

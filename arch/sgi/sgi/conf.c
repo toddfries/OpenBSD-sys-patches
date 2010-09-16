@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.9 2005/08/01 15:43:51 miod Exp $ */
+/*	$OpenBSD: conf.c,v 1.8 2005/01/02 19:50:30 kettenis Exp $ */
 
 /*
  * Copyright (c) 1992, 1993

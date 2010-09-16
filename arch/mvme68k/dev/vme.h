@@ -1,4 +1,4 @@
-/*	$OpenBSD: vme.h,v 1.12 2005/11/24 22:43:16 miod Exp $ */
+/*	$OpenBSD: vme.h,v 1.11 2004/07/30 22:29:45 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt

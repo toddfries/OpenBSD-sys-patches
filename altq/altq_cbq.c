@@ -291,7 +291,7 @@ cbq_add_queue(struct pf_altq *a)
 		borrow = NULL;
 
 	/*
-	 * A class must borrow from it's parent or it can not
+	 * A class must borrow from its parent or it can not
 	 * borrow at all.  Hence, borrow can be null.
 	 */
 	if (parent == NULL && (opts->flags & CBQCLF_ROOTCLASS) == 0) {

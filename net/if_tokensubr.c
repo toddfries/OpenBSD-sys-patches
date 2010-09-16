@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tokensubr.c,v 1.24 2006/12/07 18:15:29 reyk Exp $	*/
+/*	$OpenBSD: if_tokensubr.c,v 1.23 2006/09/26 13:11:38 pedro Exp $	*/
 /*	$NetBSD: if_tokensubr.c,v 1.7 1999/05/30 00:39:07 bad Exp $	*/
 
 /*

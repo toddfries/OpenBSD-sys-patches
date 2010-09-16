@@ -1,4 +1,4 @@
-/*	$OpenBSD: ahd_pci.c,v 1.15 2006/10/19 10:55:56 tom Exp $	*/
+/*	$OpenBSD: ahd_pci.c,v 1.14 2006/07/11 18:50:05 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2004 Milos Urbanek, Kenneth R. Westerback & Marco Peereboom

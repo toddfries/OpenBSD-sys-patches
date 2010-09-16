@@ -1,4 +1,4 @@
-/*	$OpenBSD: pciide_machdep.c,v 1.1 2006/10/16 21:46:02 drahn Exp $	*/
+/*	$OpenBSD: pciide_machdep.c,v 1.1 2006/05/29 17:13:19 drahn Exp $	*/
 
 /*
  * Copyright (c) 1998 Christopher G. Demetriou.  All rights reserved.

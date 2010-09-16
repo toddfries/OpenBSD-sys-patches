@@ -1,4 +1,4 @@
-/*	$OpenBSD: vnode.h,v 1.74 2007/02/26 11:25:23 pedro Exp $	*/
+/*	$OpenBSD: vnode.h,v 1.76 2007/04/11 16:08:50 thib Exp $	*/
 /*	$NetBSD: vnode.h,v 1.38 1996/02/29 20:59:05 cgd Exp $	*/
 
 /*
@@ -79,14 +79,6 @@ enum vtagtype	{
  */
 LIST_HEAD(buflists, buf);
 
-/*
- * Reading or writing any of these items requires holding the appropriate lock.
- * v_freelist is locked by the global vnode_free_list simple lock.
- * v_mntvnodes is locked by the global mntvnodes simple lock.
- * v_flag, v_usecount, v_holdcount and v_writecount are
- *    locked by the v_interlock simple lock.
- */
-
 struct vnode {
 	struct uvm_vnode v_uvm;			/* uvm data */
 	int	(**v_op)(void *);		/* vnode operations vector */
@@ -113,7 +105,6 @@ struct vnode {
 		struct fifoinfo	*vu_fifoinfo;	/* fifo (VFIFO) */
 	} v_un;
 
-	struct  simplelock v_interlock;		/* lock on usecount and flag */
 	enum	vtagtype v_tag;			/* type of underlying data */
 	void	*v_data;			/* private data for fs */
 	struct {
@@ -255,13 +246,13 @@ static __inline void
 vref(vp)
 	struct vnode *vp;
 {
-	simple_lock(&vp->v_interlock);
 	vp->v_usecount++;
-	simple_unlock(&vp->v_interlock);
 }
 #endif /* DIAGNOSTIC */
 
 #define	NULLVP	((struct vnode *)NULL)
+#define	VN_KNOTE(vp, b)					\
+	KNOTE(&vp->v_selectinfo.vsi_selinfo.si_note, (b))
 
 /*
  * Global vnode data.
@@ -441,7 +432,7 @@ void	vntblinit(void);
 int	vwaitforio(struct vnode *, int, char *, int);
 void	vwakeup(struct vnode *);
 void	vput(struct vnode *);
-int	vrecycle(struct vnode *, struct simplelock *, struct proc *);
+int	vrecycle(struct vnode *, struct proc *);
 void	vrele(struct vnode *);
 void	vprint(char *, struct vnode *);
 

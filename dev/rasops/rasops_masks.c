@@ -1,4 +1,4 @@
-/*	$OpenBSD: rasops_masks.c,v 1.3 2006/08/03 18:42:06 miod Exp $	*/
+/*	$OpenBSD: rasops_masks.c,v 1.2 2002/05/28 22:10:03 fgsch Exp $	*/
 /*	$NetBSD: rasops_masks.c,v 1.5 2000/06/13 13:37:00 ad Exp $	*/
 
 /*-

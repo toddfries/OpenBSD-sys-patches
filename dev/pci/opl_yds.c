@@ -1,4 +1,4 @@
-/*	$OpenBSD: opl_yds.c,v 1.6 2006/07/27 05:55:03 miod Exp $	*/
+/*	$OpenBSD: opl_yds.c,v 1.5 2005/11/21 18:16:41 millert Exp $	*/
 /*	$NetBSD$	*/
 
 /*

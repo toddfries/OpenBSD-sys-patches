@@ -1,4 +1,4 @@
-/*	$OpenBSD: ofw_machdep.h,v 1.3 2003/06/02 16:16:27 miod Exp $	*/
+/*	$OpenBSD: ofw_machdep.h,v 1.2 2002/08/20 02:50:43 drahn Exp $	*/
 
 /*
  * Copyright (c) 2002, Miodrag Vallat.

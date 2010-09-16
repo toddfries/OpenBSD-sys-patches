@@ -1,4 +1,4 @@
-/*	$OpenBSD: sigreturn.s,v 1.3 2003/06/02 23:27:48 millert Exp $	*/
+/*	$OpenBSD: sigreturn.s,v 1.2 1997/07/06 07:46:30 downsj Exp $	*/
 /*	$NetBSD: sigreturn.s,v 1.2 1997/04/25 02:22:04 thorpej Exp $	*/
 
 /*

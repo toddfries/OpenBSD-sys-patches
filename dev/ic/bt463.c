@@ -1,4 +1,4 @@
-/* $OpenBSD: bt463.c,v 1.10 2002/11/09 22:51:48 miod Exp $ */
+/* $OpenBSD: bt463.c,v 1.9 2002/08/02 16:13:07 millert Exp $ */
 /* $NetBSD: bt463.c,v 1.2 2000/06/13 17:21:06 nathanw Exp $ */
 
 /*-

@@ -1,4 +1,4 @@
-/*	$OpenBSD: gscbusvar.h,v 1.13 2004/04/07 18:24:19 mickey Exp $	*/
+/*	$OpenBSD: gscbusvar.h,v 1.12 2004/02/13 21:28:19 mickey Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff

@@ -1,4 +1,4 @@
-/*	$OpenBSD: max2820reg.h,v 1.1 2004/12/29 01:02:31 jsg Exp $	*/
+/*	$OpenBSD$	*/
 /* $NetBSD: max2820reg.h,v 1.1 2004/09/26 02:29:15 dyoung Exp $ */
 
 /*

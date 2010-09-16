@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_srvcache.c,v 1.12 2004/12/26 21:22:14 miod Exp $	*/
+/*	$OpenBSD: nfs_srvcache.c,v 1.11 2004/07/16 15:01:51 henning Exp $	*/
 /*	$NetBSD: nfs_srvcache.c,v 1.12 1996/02/18 11:53:49 fvdl Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/* $OpenBSD: lcd.h,v 1.1 2007/01/29 14:18:00 aoyama Exp $ */
+/* $OpenBSD:$ */
 
 /* 
  * Copyright (c) 2007 Kenji AOYAMA <aoyama@nk-home.net>

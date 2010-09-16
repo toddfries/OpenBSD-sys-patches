@@ -1,4 +1,4 @@
-/*	$OpenBSD: apm.c,v 1.12 2006/01/18 23:21:17 miod Exp $	*/
+/*	$OpenBSD: apm.c,v 1.11 2005/10/15 15:01:23 martin Exp $	*/
 
 /*-
  * Copyright (c) 2001 Alexander Guy.  All rights reserved.

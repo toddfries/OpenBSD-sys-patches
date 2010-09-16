@@ -1,4 +1,4 @@
-/*	$OpenBSD: byte_swap_4.S,v 1.2 1996/10/31 00:43:15 niklas Exp $	*/
+/*	$OpenBSD: byte_swap_4.S,v 1.2 1996/10/17 04:26:22 cgd Exp $	*/
 /*	$NetBSD: byte_swap_4.S,v 1.2 1996/10/17 04:26:22 cgd Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_fe.c,v 1.25 2006/03/25 22:41:44 djm Exp $	*/
+/*	$OpenBSD: if_fe.c,v 1.24 2005/05/23 23:26:56 tedu Exp $	*/
 
 /*
  * All Rights Reserved, Copyright (C) Fujitsu Limited 1995

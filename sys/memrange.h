@@ -1,4 +1,4 @@
-/* $OpenBSD: memrange.h,v 1.4 2002/10/14 21:01:01 matthieu Exp $ */
+/* $OpenBSD: memrange.h,v 1.3 2002/03/14 01:27:14 millert Exp $ */
 /*-
  * Copyright (c) 1999 Michael Smith <msmith@freebsd.org>
  * All rights reserved.

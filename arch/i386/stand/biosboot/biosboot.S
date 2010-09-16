@@ -1,4 +1,4 @@
-/*	$OpenBSD: biosboot.S,v 1.37 2004/02/10 00:35:16 tom Exp $	*/
+/*	$OpenBSD: biosboot.S,v 1.36 2004/01/26 23:21:49 tom Exp $	*/
 
 /*
  * Copyright (c) 2003 Tobias Weingartner

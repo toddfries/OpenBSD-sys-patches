@@ -1,4 +1,4 @@
-/*	$OpenBSD: apcivar.h,v 1.1 2005/04/22 11:59:11 miod Exp $	*/
+/*	$OpenBSD$	*/
 
 /*-
  * Copyright (c) 1996, 1997, 1999 The NetBSD Foundation, Inc.

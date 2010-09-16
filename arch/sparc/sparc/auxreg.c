@@ -1,4 +1,4 @@
-/*	$OpenBSD: auxreg.c,v 1.13 2005/07/08 12:36:38 miod Exp $	*/
+/*	$OpenBSD: auxreg.c,v 1.12 2005/04/17 18:47:50 miod Exp $	*/
 /*	$NetBSD: auxreg.c,v 1.21 1997/05/24 20:15:59 pk Exp $ */
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: bugio.c,v 1.17 2006/05/02 21:43:08 miod Exp $ */
+/*	$OpenBSD: bugio.c,v 1.16 2005/12/11 21:45:31 miod Exp $ */
 /*  Copyright (c) 1998 Steve Murphree, Jr. */
 
 #include <sys/param.h>

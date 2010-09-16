@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_nfereg.h,v 1.21 2007/01/08 18:39:27 damien Exp $	*/
+/*	$OpenBSD: if_nfereg.h,v 1.20 2006/11/15 02:24:37 brad Exp $	*/
 
 /*-
  * Copyright (c) 2005 Jonathan Gray <jsg@openbsd.org>

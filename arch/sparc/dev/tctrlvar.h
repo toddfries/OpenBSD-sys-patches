@@ -1,4 +1,4 @@
-/*	$OpenBSD: tctrlvar.h,v 1.6 2005/07/19 09:36:04 miod Exp $	*/
+/*	$OpenBSD: tctrlvar.h,v 1.5 2005/03/29 12:55:55 miod Exp $	*/
 /*	$NetBSD: tctrlvar.h,v 1.1 1999/08/09 18:39:58 matt Exp $ */
 
 /*-

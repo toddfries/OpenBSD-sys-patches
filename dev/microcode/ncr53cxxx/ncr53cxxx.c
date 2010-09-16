@@ -1,4 +1,4 @@
-/*	$OpenBSD: ncr53cxxx.c,v 1.4 2003/04/06 18:54:20 ho Exp $	*/
+/*	$OpenBSD: ncr53cxxx.c,v 1.3 1996/08/31 10:49:16 pefo Exp $	*/
 
 /*
  * Copyright (c) 1995 Michael L. Hitch

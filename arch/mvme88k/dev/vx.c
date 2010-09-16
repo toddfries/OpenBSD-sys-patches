@@ -1,4 +1,4 @@
-/*	$OpenBSD: vx.c,v 1.38 2006/07/28 21:46:02 miod Exp $ */
+/*	$OpenBSD: vx.c,v 1.37 2006/05/08 14:36:10 miod Exp $ */
 /*
  * Copyright (c) 1999 Steve Murphree, Jr.
  * All rights reserved.

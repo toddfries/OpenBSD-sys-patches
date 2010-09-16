@@ -1,4 +1,4 @@
-/*	$OpenBSD: cdefs.h,v 1.8 2005/11/24 20:46:45 deraadt Exp $	*/
+/*	$OpenBSD: cdefs.h,v 1.7 2002/08/29 01:15:21 mickey Exp $	*/
 
 /*
  * Copyright (c) 1995, 1996 Carnegie-Mellon University.

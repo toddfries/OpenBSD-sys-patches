@@ -1,4 +1,4 @@
-/*	$OpenBSD: i80321_mainbus.c,v 1.10 2006/09/15 23:36:11 drahn Exp $ */
+/*	$OpenBSD: i80321_mainbus.c,v 1.9 2006/08/01 22:22:20 kettenis Exp $ */
 /*	$NetBSD: i80321_mainbus.c,v 1.16 2005/12/15 01:44:00 briggs Exp $ */
 
 /*

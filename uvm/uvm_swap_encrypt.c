@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_swap_encrypt.c,v 1.14 2005/03/26 16:06:46 deraadt Exp $	*/
+/*	$OpenBSD: uvm_swap_encrypt.c,v 1.14 2005/03/26 15:53:16 deraadt Exp $	*/
 
 /*
  * Copyright 1999 Niels Provos <provos@citi.umich.edu>

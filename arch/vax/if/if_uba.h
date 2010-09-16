@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_uba.h,v 1.7 2003/11/10 21:05:04 miod Exp $	*/
+/*	$OpenBSD: if_uba.h,v 1.6 2003/06/02 23:27:57 millert Exp $	*/
 /*	$NetBSD: if_uba.h,v 1.6 1996/08/20 14:07:50 ragge Exp $	*/
 
 /*

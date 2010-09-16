@@ -1,4 +1,4 @@
-/*	$OpenBSD: fpu_emu.h,v 1.5 2006/06/21 19:24:38 jason Exp $	*/
+/*	$OpenBSD: fpu_emu.h,v 1.4 2003/06/02 23:27:55 millert Exp $	*/
 /*	$NetBSD: fpu_emu.h,v 1.4 2000/08/03 18:32:07 eeh Exp $ */
 
 /*

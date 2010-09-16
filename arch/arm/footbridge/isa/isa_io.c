@@ -1,4 +1,4 @@
-/*	$OpenBSD: isa_io.c,v 1.2 2005/12/17 07:31:25 miod Exp $	*/
+/*	$OpenBSD: isa_io.c,v 1.1 2004/02/01 05:09:49 drahn Exp $	*/
 /*	$NetBSD: isa_io.c,v 1.2 2002/09/27 15:35:44 provos Exp $	*/
 
 /*

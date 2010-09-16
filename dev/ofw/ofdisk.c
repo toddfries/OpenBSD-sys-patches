@@ -1,4 +1,4 @@
-/*	$OpenBSD: ofdisk.c,v 1.10 2006/03/15 20:20:41 miod Exp $	*/
+/*	$OpenBSD: ofdisk.c,v 1.9 2004/11/29 12:50:05 jsg Exp $	*/
 /*	$NetBSD: ofdisk.c,v 1.3 1996/10/13 01:38:13 christos Exp $	*/
 
 /*

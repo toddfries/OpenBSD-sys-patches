@@ -1,4 +1,4 @@
-/*	$OpenBSD: pdc.c,v 1.28 2004/04/07 18:24:19 mickey Exp $	*/
+/*	$OpenBSD: pdc.c,v 1.27 2003/10/31 18:31:41 mickey Exp $	*/
 
 /*
  * Copyright (c) 1998-2003 Michael Shalayeff

@@ -1,4 +1,4 @@
-/*	$OpenBSD: getsn.c,v 1.4 2004/08/07 00:38:32 deraadt Exp $	*/
+/*	$OpenBSD: getsn.c,v 1.3 2003/06/02 15:58:42 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1996 Theo de Raadt

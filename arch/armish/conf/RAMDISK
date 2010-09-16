@@ -1,4 +1,4 @@
-# $OpenBSD: RAMDISK,v 1.9 2006/08/26 10:47:34 kettenis Exp $ 
+# $OpenBSD: RAMDISK,v 1.8 2006/08/01 22:21:00 kettenis Exp $ 
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.

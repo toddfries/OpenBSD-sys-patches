@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia.c,v 1.24 2006/09/21 09:52:45 fgsch Exp $	*/
+/*	$OpenBSD: azalia.c,v 1.23 2006/07/21 20:41:51 brad Exp $	*/
 /*	$NetBSD: azalia.c,v 1.20 2006/05/07 08:31:44 kent Exp $	*/
 
 /*-

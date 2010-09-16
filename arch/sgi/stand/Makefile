@@ -1,4 +1,4 @@
-# $OpenBSD: Makefile,v 1.4 2005/04/27 18:02:16 deraadt Exp $
+# $OpenBSD: Makefile,v 1.3 2004/08/23 14:33:34 deraadt Exp $
 
 SUBDIR=	sgivol
 

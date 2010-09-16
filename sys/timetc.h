@@ -6,7 +6,7 @@
  * this stuff is worth it, you can buy me a beer in return.   Poul-Henning Kamp
  * ----------------------------------------------------------------------------
  *
- * $OpenBSD: timetc.h,v 1.2 2006/10/30 20:19:33 otto Exp $
+ * $OpenBSD: timetc.h,v 1.1 2004/07/28 17:15:12 tholo Exp $
  * $FreeBSD: src/sys/sys/timetc.h,v 1.57 2003/04/10 23:07:24 des Exp $
  */
 

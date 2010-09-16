@@ -1,4 +1,4 @@
-/*	$OpenBSD: pccom.c,v 1.57 2007/02/15 18:39:26 mickey Exp $	*/
+/*	$OpenBSD: pccom.c,v 1.56 2006/12/28 20:50:21 miod Exp $	*/
 /*	$NetBSD: com.c,v 1.82.4.1 1996/06/02 09:08:00 mrg Exp $	*/
 
 /*

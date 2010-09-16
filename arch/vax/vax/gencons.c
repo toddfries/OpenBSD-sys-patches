@@ -1,4 +1,4 @@
-/*	$OpenBSD: gencons.c,v 1.17 2006/07/19 20:21:08 miod Exp $	*/
+/*	$OpenBSD: gencons.c,v 1.16 2006/01/01 11:59:40 miod Exp $	*/
 /*	$NetBSD: gencons.c,v 1.22 2000/01/24 02:40:33 matt Exp $	*/
 
 /*

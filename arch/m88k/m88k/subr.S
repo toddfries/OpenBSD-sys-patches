@@ -1,4 +1,4 @@
-/* $OpenBSD: subr.S,v 1.14 2006/11/18 22:48:44 miod Exp $	*/
+/* $OpenBSD: subr.S,v 1.13 2006/11/17 22:32:35 miod Exp $	*/
 /*
  * Mach Operating System
  * Copyright (c) 1993-1992 Carnegie Mellon University

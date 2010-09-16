@@ -8376,7 +8376,7 @@ Lbzero_cleanup:
 	 stb	%o1, [%o0]		!	*addr = 0;
 Lbzero_done:
 	retl
-	 mov	%o4, %o0		! Restore ponter for memset (ugh)
+	 mov	%o4, %o0		! Restore pointer for memset (ugh)
 
 #if 1
 Lbzero_block:

@@ -1,5 +1,5 @@
 
-/*	$OpenBSD: linux_cdrom.c,v 1.8 2002/03/14 01:26:50 millert Exp $	*/
+/*	$OpenBSD: linux_cdrom.c,v 1.7 2002/02/13 20:43:42 jasoni Exp $	*/
 /*
  * Copyright 1997 Niels Provos <provos@physnet.uni-hamburg.de>
  * All rights reserved.

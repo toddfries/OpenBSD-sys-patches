@@ -1,4 +1,4 @@
-/*	$OpenBSD: ps2probe.c,v 1.1 2004/03/19 13:48:18 tom Exp $	*/
+/*	$OpenBSD: ps2probe.h,v 1.3 2003/06/03 20:22:12 mickey Exp $	*/
 
 /*
  * Copyright (c) 2001 Michael Shalayeff

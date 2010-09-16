@@ -1,4 +1,4 @@
-/*	$OpenBSD: qereg.h,v 1.3 2006/05/29 20:40:03 miod Exp $	*/
+/*	$OpenBSD: qereg.h,v 1.2 2003/06/02 18:32:41 jason Exp $	*/
 /*	$NetBSD: qereg.h,v 1.3 2000/07/24 04:28:51 mycroft Exp $	*/
 
 /*-

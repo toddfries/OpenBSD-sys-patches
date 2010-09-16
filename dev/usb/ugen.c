@@ -1,4 +1,4 @@
-/*	$OpenBSD: ugen.c,v 1.36 2006/11/01 03:37:23 tedu Exp $ */
+/*	$OpenBSD: ugen.c,v 1.35 2006/06/23 06:27:11 miod Exp $ */
 /*	$NetBSD: ugen.c,v 1.63 2002/11/26 18:49:48 christos Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/ugen.c,v 1.26 1999/11/17 22:33:41 n_hibma Exp $	*/
 

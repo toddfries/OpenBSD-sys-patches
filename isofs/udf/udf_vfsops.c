@@ -1,4 +1,4 @@
-/*	$OpenBSD: udf_vfsops.c,v 1.23 2006/08/07 15:50:42 pedro Exp $	*/
+/*	$OpenBSD: udf_vfsops.c,v 1.21 2006/07/11 22:02:08 pedro Exp $	*/
 
 /*
  * Copyright (c) 2001, 2002 Scott Long <scottl@freebsd.org>

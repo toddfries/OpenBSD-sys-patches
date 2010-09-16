@@ -1,4 +1,4 @@
-/*	$OpenBSD: ext2fs_dinode.h,v 1.10 2005/10/06 17:51:27 pedro Exp $	*/
+/*	$OpenBSD: ext2fs_dinode.h,v 1.9 2005/10/06 17:43:14 pedro Exp $	*/
 /*	$NetBSD: ext2fs_dinode.h,v 1.6 2000/01/26 16:21:33 bouyer Exp $	*/
 
 /*

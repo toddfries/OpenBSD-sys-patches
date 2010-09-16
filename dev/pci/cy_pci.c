@@ -1,4 +1,4 @@
-/*	$OpenBSD: cy_pci.c,v 1.13 2004/06/13 17:30:27 pvalchev Exp $	*/
+/*	$OpenBSD: cy_pci.c,v 1.12 2002/11/19 18:40:17 jason Exp $	*/
 /*
  * Copyright (c) 1996 Timo Rossi.
  * All rights reserved.

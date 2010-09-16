@@ -1,4 +1,4 @@
-/*	$OpenBSD: dart_syscon.c,v 1.1.1.1 2006/05/09 18:13:37 miod Exp $	*/
+/*	$OpenBSD$	*/
 /*
  * Copyright (c) 2006, Miodrag Vallat
  *

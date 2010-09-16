@@ -1,4 +1,4 @@
-/*	$OpenBSD: dzms.c,v 1.7 2006/08/27 16:52:15 miod Exp $	*/
+/*	$OpenBSD: dzms.c,v 1.6 2006/07/31 18:50:13 miod Exp $	*/
 /*	$NetBSD: dzms.c,v 1.1 2000/12/02 17:03:55 ragge Exp $	*/
 
 /*

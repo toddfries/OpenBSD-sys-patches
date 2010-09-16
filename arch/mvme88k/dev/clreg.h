@@ -1,4 +1,4 @@
-/*	$OpenBSD: clreg.h,v 1.6 2004/04/24 19:51:47 miod Exp $ */
+/*	$OpenBSD: clreg.h,v 1.5 2004/01/05 20:08:01 miod Exp $ */
 
 /* Copyright (c) 1998 Steve Murphree, Jr.
  * Copyright (c) 1995 Dale Rahn. All rights reserved.

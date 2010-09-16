@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_machdep.h,v 1.9 2002/03/14 01:26:33 millert Exp $	*/
+/*	$OpenBSD: linux_machdep.h,v 1.8 2001/04/07 21:44:02 tholo Exp $	*/
 /*	$NetBSD: linux_machdep.h,v 1.5 1996/05/03 19:26:28 christos Exp $	*/
 
 /*

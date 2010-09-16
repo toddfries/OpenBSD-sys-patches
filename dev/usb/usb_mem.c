@@ -1,4 +1,4 @@
-/*	$OpenBSD: usb_mem.c,v 1.16 2004/07/08 22:18:44 deraadt Exp $ */
+/*	$OpenBSD: usb_mem.c,v 1.15 2003/08/06 20:43:12 millert Exp $ */
 /*	$NetBSD: usb_mem.c,v 1.26 2003/02/01 06:23:40 thorpej Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: msg.h,v 1.13 2004/07/15 11:24:46 millert Exp $	*/
+/*	$OpenBSD: msg.h,v 1.12 2004/07/14 23:45:11 millert Exp $	*/
 /*	$NetBSD: msg.h,v 1.9 1996/02/09 18:25:18 christos Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ether.c,v 1.7 2003/08/11 06:23:09 deraadt Exp $	*/
+/*	$OpenBSD: ether.c,v 1.6 2003/06/01 17:00:32 deraadt Exp $	*/
 /*	$NetBSD: ether.c,v 1.8 1996/10/13 02:29:00 christos Exp $	*/
 
 /*

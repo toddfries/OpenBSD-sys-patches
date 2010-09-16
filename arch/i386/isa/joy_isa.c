@@ -1,4 +1,4 @@
-/*	$OpenBSD: joy_isa.c,v 1.6 2006/09/19 11:06:34 jsg Exp $	*/
+/*	$OpenBSD: joy_isa.c,v 1.5 2002/06/02 22:49:59 deraadt Exp $	*/
 /*	$NetBSD: joy.c,v 1.3 1996/05/05 19:46:15 christos Exp $	*/
 
 /*-

@@ -1,4 +1,4 @@
-/*	$OpenBSD: time.h,v 1.24 2006/06/29 23:09:03 deraadt Exp $	*/
+/*	$OpenBSD: time.h,v 1.23 2006/06/19 15:13:35 deraadt Exp $	*/
 /*	$NetBSD: time.h,v 1.18 1996/04/23 10:29:33 mycroft Exp $	*/
 
 /*

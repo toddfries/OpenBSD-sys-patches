@@ -1,4 +1,4 @@
-/*	$OpenBSD: wsksymdef.h,v 1.31 2006/07/20 10:44:40 mickey Exp $	*/
+/*	$OpenBSD: wsksymdef.h,v 1.30 2006/05/29 20:23:13 miod Exp $	*/
 /*	$NetBSD: wsksymdef.h,v 1.34.4.1 2000/07/07 09:49:54 hannken Exp $ */
 
 /*-

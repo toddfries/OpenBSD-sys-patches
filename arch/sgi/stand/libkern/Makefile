@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.5 2005/07/21 13:23:01 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.4 2004/09/23 12:55:58 pefo Exp $
 
 LIB=	kern
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_uathreg.h,v 1.2 2006/09/18 16:34:23 damien Exp $	*/
+/*	$OpenBSD: if_uathreg.h,v 1.1 2006/09/16 13:21:24 damien Exp $	*/
 
 /*-
  * Copyright (c) 2006

@@ -1,4 +1,4 @@
-/*	$OpenBSD: hp300spu.h,v 1.7 2005/09/27 22:05:37 miod Exp $	*/
+/*	$OpenBSD: hp300spu.h,v 1.6 2003/02/11 19:20:26 mickey Exp $	*/
 /*	$NetBSD: hp300spu.h,v 1.2 1997/05/01 05:26:48 thorpej Exp $	*/
 
 /*-

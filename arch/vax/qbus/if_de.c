@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_de.c,v 1.7 2006/03/25 22:41:42 djm Exp $ */
+/*	$OpenBSD: if_de.c,v 1.6 2006/01/17 20:26:16 miod Exp $ */
 /*	$NetBSD: if_de.c,v 1.11 2001/11/13 07:11:24 lukem Exp $	*/
 
 /*

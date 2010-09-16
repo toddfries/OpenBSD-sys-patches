@@ -678,7 +678,7 @@ ed_find_WD80x3(sc, cf, ia)
 	delay(100);
 	bus_space_write_1(iot, ioh, asicbase + ED_WD_MSR,
 	    bus_space_read_1(iot, ioh, asicbase + ED_WD_MSR) & ~ED_WD_MSR_RST);
-	/* Wait in the case this card is reading it's EEROM. */
+	/* Wait in the case this card is reading its EEROM. */
 	delay(5000);
 
 	sc->vendor = ED_VENDOR_WD_SMC;

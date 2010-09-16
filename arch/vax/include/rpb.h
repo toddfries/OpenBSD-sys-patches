@@ -1,4 +1,4 @@
-/*	$OpenBSD: rpb.h,v 1.10 2002/06/11 09:36:24 hugh Exp $ */
+/*	$OpenBSD: rpb.h,v 1.9 2002/03/15 01:20:04 millert Exp $ */
 /*	$NetBSD: rpb.h,v 1.6 1998/07/01 09:37:11 ragge Exp $ */
 /*
  * Copyright (c) 1995 Ludd, University of Lule}, Sweden.

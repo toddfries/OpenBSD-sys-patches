@@ -1,4 +1,4 @@
-/*	$OpenBSD: m88110.h,v 1.17 2004/06/22 04:55:35 miod Exp $ */
+/*	$OpenBSD: m88110.h,v 1.16 2004/01/13 23:24:10 miod Exp $ */
 
 #ifndef	__MACHINE_M88110_H__
 #define	__MACHINE_M88110_H__

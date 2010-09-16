@@ -1,4 +1,4 @@
-/*	$OpenBSD: openfirm.c,v 1.8 2004/02/16 04:57:50 drahn Exp $	*/
+/*	$OpenBSD: openfirm.c,v 1.7 2004/01/11 16:22:30 drahn Exp $	*/
 /*	$NetBSD: openfirm.c,v 1.1 1996/09/30 16:34:52 ws Exp $	*/
 
 /*

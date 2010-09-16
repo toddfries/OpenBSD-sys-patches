@@ -72,7 +72,7 @@
 
 /*
  * Each row in the array is a distinct parity group, so
- * each has it's own status, which is one of the following.
+ * each has its own status, which is one of the following.
  */
 typedef enum RF_RowStatus_e {
 	rf_rs_optimal,

@@ -1,4 +1,4 @@
-/*	$OpenBSD: gscsioreg.h,v 1.2 2004/11/17 16:53:05 mickey Exp $	*/
+/*	$OpenBSD: gscsioreg.h,v 1.1 2004/05/23 17:41:09 grange Exp $	*/
 /*
  * Copyright (c) 2004 Alexander Yurchenko <grange@openbsd.org>
  *

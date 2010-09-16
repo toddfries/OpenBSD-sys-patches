@@ -1,4 +1,4 @@
-/*	$OpenBSD: boot.c,v 1.32 2004/06/24 22:32:26 tom Exp $	*/
+/*	$OpenBSD: boot.c,v 1.31 2004/06/24 17:10:17 tom Exp $	*/
 
 /*
  * Copyright (c) 2003 Dale Rahn

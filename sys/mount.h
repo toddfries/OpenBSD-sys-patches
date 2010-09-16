@@ -94,11 +94,14 @@ struct iso_args {
 	char	*fspec;			/* block special device to mount */
 	struct	export_args export_info;/* network export info */
 	int	flags;			/* mounting flags, see below */
+	int	sess;			/* start sector of session */
 };
-#define	ISOFSMNT_NORRIP	0x00000001	/* disable Rock Ridge Ext.*/
-#define	ISOFSMNT_GENS	0x00000002	/* enable generation numbers */
-#define	ISOFSMNT_EXTATT	0x00000004	/* enable extended attributes */
-#define	ISOFSMNT_NOJOLIET 0x00000008	/* disable Joliet Ext.*/
+
+#define	ISOFSMNT_NORRIP		0x00000001	/* disable Rock Ridge Ext.*/
+#define	ISOFSMNT_GENS		0x00000002	/* enable generation numbers */
+#define	ISOFSMNT_EXTATT		0x00000004	/* enable extended attr. */
+#define	ISOFSMNT_NOJOLIET	0x00000008	/* disable Joliet Ext.*/
+#define	ISOFSMNT_SESS		0x00000010	/* use iso_args.sess */
 
 /*
  * Arguments to mount NFS

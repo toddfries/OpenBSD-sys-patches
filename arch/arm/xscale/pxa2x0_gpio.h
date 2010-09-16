@@ -1,4 +1,4 @@
-/*	$OpenBSD: pxa2x0_gpio.h,v 1.5 2005/04/08 21:50:37 uwe Exp $ */
+/*	$OpenBSD: pxa2x0_gpio.h,v 1.4 2005/02/22 23:54:28 drahn Exp $ */
 /*	$wasabi$	*/
 
 /*

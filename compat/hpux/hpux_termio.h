@@ -1,4 +1,4 @@
-/*	$OpenBSD: hpux_termio.h,v 1.5 2003/06/02 23:28:00 millert Exp $	*/
+/*	$OpenBSD: hpux_termio.h,v 1.4 2002/03/14 01:26:49 millert Exp $	*/
 /*	$NetBSD: hpux_termio.h,v 1.7 1997/04/01 19:59:04 scottr Exp $	*/
 
 /*

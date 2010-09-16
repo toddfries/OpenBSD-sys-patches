@@ -1,4 +1,4 @@
-/*	$OpenBSD: sdmmc_io.c,v 1.6 2006/07/18 04:10:35 uwe Exp $	*/
+/*	$OpenBSD: sdmmc_io.c,v 1.5 2006/06/19 21:14:30 miod Exp $	*/
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>

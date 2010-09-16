@@ -1,4 +1,4 @@
-/* $OpenBSD: kvm86.c,v 1.3 2007/02/20 21:15:01 tom Exp $ */
+/* $OpenBSD: kvm86.c,v 1.2 2006/11/27 16:00:19 gwk Exp $ */
 /* $NetBSD: kvm86.c,v 1.10 2005/12/26 19:23:59 perry Exp $ */
 /*
  * Copyright (c) 2002

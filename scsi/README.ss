@@ -1,4 +1,4 @@
-$OpenBSD: README.ss,v 1.6 1997/03/11 15:46:01 kstailey Exp $
+$OpenBSD: README.ss,v 1.5 1997/03/11 03:40:49 kstailey Exp $
 
 If you think SCSI tape drives are quirky you haven't seen anything.
 

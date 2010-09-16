@@ -1,4 +1,4 @@
-/*	$OpenBSD: undefined.c,v 1.3 2006/12/24 20:30:35 miod Exp $	*/
+/*	$OpenBSD: undefined.c,v 1.2 2004/02/23 19:09:57 drahn Exp $	*/
 /*	$NetBSD: undefined.c,v 1.22 2003/11/29 22:21:29 bjh21 Exp $	*/
 
 /*

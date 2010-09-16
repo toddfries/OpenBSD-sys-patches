@@ -1,4 +1,4 @@
-/* $OpenBSD: tcvar.h,v 1.12 2004/06/28 02:28:43 aaron Exp $ */
+/* $OpenBSD: tcvar.h,v 1.11 2003/04/27 11:22:54 ho Exp $ */
 /* $NetBSD: tcvar.h,v 1.17 2000/06/04 19:15:15 cgd Exp $ */
 
 /*

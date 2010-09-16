@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpcpcibus.c,v 1.36 2006/12/14 17:36:12 kettenis Exp $ */
+/*	$OpenBSD: mpcpcibus.c,v 1.35 2006/12/05 20:48:23 gwk Exp $ */
 
 /*
  * Copyright (c) 1997 Per Fogelstrom

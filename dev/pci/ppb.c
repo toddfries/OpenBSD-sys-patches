@@ -1,4 +1,4 @@
-/*	$OpenBSD: ppb.c,v 1.18 2007/02/13 18:35:32 tom Exp $	*/
+/*	$OpenBSD: ppb.c,v 1.17 2006/12/14 17:36:12 kettenis Exp $	*/
 /*	$NetBSD: ppb.c,v 1.16 1997/06/06 23:48:05 thorpej Exp $	*/
 
 /*

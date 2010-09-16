@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_rumreg.h,v 1.13 2006/11/13 20:06:38 damien Exp $	*/
+/*	$OpenBSD: if_rumreg.h,v 1.12 2006/08/09 08:21:08 damien Exp $	*/
 
 /*-
  * Copyright (c) 2005, 2006 Damien Bergamini <damien.bergamini@free.fr>

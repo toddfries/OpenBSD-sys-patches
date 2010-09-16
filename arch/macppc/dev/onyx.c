@@ -1,4 +1,4 @@
-/*	$OpenBSD: onyx.c,v 1.6 2005/12/28 10:08:07 kettenis Exp $	*/
+/*	$OpenBSD: onyx.c,v 1.5 2005/12/17 00:04:10 kettenis Exp $	*/
 
 /*-
  * Copyright (c) 2005 Tsubai Masanari.  All rights reserved.

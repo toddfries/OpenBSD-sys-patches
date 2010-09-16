@@ -1,4 +1,4 @@
-/*	$OpenBSD: ess.c,v 1.11 2006/02/22 19:43:42 miod Exp $	*/
+/*	$OpenBSD: ess.c,v 1.10 2005/04/15 13:05:14 mickey Exp $	*/
 /*	$NetBSD: ess.c,v 1.44.4.1 1999/06/21 01:18:00 thorpej Exp $	*/
 
 /*

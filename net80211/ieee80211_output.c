@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_output.c,v 1.23 2006/12/25 19:24:26 reyk Exp $	*/
+/*	$OpenBSD: ieee80211_output.c,v 1.22 2006/11/03 19:02:08 damien Exp $	*/
 /*	$NetBSD: ieee80211_output.c,v 1.13 2004/05/31 11:02:55 dyoung Exp $	*/
 
 /*-

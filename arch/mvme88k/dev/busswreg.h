@@ -1,4 +1,4 @@
-/*	$OpenBSD: busswreg.h,v 1.7 2005/12/11 21:31:36 miod Exp $ */
+/*	$OpenBSD: busswreg.h,v 1.6 2004/04/24 19:51:47 miod Exp $ */
 
 /*
  * Memory map for BusSwitch chip found in mvme197 boards.

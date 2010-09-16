@@ -1037,7 +1037,7 @@ ext2fs_mkdir(v)
 		ip->i_flag |= IN_CHANGE;
 	}
 
-	/* Directory set up, now install it's entry in the parent directory. */
+	/* Directory set up, now install its entry in the parent directory. */
 	error = ext2fs_direnter(ip, dvp, cnp);
 	if (error != 0) {
 		dp->i_e2fs_nlink--;

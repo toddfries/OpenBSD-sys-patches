@@ -1,6 +1,6 @@
 #ifndef _M88K_MUTEX_H_
 #define _M88K_MUTEX_H_
-/*	$OpenBSD: mutex.h,v 1.1 2005/12/03 19:01:14 miod Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * Copyright (c) 2005, Miodrag Vallat.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: bug.h,v 1.9 2002/03/14 01:26:39 millert Exp $ */
+/*	$OpenBSD: bug.h,v 1.8 2001/11/27 05:36:40 miod Exp $ */
 
 #ifndef _MACHINE_BUG_H_
 #define _MACHINE_BUG_H_

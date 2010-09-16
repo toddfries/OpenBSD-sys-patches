@@ -96,7 +96,7 @@ osf1_sys_setgid(p, v, retval)
 		pc->p_rgid = gid;
 		pc->p_svgid = gid;
 	}
-	p->p_flag |= P_SUGID;
+	atomic_setbits_int(&p->p_flag, P_SUGID);
 	return (0);
 }
 
@@ -137,6 +137,6 @@ osf1_sys_setuid(p, v, retval)
 		pc->p_ruid = uid;
 		pc->p_svuid = uid;
 	}
-	p->p_flag |= P_SUGID;
+	atomic_setbits_int(&p->p_flag, P_SUGID);
 	return (0);
 }

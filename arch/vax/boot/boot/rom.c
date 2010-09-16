@@ -1,4 +1,4 @@
-/*	$OpenBSD: rom.c,v 1.4 2002/06/11 09:36:23 hugh Exp $ */
+/*	$OpenBSD$ */
 /*	$NetBSD: rom.c,v 1.3 2000/07/19 00:58:25 matt Exp $ */
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.

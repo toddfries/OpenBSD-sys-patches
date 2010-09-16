@@ -1,4 +1,4 @@
-/*	$OpenBSD: init_sysent.c,v 1.98 2006/09/22 17:36:17 pedro Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * System call switch table.

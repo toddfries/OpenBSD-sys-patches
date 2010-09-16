@@ -156,7 +156,9 @@
 #define	ENEEDAUTH	81		/* Need authenticator */
 #define	EIPSEC		82		/* IPsec processing failure */
 #define	ENOATTR		83		/* Attribute not found */
+#endif
 #define	EILSEQ		84		/* Illegal byte sequence */
+#if __BSD_VISIBLE
 #define	ENOMEDIUM	85		/* No medium found */
 #define	EMEDIUMTYPE	86		/* Wrong Medium Type */
 #define	ELAST		86		/* Must be equal largest errno */

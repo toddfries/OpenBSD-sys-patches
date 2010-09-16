@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wi_obio.c,v 1.15 2006/06/19 22:42:33 miod Exp $	*/
+/*	$OpenBSD: if_wi_obio.c,v 1.14 2005/10/31 05:37:13 jsg Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999

@@ -1,4 +1,4 @@
-/*	$OpenBSD: apmvar.h,v 1.1 2005/03/29 16:26:44 miod Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  *  Copyright (c) 1995 John T. Kohl

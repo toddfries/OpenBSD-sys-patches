@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.1 2006/05/16 22:48:18 miod Exp $
+#	$OpenBSD: Makefile.inc,v 1.2 1998/08/22 07:39:52 smurph Exp $
 
 LIB_PROM_DIR=${S}/arch/aviion/stand/libprom
 

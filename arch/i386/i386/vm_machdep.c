@@ -150,6 +150,7 @@ cpu_exit(struct proc *p)
 		npxsave_proc(p, 0);
 #endif
 
+	pmap_deactivate(p);
 	switch_exit(p);
 }
 

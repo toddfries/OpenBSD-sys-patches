@@ -1,4 +1,4 @@
-/*	$OpenBSD: atwvar.h,v 1.12 2006/06/27 04:25:12 jsg Exp $	*/
+/*	$OpenBSD: atwvar.h,v 1.11 2006/02/17 11:07:44 jsg Exp $	*/
 /*	$NetBSD: atwvar.h,v 1.13 2004/07/23 07:07:55 dyoung Exp $	*/
 
 /*

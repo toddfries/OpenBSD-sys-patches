@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipx_ip.h,v 1.4 2003/06/02 23:28:16 millert Exp $	*/
+/*	$OpenBSD: ipx_ip.h,v 1.3 2002/03/14 01:27:12 millert Exp $	*/
 
 /*-
  *

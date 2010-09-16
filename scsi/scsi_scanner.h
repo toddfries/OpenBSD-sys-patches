@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsi_scanner.h,v 1.10 2005/12/10 01:30:13 deraadt Exp $	*/
+/*	$OpenBSD: scsi_scanner.h,v 1.9 2001/06/22 14:35:43 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1995 Kenneth Stailey.  All rights reserved.

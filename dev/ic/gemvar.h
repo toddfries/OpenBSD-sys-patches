@@ -1,4 +1,4 @@
-/*	$OpenBSD: gemvar.h,v 1.16 2006/12/21 22:13:36 jason Exp $	*/
+/*	$OpenBSD: gemvar.h,v 1.15 2006/11/25 02:12:04 brad Exp $	*/
 /*	$NetBSD: gemvar.h,v 1.1 2001/09/16 00:11:43 eeh Exp $ */
 
 /*

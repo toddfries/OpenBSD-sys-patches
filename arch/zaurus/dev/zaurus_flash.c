@@ -1,4 +1,4 @@
-/*	$OpenBSD: zaurus_flash.c,v 1.1 2006/11/25 14:31:59 uwe Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * Copyright (c) 2005 Uwe Stuehler <uwe@openbsd.org>

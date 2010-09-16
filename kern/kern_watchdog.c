@@ -1,4 +1,4 @@
-/*      $OpenBSD: kern_watchdog.c,v 1.7 2006/12/21 12:47:57 mbalmer Exp $        */
+/*      $OpenBSD: kern_watchdog.c,v 1.6 2006/09/19 21:43:13 mk Exp $        */
 
 /*
  * Copyright (c) 2003 Markus Friedl.  All rights reserved.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cmpci.c,v 1.14 2006/07/27 00:45:59 brad Exp $	*/
+/*	$OpenBSD: cmpci.c,v 1.13 2005/04/14 12:42:16 mickey Exp $	*/
 /*	$NetBSD: cmpci.c,v 1.25 2004/10/26 06:32:20 xtraeme Exp $	*/
 
 /*

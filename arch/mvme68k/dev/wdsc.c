@@ -1,4 +1,4 @@
-/*	$OpenBSD: wdsc.c,v 1.14 2006/11/28 23:59:45 dlg Exp $ */
+/*	$OpenBSD: wdsc.c,v 1.13 2006/04/22 11:37:06 miod Exp $ */
 
 /*
  * Copyright (c) 1996 Steve Woodford

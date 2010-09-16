@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_devar.h,v 1.27 2006/07/08 04:15:36 brad Exp $	*/
+/*	$OpenBSD: if_devar.h,v 1.26 2006/05/31 02:45:42 brad Exp $	*/
 /*	$NetBSD: if_devar.h,v 1.13 1997/06/08 18:46:36 thorpej Exp $	*/
 
 /*-

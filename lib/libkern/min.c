@@ -1,4 +1,4 @@
-/*	$OpenBSD: min.c,v 1.4 2004/08/07 00:38:32 deraadt Exp $	*/
+/*	$OpenBSD: min.c,v 1.3 2003/06/02 23:28:08 millert Exp $	*/
 /*	$NetBSD: min.c,v 1.3 1996/03/14 18:52:13 christos Exp $	*/
 
 /*

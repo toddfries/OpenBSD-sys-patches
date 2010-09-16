@@ -1,4 +1,4 @@
-/*	$OpenBSD: altq_subr.c,v 1.21 2006/12/20 17:50:40 gwk Exp $	*/
+/*	$OpenBSD: altq_subr.c,v 1.20 2006/03/04 22:40:15 brad Exp $	*/
 /*	$KAME: altq_subr.c,v 1.11 2002/01/11 08:11:49 kjc Exp $	*/
 
 /*

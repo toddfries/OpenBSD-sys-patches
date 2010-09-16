@@ -1,4 +1,4 @@
-/*	$OpenBSD: ibcs2_utsname.h,v 1.2 1996/08/02 20:35:19 niklas Exp $	*/
+/*	$OpenBSD: ibcs2_utsname.h,v 1.2 1994/10/26 02:53:14 cgd Exp $	*/
 /*	$NetBSD: ibcs2_utsname.h,v 1.2 1994/10/26 02:53:14 cgd Exp $	*/
 
 /*

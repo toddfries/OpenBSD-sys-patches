@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcmciachip.h,v 1.8 2005/11/23 11:39:37 mickey Exp $ */
+/*	$OpenBSD: pcmciachip.h,v 1.7 2005/01/27 17:03:23 millert Exp $ */
 /*	$NetBSD: pcmciachip.h,v 1.5 2000/01/13 08:58:51 joda Exp $	*/
 
 /*

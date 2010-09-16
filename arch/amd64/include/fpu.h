@@ -1,4 +1,4 @@
-/*	$OpenBSD: fpu.h,v 1.3 2006/10/01 10:52:10 kettenis Exp $	*/
+/*	$OpenBSD: fpu.h,v 1.2 2004/02/28 22:26:05 deraadt Exp $	*/
 /*	$NetBSD: fpu.h,v 1.1 2003/04/26 18:39:40 fvdl Exp $	*/
 
 #ifndef	_AMD64_FPU_H_

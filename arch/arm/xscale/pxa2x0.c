@@ -1,4 +1,4 @@
-/*	$OpenBSD: pxa2x0.c,v 1.11 2005/11/11 23:59:58 deraadt Exp $ */
+/*	$OpenBSD: pxa2x0.c,v 1.10 2005/10/31 05:23:32 deraadt Exp $ */
 /*	$NetBSD: pxa2x0.c,v 1.5 2003/12/12 16:42:44 thorpej Exp $ */
 
 /*

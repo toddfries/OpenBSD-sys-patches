@@ -1,4 +1,4 @@
-/*	$OpenBSD: sdhcreg.h,v 1.4 2006/07/30 17:20:40 fgsch Exp $	*/
+/*	$OpenBSD: sdhcreg.h,v 1.3 2006/07/30 17:09:51 fgsch Exp $	*/
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>

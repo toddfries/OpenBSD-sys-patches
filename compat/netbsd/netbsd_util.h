@@ -1,4 +1,4 @@
-/*	$OpenBSD: netbsd_util.h,v 1.1 1999/09/12 14:15:17 kstailey Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD: freebsd_util.h,v 1.1 1995/10/10 01:19:38 mycroft Exp $	*/
 
 /*

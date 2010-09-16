@@ -486,7 +486,7 @@ struct bss_join_hdr {
 #define BSS_JOIN_BUFLEN		\
 	(sizeof(struct bss_join_hdr) + IEEE80211_NWID_LEN - 1)
 #define BSS_JOIN_PARAM_SIZE(bj)	\
-	(sizeof(struct bss_join_hdr) + (bj)->esslen)
+	(sizeof(struct bss_join_hdr) + (bj)->esslen - 1)
 
 
 #define PCIR_BAR(x)     (PCI_MAPS + (x) * 4)

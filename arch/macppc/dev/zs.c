@@ -1,4 +1,4 @@
-/*	$OpenBSD: zs.c,v 1.14 2007/01/14 18:50:23 martin Exp $	*/
+/*	$OpenBSD: zs.c,v 1.13 2006/06/19 22:42:33 miod Exp $	*/
 /*	$NetBSD: zs.c,v 1.17 2001/06/19 13:42:15 wiz Exp $	*/
 
 /*

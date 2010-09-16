@@ -1,5 +1,5 @@
 %{
-/*	$OpenBSD: aicasm_scan.l,v 1.9 2004/09/18 19:51:53 mickey Exp $	*/
+/*	$OpenBSD: aicasm_scan.l,v 1.8 2004/06/12 03:37:20 krw Exp $	*/
 /*
  * Lexical Analyzer for the Aic7xxx SCSI Host adapter sequencer assembler.
  *

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.5 2002/02/04 22:17:56 mickey Exp $
+#	$OpenBSD: Makefile.inc,v 1.4 2001/03/29 03:58:17 mickey Exp $
 #
 #	NOTE:	$S must correspond to the top of the 'sys' tree
 #		$HPPA must correspond to the top of hppa tree

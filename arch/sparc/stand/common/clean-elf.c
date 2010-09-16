@@ -1,4 +1,4 @@
-/*	$OpenBSD: clean-elf.c,v 1.2 2003/11/03 07:01:33 david Exp $	*/
+/*	$OpenBSD: clean-elf.c,v 1.1 2002/08/11 12:19:47 art Exp $	*/
 /*
  * Public domain. I don't even want my name on this.
  */

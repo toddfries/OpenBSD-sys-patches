@@ -132,7 +132,7 @@ bio_lookup(char *name)
 {
 	struct bio_mapping *bm;
 
-	for (bm = LIST_FIRST(&bios); bm != NULL; bm = LIST_NEXT(bm, bm_link))
+	LIST_FOREACH(bm, &bios, bm_link)
 		if (strcmp(name, bm->bm_dev->dv_xname) == 0)
 			return (bm);
 	return (NULL);
@@ -143,7 +143,7 @@ bio_validate(void *cookie)
 {
 	struct bio_mapping *bm;
 
-	for (bm = LIST_FIRST(&bios); bm != NULL; bm = LIST_NEXT(bm, bm_link))
+	LIST_FOREACH(bm, &bios, bm_link)
 		if (bm == cookie)
 			return (1);
 	return (0);

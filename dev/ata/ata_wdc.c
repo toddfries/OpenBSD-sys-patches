@@ -1,4 +1,4 @@
-/*      $OpenBSD: ata_wdc.c,v 1.30 2007/02/14 00:53:47 jsg Exp $	*/
+/*      $OpenBSD: ata_wdc.c,v 1.29 2006/10/04 00:52:55 krw Exp $	*/
 /*	$NetBSD: ata_wdc.c,v 1.21 1999/08/09 09:43:11 bouyer Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_rum.c,v 1.54 2007/02/19 17:22:02 deraadt Exp $	*/
+/*	$OpenBSD: if_rum.c,v 1.53 2007/02/08 06:19:31 jsg Exp $	*/
 
 /*-
  * Copyright (c) 2005-2007 Damien Bergamini <damien.bergamini@free.fr>

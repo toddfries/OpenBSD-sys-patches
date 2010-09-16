@@ -1,4 +1,4 @@
-/*	$OpenBSD: umass_scsi.c,v 1.15 2006/11/30 10:05:32 deraadt Exp $ */
+/*	$OpenBSD: umass_scsi.c,v 1.14 2006/11/28 23:59:45 dlg Exp $ */
 /*	$NetBSD: umass_scsipi.c,v 1.9 2003/02/16 23:14:08 augustss Exp $	*/
 /*
  * Copyright (c) 2001 The NetBSD Foundation, Inc.

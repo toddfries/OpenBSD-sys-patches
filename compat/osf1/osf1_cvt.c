@@ -1,4 +1,4 @@
-/* $OpenBSD: osf1_cvt.c,v 1.3 2006/02/16 20:32:33 miod Exp $ */
+/* $OpenBSD: osf1_cvt.c,v 1.2 2001/11/06 19:53:17 miod Exp $ */
 /* $NetBSD: osf1_cvt.c,v 1.7 1999/06/26 01:23:23 cgd Exp $ */
 
 /*

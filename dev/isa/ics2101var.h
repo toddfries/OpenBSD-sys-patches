@@ -1,4 +1,4 @@
-/* $OpenBSD: ics2101var.h,v 1.4 2002/03/14 01:26:56 millert Exp $ */
+/* $OpenBSD: ics2101var.h,v 1.3 1998/04/26 21:02:45 provos Exp $ */
 /* $NetBSD: ics2101var.h,v 1.5 1997/10/09 07:57:24 jtc Exp $ */
 
 /*-

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ef_isapnp.c,v 1.21 2006/03/25 22:41:44 djm Exp $	*/
+/*	$OpenBSD: if_ef_isapnp.c,v 1.20 2005/11/21 18:16:40 millert Exp $	*/
 
 /*
  * Copyright (c) 1999 Jason L. Wright (jason@thought.net)

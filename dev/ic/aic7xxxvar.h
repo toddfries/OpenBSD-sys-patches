@@ -1,4 +1,4 @@
-/*	$OpenBSD: aic7xxxvar.h,v 1.22 2006/03/04 19:33:21 miod Exp $	*/
+/*	$OpenBSD: aic7xxxvar.h,v 1.21 2005/12/28 03:00:07 krw Exp $	*/
 /*
  * Core definitions and data structures shareable across OS platforms.
  *

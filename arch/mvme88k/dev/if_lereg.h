@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_lereg.h,v 1.5 2006/04/27 06:27:03 miod Exp $ */
+/*	$OpenBSD: if_lereg.h,v 1.4 2006/04/26 21:06:08 miod Exp $ */
 
 /*-
  * Copyright (c) 1982, 1992, 1993

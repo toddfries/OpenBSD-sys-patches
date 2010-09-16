@@ -1,4 +1,4 @@
-/*	$OpenBSD: ioasicvar.h,v 1.7 2004/06/28 02:28:43 aaron Exp $	*/
+/*	$OpenBSD: ioasicvar.h,v 1.6 2002/05/02 22:56:06 miod Exp $	*/
 /*	$NetBSD: ioasicvar.h,v 1.14 2000/10/17 09:45:49 nisimura Exp $	*/
 
 /*

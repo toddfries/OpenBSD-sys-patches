@@ -1,4 +1,4 @@
-/*	$OpenBSD: sunos_exec.h,v 1.2 2003/06/02 15:54:31 deraadt Exp $	*/
+/*	$OpenBSD: sunos_exec.h,v 1.1 2000/08/15 17:26:05 brad Exp $	*/
 /*	$NetBSD: exec.h,v 1.4 1994/10/25 23:03:22 deraadt Exp $	*/
 
 /*

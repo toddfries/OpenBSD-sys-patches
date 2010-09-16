@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpiprt.c,v 1.16 2007/02/23 00:04:40 jordan Exp $	*/
+/*	$OpenBSD: acpiprt.c,v 1.15 2007/02/21 19:17:23 kettenis Exp $	*/
 /*
  * Copyright (c) 2006 Mark Kettenis <kettenis@openbsd.org>
  *

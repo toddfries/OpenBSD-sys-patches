@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.7 1997/04/22 16:05:38 gvf Exp $
+#	$OpenBSD: Makefile,v 1.6 1996/05/16 02:21:58 chuck Exp $
 #
 # DO NOT OPTMIZE bugcrt (i.e. no "-O2")
 #

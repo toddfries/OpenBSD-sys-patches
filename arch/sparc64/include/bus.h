@@ -350,8 +350,6 @@ bus_space_barrier(t, h, o, s, f)
 #define	BUS_SPACE_BARRIER_READ	0x01		/* force read barrier */
 #define	BUS_SPACE_BARRIER_WRITE	0x02		/* force write barrier */
 
-#define BUS_SPACE_ALIGNED_POINTER(p, t) ALIGNED_POINTER(p, t)
-
 /*
  * Flags used in various bus DMA methods.
  */

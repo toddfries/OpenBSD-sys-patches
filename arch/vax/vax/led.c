@@ -1,4 +1,4 @@
-/*	$OpenBSD: led.c,v 1.4 2006/08/27 16:55:41 miod Exp $	*/
+/*	$OpenBSD: led.c,v 1.3 2006/08/01 18:08:55 deraadt Exp $	*/
 /*	$NetBSD: leds.c,v 1.4 2005/12/11 12:19:37 christos Exp $	*/
 
 /*

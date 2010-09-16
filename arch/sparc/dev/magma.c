@@ -1,4 +1,4 @@
-/*	$OpenBSD: magma.c,v 1.19 2004/11/02 21:16:10 miod Exp $	*/
+/*	$OpenBSD: magma.c,v 1.18 2004/09/29 07:35:11 miod Exp $	*/
 /*
  * magma.c
  *

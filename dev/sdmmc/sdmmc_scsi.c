@@ -1,4 +1,4 @@
-/*	$OpenBSD: sdmmc_scsi.c,v 1.7 2006/11/28 23:59:45 dlg Exp $	*/
+/*	$OpenBSD: sdmmc_scsi.c,v 1.6 2006/10/17 01:26:26 dlg Exp $	*/
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>

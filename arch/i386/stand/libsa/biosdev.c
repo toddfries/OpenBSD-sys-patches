@@ -134,7 +134,7 @@ bios_getdiskinfo(int dev, bios_diskinfo_t *pdi)
 
 	/* NOTE:
 	 * This currently hangs/reboots some machines
-	 * The IBM Thinkpad 750ED for one.
+	 * The IBM ThinkPad 750ED for one.
 	 *
 	 * Funny that an IBM/MS extension would not be
 	 * implemented by an IBM system...

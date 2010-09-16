@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_resource.c,v 1.4 2003/06/03 20:49:28 deraadt Exp $	*/
+/*	$OpenBSD: linux_resource.c,v 1.3 2002/03/14 01:26:50 millert Exp $	*/
 
 /*
  * Copyright (c) 2000 Niklas Hallqvist

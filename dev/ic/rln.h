@@ -1,4 +1,4 @@
-/*	$OpenBSD: rln.h,v 1.1 1999/07/30 13:43:36 d Exp $	*/
+/*	$OpenBSD: rln.h,v 1.2 1999/07/14 03:51:50 d Exp $	*/
 /*
  * David Leonard <d@openbsd.org>, 1999. Public domain.
  *

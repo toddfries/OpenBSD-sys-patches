@@ -1,4 +1,4 @@
-/*	$OpenBSD: grf_dvreg.h,v 1.1 2005/01/19 17:09:32 miod Exp $	*/
+/*	$OpenBSD: grf_dvreg.h,v 1.3 2003/06/02 23:27:44 millert Exp $	*/
 /*	$NetBSD: grf_dvreg.h,v 1.5 1994/10/26 07:23:50 cgd Exp $	*/
 
 /*

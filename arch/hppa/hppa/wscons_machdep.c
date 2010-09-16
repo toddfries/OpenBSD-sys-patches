@@ -1,4 +1,4 @@
-/*	$OpenBSD: wscons_machdep.c,v 1.7 2004/10/05 19:27:55 mickey Exp $	*/
+/*	$OpenBSD: wscons_machdep.c,v 1.6 2004/04/07 18:24:19 mickey Exp $	*/
 
 /*
  * Copyright (c) 2002-2004 Michael Shalayeff

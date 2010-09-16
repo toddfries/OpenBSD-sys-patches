@@ -1,4 +1,4 @@
-/*	$OpenBSD: ac97.c,v 1.61 2006/06/30 14:46:11 mickey Exp $	*/
+/*	$OpenBSD: ac97.c,v 1.60 2006/04/27 21:40:00 matthieu Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Constantine Sapuntzakis

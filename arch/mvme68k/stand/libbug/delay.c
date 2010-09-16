@@ -1,4 +1,4 @@
-/*	$OpenBSD: delay.c,v 1.2 1996/05/16 02:25:41 chuck Exp $ */
+/*	$OpenBSD$ */
 
 /*
  * bug routines -- assumes that the necessary sections of memory

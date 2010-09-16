@@ -1,4 +1,4 @@
-/*	$OpenBSD: profile.h,v 1.5 1997/01/24 19:57:17 niklas Exp $	*/
+/*	$OpenBSD: profile.h,v 1.4 1996/10/30 22:39:20 niklas Exp $	*/
 /*	$NetBSD: profile.h,v 1.7 1996/11/13 22:21:01 cgd Exp $	*/
 
 /*

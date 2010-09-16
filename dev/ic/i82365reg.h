@@ -1,4 +1,4 @@
-/*	$OpenBSD: i82365reg.h,v 1.7 1999/05/02 22:35:40 fgsch Exp $	*/
+/*	$OpenBSD: i82365reg.h,v 1.6 1999/01/28 04:58:33 fgsch Exp $	*/
 /*	$NetBSD: i82365reg.h,v 1.2 1997/10/16 23:18:18 thorpej Exp $	*/
 
 /*

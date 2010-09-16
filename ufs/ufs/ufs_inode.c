@@ -123,7 +123,7 @@ out:
 	 * so that it can be reused immediately.
 	 */
 	if (ip->i_din1 == NULL || DIP(ip, mode) == 0)
-		vrecycle(vp, NULL, p);
+		vrecycle(vp, p);
 
 	return (error);
 }

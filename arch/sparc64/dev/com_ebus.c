@@ -85,8 +85,9 @@ com_ebus_match(parent, match, aux)
 		if ((i = OF_getproplen(ea->ea_node, "compatible")) &&
 			OF_getprop(ea->ea_node, "compatible", compat,
 				sizeof(compat)) == i) {
-			if (strcmp(compat, "su16550") == 0 || 
-				strcmp(compat, "su") == 0) {
+			if (strcmp(compat, "su16552") == 0 ||
+			    strcmp(compat, "su16550") == 0 ||
+			    strcmp(compat, "su") == 0) {
 				return (1);
 			}
 		}

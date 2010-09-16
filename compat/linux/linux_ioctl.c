@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_ioctl.c,v 1.10 2003/07/23 20:18:10 tedu Exp $	*/
+/*	$OpenBSD: linux_ioctl.c,v 1.9 2001/04/09 06:53:45 tholo Exp $	*/
 /*	$NetBSD: linux_ioctl.c,v 1.14 1996/04/05 00:01:28 christos Exp $	*/
 
 /*

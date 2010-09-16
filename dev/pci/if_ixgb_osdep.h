@@ -31,7 +31,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 
-/* $OpenBSD: if_ixgb_osdep.h,v 1.2 2006/05/01 21:01:12 brad Exp $ */
+/* $OpenBSD: if_ixgb_osdep.h,v 1.1 2005/11/14 23:25:43 brad Exp $ */
 
 #ifndef _IXGB_OPENBSD_OS_H_
 #define _IXGB_OPENBSD_OS_H_

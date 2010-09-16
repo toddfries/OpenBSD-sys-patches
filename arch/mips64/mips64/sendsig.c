@@ -1,4 +1,4 @@
-/*	$OpenBSD: sendsig.c,v 1.9 2006/03/04 19:33:21 miod Exp $ */
+/*	$OpenBSD: sendsig.c,v 1.8 2005/12/20 06:58:19 miod Exp $ */
 
 /*
  * Copyright (c) 1990 The Regents of the University of California.

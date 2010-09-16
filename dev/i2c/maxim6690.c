@@ -54,8 +54,8 @@ struct maxtmp_softc {
 	u_int8_t sc_temp_invalid[2];
 	u_int8_t sc_temp2_mask;
 
-	struct sensor sc_sensor[MAXTMP_NUM_SENSORS];
-	struct sensordev sc_sensordev;
+	struct ksensor sc_sensor[MAXTMP_NUM_SENSORS];
+	struct ksensordev sc_sensordev;
 };
 
 int	maxtmp_match(struct device *, void *, void *);

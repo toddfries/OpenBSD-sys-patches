@@ -1,4 +1,4 @@
-/*	$OpenBSD: rs5c313reg.h,v 1.1 2006/10/06 22:30:26 mickey Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD: rs5c313reg.h,v 1.1 2006/09/07 01:12:00 uwe Exp $	*/
 
 /*-

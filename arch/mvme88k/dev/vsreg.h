@@ -1,4 +1,4 @@
-/*	$OpenBSD: vsreg.h,v 1.14 2006/12/21 02:28:47 krw Exp $	*/
+/*	$OpenBSD: vsreg.h,v 1.13 2004/09/06 06:25:28 miod Exp $	*/
 /*
  * Copyright (c) 2004, Miodrag Vallat.
  * Copyright (c) 1999 Steve Murphree, Jr.

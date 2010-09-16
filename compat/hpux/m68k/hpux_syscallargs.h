@@ -1,4 +1,4 @@
-/*	$OpenBSD: hpux_syscallargs.h,v 1.1 2004/07/09 21:34:57 mickey Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * System call argument lists.

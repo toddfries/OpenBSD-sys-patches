@@ -1,4 +1,4 @@
-/*	$OpenBSD: rf_dagdegwr.c,v 1.6 2006/07/09 22:10:05 mk Exp $	*/
+/*	$OpenBSD: rf_dagdegwr.c,v 1.5 2002/12/16 07:01:03 tdeval Exp $	*/
 /*	$NetBSD: rf_dagdegwr.c,v 1.5 2000/01/07 03:40:57 oster Exp $	*/
 
 /*

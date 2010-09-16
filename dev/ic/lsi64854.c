@@ -1,4 +1,4 @@
-/*	$OpenBSD: lsi64854.c,v 1.8 2007/02/28 18:48:35 miod Exp $	*/
+/*	$OpenBSD: lsi64854.c,v 1.7 2007/02/28 18:46:16 miod Exp $	*/
 /*	$NetBSD: lsi64854.c,v 1.18 2001/06/04 20:56:51 mrg Exp $ */
 
 /*-

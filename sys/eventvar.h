@@ -1,4 +1,4 @@
-/*	$OpenBSD: eventvar.h,v 1.2 2000/11/16 20:31:30 mickey Exp $	*/
+/*	$OpenBSD$	*/
 
 /*-
  * Copyright (c) 1999,2000 Jonathan Lemon <jlemon@FreeBSD.org>

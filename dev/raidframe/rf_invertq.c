@@ -1,4 +1,4 @@
-/*	$OpenBSD: rf_invertq.c,v 1.3 2002/12/16 07:01:04 tdeval Exp $	*/
+/*	$OpenBSD: rf_invertq.c,v 1.2 1999/02/16 00:02:53 niklas Exp $	*/
 /*	$NetBSD: rf_invertq.c,v 1.3 1999/02/05 00:06:12 oster Exp $	*/
 
 /*

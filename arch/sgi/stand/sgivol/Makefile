@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.3 2005/04/27 18:02:16 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.2 2004/08/25 18:19:35 pefo Exp $
 #	$NetBSD: Makefile,v 1.5 2002/12/13 02:36:37 lukem Exp $
 
 MAN=	sgivol.8

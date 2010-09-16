@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ecn.c,v 1.4 2002/05/16 14:10:51 kjc Exp $	*/
+/*	$OpenBSD: ip_ecn.c,v 1.3 2001/06/08 03:53:45 angelos Exp $	*/
 /*	$KAME: ip_ecn.c,v 1.9 2000/10/01 12:44:48 itojun Exp $	*/
 
 /*

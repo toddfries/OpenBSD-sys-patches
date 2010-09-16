@@ -1,4 +1,4 @@
-/*	$OpenBSD: dcmreg.h,v 1.4 2003/06/02 23:27:44 millert Exp $	*/
+/*	$OpenBSD: dcmreg.h,v 1.3 1997/01/12 15:12:23 downsj Exp $	*/
 /*	$NetBSD: dcmreg.h,v 1.5 1996/02/24 00:55:05 thorpej Exp $	*/
 
 /*

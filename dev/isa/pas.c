@@ -1,4 +1,4 @@
-/*	$OpenBSD: pas.c,v 1.24 2003/04/27 11:22:53 ho Exp $	*/
+/*	$OpenBSD: pas.c,v 1.23 2002/06/14 21:34:59 todd Exp $	*/
 /*	$NetBSD: pas.c,v 1.37 1998/01/12 09:43:43 thorpej Exp $	*/
 
 /*

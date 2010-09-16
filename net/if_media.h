@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_media.h,v 1.23 2006/12/29 20:06:31 kettenis Exp $	*/
+/*	$OpenBSD: if_media.h,v 1.22 2006/12/27 12:00:17 kettenis Exp $	*/
 /*	$NetBSD: if_media.h,v 1.22 2000/02/17 21:53:16 sommerfeld Exp $	*/
 
 /*-

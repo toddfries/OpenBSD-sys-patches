@@ -1,4 +1,4 @@
-/*	$OpenBSD: sbus.c,v 1.26 2006/06/28 20:09:15 deraadt Exp $	*/
+/*	$OpenBSD: sbus.c,v 1.25 2006/06/27 20:20:48 jason Exp $	*/
 /*	$NetBSD: sbus.c,v 1.46 2001/10/07 20:30:41 eeh Exp $ */
 
 /*-

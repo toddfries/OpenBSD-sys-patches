@@ -218,7 +218,7 @@ in_pcballoc(so, v)
 	/*
 	 * Small change in this function to set the INP_IPV6 flag so routines
 	 * outside pcb-specific routines don't need to use sotopf(), and all
-	 * of it's pointer chasing, later.
+	 * of its pointer chasing, later.
 	 */
 	if (sotopf(so) == PF_INET6)
 		inp->inp_flags = INP_IPV6;

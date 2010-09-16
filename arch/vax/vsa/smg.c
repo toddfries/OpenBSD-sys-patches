@@ -1,4 +1,4 @@
-/*	$OpenBSD: smg.c,v 1.19 2006/11/29 19:08:22 miod Exp $	*/
+/*	$OpenBSD: smg.c,v 1.18 2006/11/29 12:13:54 miod Exp $	*/
 /*	$NetBSD: smg.c,v 1.21 2000/03/23 06:46:44 thorpej Exp $ */
 /*
  * Copyright (c) 2006, Miodrag Vallat

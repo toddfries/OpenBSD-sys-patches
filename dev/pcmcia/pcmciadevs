@@ -1,4 +1,4 @@
-	$OpenBSD: pcmciadevs,v 1.130 2006/07/28 17:13:43 brad Exp $
+	$OpenBSD: pcmciadevs,v 1.129 2006/04/20 07:38:20 brad Exp $
 /* $NetBSD: pcmciadevs,v 1.13 1998/08/17 23:10:12 thorpej Exp $ */
 
 /*

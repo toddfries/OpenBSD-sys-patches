@@ -1,4 +1,4 @@
-/*	$OpenBSD: nsgphyreg.h,v 1.5 2005/05/27 09:24:01 brad Exp $	*/
+/*	$OpenBSD: nsgphyreg.h,v 1.4 2003/10/22 09:39:29 jmc Exp $	*/
 /*
  * Copyright (c) 2001 Wind River Systems
  * Copyright (c) 2001

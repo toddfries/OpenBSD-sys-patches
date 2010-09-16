@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipx_pcb.c,v 1.13 2006/05/18 21:27:25 miod Exp $	*/
+/*	$OpenBSD: ipx_pcb.c,v 1.12 2006/03/05 21:48:57 miod Exp $	*/
 
 /*-
  *

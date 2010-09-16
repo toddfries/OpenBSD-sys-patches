@@ -1,4 +1,4 @@
-/*	$OpenBSD: dkstat.h,v 1.7 2003/06/02 23:28:21 millert Exp $	*/
+/*	$OpenBSD: dkstat.h,v 1.6 2002/07/03 21:19:08 miod Exp $	*/
 /*	$NetBSD: dkstat.h,v 1.8 1995/12/28 19:16:31 thorpej Exp $	*/
 
 /*-

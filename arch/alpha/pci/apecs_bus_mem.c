@@ -1,4 +1,4 @@
-/*	$OpenBSD: apecs_bus_mem.c,v 1.6 2001/11/06 19:53:13 miod Exp $	*/
+/*	$OpenBSD: apecs_bus_mem.c,v 1.5 2001/02/16 09:07:20 jason Exp $	*/
 /* $NetBSD: apecs_bus_mem.c,v 1.8 1997/09/02 13:19:12 thorpej Exp $ */
 
 /*

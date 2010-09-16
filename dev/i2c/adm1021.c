@@ -45,8 +45,8 @@ struct admtemp_softc {
 	i2c_tag_t	sc_tag;
 	i2c_addr_t	sc_addr;
 
-	struct sensor	sc_sensor[ADMTEMP_NUM_SENSORS];
-	struct sensordev sc_sensordev;
+	struct ksensor	sc_sensor[ADMTEMP_NUM_SENSORS];
+	struct ksensordev sc_sensordev;
 	int		sc_noexternal;
 };
 

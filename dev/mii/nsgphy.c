@@ -1,4 +1,4 @@
-/*	$OpenBSD: nsgphy.c,v 1.18 2006/12/27 19:11:09 kettenis Exp $	*/
+/*	$OpenBSD: nsgphy.c,v 1.17 2006/07/22 04:45:13 brad Exp $	*/
 /*
  * Copyright (c) 2001 Wind River Systems
  * Copyright (c) 2001

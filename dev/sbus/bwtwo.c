@@ -1,4 +1,4 @@
-/*	$OpenBSD: bwtwo.c,v 1.17 2006/12/17 22:18:16 miod Exp $	*/
+/*	$OpenBSD: bwtwo.c,v 1.16 2006/06/02 20:00:56 miod Exp $	*/
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)

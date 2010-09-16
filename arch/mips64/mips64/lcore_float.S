@@ -1,4 +1,4 @@
-/*	$OpenBSD: lcore_float.S,v 1.11 2005/12/20 07:06:26 miod Exp $ */
+/*	$OpenBSD: lcore_float.S,v 1.10 2004/11/08 20:55:45 miod Exp $ */
 
 /*
  * Copyright (c) 2001-2003 Opsycon AB  (www.opsycon.se / www.opsycon.com)

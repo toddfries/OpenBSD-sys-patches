@@ -1,4 +1,4 @@
-/*	$OpenBSD: bluetooth.h,v 1.3 2006/12/01 07:18:34 camield Exp $	*/
+/*	$OpenBSD: bluetooth.h,v 1.2 2005/01/17 18:12:49 mickey Exp $	*/
 
 /*
  * bluetooth.h

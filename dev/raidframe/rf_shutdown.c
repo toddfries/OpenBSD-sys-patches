@@ -1,4 +1,4 @@
-/*	$OpenBSD: rf_shutdown.c,v 1.5 2002/12/16 07:01:05 tdeval Exp $	*/
+/*	$OpenBSD: rf_shutdown.c,v 1.4 2000/08/08 16:07:45 peter Exp $	*/
 /*	$NetBSD: rf_shutdown.c,v 1.6 2000/01/13 23:41:18 oster Exp $	*/
 
 /*

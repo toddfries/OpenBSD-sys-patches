@@ -1,5 +1,5 @@
 /* $NetBSD: ibm561.c,v 1.1 2001/12/12 07:46:48 elric Exp $ */
-/* $OpenBSD: ibm561.c,v 1.4 2006/07/16 21:50:58 miod Exp $ */
+/* $OpenBSD: ibm561.c,v 1.3 2002/11/09 22:51:48 miod Exp $ */
 
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.

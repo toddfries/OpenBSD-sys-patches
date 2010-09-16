@@ -1,4 +1,4 @@
-$OpenBSD: diodevs,v 1.7 2005/09/27 22:05:36 miod Exp $
+$OpenBSD: diodevs,v 1.6 2005/01/15 21:45:23 miod Exp $
 /* $NetBSD: diodevs,v 1.7 2003/11/23 01:57:35 tsutsui Exp $ */
 
 /*-

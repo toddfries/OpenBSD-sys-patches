@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.14 2001/09/14 05:35:31 art Exp $
+#	$OpenBSD: Makefile,v 1.13 1997/07/06 07:46:20 downsj Exp $
 #	$NetBSD: Makefile,v 1.6 1997/04/25 22:17:33 veego Exp $
 
 #	MOTOROLA MICROPROCESSOR & MEMORY TECHNOLOGY GROUP

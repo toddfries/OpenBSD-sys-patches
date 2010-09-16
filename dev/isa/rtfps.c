@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtfps.c,v 1.19 2002/03/14 01:26:56 millert Exp $       */
+/*	$OpenBSD: rtfps.c,v 1.18 1999/01/11 01:57:52 millert Exp $       */
 /*	$NetBSD: rtfps.c,v 1.27 1996/10/21 22:41:18 thorpej Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cs4280reg.h,v 1.1 2000/06/30 03:28:08 art Exp $	*/
+/*	$OpenBSD$	*/
 /*	$NetBSD: cs4280reg.h,v 1.3 2000/05/15 01:35:29 thorpej Exp $	*/
 
 /*

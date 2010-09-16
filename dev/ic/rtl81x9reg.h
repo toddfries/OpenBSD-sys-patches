@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtl81x9reg.h,v 1.36 2006/12/12 10:24:38 reyk Exp $	*/
+/*	$OpenBSD: rtl81x9reg.h,v 1.35 2006/12/01 01:13:01 todd Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998

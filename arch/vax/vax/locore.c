@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.c,v 1.32 2006/08/27 16:55:41 miod Exp $	*/
+/*	$OpenBSD: locore.c,v 1.31 2006/08/15 20:27:41 miod Exp $	*/
 /*	$NetBSD: locore.c,v 1.43 2000/03/26 11:39:45 ragge Exp $	*/
 /*
  * Copyright (c) 1994, 1998 Ludd, University of Lule}, Sweden.

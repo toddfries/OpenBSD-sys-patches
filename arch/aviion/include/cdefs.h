@@ -1,4 +1,4 @@
-/* $OpenBSD: cdefs.h,v 1.1.1.1 2006/04/18 10:56:58 miod Exp $ */
+/* $OpenBSD: cdefs.h,v 1.13 2005/11/24 20:46:47 deraadt Exp $ */
 /* public domain */
 
 #include <m88k/cdefs.h>

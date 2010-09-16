@@ -1,4 +1,4 @@
-/*	$OpenBSD: ct.c,v 1.5 2006/08/17 06:31:10 miod Exp $	*/
+/*	$OpenBSD: ct.c,v 1.4 2005/11/23 07:15:57 miod Exp $	*/
 /*	$NetBSD: ct.c,v 1.9 1996/10/14 07:29:57 thorpej Exp $	*/
 
 /*

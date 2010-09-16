@@ -1,4 +1,4 @@
-/*	$OpenBSD: diofb.c,v 1.16 2006/11/29 19:08:19 miod Exp $	*/
+/*	$OpenBSD: diofb.c,v 1.15 2006/11/29 12:13:54 miod Exp $	*/
 
 /*
  * Copyright (c) 2005, Miodrag Vallat

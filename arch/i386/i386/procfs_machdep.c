@@ -1,4 +1,4 @@
-/*	$OpenBSD: procfs_machdep.c,v 1.6 2006/12/20 17:50:40 gwk Exp $	*/
+/*	$OpenBSD: procfs_machdep.c,v 1.5 2006/11/29 20:03:20 dim Exp $	*/
 /*	$NetBSD: procfs_machdep.c,v 1.6 2001/02/21 21:39:59 jdolecek Exp $	*/
 
 /*

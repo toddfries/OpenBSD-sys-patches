@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_en_sbus.c,v 1.7 2006/06/02 20:00:54 miod Exp $	*/
+/*	$OpenBSD: if_en_sbus.c,v 1.6 2004/09/29 07:35:11 miod Exp $	*/
 /*	$NetBSD: if_en_sbus.c,v 1.4 1997/05/24 20:16:22 pk Exp $	*/
 
 /*

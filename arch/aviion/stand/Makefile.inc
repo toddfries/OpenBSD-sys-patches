@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.2 2006/05/20 22:38:32 miod Exp $
+#	$OpenBSD: Makefile.inc,v 1.1 2006/05/16 22:48:16 miod Exp $
 
 MDEC_DIR?=	/usr/mdec
 

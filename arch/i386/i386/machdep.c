@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.379 2007/02/21 19:34:25 deraadt Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.381 2007/04/03 10:14:47 art Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -256,7 +256,6 @@ void (*setperf_setup)(struct cpu_info *);
 int setperf_prio = 0;		/* for concurrent handlers */
 
 void (*delay_func)(int) = i8254_delay;
-void (*microtime_func)(struct timeval *) = i8254_microtime;
 void (*initclock_func)(void) = i8254_initclocks;
 void (*update_cpuspeed)(void) = NULL;
 
@@ -2197,6 +2196,29 @@ ibcs2_sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 #endif
 
 /*
+ * To send an AST to a process on another cpu we send an IPI to that cpu,
+ * the IPI schedules a special soft interrupt (that does nothing) and then
+ * returns through the normal interrupt return path which in turn handles
+ * the AST.
+ *
+ * The IPI can't handle the AST because it usually requires grabbing the
+ * biglock and we can't afford spinning in the IPI handler with interrupts
+ * unlocked (so that we take further IPIs and grow our stack until it
+ * overflows).
+ */
+void
+aston(struct proc *p)
+{
+#ifdef MULTIPROCESSOR
+	if (i386_atomic_testset_i(&p->p_md.md_astpending, 1) == 0 &&
+	    p->p_cpu != curcpu())
+		i386_ipi(LAPIC_IPI_AST, p->p_cpu->ci_cpuid, LAPIC_DLMODE_FIXED);
+#else
+	p->p_md.md_astpending = 1;
+#endif
+}
+
+/*
  * Send an interrupt to process.
  *
  * Stack is set up to allow sigcode stored
@@ -3288,16 +3310,29 @@ cpu_reset()
 }
 
 void
-cpu_initclocks()
+cpu_initclocks(void)
 {
 	(*initclock_func)();
+
+	if (initclock_func == i8254_initclocks)
+		i8254_inittimecounter();
+	else
+		i8254_inittimecounter_simple();
 }
 
 void
 need_resched(struct cpu_info *ci)
 {
+	struct proc *p;
+
 	ci->ci_want_resched = 1;
-	ci->ci_astpending = 1;
+
+	/*
+	 * Need to catch the curproc in case it's cleared just
+	 * between the check and the aston().
+	 */
+	if ((p = ci->ci_curproc) != NULL)
+		aston(p);
 }
 
 #ifdef MULTIPROCESSOR

@@ -1,4 +1,4 @@
-/*	$OpenBSD: intreg.h,v 1.8 2006/05/29 20:40:01 miod Exp $	*/
+/*	$OpenBSD: intreg.h,v 1.7 2005/04/19 21:30:20 miod Exp $	*/
 /*	$NetBSD: intreg.h,v 1.6 1997/07/22 20:19:10 pk Exp $ */
 
 /*

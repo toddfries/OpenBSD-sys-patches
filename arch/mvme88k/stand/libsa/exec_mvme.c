@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec_mvme.c,v 1.13 2006/05/17 06:21:34 miod Exp $	*/
+/*	$OpenBSD: exec_mvme.c,v 1.12 2006/05/16 22:51:30 miod Exp $	*/
 
 
 /*-

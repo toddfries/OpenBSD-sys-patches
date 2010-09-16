@@ -1,3 +1,3 @@
-/* $OpenBSD: internal_types.h,v 1.1 2004/08/06 21:12:19 pefo Exp $ */
+/* $OpenBSD: internal_types.h,v 1.1 2002/04/24 21:53:11 espie Exp $ */
 
 #include <mips64/internal_types.h>

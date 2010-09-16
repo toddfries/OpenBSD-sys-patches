@@ -96,6 +96,7 @@ art*		at musycc?	# Accoom Artery E1/T1 cards
 xge*		at pci?		# Neterion Xframe-I/II 10Gb ethernet
 mbg*		at pci?		# Meinberg Funkuhren radio clocks
 malo*		at pci?		# Marvell Libertas
+acx*		at pci?		# TI ACX100/ACX111 (802.11b/g)
 
 iop*		at pci?		# I2O processor
 ioprbs*		at iop?		# I2O arrays
@@ -314,6 +315,7 @@ wdc*		at pcmcia?
 com*		at pcmcia?
 com*		at cardbus?
 malo*		at cardbus?	# Marvell Libertas
+acx*		at cardbus?	# TI ACX100/ACX111 (802.11b/g)
 
 wsdisplay*	at vgafb?
 

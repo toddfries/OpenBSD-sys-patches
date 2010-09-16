@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipi.c,v 1.5 2006/03/10 21:21:08 brad Exp $	*/
+/*	$OpenBSD: ipi.c,v 1.4 2006/03/10 21:11:08 mickey Exp $	*/
 /*	$NetBSD: ipi.c,v 1.2 2003/03/01 13:05:37 fvdl Exp $	*/
 
 /*-

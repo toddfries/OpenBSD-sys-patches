@@ -67,6 +67,13 @@ static const struct rwlock_op {
 		0,
 		PLOCK
 	},
+	{	/* RW_DOWNGRADE */
+		RWLOCK_READ_INCR - RWLOCK_WRLOCK,
+		0,
+		0,
+		-1,
+		PLOCK
+	},
 };
 
 #ifndef __HAVE_MD_RWLOCK
@@ -138,6 +145,16 @@ rw_enter_diag(struct rwlock *rwl, int flags)
 		if (RW_PROC(curproc) == RW_PROC(rwl->rwl_owner))
 			panic("rw_enter: locking against myself");
 		break;
+	case RW_DOWNGRADE:
+		/*
+		 * If we're downgrading, we must hold the write lock.
+		 */
+		if ((rwl->rwl_owner & RWLOCK_WRLOCK) == 0)
+			panic("rw_enter: downgrade of non-write lock");
+		if (RW_PROC(curproc) != RW_PROC(rwl->rwl_owner))
+			panic("rw_enter: downgrade, not holder");
+		break;
+
 	default:
 		panic("rw_enter: unknown op 0x%x", flags);
 	}
@@ -154,9 +171,6 @@ rw_init(struct rwlock *rwl, const char *name)
 	rwl->rwl_name = name;
 }
 
-/*
- * You are supposed to understand this.
- */
 int
 rw_enter(struct rwlock *rwl, int flags)
 {
@@ -167,13 +181,14 @@ rw_enter(struct rwlock *rwl, int flags)
 	op = &rw_ops[flags & RW_OPMASK];
 
 	inc = op->inc + RW_PROC(curproc) * op->proc_mult;
-	prio = op->wait_prio;
-	if (flags & RW_INTR)
-		prio |= PCATCH;
 retry:
 	while (__predict_false(((o = rwl->rwl_owner) & op->check) != 0)) {
 		if (rw_test_and_set(&rwl->rwl_owner, o, o | op->wait_set))
 			continue;
+
+		prio = op->wait_prio;
+		if (flags & RW_INTR)
+			prio |= PCATCH;
 
 		rw_enter_diag(rwl, flags);
 
@@ -187,6 +202,15 @@ retry:
 
 	if (__predict_false(rw_test_and_set(&rwl->rwl_owner, o, o + inc)))
 		goto retry;
+
+	/*
+	 * If old lock had RWLOCK_WAIT and RWLOCK_WRLOCK set, it means we
+	 * downgraded a write lock and had possible read waiter, wake them
+	 * to let them retry the lock.
+	 */
+	if (__predict_false((o & (RWLOCK_WRLOCK|RWLOCK_WAIT)) ==
+	    (RWLOCK_WRLOCK|RWLOCK_WAIT)))
+		wakeup(rwl);
 
 	return (0);
 }

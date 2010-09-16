@@ -1,4 +1,4 @@
-/*	$OpenBSD: unixdev.h,v 1.6 2003/06/02 20:20:54 mickey Exp $	*/
+/*	$OpenBSD: unixdev.h,v 1.5 2003/06/01 17:00:33 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1996 Michael Shalayeff

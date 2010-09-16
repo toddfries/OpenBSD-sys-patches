@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.3 2004/09/22 22:06:18 miod Exp $
+#	$OpenBSD: Makefile,v 1.2 2004/09/16 18:54:49 pefo Exp $
 
 LIB=	sa
 

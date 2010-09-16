@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vic.c,v 1.39 2007/01/30 09:54:24 reyk Exp $	*/
+/*	$OpenBSD: if_vic.c,v 1.38 2006/12/14 10:10:20 dlg Exp $	*/
 
 /*
  * Copyright (c) 2006 Reyk Floeter <reyk@openbsd.org>

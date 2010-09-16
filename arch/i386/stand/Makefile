@@ -16,6 +16,6 @@ zero-fd0:
 
 prep-fd0:
 	sudo disklabel -rw fd0 floppy
-	sudo newfs -O -m 0 -o space -i 3000 -c 80 /dev/rfd0a
+	sudo newfs -O 0 -m 0 -o space -i 3000 -c 80 /dev/rfd0a
 
 .include <bsd.subdir.mk>

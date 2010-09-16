@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_rln_pcmcia.c,v 1.15 2005/01/27 17:04:56 millert Exp $	*/
+/*	$OpenBSD: if_rln_pcmcia.c,v 1.14 2002/11/19 18:36:18 jason Exp $	*/
 /*
  * David Leonard <d@openbsd.org>, 1999. Public domain.
  *

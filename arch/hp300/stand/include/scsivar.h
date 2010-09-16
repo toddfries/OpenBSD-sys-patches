@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsivar.h,v 1.2 2003/06/02 23:27:46 millert Exp $	*/
+/*	$OpenBSD: scsivar.h,v 1.1 1997/07/14 08:14:39 downsj Exp $	*/
 /*	$NetBSD: scsivar.h,v 1.4 1994/10/26 07:27:58 cgd Exp $	*/
 
 /*

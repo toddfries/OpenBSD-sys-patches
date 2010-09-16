@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_stgereg.h,v 1.8 2006/07/12 19:02:25 brad Exp $	*/
+/*	$OpenBSD: if_stgereg.h,v 1.7 2006/07/12 03:29:51 brad Exp $	*/
 /*	$NetBSD: if_stgereg.h,v 1.3 2003/02/10 21:10:07 christos Exp $	*/
 
 /*-

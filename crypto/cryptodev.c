@@ -1,4 +1,4 @@
-/*	$OpenBSD: cryptodev.c,v 1.66 2006/10/25 15:10:25 tedu Exp $	*/
+/*	$OpenBSD: cryptodev.c,v 1.65 2006/05/31 23:01:44 tedu Exp $	*/
 
 /*
  * Copyright (c) 2001 Theo de Raadt

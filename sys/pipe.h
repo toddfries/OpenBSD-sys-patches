@@ -1,4 +1,4 @@
-/*	$OpenBSD: pipe.h,v 1.13 2005/11/21 18:16:46 millert Exp $	*/
+/*	$OpenBSD: pipe.h,v 1.12 2004/06/24 19:35:26 tholo Exp $	*/
 
 /*
  * Copyright (c) 1996 John S. Dyson

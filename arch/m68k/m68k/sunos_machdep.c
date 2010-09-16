@@ -1,4 +1,4 @@
-/*	$OpenBSD: sunos_machdep.c,v 1.18 2005/11/06 17:23:41 miod Exp $	*/
+/*	$OpenBSD: sunos_machdep.c,v 1.17 2005/08/06 12:10:28 miod Exp $	*/
 /*	$NetBSD: sunos_machdep.c,v 1.12 1996/10/13 03:19:22 christos Exp $	*/
 
 /*

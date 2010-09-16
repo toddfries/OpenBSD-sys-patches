@@ -1,4 +1,4 @@
-/*	$OpenBSD: copypage.s,v 1.4 2005/09/25 22:27:15 miod Exp $	*/
+/*	$OpenBSD: copypage.s,v 1.3 2004/01/15 17:22:27 miod Exp $	*/
 /*	$NetBSD: copypage.s,v 1.4 1997/05/30 01:34:49 jtc Exp $	*/
 
 /*-

@@ -1,4 +1,4 @@
-/*	$OpenBSD: tftpfs.c,v 1.4 2006/08/13 23:08:44 miod Exp $	*/
+/*	$OpenBSD: tftpfs.c,v 1.3 2003/06/01 17:00:38 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 2001 Steve Murphree, Jr.

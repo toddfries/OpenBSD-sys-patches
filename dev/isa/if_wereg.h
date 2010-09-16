@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wereg.h,v 1.3 2006/03/04 19:33:21 miod Exp $	*/
+/*	$OpenBSD: if_wereg.h,v 1.2 2002/06/03 20:01:37 deraadt Exp $	*/
 /*	$NetBSD: if_wereg.h,v 1.1 1997/11/03 21:22:50 thorpej Exp $	*/
 
 /*

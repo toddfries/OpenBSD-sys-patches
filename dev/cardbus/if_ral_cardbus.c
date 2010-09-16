@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ral_cardbus.c,v 1.9 2006/10/22 12:14:44 damien Exp $  */
+/*	$OpenBSD: if_ral_cardbus.c,v 1.8 2006/10/12 16:35:52 grange Exp $  */
 
 /*-
  * Copyright (c) 2005, 2006

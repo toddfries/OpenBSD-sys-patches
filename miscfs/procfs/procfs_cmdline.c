@@ -1,4 +1,4 @@
-/*	$OpenBSD: procfs_cmdline.c,v 1.7 2006/11/29 12:24:18 miod Exp $	*/
+/*	$OpenBSD: procfs_cmdline.c,v 1.6 2005/12/11 21:30:31 miod Exp $	*/
 /*	$NetBSD: procfs_cmdline.c,v 1.3 1999/03/13 22:26:48 thorpej Exp $	*/
 
 /*

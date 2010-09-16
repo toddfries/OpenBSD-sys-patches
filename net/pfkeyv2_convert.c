@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfkeyv2_convert.c,v 1.29 2006/11/24 13:52:14 reyk Exp $	*/
+/*	$OpenBSD: pfkeyv2_convert.c,v 1.28 2006/06/01 07:06:09 todd Exp $	*/
 /*
  * The author of this code is Angelos D. Keromytis (angelos@keromytis.org)
  *
