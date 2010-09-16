@@ -1,4 +1,4 @@
-/*	$OpenBSD: apm.c,v 1.5 2010/08/31 17:35:12 pirofti Exp $	*/
+/*	$OpenBSD: apm.c,v 1.8 2010/09/09 19:06:15 miod Exp $	*/
 
 /*-
  * Copyright (c) 2001 Alexander Guy.  All rights reserved.
@@ -43,7 +43,6 @@
 #include <sys/ioctl.h>
 #include <sys/buf.h>
 #include <sys/event.h>
-#include <sys/mount.h>
 
 #include <machine/autoconf.h>
 #include <machine/conf.h>
@@ -88,7 +87,6 @@ int apmkqfilter(dev_t dev, struct knote *kn);
 int apm_getdefaultinfo(struct apm_power_info *);
 
 int apm_suspend(void);
-int apm_resume(void);
 
 struct filterops apmread_filtops =
 	{ 1, NULL, filt_apmrdetach, filt_apmread};
@@ -213,21 +211,21 @@ apmioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 	switch (cmd) {
 		/* some ioctl names from linux */
 	case APM_IOC_STANDBY:
+	case APM_IOC_STANDBY_REQ:
 		if ((flag & FWRITE) == 0)
 			error = EBADF;
 		else
 			error = EOPNOTSUPP; /* XXX */
 		break;
 	case APM_IOC_SUSPEND:
+	case APM_IOC_SUSPEND_REQ:
 		if ((flag & FWRITE) == 0)
 			error = EBADF;
 		else if (sys_platform->suspend == NULL ||
 		    sys_platform->resume == NULL)
 			error = EOPNOTSUPP;
-		else {
-			if (!(error = apm_suspend()))
-				error = apm_resume();
-		}
+		else
+			error = apm_suspend();
 		break;
 	case APM_IOC_PRN_CTL:
 		if ((flag & FWRITE) == 0)
@@ -262,23 +260,6 @@ apmioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 	case APM_IOC_GETPOWER:
 	        power = (struct apm_power_info *)data;
 		error = (*get_apminfo)(power);
-		break;
-	case APM_IOC_STANDBY_REQ:
-		if ((flag & FWRITE) == 0)
-			error = EBADF;
-		else
-			error = EOPNOTSUPP; /* XXX */
-		break;
-	case APM_IOC_SUSPEND_REQ:
-		if ((flag & FWRITE) == 0)
-			error = EBADF;
-		else if (sys_platform->suspend == NULL ||
-		    sys_platform->resume == NULL)
-			error = EOPNOTSUPP;
-		else {
-			if (!(error = apm_suspend()))
-				error = apm_resume();
-		}
 		break;
 	default:
 		error = ENOTTY;
@@ -360,7 +341,7 @@ apm_record_event(u_int event, const char *src, const char *msg)
 
 	/* skip if no user waiting */
 	if ((sc->sc_flags & SCFLAG_OPEN) == 0)
-		return (1);   
+		return (1);
 
 	apm_evindex++;
 	KNOTE(&sc->sc_note, APM_EVENT_COMPOSE(event, apm_evindex));
@@ -371,38 +352,35 @@ apm_record_event(u_int event, const char *src, const char *msg)
 int
 apm_suspend()
 {
+	int rv;
 	int s;
 
 #if NSWDISPLAY > 0
 	wsdisplay_suspend();
 #endif
 	bufq_quiesce();
+	config_suspend(TAILQ_FIRST(&alldevs), DVACT_QUIESCE);
 
 	s = splhigh();
-	config_suspend(TAILQ_FIRST(&alldevs), DVACT_SUSPEND);
-	splx(s);
+	(void)disableintr();
+	cold = 1;
 
-	if (cold)
-		vfs_syncwait(0);
-
-	return sys_platform->suspend();
-}
-
-int
-apm_resume()
-{
-	int s, rv;
-
-	s = splhigh();
+	rv = config_suspend(TAILQ_FIRST(&alldevs), DVACT_SUSPEND);
+	if (rv == 0) {
+		rv = sys_platform->suspend();
+		if (rv == 0)
+			rv = sys_platform->resume();
+	}
 	config_suspend(TAILQ_FIRST(&alldevs), DVACT_RESUME);
-	splx(s);
 
-	rv = sys_platform->resume();
+	cold = 0;
+	(void)enableintr();
+	splx(s);
 
 	bufq_restart();
 #if NWSDISPLAY > 0
 	wsdisplay_resume();
 #endif
-	
+
 	return rv;
 }
