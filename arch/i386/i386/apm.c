@@ -1,4 +1,4 @@
-/*	$OpenBSD: apm.c,v 1.90 2010/08/27 19:10:59 deraadt Exp $	*/
+/*	$OpenBSD: apm.c,v 1.94 2010/09/09 04:13:15 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1998-2001 Michael Shalayeff. All rights reserved.
@@ -50,7 +50,6 @@
 #include <sys/ioctl.h>
 #include <sys/buf.h>
 #include <sys/event.h>
-#include <sys/mount.h>	/* for vfs_syncwait() proto */
 
 #include <machine/conf.h>
 #include <machine/cpu.h>
@@ -177,8 +176,7 @@ int  apm_record_event(struct apm_softc *sc, u_int type);
 const char *apm_err_translate(int code);
 
 #define	apm_get_powstat(r) apmcall(APM_POWER_STATUS, APM_DEV_ALLDEVS, r)
-void	apm_standby(void);
-void	apm_suspend(void);
+void	apm_suspend(int);
 void	apm_resume(struct apm_softc *, struct apmregs *);
 void	apm_cpu_slow(void);
 
@@ -317,71 +315,35 @@ apm_power_print(struct apm_softc *sc, struct apmregs *regs)
 #endif
 }
 
-int apm_saved_spl;
-
 void
-apm_suspend()
-{
-#if NWSDISPLAY > 0
-	wsdisplay_suspend();
-#endif /* NWSDISPLAY > 0 */
-	bufq_quiesce();
-
-	apm_saved_spl = splhigh();
-	disable_intr();
-	dopowerhooks(PWR_SUSPEND);
-
-	if (cold)
-		vfs_syncwait(0);
-
-	(void)apm_set_powstate(APM_DEV_ALLDEVS, APM_SYS_SUSPEND);
-}
-
-void
-apm_standby()
-{
-#if NWSDISPLAY > 0
-	wsdisplay_suspend();
-#endif /* NWSDISPLAY > 0 */
-	bufq_quiesce();
-
-	apm_saved_spl = splhigh();
-	disable_intr();
-	dopowerhooks(PWR_SUSPEND);
-
-	if (cold)
-		vfs_syncwait(0);
-
-	(void)apm_set_powstate(APM_DEV_ALLDEVS, APM_SYS_STANDBY);
-}
-
-void
-apm_resume(struct apm_softc *sc, struct apmregs *regs)
+apm_suspend(int state)
 {
 	extern int perflevel;
+	int s;
 
-	apm_resumes = APM_RESUME_HOLDOFF;
+#if NWSDISPLAY > 0
+	wsdisplay_suspend();
+#endif /* NWSDISPLAY > 0 */
+	bufq_quiesce();
+	config_suspend(TAILQ_FIRST(&alldevs), DVACT_QUIESCE);
 
-	/* Some machines resume with interrupts on */
+	s = splhigh();
 	disable_intr();
+	config_suspend(TAILQ_FIRST(&alldevs), DVACT_SUSPEND);
 
-	/* they say that some machines may require reinitializing the clocks */
+	/* Send machine to sleep */
+	apm_set_powstate(APM_DEV_ALLDEVS, state);
+	/* Wake up  */
+
+	/* They say that some machines may require reinitializing the clocks */
 	i8254_startclock();
 	if (initclock_func == i8254_initclocks)
 		rtcstart();		/* in i8254 mode, rtc is profclock */
-
 	inittodr(time_second);
-	/* lower bit in cx means pccard was powered down */
 
-	dopowerhooks(PWR_RESUME);
-
+	config_suspend(TAILQ_FIRST(&alldevs), DVACT_RESUME);
 	enable_intr();
-	splx(apm_saved_spl);
-
-	apm_record_event(sc, regs->bx);
-
-	/* acknowledge any rtc interrupt we may have missed */
-	rtcdrain(NULL);
+	splx(s);
 
 	/* restore hw.setperf */
 	if (cpu_setperf != NULL)
@@ -390,6 +352,17 @@ apm_resume(struct apm_softc *sc, struct apmregs *regs)
 #if NWSDISPLAY > 0
 	wsdisplay_resume();
 #endif /* NWSDISPLAY > 0 */
+}
+
+void
+apm_resume(struct apm_softc *sc, struct apmregs *regs)
+{
+
+	apm_resumes = APM_RESUME_HOLDOFF;
+
+	/* lower bit in cx means pccard was powered down */
+
+	apm_record_event(sc, regs->bx);
 }
 
 int
@@ -498,7 +471,7 @@ apm_handle_event(struct apm_softc *sc, struct apmregs *regs)
 	case APM_CRIT_SUSPEND_REQ:
 		DPRINTF(("suspend required immediately\n"));
 		apm_record_event(sc, regs->bx);
-		apm_suspend();
+		apm_suspend(APM_SYS_SUSPEND);
 		break;
 	case APM_BATTERY_LOW:
 		DPRINTF(("Battery low!\n"));
@@ -560,10 +533,10 @@ apm_periodic_check(struct apm_softc *sc)
 
 	if (apm_suspends /*|| (apm_battlow && apm_userstandbys)*/) {
 		apm_op_inprog = 0;
-		apm_suspend();
+		apm_suspend(APM_SYS_SUSPEND);
 	} else if (apm_standbys || apm_userstandbys) {
 		apm_op_inprog = 0;
-		apm_standby();
+		apm_suspend(APM_SYS_STANDBY);
 	}
 	apm_suspends = apm_standbys = apm_battlow = apm_userstandbys = 0;
 	apm_error = 0;

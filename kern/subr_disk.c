@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_disk.c,v 1.106 2010/08/30 16:53:28 jsing Exp $	*/
+/*	$OpenBSD: subr_disk.c,v 1.109 2010/09/08 15:16:22 jsing Exp $	*/
 /*	$NetBSD: subr_disk.c,v 1.17 1996/03/16 23:17:08 christos Exp $	*/
 
 /*
@@ -790,10 +790,9 @@ disk_construct(struct disk *diskp, char *lockname)
  * Attach a disk.
  */
 void
-disk_attach(struct disk *diskp)
+disk_attach(struct device *dv, struct disk *diskp)
 {
-	struct device *dv;
-	dev_t *dev;
+	int majdev;
 
 	if (!ISSET(diskp->dk_flags, DKF_CONSTRUCTED))
 		disk_construct(diskp, diskp->dk_name);
@@ -821,12 +820,16 @@ disk_attach(struct disk *diskp)
 	disk_change = 1;
 
 	/*
-	 * Lookup and store device number for later use.
+	 * Store device structure and number for later use.
 	 */
-	dev = &diskp->dk_devno;
-	dv = parsedisk(diskp->dk_name, strlen(diskp->dk_name), RAW_PART, dev);
-	if (dv == NULL)
-		diskp->dk_devno = NODEV;
+	diskp->dk_device = dv;
+	diskp->dk_devno = NODEV;
+	if (dv != NULL) {
+		majdev = findblkmajor(dv);
+		if (majdev >= 0)
+			diskp->dk_devno =
+			    MAKEDISKDEV(majdev, dv->dv_unit, RAW_PART);
+	}
 
 	if (softraid_disk_attach)
 		softraid_disk_attach(diskp, 1);
@@ -1023,7 +1026,7 @@ parsedisk(char *str, int len, int defpart, dev_t *devp)
 		    dv->dv_xname[len] == '\0') {
 			majdev = findblkmajor(dv);
 			if (majdev < 0)
-				panic("parsedisk");
+				return NULL;
 			*devp = MAKEDISKDEV(majdev, dv->dv_unit, part);
 			break;
 		}
@@ -1390,4 +1393,29 @@ disk_map(char *path, char *mappath, int size, int flags)
 	    (flags & DM_OPENBLCK) ? "" : "r", mdk->dk_name, part);
 
 	return 0;
+}
+
+/*
+ * Lookup a disk device and verify that it has completed attaching.
+ */
+struct device *
+disk_lookup(struct cfdriver *cd, int unit)
+{
+	struct device *dv;
+	struct disk *dk;
+
+	dv = device_lookup(cd, unit);
+	if (dv == NULL)
+		return (NULL);
+
+	TAILQ_FOREACH(dk, &disklist, dk_link)
+		if (dk->dk_device == dv)
+			break;
+
+	if (dk == NULL) {
+		device_unref(dv);
+		return (NULL);
+	}
+
+	return (dv);
 }
