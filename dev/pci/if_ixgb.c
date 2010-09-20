@@ -31,7 +31,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 
-/* $OpenBSD: if_ixgb.c,v 1.56 2010/08/27 08:24:53 deraadt Exp $ */
+/* $OpenBSD: if_ixgb.c,v 1.57 2010/09/20 07:50:19 deraadt Exp $ */
 
 #include <dev/pci/if_ixgb.h>
 
