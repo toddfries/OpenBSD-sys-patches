@@ -755,13 +755,11 @@ vndioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 	DNPRINTF(VDB_FOLLOW, "vndioctl(%x, %lx, %p, %x, %p): unit %d\n",
 	    dev, cmd, addr, flag, p, unit);
 
-	if (p) {
-		error = suser(p, 0);
-		if (error)
-			return (error);
-		if (unit >= numvnd)
-			return (ENXIO);
-	}
+	error = suser(p, 0);
+	if (error)
+		return (error);
+	if (unit >= numvnd)
+		return (ENXIO);
 
 	vnd = &vnd_softc[unit];
 	vio = (struct vnd_ioctl *)addr;
