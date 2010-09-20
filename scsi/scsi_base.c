@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsi_base.c,v 1.195 2010/09/14 01:39:44 dlg Exp $	*/
+/*	$OpenBSD: scsi_base.c,v 1.197 2010/09/20 00:19:47 dlg Exp $	*/
 /*	$NetBSD: scsi_base.c,v 1.43 1997/04/02 02:29:36 mycroft Exp $	*/
 
 /*
