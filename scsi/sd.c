@@ -1,4 +1,4 @@
-/*	$OpenBSD: sd.c,v 1.215 2010/09/20 02:51:52 deraadt Exp $	*/
+/*	$OpenBSD: sd.c,v 1.217 2010/09/22 01:18:57 matthew Exp $	*/
 /*	$NetBSD: sd.c,v 1.111 1997/04/02 02:29:41 mycroft Exp $	*/
 
 /*-
@@ -841,13 +841,13 @@ sdminphys(struct buf *bp)
 int
 sdread(dev_t dev, struct uio *uio, int ioflag)
 {
-	return (physio(sdstrategy, NULL, dev, B_READ, sdminphys, uio));
+	return (physio(sdstrategy, dev, B_READ, sdminphys, uio));
 }
 
 int
 sdwrite(dev_t dev, struct uio *uio, int ioflag)
 {
-	return (physio(sdstrategy, NULL, dev, B_WRITE, sdminphys, uio));
+	return (physio(sdstrategy, dev, B_WRITE, sdminphys, uio));
 }
 
 /*
@@ -904,6 +904,7 @@ sdioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 		bcopy(lp, sc->sc_dk.dk_label, sizeof(*lp));
 		free(lp, M_TEMP);
 		goto exit;
+
 	case DIOCGPDINFO:
 		sdgetdisklabel(dev, sc, (struct disklabel *)addr, 1);
 		goto exit;
