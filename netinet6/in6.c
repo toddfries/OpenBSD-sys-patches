@@ -661,7 +661,6 @@ in6_control(struct socket *so, u_long cmd, caddr_t data, struct ifnet *ifp,
 		pr0.ndpr_plen = in6_mask2len(&ifra->ifra_prefixmask.sin6_addr,
 		    NULL);
 		if (pr0.ndpr_plen == 128) {
-			dohooks(ifp->if_addrhooks, 0);
 			break;	/* we don't need to install a host route. */
 		}
 		pr0.ndpr_prefix = ifra->ifra_addr;

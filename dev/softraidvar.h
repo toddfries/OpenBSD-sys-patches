@@ -647,10 +647,6 @@ void			sr_raid1_set_vol_state(struct sr_discipline *);
 int			sr_crypto_get_kdf(struct bioc_createraid *,
 			    struct sr_discipline *);
 int			sr_crypto_create_keys(struct sr_discipline *);
-int			sr_crypto_change_maskkey(struct sr_discipline *,
-			    struct sr_crypto_kdfinfo *,
-			    struct sr_crypto_kdfinfo *);
-
 struct sr_chunk *	sr_crypto_create_key_disk(struct sr_discipline *, dev_t);
 struct sr_chunk *	sr_crypto_read_key_disk(struct sr_discipline *, dev_t);
 

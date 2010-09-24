@@ -44,6 +44,10 @@
 
 	.data
 
+	.export netisr, data
+	.align	16
+netisr
+	.word	0
 	.align	16
 $kpsl
 	.word	PSL_W | PSL_Q | PSL_P | PSL_C | PSL_D | PSL_S | PSL_O

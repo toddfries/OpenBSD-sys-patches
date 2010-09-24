@@ -217,6 +217,8 @@ struct clockframe {
 
 extern void (*cpu_start_clock)(void);
 
+void setsoftnet(void);
+
 #define aston(p)	((p)->p_md.md_astpending = 1)
 
 /*

@@ -279,12 +279,14 @@ option	WSDISPLAY_COMPAT_PCVT		# emulate some ioctls; needed for X11
 pckbc0		at isa? flags 0x00	# PC keyboard controller
 pckbd*		at pckbc?		# PC keyboard
 pms*		at pckbc?		# PS/2 mouse for wsmouse
+pmsi*		at pckbc?		# PS/2 "Intelli"mouse for wsmouse
 vga0		at isa?
 option		X86EMU			# to POST video cards
 vga*		at pci?
 wsdisplay*	at vga?
 wskbd*		at pckbd? mux 1
 wsmouse*	at pms? mux 0
+wsmouse*	at pmsi? mux 0
 
 intagp*		at vga?		# intel integrated graphics
 agp*		at intagp?
@@ -463,7 +465,7 @@ xge*	at pci?				# Neterion Xframe-I/II 10Gb ethernet
 thtc*	at pci?				# Tehuti Networks 10Gb ethernet
 tht*	at thtc?
 gem*	at pci?				# Sun 'gem' ethernet
-bce*	at pci?				# Broadcom BCM4401
+#bce*	at pci?				# Broadcom BCM4401
 vic*	at pci?				# VMware VMXnet virtual interface
 et*	at pci?				# Agere/LSI ET1310
 age*	at pci?				# Attansic L1 Ethernet

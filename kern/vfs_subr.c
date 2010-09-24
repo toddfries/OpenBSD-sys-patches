@@ -108,9 +108,7 @@ void vfs_free_addrlist(struct netexport *);
 void vputonfreelist(struct vnode *);
 
 int vflush_vnode(struct vnode *, void *);
-extern struct bcachestats bcstats;
 int maxvnodes;
-
 
 #ifdef DEBUG
 void printlockedvnodes(void);
@@ -192,7 +190,7 @@ vfs_unbusy(struct mount *mp)
 }
 
 int
-vfs_isbusy(struct mount *mp)
+vfs_isbusy(struct mount *mp) 
 {
 	if (RWLOCK_OWNER(&mp->mnt_lock) > 0)
 		return (1);

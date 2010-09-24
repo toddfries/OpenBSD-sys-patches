@@ -743,10 +743,6 @@ queued:
 	return (0);
 bad:
 	/* wu is unwound by sr_wu_put */
-	if (pbuf)
-		sr_put_block(sd, pbuf);
-	if (qbuf)
-		sr_put_block(sd, qbuf);
 	if (wu_w)
 		sr_wu_put(wu_w);
 	return (1);

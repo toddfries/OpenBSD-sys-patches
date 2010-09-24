@@ -807,7 +807,6 @@ file net/if_loop.c			loop
 file net/if_media.c			ifmedia
 file net/if_sl.c			sl			needs-count
 file net/if_ppp.c			ppp			needs-count
-file net/netisr.c
 file net/ppp_tty.c			ppp
 file net/bsd-comp.c			ppp_bsdcomp
 file net/ppp-deflate.c			ppp_deflate

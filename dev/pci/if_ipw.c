@@ -2064,7 +2064,7 @@ fail1:	ipw_stop(ifp, 0);
 }
 
 void
-ipw_stop(struct ifnet *ifp, int softalso)
+ipw_stop(struct ifnet *ifp, int disable)
 {
 	struct ipw_softc *sc = ifp->if_softc;
 	struct ieee80211com *ic = &sc->sc_ic;

@@ -155,7 +155,7 @@ typedef enum {
 #define AR5K_TXQ_FLAG_COMPRESSION_ENABLE	0x0008
 #define AR5K_TXQ_FLAG_RDYTIME_EXP_POLICY_ENABLE	0x0010
 #define AR5K_TXQ_FLAG_FRAG_BURST_BACKOFF_ENABLE	0x0020
-#define AR5K_TXQ_FLAG_POST_FR_BKOFF_DIS         0x1000
+#define AR5K_TXQ_FLAG_POST_FR_BKOFF_DIS         0x0040
 
 typedef struct {
 	u_int32_t		tqi_ver;
@@ -645,8 +645,6 @@ struct ar5k_gain {
 #define AR5K_EEPROM_INFO_CKSUM		0xffff
 #define AR5K_EEPROM_INFO(_n)		(AR5K_EEPROM_INFO_BASE + (_n))
 
-#define AR5K_EEPROM_IS_HB63		0x000b	/* Talon detect */
-
 #define AR5K_EEPROM_VERSION		AR5K_EEPROM_INFO(1)
 #define AR5K_EEPROM_VERSION_3_0		0x3000
 #define AR5K_EEPROM_VERSION_3_1		0x3001
@@ -697,15 +695,12 @@ struct ar5k_gain {
 #define AR5K_EEPROM_OBDB1_2GHZ	0x00ed
 
 /* Misc values available since EEPROM 4.0 */
-#define AR5K_EEPROM_MISC0			0x00c4
-#define AR5K_EEPROM_EARSTART(_v)		((_v) & 0xfff)
-#define AR5K_EEPROM_EEMAP(_v)			(((_v) >> 14) & 0x3)
-#define AR5K_EEPROM_MISC1			0x00c5
-#define AR5K_EEPROM_TARGET_PWRSTART(_v)		((_v) & 0xfff)
-#define AR5K_EEPROM_HAS32KHZCRYSTAL(_v)		(((_v) >> 14) & 0x1)
-#define AR5K_EEPROM_HAS32KHZCRYSTAL_OLD(_v)	(((_v) >> 15) & 0x1)
-#define AR5K_EEPROM_MISC2			0x00c6
-#define AR5K_EEPROM_MISC3			0x00c7
+#define AR5K_EEPROM_MISC0		0x00c4
+#define AR5K_EEPROM_EARSTART(_v)	((_v) & 0xfff)
+#define AR5K_EEPROM_EEMAP(_v)		(((_v) >> 14) & 0x3)
+#define AR5K_EEPROM_MISC1		0x00c5
+#define AR5K_EEPROM_TARGET_PWRSTART(_v)	((_v) & 0xfff)
+#define AR5K_EEPROM_HAS32KHZCRYSTAL(_v)	(((_v) >> 14) & 0x1)
 
 /* Some EEPROM defines */
 #define AR5K_EEPROM_EEP_SCALE		100
@@ -754,11 +749,8 @@ struct ar5k_eeprom_info {
 	u_int16_t	ee_version;
 	u_int16_t	ee_header;
 	u_int16_t	ee_ant_gain;
-	HAL_BOOL	ee_is_hb63;
 	u_int16_t	ee_misc0;
 	u_int16_t	ee_misc1;
-	u_int16_t	ee_misc2;
-	u_int16_t	ee_misc3;
 	u_int16_t	ee_cck_ofdm_gain_delta;
 	u_int16_t	ee_cck_ofdm_power_delta;
 	u_int16_t	ee_scaled_cck_delta;
@@ -1267,8 +1259,7 @@ struct ar5k_srev_name {
 #define AR5K_SREV_VER_AR5414	0xa5
 #define AR5K_SREV_VER_AR5416	0xc0	/* PCI-Express */
 #define AR5K_SREV_VER_AR5418	0xca	/* PCI-Express */
-#define AR5K_SREV_VER_AR2425	0xe0	/* Swan */
-#define AR5K_SREV_VER_AR2417	0xf0	/* Nala */
+#define AR5K_SREV_VER_AR2425	0xe2	/* PCI-Express */
 #define AR5K_SREV_VER_UNSUPP	0xff
 
 #define AR5K_SREV_RAD_5110	0x00
@@ -1280,15 +1271,10 @@ struct ar5k_srev_name {
 #define AR5K_SREV_RAD_2112	0x40
 #define AR5K_SREV_RAD_2112A	0x45
 #define AR5K_SREV_RAD_SC0	0x56
-#define AR5K_SREV_RAD_5413	0x60
 #define AR5K_SREV_RAD_SC1	0x63
 #define AR5K_SREV_RAD_SC2	0xa2
-#define AR5K_SREV_RAD_2425	0xa2
 #define AR5K_SREV_RAD_5133	0xc0
 #define AR5K_SREV_RAD_UNSUPP	0xff
-
-#define AR5K_SREV_PHY_5413	0x61
-#define AR5K_SREV_PHY_2425	0x70
 
 #define AR5K_DEVID_AR2413	0x001a
 #define AR5K_DEVID_AR5413	0x001b

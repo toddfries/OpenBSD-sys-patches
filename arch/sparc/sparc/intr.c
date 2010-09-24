@@ -51,6 +51,9 @@
 
 #include <dev/cons.h>
 
+#include <net/netisr.h>
+#include <net/if.h>
+
 #include <machine/atomic.h>
 #include <machine/cpu.h>
 #include <machine/ctlreg.h>
@@ -59,11 +62,26 @@
 
 #include <sparc/sparc/cpuvar.h>
 
+#ifdef INET
+#include <netinet/in.h>
+#include <netinet/if_ether.h>
+#include <netinet/ip_var.h>
+#endif
+
+#ifdef INET6
+# ifndef INET
+#  include <netinet/in.h>
+# endif
+#include <netinet/ip6.h>
+#include <netinet6/ip6_var.h>
+#endif
+
 extern void raise(int, int);
 
 void	ih_insert(struct intrhand **, struct intrhand *);
 void	ih_remove(struct intrhand **, struct intrhand *);
 
+void	softnet(void *);
 void	strayintr(struct clockframe *);
 
 /*
@@ -161,8 +179,7 @@ intr_init()
 	level10.ih_vec = level10.ih_ipl >> 8;
 	evcount_attach(&level10.ih_count, "clock", &level10.ih_vec);
 	level14.ih_vec = level14.ih_ipl >> 8;
-	evcount_attach(&level14.ih_count, "prof", &level14.ih_vec,
-	    &evcount_intr);
+	evcount_attach(&level14.ih_count, "prof", &level14.ih_vec);
 
 	softnet_ih = softintr_establish(IPL_SOFTNET, softnet, NULL);
 }
@@ -536,6 +553,29 @@ softintr_schedule(void *arg)
 		}
 	}
 	splx(s);
+}
+
+void *softnet_ih;
+int netisr;
+
+void
+softnet(void *arg)
+{
+	int n;
+
+	while ((n = netisr) != 0) {
+		atomic_clearbits_int(&netisr, n);
+
+#define DONETISR(bit, fn)						\
+		do {							\
+			if (n & (1 << bit))				\
+				fn();					\
+		} while (0)
+
+#include <net/netisr_dispatch.h>
+
+#undef DONETISR
+	}
 }
 
 #ifdef DIAGNOSTIC

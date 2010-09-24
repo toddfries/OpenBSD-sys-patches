@@ -146,9 +146,7 @@ nnpfs_message_installattr(int fd,
     if (t != 0) {
 	t->tokens = message->node.tokens;
 	if ((t->tokens & NNPFS_DATA_MASK) && DATA_FROM_XNODE(t) == NULL) {
-#if 0
 	    printf ("nnpfs_message_installattr: tokens and no data\n");
-#endif
 	    t->tokens &= ~NNPFS_DATA_MASK;
 	}
 	nnpfs_attr2vattr(&message->node.attr, &t->attr, 0);

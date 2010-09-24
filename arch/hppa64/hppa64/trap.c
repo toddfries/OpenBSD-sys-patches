@@ -27,6 +27,8 @@
 #include <sys/signalvar.h>
 #include <sys/user.h>
 
+#include <net/netisr.h>
+
 #include "systrace.h"
 #include <dev/systrace.h>
 

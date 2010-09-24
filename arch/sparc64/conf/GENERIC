@@ -300,6 +300,8 @@ pckbd*	at pckbc?			#  ps2 keyboard
 wskbd*	at pckbd? mux 1			#   generic keyboard layer
 pms*	at pckbc?			#  ps2 mouse
 wsmouse* at pms? mux 0			#   generic mouse
+pmsi*	at pckbc?			#  ps2 "intelli"mouse
+wsmouse* at pmsi? mux 0			#   generic mouse
 
 audioce*	at ebus?		# ebus cs4231
 
