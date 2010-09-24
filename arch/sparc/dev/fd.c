@@ -1,4 +1,4 @@
-/*	$OpenBSD: fd.c,v 1.76 2010/09/20 06:33:47 matthew Exp $	*/
+/*	$OpenBSD: fd.c,v 1.78 2010/09/23 13:11:38 jsing Exp $	*/
 /*	$NetBSD: fd.c,v 1.51 1997/05/24 20:16:19 pk Exp $	*/
 
 /*-
@@ -641,6 +641,7 @@ fdattach(parent, self, aux)
 	/*
 	 * Initialize and attach the disk structure.
 	 */
+	fd->sc_dk.dk_flags = DKF_NOLABELREAD;
 	fd->sc_dk.dk_name = fd->sc_dv.dv_xname;
 	disk_attach(&fd->sc_dev, &fd->sc_dk);
 
@@ -1007,7 +1008,7 @@ fdread(dev, uio, flag)
 	int flag;
 {
 
-        return (physio(fdstrategy, NULL, dev, B_READ, minphys, uio));
+        return (physio(fdstrategy, dev, B_READ, minphys, uio));
 }
 
 int
@@ -1017,7 +1018,7 @@ fdwrite(dev, uio, flag)
 	int flag;
 {
 
-        return (physio(fdstrategy, NULL, dev, B_WRITE, minphys, uio));
+        return (physio(fdstrategy, dev, B_WRITE, minphys, uio));
 }
 
 void
