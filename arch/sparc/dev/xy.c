@@ -1,4 +1,4 @@
-/*	$OpenBSD: xy.c,v 1.48 2010/09/08 14:47:10 jsing Exp $	*/
+/*	$OpenBSD: xy.c,v 1.50 2010/09/22 06:40:25 krw Exp $	*/
 /*	$NetBSD: xy.c,v 1.26 1997/07/19 21:43:56 pk Exp $	*/
 
 /*
@@ -800,6 +800,7 @@ xyioctl(dev, command, addr, flag, p)
 		return 0;
 
 	case DIOCGDINFO:	/* get disk label */
+	case DIOCGPDINFO:	/* no separate 'physical' info available. */
 		bcopy(xy->sc_dk.dk_label, addr, sizeof(struct disklabel));
 		return 0;
 
@@ -917,7 +918,7 @@ xyread(dev, uio, flags)
 	int flags;
 {
 
-	return (physio(xystrategy, NULL, dev, B_READ, minphys, uio));
+	return (physio(xystrategy, dev, B_READ, minphys, uio));
 }
 
 int
@@ -927,7 +928,7 @@ xywrite(dev, uio, flags)
 	int flags;
 {
 
-	return (physio(xystrategy, NULL, dev, B_WRITE, minphys, uio));
+	return (physio(xystrategy, dev, B_WRITE, minphys, uio));
 }
 
 
