@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_crypto.c,v 1.54 2010/07/02 09:26:05 jsing Exp $ */
+/* $OpenBSD: softraid_crypto.c,v 1.55 2010/09/23 18:49:39 oga Exp $ */
 /*
  * Copyright (c) 2007 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Hans-Joerg Hoexer <hshoexer@openbsd.org>
