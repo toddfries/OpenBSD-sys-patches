@@ -376,6 +376,8 @@ struct inteldrm_softc {
 		/* for hangcheck */
 		int		hang_cnt;
 		u_int32_t	last_acthd;
+		u_int32_t	last_instdone;
+		u_int32_t	last_instdone1;
 
 		uint32_t next_gem_seqno;
 
@@ -502,7 +504,6 @@ void		inteldrm_begin_ring(struct inteldrm_softc *, int);
 void		inteldrm_out_ring(struct inteldrm_softc *, u_int32_t);
 void		inteldrm_advance_ring(struct inteldrm_softc *);
 void		inteldrm_update_ring(struct inteldrm_softc *);
-void		inteldrm_error(struct inteldrm_softc *);
 int		inteldrm_pipe_enabled(struct inteldrm_softc *, int);
 int		i915_init_phys_hws(struct inteldrm_softc *, bus_dma_tag_t);
 
@@ -786,6 +787,8 @@ read64(struct inteldrm_softc *dev_priv, bus_size_t off)
 #define   RING_VALID_MASK	0x00000001
 #define   RING_VALID		0x00000001
 #define   RING_INVALID		0x00000000
+#define   RING_WAIT_I8XX	(1<<0) /* gen2, PRBx_HEAD */
+#define   RING_WAIT		(1<<11) /* gen3+, PRBx_CTL */
 #define PRB1_TAIL	0x02040 /* 915+ only */
 #define PRB1_HEAD	0x02044 /* 915+ only */
 #define PRB1_START	0x02048 /* 915+ only */
@@ -839,11 +842,81 @@ read64(struct inteldrm_softc *dev_priv, bus_size_t off)
 #define   GM45_ERROR_CP_PRIV				(1<<3)
 #define   I915_ERROR_MEMORY_REFRESH			(1<<1)
 #define   I915_ERROR_INSTRUCTION			(1<<0)
+/* ironlake error bits */
+#define   GT_ERROR_PTE					(1<<4)
+	/* memory privilege violation error */
+#define   GT_ERROR_MPE					(1<<3)
+	/* command privilege violation error */
+#define   GT_ERROR_CPE					(1<<2)
 #define INSTPM	        0x020c0
 #define ACTHD	        0x020c8
 #define FW_BLC		0x020d8
 #define FW_BLC_SELF	0x020e0 /* 915+ only */
 #define MI_ARB_STATE	0x020e4 /* 915+ only */
+#define   MI_ARB_MASK_SHIFT	  16	/* shift for enable bits */
+
+/* Make render/texture TLB fetches lower priorty than associated data
+ *   fetches. This is not turned on by default
+ */
+#define   MI_ARB_RENDER_TLB_LOW_PRIORITY	(1 << 15)
+
+/* Isoch request wait on GTT enable (Display A/B/C streams).
+ * Make isoch requests stall on the TLB update. May cause
+ * display underruns (test mode only)
+ */
+#define   MI_ARB_ISOCH_WAIT_GTT			(1 << 14)
+
+/* Block grant count for isoch requests when block count is
+ * set to a finite value.
+ */
+#define   MI_ARB_BLOCK_GRANT_MASK		(3 << 12)
+#define   MI_ARB_BLOCK_GRANT_8			(0 << 12)	/* for 3 display planes */
+#define   MI_ARB_BLOCK_GRANT_4			(1 << 12)	/* for 2 display planes */
+#define   MI_ARB_BLOCK_GRANT_2			(2 << 12)	/* for 1 display plane */
+#define   MI_ARB_BLOCK_GRANT_0			(3 << 12)	/* don't use */
+
+/* Enable render writes to complete in C2/C3/C4 power states.
+ * If this isn't enabled, render writes are prevented in low
+ * power states. That seems bad to me.
+ */
+#define   MI_ARB_C3_LP_WRITE_ENABLE		(1 << 11)
+
+/* This acknowledges an async flip immediately instead
+ * of waiting for 2TLB fetches.
+ */
+#define   MI_ARB_ASYNC_FLIP_ACK_IMMEDIATE	(1 << 10)
+
+/* Enables non-sequential data reads through arbiter
+ */
+#define   MI_ARB_DUAL_DATA_PHASE_DISABLE       	(1 << 9)
+
+/* Disable FSB snooping of cacheable write cycles from binner/render
+ * command stream
+ */
+#define   MI_ARB_CACHE_SNOOP_DISABLE		(1 << 8)
+
+/* Arbiter time slice for non-isoch streams */
+#define   MI_ARB_TIME_SLICE_MASK		(7 << 5)
+#define   MI_ARB_TIME_SLICE_1			(0 << 5)
+#define   MI_ARB_TIME_SLICE_2			(1 << 5)
+#define   MI_ARB_TIME_SLICE_4			(2 << 5)
+#define   MI_ARB_TIME_SLICE_6			(3 << 5)
+#define   MI_ARB_TIME_SLICE_8			(4 << 5)
+#define   MI_ARB_TIME_SLICE_10			(5 << 5)
+#define   MI_ARB_TIME_SLICE_14			(6 << 5)
+#define   MI_ARB_TIME_SLICE_16			(7 << 5)
+
+/* Low priority grace period page size */
+#define   MI_ARB_LOW_PRIORITY_GRACE_4KB		(0 << 4)	/* default */
+#define   MI_ARB_LOW_PRIORITY_GRACE_8KB		(1 << 4)
+
+/* Disable display A/B trickle feed */
+#define   MI_ARB_DISPLAY_TRICKLE_FEED_DISABLE	(1 << 2)
+
+/* Set display plane priority */
+#define   MI_ARB_DISPLAY_PRIORITY_A_B		(0 << 0)	/* display A > display B */
+#define   MI_ARB_DISPLAY_PRIORITY_B_A		(1 << 0)	/* display B > display A */
+
 #define CACHE_MODE_0	0x02120 /* 915+ only */
 #define   CM0_MASK_SHIFT          16
 #define   CM0_IZ_OPT_DISABLE      (1<<6)
@@ -2509,6 +2582,7 @@ read64(struct inteldrm_softc *dev_priv, bus_size_t off)
 #define DEIER   0x4400c
 
 /* GT interrupt */
+#define GT_MASTER_ERROR         (1 << 3)
 #define GT_SYNC_STATUS          (1 << 2)
 #define GT_USER_INTERRUPT       (1 << 0)
 
@@ -3013,12 +3087,12 @@ read64(struct inteldrm_softc *dev_priv, bus_size_t off)
 /*
  * if kms we want pch event, gse, and plane flip masks too
  */
-#define PCH_SPLIT_DISPLAY_INTR_FIX	DE_MASTER_IRQ_CONTROL
-#define PCH_SPLIT_DISPLAY_INTR_VAR	DE_PIPEA_VBLANK | DE_PIPEB_VBLANK
+#define PCH_SPLIT_DISPLAY_INTR_FIX	(DE_MASTER_IRQ_CONTROL)
+#define PCH_SPLIT_DISPLAY_INTR_VAR	(DE_PIPEA_VBLANK | DE_PIPEB_VBLANK)
 #define PCH_SPLIT_DISPLAY_ENABLE_MASK	\
 	(PCH_SPLIT_DISPLAY_INTR_FIX | PCH_SPLIT_DISPLAY_INTR_VAR)
 #define PCH_SPLIT_RENDER_INTR_FIX	(0)
-#define PCH_SPLIT_RENDER_INTR_VAR	GT_USER_INTERRUPT
+#define PCH_SPLIT_RENDER_INTR_VAR	(GT_USER_INTERRUPT | GT_MASTER_ERROR)
 #define PCH_SPLIT_RENDER_ENABLE_MASK	\
 	(PCH_SPLIT_RENDER_INTR_FIX | PCH_SPLIT_RENDER_INTR_VAR)
 /* not yet */
@@ -3026,9 +3100,6 @@ read64(struct inteldrm_softc *dev_priv, bus_size_t off)
 #define PCH_SPLIT_HOTPLUG_INTR_VAR	(0)
 #define PCH_SPLIT_HOTPLUG_ENABLE_MASK	\
 	(PCH_SPLIT_HOTPLUG_INTR_FIX | PCH_SPLIT_HOTPLUG_INTR_VAR)
-
-#define PCH_SPLIT_HOTPLUG_MASK
-
 
 #define	printeir(val)	printf("%s: error reg: %b\n", __func__, val,	\
 	"\20\x10PTEERR\x2REFRESHERR\x1INSTERR")
