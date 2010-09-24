@@ -54,8 +54,8 @@ mcclock0	at isa? port 0x70
 pckbc0		at isa?				# Yeeloong only
 pckbd*		at pckbc?			# Yeeloong only
 wskbd*		at pckbd? mux 1			# Yeeloong only
-pms*		at pckbc?			# Yeeloong only
-wsmouse*	at pms? mux 0			# Yeeloong only
+pmsi*		at pckbc?			# Yeeloong only
+wsmouse*	at pmsi? mux 0			# Yeeloong only
 com0		at isa? port 0x2f8 irq 3	# Fuloong 2F only
 pciide*		at pci?
 wd*		at pciide? flags 0x0000

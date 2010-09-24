@@ -10,3 +10,7 @@ file	dev/pckbc/wskbdmap_mfii.c		pckbd
 device	pms: wsmousedev
 attach	pms at pckbcslot
 file	dev/pckbc/pms.c				pms
+
+device	pmsi: wsmousedev
+attach	pmsi at pckbcslot
+file	dev/pckbc/pms_intelli.c			pmsi
