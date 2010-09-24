@@ -1,4 +1,4 @@
-/*      $OpenBSD: glxpcib.c,v 1.10 2010/09/20 02:45:46 deraadt Exp $	*/
+/*      $OpenBSD: glxpcib.c,v 1.13 2010/09/24 10:30:29 pirofti Exp $	*/
 
 /*
  * Copyright (c) 2007 Marc Balmer <mbalmer@openbsd.org>
@@ -40,8 +40,12 @@
 #define	AMD5536_REV_MASK	0xff
 #define	AMD5536_TMC		0x51400050
 
+#define	MSR_LBAR_ENABLE		0x100000000ULL
+
 /* Multi-Functional General Purpose Timer */
 #define	MSR_LBAR_MFGPT		0x5140000d
+#define	MSR_MFGPT_SIZE		0x40
+#define	MSR_MFGPT_ADDR_MASK	0xffc0
 #define	AMD5536_MFGPT0_CMP1	0x00000000
 #define	AMD5536_MFGPT0_CMP2	0x00000002
 #define	AMD5536_MFGPT0_CNT	0x00000004
@@ -107,6 +111,8 @@
 
 /* GPIO */
 #define	MSR_LBAR_GPIO		0x5140000c
+#define	MSR_GPIO_SIZE		0x100
+#define	MSR_GPIO_ADDR_MASK	0xff00
 #define	AMD5536_GPIO_NPINS	32
 #define	AMD5536_GPIOH_OFFSET	0x80	/* high bank register offset */
 #define	AMD5536_GPIO_OUT_VAL	0x00	/* output value */
@@ -132,6 +138,8 @@ struct glxpcib_softc {
 	bus_space_handle_t	sc_gpio_ioh;
 	struct gpio_chipset_tag	sc_gpio_gc;
 	gpio_pin_t		sc_gpio_pins[AMD5536_GPIO_NPINS];
+	int			sc_wdog;
+	int			sc_wdog_period;
 #endif
 };
 
@@ -202,23 +210,25 @@ glxpcib_attach(struct device *parent, struct device *self, void *aux)
 	/* Attach the watchdog timer */
 	sc->sc_iot = pa->pa_iot;
 	wa = rdmsr(MSR_LBAR_MFGPT);
-	if (wa & 0x100000000ULL &&
-	    !bus_space_map(sc->sc_iot, wa & 0xffff, 64, 0, &sc->sc_ioh)) {
+	if (wa & MSR_LBAR_ENABLE &&
+	    !bus_space_map(sc->sc_iot, wa & MSR_MFGPT_ADDR_MASK,
+	    MSR_MFGPT_SIZE, 0, &sc->sc_ioh)) {
 
 		/* count in seconds (as upper level desires) */
 		bus_space_write_2(sc->sc_iot, sc->sc_ioh, AMD5536_MFGPT0_SETUP,
 		    AMD5536_MFGPT_CNT_EN | AMD5536_MFGPT_CMP2EV |
 		    AMD5536_MFGPT_CMP2 | AMD5536_MFGPT_DIV_MASK);
 		wdog_register(sc, glxpcib_wdogctl_cb);
+		sc->sc_wdog = 1;
 		printf(", watchdog");
 	}
 
 	/* map GPIO I/O space */
 	sc->sc_gpio_iot = pa->pa_iot;
 	ga = rdmsr(MSR_LBAR_GPIO);
-	if (ga & 0x100000000ULL &&
-	    !bus_space_map(sc->sc_gpio_iot, ga & 0xffff, 0xff, 0,
-	    &sc->sc_gpio_ioh)) {
+	if (ga & MSR_LBAR_ENABLE &&
+	    !bus_space_map(sc->sc_gpio_iot, ga & MSR_GPIO_ADDR_MASK,
+	    MSR_GPIO_SIZE, 0, &sc->sc_gpio_ioh)) {
 		printf(", gpio");
 
 		/* initialize pin array */
@@ -258,6 +268,9 @@ glxpcib_attach(struct device *parent, struct device *self, void *aux)
 int
 glxpcib_activate(struct device *self, int act)
 {
+#ifndef SMALL_KERNEL
+	struct glxpcib_softc *sc = (struct glxpcib_softc *)self;
+#endif
 	int rv = 0;
 
 	switch (act) {
@@ -265,9 +278,20 @@ glxpcib_activate(struct device *self, int act)
 		rv = config_activate_children(self, act);
 		break;
 	case DVACT_SUSPEND:
+#ifndef SMALL_KERNEL
+		if (sc->sc_wdog) {
+			sc->sc_wdog_period = bus_space_read_2(sc->sc_iot,
+			    sc->sc_ioh, AMD5536_MFGPT0_CMP2);
+			glxpcib_wdogctl_cb(sc, 0);
+		}
+#endif
 		rv = config_activate_children(self, act);
 		break;
 	case DVACT_RESUME:
+#ifndef SMALL_KERNEL
+		if (sc->sc_wdog)
+			glxpcib_wdogctl_cb(sc, sc->sc_wdog_period);
+#endif
 		rv = config_activate_children(self, act);
 		break;
 	}
