@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd.c,v 1.193 2010/09/20 02:51:52 deraadt Exp $	*/
+/*	$OpenBSD: cd.c,v 1.196 2010/09/23 13:11:38 jsing Exp $	*/
 /*	$NetBSD: cd.c,v 1.100 1997/04/02 02:29:30 mycroft Exp $	*/
 
 /*
@@ -229,6 +229,7 @@ cdattach(struct device *parent, struct device *self, void *aux)
 	    &sc->sc_xsh);
 
 	/* Attach disk. */
+	sc->sc_dk.dk_flags = DKF_NOLABELREAD;
 	disk_attach(&sc->sc_dev, &sc->sc_dk);
 }
 
@@ -769,14 +770,14 @@ int
 cdread(dev_t dev, struct uio *uio, int ioflag)
 {
 
-	return (physio(cdstrategy, NULL, dev, B_READ, cdminphys, uio));
+	return (physio(cdstrategy, dev, B_READ, cdminphys, uio));
 }
 
 int
 cdwrite(dev_t dev, struct uio *uio, int ioflag)
 {
 
-	return (physio(cdstrategy, NULL, dev, B_WRITE, cdminphys, uio));
+	return (physio(cdstrategy, dev, B_WRITE, cdminphys, uio));
 }
 
 /*
@@ -850,8 +851,12 @@ cdioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 		bcopy(lp, sc->sc_dk.dk_label, sizeof(*lp));
 		free(lp, M_TEMP);
 		break;
-	case DIOCGDINFO:
+
 	case DIOCGPDINFO:
+		cdgetdisklabel(dev, sc, (struct disklabel *)addr, 1);
+		break;
+
+	case DIOCGDINFO:
 		*(struct disklabel *)addr = *(sc->sc_dk.dk_label);
 		break;
 
