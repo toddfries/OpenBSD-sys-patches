@@ -1,0 +1,2 @@
+aac*	at pci?			# Adaptec FSA RAID controllers
+scsibus* at aac?

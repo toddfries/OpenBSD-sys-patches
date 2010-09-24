@@ -2329,7 +2329,7 @@ fail1:	iwi_stop(ifp, 0);
 }
 
 void
-iwi_stop(struct ifnet *ifp, int disable)
+iwi_stop(struct ifnet *ifp, int softalso)
 {
 	struct iwi_softc *sc = ifp->if_softc;
 	struct ieee80211com *ic = &sc->sc_ic;

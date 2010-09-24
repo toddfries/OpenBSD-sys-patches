@@ -5802,7 +5802,7 @@ fail:	iwn_stop(ifp, 1);
 }
 
 void
-iwn_stop(struct ifnet *ifp, int disable)
+iwn_stop(struct ifnet *ifp, int softalso)
 {
 	struct iwn_softc *sc = ifp->if_softc;
 	struct ieee80211com *ic = &sc->sc_ic;

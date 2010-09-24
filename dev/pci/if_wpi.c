@@ -3340,7 +3340,7 @@ fail:	wpi_stop(ifp, 1);
 }
 
 void
-wpi_stop(struct ifnet *ifp, int disable)
+wpi_stop(struct ifnet *ifp, int softalso)
 {
 	struct wpi_softc *sc = ifp->if_softc;
 	struct ieee80211com *ic = &sc->sc_ic;

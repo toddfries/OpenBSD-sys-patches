@@ -110,9 +110,6 @@
 #define	splx(c)		spllower(c)
 
 #define	setsoftast()		(astpending = 1)
-#define	setsoftclock()		/* TODO */
-#define	setsoftnet()		/* TODO */
-#define	setsofttty()		/* TODO */
 
 #ifndef _LOCORE
 #include <sys/time.h>
