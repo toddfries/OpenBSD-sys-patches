@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.164 2010/09/20 07:18:03 deraadt Exp $
+#	$OpenBSD: GENERIC,v 1.166 2010/09/24 12:46:09 dlg Exp $
 #
 #	Machine-independent option; used by all architectures for their
 #	GENERIC kernel
@@ -75,8 +75,8 @@ option		MROUTING	# Multicast router
 softraid0	at root		# Software RAID
 scsibus*	at softraid?
 
-#vscsi0		at root		# Userland backed Virtual SCSI
-#scsibus*	at vscsi?
+vscsi0		at root		# Userland backed Virtual SCSI
+scsibus*	at vscsi?
 
 pseudo-device	pf		# packet filter
 pseudo-device	pflog		# pf log if
@@ -103,6 +103,7 @@ pseudo-device	loop		# network loopback
 #pseudo-device	mpe		# MPLS PE interface
 pseudo-device	ppp		# PPP
 pseudo-device	pppoe		# PPP over Ethernet (RFC 2516)
+#pseudo-device	pppx 		# PPP multiplexer
 pseudo-device	sl		# CSLIP
 pseudo-device	sppp	1	# Sync PPP/HDLC
 pseudo-device	trunk		# Trunking support
