@@ -1,4 +1,4 @@
-/*	$OpenBSD: sd.c,v 1.215 2010/09/20 02:51:52 deraadt Exp $	*/
+/*	$OpenBSD: sd.c,v 1.218 2010/09/24 01:41:34 dlg Exp $	*/
 /*	$NetBSD: sd.c,v 1.111 1997/04/02 02:29:41 mycroft Exp $	*/
 
 /*-
@@ -841,13 +841,13 @@ sdminphys(struct buf *bp)
 int
 sdread(dev_t dev, struct uio *uio, int ioflag)
 {
-	return (physio(sdstrategy, NULL, dev, B_READ, sdminphys, uio));
+	return (physio(sdstrategy, dev, B_READ, sdminphys, uio));
 }
 
 int
 sdwrite(dev_t dev, struct uio *uio, int ioflag)
 {
-	return (physio(sdstrategy, NULL, dev, B_WRITE, sdminphys, uio));
+	return (physio(sdstrategy, dev, B_WRITE, sdminphys, uio));
 }
 
 /*
@@ -904,6 +904,7 @@ sdioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 		bcopy(lp, sc->sc_dk.dk_label, sizeof(*lp));
 		free(lp, M_TEMP);
 		goto exit;
+
 	case DIOCGPDINFO:
 		sdgetdisklabel(dev, sc, (struct disklabel *)addr, 1);
 		goto exit;
@@ -1403,7 +1404,7 @@ sd_get_parms(struct sd_softc *sc, struct disk_parms *dp, int flags)
 	struct page_flex_geometry *flex = NULL;
 	struct page_reduced_geometry *reduced = NULL;
 	u_int32_t heads = 0, sectors = 0, cyls = 0, secsize = 0, sssecsize;
-	int err;
+	int err = 0;
 
 	dp->disksize = scsi_size(sc->sc_link, flags, &sssecsize);
 
