@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.h,v 1.118 2010/08/27 17:08:01 jsg Exp $	*/
+/*	$OpenBSD: if.h,v 1.120 2010/09/24 13:29:29 claudio Exp $	*/
 /*	$NetBSD: if.h,v 1.23 1996/05/07 02:40:27 thorpej Exp $	*/
 
 /*
@@ -108,6 +108,7 @@ struct if_clonereq {
 #define MCLPOOLS	7		/* number of cluster pools */
 
 struct mclpool {
+	u_int	mcl_grown;
 	u_short	mcl_alive;
 	u_short mcl_hwm;
 	u_short mcl_cwm;
@@ -143,7 +144,6 @@ struct	if_data {
 	struct	timeval ifi_lastchange;	/* last operational state change */
 
 	struct mclpool	ifi_mclpool[MCLPOOLS];
-	u_int64_t	ifi_livelocks;		/* livelocks migitaged */
 };
 
 /*
@@ -666,8 +666,8 @@ __BEGIN_DECLS
 unsigned int if_nametoindex(const char *);
 char	*if_indextoname(unsigned int, char *);
 struct	if_nameindex *if_nameindex(void);
+void	if_freenameindex(struct if_nameindex *);
 __END_DECLS
-#define if_freenameindex(x)	free(x)
 #endif
 
 #include <net/if_arp.h>
