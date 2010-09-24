@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf.c,v 1.705 2010/09/22 05:58:29 henning Exp $ */
+/*	$OpenBSD: pf.c,v 1.713 2010/09/24 02:28:10 henning Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -180,7 +180,7 @@ static __inline int	 pf_create_state(struct pf_rule *, struct pf_rule *,
 			    struct pf_pdesc *, struct pf_state_key **,
 			    struct pf_state_key **, struct mbuf *, int,
 			    int *, struct pfi_kif *, struct pf_state **, int,
-			    u_int16_t, u_int16_t, int, struct pf_rule_slist *,
+			    int, struct pf_rule_slist *,
 			    struct pf_rule_actions *, struct pf_src_node *[]);
 int			 pf_state_key_setup(struct pf_pdesc *, struct
 			    pf_state_key **, struct pf_state_key **, int);
@@ -239,6 +239,10 @@ struct pf_state		*pf_find_state(struct pfi_kif *,
 int			 pf_src_connlimit(struct pf_state **);
 int			 pf_check_congestion(struct ifqueue *);
 int			 pf_match_rcvif(struct mbuf *, struct pf_rule *);
+void			 pf_counters_inc(int, int,
+			    struct pf_pdesc *, struct pfi_kif *,
+			    struct pf_state *, struct pf_rule *,
+			    struct pf_rule *);
 
 extern struct pool pfr_ktable_pl;
 extern struct pool pfr_kentry_pl;
@@ -941,7 +945,6 @@ pf_find_state_byid(struct pf_state_cmp *key)
 	return (RB_FIND(pf_state_tree_id, &tree_id, (struct pf_state *)key));
 }
 
-/* XXX debug function, intended to be removed one day */
 int
 pf_compare_state_keys(struct pf_state_key *a, struct pf_state_key *b,
     struct pfi_kif *kif, u_int dir)
@@ -2788,7 +2791,6 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 	int			 match = 0;
 	int			 state_icmp = 0, icmp_dir, multi;
 	u_int16_t		 virtual_type, virtual_id;
-	u_int16_t		 bproto_sum = 0, bip_sum;
 	u_int8_t		 icmptype = 0, icmpcode = 0;
 
 	PF_ACPY(&pd->nsaddr, pd->src, pd->af);
@@ -3050,8 +3052,7 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 		}
 
 		action = pf_create_state(r, a, pd, &skw, &sks, m, off,
-		    &rewrite, kif, sm, tag, bproto_sum, bip_sum, hdrlen,
-		    &rules, &act, sns);
+		    &rewrite, kif, sm, tag, hdrlen, &rules, &act, sns);
 
 		if (action != PF_PASS)
 			return (action);
@@ -3107,9 +3108,8 @@ static __inline int
 pf_create_state(struct pf_rule *r, struct pf_rule *a, struct pf_pdesc *pd,
     struct pf_state_key **skw, struct pf_state_key **sks, struct mbuf *m,
     int off, int *rewrite, struct pfi_kif *kif, struct pf_state **sm,
-    int tag, u_int16_t bproto_sum, u_int16_t bip_sum, int hdrlen,
-    struct pf_rule_slist *rules, struct pf_rule_actions *act,
-    struct pf_src_node *sns[PF_SN_MAX])
+    int tag, int hdrlen, struct pf_rule_slist *rules,
+    struct pf_rule_actions *act, struct pf_src_node *sns[PF_SN_MAX])
 {
 	struct pf_state		*s = NULL;
 	struct tcphdr		*th = pd->hdr.tcp;
@@ -3439,10 +3439,10 @@ pf_test_fragment(struct pf_rule **rm, int direction, struct pfi_kif *kif,
 		else if (r->proto && r->proto != pd->proto)
 			r = r->skip[PF_SKIP_PROTO].ptr;
 		else if (PF_MISMATCHAW(&r->src.addr, pd->src, af,
-		    r->src.neg, kif, /* XXX rdomain */ 0))
+		    r->src.neg, kif, pd->rdomain))
 			r = r->skip[PF_SKIP_SRC_ADDR].ptr;
 		else if (PF_MISMATCHAW(&r->dst.addr, pd->dst, af,
-		    r->dst.neg, NULL, /* XXX rdomain */ 0))
+		    r->dst.neg, NULL, pd->rdomain))
 			r = r->skip[PF_SKIP_DST_ADDR].ptr;
 		else if (r->tos && !(r->tos == pd->tos))
 			r = TAILQ_NEXT(r, entries);
@@ -5769,6 +5769,58 @@ pf_setup_pdesc(sa_family_t af, int dir, struct pf_pdesc *pd, struct mbuf *m,
 	return (0);
 }
 
+void
+pf_counters_inc(int dir, int action, struct pf_pdesc *pd,
+    struct pfi_kif *kif, struct pf_state *s,
+    struct pf_rule *r, struct pf_rule *a)
+{ 
+	int dirndx;
+	kif->pfik_bytes[pd->af == AF_INET6][dir == PF_OUT][action != PF_PASS]
+	    += pd->tot_len;
+	kif->pfik_packets[pd->af == AF_INET6][dir == PF_OUT][action != PF_PASS]++;
+
+	if (action == PF_PASS || r->action == PF_DROP) {
+		dirndx = (dir == PF_OUT);
+		r->packets[dirndx]++;
+		r->bytes[dirndx] += pd->tot_len;
+		if (a != NULL) {
+			a->packets[dirndx]++;
+			a->bytes[dirndx] += pd->tot_len;
+		}
+		if (s != NULL) {
+			struct pf_rule_item	*ri;
+			struct pf_sn_item	*sni;
+
+			SLIST_FOREACH(sni, &s->src_nodes, next) {
+				sni->sn->packets[dirndx]++;
+				sni->sn->bytes[dirndx] += pd->tot_len;
+			}
+			dirndx = (dir == s->direction) ? 0 : 1;
+			s->packets[dirndx]++;
+			s->bytes[dirndx] += pd->tot_len;
+
+			SLIST_FOREACH(ri, &s->match_rules, entry) {
+				ri->r->packets[dirndx]++;
+				ri->r->bytes[dirndx] += pd->tot_len;
+			}
+		}
+		if (r->src.addr.type == PF_ADDR_TABLE)
+			pfr_update_stats(r->src.addr.p.tbl,
+			    (s == NULL) ? pd->src :
+			    &s->key[(s->direction == PF_IN)]->
+				addr[(s->direction == PF_OUT)],
+			    pd->af, pd->tot_len, dir == PF_OUT,
+			    r->action == PF_PASS, r->src.neg);
+		if (r->dst.addr.type == PF_ADDR_TABLE)
+			pfr_update_stats(r->dst.addr.p.tbl,
+			    (s == NULL) ? pd->dst :
+			    &s->key[(s->direction == PF_IN)]->
+				addr[(s->direction == PF_IN)],
+			    pd->af, pd->tot_len, dir == PF_OUT,
+			    r->action == PF_PASS, r->dst.neg);
+	}
+}
+
 #ifdef INET
 int
 pf_test(int dir, struct ifnet *ifp, struct mbuf **m0,
@@ -5782,8 +5834,8 @@ pf_test(int dir, struct ifnet *ifp, struct mbuf **m0,
 	struct pf_state		*s = NULL;
 	struct pf_ruleset	*ruleset = NULL;
 	struct pf_pdesc		 pd;
-	int			 off, hdrlen, dirndx, pqid = 0;
-	u_int16_t		 qid;
+	int			 off, hdrlen;
+	u_int32_t		 qid, pqid = 0;
 
 	if (!pf_status.running)
 		return (PF_PASS);
@@ -5948,8 +6000,6 @@ done:
 			qid = s->qid;
 	} else {
 		pf_scrub_ip(&m, r->scrub_flags, r->min_ttl, r->set_tos);
-		/* XXX tag not needed since it is done in pf_test_rule ??? */
-		pf_tag_packet(m, r->tag, r->rtableid);
 		if (pqid || (pd.tos & IPTOS_LOWDELAY))
 			qid = r->pqid;
 		else
@@ -6011,48 +6061,7 @@ done:
 		}
 	}
 
-	kif->pfik_bytes[0][dir == PF_OUT][action != PF_PASS] += pd.tot_len;
-	kif->pfik_packets[0][dir == PF_OUT][action != PF_PASS]++;
-
-	if (action == PF_PASS || r->action == PF_DROP) {
-		dirndx = (dir == PF_OUT);
-		r->packets[dirndx]++;
-		r->bytes[dirndx] += pd.tot_len;
-		if (a != NULL) {
-			a->packets[dirndx]++;
-			a->bytes[dirndx] += pd.tot_len;
-		}
-		if (s != NULL) {
-			struct pf_rule_item	*ri;
-			struct pf_sn_item	*sni;
-
-			SLIST_FOREACH(sni, &s->src_nodes, next) {
-				sni->sn->packets[dirndx]++;
-				sni->sn->bytes[dirndx] += pd.tot_len;
-			}
-			dirndx = (dir == s->direction) ? 0 : 1;
-			s->packets[dirndx]++;
-			s->bytes[dirndx] += pd.tot_len;
-			SLIST_FOREACH(ri, &s->match_rules, entry) {
-				ri->r->packets[dirndx]++;
-				ri->r->bytes[dirndx] += pd.tot_len;
-			}
-		}
-		if (r->src.addr.type == PF_ADDR_TABLE)
-			pfr_update_stats(r->src.addr.p.tbl,
-			    (s == NULL) ? pd.src :
-			    &s->key[(s->direction == PF_IN)]->
-				addr[(s->direction == PF_OUT)],
-			    pd.af, pd.tot_len, dir == PF_OUT,
-			    r->action == PF_PASS, r->src.neg);
-		if (r->dst.addr.type == PF_ADDR_TABLE)
-			pfr_update_stats(r->dst.addr.p.tbl,
-			    (s == NULL) ? pd.dst :
-			    &s->key[(s->direction == PF_IN)]->
-				addr[(s->direction == PF_IN)],
-			    pd.af, pd.tot_len, dir == PF_OUT,
-			    r->action == PF_PASS, r->dst.neg);
-	}
+	pf_counters_inc(dir, action, &pd, kif, s, r, a);
 
 	switch (action) {
 	case PF_SYNPROXY_DROP:
@@ -6090,7 +6099,7 @@ pf_test6(int dir, struct ifnet *ifp, struct mbuf **m0,
 	struct pf_state		*s = NULL;
 	struct pf_ruleset	*ruleset = NULL;
 	struct pf_pdesc		 pd;
-	int			 off, hdrlen, dirndx;
+	int			 off, hdrlen;
 
 	if (!pf_status.running)
 		return (PF_PASS);
@@ -6143,7 +6152,7 @@ pf_test6(int dir, struct ifnet *ifp, struct mbuf **m0,
 	 */
 	if (htons(h->ip6_plen) == 0) {
 		action = PF_DROP;
-		REASON_SET(&reason, PFRES_NORM);	/*XXX*/
+		REASON_SET(&reason, PFRES_NORM);
 		pflog |= PF_LOG_FORCE;
 		goto done;
 	}
@@ -6320,41 +6329,7 @@ done:
 		}
 	}
 
-	kif->pfik_bytes[1][dir == PF_OUT][action != PF_PASS] += pd.tot_len;
-	kif->pfik_packets[1][dir == PF_OUT][action != PF_PASS]++;
-
-	if (action == PF_PASS || r->action == PF_DROP) {
-		dirndx = (dir == PF_OUT);
-		r->packets[dirndx]++;
-		r->bytes[dirndx] += pd.tot_len;
-		if (a != NULL) {
-			a->packets[dirndx]++;
-			a->bytes[dirndx] += pd.tot_len;
-		}
-		if (s != NULL) {
-			struct pf_sn_item	*sni;
-
-			SLIST_FOREACH(sni, &s->src_nodes, next) {
-				sni->sn->packets[dirndx]++;
-				sni->sn->bytes[dirndx] += pd.tot_len;
-			}
-			dirndx = (dir == s->direction) ? 0 : 1;
-			s->packets[dirndx]++;
-			s->bytes[dirndx] += pd.tot_len;
-		}
-		if (r->src.addr.type == PF_ADDR_TABLE)
-			pfr_update_stats(r->src.addr.p.tbl,
-			    (s == NULL) ? pd.src :
-			    &s->key[(s->direction == PF_IN)]->addr[0],
-			    pd.af, pd.tot_len, dir == PF_OUT,
-			    r->action == PF_PASS, r->src.neg);
-		if (r->dst.addr.type == PF_ADDR_TABLE)
-			pfr_update_stats(r->dst.addr.p.tbl,
-			    (s == NULL) ? pd.dst :
-			    &s->key[(s->direction == PF_IN)]->addr[1],
-			    pd.af, pd.tot_len, dir == PF_OUT,
-			    r->action == PF_PASS, r->dst.neg);
-	}
+	pf_counters_inc(dir, action, &pd, kif, s, r, a);
 
 	switch (action) {
 	case PF_SYNPROXY_DROP:
