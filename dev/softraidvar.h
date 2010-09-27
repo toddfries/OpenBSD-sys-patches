@@ -346,6 +346,11 @@ struct sr_workunit {
 	/* all ios that make up this workunit */
 	struct sr_ccb_list	swu_ccb;
 
+	/* task memory */
+	struct workq_task	swu_wqt;
+	struct workq_task	swu_intr;
+	int			swu_cb_active;	/* in callback */
+
 	TAILQ_ENTRY(sr_workunit) swu_link;
 };
 
@@ -484,6 +489,8 @@ struct sr_discipline {
 #endif /* AOE */
 	}			sd_dis_specific;/* dis specific members */
 #define mds			sd_dis_specific
+
+	struct workq		*sd_workq;
 
 	/* discipline metadata */
 	struct sr_metadata	*sd_meta;	/* in memory copy of metadata */
