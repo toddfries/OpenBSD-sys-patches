@@ -275,3 +275,10 @@ usb_freemem(usbd_bus_handle bus, usb_dma_t *p)
 	splx(s);
 	DPRINTFN(5, ("usb_freemem: frag=%p\n", f));
 }
+
+void
+usb_syncmem(usb_dma_t *p, bus_addr_t offset, bus_size_t len, int ops)
+{
+	bus_dmamap_sync(p->block->tag, p->block->map, p->offs + offset,
+	    len, ops);
+}
