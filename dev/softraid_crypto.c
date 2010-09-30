@@ -164,11 +164,11 @@ sr_crypto_create(struct sr_discipline *sd, struct bioc_createraid *bc,
 
 	} else if (sr_crypto_get_kdf(bc, sd))
 		goto done;
-
+ 
 	/* Passphrase volumes cannot be automatically assembled. */
 	if (!(bc->bc_flags & BIOC_SCNOAUTOASSEMBLE) && bc->bc_key_disk == NODEV)
 		goto done;
-
+ 
 	strlcpy(sd->sd_name, "CRYPTO", sizeof(sd->sd_name));
 	sd->sd_meta->ssdi.ssd_size = coerced_size;
 
@@ -194,12 +194,15 @@ sr_crypto_assemble(struct sr_discipline *sd, struct bioc_createraid *bc,
 		goto done;
 
 	if (bc->bc_key_disk != NODEV) {
+
 		/* Read the mask key from the key disk. */
 		sd->mds.mdd_crypto.key_disk =
 		    sr_crypto_read_key_disk(sd, bc->bc_key_disk);
 		if (sd->mds.mdd_crypto.key_disk == NULL)
 			goto done;
+
 	} else if (bc->bc_opaque_flags & BIOC_SOOUT) {
+
 		/* provide userland with kdf hint */
 		if (bc->bc_opaque == NULL)
 			goto done;
@@ -215,8 +218,10 @@ sr_crypto_assemble(struct sr_discipline *sd, struct bioc_createraid *bc,
 		/* we're done */
 		bc->bc_opaque_status = BIOC_SOINOUT_OK;
 		rv = EAGAIN;
-		goto done;
+ 		goto done;
+
 	} else if (bc->bc_opaque_flags & BIOC_SOIN) {
+
 		/* get kdf with maskkey from userland */
 		if (sr_crypto_get_kdf(bc, sd))
 			goto done;
@@ -248,11 +253,10 @@ sr_crypto_getcryptop(struct sr_workunit *wu, int encrypt)
 	s = splbio();
 	uio = pool_get(&sd->mds.mdd_crypto.sr_uiopl, PR_ZERO | PR_NOWAIT);
 	if (uio == NULL)
-		goto poolunwind;
-	uio->uio_iov = pool_get(&sd->mds.mdd_crypto.sr_iovpl,
-	    PR_ZERO | PR_NOWAIT);
+		goto unwind;
+	uio->uio_iov = pool_get(&sd->mds.mdd_crypto.sr_iovpl, PR_NOWAIT);
 	if (uio->uio_iov == NULL)
-		goto poolunwind;
+		goto unwind;
 	splx(s);
 
 	uio->uio_iovcnt = 1;
@@ -314,14 +318,11 @@ sr_crypto_getcryptop(struct sr_workunit *wu, int encrypt)
 	}
 
 	return (crp);
-poolunwind:
-	splx(s);
 unwind:
 	if (crp)
 		crypto_freereq(crp);
 	if (uio && uio->uio_iov)
-		if ((wu->swu_xs->flags & SCSI_DATA_OUT) &&
-		    uio->uio_iov->iov_base)
+		if (wu->swu_xs->flags & SCSI_DATA_OUT)
 			free(uio->uio_iov->iov_base, M_DEVBUF);
 
 	s = splbio();
@@ -345,7 +346,7 @@ sr_crypto_putcryptop(struct cryptop *crp)
 	DNPRINTF(SR_D_DIS, "%s: sr_crypto_putcryptop crp: %p\n",
 	    DEVNAME(wu->swu_dis->sd_sc), crp);
 
-	if ((wu->swu_xs->flags & SCSI_DATA_OUT) && uio->uio_iov->iov_base)
+	if (wu->swu_xs->flags & SCSI_DATA_OUT)
 		free(uio->uio_iov->iov_base, M_DEVBUF);
 	s = splbio();
 	pool_put(&sd->mds.mdd_crypto.sr_iovpl, uio->uio_iov);
@@ -782,7 +783,7 @@ sr_crypto_create_key_disk(struct sr_discipline *sd, dev_t dev)
 		    DEVNAME(sc), devname);
 		goto fail;
 	}
-
+	
 	goto done;
 
 fail:
@@ -866,7 +867,13 @@ sr_crypto_read_key_disk(struct sr_discipline *sd, dev_t dev)
 	/*
 	 * Read and validate key disk metadata.
 	 */
-	sm = malloc(SR_META_SIZE * 512, M_DEVBUF, M_WAITOK | M_ZERO);
+	sm = malloc(SR_META_SIZE * 512, M_DEVBUF, M_NOWAIT|M_ZERO);
+	if (sm == NULL) {
+		printf("%s: not enough memory for metadata buffer\n",
+		    DEVNAME(sc));
+		goto done;
+	}
+
 	if (sr_meta_native_read(sd, dev, sm, NULL)) {
 		printf("%s: native bootprobe could not read native "
 		    "metadata\n", DEVNAME(sc));
@@ -875,7 +882,7 @@ sr_crypto_read_key_disk(struct sr_discipline *sd, dev_t dev)
 
 	if (sr_meta_validate(sd, dev, sm, NULL)) {
 		DNPRINTF(SR_D_META, "%s: invalid metadata\n",
-		    DEVNAME(sc));
+ 		    DEVNAME(sc));
 		goto done;
 	}
 
@@ -886,7 +893,13 @@ sr_crypto_read_key_disk(struct sr_discipline *sd, dev_t dev)
 	}
 
 	/* Construct key disk chunk. */
-	key_disk = malloc(sizeof(struct sr_chunk), M_DEVBUF, M_WAITOK | M_ZERO);
+	key_disk = malloc(sizeof(struct sr_chunk), M_DEVBUF, M_NOWAIT|M_ZERO);
+	if (key_disk == NULL) {
+		printf("%s: not enough memory for chunk\n",
+		    DEVNAME(sc));
+		goto done;
+	}
+
 	key_disk->src_dev_mm = dev;
 	key_disk->src_vn = vn;
 	key_disk->src_size = 0;
@@ -1093,8 +1106,8 @@ sr_crypto_meta_opt_load(struct sr_discipline *sd, struct sr_meta_opt *om)
 		sd->mds.mdd_crypto.scr_meta =  &om->somi.som_meta.smm_crypto;
 		rv = 0;
 	}
-
-	return (rv);
+	
+	return rv;
 }
 
 int
@@ -1109,7 +1122,7 @@ sr_crypto_rw(struct sr_workunit *wu)
 	if (wu->swu_xs->flags & SCSI_DATA_OUT) {
 		crp = sr_crypto_getcryptop(wu, 1);
 		if (crp == NULL)
-			panic("sr_crypto_rw: no crypto op");
+			panic("sr_crypto_getcryptop");
 		crp->crp_callback = sr_crypto_write;
 		crp->crp_opaque = wu;
 		s = splvm();
@@ -1198,8 +1211,6 @@ sr_crypto_rw2(struct sr_workunit *wu, struct cryptop *crp)
 
 	LIST_INIT(&ccb->ccb_buf.b_dep);
 
-	if (wu->swu_cb_active == 1)
-		panic("%s: sr_crypto_rw2", DEVNAME(sd->sd_sc));
 	TAILQ_INSERT_TAIL(&wu->swu_ccb, ccb, ccb_link);
 
 	DNPRINTF(SR_D_DIS, "%s: %s: sr_crypto_rw2: b_bcount: %d "
@@ -1294,7 +1305,7 @@ sr_crypto_intr(struct buf *bp)
 		if ((xs->flags & SCSI_DATA_IN) && (xs->error == XS_NOERROR)) {
 			crp = sr_crypto_getcryptop(wu, 0);
 			if (crp == NULL)
-				panic("sr_crypto_intr: no crypto op");
+				panic("sr_crypto_getcryptop");
 			ccb->ccb_opaque = crp;
 			crp->crp_callback = sr_crypto_read;
 			crp->crp_opaque = wu;
@@ -1330,8 +1341,6 @@ sr_crypto_finish_io(struct sr_workunit *wu)
 
 	xs->resid = 0;
 
-	if (wu->swu_cb_active == 1)
-		panic("%s: sr_crypto_finish_io", DEVNAME(sd->sd_sc));
 	TAILQ_FOREACH(ccb, &wu->swu_ccb, ccb_link) {
 		if (ccb->ccb_opaque == NULL)
 			continue;
