@@ -156,13 +156,14 @@ blktochr(dev_t dev)
 /*
  * Check that we're in a context where it's okay to sleep.
  */
+
+#ifdef DIAGNOSTIC
 void
 assertwaitok(void)
 {
 	splassert(IPL_NONE);
-#ifdef __HAVE_CPU_MUTEX_LEVEL
 	if (curcpu()->ci_mutex_level != 0)
 		panic("assertwaitok: non-zero mutex count: %d",
 		    curcpu()->ci_mutex_level);
-#endif
 }
+#endif
