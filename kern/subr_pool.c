@@ -455,10 +455,8 @@ pool_get(struct pool *pp, int flags)
 
 	KASSERT(flags & (PR_WAITOK | PR_NOWAIT));
 
-#ifdef DIAGNOSTIC
 	if ((flags & PR_WAITOK) != 0)
 		assertwaitok();
-#endif /* DIAGNOSTIC */
 
 	mtx_enter(&pp->pr_mtx);
 	v = pool_do_get(pp, flags);

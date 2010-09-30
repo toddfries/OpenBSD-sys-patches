@@ -121,6 +121,8 @@ tsleep(const volatile void *ident, int priority, const char *wmesg, int timo)
 		return (0);
 	}
 
+	assertwaitok();
+
 	sleep_setup(&sls, ident, priority, wmesg);
 	sleep_setup_timeout(&sls, timo);
 	sleep_setup_signal(&sls, priority);
