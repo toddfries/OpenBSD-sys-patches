@@ -89,6 +89,7 @@ void	acpi_init_states(struct acpi_softc *);
 #ifndef SMALL_KERNEL
 
 int	acpi_thinkpad_enabled;
+int	acpi_saved_spl;
 int	acpi_enabled;
 
 int	acpi_matchhids(struct acpi_attach_args *aa, const char *hids[],
@@ -1726,7 +1727,6 @@ acpi_sleep_state(struct acpi_softc *sc, int state)
 {
 	struct aml_value env;
 	int error = ENXIO;
-	int s;
 
 	memset(&env, 0, sizeof(env));
 	env.type = AML_OBJTYPE_INTEGER;
@@ -1774,8 +1774,8 @@ acpi_sleep_state(struct acpi_softc *sc, int state)
 		goto fail_dvact_quiesce;
 	}
 
-	s = splhigh();
-	disable_intr();		/* XXX Why does this affect the resume path? */
+	acpi_saved_spl = splhigh();
+	disable_intr();
 	cold = 1;
 	if (config_suspend(TAILQ_FIRST(&alldevs), DVACT_SUSPEND) != 0) {
 		printf("DVACT_SUSPEND failed: not very good\n");
@@ -1847,9 +1847,14 @@ fail_dvact_suspend:
 	sc->sc_state = ACPI_STATE_S0;
 	cold = 0;
 	enable_intr();
-	splx(s);
+	splx(acpi_saved_spl);
 
-	/* XXX We might want to move this to before cold = 0 */
+	/* XXX
+	 * This should really be before interrupt enabling but inittodr
+	 * calls splclock/splx and it seems both i386 and amd64 have
+	 * code bugs -- they will enable_intr() at splx time.  That is
+	 * very very very bad.
+	 */
 	inittodr(time_second);
 
 	if (sc->sc_tts) {
@@ -1890,22 +1895,20 @@ void
 acpi_powerdown(void)
 {
 	struct aml_value env;
-	int state = ACPI_STATE_S5, s;
+	int state = ACPI_STATE_S5;
 	struct acpi_softc *sc = acpi_softc;
 
 	memset(&env, 0, sizeof(env));
 	env.type = AML_OBJTYPE_INTEGER;
 
-	s = splhigh();
+	acpi_saved_spl = splhigh();
 	disable_intr();
 	cold = 1;
 
-	acpi_susp_resume_gpewalk(sc, state, 1);
-
 	/* XXX
-	 * We are about to do AML execution, but are not in the acpi
-	 * thread; we do not know if it has left acpiec or something
-	 * else in an intermediate state.  Wish us luck.
+	 * We are about to do AML execution, but we are not truly in
+	 * the acpi thread and we do not know if it has left acpiec
+	 * or something else in a strange state.  Wish us luck.
 	 */
 	if (sc->sc_pts) {
 		/* Powerdown: 1st AML step: _PTS(Sx) */
@@ -1921,8 +1924,6 @@ acpi_powerdown(void)
 
 	acpi_sleep_pm(sc, state);
 	panic("acpi S5 transition did not happen");
-	while (1)
-		;
 }
 
 void
