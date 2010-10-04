@@ -724,6 +724,10 @@ const struct pciide_product_desc pciide_sis_products[] =  {
 	{ PCI_PRODUCT_SIS_182,		/* SIS 182 SATA */
 	  0,
 	  sata_chip_map
+	},
+	{ PCI_PRODUCT_SIS_183,		/* SIS 183 SATA */
+	  0,
+	  sata_chip_map
 	}
 };
 
@@ -4923,6 +4927,7 @@ static struct sis_hostbr_type {
 	{PCI_PRODUCT_SIS_752, 0x00, 6, "752", SIS_TYPE_SOUTH},
 	{PCI_PRODUCT_SIS_755, 0x00, 6, "755", SIS_TYPE_SOUTH},
 	{PCI_PRODUCT_SIS_760, 0x00, 6, "760", SIS_TYPE_SOUTH},
+	{PCI_PRODUCT_SIS_761, 0x00, 6, "761", SIS_TYPE_SOUTH},
 	/*
 	 * From sos@freebsd.org: the 0x961 ID will never be found in real world
 	 * {PCI_PRODUCT_SIS_961, 0x00, 6, "961", SIS_TYPE_133NEW},
