@@ -207,30 +207,35 @@ acpi_attach_machdep(struct acpi_softc *sc)
 }
 
 void
-acpi_cpu_flush(struct acpi_softc *sc, int state)
+acpi_sleep_clocks(struct acpi_softc *sc, int state)
 {
-	/*
-	 * Flush write back caches since we'll lose them.
-	 */
-	if (state > ACPI_STATE_S1)
-		wbinvd();
+	rtcstop();
 }
 
 int
-acpi_sleep_machdep(struct acpi_softc *sc, int state)
+acpi_sleep_cpu(struct acpi_softc *sc, int state)
 {
-	if (sc->sc_facs == NULL) {
-		printf("%s: acpi_sleep_machdep: no FACS\n", DEVNAME(sc));
-		return (ENXIO);
-	}
-
-	rtcstop();
+#ifdef MULTIPROCESSOR
+	int i;
+#endif
 
 	/* i386 does lazy pmap_activate */
 	pmap_activate(curproc);
 
+#ifdef MULTIPROCESSOR
+	i386_broadcast_ipi(I386_IPI_SYNCH_FPU);
+	i386_broadcast_ipi(I386_IPI_HALT);
+
+	/* Wait for cpus to halt so we know their caches are written back */
+	for (i = 1; i < ncpus; i++) {
+		struct cpu_info *ci = cpu_info[i];
+
+		if (ci->ci_flags & CPUF_RUNNING)
+			continue;
+	}
+#endif
+
 	/*
-	 *
 	 * ACPI defines two wakeup vectors. One is used for ACPI 1.0
 	 * implementations - it's in the FACS table as wakeup_vector and
 	 * indicates a 32-bit physical address containing real-mode wakeup
@@ -239,7 +244,6 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 	 * The second wakeup vector is in the FACS table as
 	 * x_wakeup_vector and indicates a 64-bit physical address
 	 * containing protected-mode wakeup code.
-	 *
 	 */
 	sc->sc_facs->wakeup_vector = (u_int32_t)ACPI_TRAMPOLINE;
 	if (sc->sc_facs->version == 1)
@@ -252,31 +256,43 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 	if (acpi_savecpu()) {
 		/* Suspend path */
 		npxsave_cpu(curcpu(), 1);
-#ifdef MULTIPROCESSOR
-		i386_broadcast_ipi(I386_IPI_SYNCH_FPU);
-		i386_broadcast_ipi(I386_IPI_HALT);
-#endif
 		wbinvd();
-		acpi_enter_sleep_state(sc, state);
-		panic("%s: acpi_enter_sleep_state failed", DEVNAME(sc));
+
+		acpi_sleep_pm(sc, state);
+		printf("%s: acpi_sleep_pm failed", DEVNAME(sc));
+		return (ECANCELED);
 	}
+	return (EINVAL);
+}
 
-	/* Resume path continues here */
-
-	/* Reset the vector */
-	sc->sc_facs->wakeup_vector = 0;
-
-#if NISA > 0
-	isa_defaultirq();
-#endif
-	intr_calculatemasks();
-
+/*
+ * We try to start the clocks early, because we will soon
+ * run AML whigh might do DELAY
+ */ 
+void
+acpi_resume_clocks(struct acpi_softc *sc, int state)
+{
 #if NLAPIC > 0
+	lapic_tpr = IPL_HIGH;
 	lapic_enable();
 	if (initclock_func == lapic_initclocks)
 		lapic_startclock();
 	lapic_set_lvt();
 #endif
+
+	i8254_startclock();
+	if (initclock_func == i8254_initclocks)
+		rtcstart();		/* in i8254 mode, rtc is profclock */
+}
+
+void
+acpi_resume_cpu(struct acpi_softc *sc, int state)
+{
+
+#if NISA > 0
+	isa_defaultirq();
+#endif
+	intr_calculatemasks();
 
 	npxinit(&cpu_info_primary);
 
@@ -287,16 +303,10 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 #if NIOAPIC > 0
 	ioapic_enable();
 #endif
-	i8254_startclock();
-	if (initclock_func == i8254_initclocks)
-		rtcstart();		/* in i8254 mode, rtc is profclock */
-	inittodr(time_second);
-
-	return (0);
 }
 
 void
-acpi_resume_machdep(void)
+acpi_resume_mp(void)
 {
 #ifdef MULTIPROCESSOR
 	struct cpu_info *ci;
