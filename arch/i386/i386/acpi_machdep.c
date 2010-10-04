@@ -273,7 +273,6 @@ void
 acpi_resume_clocks(struct acpi_softc *sc, int state)
 {
 #if NLAPIC > 0
-	lapic_tpr = IPL_HIGH;
 	lapic_enable();
 	if (initclock_func == lapic_initclocks)
 		lapic_startclock();
