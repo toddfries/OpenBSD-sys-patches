@@ -243,7 +243,8 @@ pms_change_state(struct pms_softc *sc, int newstate)
 
 		pckbc_slot_enable(sc->sc_kbctag, sc->sc_kbcslot, 1);
 
-		pckbc_flush(sc->sc_kbctag, sc->sc_kbcslot);
+		if (sc->poll)
+			pckbc_flush(sc->sc_kbctag, sc->sc_kbcslot);
 
 		cmd[0] = PMS_RESET;
 		res = pms_cmd(sc, cmd, 1, resp, 2);
