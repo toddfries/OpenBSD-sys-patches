@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpi_machdep.c,v 1.39 2010/08/11 21:22:44 kettenis Exp $	*/
+/*	$OpenBSD: acpi_machdep.c,v 1.40 2010/10/06 16:37:32 deraadt Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -246,7 +246,7 @@ acpi_sleep_cpu(struct acpi_softc *sc, int state)
 	 * containing protected-mode wakeup code.
 	 */
 	sc->sc_facs->wakeup_vector = (u_int32_t)ACPI_TRAMPOLINE;
-	if (sc->sc_facs->version == 1)
+	if (sc->sc_facs->length > 32 && sc->sc_facs->version >= 1)
 		sc->sc_facs->x_wakeup_vector = 0;
 
 	/* Copy the current cpu registers into a safe place for resume.
