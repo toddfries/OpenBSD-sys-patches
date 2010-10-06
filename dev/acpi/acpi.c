@@ -64,7 +64,7 @@ int	acpi_debug = 16;
 int	acpi_poll_enabled;
 int	acpi_hasprocfvs;
 
-#define ACPIEN_RETRIES 15
+#define ACPIEN_RETRIES 3000
 
 void 	acpi_pci_match(struct device *, struct pci_attach_args *);
 int	acpi_match(struct device *, void *, void *);
@@ -126,7 +126,6 @@ struct idechnl {
 	int64_t		sta;
 };
 
-void	acpi_resume(struct acpi_softc *, int);
 void	acpi_susp_resume_gpewalk(struct acpi_softc *, int, int);
 int	acpi_add_device(struct aml_node *node, void *arg);
 
@@ -541,7 +540,6 @@ acpi_attach(struct device *parent, struct device *self, void *aux)
 	struct acpi_rsdp *rsdp;
 	struct acpi_q *entry;
 	struct acpi_dsdt *p_dsdt;
-	int idx;
 #ifndef SMALL_KERNEL
 	struct acpi_wakeq *wentry;
 	struct device *dev;
@@ -679,23 +677,29 @@ acpi_attach(struct device *parent, struct device *self, void *aux)
 	acpi_enabled = 1;
 #endif /* SMALL_KERNEL */
 
-	/*
-	 * Take over ACPI control.  Note that once we do this, we
-	 * effectively tell the system that we have ownership of
-	 * the ACPI hardware registers, and that SMI should leave
-	 * them alone
-	 *
-	 * This may prevent thermal control on some systems where
-	 * that actually does work
-	 */
-	acpi_write_pmreg(sc, ACPIREG_SMICMD, 0, sc->sc_fadt->acpi_enable);
-	idx = 0;
-	do {
-		if (idx++ > ACPIEN_RETRIES) {
-			printf(", can't enable ACPI\n");
-			return;
+	if (sc->sc_fadt->acpi_enable) {
+		int idx = 0;
+
+		/*
+		 * Take over ACPI control.  Note that once we do this, we
+		 * effectively tell the system that we have ownership of
+		 * the ACPI hardware registers, and that SMI should leave
+		 * them alone. This may prevent thermal control on some
+		 * systems where that actually does work.
+		 */
+		acpi_write_pmreg(sc, ACPIREG_SMICMD, 0,
+		    sc->sc_fadt->acpi_enable);
+		while (1) {
+			if (acpi_read_pmreg(sc, ACPIREG_PM1_CNT, 0) &
+			    ACPI_PM1_SCI_EN)
+				break;
+			if (idx++ > ACPIEN_RETRIES) {
+				printf(", can't enable ACPI\n");
+				return;
+			}
+			delay(1000);
 		}
-	} while (!(acpi_read_pmreg(sc, ACPIREG_PM1_CNT, 0) & ACPI_PM1_SCI_EN));
+	}
 
 	printf("\n%s: tables", DEVNAME(sc));
 	SIMPLEQ_FOREACH(entry, &sc->sc_tables, q_next) {
