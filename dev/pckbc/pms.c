@@ -1,4 +1,4 @@
-/* $OpenBSD: pms.c,v 1.6 2010/09/29 19:39:18 deraadt Exp $ */
+/* $OpenBSD: pms.c,v 1.7 2010/10/02 00:28:57 krw Exp $ */
 /* $NetBSD: psm.c,v 1.11 2000/06/05 22:20:57 sommerfeld Exp $ */
 
 /*-
@@ -89,9 +89,8 @@ struct pms_softc {		/* driver status information */
 #define PMS_STATE_ENABLED	1
 #define PMS_STATE_SUSPENDED	2
 
-	struct pms_protocol protocol;
-	unsigned char packet[8];
-
+	int poll;
+	int intelli;
 	int inputstate;
 	u_int buttons;		/* mouse button status */
 
@@ -110,28 +109,8 @@ int	pms_enable(void *);
 void	pms_disable(void *);
 
 int	pms_cmd(struct pms_softc *, u_char *, int, u_char *, int);
-int	pms_get_devid(struct pms_softc *, u_char *);
-int	pms_get_status(struct pms_softc *, u_char *);
-int	pms_set_rate(struct pms_softc *, int);
-int	pms_set_resolution(struct pms_softc *, int);
-int	pms_set_scaling(struct pms_softc *, int);
-void	pms_dev_reset(struct pms_softc *);
-void	pms_dev_disable(struct pms_softc *);
-void	pms_dev_enable(struct pms_softc *);
 
-int	pms_enable_intelli(struct pms_softc *);
-
-int	pms_sync_generic(struct pms_softc *, int);
-void	pms_proc_generic(struct pms_softc *, int *, int *, int *, u_int *);
-
-struct cfattach pms_ca = {
-	sizeof(struct pms_softc), pmsprobe, pmsattach, NULL,
-	pmsactivate
-};
-
-struct cfdriver pms_cd = {
-	NULL, "pms", DV_DULL
-};
+int	pms_setintellimode(struct pms_softc *sc);
 
 const struct wsmouse_accessops pms_accessops = {
 	pms_enable,
@@ -139,14 +118,40 @@ const struct wsmouse_accessops pms_accessops = {
 	pms_disable,
 };
 
-const struct pms_protocol pms_protocols[] = {
-	/* Generic PS/2 mouse */
-	{PMS_STANDARD, 3, 0xc0, 0x00,
-	 NULL, pms_sync_generic, pms_proc_generic},
-	/* Microsoft IntelliMouse */
-	{PMS_INTELLI, 4, 0x08, 0x08,
-	 pms_enable_intelli, pms_sync_generic, pms_proc_generic}
-};
+int
+pms_cmd(struct pms_softc *sc, u_char *cmd, int len, u_char *resp, int resplen)
+{
+	if (sc->poll) {
+		return pckbc_poll_cmd(sc->sc_kbctag, sc->sc_kbcslot,
+		    cmd, len, resplen, resp, 1);
+	} else {
+		return pckbc_enqueue_cmd(sc->sc_kbctag, sc->sc_kbcslot,
+		    cmd, len, resplen, 1, resp);
+	}
+}
+
+int
+pms_setintellimode(struct pms_softc *sc)
+{
+	u_char cmd[2], resp[1];
+	int i, res;
+	static const u_char rates[] = {200, 100, 80};
+
+	cmd[0] = PMS_SET_SAMPLE;
+	for (i = 0; i < 3; i++) {
+		cmd[1] = rates[i];
+		res = pms_cmd(sc, cmd, 2, NULL, 0);
+		if (res)
+			return (0);
+	}
+
+	cmd[0] = PMS_SEND_DEV_ID;
+	res = pms_cmd(sc, cmd, 1, resp, 1);
+	if (res || resp[0] != 3)
+		return (0);
+
+	return (1);
+}
 
 int
 pmsprobe(struct device *parent, void *match, void *aux)
@@ -246,52 +251,7 @@ pms_get_devid(struct pms_softc *sc, u_char *resp)
 int
 pms_get_status(struct pms_softc *sc, u_char *resp)
 {
-	u_char cmd[1];
-
-	cmd[0] = PMS_SEND_DEV_STATUS;
-	return pms_cmd(sc, cmd, 1, resp, 3);
-}
-
-int
-pms_set_rate(struct pms_softc *sc, int value)
-{
-	u_char cmd[2];
-
-	cmd[0] = PMS_SET_SAMPLE;
-	cmd[1] = value;
-	return pms_cmd(sc, cmd, 2, NULL, 0);
-}
-
-int
-pms_set_resolution(struct pms_softc *sc, int value)
-{
-	u_char cmd[2];
-
-	cmd[0] = PMS_SET_RES;
-	cmd[1] = value;
-	return pms_cmd(sc, cmd, 2, NULL, 0);
-}
-
-int
-pms_set_scaling(struct pms_softc *sc, int scale)
-{
-	u_char cmd[1];
-
-	switch (scale) {
-	case 1:
-	default:
-		cmd[0] = PMS_SET_SCALE11;
-		break;
-	case 2:
-		cmd[0] = PMS_SET_SCALE21;
-		break;
-	}
-	return pms_cmd(sc, cmd, 1, NULL, 0);
-}
-
-void
-pms_dev_reset(struct pms_softc *sc)
-{
+	u_char cmd[1], resp[2];
 	int res;
 	u_char cmd[1], resp[2];
 
@@ -372,14 +332,57 @@ pms_change_state(struct pms_softc *sc, int newstate)
 			return EBUSY;
 
 		sc->inputstate = 0;
-		sc->buttons = 0;
+		sc->oldbuttons = 0;
 
-		pms_dev_enable(sc);
+		pckbc_slot_enable(sc->sc_kbctag, sc->sc_kbcslot, 1);
+
+		pckbc_flush(sc->sc_kbctag, sc->sc_kbcslot);
+
+		cmd[0] = PMS_RESET;
+		res = pms_cmd(sc, cmd, 1, resp, 2);
+
+		sc->intelli = pms_setintellimode(sc);
+
+		cmd[0] = PMS_DEV_ENABLE;
+		res = pms_cmd(sc, cmd, 1, NULL, 0);
+		if (res)
+			printf("pms_enable: command error\n");
+#if 0
+		{
+			u_char scmd[2];
+
+			scmd[0] = PMS_SET_RES;
+			scmd[1] = 3; /* 8 counts/mm */
+			res = pckbc_enqueue_cmd(sc->sc_kbctag, sc->sc_kbcslot, scmd,
+						2, 0, 1, 0);
+			if (res)
+				printf("pms_enable: setup error1 (%d)\n", res);
+
+			scmd[0] = PMS_SET_SCALE21;
+			res = pckbc_enqueue_cmd(sc->sc_kbctag, sc->sc_kbcslot, scmd,
+						1, 0, 1, 0);
+			if (res)
+				printf("pms_enable: setup error2 (%d)\n", res);
+
+			scmd[0] = PMS_SET_SAMPLE;
+			scmd[1] = 100; /* 100 samples/sec */
+			res = pckbc_enqueue_cmd(sc->sc_kbctag, sc->sc_kbcslot, scmd,
+						2, 0, 1, 0);
+			if (res)
+				printf("pms_enable: setup error3 (%d)\n", res);
+		}
+#endif
+		sc->sc_state = newstate;
 		sc->poll = 0;
 		break;
 	case PMS_STATE_DISABLED:
 	case PMS_STATE_SUSPENDED:
-		pms_dev_disable(sc);
+		cmd[0] = PMS_DEV_DISABLE;
+		res = pms_cmd(sc, cmd, 1, NULL, 0);
+		if (res)
+			printf("pms_disable: command error\n");
+		pckbc_slot_enable(sc->sc_kbctag, sc->sc_kbcslot, 0);
+		sc->sc_state = newstate;
 		sc->poll = (newstate == PMS_STATE_SUSPENDED) ? 1 : 0;
 		break;
 	}

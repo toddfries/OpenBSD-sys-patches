@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpi_machdep.c,v 1.45 2010/08/11 21:22:44 kettenis Exp $	*/
+/*	$OpenBSD: acpi_machdep.c,v 1.46 2010/10/06 16:37:29 deraadt Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -190,32 +190,26 @@ acpi_attach_machdep(struct acpi_softc *sc)
 }
 
 void
-acpi_sleep_clocks(struct acpi_softc *sc, int state)
+acpi_cpu_flush(struct acpi_softc *sc, int state)
 {
-	rtcstop();
+	/*
+	 * Flush write back caches since we'll lose them.
+	 */
+	if (state > ACPI_STATE_S1)
+		wbinvd();
 }
 
 int
-acpi_sleep_cpu(struct acpi_softc *sc, int state)
+acpi_sleep_machdep(struct acpi_softc *sc, int state)
 {
-#ifdef MULTIPROCESSOR
-	int i;
-#endif
+	if (sc->sc_facs == NULL) {
+		printf("%s: acpi_sleep_machdep: no FACS\n", DEVNAME(sc));
+		return (ENXIO);
+	}
+
+	rtcstop();
 
 	/* amd64 does not do lazy pmap_activate */
-
-#ifdef MULTIPROCESSOR
-	x86_broadcast_ipi(X86_IPI_SYNCH_FPU);
-	x86_broadcast_ipi(X86_IPI_HALT);
-
-	/* Wait for cpus to halt so we know their caches are written back */
-	for (i = 1; i < ncpus; i++) {
-		struct cpu_info *ci = cpu_info[i];
-
-		if (ci->ci_flags & CPUF_RUNNING)
-			continue;
-	}
-#endif
 
 	/*
 	 * ACPI defines two wakeup vectors. One is used for ACPI 1.0
@@ -228,7 +222,7 @@ acpi_sleep_cpu(struct acpi_softc *sc, int state)
 	 * containing protected-mode wakeup code.
 	 */
 	sc->sc_facs->wakeup_vector = (u_int32_t)ACPI_TRAMPOLINE;
-	if (sc->sc_facs->version == 1)
+	if (sc->sc_facs->length > 32 && sc->sc_facs->version >= 1)
 		sc->sc_facs->x_wakeup_vector = 0;
 
 	/* Copy the current cpu registers into a safe place for resume.
@@ -238,42 +232,31 @@ acpi_sleep_cpu(struct acpi_softc *sc, int state)
 	if (acpi_savecpu()) {
 		/* Suspend path */
 		fpusave_cpu(curcpu(), 1);
+#ifdef MULTIPROCESSOR
+		x86_broadcast_ipi(X86_IPI_SYNCH_FPU);
+		x86_broadcast_ipi(X86_IPI_HALT);
+#endif
 		wbinvd();
-
-		acpi_sleep_pm(sc, state);
-		printf("%s: acpi_sleep_pm failed", DEVNAME(sc));
-		return (ECANCELED);
+		acpi_enter_sleep_state(sc, state);
+		panic("%s: acpi_enter_sleep_state failed", DEVNAME(sc));
 	}
-	return (EINVAL);
-}
 
-/*
- * We try to start the clocks early, because we will soon
- * run AML whigh might do DELAY
- */ 
-void
-acpi_resume_clocks(struct acpi_softc *sc, int state)
-{
+	/* Resume path continues here */
+
+	/* Reset the vector */
+	sc->sc_facs->wakeup_vector = 0;
+
+#if NISA > 0
+	i8259_default_setup();
+#endif
+	intr_calculatemasks(curcpu());
+
 #if NLAPIC > 0
 	lapic_enable();
 	if (initclock_func == lapic_initclocks)
 		lapic_startclock();
 	lapic_set_lvt();
 #endif
-
-	i8254_startclock();
-	if (initclock_func == i8254_initclocks)
-		rtcstart();		/* in i8254 mode, rtc is profclock */
-}
-
-void
-acpi_resume_cpu(struct acpi_softc *sc, int state)
-{
-
-#if NISA > 0
-	i8259_default_setup();
-#endif
-	intr_calculatemasks(curcpu());
 
 	fpuinit(&cpu_info_primary);
 
@@ -284,12 +267,18 @@ acpi_resume_cpu(struct acpi_softc *sc, int state)
 #if NIOAPIC > 0
 	ioapic_enable();
 #endif
+	i8254_startclock();
+	if (initclock_func == i8254_initclocks)
+		rtcstart();		/* in i8254 mode, rtc is profclock */
+	inittodr(time_second);
+
+	return (0);
 }
 
 void		cpu_start_secondary(struct cpu_info *ci);
 
 void
-acpi_resume_mp(void)
+acpi_resume_machdep(void)
 {
 #ifdef MULTIPROCESSOR
 	struct cpu_info *ci;
