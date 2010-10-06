@@ -1,4 +1,4 @@
-/* $OpenBSD: acpi.c,v 1.213 2010/09/29 19:45:34 deraadt Exp $ */
+/* $OpenBSD: acpi.c,v 1.218 2010/10/05 17:04:48 jordan Exp $ */
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
@@ -130,8 +130,11 @@ void	acpi_susp_resume_gpewalk(struct acpi_softc *, int, int);
 int	acpi_add_device(struct aml_node *node, void *arg);
 
 struct gpe_block *acpi_find_gpe(struct acpi_softc *, int);
-void	acpi_enable_onegpe(struct acpi_softc *, int, int);
+void	acpi_enable_onegpe(struct acpi_softc *, int);
+void	acpi_disable_onegpe(struct acpi_softc *, int);
 int	acpi_gpe(struct acpi_softc *, int, void *);
+
+void	acpi_disable_allgpes(struct acpi_softc *);
 
 #endif /* SMALL_KERNEL */
 
@@ -1316,17 +1319,16 @@ acpi_foundide(struct aml_node *node, void *arg)
 void
 acpi_reset(void)
 {
-	struct acpi_fadt	*fadt;
 	u_int32_t		 reset_as, reset_len;
 	u_int32_t		 value;
-
-	fadt = acpi_softc->sc_fadt;
+	struct acpi_softc	*sc = acpi_softc;
+	struct acpi_fadt	*fadt = sc->sc_fadt;
 
 	/*
 	 * RESET_REG_SUP is not properly set in some implementations,
 	 * but not testing against it breaks more machines than it fixes
 	 */
-	if (acpi_softc->sc_revision <= 1 ||
+	if (sc->sc_revision <= 1 ||
 	    !(fadt->flags & FADT_RESET_REG_SUP) || fadt->reset_reg.address == 0)
 		return;
 
@@ -1340,7 +1342,7 @@ acpi_reset(void)
 	if (reset_len == 0)
 		reset_len = reset_as;
 
-	acpi_gasio(acpi_softc, ACPI_IOWRITE,
+	acpi_gasio(sc, ACPI_IOWRITE,
 	    fadt->reset_reg.address_space_id,
 	    fadt->reset_reg.address, reset_as, reset_len, &value);
 
@@ -1474,7 +1476,7 @@ acpi_add_device(struct aml_node *node, void *arg)
 }
 
 void
-acpi_enable_onegpe(struct acpi_softc *sc, int gpe, int enable)
+acpi_enable_onegpe(struct acpi_softc *sc, int gpe)
 {
 	uint8_t mask, en;
 	int s;
@@ -1483,13 +1485,25 @@ acpi_enable_onegpe(struct acpi_softc *sc, int gpe, int enable)
 	s = spltty();
 	mask = (1L << (gpe & 7));
 	en = acpi_read_pmreg(sc, ACPIREG_GPE_EN, gpe>>3);
-	dnprintf(50, "%sabling GPE %.2x (current: %sabled) %.2x\n",
-	    enable ? "en" : "dis", gpe, (en & mask) ? "en" : "dis", en);
-	if (enable)
-		en |= mask;
-	else
-		en &= ~mask;
-	acpi_write_pmreg(sc, ACPIREG_GPE_EN, gpe>>3, en);
+	dnprintf(50, "enabling GPE %.2x (current: %sabled) %.2x\n",
+	    gpe, (en & mask) ? "en" : "dis", en);
+	acpi_write_pmreg(sc, ACPIREG_GPE_EN, gpe>>3, en | mask);
+	splx(s);
+}
+
+void
+acpi_disable_onegpe(struct acpi_softc *sc, int gpe)
+{
+	uint8_t mask, en;
+	int s;
+
+	/* Read enabled register */
+	s = spltty();
+	mask = (1L << (gpe & 7));
+	en = acpi_read_pmreg(sc, ACPIREG_GPE_EN, gpe>>3);
+	dnprintf(50, "disabling GPE %.2x (current: %sabled) %.2x\n",
+	    gpe, (en & mask) ? "en" : "dis", en);
+	acpi_write_pmreg(sc, ACPIREG_GPE_EN, gpe>>3, en & ~mask);
 	splx(s);
 }
 
@@ -1581,17 +1595,9 @@ acpi_foundprw(struct aml_node *node, void *arg)
 struct gpe_block *
 acpi_find_gpe(struct acpi_softc *sc, int gpe)
 {
-#if 1
 	if (gpe >= sc->sc_lastgpe)
 		return NULL;
 	return &sc->gpe_table[gpe];
-#else
-	SIMPLEQ_FOREACH(pgpe, &sc->sc_gpes, gpe_link) {
-		if (gpe >= pgpe->start && gpe <= (pgpe->start+7))
-			return &pgpe->table[gpe & 7];
-	}
-	return NULL;
-#endif
 }
 
 void
@@ -1613,10 +1619,7 @@ acpi_init_gpes(struct acpi_softc *sc)
 	ngpe = 0;
 
 	/* Clear GPE status */
-	for (idx = 0; idx < sc->sc_lastgpe; idx += 8) {
-		acpi_write_pmreg(sc, ACPIREG_GPE_EN,  idx>>3, 0);
-		acpi_write_pmreg(sc, ACPIREG_GPE_STS, idx>>3, -1);
-	}
+	acpi_disable_allgpes(sc);
 	for (idx = 0; idx < sc->sc_lastgpe; idx++) {
 		/* Search Level-sensitive GPES */
 		snprintf(name, sizeof(name), "\\_GPE._L%.2X", idx);
@@ -1651,23 +1654,21 @@ acpi_susp_resume_gpewalk(struct acpi_softc *sc, int state,
     int wake_gpe_state)
 {
 	struct acpi_wakeq *wentry;
-	int idx;
 	u_int32_t gpe;
 
 	/* Clear GPE status */
-	for (idx = 0; idx < sc->sc_lastgpe; idx += 8) {
-		acpi_write_pmreg(sc, ACPIREG_GPE_EN,  idx>>3, 0);
-		acpi_write_pmreg(sc, ACPIREG_GPE_STS, idx>>3, -1);
-	}
-
+	acpi_disable_allgpes(sc);
 	SIMPLEQ_FOREACH(wentry, &sc->sc_wakedevs, q_next) {
 		dnprintf(10, "%.4s(S%d) gpe %.2x\n", wentry->q_node->name,
 		    wentry->q_state,
 		    wentry->q_gpe);
 
-		if (state <= wentry->q_state)
-			acpi_enable_onegpe(sc, wentry->q_gpe,
-			    wake_gpe_state);
+		if (state <= wentry->q_state) {
+			if (wake_gpe_state)
+				acpi_enable_onegpe(sc, wentry->q_gpe);
+			else
+				acpi_disable_onegpe(sc, wentry->q_gpe);
+		}
 	}
 
 	/* If we are resuming (disabling wake GPEs), enable other GPEs */
@@ -1675,9 +1676,23 @@ acpi_susp_resume_gpewalk(struct acpi_softc *sc, int state,
 	if (wake_gpe_state == 0) {
 		for (gpe = 0; gpe < sc->sc_lastgpe; gpe++) {
 			if (sc->gpe_table[gpe].handler)
-				acpi_enable_onegpe(sc, gpe, 1);
+				acpi_enable_onegpe(sc, gpe);
 		}
 	}
+}
+
+void
+acpi_disable_allgpes(struct acpi_softc *sc)
+{
+	int idx, s;
+
+	/* Clear GPE status */
+	s = spltty();
+	for (idx = 0; idx < sc->sc_lastgpe; idx += 8) {
+		acpi_write_pmreg(sc, ACPIREG_GPE_EN, idx >> 3, 0);
+		acpi_write_pmreg(sc, ACPIREG_GPE_STS, idx >> 3, -1);
+	}
+	splx(s);
 }
 
 int
@@ -2035,7 +2050,7 @@ acpi_thread(void *arg)
 		/* Enable handled GPEs here */
 		for (gpe = 0; gpe < sc->sc_lastgpe; gpe++) {
 			if (sc->gpe_table[gpe].handler)
-				acpi_enable_onegpe(sc, gpe, 1);
+				acpi_enable_onegpe(sc, gpe);
 		}
 	}
 
