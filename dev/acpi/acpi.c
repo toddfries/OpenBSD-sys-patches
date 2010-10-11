@@ -1,4 +1,4 @@
-/* $OpenBSD: acpi.c,v 1.216 2010/10/05 16:17:55 deraadt Exp $ */
+/* $OpenBSD: acpi.c,v 1.219 2010/10/07 21:17:11 jordan Exp $ */
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
