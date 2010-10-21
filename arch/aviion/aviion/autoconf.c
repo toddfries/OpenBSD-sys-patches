@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.9 2009/03/15 20:39:51 miod Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.11 2010/04/18 15:05:26 miod Exp $	*/
 /*
  * Copyright (c) 1998 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -113,6 +113,7 @@ diskconf(void)
  * driver name.
  */
 
+/* skip end of token and whitespace */
 static char *stws(char *);
 static char *
 stws(char *p)
@@ -148,20 +149,21 @@ cmdline_parse(void)
 	p = stws(bootargs);
 	while (*p != '\0') {
 		if (*p++ == '-')
-			switch (*p) {
-			case 'a':
-				boothowto |= RB_ASKNAME;
-				break;
-			case 'b':
-				boothowto |= RB_KDB;
-				break;
-			case 'c':
-				boothowto |= RB_CONFIG;
-				break;
-			case 's':
-				boothowto |= RB_SINGLE;
-				break;
-			}
+			while (*p != ' ' && *p != '\0')
+				switch (*p++) {
+				case 'a':
+					boothowto |= RB_ASKNAME;
+					break;
+				case 'b':
+					boothowto |= RB_KDB;
+					break;
+				case 'c':
+					boothowto |= RB_CONFIG;
+					break;
+				case 's':
+					boothowto |= RB_SINGLE;
+					break;
+				}
 		p = stws(p);
 	}
 
@@ -191,8 +193,9 @@ device_register(struct device *dev, void *aux)
 		 * Internal ethernet is le at syscon only, and we do not
 		 * care about controller and unit numbers.
 		 */
-		if (strncmp("le", dev->dv_xname, 2) == 0 &&
-		    strncmp("syscon", dev->dv_parent->dv_xname, 6) == 0)
+		if (strcmp("le", dev->dv_cfdata->cf_driver->cd_name) == 0 &&
+		    strcmp("syscon",
+		      dev->dv_parent->dv_cfdata->cf_driver->cd_name) == 0)
 			bootdv = dev;
 		break;
 	}

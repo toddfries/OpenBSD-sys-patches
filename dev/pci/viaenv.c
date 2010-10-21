@@ -1,4 +1,4 @@
-/*	$OpenBSD: viaenv.c,v 1.12 2009/03/29 21:53:52 sthen Exp $	*/
+/*	$OpenBSD: viaenv.c,v 1.14 2010/07/06 09:05:41 blambert Exp $	*/
 /*	$NetBSD: viaenv.c,v 1.9 2002/10/02 16:51:59 thorpej Exp $	*/
 
 /*
@@ -168,7 +168,7 @@ val_to_uK(unsigned int val)
 	int     i = val / 4;
 	int     j = val % 4;
 
-	assert(i >= 0 && i <= 255);
+	KASSERT(i >= 0 && i <= 255);
 
 	if (j == 0 || i == 255)
 		return val_to_temp[i] * 10000;
@@ -194,7 +194,7 @@ val_to_uV(unsigned int val, int index)
 	static const long mult[] =
 	    {1250000, 1250000, 1670000, 2600000, 6300000};
 
-	assert(index >= 0 && index <= 4);
+	KASSERT(index >= 0 && index <= 4);
 
 	return (25LL * val + 133) * mult[index] / 2628;
 }
@@ -318,7 +318,7 @@ viaenv_attach(struct device * parent, struct device * self, void *aux)
 
 	/* Refresh sensors data every 1.5 seconds */
 	timeout_set(&viaenv_timeout, viaenv_refresh, sc);
-	timeout_add(&viaenv_timeout, (15 * hz) / 10);
+	timeout_add_msec(&viaenv_timeout, 1500);
 
 nohwm:
 #ifdef __HAVE_TIMECOUNTER
@@ -360,7 +360,7 @@ viaenv_refresh(void *arg)
 	struct viaenv_softc *sc = (struct viaenv_softc *)arg;
 
 	viaenv_refresh_sensor_data(sc);
-	timeout_add(&viaenv_timeout, (15 * hz) / 10);
+	timeout_add_msec(&viaenv_timeout, 1500);
 }
 
 #ifdef __HAVE_TIMECOUNTER

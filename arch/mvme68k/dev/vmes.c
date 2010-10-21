@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmes.c,v 1.14 2005/11/24 22:43:16 miod Exp $ */
+/*	$OpenBSD: vmes.c,v 1.16 2010/06/27 12:41:23 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -27,10 +27,11 @@
 
 #include <sys/param.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
+
+#include <uvm/uvm_extern.h>
 
 #include <machine/autoconf.h>
 #include <machine/conf.h>

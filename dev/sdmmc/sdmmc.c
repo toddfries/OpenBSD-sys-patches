@@ -1,4 +1,4 @@
-/*	$OpenBSD: sdmmc.c,v 1.20 2009/04/07 16:35:52 blambert Exp $	*/
+/*	$OpenBSD: sdmmc.c,v 1.24 2010/08/24 14:52:23 blambert Exp $	*/
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
@@ -28,6 +28,7 @@
 #include <sys/kthread.h>
 #include <sys/malloc.h>
 #include <sys/proc.h>
+#include <sys/rwlock.h>
 #include <sys/systm.h>
 
 #include <scsi/scsi_all.h>
@@ -50,6 +51,8 @@
 int	sdmmc_match(struct device *, void *, void *);
 void	sdmmc_attach(struct device *, struct device *, void *);
 int	sdmmc_detach(struct device *, int);
+int	sdmmc_activate(struct device *, int);
+
 void	sdmmc_create_thread(void *);
 void	sdmmc_task_thread(void *);
 void	sdmmc_discover_task(void *);
@@ -64,8 +67,6 @@ int	sdmmc_set_bus_width(struct sdmmc_function *);
 int	sdmmc_ioctl(struct device *, u_long, caddr_t);
 #endif
 
-#define DEVNAME(sc)	SDMMCDEVNAME(sc)
-
 #ifdef SDMMC_DEBUG
 int sdmmcdebug = 0;
 extern int sdhcdebug;	/* XXX should have a sdmmc_chip_debug() function */
@@ -76,7 +77,8 @@ void sdmmc_dump_command(struct sdmmc_softc *, struct sdmmc_command *);
 #endif
 
 struct cfattach sdmmc_ca = {
-	sizeof(struct sdmmc_softc), sdmmc_match, sdmmc_attach, sdmmc_detach
+	sizeof(struct sdmmc_softc), sdmmc_match, sdmmc_attach, sdmmc_detach,
+	sdmmc_activate
 };
 
 struct cfdriver sdmmc_cd = {
@@ -110,7 +112,7 @@ sdmmc_attach(struct device *parent, struct device *self, void *aux)
 	TAILQ_INIT(&sc->sc_intrq);
 	sdmmc_init_task(&sc->sc_discover_task, sdmmc_discover_task, sc);
 	sdmmc_init_task(&sc->sc_intr_task, sdmmc_intr_task, sc);
-	lockinit(&sc->sc_lock, PRIBIO, DEVNAME(sc), 0, 0);
+	rw_init(&sc->sc_lock, DEVNAME(sc));
 
 #ifdef SDMMC_IOCTL
 	if (bio_register(self, sdmmc_ioctl) != 0)
@@ -140,6 +142,25 @@ sdmmc_detach(struct device *self, int flags)
 	return 0;
 }
 
+int
+sdmmc_activate(struct device *self, int act)
+{
+	struct sdmmc_softc *sc = (struct sdmmc_softc *)self;
+	int rv = 0;
+
+	switch (act) {
+	case DVACT_SUSPEND:
+		/* If card in slot, cause a detach/re-attach */
+		if (ISSET(sc->sc_flags, SMF_CARD_PRESENT))
+			sc->sc_dying = -1;
+		break;
+	case DVACT_RESUME:
+		wakeup(&sc->sc_tskq);
+		break;
+	}
+	return (rv);
+}
+
 void
 sdmmc_create_thread(void *arg)
 {
@@ -161,6 +182,7 @@ sdmmc_task_thread(void *arg)
 	struct sdmmc_task *task;
 	int s;
 
+restart:
 	sdmmc_needs_discover(&sc->sc_dev);
 
 	s = splsdmmc();
@@ -177,11 +199,20 @@ sdmmc_task_thread(void *arg)
 	splx(s);
 
 	if (ISSET(sc->sc_flags, SMF_CARD_PRESENT)) {
-		SDMMC_LOCK(sc);
+		rw_enter_write(&sc->sc_lock);
 		sdmmc_card_detach(sc, DETACH_FORCE);
-		SDMMC_UNLOCK(sc);
+		rw_exit(&sc->sc_lock);
 	}
 
+	/*
+	 * During a suspend, the card is detached since we do not know
+	 * if it is the same upon wakeup.  Go re-discover the bus.
+	 */
+	if (sc->sc_dying == -1) {
+		CLR(sc->sc_flags, SMF_CARD_PRESENT);
+		sc->sc_dying = 0;
+		goto restart;
+	}
 	sc->sc_task_thread = NULL;
 	wakeup(sc);
 	kthread_exit(0);
@@ -238,9 +269,9 @@ sdmmc_discover_task(void *arg)
 	} else {
 		if (ISSET(sc->sc_flags, SMF_CARD_PRESENT)) {
 			CLR(sc->sc_flags, SMF_CARD_PRESENT);
-			SDMMC_LOCK(sc);
+			rw_enter_write(&sc->sc_lock);
 			sdmmc_card_detach(sc, DETACH_FORCE);
-			SDMMC_UNLOCK(sc);
+			rw_exit(&sc->sc_lock);
 		}
 	}
 }
@@ -253,7 +284,7 @@ sdmmc_card_attach(struct sdmmc_softc *sc)
 {
 	DPRINTF(1,("%s: attach card\n", DEVNAME(sc)));
 
-	SDMMC_LOCK(sc);
+	rw_enter_write(&sc->sc_lock);
 	CLR(sc->sc_flags, SMF_CARD_ATTACHED);
 
 	/*
@@ -290,11 +321,11 @@ sdmmc_card_attach(struct sdmmc_softc *sc)
 		sdmmc_io_attach(sc);
 
 	SET(sc->sc_flags, SMF_CARD_ATTACHED);
-	SDMMC_UNLOCK(sc);
+	rw_exit(&sc->sc_lock);
 	return;
 err:
 	sdmmc_card_detach(sc, DETACH_FORCE);
-	SDMMC_UNLOCK(sc);
+	rw_exit(&sc->sc_lock);
 }
 
 /*
@@ -306,7 +337,7 @@ sdmmc_card_detach(struct sdmmc_softc *sc, int flags)
 {
 	struct sdmmc_function *sf, *sfnext;
 
-	SDMMC_ASSERT_LOCKED(sc);
+	rw_assert_wrlock(&sc->sc_lock);
 
 	DPRINTF(1,("%s: detach card\n", DEVNAME(sc)));
 
@@ -341,7 +372,7 @@ sdmmc_enable(struct sdmmc_softc *sc)
 	u_int32_t host_ocr;
 	int error;
 
-	SDMMC_ASSERT_LOCKED(sc);
+	rw_assert_wrlock(&sc->sc_lock);
 
 	/*
 	 * Calculate the equivalent of the card OCR from the host
@@ -392,7 +423,7 @@ sdmmc_disable(struct sdmmc_softc *sc)
 {
 	/* XXX complete commands if card is still present. */
 
-	SDMMC_ASSERT_LOCKED(sc);
+	rw_assert_wrlock(&sc->sc_lock);
 
 	/* Make sure no card is still selected. */
 	(void)sdmmc_select_card(sc, NULL);
@@ -411,7 +442,7 @@ sdmmc_set_bus_power(struct sdmmc_softc *sc, u_int32_t host_ocr,
 {
 	u_int32_t bit;
 
-	SDMMC_ASSERT_LOCKED(sc);
+	rw_assert_wrlock(&sc->sc_lock);
 
 	/* Mask off unsupported voltage levels and select the lowest. */
 	DPRINTF(1,("%s: host_ocr=%x ", DEVNAME(sc), host_ocr));
@@ -459,7 +490,7 @@ int
 sdmmc_scan(struct sdmmc_softc *sc)
 {
 
-	SDMMC_ASSERT_LOCKED(sc);
+	rw_assert_wrlock(&sc->sc_lock);
 
 	/* Scan for I/O functions. */
 	if (ISSET(sc->sc_flags, SMF_IO_MODE))
@@ -486,7 +517,7 @@ sdmmc_init(struct sdmmc_softc *sc)
 {
 	struct sdmmc_function *sf;
 
-	SDMMC_ASSERT_LOCKED(sc);
+	rw_assert_wrlock(&sc->sc_lock);
 
 	/* Initialize all identified card functions. */
 	SIMPLEQ_FOREACH(sf, &sc->sf_head, sf_list) {
@@ -525,7 +556,7 @@ sdmmc_app_command(struct sdmmc_softc *sc, struct sdmmc_command *cmd)
 	struct sdmmc_command acmd;
 	int error;
 
-	SDMMC_ASSERT_LOCKED(sc);
+	rw_assert_wrlock(&sc->sc_lock);
 
 	bzero(&acmd, sizeof acmd);
 	acmd.c_opcode = MMC_APP_CMD;
@@ -556,7 +587,7 @@ sdmmc_mmc_command(struct sdmmc_softc *sc, struct sdmmc_command *cmd)
 {
 	int error;
 
-	SDMMC_ASSERT_LOCKED(sc);
+	rw_assert_wrlock(&sc->sc_lock);
 
 	sdmmc_chip_exec_command(sc->sct, sc->sch, cmd);
 
@@ -578,7 +609,7 @@ sdmmc_go_idle_state(struct sdmmc_softc *sc)
 {
 	struct sdmmc_command cmd;
 
-	SDMMC_ASSERT_LOCKED(sc);
+	rw_assert_wrlock(&sc->sc_lock);
 
 	bzero(&cmd, sizeof cmd);
 	cmd.c_opcode = MMC_GO_IDLE_STATE;
@@ -597,7 +628,7 @@ sdmmc_send_if_cond(struct sdmmc_softc *sc, uint32_t card_ocr)
 	uint8_t pat = 0x23;	/* any pattern will do here */
 	uint8_t res;
 
-	SDMMC_ASSERT_LOCKED(sc);
+	rw_assert_wrlock(&sc->sc_lock);
 
 	bzero(&cmd, sizeof cmd);
 
@@ -624,7 +655,7 @@ sdmmc_set_relative_addr(struct sdmmc_softc *sc,
 {
 	struct sdmmc_command cmd;
 
-	SDMMC_ASSERT_LOCKED(sc);
+	rw_assert_wrlock(&sc->sc_lock);
 
 	bzero(&cmd, sizeof cmd);
 
@@ -655,15 +686,15 @@ sdmmc_set_bus_width(struct sdmmc_function *sf)
 	struct sdmmc_command cmd;
 	int error;
 
-	SDMMC_LOCK(sc);
+	rw_enter_write(&sc->sc_lock);
 
 	if (!ISSET(sc->sc_flags, SMF_SD_MODE)) {
-		SDMMC_UNLOCK(sc);
+		rw_exit(&sc->sc_lock);
 		return EOPNOTSUPP;
 	}
 
 	if ((error = sdmmc_select_card(sc, sf)) != 0) {
-		SDMMC_UNLOCK(sc);
+		rw_exit(&sc->sc_lock);
 		return error;
 	}
 
@@ -672,7 +703,7 @@ sdmmc_set_bus_width(struct sdmmc_function *sf)
 	cmd.c_arg = SD_ARG_BUS_WIDTH_4;
 	cmd.c_flags = SCF_CMD_AC | SCF_RSP_R1;
 	error = sdmmc_app_command(sc, &cmd);
-	SDMMC_UNLOCK(sc);
+	rw_exit(&sc->sc_lock);
 	return error;
 }
 
@@ -682,7 +713,7 @@ sdmmc_select_card(struct sdmmc_softc *sc, struct sdmmc_function *sf)
 	struct sdmmc_command cmd;
 	int error;
 
-	SDMMC_ASSERT_LOCKED(sc);
+	rw_assert_wrlock(&sc->sc_lock);
 
 	if (sc->sc_card == sf || (sf && sc->sc_card &&
 	    sc->sc_card->rca == sf->rca)) {
@@ -750,12 +781,12 @@ sdmmc_ioctl(struct device *self, u_long request, caddr_t addr)
 			cmd.c_datalen = ucmd->c_datalen;
 		}
 
-		SDMMC_LOCK(sc);
+		rw_enter_write(&sc->sc_lock);
 		if (request == SDIOCEXECMMC)
 			error = sdmmc_mmc_command(sc, &cmd);
 		else
 			error = sdmmc_app_command(sc, &cmd);
-		SDMMC_UNLOCK(sc);
+		rw_exit(&sc->sc_lock);
 		if (error && !cmd.c_error)
 			cmd.c_error = error;
 
@@ -784,7 +815,7 @@ sdmmc_dump_command(struct sdmmc_softc *sc, struct sdmmc_command *cmd)
 {
 	int i;
 
-	SDMMC_ASSERT_LOCKED(sc);
+	rw_assert_wrlock(&sc->sc_lock);
 
 	DPRINTF(1,("%s: cmd %u arg=%#x data=%#x dlen=%d flags=%#x "
 	    "proc=\"%s\" (error %d)\n", DEVNAME(sc), cmd->c_opcode,

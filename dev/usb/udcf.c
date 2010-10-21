@@ -1,4 +1,4 @@
-/*	$OpenBSD: udcf.c,v 1.45 2008/11/21 11:36:19 mbalmer Exp $ */
+/*	$OpenBSD: udcf.c,v 1.48 2010/09/24 08:33:59 yuo Exp $ */
 
 /*
  * Copyright (c) 2006, 2007, 2008 Marc Balmer <mbalmer@openbsd.org>
@@ -138,7 +138,7 @@ void	udcf_ct_probe(void *);
 int udcf_match(struct device *, void *, void *); 
 void udcf_attach(struct device *, struct device *, void *); 
 int udcf_detach(struct device *, int); 
-int udcf_activate(struct device *, enum devact); 
+int udcf_activate(struct device *, int); 
 
 int udcf_nc_signal(struct udcf_softc *);
 int udcf_nc_init_hw(struct udcf_softc *);
@@ -226,15 +226,11 @@ udcf_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->sc_sensor.type = SENSOR_TIMEDELTA;
 	sc->sc_sensor.status = SENSOR_S_UNKNOWN;
-	sc->sc_sensor.value = 0LL;
-	sc->sc_sensor.flags = 0;
 	sensor_attach(&sc->sc_sensordev, &sc->sc_sensor);
 
 #ifdef UDCF_DEBUG
 	sc->sc_skew.type = SENSOR_TIMEDELTA;
 	sc->sc_skew.status = SENSOR_S_UNKNOWN;
-	sc->sc_skew.value = 0LL;
-	sc->sc_skew.flags = 0;
 	strlcpy(sc->sc_skew.desc, "local clock skew",
 	    sizeof(sc->sc_skew.desc));
 	sensor_attach(&sc->sc_sensordev, &sc->sc_skew);
@@ -336,8 +332,6 @@ int
 udcf_detach(struct device *self, int flags)
 {
 	struct udcf_softc	*sc = (struct udcf_softc *)self;
-
-	sc->sc_dying = 1;
 
 	timeout_del(&sc->sc_to);
 	timeout_del(&sc->sc_bv_to);
@@ -802,7 +796,7 @@ udcf_ct_probe(void *xsc)
 }
 
 int
-udcf_activate(struct device *self, enum devact act)
+udcf_activate(struct device *self, int act)
 {
 	struct udcf_softc *sc = (struct udcf_softc *)self;
 

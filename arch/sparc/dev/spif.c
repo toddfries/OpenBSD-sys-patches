@@ -1,4 +1,4 @@
-/*	$OpenBSD: spif.c,v 1.20 2006/06/02 20:00:54 miod Exp $	*/
+/*	$OpenBSD: spif.c,v 1.27 2010/07/02 17:27:01 nicm Exp $	*/
 
 /*
  * Copyright (c) 1999 Jason L. Wright (jason@thought.net)
@@ -53,16 +53,6 @@
 #include <sparc/dev/spifreg.h>
 #include <sparc/dev/spifvar.h>
 
-#if IPL_TTY == 1
-# define IE_MSOFT IE_L1
-#elif IPL_TTY == 4
-# define IE_MSOFT IE_L4
-#elif IPL_TTY == 6
-# define IE_MSOFT IE_L6
-#else
-# error "no suitable software interrupt bit"
-#endif
-
 int	spifmatch(struct device *, void *, void *);
 void	spifattach(struct device *, struct device *, void *);
 
@@ -80,7 +70,7 @@ int	spifstcintr_mx(struct spif_softc *, int *);
 int	spifstcintr_tx(struct spif_softc *, int *);
 int	spifstcintr_rx(struct spif_softc *, int *);
 int	spifstcintr_rxexception(struct spif_softc *, int *);
-int	spifsoftintr(void *);
+void	spifsoftintr(void *);
 
 int	stty_param(struct tty *, struct termios *);
 struct tty *sttytty(dev_t);
@@ -213,9 +203,7 @@ spifattach(parent, self, aux)
 	sc->sc_stcih.ih_arg = sc;
 	intr_establish(stcpri, &sc->sc_stcih, -1, self->dv_xname);
 
-	sc->sc_softih.ih_fun = spifsoftintr;
-	sc->sc_softih.ih_arg = sc;
-	intr_establish(IPL_TTY, &sc->sc_softih, IPL_TTY, self->dv_xname);
+	sc->sc_softih = softintr_establish(IPL_SOFTTTY, spifsoftintr, sc);
 }
 
 int
@@ -246,7 +234,7 @@ sttyattach(parent, dev, aux)
 		sp->sp_dtr = 0;
 		sc->sc_regs->dtrlatch[port] = 1;
 
-		tp = ttymalloc();
+		tp = ttymalloc(0);
 
 		tp->t_oproc = stty_start;
 		tp->t_param = stty_param;
@@ -333,7 +321,7 @@ sttyopen(dev, flags, mode, p)
 		else
 			CLR(tp->t_state, TS_CARR_ON);
 	}
-	else if (ISSET(tp->t_state, TS_XCLUDE) && p->p_ucred->cr_uid != 0) {
+	else if (ISSET(tp->t_state, TS_XCLUDE) && suser(p, 0) != 0) {
 		return (EBUSY);
 	} else {
 		s = spltty();
@@ -357,7 +345,7 @@ sttyopen(dev, flags, mode, p)
 
 	splx(s);
 
-	return ((*linesw[tp->t_line].l_open)(dev, tp));
+	return ((*linesw[tp->t_line].l_open)(dev, tp, p));
 }
 
 int
@@ -374,7 +362,7 @@ sttyclose(dev, flags, mode, p)
 	int port = SPIF_PORT(dev);
 	int s;
 
-	(*linesw[tp->t_line].l_close)(tp, flags);
+	(*linesw[tp->t_line].l_close)(tp, flags, p);
 	s = spltty();
 
 	if (ISSET(tp->t_cflag, HUPCL) || !ISSET(tp->t_state, TS_ISOPEN)) {
@@ -688,13 +676,7 @@ stty_start(tp)
 	s = spltty();
 
 	if (!ISSET(tp->t_state, TS_TTSTOP | TS_TIMEOUT | TS_BUSY)) {
-		if (tp->t_outq.c_cc <= tp->t_lowat) {
-			if (ISSET(tp->t_state, TS_ASLEEP)) {
-				CLR(tp->t_state, TS_ASLEEP);
-				wakeup(&tp->t_outq);
-			}
-			selwakeup(&tp->t_wsel);
-		}
+		ttwakeupwr(tp);
 		if (tp->t_outq.c_cc) {
 			sp->sp_txc = ndqb(&tp->t_outq, 0);
 			sp->sp_txp = tp->t_outq.c_cf;
@@ -869,24 +851,18 @@ spifstcintr(vsc)
 			r |= spifstcintr_mx(sc, &needsoft);
 	}
 
-	if (needsoft) {
-#if defined(SUN4M)
-		if (CPU_ISSUN4M)
-			raise(0, IPL_TTY);
-		else
-#endif
-			ienab_bis(IE_MSOFT);
-	}
+	if (needsoft)
+		softintr_schedule(sc->sc_softih);
 	return (r);
 }
 
-int
+void
 spifsoftintr(vsc)
 	void *vsc;
 {
 	struct spif_softc *sc = (struct spif_softc *)vsc;
 	struct stty_softc *stc = sc->sc_ttys;
-	int r = 0, i, data, s, flags;
+	int i, data, s, flags;
 	u_int8_t stat, msvr;
 	struct stty_port *sp;
 	struct tty *tp;
@@ -913,7 +889,6 @@ spifsoftintr(vsc)
 					data |= TTY_PE;
 
 				(*linesw[tp->t_line].l_rint)(data, tp);
-				r = 1;
 			}
 
 			s = splhigh();
@@ -931,13 +906,11 @@ spifsoftintr(vsc)
 				sp->sp_carrier = msvr & CD180_MSVR_CD;
 				(*linesw[tp->t_line].l_modem)(tp,
 				    sp->sp_carrier);
-				r = 1;
 			}
 
 			if (ISSET(flags, STTYF_RING_OVERFLOW)) {
 				log(LOG_WARNING, "%s-%x: ring overflow\n",
 					stc->sc_dev.dv_xname, i);
-				r = 1;
 			}
 
 			if (ISSET(flags, STTYF_DONE)) {
@@ -945,12 +918,9 @@ spifsoftintr(vsc)
 				    sp->sp_txp - tp->t_outq.c_cf);
 				CLR(tp->t_state, TS_BUSY);
 				(*linesw[tp->t_line].l_start)(tp);
-				r = 1;
 			}
 		}
 	}
-
-	return (r);
 }
 
 static __inline	void

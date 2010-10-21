@@ -1,4 +1,4 @@
-/*	$OpenBSD: boot.c,v 1.11 2008/05/20 18:12:19 jsing Exp $ */
+/*	$OpenBSD: boot.c,v 1.17 2010/09/14 16:57:15 miod Exp $ */
 
 /*
  * Copyright (c) 2004 Opsycon AB, www.opsycon.se.
@@ -28,14 +28,16 @@
 
 #include <sys/param.h>
 #include <sys/stat.h>
-#include <sys/exec.h>
-#include <sys/exec_elf.h>
+#include <lib/libkern/libkern.h>
 #include <stand.h>
 
 #include <mips64/arcbios.h>
 #include <mips64/cpu.h>
 
+#include <sys/exec_elf.h>
 #include "loadfile.h"
+
+char *strstr(char *, const char *);	/* strstr.c */
 
 int	main(int, char **);
 void	dobootopts(int, char **);
@@ -50,6 +52,7 @@ enum {
 
 char *OSLoadPartition = NULL;
 char *OSLoadFilename = NULL;
+int	IP;
 
 /*
  * OpenBSD/sgi Boot Loader.
@@ -61,21 +64,23 @@ main(int argc, char *argv[])
 	u_int64_t *esym;
 	char line[1024];
 	u_long entry;
-	int fd, i;
+	int fd;
+	extern int arcbios_init(void);
+
+	IP = arcbios_init();
+
+	printf("\nOpenBSD/sgi-IP%d ARCBios boot\n", IP);
 
 	dobootopts(argc, argv);
 	if (OSLoadPartition != NULL) {
 		strlcpy(line, OSLoadPartition, sizeof(line));
-		i = strlen(line);
 		if (OSLoadFilename != NULL)
-			strlcpy(&line[i], OSLoadFilename, sizeof(line) - i - 1);
+			strlcat(line, OSLoadFilename, sizeof(line));
 	} else
-		strlcpy("invalid argument setup", line, sizeof(line));
+		strlcpy(line, "invalid argument setup", sizeof(line));
 
 	for (entry = 0; entry < argc; entry++)
 		printf("arg %d: %s\n", entry, argv[entry]);
-
-	printf("\nOpenBSD/sgi ARCBios boot\n");
 
 	printf("Boot: %s\n", line);
 
@@ -91,9 +96,9 @@ main(int argc, char *argv[])
 #ifdef __LP64__
 		esym = (u_int64_t *)marks[MARK_END];
 #else
-#undef  KSEG0_BASE
-#define KSEG0_BASE	0xffffffff80000000ULL
-		esym = (u_int64_t *)PHYS_TO_KSEG0(marks[MARK_END]);
+#undef  CKSEG0_BASE
+#define CKSEG0_BASE	0xffffffff80000000ULL
+		esym = (u_int64_t *)PHYS_TO_CKSEG0(marks[MARK_END]);
 #endif
 
 		if (entry != NULL)
@@ -101,8 +106,14 @@ main(int argc, char *argv[])
 	}
 
 	/* We failed to load the kernel. */
-	printf("Boot FAILED!\n");
+	panic("Boot FAILED!");
+}
+
+__dead void
+_rtt()
+{
 	Bios_EnterInteractiveMode();
+	for (;;) ;
 }
 
 /*
@@ -111,6 +122,7 @@ main(int argc, char *argv[])
 void
 dobootopts(int argc, char **argv)
 {
+	static char filenamebuf[1 + 32];
 	char *SystemPartition = NULL;
 	char *cp;
 	int i;
@@ -145,12 +157,59 @@ dobootopts(int argc, char **argv)
 		char *p;
 
 		strlcpy(loadpart, argv[0], sizeof loadpart);
-		p = strstr(loadpart, "partition(8)");
-		if (p) {
+		if ((p = strstr(loadpart, "partition(8)")) != NULL) {
 			p += strlen("partition(");
-			p[0] = '0'; p[2] = 0;
+		} else if (strncmp(loadpart, "dksc(", 5) == 0) {
+			p = strstr(loadpart, ",8)");
+			if (p != NULL)
+				p++;
+		} else
+			p = NULL;
+
+		if (p != NULL) {
+			p[0] = '0';
+			p[2] = '\0';
+			snprintf(filenamebuf, sizeof filenamebuf,
+			    "/bsd.rd.IP%d", IP);
 			OSLoadPartition = loadpart;
-			OSLoadFilename = "/bsd.rd";
+			OSLoadFilename = filenamebuf;
 		}
 	}
+}
+
+/*
+ * Prevent loading a wrong kernel.
+ */
+int
+check_phdr(void *v)
+{
+	Elf64_Phdr *phdr = (Elf64_Phdr *)v;
+	uint64_t addr;
+
+	switch (IP) {
+	case 27:
+		addr = 0xa800000000000000ULL >> 28;
+		break;
+	case 30:
+		addr = 0xa800000020000000ULL >> 28;
+		break;
+	case 32:
+		addr = 0xffffffff80000000ULL >> 28;
+		break;
+	default:
+		/*
+		 * If the system could not be identified, accept any
+		 * address and hope the user knows what's he's doing.
+		 */
+		return 0;
+	}
+
+	if ((phdr->p_vaddr >> 28) != addr) {
+		/* I'm sorry Dave, I can't let you do that. */
+		printf("This kernel does not seem to be compiled for this"
+		    " machine type.\nYou need to boot an IP%d kernel.\n", IP);
+		return 1;
+	}
+
+	return 0;
 }

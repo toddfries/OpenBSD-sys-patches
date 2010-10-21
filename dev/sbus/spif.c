@@ -1,4 +1,4 @@
-/*	$OpenBSD: spif.c,v 1.13 2006/03/04 13:00:55 miod Exp $	*/
+/*	$OpenBSD: spif.c,v 1.19 2010/07/02 17:27:01 nicm Exp $	*/
 
 /*
  * Copyright (c) 1999-2002 Jason L. Wright (jason@thought.net)
@@ -304,7 +304,7 @@ sttyattach(parent, dev, aux)
 
 		DTR_WRITE(sc, port, 0);
 
-		tp = ttymalloc();
+		tp = ttymalloc(0);
 
 		tp->t_oproc = stty_start;
 		tp->t_param = stty_param;
@@ -390,7 +390,7 @@ sttyopen(dev, flags, mode, p)
 		else
 			CLR(tp->t_state, TS_CARR_ON);
 	}
-	else if (ISSET(tp->t_state, TS_XCLUDE) && p->p_ucred->cr_uid != 0) {
+	else if (ISSET(tp->t_state, TS_XCLUDE) && suser(p, 0) != 0) {
 		return (EBUSY);
 	} else {
 		s = spltty();
@@ -414,7 +414,7 @@ sttyopen(dev, flags, mode, p)
 
 	splx(s);
 
-	return ((*linesw[tp->t_line].l_open)(dev, tp));
+	return ((*linesw[tp->t_line].l_open)(dev, tp, p));
 }
 
 int
@@ -431,7 +431,7 @@ sttyclose(dev, flags, mode, p)
 	int port = SPIF_PORT(dev);
 	int s;
 
-	(*linesw[tp->t_line].l_close)(tp, flags);
+	(*linesw[tp->t_line].l_close)(tp, flags, p);
 	s = spltty();
 
 	if (ISSET(tp->t_cflag, HUPCL) || !ISSET(tp->t_state, TS_ISOPEN)) {
@@ -740,13 +740,7 @@ stty_start(tp)
 	s = spltty();
 
 	if (!ISSET(tp->t_state, TS_TTSTOP | TS_TIMEOUT | TS_BUSY)) {
-		if (tp->t_outq.c_cc <= tp->t_lowat) {
-			if (ISSET(tp->t_state, TS_ASLEEP)) {
-				CLR(tp->t_state, TS_ASLEEP);
-				wakeup(&tp->t_outq);
-			}
-			selwakeup(&tp->t_wsel);
-		}
+		ttwakeupwr(tp);
 		if (tp->t_outq.c_cc) {
 			sp->sp_txc = ndqb(&tp->t_outq, 0);
 			sp->sp_txp = tp->t_outq.c_cf;

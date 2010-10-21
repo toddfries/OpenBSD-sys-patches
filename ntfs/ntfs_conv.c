@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntfs_conv.c,v 1.6 2009/03/25 20:39:47 oga Exp $	*/
+/*	$OpenBSD: ntfs_conv.c,v 1.8 2010/08/12 04:26:56 tedu Exp $	*/
 /*	$NetBSD: ntfs_conv.c,v 1.1 2002/12/23 17:38:32 jdolecek Exp $	*/
 
 /*-
@@ -36,37 +36,12 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/namei.h>
-#include <sys/proc.h>
-#include <sys/kernel.h>
-#include <sys/vnode.h>
 #include <sys/mount.h>
-#include <sys/buf.h>
-#include <sys/file.h>
-#include <sys/malloc.h>
-#if defined(__FreeBSD__)
-#include <machine/clock.h>
-#endif
-
-#include <miscfs/specfs/specdev.h>
 
 /* #define NTFS_DEBUG 1 */
-#if defined(__FreeBSD__) || defined(__NetBSD__)
-#include <fs/ntfs/ntfs.h>
-#include <fs/ntfs/ntfsmount.h>
-#include <fs/ntfs/ntfs_inode.h>
-#include <fs/ntfs/ntfs_vfsops.h>
-#include <fs/ntfs/ntfs_subr.h>
-#include <fs/ntfs/ntfs_compr.h>
-#include <fs/ntfs/ntfs_ihash.h>
-#else
 #include <ntfs/ntfs.h>
-#include <ntfs/ntfsmount.h>
 #include <ntfs/ntfs_inode.h>
-#include <ntfs/ntfs_vfsops.h>
 #include <ntfs/ntfs_subr.h>
-#include <ntfs/ntfs_compr.h>
-#include <ntfs/ntfs_ihash.h>
-#endif
 
 /* UTF-8 encoding stuff */
 
@@ -104,8 +79,8 @@ ntfs_utf8_wget(const char **str)
 	case 3:
 		if ((s[1] & 0xC0) != 0x80 || (s[2] & 0xC0) != 0x80)
 			goto encoding_error;
-		rune = ((s[0] & 0x1F) << 12) | ((s[1] & 0x3F) << 6)
-		    | (s[2] & 0x3F);
+		rune = ((s[0] & 0x1F) << 12) | ((s[1] & 0x3F) << 6) |
+		    (s[2] & 0x3F);
 		break;
 	}
 

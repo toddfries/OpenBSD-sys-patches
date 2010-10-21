@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_crypto_tkip.c,v 1.12 2008/12/03 17:25:41 damien Exp $	*/
+/*	$OpenBSD: ieee80211_crypto_tkip.c,v 1.18 2010/07/20 15:36:03 matthew Exp $	*/
 
 /*-
  * Copyright (c) 2008 Damien Bergamini <damien.bergamini@free.fr>
@@ -59,9 +59,10 @@ struct ieee80211_tkip_ctx {
 	struct rc4_ctx	rc4;
 	const u_int8_t	*txmic;
 	const u_int8_t	*rxmic;
-	u_int16_t	TTAK1[5];
-	u_int16_t	TTAK2[5];
-	u_int8_t	TTAK2ok;
+	u_int16_t	txttak[5];
+	u_int16_t	rxttak[5];
+	u_int8_t	txttak_ok;
+	u_int8_t	rxttak_ok;
 };
 
 /*
@@ -197,7 +198,8 @@ ieee80211_tkip_encrypt(struct ieee80211com *ic, struct mbuf *m0,
 	MGET(n0, M_DONTWAIT, m0->m_type);
 	if (n0 == NULL)
 		goto nospace;
-	M_DUP_PKTHDR(n0, m0);
+	if (m_dup_pkthdr(n0, m0))
+		goto nospace;
 	n0->m_pkthdr.len += IEEE80211_TKIP_HDRLEN;
 	n0->m_len = MHLEN;
 	if (n0->m_pkthdr.len >= MINCLSIZE - IEEE80211_TKIP_TAILLEN) {
@@ -213,6 +215,8 @@ ieee80211_tkip_encrypt(struct ieee80211com *ic, struct mbuf *m0,
 	hdrlen = ieee80211_get_hdrlen(wh);
 	memcpy(mtod(n0, caddr_t), wh, hdrlen);
 
+	k->k_tsc++;	/* increment the 48-bit TSC */
+
 	/* construct TKIP header */
 	ivp = mtod(n0, u_int8_t *) + hdrlen;
 	ivp[0] = k->k_tsc >> 8;		/* TSC1 */
@@ -226,9 +230,11 @@ ieee80211_tkip_encrypt(struct ieee80211com *ic, struct mbuf *m0,
 	ivp[7] = k->k_tsc >> 40;	/* TSC5 */
 
 	/* compute WEP seed */
-	if ((k->k_tsc & 0xffff) == 0)
-		Phase1(ctx->TTAK1, k->k_key, wh->i_addr2, k->k_tsc >> 16);
-	Phase2((u_int8_t *)wepseed, k->k_key, ctx->TTAK1, k->k_tsc & 0xffff);
+	if (!ctx->txttak_ok || (k->k_tsc & 0xffff) == 0) {
+		Phase1(ctx->txttak, k->k_key, wh->i_addr2, k->k_tsc >> 16);
+		ctx->txttak_ok = 1;
+	}
+	Phase2((u_int8_t *)wepseed, k->k_key, ctx->txttak, k->k_tsc & 0xffff);
 	rc4_keysetup(&ctx->rc4, (u_int8_t *)wepseed, 16);
 
 	/* encrypt frame body and compute WEP ICV */
@@ -299,8 +305,6 @@ ieee80211_tkip_encrypt(struct ieee80211com *ic, struct mbuf *m0,
 
 	n0->m_pkthdr.len += IEEE80211_TKIP_TAILLEN;
 
-	k->k_tsc++;	/* increment the 48-bit TSC */
-
 	m_freem(m0);
 	return n0;
  nospace:
@@ -364,7 +368,8 @@ ieee80211_tkip_decrypt(struct ieee80211com *ic, struct mbuf *m0,
 	MGET(n0, M_DONTWAIT, m0->m_type);
 	if (n0 == NULL)
 		goto nospace;
-	M_DUP_PKTHDR(n0, m0);
+	if (m_dup_pkthdr(n0, m0))
+		goto nospace;
 	n0->m_pkthdr.len -= IEEE80211_TKIP_OVHD;
 	n0->m_len = MHLEN;
 	if (n0->m_pkthdr.len >= MINCLSIZE) {
@@ -381,11 +386,11 @@ ieee80211_tkip_decrypt(struct ieee80211com *ic, struct mbuf *m0,
 	wh->i_fc[1] &= ~IEEE80211_FC1_PROTECTED;
 
 	/* compute WEP seed */
-	if (!ctx->TTAK2ok || ((tsc >> 16) != (*prsc >> 16))) {
-		Phase1(ctx->TTAK2, k->k_key, wh->i_addr2, tsc >> 16);
-		ctx->TTAK2ok = 1;
+	if (!ctx->rxttak_ok || (tsc >> 16) != (*prsc >> 16)) {
+		ctx->rxttak_ok = 0;	/* invalidate cached TTAK (if any) */
+		Phase1(ctx->rxttak, k->k_key, wh->i_addr2, tsc >> 16);
 	}
-	Phase2((u_int8_t *)wepseed, k->k_key, ctx->TTAK2, tsc & 0xffff);
+	Phase2((u_int8_t *)wepseed, k->k_key, ctx->rxttak, tsc & 0xffff);
 	rc4_keysetup(&ctx->rc4, (u_int8_t *)wepseed, 16);
 
 	/* decrypt frame body and compute WEP ICV */
@@ -449,7 +454,7 @@ ieee80211_tkip_decrypt(struct ieee80211com *ic, struct mbuf *m0,
 	/* compute TKIP MIC over decrypted message */
 	ieee80211_tkip_mic(n0, hdrlen, ctx->rxmic, mic);
 	/* check that it matches the MIC in received frame */
-	if (memcmp(mic0, mic, IEEE80211_TKIP_MICLEN) != 0) {
+	if (timingsafe_bcmp(mic0, mic, IEEE80211_TKIP_MICLEN) != 0) {
 		m_freem(m0);
 		m_freem(n0);
 		ic->ic_stats.is_rx_locmicfail++;
@@ -459,6 +464,8 @@ ieee80211_tkip_decrypt(struct ieee80211com *ic, struct mbuf *m0,
 
 	/* update last seen packet number (MIC is validated) */
 	*prsc = tsc;
+	/* mark cached TTAK as valid */
+	ctx->rxttak_ok = 1;
 
 	m_freem(m0);
 	return n0;
@@ -503,7 +510,7 @@ ieee80211_michael_mic_failure(struct ieee80211com *ic, u_int64_t tsc)
 	if (ic->ic_flags & IEEE80211_F_COUNTERM)
 		return;	/* countermeasures already active */
 
-	log(LOG_WARNING, "%s: Michael MIC failure", ic->ic_if.if_xname);
+	log(LOG_WARNING, "%s: Michael MIC failure\n", ic->ic_if.if_xname);
 
 	/*
 	 * NB. do not send Michael MIC Failure reports as recommended since

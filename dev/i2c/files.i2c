@@ -1,4 +1,4 @@
-# $OpenBSD: files.i2c,v 1.46 2008/04/21 04:48:25 deraadt Exp $
+# $OpenBSD: files.i2c,v 1.49 2010/03/22 21:20:58 miod Exp $
 #	$NetBSD: files.i2c,v 1.3 2003/10/20 16:24:10 briggs Exp $
 
 define	i2c {[addr = -1], [size = -1]}
@@ -149,9 +149,8 @@ attach	thmc at i2c
 file	dev/i2c/thmc50.c			thmc
 
 # SPD Memory EEPROM
-device	spdmem
-attach	spdmem at i2c
-file	dev/i2c/spdmem.c			spdmem
+attach	spdmem at i2c with spdmem_iic
+file	dev/i2c/spdmem_i2c.c			spdmem
 
 # SO-DIMM (JC-42.4) temperature sensor
 device	sdtemp
@@ -161,3 +160,9 @@ file	dev/i2c/sdtemp.c			sdtemp
 device	adtfsm
 attach	adtfsm at i2c
 file	dev/i2c/adt7462.c			adtfsm
+
+# STMicroelectronics LIS331DL MEMS motion sensor
+device	lisa
+attach	lisa at i2c
+file	dev/i2c/lis331dl.c			lisa
+

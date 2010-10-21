@@ -1,4 +1,4 @@
-/* $OpenBSD: shared_intr.c,v 1.15 2006/06/15 20:08:29 brad Exp $ */
+/* $OpenBSD: shared_intr.c,v 1.17 2010/09/20 06:33:46 matthew Exp $ */
 /* $NetBSD: shared_intr.c,v 1.13 2000/03/19 01:46:18 thorpej Exp $ */
 
 /*
@@ -170,8 +170,7 @@ alpha_shared_intr_establish(intr, num, type, level, fn, arg, basename)
 	ih->ih_arg = arg;
 	ih->ih_level = level;
 	ih->ih_num = num;
-	evcount_attach(&ih->ih_count, basename, (void *)&ih->ih_num,
-	    &evcount_intr);
+	evcount_attach(&ih->ih_count, basename, &ih->ih_num);
 
 	intr[num].intr_sharetype = type;
 	TAILQ_INSERT_TAIL(&intr[num].intr_q, ih, ih_q);
@@ -180,10 +179,9 @@ alpha_shared_intr_establish(intr, num, type, level, fn, arg, basename)
 }
 
 void
-alpha_shared_intr_disestablish(intr, cookie, basename)
+alpha_shared_intr_disestablish(intr, cookie)
 	struct alpha_shared_intr *intr;
 	void *cookie;
-	const char *basename;
 {
 	struct alpha_shared_intrhand *ih = cookie;
 	unsigned int num = ih->ih_num;

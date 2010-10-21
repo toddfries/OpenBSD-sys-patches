@@ -1,4 +1,4 @@
-/*	$OpenBSD: gpiodcf.c,v 1.1 2008/11/28 17:42:43 mbalmer Exp $ */
+/*	$OpenBSD: gpiodcf.c,v 1.3 2009/10/13 19:33:16 pirofti Exp $ */
 
 /*
  * Copyright (c) 2008 Marc Balmer <mbalmer@openbsd.org>
@@ -118,7 +118,7 @@ void	gpiodcf_invalidate(void *);
 int gpiodcf_match(struct device *, void *, void *); 
 void gpiodcf_attach(struct device *, struct device *, void *); 
 int gpiodcf_detach(struct device *, int); 
-int gpiodcf_activate(struct device *, enum devact); 
+int gpiodcf_activate(struct device *, int); 
 
 int gpiodcf_signal(struct gpiodcf_softc *);
 
@@ -192,15 +192,11 @@ gpiodcf_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->sc_sensor.type = SENSOR_TIMEDELTA;
 	sc->sc_sensor.status = SENSOR_S_UNKNOWN;
-	sc->sc_sensor.value = 0LL;
-	sc->sc_sensor.flags = 0;
 	sensor_attach(&sc->sc_sensordev, &sc->sc_sensor);
 
 #ifdef GPIODCF_DEBUG
 	sc->sc_skew.type = SENSOR_TIMEDELTA;
 	sc->sc_skew.status = SENSOR_S_UNKNOWN;
-	sc->sc_skew.value = 0LL;
-	sc->sc_skew.flags = 0;
 	strlcpy(sc->sc_skew.desc, "local clock skew",
 	    sizeof(sc->sc_skew.desc));
 	sensor_attach(&sc->sc_sensordev, &sc->sc_skew);
@@ -597,7 +593,7 @@ gpiodcf_ct_probe(void *xsc)
 }
 
 int
-gpiodcf_activate(struct device *self, enum devact act)
+gpiodcf_activate(struct device *self, int act)
 {
 	struct gpiodcf_softc *sc = (struct gpiodcf_softc *)self;
 

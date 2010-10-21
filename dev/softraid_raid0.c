@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_raid0.c,v 1.11 2008/11/25 23:05:17 marco Exp $ */
+/* $OpenBSD: softraid_raid0.c,v 1.22 2010/07/02 09:20:26 jsing Exp $ */
 /*
  * Copyright (c) 2008 Marco Peereboom <marco@peereboom.us>
  *
@@ -43,7 +43,81 @@
 #include <dev/softraidvar.h>
 #include <dev/rndvar.h>
 
-/* RAID 0 functions */
+/* RAID 0 functions. */
+int	sr_raid0_create(struct sr_discipline *, struct bioc_createraid *,
+	    int, int64_t);
+int	sr_raid0_assemble(struct sr_discipline *, struct bioc_createraid *,
+	    int);
+int	sr_raid0_alloc_resources(struct sr_discipline *);
+int	sr_raid0_free_resources(struct sr_discipline *);
+int	sr_raid0_rw(struct sr_workunit *);
+void	sr_raid0_intr(struct buf *);
+void	sr_raid0_set_chunk_state(struct sr_discipline *, int, int);
+void	sr_raid0_set_vol_state(struct sr_discipline *);
+
+/* Discipline initialisation. */
+void
+sr_raid0_discipline_init(struct sr_discipline *sd)
+{
+
+	/* Fill out discipline members. */
+	sd->sd_type = SR_MD_RAID0;
+	sd->sd_capabilities = SR_CAP_SYSTEM_DISK | SR_CAP_AUTO_ASSEMBLE;
+	sd->sd_max_wu = SR_RAID0_NOWU;
+
+	/* Setup discipline pointers. */
+	sd->sd_create = sr_raid0_create;
+	sd->sd_assemble = sr_raid0_assemble;
+	sd->sd_alloc_resources = sr_raid0_alloc_resources;
+	sd->sd_free_resources = sr_raid0_free_resources;
+	sd->sd_start_discipline = NULL;
+	sd->sd_scsi_inquiry = sr_raid_inquiry;
+	sd->sd_scsi_read_cap = sr_raid_read_cap;
+	sd->sd_scsi_tur = sr_raid_tur;
+	sd->sd_scsi_req_sense = sr_raid_request_sense;
+	sd->sd_scsi_start_stop = sr_raid_start_stop;
+	sd->sd_scsi_sync = sr_raid_sync;
+	sd->sd_scsi_rw = sr_raid0_rw;
+	sd->sd_set_chunk_state = sr_raid0_set_chunk_state;
+	sd->sd_set_vol_state = sr_raid0_set_vol_state;
+}
+
+int
+sr_raid0_create(struct sr_discipline *sd, struct bioc_createraid *bc,
+    int no_chunk, int64_t coerced_size)
+{
+
+	if (no_chunk < 2)
+		return EINVAL;
+
+	/*
+	 * XXX add variable strip size later even though MAXPHYS is really
+	 * the clever value, users like to tinker with that type of stuff.
+	 */
+	strlcpy(sd->sd_name, "RAID 0", sizeof(sd->sd_name));
+	sd->sd_meta->ssdi.ssd_strip_size = MAXPHYS;
+	sd->sd_meta->ssdi.ssd_size = (coerced_size &
+	    ~((sd->sd_meta->ssdi.ssd_strip_size >> DEV_BSHIFT) - 1)) * no_chunk;
+
+	sd->sd_max_ccb_per_wu =
+	    (MAXPHYS / sd->sd_meta->ssdi.ssd_strip_size + 1) *
+	    SR_RAID0_NOWU * no_chunk;
+
+	return 0;
+}
+
+int
+sr_raid0_assemble(struct sr_discipline *sd, struct bioc_createraid *bc,
+    int no_chunks)
+{
+
+	sd->sd_max_ccb_per_wu =
+	    (MAXPHYS / sd->sd_meta->ssdi.ssd_strip_size + 1) *
+	    SR_RAID0_NOWU * sd->sd_meta->ssdi.ssd_chunk_no;
+
+	return 0;
+}
+
 int
 sr_raid0_alloc_resources(struct sr_discipline *sd)
 {
@@ -154,7 +228,7 @@ sr_raid0_set_vol_state(struct sr_discipline *sd)
 
 	for (i = 0; i < nd; i++) {
 		s = sd->sd_vol.sv_chunks[i]->src_meta.scm_status;
-		if (s > SR_MAX_STATES)
+		if (s >= SR_MAX_STATES)
 			panic("%s: %s: %s: invalid chunk state",
 			    DEVNAME(sd->sd_sc),
 			    sd->sd_meta->ssd_devname,
@@ -173,7 +247,7 @@ sr_raid0_set_vol_state(struct sr_discipline *sd)
 
 	switch (old_state) {
 	case BIOC_SVONLINE:
-		if (new_state == BIOC_SVOFFLINE)
+		if (new_state == BIOC_SVOFFLINE || new_state == BIOC_SVONLINE)
 			break;
 		else
 			goto die;
@@ -227,7 +301,7 @@ sr_raid0_rw(struct sr_workunit *wu)
 	stripoffs = lbaoffs & (strip_size - 1);
 	chunkoffs = (strip_no / no_chunk) << strip_bits;
 	physoffs = chunkoffs + stripoffs +
-	    ((SR_META_OFFSET + SR_META_SIZE) << DEV_BSHIFT);
+	    (sd->sd_meta->ssd_data_offset << DEV_BSHIFT);
 	length = MIN(xs->datalen, strip_size - stripoffs);
 	leftover = xs->datalen;
 	data = xs->data;
@@ -255,7 +329,7 @@ sr_raid0_rw(struct sr_workunit *wu)
 		    strip_no, chunk, stripoffs, chunkoffs, physoffs, length,
 		    leftover, data);
 
-		ccb->ccb_buf.b_flags = B_CALL;
+		ccb->ccb_buf.b_flags = B_CALL | B_PHYS;
 		ccb->ccb_buf.b_iodone = sr_raid0_intr;
 		ccb->ccb_buf.b_blkno = physoffs >> DEV_BSHIFT;
 		ccb->ccb_buf.b_bcount = length;
@@ -264,12 +338,15 @@ sr_raid0_rw(struct sr_workunit *wu)
 		ccb->ccb_buf.b_data = data;
 		ccb->ccb_buf.b_error = 0;
 		ccb->ccb_buf.b_proc = curproc;
+		ccb->ccb_buf.b_bq = NULL;
 		ccb->ccb_wu = wu;
 		ccb->ccb_buf.b_flags |= xs->flags & SCSI_DATA_IN ?
 		    B_READ : B_WRITE;
 		ccb->ccb_target = chunk;
 		ccb->ccb_buf.b_dev = sd->sd_vol.sv_chunks[chunk]->src_dev_mm;
-		ccb->ccb_buf.b_vp = NULL;
+		ccb->ccb_buf.b_vp = sd->sd_vol.sv_chunks[chunk]->src_vn;
+		if ((ccb->ccb_buf.b_flags & B_READ) == 0)
+			ccb->ccb_buf.b_vp->v_numoutput++;
 		LIST_INIT(&ccb->ccb_buf.b_dep);
 		TAILQ_INSERT_TAIL(&wu->swu_ccb, ccb, ccb_link);
 
@@ -355,7 +432,6 @@ sr_raid0_intr(struct buf *bp)
 
 		xs->error = XS_NOERROR;
 		xs->resid = 0;
-		xs->flags |= ITSDONE;
 
 		pend = 0;
 		TAILQ_FOREACH(wup, &sd->sd_wu_pendq, swu_link) {
@@ -392,7 +468,6 @@ sr_raid0_intr(struct buf *bp)
 	return;
 bad:
 	xs->error = XS_DRIVER_STUFFUP;
-	xs->flags |= ITSDONE;
 	sr_wu_put(wu);
 	sr_scsi_done(sd, xs);
 	splx(s);

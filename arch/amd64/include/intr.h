@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.16 2009/03/15 19:40:40 miod Exp $	*/
+/*	$OpenBSD: intr.h,v 1.19 2010/05/31 21:39:56 deraadt Exp $	*/
 /*	$NetBSD: intr.h,v 1.2 2003/05/04 22:01:56 fvdl Exp $	*/
 
 /*-
@@ -135,10 +135,6 @@ void softintr(int);
 #define	splstatclock()	splclock()
 #define splipi()	splraise(IPL_IPI)
 
-#define spllpt()	spltty()
-
-#define	spllpt()	spltty()
-
 /*
  * Software interrupt masks
  */
@@ -209,7 +205,7 @@ int intr_allocate_slot_cpu(struct cpu_info *, struct pic *, int, int *);
 int intr_allocate_slot(struct pic *, int, int, int, struct cpu_info **, int *,
 	    int *);
 void *intr_establish(int, struct pic *, int, int, int, int (*)(void *),
-	    void *, char *);
+	    void *, const char *);
 void intr_disestablish(struct intrhand *);
 void cpu_intr_init(struct cpu_info *);
 int intr_find_mpmapping(int bus, int pin, int *handle);
@@ -255,22 +251,10 @@ struct x86_soft_intrhand {
 
 struct x86_soft_intr {
 	TAILQ_HEAD(, x86_soft_intrhand)
-		softintr_q;
-	int softintr_ssir;
-	struct simplelock softintr_slock;
+			softintr_q;
+	int		softintr_ssir;
+	struct mutex	softintr_lock;
 };
-
-#define	x86_softintr_lock(si, s)					\
-do {									\
-	(s) = splhigh();						\
-	simple_lock(&si->softintr_slock);				\
-} while (/*CONSTCOND*/ 0)
-
-#define	x86_softintr_unlock(si, s)					\
-do {									\
-	simple_unlock(&si->softintr_slock);				\
-	splx((s));							\
-} while (/*CONSTCOND*/ 0)
 
 void	*softintr_establish(int, void (*)(void *), void *);
 void	softintr_disestablish(void *);
@@ -281,15 +265,14 @@ void	softintr_dispatch(int);
 do {									\
 	struct x86_soft_intrhand *__sih = (arg);			\
 	struct x86_soft_intr *__si = __sih->sih_intrhead;		\
-	int __s;							\
 									\
-	x86_softintr_lock(__si, __s);					\
+	mtx_enter(&__si->softintr_lock);				\
 	if (__sih->sih_pending == 0) {					\
 		TAILQ_INSERT_TAIL(&__si->softintr_q, __sih, sih_q);	\
 		__sih->sih_pending = 1;					\
 		softintr(__si->softintr_ssir);				\
 	}								\
-	x86_softintr_unlock(__si, __s);					\
+	mtx_leave(&__si->softintr_lock);				\
 } while (/*CONSTCOND*/ 0)
 #endif /* _LOCORE */
 

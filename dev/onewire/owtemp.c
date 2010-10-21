@@ -1,4 +1,4 @@
-/*	$OpenBSD: owtemp.c,v 1.13 2009/01/18 09:12:04 grange Exp $	*/
+/*	$OpenBSD: owtemp.c,v 1.15 2010/07/08 07:19:54 jasper Exp $	*/
 
 /*
  * Copyright (c) 2006, 2009 Alexander Yurchenko <grange@openbsd.org>
@@ -61,7 +61,7 @@ struct owtemp_softc {
 int	owtemp_match(struct device *, void *, void *);
 void	owtemp_attach(struct device *, struct device *, void *);
 int	owtemp_detach(struct device *, int);
-int	owtemp_activate(struct device *, enum devact);
+int	owtemp_activate(struct device *, int);
 
 void	owtemp_update(void *);
 
@@ -86,8 +86,7 @@ static const struct onewire_matchfam owtemp_fams[] = {
 int
 owtemp_match(struct device *parent, void *match, void *aux)
 {
-	return (onewire_matchbyfam(aux, owtemp_fams,
-	    sizeof(owtemp_fams) /sizeof(owtemp_fams[0])));
+	return (onewire_matchbyfam(aux, owtemp_fams, nitems(owtemp_fams)));
 }
 
 void
@@ -133,7 +132,7 @@ owtemp_detach(struct device *self, int flags)
 }
 
 int
-owtemp_activate(struct device *self, enum devact act)
+owtemp_activate(struct device *self, int act)
 {
 	return (0);
 }

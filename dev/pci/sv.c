@@ -1,4 +1,4 @@
-/*      $OpenBSD: sv.c,v 1.25 2008/10/25 22:30:43 jakemsr Exp $ */
+/*      $OpenBSD: sv.c,v 1.27 2010/07/15 03:43:11 jakemsr Exp $ */
 
 /*
  * Copyright (c) 1998 Constantine Paul Sapuntzakis
@@ -611,52 +611,56 @@ sv_query_encoding(addr, fp)
 		fp->encoding = AUDIO_ENCODING_ULINEAR;
 		fp->precision = 8;
 		fp->flags = 0;
-		return (0);
+		break;
 	case 1:
 		strlcpy(fp->name, AudioEmulaw, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_ULAW;
 		fp->precision = 8;
 		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	case 2:
 		strlcpy(fp->name, AudioEalaw, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_ALAW;
 		fp->precision = 8;
 		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	case 3:
 		strlcpy(fp->name, AudioEslinear, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_SLINEAR;
 		fp->precision = 8;
 		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
         case 4:
 		strlcpy(fp->name, AudioEslinear_le, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_SLINEAR_LE;
 		fp->precision = 16;
 		fp->flags = 0;
-		return (0);
+		break;
 	case 5:
 		strlcpy(fp->name, AudioEulinear_le, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_ULINEAR_LE;
 		fp->precision = 16;
 		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	case 6:
 		strlcpy(fp->name, AudioEslinear_be, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_SLINEAR_BE;
 		fp->precision = 16;
 		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	case 7:
 		strlcpy(fp->name, AudioEulinear_be, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_ULINEAR_BE;
 		fp->precision = 16;
 		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	default:
 		return (EINVAL);
 	}
+	fp->bps = AUDIO_BPS(fp->precision);
+	fp->msb = 1;
+
+	return (0);
 }
 
 int
@@ -720,6 +724,9 @@ sv_set_params(addr, setmode, usemode, p, r)
 
         p->sw_code = pswcode;
         r->sw_code = rswcode;
+	p->bps = AUDIO_BPS(p->precision);
+	r->bps = AUDIO_BPS(r->precision);
+	p->msb = r->msb = 1;
 
         /* Set the encoding */
 	reg = sv_read_indirect(sc, SV_DMA_DATA_FORMAT);
@@ -1421,7 +1428,7 @@ sv_init_mixer(sc)
   sv_mixer_set_port(sc, &cp);
 
   for (idx = 0; idx < ARRAY_SIZE(ports); idx++) {
-    if (ports[idx].audio == AudioNdac) {
+    if (strcmp(ports[idx].audio, AudioNdac) == 0) {
       cp.type = AUDIO_MIXER_ENUM;
       cp.dev = SV_FIRST_MIXER + idx * SV_DEVICES_PER_PORT + 1;
       cp.un.ord = 0;

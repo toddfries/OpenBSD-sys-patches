@@ -1,4 +1,4 @@
-/*	$OpenBSD: uhcivar.h,v 1.20 2008/06/26 05:42:18 ray Exp $ */
+/*	$OpenBSD: uhcivar.h,v 1.23 2010/09/07 16:21:46 deraadt Exp $ */
 /*	$NetBSD: uhcivar.h,v 1.36 2002/12/31 00:39:11 augustss Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/uhcivar.h,v 1.14 1999/11/17 22:33:42 n_hibma Exp $	*/
 
@@ -155,9 +155,7 @@ typedef struct uhci_softc {
 	u_int8_t sc_saved_sof;
 	u_int16_t sc_saved_frnum;
 
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 	char sc_softwake;
-#endif /* __HAVE_GENERIC_SOFT_INTERRUPTS */
 
 	char sc_isreset;
 	char sc_suspend;
@@ -173,7 +171,6 @@ typedef struct uhci_softc {
 	char sc_vendor[32];		/* vendor string for root hub */
 	int sc_id_vendor;		/* vendor ID for root hub */
 
-	void *sc_powerhook;		/* cookie from power hook */
 	void *sc_shutdownhook;		/* cookie from shutdown hook */
 
 	struct device *sc_child;		/* /dev/usb# device */
@@ -183,4 +180,4 @@ usbd_status	uhci_init(uhci_softc_t *);
 usbd_status	uhci_run(uhci_softc_t *, int run);
 int		uhci_intr(void *);
 int		uhci_detach(uhci_softc_t *, int);
-int		uhci_activate(struct device *, enum devact);
+int		uhci_activate(struct device *, int);

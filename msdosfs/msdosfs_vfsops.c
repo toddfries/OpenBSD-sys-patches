@@ -1,4 +1,4 @@
-/*	$OpenBSD: msdosfs_vfsops.c,v 1.51 2009/01/05 01:14:40 krw Exp $	*/
+/*	$OpenBSD: msdosfs_vfsops.c,v 1.58 2010/09/23 18:40:00 oga Exp $	*/
 /*	$NetBSD: msdosfs_vfsops.c,v 1.48 1997/10/18 02:54:57 briggs Exp $	*/
 
 /*-
@@ -93,12 +93,8 @@ int msdosfs_sync_vnode(struct vnode *, void *);
  * special file to treat as a filesystem. 
  */
 int
-msdosfs_mount(mp, path, data, ndp, p)
-	struct mount *mp;
-	const char *path;
-	void *data;
-	struct nameidata *ndp;
-	struct proc *p;
+msdosfs_mount(struct mount *mp, const char *path, void *data,
+    struct nameidata *ndp, struct proc *p)
 {
 	struct vnode *devvp;	  /* vnode for blk device to mount */
 	struct msdosfs_args args; /* will hold data from mount request */
@@ -134,16 +130,14 @@ msdosfs_mount(mp, path, data, ndp, p)
 			 * If upgrade to read-write by non-root, then verify
 			 * that user has necessary permissions on the device.
 			 */
-			if (p->p_ucred->cr_uid != 0) {
+			if (suser(p, 0) != 0) {
 				devvp = pmp->pm_devvp;
 				vn_lock(devvp, LK_EXCLUSIVE | LK_RETRY, p);
 				error = VOP_ACCESS(devvp, VREAD | VWRITE,
 						   p->p_ucred, p);
-				if (error) {
-					VOP_UNLOCK(devvp, 0, p);
-					return (error);
-				}
 				VOP_UNLOCK(devvp, 0, p);
+				if (error)
+					return (error);
 			}
 			pmp->pm_flags &= ~MSDOSFSMNT_RONLY;
 		}
@@ -184,7 +178,7 @@ msdosfs_mount(mp, path, data, ndp, p)
 	 * If mount by non-root, then verify that user has necessary
 	 * permissions on the device.
 	 */
-	if (p->p_ucred->cr_uid != 0) {
+	if (suser(p, 0) != 0) {
 		accessmode = VREAD;
 		if ((mp->mnt_flag & MNT_RDONLY) == 0)
 			accessmode |= VWRITE;
@@ -248,11 +242,8 @@ msdosfs_mount(mp, path, data, ndp, p)
 }
 
 int
-msdosfs_mountfs(devvp, mp, p, argp)
-	struct vnode *devvp;
-	struct mount *mp;
-	struct proc *p;
-	struct msdosfs_args *argp;
+msdosfs_mountfs(struct vnode *devvp, struct mount *mp, struct proc *p,
+    struct msdosfs_args *argp)
 {
 	struct msdosfsmount *pmp;
 	struct buf *bp;
@@ -482,6 +473,8 @@ msdosfs_mountfs(devvp, mp, p, argp)
 			;
 		else
 		        pmp->pm_fsinfo = 0;
+		/* XXX make sure this tiny buf doesn't come back in fillinusemap! */
+		SET(bp->b_flags, B_INVAL);
 		brelse(bp);
 		bp = NULL;
 	}
@@ -555,7 +548,11 @@ error_exit:
 	devvp->v_specmountpoint = NULL;
 	if (bp)
 		brelse(bp);
+
+	vn_lock(devvp, LK_EXCLUSIVE|LK_RETRY, p);
 	(void) VOP_CLOSE(devvp, ronly ? FREAD : FREAD|FWRITE, NOCRED, p);
+	VOP_UNLOCK(devvp, 0, p);
+
 	if (pmp) {
 		if (pmp->pm_inusemap)
 			free(pmp->pm_inusemap, M_MSDOSFSFAT);
@@ -566,10 +563,7 @@ error_exit:
 }
 
 int
-msdosfs_start(mp, flags, p)
-	struct mount *mp;
-	int flags;
-	struct proc *p;
+msdosfs_start(struct mount *mp, int flags, struct proc *p)
 {
 
 	return (0);
@@ -579,10 +573,7 @@ msdosfs_start(mp, flags, p)
  * Unmount the filesystem described by mp.
  */
 int
-msdosfs_unmount(mp, mntflags, p)
-	struct mount *mp;
-	int mntflags;
-	struct proc *p;
+msdosfs_unmount(struct mount *mp, int mntflags,struct proc *p)
 {
 	struct msdosfsmount *pmp;
 	int error, flags;
@@ -601,9 +592,10 @@ msdosfs_unmount(mp, mntflags, p)
 #ifdef MSDOSFS_DEBUG
 	vprint("msdosfs_umount(): just before calling VOP_CLOSE()\n", vp);
 #endif
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
 	error = VOP_CLOSE(vp,
 	   pmp->pm_flags & MSDOSFSMNT_RONLY ? FREAD : FREAD|FWRITE, NOCRED, p);
-	vrele(vp);
+	vput(vp);
 	free(pmp->pm_inusemap, M_MSDOSFSFAT);
 	free(pmp, M_MSDOSFSMNT);
 	mp->mnt_data = (qaddr_t)0;
@@ -612,9 +604,7 @@ msdosfs_unmount(mp, mntflags, p)
 }
 
 int
-msdosfs_root(mp, vpp)
-	struct mount *mp;
-	struct vnode **vpp;
+msdosfs_root(struct mount *mp, struct vnode **vpp)
 {
 	struct msdosfsmount *pmp = VFSTOMSDOSFS(mp);
 	struct denode *ndep;
@@ -633,10 +623,7 @@ msdosfs_root(mp, vpp)
 }
 
 int
-msdosfs_statfs(mp, sbp, p)
-	struct mount *mp;
-	struct statfs *sbp;
-	struct proc *p;
+msdosfs_statfs(struct mount *mp, struct statfs *sbp, struct proc *p)
 {
 	struct msdosfsmount *pmp;
 
@@ -694,11 +681,7 @@ msdosfs_sync_vnode(struct vnode *vp, void *arg)
 
 
 int
-msdosfs_sync(mp, waitfor, cred, p)
-	struct mount *mp;
-	int waitfor;
-	struct ucred *cred;
-	struct proc *p;
+msdosfs_sync(struct mount *mp, int waitfor, struct ucred *cred, struct proc *p)
 {
 	struct msdosfsmount *pmp = VFSTOMSDOSFS(mp);
 	struct msdosfs_sync_arg msa;
@@ -739,10 +722,7 @@ msdosfs_sync(mp, waitfor, cred, p)
 }
 
 int
-msdosfs_fhtovp(mp, fhp, vpp)
-	struct mount *mp;
-	struct fid *fhp;
-	struct vnode **vpp;
+msdosfs_fhtovp(struct mount *mp, struct fid *fhp, struct vnode **vpp)
 {
 	struct msdosfsmount *pmp = VFSTOMSDOSFS(mp);
 	struct defid *defhp = (struct defid *) fhp;
@@ -759,9 +739,7 @@ msdosfs_fhtovp(mp, fhp, vpp)
 }
 
 int
-msdosfs_vptofh(vp, fhp)
-	struct vnode *vp;
-	struct fid *fhp;
+msdosfs_vptofh(struct vnode *vp, struct fid *fhp)
 {
 	struct denode *dep;
 	struct defid *defhp;
@@ -776,14 +754,11 @@ msdosfs_vptofh(vp, fhp)
 }
 
 int
-msdosfs_check_export(mp, nam, exflagsp, credanonp)
-	register struct mount *mp;
-	struct mbuf *nam;
-	int *exflagsp;
-	struct ucred **credanonp;
+msdosfs_check_export(struct mount *mp, struct mbuf *nam, int *exflagsp,
+    struct ucred **credanonp)
 {
-	register struct netcred *np;
-	register struct msdosfsmount *pmp = VFSTOMSDOSFS(mp);
+	struct netcred *np;
+	struct msdosfsmount *pmp = VFSTOMSDOSFS(mp);
 
 	/*
 	 * Get the export permission structure for this <mp, client> tuple.

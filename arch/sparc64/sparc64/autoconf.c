@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.103 2009/04/04 21:07:48 kettenis Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.108 2010/08/07 00:13:09 krw Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.51 2001/07/24 19:32:11 eeh Exp $ */
 
 /*
@@ -68,6 +68,7 @@
 #include <machine/bus.h>
 #include <machine/autoconf.h>
 #include <machine/hypervisor.h>
+#include <machine/mdesc.h>
 #include <machine/openfirm.h>
 #include <machine/sparc64.h>
 #include <machine/cpu.h>
@@ -214,7 +215,6 @@ str2hex(char *str, long *vp)
 int
 get_ncpus(void)
 {
-#ifdef MULTIPROCESSOR
 	int node, child, stack[4], depth, ncpus;
 	char buf[32];
 
@@ -227,7 +227,7 @@ get_ncpus(void)
 
 		if (node == 0 || node == -1) {
 			if (--depth < 0)
-				return (ncpus);
+				goto done;
 			
 			stack[depth] = OF_peer(stack[depth]);
 			continue;
@@ -244,7 +244,10 @@ get_ncpus(void)
 			stack[depth] = OF_peer(stack[depth]);
 	}
 
-	return (0);
+done:
+	ncpusfound = ncpus;
+#ifdef MULTIPROCESSOR
+	return (ncpus);
 #else
 	return (1);
 #endif
@@ -612,6 +615,11 @@ bootpath_store(storep, bp)
 void
 cpu_configure()
 {
+#ifdef SUN4V
+	if (CPU_ISSUN4V)
+		mdesc_init();
+#endif
+
 	/* build the bootpath */
 	bootpath_build();
 
@@ -676,7 +684,7 @@ sun4v_set_soft_state(int state, const char *desc)
 		return;
 
 	if (!pmap_extract(pmap_kernel(), (vaddr_t)desc, &pa))
-		panic("sun4v_set_soft_state: pmap_extract failed\n");
+		panic("sun4v_set_soft_state: pmap_extract failed");
 
 	err = hv_soft_state_set(state, pa);
 	if (err != H_EOK)
@@ -852,6 +860,8 @@ extern bus_space_tag_t mainbus_space_tag;
 			hw_vendor = "Fujitsu";
 		if (strncmp(buf, "TAD,", 4) == 0)
 			hw_vendor = "Tadpole";
+		if (strncmp(buf, "NATE,", 5) == 0)
+			hw_vendor = "Naturetech";
 
 		/*
 		 * The Momentum Leopard-V advertises itself as
@@ -1342,7 +1352,8 @@ device_register(struct device *dev, void *aux)
 	}
 
 	if (strcmp(devname, "scsibus") == 0) {
-		struct scsi_link *sl = aux;
+		struct scsibus_attach_args *saa = aux;
+		struct scsi_link *sl = saa->saa_sc_link;
 
 		if (strcmp(bp->name, "fp") == 0 &&
 		    bp->val[0] == sl->scsibus) {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pxa2x0_intr.c,v 1.18 2009/04/08 21:19:31 kettenis Exp $ */
+/*	$OpenBSD: pxa2x0_intr.c,v 1.21 2010/09/20 06:33:47 matthew Exp $ */
 /*	$NetBSD: pxa2x0_intr.c,v 1.5 2003/07/15 00:24:55 lukem Exp $	*/
 
 /*
@@ -531,7 +531,7 @@ _setsoftintr(int si)
 
 void *
 pxa2x0_intr_establish(int irqno, int level,
-    int (*func)(void *), void *arg, char *name)
+    int (*func)(void *), void *arg, const char *name)
 {
 	int psw;
 #ifdef MULTIPLE_HANDLERS_ON_ONE_IRQ
@@ -567,8 +567,7 @@ pxa2x0_intr_establish(int irqno, int level,
 #endif
 
 	if (name != NULL)
-		evcount_attach(&ih->ih_count, name, (void *)&ih->ih_irq,
-		    &evcount_intr);
+		evcount_attach(&ih->ih_count, name, &ih->ih_irq);
 
 #ifdef MULTIPLE_HANDLERS_ON_ONE_IRQ
 	pxa2x0_update_intr_masks();
@@ -629,7 +628,7 @@ pxa2x0_intr_disestablish(void *cookie)
  */
 void *
 sa11x0_intr_establish(sa11x0_chipset_tag_t ic, int irq, int type, int level,
-    int (*ih_fun)(void *), void *ih_arg, char *name)
+    int (*ih_fun)(void *), void *ih_arg, const char *name)
 {
 
 	return pxa2x0_intr_establish(irq, level, ih_fun, ih_arg, name);

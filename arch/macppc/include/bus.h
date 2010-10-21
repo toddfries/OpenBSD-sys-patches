@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus.h,v 1.13 2007/02/07 03:20:37 dlg Exp $	*/
+/*	$OpenBSD: bus.h,v 1.18 2010/04/04 12:49:30 miod Exp $	*/
 
 /*
  * Copyright (c) 1997 Per Fogelstrom.  All rights reserved.
@@ -65,17 +65,21 @@ extern struct ppc_bus_space ppc_isa_io, ppc_isa_mem;
  * Access methods for bus resources
  */
 int	bus_space_map(bus_space_tag_t t, bus_addr_t addr,
-	    bus_size_t size, int cacheable, bus_space_handle_t *bshp);
+	    bus_size_t size, int flags, bus_space_handle_t *bshp);
 void	bus_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh,
 	    bus_size_t size);
 int	bus_space_subregion(bus_space_tag_t t, bus_space_handle_t bsh,
 	    bus_size_t offset, bus_size_t size, bus_space_handle_t *nbshp);
 int	bus_space_alloc(bus_space_tag_t tag, bus_addr_t rstart,
 	    bus_addr_t rend, bus_size_t size, bus_size_t alignment,
-	    bus_size_t boundary, int cacheable, bus_addr_t *addrp,
+	    bus_size_t boundary, int flags, bus_addr_t *addrp,
 	    bus_space_handle_t *handlep);
 void	bus_space_free(bus_space_tag_t tag, bus_space_handle_t handle,
 	    bus_size_t size);
+
+#define	BUS_SPACE_MAP_CACHEABLE		0x01
+#define	BUS_SPACE_MAP_LINEAR		0x02
+#define	BUS_SPACE_MAP_PREFETCHABLE	0x04
 
 #define bus_space_read(n,m)						      \
 static __inline CAT3(u_int,m,_t)					      \
@@ -427,7 +431,7 @@ void
 bus_space_copy_4(void *v, bus_space_handle_t h1, bus_space_handle_t h2,
     bus_size_t o1, bus_size_t o2, bus_size_t c);
 #define	bus_space_copy_8 \
-    !!! bus_space_write_raw_multi_8 not implemented !!!
+    !!! bus_space_copy_8 not implemented !!!
 
 /*
  * Bus read/write barrier methods.
@@ -446,15 +450,10 @@ bus_space_copy_4(void *v, bus_space_handle_t h1, bus_space_handle_t h2,
 	((void)((void)(t), (void)(h), (void)(o), (void)(l), (void)(f)))  
 #define BUS_SPACE_BARRIER_READ  0x01		/* force read barrier */ 
 #define BUS_SPACE_BARRIER_WRITE 0x02		/* force write barrier */
-/* Compatibility defines */
-#define BUS_BARRIER_READ        BUS_SPACE_BARRIER_READ
-#define BUS_BARRIER_WRITE       BUS_SPACE_BARRIER_WRITE
-
 
 #define	BUS_DMA_WAITOK		0x000	/* safe to sleep (pseudo-flag) */
 #define	BUS_DMA_NOWAIT		0x001	/* not safe to sleep */
 #define	BUS_DMA_ALLOCNOW	0x002	/* perform resource allocation now */
-#define	BUS_DMAMEM_NOSYNC	0x004
 #define	BUS_DMA_COHERENT	0x008	/* hint: map memory DMA coherent */
 #define	BUS_DMA_BUS1		0x010	/* placeholders for bus functions... */
 #define	BUS_DMA_BUS2		0x020
@@ -463,6 +462,7 @@ bus_space_copy_4(void *v, bus_space_handle_t h1, bus_space_handle_t h2,
 #define BUS_DMA_READ            0x100	/* mapping is device -> memory only */
 #define	BUS_DMA_WRITE		0x200	/* mapping is memory -> device only */
 #define	BUS_DMA_STREAMING	0x400	/* hint: sequential, unidirectional */
+#define	BUS_DMA_ZERO		0x800	/* zero memory in dmamem_alloc */
 
 
 /* Forwards needed by prototypes below. */

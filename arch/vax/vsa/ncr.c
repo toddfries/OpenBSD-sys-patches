@@ -1,4 +1,4 @@
-/* $OpenBSD: ncr.c,v 1.25 2009/02/16 21:19:06 miod Exp $ */
+/* $OpenBSD: ncr.c,v 1.28 2010/09/20 06:33:48 matthew Exp $ */
 /*	$NetBSD: ncr.c,v 1.32 2000/06/25 16:00:43 ragge Exp $	*/
 
 /*-
@@ -51,7 +51,6 @@
 #include <sys/buf.h>
 #include <sys/disk.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -126,13 +125,6 @@ struct scsi_adapter	si_ops = {
 	NULL			/* free_dev() */
 };
 
-struct scsi_device	si_dev = {
-	NULL,		/* use default error handler */
-	NULL,		/* no start function */
-	NULL,		/* no async handler */
-	NULL		/* use default done routine */
-};
-
 struct cfattach ncr_ca = {
 	sizeof(struct si_softc), si_match, si_attach
 };
@@ -179,8 +171,7 @@ si_attach(parent, self, aux)
 	scb_vecalloc(va->va_cvec, (void (*)(void *)) ncr5380_intr, sc,
 	    SCB_ISTACK, &sc->ncr_intrcnt);
 	sc->ncr_cvec = va->va_cvec;
-	evcount_attach(&sc->ncr_intrcnt, self->dv_xname,
-	    (void *)&sc->ncr_cvec, &evcount_intr);
+	evcount_attach(&sc->ncr_intrcnt, self->dv_xname, &sc->ncr_cvec);
 
 	/*
 	 * DMA area mapin.
@@ -246,7 +237,6 @@ si_attach(parent, self, aux)
 	ncr_sc->sc_link.adapter_softc =	sc;
 	ncr_sc->sc_link.adapter_target = target;
 	ncr_sc->sc_link.adapter = &si_ops;
-	ncr_sc->sc_link.device = &si_dev;
 	ncr_sc->sc_link.openings = 4;
 
 	/*

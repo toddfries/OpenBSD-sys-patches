@@ -1,4 +1,4 @@
-/*	$OpenBSD: bsd_fdintr.s,v 1.11 2004/09/29 07:35:13 miod Exp $	*/
+/*	$OpenBSD: bsd_fdintr.s,v 1.13 2010/08/17 20:05:08 miod Exp $	*/
 /*	$NetBSD: bsd_fdintr.s,v 1.11 1997/04/07 21:00:36 pk Exp $ */
 
 /*
@@ -42,6 +42,13 @@
 #include <sparc/sparc/vaddrs.h>
 #include <sparc/dev/fdreg.h>
 #include <sparc/dev/fdvar.h>
+
+/*
+ * Note the following code hardcodes soft interrupt level 4, instead of
+ * picking the actual bits from the softintr cookie. We don't have enough
+ * free registers to be able to pick it easily, anyway; it's just not
+ * worth doing.
+ */
 
 #define FD_SET_SWINTR_4C				\
 	sethi	%hi(INTRREG_VA), %l5;			\
@@ -180,7 +187,7 @@ _C_LABEL(fdchwintr):
 
 	! tally interrupt
 	ldd	[R_fdc + FDC_COUNT], %l4
-	inccc	%l4
+	inccc	%l5
 	addx	%l4, 0, %l4
 	std	%l4, [R_fdc + FDC_COUNT]
 
@@ -300,6 +307,9 @@ ssi:
 	! set software interrupt
 	! enter here with status in %l7
 	st	%l7, [R_fdc + FDC_ISTATUS]
+	ld	[R_fdc + FDC_SIH], %l6
+	mov	1, %l7
+	st	%l7, [%l6 + SIH_PENDING]
 	FD_SET_SWINTR
 
 x:

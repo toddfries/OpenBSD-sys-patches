@@ -1,4 +1,4 @@
-/*	$OpenBSD: bios.c,v 1.16 2009/01/13 13:53:50 kettenis Exp $	*/
+/*	$OpenBSD: bios.c,v 1.20 2010/04/20 22:05:41 tedu Exp $	*/
 /*
  * Copyright (c) 2006 Gordon Willem Klok <gklok@cogeco.ca>
  *
@@ -23,6 +23,7 @@
 #include <sys/malloc.h>
 
 #include <uvm/uvm_extern.h>
+#include <sys/proc.h>
 #include <sys/sysctl.h>
 
 #include <machine/conf.h>
@@ -52,7 +53,8 @@ int bios_print(void *, const char *);
 char *fixstring(char *);
 
 struct cfattach bios_ca = {
-	sizeof(struct bios_softc), bios_match, bios_attach
+	sizeof(struct bios_softc), bios_match, bios_attach, NULL,
+	config_activate_children
 };
 
 struct cfdriver bios_cd = {
@@ -158,9 +160,6 @@ bios_attach(struct device *parent, struct device *self, void *aux)
 	printf("\n");
 
 #if NACPI > 0
-#if NPCI > 0
-	if (pci_mode != 0)
-#endif
 	{
 		struct bios_attach_args ba;
 
@@ -394,7 +393,7 @@ smbios_info(char * str)
 		 * If the uuid value is all 0xff the uuid is present but not
 		 * set, if its all 0 then the uuid isn't present at all.
 		 */
-		uuidf |= SMBIOS_UUID_NPRESENT|SMBIOS_UUID_NSET;
+		uuidf = SMBIOS_UUID_NPRESENT|SMBIOS_UUID_NSET;
 		for (i = 0; i < sizeof(sys->uuid); i++) {
 			if (sys->uuid[i] != 0xff)
 				uuidf &= ~SMBIOS_UUID_NSET;

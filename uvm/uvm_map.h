@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_map.h,v 1.40 2009/03/25 20:00:18 oga Exp $	*/
+/*	$OpenBSD: uvm_map.h,v 1.43 2010/04/20 22:05:44 tedu Exp $	*/
 /*	$NetBSD: uvm_map.h,v 1.24 2001/02/18 21:19:08 chs Exp $	*/
 
 /* 
@@ -154,8 +154,12 @@ struct vm_map_entry {
 
 #define UVM_MAP_STATIC		0x01		/* static map entry */
 #define UVM_MAP_KMEM		0x02		/* from kmem entry pool */
-
 };
+
+/*
+ * Marks the map entry as a guard page, using vm_map_entry.etype.
+ */
+#define MAP_ET_KVAGUARD		0x10		/* guard entry */
 
 #define	VM_MAPENT_ISWIRED(entry)	((entry)->wired_count != 0)
 
@@ -299,7 +303,7 @@ int		uvm_map_submap(vm_map_t, vaddr_t, vaddr_t, vm_map_t);
 void		uvm_unmap_p(vm_map_t, vaddr_t, vaddr_t, struct proc *);
 void		uvm_unmap_detach(vm_map_entry_t,int);
 void		uvm_unmap_remove(vm_map_t, vaddr_t, vaddr_t, vm_map_entry_t *,
-		    struct proc *);
+		    struct proc *, boolean_t);
 
 #endif /* _KERNEL */
 
@@ -334,7 +338,6 @@ void		uvm_unmap_remove(vm_map_t, vaddr_t, vaddr_t, vm_map_entry_t *,
 #ifdef _KERNEL
 /* XXX: clean up later */
 #include <sys/time.h>
-#include <sys/proc.h>	/* for tsleep(), wakeup() */
 #include <sys/systm.h>	/* for panic() */
 
 static __inline boolean_t vm_map_lock_try(vm_map_t);

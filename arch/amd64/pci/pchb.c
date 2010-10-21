@@ -1,4 +1,4 @@
-/*	$OpenBSD: pchb.c,v 1.28 2009/03/31 22:19:57 kettenis Exp $	*/
+/*	$OpenBSD: pchb.c,v 1.37 2010/08/31 17:13:46 deraadt Exp $	*/
 /*	$NetBSD: pchb.c,v 1.1 2003/04/26 18:39:50 fvdl Exp $	*/
 /*
  * Copyright (c) 2000 Michael Shalayeff
@@ -66,6 +66,7 @@
 #include <dev/pci/pcidevs.h>
 
 #include <dev/pci/agpvar.h>
+#include <dev/pci/ppbreg.h>
 
 #include <dev/rndvar.h>
 
@@ -89,8 +90,10 @@
 #define AMD64HT_LDT1_TYPE	0xb8
 #define AMD64HT_LDT2_BUS	0xd4
 #define AMD64HT_LDT2_TYPE	0xd8
+#define AMD64HT_LDT3_BUS	0xf4
+#define AMD64HT_LDT3_TYPE	0xf8
 
-#define AMD64HT_NUM_LDT		3
+#define AMD64HT_NUM_LDT		4
 
 #define AMD64HT_LDT_TYPE_MASK		0x0000001f
 #define  AMD64HT_LDT_INIT_COMPLETE	0x00000002
@@ -105,6 +108,7 @@ struct pchb_softc {
 	bus_space_handle_t sc_bh;
 
 	/* rng stuff */
+	int sc_rng_active;
 	int sc_rng_ax;
 	int sc_rng_i;
 	struct timeout sc_rng_to;
@@ -112,9 +116,11 @@ struct pchb_softc {
 
 int	pchbmatch(struct device *, void *, void *);
 void	pchbattach(struct device *, struct device *, void *);
+int	pchbactivate(struct device *, int);
 
 struct cfattach pchb_ca = {
-	sizeof(struct pchb_softc), pchbmatch, pchbattach
+	sizeof(struct pchb_softc), pchbmatch, pchbattach, NULL,
+	pchbactivate
 };
 
 struct cfdriver pchb_cd = {
@@ -142,7 +148,12 @@ pchbattach(struct device *parent, struct device *self, void *aux)
 {
 	struct pchb_softc *sc = (struct pchb_softc *)self;
 	struct pci_attach_args *pa = aux;
+	struct pcibus_attach_args pba;
+	pcireg_t bcreg, bir;
+	u_char pbnum;
+	pcitag_t tag;
 	int i, r;
+	int doattach = 0;
 
 	switch (PCI_VENDOR(pa->pa_id)) {
 	case PCI_VENDOR_AMD:
@@ -150,7 +161,6 @@ pchbattach(struct device *parent, struct device *self, void *aux)
 		switch (PCI_PRODUCT(pa->pa_id)) {
 		case PCI_PRODUCT_AMD_AMD64_0F_HT:
 		case PCI_PRODUCT_AMD_AMD64_10_HT:
-		case PCI_PRODUCT_AMD_AMD64_11_HT:
 			for (i = 0; i < AMD64HT_NUM_LDT; i++)
 				pchb_amd64ht_attach(self, pa, i);
 			break;
@@ -194,6 +204,35 @@ pchbattach(struct device *parent, struct device *self, void *aux)
 			timeout_set(&sc->sc_rng_to, pchb_rnd, sc);
 			sc->sc_rng_i = 4;
 			pchb_rnd(sc);
+			sc->sc_rng_active = 1;
+			break;
+		}
+		printf("\n");
+		break;
+	case PCI_VENDOR_VIATECH:
+		switch (PCI_PRODUCT(pa->pa_id)) {
+		case PCI_PRODUCT_VIATECH_VT8251_PCIE_0:
+			/*
+			 * Bump the host bridge into PCI-PCI bridge
+			 * mode by clearing magic bit on the VLINK
+			 * device.  This allows us to read the bus
+			 * number for the PCI bus attached to this
+			 * host bridge.
+			 */
+			tag = pci_make_tag(pa->pa_pc, 0, 17, 7);
+			bcreg = pci_conf_read(pa->pa_pc, tag, 0xfc);
+			bcreg &= ~0x00000004; /* XXX Magic */
+			pci_conf_write(pa->pa_pc, tag, 0xfc, bcreg);
+
+			bir = pci_conf_read(pa->pa_pc,
+			    pa->pa_tag, PPB_REG_BUSINFO);
+			pbnum = PPB_BUSINFO_PRIMARY(bir);
+			if (pbnum > 0)
+				doattach = 1;
+
+			/* Switch back to host bridge mode. */
+			bcreg |= 0x00000004; /* XXX Magic */
+			pci_conf_write(pa->pa_pc, tag, 0xfc, bcreg);
 			break;
 		}
 		printf("\n");
@@ -205,7 +244,7 @@ pchbattach(struct device *parent, struct device *self, void *aux)
 
 #if NAGP > 0
 	/*
-	 * Intel IGD have an odd interface and attach at vga, however
+	 * Intel IGD have an odd interface and attach at vga, however,
 	 * in that mode they don't have the AGP cap bit, so this
 	 * test should be sufficient
 	 */
@@ -218,6 +257,45 @@ pchbattach(struct device *parent, struct device *self, void *aux)
 		config_found(self, &aa, agpdev_print);
 	}
 #endif /* NAGP > 0 */
+
+	if (doattach == 0)
+		return;
+
+	bzero(&pba, sizeof(pba));
+	pba.pba_busname = "pci";
+	pba.pba_iot = pa->pa_iot;
+	pba.pba_memt = pa->pa_memt;
+	pba.pba_dmat = pa->pa_dmat;
+	pba.pba_domain = pa->pa_domain;
+	pba.pba_bus = pbnum;
+	pba.pba_pc = pa->pa_pc;
+	config_found(self, &pba, pchb_print);
+}
+
+int
+pchbactivate(struct device *self, int act)
+{
+	struct pchb_softc *sc = (struct pchb_softc *)self;
+	int rv = 0;
+
+	switch (act) {
+	case DVACT_QUIESCE:
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_SUSPEND:
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_RESUME:
+		/* re-enable RNG, if we have it */
+		if (sc->sc_rng_active)
+			bus_space_write_1(sc->sc_bt, sc->sc_bh,
+			    I82802_RNG_HWST,
+			    bus_space_read_1(sc->sc_bt, sc->sc_bh,
+			    I82802_RNG_HWST) | I82802_RNG_HWST_ENABLE);
+		rv = config_activate_children(self, act);
+		break;
+	}
+	return (rv);
 }
 
 int

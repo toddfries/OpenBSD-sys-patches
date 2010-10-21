@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.h,v 1.35 2007/12/14 18:32:23 deraadt Exp $	*/
+/*	$OpenBSD: pmap.h,v 1.37 2010/01/03 19:23:49 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2002-2004 Michael Shalayeff
@@ -84,7 +84,7 @@ extern struct pdc_hwtlb pdc_hwtlb;
  * pool quickmaps
  */
 #define	pmap_map_direct(pg)	((vaddr_t)VM_PAGE_TO_PHYS(pg))
-#define	pmap_unmap_direct(va) PHYS_TO_VM_PAGE((paddr_t)(va))
+struct vm_page *pmap_unmap_direct(vaddr_t);
 #define	__HAVE_PMAP_DIRECT
 
 /*
@@ -111,7 +111,6 @@ extern struct pdc_hwtlb pdc_hwtlb;
 #define pmap_is_referenced(pg)	pmap_testbit(pg, PTE_PROT(TLB_REFTRAP))
 #define pmap_phys_address(ppn)	((ppn) << PAGE_SHIFT)
 
-#define pmap_proc_iflush(p,va,len)	/* nothing */
 #define pmap_unuse_final(p)		/* nothing */
 #define	pmap_remove_holes(map)		do { /* nothing */ } while (0)
 
@@ -121,6 +120,7 @@ boolean_t pmap_testbit(struct vm_page *, u_int);
 void pmap_write_protect(struct pmap *, vaddr_t, vaddr_t, vm_prot_t);
 void pmap_remove(struct pmap *pmap, vaddr_t sva, vaddr_t eva);
 void pmap_page_remove(struct vm_page *pg);
+void pmap_proc_iflush(struct proc *, vaddr_t, vsize_t);
 
 static __inline int
 pmap_prot(struct pmap *pmap, int prot)

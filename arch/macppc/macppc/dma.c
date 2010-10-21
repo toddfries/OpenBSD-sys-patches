@@ -1,4 +1,4 @@
-/*	$OpenBSD: dma.c,v 1.29 2009/03/07 15:34:34 miod Exp $	*/
+/*	$OpenBSD: dma.c,v 1.33 2010/06/26 23:24:43 guenther Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -33,7 +33,6 @@
 
 #include <sys/param.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/extent.h>
 #include <sys/buf.h>
 #include <sys/device.h>
@@ -460,9 +459,10 @@ int
 _dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs, size_t size,
     caddr_t *kvap, int flags)
 {
-	vaddr_t va;
+	vaddr_t va, sva;
+	size_t ssize;
 	bus_addr_t addr;
-	int curseg;
+	int curseg, error;
 
 	size = round_page(size);
 	va = uvm_km_valloc(kernel_map, size);
@@ -471,15 +471,26 @@ _dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs, size_t size,
 
 	*kvap = (caddr_t)va;
 
+	sva = va;
+	ssize = size;
 	for (curseg = 0; curseg < nsegs; curseg++) {
 		for (addr = segs[curseg].ds_addr;
 		    addr < (segs[curseg].ds_addr + segs[curseg].ds_len);
 		    addr += PAGE_SIZE, va += PAGE_SIZE, size -= PAGE_SIZE) {
 			if (size == 0)
 				panic("_bus_dmamem_map: size botch");
-			pmap_enter(pmap_kernel(), va, addr,
-			    VM_PROT_READ | VM_PROT_WRITE,
-			    VM_PROT_READ | VM_PROT_WRITE | PMAP_WIRED);
+			error = pmap_enter(pmap_kernel(), va, addr,
+			    VM_PROT_READ | VM_PROT_WRITE, VM_PROT_READ |
+			    VM_PROT_WRITE | PMAP_WIRED | PMAP_CANFAIL);
+			if (error) {
+				/*
+				 * Clean up after ourselves.
+				 * XXX uvm_wait on WAITOK
+				 */
+				pmap_update(pmap_kernel());
+				uvm_km_free(kernel_map, va, ssize);
+				return (error);
+			}
 		}
 	}
 	pmap_update(pmap_kernel());
@@ -552,7 +563,7 @@ _dmamem_alloc_range(bus_dma_tag_t t, bus_size_t size, bus_size_t alignment,
 	vaddr_t curaddr, lastaddr;
 	struct vm_page *m;
 	struct pglist mlist;
-	int curseg, error;
+	int curseg, error, plaflag;
 
 	/* Always round the size. */
 	size = round_page(size);
@@ -560,9 +571,13 @@ _dmamem_alloc_range(bus_dma_tag_t t, bus_size_t size, bus_size_t alignment,
 	/*
 	 * Allocate pages from the VM system.
 	 */
+	plaflag = flags & BUS_DMA_NOWAIT ? UVM_PLA_NOWAIT : UVM_PLA_WAITOK;
+	if (flags & BUS_DMA_ZERO)
+		plaflag |= UVM_PLA_ZERO;
+
 	TAILQ_INIT(&mlist);
 	error = uvm_pglistalloc(size, low, high,
-	    alignment, boundary, &mlist, nsegs, (flags & BUS_DMA_NOWAIT) == 0);
+	    alignment, boundary, &mlist, nsegs, plaflag);
 	if (error)
 		return (error);
 

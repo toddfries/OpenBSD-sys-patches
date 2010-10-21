@@ -1,4 +1,4 @@
-/*	$OpenBSD: npx.c,v 1.44 2008/12/04 15:48:19 weingart Exp $	*/
+/*	$OpenBSD: npx.c,v 1.53 2010/09/29 15:11:31 joshe Exp $	*/
 /*	$NetBSD: npx.c,v 1.57 1996/05/12 23:12:24 mycroft Exp $	*/
 
 #if 0
@@ -134,8 +134,9 @@ extern int i386_fpu_present;
 extern int i386_fpu_exception;
 extern int i386_fpu_fdivbug;
 
-#define        fxsave(addr)            __asm("fxsave %0" : "=m" (*addr))
-#define        fxrstor(addr)           __asm("fxrstor %0" : : "m" (*addr))
+#define fxsave(addr)		__asm("fxsave %0" : "=m" (*addr))
+#define fxrstor(addr)		__asm("fxrstor %0" : : "m" (*addr))
+#define ldmxcsr(addr)		__asm("ldmxcsr %0" : : "m" (*addr))
 
 static __inline void
 fpu_save(union savefpu *addr)
@@ -535,6 +536,38 @@ npxintr(void *arg)
 	return (1);
 }
 
+void
+npxtrap(struct trapframe *frame)
+{
+	struct proc *p = curcpu()->ci_fpcurproc;
+	union savefpu *addr = &p->p_addr->u_pcb.pcb_savefpu;
+	u_int32_t mxcsr, statbits;
+	int code;
+	union sigval sv;
+
+#ifdef DIAGNOSTIC
+	/*
+	 * At this point, fpcurproc should be curproc.  If it wasn't, the TS
+	 * bit should be set, and we should have gotten a DNA exception.
+	 */
+	if (p != curproc)
+		panic("npxtrap: wrong process");
+#endif
+
+	fxsave(&addr->sv_xmm);
+	mxcsr = addr->sv_xmm.sv_env.en_mxcsr;
+	statbits = mxcsr;
+	mxcsr &= ~0x3f;
+	ldmxcsr(&mxcsr);
+	addr->sv_xmm.sv_ex_sw = addr->sv_xmm.sv_env.en_sw;
+	addr->sv_xmm.sv_ex_tw = addr->sv_xmm.sv_env.en_tw;
+	code = x86fpflags_to_siginfo (statbits);
+	sv.sival_int = frame->tf_eip;
+	KERNEL_PROC_LOCK(p);
+	trapsignal(p, SIGFPE, frame->tf_err, code, sv);
+	KERNEL_PROC_UNLOCK(p);
+}
+
 static int
 x86fpflags_to_siginfo(u_int32_t flags)
 {
@@ -564,14 +597,10 @@ x86fpflags_to_siginfo(u_int32_t flags)
  * Otherwise, we save the previous state, if necessary, and restore our last
  * saved state.
  */
-
-/*
- * XXX It is unclear if the code below is correct in the multiprocessor
- * XXX case.  Check the NetBSD sources once again to be sure.
- */
 int
 npxdna_xmm(struct cpu_info *ci)
 {
+	union savefpu *sfp;
 	struct proc *p;
 	int s;
 
@@ -602,7 +631,7 @@ npxdna_xmm(struct cpu_info *ci)
 	if (ci->ci_fpcurproc != NULL) {
 		IPRINTF(("%s: fp save %lx\n", ci->ci_dev.dv_xname,
 		    (u_long)ci->ci_fpcurproc));
-		npxsave_cpu(ci, 1);
+		npxsave_cpu(ci, ci->ci_fpcurproc != &proc0);
 	} else {
 		clts();
 		IPRINTF(("%s: fp init\n", ci->ci_dev.dv_xname));
@@ -628,8 +657,13 @@ npxdna_xmm(struct cpu_info *ci)
 	splx(s);
 	uvmexp.fpswtch++;
 
+	sfp = &p->p_addr->u_pcb.pcb_savefpu;
+
 	if ((p->p_md.md_flags & MDP_USEDFPU) == 0) {
-		fldcw(&p->p_addr->u_pcb.pcb_savefpu.sv_xmm.sv_env.en_cw);
+		bzero(&sfp->sv_xmm, sizeof(sfp->sv_xmm));
+		sfp->sv_xmm.sv_env.en_cw = __OpenBSD_NPXCW__;
+		sfp->sv_xmm.sv_env.en_mxcsr = __INITIAL_MXCSR__;
+		fxrstor(&sfp->sv_xmm);
 		p->p_md.md_flags |= MDP_USEDFPU;
 	} else {
 		static double	zero = 0.0;
@@ -640,7 +674,7 @@ npxdna_xmm(struct cpu_info *ci)
 		 */
 		fnclex();
 		__asm __volatile("ffree %%st(7)\n\tfld %0" : : "m" (zero));
-		fxrstor(&p->p_addr->u_pcb.pcb_savefpu.sv_xmm);
+		fxrstor(&sfp->sv_xmm);
 	}
 
 	return (1);
@@ -649,6 +683,7 @@ npxdna_xmm(struct cpu_info *ci)
 int
 npxdna_s87(struct cpu_info *ci)
 {
+	union savefpu *sfp;
 	struct proc *p;
 	int s;
 
@@ -677,7 +712,7 @@ npxdna_s87(struct cpu_info *ci)
 	if (ci->ci_fpcurproc != NULL) {
 		IPRINTF(("%s: fp save %lx\n", ci->ci_dev.dv_xname,
 		    (u_long)ci->ci_fpcurproc));
-		npxsave_cpu(ci, 1);
+		npxsave_cpu(ci, ci->ci_fpcurproc != &proc0);
 	} else {
 		clts();
 		IPRINTF(("%s: fp init\n", ci->ci_dev.dv_xname));
@@ -703,8 +738,13 @@ npxdna_s87(struct cpu_info *ci)
 	splx(s);
 	uvmexp.fpswtch++;
 
+	sfp = &p->p_addr->u_pcb.pcb_savefpu;
+
 	if ((p->p_md.md_flags & MDP_USEDFPU) == 0) {
-		fldcw(&p->p_addr->u_pcb.pcb_savefpu.sv_87.sv_env.en_cw);
+		bzero(&sfp->sv_87, sizeof(sfp->sv_87));
+		sfp->sv_87.sv_env.en_cw = __OpenBSD_NPXCW__;
+		sfp->sv_87.sv_env.en_tw = 0xffff;
+		frstor(&sfp->sv_87);
 		p->p_md.md_flags |= MDP_USEDFPU;
 	} else {
 		/*
@@ -720,7 +760,7 @@ npxdna_s87(struct cpu_info *ci)
 		 * fnclex if it is the first FPU instruction after a context
 		 * switch.
 		 */
-		frstor(&p->p_addr->u_pcb.pcb_savefpu.sv_87);
+		frstor(&sfp->sv_87);
 	}
 
 	return (1);
@@ -815,9 +855,9 @@ npxsave_proc(struct proc *p, int save)
 		IPRINTF(("%s: fp ipi to %s %s %lx\n", ci->ci_dev.dv_xname,
 		    oci->ci_dev.dv_xname, save ? "save" : "flush", (u_long)p));
 
+		oci->ci_fpsaveproc = p;
 		i386_send_ipi(oci,
 		    save ? I386_IPI_SYNCH_FPU : I386_IPI_FLUSH_FPU);
-
 		while (p->p_addr->u_pcb.pcb_fpcpu != NULL)
 			SPINLOCK_SPIN_HOOK;
 	}
@@ -825,4 +865,52 @@ npxsave_proc(struct proc *p, int save)
 	KASSERT(ci->ci_fpcurproc == p);
 	npxsave_cpu(ci, save);
 #endif
+}
+
+void
+fpu_kernel_enter(void)
+{
+	struct cpu_info	*ci = curcpu();
+	uint32_t	 cw;
+	int		 s;
+
+	/*
+	 * Fast path.  If the kernel was using the FPU before, there
+	 * is no work to do besides clearing TS.
+	 */
+	if (ci->ci_fpcurproc == &proc0) {
+		clts();
+		return;
+	}
+
+	s = splipi();
+
+	if (ci->ci_fpcurproc != NULL) {
+		npxsave_cpu(ci, 1);
+		uvmexp.fpswtch++;
+	}
+
+	/* Claim the FPU */
+	ci->ci_fpcurproc = &proc0;
+
+	splx(s);
+
+	/* Disable DNA exceptions */
+	clts();
+
+	/* Initialize the FPU */
+	fninit();
+	cw = __INITIAL_NPXCW__;
+	fldcw(&cw);
+	if (i386_has_sse || i386_has_sse2) {
+		cw = __INITIAL_MXCSR__;
+		ldmxcsr(&cw);
+	}
+}
+
+void
+fpu_kernel_exit(void)
+{
+	/* Enable DNA exceptions */
+	stts();
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uticom.c,v 1.3 2008/06/14 14:33:38 fgsch Exp $	*/
+/*	$OpenBSD: uticom.c,v 1.5 2010/09/24 08:33:59 yuo Exp $	*/
 /*
  * Copyright (c) 2005 Dmitry Komissaroff <dxi@mail.ru>.
  *
@@ -175,7 +175,7 @@ struct ucom_methods uticom_methods = {
 int	uticom_match(struct device *, void *, void *);
 void	uticom_attach(struct device *, struct device *, void *);
 int	uticom_detach(struct device *, int);
-int	uticom_activate(struct device *, enum devact);
+int	uticom_activate(struct device *, int);
 
 struct cfdriver uticom_cd = {
 	NULL, "uticom", DV_DULL
@@ -441,7 +441,7 @@ fwload_done:
 }
 
 int
-uticom_activate(struct device *self, enum devact act)
+uticom_activate(struct device *self, int act)
 {
 	struct uticom_softc *sc = (struct uticom_softc *)self;
 	int rv = 0;
@@ -466,7 +466,6 @@ uticom_detach(struct device *self, int flags)
 
 	DPRINTF(("%s: uticom_detach: sc = %p\n",
 	    sc->sc_dev.dv_xname, sc));
-	sc->sc_dying = 1;
 
 	if (sc->sc_subdev != NULL) {
 		config_detach(sc->sc_subdev, flags);

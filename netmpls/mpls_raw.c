@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpls_raw.c,v 1.4 2008/11/01 16:37:55 michele Exp $	*/
+/*	$OpenBSD: mpls_raw.c,v 1.8 2010/09/03 13:12:31 claudio Exp $	*/
 
 /*
  * Copyright (C) 1999, 2000 and 2001 AYAME Project, WIDE Project.
@@ -39,6 +39,7 @@
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/systm.h>
+#include <sys/proc.h>
 #include <sys/sysctl.h>
 
 #include <net/if.h>
@@ -53,9 +54,8 @@
 u_long mpls_raw_sendspace = MPLS_RAW_SNDQ;
 u_long mpls_raw_recvspace = MPLS_RAW_RCVQ;
 
-int mpls_enable = 0;
 int mpls_defttl = 255;
-int mpls_inkloop = 16;
+int mpls_inkloop = MPLS_INKERNEL_LOOP_MAX;
 int mpls_push_expnull_ip = 0;
 int mpls_push_expnull_ip6 = 0;
 int mpls_mapttl_ip = 1;
@@ -118,7 +118,7 @@ mpls_raw_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 		break;
 
 	default:
-		panic("rip_usrreq");
+		panic("mpls_raw_usrreq");
 	}
 
 	return (error);

@@ -350,7 +350,7 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
 #       define R300_PVS_CNTL_1_PROGRAM_START_SHIFT   0
 #       define R300_PVS_CNTL_1_POS_END_SHIFT         10
 #       define R300_PVS_CNTL_1_PROGRAM_END_SHIFT     20
-/* Addresses are relative the the vertex program parameters area. */
+/* Addresses are relative to the vertex program parameters area. */
 #define R300_VAP_PVS_CNTL_2                 0x22D4
 #       define R300_PVS_CNTL_2_PARAM_OFFSET_SHIFT 0
 #       define R300_PVS_CNTL_2_PARAM_COUNT_SHIFT  16
@@ -1772,6 +1772,11 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #define R500_RB3D_COLOR_CLEAR_VALUE_AR  0x46c0
 #define R500_RB3D_CONSTANT_COLOR_AR     0x4ef8
+
+#define R300_SU_REG_DEST                0x42c8
+#define RV530_FG_ZBREG_DEST             0x4be8
+#define R300_ZB_ZPASS_DATA              0x4f58
+#define R300_ZB_ZPASS_ADDR              0x4f5c
 
 #endif /* _R300_REG_H */
 

@@ -1,4 +1,4 @@
-/* $OpenBSD: machdep.c,v 1.117 2009/02/04 17:19:16 miod Exp $ */
+/* $OpenBSD: machdep.c,v 1.127 2010/06/30 20:38:49 tedu Exp $ */
 /* $NetBSD: machdep.c,v 1.210 2000/06/01 17:12:38 thorpej Exp $ */
 
 /*-
@@ -78,17 +78,13 @@
 #include <sys/user.h>
 #include <sys/exec.h>
 #include <sys/exec_ecoff.h>
-#include <uvm/uvm_extern.h>
-#include <uvm/uvm_swap.h>
+#include <uvm/uvm.h>
 #include <sys/sysctl.h>
 #include <sys/core.h>
 #include <sys/kcore.h>
 #include <machine/kcore.h>
 #ifndef NO_IEEE
 #include <machine/fpu.h>
-#endif
-#ifdef SYSVMSG
-#include <sys/msg.h>
 #endif
 #include <sys/timetc.h>
 
@@ -116,11 +112,18 @@
 #include <ddb/db_extern.h>
 #endif
 
+#include "ioasic.h"
+
+#if NIOASIC > 0
+#include <machine/tc_machdep.h>
+#include <dev/tc/tcreg.h>
+#include <dev/tc/ioasicvar.h>
+#endif
+
 int	cpu_dump(void);
 int	cpu_dumpsize(void);
 u_long	cpu_dump_mempagecnt(void);
 void	dumpsys(void);
-caddr_t allocsys(caddr_t);
 void	identifycpu(void);
 void	regdump(struct trapframe *framep);
 void	printregs(struct reg *);
@@ -139,8 +142,21 @@ int	bufpages = 0;
 #endif
 int	bufcachepercent = BUFCACHEPERCENT;
 
+struct uvm_constraint_range  isa_constraint = { 0x0, 0x00ffffffUL };
+struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
+struct uvm_constraint_range *uvm_md_constraints[] = {
+	&isa_constraint,
+	NULL
+};
+
 struct vm_map *exec_map = NULL;
 struct vm_map *phys_map = NULL;
+
+/*
+ * safepri is a safe priority for sleep to set for a spin-wait
+ * during autoconfiguration or after a panic.
+ */
+int   safepri = 0;
 
 #ifdef APERTURE
 #ifdef INSECURE
@@ -173,6 +189,8 @@ u_int64_t	cycles_per_usec;
 
 struct bootinfo_kernel bootinfo;
 
+struct consdev *cn_tab;
+
 /* For built-in TCDS */
 #if defined(DEC_3000_300) || defined(DEC_3000_500)
 u_int8_t	dec_3000_scsiid[2], dec_3000_scsifast[2];
@@ -186,6 +204,9 @@ int	alpha_unaligned_fix = 1;	/* fix up unaligned accesses */
 int	alpha_unaligned_sigbus = 1;	/* SIGBUS on fixed-up accesses */
 #ifndef NO_IEEE
 int	alpha_fp_sync_complete = 0;	/* fp fixup if sync even without /s */
+#endif
+#if NIOASIC > 0
+int	alpha_led_blink = 0;
 #endif
 
 /* used by hw_sysctl */
@@ -214,9 +235,7 @@ alpha_init(pfn, ptb, bim, bip, biv)
 	struct vm_physseg *vps;
 	vaddr_t kernstart, kernend;
 	paddr_t kernstartpfn, kernendpfn, pfn0, pfn1;
-	vsize_t size;
 	char *p;
-	caddr_t v;
 	const char *bootinfo_msg;
 	const struct cpuinit *c;
 	extern caddr_t esym;
@@ -646,22 +665,6 @@ nobootinfo:
 	    (struct user *)pmap_steal_memory(UPAGES * PAGE_SIZE, NULL, NULL);
 
 	/*
-	 * Allocate space for system data structures.  These data structures
-	 * are allocated here instead of cpu_startup() because physical
-	 * memory is directly addressable.  We don't have to map these into
-	 * virtual address space.
-	 */
-	size = (vsize_t)allocsys(NULL);
-	v = (caddr_t)pmap_steal_memory(size, NULL, NULL);
-	if ((allocsys(v) - v) != size)
-		panic("alpha_init: table size inconsistency");
-
-	/*
-	 * Clear allocated memory.
-	 */
-	bzero(v, size);
-
-	/*
 	 * Initialize the virtual memory system, and set the
 	 * page table base register in proc 0's PCB.
 	 */
@@ -801,34 +804,6 @@ nobootinfo:
 	}
 }
 
-caddr_t
-allocsys(v)
-	caddr_t v;
-{
-	/*
-	 * Allocate space for system data structures.
-	 * The first available kernel virtual address is in "v".
-	 * As pages of kernel virtual memory are allocated, "v" is incremented.
-	 *
-	 * These data structures are allocated here instead of cpu_startup()
-	 * because physical memory is directly addressable. We don't have
-	 * to map these into virtual address space.
-	 */
-#define valloc(name, type, num) \
-	    (name) = (type *)v; v = (caddr_t)ALIGN((name)+(num))
-
-#ifdef SYSVMSG
-	valloc(msgpool, char, msginfo.msgmax);
-	valloc(msgmaps, struct msgmap, msginfo.msgseg);
-	valloc(msghdrs, struct msg, msginfo.msgtql);
-	valloc(msqids, struct msqid_ds, msginfo.msgmni);
-#endif
-
-#undef valloc
-
-	return v;
-}
-
 void
 consinit()
 {
@@ -873,13 +848,6 @@ cpu_startup()
 		    ptoa((psize_t)unknownmem),
 		    ptoa((psize_t)unknownmem) / 1024 / 1024);
 	}
-
-	/*
-	 * Determine how many buffers to allocate.
-	 * We allocate bufcachepercent% of memory for buffer space.
-	 */
-	if (bufpages == 0)
-		bufpages = physmem * bufcachepercent / 100;
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
@@ -1528,12 +1496,6 @@ sendsig(catcher, sig, mask, code, type, val)
 	memset(ksc.sc_reserved, 0, sizeof ksc.sc_reserved);	/* XXX */
 	memset(ksc.sc_xxx, 0, sizeof ksc.sc_xxx);		/* XXX */
 
-#ifdef COMPAT_OSF1
-	/*
-	 * XXX Create an OSF/1-style sigcontext and associated goo.
-	 */
-#endif
-
 	if (psp->ps_siginfo & sigmask(sig)) {
 		initsiginfo(&ksi, sig, code, type, val);
 		sip = (void *)scp + kscsize;
@@ -1672,6 +1634,9 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 	struct proc *p;
 {
 	dev_t consdev;
+#if NIOASIC > 0
+	int oldval, ret;
+#endif
 
 	if (name[0] != CPU_CHIPSET && namelen != 1)
 		return (ENOTDIR);		/* overloaded */
@@ -1725,6 +1690,14 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
                             &allowaperture));
 #else
 		return (sysctl_rdint(oldp, oldlenp, newp, 0));
+#endif
+#if NIOASIC > 0
+	case CPU_LED_BLINK:
+		oldval = alpha_led_blink;
+		ret = sysctl_int(oldp, oldlenp, newp, newlen, &alpha_led_blink);
+		if (oldval != alpha_led_blink)
+			ioasic_led_blink(NULL);
+		return (ret);
 #endif
 	default:
 		return (EOPNOTSUPP);
@@ -1914,59 +1887,6 @@ delay(n)
 		pcc0 = pcc1;
 	}
 }
-
-#if defined(COMPAT_OSF1)
-void	cpu_exec_ecoff_setregs(struct proc *, struct exec_package *,
-	    u_long, register_t *);
-
-void
-cpu_exec_ecoff_setregs(p, epp, stack, retval)
-	struct proc *p;
-	struct exec_package *epp;
-	u_long stack;
-	register_t *retval;
-{
-	struct ecoff_exechdr *execp = (struct ecoff_exechdr *)epp->ep_hdr;
-
-	setregs(p, epp, stack, retval);
-	p->p_md.md_tf->tf_regs[FRAME_GP] = execp->a.gp_value;
-}
-
-/*
- * cpu_exec_ecoff_hook():
- *	cpu-dependent ECOFF format hook for execve().
- * 
- * Do any machine-dependent diddling of the exec package when doing ECOFF.
- *
- */
-int
-cpu_exec_ecoff_hook(p, epp)
-	struct proc *p;
-	struct exec_package *epp;
-{
-	struct ecoff_exechdr *execp = (struct ecoff_exechdr *)epp->ep_hdr;
-	extern struct emul emul_native;
-	int error;
-	extern int osf1_exec_ecoff_hook(struct proc *, struct exec_package *);
-
-	switch (execp->f.f_magic) {
-#ifdef COMPAT_OSF1
-	case ECOFF_MAGIC_ALPHA:
-		error = osf1_exec_ecoff_hook(p, epp);
-		break;
-#endif
-
-	case ECOFF_MAGIC_NATIVE_ALPHA:
-		epp->ep_emul = &emul_native;
-		error = 0;
-		break;
-
-	default:
-		error = ENOEXEC;
-	}
-	return (error);
-}
-#endif
 
 int
 alpha_pa_access(pa)

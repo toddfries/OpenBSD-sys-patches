@@ -1,4 +1,4 @@
-/*	$OpenBSD: trm.c,v 1.12 2009/02/16 21:19:07 miod Exp $
+/*	$OpenBSD: trm.c,v 1.23 2010/10/09 19:35:32 krw Exp $
  * ------------------------------------------------------------
  *   O.S       : OpenBSD
  *   File Name : trm.c
@@ -76,7 +76,7 @@ u_int8_t trm_get_data(bus_space_tag_t, bus_space_handle_t, u_int8_t);
 
 void	trm_wait_30us(bus_space_tag_t, bus_space_handle_t);
 
-int	trm_scsi_cmd(struct scsi_xfer *);
+void	trm_scsi_cmd(struct scsi_xfer *);
 
 struct trm_scsi_req_q *trm_GetFreeSRB(struct trm_softc *);
 
@@ -137,13 +137,6 @@ struct scsi_adapter trm_switch = {
 	trm_minphys,
 	NULL,
 	NULL
-};
-
-static struct scsi_device trm_device = {
-	NULL,            /* Use default error handler */
-	NULL,            /* have a queue, served by this */
-	NULL,            /* have no async handler */
-	NULL,            /* Use default 'done' routine */
 };
 
 /* 
@@ -326,7 +319,7 @@ trm_StartWaitingSRB(struct trm_softc *sc)
  * Call By  : GENERIC SCSI driver
  * ------------------------------------------------------------
  */
-int
+void
 trm_scsi_cmd(struct scsi_xfer *xs) 
 {
 	struct trm_scsi_req_q *pSRB;
@@ -335,7 +328,7 @@ trm_scsi_cmd(struct scsi_xfer *xs)
 	bus_space_tag_t	iot;
 	struct trm_dcb *pDCB;
 	u_int8_t target, lun;
-	int i, error, intflag, xferflags;
+	int i, error, intflag, timeout, xferflags;
 
 	target = xs->sc_link->target;
 	lun    = xs->sc_link->lun;
@@ -354,20 +347,23 @@ trm_scsi_cmd(struct scsi_xfer *xs)
 		printf("%s: target=%d >= %d\n",
 		    sc->sc_device.dv_xname, target, TRM_MAX_TARGETS);
 		xs->error = XS_DRIVER_STUFFUP;
-		return COMPLETE;
+		scsi_done(xs);
+		return;
 	}
 	if (lun >= TRM_MAX_LUNS) {
 		printf("%s: lun=%d >= %d\n",
 		    sc->sc_device.dv_xname, lun, TRM_MAX_LUNS);
 		xs->error = XS_DRIVER_STUFFUP;
-		return COMPLETE;
+		scsi_done(xs);
+		return;
 	}
 
 	pDCB = sc->pDCB[target][lun];
 	if (pDCB == NULL) {
 		/* Removed as a result of INQUIRY proving no device present */
 		xs->error = XS_DRIVER_STUFFUP;
-		return COMPLETE;
+		scsi_done(xs);
+		return;
  	}
  
 	xferflags = xs->flags;
@@ -377,14 +373,8 @@ trm_scsi_cmd(struct scsi_xfer *xs)
 #endif
 		trm_reset(sc);
 		xs->error = XS_NOERROR;
-		return COMPLETE;
-	}
-
-	if (xferflags & ITSDONE) {
-#ifdef TRM_DEBUG0
-		printf("%s: Is it done?\n", sc->sc_device.dv_xname);
-#endif
-		xs->flags &= ~ITSDONE;
+		scsi_done(xs);
+		return;
 	}
 
 	xs->error  = XS_NOERROR;
@@ -397,7 +387,9 @@ trm_scsi_cmd(struct scsi_xfer *xs)
 
 	if (pSRB == NULL) {
 		splx(intflag);
-		return (NO_CCB);
+		xs->error = XS_NO_CCB;
+		scsi_done(xs);
+		return;
 	}
 
 	/* 
@@ -426,7 +418,8 @@ trm_scsi_cmd(struct scsi_xfer *xs)
 			 */
 			TAILQ_INSERT_HEAD(&sc->freeSRB, pSRB, link);
 			splx(intflag);
-			return COMPLETE;
+			scsi_done(xs);
+			return;
 		}
 
 		bus_dmamap_sync(sc->sc_dmatag, pSRB->dmamapxfer,
@@ -450,11 +443,7 @@ trm_scsi_cmd(struct scsi_xfer *xs)
 
 	memcpy(pSRB->CmdBlock, xs->cmd, xs->cmdlen);
 
-	splx (intflag);
-
 	timeout_set(&xs->stimeout, trm_timeout, pSRB);
-
-	intflag = splbio();
 
 	pSRB->SRBFlag |= TRM_ON_WAITING_SRB;
 	TAILQ_INSERT_TAIL(&sc->waitingSRB, pSRB, link);
@@ -463,19 +452,23 @@ trm_scsi_cmd(struct scsi_xfer *xs)
 	if ((xferflags & SCSI_POLL) == 0) {
 		timeout_add_msec(&xs->stimeout, xs->timeout);
 		splx(intflag);
-		return SUCCESSFULLY_QUEUED;
+		return;
 	}
 
-	while ((--xs->timeout > 0) && ((xs->flags & ITSDONE) == 0)) {
+	/* Avoid use after free (via scsi_done()) of xs! */
+	for (timeout = xs->timeout; timeout > 0; timeout--) {
 		trm_Interrupt(sc);
+		if (pSRB->xs == NULL) {
+			splx(intflag);
+			return;
+		}
 		DELAY(1000);
 	}
 
-	if (xs->timeout == 0)
+	if (timeout == 0 && pSRB->xs != NULL)
 		trm_timeout(pSRB);
 
 	splx(intflag);
-	return COMPLETE;
 }
 
 /*
@@ -494,12 +487,12 @@ trm_ResetAllDevParam(struct trm_softc *sc)
 	pEEpromBuf = &trm_eepromBuf[sc->sc_AdapterUnit];
 
 	for (target = 0; target < TRM_MAX_TARGETS; target++) {
-		if (target == sc->sc_AdaptSCSIID)
+		if (target == sc->sc_AdaptSCSIID || sc->pDCB[target][0] == NULL)
 			continue;
 
 		if ((sc->pDCB[target][0]->DCBFlag & TRM_QUIRKS_VALID) == 0)
 			quirks = SDEV_NOWIDE | SDEV_NOSYNC | SDEV_NOTAGS;
-		else
+		else if (sc->pDCB[target][0]->sc_link != NULL)
 			quirks = sc->pDCB[target][0]->sc_link->quirks;
 
 		trm_ResetDevParam(sc, sc->pDCB[target][0], quirks);
@@ -653,10 +646,11 @@ trm_timeout(void *arg1)
  	if (xs != NULL) {
  		sc = xs->sc_link->adapter_softc;
  		sc_print_addr(xs->sc_link);
- 		printf("SCSI OpCode 0x%02x timed out\n",
+ 		printf("%s: SCSI OpCode 0x%02x timed out\n",
  		    sc->sc_device.dv_xname, xs->cmd->opcode);
 		pSRB->SRBFlag |= TRM_SCSI_TIMED_OUT;
  		trm_FinishSRB(sc, pSRB);
+		trm_reset(sc);
 		trm_StartWaitingSRB(sc);
  	}
 #ifdef TRM_DEBUG0
@@ -2060,7 +2054,7 @@ trm_FinishSRB(struct trm_softc *sc, struct trm_scsi_req_q *pSRB)
 
 	if ((xs->flags & SCSI_POLL) != 0) {
 
-		if (xs->cmd->opcode == INQUIRY) {
+		if (xs->cmd->opcode == INQUIRY && pDCB->sc_link == NULL) {
 
 			ptr = (struct scsi_inquiry_data *) xs->data; 
 
@@ -2080,8 +2074,6 @@ trm_FinishSRB(struct trm_softc *sc, struct trm_scsi_req_q *pSRB)
 	}
 
 	trm_ReleaseSRB(sc, pSRB);
-
-	xs->flags |= ITSDONE;
 
 	/*
 	 * Notify cmd done
@@ -2442,7 +2434,6 @@ trm_initACB(struct trm_softc *sc, int unit)
 	sc->sc_link.adapter_softc    = sc;
 	sc->sc_link.adapter_target   = sc->sc_AdaptSCSIID;
 	sc->sc_link.openings         = 30; /* So TagMask (32 bit integer) always has space */
-	sc->sc_link.device           = &trm_device;
 	sc->sc_link.adapter          = &sc->sc_adapter;
 	sc->sc_link.adapter_buswidth = ((sc->sc_config & HCC_WIDE_CARD) == 0) ? 8:16;
 
@@ -2877,7 +2868,7 @@ trm_init(struct trm_softc *sc, int unit)
 	all_srbs_size = TRM_MAX_SRB_CNT * sizeof(struct trm_scsi_req_q);
 
 	error = bus_dmamem_alloc(sc->sc_dmatag, all_srbs_size, NBPG, 0, &seg,
-	    1, &rseg, BUS_DMA_NOWAIT);
+	    1, &rseg, BUS_DMA_NOWAIT | BUS_DMA_ZERO);
 	if (error != 0) {
 		printf("%s: unable to allocate SCSI REQUEST BLOCKS, error = %d\n",
 		    sc->sc_device.dv_xname, error);
@@ -2916,7 +2907,6 @@ trm_init(struct trm_softc *sc, int unit)
 	printf("\n\n%s: all_srbs_size=%x\n", 
 	    sc->sc_device.dv_xname, all_srbs_size);
 #endif
-	bzero(sc->SRB, all_srbs_size);
 	trm_initACB(sc, unit);
 	trm_initAdapter(sc);
 

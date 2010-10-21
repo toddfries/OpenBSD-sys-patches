@@ -1,4 +1,4 @@
-/*	$OpenBSD: pciio.h,v 1.2 2001/06/26 20:44:14 jason Exp $	*/
+/*	$OpenBSD: pciio.h,v 1.7 2010/09/05 18:14:33 kettenis Exp $	*/
 
 /*-
  * Copyright (c) 1997, Stefan Esser <se@FreeBSD.ORG>
@@ -35,70 +35,10 @@
 
 #include <sys/ioccom.h>
 
-#define PCI_MAXNAMELEN	16
-
-typedef enum {
-	PCI_GETCONF_LAST_DEVICE,
-	PCI_GETCONF_LIST_CHANGED,
-	PCI_GETCONF_MORE_DEVS,
-	PCI_GETCONF_ERROR
-} pci_getconf_status;
-
-typedef enum {
-	PCI_GETCONF_NO_MATCH		= 0x00,
-	PCI_GETCONF_MATCH_BUS		= 0x01,
-	PCI_GETCONF_MATCH_DEV		= 0x02,
-	PCI_GETCONF_MATCH_FUNC		= 0x04,
-	PCI_GETCONF_MATCH_NAME		= 0x08,
-	PCI_GETCONF_MATCH_UNIT		= 0x10,
-	PCI_GETCONF_MATCH_VENDOR	= 0x20,
-	PCI_GETCONF_MATCH_DEVICE	= 0x40,
-	PCI_GETCONF_MATCH_CLASS		= 0x80
-} pci_getconf_flags;
-
 struct pcisel {
 	u_int8_t	pc_bus;		/* bus number */
 	u_int8_t	pc_dev;		/* device on this bus */
 	u_int8_t	pc_func;	/* function on this device */
-};
-
-struct	pci_conf {
-	struct pcisel	pc_sel;		/* bus+slot+function */
-	u_int8_t	pc_hdr;		/* PCI header type */
-	u_int16_t	pc_subvendor;	/* card vendor ID */
-	u_int16_t	pc_subdevice;	/* card device ID, assigned by 
-					   card vendor */
-	u_int16_t	pc_vendor;	/* chip vendor ID */
-	u_int16_t	pc_device;	/* chip device ID, assigned by 
-					   chip vendor */
-	u_int8_t	pc_class;	/* chip PCI class */
-	u_int8_t	pc_subclass;	/* chip PCI subclass */
-	u_int8_t	pc_progif;	/* chip PCI programming interface */
-	u_int8_t	pc_revid;	/* chip revision ID */
-	char		pd_name[PCI_MAXNAMELEN + 1];  /* device name */
-	u_long		pd_unit;	/* device unit number */
-};
-
-struct pci_match_conf {
-	struct pcisel		pc_sel;		/* bus+slot+function */
-	char			pd_name[PCI_MAXNAMELEN + 1];  /* device name */
-	u_long			pd_unit;	/* Unit number */
-	u_int16_t		pc_vendor;	/* PCI Vendor ID */
-	u_int16_t		pc_device;	/* PCI Device ID */
-	u_int8_t		pc_class;	/* PCI class */
-	pci_getconf_flags	flags;		/* Matching expression */
-};
-
-struct	pci_conf_io {
-	u_int32_t		pat_buf_len;	/* pattern buffer length */
-	u_int32_t		num_patterns;	/* number of patterns */
-	struct pci_match_conf	*patterns;	/* pattern buffer */
-	u_int32_t		match_buf_len;	/* match buffer length */
-	u_int32_t		num_matches;	/* number of matches returned */
-	struct pci_conf		*matches;	/* match buffer */
-	u_int32_t		offset;		/* offset into device list */
-	u_int32_t		generation;	/* device list generation */
-	pci_getconf_status	status;		/* request status */
 };
 
 struct pci_io {
@@ -107,11 +47,32 @@ struct pci_io {
 	int		pi_width;	/* width (in bytes) of read or write */
 	u_int32_t	pi_data;	/* data to write or result of read */
 };
-	
 
-#define	PCIOCGETCONF	_IOWR('p', 1, struct pci_conf_io)
+struct pci_rom {
+	struct pcisel	pr_sel;
+	int		pr_romlen;
+	char		*pr_rom;
+};
+
+struct pci_vga {
+	struct pcisel	pv_sel;
+	int		pv_lock;
+	int		pv_decode;
+};
+
+#define	PCI_VGA_UNLOCK		0x00
+#define	PCI_VGA_LOCK		0x01
+#define	PCI_VGA_TRYLOCK		0x02
+
+#define	PCI_VGA_IO_ENABLE	0x01
+#define	PCI_VGA_MEM_ENABLE	0x02
+
 #define	PCIOCREAD	_IOWR('p', 2, struct pci_io)
 #define	PCIOCWRITE	_IOWR('p', 3, struct pci_io)
-#define	PCIOCATTACHED	_IOWR('p', 4, struct pci_io)
+#define	PCIOCGETROMLEN	_IOWR('p', 4, struct pci_rom)
+#define	PCIOCGETROM	_IOWR('p', 5, struct pci_rom)
+#define	PCIOCGETVGA	_IOWR('p', 6, struct pci_vga)
+#define	PCIOCSETVGA	_IOWR('p', 7, struct pci_vga)
+#define	PCIOCREADMASK	_IOWR('p', 8, struct pci_io)
 
 #endif /* !_SYS_PCIIO_H_ */

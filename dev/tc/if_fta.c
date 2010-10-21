@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_fta.c,v 1.15 2008/08/09 16:42:30 miod Exp $	*/
+/*	$OpenBSD: if_fta.c,v 1.17 2010/09/20 07:40:42 deraadt Exp $	*/
 /*	$NetBSD: if_fta.c,v 1.7 1996/10/22 21:37:26 cgd Exp $	*/
 
 /*-
@@ -115,12 +115,6 @@ pdq_tc_attach(parent, self, aux)
 
 	tc_intr_establish(parent, ta->ta_cookie, IPL_NET,
 	    (int (*)(void *)) pdq_interrupt, sc->sc_pdq, self->dv_xname);
-
-	sc->sc_ats = shutdownhook_establish((void (*)(void *)) pdq_hwreset,
-	    sc->sc_pdq);
-	if (sc->sc_ats == NULL)
-		printf("%s: warning: couldn't establish shutdown hook\n",
-		    self->dv_xname);
 }
 
 struct cfattach fta_ca = {
@@ -128,5 +122,5 @@ struct cfattach fta_ca = {
 };
 
 struct cfdriver fta_cd = {
-	0, "fta", DV_IFNET
+	NULL, "fta", DV_IFNET
 };

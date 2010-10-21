@@ -1,4 +1,4 @@
-/*    $OpenBSD: if_sn.c,v 1.52 2009/03/29 21:53:52 sthen Exp $        */
+/*    $OpenBSD: if_sn.c,v 1.54 2010/03/31 19:46:27 miod Exp $        */
 /*    $NetBSD: if_sn.c,v 1.13 1997/04/25 03:40:10 briggs Exp $        */
 
 /*
@@ -113,8 +113,8 @@ snsetup(struct sn_softc *sc, u_int8_t *lladdr)
 	 * to do that?
 	 */
 	TAILQ_INIT(&pglist);
-	error = uvm_pglistalloc(SN_NPAGES * PAGE_SIZE, 0, -PAGE_SIZE,
-	    PAGE_SIZE, 0, &pglist, 1, 0);
+	error = uvm_pglistalloc(SN_NPAGES * PAGE_SIZE, 0, -1,
+	    PAGE_SIZE, 0, &pglist, 1, UVM_PLA_NOWAIT);
 	if (error != 0) {
 		printf(": could not allocate descriptor memory\n");
 		return (error);

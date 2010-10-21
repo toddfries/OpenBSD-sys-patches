@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.51 2008/11/22 18:12:32 art Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.55 2010/04/20 23:27:00 deraadt Exp $	*/
 /*	$NetBSD: cpu.c,v 1.13 2001/05/26 21:27:15 chs Exp $ */
 
 /*
@@ -54,6 +54,7 @@
 
 #include <sys/param.h>
 #include <sys/device.h>
+#include <sys/proc.h>
 #include <sys/sysctl.h>
 #include <sys/systm.h>
 
@@ -136,7 +137,7 @@ alloc_cpuinfo(struct mainbus_attach_args *ma)
 		if (cpi->ci_upaid == portid)
 			return cpi;
 
-	va = uvm_km_valloc_align(kernel_map, sz, 8 * PAGE_SIZE);
+	va = uvm_km_valloc_align(kernel_map, sz, 8 * PAGE_SIZE, 0);
 	if (va == 0)
 		panic("alloc_cpuinfo: no virtual space");
 	va0 = va;
@@ -260,7 +261,7 @@ cpu_attach(parent, dev, aux)
 	vers = IU_VERS(ver);
 
 	/* tell them what we have */
-	if (strncmp(parent->dv_xname, "core", 4) == 0)
+	if (strcmp(parent->dv_cfdata->cf_driver->cd_name, "core") == 0)
 		node = OF_parent(ma->ma_node);
 	else
 		node = ma->ma_node;
@@ -708,11 +709,11 @@ cpu_boot_secondary_processors(void)
 		else
 			cpuid = getpropint(ci->ci_node, "cpuid", -1);
 
-		if (cpuid == -1) {
-			prom_start_cpu(ci->ci_node,
+		if (OF_test("SUNW,start-cpu-by-cpuid") == 0) {
+			prom_start_cpu_by_cpuid(cpuid,
 			    (void *)cpu_mp_startup, ci->ci_paddr);
 		} else {
-			prom_start_cpu_by_cpuid(cpuid,
+			prom_start_cpu(ci->ci_node,
 			    (void *)cpu_mp_startup, ci->ci_paddr);
 		}
 

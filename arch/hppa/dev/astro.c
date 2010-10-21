@@ -1,4 +1,4 @@
-/*	$OpenBSD: astro.c,v 1.8 2007/10/06 23:50:54 krw Exp $	*/
+/*	$OpenBSD: astro.c,v 1.12 2010/08/07 03:50:01 krw Exp $	*/
 
 /*
  * Copyright (c) 2007 Mark Kettenis
@@ -165,6 +165,7 @@ int	iommu_dvmamap_create(void *, bus_size_t, int, bus_size_t, bus_size_t,
 void	iommu_dvmamap_destroy(void *, bus_dmamap_t);
 int	iommu_dvmamap_load(void *, bus_dmamap_t, void *, bus_size_t,
 	    struct proc *, int);
+int	iommu_iomap_load_map(struct astro_softc *, bus_dmamap_t, int);
 int	iommu_dvmamap_load_mbuf(void *, bus_dmamap_t, struct mbuf *, int);
 int	iommu_dvmamap_load_uio(void *, bus_dmamap_t, struct uio *, int);
 int	iommu_dvmamap_load_raw(void *, bus_dmamap_t, bus_dma_segment_t *,
@@ -271,7 +272,8 @@ astro_attach(struct device *parent, struct device *self, void *aux)
 
 	size = (1 << (iova_bits - PAGE_SHIFT)) * sizeof(u_int64_t);
 	TAILQ_INIT(&mlist);
-	if (uvm_pglistalloc(size, 0, -1, PAGE_SIZE, 0, &mlist, 1, 0) != 0)
+	if (uvm_pglistalloc(size, 0, -1, PAGE_SIZE, 0, &mlist,
+	    1, UVM_PLA_NOWAIT) != 0)
 		panic("astrottach: no memory");
 
 	va = uvm_km_valloc(kernel_map, size);
@@ -321,7 +323,7 @@ astro_attach(struct device *parent, struct device *self, void *aux)
 	nca = *ca;	/* clone from us */
 	nca.ca_hpamask = HPPA_IOBEGIN;
 	nca.ca_dmatag = &sc->sc_dmatag;
-	pdc_scanbus(self, &nca, MAXMODBUS, 0);
+	pdc_scanbus(self, &nca, MAXMODBUS, 0, 0);
 }
 
 int
@@ -667,7 +669,7 @@ iommu_iomap_translate(struct iommu_map_state *ims, paddr_t pa)
 	e = SPLAY_FIND(iommu_page_tree, &ipm->ipm_tree, &pe);
 
 	if (e == NULL) {
-		panic("couldn't find pa %lx\n", pa);
+		panic("couldn't find pa %lx", pa);
 		return 0;
 	}
 
