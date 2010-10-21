@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia_codec.c,v 1.143 2010/03/21 15:04:35 jakemsr Exp $	*/
+/*	$OpenBSD: azalia_codec.c,v 1.151 2010/09/10 15:11:23 jakemsr Exp $	*/
 /*	$NetBSD: azalia_codec.c,v 1.8 2006/05/10 11:17:27 kent Exp $	*/
 
 /*-
@@ -179,7 +179,8 @@ azalia_codec_init_vtbl(codec_t *this)
 		break;
 	case 0x111d76b2:
 		this->name = "IDT 92HD71B7";
-		if ((this->subid & 0x0000ffff) == 0x00001028) {	/* DELL */
+		if ((this->subid & 0x0000ffff) == 0x00001028 || /* DELL */
+		    (this->subid & 0x0000ffff) == 0x0000103c) { /* HP */
 			this->qrks |= AZ_QRK_GPIO_UNMUTE_0;
 		}
 		break;
@@ -529,7 +530,7 @@ azalia_unsol_event(codec_t *this, int tag)
 	case AZ_TAG_SPKR:
 		mc.type = AUDIO_MIXER_ENUM;
 		vol = 0;
-		for (i = 0; err == 0 && i < this->nsense_pins; i++) {
+		for (i = 0; !vol && !err && i < this->nsense_pins; i++) {
 			if (!(this->spkr_muters & (1 << i)))
 				continue;
 			err = azalia_comresp(this, this->sense_pins[i],
@@ -543,6 +544,7 @@ azalia_unsol_event(codec_t *this, int tag)
 		}
 		if (err)
 			break;
+		this->spkr_muted = vol;
 		switch(this->spkr_mute_method) {
 		case AZ_SPKR_MUTE_SPKR_MUTE:
 			mc.un.ord = vol;
@@ -1042,9 +1044,9 @@ azalia_mixer_init(codec_t *this)
 		this->spkr_muters = 0;
 		for (i = 0, j = 0; i < this->nsense_pins; i++) {
 			ww = &this->w[this->sense_pins[i]];
-			if (!(w->d.pin.cap & COP_PINCAP_OUTPUT))
+			if (!(ww->d.pin.cap & COP_PINCAP_OUTPUT))
 				continue;
-			if (!(w->widgetcap & COP_AWCAP_UNSOL))
+			if (!(ww->widgetcap & COP_AWCAP_UNSOL))
 				continue;
 			d->un.s.member[j].mask = 1 << i;
 			this->spkr_muters |= (1 << i);
@@ -1331,6 +1333,26 @@ azalia_mixer_default(codec_t *this)
 		azalia_mixer_set(this, m->nid, m->target, &mc);
 	}
 
+	/* make sure default connection is valid */
+	for (i = 0; i < this->nmixers; i++) {
+		m = &this->mixers[i];
+		if (m->target != MI_TARGET_CONNLIST)
+			continue;
+
+		azalia_mixer_get(this, m->nid, m->target, &mc);
+		for (j = 0; j < m->devinfo.un.e.num_mem; j++) {
+			if (mc.un.ord == m->devinfo.un.e.member[j].ord)
+				break;
+		}
+		if (j >= m->devinfo.un.e.num_mem) {
+			bzero(&mc, sizeof(mc));
+			mc.dev = i;
+			mc.type = AUDIO_MIXER_ENUM;
+			mc.un.ord = m->devinfo.un.e.member[0].ord;
+		}
+		azalia_mixer_set(this, m->nid, m->target, &mc);
+	}
+
 	/* get default value for play group master */
 	for (i = 0; i < this->playvols.nslaves; i++) {
 		if (!(this->playvols.cur & (1 << i)))
@@ -1400,8 +1422,10 @@ azalia_codec_enable_unsol(codec_t *this)
 		w = &this->w[this->playvols.master];
 		err = azalia_comresp(this, w->nid, CORB_GET_VOLUME_KNOB,
 		    0, &result);
-		if (err)
+		if (err) {
+			DPRINTF(("%s: get volume knob error\n", __func__));
 			return err;
+		}
 
 		/* current level */
 		this->playvols.hw_step = CORB_VKNOB_VOLUME(result);
@@ -1411,15 +1435,25 @@ azalia_codec_enable_unsol(codec_t *this)
 		result &= ~(CORB_VKNOB_DIRECT);
 		err = azalia_comresp(this, w->nid, CORB_SET_VOLUME_KNOB,
 		    result, NULL);
-		if (err)
-			return err;
+		if (err) {
+			DPRINTF(("%s: set volume knob error\n", __func__));
+			/* XXX If there was an error setting indirect
+			 * mode, do not return an error.  However, do not
+			 * enable unsolicited responses either.  Most
+			 * likely the volume knob doesn't work right.
+			 * Perhaps it's simply not wired/enabled.
+			 */
+			return 0;
+		}
 
 		/* enable unsolicited responses */
 		result = CORB_UNSOL_ENABLE | AZ_TAG_PLAYVOL;
 		err = azalia_comresp(this, w->nid,
 		    CORB_SET_UNSOLICITED_RESPONSE, result, NULL);
-		if (err)
+		if (err) {
+			DPRINTF(("%s: set vknob unsol resp error\n", __func__));
 			return err;
+		}
 	}
 
 	return 0;
@@ -1705,8 +1739,8 @@ azalia_mixer_get(const codec_t *this, nid_t nid, int target,
 	}
 
 	else {
-		printf("%s: internal error in %s: target=%x\n",
-		    XNAME(this), __func__, target);
+		DPRINTF(("%s: internal error in %s: target=%x\n",
+		    XNAME(this), __func__, target));
 		return -1;
 	}
 	return 0;
@@ -2128,6 +2162,16 @@ azalia_mixer_set(codec_t *this, nid_t nid, int target, const mixer_ctrl_t *mc)
 				w = &this->w[this->playvols.slaves[i]];
 				if (!(w->outamp_cap & COP_AMPCAP_MUTE))
 					continue;
+				if (this->spkr_muted == 1 &&
+				    ((this->spkr_mute_method ==
+				    AZ_SPKR_MUTE_SPKR_MUTE &&
+				    (w->nid == this->speaker ||
+				    w->nid == this->speaker2)) ||
+				    (this->spkr_mute_method ==
+				    AZ_SPKR_MUTE_DAC_MUTE &&
+				    w->nid == this->spkr_dac))) {
+					continue;
+				}
 				mc2.type = AUDIO_MIXER_ENUM;
 				mc2.un.ord = this->playvols.mute;
 				err = azalia_mixer_set(this, w->nid,
@@ -2224,8 +2268,8 @@ azalia_mixer_set(codec_t *this, nid_t nid, int target, const mixer_ctrl_t *mc)
 	}
 
 	else {
-		printf("%s: internal error in %s: target=%x\n",
-		    XNAME(this), __func__, target);
+		DPRINTF(("%s: internal error in %s: target=%x\n",
+		    XNAME(this), __func__, target));
 		return -1;
 	}
 	return 0;
@@ -2245,7 +2289,7 @@ azalia_mixer_from_device_value(const codec_t *this, nid_t nid, int target,
 		steps = COP_AMPCAP_NUMSTEPS(this->w[nid].outamp_cap);
 		ctloff = COP_AMPCAP_CTLOFF(this->w[nid].outamp_cap);
 	} else {
-		printf("%s: unknown target: %d\n", __func__, target);
+		DPRINTF(("%s: unknown target: %d\n", __func__, target));
 		steps = 255;
 	}
 	dv -= ctloff;
@@ -2271,7 +2315,7 @@ azalia_mixer_to_device_value(const codec_t *this, nid_t nid, int target,
 		steps = COP_AMPCAP_NUMSTEPS(this->w[nid].outamp_cap);
 		ctloff = COP_AMPCAP_CTLOFF(this->w[nid].outamp_cap);
 	} else {
-		printf("%s: unknown target: %d\n", __func__, target);
+		DPRINTF(("%s: unknown target: %d\n", __func__, target));
 		steps = 255;
 	}
 	if (uv <= AUDIO_MIN_GAIN || steps == 0)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.6 2010/06/09 15:25:32 jsing Exp $ */
+/*	$OpenBSD: conf.c,v 1.9 2010/09/23 05:02:14 claudio Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -86,12 +86,6 @@ int	nblkdev = sizeof (bdevsw) / sizeof (bdevsw[0]);
  *	Character devices.
  */
 
-/* open, close, write, ioctl */
-#define	cdev_lpt_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) enodev, \
-	dev_init(c,n,write), dev_init(c,n,ioctl), (dev_type_stop((*))) enodev, \
-	0, seltrue, (dev_type_mmap((*))) enodev }
-
 #define mmread mmrw
 #define mmwrite mmrw
 dev_type_read(mmrw);
@@ -108,7 +102,6 @@ cdev_decl(com);
 #include "lpt.h"
 cdev_decl(lpt);
 #include "ch.h"
-#include "ss.h"
 #include "uk.h"
 cdev_decl(wd);
 #include "audio.h"
@@ -140,6 +133,7 @@ cdev_decl(pci);
 
 #include "bthub.h"
 #include "vscsi.h"
+#include "pppx.h"
 
 struct cdevsw	cdevsw[] =
 {
@@ -181,7 +175,7 @@ struct cdevsw	cdevsw[] =
 	cdev_pf_init(NPF,pf),		/* 31: packet filter */
 	cdev_uk_init(NUK,uk),		/* 32: unknown SCSI */
 	cdev_random_init(1,random),	/* 33: random data source */
-	cdev_ss_init(NSS,ss),		/* 34: SCSI scanner */
+	cdev_notdef(),			/* 34: */
 	cdev_ksyms_init(NKSYMS,ksyms),	/* 35: Kernel symbols device */
 	cdev_ch_init(NCH,ch),		/* 36: SCSI autochanger */
 	cdev_notdef(),			/* 37: */
@@ -222,6 +216,7 @@ struct cdevsw	cdevsw[] =
 	cdev_bthub_init(NBTHUB,bthub),	/* 68: bluetooth hub */
 	cdev_vscsi_init(NVSCSI,vscsi),	/* 69: vscsi */
 	cdev_disk_init(1,diskmap),	/* 70: disk mapper */
+	cdev_pppx_init(NPPPX,pppx),	/* 71: pppx */
 };
 
 int	nchrdev = sizeof (cdevsw) / sizeof (cdevsw[0]);

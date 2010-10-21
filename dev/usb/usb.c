@@ -1,4 +1,4 @@
-/*	$OpenBSD: usb.c,v 1.62 2009/11/09 17:53:39 nicm Exp $	*/
+/*	$OpenBSD: usb.c,v 1.68 2010/09/23 06:30:37 jakemsr Exp $	*/
 /*	$NetBSD: usb.c,v 1.77 2003/01/01 00:10:26 thorpej Exp $	*/
 
 /*
@@ -54,6 +54,7 @@
 #include <sys/selinfo.h>
 #include <sys/vnode.h>
 #include <sys/signalvar.h>
+#include <sys/time.h>
 
 #include <dev/usb/usb.h>
 #include <dev/usb/usbdi.h>
@@ -81,8 +82,7 @@ extern int	ehcidebug;
 #endif
 /*
  * 0  - do usual exploration
- * 1  - do not use timeout exploration
- * >1 - do no exploration
+ * !0 - do no exploration
  */
 int	usb_noexplore = 0;
 #else
@@ -95,18 +95,20 @@ struct usb_softc {
 	usbd_bus_handle  sc_bus;	/* USB controller */
 	struct usbd_port sc_port;	/* dummy port for root hub */
 
-	struct proc	*sc_event_thread;
+	struct usb_task	 sc_explore_task;
 
-	char		 sc_dying;
+	struct timeval	 sc_ptime;
 };
 
-TAILQ_HEAD(, usb_task) usb_all_tasks;
+TAILQ_HEAD(, usb_task) usb_explore_tasks;
+TAILQ_HEAD(, usb_task) usb_tasks;
 
-volatile int threads_pending = 0;
+int usb_run_tasks;
+int explore_pending;
 
-void	usb_discover(void *);
-void	usb_create_event_thread(void *);
-void	usb_event_thread(void *);
+void	usb_explore(void *);
+void	usb_first_explore(void *);
+void	usb_create_task_thread(void *);
 void	usb_task_thread(void *);
 struct proc *usb_task_thread_proc = NULL;
 
@@ -180,7 +182,7 @@ usb_attach(struct device *parent, struct device *self, void *aux)
 		break;
 	default:
 		printf(", not supported\n");
-		sc->sc_dying = 1;
+		sc->sc_bus->dying = 1;
 		return;
 	}
 	printf("\n");
@@ -188,6 +190,12 @@ usb_attach(struct device *parent, struct device *self, void *aux)
 	/* Make sure not to use tsleep() if we are cold booting. */
 	if (cold)
 		sc->sc_bus->use_polling++;
+
+	/* Don't let hub interrupts cause explore until ready. */
+	sc->sc_bus->flags |= USB_BUS_CONFIG_PENDING;
+
+	/* explore task */
+	usb_init_task(&sc->sc_explore_task, usb_explore, sc);
 
 	ue.u.ue_ctrlr.ue_bus = sc->sc_dev.dv_unit;
 	usb_add_event(USB_EVENT_CTRLR_ATTACH, &ue);
@@ -197,7 +205,7 @@ usb_attach(struct device *parent, struct device *self, void *aux)
 	    sc->sc_bus->methods->soft_intr, sc->sc_bus);
 	if (sc->sc_bus->soft == NULL) {
 		printf("%s: can't register softintr\n", sc->sc_dev.dv_xname);
-		sc->sc_dying = 1;
+		sc->sc_bus->dying = 1;
 		return;
 	}
 
@@ -206,7 +214,7 @@ usb_attach(struct device *parent, struct device *self, void *aux)
 	if (!err) {
 		dev = sc->sc_port.device;
 		if (dev->hub == NULL) {
-			sc->sc_dying = 1;
+			sc->sc_bus->dying = 1;
 			printf("%s: root device is not a hub\n",
 			       sc->sc_dev.dv_xname);
 			return;
@@ -224,36 +232,48 @@ usb_attach(struct device *parent, struct device *self, void *aux)
 	} else {
 		printf("%s: root hub problem, error=%d\n",
 		       sc->sc_dev.dv_xname, err);
-		sc->sc_dying = 1;
+		sc->sc_bus->dying = 1;
 	}
 	if (cold)
 		sc->sc_bus->use_polling--;
 
-	config_pending_incr();
-	kthread_create_deferred(usb_create_event_thread, sc);
+	if (!sc->sc_bus->dying) {
+		getmicrouptime(&sc->sc_ptime);
+		if (sc->sc_bus->usbrev == USBREV_2_0)
+			explore_pending++;
+		config_pending_incr();
+		kthread_create_deferred(usb_first_explore, sc);
+	}
+}
+
+/*
+ * Called by usbd_init when first usb is attached.
+ */
+void
+usb_begin_tasks(void)
+{
+	TAILQ_INIT(&usb_explore_tasks);
+	TAILQ_INIT(&usb_tasks);
+	usb_run_tasks = 1;
+	kthread_create_deferred(usb_create_task_thread, NULL);
+}
+
+/*
+ * Called by usbd_finish when last usb is detached.
+ */
+void
+usb_end_tasks(void)
+{
+	usb_run_tasks = 0;
+	wakeup(&usb_run_tasks);
 }
 
 void
-usb_create_event_thread(void *arg)
+usb_create_task_thread(void *arg)
 {
-	struct usb_softc *sc = arg;
-	static int created = 0;
-
-	if (sc->sc_bus->usbrev == USBREV_2_0)
-		threads_pending++;
-
-	if (kthread_create(usb_event_thread, sc, &sc->sc_event_thread,
-	    "%s", sc->sc_dev.dv_xname))
-		panic("unable to create event thread for %s",
-		    sc->sc_dev.dv_xname);
-
-	if (!created) {
-		created = 1;
-		TAILQ_INIT(&usb_all_tasks);
-		if (kthread_create(usb_task_thread, NULL,
-		    &usb_task_thread_proc, "usbtask"))
-			panic("unable to create usb task thread");
-	}
+	if (kthread_create(usb_task_thread, NULL,
+	    &usb_task_thread_proc, "usbtask"))
+		panic("unable to create usb task thread");
 }
 
 /*
@@ -266,15 +286,22 @@ usb_add_task(usbd_device_handle dev, struct usb_task *task)
 {
 	int s;
 
+	DPRINTFN(2,("%s: task=%p onqueue=%d\n", __func__, task, task->onqueue));
+
+	/* Don't add task if the device's root hub is dying. */
+	if (dev->bus->dying)
+		return;
+
 	s = splusb();
 	if (!task->onqueue) {
-		DPRINTFN(2,("usb_add_task: task=%p\n", task));
-		TAILQ_INSERT_TAIL(&usb_all_tasks, task, next);
+		if (task->fun == usb_explore)
+			TAILQ_INSERT_TAIL(&usb_explore_tasks, task, next);
+		else
+			TAILQ_INSERT_TAIL(&usb_tasks, task, next);
 		task->onqueue = 1;
-	} else {
-		DPRINTFN(3,("usb_add_task: task=%p on q\n", task));
+		task->dev = dev;
 	}
-	wakeup(&usb_all_tasks);
+	wakeup(&usb_run_tasks);
 	splx(s);
 }
 
@@ -283,63 +310,73 @@ usb_rem_task(usbd_device_handle dev, struct usb_task *task)
 {
 	int s;
 
+	DPRINTFN(2,("%s: task=%p onqueue=%d\n", __func__, task, task->onqueue));
+
 	s = splusb();
 	if (task->onqueue) {
-		TAILQ_REMOVE(&usb_all_tasks, task, next);
+		if (task->fun == usb_explore)
+			TAILQ_REMOVE(&usb_explore_tasks, task, next);
+		else
+			TAILQ_REMOVE(&usb_tasks, task, next);
 		task->onqueue = 0;
 	}
 	splx(s);
 }
 
 void
-usb_event_thread(void *arg)
+usb_rem_wait_task(usbd_device_handle dev, struct usb_task *task)
+{
+	int s;
+
+	DPRINTFN(2,("%s: task=%p onqueue=%d\n", __func__, task, task->onqueue));
+
+	s = splusb();
+	usb_rem_task(dev, task);
+	while (task->running) {
+		DPRINTF(("%s: waiting for task to complete\n", __func__));
+		tsleep(task, PWAIT, "endtask", 0);
+	}
+	splx(s);
+}
+
+void
+usb_first_explore(void *arg)
 {
 	struct usb_softc *sc = arg;
-	int pwrdly;
+	struct timeval now, waited;
+	int pwrdly, waited_ms;
 
-	DPRINTF(("usb_event_thread: start\n"));
+	getmicrouptime(&now);
+	timersub(&now, &sc->sc_ptime, &waited);
+	waited_ms = waited.tv_sec * 1000 + waited.tv_usec / 1000;
 
 	/* Wait for power to come good. */
 	pwrdly = sc->sc_bus->root_hub->hub->hubdesc.bPwrOn2PwrGood * 
 	    UHD_PWRON_FACTOR + USB_EXTRA_POWER_UP_TIME;
-	usb_delay_ms(sc->sc_bus, pwrdly);
+	if (pwrdly > waited_ms)
+		usb_delay_ms(sc->sc_bus, pwrdly - waited_ms);
 
-	/* USB1 threads wait for USB2 threads to finish their first probe. */
-	while (sc->sc_bus->usbrev != USBREV_2_0 && threads_pending)
-		(void)tsleep((void *)&threads_pending, PWAIT, "config", 0);
+	/*
+	 * USB1 waits for USB2 to finish their first probe.
+	 * We only really need to have "companion" USB1 controllers
+	 * wait, but it's hard to determine what's a companion and
+	 * what isn't.
+	 */
+	while (sc->sc_bus->usbrev != USBREV_2_0 && explore_pending)
+		(void)tsleep((void *)&explore_pending, PWAIT, "config", 0);
 
-	/* Make sure first discover does something. */
-	sc->sc_bus->needs_explore = 1;
-	usb_discover(sc);
-	config_pending_decr();
+	/*
+	 * Add first explore task to the queue.  The tasks are run in order
+	 * in a single thread, so adding tasks to the queue in the correct
+	 * order means they will run in the correct order.
+	 */
+	usb_needs_explore(sc->sc_bus->root_hub, 1);
 
 	/* Wake up any companions waiting for handover before their probes. */
 	if (sc->sc_bus->usbrev == USBREV_2_0) {
-		threads_pending--;
-		wakeup((void *)&threads_pending);
-	}
-
-	while (!sc->sc_dying) {
-#ifdef USB_DEBUG
-		if (usb_noexplore < 2)
-#endif
-		usb_discover(sc);
-#ifdef USB_DEBUG
-		(void)tsleep(&sc->sc_bus->needs_explore, PWAIT, "usbevt",
-		    usb_noexplore ? 0 : hz * 60);
-#else
-		(void)tsleep(&sc->sc_bus->needs_explore, PWAIT, "usbevt",
-		    hz * 60);
-#endif
-		DPRINTFN(2,("usb_event_thread: woke up\n"));
-	}
-	sc->sc_event_thread = NULL;
-
-	/* In case parent is waiting for us to exit. */
-	wakeup(sc);
-
-	DPRINTF(("usb_event_thread: exit\n"));
-	kthread_exit(0);
+		explore_pending--;
+		wakeup((void *)&explore_pending);
+ 	}
 }
 
 void
@@ -351,21 +388,29 @@ usb_task_thread(void *arg)
 	DPRINTF(("usb_task_thread: start\n"));
 
 	s = splusb();
-	for (;;) {
-		task = TAILQ_FIRST(&usb_all_tasks);
-		if (task == NULL) {
-			tsleep(&usb_all_tasks, PWAIT, "usbtsk", 0);
-			task = TAILQ_FIRST(&usb_all_tasks);
+	while (usb_run_tasks) {
+		if ((task = TAILQ_FIRST(&usb_explore_tasks)) != NULL)
+			TAILQ_REMOVE(&usb_explore_tasks, task, next);
+		else if ((task = TAILQ_FIRST(&usb_tasks)) != NULL)
+			TAILQ_REMOVE(&usb_tasks, task, next);
+		else {
+			tsleep(&usb_run_tasks, PWAIT, "usbtsk", 0);
+			continue;
 		}
-		DPRINTFN(2,("usb_task_thread: woke up task=%p\n", task));
-		if (task != NULL) {
-			TAILQ_REMOVE(&usb_all_tasks, task, next);
-			task->onqueue = 0;
-			splx(s);
-			task->fun(task->arg);
-			s = splusb();
-		}
+		task->onqueue = 0;
+		/* Don't execute the task if the root hub is gone. */
+		if (task->dev->bus->dying)
+			continue;
+		task->running = 1;
+		splx(s);
+		task->fun(task->arg);
+		s = splusb();
+		task->running = 0;
+		wakeup(task);
 	}
+	splx(s);
+
+	kthread_exit(0);
 }
 
 int
@@ -398,7 +443,7 @@ usbopen(dev_t dev, int flag, int mode, struct proc *p)
 	if (sc == NULL)
 		return (ENXIO);
 
-	if (sc->sc_dying)
+	if (sc->sc_bus->dying)
 		return (EIO);
 
 	return (0);
@@ -477,7 +522,7 @@ usbioctl(dev_t devt, u_long cmd, caddr_t data, int flag, struct proc *p)
 
 	sc = usb_cd.cd_devs[unit];
 
-	if (sc->sc_dying)
+	if (sc->sc_bus->dying)
 		return (EIO);
 
 	error = 0;
@@ -662,34 +707,48 @@ usbkqfilter(dev_t dev, struct knote *kn)
 	return (0);
 }
 
-/* Explore device tree from the root. */
+/*
+ * Explore device tree from the root.  We need mutual exclusion to this
+ * hub while traversing the device tree, but this is guaranteed since this
+ * function is only called from the task thread, with one exception:
+ * usb_attach() calls this function, but there shouldn't be anything else
+ * trying to explore this hub at that time.
+ */
 void
-usb_discover(void *v)
+usb_explore(void *v)
 {
 	struct usb_softc *sc = v;
 
-	DPRINTFN(2,("usb_discover\n"));
+	DPRINTFN(2,("%s: %s\n", __func__, sc->sc_dev.dv_xname));
 #ifdef USB_DEBUG
-	if (usb_noexplore > 1)
+	if (usb_noexplore)
 		return;
 #endif
-	/*
-	 * We need mutual exclusion while traversing the device tree,
-	 * but this is guaranteed since this function is only called
-	 * from the event thread for the controller.
-	 */
-	while (sc->sc_bus->needs_explore && !sc->sc_dying) {
-		sc->sc_bus->needs_explore = 0;
+
+	if (!sc->sc_bus->dying)
 		sc->sc_bus->root_hub->hub->explore(sc->sc_bus->root_hub);
+
+	if (sc->sc_bus->flags & USB_BUS_CONFIG_PENDING) {
+		DPRINTF(("%s: %s: first explore done\n", __func__,
+		    sc->sc_dev.dv_xname));
+		config_pending_decr();
+		sc->sc_bus->flags &= ~(USB_BUS_CONFIG_PENDING);
 	}
 }
 
 void
-usb_needs_explore(usbd_device_handle dev)
+usb_needs_explore(usbd_device_handle dev, int first_explore)
 {
-	DPRINTFN(2,("usb_needs_explore\n"));
-	dev->bus->needs_explore = 1;
-	wakeup(&dev->bus->needs_explore);
+	DPRINTFN(3,("%s: %s\n", dev->bus->usbctl->sc_dev.dv_xname, __func__));
+
+	if (!first_explore &&
+	    (dev->bus->flags & USB_BUS_CONFIG_PENDING)) {
+		DPRINTF(("%s: %s: not exploring before first explore\n",
+		    __func__, dev->bus->usbctl->sc_dev.dv_xname));
+		return;
+	}
+
+	usb_add_task(dev, &dev->bus->usbctl->sc_explore_task);
 }
 
 void
@@ -697,8 +756,7 @@ usb_needs_reattach(usbd_device_handle dev)
 {
 	DPRINTFN(2,("usb_needs_reattach\n"));
 	dev->powersrc->reattach = 1;
-	dev->bus->needs_explore = 1;
-	wakeup(&dev->bus->needs_explore);
+	usb_needs_explore(dev, 0);
 }
 
 /* Called at splusb() */
@@ -790,18 +848,20 @@ usb_activate(struct device *self, int act)
 {
 	struct usb_softc *sc = (struct usb_softc *)self;
 	usbd_device_handle dev = sc->sc_port.device;
-	int i, rv = 0;
+	int i, rv = 0, r;
 
 	switch (act) {
 	case DVACT_ACTIVATE:
 		break;
-
 	case DVACT_DEACTIVATE:
-		sc->sc_dying = 1;
+		sc->sc_bus->dying = 1;
 		if (dev != NULL && dev->cdesc != NULL &&
 		    dev->subdevs != NULL) {
-			for (i = 0; dev->subdevs[i]; i++)
-				rv |= config_deactivate(dev->subdevs[i]);
+			for (i = 0; dev->subdevs[i]; i++) {
+				r = config_deactivate(dev->subdevs[i]);
+				if (r)
+					rv = r;
+			}
 		}
 		break;
 	}
@@ -816,20 +876,13 @@ usb_detach(struct device *self, int flags)
 
 	DPRINTF(("usb_detach: start\n"));
 
-	sc->sc_dying = 1;
+	sc->sc_bus->dying = 1;
 
 	/* Make all devices disconnect. */
 	if (sc->sc_port.device != NULL)
 		usb_disconnect_port(&sc->sc_port, self);
 
-	/* Kill off event thread. */
-	if (sc->sc_event_thread != NULL) {
-		wakeup(&sc->sc_bus->needs_explore);
-		if (tsleep(sc, PWAIT, "usbdet", hz * 60))
-			printf("%s: event thread didn't die\n",
-			       sc->sc_dev.dv_xname);
-		DPRINTF(("usb_detach: event thread dead\n"));
-	}
+	usb_rem_wait_task(sc->sc_bus->root_hub, &sc->sc_explore_task);
 
 	usbd_finish();
 

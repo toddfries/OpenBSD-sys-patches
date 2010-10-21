@@ -1,4 +1,4 @@
-/* $OpenBSD: intc.c,v 1.2 2010/06/01 03:11:43 drahn Exp $ */
+/* $OpenBSD: intc.c,v 1.4 2010/09/20 06:33:48 matthew Exp $ */
 /*
  * Copyright (c) 2007,2009 Dale Rahn <drahn@openbsd.org>
  *
@@ -424,7 +424,7 @@ intc_intr_establish(int irqno, int level, int (*func)(void *),
 	struct intrhand *ih;
 
 	if (irqno < 0 || irqno > NIRQ)
-		panic("intc_intr_establish: bogus irqnumber %d: %s\n",
+		panic("intc_intr_establish: bogus irqnumber %d: %s",
 		     irqno, name);
 	psw = disable_interrupts(I32_bit);
 
@@ -442,8 +442,7 @@ intc_intr_establish(int irqno, int level, int (*func)(void *),
 	TAILQ_INSERT_TAIL(&intc_handler[irqno].iq_list, ih, ih_list);
 
 	if (name != NULL)
-		evcount_attach(&ih->ih_count, name, (void *)&ih->ih_irq,
-		    &evcount_intr);
+		evcount_attach(&ih->ih_count, name, &ih->ih_irq);
 
 #ifdef DEBUG_INTC
 	printf("intc_intr_establish irq %d level %d [%s]\n", irqno, level,

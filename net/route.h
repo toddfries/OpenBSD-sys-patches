@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.h,v 1.68 2010/05/07 13:33:16 claudio Exp $	*/
+/*	$OpenBSD: route.h,v 1.74 2010/10/11 11:41:08 claudio Exp $	*/
 /*	$NetBSD: route.h,v 1.9 1996/02/13 22:00:49 christos Exp $	*/
 
 /*
@@ -230,6 +230,7 @@ struct rt_msghdr {
 #define RTM_DELADDR	0xd	/* address being removed from iface */
 #define RTM_IFINFO	0xe	/* iface going up/down etc. */
 #define RTM_IFANNOUNCE	0xf	/* iface arrival/departure */
+#define RTM_DESYNC	0x10	/* route socket buffer overflow */
 
 #define RTV_MTU		0x1	/* init or lock _mtu */
 #define RTV_HOPCOUNT	0x2	/* init or lock _hopcount */
@@ -276,8 +277,11 @@ struct rt_msghdr {
  */
 #define ROUTE_MSGFILTER	1	/* bitmask to specifiy which types should be
 				   sent to the client. */
+#define ROUTE_TABLEFILTER 2	/* change routing table the socket is listening
+				   on, RTABLE_ANY listens on all tables. */
 
 #define ROUTE_FILTER(m)	(1 << (m))
+#define RTABLE_ANY	0xffffffff
 
 struct rt_addrinfo {
 	int	rti_addrs;
@@ -310,6 +314,7 @@ struct rttimer {
 	void            	(*rtt_func)(struct rtentry *, 
 						 struct rttimer *);
 	time_t          	rtt_time; /* When this timer was registered */
+	u_int			rtt_tableid;	/* routing table id of rtt_rt */
 };
 
 struct rttimer_queue {
@@ -372,7 +377,7 @@ void	 rt_setmetrics(u_long, struct rt_metrics *, struct rt_kmetrics *);
 void	 rt_getmetrics(struct rt_kmetrics *, struct rt_metrics *);
 int      rt_timer_add(struct rtentry *,
              void(*)(struct rtentry *, struct rttimer *),
-	     struct rttimer_queue *);
+	     struct rttimer_queue *, u_int);
 void	 rt_timer_init(void);
 struct rttimer_queue *
 	 rt_timer_queue_create(u_int);
@@ -400,7 +405,7 @@ int	 rtrequest1(int, struct rt_addrinfo *, u_int8_t, struct rtentry **,
 void	 rt_if_remove(struct ifnet *);
 #ifndef SMALL_KERNEL
 void	 rt_if_track(struct ifnet *);
-int	 rt_if_linkstate_change(struct radix_node *, void *);
+int	 rt_if_linkstate_change(struct radix_node *, void *, u_int);
 #endif
 int	 rtdeletemsg(struct rtentry *, u_int);
 

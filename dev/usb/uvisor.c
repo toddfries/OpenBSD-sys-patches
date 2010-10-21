@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvisor.c,v 1.39 2009/10/13 19:33:19 pirofti Exp $	*/
+/*	$OpenBSD: uvisor.c,v 1.42 2010/09/24 08:33:59 yuo Exp $	*/
 /*	$NetBSD: uvisor.c,v 1.21 2003/08/03 21:59:26 nathanw Exp $	*/
 
 /*
@@ -382,17 +382,18 @@ int
 uvisor_activate(struct device *self, int act)
 {
 	struct uvisor_softc *sc = (struct uvisor_softc *)self;
-	int rv = 0;
-	int i;
+	int i, rv = 0, r;
 
 	switch (act) {
 	case DVACT_ACTIVATE:
 		break;
-
 	case DVACT_DEACTIVATE:
 		for (i = 0; i < sc->sc_numcon; i++)
-			if (sc->sc_subdevs[i] != NULL)
-				rv = config_deactivate(sc->sc_subdevs[i]);
+			if (sc->sc_subdevs[i] != NULL) {
+				r = config_deactivate(sc->sc_subdevs[i]);
+				if (r)
+					rv = r;
+			}
 		sc->sc_dying = 1;
 		break;
 	}
@@ -407,7 +408,6 @@ uvisor_detach(struct device *self, int flags)
 	int i;
 
 	DPRINTF(("uvisor_detach: sc=%p flags=%d\n", sc, flags));
-	sc->sc_dying = 1;
 	for (i = 0; i < sc->sc_numcon; i++) {
 		if (sc->sc_subdevs[i] != NULL) {
 			rv |= config_detach(sc->sc_subdevs[i], flags);
@@ -425,7 +425,7 @@ usbd_status
 uvisor_init(struct uvisor_softc *sc, struct uvisor_connection_info *ci,
     struct uvisor_palm_connection_info *cpi)
 {
-	usbd_status err;
+	usbd_status err = 0;
 	usb_device_request_t req;
 	int actlen;
 	uWord avail;

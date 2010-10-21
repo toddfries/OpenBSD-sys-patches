@@ -1,4 +1,4 @@
-/*	$OpenBSD: cryptodev.c,v 1.71 2010/04/20 22:05:41 tedu Exp $	*/
+/*	$OpenBSD: cryptodev.c,v 1.74 2010/10/06 22:19:20 mikeb Exp $	*/
 
 /*
  * Copyright (c) 2001 Theo de Raadt
@@ -44,7 +44,6 @@
 #include <crypto/sha1.h>
 #include <crypto/rmd160.h>
 #include <crypto/cast.h>
-#include <crypto/skipjack.h>
 #include <crypto/blf.h>
 #include <crypto/cryptodev.h>
 #include <crypto/xform.h>
@@ -165,9 +164,6 @@ cryptof_ioctl(struct file *fp, u_long cmd, caddr_t data, struct proc *p)
 			break;
 		case CRYPTO_CAST_CBC:
 			txform = &enc_xform_cast5;
-			break;
-		case CRYPTO_SKIPJACK_CBC:
-			txform = &enc_xform_skipjack;
 			break;
 		case CRYPTO_AES_CBC:
 			txform = &enc_xform_rijndael128;
@@ -326,7 +322,7 @@ cryptodev_op(struct csession *cse, struct crypt_op *cop, struct proc *p)
 	cse->uio.uio_iov = cse->iovec;
 	bzero(&cse->iovec, sizeof(cse->iovec));
 	cse->uio.uio_iov[0].iov_len = cop->len;
-	cse->uio.uio_iov[0].iov_base = malloc(cop->len, M_XDATA, M_WAITOK);
+	cse->uio.uio_iov[0].iov_base = malloc(cop->len, M_XDATA, M_WAITOK); /* XXX dma accessible */
 	cse->uio.uio_resid = cse->uio.uio_iov[0].iov_len;
 
 	/* number of requests, not logical and */
@@ -651,18 +647,6 @@ cryptoclose(dev_t dev, int flag, int mode, struct proc *p)
 }
 
 int
-cryptoread(dev_t dev, struct uio *uio, int ioflag)
-{
-	return (EIO);
-}
-
-int
-cryptowrite(dev_t dev, struct uio *uio, int ioflag)
-{
-	return (EIO);
-}
-
-int
 cryptoioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 {
 	struct file *f;
@@ -692,12 +676,6 @@ cryptoioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 		break;
 	}
 	return (error);
-}
-
-int
-cryptopoll(dev_t dev, int events, struct proc *p)
-{
-	return (seltrue(dev, events, p));
 }
 
 struct csession *

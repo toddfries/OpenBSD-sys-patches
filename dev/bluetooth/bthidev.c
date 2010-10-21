@@ -1,4 +1,4 @@
-/*	$OpenBSD: bthidev.c,v 1.6 2009/11/21 13:05:32 guenther Exp $	*/
+/*	$OpenBSD: bthidev.c,v 1.8 2010/08/05 13:13:17 miod Exp $	*/
 /*	$NetBSD: bthidev.c,v 1.16 2008/08/06 15:01:23 plunky Exp $	*/
 
 /*-
@@ -95,7 +95,7 @@ struct bthidev_softc {
 void	bthidev_timeout(void *);
 int	bthidev_listen(struct bthidev_softc *);
 int	bthidev_connect(struct bthidev_softc *);
-int	bthidev_output(struct bthidev *, uint8_t *, int);
+int	bthidev_output(struct bthidev *, uint8_t *, int, int);
 void	bthidev_null(struct bthidev *, uint8_t *, int);
 
 /* autoconf(9) glue */
@@ -642,8 +642,8 @@ bthidev_ctl_disconnected(void *arg, int err)
 		sc->sc_flags &= ~BTHID_CONNECTING;
 
 		if (sc->sc_flags & BTHID_RECONNECT)
-			timeout_add(&sc->sc_reconnect,
-			    BTHID_RETRY_INTERVAL * hz);
+			timeout_add_sec(&sc->sc_reconnect,
+			    BTHID_RETRY_INTERVAL);
 		else
 			sc->sc_state = BTHID_WAIT_CTL;
 	} else {
@@ -674,8 +674,8 @@ bthidev_int_disconnected(void *arg, int err)
 		sc->sc_flags &= ~BTHID_CONNECTING;
 
 		if (sc->sc_flags & BTHID_RECONNECT)
-			timeout_add(&sc->sc_reconnect,
-			    BTHID_RETRY_INTERVAL * hz);
+			timeout_add_sec(&sc->sc_reconnect,
+			    BTHID_RETRY_INTERVAL);
 		else
 			sc->sc_state = BTHID_WAIT_CTL;
 	} else {
@@ -856,7 +856,7 @@ bthidev_null(struct bthidev *hidev, uint8_t *report, int len)
 }
 
 int
-bthidev_output(struct bthidev *hidev, uint8_t *report, int rlen)
+bthidev_output(struct bthidev *hidev, uint8_t *report, int rlen, int nolock)
 {
 	struct bthidev_softc *sc = (struct bthidev_softc *)hidev->sc_parent;
 	struct mbuf *m;
@@ -892,9 +892,11 @@ bthidev_output(struct bthidev *hidev, uint8_t *report, int rlen)
 	memcpy(mtod(m, uint8_t *) + 2, report, rlen);
 	m->m_pkthdr.len = m->m_len = rlen + 2;
 
-	mutex_enter(&bt_lock);
+	if (!nolock)
+		mutex_enter(&bt_lock);
 	err = l2cap_send(sc->sc_int, m);
-	mutex_exit(&bt_lock);
+	if (!nolock)
+		mutex_exit(&bt_lock);
 
 	return err;
 }

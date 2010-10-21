@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ether.c,v 1.86 2010/05/07 13:33:16 claudio Exp $	*/
+/*	$OpenBSD: if_ether.c,v 1.88 2010/07/22 00:41:55 deraadt Exp $	*/
 /*	$NetBSD: if_ether.c,v 1.31 1996/05/11 12:59:58 mycroft Exp $	*/
 
 /*
@@ -87,7 +87,7 @@ void in_arpinput(struct mbuf *);
 
 LIST_HEAD(, llinfo_arp) llinfo_arp;
 struct	ifqueue arpintrq = {0, 0, 0, 50};
-int	arp_inuse, arp_allocated, arp_intimer;
+int	arp_inuse, arp_allocated;
 int	arp_maxtries = 5;
 int	useloopback = 1;	/* use loopback interface for local traffic */
 int	arpinit_done;
@@ -105,7 +105,7 @@ struct ifnet *myip_ifp;
 void	db_print_sa(struct sockaddr *);
 void	db_print_ifa(struct ifaddr *);
 void	db_print_llinfo(caddr_t);
-int	db_show_radix_node(struct radix_node *, void *);
+int	db_show_radix_node(struct radix_node *, void *, u_int);
 #endif
 
 /*
@@ -1106,16 +1106,14 @@ db_print_llinfo(li)
  * Return non-zero error to abort walk.
  */
 int
-db_show_radix_node(rn, w)
-	struct radix_node *rn;
-	void *w;
+db_show_radix_node(struct radix_node *rn, void *w, u_int id)
 {
 	struct rtentry *rt = (struct rtentry *)rn;
 
 	db_printf("rtentry=%p", rt);
 
-	db_printf(" flags=0x%x refcnt=%d use=%ld expire=%ld\n",
-	    rt->rt_flags, rt->rt_refcnt, rt->rt_use, rt->rt_expire);
+	db_printf(" flags=0x%x refcnt=%d use=%ld expire=%ld rtableid %u\n",
+	    rt->rt_flags, rt->rt_refcnt, rt->rt_use, rt->rt_expire, id);
 
 	db_printf(" key="); db_print_sa(rt_key(rt));
 	db_printf(" mask="); db_print_sa(rt_mask(rt));
@@ -1142,7 +1140,7 @@ db_show_radix_node(rn, w)
  * Use this from ddb:  "call db_show_arptab"
  */
 int
-db_show_arptab()
+db_show_arptab(void)
 {
 	struct radix_node_head *rnh;
 	rnh = rt_gettable(AF_INET, 0);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpi.c,v 1.151 2010/06/15 04:30:26 dlg Exp $ */
+/*	$OpenBSD: mpi.c,v 1.165 2010/09/24 01:27:11 dlg Exp $ */
 
 /*
  * Copyright (c) 2005, 2006, 2009 David Gwynne <dlg@openbsd.org>
@@ -78,13 +78,6 @@ struct scsi_adapter mpi_switch = {
 	mpi_scsi_ioctl
 };
 
-struct scsi_device mpi_dev = {
-	NULL,
-	NULL,
-	NULL,
-	NULL
-};
-
 struct mpi_dmamem	*mpi_dmamem_alloc(struct mpi_softc *, size_t);
 void			mpi_dmamem_free(struct mpi_softc *,
 			    struct mpi_dmamem *);
@@ -110,6 +103,7 @@ int			mpi_ppr(struct mpi_softc *, struct scsi_link *,
 			    struct mpi_cfg_raid_physdisk *, int, int, int);
 int			mpi_inq(struct mpi_softc *, u_int16_t, int);
 
+int			mpi_cfg_sas(struct mpi_softc *);
 void			mpi_fc_info(struct mpi_softc *);
 
 void			mpi_timeout_xs(void *);
@@ -144,10 +138,15 @@ int			mpi_scsi_probe_virtual(struct scsi_link *);
 
 int			mpi_eventnotify(struct mpi_softc *);
 void			mpi_eventnotify_done(struct mpi_ccb *);
-void			mpi_eventack(struct mpi_softc *,
-			    struct mpi_msg_event_reply *);
+void			mpi_eventnotify_free(struct mpi_softc *,
+			    struct mpi_rcb *);
+void			mpi_eventack(void *, void *);
 void			mpi_eventack_done(struct mpi_ccb *);
-void			mpi_evt_sas(struct mpi_softc *, struct mpi_rcb *);
+int			mpi_evt_sas(struct mpi_softc *, struct mpi_rcb *);
+void			mpi_evt_sas_detach(void *, void *);
+void			mpi_evt_sas_detach_done(struct mpi_ccb *);
+void			mpi_evt_fc_rescan(struct mpi_softc *);
+void			mpi_fc_rescan(void *, void *);
 
 int			mpi_req_cfg_header(struct mpi_softc *, u_int8_t,
 			    u_int8_t, u_int32_t, int, void *);
@@ -212,6 +211,9 @@ mpi_attach(struct mpi_softc *sc)
 
 	printf("\n");
 
+	rw_init(&sc->sc_lock, "mpi_lock");
+	mtx_init(&sc->sc_evt_rescan_mtx, IPL_BIO);
+
 	/* disable interrupts */
 	mpi_write(sc, MPI_INTR_MASK,
 	    MPI_INTR_MASK_REPLY | MPI_INTR_MASK_DOORBELL);
@@ -262,11 +264,19 @@ mpi_attach(struct mpi_softc *sc)
 		goto free_replies;
 	}
 
-	if (sc->sc_porttype == MPI_PORTFACTS_PORTTYPE_SAS) {
+	switch (sc->sc_porttype) {
+	case MPI_PORTFACTS_PORTTYPE_SAS:
+		SIMPLEQ_INIT(&sc->sc_evt_scan_queue);
+		mtx_init(&sc->sc_evt_scan_mtx, IPL_BIO);
+		scsi_ioh_set(&sc->sc_evt_scan_handler, &sc->sc_iopool,
+		    mpi_evt_sas_detach, sc);
+		/* FALLTHROUGH */
+	case MPI_PORTFACTS_PORTTYPE_FC:
 		if (mpi_eventnotify(sc) != 0) {
 			printf("%s: unable to enable events\n", DEVNAME(sc));
 			goto free_replies;
 		}
+		break;
 	}
 
 	if (mpi_portenable(sc) != 0) {
@@ -285,12 +295,14 @@ mpi_attach(struct mpi_softc *sc)
 			goto free_replies;
 		mpi_squash_ppr(sc);
 		break;
+	case MPI_PORTFACTS_PORTTYPE_SAS:
+		if (mpi_cfg_sas(sc) != 0)
+			goto free_replies;
+		break;
 	case MPI_PORTFACTS_PORTTYPE_FC:
 		mpi_fc_info(sc);
 		break;
 	}
-
-	rw_init(&sc->sc_lock, "mpi_lock");
 
 	/* get raid pages */
 	mpi_get_raid(sc);
@@ -328,12 +340,14 @@ mpi_attach(struct mpi_softc *sc)
 #endif /* NBIO > 0 */
 
 	/* we should be good to go now, attach scsibus */
-	sc->sc_link.device = &mpi_dev;
 	sc->sc_link.adapter = &mpi_switch;
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = sc->sc_target;
 	sc->sc_link.adapter_buswidth = sc->sc_buswidth;
-	sc->sc_link.openings = sc->sc_maxcmds / sc->sc_buswidth;
+	if (sc->sc_porttype == MPI_PORTFACTS_PORTTYPE_SCSI)
+		sc->sc_link.openings = sc->sc_maxcmds / sc->sc_buswidth;
+	else
+		sc->sc_link.openings = sc->sc_maxcmds;
 	sc->sc_link.pool = &sc->sc_iopool;
 
 	bzero(&saa, sizeof(saa));
@@ -470,7 +484,7 @@ mpi_run_ppr(struct mpi_softc *sc)
 	}
 
 	for (i = 0; i < sc->sc_buswidth; i++) {
-		link = sc->sc_scsibus->sc_link[i][0];
+		link = scsi_get_link(sc->sc_scsibus, i, 0);
 		if (link == NULL)
 			continue;
 
@@ -744,7 +758,7 @@ mpi_inq(struct mpi_softc *sc, u_int16_t target, int physdisk)
 	inq.opcode = INQUIRY;
 	_lto2b(sizeof(struct scsi_inquiry_data), inq.length);
 
-	ccb = mpi_get_ccb(sc);
+	ccb = scsi_io_get(&sc->sc_iopool, SCSI_NOSLEEP);
 	if (ccb == NULL)
 		return (1);
 
@@ -798,9 +812,45 @@ mpi_inq(struct mpi_softc *sc, u_int16_t target, int physdisk)
 	if (ccb->ccb_rcb != NULL)
 		mpi_push_reply(sc, ccb->ccb_rcb);
 
-	mpi_put_ccb(sc, ccb);
+	scsi_io_put(&sc->sc_iopool, ccb);
 
 	return (0);
+}
+
+int
+mpi_cfg_sas(struct mpi_softc *sc)
+{
+	struct mpi_ecfg_hdr		ehdr;
+	struct mpi_cfg_sas_iou_pg1	*pg;
+	size_t				pagelen;
+	int				rv = 0;
+
+	if (mpi_ecfg_header(sc, MPI_CONFIG_REQ_EXTPAGE_TYPE_SAS_IO_UNIT, 1, 0,
+	    &ehdr) != 0)
+		return (EIO);
+
+	pagelen = letoh16(ehdr.ext_page_length) * 4;
+	pg = malloc(pagelen, M_TEMP, M_NOWAIT | M_ZERO);
+	if (pg == NULL)
+		return (ENOMEM);
+
+	if (mpi_ecfg_page(sc, 0, &ehdr, 1, pg, pagelen) != 0) {
+		rv = EIO;
+		goto out;
+	}
+
+	if (pg->max_sata_q_depth != 32) {
+		pg->max_sata_q_depth = 32;
+
+		if (mpi_ecfg_page(sc, 0, &ehdr, 0, pg, pagelen) != 0) {
+			rv = EIO;
+			goto out;
+		}
+	}
+
+out:
+	free(pg, M_TEMP);
+	return (rv);
 }
 
 void
@@ -880,7 +930,7 @@ mpi_reply(struct mpi_softc *sc, u_int32_t reg)
 			break;
 
 		default:
-			panic("%s: unsupported context reply\n",
+			panic("%s: unsupported context reply",
 			    DEVNAME(sc));
 		}
 	}
@@ -1224,7 +1274,7 @@ mpi_scsi_cmd(struct scsi_xfer *xs)
 		DNPRINTF(MPI_D_CMD, "%s: CBD too big %d\n",
 		    DEVNAME(sc), xs->cmdlen);
 		bzero(&xs->sense, sizeof(xs->sense));
-		xs->sense.error_code = SSD_ERRCODE_VALID | 0x70;
+		xs->sense.error_code = SSD_ERRCODE_VALID | SSD_ERRCODE_CURRENT;
 		xs->sense.flags = SKEY_ILLEGAL_REQUEST;
 		xs->sense.add_sense_code = 0x20;
 		xs->error = XS_SENSE;
@@ -2074,7 +2124,7 @@ mpi_portfacts(struct mpi_softc *sc)
 
 	DNPRINTF(MPI_D_MISC, "%s: mpi_portfacts\n", DEVNAME(sc));
 
-	ccb = mpi_get_ccb(sc);
+	ccb = scsi_io_get(&sc->sc_iopool, SCSI_NOSLEEP);
 	if (ccb == NULL) {
 		DNPRINTF(MPI_D_MISC, "%s: mpi_portfacts ccb_get\n",
 		    DEVNAME(sc));
@@ -2131,7 +2181,7 @@ mpi_portfacts(struct mpi_softc *sc)
 	mpi_push_reply(sc, ccb->ccb_rcb);
 	rv = 0;
 err:
-	mpi_put_ccb(sc, ccb);
+	scsi_io_put(&sc->sc_iopool, ccb);
 
 	return (rv);
 }
@@ -2156,12 +2206,12 @@ mpi_cfg_coalescing(struct mpi_softc *sc)
 	}
 
 	DNPRINTF(MPI_D_MISC, "%s: IOC page 1\n", DEVNAME(sc));
-	DNPRINTF(MPI_D_MISC, "%s:  flags: 0x08%x\n", DEVNAME(sc),
+	DNPRINTF(MPI_D_MISC, "%s:  flags: 0x%08x\n", DEVNAME(sc),
 	    letoh32(pg.flags));
 	DNPRINTF(MPI_D_MISC, "%s:  coalescing_timeout: %d\n", DEVNAME(sc),
 	    letoh32(pg.coalescing_timeout));
 	DNPRINTF(MPI_D_MISC, "%s:  coalescing_depth: %d pci_slot_num: %d\n",
-	    DEVNAME(sc), pg.coalescing_timeout, pg.pci_slot_num);
+	    DEVNAME(sc), pg.coalescing_depth, pg.pci_slot_num);
 
 	flags = letoh32(pg.flags);
 	if (!ISSET(flags, MPI_CFG_IOC_1_REPLY_COALESCING))
@@ -2183,12 +2233,18 @@ mpi_eventnotify(struct mpi_softc *sc)
 	struct mpi_ccb				*ccb;
 	struct mpi_msg_event_request		*enq;
 
-	ccb = mpi_get_ccb(sc);
+	ccb = scsi_io_get(&sc->sc_iopool, SCSI_NOSLEEP);
 	if (ccb == NULL) {
 		DNPRINTF(MPI_D_MISC, "%s: mpi_eventnotify ccb_get\n",
 		    DEVNAME(sc));
 		return (1);
 	}
+
+	sc->sc_evt_ccb = ccb;
+	SIMPLEQ_INIT(&sc->sc_evt_ack_queue);
+	mtx_init(&sc->sc_evt_ack_mtx, IPL_BIO);
+	scsi_ioh_set(&sc->sc_evt_ack_handler, &sc->sc_iopool,
+	    mpi_eventack, sc);
 
 	ccb->ccb_done = mpi_eventnotify_done;
 	enq = ccb->ccb_cmd;
@@ -2198,7 +2254,6 @@ mpi_eventnotify(struct mpi_softc *sc)
 	enq->event_switch = MPI_EVENT_SWITCH_ON;
 	enq->msg_context = htole32(ccb->ccb_id);
 
-	sc->sc_evt_ccb = ccb;
 	mpi_start(sc, ccb);
 	return (0);
 }
@@ -2207,7 +2262,8 @@ void
 mpi_eventnotify_done(struct mpi_ccb *ccb)
 {
 	struct mpi_softc			*sc = ccb->ccb_sc;
-	struct mpi_msg_event_reply		*enp = ccb->ccb_rcb->rcb_reply;
+	struct mpi_rcb				*rcb = ccb->ccb_rcb;
+	struct mpi_msg_event_reply		*enp = rcb->rcb_reply;
 
 	DNPRINTF(MPI_D_EVT, "%s: mpi_eventnotify_done\n", DEVNAME(sc));
 
@@ -2237,7 +2293,16 @@ mpi_eventnotify_done(struct mpi_ccb *ccb)
 		if (sc->sc_scsibus == NULL)
 			break;
 
-		mpi_evt_sas(sc, ccb->ccb_rcb);
+		if (mpi_evt_sas(sc, rcb) != 0) {
+			/* reply is freed later on */
+			return;
+		}
+		break;
+
+	case MPI_EVENT_RESCAN:
+		if (sc->sc_scsibus != NULL &&
+		    sc->sc_porttype == MPI_PORTFACTS_PORTTYPE_FC)
+			mpi_evt_fc_rescan(sc);
 		break;
 
 	default:
@@ -2246,19 +2311,24 @@ mpi_eventnotify_done(struct mpi_ccb *ccb)
 		break;
 	}
 
-	if (enp->ack_required)
-		mpi_eventack(sc, enp);
-	mpi_push_reply(sc, ccb->ccb_rcb);
-
-#if 0
-	/* fc hbas have a bad habit of setting this without meaning it. */
-	if ((enp->msg_flags & MPI_EVENT_FLAGS_REPLY_KEPT) == 0) {
-		mpi_put_ccb(sc, ccb);
-	}
-#endif
+	mpi_eventnotify_free(sc, rcb);
 }
 
 void
+mpi_eventnotify_free(struct mpi_softc *sc, struct mpi_rcb *rcb)
+{
+	struct mpi_msg_event_reply		*enp = rcb->rcb_reply;
+
+	if (enp->ack_required) {
+		mtx_enter(&sc->sc_evt_ack_mtx);
+		SIMPLEQ_INSERT_TAIL(&sc->sc_evt_ack_queue, rcb, rcb_link);
+		mtx_leave(&sc->sc_evt_ack_mtx);
+		scsi_ioh_add(&sc->sc_evt_ack_handler);
+	} else
+		mpi_push_reply(sc, rcb);
+}
+
+int
 mpi_evt_sas(struct mpi_softc *sc, struct mpi_rcb *rcb)
 {
 	struct mpi_evt_sas_change		*ch;
@@ -2269,7 +2339,7 @@ mpi_evt_sas(struct mpi_softc *sc, struct mpi_rcb *rcb)
 	ch = (struct mpi_evt_sas_change *)data;
 
 	if (ch->bus != 0)
-		return;
+		return (0);
 
 	switch (ch->reason) {
 	case MPI_EVT_SASCH_REASON_ADDED:
@@ -2282,12 +2352,14 @@ mpi_evt_sas(struct mpi_softc *sc, struct mpi_rcb *rcb)
 
 	case MPI_EVT_SASCH_REASON_NOT_RESPONDING:
 		scsi_activate(sc->sc_scsibus, ch->target, -1, DVACT_DEACTIVATE);
-		if (scsi_req_detach(sc->sc_scsibus, ch->target, -1,
-		    DETACH_FORCE) != 0) {
-			printf("%s: unable to request detach of %d\n",
-			    DEVNAME(sc), ch->target);
-		}
-		break;
+
+		mtx_enter(&sc->sc_evt_scan_mtx);
+		SIMPLEQ_INSERT_TAIL(&sc->sc_evt_scan_queue, rcb, rcb_link);
+		mtx_leave(&sc->sc_evt_scan_mtx);
+		scsi_ioh_add(&sc->sc_evt_scan_handler);
+
+		/* we'll handle event ack later on */
+		return (1);
 
 	case MPI_EVT_SASCH_REASON_SMART_DATA:
 	case MPI_EVT_SASCH_REASON_UNSUPPORTED:
@@ -2298,19 +2370,158 @@ mpi_evt_sas(struct mpi_softc *sc, struct mpi_rcb *rcb)
 		    "0x%02x\n", DEVNAME(sc), ch->reason);
 		break;
 	}
+
+	return (0);
 }
 
 void
-mpi_eventack(struct mpi_softc *sc, struct mpi_msg_event_reply *enp)
+mpi_evt_sas_detach(void *cookie, void *io)
 {
-	struct mpi_ccb				*ccb;
-	struct mpi_msg_eventack_request		*eaq;
+	struct mpi_softc			*sc = cookie;
+	struct mpi_ccb				*ccb = io;
+	struct mpi_rcb				*rcb, *next;
+	struct mpi_msg_event_reply		*enp;
+	struct mpi_evt_sas_change		*ch;
+	struct mpi_msg_scsi_task_request	*str;
 
-	ccb = mpi_get_ccb(sc);
-	if (ccb == NULL) {
-		DNPRINTF(MPI_D_EVT, "%s: mpi_eventack ccb_get\n", DEVNAME(sc));
+	DNPRINTF(MPI_D_EVT, "%s: event sas detach handler\n", DEVNAME(sc));
+
+	mtx_enter(&sc->sc_evt_scan_mtx);
+	rcb = SIMPLEQ_FIRST(&sc->sc_evt_scan_queue);
+	if (rcb != NULL) {
+		next = SIMPLEQ_NEXT(rcb, rcb_link);
+		SIMPLEQ_REMOVE_HEAD(&sc->sc_evt_scan_queue, rcb_link);
+	}
+	mtx_leave(&sc->sc_evt_scan_mtx);
+
+	if (rcb == NULL) {
+		scsi_io_put(&sc->sc_iopool, ccb);
 		return;
 	}
+
+	enp = rcb->rcb_reply;
+	ch = (struct mpi_evt_sas_change *)(enp + 1);
+
+	ccb->ccb_done = mpi_evt_sas_detach_done;
+	str = ccb->ccb_cmd;
+
+	str->target_id = ch->target;
+	str->bus = 0;
+	str->function = MPI_FUNCTION_SCSI_TASK_MGMT;
+
+	str->task_type = MPI_MSG_SCSI_TASK_TYPE_TARGET_RESET;
+
+	str->msg_context = htole32(ccb->ccb_id);
+
+	mpi_eventnotify_free(sc, rcb);
+
+	mpi_start(sc, ccb);
+
+	if (next != NULL)
+		scsi_ioh_add(&sc->sc_evt_scan_handler);
+}
+
+void
+mpi_evt_sas_detach_done(struct mpi_ccb *ccb)
+{
+	struct mpi_softc			*sc = ccb->ccb_sc;
+	struct mpi_msg_scsi_task_reply		*r = ccb->ccb_rcb->rcb_reply;
+
+	if (scsi_req_detach(sc->sc_scsibus, r->target_id, -1,
+	    DETACH_FORCE) != 0) {
+		printf("%s: unable to request detach of %d\n",
+		    DEVNAME(sc), r->target_id);
+	}
+
+	mpi_push_reply(sc, ccb->ccb_rcb);
+	scsi_io_put(&sc->sc_iopool, ccb);
+}
+
+void
+mpi_evt_fc_rescan(struct mpi_softc *sc)
+{
+	int					queue = 1;
+
+	mtx_enter(&sc->sc_evt_rescan_mtx);
+	if (sc->sc_evt_rescan_sem)
+		queue = 0;
+	else
+		sc->sc_evt_rescan_sem = 1;
+	mtx_leave(&sc->sc_evt_rescan_mtx);
+
+	if (queue) {
+		workq_queue_task(NULL, &sc->sc_evt_rescan, 0,
+		    mpi_fc_rescan, sc, NULL);
+	}
+}
+
+void
+mpi_fc_rescan(void *xsc, void *xarg)
+{
+	struct mpi_softc			*sc = xsc;
+	struct mpi_cfg_hdr			hdr;
+	struct mpi_cfg_fc_device_pg0		pg;
+	struct scsi_link			*link;
+	u_int32_t				id;
+	int					i;
+
+	mtx_enter(&sc->sc_evt_rescan_mtx);
+	sc->sc_evt_rescan_sem = 0;
+	mtx_leave(&sc->sc_evt_rescan_mtx);
+
+	for (i = 0; i < sc->sc_buswidth; i++) {
+		id = MPI_PAGE_ADDRESS_FC_BTID | i;
+
+		if (mpi_req_cfg_header(sc, MPI_CONFIG_REQ_PAGE_TYPE_FC_DEV, 0,
+		    id, 0, &hdr) != 0) {
+			printf("%s: header get for rescan of %d failed\n",
+			    DEVNAME(sc), i);
+			return;
+		}
+
+		link = scsi_get_link(sc->sc_scsibus, i, 0);
+
+		memset(&pg, 0, sizeof(pg));
+		if (mpi_req_cfg_page(sc, id, 0, &hdr, 1,
+		    &pg, sizeof(pg)) == 0) {
+			if (link == NULL)
+				scsi_probe_target(sc->sc_scsibus, i);
+		} else {
+			if (link != NULL) {
+				scsi_activate(sc->sc_scsibus, i, -1,
+				    DVACT_DEACTIVATE);
+				scsi_detach_target(sc->sc_scsibus, i,
+				    DETACH_FORCE);
+			}
+		}
+	}
+}
+
+void
+mpi_eventack(void *cookie, void *io)
+{
+	struct mpi_softc			*sc = cookie;
+	struct mpi_ccb				*ccb = io;
+	struct mpi_rcb				*rcb, *next;
+	struct mpi_msg_event_reply		*enp;
+	struct mpi_msg_eventack_request		*eaq;
+
+	DNPRINTF(MPI_D_EVT, "%s: event ack\n", DEVNAME(sc));
+
+	mtx_enter(&sc->sc_evt_ack_mtx);
+	rcb = SIMPLEQ_FIRST(&sc->sc_evt_ack_queue);
+	if (rcb != NULL) {
+		next = SIMPLEQ_NEXT(rcb, rcb_link);
+		SIMPLEQ_REMOVE_HEAD(&sc->sc_evt_ack_queue, rcb_link);
+	}
+	mtx_leave(&sc->sc_evt_ack_mtx);
+
+	if (rcb == NULL) {
+		scsi_io_put(&sc->sc_iopool, ccb);
+		return;
+	}
+
+	enp = rcb->rcb_reply;
 
 	ccb->ccb_done = mpi_eventack_done;
 	eaq = ccb->ccb_cmd;
@@ -2321,8 +2532,11 @@ mpi_eventack(struct mpi_softc *sc, struct mpi_msg_event_reply *enp)
 	eaq->event = enp->event;
 	eaq->event_context = enp->event_context;
 
+	mpi_push_reply(sc, rcb);
 	mpi_start(sc, ccb);
-	return;
+
+	if (next != NULL)
+		scsi_ioh_add(&sc->sc_evt_ack_handler);
 }
 
 void
@@ -2333,7 +2547,7 @@ mpi_eventack_done(struct mpi_ccb *ccb)
 	DNPRINTF(MPI_D_EVT, "%s: event ack done\n", DEVNAME(sc));
 
 	mpi_push_reply(sc, ccb->ccb_rcb);
-	mpi_put_ccb(sc, ccb);
+	scsi_io_put(&sc->sc_iopool, ccb);
 }
 
 int
@@ -2345,7 +2559,7 @@ mpi_portenable(struct mpi_softc *sc)
 
 	DNPRINTF(MPI_D_MISC, "%s: mpi_portenable\n", DEVNAME(sc));
 
-	ccb = mpi_get_ccb(sc);
+	ccb = scsi_io_get(&sc->sc_iopool, SCSI_NOSLEEP);
 	if (ccb == NULL) {
 		DNPRINTF(MPI_D_MISC, "%s: mpi_portenable ccb_get\n",
 		    DEVNAME(sc));
@@ -2371,7 +2585,7 @@ mpi_portenable(struct mpi_softc *sc)
 	} else
 		mpi_push_reply(sc, ccb->ccb_rcb);
 
-	mpi_put_ccb(sc, ccb);
+	scsi_io_put(&sc->sc_iopool, ccb);
 
 	return (rv);
 }
@@ -2400,7 +2614,7 @@ mpi_fwupload(struct mpi_softc *sc)
 		return (1);
 	}
 
-	ccb = mpi_get_ccb(sc);
+	ccb = scsi_io_get(&sc->sc_iopool, SCSI_NOSLEEP);
 	if (ccb == NULL) {
 		DNPRINTF(MPI_D_MISC, "%s: mpi_fwupload ccb_get\n",
 		    DEVNAME(sc));
@@ -2431,14 +2645,14 @@ mpi_fwupload(struct mpi_softc *sc)
 	}
 
 	if (ccb->ccb_rcb == NULL)
-		panic("%s: unable to do fw upload\n", DEVNAME(sc));
+		panic("%s: unable to do fw upload", DEVNAME(sc));
 	upp = ccb->ccb_rcb->rcb_reply;
 
 	if (letoh16(upp->ioc_status) != MPI_IOCSTATUS_SUCCESS)
 		rv = 1;
 
 	mpi_push_reply(sc, ccb->ccb_rcb);
-	mpi_put_ccb(sc, ccb);
+	scsi_io_put(&sc->sc_iopool, ccb);
 
 	return (rv);
 
@@ -2452,7 +2666,6 @@ mpi_get_raid(struct mpi_softc *sc)
 {
 	struct mpi_cfg_hdr		hdr;
 	struct mpi_cfg_ioc_pg2		*vol_page;
-	struct mpi_cfg_raid_vol		*vol_list;
 	size_t				pagelen;
 	u_int32_t			capabilities;
 
@@ -2471,7 +2684,6 @@ mpi_get_raid(struct mpi_softc *sc)
 		    "space for ioc config page 2\n", DEVNAME(sc));
 		return;
 	}
-	vol_list = (struct mpi_cfg_raid_vol *)(vol_page + 1);
 
 	if (mpi_cfg_page(sc, 0, &hdr, 1, vol_page, pagelen) != 0) {
 		DNPRINTF(MPI_D_RAID, "%s: mpi_get_raid unable to fetch IOC "
@@ -2555,7 +2767,7 @@ mpi_req_cfg_header(struct mpi_softc *sc, u_int8_t type, u_int8_t number,
 		mpi_wait(sc, ccb);
 
 	if (ccb->ccb_rcb == NULL)
-		panic("%s: unable to fetch config header\n", DEVNAME(sc));
+		panic("%s: unable to fetch config header", DEVNAME(sc));
 	cp = ccb->ccb_rcb->rcb_reply;
 
 	DNPRINTF(MPI_D_MISC, "%s:  action: 0x%02x msg_length: %d function: "
@@ -2671,7 +2883,7 @@ mpi_req_cfg_page(struct mpi_softc *sc, u_int32_t address, int flags,
 		mpi_wait(sc, ccb);
 
 	if (ccb->ccb_rcb == NULL) {
-		mpi_put_ccb(sc, ccb);
+		scsi_io_put(&sc->sc_iopool, ccb);
 		return (1);
 	}
 	cp = ccb->ccb_rcb->rcb_reply;
@@ -3034,7 +3246,7 @@ mpi_ioctl_vol(struct mpi_softc *sc, struct bioc_vol *bv)
 	bv->bv_nodisk = rpg0->num_phys_disks;
 
 	for (i = 0, vol = -1; i < sc->sc_buswidth; i++) {
-		link = sc->sc_scsibus->sc_link[i][0];
+		link = scsi_get_link(sc->sc_scsibus, i, 0);
 		if (link == NULL)
 			continue;
 
@@ -3147,7 +3359,7 @@ mpi_create_sensors(struct mpi_softc *sc)
 
 	/* count volumes */
 	for (i = 0, vol = 0; i < sc->sc_buswidth; i++) {
-		link = sc->sc_scsibus->sc_link[i][0];
+		link = scsi_get_link(sc->sc_scsibus, i, 0);
 		if (link == NULL)
 			continue;
 		/* skip if not a virtual disk */
@@ -3168,7 +3380,7 @@ mpi_create_sensors(struct mpi_softc *sc)
 	    sizeof(sc->sc_sensordev.xname));
 
 	for (i = 0, vol= 0; i < sc->sc_buswidth; i++) {
-		link = sc->sc_scsibus->sc_link[i][0];
+		link = scsi_get_link(sc->sc_scsibus, i, 0);
 		if (link == NULL)
 			continue;
 		/* skip if not a virtual disk */
@@ -3208,7 +3420,7 @@ mpi_refresh_sensors(void *arg)
 	rw_enter_write(&sc->sc_lock);
 
 	for (i = 0, vol = 0; i < sc->sc_buswidth; i++) {
-		link = sc->sc_scsibus->sc_link[i][0];
+		link = scsi_get_link(sc->sc_scsibus, i, 0);
 		if (link == NULL)
 			continue;
 		/* skip if not a virtual disk */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: promcons.c,v 1.13 2010/04/12 12:57:51 tedu Exp $	*/
+/*	$OpenBSD: promcons.c,v 1.16 2010/07/02 17:27:01 nicm Exp $	*/
 /*	$NetBSD: promcons.c,v 1.5 1996/11/13 22:20:55 cgd Exp $	*/
 
 /*
@@ -34,7 +34,6 @@
 #include <sys/selinfo.h>
 #include <sys/tty.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/conf.h>
 #include <sys/file.h>
 #include <sys/uio.h>
@@ -75,7 +74,7 @@ promopen(dev, flag, mode, p)
 	s = spltty();
 
 	if (prom_tty[unit] == NULL) {
-		tp = prom_tty[unit] = ttymalloc();
+		tp = prom_tty[unit] = ttymalloc(0);
 	} else
 		tp = prom_tty[unit];
 
@@ -185,13 +184,7 @@ promstart(tp)
 	s = spltty();
 	if (tp->t_state & (TS_TTSTOP | TS_BUSY))
 		goto out;
-	if (tp->t_outq.c_cc <= tp->t_lowat) {
-		if (tp->t_state & TS_ASLEEP) {
-			tp->t_state &= ~TS_ASLEEP;
-			wakeup((caddr_t)&tp->t_outq);
-		}
-		selwakeup(&tp->t_wsel);
-	}
+	ttwakeupwr(tp);
 	tp->t_state |= TS_BUSY;
 	while (tp->t_outq.c_cc != 0)
 		promcnputc(tp->t_dev, getc(&tp->t_outq));

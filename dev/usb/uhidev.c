@@ -1,4 +1,4 @@
-/*	$OpenBSD: uhidev.c,v 1.37 2009/11/23 19:26:54 yuo Exp $	*/
+/*	$OpenBSD: uhidev.c,v 1.40 2010/09/24 08:33:59 yuo Exp $	*/
 /*	$NetBSD: uhidev.c,v 1.14 2003/03/11 16:44:00 augustss Exp $	*/
 
 /*
@@ -336,17 +336,19 @@ int
 uhidev_activate(struct device *self, int act)
 {
 	struct uhidev_softc *sc = (struct uhidev_softc *)self;
-	int i, rv = 0;
+	int i, rv = 0, r;
 
 	switch (act) {
 	case DVACT_ACTIVATE:
 		break;
-
 	case DVACT_DEACTIVATE:
 		for (i = 0; i < sc->sc_nrepid; i++)
-			if (sc->sc_subdevs[i] != NULL)
-				rv |= config_deactivate(
-					&sc->sc_subdevs[i]->sc_dev);
+			if (sc->sc_subdevs[i] != NULL) {
+				r = config_deactivate(
+				    &sc->sc_subdevs[i]->sc_dev);
+				if (r)
+					rv = r;
+			}
 		sc->sc_dying = 1;
 		break;
 	}
@@ -361,7 +363,6 @@ uhidev_detach(struct device *self, int flags)
 
 	DPRINTF(("uhidev_detach: sc=%p flags=%d\n", sc, flags));
 
-	sc->sc_dying = 1;
 	if (sc->sc_ipipe != NULL)
 		usbd_abort_pipe(sc->sc_ipipe);
 
@@ -659,4 +660,73 @@ uhidev_write(struct uhidev_softc *sc, void *data, int len)
 #endif
 	return usbd_intr_transfer(sc->sc_owxfer, sc->sc_opipe, 0,
 	    USBD_NO_TIMEOUT, data, &len, "uhidevwi");
+}
+
+int
+uhidev_ioctl(struct uhidev *sc, u_long cmd, caddr_t addr, int flag,
+    struct proc *p)
+{
+	struct usb_ctl_report_desc *rd;
+	struct usb_ctl_report *re;
+	int size, extra;
+	usbd_status err;
+	void *desc;
+
+	switch (cmd) {
+	case USB_GET_REPORT_DESC:
+		uhidev_get_report_desc(sc->sc_parent, &desc, &size);
+		rd = (struct usb_ctl_report_desc *)addr;
+		size = min(size, sizeof rd->ucrd_data);
+		rd->ucrd_size = size;
+		memcpy(rd->ucrd_data, desc, size);
+		break;
+	case USB_GET_REPORT:
+		re = (struct usb_ctl_report *)addr;
+		switch (re->ucr_report) {
+		case UHID_INPUT_REPORT:
+			size = sc->sc_isize;
+			break;
+		case UHID_OUTPUT_REPORT:
+			size = sc->sc_osize;
+			break;
+		case UHID_FEATURE_REPORT:
+			size = sc->sc_fsize;
+			break;
+		default:
+			return EINVAL;
+		}
+		extra = sc->sc_report_id != 0;
+		err = uhidev_get_report(sc, re->ucr_report, re->ucr_data,
+		    size + extra);
+		if (extra)
+			memcpy(re->ucr_data, re->ucr_data + 1, size);
+		if (err)
+			return EIO;
+		break;
+	case USB_SET_REPORT:
+		re = (struct usb_ctl_report *)addr;
+		switch (re->ucr_report) {
+		case UHID_INPUT_REPORT:
+			size = sc->sc_isize;
+			break;
+		case UHID_OUTPUT_REPORT:
+			size = sc->sc_osize;
+			break;
+		case UHID_FEATURE_REPORT:
+			size = sc->sc_fsize;
+			break;
+		default:
+			return EINVAL;
+		}
+		err = uhidev_set_report(sc, re->ucr_report, re->ucr_data, size);
+		if (err)
+			return EIO;
+		break;
+	case USB_GET_REPORT_ID:
+		*(int *)addr = sc->sc_report_id;
+		break;
+	default:
+		return -1;
+	}
+	return 0;
 }

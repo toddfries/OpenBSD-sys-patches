@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_fxp_pci.c,v 1.52 2009/10/15 17:54:56 deraadt Exp $	*/
+/*	$OpenBSD: if_fxp_pci.c,v 1.56 2010/08/27 18:25:47 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1995, David Greenman
@@ -46,6 +46,7 @@
 #include <sys/socket.h>
 #include <sys/timeout.h>
 #include <sys/syslog.h>
+#include <sys/workq.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
@@ -90,7 +91,7 @@ struct fxp_pci_softc {
 
 struct cfattach fxp_pci_ca = {
 	sizeof(struct fxp_pci_softc), fxp_pci_match, fxp_pci_attach,
-	    fxp_pci_detach
+	fxp_pci_detach, fxp_activate
 };
 
 const struct pci_matchid fxp_pci_devices[] = {

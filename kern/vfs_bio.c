@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_bio.c,v 1.121 2010/02/05 12:24:32 jsing Exp $	*/
+/*	$OpenBSD: vfs_bio.c,v 1.126 2010/08/03 06:30:19 deraadt Exp $	*/
 /*	$NetBSD: vfs_bio.c,v 1.44 1996/06/11 11:15:36 pk Exp $	*/
 
 /*
@@ -873,13 +873,18 @@ incore(struct vnode *vp, daddr64_t blkno)
 {
 	struct buf *bp;
 	struct buf b;
+	int s;
+
+	s = splbio();
 
 	/* Search buf lookup tree */
 	b.b_lblkno = blkno;
 	bp = RB_FIND(buf_rb_bufs, &vp->v_bufs_tree, &b);
-	if (bp && !ISSET(bp->b_flags, B_INVAL))
-		return(bp);
-	return(NULL);
+	if (bp != NULL && ISSET(bp->b_flags, B_INVAL))
+		bp = NULL;
+
+	splx(s);
+	return (bp);
 }
 
 /*
@@ -908,11 +913,10 @@ getblk(struct vnode *vp, daddr64_t blkno, int size, int slpflag, int slptimeo)
 	 * the block until the write is finished.
 	 */
 start:
+	s = splbio();
 	b.b_lblkno = blkno;
 	bp = RB_FIND(buf_rb_bufs, &vp->v_bufs_tree, &b);
 	if (bp != NULL) {
-
-		s = splbio();
 		if (ISSET(bp->b_flags, B_BUSY)) {
 			SET(bp->b_flags, B_WANTED);
 			error = tsleep(bp, slpflag | (PRIBIO + 1), "getblk",
@@ -931,8 +935,8 @@ start:
 			splx(s);
 			return (bp);
 		}
-		splx(s);
 	}
+	splx(s);
 
 	if ((bp = buf_get(vp, blkno, size)) == NULL)
 		goto start;
@@ -1202,6 +1206,9 @@ biodone(struct buf *bp)
 	if (ISSET(bp->b_flags, B_DONE))
 		panic("biodone already");
 	SET(bp->b_flags, B_DONE);		/* note that it's done */
+
+	if (bp->b_bq)
+		bufq_done(bp->b_bq, bp);
 
 	if (LIST_FIRST(&bp->b_dep) != NULL)
 		buf_complete(bp);

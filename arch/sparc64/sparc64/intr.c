@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.c,v 1.35 2010/04/16 22:35:24 kettenis Exp $	*/
+/*	$OpenBSD: intr.c,v 1.38 2010/09/27 17:39:43 deraadt Exp $	*/
 /*	$NetBSD: intr.c,v 1.39 2001/07/19 23:38:11 eeh Exp $ */
 
 /*
@@ -48,8 +48,6 @@
 
 #include <dev/cons.h>
 
-#include <net/netisr.h>
-
 #include <machine/atomic.h>
 #include <machine/cpu.h>
 #include <machine/ctlreg.h>
@@ -69,7 +67,6 @@ struct intrhand *intrlev[MAXINTNUM];
 
 void	strayintr(const struct trapframe64 *, int);
 int	softintr(void *);
-int	softnet(void *);
 int	intr_list_handler(void *);
 void	intr_ack(struct intrhand *);
 
@@ -124,37 +121,6 @@ strayintr(fp, vectored)
  *	Network software interrupt
  *	Soft clock interrupt
  */
-
-int netisr;
-
-int
-softnet(fp)
-	void *fp;
-{
-	int n;
-	
-	while ((n = netisr) != 0) {
-		atomic_clearbits_int(&netisr, n);
-	
-#define DONETISR(bit, fn)						\
-		do {							\
-			if (n & (1 << bit))				\
-				fn();					\
-		} while (0)
-
-#include <net/netisr_dispatch.h>
-
-#undef DONETISR
-	}
-	return (1);
-}
-
-struct intrhand soft01net = { softnet, NULL, 1 };
-
-void 
-setsoftnet() {
-	send_softint(-1, IPL_SOFTNET, &soft01net);
-}
 
 /*
  * PCI devices can share interrupts so we need to have
@@ -228,9 +194,9 @@ intr_establish(int level, struct intrhand *ih)
 		panic("intr_establish: bad intr number %x", ih->ih_number);
 
 	if (strlen(ih->ih_name) == 0)
-		evcount_attach(&ih->ih_count, "unknown", NULL, &evcount_intr);
+		evcount_attach(&ih->ih_count, "unknown", NULL);
 	else
-		evcount_attach(&ih->ih_count, ih->ih_name, NULL, &evcount_intr);
+		evcount_attach(&ih->ih_count, ih->ih_name, NULL);
 
 	q = intrlev[ih->ih_number];
 	if (q == NULL) {
@@ -312,7 +278,7 @@ softintr_establish(level, fun, arg)
 	if (level == IPL_TTY)
 		level = IPL_SOFTTTY;
 
-	ih = malloc(sizeof(*ih), M_DEVBUF, M_ZERO);
+	ih = malloc(sizeof(*ih), M_DEVBUF, M_WAITOK | M_ZERO);
 	ih->ih_fun = (int (*)(void *))fun;	/* XXX */
 	ih->ih_arg = arg;
 	ih->ih_pil = level;
@@ -369,14 +335,14 @@ void sparc64_intunlock(struct trapframe64 *);
 void
 sparc64_intlock(struct trapframe64 *tf)
 {
-	if(tf->tf_pil < PIL_SCHED)
+	if (tf->tf_pil < PIL_SCHED && tf->tf_pil != PIL_CLOCK)
 		__mp_lock(&kernel_lock);
 }
 
 void
 sparc64_intunlock(struct trapframe64 *tf)
 {
-	if(tf->tf_pil < PIL_SCHED)
+	if (tf->tf_pil < PIL_SCHED && tf->tf_pil != PIL_CLOCK)
 		__mp_unlock(&kernel_lock);
 }
 

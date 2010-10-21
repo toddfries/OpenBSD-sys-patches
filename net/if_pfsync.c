@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pfsync.c,v 1.147 2010/05/24 02:11:04 dlg Exp $	*/
+/*	$OpenBSD: if_pfsync.c,v 1.156 2010/09/27 23:45:48 dlg Exp $	*/
 
 /*
  * Copyright (c) 2002 Michael Shalayeff
@@ -46,6 +46,7 @@
 #include <sys/proc.h>
 #include <sys/systm.h>
 #include <sys/time.h>
+#include <sys/malloc.h>
 #include <sys/mbuf.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
@@ -278,6 +279,7 @@ pfsyncattach(int npfsync)
 {
 	if_clone_attach(&pfsync_cloner);
 }
+
 int
 pfsync_clone_create(struct if_clone *ifc, int unit)
 {
@@ -290,9 +292,7 @@ pfsync_clone_create(struct if_clone *ifc, int unit)
 
 	pfsync_sync_ok = 1;
 
-	sc = malloc(sizeof(*pfsyncif), M_DEVBUF, M_NOWAIT | M_ZERO);
-	if (sc == NULL)
-		return (ENOMEM);
+	sc = malloc(sizeof(*pfsyncif), M_DEVBUF, M_WAITOK | M_ZERO);
 
 	for (q = 0; q < PFSYNC_S_COUNT; q++)
 		TAILQ_INIT(&sc->sc_qs[q]);
@@ -517,7 +517,7 @@ pfsync_state_import(struct pfsync_state *sp, u_int8_t flags)
 	if (flags & PFSYNC_SI_IOCTL)
 		pool_flags = PR_WAITOK | PR_LIMITFAIL | PR_ZERO;
 	else
-		pool_flags = PR_LIMITFAIL | PR_ZERO;
+		pool_flags = PR_NOWAIT | PR_LIMITFAIL | PR_ZERO;
 
 	if ((st = pool_get(&pf_state_pl, pool_flags)) == NULL)
 		goto cleanup;
@@ -1215,9 +1215,10 @@ pfsync_in_tdb(struct pfsync_pkt *pkt, caddr_t buf, int len, int count)
 	int s;
 
 	s = splsoftnet();
-	for (i = 0; i < count; i++)
+	for (i = 0; i < count; i++) {
 		tp = (struct pfsync_tdb *)(buf + len * i);
 		pfsync_update_net_tdb(tp);
+	}
 	splx(s);
 #endif
 
@@ -1239,7 +1240,7 @@ pfsync_update_net_tdb(struct pfsync_tdb *pt)
 		goto bad;
 
 	s = spltdb();
-	tdb = gettdb(pt->spi, &pt->dst, pt->sproto);
+	tdb = gettdb(ntohs(pt->rdomain), pt->spi, &pt->dst, pt->sproto);
 	if (tdb) {
 		pt->rpl = ntohl(pt->rpl);
 		pt->cur_bytes = betoh64(pt->cur_bytes);
@@ -2047,7 +2048,7 @@ pfsync_q_ins(struct pf_state *st, int q)
 
 	KASSERT(st->sync_state == PFSYNC_S_NONE);
 
-#if 1 || defined(PFSYNC_DEBUG)
+#if defined(PFSYNC_DEBUG)
 	if (sc->sc_len < PFSYNC_MINPKT)
 		panic("pfsync pkt len is too low %d", sc->sc_len);
 #endif
@@ -2162,6 +2163,7 @@ pfsync_out_tdb(struct tdb *t, void *buf)
 	    RPL_INCR : 0));
 	ut->cur_bytes = htobe64(t->tdb_cur_bytes);
 	ut->sproto = t->tdb_sproto;
+	ut->rdomain = htons(t->tdb_rdomain);
 }
 
 void
@@ -2169,16 +2171,20 @@ pfsync_bulk_start(void)
 {
 	struct pfsync_softc *sc = pfsyncif;
 
-	sc->sc_ureq_received = time_uptime;
-
-	if (sc->sc_bulk_next == NULL)
-		sc->sc_bulk_next = TAILQ_FIRST(&state_list);
-	sc->sc_bulk_last = sc->sc_bulk_next;
-
 	DPFPRINTF(LOG_INFO, "received bulk update request");
 
-	pfsync_bulk_status(PFSYNC_BUS_START);
-	timeout_add(&sc->sc_bulk_tmo, 0);
+	if (TAILQ_EMPTY(&state_list))
+		pfsync_bulk_status(PFSYNC_BUS_END);
+	else {
+		sc->sc_ureq_received = time_uptime;
+
+		if (sc->sc_bulk_next == NULL)
+			sc->sc_bulk_next = TAILQ_FIRST(&state_list);
+		sc->sc_bulk_last = sc->sc_bulk_next;
+
+		pfsync_bulk_status(PFSYNC_BUS_START);
+		timeout_add(&sc->sc_bulk_tmo, 0);
+	}
 }
 
 void
@@ -2193,7 +2199,7 @@ pfsync_bulk_update(void *arg)
 
 	st = sc->sc_bulk_next;
 
-	while (st != sc->sc_bulk_last) {
+	for (;;) {
 		if (st->sync_state == PFSYNC_S_NONE &&
 		    st->timeout < PFTM_MAX &&
 		    st->pfsync_time <= sc->sc_ureq_received) {
@@ -2205,19 +2211,23 @@ pfsync_bulk_update(void *arg)
 		if (st == NULL)
 			st = TAILQ_FIRST(&state_list);
 
-		if (i > 0 && TAILQ_EMPTY(&sc->sc_qs[PFSYNC_S_UPD])) {
+		if (st == sc->sc_bulk_last) {
+			/* we're done */
+			sc->sc_bulk_next = NULL;
+			sc->sc_bulk_last = NULL;
+			pfsync_bulk_status(PFSYNC_BUS_END);
+			break;
+		}
+
+		if (i > 1 && (sc->sc_if.if_mtu - sc->sc_len) <
+		    sizeof(struct pfsync_state)) {
+			/* we've filled a packet */
 			sc->sc_bulk_next = st;
 			timeout_add(&sc->sc_bulk_tmo, 1);
-			goto out;
+			break;
 		}
 	}
 
-	/* we're done */
-	sc->sc_bulk_next = NULL;
-	sc->sc_bulk_last = NULL;
-	pfsync_bulk_status(PFSYNC_BUS_END);
-
-out:
 	splx(s);
 }
 
@@ -2248,6 +2258,9 @@ void
 pfsync_bulk_fail(void *arg)
 {
 	struct pfsync_softc *sc = arg;
+	int s;
+
+	s = splsoftnet();
 
 	if (sc->sc_bulk_tries++ < PFSYNC_MAX_BULKTRIES) {
 		/* Try again */
@@ -2265,6 +2278,8 @@ pfsync_bulk_fail(void *arg)
 		pfsync_sync_ok = 1;
 		DPFPRINTF(LOG_ERR, "failed to receive bulk update");
 	}
+
+	splx(s);
 }
 
 void
@@ -2300,13 +2315,12 @@ pfsync_state_in_use(struct pf_state *st)
 	if (sc == NULL)
 		return (0);
 
-	if (st->sync_state != PFSYNC_S_NONE)
+	if (st->sync_state != PFSYNC_S_NONE ||
+	    st == sc->sc_bulk_next ||
+	    st == sc->sc_bulk_last)
 		return (1);
 
-	if (sc->sc_bulk_next == NULL && sc->sc_bulk_last == NULL)
-		return (0);
-
-	return (1);
+	return (0);
 }
 
 void

@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.32 2010/06/08 12:33:30 jsing Exp $	*/
+/*	$OpenBSD: intr.h,v 1.34 2010/07/02 00:00:45 jsing Exp $	*/
 
 /*
  * Copyright (c) 2002-2004 Michael Shalayeff
@@ -57,13 +57,12 @@
 
 #ifdef MULTIPROCESSOR
 #define	HPPA_IPI_NOP		0
-
-#define	HPPA_NIPI		1
+#define	HPPA_IPI_FPU_SAVE	1
+#define	HPPA_IPI_FPU_FLUSH	2
+#define	HPPA_NIPI		3
 #endif
 
 #if !defined(_LOCORE) && defined(_KERNEL)
-
-#include <machine/atomic.h>
 
 extern volatile u_long imask[NIPL];
 
@@ -151,8 +150,12 @@ hppa_intr_enable(register_t eiem)
 #define	SOFTINT_MASK ((1 << (IPL_SOFTCLOCK - 1)) | \
     (1 << (IPL_SOFTNET - 1)) | (1 << (IPL_SOFTTTY - 1)))
 
+#ifdef MULTIPROCESSOR
+void	 hppa_ipi_init(struct cpu_info *);
+int	 hppa_ipi_send(struct cpu_info *, u_long);
+#endif
+
 #define	setsoftast(p)	(p->p_md.md_astpending = 1)
-#define	setsoftnet()	softintr(1 << (IPL_SOFTNET - 1))
 
 void	*softintr_establish(int, void (*)(void *), void *);
 void	 softintr_disestablish(void *);

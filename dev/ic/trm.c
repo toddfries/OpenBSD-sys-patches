@@ -1,4 +1,4 @@
-/*	$OpenBSD: trm.c,v 1.20 2010/06/19 21:43:16 krw Exp $
+/*	$OpenBSD: trm.c,v 1.23 2010/10/09 19:35:32 krw Exp $
  * ------------------------------------------------------------
  *   O.S       : OpenBSD
  *   File Name : trm.c
@@ -137,13 +137,6 @@ struct scsi_adapter trm_switch = {
 	trm_minphys,
 	NULL,
 	NULL
-};
-
-static struct scsi_device trm_device = {
-	NULL,            /* Use default error handler */
-	NULL,            /* have a queue, served by this */
-	NULL,            /* have no async handler */
-	NULL,            /* Use default 'done' routine */
 };
 
 /* 
@@ -335,7 +328,7 @@ trm_scsi_cmd(struct scsi_xfer *xs)
 	bus_space_tag_t	iot;
 	struct trm_dcb *pDCB;
 	u_int8_t target, lun;
-	int i, error, intflag, xferflags;
+	int i, error, intflag, timeout, xferflags;
 
 	target = xs->sc_link->target;
 	lun    = xs->sc_link->lun;
@@ -462,12 +455,17 @@ trm_scsi_cmd(struct scsi_xfer *xs)
 		return;
 	}
 
-	while ((--xs->timeout > 0) && ((xs->flags & ITSDONE) == 0)) {
+	/* Avoid use after free (via scsi_done()) of xs! */
+	for (timeout = xs->timeout; timeout > 0; timeout--) {
 		trm_Interrupt(sc);
+		if (pSRB->xs == NULL) {
+			splx(intflag);
+			return;
+		}
 		DELAY(1000);
 	}
 
-	if (xs->timeout == 0)
+	if (timeout == 0 && pSRB->xs != NULL)
 		trm_timeout(pSRB);
 
 	splx(intflag);
@@ -489,12 +487,12 @@ trm_ResetAllDevParam(struct trm_softc *sc)
 	pEEpromBuf = &trm_eepromBuf[sc->sc_AdapterUnit];
 
 	for (target = 0; target < TRM_MAX_TARGETS; target++) {
-		if (target == sc->sc_AdaptSCSIID)
+		if (target == sc->sc_AdaptSCSIID || sc->pDCB[target][0] == NULL)
 			continue;
 
 		if ((sc->pDCB[target][0]->DCBFlag & TRM_QUIRKS_VALID) == 0)
 			quirks = SDEV_NOWIDE | SDEV_NOSYNC | SDEV_NOTAGS;
-		else
+		else if (sc->pDCB[target][0]->sc_link != NULL)
 			quirks = sc->pDCB[target][0]->sc_link->quirks;
 
 		trm_ResetDevParam(sc, sc->pDCB[target][0], quirks);
@@ -648,10 +646,11 @@ trm_timeout(void *arg1)
  	if (xs != NULL) {
  		sc = xs->sc_link->adapter_softc;
  		sc_print_addr(xs->sc_link);
- 		printf("SCSI OpCode 0x%02x timed out\n",
+ 		printf("%s: SCSI OpCode 0x%02x timed out\n",
  		    sc->sc_device.dv_xname, xs->cmd->opcode);
 		pSRB->SRBFlag |= TRM_SCSI_TIMED_OUT;
  		trm_FinishSRB(sc, pSRB);
+		trm_reset(sc);
 		trm_StartWaitingSRB(sc);
  	}
 #ifdef TRM_DEBUG0
@@ -2055,7 +2054,7 @@ trm_FinishSRB(struct trm_softc *sc, struct trm_scsi_req_q *pSRB)
 
 	if ((xs->flags & SCSI_POLL) != 0) {
 
-		if (xs->cmd->opcode == INQUIRY) {
+		if (xs->cmd->opcode == INQUIRY && pDCB->sc_link == NULL) {
 
 			ptr = (struct scsi_inquiry_data *) xs->data; 
 
@@ -2435,7 +2434,6 @@ trm_initACB(struct trm_softc *sc, int unit)
 	sc->sc_link.adapter_softc    = sc;
 	sc->sc_link.adapter_target   = sc->sc_AdaptSCSIID;
 	sc->sc_link.openings         = 30; /* So TagMask (32 bit integer) always has space */
-	sc->sc_link.device           = &trm_device;
 	sc->sc_link.adapter          = &sc->sc_adapter;
 	sc->sc_link.adapter_buswidth = ((sc->sc_config & HCC_WIDE_CARD) == 0) ? 8:16;
 

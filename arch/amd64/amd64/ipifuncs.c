@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipifuncs.c,v 1.11 2010/04/07 06:33:06 kettenis Exp $	*/
+/*	$OpenBSD: ipifuncs.c,v 1.14 2010/10/02 23:14:32 deraadt Exp $	*/
 /*	$NetBSD: ipifuncs.c,v 1.1 2003/04/26 18:39:28 fvdl Exp $ */
 
 /*-
@@ -97,7 +97,9 @@ x86_64_ipi_nop(struct cpu_info *ci)
 void
 x86_64_ipi_halt(struct cpu_info *ci)
 {
+	SCHED_ASSERT_UNLOCKED();
 	disable_intr();
+	wbinvd();
 	ci->ci_flags &= ~CPUF_RUNNING;
 	wbinvd();
 
@@ -109,13 +111,15 @@ x86_64_ipi_halt(struct cpu_info *ci)
 void
 x86_64_ipi_flush_fpu(struct cpu_info *ci)
 {
-	fpusave_cpu(ci, 0);
+	if (ci->ci_fpsaveproc == ci->ci_fpcurproc)
+		fpusave_cpu(ci, 0);
 }
 
 void
 x86_64_ipi_synch_fpu(struct cpu_info *ci)
 {
-	fpusave_cpu(ci, 1);
+	if (ci->ci_fpsaveproc == ci->ci_fpcurproc)
+		fpusave_cpu(ci, 1);
 }
 
 #if NMTRR > 0

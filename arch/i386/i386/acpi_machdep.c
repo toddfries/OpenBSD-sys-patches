@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpi_machdep.c,v 1.30 2010/04/20 22:05:41 tedu Exp $	*/
+/*	$OpenBSD: acpi_machdep.c,v 1.41 2010/10/06 18:21:09 kettenis Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -57,12 +57,12 @@
 #endif
 
 #if NAPM > 0
-int haveacpibutusingapm;	
+int haveacpibutusingapm;
 #endif
 
 extern u_char acpi_real_mode_resume[], acpi_resume_end[];
 
-extern int acpi_savecpu(void);
+extern int acpi_savecpu(void) __returns_twice;
 extern void intr_calculatemasks(void);
 
 #define ACPI_BIOS_RSDP_WINDOW_BASE        0xe0000
@@ -122,7 +122,7 @@ acpi_scan(struct acpi_mem_map *handle, paddr_t pa, size_t len)
 			if (rsdp->revision == 0 &&
 			    acpi_checksum(ptr, sizeof(struct acpi_rsdp1)) == 0)
 				return (ptr);
-			else if (rsdp->revision >= 2 && rsdp->revision <= 3 &&
+			else if (rsdp->revision >= 2 && rsdp->revision <= 4 &&
 			    acpi_checksum(ptr, sizeof(struct acpi_rsdp)) == 0)
 				return (ptr);
 		}
@@ -219,16 +219,25 @@ acpi_cpu_flush(struct acpi_softc *sc, int state)
 int
 acpi_sleep_machdep(struct acpi_softc *sc, int state)
 {
+	int s;
+
 	if (sc->sc_facs == NULL) {
 		printf("%s: acpi_sleep_machdep: no FACS\n", DEVNAME(sc));
 		return (ENXIO);
 	}
 
+	rtcstop();
+
 	/* i386 does lazy pmap_activate */
 	pmap_activate(curproc);
 
 	/*
-	 *
+	 * The local apic may lose its state, so save the Task
+	 * Priority register where we keep the system priority level.
+	 */
+	s = lapic_tpr;
+
+	/*
 	 * ACPI defines two wakeup vectors. One is used for ACPI 1.0
 	 * implementations - it's in the FACS table as wakeup_vector and
 	 * indicates a 32-bit physical address containing real-mode wakeup
@@ -237,17 +246,20 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 	 * The second wakeup vector is in the FACS table as
 	 * x_wakeup_vector and indicates a 64-bit physical address
 	 * containing protected-mode wakeup code.
-	 *
 	 */
 	sc->sc_facs->wakeup_vector = (u_int32_t)ACPI_TRAMPOLINE;
-	if (sc->sc_facs->version == 1)
+	if (sc->sc_facs->length > 32 && sc->sc_facs->version >= 1)
 		sc->sc_facs->x_wakeup_vector = 0;
 
-	/* Copy the current cpu registers into a safe place for resume. */
+	/* Copy the current cpu registers into a safe place for resume.
+	 * acpi_savecpu actually returns twice - once in the suspend
+	 * path and once in the resume path (see setjmp(3)).
+	 */
 	if (acpi_savecpu()) {
+		/* Suspend path */
 		npxsave_cpu(curcpu(), 1);
 #ifdef MULTIPROCESSOR
-		i386_broadcast_ipi(I386_IPI_FLUSH_FPU);
+		i386_broadcast_ipi(I386_IPI_SYNCH_FPU);
 		i386_broadcast_ipi(I386_IPI_HALT);
 #endif
 		wbinvd();
@@ -255,20 +267,13 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 		panic("%s: acpi_enter_sleep_state failed", DEVNAME(sc));
 	}
 
-	/*
-	 * On resume, the execution path will actually occur here.
-	 * This is because we previously saved the stack location
-	 * in acpi_savecpu, and issued a far jmp to the restore
-	 * routine in the wakeup code. This means we are
-	 * returning to the location immediately following the
-	 * last call instruction - after the call to acpi_savecpu.
-	 */
-	
-#if 0
-        /* Temporarily disabled for debugging purposes */
-        /* Reset the wakeup vector to avoid resuming on reboot */
-        sc->sc_facs->wakeup_vector = 0;
-#endif	
+	/* Resume path continues here */
+
+	/* Reset the vector */
+	sc->sc_facs->wakeup_vector = 0;
+
+	/* Restore the Task Priority register */
+	lapic_tpr = s;
 
 #if NISA > 0
 	isa_defaultirq();
@@ -277,7 +282,8 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 
 #if NLAPIC > 0
 	lapic_enable();
-	lapic_initclocks();
+	if (initclock_func == lapic_initclocks)
+		lapic_startclock();
 	lapic_set_lvt();
 #endif
 
@@ -290,7 +296,9 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 #if NIOAPIC > 0
 	ioapic_enable();
 #endif
-	initrtclock();
+	i8254_startclock();
+	if (initclock_func == i8254_initclocks)
+		rtcstart();		/* in i8254 mode, rtc is profclock */
 	inittodr(time_second);
 
 	return (0);
@@ -335,5 +343,4 @@ acpi_resume_machdep(void)
 	cpu_boot_secondary_processors();
 #endif /* MULTIPROCESSOR */
 }
-
 #endif /* ! SMALL_KERNEL */

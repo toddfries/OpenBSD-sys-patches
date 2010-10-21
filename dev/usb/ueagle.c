@@ -1,4 +1,4 @@
-/*	$OpenBSD: ueagle.c,v 1.26 2010/06/05 13:06:57 damien Exp $	*/
+/*	$OpenBSD: ueagle.c,v 1.28 2010/09/24 08:33:59 yuo Exp $	*/
 
 /*-
  * Copyright (c) 2003-2006
@@ -214,7 +214,6 @@ ueagle_attach(struct device *parent, struct device *self, void *aux)
 
 	ifp->if_softc = sc;
 	ifp->if_flags = IFF_SIMPLEX;
-	ifp->if_init = ueagle_init;
 	ifp->if_ioctl = ueagle_ioctl;
 	ifp->if_start = ueagle_start;
 	IFQ_SET_READY(&ifp->if_snd);
@@ -243,7 +242,6 @@ ueagle_detach(struct device *self, int flags)
 	if (sc->fw != NULL)
 		return 0; /* shortcut for pre-firmware devices */
 
-	sc->gone = 1;
 	ueagle_stop(ifp, 1);
 
 	/* wait for stat thread to exit properly */

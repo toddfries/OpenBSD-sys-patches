@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.c,v 1.216 2010/05/28 12:09:09 claudio Exp $	*/
+/*	$OpenBSD: if.c,v 1.225 2010/08/27 17:08:01 jsg Exp $	*/
 /*	$NetBSD: if.c,v 1.35 1996/05/07 05:26:04 thorpej Exp $	*/
 
 /*
@@ -71,6 +71,7 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/mbuf.h>
+#include <sys/pool.h>
 #include <sys/proc.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
@@ -140,7 +141,6 @@ int	ifqmaxlen = IFQ_MAXLEN;
 void	if_detach_queues(struct ifnet *, struct ifqueue *);
 void	if_detached_start(struct ifnet *);
 int	if_detached_ioctl(struct ifnet *, u_long, caddr_t);
-int	if_detached_init(struct ifnet *);
 void	if_detached_watchdog(struct ifnet *);
 
 int	if_getgroup(caddr_t, struct ifnet *);
@@ -520,7 +520,6 @@ if_detach(struct ifnet *ifp)
 	ifp->if_flags &= ~IFF_OACTIVE;
 	ifp->if_start = if_detached_start;
 	ifp->if_ioctl = if_detached_ioctl;
-	ifp->if_init = if_detached_init;
 	ifp->if_watchdog = if_detached_watchdog;
 
 	/* Call detach hooks, ie. to remove vlan interfaces */
@@ -1322,7 +1321,7 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 			splx(s);
 		}
 		ifp->if_flags = (ifp->if_flags & IFF_CANTCHANGE) |
-			(ifr->ifr_flags &~ IFF_CANTCHANGE);
+			(ifr->ifr_flags & ~IFF_CANTCHANGE);
 		if (ifp->if_ioctl)
 			(void) (*ifp->if_ioctl)(ifp, cmd, data);
 		break;
@@ -1371,7 +1370,7 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 
 
 		ifp->if_xflags = (ifp->if_xflags & IFXF_CANTCHANGE) |
-			(ifr->ifr_flags &~ IFXF_CANTCHANGE);
+			(ifr->ifr_flags & ~IFXF_CANTCHANGE);
 		rt_ifmsg(ifp);
 		break;
 
@@ -1409,7 +1408,7 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 	case SIOCSIFPHYADDR_IN6:
 #endif
 	case SIOCSLIFPHYADDR:
-	case SIOCSLIFPHYRTABLEID:
+	case SIOCSLIFPHYRTABLE:
 	case SIOCADDMULTI:
 	case SIOCDELMULTI:
 	case SIOCSIFMEDIA:
@@ -1419,7 +1418,7 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 	case SIOCGIFPSRCADDR:
 	case SIOCGIFPDSTADDR:
 	case SIOCGLIFPHYADDR:
-	case SIOCGLIFPHYRTABLEID:
+	case SIOCGLIFPHYRTABLE:
 	case SIOCGIFMEDIA:
 		if (ifp->if_ioctl == 0)
 			return (EOPNOTSUPP);
@@ -1476,19 +1475,32 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 		ifp->if_priority = ifr->ifr_metric;
 		break;
 
-	case SIOCGIFRTABLEID:
+	case SIOCGIFRDOMAIN:
 		ifr->ifr_rdomainid = ifp->if_rdomain;
 		break;
 
-	case SIOCSIFRTABLEID:
+	case SIOCSIFRDOMAIN:
 		if ((error = suser(p, 0)) != 0)
 			return (error);
 		if (ifr->ifr_rdomainid < 0 ||
 		    ifr->ifr_rdomainid > RT_TABLEID_MAX)
 			return (EINVAL);
+
+		/* make sure that the routing table exists */
+		if (!rtable_exists(ifr->ifr_rdomainid)) {
+			if ((error = rtable_add(ifr->ifr_rdomainid)) != 0)
+				return (error);
+			rtable_l2set(ifr->ifr_rdomainid, ifr->ifr_rdomainid);
+		}
+
+		/* make sure that the routing table is a real rdomain */
+		if (ifr->ifr_rdomainid != rtable_l2(ifr->ifr_rdomainid))
+			return (EINVAL);
+
 		/* remove all routing entries when switching domains */
 		/* XXX hell this is ugly */
 		if (ifr->ifr_rdomainid != ifp->if_rdomain) {
+			int s = splnet();
 			rt_if_remove(ifp);
 #ifdef INET
 			rti_delete(ifp);
@@ -1501,6 +1513,7 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 #endif
 #ifdef INET6
 			in6_ifdetach(ifp);
+			ifp->if_xflags |= IFXF_NOINET6;
 #endif
 #ifdef INET
 			for (ifa = TAILQ_FIRST(&ifp->if_addrlist); ifa != NULL;
@@ -1518,18 +1531,15 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 				IFAFREE(ifa);
 			}
 #endif
+			splx(s);
 		}
 
-		/* make sure that the routing table exists */
-		if (!rtable_exists(ifr->ifr_rdomainid)) {
-			if (rtable_add(ifr->ifr_rdomainid) == -1)
-				panic("rtinit: rtable_add");
-		}
-		if (ifr->ifr_rdomainid != rtable_l2(ifr->ifr_rdomainid)) {
-			/* XXX we should probably flush the table */
-			rtable_l2set(ifr->ifr_rdomainid, ifr->ifr_rdomainid);
-		}
+		/* Let devices like enc(4) or mpe(4) know about the change */
+		if ((error = (*ifp->if_ioctl)(ifp, cmd, data)) != ENOTTY)
+			return (error);
+		error = 0;
 
+		/* Add interface to the specified rdomain */
 		ifp->if_rdomain = ifr->ifr_rdomainid;
 		break;
 
@@ -1785,12 +1795,6 @@ int
 if_detached_ioctl(struct ifnet *ifp, u_long a, caddr_t b)
 {
 	return ENODEV;
-}
-
-int
-if_detached_init(struct ifnet *ifp)
-{
-	return (ENXIO);
 }
 
 void

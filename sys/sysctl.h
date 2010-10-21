@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysctl.h,v 1.102 2010/05/02 00:51:10 tedu Exp $	*/
+/*	$OpenBSD: sysctl.h,v 1.106 2010/08/19 18:14:13 kettenis Exp $	*/
 /*	$NetBSD: sysctl.h,v 1.16 1996/04/09 20:55:36 cgd Exp $	*/
 
 /*
@@ -188,7 +188,9 @@ struct ctlname {
 #define	KERN_CPTIME2		71	/* array: cp_time2 */
 #define	KERN_CACHEPCT		72	/* buffer cache % of physmem */
 #define	KERN_FILE2		73	/* struct: file entries */
-#define	KERN_MAXID		74	/* number of valid kern ids */
+#define	KERN_RTHREADS		74	/* kernel rthreads support enabled */
+#define	KERN_CONSDEV		75	/* dev_t: console terminal device */
+#define	KERN_MAXID		76	/* number of valid kern ids */
 
 #define	CTL_KERN_NAMES { \
 	{ 0, 0 }, \
@@ -265,6 +267,8 @@ struct ctlname {
  	{ "cp_time2", CTLTYPE_STRUCT }, \
 	{ "bufcachepercent", CTLTYPE_INT }, \
 	{ "file2", CTLTYPE_STRUCT }, \
+	{ "rthreads", CTLTYPE_INT }, \
+	{ "consdev", CTLTYPE_STRUCT }, \
 }
 
 /*
@@ -497,7 +501,7 @@ struct kinfo_proc2 {
 
 #define PTRTOINT64(_x)	((u_int64_t)(u_long)(_x))
 
-#define FILL_KPROC2(kp, copy_str, p, pr, pc, uc, pg, paddr, sess, vm, lim, ps) \
+#define FILL_KPROC2(kp, copy_str, p, pr, pc, uc, pg, paddr, praddr, sess, vm, lim, ps) \
 do {									\
 	memset((kp), 0, sizeof(*(kp)));					\
 									\
@@ -507,11 +511,11 @@ do {									\
 	(kp)->p_limit = PTRTOINT64((pr)->ps_limit);			\
 	(kp)->p_vmspace = PTRTOINT64((p)->p_vmspace);			\
 	(kp)->p_sigacts = PTRTOINT64((p)->p_sigacts);			\
-	(kp)->p_sess = PTRTOINT64((p)->p_session);			\
+	(kp)->p_sess = PTRTOINT64((pr)->ps_session);			\
 	(kp)->p_ru = PTRTOINT64((p)->p_ru);				\
 									\
 	(kp)->p_exitsig = (p)->p_exitsig;				\
-	(kp)->p_flag = (p)->p_flag | P_INMEM;				\
+	(kp)->p_flag = (p)->p_flag | (pr)->ps_flags | P_INMEM;		\
 									\
 	(kp)->p_pid = (p)->p_pid;					\
 	(kp)->p__pgid = (pg)->pg_id;					\
@@ -562,7 +566,7 @@ do {									\
 									\
 	if ((sess)->s_ttyvp)						\
 		(kp)->p_eflag |= EPROC_CTTY;				\
-	if ((sess)->s_leader == (paddr))				\
+	if ((sess)->s_leader == (praddr))				\
 		(kp)->p_eflag |= EPROC_SLEADER;				\
 									\
 	if ((p)->p_stat != SIDL && !P_ZOMBIE(p)) {			\
@@ -942,7 +946,7 @@ int sysctl_file2(int *, u_int, char *, size_t *, struct proc *);
 int sysctl_doproc(int *, u_int, char *, size_t *);
 struct radix_node;
 struct walkarg;
-int sysctl_dumpentry(struct radix_node *, void *);
+int sysctl_dumpentry(struct radix_node *, void *, u_int);
 int sysctl_iflist(int, struct walkarg *);
 int sysctl_rtable(int *, u_int, void *, size_t *, void *, size_t);
 int sysctl_clockrate(char *, size_t *, void *);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_input.c,v 1.181 2010/06/07 13:26:35 henning Exp $	*/
+/*	$OpenBSD: ip_input.c,v 1.184 2010/09/08 08:34:42 claudio Exp $	*/
 /*	$NetBSD: ip_input.c,v 1.30 1996/03/16 23:53:58 christos Exp $	*/
 
 /*
@@ -490,7 +490,8 @@ ipv4_input(m)
                 s = splnet();
 		if (mtag != NULL) {
 			tdbi = (struct tdb_ident *)(mtag + 1);
-			tdb = gettdb(tdbi->spi, &tdbi->dst, tdbi->proto);
+			tdb = gettdb(tdbi->rdomain, tdbi->spi,
+			    &tdbi->dst, tdbi->proto);
 		} else
 			tdb = NULL;
 	        ipsp_spd_lookup(m, AF_INET, hlen, &error,
@@ -649,7 +650,8 @@ found:
         s = splnet();
 	if (mtag) {
 		tdbi = (struct tdb_ident *)(mtag + 1);
-	        tdb = gettdb(tdbi->spi, &tdbi->dst, tdbi->proto);
+	        tdb = gettdb(tdbi->rdomain, tdbi->spi, &tdbi->dst,
+		    tdbi->proto);
 	} else
 		tdb = NULL;
 	ipsp_spd_lookup(m, AF_INET, hlen, &error, IPSP_DIRECTION_IN,
@@ -702,7 +704,7 @@ in_iawithaddr(struct in_addr ina, struct mbuf *m, u_int rdomain)
 				if (m)
 					m->m_flags |= M_BCAST;
 				return ia;
-			    }
+			}
 		}
 	}
 
@@ -1555,6 +1557,12 @@ ip_forward(m, srcrt)
 		ipstat.ips_cantfrag++;
 		break;
 
+	case EACCES:
+		/*
+		 * pf(4) blocked the packet. There is no need to send an ICMP
+		 * packet back since pf(4) takes care of it.
+		 */
+		goto freecopy;
 	case ENOBUFS:
 		/*
 		 * a router should not generate ICMP_SOURCEQUENCH as

@@ -1,4 +1,4 @@
-/*	$OpenBSD: gdt_common.c,v 1.50 2010/05/20 00:55:17 krw Exp $	*/
+/*	$OpenBSD: gdt_common.c,v 1.55 2010/10/12 00:53:32 krw Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000, 2003 Niklas Hallqvist.  All rights reserved.
@@ -103,10 +103,6 @@ struct scsi_adapter gdt_raw_switch = {
 	gdt_raw_scsi_cmd, gdtminphys, 0, 0,
 };
 
-struct scsi_device gdt_dev = {
-	NULL, NULL, NULL, NULL
-};
-
 int gdt_cnt = 0;
 u_int8_t gdt_polling;
 u_int8_t gdt_from_wait;
@@ -161,7 +157,6 @@ gdt_attach(struct gdt_softc *sc)
 	/* Fill in the prototype scsi_link. */
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter = &gdt_switch;
-	sc->sc_link.device = &gdt_dev;
 	/* openings will be filled in later. */
 	sc->sc_link.adapter_buswidth =
 	    (sc->sc_class & GDT_FC) ? GDT_MAXID : GDT_MAX_HDRIVES;
@@ -499,7 +494,6 @@ gdt_attach(struct gdt_softc *sc)
 		sc->sc_raw_link[i].adapter_softc = sc;
 		sc->sc_raw_link[i].adapter = &gdt_raw_switch;
 		sc->sc_raw_link[i].adapter_target = 7;
-		sc->sc_raw_link[i].device = &gdt_dev;
 		sc->sc_raw_link[i].openings = 4;	/* XXX a guess */
 		sc->sc_raw_link[i].adapter_buswidth =
 		    (sc->sc_class & GDT_FC) ? GDT_MAXID : 16;	/* XXX */
@@ -593,6 +587,7 @@ gdt_scsi_cmd(struct scsi_xfer *xs)
 	bus_dmamap_t xfer;
 	int error;
 	int s;
+	int polled;
 
 	GDT_DPRINTF(GDT_D_CMD, ("gdt_scsi_cmd "));
 
@@ -621,6 +616,7 @@ gdt_scsi_cmd(struct scsi_xfer *xs)
 		ccb = NULL;
 		link = xs->sc_link;
 		target = link->target;
+		polled = ISSET(xs->flags, SCSI_POLL);
  
 		if (!gdt_polling && !(xs->flags & SCSI_POLL) &&
 		    sc->sc_test_busy(sc)) {
@@ -765,7 +761,6 @@ gdt_scsi_cmd(struct scsi_xfer *xs)
 					splx(s);
 					return;
 				}
-				scsi_done(xs);
 			}
 		}
 
@@ -773,7 +768,7 @@ gdt_scsi_cmd(struct scsi_xfer *xs)
 		/*
 		 * Don't process the queue if we are polling.
 		 */
-		if (xs->flags & SCSI_POLL) {
+		if (polled) {
 			break;
 		}
 	}
@@ -949,7 +944,7 @@ gdt_internal_cache_cmd(struct scsi_xfer *xs)
 	case REQUEST_SENSE:
 		GDT_DPRINTF(GDT_D_CMD, ("REQUEST SENSE tgt %d ", target));
 		bzero(&sd, sizeof sd);
-		sd.error_code = 0x70;
+		sd.error_code = SSD_ERRCODE_CURRENT;
 		sd.segment = 0;
 		sd.flags = SKEY_NO_SENSE;
 		gdt_enc32(sd.info, 0);
@@ -968,6 +963,7 @@ gdt_internal_cache_cmd(struct scsi_xfer *xs)
 		inq.version = 2;
 		inq.response_format = 2;
 		inq.additional_length = 32;
+		inq.flags |= SID_CmdQue;
 		strlcpy(inq.vendor, "ICP	   ", sizeof inq.vendor);
 		snprintf(inq.product, sizeof inq.product, "Host drive  #%02d",
 		    target);
@@ -1007,7 +1003,7 @@ gdt_raw_scsi_cmd(struct scsi_xfer *xs)
 	if (xs->cmdlen > 12 /* XXX create #define */) {
 		GDT_DPRINTF(GDT_D_CMD, ("CDB too big %p ", xs));
 		bzero(&xs->sense, sizeof(xs->sense));
-		xs->sense.error_code = SSD_ERRCODE_VALID | 0x70;
+		xs->sense.error_code = SSD_ERRCODE_VALID | SSD_ERRCODE_CURRENT;
 		xs->sense.flags = SKEY_ILLEGAL_REQUEST;
 		xs->sense.add_sense_code = 0x20; /* illcmd, 0x24 illfield */
 		xs->error = XS_SENSE;
@@ -1091,7 +1087,7 @@ gdt_intr(void *arg)
 	struct gdt_intr_ctx ctx;
 	int chain = 1;
 	int sync_val = 0;
-	struct scsi_xfer *xs;
+	struct scsi_xfer *xs = NULL;
 	int prev_cmd;
 	struct gdt_ccb *ccb;
 
@@ -1161,8 +1157,11 @@ gdt_intr(void *arg)
 	sync_val = gdt_sync_event(sc, ctx.service, ctx.istatus, xs);
 
  finish:
-
 	switch (sync_val) {
+	case 0:
+		if (xs && gdt_from_wait)
+			scsi_done(xs);
+		break;
 	case 1:
 		scsi_done(xs);
 		break;

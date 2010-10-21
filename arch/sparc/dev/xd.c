@@ -1,4 +1,4 @@
-/*	$OpenBSD: xd.c,v 1.48 2010/05/23 10:49:19 dlg Exp $	*/
+/*	$OpenBSD: xd.c,v 1.52 2010/09/22 06:40:25 krw Exp $	*/
 /*	$NetBSD: xd.c,v 1.37 1997/07/29 09:58:16 fair Exp $	*/
 
 /*
@@ -267,12 +267,6 @@ struct xdc_attach_args {	/* this is the "aux" args to xdattach */
 	int	fullmode;	/* submit mode */
 	int	booting;	/* are we booting or not? */
 };
-
-/*
- * dkdriver
- */
-
-struct dkdriver xddkdriver = {xdstrategy};
 
 /*
  * start: disk label fix code (XXX)
@@ -562,7 +556,6 @@ xdattach(parent, self, aux)
 	 * to start with a clean slate.
 	 */
 	bzero(&xd->sc_dk, sizeof(xd->sc_dk));
-	xd->sc_dk.dk_driver = &xddkdriver;
 	xd->sc_dk.dk_name = xd->sc_dev.dv_xname;
 
 	/* if booting, init the xd_softc */
@@ -663,7 +656,7 @@ xdattach(parent, self, aux)
 
 	xd->hw_spt = spt;
 	/* Attach the disk: must be before getdisklabel to malloc label */
-	disk_attach(&xd->sc_dk);
+	disk_attach(&xd->sc_dev, &xd->sc_dk);
 
 	if (xdgetdisklabel(xd, xa->buf) != XD_ERR_AOK)
 		goto done;
@@ -846,6 +839,7 @@ xdioctl(dev, command, addr, flag, p)
 		return 0;
 
 	case DIOCGDINFO:	/* get disk label */
+	case DIOCGPDINFO:	/* no separate 'physical' info available. */
 		bcopy(xd->sc_dk.dk_label, addr, sizeof(struct disklabel));
 		return 0;
 
@@ -961,7 +955,7 @@ xdread(dev, uio, flags)
 	int flags;
 {
 
-	return (physio(xdstrategy, NULL, dev, B_READ, minphys, uio));
+	return (physio(xdstrategy, dev, B_READ, minphys, uio));
 }
 
 int
@@ -971,7 +965,7 @@ xdwrite(dev, uio, flags)
 	int flags;
 {
 
-	return (physio(xdstrategy, NULL, dev, B_WRITE, minphys, uio));
+	return (physio(xdstrategy, dev, B_WRITE, minphys, uio));
 }
 
 

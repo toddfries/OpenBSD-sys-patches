@@ -1,4 +1,4 @@
-/*	$OpenBSD: gumstix_machdep.c,v 1.2 2009/07/26 18:48:55 miod Exp $	*/
+/*	$OpenBSD: gumstix_machdep.c,v 1.4 2010/06/27 12:41:23 miod Exp $	*/
 /*	$NetBSD: lubbock_machdep.c,v 1.2 2003/07/15 00:25:06 lukem Exp $ */
 
 /*

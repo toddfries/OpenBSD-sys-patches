@@ -1,4 +1,4 @@
-/*	$OpenBSD: ch.c,v 1.38 2010/06/15 04:11:34 dlg Exp $	*/
+/*	$OpenBSD: ch.c,v 1.43 2010/08/30 02:47:56 matthew Exp $	*/
 /*	$NetBSD: ch.c,v 1.26 1997/02/21 22:06:52 thorpej Exp $	*/
 
 /*
@@ -43,7 +43,6 @@
 #include <sys/ioctl.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/chio.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
@@ -120,14 +119,6 @@ int	ch_get_params(struct ch_softc *, int);
 int	ch_interpret_sense(struct scsi_xfer *xs);
 void	ch_get_quirks(struct ch_softc *, struct scsi_inquiry_data *);
 
-/* SCSI glue */
-struct scsi_device ch_switch = {
-	ch_interpret_sense,
-	NULL,
-	NULL,
-	NULL
-};
-
 /*
  * SCSI changer quirks.
  */
@@ -168,7 +159,7 @@ chattach(parent, self, aux)
 
 	/* Glue into the SCSI bus */
 	sc->sc_link = link;
-	link->device = &ch_switch;
+	link->interpret_sense = ch_interpret_sense;
 	link->device_softc = sc;
 	link->openings = 1;
 
@@ -357,7 +348,9 @@ ch_move(sc, cm)
 	struct ch_softc *sc;
 	struct changer_move *cm;
 {
-	struct scsi_move_medium cmd;
+	struct scsi_move_medium *cmd;
+	struct scsi_xfer *xs;
+	int error;
 	u_int16_t fromelem, toelem;
 
 	/*
@@ -384,19 +377,25 @@ ch_move(sc, cm)
 	/*
 	 * Build the SCSI command.
 	 */
-	bzero(&cmd, sizeof(cmd));
-	cmd.opcode = MOVE_MEDIUM;
-	_lto2b(sc->sc_picker, cmd.tea);
-	_lto2b(fromelem, cmd.src);
-	_lto2b(toelem, cmd.dst);
-	if (cm->cm_flags & CM_INVERT)
-		cmd.flags |= MOVE_MEDIUM_INVERT;
+	xs = scsi_xs_get(sc->sc_link, 0);
+	if (xs == NULL)
+		return (ENOMEM);
+	xs->cmdlen = sizeof(*cmd);
+	xs->retries = CHRETRIES;
+	xs->timeout = 100000;
 
-	/*
-	 * Send command to changer.
-	 */
-	return (scsi_scsi_cmd(sc->sc_link, (struct scsi_generic *)&cmd,
-	    sizeof(cmd), NULL, 0, CHRETRIES, 100000, NULL, 0));
+	cmd = (struct scsi_move_medium *)xs->cmd;
+	cmd->opcode = MOVE_MEDIUM;
+	_lto2b(sc->sc_picker, cmd->tea);
+	_lto2b(fromelem, cmd->src);
+	_lto2b(toelem, cmd->dst);
+	if (cm->cm_flags & CM_INVERT)
+		cmd->flags |= MOVE_MEDIUM_INVERT;
+
+	error = scsi_xs_sync(xs);
+	scsi_xs_put(xs);
+
+	return (error);
 }
 
 int
@@ -404,7 +403,9 @@ ch_exchange(sc, ce)
 	struct ch_softc *sc;
 	struct changer_exchange *ce;
 {
-	struct scsi_exchange_medium cmd;
+	struct scsi_exchange_medium *cmd;
+	struct scsi_xfer *xs;
+	int error;
 	u_int16_t src, dst1, dst2;
 
 	/*
@@ -437,22 +438,28 @@ ch_exchange(sc, ce)
 	/*
 	 * Build the SCSI command.
 	 */
-	bzero(&cmd, sizeof(cmd));
-	cmd.opcode = EXCHANGE_MEDIUM;
-	_lto2b(sc->sc_picker, cmd.tea);
-	_lto2b(src, cmd.src);
-	_lto2b(dst1, cmd.fdst);
-	_lto2b(dst2, cmd.sdst);
-	if (ce->ce_flags & CE_INVERT1)
-		cmd.flags |= EXCHANGE_MEDIUM_INV1;
-	if (ce->ce_flags & CE_INVERT2)
-		cmd.flags |= EXCHANGE_MEDIUM_INV2;
+	xs = scsi_xs_get(sc->sc_link, 0);
+	if (xs == NULL)
+		return (ENOMEM);
+	xs->cmdlen = sizeof(*cmd);
+	xs->retries = CHRETRIES;
+	xs->timeout = 100000;
 
-	/*
-	 * Send command to changer.
-	 */
-	return (scsi_scsi_cmd(sc->sc_link, (struct scsi_generic *)&cmd,
-	    sizeof(cmd), NULL, 0, CHRETRIES, 100000, NULL, 0));
+	cmd = (struct scsi_exchange_medium *)xs->cmd;
+	cmd->opcode = EXCHANGE_MEDIUM;
+	_lto2b(sc->sc_picker, cmd->tea);
+	_lto2b(src, cmd->src);
+	_lto2b(dst1, cmd->fdst);
+	_lto2b(dst2, cmd->sdst);
+	if (ce->ce_flags & CE_INVERT1)
+		cmd->flags |= EXCHANGE_MEDIUM_INV1;
+	if (ce->ce_flags & CE_INVERT2)
+		cmd->flags |= EXCHANGE_MEDIUM_INV2;
+
+	error = scsi_xs_sync(xs);
+	scsi_xs_put(xs);
+
+	return (error);
 }
 
 int
@@ -460,7 +467,9 @@ ch_position(sc, cp)
 	struct ch_softc *sc;
 	struct changer_position *cp;
 {
-	struct scsi_position_to_element cmd;
+	struct scsi_position_to_element *cmd;
+	struct scsi_xfer *xs;
+	int error;
 	u_int16_t dst;
 
 	/*
@@ -479,18 +488,24 @@ ch_position(sc, cp)
 	/*
 	 * Build the SCSI command.
 	 */
-	bzero(&cmd, sizeof(cmd));
-	cmd.opcode = POSITION_TO_ELEMENT;
-	_lto2b(sc->sc_picker, cmd.tea);
-	_lto2b(dst, cmd.dst);
-	if (cp->cp_flags & CP_INVERT)
-		cmd.flags |= POSITION_TO_ELEMENT_INVERT;
+	xs = scsi_xs_get(sc->sc_link, 0);
+	if (xs == NULL)
+		return (ENOMEM);
+	xs->cmdlen = sizeof(*cmd);
+	xs->retries = CHRETRIES;
+	xs->timeout = 100000;
 
-	/*
-	 * Send command to changer.
-	 */
-	return (scsi_scsi_cmd(sc->sc_link, (struct scsi_generic *)&cmd,
-	    sizeof(cmd), NULL, 0, CHRETRIES, 100000, NULL, 0));
+	cmd = (struct scsi_position_to_element *)xs->cmd;
+	cmd->opcode = POSITION_TO_ELEMENT;
+	_lto2b(sc->sc_picker, cmd->tea);
+	_lto2b(dst, cmd->dst);
+	if (cp->cp_flags & CP_INVERT)
+		cmd->flags |= POSITION_TO_ELEMENT_INVERT;
+
+	error = scsi_xs_sync(xs);
+	scsi_xs_put(xs);
+
+	return (error);
 }
 
 /*
@@ -633,27 +648,35 @@ ch_getelemstatus(sc, first, count, data, datalen, voltag)
 	size_t datalen;
 	int voltag;
 {
-	struct scsi_read_element_status cmd;
+	struct scsi_read_element_status *cmd;
+	struct scsi_xfer *xs;
+	int error;
 
 	/*
 	 * Build SCSI command.
 	 */
-	bzero(&cmd, sizeof(cmd));
-	cmd.opcode = READ_ELEMENT_STATUS;
-	_lto2b(first, cmd.sea);
-	_lto2b(count, cmd.count);
-	_lto3b(datalen, cmd.len);
+	xs = scsi_xs_get(sc->sc_link, SCSI_DATA_IN);
+	if (xs == NULL)
+		return (ENOMEM);
+	xs->cmdlen = sizeof(*cmd);
+	xs->data = data;
+	xs->datalen = datalen;
+	xs->retries = CHRETRIES;
+	xs->timeout = 100000;
+
+	cmd = (struct scsi_read_element_status *)xs->cmd;
+	cmd->opcode = READ_ELEMENT_STATUS;
+	_lto2b(first, cmd->sea);
+	_lto2b(count, cmd->count);
+	_lto3b(datalen, cmd->len);
 	if (voltag)
-		cmd.byte2 |= READ_ELEMENT_STATUS_VOLTAG;
+		cmd->byte2 |= READ_ELEMENT_STATUS_VOLTAG;
 
-	/*
-	 * Send command to changer.
-	 */
-	return (scsi_scsi_cmd(sc->sc_link, (struct scsi_generic *)&cmd,
-	    sizeof(cmd), (u_char *)data, datalen, CHRETRIES, 100000, NULL,
-	    SCSI_DATA_IN));
+	error = scsi_xs_sync(xs);
+	scsi_xs_put(xs);
+
+	return (error);
 }
-
 
 /*
  * Ask the device about itself and fill in the parameters in our
@@ -766,7 +789,7 @@ ch_interpret_sense(xs)
 
 	if (((sc_link->flags & SDEV_OPEN) == 0) ||
 	    (serr != SSD_ERRCODE_CURRENT && serr != SSD_ERRCODE_DEFERRED))
-		return (EJUSTRETURN); /* let the generic code handle it */
+		return (scsi_interpret_sense(xs));
 
 	switch (skey) {
 
@@ -793,9 +816,9 @@ ch_interpret_sense(xs)
 			xs->retries++;
 			return (scsi_delay(xs, 1));
 		default:
-			return (EJUSTRETURN);
+			return (scsi_interpret_sense(xs));
 	}
 	default:
-		return (EJUSTRETURN);
+		return (scsi_interpret_sense(xs));
 	}
 }

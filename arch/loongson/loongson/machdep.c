@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.20 2010/06/10 17:54:13 deraadt Exp $ */
+/*	$OpenBSD: machdep.c,v 1.23 2010/08/28 22:29:03 miod Exp $ */
 
 /*
  * Copyright (c) 2009, 2010 Miodrag Vallat.
@@ -63,7 +63,7 @@
 #include <sys/sem.h>
 #endif
 
-#include <uvm/uvm_extern.h>
+#include <uvm/uvm.h>
 
 #include <machine/db_machdep.h>
 #include <ddb/db_interface.h>
@@ -93,6 +93,14 @@ char	pmon_bootp[80];
 #endif
 int	bufpages = BUFPAGES;
 int	bufcachepercent = BUFCACHEPERCENT;
+
+/*
+ * Even though the system is 64bit, the hardware is constrained to up
+ * to 2G of contigous physical memory (direct 2GB DMA area), so there
+ * is no particular constraint. paddr_t is long so: 
+ */
+struct uvm_constraint_range  dma_constraint = { 0x0, 0xffffffffUL };
+struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
 
 vm_map_t exec_map;
 vm_map_t phys_map;
@@ -368,7 +376,8 @@ mips_init(int32_t argc, int32_t argv, int32_t envp, int32_t cv,
 			/* better expose the problem than limit to 256MB */
 			goto unsupported;
 		}
-	}
+	} else
+		memhi = 0;
 
 	uncached_base = PHYS_TO_XKPHYS(0, CCA_NC);
 

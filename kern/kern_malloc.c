@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_malloc.c,v 1.81 2009/08/25 18:02:42 miod Exp $	*/
+/*	$OpenBSD: kern_malloc.c,v 1.86 2010/09/26 21:03:56 tedu Exp $	*/
 /*	$NetBSD: kern_malloc.c,v 1.15.4.2 1996/06/13 17:10:56 cgd Exp $	*/
 
 /*
@@ -41,7 +41,7 @@
 #include <sys/time.h>
 #include <sys/rwlock.h>
 
-#include <uvm/uvm_extern.h>
+#include <uvm/uvm.h>
 
 static __inline__ long BUCKETINDX(size_t sz)
 {
@@ -107,7 +107,9 @@ u_int	nkmempages_min = 0;
 u_int	nkmempages_max = 0;
 
 struct kmembuckets bucket[MINBUCKET + 16];
+#ifdef KMEMSTATS
 struct kmemstats kmemstats[M_LAST];
+#endif
 struct kmemusage *kmemusage;
 char *kmembase, *kmemlimit;
 char buckstring[16 * sizeof("123456,")];
@@ -189,6 +191,11 @@ malloc(unsigned long size, int type, int flags)
 		panic("malloc - bogus type");
 #endif
 
+	KASSERT(flags & (M_WAITOK | M_NOWAIT));
+
+	if ((flags & M_NOWAIT) == 0)
+		assertwaitok();
+
 #ifdef MALLOC_DEBUG
 	if (debug_malloc(size, type, flags, (void **)&va)) {
 		if ((flags & M_ZERO) && va != NULL)
@@ -233,10 +240,12 @@ malloc(unsigned long size, int type, int flags)
 		else
 			allocsize = 1 << indx;
 		npg = atop(round_page(allocsize));
-		va = (caddr_t) uvm_km_kmemalloc(kmem_map, NULL,
-		    (vsize_t)ptoa(npg), 
+		va = (caddr_t)uvm_km_kmemalloc_pla(kmem_map, NULL,
+		    (vsize_t)ptoa(npg), 0,
 		    ((flags & M_NOWAIT) ? UVM_KMF_NOWAIT : 0) |
-		    ((flags & M_CANFAIL) ? UVM_KMF_CANFAIL : 0));
+		    ((flags & M_CANFAIL) ? UVM_KMF_CANFAIL : 0),
+		    dma_constraint.ucr_low, dma_constraint.ucr_high,
+		    0, 0, 0);
 		if (va == NULL) {
 			/*
 			 * Kmem_malloc() can return NULL, even if it can

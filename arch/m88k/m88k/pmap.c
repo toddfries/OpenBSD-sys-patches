@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.51 2010/05/09 15:46:17 jasper Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.53 2010/06/27 12:41:23 miod Exp $	*/
 /*
  * Copyright (c) 2001-2004, Miodrag Vallat
  * Copyright (c) 1998-2001 Steve Murphree, Jr.
@@ -51,9 +51,9 @@
 #include <sys/malloc.h>
 #include <sys/pool.h>
 #include <sys/msgbuf.h>
-#include <sys/user.h>
 
 #include <machine/asm_macro.h>
+#include <machine/mmu.h>
 #include <machine/cmmu.h>
 #include <machine/cpu.h>
 #include <machine/lock.h>

@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore_c.c,v 1.8 2010/04/21 03:03:26 deraadt Exp $	*/
+/*	$OpenBSD: locore_c.c,v 1.10 2010/06/27 12:41:23 miod Exp $	*/
 /*	$NetBSD: locore_c.c,v 1.13 2006/03/04 01:13:35 uwe Exp $	*/
 
 /*-
@@ -107,7 +107,6 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/sched.h>
 #include <sys/proc.h>
 
@@ -115,6 +114,7 @@
 
 #include <sh/locore.h>
 #include <sh/cpu.h>
+#include <sh/pcb.h>
 #include <sh/pmap.h>
 #include <sh/mmu_sh3.h>
 #include <sh/mmu_sh4.h>

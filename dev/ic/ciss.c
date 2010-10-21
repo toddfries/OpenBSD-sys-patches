@@ -1,4 +1,4 @@
-/*	$OpenBSD: ciss.c,v 1.55 2010/06/15 04:11:34 dlg Exp $	*/
+/*	$OpenBSD: ciss.c,v 1.63 2010/09/20 06:17:49 krw Exp $	*/
 
 /*
  * Copyright (c) 2005,2006 Michael Shalayeff
@@ -74,10 +74,6 @@ void	cissminphys(struct buf *bp, struct scsi_link *sl);
 
 struct scsi_adapter ciss_switch = {
 	ciss_scsi_cmd, cissminphys, NULL, NULL, ciss_scsi_ioctl
-};
-
-struct scsi_device ciss_dev = {
-	NULL, NULL, NULL, NULL
 };
 
 #if NBIO > 0
@@ -367,9 +363,8 @@ ciss_attach(struct ciss_softc *sc)
 		return -1;
 	}
 
-	sc->sc_link.device = &ciss_dev;
 	sc->sc_link.adapter_softc = sc;
-	sc->sc_link.openings = sc->maxcmd / (sc->maxunits? sc->maxunits : 1);
+	sc->sc_link.openings = sc->maxcmd;
 	sc->sc_link.adapter = &ciss_switch;
 	sc->sc_link.luns = 1;
 	sc->sc_link.adapter_target = sc->maxunits;
@@ -400,18 +395,19 @@ ciss_attach(struct ciss_softc *sc)
 	sc->sensors = malloc(sizeof(struct ksensor) * sc->maxunits,
 	    M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (sc->sensors) {
+		struct device *dev;
+
 		strlcpy(sc->sensordev.xname, sc->sc_dev.dv_xname,
 		    sizeof(sc->sensordev.xname));
-		for (i = 0; i < sc->maxunits;
-		    sensor_attach(&sc->sensordev, &sc->sensors[i++])) {
+		for (i = 0; i < sc->maxunits; i++) {
 			sc->sensors[i].type = SENSOR_DRIVE;
 			sc->sensors[i].status = SENSOR_S_UNKNOWN;
-			strlcpy(sc->sensors[i].desc, ((struct device *)
-			    scsibus->sc_link[i][0]->device_softc)->dv_xname,
+			dev = scsi_get_link(scsibus, i, 0)->device_softc;
+			strlcpy(sc->sensors[i].desc, dev->dv_xname,
 			    sizeof(sc->sensors[i].desc));
-			strlcpy(sc->sc_lds[i]->xname, ((struct device *)
-			    scsibus->sc_link[i][0]->device_softc)->dv_xname,
+			strlcpy(sc->sc_lds[i]->xname, dev->dv_xname,
 			    sizeof(sc->sc_lds[i]->xname));
+			sensor_attach(&sc->sensordev, &sc->sensors[i]);
 		}
 		if (sensor_task_register(sc, ciss_sensors, 10) == NULL)
 			free(sc->sensors, M_DEVBUF);
@@ -482,6 +478,7 @@ ciss_cmd(struct ciss_ccb *ccb, int flags, int wait)
 			if (ccb->ccb_xs) {
 				ccb->ccb_xs->error = XS_DRIVER_STUFFUP;
 				scsi_done(ccb->ccb_xs);
+				ccb->ccb_xs = NULL;
 			}
 			return (error);
 		}
@@ -619,6 +616,7 @@ ciss_done(struct ciss_ccb *ccb)
 {
 	struct ciss_softc *sc = ccb->ccb_sc;
 	struct scsi_xfer *xs = ccb->ccb_xs;
+        struct ciss_cmd *cmd = &ccb->ccb_cmd;
 	ciss_lock_t lock;
 	int error = 0;
 
@@ -629,7 +627,6 @@ ciss_done(struct ciss_ccb *ccb)
 		    sc->sc_dev.dv_xname, ccb, ccb->ccb_state, CISS_CCB_BITS);
 		return 1;
 	}
-
 	lock = CISS_LOCK(sc);
 	ccb->ccb_state = CISS_CCB_READY;
 
@@ -638,14 +635,14 @@ ciss_done(struct ciss_ccb *ccb)
 
 	if (ccb->ccb_data) {
 		bus_dmamap_sync(sc->dmat, ccb->ccb_dmamap, 0,
-		    ccb->ccb_dmamap->dm_mapsize, (xs->flags & SCSI_DATA_IN) ?
+		    ccb->ccb_dmamap->dm_mapsize, (cmd->flags & CISS_CDB_IN) ?
 		    BUS_DMASYNC_POSTREAD : BUS_DMASYNC_POSTWRITE);
 		bus_dmamap_unload(sc->dmat, ccb->ccb_dmamap);
 	}
 
 	if (xs) {
 		xs->resid = 0;
-		scsi_done(ccb->ccb_xs);
+		scsi_done(xs);
 	}
 
 	CISS_UNLOCK(sc, lock);
@@ -672,7 +669,8 @@ ciss_error(struct ciss_ccb *ccb)
 		    err->err_info, err->err_type[3], err->err_type[2]);
 		if (xs) {
 			bzero(&xs->sense, sizeof(xs->sense));
-			xs->sense.error_code = SSD_ERRCODE_VALID | 0x70;
+			xs->sense.error_code = SSD_ERRCODE_VALID |
+			    SSD_ERRCODE_CURRENT;
 			xs->sense.flags = SKEY_ILLEGAL_REQUEST;
 			xs->sense.add_sense_code = 0x24; /* ill field */
 			xs->error = XS_SENSE;
@@ -849,7 +847,7 @@ ciss_scsi_cmd(struct scsi_xfer *xs)
 	if (xs->cmdlen > CISS_MAX_CDB) {
 		CISS_DPRINTF(CISS_D_CMD, ("CDB too big %p ", xs));
 		bzero(&xs->sense, sizeof(xs->sense));
-		xs->sense.error_code = SSD_ERRCODE_VALID | 0x70;
+		xs->sense.error_code = SSD_ERRCODE_VALID | SSD_ERRCODE_CURRENT;
 		xs->sense.flags = SKEY_ILLEGAL_REQUEST;
 		xs->sense.add_sense_code = 0x20; /* illcmd, 0x24 illfield */
 		xs->error = XS_SENSE;
@@ -1011,8 +1009,10 @@ ciss_ioctl(struct device *dev, u_long cmd, caddr_t addr)
 			break;
 		}
 		ldp = sc->sc_lds[bv->bv_volid];
-		if (!ldp)
-			return EINVAL;
+		if (!ldp) {
+			error = EINVAL;
+			break;
+		}
 		ldid = sc->scratch;
 		if ((error = ciss_ldid(sc, bv->bv_volid, ldid)))
 			break;

@@ -1,4 +1,4 @@
-/* $OpenBSD: if_mpe.c,v 1.20 2010/05/31 11:46:02 claudio Exp $ */
+/* $OpenBSD: if_mpe.c,v 1.23 2010/09/21 06:13:06 claudio Exp $ */
 
 /*
  * Copyright (c) 2008 Pierre-Yves Ritschard <pyr@spootnik.org>
@@ -242,22 +242,21 @@ mpeoutput(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 		off = sizeof(sa_family_t) + sizeof(in_addr_t);
 		M_PREPEND(m, sizeof(shim) + off, M_DONTWAIT);
 		if (m == NULL) {
-			m_freem(m);
 			error = ENOBUFS;
 			goto out;
 		}
 		*mtod(m, sa_family_t *) = AF_INET;
 		m_copyback(m, sizeof(sa_family_t), sizeof(in_addr_t),
-		    (caddr_t)&((satosin(dst)->sin_addr)));
+		    (caddr_t)&((satosin(dst)->sin_addr)), M_NOWAIT);
 		break;
 #endif
 	default:
 		m_freem(m);
-		error = ENETDOWN;
+		error = EPFNOSUPPORT;
 		goto out;
 	}
 
-	m_copyback(m, off, sizeof(shim), (caddr_t)&shim);
+	m_copyback(m, off, sizeof(shim), (caddr_t)&shim, M_NOWAIT);
 
 	s = splnet();
 	IFQ_ENQUEUE(&ifp->if_snd, m, NULL, error);
@@ -343,6 +342,17 @@ mpeioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			break;
 		ifm->sc_shim.shim_label = shim.shim_label;
 		break;
+	case SIOCSIFRDOMAIN:
+		/* must readd the MPLS "route" for our label */
+		ifm = ifp->if_softc;
+		if (ifr->ifr_rdomainid != ifp->if_rdomain) {
+			if (ifm->sc_shim.shim_label) {
+				shim.shim_label = ifm->sc_shim.shim_label;
+				error = mpe_newlabel(ifp, RTM_ADD, &shim);
+			}
+		}
+		/* return with ENOTTY so that the parent handler finishes */
+		return (ENOTTY);
 	default:
 		return (ENOTTY);
 	}

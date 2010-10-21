@@ -1,4 +1,4 @@
-/*	$OpenBSD: xbridge.c,v 1.72 2010/05/09 18:36:07 miod Exp $	*/
+/*	$OpenBSD: xbridge.c,v 1.76 2010/09/22 02:28:37 jsg Exp $	*/
 
 /*
  * Copyright (c) 2008, 2009  Miodrag Vallat.
@@ -253,6 +253,9 @@ int	xbridge_space_region_io(bus_space_tag_t, bus_space_handle_t,
 	    bus_size_t, bus_size_t, bus_space_handle_t *);
 int	xbridge_space_region_mem(bus_space_tag_t, bus_space_handle_t,
 	    bus_size_t, bus_size_t, bus_space_handle_t *);
+
+void	xbridge_space_barrier(bus_space_tag_t, bus_space_handle_t,
+	    bus_size_t, bus_size_t, int);
 
 int	xbridge_dmamap_load_buffer(bus_dma_tag_t, bus_dmamap_t, void *,
 	    bus_size_t, struct proc *, int, paddr_t *, int *, int);
@@ -544,6 +547,7 @@ xbpci_attach(struct device *parent, struct device *self, void *aux)
 	xb->xb_mem_bus_space->_space_write_raw_4 = xbridge_write_raw_4;
 	xb->xb_mem_bus_space->_space_read_raw_8 = xbridge_read_raw_8;
 	xb->xb_mem_bus_space->_space_write_raw_8 = xbridge_write_raw_8;
+	xb->xb_mem_bus_space->_space_barrier = xbridge_space_barrier;
 
 	bcopy(xb->xb_regt, xb->xb_io_bus_space, sizeof(*xb->xb_io_bus_space));
 	xb->xb_io_bus_space->bus_private = xb;
@@ -559,6 +563,7 @@ xbpci_attach(struct device *parent, struct device *self, void *aux)
 	xb->xb_io_bus_space->_space_write_raw_4 = xbridge_write_raw_4;
 	xb->xb_io_bus_space->_space_read_raw_8 = xbridge_read_raw_8;
 	xb->xb_io_bus_space->_space_write_raw_8 = xbridge_write_raw_8;
+	xb->xb_io_bus_space->_space_barrier = xbridge_space_barrier;
 
 	xb->xb_dmat = malloc(sizeof (*xb->xb_dmat), M_DEVBUF, M_NOWAIT);
 	if (xb->xb_dmat == NULL)
@@ -696,27 +701,7 @@ xbridge_conf_read(void *cookie, pcitag_t tag, int offset)
 	int skip;
 	int s;
 
-	/* Disable interrupts on this bridge (especially error interrupts) */
-	xbridge_write_reg(xb, BRIDGE_IER, 0);
-	(void)xbridge_read_reg(xb, WIDGET_TFLUSH);
-	s = splhigh();
-
 	xbridge_decompose_tag(cookie, tag, &bus, &dev, &fn);
-	if (bus != 0) {
-		xbridge_write_reg(xb, BRIDGE_PCI_CFG,
-		    (bus << 16) | (dev << 11));
-		pa = xb->xb_regh + BRIDGE_PCI_CFG1_SPACE;
-	} else {
-		if (ISSET(xb->xb_flags, XF_PIC)) {
-			/*
-			 * On PIC, device 0 in configuration space is the
-			 * PIC itself, device slots are offset by one.
-			 */
-			pa = xb->xb_regh + BRIDGE_PCI_CFG_SPACE +
-			    ((dev + 1) << 12);
-		} else
-			pa = xb->xb_regh + BRIDGE_PCI_CFG_SPACE + (dev << 12);
-	}
 
 	/*
 	 * IOC3 devices only implement a subset of the PCI configuration
@@ -758,14 +743,37 @@ xbridge_conf_read(void *cookie, pcitag_t tag, int offset)
 	}
 
 	if (skip == 0) {
+		/*
+		 * Disable interrupts on this bridge (especially error
+		 * interrupts).
+		 */
+		s = splhigh();
+		xbridge_write_reg(xb, BRIDGE_IER, 0);
+		(void)xbridge_read_reg(xb, WIDGET_TFLUSH);
+
+		if (bus != 0) {
+			xbridge_write_reg(xb, BRIDGE_PCI_CFG,
+			    (bus << 16) | (dev << 11));
+			pa = xb->xb_regh + BRIDGE_PCI_CFG1_SPACE;
+		} else {
+			/*
+			 * On PIC, device 0 in configuration space is the
+			 * PIC itself, device slots are offset by one.
+			 */
+			if (ISSET(xb->xb_flags, XF_PIC))
+				dev++;
+			pa = xb->xb_regh + BRIDGE_PCI_CFG_SPACE + (dev << 12);
+		}
+
 		pa += (fn << 8) + offset;
 		if (guarded_read_4(pa, &data) != 0)
 			data = 0xffffffff;
+
+		xbridge_write_reg(xb, BRIDGE_IER, xb->xb_ier);
+		(void)xbridge_read_reg(xb, WIDGET_TFLUSH);
+		splx(s);
 	}
 
-	splx(s);
-	xbridge_write_reg(xb, BRIDGE_IER, xb->xb_ier);
-	(void)xbridge_read_reg(xb, WIDGET_TFLUSH);
 	return data;
 }
 
@@ -778,27 +786,7 @@ xbridge_conf_write(void *cookie, pcitag_t tag, int offset, pcireg_t data)
 	int skip;
 	int s;
 
-	/* Disable interrupts on this bridge (especially error interrupts) */
-	xbridge_write_reg(xb, BRIDGE_IER, 0);
-	(void)xbridge_read_reg(xb, WIDGET_TFLUSH);
-	s = splhigh();
-
 	xbridge_decompose_tag(cookie, tag, &bus, &dev, &fn);
-	if (bus != 0) {
-		xbridge_write_reg(xb, BRIDGE_PCI_CFG,
-		    (bus << 16) | (dev << 11));
-		pa = xb->xb_regh + BRIDGE_PCI_CFG1_SPACE;
-	} else {
-		if (ISSET(xb->xb_flags, XF_PIC)) {
-			/*
-			 * On PIC, device 0 in configuration space is the
-			 * PIC itself, device slots are offset by one.
-			 */
-			pa = xb->xb_regh + BRIDGE_PCI_CFG_SPACE +
-			    ((dev + 1) << 12);
-		} else
-			pa = xb->xb_regh + BRIDGE_PCI_CFG_SPACE + (dev << 12);
-	}
 
 	/*
 	 * IOC3 devices only implement a subset of the PCI configuration
@@ -837,13 +825,35 @@ xbridge_conf_write(void *cookie, pcitag_t tag, int offset, pcireg_t data)
 	}
 
 	if (skip == 0) {
+		/*
+		 * Disable interrupts on this bridge (especially error
+		 * interrupts).
+		 */
+		s = splhigh();
+		xbridge_write_reg(xb, BRIDGE_IER, 0);
+		(void)xbridge_read_reg(xb, WIDGET_TFLUSH);
+
+		if (bus != 0) {
+			xbridge_write_reg(xb, BRIDGE_PCI_CFG,
+			    (bus << 16) | (dev << 11));
+			pa = xb->xb_regh + BRIDGE_PCI_CFG1_SPACE;
+		} else {
+			/*
+			 * On PIC, device 0 in configuration space is the
+			 * PIC itself, device slots are offset by one.
+			 */
+			if (ISSET(xb->xb_flags, XF_PIC))
+				dev++;
+			pa = xb->xb_regh + BRIDGE_PCI_CFG_SPACE + (dev << 12);
+		}
+
 		pa += (fn << 8) + offset;
 		guarded_write_4(pa, data);
-	}
 
-	splx(s);
-	xbridge_write_reg(xb, BRIDGE_IER, xb->xb_ier);
-	(void)xbridge_read_reg(xb, WIDGET_TFLUSH);
+		xbridge_write_reg(xb, BRIDGE_IER, xb->xb_ier);
+		(void)xbridge_read_reg(xb, WIDGET_TFLUSH);
+		splx(s);
+	}
 }
 
 int
@@ -1061,7 +1071,7 @@ xbridge_intr_establish(void *cookie, pci_intr_handle_t ih, int level,
 	xih->xih_arg = arg;
 	xih->xih_level = level;
 	xih->xih_device = device;
-	evcount_attach(&xih->xih_count, name, &xi->xi_intrsrc, &evcount_intr);
+	evcount_attach(&xih->xih_count, name, &xi->xi_intrsrc);
 	LIST_INSERT_HEAD(&xi->xi_handlers, xih, xih_nxt);
 
 	if (new) {
@@ -1580,6 +1590,50 @@ xbridge_space_region_mem(bus_space_tag_t t, bus_space_handle_t bsh,
 
 	*nbshp = bsh + offset;
 	return 0;
+}
+
+void
+xbridge_space_barrier(bus_space_tag_t t, bus_space_handle_t h, bus_size_t offs,
+    bus_size_t len, int flags)
+{
+	struct xbpci_softc *xb = (struct xbpci_softc *)t->bus_private;
+	bus_addr_t bpa, start, end;
+	uint d, devmin, devmax;
+
+	__asm__ __volatile__ ("sync" ::: "memory");
+
+	if (flags & BUS_SPACE_BARRIER_WRITE) {
+		/*
+		 * Try to figure out which device we are working for, and
+		 * flush its PCI write buffer.
+		 * This is ugly; we really need to be able to provide a
+		 * different bus_space_tag_t to each slot, to be able
+		 * to tell them apart.
+		 */
+		if (t->_space_map == xbridge_space_map_devio) {
+			bpa = (bus_addr_t)h - xb->xb_regt->bus_base;
+			for (d = 0; d < xb->xb_nslots; d++) {
+				start = PIC_DEVIO_OFFS(xb->xb_busno, d);
+				end = start + BRIDGE_DEVIO_SIZE(d);
+				if (bpa >= start && bpa < end)
+					break;
+			}
+			devmin = d;
+			devmax = d + 1;
+			/* should not happen */
+			if (d == xb->xb_nslots) {
+				devmin = 0;
+				devmax = xb->xb_nslots;
+			}
+		} else {
+			/* nothing better came up my sleeve... */
+			devmin = 0;
+			devmax = xb->xb_nslots;
+		}
+		for (d = devmin; d < devmax; d++)
+			xbridge_read_reg(xb, BRIDGE_DEVICE_WBFLUSH(d));
+		(void)xbridge_read_reg(xb, WIDGET_TFLUSH);
+	}
 }
 
 /*
@@ -3532,7 +3586,7 @@ xbridge_rbus_parent_io(struct pci_attach_args *pa)
 
 		if (start < end) {
 			rb = rbus_new_root_share(pa->pa_iot, ex,
-			    start, end - start, 0);
+			    start, end - start);
 			if (rb != NULL)
 				rb->rb_md = &xbridge_rb_md_fn;
 		}
@@ -3543,7 +3597,7 @@ xbridge_rbus_parent_io(struct pci_attach_args *pa)
 	 * resources, return a valid body which will fail requests.
 	 */
 	if (rb == NULL)
-		rb = rbus_new_body(pa->pa_iot, NULL, 0, 0, 0,
+		rb = rbus_new_body(pa->pa_iot, NULL, 0, 0,
 		    RBUS_SPACE_INVALID);
 
 	return rb;
@@ -3569,7 +3623,7 @@ xbridge_rbus_parent_mem(struct pci_attach_args *pa)
 
 		if (start < ex->ex_end) {
 			rb = rbus_new_root_share(pa->pa_memt, ex,
-			    start, ex->ex_end - start, 0);
+			    start, ex->ex_end - start);
 			if (rb != NULL)
 				rb->rb_md = &xbridge_rb_md_fn;
 		}
@@ -3580,7 +3634,7 @@ xbridge_rbus_parent_mem(struct pci_attach_args *pa)
 	 * resources, return a valid body which will fail requests.
 	 */
 	if (rb == NULL)
-		rb = rbus_new_body(pa->pa_iot, NULL, NULL, 0, 0, 0,
+		rb = rbus_new_body(pa->pa_iot, NULL, 0, 0, 0,
 		    RBUS_SPACE_INVALID);
 
 	return rb;

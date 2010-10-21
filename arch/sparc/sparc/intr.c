@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.c,v 1.32 2009/04/10 20:53:54 miod Exp $ */
+/*	$OpenBSD: intr.c,v 1.36 2010/09/28 18:52:00 deraadt Exp $ */
 /*	$NetBSD: intr.c,v 1.20 1997/07/29 09:42:03 fair Exp $ */
 
 /*
@@ -51,9 +51,6 @@
 
 #include <dev/cons.h>
 
-#include <net/netisr.h>
-#include <net/if.h>
-
 #include <machine/atomic.h>
 #include <machine/cpu.h>
 #include <machine/ctlreg.h>
@@ -62,26 +59,11 @@
 
 #include <sparc/sparc/cpuvar.h>
 
-#ifdef INET
-#include <netinet/in.h>
-#include <netinet/if_ether.h>
-#include <netinet/ip_var.h>
-#endif
-
-#ifdef INET6
-# ifndef INET
-#  include <netinet/in.h>
-# endif
-#include <netinet/ip6.h>
-#include <netinet6/ip6_var.h>
-#endif
-
 extern void raise(int, int);
 
 void	ih_insert(struct intrhand **, struct intrhand *);
 void	ih_remove(struct intrhand **, struct intrhand *);
 
-void	softnet(void *);
 void	strayintr(struct clockframe *);
 
 /*
@@ -177,8 +159,7 @@ void
 intr_init()
 {
 	level10.ih_vec = level10.ih_ipl >> 8;
-	evcount_attach(&level10.ih_count, "clock", &level10.ih_vec,
-	    &evcount_intr);
+	evcount_attach(&level10.ih_count, "clock", &level10.ih_vec);
 	level14.ih_vec = level14.ih_ipl >> 8;
 	evcount_attach(&level14.ih_count, "prof", &level14.ih_vec,
 	    &evcount_intr);
@@ -297,7 +278,7 @@ intr_establish(level, ih, ipl_block, name)
 	ih->ih_vec = ipl_block;
 	ih->ih_ipl = (ipl_block << 8);
 	if (name != NULL)
-		evcount_attach(&ih->ih_count, name, &ih->ih_vec, &evcount_intr);
+		evcount_attach(&ih->ih_count, name, &ih->ih_vec);
 
 	s = splhigh();
 
@@ -465,11 +446,11 @@ softintr_establish(int level, void (*fn)(void *), void *arg)
 	 * to be passed to raise().
 	 * On a sun4 or sun4c, the appropriate bit to set
 	 * in the interrupt enable register is stored, to be
-	 * passed to ienab_bis().
+	 * passed to intreg_set_44c().
 	 */
 	ipl = hw = level;
-#if defined(SUN4) || defined(SUN4C)
-	if (CPU_ISSUN4OR4C) {
+#if defined(SUN4) || defined(SUN4C) || defined(SUN4E)
+	if (CPU_ISSUN4OR4COR4E) {
 		/*
 		 * Select the most suitable of the three available
 		 * softintr levels.
@@ -487,7 +468,8 @@ softintr_establish(int level, void (*fn)(void *), void *arg)
 	}
 #endif
 
-	sih = (struct sintrhand *)malloc(sizeof *sih, M_DEVBUF, M_ZERO);
+	sih = (struct sintrhand *)malloc(sizeof *sih, M_DEVBUF,
+	    M_NOWAIT|M_ZERO);
 	if (sih == NULL)
 		return NULL;
 
@@ -533,43 +515,28 @@ softintr_schedule(void *arg)
 	if (sih->sih_pending == 0) {
 		sih->sih_pending++;
 
+		switch (cputyp) {
+		default:
 #if defined(SUN4M)
-		if (CPU_ISSUN4M)
+		case CPU_SUN4M:
 			raise(0, sih->sih_hw);
+			break;
 #endif
-#if defined(SUN4) || defined(SUN4C)
-		if (CPU_ISSUN4OR4C)
-			ienab_bis(sih->sih_hw);
+#if defined(SUN4) || defined(SUN4C) || defined(SUN4E)
+		case CPU_SUN4:
+		case CPU_SUN4E:
+		case CPU_SUN4C:
+			intreg_set_44c(sih->sih_hw);
+			break;
 #endif
 #if defined(solbourne)
-		if (CPU_ISKAP)
+		case CPU_KAP:
 			ienab_bis(sih->sih_hw);
+			break;
 #endif
+		}
 	}
 	splx(s);
-}
-
-void *softnet_ih;
-int netisr;
-
-void
-softnet(void *arg)
-{
-	int n;
-
-	while ((n = netisr) != 0) {
-		atomic_clearbits_int(&netisr, n);
-
-#define DONETISR(bit, fn)						\
-		do {							\
-			if (n & (1 << bit))				\
-				fn();					\
-		} while (0)
-
-#include <net/netisr_dispatch.h>
-
-#undef DONETISR
-	}
 }
 
 #ifdef DIAGNOSTIC

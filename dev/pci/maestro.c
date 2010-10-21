@@ -1,4 +1,4 @@
-/*	$OpenBSD: maestro.c,v 1.28 2010/04/08 00:23:53 tedu Exp $	*/
+/*	$OpenBSD: maestro.c,v 1.31 2010/09/07 16:21:45 deraadt Exp $	*/
 /* $FreeBSD: /c/ncvs/src/sys/dev/sound/pci/maestro.c,v 1.3 2000/11/21 12:22:11 julian Exp $ */
 /*
  * FreeBSD's ESS Agogo/Maestro driver 
@@ -455,7 +455,6 @@ struct maestro_softc {
 	struct ac97_host_if	host_if;
 	struct audio_device	*sc_audev;
 
-	void			*powerhook;
 	int			suspend;
 
 	struct maestro_channel	play;
@@ -475,6 +474,7 @@ void	salloc_insert(salloc_t, struct salloc_head *,
 
 int	maestro_match(struct device *, void *, void *);
 void	maestro_attach(struct device *, struct device *, void *);
+int	maestro_activate(struct device *, int);
 int	maestro_intr(void *);
 
 int	maestro_open(void *, int);
@@ -510,7 +510,6 @@ void	maestro_initcodec(void *);
 void	maestro_set_speed(struct maestro_channel *, u_long *);
 void	maestro_init(struct maestro_softc *);
 void	maestro_power(struct maestro_softc *, int);
-void	maestro_powerhook(int, void *);
 
 void 	maestro_channel_start(struct maestro_channel *);
 void 	maestro_channel_stop(struct maestro_channel *);
@@ -542,7 +541,8 @@ struct cfdriver maestro_cd = {
 };
 
 struct cfattach maestro_ca = {
-	sizeof (struct maestro_softc), maestro_match, maestro_attach
+	sizeof (struct maestro_softc), maestro_match, maestro_attach,
+	NULL, maestro_activate
 };
 
 struct audio_hw_if maestro_hw_if = {
@@ -765,11 +765,6 @@ maestro_attach(parent, self, aux)
 
 	/* Attach audio */
 	audio_attach_mi(&maestro_hw_if, sc, &sc->dev);
-
-	/* Hook power changes */
-	sc->suspend = PWR_RESUME;
-	sc->powerhook = powerhook_establish(maestro_powerhook, sc);
-
 	return;
 
  bad:
@@ -974,18 +969,18 @@ maestro_query_devinfo(self, cp)
 }
 
 struct audio_encoding maestro_tab[] = { 
-	{0, AudioEslinear_le, AUDIO_ENCODING_SLINEAR_LE, 16, 0},
-	{1, AudioEslinear, AUDIO_ENCODING_SLINEAR, 8, 0},
-	{2, AudioEulinear, AUDIO_ENCODING_ULINEAR, 8, 0},
-	{3, AudioEslinear_be, AUDIO_ENCODING_SLINEAR_BE, 16,
+	{0, AudioEslinear_le, AUDIO_ENCODING_SLINEAR_LE, 16, 2, 1, 0},
+	{1, AudioEslinear, AUDIO_ENCODING_SLINEAR, 8, 1, 1, 0},
+	{2, AudioEulinear, AUDIO_ENCODING_ULINEAR, 8, 1, 1, 0},
+	{3, AudioEslinear_be, AUDIO_ENCODING_SLINEAR_BE, 16, 2, 1,
 	    AUDIO_ENCODINGFLAG_EMULATED},
-	{4, AudioEulinear_le, AUDIO_ENCODING_ULINEAR_LE, 16,
+	{4, AudioEulinear_le, AUDIO_ENCODING_ULINEAR_LE, 16, 2, 1,
 	    AUDIO_ENCODINGFLAG_EMULATED},
-	{5, AudioEulinear_be, AUDIO_ENCODING_ULINEAR_BE, 16,
+	{5, AudioEulinear_be, AUDIO_ENCODING_ULINEAR_BE, 16, 2, 1,
 	    AUDIO_ENCODINGFLAG_EMULATED},
-	{6, AudioEmulaw, AUDIO_ENCODING_ULAW, 8,
+	{6, AudioEmulaw, AUDIO_ENCODING_ULAW, 8, 1, 1,
 	    AUDIO_ENCODINGFLAG_EMULATED},
-	{7, AudioEalaw, AUDIO_ENCODING_ALAW, 8,
+	{7, AudioEalaw, AUDIO_ENCODING_ALAW, 8, 1, 1,
 	    AUDIO_ENCODINGFLAG_EMULATED}
 };
 
@@ -1116,6 +1111,9 @@ maestro_set_params(hdl, setmode, usemode, play, rec)
 		play->sw_code = change_sign16_swap_bytes_le;
 	else if (play->encoding != AUDIO_ENCODING_SLINEAR_LE)
 		return (EINVAL);
+
+	play->bps = AUDIO_BPS(play->precision);
+	play->msb = 1;
 
 	maestro_set_speed(&sc->play, &play->sample_rate);
 	return (0);
@@ -1501,17 +1499,15 @@ maestro_initcodec(self)
  * Power management interface
  */
 
-void
-maestro_powerhook(why, self)
-	int why;
-	void *self;
+int
+maestro_activate(struct device *self, int act)
 {
 	struct maestro_softc *sc = (struct maestro_softc *)self;
 
-	if (why != PWR_RESUME) {
+	switch (act) {
+	case DVACT_SUSPEND:
 		/* Power down device on shutdown. */
 		DPRINTF(("maestro: power down\n"));
-		sc->suspend = why;
 		if (sc->record.mode & MAESTRO_RUNNING) {
 		    	sc->record.current = wp_apu_read(sc, sc->record.num, APUREG_CURPTR);
 			maestro_channel_stop(&sc->record);
@@ -1530,16 +1526,10 @@ maestro_powerhook(why, self)
 		bus_space_write_4(sc->iot, sc->ioh, PORT_RINGBUS_CTRL, 0);
 		DELAY(1);
 		maestro_power(sc, PPMI_D3);
-	} else {
+		break;
+	case DVACT_RESUME:
 		/* Power up device on resume. */
 		DPRINTF(("maestro: power resume\n"));
-		if (sc->suspend == PWR_RESUME) {
-			printf("%s: resume without suspend?\n",
-			    sc->dev.dv_xname);
-			sc->suspend = why;
-			return;
-		}
-		sc->suspend = why;
 		maestro_power(sc, PPMI_D0);
 		DELAY(100000);
 		maestro_init(sc);
@@ -1551,7 +1541,9 @@ maestro_powerhook(why, self)
 		if (sc->record.mode & MAESTRO_RUNNING)
 			maestro_channel_start(&sc->record);
 		maestro_update_timer(sc);
+		break;
 	}
+	return 0;
 }
 
 void

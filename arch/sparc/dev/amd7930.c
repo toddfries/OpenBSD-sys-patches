@@ -1,4 +1,4 @@
-/*	$OpenBSD: amd7930.c,v 1.32 2009/04/10 20:53:51 miod Exp $	*/
+/*	$OpenBSD: amd7930.c,v 1.34 2010/09/20 06:33:47 matthew Exp $	*/
 /*	$NetBSD: amd7930.c,v 1.37 1998/03/30 14:23:40 pk Exp $	*/
 
 /*
@@ -299,7 +299,7 @@ amd7930attach(parent, self, args)
 	if (intr_fasttrap(pri, amd7930_trap, amd7930_shareintr, sc) == 0) {
 		auiop = &sc->sc_au;
 		evcount_attach(&sc->sc_hwih.ih_count, sc->sc_dev.dv_xname,
-		    &sc->sc_hwih.ih_vec, &evcount_intr);
+		    &sc->sc_hwih.ih_vec);
 	} else {
 #ifdef AUDIO_DEBUG
 		printf("%s: unable to register fast trap handler\n",
@@ -389,12 +389,13 @@ amd7930_set_params(addr, setmode, usemode, p, r)
 	int setmode, usemode;
 	struct audio_params *p, *r;
 {
-	if (p->sample_rate < 7500 || p->sample_rate > 8500 ||
-	    p->encoding != AUDIO_ENCODING_ULAW ||
-	    p->precision != 8 ||
-	    p->channels != 1) 
-		return (EINVAL);
-	p->sample_rate = 8000;	/* no other rates supported by amd chip */     
+	p->encoding = AUDIO_ENCODING_ULAW;
+	p->precision = 8;
+	p->bps = 1;
+	p->msb = 1;
+	p->channels = 1; 
+	/* no other rates supported by amd chip */
+	p->sample_rate = 8000;
 
 	return (0);
 }  
@@ -409,6 +410,8 @@ amd7930_query_encoding(addr, fp)
 		strlcpy(fp->name, AudioEmulaw, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_ULAW;
 		fp->precision = 8;
+		fp->bps = 1;
+		fp->msb = 1;
 		fp->flags = 0;
 		break;
 	default:

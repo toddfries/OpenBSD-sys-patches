@@ -1,4 +1,4 @@
-/*	$OpenBSD: bonito.c,v 1.14 2010/05/08 21:59:56 miod Exp $	*/
+/*	$OpenBSD: bonito.c,v 1.17 2010/09/20 06:33:48 matthew Exp $	*/
 /*	$NetBSD: bonito_mainbus.c,v 1.11 2008/04/28 20:23:10 martin Exp $	*/
 /*	$NetBSD: bonito_pci.c,v 1.5 2008/04/28 20:23:28 martin Exp $	*/
 
@@ -80,7 +80,8 @@ int	bonito_match(struct device *, void *, void *);
 void	bonito_attach(struct device *, struct device *, void *);
 
 const struct cfattach bonito_ca = {
-	sizeof(struct bonito_softc), bonito_match, bonito_attach
+	sizeof(struct bonito_softc), bonito_match, bonito_attach,
+	NULL, config_activate_children
 };
 
 struct cfdriver bonito_cd = {
@@ -399,7 +400,7 @@ bonito_intr_establish(int irq, int type, int level, int (*handler)(void *),
 	ih->ih_arg = arg;
 	ih->ih_level = level;
 	ih->ih_irq = irq;
-	evcount_attach(&ih->ih_count, name, (void *)&ih->ih_irq, &evcount_intr);
+	evcount_attach(&ih->ih_count, name, &ih->ih_irq);
 
 	s = splhigh();
 
@@ -995,11 +996,15 @@ bonito_io_map(bus_space_tag_t t, bus_addr_t offs, bus_size_t size, int flags,
     bus_space_handle_t *bshp)
 {
 	const struct legacy_io_range *r;
+	bus_addr_t rend;
 
 	if (offs < BONITO_PCIIO_LEGACY) {
-		size--;
-		for (r = sys_platform->legacy_io_ranges; r->start != 0; r++)
-			if (offs >= r->start && offs + size <= r->end)
+		if ((r = sys_platform->legacy_io_ranges) == NULL)
+			return ENXIO;
+
+		rend = offs + size - 1;
+		for (; r->start != 0; r++)
+			if (offs >= r->start && rend <= r->end)
 				break;
 
 		if (r->end == 0)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_physio.c,v 1.29 2009/06/04 21:27:14 oga Exp $	*/
+/*	$OpenBSD: kern_physio.c,v 1.32 2010/09/22 01:18:57 matthew Exp $	*/
 /*	$NetBSD: kern_physio.c,v 1.28 1997/05/19 10:43:28 pk Exp $	*/
 
 /*-
@@ -68,19 +68,19 @@ void putphysbuf(struct buf *bp);
  * Comments in brackets are from Leffler, et al.'s pseudo-code implementation.
  */
 int
-physio(void (*strategy)(struct buf *), struct buf *bp, dev_t dev, int flags,
+physio(void (*strategy)(struct buf *), dev_t dev, int flags,
     void (*minphys)(struct buf *), struct uio *uio)
 {
 	struct iovec *iovp;
 	struct proc *p = curproc;
-	int error, done, i, nobuf, s, todo;
+	int error, done, i, s, todo;
+	struct buf *bp;
 
 	error = 0;
 	flags &= B_READ | B_WRITE;
 
-	/* Make sure we have a buffer, creating one if necessary. */
-	if ((nobuf = (bp == NULL)) != 0)
-		bp = getphysbuf();
+	/* Create a buffer. */
+	bp = getphysbuf();
 
 	/* [raise the processor priority level to splbio;] */
 	s = splbio();
@@ -113,6 +113,8 @@ physio(void (*strategy)(struct buf *), struct buf *bp, dev_t dev, int flags,
 	for (i = 0; i < uio->uio_iovcnt; i++) {
 		iovp = &uio->uio_iov[i];
 		while (iovp->iov_len > 0) {
+			void *map = NULL;
+
 			/*
 			 * [mark the buffer busy for physical I/O]
 			 * (i.e. set B_PHYS (because it's an I/O to user
@@ -124,7 +126,6 @@ physio(void (*strategy)(struct buf *), struct buf *bp, dev_t dev, int flags,
 
 			/* [set up the buffer for a maximum-sized transfer] */
 			bp->b_blkno = btodb(uio->uio_offset);
-			bp->b_data = iovp->iov_base;
 
 			/*
 			 * Because iov_len is unsigned but b_bcount is signed,
@@ -157,15 +158,20 @@ physio(void (*strategy)(struct buf *), struct buf *bp, dev_t dev, int flags,
 			 * saves it in b_saveaddr.  However, vunmapbuf()
 			 * restores it.
 			 */
-			error = uvm_vslock(p, bp->b_data, todo,
+			error = uvm_vslock_device(p, iovp->iov_base, todo,
 			    (flags & B_READ) ?
-			    VM_PROT_READ | VM_PROT_WRITE : VM_PROT_READ);
+			    VM_PROT_READ | VM_PROT_WRITE : VM_PROT_READ, &map);
 			if (error) {
 				bp->b_flags |= B_ERROR;
 				bp->b_error = error;
 				goto after_unlock;
 			}
-			vmapbuf(bp, todo);
+			if (map) {
+				bp->b_data = map;
+			} else {
+				bp->b_data = iovp->iov_base;
+				vmapbuf(bp, todo);
+			}
 
 			/* [call strategy to start the transfer] */
 			(*strategy)(bp);
@@ -194,8 +200,9 @@ physio(void (*strategy)(struct buf *), struct buf *bp, dev_t dev, int flags,
 			 * [unlock the part of the address space previously
 			 *    locked]
 			 */
-			vunmapbuf(bp, todo);
-			uvm_vsunlock(p, bp->b_data, todo);
+			if (!map)
+				vunmapbuf(bp, todo);
+			uvm_vsunlock_device(p, iovp->iov_base, todo, map);
 after_unlock:
 
 			/* remember error value (save a splbio/splx pair) */
@@ -235,18 +242,7 @@ done:
 	 */
 	s = splbio();
 	bp->b_flags &= ~(B_BUSY | B_PHYS | B_RAW);
-	if (nobuf)
-		putphysbuf(bp);
-	else {
-		/*
-		 * [if another process is waiting for the raw I/O buffer,
-		 *    wake up processes waiting to do physical I/O]
-		 */
-		if (bp->b_flags & B_WANTED) {
-			bp->b_flags &= ~B_WANTED;
-			wakeup(bp);
-		}
-	}
+	putphysbuf(bp);
 	splx(s);
 
 	return (error);
@@ -262,12 +258,8 @@ struct buf *
 getphysbuf(void)
 {
 	struct buf *bp;
-	int s;
 
-	s = splbio();
 	bp = pool_get(&bufpool, PR_WAITOK | PR_ZERO);
-	splx(s);
-
 	bp->b_vnbufs.le_next = NOLIST;
 
 	return (bp);

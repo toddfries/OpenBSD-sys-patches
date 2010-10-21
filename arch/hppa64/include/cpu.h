@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.16 2009/11/25 23:18:14 jsing Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.18 2010/09/28 20:27:54 miod Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -110,9 +110,6 @@
 #define	splx(c)		spllower(c)
 
 #define	setsoftast()		(astpending = 1)
-#define	setsoftclock()		/* TODO */
-#define	setsoftnet()		/* TODO */
-#define	setsofttty()		/* TODO */
 
 #ifndef _LOCORE
 #include <sys/time.h>
@@ -135,6 +132,11 @@ struct cpu_info {
 	/* Spinning up the CPU */
 	void		(*ci_spinup)(void); /* spinup routine */
 	void		*ci_initstack;
+
+	u_long		ci_itmr;
+#ifdef DIAGNOSTIC
+	int		ci_mutex_level;
+#endif
 };
 
 struct cpu_info *curcpu(void);

@@ -1,4 +1,4 @@
-#	$OpenBSD: files,v 1.492 2010/06/08 12:46:49 jsing Exp $
+#	$OpenBSD: files,v 1.504 2010/10/06 22:19:20 mikeb Exp $
 #	$NetBSD: files,v 1.87 1996/05/19 17:17:50 jonathan Exp $
 
 #	@(#)files.newconf	7.5 (Berkeley) 5/10/93
@@ -15,7 +15,6 @@ define	atascsi {}
 define	ifmedia
 define	mii {[phy = -1]}
 define	midibus {}
-define	midisyn
 define	radiobus {}
 define	i2cbus {}
 define	gpiobus {}
@@ -324,11 +323,6 @@ file	dev/ic/pckbc.c			pckbc needs-flag
 device	pcfiic: i2cbus
 file	dev/ic/pcf8584.c		pcfiic
 
-# OPL2/OPL3 FM synth driver
-device	opl: midibus, midisyn
-file	dev/ic/opl.c			opl
-file	dev/ic/oplinstrs.c		opl
-
 # AC-97 CODECs
 define	ac97
 file	dev/ic/ac97.c			ac97
@@ -523,6 +517,7 @@ pseudo-device crypto: ifnet
 pseudo-device trunk: ifnet, ether, ifmedia
 pseudo-device mpe: ifnet, ether
 pseudo-device vether: ifnet, ether
+pseudo-device pppx: ifnet
 
 pseudo-device sequencer
 pseudo-device systrace
@@ -605,7 +600,6 @@ file dev/ic/lm700x.c			lm700x
 file dev/ic/tc921x.c			tc921x
 file dev/ic/pt2254a.c			pt2254a
 file dev/midi.c				midi | midibus		needs-flag
-file dev/midisyn.c			midisyn
 file dev/mulaw.c			mulaw
 file dev/sequencer.c			sequencer		needs-flag
 file dev/systrace.c			systrace		needs-flag
@@ -731,6 +725,7 @@ file kern/subr_evcount.c
 file kern/subr_extent.c
 file kern/subr_log.c
 file kern/subr_pool.c
+file kern/dma_alloc.c
 file kern/subr_prf.c
 file kern/subr_prof.c
 file kern/subr_userconf.c		boot_config
@@ -812,6 +807,7 @@ file net/if_loop.c			loop
 file net/if_media.c			ifmedia
 file net/if_sl.c			sl			needs-count
 file net/if_ppp.c			ppp			needs-count
+file net/netisr.c
 file net/ppp_tty.c			ppp
 file net/bsd-comp.c			ppp_bsdcomp
 file net/ppp-deflate.c			ppp_deflate
@@ -834,6 +830,7 @@ file net/if_trunk.c			trunk			needs-count
 file net/trunklacp.c			trunk
 file net/if_mpe.c			mpe			needs-count
 file net/if_vether.c			vether			needs-count
+file net/if_pppx.c			pppx			needs-count
 file net/if_aoe.c			ether & aoe
 file net80211/ieee80211.c		wlan
 file net80211/ieee80211_amrr.c		wlan
@@ -889,7 +886,6 @@ file crypto/sha1.c			(inet & ipsec) | crypto | carp | wlan
 file crypto/sha2.c			(inet & ipsec) | crypto | wlan
 file crypto/blf.c			(inet & ipsec) | crypto | vnd
 file crypto/cast.c			(inet & ipsec) | crypto
-file crypto/skipjack.c			(inet & ipsec) | crypto
 file crypto/ecb_enc.c			(inet & ipsec) | crypto
 file crypto/set_key.c			(inet & ipsec) | crypto
 file crypto/ecb3_enc.c			(inet & ipsec) | crypto
@@ -903,6 +899,7 @@ file crypto/arc4.c
 file crypto/michael.c			wlan
 file crypto/cmac.c			wlan
 file crypto/hmac.c			wlan | (softraid & crypto)
+file crypto/gmac.c			(inet & ipsec) | crypto
 file crypto/key_wrap.c			wlan
 file crypto/idgen.c			inet6 | nfsclient | nfsserver
 file netatalk/aarp.c			netatalk
@@ -1063,19 +1060,14 @@ file compat/common/compat_exec.c	!small_kernel
 file compat/common/compat_util.c	!small_kernel
 file compat/common/compat_dir.c		!small_kernel
 file compat/common/compat_vm.c		!small_kernel &
-	(compat_freebsd | compat_bsdos | compat_sunos | compat_hpux | compat_linux)
+	(compat_freebsd | compat_linux)
 file compat/common/kern_info_09.c	!small_kernel &
-	(compat_freebsd | compat_ibcs2 | compat_sunos | compat_hpux |
-	compat_osf1 | compat_linux)
-file compat/common/kern_ipc_10.c	!small_kernel &
-	(compat_freebsd | compat_ibcs2 | compat_sunos | compat_hpux | compat_bsdos)
-file compat/common/vfs_syscalls_25.c	!small_kernel &
-	(compat_freebsd | compat_bsdos | compat_sunos | compat_hpux)
+	(compat_freebsd | compat_linux)
+file compat/common/kern_ipc_10.c	!small_kernel & compat_freebsd
+file compat/common/vfs_syscalls_25.c	!small_kernel & compat_freebsd
 file compat/common/vfs_syscalls_35.c	!small_kernel & (compat_35 |
-	compat_freebsd | compat_bsdos | compat_sunos | compat_hpux)
-file compat/common/vfs_syscalls_o43.c	!small_kernel & compat_o43
+	compat_freebsd )
 file compat/common/kern_ipc_35.c	!small_kernel & compat_35
-file compat/common/kern_ipc_23.c	!small_kernel & compat_23
 file compat/common/kern_exit_43.c	!small_kernel
 file compat/common/kern_info_43.c	!small_kernel
 file compat/common/kern_resource_43.c	!small_kernel
@@ -1093,6 +1085,7 @@ file dev/x86emu/x86emu_util.c		x86emu
 file lib/libkern/mcount.c		gprof
 file lib/libkern/getsn.c
 file lib/libkern/random.c
+file lib/libkern/timingsafe_bcmp.c
 file lib/libkern/arch/${MACHINE_ARCH}/strchr.S | lib/libkern/strchr.c
 file lib/libkern/arch/${MACHINE_ARCH}/strrchr.S | lib/libkern/strrchr.c
 file lib/libkern/arch/${MACHINE_ARCH}/__main.S | lib/libkern/__main.c

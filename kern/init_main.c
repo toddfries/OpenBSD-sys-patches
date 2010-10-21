@@ -1,4 +1,4 @@
-/*	$OpenBSD: init_main.c,v 1.167 2010/05/14 18:47:56 kettenis Exp $	*/
+/*	$OpenBSD: init_main.c,v 1.171 2010/09/08 14:15:56 jsing Exp $	*/
 /*	$NetBSD: init_main.c,v 1.84.4.1 1996/06/02 09:08:06 mrg Exp $	*/
 
 /*
@@ -89,6 +89,7 @@
 
 #include <net/if.h>
 #include <net/raw_cb.h>
+#include <net/netisr.h>
 
 #if defined(CRYPTO)
 #include <crypto/cryptodev.h>
@@ -140,7 +141,7 @@ void	start_init(void *);
 void	start_cleaner(void *);
 void	start_update(void *);
 void	start_reaper(void *);
-void	init_crypto(void);
+void	crypto_init(void);
 void	init_exec(void);
 void	kqueue_init(void);
 void	workq_init(void);
@@ -184,6 +185,7 @@ int
 main(void *framep)
 {
 	struct proc *p;
+	struct process *pr;
 	struct pdevinit *pdev;
 	struct timeval rtv;
 	quad_t lim;
@@ -263,21 +265,21 @@ main(void *framep)
 	TAILQ_INIT(&process0.ps_threads);
 	TAILQ_INSERT_TAIL(&process0.ps_threads, p, p_thr_link);
 	process0.ps_refcnt = 1;
-	p->p_p = &process0;
+	p->p_p = pr = &process0;
 
-	/* Set the default routing domain. */
-	process0.ps_rdomain = 0;
+	/* Set the default routing table/domain. */
+	process0.ps_rtableid = 0;
 
 	LIST_INSERT_HEAD(&allproc, p, p_list);
-	p->p_pgrp = &pgrp0;
+	pr->ps_pgrp = &pgrp0;
 	LIST_INSERT_HEAD(PIDHASH(0), p, p_hash);
 	LIST_INSERT_HEAD(PGRPHASH(0), &pgrp0, pg_hash);
 	LIST_INIT(&pgrp0.pg_members);
-	LIST_INSERT_HEAD(&pgrp0.pg_members, p, p_pglist);
+	LIST_INSERT_HEAD(&pgrp0.pg_members, pr, ps_pglist);
 
 	pgrp0.pg_session = &session0;
 	session0.s_count = 1;
-	session0.s_leader = p;
+	session0.s_leader = pr;
 
 	atomic_setbits_int(&p->p_flag, P_SYSTEM | P_NOCLDWAIT);
 	p->p_stat = SONPROC;
@@ -290,7 +292,6 @@ main(void *framep)
 	timeout_set(&p->p_realit_to, realitexpire, p);
 
 	/* Create credentials. */
-	cred0.p_refcnt = 1;
 	p->p_cred = &cred0;
 	p->p_ucred = crget();
 	p->p_ucred->cr_ngroups = 1;	/* group 0 */
@@ -304,7 +305,7 @@ main(void *framep)
 	p->p_fd = fdinit(NULL);
 
 	/* Create the limits structures. */
-	p->p_p->ps_limit = &limit0;
+	pr->ps_limit = &limit0;
 	for (i = 0; i < nitems(p->p_rlimit); i++)
 		limit0.pl_rlimit[i].rlim_cur =
 		    limit0.pl_rlimit[i].rlim_max = RLIM_INFINITY;
@@ -387,6 +388,7 @@ main(void *framep)
 			(*pdev->pdev_attach)(pdev->pdev_count);
 
 #ifdef CRYPTO
+	crypto_init();
 	swcr_init();
 #endif /* CRYPTO */
 	
@@ -395,6 +397,7 @@ main(void *framep)
 	 * until everything is ready.
 	 */
 	s = splnet();
+	netisr_init();
 	domaininit();
 	if_attachdomain();
 	splx(s);
@@ -523,11 +526,6 @@ main(void *framep)
 	/* Create the aiodone daemon kernel thread. */ 
 	if (kthread_create(uvm_aiodone_daemon, NULL, NULL, "aiodoned"))
 		panic("fork aiodoned");
-
-#ifdef CRYPTO
-	/* Create the crypto kernel thread. */
-	init_crypto();
-#endif /* CRYPTO */
 
 	microtime(&rtv);
 	srandom((u_int32_t)(rtv.tv_sec ^ rtv.tv_usec) ^ arc4random());

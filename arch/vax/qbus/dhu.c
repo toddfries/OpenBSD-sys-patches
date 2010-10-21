@@ -1,4 +1,4 @@
-/*	$OpenBSD: dhu.c,v 1.16 2010/04/12 12:57:52 tedu Exp $	*/
+/*	$OpenBSD: dhu.c,v 1.19 2010/09/20 06:33:48 matthew Exp $	*/
 /*	$NetBSD: dhu.c,v 1.19 2000/06/04 06:17:01 matt Exp $	*/
 /*
  * Copyright (c) 2003, Hugh Graham.
@@ -243,7 +243,7 @@ dhu_attach(parent, self, aux)
 
 	for (i = 0; i < sc->sc_lines; i++) {
 		struct tty *tp;
-		tp = sc->sc_dhu[i].dhu_tty = ttymalloc();
+		tp = sc->sc_dhu[i].dhu_tty = ttymalloc(0);
 		sc->sc_dhu[i].dhu_state = STATE_IDLE;
 		bus_dmamap_create(sc->sc_dmat, tp->t_outq.c_cn, 1, 
 		    tp->t_outq.c_cn, 0, BUS_DMA_ALLOCNOW|BUS_DMA_NOWAIT,
@@ -261,11 +261,9 @@ dhu_attach(parent, self, aux)
 	    dhuxint, sc, &sc->sc_tintrcnt);
 
 	sc->sc_rcvec = ua->ua_cvec;
-	evcount_attach(&sc->sc_rintrcnt, sc->sc_dev.dv_xname,
-	    (void *)&sc->sc_rcvec, &evcount_intr);
+	evcount_attach(&sc->sc_rintrcnt, sc->sc_dev.dv_xname, &sc->sc_rcvec);
 	sc->sc_tcvec = ua->ua_cvec + 4;
-	evcount_attach(&sc->sc_tintrcnt, sc->sc_dev.dv_xname,
-	    (void *)&sc->sc_tcvec, &evcount_intr);
+	evcount_attach(&sc->sc_tintrcnt, sc->sc_dev.dv_xname, &sc->sc_tcvec);
 }
 
 /* Receiver Interrupt */
@@ -639,13 +637,7 @@ dhustart(tp)
 
 	if (tp->t_state & (TS_TIMEOUT|TS_BUSY|TS_TTSTOP))
 		goto out;
-	if (tp->t_outq.c_cc <= tp->t_lowat) {
-		if (tp->t_state & TS_ASLEEP) {
-			tp->t_state &= ~TS_ASLEEP;
-			wakeup((caddr_t)&tp->t_outq);
-		}
-		selwakeup(&tp->t_wsel);
-	}
+	ttwakeupwr(tp);
 	if (tp->t_outq.c_cc == 0)
 		goto out;
 	cc = ndqb(&tp->t_outq, 0);

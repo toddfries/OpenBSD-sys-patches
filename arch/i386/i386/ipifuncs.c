@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipifuncs.c,v 1.16 2010/04/07 06:33:06 kettenis Exp $	*/
+/*	$OpenBSD: ipifuncs.c,v 1.19 2010/10/02 23:14:33 deraadt Exp $	*/
 /* $NetBSD: ipifuncs.c,v 1.1.2.3 2000/06/26 02:04:06 sommerfeld Exp $ */
 
 /*-
@@ -100,7 +100,9 @@ i386_ipi_nop(struct cpu_info *ci)
 void
 i386_ipi_halt(struct cpu_info *ci)
 {
+	SCHED_ASSERT_UNLOCKED();
 	disable_intr();
+	wbinvd();
 	ci->ci_flags &= ~CPUF_RUNNING;
 	wbinvd();
 
@@ -113,13 +115,15 @@ i386_ipi_halt(struct cpu_info *ci)
 void
 i386_ipi_flush_fpu(struct cpu_info *ci)
 {
-	npxsave_cpu(ci, 0);
+	if (ci->ci_fpsaveproc == ci->ci_fpcurproc)
+		npxsave_cpu(ci, 0);
 }
 
 void
 i386_ipi_synch_fpu(struct cpu_info *ci)
 {
-	npxsave_cpu(ci, 1);
+	if (ci->ci_fpsaveproc == ci->ci_fpcurproc)
+		npxsave_cpu(ci, 1);
 }
 #endif
 

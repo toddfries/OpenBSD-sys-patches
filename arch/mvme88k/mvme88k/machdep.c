@@ -1,4 +1,4 @@
-/* $OpenBSD: machdep.c,v 1.235 2009/08/11 19:17:16 miod Exp $	*/
+/* $OpenBSD: machdep.c,v 1.238 2010/09/20 06:33:47 matthew Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -81,8 +81,7 @@
 
 #include <dev/cons.h>
 
-#include <uvm/uvm_extern.h>
-#include <uvm/uvm_swap.h>
+#include <uvm/uvm.h>
 
 #include "ksyms.h"
 #if DDB
@@ -160,6 +159,14 @@ int bufpages = BUFPAGES;
 int bufpages = 0;
 #endif
 int bufcachepercent = BUFCACHEPERCENT;
+
+/*
+ * 32 or 34 bit physical address bus depending upon the CPU flavor.
+ * 32 bit DMA. "I am not aware of any system where the upper 2 bits
+ * have ever been used" - miod@
+ */
+struct uvm_constraint_range  dma_constraint = { 0x0, 0xffffffffUL};
+struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
 
 /*
  * Info for CTL_HW
@@ -770,8 +777,7 @@ intr_establish(int vec, struct intrhand *ih, const char *name)
 		}
 	}
 
-	evcount_attach(&ih->ih_count, name, (void *)&ih->ih_ipl,
-	    &evcount_intr);
+	evcount_attach(&ih->ih_count, name, &ih->ih_ipl);
 	SLIST_INSERT_HEAD(list, ih, ih_link);
 
 #ifdef MVME188

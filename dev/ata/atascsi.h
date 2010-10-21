@@ -1,4 +1,4 @@
-/*	$OpenBSD: atascsi.h,v 1.41 2010/05/05 11:33:26 dlg Exp $ */
+/*	$OpenBSD: atascsi.h,v 1.44 2010/09/23 11:41:54 dlg Exp $ */
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>
@@ -32,11 +32,13 @@ struct scsi_link;
 #define ATA_C_IDENTIFY_PACKET	0xa1
 #define ATA_C_READDMA		0xc8
 #define ATA_C_WRITEDMA		0xca
+#define ATA_C_STANDBY_IMMED	0xe0
 #define ATA_C_FLUSH_CACHE	0xe7
 #define ATA_C_FLUSH_CACHE_EXT	0xea /* lba48 */
 #define ATA_C_IDENTIFY		0xec
 #define ATA_C_SET_FEATURES	0xef
 #define ATA_C_SEC_FREEZE_LOCK	0xf5
+#define ATA_C_DSM		0x06
 
 /*
  * ATA SET FEATURES subcommands
@@ -85,7 +87,12 @@ struct ata_identify {
 	u_int16_t	typtime[2];	/*  71 */
 	u_int16_t	reserved5[2];	/*  73 */
 	u_int16_t	qdepth;		/*  75 */
+#define ATA_QDEPTH(_q)		(((_q) & 0x1f) + 1)
 	u_int16_t	satacap;	/*  76 */
+#define ATA_SATACAP_GEN1	0x0002
+#define ATA_SATACAP_GEN2	0x0004
+#define ATA_SATACAP_NCQ		0x0100
+#define ATA_SATACAP_PWRMGMT	0x0200
 	u_int16_t	reserved6;	/*  77 */
 	u_int16_t	satafsup;	/*  78 */
 	u_int16_t	satafen;	/*  79 */
@@ -155,6 +162,11 @@ struct ata_identify {
  */
 #define ATA_IDENTIFY_WRITECACHE		(1 << 5)
 #define ATA_IDENTIFY_LOOKAHEAD		(1 << 6)
+
+/*
+ * ATA DSM (Data Set Management) subcommands
+ */
+#define ATA_DSM_TRIM		0x01
 
 /*
  * Frame Information Structures

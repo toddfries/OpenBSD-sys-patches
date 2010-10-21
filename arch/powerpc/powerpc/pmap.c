@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.114 2010/04/24 17:56:06 kettenis Exp $ */
+/*	$OpenBSD: pmap.c,v 1.117 2010/08/07 03:50:01 krw Exp $ */
 
 /*
  * Copyright (c) 2001, 2002, 2007 Dale Rahn.
@@ -78,7 +78,6 @@
 #include <sys/malloc.h>
 #include <sys/proc.h>
 #include <sys/queue.h>
-#include <sys/user.h>
 #include <sys/systm.h>
 #include <sys/pool.h>
 
@@ -244,7 +243,7 @@ pmap_hash_lock(int entry)
 		if (pmap_hash_lock_word & (1 << entry)) {
 			attempt++;
 			if(attempt >0x20000000)
-				panic("unable to obtain lock on entry %d\n",
+				panic("unable to obtain lock on entry %d",
 				    entry);
 			continue;
 		}
@@ -794,7 +793,7 @@ _pmap_kenter_pa(vaddr_t va, paddr_t pa, vm_prot_t prot, int flags, int cache)
 
 	/* Do not have pted for this, get one and put it in VP */
 	if (pted == NULL) {
-		panic("pted not preallocated in pmap_kernel() va %lx pa %lx\n",
+		panic("pted not preallocated in pmap_kernel() va %lx pa %lx",
 		    va, pa);
 	}
 
@@ -1302,11 +1301,8 @@ pmap_t
 pmap_create()
 {
 	pmap_t pmap;
-	int s;
 
-	s = splvm();
 	pmap = pool_get(&pmap_pmap_pool, PR_WAITOK);
-	splx(s);
 	pmap_pinit(pmap);
 	return (pmap);
 }
@@ -1330,7 +1326,6 @@ void
 pmap_destroy(pmap_t pm)
 {
 	int refs;
-	int s;
 
 	/* simple_lock(&pmap->pm_obj.vmobjlock); */
 	refs = --pm->pm_refs;
@@ -1342,9 +1337,7 @@ pmap_destroy(pmap_t pm)
 	 * reference count is zero, free pmap resources and free pmap.
 	 */
 	pmap_release(pm);
-	s = splvm();
 	pool_put(&pmap_pmap_pool, pm);
-	splx(s);
 }
 
 /*

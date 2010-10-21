@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.117 2010/06/10 17:54:13 deraadt Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.121 2010/08/07 03:50:01 krw Exp $	*/
 /*	$NetBSD: machdep.c,v 1.4 1996/10/16 19:33:11 ws Exp $	*/
 
 /*
@@ -52,7 +52,7 @@
 #include <sys/core.h>
 #include <sys/kcore.h>
 
-#include <uvm/uvm_extern.h>
+#include <uvm/uvm.h>
 
 #include <dev/cons.h>
 
@@ -105,6 +105,9 @@ int bufpages = BUFPAGES;
 int bufpages = 0;
 #endif
 int bufcachepercent = BUFCACHEPERCENT;
+
+struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
+struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
 
 struct bat battable[16];
 
@@ -634,6 +637,8 @@ sys_sigreturn(struct proc *p, void *v, register_t *retval)
 	if ((error = copyin(SCARG(uap, sigcntxp), &sc, sizeof sc)))
 		return error;
 	tf = trapframe(p);
+	sc.sc_frame.srr1 &= ~PSL_VEC;
+	sc.sc_frame.srr1 |= (tf->srr1 & PSL_VEC);
 	if ((sc.sc_frame.srr1 & PSL_USERSTATIC) != (tf->srr1 & PSL_USERSTATIC))
 		return EINVAL;
 	bcopy(&sc.sc_frame, tf, sizeof *tf);
@@ -1040,7 +1045,7 @@ intr_send_ipi_t *intr_send_ipi_func = ppc_no_send_ipi;
 void
 ppc_no_send_ipi(struct cpu_info *ci, int id)
 {
-	panic("ppc_send_ipi called: no ipi function\n");
+	panic("ppc_send_ipi called: no ipi function");
 }
 
 void

@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.157 2010/05/26 03:26:59 deraadt Exp $
+#	$OpenBSD: GENERIC,v 1.168 2010/10/18 15:01:21 claudio Exp $
 #
 #	Machine-independent option; used by all architectures for their
 #	GENERIC kernel
@@ -15,9 +15,7 @@ option		KTRACE		# system call tracing, a la ktrace(1)
 option		ACCOUNTING	# acct(2) process accounting
 option		KMEMSTATS	# collect malloc(9) statistics
 option		PTRACE		# ptrace(2) system call
-option		RTHREADS
 
-#option		PAGEFASTRECYCLE	# fast physical page recycling
 #option		KVA_GUARDPAGES	# slow virtual address recycling (+ guarding)
 option		POOL_DEBUG	# pool corruption detection 
 #option		VFSDEBUG	# VFS locking checks
@@ -31,7 +29,7 @@ option		SYSVSHM		# System V-like memory sharing
 option		UVM_SWAP_ENCRYPT# support encryption of pages going to swap
 
 option		COMPAT_43	# Kernel compatibility with 4.3BSD
-option		COMPAT_O43	# and OpenBSD 4.3
+option		COMPAT_O47	# Compatibility with OpenBSD 4.7
 
 option		LKM		# loadable kernel modules
 
@@ -66,13 +64,13 @@ option		IPSEC		# IPsec
 #option		NETATALK	# AppleTalk
 option		PPP_BSDCOMP	# PPP BSD compression
 option		PPP_DEFLATE
-#option		PIPEX		# Pppac IP EXtension, for npppd
+option		PIPEX		# Pppac IP EXtension, for npppd
 option		MROUTING	# Multicast router
 #option		PIM		# Protocol Independent Multicast
 option		MPLS		# Multi-Protocol Label Switching
 
-#mpath0		at root		# SCSI Multipathing
-#scsibus*	at mpath?
+mpath0		at root		# SCSI Multipathing
+scsibus*	at mpath?
 
 softraid0	at root		# Software RAID
 scsibus*	at softraid?
@@ -84,13 +82,13 @@ pseudo-device	pf		# packet filter
 pseudo-device	pflog		# pf log if
 pseudo-device	pfsync		# pf sync if
 pseudo-device	pflow		# pflow export if
-pseudo-device	enc	1	# option IPSEC needs the encapsulation interface
+pseudo-device	enc		# option IPSEC needs the encapsulation interface
 
 pseudo-device	pty	16	# initial number of pseudo-terminals
 pseudo-device	nmea	1	# NMEA 0183 line discipline
 pseudo-device	msts	1	# MSTS line discipline
 pseudo-device	endrun	1	# EndRun line discipline
-pseudo-device	vnd	4	# paging to files
+pseudo-device	vnd	4	# vnode disk devices
 pseudo-device	ccd	4	# concatenated disk devices
 pseudo-device	ksyms	1	# kernel symbols device
 pseudo-device	systrace 1	# system call tracing device
@@ -105,6 +103,7 @@ pseudo-device	loop		# network loopback
 pseudo-device	mpe		# MPLS PE interface
 pseudo-device	ppp		# PPP
 pseudo-device	pppoe		# PPP over Ethernet (RFC 2516)
+#pseudo-device	pppx 		# PPP multiplexer
 pseudo-device	sl		# CSLIP
 pseudo-device	sppp	1	# Sync PPP/HDLC
 pseudo-device	trunk		# Trunking support

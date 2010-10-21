@@ -37,6 +37,7 @@
 int	radeondrm_probe(struct device *, void *, void *);
 void	radeondrm_attach(struct device *, struct device *, void *);
 int	radeondrm_detach(struct device *, int);
+int	radeondrm_activate(struct device *, int);
 int	radeondrm_ioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
 
 int radeon_no_wb;
@@ -486,7 +487,7 @@ const static struct drm_pcidev radeondrm_pciidlist[] = {
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD3450,
 	    CHIP_RV620|RADEON_NEW_MEMMAP},
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD3470,
-	    CHIP_RV620||RADEON_NEW_MEMMAP},
+	    CHIP_RV620|RADEON_NEW_MEMMAP},
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD2600_PRO,
 	    CHIP_RV630|RADEON_NEW_MEMMAP},
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD2600_XT,
@@ -501,6 +502,8 @@ const static struct drm_pcidev radeondrm_pciidlist[] = {
 	    CHIP_RV670|RADEON_NEW_MEMMAP},
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD3200_1,
 	    CHIP_RS780|RADEON_NEW_MEMMAP|RADEON_IS_IGP},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD3200_2,
+	    CHIP_RS780|RADEON_NEW_MEMMAP|RADEON_IS_IGP},
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD3300,
 	    CHIP_RS780|RADEON_NEW_MEMMAP|RADEON_IS_IGP},
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD4350,
@@ -509,12 +512,20 @@ const static struct drm_pcidev radeondrm_pciidlist[] = {
 	    CHIP_RV710|RADEON_IS_MOBILITY|RADEON_NEW_MEMMAP},
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD4650,
 	    CHIP_RV730|RADEON_NEW_MEMMAP},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD4670,
+	    CHIP_RV730|RADEON_NEW_MEMMAP},
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD4850,
 	    CHIP_RV770|RADEON_NEW_MEMMAP},
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD4870,
 	    CHIP_RV770|RADEON_NEW_MEMMAP},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD4870_M98,
+	    CHIP_RV770|RADEON_IS_MOBILITY|RADEON_NEW_MEMMAP},
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD4890,
 	    CHIP_RV770|RADEON_NEW_MEMMAP},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD4200,
+	    CHIP_RS880|RADEON_NEW_MEMMAP|RADEON_IS_IGP},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD4200_M,
+	    CHIP_RS880|RADEON_IS_MOBILITY|RADEON_NEW_MEMMAP|RADEON_IS_IGP},
         {0, 0, 0}
 };
 
@@ -654,9 +665,40 @@ radeondrm_detach(struct device *self, int flags)
 	return (0);
 }
 
+int
+radeondrm_activate(struct device *arg, int act)
+{
+	struct drm_radeon_private *dev_priv = (struct drm_radeon_private *)arg;
+	struct drm_device	*dev = (struct drm_device *)dev_priv->drmdev;
+
+	switch (act) {
+	case DVACT_SUSPEND:
+		/* Interrupts still not supported on r600 */
+		if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600 ||
+		    dev->irq_enabled == 0)
+			break;
+		if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_RS690)
+			RADEON_WRITE(R500_DxMODE_INT_MASK, 0);
+		RADEON_WRITE(RADEON_GEN_INT_CNTL, 0);
+		break;
+	case DVACT_RESUME:
+		/* Interrupts still not supported on r600 */
+		if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600 ||
+		    dev->irq_enabled == 0)
+			break;
+		if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_RS690)
+			RADEON_WRITE(R500_DxMODE_INT_MASK,
+			    dev_priv->r500_disp_irq_reg);
+		RADEON_WRITE(RADEON_GEN_INT_CNTL, dev_priv->irq_enable_reg);
+		break;
+	}
+
+	return (0);
+}
+
 struct cfattach radeondrm_ca = {
         sizeof (drm_radeon_private_t), radeondrm_probe, radeondrm_attach, 
-	radeondrm_detach
+	radeondrm_detach, radeondrm_activate
 }; 
 
 struct cfdriver radeondrm_cd = {

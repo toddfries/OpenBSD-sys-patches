@@ -1,4 +1,4 @@
-/*	$OpenBSD: uhcivar.h,v 1.22 2009/11/04 19:14:10 kettenis Exp $ */
+/*	$OpenBSD: uhcivar.h,v 1.23 2010/09/07 16:21:46 deraadt Exp $ */
 /*	$NetBSD: uhcivar.h,v 1.36 2002/12/31 00:39:11 augustss Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/uhcivar.h,v 1.14 1999/11/17 22:33:42 n_hibma Exp $	*/
 
@@ -90,6 +90,8 @@ struct uhci_soft_td {
 	uhci_td_t td;			/* The real TD, must be first */
 	uhci_soft_td_qh_t link; 	/* soft version of the td_link field */
 	uhci_physaddr_t physaddr;	/* TD's physical address. */
+	usb_dma_t dma;			/* TD's DMA infos */
+	int offs;			/* TD's offset in usb_dma_t */
 };
 /*
  * Make the size such that it is a multiple of UHCI_TD_ALIGN.  This way
@@ -109,6 +111,8 @@ struct uhci_soft_qh {
 	uhci_soft_td_t *elink;		/* soft version of qh_elink */
 	uhci_physaddr_t physaddr;	/* QH's physical address. */
 	int pos;			/* Timeslot position */
+	usb_dma_t dma;			/* QH's DMA infos */
+	int offs;			/* QH's offset in usb_dma_t */
 };
 /* See comment about UHCI_STD_SIZE. */
 #define UHCI_SQH_SIZE ((sizeof (struct uhci_soft_qh) + UHCI_QH_ALIGN - 1) / UHCI_QH_ALIGN * UHCI_QH_ALIGN)
@@ -171,7 +175,6 @@ typedef struct uhci_softc {
 	char sc_vendor[32];		/* vendor string for root hub */
 	int sc_id_vendor;		/* vendor ID for root hub */
 
-	void *sc_powerhook;		/* cookie from power hook */
 	void *sc_shutdownhook;		/* cookie from shutdown hook */
 
 	struct device *sc_child;		/* /dev/usb# device */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: comvar.h,v 1.47 2009/11/04 19:14:10 kettenis Exp $	*/
+/*	$OpenBSD: comvar.h,v 1.50 2010/08/06 21:04:14 kettenis Exp $	*/
 /*	$NetBSD: comvar.h,v 1.5 1996/05/05 19:50:47 christos Exp $	*/
 
 /*
@@ -66,7 +66,7 @@ struct commulti_attach_args {
 	int		ca_noien;
 };
 
-#define	COM_IBUFSIZE	(2 * 512)
+#define	COM_IBUFSIZE	(32 * 512)
 #define	COM_IHIGHWATER	((3 * COM_IBUFSIZE) / 4)
 
 struct com_softc {
@@ -138,6 +138,7 @@ int	comstop(struct tty *, int);
 int	comintr(void *);
 int	com_detach(struct device *, int);
 int	com_activate(struct device *, int);
+void	com_resume(struct com_softc *);
 
 void	comdiag(void *);
 int	comspeed(long, long);

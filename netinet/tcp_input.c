@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_input.c,v 1.232 2010/03/11 00:24:58 sthen Exp $	*/
+/*	$OpenBSD: tcp_input.c,v 1.239 2010/09/29 19:42:11 claudio Exp $	*/
 /*	$NetBSD: tcp_input.c,v 1.23 1996/02/13 23:43:44 christos Exp $	*/
 
 /*
@@ -175,12 +175,15 @@ do { \
  * Macro to compute ACK transmission behavior.  Delay the ACK unless
  * we have already delayed an ACK (must send an ACK every two segments).
  * We also ACK immediately if we received a PUSH and the ACK-on-PUSH
- * option is enabled.
+ * option is enabled or when the packet is comming from a loopback
+ * interface.
  */
-#define	TCP_SETUP_ACK(tp, tiflags) \
+#define	TCP_SETUP_ACK(tp, tiflags, m) \
 do { \
 	if ((tp)->t_flags & TF_DELACK || \
-	    (tcp_ack_on_push && (tiflags) & TH_PUSH)) \
+	    (tcp_ack_on_push && (tiflags) & TH_PUSH) || \
+	    (m && (m->m_flags & M_PKTHDR) && m->m_pkthdr.rcvif && \
+	    (m->m_pkthdr.rcvif->if_flags & IFF_LOOPBACK))) \
 		tp->t_flags |= TF_ACKNOW; \
 	else \
 		TCP_SET_DELACK(tp); \
@@ -723,7 +726,7 @@ findpcb:
 			if ((tiflags & (TH_RST|TH_ACK|TH_SYN)) != TH_SYN) {
 				if (tiflags & TH_RST) {
 					syn_cache_reset(&src.sa, &dst.sa, th,
-					    inp->inp_rdomain);
+					    inp->inp_rtableid);
 				} else if ((tiflags & (TH_ACK|TH_SYN)) ==
 				    (TH_ACK|TH_SYN)) {
 					/*
@@ -765,11 +768,6 @@ findpcb:
 						if (tp == NULL)
 							goto badsyn;	/*XXX*/
 
-						/*
-						 * Compute proper scaling
-						 * value from buffer space
-						 */
-						tcp_rscale(tp, so->so_rcv.sb_hiwat);
 						goto after_listen;
 					}
 				} else {
@@ -893,7 +891,8 @@ after_listen:
         s = splnet();
 	if (mtag != NULL) {
 		tdbi = (struct tdb_ident *)(mtag + 1);
-	        tdb = gettdb(tdbi->spi, &tdbi->dst, tdbi->proto);
+	        tdb = gettdb(tdbi->rdomain, tdbi->spi,
+		    &tdbi->dst, tdbi->proto);
 	} else
 		tdb = NULL;
 	ipsp_spd_lookup(m, af, iphlen, &error, IPSP_DIRECTION_IN,
@@ -962,7 +961,8 @@ after_listen:
 #else
 	if (optp)
 #endif
-		if (tcp_dooptions(tp, optp, optlen, th, m, iphlen, &opti))
+		if (tcp_dooptions(tp, optp, optlen, th, m, iphlen, &opti,
+		    m->m_pkthdr.rdomain))
 			goto drop;
 
 	if (opti.ts_present && opti.ts_ecr) {
@@ -1089,6 +1089,7 @@ after_listen:
 				else if (TCP_TIMER_ISARMED(tp, TCPT_PERSIST) == 0)
 					TCP_TIMER_ARM(tp, TCPT_REXMT, tp->t_rxtcur);
 
+				tcp_update_sndspace(tp);
 				if (sb_notify(&so->so_snd))
 					sowwakeup(so);
 				if (so->so_snd.sb_cc)
@@ -1113,6 +1114,8 @@ after_listen:
 			tcpstat.tcps_rcvpack++;
 			tcpstat.tcps_rcvbyte += tlen;
 			ND6_HINT(tp);
+
+			TCP_SETUP_ACK(tp, tiflags, m);
 			/*
 			 * Drop TCP, IP headers and TCP options then add data
 			 * to socket buffer.
@@ -1120,11 +1123,20 @@ after_listen:
 			if (so->so_state & SS_CANTRCVMORE)
 				m_freem(m);
 			else {
+				if (opti.ts_present && opti.ts_ecr) {
+					if (tp->rfbuf_ts < opti.ts_ecr &&
+					    opti.ts_ecr - tp->rfbuf_ts < hz) {
+						tcp_update_rcvspace(tp);
+						/* Start over with next RTT. */
+						tp->rfbuf_cnt = 0;
+						tp->rfbuf_ts = 0;
+					} else
+						tp->rfbuf_cnt += tlen;
+				}
 				m_adj(m, iphlen + off);
 				sbappendstream(&so->so_rcv, m);
 			}
 			sorwakeup(so);
-			TCP_SETUP_ACK(tp, tiflags);
 			if (tp->t_flags & TF_ACKNOW)
 				(void) tcp_output(tp);
 			return;
@@ -1149,6 +1161,10 @@ after_listen:
 		win = 0;
 	tp->rcv_wnd = imax(win, (int)(tp->rcv_adv - tp->rcv_nxt));
 	}
+
+	/* Reset receive buffer auto scaling when not in bulk receive mode. */
+	tp->rfbuf_cnt = 0;
+	tp->rfbuf_ts = 0;
 
 	switch (tp->t_state) {
 
@@ -1859,6 +1875,8 @@ trimthenstep6:
 			tp->snd_wnd -= acked;
 			ourfinisacked = 0;
 		}
+
+		tcp_update_sndspace(tp);
 		if (sb_notify(&so->so_snd))
 			sowwakeup(so);
 
@@ -2058,7 +2076,7 @@ dodata:							/* XXX */
 #endif
 		if (th->th_seq == tp->rcv_nxt && TAILQ_EMPTY(&tp->t_segq) &&
 		    tp->t_state == TCPS_ESTABLISHED) {
-			TCP_SETUP_ACK(tp, tiflags);
+			TCP_SETUP_ACK(tp, tiflags, m);
 			tp->rcv_nxt += tlen;
 			tiflags = th->th_flags & TH_FIN;
 			tcpstat.tcps_rcvpack++;
@@ -2256,7 +2274,8 @@ drop:
 
 int
 tcp_dooptions(struct tcpcb *tp, u_char *cp, int cnt, struct tcphdr *th,
-    struct mbuf *m, int iphlen, struct tcp_opt_info *oi)
+    struct mbuf *m, int iphlen, struct tcp_opt_info *oi,
+    u_int rtableid)
 {
 	u_int16_t mss = 0;
 	int opt, optlen;
@@ -2348,7 +2367,7 @@ tcp_dooptions(struct tcpcb *tp, u_char *cp, int cnt, struct tcphdr *th,
 			if (optlen != TCPOLEN_SIGNATURE)
 				continue;
 
-			if (sigp && bcmp(sigp, cp + 2, 16))
+			if (sigp && timingsafe_bcmp(sigp, cp + 2, 16))
 				return (-1);
 
 			sigp = cp + 2;
@@ -2388,7 +2407,8 @@ tcp_dooptions(struct tcpcb *tp, u_char *cp, int cnt, struct tcphdr *th,
 #endif /* INET6 */
 		}
 
-		tdb = gettdbbysrcdst(0, &src, &dst, IPPROTO_TCP);
+		tdb = gettdbbysrcdst(rtable_l2(rtableid),
+		    0, &src, &dst, IPPROTO_TCP);
 
 		/*
 		 * We don't have an SA for this peer, so we turn off
@@ -2415,7 +2435,7 @@ tcp_dooptions(struct tcpcb *tp, u_char *cp, int cnt, struct tcphdr *th,
 		if (tcp_signature(tdb, tp->pf, m, th, iphlen, 1, sig) < 0)
 			return (-1);
 
-		if (bcmp(sig, sigp, 16)) {
+		if (timingsafe_bcmp(sig, sigp, 16)) {
 			tcpstat.tcps_rcvbadsig++;
 			return (-1);
 		}
@@ -3038,7 +3058,7 @@ tcp_mss(struct tcpcb *tp, int offer)
 	else if (tp->pf == AF_INET) {
 		if (ip_mtudisc)
 			mss = ifp->if_mtu - iphlen - sizeof(struct tcphdr);
-		else if (inp && in_localaddr(inp->inp_faddr, inp->inp_rdomain))
+		else if (inp && in_localaddr(inp->inp_faddr, inp->inp_rtableid))
 			mss = ifp->if_mtu - iphlen - sizeof(struct tcphdr);
 	}
 #ifdef INET6
@@ -3564,7 +3584,7 @@ syn_cache_cleanup(struct tcpcb *tp)
  */
 struct syn_cache *
 syn_cache_lookup(struct sockaddr *src, struct sockaddr *dst,
-    struct syn_cache_head **headp, u_int rdomain)
+    struct syn_cache_head **headp, u_int rtableid)
 {
 	struct syn_cache *sc;
 	struct syn_cache_head *scp;
@@ -3582,7 +3602,7 @@ syn_cache_lookup(struct sockaddr *src, struct sockaddr *dst,
 			continue;
 		if (!bcmp(&sc->sc_src, src, src->sa_len) &&
 		    !bcmp(&sc->sc_dst, dst, dst->sa_len) &&
-		    rtable_l2(rdomain) == rtable_l2(sc->sc_rdomain)) {
+		    rtable_l2(rtableid) == rtable_l2(sc->sc_rtableid)) {
 			splx(s);
 			return (sc);
 		}
@@ -3628,7 +3648,7 @@ syn_cache_get(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 
 	s = splsoftnet();
 	if ((sc = syn_cache_lookup(src, dst, &scp,
-	    sotoinpcb(so)->inp_rdomain)) == NULL) {
+	    sotoinpcb(so)->inp_rtableid)) == NULL) {
 		splx(s);
 		return (NULL);
 	}
@@ -3708,8 +3728,8 @@ syn_cache_get(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 	inp = (struct inpcb *)so->so_pcb;
 #endif /* INET6 */
 
-	/* inherit rdomain from listening socket */
-	inp->inp_rdomain = sc->sc_rdomain;
+	/* inherit rtable from listening socket */
+	inp->inp_rtableid = sc->sc_rtableid;
 
 	inp->inp_lport = th->th_dport;
 	switch (src->sa_family) {
@@ -3792,6 +3812,7 @@ syn_cache_get(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 #endif
 
 	tp->ts_modulate = sc->sc_modulate;
+	tp->ts_recent = sc->sc_timestamp;
 	tp->iss = sc->sc_iss;
 	tp->irs = sc->sc_irs;
 	tcp_sendseqinit(tp);
@@ -3867,13 +3888,13 @@ abort:
 
 void
 syn_cache_reset(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
-    u_int rdomain)
+    u_int rtableid)
 {
 	struct syn_cache *sc;
 	struct syn_cache_head *scp;
 	int s = splsoftnet();
 
-	if ((sc = syn_cache_lookup(src, dst, &scp, rdomain)) == NULL) {
+	if ((sc = syn_cache_lookup(src, dst, &scp, rtableid)) == NULL) {
 		splx(s);
 		return;
 	}
@@ -3890,14 +3911,14 @@ syn_cache_reset(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 
 void
 syn_cache_unreach(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
-    u_int rdomain)
+    u_int rtableid)
 {
 	struct syn_cache *sc;
 	struct syn_cache_head *scp;
 	int s;
 
 	s = splsoftnet();
-	if ((sc = syn_cache_lookup(src, dst, &scp, rdomain)) == NULL) {
+	if ((sc = syn_cache_lookup(src, dst, &scp, rtableid)) == NULL) {
 		splx(s);
 		return;
 	}
@@ -3972,6 +3993,7 @@ syn_cache_add(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 #else
 	if (optp) {
 #endif
+		bzero(&tb, sizeof(tb));
 		tb.pf = tp->pf;
 #ifdef TCP_SACK
 		tb.sack_enable = tp->sack_enable;
@@ -3982,7 +4004,8 @@ syn_cache_add(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 			tb.t_flags |= TF_SIGNATURE;
 #endif
 		tb.t_state = TCPS_LISTEN;
-		if (tcp_dooptions(&tb, optp, optlen, th, m, iphlen, oi))
+		if (tcp_dooptions(&tb, optp, optlen, th, m, iphlen, oi,
+		    sotoinpcb(so)->inp_rtableid))
 			return (0);
 	} else
 		tb.t_flags = 0;
@@ -4005,7 +4028,7 @@ syn_cache_add(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 	 * If we do, resend the SYN,ACK.  We do not count this
 	 * as a retransmission (XXX though maybe we should).
 	 */
-	if ((sc = syn_cache_lookup(src, dst, &scp, sotoinpcb(so)->inp_rdomain))
+	if ((sc = syn_cache_lookup(src, dst, &scp, sotoinpcb(so)->inp_rtableid))
 	    != NULL) {
 		tcpstat.tcps_sc_dupesyn++;
 		if (ipopts) {
@@ -4038,7 +4061,7 @@ syn_cache_add(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 	 */
 	bcopy(src, &sc->sc_src, src->sa_len);
 	bcopy(dst, &sc->sc_dst, dst->sa_len);
-	sc->sc_rdomain = sotoinpcb(so)->inp_rdomain;
+	sc->sc_rtableid = sotoinpcb(so)->inp_rtableid;
 	sc->sc_flags = 0;
 	sc->sc_ipopts = ipopts;
 	sc->sc_irs = th->th_seq;
@@ -4058,9 +4081,28 @@ syn_cache_add(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 	    (TF_RCVD_SCALE|TF_REQ_SCALE)) {
 		sc->sc_requested_s_scale = tb.requested_s_scale;
 		sc->sc_request_r_scale = 0;
+		/*
+		 * Pick the smallest possible scaling factor that
+		 * will still allow us to scale up to sb_max.
+		 *
+		 * We do this because there are broken firewalls that
+		 * will corrupt the window scale option, leading to
+		 * the other endpoint believing that our advertised
+		 * window is unscaled.  At scale factors larger than
+		 * 5 the unscaled window will drop below 1500 bytes,
+		 * leading to serious problems when traversing these
+		 * broken firewalls.
+		 *
+		 * With the default sbmax of 256K, a scale factor
+		 * of 3 will be chosen by this algorithm.  Those who
+		 * choose a larger sbmax should watch out
+		 * for the compatiblity problems mentioned above.
+		 *
+		 * RFC1323: The Window field in a SYN (i.e., a <SYN>
+		 * or <SYN,ACK>) segment itself is never scaled.
+		 */
 		while (sc->sc_request_r_scale < TCP_MAX_WINSHIFT &&
-		    TCP_MAXWIN << sc->sc_request_r_scale <
-		    so->so_rcv.sb_hiwat)
+		    (TCP_MAXWIN << sc->sc_request_r_scale) < sb_max)
 			sc->sc_request_r_scale++;
 	} else {
 		sc->sc_requested_s_scale = 15;
@@ -4166,7 +4208,7 @@ syn_cache_respond(struct syn_cache *sc, struct mbuf *m)
 	m->m_data += max_linkhdr;
 	m->m_len = m->m_pkthdr.len = tlen;
 	m->m_pkthdr.rcvif = NULL;
-	m->m_pkthdr.rdomain = sc->sc_rdomain;
+	m->m_pkthdr.rdomain = sc->sc_rtableid;
 	memset(mtod(m, u_char *), 0, tlen);
 
 	switch (sc->sc_src.sa.sa_family) {
@@ -4267,7 +4309,8 @@ syn_cache_respond(struct syn_cache *sc, struct mbuf *m)
 #endif /* INET6 */
 		}
 
-		tdb = gettdbbysrcdst(0, &src, &dst, IPPROTO_TCP);
+		tdb = gettdbbysrcdst(rtable_l2(sc->sc_rtableid),
+		    0, &src, &dst, IPPROTO_TCP);
 		if (tdb == NULL) {
 			if (m)
 				m_freem(m);

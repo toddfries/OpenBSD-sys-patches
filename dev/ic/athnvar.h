@@ -1,4 +1,4 @@
-/*	$OpenBSD: athnvar.h,v 1.18 2010/06/22 19:44:22 damien Exp $	*/
+/*	$OpenBSD: athnvar.h,v 1.24 2010/10/18 16:37:12 damien Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -16,7 +16,6 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#define ATHN_DEBUG		1
 /*#define ATHN_BT_COEXISTENCE	1*/
 
 #ifdef ATHN_DEBUG
@@ -360,6 +359,7 @@ struct athn_ops {
 		    struct ieee80211_channel *);
 	void	(*swap_rom)(struct athn_softc *);
 	void	(*olpc_init)(struct athn_softc *);
+	void	(*olpc_temp_compensation)(struct athn_softc *);
 	/* GPIO callbacks. */
 	int	(*gpio_read)(struct athn_softc *, int);
 	void	(*gpio_write)(struct athn_softc *, int, int);
@@ -425,7 +425,7 @@ struct athn_softc {
 	u_int				flags;
 #define ATHN_FLAG_PCIE			(1 << 0)
 #define ATHN_FLAG_OLPC			(1 << 1)
-#define ATHN_FLAG_SPLIT_MMIC		(1 << 2)
+#define ATHN_FLAG_PAPRD			(1 << 2)
 #define ATHN_FLAG_FAST_PLL_CLOCK	(1 << 3)
 #define ATHN_FLAG_RFSILENT		(1 << 4)
 #define ATHN_FLAG_RFSILENT_REVERSED	(1 << 5)
@@ -436,8 +436,7 @@ struct athn_softc {
 #define ATHN_FLAG_11A			(1 << 8)
 #define ATHN_FLAG_11G			(1 << 9)
 #define ATHN_FLAG_11N			(1 << 10)
-#define ATHN_FLAG_SPLIT_TKIP_MIC	(1 << 11)
-#define ATHN_FLAG_PAPRD			(1 << 12)
+#define ATHN_FLAG_AN_TOP2_FIXUP		(1 << 11)
 
 	uint8_t				ngpiopins;
 	int				led_pin;
@@ -469,6 +468,7 @@ struct athn_softc {
 	int8_t				tx_gain_tbl[AR9280_TX_GAIN_TABLE_SIZE];
 	int8_t				pdadc;
 	int8_t				tcomp;
+	int				olpc_ticks;
 
 	/* PA predistortion. */
 	uint16_t			gain1[AR_MAX_CHAINS];
@@ -532,6 +532,7 @@ struct athn_softc {
 	int				nf_hist_cur;
 	int16_t				nf_priv[AR_MAX_CHAINS];
 	int16_t				nf_ext_priv[AR_MAX_CHAINS];
+	int				pa_calib_ticks;
 
 	struct athn_calib		calib;
 	struct athn_ani			ani;
@@ -557,4 +558,6 @@ struct athn_softc {
 
 extern int	athn_attach(struct athn_softc *);
 extern void	athn_detach(struct athn_softc *);
+extern void	athn_suspend(struct athn_softc *);
+extern void	athn_resume(struct athn_softc *);
 extern int	athn_intr(void *);

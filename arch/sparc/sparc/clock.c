@@ -1,4 +1,4 @@
-/*	$OpenBSD: clock.c,v 1.24 2006/12/10 16:12:41 miod Exp $	*/
+/*	$OpenBSD: clock.c,v 1.26 2010/07/10 19:32:24 miod Exp $	*/
 /*	$NetBSD: clock.c,v 1.52 1997/05/24 20:16:05 pk Exp $ */
 
 /*
@@ -252,7 +252,7 @@ oclockattach(parent, self, aux)
 	/* 
 	 * calibrate delay() 
 	 */
-	ienab_bic(IE_L14 | IE_L10);	/* disable all clock intrs */
+	intreg_clr_44c(IE_L14 | IE_L10);	/* disable all clock intrs */
 	for (timerblurb = 1; ; timerblurb++) {
 		volatile register char *ireg = &i7->clk_intr_reg;
 		int ival;
@@ -377,8 +377,7 @@ clockattach(parent, self, aux)
 
 	if (CPU_ISSUN4)
 		prop = "mk48t02";
-
-	else if (CPU_ISSUN4COR4M)
+	else if (!CPU_ISSUN4)
 		prop = getpropstring(ra->ra_node, "model");
 
 	printf(": %s (eeprom)\n", prop);
@@ -455,7 +454,7 @@ timermatch(parent, vcf, aux)
 		return (1);
 	}
 
-	if (CPU_ISSUN4C) {
+	if (CPU_ISSUN4C || CPU_ISSUN4E) {
 		return (strcmp("counter-timer", ca->ca_ra.ra_name) == 0);
 	}
 
@@ -492,11 +491,11 @@ timerattach(parent, self, aux)
 		lim = &counterreg_4m->t_limit;
 	}
 
-	if (CPU_ISSUN4OR4C) {
+	if (CPU_ISSUN4OR4COR4E) {
 		/*
 		 * This time, we ignore any existing virtual address because
 		 * we have a fixed virtual address for the timer, to make
-		 * microtime() faster (in SUN4/SUN4C kernel only).
+		 * microtime() faster (in SUN4/SUN4C/SUN4E kernel only).
 		 */
 		(void)mapdev(ra->ra_reg, TIMERREG_VA, 0,
 			     sizeof(struct timerreg_4));
@@ -611,10 +610,10 @@ cpu_initclocks()
 
 		i7->clk_intr_reg = INTERSIL_INTER_CSECONDS; /* 1/100 sec */
 
-		ienab_bic(IE_L14 | IE_L10);	/* disable all clock intrs */
+		intreg_clr_44c(IE_L14 | IE_L10);/* disable all clock intrs */
 		intersil_disable(i7);		/* disable clock */
 		dummy = intersil_clear(i7);	/* clear interrupts */
-		ienab_bis(IE_L10);		/* enable l10 interrupt */
+		intreg_set_44c(IE_L10);		/* enable l10 interrupt */
 		intersil_enable(i7);		/* enable clock */
 
 		return;
@@ -644,7 +643,7 @@ cpu_initclocks()
 		counterreg_4m->t_limit = tmr_ustolim4m(statint);
 	}
 
-	if (CPU_ISSUN4OR4C) {
+	if (CPU_ISSUN4OR4COR4E) {
 		timerreg4->t_c10.t_limit = tmr_ustolim(tick);
 		timerreg4->t_c14.t_limit = tmr_ustolim(statint);
 	}
@@ -653,12 +652,13 @@ cpu_initclocks()
 
 #if defined(SUN4M)
 	if (CPU_ISSUN4M)
-		ienab_bic(SINTR_T);
+		intreg_clr_4m(SINTR_T);
 #endif
 
-	if (CPU_ISSUN4OR4C)
-		ienab_bis(IE_L14 | IE_L10);
-
+#if defined(SUN4) || defined(SUN4C) || defined(SUN4E)
+	if (CPU_ISSUN4OR4COR4E)
+		intreg_set_44c(IE_L14 | IE_L10);
+#endif
 }
 
 /*
@@ -673,9 +673,7 @@ setstatclockrate(newhz)
 }
 
 /*
- * Level 10 (clock) interrupts.  If we are using the FORTH PROM for
- * console input, we need to check for that here as well, and generate
- * a software interrupt to read it.
+ * Level 10 (clock) interrupts.
  */
 int
 clockintr(cap)
@@ -695,8 +693,8 @@ clockintr(cap)
 #if defined(SUN4)
 	if (oldclk) {
 		discard = intersil_clear(i7);
-		ienab_bic(IE_L10);  /* clear interrupt */
-		ienab_bis(IE_L10);  /* enable interrupt */
+		intreg_clr_44c(IE_L10);	/* clear interrupt */
+		intreg_set_44c(IE_L10);	/* enable interrupt */
 		goto forward;
 	}
 #endif
@@ -706,8 +704,8 @@ clockintr(cap)
 		discard = timerreg_4m->t_limit;
 	}
 #endif
-#if defined(SUN4) || defined(SUN4C)
-	if (CPU_ISSUN4OR4C) {
+#if defined(SUN4) || defined(SUN4C) || defined(SUN4E)
+	if (CPU_ISSUN4OR4COR4E) {
 		discard = timerreg4->t_c10.t_limit;
 	}
 #endif
@@ -750,7 +748,7 @@ statintr(cap)
 		}
 	}
 
-	if (CPU_ISSUN4OR4C) {
+	if (CPU_ISSUN4OR4COR4E) {
 		discard = timerreg4->t_c14.t_limit;
 	}
 	statclock((struct clockframe *)cap);
@@ -770,7 +768,7 @@ statintr(cap)
 		counterreg_4m->t_limit = tmr_ustolim4m(newint);
 	}
 
-	if (CPU_ISSUN4OR4C) {
+	if (CPU_ISSUN4OR4COR4E) {
 		timerreg4->t_c14.t_limit = tmr_ustolim(newint);
 	}
 	return (1);

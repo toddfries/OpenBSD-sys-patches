@@ -1,4 +1,4 @@
-/*      $OpenBSD: ip_gre.c,v 1.37 2010/05/11 09:22:56 claudio Exp $ */
+/*      $OpenBSD: ip_gre.c,v 1.40 2010/09/28 14:14:54 yasuoka Exp $ */
 /*	$NetBSD: ip_gre.c,v 1.9 1999/10/25 19:18:11 drochner Exp $ */
 
 /*
@@ -187,6 +187,11 @@ gre_input2(m , hlen, proto)
 			af = AF_INET6;
 			break;
 #endif
+		case 0:
+			/* keepalive reply, retrigger hold timer */
+			gre_recv_keepalive(sc);
+			m_freem(m);
+			return (1);
 #ifdef MPLS
 		case ETHERTYPE_MPLS:
 		case ETHERTYPE_MPLS_MCAST:
@@ -437,9 +442,10 @@ gre_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
     struct mbuf *control, struct proc *p)
 {
 #ifdef  PIPEX 
-	if (req == PRU_SEND) {
+	struct inpcb *inp = sotoinpcb(so);
+
+	if (inp != NULL && inp->inp_pipex && req == PRU_SEND) {
 		int s;
-		struct inpcb *inp;
 		struct sockaddr_in *sin4;
 		struct in_addr *ina_dst;
 		struct pipex_session *session;
@@ -457,7 +463,8 @@ gre_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 				ina_dst = &sin4->sin_addr;
 		}
 		if (ina_dst != NULL &&
-		    (session = pipex_pptp_userland_lookup_session(m, *ina_dst)))
+		    (session = pipex_pptp_userland_lookup_session_ipv4(m,
+			    *ina_dst)))
 			m = pipex_pptp_userland_output(m, session);
 		splx(s);
 

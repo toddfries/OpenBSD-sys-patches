@@ -1,4 +1,4 @@
-/*	$OpenBSD: elroy.c,v 1.7 2010/05/24 15:06:03 deraadt Exp $	*/
+/*	$OpenBSD: elroy.c,v 1.9 2010/09/22 02:28:37 jsg Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -317,6 +317,9 @@ elroy_iomap(void *v, bus_addr_t bpa, bus_size_t size,
 	/* volatile struct elroy_regs *r = sc->sc_regs; */
 	int error;
 
+	/* Convert 32-bit PCI address to a 64-bit address. */
+	bpa |= (HPPA_IOBEGIN | 0xff00000000UL);
+
 	if ((error = bus_space_map(sc->sc_bt, bpa + sc->sc_iobase, size,
 	    flags, bshp)))
 		return (error);
@@ -331,6 +334,9 @@ elroy_memmap(void *v, bus_addr_t bpa, bus_size_t size,
 	struct elroy_softc *sc = v;
 	/* volatile struct elroy_regs *r = sc->sc_regs; */
 	int error;
+
+	/* Convert 32-bit PCI address to a 64-bit address. */
+	bpa |= (HPPA_IOBEGIN | 0xff00000000UL);
 
 	if ((error = bus_space_map(sc->sc_bt, bpa, size, flags, bshp)))
 		return (error);
@@ -462,7 +468,7 @@ elroy_alloc_parent(struct device *self, struct pci_attach_args *pa, int io)
 		return (NULL);
 
 	extent_free(ex, start, size, EX_NOWAIT);
-	return rbus_new_root_share(tag, ex, start, size, 0);
+	return rbus_new_root_share(tag, ex, start, size);
 #else
 	return (NULL);
 #endif
@@ -1314,7 +1320,7 @@ letoh64(r->eio_base), letoh64(r->eio_mask));
 #endif
 
 	/* XXX evil hack! */
-	sc->sc_iobase = 0xfffee00000;
+	sc->sc_iobase = 0xfee00000;
 
 	sc->sc_iot = elroy_iomemt;
 	sc->sc_iot.hbt_cookie = sc;

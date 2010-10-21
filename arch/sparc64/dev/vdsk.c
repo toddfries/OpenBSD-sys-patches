@@ -1,4 +1,4 @@
-/*	$OpenBSD: vdsk.c,v 1.23 2010/06/15 04:11:34 dlg Exp $	*/
+/*	$OpenBSD: vdsk.c,v 1.25 2010/10/12 00:53:32 krw Exp $	*/
 /*
  * Copyright (c) 2009 Mark Kettenis
  *
@@ -175,10 +175,6 @@ struct cfdriver vdsk_cd = {
 	NULL, "vdsk", DV_DULL
 };
 
-struct scsi_device vdsk_device = {
-	NULL, NULL, NULL, NULL
-};
-
 int	vdsk_tx_intr(void *);
 int	vdsk_rx_intr(void *);
 
@@ -343,7 +339,6 @@ vdsk_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_switch.dev_probe = vdsk_dev_probe;
 	sc->sc_switch.dev_free = vdsk_dev_free;
 
-	sc->sc_link.device = &vdsk_device;
 	sc->sc_link.adapter = &sc->sc_switch;
 	sc->sc_link.adapter_softc = self;
 	sc->sc_link.adapter_buswidth = 2;
@@ -1081,6 +1076,7 @@ vdsk_scsi_inquiry(struct scsi_xfer *xs)
 	inq.version = 0x05; /* SPC-3 */
 	inq.response_format = 2;
 	inq.additional_length = 32;
+	inq.flags |= SID_CmdQue;
 	bcopy("SUN     ", inq.vendor, sizeof(inq.vendor));
 	bcopy("Virtual Disk    ", inq.product, sizeof(inq.product));
 	snprintf(buf, sizeof(buf), "%u.%u ", sc->sc_major, sc->sc_minor);

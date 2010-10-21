@@ -1,4 +1,4 @@
-/*	$OpenBSD: systm.h,v 1.79 2010/04/20 22:05:44 tedu Exp $	*/
+/*	$OpenBSD: systm.h,v 1.86 2010/09/21 01:09:10 matthew Exp $	*/
 /*	$NetBSD: systm.h,v 1.50 1996/06/09 04:55:09 briggs Exp $	*/
 
 /*-
@@ -107,6 +107,8 @@ extern struct vnode *swapdev_vp;/* vnode equivalent to above */
 struct proc;
 #define curproc curcpu()->ci_curproc
 
+extern int rthreads_enabled;
+
 typedef int	sy_call_t(struct proc *, void *, register_t *);
 
 extern struct sysent {		/* system call table */
@@ -154,6 +156,7 @@ void vfs_opv_init_default(struct vnodeopv_desc *);
 void vfs_op_init(void);
 
 int	seltrue(dev_t dev, int which, struct proc *);
+int	selfalse(dev_t dev, int which, struct proc *);
 void	*hashinit(int, int, int, u_long *);
 int	sys_nosys(struct proc *, void *, register_t *);
 
@@ -175,6 +178,12 @@ void	ttyprintf(struct tty *, const char *, ...)
 
 void	splassert_fail(int, int, const char *);
 extern	int splassert_ctl;
+
+#ifdef DIAGNOSTIC
+void	assertwaitok(void);
+#else
+#define	assertwaitok()	do { /* nothing */ } while (0)
+#endif
 
 void	tablefull(const char *);
 
@@ -210,8 +219,8 @@ int	copyin(const void *, void *, size_t)
 int	copyout(const void *, void *, size_t);
 
 struct timeval;
-int	hzto(struct timeval *);
-int	tvtohz(struct timeval *);
+int	hzto(const struct timeval *);
+int	tvtohz(const struct timeval *);
 void	realitexpire(void *);
 
 struct clockframe;
@@ -290,16 +299,6 @@ void	dohooks(struct hook_desc_head *, int);
 #define mountroothook_disestablish(vhook) \
 	hook_disestablish(&mountroothook_list, (vhook))
 #define domountroothooks() dohooks(&mountroothook_list, HOOK_REMOVE|HOOK_FREE)
-
-/*
- * Power management hooks.
- */
-void	*powerhook_establish(void (*)(int, void *), void *);
-void	powerhook_disestablish(void *);
-void	dopowerhooks(int);
-#define PWR_RESUME 0
-#define PWR_SUSPEND 1
-#define PWR_STANDBY 2
 
 struct uio;
 int	uiomove(void *, int, struct uio *);

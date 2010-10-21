@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_descrip.c,v 1.83 2010/03/24 23:18:17 tedu Exp $	*/
+/*	$OpenBSD: kern_descrip.c,v 1.85 2010/07/26 01:56:27 guenther Exp $	*/
 /*	$NetBSD: kern_descrip.c,v 1.42 1996/03/30 22:24:38 christos Exp $	*/
 
 /*
@@ -68,7 +68,6 @@
  * Descriptor management.
  */
 struct filelist filehead;	/* head of list of open files */
-struct rwlock fileheadlk;
 int nfiles;			/* actual number of open files */
 
 static __inline void fd_used(struct filedesc *, int);
@@ -88,7 +87,6 @@ filedesc_init(void)
 	pool_init(&fdesc_pool, sizeof(struct filedesc0), 0, 0, 0, "fdescpl",
 		&pool_allocator_nointr);
 	LIST_INIT(&filehead);
-	rw_init(&fileheadlk, "filehead");
 }
 
 static __inline int
@@ -391,12 +389,12 @@ restart:
 		if ((long)SCARG(uap, arg) <= 0) {
 			SCARG(uap, arg) = (void *)(-(long)SCARG(uap, arg));
 		} else {
-			struct proc *p1 = pfind((long)SCARG(uap, arg));
-			if (p1 == 0) {
+			struct process *pr1 = prfind((long)SCARG(uap, arg));
+			if (pr1 == 0) {
 				error = ESRCH;
 				break;
 			}
-			SCARG(uap, arg) = (void *)(long)p1->p_pgrp->pg_id;
+			SCARG(uap, arg) = (void *)(long)pr1->ps_pgrp->pg_id;
 		}
 		error = ((*fp->f_ops->fo_ioctl)
 			(fp, TIOCSPGRP, (caddr_t)&SCARG(uap, arg), p));
@@ -827,13 +825,11 @@ restart:
 	nfiles++;
 	fp = pool_get(&file_pool, PR_WAITOK|PR_ZERO);
 	fp->f_iflags = FIF_LARVAL;
-	rw_enter_write(&fileheadlk);
 	if ((fq = p->p_fd->fd_ofiles[0]) != NULL) {
 		LIST_INSERT_AFTER(fq, fp, f_list);
 	} else {
 		LIST_INSERT_HEAD(&filehead, fp, f_list);
 	}
-	rw_exit_write(&fileheadlk);
 	p->p_fd->fd_ofiles[i] = fp;
 	fp->f_count = 1;
 	fp->f_cred = p->p_ucred;
@@ -905,6 +901,7 @@ fdcopy(struct proc *p)
 
 	newfdp = pool_get(&fdesc_pool, PR_WAITOK);
 	bcopy(fdp, newfdp, sizeof(struct filedesc));
+	rw_init(&newfdp->fd_lock, "fdlock");
 	if (newfdp->fd_cdir)
 		vref(newfdp->fd_cdir);
 	if (newfdp->fd_rdir)
@@ -991,8 +988,11 @@ fdfree(struct proc *p)
 	struct file **fpp, *fp;
 	int i;
 
-	if (--fdp->fd_refcnt > 0)
+	fdplock(fdp);
+	if (--fdp->fd_refcnt > 0) {
+		fdpunlock(fdp);
 		return;
+	}
 	fpp = fdp->fd_ofiles;
 	for (i = fdp->fd_lastfile; i >= 0; i--, fpp++) {
 		fp = *fpp;
@@ -1092,9 +1092,7 @@ closef(struct file *fp, struct proc *p)
 		error = 0;
 
 	/* Free fp */
-	rw_enter_write(&fileheadlk);
 	LIST_REMOVE(fp, f_list);
-	rw_exit_write(&fileheadlk);
 	crfree(fp->f_cred);
 #ifdef DIAGNOSTIC
 	if (fp->f_count != 0 || fp->f_usecount != 1)

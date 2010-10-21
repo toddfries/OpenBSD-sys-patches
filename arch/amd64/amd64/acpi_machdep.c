@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpi_machdep.c,v 1.35 2010/04/20 22:08:17 tedu Exp $	*/
+/*	$OpenBSD: acpi_machdep.c,v 1.46 2010/10/06 16:37:29 deraadt Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -57,7 +57,7 @@ extern u_char acpi_real_mode_resume[], acpi_resume_end[];
 extern u_int32_t acpi_pdirpa;
 extern paddr_t tramp_pdirpa;
 
-extern int acpi_savecpu(void);
+extern int acpi_savecpu(void) __returns_twice;
 
 #define ACPI_BIOS_RSDP_WINDOW_BASE        0xe0000
 #define ACPI_BIOS_RSDP_WINDOW_SIZE        0x20000
@@ -116,7 +116,7 @@ acpi_scan(struct acpi_mem_map *handle, paddr_t pa, size_t len)
 			if (rsdp->revision == 0 &&
 			    acpi_checksum(ptr, sizeof(struct acpi_rsdp1)) == 0)
 				return (ptr);
-			else if (rsdp->revision >= 2 && rsdp->revision <= 3 &&
+			else if (rsdp->revision >= 2 && rsdp->revision <= 4 &&
 			    acpi_checksum(ptr, sizeof(struct acpi_rsdp)) == 0)
 				return (ptr);
 		}
@@ -207,10 +207,11 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 		return (ENXIO);
 	}
 
+	rtcstop();
+
 	/* amd64 does not do lazy pmap_activate */
 
 	/*
-	 *
 	 * ACPI defines two wakeup vectors. One is used for ACPI 1.0
 	 * implementations - it's in the FACS table as wakeup_vector and
 	 * indicates a 32-bit physical address containing real-mode wakeup
@@ -219,28 +220,31 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 	 * The second wakeup vector is in the FACS table as
 	 * x_wakeup_vector and indicates a 64-bit physical address
 	 * containing protected-mode wakeup code.
-	 *
 	 */
 	sc->sc_facs->wakeup_vector = (u_int32_t)ACPI_TRAMPOLINE;
-	if (sc->sc_facs->version == 1)
+	if (sc->sc_facs->length > 32 && sc->sc_facs->version >= 1)
 		sc->sc_facs->x_wakeup_vector = 0;
 
-	/* Copy the current cpu registers into a safe place for resume. */
+	/* Copy the current cpu registers into a safe place for resume.
+	 * acpi_savecpu actually returns twice - once in the suspend
+	 * path and once in the resume path (see setjmp(3)).
+	 */
 	if (acpi_savecpu()) {
+		/* Suspend path */
 		fpusave_cpu(curcpu(), 1);
 #ifdef MULTIPROCESSOR
-		x86_broadcast_ipi(X86_IPI_FLUSH_FPU);
+		x86_broadcast_ipi(X86_IPI_SYNCH_FPU);
 		x86_broadcast_ipi(X86_IPI_HALT);
-#endif 
+#endif
 		wbinvd();
 		acpi_enter_sleep_state(sc, state);
 		panic("%s: acpi_enter_sleep_state failed", DEVNAME(sc));
 	}
-#if 0
-	/* Temporarily disabled for debugging purposes */
-	/* Reset the wakeup vector to avoid resuming on reboot */
+
+	/* Resume path continues here */
+
+	/* Reset the vector */
 	sc->sc_facs->wakeup_vector = 0;
-#endif
 
 #if NISA > 0
 	i8259_default_setup();
@@ -249,7 +253,8 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 
 #if NLAPIC > 0
 	lapic_enable();
-	lapic_initclocks();
+	if (initclock_func == lapic_initclocks)
+		lapic_startclock();
 	lapic_set_lvt();
 #endif
 
@@ -262,13 +267,15 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 #if NIOAPIC > 0
 	ioapic_enable();
 #endif
-	initrtclock();
+	i8254_startclock();
+	if (initclock_func == i8254_initclocks)
+		rtcstart();		/* in i8254 mode, rtc is profclock */
 	inittodr(time_second);
 
 	return (0);
 }
 
-void    	cpu_start_secondary(struct cpu_info *ci);
+void		cpu_start_secondary(struct cpu_info *ci);
 
 void
 acpi_resume_machdep(void)
@@ -292,7 +299,7 @@ acpi_resume_machdep(void)
 		if (ci->ci_flags & (CPUF_BSP|CPUF_SP|CPUF_PRIMARY))
 			continue;
 		KASSERT((ci->ci_flags & CPUF_RUNNING) == 0);
-		
+
 		p = ci->ci_schedstate.spc_idleproc;
 		pcb = &p->p_addr->u_pcb;
 
@@ -303,6 +310,8 @@ acpi_resume_machdep(void)
 		sf->sf_rip = (u_int64_t)proc_trampoline;
 		pcb->pcb_rsp = (u_int64_t)sf;
 		pcb->pcb_rbp = 0;
+
+		ci->ci_idepth = 0;
 
 		ci->ci_flags &= ~CPUF_PRESENT;
 		cpu_start_secondary(ci);

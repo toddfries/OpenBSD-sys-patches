@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.172 2010/06/03 15:48:58 jsing Exp $	*/
+/*	$OpenBSD: locore.S,v 1.179 2010/08/18 21:01:14 jasper Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff
@@ -103,20 +103,11 @@
 
 	.data
 
-	.export netisr, data
-	.align 16
-netisr
-	.word	0
-	.size	netisr, .-netisr
-	.align	16
-
 	BSS(pdc_stack, 4)	/* temp stack for PDC call */
 	BSS(emrg_stack, 4)	/* stack for HPMC/TOC/PWRF */
 
 	.export	kernelmapped, data
 	BSS(kernelmapped, 4)	/* set when kernel is mapped */
-	.export	fpu_curpcb, data
-	BSS(fpu_curpcb, 4)	/* pcb of the fpu owner */
 	.export fpu_enable, data
 	BSS(fpu_enable, 4)	/* bits to set in the ccr to enable fpu */
 	BSS(cpu_fpuena, 4)	/* enable FPU, otherwise force emulate */
@@ -495,37 +486,12 @@ EXIT(pdc_call)
 gateway_page
 	nop				/* @ 0.C0000000 (Nothing)  */
 	gate,n	$bsd_syscall,r0		/* @ 0.C0000004 (HPUX/BSD) */
-#ifdef COMPAT_OSF1
-	bl,n	$osf_syscall,r0
-	bl,n	$osf_syscall,r0
-#else
 	nop				/* @ 0.C0000008 (HPOSF UNIX) */
 	nop				/* @ 0.C000000C (HPOSF Mach) */
-#endif
 	nop
 	nop
 	nop
 	nop
-
-#ifdef COMPAT_OSF1
-$osf_syscall
-	/*
-	 * Ripped screaming from OSF/MkLinux:
-	 *
-	 * Convert HPOSF system call to a BSD one by stashing arg4 and arg5
-	 * back into the frame, and moving the system call number into r22.
-	 * Fortunately, the HPOSF compiler has a bigger stack frame, which
-	 * allows this horrible hack.
-	 *
-	 * We also need to save r29 (aka ret1) for the emulator since it may
-	 * get clobbered between here and there.
-	 */
-	stw	r22, HPPA_FRAME_ARG(4)(sp)
-	stw	r21, HPPA_FRAME_ARG(5)(sp)
-	stw	r29, HPPA_FRAME_SL(sp)
-	gate	$bsd_syscall,r0
-	copy	r1, r22
-#endif /* COMPAT_OSF1 */
 
 $bsd_syscall
 	/*
@@ -982,8 +948,8 @@ ENTRY(TLABEL(excpt),0)
 	copy	rp, r1
 	copy	arg0, r8
 	mfctl	cr30, r9
-#if (PCB_FPREGS+U_PCB) != 0
-	ldo	PCB_FPREGS+U_PCB(r9), r9
+#if HFP_REGS != 0
+	ldo	HFP_REGS(r9), r9
 #endif
 	.import	fpu_save, code
 	.call
@@ -991,9 +957,12 @@ ENTRY(TLABEL(excpt),0)
 	copy	r9, arg0
 	copy	r1, rp
 	copy	r8, arg0
+	mfctl	cr29, r1
 	mtctl	r0, ccr		/* cause a reload after exception */
-	ldil	L%fpu_curpcb, r1
-	stw	r0, R%fpu_curpcb(r1)
+	ldw	CI_FPU_STATE(r1), r16
+	stw	r0, CI_FPU_STATE(r1)
+	stw	r0, HFP_CPU(r16)
+	sync
 
 	/* now, check for trap */
 	ldw	0(r9), r1
@@ -1057,7 +1026,6 @@ ENTRY(TLABEL(emu),0)
 	ldil	L%cpu_fpuena, r1
 	ldw	R%cpu_fpuena(r1), r9
 	comib,=	0, r9, $fpusw_emu
-	ldil	L%fpu_curpcb, r1
 
 	/* if we are already enabled and hit again, emulate */
 	mfctl	ccr, r1
@@ -1066,8 +1034,12 @@ ENTRY(TLABEL(emu),0)
 	nop
 
 $fpusw_emu
+	mfctl	cr29, r1
 	mtctl	r0, ccr		/* cause a reload after exception */
-	stw	r0, R%fpu_curpcb(r1)
+	ldw	CI_FPU_STATE(r1), r16
+	stw	r0, CI_FPU_STATE(r1)
+	stw	r0, HFP_CPU(r16)
+	sync
 #if 0
 	/* here we emulate the fld/fst */
 	mfctl	iir, r1
@@ -1090,17 +1062,17 @@ $fpusw_set
 	depi	3, 25, 2, r1
 	mtctl	r1, ccr
 
-	ldil	L%fpu_curpcb, r16
+	mfctl	cr29, r16
 	mfctl	cr30, r9
-	ldw	R%fpu_curpcb(r16), r16
+	ldw	CI_FPU_STATE(r16), r16
 
 	comb,=,n r16, r0, $fpusw_nosave
 	comb,=,n r16, r9, $fpusw_done
 
 	copy	arg0, r17
 	copy	rp, r1
-#if (PCB_FPREGS+U_PCB) != 0
-	ldo	PCB_FPREGS+U_PCB(r16), r16
+#if HFP_REGS != 0
+	ldo	HFP_REGS(r16), r16
 #endif
 	.import	fpu_save, code
 	.call
@@ -1109,12 +1081,18 @@ $fpusw_set
 	copy	r1, rp
 	copy	r17, arg0
 
+	mfctl	cr29, r1
+	ldw	CI_FPU_STATE(r1), r16
+	stw	r0, CI_FPU_STATE(r1)
+	stw	r0, HFP_CPU(r16)
+	sync
+
 $fpusw_nosave
 	/* count switches */
 	.import	uvmexp, data
 	ldil	L%(uvmexp+FPSWTCH), r1
 	ldw	R%(uvmexp+FPSWTCH)(r1), r16
-	ldo	31*8+PCB_FPREGS+U_PCB(r9), r17
+	ldo	31*8+HFP_REGS(r9), r17
 	ldo	1(r16), r16
 	stw	r16, R%(uvmexp+FPSWTCH)(r1)
 
@@ -1151,8 +1129,10 @@ $fpusw_nosave
 	fldds,ma -8(r17), fr1
 	fldds     0(r17), fr0	/* fr0 must be restored last */
 
-	ldil	L%fpu_curpcb, r1
-	stw	r17, R%fpu_curpcb(r1)
+	mfctl	cr29, r1
+	stw	r9, CI_FPU_STATE(r1)
+	stw	r1, HFP_CPU(r9)
+	sync
 
 $fpusw_done
 	rfir
@@ -3071,30 +3051,5 @@ sigcode_call
 	ldi	SYS_exit, t1
 ALTENTRY(esigcode)
 EXIT(sigcode)
-
-#ifdef COMPAT_HPUX
-ENTRY(hpux_sigcode,0)
-	bb,>=,n	arg3, 30, hpux_sigcode_call
-	dep	r0, 31, 2, arg3
-	ldw	4(arg3), r19
-	ldw	0(arg3), arg3
-hpux_sigcode_call
-	.call
-	ble	0(sr0, arg3)
-	nop	/* rp has already been set */
-ALTENTRY(hpux_esigcode)
-EXIT(hpux_sigcode)
-#endif /* COMPAT_HPUX */
-
-
-#ifdef COMPAT_LINUX
-ENTRY(linux_sigcode,0)
-
-	/* TODO linux signal trampoline */
-	bv	0(rp)
-	nop
-ALTENTRY(linux_esigcode)
-EXIT(linux_sigcode)
-#endif /* COMPAT_LINUX */
 
 	.end

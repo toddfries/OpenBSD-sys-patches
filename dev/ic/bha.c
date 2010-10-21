@@ -1,4 +1,4 @@
-/*	$OpenBSD: bha.c,v 1.23 2010/05/20 00:55:17 krw Exp $	*/
+/*	$OpenBSD: bha.c,v 1.26 2010/08/07 03:50:01 krw Exp $	*/
 /*	$NetBSD: bha.c,v 1.27 1998/11/19 21:53:00 thorpej Exp $	*/
 
 #undef BHADEBUG
@@ -63,7 +63,6 @@
 #include <sys/malloc.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 
 #include <machine/bus.h>
 #include <machine/intr.h>
@@ -100,14 +99,6 @@ int bha_create_ccbs(struct bha_softc *, struct bha_ccb *, int);
 
 struct cfdriver bha_cd = {
 	NULL, "bha", DV_DULL
-};
-
-/* the below structure is so we have a default dev struct for out link struct */
-struct scsi_device bha_dev = {
-	NULL,			/* Use default error handler */
-	NULL,			/* have a queue, served by this */
-	NULL,			/* have no async handler */
-	NULL,			/* Use default 'done' routine */
 };
 
 #define BHA_RESET_TIMEOUT	2000	/* time to wait for reset (mSec) */
@@ -273,7 +264,6 @@ bha_attach(sc, bpd)
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = bpd->sc_scsi_dev;
 	sc->sc_link.adapter = &sc->sc_adapter;
-	sc->sc_link.device = &bha_dev;
 	sc->sc_link.openings = 4;
 
 	TAILQ_INIT(&sc->sc_free_ccb);
@@ -749,13 +739,13 @@ bha_done(sc, ccb)
 	 */
 #ifdef BHADIAG
 	if (ccb->flags & CCB_SENDING) {
-		panic("%s: exiting ccb still in transit!\n",
+		panic("%s: exiting ccb still in transit!",
 		    sc->sc_dev.dv_xname);
 		return;
 	}
 #endif
 	if ((ccb->flags & CCB_ALLOC) == 0) {
-		panic("%s: exiting ccb not allocated!\n",
+		panic("%s: exiting ccb not allocated!",
 		    sc->sc_dev.dv_xname);
 		return;
 	}
@@ -1463,7 +1453,7 @@ bha_timeout(arg)
 	 */
 	bha_collect_mbo(sc);
 	if (ccb->flags & CCB_SENDING)
-		panic("%s: not taking commands!\n", sc->sc_dev.dv_xname);
+		panic("%s: not taking commands!", sc->sc_dev.dv_xname);
 #endif
 
 	/*

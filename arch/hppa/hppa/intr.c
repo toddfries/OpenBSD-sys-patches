@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.c,v 1.33 2010/05/24 15:04:54 deraadt Exp $	*/
+/*	$OpenBSD: intr.c,v 1.35 2010/09/20 06:33:47 matthew Exp $	*/
 
 /*
  * Copyright (c) 2002-2004 Michael Shalayeff
@@ -33,16 +33,11 @@
 #include <sys/evcount.h>
 #include <sys/malloc.h>
 
-#include <net/netisr.h>
-
 #include <uvm/uvm_extern.h>	/* for uvmexp */
 
 #include <machine/autoconf.h>
 #include <machine/frame.h>
 #include <machine/reg.h>
-
-void softnet(void);
-void softtty(void);
 
 struct hppa_iv {
 	char pri;
@@ -64,7 +59,7 @@ struct hppa_iv intr_store[8*2*CPU_NINTS] __attribute__ ((aligned(32))),
     *intr_more = intr_store, *intr_list;
 struct hppa_iv intr_table[CPU_NINTS] __attribute__ ((aligned(32))) = {
 	{ IPL_SOFTCLOCK, 0, HPPA_IV_SOFT, 0, 0, NULL },
-	{ IPL_SOFTNET  , 0, HPPA_IV_SOFT, 0, 0, (int (*)(void *))&softnet },
+	{ IPL_SOFTNET  , 0, HPPA_IV_SOFT, 0, 0, NULL },
 	{ 0 },
 	{ 0 },
 	{ IPL_SOFTTTY  , 0, HPPA_IV_SOFT, 0, 0, NULL }
@@ -88,18 +83,6 @@ splassert_check(int wantipl, const char *func)
 		splassert_fail(wantipl, ci->ci_cpl, func);
 }
 #endif
-
-void
-softnet(void)
-{
-	int ni;
-
-	/* use atomic "load & clear" */
-	__asm __volatile(
-	    "ldcws	0(%2), %0": "=&r" (ni), "+m" (netisr): "r" (&netisr));
-#define DONETISR(m,c) if (ni & (1 << (m))) c()
-#include <net/netisr_dispatch.h>
-}
 
 void
 cpu_intr_init(void)
@@ -193,7 +176,7 @@ cpu_intr_map(void *v, int pri, int irq, int (*handler)(void *), void *arg,
 		}
 	}
 
-	evcount_attach(cnt, name, NULL, &evcount_intr);
+	evcount_attach(cnt, name, NULL);
 	iv->pri = pri;
 	iv->irq = irq;
 	iv->flags = 0;
@@ -247,7 +230,7 @@ cpu_intr_establish(int pri, int irq, int (*handler)(void *), void *arg,
 		free(cnt, M_DEVBUF);
 		iv->cnt = NULL;
 	} else
-		evcount_attach(cnt, name, NULL, &evcount_intr);
+		evcount_attach(cnt, name, NULL);
 
 	return (iv);
 }
@@ -307,6 +290,13 @@ cpu_intr(void *v)
 
 	while ((mask = ci->ci_ipending & ~imask[s])) {
 		int r, bit = fls(mask) - 1;
+
+#ifdef MULTIPROCESSOR
+		/* XXX - Ensure that IPIs run first. */
+		if (mask & (1 << 30))
+			bit = 30;
+#endif
+
 		struct hppa_iv *iv = &intr_table[bit];
 
 		ci->ci_ipending &= ~(1L << bit);

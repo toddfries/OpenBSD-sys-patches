@@ -1,4 +1,4 @@
-/*	$OpenBSD: openpic.c,v 1.60 2010/04/09 19:24:17 jasper Exp $	*/
+/*	$OpenBSD: openpic.c,v 1.62 2010/09/20 06:33:47 matthew Exp $	*/
 
 /*-
  * Copyright (c) 1995 Per Fogelstrom
@@ -290,8 +290,7 @@ printf("vI %d ", irq);
 	ih->ih_next = NULL;
 	ih->ih_level = level;
 	ih->ih_irq = irq;
-	evcount_attach(&ih->ih_count, name, (void *)&o_hwirq[irq],
-	    &evcount_intr);
+	evcount_attach(&ih->ih_count, name, &o_hwirq[irq]);
 	*p = ih;
 
 	return (ih);
@@ -666,7 +665,7 @@ openpic_send_ipi(struct cpu_info *ci, int id)
 		id = 1;
 		break;
 	default:
-		panic("invalid ipi send to cpu %d %d\n", ci->ci_cpuid, id);
+		panic("invalid ipi send to cpu %d %d", ci->ci_cpuid, id);
 	}
 		
 		
@@ -789,14 +788,10 @@ openpic_init()
 	x |= (15 << OPENPIC_PRIORITY_SHIFT) | IPI_VECTOR_DDB;
 	openpic_write(OPENPIC_IPI_VECTOR(1), x);
 
-	evcount_attach(&ipi_nop[0], "ipi_nop0", (void *)&ipi_nopirq,
-	    &evcount_intr);
-	evcount_attach(&ipi_nop[1], "ipi_nop1", (void *)&ipi_nopirq,
-	    &evcount_intr);
-	evcount_attach(&ipi_ddb[0], "ipi_ddb0", (void *)&ipi_ddbirq,
-	    &evcount_intr);
-	evcount_attach(&ipi_ddb[1], "ipi_ddb1", (void *)&ipi_ddbirq,
-	    &evcount_intr);
+	evcount_attach(&ipi_nop[0], "ipi_nop0", &ipi_nopirq);
+	evcount_attach(&ipi_nop[1], "ipi_nop1", &ipi_nopirq);
+	evcount_attach(&ipi_ddb[0], "ipi_ddb0", &ipi_ddbirq);
+	evcount_attach(&ipi_ddb[1], "ipi_ddb1", &ipi_ddbirq);
 #endif
 
 	/* XXX set spurious intr vector */

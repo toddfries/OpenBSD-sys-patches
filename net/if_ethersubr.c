@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ethersubr.c,v 1.144 2010/06/03 16:15:00 naddy Exp $	*/
+/*	$OpenBSD: if_ethersubr.c,v 1.147 2010/10/11 11:31:14 claudio Exp $	*/
 /*	$NetBSD: if_ethersubr.c,v 1.19 1996/05/07 02:40:30 thorpej Exp $	*/
 
 /*
@@ -282,10 +282,12 @@ ether_output(ifp0, m0, dst, rt0)
 			if (rt->rt_gwroute == 0)
 				goto lookup;
 			if (((rt = rt->rt_gwroute)->rt_flags & RTF_UP) == 0) {
-				rtfree(rt); rt = rt0;
-			lookup: rt->rt_gwroute = rtalloc1(rt->rt_gateway,
-			    RT_REPORT, ifp->if_rdomain);
-				if ((rt = rt->rt_gwroute) == 0)
+				rtfree(rt);
+				rt = rt0;
+			lookup:
+				rt->rt_gwroute = rtalloc1(rt->rt_gateway,
+				    RT_REPORT, ifp->if_rdomain);
+				if ((rt = rt->rt_gwroute) == NULL)
 					senderr(EHOSTUNREACH);
 			}
 		}
@@ -677,7 +679,7 @@ ether_input(ifp0, eh, m)
 	 * is for us.  Drop otherwise.
 	 */
 	if ((m->m_flags & (M_BCAST|M_MCAST)) == 0 &&
-	    (ifp->if_flags & IFF_PROMISC)) {
+	    ((ifp->if_flags & IFF_PROMISC) || (ifp0->if_flags & IFF_PROMISC))) {
 		if (bcmp(ac->ac_enaddr, (caddr_t)eh->ether_dhost,
 		    ETHER_ADDR_LEN)) {
 			m_freem(m);
@@ -735,13 +737,6 @@ decapsulate:
 #if NPPPOE > 0 || defined(PIPEX)
 	case ETHERTYPE_PPPOEDISC:
 	case ETHERTYPE_PPPOE:
-		/* XXX we dont have this flag */
-		/*
-		if (m->m_flags & M_PROMISC) {
-			m_freem(m);
-			goto done;
-		}
-		*/
 #ifndef PPPOE_SERVER
 		if (m->m_flags & (M_MCAST | M_BCAST)) {
 			m_freem(m);
@@ -771,7 +766,7 @@ decapsulate:
 
 		schednetisr(NETISR_PPPOE);
 		break;
-#endif /* NPPPOE > 0 || defined(PIPEX) */
+#endif
 #ifdef AOE
 	case ETHERTYPE_AOE:
 		aoe_input(ifp, m);

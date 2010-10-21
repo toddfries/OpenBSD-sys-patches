@@ -1,4 +1,4 @@
-/*	$OpenBSD: esa.c,v 1.18 2009/11/13 02:22:19 deraadt Exp $	*/
+/*	$OpenBSD: esa.c,v 1.22 2010/09/07 16:21:44 deraadt Exp $	*/
 /* $NetBSD: esa.c,v 1.12 2002/03/24 14:17:35 jmcneill Exp $ */
 
 /*
@@ -102,6 +102,7 @@ struct audio_device esa_device = {
 int		esa_match(struct device *, void *, void *);
 void		esa_attach(struct device *, struct device *, void *);
 int		esa_detach(struct device *, int);
+int		esa_activate(struct device *, int);
 
 /* audio(9) functions */
 int		esa_open(void *, int);
@@ -160,24 +161,24 @@ int		esa_add_list(struct esa_voice *, struct esa_list *, u_int16_t,
 void		esa_remove_list(struct esa_voice *, struct esa_list *, int);
 
 /* power management */
-void		esa_powerhook(int, void *);
 int		esa_suspend(struct esa_softc *);
 int		esa_resume(struct esa_softc *);
 
 static audio_encoding_t esa_encoding[] = {
-	{ 0, AudioEulinear, AUDIO_ENCODING_ULINEAR, 8, 0 },
-	{ 1, AudioEmulaw, AUDIO_ENCODING_ULAW, 8,
-		AUDIO_ENCODINGFLAG_EMULATED },
-	{ 2, AudioEalaw, AUDIO_ENCODING_ALAW, 8, AUDIO_ENCODINGFLAG_EMULATED },
-	{ 3, AudioEslinear, AUDIO_ENCODING_SLINEAR, 8,
-		AUDIO_ENCODINGFLAG_EMULATED }, /* XXX: Are you sure? */
-	{ 4, AudioEslinear_le, AUDIO_ENCODING_SLINEAR_LE, 16, 0 },
-	{ 5, AudioEulinear_le, AUDIO_ENCODING_ULINEAR_LE, 16,
-		AUDIO_ENCODINGFLAG_EMULATED },
-	{ 6, AudioEslinear_be, AUDIO_ENCODING_SLINEAR_BE, 16,
-		AUDIO_ENCODINGFLAG_EMULATED },
-	{ 7, AudioEulinear_be, AUDIO_ENCODING_ULINEAR_BE, 16,
-		AUDIO_ENCODINGFLAG_EMULATED }
+	{ 0, AudioEulinear, AUDIO_ENCODING_ULINEAR, 8, 1, 1, 0 },
+	{ 1, AudioEmulaw, AUDIO_ENCODING_ULAW, 8, 1, 1,
+	    AUDIO_ENCODINGFLAG_EMULATED },
+	{ 2, AudioEalaw, AUDIO_ENCODING_ALAW, 8, 1, 1,
+	    AUDIO_ENCODINGFLAG_EMULATED },
+	{ 3, AudioEslinear, AUDIO_ENCODING_SLINEAR, 8, 1, 1,
+	    AUDIO_ENCODINGFLAG_EMULATED },
+	{ 4, AudioEslinear_le, AUDIO_ENCODING_SLINEAR_LE, 16, 2, 1, 0 },
+	{ 5, AudioEulinear_le, AUDIO_ENCODING_ULINEAR_LE, 16, 2, 1,
+	    AUDIO_ENCODINGFLAG_EMULATED },
+	{ 6, AudioEslinear_be, AUDIO_ENCODING_SLINEAR_BE, 16, 2, 1,
+	    AUDIO_ENCODINGFLAG_EMULATED },
+	{ 7, AudioEulinear_be, AUDIO_ENCODING_ULINEAR_BE, 16, 2, 1,
+	    AUDIO_ENCODINGFLAG_EMULATED }
 };
 
 #define ESA_NENCODINGS 8
@@ -218,7 +219,7 @@ struct cfdriver esa_cd = {
 
 struct cfattach esa_ca = {
 	sizeof(struct esa_softc), esa_match, esa_attach,
-	esa_detach, /*esa_activate*/ NULL
+	esa_detach, esa_activate
 };
 
 /*
@@ -336,6 +337,8 @@ esa_set_params(void *hdl, int setmode, int usemode, struct audio_params *play,
 		default:
 			return (EINVAL);
 		}
+		p->bps = AUDIO_BPS(p->precision);
+		p->msb = 1;
 
 		ch->mode = *p;
 	}
@@ -1141,13 +1144,6 @@ esa_attach(struct device *parent, struct device *self, void *aux)
 		sc->sc_audiodev[i] =
 		    audio_attach_mi(&esa_hw_if, &sc->voice[i], &sc->sc_dev);
 	}
-
-	sc->powerhook = powerhook_establish(esa_powerhook, sc);
-	if (sc->powerhook == NULL)
-		printf("%s: WARNING: unable to establish powerhook\n",
-		    sc->sc_dev.dv_xname);
-
-	return;
 }
 
 int
@@ -1601,21 +1597,21 @@ esa_remove_list(struct esa_voice *vc, struct esa_list *el, int index)
 	return;
 }
 
-void
-esa_powerhook(int why, void *hdl)
+int
+esa_activate(struct device *self, int act)
 {
-	struct esa_softc *sc = (struct esa_softc *)hdl;
+	struct esa_softc *sc = (struct esa_softc *)self;
 
-	switch (why) {
-	case PWR_SUSPEND:
-	case PWR_STANDBY:
+	switch (act) {
+	case DVACT_SUSPEND:
 		esa_suspend(sc);
 		break;
-	case PWR_RESUME:
+	case DVACT_RESUME:
 		esa_resume(sc);
 		(sc->codec_if->vtbl->restore_ports)(sc->codec_if);
 		break;
 	}
+	return 0;
 }
 
 int

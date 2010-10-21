@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.473 2010/06/10 17:54:13 deraadt Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.485 2010/10/02 23:31:34 deraadt Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -195,6 +195,14 @@ int	bufpages = 0;
 #endif
 int	bufcachepercent = BUFCACHEPERCENT;
 
+struct uvm_constraint_range  isa_constraint = { 0x0, 0x00ffffffUL };
+struct uvm_constraint_range  dma_constraint = { 0x0, 0xffffffffUL };
+struct uvm_constraint_range *uvm_md_constraints[] = {
+	&isa_constraint,
+	&dma_constraint,
+	NULL
+};
+
 extern int	boothowto;
 int	physmem;
 
@@ -234,6 +242,7 @@ void (*update_cpuspeed)(void) = NULL;
 void	via_update_sensor(void *args);
 #endif
 int kbd_reset;
+int lid_suspend;
 
 /*
  * safepri is a safe priority for sleep to set for a spin-wait
@@ -393,7 +402,7 @@ cpu_startup()
 	initmsgbuf((caddr_t)msgbufp, round_page(MSGBUFSIZE));
 
 	printf("%s", version);
-	startrtclock();
+	startclocks();
 
 	/*
 	 * We need to call identifycpu here early, so users have at least some
@@ -2170,7 +2179,6 @@ void
 sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
     union sigval val)
 {
-	extern char sigcode, sigcode_xmm;
 	struct proc *p = curproc;
 	struct trapframe *tf = p->p_md.md_regs;
 	struct sigframe *fp, frame;
@@ -2193,11 +2201,18 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	} else
 		sp = tf->tf_esp;
 
-	frame.sf_fpstate = NULL;
+	frame.sf_sc.sc_fpstate = NULL;
 	if (p->p_md.md_flags & MDP_USEDFPU) {
+		npxsave_proc(p, 1);
 		sp -= sizeof(union savefpu);
 		sp &= ~0xf;	/* for XMM regs */
-		frame.sf_fpstate = (void *)sp;
+		frame.sf_sc.sc_fpstate = (void *)sp;
+		if (copyout(&p->p_addr->u_pcb.pcb_savefpu,
+		    (void *)sp, sizeof(union savefpu)))
+			sigexit(p, SIGILL);
+
+		/* Signal handlers get a completely clean FP state */
+		p->p_md.md_flags &= ~MDP_USEDFPU;
 	}
 
 	fp = (struct sigframe *)sp - 1;
@@ -2268,8 +2283,6 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	tf->tf_ds = GSEL(GUDATA_SEL, SEL_UPL);
 	tf->tf_eip = p->p_sigcode;
 	tf->tf_cs = GSEL(GUCODE_SEL, SEL_UPL);
-	if (i386_use_fxsave)
-		tf->tf_eip += &sigcode_xmm - &sigcode;
 	tf->tf_eflags &= ~(PSL_T|PSL_D|PSL_VM|PSL_AC);
 	tf->tf_esp = (int)fp;
 	tf->tf_ss = GSEL(GUDATA_SEL, SEL_UPL);
@@ -2292,9 +2305,8 @@ sys_sigreturn(struct proc *p, void *v, register_t *retval)
 		syscallarg(struct sigcontext *) sigcntxp;
 	} */ *uap = v;
 	struct sigcontext *scp, context;
-	struct trapframe *tf;
-
-	tf = p->p_md.md_regs;
+	struct trapframe *tf = p->p_md.md_regs;
+	int error;
 
 	/*
 	 * The trampoline code hands us the context.
@@ -2346,6 +2358,16 @@ sys_sigreturn(struct proc *p, void *v, register_t *retval)
 	tf->tf_esp = context.sc_esp;
 	tf->tf_ss = context.sc_ss;
 
+	if (p->p_md.md_flags & MDP_USEDFPU)
+		npxsave_proc(p, 0);
+
+	if (context.sc_fpstate) {
+		if ((error = copyin(context.sc_fpstate,
+		    &p->p_addr->u_pcb.pcb_savefpu, sizeof (union savefpu))))
+			return (error);
+		p->p_md.md_flags |= MDP_USEDFPU;
+	}
+
 	if (context.sc_onstack & 01)
 		p->p_sigacts->ps_sigstk.ss_flags |= SS_ONSTACK;
 	else
@@ -2381,6 +2403,9 @@ struct pcb dumppcb;
 void
 boot(int howto)
 {
+	if (howto & RB_POWERDOWN)
+		lid_suspend = 0;
+
 	if (cold) {
 		/*
 		 * If the system is cold, just halt, unless the user
@@ -2669,6 +2694,7 @@ setregs(struct proc *p, struct exec_package *pack, u_long stack,
 	/* If we were using the FPU, forget about it. */
 	if (pcb->pcb_fpcpu != NULL)
 		npxsave_proc(p, 0);
+	p->p_md.md_flags &= ~MDP_USEDFPU;
 #endif
 
 #ifdef USER_LDT
@@ -2694,19 +2720,17 @@ setregs(struct proc *p, struct exec_package *pack, u_long stack,
 	 */
 	pmap->pm_hiexec = 0;
 
-	p->p_md.md_flags &= ~MDP_USEDFPU;
-	if (i386_use_fxsave) {
-		pcb->pcb_savefpu.sv_xmm.sv_env.en_cw = __OpenBSD_NPXCW__;
-		pcb->pcb_savefpu.sv_xmm.sv_env.en_mxcsr = __INITIAL_MXCSR__;
-	} else
-		pcb->pcb_savefpu.sv_87.sv_env.en_cw = __OpenBSD_NPXCW__;
-
 	tf->tf_fs = GSEL(GUDATA_SEL, SEL_UPL);
 	tf->tf_gs = GSEL(GUDATA_SEL, SEL_UPL);
 	tf->tf_es = GSEL(GUDATA_SEL, SEL_UPL);
 	tf->tf_ds = GSEL(GUDATA_SEL, SEL_UPL);
+	tf->tf_edi = 0;
+	tf->tf_esi = 0;
 	tf->tf_ebp = 0;
 	tf->tf_ebx = (int)PS_STRINGS;
+	tf->tf_edx = 0;
+	tf->tf_ecx = 0;
+	tf->tf_eax = 0;
 	tf->tf_eip = pack->ep_entry;
 	tf->tf_cs = GSEL(GUCODE_SEL, SEL_UPL);
 	tf->tf_eflags = PSL_USERSET;
@@ -2899,16 +2923,6 @@ init386(paddr_t first_avail)
 	    SDT_MEMRWA, SEL_UPL, 1, 1);
 	setsegment(&gdt[GCPU_SEL].sd, &cpu_info_primary,
 	    sizeof(struct cpu_info)-1, SDT_MEMRWA, SEL_KPL, 0, 0);
-
-	/* make ldt gates and memory segments */
-#ifdef COMPAT_IBCS2
-	setgate(&ldt[LSYS5CALLS_SEL].gd, &IDTVEC(osyscall), 1, SDT_SYS386CGT,
-	    SEL_UPL, GCODE_SEL);
-#endif
-#ifdef COMPAT_BSDOS
-	setgate(&ldt[LBSDICALLS_SEL].gd, &IDTVEC(osyscall), 1, SDT_SYS386CGT,
-	    SEL_UPL, GCODE_SEL);
-#endif
 
 	/* exceptions */
 	setgate(&idt[  0], &IDTVEC(div),     0, SDT_SYS386TGT, SEL_KPL, GCODE_SEL);
@@ -3281,12 +3295,7 @@ cpu_reset()
 void
 cpu_initclocks(void)
 {
-	(*initclock_func)();
-
-	if (initclock_func == i8254_initclocks)
-		i8254_inittimecounter();
-	else
-		i8254_inittimecounter_simple();
+	(*initclock_func)();		/* lapic or i8254 */
 }
 
 void
@@ -3297,8 +3306,7 @@ need_resched(struct cpu_info *ci)
 	/* There's a risk we'll be called before the idle threads start */
 	if (ci->ci_curproc) {
 		aston(ci->ci_curproc);
-		if (ci != curcpu())
-			cpu_unidle(ci);
+		cpu_unidle(ci);
 	}
 }
 
@@ -3406,6 +3414,8 @@ cpu_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 		return (sysctl_rdint(oldp, oldlenp, newp, i386_has_sse2));
 	case CPU_XCRYPT:
 		return (sysctl_rdint(oldp, oldlenp, newp, i386_has_xcrypt));
+	case CPU_LIDSUSPEND:
+		return (sysctl_int(oldp, oldlenp, newp, newlen, &lid_suspend));
 	default:
 		return (EOPNOTSUPP);
 	}

@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_raid1.c,v 1.23 2010/03/26 11:20:34 jsing Exp $ */
+/* $OpenBSD: softraid_raid1.c,v 1.25 2010/07/02 09:20:26 jsing Exp $ */
 /*
  * Copyright (c) 2007 Marco Peereboom <marco@peereboom.us>
  *
@@ -381,7 +381,7 @@ sr_raid1_rw(struct sr_workunit *wu)
 		goto bad;
 
 	/* calculate physical block */
-	blk += SR_DATA_OFFSET;
+	blk += sd->sd_meta->ssd_data_offset;
 
 	if (xs->flags & SCSI_DATA_IN)
 		ios = 1;
@@ -416,6 +416,7 @@ sr_raid1_rw(struct sr_workunit *wu)
 		b->b_data = xs->data;
 		b->b_error = 0;
 		b->b_proc = curproc;
+		b->b_bq = NULL;
 		ccb->ccb_wu = wu;
 
 		if (xs->flags & SCSI_DATA_IN) {
@@ -475,6 +476,8 @@ ragain:
 
 		LIST_INIT(&b->b_dep);
 
+		if (wu->swu_cb_active == 1)
+			panic("%s: sr_raid1_rw", DEVNAME(sd->sd_sc));
 		TAILQ_INSERT_TAIL(&wu->swu_ccb, ccb, ccb_link);
 
 		DNPRINTF(SR_D_DIS, "%s: %s: sr_raid1: b_bcount: %d "
@@ -559,6 +562,9 @@ sr_raid1_intr(struct buf *bp)
 				printf("%s: retrying read on block %lld\n",
 				    DEVNAME(sc), b->b_blkno);
 				sr_ccb_put(ccb);
+				if (wu->swu_cb_active == 1)
+					panic("%s: sr_raid1_intr_cb",
+					    DEVNAME(sd->sd_sc));
 				TAILQ_INIT(&wu->swu_ccb);
 				wu->swu_state = SR_WU_RESTART;
 				if (sd->sd_scsi_rw(wu))
@@ -646,6 +652,8 @@ sr_raid1_recreate_wu(struct sr_workunit *wu)
 		DNPRINTF(SR_D_INTR, "%s: sr_raid1_recreate_wu: %p\n", wup);
 
 		/* toss all ccbs */
+		if (wu->swu_cb_active == 1)
+			panic("%s: sr_raid1_recreate_wu", DEVNAME(sd->sd_sc));
 		while ((ccb = TAILQ_FIRST(&wup->swu_ccb)) != NULL) {
 			TAILQ_REMOVE(&wup->swu_ccb, ccb, ccb_link);
 			sr_ccb_put(ccb);

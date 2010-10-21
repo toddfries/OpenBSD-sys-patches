@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.10 2010/06/09 15:25:32 jsing Exp $	*/
+/*	$OpenBSD: conf.c,v 1.12 2010/09/23 05:02:14 claudio Exp $	*/
 
 /*-
  * Copyright (c) 1991 The Regents of the University of California.
@@ -52,7 +52,6 @@
 #include "pty.h"
 #include "rd.h"
 #include "sd.h"
-#include "ss.h"
 #include "st.h"
 #include "systrace.h"
 #include "tun.h"
@@ -60,6 +59,7 @@
 #include "vme.h"
 #include "vnd.h"
 #include "vscsi.h"
+#include "pppx.h"
 #ifdef NNPFS
 #include <nnpfs/nnnpfs.h>
 cdev_decl(nnpfs_dev);
@@ -133,7 +133,7 @@ struct cdevsw	cdevsw[] =
 	cdev_pf_init(NPF,pf),		/* 39: packet filter */
 	cdev_random_init(1,random),	/* 40: random data source */
 	cdev_uk_init(NUK,uk),		/* 41 */
-	cdev_ss_init(NSS,ss),		/* 42 */
+	cdev_notdef(),			/* 42 */
 	cdev_ksyms_init(NKSYMS,ksyms),	/* 43: Kernel symbols device */
 	cdev_ch_init(NCH,ch),		/* 44: SCSI autochanger */
 	cdev_notdef(),			/* 45 */
@@ -150,6 +150,7 @@ struct cdevsw	cdevsw[] =
 	cdev_ptm_init(NPTY,ptm),	/* 52: pseudo-tty ptm device */
 	cdev_vscsi_init(NVSCSI,vscsi),	/* 53: vscsi */
 	cdev_disk_init(1,diskmap),	/* 54: disk mapper */
+	cdev_pppx_init(NPPPX,pppx),	/* 55: pppx */
 };
 int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bge.c,v 1.293 2010/04/06 15:27:51 naddy Exp $	*/
+/*	$OpenBSD: if_bge.c,v 1.303 2010/09/20 07:40:38 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2001 Wind River Systems
@@ -151,11 +151,9 @@ int bge_intr(void *);
 void bge_start(struct ifnet *);
 int bge_ioctl(struct ifnet *, u_long, caddr_t);
 void bge_init(void *);
-void bge_power(int, void *);
 void bge_stop_block(struct bge_softc *, bus_size_t, u_int32_t);
 void bge_stop(struct bge_softc *);
 void bge_watchdog(struct ifnet *);
-void bge_shutdown(void *);
 int bge_ifmedia_upd(struct ifnet *);
 void bge_ifmedia_sts(struct ifnet *, struct ifmediareq *);
 
@@ -832,7 +830,7 @@ bge_newbuf_jumbo(struct bge_softc *sc, int i)
 		r->bge_bd.bge_len = dmap->dm_segs[0].ds_len;
 		break;
 	default:
-		panic("%s: %d segments\n", __func__, dmap->dm_nsegs);
+		panic("%s: %d segments", __func__, dmap->dm_nsegs);
 	}
 
 	bus_dmamap_sync(sc->bge_dmatag, sc->bge_ring_map,
@@ -1352,9 +1350,12 @@ bge_blockinit(struct bge_softc *sc)
 
 	/* Configure mbuf pool watermarks */
 	/* new Broadcom docs strongly recommend these: */
-	if (BGE_IS_5705_PLUS(sc) &&
-	    BGE_ASICREV(sc->bge_chipid) != BGE_ASICREV_BCM5717 &&
-	    BGE_ASICREV(sc->bge_chipid) != BGE_ASICREV_BCM57765) {
+	if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5717 ||
+	    BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM57765) {
+		CSR_WRITE_4(sc, BGE_BMAN_MBUFPOOL_READDMA_LOWAT, 0x0);
+		CSR_WRITE_4(sc, BGE_BMAN_MBUFPOOL_MACRX_LOWAT, 0x2a);
+		CSR_WRITE_4(sc, BGE_BMAN_MBUFPOOL_HIWAT, 0xa0);
+	} else if (BGE_IS_5705_PLUS(sc)) {
 		CSR_WRITE_4(sc, BGE_BMAN_MBUFPOOL_READDMA_LOWAT, 0x0);
 
 		if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5906) {
@@ -1660,10 +1661,16 @@ bge_blockinit(struct bge_softc *sc)
 	if (BGE_IS_5755_PLUS(sc))
 		val |= BGE_WDMAMODE_STATUS_TAG_FIX;
 
+	if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5785)
+		val |= BGE_WDMAMODE_BURST_ALL_DATA;
+
 	/* Turn on write DMA state machine */
 	CSR_WRITE_4(sc, BGE_WDMA_MODE, val);
 
 	val = BGE_RDMAMODE_ENABLE|BGE_RDMAMODE_ALL_ATTNS;
+
+	if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5717)
+		val |= BGE_RDMAMODE_MULT_DMA_RD_DIS;
 
 	if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5784 ||
 	    BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5785 ||
@@ -2116,10 +2123,12 @@ bge_attach(struct device *parent, struct device *self, void *aux)
 	sc->bge_tx_max_coal_bds = 400;
 
 	/* 5705 limits RX return ring to 512 entries. */
-	if (BGE_IS_5705_PLUS(sc))
-		sc->bge_return_ring_cnt = BGE_RETURN_RING_CNT_5705;
-	else
+	if (BGE_IS_5700_FAMILY(sc) ||
+	    BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5717 ||
+	    BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM57765)
 		sc->bge_return_ring_cnt = BGE_RETURN_RING_CNT;
+	else
+		sc->bge_return_ring_cnt = BGE_RETURN_RING_CNT_5705;
 
 	/* Set up ifnet structure */
 	ifp = &sc->arpcom.ac_if;
@@ -2188,7 +2197,8 @@ bge_attach(struct device *parent, struct device *self, void *aux)
 	/* The SysKonnect SK-9D41 is a 1000baseSX card. */
 	if (PCI_PRODUCT(subid) == SK_SUBSYSID_9D41 ||
 	    (hwcfg & BGE_HWCFG_MEDIA) == BGE_MEDIA_FIBER) {
-		if (BGE_IS_5714_FAMILY(sc))
+		if (BGE_IS_5714_FAMILY(sc) ||
+		    BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5717)
 		    sc->bge_flags |= BGE_PHY_FIBER_MII;
 		else
 		    sc->bge_flags |= BGE_PHY_FIBER_TBI;
@@ -2252,9 +2262,6 @@ bge_attach(struct device *parent, struct device *self, void *aux)
 	if_attach(ifp);
 	ether_ifattach(ifp);
 
-	sc->sc_shutdownhook = shutdownhook_establish(bge_shutdown, sc);
-	sc->sc_powerhook = powerhook_establish(bge_power, sc);	
-	
 	timeout_set(&sc->bge_timeout, bge_tick, sc);
 	timeout_set(&sc->bge_rxtimeout, bge_rxtick, sc);
 	return;
@@ -2279,15 +2286,26 @@ fail_1:
 int
 bge_activate(struct device *self, int act)
 {
-	switch(act) {
+	struct bge_softc *sc = (struct bge_softc *)self;
+	struct ifnet *ifp = &sc->arpcom.ac_if;
+	int rv = 0;
+
+	switch (act) {
+	case DVACT_QUIESCE:
+		rv = config_activate_children(self, act);
+		break;
 	case DVACT_SUSPEND:
+		rv = config_activate_children(self, act);
+		if (ifp->if_flags & IFF_RUNNING)
+			bge_stop(sc);
 		break;
 	case DVACT_RESUME:
-		bge_power(PWR_RESUME, self);
+		if (ifp->if_flags & IFF_UP)
+			bge_init(sc);
+		rv = config_activate_children(self, act);
 		break;
 	}
-
-	return (0);
+	return (rv);
 }
 
 void
@@ -3598,19 +3616,6 @@ bge_stop(struct bge_softc *sc)
 	BGE_STS_CLRBIT(sc, BGE_STS_LINK);
 }
 
-/*
- * Stop all chip I/O so that the kernel's probe routines don't
- * get confused by errant DMAs when rebooting.
- */
-void
-bge_shutdown(void *xsc)
-{
-	struct bge_softc *sc = (struct bge_softc *)xsc;
-
-	bge_stop(sc);
-	bge_reset(sc);
-}
-
 void
 bge_link_upd(struct bge_softc *sc)
 {
@@ -3713,19 +3718,4 @@ bge_link_upd(struct bge_softc *sc)
 	CSR_WRITE_4(sc, BGE_MAC_STS, BGE_MACSTAT_SYNC_CHANGED|
 	    BGE_MACSTAT_CFG_CHANGED|BGE_MACSTAT_MI_COMPLETE|
 	    BGE_MACSTAT_LINK_CHANGED);
-}
-
-void
-bge_power(int why, void *xsc)
-{
-	struct bge_softc *sc = (struct bge_softc *)xsc;
-	struct ifnet *ifp;
-
-	if (why == PWR_RESUME) {
-		ifp = &sc->arpcom.ac_if;
-		if (ifp->if_flags & IFF_UP) {
-			bge_init(xsc);
-			bge_start(ifp);
-		}
-	}
 }

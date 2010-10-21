@@ -1,4 +1,4 @@
-/*	$OpenBSD: z8530tty.c,v 1.12 2010/04/12 12:57:52 tedu Exp $ */
+/*	$OpenBSD: z8530tty.c,v 1.15 2010/07/05 10:41:35 blambert Exp $ */
 /*	$NetBSD: z8530tty.c,v 1.13 1996/10/16 20:42:14 gwr Exp $	*/
 
 /*-
@@ -339,7 +339,7 @@ zstty_attach(struct device *parent, struct device *self, void   *aux)
 
 	printf("\n");
 
-	tp = ttymalloc();
+	tp = ttymalloc(0);
 	tp->t_dev = dev;
 	tp->t_oproc = zsstart;
 	tp->t_param = zsparam;
@@ -781,15 +781,9 @@ zsstart(struct tty *tp)
 	if (zst->zst_tx_stopped)
 		goto out;
 
-	if (tp->t_outq.c_cc <= tp->t_lowat) {
-		if (ISSET(tp->t_state, TS_ASLEEP)) {
-			CLR(tp->t_state, TS_ASLEEP);
-			wakeup((caddr_t)&tp->t_outq);
-		}
-		selwakeup(&tp->t_wsel);
-		if (tp->t_outq.c_cc == 0)
-			goto out;
-	}
+	ttwakeupwr(tp);
+	if (tp->t_outq.c_cc == 0)
+		goto out;
 
 	/* Grab the first contiguous region of buffer space. */
 	{
@@ -1414,7 +1408,7 @@ zstty_rxsoft(struct zstty_softc *zst, struct tty *tp)
 	if (cc == zstty_rbuf_size) {
 		zst->zst_floods++;
 		if (zst->zst_errors++ == 0)
-			timeout_add(&zst->zst_diag_ch, 60 * hz);
+			timeout_add_sec(&zst->zst_diag_ch, 60);
 	}
 
 	/* If not yet open, drop the entire buffer content here */

@@ -1,4 +1,4 @@
-#	$OpenBSD: files.pci,v 1.271 2010/04/02 20:07:29 deraadt Exp $
+#	$OpenBSD: files.pci,v 1.276 2010/10/14 21:23:04 pirofti Exp $
 #	$NetBSD: files.pci,v 1.20 1996/09/24 17:47:15 christos Exp $
 #
 # Config file and device description for machine-independent PCI code.
@@ -116,9 +116,6 @@ device	eso {}: audio, auconv, mulaw, midibus
 attach	eso at pci
 file	dev/pci/eso.c			eso
 
-attach	opl at eso with opl_eso
-file	dev/pci/opl_eso.c		opl_eso
-
 # Acer Labs M5455
 device	auacer: audio, auconv, mulaw, ac97
 attach	auacer at pci
@@ -136,7 +133,7 @@ file	dev/pci/azalia.c		azalia
 file	dev/pci/azalia_codec.c		azalia
 
 # VIA Envy24 (aka ICE1712)
-device	envy: audio, auconv, mulaw, ac97
+device	envy: audio, ac97, midibus
 attach	envy at pci
 file	dev/pci/envy.c			envy
 
@@ -180,9 +177,6 @@ device	yds {}: audio, auconv, mulaw, ac97, firmload
 attach	yds at pci
 file	dev/pci/yds.c			yds
 
-attach	opl at yds with opl_yds
-file	dev/pci/opl_yds.c		opl_yds
-
 # Forte Media FM801
 device	fms: audio, auconv, mulaw, ac97, midibus, tea5757, radiobus
 attach	fms at pci
@@ -224,8 +218,8 @@ file	dev/pci/mpi_pci.c		mpi_pci
 
 # LSI Logic Fusion-MPT Message Passing Interface 2.0
 device	mpii: scsi
-attach	mpii at pci with mpii_pci
-file	dev/pci/mpii.c			mpii_pci
+attach	mpii at pci
+file	dev/pci/mpii.c			mpii
 
 # Emulex Light Pulse Fibre Channel (Service Level Interface)
 attach	sli at pci with sli_pci
@@ -571,9 +565,6 @@ device	cmpci {}: audio, auconv, mulaw
 attach	cmpci at pci
 file	dev/pci/cmpci.c			cmpci
 
-attach	opl at cmpci with opl_cmpci
-file	dev/pci/opl_cmpci.c		opl_cmpci
-
 # Initio ULTRA WIDE/ULTRA2 WIDE SCSI Controllers
 attach	iha at pci with iha_pci
 file	dev/pci/iha_pci.c		iha_pci
@@ -806,3 +797,12 @@ device	auglx: audio, ac97
 attach	auglx at pci
 file	dev/pci/auglx.c			auglx
 
+# Intel 3400 Thermal 
+device	itherm
+attach	itherm at pci
+file	dev/pci/itherm.c		itherm
+
+# AMD Geode CS5536 PCI-ISA bridge
+device	glxpcib: isabus, gpiobus
+attach	glxpcib at pci
+file	dev/pci/glxpcib.c		glxpcib

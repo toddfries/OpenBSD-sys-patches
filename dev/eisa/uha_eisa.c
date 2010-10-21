@@ -1,4 +1,4 @@
-/*	$OpenBSD: uha_eisa.c,v 1.10 2009/08/29 13:58:51 jasper Exp $	*/
+/*	$OpenBSD: uha_eisa.c,v 1.12 2010/08/07 03:50:01 krw Exp $	*/
 /*	$NetBSD: uha_eisa.c,v 1.5 1996/10/21 22:31:07 thorpej Exp $	*/
 
 /*
@@ -36,7 +36,7 @@
 #include <sys/device.h>
 #include <sys/kernel.h>
 #include <sys/proc.h>
-#include <sys/user.h>
+#include <uvm/uvm_extern.h>
 
 #include <machine/bus.h>
 #include <machine/intr.h>
@@ -230,7 +230,7 @@ u24_start_mbox(sc, mscp)
 		delay(100);
 	}
 	if (!spincount)
-		panic("%s: uha_start_mbox, board not responding\n",
+		panic("%s: uha_start_mbox, board not responding",
 		    sc->sc_dev.dv_xname);
 
 	bus_space_write_4(iot, ioh, U24_OGMPTR, KVTOPHYS(mscp));

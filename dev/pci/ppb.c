@@ -1,4 +1,4 @@
-/*	$OpenBSD: ppb.c,v 1.41 2010/04/06 22:28:07 tedu Exp $	*/
+/*	$OpenBSD: ppb.c,v 1.46 2010/09/25 19:23:39 mlarkin Exp $	*/
 /*	$NetBSD: ppb.c,v 1.16 1997/06/06 23:48:05 thorpej Exp $	*/
 
 /*
@@ -81,6 +81,8 @@ struct ppb_softc {
 	pcireg_t sc_bir;
 	pcireg_t sc_bcr;
 	pcireg_t sc_int;
+	pcireg_t sc_slcsr;
+	int sc_pmcsr_state;
 };
 
 int	ppbmatch(struct device *, void *, void *);
@@ -344,10 +346,13 @@ ppbactivate(struct device *self, int act)
 	struct ppb_softc *sc = (void *)self;
 	pci_chipset_tag_t pc = sc->sc_pc;
 	pcitag_t tag = sc->sc_tag;
-	pcireg_t blr;
+	pcireg_t blr, csr, reg;
 	int rv = 0;
 
 	switch (act) {
+	case DVACT_QUIESCE:
+		rv = config_activate_children(self, act);
+		break;
 	case DVACT_SUSPEND:
 		rv = config_activate_children(self, act);
 
@@ -357,13 +362,40 @@ ppbactivate(struct device *self, int act)
 		sc->sc_bir = pci_conf_read(pc, tag, PPB_REG_BUSINFO);
 		sc->sc_bcr = pci_conf_read(pc, tag, PPB_REG_BRIDGECONTROL);
 		sc->sc_int = pci_conf_read(pc, tag, PCI_INTERRUPT_REG);
+		if (sc->sc_cap_off)
+			sc->sc_slcsr = pci_conf_read(pc, tag,
+			    sc->sc_cap_off + PCI_PCIE_SLCSR);
+
+		if (pci_dopm) {	
+			/*
+		 	 * Place the bridge into D3.  The PCI Power
+			 * Management spec says we should disable I/O
+			 * and memory space as well as bus mastering
+			 * before we do so.
+		 	 */
+			csr = sc->sc_csr;
+			csr &= ~PCI_COMMAND_IO_ENABLE;
+			csr &= ~PCI_COMMAND_MEM_ENABLE;
+			csr &= ~PCI_COMMAND_MASTER_ENABLE;
+			pci_conf_write(pc, tag, PCI_COMMAND_STATUS_REG, csr);
+			sc->sc_pmcsr_state = pci_get_powerstate(pc, tag);
+			pci_set_powerstate(pc, tag, PCI_PMCSR_STATE_D3);
+		}
 		break;
 	case DVACT_RESUME:
+		if (pci_dopm) {
+			/* Restore power. */
+			pci_set_powerstate(pc, tag, sc->sc_pmcsr_state);
+		}
+
 		/* Restore the registers saved above. */
 		pci_conf_write(pc, tag, PCI_BHLC_REG, sc->sc_bhlcr);
 		pci_conf_write(pc, tag, PPB_REG_BUSINFO, sc->sc_bir);
 		pci_conf_write(pc, tag, PPB_REG_BRIDGECONTROL, sc->sc_bcr);
 		pci_conf_write(pc, tag, PCI_INTERRUPT_REG, sc->sc_int);
+		if (sc->sc_cap_off)
+			pci_conf_write(pc, tag,
+			    sc->sc_cap_off + PCI_PCIE_SLCSR, sc->sc_slcsr);
 
 		/* Restore I/O window. */
 		blr = pci_conf_read(pc, tag, PPB_REG_IOSTATUS);
@@ -395,7 +427,9 @@ ppbactivate(struct device *self, int act)
 		 * Restore command register last to avoid exposing
 		 * uninitialised windows.
 		 */
-		pci_conf_write(pc, tag, PCI_COMMAND_STATUS_REG, sc->sc_csr);
+		reg = pci_conf_read(pc, tag, PCI_COMMAND_STATUS_REG);
+		pci_conf_write(pc, tag, PCI_COMMAND_STATUS_REG,
+		    (reg & 0xffff0000) | (sc->sc_csr & 0x0000ffff));
 
 		rv = config_activate_children(self, act);
 		break;
@@ -563,7 +597,7 @@ ppb_intr(void *arg)
 
 	/*
 	 * XXX ignore hotplug events while in autoconf.  On some
-	 * machines with onboard re(4), we gat a bogus hotplug remove
+	 * machines with onboard re(4), we get a bogus hotplug remove
 	 * event when we reset that device.  Ignoring that event makes
 	 * sure we will not try to forcibly detach re(4) when it isn't
 	 * ready to deal with that.
