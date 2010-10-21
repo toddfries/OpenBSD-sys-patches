@@ -1,4 +1,4 @@
-/*	$OpenBSD: ehci_pci.c,v 1.15 2009/03/29 21:53:52 sthen Exp $ */
+/*	$OpenBSD: ehci_pci.c,v 1.22 2010/10/20 20:34:19 mk Exp $ */
 /*	$NetBSD: ehci_pci.c,v 1.15 2004/04/23 21:13:06 itojun Exp $	*/
 
 /*
@@ -35,7 +35,7 @@
 #include <sys/kernel.h>
 #include <sys/rwlock.h>
 #include <sys/device.h>
-#include <sys/proc.h>
+#include <sys/timeout.h>
 #include <sys/queue.h>
 
 #include <machine/bus.h>
@@ -65,18 +65,24 @@ struct ehci_pci_softc {
 	void 			*sc_ih;		/* interrupt vectoring */
 };
 
+int ehci_sb700_match(struct pci_attach_args *pa);
+
+#define EHCI_SBx00_WORKAROUND_REG	0x50
+#define EHCI_SBx00_WORKAROUND_ENABLE	(1 << 3)
+#define EHCI_VT6202_WORKAROUND_REG	0x48
+
 int	ehci_pci_match(struct device *, void *, void *);
 void	ehci_pci_attach(struct device *, struct device *, void *);
 int	ehci_pci_detach(struct device *, int);
+int	ehci_pci_activate(struct device *, int);
 void	ehci_pci_givecontroller(struct ehci_pci_softc *);
-void	ehci_pci_takecontroller(struct ehci_pci_softc *);
+void	ehci_pci_takecontroller(struct ehci_pci_softc *, int);
 void	ehci_pci_shutdown(void *);
 
 struct cfattach ehci_pci_ca = {
 	sizeof(struct ehci_pci_softc), ehci_pci_match, ehci_pci_attach,
-	ehci_pci_detach, ehci_activate
+	ehci_pci_detach, ehci_pci_activate
 };
-
 
 int
 ehci_pci_match(struct device *parent, void *match, void *aux)
@@ -122,6 +128,42 @@ ehci_pci_attach(struct device *parent, struct device *self, void *aux)
 	DPRINTF(("%s: offs=%d\n", devname, sc->sc.sc_offs));
 	EOWRITE2(&sc->sc, EHCI_USBINTR, 0);
 
+	/* Handle quirks */
+	switch (PCI_VENDOR(pa->pa_id)) {
+	case PCI_VENDOR_ATI:
+		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_ATI_SB600_EHCI ||
+		    (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_ATI_SB700_EHCI &&
+		     pci_find_device(NULL, ehci_sb700_match))) {
+			pcireg_t value;
+
+			/* apply the ATI SB600/SB700 workaround */
+			value = pci_conf_read(sc->sc_pc, sc->sc_tag,
+			    EHCI_SBx00_WORKAROUND_REG);
+			pci_conf_write(sc->sc_pc, sc->sc_tag,
+			    EHCI_SBx00_WORKAROUND_REG, value |
+			    EHCI_SBx00_WORKAROUND_ENABLE);
+		}
+		break;
+
+	case PCI_VENDOR_VIATECH:
+		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_VIATECH_VT6202 &&
+		    (PCI_REVISION(pa->pa_class) & 0xf0) == 0x60) {
+			pcireg_t value;
+
+			/*
+			 * The VT6202 defaults to a 1 usec EHCI sleep time
+			 * which hogs the PCI bus *badly*. Setting bit 5 of
+			 * the register makes that sleep time use the conventional
+			 * 10 usec.
+			 */
+			value = pci_conf_read(sc->sc_pc, sc->sc_tag,
+			    EHCI_VT6202_WORKAROUND_REG);
+			pci_conf_write(sc->sc_pc, sc->sc_tag,
+			    EHCI_VT6202_WORKAROUND_REG, value | 0x20000000);
+		}
+		break;
+	}
+
 	/* Map and establish the interrupt. */
 	if (pci_intr_map(pa, &ih)) {
 		printf(": couldn't map interrupt\n");
@@ -144,7 +186,7 @@ ehci_pci_attach(struct device *parent, struct device *self, void *aux)
 	case PCI_USBREV_1_1:
 		sc->sc.sc_bus.usbrev = USBREV_UNKNOWN;
 		printf("%s: pre-2.0 USB rev\n", devname);
-		goto unmap_ret;
+		goto disestablish_ret;
 	case PCI_USBREV_2_0:
 		sc->sc.sc_bus.usbrev = USBREV_2_0;
 		break;
@@ -166,11 +208,11 @@ ehci_pci_attach(struct device *parent, struct device *self, void *aux)
 	if (sc->sc.sc_id_vendor == PCI_VENDOR_VIATECH)
 		sc->sc.sc_flags |= EHCIF_DROPPED_INTR_WORKAROUND;
 
-	ehci_pci_takecontroller(sc);
+	ehci_pci_takecontroller(sc, 0);
 	r = ehci_init(&sc->sc);
 	if (r != USBD_NORMAL_COMPLETION) {
 		printf("%s: init failed, error=%d\n", devname, r);
-		goto unmap_ret;
+		goto disestablish_ret;
 	}
 
 	sc->sc.sc_shutdownhook = shutdownhook_establish(ehci_pci_shutdown, sc);
@@ -182,9 +224,26 @@ ehci_pci_attach(struct device *parent, struct device *self, void *aux)
 
 	return;
 
+disestablish_ret:
+	pci_intr_disestablish(sc->sc_pc, sc->sc_ih);
 unmap_ret:
 	bus_space_unmap(sc->sc.iot, sc->sc.ioh, sc->sc.sc_size);
 	splx(s);
+}
+
+int
+ehci_pci_activate(struct device *self, int act)
+{
+	struct ehci_pci_softc *sc = (struct ehci_pci_softc *)self;
+
+	/* On resume, take ownership from the BIOS */
+	switch (act) {
+	case DVACT_RESUME:
+		ehci_pci_takecontroller(sc, 1);
+		break;
+	}
+
+	return ehci_activate(self, act);
 }
 
 int
@@ -228,7 +287,7 @@ ehci_pci_givecontroller(struct ehci_pci_softc *sc)
 #endif
 
 void
-ehci_pci_takecontroller(struct ehci_pci_softc *sc)
+ehci_pci_takecontroller(struct ehci_pci_softc *sc, int silent)
 {
 	u_int32_t cparams, eec, legsup;
 	int eecp, i;
@@ -253,7 +312,7 @@ ehci_pci_takecontroller(struct ehci_pci_softc *sc)
 					break;
 				DELAY(1000);
 			}
-			if (legsup & EHCI_LEGSUP_BIOSOWNED)
+			if (silent == 00 && (legsup & EHCI_LEGSUP_BIOSOWNED))
 				printf("%s: timed out waiting for BIOS\n",
 				    sc->sc.sc_bus.bdev.dv_xname);
 		}
@@ -270,4 +329,16 @@ ehci_pci_shutdown(void *v)
 	/* best not to do this anymore; BIOS SMM spins? */
 	ehci_pci_givecontroller(sc);
 #endif
+}
+
+int
+ehci_sb700_match(struct pci_attach_args *pa)
+{
+	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_ATI &&
+	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_ATI_SBX00_SMB &&
+	    (PCI_REVISION(pa->pa_class) == 0x3a ||
+	     PCI_REVISION(pa->pa_class) == 0x3b))
+		return (1);
+
+	return (0);
 }

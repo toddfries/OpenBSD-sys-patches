@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd9660_vfsops.c,v 1.49 2009/05/21 23:45:48 krw Exp $	*/
+/*	$OpenBSD: cd9660_vfsops.c,v 1.55 2010/09/10 16:34:08 thib Exp $	*/
 /*	$NetBSD: cd9660_vfsops.c,v 1.26 1997/06/13 15:38:58 pk Exp $	*/
 
 /*-
@@ -178,7 +178,7 @@ cd9660_mount(mp, path, data, ndp, p)
 	 * If mount by non-root, then verify that user has necessary
 	 * permissions on the device.
 	 */
-	if (p->p_ucred->cr_uid != 0) {
+	if (suser(p, 0) != 0) {
 		vn_lock(devvp, LK_EXCLUSIVE | LK_RETRY, p);
 		error = VOP_ACCESS(devvp, VREAD, p->p_ucred, p);
 		if (error) {
@@ -225,7 +225,6 @@ iso_mountfs(devvp, mp, p, argp)
 	struct buf *pribp = NULL, *supbp = NULL;
 	dev_t dev = devvp->v_rdev;
 	int error = EINVAL;
-	int needclose = 0;
 	int ronly = (mp->mnt_flag & MNT_RDONLY) != 0;
 	extern struct vnode *rootvp;
 	int iso_bsize;
@@ -251,13 +250,15 @@ iso_mountfs(devvp, mp, p, argp)
 		return (error);
 	if (vcount(devvp) > 1 && devvp != rootvp)
 		return (EBUSY);
-	if ((error = vinvalbuf(devvp, V_SAVE, p->p_ucred, p, 0, 0)) != 0)
+	vn_lock(devvp, LK_EXCLUSIVE | LK_RETRY, p);
+	error = vinvalbuf(devvp, V_SAVE, p->p_ucred, p, 0, 0);
+	VOP_UNLOCK(devvp, 0, p);
+	if (error)
 		return (error);
 
 	error = VOP_OPEN(devvp, ronly ? FREAD : FREAD|FWRITE, FSCRED, p);
 	if (error)
 		return (error);
-	needclose = 1;
 	
 	/*
 	 * This is the "logical sector size".  The standard says this
@@ -443,9 +444,11 @@ out:
 		brelse(bp);
 	if (supbp)
 		brelse(supbp);
-	if (needclose)
-		(void)VOP_CLOSE(devvp, ronly ? FREAD : FREAD|FWRITE, NOCRED,
-		    p);
+
+	vn_lock(devvp, LK_EXCLUSIVE | LK_RETRY, p);
+	VOP_CLOSE(devvp, ronly ? FREAD : FREAD|FWRITE, NOCRED, p);
+	VOP_UNLOCK(devvp, 0, p);
+
 	if (isomp) {
 		free((caddr_t)isomp, M_ISOFSMNT);
 		mp->mnt_data = (qaddr_t)0;
@@ -581,8 +584,9 @@ cd9660_unmount(mp, mntflags, p)
 #endif
 	
 	isomp->im_devvp->v_specmountpoint = NULL;
+	vn_lock(isomp->im_devvp, LK_EXCLUSIVE | LK_RETRY, p);
 	error = VOP_CLOSE(isomp->im_devvp, FREAD, NOCRED, p);
-	vrele(isomp->im_devvp);
+	vput(isomp->im_devvp);
 	free((caddr_t)isomp, M_ISOFSMNT);
 	mp->mnt_data = (qaddr_t)0;
 	mp->mnt_flag &= ~MNT_LOCAL;
@@ -847,7 +851,7 @@ retry:
 
 	ip->i_mnt = imp;
 	ip->i_devvp = imp->im_devvp;
-	VREF(ip->i_devvp);
+	vref(ip->i_devvp);
 
 	if (relocated) {
 		/*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_pdaemon.c,v 1.48 2009/06/15 17:01:26 beck Exp $	*/
+/*	$OpenBSD: uvm_pdaemon.c,v 1.56 2010/09/26 12:53:27 thib Exp $	*/
 /*	$NetBSD: uvm_pdaemon.c,v 1.23 2000/08/20 10:24:14 bjh21 Exp $	*/
 
 /* 
@@ -143,7 +143,7 @@ uvm_wait(const char *wmsg)
 	}
 
 	uvm_lock_fpageq();
-	wakeup(&uvm.pagedaemon_proc);		/* wake the daemon! */
+	wakeup(&uvm.pagedaemon);		/* wake the daemon! */
 	msleep(&uvmexp.free, &uvm.fpageqlock, PVM | PNORELOCK, wmsg, timo);
 }
 
@@ -214,7 +214,7 @@ uvm_pageout(void *arg)
 	for (;;) {
 		uvm_lock_fpageq();
 		UVMHIST_LOG(pdhist,"  <<SLEEPING>>",0,0,0,0);
-		msleep(&uvm.pagedaemon_proc, &uvm.fpageqlock, PVM | PNORELOCK,
+		msleep(&uvm.pagedaemon, &uvm.fpageqlock, PVM | PNORELOCK,
 		    "pgdaemon", 0);
 		uvmexp.pdwoke++;
 		UVMHIST_LOG(pdhist,"  <<WOKE UP>>",0,0,0,0);
@@ -239,11 +239,12 @@ uvm_pageout(void *arg)
 		    uvmexp.inactarg);
 
 		/*
-		 * scan if needed
+		 * get pages from the buffer cache, or scan if needed
 		 */
-		if ((uvmexp.free - BUFPAGES_DEFICIT) < uvmexp.freetarg ||
-		    uvmexp.inactive < uvmexp.inactarg) {
-			uvmpd_scan();
+		if (((uvmexp.free - BUFPAGES_DEFICIT) < uvmexp.freetarg) ||
+		    ((uvmexp.inactive + BUFPAGES_INACT) < uvmexp.inactarg)) {
+			if (bufbackoff() == -1)
+				uvmpd_scan();
 		}
 
 		/*
@@ -288,7 +289,7 @@ uvm_aiodone_daemon(void *arg)
 		 */
 		mtx_enter(&uvm.aiodoned_lock);
 		while ((bp = TAILQ_FIRST(&uvm.aio_done)) == NULL)
-			msleep(&uvm.aiodoned_proc, &uvm.aiodoned_lock,
+			msleep(&uvm.aiodoned, &uvm.aiodoned_lock,
 			    PVM, "aiodoned", 0);
 		/* Take the list for ourselves. */
 		TAILQ_INIT(&uvm.aio_done);
@@ -310,8 +311,8 @@ uvm_aiodone_daemon(void *arg)
 			bp = nbp;
 		}
 		uvm_lock_fpageq();
-		wakeup(free <= uvmexp.reserve_kernel ?
-		    (void *)&uvm.pagedaemon_proc : (void *)&uvmexp.free);
+		wakeup(free <= uvmexp.reserve_kernel ? &uvm.pagedaemon :
+		    &uvmexp.free);
 		uvm_unlock_fpageq();
 	}
 }
@@ -823,8 +824,13 @@ uvmpd_scan_inactive(struct pglist *pglst)
 			/* released during I/O? Can only happen for anons */
 			if (p->pg_flags & PG_RELEASED) {
 				KASSERT(anon != NULL);
-				/* remove page so we can get nextpg */
+				/*
+				 * remove page so we can get nextpg,
+				 * also zero out anon so we don't use
+				 * it after the free.
+				 */
 				anon->an_page = NULL;
+				p->uanon = NULL;
 
 				simple_unlock(&anon->an_lock);
 				uvm_anfree(anon);	/* kills anon */
@@ -1042,6 +1048,7 @@ uvmpd_scan(void)
 		 */
 
 		if (inactive_shortage > 0) {
+			pmap_page_protect(p, VM_PROT_NONE);
 			/* no need to check wire_count as pg is "active" */
 			uvm_pagedeactivate(p);
 			uvmexp.pddeact++;

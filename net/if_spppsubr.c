@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_spppsubr.c,v 1.75 2009/02/18 08:36:20 canacar Exp $	*/
+/*	$OpenBSD: if_spppsubr.c,v 1.82 2010/09/13 08:53:06 claudio Exp $	*/
 /*
  * Synchronous PPP/Cisco link level subroutines.
  * Keepalive protocol implemented in both Cisco and PPP modes.
@@ -408,6 +408,8 @@ HIDE void sppp_phase_network(struct sppp *sp);
 HIDE void sppp_print_bytes(const u_char *p, u_short len);
 HIDE void sppp_print_string(const char *p, u_short len);
 HIDE void sppp_qflush(struct ifqueue *ifq);
+int sppp_update_gw_walker(struct radix_node *rn, void *arg, u_int);
+void sppp_update_gw(struct ifnet *ifp);
 HIDE void sppp_set_ip_addrs(struct sppp *sp, u_int32_t myaddr,
 			      u_int32_t hisaddr);
 HIDE void sppp_clear_ip_addrs(struct sppp *sp);
@@ -520,6 +522,9 @@ sppp_input(struct ifnet *ifp, struct mbuf *m)
 		m_freem (m);
 		return;
 	}
+
+	/* mark incoming routing domain */
+	m->m_pkthdr.rdomain = ifp->if_rdomain;
 
 	if (sp->pp_flags & PP_NOFRAMING) {
 		memcpy(&ht.protocol, mtod(m, char *), sizeof(ht.protocol));
@@ -694,6 +699,15 @@ sppp_output(struct ifnet *ifp, struct mbuf *m,
 	struct timeval tv;
 	int s, len, rv = 0;
 	u_int16_t protocol;
+
+#ifdef DIAGNOSTIC
+	if (ifp->if_rdomain != rtable_l2(m->m_pkthdr.rdomain)) {
+		printf("%s: trying to send packet on wrong domain. "
+		    "if %d vs. mbuf %d, AF %d\n", ifp->if_xname,
+		    ifp->if_rdomain, rtable_l2(m->m_pkthdr.rdomain),
+		    dst->sa_family);
+	}
+#endif
 
 	s = splnet();
 
@@ -908,7 +922,7 @@ sppp_attach(struct ifnet *ifp)
 		keepalive_ch = timeout(sppp_keepalive, 0, hz * 10);
 #elif defined(__OpenBSD__)
 		timeout_set(&keepalive_ch, sppp_keepalive, NULL);
-		timeout_add(&keepalive_ch, hz * 10);
+		timeout_add_sec(&keepalive_ch, 10);
 #endif
 	}
 
@@ -3891,7 +3905,7 @@ sppp_chap_input(struct sppp *sp, struct mbuf *m)
 #define SUCCMSG "Welcome!"
 
 		if (value_len != sizeof digest ||
-		    bcmp(digest, value, value_len) != 0) {
+		    timingsafe_bcmp(digest, value, value_len) != 0) {
 			/* action scn, tld */
 			sppp_auth_send(&chap, sp, CHAP_FAILURE, h->ident,
 				       sizeof(FAILMSG) - 1, (u_char *)FAILMSG,
@@ -4023,7 +4037,7 @@ sppp_chap_tlu(struct sppp *sp)
 #if defined (__FreeBSD__)
 		sp->ch[IDX_CHAP] = timeout(chap.TO, (void *)sp, i * hz);
 #elif defined(__OpenBSD__)
-		timeout_add(&sp->ch[IDX_CHAP], i * hz);
+		timeout_add_sec(&sp->ch[IDX_CHAP], i);
 #endif
 	}
 
@@ -4587,7 +4601,7 @@ sppp_keepalive(void *dummy)
 	keepalive_ch = timeout(sppp_keepalive, 0, hz * 10);
 #endif
 #if defined (__OpenBSD__)
-	timeout_add(&keepalive_ch, hz * 10);
+	timeout_add_sec(&keepalive_ch, 10);
 #endif
 }
 
@@ -4639,6 +4653,39 @@ sppp_get_ip_addrs(struct sppp *sp, u_int32_t *src, u_int32_t *dst,
 
 	if (dst) *dst = ntohl(ddst);
 	if (src) *src = ntohl(ssrc);
+}
+
+int
+sppp_update_gw_walker(struct radix_node *rn, void *arg, u_int id)
+{
+	struct ifnet *ifp = arg;
+	struct rtentry *rt = (struct rtentry *)rn;
+
+	if (rt->rt_ifp == ifp) {
+		if (rt->rt_ifa->ifa_dstaddr->sa_family !=
+		    rt->rt_gateway->sa_family ||
+		    (rt->rt_flags & RTF_GATEWAY) == 0)
+			return (0);	/* do not modify non-gateway routes */
+		bcopy(rt->rt_ifa->ifa_dstaddr, rt->rt_gateway,
+		    rt->rt_ifa->ifa_dstaddr->sa_len);
+	}
+	return (0);
+}
+
+void
+sppp_update_gw(struct ifnet *ifp)
+{
+        struct radix_node_head *rnh;
+	u_int tid;
+
+	/* update routing table */
+	for (tid = 0; tid <= RT_TABLEID_MAX; tid++) {
+		if ((rnh = rt_gettable(AF_INET, tid)) != NULL) {
+			while ((*rnh->rnh_walktree)(rnh,
+			    sppp_update_gw_walker, ifp) == EAGAIN)
+				;	/* nothing */
+		}
+	}
 }
 
 /*
@@ -4701,7 +4748,9 @@ sppp_set_ip_addrs(struct sppp *sp, u_int32_t myaddr, u_int32_t hisaddr)
 		if (debug && error) {
 			log(LOG_DEBUG, SPP_FMT "sppp_set_ip_addrs: in_ifinit "
 			" failed, error=%d\n", SPP_ARGS(ifp), error);
+			return;
 		}
+		sppp_update_gw(ifp);
 	}
 }
 
@@ -4748,6 +4797,7 @@ sppp_clear_ip_addrs(struct sppp *sp)
 			dest->sin_addr.s_addr = sp->ipcp.saved_hisaddr;
 		if (!in_ifinit(ifp, ifatoia(ifa), &new_sin, 0))
 			dohooks(ifp->if_addrhooks, 0);
+		sppp_update_gw(ifp);
 	}
 }
 
@@ -4813,7 +4863,7 @@ sppp_gen_ip6_addr(struct sppp *sp, struct in6_addr *addr)
 }
 
 /*
- * Set my IPv6 address.  Must be called at splimp.
+ * Set my IPv6 address.  Must be called at splnet.
  */
 HIDE void
 sppp_set_ip6_addr(struct sppp *sp, const struct in6_addr *src)

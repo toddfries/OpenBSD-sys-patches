@@ -1,4 +1,4 @@
-/*	$OpenBSD: systm.h,v 1.76 2009/04/19 17:53:39 deraadt Exp $	*/
+/*	$OpenBSD: systm.h,v 1.86 2010/09/21 01:09:10 matthew Exp $	*/
 /*	$NetBSD: systm.h,v 1.50 1996/06/09 04:55:09 briggs Exp $	*/
 
 /*-
@@ -105,6 +105,9 @@ extern dev_t swapdev;		/* swapping device */
 extern struct vnode *swapdev_vp;/* vnode equivalent to above */
 
 struct proc;
+#define curproc curcpu()->ci_curproc
+
+extern int rthreads_enabled;
 
 typedef int	sy_call_t(struct proc *, void *, register_t *);
 
@@ -153,6 +156,7 @@ void vfs_opv_init_default(struct vnodeopv_desc *);
 void vfs_op_init(void);
 
 int	seltrue(dev_t dev, int which, struct proc *);
+int	selfalse(dev_t dev, int which, struct proc *);
 void	*hashinit(int, int, int, u_long *);
 int	sys_nosys(struct proc *, void *, register_t *);
 
@@ -174,6 +178,8 @@ void	ttyprintf(struct tty *, const char *, ...)
 
 void	splassert_fail(int, int, const char *);
 extern	int splassert_ctl;
+
+void	assertwaitok(void);
 
 void	tablefull(const char *);
 
@@ -209,13 +215,13 @@ int	copyin(const void *, void *, size_t)
 int	copyout(const void *, void *, size_t);
 
 struct timeval;
-int	hzto(struct timeval *);
-int	tvtohz(struct timeval *);
+int	hzto(const struct timeval *);
+int	tvtohz(const struct timeval *);
 void	realitexpire(void *);
 
 struct clockframe;
 void	hardclock(struct clockframe *);
-void	softclock(void);
+void	softclock(void *);
 void	statclock(struct clockframe *);
 
 void	initclocks(void);
@@ -226,6 +232,24 @@ void	cpu_initclocks(void);
 void	startprofclock(struct proc *);
 void	stopprofclock(struct proc *);
 void	setstatclockrate(int);
+
+struct sleep_state;
+void	sleep_setup(struct sleep_state *, const volatile void *, int,
+	    const char *);
+void	sleep_setup_timeout(struct sleep_state *, int);
+void	sleep_setup_signal(struct sleep_state *, int);
+void	sleep_finish(struct sleep_state *, int);
+int	sleep_finish_timeout(struct sleep_state *);
+int	sleep_finish_signal(struct sleep_state *);
+void	sleep_queue_init(void);
+
+struct mutex;
+void    wakeup_n(const volatile void *, int);
+void    wakeup(const volatile void *);
+#define wakeup_one(c) wakeup_n((c), 1)
+int	tsleep(const volatile void *, int, const char *, int);
+int	msleep(const volatile void *, struct mutex *, int,  const char*, int);
+void	yield(void);
 
 void	wdog_register(void *, int (*)(void *, int));
 
@@ -271,16 +295,6 @@ void	dohooks(struct hook_desc_head *, int);
 #define mountroothook_disestablish(vhook) \
 	hook_disestablish(&mountroothook_list, (vhook))
 #define domountroothooks() dohooks(&mountroothook_list, HOOK_REMOVE|HOOK_FREE)
-
-/*
- * Power management hooks.
- */
-void	*powerhook_establish(void (*)(int, void *), void *);
-void	powerhook_disestablish(void *);
-void	dopowerhooks(int);
-#define PWR_RESUME 0
-#define PWR_SUSPEND 1
-#define PWR_STANDBY 2
 
 struct uio;
 int	uiomove(void *, int, struct uio *);

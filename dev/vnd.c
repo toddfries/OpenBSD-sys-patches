@@ -1,4 +1,4 @@
-/*	$OpenBSD: vnd.c,v 1.92 2009/06/04 05:57:27 krw Exp $	*/
+/*	$OpenBSD: vnd.c,v 1.103 2010/09/22 01:18:57 matthew Exp $	*/
 /*	$NetBSD: vnd.c,v 1.26 1996/03/30 23:06:11 christos Exp $	*/
 
 /*
@@ -57,7 +57,6 @@
  * file, the protection of the mapped file is ignored (effectively,
  * by using root credentials in all transactions).
  *
- * NOTE 3: Doesn't interact with leases, should it?
  */
 
 #include <sys/param.h>
@@ -79,6 +78,7 @@
 #include <sys/rwlock.h>
 #include <sys/uio.h>
 #include <sys/conf.h>
+#include <sys/dkio.h>
 
 #include <crypto/blf.h>
 
@@ -125,7 +125,6 @@ struct pool     vndbufpl;
 struct vnd_softc {
 	struct device	 sc_dev;
 	struct disk	 sc_dk;
-	int		 sc_active;		/* XXX */
 
 	char		 sc_file[VNDNLEN];	/* file we're covering */
 	int		 sc_flags;		/* flags */
@@ -135,6 +134,7 @@ struct vnd_softc {
 	size_t		 sc_ntracks;		/* # of tracks per cylinder */
 	struct vnode	*sc_vp;			/* vnode */
 	struct ucred	*sc_cred;		/* credentials */
+	struct buf	 sc_tab;		/* transfer queue */
 	blf_ctx		*sc_keyctx;		/* key context */
 	struct rwlock	 sc_rwlock;
 };
@@ -153,8 +153,6 @@ struct vnd_softc {
 struct vnd_softc *vnd_softc;
 int numvnd = 0;
 
-struct dkdriver vnddkdriver = { vndstrategy };
-
 /* called by main() at boot time */
 void	vndattach(int);
 
@@ -163,7 +161,7 @@ void	vndstart(struct vnd_softc *);
 int	vndsetcred(struct vnd_softc *, struct ucred *);
 void	vndiodone(struct buf *);
 void	vndshutdown(void);
-void	vndgetdisklabel(dev_t, struct vnd_softc *, struct disklabel *, int);
+int	vndgetdisklabel(dev_t, struct vnd_softc *, struct disklabel *, int);
 void	vndencrypt(struct vnd_softc *, caddr_t, size_t, daddr64_t, int);
 size_t	vndbdevsize(struct vnode *, struct proc *);
 
@@ -300,12 +298,10 @@ bad:
 /*
  * Load the label information on the named device
  */
-void
+int
 vndgetdisklabel(dev_t dev, struct vnd_softc *sc, struct disklabel *lp,
     int spoofonly)
 {
-	char *errstring = NULL;
-
 	bzero(lp, sizeof(struct disklabel));
 
 	lp->d_secsize = sc->sc_secsize;
@@ -318,8 +314,6 @@ vndgetdisklabel(dev_t dev, struct vnd_softc *sc, struct disklabel *lp,
 	lp->d_type = DTYPE_VND;
 	strncpy(lp->d_packname, "fictitious", sizeof(lp->d_packname));
 	DL_SETDSIZE(lp, sc->sc_size);
-	lp->d_rpm = 3600;
-	lp->d_interleave = 1;
 	lp->d_flags = 0;
 	lp->d_version = 1;
 
@@ -328,12 +322,7 @@ vndgetdisklabel(dev_t dev, struct vnd_softc *sc, struct disklabel *lp,
 	lp->d_checksum = dkcksum(lp);
 
 	/* Call the generic disklabel extraction routine */
-	errstring = readdisklabel(VNDLABELDEV(dev), vndstrategy, lp, spoofonly);
-	if (errstring) {
-		DNPRINTF(VDB_IO, "%s: %s\n", sc->sc_dev.dv_xname,
-		    errstring);
-		return;
-	}
+	return readdisklabel(VNDLABELDEV(dev), vndstrategy, lp, spoofonly);
 }
 
 int
@@ -499,8 +488,8 @@ vndstrategy(struct buf *bp)
 			biodone(bp);
 			splx(s);
 
-			/* If nothing more is queued, we are done. */
-			if (!vnd->sc_active)
+			/* If nothing more is queued, we are done.  */
+			if (!vnd->sc_tab.b_active)
 				return;
 
 			/*
@@ -508,8 +497,9 @@ vndstrategy(struct buf *bp)
 			 * routine might queue using same links.
 			 */
 			s = splbio();
-			bp = BUFQ_GET(vnd->sc_dk.dk_bufq);
-			vnd->sc_active--;
+			bp = vnd->sc_tab.b_actf;
+			vnd->sc_tab.b_actf = bp->b_actf;
+			vnd->sc_tab.b_active--;
 			splx(s);
 		}
 	}
@@ -553,7 +543,7 @@ vndstrategy(struct buf *bp)
 		if (resid < sz)
 			sz = resid;
 
-		DNPRINTF(VDB_IO, "vndstrategy: vp %p/%p bn %x/%x sz %x\n",
+		DNPRINTF(VDB_IO, "vndstrategy: vp %p/%p bn %x/%lld sz %x\n",
 		    vnd->sc_vp, vp, bn, nbn, sz);
 
 		s = splbio();
@@ -577,6 +567,7 @@ vndstrategy(struct buf *bp)
 		nbp->vb_buf.b_validoff = bp->b_validoff;
 		nbp->vb_buf.b_validend = bp->b_validend;
 		LIST_INIT(&nbp->vb_buf.b_dep);
+		nbp->vb_buf.b_bq = NULL;
 
 		/* save a reference to the old buffer */
 		nbp->vb_obp = bp;
@@ -609,8 +600,8 @@ vndstrategy(struct buf *bp)
 		 */
 		nbp->vb_buf.b_cylinder = nbp->vb_buf.b_blkno;
 		s = splbio();
-		BUFQ_ADD(vnd->sc_dk.dk_bufq, &nbp->vb_buf);
-		vnd->sc_active++;
+		disksort(&vnd->sc_tab, &nbp->vb_buf);
+		vnd->sc_tab.b_active++;
 		vndstart(vnd);
 		splx(s);
 		bn += sz;
@@ -633,12 +624,11 @@ vndstart(struct vnd_softc *vnd)
 	 * Dequeue now since lower level strategy routine might
 	 * queue using same links
 	 */
-	bp = BUFQ_GET(vnd->sc_dk.dk_bufq);
-	if (bp == NULL)
-		return;
+	bp = vnd->sc_tab.b_actf;
+	vnd->sc_tab.b_actf = bp->b_actf;
 
 	DNPRINTF(VDB_IO,
-	    "vndstart(%d): bp %p vp %p blkno %x addr %p cnt %lx\n",
+	    "vndstart(%d): bp %p vp %p blkno %lld addr %p cnt %lx\n",
 	    vnd-vnd_softc, bp, bp->b_vp, bp->b_blkno, bp->b_data,
 	    bp->b_bcount);
 
@@ -660,7 +650,7 @@ vndiodone(struct buf *bp)
 	splassert(IPL_BIO);
 
 	DNPRINTF(VDB_IO,
-	    "vndiodone(%d): vbp %p vp %p blkno %x addr %p cnt %lx\n",
+	    "vndiodone(%d): vbp %p vp %p blkno %lld addr %p cnt %lx\n",
 	    vnd-vnd_softc, vbp, vbp->vb_buf.b_vp, vbp->vb_buf.b_blkno,
 	    vbp->vb_buf.b_data, vbp->vb_buf.b_bcount);
 
@@ -668,24 +658,29 @@ vndiodone(struct buf *bp)
 		DNPRINTF(VDB_IO, "vndiodone: vbp %p error %d\n", vbp,
 		    vbp->vb_buf.b_error);
 
-		pbp->b_flags |= B_ERROR;
-		/* XXX does this matter here? */
-		(&vbp->vb_buf)->b_flags |= B_RAW;
-		pbp->b_error = biowait(&vbp->vb_buf);
+		pbp->b_flags |= (B_ERROR|B_INVAL);
+		pbp->b_error = vbp->vb_buf.b_error;
+		pbp->b_iodone = NULL;
+		biodone(pbp);
+		goto out;
 	}
+
 	pbp->b_resid -= vbp->vb_buf.b_bcount;
-	putvndbuf(vbp);
-	if (vnd->sc_active) {
-		disk_unbusy(&vnd->sc_dk, (pbp->b_bcount - pbp->b_resid),
-		    (pbp->b_flags & B_READ));
-		if (BUFQ_PEEK(vnd->sc_dk.dk_bufq) != NULL)
-			vnd->sc_active--;
-	}
+
 	if (pbp->b_resid == 0) {
 		DNPRINTF(VDB_IO, "vndiodone: pbp %p iodone\n", pbp);
 		biodone(pbp);
 	}
 
+out:
+	putvndbuf(vbp);
+
+	if (vnd->sc_tab.b_active) {
+		disk_unbusy(&vnd->sc_dk, (pbp->b_bcount - pbp->b_resid),
+		    (pbp->b_flags & B_READ));
+		if (!vnd->sc_tab.b_actf)
+			vnd->sc_tab.b_active--;
+	}
 }
 
 /* ARGSUSED */
@@ -704,7 +699,7 @@ vndread(dev_t dev, struct uio *uio, int flags)
 	if ((sc->sc_flags & VNF_INITED) == 0)
 		return (ENXIO);
 
-	return (physio(vndstrategy, NULL, dev, B_READ, minphys, uio));
+	return (physio(vndstrategy, dev, B_READ, minphys, uio));
 }
 
 /* ARGSUSED */
@@ -723,7 +718,7 @@ vndwrite(dev_t dev, struct uio *uio, int flags)
 	if ((sc->sc_flags & VNF_INITED) == 0)
 		return (ENXIO);
 
-	return (physio(vndstrategy, NULL, dev, B_WRITE, minphys, uio));
+	return (physio(vndstrategy, dev, B_WRITE, minphys, uio));
 }
 
 size_t
@@ -870,9 +865,8 @@ vndioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 		    vnd->sc_vp, (unsigned long long)vnd->sc_size);
 
 		/* Attach the disk. */
-		vnd->sc_dk.dk_driver = &vnddkdriver;
 		vnd->sc_dk.dk_name = vnd->sc_dev.dv_xname;
-		disk_attach(&vnd->sc_dk);
+		disk_attach(&vnd->sc_dev, &vnd->sc_dk);
 
 		vndunlock(vnd);
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvscom.c,v 1.19 2007/10/11 18:33:15 deraadt Exp $ */
+/*	$OpenBSD: uvscom.c,v 1.21 2010/09/24 08:33:59 yuo Exp $ */
 /*	$NetBSD: uvscom.c,v 1.9 2003/02/12 15:36:20 ichiro Exp $	*/
 /*-
  * Copyright (c) 2001-2002, Shunsuke Akiyama <akiyama@jp.FreeBSD.org>.
@@ -210,7 +210,7 @@ static const struct usb_devno uvscom_devs [] = {
 int uvscom_match(struct device *, void *, void *); 
 void uvscom_attach(struct device *, struct device *, void *); 
 int uvscom_detach(struct device *, int); 
-int uvscom_activate(struct device *, enum devact); 
+int uvscom_activate(struct device *, int); 
 
 struct cfdriver uvscom_cd = { 
 	NULL, "uvscom", DV_DULL 
@@ -376,8 +376,6 @@ uvscom_detach(struct device *self, int flags)
 
 	DPRINTF(("uvscom_detach: sc = %p\n", sc));
 
-	sc->sc_dying = 1;
-
 	if (sc->sc_intr_pipe != NULL) {
 		usbd_abort_pipe(sc->sc_intr_pipe);
 		usbd_close_pipe(sc->sc_intr_pipe);
@@ -385,7 +383,6 @@ uvscom_detach(struct device *self, int flags)
 		sc->sc_intr_pipe = NULL;
 	}
 
-	sc->sc_dying = 1;
 	if (sc->sc_subdev != NULL) {
 		rv = config_detach(sc->sc_subdev, flags);
 		sc->sc_subdev = NULL;
@@ -398,7 +395,7 @@ uvscom_detach(struct device *self, int flags)
 }
 
 int
-uvscom_activate(struct device *self, enum devact act)
+uvscom_activate(struct device *self, int act)
 {
 	struct uvscom_softc *sc = (struct uvscom_softc *)self;
 	int rv = 0;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_meter.c,v 1.27 2009/05/08 13:50:15 ariane Exp $	*/
+/*	$OpenBSD: uvm_meter.c,v 1.29 2010/07/22 17:31:39 thib Exp $	*/
 /*	$NetBSD: uvm_meter.c,v 1.21 2001/07/14 06:36:03 matt Exp $	*/
 
 /*
@@ -76,7 +76,7 @@ static fixpt_t cexp[3] = {
  * prototypes
  */
 
-void uvm_loadav(struct loadavg *);
+static void uvm_loadav(struct loadavg *);
 
 /*
  * uvm_meter: calculate load average and wake up the swapper (if needed)
@@ -94,7 +94,7 @@ uvm_meter(void)
  * uvm_loadav: compute a tenex style load average of a quantity on
  * 1, 5, and 15 minute intervals.
  */
-void
+static void
 uvm_loadav(struct loadavg *avg)
 {
 	CPU_INFO_ITERATOR cii;
@@ -149,7 +149,6 @@ uvm_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 	struct vmtotal vmtotals;
 	int rv, t;
 	struct _ps_strings _ps = { PS_STRINGS };
-	extern int uvm_km_pages_free;
 
 	switch (name[0]) {
 	case VM_SWAPENCRYPT:
@@ -230,9 +229,6 @@ uvm_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 
 	case VM_USPACE:
 		return (sysctl_rdint(oldp, oldlenp, newp, USPACE));
-
-	case VM_KMPAGESFREE:
-		return (sysctl_rdint(oldp, oldlenp, newp, uvm_km_pages_free));
 
 	default:
 		return (EOPNOTSUPP);

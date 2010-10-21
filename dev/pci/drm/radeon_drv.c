@@ -37,6 +37,7 @@
 int	radeondrm_probe(struct device *, void *, void *);
 void	radeondrm_attach(struct device *, struct device *, void *);
 int	radeondrm_detach(struct device *, int);
+int	radeondrm_activate(struct device *, int);
 int	radeondrm_ioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
 
 int radeon_no_wb;
@@ -479,6 +480,52 @@ const static struct drm_pcidev radeondrm_pciidlist[] = {
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_X1250IGP,
 	    CHIP_RS690|RADEON_IS_IGP|RADEON_NEW_MEMMAP|RADEON_IS_IGPGART},
 #endif
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD2400_XT,
+	    CHIP_RV610|RADEON_NEW_MEMMAP},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD3400_M82,
+	    CHIP_RV620|RADEON_IS_MOBILITY|RADEON_NEW_MEMMAP},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD3450,
+	    CHIP_RV620|RADEON_NEW_MEMMAP},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD3470,
+	    CHIP_RV620|RADEON_NEW_MEMMAP},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD2600_PRO,
+	    CHIP_RV630|RADEON_NEW_MEMMAP},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD2600_XT,
+	    CHIP_RV630|RADEON_NEW_MEMMAP},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD3650_M,
+	    CHIP_RV635|RADEON_IS_MOBILITY|RADEON_NEW_MEMMAP},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD3650,
+	    CHIP_RV635|RADEON_NEW_MEMMAP},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD3670_M,
+	    CHIP_RV635|RADEON_IS_MOBILITY|RADEON_NEW_MEMMAP},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD3850,
+	    CHIP_RV670|RADEON_NEW_MEMMAP},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD3200_1,
+	    CHIP_RS780|RADEON_NEW_MEMMAP|RADEON_IS_IGP},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD3200_2,
+	    CHIP_RS780|RADEON_NEW_MEMMAP|RADEON_IS_IGP},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD3300,
+	    CHIP_RS780|RADEON_NEW_MEMMAP|RADEON_IS_IGP},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD4350,
+	    CHIP_RV710|RADEON_NEW_MEMMAP},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD4500_M,
+	    CHIP_RV710|RADEON_IS_MOBILITY|RADEON_NEW_MEMMAP},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD4650,
+	    CHIP_RV730|RADEON_NEW_MEMMAP},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD4670,
+	    CHIP_RV730|RADEON_NEW_MEMMAP},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD4850,
+	    CHIP_RV770|RADEON_NEW_MEMMAP},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD4870,
+	    CHIP_RV770|RADEON_NEW_MEMMAP},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD4870_M98,
+	    CHIP_RV770|RADEON_IS_MOBILITY|RADEON_NEW_MEMMAP},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD4890,
+	    CHIP_RV770|RADEON_NEW_MEMMAP},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD4200,
+	    CHIP_RS880|RADEON_NEW_MEMMAP|RADEON_IS_IGP},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD4200_M,
+	    CHIP_RS880|RADEON_IS_MOBILITY|RADEON_NEW_MEMMAP|RADEON_IS_IGP},
         {0, 0, 0}
 };
 
@@ -556,7 +603,7 @@ radeondrm_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 	printf(": %s\n", pci_intr_string(pa->pa_pc, dev_priv->ih));
-	mtx_init(&dev_priv->swi_lock, IPL_BIO);
+	mtx_init(&dev_priv->swi_lock, IPL_TTY);
 
 	switch (dev_priv->flags & RADEON_FAMILY_MASK) {
 	case CHIP_R100:
@@ -618,9 +665,40 @@ radeondrm_detach(struct device *self, int flags)
 	return (0);
 }
 
+int
+radeondrm_activate(struct device *arg, int act)
+{
+	struct drm_radeon_private *dev_priv = (struct drm_radeon_private *)arg;
+	struct drm_device	*dev = (struct drm_device *)dev_priv->drmdev;
+
+	switch (act) {
+	case DVACT_SUSPEND:
+		/* Interrupts still not supported on r600 */
+		if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600 ||
+		    dev->irq_enabled == 0)
+			break;
+		if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_RS690)
+			RADEON_WRITE(R500_DxMODE_INT_MASK, 0);
+		RADEON_WRITE(RADEON_GEN_INT_CNTL, 0);
+		break;
+	case DVACT_RESUME:
+		/* Interrupts still not supported on r600 */
+		if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600 ||
+		    dev->irq_enabled == 0)
+			break;
+		if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_RS690)
+			RADEON_WRITE(R500_DxMODE_INT_MASK,
+			    dev_priv->r500_disp_irq_reg);
+		RADEON_WRITE(RADEON_GEN_INT_CNTL, dev_priv->irq_enable_reg);
+		break;
+	}
+
+	return (0);
+}
+
 struct cfattach radeondrm_ca = {
         sizeof (drm_radeon_private_t), radeondrm_probe, radeondrm_attach, 
-	radeondrm_detach
+	radeondrm_detach, radeondrm_activate
 }; 
 
 struct cfdriver radeondrm_cd = {
@@ -734,16 +812,30 @@ u_int32_t
 radeondrm_get_scratch(struct drm_radeon_private *dev_priv, u_int32_t off)
 {
 	if (dev_priv->writeback_works)
-		return (radeondrm_read_rptr(dev_priv, RADEON_SCRATCHOFF(off)));
+		if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600)
+			return radeondrm_read_rptr(dev_priv,
+			    R600_SCRATCHOFF(off));
+		else
+			return radeondrm_read_rptr(dev_priv,
+			    RADEON_SCRATCHOFF(off));
 	else
-		return (RADEON_READ( RADEON_SCRATCH_REG0 + 4*(off) ));
+		if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600)
+			return RADEON_READ(R600_SCRATCH_REG0 + 4 * off);
+		else
+			return RADEON_READ(RADEON_SCRATCH_REG0 + 4 * off);
 }
 
 void
 radeondrm_begin_ring(struct drm_radeon_private *dev_priv, int ncmd)
 {
+	int align_nr;
 	RADEON_VPRINTF("%d\n", ncmd);
-	if (dev_priv->ring.space <= ncmd) {
+
+	align_nr = RADEON_RING_ALIGN - ((dev_priv->ring.tail + ncmd) &
+		(RADEON_RING_ALIGN - 1));
+	align_nr += ncmd;
+
+	if (dev_priv->ring.space <= align_nr) {
 		radeondrm_commit_ring(dev_priv);
 		radeon_wait_ring(dev_priv, ncmd);
 	}
@@ -769,12 +861,38 @@ radeondrm_advance_ring(struct drm_radeon_private *dev_priv)
 void
 radeondrm_commit_ring(struct drm_radeon_private *dev_priv)
 {
+	int		 i, tail_aligned, num_p2;
+	u_int32_t	*ring;
+
+	/* check if the ring is padded out to 16-dword alignment */
+
+	tail_aligned = dev_priv->ring.tail & (RADEON_RING_ALIGN - 1);
+	if (tail_aligned) {
+		num_p2 = RADEON_RING_ALIGN - tail_aligned;
+
+		ring = dev_priv->ring.start;
+		/* pad with some CP_PACKET2 */
+		for (i = 0; i < num_p2; i++)
+			ring[dev_priv->ring.tail + i] = CP_PACKET2();
+
+		dev_priv->ring.tail += i;
+		dev_priv->ring.space -= num_p2;
+		
+	}
+	dev_priv->ring.tail &= dev_priv->ring.tail_mask;
+	/* XXX 128byte aligned stuff */
 	/* flush write combining buffer and writes to ring */
 	DRM_MEMORYBARRIER();
 	radeondrm_get_ring_head(dev_priv);
-	RADEON_WRITE(RADEON_CP_RB_WPTR, dev_priv->ring.tail);
-	/* read from PCI bus to ensure correct posting */
-	RADEON_READ(RADEON_CP_RB_RPTR);
+	if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600) {
+		RADEON_WRITE(R600_CP_RB_WPTR, dev_priv->ring.tail);
+		/* read from PCI bus to ensure correct posting */
+		RADEON_READ(R600_CP_RB_RPTR);
+	} else {
+		RADEON_WRITE(RADEON_CP_RB_WPTR, dev_priv->ring.tail);
+		/* read from PCI bus to ensure correct posting */
+		RADEON_READ(RADEON_CP_RB_RPTR);
+	}
 }
 
 void

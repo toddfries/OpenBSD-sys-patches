@@ -1,4 +1,4 @@
-/*	$OpenBSD: cl.c,v 1.54 2009/05/31 12:25:53 miod Exp $ */
+/*	$OpenBSD: cl.c,v 1.59 2010/06/28 14:13:29 deraadt Exp $ */
 
 /*
  * Copyright (c) 1995 Dale Rahn. All rights reserved.
@@ -543,7 +543,7 @@ clopen(dev, flag, mode, p)
 	if (cl->tty) {
 		tp = cl->tty;
 	} else {
-		tp = cl->tty = ttymalloc();
+		tp = cl->tty = ttymalloc(0);
 	}
 	tp->t_oproc = clstart;
 	tp->t_param = clparam;
@@ -600,7 +600,7 @@ clopen(dev, flag, mode, p)
 			bus_space_write_1(sc->sc_iot, sc->sc_ioh, CL_CAR,
 			    save);
 		}
-	} else if (tp->t_state & TS_XCLUDE && p->p_ucred->cr_uid != 0) {
+	} else if (tp->t_state & TS_XCLUDE && suser(p, 0) != 0) {
 		splx(s);
 		return EBUSY;
 	}
@@ -614,7 +614,7 @@ clopen(dev, flag, mode, p)
 #ifdef DEBUG
 	cl_dumpport(sc, channel);
 #endif
-	return (*linesw[tp->t_line].l_open)(dev, tp);
+	return (*linesw[tp->t_line].l_open)(dev, tp, p);
 }
 
 int
@@ -710,7 +710,7 @@ clclose(dev, flag, mode, p)
 	iot = sc->sc_iot;
 	ioh = sc->sc_ioh;
 	tp = cl->tty;
-	(*linesw[tp->t_line].l_close)(tp, flag);
+	(*linesw[tp->t_line].l_close)(tp, flag, p);
 
 	s = splcl();
 	bus_space_write_1(iot, ioh, CL_CAR, channel);

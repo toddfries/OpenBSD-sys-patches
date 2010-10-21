@@ -1,4 +1,4 @@
-/*	$OpenBSD: boot.c,v 1.13 2009/05/30 03:59:27 miod Exp $ */
+/*	$OpenBSD: boot.c,v 1.17 2010/09/14 16:57:15 miod Exp $ */
 
 /*
  * Copyright (c) 2004 Opsycon AB, www.opsycon.se.
@@ -34,6 +34,7 @@
 #include <mips64/arcbios.h>
 #include <mips64/cpu.h>
 
+#include <sys/exec_elf.h>
 #include "loadfile.h"
 
 char *strstr(char *, const char *);	/* strstr.c */
@@ -95,9 +96,9 @@ main(int argc, char *argv[])
 #ifdef __LP64__
 		esym = (u_int64_t *)marks[MARK_END];
 #else
-#undef  KSEG0_BASE
-#define KSEG0_BASE	0xffffffff80000000ULL
-		esym = (u_int64_t *)PHYS_TO_KSEG0(marks[MARK_END]);
+#undef  CKSEG0_BASE
+#define CKSEG0_BASE	0xffffffff80000000ULL
+		esym = (u_int64_t *)PHYS_TO_CKSEG0(marks[MARK_END]);
 #endif
 
 		if (entry != NULL)
@@ -174,4 +175,41 @@ dobootopts(int argc, char **argv)
 			OSLoadFilename = filenamebuf;
 		}
 	}
+}
+
+/*
+ * Prevent loading a wrong kernel.
+ */
+int
+check_phdr(void *v)
+{
+	Elf64_Phdr *phdr = (Elf64_Phdr *)v;
+	uint64_t addr;
+
+	switch (IP) {
+	case 27:
+		addr = 0xa800000000000000ULL >> 28;
+		break;
+	case 30:
+		addr = 0xa800000020000000ULL >> 28;
+		break;
+	case 32:
+		addr = 0xffffffff80000000ULL >> 28;
+		break;
+	default:
+		/*
+		 * If the system could not be identified, accept any
+		 * address and hope the user knows what's he's doing.
+		 */
+		return 0;
+	}
+
+	if ((phdr->p_vaddr >> 28) != addr) {
+		/* I'm sorry Dave, I can't let you do that. */
+		printf("This kernel does not seem to be compiled for this"
+		    " machine type.\nYou need to boot an IP%d kernel.\n", IP);
+		return 1;
+	}
+
+	return 0;
 }

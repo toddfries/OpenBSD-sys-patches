@@ -1,4 +1,4 @@
-/*	$OpenBSD: rbus_machdep.c,v 1.8 2009/05/03 21:30:09 kettenis Exp $ */
+/*	$OpenBSD: rbus_machdep.c,v 1.11 2010/09/22 02:28:37 jsg Exp $ */
 /*	$NetBSD: rbus_machdep.c,v 1.2 1999/10/15 06:43:06 haya Exp $	*/
 
 /*
@@ -13,11 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by HAYAKAWA Koichi.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -34,12 +29,11 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/extent.h>
+#include <sys/proc.h>
+#include <sys/sysctl.h>
+#include <sys/device.h>
 
 #include <uvm/uvm_extern.h>
-
-#include <sys/sysctl.h>
-
-#include <sys/device.h>
 
 #include <machine/bus.h>
 #include <dev/cardbus/rbus.h>
@@ -55,14 +49,14 @@ rbus_pccbb_parent_mem(struct device *self, struct pci_attach_args *pa)
 	macppc_cardbus_init(pa->pa_pc, pa->pa_tag);
 
 	return (rbus_new_root_share(pa->pa_memt, pa->pa_memex,
-	    0x00000000, 0xffffffff, 0));
+	    0x00000000, 0xffffffff));
 }
 
 rbus_tag_t
 rbus_pccbb_parent_io(struct device *self, struct pci_attach_args *pa)
 {
 	return (rbus_new_root_share(pa->pa_iot, pa->pa_ioex,
-	    0x0000, 0xffff, 0));
+	    0x0000, 0xffff));
 }
 
 /*

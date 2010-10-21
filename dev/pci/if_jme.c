@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_jme.c,v 1.19 2009/06/05 06:05:06 naddy Exp $	*/
+/*	$OpenBSD: if_jme.c,v 1.24 2010/08/27 17:08:00 jsg Exp $	*/
 /*-
  * Copyright (c) 2008, Pyun YongHyeon <yongari@FreeBSD.org>
  * All rights reserved.
@@ -112,7 +112,7 @@ void	jme_tick(void *);
 void	jme_stop(struct jme_softc *);
 void	jme_reset(struct jme_softc *);
 void	jme_set_vlan(struct jme_softc *);
-void	jme_set_filter(struct jme_softc *);
+void	jme_iff(struct jme_softc *);
 void	jme_stop_tx(struct jme_softc *);
 void	jme_stop_rx(struct jme_softc *);
 void	jme_mac_config(struct jme_softc *);
@@ -606,7 +606,6 @@ jme_attach(struct device *parent, struct device *self, void *aux)
 	ifp = &sc->sc_arpcom.ac_if;
 	ifp->if_softc = sc;
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
-	ifp->if_init = jme_init;
 	ifp->if_ioctl = jme_ioctl;
 	ifp->if_start = jme_start;
 	ifp->if_watchdog = jme_watchdog;
@@ -748,7 +747,7 @@ jme_dma_alloc(struct jme_softc *sc)
 	/* Allocate DMA'able memory for RX ring */
 	error = bus_dmamem_alloc(sc->sc_dmat, JME_RX_RING_SIZE, ETHER_ALIGN, 0,
 	    &sc->jme_rdata.jme_rx_ring_seg, 1, &nsegs,
-	    BUS_DMA_WAITOK);
+	    BUS_DMA_WAITOK | BUS_DMA_ZERO);
 /* XXX zero */
 	if (error) {
 		printf("%s: could not allocate DMA'able memory for Rx ring.\n",
@@ -761,8 +760,6 @@ jme_dma_alloc(struct jme_softc *sc)
 	    BUS_DMA_NOWAIT);
 	if (error)
 		return (ENOBUFS);
-
-	bzero(sc->jme_rdata.jme_rx_ring, JME_RX_RING_SIZE);
 
 	/* Load the DMA map for Rx ring. */
 	error = bus_dmamap_load(sc->sc_dmat,
@@ -1074,7 +1071,7 @@ jme_encap(struct jme_softc *sc, struct mbuf **m_head)
 	if (maxsegs > JME_MAXTXSEGS)
 		maxsegs = JME_MAXTXSEGS;
 	if (maxsegs < (sc->jme_txd_spare - 1))
-		panic("%s: not enough segments %d\n", sc->sc_dev.dv_xname,
+		panic("%s: not enough segments %d", sc->sc_dev.dv_xname,
 		    maxsegs);
 
 	error = bus_dmamap_load_mbuf(sc->sc_dmat, txd->tx_dmamap,
@@ -1084,44 +1081,19 @@ jme_encap(struct jme_softc *sc, struct mbuf **m_head)
 		error = EFBIG;
 	}
 	if (error == EFBIG) {
-		error = 0;
-
-		MGETHDR(m, M_DONTWAIT, MT_DATA);
-		if (m == NULL) {
+		if (m_defrag(*m_head, M_DONTWAIT)) {
 			printf("%s: can't defrag TX mbuf\n",
 			    sc->sc_dev.dv_xname);
 			m_freem(*m_head);
 			*m_head = NULL;
 			return (ENOBUFS);
 		}
-
-		M_DUP_PKTHDR(m, *m_head);
-		if ((*m_head)->m_pkthdr.len > MHLEN) {
-			MCLGET(m, M_DONTWAIT);
-			if (!(m->m_flags & M_EXT)) {
-				m_freem(*m_head);
-				m_freem(m);
-				*m_head = NULL;
-				return (ENOBUFS);
-			}
-		}
-		
-		m_copydata(*m_head, 0, (*m_head)->m_pkthdr.len, mtod(m, caddr_t));
-		m_freem(*m_head);
-		m->m_len = m->m_pkthdr.len;
-		*m_head = m;
-
 		error = bus_dmamap_load_mbuf(sc->sc_dmat,
 					     txd->tx_dmamap, *m_head,
 					     BUS_DMA_NOWAIT);
 		if (error != 0) {
 			printf("%s: could not load defragged TX mbuf\n",
 			    sc->sc_dev.dv_xname);
-			if (!error) {
-				bus_dmamap_unload(sc->sc_dmat,
-						  txd->tx_dmamap);
-				error = EFBIG;
-			}
 			m_freem(*m_head);
 			*m_head = NULL;
 			return (error);
@@ -1336,7 +1308,7 @@ jme_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	if (error == ENETRESET) {
 		if (ifp->if_flags & IFF_RUNNING)
-			jme_set_filter(sc);
+			jme_iff(sc);
 		error = 0;
 	}
 
@@ -1528,7 +1500,7 @@ jme_txeof(struct jme_softc *sc)
 		txd = &sc->jme_cdata.jme_txdesc[cons];
 
 		if (txd->tx_m == NULL)
-			panic("%s: freeing NULL mbuf!\n", sc->sc_dev.dv_xname);
+			panic("%s: freeing NULL mbuf!", sc->sc_dev.dv_xname);
 
 		status = letoh32(txd->tx_desc->flags);
 		if ((status & JME_TD_OWN) == JME_TD_OWN)
@@ -1563,7 +1535,7 @@ jme_txeof(struct jme_softc *sc)
 		txd->tx_m = NULL;
 		sc->jme_cdata.jme_tx_cnt -= txd->tx_ndesc;
 		if (sc->jme_cdata.jme_tx_cnt < 0)
-			panic("%s: Active Tx desc counter was garbled\n",
+			panic("%s: Active Tx desc counter was garbled",
 			    sc->sc_dev.dv_xname);
 		txd->tx_ndesc = 0;
 	}
@@ -1925,7 +1897,8 @@ jme_init(struct ifnet *ifp)
 	CSR_WRITE_4(sc, JME_RXMAC, 0);
 
 	/* Set up the receive filter. */
-	jme_set_filter(sc);
+	jme_iff(sc);
+
 	jme_set_vlan(sc);
 
 	/*
@@ -2285,7 +2258,7 @@ jme_set_vlan(struct jme_softc *sc)
 }
 
 void
-jme_set_filter(struct jme_softc *sc)
+jme_iff(struct jme_softc *sc)
 {
 	struct arpcom *ac = &sc->sc_arpcom;
 	struct ifnet *ifp = &ac->ac_if;

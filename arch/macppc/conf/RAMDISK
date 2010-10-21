@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK,v 1.88 2009/06/02 06:31:08 todd Exp $
+#	$OpenBSD: RAMDISK,v 1.90 2010/07/03 03:59:16 krw Exp $
 #
 # PPC GENERIC config file
 #
@@ -63,7 +63,6 @@ pcscp*		at pci?		# AMD Am53c974 PCscsi-PCI SCSI
 isp*		at pci?		# Qlogic ISP [12]0x0 SCSI/FibreChannel
 mpi*		at pci?		# LSI Logic MPT-Fusion Message Passing Interface
 arc*		at pci?		# Areca RAID Controllers
-option		ISP_COMPILE_FW
 pciide*		at pci?
 kauaiata*	at pci?		# Apple ATA 100
 wdc*		at kauaiata?
@@ -200,8 +199,6 @@ zyd*		at uhub?		# Zydas ZD1211
 url*		at uhub?		# Realtek RTL8150L based adapters
 wi*		at uhub?		# WaveLAN IEEE 802.11DS
 #uscanner*	at uhub?		# USB Scanner driver
-#usscanner*	at uhub?		# USB SCSI scanners
-#scsibus*	at usscanner?
 #uyap*		at uhub?		# Y@P firmware loader
 #ugen*		at uhub?		# USB Generic driver
 umass*		at uhub?		# USB Mass Storage devices
@@ -227,7 +224,6 @@ sd*		at scsibus?
 st*		at scsibus?
 cd*		at scsibus?
 #ch*		at scsibus?
-#ss*		at scsibus?
 #uk*		at scsibus?
 
 pseudo-device	loop	1	# network loopback

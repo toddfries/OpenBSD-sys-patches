@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.20 2009/06/03 18:32:24 jasper Exp $ */
+/*	$OpenBSD: conf.c,v 1.25 2010/09/23 05:02:14 claudio Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -43,7 +43,8 @@
 #include <sys/proc.h>
 #include <sys/vnode.h>
 #include <sys/tty.h>
-#include <sys/conf.h>
+
+#include <machine/conf.h>
 
 /*
  *	Block devices.
@@ -85,12 +86,6 @@ int	nblkdev = sizeof (bdevsw) / sizeof (bdevsw[0]);
  *	Character devices.
  */
 
-/* open, close, write, ioctl */
-#define	cdev_lpt_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) enodev, \
-	dev_init(c,n,write), dev_init(c,n,ioctl), (dev_type_stop((*))) enodev, \
-	0, seltrue, (dev_type_mmap((*))) enodev }
-
 #define mmread mmrw
 #define mmwrite mmrw
 dev_type_read(mmrw);
@@ -106,7 +101,6 @@ cdev_decl(com);
 #include "lpt.h"
 cdev_decl(lpt);
 #include "ch.h"
-#include "ss.h"
 #include "uk.h"
 cdev_decl(wd);
 #include "audio.h"
@@ -135,6 +129,8 @@ cdev_decl(pci);
 #include "ulpt.h"
 #include "urio.h"
 #include "ucom.h"
+#include "vscsi.h"
+#include "pppx.h"
 
 struct cdevsw	cdevsw[] =
 {
@@ -176,7 +172,7 @@ struct cdevsw	cdevsw[] =
 	cdev_pf_init(NPF,pf),		/* 31: packet filter */
 	cdev_uk_init(NUK,uk),		/* 32: unknown SCSI */
 	cdev_random_init(1,random),	/* 33: random data source */
-	cdev_ss_init(NSS,ss),		/* 34: SCSI scanner */
+	cdev_notdef(),			/* 34: */
 	cdev_ksyms_init(NKSYMS,ksyms),	/* 35: Kernel symbols device */
 	cdev_ch_init(NCH,ch),		/* 36: SCSI autochanger */
 	cdev_notdef(),			/* 37: */
@@ -213,7 +209,10 @@ struct cdevsw	cdevsw[] =
 	cdev_ulpt_init(NULPT,ulpt),	/* 64: USB printers */
 	cdev_urio_init(NURIO,urio),	/* 65: USB Diamond Rio 500 */
 	cdev_tty_init(NUCOM,ucom),	/* 66: USB tty */
-	cdev_hotplug_init(NHOTPLUG,hotplug) /* 67: devices hotplugging */
+	cdev_hotplug_init(NHOTPLUG,hotplug), /* 67: devices hotplugging */
+	cdev_vscsi_init(NVSCSI,vscsi),	/* 68: vscsi */
+	cdev_disk_init(1,diskmap),	/* 69: disk mapper */
+	cdev_pppx_init(NPPPX,pppx),	/* 70: pppx */
 };
 
 int	nchrdev = sizeof (cdevsw) / sizeof (cdevsw[0]);

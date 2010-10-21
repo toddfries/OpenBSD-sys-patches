@@ -1,4 +1,4 @@
-/*	$OpenBSD: envyvar.h,v 1.12 2009/05/08 16:53:45 ratchov Exp $	*/
+/*	$OpenBSD: envyvar.h,v 1.16 2010/10/04 09:32:43 ratchov Exp $	*/
 /*
  * Copyright (c) 2007 Alexandre Ratchov <alex@caoua.org>
  *
@@ -20,7 +20,9 @@
 
 #include <sys/types.h>
 #include <sys/device.h>
+#include <sys/time.h>
 #include <dev/audio_if.h>
+#include <dev/midi_if.h>
 
 struct envy_softc;
 
@@ -55,25 +57,49 @@ struct envy_softc {
 	struct device		dev;
 	struct device	       *audio;
 	int			isht;		/* is a Envy24HT ? */
+	int			isac97;		/* is a Envy24HT AC97 ? */
 	struct envy_buf		ibuf, obuf;
 	pcitag_t		pci_tag;
 	pci_chipset_tag_t	pci_pc;
 	pci_intr_handle_t      *pci_ih;
 	bus_dma_tag_t		pci_dmat;
 	bus_space_tag_t		ccs_iot;
-	bus_space_handle_t      ccs_ioh;
+	bus_space_handle_t	ccs_ioh;
 	bus_size_t		ccs_iosz;
 	bus_space_tag_t		mt_iot;
-	bus_space_handle_t      mt_ioh;
+	bus_space_handle_t	mt_ioh;
 	bus_size_t		mt_iosz;
+	int			iactive;	/* trigger_input called */
+	int			oactive;	/* trigger_output called */
+	int			ibusy;		/* input DMA started */
+	int			obusy;		/* output DMA started */
+#ifdef ENVY_DEBUG
+	unsigned 		spurious;
+	struct timespec		start_ts;
+#define ENVY_NINTR		16
+	unsigned 		nintr;
+	struct envy_intr {
+		int ipos, opos, st, mask, ctl, iactive, oactive;
+		struct timespec ts;
+	} intrs[ENVY_NINTR];
+#endif
 	struct envy_card       *card;
 	unsigned char 		shadow[4][16];
 #define ENVY_EEPROM_MAXSZ 32
 	unsigned char		eeprom[ENVY_EEPROM_MAXSZ];
+	struct ac97_codec_if   *codec_if;
+	struct ac97_host_if	host_if;
+	enum ac97_host_flags	codec_flags;
 	void (*iintr)(void *);
 	void *iarg;
 	void (*ointr)(void *);
 	void *oarg;
+#if NMIDI > 0
+	void (*midi_in)(void *, int);
+	void (*midi_out)(void *);
+	void *midi_arg;
+	struct device *midi;
+#endif
 };
 
 #define ENVY_MIX_CLASSIN	0

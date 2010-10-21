@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_axe.c,v 1.92 2009/05/13 16:46:55 jsg Exp $	*/
+/*	$OpenBSD: if_axe.c,v 1.99 2010/09/24 03:21:21 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006, 2007 Jonathan Gray <jsg@openbsd.org>
@@ -149,6 +149,7 @@ const struct axe_type axe_devs[] = {
 	{ { USB_VENDOR_APPLE, USB_PRODUCT_APPLE_ETHERNET }, AX772 },
 	{ { USB_VENDOR_ASIX, USB_PRODUCT_ASIX_AX88172}, 0 },
 	{ { USB_VENDOR_ASIX, USB_PRODUCT_ASIX_AX88772}, AX772 },
+	{ { USB_VENDOR_ASIX, USB_PRODUCT_ASIX_AX88772A}, AX772 },
 	{ { USB_VENDOR_ASIX, USB_PRODUCT_ASIX_AX88178}, AX178 },
 	{ { USB_VENDOR_ATEN, USB_PRODUCT_ATEN_UC210T}, 0 },
 	{ { USB_VENDOR_BELKIN, USB_PRODUCT_BELKIN_F5D5055 }, AX178 },
@@ -165,6 +166,7 @@ const struct axe_type axe_devs[] = {
 	{ { USB_VENDOR_LOGITEC, USB_PRODUCT_LOGITEC_LAN_GTJU2}, AX178 },
 	{ { USB_VENDOR_MELCO, USB_PRODUCT_MELCO_LUAU2GT}, AX178 },
 	{ { USB_VENDOR_MELCO, USB_PRODUCT_MELCO_LUAU2KTX}, 0 },
+	{ { USB_VENDOR_MSI, USB_PRODUCT_MSI_AX88772A}, AX772 },
 	{ { USB_VENDOR_NETGEAR, USB_PRODUCT_NETGEAR_FA120}, 0 },
 	{ { USB_VENDOR_OQO, USB_PRODUCT_OQO_ETHER01PLUS }, AX772 },
 	{ { USB_VENDOR_PLANEX3, USB_PRODUCT_PLANEX3_GU1000T }, AX178 },
@@ -178,7 +180,7 @@ const struct axe_type axe_devs[] = {
 int axe_match(struct device *, void *, void *); 
 void axe_attach(struct device *, struct device *, void *); 
 int axe_detach(struct device *, int); 
-int axe_activate(struct device *, enum devact); 
+int axe_activate(struct device *, int); 
 
 struct cfdriver axe_cd = { 
 	NULL, "axe", DV_IFNET 
@@ -270,6 +272,7 @@ axe_miibus_readreg(struct device *dev, int phy, int reg)
 	struct axe_softc	*sc = (void *)dev;
 	usbd_status		err;
 	uWord			val;
+	int			ival;
 
 	if (sc->axe_dying) {
 		DPRINTF(("axe: dying\n"));
@@ -290,7 +293,7 @@ axe_miibus_readreg(struct device *dev, int phy, int reg)
 	if (sc->axe_phyaddrs[1] != AXE_NOPHY && phy != sc->axe_phyaddrs[1])
 		return (0);
 #endif
-	if (sc->axe_phyaddrs[0] != 0xFF && sc->axe_phyaddrs[0] != phy)
+	if (sc->axe_phyno != phy)
 		return (0);
 
 	USETW(val, 0);
@@ -308,10 +311,18 @@ axe_miibus_readreg(struct device *dev, int phy, int reg)
 	DPRINTF(("axe_miibus_readreg: phy 0x%x reg 0x%x val 0x%x\n",
 	    phy, reg, UGETW(val)));
 
-	if (UGETW(val) && UGETW(val) != 0xffff)
-		sc->axe_phyaddrs[0] = phy;
+	ival = UGETW(val);
+	if ((sc->axe_flags & AX772) != 0 && reg == MII_BMSR) {
+		/*
+		* BMSR of AX88772 indicates that it supports extended
+		* capability but the extended status register is
+		* revered for embedded ethernet PHY. So clear the
+		* extended capability bit of BMSR.
+		*/
+		ival &= ~BMSR_EXTCAP;
+	}
 
-	return (UGETW(val));
+	return (ival);
 }
 
 void
@@ -322,6 +333,8 @@ axe_miibus_writereg(struct device *dev, int phy, int reg, int val)
 	uWord			uval;
 
 	if (sc->axe_dying)
+		return;
+	if (sc->axe_phyno != phy)
 		return;
 
 	USETW(uval, val);
@@ -343,6 +356,7 @@ axe_miibus_statchg(struct device *dev)
 {
 	struct axe_softc	*sc = (void *)dev;
 	struct mii_data		*mii = GET_MII(sc);
+	struct ifnet		*ifp;
 	int			val, err;
 
 	if ((mii->mii_media_active & IFM_GMASK) == IFM_FDX)
@@ -350,8 +364,41 @@ axe_miibus_statchg(struct device *dev)
 	else
 		val = 0;
 
+	ifp = GET_IFP(sc);
+	if (mii == NULL || ifp == NULL ||
+	    (ifp->if_flags & IFF_RUNNING) == 0)
+		return;
+
+	sc->axe_link = 0;
+	if ((mii->mii_media_status & (IFM_ACTIVE | IFM_AVALID)) ==
+	    (IFM_ACTIVE | IFM_AVALID)) {
+		switch (IFM_SUBTYPE(mii->mii_media_active)) {
+		    case IFM_10_T:
+		    case IFM_100_TX:
+			sc->axe_link++;
+			break;
+		    case IFM_1000_T:
+			if ((sc->axe_flags & AX178) == 0)
+			    break;
+			sc->axe_link++;
+			break;
+		    default:
+			break;
+		}
+	}
+
+	/* Lost link, do nothing. */
+	if (sc->axe_link == 0)
+		return;
+
+	val = 0;
+	if ((IFM_OPTIONS(mii->mii_media_active) & IFM_FDX) != 0)
+		val |= AXE_MEDIA_FULL_DUPLEX;
+
 	if (sc->axe_flags & AX178 || sc->axe_flags & AX772) {
 		val |= (AXE_178_MEDIA_RX_EN | AXE_178_MEDIA_MAGIC);
+		if (sc->axe_flags & AX178)
+			val |= AXE_178_MEDIA_ENCK;
 
 		switch (IFM_SUBTYPE(mii->mii_media_active)) {
 		case IFM_1000_T:
@@ -383,7 +430,6 @@ axe_ifmedia_upd(struct ifnet *ifp)
 	struct axe_softc	*sc = ifp->if_softc;
 	struct mii_data		*mii = GET_MII(sc);
 
-	sc->axe_link = 0;
 	if (mii->mii_instance) {
 		struct mii_softc	*miisc;
 		LIST_FOREACH(miisc, &mii->mii_phys, mii_list)
@@ -516,6 +562,9 @@ axe_ax88178_init(struct axe_softc *sc)
 	axe_cmd(sc, AXE_CMD_SW_RESET_REG, 0,
 	    AXE_SW_RESET_PRL | AXE_178_RESET_MAGIC, NULL);
 	usbd_delay_ms(sc->axe_udev, 150);
+	/* Enable MII/GMII/RGMII for external PHY */
+	axe_cmd(sc, AXE_CMD_SW_PHY_SELECT, 0, 0, NULL);
+	usbd_delay_ms(sc->axe_udev, 10);
 	axe_cmd(sc, AXE_CMD_RXCTL_WRITE, 0, 0, NULL);
 }
 
@@ -525,7 +574,7 @@ axe_ax88772_init(struct axe_softc *sc)
 	axe_cmd(sc, AXE_CMD_WRITE_GPIO, 0, 0x00b0, NULL);
 	usbd_delay_ms(sc->axe_udev, 40);
 
-	if (sc->axe_phyaddrs[1] == AXE_INTPHY) {
+	if (sc->axe_phyno == AXE_PHY_NO_AX772_EPHY) {
 		/* ask for the embedded PHY */
 		axe_cmd(sc, AXE_CMD_SW_PHY_SELECT, 0, 0x01, NULL);
 		usbd_delay_ms(sc->axe_udev, 10);
@@ -557,6 +606,29 @@ axe_ax88772_init(struct axe_softc *sc)
 
 	usbd_delay_ms(sc->axe_udev, 150);
 	axe_cmd(sc, AXE_CMD_RXCTL_WRITE, 0, 0, NULL);
+}
+
+static int
+axe_get_phyno(struct axe_softc *sc, int sel)
+{
+	int phyno = -1;
+
+	switch (AXE_PHY_TYPE(sc->axe_phyaddrs[sel])) {
+	case PHY_TYPE_100_HOME:
+	case PHY_TYPE_GIG:
+		phyno  = AXE_PHY_NO(sc->axe_phyaddrs[sel]);
+		break;
+	case PHY_TYPE_SPECIAL:
+		/* FALLTHROUGH */
+	case PHY_TYPE_RSVD:
+		/* FALLTHROUGH */
+	case PHY_TYPE_NON_SUP:
+		/* FALLTHROUGH */
+	default:
+		break;
+	}
+
+	return (phyno);
 }
 
 /*
@@ -658,14 +730,21 @@ axe_attach(struct device *parent, struct device *self, void *aux)
 	DPRINTF((" phyaddrs[0]: %x phyaddrs[1]: %x\n",
 	    sc->axe_phyaddrs[0], sc->axe_phyaddrs[1]));
 
-	if (sc->axe_flags & AX178) {
+	sc->axe_phyno = axe_get_phyno(sc, AXE_PHY_SEL_PRI);
+	if (sc->axe_phyno == -1)
+		sc->axe_phyno = axe_get_phyno(sc, AXE_PHY_SEL_SEC);
+	if (sc->axe_phyno == -1) {
+		printf("%s:", sc->axe_dev.dv_xname);
+		printf(" no valid PHY address found, assuming PHY address 0\n");
+		sc->axe_phyno = 0;
+	}
+
+	DPRINTF((" get_phyno %d\n", sc->axe_phyno));
+
+	if (sc->axe_flags & AX178)
 		axe_ax88178_init(sc);
-		printf(" AX88178");
-	} else if (sc->axe_flags & AX772) {
+	else if (sc->axe_flags & AX772)
 		axe_ax88772_init(sc);
-		printf(" AX88772");
-	} else
-		printf(" AX88172");
 
 	/*
 	 * Get station address.
@@ -681,14 +760,15 @@ axe_attach(struct device *parent, struct device *self, void *aux)
 	axe_cmd(sc, AXE_CMD_READ_IPG012, 0, 0, (void *)&sc->axe_ipgs);
 
 	/*
-	 * Work around broken adapters that appear to lie about
-	 * their PHY addresses.
-	 */
-	sc->axe_phyaddrs[0] = sc->axe_phyaddrs[1] = 0xFF;
-
-	/*
 	 * An ASIX chip was detected. Inform the world.
 	 */
+	printf("%s:", sc->axe_dev.dv_xname);
+	if (sc->axe_flags & AX178)
+		printf(" AX88178");
+	else if (sc->axe_flags & AX772)
+		printf(" AX88772");
+	else
+		printf(" AX88172");
 	printf(", address %s\n", ether_sprintf(eaddr));
 
 	bcopy(eaddr, (char *)&sc->arpcom.ac_enaddr, ETHER_ADDR_LEN);
@@ -755,8 +835,6 @@ axe_detach(struct device *self, int flags)
 
 	timeout_del(&sc->axe_stat_ch);
 
-	sc->axe_dying = 1;
-
 	if (sc->axe_ep[AXE_ENDPT_TX] != NULL)
 		usbd_abort_pipe(sc->axe_ep[AXE_ENDPT_TX]);
 	if (sc->axe_ep[AXE_ENDPT_RX] != NULL)
@@ -809,7 +887,7 @@ axe_detach(struct device *self, int flags)
 }
 
 int
-axe_activate(struct device *self, enum devact act)
+axe_activate(struct device *self, int act)
 {
 	struct axe_softc *sc = (struct axe_softc *)self;
 
@@ -1117,15 +1195,8 @@ axe_tick_task(void *xsc)
 	s = splnet();
 
 	mii_tick(mii);
-	if (!sc->axe_link && mii->mii_media_status & IFM_ACTIVE &&
-	    IFM_SUBTYPE(mii->mii_media_active) != IFM_NONE) {
-		DPRINTF(("%s: %s: got link\n",
-			 sc->axe_dev.dv_xname, __func__));
-		sc->axe_link++;
-		if (IFQ_IS_EMPTY(&ifp->if_snd) == 0)
-			   axe_start(ifp);
-	}
-
+	if (sc->axe_link == 0)
+		axe_miibus_statchg(&sc->axe_dev);
 	timeout_add_sec(&sc->axe_stat_ch, 1);
 
 	splx(s);
@@ -1325,6 +1396,7 @@ axe_init(void *xsc)
 		usbd_transfer(c->axe_xfer);
 	}
 
+	sc->axe_link = 0;
 	ifp->if_flags |= IFF_RUNNING;
 	ifp->if_flags &= ~IFF_OACTIVE;
 

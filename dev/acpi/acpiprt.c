@@ -1,4 +1,4 @@
-/* $OpenBSD: acpiprt.c,v 1.35 2009/03/31 20:59:00 kettenis Exp $ */
+/* $OpenBSD: acpiprt.c,v 1.43 2010/08/03 22:54:12 kettenis Exp $ */
 /*
  * Copyright (c) 2006 Mark Kettenis <kettenis@openbsd.org>
  *
@@ -56,7 +56,6 @@ SIMPLEQ_HEAD(, acpiprt_map) acpiprt_map_list =
 int	acpiprt_match(struct device *, void *, void *);
 void	acpiprt_attach(struct device *, struct device *, void *);
 int	acpiprt_getirq(union acpi_resource *crs, void *arg);
-int	acpiprt_getminbus(union acpi_resource *, void *);
 int	acpiprt_chooseirq(union acpi_resource *, void *);
 
 struct acpiprt_softc {
@@ -106,7 +105,6 @@ acpiprt_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_acpi = (struct acpi_softc *)parent;
 	sc->sc_devnode = aa->aaa_node;
 	sc->sc_bus = acpiprt_getpcibus(sc, sc->sc_devnode);
-
 	printf(": bus %d (%s)", sc->sc_bus, sc->sc_devnode->parent->name);
 
 	if (aml_evalnode(sc->sc_acpi, sc->sc_devnode, 0, NULL, &res)) {
@@ -140,10 +138,10 @@ acpiprt_getirq(union acpi_resource *crs, void *arg)
 	typ = AML_CRSTYPE(crs);
 	switch (typ) {
 	case SR_IRQ:
-		*irq = ffs(aml_letohost16(crs->sr_irq.irq_mask)) - 1;
+		*irq = ffs(letoh16(crs->sr_irq.irq_mask)) - 1;
 		break;
 	case LR_EXTIRQ:
-		*irq = aml_letohost32(crs->lr_extirq.irq[0]);
+		*irq = letoh32(crs->lr_extirq.irq[0]);
 		break;
 	default:
 		printf("unknown interrupt: %x\n", typ);
@@ -160,7 +158,7 @@ acpiprt_pri[16] = {
 	2,			/* Serial Port B */
 	5,			/* Parallel Port / Generic */
 	2,			/* Floppy Disk */
-	4, 			/* Parallel Port / Generic */
+	4,			/* Parallel Port / Generic */
 	1,			/* RTC */
 	6,			/* Generic */
 	7,			/* Generic */
@@ -279,18 +277,13 @@ acpiprt_prt_add(struct acpiprt_softc *sc, struct aml_value *v)
 			aml_freevalue(&res);
 			return;
 		}
-		aml_parse_resource(res.length, res.v_buffer,
-		    acpiprt_getirq, &irq);
+		aml_parse_resource(&res, acpiprt_getirq, &irq);
 		aml_freevalue(&res);
 
 		/* Pick a new IRQ if necessary. */
 		if ((irq == 0 || irq == 2 || irq == 13) &&
 		    !aml_evalname(sc->sc_acpi, node, "_PRS", 0, NULL, &res)){
-			if (res.type == AML_OBJTYPE_BUFFER &&
-			    res.length >= 5) {
-				aml_parse_resource(res.length, res.v_buffer,
-				    acpiprt_chooseirq, &irq);
-			}
+			aml_parse_resource(&res, acpiprt_chooseirq, &irq);
 			aml_freevalue(&res);
 		}
 
@@ -365,85 +358,11 @@ acpiprt_prt_add(struct acpiprt_softc *sc, struct aml_value *v)
 }
 
 int
-acpiprt_getminbus(union acpi_resource *crs, void *arg)
-{
-	int *bbn = arg;
-	int typ = AML_CRSTYPE(crs);
-
-	/* Check for embedded bus number */
-	if (typ == LR_WORD && crs->lr_word.type == 2)
-		*bbn = crs->lr_word._min;
-	return 0;
-}
-
-int
 acpiprt_getpcibus(struct acpiprt_softc *sc, struct aml_node *node)
 {
-	struct aml_node *parent = node->parent;
-	struct aml_value res;
-	pci_chipset_tag_t pc = NULL;
-	pcitag_t tag;
-	pcireg_t reg;
-	int bus, dev, func, rv;
-	int64_t ires;
-
-	if (parent == NULL)
-		return 0;
-
-	/*
-	 * If our parent is a a bridge, it might have an address descriptor
-	 * that tells us our bus number.
-	 */
-	if (aml_evalname(sc->sc_acpi, parent, "_CRS.", 0, NULL, &res) == 0) {
-		rv = -1;
-		if (res.type == AML_OBJTYPE_BUFFER)
-			aml_parse_resource(res.length, res.v_buffer,
-			    acpiprt_getminbus, &rv);
-		aml_freevalue(&res);
-		if (rv != -1)
-			return rv;
-	}
-
-	/*
-	 * If our parent is the root of the bus, it should specify the
-	 * base bus number.
-	 */
-	if (aml_evalinteger(sc->sc_acpi, parent, "_BBN.", 0, NULL, &ires) == 0) {
-		return (ires);
-	}
-
-	/*
-	 * If our parent is a PCI-PCI bridge, get our bus number from its
-	 * PCI config space.
-	 */
-	if (aml_evalinteger(sc->sc_acpi, parent, "_ADR.", 0, NULL, &ires) == 0) {
-		bus = acpiprt_getpcibus(sc, parent);
-		dev = ACPI_PCI_DEV(ires << 16);
-		func = ACPI_PCI_FN(ires << 16);
-
-		/*
-		 * Some systems return 255 as the device number for
-		 * devices that are not really there.
-		 */
-		if (dev >= pci_bus_maxdevs(pc, bus))
-			return (-1);
-
-		tag = pci_make_tag(pc, bus, dev, func);
-
-		/* Check whether the device is really there. */
-		reg = pci_conf_read(pc, tag, PCI_ID_REG);
-		if (PCI_VENDOR(reg) == PCI_VENDOR_INVALID)
-			return (-1);
-
-		/* Fetch bus number from PCI config space. */
-		reg = pci_conf_read(pc, tag, PCI_CLASS_REG);
-		if (PCI_CLASS(reg) == PCI_CLASS_BRIDGE &&
-		    PCI_SUBCLASS(reg) == PCI_SUBCLASS_BRIDGE_PCI) {
-			reg = pci_conf_read(pc, tag, PPB_REG_BUSINFO);
-			return (PPB_BUSINFO_SECONDARY(reg));
-		}
-	}
-	return (0);
+	/* Check if parent device has PCI mapping */
+	return (node->parent && node->parent->pci) ?
+		node->parent->pci->sub : -1;
 }
 
 void
@@ -484,7 +403,7 @@ acpiprt_route_interrupt(int bus, int dev, int pin)
 		aml_freevalue(&res);
 		return;
 	}
-	aml_parse_resource(res.length, res.v_buffer, acpiprt_getirq, &irq);
+	aml_parse_resource(&res, acpiprt_getirq, &irq);
 
 	/* Only re-route interrupts when necessary. */
 	if ((sta & STA_ENABLED) && irq == newirq) {

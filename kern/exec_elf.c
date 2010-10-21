@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec_elf.c,v 1.70 2009/06/06 21:25:19 deraadt Exp $	*/
+/*	$OpenBSD: exec_elf.c,v 1.77 2010/09/17 14:03:09 mikeb Exp $	*/
 
 /*
  * Copyright (c) 1996 Per Fogelstrom
@@ -159,7 +159,7 @@ struct emul ELFNAMEEND(emul) = {
 #else
 	NULL,
 #endif
-	sizeof (AuxInfo) * ELF_AUX_ENTRIES,
+	(sizeof(AuxInfo) * ELF_AUX_ENTRIES / sizeof(char *)),
 	ELFNAME(copyargs),
 	setregs,
 	ELFNAME2(exec,fixup),
@@ -201,7 +201,7 @@ ELFNAME(check_header)(Elf_Ehdr *ehdr)
 	/*
 	 * We need to check magic, class size, endianess, and version before
 	 * we look at the rest of the Elf_Ehdr structure. These few elements
-	 * are represented in a machine independant fashion.
+	 * are represented in a machine independent fashion.
 	 */
 	if (!IS_ELF(*ehdr) ||
 	    ehdr->e_ident[EI_CLASS] != ELF_TARG_CLASS ||
@@ -209,7 +209,7 @@ ELFNAME(check_header)(Elf_Ehdr *ehdr)
 	    ehdr->e_ident[EI_VERSION] != ELF_TARG_VER)
 		return (ENOEXEC);
 
-	/* Now check the machine dependant header */
+	/* Now check the machine dependent header */
 	if (ehdr->e_machine != ELF_TARG_MACH ||
 	    ehdr->e_version != ELF_TARG_VER)
 		return (ENOEXEC);
@@ -641,7 +641,7 @@ native:
 			    pp, &addr, &size, &prot, flags);
 
 			/*
-			 * Update exe_base in case allignment was off.
+			 * Update exe_base in case alignment was off.
 			 * For PIE, addr is relative to exe_base so
 			 * adjust it (non PIE exe_base is 0 so no change).
 			 */
@@ -752,15 +752,6 @@ native:
 		epp->ep_emul_arg = ap;
 		epp->ep_interp_pos = pos;
 	}
-
-#if defined(COMPAT_SVR4) && defined(i386) && 0	/* nothing sets OOS_DELL... */
-#ifndef ELF_MAP_PAGE_ZERO
-	/* Dell SVR4 maps page zero, yeuch! */
-	if (p->p_os == OOS_DELL)
-#endif
-		NEW_VMCMD(&epp->ep_vmcmds, vmcmd_map_readvn, PAGE_SIZE, 0,
-		    epp->ep_vp, 0, VM_PROT_READ);
-#endif
 
 	free(ph, M_TEMP);
 	vn_marktext(epp->ep_vp);
@@ -1087,6 +1078,8 @@ ELFNAMEEND(coredump)(struct proc *p, void *cookie)
 	}
 
 out:
+	if (psections)
+		free(psections, M_TEMP);
 	return (error);
 #endif
 }
@@ -1146,9 +1139,8 @@ ELFNAMEEND(coredump_notes)(struct proc *p, void *iocookie, size_t *sizep)
 	struct uio uio;
 	struct elfcore_procinfo cpi;
 	Elf_Note nhdr;
-#ifdef RTHREADS
+	struct process *pr = p->p_p;
 	struct proc *q;
-#endif
 	size_t size, notesize;
 	int error;
 
@@ -1170,11 +1162,11 @@ ELFNAMEEND(coredump_notes)(struct proc *p, void *iocookie, size_t *sizep)
 		cpi.cpi_sigignore = p->p_sigignore;
 		cpi.cpi_sigcatch = p->p_sigcatch;
 
-		cpi.cpi_pid = p->p_pid;
-		cpi.cpi_ppid = p->p_pptr->p_pid;
-		cpi.cpi_pgrp = p->p_pgid;
-		if (p->p_session->s_leader)
-			cpi.cpi_sid = p->p_session->s_leader->p_pid;
+		cpi.cpi_pid = pr->ps_pid;
+		cpi.cpi_ppid = pr->ps_pptr->ps_pid;
+		cpi.cpi_pgrp = pr->ps_pgid;
+		if (pr->ps_session->s_leader)
+			cpi.cpi_sid = pr->ps_session->s_leader->ps_pid;
 		else
 			cpi.cpi_sid = 0;
 
@@ -1207,7 +1199,7 @@ ELFNAMEEND(coredump_notes)(struct proc *p, void *iocookie, size_t *sizep)
 		iov.iov_len = sizeof(pss);
 		uio.uio_iov = &iov;
 		uio.uio_iovcnt = 1;
-		uio.uio_offset = (off_t)PS_STRINGS;
+		uio.uio_offset = (off_t)(vaddr_t)PS_STRINGS;
 		uio.uio_resid = sizeof(pss);
 		uio.uio_segflg = UIO_SYSSPACE;
 		uio.uio_rw = UIO_READ;
@@ -1269,13 +1261,12 @@ ELFNAMEEND(coredump_notes)(struct proc *p, void *iocookie, size_t *sizep)
 		return (error);
 	size += notesize;
 
-#ifdef RTHREADS
 	/*
 	 * Now, for each thread, write the register info and any other
 	 * per-thread notes.  Since we're dumping core, we don't bother
 	 * locking.
 	 */
-	TAILQ_FOREACH(q, &p->p_p->ps_threads, p_thr_link) {
+	TAILQ_FOREACH(q, &pr->ps_threads, p_thr_link) {
 		if (q == p)		/* we've taken care of this thread */
 			continue;
 		error = ELFNAMEEND(coredump_note)(q, iocookie, &notesize);
@@ -1283,7 +1274,6 @@ ELFNAMEEND(coredump_notes)(struct proc *p, void *iocookie, size_t *sizep)
 			return (error);
 		size += notesize;
 	}
-#endif
 
 	*sizep = size;
 #endif

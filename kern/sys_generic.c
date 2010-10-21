@@ -1,4 +1,4 @@
-/*	$OpenBSD: sys_generic.c,v 1.66 2009/06/08 23:18:42 deraadt Exp $	*/
+/*	$OpenBSD: sys_generic.c,v 1.71 2010/08/18 17:42:12 marco Exp $	*/
 /*	$NetBSD: sys_generic.c,v 1.24 1996/03/29 00:25:32 cgd Exp $	*/
 
 /*
@@ -63,7 +63,6 @@
 #include <uvm/uvm_extern.h>
 
 int selscan(struct proc *, fd_set *, fd_set *, int, int, register_t *);
-int seltrue(dev_t, int, struct proc *);
 void pollscan(struct proc *, struct pollfd *, u_int, register_t *);
 int pollout(struct pollfd *, struct pollfd *, u_int);
 
@@ -189,7 +188,7 @@ dofilereadv(struct proc *p, int fd, struct file *fp, const struct iovec *iovp,
 	/*
 	 * if tracing, save a copy of iovec
 	 */
-	if (KTRPOINT(p, KTR_GENIO))  {
+	if (KTRPOINT(p, KTR_GENIO)) {
 		ktriov = malloc(iovlen, M_TEMP, M_WAITOK);
 		bcopy(auio.uio_iov, ktriov, iovlen);
 	}
@@ -206,7 +205,7 @@ dofilereadv(struct proc *p, int fd, struct file *fp, const struct iovec *iovp,
 	fp->f_rbytes += cnt;
 #ifdef KTRACE
 	if (ktriov != NULL) {
-		if (error == 0) 
+		if (error == 0)
 			ktrgenio(p, fd, UIO_READ, ktriov, cnt,
 			    error);
 		free(ktriov, M_TEMP);
@@ -342,7 +341,7 @@ dofilewritev(struct proc *p, int fd, struct file *fp, const struct iovec *iovp,
 	/*
 	 * if tracing, save a copy of iovec
 	 */
-	if (KTRPOINT(p, KTR_GENIO))  {
+	if (KTRPOINT(p, KTR_GENIO)) {
 		ktriov = malloc(iovlen, M_TEMP, M_WAITOK);
 		bcopy(auio.uio_iov, ktriov, iovlen);
 	}
@@ -362,7 +361,7 @@ dofilewritev(struct proc *p, int fd, struct file *fp, const struct iovec *iovp,
 	fp->f_wbytes += cnt;
 #ifdef KTRACE
 	if (ktriov != NULL) {
-		if (error == 0) 
+		if (error == 0)
 			ktrgenio(p, fd, UIO_WRITE, ktriov, cnt, error);
 		free(ktriov, M_TEMP);
 	}
@@ -396,7 +395,7 @@ sys_ioctl(struct proc *p, void *v, register_t *retval)
 	caddr_t data, memp;
 	int tmp;
 #define STK_PARAMS	128
-	char stkbuf[STK_PARAMS];
+	u_long stkbuf[STK_PARAMS / sizeof(u_long)];
 
 	fdp = p->p_fd;
 	if ((fp = fd_getfile(fdp, SCARG(uap, fd))) == NULL)
@@ -427,7 +426,7 @@ sys_ioctl(struct proc *p, void *v, register_t *retval)
 		memp = (caddr_t)malloc((u_long)size, M_IOCTLOPS, M_WAITOK);
 		data = memp;
 	} else
-		data = stkbuf;
+		data = (caddr_t)stkbuf;
 	if (com&IOC_IN) {
 		if (size) {
 			error = copyin(SCARG(uap, data), data, (u_int)size);
@@ -477,12 +476,12 @@ sys_ioctl(struct proc *p, void *v, register_t *retval)
 		if (tmp <= 0) {
 			tmp = -tmp;
 		} else {
-			struct proc *p1 = pfind(tmp);
-			if (p1 == 0) {
+			struct process *pr = prfind(tmp);
+			if (pr == NULL) {
 				error = ESRCH;
 				break;
 			}
-			tmp = p1->p_pgrp->pg_id;
+			tmp = pr->ps_pgrp->pg_id;
 		}
 		error = (*fp->f_ops->fo_ioctl)
 			(fp, TIOCSPGRP, (caddr_t)&tmp, p);
@@ -631,7 +630,7 @@ done:
 		putbits(ex, 2);
 #undef putbits
 	}
-	
+
 	if (pibits[0] != (fd_set *)&bits[0])
 		free(pibits[0], M_TEMP);
 	return (error);
@@ -680,6 +679,13 @@ seltrue(dev_t dev, int events, struct proc *p)
 	return (events & (POLLIN | POLLOUT | POLLRDNORM | POLLWRNORM));
 }
 
+int
+selfalse(dev_t dev, int events, struct proc *p)
+{
+
+	return (0);
+}
+
 /*
  * Record a select request.
  */
@@ -708,6 +714,7 @@ selwakeup(struct selinfo *sip)
 	struct proc *p;
 	int s;
 
+	KNOTE(&sip->si_note, 0);
 	if (sip->si_selpid == 0)
 		return;
 	if (sip->si_flags & SI_COLL) {
@@ -766,7 +773,7 @@ pollout(struct pollfd *pl, struct pollfd *upl, u_int nfds)
 {
 	int error = 0;
 	u_int i = 0;
-	
+
 	while (!error && i++ < nfds) {
 		error = copyout(&pl->revents, &upl->revents,
 		    sizeof(upl->revents));
@@ -802,7 +809,7 @@ sys_poll(struct proc *p, void *v, register_t *retval)
 		return (EINVAL);
 
 	sz = sizeof(struct pollfd) * nfds;
-	
+
 	/* optimize for the default case, of a small nfds value */
 	if (sz > sizeof(pfds))
 		pl = (struct pollfd *) malloc(sz, M_TEMP, M_WAITOK);

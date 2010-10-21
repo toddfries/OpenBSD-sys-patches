@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.127 2009/06/03 00:49:12 art Exp $	*/
+/*	$OpenBSD: locore.s,v 1.130 2010/07/03 04:54:32 kettenis Exp $	*/
 /*	$NetBSD: locore.s,v 1.145 1996/05/03 19:41:19 christos Exp $	*/
 
 /*-
@@ -639,29 +639,8 @@ NENTRY(proc_trampoline)
  * Signal trampoline; copied to top of user stack.
  */
 NENTRY(sigcode)
-	movl	SIGF_FPSTATE(%esp),%esi	# FPU state area if need saving
-	testl	%esi,%esi
-	jz	1f
-	fnsave	(%esi)
-1:	call	*SIGF_HANDLER(%esp)
-	testl	%esi,%esi
-	jz	2f
-	frstor	(%esi)
-	jmp	2f
-
-	.globl  _C_LABEL(sigcode_xmm)
-_C_LABEL(sigcode_xmm):
-	movl	SIGF_FPSTATE(%esp),%esi	# FPU state area if need saving
-	testl	%esi,%esi
-	jz	1f
-	fxsave	(%esi)
-	fninit
-1:	call	*SIGF_HANDLER(%esp)
-	testl	%esi,%esi
-	jz	2f
-	fxrstor	(%esi)
-
-2:	leal	SIGF_SC(%esp),%eax	# scp (the call may have clobbered the
+	call	*SIGF_HANDLER(%esp)
+	leal	SIGF_SC(%esp),%eax	# scp (the call may have clobbered the
 					# copy at SIGF_SCP(%esp))
 	pushl	%eax
 	pushl	%eax			# junk to fake return address
@@ -1390,7 +1369,7 @@ ENTRY(savectx)
  * XXX - debugger traps are now interrupt gates so at least bdb doesn't lose
  * control.  The sti's give the standard losing behaviour for ddb and kgdb.
  */
-#define	IDTVEC(name)	ALIGN_TEXT; .globl X/**/name; X/**/name:
+#define	IDTVEC(name)	ALIGN_TEXT; .globl X##name; X##name:
 
 #define	TRAP(a)		pushl $(a) ; jmp _C_LABEL(alltraps)
 #define	ZTRAP(a)	pushl $0 ; TRAP(a)
@@ -1532,7 +1511,9 @@ calltrap:
 #ifdef DIAGNOSTIC
 	movl	CPL,%ebx
 #endif /* DIAGNOSTIC */
+	pushl	%esp
 	call	_C_LABEL(trap)
+	addl	$4,%esp
 2:	/* Check for ASTs on exit to user mode. */
 	cli
 	CHECK_ASTPENDING(%ecx)
@@ -1546,7 +1527,9 @@ calltrap:
 5:	CLEAR_ASTPENDING(%ecx)
 	sti
 	movl	$T_ASTFLT,TF_TRAPNO(%esp)
+	pushl	%esp
 	call	_C_LABEL(trap)
+	addl	$4,%esp
 	jmp	2b
 #ifndef DIAGNOSTIC
 1:	INTRFASTEXIT
@@ -1589,7 +1572,9 @@ IDTVEC(syscall)
 syscall1:
 	pushl	$T_ASTFLT	# trap # for doing ASTs
 	INTRENTRY
+	pushl	%esp
 	call	_C_LABEL(syscall)
+	addl	$4,%esp
 2:	/* Check for ASTs on exit to user mode. */
 	cli
 	CHECK_ASTPENDING(%ecx)
@@ -1598,7 +1583,9 @@ syscall1:
 	CLEAR_ASTPENDING(%ecx)
 	sti
 	/* Pushed T_ASTFLT into tf_trapno on entry. */
+	pushl	%esp
 	call	_C_LABEL(trap)
+	addl	$4,%esp
 	jmp	2b
 1:	INTRFASTEXIT
 

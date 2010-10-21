@@ -1,4 +1,4 @@
-/*	$OpenBSD: aac.c,v 1.39 2009/02/16 21:19:06 miod Exp $	*/
+/*	$OpenBSD: aac.c,v 1.51 2010/10/12 00:53:32 krw Exp $	*/
 
 /*-
  * Copyright (c) 2000 Michael Smith
@@ -111,8 +111,10 @@ int	aac_alloc_commands(struct aac_softc *);
 void	aac_free_commands(struct aac_softc *);
 void	aac_unmap_command(struct aac_command *);
 
+#if 0
 int	aac_raw_scsi_cmd(struct scsi_xfer *);
-int	aac_scsi_cmd(struct scsi_xfer *);
+#endif
+void	aac_scsi_cmd(struct scsi_xfer *);
 void	aac_startio(struct aac_softc *);
 void	aac_startup(struct aac_softc *);
 void	aac_add_container(struct aac_softc *, struct aac_mntinforesp *, int);
@@ -128,13 +130,11 @@ struct scsi_adapter aac_switch = {
 	aac_scsi_cmd, aacminphys, 0, 0,
 };
 
+#if 0
 struct scsi_adapter aac_raw_switch = {
 	aac_raw_scsi_cmd, aacminphys, 0, 0,
 };
-
-struct scsi_device aac_dev = {
-	NULL, NULL, NULL, NULL
-};
+#endif
 
 /* Falcon/PPC interface */
 int	aac_fa_get_fwstatus(struct aac_softc *);
@@ -270,7 +270,6 @@ aac_attach(struct aac_softc *sc)
 	/* Fill in the prototype scsi_link. */
 	sc->aac_link.adapter_softc = sc;
 	sc->aac_link.adapter = &aac_switch;
-	sc->aac_link.device = &aac_dev;
 	sc->aac_link.openings = (sc->total_fibs - 8) / 
 	    (sc->aac_container_count ? sc->aac_container_count : 1);
 	sc->aac_link.adapter_buswidth = AAC_MAX_CONTAINERS;
@@ -424,7 +423,7 @@ aac_add_container(struct aac_softc *sc, struct aac_mntinforesp *mir, int f)
 		co = (struct aac_container *)malloc(sizeof *co, M_DEVBUF,
 		       M_NOWAIT);
 		if (co == NULL)
-			panic("Out of memory?!\n");
+			panic("Out of memory?!");
 		bzero(co, sizeof *co);
 		AAC_DPRINTF(AAC_D_MISC,
 			    ("%s: id %x  name '%.16s'  size %u  type %d\n", 
@@ -548,7 +547,7 @@ aac_detach(device_t dev)
 	}
 
 	if (sc->aifflags & AAC_AIFFLAGS_RUNNING)
-		panic("Cannot shutdown AIF thread\n");
+		panic("Cannot shutdown AIF thread");
 
 	if ((error = aac_shutdown(dev)))
 		return(error);
@@ -770,7 +769,7 @@ aac_startio(struct aac_softc *sc)
 		 * catastrophic since it means that bus_dmamap_load() failed.
 		 */
 		if (aac_map_command(cm) != 0)
-			panic("aac: error mapping command %p\n", cm);
+			panic("aac: error mapping command %p", cm);
 
 		AAC_DPRINTF(AAC_D_CMD, ("\n%s: another command",
 					sc->aac_dev.dv_xname));
@@ -1007,7 +1006,7 @@ aac_bio_command(struct aac_softc *sc, struct aac_command **cmp)
 		opcode = WRITE_COMMAND;
 		break;
 	default:
-		panic("%s: invalid opcode %#x\n", sc->aac_dev.dv_xname,
+		panic("%s: invalid opcode %#x", sc->aac_dev.dv_xname,
 		      xs->cmd->opcode);
 	}
 
@@ -1049,7 +1048,7 @@ aac_bio_command(struct aac_softc *sc, struct aac_command **cmp)
 			br->Flags = 0;
 			fib->Header.Size += sizeof(struct aac_blockread64);
 			cm->cm_flags |= AAC_CMD_DATAOUT;
-			(struct aac_sg_table64 *)cm->cm_sgtable = &br->SgMap64;
+			cm->cm_sgtable = (struct aac_sg_table *)&br->SgMap64;
 		} else {
 			struct aac_blockwrite64 *bw;
 			bw = (struct aac_blockwrite64 *)&fib->data[0];
@@ -1061,7 +1060,7 @@ aac_bio_command(struct aac_softc *sc, struct aac_command **cmp)
 			bw->Flags = 0;
 			fib->Header.Size += sizeof(struct aac_blockwrite64);
 			cm->cm_flags |= AAC_CMD_DATAIN;
-			(struct aac_sg_table64 *)cm->cm_sgtable = &bw->SgMap64;
+			cm->cm_sgtable = (struct aac_sg_table *)&bw->SgMap64;
 		}
 	}
 
@@ -1103,7 +1102,6 @@ aac_bio_complete(struct aac_command *cm)
 
 	xs->error = status == ST_OK? XS_NOERROR : XS_DRIVER_STUFFUP;
 	xs->resid = 0;
-	xs->flags |= ITSDONE;
 	scsi_done(xs);
 	splx(s);
 }
@@ -1213,7 +1211,7 @@ aac_alloc_commands(struct aac_softc *sc)
 
 	/* allocate the FIBs in DMAable memory and load them */
 	if (bus_dmamem_alloc(sc->aac_dmat, AAC_FIBMAP_SIZE, PAGE_SIZE, 0,
-	    &fm->aac_seg, 1, &fm->aac_nsegs, BUS_DMA_NOWAIT)) {
+	    &fm->aac_seg, 1, &fm->aac_nsegs, BUS_DMA_NOWAIT | BUS_DMA_ZERO)) {
 		printf("%s: can't alloc FIBs\n", sc->aac_dev.dv_xname);
 		error = ENOBUFS;
 		goto exit_alloc;
@@ -1242,7 +1240,6 @@ aac_alloc_commands(struct aac_softc *sc)
 
 	/* initialise constant fields in the command structure */
 	AAC_LOCK_ACQUIRE(&sc->aac_io_lock);
-	bzero(fm->aac_fibs, AAC_FIB_COUNT * sizeof(struct aac_fib));
 	for (i = 0; i < AAC_FIB_COUNT; i++) {
 		cm = sc->aac_commands + sc->total_fibs;
 		fm->aac_commands = cm;
@@ -1515,7 +1512,7 @@ aac_init(struct aac_softc *sc)
 	 * of ignored?
 	 */
 	if (bus_dmamem_alloc(sc->aac_dmat, AAC_COMMON_ALLOCSIZE, PAGE_SIZE, 0,
-			     &seg, 1, &nsegs, BUS_DMA_NOWAIT)) {
+			     &seg, 1, &nsegs, BUS_DMA_NOWAIT | BUS_DMA_ZERO)) {
 		printf("%s: can't allocate common structure\n",
 		    sc->aac_dev.dv_xname);
 		return (ENOMEM);
@@ -1550,10 +1547,10 @@ aac_init(struct aac_softc *sc)
 	sc->aac_common_busaddr = sc->aac_common_map->dm_segs[0].ds_addr;
 
 	if (sc->aac_common_busaddr < 8192) {
-		(uint8_t *)sc->aac_common += 8192;
+		sc->aac_common = (struct aac_common *)
+		    ((uint8_t *)sc->aac_common + 8192);
 		sc->aac_common_busaddr += 8192;
 	}
-	bzero(sc->aac_common, sizeof *sc->aac_common);
     
 	/* Allocate some FIBs and associated command structs */
 	TAILQ_INIT(&sc->aac_fibmap_tqh);
@@ -2091,9 +2088,8 @@ aac_command_timeout(struct aac_command *cm)
 		struct scsi_xfer *xs = cm->cm_private;
 		int s = splbio();
 		xs->error = XS_DRIVER_STUFFUP;
-		xs->flags |= ITSDONE;
-		scsi_done(xs);
 		splx(s);
+		scsi_done(xs);
 
 		aac_remove_bio(cm);
 		aac_unmap_command(cm);
@@ -2434,7 +2430,7 @@ aac_internal_cache_cmd(struct scsi_xfer *xs)
 	case REQUEST_SENSE:
 		AAC_DPRINTF(AAC_D_CMD, ("REQUEST SENSE tgt %d ", target));
 		bzero(&sd, sizeof sd);
-		sd.error_code = 0x70;
+		sd.error_code = SSD_ERRCODE_CURRENT;
 		sd.segment = 0;
 		sd.flags = SKEY_NO_SENSE;
 		aac_enc32(sd.info, 0);
@@ -2452,6 +2448,7 @@ aac_internal_cache_cmd(struct scsi_xfer *xs)
 		inq.version = 2;
 		inq.response_format = 2;
 		inq.additional_length = 32;
+		inq.flags |= SID_CmdQue;
 		strlcpy(inq.vendor, "Adaptec", sizeof inq.vendor);
 		snprintf(inq.product, sizeof inq.product, "Container #%02d",
 		    target);
@@ -2481,12 +2478,6 @@ aac_internal_cache_cmd(struct scsi_xfer *xs)
 void
 aacminphys(struct buf *bp, struct scsi_link *sl)
 {
-#if 0
-	u_int8_t *buf = bp->b_data;
-	paddr_t pa;
-	long off;
-#endif
-
 	AAC_DPRINTF(AAC_D_MISC, ("aacminphys(0x%x)\n", bp));
 
 #if 0	/* As this is way more than MAXPHYS it's really not necessary. */
@@ -2494,32 +2485,28 @@ aacminphys(struct buf *bp, struct scsi_link *sl)
 		bp->b_bcount = ((AAC_MAXOFFSETS - 1) * PAGE_SIZE);
 #endif
 
-#if 0
-	for (off = PAGE_SIZE, pa = vtophys(buf); off < bp->b_bcount;
-	    off += PAGE_SIZE)
-		if (pa + off != vtophys(buf + off)) {
-			bp->b_bcount = off;
-			break;
-		}
-#endif
 	minphys(bp);
 }
 
+#if 0
 int
 aac_raw_scsi_cmd(struct scsi_xfer *xs)
 {
 #ifdef AAC_DEBUG
 	struct aac_softc *sc = xs->sc_link->adapter_softc;
 #endif
+	int s;
+
 	AAC_DPRINTF(AAC_D_CMD, ("%s: aac_raw_scsi_cmd\n",
 				sc->aac_dev.dv_xname));
 
 	/* XXX Not yet implemented */
 	xs->error = XS_DRIVER_STUFFUP;
-	return (COMPLETE);
+	scsi_done(xs);
 }
+#endif
 
-int
+void
 aac_scsi_cmd(struct scsi_xfer *xs)
 {
 	struct scsi_link *link = xs->sc_link;
@@ -2529,7 +2516,6 @@ aac_scsi_cmd(struct scsi_xfer *xs)
 	u_int32_t blockno, blockcnt;
 	struct scsi_rw *rw;
 	struct scsi_rw_big *rwb;
-	int retval = SUCCESSFULLY_QUEUED;
 	int s = splbio();
 
 	xs->error = XS_NOERROR;
@@ -2541,10 +2527,9 @@ aac_scsi_cmd(struct scsi_xfer *xs)
 		 * faked sense too.
 		 */
 		xs->error = XS_DRIVER_STUFFUP;
-		xs->flags |= ITSDONE;
 		scsi_done(xs);
 		splx(s);
-		return (COMPLETE);
+		return;
 	}
 
 	AAC_DPRINTF(AAC_D_CMD, ("%s: aac_scsi_cmd: ", sc->aac_dev.dv_xname));
@@ -2564,7 +2549,6 @@ aac_scsi_cmd(struct scsi_xfer *xs)
 	case VERIFY:
 #endif
 		aac_internal_cache_cmd(xs);
-		xs->flags |= ITSDONE;
 		scsi_done(xs);
 		goto ready;
 
@@ -2572,7 +2556,6 @@ aac_scsi_cmd(struct scsi_xfer *xs)
 		AAC_DPRINTF(AAC_D_CMD, ("PREVENT/ALLOW "));
 		/* XXX Not yet implemented */
 		xs->error = XS_NOERROR;
-		xs->flags |= ITSDONE;
 		scsi_done(xs);
 		goto ready;
 
@@ -2580,7 +2563,6 @@ aac_scsi_cmd(struct scsi_xfer *xs)
 		AAC_DPRINTF(AAC_D_CMD, ("SYNCHRONIZE_CACHE "));
 		/* XXX Not yet implemented */
 		xs->error = XS_NOERROR;
-		xs->flags |= ITSDONE;
 		scsi_done(xs);
 		goto ready;
 
@@ -2588,7 +2570,6 @@ aac_scsi_cmd(struct scsi_xfer *xs)
 		AAC_DPRINTF(AAC_D_CMD, ("unknown opc %#x ", xs->cmd->opcode));
 		/* XXX Not yet implemented */
 		xs->error = XS_DRIVER_STUFFUP;
-		xs->flags |= ITSDONE;
 		scsi_done(xs);
 		goto ready;
 
@@ -2625,7 +2606,6 @@ aac_scsi_cmd(struct scsi_xfer *xs)
 			 * sense too.
 			 */
 			xs->error = XS_DRIVER_STUFFUP;
-			xs->flags |= ITSDONE;
 			scsi_done(xs);
 			goto ready;
 		}
@@ -2637,8 +2617,10 @@ aac_scsi_cmd(struct scsi_xfer *xs)
 			 * We are out of commands, try again
 			 * in a little while.
 			 */
+			xs->error = XS_NO_CCB;
+			scsi_done(xs);
 			splx(s);
-			return (NO_CCB);
+			return;
 		}
 
 		/* fill out the command */
@@ -2661,25 +2643,19 @@ aac_scsi_cmd(struct scsi_xfer *xs)
 			{
 				printf("%s: command timed out\n",
 				       sc->aac_dev.dv_xname);
+				xs->error = XS_NO_CCB;
+				scsi_done(xs);
 				splx(s);
-				return (TRY_AGAIN_LATER);
+				return;
 			}
-			xs->flags |= ITSDONE;
 			scsi_done(xs);
 		}
 	}
 
  ready:
-	/*
-	 * Don't process the queue if we are polling.
-	 */
-	if (xs->flags & SCSI_POLL)
-		retval = COMPLETE;
-
 	splx(s);
 	AAC_DPRINTF(AAC_D_CMD, ("%s: scsi_cmd complete\n",
 				sc->aac_dev.dv_xname));
-	return (retval);
 }
 
 /*

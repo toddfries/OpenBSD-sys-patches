@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ix.h,v 1.5 2009/06/04 22:27:31 jsg Exp $	*/
+/*	$OpenBSD: if_ix.h,v 1.11 2010/08/27 08:24:53 deraadt Exp $	*/
 
 /******************************************************************************
 
@@ -116,7 +116,8 @@
 #define HW_DEBUGOUT2(S, A, B)       if (DEBUG_HW) printf(S "\n", A, B)
 
 #define MAX_NUM_MULTICAST_ADDRESSES     128
-#define IXGBE_MAX_SCATTER		100
+#define IXGBE_82598_SCATTER		100
+#define IXGBE_82599_SCATTER		32
 #define IXGBE_MSIX_BAR			3
 #if 0
 #define IXGBE_TSO_SIZE			65535
@@ -151,6 +152,11 @@
 /* Used for auto RX queue configuration */
 extern int mp_ncpus;
 
+struct ixgbe_tx_buf {
+	struct mbuf	*m_head;
+	bus_dmamap_t	map;
+};
+
 struct ixgbe_rx_buf {
 	struct mbuf	*m_head;
 	bus_dmamap_t	 map;
@@ -168,15 +174,6 @@ struct ixgbe_dma_alloc {
 	int			dma_nseg;
 };
 
-struct ix_pkt {
-	TAILQ_ENTRY(ix_pkt)	 pkt_entry;
-	bus_dmamap_t		 pkt_dmamap;
-	struct mbuf		*pkt_mbuf;
-	u_int16_t		 pkt_start_desc;
-};
-
-TAILQ_HEAD(ix_pkt_list, ix_pkt);
-
 /*
  * The transmit ring, one per tx queue
  */
@@ -193,10 +190,7 @@ struct tx_ring {
 	struct ixgbe_dma_alloc	txwbdma;
 	uint32_t		next_avail_tx_desc;
 	uint32_t		next_tx_to_clean;
-	struct mutex		tx_pkt_mtx;
-	u_int			tx_pkt_count;
-	struct ix_pkt_list	tx_free_pkts;
-	struct ix_pkt_list	tx_used_pkts;
+	struct ixgbe_tx_buf	*tx_buffers;
 	volatile uint16_t	tx_avail;
 	uint32_t		txd_cmd;
 	bus_dma_tag_t		txtag;
@@ -243,12 +237,6 @@ struct ix_softc {
 
 	struct ixgbe_hw	hw;
 	struct ixgbe_osdep	 osdep;
-	void			*powerhook;
-	void			*shutdownhook;
-
-	/* general flags */
-	int			 ix_flags;
-#define IX_ALLOC_PKTS_FLAG		0x01
 
 	struct resource	*pci_mem;
 	struct resource	*msix_mem;
@@ -271,6 +259,7 @@ struct ix_softc {
 	struct mutex	core_mtx;
 
 	/* Legacy Fast Intr handling */
+	int		sfp_probe;
 	workq_fn	link_task;
 
 	/* Info about the board itself */

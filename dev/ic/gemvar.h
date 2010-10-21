@@ -1,4 +1,4 @@
-/*	$OpenBSD: gemvar.h,v 1.21 2009/03/22 21:46:31 kettenis Exp $	*/
+/*	$OpenBSD: gemvar.h,v 1.26 2010/09/20 07:40:41 deraadt Exp $	*/
 /*	$NetBSD: gemvar.h,v 1.1 2001/09/16 00:11:43 eeh Exp $ */
 
 /*
@@ -155,9 +155,6 @@ struct gem_softc {
 #define	GEM_GIGABIT		0x0001	/* has a gigabit PHY */
 
 
-	void *sc_sdhook;		/* shutdown hook */
-	void *sc_powerhook;		/* power management hook */
-
 	struct gem_stats sc_stats;	/* debugging stats */
 
 	/*
@@ -201,7 +198,6 @@ struct gem_softc {
 	/* ========== */
 	int			sc_inited;
 	int			sc_debug;
-	void			*sc_sh;		/* shutdownhook cookie */
 
 	/* Special hardware hooks */
 	void	(*sc_hwreset)(struct gem_softc *);
@@ -277,7 +273,7 @@ do {									\
 
 #ifdef _KERNEL
 void	gem_attach(struct gem_softc *, const u_int8_t *);
-int	gem_activate(struct device *, enum devact);
+int	gem_activate(struct device *, int);
 int	gem_detach(struct gem_softc *);
 int	gem_intr(void *);
 int	gem_read_srom(struct gem_softc *);
@@ -290,6 +286,7 @@ int	gem_mediachange(struct ifnet *);
 void	gem_mediastatus(struct ifnet *, struct ifmediareq *);
 
 void	gem_config(struct gem_softc *);
+void	gem_unconfig(struct gem_softc *);
 void	gem_reset(struct gem_softc *);
 int	gem_intr(void *);
 #endif /* _KERNEL */

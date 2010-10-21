@@ -1,4 +1,4 @@
-/* $OpenBSD: pckbd.c,v 1.17 2009/05/03 13:02:35 miod Exp $ */
+/* $OpenBSD: pckbd.c,v 1.28 2010/08/28 12:49:57 miod Exp $ */
 /* $NetBSD: pckbd.c,v 1.24 2000/06/05 22:20:57 sommerfeld Exp $ */
 
 /*-
@@ -125,7 +125,11 @@ int pckbdprobe(struct device *, void *, void *);
 void pckbdattach(struct device *, struct device *, void *);
 
 struct cfattach pckbd_ca = {
-	sizeof(struct pckbd_softc), pckbdprobe, pckbdattach,
+	sizeof(struct pckbd_softc), 
+	pckbdprobe, 
+	pckbdattach, 
+	NULL, 
+	NULL
 };
 
 int	pckbd_enable(void *, int);
@@ -325,6 +329,19 @@ pckbdprobe(parent, match, aux)
 		 * Let the probe succeed if the keyboard is used
 		 * as console input - it can be connected later.
 		 */
+#if defined(__i386__) || defined(__amd64__)
+		/*
+		 * However, on legacy-free PCs, there might really
+		 * be no PS/2 connector at all; in that case, do not
+		 * even try to attach; ukbd will take over as console.
+		 */
+		if (res == ENXIO) {
+			/* check cf_flags from parent */
+			struct cfdata *cf = parent->dv_cfdata;
+			if (!ISSET(cf->cf_flags, PCKBCF_FORCE_KEYBOARD_PRESENT))
+				return 0;
+		}
+#endif
 		return (pckbd_is_console(pa->pa_tag, pa->pa_slot) ? 1 : 0);
 	}
 	if (resp[0] != KBR_RSTDONE) {
@@ -396,7 +413,6 @@ pckbdattach(parent, self, aux)
 
 	/*
 	 * Attach the wskbd, saving a handle to it.
-	 * XXX XXX XXX
 	 */
 	sc->sc_wskbddev = config_found(self, &a, wskbddevprint);
 }
@@ -753,7 +769,7 @@ pckbd_scancode_translate(struct pckbd_internal *id, int datain)
 	if (id->t_extended1 == 2 && datain == 0x14)
 		return 0x1d | id->t_releasing;
 	else if (id->t_extended1 == 1 && datain == 0x77)
-		return 0x77 | id->t_releasing;
+		return 0x45 | id->t_releasing;
 
 	if (id->t_extended != 0) {
 		if (datain >= sizeof pckbd_xtbl_ext)
@@ -832,7 +848,7 @@ pckbd_decode(id, datain, type, dataout)
 	} else {
 		/* Always ignore typematic keys */
 		if (key == id->t_lastchar)
-			return(0);
+			return 0;
 		id->t_lastchar = key;
 		*type = WSCONS_EVENT_KEY_DOWN;
 	}

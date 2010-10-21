@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_syscalls.c,v 1.155 2009/06/04 00:24:02 blambert Exp $	*/
+/*	$OpenBSD: vfs_syscalls.c,v 1.163 2010/07/01 22:03:32 krw Exp $	*/
 /*	$NetBSD: vfs_syscalls.c,v 1.71 1996/04/23 10:29:02 mycroft Exp $	*/
 
 /*
@@ -87,15 +87,13 @@ sys_mount(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 	struct vnode *vp;
 	struct mount *mp;
-	int error, flag = 0;
-#ifdef COMPAT_43
-	u_long fstypenum = 0;
-#endif
+	int error, mntflag = 0;
 	char fstypename[MFSNAMELEN];
 	char fspath[MNAMELEN];
 	struct vattr va;
 	struct nameidata nd;
 	struct vfsconf *vfsp;
+	int flags = SCARG(uap, flags);
 
 	if (usermount == 0 && (error = suser(p, 0)))
 		return (error);
@@ -114,18 +112,18 @@ sys_mount(struct proc *p, void *v, register_t *retval)
 	if ((error = namei(&nd)) != 0)
 		return (error);
 	vp = nd.ni_vp;
-	if (SCARG(uap, flags) & MNT_UPDATE) {
+	if (flags & MNT_UPDATE) {
 		if ((vp->v_flag & VROOT) == 0) {
 			vput(vp);
 			return (EINVAL);
 		}
 		mp = vp->v_mount;
-		flag = mp->mnt_flag;
+		mntflag = mp->mnt_flag;
 		/*
 		 * We only allow the filesystem to be reloaded if it
 		 * is currently mounted read-only.
 		 */
-		if ((SCARG(uap, flags) & MNT_RELOAD) &&
+		if ((flags & MNT_RELOAD) &&
 		    ((mp->mnt_flag & MNT_RDONLY) == 0)) {
 			vput(vp);
 			return (EOPNOTSUPP);	/* Needs translation */
@@ -145,20 +143,20 @@ sys_mount(struct proc *p, void *v, register_t *retval)
 		 * enforce MNT_NOSUID and MNT_NODEV for non-root users, and
 		 * inherit MNT_NOEXEC from the mount point.
 		 */
-		if (p->p_ucred->cr_uid != 0) {
-			if (SCARG(uap, flags) & MNT_EXPORTED) {
+		if (suser(p, 0) != 0) {
+			if (flags & MNT_EXPORTED) {
 				vput(vp);
 				return (EPERM);
 			}
-			SCARG(uap, flags) |= MNT_NOSUID | MNT_NODEV;
-			if (flag & MNT_NOEXEC)
-				SCARG(uap, flags) |= MNT_NOEXEC;
+			flags |= MNT_NOSUID | MNT_NODEV;
+			if (mntflag & MNT_NOEXEC)
+				flags |= MNT_NOEXEC;
 		}
 		if ((error = vfs_busy(mp, VB_READ|VB_NOWAIT)) != 0) {
 			vput(vp);
 			return (error);
 		}
-		mp->mnt_flag |= SCARG(uap, flags) & (MNT_RELOAD | MNT_UPDATE);
+		mp->mnt_flag |= flags & (MNT_RELOAD | MNT_UPDATE);
 		goto update;
 	}
 	/*
@@ -176,14 +174,14 @@ sys_mount(struct proc *p, void *v, register_t *retval)
 	 * enforce MNT_NOSUID and MNT_NODEV for non-root users, and inherit
 	 * MNT_NOEXEC from the mount point.
 	 */
-	if (p->p_ucred->cr_uid != 0) {
-		if (SCARG(uap, flags) & MNT_EXPORTED) {
+	if (suser(p, 0) != 0) {
+		if (flags & MNT_EXPORTED) {
 			vput(vp);
 			return (EPERM);
 		}
-		SCARG(uap, flags) |= MNT_NOSUID | MNT_NODEV;
+		flags |= MNT_NOSUID | MNT_NODEV;
 		if (vp->v_mount->mnt_flag & MNT_NOEXEC)
-			SCARG(uap, flags) |= MNT_NOEXEC;
+			flags |= MNT_NOEXEC;
 	}
 	if ((error = vinvalbuf(vp, V_SAVE, p->p_ucred, p, 0, 0)) != 0) {
 		vput(vp);
@@ -195,28 +193,8 @@ sys_mount(struct proc *p, void *v, register_t *retval)
 	}
 	error = copyinstr(SCARG(uap, type), fstypename, MFSNAMELEN, NULL);
 	if (error) {
-#ifdef COMPAT_43
-		/*
-		 * Historically filesystem types were identified by number.
-		 * If we get an integer for the filesystem type instead of a
-		 * string, we check to see if it matches one of the historic
-		 * filesystem types.
-		 */
-		fstypenum = (u_long)SCARG(uap, type);
-
-		for (vfsp = vfsconf; vfsp; vfsp = vfsp->vfc_next)
-			if (vfsp->vfc_typenum == fstypenum)
-				break;
-		if (vfsp == NULL) {
-			vput(vp);
-			return (ENODEV);
-		}
-		strncpy(fstypename, vfsp->vfc_name, MFSNAMELEN);
-
-#else
 		vput(vp);
 		return (error);
-#endif
 	}
 	for (vfsp = vfsconf; vfsp; vfsp = vfsp->vfc_next) {
 		if (!strcmp(vfsp->vfc_name, fstypename))
@@ -249,14 +227,14 @@ update:
 	/*
 	 * Set the mount level flags.
 	 */
-	if (SCARG(uap, flags) & MNT_RDONLY)
+	if (flags & MNT_RDONLY)
 		mp->mnt_flag |= MNT_RDONLY;
 	else if (mp->mnt_flag & MNT_RDONLY)
 		mp->mnt_flag |= MNT_WANTRDWR;
 	mp->mnt_flag &=~ (MNT_NOSUID | MNT_NOEXEC | MNT_NODEV |
 	    MNT_SYNCHRONOUS | MNT_ASYNC | MNT_SOFTDEP | MNT_NOATIME |
 	    MNT_FORCE);
-	mp->mnt_flag |= SCARG(uap, flags) & (MNT_NOSUID | MNT_NOEXEC |
+	mp->mnt_flag |= flags & (MNT_NOSUID | MNT_NOEXEC |
 	    MNT_NODEV | MNT_SYNCHRONOUS | MNT_ASYNC | MNT_SOFTDEP |
 	    MNT_NOATIME | MNT_FORCE);
 	/*
@@ -273,7 +251,7 @@ update:
 		mp->mnt_flag &=~
 		    (MNT_UPDATE | MNT_RELOAD | MNT_FORCE | MNT_WANTRDWR);
 		if (error)
-			mp->mnt_flag = flag;
+			mp->mnt_flag = mntflag;
 
  		if ((mp->mnt_flag & MNT_RDONLY) == 0) {
  			if (mp->mnt_syncer == NULL)
@@ -306,7 +284,7 @@ update:
 		if ((error = VFS_START(mp, 0, p)) != 0)
 			vrele(vp);
 	} else {
-		mp->mnt_vnodecovered->v_mountedhere = (struct mount *)0;
+		mp->mnt_vnodecovered->v_mountedhere = NULL;
 		vfs_unbusy(mp);
 		free(mp, M_MOUNT);
 		vput(vp);
@@ -335,14 +313,14 @@ again:
 		fdp = p->p_fd;
 		if (fdp->fd_cdir == olddp) {
 			vp = fdp->fd_cdir;
-			VREF(newdp);
+			vref(newdp);
 			fdp->fd_cdir = newdp;
 			if (vrele(vp))
 				goto again;
 		}
 		if (fdp->fd_rdir == olddp) {
 			vp = fdp->fd_rdir;
-			VREF(newdp);
+			vref(newdp);
 			fdp->fd_rdir = newdp;
 			if (vrele(vp))
 				goto again;
@@ -350,7 +328,7 @@ again:
 	}
 	if (rootvnode == olddp) {
 		vrele(rootvnode);
-		VREF(newdp);
+		vref(newdp);
 		rootvnode = newdp;
 	}
 	vput(newdp);
@@ -698,7 +676,7 @@ sys_fchdir(struct proc *p, void *v, register_t *retval)
 	if ((error = getvnode(fdp, SCARG(uap, fd), &fp)) != 0)
 		return (error);
 	vp = (struct vnode *)fp->f_data;
-	VREF(vp);
+	vref(vp);
 	FRELE(fp);
 	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
 	if (vp->v_type != VDIR)
@@ -776,7 +754,7 @@ sys_chroot(struct proc *p, void *v, register_t *retval)
 		 */
 		vrele(fdp->fd_rdir);
 		vrele(fdp->fd_cdir);
-		VREF(nd.ni_vp);
+		vref(nd.ni_vp);
 		fdp->fd_cdir = nd.ni_vp;
 	}
 	fdp->fd_rdir = nd.ni_vp;
@@ -1018,8 +996,8 @@ sys_fhopen(struct proc *p, void *v, register_t *retval)
 			error = EISDIR;
 			goto bad;
 		}
-		if ((error = vn_writechk(vp)) != 0 ||
-		    (error = VOP_ACCESS(vp, VWRITE, cred, p)) != 0)
+		if ((error = VOP_ACCESS(vp, VWRITE, cred, p)) != 0 ||
+		    (error = vn_writechk(vp)) != 0)
 			goto bad;
 	}
 	if (flags & O_TRUNC) {
@@ -1116,7 +1094,7 @@ sys_fhstat(struct proc *p, void *v, register_t *retval)
 int
 sys_fhstatfs(struct proc *p, void *v, register_t *retval)
 {
-	struct sys_fhstatfs_args /*
+	struct sys_fhstatfs_args /* {
 		syscallarg(const fhandle_t *) fhp;
 		syscallarg(struct statfs *) buf;
 	} */ *uap = v;
@@ -1145,7 +1123,7 @@ sys_fhstatfs(struct proc *p, void *v, register_t *retval)
 	if ((error = VFS_STATFS(mp, sp, p)) != 0)
 		return (error);
 	sp->f_flags = mp->mnt_flag & MNT_VISFLAGMASK;
-	return (copyout(sp, SCARG(uap, buf), sizeof(sp)));
+	return (copyout(sp, SCARG(uap, buf), sizeof(*sp)));
 }
 
 /*
@@ -1458,8 +1436,9 @@ sys_access(struct proc *p, void *v, register_t *retval)
 	struct vnode *vp;
 	int error, flags, t_gid, t_uid;
 	struct nameidata nd;
+	int userflags = SCARG(uap, flags);
 
-	if (SCARG(uap, flags) & ~(R_OK | W_OK | X_OK))
+	if (userflags & ~(R_OK | W_OK | X_OK))
 		return (EINVAL);
 	t_uid = cred->cr_uid;
 	t_gid = cred->cr_gid;
@@ -1472,16 +1451,18 @@ sys_access(struct proc *p, void *v, register_t *retval)
 	vp = nd.ni_vp;
 
 	/* Flags == 0 means only check for existence. */
-	if (SCARG(uap, flags)) {
+	if (userflags) {
 		flags = 0;
-		if (SCARG(uap, flags) & R_OK)
+		if (userflags & R_OK)
 			flags |= VREAD;
-		if (SCARG(uap, flags) & W_OK)
+		if (userflags & W_OK)
 			flags |= VWRITE;
-		if (SCARG(uap, flags) & X_OK)
+		if (userflags & X_OK)
 			flags |= VEXEC;
-		if ((flags & VWRITE) == 0 || (error = vn_writechk(vp)) == 0)
-			error = VOP_ACCESS(vp, flags, cred, p);
+
+		error = VOP_ACCESS(vp, flags, cred, p);
+		if (!error && (flags & VWRITE))
+			error = vn_writechk(vp);
 	}
 	vput(vp);
 out1:
@@ -1590,6 +1571,7 @@ sys_readlink(struct proc *p, void *v, register_t *retval)
 	struct uio auio;
 	int error;
 	struct nameidata nd;
+	size_t count = SCARG(uap, count);
 
 	NDINIT(&nd, LOOKUP, NOFOLLOW | LOCKLEAF, UIO_USERSPACE,
 	    SCARG(uap, path), p);
@@ -1600,18 +1582,18 @@ sys_readlink(struct proc *p, void *v, register_t *retval)
 		error = EINVAL;
 	else {
 		aiov.iov_base = SCARG(uap, buf);
-		aiov.iov_len = SCARG(uap, count);
+		aiov.iov_len = count;
 		auio.uio_iov = &aiov;
 		auio.uio_iovcnt = 1;
 		auio.uio_offset = 0;
 		auio.uio_rw = UIO_READ;
 		auio.uio_segflg = UIO_USERSPACE;
 		auio.uio_procp = p;
-		auio.uio_resid = SCARG(uap, count);
+		auio.uio_resid = count;
 		error = VOP_READLINK(vp, &auio, p->p_ucred);
 	}
 	vput(vp);
-	*retval = SCARG(uap, count) - auio.uio_resid;
+	*retval = count - auio.uio_resid;
 	return (error);
 }
 
@@ -1630,6 +1612,7 @@ sys_chflags(struct proc *p, void *v, register_t *retval)
 	struct vattr vattr;
 	int error;
 	struct nameidata nd;
+	u_int flags = SCARG(uap, flags);
 
 	NDINIT(&nd, LOOKUP, FOLLOW, UIO_USERSPACE, SCARG(uap, path), p);
 	if ((error = namei(&nd)) != 0)
@@ -1638,7 +1621,7 @@ sys_chflags(struct proc *p, void *v, register_t *retval)
 	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
 	if (vp->v_mount->mnt_flag & MNT_RDONLY)
 		error = EROFS;
-	else if (SCARG(uap, flags) == VNOVAL)
+	else if (flags == VNOVAL)
 		error = EINVAL;
 	else {
 		if (suser(p, 0)) {
@@ -1650,7 +1633,7 @@ sys_chflags(struct proc *p, void *v, register_t *retval)
 			}
 		}
 		VATTR_NULL(&vattr);
-		vattr.va_flags = SCARG(uap, flags);
+		vattr.va_flags = flags;
 		error = VOP_SETATTR(vp, &vattr, p->p_ucred, p);
 	}
 out:
@@ -1673,6 +1656,7 @@ sys_fchflags(struct proc *p, void *v, register_t *retval)
 	struct vnode *vp;
 	struct file *fp;
 	int error;
+	u_int flags = SCARG(uap, flags);
 
 	if ((error = getvnode(p->p_fd, SCARG(uap, fd), &fp)) != 0)
 		return (error);
@@ -1680,7 +1664,7 @@ sys_fchflags(struct proc *p, void *v, register_t *retval)
 	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
 	if (vp->v_mount && vp->v_mount->mnt_flag & MNT_RDONLY)
 		error = EROFS;
-	else if (SCARG(uap, flags) == VNOVAL)
+	else if (flags == VNOVAL)
 		error = EINVAL;
 	else {
 		if (suser(p, 0)) {
@@ -1693,7 +1677,7 @@ sys_fchflags(struct proc *p, void *v, register_t *retval)
 			}
 		}
 		VATTR_NULL(&vattr);
-		vattr.va_flags = SCARG(uap, flags);
+		vattr.va_flags = flags;
 		error = VOP_SETATTR(vp, &vattr, p->p_ucred, p);
 	}
 out:
@@ -1789,6 +1773,8 @@ sys_chown(struct proc *p, void *v, register_t *retval)
 	int error;
 	struct nameidata nd;
 	mode_t mode;
+	uid_t uid = SCARG(uap, uid);
+	gid_t gid = SCARG(uap, gid);
 
 	NDINIT(&nd, LOOKUP, FOLLOW, UIO_USERSPACE, SCARG(uap, path), p);
 	if ((error = namei(&nd)) != 0)
@@ -1798,7 +1784,7 @@ sys_chown(struct proc *p, void *v, register_t *retval)
 	if (vp->v_mount->mnt_flag & MNT_RDONLY)
 		error = EROFS;
 	else {
-		if ((SCARG(uap, uid) != -1 || SCARG(uap, gid) != -1) &&
+		if ((uid != -1 || gid != -1) &&
 		    (suser(p, 0) || suid_clear)) {
 			error = VOP_GETATTR(vp, &vattr, p->p_ucred, p);
 			if (error)
@@ -1810,8 +1796,8 @@ sys_chown(struct proc *p, void *v, register_t *retval)
 		else
 			mode = VNOVAL;
 		VATTR_NULL(&vattr);
-		vattr.va_uid = SCARG(uap, uid);
-		vattr.va_gid = SCARG(uap, gid);
+		vattr.va_uid = uid;
+		vattr.va_gid = gid;
 		vattr.va_mode = mode;
 		error = VOP_SETATTR(vp, &vattr, p->p_ucred, p);
 	}
@@ -1837,6 +1823,8 @@ sys_lchown(struct proc *p, void *v, register_t *retval)
 	int error;
 	struct nameidata nd;
 	mode_t mode;
+	uid_t uid = SCARG(uap, uid);
+	gid_t gid = SCARG(uap, gid);
 
 	NDINIT(&nd, LOOKUP, NOFOLLOW, UIO_USERSPACE, SCARG(uap, path), p);
 	if ((error = namei(&nd)) != 0)
@@ -1846,7 +1834,7 @@ sys_lchown(struct proc *p, void *v, register_t *retval)
 	if (vp->v_mount->mnt_flag & MNT_RDONLY)
 		error = EROFS;
 	else {
-		if ((SCARG(uap, uid) != -1 || SCARG(uap, gid) != -1) &&
+		if ((uid != -1 || gid != -1) &&
 		    (suser(p, 0) || suid_clear)) {
 			error = VOP_GETATTR(vp, &vattr, p->p_ucred, p);
 			if (error)
@@ -1858,8 +1846,8 @@ sys_lchown(struct proc *p, void *v, register_t *retval)
 		else
 			mode = VNOVAL;
 		VATTR_NULL(&vattr);
-		vattr.va_uid = SCARG(uap, uid);
-		vattr.va_gid = SCARG(uap, gid);
+		vattr.va_uid = uid;
+		vattr.va_gid = gid;
 		vattr.va_mode = mode;
 		error = VOP_SETATTR(vp, &vattr, p->p_ucred, p);
 	}
@@ -1885,6 +1873,8 @@ sys_fchown(struct proc *p, void *v, register_t *retval)
 	int error;
 	struct file *fp;
 	mode_t mode;
+	uid_t uid = SCARG(uap, uid);
+	gid_t gid = SCARG(uap, gid);
 
 	if ((error = getvnode(p->p_fd, SCARG(uap, fd), &fp)) != 0)
 		return (error);
@@ -1893,7 +1883,7 @@ sys_fchown(struct proc *p, void *v, register_t *retval)
 	if (vp->v_mount->mnt_flag & MNT_RDONLY)
 		error = EROFS;
 	else {
-		if ((SCARG(uap, uid) != -1 || SCARG(uap, gid) != -1) &&
+		if ((uid != -1 || gid != -1) &&
 		    (suser(p, 0) || suid_clear)) {
 			error = VOP_GETATTR(vp, &vattr, p->p_ucred, p);
 			if (error)
@@ -1904,8 +1894,8 @@ sys_fchown(struct proc *p, void *v, register_t *retval)
 		} else
 			mode = VNOVAL;
 		VATTR_NULL(&vattr);
-		vattr.va_uid = SCARG(uap, uid);
-		vattr.va_gid = SCARG(uap, gid);
+		vattr.va_uid = uid;
+		vattr.va_gid = gid;
 		vattr.va_mode = mode;
 		error = VOP_SETATTR(vp, &vattr, p->p_ucred, p);
 	}
@@ -2041,8 +2031,8 @@ sys_truncate(struct proc *p, void *v, register_t *retval)
 	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
 	if (vp->v_type == VDIR)
 		error = EISDIR;
-	else if ((error = vn_writechk(vp)) == 0 &&
-	    (error = VOP_ACCESS(vp, VWRITE, p->p_ucred, p)) == 0) {
+	else if ((error = VOP_ACCESS(vp, VWRITE, p->p_ucred, p)) == 0 &&
+	    (error = vn_writechk(vp)) == 0) {
 		VATTR_NULL(&vattr);
 		vattr.va_size = SCARG(uap, length);
 		error = VOP_SETATTR(vp, &vattr, p->p_ucred, p);
@@ -2320,6 +2310,10 @@ sys_getdirentries(struct proc *p, void *v, register_t *retval)
 		return (error);
 	if ((fp->f_flag & FREAD) == 0) {
 		error = EBADF;
+		goto bad;
+	}
+	if ((fp->f_offset < 0) || (fp->f_offset > LONG_MAX)) {
+		error = EINVAL;
 		goto bad;
 	}
 	vp = (struct vnode *)fp->f_data;

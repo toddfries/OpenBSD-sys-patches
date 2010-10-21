@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.51 2009/06/03 14:45:53 jj Exp $	*/
+/*	$OpenBSD: conf.c,v 1.58 2010/10/08 18:21:34 ratchov Exp $	*/
 /*	$NetBSD: conf.c,v 1.17 2001/03/26 12:33:26 lukem Exp $ */
 
 /*
@@ -55,12 +55,12 @@
 #include "pty.h"
 #include "bpfilter.h"
 #include "tun.h"
+#include "midi.h"
 #include "audio.h"
 #include "video.h"
 #include "vnd.h"
 #include "ccd.h"
 #include "ch.h"
-#include "ss.h"
 #include "sd.h"
 #include "st.h"
 #include "cd.h"
@@ -106,6 +106,8 @@ cdev_decl(pci);
 #include "ucom.h"
 #include "uscanner.h"
 
+#include "bthub.h"
+
 #include "pf.h"
 
 #ifdef NNPFS
@@ -118,6 +120,8 @@ cdev_decl(nnpfs_dev);
 
 #include "systrace.h"
 #include "hotplug.h"
+#include "vscsi.h"
+#include "pppx.h"
 
 struct bdevsw	bdevsw[] =
 {
@@ -219,7 +223,7 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 56 */
 	cdev_notdef(),			/* 57 */
 	cdev_disk_init(NCD,cd),		/* 58: SCSI CD-ROM */
-	cdev_scanner_init(NSS,ss),	/* 59: SCSI scanner */
+	cdev_notdef(),			/* 59 */
 	cdev_uk_init(NUK,uk),		/* 60: SCSI unknown */
 	cdev_disk_init(NRD,rd),		/* 61: memory disk */
 	cdev_notdef(),			/* 62 */
@@ -228,7 +232,7 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 65 */
 	cdev_notdef(),			/* 66 */
 	cdev_notdef(),			/* 67 */
-	cdev_notdef(),			/* 68 */
+	cdev_midi_init(NMIDI,midi),	/* 68: /dev/rmidi */
 	cdev_audio_init(NAUDIO,audio),	/* 69: /dev/audio */
 	cdev_openprom_init(1,openprom),	/* 70: /dev/openprom */
 	cdev_tty_init(NMTTY,mtty),	/* 71: magma serial ports */
@@ -288,7 +292,11 @@ struct cdevsw	cdevsw[] =
 	cdev_hotplug_init(NHOTPLUG,hotplug), /* 124: devices hot plugging */
 	cdev_tty_init(NVCONS,vcons),	/* 125: virtual console */
 	cdev_tty_init(NSBBC,sbbc),	/* 126: SBBC console */
-	cdev_tty_init(NVCCTTY,vcctty)	/* 127: virtual console concentrator */
+	cdev_tty_init(NVCCTTY,vcctty),	/* 127: virtual console concentrator */
+	cdev_vscsi_init(NVSCSI,vscsi),	/* 128: vscsi */
+	cdev_bthub_init(NBTHUB,bthub),	/* 129: bluetooth hub */
+	cdev_disk_init(1,diskmap),	/* 130: disk mapper */
+	cdev_pppx_init(NPPPX,pppx),	/* 131: pppx */
 };
 int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
 

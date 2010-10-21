@@ -1,4 +1,4 @@
-/*	$OpenBSD: cmpci.c,v 1.24 2009/05/06 23:13:29 jakemsr Exp $	*/
+/*	$OpenBSD: cmpci.c,v 1.30 2010/10/09 09:11:13 jakemsr Exp $	*/
 /*	$NetBSD: cmpci.c,v 1.25 2004/10/26 06:32:20 xtraeme Exp $	*/
 
 /*
@@ -54,7 +54,6 @@ int cmpcidebug = 0;
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/device.h>
-#include <sys/proc.h>
 
 #include <dev/pci/pcidevs.h>
 #include <dev/pci/pcivar.h>
@@ -96,18 +95,22 @@ void cmpci_set_mixer_gain(struct cmpci_softc *, int);
 void cmpci_set_out_ports(struct cmpci_softc *);
 int cmpci_set_in_ports(struct cmpci_softc *);
 
+int cmpci_resume(struct cmpci_softc *);
+
 /*
  * autoconf interface
  */
 int cmpci_match(struct device *, void *, void *);
 void cmpci_attach(struct device *, struct device *, void *);
+int cmpci_activate(struct device *, int);
 
 struct cfdriver cmpci_cd = {
 	NULL, "cmpci", DV_DULL
 };
 
 struct cfattach cmpci_ca = {
-	sizeof (struct cmpci_softc), cmpci_match, cmpci_attach
+	sizeof (struct cmpci_softc), cmpci_match, cmpci_attach, NULL,
+	cmpci_activate
 };
 
 /* interrupt */
@@ -517,10 +520,48 @@ cmpci_attach(struct device *parent, struct device *self, void *aux)
 }
 
 int
+cmpci_activate(struct device *self, int act)
+{
+	struct cmpci_softc *sc = (struct cmpci_softc *)self;
+	int rv = 0;
+
+	switch (act) {
+	case DVACT_ACTIVATE:
+		break;
+	case DVACT_QUIESCE:
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_SUSPEND:
+		break;
+	case DVACT_RESUME:
+		cmpci_resume(sc);
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_DEACTIVATE:
+		break;
+	}
+	return (rv);
+}
+
+int
+cmpci_resume(struct cmpci_softc *sc)
+{
+	int i;
+
+	cmpci_mixerreg_write(sc, CMPCI_SB16_MIXER_RESET, 0);
+	for (i = 0; i < CMPCI_NDEVS; i++)
+		cmpci_set_mixer_gain(sc, i);
+
+	return 0;
+}
+
+int
 cmpci_intr(void *handle)
 {
 	struct cmpci_softc *sc = handle;
+	struct cmpci_channel *chan;
 	uint32_t intrstat;
+	uint16_t hwpos;
 
 	intrstat = bus_space_read_4(sc->sc_iot, sc->sc_ioh,
 	    CMPCI_REG_INTR_STATUS);
@@ -539,12 +580,42 @@ cmpci_intr(void *handle)
 		    CMPCI_REG_CH1_INTR_ENABLE);
 
 	if (intrstat & CMPCI_REG_CH0_INTR) {
-		if (sc->sc_ch0.intr != NULL)
-			(*sc->sc_ch0.intr)(sc->sc_ch0.intr_arg);
+		chan = &sc->sc_ch0;
+		if (chan->intr != NULL) {
+			hwpos = bus_space_read_2(sc->sc_iot, sc->sc_ioh,
+			    CMPCI_REG_DMA0_BYTES);
+			hwpos = hwpos * chan->bps / chan->blksize;
+			hwpos = chan->nblocks - hwpos - 1;
+			while (chan->swpos != hwpos) {
+				(*chan->intr)(chan->intr_arg);
+				chan->swpos++;
+				if (chan->swpos >= chan->nblocks)
+					chan->swpos = 0;
+				if (chan->swpos != hwpos) {
+					DPRINTF(("%s: DMA0 hwpos=%d swpos=%d\n",
+					    __func__, hwpos, chan->swpos));
+				}
+			}
+		}
 	}
 	if (intrstat & CMPCI_REG_CH1_INTR) {
-		if (sc->sc_ch1.intr != NULL)
-			(*sc->sc_ch1.intr)(sc->sc_ch1.intr_arg);
+		chan = &sc->sc_ch1;
+		if (chan->intr != NULL) {
+			hwpos = bus_space_read_2(sc->sc_iot, sc->sc_ioh,
+			    CMPCI_REG_DMA1_BYTES);
+			hwpos = hwpos * chan->bps / chan->blksize;
+			hwpos = chan->nblocks - hwpos - 1;
+			while (chan->swpos != hwpos) {
+				(*chan->intr)(chan->intr_arg);
+				chan->swpos++;
+				if (chan->swpos >= chan->nblocks)
+					chan->swpos = 0;
+				if (chan->swpos != hwpos) {
+					DPRINTF(("%s: DMA1 hwpos=%d swpos=%d\n",
+					    __func__, hwpos, chan->swpos));
+				}
+			}
+		}
 	}
 
 	/* enable intr */
@@ -630,6 +701,9 @@ cmpci_query_encoding(void *handle, struct audio_encoding *fp)
 	default:
 		return EINVAL;
 	}
+	fp->bps = AUDIO_BPS(fp->precision);
+	fp->msb = 1;
+
 	return 0;
 }
 
@@ -639,6 +713,8 @@ cmpci_get_default_params(void *addr, int mode, struct audio_params *params)
 	params->sample_rate = 48000;
 	params->encoding = AUDIO_ENCODING_SLINEAR_LE;
 	params->precision = 16;
+	params->bps = 2;
+	params->msb = 1;
 	params->channels = 2;
 	params->sw_code = NULL;
 	params->factor = 1;
@@ -859,6 +935,8 @@ cmpci_set_params(void *handle, int setmode, int usemode,
 		default:
 			return (EINVAL);
 		}
+		p->bps = AUDIO_BPS(p->precision);
+		p->msb = 1;
 		if (mode & AUMODE_PLAY) {
 			if (sc->sc_play_channel == 1) {
 				cmpci_reg_partial_write_4(sc,
@@ -1923,7 +2001,7 @@ cmpci_trigger_output(void *handle, void *start, void *end, int blksize,
 	uint32_t reg_dma_base, reg_dma_bytes, reg_dma_samples, reg_dir,
 	    reg_intr_enable, reg_enable;
 	uint32_t length;
-	int bps;
+	size_t buffer_size = (caddr_t)end - (caddr_t)start;
 
 	cmpci_set_out_ports(sc);
 
@@ -1945,12 +2023,15 @@ cmpci_trigger_output(void *handle, void *start, void *end, int blksize,
 		reg_enable = CMPCI_REG_CH0_ENABLE;
 	}
 
+	chan->bps = (param->channels > 1 ? 2 : 1) * param->bps * param->factor;
+	if (!chan->bps)
+		return EINVAL;
+
 	chan->intr = intr;
 	chan->intr_arg = arg;
-	bps = (param->channels > 1 ? 2 : 1) * param->precision *
-	    param->factor / 8;
-	if (!bps)
-		return EINVAL;
+	chan->blksize = blksize;
+	chan->nblocks = buffer_size / chan->blksize;
+	chan->swpos = 0;
 
 	/* set DMA frame */
 	if (!(p = cmpci_find_dmamem(sc, start)))
@@ -1958,12 +2039,12 @@ cmpci_trigger_output(void *handle, void *start, void *end, int blksize,
 	bus_space_write_4(sc->sc_iot, sc->sc_ioh, reg_dma_base,
 	    DMAADDR(p));
 	delay(10);
-	length = ((caddr_t)end - (caddr_t)start + 1) / bps - 1;
+	length = (buffer_size + 1) / chan->bps - 1;
 	bus_space_write_2(sc->sc_iot, sc->sc_ioh, reg_dma_bytes, length);
 	delay(10);
 
 	/* set interrupt count */
-	length = (blksize + bps - 1) / bps - 1;
+	length = (chan->blksize + chan->bps - 1) / chan->bps - 1;
 	bus_space_write_2(sc->sc_iot, sc->sc_ioh, reg_dma_samples, length);
 	delay(10);
 
@@ -1981,15 +2062,20 @@ cmpci_trigger_input(void *handle, void *start, void *end, int blksize,
 {
 	struct cmpci_softc *sc = handle;
 	struct cmpci_dmanode *p;
-	int bps;
+	struct cmpci_channel *chan = &sc->sc_ch1;
+	size_t buffer_size = (caddr_t)end - (caddr_t)start;
 
 	cmpci_set_in_ports(sc);
 
-	sc->sc_ch1.intr = intr;
-	sc->sc_ch1.intr_arg = arg;
-	bps = param->channels*param->precision*param->factor/8;
-	if (!bps)
+	chan->bps = param->channels * param->bps * param->factor;
+	if (!chan->bps)
 		return EINVAL;
+
+	chan->intr = intr;
+	chan->intr_arg = arg;
+	chan->blksize = blksize;
+	chan->nblocks = buffer_size / chan->blksize;
+	chan->swpos = 0;
 
 	/* set DMA frame */
 	if (!(p = cmpci_find_dmamem(sc, start)))
@@ -1998,12 +2084,12 @@ cmpci_trigger_input(void *handle, void *start, void *end, int blksize,
 	    DMAADDR(p));
 	delay(10);
 	bus_space_write_2(sc->sc_iot, sc->sc_ioh, CMPCI_REG_DMA1_BYTES,
-	    ((caddr_t)end - (caddr_t)start + 1) / bps - 1);
+	    (buffer_size + 1) / chan->bps - 1);
 	delay(10);
 
 	/* set interrupt count */
 	bus_space_write_2(sc->sc_iot, sc->sc_ioh, CMPCI_REG_DMA1_SAMPLES,
-	    (blksize + bps - 1) / bps - 1);
+	    (chan->blksize + chan->bps - 1) / chan->bps - 1);
 	delay(10);
 
 	/* start DMA */

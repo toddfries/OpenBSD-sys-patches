@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.13 2009/06/15 17:01:26 beck Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.26 2010/06/27 13:28:46 miod Exp $	*/
 /*	$NetBSD: machdep.c,v 1.4 1996/10/16 19:33:11 ws Exp $	*/
 
 /*
@@ -39,9 +39,6 @@
 #include <sys/extent.h>
 #include <sys/malloc.h>
 #include <sys/mount.h>
-#ifdef SYSVMSG
-#include <sys/msg.h>
-#endif
 #include <sys/msgbuf.h>
 #include <sys/proc.h>
 #include <sys/reboot.h>
@@ -51,15 +48,14 @@
 #include <sys/tty.h>
 #include <sys/user.h>
 
-#include <uvm/uvm_extern.h>
+#include <uvm/uvm.h>
 
 #include <machine/bat.h>
 #include <machine/bus.h>
+#include <machine/fdt.h>
 #include <machine/pio.h>
 #include <machine/powerpc.h>
 #include <machine/trap.h>
-
-#include <net/netisr.h>
 
 #include <dev/cons.h>
 
@@ -89,10 +85,19 @@ int bufpages = 0;
 #endif
 int bufcachepercent = BUFCACHEPERCENT;
 
+struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
+struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
+
 struct bat battable[16];
 
 struct vm_map *exec_map = NULL;
 struct vm_map *phys_map = NULL;
+
+/*
+ * safepri is a safe priority for sleep to set for a spin-wait
+ * during autoconfiguration or after a panic.
+ */
+int   safepri = 0;
 
 int ppc_malloc_ok = 0;
 
@@ -115,6 +120,7 @@ struct bd_info {
 } bootinfo;
 
 extern struct bd_info **fwargsave;
+extern struct fdt_head *fwfdtsave;
 
 void uboot_mem_regions(struct mem_region **, struct mem_region **);
 void uboot_vmon(void);
@@ -136,7 +142,6 @@ int allowaperture = 0;
 #endif
 #endif
 
-caddr_t allocsys(caddr_t);
 void dumpsys(void);
 int lcsplx(int ipl);
 void myetheraddr(u_char *);
@@ -177,13 +182,69 @@ initppc(u_int startkernel, u_int endkernel, char *args)
 #endif
 	extern void *msgbuf_addr;
 	int exc, scratch;
+	void *node;
 
 	extern char __bss_start[], __end[];
 	bzero(__bss_start, __end - __bss_start);
 
 	/* Make a copy of the args! */
 	strlcpy(bootpathbuf, args ? args : "wd0a", sizeof bootpathbuf);
-	memcpy(&bootinfo, *fwargsave, sizeof bootinfo);
+
+	if (fwfdtsave == NULL) {
+		/*
+		 * We were loaded by an old U-Boot that didn't provide
+		 * a flattened device tree.  It should have provided a
+		 * valid bootinfo structure which we'll use to build
+		 * such a device tree ourselves.
+		 *
+		 * XXX We don't build a flattened device tree yet.
+		 */
+		memcpy(&bootinfo, *fwargsave, sizeof bootinfo);
+
+		extern uint8_t dt_blob_start[];
+		fdt_init(&dt_blob_start);
+	}
+
+	if (fwfdtsave && fwfdtsave->fh_magic == FDT_MAGIC) {
+		/* 
+		 * Save the FDT firmware blob passed by the bootloader
+		 * before we zero all memory.
+		 * 
+		 */
+		void *fdt = (void *)endkernel;
+		memcpy(fdt, fwfdtsave, fwfdtsave->fh_size);
+		endkernel += fwfdtsave->fh_size;
+
+		fdt_init(fdt);
+
+		/*
+		 * XXX Create a fake bootinfo structure if we were
+		 * loaded by RouterBOOT.
+		 */
+		node = fdt_find_node("/memory");
+		if (node) {
+			char *reg;
+
+			if (fdt_node_property(node, "reg", &reg)) {
+				bootinfo.bi_memstart = *(u_int32_t *)reg;
+				bootinfo.bi_memsize = *((u_int32_t *)reg + 1);
+			}
+		}
+		node = fdt_find_node("/soc8343");
+		if (node) {
+			char *reg;
+
+			if (fdt_node_property(node, "reg", &reg))
+				bootinfo.bi_immr_base = *(u_int32_t *)reg;
+		}
+		node = fdt_find_node("/soc8343/ethernet");
+		if (node) {
+			char *addr;
+
+			if (fdt_node_property(node, "mac-address", &addr))
+				memcpy(bootinfo.bi_enetaddr, addr, 6);
+		}
+	}
 
 	proc0.p_cpu = &cpu_info[0];
 	proc0.p_addr = proc0paddr;
@@ -382,6 +443,24 @@ initppc(u_int startkernel, u_int endkernel, char *args)
 	comconsrate = 115200;
 	comconsaddr = 0x00004500;
 	comconsiot = &mainbus_bus_space;
+
+	node = fdt_find_node("/chosen");
+	if (node) {
+		char *console;
+
+		fdt_node_property(node, "linux,stdout-path", &console);
+		node = fdt_find_node(console);
+		if (node) {
+			char *freq;
+			char *reg;
+
+			if (fdt_node_property(node, "clock-frequency", &freq))
+				comconsfreq = *(u_int32_t *)freq;
+			if (fdt_node_property(node, "reg", &reg))
+				comconsaddr = *(u_int32_t *)reg;
+		}
+	}
+
 	consinit();
 
 #ifdef DDB
@@ -405,21 +484,6 @@ dumpsys(void)
 
 int imask[IPL_NUM];
 
-int netisr;
-
-/*
- * Soft networking interrupts.
- */
-void
-softnet(int isr)
-{
-#define DONETISR(flag, func) \
-	if (isr & (1 << flag))\
-		func();
-
-#include <net/netisr_dispatch.h>
-}
-
 int
 lcsplx(int ipl)
 {
@@ -429,20 +493,20 @@ lcsplx(int ipl)
 /* BUS functions */
 int
 bus_space_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size,
-    int cacheable, bus_space_handle_t *bshp)
+    int flags, bus_space_handle_t *bshp)
 {
 	int error;
 
 	if  (POWERPC_BUS_TAG_BASE(t) == 0) {
 		/* if bus has base of 0 fail. */
-		return 1;
+		return EINVAL;
 	}
 	bpa |= POWERPC_BUS_TAG_BASE(t);
 	if ((error = extent_alloc_region(devio_ex, bpa, size, EX_NOWAIT |
 	    (ppc_malloc_ok ? EX_MALLOCOK : 0))))
 		return error;
 
-	if ((error = bus_mem_add_mapping(bpa, size, cacheable, bshp))) {
+	if ((error = bus_mem_add_mapping(bpa, size, flags, bshp))) {
 		if (extent_free(devio_ex, bpa, size, EX_NOWAIT |
 			(ppc_malloc_ok ? EX_MALLOCOK : 0)))
 		{
@@ -498,7 +562,7 @@ bus_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size)
 vaddr_t ppc_kvm_stolen = VM_KERN_ADDRESS_SIZE;
 
 int
-bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int cacheable,
+bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int flags,
     bus_space_handle_t *bshp)
 {
 	bus_addr_t vaddr;
@@ -539,9 +603,9 @@ bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int cacheable,
 		bpa, size, *bshp, spa);
 #endif
 	for (; len > 0; len -= PAGE_SIZE) {
-		pmap_kenter_cache(vaddr, spa,
-			VM_PROT_READ | VM_PROT_WRITE,
-			cacheable ? PMAP_CACHE_WT : PMAP_CACHE_CI);
+		pmap_kenter_cache(vaddr, spa, VM_PROT_READ | VM_PROT_WRITE,
+		    (flags & BUS_SPACE_MAP_CACHEABLE) ?
+		      PMAP_CACHE_WT : PMAP_CACHE_CI);
 		spa += PAGE_SIZE;
 		vaddr += PAGE_SIZE;
 	}
@@ -550,7 +614,7 @@ bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int cacheable,
 
 int
 bus_space_alloc(bus_space_tag_t tag, bus_addr_t rstart, bus_addr_t rend,
-    bus_size_t size, bus_size_t alignment, bus_size_t boundary, int cacheable,
+    bus_size_t size, bus_size_t alignment, bus_size_t boundary, int flags,
     bus_addr_t *addrp, bus_space_handle_t *handlep)
 {
 
@@ -743,40 +807,14 @@ bus_space_subregion(bus_space_tag_t t, bus_space_handle_t bsh,
 void
 cpu_startup()
 {
-	int sz;
-	caddr_t v;
 	vaddr_t minaddr, maxaddr;
 
-	v = (caddr_t)proc0paddr + USPACE;
 	proc0.p_addr = proc0paddr;
 
 	printf("%s", version);
 
 	printf("real mem = %u (%uMB)\n", ptoa(physmem),
 	    ptoa(physmem)/1024/1024);
-
-	/*
-	 * Find out how much space we need, allocate it,
-	 * and then give everything true virtual addresses.
-	 */
-	sz = (int)allocsys((caddr_t)0);
-	if ((v = (caddr_t)uvm_km_zalloc(kernel_map, round_page(sz))) == 0)
-		panic("startup: no room for tables");
-	if (allocsys(v) - v != sz)
-		panic("startup: table size inconsistency");
-
-	/*
-	 * Determine how many buffers to allocate.
-	 * We allocate bufcachepercent% of memory for buffer space.
-	 */
-	if (bufpages == 0)
-		bufpages = physmem * bufcachepercent / 100;
-
-	/* Restrict to at most 25% filled kvm */
-	if (bufpages >
-	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) / PAGE_SIZE / 4) 
-		bufpages = (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) /
-		    PAGE_SIZE / 4;
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
@@ -802,25 +840,6 @@ cpu_startup()
 	bufinit();
 
 	devio_malloc_safe = 1;
-}
-
-/*
- * Allocate space for system data structures.
- */
-caddr_t
-allocsys(caddr_t v)
-{
-#define	valloc(name, type, num) \
-	v = (caddr_t)(((name) = (type *)v) + (num))
-
-#ifdef	SYSVMSG
-	valloc(msgpool, char, msginfo.msgmax);
-	valloc(msgmaps, struct msgmap, msginfo.msgseg);
-	valloc(msghdrs, struct msg, msginfo.msgtql);
-	valloc(msqids, struct msqid_ds, msginfo.msgmni);
-#endif
-
-	return v;
 }
 
 /*
@@ -1111,40 +1130,32 @@ do_pending_int(void)
 			ci->ci_cpl = SINT_CLOCK|SINT_NET|SINT_TTY;
 			ppc_intr_enable(1);
 			KERNEL_LOCK();
-			softclock();
+			softintr_dispatch(SI_SOFTCLOCK);
 			KERNEL_UNLOCK();
 			ppc_intr_disable();
 			continue;
 		}
 		if((ci->ci_ipending & SINT_NET) & ~pcpl) {
-			extern int netisr;
-			int pisr;
-		       
 			ci->ci_ipending &= ~SINT_NET;
 			ci->ci_cpl = SINT_NET|SINT_TTY;
-			while ((pisr = netisr) != 0) {
-				atomic_clearbits_int(&netisr, pisr);
-				ppc_intr_enable(1);
-				KERNEL_LOCK();
-				softnet(pisr);
-				KERNEL_UNLOCK();
-				ppc_intr_disable();
-			}
+			ppc_intr_enable(1);
+			KERNEL_LOCK();
+			softintr_dispatch(SI_SOFTNET);
+			KERNEL_UNLOCK();
+			ppc_intr_disable();
 			continue;
 		}
-#if 0
 		if((ci->ci_ipending & SINT_TTY) & ~pcpl) {
 			ci->ci_ipending &= ~SINT_TTY;
 			ci->ci_cpl = SINT_TTY;
 			ppc_intr_enable(1);
 			KERNEL_LOCK();
-			softtty();
+			softintr_dispatch(SI_SOFTTTY);
 			KERNEL_UNLOCK();
 			ppc_intr_disable();
 			continue;
 		}
-#endif
-	} while ((ci->ci_ipending & SINT_MASK) & ~pcpl);
+	} while ((ci->ci_ipending & SINT_ALLMASK) & ~pcpl);
 	ci->ci_cpl = pcpl;	/* Don't use splx... we are here already! */
 
 	ci->ci_iactive = 0;

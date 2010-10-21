@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.25 2009/06/03 14:45:52 jj Exp $ */
+/*	$OpenBSD: conf.c,v 1.29 2010/09/23 05:02:14 claudio Exp $ */
 
 /*
  * Copyright (c) 1997 Per Fogelstrom
@@ -88,7 +88,6 @@ cdev_decl(bugtty);
 
 #include "st.h"
 #include "uk.h"
-#include "ss.h"
 
 cdev_decl(wd);
 
@@ -112,6 +111,9 @@ cdev_decl(nnpfs_dev);
 #include "pf.h"
 
 #include "systrace.h"
+
+#include "vscsi.h"
+#include "pppx.h"
 
 struct cdevsw cdevsw[] = {
         cdev_cn_init(1,cn),             /* 0: virtual console */
@@ -160,7 +162,7 @@ struct cdevsw cdevsw[] = {
         cdev_pf_init(NPF,pf),           /* 39: packet filter */
         cdev_random_init(1,random),     /* 40: random data source */
 	cdev_uk_init(NUK,uk),		/* 41: unknown SCSI */
-	cdev_ss_init(NSS,ss),           /* 42: SCSI scanner */
+        cdev_notdef(),                  /* 42 */
 	cdev_ksyms_init(NKSYMS,ksyms),	/* 43: Kernel symbols device */
         cdev_notdef(),                  /* 44 */
         cdev_notdef(),                  /* 45 */
@@ -178,6 +180,9 @@ struct cdevsw cdevsw[] = {
 	cdev_bio_init(NBIO,bio),	/* 53: ioctl tunnel */
 	cdev_disk_init(NRAID,raid),	/* 54: RAIDframe disk driver */
 	cdev_ptm_init(NPTY,ptm),	/* 55: pseudo-tty ptm device */
+	cdev_vscsi_init(NVSCSI,vscsi),	/* 56: vscsi */
+	cdev_disk_init(1,diskmap),	/* 57: disk mapper */
+	cdev_pppx_init(NPPPX,pppx),	/* 58: pppx */
 };
 int nchrdev = sizeof cdevsw / sizeof cdevsw[0];
 

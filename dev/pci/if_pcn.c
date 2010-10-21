@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pcn.c,v 1.21 2008/11/28 02:44:18 brad Exp $	*/
+/*	$OpenBSD: if_pcn.c,v 1.23 2010/09/20 07:40:38 deraadt Exp $	*/
 /*	$NetBSD: if_pcn.c,v 1.26 2005/05/07 09:15:44 is Exp $	*/
 
 /*
@@ -283,7 +283,6 @@ struct pcn_softc {
 	bus_space_handle_t sc_sh;	/* bus space handle */
 	bus_dma_tag_t sc_dmat;		/* bus DMA tag */
 	struct arpcom sc_arpcom;	/* Ethernet common data */
-	void *sc_sdhook;		/* shutdown hook */
 
 	/* Points to our media routines, etc. */
 	const struct pcn_variant *sc_variant;
@@ -401,8 +400,6 @@ int	pcn_ioctl(struct ifnet *, u_long, caddr_t);
 int	pcn_init(struct ifnet *);
 void	pcn_stop(struct ifnet *, int);
 
-void	pcn_shutdown(void *);
-
 void	pcn_reset(struct pcn_softc *);
 void	pcn_rxdrain(struct pcn_softc *);
 int	pcn_add_rxbuf(struct pcn_softc *, int);
@@ -489,7 +486,7 @@ const struct pci_matchid pcn_devices[] = {
 };
 
 struct cfdriver pcn_cd = {
-	0, "pcn", DV_IFNET
+	NULL, "pcn", DV_IFNET
 };
 
 /*
@@ -794,12 +791,6 @@ pcn_attach(struct device *parent, struct device *self, void *aux)
 	/* Attach the interface. */
 	if_attach(ifp);
 	ether_ifattach(ifp);
-
-	/* Make sure the interface is shutdown during reboot. */
-	sc->sc_sdhook = shutdownhook_establish(pcn_shutdown, sc);
-	if (sc->sc_sdhook == NULL)
-		printf("%s: WARNING: unable to establish shutdown hook\n",
-		    sc->sc_dev.dv_xname);
 	return;
 
 	/*
@@ -826,20 +817,6 @@ pcn_attach(struct device *parent, struct device *self, void *aux)
 	    sizeof(struct pcn_control_data));
  fail_1:
 	bus_dmamem_free(sc->sc_dmat, &seg, rseg);
-}
-
-/*
- * pcn_shutdown:
- *
- *	Make sure the interface is stopped at reboot time.
- */
-void
-pcn_shutdown(void *arg)
-{
-	struct pcn_softc *sc = arg;
-
-	pcn_stop(&sc->sc_arpcom.ac_if, 1);
-	pcn_reset(sc);
 }
 
 /*

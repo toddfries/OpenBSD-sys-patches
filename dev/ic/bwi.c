@@ -1,4 +1,4 @@
-/*	$OpenBSD: bwi.c,v 1.87 2009/06/02 11:54:00 deraadt Exp $	*/
+/*	$OpenBSD: bwi.c,v 1.95 2010/08/27 17:08:00 jsg Exp $	*/
 
 /*
  * Copyright (c) 2007 The DragonFly Project.  All rights reserved.
@@ -45,6 +45,7 @@
 #include <sys/device.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
+#include <sys/workq.h>
 #include <sys/mbuf.h>
 #include <sys/proc.h>
 #include <sys/socket.h>
@@ -288,13 +289,11 @@ void		 bwi_get_clock_freq(struct bwi_softc *,
 		     struct bwi_clock_freq *);
 int		 bwi_set_clock_mode(struct bwi_softc *, enum bwi_clock_mode);
 int		 bwi_set_clock_delay(struct bwi_softc *);
-int		 bwi_init(struct ifnet *);
 int		 bwi_ioctl(struct ifnet *, u_long, caddr_t);
 void		 bwi_start(struct ifnet *);
 void		 bwi_watchdog(struct ifnet *);
 void		 bwi_newstate_begin(struct bwi_softc *, enum ieee80211_state);
 void		 bwi_init_statechg(struct bwi_softc *, int);
-int		 bwi_stop(struct bwi_softc *, int);
 int		 bwi_newstate(struct ieee80211com *, enum ieee80211_state, int);
 int		 bwi_media_change(struct ifnet *);
 void		 bwi_iter_func(void *, struct ieee80211_node *);
@@ -343,8 +342,7 @@ void		 bwi_free_tx_ring32(struct bwi_softc *, int);
 void		 bwi_free_txstats64(struct bwi_softc *);
 void		 bwi_free_rx_ring64(struct bwi_softc *);
 void		 bwi_free_tx_ring64(struct bwi_softc *, int);
-uint8_t		 bwi_ofdm_plcp2rate(uint32_t *);
-uint8_t		 bwi_ds_plcp2rate(struct ieee80211_ds_plcp_hdr *);
+uint8_t		 bwi_plcp2rate(uint32_t, enum ieee80211_phymode);
 void		 bwi_ofdm_plcp_header(uint32_t *, int, uint8_t);
 void		 bwi_ds_plcp_header(struct ieee80211_ds_plcp_hdr *, int,
 		     uint8_t);
@@ -492,7 +490,7 @@ static const struct {
 } bwi_bbpid_map[] = {
 	{ 0x4301, 0x4301, 0x4301 },
 	{ 0x4305, 0x4307, 0x4307 },
-	{ 0x4403, 0x4403, 0x4402 },
+	{ 0x4402, 0x4403, 0x4402 },
 	{ 0x4610, 0x4615, 0x4610 },
 	{ 0x4710, 0x4715, 0x4710 },
 	{ 0x4720, 0x4725, 0x4309 }
@@ -800,7 +798,6 @@ bwi_attach(struct bwi_softc *sc)
 
 	/* setup interface */
 	ifp->if_softc = sc;
-	ifp->if_init = bwi_init;
 	ifp->if_ioctl = bwi_ioctl;
 	ifp->if_start = bwi_start;
 	ifp->if_watchdog = bwi_watchdog;
@@ -858,7 +855,7 @@ bwi_attach(struct bwi_softc *sc)
 		error = ENXIO;
 		goto fail;
 	} else
-		panic("unknown phymode %d\n", phy->phy_mode);
+		panic("unknown phymode %d", phy->phy_mode);
 
 	printf(", address %s\n", ether_sprintf(ic->ic_myaddr));
 
@@ -2178,7 +2175,7 @@ bwi_mac_hostflags_init(struct bwi_mac *mac)
 		if (phy->phy_rev >= 2 && rf->rf_type == BWI_RF_T_BCM2050)
 			host_flags &= ~BWI_HFLAG_GDC_WA;
 	} else {
-		panic("unknown PHY mode %u\n", phy->phy_mode);
+		panic("unknown PHY mode %u", phy->phy_mode);
 	}
 
 	HFLAGS_WRITE(mac, host_flags);
@@ -2278,7 +2275,7 @@ bwi_mac_set_ackrates(struct bwi_mac *mac, const struct ieee80211_rateset *rs)
 			    IEEE80211_MODE_11G) & 0xf) * 2;
 			break;
 		default:
-			panic("unsupported modtype %u\n", modtype);
+			panic("unsupported modtype %u", modtype);
 		}
 
 		MOBJ_WRITE_2(mac, BWI_COMM_MOBJ, ofs + 0x20,
@@ -4266,7 +4263,7 @@ bwi_phy812_value(struct bwi_mac *mac, uint16_t lpd)
 		case 0x100:
 			return ((0x2093 | ext_lna));
 		default:
-			panic("unsupported lpd\n");
+			panic("unsupported lpd");
 		}
 	} else {
 		ext_lna |= (loop << 8);
@@ -4279,11 +4276,11 @@ bwi_phy812_value(struct bwi_mac *mac, uint16_t lpd)
 		case 0x100:
 			return ((0x93 | ext_lna));
 		default:
-			panic("unsupported lpd\n");
+			panic("unsupported lpd");
 		}
 	}
 
-	panic("never reached\n");
+	panic("never reached");
 
 	return (0);
 }
@@ -6531,7 +6528,7 @@ bwi_led_event(struct bwi_softc *sc, int event)
 		rate = 0;
 		break;
 	default:
-		panic("unknown LED event %d\n", event);
+		panic("unknown LED event %d", event);
 		break;
 	}
 	bwi_led_blink_start(sc, bwi_led_duration[rate].on_dur,
@@ -7430,7 +7427,7 @@ bwi_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 		if (ic->ic_opmode != IEEE80211_M_MONITOR) {
 			/* start automatic rate control timer */
 			if (ic->ic_fixed_rate == -1)
-				timeout_add(&sc->sc_amrr_ch, hz / 2);
+				timeout_add_msec(&sc->sc_amrr_ch, 500);
 		}
 	} else
 		bwi_set_bssid(sc, bwi_zero_addr);
@@ -7485,7 +7482,7 @@ bwi_amrr_timeout(void *arg)
 		ieee80211_iterate_nodes(ic, bwi_iter_func, sc);
 #endif
 
-	timeout_add(&sc->sc_amrr_ch, hz / 2);
+	timeout_add_msec(&sc->sc_amrr_ch, 500);
 }
 
 void
@@ -7721,7 +7718,7 @@ bwi_dma_txstats_alloc(struct bwi_softc *sc, uint32_t ctrl_base,
 	}
 
 	error = bus_dmamem_alloc(sc->sc_dmat, dma_size, BWI_RING_ALIGN, 0,
-	     &st->stats_ring_seg, 1, &nsegs, BUS_DMA_NOWAIT);
+	     &st->stats_ring_seg, 1, &nsegs, BUS_DMA_NOWAIT | BUS_DMA_ZERO);
 	if (error) {
 		printf("%s: can't allocate txstats ring DMA mem\n",
 		    sc->sc_dev.dv_xname);
@@ -7745,7 +7742,6 @@ bwi_dma_txstats_alloc(struct bwi_softc *sc, uint32_t ctrl_base,
 		return (error);
 	}
 
-	bzero(st->stats_ring, dma_size);
 	st->stats_ring_paddr = st->stats_ring_dmap->dm_segs[0].ds_addr;
 
 	/*
@@ -7762,7 +7758,7 @@ bwi_dma_txstats_alloc(struct bwi_softc *sc, uint32_t ctrl_base,
 		return (error);
 	}
 	error = bus_dmamem_alloc(sc->sc_dmat, dma_size, BWI_ALIGN, 0,
-	    &st->stats_seg, 1, &nsegs, BUS_DMA_NOWAIT);
+	    &st->stats_seg, 1, &nsegs, BUS_DMA_NOWAIT | BUS_DMA_ZERO);
 	if (error) {
 		printf("%s: can't allocate txstats DMA mem\n",
 		    sc->sc_dev.dv_xname);
@@ -7784,7 +7780,6 @@ bwi_dma_txstats_alloc(struct bwi_softc *sc, uint32_t ctrl_base,
 		return (error);
 	}
 
-	bzero(st->stats, dma_size);
 	st->stats_paddr = st->stats_dmap->dm_segs[0].ds_addr;
 	st->stats_ctrl_base = ctrl_base;
 
@@ -8234,7 +8229,7 @@ bwi_rxeof(struct bwi_softc *sc, int end_idx)
 		struct ieee80211_rxinfo rxi;
 		struct ieee80211_node *ni;
 		struct mbuf *m;
-		void *plcp;
+		uint32_t plcp;
 		uint16_t flags2;
 		int buflen, wh_ofs, hdr_extra, rssi, type, rate;
 
@@ -8264,7 +8259,7 @@ bwi_rxeof(struct bwi_softc *sc, int end_idx)
 			goto next;
 		}
 
-		plcp = ((uint8_t *)(hdr + 1) + hdr_extra);
+		bcopy((uint8_t *)(hdr + 1) + hdr_extra, &plcp, sizeof(plcp));
 		rssi = bwi_calc_rssi(sc, hdr);
 
 		m->m_pkthdr.rcvif = ifp;
@@ -8272,9 +8267,9 @@ bwi_rxeof(struct bwi_softc *sc, int end_idx)
 		m_adj(m, sizeof(*hdr) + wh_ofs);
 
 		if (htole16(hdr->rxh_flags1) & BWI_RXH_F1_OFDM)
-			rate = bwi_ofdm_plcp2rate(plcp);
+			rate = bwi_plcp2rate(plcp, IEEE80211_MODE_11G);
 		else
-			rate = bwi_ds_plcp2rate(plcp);
+			rate = bwi_plcp2rate(plcp, IEEE80211_MODE_11B);
 
 #if NBPFILTER > 0
 		/* RX radio tap */
@@ -8488,21 +8483,10 @@ bwi_free_tx_ring64(struct bwi_softc *sc, int ring_idx)
 }
 
 uint8_t
-bwi_ofdm_plcp2rate(uint32_t *plcp0)
+bwi_plcp2rate(uint32_t plcp0, enum ieee80211_phymode phymode)
 {
-	uint32_t plcp;
-	uint8_t plcp_rate;
-
-	plcp = letoh32(*plcp0);
-	plcp_rate = __SHIFTOUT(plcp, IEEE80211_OFDM_PLCP_RATE_MASK);
-
-	return (ieee80211_plcp2rate(plcp_rate, IEEE80211_MODE_11G));
-}
-
-uint8_t
-bwi_ds_plcp2rate(struct ieee80211_ds_plcp_hdr *hdr)
-{
-	return (ieee80211_plcp2rate(hdr->i_signal, IEEE80211_MODE_11B));
+	uint32_t plcp = letoh32(plcp0) & IEEE80211_OFDM_PLCP_RATE_MASK;
+	return (ieee80211_plcp2rate(plcp, phymode));
 }
 
 void
@@ -8559,7 +8543,7 @@ bwi_plcp_header(void *plcp, int pkt_len, uint8_t rate)
 	else if (modtype == IEEE80211_MODTYPE_DS)
 		bwi_ds_plcp_header(plcp, pkt_len, rate);
 	else
-		panic("unsupport modulation type %u\n", modtype);
+		panic("unsupport modulation type %u", modtype);
 }
 
 enum bwi_modtype
@@ -8631,7 +8615,7 @@ bwi_ack_rate(struct ieee80211_node *ni, uint8_t rate)
 		ack_rate = 48;
 		break;
 	default:
-		panic("unsupported rate %d\n", rate);
+		panic("unsupported rate %d", rate);
 	}
 	return ack_rate;
 }
@@ -8861,40 +8845,11 @@ bwi_encap(struct bwi_softc *sc, int idx, struct mbuf *m,
 	}
 
 	if (error) {	/* error == EFBIG */
-		struct mbuf *m_new;
-
-		error = 0;
-
-		MGETHDR(m_new, M_DONTWAIT, MT_DATA);
-		if (m_new == NULL) {
-			m_freem(m);
-			error = ENOBUFS;
+		if (m_defrag(m, M_DONTWAIT)) {
 			printf("%s: can't defrag TX buffer\n",
 			    sc->sc_dev.dv_xname);
 			goto back;
 		}
-
-		M_DUP_PKTHDR(m_new, m);
-		if (m->m_pkthdr.len > MHLEN) {
-			MCLGET(m_new, M_DONTWAIT);
-			if (!(m_new->m_flags & M_EXT)) {
-				m_freem(m);
-				m_freem(m_new);
-				error = ENOBUFS;
-			}
-		}
-		
-		if (error) {
-			printf("%s: can't defrag TX buffer\n",
-			    sc->sc_dev.dv_xname);
-			goto back;
-		}
-
-		m_copydata(m, 0, m->m_pkthdr.len, mtod(m_new, caddr_t));
-		m_freem(m);
-		m_new->m_len = m_new->m_pkthdr.len;
-		m = m_new;
-		
 		error = bus_dmamap_load_mbuf(sc->sc_dmat, tb->tb_dmap, m,
 		    BUS_DMA_NOWAIT);
 		if (error) {
@@ -9147,7 +9102,7 @@ bwi_regwin_name(const struct bwi_regwin *rw)
 	case BWI_REGWIN_T_BUSPCIE:
 		return ("PCIE");
 	}
-	panic("unknown regwin type 0x%04x\n", rw->rw_type);
+	panic("unknown regwin type 0x%04x", rw->rw_type);
 
 	return (NULL);
 }

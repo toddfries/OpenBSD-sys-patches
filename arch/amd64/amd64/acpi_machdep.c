@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpi_machdep.c,v 1.21 2009/06/06 00:23:38 mlarkin Exp $	*/
+/*	$OpenBSD: acpi_machdep.c,v 1.46 2010/10/06 16:37:29 deraadt Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -20,6 +20,9 @@
 #include <sys/kernel.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
+#include <sys/memrange.h>
+#include <sys/proc.h>
+#include <sys/user.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -27,13 +30,22 @@
 #include <machine/biosvar.h>
 #include <machine/isa_machdep.h>
 
+#include <machine/cpu.h>
+#include <machine/cpufunc.h>
+#include <machine/cpuvar.h>
+
 #include <dev/isa/isareg.h>
 #include <dev/acpi/acpireg.h>
 #include <dev/acpi/acpivar.h>
 #include <dev/acpi/acpidev.h>
 
+#include "isa.h"
 #include "ioapic.h"
 #include "lapic.h"
+
+#if NIOAPIC > 0
+#include <machine/i82093var.h>
+#endif
 
 #if NLAPIC > 0
 #include <machine/apicvar.h>
@@ -45,8 +57,7 @@ extern u_char acpi_real_mode_resume[], acpi_resume_end[];
 extern u_int32_t acpi_pdirpa;
 extern paddr_t tramp_pdirpa;
 
-extern int acpi_savecpu(void);
-extern void ioapic_enable(void);
+extern int acpi_savecpu(void) __returns_twice;
 
 #define ACPI_BIOS_RSDP_WINDOW_BASE        0xe0000
 #define ACPI_BIOS_RSDP_WINDOW_SIZE        0x20000
@@ -105,7 +116,7 @@ acpi_scan(struct acpi_mem_map *handle, paddr_t pa, size_t len)
 			if (rsdp->revision == 0 &&
 			    acpi_checksum(ptr, sizeof(struct acpi_rsdp1)) == 0)
 				return (ptr);
-			else if (rsdp->revision >= 2 && rsdp->revision <= 3 &&
+			else if (rsdp->revision >= 2 && rsdp->revision <= 4 &&
 			    acpi_checksum(ptr, sizeof(struct acpi_rsdp)) == 0)
 				return (ptr);
 		}
@@ -115,7 +126,8 @@ acpi_scan(struct acpi_mem_map *handle, paddr_t pa, size_t len)
 }
 
 int
-acpi_probe(struct device *parent, struct cfdata *match, struct bios_attach_args *ba)
+acpi_probe(struct device *parent, struct cfdata *match,
+    struct bios_attach_args *ba)
 {
 	struct acpi_mem_map handle;
 	u_int8_t *ptr;
@@ -155,6 +167,7 @@ havebase:
 }
 
 #ifndef SMALL_KERNEL
+
 void
 acpi_attach_machdep(struct acpi_softc *sc)
 {
@@ -164,21 +177,16 @@ acpi_attach_machdep(struct acpi_softc *sc)
 	    IST_LEVEL, IPL_TTY, acpi_interrupt, sc, sc->sc_dev.dv_xname);
 	cpuresetfn = acpi_reset;
 
-#ifdef ACPI_SLEEP_ENABLED
-
 	/*
 	 * Sanity check before setting up trampoline.
 	 * Ensure the trampoline size is < PAGE_SIZE
 	 */
 	KASSERT(acpi_resume_end - acpi_real_mode_resume < PAGE_SIZE);
 
-	bcopy(acpi_real_mode_resume, 
-	    (caddr_t)ACPI_TRAMPOLINE, 
+	bcopy(acpi_real_mode_resume, (caddr_t)ACPI_TRAMPOLINE,
 	    acpi_resume_end - acpi_real_mode_resume);
 
 	acpi_pdirpa = tramp_pdirpa;
-
-#endif /* ACPI_SLEEP_ENABLED */
 }
 
 void
@@ -190,24 +198,20 @@ acpi_cpu_flush(struct acpi_softc *sc, int state)
 	if (state > ACPI_STATE_S1)
 		wbinvd();
 }
+
 int
 acpi_sleep_machdep(struct acpi_softc *sc, int state)
 {
-#ifdef ACPI_SLEEP_ENABLED
-
 	if (sc->sc_facs == NULL) {
 		printf("%s: acpi_sleep_machdep: no FACS\n", DEVNAME(sc));
 		return (ENXIO);
 	}
 
-	if (rcr3() != pmap_kernel()->pm_pdirpa) {
-		pmap_activate(curproc);
-		
-		KASSERT(rcr3() == pmap_kernel()->pm_pdirpa);
-	}
+	rtcstop();
+
+	/* amd64 does not do lazy pmap_activate */
 
 	/*
-	 *
 	 * ACPI defines two wakeup vectors. One is used for ACPI 1.0
 	 * implementations - it's in the FACS table as wakeup_vector and
 	 * indicates a 32-bit physical address containing real-mode wakeup
@@ -216,41 +220,104 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 	 * The second wakeup vector is in the FACS table as
 	 * x_wakeup_vector and indicates a 64-bit physical address
 	 * containing protected-mode wakeup code.
-	 *
 	 */
-
 	sc->sc_facs->wakeup_vector = (u_int32_t)ACPI_TRAMPOLINE;
-	if (sc->sc_facs->version == 1)
+	if (sc->sc_facs->length > 32 && sc->sc_facs->version >= 1)
 		sc->sc_facs->x_wakeup_vector = 0;
 
-	/* Copy the current cpu registers into a safe place for resume. */
+	/* Copy the current cpu registers into a safe place for resume.
+	 * acpi_savecpu actually returns twice - once in the suspend
+	 * path and once in the resume path (see setjmp(3)).
+	 */
 	if (acpi_savecpu()) {
+		/* Suspend path */
+		fpusave_cpu(curcpu(), 1);
+#ifdef MULTIPROCESSOR
+		x86_broadcast_ipi(X86_IPI_SYNCH_FPU);
+		x86_broadcast_ipi(X86_IPI_HALT);
+#endif
 		wbinvd();
 		acpi_enter_sleep_state(sc, state);
 		panic("%s: acpi_enter_sleep_state failed", DEVNAME(sc));
 	}
 
-	/*
-	 * On resume, the execution path will actually occur here.
-	 * This is because we previously saved the stack location
-	 * in acpi_savecpu, and issued a far jmp to the restore
-	 * routine in the wakeup code. This means we are
-	 * returning to the location immediately following the
-	 * last call instruction - after the call to acpi_savecpu.
-	 */
+	/* Resume path continues here */
+
+	/* Reset the vector */
+	sc->sc_facs->wakeup_vector = 0;
+
+#if NISA > 0
+	i8259_default_setup();
+#endif
+	intr_calculatemasks(curcpu());
 
 #if NLAPIC > 0
 	lapic_enable();
-	lapic_initclocks();
+	if (initclock_func == lapic_initclocks)
+		lapic_startclock();
+	lapic_set_lvt();
 #endif
+
+	fpuinit(&cpu_info_primary);
+
+	/* Re-initialise memory range handling */
+	if (mem_range_softc.mr_op != NULL)
+		mem_range_softc.mr_op->initAP(&mem_range_softc);
+
 #if NIOAPIC > 0
 	ioapic_enable();
 #endif
-	initrtclock();
+	i8254_startclock();
+	if (initclock_func == i8254_initclocks)
+		rtcstart();		/* in i8254 mode, rtc is profclock */
 	inittodr(time_second);
-#endif /* ACPI_SLEEP_ENABLED */
-	return 0;
- }
 
+	return (0);
+}
 
+void		cpu_start_secondary(struct cpu_info *ci);
+
+void
+acpi_resume_machdep(void)
+{
+#ifdef MULTIPROCESSOR
+	struct cpu_info *ci;
+	struct proc *p;
+	struct pcb *pcb;
+	struct trapframe *tf;
+	struct switchframe *sf;
+	int i;
+
+	/* XXX refactor with matching code in cpu.c */
+
+	for (i = 0; i < MAXCPUS; i++) {
+		ci = cpu_info[i];
+		if (ci == NULL)
+			continue;
+		if (ci->ci_idle_pcb == NULL)
+			continue;
+		if (ci->ci_flags & (CPUF_BSP|CPUF_SP|CPUF_PRIMARY))
+			continue;
+		KASSERT((ci->ci_flags & CPUF_RUNNING) == 0);
+
+		p = ci->ci_schedstate.spc_idleproc;
+		pcb = &p->p_addr->u_pcb;
+
+		tf = (struct trapframe *)pcb->pcb_tss.tss_rsp0 - 1;
+		sf = (struct switchframe *)tf - 1;
+		sf->sf_r12 = (u_int64_t)sched_idle;
+		sf->sf_r13 = (u_int64_t)ci;
+		sf->sf_rip = (u_int64_t)proc_trampoline;
+		pcb->pcb_rsp = (u_int64_t)sf;
+		pcb->pcb_rbp = 0;
+
+		ci->ci_idepth = 0;
+
+		ci->ci_flags &= ~CPUF_PRESENT;
+		cpu_start_secondary(ci);
+	}
+
+	cpu_boot_secondary_processors();
+#endif /* MULTIPROCESSOR */
+}
 #endif /* ! SMALL_KERNEL */

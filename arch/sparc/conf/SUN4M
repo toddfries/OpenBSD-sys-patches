@@ -1,4 +1,4 @@
-#	$OpenBSD: SUN4M,v 1.74 2009/05/20 18:22:33 miod Exp $
+#	$OpenBSD: SUN4M,v 1.78 2010/07/03 03:59:17 krw Exp $
 #	$NetBSD: GENERIC,v 1.28.2.1 1996/07/02 23:55:22 jtc Exp $
 
 # Machine architecture; required by config(8)
@@ -16,7 +16,6 @@ option		SUN4M		# sun4m - SS10, SS20, Classic, etc.
 #option		KGDBRATE=38400	# baud rate
 
 # Options for SPARCstation hardware
-option		COMPAT_SUNOS	# compatibility with SunOS binaries
 option		COMPAT_SVR4	# compatibility with SVR4 binaries
 option		PROCFS		# /proc
 
@@ -115,7 +114,6 @@ esp*	at dma? flags 0x00ff000f			# depending on model
 
 #sun4c, sun4m
 isp*	at sbus?
-options ISP_COMPILE_1000_FW=1
 
 # sun4m Ethernet - an AMD 7990 LANCE behind
 # specialized DMA glue
@@ -141,6 +139,9 @@ hme*	at sbus?
 qec*	at sbus?
 qe*	at qec?
 be*	at qec?
+
+# Gigabit ethernet
+gem*	at sbus?
 
 # Sun "bwtwo" black and white framebuffer, found on sun4, sun4c, and sun4m
 # systems.
@@ -221,6 +222,7 @@ ep*	at pcmcia?		# PCMCIA based 3C5xx ethernet
 
 # Media Independent Interface (mii) drivers (required by hme, ne, ep)
 bmtphy*	at mii?			# Broadcom 10/100 PHYs
+gentbi*	at mii?			# Generic 1000BASE-X ten-bit PHY
 lxtphy*	at mii?			# Level1 LXT970 PHYs
 nsphy*	at mii?			# NS and compatible PHYs
 nsphyter* at mii?
@@ -240,7 +242,6 @@ sd*	at scsibus?		# SCSI disks
 st*	at scsibus?		# SCSI tapes
 cd*	at scsibus?		# SCSI CD-ROMs
 ch*	at scsibus?		# SCSI changer devices
-ss*	at scsibus?		# SCSI scanners
 uk*	at scsibus?		# unknown SCSI devices
 
 # Floppy controller and drive found on SPARCstations.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vnode.h,v 1.100 2009/06/15 17:01:26 beck Exp $	*/
+/*	$OpenBSD: vnode.h,v 1.106 2010/09/10 16:34:09 thib Exp $	*/
 /*	$NetBSD: vnode.h,v 1.38 1996/02/29 20:59:05 cgd Exp $	*/
 
 /*
@@ -32,10 +32,13 @@
  *	@(#)vnode.h	8.11 (Berkeley) 11/21/94
  */
 
+#include <sys/buf.h>
 #include <sys/types.h>
 #include <sys/queue.h>
 #include <sys/lock.h>
+#include <sys/namei.h>
 #include <sys/selinfo.h>
+#include <sys/tree.h>
 
 #include <uvm/uvm.h>
 #include <uvm/uvm_vnode.h>
@@ -79,6 +82,9 @@ enum vtagtype	{
  */
 LIST_HEAD(buflists, buf);
 
+RB_HEAD(buf_rb_bufs, buf);
+RB_HEAD(namecache_rb_cache, namecache);
+
 struct vnode {
 	struct uvm_vnode v_uvm;			/* uvm data */
 	int	(**v_op)(void *);		/* vnode operations vector */
@@ -94,6 +100,7 @@ struct vnode {
 	struct	mount *v_mount;			/* ptr to vfs we are in */
 	TAILQ_ENTRY(vnode) v_freelist;		/* vnode freelist */
 	LIST_ENTRY(vnode) v_mntvnodes;		/* vnodes for mount point */
+	struct	buf_rb_bufs v_bufs_tree;	/* lookup of all bufs */
 	struct	buflists v_cleanblkhd;		/* clean blocklist head */
 	struct	buflists v_dirtyblkhd;		/* dirty blocklist head */
 	u_int   v_numoutput;			/* num of writes in progress */
@@ -104,6 +111,10 @@ struct vnode {
 		struct specinfo	*vu_specinfo;	/* device (VCHR, VBLK) */
 		struct fifoinfo	*vu_fifoinfo;	/* fifo (VFIFO) */
 	} v_un;
+
+	/* VFS namecache */
+	struct namecache_rb_cache v_nc_tree;
+	TAILQ_HEAD(, namecache) v_cache_dst;	 /* cache entries to us */
 
 	enum	vtagtype v_tag;			/* type of underlying data */
 	void	*v_data;			/* private data for fs */
@@ -125,10 +136,11 @@ struct vnode {
 #define	VXWANT		0x0200	/* process is waiting for vnode */
 #define	VCLONED		0x0400	/* vnode was cloned */
 #define	VALIASED	0x0800	/* vnode has an alias */
+#define	VLARVAL		0x1000	/* vnode data not yet set up by higher level */
 #define	VLOCKSWORK	0x4000	/* FS supports locking discipline */
 #define	VCLONE		0x8000	/* vnode is a clone */
 #define	VBITS	"\010\001ROOT\002TEXT\003SYSTEM\004ISTTY\010XLOCK" \
-    "\011XWANT\013ALIASED\016LOCKSWORK\017CLONE"
+    "\011XWANT\013ALIASED\014LARVAL\016LOCKSWORK\017CLONE"
 
 /*
  * (v_bioflag) Flags that may be manipulated by interrupt handlers
@@ -230,7 +242,6 @@ extern struct freelst vnode_hold_list;	/* free vnodes referencing buffers */
 extern struct freelst vnode_free_list;	/* vnode free list */
 
 #define	VATTR_NULL(vap)	vattr_null(vap)
-#define	VREF(vp)	vref(vp)		/* increase reference */
 #define	NULLVP	((struct vnode *)NULL)
 #define	VN_KNOTE(vp, b)					\
 	KNOTE(&vp->v_selectinfo.si_note, (b))
@@ -243,8 +254,9 @@ extern	int desiredvnodes;		/* XXX number of vnodes desired */
 extern	int maxvnodes;			/* XXX number of vnodes to allocate */
 extern	time_t syncdelay;		/* time to delay syncing vnodes */
 extern	int rushjob;			/* # of slots syncer should run ASAP */
+extern void    vhold(struct vnode *);
+extern void    vdrop(struct vnode *);
 #endif /* _KERNEL */
-
 
 /*
  * Mods for exensibility.

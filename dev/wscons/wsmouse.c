@@ -1,4 +1,4 @@
-/* $OpenBSD: wsmouse.c,v 1.19 2007/04/10 22:37:17 miod Exp $ */
+/* $OpenBSD: wsmouse.c,v 1.21 2010/07/26 01:56:27 guenther Exp $ */
 /* $NetBSD: wsmouse.c,v 1.35 2005/02/27 00:27:52 perry Exp $ */
 
 /*
@@ -143,7 +143,7 @@ struct wsmouse_softc {
 int	wsmouse_match(struct device *, void *, void *);
 void	wsmouse_attach(struct device *, struct device *, void *);
 int	wsmouse_detach(struct device *, int);
-int	wsmouse_activate(struct device *, enum devact);
+int	wsmouse_activate(struct device *, int);
 
 int	wsmouse_do_ioctl(struct wsmouse_softc *, u_long, caddr_t, 
 			      int, struct proc *);
@@ -224,7 +224,7 @@ wsmouse_attach(struct device *parent, struct device *self, void *aux)
 }
 
 int
-wsmouse_activate(struct device *self, enum devact act)
+wsmouse_activate(struct device *self, int act)
 {
 	struct wsmouse_softc *sc = (struct wsmouse_softc *)self;
 
@@ -512,7 +512,7 @@ wsmouseopen(dev_t dev, int flags, int mode, struct proc *p)
 
 	evar = &sc->sc_base.me_evar;
 	wsevent_init(evar);
-	evar->io = p;
+	evar->io = p->p_p;
 
 	error = wsmousedoopen(sc, evar);
 	if (error) {
@@ -638,15 +638,15 @@ wsmouse_do_ioctl(struct wsmouse_softc *sc, u_long cmd, caddr_t data, int flag,
 	case FIOSETOWN:
 		if (sc->sc_base.me_evp == NULL)
 			return (EINVAL);
-		if (-*(int *)data != sc->sc_base.me_evp->io->p_pgid
-		    && *(int *)data != sc->sc_base.me_evp->io->p_pid)
+		if (-*(int *)data != sc->sc_base.me_evp->io->ps_pgid
+		    && *(int *)data != sc->sc_base.me_evp->io->ps_pid)
 			return (EPERM);
 		return (0);
 
 	case TIOCSPGRP:
 		if (sc->sc_base.me_evp == NULL)
 			return (EINVAL);
-		if (*(int *)data != sc->sc_base.me_evp->io->p_pgid)
+		if (*(int *)data != sc->sc_base.me_evp->io->ps_pgid)
 			return (EPERM);
 		return (0);
 	}

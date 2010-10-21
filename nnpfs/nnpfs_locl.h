@@ -82,7 +82,6 @@ typedef struct nameidata nnpfs_componentname;
 
 #define cn_nameptr	ni_ptr
 #define cn_namelen	ni_namelen
-#define cn_hash		ni_hash
 #define cn_cred		ni_cred
 #define cn_nameiop	ni_nameiop
 #define cn_flags	ni_flags
@@ -372,7 +371,7 @@ struct nnpfs_setgroups_args{
 #define nnpfs_vfs_object_create(vp,proc,ucred) vfs_object_create(vp,proc,ucred)
 #endif
 
-#if  defined(UVM) || (defined(__NetBSD__) && __NetBSD_Version__ >= 105280000)
+#if  defined(UVM) || (defined(__NetBSD__) && __NetBSD_Version__ >= 105280000) || defined(__OpenBSD__)
 #define nnpfs_set_vp_size(vp, sz) uvm_vnp_setsize(vp, sz)
 #elif HAVE_KERNEL_VNODE_PAGER_SETSIZE
 #define nnpfs_set_vp_size(vp, sz) vnode_pager_setsize(vp, sz)

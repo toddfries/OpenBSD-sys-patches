@@ -1,4 +1,4 @@
-/*	$OpenBSD: atw.c,v 1.66 2009/06/03 20:00:36 deraadt Exp $	*/
+/*	$OpenBSD: atw.c,v 1.74 2010/09/20 00:11:37 jsg Exp $	*/
 /*	$NetBSD: atw.c,v 1.69 2004/07/23 07:07:55 dyoung Exp $	*/
 
 /*-
@@ -841,23 +841,6 @@ atw_attach(struct atw_softc *sc)
 	bpfattach(&sc->sc_radiobpf, ifp, DLT_IEEE802_11_RADIO,
 	    sizeof(struct ieee80211_frame) + 64);
 #endif
-
-	/*
-	 * Make sure the interface is shutdown during reboot.
-	 */
-	sc->sc_sdhook = shutdownhook_establish(atw_shutdown, sc);
-	if (sc->sc_sdhook == NULL)
-		printf("%s: WARNING: unable to establish shutdown hook\n",
-		    sc->sc_dev.dv_xname);
-
-	/*
-	 * Add a suspend hook to make sure we come back up after a
-	 * resume.
-	 */
-	sc->sc_powerhook = powerhook_establish(atw_power, sc);
-	if (sc->sc_powerhook == NULL)
-		printf("%s: WARNING: unable to establish power hook\n",
-		    sc->sc_dev.dv_xname);
 
 	memset(&sc->sc_rxtapu, 0, sizeof(sc->sc_rxtapu));
 	sc->sc_rxtap.ar_ihdr.it_len = sizeof(sc->sc_rxtapu);
@@ -1968,7 +1951,7 @@ atw_si4126_write(struct atw_softc *sc, u_int addr, u_int val)
 	ATW_WRITE(sc, ATW_SYNRF, reg | ATW_SYNRF_LEIF);
 	ATW_WRITE(sc, ATW_SYNRF, reg);
 
-	for (mask = BIT(nbits - 1); mask != 0; mask >>= 1) {
+	for (mask = (1 << (nbits - 1)); mask != 0; mask >>= 1) {
 		if ((bits & mask) != 0)
 			reg |= ATW_SYNRF_SYNDATA;
 		else
@@ -2034,7 +2017,7 @@ atw_si4126_read(struct atw_softc *sc, u_int addr, u_int *val)
 
 /* XXX is the endianness correct? test. */
 #define	atw_calchash(addr) \
-	(ether_crc32_le((addr), IEEE80211_ADDR_LEN) & BITS(5, 0))
+	(ether_crc32_le((addr), IEEE80211_ADDR_LEN) & 0x3f)
 
 /*
  * atw_filter_setup:
@@ -2309,15 +2292,20 @@ void
 atw_write_sup_rates(struct atw_softc *sc)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
-	/* 14 bytes are probably (XXX) reserved in the ADM8211 SRAM for
-	 * supported rates
+	/*
+	 * There is not enough space in the ADM8211 SRAM for the
+	 * full IEEE80211_RATE_MAXSIZE
 	 */
-	u_int8_t buf[roundup(1 /* length */ + IEEE80211_RATE_SIZE, 2)];
+	u_int8_t buf[12];
+	u_int8_t nrates;
 
 	memset(buf, 0, sizeof(buf));
-	buf[0] = ic->ic_bss->ni_rates.rs_nrates;
-	memcpy(&buf[1], ic->ic_bss->ni_rates.rs_rates,
-	    ic->ic_bss->ni_rates.rs_nrates);
+	if (ic->ic_bss->ni_rates.rs_nrates > sizeof(buf) - 1)
+		nrates = sizeof(buf) - 1;
+	else
+		nrates = ic->ic_bss->ni_rates.rs_nrates;
+	buf[0] = nrates;
+	memcpy(&buf[1], ic->ic_bss->ni_rates.rs_rates, nrates);
 
 	/* XXX deal with rev BA bug linux driver talks of? */
 
@@ -2757,24 +2745,10 @@ atw_detach(struct atw_softc *sc)
 	    sizeof(struct atw_control_data));
 	bus_dmamem_free(sc->sc_dmat, &sc->sc_cdseg, sc->sc_cdnseg);
 
-	if (sc->sc_sdhook != NULL)
-		shutdownhook_disestablish(sc->sc_sdhook);
-	if (sc->sc_powerhook != NULL)
-		powerhook_disestablish(sc->sc_powerhook);
-
 	if (sc->sc_srom)
 		free(sc->sc_srom, M_DEVBUF);
 
 	return (0);
-}
-
-/* atw_shutdown: make sure the interface is stopped at reboot time. */
-void
-atw_shutdown(void *arg)
-{
-	struct atw_softc *sc = arg;
-
-	atw_stop(&sc->sc_ic.ic_if, 1);
 }
 
 int
@@ -3997,39 +3971,37 @@ atw_start(struct ifnet *ifp)
 	}
 }
 
-/*
- * atw_power:
- *
- *	Power management (suspend/resume) hook.
- */
-void
-atw_power(int why, void *arg)
+int
+atw_activate(struct device *self, int act)
 {
-	struct atw_softc *sc = arg;
+	struct atw_softc *sc = (struct atw_softc *)self;
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
-	int s;
 
-	DPRINTF(sc, ("%s: atw_power(%d,)\n", sc->sc_dev.dv_xname, why));
-
-	s = splnet();
-	switch (why) {
-	case PWR_STANDBY:
-		/* XXX do nothing. */
-		break;
-	case PWR_SUSPEND:
-		atw_stop(ifp, 1);
+	switch (act) {
+	case DVACT_SUSPEND:
+		if (ifp->if_flags & IFF_RUNNING)
+			atw_stop(ifp, 1);
 		if (sc->sc_power != NULL)
-			(*sc->sc_power)(sc, why);
+			(*sc->sc_power)(sc, act);
 		break;
-	case PWR_RESUME:
-		if (ifp->if_flags & IFF_UP) {
-			if (sc->sc_power != NULL)
-				(*sc->sc_power)(sc, why);
-			atw_init(ifp);
-		}
+	case DVACT_RESUME:
+		workq_queue_task(NULL, &sc->sc_resume_wqt, 0,
+		    atw_resume, sc, NULL);
 		break;
 	}
-	splx(s);
+	return 0;
+}
+
+void
+atw_resume(void *arg1, void *arg2)
+{
+	struct atw_softc *sc = (struct atw_softc *)arg1;
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
+
+	if (sc->sc_power != NULL)
+		(*sc->sc_power)(sc, DVACT_RESUME);
+	if (ifp->if_flags & IFF_UP)
+		atw_init(ifp);
 }
 
 /*

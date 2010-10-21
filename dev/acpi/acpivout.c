@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpivout.c,v 1.4 2009/06/04 17:25:51 pirofti Exp $	*/
+/*	$OpenBSD: acpivout.c,v 1.7 2010/08/08 20:45:18 kettenis Exp $	*/
 /*
  * Copyright (c) 2009 Paul Irofti <pirofti@openbsd.org>
  *
@@ -61,9 +61,9 @@ struct acpivout_softc {
 
 	int	sc_dod;
 	int	sc_vout_type;
-#define ACPIVOUT_OTHER	 	0
+#define ACPIVOUT_OTHER		0
 #define ACPIVOUT_VGA		1
-#define ACPIVOUT_TV 		2
+#define ACPIVOUT_TV		2
 #define ACPIVOUT_DVI		3
 #define ACPIVOUT_LCD		4
 
@@ -250,7 +250,10 @@ acpivout_find_brightness(struct acpivout_softc *sc, int level)
 		if  (mid < level && level <= sc->sc_bcl[i + 1])
 			return sc->sc_bcl[i + 1];
 	}
-	return sc->sc_bcl[i];
+	if (level < sc->sc_bcl[0])
+		return sc->sc_bcl[0];
+	else
+		return sc->sc_bcl[i];
 }
 
 void
@@ -331,9 +334,11 @@ acpivout_get_param(struct wsdisplay_param *dp)
 				break;
 		}
 		if (sc != NULL && sc->sc_bcl_len != 0) {
-			dp->min = sc->sc_bcl[0];
+			dp->min = 0;
 			dp->max =  sc->sc_bcl[sc->sc_bcl_len - 1];
+			rw_enter_write(&sc->sc_acpi->sc_lck);
 			dp->curval = acpivout_get_brightness(sc);
+			rw_exit_write(&sc->sc_acpi->sc_lck);
 			if (dp->curval != -1)
 				return 0;
 		}
@@ -360,8 +365,10 @@ acpivout_set_param(struct wsdisplay_param *dp)
 				break;
 		}
 		if (sc != NULL && sc->sc_bcl_len != 0) {
+			rw_enter_write(&sc->sc_acpi->sc_lck);
 			exact = acpivout_find_brightness(sc, dp->curval);
 			acpivout_set_brightness(sc, exact);
+			rw_exit_write(&sc->sc_acpi->sc_lck);
 			return 0;
 		}
 		return -1;

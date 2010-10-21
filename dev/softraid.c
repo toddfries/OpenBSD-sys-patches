@@ -1,7 +1,8 @@
-/* $OpenBSD: softraid.c,v 1.150 2009/06/12 17:22:52 jsing Exp $ */
+/* $OpenBSD: softraid.c,v 1.215 2010/10/12 00:53:32 krw Exp $ */
 /*
- * Copyright (c) 2007 Marco Peereboom <marco@peereboom.us>
+ * Copyright (c) 2007, 2008, 2009 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
+ * Copyright (c) 2009 Joel Sing <jsing@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -39,6 +40,7 @@
 #include <sys/uio.h>
 #include <sys/workq.h>
 #include <sys/kthread.h>
+#include <sys/dkio.h>
 
 #ifdef AOE
 #include <sys/mbuf.h>
@@ -74,11 +76,9 @@ uint32_t	sr_debug = 0
 int		sr_match(struct device *, void *, void *);
 void		sr_attach(struct device *, struct device *, void *);
 int		sr_detach(struct device *, int);
-int		sr_activate(struct device *, enum devact);
 
 struct cfattach softraid_ca = {
 	sizeof(struct sr_softc), sr_match, sr_attach, sr_detach,
-	sr_activate
 };
 
 struct cfdriver softraid_cd = {
@@ -86,12 +86,12 @@ struct cfdriver softraid_cd = {
 };
 
 /* scsi & discipline */
-int			sr_scsi_cmd(struct scsi_xfer *);
+void			sr_scsi_cmd(struct scsi_xfer *);
 void			sr_minphys(struct buf *bp, struct scsi_link *sl);
 void			sr_copy_internal_data(struct scsi_xfer *,
 			    void *, size_t);
 int			sr_scsi_ioctl(struct scsi_link *, u_long,
-			    caddr_t, int, struct proc *);
+			    caddr_t, int);
 int			sr_ioctl(struct device *, u_long, caddr_t);
 int			sr_ioctl_inq(struct sr_softc *, struct bioc_inq *);
 int			sr_ioctl_vol(struct sr_softc *, struct bioc_vol *);
@@ -102,6 +102,10 @@ int			sr_ioctl_createraid(struct sr_softc *,
 			    struct bioc_createraid *, int);
 int			sr_ioctl_deleteraid(struct sr_softc *,
 			    struct bioc_deleteraid *);
+int			sr_ioctl_discipline(struct sr_softc *,
+			    struct bioc_discipline *);
+int			sr_ioctl_installboot(struct sr_softc *,
+			    struct bioc_installboot *);
 void			sr_chunks_unwind(struct sr_softc *,
 			    struct sr_chunk_head *);
 void			sr_discipline_free(struct sr_discipline *);
@@ -113,12 +117,15 @@ void			sr_shutdown(void *);
 void			sr_uuid_get(struct sr_uuid *);
 void			sr_uuid_print(struct sr_uuid *, int);
 void			sr_checksum_print(u_int8_t *);
-void			sr_checksum(struct sr_softc *, void *, void *,
-			    u_int32_t);
 int			sr_boot_assembly(struct sr_softc *);
 int			sr_already_assembled(struct sr_discipline *);
+int			sr_hotspare(struct sr_softc *, dev_t);
+void			sr_hotspare_rebuild(struct sr_discipline *);
+int			sr_rebuild_init(struct sr_discipline *, dev_t, int);
 void			sr_rebuild(void *);
 void			sr_rebuild_thread(void *);
+void			sr_roam_chunks(struct sr_discipline *);
+int			sr_chunk_in_use(struct sr_softc *, dev_t);
 
 /* don't include these on RAMDISK */
 #ifndef SMALL_KERNEL
@@ -129,20 +136,16 @@ void			sr_sensors_delete(struct sr_discipline *);
 
 /* metadata */
 int			sr_meta_probe(struct sr_discipline *, dev_t *, int);
-int			sr_meta_attach(struct sr_discipline *, int);
-void			sr_meta_getdevname(struct sr_softc *, dev_t, char *,
-			    int);
+int			sr_meta_attach(struct sr_discipline *, int, int);
 int			sr_meta_rw(struct sr_discipline *, dev_t, void *,
 			    size_t, daddr64_t, long);
 int			sr_meta_clear(struct sr_discipline *);
-int			sr_meta_read(struct sr_discipline *);
-int			sr_meta_save(struct sr_discipline *, u_int32_t);
-int			sr_meta_validate(struct sr_discipline *, dev_t,
-			    struct sr_metadata *, void *);
 void			sr_meta_chunks_create(struct sr_softc *,
 			    struct sr_chunk_head *);
 void			sr_meta_init(struct sr_discipline *,
 			    struct sr_chunk_head *);
+void			sr_meta_opt_load(struct sr_discipline *,
+			    struct sr_meta_opt *);
 
 /* hotplug magic */
 void			sr_disk_attach(struct disk *, int);
@@ -164,20 +167,14 @@ struct scsi_adapter sr_switch = {
 	sr_scsi_cmd, sr_minphys, NULL, NULL, sr_scsi_ioctl
 };
 
-struct scsi_device sr_dev = {
-	NULL, NULL, NULL, NULL
-};
-
 /* native metadata format */
-int			sr_meta_native_bootprobe(struct sr_softc *,
-			    struct device *, struct sr_metadata_list_head *);
+int			sr_meta_native_bootprobe(struct sr_softc *, dev_t,
+			    struct sr_metadata_list_head *);
 #define SR_META_NOTCLAIMED	(0)
 #define SR_META_CLAIMED		(1)
 int			sr_meta_native_probe(struct sr_softc *,
 			   struct sr_chunk *);
 int			sr_meta_native_attach(struct sr_discipline *, int);
-int			sr_meta_native_read(struct sr_discipline *, dev_t,
-			    struct sr_metadata *, void *);
 int			sr_meta_native_write(struct sr_discipline *, dev_t,
 			    struct sr_metadata *,void *);
 
@@ -205,24 +202,22 @@ struct sr_meta_driver {
 } smd[] = {
 	{ SR_META_OFFSET, SR_META_SIZE * 512,
 	  sr_meta_native_probe, sr_meta_native_attach, NULL,
-	  sr_meta_native_read , sr_meta_native_write, NULL },
-#define SR_META_F_NATIVE	0
+	  sr_meta_native_read, sr_meta_native_write, NULL },
 	{ 0, 0, NULL, NULL, NULL, NULL }
-#define SR_META_F_INVALID	-1
 };
 
 int
-sr_meta_attach(struct sr_discipline *sd, int force)
+sr_meta_attach(struct sr_discipline *sd, int chunk_no, int force)
 {
 	struct sr_softc		*sc = sd->sd_sc;
 	struct sr_chunk_head	*cl;
-	struct sr_chunk		*ch_entry;
+	struct sr_chunk		*ch_entry, *chunk1, *chunk2;
 	int			rv = 1, i = 0;
 
 	DNPRINTF(SR_D_META, "%s: sr_meta_attach(%d)\n", DEVNAME(sc));
 
 	/* in memory copy of metadata */
-	sd->sd_meta = malloc(SR_META_SIZE * 512 , M_DEVBUF, M_ZERO);
+	sd->sd_meta = malloc(SR_META_SIZE * 512, M_DEVBUF, M_ZERO | M_NOWAIT);
 	if (!sd->sd_meta) {
 		printf("%s: could not allocate memory for metadata\n",
 		    DEVNAME(sc));
@@ -232,7 +227,7 @@ sr_meta_attach(struct sr_discipline *sd, int force)
 	if (sd->sd_meta_type != SR_META_F_NATIVE) {
 		/* in memory copy of foreign metadata */
 		sd->sd_meta_foreign = malloc(smd[sd->sd_meta_type].smd_size,
-		    M_DEVBUF, M_ZERO);
+		    M_DEVBUF, M_ZERO | M_NOWAIT);
 		if (!sd->sd_meta_foreign) {
 			/* unwind frees sd_meta */
 			printf("%s: could not allocate memory for foreign "
@@ -243,10 +238,7 @@ sr_meta_attach(struct sr_discipline *sd, int force)
 
 	/* we have a valid list now create an array index */
 	cl = &sd->sd_vol.sv_chunk_list;
-	SLIST_FOREACH(ch_entry, cl, src_link) {
-		i++;
-	}
-	sd->sd_vol.sv_chunks = malloc(sizeof(struct sr_chunk *) * i,
+	sd->sd_vol.sv_chunks = malloc(sizeof(struct sr_chunk *) * chunk_no,
 	    M_DEVBUF, M_WAITOK | M_ZERO);
 
 	/* fill out chunk array */
@@ -258,6 +250,27 @@ sr_meta_attach(struct sr_discipline *sd, int force)
 	if (smd[sd->sd_meta_type].smd_attach(sd, force))
 		goto bad;
 
+	/* Force chunks into correct order now that metadata is attached. */
+	SLIST_FOREACH(ch_entry, cl, src_link)
+		SLIST_REMOVE(cl, ch_entry, sr_chunk, src_link);
+	for (i = 0; i < chunk_no; i++) {
+		ch_entry = sd->sd_vol.sv_chunks[i];
+		chunk2 = NULL;
+		SLIST_FOREACH(chunk1, cl, src_link) {
+			if (chunk1->src_meta.scmi.scm_chunk_id >
+			    ch_entry->src_meta.scmi.scm_chunk_id)
+				break;
+			chunk2 = chunk1;
+		}
+		if (chunk2 == NULL)
+			SLIST_INSERT_HEAD(cl, ch_entry, src_link);
+		else
+			SLIST_INSERT_AFTER(chunk2, ch_entry, src_link);
+	}
+	i = 0;
+	SLIST_FOREACH(ch_entry, cl, src_link)
+		sd->sd_vol.sv_chunks[i++] = ch_entry;
+
 	rv = 0;
 bad:
 	return (rv);
@@ -267,7 +280,7 @@ int
 sr_meta_probe(struct sr_discipline *sd, dev_t *dt, int no_chunk)
 {
 	struct sr_softc		*sc = sd->sd_sc;
-	struct bdevsw		*bdsw;
+	struct vnode		*vn;
 	struct sr_chunk		*ch_entry, *ch_prev = NULL;
 	struct sr_chunk_head	*cl;
 	char			devname[32];
@@ -299,23 +312,27 @@ sr_meta_probe(struct sr_discipline *sd, dev_t *dt, int no_chunk)
 			continue;
 		} else {
 			sr_meta_getdevname(sc, dev, devname, sizeof(devname));
-			bdsw = bdevsw_lookup(dev);
+			if (bdevvp(dev, &vn)) {
+				printf("%s:, sr_meta_probe: can't allocate "
+				    "vnode\n", DEVNAME(sc));
+				goto unwind;
+			}
 
 			/*
 			 * XXX leaving dev open for now; move this to attach
 			 * and figure out the open/close dance for unwind.
 			 */
-			error = bdsw->d_open(dev, FREAD | FWRITE, S_IFBLK,
-			    curproc);
+			error = VOP_OPEN(vn, FREAD | FWRITE, NOCRED, curproc);
 			if (error) {
 				DNPRINTF(SR_D_META,"%s: sr_meta_probe can't "
 				    "open %s\n", DEVNAME(sc), devname);
-				/* dev isn't open but will be closed anyway */
+				vput(vn);
 				goto unwind;
 			}
 
 			strlcpy(ch_entry->src_devname, devname,
-			   sizeof(ch_entry->src_devname));
+			    sizeof(ch_entry->src_devname));
+			ch_entry->src_vn = vn;
 		}
 
 		/* determine if this is a device we understand */
@@ -379,12 +396,12 @@ sr_meta_rw(struct sr_discipline *sd, dev_t dev, void *md, size_t sz,
 	DNPRINTF(SR_D_META, "%s: sr_meta_rw(0x%x, %p, %d, %llu 0x%x)\n",
 	    DEVNAME(sc), dev, md, sz, ofs, flags);
 
+	bzero(&b, sizeof(b));
+
 	if (md == NULL) {
 		printf("%s: read invalid metadata pointer\n", DEVNAME(sc));
 		goto done;
 	}
-
-	bzero(&b, sizeof(b));
 	b.b_flags = flags | B_PHYS;
 	b.b_blkno = ofs;
 	b.b_bcount = sz;
@@ -394,10 +411,16 @@ sr_meta_rw(struct sr_discipline *sd, dev_t dev, void *md, size_t sz,
 	b.b_error = 0;
 	b.b_proc = curproc;
 	b.b_dev = dev;
-	b.b_vp = NULL;
 	b.b_iodone = NULL;
+	if (bdevvp(dev, &b.b_vp)) {
+		printf("%s: sr_meta_rw: can't allocate vnode\n", DEVNAME(sc));
+		goto done;
+	}
+	if ((b.b_flags & B_READ) == 0)
+		b.b_vp->v_numoutput++;
+
 	LIST_INIT(&b.b_dep);
-	bdevsw_lookup(b.b_dev)->d_strategy(&b);
+	VOP_STRATEGY(&b);
 	biowait(&b);
 
 	if (b.b_flags & B_ERROR) {
@@ -407,6 +430,9 @@ sr_meta_rw(struct sr_discipline *sd, dev_t dev, void *md, size_t sz,
 	}
 	rv = 0;
 done:
+	if (b.b_vp)
+		vput(b.b_vp);
+
 	return (rv);
 }
 
@@ -427,7 +453,7 @@ sr_meta_clear(struct sr_discipline *sd)
 		goto done;
 	}
 
-	m = malloc(SR_META_SIZE * 512 , M_DEVBUF, M_WAITOK | M_ZERO);
+	m = malloc(SR_META_SIZE * 512, M_DEVBUF, M_WAITOK | M_ZERO);
 	SLIST_FOREACH(ch_entry, cl, src_link) {
 		if (sr_meta_native_write(sd, ch_entry->src_dev_mm, m, NULL)) {
 			/* XXX mark disk offline */
@@ -437,7 +463,6 @@ sr_meta_clear(struct sr_discipline *sd)
 			continue;
 		}
 		bzero(&ch_entry->src_meta, sizeof(ch_entry->src_meta));
-		bzero(&ch_entry->src_opt, sizeof(ch_entry->src_opt));
 	}
 
 	bzero(sd->sd_meta, SR_META_SIZE * 512);
@@ -469,7 +494,7 @@ sr_meta_chunks_create(struct sr_softc *sc, struct sr_chunk_head *cl)
 		ch_entry->src_meta.scm_status = BIOC_SDONLINE;
 		strlcpy(ch_entry->src_meta.scmi.scm_devname, name,
 		    sizeof(ch_entry->src_meta.scmi.scm_devname));
-		bcopy(&uuid,  &ch_entry->src_meta.scmi.scm_uuid,
+		bcopy(&uuid, &ch_entry->src_meta.scmi.scm_uuid,
 		    sizeof(ch_entry->src_meta.scmi.scm_uuid));
 
 		if (ch_entry->src_meta.scmi.scm_size > max_chunk_sz)
@@ -499,7 +524,6 @@ sr_meta_init(struct sr_discipline *sd, struct sr_chunk_head *cl)
 	struct sr_softc		*sc = sd->sd_sc;
 	struct sr_metadata	*sm = sd->sd_meta;
 	struct sr_meta_chunk	*im_sc;
-	struct sr_meta_opt	*im_so;
 	int			i, chunk_no;
 
 	DNPRINTF(SR_D_META, "%s: sr_meta_init\n", DEVNAME(sc));
@@ -511,7 +535,9 @@ sr_meta_init(struct sr_discipline *sd, struct sr_chunk_head *cl)
 	sm->ssdi.ssd_magic = SR_MAGIC;
 	sm->ssdi.ssd_version = SR_META_VERSION;
 	sm->ssd_ondisk = 0;
-	sm->ssdi.ssd_flags = sd->sd_meta_flags;
+	sm->ssdi.ssd_vol_flags = sd->sd_meta_flags;
+	sm->ssd_data_offset = SR_DATA_OFFSET;
+
 	/* get uuid from chunk 0 */
 	bcopy(&sd->sd_vol.sv_chunks[0]->src_meta.scmi.scm_uuid,
 	    &sm->ssdi.ssd_uuid,
@@ -526,26 +552,17 @@ sr_meta_init(struct sr_discipline *sd, struct sr_chunk_head *cl)
 		im_sc->scmi.scm_volid = sm->ssdi.ssd_volid;
 		sr_checksum(sc, im_sc, &im_sc->scm_checksum,
 		    sizeof(struct sr_meta_chunk_invariant));
-
-		/* carry optional meta also in chunk area */
-		im_so = &sd->sd_vol.sv_chunks[i]->src_opt;
-		bzero(im_so, sizeof(*im_so));
-		if (sd->sd_type == SR_MD_CRYPTO) {
-			sm->ssdi.ssd_opt_no = 1;
-			im_so->somi.som_type = SR_OPT_CRYPTO;
-
-			/*
-			 * copy encrypted key / passphrase into optional
-			 * metadata area
-			 */
-			bcopy(&sd->mds.mdd_crypto.scr_meta,
-			    &im_so->somi.som_meta.smm_crypto,
-			    sizeof(im_so->somi.som_meta.smm_crypto));
-
-			sr_checksum(sc, im_so, im_so->som_checksum,
-			    sizeof(struct sr_meta_opt_invariant));
-		}
 	}
+}
+
+void
+sr_meta_opt_load(struct sr_discipline *sd, struct sr_meta_opt *om)
+{
+	if (om->somi.som_type == SR_OPT_BOOT) {
+
+
+	} else
+		panic("unknown optional metadata type");
 }
 
 void
@@ -573,6 +590,7 @@ sr_meta_save(struct sr_discipline *sd, u_int32_t flags)
 	struct sr_chunk		*src;
 	struct sr_meta_chunk	*cm;
 	struct sr_workunit	wu;
+	struct sr_meta_opt_item *omi;
 	struct sr_meta_opt	*om;
 	int			i;
 
@@ -586,15 +604,12 @@ sr_meta_save(struct sr_discipline *sd, u_int32_t flags)
 
 	/* meta scratchpad */
 	s = &smd[sd->sd_meta_type];
-	m = malloc(SR_META_SIZE * 512 , M_DEVBUF, M_ZERO);
+	m = malloc(SR_META_SIZE * 512, M_DEVBUF, M_ZERO | M_NOWAIT);
 	if (!m) {
 		printf("%s: could not allocate metadata scratch area\n",
 		    DEVNAME(sc));
 		goto bad;
 	}
-
-	if (sm->ssdi.ssd_opt_no > 1)
-		panic("not yet save > 1 optional metadata members");
 
 	/* from here on out metadata is updated */
 restart:
@@ -602,18 +617,21 @@ restart:
 	sm->ssd_meta_flags = flags;
 	bcopy(sm, m, sizeof(*m));
 
+	/* Chunk metadata. */
+	cm = (struct sr_meta_chunk *)(m + 1);
 	for (i = 0; i < sm->ssdi.ssd_chunk_no; i++) {
 		src = sd->sd_vol.sv_chunks[i];
-		cm = (struct sr_meta_chunk *)(m + 1);
-		bcopy(&src->src_meta, cm + i, sizeof(*cm));
+		bcopy(&src->src_meta, cm, sizeof(*cm));
+		cm++;
 	}
 
-	/* optional metadata */
-	om = (struct sr_meta_opt *)(cm + i);
-	for (i = 0; i < sm->ssdi.ssd_opt_no; i++) {
-		bcopy(&src->src_opt, om + i, sizeof(*om));
+	/* Optional metadata. */
+	om = (struct sr_meta_opt *)(cm);
+	SLIST_FOREACH(omi, &sd->sd_meta_opt, omi_link) {
+		bcopy(&omi->omi_om, om, sizeof(*om));
 		sr_checksum(sc, om, &om->som_checksum,
 		    sizeof(struct sr_meta_opt_invariant));
+		om++;
 	}
 
 	for (i = 0; i < sm->ssdi.ssd_chunk_no; i++) {
@@ -623,7 +641,7 @@ restart:
 		if (src->src_meta.scm_status == BIOC_SDOFFLINE)
 			continue;
 
-		/* calculate metdata checksum for correct chunk */
+		/* calculate metadata checksum for correct chunk */
 		m->ssdi.ssd_chunk_id = i;
 		sr_checksum(sc, m, &m->ssd_checksum,
 		    sizeof(struct sr_meta_invariant));
@@ -651,7 +669,7 @@ restart:
 		}
 	}
 
-	/* not al disciplines have sync */
+	/* not all disciplines have sync */
 	if (sd->sd_scsi_sync) {
 		bzero(&wu, sizeof(wu));
 		wu.swu_fake = 1;
@@ -675,16 +693,17 @@ sr_meta_read(struct sr_discipline *sd)
 	struct sr_chunk		*ch_entry;
 	struct sr_meta_chunk	*cp;
 	struct sr_meta_driver	*s;
+	struct sr_meta_opt_item *omi;
 	struct sr_meta_opt	*om;
 	void			*fm = NULL;
-	int			no_disk = 0, got_meta = 0;
+	int			i, no_disk = 0, got_meta = 0;
 
 	DNPRINTF(SR_D_META, "%s: sr_meta_read\n", DEVNAME(sc));
 
 	sm = malloc(SR_META_SIZE * 512, M_DEVBUF, M_WAITOK | M_ZERO);
 	s = &smd[sd->sd_meta_type];
 	if (sd->sd_meta_type != SR_META_F_NATIVE)
-		fm = malloc(s->smd_size , M_DEVBUF, M_WAITOK | M_ZERO);
+		fm = malloc(s->smd_size, M_DEVBUF, M_WAITOK | M_ZERO);
 
 	cp = (struct sr_meta_chunk *)(sm + 1);
 	SLIST_FOREACH(ch_entry, cl, src_link) {
@@ -727,22 +746,24 @@ sr_meta_read(struct sr_discipline *sd)
 
 		bcopy(cp, &ch_entry->src_meta, sizeof(ch_entry->src_meta));
 
-		if (sm->ssdi.ssd_opt_no > 1)
-			panic("not yet read > 1 optional metadata members");
+		/* Process optional metadata. */
+		om = (struct sr_meta_opt *) ((u_int8_t *)(sm + 1) +
+		    sizeof(struct sr_meta_chunk) * sm->ssdi.ssd_chunk_no);
+		for (i = 0; i < sm->ssdi.ssd_opt_no; i++) {
 
-		if (sm->ssdi.ssd_opt_no) {
-			om = (struct sr_meta_opt *) ((u_int8_t *)(sm + 1) +
-			    sizeof(struct sr_meta_chunk) *
-			    sm->ssdi.ssd_chunk_no);
-			bcopy(om, &ch_entry->src_opt,
-			    sizeof(ch_entry->src_opt));
+			omi = malloc(sizeof(struct sr_meta_opt_item),
+			    M_DEVBUF, M_WAITOK | M_ZERO);
+			bcopy(om, &omi->omi_om, sizeof(struct sr_meta_opt));
+			SLIST_INSERT_HEAD(&sd->sd_meta_opt, omi, omi_link);
 
-			if (om->somi.som_type == SR_OPT_CRYPTO) {
-				bcopy(
-				    &ch_entry->src_opt.somi.som_meta.smm_crypto,
-				    &sd->mds.mdd_crypto.scr_meta,
-				    sizeof(sd->mds.mdd_crypto.scr_meta));
-			}
+			/* See if discipline wants to handle it. */
+			if (sd->sd_meta_opt_load &&
+			    sd->sd_meta_opt_load(sd, &omi->omi_om) == 0)
+				continue;
+			else
+				sr_meta_opt_load(sd, &omi->omi_om);
+
+			om++;
 		}
 
 		cp++;
@@ -765,7 +786,9 @@ sr_meta_validate(struct sr_discipline *sd, dev_t dev, struct sr_metadata *sm,
 {
 	struct sr_softc		*sc = sd->sd_sc;
 	struct sr_meta_driver	*s;
+#ifdef SR_DEBUG
 	struct sr_meta_chunk	*mc;
+#endif
 	char			devname[32];
 	int			rv = 1;
 	u_int8_t		checksum[MD5_DIGEST_LENGTH];
@@ -791,27 +814,53 @@ sr_meta_validate(struct sr_discipline *sd, dev_t dev, struct sr_metadata *sm,
 		goto done;
 	}
 
-	if (sm->ssdi.ssd_version != SR_META_VERSION) {
-		printf("%s: %s can not read metadata version %u, expected %u\n",
-		    DEVNAME(sc), devname, sm->ssdi.ssd_version,
-		    SR_META_VERSION);
-		goto done;
-	}
-
+	/* Verify metadata checksum. */
 	sr_checksum(sc, sm, &checksum, sizeof(struct sr_meta_invariant));
 	if (bcmp(&checksum, &sm->ssd_checksum, sizeof(checksum))) {
 		printf("%s: invalid metadata checksum\n", DEVNAME(sc));
 		goto done;
 	}
 
-	/* XXX do other checksums */
+	/* Handle changes between versions. */
+	if (sm->ssdi.ssd_version == 3) {
 
+		/*
+		 * Version 3 - update metadata version and fix up data offset
+		 * value since this did not exist in version 3.
+		 */
+		sm->ssdi.ssd_version = SR_META_VERSION;
+		snprintf(sm->ssdi.ssd_revision, sizeof(sm->ssdi.ssd_revision),
+		    "%03d", SR_META_VERSION);
+		if (sm->ssd_data_offset == 0)
+			sm->ssd_data_offset = SR_META_V3_DATA_OFFSET;
+
+	} else if (sm->ssdi.ssd_version == SR_META_VERSION) {
+
+		/* 
+		 * Version 4 - original metadata format did not store
+		 * data offset so fix this up if necessary.
+		 */
+		if (sm->ssd_data_offset == 0)
+			sm->ssd_data_offset = SR_DATA_OFFSET;
+
+	} else {
+
+		printf("%s: %s can not read metadata version %u, expected %u\n",
+		    DEVNAME(sc), devname, sm->ssdi.ssd_version,
+		    SR_META_VERSION);
+		goto done;
+
+	}
+
+#ifdef SR_DEBUG
 	/* warn if disk changed order */
 	mc = (struct sr_meta_chunk *)(sm + 1);
 	if (strncmp(mc[sm->ssdi.ssd_chunk_id].scmi.scm_devname, devname,
 	    sizeof(mc[sm->ssdi.ssd_chunk_id].scmi.scm_devname)))
-		printf("%s: roaming device %s -> %s\n", DEVNAME(sc),
-		    mc[sm->ssdi.ssd_chunk_id].scmi.scm_devname, devname);
+		DNPRINTF(SR_D_META, "%s: roaming device %s -> %s\n",
+		    DEVNAME(sc), mc[sm->ssdi.ssd_chunk_id].scmi.scm_devname,
+		    devname);
+#endif
 
 	/* we have meta data on disk */
 	DNPRINTF(SR_D_META, "%s: sr_meta_validate valid metadata %s\n",
@@ -823,61 +872,64 @@ done:
 }
 
 int
-sr_meta_native_bootprobe(struct sr_softc *sc, struct device *dv,
+sr_meta_native_bootprobe(struct sr_softc *sc, dev_t devno,
     struct sr_metadata_list_head *mlh)
 {
-	struct bdevsw		*bdsw;
+	struct vnode		*vn;
 	struct disklabel	label;
-	struct sr_metadata	*md;
-	struct sr_discipline	*fake_sd;
+	struct sr_metadata	*md = NULL;
+	struct sr_discipline	*fake_sd = NULL;
 	struct sr_metadata_list *mle;
 	char			devname[32];
-	dev_t			dev, devr;
-	int			error, i, majdev;
+	dev_t			chrdev, rawdev;
+	int			error, i;
 	int			rv = SR_META_NOTCLAIMED;
 
 	DNPRINTF(SR_D_META, "%s: sr_meta_native_bootprobe\n", DEVNAME(sc));
 
-	majdev = findblkmajor(dv);
-	if (majdev == -1)
-		goto done;
-	dev = MAKEDISKDEV(majdev, dv->dv_unit, RAW_PART);
-	bdsw = &bdevsw[majdev];
-
 	/*
-	 * The devices are being opened with S_IFCHR instead of
-	 * S_IFBLK so that the SCSI mid-layer does not whine when
-	 * media is not inserted in certain devices like zip drives
-	 * and such.
+	 * Use character raw device to avoid SCSI complaints about missing
+	 * media on removable media devices.
 	 */
+	chrdev = blktochr(devno);
+	rawdev = MAKEDISKDEV(major(chrdev), DISKUNIT(devno), RAW_PART);
+	if (cdevvp(rawdev, &vn)) {
+		printf("%s:, sr_meta_native_bootprobe: can't allocate vnode\n",
+		    DEVNAME(sc));
+		goto done;
+	}
 
 	/* open device */
-	error = (*bdsw->d_open)(dev, FREAD, S_IFCHR, curproc);
+	error = VOP_OPEN(vn, FREAD, NOCRED, curproc);
 	if (error) {
 		DNPRINTF(SR_D_META, "%s: sr_meta_native_bootprobe open "
-		    "failed\n" , DEVNAME(sc));
+		    "failed\n", DEVNAME(sc));
+		vput(vn);
 		goto done;
 	}
 
 	/* get disklabel */
-	error = (*bdsw->d_ioctl)(dev, DIOCGDINFO, (void *)&label, FREAD,
+	error = VOP_IOCTL(vn, DIOCGDINFO, (caddr_t)&label, FREAD, NOCRED,
 	    curproc);
 	if (error) {
 		DNPRINTF(SR_D_META, "%s: sr_meta_native_bootprobe ioctl "
 		    "failed\n", DEVNAME(sc));
-		error = (*bdsw->d_close)(dev, FREAD, S_IFCHR, curproc);
+		VOP_CLOSE(vn, FREAD, NOCRED, curproc);
+		vput(vn);
 		goto done;
 	}
 
 	/* we are done, close device */
-	error = (*bdsw->d_close)(dev, FREAD, S_IFCHR, curproc);
+	error = VOP_CLOSE(vn, FREAD, NOCRED, curproc);
 	if (error) {
 		DNPRINTF(SR_D_META, "%s: sr_meta_native_bootprobe close "
 		    "failed\n", DEVNAME(sc));
+		vput(vn);
 		goto done;
 	}
+	vput(vn);
 
-	md = malloc(SR_META_SIZE * 512 , M_DEVBUF, M_ZERO);
+	md = malloc(SR_META_SIZE * 512, M_DEVBUF, M_ZERO | M_NOWAIT);
 	if (md == NULL) {
 		printf("%s: not enough memory for metadata buffer\n",
 		    DEVNAME(sc));
@@ -885,11 +937,12 @@ sr_meta_native_bootprobe(struct sr_softc *sc, struct device *dv,
 	}
 
 	/* create fake sd to use utility functions */
-	fake_sd = malloc(sizeof(struct sr_discipline) , M_DEVBUF, M_ZERO);
+	fake_sd = malloc(sizeof(struct sr_discipline), M_DEVBUF,
+	    M_ZERO | M_NOWAIT);
 	if (fake_sd == NULL) {
 		printf("%s: not enough memory for fake discipline\n",
 		    DEVNAME(sc));
-		goto nosd;
+		goto done;
 	}
 	fake_sd->sd_sc = sc;
 	fake_sd->sd_meta_type = SR_META_F_NATIVE;
@@ -899,27 +952,39 @@ sr_meta_native_bootprobe(struct sr_softc *sc, struct device *dv,
 			continue;
 
 		/* open partition */
-		devr = MAKEDISKDEV(majdev, dv->dv_unit, i);
-		error = (*bdsw->d_open)(devr, FREAD, S_IFCHR, curproc);
+		rawdev = MAKEDISKDEV(major(devno), DISKUNIT(devno), i);
+		if (bdevvp(rawdev, &vn)) {
+			printf("%s:, sr_meta_native_bootprobe: can't allocate "
+			    "vnode for partition\n", DEVNAME(sc));
+			goto done;
+		}
+		error = VOP_OPEN(vn, FREAD, NOCRED, curproc);
 		if (error) {
 			DNPRINTF(SR_D_META, "%s: sr_meta_native_bootprobe "
 			    "open failed, partition %d\n",
 			    DEVNAME(sc), i);
+			vput(vn);
 			continue;
 		}
 
-		if (sr_meta_native_read(fake_sd, devr, md, NULL)) {
+		if (sr_meta_native_read(fake_sd, rawdev, md, NULL)) {
 			printf("%s: native bootprobe could not read native "
 			    "metadata\n", DEVNAME(sc));
+			VOP_CLOSE(vn, FREAD, NOCRED, curproc);
+			vput(vn);
 			continue;
 		}
 
 		/* are we a softraid partition? */
-		if (md->ssdi.ssd_magic != SR_MAGIC)
+		if (md->ssdi.ssd_magic != SR_MAGIC) {
+			VOP_CLOSE(vn, FREAD, NOCRED, curproc);
+			vput(vn);
 			continue;
-		sr_meta_getdevname(sc, devr, devname, sizeof(devname));
-		if (sr_meta_validate(fake_sd, devr, md, NULL) == 0) {
-			if (md->ssdi.ssd_flags & BIOC_SCNOAUTOASSEMBLE) {
+		}
+
+		sr_meta_getdevname(sc, rawdev, devname, sizeof(devname));
+		if (sr_meta_validate(fake_sd, rawdev, md, NULL) == 0) {
+			if (md->ssdi.ssd_vol_flags & BIOC_SCNOAUTOASSEMBLE) {
 				DNPRINTF(SR_D_META, "%s: don't save %s\n",
 				    DEVNAME(sc), devname);
 			} else {
@@ -928,127 +993,362 @@ sr_meta_native_bootprobe(struct sr_softc *sc, struct device *dv,
 				    M_WAITOK | M_ZERO);
 				bcopy(md, &mle->sml_metadata,
 				    SR_META_SIZE * 512);
-				mle->sml_mm = devr;
+				mle->sml_mm = rawdev;
 				SLIST_INSERT_HEAD(mlh, mle, sml_link);
 				rv = SR_META_CLAIMED;
 			}
 		}
 
 		/* we are done, close partition */
-		error = (*bdsw->d_close)(devr, FREAD, S_IFCHR, curproc);
-		if (error) {
-			DNPRINTF(SR_D_META, "%s: sr_meta_native_bootprobe "
-			    "close failed\n", DEVNAME(sc));
-			continue;
-		}
+		VOP_CLOSE(vn, FREAD, NOCRED, curproc);
+		vput(vn);
 	}
 
-	free(fake_sd, M_DEVBUF);
-nosd:
-	free(md, M_DEVBUF);
 done:
+	if (fake_sd)
+		free(fake_sd, M_DEVBUF);
+	if (md)
+		free(md, M_DEVBUF);
+
 	return (rv);
 }
 
 int
 sr_boot_assembly(struct sr_softc *sc)
 {
-	struct device		*dv;
-	struct sr_metadata_list_head mlh;
-	struct sr_metadata_list *mle, *mle2;
-	struct sr_metadata	*m1, *m2;
+	struct disk		*dk;
+	struct sr_disk_head	sdklist;
+	struct sr_disk		*sdk;
 	struct bioc_createraid	bc;
-	int			rv = 0, no_dev, i;
-	dev_t			*dt = NULL;
+	struct sr_metadata_list_head mlh, kdh;
+	struct sr_metadata_list *mle, *mlenext, *mle1, *mle2;
+	struct sr_metadata	*metadata;
+	struct sr_boot_volume_head bvh;
+	struct sr_boot_volume	*vol, *vp1, *vp2;
+	struct sr_meta_chunk	*hm;
+	struct sr_chunk_head	*cl;
+	struct sr_chunk		*hotspare, *chunk, *last;
+	u_int32_t		chunk_id;
+	u_int64_t		*ondisk = NULL;
+	dev_t			*devs = NULL;
+	char			devname[32];
+	int			rv = 0, i;
 
 	DNPRINTF(SR_D_META, "%s: sr_boot_assembly\n", DEVNAME(sc));
 
+	SLIST_INIT(&sdklist);
 	SLIST_INIT(&mlh);
 
-	TAILQ_FOREACH(dv, &alldevs, dv_list) {
-		if (dv->dv_class != DV_DISK)
-			continue;
+	dk = TAILQ_FIRST(&disklist);
+	while (dk != TAILQ_END(&disklist)) {
 
-		/* XXX is there  a better way of excluding some devices? */
-		if (!strncmp(dv->dv_xname, "fd", 2) ||
-		    !strncmp(dv->dv_xname, "cd", 2) ||
-		    !strncmp(dv->dv_xname, "rx", 2))
+		/* See if this disk has been checked. */
+		SLIST_FOREACH(sdk, &sdklist, sdk_link)
+			if (sdk->sdk_devno == dk->dk_devno)
+				break;
+
+		if (sdk != NULL) {
+			dk = TAILQ_NEXT(dk, dk_link);
 			continue;
+		}
+
+		/* Add this disk to the list that we've checked. */
+		sdk = malloc(sizeof(struct sr_disk), M_DEVBUF,
+		    M_NOWAIT | M_CANFAIL | M_ZERO);
+		if (sdk == NULL)
+			goto unwind;
+		sdk->sdk_devno = dk->dk_devno;
+		SLIST_INSERT_HEAD(&sdklist, sdk, sdk_link);
+
+		/* Only check sd(4) and wd(4) devices. */
+		if (strncmp(dk->dk_name, "sd", 2) &&
+		    strncmp(dk->dk_name, "wd", 2)) {
+			dk = TAILQ_NEXT(dk, dk_link);
+			continue;
+		}
 
 		/* native softraid uses partitions */
-		if (sr_meta_native_bootprobe(sc, dv, &mlh) == SR_META_CLAIMED)
-			continue;
+		sr_meta_native_bootprobe(sc, dk->dk_devno, &mlh);
 
-		/* probe non-native disks */
+		/* probe non-native disks if native failed. */
+
+		/* Restart scan since we may have slept. */
+		dk = TAILQ_FIRST(&disklist);
 	}
 
 	/*
-	 * XXX poor mans hack that doesn't keep disks in order and does not
-	 * roam disks correctly.  replace this with something smarter that
-	 * orders disks by volid, chunkid and uuid.
+	 * Create a list of volumes and associate chunks with each volume.
 	 */
-	dt = malloc(BIOC_CRMAXLEN * sizeof(dev_t), M_DEVBUF, M_WAITOK);
-	for (i = 0; i < BIOC_CRMAXLEN; i++)
-		dt[i] = NODEV; /* mark device as illegal */
-	SLIST_FOREACH(mle, &mlh, sml_link) {
-		/* chunk used already? */
-		if (mle->sml_used)
+
+	SLIST_INIT(&bvh);
+	SLIST_INIT(&kdh);
+
+	for (mle = SLIST_FIRST(&mlh); mle != SLIST_END(&mlh); mle = mlenext) {
+
+		mlenext = SLIST_NEXT(mle, sml_link);
+		SLIST_REMOVE(&mlh, mle, sr_metadata_list, sml_link);
+
+		metadata = (struct sr_metadata *)&mle->sml_metadata;
+		mle->sml_chunk_id = metadata->ssdi.ssd_chunk_id;
+
+		/* Handle key disks separately. */
+		if (metadata->ssdi.ssd_level == SR_KEYDISK_LEVEL) {
+			SLIST_INSERT_HEAD(&kdh, mle, sml_link);
 			continue;
+		}
 
-		no_dev = 0;
-		m1 = (struct sr_metadata *)&mle->sml_metadata;
-		SLIST_FOREACH(mle2, &mlh, sml_link) {
-			/* chunk used already? */
-			if (mle2->sml_used)
-				continue;
+		SLIST_FOREACH(vol, &bvh, sbv_link) {
+			if (bcmp(&metadata->ssdi.ssd_uuid, &vol->sbv_uuid,
+			    sizeof(metadata->ssdi.ssd_uuid)) == 0)
+				break;
+		}
 
-			m2 = (struct sr_metadata *)&mle2->sml_metadata;
-
-			/* are we the same volume? */
-			if (m1->ssdi.ssd_volid != m2->ssdi.ssd_volid)
-				continue;
-
-			/* same uuid? */
-			if (bcmp(&m1->ssdi.ssd_uuid, &m2->ssdi.ssd_uuid,
-			    sizeof(m1->ssdi.ssd_uuid)))
-				continue;
-
-			/* sanity */
-			if (dt[m2->ssdi.ssd_chunk_id] != NODEV) {
-				printf("%s: chunk id already in use; can not "
-				    "assemble volume\n", DEVNAME(sc));
+		if (vol == NULL) {
+			vol = malloc(sizeof(struct sr_boot_volume),
+			    M_DEVBUF, M_NOWAIT | M_CANFAIL | M_ZERO);
+			if (vol == NULL) {
+				printf("%s: failed to allocate boot volume!\n",
+				    DEVNAME(sc));
 				goto unwind;
 			}
-			dt[m2->ssdi.ssd_chunk_id] = mle2->sml_mm;
-			no_dev++;
-			mle2->sml_used = 1;
-		}
-		if (m1->ssdi.ssd_chunk_no != no_dev) {
-			printf("%s: not all chunks were provided; "
-			    "attempting to bring volume %d online\n",
-			    DEVNAME(sc), m1->ssdi.ssd_volid);
-			no_dev = m1->ssdi.ssd_chunk_no;
+
+			vol->sbv_level = metadata->ssdi.ssd_level;
+			vol->sbv_volid = metadata->ssdi.ssd_volid;
+			vol->sbv_chunk_no = metadata->ssdi.ssd_chunk_no;
+			bcopy(&metadata->ssdi.ssd_uuid, &vol->sbv_uuid,
+			    sizeof(metadata->ssdi.ssd_uuid));
+			SLIST_INIT(&vol->sml);
+
+			/* Maintain volume order. */
+			vp2 = NULL;
+			SLIST_FOREACH(vp1, &bvh, sbv_link) {
+				if (vp1->sbv_volid > vol->sbv_volid)
+					break;
+				vp2 = vp1;
+			}
+			if (vp2 == NULL) {
+				DNPRINTF(SR_D_META, "%s: insert volume %u "
+				    "at head\n", DEVNAME(sc), vol->sbv_volid);
+				SLIST_INSERT_HEAD(&bvh, vol, sbv_link);
+			} else {
+				DNPRINTF(SR_D_META, "%s: insert volume %u "
+				    "after %u\n", DEVNAME(sc), vol->sbv_volid,
+				    vp2->sbv_volid);
+				SLIST_INSERT_AFTER(vp2, vol, sbv_link);
+			}
 		}
 
+		/* Maintain chunk order. */
+		mle2 = NULL;
+		SLIST_FOREACH(mle1, &vol->sml, sml_link) {
+			if (mle1->sml_chunk_id > mle->sml_chunk_id)
+				break;
+			mle2 = mle1;
+		}
+		if (mle2 == NULL) {
+			DNPRINTF(SR_D_META, "%s: volume %u insert chunk %u "
+			    "at head\n", DEVNAME(sc), vol->sbv_volid,
+			    mle->sml_chunk_id);
+			SLIST_INSERT_HEAD(&vol->sml, mle, sml_link);
+		} else {
+			DNPRINTF(SR_D_META, "%s: volume %u insert chunk %u "
+			    "after %u\n", DEVNAME(sc), vol->sbv_volid,
+			    mle->sml_chunk_id, mle2->sml_chunk_id);
+			SLIST_INSERT_AFTER(mle2, mle, sml_link);
+		}
+
+		vol->sbv_dev_no++;
+	}
+
+	/* Allocate memory for device and ondisk version arrays. */
+	devs = malloc(BIOC_CRMAXLEN * sizeof(dev_t), M_DEVBUF,
+	    M_NOWAIT | M_CANFAIL);
+	if (devs == NULL) {
+		printf("%s: failed to allocate device array\n", DEVNAME(sc));
+		goto unwind;
+	}
+	ondisk = malloc(BIOC_CRMAXLEN * sizeof(u_int64_t), M_DEVBUF,
+	    M_NOWAIT | M_CANFAIL);
+	if (ondisk == NULL) {
+		printf("%s: failed to allocate ondisk array\n", DEVNAME(sc));
+		goto unwind;
+	}
+
+	/*
+	 * Assemble hotspare "volumes".
+	 */
+	SLIST_FOREACH(vol, &bvh, sbv_link) {
+
+		/* Check if this is a hotspare "volume". */
+		if (vol->sbv_level != SR_HOTSPARE_LEVEL ||
+		    vol->sbv_chunk_no != 1)
+			continue;
+
+#ifdef SR_DEBUG
+		DNPRINTF(SR_D_META, "%s: assembling hotspare volume ",
+		    DEVNAME(sc));
+		if (sr_debug & SR_D_META)
+			sr_uuid_print(&vol->sbv_uuid, 0);
+		DNPRINTF(SR_D_META, " volid %u with %u chunks\n",
+		    vol->sbv_volid, vol->sbv_chunk_no);
+#endif
+	
+		/* Create hotspare chunk metadata. */
+		hotspare = malloc(sizeof(struct sr_chunk), M_DEVBUF,
+		    M_NOWAIT | M_CANFAIL | M_ZERO);
+		if (hotspare == NULL) {
+			printf("%s: failed to allocate hotspare\n",
+			    DEVNAME(sc));
+			goto unwind;
+		}
+
+		mle = SLIST_FIRST(&vol->sml);
+		sr_meta_getdevname(sc, mle->sml_mm, devname, sizeof(devname));
+		hotspare->src_dev_mm = mle->sml_mm;
+		strlcpy(hotspare->src_devname, devname,
+		    sizeof(hotspare->src_devname));
+		hotspare->src_size = metadata->ssdi.ssd_size;
+
+		hm = &hotspare->src_meta;
+		hm->scmi.scm_volid = SR_HOTSPARE_VOLID;
+		hm->scmi.scm_chunk_id = 0;
+		hm->scmi.scm_size = metadata->ssdi.ssd_size;
+		hm->scmi.scm_coerced_size = metadata->ssdi.ssd_size;
+		strlcpy(hm->scmi.scm_devname, devname,
+		    sizeof(hm->scmi.scm_devname));
+		bcopy(&metadata->ssdi.ssd_uuid, &hm->scmi.scm_uuid,
+		    sizeof(struct sr_uuid));
+
+		sr_checksum(sc, hm, &hm->scm_checksum,
+		    sizeof(struct sr_meta_chunk_invariant));
+
+		hm->scm_status = BIOC_SDHOTSPARE;
+
+		/* Add chunk to hotspare list. */
+		rw_enter_write(&sc->sc_hs_lock);
+		cl = &sc->sc_hotspare_list;
+		if (SLIST_EMPTY(cl))
+			SLIST_INSERT_HEAD(cl, hotspare, src_link);
+		else {
+			SLIST_FOREACH(chunk, cl, src_link)
+				last = chunk;
+			SLIST_INSERT_AFTER(last, hotspare, src_link);
+		}
+		sc->sc_hotspare_no++;
+		rw_exit_write(&sc->sc_hs_lock);
+
+	}
+
+	/*
+	 * Assemble RAID volumes.
+	 */
+	SLIST_FOREACH(vol, &bvh, sbv_link) {
+
 		bzero(&bc, sizeof(bc));
-		bc.bc_level = m1->ssdi.ssd_level;
-		bc.bc_dev_list_len = no_dev * sizeof(dev_t);
-		bc.bc_dev_list = dt;
+
+		/* Check if this is a hotspare "volume". */
+		if (vol->sbv_level == SR_HOTSPARE_LEVEL &&
+		    vol->sbv_chunk_no == 1)
+			continue;
+
+#ifdef SR_DEBUG
+		DNPRINTF(SR_D_META, "%s: assembling volume ", DEVNAME(sc));
+		if (sr_debug & SR_D_META)
+			sr_uuid_print(&vol->sbv_uuid, 0);
+		DNPRINTF(SR_D_META, " volid %u with %u chunks\n",
+		    vol->sbv_volid, vol->sbv_chunk_no);
+#endif
+
+		/*
+		 * If this is a crypto volume, try to find a matching
+		 * key disk...
+		 */
+		bc.bc_key_disk = NODEV;
+		if (vol->sbv_level == 'C') {
+			SLIST_FOREACH(mle, &kdh, sml_link) {
+				metadata =
+				    (struct sr_metadata *)&mle->sml_metadata;
+				if (bcmp(&metadata->ssdi.ssd_uuid,
+				    &vol->sbv_uuid,
+				    sizeof(metadata->ssdi.ssd_uuid)) == 0) {
+					bc.bc_key_disk = mle->sml_mm;
+				}
+			}
+		}
+
+		for (i = 0; i < BIOC_CRMAXLEN; i++) {
+			devs[i] = NODEV; /* mark device as illegal */
+			ondisk[i] = 0;
+		}
+
+		SLIST_FOREACH(mle, &vol->sml, sml_link) {
+			metadata = (struct sr_metadata *)&mle->sml_metadata;
+			chunk_id = metadata->ssdi.ssd_chunk_id;
+
+			if (devs[chunk_id] != NODEV) {
+				vol->sbv_dev_no--;
+				sr_meta_getdevname(sc, mle->sml_mm, devname,
+				    sizeof(devname));
+				printf("%s: found duplicate chunk %u for "
+				    "volume %u on device %s\n", DEVNAME(sc),
+				    chunk_id, vol->sbv_volid, devname);
+			}
+
+			if (devs[chunk_id] == NODEV ||
+			    metadata->ssd_ondisk > ondisk[chunk_id]) {
+				devs[chunk_id] = mle->sml_mm;
+				ondisk[chunk_id] = metadata->ssd_ondisk;
+				DNPRINTF(SR_D_META, "%s: using ondisk "
+				    "metadata version %llu for chunk %u\n",
+				    DEVNAME(sc), ondisk[chunk_id], chunk_id);
+			}
+		}
+
+		if (vol->sbv_chunk_no != vol->sbv_dev_no) {
+			printf("%s: not all chunks were provided; "
+			    "attempting to bring volume %d online\n",
+			    DEVNAME(sc), vol->sbv_volid);
+		}
+
+		bc.bc_level = vol->sbv_level;
+		bc.bc_dev_list_len = vol->sbv_chunk_no * sizeof(dev_t);
+		bc.bc_dev_list = devs;
 		bc.bc_flags = BIOC_SCDEVT;
+
+		rw_enter_write(&sc->sc_lock);
 		sr_ioctl_createraid(sc, &bc, 0);
+		rw_exit_write(&sc->sc_lock);
+
 		rv++;
 	}
 
 	/* done with metadata */
 unwind:
+	for (vp1 = SLIST_FIRST(&bvh); vp1 != SLIST_END(&bvh); vp1 = vp2) {
+		vp2 = SLIST_NEXT(vp1, sbv_link);
+		for (mle1 = SLIST_FIRST(&vp1->sml);
+		    mle1 != SLIST_END(&vp1->sml); mle1 = mle2) {
+			mle2 = SLIST_NEXT(mle1, sml_link);
+			free(mle1, M_DEVBUF);
+		}
+		free(vp1, M_DEVBUF);
+	}
 	for (mle = SLIST_FIRST(&mlh); mle != SLIST_END(&mlh); mle = mle2) {
 		mle2 = SLIST_NEXT(mle, sml_link);
 		free(mle, M_DEVBUF);
 	}
 	SLIST_INIT(&mlh);
 
-	if (dt)
-		free(dt, M_DEVBUF);
+	while (!SLIST_EMPTY(&sdklist)) {
+		sdk = SLIST_FIRST(&sdklist);
+		SLIST_REMOVE_HEAD(&sdklist, sdk_link);
+		free(sdk, M_DEVBUF);
+	}
+
+	if (devs)
+		free(devs, M_DEVBUF);
+	if (ondisk)
+		free(ondisk, M_DEVBUF);
 
 	return (rv);
 }
@@ -1060,19 +1360,16 @@ sr_meta_native_probe(struct sr_softc *sc, struct sr_chunk *ch_entry)
 	char			*devname;
 	int			error, part;
 	daddr64_t		size;
-	struct bdevsw		*bdsw;
-	dev_t			dev;
 
 	DNPRINTF(SR_D_META, "%s: sr_meta_native_probe(%s)\n",
 	   DEVNAME(sc), ch_entry->src_devname);
 
-	dev = ch_entry->src_dev_mm;
 	devname = ch_entry->src_devname;
-	bdsw = bdevsw_lookup(dev);
-	part = DISKPART(dev);
+	part = DISKPART(ch_entry->src_dev_mm);
 
 	/* get disklabel */
-	error = bdsw->d_ioctl(dev, DIOCGDINFO, (void *)&label, FREAD, curproc);
+	error = VOP_IOCTL(ch_entry->src_vn, DIOCGDINFO, (caddr_t)&label, FREAD,
+	    NOCRED, curproc);
 	if (error) {
 		DNPRINTF(SR_D_META, "%s: %s can't obtain disklabel\n",
 		    DEVNAME(sc), devname);
@@ -1082,14 +1379,13 @@ sr_meta_native_probe(struct sr_softc *sc, struct sr_chunk *ch_entry)
 	/* make sure the partition is of the right type */
 	if (label.d_partitions[part].p_fstype != FS_RAID) {
 		DNPRINTF(SR_D_META,
-		    "%s: %s partition not of type RAID (%d)\n", DEVNAME(sc) ,
+		    "%s: %s partition not of type RAID (%d)\n", DEVNAME(sc),
 		    devname,
 		    label.d_partitions[part].p_fstype);
 		goto unwind;
 	}
 
-	size = DL_GETPSIZE(&label.d_partitions[part]) -
-	    SR_META_SIZE - SR_META_OFFSET;
+	size = DL_GETPSIZE(&label.d_partitions[part]) - SR_DATA_OFFSET;
 	if (size <= 0) {
 		DNPRINTF(SR_D_META, "%s: %s partition too small\n", DEVNAME(sc),
 		    devname);
@@ -1120,7 +1416,7 @@ sr_meta_native_attach(struct sr_discipline *sd, int force)
 
 	DNPRINTF(SR_D_META, "%s: sr_meta_native_attach\n", DEVNAME(sc));
 
-	md = malloc(SR_META_SIZE * 512 , M_DEVBUF, M_ZERO);
+	md = malloc(SR_META_SIZE * 512, M_DEVBUF, M_ZERO | M_NOWAIT);
 	if (md == NULL) {
 		printf("%s: not enough memory for metadata buffer\n",
 		    DEVNAME(sc));
@@ -1142,6 +1438,8 @@ sr_meta_native_attach(struct sr_discipline *sd, int force)
 
 		if (md->ssdi.ssd_magic == SR_MAGIC) {
 			sr++;
+			ch_entry->src_meta.scmi.scm_chunk_id =
+			    md->ssdi.ssd_chunk_id;
 			if (d == 0) {
 				bcopy(&md->ssdi.ssd_uuid, &uuid, sizeof uuid);
 				expected = md->ssdi.ssd_chunk_no;
@@ -1176,8 +1474,6 @@ sr_meta_native_attach(struct sr_discipline *sd, int force)
 			ch_next = SLIST_NEXT(ch_entry, src_link);
 
 			/* XXX do we want to read this again? */
-			printf("ch %p %p\n", ch_entry, md);
-			printf("mm %x\n", ch_entry->src_dev_mm);
 			if (ch_entry->src_dev_mm == NODEV)
 				panic("src_dev_mm == NODEV");
 			if (sr_meta_native_read(sd, ch_entry->src_dev_mm, md,
@@ -1294,13 +1590,17 @@ sr_attach(struct device *parent, struct device *self, void *aux)
 	DNPRINTF(SR_D_MISC, "\n%s: sr_attach", DEVNAME(sc));
 
 	rw_init(&sc->sc_lock, "sr_lock");
+	rw_init(&sc->sc_hs_lock, "sr_hs_lock");
 
 	SLIST_INIT(&sr_hotplug_callbacks);
+	SLIST_INIT(&sc->sc_hotspare_list);
 
+#if NBIO > 0
 	if (bio_register(&sc->sc_dev, sr_ioctl) != 0)
 		printf("%s: controller registration failed", DEVNAME(sc));
 	else
 		sc->sc_ioctl = sr_ioctl;
+#endif /* NBIO > 0 */
 
 	printf("\n");
 
@@ -1313,12 +1613,6 @@ int
 sr_detach(struct device *self, int flags)
 {
 	return (0);
-}
-
-int
-sr_activate(struct device *self, enum devact act)
-{
-	return (1);
 }
 
 void
@@ -1565,22 +1859,18 @@ sr_wu_get(struct sr_discipline *sd, int canwait)
 void
 sr_scsi_done(struct sr_discipline *sd, struct scsi_xfer *xs)
 {
-	int			s;
-
 	DNPRINTF(SR_D_DIS, "%s: sr_scsi_done: xs %p\n", DEVNAME(sd->sd_sc), xs);
 
-	s = splbio();
 	scsi_done(xs);
-	splx(s);
 }
 
-int
+void
 sr_scsi_cmd(struct scsi_xfer *xs)
 {
 	int			s;
 	struct scsi_link	*link = xs->sc_link;
 	struct sr_softc		*sc = link->adapter_softc;
-	struct sr_workunit	*wu;
+	struct sr_workunit	*wu = NULL;
 	struct sr_discipline	*sd;
 
 	DNPRINTF(SR_D_CMD, "%s: sr_scsi_cmd: scsibus%d xs: %p "
@@ -1595,7 +1885,6 @@ sr_scsi_cmd(struct scsi_xfer *xs)
 		DNPRINTF(SR_D_CMD, "%s: sr_scsi_cmd: attaching %p\n",
 		    DEVNAME(sc), sd);
 		if (sd == NULL) {
-			wu = NULL;
 			printf("%s: sr_scsi_cmd NULL discipline\n",
 			    DEVNAME(sc));
 			goto stuffup;
@@ -1614,7 +1903,9 @@ sr_scsi_cmd(struct scsi_xfer *xs)
 	 */
 	if ((wu = sr_wu_get(sd, 0)) == NULL) {
 		DNPRINTF(SR_D_CMD, "%s: sr_scsi_cmd no wu\n", DEVNAME(sc));
-		return (NO_CCB);
+		xs->error = XS_NO_CCB;
+		sr_scsi_done(sd, xs);
+		return;
 	}
 
 	xs->error = XS_NOERROR;
@@ -1696,30 +1987,33 @@ sr_scsi_cmd(struct scsi_xfer *xs)
 		goto stuffup;
 	}
 
-	return (SUCCESSFULLY_QUEUED);
+	return;
 stuffup:
-	if (sd->sd_scsi_sense.error_code) {
+	if (sd && sd->sd_scsi_sense.error_code) {
 		xs->error = XS_SENSE;
 		bcopy(&sd->sd_scsi_sense, &xs->sense, sizeof(xs->sense));
 		bzero(&sd->sd_scsi_sense, sizeof(sd->sd_scsi_sense));
 	} else {
 		xs->error = XS_DRIVER_STUFFUP;
-		xs->flags |= ITSDONE;
 	}
 complete:
 	if (wu)
 		sr_wu_put(wu);
 	sr_scsi_done(sd, xs);
-	return (COMPLETE);
 }
 int
-sr_scsi_ioctl(struct scsi_link *link, u_long cmd, caddr_t addr, int flag,
-    struct proc *p)
+sr_scsi_ioctl(struct scsi_link *link, u_long cmd, caddr_t addr, int flag)
 {
 	DNPRINTF(SR_D_IOCTL, "%s: sr_scsi_ioctl cmd: %#x\n",
 	    DEVNAME((struct sr_softc *)link->adapter_softc), cmd);
 
-	return (sr_ioctl(link->adapter_softc, cmd, addr));
+	switch (cmd) {
+	case DIOCGCACHE:
+	case DIOCSCACHE:
+		return (EOPNOTSUPP);
+	default:
+		return (sr_ioctl(link->adapter_softc, cmd, addr));
+	}
 }
 
 int
@@ -1771,6 +2065,15 @@ sr_ioctl(struct device *dev, u_long cmd, caddr_t addr)
 	case BIOCDELETERAID:
 		rv = sr_ioctl_deleteraid(sc, (struct bioc_deleteraid *)addr);
 		break;
+
+	case BIOCDISCIPLINE:
+		rv = sr_ioctl_discipline(sc, (struct bioc_discipline *)addr);
+		break;
+
+	case BIOCINSTALLBOOT:
+		rv = sr_ioctl_installboot(sc, (struct bioc_installboot *)addr);
+		break;
+
 	default:
 		DNPRINTF(SR_D_IOCTL, "invalid ioctl\n");
 		rv = ENOTTY;
@@ -1794,8 +2097,8 @@ sr_ioctl_inq(struct sr_softc *sc, struct bioc_inq *bi)
 		}
 
 	strlcpy(bi->bi_dev, sc->sc_dev.dv_xname, sizeof(bi->bi_dev));
-	bi->bi_novol = vol;
-	bi->bi_nodisk = disk;
+	bi->bi_novol = vol + sc->sc_hotspare_no;
+	bi->bi_nodisk = disk + sc->sc_hotspare_no;
 
 	return (0);
 }
@@ -1805,6 +2108,7 @@ sr_ioctl_vol(struct sr_softc *sc, struct bioc_vol *bv)
 {
 	int			i, vol, rv = EINVAL;
 	struct sr_discipline	*sd;
+	struct sr_chunk		*hotspare;
 	daddr64_t		rb, sz;
 
 	for (i = 0, vol = -1; i < SR_MAXSCSIBUS; i++) {
@@ -1814,24 +2118,57 @@ sr_ioctl_vol(struct sr_softc *sc, struct bioc_vol *bv)
 		if (vol != bv->bv_volid)
 			continue;
 
+		if (sc->sc_dis[i] == NULL)
+			goto done;
+
 		sd = sc->sc_dis[i];
 		bv->bv_status = sd->sd_vol_status;
 		bv->bv_size = sd->sd_meta->ssdi.ssd_size << DEV_BSHIFT;
 		bv->bv_level = sd->sd_meta->ssdi.ssd_level;
 		bv->bv_nodisk = sd->sd_meta->ssdi.ssd_chunk_no;
+
+#ifdef CRYPTO
+		if (sd->sd_meta->ssdi.ssd_level == 'C' &&
+		    sd->mds.mdd_crypto.key_disk != NULL)
+			bv->bv_nodisk++;
+#endif
+
 		if (bv->bv_status == BIOC_SVREBUILD) {
 			sz = sd->sd_meta->ssdi.ssd_size;
 			rb = sd->sd_meta->ssd_rebuild;
-			bv->bv_percent = 100 - ((sz * 100 - rb * 100) / sz);
+			if (rb > 0)
+				bv->bv_percent = 100 -
+				    ((sz * 100 - rb * 100) / sz) - 1;
+			else
+				bv->bv_percent = 0;
 		}
 		strlcpy(bv->bv_dev, sd->sd_meta->ssd_devname,
 		    sizeof(bv->bv_dev));
 		strlcpy(bv->bv_vendor, sd->sd_meta->ssdi.ssd_vendor,
 		    sizeof(bv->bv_vendor));
 		rv = 0;
-		break;
+		goto done;
 	}
 
+	/* Check hotspares list. */
+	SLIST_FOREACH(hotspare, &sc->sc_hotspare_list, src_link) {
+		vol++;
+		if (vol != bv->bv_volid)
+			continue;
+
+		bv->bv_status = BIOC_SVONLINE;
+		bv->bv_size = hotspare->src_meta.scmi.scm_size << DEV_BSHIFT;
+		bv->bv_level = -1;	/* Hotspare. */
+		bv->bv_nodisk = 1;
+		strlcpy(bv->bv_dev, hotspare->src_meta.scmi.scm_devname,
+		    sizeof(bv->bv_dev));
+		strlcpy(bv->bv_vendor, hotspare->src_meta.scmi.scm_devname,
+		    sizeof(bv->bv_vendor));
+		rv = 0;
+		goto done;
+	}
+
+done:
 	return (rv);
 }
 
@@ -1839,7 +2176,7 @@ int
 sr_ioctl_disk(struct sr_softc *sc, struct bioc_disk *bd)
 {
 	int			i, vol, rv = EINVAL, id;
-	struct sr_chunk		*src;
+	struct sr_chunk		*src, *hotspare;
 
 	for (i = 0, vol = -1; i < SR_MAXSCSIBUS; i++) {
 		/* XXX this will not work when we stagger disciplines */
@@ -1848,11 +2185,22 @@ sr_ioctl_disk(struct sr_softc *sc, struct bioc_disk *bd)
 		if (vol != bd->bd_volid)
 			continue;
 
+		if (sc->sc_dis[i] == NULL)
+			goto done;
+
 		id = bd->bd_diskid;
-		if (id >= sc->sc_dis[i]->sd_meta->ssdi.ssd_chunk_no)
+
+		if (id < sc->sc_dis[i]->sd_meta->ssdi.ssd_chunk_no)
+			src = sc->sc_dis[i]->sd_vol.sv_chunks[id];
+#ifdef CRYPTO
+		else if (id == sc->sc_dis[i]->sd_meta->ssdi.ssd_chunk_no &&
+		    sc->sc_dis[i]->sd_meta->ssdi.ssd_level == 'C' &&
+		    sc->sc_dis[i]->mds.mdd_crypto.key_disk != NULL)
+			src = sc->sc_dis[i]->mds.mdd_crypto.key_disk;
+#endif
+		else
 			break;
 
-		src = sc->sc_dis[i]->sd_vol.sv_chunks[id];
 		bd->bd_status = src->src_meta.scm_status;
 		bd->bd_size = src->src_meta.scmi.scm_size << DEV_BSHIFT;
 		bd->bd_channel = vol;
@@ -1860,27 +2208,48 @@ sr_ioctl_disk(struct sr_softc *sc, struct bioc_disk *bd)
 		strlcpy(bd->bd_vendor, src->src_meta.scmi.scm_devname,
 		    sizeof(bd->bd_vendor));
 		rv = 0;
-		break;
+		goto done;
 	}
 
+	/* Check hotspares list. */
+	SLIST_FOREACH(hotspare, &sc->sc_hotspare_list, src_link) {
+		vol++;
+		if (vol != bd->bd_volid)
+			continue;
+
+		if (bd->bd_diskid != 0)
+			break;
+
+		bd->bd_status = hotspare->src_meta.scm_status;
+		bd->bd_size = hotspare->src_meta.scmi.scm_size << DEV_BSHIFT;
+		bd->bd_channel = vol;
+		bd->bd_target = bd->bd_diskid;
+		strlcpy(bd->bd_vendor, hotspare->src_meta.scmi.scm_devname,
+		    sizeof(bd->bd_vendor));
+		rv = 0;
+		goto done;
+	}
+
+done:
 	return (rv);
 }
 
 int
 sr_ioctl_setstate(struct sr_softc *sc, struct bioc_setstate *bs)
 {
-	int			rv = EINVAL, part;
-	int			i, c, found, vol, open = 0;
-	struct sr_discipline	*sd = NULL, *sw = NULL;
-	char			devname[32];
-	struct bdevsw		*bdsw;
-	dev_t			dev;
-	daddr64_t		size, csize;
-	struct disklabel	label;
-	struct sr_meta_chunk	*old, *new;
+	int			rv = EINVAL;
+	int			i, vol, found, c;
+	struct sr_discipline	*sd = NULL;
+	struct sr_chunk		*ch_entry;
+	struct sr_chunk_head	*cl;
 
 	if (bs->bs_other_id_type == BIOC_SSOTHER_UNUSED)
 		goto done;
+
+	if (bs->bs_status == BIOC_SSHOTSPARE) {
+		rv = sr_hotspare(sc, (dev_t)bs->bs_other_id);
+		goto done;
+	}
 
 	for (i = 0, vol = -1; i < SR_MAXSCSIBUS; i++) {
 		/* XXX this will not work when we stagger disciplines */
@@ -1894,7 +2263,372 @@ sr_ioctl_setstate(struct sr_softc *sc, struct bioc_setstate *bs)
 	if (sd == NULL)
 		goto done;
 
-	if (!sd->sd_rebuild) {
+	switch (bs->bs_status) {
+	case BIOC_SSOFFLINE:
+		/* Take chunk offline */
+		found = c = 0;
+		cl = &sd->sd_vol.sv_chunk_list;
+		SLIST_FOREACH(ch_entry, cl, src_link) {
+			if (ch_entry->src_dev_mm == bs->bs_other_id) {
+				found = 1;
+				break;
+			}
+			c++;
+		}
+		if (found == 0) {
+			printf("%s: chunk not part of array\n", DEVNAME(sc));
+			goto done;
+		}
+		
+		/* XXX: check current state first */
+		sd->sd_set_chunk_state(sd, c, BIOC_SSOFFLINE);
+		
+		if (sr_meta_save(sd, SR_META_DIRTY)) {
+			printf("%s: could not save metadata to %s\n",
+			    DEVNAME(sc), sd->sd_meta->ssd_devname);
+			goto done;
+		}
+		rv = 0;
+		break;
+
+	case BIOC_SDSCRUB:
+		break;
+
+	case BIOC_SSREBUILD:
+		rv = sr_rebuild_init(sd, (dev_t)bs->bs_other_id, 0);
+		break;
+
+	default:
+		printf("%s: unsupported state request %d\n",
+		    DEVNAME(sc), bs->bs_status);
+	}
+
+done:
+	return (rv);
+}
+
+int
+sr_chunk_in_use(struct sr_softc *sc, dev_t dev)
+{
+	struct sr_discipline	*sd;
+	struct sr_chunk		*chunk;
+	int			i, c;
+
+	/* See if chunk is already in use. */
+	for (i = 0; i < SR_MAXSCSIBUS; i++) {
+		if (sc->sc_dis[i] == NULL)
+			continue;
+		sd = sc->sc_dis[i];
+		for (c = 0; c < sd->sd_meta->ssdi.ssd_chunk_no; c++) {
+			chunk = sd->sd_vol.sv_chunks[c];
+			if (chunk->src_dev_mm == dev)
+				return chunk->src_meta.scm_status;
+		}
+	}
+
+	/* Check hotspares list. */
+	SLIST_FOREACH(chunk, &sc->sc_hotspare_list, src_link)
+		if (chunk->src_dev_mm == dev)
+			return chunk->src_meta.scm_status;
+
+	return BIOC_SDINVALID;
+}
+
+int
+sr_hotspare(struct sr_softc *sc, dev_t dev)
+{
+	struct sr_discipline	*sd = NULL;
+	struct sr_metadata	*sm = NULL;
+	struct sr_meta_chunk    *hm;
+	struct sr_chunk_head	*cl;
+	struct sr_chunk		*chunk, *last, *hotspare = NULL;
+	struct sr_uuid		uuid;
+	struct disklabel	label;
+	struct vnode		*vn;
+	daddr64_t		size;
+	char			devname[32];
+	int			rv = EINVAL;
+	int			c, part, open = 0;
+
+	/*
+	 * Add device to global hotspares list.
+	 */
+
+	sr_meta_getdevname(sc, dev, devname, sizeof(devname));
+
+	/* Make sure chunk is not already in use. */
+	c = sr_chunk_in_use(sc, dev);
+	if (c != BIOC_SDINVALID && c != BIOC_SDOFFLINE) {
+		if (c == BIOC_SDHOTSPARE)
+			printf("%s: %s is already a hotspare\n",
+			    DEVNAME(sc), devname);
+		else
+			printf("%s: %s is already in use\n",
+			    DEVNAME(sc), devname);
+		goto done;
+	}
+
+	/* XXX - See if there is an existing degraded volume... */
+
+	/* Open device. */
+	if (bdevvp(dev, &vn)) {
+		printf("%s:, sr_hotspare: can't allocate vnode\n", DEVNAME(sc));
+		goto done;
+	}
+	if (VOP_OPEN(vn, FREAD | FWRITE, NOCRED, curproc)) {
+		DNPRINTF(SR_D_META,"%s: sr_hotspare cannot open %s\n",
+		    DEVNAME(sc), devname);
+		vput(vn);
+		goto fail;
+	}
+	open = 1; /* close dev on error */
+
+	/* Get partition details. */
+	part = DISKPART(dev);
+	if (VOP_IOCTL(vn, DIOCGDINFO, (caddr_t)&label, FREAD,
+	    NOCRED, curproc)) {
+		DNPRINTF(SR_D_META, "%s: sr_hotspare ioctl failed\n",
+		    DEVNAME(sc));
+		VOP_CLOSE(vn, FREAD | FWRITE, NOCRED, curproc);
+		vput(vn);
+		goto fail;
+	}
+	if (label.d_partitions[part].p_fstype != FS_RAID) {
+		printf("%s: %s partition not of type RAID (%d)\n",
+		    DEVNAME(sc), devname,
+		    label.d_partitions[part].p_fstype);
+		goto fail;
+	}
+
+	/* Calculate partition size. */
+	size = DL_GETPSIZE(&label.d_partitions[part]) - SR_DATA_OFFSET;
+
+	/*
+	 * Create and populate chunk metadata.
+	 */
+
+	sr_uuid_get(&uuid);
+	hotspare = malloc(sizeof(struct sr_chunk), M_DEVBUF, M_WAITOK | M_ZERO);
+
+	hotspare->src_dev_mm = dev;
+	hotspare->src_vn = vn;
+	strlcpy(hotspare->src_devname, devname, sizeof(hm->scmi.scm_devname));
+	hotspare->src_size = size;
+
+	hm = &hotspare->src_meta;
+	hm->scmi.scm_volid = SR_HOTSPARE_VOLID;
+	hm->scmi.scm_chunk_id = 0;
+	hm->scmi.scm_size = size;
+	hm->scmi.scm_coerced_size = size;
+	strlcpy(hm->scmi.scm_devname, devname, sizeof(hm->scmi.scm_devname));
+	bcopy(&uuid, &hm->scmi.scm_uuid, sizeof(struct sr_uuid));
+
+	sr_checksum(sc, hm, &hm->scm_checksum,
+	    sizeof(struct sr_meta_chunk_invariant));
+
+	hm->scm_status = BIOC_SDHOTSPARE;
+
+	/*
+	 * Create and populate our own discipline and metadata.
+	 */
+
+	sm = malloc(sizeof(struct sr_metadata), M_DEVBUF, M_WAITOK | M_ZERO);
+	sm->ssdi.ssd_magic = SR_MAGIC;
+	sm->ssdi.ssd_version = SR_META_VERSION;
+	sm->ssd_ondisk = 0;
+	sm->ssdi.ssd_vol_flags = 0;
+	bcopy(&uuid, &sm->ssdi.ssd_uuid, sizeof(struct sr_uuid));
+	sm->ssdi.ssd_chunk_no = 1;
+	sm->ssdi.ssd_volid = SR_HOTSPARE_VOLID;
+	sm->ssdi.ssd_level = SR_HOTSPARE_LEVEL;
+	sm->ssdi.ssd_size = size;
+	strlcpy(sm->ssdi.ssd_vendor, "OPENBSD", sizeof(sm->ssdi.ssd_vendor));
+	snprintf(sm->ssdi.ssd_product, sizeof(sm->ssdi.ssd_product),
+	    "SR %s", "HOTSPARE");
+	snprintf(sm->ssdi.ssd_revision, sizeof(sm->ssdi.ssd_revision),
+	    "%03d", SR_META_VERSION);
+
+	sd = malloc(sizeof(struct sr_discipline), M_DEVBUF, M_WAITOK | M_ZERO);
+	sd->sd_sc = sc;
+	sd->sd_meta = sm;
+	sd->sd_meta_type = SR_META_F_NATIVE;
+	sd->sd_vol_status = BIOC_SVONLINE;
+	strlcpy(sd->sd_name, "HOTSPARE", sizeof(sd->sd_name));
+	SLIST_INIT(&sd->sd_meta_opt);
+
+	/* Add chunk to volume. */
+	sd->sd_vol.sv_chunks = malloc(sizeof(struct sr_chunk *), M_DEVBUF,
+	    M_WAITOK | M_ZERO);
+	sd->sd_vol.sv_chunks[0] = hotspare;
+	SLIST_INIT(&sd->sd_vol.sv_chunk_list);
+	SLIST_INSERT_HEAD(&sd->sd_vol.sv_chunk_list, hotspare, src_link);
+
+	/* Save metadata. */
+	if (sr_meta_save(sd, SR_META_DIRTY)) {
+		printf("%s: could not save metadata to %s\n",
+		    DEVNAME(sc), devname);
+		goto fail;
+	}
+	
+	/*
+	 * Add chunk to hotspare list.
+	 */
+	rw_enter_write(&sc->sc_hs_lock);
+	cl = &sc->sc_hotspare_list;
+	if (SLIST_EMPTY(cl))
+		SLIST_INSERT_HEAD(cl, hotspare, src_link);
+	else {
+		SLIST_FOREACH(chunk, cl, src_link)
+			last = chunk;
+		SLIST_INSERT_AFTER(last, hotspare, src_link);
+	}
+	sc->sc_hotspare_no++;
+	rw_exit_write(&sc->sc_hs_lock);
+
+	rv = 0;
+	goto done;
+
+fail:
+	if (hotspare)
+		free(hotspare, M_DEVBUF);
+
+done:
+	if (sd && sd->sd_vol.sv_chunks)
+		free(sd->sd_vol.sv_chunks, M_DEVBUF);
+	if (sd)
+		free(sd, M_DEVBUF);
+	if (sm)
+		free(sm, M_DEVBUF);
+	if (open) {
+		VOP_CLOSE(vn, FREAD | FWRITE, NOCRED, curproc);
+		vput(vn);
+	}
+
+	return (rv);
+}
+
+void
+sr_hotspare_rebuild_callback(void *arg1, void *arg2)
+{
+	sr_hotspare_rebuild((struct sr_discipline *)arg1);
+}
+
+void
+sr_hotspare_rebuild(struct sr_discipline *sd)
+{
+	struct sr_chunk_head	*cl;
+	struct sr_chunk		*hotspare, *chunk = NULL;
+	struct sr_workunit	*wu;
+	struct sr_ccb           *ccb;
+	int			i, s, chunk_no, busy;
+
+	/*
+	 * Attempt to locate a hotspare and initiate rebuild.
+	 */
+
+	for (i = 0; i < sd->sd_meta->ssdi.ssd_chunk_no; i++) {
+		if (sd->sd_vol.sv_chunks[i]->src_meta.scm_status ==
+		    BIOC_SDOFFLINE) {
+			chunk_no = i;
+			chunk = sd->sd_vol.sv_chunks[i];
+			break;
+		}
+	}
+
+	if (chunk == NULL) {
+		printf("%s: no offline chunk found on %s!\n",
+		    DEVNAME(sd->sd_sc), sd->sd_meta->ssd_devname);
+		return;
+	}
+
+	/* See if we have a suitable hotspare... */
+	rw_enter_write(&sd->sd_sc->sc_hs_lock);
+	cl = &sd->sd_sc->sc_hotspare_list;
+	SLIST_FOREACH(hotspare, cl, src_link)
+		if (hotspare->src_size >= chunk->src_size)
+			break;
+
+	if (hotspare != NULL) {
+
+		printf("%s: %s volume degraded, will attempt to "
+		    "rebuild on hotspare %s\n", DEVNAME(sd->sd_sc),
+		    sd->sd_meta->ssd_devname, hotspare->src_devname);
+
+		/*
+		 * Ensure that all pending I/O completes on the failed chunk
+		 * before trying to initiate a rebuild.
+		 */
+		i = 0;
+		do {
+			busy = 0;
+
+			s = splbio();
+			TAILQ_FOREACH(wu, &sd->sd_wu_pendq, swu_link) {
+        			TAILQ_FOREACH(ccb, &wu->swu_ccb, ccb_link) {
+                			if (ccb->ccb_target == chunk_no)
+						busy = 1;
+				}
+			}
+			TAILQ_FOREACH(wu, &sd->sd_wu_defq, swu_link) {
+        			TAILQ_FOREACH(ccb, &wu->swu_ccb, ccb_link) {
+                			if (ccb->ccb_target == chunk_no)
+						busy = 1;
+				}
+			}
+			splx(s);
+
+			if (busy) {
+				tsleep(sd, PRIBIO, "sr_hotspare", hz);
+				i++;
+			}
+
+		} while (busy && i < 120);
+
+		DNPRINTF(SR_D_META, "%s: waited %i seconds for I/O to "
+		    "complete on failed chunk %s\n", DEVNAME(sd->sd_sc),
+		    i, chunk->src_devname);
+
+		if (busy) {
+			printf("%s: pending I/O failed to complete on "
+			    "failed chunk %s, hotspare rebuild aborted...\n",
+			    DEVNAME(sd->sd_sc), chunk->src_devname);
+			goto done;
+		}
+
+		s = splbio();
+		rw_enter_write(&sd->sd_sc->sc_lock);
+		if (sr_rebuild_init(sd, hotspare->src_dev_mm, 1) == 0) {
+
+			/* Remove hotspare from available list. */
+			sd->sd_sc->sc_hotspare_no--;
+			SLIST_REMOVE(cl, hotspare, sr_chunk, src_link);
+			free(hotspare, M_DEVBUF);
+
+		}
+		rw_exit_write(&sd->sd_sc->sc_lock);
+		splx(s);
+	}
+done:
+	rw_exit_write(&sd->sd_sc->sc_hs_lock);
+}
+
+int
+sr_rebuild_init(struct sr_discipline *sd, dev_t dev, int hotspare)
+{
+	struct sr_softc		*sc = sd->sd_sc;
+	int			rv = EINVAL, part;
+	int			c, found, open = 0;
+	char			devname[32];
+	struct vnode		*vn;
+	daddr64_t		size, csize;
+	struct disklabel	label;
+	struct sr_meta_chunk	*old, *new;
+
+	/*
+	 * Attempt to initiate a rebuild onto the specified device.
+	 */
+
+	if (!(sd->sd_capabilities & SR_CAP_REBUILD)) {
 		printf("%s: discipline does not support rebuild\n",
 		    DEVNAME(sc));
 		goto done;
@@ -1932,35 +2666,38 @@ sr_ioctl_setstate(struct sr_softc *sc, struct bioc_setstate *bs)
 	}
 
 	/* populate meta entry */
-	dev = (dev_t)bs->bs_other_id;
 	sr_meta_getdevname(sc, dev, devname, sizeof(devname));
-	bdsw = bdevsw_lookup(dev);
+	if (bdevvp(dev, &vn)) {
+		printf("%s:, sr_rebuild_init: can't allocate vnode\n",
+		    DEVNAME(sc));
+		goto done;
+	}
 
-	if (bdsw->d_open(dev, FREAD | FWRITE, S_IFBLK, curproc)) {
+	if (VOP_OPEN(vn, FREAD | FWRITE, NOCRED, curproc)) {
 		DNPRINTF(SR_D_META,"%s: sr_ioctl_setstate can't "
 		    "open %s\n", DEVNAME(sc), devname);
+		vput(vn);
 		goto done;
 	}
 	open = 1; /* close dev on error */
 
 	/* get partition */
 	part = DISKPART(dev);
-	if ((*bdsw->d_ioctl)(dev, DIOCGDINFO, (void *)&label, FREAD,
-	    curproc)) {
+	if (VOP_IOCTL(vn, DIOCGDINFO, (caddr_t)&label, FREAD,
+	    NOCRED, curproc)) {
 		DNPRINTF(SR_D_META, "%s: sr_ioctl_setstate ioctl failed\n",
 		    DEVNAME(sc));
 		goto done;
 	}
 	if (label.d_partitions[part].p_fstype != FS_RAID) {
 		printf("%s: %s partition not of type RAID (%d)\n",
-		    DEVNAME(sc) , devname,
+		    DEVNAME(sc), devname,
 		    label.d_partitions[part].p_fstype);
 		goto done;
 	}
 
 	/* is partition large enough? */
-	size = DL_GETPSIZE(&label.d_partitions[part]) -
-	    SR_META_SIZE - SR_META_OFFSET;
+	size = DL_GETPSIZE(&label.d_partitions[part]) - SR_DATA_OFFSET;
 	if (size < csize) {
 		printf("%s: partition too small, at least %llu B required\n",
 		    DEVNAME(sc), csize << DEV_BSHIFT);
@@ -1970,23 +2707,20 @@ sr_ioctl_setstate(struct sr_softc *sc, struct bioc_setstate *bs)
 		    DEVNAME(sc), (size - csize) << DEV_BSHIFT);
 
 	/* make sure we are not stomping on some other partition */
-	for (i = 0, vol = -1; i < SR_MAXSCSIBUS; i++) {
-		if (!sc->sc_dis[i])
-			continue;
-		sw = sc->sc_dis[i];
-		for (c = 0; c < sw->sd_meta->ssdi.ssd_chunk_no; c++)
-			if (sw->sd_vol.sv_chunks[c]->src_dev_mm == dev &&
-			    sd->sd_vol.sv_chunks[c]->src_meta.scm_status !=
-			        BIOC_SDOFFLINE) {
-				printf("%s: %s chunk already in use\n",
-				    DEVNAME(sc), devname);
-				goto done;
-			}
+	c = sr_chunk_in_use(sc, dev);
+	if (c != BIOC_SDINVALID && c != BIOC_SDOFFLINE &&
+	    !(hotspare && c == BIOC_SDHOTSPARE)) {
+		printf("%s: %s is already in use\n", DEVNAME(sc), devname);
+		goto done;
 	}
+
+	/* Reset rebuild counter since we rebuilding onto a new chunk. */
+	sd->sd_meta->ssd_rebuild = 0;
 
 	/* recreate metadata */
 	open = 0; /* leave dev open from here on out */
 	sd->sd_vol.sv_chunks[found]->src_dev_mm = dev;
+	sd->sd_vol.sv_chunks[found]->src_vn = vn;
 	new->scmi.scm_volid = old->scmi.scm_volid;
 	new->scmi.scm_chunk_id = found;
 	strlcpy(new->scmi.scm_devname, devname,
@@ -2005,17 +2739,50 @@ sr_ioctl_setstate(struct sr_softc *sc, struct bioc_setstate *bs)
 		goto done;
 	}
 
-	printf("%s: trying to rebuild %s to %s\n", DEVNAME(sc),
+	printf("%s: rebuild of %s started on %s\n", DEVNAME(sc),
 	    sd->sd_meta->ssd_devname, devname);
 
+	sd->sd_reb_abort = 0;
 	kthread_create_deferred(sr_rebuild, sd);
 
 	rv = 0;
 done:
-	if (open)
-		(*bdsw->d_close)(dev, FREAD | FWRITE, S_IFCHR, curproc);
+	if (open) {
+		VOP_CLOSE(vn, FREAD | FWRITE, NOCRED, curproc);
+		vput(vn);
+	}
 
 	return (rv);
+}
+
+void
+sr_roam_chunks(struct sr_discipline *sd)
+{
+	struct sr_softc		*sc = sd->sd_sc;
+	struct sr_chunk		*chunk;
+	struct sr_meta_chunk	*meta;
+	int			roamed = 0;
+
+	/* Have any chunks roamed? */
+	SLIST_FOREACH(chunk, &sd->sd_vol.sv_chunk_list, src_link) {
+		
+		meta = &chunk->src_meta;
+	
+		if (strncmp(meta->scmi.scm_devname, chunk->src_devname,
+		    sizeof(meta->scmi.scm_devname))) {
+
+			printf("%s: roaming device %s -> %s\n", DEVNAME(sc),
+			    meta->scmi.scm_devname, chunk->src_devname);
+
+			strlcpy(meta->scmi.scm_devname, chunk->src_devname,
+			    sizeof(meta->scmi.scm_devname));
+
+			roamed++;
+		}
+	}
+
+	if (roamed)
+		sr_meta_save(sd, SR_META_DIRTY);
 }
 
 int
@@ -2023,14 +2790,13 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc, int user)
 {
 	dev_t			*dt;
 	int			i, s, no_chunk, rv = EINVAL, vol;
-	int			no_meta, updatemeta = 0, disk = 1;
-	u_int64_t		vol_size;
-	int32_t			strip_size = 0;
+	int			no_meta, updatemeta = 0;
 	struct sr_chunk_head	*cl;
 	struct sr_discipline	*sd = NULL;
 	struct sr_chunk		*ch_entry;
 	struct device		*dev, *dev2;
 	struct scsibus_attach_args saa;
+	char			devname[32];
 
 	DNPRINTF(SR_D_IOCTL, "%s: sr_ioctl_createraid(%d)\n",
 	    DEVNAME(sc), user);
@@ -2040,17 +2806,34 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc, int user)
 		goto unwind;
 
 	dt = malloc(bc->bc_dev_list_len, M_DEVBUF, M_WAITOK | M_ZERO);
-	if (user)
-		copyin(bc->bc_dev_list, dt, bc->bc_dev_list_len);
-	else
+	if (user) {
+		if (copyin(bc->bc_dev_list, dt, bc->bc_dev_list_len) != 0)
+			goto unwind;
+	} else
 		bcopy(bc->bc_dev_list, dt, bc->bc_dev_list_len);
 
+	/* Initialise discipline. */
 	sd = malloc(sizeof(struct sr_discipline), M_DEVBUF, M_WAITOK | M_ZERO);
 	sd->sd_sc = sc;
+	SLIST_INIT(&sd->sd_meta_opt);
+	if (sr_discipline_init(sd, bc->bc_level)) {
+		printf("%s: could not initialize discipline\n", DEVNAME(sc));
+		goto unwind;
+	}
 
 	no_chunk = bc->bc_dev_list_len / sizeof(dev_t);
 	cl = &sd->sd_vol.sv_chunk_list;
 	SLIST_INIT(cl);
+
+	/* Ensure that chunks are not already in use. */
+	for (i = 0; i < no_chunk; i++) {
+		if (sr_chunk_in_use(sc, dt[i]) != BIOC_SDINVALID) {
+			sr_meta_getdevname(sc, dt[i], devname, sizeof(devname));
+			printf("%s: chunk %s already in use\n",
+			    DEVNAME(sc), devname);
+			goto unwind;
+		}
+	}
 
 	sd->sd_meta_type = sr_meta_probe(sd, dt, no_chunk);
 	if (sd->sd_meta_type == SR_META_F_INVALID) {
@@ -2058,7 +2841,7 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc, int user)
 		goto unwind;
 	}
 
-	if (sr_meta_attach(sd, bc->bc_flags & BIOC_SCFORCE)) {
+	if (sr_meta_attach(sd, no_chunk, bc->bc_flags & BIOC_SCFORCE)) {
 		printf("%s: can't attach metadata type %d\n", DEVNAME(sc),
 		    sd->sd_meta_type);
 		goto unwind;
@@ -2087,107 +2870,27 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc, int user)
 		sr_meta_chunks_create(sc, cl);
 		ch_entry = SLIST_FIRST(cl);
 
-		/* no metadata available */
-		switch (bc->bc_level) {
-		case 0:
-			if (no_chunk < 2)
-				goto unwind;
-			strlcpy(sd->sd_name, "RAID 0", sizeof(sd->sd_name));
-			/*
-			 * XXX add variable strip size later even though
-			 * MAXPHYS is really the clever value, users like
-			 * to tinker with that type of stuff
-			 */
-			strip_size = MAXPHYS;
-			vol_size =
-			    ch_entry->src_meta.scmi.scm_coerced_size * no_chunk;
-			break;
-		case 1:
-			if (no_chunk < 2)
-				goto unwind;
-			strlcpy(sd->sd_name, "RAID 1", sizeof(sd->sd_name));
-			vol_size = ch_entry->src_meta.scmi.scm_coerced_size;
-			break;
-#ifdef not_yet
-		case 4:
-		case 5:
-			if (no_chunk < 3)
-				goto unwind;
-			if (bc->bc_level == 4)
-				strlcpy(sd->sd_name, "RAID 4",
-				    sizeof(sd->sd_name));
-			else
-				strlcpy(sd->sd_name, "RAID 5",
-				    sizeof(sd->sd_name));
-			/*
-			 * XXX add variable strip size later even though
-			 * MAXPHYS is really the clever value, users like
-			 * to tinker with that type of stuff
-			 */
-			strip_size = MAXPHYS;
-			vol_size = ch_entry->src_meta.scmi.scm_coerced_size *
-			    (no_chunk - 1);
-			break;
-#endif /* not_yet */
-#ifdef AOE
-#ifdef not_yet
-		case 'A':
-			/* target */
-			if (no_chunk != 1)
-				goto unwind;
-			strlcpy(sd->sd_name, "AOE TARG", sizeof(sd->sd_name));
-			vol_size = ch_entry->src_meta.scmi.scm_coerced_size;
-			break;
-		case 'a':
-			/* initiator */
-			if (no_chunk != 1)
-				goto unwind;
-			strlcpy(sd->sd_name, "AOE INIT", sizeof(sd->sd_name));
-			break;
-#endif /* not_yet */
-#endif /* AOE */
-#ifdef CRYPTO
-		case 'C':
-			DNPRINTF(SR_D_IOCTL,
-			    "%s: sr_ioctl_createraid: no_chunk %d\n",
-			    DEVNAME(sc), no_chunk);
+		sd->sd_vol_status = BIOC_SVONLINE;
+		sd->sd_meta->ssdi.ssd_level = bc->bc_level;
+		sd->sd_meta->ssdi.ssd_chunk_no = no_chunk;
 
-			if (no_chunk != 1)
-				goto unwind;
+		/* Make the volume UUID available. */
+		bcopy(&ch_entry->src_meta.scmi.scm_uuid,
+		    &sd->sd_meta->ssdi.ssd_uuid,
+		    sizeof(sd->sd_meta->ssdi.ssd_uuid));
 
-			/* no hint available yet */
-			if (bc->bc_opaque_flags & BIOC_SOOUT) {
-				bc->bc_opaque_status = BIOC_SOINOUT_FAILED;
-				rv = 0;
+		if (sd->sd_create) {
+			if ((i = sd->sd_create(sd, bc, no_chunk,
+			    ch_entry->src_meta.scmi.scm_coerced_size))) {
+				rv = i;
 				goto unwind;
 			}
-
-			if (!(bc->bc_flags & BIOC_SCNOAUTOASSEMBLE))
-				goto unwind;
-
-			if (sr_crypto_get_kdf(bc, sd))
-				goto unwind;
-
-			strlcpy(sd->sd_name, "CRYPTO", sizeof(sd->sd_name));
-			vol_size = ch_entry->src_meta.scmi.scm_size;
-
-			sr_crypto_create_keys(sd);
-
-			break;
-#endif /* CRYPTO */
-		default:
-			goto unwind;
 		}
 
 		/* fill out all volume metadata */
 		DNPRINTF(SR_D_IOCTL,
 		    "%s: sr_ioctl_createraid: vol_size: %lld\n",
-		    DEVNAME(sc), vol_size);
-		sd->sd_meta->ssdi.ssd_chunk_no = no_chunk;
-		sd->sd_meta->ssdi.ssd_size = vol_size;
-		sd->sd_vol_status = BIOC_SVONLINE;
-		sd->sd_meta->ssdi.ssd_level = bc->bc_level;
-		sd->sd_meta->ssdi.ssd_strip_size = strip_size;
+		    DEVNAME(sc), sd->sd_meta->ssdi.ssd_size);
 		strlcpy(sd->sd_meta->ssdi.ssd_vendor, "OPENBSD",
 		    sizeof(sd->sd_meta->ssdi.ssd_vendor));
 		snprintf(sd->sd_meta->ssdi.ssd_product,
@@ -2214,31 +2917,14 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc, int user)
 			printf(" already assembled\n");
 			goto unwind;
 		}
-#ifdef CRYPTO
-		/* provide userland with kdf hint */
-		if (bc->bc_opaque_flags & BIOC_SOOUT) {
-			if (bc->bc_opaque == NULL)
-				goto unwind;
 
-			if (sizeof(sd->mds.mdd_crypto.scr_meta.scm_kdfhint) <
-			    bc->bc_opaque_size)
+		if (sd->sd_assemble) {
+			if ((i = sd->sd_assemble(sd, bc, no_chunk))) {
+				rv = i;
 				goto unwind;
-
-			if (copyout(sd->mds.mdd_crypto.scr_meta.scm_kdfhint,
-			    bc->bc_opaque, bc->bc_opaque_size))
-				goto unwind;
-
-			/* we're done */
-			bc->bc_opaque_status = BIOC_SOINOUT_OK;
-			rv = 0;
-			goto unwind;
+			}
 		}
-		/* get kdf with maskkey from userland */
-		if (bc->bc_opaque_flags & BIOC_SOIN) {
-			if (sr_crypto_get_kdf(bc, sd))
-				goto unwind;
-		}
-#endif	/* CRYPTO */
+
 		DNPRINTF(SR_D_META, "%s: disk assembled from metadata\n",
 		    DEVNAME(sc));
 		updatemeta = 0;
@@ -2254,14 +2940,24 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc, int user)
 			    "assemble it\n");
 			goto unwind;
 		}
+
+		if (sd->sd_assemble) {
+			if ((i = sd->sd_assemble(sd, bc, no_chunk))) {
+				rv = i;
+				goto unwind;
+			}
+		}
+
 		printf("%s: trying to bring up %s degraded\n", DEVNAME(sc),
 		    sd->sd_meta->ssd_devname);
 	}
 
 	/* metadata SHALL be fully filled in at this point */
 
-	if (sr_discipline_init(sd, bc->bc_level)) {
-		printf("%s: could not initialize discipline\n", DEVNAME(sc));
+	/* Make sure that metadata level matches assembly level. */
+	if (sd->sd_meta->ssdi.ssd_level != bc->bc_level) {
+		printf("%s: volume level does not match metadata level!\n",
+		    DEVNAME(sc));
 		goto unwind;
 	}
 
@@ -2269,7 +2965,16 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc, int user)
 	if ((rv = sd->sd_alloc_resources(sd)))
 		goto unwind;
 
-	if (disk) {
+	/* Adjust flags if necessary. */
+	if ((sd->sd_capabilities & SR_CAP_AUTO_ASSEMBLE) &&
+	    (bc->bc_flags & BIOC_SCNOAUTOASSEMBLE) !=
+	    (sd->sd_meta->ssdi.ssd_vol_flags & BIOC_SCNOAUTOASSEMBLE)) {
+		sd->sd_meta->ssdi.ssd_vol_flags &= ~BIOC_SCNOAUTOASSEMBLE;
+		sd->sd_meta->ssdi.ssd_vol_flags |=
+		    bc->bc_flags & BIOC_SCNOAUTOASSEMBLE;
+	}
+
+	if (sd->sd_capabilities & SR_CAP_SYSTEM_DISK) {
 		/* set volume status */
 		sd->sd_set_vol_state(sd);
 		if (sd->sd_vol_status == BIOC_SVOFFLINE) {
@@ -2279,8 +2984,10 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc, int user)
 		}
 
 		/* setup scsi midlayer */
-		sd->sd_link.openings = sd->sd_max_wu;
-		sd->sd_link.device = &sr_dev;
+		if (sd->sd_openings)
+			sd->sd_link.openings = sd->sd_openings(sd);
+		else
+			sd->sd_link.openings = sd->sd_max_wu;
 		sd->sd_link.device_softc = sc;
 		sd->sd_link.adapter_softc = sc;
 		sd->sd_link.adapter = &sr_switch;
@@ -2340,6 +3047,10 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc, int user)
 				    sizeof(sd->sd_meta->ssd_devname));
 			}
 		}
+
+		/* Update device name on any chunks which roamed. */
+		sr_roam_chunks(sd);
+
 #ifndef SMALL_KERNEL
 		if (sr_sensors_create(sd))
 			printf("%s: unable to create sensor for %s\n",
@@ -2373,6 +3084,10 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc, int user)
 unwind:
 	sr_discipline_shutdown(sd);
 
+	/* XXX - use internal status values! */
+	if (rv == EAGAIN)
+		rv = 0;
+
 	return (rv);
 }
 
@@ -2400,7 +3115,7 @@ sr_ioctl_deleteraid(struct sr_softc *sc, struct bioc_deleteraid *dr)
 		goto bad;
 
 	sd->sd_deleted = 1;
-	sd->sd_meta->ssdi.ssd_flags = BIOC_SCNOAUTOASSEMBLE;
+	sd->sd_meta->ssdi.ssd_vol_flags = BIOC_SCNOAUTOASSEMBLE;
 	sr_shutdown(sd);
 
 	rv = 0;
@@ -2408,11 +3123,186 @@ bad:
 	return (rv);
 }
 
+int
+sr_ioctl_discipline(struct sr_softc *sc, struct bioc_discipline *bd)
+{
+	struct sr_discipline	*sd = NULL;
+	int			i, rv = 1;
+
+	/* Dispatch a discipline specific ioctl. */
+
+	DNPRINTF(SR_D_IOCTL, "%s: sr_ioctl_discipline %s\n", DEVNAME(sc),
+	    bd->bd_dev);
+
+	for (i = 0; i < SR_MAXSCSIBUS; i++)
+		if (sc->sc_dis[i]) {
+			if (!strncmp(sc->sc_dis[i]->sd_meta->ssd_devname,
+			    bd->bd_dev,
+			    sizeof(sc->sc_dis[i]->sd_meta->ssd_devname))) {
+				sd = sc->sc_dis[i];
+				break;
+			}
+		}
+
+	if (sd && sd->sd_ioctl_handler)
+		rv = sd->sd_ioctl_handler(sd, bd);
+
+	return (rv);
+}
+
+int
+sr_ioctl_installboot(struct sr_softc *sc, struct bioc_installboot *bb)
+{
+	void			*bootblk = NULL, *bootldr = NULL;
+	struct sr_discipline	*sd = NULL;
+	struct sr_chunk		*chunk;
+	struct buf		b;
+	u_int32_t		bbs, bls;
+	int			rv = EINVAL;
+	int			i;
+
+	DNPRINTF(SR_D_IOCTL, "%s: sr_ioctl_installboot %s\n", DEVNAME(sc),
+	    bb->bb_dev);
+
+	for (i = 0; i < SR_MAXSCSIBUS; i++)
+		if (sc->sc_dis[i]) {
+			if (!strncmp(sc->sc_dis[i]->sd_meta->ssd_devname,
+			    bb->bb_dev,
+			    sizeof(sc->sc_dis[i]->sd_meta->ssd_devname))) {
+				sd = sc->sc_dis[i];
+				break;
+			}
+		}
+
+	if (sd == NULL)
+		goto done;
+
+	if (bb->bb_bootblk_size > SR_BOOT_BLOCKS_SIZE * 512)
+		goto done;
+
+	if (bb->bb_bootldr_size > SR_BOOT_LOADER_SIZE * 512)
+		goto done;
+
+	/* Copy in boot block. */
+	bbs = howmany(bb->bb_bootblk_size, DEV_BSIZE) * DEV_BSIZE;
+	bootblk = malloc(bbs, M_DEVBUF, M_WAITOK | M_ZERO);
+	if (copyin(bb->bb_bootblk, bootblk, bb->bb_bootblk_size) != 0)
+		goto done;
+
+	/* Copy in boot loader. */
+	bls = howmany(bb->bb_bootldr_size, DEV_BSIZE) * DEV_BSIZE;
+	bootldr = malloc(bls, M_DEVBUF, M_WAITOK | M_ZERO);
+	if (copyin(bb->bb_bootldr, bootldr, bb->bb_bootldr_size) != 0)
+		goto done;
+
+	/* Save boot block and boot loader to each chunk. */
+	for (i = 0; i < sd->sd_meta->ssdi.ssd_chunk_no; i++) {
+
+		chunk = sd->sd_vol.sv_chunks[i];
+
+		/* Save boot blocks. */
+		DNPRINTF(SR_D_IOCTL,
+		    "sr_ioctl_installboot: saving boot block to %s "
+		    "(%u bytes)\n", chunk->src_devname, bbs);
+
+		bzero(&b, sizeof(b));
+		b.b_flags = B_WRITE | B_PHYS;
+		b.b_blkno = SR_BOOT_BLOCKS_OFFSET;
+		b.b_bcount = bbs;
+		b.b_bufsize = bbs;
+		b.b_resid = bbs;
+		b.b_data = bootblk;
+		b.b_error = 0;
+		b.b_proc = curproc;
+		b.b_dev = chunk->src_dev_mm;
+		b.b_vp = NULL;
+		b.b_iodone = NULL;
+		if (bdevvp(chunk->src_dev_mm, &b.b_vp)) {
+			printf("%s: sr_ioctl_installboot: vnode allocation "
+			    "failed\n", DEVNAME(sc));
+			goto done;
+		}
+		if ((b.b_flags & B_READ) == 0)
+			b.b_vp->v_numoutput++;
+		LIST_INIT(&b.b_dep);
+		VOP_STRATEGY(&b);
+		biowait(&b);
+		vput(b.b_vp);
+
+		if (b.b_flags & B_ERROR) {
+			printf("%s: 0x%x i/o error on block %llu while "
+			    "writing boot block %d\n", DEVNAME(sc),
+			    chunk->src_dev_mm, b.b_blkno, b.b_error);
+			goto done;
+		}
+
+		/* Save boot loader.*/
+		DNPRINTF(SR_D_IOCTL,
+		    "sr_ioctl_installboot: saving boot loader to %s "
+		    "(%u bytes)\n", chunk->src_devname, bls);
+
+		bzero(&b, sizeof(b));
+		b.b_flags = B_WRITE | B_PHYS;
+		b.b_blkno = SR_BOOT_LOADER_OFFSET;
+		b.b_bcount = bls;
+		b.b_bufsize = bls;
+		b.b_resid = bls;
+		b.b_data = bootldr;
+		b.b_error = 0;
+		b.b_proc = curproc;
+		b.b_dev = chunk->src_dev_mm;
+		b.b_vp = NULL;
+		b.b_iodone = NULL;
+		if (bdevvp(chunk->src_dev_mm, &b.b_vp)) {
+			printf("%s: sr_ioctl_installboot: vnode alocation "
+			    "failed\n", DEVNAME(sc));
+			goto done;
+		}
+		if ((b.b_flags & B_READ) == 0)
+			b.b_vp->v_numoutput++;
+		LIST_INIT(&b.b_dep);
+		VOP_STRATEGY(&b);
+		biowait(&b);
+		vput(b.b_vp);
+
+		if (b.b_flags & B_ERROR) {
+			printf("%s: 0x%x i/o error on block %llu while "
+			    "writing boot blocks %d\n", DEVNAME(sc),
+			    chunk->src_dev_mm, b.b_blkno, b.b_error);
+			goto done;
+		}
+
+	}
+
+	/* XXX - Install boot block on disk - MD code. */
+
+	/* Save boot details in metadata. */
+	sd->sd_meta->ssdi.ssd_vol_flags |= BIOC_SCBOOTABLE;
+
+	/* XXX - Store size of boot block/loader in optional metadata. */
+
+	/* Save metadata. */
+	if (sr_meta_save(sd, SR_META_DIRTY)) {
+		printf("%s: could not save metadata to %s\n",
+		    DEVNAME(sc), chunk->src_devname);
+		goto done;
+	}
+
+	rv = 0;
+
+done:
+	if (bootblk)
+		free(bootblk, M_DEVBUF);
+	if (bootldr)
+		free(bootldr, M_DEVBUF);
+
+	return (rv);
+}
+
 void
 sr_chunks_unwind(struct sr_softc *sc, struct sr_chunk_head *cl)
 {
 	struct sr_chunk		*ch_entry, *ch_next;
-	dev_t			dev;
 
 	DNPRINTF(SR_D_IOCTL, "%s: sr_chunks_unwind\n", DEVNAME(sc));
 
@@ -2423,13 +3313,20 @@ sr_chunks_unwind(struct sr_softc *sc, struct sr_chunk_head *cl)
 	    ch_entry != SLIST_END(cl); ch_entry = ch_next) {
 		ch_next = SLIST_NEXT(ch_entry, src_link);
 
-		dev = ch_entry->src_dev_mm;
 		DNPRINTF(SR_D_IOCTL, "%s: sr_chunks_unwind closing: %s\n",
 		    DEVNAME(sc), ch_entry->src_devname);
-		if (dev != NODEV)
-			bdevsw_lookup(dev)->d_close(dev, FWRITE, S_IFBLK,
+		if (ch_entry->src_vn) {
+			/*
+			 * XXX - explicitly lock the vnode until we can resolve
+			 * the problem introduced by vnode aliasing... specfs
+			 * has no locking, whereas ufs/ffs does!
+			 */
+			vn_lock(ch_entry->src_vn, LK_EXCLUSIVE |
+			    LK_RETRY, curproc);
+			VOP_CLOSE(ch_entry->src_vn, FREAD | FWRITE, NOCRED,
 			    curproc);
-
+			vput(ch_entry->src_vn);
+		}
 		free(ch_entry, M_DEVBUF);
 	}
 	SLIST_INIT(cl);
@@ -2438,11 +3335,15 @@ sr_chunks_unwind(struct sr_softc *sc, struct sr_chunk_head *cl)
 void
 sr_discipline_free(struct sr_discipline *sd)
 {
-	struct sr_softc		*sc = sd->sd_sc;
+	struct sr_softc		*sc;
+	struct sr_meta_opt_head *omh;
+	struct sr_meta_opt_item	*omi, *omi_next;
 	int			i;
 
 	if (!sd)
 		return;
+
+	sc = sd->sd_sc;
 
 	DNPRINTF(SR_D_DIS, "%s: sr_discipline_free %s\n",
 	    DEVNAME(sc),
@@ -2455,6 +3356,12 @@ sr_discipline_free(struct sr_discipline *sd)
 		free(sd->sd_meta, M_DEVBUF);
 	if (sd->sd_meta_foreign)
 		free(sd->sd_meta_foreign, M_DEVBUF);
+
+	omh = &sd->sd_meta_opt;
+	for (omi = SLIST_FIRST(omh); omi != SLIST_END(omh); omi = omi_next) {
+		omi_next = SLIST_NEXT(omi, omi_link);
+		free(omi, M_DEVBUF);
+	}
 
 	for (i = 0; i < SR_MAXSCSIBUS; i++)
 		if (sc->sc_dis[i] == sd) {
@@ -2519,12 +3426,13 @@ sr_discipline_init(struct sr_discipline *sd, int level)
 		sr_raid1_discipline_init(sd);
 		break;
 	case 4:
+		sr_raidp_discipline_init(sd, SR_MD_RAID4);
+		break;
 	case 5:
-		if (level == 4)
-			sd->sd_type = SR_MD_RAID4;
-		else
-			sd->sd_type = SR_MD_RAID5;
-		sr_raidp_discipline_init(sd);
+		sr_raidp_discipline_init(sd, SR_MD_RAID5);
+		break;
+	case 6:
+		sr_raid6_discipline_init(sd);
 		break;
 #ifdef AOE
 	/* AOE target. */
@@ -2565,6 +3473,7 @@ sr_raid_inquiry(struct sr_workunit *wu)
 	inq.version = 2;
 	inq.response_format = 2;
 	inq.additional_length = 32;
+	inq.flags |= SID_CmdQue;
 	strlcpy(inq.vendor, sd->sd_meta->ssdi.ssd_vendor,
 	    sizeof(inq.vendor));
 	strlcpy(inq.product, sd->sd_meta->ssdi.ssd_product,
@@ -2735,7 +3644,7 @@ sr_raid_startwu(struct sr_workunit *wu)
 
 	/* start all individual ios */
 	TAILQ_FOREACH(ccb, &wu->swu_ccb, ccb_link) {
-		bdevsw_lookup(ccb->ccb_buf.b_dev)->d_strategy(&ccb->ccb_buf);
+		VOP_STRATEGY(&ccb->ccb_buf);
 	}
 }
 
@@ -2839,7 +3748,7 @@ sr_shutdown(void *arg)
 	    DEVNAME(sc), sd->sd_meta->ssd_devname);
 
 	/* abort rebuild and drain io */
-	sd->sd_going_down = 1;
+	sd->sd_reb_abort = 1;
 	while (sd->sd_reb_active)
 		tsleep(sd, PWAIT, "sr_shutdown", 1);
 
@@ -2857,6 +3766,9 @@ sr_validate_io(struct sr_workunit *wu, daddr64_t *blk, char *func)
 
 	DNPRINTF(SR_D_DIS, "%s: %s 0x%02x\n", DEVNAME(sd->sd_sc), func,
 	    xs->cmd->opcode);
+
+	if (sd->sd_meta->ssd_data_offset == 0)
+		panic("invalid data offset");
 
 	if (sd->sd_vol_status == BIOC_SVOFFLINE) {
 		DNPRINTF(SR_D_DIS, "%s: %s device offline\n",
@@ -2984,7 +3896,10 @@ sr_rebuild_thread(void *arg)
 		 */
 		psz = sd->sd_meta->ssdi.ssd_size;
 		rb = sd->sd_meta->ssd_rebuild;
-		percent = 100 - ((psz * 100 - rb * 100) / psz);
+		if (rb > 0)
+			percent = 100 - ((psz * 100 - rb * 100) / psz) - 1;
+		else
+			percent = 0;
 		printf("%s: resuming rebuild on %s at %llu%%\n",
 		    DEVNAME(sc), sd->sd_meta->ssd_devname, percent);
 	}
@@ -3081,7 +3996,10 @@ queued:
 		/* save metadata every percent */
 		psz = sd->sd_meta->ssdi.ssd_size;
 		rb = sd->sd_meta->ssd_rebuild;
-		percent = 100 - ((psz * 100 - rb * 100) / psz);
+		if (rb > 0)
+			percent = 100 - ((psz * 100 - rb * 100) / psz) - 1;
+		else
+			percent = 0;
 		if (percent != old_percent && blk != whole_blk) {
 			if (sr_meta_save(sd, SR_META_DIRTY))
 				printf("%s: could not save metadata to %s\n",
@@ -3089,7 +4007,7 @@ queued:
 			old_percent = percent;
 		}
 
-		if (sd->sd_going_down)
+		if (sd->sd_reb_abort)
 			goto abort;
 	}
 
@@ -3245,7 +4163,7 @@ sr_meta_print(struct sr_metadata *m)
 
 	printf("\tssd_magic 0x%llx\n", m->ssdi.ssd_magic);
 	printf("\tssd_version %d\n", m->ssdi.ssd_version);
-	printf("\tssd_flags 0x%x\n", m->ssdi.ssd_flags);
+	printf("\tssd_vol_flags 0x%x\n", m->ssdi.ssd_vol_flags);
 	printf("\tssd_uuid ");
 	sr_uuid_print(&m->ssdi.ssd_uuid, 1);
 	printf("\tssd_chunk_no %d\n", m->ssdi.ssd_chunk_no);

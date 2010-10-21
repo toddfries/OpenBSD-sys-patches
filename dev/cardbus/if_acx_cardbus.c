@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_acx_cardbus.c,v 1.14 2009/03/29 21:53:52 sthen Exp $  */
+/*	$OpenBSD: if_acx_cardbus.c,v 1.19 2010/09/06 19:20:21 deraadt Exp $  */
 
 /*
  * Copyright (c) 2006 Claudio Jeker <claudio@openbsd.org>
@@ -64,7 +64,7 @@ struct acx_cardbus_softc {
 
 	/* cardbus specific goo */
 	cardbus_devfunc_t	sc_ct;
-	cardbustag_t		sc_tag;
+	pcitag_t		sc_tag;
 	void			*sc_ih;
 	bus_size_t		sc_mapsize1;
 	bus_size_t		sc_mapsize2;
@@ -79,6 +79,7 @@ struct acx_cardbus_softc {
 	bus_size_t		sc_iomapsize;
 
 	int			sc_acx_attached;
+	pci_chipset_tag_t	sc_pc;
 };
 
 int	acx_cardbus_match(struct device *, void *, void *);
@@ -90,7 +91,7 @@ struct cfattach acx_cardbus_ca = {
 	acx_cardbus_attach, acx_cardbus_detach
 };
 
-static const struct cardbus_matchid acx_cardbus_devices[] = {
+static const struct pci_matchid acx_cardbus_devices[] = {
 	{ PCI_VENDOR_TI, PCI_PRODUCT_TI_ACX100A },
 	{ PCI_VENDOR_TI, PCI_PRODUCT_TI_ACX100B },
 	{ PCI_VENDOR_TI, PCI_PRODUCT_TI_ACX111 },
@@ -123,52 +124,53 @@ acx_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	csc->sc_ct = ct;
 	csc->sc_tag = ca->ca_tag;
 	csc->sc_intrline = ca->ca_intrline;
+	csc->sc_pc = ca->ca_pc;
 
 	/* power management hooks */
 	sc->sc_enable = acx_cardbus_enable;
 	sc->sc_disable = acx_cardbus_disable;
 	sc->sc_power = acx_cardbus_power;
 
-	if (CARDBUS_PRODUCT(ca->ca_id) == PCI_PRODUCT_TI_ACX100A) {
+	if (PCI_PRODUCT(ca->ca_id) == PCI_PRODUCT_TI_ACX100A) {
 		/* first map I/O space as seen in the dragonfly code */
 		error = Cardbus_mapreg_map(ct, CARDBUS_BASE0_REG,
-		    CARDBUS_MAPREG_TYPE_IO, 0, &csc->sc_io_bt, &csc->sc_io_bh,
+		    PCI_MAPREG_TYPE_IO, 0, &csc->sc_io_bt, &csc->sc_io_bh,
 		    &base, &csc->sc_iomapsize);
 		if (error != 0) {
 			printf(": can't map i/o space\n");
 			return;
 		}
-		csc->sc_iobar_val = base | CARDBUS_MAPREG_TYPE_IO;
+		csc->sc_iobar_val = base | PCI_MAPREG_TYPE_IO;
 		b1 = CARDBUS_BASE1_REG;
 		b2 = CARDBUS_BASE2_REG;
 	}
 
 	/* map control/status registers */
-	error = Cardbus_mapreg_map(ct, b1, CARDBUS_MAPREG_TYPE_MEM, 0,
+	error = Cardbus_mapreg_map(ct, b1, PCI_MAPREG_TYPE_MEM, 0,
 	    &sc->sc_mem1_bt, &sc->sc_mem1_bh, &base, &csc->sc_mapsize1);
 	if (error != 0) {
 		printf(": can't map mem1 space\n");
 		return;
 	}
 
-	csc->sc_bar1_val = base | CARDBUS_MAPREG_TYPE_MEM;
+	csc->sc_bar1_val = base | PCI_MAPREG_TYPE_MEM;
 
 	/* map the other memory region */
-	error = Cardbus_mapreg_map(ct, b2, CARDBUS_MAPREG_TYPE_MEM, 0,
+	error = Cardbus_mapreg_map(ct, b2, PCI_MAPREG_TYPE_MEM, 0,
 	    &sc->sc_mem2_bt, &sc->sc_mem2_bh, &base, &csc->sc_mapsize2);
 	if (error != 0) {
 		printf(": can't map mem2 space\n");
 		return;
 	}
 
-	csc->sc_bar2_val = base | CARDBUS_MAPREG_TYPE_MEM;
+	csc->sc_bar2_val = base | PCI_MAPREG_TYPE_MEM;
 
 	/* set up the PCI configuration registers */
 	acx_cardbus_setup(csc);
 
 	printf(": irq %d\n", csc->sc_intrline);
 
-	if (CARDBUS_PRODUCT(ca->ca_id) == PCI_PRODUCT_TI_ACX111)
+	if (PCI_PRODUCT(ca->ca_id) == PCI_PRODUCT_TI_ACX111)
 		acx111_set_param(sc);
 	else
 		acx100_set_param(sc);
@@ -270,7 +272,7 @@ acx_cardbus_power(struct acx_softc *sc, int why)
 {
 	struct acx_cardbus_softc *csc = (struct acx_cardbus_softc *)sc;
 
-	if (why == PWR_RESUME) {
+	if (why == DVACT_RESUME) {
 		/* kick the PCI configuration registers */
 		acx_cardbus_setup(csc);
 	}
@@ -281,34 +283,35 @@ acx_cardbus_setup(struct acx_cardbus_softc *csc)
 {
 	cardbus_devfunc_t ct = csc->sc_ct;
 	cardbus_chipset_tag_t cc = ct->ct_cc;
+	pci_chipset_tag_t pc = csc->sc_pc;
 	cardbus_function_tag_t cf = ct->ct_cf;
 	pcireg_t reg;
 	int b1 = CARDBUS_BASE0_REG, b2 = CARDBUS_BASE1_REG;
 
 	if (csc->sc_iobar_val) {
-		cardbus_conf_write(cc, cf, csc->sc_tag, CARDBUS_BASE0_REG,
-		    csc->sc_bar1_val);
+		pci_conf_write(pc, csc->sc_tag, CARDBUS_BASE0_REG,
+		    csc->sc_iobar_val);
 		b1 = CARDBUS_BASE1_REG;
 		b2 = CARDBUS_BASE2_REG;
 		/* (*cf->cardbus_ctrl)(cc, CARDBUS_IO_ENABLE); */
 	}
 
 	/* program the BAR */
-	cardbus_conf_write(cc, cf, csc->sc_tag, b1, csc->sc_bar1_val);
-	cardbus_conf_write(cc, cf, csc->sc_tag, b2, csc->sc_bar2_val);
+	pci_conf_write(pc, csc->sc_tag, b1, csc->sc_bar1_val);
+	pci_conf_write(pc, csc->sc_tag, b2, csc->sc_bar2_val);
 
 	/* make sure the right access type is on the cardbus bridge */
 	(*cf->cardbus_ctrl)(cc, CARDBUS_MEM_ENABLE);
 	(*cf->cardbus_ctrl)(cc, CARDBUS_BM_ENABLE);
 
 	/* enable the appropriate bits in the PCI CSR */
-	reg = cardbus_conf_read(cc, cf, csc->sc_tag,
-	    CARDBUS_COMMAND_STATUS_REG);
-	reg |= CARDBUS_COMMAND_MASTER_ENABLE | CARDBUS_COMMAND_MEM_ENABLE;
+	reg = pci_conf_read(pc, csc->sc_tag,
+	    PCI_COMMAND_STATUS_REG);
+	reg |= PCI_COMMAND_MASTER_ENABLE | PCI_COMMAND_MEM_ENABLE;
 #if 0
 	if (csc->sc_iobar_val)
-		reg |= CARDBUS_COMMAND_IO_ENABLE;
+		reg |= PCI_COMMAND_IO_ENABLE;
 #endif
-	cardbus_conf_write(cc, cf, csc->sc_tag, CARDBUS_COMMAND_STATUS_REG,
+	pci_conf_write(pc, csc->sc_tag, PCI_COMMAND_STATUS_REG,
 	    reg);
 }

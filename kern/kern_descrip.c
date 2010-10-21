@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_descrip.c,v 1.81 2008/11/25 18:04:38 blambert Exp $	*/
+/*	$OpenBSD: kern_descrip.c,v 1.85 2010/07/26 01:56:27 guenther Exp $	*/
 /*	$NetBSD: kern_descrip.c,v 1.42 1996/03/30 22:24:38 christos Exp $	*/
 
 /*
@@ -389,12 +389,12 @@ restart:
 		if ((long)SCARG(uap, arg) <= 0) {
 			SCARG(uap, arg) = (void *)(-(long)SCARG(uap, arg));
 		} else {
-			struct proc *p1 = pfind((long)SCARG(uap, arg));
-			if (p1 == 0) {
+			struct process *pr1 = prfind((long)SCARG(uap, arg));
+			if (pr1 == 0) {
 				error = ESRCH;
 				break;
 			}
-			SCARG(uap, arg) = (void *)(long)p1->p_pgrp->pg_id;
+			SCARG(uap, arg) = (void *)(long)pr1->ps_pgrp->pg_id;
 		}
 		error = ((*fp->f_ops->fo_ioctl)
 			(fp, TIOCSPGRP, (caddr_t)&SCARG(uap, arg), p));
@@ -856,10 +856,10 @@ fdinit(struct proc *p)
 		struct filedesc *fdp = p->p_fd;
 
 		newfdp->fd_fd.fd_cdir = fdp->fd_cdir;
-		VREF(newfdp->fd_fd.fd_cdir);
+		vref(newfdp->fd_fd.fd_cdir);
 		newfdp->fd_fd.fd_rdir = fdp->fd_rdir;
 		if (newfdp->fd_fd.fd_rdir)
-			VREF(newfdp->fd_fd.fd_rdir);
+			vref(newfdp->fd_fd.fd_rdir);
 	}
 	rw_init(&newfdp->fd_fd.fd_lock, "fdlock");
 
@@ -902,9 +902,9 @@ fdcopy(struct proc *p)
 	newfdp = pool_get(&fdesc_pool, PR_WAITOK);
 	bcopy(fdp, newfdp, sizeof(struct filedesc));
 	if (newfdp->fd_cdir)
-		VREF(newfdp->fd_cdir);
+		vref(newfdp->fd_cdir);
 	if (newfdp->fd_rdir)
-		VREF(newfdp->fd_rdir);
+		vref(newfdp->fd_rdir);
 	newfdp->fd_refcnt = 1;
 
 	/*

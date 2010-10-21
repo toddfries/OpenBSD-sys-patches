@@ -1,4 +1,4 @@
-/*       $OpenBSD: vfs_sync.c,v 1.44 2008/05/08 17:45:45 thib Exp $  */
+/*       $OpenBSD: vfs_sync.c,v 1.48 2010/09/10 16:34:08 thib Exp $  */
 
 /*
  *  Portions of this code are:
@@ -62,13 +62,13 @@ int   softdep_process_worklist(struct mount *);
 #define SYNCER_MAXDELAY	32		/* maximum sync delay time */
 #define SYNCER_DEFAULT 30		/* default sync delay time */
 int syncer_maxdelay = SYNCER_MAXDELAY;	/* maximum delay time */
-time_t syncdelay = SYNCER_DEFAULT;	/* time to delay syncing vnodes */
+int syncdelay = SYNCER_DEFAULT;		/* time to delay syncing vnodes */
 
 int rushjob = 0;			/* number of slots to run ASAP */
 int stat_rush_requests = 0;		/* number of rush requests */
 
-static int syncer_delayno = 0;
-static long syncer_mask;
+int syncer_delayno = 0;
+long syncer_mask;
 LIST_HEAD(synclist, vnode);
 static struct synclist *syncer_workitem_pending;
 
@@ -269,14 +269,14 @@ int   sync_print(void *);
 int (**sync_vnodeop_p)(void *);
 struct vnodeopv_entry_desc sync_vnodeop_entries[] = {
       { &vop_default_desc, eopnotsupp },
-      { &vop_close_desc, sync_close },                /* close */
-      { &vop_fsync_desc, sync_fsync },                /* fsync */
-      { &vop_inactive_desc, sync_inactive },          /* inactive */
-      { &vop_reclaim_desc, sync_reclaim },            /* reclaim */
-      { &vop_lock_desc, sync_lock },                  /* lock */
-      { &vop_unlock_desc, sync_unlock },              /* unlock */
-      { &vop_print_desc, sync_print },                /* print */
-      { &vop_islocked_desc, sync_islocked },          /* islocked */
+      { &vop_close_desc, sync_close },
+      { &vop_fsync_desc, sync_fsync },
+      { &vop_inactive_desc, sync_inactive },
+      { &vop_reclaim_desc, sync_reclaim },
+      { &vop_lock_desc, sync_lock },
+      { &vop_unlock_desc, sync_unlock },
+      { &vop_print_desc, sync_print },
+      { &vop_islocked_desc, sync_islocked },
       { (struct vnodeop_desc*)NULL, (int(*)(void *))NULL }
 };
 struct vnodeopv_desc sync_vnodeop_opv_desc = {

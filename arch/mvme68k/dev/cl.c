@@ -1,4 +1,4 @@
-/*	$OpenBSD: cl.c,v 1.47 2009/05/31 12:25:52 miod Exp $ */
+/*	$OpenBSD: cl.c,v 1.52 2010/06/28 14:13:29 deraadt Exp $ */
 
 /*
  * Copyright (c) 1995 Dale Rahn. All rights reserved.
@@ -554,7 +554,7 @@ clopen(dev, flag, mode, p)
 	if (cl->tty) {
 		tp = cl->tty;
 	} else {
-		tp = cl->tty = ttymalloc();
+		tp = cl->tty = ttymalloc(0);
 	}
 	tp->t_oproc = clstart;
 	tp->t_param = clparam;
@@ -650,7 +650,7 @@ if (channel == 2) { /* test one channel now */
 #endif /* CL_DMA_WORKS */
 			sc->cl_reg->cl_car = save;
 		}
-	} else if (tp->t_state & TS_XCLUDE && p->p_ucred->cr_uid != 0) {
+	} else if (tp->t_state & TS_XCLUDE && suser(p, 0) != 0) {
 		splx(s);
 		return(EBUSY);
 	}
@@ -671,7 +671,7 @@ if (channel == 2) { /* test one channel now */
 #ifdef DEBUG
 	cl_dumpport(channel);
 #endif
-	return((*linesw[tp->t_line].l_open)(dev, tp));
+	return((*linesw[tp->t_line].l_open)(dev, tp, p));
 }
 int clparam(tp, t)
 	struct tty *tp;
@@ -759,7 +759,7 @@ clclose(dev, flag, mode, p)
 	channel = CL_CHANNEL(dev);
 	cl = &sc->sc_cl[channel];
 	tp = cl->tty;
-	(*linesw[tp->t_line].l_close)(tp, flag);
+	(*linesw[tp->t_line].l_close)(tp, flag, p);
 
 	s = splcl();
 	

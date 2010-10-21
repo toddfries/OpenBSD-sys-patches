@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_rl_pci.c,v 1.17 2009/06/02 17:27:39 jsg Exp $ */
+/*	$OpenBSD: if_rl_pci.c,v 1.20 2010/08/27 20:21:43 deraadt Exp $ */
 
 /*
  * Copyright (c) 1997, 1998
@@ -93,7 +93,8 @@ struct rl_pci_softc {
 };
 
 struct cfattach rl_pci_ca = {
-	sizeof(struct rl_pci_softc), rl_pci_match, rl_pci_attach, rl_pci_detach
+	sizeof(struct rl_pci_softc), rl_pci_match, rl_pci_attach, rl_pci_detach,
+	rl_activate
 };
 
 const struct pci_matchid rl_pci_devices[] = {
@@ -114,10 +115,7 @@ const struct pci_matchid rl_pci_devices[] = {
 };
 
 int
-rl_pci_match(parent, match, aux)
-	struct device *parent;
-	void *match;
-	void *aux;
+rl_pci_match(struct device *parent, void *match, void *aux)
 {
 	struct pci_attach_args *pa = aux;
 
@@ -131,16 +129,14 @@ rl_pci_match(parent, match, aux)
 }
 
 void
-rl_pci_attach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+rl_pci_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct rl_pci_softc *psc = (void *)self;
-	struct rl_softc *sc = &psc->psc_softc;
-	struct pci_attach_args *pa = aux;
-	pci_chipset_tag_t pc = pa->pa_pc;
-	pci_intr_handle_t ih;
-	const char *intrstr = NULL;
+	struct rl_pci_softc	*psc = (void *)self;
+	struct rl_softc		*sc = &psc->psc_softc;
+	struct pci_attach_args	*pa = aux;
+	pci_chipset_tag_t	pc = pa->pa_pc;
+	pci_intr_handle_t	ih;
+	const char		*intrstr = NULL;
 
 	/*
 	 * Map control/status registers.
@@ -191,9 +187,9 @@ rl_pci_attach(parent, self, aux)
 int
 rl_pci_detach(struct device *self, int flags)
 {
-	struct rl_pci_softc *psc = (void *)self;
-	struct rl_softc *sc = &psc->psc_softc;
-	int rv;
+	struct rl_pci_softc	*psc = (void *)self;
+	struct rl_softc		*sc = &psc->psc_softc;
+	int			rv;
 
 	rv = rl_detach(sc);
 	if (rv)
@@ -206,4 +202,3 @@ rl_pci_detach(struct device *self, int flags)
 
 	return (0);
 }
-

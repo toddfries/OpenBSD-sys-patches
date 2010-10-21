@@ -1,4 +1,4 @@
-/*	$OpenBSD: gus.c,v 1.32 2008/10/15 19:12:18 blambert Exp $	*/
+/*	$OpenBSD: gus.c,v 1.34 2010/07/15 03:43:11 jakemsr Exp $	*/
 /*	$NetBSD: gus.c,v 1.51 1998/01/25 23:48:06 mycroft Exp $	*/
 
 /*-
@@ -1001,14 +1001,8 @@ gus_voice_intr(sc)
 			    sc->sc_playbuf = ++sc->sc_playbuf % sc->sc_nbufs;
 			    gus_start_playing(sc, sc->sc_playbuf);
 			} else if (sc->sc_bufcnt < 0) {
-#ifdef DDB
-			    printf("%s: negative bufcnt in stopped voice\n",
-				   sc->sc_dev.dv_xname);
-			    Debugger();
-#else
 			    panic("%s: negative bufcnt in stopped voice",
-				  sc->sc_dev.dv_xname);
-#endif
+				   sc->sc_dev.dv_xname);
 			} else {
 			    sc->sc_playbuf = -1; /* none are active */
 			    gus_stops++;
@@ -1579,6 +1573,9 @@ gus_set_params(addr, setmode, usemode, p, r)
 		r->sw_code = p->sw_code = swap_bytes;
 		break;
 	}
+	p->bps = AUDIO_BPS(p->precision);
+	r->bps = AUDIO_BPS(r->precision);
+	p->msb = r->msb = 1;
 
 	return 0;
 }
@@ -3316,6 +3313,9 @@ gus_query_encoding(addr, fp)
 		return(EINVAL);
 		/*NOTREACHED*/
 	}
+	fp->bps = AUDIO_BPS(fp->precision);
+	fp->msb = 1;
+
 	return (0);
 }
 

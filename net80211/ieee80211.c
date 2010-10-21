@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211.c,v 1.36 2009/06/03 20:35:37 beck Exp $	*/
+/*	$OpenBSD: ieee80211.c,v 1.39 2010/08/07 03:50:02 krw Exp $	*/
 /*	$NetBSD: ieee80211.c,v 1.19 2004/06/06 05:45:29 dyoung Exp $	*/
 
 /*-
@@ -181,7 +181,7 @@ ieee80211_mhz2ieee(u_int freq, u_int flags)
 			return (freq - 2407) / 5;
 		else
 			return 15 + ((freq - 2512) / 20);
-	} else if (flags & IEEE80211_CHAN_5GHZ) {	/* 5Ghz band */
+	} else if (flags & IEEE80211_CHAN_5GHZ) {	/* 5GHz band */
 		return (freq - 5000) / 5;
 	} else {				/* either, guess */
 		if (freq == 2484)
@@ -228,7 +228,7 @@ ieee80211_ieee2mhz(u_int chan, u_int flags)
 			return 2407 + chan*5;
 		else
 			return 2512 + ((chan-15)*20);
-	} else if (flags & IEEE80211_CHAN_5GHZ) {/* 5Ghz band */
+	} else if (flags & IEEE80211_CHAN_5GHZ) {/* 5GHz band */
 		return 5000 + (chan*5);
 	} else {				/* either, guess */
 		if (chan == 14)
@@ -547,7 +547,10 @@ ieee80211_media_status(struct ifnet *ifp, struct ifmediareq *imr)
 
 	imr->ifm_status = IFM_AVALID;
 	imr->ifm_active = IFM_IEEE80211;
-	if (ic->ic_state == IEEE80211_S_RUN)
+	if (ic->ic_state == IEEE80211_S_RUN &&
+	    (ic->ic_opmode != IEEE80211_M_STA ||
+	     !(ic->ic_flags & IEEE80211_F_RSNON) ||
+	     ic->ic_bss->ni_port_valid))
 		imr->ifm_status |= IFM_ACTIVE;
 	imr->ifm_active |= IFM_AUTO;
 	switch (ic->ic_opmode) {
@@ -731,7 +734,7 @@ ieee80211_setmode(struct ieee80211com *ic, enum ieee80211_phymode mode)
 			}
 		if ((ic->ic_ibss_chan == NULL) || isclr(ic->ic_chan_active,
 		    ieee80211_chan2ieee(ic, ic->ic_ibss_chan)))
-			panic("Bad IBSS channel %u\n",
+			panic("Bad IBSS channel %u",
 			    ieee80211_chan2ieee(ic, ic->ic_ibss_chan));
 	}
 

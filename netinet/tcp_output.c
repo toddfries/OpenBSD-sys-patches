@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_output.c,v 1.87 2009/06/05 00:05:22 claudio Exp $	*/
+/*	$OpenBSD: tcp_output.c,v 1.92 2010/09/24 02:59:45 claudio Exp $	*/
 /*	$NetBSD: tcp_output.c,v 1.16 1997/06/03 16:17:09 kml Exp $	*/
 
 /*
@@ -212,7 +212,8 @@ tcp_output(struct tcpcb *tp)
 	int off, flags, error;
 	struct mbuf *m;
 	struct tcphdr *th;
-	u_char opt[MAX_TCPOPTLEN];
+	u_int32_t optbuf[howmany(MAX_TCPOPTLEN, sizeof(u_int32_t))];
+	u_char *opt = (u_char *)optbuf;
 	unsigned int optlen, hdrlen, packetlen;
 	int idle, sendalot = 0;
 #ifdef TCP_SACK
@@ -592,6 +593,11 @@ send:
 		*lp++ = htonl(tcp_now + tp->ts_modulate);
 		*lp   = htonl(tp->ts_recent);
 		optlen += TCPOLEN_TSTAMP_APPA;
+
+		/* Set receive buffer autosizing timestamp. */
+		if (tp->rfbuf_ts == 0)
+			tp->rfbuf_ts = tcp_now;
+
 	}
 
 #ifdef TCP_SIGNATURE
@@ -923,7 +929,8 @@ send:
 
 		/* XXX gettdbbysrcdst() should really be called at spltdb(). */
 		/* XXX this is splsoftnet(), currently they are the same. */
-		tdb = gettdbbysrcdst(0, &src, &dst, IPPROTO_TCP);
+		tdb = gettdbbysrcdst(rtable_l2(tp->t_inpcb->inp_rtableid),
+		    0, &src, &dst, IPPROTO_TCP);
 		if (tdb == NULL)
 			return (EPERM);
 
@@ -1028,6 +1035,8 @@ send:
 		if (SEQ_GT(tp->snd_nxt + len, tp->snd_max))
 			tp->snd_max = tp->snd_nxt + len;
 
+	tcp_update_sndspace(tp);
+
 	/*
 	 * Trace.
 	 */
@@ -1060,7 +1069,7 @@ send:
 #endif
 
 	/* force routing domain */
-	m->m_pkthdr.rdomain = tp->t_inpcb->inp_rdomain;
+	m->m_pkthdr.rdomain = tp->t_inpcb->inp_rtableid;
 
 	switch (tp->pf) {
 	case 0:	/*default to PF_INET*/
@@ -1136,6 +1145,8 @@ out:
 			tcp_mtudisc(tp->t_inpcb, -1);
 			return (0);
 		}
+		if (error == EACCES)	/* translate pf(4) error for userland */
+			error = EHOSTUNREACH;
 		if ((error == EHOSTUNREACH || error == ENETDOWN) &&
 		    TCPS_HAVERCVDSYN(tp->t_state)) {
 			tp->t_softerror = error;

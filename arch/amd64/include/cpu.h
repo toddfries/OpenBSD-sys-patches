@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.48 2009/06/09 02:56:38 krw Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.58 2010/10/02 23:13:27 deraadt Exp $	*/
 /*	$NetBSD: cpu.h,v 1.1 2003/04/26 18:39:39 fvdl Exp $	*/
 
 /*-
@@ -74,6 +74,7 @@ struct cpu_info {
 	u_int64_t ci_scratch;
 
 	struct proc *ci_fpcurproc;
+	struct proc *ci_fpsaveproc;
 	int ci_fpsaving;
 
 	struct pcb *ci_curpcb;
@@ -86,8 +87,11 @@ struct cpu_info {
 	int		ci_idepth;
 	u_int32_t	ci_imask[NIPL];
 	u_int32_t	ci_iunmask[NIPL];
+#ifdef DIAGNOSTIC
+	int		ci_mutex_level;
+#endif
 
-	u_int		ci_flags;
+	volatile u_int	ci_flags;
 	u_int32_t	ci_ipis;
 
 	u_int32_t	ci_feature_flags;
@@ -95,6 +99,7 @@ struct cpu_info {
 	u_int32_t	ci_signature;
 	u_int32_t	ci_family;
 	u_int32_t	ci_model;
+	u_int32_t	ci_cflushsz;
 	u_int64_t	ci_tsc_freq;
 
 	struct cpu_functions *ci_func;
@@ -288,12 +293,18 @@ void	proc_trampoline(void);
 void	child_trampoline(void);
 
 /* clock.c */
-void	initrtclock(void);
-void	startrtclock(void);
+extern void (*initclock_func)(void);
+void	startclocks(void);
+void	rtcstart(void);
+void	rtcstop(void);
 void	i8254_delay(int);
 void	i8254_initclocks(void);
+void	i8254_startclock(void);
 void	i8254_inittimecounter(void);
 void	i8254_inittimecounter_simple(void);
+
+/* i8259.c */
+void	i8259_default_setup(void);
 
 
 void cpu_init_msrs(struct cpu_info *);
@@ -340,7 +351,9 @@ void mp_setperf_init(void);
 #define CPU_APMWARN		9	/* APM battery warning percentage */
 #define CPU_KBDRESET		10	/* keyboard reset under pcvt */
 #define CPU_APMHALT		11	/* halt -p hack */
-#define CPU_MAXID		12	/* number of valid machdep ids */
+#define CPU_XCRYPT		12	/* supports VIA xcrypt in userland */
+#define CPU_LIDSUSPEND		13	/* lid close causes a suspend */
+#define CPU_MAXID		14	/* number of valid machdep ids */
 
 #define	CTL_MACHDEP_NAMES { \
 	{ 0, 0 }, \
@@ -355,6 +368,8 @@ void mp_setperf_init(void);
 	{ "apmwarn", CTLTYPE_INT }, \
 	{ "kbdreset", CTLTYPE_INT }, \
 	{ "apmhalt", CTLTYPE_INT }, \
+	{ "xcrypt", CTLTYPE_INT }, \
+	{ "lidsuspend", CTLTYPE_INT }, \
 }
 
 /*

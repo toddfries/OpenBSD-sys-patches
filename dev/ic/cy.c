@@ -1,4 +1,4 @@
-/*	$OpenBSD: cy.c,v 1.25 2005/11/21 18:16:39 millert Exp $	*/
+/*	$OpenBSD: cy.c,v 1.32 2010/07/02 17:27:01 nicm Exp $	*/
 /*
  * Copyright (c) 1996 Timo Rossi.
  * All rights reserved.
@@ -62,7 +62,6 @@
 #include <sys/tty.h>
 #include <sys/proc.h>
 #include <sys/conf.h>
-#include <sys/user.h>
 #include <sys/selinfo.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
@@ -300,7 +299,7 @@ cyopen(dev, flag, mode, p)
 
 	s = spltty();
 	if (cy->cy_tty == NULL) {
-		cy->cy_tty = ttymalloc();
+		cy->cy_tty = ttymalloc(0);
 	}
 	splx(s);
 
@@ -377,7 +376,7 @@ cyopen(dev, flag, mode, p)
 			SET(tp->t_state, TS_CARR_ON);
 		else
 			CLR(tp->t_state, TS_CARR_ON);
-	} else if (ISSET(tp->t_state, TS_XCLUDE) && p->p_ucred->cr_uid != 0) {
+	} else if (ISSET(tp->t_state, TS_XCLUDE) && suser(p, 0) != 0) {
 		return (EBUSY);
 	} else {
 		s = spltty();
@@ -400,7 +399,7 @@ cyopen(dev, flag, mode, p)
 
 	splx(s);
 
-	return (*linesw[tp->t_line].l_open)(dev, tp);
+	return (*linesw[tp->t_line].l_open)(dev, tp, p);
 }
 
 /*
@@ -424,7 +423,7 @@ cyclose(dev, flag, mode, p)
 	    port, flag, mode);
 #endif
 
-	(*linesw[tp->t_line].l_close)(tp, flag);
+	(*linesw[tp->t_line].l_close)(tp, flag, p);
 	s = spltty();
 
 	if (ISSET(tp->t_cflag, HUPCL) &&
@@ -622,17 +621,9 @@ cystart(tp)
 #endif
 
 	if (!ISSET(tp->t_state, TS_TTSTOP | TS_TIMEOUT | TS_BUSY)) {
-		if (tp->t_outq.c_cc <= tp->t_lowat) {
-			if (ISSET(tp->t_state, TS_ASLEEP)) {
-				CLR(tp->t_state, TS_ASLEEP);
-				wakeup(&tp->t_outq);
-			}
-
-			selwakeup(&tp->t_wsel);
-
-			if (tp->t_outq.c_cc == 0)
-				goto out;
-		}
+		ttwakeupwr(tp);
+		if (tp->t_outq.c_cc == 0)
+			goto out;
 
 		SET(tp->t_state, TS_BUSY);
 		cy_enable_transmitter(cy);

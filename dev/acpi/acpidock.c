@@ -1,4 +1,4 @@
-/* $OpenBSD: acpidock.c,v 1.38 2009/06/07 13:18:04 mk Exp $ */
+/* $OpenBSD: acpidock.c,v 1.42 2010/07/27 01:21:19 jordan Exp $ */
 /*
  * Copyright (c) 2006,2007 Michael Knudsen <mk@openbsd.org>
  *
@@ -107,7 +107,7 @@ acpidock_attach(struct device *parent, struct device *self, void *aux)
 	sensordev_install(&sc->sc_sensdev);
 
 	TAILQ_INIT(&sc->sc_deps_h);
-	aml_find_node(aml_root.child, "_EJD", acpidock_foundejd, sc);
+	aml_find_node(&aml_root, "_EJD", acpidock_foundejd, sc);
 
 	aml_register_notify(sc->sc_devnode, aa->aaa_dev,
 	    acpidock_notify, sc, ACPIDEV_NOPOLL);
@@ -226,6 +226,9 @@ acpidock_notify(struct aml_node *node, int notify_type, void *arg)
 		break;
 
 	case ACPIDOCK_EVENT_EJECT:
+	case ACPIDOCK_EVENT_DEVCHECK:
+		/* ACPI Spec says eject button press generates
+		 * a Notify(Device, 1); */
 		TAILQ_FOREACH(n, &sc->sc_deps_h, entries)
 			acpidock_eject(sc, n->node);
 		acpidock_dockctl(sc, 0);
@@ -246,7 +249,7 @@ acpidock_notify(struct aml_node *node, int notify_type, void *arg)
 		    sizeof(sc->sc_sens.desc));
 
 	printf("%s: %s\n",
-	    DEVNAME(sc), sc->sc_docked == ACPIDOCK_STATUS_DOCKED ? 
+	    DEVNAME(sc), sc->sc_docked == ACPIDOCK_STATUS_DOCKED ?
 	    "docked" : "undocked");
 
 	return (0);
@@ -282,11 +285,7 @@ acpidock_foundejd(struct aml_node *node, void *arg)
 	if (aml_evalnode(sc->sc_acpi, node, 0, NULL, &res) == -1)
 		printf(": error\n");
 	else {
-		if (!memcmp(res.v_string, "_SB.", 4)) {
-			dock = aml_searchname(&aml_root, "_SB_");
-			dock = aml_searchname(dock, res.v_string+4);
-		} else
-			dock = aml_searchname(&aml_root, res.v_string);
+		dock = aml_searchname(&aml_root, res.v_string);
 
 		if (dock == sc->sc_devnode)
 			/* Add all children devices of Device containing _EJD */

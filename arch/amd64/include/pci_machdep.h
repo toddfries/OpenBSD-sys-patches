@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.h,v 1.11 2009/04/21 19:18:09 kettenis Exp $	*/
+/*	$OpenBSD: pci_machdep.h,v 1.15 2010/06/29 22:08:28 jordan Exp $	*/
 /*	$NetBSD: pci_machdep.h,v 1.1 2003/02/26 21:26:11 fvdl Exp $	*/
 
 /*
@@ -53,7 +53,7 @@ typedef struct {
 	int line, pin;
 } pci_intr_handle_t;
 
-#define	pci_intr_line(ih)	((ih.line) & 0xff)
+#define	pci_intr_line(pc,ih)	((ih.line) & 0xff)
 
 /*
  * amd64-specific PCI variables and functions.
@@ -80,10 +80,12 @@ void		pci_conf_write(pci_chipset_tag_t, pcitag_t, int,
 int		pci_intr_map(struct pci_attach_args *, pci_intr_handle_t *);
 const char	*pci_intr_string(pci_chipset_tag_t, pci_intr_handle_t);
 void		*pci_intr_establish(pci_chipset_tag_t, pci_intr_handle_t,
-		    int, int (*)(void *), void *, char *);
+		    int, int (*)(void *), void *, const char *);
 void		pci_intr_disestablish(pci_chipset_tag_t, void *);
 void		pci_decompose_tag(pci_chipset_tag_t, pcitag_t,
 		    int *, int *, int *);
+
+void 		pci_dev_postattach(struct device *, struct pci_attach_args *);
 
 /*
  * ALL OF THE FOLLOWING ARE MACHINE-DEPENDENT, AND SHOULD NOT BE USED
@@ -96,3 +98,10 @@ void		pci_decompose_tag(pci_chipset_tag_t, pcitag_t,
  * controller on a PC.
  */
 #define	X86_PCI_INTERRUPT_LINE_NO_CONNECTION	0xff
+
+/*
+ * PCI address space is shared with ISA, so avoid legacy ISA I/O
+ * registers.
+ */
+#define PCI_IO_START	0x400
+#define PCI_IO_END	0xffff

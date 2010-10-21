@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.c,v 1.48 2009/04/29 18:28:37 kettenis Exp $	*/
+/*	$OpenBSD: pci_machdep.c,v 1.54 2010/09/06 19:05:48 kettenis Exp $	*/
 /*	$NetBSD: pci_machdep.c,v 1.28 1997/06/06 23:29:17 thorpej Exp $	*/
 
 /*-
@@ -167,7 +167,7 @@ struct bus_dma_tag pci_bus_dma_tag = {
 	_bus_dmamap_load_uio,
 	_bus_dmamap_load_raw,
 	_bus_dmamap_unload,
-	NULL,			/* _dmamap_sync */
+	_bus_dmamap_sync,
 	_bus_dmamem_alloc,
 	_bus_dmamem_free,
 	_bus_dmamem_map,
@@ -569,7 +569,7 @@ void	acpiprt_route_interrupt(int bus, int dev, int pin);
 
 void *
 pci_intr_establish(pci_chipset_tag_t pc, pci_intr_handle_t ih, int level,
-    int (*func)(void *), void *arg, char *what)
+    int (*func)(void *), void *arg, const char *what)
 {
 	void *ret;
 	int bus, dev;
@@ -651,5 +651,22 @@ pci_init_extents(void)
 				printf("memory map conflict 0x%llx/0x%llx\n",
 				    bmp->addr, bmp->size);
 		}
+
+		/* Take out the video buffer area and BIOS areas. */
+		extent_alloc_region(pcimem_ex, IOM_BEGIN, IOM_SIZE,
+		    EX_CONFLICTOK | EX_NOWAIT);
 	}
+}
+
+#include "acpi.h"
+#if NACPI > 0
+void acpi_pci_match(struct device *, struct pci_attach_args *);
+#endif
+
+void
+pci_dev_postattach(struct device *dev, struct pci_attach_args *pa)
+{
+#if NACPI > 0
+	acpi_pci_match(dev, pa);
+#endif
 }

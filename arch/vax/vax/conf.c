@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.57 2009/06/03 14:45:53 jj Exp $ */
+/*	$OpenBSD: conf.c,v 1.61 2010/09/23 05:02:14 claudio Exp $ */
 /*	$NetBSD: conf.c,v 1.44 1999/10/27 16:38:54 ragge Exp $	*/
 
 /*-
@@ -339,7 +339,6 @@ cdev_decl(ii);
 
 #include "tun.h" 
 #include "ch.h"
-#include "ss.h"
 #include "uk.h"
 
 #ifdef NNPFS
@@ -354,6 +353,9 @@ cdev_decl(nnpfs_dev);
 #include "pf.h"
 
 #include "systrace.h"
+
+#include "vscsi.h"
+#include "pppx.h"
 
 struct cdevsw	cdevsw[] =
 {
@@ -421,7 +423,7 @@ struct cdevsw	cdevsw[] =
 	cdev_disk_init(NCD,cd),		/* 61: SCSI CD-ROM */
 	cdev_disk_init(NRD,rd),		/* 62: memory disk driver */
 	cdev_ch_init(NCH,ch),		/* 63: SCSI autochanger */
-	cdev_scanner_init(NSS,ss),	/* 64: SCSI scanner */
+	cdev_notdef(),			/* 64 */
 	cdev_uk_init(NUK,uk),		/* 65: SCSI unknown */
 	cdev_tty_init(NDL,dl),		/* 66: DL11 */
 	cdev_random_init(1,random),	/* 67: random data source */
@@ -437,6 +439,9 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 74 */
 #endif
 	cdev_ptm_init(NPTY,ptm),	/* 75: pseudo-tty ptm device */
+	cdev_vscsi_init(NVSCSI,vscsi),	/* 78: vscsi */
+	cdev_disk_init(1,diskmap),	/* 79: disk mapper */
+	cdev_pppx_init(NPPPX,pppx),	/* 80: pppx */
 };
 int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
 

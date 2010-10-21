@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd9660_lookup.c,v 1.15 2007/10/29 13:02:19 chl Exp $	*/
+/*	$OpenBSD: cd9660_lookup.c,v 1.17 2010/01/17 20:25:58 chl Exp $	*/
 /*	$NetBSD: cd9660_lookup.c,v 1.18 1997/05/08 16:19:59 mycroft Exp $	*/
 
 /*-
@@ -110,7 +110,6 @@ cd9660_lookup(v)
 	struct vnode *tdp;		/* returned by cd9660_vget_internal */
 	u_long bmask;			/* block offset mask */
 	int lockparent;			/* 1 => lockparent flag is set */
-	int wantparent;			/* 1 => wantparent or lockparent flag */
 	int error;
 	ino_t ino = 0;
 	int reclen;
@@ -135,7 +134,6 @@ cd9660_lookup(v)
 	dp = VTOI(vdp);
 	imp = dp->i_mnt;
 	lockparent = flags & LOCKPARENT;
-	wantparent = flags & (LOCKPARENT|WANTPARENT);
 	
 	/*
 	 * Check accessiblity of directory.
@@ -398,7 +396,7 @@ found:
 		*vpp = tdp;
 	} else if (dp->i_number == dp->i_ino) {
 		brelse(bp);
-		VREF(vdp);	/* we want ourself, ie "." */
+		vref(vdp);	/* we want ourself, ie "." */
 		*vpp = vdp;
 	} else {
 		error = cd9660_vget_internal(vdp->v_mount, dp->i_ino, &tdp,

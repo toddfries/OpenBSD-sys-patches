@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_vnops.c,v 1.62 2009/01/29 22:08:45 guenther Exp $	*/
+/*	$OpenBSD: vfs_vnops.c,v 1.65 2010/07/26 01:56:27 guenther Exp $	*/
 /*	$NetBSD: vfs_vnops.c,v 1.20 1996/02/04 02:18:41 christos Exp $	*/
 
 /*
@@ -132,7 +132,7 @@ vn_open(struct nameidata *ndp, int fmode, int cmode)
 		goto bad;
 	}
 	if (vp->v_type == VLNK) {
-		error = EMLINK;
+		error = ELOOP;
 		goto bad;
 	}
 	if ((fmode & O_CREAT) == 0) {
@@ -435,10 +435,11 @@ vn_ioctl(struct file *fp, u_long com, caddr_t data, struct proc *p)
 	case VBLK:
 		error = VOP_IOCTL(vp, com, data, fp->f_flag, p->p_ucred, p);
 		if (error == 0 && com == TIOCSCTTY) {
-			if (p->p_session->s_ttyvp)
-				vrele(p->p_session->s_ttyvp);
-			p->p_session->s_ttyvp = vp;
-			VREF(vp);
+			struct session *s = p->p_p->ps_session;
+			if (s->s_ttyvp)
+				vrele(s->s_ttyvp);
+			s->s_ttyvp = vp;
+			vref(vp);
 		}
 		return (error);
 	}

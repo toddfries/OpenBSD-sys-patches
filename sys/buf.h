@@ -1,4 +1,4 @@
-/*	$OpenBSD: buf.h,v 1.65 2009/06/15 17:01:26 beck Exp $	*/
+/*	$OpenBSD: buf.h,v 1.74 2010/09/22 01:18:57 matthew Exp $	*/
 /*	$NetBSD: buf.h,v 1.25 1997/04/09 21:12:17 mycroft Exp $	*/
 
 /*
@@ -40,11 +40,17 @@
 #ifndef _SYS_BUF_H_
 #define	_SYS_BUF_H_
 #include <sys/queue.h>
+#include <sys/tree.h>
+#include <sys/mutex.h>
+#include <sys/workq.h>
 
 #define NOLIST ((struct buf *)0x87654321)
 
 struct buf;
 struct vnode;
+
+struct buf_rb_bufs;
+RB_PROTOTYPE(buf_rb_bufs, buf, b_rbbufs, rb_buf_compare);
 
 LIST_HEAD(bufhead, buf);
 
@@ -53,6 +59,66 @@ LIST_HEAD(bufhead, buf);
  */
 
 LIST_HEAD(workhead, worklist);
+
+/*
+ * Buffer queues
+ */
+#define BUFQ_DISKSORT	0
+#define	BUFQ_FIFO	1
+#define BUFQ_DEFAULT	BUFQ_DISKSORT
+#define BUFQ_HOWMANY	2
+
+struct bufq_impl;
+
+struct bufq {
+	SLIST_ENTRY(bufq)	 bufq_entries;
+	struct mutex	 	 bufq_mtx;
+	void			*bufq_data;
+	u_int			 bufq_outstanding;
+	int			 bufq_stop;
+	int			 bufq_type;
+	const struct bufq_impl	*bufq_impl;
+};
+
+int		 bufq_init(struct bufq *, int);
+int		 bufq_switch(struct bufq *, int);
+void		 bufq_destroy(struct bufq *);
+
+void		 bufq_queue(struct bufq *, struct buf *);
+struct buf	*bufq_dequeue(struct bufq *);
+void		 bufq_requeue(struct bufq *, struct buf *);
+int		 bufq_peek(struct bufq *);
+void		 bufq_drain(struct bufq *);
+
+void		 bufq_done(struct bufq *, struct buf *);
+void		 bufq_quiesce(void);
+void		 bufq_restart(void);
+
+/* disksort */
+struct bufq_disksort {
+	struct buf	 *bqd_actf;
+	struct buf	**bqd_actb;
+};
+
+/* fifo */
+SIMPLEQ_HEAD(bufq_fifo_head, buf);
+struct bufq_fifo {
+	SIMPLEQ_ENTRY(buf)	bqf_entries;
+};
+
+/* Abuse bufq_fifo, for swapping to regular files. */
+struct bufq_swapreg {
+	SIMPLEQ_ENTRY(buf)	bqf_entries;
+	struct workq_task	bqf_wqtask;
+
+};
+
+/* bufq link in struct buf */
+union bufq_data {
+	struct bufq_disksort	bufq_data_disksort;
+	struct bufq_fifo	bufq_data_fifo;
+	struct bufq_swapreg	bufq_swapreg;
+};
 
 /*
  * These are currently used only by the soft dependency code, hence
@@ -68,16 +134,17 @@ extern struct bio_ops {
 	int	(*io_countdeps)(struct buf *, int, int);
 } bioops;
 
-/*
- * The buffer header describes an I/O operation in the kernel.
- */
+/* XXX: disksort(); */
+#define b_actf	b_bufq.bufq_data_disksort.bqd_actf
+#define b_actb	b_bufq.bufq_data_disksort.bqd_actb
+
+/* The buffer header describes an I/O operation in the kernel. */
 struct buf {
+	RB_ENTRY(buf) b_rbbufs;		/* vnode "hash" tree */
 	LIST_ENTRY(buf) b_list;		/* All allocated buffers. */
-	LIST_ENTRY(buf) b_hash;		/* Hash chain. */
 	LIST_ENTRY(buf) b_vnbufs;	/* Buffer's associated vnode. */
 	TAILQ_ENTRY(buf) b_freelist;	/* Free list position if not active. */
 	time_t	b_synctime;		/* Time this buffer should be flushed */
-	struct	buf *b_actf, **b_actb;	/* Device driver queue when active. */
 	struct  proc *b_proc;		/* Associated proc; NULL if kernel. */
 	volatile long	b_flags;	/* B_* flags. */
 	int	b_error;		/* Errno value. */
@@ -89,6 +156,9 @@ struct buf {
 	void	*b_saveaddr;		/* Original b_data for physio. */
 
 	TAILQ_ENTRY(buf) b_valist;	/* LRU of va to reuse. */
+
+	union	bufq_data b_bufq;
+	struct	bufq	  *b_bq;	/* What bufq this buf is on */
 
 	struct uvm_object *b_pobj;	/* Object containing the pages */
 	off_t	b_poffs;		/* Offset within object */
@@ -105,28 +175,6 @@ struct buf {
 	int	b_validend;		/* Offset of end of valid region. */
  	struct	workhead b_dep;		/* List of filesystem dependencies. */
 };
-
-/* BUFQ: flexible buffer queue routines. */
-#define BUFQ_DISKSORT	1
-#define BUFQ_DEFAULT	BUFQ_DISKSORT
-
-struct bufq {
-	struct buf	*(*bufq_get)(struct bufq *, int);
-	void		 (*bufq_add)(struct bufq *, struct buf *);
-	void		  *bufq_data;
-	int		   bufq_type;
-};
-
-TAILQ_HEAD(bufq_tailq, buf);
-
-#define	BUFQ_ADD(_bufq, _bp)	(_bufq)->bufq_add(_bufq, _bp)
-#define	BUFQ_GET(_bufq)		(_bufq)->bufq_get(_bufq, 0)
-#define	BUFQ_PEEK(_bufq)	(_bufq)->bufq_get(_bufq, 1)
-
-struct bufq	*bufq_init(int);
-void		 bufq_destroy(struct bufq *);
-void		 bufq_drain(struct bufq *);
-
 
 /*
  * For portability with historic industry practice, the cylinder number has
@@ -253,8 +301,8 @@ void	buf_free_pages(struct buf *);
 
 
 void	minphys(struct buf *bp);
-int	physio(void (*strategy)(struct buf *), struct buf *bp, dev_t dev,
-	    int flags, void (*minphys)(struct buf *), struct uio *uio);
+int	physio(void (*strategy)(struct buf *), dev_t dev, int flags,
+	    void (*minphys)(struct buf *), struct uio *uio);
 void  brelvp(struct buf *);
 void  reassignbuf(struct buf *);
 void  bgetvp(struct vnode *, struct buf *);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sig.c,v 1.105 2009/06/06 21:25:19 deraadt Exp $	*/
+/*	$OpenBSD: kern_sig.c,v 1.116 2010/07/26 01:56:27 guenther Exp $	*/
 /*	$NetBSD: kern_sig.c,v 1.54 1996/04/22 01:38:32 christos Exp $	*/
 
 /*
@@ -48,7 +48,6 @@
 #include <sys/event.h>
 #include <sys/proc.h>
 #include <sys/systm.h>
-#include <sys/timeb.h>
 #include <sys/times.h>
 #include <sys/buf.h>
 #include <sys/acct.h>
@@ -69,7 +68,6 @@
 #include <machine/cpu.h>
 
 #include <uvm/uvm_extern.h>
-#include <sys/user.h>		/* for coredump */
 
 int	filt_sigattach(struct knote *kn);
 void	filt_sigdetach(struct knote *kn);
@@ -98,14 +96,7 @@ cansignal(struct proc *p, struct pcred *pc, struct proc *q, int signum)
 	if (p == q)
 		return (1);		/* process can always signal itself */
 
-#ifdef RTHREADS
-	/* a thread can only be signalled from within the same process */
-	if (q->p_flag & P_THREAD) {
-		return (p->p_p == q->p_p);
-	}
-#endif
-
-	if (signum == SIGCONT && q->p_session == p->p_session)
+	if (signum == SIGCONT && q->p_p->ps_session == p->p_p->ps_session)
 		return (1);		/* SIGCONT in session */
 
 	/*
@@ -223,16 +214,21 @@ sys_sigaction(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 	struct sigaction vec;
 	struct sigaction *sa;
+	const struct sigaction *nsa;
+	struct sigaction *osa;
 	struct sigacts *ps = p->p_sigacts;
 	int signum;
 	int bit, error;
 
 	signum = SCARG(uap, signum);
+	nsa = SCARG(uap, nsa);
+	osa = SCARG(uap, osa);
+
 	if (signum <= 0 || signum >= NSIG ||
-	    (SCARG(uap, nsa) && (signum == SIGKILL || signum == SIGSTOP)))
+	    (nsa && (signum == SIGKILL || signum == SIGSTOP)))
 		return (EINVAL);
 	sa = &vec;
-	if (SCARG(uap, osa)) {
+	if (osa) {
 		sa->sa_handler = ps->ps_sigact[signum];
 		sa->sa_mask = ps->ps_catchmask[signum];
 		bit = sigmask(signum);
@@ -254,12 +250,12 @@ sys_sigaction(struct proc *p, void *v, register_t *retval)
 		if ((sa->sa_mask & bit) == 0)
 			sa->sa_flags |= SA_NODEFER;
 		sa->sa_mask &= ~bit;
-		error = copyout(sa, SCARG(uap, osa), sizeof (vec));
+		error = copyout(sa, osa, sizeof (vec));
 		if (error)
 			return (error);
 	}
-	if (SCARG(uap, nsa)) {
-		error = copyin(SCARG(uap, nsa), sa, sizeof (vec));
+	if (nsa) {
+		error = copyin(nsa, sa, sizeof (vec));
 		if (error)
 			return (error);
 		setsigvec(p, signum, sa);
@@ -317,17 +313,6 @@ setsigvec(struct proc *p, int signum, struct sigaction *sa)
 		ps->ps_sigonstack |= bit;
 	else
 		ps->ps_sigonstack &= ~bit;
-#ifdef COMPAT_SUNOS
-	{
-		extern struct emul emul_sunos;
-		if (p->p_emul == &emul_sunos) {
-			if (sa->sa_flags & SA_USERTRAMP)
-				ps->ps_usertramp |= bit;
-			else
-				ps->ps_usertramp &= ~bit;
-		}
-	}
-#endif
 	/*
 	 * Set bit in p_sigignore for signals that are set to SIG_IGN,
 	 * and for signals set to SIG_DFL where the default is to ignore.
@@ -420,23 +405,22 @@ sys_sigprocmask(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 	int error = 0;
 	int s;
+	sigset_t mask;
 
 	*retval = p->p_sigmask;
+	mask = SCARG(uap, mask);
 	s = splhigh();
 
 	switch (SCARG(uap, how)) {
 	case SIG_BLOCK:
-		p->p_sigmask |= SCARG(uap, mask) &~ sigcantmask;
+		p->p_sigmask |= mask &~ sigcantmask;
 		break;
-
 	case SIG_UNBLOCK:
-		p->p_sigmask &= ~SCARG(uap, mask);
+		p->p_sigmask &= ~mask;
 		break;
-
 	case SIG_SETMASK:
-		p->p_sigmask = SCARG(uap, mask) &~ sigcantmask;
+		p->p_sigmask = mask &~ sigcantmask;
 		break;
-
 	default:
 		error = EINVAL;
 		break;
@@ -494,21 +478,26 @@ sys_osigaltstack(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 	struct sigacts *psp;
 	struct osigaltstack ss;
+	const struct osigaltstack *nss;
+	struct osigaltstack *oss;
 	int error;
+
+	nss = SCARG(uap, nss);
+	oss = SCARG(uap, oss);
 
 	psp = p->p_sigacts;
 	if ((psp->ps_flags & SAS_ALTSTACK) == 0)
 		psp->ps_sigstk.ss_flags |= SS_DISABLE;
-	if (SCARG(uap, oss)) {
+	if (oss) {
 		ss.ss_sp = psp->ps_sigstk.ss_sp;
 		ss.ss_size = psp->ps_sigstk.ss_size;
 		ss.ss_flags = psp->ps_sigstk.ss_flags;
-		if ((error = copyout(&ss, SCARG(uap, oss), sizeof(ss))))
+		if ((error = copyout(&ss, oss, sizeof(ss))))
 			return (error);
 	}
-	if (SCARG(uap, nss) == NULL)
+	if (nss == NULL)
 		return (0);
-	error = copyin(SCARG(uap, nss), &ss, sizeof(ss));
+	error = copyin(nss, &ss, sizeof(ss));
 	if (error)
 		return (error);
 	if (ss.ss_flags & SS_DISABLE) {
@@ -536,17 +525,22 @@ sys_sigaltstack(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 	struct sigacts *psp;
 	struct sigaltstack ss;
+	const struct sigaltstack *nss;
+	struct sigaltstack *oss;
 	int error;
+
+	nss = SCARG(uap, nss);
+	oss = SCARG(uap, oss);
 
 	psp = p->p_sigacts;
 	if ((psp->ps_flags & SAS_ALTSTACK) == 0)
 		psp->ps_sigstk.ss_flags |= SS_DISABLE;
-	if (SCARG(uap, oss) && (error = copyout(&psp->ps_sigstk,
-	    SCARG(uap, oss), sizeof(struct sigaltstack))))
+	if (oss && (error = copyout(&psp->ps_sigstk,
+	    oss, sizeof(struct sigaltstack))))
 		return (error);
-	if (SCARG(uap, nss) == NULL)
+	if (nss == NULL)
 		return (0);
-	error = copyin(SCARG(uap, nss), &ss, sizeof(ss));
+	error = copyin(nss, &ss, sizeof(ss));
 	if (error)
 		return (error);
 	if (ss.ss_flags & SS_DISABLE) {
@@ -573,45 +567,47 @@ sys_kill(struct proc *cp, void *v, register_t *retval)
 	} */ *uap = v;
 	struct proc *p;
 	struct pcred *pc = cp->p_cred;
+	int pid = SCARG(uap, pid);
+	int signum = SCARG(uap, signum);
 
-	if ((u_int)SCARG(uap, signum) >= NSIG)
+	if (((u_int)signum) >= NSIG)
 		return (EINVAL);
-	if (SCARG(uap, pid) > 0) {
+	if (pid > 0) {
 		enum signal_type type = SPROCESS;
 
-#ifdef RTHREADS
-		if (SCARG(uap, pid) > THREAD_PID_OFFSET) {
-			if ((p = pfind(SCARG(uap, pid)
-					- THREAD_PID_OFFSET)) == NULL)
+		/*
+		 * If the target pid is > THREAD_PID_OFFSET then this
+		 * must be a kill of another thread in the same process.
+		 * Otherwise, this is a process kill and the target must
+		 * be a main thread.
+		 */
+		if (pid > THREAD_PID_OFFSET) {
+			if ((p = pfind(pid - THREAD_PID_OFFSET)) == NULL)
 				return (ESRCH);
-			if (p->p_flag & P_THREAD)
+			if (p->p_p != cp->p_p)
 				return (ESRCH);
 			type = STHREAD;
-		} else
-#endif
-		{
-			if ((p = pfind(SCARG(uap, pid))) == NULL)
+		} else {
+			if ((p = pfind(pid)) == NULL)
 				return (ESRCH);
-#ifdef RTHREADS
 			if (p->p_flag & P_THREAD)
-				type = STHREAD;
-#endif
+				return (ESRCH);
+			if (!cansignal(cp, pc, p, signum))
+				return (EPERM);
 		}
 
-		/* kill single process */
-		if (!cansignal(cp, pc, p, SCARG(uap, signum)))
-			return (EPERM);
-		if (SCARG(uap, signum))
-			ptsignal(p, SCARG(uap, signum), type);
+		/* kill single process or thread */
+		if (signum)
+			ptsignal(p, signum, type);
 		return (0);
 	}
-	switch (SCARG(uap, pid)) {
+	switch (pid) {
 	case -1:		/* broadcast signal */
-		return (killpg1(cp, SCARG(uap, signum), 0, 1));
+		return (killpg1(cp, signum, 0, 1));
 	case 0:			/* signal own process group */
-		return (killpg1(cp, SCARG(uap, signum), 0, 0));
+		return (killpg1(cp, signum, 0, 0));
 	default:		/* negative explicit process group */
-		return (killpg1(cp, SCARG(uap, signum), -SCARG(uap, pid), 0));
+		return (killpg1(cp, signum, -pid, 0));
 	}
 	/* NOTREACHED */
 }
@@ -624,6 +620,7 @@ int
 killpg1(struct proc *cp, int signum, int pgid, int all)
 {
 	struct proc *p;
+	struct process *pr;
 	struct pcred *pc = cp->p_cred;
 	struct pgrp *pgrp;
 	int nfound = 0;
@@ -645,13 +642,14 @@ killpg1(struct proc *cp, int signum, int pgid, int all)
 			/*
 			 * zero pgid means send to my process group.
 			 */
-			pgrp = cp->p_pgrp;
+			pgrp = cp->p_p->ps_pgrp;
 		else {
 			pgrp = pgfind(pgid);
 			if (pgrp == NULL)
 				return (ESRCH);
 		}
-		LIST_FOREACH(p, &pgrp->pg_members, p_pglist) {
+		LIST_FOREACH(pr, &pgrp->pg_members, ps_pglist) {
+			p = pr->ps_mainproc;
 			if (p->p_pid <= 1 || p->p_flag & (P_SYSTEM|P_THREAD) ||
 			    !cansignal(cp, pc, p, signum))
 				continue;
@@ -663,14 +661,14 @@ killpg1(struct proc *cp, int signum, int pgid, int all)
 	return (nfound ? 0 : ESRCH);
 }
 
-#define CANDELIVER(uid, euid, p) \
+#define CANDELIVER(uid, euid, pr) \
 	(euid == 0 || \
-	(uid) == (p)->p_cred->p_ruid || \
-	(uid) == (p)->p_cred->p_svuid || \
-	(uid) == (p)->p_ucred->cr_uid || \
-	(euid) == (p)->p_cred->p_ruid || \
-	(euid) == (p)->p_cred->p_svuid || \
-	(euid) == (p)->p_ucred->cr_uid)
+	(uid) == (pr)->ps_cred->p_ruid || \
+	(uid) == (pr)->ps_cred->p_svuid || \
+	(uid) == (pr)->ps_cred->pc_ucred->cr_uid || \
+	(euid) == (pr)->ps_cred->p_ruid || \
+	(euid) == (pr)->ps_cred->p_svuid || \
+	(euid) == (pr)->ps_cred->pc_ucred->cr_uid)
 
 /*
  * Deliver signum to pgid, but first check uid/euid against each
@@ -680,7 +678,7 @@ void
 csignal(pid_t pgid, int signum, uid_t uid, uid_t euid)
 {
 	struct pgrp *pgrp;
-	struct proc *p;
+	struct process *pr;
 
 	if (pgid == 0)
 		return;
@@ -688,14 +686,14 @@ csignal(pid_t pgid, int signum, uid_t uid, uid_t euid)
 		pgid = -pgid;
 		if ((pgrp = pgfind(pgid)) == NULL)
 			return;
-		LIST_FOREACH(p, &pgrp->pg_members, p_pglist)
-			if (CANDELIVER(uid, euid, p))
-				psignal(p, signum);
+		LIST_FOREACH(pr, &pgrp->pg_members, ps_pglist)
+			if (CANDELIVER(uid, euid, pr))
+				prsignal(pr, signum);
 	} else {
-		if ((p = pfind(pgid)) == NULL)
+		if ((pr = prfind(pgid)) == NULL)
 			return;
-		if (CANDELIVER(uid, euid, p))
-			psignal(p, signum);
+		if (CANDELIVER(uid, euid, pr))
+			prsignal(pr, signum);
 	}
 }
 
@@ -718,13 +716,12 @@ gsignal(int pgid, int signum)
 void
 pgsignal(struct pgrp *pgrp, int signum, int checkctty)
 {
-	struct proc *p;
+	struct process *pr;
 
 	if (pgrp)
-		LIST_FOREACH(p, &pgrp->pg_members, p_pglist)
-			if ((checkctty == 0 || p->p_flag & P_CONTROLT) &&
-			    (p->p_flag & P_THREAD) == 0)
-				psignal(p, signum);
+		LIST_FOREACH(pr, &pgrp->pg_members, ps_pglist)
+			if (checkctty == 0 || pr->ps_flags & PS_CONTROLT)
+				prsignal(pr, signum);
 }
 
 /*
@@ -801,9 +798,7 @@ ptsignal(struct proc *p, int signum, enum signal_type type)
 	int s, prop;
 	sig_t action;
 	int mask;
-#ifdef RTHREADS
 	struct proc *q;
-#endif
 	int wakeparent = 0;
 
 #ifdef DIAGNOSTIC
@@ -817,7 +812,6 @@ ptsignal(struct proc *p, int signum, enum signal_type type)
 
 	mask = sigmask(signum);
 
-#ifdef RTHREADS
 	if (type == SPROCESS) {
 		TAILQ_FOREACH(q, &p->p_p->ps_threads, p_thr_link) {
 			/* ignore exiting threads */
@@ -831,10 +825,9 @@ ptsignal(struct proc *p, int signum, enum signal_type type)
 			}
 		}
 	}
-#endif
 
 	if (type != SPROPAGATED)
-		KNOTE(&p->p_klist, NOTE_SIGNAL | signum);
+		KNOTE(&p->p_p->ps_klist, NOTE_SIGNAL | signum);
 
 	prop = sigprop[signum];
 
@@ -843,15 +836,12 @@ ptsignal(struct proc *p, int signum, enum signal_type type)
 	 */
 	if (p->p_flag & P_TRACED)
 		action = SIG_DFL;
-#ifdef RTHREADS
 	else if (p->p_sigdivert & mask) {
 		p->p_sigwait = signum;
 		atomic_clearbits_int(&p->p_sigdivert, ~0);
 		action = SIG_CATCH;
 		wakeup(&p->p_sigdivert);
-	}
-#endif
-	else {
+	} else {
 		/*
 		 * If the signal is being ignored,
 		 * then we forget about it immediately.
@@ -877,7 +867,7 @@ ptsignal(struct proc *p, int signum, enum signal_type type)
 			 * the action is default; don't stop the process below
 			 * if sleeping, and don't clear any pending SIGCONT.
 			 */
-			if (prop & SA_TTYSTOP && p->p_pgrp->pg_jobc == 0)
+			if (prop & SA_TTYSTOP && p->p_p->ps_pgrp->pg_jobc == 0)
 				return;
 		}
 	}
@@ -893,7 +883,6 @@ ptsignal(struct proc *p, int signum, enum signal_type type)
 
 	atomic_setbits_int(&p->p_siglist, mask);
 
-#ifdef RTHREADS
 	/*
 	 * XXX delay processing of SA_STOP signals unless action == SIG_DFL?
 	 */
@@ -903,7 +892,6 @@ ptsignal(struct proc *p, int signum, enum signal_type type)
 				ptsignal(q, signum, SPROPAGATED);
 		}
 	}
-#endif
 
 	/*
 	 * Defer further processing for signals which are held,
@@ -1044,7 +1032,7 @@ run:
 out:
 	SCHED_UNLOCK(s);
 	if (wakeparent)
-		wakeup(p->p_pptr);
+		wakeup(p->p_p->ps_pptr);
 }
 
 /*
@@ -1149,7 +1137,7 @@ issignal(struct proc *p)
 			 */
 			if (prop & SA_STOP) {
 				if (p->p_flag & P_TRACED ||
-		    		    (p->p_pgrp->pg_jobc == 0 &&
+		    		    (p->p_p->ps_pgrp->pg_jobc == 0 &&
 				    prop & SA_TTYSTOP))
 					break;	/* == ignore */
 				p->p_xstat = signum;
@@ -1203,9 +1191,8 @@ keep:
 void
 proc_stop(struct proc *p, int sw)
 {
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 	extern void *softclock_si;
-#endif
+
 #ifdef MULTIPROCESSOR
 	SCHED_ASSERT_LOCKED();
 #endif
@@ -1219,11 +1206,7 @@ proc_stop(struct proc *p, int sw)
 		 * We need this soft interrupt to be handled fast.
 		 * Extra calls to softclock don't hurt.
 		 */
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
                 softintr_schedule(softclock_si);
-#else
-                setsoftclock();
-#endif
 	}
 	if (sw)
 		mi_switch();
@@ -1244,9 +1227,9 @@ proc_stop_sweep(void *v)
 			continue;
 		atomic_clearbits_int(&p->p_flag, P_STOPPED);
 
-		if ((p->p_pptr->p_flag & P_NOCLDSTOP) == 0)
-			psignal(p->p_pptr, SIGCHLD);
-		wakeup(p->p_pptr);
+		if ((p->p_p->ps_pptr->ps_mainproc->p_flag & P_NOCLDSTOP) == 0)
+			prsignal(p->p_p->ps_pptr, SIGCHLD);
+		wakeup(p->p_p->ps_pptr);
 	}
 }
 
@@ -1462,8 +1445,6 @@ coredump(struct proc *p)
 	vattr.va_size = 0;
 	VOP_SETATTR(vp, &vattr, cred, p);
 	p->p_acflag |= ACORE;
-	bcopy(p, &p->p_addr->u_kproc.kp_proc, sizeof(struct proc));
-	fill_eproc(p, &p->p_addr->u_kproc.kp_eproc);
 
 	io.io_proc = p;
 	io.io_vp = vp;
@@ -1556,16 +1537,21 @@ sys_nosys(struct proc *p, void *v, register_t *retval)
 	return (ENOSYS);
 }
 
-#ifdef RTHREADS
 int
 sys_thrsigdivert(struct proc *p, void *v, register_t *retval)
 {
 	struct sys_thrsigdivert_args /* {
 		syscallarg(sigset_t) sigmask;
+		syscallarg(siginfo_t *) info;
+		syscallarg(const struct timespec *) timeout;
 	} */ *uap = v;
 	sigset_t mask;
 	sigset_t *m;
+	long long to_ticks = 0;
 	int error;
+
+	if (!rthreads_enabled)
+		return (ENOTSUP);
 
 	m = NULL;
 	mask = SCARG(uap, sigmask) &~ sigcantmask;
@@ -1582,23 +1568,45 @@ sys_thrsigdivert(struct proc *p, void *v, register_t *retval)
 		return (0);
 	}
 
+	if (SCARG(uap, timeout) != NULL) {
+		struct timespec ts;
+		if ((error = copyin(SCARG(uap, timeout), &ts, sizeof(ts))) != 0)
+			return (error);
+		to_ticks = (long long)hz * ts.tv_sec +
+		    ts.tv_nsec / (tick * 1000);
+		if (to_ticks > INT_MAX)
+			to_ticks = INT_MAX;
+	}
+
 	p->p_sigwait = 0;
 	atomic_setbits_int(&p->p_sigdivert, mask);
-	error = tsleep(&p->p_sigdivert, PPAUSE|PCATCH, "sigwait", 0);
+	error = tsleep(&p->p_sigdivert, PPAUSE|PCATCH, "sigwait",
+	    (int)to_ticks);
 	if (p->p_sigdivert) {
 		/* interrupted */
 		KASSERT(error != 0);
 		atomic_clearbits_int(&p->p_sigdivert, ~0);
 		if (error == EINTR)
 			error = ERESTART;
+		else if (error == ETIMEDOUT)
+			error = EAGAIN;
 		return (error);
 
 	}
 	KASSERT(p->p_sigwait != 0);
 	*retval = p->p_sigwait;
-	return (0);
+
+	if (SCARG(uap, info) == NULL) {
+		error = 0;
+	} else {
+		siginfo_t si;
+
+		bzero(&si, sizeof si);
+		si.si_signo = p->p_sigwait;
+		error = copyout(&si, SCARG(uap, info), sizeof(si));
+	}
+	return (error);
 }
-#endif
 
 void
 initsiginfo(siginfo_t *si, int sig, u_long code, int type, union sigval val)
@@ -1633,7 +1641,7 @@ filt_sigattach(struct knote *kn)
 	kn->kn_flags |= EV_CLEAR;		/* automatically set */
 
 	/* XXX lock the proc here while adding to the list? */
-	SLIST_INSERT_HEAD(&p->p_klist, kn, kn_selnext);
+	SLIST_INSERT_HEAD(&p->p_p->ps_klist, kn, kn_selnext);
 
 	return (0);
 }
@@ -1643,7 +1651,7 @@ filt_sigdetach(struct knote *kn)
 {
 	struct proc *p = kn->kn_ptr.p_proc;
 
-	SLIST_REMOVE(&p->p_klist, kn, knote, kn_selnext);
+	SLIST_REMOVE(&p->p_p->ps_klist, kn, knote, kn_selnext);
 }
 
 /*

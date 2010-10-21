@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.192 2009/06/09 01:13:47 deraadt Exp $g
+#	$OpenBSD: GENERIC,v 1.200 2010/09/23 16:21:46 yuo Exp $g
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -64,7 +64,6 @@ pcscp*		at pci?		# AMD Am53c974 PCscsi-PCI SCSI
 isp*		at pci?		# Qlogic ISP [12]0x0 SCSI/FibreChannel
 mpi*		at pci?		# LSI Logic MPT-Fusion Message Passing Interface
 arc*		at pci?		# Areca RAID Controllers
-option		ISP_COMPILE_FW
 pciide*		at pci?
 kauaiata*	at pci?		# Apple ATA 100
 wdc*		at kauaiata?
@@ -155,6 +154,7 @@ wi*		at macobio?	# airport
 macgpio*	at macobio?	# GPIO, PMU interrupt router.
 macgpio*	at macgpio?	# GPIO, PMU interrupt router.
 sysbutton*	at macgpio?	# Xserve system id button.
+pgs*		at macgpio?	# Programmer Switch.
 akbd*		at adb?		# ADB keyboard
 wskbd*		at akbd? mux 1
 ams*		at adb?		# ADB mouse
@@ -270,6 +270,7 @@ axe*	at uhub?		# ASIX Electronics AX88172 USB Ethernet
 cue*	at uhub?		# CATC USB-EL1201A based Ethernet
 kue*	at uhub?		# Kawasaki KL5KUSB101B based Ethernet
 cdce*	at uhub?		# CDC Ethernet
+urndis*	at uhub?		# Remote NDIS devices
 upl*	at uhub?		# Prolific PL2301/PL2302 host-to-host `network'
 udav*	at uhub?		# Davicom DM9601 based Ethernet
 mos*	at uhub?		# MOSCHIP MCS7730/7830 10/100 Ethernet
@@ -277,8 +278,6 @@ url*	at uhub?		# Realtek RTL8150L based adapters
 wi*	at uhub?		# WaveLAN IEEE 802.11DS
 urio*	at uhub?		# Diamond Multimedia Rio 500
 uscanner* at uhub?		# USB Scanners
-usscanner* at uhub?		# USB SCSI scanners, e.g., HP5300
-scsibus* at usscanner?
 #uyap*	at uhub?		# Y@P firmware loader
 udsbr*	at uhub?		# D-Link DSB-R100 radio
 radio*	at udsbr?		# USB radio
@@ -290,6 +289,8 @@ run*	at uhub?		# Ralink RT2700U/RT2800U/RT3000U
 zyd*	at uhub?		# Zydas ZD1211
 udcf*	at uhub?		# Gude Expert mouseCLOCK
 umbg*	at uhub?		# Meinberg Funkuhren USB5131
+uthum*	at uhidev?		# TEMPerHUM sensor
+utwitch* at uhidev?		# YUREX BBU sensor
 uow*	at uhub?		# Maxim/Dallas DS2490 1-Wire adapter
 onewire* at uow?
 
@@ -369,19 +370,13 @@ audio*		at uaudio?
 audio*		at aoa?
 audio*		at daca?
 
-# OPL[23] FM synthesizers
-opl*		at cmpci?
-opl*		at eso?
-
 # MIDI support
 midi*		at eap?
-midi*		at opl?
 
 sd*		at scsibus?
 st*		at scsibus?
 cd*		at scsibus?
 ch*		at scsibus?
-ss*		at scsibus?
 safte*		at scsibus?
 ses*		at scsibus?
 uk*		at scsibus?
@@ -391,6 +386,7 @@ option ONEWIREVERBOSE
 owid*	at onewire?		# ID
 owsbm*	at onewire?		# Smart Battery Monitor
 owtemp* at onewire?		# Temperature
+owctr*	at onewire?			# Counter device
 
 pseudo-device	hotplug	1	# devices hot plugging
 pseudo-device	wsmux	2	# mouse & keyboard multiplexor

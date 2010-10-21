@@ -1,4 +1,4 @@
-#	$OpenBSD: files.usb,v 1.83 2009/05/09 19:23:07 mglocker Exp $
+#	$OpenBSD: files.usb,v 1.93 2010/09/23 14:33:34 yuo Exp $
 #	$NetBSD: files.usb,v 1.16 2000/02/14 20:29:54 augustss Exp $
 #
 # Config file and device description for machine-independent USB code.
@@ -39,7 +39,7 @@ device	uvideo: video, firmload
 attach	uvideo at uhub
 file	dev/usb/uvideo.c		uvideo
 
-device	udl: wsemuldisplaydev, rasops16
+device	udl: wsemuldisplaydev, rasops16, edid
 attach	udl at uhub
 file	dev/usb/udl.c			udl
 
@@ -80,13 +80,17 @@ attach	uhid at uhidbus
 file	dev/usb/uhid.c			uhid			needs-flag
 
 # Keyboards
-device	ukbd: hid, wskbddev
+define	hidkbd
+file	dev/usb/hidkbd.c		hidkbd			needs-flag
+file	dev/usb/ukbdmap.c		hidkbd
+device	ukbd: hid, hidkbd, wskbddev
 attach	ukbd at uhidbus
 file	dev/usb/ukbd.c			ukbd			needs-flag
-file	dev/usb/ukbdmap.c		ukbd
 
 # Mice
-device	ums: hid, wsmousedev
+define	hidms
+file	dev/usb/hidms.c			hidms
+device	ums: hid, hidms, wsmousedev
 attach	ums at uhidbus
 file	dev/usb/ums.c			ums
 
@@ -94,6 +98,10 @@ file	dev/usb/ums.c			ums
 device	uts: wsmousedev
 attach	uts at uhub
 file	dev/usb/uts.c			uts
+
+device	uhts: wsmousedev
+attach	uhts at uhidbus
+file	dev/usb/uhts.c			uhts
 
 # Cypress microcontroller based serial adpaters
 device	ucycom: hid, ucombus
@@ -145,6 +153,20 @@ device	udsbr: radiobus
 attach	udsbr at uhub
 file	dev/usb/udsbr.c			udsbr
 
+# TEMPerHUM HID
+device	uthum: hid
+attach	uthum at uhidbus
+file	dev/usb/uthum.c			uthum
+
+# Strawberry Linux USBRH
+device	utrh: hid
+attach	utrh at uhidbus
+file	dev/usb/utrh.c			utrh
+
+# Maywa-denki/Kayac YUREX
+device	utwitch: hid
+attach	utwitch at uhidbus
+file	dev/usb/utwitch.c		utwitch
 
 # Ethernet adapters
 # ADMtek AN986 Pegasus
@@ -172,6 +194,11 @@ file	dev/usb/if_kue.c		kue
 device	cdce: ether, ifnet, ifmedia
 attach	cdce at uhub
 file	dev/usb/if_cdce.c		cdce
+
+# RNDIS
+device urndis: ether, ifnet, ifmedia
+attach urndis at uhub
+file	dev/usb/if_urndis.c		urndis
 
 # Moschip MCS7x30 Ethernet
 device	mos: ether, ifnet, mii, ifmedia
@@ -267,11 +294,6 @@ device	uscanner
 attach	uscanner at uhub
 file	dev/usb/uscanner.c		uscanner		needs-flag
 
-# Avision SCSI over USB, HP5300
-device	usscanner: scsi
-attach	usscanner at uhub
-file	dev/usb/usscanner.c		usscanner
-
 # Prism3 WI @ USB
 attach	wi at uhub with wi_usb
 file	dev/usb/if_wi_usb.c		wi_usb
@@ -337,7 +359,6 @@ file	dev/usb/usbf_subr.c		usbf
 device	cdcef {}
 attach	cdcef at usbf
 file	dev/usb/if_cdcef.c		cdcef
-
 
 # Atheros AR5005UG/AR5005UX
 device	uath: ether, ifnet, ifmedia, wlan, firmload

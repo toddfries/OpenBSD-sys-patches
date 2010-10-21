@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfsmount.h,v 1.20 2009/06/03 00:12:34 thib Exp $	*/
+/*	$OpenBSD: nfsmount.h,v 1.24 2009/09/02 18:20:54 thib Exp $	*/
 /*	$NetBSD: nfsmount.h,v 1.10 1996/02/18 11:54:03 fvdl Exp $	*/
 
 /*
@@ -45,6 +45,11 @@
  * Holds NFS specific information for mount.
  */
 struct	nfsmount {
+	RB_HEAD(nfs_nodetree, nfsnode)
+		nm_ntree;		/* filehandle/node tree */
+	TAILQ_HEAD(reqs, nfsreq)
+		nm_reqsq;		/* request queue for this mount. */
+	struct timeout nm_rtimeout;	/* timeout (scans/resends nm_reqsq). */
 	int	nm_flag;		/* Flags for soft/hard... */
 	struct	mount *nm_mountp;	/* Vfs structure for this filesystem */
 	int	nm_numgrps;		/* Max. size of groupslist */

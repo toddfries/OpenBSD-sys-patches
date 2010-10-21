@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_zyd.c,v 1.79 2009/06/01 08:53:44 damien Exp $	*/
+/*	$OpenBSD: if_zyd.c,v 1.82 2010/08/27 17:08:01 jsg Exp $	*/
 
 /*-
  * Copyright (c) 2006 by Damien Bergamini <damien.bergamini@free.fr>
@@ -113,8 +113,10 @@ static const struct zyd_type {
 	ZYD_ZD1211_DEV(UMEDIA,		ALL0298V2),
 	ZYD_ZD1211_DEV(UMEDIA,		TEW429UB_A),
 	ZYD_ZD1211_DEV(UMEDIA,		TEW429UB),
+	ZYD_ZD1211_DEV(UNKNOWN2,	NW3100),
 	ZYD_ZD1211_DEV(WISTRONNEWEB,	UR055G),
 	ZYD_ZD1211_DEV(ZCOM,		ZD1211),
+	ZYD_ZD1211_DEV(ZYDAS,		ALL0298),
 	ZYD_ZD1211_DEV(ZYDAS,		ZD1211),
 	ZYD_ZD1211_DEV(ZYXEL,		AG225H),
 	ZYD_ZD1211_DEV(ZYXEL,		ZYAIRG220),
@@ -122,15 +124,19 @@ static const struct zyd_type {
 	ZYD_ZD1211_DEV(ZYXEL,		G202),
 
 	ZYD_ZD1211B_DEV(ACCTON,		SMCWUSBG),
+	ZYD_ZD1211B_DEV(ACCTON,		WN4501H_LF_IR),
+	ZYD_ZD1211B_DEV(ACCTON,		WUS201),
 	ZYD_ZD1211B_DEV(ACCTON,		ZD1211B),
 	ZYD_ZD1211B_DEV(ASUS,		A9T_WIFI),
 	ZYD_ZD1211B_DEV(BELKIN,		F5D7050C),
 	ZYD_ZD1211B_DEV(BELKIN,		ZD1211B),
+	ZYD_ZD1211B_DEV(BEWAN,		BWIFI_USB54AR),
 	ZYD_ZD1211B_DEV(CISCOLINKSYS,	WUSBF54G),
 	ZYD_ZD1211B_DEV(CYBERTAN,	ZD1211B),
 	ZYD_ZD1211B_DEV(FIBERLINE,	WL430U),
 	ZYD_ZD1211B_DEV(MELCO,		KG54L),
 	ZYD_ZD1211B_DEV(PHILIPS,	SNU5600),
+	ZYD_ZD1211B_DEV(PHILIPS,	SNU5630NS05),
 	ZYD_ZD1211B_DEV(PLANEX2,	GW_US54GXS),
 	ZYD_ZD1211B_DEV(SAGEM,		XG76NA),
 	ZYD_ZD1211B_DEV(SITECOMEU,	WL603),
@@ -140,10 +146,12 @@ static const struct zyd_type {
 	ZYD_ZD1211B_DEV(UNKNOWN1,	ZD1211B_2),
 	ZYD_ZD1211B_DEV(UNKNOWN2,	ZD1211B),
 	ZYD_ZD1211B_DEV(UNKNOWN3,	ZD1211B),
+	ZYD_ZD1211B_DEV(SONY,		IFU_WLM2),
 	ZYD_ZD1211B_DEV(USR,		USR5423),
 	ZYD_ZD1211B_DEV(VTECH,		ZD1211B),
 	ZYD_ZD1211B_DEV(ZCOM,		ZD1211B),
 	ZYD_ZD1211B_DEV(ZYDAS,		ZD1211B),
+	ZYD_ZD1211B_DEV(ZYDAS,		ZD1211B_2),
 	ZYD_ZD1211B_DEV(ZYXEL,		M202),
 	ZYD_ZD1211B_DEV(ZYXEL,		G220V2),
 };
@@ -153,7 +161,7 @@ static const struct zyd_type {
 int zyd_match(struct device *, void *, void *); 
 void zyd_attach(struct device *, struct device *, void *); 
 int zyd_detach(struct device *, int); 
-int zyd_activate(struct device *, enum devact); 
+int zyd_activate(struct device *, int); 
 
 struct cfdriver zyd_cd = { 
 	NULL, "zyd", DV_IFNET 
@@ -390,7 +398,6 @@ zyd_complete_attach(struct zyd_softc *sc)
 
 	ifp->if_softc = sc;
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
-	ifp->if_init = zyd_init;
 	ifp->if_ioctl = zyd_ioctl;
 	ifp->if_start = zyd_start;
 	ifp->if_watchdog = zyd_watchdog;
@@ -2575,7 +2582,7 @@ zyd_newassoc(struct ieee80211com *ic, struct ieee80211_node *ni, int isnew)
 }
 
 int
-zyd_activate(struct device *self, enum devact act)
+zyd_activate(struct device *self, int act)
 {
 	switch (act) {
 	case DVACT_ACTIVATE:

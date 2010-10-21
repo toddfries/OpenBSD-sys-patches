@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_rtw_pci.c,v 1.12 2009/06/02 01:11:32 jsg Exp $	*/
+/*	$OpenBSD: if_rtw_pci.c,v 1.14 2010/08/29 16:47:00 deraadt Exp $	*/
 /*	$NetBSD: if_rtw_pci.c,v 1.1 2004/09/26 02:33:36 dyoung Exp $	*/
 
 /*-
@@ -100,15 +100,17 @@ void	rtw_pci_attach(struct device *, struct device *, void *);
 
 struct cfattach rtw_pci_ca = {
 	sizeof (struct rtw_pci_softc), rtw_pci_match, rtw_pci_attach,
-	    rtw_pci_detach
+	    rtw_pci_detach, rtw_activate
 };
 
 const struct pci_matchid rtw_pci_products[] = {
 	{ PCI_VENDOR_REALTEK,	PCI_PRODUCT_REALTEK_RT8180 },
 #ifdef RTW_DEBUG
 	{ PCI_VENDOR_REALTEK,	PCI_PRODUCT_REALTEK_RT8185 },
+	{ PCI_VENDOR_BELKIN2,	PCI_PRODUCT_BELKIN2_F5D7010 },
 #endif
 	{ PCI_VENDOR_BELKIN2,	PCI_PRODUCT_BELKIN2_F5D6001 },
+	{ PCI_VENDOR_BELKIN2,	PCI_PRODUCT_BELKIN2_F5D6020V3 },
 	{ PCI_VENDOR_DLINK,	PCI_PRODUCT_DLINK_DWL610 },
 };
 

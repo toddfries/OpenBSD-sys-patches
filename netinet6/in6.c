@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6.c,v 1.82 2009/06/04 19:07:21 henning Exp $	*/
+/*	$OpenBSD: in6.c,v 1.89 2010/10/07 22:07:06 mpf Exp $	*/
 /*	$KAME: in6.c,v 1.372 2004/06/14 08:14:21 itojun Exp $	*/
 
 /*
@@ -104,8 +104,6 @@ const struct in6_addr in6addr_intfacelocal_allnodes =
 	IN6ADDR_INTFACELOCAL_ALLNODES_INIT;
 const struct in6_addr in6addr_linklocal_allnodes =
 	IN6ADDR_LINKLOCAL_ALLNODES_INIT;
-const struct in6_addr in6addr_linklocal_allrouters =
-	IN6ADDR_LINKLOCAL_ALLROUTERS_INIT;
 
 const struct in6_addr in6mask0 = IN6MASK0;
 const struct in6_addr in6mask32 = IN6MASK32;
@@ -113,14 +111,15 @@ const struct in6_addr in6mask64 = IN6MASK64;
 const struct in6_addr in6mask96 = IN6MASK96;
 const struct in6_addr in6mask128 = IN6MASK128;
 
-static int in6_lifaddr_ioctl(struct socket *, u_long, caddr_t,
-	struct ifnet *, struct proc *);
-static int in6_ifinit(struct ifnet *, struct in6_ifaddr *,
-	struct sockaddr_in6 *, int);
-static void in6_unlink_ifa(struct in6_ifaddr *, struct ifnet *);
+int in6_lifaddr_ioctl(struct socket *, u_long, caddr_t, struct ifnet *,
+	    struct proc *);
+int in6_ifinit(struct ifnet *, struct in6_ifaddr *, int);
+void in6_unlink_ifa(struct in6_ifaddr *, struct ifnet *);
+void in6_ifloop_request(int, struct ifaddr *);
 
-const struct sockaddr_in6 sa6_any = {sizeof(sa6_any), AF_INET6,
-				     0, 0, IN6ADDR_ANY_INIT, 0};
+const struct sockaddr_in6 sa6_any = {
+	sizeof(sa6_any), AF_INET6, 0, 0, IN6ADDR_ANY_INIT, 0
+};
 
 /*
  * This structure is used to keep track of in6_multi chains which belong to
@@ -138,7 +137,7 @@ struct multi6_kludge {
  * Subroutine for in6_ifaddloop() and in6_ifremloop().
  * This routine does actual work.
  */
-static void
+void
 in6_ifloop_request(int cmd, struct ifaddr *ifa)
 {
 	struct rt_addrinfo info;
@@ -273,7 +272,7 @@ in6_ifremloop(struct ifaddr *ifa)
 		 * route surely exists.  With this check, we can avoid to
 		 * delete an interface direct route whose destination is same
 		 * as the address being removed.  This can happen when removing
-		 * a subnet-router anycast address on an interface attahced
+		 * a subnet-router anycast address on an interface attached
 		 * to a shared medium.
 		 */
 		rt = rtalloc1(ifa->ifa_addr, 0, 0);
@@ -325,8 +324,8 @@ in6_mask2len(struct in6_addr *mask, u_char *lim0)
 #define ia62ifa(ia6)	(&((ia6)->ia_ifa))
 
 int
-in6_control(struct socket *so, u_long cmd, caddr_t data, 
-	struct ifnet *ifp, struct proc *p)
+in6_control(struct socket *so, u_long cmd, caddr_t data, struct ifnet *ifp,
+    struct proc *p)
 {
 	struct	in6_ifreq *ifr = (struct in6_ifreq *)data;
 	struct	in6_ifaddr *ia = NULL;
@@ -662,6 +661,7 @@ in6_control(struct socket *so, u_long cmd, caddr_t data,
 		pr0.ndpr_plen = in6_mask2len(&ifra->ifra_prefixmask.sin6_addr,
 		    NULL);
 		if (pr0.ndpr_plen == 128) {
+			dohooks(ifp->if_addrhooks, 0);
 			break;	/* we don't need to install a host route. */
 		}
 		pr0.ndpr_prefix = ifra->ifra_addr;
@@ -771,8 +771,8 @@ in6_control(struct socket *so, u_long cmd, caddr_t data,
  * This function is separated from in6_control().
  */
 int
-in6_update_ifa(struct ifnet *ifp, struct in6_aliasreq *ifra, 
-	struct in6_ifaddr *ia)
+in6_update_ifa(struct ifnet *ifp, struct in6_aliasreq *ifra,
+    struct in6_ifaddr *ia)
 {
 	int error = 0, hostIsNew = 0, plen = -1;
 	struct in6_ifaddr *oia;
@@ -944,8 +944,8 @@ in6_update_ifa(struct ifnet *ifp, struct in6_aliasreq *ifra,
 			oia->ia_next = ia;
 		} else
 			in6_ifaddr = ia;
-		TAILQ_INSERT_TAIL(&ifp->if_addrlist, &ia->ia_ifa,
-				  ifa_list);
+		ia->ia_addr = ifra->ifra_addr;
+		ifa_add(ifp, &ia->ia_ifa);
 	}
 
 	/* set prefix mask */
@@ -1005,7 +1005,7 @@ in6_update_ifa(struct ifnet *ifp, struct in6_aliasreq *ifra,
 		ia->ia6_lifetime.ia6t_preferred = 0;
 
 	/* reset the interface and routing table appropriately. */
-	if ((error = in6_ifinit(ifp, ia, &ifra->ifra_addr, hostIsNew)) != 0)
+	if ((error = in6_ifinit(ifp, ia, hostIsNew)) != 0)
 		goto unlink;
 
 	/*
@@ -1271,13 +1271,13 @@ in6_purgeaddr(struct ifaddr *ifa)
 	in6_unlink_ifa(ia, ifp);
 }
 
-static void
+void
 in6_unlink_ifa(struct in6_ifaddr *ia, struct ifnet *ifp)
 {
 	struct in6_ifaddr *oia;
 	int	s = splnet();
 
-	TAILQ_REMOVE(&ifp->if_addrlist, &ia->ia_ifa, ifa_list);
+	ifa_del(ifp, &ia->ia_ifa);
 
 	oia = ia;
 	if (oia == (ia = in6_ifaddr))
@@ -1325,22 +1325,6 @@ in6_unlink_ifa(struct in6_ifaddr *ia, struct ifnet *ifp)
 	splx(s);
 }
 
-void
-in6_purgeif(struct ifnet *ifp)
-{
-	struct ifaddr *ifa, *nifa;
-
-	for (ifa = TAILQ_FIRST(&ifp->if_addrlist); ifa != NULL; ifa = nifa)
-	{
-		nifa = TAILQ_NEXT(ifa, ifa_list);
-		if (ifa->ifa_addr->sa_family != AF_INET6)
-			continue;
-		in6_purgeaddr(ifa);
-	}
-
-	in6_ifdetach(ifp);
-}
-
 /*
  * SIOC[GAD]LIFADDR.
  *	SIOCGLIFADDR: get first address. (?)
@@ -1364,9 +1348,9 @@ in6_purgeif(struct ifnet *ifp)
  * RFC2373 defines interface id to be 64bit, but it allows non-RFC2374
  * address encoding scheme. (see figure on page 8)
  */
-static int
+int
 in6_lifaddr_ioctl(struct socket *so, u_long cmd, caddr_t data, 
-	struct ifnet *ifp, struct proc *p)
+    struct ifnet *ifp, struct proc *p)
 {
 	struct if_laddrreq *iflr = (struct if_laddrreq *)data;
 	struct ifaddr *ifa;
@@ -1581,9 +1565,8 @@ in6_lifaddr_ioctl(struct socket *so, u_long cmd, caddr_t data,
  * Initialize an interface's intetnet6 address
  * and routing table entry.
  */
-static int
-in6_ifinit(struct ifnet *ifp, struct in6_ifaddr *ia, 
-	struct sockaddr_in6 *sin6, int newhost)
+int
+in6_ifinit(struct ifnet *ifp, struct in6_ifaddr *ia, int newhost)
 {
 	int	error = 0, plen, ifacount = 0;
 	int	s = splnet();
@@ -1601,8 +1584,6 @@ in6_ifinit(struct ifnet *ifp, struct in6_ifaddr *ia,
 			continue;
 		ifacount++;
 	}
-
-	ia->ia_addr = *sin6;
 
 	if ((ifacount <= 1 || ifp->if_type == IFT_CARP) && ifp->if_ioctl &&
 	    (error = (*ifp->if_ioctl)(ifp, SIOCSIFADDR, (caddr_t)ia))) {
@@ -1898,8 +1879,7 @@ in6_joingroup(struct ifnet *ifp, struct in6_addr *addr, int *errorp)
 }
 
 int
-in6_leavegroup(imm)
-	struct in6_multi_mship *imm;
+in6_leavegroup(struct in6_multi_mship *imm)
 {
 
 	if (imm->i6mm_maddr)
@@ -2113,23 +2093,6 @@ in6_addr2scopeid(struct ifnet *ifp, struct in6_addr *addr)
 	}
 }
 
-int
-in6_is_addr_deprecated(struct sockaddr_in6 *sa6)
-{
-	struct in6_ifaddr *ia;
-
-	for (ia = in6_ifaddr; ia; ia = ia->ia_next) {
-		if (IN6_ARE_ADDR_EQUAL(&ia->ia_addr.sin6_addr,
-		    &sa6->sin6_addr) &&
-		    (ia->ia6_flags & IN6_IFF_DEPRECATED) != 0)
-			return (1); /* true */
-
-		/* XXX: do we still have to go thru the rest of the list? */
-	}
-
-	return (0);		/* false */
-}
-
 /*
  * return length of part which dst and src are equal
  * hard coding...
@@ -2333,6 +2296,22 @@ in6_ifawithscope(struct ifnet *oifp, struct in6_addr *dst)
 			     IN6_IFF_DEPRECATED) == 0)
 				goto replace;
 
+			if (oifp == ifp) {
+				/* Do not replace temporary autoconf addresses
+				 * with non-temporary addresses. */
+				if ((ifa_best->ia6_flags & IN6_IFF_PRIVACY) &&
+			            !(((struct in6_ifaddr *)ifa)->ia6_flags &
+				    IN6_IFF_PRIVACY))
+					continue;
+
+				/* Replace non-temporary autoconf addresses
+				 * with temporary addresses. */
+				if (!(ifa_best->ia6_flags & IN6_IFF_PRIVACY) &&
+			            (((struct in6_ifaddr *)ifa)->ia6_flags &
+				    IN6_IFF_PRIVACY))
+					goto replace;
+			}
+
 			/*
 			 * At this point, we have two cases:
 			 * 1. we are looking at a non-deprecated address,
@@ -2378,7 +2357,7 @@ in6_ifawithscope(struct ifnet *oifp, struct in6_addr *dst)
 			 *     equal     equal   larger    N/A |      Yes (8)
 			 *     equal     equal  smaller    N/A |       No (9)
 			 *     equal     equal    equal    Yes |      Yes (a)
-			 *     eaual     eqaul    equal     No |       No (b)
+			 *     equal     equal    equal     No |       No (b)
 			 */
 			dscopecmp = IN6_ARE_SCOPE_CMP(src_scope, dst_scope);
 			bscopecmp = IN6_ARE_SCOPE_CMP(src_scope, best_scope);
@@ -2448,87 +2427,6 @@ in6_ifawithscope(struct ifnet *oifp, struct in6_addr *dst)
 }
 
 /*
- * return the best address out of the same scope. if no address was
- * found, return the first valid address from designated IF.
- */
-struct in6_ifaddr *
-in6_ifawithifp(struct ifnet *ifp, struct in6_addr *dst)
-{
-	int dst_scope =	in6_addrscope(dst), blen = -1, tlen;
-	struct ifaddr *ifa;
-	struct in6_ifaddr *besta = 0;
-	struct in6_ifaddr *dep[2];	/*last-resort: deprecated*/
-
-	dep[0] = dep[1] = NULL;
-
-	/*
-	 * We first look for addresses in the same scope.
-	 * If there is one, return it.
-	 * If two or more, return one which matches the dst longest.
-	 * If none, return one of global addresses assigned other ifs.
-	 */
-	TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
-		if (ifa->ifa_addr->sa_family != AF_INET6)
-			continue;
-		if (((struct in6_ifaddr *)ifa)->ia6_flags & IN6_IFF_ANYCAST)
-			continue; /* XXX: is there any case to allow anycast? */
-		if (((struct in6_ifaddr *)ifa)->ia6_flags & IN6_IFF_NOTREADY)
-			continue; /* don't use this interface */
-		if (((struct in6_ifaddr *)ifa)->ia6_flags & IN6_IFF_DETACHED)
-			continue;
-		if (((struct in6_ifaddr *)ifa)->ia6_flags & IN6_IFF_DEPRECATED) {
-			if (ip6_use_deprecated)
-				dep[0] = (struct in6_ifaddr *)ifa;
-			continue;
-		}
-
-		if (dst_scope == in6_addrscope(IFA_IN6(ifa))) {
-			/*
-			 * call in6_matchlen() as few as possible
-			 */
-			if (besta) {
-				if (blen == -1)
-					blen = in6_matchlen(&besta->ia_addr.sin6_addr, dst);
-				tlen = in6_matchlen(IFA_IN6(ifa), dst);
-				if (tlen > blen) {
-					blen = tlen;
-					besta = (struct in6_ifaddr *)ifa;
-				}
-			} else
-				besta = (struct in6_ifaddr *)ifa;
-		}
-	}
-	if (besta)
-		return (besta);
-
-	TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
-		if (ifa->ifa_addr->sa_family != AF_INET6)
-			continue;
-		if (((struct in6_ifaddr *)ifa)->ia6_flags & IN6_IFF_ANYCAST)
-			continue; /* XXX: is there any case to allow anycast? */
-		if (((struct in6_ifaddr *)ifa)->ia6_flags & IN6_IFF_NOTREADY)
-			continue; /* don't use this interface */
-		if (((struct in6_ifaddr *)ifa)->ia6_flags & IN6_IFF_DETACHED)
-			continue;
-		if (((struct in6_ifaddr *)ifa)->ia6_flags & IN6_IFF_DEPRECATED) {
-			if (ip6_use_deprecated)
-				dep[1] = (struct in6_ifaddr *)ifa;
-			continue;
-		}
-
-		return (struct in6_ifaddr *)ifa;
-	}
-
-	/* use the last-resort values, that are, deprecated addresses */
-	if (dep[0])
-		return dep[0];
-	if (dep[1])
-		return dep[1];
-
-	return NULL;
-}
-
-/*
  * perform DAD when interface becomes IFF_UP.
  */
 void
@@ -2591,7 +2489,7 @@ in6if_do_dad(struct ifnet *ifp)
  * to in6_maxmtu.
  */
 void
-in6_setmaxmtu()
+in6_setmaxmtu(void)
 {
 	unsigned long maxmtu = 0;
 	struct ifnet *ifp;

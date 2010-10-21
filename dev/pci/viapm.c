@@ -1,4 +1,4 @@
-/*	$OpenBSD: viapm.c,v 1.11 2009/06/11 02:09:03 kevlo Exp $	*/
+/*	$OpenBSD: viapm.c,v 1.13 2010/04/08 00:23:54 tedu Exp $	*/
 
 /*
  * Copyright (c) 2005 Mark Kettenis <kettenis@openbsd.org>
@@ -25,7 +25,6 @@
 #include <sys/device.h>
 #include <sys/kernel.h>
 #include <sys/rwlock.h>
-#include <sys/proc.h>
 
 #include <machine/bus.h>
 
@@ -133,7 +132,8 @@ const struct pci_matchid viapm_ids[] = {
 	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VT8237S_ISA },
 	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VT8251_ISA },
 	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_CX700_ISA },
-	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VX800_ISA }
+	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VX800_ISA },
+	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VX855_ISA }
 };
 
 int

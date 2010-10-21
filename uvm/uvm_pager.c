@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_pager.c,v 1.51 2009/05/23 14:06:37 oga Exp $	*/
+/*	$OpenBSD: uvm_pager.c,v 1.57 2010/07/24 15:40:39 kettenis Exp $	*/
 /*	$NetBSD: uvm_pager.c,v 1.36 2000/11/27 18:26:41 chs Exp $	*/
 
 /*
@@ -88,7 +88,6 @@ struct	uvm_pseg psegs[PSEG_NUMSEGS];
 #define UVM_PSEG_INUSE(pseg,id)	(((pseg)->use & (1 << (id))) != 0)
 
 void		uvm_pseg_init(struct uvm_pseg *);
-void		uvm_pseg_destroy(struct uvm_pseg *);
 vaddr_t		uvm_pseg_get(int);
 void		uvm_pseg_release(vaddr_t);
 
@@ -138,26 +137,7 @@ uvm_pseg_init(struct uvm_pseg *pseg)
 {
 	KASSERT(pseg->start == 0);
 	KASSERT(pseg->use == 0);
-	pseg->start = uvm_km_valloc(kernel_map, MAX_PAGER_SEGS * MAXBSIZE);
-}
-
-/*
- * Destroy a uvm_pseg.
- *
- * Never fails.
- *
- * Requires that seg != &psegs[0]
- *
- * Caller locks uvm_pseg_lck.
- */
-void
-uvm_pseg_destroy(struct uvm_pseg *pseg)
-{
-	KASSERT(pseg != &psegs[0]);
-	KASSERT(pseg->start != 0);
-	KASSERT(pseg->use == 0);
-	uvm_km_free(kernel_map, pseg->start, MAX_PAGER_SEGS * MAXBSIZE);
-	pseg->start = 0;
+	pseg->start = uvm_km_valloc_try(kernel_map, MAX_PAGER_SEGS * MAXBSIZE);
 }
 
 /*
@@ -225,6 +205,7 @@ uvm_pseg_release(vaddr_t segaddr)
 {
 	int id;
 	struct uvm_pseg *pseg;
+	vaddr_t va = 0;
 
 	for (pseg = &psegs[0]; pseg != &psegs[PSEG_NUMSEGS]; pseg++) {
 		if (pseg->start <= segaddr &&
@@ -246,10 +227,15 @@ uvm_pseg_release(vaddr_t segaddr)
 	pseg->use &= ~(1 << id);
 	wakeup(&psegs);
 
-	if (pseg != &psegs[0] && UVM_PSEG_EMPTY(pseg))
-		uvm_pseg_destroy(pseg);
+	if (pseg != &psegs[0] && UVM_PSEG_EMPTY(pseg)) {
+		va = pseg->start;
+		pseg->start = 0;
+	}
 
 	mtx_leave(&uvm_pseg_lck);
+
+	if (va)
+		uvm_km_free(kernel_map, va, MAX_PAGER_SEGS * MAXBSIZE);
 }
 
 /*
@@ -816,7 +802,7 @@ uvm_aio_biodone(struct buf *bp)
 
 	mtx_enter(&uvm.aiodoned_lock);	/* locks uvm.aio_done */
 	TAILQ_INSERT_TAIL(&uvm.aio_done, bp, b_freelist);
-	wakeup(&uvm.aiodoned_proc);
+	wakeup(&uvm.aiodoned);
 	mtx_leave(&uvm.aiodoned_lock);
 }
 
@@ -841,12 +827,6 @@ uvm_aio_aiodone(struct buf *bp)
 
 	error = (bp->b_flags & B_ERROR) ? (bp->b_error ? bp->b_error : EIO) : 0;
 	write = (bp->b_flags & B_READ) == 0;
-#ifdef UBC
-	/* XXXUBC B_NOCACHE is for swap pager, should be done differently */
-	if (write && !(bp->b_flags & B_NOCACHE) && bioops.io_pageiodone) {
-		(*bioops.io_pageiodone)(bp);
-	}
-#endif
 
 	uobj = NULL;
 	for (i = 0; i < npages; i++) {

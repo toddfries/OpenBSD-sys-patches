@@ -1,4 +1,4 @@
-/*	$OpenBSD: fd.c,v 1.76 2009/06/02 12:32:08 deraadt Exp $	*/
+/*	$OpenBSD: fd.c,v 1.89 2010/09/23 13:11:37 jsing Exp $	*/
 /*	$NetBSD: fd.c,v 1.90 1996/05/12 23:12:03 mycroft Exp $	*/
 
 /*-
@@ -60,6 +60,7 @@
 #include <sys/queue.h>
 #include <sys/stat.h>
 #include <sys/timeout.h>
+#include <sys/dkio.h>
 
 #include <machine/cpu.h>
 #include <machine/bus.h>
@@ -139,13 +140,11 @@ struct cfdriver fd_cd = {
 	NULL, "fd", DV_DISK
 };
 
-void fdgetdisklabel(dev_t, struct fd_softc *, struct disklabel *, int);
+int fdgetdisklabel(dev_t, struct fd_softc *, struct disklabel *, int);
 int fd_get_parms(struct fd_softc *);
 void fdstrategy(struct buf *);
 void fdstart(struct fd_softc *);
 int fdintr(struct fdc_softc *);
-
-struct dkdriver fddkdriver = { fdstrategy };
 
 void fd_set_motor(struct fdc_softc *fdc, int reset);
 void fd_motor_off(void *arg);
@@ -156,12 +155,10 @@ static __inline struct fd_type *fd_dev_to_type(struct fd_softc *, dev_t);
 void fdretry(struct fd_softc *);
 void fdtimeout(void *);
 
-void
+int
 fdgetdisklabel(dev_t dev, struct fd_softc *fd, struct disklabel *lp,
     int spoofonly)
 {
-	char *errstring;
-
 	bzero(lp, sizeof(struct disklabel));
 
 	lp->d_type = DTYPE_FLOPPY;
@@ -171,11 +168,9 @@ fdgetdisklabel(dev_t dev, struct fd_softc *fd, struct disklabel *lp,
 	lp->d_ncylinders = fd->sc_type->tracks;
 	lp->d_ntracks = fd->sc_type->heads;	/* Go figure... */
 	DL_SETDSIZE(lp, fd->sc_type->size);
-	lp->d_rpm = 300;	/* XXX like it matters... */
 
 	strncpy(lp->d_typename, "floppy disk", sizeof(lp->d_typename));
 	strncpy(lp->d_packname, "fictitious", sizeof(lp->d_packname));
-	lp->d_interleave = 1;
 	lp->d_version = 1;
 
 	lp->d_magic = DISKMAGIC;
@@ -186,10 +181,7 @@ fdgetdisklabel(dev_t dev, struct fd_softc *fd, struct disklabel *lp,
 	 * Call the generic disklabel extraction routine.  If there's
 	 * not a label there, fake it.
 	 */
-	errstring = readdisklabel(DISKLABELDEV(dev), fdstrategy, lp, spoofonly);
-	if (errstring) {
-		/*printf("%s: %s\n", fd->sc_dev.dv_xname, errstring);*/
-	}
+	return readdisklabel(DISKLABELDEV(dev), fdstrategy, lp, spoofonly);
 }
 
 int
@@ -311,9 +303,9 @@ fdattach(parent, self, aux)
 	/*
 	 * Initialize and attach the disk structure.
 	 */
+	fd->sc_dk.dk_flags = DKF_NOLABELREAD;
 	fd->sc_dk.dk_name = fd->sc_dev.dv_xname;
-	fd->sc_dk.dk_driver = &fddkdriver;
-	disk_attach(&fd->sc_dk);
+	disk_attach(&fd->sc_dev, &fd->sc_dk);
 
 	/* Needed to power off if the motor is on when we halt. */
 	fd->sc_sdhook = shutdownhook_establish(fd_motor_off, fd);
@@ -418,7 +410,7 @@ fdstrategy(bp)
  	bp->b_cylinder = bp->b_blkno / (fd_bsize / DEV_BSIZE) / fd->sc_type->seccyl;
 
 #ifdef FD_DEBUG
-	printf("fdstrategy: b_blkno %d b_bcount %d blkno %d cylin %d sz %d\n",
+	printf("fdstrategy: b_blkno %lld b_bcount %d blkno %lld cylin %d sz %d\n",
 	    bp->b_blkno, bp->b_bcount, fd->sc_blkno, bp->b_cylinder, sz);
 #endif
 
@@ -507,7 +499,7 @@ fdread(dev, uio, flags)
 	int flags;
 {
 
-	return (physio(fdstrategy, NULL, dev, B_READ, minphys, uio));
+	return (physio(fdstrategy, dev, B_READ, minphys, uio));
 }
 
 int
@@ -517,7 +509,7 @@ fdwrite(dev, uio, flags)
 	int flags;
 {
 
-	return (physio(fdstrategy, NULL, dev, B_WRITE, minphys, uio));
+	return (physio(fdstrategy, dev, B_WRITE, minphys, uio));
 }
 
 void
@@ -734,7 +726,7 @@ loop:
 			fd_set_motor(fdc, 0);
 			fdc->sc_state = MOTORWAIT;
 			/* Allow .25s for motor to stabilize. */
-			timeout_add(&fd->fd_motor_on_to, hz / 4);
+			timeout_add_msec(&fd->fd_motor_on_to, 250);
 			return 1;
 		}
 		/* Make sure the right drive is selected. */
@@ -781,10 +773,7 @@ loop:
 		{int block;
 		 block = (fd->sc_cylin * type->heads + head) * type->sectrac + sec;
 		 if (block != fd->sc_blkno) {
-			 printf("fdintr: block %d != blkno %llu\n", block, fd->sc_blkno);
-#ifdef DDB
-			 Debugger();
-#endif
+			 panic("fdintr: block %d != blkno %llu", block, fd->sc_blkno);
 		 }}
 #endif
 		read = bp->b_flags & B_READ ? DMAMODE_READ : DMAMODE_WRITE;
@@ -834,7 +823,7 @@ loop:
 		timeout_del(&fd->fdtimeout_to);
 		fdc->sc_state = SEEKCOMPLETE;
 		/* allow 1/50 second for heads to settle */
-		timeout_add(&fdc->fdcpseudointr_to, hz / 50);
+		timeout_add_msec(&fdc->fdcpseudointr_to, 20);
 		return 1;
 
 	case SEEKCOMPLETE:
@@ -872,7 +861,7 @@ loop:
 #ifdef FD_DEBUG
 			fdcstatus(&fd->sc_dev, 7, bp->b_flags & B_READ ?
 			    "read failed" : "write failed");
-			printf("blkno %d nblks %d\n",
+			printf("blkno %lld nblks %d\n",
 			    fd->sc_blkno, fd->sc_nblks);
 #endif
 			fdretry(fd);
@@ -902,7 +891,7 @@ loop:
 		delay(100);
 		fd_set_motor(fdc, 0);
 		fdc->sc_state = RESETCOMPLETE;
-		timeout_add(&fd->fdtimeout_to, hz / 2);
+		timeout_add_msec(&fd->fdtimeout_to, 500);
 		return 1;			/* will return later */
 
 	case RESETCOMPLETE:
@@ -1030,7 +1019,7 @@ fdioctl(dev, cmd, addr, flag, p)
 	struct proc *p;
 {
 	struct fd_softc *fd = fd_cd.cd_devs[FDUNIT(dev)];
-	struct disklabel dl, *lp = &dl;
+	struct disklabel *lp;
 	int error;
 
 	switch (cmd) {
@@ -1067,14 +1056,17 @@ fdioctl(dev, cmd, addr, flag, p)
 		return 0;
 
 	case DIOCWDINFO:
+	case DIOCSDINFO:
 		if ((flag & FWRITE) == 0)
 			return EBADF;
 
-		error = setdisklabel(lp, (struct disklabel *)addr, 0);
-		if (error)
-			return error;
-
-		error = writedisklabel(DISKLABELDEV(dev), fdstrategy, lp);
+		error = setdisklabel(fd->sc_dk.dk_label,
+		    (struct disklabel *)addr, 0);
+		if (error == 0) {
+			if (cmd == DIOCWDINFO)
+				error = writedisklabel(DISKLABELDEV(dev),
+				    fdstrategy, fd->sc_dk.dk_label);
+		}
 		return error;
 
         case FD_FORM:

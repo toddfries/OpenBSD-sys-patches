@@ -1,4 +1,4 @@
-/* $OpenBSD: ega.c,v 1.13 2009/03/29 21:53:52 sthen Exp $ */
+/* $OpenBSD: ega.c,v 1.15 2009/09/05 14:09:35 miod Exp $ */
 /* $NetBSD: ega.c,v 1.4.4.1 2000/06/30 16:27:47 simonb Exp $ */
 
 /*
@@ -113,7 +113,7 @@ static void ega_init(struct ega_config *,
 static void ega_setfont(struct ega_config *, struct egascreen *);
 static int ega_alloc_attr(void *, int, int, int, long *);
 static void ega_unpack_attr(void *, long, int *, int *, int *);
-void ega_copyrows(void *, int, int, int);
+int ega_copyrows(void *, int, int, int);
 
 struct cfattach ega_ca = {
 	sizeof(struct ega_softc), ega_match, ega_attach,
@@ -622,8 +622,10 @@ ega_alloc_screen(v, type, cookiep, curxp, curyp, defattrp)
 		 * for the first one too.
 		 * XXX We could be more clever and use video RAM.
 		 */
-		LIST_FIRST(&vc->screens)->pcs.mem =
-		  malloc(type->ncols * type->nrows * 2, M_DEVBUF, M_WAITOK);
+		scr = LIST_FIRST(&vs->screens);
+		scr->pcs.mem =
+		  malloc(scr->pcs.type->ncols * scr->pcs.type->nrows * 2,
+		    M_DEVBUF, M_WAITOK);
 	}
 
 	scr = malloc(sizeof(struct egascreen), M_DEVBUF, M_WAITOK);
@@ -923,7 +925,7 @@ ega_unpack_attr(id, attr, fg, bg, ul)
 		*fg += 8;
 }
 
-void
+int
 ega_copyrows(id, srcrow, dstrow, nrows)
 	void *id;
 	int srcrow, dstrow, nrows;
@@ -975,4 +977,6 @@ ega_copyrows(id, srcrow, dstrow, nrows)
 	} else
 		bcopy(&scr->pcs.mem[srcoff], &scr->pcs.mem[dstoff],
 		      nrows * ncols * 2);
+
+	return 0;
 }

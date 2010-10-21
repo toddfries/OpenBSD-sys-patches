@@ -1,4 +1,4 @@
-/*	$OpenBSD: in.h,v 1.79 2009/06/05 00:05:22 claudio Exp $	*/
+/*	$OpenBSD: in.h,v 1.85 2010/09/23 04:45:15 yasuoka Exp $	*/
 /*	$NetBSD: in.h,v 1.20 1996/02/13 23:41:47 christos Exp $	*/
 
 /*
@@ -73,10 +73,15 @@
 #define IPPROTO_PIM		103		/* Protocol indep. multicast */
 #define IPPROTO_IPCOMP		108		/* IP Payload Comp. Protocol */
 #define	IPPROTO_CARP		112		/* CARP */
+#define	IPPROTO_MPLS		137		/* unicast MPLS packet */
 #define	IPPROTO_PFSYNC		240		/* PFSYNC */
 #define	IPPROTO_RAW		255		/* raw IP packet */
 
 #define	IPPROTO_MAX		256
+
+/* Only used internally, so it can be outside the range of valid IP protocols */
+#define	IPPROTO_DIVERT		258		/* Divert sockets */
+
 
 /*
  * From FreeBSD:
@@ -190,6 +195,13 @@ struct in_addr {
 #define	IN_LOCAL_GROUP(i)	(((u_int32_t)(i) & __IPADDR(0xffffff00)) == \
 				 __IPADDR(0xe0000000))
 
+#ifdef _KERNEL
+#define IN_CLASSFULBROADCAST(i, b) \
+				((IN_CLASSC(b) && (b | IN_CLASSC_HOST) == i) ||	\
+				 (IN_CLASSB(b) && (b | IN_CLASSB_HOST) == i) ||	\
+				 (IN_CLASSA(b) && (b | IN_CLASSA_HOST) == i))
+#endif	/* _KERNEL */
+
 #define	INADDR_ANY		__IPADDR(0x00000000)
 #define	INADDR_LOOPBACK		__IPADDR(0x7f000001)
 #define	INADDR_BROADCAST	__IPADDR(0xffffffff)	/* must be masked */
@@ -268,6 +280,7 @@ struct ip_opts {
 #define IP_RECVTTL		31   /* bool; receive IP TTL w/dgram */
 #define IP_MINTTL		32   /* minimum TTL for packet or drop */
 #define IP_RECVDSTPORT		33   /* bool; receive IP dst port w/dgram */
+#define IP_PIPEX		34   /* bool; using PIPEX */
 
 /*
  * Security levels - IPsec, not IPSO
@@ -326,7 +339,7 @@ struct ip_mreq {
  * Third level is protocol number.
  * Fourth level is desired variable within that protocol.
  */
-#define	IPPROTO_MAXID	(IPPROTO_PFSYNC + 1)	/* don't list to IPPROTO_MAX */
+#define	IPPROTO_MAXID	(IPPROTO_DIVERT + 1)	/* don't list to IPPROTO_MAX */
 
 #define	CTL_IPPROTO_NAMES { \
 	{ "ip", CTLTYPE_NODE }, \
@@ -570,6 +583,24 @@ struct ip_mreq {
 	{ 0, 0 }, \
 	{ 0, 0 }, \
 	{ "pfsync", CTLTYPE_NODE }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ "divert", CTLTYPE_NODE }, \
 }
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vdsk.c,v 1.12 2009/05/12 20:20:35 kettenis Exp $	*/
+/*	$OpenBSD: vdsk.c,v 1.25 2010/10/12 00:53:32 krw Exp $	*/
 /*
  * Copyright (c) 2009 Mark Kettenis
  *
@@ -142,6 +142,9 @@ struct vdsk_softc {
 #define VIO_ACK_RDX		0x0080
 #define VIO_ESTABLISHED		0x00ff
 
+	uint16_t	sc_major;
+	uint16_t	sc_minor;
+
 	uint32_t	sc_local_sid;
 	uint64_t	sc_dring_ident;
 	uint64_t	sc_seq_no;
@@ -172,10 +175,6 @@ struct cfdriver vdsk_cd = {
 	NULL, "vdsk", DV_DULL
 };
 
-struct scsi_device vdsk_device = {
-	NULL, NULL, NULL, NULL
-};
-
 int	vdsk_tx_intr(void *);
 int	vdsk_rx_intr(void *);
 
@@ -197,15 +196,14 @@ void	vdsk_send_attr_info(struct vdsk_softc *);
 void	vdsk_send_dring_reg(struct vdsk_softc *);
 void	vdsk_send_rdx(struct vdsk_softc *);
 
-int	vdsk_scsi_cmd(struct scsi_xfer *);
+void	vdsk_scsi_cmd(struct scsi_xfer *);
 int	vdsk_dev_probe(struct scsi_link *);
 void	vdsk_dev_free(struct scsi_link *);
-int	vdsk_ioctl(struct scsi_link *, u_long, caddr_t, int, struct proc *);
 
-int	vdsk_scsi_inq(struct scsi_xfer *);
-int	vdsk_scsi_inquiry(struct scsi_xfer *);
-int	vdsk_scsi_capacity(struct scsi_xfer *);
-int	vdsk_scsi_done(struct scsi_xfer *, int);
+void	vdsk_scsi_inq(struct scsi_xfer *);
+void	vdsk_scsi_inquiry(struct scsi_xfer *);
+void	vdsk_scsi_capacity(struct scsi_xfer *);
+void	vdsk_scsi_done(struct scsi_xfer *, int);
 
 int
 vdsk_match(struct device *parent, void *match, void *aux)
@@ -340,9 +338,7 @@ vdsk_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_switch.scsi_minphys = scsi_minphys;
 	sc->sc_switch.dev_probe = vdsk_dev_probe;
 	sc->sc_switch.dev_free = vdsk_dev_free;
-	sc->sc_switch.ioctl = vdsk_ioctl;
 
-	sc->sc_link.device = &vdsk_device;
 	sc->sc_link.adapter = &sc->sc_switch;
 	sc->sc_link.adapter_softc = self;
 	sc->sc_link.adapter_buswidth = 2;
@@ -411,7 +407,6 @@ vdsk_rx_intr(void *arg)
 	}
 
 	if (rx_state != lc->lc_rx_state) {
-		sc->sc_tx_cnt = sc->sc_tx_prod = sc->sc_tx_cons = 0;
 		sc->sc_vio_state = 0;
 		lc->lc_tx_seqid = 0;
 		lc->lc_state = 0;
@@ -530,6 +525,8 @@ vdsk_rx_vio_ver_info(struct vdsk_softc *sc, struct vio_msg_tag *tag)
 			ldc_reset(&sc->sc_lc);
 			break;
 		}
+		sc->sc_major = vi->major;
+		sc->sc_minor = vi->minor;
 		sc->sc_vio_state |= VIO_ACK_VER_INFO;
 		break;
 
@@ -616,13 +613,34 @@ vdsk_rx_vio_rdx(struct vdsk_softc *sc, struct vio_msg_tag *tag)
 		break;
 
 	case VIO_SUBTYPE_ACK:
+	{
+		int prod;
+
 		DPRINTF(("CTRL/ACK/RDX\n"));
 		if (!ISSET(sc->sc_vio_state, VIO_SND_RDX)) {
 			ldc_reset(&sc->sc_lc);
 			break;
 		}
 		sc->sc_vio_state |= VIO_ACK_RDX;
+
+		/*
+		 * If this ACK is the result of a reconnect, we may
+		 * have pending I/O that we need to resubmit.  We need
+		 * to rebuild the ring descriptors though since the
+		 * vDisk server on the other side may have touched
+		 * them already.  So we just clean up the ring and the
+		 * LDC map and resubmit the SCSI commands based on our
+		 * soft descriptors.
+		 */
+		prod = sc->sc_tx_prod;
+		sc->sc_tx_prod = sc->sc_tx_cons;
+		sc->sc_tx_cnt = 0;
+		sc->sc_lm->lm_next = 1;
+		sc->sc_lm->lm_count = 1;
+		while (sc->sc_tx_prod != prod)
+			vdsk_scsi_cmd(sc->sc_vsd[sc->sc_tx_prod].vsd_xs);
 		break;
+	}
 
 	default:
 		DPRINTF(("CTRL/0x%02x/RDX (VIO)\n", tag->stype));
@@ -711,7 +729,6 @@ vdsk_ldc_reset(struct ldc_conn *lc)
 {
 	struct vdsk_softc *sc = lc->lc_sc;
 
-	sc->sc_tx_cnt = sc->sc_tx_prod = sc->sc_tx_cons = 0;
 	sc->sc_vio_state = 0;
 }
 
@@ -890,7 +907,7 @@ vdsk_dring_free(bus_dma_tag_t t, struct vdsk_dring *vd)
 	free(vd, M_DEVBUF);
 }
 
-int
+void
 vdsk_scsi_cmd(struct scsi_xfer *xs)
 {
 	struct scsi_rw *rw;
@@ -914,21 +931,25 @@ vdsk_scsi_cmd(struct scsi_xfer *xs)
 		break;
 
 	case INQUIRY:
-		return (vdsk_scsi_inq(xs));
+		vdsk_scsi_inq(xs);
+		return;
 	case READ_CAPACITY:
-		return (vdsk_scsi_capacity(xs));
+		vdsk_scsi_capacity(xs);
+		return;
 
 	case TEST_UNIT_READY:
 	case START_STOP:
 	case PREVENT_ALLOW:
-		return (vdsk_scsi_done(xs, XS_NOERROR));
+		vdsk_scsi_done(xs, XS_NOERROR);
+		return;
 
 	default:
 		printf("%s cmd 0x%02x\n", __func__, xs->cmd->opcode);
 	case MODE_SENSE:
 	case MODE_SENSE_BIG:
 	case REPORT_LUNS:
-		return (vdsk_scsi_done(xs, XS_DRIVER_STUFFUP));
+		vdsk_scsi_done(xs, XS_DRIVER_STUFFUP);
+		return;
 	}
 
 	if (xs->cmdlen == 6) {
@@ -951,8 +972,14 @@ vdsk_scsi_cmd(struct scsi_xfer *xs)
 	int desc, s;
 	int timeout;
 
-	if (sc->sc_tx_cnt >= sc->sc_vd->vd_nentries)
-		return (NO_CCB);
+	s = splbio();
+	if (sc->sc_vio_state != VIO_ESTABLISHED ||
+	    sc->sc_tx_cnt >= sc->sc_vd->vd_nentries) {
+		xs->error = XS_NO_CCB;
+		scsi_done(xs);
+		splx(s);
+		return;
+	}
 
 	desc = sc->sc_tx_prod;
 
@@ -1008,10 +1035,11 @@ vdsk_scsi_cmd(struct scsi_xfer *xs)
 	dm.start_idx = dm.end_idx = desc;
 	vdsk_sendmsg(sc, &dm, sizeof(dm));
 
-	if (!ISSET(xs->flags, SCSI_POLL))
-		return (SUCCESSFULLY_QUEUED);
+	if (!ISSET(xs->flags, SCSI_POLL)) {
+		splx(s);
+		return;
+	}
 
-	s = splbio();
 	timeout = 1000;
 	do {
 		if (vdsk_rx_intr(sc) &&
@@ -1021,26 +1049,26 @@ vdsk_scsi_cmd(struct scsi_xfer *xs)
 		delay(1000);
 	} while(--timeout > 0);
 	splx(s);
-
-	return (COMPLETE);
 }
 }
 
-int
+void
 vdsk_scsi_inq(struct scsi_xfer *xs)
 {
 	struct scsi_inquiry *inq = (struct scsi_inquiry *)xs->cmd;
 
 	if (ISSET(inq->flags, SI_EVPD))
-		return (vdsk_scsi_done(xs, XS_DRIVER_STUFFUP));
-
-	return (vdsk_scsi_inquiry(xs));
+		vdsk_scsi_done(xs, XS_DRIVER_STUFFUP);
+	else
+		vdsk_scsi_inquiry(xs);
 }
 
-int
+void
 vdsk_scsi_inquiry(struct scsi_xfer *xs)
 {
+	struct vdsk_softc *sc = xs->sc_link->adapter_softc;
 	struct scsi_inquiry_data inq;
+	char buf[5];
 
 	bzero(&inq, sizeof(inq));
 
@@ -1048,16 +1076,18 @@ vdsk_scsi_inquiry(struct scsi_xfer *xs)
 	inq.version = 0x05; /* SPC-3 */
 	inq.response_format = 2;
 	inq.additional_length = 32;
+	inq.flags |= SID_CmdQue;
 	bcopy("SUN     ", inq.vendor, sizeof(inq.vendor));
 	bcopy("Virtual Disk    ", inq.product, sizeof(inq.product));
-	bcopy("1.0 ", inq.revision, sizeof(inq.revision));
+	snprintf(buf, sizeof(buf), "%u.%u ", sc->sc_major, sc->sc_minor);
+	bcopy(buf, inq.revision, sizeof(inq.revision));
 
 	bcopy(&inq, xs->data, MIN(sizeof(inq), xs->datalen));
 
-	return (vdsk_scsi_done(xs, XS_NOERROR));
+	vdsk_scsi_done(xs, XS_NOERROR);
 }
 
-int
+void
 vdsk_scsi_capacity(struct scsi_xfer *xs)
 {
 	struct vdsk_softc *sc = xs->sc_link->adapter_softc;
@@ -1075,21 +1105,15 @@ vdsk_scsi_capacity(struct scsi_xfer *xs)
 
 	bcopy(&rcd, xs->data, MIN(sizeof(rcd), xs->datalen));
 
-	return (vdsk_scsi_done(xs, XS_NOERROR));
+	vdsk_scsi_done(xs, XS_NOERROR);
 }
 
-int
+void
 vdsk_scsi_done(struct scsi_xfer *xs, int error)
 {
-	int s;
-
 	xs->error = error;
-	xs->flags |= ITSDONE;
 
-	s = splbio();
 	scsi_done(xs);
-	splx(s);
-	return (COMPLETE);
 }
 
 int
@@ -1108,12 +1132,3 @@ vdsk_dev_free(struct scsi_link *link)
 {
 	printf("%s\n", __func__);
 }
-
-int
-vdsk_ioctl(struct scsi_link *link, u_long cmd, caddr_t addr, int flags,
-    struct proc *p)
-{
-	printf("%s\n", __func__);
-	return (ENOTTY);
-}
-

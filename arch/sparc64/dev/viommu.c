@@ -1,4 +1,4 @@
-/*	$OpenBSD: viommu.c,v 1.7 2009/05/04 16:48:37 oga Exp $	*/
+/*	$OpenBSD: viommu.c,v 1.10 2010/08/07 03:50:01 krw Exp $	*/
 /*	$NetBSD: iommu.c,v 1.47 2002/02/08 20:03:45 eeh Exp $	*/
 
 /*
@@ -40,6 +40,7 @@
 #include <sys/extent.h>
 #include <sys/malloc.h>
 #include <sys/systm.h>
+#include <sys/proc.h>
 #include <sys/device.h>
 #include <sys/mbuf.h>
 
@@ -159,7 +160,7 @@ viommu_enter(struct iommu_state *is, struct strbuf_ctl *sb, bus_addr_t va,
 
 	page_list[0] = trunc_page(pa);
 	if (!pmap_extract(pmap_kernel(), (vaddr_t)page_list, &addr))
-		panic("viommu_enter: pmap_extract failed\n");
+		panic("viommu_enter: pmap_extract failed");
 	err = hv_pci_iommu_map(is->is_devhandle, tsbid, 1, attr,
 	    addr, &nmapped);
 	if (err != H_EOK || nmapped != 1)
@@ -373,8 +374,10 @@ viommu_dvmamap_load(bus_dma_tag_t t, bus_dma_tag_t t0, bus_dmamap_t map,
 #endif
 	}		
 #endif	
-	if (err != 0)
+	if (err != 0) {
+		iommu_iomap_clear_pages(ims);
 		return (err);
+	}
 
 	/* Set the active DVMA map */
 	map->_dm_dvmastart = dvmaddr;
@@ -547,8 +550,10 @@ viommu_dvmamap_load_raw(bus_dma_tag_t t, bus_dma_tag_t t0, bus_dmamap_t map,
 	    EX_NOWAIT | EX_BOUNDZERO, (u_long *)&dvmaddr);
 	mtx_leave(&is->is_mtx);
 
-	if (err != 0)
+	if (err != 0) {
+		iommu_iomap_clear_pages(ims);
 		return (err);
+	}
 
 #ifdef DEBUG
 	if (dvmaddr == (bus_addr_t)-1)	{ 

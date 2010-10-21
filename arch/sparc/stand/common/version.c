@@ -1,4 +1,4 @@
-/*	$OpenBSD: version.c,v 1.3 2002/08/12 00:25:26 art Exp $	*/
+/*	$OpenBSD: version.c,v 1.7 2010/08/16 14:41:29 miod Exp $	*/
 /*	$NetBSD: version.c,v 1.4 1995/09/16 23:20:39 pk Exp $ */
 
 /*
@@ -42,6 +42,11 @@
  *	2.0	OpenBSD reorganization.
  *	2.1	Bumped RELOC
  *	2.2	ELF support added.
+ *	2.3	Bumped RELOC
+ *	2.4	Support for larger kernels and fragmented memory layouts.
+ *	2.5	sun4e support
+ *	2.6	Support for larger kernels when booting from tape, and avoid
+ *		stomping on PROM data below 4MB on sun4c
  */
 
-char *version = "2.2";
+char *version = "2.6";

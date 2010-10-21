@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sis.c,v 1.91 2009/06/12 21:55:50 claudio Exp $ */
+/*	$OpenBSD: if_sis.c,v 1.101 2010/08/31 17:13:44 deraadt Exp $ */
 /*
  * Copyright (c) 1997, 1998, 1999
  *	Bill Paul <wpaul@ctr.columbia.edu>.  All rights reserved.
@@ -104,17 +104,18 @@
 
 int sis_probe(struct device *, void *, void *);
 void sis_attach(struct device *, struct device *, void *);
+int sis_activate(struct device *, int);
 
 struct cfattach sis_ca = {
-	sizeof(struct sis_softc), sis_probe, sis_attach
+	sizeof(struct sis_softc), sis_probe, sis_attach, NULL,
+	sis_activate
 };
 
 struct cfdriver sis_cd = {
-	0, "sis", DV_IFNET
+	NULL, "sis", DV_IFNET
 };
 
 int sis_intr(void *);
-void sis_shutdown(void *);
 void sis_fill_rx_ring(struct sis_softc *);
 int sis_newbuf(struct sis_softc *, struct sis_desc *);
 int sis_encap(struct sis_softc *, struct mbuf *, u_int32_t *);
@@ -307,7 +308,7 @@ sis_read_eeprom(struct sis_softc *sc, caddr_t dest,
 		sis_eeprom_getword(sc, off + i, &word);
 		ptr = (u_int16_t *)(dest + (i * 2));
 		if (swap)
-			*ptr = ntohs(word);
+			*ptr = letoh16(word);
 		else
 			*ptr = word;
 	}
@@ -344,11 +345,11 @@ sis_read_mac(struct sis_softc *sc, struct pci_attach_args *pa)
 	SIS_CLRBIT(sc, SIS_RXFILT_CTL, SIS_RXFILTCTL_ENABLE);
 
 	CSR_WRITE_4(sc, SIS_RXFILT_CTL, SIS_FILTADDR_PAR0);
-	enaddr[0] = CSR_READ_4(sc, SIS_RXFILT_DATA) & 0xffff;
+	enaddr[0] = letoh16(CSR_READ_4(sc, SIS_RXFILT_DATA) & 0xffff);
 	CSR_WRITE_4(sc, SIS_RXFILT_CTL, SIS_FILTADDR_PAR1);
-	enaddr[1] = CSR_READ_4(sc, SIS_RXFILT_DATA) & 0xffff;
+	enaddr[1] = letoh16(CSR_READ_4(sc, SIS_RXFILT_DATA) & 0xffff);
 	CSR_WRITE_4(sc, SIS_RXFILT_CTL, SIS_FILTADDR_PAR2);
-	enaddr[2] = CSR_READ_4(sc, SIS_RXFILT_DATA) & 0xffff;
+	enaddr[2] = letoh16(CSR_READ_4(sc, SIS_RXFILT_DATA) & 0xffff);
 
 	SIS_SETBIT(sc, SIS_RXFILT_CTL, SIS_RXFILTCTL_ENABLE);
 }
@@ -363,7 +364,7 @@ sis_read96x_mac(struct sis_softc *sc)
 	for (i = 0; i < 2000; i++) {
 		if ((CSR_READ_4(sc, SIS_EECTL) & SIS96x_EECTL_GNT)) {
 			sis_read_eeprom(sc, (caddr_t)&sc->arpcom.ac_enaddr,
-			    SIS_EE_NODEADDR, 3, 0);
+			    SIS_EE_NODEADDR, 3, 1);
 			break;
 		} else
 			DELAY(1);
@@ -1000,7 +1001,8 @@ sis_attach(struct device *parent, struct device *self, void *aux)
 		{
 			u_int16_t		tmp[4];
 
-			sis_read_eeprom(sc, (caddr_t)&tmp, NS_EE_NODEADDR,4,0);
+			sis_read_eeprom(sc, (caddr_t)&tmp, NS_EE_NODEADDR,
+			    4, 0);
 
 			/* Shift everything over one bit. */
 			tmp[3] = tmp[3] >> 1;
@@ -1011,9 +1013,9 @@ sis_attach(struct device *parent, struct device *self, void *aux)
 			tmp[1] |= tmp[0] << 15;
 
 			/* Now reverse all the bits. */
-			tmp[3] = sis_reverse(tmp[3]);
-			tmp[2] = sis_reverse(tmp[2]);
-			tmp[1] = sis_reverse(tmp[1]);
+			tmp[3] = letoh16(sis_reverse(tmp[3]));
+			tmp[2] = letoh16(sis_reverse(tmp[2]));
+			tmp[1] = letoh16(sis_reverse(tmp[1]));
 
 			bcopy((char *)&tmp[1], sc->arpcom.ac_enaddr,
 			    ETHER_ADDR_LEN);
@@ -1051,7 +1053,7 @@ sis_attach(struct device *parent, struct device *self, void *aux)
 			sis_read_mac(sc, pa);
 		else
 			sis_read_eeprom(sc, (caddr_t)&sc->arpcom.ac_enaddr,
-			    SIS_EE_NODEADDR, 3, 0);
+			    SIS_EE_NODEADDR, 3, 1);
 		break;
 	}
 
@@ -1062,7 +1064,7 @@ sis_attach(struct device *parent, struct device *self, void *aux)
 
 	if (bus_dmamem_alloc(sc->sc_dmat, sizeof(struct sis_list_data),
 	    PAGE_SIZE, 0, sc->sc_listseg, 1, &sc->sc_listnseg,
-	    BUS_DMA_NOWAIT) != 0) {
+	    BUS_DMA_NOWAIT | BUS_DMA_ZERO) != 0) {
 		printf(": can't alloc list mem\n");
 		goto fail_2;
 	}
@@ -1084,7 +1086,6 @@ sis_attach(struct device *parent, struct device *self, void *aux)
 		goto fail_2;
 	}
 	sc->sis_ldata = (struct sis_list_data *)sc->sc_listkva;
-	bzero(sc->sis_ldata, sizeof(struct sis_list_data));
 
 	for (i = 0; i < SIS_RX_LIST_CNT; i++) {
 		if (bus_dmamap_create(sc->sc_dmat, MCLBYTES, 1, MCLBYTES, 0,
@@ -1143,8 +1144,6 @@ sis_attach(struct device *parent, struct device *self, void *aux)
 	 */
 	if_attach(ifp);
 	ether_ifattach(ifp);
-
-	shutdownhook_establish(sis_shutdown, sc);
 	return;
 
 fail_2:
@@ -1152,6 +1151,31 @@ fail_2:
 
 fail_1:
 	bus_space_unmap(sc->sis_btag, sc->sis_bhandle, size);
+}
+
+int
+sis_activate(struct device *self, int act)
+{
+	struct sis_softc *sc = (struct sis_softc *)self;
+	struct ifnet *ifp = &sc->arpcom.ac_if;
+	int rv = 0;
+
+	switch (act) {
+	case DVACT_QUIESCE:
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_SUSPEND:
+		if (ifp->if_flags & IFF_RUNNING)
+			sis_stop(sc);
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_RESUME:
+		rv = config_activate_children(self, act);
+		if (ifp->if_flags & IFF_UP)
+			sis_init(sc);
+		break;
+	}
+	return (rv);
 }
 
 /*
@@ -1176,8 +1200,8 @@ sis_ring_init(struct sis_softc *sc)
 			nexti = i + 1;
 		ld->sis_tx_list[i].sis_nextdesc = &ld->sis_tx_list[nexti];
 		ld->sis_tx_list[i].sis_next =
-		    sc->sc_listmap->dm_segs[0].ds_addr +
-		    offsetof(struct sis_list_data, sis_tx_list[nexti]);
+		    htole32(sc->sc_listmap->dm_segs[0].ds_addr +
+		      offsetof(struct sis_list_data, sis_tx_list[nexti]));
 		ld->sis_tx_list[i].sis_mbuf = NULL;
 		ld->sis_tx_list[i].sis_ptr = 0;
 		ld->sis_tx_list[i].sis_ctl = 0;
@@ -1192,8 +1216,8 @@ sis_ring_init(struct sis_softc *sc)
 			nexti = i + 1;
 		ld->sis_rx_list[i].sis_nextdesc = &ld->sis_rx_list[nexti];
 		ld->sis_rx_list[i].sis_next =
-		    sc->sc_listmap->dm_segs[0].ds_addr +
-		    offsetof(struct sis_list_data, sis_rx_list[nexti]);
+		    htole32(sc->sc_listmap->dm_segs[0].ds_addr +
+		      offsetof(struct sis_list_data, sis_rx_list[nexti]));
 		ld->sis_rx_list[i].sis_ctl = 0;
 	}
 
@@ -1231,21 +1255,15 @@ sis_newbuf(struct sis_softc *sc, struct sis_desc *c)
 	if (c == NULL)
 		return (EINVAL);
 
-	MGETHDR(m_new, M_DONTWAIT, MT_DATA);
-	if (m_new == NULL)
+	m_new = MCLGETI(NULL, M_DONTWAIT, &sc->arpcom.ac_if, MCLBYTES);
+	if (!m_new)
 		return (ENOBUFS);
-
-	MCLGETI(m_new, M_DONTWAIT, &sc->arpcom.ac_if, MCLBYTES);
-	if (!(m_new->m_flags & M_EXT)) {
-		m_freem(m_new);
-		return (ENOBUFS);
-	}
 
 	m_new->m_len = m_new->m_pkthdr.len = MCLBYTES;
 
 	if (bus_dmamap_load_mbuf(sc->sc_dmat, c->map, m_new,
 	    BUS_DMA_NOWAIT)) {
-		m_freem(m_new);
+		m_free(m_new);
 		return (ENOBUFS);
 	}
 
@@ -1253,8 +1271,8 @@ sis_newbuf(struct sis_softc *sc, struct sis_desc *c)
 	    BUS_DMASYNC_PREREAD);
 
 	c->sis_mbuf = m_new;
-	c->sis_ptr = c->map->dm_segs[0].ds_addr;
-	c->sis_ctl = ETHER_MAX_DIX_LEN;
+	c->sis_ptr = htole32(c->map->dm_segs[0].ds_addr);
+	c->sis_ctl = htole32(ETHER_MAX_DIX_LEN);
 
 	bus_dmamap_sync(sc->sc_dmat, sc->sc_listmap,
 	    ((caddr_t)c - sc->sc_listkva), sizeof(struct sis_desc),
@@ -1280,14 +1298,14 @@ sis_rxeof(struct sis_softc *sc)
 
 	while(sc->sis_cdata.sis_rx_cnt > 0) {
 		cur_rx = &sc->sis_ldata->sis_rx_list[sc->sis_cdata.sis_rx_cons];
-		if (!SIS_OWNDESC(cur_rx))
-			break;
 		bus_dmamap_sync(sc->sc_dmat, sc->sc_listmap,
 		    ((caddr_t)cur_rx - sc->sc_listkva),
 		    sizeof(struct sis_desc),
 		    BUS_DMASYNC_POSTREAD | BUS_DMASYNC_POSTWRITE);
+		if (!SIS_OWNDESC(cur_rx))
+			break;
 
-		rxstat = cur_rx->sis_rxstat;
+		rxstat = letoh32(cur_rx->sis_rxstat);
 		m = cur_rx->sis_mbuf;
 		cur_rx->sis_mbuf = NULL;
 		total_len = SIS_RXBYTES(cur_rx);
@@ -1326,7 +1344,7 @@ sis_rxeof(struct sis_softc *sc)
 		 * if the allocation fails, then use m_devget and leave the
 		 * existing buffer in the receive ring.
 		 */
-		if (1) {
+		{
 			struct mbuf *m0;
 			m0 = m_devget(mtod(m, char *), total_len, ETHER_ALIGN,
 			    ifp, NULL);
@@ -1336,12 +1354,11 @@ sis_rxeof(struct sis_softc *sc)
 				continue;
 			}
 			m = m0;
-		} else
-#endif
-		{
-			m->m_pkthdr.rcvif = ifp;
-			m->m_pkthdr.len = m->m_len = total_len;
 		}
+#else
+		m->m_pkthdr.rcvif = ifp;
+		m->m_pkthdr.len = m->m_len = total_len;
+#endif
 		ifp->if_ipackets++;
 
 #if NBPFILTER > 0
@@ -1365,7 +1382,7 @@ void
 sis_txeof(struct sis_softc *sc)
 {
 	struct ifnet		*ifp;
-	u_int32_t		idx;
+	u_int32_t		idx, ctl, txstat;
 
 	ifp = &sc->arpcom.ac_if;
 
@@ -1385,19 +1402,22 @@ sis_txeof(struct sis_softc *sc)
 		if (SIS_OWNDESC(cur_tx))
 			break;
 
-		if (cur_tx->sis_ctl & SIS_CMDSTS_MORE)
+		ctl = letoh32(cur_tx->sis_ctl);
+
+		if (ctl & SIS_CMDSTS_MORE)
 			continue;
 
-		if (!(cur_tx->sis_ctl & SIS_CMDSTS_PKT_OK)) {
+		txstat = letoh32(cur_tx->sis_txstat);
+
+		if (!(ctl & SIS_CMDSTS_PKT_OK)) {
 			ifp->if_oerrors++;
-			if (cur_tx->sis_txstat & SIS_TXSTAT_EXCESSCOLLS)
+			if (txstat & SIS_TXSTAT_EXCESSCOLLS)
 				ifp->if_collisions++;
-			if (cur_tx->sis_txstat & SIS_TXSTAT_OUTOFWINCOLL)
+			if (txstat & SIS_TXSTAT_OUTOFWINCOLL)
 				ifp->if_collisions++;
 		}
 
-		ifp->if_collisions +=
-		    (cur_tx->sis_txstat & SIS_TXSTAT_COLLCNT) >> 16;
+		ifp->if_collisions += (txstat & SIS_TXSTAT_COLLCNT) >> 16;
 
 		ifp->if_opackets++;
 		if (cur_tx->map->dm_nsegs != 0) {
@@ -1543,10 +1563,10 @@ sis_encap(struct sis_softc *sc, struct mbuf *m_head, u_int32_t *txidx)
 		if ((SIS_TX_LIST_CNT - (sc->sis_cdata.sis_tx_cnt + i)) < 2)
 			return(ENOBUFS);
 		f = &sc->sis_ldata->sis_tx_list[frag];
-		f->sis_ctl = SIS_CMDSTS_MORE | map->dm_segs[i].ds_len;
-		f->sis_ptr = map->dm_segs[i].ds_addr;
+		f->sis_ctl = htole32(SIS_CMDSTS_MORE | map->dm_segs[i].ds_len);
+		f->sis_ptr = htole32(map->dm_segs[i].ds_addr);
 		if (i != 0)
-			f->sis_ctl |= SIS_CMDSTS_OWN;
+			f->sis_ctl |= htole32(SIS_CMDSTS_OWN);
 		cur = frag;
 		SIS_INC(frag, SIS_TX_LIST_CNT);
 	}
@@ -1555,8 +1575,8 @@ sis_encap(struct sis_softc *sc, struct mbuf *m_head, u_int32_t *txidx)
 	    BUS_DMASYNC_PREWRITE);
 
 	sc->sis_ldata->sis_tx_list[cur].sis_mbuf = m_head;
-	sc->sis_ldata->sis_tx_list[cur].sis_ctl &= ~SIS_CMDSTS_MORE;
-	sc->sis_ldata->sis_tx_list[*txidx].sis_ctl |= SIS_CMDSTS_OWN;
+	sc->sis_ldata->sis_tx_list[cur].sis_ctl &= ~htole32(SIS_CMDSTS_MORE);
+	sc->sis_ldata->sis_tx_list[*txidx].sis_ctl |= htole32(SIS_CMDSTS_OWN);
 	sc->sis_cdata.sis_tx_cnt += i;
 	*txidx = frag;
 
@@ -1656,23 +1676,23 @@ sis_init(void *xsc)
 	if (sc->sis_type == SIS_TYPE_83815) {
 		CSR_WRITE_4(sc, SIS_RXFILT_CTL, NS_FILTADDR_PAR0);
 		CSR_WRITE_4(sc, SIS_RXFILT_DATA,
-		    ((u_int16_t *)sc->arpcom.ac_enaddr)[0]);
+		    htole16(((u_int16_t *)sc->arpcom.ac_enaddr)[0]));
 		CSR_WRITE_4(sc, SIS_RXFILT_CTL, NS_FILTADDR_PAR1);
 		CSR_WRITE_4(sc, SIS_RXFILT_DATA,
-		    ((u_int16_t *)sc->arpcom.ac_enaddr)[1]);
+		    htole16(((u_int16_t *)sc->arpcom.ac_enaddr)[1]));
 		CSR_WRITE_4(sc, SIS_RXFILT_CTL, NS_FILTADDR_PAR2);
 		CSR_WRITE_4(sc, SIS_RXFILT_DATA,
-		    ((u_int16_t *)sc->arpcom.ac_enaddr)[2]);
+		    htole16(((u_int16_t *)sc->arpcom.ac_enaddr)[2]));
 	} else {
 		CSR_WRITE_4(sc, SIS_RXFILT_CTL, SIS_FILTADDR_PAR0);
 		CSR_WRITE_4(sc, SIS_RXFILT_DATA,
-		    ((u_int16_t *)sc->arpcom.ac_enaddr)[0]);
+		    htole16(((u_int16_t *)sc->arpcom.ac_enaddr)[0]));
 		CSR_WRITE_4(sc, SIS_RXFILT_CTL, SIS_FILTADDR_PAR1);
 		CSR_WRITE_4(sc, SIS_RXFILT_DATA,
-		    ((u_int16_t *)sc->arpcom.ac_enaddr)[1]);
+		    htole16(((u_int16_t *)sc->arpcom.ac_enaddr)[1]));
 		CSR_WRITE_4(sc, SIS_RXFILT_CTL, SIS_FILTADDR_PAR2);
 		CSR_WRITE_4(sc, SIS_RXFILT_DATA,
-		    ((u_int16_t *)sc->arpcom.ac_enaddr)[2]);
+		    htole16(((u_int16_t *)sc->arpcom.ac_enaddr)[2]));
 	}
 
 	/* Init circular TX/RX lists. */
@@ -1992,16 +2012,4 @@ sis_stop(struct sis_softc *sc)
 		bzero((char *)&sc->sis_ldata->sis_tx_list[i],
 		    sizeof(struct sis_desc) - sizeof(bus_dmamap_t));
 	}
-}
-
-/*
- * Stop all chip I/O so that the kernel's probe routines don't
- * get confused by errant DMAs when rebooting.
- */
-void
-sis_shutdown(void *v)
-{
-	struct sis_softc	*sc = (struct sis_softc *)v;
-
-	sis_stop(sc);
 }

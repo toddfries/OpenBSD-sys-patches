@@ -1,4 +1,4 @@
-/*	$OpenBSD: macintr.c,v 1.37 2009/06/09 01:12:38 deraadt Exp $	*/
+/*	$OpenBSD: macintr.c,v 1.40 2010/09/20 06:33:47 matthew Exp $	*/
 
 /*-
  * Copyright (c) 1995 Per Fogelstrom
@@ -221,7 +221,7 @@ fakeintr(void *arg)
  */
 void *
 macintr_establish(void * lcv, int irq, int type, int level,
-    int (*ih_fun)(void *), void *ih_arg, char *name)
+    int (*ih_fun)(void *), void *ih_arg, const char *name)
 {
 	struct intrhand **p, *q, *ih;
 	static struct intrhand fakehand;
@@ -288,8 +288,7 @@ printf("vI %d ", irq);
 	ih->ih_next = NULL;
 	ih->ih_level = level;
 	ih->ih_irq = irq;
-	evcount_attach(&ih->ih_count, name, (void *)&m_hwirq[irq],
-	    &evcount_intr);
+	evcount_attach(&ih->ih_count, name, &m_hwirq[irq]);
 	*p = ih;
 
 	return (ih);
@@ -374,7 +373,7 @@ intr_calculatemasks()
 		for (irq = 0; irq < ICU_LEN; irq++)
 			if (m_intrlevel[irq] & (1 << level))
 				irqs |= 1 << irq;
-		imask[level] = irqs | SINT_MASK;
+		imask[level] = irqs | SINT_ALLMASK;
 	}
 
 	/*
@@ -387,7 +386,7 @@ intr_calculatemasks()
 	imask[IPL_NET] |= imask[IPL_BIO];
 	imask[IPL_TTY] |= imask[IPL_NET];
 	imask[IPL_VM] |= imask[IPL_TTY];
-	imask[IPL_CLOCK] |= imask[IPL_VM] | SPL_CLOCK;
+	imask[IPL_CLOCK] |= imask[IPL_VM] | SPL_CLOCKMASK;
 
 	/*
 	 * These are pseudo-levels.
@@ -400,7 +399,7 @@ intr_calculatemasks()
 		register int irqs = 1 << irq;
 		for (q = m_intrhand[irq]; q; q = q->ih_next)
 			irqs |= imask[q->ih_level];
-		m_intrmask[irq] = irqs | SINT_MASK;
+		m_intrmask[irq] = irqs | SINT_ALLMASK;
 	}
 
 	/* Lastly, determine which IRQs are actually in use. */
@@ -579,23 +578,17 @@ mac_intr_do_pending_int()
 	do {
 		if((ci->ci_ipending & SINT_CLOCK) & ~pcpl) {
 			ci->ci_ipending &= ~SINT_CLOCK;
-			softclock();
+			softintr_dispatch(SI_SOFTCLOCK);
 		}
 		if((ci->ci_ipending & SINT_NET) & ~pcpl) {
-			extern int netisr;
-			int pisr;
-
 			ci->ci_ipending &= ~SINT_NET;
-			while ((pisr = netisr) != 0) {
-				atomic_clearbits_int(&netisr, pisr);
-				softnet(pisr);
-			}
+			softintr_dispatch(SI_SOFTNET);
 		}
 		if((ci->ci_ipending & SINT_TTY) & ~pcpl) {
 			ci->ci_ipending &= ~SINT_TTY;
-			softtty();
+			softintr_dispatch(SI_SOFTTTY);
 		}
-	} while ((ci->ci_ipending & SINT_MASK) & ~pcpl);
+	} while ((ci->ci_ipending & SINT_ALLMASK) & ~pcpl);
 	ci->ci_ipending &= pcpl;
 	ci->ci_cpl = pcpl;	/* Don't use splx... we are here already! */
 	ppc_intr_enable(s);

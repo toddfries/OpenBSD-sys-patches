@@ -1,4 +1,4 @@
-/*	$OpenBSD: lcore_access.S,v 1.17 2009/05/22 20:37:53 miod Exp $ */
+/*	$OpenBSD: lcore_access.S,v 1.19 2010/01/31 19:39:04 miod Exp $ */
 
 /*
  * Copyright (c) 2001-2003 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -80,16 +80,6 @@ sigcode:
 	.globl	esigcode
 esigcode:
 
-/* Mips o32 ABI sigcode. 32 bit pointers. */
-	.globl	sigcode_o32
-sigcode_o32:
-	addu	a0, sp, 16		# address of sigcontext
-	li	v0, SYS_sigreturn	# sigreturn(scp)
-	syscall
-	break	0			# just in case sigreturn fails
-	.globl	esigcode_o32
-esigcode_o32:
-
 /*
  * Copy a null terminated string within the kernel address space.
  * Maxlength may be null if count not wanted.
@@ -120,44 +110,6 @@ LEAF(copystr, 0)
 	j	ra
 	nop
 END(copystr)
-
-#ifndef __LP64__
-/*
- *  Read 64 bits from bus in non LP64 mode.
- *  XXX ints should be disabled!
- */
-LEAF(lp32_read8, 0)
-#if defined(__MIPSEB__)
-	ld	v1, 0(a0)
-	jr	ra
-	dsrl	v0, v1, 32
-#else
-	ld	v0, 0(a0)
-	jr	ra
-	dsrl	v1, v0, 32
-#endif
-END(lp32_read8)
-
-/*
- *  Write 64 bits to bus in non LP64 mode.
- *  XXX ints should be disabled!
- */
-LEAF(lp32_write8, 0)
-#if defined(__MIPSEB__)
-	dsll	a2, 32
-	dsll	a3, 32
-	dsrl	a3, 32
-	or	a2, a3
-#else
-	dsll	a3, 32
-	dsll	a2, 32
-	dsrl	a2, 32
-	or	a3, a2
-#endif
-	jr	ra
-	sd	a2, 0(a0)
-END(lp32_write8)
-#endif
 
 /*
  * Optimized memory zero code.
@@ -190,12 +142,14 @@ NON_LEAF(copyinstr, FRAMESZ(CF_SZ), ra)
 	PTR_S	ra, CF_RA_OFFS(sp)
 	blt	a0, zero, _copyerr	# make sure address is in user space
 	LI	v0, KT_COPYERR
-	PTR_L	t3, curprocpaddr
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t3, CI_CURPROCPADDR(t1)
 	jal	copystr
 	sw	v0, PCB_ONFAULT(t3)
 
 	PTR_L	ra, CF_RA_OFFS(sp)
-	PTR_L	t3, curprocpaddr
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t3, CI_CURPROCPADDR(t1)
 	sw	zero, PCB_ONFAULT(t3)
 	PTR_ADDU sp, sp, FRAMESZ(CF_SZ)
 	j	ra
@@ -218,12 +172,14 @@ NON_LEAF(copyoutstr, FRAMESZ(CF_SZ), ra)
 	PTR_S	ra, CF_RA_OFFS(sp)
 	blt	a1, zero, _copyerr	# make sure address is in user space
 	LI	v0, KT_COPYERR
-	PTR_L	t3, curprocpaddr
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t3, CI_CURPROCPADDR(t1)
 	jal	copystr
 	sw	v0, PCB_ONFAULT(t3)
 
 	PTR_L	ra, CF_RA_OFFS(sp)
-	PTR_L	t3, curprocpaddr
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t3, CI_CURPROCPADDR(t1)
 	sw	zero, PCB_ONFAULT(t3)
 	PTR_ADDU sp, sp, FRAMESZ(CF_SZ)
 	j	ra
@@ -243,12 +199,14 @@ NON_LEAF(copyin, FRAMESZ(CF_SZ), ra)
 	PTR_S	ra, CF_RA_OFFS(sp)
 	blt	a0, zero, _copyerr	# make sure address is in user space
 	li	v0, KT_COPYERR
-	PTR_L	t3, curprocpaddr
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t3, CI_CURPROCPADDR(t1)
 	jal	bcopy
 	sw	v0, PCB_ONFAULT(t3)
 
 	PTR_L	ra, CF_RA_OFFS(sp)
-	PTR_L	t3, curprocpaddr
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t3, CI_CURPROCPADDR(t1)
 	sw	zero, PCB_ONFAULT(t3)
 	PTR_ADDU sp, sp, FRAMESZ(CF_SZ)
 	j	ra
@@ -268,12 +226,14 @@ NON_LEAF(copyout, FRAMESZ(CF_SZ), ra)
 	PTR_S	ra, CF_RA_OFFS(sp)
 	blt	a1, zero, _copyerr	# make sure address is in user space
 	li	v0, KT_COPYERR
-	PTR_L	t3, curprocpaddr
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t3, CI_CURPROCPADDR(t1)
 	jal	bcopy
 	sw	v0, PCB_ONFAULT(t3)
 
 	PTR_L	ra, CF_RA_OFFS(sp)
-	PTR_L	t3, curprocpaddr
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t3, CI_CURPROCPADDR(t1)
 	sw	zero, PCB_ONFAULT(t3)
 	PTR_ADDU sp, sp, FRAMESZ(CF_SZ)
 	j	ra
@@ -282,7 +242,8 @@ END(copyout)
 
 _copyerr:
 	PTR_L	ra, CF_RA_OFFS(sp)
-	PTR_L	t3, curprocpaddr
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t3, CI_CURPROCPADDR(t1)
 	sw	zero, PCB_ONFAULT(t3)
 	PTR_ADDU sp, sp, FRAMESZ(CF_SZ)
 	j	ra
@@ -295,7 +256,8 @@ NON_LEAF(kcopy, FRAMESZ(CF_SZ + REGSZ), ra)
 	PTR_SUBU sp, sp, FRAMESZ(CF_SZ + REGSZ)
 	.mask	0x80000000, (CF_RA_OFFS - FRAMESZ(CF_SZ + REGSZ))
 	PTR_S	ra, CF_RA_OFFS + REGSZ(sp)
-	PTR_L	t3, curprocpaddr
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t3, CI_CURPROCPADDR(t1)
 	lw	v1, PCB_ONFAULT(t3)
 	li	v0, KT_KCOPYERR
 	PTR_S	v1, CF_ARGSZ(sp)	# save old pcb_onfault
@@ -303,7 +265,8 @@ NON_LEAF(kcopy, FRAMESZ(CF_SZ + REGSZ), ra)
 	sw	v0, PCB_ONFAULT(t3)
 
 	PTR_L	v0, CF_ARGSZ(sp)
-	PTR_L	t3, curprocpaddr
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t3, CI_CURPROCPADDR(t1)
 	PTR_L	ra, CF_RA_OFFS + REGSZ(sp)
 	sw	v0, PCB_ONFAULT(t3)
 	PTR_ADDU sp, sp, FRAMESZ(CF_SZ + REGSZ)
@@ -313,7 +276,8 @@ END(kcopy)
 
 _kcopyerr:
 	PTR_L	v0, CF_ARGSZ(sp)
-	PTR_L	t3, curprocpaddr
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t3, CI_CURPROCPADDR(t1)
 	PTR_L	ra, CF_RA_OFFS + REGSZ(sp)
 	sw	v0, PCB_ONFAULT(t3)
 	PTR_ADDU sp, sp, FRAMESZ(CF_SZ + REGSZ)
@@ -327,7 +291,8 @@ _kcopyerr:
  */
 
 LEAF(guarded_read_4, 0)
-	PTR_L	t3, curprocpaddr
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t3, CI_CURPROCPADDR(t1)
 	li	v0, KT_GUARDERR
 	lw	v1, PCB_ONFAULT(t3)
 	sw	v0, PCB_ONFAULT(t3)
@@ -341,7 +306,8 @@ LEAF(guarded_read_4, 0)
 END(guarded_read_4)
 
 LEAF(guarded_write_4, 0)
-	PTR_L	t3, curprocpaddr
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t3, CI_CURPROCPADDR(t1)
 	li	v0, KT_GUARDERR
 	lw	v1, PCB_ONFAULT(t3)
 	sw	v0, PCB_ONFAULT(t3)

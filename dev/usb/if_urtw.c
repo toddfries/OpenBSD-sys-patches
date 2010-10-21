@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_urtw.c,v 1.21 2009/06/06 12:06:28 martynas Exp $	*/
+/*	$OpenBSD: if_urtw.c,v 1.31 2010/08/27 17:08:01 jsg Exp $	*/
 
 /*-
  * Copyright (c) 2009 Martynas Venckus <martynas@openbsd.org>
@@ -83,10 +83,13 @@ static const struct urtw_type {
 #define	URTW_DEV_RTL8187B(v, p)	\
 	    { { USB_VENDOR_##v, USB_PRODUCT_##v##_##p }, URTW_HWREV_8187B }
 	/* Realtek RTL8187 devices. */
+	URTW_DEV_RTL8187(ASUS,		P5B_WIFI),
 	URTW_DEV_RTL8187(DICKSMITH,	RTL8187),
+	URTW_DEV_RTL8187(LINKSYS4,	WUSB54GCV2),
 	URTW_DEV_RTL8187(LOGITEC,	RTL8187),
 	URTW_DEV_RTL8187(NETGEAR,	WG111V2),
 	URTW_DEV_RTL8187(REALTEK,	RTL8187),
+	URTW_DEV_RTL8187(SITECOMEU,	WL168V1),
 	URTW_DEV_RTL8187(SPHAIRON,	RTL8187),
 	URTW_DEV_RTL8187(SURECOM,	EP9001G2A),
 	/* Realtek RTL8187B devices. */
@@ -95,7 +98,7 @@ static const struct urtw_type {
 	URTW_DEV_RTL8187B(REALTEK,	RTL8187B_0),
 	URTW_DEV_RTL8187B(REALTEK,	RTL8187B_1),
 	URTW_DEV_RTL8187B(REALTEK,	RTL8187B_2),
-	URTW_DEV_RTL8187B(SITECOMEU,	WL168)
+	URTW_DEV_RTL8187B(SITECOMEU,	WL168V4)
 #undef	URTW_DEV_RTL8187
 #undef	URTW_DEV_RTL8187B
 };
@@ -532,7 +535,7 @@ usbd_status	urtw_8225_setgain(struct urtw_softc *, int16_t);
 usbd_status	urtw_8225_usb_init(struct urtw_softc *);
 usbd_status	urtw_8225_write_c(struct urtw_softc *, uint8_t, uint16_t);
 usbd_status	urtw_8225_write_s16(struct urtw_softc *, uint8_t, int,
-		    uint16_t *);
+		    uint16_t);
 usbd_status	urtw_8225_read(struct urtw_softc *, uint8_t, uint32_t *);
 usbd_status	urtw_8225_rf_init(struct urtw_rf *);
 usbd_status	urtw_8225_rf_set_chan(struct urtw_rf *, int);
@@ -571,11 +574,13 @@ usbd_status	urtw_8225v2_b_update_chan(struct urtw_softc *);
 usbd_status	urtw_8225v2_b_rf_init(struct urtw_rf *);
 usbd_status	urtw_8225v2_b_rf_set_chan(struct urtw_rf *, int);
 usbd_status	urtw_8225v2_b_set_txpwrlvl(struct urtw_softc *, int);
+int		urtw_set_bssid(struct urtw_softc *, const uint8_t *);
+int		urtw_set_macaddr(struct urtw_softc *, const uint8_t *);
 
 int urtw_match(struct device *, void *, void *);
 void urtw_attach(struct device *, struct device *, void *);
 int urtw_detach(struct device *, int);
-int urtw_activate(struct device *, enum devact);
+int urtw_activate(struct device *, int);
 
 struct cfdriver urtw_cd = {
 	NULL, "urtw", DV_IFNET
@@ -612,11 +617,11 @@ urtw_attach(struct device *parent, struct device *self, void *aux)
 	uint8_t data8;
 	uint32_t data;
 	int i;
-	const char *urtw_name = NULL;
 
 	sc->sc_udev = uaa->device;
-
 	sc->sc_hwrev = urtw_lookup(uaa->vendor, uaa->product)->rev;
+
+	printf("%s: ", sc->sc_dev.dv_xname);
 
 	if (sc->sc_hwrev & URTW_HWREV_8187) {
 		urtw_read32_m(sc, URTW_TX_CONF, &data);
@@ -624,7 +629,7 @@ urtw_attach(struct device *parent, struct device *self, void *aux)
 		switch (data) {
 		case URTW_TX_HWREV_8187_D:
 			sc->sc_hwrev |= URTW_HWREV_8187_D;
-			urtw_name = "RTL8187 rev. D";
+			printf("RTL8187 rev D");
 			break;
 		case URTW_TX_HWREV_8187B_D:
 			/*
@@ -632,11 +637,11 @@ urtw_attach(struct device *parent, struct device *self, void *aux)
 			 * USB IDs of RTL8187.
 			 */
 			sc->sc_hwrev = URTW_HWREV_8187B | URTW_HWREV_8187B_B;
-			urtw_name = "RTL8187B rev. B (early)";
+			printf("RTL8187B rev B (early)");
 			break;
 		default:
 			sc->sc_hwrev |= URTW_HWREV_8187_B;
-			urtw_name = "RTL8187 rev. B (default)";
+			printf("RTL8187 rev 0x%02x", data >> 25);
 			break;
 		}
 	} else {
@@ -645,24 +650,22 @@ urtw_attach(struct device *parent, struct device *self, void *aux)
 		switch (data8) {
 		case URTW_8187B_HWREV_8187B_B:
 			sc->sc_hwrev |= URTW_HWREV_8187B_B;
-			urtw_name = "RTL8187B rev. B";
+			printf("RTL8187B rev B");
 			break;
 		case URTW_8187B_HWREV_8187B_D:
 			sc->sc_hwrev |= URTW_HWREV_8187B_D;
-			urtw_name = "RTL8187B rev. D";
+			printf("RTL8187B rev D");
 			break;
 		case URTW_8187B_HWREV_8187B_E:
 			sc->sc_hwrev |= URTW_HWREV_8187B_E;
-			urtw_name = "RTL8187B rev. E";
+			printf("RTL8187B rev E");
 			break;
 		default:
 			sc->sc_hwrev |= URTW_HWREV_8187B_B;
-			urtw_name = "RTL8187B rev. B (default)";
+			printf("RTL8187B rev 0x%02x", data8);
 			break;
 		}
 	}
-
-	printf("%s: %s", sc->sc_dev.dv_xname, urtw_name);
 
 	urtw_read32_m(sc, URTW_RX, &data);
 	sc->sc_epromtype = (data & URTW_RX_9356SEL) ? URTW_EEPROM_93C56 :
@@ -721,9 +724,9 @@ urtw_attach(struct device *parent, struct device *self, void *aux)
 	ifp->if_softc = sc;
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
 	if (sc->sc_hwrev & URTW_HWREV_8187) {
-		ifp->if_init = urtw_init;
+		sc->sc_init = urtw_init;
 	} else {
-		ifp->if_init = urtw_8187b_init;
+		sc->sc_init = urtw_8187b_init;
 	}
 	ifp->if_ioctl = urtw_ioctl;
 	ifp->if_start = urtw_start;
@@ -793,12 +796,12 @@ urtw_detach(struct device *self, int flags)
 }
 
 int
-urtw_activate(struct device *self, enum devact act)
+urtw_activate(struct device *self, int act)
 {
 	switch (act) {
 	case DVACT_ACTIVATE:
-		return (EOPNOTSUPP);
-	case (DVACT_DEACTIVATE):
+		break;
+	case DVACT_DEACTIVATE:
 		break;
 	}
 
@@ -1025,6 +1028,7 @@ urtw_free_tx_data_list(struct urtw_softc *sc)
 int
 urtw_media_change(struct ifnet *ifp)
 {
+	struct urtw_softc *sc = ifp->if_softc;
 	int error;
 
 	error = ieee80211_media_change(ifp);
@@ -1033,7 +1037,7 @@ urtw_media_change(struct ifnet *ifp)
 
 	if ((ifp->if_flags & (IFF_UP | IFF_RUNNING)) ==
 	    (IFF_UP | IFF_RUNNING))
-		ifp->if_init(ifp);
+		sc->sc_init(ifp);
 
 	return (0);
 }
@@ -1088,44 +1092,19 @@ fail:
 	return (error);
 }
 
-/* XXX why we should allocalte memory buffer instead of using memory stack? */
 usbd_status
 urtw_8225_write_s16(struct urtw_softc *sc, uint8_t addr, int index,
-    uint16_t *data)
+    uint16_t data)
 {
-	uint8_t *buf;
-	uint16_t data16;
-	usb_device_request_t *req;
-	usbd_status error = 0;
+	usb_device_request_t req;
 
-	data16 = *data;
-	req = (usb_device_request_t *)malloc(sizeof(usb_device_request_t),
-	    M_DEVBUF, M_NOWAIT | M_ZERO);
-	if (req == NULL) {
-		printf("%s: could not allocate a memory\n",
-		    sc->sc_dev.dv_xname);
-		goto fail0;
-	}
-	buf = (uint8_t *)malloc(2, M_DEVBUF, M_NOWAIT | M_ZERO);
-	if (req == NULL) {
-		printf("%s: could not allocate a memory\n",
-		    sc->sc_dev.dv_xname);
-		goto fail1;
-	}
+	req.bmRequestType = UT_WRITE_VENDOR_DEVICE;
+	req.bRequest = URTW_8187_SETREGS_REQ;
+	USETW(req.wValue, addr);
+	USETW(req.wIndex, index);
+	USETW(req.wLength, sizeof(uint16_t));
 
-	req->bmRequestType = UT_WRITE_VENDOR_DEVICE;
-	req->bRequest = URTW_8187_SETREGS_REQ;
-	USETW(req->wValue, addr);
-	USETW(req->wIndex, index);
-	USETW(req->wLength, sizeof(uint16_t));
-	buf[0] = (data16 & 0x00ff);
-	buf[1] = (data16 & 0xff00) >> 8;
-
-	error = usbd_do_request(sc->sc_udev, req, buf);
-
-	free(buf, M_DEVBUF);
-fail1:	free(req, M_DEVBUF);
-fail0:	return (error);
+	return (usbd_do_request(sc->sc_udev, &req, &data));
 }
 
 usbd_status
@@ -1238,7 +1217,7 @@ urtw_8225_write_c(struct urtw_softc *sc, uint8_t addr, uint16_t data)
 	urtw_write16_m(sc, URTW_RF_PINS_OUTPUT, d80);
 	DELAY(10);
 
-	error = urtw_8225_write_s16(sc, addr, 0x8225, &data);
+	error = urtw_8225_write_s16(sc, addr, 0x8225, data);
 	if (error != 0)
 		goto fail;
 
@@ -1308,10 +1287,12 @@ urtw_get_rfchip(struct urtw_softc *sc)
 				rf->init = urtw_8225_rf_init;
 				rf->set_chan = urtw_8225_rf_set_chan;
 				rf->set_sens = urtw_8225_rf_set_sens;
+				printf(", RFv1");
 			} else {
 				rf->init = urtw_8225v2_rf_init;
 				rf->set_chan = urtw_8225v2_rf_set_chan;
 				rf->set_sens = NULL;
+				printf(", RFv2");
 			}
 			break;
 		default:
@@ -1329,7 +1310,7 @@ urtw_get_rfchip(struct urtw_softc *sc)
 	return (0);
 
 fail:
-	panic("unsupported RF chip %d\n", data & 0xff);
+	panic("unsupported RF chip %d", data & 0xff);
 	/* NOTREACHED */
 }
 
@@ -1998,7 +1979,7 @@ urtw_led_ctl(struct urtw_softc *sc, int mode)
 		error = urtw_led_mode3(sc, mode);
 		break;
 	default:
-		panic("unsupported LED mode %d\n", sc->sc_strategy);
+		panic("unsupported LED mode %d", sc->sc_strategy);
 		/* NOTREACHED */
 	}
 
@@ -2075,7 +2056,7 @@ urtw_update_msr(struct urtw_softc *sc)
 			data |= URTW_MSR_LINK_STA;
 			break;
 		default:
-			panic("unsupported operation mode 0x%x\n",
+			panic("unsupported operation mode 0x%x",
 			    ic->ic_opmode);
 			/* NOTREACHED */
 		}
@@ -2298,8 +2279,9 @@ urtw_init(struct ifnet *ifp)
 
 	/* applying MAC address again. */
 	IEEE80211_ADDR_COPY(ic->ic_myaddr, LLADDR(ifp->if_sadl));
-	urtw_write32_m(sc, URTW_MAC0, ((uint32_t *)ic->ic_myaddr)[0]);
-	urtw_write16_m(sc, URTW_MAC4, ((uint32_t *)ic->ic_myaddr)[1] & 0xffff);
+	error = urtw_set_macaddr(sc, ic->ic_myaddr);
+	if (error)
+		goto fail;
 	error = urtw_set_mode(sc, URTW_EPROM_CMD_NORMAL);
 	if (error)
 		goto fail;
@@ -2431,7 +2413,7 @@ urtw_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 				urtw_set_multi(sc);
 			} else {
 				if (!(ifp->if_flags & IFF_RUNNING))
-					ifp->if_init(ifp);
+					sc->sc_init(ifp);
 			}
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
@@ -2474,7 +2456,7 @@ urtw_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	if (error == ENETRESET) {
 		if ((ifp->if_flags & (IFF_RUNNING | IFF_UP)) ==
 		    (IFF_RUNNING | IFF_UP))
-			ifp->if_init(ifp);
+			sc->sc_init(ifp);
 		error = 0;
 	}
 
@@ -3548,7 +3530,7 @@ urtw_task(void *arg)
 
 	case IEEE80211_S_SCAN:
 		urtw_set_chan(sc, ic->ic_bss->ni_chan);
-		timeout_add(&sc->scan_to, hz / 5);
+		timeout_add_msec(&sc->scan_to, 200);
 		break;
 
 	case IEEE80211_S_AUTH:
@@ -3560,9 +3542,9 @@ urtw_task(void *arg)
 		ni = ic->ic_bss;
 
 		/* setting bssid. */
-		urtw_write32_m(sc, URTW_BSSID, ((uint32_t *)ni->ni_bssid)[0]);
-		urtw_write16_m(sc, URTW_BSSID + 4,
-		    ((uint16_t *)ni->ni_bssid)[2]);
+		error = urtw_set_bssid(sc, ni->ni_bssid);
+		if (error != 0)
+			goto fail;
 		urtw_update_msr(sc);
 		/* XXX maybe the below would be incorrect. */
 		urtw_write16_m(sc, URTW_ATIM_WND, 2);
@@ -3685,8 +3667,9 @@ urtw_8187b_init(struct ifnet *ifp)
 	if (error)
 		goto fail;
 	IEEE80211_ADDR_COPY(ic->ic_myaddr, LLADDR(ifp->if_sadl));
-	urtw_write32_m(sc, URTW_MAC0, ((uint32_t *)ic->ic_myaddr)[0]);
-	urtw_write16_m(sc, URTW_MAC4, ((uint32_t *)ic->ic_myaddr)[1] & 0xffff);
+	error = urtw_set_macaddr(sc, ic->ic_myaddr);
+	if (error)
+		goto fail;
 	error = urtw_set_mode(sc, URTW_EPROM_CMD_NORMAL);
 	if (error)
 		goto fail;
@@ -4097,3 +4080,34 @@ fail:
 	return (error);
 }
 
+int
+urtw_set_bssid(struct urtw_softc *sc, const uint8_t *bssid)
+{
+	int error;
+
+	urtw_write32_m(sc, URTW_BSSID,
+	    bssid[0] | bssid[1] << 8 | bssid[2] << 16 | bssid[3] << 24);
+	urtw_write16_m(sc, URTW_BSSID + 4,
+	    bssid[4] | bssid[5] << 8);
+
+	return 0;
+
+fail:
+	return error;
+}
+
+int
+urtw_set_macaddr(struct urtw_softc *sc, const uint8_t *addr)
+{
+	int error;
+
+	urtw_write32_m(sc, URTW_MAC0,
+	    addr[0] | addr[1] << 8 | addr[2] << 16 | addr[3] << 24);
+	urtw_write16_m(sc, URTW_MAC4,
+	    addr[4] | addr[5] << 8);
+
+	return 0;
+
+fail:
+	return error;
+}

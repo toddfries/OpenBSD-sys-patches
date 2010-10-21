@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_init.c,v 1.22 2009/06/02 23:00:19 oga Exp $	*/
+/*	$OpenBSD: uvm_init.c,v 1.28 2010/08/07 03:50:02 krw Exp $	*/
 /*	$NetBSD: uvm_init.c,v 1.14 2000/06/27 17:29:23 mrg Exp $	*/
 
 /*
@@ -48,6 +48,7 @@
 #include <sys/proc.h>
 #include <sys/malloc.h>
 #include <sys/vnode.h>
+#include <sys/pool.h>
 
 #include <uvm/uvm.h>
 
@@ -126,6 +127,11 @@ uvm_init(void)
 	kmeminit();
 
 	/*
+	 * step 6.5: init the dma allocator, which is backed by pools.
+	 */
+	dma_alloc_init();
+
+	/*
 	 * step 7: init all pagers and the pager_map.
 	 */
 
@@ -143,9 +149,8 @@ uvm_init(void)
 	uvm_km_page_init();
 
 	/*
-	 * the VM system is now up!  now that malloc is up we can resize the
-	 * <obj,off> => <page> hash table for general use and enable paging
-	 * of kernel objects.
+	 * the VM system is now up!  now that malloc is up we can
+	 * enable paging of kernel objects.
 	 */
 
 	uao_create(VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS,
@@ -159,14 +164,14 @@ uvm_init(void)
 	if (uvm_map(kernel_map, &kvm_start, 3 * PAGE_SIZE,
 	    NULL, UVM_UNKNOWN_OFFSET, 0, UVM_MAPFLAG(UVM_PROT_NONE,
 	    UVM_PROT_NONE, UVM_INH_NONE, UVM_ADV_RANDOM, UVM_FLAG_FIXED)))
-		panic("uvm_init: cannot reserve dead beef @0x%x\n", DEADBEEF0);
+		panic("uvm_init: cannot reserve dead beef @0x%x", DEADBEEF0);
 #endif
 #ifdef DEADBEEF1
 	kvm_start = trunc_page(DEADBEEF1) - PAGE_SIZE;
 	if (uvm_map(kernel_map, &kvm_start, 3 * PAGE_SIZE,
 	    NULL, UVM_UNKNOWN_OFFSET, 0, UVM_MAPFLAG(UVM_PROT_NONE,
 	    UVM_PROT_NONE, UVM_INH_NONE, UVM_ADV_RANDOM, UVM_FLAG_FIXED)))
-		panic("uvm_init: cannot reserve dead beef @0x%x\n", DEADBEEF1);
+		panic("uvm_init: cannot reserve dead beef @0x%x", DEADBEEF1);
 #endif
 	/*
 	 * init anonymous memory systems

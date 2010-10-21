@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.122 2009/06/15 17:01:25 beck Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.129 2010/07/02 19:57:14 tedu Exp $	*/
 /*	$NetBSD: machdep.c,v 1.121 1999/03/26 23:41:29 mycroft Exp $	*/
 
 /*
@@ -66,9 +66,6 @@
 #include <sys/sysctl.h>
 #include <sys/syscallargs.h>
 #include <sys/syslog.h>
-#ifdef SYSVMSG
-#include <sys/msg.h>
-#endif
 
 #include <machine/db_machdep.h>
 #ifdef DDB
@@ -117,6 +114,10 @@ int	bufpages = 0;
 int	bufcachepercent = BUFCACHEPERCENT;
 
 int	physmem;		/* size of physical memory, in pages */
+
+struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
+struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
+
 /*
  * safepri is a safe priority for sleep to set for a spin-wait
  * during autoconfiguration or after a panic.
@@ -126,13 +127,6 @@ int	safepri = PSL_LOWIPL;
 extern	u_int lowram;
 extern	short exframesize[];
 
-#ifdef COMPAT_HPUX
-extern struct emul emul_hpux;
-#endif
-#ifdef COMPAT_SUNOS
-extern struct emul emul_sunos;
-#endif
-
 /*
  * Some storage space must be allocated statically because of the
  * early console initialization.
@@ -141,7 +135,6 @@ char	extiospace[EXTENT_FIXED_STORAGE_SIZE(8)];
 extern int eiomapsize;
 
 /* prototypes for local functions */
-caddr_t	allocsys(caddr_t);
 void	parityenable(void);
 int	parityerror(struct frame *);
 int	parityerrorfind(void);
@@ -238,9 +231,7 @@ cpu_startup()
 {
 	extern char *etext;
 	unsigned i;
-	caddr_t v;
 	vaddr_t minaddr, maxaddr;
-	vsize_t size;
 #ifdef DEBUG
 	extern int pmapdebug;
 	int opmapdebug = pmapdebug;
@@ -272,29 +263,6 @@ cpu_startup()
 	identifycpu();
 	printf("real mem = %u (%uMB)\n", ptoa(physmem),
 	    ptoa(physmem)/1024/1024);
-
-	/*
-	 * Find out how much space we need, allocate it,
-	 * and then give everything true virtual addresses.
-	 */
-	size = (vsize_t)allocsys((caddr_t)0);
-	if ((v = (caddr_t)uvm_km_zalloc(kernel_map, round_page(size))) == 0)
-		panic("startup: no room for tables");
-	if ((allocsys(v) - v) != size)
-		panic("startup: table size inconsistency");
-
-	/*
-	 * Determine how many buffers to allocate.
-	 * We allocate bufcachepercent% of memory for buffer space.
-	 */
-	if (bufpages == 0)
-		bufpages = physmem * bufcachepercent / 100;
-
-	/* Restrict to at most 25% filled kvm */
-	if (bufpages >
-	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) / PAGE_SIZE / 4) 
-		bufpages = (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) /
-		    PAGE_SIZE / 4;
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
@@ -356,35 +324,6 @@ cpu_startup()
 		printf("kernel does not support -c; continuing..\n");
 #endif
 	}
-}
-
-/*
- * Allocate space for system data structures.  We are given
- * a starting virtual address and we return a final virtual
- * address; along the way we set each data structure pointer.
- *
- * We call allocsys() with 0 to find out how much space we want,
- * allocate that much and fill it with zeroes, and then call
- * allocsys() again with the correct base virtual address.
- */
-caddr_t
-allocsys(v)
-	caddr_t v;
-{
-
-#define	valloc(name, type, num)	\
-	    (name) = (type *)v; v = (caddr_t)((name)+(num))
-#define	valloclim(name, type, num, lim) \
-	    (name) = (type *)v; v = (caddr_t)((lim) = ((name)+(num)))
-
-#ifdef SYSVMSG
-	valloc(msgpool, char, msginfo.msgmax);
-	valloc(msgmaps, struct msgmap, msginfo.msgseg);
-	valloc(msghdrs, struct msg, msginfo.msgtql);
-	valloc(msqids, struct msqid_ds, msginfo.msgmni);
-#endif
-
-	return (v);
 }
 
 /*
@@ -1106,52 +1045,4 @@ done:
 	pmap_update(pmap_kernel());
 	splx(s);
 	return(found);
-}
-
-/*
- * cpu_exec_aout_makecmds():
- *	cpu-dependent a.out format hook for execve().
- *
- * Determine of the given exec package refers to something which we
- * understand and, if so, set up the vmcmds for it.
- */
-int
-cpu_exec_aout_makecmds(p, epp)
-	struct proc *p;
-	struct exec_package *epp;
-{
-#if defined(COMPAT_44) || defined(COMPAT_SUNOS)
-	u_long midmag, magic;
-	u_short mid;
-	int error;
-	struct exec *execp = epp->ep_hdr;
-#ifdef COMPAT_SUNOS
-	extern int sunos_exec_aout_makecmds(struct proc *, struct exec_package *);
-#endif
-
-	midmag = ntohl(execp->a_midmag);
-	mid = (midmag >> 16) & 0xffff;
-	magic = midmag & 0xffff;
-
-	midmag = mid << 16 | magic;
-
-	switch (midmag) {
-#ifdef COMPAT_44
-	case (MID_HP300 << 16) | ZMAGIC:
-		error = exec_aout_prep_oldzmagic(p, epp);
-		break;
-#endif
-	default:
-#ifdef COMPAT_SUNOS
-		/* Hand it over to the SunOS emulation package. */
-		error = sunos_exec_aout_makecmds(p, epp);
-#else
-		error = ENOEXEC;
-#endif
-	}
-
-	return error;
-#else /* !(defined(COMPAT_44) || defined(COMPAT_SUNOS)) */
-	return ENOEXEC;
-#endif
 }

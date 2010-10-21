@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.12 2009/06/03 14:45:51 jj Exp $	*/
+/*	$OpenBSD: conf.c,v 1.16 2010/09/23 05:02:14 claudio Exp $	*/
 
 /*-
  * Copyright (c) 1991 The Regents of the University of California.
@@ -47,7 +47,6 @@
 #include "st.h"
 #include "cd.h"
 #include "ch.h"
-#include "ss.h"
 #include "uk.h"
 #include "wd.h"
 bdev_decl(wd);
@@ -110,6 +109,9 @@ cdev_decl(com);
 
 #include "systrace.h"
 
+#include "vscsi.h"
+#include "pppx.h"
+
 #ifdef USER_PCICONF
 #include "pci.h"
 cdev_decl(pci);
@@ -131,7 +133,7 @@ struct cdevsw   cdevsw[] =
 	cdev_tape_init(NST,st),		/* 11: SCSI tape */
 	cdev_disk_init(NCD,cd),		/* 12: SCSI cd-rom */
 	cdev_ch_init(NCH,ch),		/* 13: SCSI changer */
-	cdev_ss_init(NSS,ss),		/* 14: SCSI scanner */
+	cdev_notdef(),			/* 14 */
 	cdev_uk_init(NUK,uk),		/* 15: SCSI unknown */
 	cdev_fd_init(1,filedesc),	/* 16: file descriptor pseudo-device */
 	cdev_bpf_init(NBPFILTER,bpf),	/* 17: Berkeley packet filter */
@@ -166,12 +168,15 @@ struct cdevsw   cdevsw[] =
 	cdev_bio_init(NBIO,bio),	/* 37: ioctl tunnel */
 	cdev_ptm_init(NPTY,ptm),	/* 38: pseudo-tty ptm device */
 	cdev_disk_init(NWD,wd),		/* 39: ST506 disk */
-	cdev_lkm_dummy(),
-	cdev_lkm_dummy(),
-	cdev_lkm_dummy(),
-	cdev_lkm_dummy(),
-	cdev_lkm_dummy(),
-	cdev_lkm_dummy(),
+	cdev_lkm_dummy(),		/* 40 */
+	cdev_lkm_dummy(),		/* 41 */
+	cdev_lkm_dummy(),		/* 42 */
+	cdev_lkm_dummy(),		/* 43 */
+	cdev_lkm_dummy(),		/* 44 */
+	cdev_lkm_dummy(),		/* 45 */
+	cdev_vscsi_init(NVSCSI,vscsi),	/* 46: vscsi */
+	cdev_disk_init(1,diskmap),	/* 47: disk mapper */
+	cdev_pppx_init(NPPPX,pppx),	/* 48: pppx */
 };
 int nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
 

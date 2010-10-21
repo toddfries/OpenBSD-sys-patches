@@ -1,4 +1,4 @@
-/* $OpenBSD: acpicpu.c,v 1.54 2009/06/10 03:42:20 gwk Exp $ */
+/* $OpenBSD: acpicpu.c,v 1.57 2010/07/21 19:35:15 deraadt Exp $ */
 /*
  * Copyright (c) 2005 Marco Peereboom <marco@openbsd.org>
  *
@@ -215,7 +215,7 @@ acpicpu_set_pdc(struct acpicpu_softc *sc)
 
 	aml_evalname(sc->sc_acpi, sc->sc_devnode, "_PDC", 1, &cmd, &res);
 
-	/* Evalualte _OSC */
+	/* Evaluate _OSC */
 	memset(&osc_cmd, 0, sizeof(cmd) * 4);
 	osc_cmd[0].type = AML_OBJTYPE_BUFFER;
 	osc_cmd[0].v_buffer = (uint8_t *)&cpu_oscuuid;
@@ -392,8 +392,7 @@ acpicpu_attach(struct device *parent, struct device *self, void *aux)
 		acpicpu_getppc(sc);
 		if (acpicpu_getpct(sc))
 			sc->sc_flags |= FLAGS_NOPCT;
-		else {
-
+		else if (sc->sc_pss_len > 0) {
 			/* Notify BIOS we are handing p-states */
 			if (sc->sc_acpi->sc_fadt->pstate_cnt)
 				acpi_write_pmreg(sc->sc_acpi, ACPIREG_SMICMD, 0,
@@ -580,7 +579,7 @@ acpicpu_getpss(struct acpicpu_softc *sc)
 	for (i = 0; i < res.length; i++) {
 		cf = aml_val2int(res.v_package[i]->v_package[0]);
 
-		/* This heuristic comes from FreeBSDs 
+		/* This heuristic comes from FreeBSDs
 		 * dev/acpica/acpi_perf.c to weed out invalid PSS entries.
 		 */
 		if (cf == sc->sc_pss[c].pss_core_freq) {

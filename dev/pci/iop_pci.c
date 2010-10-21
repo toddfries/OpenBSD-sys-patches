@@ -1,4 +1,4 @@
-/*	$OpenBSD: iop_pci.c,v 1.6 2008/06/26 05:42:17 ray Exp $	*/
+/*	$OpenBSD: iop_pci.c,v 1.8 2010/07/13 13:07:35 kettenis Exp $	*/
 /*	$NetBSD: iop_pci.c,v 1.4 2001/03/20 13:21:00 ad Exp $	*/
 
 /*-
@@ -39,7 +39,6 @@
 #include <sys/kernel.h>
 #include <sys/device.h>
 #include <sys/queue.h>
-#include <sys/proc.h>
 
 #include <machine/endian.h>
 #include <machine/bus.h>
@@ -99,7 +98,6 @@ iop_pci_attach(struct device *parent, struct device *self, void *aux)
 	sc = (struct iop_softc *)self;
 	pa = (struct pci_attach_args *)aux;
 	pc = pa->pa_pc;
-	printf(": ");
 
 	/*
 	 * The kernel always uses the first memory mapping to communicate
@@ -111,14 +109,14 @@ iop_pci_attach(struct device *parent, struct device *self, void *aux)
 			break;
 	}
 	if (i == PCI_MAPREG_END) {
-		printf("can't find mapping\n");
+		printf(": can't find mapping\n");
 		return;
 	}
 
 	/* Map the register window. */
 	if (pci_mapreg_map(pa, i, PCI_MAPREG_TYPE_MEM, 0, &sc->sc_iot,
 	    &sc->sc_ioh, NULL, NULL, 0x40000)) {
-		printf("%s: can't map register window\n", sc->sc_dv.dv_xname);
+		printf(": can't map register window\n");
 		return;
 	}
 
@@ -128,14 +126,14 @@ iop_pci_attach(struct device *parent, struct device *self, void *aux)
 
 	/* Map and establish the interrupt.  XXX IPL_BIO. */
 	if (pci_intr_map(pa, &ih)) {
-		printf("can't map interrupt\n");
+		printf(": can't map interrupt\n");
 		return;
 	}
 	intrstr = pci_intr_string(pc, ih);
 	sc->sc_ih = pci_intr_establish(pc, ih, IPL_BIO, iop_intr, sc,
 	    sc->sc_dv.dv_xname);
 	if (sc->sc_ih == NULL) {
-		printf("can't establish interrupt");
+		printf(": can't establish interrupt");
 		if (intrstr != NULL)
 			printf(" at %s", intrstr);
 		printf("\n");

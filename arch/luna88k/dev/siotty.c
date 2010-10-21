@@ -1,4 +1,4 @@
-/* $OpenBSD: siotty.c,v 1.7 2008/06/26 05:42:11 ray Exp $ */
+/* $OpenBSD: siotty.c,v 1.15 2010/09/29 13:39:03 miod Exp $ */
 /* $NetBSD: siotty.c,v 1.9 2002/03/17 19:40:43 atatat Exp $ */
 
 /*-
@@ -36,7 +36,6 @@
 #include <sys/conf.h>
 #include <sys/ioctl.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/tty.h>
 #include <sys/uio.h>
 #include <sys/fcntl.h>
@@ -199,13 +198,7 @@ siostart(tp)
 	s = spltty();
 	if (tp->t_state & (TS_BUSY|TS_TIMEOUT|TS_TTSTOP))
 		goto out;
-	if (tp->t_outq.c_cc <= tp->t_lowat) {
-		if (tp->t_state & TS_ASLEEP) {
-			tp->t_state &= ~TS_ASLEEP;
-			wakeup((caddr_t)&tp->t_outq);
-		}
-		selwakeup(&tp->t_wsel);
-	}
+	ttwakeupwr(tp);
 	if (tp->t_outq.c_cc == 0)
 		goto out;
 
@@ -359,10 +352,10 @@ sioopen(dev, flag, mode, p)
 	if ((sc = siotty_cd.cd_devs[minor(dev)]) == NULL)
 		return ENXIO;
 	if ((tp = sc->sc_tty) == NULL) {
-		tp = sc->sc_tty = ttymalloc();
+		tp = sc->sc_tty = ttymalloc(0);
 	}		
 	else if ((tp->t_state & TS_ISOPEN) && (tp->t_state & TS_XCLUDE)
-	    && p->p_ucred->cr_uid != 0)
+	    && suser(p, 0) != 0)
 		return EBUSY;
 
 	tp->t_oproc = siostart;
@@ -394,13 +387,13 @@ sioopen(dev, flag, mode, p)
 #endif
 	}
 
-	error = ttyopen(dev, tp);
+	error = ttyopen(dev, tp, p);
 	if (error > 0)
 		return error;
 /*
 	return (*tp->t_linesw->l_open)(dev, tp);
 */
-	return (*linesw[tp->t_line].l_open)(dev, tp);
+	return (*linesw[tp->t_line].l_open)(dev, tp, p);
 }
  
 int
@@ -416,7 +409,7 @@ sioclose(dev, flag, mode, p)
 /*
 	(*tp->t_linesw->l_close)(tp, flag);
 */
-	(*linesw[tp->t_line].l_close)(tp, flag);
+	(*linesw[tp->t_line].l_close)(tp, flag, p);
 
 	s = spltty();
 	siomctl(sc, TIOCM_BREAK, DMBIC);
