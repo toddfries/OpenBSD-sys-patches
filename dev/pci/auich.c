@@ -1,4 +1,4 @@
-/*	$OpenBSD: auich.c,v 1.82 2010/06/07 23:35:24 ratchov Exp $	*/
+/*	$OpenBSD: auich.c,v 1.93 2010/09/12 03:17:34 jakemsr Exp $	*/
 
 /*
  * Copyright (c) 2000,2001 Michael Shalayeff
@@ -174,7 +174,9 @@ struct auich_softc {
 	void *sc_ih;
 
 	audio_device_t sc_audev;
+	struct device *audiodev;
 
+	pcireg_t pci_id;
 	bus_space_tag_t iot;
 	bus_space_tag_t iot_mix;
 	bus_space_handle_t mix_ioh;
@@ -201,6 +203,9 @@ struct auich_softc {
 
 		void (*intr)(void *);
 		void *arg;
+		int running;
+		size_t size;
+		uint32_t ap;
 	} pcmo, pcmi, mici;
 
 	struct auich_dma *sc_pdma;	/* play */
@@ -212,7 +217,6 @@ struct auich_softc {
 	int pcmo_fifoe;
 #endif
 
-	void *powerhook;
 	int suspend;
 	u_int16_t ext_ctrl;
 	int sc_sample_size;
@@ -227,6 +231,10 @@ struct auich_softc {
 	int sc_pcm2;
 	int sc_pcm4;
 	int sc_pcm6;
+
+	u_int last_rrate;
+	u_int last_prate;
+	u_int last_pchan;
 };
 
 #ifdef AUICH_DEBUG
@@ -247,8 +255,11 @@ int  auich_match(struct device *, void *, void *);
 void auich_attach(struct device *, struct device *, void *);
 int  auich_intr(void *);
 
+int auich_activate(struct device *, int);
+
 struct cfattach auich_ca = {
-	sizeof(struct auich_softc), auich_match, auich_attach
+	sizeof(struct auich_softc), auich_match, auich_attach,
+	NULL, auich_activate
 };
 
 static const struct auich_devtype {
@@ -289,7 +300,7 @@ int auich_query_encoding(void *, struct audio_encoding *);
 int auich_set_params(void *, int, int, struct audio_params *,
     struct audio_params *);
 int auich_round_blocksize(void *, int);
-void auich_halt_pipe(struct auich_softc *, int);
+void auich_halt_pipe(struct auich_softc *, int, struct auich_ring *);
 int auich_halt_output(void *);
 int auich_halt_input(void *);
 int auich_getdev(void *, struct audio_device *);
@@ -312,7 +323,7 @@ int auich_allocmem(struct auich_softc *, size_t, size_t, struct auich_dma *);
 int auich_freemem(struct auich_softc *, struct auich_dma *);
 void auich_get_default_params(void *, int, struct audio_params *);
 
-void auich_powerhook(int, void *);
+int auich_resume(struct auich_softc *);
 
 struct audio_hw_if auich_hw_if = {
 	auich_open,
@@ -431,8 +442,10 @@ auich_attach(parent, self, aux)
 		}
 	}
 	sc->dmat = pa->pa_dmat;
+	sc->pci_id = pa->pa_id;
 
 	if (pci_intr_map(pa, &ih)) {
+		printf(": can't map interrupt\n");
 		bus_space_unmap(sc->iot, sc->aud_ioh, aud_size);
 		bus_space_unmap(sc->iot_mix, sc->mix_ioh, mix_size);
 		return;
@@ -535,13 +548,38 @@ auich_attach(parent, self, aux)
 	}
 	sc->codec_if->vtbl->unlock(sc->codec_if);
 
-	audio_attach_mi(&auich_hw_if, sc, &sc->sc_dev);
+	sc->audiodev = audio_attach_mi(&auich_hw_if, sc, &sc->sc_dev);
 
 	/* Watch for power changes */
-	sc->suspend = PWR_RESUME;
-	sc->powerhook = powerhook_establish(auich_powerhook, sc);
+	sc->suspend = DVACT_RESUME;
 
 	sc->sc_ac97rate = -1;
+}
+
+int
+auich_activate(struct device *self, int act)
+{
+	struct auich_softc *sc = (struct auich_softc *)self;
+	int rv = 0;
+
+	switch (act) {
+	case DVACT_ACTIVATE:
+		break;
+	case DVACT_QUIESCE:
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_SUSPEND:
+		break;
+	case DVACT_RESUME:
+		auich_resume(sc);
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_DEACTIVATE:
+		if (sc->audiodev != NULL)
+			rv = config_deactivate(sc->audiodev);
+		break;
+	}
+	return (rv);
 }
 
 int
@@ -685,6 +723,8 @@ auich_query_encoding(v, aep)
 			aep->encoding = AUDIO_ENCODING_SLINEAR_LE;
 			aep->precision = 16;
 			aep->flags = 0;
+			aep->bps = 2;
+			aep->msb = 1;
 			return (0);
 		default:
 			return (EINVAL);
@@ -696,52 +736,55 @@ auich_query_encoding(v, aep)
 			aep->encoding = AUDIO_ENCODING_ULINEAR;
 			aep->precision = 8;
 			aep->flags = 0;
-			return (0);
+			break;
 		case 1:
 			strlcpy(aep->name, AudioEmulaw, sizeof aep->name);
 			aep->encoding = AUDIO_ENCODING_ULAW;
 			aep->precision = 8;
 			aep->flags = AUDIO_ENCODINGFLAG_EMULATED;
-			return (0);
+			break;
 		case 2:
 			strlcpy(aep->name, AudioEalaw, sizeof aep->name);
 			aep->encoding = AUDIO_ENCODING_ALAW;
 			aep->precision = 8;
 			aep->flags = AUDIO_ENCODINGFLAG_EMULATED;
-			return (0);
+			break;
 		case 3:
 			strlcpy(aep->name, AudioEslinear, sizeof aep->name);
 			aep->encoding = AUDIO_ENCODING_SLINEAR;
 			aep->precision = 8;
 			aep->flags = AUDIO_ENCODINGFLAG_EMULATED;
-			return (0);
+			break;
 		case 4:
 			strlcpy(aep->name, AudioEslinear_le, sizeof aep->name);
 			aep->encoding = AUDIO_ENCODING_SLINEAR_LE;
 			aep->precision = 16;
 			aep->flags = 0;
-			return (0);
+			break;
 		case 5:
 			strlcpy(aep->name, AudioEulinear_le, sizeof aep->name);
 			aep->encoding = AUDIO_ENCODING_ULINEAR_LE;
 			aep->precision = 16;
 			aep->flags = AUDIO_ENCODINGFLAG_EMULATED;
-			return (0);
+			break;
 		case 6:
 			strlcpy(aep->name, AudioEslinear_be, sizeof aep->name);
 			aep->encoding = AUDIO_ENCODING_SLINEAR_BE;
 			aep->precision = 16;
 			aep->flags = AUDIO_ENCODINGFLAG_EMULATED;
-			return (0);
+			break;
 		case 7:
 			strlcpy(aep->name, AudioEulinear_be, sizeof aep->name);
 			aep->encoding = AUDIO_ENCODING_ULINEAR_BE;
 			aep->precision = 16;
 			aep->flags = AUDIO_ENCODINGFLAG_EMULATED;
-			return (0);
+			break;
 		default:
 			return (EINVAL);
 		}
+		aep->bps = AUDIO_BPS(aep->precision);
+		aep->msb = 1;
+		return (0);
 	}
 }
 
@@ -960,12 +1003,16 @@ auich_set_params(v, setmode, usemode, play, rec)
 		default:
 			return (EINVAL);
 		}
+		play->bps = AUDIO_BPS(play->precision);
+		play->msb = 1;
 
 		orate = adj_rate = play->sample_rate;
 		if (sc->sc_ac97rate != 0)
 			adj_rate = orate * AUICH_FIXED_RATE / sc->sc_ac97rate;
 
 		play->sample_rate = adj_rate;
+		sc->last_prate = play->sample_rate;
+
 		error = ac97_set_rate(sc->codec_if,
 		    AC97_REG_PCM_LFE_DAC_RATE, &play->sample_rate);
 		if (error)
@@ -993,6 +1040,8 @@ auich_set_params(v, setmode, usemode, play, rec)
 		else if (play->channels == 6)
 			control |= sc->sc_pcm6;
 		bus_space_write_4(sc->iot, sc->aud_ioh, AUICH_GCTRL, control);
+
+		sc->last_pchan = play->channels;
 	}
 
 	if (setmode & AUMODE_RECORD) {
@@ -1145,11 +1194,14 @@ auich_set_params(v, setmode, usemode, play, rec)
 		default:
 			return (EINVAL);
 		}
+		rec->bps = AUDIO_BPS(rec->precision);
+		rec->msb = 1;
 
 		orate = rec->sample_rate;
 		if (sc->sc_ac97rate != 0)
 			rec->sample_rate = orate * AUICH_FIXED_RATE /
 			    sc->sc_ac97rate;
+		sc->last_rrate = rec->sample_rate;
 		error = ac97_set_rate(sc->codec_if, AC97_REG_PCM_LR_ADC_RATE,
 		    &rec->sample_rate);
 		if (error)
@@ -1170,7 +1222,7 @@ auich_round_blocksize(v, blk)
 
 
 void
-auich_halt_pipe(struct auich_softc *sc, int pipe)
+auich_halt_pipe(struct auich_softc *sc, int pipe, struct auich_ring *ring)
 {
 	int i;
 	uint32_t sts;
@@ -1195,6 +1247,8 @@ auich_halt_pipe(struct auich_softc *sc, int pipe)
 	if (i > 0)
 		DPRINTF(AUICH_DEBUG_DMA,
 		    ("auich_halt_pipe: halt took %d cycles\n", i));
+
+	ring->running = 0;
 }
 
 
@@ -1206,7 +1260,7 @@ auich_halt_output(v)
 
 	DPRINTF(AUICH_DEBUG_DMA, ("%s: halt_output\n", sc->sc_dev.dv_xname));
 
-	auich_halt_pipe(sc, AUICH_PCMO);
+	auich_halt_pipe(sc, AUICH_PCMO, &sc->pcmo);
 
 	sc->pcmo.intr = NULL;
 
@@ -1224,8 +1278,8 @@ auich_halt_input(v)
 
 	/* XXX halt both unless known otherwise */
 
-	auich_halt_pipe(sc, AUICH_PCMI);
-	auich_halt_pipe(sc, AUICH_MICI);
+	auich_halt_pipe(sc, AUICH_PCMI, &sc->pcmi);
+	auich_halt_pipe(sc, AUICH_MICI, &sc->mici);
 
 	sc->pcmi.intr = NULL;
 
@@ -1518,6 +1572,8 @@ auich_trigger_pipe(struct auich_softc *sc, int pipe, struct auich_ring *ring)
 	    (qptr - 1) & AUICH_LVI_MASK);
 	bus_space_write_1(sc->iot, sc->aud_ioh, pipe + AUICH_CTRL,
 	    AUICH_IOCE | AUICH_FEIE | AUICH_RPBM);
+
+	ring->running = 1;
 }
 
 void
@@ -1548,6 +1604,10 @@ auich_intr_pipe(struct auich_softc *sc, int pipe, struct auich_ring *ring)
 			ring->intr(ring->arg);
 		else
 			printf("auich_intr: got progress with intr==NULL\n");
+
+		ring->ap += blksize;
+		if (ring->ap >= ring->size)
+			ring->ap = 0;
 	}
 	ring->qptr = qptr;
 
@@ -1583,7 +1643,7 @@ auich_trigger_output(v, start, end, blksize, intr, arg, param)
 		return -1;
 
 	size = (size_t)((caddr_t)end - (caddr_t)start);
-
+	sc->pcmo.size = size;
 	sc->pcmo.intr = intr;
 	sc->pcmo.arg = arg;
 
@@ -1631,7 +1691,7 @@ auich_trigger_input(v, start, end, blksize, intr, arg, param)
 		return -1;
 
 	size = (size_t)((caddr_t)end - (caddr_t)start);
-
+	sc->pcmi.size = size;
 	sc->pcmi.intr = intr;
 	sc->pcmi.arg = arg;
 
@@ -1775,37 +1835,22 @@ auich_alloc_cdata(struct auich_softc *sc)
 	return error;
 }
 
-
-void
-auich_powerhook(why, self)
-	int why;
-	void *self;
+int
+auich_resume(struct auich_softc *sc)
 {
-	struct auich_softc *sc = (struct auich_softc *)self;
-
-	if (why != PWR_RESUME) {
-		/* Power down */
-		DPRINTF(1, ("auich: power down\n"));
-		sc->suspend = why;
-		auich_read_codec(sc, AC97_REG_EXT_AUDIO_CTRL, &sc->ext_ctrl);
-
-	} else {
-		/* Wake up */
-		DPRINTF(1, ("auich: power resume\n"));
-		if (sc->suspend == PWR_RESUME) {
-			printf("%s: resume without suspend?\n",
-			    sc->sc_dev.dv_xname);
-			sc->suspend = why;
-			return;
-		}
-		sc->suspend = why;
-		auich_reset_codec(sc);
-		DELAY(1000);
-		(sc->codec_if->vtbl->restore_ports)(sc->codec_if);
-		auich_write_codec(sc, AC97_REG_EXT_AUDIO_CTRL, sc->ext_ctrl);
+	/* SiS 7012 needs special handling */
+	if (PCI_VENDOR(sc->pci_id) == PCI_VENDOR_SIS &&
+	    PCI_PRODUCT(sc->pci_id) == PCI_PRODUCT_SIS_7012_ACA) {
+		/* un-mute output */
+		bus_space_write_4(sc->iot, sc->aud_ioh, ICH_SIS_NV_CTL,
+		    bus_space_read_4(sc->iot, sc->aud_ioh, ICH_SIS_NV_CTL) |
+		    ICH_SIS_CTL_UNMUTE);
 	}
-}
 
+	ac97_resume(&sc->host_if, sc->codec_if);
+
+	return (0);
+}
 
 /* -------------------------------------------------------------------- */
 /* Calibrate card (some boards are overclocked and need scaling) */
@@ -1918,8 +1963,8 @@ auich_calibrate(struct auich_softc *sc)
 			    sc->sc_dev.dv_xname, wait_us, sts,
 			    AUICH_ISTS_BITS, civ);
 			/* reset and clean up*/
-			auich_halt_pipe(sc, AUICH_PCMI);
-			auich_halt_pipe(sc, AUICH_MICI);
+			auich_halt_pipe(sc, AUICH_PCMI, &sc->pcmi);
+			auich_halt_pipe(sc, AUICH_MICI, &sc->mici);
 			auich_freem(sc, temp_buffer, M_DEVBUF);
 			/* return default sample rate */
 			return (ac97rate);
@@ -1931,8 +1976,8 @@ auich_calibrate(struct auich_softc *sc)
 		sc->sc_dev.dv_xname, wait_us, sts, AUICH_ISTS_BITS, civ));
 
 	/* reset and clean up */
-	auich_halt_pipe(sc, AUICH_PCMI);
-	auich_halt_pipe(sc, AUICH_MICI);
+	auich_halt_pipe(sc, AUICH_PCMI, &sc->pcmi);
+	auich_halt_pipe(sc, AUICH_MICI, &sc->mici);
 	auich_freem(sc, temp_buffer, M_DEVBUF);
 
 #ifdef AUICH_DEBUG

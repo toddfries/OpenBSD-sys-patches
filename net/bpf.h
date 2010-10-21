@@ -1,4 +1,4 @@
-/*	$OpenBSD: bpf.h,v 1.38 2008/12/22 12:13:13 michele Exp $	*/
+/*	$OpenBSD: bpf.h,v 1.40 2010/09/21 04:06:37 henning Exp $	*/
 /*	$NetBSD: bpf.h,v 1.15 1996/12/13 07:57:33 mikel Exp $	*/
 
 /*
@@ -179,7 +179,6 @@ struct bpf_hdr {
 #define DLT_RAW			14	/* raw IP */
 #define DLT_SLIP_BSDOS		15	/* BSD/OS Serial Line IP */
 #define DLT_PPP_BSDOS		16	/* BSD/OS Point-to-point Protocol */
-#define DLT_OLD_PFLOG		17	/* Packet filter logging, old (XXX remove?) */
 #define DLT_PFSYNC		18	/* Packet filter state syncing */
 #define DLT_PPP_ETHER		51	/* PPP over Ethernet; session only w/o ether header */
 #define DLT_IEEE802_11		105	/* IEEE 802.11 wireless */
@@ -274,6 +273,7 @@ void	 bpf_mtap(caddr_t, struct mbuf *, u_int);
 void	 bpf_mtap_hdr(caddr_t, caddr_t, u_int, struct mbuf *, u_int);
 void	 bpf_mtap_af(caddr_t, u_int32_t, struct mbuf *, u_int);
 void	 bpf_mtap_ether(caddr_t, struct mbuf *, u_int);
+void	 bpf_mtap_pflog(caddr_t, caddr_t, struct mbuf *);
 void	 bpfattach(caddr_t *, struct ifnet *, u_int, u_int);
 void	 bpfdetach(struct ifnet *);
 void	 bpfilterattach(int);

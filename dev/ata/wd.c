@@ -1,4 +1,4 @@
-/*	$OpenBSD: wd.c,v 1.84 2010/06/07 20:32:45 jsg Exp $ */
+/*	$OpenBSD: wd.c,v 1.95 2010/09/22 01:18:57 matthew Exp $ */
 /*	$NetBSD: wd.c,v 1.193 1999/02/28 17:15:27 explorer Exp $ */
 
 /*
@@ -12,11 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *	notice, this list of conditions and the following disclaimer in the
  *	documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *	must display the following acknowledgement:
- *  This product includes software developed by Manuel Bouyer.
- * 4. The name of the author may not be used to endorse or promote products
- *	derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -121,7 +116,7 @@ struct wd_softc {
 	/* General disk infos */
 	struct device sc_dev;
 	struct disk sc_dk;
-	struct bufq	*sc_bufq;
+	struct bufq sc_bufq;
 
 	/* IDE disk soft states */
 	struct ata_bio sc_wdc_bio; /* current transfer */
@@ -182,15 +177,13 @@ void  wd_flushcache(struct wd_softc *, int);
 void  wd_standby(struct wd_softc *, int);
 void  wd_shutdown(void *);
 
-struct dkdriver wddkdriver = { wdstrategy };
-
 /* XXX: these should go elsewhere */
 cdev_decl(wd);
 bdev_decl(wd);
 
 #define wdlock(wd)  disk_lock(&(wd)->sc_dk)
 #define wdunlock(wd)  disk_unlock(&(wd)->sc_dk)
-#define wdlookup(unit) (struct wd_softc *)device_lookup(&wd_cd, (unit))
+#define wdlookup(unit) (struct wd_softc *)disk_lookup(&wd_cd, (unit))
 
 
 int
@@ -365,18 +358,19 @@ wdattach(struct device *parent, struct device *self, void *aux)
 	}
 
 	/*
-	 * Initialize and attach the disk structure.
+	 * Initialize disk structures.
 	 */
-	wd->sc_dk.dk_driver = &wddkdriver;
 	wd->sc_dk.dk_name = wd->sc_dev.dv_xname;
-	wd->sc_bufq = bufq_init(BUFQ_DEFAULT);
-	disk_attach(&wd->sc_dk);
-	wd->sc_wdc_bio.lp = wd->sc_dk.dk_label;
+	bufq_init(&wd->sc_bufq, BUFQ_DEFAULT);
 	wd->sc_sdhook = shutdownhook_establish(wd_shutdown, wd);
 	if (wd->sc_sdhook == NULL)
 		printf("%s: WARNING: unable to establish shutdown hook\n",
 		    wd->sc_dev.dv_xname);
 	timeout_set(&wd->sc_restart_timeout, wdrestart, wd);
+
+	/* Attach disk. */
+	disk_attach(&wd->sc_dev, &wd->sc_dk);
+	wd->sc_wdc_bio.lp = wd->sc_dk.dk_label;
 }
 
 int
@@ -386,17 +380,21 @@ wdactivate(struct device *self, int act)
 	int rv = 0;
 
 	switch (act) {
-	case DVACT_ACTIVATE:
-		break;
-
-	case DVACT_DEACTIVATE:
-		/*
-		* Nothing to do; we key off the device's DVF_ACTIVATE.
-		*/
-		break;
 	case DVACT_SUSPEND:
 		wd_flushcache(wd, AT_POLL);
 		wd_standby(wd, AT_POLL);
+		break;
+	case DVACT_RESUME:
+		/*
+		 * Do two resets separated by a small delay. The
+		 * first wakes the controller, the second resets
+		 * the channel
+		 */
+		wdc_disable_intr(wd->drvp->chnl_softc);
+		wdc_reset_channel(wd->drvp);
+		delay(10000);
+		wdc_reset_channel(wd->drvp);
+		wdc_enable_intr(wd->drvp->chnl_softc);
 		break;
 	}
 	return (rv);
@@ -411,7 +409,7 @@ wddetach(struct device *self, int flags)
 
 	/* Remove unprocessed buffers from queue */
 	s = splbio();
-	while ((bp = BUFQ_DEQUEUE(sc->sc_bufq)) != NULL) {
+	while ((bp = bufq_dequeue(&sc->sc_bufq)) != NULL) {
 		bp->b_error = ENXIO;
 		bp->b_flags |= B_ERROR;
 		biodone(bp);
@@ -433,7 +431,7 @@ wddetach(struct device *self, int flags)
 		shutdownhook_disestablish(sc->sc_sdhook);
 
 	/* Detach disk. */
-	bufq_destroy(sc->sc_bufq);
+	bufq_destroy(&sc->sc_bufq);
 	disk_detach(&sc->sc_dk);
 
 	return (0);
@@ -484,7 +482,7 @@ wdstrategy(struct buf *bp)
 	    (wd->sc_flags & (WDF_WLABEL|WDF_LABELLING)) != 0) <= 0)
 		goto done;
 	/* Queue transfer on drive, activate drive and controller if idle. */
-	BUFQ_QUEUE(wd->sc_bufq, bp);
+	bufq_queue(&wd->sc_bufq, bp);
 	s = splbio();
 	wdstart(wd);
 	splx(s);
@@ -516,7 +514,7 @@ wdstart(void *arg)
 	while (wd->openings > 0) {
 
 		/* Is there a buf for us ? */
-		if ((bp = BUFQ_DEQUEUE(wd->sc_bufq)) == NULL)
+		if ((bp = bufq_dequeue(&wd->sc_bufq)) == NULL)
 			return;
 		/*
 		 * Make the command. First lock the device
@@ -661,7 +659,7 @@ wdread(dev_t dev, struct uio *uio, int flags)
 {
 
 	WDCDEBUG_PRINT(("wdread\n"), DEBUG_XFERS);
-	return (physio(wdstrategy, NULL, dev, B_READ, minphys, uio));
+	return (physio(wdstrategy, dev, B_READ, minphys, uio));
 }
 
 int
@@ -669,7 +667,7 @@ wdwrite(dev_t dev, struct uio *uio, int flags)
 {
 
 	WDCDEBUG_PRINT(("wdwrite\n"), DEBUG_XFERS);
-	return (physio(wdstrategy, NULL, dev, B_WRITE, minphys, uio));
+	return (physio(wdstrategy, dev, B_WRITE, minphys, uio));
 }
 
 int
@@ -940,8 +938,7 @@ wdioctl(dev_t dev, u_long xfer, caddr_t addr, int flag, struct proc *p)
 		auio.uio_offset =
 			fop->df_startblk * wd->sc_dk.dk_label->d_secsize;
 		auio.uio_procp = p;
-		error = physio(wdformat, NULL, dev, B_WRITE, minphys,
-		    &auio);
+		error = physio(wdformat, dev, B_WRITE, minphys, &auio);
 		fop->df_count -= auio.uio_resid;
 		fop->df_reg[0] = wdc->sc_status;
 		fop->df_reg[1] = wdc->sc_error;
@@ -1217,7 +1214,7 @@ wd_standby(struct wd_softc *wd, int flags)
 	} else {
 		wdc_c.flags = AT_WAIT;
 	}
-	wdc_c.timeout = 1000; /* 1s timeout */
+	wdc_c.timeout = 30000; /* 30s timeout */
 	if (wdc_exec_command(wd->drvp, &wdc_c) != WDC_COMPLETE) {
 		printf("%s: standby command didn't complete\n",
 		    wd->sc_dev.dv_xname);

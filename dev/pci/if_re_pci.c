@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_re_pci.c,v 1.27 2009/11/26 00:12:31 kettenis Exp $	*/
+/*	$OpenBSD: if_re_pci.c,v 1.30 2010/09/07 16:21:45 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2005 Peter Valchev <pvalchev@openbsd.org>
@@ -226,10 +226,6 @@ re_pci_detach(struct device *self, int flags)
 	ether_ifdetach(ifp);
 	if_detach(ifp);
 
-	/* No more hooks */
-	if (sc->sc_pwrhook != NULL)
-		powerhook_disestablish(sc->sc_pwrhook);
-
 	/* Disable interrupts */
 	if (psc->sc_ih != NULL)
 		pci_intr_disestablish(psc->sc_pc, psc->sc_ih);
@@ -247,12 +243,14 @@ re_pci_activate(struct device *self, int act)
 	struct rl_softc		*sc = &psc->sc_rl;
 	struct ifnet 		*ifp = &sc->sc_arpcom.ac_if;
 
-	switch(act) {
+	switch (act) {
 	case DVACT_SUSPEND:
+		if (ifp->if_flags & IFF_RUNNING)
+			re_stop(ifp);
 		break;
 	case DVACT_RESUME:
 		re_reset(sc);
-		if (ifp->if_flags & IFF_RUNNING)
+		if (ifp->if_flags & IFF_UP)
 			re_init(ifp);
 		break;
 	}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: re.c,v 1.119 2010/05/19 15:27:35 oga Exp $	*/
+/*	$OpenBSD: re.c,v 1.129 2010/10/05 08:57:34 mikeb Exp $	*/
 /*	$FreeBSD: if_re.c,v 1.31 2004/09/04 07:54:05 ru Exp $	*/
 /*
  * Copyright (c) 1997, 1998-2003
@@ -233,6 +233,7 @@ static const struct re_revision {
 	{ RL_HWREV_8168CP,	"RTL8168CP/8111CP" },
 	{ RL_HWREV_8168D,	"RTL8168D/8111D" },
 	{ RL_HWREV_8168DP,      "RTL8168DP/8111DP" },
+	{ RL_HWREV_8168E,       "RTL8168E/8111E" },
 	{ RL_HWREV_8169,	"RTL8169" },
 	{ RL_HWREV_8169_8110SB,	"RTL8169/8110SB" },
 	{ RL_HWREV_8169_8110SBL, "RTL8169SBL" },
@@ -352,19 +353,20 @@ re_gmii_readreg(struct device *self, int phy, int reg)
 	}
 
 	CSR_WRITE_4(sc, RL_PHYAR, reg << 16);
-	DELAY(1000);
 
-	for (i = 0; i < RL_TIMEOUT; i++) {
+	for (i = 0; i < RL_PHY_TIMEOUT; i++) {
 		rval = CSR_READ_4(sc, RL_PHYAR);
 		if (rval & RL_PHYAR_BUSY)
 			break;
-		DELAY(100);
+		DELAY(25);
 	}
 
-	if (i == RL_TIMEOUT) {
+	if (i == RL_PHY_TIMEOUT) {
 		printf ("%s: PHY read failed\n", sc->sc_dev.dv_xname);
 		return (0);
 	}
+
+	DELAY(20);
 
 	return (rval & RL_PHYAR_PHYDATA);
 }
@@ -378,17 +380,18 @@ re_gmii_writereg(struct device *dev, int phy, int reg, int data)
 
 	CSR_WRITE_4(sc, RL_PHYAR, (reg << 16) |
 	    (data & RL_PHYAR_PHYDATA) | RL_PHYAR_BUSY);
-	DELAY(1000);
 
-	for (i = 0; i < RL_TIMEOUT; i++) {
+	for (i = 0; i < RL_PHY_TIMEOUT; i++) {
 		rval = CSR_READ_4(sc, RL_PHYAR);
 		if (!(rval & RL_PHYAR_BUSY))
 			break;
-		DELAY(100);
+		DELAY(25);
 	}
 
-	if (i == RL_TIMEOUT)
+	if (i == RL_PHY_TIMEOUT)
 		printf ("%s: PHY write failed\n", sc->sc_dev.dv_xname);
+
+	DELAY(20);
 }
 
 int
@@ -770,7 +773,7 @@ done:
 	sc->rl_testmode = 0;
 	sc->rl_flags &= ~RL_FLAG_LINK;
 	ifp->if_flags &= ~IFF_PROMISC;
-	re_stop(ifp, 1);
+	re_stop(ifp);
 	if (m0 != NULL)
 		m_freem(m0);
 	DPRINTF(("leaving re_diag\n"));
@@ -855,6 +858,12 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 		 * RTL8111C/CP : supports up to 9KB jumbo frame.
 		 */
 		sc->rl_flags |= RL_FLAG_NOJUMBO;
+		break;
+	case RL_HWREV_8168E:
+		sc->rl_flags |= RL_FLAG_INVMAR | RL_FLAG_PHYWAKE |
+		    RL_FLAG_PHYWAKE_PM | RL_FLAG_PAR | RL_FLAG_DESCV2 |
+		    RL_FLAG_MACSTAT | RL_FLAG_HWIM | RL_FLAG_CMDSTOP |
+		    RL_FLAG_AUTOPAD | RL_FLAG_NOJUMBO;
 		break;
 	case RL_HWREV_8169_8110SB:
 	case RL_HWREV_8169_8110SBL:
@@ -1095,7 +1104,6 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 	ifp->if_ioctl = re_ioctl;
 	ifp->if_start = re_start;
 	ifp->if_watchdog = re_watchdog;
-	ifp->if_init = re_init;
 	if ((sc->rl_flags & RL_FLAG_NOJUMBO) == 0)
 		ifp->if_hardmtu = RL_JUMBO_MTU;
 	IFQ_SET_MAXLEN(&ifp->if_snd, RL_TX_QLEN);
@@ -1113,6 +1121,8 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 	timeout_set(&sc->timer_handle, re_tick, sc);
 
 	/* Take PHY out of power down mode. */
+	if (sc->rl_flags & RL_FLAG_PHYWAKE_PM)
+		CSR_WRITE_1(sc, RL_PMCH, CSR_READ_1(sc, RL_PMCH) | 0x80);
 	if (sc->rl_flags & RL_FLAG_PHYWAKE) {
 		re_gmii_writereg((struct device *)sc, 1, 0x1f, 0);
 		re_gmii_writereg((struct device *)sc, 1, 0x0e, 0);
@@ -1931,7 +1941,7 @@ re_init(struct ifnet *ifp)
 	/*
 	 * Cancel pending I/O and free all RX/TX buffers.
 	 */
-	re_stop(ifp, 0);
+	re_stop(ifp);
 
 	/*
 	 * Enable C+ RX and TX mode, as well as RX checksum offload.
@@ -2032,8 +2042,10 @@ re_init(struct ifnet *ifp)
 	if (sc->sc_hwrev != RL_HWREV_8139CPLUS)
 		CSR_WRITE_2(sc, RL_MAXRXPKTLEN, 16383);
 
-	if (sc->rl_testmode)
+	if (sc->rl_testmode) {
+		splx(s);
 		return (0);
+	}
 
 	mii_mediachg(&sc->sc_mii);
 
@@ -2107,7 +2119,7 @@ re_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 				re_init(ifp);
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
-				re_stop(ifp, 1);
+				re_stop(ifp);
 		}
 		break;
 	case SIOCGIFMEDIA:
@@ -2152,7 +2164,7 @@ re_watchdog(struct ifnet *ifp)
  * RX and TX lists.
  */
 void
-re_stop(struct ifnet *ifp, int disable)
+re_stop(struct ifnet *ifp)
 {
 	struct rl_softc *sc;
 	int	i;
@@ -2290,7 +2302,7 @@ re_config_imtype(struct rl_softc *sc, int imtype)
 		break;
 
 	default:
-		panic("%s: unknown imtype %d\n",
+		panic("%s: unknown imtype %d",
 		      sc->sc_dev.dv_xname, imtype);
 	}
 }
@@ -2323,7 +2335,7 @@ re_setup_intr(struct rl_softc *sc, int enable_intrs, int imtype)
 		break;
 
 	default:
-		panic("%s: unknown imtype %d\n",
+		panic("%s: unknown imtype %d",
 		      sc->sc_dev.dv_xname, imtype);
 	}
 }

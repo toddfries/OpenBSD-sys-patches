@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntfs_vfsops.c,v 1.15 2009/08/13 16:00:53 jasper Exp $	*/
+/*	$OpenBSD: ntfs_vfsops.c,v 1.23 2010/09/10 16:34:09 thib Exp $	*/
 /*	$NetBSD: ntfs_vfsops.c,v 1.7 2003/04/24 07:50:19 christos Exp $	*/
 
 /*-
@@ -335,7 +335,9 @@ ntfs_mountfs(devvp, mp, argsp, p)
 	ncount = vcount(devvp);
 	if (ncount > 1 && devvp != rootvp)
 		return (EBUSY);
+	vn_lock(devvp, LK_EXCLUSIVE | LK_RETRY, p);
 	error = vinvalbuf(devvp, V_SAVE, p->p_ucred, p, 0, 0);
+	VOP_UNLOCK(devvp, 0, p);
 	if (error)
 		return (error);
 
@@ -434,11 +436,10 @@ ntfs_mountfs(devvp, mp, argsp, p)
 			goto out1;
 
 		/* Count valid entries */
-		for(num=0;;num++) {
+		for(num = 0; ; num++) {
 			error = ntfs_readattr(ntmp, VTONT(vp),
-					NTFS_A_DATA, NULL,
-					num * sizeof(ad), sizeof(ad),
-					&ad, NULL);
+			    NTFS_A_DATA, NULL, num * sizeof(ad), sizeof(ad),
+			    &ad, NULL);
 			if (error)
 				goto out1;
 			if (ad.ad_name[0] == 0)
@@ -446,18 +447,16 @@ ntfs_mountfs(devvp, mp, argsp, p)
 		}
 
 		/* Alloc memory for attribute definitions */
-		ntmp->ntm_ad = (struct ntvattrdef *) malloc(
-			num * sizeof(struct ntvattrdef),
-			M_NTFSMNT, M_WAITOK);
+		ntmp->ntm_ad = malloc(num * sizeof(struct ntvattrdef),
+		    M_NTFSMNT, M_WAITOK);
 
 		ntmp->ntm_adnum = num;
 
 		/* Read them and translate */
-		for(i=0;i<num;i++){
+		for(i = 0; i < num; i++){
 			error = ntfs_readattr(ntmp, VTONT(vp),
-					NTFS_A_DATA, NULL,
-					i * sizeof(ad), sizeof(ad),
-					&ad, NULL);
+			    NTFS_A_DATA, NULL, i * sizeof(ad), sizeof(ad),
+			    &ad, NULL);
 			if (error)
 				goto out1;
 			j = 0;
@@ -472,7 +471,7 @@ ntfs_mountfs(devvp, mp, argsp, p)
 	}
 
 	mp->mnt_stat.f_fsid.val[0] = dev;
-	mp->mnt_stat.f_fsid.val[1] = makefstype(MOUNT_NTFS);
+	mp->mnt_stat.f_fsid.val[1] = mp->mnt_vfc->vfc_typenum;
 	mp->mnt_maxsymlinklen = 0;
 	mp->mnt_flag |= MNT_LOCAL;
 	devvp->v_specmountpoint = mp;
@@ -499,9 +498,9 @@ out:
 	}
 
 	/* lock the device vnode before calling VOP_CLOSE() */
-	VN_LOCK(devvp, LK_EXCLUSIVE | LK_RETRY, p);
+	vn_lock(devvp, LK_EXCLUSIVE | LK_RETRY, p);
 	(void)VOP_CLOSE(devvp, ronly ? FREAD : FREAD|FWRITE, NOCRED, p);
-	VOP__UNLOCK(devvp, 0, p);
+	VOP_UNLOCK(devvp, 0, p);
 	
 	return (error);
 }
@@ -561,15 +560,14 @@ ntfs_unmount(
 	if (ntmp->ntm_devvp->v_type != VBAD)
 		ntmp->ntm_devvp->v_specmountpoint = NULL;
 
-	vinvalbuf(ntmp->ntm_devvp, V_SAVE, NOCRED, p, 0, 0);
-
 	/* lock the device vnode before calling VOP_CLOSE() */
 	VOP_LOCK(ntmp->ntm_devvp, LK_EXCLUSIVE | LK_RETRY, p);
+	vinvalbuf(ntmp->ntm_devvp, V_SAVE, NOCRED, p, 0, 0);
+
 	error = VOP_CLOSE(ntmp->ntm_devvp, ronly ? FREAD : FREAD|FWRITE,
 		NOCRED, p);
-	VOP__UNLOCK(ntmp->ntm_devvp, 0, p);
 
-	vrele(ntmp->ntm_devvp);
+	vput(ntmp->ntm_devvp);
 
 	/* free the toupper table, if this has been last mounted ntfs volume */
 	ntfs_toupper_unuse(p);
@@ -633,7 +631,7 @@ ntfs_calccfree(
 
 	bmsize = VTOF(vp)->f_size;
 
-	tmp = (u_int8_t *) malloc(bmsize, M_TEMP, M_WAITOK);
+	tmp = malloc(bmsize, M_TEMP, M_WAITOK);
 
 	error = ntfs_readattr(ntmp, VTONT(vp), NTFS_A_DATA, NULL,
 			       0, bmsize, tmp, NULL);
@@ -827,7 +825,7 @@ ntfs_vgetex(
 
 	if (FTOV(fp)) {
 		/* vget() returns error if the vnode has been recycled */
-		if (VGET(FTOV(fp), lkflags, p) == 0) {
+		if (vget(FTOV(fp), lkflags, p) == 0) {
 			*vpp = FTOV(fp);
 			return (0);
 		}
@@ -850,7 +848,7 @@ ntfs_vgetex(
 		vp->v_flag |= VROOT;
 
 	if (lkflags & LK_TYPE_MASK) {
-		error = VN_LOCK(vp, lkflags, p);
+		error = vn_lock(vp, lkflags, p);
 		if (error) {
 			vput(vp);
 			return (error);

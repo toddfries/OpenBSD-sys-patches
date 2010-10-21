@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_carp.c,v 1.175 2010/04/25 17:38:53 mpf Exp $	*/
+/*	$OpenBSD: ip_carp.c,v 1.178 2010/08/26 13:28:15 claudio Exp $	*/
 
 /*
  * Copyright (c) 2002 Michael Shalayeff. All rights reserved.
@@ -320,9 +320,10 @@ carp_hmac_prepare_ctx(struct carp_vhost_entry *vhe, u_int8_t ctx)
 		last = cur;
 		cur.s_addr = 0xffffffff;
 		TAILQ_FOREACH(ifa, &sc->sc_if.if_addrlist, ifa_list) {
+			if (ifa->ifa_addr->sa_family != AF_INET)
+				continue;
 			in.s_addr = ifatoia(ifa)->ia_addr.sin_addr.s_addr;
-			if (ifa->ifa_addr->sa_family == AF_INET &&
-			    ntohl(in.s_addr) > ntohl(last.s_addr) &&
+			if (ntohl(in.s_addr) > ntohl(last.s_addr) &&
 			    ntohl(in.s_addr) < ntohl(cur.s_addr)) {
 				cur.s_addr = in.s_addr;
 				found++;
@@ -340,14 +341,15 @@ carp_hmac_prepare_ctx(struct carp_vhost_entry *vhe, u_int8_t ctx)
 		last6 = cur6;
 		memset(&cur6, 0xff, sizeof(cur6));
 		TAILQ_FOREACH(ifa, &sc->sc_if.if_addrlist, ifa_list) {
+			if (ifa->ifa_addr->sa_family != AF_INET6)
+				continue;
 			in6 = ifatoia6(ifa)->ia_addr.sin6_addr;
 			if (IN6_IS_SCOPE_EMBED(&in6)) {
 				if (ctx == HMAC_NOV6LL)
 					continue;
 				in6.s6_addr16[1] = 0;
 			}
-			if (ifa->ifa_addr->sa_family == AF_INET6 &&
-			    memcmp(&in6, &last6, sizeof(in6)) > 0 &&
+			if (memcmp(&in6, &last6, sizeof(in6)) > 0 &&
 			    memcmp(&in6, &cur6, sizeof(in6)) < 0) {
 				cur6 = in6;
 				found++;
@@ -392,7 +394,7 @@ carp_hmac_verify(struct carp_vhost_entry *vhe, u_int32_t counter[2],
 
 	for (i = 0; i < HMAC_MAX; i++) { 
 		carp_hmac_generate(vhe, counter, md2, i);
-		if (!bcmp(md, md2, sizeof(md2)))
+		if (!timingsafe_bcmp(md, md2, sizeof(md2)))
 			return (0);
 	}
 	return (1);
@@ -1245,8 +1247,8 @@ carp_send_ad(void *v)
 			    &ip6->ip6_src, sizeof(struct in6_addr));
 		/* set the multicast destination */
 
-		ip6->ip6_dst.s6_addr8[0] = 0xff;
-		ip6->ip6_dst.s6_addr8[1] = 0x02;
+		ip6->ip6_dst.s6_addr16[0] = htons(0xff02);
+		ip6->ip6_dst.s6_addr16[1] = htons(sc->sc_carpdev->if_index);
 		ip6->ip6_dst.s6_addr8[15] = 0x12;
 
 		ch_ptr = (void *)ip6 + sizeof(*ip6);

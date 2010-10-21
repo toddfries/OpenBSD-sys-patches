@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_dc_pci.c,v 1.65 2009/10/15 17:54:56 deraadt Exp $	*/
+/*	$OpenBSD: if_dc_pci.c,v 1.67 2010/08/27 19:54:03 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -574,5 +574,6 @@ dc_pci_detach(struct device *self, int flags)
 }
 
 struct cfattach dc_pci_ca = {
-	sizeof(struct dc_softc), dc_pci_match, dc_pci_attach, dc_pci_detach
+	sizeof(struct dc_softc), dc_pci_match, dc_pci_attach, dc_pci_detach,
+	dc_activate
 };

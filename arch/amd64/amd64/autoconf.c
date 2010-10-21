@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.31 2010/04/20 23:12:01 phessler Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.36 2010/09/07 16:22:48 mikeb Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.1 2003/04/26 18:39:26 fvdl Exp $	*/
 
 /*-
@@ -100,6 +100,9 @@ void		viac3_rnd(void *);
 #ifdef CRYPTO
 void		viac3_crypto_setup(void);
 extern int	amd64_has_xcrypt;
+
+void		aesni_setup(void);
+extern int	amd64_has_aesni;
 #endif
 
 /*
@@ -113,8 +116,6 @@ cpu_configure(void)
 #endif
 
 	x86_64_proc0_tss_ldt_init();
-
-	startrtclock();
 
 	if (config_rootfound("mainbus", NULL) == NULL)
 		panic("configure: mainbus not configured");
@@ -148,6 +149,9 @@ cpu_configure(void)
 	 */
 	if (amd64_has_xcrypt)
 		viac3_crypto_setup();
+
+	if (amd64_has_aesni)
+		aesni_setup();
 #endif
 }
 

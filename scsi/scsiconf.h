@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsiconf.h,v 1.127 2010/06/15 04:11:34 dlg Exp $	*/
+/*	$OpenBSD: scsiconf.h,v 1.141 2010/10/12 00:53:32 krw Exp $	*/
 /*	$NetBSD: scsiconf.h,v 1.35 1997/04/02 02:29:38 mycroft Exp $	*/
 
 /*
@@ -266,8 +266,6 @@ void		devid_free(struct devid *);
  *
  * each adapter type has a scsi_adapter struct. This describes the adapter and
  *    identifies routines that can be called to use the adapter.
- * each device type has a scsi_device struct. This describes the device and
- *    identifies routines that can be called to use the device.
  * each existing device position (scsibus + target + lun)
  *    can be described by a scsi_link struct.
  *    Only scsi positions that actually have devices, have a scsi_link
@@ -311,42 +309,17 @@ struct scsi_adapter {
 	int		(*ioctl)(struct scsi_link *, u_long, caddr_t, int);
 };
 
-/*
- * These entry points are called by the low-end drivers to get services from
- * whatever high-end drivers they are attached to.  Each device type has one
- * of these statically allocated.
- */
-struct scsi_device {
-	int	(*err_handler)(struct scsi_xfer *);
-			/* returns -1 to say err processing done */
-	void	(*start)(void *);
-
-	int	(*async)(void);
-	void	(*done)(struct scsi_xfer *);
-};
-
-/*
- *
- */
-
-struct scsi_runq_entry {
-	TAILQ_ENTRY(scsi_runq_entry) e;
-	u_int state;
-#define RUNQ_IDLE	0
-#define RUNQ_LINKQ	1
-#define RUNQ_POOLQ	3
-};
-TAILQ_HEAD(scsi_runq, scsi_runq_entry);
-
 struct scsi_iopool;
 
 struct scsi_iohandler {
-	struct scsi_runq_entry entry; /* must be first */
+	TAILQ_ENTRY(scsi_iohandler) q_entry;
+	u_int q_state;
 
 	struct scsi_iopool *pool;
 	void (*handler)(void *, void *);
 	void *cookie;
 };
+TAILQ_HEAD(scsi_runq, scsi_iohandler);
 
 struct scsi_iopool {
 	/* access to the IOs */
@@ -362,10 +335,6 @@ struct scsi_iopool {
 	struct mutex mtx;
 };
 
-/*
- *
- */
-
 struct scsi_xshandler {
 	struct scsi_iohandler ioh; /* must be first */
 
@@ -380,6 +349,8 @@ struct scsi_xshandler {
  * as well.
  */
 struct scsi_link {
+	SLIST_ENTRY(scsi_link)	bus_list;
+
 	u_int		state;
 #define SDEV_S_WAITING		(1<<0)
 #define SDEV_S_DYING		(1<<1)
@@ -415,7 +386,7 @@ struct scsi_link {
 #define	ADEV_NOCAPACITY		0x0800	/* no READ CD CAPACITY */
 #define	ADEV_NODOORLOCK		0x2000	/* can't lock door */
 #define SDEV_ONLYBIG		0x4000  /* always use READ_BIG and WRITE_BIG */
-	struct	scsi_device *device;	/* device entry points etc. */
+	int	(*interpret_sense)(struct scsi_xfer *);
 	void	*device_softc;		/* needed for call to foo_start */
 	struct	scsi_adapter *adapter;	/* adapter entry points etc. */
 	void	*adapter_softc;		/* needed for call to foo_scsi_cmd */
@@ -425,6 +396,7 @@ struct scsi_link {
 
 	struct	scsi_runq queue;
 	u_int	running;
+	u_short	pending;
 
 	struct	scsi_iopool *pool;
 };
@@ -458,7 +430,7 @@ struct scsibus_attach_args {
 struct scsibus_softc {
 	struct device sc_dev;
 	struct scsi_link *adapter_link;	/* prototype supplied by adapter */
-	struct scsi_link ***sc_link;
+	SLIST_HEAD(, scsi_link) sc_link;
 	u_int16_t sc_buswidth;
 };
 
@@ -490,12 +462,7 @@ struct scsi_xfer {
 	size_t	resid;			/* how much buffer was not touched */
 	int	error;			/* an error value	*/
 	struct	buf *bp;		/* If we need to associate with a buf */
-	struct	scsi_sense_data	sense; /* 32 bytes*/
-	/*
-	 * Believe it or not, Some targets fall on the ground with
-	 * anything but a certain sense length.
-	 */
-	int	req_sense_length;	/* Explicit request sense length */
+	struct	scsi_sense_data	sense;	/* 18 bytes*/
 	u_int8_t status;		/* SCSI status */
 	struct	scsi_generic cmdstore;	/* stash the command in here */
 	/*
@@ -565,7 +532,6 @@ const void *scsi_inqmatch(struct scsi_inquiry_data *, const void *, int,
     workq_add_task(NULL, (_fl), (_f), (_a1), (_a2))
 
 void	scsi_init(void);
-void	scsi_deinit(void);
 daddr64_t scsi_size(struct scsi_link *, int, u_int32_t *);
 int	scsi_test_unit_ready(struct scsi_link *, int, int);
 int	scsi_inquire(struct scsi_link *, struct scsi_inquiry_data *, int);
@@ -586,9 +552,6 @@ int	scsi_mode_select(struct scsi_link *, int, struct scsi_mode_header *,
 int	scsi_mode_select_big(struct scsi_link *, int,
 	    struct scsi_mode_header_big *, int, int);
 void	scsi_done(struct scsi_xfer *);
-int	scsi_scsi_cmd(struct scsi_link *, struct scsi_generic *,
-	    int cmdlen, u_char *data_addr, int datalen, int retries,
-	    int timeout, struct buf *bp, int flags);
 int	scsi_do_ioctl(struct scsi_link *, u_long, caddr_t, int);
 void	sc_print_addr(struct scsi_link *);
 int	scsi_report_luns(struct scsi_link *, int,
@@ -613,21 +576,32 @@ int	scsi_detach_lun(struct scsibus_softc *, int, int, int);
 int	scsi_req_probe(struct scsibus_softc *, int, int);
 int	scsi_req_detach(struct scsibus_softc *, int, int, int);
 
-void	scsi_activate(struct scsibus_softc *, int, int, int);
+int	scsi_activate(struct scsibus_softc *, int, int, int);
+
+struct scsi_link *	scsi_get_link(struct scsibus_softc *, int, int);
+void			scsi_add_link(struct scsibus_softc *,
+			    struct scsi_link *);
+void			scsi_remove_link(struct scsibus_softc *,
+			    struct scsi_link *);
 
 extern const u_int8_t version_to_spc[];
-#define SCSISPC(x)(version_to_spc[(x) & SID_ANSII])
+#define SCSISPC(x)	(version_to_spc[(x) & SID_ANSII])
 
 struct scsi_xfer *	scsi_xs_get(struct scsi_link *, int);
 void			scsi_xs_exec(struct scsi_xfer *);
 int			scsi_xs_sync(struct scsi_xfer *);
 void			scsi_xs_put(struct scsi_xfer *);
+#ifdef SCSIDEBUG
+void			scsi_sense_print_debug(struct scsi_xfer *);
+#endif
 
 /*
  * iopool stuff
  */
 void	scsi_iopool_init(struct scsi_iopool *, void *,
 	    void *(*)(void *), void (*)(void *, void *));
+void	scsi_iopool_destroy(struct scsi_iopool *);
+void	scsi_link_shutdown(struct scsi_link *);
 
 void *	scsi_io_get(struct scsi_iopool *, int);
 void	scsi_io_put(struct scsi_iopool *, void *);
@@ -659,6 +633,11 @@ int	mpath_path_detach(struct scsi_link *, int);
 
 void	mpath_path_activate(struct scsi_link *);
 void	mpath_path_deactivate(struct scsi_link *);
+
+/*
+ * Utility functions for SCSI HBA emulation.
+ */
+void	scsi_cmd_rw_decode(struct scsi_generic *, u_int64_t *, u_int32_t *);
 
 #endif /* _KERNEL */
 #endif /* SCSI_SCSICONF_H */

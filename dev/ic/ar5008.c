@@ -1,4 +1,4 @@
-/*	$OpenBSD: ar5008.c,v 1.9 2010/06/21 19:46:50 damien Exp $	*/
+/*	$OpenBSD: ar5008.c,v 1.13 2010/09/03 15:40:08 damien Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -1792,15 +1792,15 @@ ar5008_bb_load_noisefloor(struct athn_softc *sc)
 	AR_CLRBITS(sc, AR_PHY_AGC_CONTROL, AR_PHY_AGC_CONTROL_NO_UPDATE_NF);
 	AR_SETBITS(sc, AR_PHY_AGC_CONTROL, AR_PHY_AGC_CONTROL_NF);
 	/* Wait for load to complete. */
-	for (ntries = 0; ntries < 5; ntries++) {
+	for (ntries = 0; ntries < 1000; ntries++) {
 		if (!(AR_READ(sc, AR_PHY_AGC_CONTROL) & AR_PHY_AGC_CONTROL_NF))
 			break;
 		DELAY(50);
 	}
-#ifdef ATHN_DEBUG
-	if (ntries == 5 && athn_debug > 0)
-		printf("failed to load noisefloor values\n");
-#endif
+	if (ntries == 1000) {
+		DPRINTF(("failed to load noisefloor values\n"));
+		return;
+	}
 
 	/* Restore noisefloor values to initial (max) values. */
 	for (i = 0; i < AR_MAX_CHAINS; i++)
@@ -2222,7 +2222,13 @@ ar5008_hw_init(struct athn_softc *sc, struct ieee80211_channel *c,
 	}
 	DPRINTFN(4, ("writing modal init vals\n"));
 	for (i = 0; i < ini->nregs; i++) {
-		AR_WRITE(sc, ini->regs[i], pvals[i]);
+		uint32_t val = pvals[i];
+
+		/* Fix AR_AN_TOP2 initialization value if required. */
+		if (ini->regs[i] == AR_AN_TOP2 &&
+		    (sc->flags & ATHN_FLAG_AN_TOP2_FIXUP))
+			val &= ~AR_AN_TOP2_PWDCLKIND;
+		AR_WRITE(sc, ini->regs[i], val);
 		if (AR_IS_ANALOG_REG(ini->regs[i]))
 			DELAY(100);
 		if ((i & 0x1f) == 0)
@@ -2293,8 +2299,12 @@ ar5008_hw_init(struct athn_softc *sc, struct ieee80211_channel *c,
 	ar5008_set_phy(sc, c, extc);
 	ar5008_init_chains(sc);
 
-	if (sc->flags & ATHN_FLAG_OLPC)
+	if (sc->flags & ATHN_FLAG_OLPC) {
+		extern int ticks;
+		sc->olpc_ticks = ticks;
 		ops->olpc_init(sc);
+	}
+
 	ops->set_txpower(sc, c, extc);
 
 	if (!AR_SINGLE_CHIP(sc))
@@ -2342,6 +2352,7 @@ ar5008_get_pdadcs(struct athn_softc *sc, uint8_t fbin,
 		    hipier->pwr[i][nicepts - 1]);
 	}
 
+	/* Fill phase domain analog-to-digital converter (PDADC) table. */
 	npdadcs = 0;
 	for (i = 0; i < nxpdgains; i++) {
 		if (i != nxpdgains - 1)
@@ -2401,7 +2412,7 @@ ar5008_get_pdadcs(struct athn_softc *sc, uint8_t fbin,
 		while (ss < maxidx && npdadcs < AR_NUM_PDADC_VALUES - 1)
 			pdadcs[npdadcs++] = vpd[ss++];
 
-		if (tgtidx <= maxidx)
+		if (tgtidx < maxidx)
 			continue;
 
 		/* Extrapolate data for maxidx <= ss <= tgtidx. */
@@ -2458,7 +2469,7 @@ ar5008_get_lg_tpow(struct athn_softc *sc, struct ieee80211_channel *c,
 		    tgt[lo].bChannel, tgt[lo].tPow2x[i],
 		    tgt[hi].bChannel, tgt[hi].tPow2x[i]);
 	}
-	/* XXX Apply conformance test limit. */
+	/* XXX Apply conformance testing limit. */
 }
 
 #ifndef IEEE80211_NO_HT
@@ -2490,7 +2501,7 @@ ar5008_get_ht_tpow(struct athn_softc *sc, struct ieee80211_channel *c,
 		    tgt[lo].bChannel, tgt[lo].tPow2x[i],
 		    tgt[hi].bChannel, tgt[hi].tPow2x[i]);
 	}
-	/* XXX Apply conformance test limit. */
+	/* XXX Apply conformance testing limit. */
 }
 #endif
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: at_control.c,v 1.15 2010/01/13 02:13:12 henning Exp $	*/
+/*	$OpenBSD: at_control.c,v 1.17 2010/09/27 20:16:17 guenther Exp $	*/
 
 /*
  * Copyright (c) 1990,1991 Regents of The University of Michigan.
@@ -190,8 +190,6 @@ at_control( cmd, data, ifp, p )
 
 	    aa = aa0;
 
-	    ifa_add(ifp, (struct ifaddr *)aa);
-
 	    /* FreeBSD found this. Whew */
 	    aa->aa_ifa.ifa_refcnt++;
 
@@ -208,6 +206,8 @@ at_control( cmd, data, ifp, p )
 		aa->aa_flags |= AFA_PHASE2;
 	    }
 	    aa->aa_ifp = ifp;
+
+	    ifa_add(ifp, (struct ifaddr *)aa);
 	} else {
 	    at_scrub( ifp, aa );
 	}
@@ -399,7 +399,7 @@ at_ifinit( ifp, aa, sat )
 		aa->aa_probcnt = 10;
 		timeout_set(&aarpprobe_timeout, aarpprobe, ifp);
 		/* XXX don't use hz so badly */
-		timeout_add(&aarpprobe_timeout, hz / 5);
+		timeout_add_msec(&aarpprobe_timeout, 200);
 		if ( tsleep( aa, PPAUSE|PCATCH, "at_ifinit", 0 )) {
 		    printf( "at_ifinit why did this happen?!\n" );
 		    aa->aa_addr = oldaddr;

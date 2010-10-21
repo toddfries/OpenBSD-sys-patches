@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_raid6.c,v 1.16 2010/03/26 11:20:34 jsing Exp $ */
+/* $OpenBSD: softraid_raid6.c,v 1.19 2010/08/07 03:50:01 krw Exp $ */
 /*
  * Copyright (c) 2009 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2009 Jordan Hargrave <jordan@openbsd.org>
@@ -303,7 +303,7 @@ sr_raid6_set_chunk_state(struct sr_discipline *sd, int c, int new_state)
 die:
 		splx(s); /* XXX */
 		panic("%s: %s: %s: invalid chunk state transition "
-		    "%d -> %d\n", DEVNAME(sd->sd_sc),
+		    "%d -> %d", DEVNAME(sd->sd_sc),
 		    sd->sd_meta->ssd_devname,
 		    sd->sd_vol.sv_chunks[c]->src_meta.scmi.scm_devname,
 		    old_state, new_state);
@@ -433,7 +433,7 @@ sr_raid6_set_vol_state(struct sr_discipline *sd)
 
 	default:
 die:
-		panic("%s: %s: invalid volume state transition %d -> %d\n",
+		panic("%s: %s: invalid volume state transition %d -> %d",
 		    DEVNAME(sd->sd_sc), sd->sd_meta->ssd_devname,
 		    old_state, new_state);
 		/* NOTREACHED */
@@ -491,7 +491,7 @@ sr_raid6_rw(struct sr_workunit *wu)
 		strip_offs = lbaoffs & (strip_size - 1);
 		chunk_offs = (strip_no / no_chunk) << strip_bits;
 		phys_offs = chunk_offs + strip_offs +
-		    (SR_DATA_OFFSET << DEV_BSHIFT);
+		    (sd->sd_meta->ssd_data_offset << DEV_BSHIFT);
 
 		/* get size remaining in this stripe */
 		length = MIN(strip_size - strip_offs, datalen);
@@ -989,6 +989,7 @@ sr_raid6_addio(struct sr_workunit *wu, int dsk, daddr64_t blk, daddr64_t len,
 	ccb->ccb_buf.b_proc = curproc;
 	ccb->ccb_buf.b_dev = sd->sd_vol.sv_chunks[dsk]->src_dev_mm;
 	ccb->ccb_buf.b_vp = sd->sd_vol.sv_chunks[dsk]->src_vn;
+	ccb->ccb_buf.b_bq = NULL;
 	if ((ccb->ccb_buf.b_flags & B_READ) == 0)
 		ccb->ccb_buf.b_vp->v_numoutput++;
 

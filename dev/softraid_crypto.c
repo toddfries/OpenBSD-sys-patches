@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_crypto.c,v 1.52 2010/05/18 04:41:14 dlg Exp $ */
+/* $OpenBSD: softraid_crypto.c,v 1.57 2010/09/27 19:49:43 thib Exp $ */
 /*
  * Copyright (c) 2007 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Hans-Joerg Hoexer <hshoexer@openbsd.org>
@@ -251,10 +251,10 @@ sr_crypto_getcryptop(struct sr_workunit *wu, int encrypt)
 	    DEVNAME(sd->sd_sc), wu, encrypt);
 
 	s = splbio();
-	uio = pool_get(&sd->mds.mdd_crypto.sr_uiopl, PR_ZERO);
+	uio = pool_get(&sd->mds.mdd_crypto.sr_uiopl, PR_ZERO | PR_NOWAIT);
 	if (uio == NULL)
 		goto unwind;
-	uio->uio_iov = pool_get(&sd->mds.mdd_crypto.sr_iovpl, 0);
+	uio->uio_iov = pool_get(&sd->mds.mdd_crypto.sr_iovpl, PR_NOWAIT);
 	if (uio->uio_iov == NULL)
 		goto unwind;
 	splx(s);
@@ -264,6 +264,8 @@ sr_crypto_getcryptop(struct sr_workunit *wu, int encrypt)
 	if (xs->flags & SCSI_DATA_OUT) {
 		uio->uio_iov->iov_base = malloc(xs->datalen, M_DEVBUF,
 		    M_NOWAIT);
+		if (uio->uio_iov->iov_base == NULL)
+			goto unwind;
 		bcopy(xs->data, uio->uio_iov->iov_base, xs->datalen);
 	} else
 		uio->uio_iov->iov_base = xs->data;
@@ -674,7 +676,7 @@ sr_crypto_create_key_disk(struct sr_discipline *sd, dev_t dev)
 		    DEVNAME(sc));
 		goto done;
 	}
-	if (VOP_OPEN(vn, FREAD | FWRITE, NOCRED, 0)) {
+	if (VOP_OPEN(vn, FREAD | FWRITE, NOCRED, curproc)) {
 		DNPRINTF(SR_D_META,"%s: sr_create_key_disk cannot open %s\n",
 		    DEVNAME(sc), devname);
 		vput(vn);
@@ -684,10 +686,11 @@ sr_crypto_create_key_disk(struct sr_discipline *sd, dev_t dev)
 
 	/* Get partition details. */
 	part = DISKPART(dev);
-	if (VOP_IOCTL(vn, DIOCGDINFO, (caddr_t)&label, FREAD, NOCRED, 0)) {
+	if (VOP_IOCTL(vn, DIOCGDINFO, (caddr_t)&label,
+	    FREAD, NOCRED, curproc)) {
 		DNPRINTF(SR_D_META, "%s: sr_create_key_disk ioctl failed\n",
 		    DEVNAME(sc));
-		VOP_CLOSE(vn, FREAD | FWRITE, NOCRED, 0);
+		VOP_CLOSE(vn, FREAD | FWRITE, NOCRED, curproc);
 		vput(vn);
 		goto fail;
 	}
@@ -731,7 +734,7 @@ sr_crypto_create_key_disk(struct sr_discipline *sd, dev_t dev)
 	sm->ssdi.ssd_magic = SR_MAGIC;
 	sm->ssdi.ssd_version = SR_META_VERSION;
 	sm->ssd_ondisk = 0;
-	sm->ssdi.ssd_flags = 0;
+	sm->ssdi.ssd_vol_flags = 0;
 	bcopy(&sd->sd_meta->ssdi.ssd_uuid, &sm->ssdi.ssd_uuid,
 	    sizeof(struct sr_uuid));
 	sm->ssdi.ssd_chunk_no = 1;
@@ -798,7 +801,7 @@ done:
 	if (sm)
 		free(sm, M_DEVBUF);
 	if (open) {
-		VOP_CLOSE(vn, FREAD | FWRITE, NOCRED, 0);
+		VOP_CLOSE(vn, FREAD | FWRITE, NOCRED, curproc);
 		vput(vn);
 	}
 
@@ -836,7 +839,7 @@ sr_crypto_read_key_disk(struct sr_discipline *sd, dev_t dev)
 		    DEVNAME(sc));
 		goto done;
 	}
-	if (VOP_OPEN(vn, FREAD | FWRITE, NOCRED, 0)) {
+	if (VOP_OPEN(vn, FREAD | FWRITE, NOCRED, curproc)) {
 		DNPRINTF(SR_D_META,"%s: sr_create_key_disk cannot open %s\n",
 		    DEVNAME(sc), devname);
 		vput(vn);
@@ -846,10 +849,11 @@ sr_crypto_read_key_disk(struct sr_discipline *sd, dev_t dev)
 
 	/* Get partition details. */
 	part = DISKPART(dev);
-	if (VOP_IOCTL(vn, DIOCGDINFO, (caddr_t)&label, FREAD, NOCRED, 0)) {
+	if (VOP_IOCTL(vn, DIOCGDINFO, (caddr_t)&label, FREAD,
+	    NOCRED, curproc)) {
 		DNPRINTF(SR_D_META, "%s: sr_create_key_disk ioctl failed\n",
 		    DEVNAME(sc));
-		VOP_CLOSE(vn, FREAD | FWRITE, NOCRED, 0);
+		VOP_CLOSE(vn, FREAD | FWRITE, NOCRED, curproc);
 		vput(vn);
 		goto done;
 	}
@@ -863,7 +867,7 @@ sr_crypto_read_key_disk(struct sr_discipline *sd, dev_t dev)
 	/*
 	 * Read and validate key disk metadata.
 	 */
-	sm = malloc(SR_META_SIZE * 512, M_DEVBUF, M_ZERO);
+	sm = malloc(SR_META_SIZE * 512, M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (sm == NULL) {
 		printf("%s: not enough memory for metadata buffer\n",
 		    DEVNAME(sc));
@@ -889,7 +893,7 @@ sr_crypto_read_key_disk(struct sr_discipline *sd, dev_t dev)
 	}
 
 	/* Construct key disk chunk. */
-	key_disk = malloc(sizeof(struct sr_chunk), M_DEVBUF, M_ZERO);
+	key_disk = malloc(sizeof(struct sr_chunk), M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (key_disk == NULL) {
 		printf("%s: not enough memory for chunk\n",
 		    DEVNAME(sc));
@@ -928,7 +932,7 @@ done:
 		free(sm, M_DEVBUF);
 
 	if (vn && open) {
-		VOP_CLOSE(vn, FREAD, NOCRED, 0);
+		VOP_CLOSE(vn, FREAD, NOCRED, curproc);
 		vput(vn);
 	}
 
@@ -1117,6 +1121,8 @@ sr_crypto_rw(struct sr_workunit *wu)
 
 	if (wu->swu_xs->flags & SCSI_DATA_OUT) {
 		crp = sr_crypto_getcryptop(wu, 1);
+		if (crp == NULL)
+			panic("sr_crypto_getcryptop");
 		crp->crp_callback = sr_crypto_write;
 		crp->crp_opaque = wu;
 		s = splvm();
@@ -1165,7 +1171,7 @@ sr_crypto_rw2(struct sr_workunit *wu, struct cryptop *crp)
 	if (sr_validate_io(wu, &blk, "sr_crypto_rw2"))
 		goto bad;
 
-	blk += SR_DATA_OFFSET;
+	blk += sd->sd_meta->ssd_data_offset;
 
 	wu->swu_io_count = 1;
 
@@ -1298,6 +1304,8 @@ sr_crypto_intr(struct buf *bp)
 
 		if ((xs->flags & SCSI_DATA_IN) && (xs->error == XS_NOERROR)) {
 			crp = sr_crypto_getcryptop(wu, 0);
+			if (crp == NULL)
+				panic("sr_crypto_getcryptop");
 			ccb->ccb_opaque = crp;
 			crp->crp_callback = sr_crypto_read;
 			crp->crp_opaque = wu;

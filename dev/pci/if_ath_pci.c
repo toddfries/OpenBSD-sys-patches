@@ -1,4 +1,4 @@
-/*      $OpenBSD: if_ath_pci.c,v 1.20 2009/08/10 20:29:52 deraadt Exp $   */
+/*      $OpenBSD: if_ath_pci.c,v 1.22 2010/08/27 19:44:44 deraadt Exp $   */
 /*	$NetBSD: if_ath_pci.c,v 1.7 2004/06/30 05:58:17 mycroft Exp $	*/
 
 /*-
@@ -96,7 +96,8 @@ struct cfattach ath_pci_ca = {
 	sizeof(struct ath_pci_softc),
 	ath_pci_match,
 	ath_pci_attach,
-	ath_pci_detach
+	ath_pci_detach,
+	ath_activate
 };
 
 int

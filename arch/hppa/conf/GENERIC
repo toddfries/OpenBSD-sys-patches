@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.133 2010/03/03 20:57:28 mk Exp $
+#	$OpenBSD: GENERIC,v 1.139 2010/09/23 16:21:46 yuo Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -28,10 +28,6 @@ option		HP8700_CPU		# PCXW2 (in 32bit mode)
 option		FPEMUL
 option		USELEDS		# blink 'em
 option		USER_PCICONF	# user-space PCI configuration
-
-option		COMPAT_HPUX
-#option		COMPAT_LINUX
-#option		PROCFS		# /proc
 
 config	bsd swap generic
 
@@ -158,8 +154,6 @@ upl*	at uhub?		# Prolific PL2301/PL2302 host-to-host `network'
 wi*	at uhub?		# WaveLAN IEEE 802.11DS
 urio*	at uhub?		# Diamond Multimedia Rio 500
 uscanner* at uhub?		# USB Scanners
-usscanner* at uhub?		# USB SCSI scanners, e.g., HP5300
-scsibus* at usscanner?
 uyap*	at uhub?		# Y@P firmware loader
 udsbr*	at uhub?		# D-Link DSB-R100 radio
 radio*	at udsbr?		# USB radio
@@ -169,6 +163,7 @@ rum*	at uhub?		# Ralink RT2501USB/RT2601USB
 run*	at uhub?		# Ralink RT2700U/RT2800U/RT3000U
 zyd*	at uhub?		# Zydas ZD1211
 uthum*	at uhidev?		# TEMPerHUM sensor
+utwitch* at uhidev?		# YUREX BBU sensor
 uow*	at uhub?		# Maxim/Dallas DS2490 1-Wire adapter
 onewire* at uow?
 
@@ -358,7 +353,6 @@ sd*	at scsibus?
 st*	at scsibus?
 cd*	at scsibus?
 ch*	at scsibus?
-ss*	at scsibus?
 safte*	at scsibus?
 ses*	at scsibus?
 uk*	at scsibus?
@@ -368,6 +362,7 @@ option ONEWIREVERBOSE
 owid*	at onewire?		# ID
 owsbm*	at onewire?		# Smart Battery Monitor
 owtemp* at onewire?		# Temperature
+owctr*	at onewire?		# Counter device
 
 pseudo-device	hotplug	1	# devices hot plugging
 pseudo-device	wsmux	2	# mouse and keyboard multiplexor

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pdc.c,v 1.36 2010/04/20 23:27:01 deraadt Exp $	*/
+/*	$OpenBSD: pdc.c,v 1.38 2010/07/02 17:27:01 nicm Exp $	*/
 
 /*
  * Copyright (c) 1998-2003 Michael Shalayeff
@@ -207,7 +207,7 @@ pdcopen(dev, flag, mode, p)
 	if (sc->sc_tty)
 		tp = sc->sc_tty;
 	else {
-		tp = sc->sc_tty = ttymalloc();
+		tp = sc->sc_tty = ttymalloc(0);
 	}
 
 	tp->t_oproc = pdcstart;
@@ -338,13 +338,7 @@ pdcstart(tp)
 		splx(s);
 		return;
 	}
-	if (tp->t_outq.c_cc <= tp->t_lowat) {
-		if (tp->t_state & TS_ASLEEP) {
-			tp->t_state &= ~TS_ASLEEP;
-			wakeup((caddr_t)&tp->t_outq);
-		}
-		selwakeup(&tp->t_wsel);
-	}
+	ttwakeupwr(tp);
 	tp->t_state |= TS_BUSY;
 	while (tp->t_outq.c_cc != 0)
 		pdccnputc(tp->t_dev, getc(&tp->t_outq));

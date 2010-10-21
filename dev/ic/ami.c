@@ -1,4 +1,4 @@
-/*	$OpenBSD: ami.c,v 1.209 2010/06/23 04:53:53 dlg Exp $	*/
+/*	$OpenBSD: ami.c,v 1.217 2010/10/12 00:53:32 krw Exp $	*/
 
 /*
  * Copyright (c) 2001 Michael Shalayeff
@@ -100,18 +100,10 @@ struct scsi_adapter ami_switch = {
 	ami_scsi_cmd, amiminphys, 0, 0, ami_scsi_ioctl
 };
 
-struct scsi_device ami_dev = {
-	NULL, NULL, NULL, NULL
-};
-
 void	ami_scsi_raw_cmd(struct scsi_xfer *);
 
 struct scsi_adapter ami_raw_switch = {
 	ami_scsi_raw_cmd, amiminphys, 0, 0,
-};
-
-struct scsi_device ami_raw_dev = {
-	NULL, NULL, NULL, NULL
 };
 
 void *		ami_get_ccb(void *);
@@ -500,11 +492,7 @@ ami_attach(struct ami_softc *sc)
 		sc->sc_maxcmds -= AMI_MAXIOCTLCMDS + AMI_MAXPROCS *
 		    AMI_MAXRAWCMDS * sc->sc_channels;
 
-		if (sc->sc_nunits)
-			sc->sc_link.openings =
-			    sc->sc_maxcmds / sc->sc_nunits;
-		else
-			sc->sc_link.openings = sc->sc_maxcmds;
+		sc->sc_link.openings = sc->sc_maxcmds;
 	}
 
 	ami_freemem(sc, am);
@@ -529,7 +517,6 @@ ami_attach(struct ami_softc *sc)
 	/* TODO: fetch & print cache strategy */
 	/* TODO: fetch & print scsi and raid info */
 
-	sc->sc_link.device = &ami_dev;
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter = &ami_switch;
 	sc->sc_link.adapter_target = sc->sc_maxunits;
@@ -590,8 +577,7 @@ ami_attach(struct ami_softc *sc)
 
 		rsc->sc_softc = sc;
 		rsc->sc_channel = rsc - sc->sc_rawsoftcs;
-		rsc->sc_link.device = &ami_raw_dev;
-		rsc->sc_link.openings = AMI_MAXRAWCMDS;
+		rsc->sc_link.openings = sc->sc_maxcmds;
 		rsc->sc_link.adapter_softc = rsc;
 		rsc->sc_link.adapter = &ami_raw_switch;
 		rsc->sc_proctarget = -1;
@@ -1013,7 +999,7 @@ ami_complete(struct ami_softc *sc, struct ami_ccb *ccb, int timeout)
 {
 	void (*done)(struct ami_softc *, struct ami_ccb *);
 	int ready;
-	int i;
+	int i = 0;
 	int s;
 
 	done = ccb->ccb_done;
@@ -1229,7 +1215,7 @@ ami_scsi_raw_cmd(struct scsi_xfer *xs)
 	if (xs->cmdlen > AMI_MAX_CDB) {
 		AMI_DPRINTF(AMI_D_CMD, ("CDB too big %p ", xs));
 		bzero(&xs->sense, sizeof(xs->sense));
-		xs->sense.error_code = SSD_ERRCODE_VALID | 0x70;
+		xs->sense.error_code = SSD_ERRCODE_VALID | SSD_ERRCODE_CURRENT;
 		xs->sense.flags = SKEY_ILLEGAL_REQUEST;
 		xs->sense.add_sense_code = 0x20; /* illcmd, 0x24 illfield */
 		xs->error = XS_SENSE;
@@ -1346,7 +1332,6 @@ ami_scsi_cmd(struct scsi_xfer *xs)
 		return;
 	}
 
-	error = 0;
 	xs->error = XS_NOERROR;
 
 	switch (xs->cmd->opcode) {
@@ -1389,7 +1374,7 @@ ami_scsi_cmd(struct scsi_xfer *xs)
 	case REQUEST_SENSE:
 		AMI_DPRINTF(AMI_D_CMD, ("REQUEST SENSE tgt %d ", target));
 		bzero(&sd, sizeof(sd));
-		sd.error_code = 0x70;
+		sd.error_code = SSD_ERRCODE_CURRENT;
 		sd.segment = 0;
 		sd.flags = SKEY_NO_SENSE;
 		*(u_int32_t*)sd.info = htole32(0);
@@ -1408,6 +1393,7 @@ ami_scsi_cmd(struct scsi_xfer *xs)
 		inq.version = 2;
 		inq.response_format = 2;
 		inq.additional_length = 32;
+		inq.flags |= SID_CmdQue;
 		strlcpy(inq.vendor, "AMI    ", sizeof(inq.vendor));
 		snprintf(inq.product, sizeof(inq.product),
 		    "Host drive  #%02d", target);
@@ -2015,8 +2001,8 @@ ami_disk(struct ami_softc *sc, struct bioc_disk *bd,
 		if (!ami_drv_inq(sc, ch, tg, 0x80, &vpdbuf)) {
 			bcopy(vpdbuf.serial, ser, sizeof ser - 1);
 			ser[sizeof ser - 1] = '\0';
-			if (vpdbuf.hdr.page_length < sizeof ser)
-				ser[vpdbuf.hdr.page_length] = '\0';
+			if (_2btol(vpdbuf.hdr.page_length) < sizeof ser)
+				ser[_2btol(vpdbuf.hdr.page_length)] = '\0';
 			strlcpy(bd->bd_serial, ser, sizeof(bd->bd_serial));
 		}
 
@@ -2261,8 +2247,9 @@ ami_ioctl_disk(struct ami_softc *sc, struct bioc_disk *bd)
 			if (!ami_drv_inq(sc, ch, tg, 0x80, &vpdbuf)) {
 				bcopy(vpdbuf.serial, ser, sizeof ser - 1);
 				ser[sizeof ser - 1] = '\0';
-				if (vpdbuf.hdr.page_length < sizeof ser)
-					ser[vpdbuf.hdr.page_length] = '\0';
+				if (_2btol(vpdbuf.hdr.page_length) < sizeof ser)
+					ser[_2btol(vpdbuf.hdr.page_length)] =
+					    '\0';
 				strlcpy(bd->bd_serial, ser,
 				    sizeof(bd->bd_serial));
 			}
@@ -2362,6 +2349,7 @@ ami_create_sensors(struct ami_softc *sc)
 {
 	struct device *dev;
 	struct scsibus_softc *ssc = NULL;
+	struct scsi_link *link;
 	int i;
 
 	TAILQ_FOREACH(dev, &alldevs, dv_list) {
@@ -2386,10 +2374,11 @@ ami_create_sensors(struct ami_softc *sc)
 	    sizeof(sc->sc_sensordev.xname));
 
 	for (i = 0; i < sc->sc_nunits; i++) {
-		if (ssc->sc_link[i][0] == NULL)
+		link = scsi_get_link(ssc, i, 0);
+		if (link == NULL)
 			goto bad;
 
-		dev = ssc->sc_link[i][0]->device_softc;
+		dev = link->device_softc;
 
 		sc->sc_sensors[i].type = SENSOR_DRIVE;
 		sc->sc_sensors[i].status = SENSOR_S_UNKNOWN;

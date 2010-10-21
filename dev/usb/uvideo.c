@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvideo.c,v 1.131 2010/04/27 03:38:34 marco Exp $ */
+/*	$OpenBSD: uvideo.c,v 1.145 2010/10/18 23:25:31 jakemsr Exp $ */
 
 /*
  * Copyright (c) 2008 Robert Nagy <robert@openbsd.org>
@@ -57,6 +57,9 @@ int uvideo_debug = 1;
 
 #define DEVNAME(_s) ((_s)->sc_dev.dv_xname)
 
+#define byteof(x) ((x) >> 3)
+#define bitof(x)  (1L << ((x) & 0x7))
+
 int		uvideo_enable(void *);
 void		uvideo_disable(void *);
 int		uvideo_open(void *, int, int *, uint8_t *, void (*)(void *),
@@ -78,6 +81,7 @@ usbd_status	uvideo_vc_get_ctrl(struct uvideo_softc *, uint8_t *, uint8_t,
 usbd_status	uvideo_vc_set_ctrl(struct uvideo_softc *, uint8_t *, uint8_t,
 		    uint8_t, uint16_t, uint16_t);
 int		uvideo_find_ctrl(struct uvideo_softc *, int);
+int		uvideo_has_ctrl(struct usb_video_vc_processing_desc *, int);
 
 usbd_status	uvideo_vs_parse_desc(struct uvideo_softc *,
 		    usb_config_descriptor_t *);
@@ -310,7 +314,7 @@ struct uvideo_devs {
 	},
 	{
 	    /* Has a non-standard streaming header protocol */
-	    { USB_VENDOR_APPLE, USB_PRODUCT_APPLE_ISIGHT_1},
+	    { USB_VENDOR_APPLE, USB_PRODUCT_APPLE_ISIGHT_1 },
 	    NULL,
 	    NULL,
 	    UVIDEO_FLAG_ISIGHT_STREAM_HEADER
@@ -323,7 +327,21 @@ struct uvideo_devs {
 	},
 	{
 	    /* Needs to fix dwMaxVideoFrameSize */
-	    { USB_VENDOR_CHENSOURCE, USB_PRODUCT_CHENSOURCE_CM12402},
+	    { USB_VENDOR_CHENSOURCE, USB_PRODUCT_CHENSOURCE_CM12402 },
+	    NULL,
+	    NULL,
+	    UVIDEO_FLAG_FIX_MAX_VIDEO_FRAME_SIZE
+	},
+	{
+	    /* Needs to fix dwMaxVideoFrameSize */
+	    { USB_VENDOR_MICRODIA, USB_PRODUCT_MICRODIA_CAM_1 },
+	    NULL,
+	    NULL,
+	    UVIDEO_FLAG_FIX_MAX_VIDEO_FRAME_SIZE
+	},
+	{
+	    /* Needs to fix dwMaxVideoFrameSize */
+	    { USB_VENDOR_MICROSOFT, USB_PRODUCT_MICROSOFT_LIFECAM },
 	    NULL,
 	    NULL,
 	    UVIDEO_FLAG_FIX_MAX_VIDEO_FRAME_SIZE
@@ -656,17 +674,11 @@ uvideo_vc_parse_desc_pu(struct uvideo_softc *sc,
 {
 	struct usb_video_vc_processing_desc *d;
 
-	d = (struct usb_video_vc_processing_desc *)(uint8_t *)desc;
+	/* PU descriptor is variable sized */
+	d = (void *)desc;
 
 	if (sc->sc_desc_vc_pu_num == UVIDEO_MAX_PU) {
 		printf("%s: too many PU descriptors found!\n", DEVNAME(sc));
-		return (USBD_INVAL);
-	}
-
-	/* XXX support variable bmControls fields */
-	if (d->bControlSize != 2) {
-		printf("%s: video control not supported for this device.\n",
-		    DEVNAME(sc));
 		return (USBD_INVAL);
 	}
 
@@ -749,8 +761,8 @@ uvideo_find_ctrl(struct uvideo_softc *sc, int id)
 
 	/* does the device support this control? */
 	for (found = 0, j = 0; j < sc->sc_desc_vc_pu_num; j++) {
-		if (UGETW(sc->sc_desc_vc_pu[j]->bmControls) &
-		    uvideo_ctrls[i].ctrl_bitmap) {
+		if (uvideo_has_ctrl(sc->sc_desc_vc_pu[j],
+		    uvideo_ctrls[i].ctrl_bit) != 0) {
 			found = 1;
 			break; 
 		}
@@ -763,6 +775,15 @@ uvideo_find_ctrl(struct uvideo_softc *sc, int id)
 	sc->sc_desc_vc_pu_cur = sc->sc_desc_vc_pu[j];
 
 	return (i);
+}
+
+int
+uvideo_has_ctrl(struct usb_video_vc_processing_desc *desc, int ctrl_bit)
+{
+	if (desc->bControlSize * 8 <= ctrl_bit)
+		return (0);
+
+	return (desc->bmControls[byteof(ctrl_bit)] & bitof(ctrl_bit));
 }
 
 usbd_status
@@ -1078,49 +1099,47 @@ usbd_status
 uvideo_vs_parse_desc_frame_uncompressed(struct uvideo_softc *sc,
     const usb_descriptor_t *desc)
 {
-	struct usb_video_frame_uncompressed_desc *d;
-	int fmtidx;
+	struct usb_video_frame_uncompressed_desc *fd = 
+	    (struct usb_video_frame_uncompressed_desc *)(uint8_t *)desc;
+	int fmtidx, frame_num;
 	uint32_t fbuf_size;
-	struct usb_video_frame_uncompressed_desc *fd;
 
-	d = (struct usb_video_frame_uncompressed_desc *)(uint8_t *)desc;
+	fmtidx = sc->sc_fmtgrp_idx;
 
-	if (d->bFrameIndex == UVIDEO_MAX_FRAME) {
+	frame_num = sc->sc_fmtgrp[fmtidx].frame_num + 1;
+	if (frame_num >= UVIDEO_MAX_FRAME) {
 		printf("%s: too many UNCOMPRESSED frame descriptors found!\n",
 		    DEVNAME(sc));
 		return (USBD_INVAL);
 	}
+	sc->sc_fmtgrp[fmtidx].frame_num = frame_num;
 
-	fmtidx = sc->sc_fmtgrp_idx;
-	sc->sc_fmtgrp[fmtidx].frame[d->bFrameIndex] =
-	    (struct usb_video_frame_mjpeg_desc *)d;
+	sc->sc_fmtgrp[fmtidx].frame[frame_num] =
+	    (struct usb_video_frame_mjpeg_desc *)fd;
 
-	if (sc->sc_fmtgrp[fmtidx].format_dfidx == d->bFrameIndex) {
+	if (sc->sc_fmtgrp[fmtidx].frame_cur == NULL ||
+	    sc->sc_fmtgrp[fmtidx].format_dfidx == frame_num) {
 		sc->sc_fmtgrp[fmtidx].frame_cur =
-		    sc->sc_fmtgrp[fmtidx].frame[d->bFrameIndex];
+		    sc->sc_fmtgrp[fmtidx].frame[frame_num];
 	}
 
-	sc->sc_fmtgrp[fmtidx].frame_num++;
-
 	if (sc->sc_fmtgrp[fmtidx].frame_num ==
-	    sc->sc_fmtgrp[fmtidx].format->bNumFrameDescriptors)
+	    sc->sc_fmtgrp[fmtidx].format->bNumFrameDescriptors) {
 		sc->sc_fmtgrp_idx++;
+	}
 
 	/*
 	 * On some broken device, dwMaxVideoFrameBufferSize is not correct.
-	 * So fix it by frame width/height.
-	 *   XXX: YUV2 format only
+	 * So fix it by frame width/height (XXX YUV2 format only).
 	 */
 	if (sc->sc_quirk &&
 	    sc->sc_quirk->flags & UVIDEO_FLAG_FIX_MAX_VIDEO_FRAME_SIZE &&
 	    sc->sc_fmtgrp[fmtidx].pixelformat == V4L2_PIX_FMT_YUYV) {
-		fd = (struct usb_video_frame_uncompressed_desc *)
-		    sc->sc_fmtgrp[fmtidx].frame[d->bFrameIndex]; 
-		fbuf_size = UGETW(fd->wWidth) * UGETW(fd->wHeight) * 2;
+		fbuf_size = UGETW(fd->wWidth) * UGETW(fd->wHeight) * 4;
 		DPRINTF(1, "wWidth = %d, wHeight = %d\n",
 			UGETW(fd->wWidth), UGETW(fd->wHeight));
 	} else
-		fbuf_size = UGETDW(d->dwMaxVideoFrameBufferSize);
+		fbuf_size = UGETDW(fd->dwMaxVideoFrameBufferSize);
 
 	/* store max value */
 	if (fbuf_size > sc->sc_max_fbuf_size)
@@ -1207,7 +1226,7 @@ uvideo_vs_set_alt(struct uvideo_softc *sc, usbd_interface_handle ifaceh,
 	const usb_descriptor_t *desc;
 	usb_interface_descriptor_t *id;
 	usb_endpoint_descriptor_t *ed;
-	int i;
+	int i, diff, best_diff = INT_MAX;
 	usbd_status error;
 	uint32_t psize;
 
@@ -1234,18 +1253,25 @@ uvideo_vs_set_alt(struct uvideo_softc *sc, usbd_interface_handle ifaceh,
 		/* save endpoint with requested bandwidth */
 		psize = UGETW(ed->wMaxPacketSize);
 		psize = UE_GET_SIZE(psize) * (1 + UE_GET_TRANS(psize));
-		if (psize >= max_packet_size) {
+		if (psize >= max_packet_size)
+			diff = psize - max_packet_size;
+		else
+			goto next;
+		if (diff < best_diff) {
+			best_diff = diff;
 			sc->sc_vs_cur->endpoint = ed->bEndpointAddress;
 			sc->sc_vs_cur->curalt = id->bAlternateSetting;
 			sc->sc_vs_cur->psize = psize;
-			DPRINTF(1, "%s: set alternate iface to ", DEVNAME(sc));
-			DPRINTF(1, "bAlternateSetting=0x%02x\n",
-			    id->bAlternateSetting);
-			break;
+			if (diff == 0)
+				break;
 		}
 next:
 		desc = usb_desc_iter_next(&iter);
 	}
+
+	DPRINTF(1, "%s: set alternate iface to ", DEVNAME(sc));
+	DPRINTF(1, "bAlternateSetting=0x%02x psize=%d max_packet_size=%d\n",
+	    sc->sc_vs_cur->curalt, sc->sc_vs_cur->psize, max_packet_size);
 
 	/* set alternate video stream interface */
 	error = usbd_set_interface(ifaceh, i);
@@ -1320,7 +1346,7 @@ uvideo_find_res(struct uvideo_softc *sc, int idx, int width, int height,
 			diff_best = diff;
 			r->width = w;
 			r->height = h;
-			r->fidx = i;
+			r->fidx = sc->sc_fmtgrp[idx].frame[i]->bFrameIndex;
 		}
 		DPRINTF(1, "%s: %s: frame index %d: width=%d, height=%d\n",
 		    DEVNAME(sc), __func__, i, w, h);
@@ -1461,7 +1487,7 @@ uvideo_vs_get_probe(struct uvideo_softc *sc, uint8_t *probe_data,
 
 		/*
 		 * On some broken device, the above value is not correct.
-		 * So fix it by frame width/height (XXX:YUV2 format only)
+		 * So fix it by frame width/height (XXX YUV2 format only).
 		 */
 		if (sc->sc_quirk &&
 		    sc->sc_quirk->flags &
@@ -1469,7 +1495,7 @@ uvideo_vs_get_probe(struct uvideo_softc *sc, uint8_t *probe_data,
 		    sc->sc_fmtgrp_cur->pixelformat == V4L2_PIX_FMT_YUYV) {
 			USETDW(pc->dwMaxVideoFrameSize, 
 		    	    UGETW(sc->sc_fmtgrp_cur->frame_cur->wWidth) *
-			    UGETW(sc->sc_fmtgrp_cur->frame_cur->wHeight) * 2);
+			    UGETW(sc->sc_fmtgrp_cur->frame_cur->wHeight) * 4);
 		}
 	}
 
@@ -2094,6 +2120,12 @@ uvideo_mmap_queue(struct uvideo_softc *sc, uint8_t *buf, int len)
 		sc->sc_mmap_cur = 0;
 
 	wakeup(sc);
+
+	/*
+	 * In case userland uses poll(2), signal that we have a frame
+	 * ready to dequeue.
+	 */
+	sc->sc_uplayer_intr(sc->sc_uplayer_arg);
 }
 
 void
@@ -2542,7 +2574,8 @@ uvideo_dump_desc_processing(struct uvideo_softc *sc,
 {
 	struct usb_video_vc_processing_desc *d;
 
-	d = (struct usb_video_vc_processing_desc *)(uint8_t *)desc;
+	/* PU descriptor is variable sized */
+	d = (void *)desc;
 
 	printf("bLength=%d\n", d->bLength);
 	printf("bDescriptorType=0x%02x\n", d->bDescriptorType);
@@ -2551,9 +2584,10 @@ uvideo_dump_desc_processing(struct uvideo_softc *sc,
 	printf("bSourceID=0x%02x\n", d->bSourceID);
 	printf("wMaxMultiplier=%d\n", UGETW(d->wMaxMultiplier));
 	printf("bControlSize=%d\n", d->bControlSize);
-	printf("bmControls=0x%02x\n", UGETW(d->bmControls));
-	printf("iProcessing=0x%02x\n", d->iProcessing);
-	printf("bmVideoStandards=0x%02x\n", d->bmVideoStandards);
+	printf("bmControls=0x");
+	uvideo_hexdump(d->bmControls, d->bControlSize, 1);
+	printf("iProcessing=0x%02x\n", d->bmControls[d->bControlSize]);
+	printf("bmVideoStandards=0x%02x\n", d->bmControls[d->bControlSize + 1]);
 }
 
 void
@@ -2742,20 +2776,11 @@ uvideo_enum_fsizes(void *v, struct v4l2_frmsizeenum *fsizes)
 		/* no more frames left */
 		return (EINVAL);
 
-	if (sc->sc_fmtgrp[idx].frame[i]->bFrameIntervalType == 0) {
-		/* TODO */
-		fsizes->type = V4L2_FRMSIZE_TYPE_CONTINUOUS;
-		fsizes->stepwise.min_width = 0;
-		fsizes->stepwise.min_height = 0;
-		fsizes->stepwise.max_width = 0;
-		fsizes->stepwise.max_height = 0;
-	} else {
-		fsizes->type = V4L2_FRMSIZE_TYPE_DISCRETE;
-		fsizes->discrete.width =
-		    UGETW(sc->sc_fmtgrp[idx].frame[i]->wWidth);
-		fsizes->discrete.height =
-		    UGETW(sc->sc_fmtgrp[idx].frame[i]->wHeight);
-	}
+	fsizes->type = V4L2_FRMSIZE_TYPE_DISCRETE;
+	fsizes->un.discrete.width =
+	    UGETW(sc->sc_fmtgrp[idx].frame[i]->wWidth);
+	fsizes->un.discrete.height =
+	    UGETW(sc->sc_fmtgrp[idx].frame[i]->wHeight);
 
 	return (0);
 }
@@ -3041,11 +3066,24 @@ uvideo_queryctrl(void *v, struct v4l2_queryctrl *qctrl)
 	struct uvideo_softc *sc = v;
 	int i;
 	usbd_status error;
-	uint8_t ctrl_data[2];
+	uint8_t *ctrl_data;
+	uint16_t ctrl_len;
 
 	i = uvideo_find_ctrl(sc, qctrl->id);
 	if (i == EINVAL)
 		return (i);
+
+	ctrl_len = uvideo_ctrls[i].ctrl_len;
+	if (ctrl_len < 1 || ctrl_len > 2) {
+		printf("%s: invalid control length: %d\n", __func__, ctrl_len);
+		return (EINVAL);
+	}
+
+	ctrl_data = malloc(ctrl_len, M_USBDEV, M_WAITOK);
+	if (ctrl_data == NULL) {
+		printf("%s: could not allocate control data\n", __func__);
+		return (ENOMEM);
+	}
 
 	/* set type */
 	qctrl->type = uvideo_ctrls[i].type;
@@ -3059,7 +3097,18 @@ uvideo_queryctrl(void *v, struct v4l2_queryctrl *qctrl)
 	    uvideo_ctrls[i].ctrl_selector, uvideo_ctrls[i].ctrl_len);
 	if (error != USBD_NORMAL_COMPLETION)
 		return (EINVAL);
-	qctrl->minimum = letoh16(*(uint16_t *)ctrl_data);
+	switch (ctrl_len) {
+	case 1:
+		qctrl->minimum = uvideo_ctrls[i].sig ?
+		    *(int8_t *)ctrl_data :
+		    *ctrl_data;
+		break;
+	case 2:
+		qctrl->minimum = uvideo_ctrls[i].sig ?
+		    letoh16(*(int16_t *)ctrl_data) :
+		    letoh16(*(uint16_t *)ctrl_data);
+		break;
+	}
 
 	/* set maximum */
 	error = uvideo_vc_get_ctrl(sc, ctrl_data, GET_MAX,
@@ -3067,7 +3116,18 @@ uvideo_queryctrl(void *v, struct v4l2_queryctrl *qctrl)
 	    uvideo_ctrls[i].ctrl_selector, uvideo_ctrls[i].ctrl_len);
 	if (error != USBD_NORMAL_COMPLETION)
 		return (EINVAL);
-	qctrl->maximum = letoh16(*(uint16_t *)ctrl_data);
+	switch(ctrl_len) {
+	case 1:
+		qctrl->maximum = uvideo_ctrls[i].sig ?
+		    *(int8_t *)ctrl_data :
+		    *ctrl_data;
+		break;
+	case 2:
+		qctrl->maximum = uvideo_ctrls[i].sig ?
+		    letoh16(*(int16_t *)ctrl_data) :
+		    letoh16(*(uint16_t *)ctrl_data);
+		break;
+	}
 
 	/* set resolution */
 	error = uvideo_vc_get_ctrl(sc, ctrl_data, GET_RES,
@@ -3075,7 +3135,18 @@ uvideo_queryctrl(void *v, struct v4l2_queryctrl *qctrl)
 	    uvideo_ctrls[i].ctrl_selector, uvideo_ctrls[i].ctrl_len);
 	if (error != USBD_NORMAL_COMPLETION)
 		return (EINVAL);
-	qctrl->step = letoh16(*(uint16_t *)ctrl_data);
+	switch(ctrl_len) {
+	case 1:
+		qctrl->step = uvideo_ctrls[i].sig ?
+		    *(int8_t *)ctrl_data:
+		    *ctrl_data;
+		break;
+	case 2:
+		qctrl->step = uvideo_ctrls[i].sig ?
+		    letoh16(*(int16_t *)ctrl_data) :
+		    letoh16(*(uint16_t *)ctrl_data);
+		break;
+	}
 
 	/* set default */
 	error = uvideo_vc_get_ctrl(sc, ctrl_data, GET_DEF,
@@ -3083,10 +3154,23 @@ uvideo_queryctrl(void *v, struct v4l2_queryctrl *qctrl)
 	    uvideo_ctrls[i].ctrl_selector, uvideo_ctrls[i].ctrl_len);
 	if (error != USBD_NORMAL_COMPLETION)
 		return (EINVAL);
-	qctrl->default_value = letoh16(*(uint16_t *)ctrl_data);
+	switch(ctrl_len) {
+	case 1:
+		qctrl->default_value = uvideo_ctrls[i].sig ?
+		    *(int8_t *)ctrl_data :
+		    *ctrl_data;
+		break;
+	case 2:
+		qctrl->default_value = uvideo_ctrls[i].sig ?
+		    letoh16(*(int16_t *)ctrl_data) :
+		    letoh16(*(uint16_t *)ctrl_data);
+		break;
+	}
 
 	/* set flags */
 	qctrl->flags = 0;
+
+	free(ctrl_data, M_USBDEV);
 
 	return (0);
 }
@@ -3097,18 +3181,44 @@ uvideo_g_ctrl(void *v, struct v4l2_control *gctrl)
 	struct uvideo_softc *sc = v;
 	int i;
 	usbd_status error;
-	uint8_t ctrl_data[2];
+	int8_t *ctrl_data;
+	uint16_t ctrl_len;
 
 	i = uvideo_find_ctrl(sc, gctrl->id);
 	if (i == EINVAL)
 		return (i);
+
+	ctrl_len = uvideo_ctrls[i].ctrl_len;
+	if (ctrl_len < 1 || ctrl_len > 2) {
+		printf("%s: invalid control length: %d\n", __func__, ctrl_len);
+		return (EINVAL);
+	}
+
+	ctrl_data = malloc(ctrl_len, M_USBDEV, M_WAITOK);
+	if (ctrl_data == NULL) {
+		printf("%s: could not allocate control data\n", __func__);
+		return (ENOMEM);
+	}
 
 	error = uvideo_vc_get_ctrl(sc, ctrl_data, GET_CUR,
 	    sc->sc_desc_vc_pu_cur->bUnitID,
 	    uvideo_ctrls[i].ctrl_selector, uvideo_ctrls[i].ctrl_len);
 	if (error != USBD_NORMAL_COMPLETION)
 		return (EINVAL);
-	gctrl->value = letoh16(*(uint16_t *)ctrl_data);
+	switch(ctrl_len) {
+	case 1:
+		gctrl->value = uvideo_ctrls[i].sig ?
+		    *(int8_t *)ctrl_data :
+		    *ctrl_data;
+		break;
+	case 2:
+		gctrl->value = uvideo_ctrls[i].sig ?
+		    letoh16(*(int16_t *)ctrl_data) :
+		    letoh16(*(uint16_t *)ctrl_data);
+		break;
+	}
+
+	free(ctrl_data, M_USBDEV);
 
 	return (0);
 }
@@ -3119,18 +3229,46 @@ uvideo_s_ctrl(void *v, struct v4l2_control *sctrl)
 	struct uvideo_softc *sc = v;
 	int i;
 	usbd_status error;
-	uint8_t ctrl_data[2];
+	int8_t *ctrl_data;
+	uint16_t ctrl_len;
 
 	i = uvideo_find_ctrl(sc, sctrl->id);
 	if (i == EINVAL)
 		return (i);
 
-	*(uint16_t *)ctrl_data = htole16(sctrl->value);
+	ctrl_len = uvideo_ctrls[i].ctrl_len;
+	if (ctrl_len < 1 || ctrl_len > 2) {
+		printf("%s: invalid control length: %d\n", __func__, ctrl_len);
+		return (EINVAL);
+	}
+
+	ctrl_data = malloc(ctrl_len, M_USBDEV, M_WAITOK);
+	if (ctrl_data == NULL) {
+		printf("%s: could not allocate control data\n", __func__);
+		return (ENOMEM);
+	}
+
+	switch(ctrl_len) {
+	case 1:
+		if (uvideo_ctrls[i].sig)
+			*(int8_t *)ctrl_data = sctrl->value;
+		else
+			*ctrl_data = sctrl->value;
+		break;
+	case 2:
+		if (uvideo_ctrls[i].sig)
+			*(int16_t *)ctrl_data = htole16(sctrl->value);
+		else
+			*(uint16_t *)ctrl_data = htole16(sctrl->value);
+		break;
+	}
 	error = uvideo_vc_set_ctrl(sc, ctrl_data, SET_CUR,
 	    sc->sc_desc_vc_pu_cur->bUnitID,
 	    uvideo_ctrls[i].ctrl_selector, uvideo_ctrls[i].ctrl_len);
 	if (error != USBD_NORMAL_COMPLETION)
 		return (EINVAL);
+
+	free(ctrl_data, M_USBDEV);
 
 	return (0);
 }

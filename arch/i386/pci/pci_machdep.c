@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.c,v 1.50 2009/09/28 15:58:30 kettenis Exp $	*/
+/*	$OpenBSD: pci_machdep.c,v 1.54 2010/09/06 19:05:48 kettenis Exp $	*/
 /*	$NetBSD: pci_machdep.c,v 1.28 1997/06/06 23:29:17 thorpej Exp $	*/
 
 /*-
@@ -167,7 +167,7 @@ struct bus_dma_tag pci_bus_dma_tag = {
 	_bus_dmamap_load_uio,
 	_bus_dmamap_load_raw,
 	_bus_dmamap_unload,
-	NULL,			/* _dmamap_sync */
+	_bus_dmamap_sync,
 	_bus_dmamem_alloc,
 	_bus_dmamem_free,
 	_bus_dmamem_map,
@@ -656,4 +656,17 @@ pci_init_extents(void)
 		extent_alloc_region(pcimem_ex, IOM_BEGIN, IOM_SIZE,
 		    EX_CONFLICTOK | EX_NOWAIT);
 	}
+}
+
+#include "acpi.h"
+#if NACPI > 0
+void acpi_pci_match(struct device *, struct pci_attach_args *);
+#endif
+
+void
+pci_dev_postattach(struct device *dev, struct pci_attach_args *pa)
+{
+#if NACPI > 0
+	acpi_pci_match(dev, pa);
+#endif
 }

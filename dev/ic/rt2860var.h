@@ -1,4 +1,4 @@
-/*	$OpenBSD: rt2860var.h,v 1.16 2010/04/06 16:41:54 damien Exp $	*/
+/*	$OpenBSD: rt2860var.h,v 1.20 2010/09/07 16:21:42 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 2007
@@ -97,6 +97,7 @@ struct rt2860_rx_ring {
 
 struct rt2860_node {
 	struct ieee80211_node	ni;
+	uint8_t			wcid;
 	uint8_t			ridx[IEEE80211_RATE_MAXSIZE];
 	uint8_t			ctl_ridx[IEEE80211_RATE_MAXSIZE];
 };
@@ -111,7 +112,6 @@ struct rt2860_softc {
 
 	int				(*sc_enable)(struct rt2860_softc *);
 	void				(*sc_disable)(struct rt2860_softc *);
-	void				(*sc_power)(struct rt2860_softc *, int);
 
 	bus_dma_tag_t			sc_dmat;
 	bus_space_tag_t			sc_st;
@@ -122,12 +122,14 @@ struct rt2860_softc {
 
 	int				sc_flags;
 #define RT2860_ENABLED		(1 << 0)
-#define RT2860_FWLOADED		(1 << 1)
-#define RT2860_ADVANCED_PS	(1 << 2)
-#define RT2860_PCIE		(1 << 3)
+#define RT2860_ADVANCED_PS	(1 << 1)
+#define RT2860_PCIE		(1 << 2)
 
 	uint32_t			sc_ic_flags;
 	int				fixed_ridx;
+
+	u_char				*ucode;
+	size_t				ucsize;
 
 	struct rt2860_tx_ring		txq[6];
 	struct rt2860_rx_ring		rxq;
@@ -196,9 +198,10 @@ struct rt2860_softc {
 #define sc_txtap			sc_txtapu.th
 	int				sc_txtap_len;
 #endif
-	void				*sc_powerhook;
 };
 
 int	rt2860_attach(void *, int);
 int	rt2860_detach(void *);
+void	rt2860_suspend(void *);
+void	rt2860_resume(void *);
 int	rt2860_intr(void *);

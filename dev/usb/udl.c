@@ -1,4 +1,4 @@
-/*	$OpenBSD: udl.c,v 1.57 2010/06/01 04:53:17 mglocker Exp $ */
+/*	$OpenBSD: udl.c,v 1.64 2010/10/16 07:06:20 maja Exp $ */
 
 /*
  * Copyright (c) 2009 Marcus Glocker <mglocker@openbsd.org>
@@ -234,6 +234,7 @@ struct udl_type {
 static const struct udl_type udl_devs[] = {
 	{ { USB_VENDOR_DISPLAYLINK, USB_PRODUCT_DISPLAYLINK_LCD4300U },	DL120 },
 	{ { USB_VENDOR_DISPLAYLINK, USB_PRODUCT_DISPLAYLINK_LCD8000U },	DL120 },
+	{ { USB_VENDOR_DISPLAYLINK, USB_PRODUCT_DISPLAYLINK_GUC2020 },	DL160 },
 	{ { USB_VENDOR_DISPLAYLINK, USB_PRODUCT_DISPLAYLINK_LD220 },	DL165 },
 	{ { USB_VENDOR_DISPLAYLINK, USB_PRODUCT_DISPLAYLINK_VCUD60 },	DL160 },
 	{ { USB_VENDOR_DISPLAYLINK, USB_PRODUCT_DISPLAYLINK_DLDVI },	DL160 },
@@ -241,10 +242,13 @@ static const struct udl_type udl_devs[] = {
 	{ { USB_VENDOR_DISPLAYLINK, USB_PRODUCT_DISPLAYLINK_WSDVI },	DLUNK },
 	{ { USB_VENDOR_DISPLAYLINK, USB_PRODUCT_DISPLAYLINK_EC008 },	DL160 },
 	{ { USB_VENDOR_DISPLAYLINK, USB_PRODUCT_DISPLAYLINK_HPDOCK },	DL160 },
+	{ { USB_VENDOR_DISPLAYLINK, USB_PRODUCT_DISPLAYLINK_NL571 },	DL160 },
 	{ { USB_VENDOR_DISPLAYLINK, USB_PRODUCT_DISPLAYLINK_M01061 },	DL195 },
-	{ { USB_VENDOR_DISPLAYLINK, USB_PRODUCT_DISPLAYLINK_SWDVI },	DL160 },
+	{ { USB_VENDOR_DISPLAYLINK, USB_PRODUCT_DISPLAYLINK_NBDOCK },	DL165 },
+	{ { USB_VENDOR_DISPLAYLINK, USB_PRODUCT_DISPLAYLINK_SWDVI },	DLUNK },
 	{ { USB_VENDOR_DISPLAYLINK, USB_PRODUCT_DISPLAYLINK_UM7X0 },	DL120 },
-	{ { USB_VENDOR_DISPLAYLINK, USB_PRODUCT_DISPLAYLINK_CONV },	DL160 }
+	{ { USB_VENDOR_DISPLAYLINK, USB_PRODUCT_DISPLAYLINK_CONV },	DL160 },
+	{ { USB_VENDOR_DISPLAYLINK, USB_PRODUCT_DISPLAYLINK_LUM70 },	DL125 }
 };
 #define udl_lookup(v, p) ((struct udl_type *)usb_lookup(udl_devs, v, p))
 
@@ -487,6 +491,7 @@ udl_activate(struct device *self, int act)
 	case DVACT_ACTIVATE:
 		break;
 	case DVACT_DEACTIVATE:
+		/* XXX sc->sc_dying = 1; */
 		break;
 	}
 
@@ -652,7 +657,7 @@ udl_alloc_screen(void *v, const struct wsscreen_descr *type,
 
 	/* allocate character backing store */
 	sc->sc_cbs = malloc((sc->sc_ri.ri_rows * sc->sc_ri.ri_cols) *
-	    sizeof(*sc->sc_cbs), M_DEVBUF, M_ZERO);
+	    sizeof(*sc->sc_cbs), M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (sc->sc_cbs == NULL) {
 		printf("%s: can't allocate mem for character backing store!\n",
 		    DN(sc));
@@ -1285,32 +1290,67 @@ udl_select_chip(struct udl_softc *sc)
 
 	dd = usbd_get_device_descriptor(sc->sc_udev);
 
-	bzero(serialnum, sizeof serialnum);
-	error = usbd_get_string_desc(sc->sc_udev, dd->iSerialNumber,
-	    0, &us, &len);
-	if (error != USBD_NORMAL_COMPLETION)
-		return (1);
-		
-	s = &serialnum[0];
-	n = len / 2 - 1;
-	for (i = 0; i < n && i < USB_MAX_STRING_LEN; i++) {
-		c = UGETW(us.bString[i]);
-		/* Convert from Unicode, handle buggy strings. */
-		if ((c & 0xff00) == 0)
-			*s++ = c;
-		else if ((c & 0x00ff) == 0)
-			*s++ = c >> 8;
-		else
-			*s++ = '?';
+	if ((UGETW(dd->idVendor) == USB_VENDOR_DISPLAYLINK) &&
+	    (UGETW(dd->idProduct) == USB_PRODUCT_DISPLAYLINK_WSDVI)) {
+
+		/*
+		 * WS Tech DVI is DL120 or DL160. All deviced uses the
+		 * same revision (0.04) so iSerialNumber must be used
+		 * to determin which chip it is.
+		 */
+
+		bzero(serialnum, sizeof serialnum);
+		error = usbd_get_string_desc(sc->sc_udev, dd->iSerialNumber,
+		    0, &us, &len);
+		if (error != USBD_NORMAL_COMPLETION)
+			return (1);
+
+		s = &serialnum[0];
+		n = len / 2 - 1;
+		for (i = 0; i < n && i < USB_MAX_STRING_LEN; i++) {
+			c = UGETW(us.bString[i]);
+			/* Convert from Unicode, handle buggy strings. */
+			if ((c & 0xff00) == 0)
+				*s++ = c;
+			else if ((c & 0x00ff) == 0)
+				*s++ = c >> 8;
+			else
+				*s++ = '?';
+		}
+		*s++ = 0;
+
+		if (strlen(serialnum) > 7)
+			if (strncmp(serialnum, "0198-13", 7) == 0)
+				sc->sc_chip = DL160;
+
+		DPRINTF(1, "%s: %s: iSerialNumber (%s) used to select chip (%d)\n",
+		     DN(sc), FUNC, serialnum, sc->sc_chip);
+
 	}
-	*s++ = 0;
 
-	if (strlen(serialnum) > 7)
-		if (strncmp(serialnum, "0198-13", 7) == 0)
-			sc->sc_chip = DL160;
+	if ((UGETW(dd->idVendor) == USB_VENDOR_DISPLAYLINK) &&
+	    (UGETW(dd->idProduct) == USB_PRODUCT_DISPLAYLINK_SWDVI)) {
 
-	DPRINTF(1, "%s: %s: iSerialNumber (%s) used to select chip (%d)\n",
-	     DN(sc), FUNC, serialnum, sc->sc_chip);
+		/*
+		 * SUNWEIT DVI is DL160, DL125, DL165 or DL195. Major revision
+		 * can be used to differ between DL1x0 and DL1x5. Minor to
+		 * differ between DL1x5. iSerialNumber seems not to be uniqe.
+		 */
+
+		sc->sc_chip = DL160;
+
+		if (UGETW(dd->bcdDevice) >= 0x100) {
+			sc->sc_chip = DL165;
+			if (UGETW(dd->bcdDevice) == 0x104)
+				sc->sc_chip = DL195;
+			if (UGETW(dd->bcdDevice) == 0x108)
+				sc->sc_chip = DL125;
+		}
+
+		DPRINTF(1, "%s: %s: bcdDevice (%02x) used to select chip (%d)\n",
+		     DN(sc), FUNC, UGETW(dd->bcdDevice), sc->sc_chip);
+
+	}
 
 	return (0);
 }
@@ -1391,7 +1431,7 @@ udl_fbmem_alloc(struct udl_softc *sc)
 	size = round_page(size);
 
 	if (sc->sc_fbmem == NULL) {
-		sc->sc_fbmem = malloc(size, M_DEVBUF, M_ZERO);
+		sc->sc_fbmem = malloc(size, M_DEVBUF, M_NOWAIT|M_ZERO);
 		if (sc->sc_fbmem == NULL)
 			return (-1);
 	}
@@ -1456,7 +1496,7 @@ udl_cmd_alloc_buf(struct udl_softc *sc)
 {
 	struct udl_cmd_buf *cb = &sc->sc_cmd_buf;
 
-	cb->buf = malloc(UDL_CMD_MAX_XFER_SIZE, M_DEVBUF, 0);
+	cb->buf = malloc(UDL_CMD_MAX_XFER_SIZE, M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (cb->buf == NULL) {
 		printf("%s: %s: can't allocate buffer!\n",
 		    DN(sc), FUNC);
@@ -1860,6 +1900,21 @@ udl_init_chip(struct udl_softc *sc)
 	if (error != USBD_NORMAL_COMPLETION)
 		return (error);
 	DPRINTF(1, "%s: %s: poll=0x%08x\n", DN(sc), FUNC, ui32);
+
+	/* Some products may use later chip too */
+	switch (ui32 & 0xff) {
+	case 0xf1:				/* DL1x5 */
+		switch (sc->sc_chip) {
+		case DL120:
+			sc->sc_chip = DL125;
+			break;
+		case DL160:
+			sc->sc_chip = DL165;
+			break;
+		}
+		break;
+	}
+	DPRINTF(1, "%s: %s: chip %d\n", DN(sc), FUNC, sc->sc_chip);
 
 	error = udl_read_1(sc, 0xc484, &ui8);
 	if (error != USBD_NORMAL_COMPLETION)

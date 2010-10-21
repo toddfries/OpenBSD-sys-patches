@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_iwnvar.h,v 1.19 2010/05/05 19:47:43 damien Exp $	*/
+/*	$OpenBSD: if_iwnvar.h,v 1.21 2010/09/07 16:21:45 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 2007, 2008
@@ -284,7 +284,7 @@ struct iwn_softc {
 	uint8_t			chainmask;
 
 	int			sc_tx_timer;
-	void			*powerhook;
+	struct workq_task	sc_resume_wqt;
 
 #if NBPFILTER > 0
 	caddr_t			sc_drvbpf;

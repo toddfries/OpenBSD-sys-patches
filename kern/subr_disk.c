@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_disk.c,v 1.103 2010/05/03 15:27:28 jsing Exp $	*/
+/*	$OpenBSD: subr_disk.c,v 1.112 2010/09/24 07:08:50 deraadt Exp $	*/
 /*	$NetBSD: subr_disk.c,v 1.17 1996/03/16 23:17:08 christos Exp $	*/
 
 /*
@@ -57,6 +57,7 @@
 #include <sys/dkstat.h>		/* XXX */
 #include <sys/proc.h>
 #include <sys/vnode.h>
+#include <sys/workq.h>
 #include <uvm/uvm_extern.h>
 
 #include <sys/socket.h>
@@ -80,6 +81,9 @@ int	disk_change;		/* set if a disk has been attached/detached
 
 /* softraid callback, do not use! */
 void (*softraid_disk_attach)(struct disk *, int);
+
+char *disk_readlabel(struct disklabel *, dev_t, char *, size_t);
+void disk_attach_callback(void *, void *);
 
 /*
  * Seek sort for disks.  We depend on the driver which calls us using b_resid
@@ -788,8 +792,9 @@ disk_construct(struct disk *diskp, char *lockname)
  * Attach a disk.
  */
 void
-disk_attach(struct disk *diskp)
+disk_attach(struct device *dv, struct disk *diskp)
 {
+	int majdev;
 
 	if (!ISSET(diskp->dk_flags, DKF_CONSTRUCTED))
 		disk_construct(diskp, diskp->dk_name);
@@ -816,8 +821,44 @@ disk_attach(struct disk *diskp)
 	++disk_count;
 	disk_change = 1;
 
+	/*
+	 * Store device structure and number for later use.
+	 */
+	diskp->dk_device = dv;
+	diskp->dk_devno = NODEV;
+	if (dv != NULL) {
+		majdev = findblkmajor(dv);
+		if (majdev >= 0)
+			diskp->dk_devno =
+			    MAKEDISKDEV(majdev, dv->dv_unit, RAW_PART);
+	}
+	if (diskp->dk_devno != NODEV)
+		workq_add_task(NULL, 0, disk_attach_callback,
+		    (void *)(long)(diskp->dk_devno), NULL);
+
 	if (softraid_disk_attach)
 		softraid_disk_attach(diskp, 1);
+}
+
+void
+disk_attach_callback(void *arg1, void *arg2)
+{
+	char errbuf[100];
+	struct disklabel dl;
+	struct disk *dk;
+	dev_t dev = (dev_t)(long)arg1;
+
+	/* Locate disk associated with device no. */
+	TAILQ_FOREACH(dk, &disklist, dk_link) {
+		if (dk->dk_devno == dev)
+			break;
+	}
+	if (dk == NULL || (dk->dk_flags & (DKF_OPENED | DKF_NOLABELREAD)))
+		return;
+
+	/* Read disklabel. */
+	disk_readlabel(&dl, dev, errbuf, sizeof(errbuf));
+	dk->dk_flags |= DKF_OPENED;
 }
 
 /*
@@ -917,38 +958,15 @@ disk_unlock(struct disk *dk)
 int
 dk_mountroot(void)
 {
-	dev_t rawdev, rrootdev;
+	char errbuf[100];
 	int part = DISKPART(rootdev);
 	int (*mountrootfn)(void);
 	struct disklabel dl;
-	struct vnode *vn;
-	int error;
+	char *error;
 
-	rrootdev = blktochr(rootdev);
-	rawdev = MAKEDISKDEV(major(rrootdev), DISKUNIT(rootdev), RAW_PART);
-#ifdef DEBUG
-	printf("rootdev=0x%x rrootdev=0x%x rawdev=0x%x\n", rootdev,
-	    rrootdev, rawdev);
-#endif
-
-	/*
-	 * open device, ioctl for the disklabel, and close it.
-	 */
-	if (cdevvp(rawdev, &vn))
-		panic("cannot obtain vnode for 0x%x/0x%x", rootdev, rrootdev);
-	error = VOP_OPEN(vn, FREAD, NOCRED, curproc);
+	error = disk_readlabel(&dl, rootdev, errbuf, sizeof(errbuf));
 	if (error)
-		panic("cannot open disk, 0x%x/0x%x, error %d",
-		    rootdev, rrootdev, error);
-	error = VOP_IOCTL(vn, DIOCGDINFO, (caddr_t)&dl, FREAD, NOCRED, 0);
-	if (error)
-		panic("cannot read disk label, 0x%x/0x%x, error %d",
-		    rootdev, rrootdev, error);
-	error = VOP_CLOSE(vn, FREAD, NOCRED, 0);
-	if (error)
-		panic("cannot close disk , 0x%x/0x%x, error %d",
-		    rootdev, rrootdev, error);
-	vput(vn);
+		panic(error);
 
 	if (DL_GETPSIZE(&dl.d_partitions[part]) == 0)
 		panic("root filesystem has size 0");
@@ -987,8 +1005,8 @@ dk_mountroot(void)
 		mountrootfn = ffs_mountroot;
 		}
 #else
-		panic("disk 0x%x/0x%x filesystem type %d not known", 
-		    rootdev, rrootdev, dl.d_partitions[part].p_fstype);
+		panic("disk 0x%x filesystem type %d not known", 
+		    rootdev, dl.d_partitions[part].p_fstype);
 #endif
 	}
 	return (*mountrootfn)();
@@ -1035,7 +1053,7 @@ parsedisk(char *str, int len, int defpart, dev_t *devp)
 		    dv->dv_xname[len] == '\0') {
 			majdev = findblkmajor(dv);
 			if (majdev < 0)
-				panic("parsedisk");
+				return NULL;
 			*devp = MAKEDISKDEV(majdev, dv->dv_unit, part);
 			break;
 		}
@@ -1283,6 +1301,48 @@ findblkname(int maj)
 	return (NULL);
 }
 
+char *
+disk_readlabel(struct disklabel *dl, dev_t dev, char *errbuf, size_t errsize)
+{
+	struct vnode *vn;
+	dev_t chrdev, rawdev;
+	int error;
+
+	chrdev = blktochr(dev);
+	rawdev = MAKEDISKDEV(major(chrdev), DISKUNIT(chrdev), RAW_PART);
+
+#ifdef DEBUG
+	printf("dev=0x%x chrdev=0x%x rawdev=0x%x\n", dev, chrdev, rawdev);
+#endif
+
+	if (cdevvp(rawdev, &vn)) {
+		snprintf(errbuf, errsize,
+		    "cannot obtain vnode for 0x%x/0x%x", dev, rawdev);
+		return (errbuf);
+	}
+
+	error = VOP_OPEN(vn, FREAD, NOCRED, curproc);
+	if (error) {
+		snprintf(errbuf, errsize,
+		    "cannot open disk, 0x%x/0x%x, error %d",
+		    dev, rawdev, error);
+		goto done;
+	}
+
+	error = VOP_IOCTL(vn, DIOCGDINFO, (caddr_t)dl, FREAD, NOCRED, curproc);
+	if (error) {
+		snprintf(errbuf, errsize,
+		    "cannot read disk label, 0x%x/0x%x, error %d",
+		    dev, rawdev, error);
+	}
+done:
+	VOP_CLOSE(vn, FREAD, NOCRED, curproc);
+	vput(vn);
+	if (error)
+		return (errbuf);
+	return (NULL);
+}
+
 int
 disk_map(char *path, char *mappath, int size, int flags)
 {
@@ -1352,4 +1412,29 @@ disk_map(char *path, char *mappath, int size, int flags)
 	    (flags & DM_OPENBLCK) ? "" : "r", mdk->dk_name, part);
 
 	return 0;
+}
+
+/*
+ * Lookup a disk device and verify that it has completed attaching.
+ */
+struct device *
+disk_lookup(struct cfdriver *cd, int unit)
+{
+	struct device *dv;
+	struct disk *dk;
+
+	dv = device_lookup(cd, unit);
+	if (dv == NULL)
+		return (NULL);
+
+	TAILQ_FOREACH(dk, &disklist, dk_link)
+		if (dk->dk_device == dv)
+			break;
+
+	if (dk == NULL) {
+		device_unref(dv);
+		return (NULL);
+	}
+
+	return (dv);
 }

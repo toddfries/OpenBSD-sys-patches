@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpivar.h,v 1.57 2010/04/07 06:33:06 kettenis Exp $	*/
+/*	$OpenBSD: acpivar.h,v 1.66 2010/08/08 20:45:18 kettenis Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -129,10 +129,11 @@ struct acpi_parsestate {
 };
 
 struct acpi_reg_map {
-	bus_space_handle_t  ioh;
-	int		    addr;
-	int		    size;
-	const char	   *name;
+	bus_space_handle_t	ioh;
+	int			addr;
+	int			size;
+	int			access;
+	const char		*name;
 };
 
 struct acpi_thread {
@@ -153,6 +154,7 @@ struct gpe_block {
 	int  (*handler)(struct acpi_softc *, int, void *);
 	void *arg;
 	int   active;
+	int   edge;
 };
 
 struct acpi_devlist {
@@ -207,6 +209,11 @@ struct acpi_softc {
 	int			sc_powerbtn;
 	int			sc_sleepbtn;
 
+	int			sc_sleepmode;
+	int			sc_powerdown;
+
+	struct rwlock		sc_lck;
+
 	struct {
 		int slp_typa;
 		int slp_typb;
@@ -216,7 +223,7 @@ struct acpi_softc {
 
 	struct gpe_block	*gpe_table;
 
-	int			sc_wakeup;
+	int			sc_threadwaiting;
 	u_int32_t		sc_gpe_sts;
 	u_int32_t		sc_gpe_en;
 	struct acpi_thread	*sc_thread;
@@ -242,6 +249,8 @@ struct acpi_softc {
 
 	int			sc_flags;
 };
+
+extern struct acpi_softc *acpi_softc;
 
 #define	SCFLAG_OREAD	0x0000001
 #define	SCFLAG_OWRITE	0x0000002
@@ -301,11 +310,12 @@ void	 acpi_sleep_walk(struct acpi_softc *, int);
 #define ACPI_IOREAD 0
 #define ACPI_IOWRITE 1
 
-void acpi_delay(struct acpi_softc *, int64_t);
+void acpi_wakeup(void *);
+
 int acpi_gasio(struct acpi_softc *, int, int, uint64_t, int, int, void *);
 
 int	acpi_set_gpehandler(struct acpi_softc *, int,
-	    int (*)(struct acpi_softc *, int, void *), void *, const char *);
+	    int (*)(struct acpi_softc *, int, void *), void *, int);
 void	acpi_enable_gpe(struct acpi_softc *, u_int32_t);
 
 int	acpiec_intr(struct acpiec_softc *);
@@ -317,6 +327,7 @@ int	acpi_read_pmreg(struct acpi_softc *, int, int);
 void	acpi_write_pmreg(struct acpi_softc *, int, int, int);
 
 void	acpi_poll(void *);
+void	acpi_sleep(int, char *);
 
 int acpi_matchhids(struct acpi_attach_args *, const char *[], const char *);
 

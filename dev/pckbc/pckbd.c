@@ -1,4 +1,4 @@
-/* $OpenBSD: pckbd.c,v 1.24 2009/11/23 23:22:38 deraadt Exp $ */
+/* $OpenBSD: pckbd.c,v 1.28 2010/08/28 12:49:57 miod Exp $ */
 /* $NetBSD: pckbd.c,v 1.24 2000/06/05 22:20:57 sommerfeld Exp $ */
 
 /*-
@@ -123,14 +123,13 @@ static int pckbd_is_console(pckbc_tag_t, pckbc_slot_t);
 
 int pckbdprobe(struct device *, void *, void *);
 void pckbdattach(struct device *, struct device *, void *);
-int pckbd_activate(struct device *, int);
 
 struct cfattach pckbd_ca = {
 	sizeof(struct pckbd_softc), 
 	pckbdprobe, 
 	pckbdattach, 
 	NULL, 
-	pckbd_activate
+	NULL
 };
 
 int	pckbd_enable(void *, int);
@@ -336,8 +335,12 @@ pckbdprobe(parent, match, aux)
 		 * be no PS/2 connector at all; in that case, do not
 		 * even try to attach; ukbd will take over as console.
 		 */
-		if (res == ENXIO)
-			return 0;
+		if (res == ENXIO) {
+			/* check cf_flags from parent */
+			struct cfdata *cf = parent->dv_cfdata;
+			if (!ISSET(cf->cf_flags, PCKBCF_FORCE_KEYBOARD_PRESENT))
+				return 0;
+		}
 #endif
 		return (pckbd_is_console(pa->pa_tag, pa->pa_slot) ? 1 : 0);
 	}
@@ -412,22 +415,6 @@ pckbdattach(parent, self, aux)
 	 * Attach the wskbd, saving a handle to it.
 	 */
 	sc->sc_wskbddev = config_found(self, &a, wskbddevprint);
-}
-
-int
-pckbd_activate(struct device *self, int act)
-{
-	int rv = 0;
-
-	switch (act) {
-	case DVACT_SUSPEND:
-		rv = pckbd_enable(self, 0);
-		break;
-	case DVACT_RESUME:
-		rv = pckbd_enable(self, 1);
-		break;
-	}
-	return (rv);
 }
 
 int
@@ -782,7 +769,7 @@ pckbd_scancode_translate(struct pckbd_internal *id, int datain)
 	if (id->t_extended1 == 2 && datain == 0x14)
 		return 0x1d | id->t_releasing;
 	else if (id->t_extended1 == 1 && datain == 0x77)
-		return 0x77 | id->t_releasing;
+		return 0x45 | id->t_releasing;
 
 	if (id->t_extended != 0) {
 		if (datain >= sizeof pckbd_xtbl_ext)
@@ -861,7 +848,7 @@ pckbd_decode(id, datain, type, dataout)
 	} else {
 		/* Always ignore typematic keys */
 		if (key == id->t_lastchar)
-			return(0);
+			return 0;
 		id->t_lastchar = key;
 		*type = WSCONS_EVENT_KEY_DOWN;
 	}

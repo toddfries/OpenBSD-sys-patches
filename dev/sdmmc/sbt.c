@@ -1,4 +1,4 @@
-/*	$OpenBSD: sbt.c,v 1.14 2010/02/11 10:12:19 claudio Exp $	*/
+/*	$OpenBSD: sbt.c,v 1.17 2010/08/24 14:52:23 blambert Exp $	*/
 
 /*
  * Copyright (c) 2007 Uwe Stuehler <uwe@openbsd.org>
@@ -98,8 +98,6 @@ int sbt_debug = 0;
 #define DPRINTF(s)	do {} while (0)
 #define DNPRINTF(n, s)	do {} while (0)
 #endif
-
-#define DEVNAME(sc)	((sc)->sc_dev.dv_xname)
 
 struct cfattach sbt_ca = {
 	sizeof(struct sbt_softc), sbt_match, sbt_attach, sbt_detach
@@ -310,7 +308,7 @@ sbt_read_packet(struct sbt_softc *sc, u_char *buf, size_t *lenp)
 	}
 
 out:
-	SDMMC_LOCK(sc->sc_sf->sc);
+	rw_enter_write(&sc->sc_sf->sc->sc_lock);
 	if (error) {
 		if (sc->sc_rxtry >= SBT_RXTRY_MAX) {
 			/* Drop and request the next packet. */
@@ -321,14 +319,14 @@ out:
 			sc->sc_rxtry++;
 			CSR_WRITE_1(sc, SBT_REG_RPC, RPC_PCRRT);
 		}
-		SDMMC_UNLOCK(sc->sc_sf->sc);
+		rw_exit(&sc->sc_sf->sc->sc_lock);
 		return error;
 	}
 
 	/* acknowledge read packet */
 	CSR_WRITE_1(sc, SBT_REG_RPC, 0);
 
-	SDMMC_UNLOCK(sc->sc_sf->sc);
+	rw_exit(&sc->sc_sf->sc->sc_lock);
 
 	*lenp = len;
 	return 0;
@@ -351,10 +349,10 @@ sbt_intr(void *arg)
 	/* Block further SDIO interrupts; XXX not really needed? */
 	s = splsdmmc();
 
-	SDMMC_LOCK(sc->sc_sf->sc);
+	rw_enter_write(&sc->sc_sf->sc->sc_lock);
 	status = CSR_READ_1(sc, SBT_REG_ISTAT);
 	CSR_WRITE_1(sc, SBT_REG_ICLR, status);
-	SDMMC_UNLOCK(sc->sc_sf->sc);
+	rw_exit(&sc->sc_sf->sc->sc_lock);
 
 	if ((status & ISTAT_INTRD) == 0)
 		return 0;	/* shared SDIO card interrupt? */
@@ -372,7 +370,7 @@ sbt_intr(void *arg)
 	}
 
 	m->m_pkthdr.len = m->m_len = MHLEN;
-	m_copyback(m, 0, len, sc->sc_buf);
+	m_copyback(m, 0, len, sc->sc_buf, M_NOWAIT);
 	if (m->m_pkthdr.len == MAX(MHLEN, len)) {
 		m->m_pkthdr.len = len;
 		m->m_len = MIN(MHLEN, m->m_pkthdr.len);

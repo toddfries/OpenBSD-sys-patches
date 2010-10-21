@@ -1,4 +1,4 @@
-/*      $OpenBSD: ip_divert.c,v 1.6 2010/04/20 22:05:43 tedu Exp $ */
+/*      $OpenBSD: ip_divert.c,v 1.8 2010/09/08 08:34:42 claudio Exp $ */
 
 /*
  * Copyright (c) 2009 Michele Marchetto <michele@openbsd.org>
@@ -94,7 +94,7 @@ divert_output(struct mbuf *m, ...)
 
 	m->m_pkthdr.rcvif = NULL;
 	m->m_nextpkt = NULL;
-	m->m_pkthdr.rdomain = inp->inp_rdomain;
+	m->m_pkthdr.rdomain = inp->inp_rtableid;
 
 	if (control)
 		m_freem(control);
@@ -125,6 +125,8 @@ divert_output(struct mbuf *m, ...)
 		    ((so->so_options & SO_DONTROUTE) ? IP_ROUTETOIF : 0)
 		    | IP_ALLOWBROADCAST | IP_RAWOUTPUT, (void *)NULL,
 		    (void *)NULL);
+		if (error == EACCES)	/* translate pf(4) error for userland */
+			error = EHOSTUNREACH;
 	}
 
 	divstat.divs_opackets++;

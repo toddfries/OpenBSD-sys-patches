@@ -1,4 +1,4 @@
-/* $OpenBSD: acpibat.c,v 1.55 2009/11/24 21:37:42 deraadt Exp $ */
+/* $OpenBSD: acpibat.c,v 1.57 2010/08/07 16:55:38 canacar Exp $ */
 /*
  * Copyright (c) 2005 Marco Peereboom <marco@openbsd.org>
  *
@@ -23,6 +23,7 @@
 #include <sys/sensors.h>
 
 #include <machine/bus.h>
+#include <machine/apmvar.h>
 
 #include <dev/acpi/acpireg.h>
 #include <dev/acpi/acpivar.h>
@@ -279,6 +280,7 @@ acpibat_refresh(void *arg)
 		sc->sc_sens[7].status = SENSOR_S_UNSPEC;
 		sc->sc_sens[7].flags = 0;
 	}
+	acpi_record_event(sc->sc_acpi, APM_POWER_CHANGE);
 }
 
 int
@@ -405,7 +407,7 @@ acpibat_notify(struct aml_node *node, int notify_type, void *arg)
 
 	/* Check if installed state of battery has changed */
 	if (aml_evalinteger(sc->sc_acpi, node, "_STA", 0, NULL, &sta) == 0) {
- 		present = sta & STA_BATTERY;
+		present = sta & STA_BATTERY;
 		if (!sc->sc_bat_present && present)
 			sc->sc_bat_present = 1;
 		else if (sc->sc_bat_present && !present)

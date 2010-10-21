@@ -1,4 +1,4 @@
-/*	$OpenBSD: zaurus_apm.c,v 1.15 2010/04/21 03:11:30 deraadt Exp $	*/
+/*	$OpenBSD: zaurus_apm.c,v 1.20 2010/09/07 16:21:41 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2005 Uwe Stuehler <uwe@bsdx.de>
@@ -22,6 +22,7 @@
 #include <sys/timeout.h>
 #include <sys/conf.h>
 #include <sys/proc.h>
+#include <sys/buf.h>
 #include <sys/sysctl.h>
 
 #include <arm/xscale/pxa2x0reg.h>
@@ -560,12 +561,15 @@ zapm_power_info(struct pxa2x0_apm_softc *pxa_sc, struct apm_power_info *power)
 }
 
 /*
- * Called before suspending when all powerhooks are done.
+ * Called before suspending when all ca_activate functions are done.
  */
 void
 zapm_suspend(struct pxa2x0_apm_softc *pxa_sc)
 {
 	struct zapm_softc *sc = (struct zapm_softc *)pxa_sc;
+
+	bufq_quiesce();
+	config_suspend(TAILQ_FIRST(&alldevs), DVACT_QUIESCE);
 
 	/* Poll in suspended mode and forget the discharge timeout. */
 	sc->sc_suspended = 1;
@@ -584,7 +588,7 @@ zapm_suspend(struct pxa2x0_apm_softc *pxa_sc)
 
 /*
  * Called after wake-up from suspend with interrupts still disabled,
- * before any powerhooks are done.
+ * before any ca_activate functions are done.
  */
 int
 zapm_resume(struct pxa2x0_apm_softc *pxa_sc)
@@ -638,6 +642,7 @@ void
 zapm_poweroff(void)
 {
 	struct pxa2x0_apm_softc *sc;
+	int s;
 
 	KASSERT(apm_cd.cd_ndevs > 0 && apm_cd.cd_devs[0] != NULL);
 	sc = apm_cd.cd_devs[0];
@@ -646,7 +651,8 @@ zapm_poweroff(void)
 	wsdisplay_suspend();
 #endif /* NWSDISPLAY > 0 */
 
-	dopowerhooks(PWR_SUSPEND);
+	s = splhigh();
+	config_suspend(TAILQ_FIRST(&alldevs), DVACT_SUSPEND);
 
 	/* XXX enable charging during suspend */
 
@@ -662,14 +668,15 @@ zapm_poweroff(void)
 
 	do {
 		pxa2x0_apm_sleep(sc);
-	}
-	while (!zapm_resume(sc));
+	} while (!zapm_resume(sc));
 
 	zapm_restart();
 
 	/* NOTREACHED */
-	dopowerhooks(PWR_RESUME);
+	config_suspend(TAILQ_FIRST(&alldevs), DVACT_RESUME);
+	splx(s);
 
+	bufq_restart();
 #if NWSDISPLAY > 0
 	wsdisplay_resume();
 #endif /* NWSDISPLAY > 0 */

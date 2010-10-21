@@ -1,4 +1,4 @@
-/*	$OpenBSD: fd.c,v 1.70 2010/05/23 10:49:19 dlg Exp $	*/
+/*	$OpenBSD: fd.c,v 1.79 2010/09/28 12:39:17 miod Exp $	*/
 /*	$NetBSD: fd.c,v 1.51 1997/05/24 20:16:19 pk Exp $	*/
 
 /*-
@@ -139,7 +139,6 @@ enum fdc_state {
 /* software state, per controller */
 struct fdc_softc {
 	struct device	sc_dev;		/* boilerplate */
-	void		*sc_sih;	/* softintr cookie */
 	caddr_t		sc_reg;
 	struct fd_softc *sc_fd[4];	/* pointers to children */
 	TAILQ_HEAD(drivehead, fd_softc) sc_drives;
@@ -164,6 +163,7 @@ struct fdc_softc {
 #define sc_nstat	sc_io.fdcio_nstat
 #define sc_status	sc_io.fdcio_status
 #define	sc_hih		sc_io.fdcio_ih
+#define	sc_sih		sc_io.fdcio_sih
 	struct timeout	fdctimeout_to;
 	struct timeout	fdcpseudointr_to;
 };
@@ -244,8 +244,6 @@ void fdstrategy(struct buf *);
 void fdstart(struct fd_softc *);
 int fdprint(void *, const char *);
 
-struct dkdriver fddkdriver = { fdstrategy };
-
 struct	fd_type *fd_nvtotype(char *, int, int);
 void	fd_set_motor(struct fdc_softc *fdc);
 void	fd_motor_off(void *arg);
@@ -281,9 +279,9 @@ fdcmatch(parent, match, aux)
 	register struct romaux *ra = &ca->ca_ra;
 
 	/*
-	 * Floppy doesn't exist on sun4.
+	 * Floppy doesn't exist on sun4 and sun4e.
 	 */
-	if (CPU_ISSUN4)
+	if (CPU_ISSUN4OR4E)
 		return (0);
 
 	/*
@@ -428,7 +426,7 @@ fdcattach(parent, self, aux)
 		return;
 	}
 	evcount_attach(&fdc->sc_hih.ih_count, self->dv_xname,
-	    &fdc->sc_hih.ih_vec, &evcount_intr);
+	    &fdc->sc_hih.ih_vec);
 #endif
 	fdc->sc_sih = softintr_establish(IPL_FDSOFT, fdcswintr, fdc);
 
@@ -643,9 +641,9 @@ fdattach(parent, self, aux)
 	/*
 	 * Initialize and attach the disk structure.
 	 */
+	fd->sc_dk.dk_flags = DKF_NOLABELREAD;
 	fd->sc_dk.dk_name = fd->sc_dv.dv_xname;
-	fd->sc_dk.dk_driver = &fddkdriver;
-	disk_attach(&fd->sc_dk);
+	disk_attach(&fd->sc_dv, &fd->sc_dk);
 
 	/*
 	 * We're told if we're the boot device in fdcattach().
@@ -1010,7 +1008,7 @@ fdread(dev, uio, flag)
 	int flag;
 {
 
-        return (physio(fdstrategy, NULL, dev, B_READ, minphys, uio));
+        return (physio(fdstrategy, dev, B_READ, minphys, uio));
 }
 
 int
@@ -1020,7 +1018,7 @@ fdwrite(dev, uio, flag)
 	int flag;
 {
 
-        return (physio(fdstrategy, NULL, dev, B_WRITE, minphys, uio));
+        return (physio(fdstrategy, dev, B_WRITE, minphys, uio));
 }
 
 void
@@ -1795,9 +1793,6 @@ fdioctl(dev, cmd, addr, flag, p)
 		if (((struct mtop *)addr)->mt_op != MTOFFL)
 			return EIO;
 
-#ifdef COMPAT_SUNOS
-	case SUNOS_FDIOCEJECT:
-#endif
 	case DIOCEJECT:
 		fd_do_eject(fd);
 		return (0);

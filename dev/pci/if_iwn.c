@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_iwn.c,v 1.97 2010/06/05 18:52:47 damien Exp $	*/
+/*	$OpenBSD: if_iwn.c,v 1.105 2010/09/07 16:21:45 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 2007-2010 Damien Bergamini <damien.bergamini@free.fr>
@@ -33,6 +33,7 @@
 #include <sys/conf.h>
 #include <sys/device.h>
 #include <sys/sensors.h>
+#include <sys/workq.h>
 
 #include <machine/bus.h>
 #include <machine/endian.h>
@@ -104,7 +105,8 @@ void		iwn_sensor_attach(struct iwn_softc *);
 void		iwn_radiotap_attach(struct iwn_softc *);
 #endif
 int		iwn_detach(struct device *, int);
-void		iwn_power(int, void *);
+int		iwn_activate(struct device *, int);
+void		iwn_resume(void *, void *);
 int		iwn_nic_lock(struct iwn_softc *);
 int		iwn_eeprom_lock(struct iwn_softc *);
 int		iwn_init_otprom(struct iwn_softc *);
@@ -331,7 +333,8 @@ struct cfdriver iwn_cd = {
 };
 
 struct cfattach iwn_ca = {
-	sizeof (struct iwn_softc), iwn_match, iwn_attach, iwn_detach
+	sizeof (struct iwn_softc), iwn_match, iwn_attach, iwn_detach,
+	iwn_activate
 };
 
 int
@@ -529,7 +532,6 @@ iwn_attach(struct device *parent, struct device *self, void *aux)
 
 	ifp->if_softc = sc;
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
-	ifp->if_init = iwn_init;
 	ifp->if_ioctl = iwn_ioctl;
 	ifp->if_start = iwn_start;
 	ifp->if_watchdog = iwn_watchdog;
@@ -565,9 +567,6 @@ iwn_attach(struct device *parent, struct device *self, void *aux)
 	iwn_radiotap_attach(sc);
 #endif
 	timeout_set(&sc->calib_to, iwn_calib_timeout, sc);
-
-	sc->powerhook = powerhook_establish(iwn_power, sc);
-
 	return;
 
 	/* Free allocated memory if something failed during attachment. */
@@ -710,9 +709,6 @@ iwn_detach(struct device *self, int flags)
 	if (sc->sc_ih != NULL)
 		pci_intr_disestablish(sc->sc_pct, sc->sc_ih);
 
-	if (sc->powerhook != NULL)
-		powerhook_disestablish(sc->powerhook);
-
 	/* Free DMA resources. */
 	iwn_free_rx_ring(sc, &sc->rxq);
 	for (qid = 0; qid < sc->sc_hal->ntxqs; qid++)
@@ -737,16 +733,33 @@ iwn_detach(struct device *self, int flags)
 	return 0;
 }
 
-void
-iwn_power(int why, void *arg)
+int
+iwn_activate(struct device *self, int act)
 {
-	struct iwn_softc *sc = arg;
-	struct ifnet *ifp;
+	struct iwn_softc *sc = (struct iwn_softc *)self;
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
+
+	switch (act) {
+	case DVACT_SUSPEND:
+		if (ifp->if_flags & IFF_RUNNING)
+			iwn_stop(ifp, 0);
+		break;
+	case DVACT_RESUME:
+		workq_queue_task(NULL, &sc->sc_resume_wqt, 0,
+		    iwn_resume, sc, NULL);
+		break;
+	}
+
+	return 0;
+}
+
+void
+iwn_resume(void *arg1, void *arg2)
+{
+	struct iwn_softc *sc = arg1;
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
 	pcireg_t reg;
 	int s;
-
-	if (why != PWR_RESUME)
-		return;
 
 	/* Clear device-specific "PCI retry timeout" register (41h). */
 	reg = pci_conf_read(sc->sc_pct, sc->sc_pcitag, 0x40);
@@ -754,12 +767,15 @@ iwn_power(int why, void *arg)
 	pci_conf_write(sc->sc_pct, sc->sc_pcitag, 0x40, reg);
 
 	s = splnet();
-	ifp = &sc->sc_ic.ic_if;
-	if (ifp->if_flags & IFF_UP) {
-		ifp->if_init(ifp);
-		if (ifp->if_flags & IFF_RUNNING)
-			ifp->if_start(ifp);
-	}
+	while (sc->sc_flags & IWN_FLAG_BUSY)
+		tsleep(&sc->sc_flags, 0, "iwnpwr", 0);
+	sc->sc_flags |= IWN_FLAG_BUSY;
+
+	if (ifp->if_flags & IFF_UP)
+		iwn_init(ifp);
+
+	sc->sc_flags &= ~IWN_FLAG_BUSY;
+	wakeup(&sc->sc_flags);
 	splx(s);
 }
 
@@ -3079,9 +3095,11 @@ iwn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	 * Prevent processes from entering this function while another
 	 * process is tsleep'ing in it.
 	 */
-	if (sc->sc_flags & IWN_FLAG_BUSY) {
+	while ((sc->sc_flags & IWN_FLAG_BUSY) && error == 0)
+		error = tsleep(&sc->sc_flags, PCATCH, "iwnioc", 0);
+	if (error != 0) {
 		splx(s);
-		return EBUSY;
+		return error;
 	}
 	sc->sc_flags |= IWN_FLAG_BUSY;
 
@@ -3145,6 +3163,7 @@ iwn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	}
 
 	sc->sc_flags &= ~IWN_FLAG_BUSY;
+	wakeup(&sc->sc_flags);
 	splx(s);
 	return error;
 }
@@ -5676,7 +5695,6 @@ iwn_hw_stop(struct iwn_softc *sc)
 {
 	const struct iwn_hal *hal = sc->sc_hal;
 	int chnl, qid, ntries;
-	uint32_t tmp;
 
 	IWN_WRITE(sc, IWN_RESET, IWN_RESET_NEVO);
 
@@ -5697,8 +5715,7 @@ iwn_hw_stop(struct iwn_softc *sc)
 		for (chnl = 0; chnl < hal->ndmachnls; chnl++) {
 			IWN_WRITE(sc, IWN_FH_TX_CONFIG(chnl), 0);
 			for (ntries = 0; ntries < 200; ntries++) {
-				tmp = IWN_READ(sc, IWN_FH_TX_STATUS);
-				if ((tmp & IWN_FH_TX_STATUS_IDLE(chnl)) ==
+				if (IWN_READ(sc, IWN_FH_TX_STATUS) &
 				    IWN_FH_TX_STATUS_IDLE(chnl))
 					break;
 				DELAY(10);

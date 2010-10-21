@@ -1,4 +1,4 @@
-/*	$OpenBSD: ncr53c9x.c,v 1.46 2010/05/20 00:55:17 krw Exp $	*/
+/*	$OpenBSD: ncr53c9x.c,v 1.49 2010/09/28 01:50:08 deraadt Exp $	*/
 /*     $NetBSD: ncr53c9x.c,v 1.56 2000/11/30 14:41:46 thorpej Exp $    */
 
 /*
@@ -75,7 +75,6 @@
 #include <sys/buf.h>
 #include <sys/malloc.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/queue.h>
 #include <sys/pool.h>
 
@@ -186,10 +185,9 @@ ncr53c9x_lunsearch(ti, lun)
  * Attach this instance, and then all the sub-devices
  */
 void
-ncr53c9x_attach(sc, adapter, dev)
+ncr53c9x_attach(sc, adapter)
 	struct ncr53c9x_softc *sc;
 	struct scsi_adapter *adapter;
-	struct scsi_device *dev;
 {
 	struct scsibus_attach_args saa;
 
@@ -266,7 +264,6 @@ ncr53c9x_attach(sc, adapter, dev)
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = sc->sc_id;
 	sc->sc_link.adapter = adapter;
-	sc->sc_link.device = dev;
 	sc->sc_link.openings = 2;
 	sc->sc_link.adapter_buswidth = sc->sc_ntarg;
 
@@ -764,7 +761,7 @@ ncr53c9x_get_ecb(sc, flags)
 	int flags;
 {
 	struct ncr53c9x_ecb *ecb;
-	int s, wait = 0;
+	int s, wait = PR_NOWAIT;
 
 	if ((curproc != NULL) && ((flags & SCSI_NOSLEEP) == 0))
 		wait = PR_WAITOK;

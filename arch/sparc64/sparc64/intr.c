@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.c,v 1.35 2010/04/16 22:35:24 kettenis Exp $	*/
+/*	$OpenBSD: intr.c,v 1.38 2010/09/27 17:39:43 deraadt Exp $	*/
 /*	$NetBSD: intr.c,v 1.39 2001/07/19 23:38:11 eeh Exp $ */
 
 /*
@@ -228,9 +228,9 @@ intr_establish(int level, struct intrhand *ih)
 		panic("intr_establish: bad intr number %x", ih->ih_number);
 
 	if (strlen(ih->ih_name) == 0)
-		evcount_attach(&ih->ih_count, "unknown", NULL, &evcount_intr);
+		evcount_attach(&ih->ih_count, "unknown", NULL);
 	else
-		evcount_attach(&ih->ih_count, ih->ih_name, NULL, &evcount_intr);
+		evcount_attach(&ih->ih_count, ih->ih_name, NULL);
 
 	q = intrlev[ih->ih_number];
 	if (q == NULL) {
@@ -312,7 +312,7 @@ softintr_establish(level, fun, arg)
 	if (level == IPL_TTY)
 		level = IPL_SOFTTTY;
 
-	ih = malloc(sizeof(*ih), M_DEVBUF, M_ZERO);
+	ih = malloc(sizeof(*ih), M_DEVBUF, M_WAITOK | M_ZERO);
 	ih->ih_fun = (int (*)(void *))fun;	/* XXX */
 	ih->ih_arg = arg;
 	ih->ih_pil = level;
@@ -369,14 +369,14 @@ void sparc64_intunlock(struct trapframe64 *);
 void
 sparc64_intlock(struct trapframe64 *tf)
 {
-	if(tf->tf_pil < PIL_SCHED)
+	if (tf->tf_pil < PIL_SCHED && tf->tf_pil != PIL_CLOCK)
 		__mp_lock(&kernel_lock);
 }
 
 void
 sparc64_intunlock(struct trapframe64 *tf)
 {
-	if(tf->tf_pil < PIL_SCHED)
+	if (tf->tf_pil < PIL_SCHED && tf->tf_pil != PIL_CLOCK)
 		__mp_unlock(&kernel_lock);
 }
 

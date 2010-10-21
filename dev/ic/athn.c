@@ -1,4 +1,4 @@
-/*	$OpenBSD: athn.c,v 1.53 2010/06/21 19:56:42 damien Exp $	*/
+/*	$OpenBSD: athn.c,v 1.63 2010/08/27 17:08:00 jsg Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -153,7 +153,7 @@ int		ar9287_attach(struct athn_softc *);
 int		ar9380_attach(struct athn_softc *);
 int		ar5416_init_calib(struct athn_softc *,
 		    struct ieee80211_channel *, struct ieee80211_channel *);
-int		ar9285_1_2_init_calib(struct athn_softc *,
+int		ar9285_init_calib(struct athn_softc *,
 		    struct ieee80211_channel *, struct ieee80211_channel *);
 int		ar9003_init_calib(struct athn_softc *);
 void		ar9285_pa_calib(struct athn_softc *);
@@ -219,13 +219,9 @@ athn_attach(struct athn_softc *sc)
 	/*
 	 * In HostAP mode, the number of STAs that we can handle is
 	 * limited by the number of entries in the HW key cache.
-	 * TKIP keys consume 2 or 4 entries in the cache.
+	 * TKIP keys consume 2 entries in the cache.
 	 */
-	if (sc->flags & ATHN_FLAG_SPLIT_TKIP_MIC)
-		ic->ic_max_nnodes = sc->kc_entries / 4;
-	else
-		ic->ic_max_nnodes = sc->kc_entries / 2;
-	ic->ic_max_nnodes -= IEEE80211_WEP_NKID;
+	ic->ic_max_nnodes = (sc->kc_entries / 2) - IEEE80211_WEP_NKID;
 	if (ic->ic_max_nnodes > IEEE80211_CACHE_SIZE)
 		ic->ic_max_nnodes = IEEE80211_CACHE_SIZE;
 
@@ -326,7 +322,7 @@ athn_attach(struct athn_softc *sc)
 		    ieee80211_std_rateset_11a;
 	}
 
-	/* Get the list of auhtorized/supported channels. */
+	/* Get the list of authorized/supported channels. */
 	athn_get_chanlist(sc);
 
 	/* IBSS channel undefined for now. */
@@ -334,7 +330,6 @@ athn_attach(struct athn_softc *sc)
 
 	ifp->if_softc = sc;
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
-	ifp->if_init = athn_init;
 	ifp->if_ioctl = athn_ioctl;
 	ifp->if_start = athn_start;
 	ifp->if_watchdog = athn_watchdog;
@@ -449,6 +444,7 @@ athn_rx_start(struct athn_softc *sc)
 	/* Want Compressed Block Ack Requests. */
 	rfilt |= AR_RX_FILTER_COMPR_BAR;
 #endif
+	rfilt |= AR_RX_FILTER_BEACON;
 	if (ic->ic_opmode != IEEE80211_M_STA) {
 		rfilt |= AR_RX_FILTER_PROBEREQ;
 		if (ic->ic_opmode == IEEE80211_M_MONITOR)
@@ -458,9 +454,7 @@ athn_rx_start(struct athn_softc *sc)
 		    ic->ic_opmode == IEEE80211_M_HOSTAP)
 			rfilt |= AR_RX_FILTER_PSPOLL;
 #endif
-		rfilt |= AR_RX_FILTER_BEACON;
-	} else
-		rfilt |= AR_RX_FILTER_BEACON; /* XXX AR_RX_FILTER_MYBEACON */
+	}
 	athn_set_rxfilter(sc, rfilt);
 
 	/* Set BSSID mask. */
@@ -963,44 +957,16 @@ athn_set_key(struct ieee80211com *ic, struct ieee80211_node *ni,
 			rxmic = &key[16];
 			txmic = &key[24];
 		}
-		if (sc->flags & ATHN_FLAG_SPLIT_TKIP_MIC) {
-			/* Tx MIC is at entry + 64. */
-			micentry = entry + 64;
-			AR_WRITE(sc, AR_KEYTABLE_KEY0(micentry),
-			    LE_READ_4(&txmic[0]));
-			AR_WRITE(sc, AR_KEYTABLE_KEY1(micentry), 0);
+		/* Tx+Rx MIC key is at entry + 64. */
+		micentry = entry + 64;
+		AR_WRITE(sc, AR_KEYTABLE_KEY0(micentry), LE_READ_4(&rxmic[0]));
+		AR_WRITE(sc, AR_KEYTABLE_KEY1(micentry), LE_READ_2(&txmic[2]));
 
-			AR_WRITE(sc, AR_KEYTABLE_KEY2(micentry),
-			    LE_READ_4(&txmic[4]));
-			AR_WRITE(sc, AR_KEYTABLE_KEY3(micentry), 0);
+		AR_WRITE(sc, AR_KEYTABLE_KEY2(micentry), LE_READ_4(&rxmic[4]));
+		AR_WRITE(sc, AR_KEYTABLE_KEY3(micentry), LE_READ_2(&txmic[0]));
 
-			/* Rx MIC key is at entry + 64 + 32. */
-			micentry = entry + 64 + 32;
-			AR_WRITE(sc, AR_KEYTABLE_KEY0(micentry),
-			    LE_READ_4(&rxmic[0]));
-			AR_WRITE(sc, AR_KEYTABLE_KEY1(micentry), 0);
-
-			AR_WRITE(sc, AR_KEYTABLE_KEY2(micentry),
-			    LE_READ_4(&rxmic[4]));
-			AR_WRITE(sc, AR_KEYTABLE_KEY3(micentry), 0);
-		} else {
-			/* Tx+Rx MIC key is at entry + 64. */
-			micentry = entry + 64;
-			AR_WRITE(sc, AR_KEYTABLE_KEY0(micentry),
-			    LE_READ_4(&rxmic[0]));
-			AR_WRITE(sc, AR_KEYTABLE_KEY1(micentry),
-			    LE_READ_2(&txmic[2]));
-
-			AR_WRITE(sc, AR_KEYTABLE_KEY2(micentry),
-			    LE_READ_4(&rxmic[4]));
-			AR_WRITE(sc, AR_KEYTABLE_KEY3(micentry),
-			    LE_READ_2(&txmic[0]));
-
-			AR_WRITE(sc, AR_KEYTABLE_KEY4(micentry),
-			    LE_READ_4(&txmic[4]));
-			AR_WRITE(sc, AR_KEYTABLE_TYPE(micentry),
-			    AR_KEYTABLE_TYPE_CLR);
-		}
+		AR_WRITE(sc, AR_KEYTABLE_KEY4(micentry), LE_READ_4(&txmic[4]));
+		AR_WRITE(sc, AR_KEYTABLE_TYPE(micentry), AR_KEYTABLE_TYPE_CLR);
 	}
 	AR_WRITE(sc, AR_KEYTABLE_KEY0(entry), LE_READ_4(&key[ 0]));
 	AR_WRITE(sc, AR_KEYTABLE_KEY1(entry), LE_READ_2(&key[ 4]));
@@ -1042,8 +1008,6 @@ athn_delete_key(struct ieee80211com *ic, struct ieee80211_node *ni,
 		entry = (uintptr_t)k->k_priv;
 		athn_reset_key(sc, entry);
 		athn_reset_key(sc, entry + 64);
-		if (sc->flags & ATHN_FLAG_SPLIT_TKIP_MIC)
-			athn_reset_key(sc, entry + 64 + 32);
 		break;
 	default:
 		/* Fallback to software crypto for other ciphers. */
@@ -1175,17 +1139,34 @@ athn_iter_func(void *arg, struct ieee80211_node *ni)
 void
 athn_calib_to(void *arg)
 {
+	extern int ticks;
 	struct athn_softc *sc = arg;
+	struct athn_ops *ops = &sc->ops;
 	struct ieee80211com *ic = &sc->sc_ic;
 	int s;
 
 	s = splnet();
+
+	/* Do periodic (every 4 minutes) PA calibration. */
+	if (AR_SREV_9285_11_OR_LATER(sc) &&
+	    !AR_SREV_9380_10_OR_LATER(sc) &&
+	    ticks >= sc->pa_calib_ticks + 240 * hz) {
+		sc->pa_calib_ticks = ticks;
+		ar9285_pa_calib(sc);
+	}
+
+	/* Do periodic (every 30 seconds) temperature compensation. */
+	if ((sc->flags & ATHN_FLAG_OLPC) &&
+	    ticks >= sc->olpc_ticks + 30 * hz) {
+		sc->olpc_ticks = ticks;
+		ops->olpc_temp_compensation(sc);
+	}
+
 #ifdef notyet
 	/* XXX ANI. */
 	athn_ani_monitor(sc);
-	/* XXX OLPC temperature compensation. */
 
-	sc->ops.next_calib(sc);
+	ops->next_calib(sc);
 #endif
 	if (ic->ic_fixed_rate == -1) {
 		if (ic->ic_opmode == IEEE80211_M_STA)
@@ -1206,8 +1187,8 @@ athn_init_calib(struct athn_softc *sc, struct ieee80211_channel *c,
 
 	if (AR_SREV_9380_10_OR_LATER(sc))
 		error = ar9003_init_calib(sc);
-	else if (AR_SREV_9285_12_OR_LATER(sc))
-		error = ar9285_1_2_init_calib(sc, c, extc);
+	else if (AR_SREV_9285_10_OR_LATER(sc))
+		error = ar9285_init_calib(sc, c, extc);
 	else
 		error = ar5416_init_calib(sc, c, extc);
 	if (error != 0)
@@ -1215,9 +1196,11 @@ athn_init_calib(struct athn_softc *sc, struct ieee80211_channel *c,
 
 	if (!AR_SREV_9380_10_OR_LATER(sc)) {
 		/* Do PA calibration. */
-		if (AR_SREV_9285_11_OR_LATER(sc))
+		if (AR_SREV_9285_11_OR_LATER(sc)) {
+			extern int ticks;
+			sc->pa_calib_ticks = ticks;
 			ar9285_pa_calib(sc);
-
+		}
 		/* Do noisefloor calibration. */
 		ops->noisefloor_calib(sc);
 	}
@@ -2153,8 +2136,7 @@ athn_hw_reset(struct athn_softc *sc, struct ieee80211_channel *c,
 
 	athn_init_qos(sc);
 
-	if (!(sc->flags & ATHN_FLAG_SPLIT_TKIP_MIC))
-		AR_SETBITS(sc, AR_PCU_MISC, AR_PCU_MIC_NEW_LOC_ENA);
+	AR_SETBITS(sc, AR_PCU_MISC, AR_PCU_MIC_NEW_LOC_ENA);
 
 	if (AR_SREV_9287_13_OR_LATER(sc) && !AR_SREV_9380_10_OR_LATER(sc))
 		ar9287_1_3_setup_async_fifo(sc);
@@ -2279,6 +2261,7 @@ athn_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 	struct ifnet *ifp = &ic->ic_if;
 	struct athn_softc *sc = ifp->if_softc;
 	struct athn_ops *ops = &sc->ops;
+	uint32_t reg;
 	int error;
 
 	timeout_del(&sc->calib_to);
@@ -2326,6 +2309,12 @@ athn_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 			athn_set_sta_timers(sc);
 			/* Enable beacon miss interrupts. */
 			sc->imask |= AR_IMR_BMISS;
+
+			/* Stop receiving beacons from other BSS. */
+			reg = AR_READ(sc, AR_RX_FILTER);
+			reg = (reg & ~AR_RX_FILTER_BEACON) |
+			    AR_RX_FILTER_MYBEACON;
+			AR_WRITE(sc, AR_RX_FILTER, reg);
 		}
 		athn_enable_interrupts(sc);
 
@@ -2735,4 +2724,22 @@ athn_stop(struct ifnet *ifp, int disable)
 	/* For CardBus, power down the socket. */
 	if (disable && sc->sc_disable != NULL)
 		sc->sc_disable(sc);
+}
+
+void
+athn_suspend(struct athn_softc *sc)
+{
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
+
+	if (ifp->if_flags & IFF_RUNNING)
+		athn_stop(ifp, 1);
+}
+
+void
+athn_resume(struct athn_softc *sc)
+{
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
+
+	if (ifp->if_flags & IFF_UP)
+		athn_init(ifp);
 }

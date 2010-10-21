@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid.c,v 1.206 2010/06/15 10:59:52 dlg Exp $ */
+/* $OpenBSD: softraid.c,v 1.215 2010/10/12 00:53:32 krw Exp $ */
 /*
  * Copyright (c) 2007, 2008, 2009 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -76,11 +76,9 @@ uint32_t	sr_debug = 0
 int		sr_match(struct device *, void *, void *);
 void		sr_attach(struct device *, struct device *, void *);
 int		sr_detach(struct device *, int);
-int		sr_activate(struct device *, int);
 
 struct cfattach softraid_ca = {
 	sizeof(struct sr_softc), sr_match, sr_attach, sr_detach,
-	sr_activate
 };
 
 struct cfdriver softraid_cd = {
@@ -169,13 +167,9 @@ struct scsi_adapter sr_switch = {
 	sr_scsi_cmd, sr_minphys, NULL, NULL, sr_scsi_ioctl
 };
 
-struct scsi_device sr_dev = {
-	NULL, NULL, NULL, NULL
-};
-
 /* native metadata format */
-int			sr_meta_native_bootprobe(struct sr_softc *,
-			    struct device *, struct sr_metadata_list_head *);
+int			sr_meta_native_bootprobe(struct sr_softc *, dev_t,
+			    struct sr_metadata_list_head *);
 #define SR_META_NOTCLAIMED	(0)
 #define SR_META_CLAIMED		(1)
 int			sr_meta_native_probe(struct sr_softc *,
@@ -223,7 +217,7 @@ sr_meta_attach(struct sr_discipline *sd, int chunk_no, int force)
 	DNPRINTF(SR_D_META, "%s: sr_meta_attach(%d)\n", DEVNAME(sc));
 
 	/* in memory copy of metadata */
-	sd->sd_meta = malloc(SR_META_SIZE * 512, M_DEVBUF, M_ZERO);
+	sd->sd_meta = malloc(SR_META_SIZE * 512, M_DEVBUF, M_ZERO | M_NOWAIT);
 	if (!sd->sd_meta) {
 		printf("%s: could not allocate memory for metadata\n",
 		    DEVNAME(sc));
@@ -233,7 +227,7 @@ sr_meta_attach(struct sr_discipline *sd, int chunk_no, int force)
 	if (sd->sd_meta_type != SR_META_F_NATIVE) {
 		/* in memory copy of foreign metadata */
 		sd->sd_meta_foreign = malloc(smd[sd->sd_meta_type].smd_size,
-		    M_DEVBUF, M_ZERO);
+		    M_DEVBUF, M_ZERO | M_NOWAIT);
 		if (!sd->sd_meta_foreign) {
 			/* unwind frees sd_meta */
 			printf("%s: could not allocate memory for foreign "
@@ -328,7 +322,7 @@ sr_meta_probe(struct sr_discipline *sd, dev_t *dt, int no_chunk)
 			 * XXX leaving dev open for now; move this to attach
 			 * and figure out the open/close dance for unwind.
 			 */
-			error = VOP_OPEN(vn, FREAD | FWRITE, NOCRED, 0);
+			error = VOP_OPEN(vn, FREAD | FWRITE, NOCRED, curproc);
 			if (error) {
 				DNPRINTF(SR_D_META,"%s: sr_meta_probe can't "
 				    "open %s\n", DEVNAME(sc), devname);
@@ -541,7 +535,8 @@ sr_meta_init(struct sr_discipline *sd, struct sr_chunk_head *cl)
 	sm->ssdi.ssd_magic = SR_MAGIC;
 	sm->ssdi.ssd_version = SR_META_VERSION;
 	sm->ssd_ondisk = 0;
-	sm->ssdi.ssd_flags = sd->sd_meta_flags;
+	sm->ssdi.ssd_vol_flags = sd->sd_meta_flags;
+	sm->ssd_data_offset = SR_DATA_OFFSET;
 
 	/* get uuid from chunk 0 */
 	bcopy(&sd->sd_vol.sv_chunks[0]->src_meta.scmi.scm_uuid,
@@ -609,7 +604,7 @@ sr_meta_save(struct sr_discipline *sd, u_int32_t flags)
 
 	/* meta scratchpad */
 	s = &smd[sd->sd_meta_type];
-	m = malloc(SR_META_SIZE * 512, M_DEVBUF, M_ZERO);
+	m = malloc(SR_META_SIZE * 512, M_DEVBUF, M_ZERO | M_NOWAIT);
 	if (!m) {
 		printf("%s: could not allocate metadata scratch area\n",
 		    DEVNAME(sc));
@@ -819,20 +814,43 @@ sr_meta_validate(struct sr_discipline *sd, dev_t dev, struct sr_metadata *sm,
 		goto done;
 	}
 
-	if (sm->ssdi.ssd_version != SR_META_VERSION) {
-		printf("%s: %s can not read metadata version %u, expected %u\n",
-		    DEVNAME(sc), devname, sm->ssdi.ssd_version,
-		    SR_META_VERSION);
-		goto done;
-	}
-
+	/* Verify metadata checksum. */
 	sr_checksum(sc, sm, &checksum, sizeof(struct sr_meta_invariant));
 	if (bcmp(&checksum, &sm->ssd_checksum, sizeof(checksum))) {
 		printf("%s: invalid metadata checksum\n", DEVNAME(sc));
 		goto done;
 	}
 
-	/* XXX do other checksums */
+	/* Handle changes between versions. */
+	if (sm->ssdi.ssd_version == 3) {
+
+		/*
+		 * Version 3 - update metadata version and fix up data offset
+		 * value since this did not exist in version 3.
+		 */
+		sm->ssdi.ssd_version = SR_META_VERSION;
+		snprintf(sm->ssdi.ssd_revision, sizeof(sm->ssdi.ssd_revision),
+		    "%03d", SR_META_VERSION);
+		if (sm->ssd_data_offset == 0)
+			sm->ssd_data_offset = SR_META_V3_DATA_OFFSET;
+
+	} else if (sm->ssdi.ssd_version == SR_META_VERSION) {
+
+		/* 
+		 * Version 4 - original metadata format did not store
+		 * data offset so fix this up if necessary.
+		 */
+		if (sm->ssd_data_offset == 0)
+			sm->ssd_data_offset = SR_DATA_OFFSET;
+
+	} else {
+
+		printf("%s: %s can not read metadata version %u, expected %u\n",
+		    DEVNAME(sc), devname, sm->ssdi.ssd_version,
+		    SR_META_VERSION);
+		goto done;
+
+	}
 
 #ifdef SR_DEBUG
 	/* warn if disk changed order */
@@ -854,7 +872,7 @@ done:
 }
 
 int
-sr_meta_native_bootprobe(struct sr_softc *sc, struct device *dv,
+sr_meta_native_bootprobe(struct sr_softc *sc, dev_t devno,
     struct sr_metadata_list_head *mlh)
 {
 	struct vnode		*vn;
@@ -863,30 +881,26 @@ sr_meta_native_bootprobe(struct sr_softc *sc, struct device *dv,
 	struct sr_discipline	*fake_sd = NULL;
 	struct sr_metadata_list *mle;
 	char			devname[32];
-	dev_t			dev, devr;
-	int			error, i, majdev;
+	dev_t			chrdev, rawdev;
+	int			error, i;
 	int			rv = SR_META_NOTCLAIMED;
 
 	DNPRINTF(SR_D_META, "%s: sr_meta_native_bootprobe\n", DEVNAME(sc));
-
-	majdev = findblkmajor(dv);
-	if (majdev == -1)
-		goto done;
-	dev = MAKEDISKDEV(majdev, dv->dv_unit, RAW_PART);
 
 	/*
 	 * Use character raw device to avoid SCSI complaints about missing
 	 * media on removable media devices.
 	 */
-	dev = MAKEDISKDEV(major(blktochr(dev)), dv->dv_unit, RAW_PART);
-	if (cdevvp(dev, &vn)) {
+	chrdev = blktochr(devno);
+	rawdev = MAKEDISKDEV(major(chrdev), DISKUNIT(devno), RAW_PART);
+	if (cdevvp(rawdev, &vn)) {
 		printf("%s:, sr_meta_native_bootprobe: can't allocate vnode\n",
 		    DEVNAME(sc));
 		goto done;
 	}
 
 	/* open device */
-	error = VOP_OPEN(vn, FREAD, NOCRED, 0);
+	error = VOP_OPEN(vn, FREAD, NOCRED, curproc);
 	if (error) {
 		DNPRINTF(SR_D_META, "%s: sr_meta_native_bootprobe open "
 		    "failed\n", DEVNAME(sc));
@@ -895,17 +909,18 @@ sr_meta_native_bootprobe(struct sr_softc *sc, struct device *dv,
 	}
 
 	/* get disklabel */
-	error = VOP_IOCTL(vn, DIOCGDINFO, (caddr_t)&label, FREAD, NOCRED, 0);
+	error = VOP_IOCTL(vn, DIOCGDINFO, (caddr_t)&label, FREAD, NOCRED,
+	    curproc);
 	if (error) {
 		DNPRINTF(SR_D_META, "%s: sr_meta_native_bootprobe ioctl "
 		    "failed\n", DEVNAME(sc));
-		VOP_CLOSE(vn, FREAD, NOCRED, 0);
+		VOP_CLOSE(vn, FREAD, NOCRED, curproc);
 		vput(vn);
 		goto done;
 	}
 
 	/* we are done, close device */
-	error = VOP_CLOSE(vn, FREAD, NOCRED, 0);
+	error = VOP_CLOSE(vn, FREAD, NOCRED, curproc);
 	if (error) {
 		DNPRINTF(SR_D_META, "%s: sr_meta_native_bootprobe close "
 		    "failed\n", DEVNAME(sc));
@@ -914,7 +929,7 @@ sr_meta_native_bootprobe(struct sr_softc *sc, struct device *dv,
 	}
 	vput(vn);
 
-	md = malloc(SR_META_SIZE * 512, M_DEVBUF, M_ZERO);
+	md = malloc(SR_META_SIZE * 512, M_DEVBUF, M_ZERO | M_NOWAIT);
 	if (md == NULL) {
 		printf("%s: not enough memory for metadata buffer\n",
 		    DEVNAME(sc));
@@ -922,7 +937,8 @@ sr_meta_native_bootprobe(struct sr_softc *sc, struct device *dv,
 	}
 
 	/* create fake sd to use utility functions */
-	fake_sd = malloc(sizeof(struct sr_discipline), M_DEVBUF, M_ZERO);
+	fake_sd = malloc(sizeof(struct sr_discipline), M_DEVBUF,
+	    M_ZERO | M_NOWAIT);
 	if (fake_sd == NULL) {
 		printf("%s: not enough memory for fake discipline\n",
 		    DEVNAME(sc));
@@ -936,13 +952,13 @@ sr_meta_native_bootprobe(struct sr_softc *sc, struct device *dv,
 			continue;
 
 		/* open partition */
-		devr = MAKEDISKDEV(majdev, dv->dv_unit, i);
-		if (bdevvp(devr, &vn)) {
+		rawdev = MAKEDISKDEV(major(devno), DISKUNIT(devno), i);
+		if (bdevvp(rawdev, &vn)) {
 			printf("%s:, sr_meta_native_bootprobe: can't allocate "
 			    "vnode for partition\n", DEVNAME(sc));
 			goto done;
 		}
-		error = VOP_OPEN(vn, FREAD, NOCRED, 0);
+		error = VOP_OPEN(vn, FREAD, NOCRED, curproc);
 		if (error) {
 			DNPRINTF(SR_D_META, "%s: sr_meta_native_bootprobe "
 			    "open failed, partition %d\n",
@@ -951,24 +967,24 @@ sr_meta_native_bootprobe(struct sr_softc *sc, struct device *dv,
 			continue;
 		}
 
-		if (sr_meta_native_read(fake_sd, devr, md, NULL)) {
+		if (sr_meta_native_read(fake_sd, rawdev, md, NULL)) {
 			printf("%s: native bootprobe could not read native "
 			    "metadata\n", DEVNAME(sc));
-			VOP_CLOSE(vn, FREAD, NOCRED, 0);
+			VOP_CLOSE(vn, FREAD, NOCRED, curproc);
 			vput(vn);
 			continue;
 		}
 
 		/* are we a softraid partition? */
 		if (md->ssdi.ssd_magic != SR_MAGIC) {
-			VOP_CLOSE(vn, FREAD, NOCRED, 0);
+			VOP_CLOSE(vn, FREAD, NOCRED, curproc);
 			vput(vn);
 			continue;
 		}
 
-		sr_meta_getdevname(sc, devr, devname, sizeof(devname));
-		if (sr_meta_validate(fake_sd, devr, md, NULL) == 0) {
-			if (md->ssdi.ssd_flags & BIOC_SCNOAUTOASSEMBLE) {
+		sr_meta_getdevname(sc, rawdev, devname, sizeof(devname));
+		if (sr_meta_validate(fake_sd, rawdev, md, NULL) == 0) {
+			if (md->ssdi.ssd_vol_flags & BIOC_SCNOAUTOASSEMBLE) {
 				DNPRINTF(SR_D_META, "%s: don't save %s\n",
 				    DEVNAME(sc), devname);
 			} else {
@@ -977,14 +993,14 @@ sr_meta_native_bootprobe(struct sr_softc *sc, struct device *dv,
 				    M_WAITOK | M_ZERO);
 				bcopy(md, &mle->sml_metadata,
 				    SR_META_SIZE * 512);
-				mle->sml_mm = devr;
+				mle->sml_mm = rawdev;
 				SLIST_INSERT_HEAD(mlh, mle, sml_link);
 				rv = SR_META_CLAIMED;
 			}
 		}
 
 		/* we are done, close partition */
-		VOP_CLOSE(vn, FREAD, NOCRED, 0);
+		VOP_CLOSE(vn, FREAD, NOCRED, curproc);
 		vput(vn);
 	}
 
@@ -1000,7 +1016,9 @@ done:
 int
 sr_boot_assembly(struct sr_softc *sc)
 {
-	struct device		*dv;
+	struct disk		*dk;
+	struct sr_disk_head	sdklist;
+	struct sr_disk		*sdk;
 	struct bioc_createraid	bc;
 	struct sr_metadata_list_head mlh, kdh;
 	struct sr_metadata_list *mle, *mlenext, *mle1, *mle2;
@@ -1018,22 +1036,44 @@ sr_boot_assembly(struct sr_softc *sc)
 
 	DNPRINTF(SR_D_META, "%s: sr_boot_assembly\n", DEVNAME(sc));
 
+	SLIST_INIT(&sdklist);
 	SLIST_INIT(&mlh);
 
-	TAILQ_FOREACH(dv, &alldevs, dv_list) {
-		if (dv->dv_class != DV_DISK)
+	dk = TAILQ_FIRST(&disklist);
+	while (dk != TAILQ_END(&disklist)) {
+
+		/* See if this disk has been checked. */
+		SLIST_FOREACH(sdk, &sdklist, sdk_link)
+			if (sdk->sdk_devno == dk->dk_devno)
+				break;
+
+		if (sdk != NULL) {
+			dk = TAILQ_NEXT(dk, dk_link);
 			continue;
+		}
+
+		/* Add this disk to the list that we've checked. */
+		sdk = malloc(sizeof(struct sr_disk), M_DEVBUF,
+		    M_NOWAIT | M_CANFAIL | M_ZERO);
+		if (sdk == NULL)
+			goto unwind;
+		sdk->sdk_devno = dk->dk_devno;
+		SLIST_INSERT_HEAD(&sdklist, sdk, sdk_link);
 
 		/* Only check sd(4) and wd(4) devices. */
-		if (strcmp(dv->dv_cfdata->cf_driver->cd_name, "sd") &&
-		    strcmp(dv->dv_cfdata->cf_driver->cd_name, "wd"))
+		if (strncmp(dk->dk_name, "sd", 2) &&
+		    strncmp(dk->dk_name, "wd", 2)) {
+			dk = TAILQ_NEXT(dk, dk_link);
 			continue;
+		}
 
 		/* native softraid uses partitions */
-		if (sr_meta_native_bootprobe(sc, dv, &mlh) == SR_META_CLAIMED)
-			continue;
+		sr_meta_native_bootprobe(sc, dk->dk_devno, &mlh);
 
-		/* probe non-native disks */
+		/* probe non-native disks if native failed. */
+
+		/* Restart scan since we may have slept. */
+		dk = TAILQ_FIRST(&disklist);
 	}
 
 	/*
@@ -1299,6 +1339,12 @@ unwind:
 	}
 	SLIST_INIT(&mlh);
 
+	while (!SLIST_EMPTY(&sdklist)) {
+		sdk = SLIST_FIRST(&sdklist);
+		SLIST_REMOVE_HEAD(&sdklist, sdk_link);
+		free(sdk, M_DEVBUF);
+	}
+
 	if (devs)
 		free(devs, M_DEVBUF);
 	if (ondisk)
@@ -1323,7 +1369,7 @@ sr_meta_native_probe(struct sr_softc *sc, struct sr_chunk *ch_entry)
 
 	/* get disklabel */
 	error = VOP_IOCTL(ch_entry->src_vn, DIOCGDINFO, (caddr_t)&label, FREAD,
-	    NOCRED, 0);
+	    NOCRED, curproc);
 	if (error) {
 		DNPRINTF(SR_D_META, "%s: %s can't obtain disklabel\n",
 		    DEVNAME(sc), devname);
@@ -1370,7 +1416,7 @@ sr_meta_native_attach(struct sr_discipline *sd, int force)
 
 	DNPRINTF(SR_D_META, "%s: sr_meta_native_attach\n", DEVNAME(sc));
 
-	md = malloc(SR_META_SIZE * 512, M_DEVBUF, M_ZERO);
+	md = malloc(SR_META_SIZE * 512, M_DEVBUF, M_ZERO | M_NOWAIT);
 	if (md == NULL) {
 		printf("%s: not enough memory for metadata buffer\n",
 		    DEVNAME(sc));
@@ -1567,12 +1613,6 @@ int
 sr_detach(struct device *self, int flags)
 {
 	return (0);
-}
-
-int
-sr_activate(struct device *self, int act)
-{
-	return (1);
 }
 
 void
@@ -2335,7 +2375,7 @@ sr_hotspare(struct sr_softc *sc, dev_t dev)
 		printf("%s:, sr_hotspare: can't allocate vnode\n", DEVNAME(sc));
 		goto done;
 	}
-	if (VOP_OPEN(vn, FREAD | FWRITE, NOCRED, 0)) {
+	if (VOP_OPEN(vn, FREAD | FWRITE, NOCRED, curproc)) {
 		DNPRINTF(SR_D_META,"%s: sr_hotspare cannot open %s\n",
 		    DEVNAME(sc), devname);
 		vput(vn);
@@ -2345,10 +2385,11 @@ sr_hotspare(struct sr_softc *sc, dev_t dev)
 
 	/* Get partition details. */
 	part = DISKPART(dev);
-	if (VOP_IOCTL(vn, DIOCGDINFO, (caddr_t)&label, FREAD, NOCRED, 0)) {
+	if (VOP_IOCTL(vn, DIOCGDINFO, (caddr_t)&label, FREAD,
+	    NOCRED, curproc)) {
 		DNPRINTF(SR_D_META, "%s: sr_hotspare ioctl failed\n",
 		    DEVNAME(sc));
-		VOP_CLOSE(vn, FREAD | FWRITE, NOCRED, 0);
+		VOP_CLOSE(vn, FREAD | FWRITE, NOCRED, curproc);
 		vput(vn);
 		goto fail;
 	}
@@ -2395,7 +2436,7 @@ sr_hotspare(struct sr_softc *sc, dev_t dev)
 	sm->ssdi.ssd_magic = SR_MAGIC;
 	sm->ssdi.ssd_version = SR_META_VERSION;
 	sm->ssd_ondisk = 0;
-	sm->ssdi.ssd_flags = 0;
+	sm->ssdi.ssd_vol_flags = 0;
 	bcopy(&uuid, &sm->ssdi.ssd_uuid, sizeof(struct sr_uuid));
 	sm->ssdi.ssd_chunk_no = 1;
 	sm->ssdi.ssd_volid = SR_HOTSPARE_VOLID;
@@ -2459,7 +2500,7 @@ done:
 	if (sm)
 		free(sm, M_DEVBUF);
 	if (open) {
-		VOP_CLOSE(vn, FREAD | FWRITE, NOCRED, 0);
+		VOP_CLOSE(vn, FREAD | FWRITE, NOCRED, curproc);
 		vput(vn);
 	}
 
@@ -2632,7 +2673,7 @@ sr_rebuild_init(struct sr_discipline *sd, dev_t dev, int hotspare)
 		goto done;
 	}
 
-	if (VOP_OPEN(vn, FREAD | FWRITE, NOCRED, 0)) {
+	if (VOP_OPEN(vn, FREAD | FWRITE, NOCRED, curproc)) {
 		DNPRINTF(SR_D_META,"%s: sr_ioctl_setstate can't "
 		    "open %s\n", DEVNAME(sc), devname);
 		vput(vn);
@@ -2642,7 +2683,8 @@ sr_rebuild_init(struct sr_discipline *sd, dev_t dev, int hotspare)
 
 	/* get partition */
 	part = DISKPART(dev);
-	if (VOP_IOCTL(vn, DIOCGDINFO, (caddr_t)&label, FREAD, NOCRED, 0)) {
+	if (VOP_IOCTL(vn, DIOCGDINFO, (caddr_t)&label, FREAD,
+	    NOCRED, curproc)) {
 		DNPRINTF(SR_D_META, "%s: sr_ioctl_setstate ioctl failed\n",
 		    DEVNAME(sc));
 		goto done;
@@ -2706,7 +2748,7 @@ sr_rebuild_init(struct sr_discipline *sd, dev_t dev, int hotspare)
 	rv = 0;
 done:
 	if (open) {
-		VOP_CLOSE(vn, FREAD | FWRITE, NOCRED, 0);
+		VOP_CLOSE(vn, FREAD | FWRITE, NOCRED, curproc);
 		vput(vn);
 	}
 
@@ -2926,9 +2968,9 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc, int user)
 	/* Adjust flags if necessary. */
 	if ((sd->sd_capabilities & SR_CAP_AUTO_ASSEMBLE) &&
 	    (bc->bc_flags & BIOC_SCNOAUTOASSEMBLE) !=
-	    (sd->sd_meta->ssdi.ssd_flags & BIOC_SCNOAUTOASSEMBLE)) {
-		sd->sd_meta->ssdi.ssd_flags &= ~BIOC_SCNOAUTOASSEMBLE;
-		sd->sd_meta->ssdi.ssd_flags |=
+	    (sd->sd_meta->ssdi.ssd_vol_flags & BIOC_SCNOAUTOASSEMBLE)) {
+		sd->sd_meta->ssdi.ssd_vol_flags &= ~BIOC_SCNOAUTOASSEMBLE;
+		sd->sd_meta->ssdi.ssd_vol_flags |=
 		    bc->bc_flags & BIOC_SCNOAUTOASSEMBLE;
 	}
 
@@ -2946,7 +2988,6 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc, int user)
 			sd->sd_link.openings = sd->sd_openings(sd);
 		else
 			sd->sd_link.openings = sd->sd_max_wu;
-		sd->sd_link.device = &sr_dev;
 		sd->sd_link.device_softc = sc;
 		sd->sd_link.adapter_softc = sc;
 		sd->sd_link.adapter = &sr_switch;
@@ -3074,7 +3115,7 @@ sr_ioctl_deleteraid(struct sr_softc *sc, struct bioc_deleteraid *dr)
 		goto bad;
 
 	sd->sd_deleted = 1;
-	sd->sd_meta->ssdi.ssd_flags = BIOC_SCNOAUTOASSEMBLE;
+	sd->sd_meta->ssdi.ssd_vol_flags = BIOC_SCNOAUTOASSEMBLE;
 	sr_shutdown(sd);
 
 	rv = 0;
@@ -3236,7 +3277,7 @@ sr_ioctl_installboot(struct sr_softc *sc, struct bioc_installboot *bb)
 	/* XXX - Install boot block on disk - MD code. */
 
 	/* Save boot details in metadata. */
-	sd->sd_meta->ssdi.ssd_flags |= BIOC_SCBOOTABLE;
+	sd->sd_meta->ssdi.ssd_vol_flags |= BIOC_SCBOOTABLE;
 
 	/* XXX - Store size of boot block/loader in optional metadata. */
 
@@ -3280,8 +3321,10 @@ sr_chunks_unwind(struct sr_softc *sc, struct sr_chunk_head *cl)
 			 * the problem introduced by vnode aliasing... specfs
 			 * has no locking, whereas ufs/ffs does!
 			 */
-			vn_lock(ch_entry->src_vn, LK_EXCLUSIVE | LK_RETRY, 0);
-			VOP_CLOSE(ch_entry->src_vn, FREAD | FWRITE, NOCRED, 0);
+			vn_lock(ch_entry->src_vn, LK_EXCLUSIVE |
+			    LK_RETRY, curproc);
+			VOP_CLOSE(ch_entry->src_vn, FREAD | FWRITE, NOCRED,
+			    curproc);
 			vput(ch_entry->src_vn);
 		}
 		free(ch_entry, M_DEVBUF);
@@ -3430,6 +3473,7 @@ sr_raid_inquiry(struct sr_workunit *wu)
 	inq.version = 2;
 	inq.response_format = 2;
 	inq.additional_length = 32;
+	inq.flags |= SID_CmdQue;
 	strlcpy(inq.vendor, sd->sd_meta->ssdi.ssd_vendor,
 	    sizeof(inq.vendor));
 	strlcpy(inq.product, sd->sd_meta->ssdi.ssd_product,
@@ -3722,6 +3766,9 @@ sr_validate_io(struct sr_workunit *wu, daddr64_t *blk, char *func)
 
 	DNPRINTF(SR_D_DIS, "%s: %s 0x%02x\n", DEVNAME(sd->sd_sc), func,
 	    xs->cmd->opcode);
+
+	if (sd->sd_meta->ssd_data_offset == 0)
+		panic("invalid data offset");
 
 	if (sd->sd_vol_status == BIOC_SVOFFLINE) {
 		DNPRINTF(SR_D_DIS, "%s: %s device offline\n",
@@ -4116,7 +4163,7 @@ sr_meta_print(struct sr_metadata *m)
 
 	printf("\tssd_magic 0x%llx\n", m->ssdi.ssd_magic);
 	printf("\tssd_version %d\n", m->ssdi.ssd_version);
-	printf("\tssd_flags 0x%x\n", m->ssdi.ssd_flags);
+	printf("\tssd_vol_flags 0x%x\n", m->ssdi.ssd_vol_flags);
 	printf("\tssd_uuid ");
 	sr_uuid_print(&m->ssdi.ssd_uuid, 1);
 	printf("\tssd_chunk_no %d\n", m->ssdi.ssd_chunk_no);

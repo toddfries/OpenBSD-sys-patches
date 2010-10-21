@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.39 2010/05/08 16:54:07 oga Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.41 2010/07/25 21:43:35 deraadt Exp $	*/
 /* $NetBSD: cpu.c,v 1.1.2.7 2000/06/26 02:04:05 sommerfeld Exp $ */
 
 /*-
@@ -69,7 +69,6 @@
 
 #include <sys/param.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 
@@ -471,7 +470,7 @@ cpu_hatch(void *v)
 
 	cpu_init_idt();
 	lapic_enable();
-	lapic_initclocks();
+	lapic_startclock();
 	lapic_set_lvt();
 	gdt_init_cpu(ci);
 	cpu_init_ldt(ci);

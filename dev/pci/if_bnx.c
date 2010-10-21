@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bnx.c,v 1.88 2010/05/24 21:23:23 sthen Exp $	*/
+/*	$OpenBSD: if_bnx.c,v 1.90 2010/09/20 07:40:38 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 2006 Broadcom Corporation
@@ -285,7 +285,6 @@ int	bnx_read_rv2p(struct bnx_softc *sc, int);
 #if 0
 void	bnx_detach(void *);
 #endif
-void	bnx_shutdown(void *);
 
 /****************************************************************************/
 /* BNX Debug Data Structure Dump Routines                                   */
@@ -990,23 +989,6 @@ bnx_detach(void *xsc)
 	return(0);
 }
 #endif
-
-/****************************************************************************/
-/* Device shutdown function.                                                */
-/*                                                                          */
-/* Stops and resets the controller.                                         */
-/*                                                                          */
-/* Returns:                                                                 */
-/*   Nothing                                                                */
-/****************************************************************************/
-void
-bnx_shutdown(void *xsc)
-{
-	struct bnx_softc	*sc = (struct bnx_softc *)xsc;
-
-	bnx_stop(sc);
-	bnx_reset(sc, BNX_DRV_MSG_CODE_RESET);
-}
 
 /****************************************************************************/
 /* Indirect register read.                                                  */
@@ -2227,7 +2209,7 @@ bnx_get_media(struct bnx_softc *sc)
 	} else if (BNX_CHIP_BOND_ID(sc) & BNX_CHIP_BOND_ID_SERDES_BIT)
 		sc->bnx_phy_flags |= BNX_PHY_SERDES_FLAG;
 
-	if (sc->bnx_phy_flags && BNX_PHY_SERDES_FLAG) {
+	if (sc->bnx_phy_flags & BNX_PHY_SERDES_FLAG) {
 		sc->bnx_flags |= BNX_NO_WOL_FLAG;
 
 		if (BNX_CHIP_NUM(sc) == BNX_CHIP_NUM_5709)

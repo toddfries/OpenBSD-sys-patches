@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_subr.c,v 1.185 2010/05/06 06:53:09 mpf Exp $	*/
+/*	$OpenBSD: vfs_subr.c,v 1.191 2010/09/10 16:34:08 thib Exp $	*/
 /*	$NetBSD: vfs_subr.c,v 1.53 1996/04/22 01:39:13 christos Exp $	*/
 
 /*
@@ -103,7 +103,7 @@ int getdevvp(dev_t, struct vnode **, enum vtype);
 
 int vfs_hang_addrlist(struct mount *, struct netexport *,
 				  struct export_args *);
-int vfs_free_netcred(struct radix_node *, void *);
+int vfs_free_netcred(struct radix_node *, void *, u_int);
 void vfs_free_addrlist(struct netexport *);
 void vputonfreelist(struct vnode *);
 
@@ -136,7 +136,7 @@ void
 vntblinit(void)
 {
 	/* buffer cache may need a vnode for each buffer */
-	maxvnodes = desiredvnodes;
+	maxvnodes = 2 * desiredvnodes;
 	pool_init(&vnode_pool, sizeof(struct vnode), 0, 0, 0, "vnodes",
 	    &pool_allocator_nointr);
 	TAILQ_INIT(&vnode_hold_list);
@@ -278,23 +278,6 @@ vfs_getnewfsid(struct mount *mp)
 }
 
 /*
- * Make a 'unique' number from a mount type name.
- * Note that this is no longer used for ffs which
- * now has an on-disk filesystem id.
- */
-long
-makefstype(char *type)
-{
-	long rv;
-
-	for (rv = 0; *type; type++) {
-		rv <<= 2;
-		rv ^= *type;
-	}
-	return rv;
-}
-
-/*
  * Set vnode attributes to VNOVAL
  */
 void
@@ -335,6 +318,13 @@ getnewvnode(enum vtagtype tag, struct mount *mp, int (**vops)(void *),
 	int s;
 
 	/*
+	 * allow maxvnodes to increase if the buffer cache itself
+	 * is big enough to justify it. (we don't shrink it ever)
+	 */
+	maxvnodes = maxvnodes < bcstats.numbufs ? bcstats.numbufs
+	    : maxvnodes;
+
+	/*
 	 * We must choose whether to allocate a new vnode or recycle an
 	 * existing one. The criterion for allocating a new one is that
 	 * the total number of vnodes is less than the number desired or
@@ -350,7 +340,7 @@ getnewvnode(enum vtagtype tag, struct mount *mp, int (**vops)(void *),
 	 * referencing buffers.
 	 */
 	toggle ^= 1;
-	if (numvnodes > 2 * maxvnodes)
+	if (numvnodes / 2 > maxvnodes)
 		toggle = 0;
 
 	s = splbio();
@@ -774,7 +764,7 @@ vdrop(struct vnode *vp)
 {
 #ifdef DIAGNOSTIC
 	if (vp->v_holdcnt == 0)
-		panic("vdrop: zero holdcnt"); 
+		panic("vdrop: zero holdcnt");
 #endif
 
 	vp->v_holdcnt--;
@@ -860,7 +850,7 @@ vflush_vnode(struct vnode *vp, void *arg) {
 		vgonel(vp, p);
 		return (0);
 	}
-		
+
 	/*
 	 * If FORCECLOSE is set, forcibly close the vnode.
 	 * For block or character devices, revert to an
@@ -1482,7 +1472,7 @@ out:
 
 /* ARGSUSED */
 int
-vfs_free_netcred(struct radix_node *rn, void *w)
+vfs_free_netcred(struct radix_node *rn, void *w, u_int id)
 {
 	struct radix_node_head *rnh = (struct radix_node_head *)w;
 

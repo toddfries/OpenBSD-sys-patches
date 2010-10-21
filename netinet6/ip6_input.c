@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_input.c,v 1.96 2010/05/07 13:33:17 claudio Exp $	*/
+/*	$OpenBSD: ip6_input.c,v 1.98 2010/09/09 09:46:13 claudio Exp $	*/
 /*	$KAME: ip6_input.c,v 1.188 2001/03/29 05:34:31 itojun Exp $	*/
 
 /*
@@ -89,8 +89,7 @@
 
 #ifdef INET
 #include <netinet/ip.h>
-#include <netinet/ip_icmp.h>
-#endif /*INET*/
+#endif
 
 #include <netinet/in_pcb.h>
 #include <netinet6/in6_var.h>
@@ -126,10 +125,6 @@ u_char ip6_protox[IPPROTO_MAX];
 static int ip6qmaxlen = IFQ_MAXLEN;
 struct in6_ifaddr *in6_ifaddr;
 struct ifqueue ip6intrq;
-
-int ip6_forward_srcrt;			/* XXX */
-int ip6_sourcecheck;			/* XXX */
-int ip6_sourcecheck_interval;		/* XXX */
 
 struct ip6stat ip6stat;
 

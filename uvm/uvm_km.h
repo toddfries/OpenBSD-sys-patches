@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_km.h,v 1.9 2007/04/11 12:10:42 art Exp $	*/
+/*	$OpenBSD: uvm_km.h,v 1.11 2010/07/15 00:14:17 tedu Exp $	*/
 /*	$NetBSD: uvm_km.h,v 1.9 1999/06/21 17:25:11 thorpej Exp $	*/
 
 /*
@@ -52,6 +52,34 @@ void uvm_km_init(vaddr_t, vaddr_t);
 void uvm_km_page_init(void);
 void uvm_km_pgremove(struct uvm_object *, vaddr_t, vaddr_t);
 void uvm_km_pgremove_intrsafe(vaddr_t, vaddr_t);
+
+#if !defined(__HAVE_PMAP_DIRECT)
+
+#define UVM_KM_PAGES_LOWAT_MAX	(2048)
+#define UVM_KM_PAGES_HIWAT_MAX	(4 * UVM_KM_PAGES_LOWAT_MAX)
+
+struct uvm_km_free_page {
+	struct uvm_km_free_page *next;
+};
+struct uvm_km_pages {
+	struct	mutex mtx;
+
+	/* Low and high water mark for addresses. */
+	int	lowat;
+	int	hiwat;
+
+	/* Kernel address pool. */
+	int	free;
+	vaddr_t	page[UVM_KM_PAGES_HIWAT_MAX];
+
+	struct uvm_km_free_page *freelist;
+	int freelistlen;
+
+	struct	proc *km_proc;
+};
+
+extern struct uvm_km_pages uvm_km_pages;
+#endif	/* _HAVE_PMAP_DIRECT */
 
 #endif /* _KERNEL */
 

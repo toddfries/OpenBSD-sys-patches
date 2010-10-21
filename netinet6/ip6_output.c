@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_output.c,v 1.112 2010/05/07 13:33:17 claudio Exp $	*/
+/*	$OpenBSD: ip6_output.c,v 1.118 2010/09/23 04:45:15 yasuoka Exp $	*/
 /*	$KAME: ip6_output.c,v 1.172 2001/03/25 09:55:56 itojun Exp $	*/
 
 /*
@@ -180,6 +180,9 @@ ip6_output(struct mbuf *m0, struct ip6_pktopts *opt, struct route_in6 *ro,
 	u_int32_t sspi;
 	struct tdb *tdb;
 	int s;
+#if NPF > 0
+	struct ifnet *encif;
+#endif
 #endif /* IPSEC */
 
 #ifdef IPSEC
@@ -239,7 +242,7 @@ ip6_output(struct mbuf *m0, struct ip6_pktopts *opt, struct route_in6 *ro,
 			    mtag->m_tag_len, sizeof (struct tdb_ident));
 #endif
 		tdbi = (struct tdb_ident *)(mtag + 1);
-		tdb = gettdb(tdbi->spi, &tdbi->dst, tdbi->proto);
+		tdb = gettdb(tdbi->rdomain, tdbi->spi, &tdbi->dst, tdbi->proto);
 		if (tdb == NULL)
 			error = -EINVAL;
 		m_tag_delete(m, mtag);
@@ -280,6 +283,7 @@ ip6_output(struct mbuf *m0, struct ip6_pktopts *opt, struct route_in6 *ro,
 			tdbi = (struct tdb_ident *)(mtag + 1);
 			if (tdbi->spi == tdb->tdb_spi &&
 			    tdbi->proto == tdb->tdb_sproto &&
+			    tdbi->rdomain == tdb->tdb_rdomain &&
 			    !bcmp(&tdbi->dst, &tdb->tdb_dst,
 			    sizeof(union sockaddr_union))) {
 				splx(s);
@@ -501,8 +505,24 @@ reroute:
 	if (sproto != 0) {
 	        s = splnet();
 
+		/*
+		 * XXX what should we do if ip6_hlim == 0 and the
+		 * packet gets tunneled?
+		 */
+
+		tdb = gettdb(rtable_l2(m->m_pkthdr.rdomain),
+		    sspi, &sdst, sproto);
+		if (tdb == NULL) {
+			splx(s);
+			error = EHOSTUNREACH;
+			m_freem(m);
+			goto done;
+		}
+
 #if NPF > 0
-		if (pf_test6(PF_OUT, &encif[0].sc_if, &m, NULL) != PF_PASS) {
+		if ((encif = enc_getif(tdb->tdb_rdomain,
+		    tdb->tdb_tap)) == NULL ||
+		    pf_test6(PF_OUT, encif, &m, NULL) != PF_PASS) {
 			splx(s);
 			error = EHOSTUNREACH;
 			m_freem(m);
@@ -521,18 +541,6 @@ reroute:
 		 * What's the behaviour?
 		 */
 #endif
-		/*
-		 * XXX what should we do if ip6_hlim == 0 and the
-		 * packet gets tunneled?
-		 */
-
-		tdb = gettdb(sspi, &sdst, sproto);
-		if (tdb == NULL) {
-			splx(s);
-			error = EHOSTUNREACH;
-			m_freem(m);
-			goto done;
-		}
 
 		m->m_flags &= ~(M_BCAST | M_MCAST);	/* just in case */
 
@@ -1631,8 +1639,8 @@ do { \
 				}
 				tdbip = mtod(m, struct tdb_ident *);
 				s = spltdb();
-				tdb = gettdb(tdbip->spi, &tdbip->dst,
-				    tdbip->proto);
+				tdb = gettdb(tdbip->rdomain, tdbip->spi,
+				    &tdbip->dst, tdbip->proto);
 				if (tdb == NULL)
 					error = ESRCH;
 				else
@@ -1700,6 +1708,12 @@ do { \
 				if (!error)
 					inp->inp_secrequire = get_sa_require(inp);
 #endif
+				break;
+			case IPV6_PIPEX:
+				if (m != NULL && m->m_len == sizeof(int))
+					inp->inp_pipex = *mtod(m, int *);
+				else
+					error = EINVAL;
 				break;
 
 			default:
@@ -1903,6 +1917,8 @@ do { \
 					tdbi.spi = inp->inp_tdb_out->tdb_spi;
 					tdbi.dst = inp->inp_tdb_out->tdb_dst;
 					tdbi.proto = inp->inp_tdb_out->tdb_sproto;
+					tdbi.rdomain =
+					    inp->inp_tdb_out->tdb_rdomain;
 					*mp = m = m_get(M_WAIT, MT_SOOPTS);
 					m->m_len = sizeof(tdbi);
 					bcopy((caddr_t)&tdbi, mtod(m, caddr_t),
@@ -1943,6 +1959,11 @@ do { \
 				}
 				*mtod(m, int *) = optval;
 #endif
+				break;
+			case IPV6_PIPEX:
+				*mp = m = m_get(M_WAIT, MT_SOOPTS);
+				m->m_len = sizeof(int);
+				*mtod(m, int *) = optval;
 				break;
 
 			default:
@@ -2183,7 +2204,7 @@ ip6_getpcbopt(struct ip6_pktopts *pktopt, int optname, struct mbuf **mp)
 		break;
 	default:		/* should not happen */
 #ifdef DIAGNOSTIC
-		panic("ip6_getpcbopt: unexpected option\n");
+		panic("ip6_getpcbopt: unexpected option");
 #endif
 		return (ENOPROTOOPT);
 	}
@@ -3160,29 +3181,6 @@ ip6_splithdr(struct mbuf *m, struct ip6_exthdrs *exthdrs)
 	}
 	exthdrs->ip6e_ip6 = m;
 	return 0;
-}
-
-/*
- * Compute IPv6 extension header length.
- */
-int
-ip6_optlen(struct inpcb *inp)
-{
-	int len;
-
-	if (!inp->inp_outputopts6)
-		return 0;
-
-	len = 0;
-#define elen(x) \
-    (((struct ip6_ext *)(x)) ? (((struct ip6_ext *)(x))->ip6e_len + 1) << 3 : 0)
-
-	len += elen(inp->inp_outputopts6->ip6po_hbh);
-	len += elen(inp->inp_outputopts6->ip6po_dest1);
-	len += elen(inp->inp_outputopts6->ip6po_rthdr);
-	len += elen(inp->inp_outputopts6->ip6po_dest2);
-	return len;
-#undef elen
 }
 
 u_int32_t

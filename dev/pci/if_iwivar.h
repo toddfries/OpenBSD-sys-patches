@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_iwivar.h,v 1.20 2009/06/05 22:40:31 deraadt Exp $	*/
+/*	$OpenBSD: if_iwivar.h,v 1.23 2010/09/07 16:21:45 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 2004-2006
@@ -91,8 +91,9 @@ struct iwi_softc {
 	int			(*sc_newstate)(struct ieee80211com *,
 				    enum ieee80211_state, int);
 
-	uint32_t		flags;
+	uint32_t		sc_flags;
 #define IWI_FLAG_FW_INITED	(1 << 0)
+#define IWI_FLAG_BUSY		(1 << 1)
 
 	bus_dma_tag_t		sc_dmat;
 
@@ -113,7 +114,7 @@ struct iwi_softc {
 
 	int			sc_tx_timer;
 
-	void			*powerhook;
+	struct workq_task	sc_resume_wqt;
 
 #if NBPFILTER > 0
 	caddr_t			sc_drvbpf;

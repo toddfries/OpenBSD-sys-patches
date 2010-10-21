@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_uath.c,v 1.41 2010/04/20 22:05:43 tedu Exp $	*/
+/*	$OpenBSD: if_uath.c,v 1.43 2010/08/27 17:08:01 jsg Exp $	*/
 
 /*-
  * Copyright (c) 2006
@@ -191,7 +191,7 @@ int uath_detach(struct device *, int);
 int uath_activate(struct device *, int); 
 
 struct cfdriver uath_cd = { 
-	NULL, "uath", DV_DULL 
+	NULL, "uath", DV_IFNET
 }; 
 
 const struct cfattach uath_ca = { 
@@ -391,7 +391,6 @@ uath_attach(struct device *parent, struct device *self, void *aux)
 
 	ifp->if_softc = sc;
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
-	ifp->if_init = uath_init;
 	ifp->if_ioctl = uath_ioctl;
 	ifp->if_start = uath_start;
 	ifp->if_watchdog = uath_watchdog;

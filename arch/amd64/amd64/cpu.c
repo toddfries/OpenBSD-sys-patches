@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.33 2010/05/08 16:54:07 oga Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.36 2010/10/14 04:38:24 guenther Exp $	*/
 /* $NetBSD: cpu.c,v 1.1 2003/04/26 18:39:26 fvdl Exp $ */
 
 /*-
@@ -69,7 +69,6 @@
 
 #include <sys/param.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
@@ -498,7 +497,7 @@ cpu_hatch(void *v)
 	ci->ci_flags |= CPUF_PRESENT;
 
 	lapic_enable();
-	lapic_initclocks();
+	lapic_startclock();
 
 	while ((ci->ci_flags & CPUF_GO) == 0)
 		delay(10);
@@ -655,7 +654,7 @@ cpu_init_msrs(struct cpu_info *ci)
 {
 	wrmsr(MSR_STAR,
 	    ((uint64_t)GSEL(GCODE_SEL, SEL_KPL) << 32) |
-	    ((uint64_t)LSEL(LSYSRETBASE_SEL, SEL_UPL) << 48));
+	    ((uint64_t)GSEL(GUCODE32_SEL, SEL_UPL) << 48));
 	wrmsr(MSR_LSTAR, (uint64_t)Xsyscall);
 	wrmsr(MSR_CSTAR, (uint64_t)Xsyscall32);
 	wrmsr(MSR_SFMASK, PSL_NT|PSL_T|PSL_I|PSL_C);

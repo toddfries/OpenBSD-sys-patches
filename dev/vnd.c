@@ -1,4 +1,4 @@
-/*	$OpenBSD: vnd.c,v 1.97 2010/05/18 04:41:14 dlg Exp $	*/
+/*	$OpenBSD: vnd.c,v 1.103 2010/09/22 01:18:57 matthew Exp $	*/
 /*	$NetBSD: vnd.c,v 1.26 1996/03/30 23:06:11 christos Exp $	*/
 
 /*
@@ -57,7 +57,6 @@
  * file, the protection of the mapped file is ignored (effectively,
  * by using root credentials in all transactions).
  *
- * NOTE 3: Doesn't interact with leases, should it?
  */
 
 #include <sys/param.h>
@@ -153,8 +152,6 @@ struct vnd_softc {
 
 struct vnd_softc *vnd_softc;
 int numvnd = 0;
-
-struct dkdriver vnddkdriver = { vndstrategy };
 
 /* called by main() at boot time */
 void	vndattach(int);
@@ -570,6 +567,7 @@ vndstrategy(struct buf *bp)
 		nbp->vb_buf.b_validoff = bp->b_validoff;
 		nbp->vb_buf.b_validend = bp->b_validend;
 		LIST_INIT(&nbp->vb_buf.b_dep);
+		nbp->vb_buf.b_bq = NULL;
 
 		/* save a reference to the old buffer */
 		nbp->vb_obp = bp;
@@ -660,24 +658,29 @@ vndiodone(struct buf *bp)
 		DNPRINTF(VDB_IO, "vndiodone: vbp %p error %d\n", vbp,
 		    vbp->vb_buf.b_error);
 
-		pbp->b_flags |= B_ERROR;
-		/* XXX does this matter here? */
-		(&vbp->vb_buf)->b_flags |= B_RAW;
-		pbp->b_error = biowait(&vbp->vb_buf);
+		pbp->b_flags |= (B_ERROR|B_INVAL);
+		pbp->b_error = vbp->vb_buf.b_error;
+		pbp->b_iodone = NULL;
+		biodone(pbp);
+		goto out;
 	}
+
 	pbp->b_resid -= vbp->vb_buf.b_bcount;
+
+	if (pbp->b_resid == 0) {
+		DNPRINTF(VDB_IO, "vndiodone: pbp %p iodone\n", pbp);
+		biodone(pbp);
+	}
+
+out:
 	putvndbuf(vbp);
+
 	if (vnd->sc_tab.b_active) {
 		disk_unbusy(&vnd->sc_dk, (pbp->b_bcount - pbp->b_resid),
 		    (pbp->b_flags & B_READ));
 		if (!vnd->sc_tab.b_actf)
 			vnd->sc_tab.b_active--;
 	}
-	if (pbp->b_resid == 0) {
-		DNPRINTF(VDB_IO, "vndiodone: pbp %p iodone\n", pbp);
-		biodone(pbp);
-	}
-
 }
 
 /* ARGSUSED */
@@ -696,7 +699,7 @@ vndread(dev_t dev, struct uio *uio, int flags)
 	if ((sc->sc_flags & VNF_INITED) == 0)
 		return (ENXIO);
 
-	return (physio(vndstrategy, NULL, dev, B_READ, minphys, uio));
+	return (physio(vndstrategy, dev, B_READ, minphys, uio));
 }
 
 /* ARGSUSED */
@@ -715,7 +718,7 @@ vndwrite(dev_t dev, struct uio *uio, int flags)
 	if ((sc->sc_flags & VNF_INITED) == 0)
 		return (ENXIO);
 
-	return (physio(vndstrategy, NULL, dev, B_WRITE, minphys, uio));
+	return (physio(vndstrategy, dev, B_WRITE, minphys, uio));
 }
 
 size_t
@@ -862,9 +865,8 @@ vndioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 		    vnd->sc_vp, (unsigned long long)vnd->sc_size);
 
 		/* Attach the disk. */
-		vnd->sc_dk.dk_driver = &vnddkdriver;
 		vnd->sc_dk.dk_name = vnd->sc_dev.dv_xname;
-		disk_attach(&vnd->sc_dk);
+		disk_attach(&vnd->sc_dev, &vnd->sc_dk);
 
 		vndunlock(vnd);
 

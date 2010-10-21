@@ -1,4 +1,4 @@
-/* $OpenBSD: mfi.c,v 1.106 2010/06/15 04:11:34 dlg Exp $ */
+/* $OpenBSD: mfi.c,v 1.113 2010/09/24 01:30:05 dlg Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  *
@@ -61,10 +61,6 @@ void	mfiminphys(struct buf *bp, struct scsi_link *sl);
 
 struct scsi_adapter mfi_switch = {
 	mfi_scsi_cmd, mfiminphys, 0, 0, mfi_scsi_ioctl
-};
-
-struct scsi_device mfi_dev = {
-	NULL, NULL, NULL, NULL
 };
 
 struct mfi_ccb	*mfi_get_ccb(struct mfi_softc *);
@@ -156,9 +152,9 @@ mfi_get_ccb(struct mfi_softc *sc)
 	struct mfi_ccb		*ccb;
 
 	mtx_enter(&sc->sc_ccb_mtx);
-	ccb = TAILQ_FIRST(&sc->sc_ccb_freeq);
+	ccb = SLIST_FIRST(&sc->sc_ccb_freeq);
 	if (ccb != NULL) {
-		TAILQ_REMOVE(&sc->sc_ccb_freeq, ccb, ccb_link);
+		SLIST_REMOVE_HEAD(&sc->sc_ccb_freeq, ccb_link);
 		ccb->ccb_state = MFI_CCB_READY;
 	}
 	mtx_leave(&sc->sc_ccb_mtx);
@@ -190,7 +186,7 @@ mfi_put_ccb(struct mfi_ccb *ccb)
 	ccb->ccb_len = 0;
 
 	mtx_enter(&sc->sc_ccb_mtx);
-	TAILQ_INSERT_TAIL(&sc->sc_ccb_freeq, ccb, ccb_link);
+	SLIST_INSERT_HEAD(&sc->sc_ccb_freeq, ccb, ccb_link);
 	mtx_leave(&sc->sc_ccb_mtx);
 }
 
@@ -640,7 +636,7 @@ mfi_attach(struct mfi_softc *sc, enum mfi_iop iop)
 	if (mfi_transition_firmware(sc))
 		return (1);
 
-	TAILQ_INIT(&sc->sc_ccb_freeq);
+	SLIST_INIT(&sc->sc_ccb_freeq);
 	mtx_init(&sc->sc_ccb_mtx, IPL_BIO);
 
 	rw_init(&sc->sc_lock, "mfi_lock");
@@ -718,7 +714,6 @@ mfi_attach(struct mfi_softc *sc, enum mfi_iop iop)
 	else
 		sc->sc_link.openings = sc->sc_max_cmds;
 
-	sc->sc_link.device = &mfi_dev;
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter = &mfi_switch;
 	sc->sc_link.adapter_target = MFI_MAX_LD;
@@ -906,9 +901,21 @@ mfi_scsi_xs_done(struct mfi_ccb *ccb)
 		bus_dmamap_unload(sc->sc_dmat, ccb->ccb_dmamap);
 	}
 
-	if (hdr->mfh_cmd_status != MFI_STAT_OK) {
+	switch (hdr->mfh_cmd_status) {
+	case MFI_STAT_OK:
+		xs->resid = 0;
+		break;
+
+	case MFI_STAT_SCSI_DONE_WITH_ERROR:
+		xs->error = XS_SENSE;
+		xs->resid = 0;
+		memset(&xs->sense, 0, sizeof(xs->sense));
+		memcpy(&xs->sense, ccb->ccb_sense, sizeof(xs->sense));
+		break;
+
+	default:
 		xs->error = XS_DRIVER_STUFFUP;
-		DNPRINTF(MFI_D_INTR, "%s: mfi_scsi_xs_done stuffup %#x\n",
+		printf("%s: mfi_scsi_xs_done stuffup %#x\n",
 		    DEVNAME(sc), hdr->mfh_cmd_status);
 
 		if (hdr->mfh_scsi_status != 0) {
@@ -921,9 +928,8 @@ mfi_scsi_xs_done(struct mfi_ccb *ccb)
 			    sizeof(struct scsi_sense_data));
 			xs->error = XS_SENSE;
 		}
+		break;
 	}
-
-	xs->resid = 0;
 
 	mfi_put_ccb(ccb);
 	scsi_done(xs);
@@ -951,7 +957,7 @@ mfi_scsi_ld(struct mfi_ccb *ccb, struct scsi_xfer *xs)
 	pf->mpf_sense_addr_lo = htole32(ccb->ccb_psense);
 
 	memset(pf->mpf_cdb, 0, 16);
-	memcpy(pf->mpf_cdb, &xs->cmdstore, xs->cmdlen);
+	memcpy(pf->mpf_cdb, xs->cmd, xs->cmdlen);
 
 	ccb->ccb_done = mfi_scsi_xs_done;
 	ccb->ccb_cookie = xs;
@@ -1081,7 +1087,8 @@ mfi_scsi_cmd(struct scsi_xfer *xs)
 			printf("%s: mfi_scsi_cmd poll failed\n",
 			    DEVNAME(sc));
 			bzero(&xs->sense, sizeof(xs->sense));
-			xs->sense.error_code = SSD_ERRCODE_VALID | 0x70;
+			xs->sense.error_code = SSD_ERRCODE_VALID |
+			    SSD_ERRCODE_CURRENT;
 			xs->sense.flags = SKEY_ILLEGAL_REQUEST;
 			xs->sense.add_sense_code = 0x20; /* invalid opcode */
 			xs->error = XS_SENSE;
@@ -1734,7 +1741,6 @@ mfi_ioctl_setstate(struct mfi_softc *sc, struct bioc_setstate *bs)
 	struct mfi_pd_list	*pd;
 	int			i, found, rv = EINVAL;
 	uint8_t			mbox[MFI_MBOX_SIZE];
-	uint32_t		cmd;
 
 	DNPRINTF(MFI_D_IOCTL, "%s: mfi_ioctl_setstate %x\n", DEVNAME(sc),
 	    bs->bs_status);
@@ -1762,21 +1768,17 @@ mfi_ioctl_setstate(struct mfi_softc *sc, struct bioc_setstate *bs)
 	switch (bs->bs_status) {
 	case BIOC_SSONLINE:
 		mbox[2] = MFI_PD_ONLINE;
-		cmd = MD_DCMD_PD_SET_STATE;
 		break;
 
 	case BIOC_SSOFFLINE:
 		mbox[2] = MFI_PD_OFFLINE;
-		cmd = MD_DCMD_PD_SET_STATE;
 		break;
 
 	case BIOC_SSHOTSPARE:
 		mbox[2] = MFI_PD_HOTSPARE;
-		cmd = MD_DCMD_PD_SET_STATE;
 		break;
 /*
 	case BIOC_SSREBUILD:
-		cmd = MD_DCMD_PD_REBUILD;
 		break;
 */
 	default:
@@ -1899,6 +1901,7 @@ mfi_create_sensors(struct mfi_softc *sc)
 {
 	struct device		*dev;
 	struct scsibus_softc	*ssc = NULL;
+	struct scsi_link	*link;
 	int			i;
 
 	TAILQ_FOREACH(dev, &alldevs, dv_list) {
@@ -1923,10 +1926,11 @@ mfi_create_sensors(struct mfi_softc *sc)
 	    sizeof(sc->sc_sensordev.xname));
 
 	for (i = 0; i < sc->sc_ld_cnt; i++) {
-		if (ssc->sc_link[i][0] == NULL)
+		link = scsi_get_link(ssc, i, 0);
+		if (link == NULL)
 			goto bad;
 
-		dev = ssc->sc_link[i][0]->device_softc;
+		dev = link->device_softc;
 
 		sc->sc_sensors[i].type = SENSOR_DRIVE;
 		sc->sc_sensors[i].status = SENSOR_S_UNKNOWN;

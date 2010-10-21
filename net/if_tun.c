@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tun.c,v 1.106 2010/05/06 13:06:40 claudio Exp $	*/
+/*	$OpenBSD: if_tun.c,v 1.109 2010/09/23 04:47:02 matthew Exp $	*/
 /*	$NetBSD: if_tun.c,v 1.24 1996/05/07 02:40:48 thorpej Exp $	*/
 
 /*
@@ -343,9 +343,6 @@ tunopen(dev_t dev, int flag, int mode, struct proc *p)
 	struct ifnet		*ifp;
 	int			 error, s;
 
-	if ((error = suser(p, 0)) != 0)
-		return (error);
-
 	if ((tp = tun_lookup(minor(dev))) == NULL) {	/* create on demand */
 		char	xname[IFNAMSIZ];
 
@@ -574,9 +571,6 @@ tun_output(struct ifnet *ifp, struct mbuf *m0, struct sockaddr *dst,
 	struct tun_softc	*tp = ifp->if_softc;
 	int			 s, len, error;
 	u_int32_t		*af;
-#ifdef PIPEX
-	struct pipex_session	*session;
-#endif
 
 	if ((ifp->if_flags & (IFF_UP|IFF_RUNNING)) != (IFF_UP|IFF_RUNNING)) {
 		m_freem(m0);
@@ -609,8 +603,8 @@ tun_output(struct ifnet *ifp, struct mbuf *m0, struct sockaddr *dst,
 		bpf_mtap(ifp->if_bpf, m0, BPF_DIRECTION_OUT);
 #endif
 #ifdef PIPEX
-	if ((session = pipex_ip_lookup_session(m0, &tp->pipex_iface)) != NULL) {
-		pipex_ip_output(m0, session);
+	if ((m0 = pipex_output(m0, dst->sa_family, sizeof(u_int32_t),
+	    &tp->pipex_iface)) == NULL) {
 		splx(s);
 		return (0);
 	}
@@ -824,7 +818,7 @@ tunread(dev_t dev, struct uio *uio, int ioflag)
 		m_freem(m0);
 	}
 	if (error)
-		ifp->if_ierrors++;
+		ifp->if_oerrors++;
 
 	return (error);
 }

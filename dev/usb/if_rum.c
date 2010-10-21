@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_rum.c,v 1.88 2010/04/20 22:05:43 tedu Exp $	*/
+/*	$OpenBSD: if_rum.c,v 1.90 2010/08/27 17:08:01 jsg Exp $	*/
 
 /*-
  * Copyright (c) 2005-2007 Damien Bergamini <damien.bergamini@free.fr>
@@ -419,7 +419,6 @@ rum_attach(struct device *parent, struct device *self, void *aux)
 
 	ifp->if_softc = sc;
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
-	ifp->if_init = rum_init;
 	ifp->if_ioctl = rum_ioctl;
 	ifp->if_start = rum_start;
 	ifp->if_watchdog = rum_watchdog;
@@ -1991,6 +1990,7 @@ rum_init(struct ifnet *ifp)
 	if (ntries == 1000) {
 		printf("%s: timeout waiting for BBP/RF to wakeup\n",
 		    sc->sc_dev.dv_xname);
+		error = ENODEV;
 		goto fail;
 	}
 

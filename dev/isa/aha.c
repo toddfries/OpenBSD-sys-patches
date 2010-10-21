@@ -1,4 +1,4 @@
-/*	$OpenBSD: aha.c,v 1.69 2010/05/20 00:55:17 krw Exp $	*/
+/*	$OpenBSD: aha.c,v 1.73 2010/08/07 03:50:01 krw Exp $	*/
 /*	$NetBSD: aha.c,v 1.11 1996/05/12 23:51:23 mycroft Exp $	*/
 
 #undef AHADIAG
@@ -57,7 +57,6 @@
 #include <sys/malloc.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/timeout.h>
 
 #include <uvm/uvm.h>
@@ -160,14 +159,6 @@ struct scsi_adapter aha_switch = {
 	ahaminphys,
 	0,
 	0,
-};
-
-/* the below structure is so we have a default dev struct for out link struct */
-struct scsi_device aha_dev = {
-	NULL,			/* Use default error handler */
-	NULL,			/* have a queue, served by this */
-	NULL,			/* have no async handler */
-	NULL,			/* Use default 'done' routine */
 };
 
 int	aha_isapnp_probe(struct device *, void *, void *);
@@ -400,7 +391,6 @@ ahaattach(parent, self, aux)
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = sc->sc_scsi_dev;
 	sc->sc_link.adapter = &aha_switch;
-	sc->sc_link.device = &aha_dev;
 	sc->sc_link.openings = 2;
 
 	bzero(&saa, sizeof(saa));
@@ -1410,11 +1400,11 @@ aha_timeout(arg)
 	int s;
 
 	s = splbio();
-	bus_dmamap_sync(sc->sc_dmat, ccb->ccb_dmam, 0,
-	    ccb->ccb_dmam->dm_mapsize, BUS_DMASYNC_POSTREAD);
 	xs = ccb->xs;
 	sc_link = xs->sc_link;
 	sc = sc_link->adapter_softc;
+	bus_dmamap_sync(sc->sc_dmat, ccb->ccb_dmam, 0,
+	    ccb->ccb_dmam->dm_mapsize, BUS_DMASYNC_POSTREAD);
 
 	sc_print_addr(sc_link);
 	printf("timed out");
@@ -1425,7 +1415,7 @@ aha_timeout(arg)
 	 */
 	aha_collect_mbo(sc);
 	if (ccb->flags & CCB_SENDING)
-		panic("%s: not taking commands!\n", sc->sc_dev.dv_xname);
+		panic("%s: not taking commands!", sc->sc_dev.dv_xname);
 #endif
 
 	/*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: macepcibridge.c,v 1.38 2010/04/06 19:12:34 miod Exp $ */
+/*	$OpenBSD: macepcibridge.c,v 1.40 2010/09/22 02:28:37 jsg Exp $ */
 
 /*
  * Copyright (c) 2009 Miodrag Vallat.
@@ -131,7 +131,8 @@ bus_space_t mace_pcibbus_mem_tag = {
 	mace_pcib_read_raw_4, mace_pcib_write_raw_4,
 	mace_pcib_read_raw_8, mace_pcib_write_raw_8,
 	mace_pcib_space_map, mace_pcib_space_unmap, mace_pcib_space_region,
-	mace_pcib_space_vaddr
+	mace_pcib_space_vaddr,
+	NULL
 };
 
 bus_space_t mace_pcibbus_io_tag = {
@@ -145,7 +146,8 @@ bus_space_t mace_pcibbus_io_tag = {
 	mace_pcib_read_raw_4, mace_pcib_write_raw_4,
 	mace_pcib_read_raw_8, mace_pcib_write_raw_8,
 	mace_pcib_space_map, mace_pcib_space_unmap, mace_pcib_space_region,
-	mace_pcib_space_vaddr
+	mace_pcib_space_vaddr,
+	NULL
 };
 
 /*
@@ -885,7 +887,7 @@ mace_pcibr_rbus_parent_io(struct pci_attach_args *pa)
 	rbus_tag_t rb;
 
 	rb = rbus_new_root_share(pa->pa_iot, pa->pa_ioex,
-	    0x0000, 0xffff, 0);
+	    0x0000, 0xffff);
 	if (rb != NULL)
 		rb->rb_md = &mace_pcibr_rb_md_fn;
 
@@ -898,7 +900,7 @@ mace_pcibr_rbus_parent_mem(struct pci_attach_args *pa)
 	rbus_tag_t rb;
 
 	rb = rbus_new_root_share(pa->pa_memt, pa->pa_memex,
-	    0, 0xffffffff, 0);
+	    0, 0xffffffff);
 	if (rb != NULL)
 		rb->rb_md = &mace_pcibr_rb_md_fn;
 
