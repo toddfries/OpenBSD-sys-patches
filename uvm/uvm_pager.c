@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_pager.c,v 1.49 2009/04/06 12:02:52 oga Exp $	*/
+/*	$OpenBSD: uvm_pager.c,v 1.57 2010/07/24 15:40:39 kettenis Exp $	*/
 /*	$NetBSD: uvm_pager.c,v 1.36 2000/11/27 18:26:41 chs Exp $	*/
 
 /*
@@ -88,7 +88,6 @@ struct	uvm_pseg psegs[PSEG_NUMSEGS];
 #define UVM_PSEG_INUSE(pseg,id)	(((pseg)->use & (1 << (id))) != 0)
 
 void		uvm_pseg_init(struct uvm_pseg *);
-void		uvm_pseg_destroy(struct uvm_pseg *);
 vaddr_t		uvm_pseg_get(int);
 void		uvm_pseg_release(vaddr_t);
 
@@ -138,26 +137,7 @@ uvm_pseg_init(struct uvm_pseg *pseg)
 {
 	KASSERT(pseg->start == 0);
 	KASSERT(pseg->use == 0);
-	pseg->start = uvm_km_valloc(kernel_map, MAX_PAGER_SEGS * MAXBSIZE);
-}
-
-/*
- * Destroy a uvm_pseg.
- *
- * Never fails.
- *
- * Requires that seg != &psegs[0]
- *
- * Caller locks uvm_pseg_lck.
- */
-void
-uvm_pseg_destroy(struct uvm_pseg *pseg)
-{
-	KASSERT(pseg != &psegs[0]);
-	KASSERT(pseg->start != 0);
-	KASSERT(pseg->use == 0);
-	uvm_km_free(kernel_map, pseg->start, MAX_PAGER_SEGS * MAXBSIZE);
-	pseg->start = 0;
+	pseg->start = uvm_km_valloc_try(kernel_map, MAX_PAGER_SEGS * MAXBSIZE);
 }
 
 /*
@@ -225,6 +205,7 @@ uvm_pseg_release(vaddr_t segaddr)
 {
 	int id;
 	struct uvm_pseg *pseg;
+	vaddr_t va = 0;
 
 	for (pseg = &psegs[0]; pseg != &psegs[PSEG_NUMSEGS]; pseg++) {
 		if (pseg->start <= segaddr &&
@@ -246,10 +227,15 @@ uvm_pseg_release(vaddr_t segaddr)
 	pseg->use &= ~(1 << id);
 	wakeup(&psegs);
 
-	if (pseg != &psegs[0] && UVM_PSEG_EMPTY(pseg))
-		uvm_pseg_destroy(pseg);
+	if (pseg != &psegs[0] && UVM_PSEG_EMPTY(pseg)) {
+		va = pseg->start;
+		pseg->start = 0;
+	}
 
 	mtx_leave(&uvm_pseg_lck);
+
+	if (va)
+		uvm_km_free(kernel_map, va, MAX_PAGER_SEGS * MAXBSIZE);
 }
 
 /*
@@ -339,6 +325,8 @@ uvm_pagermapout(vaddr_t kva, int npages)
  *      PGO_ALLPAGES:  all pages in object are valid targets
  *      !PGO_ALLPAGES: use "lo" and "hi" to limit range of cluster
  *      PGO_DOACTCLUST: include active pages in cluster.
+ *	PGO_FREE: set the PG_RELEASED bits on the cluster so they'll be freed
+ *		in async io (caller must clean on error).
  *        NOTE: the caller should clear PG_CLEANCHK bits if PGO_DOACTCLUST.
  *              PG_CLEANCHK is only a hint, but clearing will help reduce
  *		the number of calls we make to the pmap layer.
@@ -440,6 +428,14 @@ uvm_mk_pcluster(struct uvm_object *uobj, struct vm_page **pps, int *npages,
 			atomic_setbits_int(&pclust->pg_flags, PG_BUSY);
 			UVM_PAGE_OWN(pclust, "uvm_mk_pcluster");
 
+			/*
+			 * If we want to free after io is done, and we're
+			 * async, set the released flag
+			 */
+			if ((flags & (PGO_FREE|PGO_SYNCIO)) == PGO_FREE)
+				atomic_setbits_int(&pclust->pg_flags,
+				    PG_RELEASED);
+
 			/* XXX: protect wired page?   see above comment. */
 			pmap_page_protect(pclust, VM_PROT_READ);
 			if (!forward) {
@@ -481,6 +477,7 @@ uvm_mk_pcluster(struct uvm_object *uobj, struct vm_page **pps, int *npages,
  *	PGO_DOACTCLUST: include "PQ_ACTIVE" pages as valid targets
  *	PGO_SYNCIO: do SYNC I/O (no async)
  *	PGO_PDFREECLUST: pagedaemon: drop cluster on successful I/O
+ *	PGO_FREE: tell the aio daemon to free pages in the async case.
  * => start/stop: if (uobj && !PGO_ALLPAGES) limit targets to this range
  *		  if (!uobj) start is the (daddr64_t) of the starting swapblk
  * => return state:
@@ -704,8 +701,6 @@ uvm_pager_dropcluster(struct uvm_object *uobj, struct vm_page *pg,
     struct vm_page **ppsp, int *npages, int flags)
 {
 	int lcv;
-	boolean_t obj_is_alive; 
-	struct uvm_object *saved_uobj;
 
 	/*
 	 * drop all pages but "pg"
@@ -747,9 +742,8 @@ uvm_pager_dropcluster(struct uvm_object *uobj, struct vm_page *pg,
 		}
 
 		/* if page was released, release it.  otherwise un-busy it */
-		if (ppsp[lcv]->pg_flags & PG_RELEASED) {
-
-			if (ppsp[lcv]->pg_flags & PQ_ANON) {
+		if (ppsp[lcv]->pg_flags & PG_RELEASED &&
+		    ppsp[lcv]->pg_flags & PQ_ANON) {
 				/* so that anfree will free */
 				atomic_clearbits_int(&ppsp[lcv]->pg_flags,
 				    PG_BUSY);
@@ -761,34 +755,13 @@ uvm_pager_dropcluster(struct uvm_object *uobj, struct vm_page *pg,
 				uvm_anfree(ppsp[lcv]->uanon);
 
 				continue;
-			}
-
-			/*
-			 * pgo_releasepg will dump the page for us
-			 */
-
-			saved_uobj = ppsp[lcv]->uobject;
-			obj_is_alive =
-			    saved_uobj->pgops->pgo_releasepg(ppsp[lcv], NULL);
-			
-			/* for normal objects, "pg" is still PG_BUSY by us,
-			 * so obj can't die */
-			KASSERT(!uobj || obj_is_alive);
-
-			/* only unlock the object if it is still alive...  */
-			if (obj_is_alive && saved_uobj != uobj)
-				simple_unlock(&saved_uobj->vmobjlock);
-
-			/*
-			 * XXXCDC: suppose uobj died in the pgo_releasepg?
-			 * how pass that
-			 * info up to caller.  we are currently ignoring it...
-			 */
-
-			continue;		/* next page */
 		} else {
+			/*
+			 * if we were planning on async io then we would
+			 * have PG_RELEASED set, clear that with the others.
+			 */
 			atomic_clearbits_int(&ppsp[lcv]->pg_flags,
-			    PG_BUSY|PG_WANTED|PG_FAKE);
+			    PG_BUSY|PG_WANTED|PG_FAKE|PG_RELEASED);
 			UVM_PAGE_OWN(ppsp[lcv], NULL);
 		}
 
@@ -811,33 +784,6 @@ uvm_pager_dropcluster(struct uvm_object *uobj, struct vm_page *pg,
 		}
 	}
 }
-
-#ifdef UBC
-/*
- * interrupt-context iodone handler for nested i/o bufs.
- *
- * => must be at splbio().
- */
-
-void
-uvm_aio_biodone1(struct buf *bp)
-{
-	struct buf *mbp = bp->b_private;
-
-	splassert(IPL_BIO);
-
-	KASSERT(mbp != bp);
-	if (bp->b_flags & B_ERROR) {
-		mbp->b_flags |= B_ERROR;
-		mbp->b_error = bp->b_error;
-	}
-	mbp->b_resid -= bp->b_bcount;
-	pool_put(&bufpool, bp);
-	if (mbp->b_resid == 0) {
-		biodone(mbp);
-	}
-}
-#endif
 
 /*
  * interrupt-context iodone handler for single-buf i/os
@@ -881,12 +827,6 @@ uvm_aio_aiodone(struct buf *bp)
 
 	error = (bp->b_flags & B_ERROR) ? (bp->b_error ? bp->b_error : EIO) : 0;
 	write = (bp->b_flags & B_READ) == 0;
-#ifdef UBC
-	/* XXXUBC B_NOCACHE is for swap pager, should be done differently */
-	if (write && !(bp->b_flags & B_NOCACHE) && bioops.io_pageiodone) {
-		(*bioops.io_pageiodone)(bp);
-	}
-#endif
 
 	uobj = NULL;
 	for (i = 0; i < npages; i++) {

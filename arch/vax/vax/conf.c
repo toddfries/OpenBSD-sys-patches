@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.56 2009/01/25 17:30:49 miod Exp $ */
+/*	$OpenBSD: conf.c,v 1.61 2010/09/23 05:02:14 claudio Exp $ */
 /*	$NetBSD: conf.c,v 1.44 1999/10/27 16:38:54 ragge Exp $	*/
 
 /*-
@@ -339,12 +339,11 @@ cdev_decl(ii);
 
 #include "tun.h" 
 #include "ch.h"
-#include "ss.h"
 #include "uk.h"
 
-#ifdef XFS
-#include <xfs/nxfs.h>
-cdev_decl(xfs_dev);
+#ifdef NNPFS
+#include <nnpfs/nnnpfs.h>
+cdev_decl(nnpfs_dev);
 #endif
 
 #include "wsdisplay.h"
@@ -354,6 +353,9 @@ cdev_decl(xfs_dev);
 #include "pf.h"
 
 #include "systrace.h"
+
+#include "vscsi.h"
+#include "pppx.h"
 
 struct cdevsw	cdevsw[] =
 {
@@ -421,7 +423,7 @@ struct cdevsw	cdevsw[] =
 	cdev_disk_init(NCD,cd),		/* 61: SCSI CD-ROM */
 	cdev_disk_init(NRD,rd),		/* 62: memory disk driver */
 	cdev_ch_init(NCH,ch),		/* 63: SCSI autochanger */
-	cdev_scanner_init(NSS,ss),	/* 64: SCSI scanner */
+	cdev_notdef(),			/* 64 */
 	cdev_uk_init(NUK,uk),		/* 65: SCSI unknown */
 	cdev_tty_init(NDL,dl),		/* 66: DL11 */
 	cdev_random_init(1,random),	/* 67: random data source */
@@ -431,12 +433,15 @@ struct cdevsw	cdevsw[] =
 	cdev_disk_init(NRY,ry),		/* 71: VS floppy */
 	cdev_bio_init(NBIO,bio),	/* 72: ioctl tunnel */
 	cdev_disk_init(NRAID,raid),	/* 73: RAIDframe disk driver */
-#ifdef XFS
-	cdev_xfs_init(NXFS,xfs_dev),	/* 74: xfs communication device */
+#ifdef NNPFS
+	cdev_nnpfs_init(NNNPFS,nnpfs_dev),	/* 74: nnpfs communication device */
 #else
 	cdev_notdef(),			/* 74 */
 #endif
 	cdev_ptm_init(NPTY,ptm),	/* 75: pseudo-tty ptm device */
+	cdev_vscsi_init(NVSCSI,vscsi),	/* 78: vscsi */
+	cdev_disk_init(1,diskmap),	/* 79: disk mapper */
+	cdev_pppx_init(NPPPX,pppx),	/* 80: pppx */
 };
 int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_input.c,v 1.161 2008/12/24 07:41:59 dlg Exp $	*/
+/*	$OpenBSD: ip_input.c,v 1.184 2010/09/08 08:34:42 claudio Exp $	*/
 /*	$NetBSD: ip_input.c,v 1.30 1996/03/16 23:53:58 christos Exp $	*/
 
 /*
@@ -43,6 +43,7 @@
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/syslog.h>
+#include <sys/proc.h>
 #include <sys/sysctl.h>
 #include <sys/pool.h>
 
@@ -172,7 +173,7 @@ static	struct ip_srcrt {
 } ip_srcrt;
 
 void save_rte(u_char *, struct in_addr);
-int ip_weadvertise(u_int32_t);
+int ip_weadvertise(u_int32_t, u_int);
 
 /*
  * IP initialization: fill in IP protocol switch table.
@@ -199,7 +200,8 @@ ip_init()
 	for (pr = inetdomain.dom_protosw;
 	    pr < inetdomain.dom_protoswNPROTOSW; pr++)
 		if (pr->pr_domain->dom_family == PF_INET &&
-		    pr->pr_protocol && pr->pr_protocol != IPPROTO_RAW)
+		    pr->pr_protocol && pr->pr_protocol != IPPROTO_RAW &&
+		    pr->pr_protocol < IPPROTO_MAX)
 			ip_protox[pr->pr_protocol] = pr - inetsw;
 	LIST_INIT(&ipq);
 	ipintrq.ifq_maxlen = ipqmaxlen;
@@ -222,7 +224,6 @@ ip_init()
 
 struct	sockaddr_in ipaddr = { sizeof(ipaddr), AF_INET };
 struct	route ipforward_rt;
-int	ipforward_rtableid;
 
 void
 ipintr()
@@ -386,15 +387,24 @@ ipv4_input(m)
 	        return;
 	}
 
-	/*
-	 * Check our list of addresses, to see if the packet is for us.
-	 */
-	if ((ia = in_iawithaddr(ip->ip_dst, m)) != NULL &&
-	    (ia->ia_ifp->if_flags & IFF_UP))
-		goto ours;
-
 	if (m->m_pkthdr.pf.flags & PF_TAG_DIVERTED)
 		goto ours;
+
+#if NPF > 0
+	if (m->m_pkthdr.pf.statekey &&
+	    ((struct pf_state_key *)m->m_pkthdr.pf.statekey)->inp)
+		goto ours;
+
+	/*
+	 * Check our list of addresses, to see if the packet is for us.
+	 * if we have linked state keys it is certainly to be forwarded.
+	 */
+	if (!m->m_pkthdr.pf.statekey ||
+	    !((struct pf_state_key *)m->m_pkthdr.pf.statekey)->reverse)
+#endif
+		if ((ia = in_iawithaddr(ip->ip_dst, m, m->m_pkthdr.rdomain)) !=
+		    NULL && (ia->ia_ifp->if_flags & IFF_UP))
+			goto ours;
 
 	if (IN_MULTICAST(ip->ip_dst.s_addr)) {
 		struct in_multi *inm;
@@ -451,6 +461,7 @@ ipv4_input(m)
 		}
 		goto ours;
 	}
+
 	if (ip->ip_dst.s_addr == INADDR_BROADCAST ||
 	    ip->ip_dst.s_addr == INADDR_ANY)
 		goto ours;
@@ -479,7 +490,8 @@ ipv4_input(m)
                 s = splnet();
 		if (mtag != NULL) {
 			tdbi = (struct tdb_ident *)(mtag + 1);
-			tdb = gettdb(tdbi->spi, &tdbi->dst, tdbi->proto);
+			tdb = gettdb(tdbi->rdomain, tdbi->spi,
+			    &tdbi->dst, tdbi->proto);
 		} else
 			tdb = NULL;
 	        ipsp_spd_lookup(m, AF_INET, hlen, &error,
@@ -638,7 +650,8 @@ found:
         s = splnet();
 	if (mtag) {
 		tdbi = (struct tdb_ident *)(mtag + 1);
-	        tdb = gettdb(tdbi->spi, &tdbi->dst, tdbi->proto);
+	        tdb = gettdb(tdbi->rdomain, tdbi->spi, &tdbi->dst,
+		    tdbi->proto);
 	} else
 		tdb = NULL;
 	ipsp_spd_lookup(m, AF_INET, hlen, &error, IPSP_DIRECTION_IN,
@@ -667,34 +680,31 @@ bad:
 }
 
 struct in_ifaddr *
-in_iawithaddr(ina, m)
-	struct in_addr ina;
-	struct mbuf *m;
+in_iawithaddr(struct in_addr ina, struct mbuf *m, u_int rdomain)
 {
 	struct in_ifaddr *ia;
 
+	rdomain = rtable_l2(rdomain);
 	TAILQ_FOREACH(ia, &in_ifaddr, ia_list) {
+		if (ia->ia_ifp->if_rdomain != rdomain)
+			continue;
 		if ((ina.s_addr == ia->ia_addr.sin_addr.s_addr) ||
 		    ((ia->ia_ifp->if_flags & (IFF_LOOPBACK|IFF_LINK1)) ==
 			(IFF_LOOPBACK|IFF_LINK1) &&
-		     ia->ia_subnet == (ina.s_addr & ia->ia_subnetmask)))
+		     ia->ia_net == (ina.s_addr & ia->ia_netmask)))
 			return ia;
+		/* check ancient classful too, e. g. for rarp-based netboot */
 		if (((ip_directedbcast == 0) || (m && ip_directedbcast &&
 		    ia->ia_ifp == m->m_pkthdr.rcvif)) &&
 		    (ia->ia_ifp->if_flags & IFF_BROADCAST)) {
 			if (ina.s_addr == ia->ia_broadaddr.sin_addr.s_addr ||
-			    ina.s_addr == ia->ia_netbroadcast.s_addr ||
-			    /*
-			     * Look for all-0's host part (old broadcast addr),
-			     * either for subnet or net.
-			     */
-			    ina.s_addr == ia->ia_subnet ||
-			    ina.s_addr == ia->ia_net) {
+			    IN_CLASSFULBROADCAST(ina.s_addr,
+			    ia->ia_addr.sin_addr.s_addr)) {
 				/* Make sure M_BCAST is set */
 				if (m)
 					m->m_flags |= M_BCAST;
 				return ia;
-			    }
+			}
 		}
 	}
 
@@ -1030,7 +1040,8 @@ ip_dooptions(m)
 				goto bad;
 			}
 			ipaddr.sin_addr = ip->ip_dst;
-			ia = ifatoia(ifa_ifwithaddr(sintosa(&ipaddr)));
+			ia = ifatoia(ifa_ifwithaddr(sintosa(&ipaddr),
+			    m->m_pkthdr.rdomain));
 			if (ia == 0) {
 				if (opt == IPOPT_SSRR) {
 					type = ICMP_UNREACH;
@@ -1060,10 +1071,14 @@ ip_dooptions(m)
 			if (opt == IPOPT_SSRR) {
 #define	INA	struct in_ifaddr *
 #define	SA	struct sockaddr *
-			    if ((ia = (INA)ifa_ifwithdstaddr((SA)&ipaddr)) == 0)
-				ia = (INA)ifa_ifwithnet((SA)&ipaddr);
+			    if ((ia = (INA)ifa_ifwithdstaddr((SA)&ipaddr,
+				m->m_pkthdr.rdomain)) == 0)
+				ia = (INA)ifa_ifwithnet((SA)&ipaddr,
+				    m->m_pkthdr.rdomain);
 			} else
-				ia = ip_rtaddr(ipaddr.sin_addr);
+				/* keep packet in the virtual instance */
+				ia = ip_rtaddr(ipaddr.sin_addr,
+				    m->m_pkthdr.rdomain);
 			if (ia == 0) {
 				type = ICMP_UNREACH;
 				code = ICMP_UNREACH_SRCFAIL;
@@ -1100,9 +1115,12 @@ ip_dooptions(m)
 			/*
 			 * locate outgoing interface; if we're the destination,
 			 * use the incoming interface (should be same).
+			 * Again keep the packet inside the virtual instance.
 			 */
-			if ((ia = (INA)ifa_ifwithaddr((SA)&ipaddr)) == 0 &&
-			    (ia = ip_rtaddr(ipaddr.sin_addr)) == 0) {
+			if ((ia = (INA)ifa_ifwithaddr((SA)&ipaddr,
+			    m->m_pkthdr.rdomain)) == 0 &&
+			    (ia = ip_rtaddr(ipaddr.sin_addr,
+			    m->m_pkthdr.rdomain)) == 0) {
 				type = ICMP_UNREACH;
 				code = ICMP_UNREACH_HOST;
 				goto bad;
@@ -1150,7 +1168,8 @@ ip_dooptions(m)
 					goto bad;
 				bcopy((caddr_t)&sin, (caddr_t)&ipaddr.sin_addr,
 				    sizeof(struct in_addr));
-				if (ifa_ifwithaddr((SA)&ipaddr) == 0)
+				if (ifa_ifwithaddr((SA)&ipaddr,
+				    m->m_pkthdr.rdomain) == 0)
 					continue;
 				ipt.ipt_ptr += sizeof(struct in_addr);
 				break;
@@ -1183,8 +1202,7 @@ bad:
  * return internet address info of interface to be used to get there.
  */
 struct in_ifaddr *
-ip_rtaddr(dst)
-	 struct in_addr dst;
+ip_rtaddr(struct in_addr dst, u_int rtableid)
 {
 	struct sockaddr_in *sin;
 
@@ -1199,7 +1217,8 @@ ip_rtaddr(dst)
 		sin->sin_len = sizeof(*sin);
 		sin->sin_addr = dst;
 
-		rtalloc(&ipforward_rt);
+		ipforward_rt.ro_rt = rtalloc1(&ipforward_rt.ro_dst, RT_REPORT,
+		    rtableid);
 	}
 	if (ipforward_rt.ro_rt == 0)
 		return ((struct in_ifaddr *)0);
@@ -1234,8 +1253,7 @@ save_rte(option, dst)
  * Code shamelessly copied from arplookup().
  */
 int
-ip_weadvertise(addr)
-	u_int32_t addr;
+ip_weadvertise(u_int32_t addr, u_int rtableid)
 {
 	struct rtentry *rt;
 	struct ifnet *ifp;
@@ -1246,7 +1264,7 @@ ip_weadvertise(addr)
 	sin.sin_family = AF_INET;
 	sin.sin_addr.s_addr = addr;
 	sin.sin_other = SIN_PROXY;
-	rt = rtalloc1(sintosa(&sin), 0, 0);	/* XXX other tables? */
+	rt = rtalloc1(sintosa(&sin), 0, rtableid);
 	if (rt == 0)
 		return 0;
 
@@ -1256,7 +1274,10 @@ ip_weadvertise(addr)
 		return 0;
 	}
 
-	TAILQ_FOREACH(ifp, &ifnet, if_list)
+	rtableid = rtable_l2(rtableid);
+	TAILQ_FOREACH(ifp, &ifnet, if_list) {
+		if (ifp->if_rdomain != rtableid)
+			continue;
 		TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
 			if (ifa->ifa_addr->sa_family != rt->rt_gateway->sa_family)
 				continue;
@@ -1268,6 +1289,7 @@ ip_weadvertise(addr)
 				return 1;
 			}
 		}
+	}
 
 	RTFREE(rt);
 	return 0;
@@ -1400,7 +1422,8 @@ ip_forward(m, srcrt)
 	struct ip *ip = mtod(m, struct ip *);
 	struct sockaddr_in *sin;
 	struct rtentry *rt;
-	int error, type = 0, code = 0, destmtu = 0, rtableid = 0;
+	int error, type = 0, code = 0, destmtu = 0;
+	u_int rtableid = 0;
 	struct mbuf *mcopy;
 	n_long dest;
 
@@ -1410,7 +1433,7 @@ ip_forward(m, srcrt)
 		printf("forward: src %x dst %x ttl %x\n", ip->ip_src.s_addr,
 		    ip->ip_dst.s_addr, ip->ip_ttl);
 #endif
-	if (m->m_flags & M_BCAST || in_canforward(ip->ip_dst) == 0) {
+	if (m->m_flags & (M_BCAST|M_MCAST) || in_canforward(ip->ip_dst) == 0) {
 		ipstat.ips_cantforward++;
 		m_freem(m);
 		return;
@@ -1420,14 +1443,12 @@ ip_forward(m, srcrt)
 		return;
 	}
 
-#if NPF > 0
-	rtableid = m->m_pkthdr.pf.rtableid;
-#endif
+	rtableid = m->m_pkthdr.rdomain;
 
 	sin = satosin(&ipforward_rt.ro_dst);
 	if ((rt = ipforward_rt.ro_rt) == 0 ||
 	    ip->ip_dst.s_addr != sin->sin_addr.s_addr ||
-	    rtableid != ipforward_rtableid) {
+	    rtableid != ipforward_rt.ro_tableid) {
 		if (ipforward_rt.ro_rt) {
 			RTFREE(ipforward_rt.ro_rt);
 			ipforward_rt.ro_rt = 0;
@@ -1435,13 +1456,13 @@ ip_forward(m, srcrt)
 		sin->sin_family = AF_INET;
 		sin->sin_len = sizeof(*sin);
 		sin->sin_addr = ip->ip_dst;
+		ipforward_rt.ro_tableid = rtableid;
 
-		rtalloc_mpath(&ipforward_rt, &ip->ip_src.s_addr, rtableid);
+		rtalloc_mpath(&ipforward_rt, &ip->ip_src.s_addr);
 		if (ipforward_rt.ro_rt == 0) {
 			icmp_error(m, ICMP_UNREACH, ICMP_UNREACH_HOST, dest, 0);
 			return;
 		}
-		ipforward_rtableid = rtableid;
 		rt = ipforward_rt.ro_rt;
 	}
 
@@ -1470,10 +1491,11 @@ ip_forward(m, srcrt)
 	    (rt->rt_flags & (RTF_DYNAMIC|RTF_MODIFIED)) == 0 &&
 	    satosin(rt_key(rt))->sin_addr.s_addr != 0 &&
 	    ipsendredirects && !srcrt &&
-	    !ip_weadvertise(satosin(rt_key(rt))->sin_addr.s_addr)) {
+	    !ip_weadvertise(satosin(rt_key(rt))->sin_addr.s_addr,
+	    m->m_pkthdr.rdomain)) {
 		if (rt->rt_ifa &&
-		    (ip->ip_src.s_addr & ifatoia(rt->rt_ifa)->ia_subnetmask) ==
-		    ifatoia(rt->rt_ifa)->ia_subnet) {
+		    (ip->ip_src.s_addr & ifatoia(rt->rt_ifa)->ia_netmask) ==
+		    ifatoia(rt->rt_ifa)->ia_net) {
 		    if (rt->rt_flags & RTF_GATEWAY)
 			dest = satosin(rt->rt_gateway)->sin_addr.s_addr;
 		    else
@@ -1535,8 +1557,13 @@ ip_forward(m, srcrt)
 		ipstat.ips_cantfrag++;
 		break;
 
+	case EACCES:
+		/*
+		 * pf(4) blocked the packet. There is no need to send an ICMP
+		 * packet back since pf(4) takes care of it.
+		 */
+		goto freecopy;
 	case ENOBUFS:
-#if 1
 		/*
 		 * a router should not generate ICMP_SOURCEQUENCH as
 		 * required in RFC1812 Requirements for IP Version 4 Routers.
@@ -1544,11 +1571,6 @@ ip_forward(m, srcrt)
 		 * or the underlying interface is rate-limited.
 		 */
 		goto freecopy;
-#else
-		type = ICMP_SOURCEQUENCH;
-		code = 0;
-		break;
-#endif
 	}
 
 	icmp_error(mcopy, type, code, dest, destmtu);
@@ -1608,7 +1630,6 @@ ip_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
 			    rt_timer_queue_create(ip_mtudisc_timeout);
 		} else if (ip_mtudisc == 0 && ip_mtudisc_timeout_q != NULL) {
 			rt_timer_queue_destroy(ip_mtudisc_timeout_q, TRUE);
-			Free(ip_mtudisc_timeout_q);
 			ip_mtudisc_timeout_q = NULL;
 		}
 		return error;

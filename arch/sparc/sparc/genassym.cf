@@ -1,4 +1,4 @@
-#	$OpenBSD: genassym.cf,v 1.20 2007/05/08 07:23:18 art Exp $
+#	$OpenBSD: genassym.cf,v 1.22 2010/08/17 20:05:08 miod Exp $
 #	$NetBSD: genassym.cf,v 1.2 1997/06/28 19:59:04 pk Exp $
 
 #
@@ -57,6 +57,7 @@ include <uvm/uvm_extern.h>
 
 include <machine/pmap.h>
 include <machine/cpu.h>
+include <machine/intr.h>
 
 include <machine/oldmon.h>
 include <machine/bsd_openprom.h>
@@ -97,6 +98,7 @@ struct	uvmexp		V_
 member	swtch
 member	INTR		intrs
 member	faults
+member	softs
 
 # CPU info structure
 struct	cpu_softc
@@ -162,6 +164,10 @@ member	ih_ipl
 member	ih_next
 member	IH_COUNT	ih_count.ec_count
 
+# sintrhand fields.
+struct	sintrhand
+member	sih_pending
+
 ifdef notyet
 # ZSCC interrupt fields
 struct	zs_softc	Z
@@ -184,6 +190,7 @@ member	au_rend
 member	au_pdata
 member	au_pend
 member	AU_COUNT	au_ih.ih_count.ec_count
+member	au_swih
 
 struct	amd7930		AMD_
 member	ir
@@ -217,3 +224,4 @@ member	FDC_NSTAT	fdcio_nstat
 member	FDC_DATA	fdcio_data
 member	FDC_TC		fdcio_tc
 member	FDC_COUNT	fdcio_ih.ih_count.ec_count
+member	FDC_SIH		fdcio_sih

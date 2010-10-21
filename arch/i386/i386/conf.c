@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.130 2009/01/25 17:30:48 miod Exp $	*/
+/*	$OpenBSD: conf.c,v 1.135 2010/09/22 13:03:47 claudio Exp $	*/
 /*	$NetBSD: conf.c,v 1.75 1996/05/03 19:40:20 christos Exp $	*/
 
 /*
@@ -122,7 +122,6 @@ cdev_decl(wd);
 #include "com.h"
 cdev_decl(com);
 cdev_decl(fd);
-#include "ss.h"
 #include "lpt.h"
 cdev_decl(lpt);
 #include "ch.h"
@@ -155,9 +154,9 @@ cdev_decl(music);
 #include "pctr.h"
 #include "bios.h"
 #include "iop.h"
-#ifdef XFS
-#include <xfs/nxfs.h>
-cdev_decl(xfs_dev);
+#ifdef NNPFS
+#include <nnpfs/nnnpfs.h>
+cdev_decl(nnpfs_dev);
 #endif
 #include "bktr.h"
 #include "ksyms.h"
@@ -193,6 +192,8 @@ cdev_decl(pci);
 #include "hotplug.h"
 #include "gpio.h"
 #include "amdmsr.h"
+#include "vscsi.h"
+#include "pppx.h"
 
 struct cdevsw	cdevsw[] =
 {
@@ -216,7 +217,7 @@ struct cdevsw	cdevsw[] =
 	cdev_lpt_init(NLPT,lpt),	/* 16: parallel printer */
 	cdev_ch_init(NCH,ch),		/* 17: SCSI autochanger */
 	cdev_disk_init(NCCD,ccd),	/* 18: concatenated disk driver */
-	cdev_ss_init(NSS,ss),           /* 19: SCSI scanner */
+	cdev_notdef(),			/* 19 */
 	cdev_uk_init(NUK,uk),		/* 20: unknown SCSI */
 	cdev_acpiapm_init(1,acpiapm),	/* 21: Power Management stuff */
 	cdev_fd_init(1,filedesc),	/* 22: file descriptor pseudo-device */
@@ -256,8 +257,8 @@ struct cdevsw	cdevsw[] =
 	cdev_ocis_init(NBIOS,bios),	/* 48: onboard BIOS PROM */
 	cdev_bktr_init(NBKTR,bktr),     /* 49: Bt848 video capture device */
 	cdev_ksyms_init(NKSYMS,ksyms),	/* 50: Kernel symbols device */
-#ifdef XFS
-	cdev_xfs_init(NXFS,xfs_dev),	/* 51: xfs communication device */
+#ifdef NNPFS
+	cdev_nnpfs_init(NNNPFS,nnpfs_dev),	/* 51: nnpfs communication device */
 #else
 	cdev_notdef(),			/* 51 */
 #endif
@@ -305,7 +306,10 @@ struct cdevsw	cdevsw[] =
 	cdev_bthub_init(NBTHUB,bthub),	/* 86: bthub */
 	cdev_agp_init(NAGP,agp),	/* 87: agp */
 	cdev_drm_init(NDRM,drm),	/* 88: drm */
-	cdev_amdmsr_init(NAMDMSR,amdmsr)	/* 89: amdmsr */
+	cdev_amdmsr_init(NAMDMSR,amdmsr),	/* 89: amdmsr */
+	cdev_vscsi_init(NVSCSI,vscsi),	/* 90: vscsi */
+	cdev_disk_init(1,diskmap),	/* 91: disk mapper */
+	cdev_pppx_init(NPPPX,pppx),     /* 92: pppx */
 };
 int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
 

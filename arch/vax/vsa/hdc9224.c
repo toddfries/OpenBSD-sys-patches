@@ -1,4 +1,4 @@
-/*	$OpenBSD: hdc9224.c,v 1.22 2007/09/01 12:45:42 miod Exp $	*/
+/*	$OpenBSD: hdc9224.c,v 1.34 2010/09/28 13:20:50 miod Exp $	*/
 /*	$NetBSD: hdc9224.c,v 1.16 2001/07/26 15:05:09 wiz Exp $ */
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.
@@ -58,9 +58,9 @@
 #include <sys/file.h>
 #include <sys/stat.h> 
 #include <sys/ioctl.h>
+#include <sys/dkio.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/device.h>
 #include <sys/disklabel.h>
 #include <sys/disk.h>
@@ -164,8 +164,9 @@ void hdattach(struct device *, struct device *, void *);
 void hdcintr(void *);
 int hdc_command(struct hdcsoftc *, int);
 void hd_readgeom(struct hdcsoftc *, struct hdsoftc *);
+int hdgetdisklabel(dev_t, struct hdsoftc *, struct disklabel *, int);
 #ifdef HDDEBUG
-void hdc_printgeom( struct hdgeom *);
+void hdc_printgeom(struct hdgeom *);
 #endif
 void hdc_writeregs(struct hdcsoftc *);
 void hdcstart(struct hdcsoftc *, struct buf *);
@@ -275,8 +276,7 @@ hdcattach(struct device *parent, struct device *self, void *aux)
 	 * Get interrupt vector, enable instrumentation.
 	 */
 	scb_vecalloc(va->va_cvec, hdcintr, sc, SCB_ISTACK, &sc->sc_intrcnt);
-	evcount_attach(&sc->sc_intrcnt, self->dv_xname, (void *)va->va_cvec,
-	    &evcount_intr);
+	evcount_attach(&sc->sc_intrcnt, self->dv_xname, (void *)va->va_cvec);
 
 	sc->sc_regs = vax_map_physmem(va->va_paddr, 1);
 	sc->sc_dmabase = (caddr_t)va->va_dmaaddr;
@@ -338,6 +338,15 @@ hdmatch(parent, vcf, aux)
 
 #define	HDMAJOR 19
 
+int
+hdgetdisklabel(dev_t dev, struct hdsoftc *hd, struct disklabel *lp,
+    int spoofonly)
+{
+	hdmakelabel(lp, &hd->sc_xbn);
+
+	return readdisklabel(dev, hdstrategy, lp, spoofonly);
+}
+
 void
 hdattach(struct device *parent, struct device *self, void *aux)
 {
@@ -345,14 +354,14 @@ hdattach(struct device *parent, struct device *self, void *aux)
 	struct hdsoftc *hd = (void*)self;
 	struct hdc_attach_args *ha = aux;
 	struct disklabel *dl;
-	char *msg;
+	int error;
 
 	hd->sc_drive = ha->ha_drive;
 	/*
 	 * Initialize and attach the disk structure.
 	 */
 	hd->sc_disk.dk_name = hd->sc_dev.dv_xname;
-	disk_attach(&hd->sc_disk);
+	disk_attach(&hd->sc_dev, &hd->sc_disk);
 
 	/*
 	 * if it's not a floppy then evaluate the on-disk geometry.
@@ -361,15 +370,11 @@ hdattach(struct device *parent, struct device *self, void *aux)
 	hd_readgeom(sc, hd);
 	disk_printtype(hd->sc_drive, hd->sc_xbn.media_id);
 	dl = hd->sc_disk.dk_label;
-	hdmakelabel(dl, &hd->sc_xbn);
-	msg = readdisklabel(MAKEDISKDEV(HDMAJOR, hd->sc_dev.dv_unit, RAW_PART),
-	    hdstrategy, dl, 0);
+	error = hdgetdisklabel(MAKEDISKDEV(HDMAJOR, hd->sc_dev.dv_unit, RAW_PART),
+	    hd, dl, 0);
 	printf("%s: %luMB, %lu sectors\n",
 	    hd->sc_dev.dv_xname, DL_GETDSIZE(dl) / (1048576 / DEV_BSIZE),
 	    DL_GETDSIZE(dl));
-	if (msg) {
-		/*printf("%s: %s\n", hd->sc_dev.dv_xname, msg);*/
-	}
 #ifdef HDDEBUG
 	hdc_printgeom(&hd->sc_xbn);
 #endif
@@ -701,9 +706,13 @@ hdioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 {
 	struct hdsoftc *hd = hd_cd.cd_devs[DISKUNIT(dev)];
 	struct disklabel *lp = hd->sc_disk.dk_label;
-	int err = 0;
+	int error = 0;
 
 	switch (cmd) {
+	case DIOCGPDINFO:
+		hdgetdisklabel(dev, hd, (struct disklabel *)addr, 1);
+		break;
+
 	case DIOCGDINFO:
 		bcopy(lp, addr, sizeof (struct disklabel));
 		break;
@@ -718,22 +727,23 @@ hdioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 	case DIOCSDINFO:
 		if ((flag & FWRITE) == 0)
 			return EBADF;
-		else
-			err = (cmd == DIOCSDINFO ?
-			    setdisklabel(lp, (struct disklabel *)addr, 0) :
-			    writedisklabel(dev, hdstrategy, lp));
+		error = setdisklabel(lp, (struct disklabel *)addr, 0);
+		if (error == 0) {
+			if (cmd == DIOCWDINFO)
+				error = writedisklabel(dev, hdstrategy, lp);
+		}
 		break;
 
 	case DIOCWLABEL:
 		if ((flag & FWRITE) == 0)
-			err = EBADF;
+			error = EBADF;
 		break;
 
 	default:
-		err = ENOTTY;
+		error = ENOTTY;
 		break;
 	}
-	return err;
+	return error;
 }
 
 /*
@@ -742,7 +752,7 @@ hdioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 int
 hdread(dev_t dev, struct uio *uio, int flag)
 {
-	return (physio(hdstrategy, NULL, dev, B_READ, minphys, uio));
+	return (physio(hdstrategy, dev, B_READ, minphys, uio));
 }
 
 /*
@@ -751,7 +761,7 @@ hdread(dev_t dev, struct uio *uio, int flag)
 int
 hdwrite(dev_t dev, struct uio *uio, int flag)
 {
-	return (physio(hdstrategy, NULL, dev, B_WRITE, minphys, uio));
+	return (physio(hdstrategy, dev, B_WRITE, minphys, uio));
 }
 
 /*
@@ -854,7 +864,6 @@ hdmakelabel(struct disklabel *dl, struct hdgeom *g)
 	dl->d_typename[p++] = n + '0';
 	dl->d_typename[p] = 0;
 	dl->d_type = DTYPE_MSCP; /* XXX - what to use here??? */
-	dl->d_rpm = 3600;
 	dl->d_secsize = DEV_BSIZE;
 
 	DL_SETDSIZE(dl, g->lbn_count);
@@ -869,7 +878,6 @@ hdmakelabel(struct disklabel *dl, struct hdgeom *g)
 	    
 	DL_SETPOFFSET(&dl->d_partitions[0], 0);
 	DL_SETPOFFSET(&dl->d_partitions[2], 0);
-	dl->d_interleave = dl->d_headswitch = 1;
 	dl->d_version = 1;
 	dl->d_magic = dl->d_magic2 = DISKMAGIC;
 	dl->d_checksum = dkcksum(dl);

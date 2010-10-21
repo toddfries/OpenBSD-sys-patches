@@ -1,4 +1,4 @@
-/*	$OpenBSD: i82365_isa.c,v 1.20 2005/03/25 16:41:18 mickey Exp $	*/
+/*	$OpenBSD: i82365_isa.c,v 1.22 2010/09/07 16:21:43 deraadt Exp $	*/
 /*	$NetBSD: i82365_isa.c,v 1.11 1998/06/09 07:25:00 thorpej Exp $	*/
 
 /*
@@ -221,7 +221,6 @@ pcic_isa_attach(parent, self, aux)
 				pcic_write(h, PCIC_CSC_INTR,
 				    (sc->irq << PCIC_CSC_INTR_IRQ_SHIFT) |
 				    PCIC_CSC_INTR_CD_ENABLE);
-				powerhook_establish(pcic_power, h);
 			}
 		}
 	} else
@@ -230,7 +229,7 @@ pcic_isa_attach(parent, self, aux)
 	printf("polling enabled\n");
 	if (sc->poll_established == 0) {
 		timeout_set(&sc->poll_timeout, pcic_poll_intr, sc);
-		timeout_add(&sc->poll_timeout, hz / 2);
+		timeout_add_msec(&sc->poll_timeout, 500);
 		sc->poll_established = 1;
 	}
 }

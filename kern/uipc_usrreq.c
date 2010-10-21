@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_usrreq.c,v 1.45 2009/02/22 07:47:22 otto Exp $	*/
+/*	$OpenBSD: uipc_usrreq.c,v 1.49 2010/10/18 04:31:01 guenther Exp $	*/
 /*	$NetBSD: uipc_usrreq.c,v 1.18 1996/02/09 19:00:50 christos Exp $	*/
 
 /*
@@ -288,14 +288,16 @@ uipc_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 			nam->m_len = 0;
 		break;
 
+#ifdef COMPAT_O47
 	case PRU_PEEREID:
 		if (unp->unp_flags & UNP_FEIDS) {
-			nam->m_len = sizeof(struct unpcbid);
+			nam->m_len = sizeof(struct sockpeercred);
 			bcopy((caddr_t)(&(unp->unp_connid)),
 			    mtod(nam, caddr_t), (unsigned)nam->m_len);
 		} else
 			nam->m_len = 0;
 		break;
+#endif /* COMPAT_O47 */
 
 	case PRU_SLOWTIMO:
 		break;
@@ -431,8 +433,9 @@ unp_bind(struct unpcb *unp, struct mbuf *nam, struct proc *p)
 	vp->v_socket = unp->unp_socket;
 	unp->unp_vnode = vp;
 	unp->unp_addr = m_copy(nam, 0, (int)M_COPYALL);
-	unp->unp_connid.unp_euid = p->p_ucred->cr_uid;
-	unp->unp_connid.unp_egid = p->p_ucred->cr_gid;
+	unp->unp_connid.uid = p->p_ucred->cr_uid;
+	unp->unp_connid.gid = p->p_ucred->cr_gid;
+	unp->unp_connid.pid = p->p_p->ps_mainproc->p_pid;
 	unp->unp_flags |= UNP_FEIDSBIND;
 	VOP_UNLOCK(vp, 0, p);
 	return (0);
@@ -484,13 +487,13 @@ unp_connect(struct socket *so, struct mbuf *nam, struct proc *p)
 		if (unp2->unp_addr)
 			unp3->unp_addr =
 			    m_copy(unp2->unp_addr, 0, (int)M_COPYALL);
-		unp3->unp_connid.unp_euid = p->p_ucred->cr_uid;
-		unp3->unp_connid.unp_egid = p->p_ucred->cr_gid;
+		unp3->unp_connid.uid = p->p_ucred->cr_uid;
+		unp3->unp_connid.gid = p->p_ucred->cr_gid;
+		unp3->unp_connid.pid = p->p_p->ps_mainproc->p_pid;
 		unp3->unp_flags |= UNP_FEIDS;
 		so2 = so3;
 		if (unp2->unp_flags & UNP_FEIDSBIND) {
-			unp->unp_connid.unp_euid = unp2->unp_connid.unp_euid;
-			unp->unp_connid.unp_egid = unp2->unp_connid.unp_egid;
+			unp->unp_connid = unp2->unp_connid;
 			unp->unp_flags |= UNP_FEIDS;
 		}
 	}

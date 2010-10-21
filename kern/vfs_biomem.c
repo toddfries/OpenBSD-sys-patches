@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_biomem.c,v 1.4 2008/11/08 23:20:50 pedro Exp $ */
+/*	$OpenBSD: vfs_biomem.c,v 1.14 2010/04/30 21:56:39 oga Exp $ */
 /*
  * Copyright (c) 2007 Artur Grabowski <art@openbsd.org>
  *
@@ -20,6 +20,7 @@
 #include <sys/systm.h>
 #include <sys/buf.h>
 #include <sys/pool.h>
+#include <sys/proc.h>		/* XXX for atomic */
 #include <sys/mount.h>
 
 #include <uvm/uvm_extern.h>
@@ -63,10 +64,7 @@ buf_mem_init(vsize_t size)
 
 	buf_object = &buf_object_store;
 
-	buf_object->pgops = NULL;
-	TAILQ_INIT(&buf_object->memq);
-	buf_object->uo_npages = 0;
-	buf_object->uo_refs = 1;
+	uvm_objinit(buf_object, NULL, 1);
 }
 
 /*
@@ -75,7 +73,6 @@ buf_mem_init(vsize_t size)
 void
 buf_acquire(struct buf *bp)
 {
-	vaddr_t va;
 	int s;
 
 	KASSERT((bp->b_flags & B_BUSY) == 0);
@@ -85,6 +82,32 @@ buf_acquire(struct buf *bp)
 	 * Busy before waiting for kvm.
 	 */
 	SET(bp->b_flags, B_BUSY);
+	buf_map(bp);
+
+	splx(s);
+}
+
+/*
+ * Busy a buffer, but don't map it.
+ * If it has a mapping, we keep it, but we also keep the mapping on
+ * the list since we assume that it won't be used anymore.
+ */
+void
+buf_acquire_unmapped(struct buf *bp)
+{
+	int s;
+
+	s = splbio();
+	SET(bp->b_flags, B_BUSY|B_NOTMAPPED);
+	splx(s);
+}
+
+void
+buf_map(struct buf *bp)
+{
+	vaddr_t va;
+
+	splassert(IPL_BIO);
 
 	if (bp->b_data == NULL) {
 		unsigned long i;
@@ -123,22 +146,10 @@ buf_acquire(struct buf *bp)
 	} else {
 		TAILQ_REMOVE(&buf_valist, bp, b_valist);
 	}
-	splx(s);
-}
 
-/*
- * Busy a buffer, but don't map it.
- * If it has a mapping, we keep it, but we also keep the mapping on
- * the list since we assume that it won't be used anymore.
- */
-void
-buf_acquire_unmapped(struct buf *bp)
-{
-	int s;
+	bcstats.busymapped++;
 
-	s = splbio();
-	SET(bp->b_flags, B_BUSY|B_NOTMAPPED);
-	splx(s);
+	CLR(bp->b_flags, B_NOTMAPPED);
 }
 
 void
@@ -151,6 +162,7 @@ buf_release(struct buf *bp)
 
 	s = splbio();
 	if (bp->b_data) {
+		bcstats.busymapped--;
 		TAILQ_INSERT_TAIL(&buf_valist, bp, b_valist);
 		if (buf_needva) {
 			buf_needva--;
@@ -184,6 +196,8 @@ buf_dealloc_mem(struct buf *bp)
 	bp->b_data = NULL;
 
 	if (data) {
+		if (bp->b_flags & B_BUSY)
+			bcstats.busymapped--;
 		pmap_kremove((vaddr_t)data, bp->b_bufsize);
 		pmap_update(pmap_kernel());
 	}
@@ -207,6 +221,18 @@ buf_dealloc_mem(struct buf *bp)
 	splx(s);
 
 	return (1);
+}
+
+void
+buf_shrink_mem(struct buf *bp, vsize_t newsize)
+{
+	vaddr_t va = (vaddr_t)bp->b_data;
+
+	if (newsize < bp->b_bufsize) {
+		pmap_kremove(va + newsize, bp->b_bufsize - newsize);
+		pmap_update(pmap_kernel());
+		bp->b_bufsize = newsize;
+	}
 }
 
 vaddr_t

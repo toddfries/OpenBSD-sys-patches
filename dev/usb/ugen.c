@@ -1,4 +1,4 @@
-/*	$OpenBSD: ugen.c,v 1.56 2008/12/14 16:48:04 fgsch Exp $ */
+/*	$OpenBSD: ugen.c,v 1.62 2010/09/24 08:33:59 yuo Exp $ */
 /*	$NetBSD: ugen.c,v 1.63 2002/11/26 18:49:48 christos Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/ugen.c,v 1.26 1999/11/17 22:33:41 n_hibma Exp $	*/
 
@@ -126,7 +126,7 @@ int ugen_get_alt_index(struct ugen_softc *sc, int ifaceidx);
 int ugen_match(struct device *, void *, void *); 
 void ugen_attach(struct device *, struct device *, void *); 
 int ugen_detach(struct device *, int); 
-int ugen_activate(struct device *, enum devact); 
+int ugen_activate(struct device *, int); 
 
 struct cfdriver ugen_cd = { 
 	NULL, "ugen", DV_DULL 
@@ -193,6 +193,7 @@ int
 ugen_set_config(struct ugen_softc *sc, int configno)
 {
 	usbd_device_handle dev = sc->sc_udev;
+	usb_config_descriptor_t *cdesc;
 	usbd_interface_handle iface;
 	usb_endpoint_descriptor_t *ed;
 	struct ugen_endpoint *sce;
@@ -217,7 +218,8 @@ ugen_set_config(struct ugen_softc *sc, int configno)
 		}
 
 	/* Avoid setting the current value. */
-	if (usbd_get_config_descriptor(dev)->bConfigurationValue != configno) {
+	cdesc = usbd_get_config_descriptor(dev);
+	if (!cdesc || cdesc->bConfigurationValue != configno) {
 		err = usbd_set_config_no(dev, configno, 1);
 		if (err)
 			return (err);
@@ -321,8 +323,7 @@ ugenopen(dev_t dev, int flag, int mode, struct proc *p)
 			sce->ibuf = malloc(isize, M_USBDEV, M_WAITOK);
 			DPRINTFN(5, ("ugenopen: intr endpt=%d,isize=%d\n",
 				     endpt, isize));
-			if (clalloc(&sce->q, UGEN_IBSIZE, 0) == -1)
-				return (ENOMEM);
+			clalloc(&sce->q, UGEN_IBSIZE, 0);
 			err = usbd_open_pipe_intr(sce->iface,
 				  edesc->bEndpointAddress,
 				  USBD_SHORT_XFER_OK, &sce->pipeh, sce,
@@ -726,7 +727,7 @@ ugenwrite(dev_t dev, struct uio *uio, int flag)
 }
 
 int
-ugen_activate(struct device *self, enum devact act)
+ugen_activate(struct device *self, int act)
 {
 	struct ugen_softc *sc = (struct ugen_softc *)self;
 
@@ -752,7 +753,6 @@ ugen_detach(struct device *self, int flags)
 
 	DPRINTF(("ugen_detach: sc=%p flags=%d\n", sc, flags));
 
-	sc->sc_dying = 1;
 	/* Abort all pipes.  Causes processes waiting for transfer to wake. */
 	for (i = 0; i < USB_MAX_ENDPOINTS; i++) {
 		for (dir = OUT; dir <= IN; dir++) {

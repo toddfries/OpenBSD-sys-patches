@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wpireg.h,v 1.23 2008/11/25 18:49:49 damien Exp $	*/
+/*	$OpenBSD: if_wpireg.h,v 1.27 2009/10/24 20:17:17 damien Exp $	*/
 
 /*-
  * Copyright (c) 2006-2008
@@ -20,10 +20,11 @@
 #define WPI_TX_RING_COUNT	256
 #define WPI_TX_RING_LOMARK	192
 #define WPI_TX_RING_HIMARK	224
-#define WPI_RX_RING_COUNT_LOG	8
+#define WPI_RX_RING_COUNT_LOG	6
 #define WPI_RX_RING_COUNT	(1 << WPI_RX_RING_COUNT_LOG)
 
-#define WPI_NTXQUEUES		16
+#define WPI_NTXQUEUES		8
+#define WPI_NDMACHNLS		6
 
 /* Maximum scatter/gather. */
 #define WPI_MAX_SCATTER	4
@@ -250,7 +251,7 @@ struct wpi_rx_desc {
 
 struct wpi_tx_cmd {
 	uint8_t	code;
-#define WPI_CMD_CONFIGURE	 16
+#define WPI_CMD_RXON		 16
 #define WPI_CMD_ASSOCIATE	 17
 #define WPI_CMD_EDCA_PARAMS	 19
 #define WPI_CMD_TIMING		 20
@@ -269,7 +270,7 @@ struct wpi_tx_cmd {
 	uint8_t	data[124];
 } __packed;
 
-/* Structure for command WPI_CMD_CONFIGURE. */
+/* Structure for command WPI_CMD_RXON. */
 struct wpi_rxon {
 	uint8_t		myaddr[IEEE80211_ADDR_LEN];
 	uint16_t	reserved1;
@@ -519,13 +520,21 @@ struct wpi_cmd_txpower {
 /* Structure for command WPI_CMD_BT_COEX. */
 struct wpi_bluetooth {
 	uint8_t		flags;
-	uint8_t		lead;
-	uint8_t		kill;
-	uint8_t		reserved;
-	uint32_t	ack;
-	uint32_t	cts;
-} __packed;
+#define WPI_BT_COEX_DISABLE	0
+#define WPI_BT_COEX_MODE_2WIRE	1
+#define WPI_BT_COEX_MODE_3WIRE	2
+#define WPI_BT_COEX_MODE_4WIRE	3
 
+	uint8_t		lead_time;
+#define WPI_BT_LEAD_TIME_DEF	30
+
+	uint8_t		max_kill;
+#define WPI_BT_MAX_KILL_DEF	5
+
+	uint8_t		reserved;
+	uint32_t	kill_ack;
+	uint32_t	kill_cts;
+} __packed;
 
 /* Structures for WPI_RX_DONE notification. */
 struct wpi_rx_stat {
@@ -822,3 +831,10 @@ static const char * const wpi_fw_errmsg[] = {
 #define WPI_CLRBITS(sc, reg, mask)					\
 	WPI_WRITE(sc, reg, WPI_READ(sc, reg) & ~(mask))
 
+#define WPI_BARRIER_WRITE(sc)						\
+	bus_space_barrier((sc)->sc_st, (sc)->sc_sh, 0, (sc)->sc_sz,	\
+	    BUS_SPACE_BARRIER_WRITE)
+
+#define WPI_BARRIER_READ_WRITE(sc)					\
+	bus_space_barrier((sc)->sc_st, (sc)->sc_sh, 0, (sc)->sc_sz,	\
+	    BUS_SPACE_BARRIER_READ | BUS_SPACE_BARRIER_WRITE)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.42 2009/01/25 17:30:48 miod Exp $	*/
+/*	$OpenBSD: conf.c,v 1.47 2010/09/23 05:02:14 claudio Exp $	*/
 /*	$NetBSD: conf.c,v 1.41 1997/02/11 07:35:49 scottr Exp $	*/
 
 /*
@@ -81,7 +81,6 @@ int	nblkdev = sizeof(bdevsw) / sizeof(bdevsw[0]);
 cdev_decl(mm);
 #include "bio.h"
 #include "pty.h"
-#include "ss.h"
 #include "uk.h"
 cdev_decl(fd);
 #include "zsc.h"
@@ -93,9 +92,9 @@ cdev_decl(zs);
 #include "asc.h"
 cdev_decl(asc);
 #include "ksyms.h"
-#ifdef XFS
-#include <xfs/nxfs.h>
-cdev_decl(xfs_dev);
+#ifdef NNPFS
+#include <nnpfs/nnnpfs.h>
+cdev_decl(nnpfs_dev);
 #endif
 #include "wsdisplay.h"
 #include "wskbd.h"
@@ -105,6 +104,9 @@ cdev_decl(xfs_dev);
 #include "pf.h"
 
 #include "systrace.h"
+
+#include "vscsi.h"
+#include "pppx.h"
 
 struct cdevsw	cdevsw[] =
 {
@@ -141,7 +143,7 @@ struct cdevsw	cdevsw[] =
 	cdev_lkm_dummy(),		/* 30 */
 	cdev_lkm_dummy(),		/* 31 */
 	cdev_random_init(1,random),	/* 32: random data source */
-	cdev_ss_init(NSS,ss),           /* 33: SCSI scanner */
+	cdev_notdef(),			/* 33 */
 	cdev_uk_init(NUK,uk),		/* 34: SCSI unknown */
 	cdev_pf_init(NPF,pf),		/* 35: packet filter */
 	cdev_audio_init(NASC,asc),      /* 36: ASC audio device */
@@ -159,12 +161,15 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 48 */
 	cdev_bio_init(NBIO,bio),	/* 49: ioctl tunnel */
 	cdev_systrace_init(NSYSTRACE,systrace),	/* 50 system call tracing */
-#ifdef XFS
-	cdev_xfs_init(NXFS,xfs_dev),	/* 51: xfs communication device */
+#ifdef NNPFS
+	cdev_nnpfs_init(NNNPFS,nnpfs_dev),	/* 51: nnpfs communication device */
 #else
 	cdev_notdef(),			/* 51 */
 #endif
 	cdev_ptm_init(NPTY,ptm),	/* 52: pseudo-tty ptm device */
+	cdev_vscsi_init(NVSCSI,vscsi),	/* 53: vscsi */
+	cdev_disk_init(1,diskmap),	/* 54: disk mapper */
+	cdev_pppx_init(NPPPX,pppx),	/* 55: pppx */
 };
 int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
 

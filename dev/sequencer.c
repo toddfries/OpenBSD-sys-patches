@@ -1,4 +1,4 @@
-/*	$OpenBSD: sequencer.c,v 1.16 2008/06/26 05:42:14 ray Exp $	*/
+/*	$OpenBSD: sequencer.c,v 1.19 2009/11/09 17:53:39 nicm Exp $	*/
 /*	$NetBSD: sequencer.c,v 1.13 1998/11/25 22:17:07 augustss Exp $	*/
 
 /*
@@ -616,6 +616,12 @@ sequencerpoll(dev_t dev, int events, struct proc *p)
 			selrecord(p, &sc->wsel);
 	}
 	return (revents);
+}
+
+int
+sequencerkqfilter(dev_t dev, struct knote *kn)
+{
+	return (EPERM);
 }
 
 void

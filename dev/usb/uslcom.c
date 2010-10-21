@@ -1,4 +1,4 @@
-/*	$OpenBSD: uslcom.c,v 1.19 2008/03/22 02:50:02 jsg Exp $	*/
+/*	$OpenBSD: uslcom.c,v 1.21 2010/09/24 08:33:59 yuo Exp $	*/
 
 /*
  * Copyright (c) 2006 Jonathan Gray <jsg@openbsd.org>
@@ -148,7 +148,7 @@ static const struct usb_devno uslcom_devs[] = {
 int uslcom_match(struct device *, void *, void *); 
 void uslcom_attach(struct device *, struct device *, void *); 
 int uslcom_detach(struct device *, int); 
-int uslcom_activate(struct device *, enum devact); 
+int uslcom_activate(struct device *, int); 
 
 struct cfdriver uslcom_cd = { 
 	NULL, "uslcom", DV_DULL 
@@ -253,7 +253,6 @@ uslcom_detach(struct device *self, int flags)
 	struct uslcom_softc *sc = (struct uslcom_softc *)self;
 	int rv = 0;
 
-	sc->sc_dying = 1;
 	if (sc->sc_subdev != NULL) {
 		rv = config_detach(sc->sc_subdev, flags);
 		sc->sc_subdev = NULL;
@@ -266,7 +265,7 @@ uslcom_detach(struct device *self, int flags)
 }
 
 int
-uslcom_activate(struct device *self, enum devact act)
+uslcom_activate(struct device *self, int act)
 {
 	struct uslcom_softc *sc = (struct uslcom_softc *)self;
 	int rv = 0;

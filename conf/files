@@ -1,4 +1,4 @@
-#	$OpenBSD: files,v 1.454 2009/01/29 15:12:28 pyr Exp $
+#	$OpenBSD: files,v 1.504 2010/10/06 22:19:20 mikeb Exp $
 #	$NetBSD: files,v 1.87 1996/05/19 17:17:50 jonathan Exp $
 
 #	@(#)files.newconf	7.5 (Berkeley) 5/10/93
@@ -15,7 +15,6 @@ define	atascsi {}
 define	ifmedia
 define	mii {[phy = -1]}
 define	midibus {}
-define	midisyn
 define	radiobus {}
 define	i2cbus {}
 define	gpiobus {}
@@ -108,6 +107,12 @@ include "dev/pci/drm/files.drm"
 device	vga: wsemuldisplaydev, pcdisplayops, drmdev, agpint
 file	dev/ic/vga.c			vga & (vga_pci | vga_isa) needs-flag
 file	dev/ic/vga_subr.c		vga & (vga_pci | vga_isa) needs-flag
+
+# Video modes 
+define	edid
+file	dev/videomode/edid.c		edid
+file    dev/videomode/vesagtf.c         edid
+file    dev/videomode/videomode.c       edid
 
 # Attribute for devices that read/write an IEEE 802.3u MII bus using the
 # bit-bang method.
@@ -227,7 +232,7 @@ file	dev/ic/osiop.c			osiop & (osiop_gsc | osiop_eisa | osiop_pcctwo)
 
 # Symbios/NCR 53c700 SCSI controllers
 device	oosiop: scsi
-file	dev/ic/oosiop.c			oosiop & (oosiop_gsc)
+file	dev/ic/oosiop.c			oosiop
 
 # 3Com Etherlink-III Ethernet controller
 device	ep: ether, ifnet, ifmedia, mii
@@ -301,6 +306,9 @@ file	dev/ic/i82596.c			ie & (ie_pci | ie_eisa | ie_gsc)
 device	gem: ether, ifnet, ifmedia, mii
 file	dev/ic/gem.c			gem
 
+device	ti: ether, ifnet, ifmedia, mii, firmload
+file	dev/ic/ti.c			ti
+
 # 8250/16[45]50-based "com" ports
 device	com: tty
 file	dev/ic/com.c			com & (com | com_cardbus | com_gsc |
@@ -314,11 +322,6 @@ file	dev/ic/pckbc.c			pckbc needs-flag
 # PCF8584 I2C Controllers
 device	pcfiic: i2cbus
 file	dev/ic/pcf8584.c		pcfiic
-
-# OPL2/OPL3 FM synth driver
-device	opl: midibus, midisyn
-file	dev/ic/opl.c			opl
-file	dev/ic/oplinstrs.c		opl
 
 # AC-97 CODECs
 define	ac97
@@ -361,6 +364,17 @@ file	dev/ic/ar5212.c			ar5xxx
 # Atheros AR5k (802.11/a/b/g) driver
 device	ath: ether, ifnet, ifmedia, ar5xxx, wlan, gpiobus
 file	dev/ic/ath.c			ath
+
+# Atheros AR9k (802.11a/g/n) driver
+device	athn: ether, ifnet, ifmedia, wlan
+file	dev/ic/athn.c			athn
+file	dev/ic/ar5008.c			athn
+file	dev/ic/ar5416.c			athn
+file	dev/ic/ar9280.c			athn
+file	dev/ic/ar9285.c			athn
+file	dev/ic/ar9287.c			athn
+file	dev/ic/ar9003.c			athn
+file	dev/ic/ar9380.c			athn
 
 # ADMtek ADM8211 802.11
 device	atw: ether, ifnet, ifmedia, smc93cx6, wlan
@@ -431,6 +445,11 @@ file	dev/usb/ehci.c			ehci	needs-flag
 device	sdhc: sdmmcbus
 file	dev/sdmmc/sdhc.c		sdhc	needs-flag
 
+# Winbond Integrated Media Reader
+device wbsd: sdmmcbus
+file	dev/ic/w83l518d.c		wbsd
+file	dev/ic/w83l518d_sdmmc.c		wbsd
+
 # radio devices, attaches to radio hardware driver
 device	radio
 attach	radio at radiobus
@@ -449,14 +468,25 @@ device	vscsi: scsi
 attach	vscsi at root
 file	dev/vscsi.c			vscsi	needs-flag
 
+# SCSI Multipathing
+device	mpath: scsi
+attach	mpath at root
+file	scsi/mpath.c			mpath	needs-flag
+
 # Software RAID
 device	softraid: scsi
 attach	softraid at root
 file	dev/softraid.c			softraid	needs-flag
 file	dev/softraid_raid0.c		softraid
 file	dev/softraid_raid1.c		softraid
+file	dev/softraid_raidp.c		softraid
 file	dev/softraid_crypto.c		softraid & crypto
 file	dev/softraid_aoe.c		softraid & ether & aoe
+file	dev/softraid_raid6.c		softraid
+
+# SPD Memory EEPROM
+device	spdmem
+file	dev/spdmem.c			spdmem
 
 # legitimate pseudo-devices
 pseudo-device vnd: disk
@@ -468,13 +498,13 @@ file	dev/ramdisk.c			rd needs-flag
 pseudo-device pty: tty
 pseudo-device nmea: tty
 pseudo-device msts: tty
+pseudo-device endrun: tty
 
 pseudo-device loop: ifnet
 pseudo-device sl: ifnet
 pseudo-device ppp: ifnet
 pseudo-device tun: ifnet
 pseudo-device bpfilter: ifnet
-pseudo-device strip: ifnet
 pseudo-device enc: ifnet
 pseudo-device bridge: ifnet, ether
 pseudo-device vlan: ifnet, ether
@@ -486,6 +516,8 @@ pseudo-device gre: ifnet
 pseudo-device crypto: ifnet
 pseudo-device trunk: ifnet, ether, ifmedia
 pseudo-device mpe: ifnet, ether
+pseudo-device vether: ifnet, ether
+pseudo-device pppx: ifnet
 
 pseudo-device sequencer
 pseudo-device systrace
@@ -537,22 +569,24 @@ file ddb/db_command.c			ddb
 file ddb/db_elf.c			ddb
 file ddb/db_examine.c			ddb
 file ddb/db_expr.c			ddb
+file ddb/db_hangman.c			ddb
 file ddb/db_input.c			ddb
 file ddb/db_lex.c			ddb
 file ddb/db_output.c			ddb
 file ddb/db_print.c			ddb
 file ddb/db_run.c			ddb | kgdb
+file ddb/db_struct.c			ddb & ddb_struct
 file ddb/db_sym.c			ddb
 file ddb/db_trap.c			ddb
 file ddb/db_variables.c			ddb
 file ddb/db_watch.c			ddb
 file ddb/db_write_cmd.c			ddb
 file ddb/db_usrreq.c			ddb
-file ddb/db_hangman.c			ddb
 file dev/auconv.c			auconv
 file dev/audio.c			audio			needs-flag
 file dev/ccd.c				ccd			needs-flag
 file dev/cons.c
+file dev/diskmap.c
 file dev/firmload.c			firmload
 file dev/flash.c			flash			needs-flag
 file dev/ic/ncr5380sbc.c		ncr5380sbc
@@ -566,7 +600,6 @@ file dev/ic/lm700x.c			lm700x
 file dev/ic/tc921x.c			tc921x
 file dev/ic/pt2254a.c			pt2254a
 file dev/midi.c				midi | midibus		needs-flag
-file dev/midisyn.c			midisyn
 file dev/mulaw.c			mulaw
 file dev/sequencer.c			sequencer		needs-flag
 file dev/systrace.c			systrace		needs-flag
@@ -654,6 +687,7 @@ file kern/exec_subr.c
 file kern/init_main.c
 file kern/init_sysent.c
 file kern/kern_acct.c			accounting
+file kern/kern_bufq.c
 file kern/kern_clock.c
 file kern/kern_descrip.c
 file kern/kern_event.c
@@ -691,6 +725,7 @@ file kern/subr_evcount.c
 file kern/subr_extent.c
 file kern/subr_log.c
 file kern/subr_pool.c
+file kern/dma_alloc.c
 file kern/subr_prf.c
 file kern/subr_prof.c
 file kern/subr_userconf.c		boot_config
@@ -709,6 +744,7 @@ file kern/tty_conf.c
 file kern/tty_pty.c			pty			needs-count
 file kern/tty_nmea.c			nmea			needs-flag
 file kern/tty_msts.c			msts			needs-flag
+file kern/tty_endrun.c			endrun			needs-flag
 file kern/tty_subr.c
 file kern/tty_tty.c
 file kern/uipc_domain.c
@@ -770,7 +806,6 @@ file net/if_spppsubr.c			sppp
 file net/if_loop.c			loop
 file net/if_media.c			ifmedia
 file net/if_sl.c			sl			needs-count
-file net/if_strip.c			strip			needs-count
 file net/if_ppp.c			ppp			needs-count
 file net/ppp_tty.c			ppp
 file net/bsd-comp.c			ppp_bsdcomp
@@ -780,18 +815,21 @@ file net/if_tun.c			tun			needs-count
 file net/if_bridge.c			bridge			needs-count
 file net/bridgestp.c			bridge
 file net/if_vlan.c			vlan			needs-count
+file net/pipex.c			pipex
 file net/radix.c
 file net/radix_mpath.c			!small_kernel
 file net/raw_cb.c
 file net/raw_usrreq.c
 file net/route.c
 file net/rtsock.c
-file net/slcompress.c			sl | ppp | strip
+file net/slcompress.c			sl | ppp
 file net/if_enc.c			enc			needs-count
 file net/if_gre.c			gre			needs-count
 file net/if_trunk.c			trunk			needs-count
 file net/trunklacp.c			trunk
 file net/if_mpe.c			mpe			needs-count
+file net/if_vether.c			vether			needs-count
+file net/if_pppx.c			pppx			needs-count
 file net/if_aoe.c			ether & aoe
 file net80211/ieee80211.c		wlan
 file net80211/ieee80211_amrr.c		wlan
@@ -815,6 +853,7 @@ file netinet/igmp.c			inet
 file netinet/in.c			inet
 file netinet/in_pcb.c			inet
 file netinet/in_proto.c			inet
+file netinet/ip_divert.c		inet & pf
 file netinet/ip_icmp.c			inet
 file netinet/ip_id.c			inet
 file netinet/ip_input.c			inet
@@ -832,7 +871,7 @@ file netinet/ip_gre.c			inet
 file netinet/ip_ipsp.c			(inet | inet6) & (ipsec | tcp_signature)
 file netinet/ip_spd.c			(inet | inet6) & (ipsec | tcp_signature)
 file netinet/ip_ipip.c			inet | inet6
-file netinet/ip_ether.c			inet
+file netinet/ip_ether.c			(inet | inet6) & gif
 file netinet/ipsec_input.c		(inet | inet6) & ipsec
 file netinet/ipsec_output.c		(inet | inet6) & ipsec
 file netinet/ip_esp.c			inet & ipsec
@@ -846,7 +885,6 @@ file crypto/sha1.c			(inet & ipsec) | crypto | carp | wlan
 file crypto/sha2.c			(inet & ipsec) | crypto | wlan
 file crypto/blf.c			(inet & ipsec) | crypto | vnd
 file crypto/cast.c			(inet & ipsec) | crypto
-file crypto/skipjack.c			(inet & ipsec) | crypto
 file crypto/ecb_enc.c			(inet & ipsec) | crypto
 file crypto/set_key.c			(inet & ipsec) | crypto
 file crypto/ecb3_enc.c			(inet & ipsec) | crypto
@@ -860,6 +898,7 @@ file crypto/arc4.c
 file crypto/michael.c			wlan
 file crypto/cmac.c			wlan
 file crypto/hmac.c			wlan | (softraid & crypto)
+file crypto/gmac.c			(inet & ipsec) | crypto
 file crypto/key_wrap.c			wlan
 file crypto/idgen.c			inet6 | nfsclient | nfsserver
 file netatalk/aarp.c			netatalk
@@ -896,6 +935,7 @@ file netnatm/natm_pcb.c			natm
 file netnatm/natm_proto.c		natm
 file netnatm/natm.c			natm
 file nfs/krpc_subr.c			nfsclient
+#file nfs/nfs_aiod.c			nfsclient
 file nfs/nfs_bio.c			nfsclient
 file nfs/nfs_boot.c			nfsclient
 file nfs/nfs_debug.c			nfsclient & ddb
@@ -938,20 +978,20 @@ file ufs/ext2fs/ext2fs_readwrite.c	ext2fs
 file ufs/ext2fs/ext2fs_subr.c		ext2fs
 file ufs/ext2fs/ext2fs_vfsops.c		ext2fs
 file ufs/ext2fs/ext2fs_vnops.c		ext2fs
-file xfs/xfs_common-bsd.c		xfs
-file xfs/xfs_deb.c			xfs
-file xfs/xfs_dev-bsd.c			xfs
-file xfs/xfs_dev-common.c		xfs
-file xfs/xfs_message.c			xfs
-file xfs/xfs_node.c			xfs
-file xfs/xfs_node-bsd.c			xfs
-file xfs/xfs_syscalls-common.c		xfs
-file xfs/xfs_vfsops-bsd.c		xfs
-file xfs/xfs_vfsops-common.c		xfs
-file xfs/xfs_vfsops-openbsd.c		xfs
-file xfs/xfs_vnodeops-bsd.c		xfs
-file xfs/xfs_vnodeops-common.c		xfs
-file xfs/xfs_syscalls-dummy.c		!xfs
+file nnpfs/nnpfs_common-bsd.c		nnpfs
+file nnpfs/nnpfs_deb.c			nnpfs
+file nnpfs/nnpfs_dev-bsd.c		nnpfs
+file nnpfs/nnpfs_dev-common.c		nnpfs
+file nnpfs/nnpfs_message.c		nnpfs
+file nnpfs/nnpfs_node.c			nnpfs
+file nnpfs/nnpfs_node-bsd.c		nnpfs
+file nnpfs/nnpfs_syscalls-common.c	nnpfs
+file nnpfs/nnpfs_vfsops-bsd.c		nnpfs
+file nnpfs/nnpfs_vfsops-common.c	nnpfs
+file nnpfs/nnpfs_vfsops-openbsd.c	nnpfs
+file nnpfs/nnpfs_vnodeops-bsd.c		nnpfs
+file nnpfs/nnpfs_vnodeops-common.c	nnpfs
+file nnpfs/nnpfs_syscalls-dummy.c	!nnpfs
 file uvm/uvm_amap.c
 file uvm/uvm_anon.c
 file uvm/uvm_aobj.c
@@ -965,10 +1005,12 @@ file uvm/uvm_km.c
 file uvm/uvm_map.c
 file uvm/uvm_meter.c
 file uvm/uvm_mmap.c
+file uvm/uvm_object.c
 file uvm/uvm_page.c
 file uvm/uvm_pager.c
 file uvm/uvm_pdaemon.c
 file uvm/uvm_pglist.c
+file uvm/uvm_pmemrange.c
 file uvm/uvm_stat.c
 file uvm/uvm_swap.c
 file uvm/uvm_swap_encrypt.c		uvm_swap_encrypt
@@ -985,6 +1027,7 @@ file netinet/in_gif.c			gif & inet
 file netinet6/in6_gif.c			gif & inet6
 file netinet6/in6_pcb.c			inet6
 file netinet6/in6.c			inet6
+file netinet6/ip6_divert.c		inet6 & pf
 file netinet6/in6_ifattach.c		inet6
 file netinet6/in6_cksum.c		inet6
 file netinet6/in6_src.c			inet6
@@ -1016,19 +1059,14 @@ file compat/common/compat_exec.c	!small_kernel
 file compat/common/compat_util.c	!small_kernel
 file compat/common/compat_dir.c		!small_kernel
 file compat/common/compat_vm.c		!small_kernel &
-	(compat_freebsd | compat_bsdos | compat_sunos | compat_hpux | compat_linux)
+	(compat_freebsd | compat_linux)
 file compat/common/kern_info_09.c	!small_kernel &
-	(compat_freebsd | compat_ibcs2 | compat_sunos | compat_hpux |
-	compat_osf1 | compat_linux)
-file compat/common/kern_ipc_10.c	!small_kernel &
-	(compat_freebsd | compat_ibcs2 | compat_sunos | compat_hpux | compat_bsdos)
-file compat/common/vfs_syscalls_25.c	!small_kernel &
-	(compat_freebsd | compat_bsdos | compat_sunos | compat_hpux)
+	(compat_freebsd | compat_linux)
+file compat/common/kern_ipc_10.c	!small_kernel & compat_freebsd
+file compat/common/vfs_syscalls_25.c	!small_kernel & compat_freebsd
 file compat/common/vfs_syscalls_35.c	!small_kernel & (compat_35 |
-	compat_freebsd | compat_bsdos | compat_sunos | compat_hpux)
-file compat/common/vfs_syscalls_o43.c	!small_kernel & compat_o43
+	compat_freebsd )
 file compat/common/kern_ipc_35.c	!small_kernel & compat_35
-file compat/common/kern_ipc_23.c	!small_kernel & compat_23
 file compat/common/kern_exit_43.c	!small_kernel
 file compat/common/kern_info_43.c	!small_kernel
 file compat/common/kern_resource_43.c	!small_kernel
@@ -1038,10 +1076,15 @@ file compat/common/uipc_syscalls_43.c	!small_kernel
 file compat/common/vfs_syscalls_43.c	!small_kernel
 file compat/common/vm_43.c		!small_kernel
 
+# libx86emu
+file dev/x86emu/x86emu.c		x86emu
+file dev/x86emu/x86emu_util.c		x86emu
+
 # libkern MI components
 file lib/libkern/mcount.c		gprof
 file lib/libkern/getsn.c
 file lib/libkern/random.c
+file lib/libkern/timingsafe_bcmp.c
 file lib/libkern/arch/${MACHINE_ARCH}/strchr.S | lib/libkern/strchr.c
 file lib/libkern/arch/${MACHINE_ARCH}/strrchr.S | lib/libkern/strrchr.c
 file lib/libkern/arch/${MACHINE_ARCH}/__main.S | lib/libkern/__main.c

@@ -1,4 +1,4 @@
-/*	$OpenBSD: intreg.h,v 1.8 2006/05/29 20:40:01 miod Exp $	*/
+/*	$OpenBSD: intreg.h,v 1.11 2010/07/10 19:32:25 miod Exp $	*/
 /*	$NetBSD: intreg.h,v 1.6 1997/07/22 20:19:10 pk Exp $ */
 
 /*
@@ -43,31 +43,26 @@
 
 #include <sparc/sparc/vaddrs.h>
 
+#if defined(SUN4) || defined(SUN4C) || defined(SUN4E)
+
 /*
  * sun4c interrupt enable register.
  *
- * The register is a single byte.  C code must use the ienab_bis and
- * ienab_bic functions found in locore.s.
+ * The register is a single byte.  C code must use the intreg_set_44c and
+ * intreg_clr_44c functions found in locore.s.
  *
  * The register's physical address is defined here as the register
  * must be mapped early in the boot process (otherwise NMI handling
  * will fail).
  */
-#define	INT_ENABLE_REG_PHYSADR	0xf5000000	/* phys addr in IOspace */
+#define	INT_ENABLE_REG_PHYSADR_44C	0xf5000000
+#define	INT_ENABLE_REG_PHYSADR_4E	0xea000000
 
 /*
  * Bits in interrupt enable register.  Software interrupt requests must
  * be cleared in software.  This is done in locore.s.  The ALLIE bit must
  * be cleared to clear asynchronous memory error (level 15) interrupts.
  */
-#ifdef solbourne
-#define	IE_L14		14
-#define	IE_L10		10
-#define	IE_L8		8
-#define	IE_L6		6
-#define	IE_L4		4
-#define	IE_L1		1
-#else
 #define	IE_L14		0x80	/* enable level 14 (counter 1) interrupts */
 #define	IE_L10		0x20	/* enable level 10 (counter 0) interrupts */
 #define	IE_L8		0x10	/* enable level 8 interrupts */
@@ -75,24 +70,16 @@
 #define	IE_L4		0x04	/* request software level 4 interrupt */
 #define	IE_L1		0x02	/* request software level 1 interrupt */
 #define	IE_ALLIE	0x01	/* enable interrupts */
-#endif
 
 #ifndef _LOCORE
-void	ienab_bis(int bis);	/* set given bits */
-void	ienab_bic(int bic);	/* clear given bits */
+void	intreg_set_44c(int);	/* set given bits */
+void	intreg_clr_44c(int);	/* clear given bits */
 #endif
 
-#if defined(SUN4M)
-#ifdef notyet
-#define IENAB_SYS	((_MAXNBPG * _MAXNCPU) + 0xc)
-#define IENAB_P0	0x0008
-#define IENAB_P1	0x1008
-#define IENAB_P2	0x2008
-#define IENAB_P3	0x3008
-#endif /* notyet */
-#endif
+#endif /* SUN4 || SUN4C || SUN4E */
 
 #if defined(SUN4M)
+
 /*
  * Interrupt Control Registers, located in IO space.
  * (mapped to `locore' for now..)
@@ -149,5 +136,9 @@ void	ienab_bic(int bic);	/* clear given bits */
 				"\022A\023SC\024T\025VI\065MI\027F" \
 				"\034V\035M\036I\037ME\040MA"
 
-
+#ifndef _LOCORE
+void	intreg_clr_4m(int);
+void	intreg_set_4m(int);
 #endif
+
+#endif	/* SUN4M */

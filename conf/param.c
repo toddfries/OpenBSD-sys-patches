@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.c,v 1.29 2008/03/20 22:25:29 deraadt Exp $	*/
+/*	$OpenBSD: param.c,v 1.31 2009/12/08 22:12:06 miod Exp $	*/
 /*	$NetBSD: param.c,v 1.16 1996/03/12 03:08:40 mrg Exp $	*/
 
 /*
@@ -103,8 +103,6 @@ int	mcllowat = MCLLOWAT;
 
 int	fscale = FSCALE;	/* kernel uses `FSCALE', user uses `fscale' */
 
-int	shmseg = 8;
-int	shmmaxpgs = SHMMAXPGS;
 /*
  * Values in support of System V compatible shared memory.	XXX
  */
@@ -138,21 +136,6 @@ struct	seminfo seminfo = {
 	SEMUSZ,		/* size in bytes of undo structure */
 	SEMVMX,		/* semaphore maximum value */
 	SEMAEM		/* adjust on exit max value */
-};
-#endif
-
-/*
- * Values in support of System V compatible messages.
- */
-#ifdef SYSVMSG
-struct	msginfo msginfo = {
-	MSGMAX,		/* max chars in a message */
-	MSGMNI,		/* # of message queue identifiers */
-	MSGMNB,		/* max chars in a queue */
-	MSGTQL,		/* max messages in system */
-	MSGSSZ,		/* size of a message segment */
-			/* (must be small power of 2 greater than 4) */
-	MSGSEG		/* number of message segments */
 };
 #endif
 

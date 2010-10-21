@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_stgereg.h,v 1.9 2008/06/26 05:42:17 ray Exp $	*/
+/*	$OpenBSD: if_stgereg.h,v 1.11 2009/08/10 19:41:05 deraadt Exp $	*/
 /*	$NetBSD: if_stgereg.h,v 1.3 2003/02/10 21:10:07 christos Exp $	*/
 
 /*-
@@ -529,9 +529,7 @@ struct stge_softc {
 	bus_space_handle_t sc_sh;	/* bus space handle */ 
 	bus_dma_tag_t sc_dmat;		/* bus DMA tag */ 
 	struct arpcom sc_arpcom;	/* ethernet common data */
-	void *sc_sdhook;		/* shutdown hook */
 	int sc_rev;			/* silicon revision */ 
-	int stge_if_flags;
 	void *sc_ih;			/* interrupt cookie */
 
 	struct mii_data sc_mii;		/* MII/media information */

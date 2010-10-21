@@ -1,4 +1,4 @@
-/*	$OpenBSD: sched_bsd.c,v 1.20 2009/03/23 13:25:11 art Exp $	*/
+/*	$OpenBSD: sched_bsd.c,v 1.24 2010/09/24 13:21:30 matthew Exp $	*/
 /*	$NetBSD: kern_synch.c,v 1.37 1996/04/22 01:38:37 christos Exp $	*/
 
 /*-
@@ -93,23 +93,22 @@ void
 roundrobin(struct cpu_info *ci)
 {
 	struct schedstate_percpu *spc = &ci->ci_schedstate;
-	int s;
 
 	spc->spc_rrticks = rrticks_init;
 
 	if (ci->ci_curproc != NULL) {
-		s = splstatclock();
 		if (spc->spc_schedflags & SPCF_SEENRR) {
 			/*
 			 * The process has already been through a roundrobin
 			 * without switching and may be hogging the CPU.
 			 * Indicate that the process should yield.
 			 */
-			spc->spc_schedflags |= SPCF_SHOULDYIELD;
+			atomic_setbits_int(&spc->spc_schedflags,
+			    SPCF_SHOULDYIELD);
 		} else {
-			spc->spc_schedflags |= SPCF_SEENRR;
+			atomic_setbits_int(&spc->spc_schedflags,
+			    SPCF_SEENRR);
 		}
-		splx(s);
 	}
 
 	if (spc->spc_nrun)
@@ -202,7 +201,7 @@ fixpt_t	ccpu = 0.95122942450071400909 * FSCALE;		/* exp(-1/20) */
 #define	CCPU_SHIFT	11
 
 /*
- * Recompute process priorities, every hz ticks.
+ * Recompute process priorities, every second.
  */
 void
 schedcpu(void *arg)
@@ -337,6 +336,7 @@ preempt(struct proc *newp)
 	SCHED_LOCK(s);
 	p->p_priority = p->p_usrpri;
 	p->p_stat = SRUN;
+	p->p_cpu = sched_choosecpu(p);
 	setrunqueue(p);
 	p->p_stats->p_ru.ru_nivcsw++;
 	mi_switch();
@@ -356,6 +356,7 @@ mi_switch(void)
 	int sched_count;
 #endif
 
+	assertwaitok();
 	KASSERT(p->p_stat != SONPROC);
 
 	SCHED_ASSERT_LOCKED();
@@ -405,7 +406,7 @@ mi_switch(void)
 	 * Process is about to yield the CPU; clear the appropriate
 	 * scheduling flags.
 	 */
-	spc->spc_schedflags &= ~SPCF_SWITCHCLEAR;
+	atomic_clearbits_int(&spc->spc_schedflags, SPCF_SWITCHCLEAR);
 
 	nextproc = sched_chooseproc();
 
@@ -516,6 +517,7 @@ setrunnable(struct proc *p)
 		break;
 	}
 	p->p_stat = SRUN;
+	p->p_cpu = sched_choosecpu(p);
 	setrunqueue(p);
 	if (p->p_slptime > 1)
 		updatepri(p);

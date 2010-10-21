@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.h,v 1.16 2007/05/04 03:44:44 deraadt Exp $	*/
+/*	$OpenBSD: autoconf.h,v 1.18 2010/06/29 21:28:08 miod Exp $	*/
 /*	$NetBSD: autoconf.h,v 1.20 1997/05/24 20:03:03 pk Exp $ */
 
 /*
@@ -44,6 +44,9 @@
 /*
  * Autoconfiguration information.
  */
+
+#ifndef _MACHINE_AUTOCONF_H_
+#define _MACHINE_AUTOCONF_H_
 
 /*
  * Most devices are configured according to information kept in
@@ -163,19 +166,6 @@ int	romprop(struct romaux *ra, const char *name, int node);
  */
 char	*clockfreq(int freq);
 
-/*
- * Memory description arrays.  Shared between pmap.c and autoconf.c; no
- * one else should use this (except maybe mem.c, e.g., if we fix the VM to
- * handle discontiguous physical memory).
- */
-struct memarr {
-	u_int	addr;
-	u_int	len;
-};
-int	makememarr(struct memarr *, int max, int which);
-#define	MEMARR_AVAILPHYS	0
-#define	MEMARR_TOTALPHYS	1
-
 /* Pass a string to the FORTH interpreter.  May fail silently. */
 void	rominterpret(char *);
 
@@ -201,3 +191,5 @@ int	findroot(void);
 int	findnode(int, const char *);
 int	opennode(char *);
 int	node_has_property(int, const char *);
+
+#endif /* _MACHINE_AUTOCONF_H_ */

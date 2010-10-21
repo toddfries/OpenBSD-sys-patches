@@ -1,4 +1,4 @@
-/*	$OpenBSD: bios.c,v 1.84 2009/01/13 13:53:50 kettenis Exp $	*/
+/*	$OpenBSD: bios.c,v 1.87 2010/03/28 12:08:49 kettenis Exp $	*/
 
 /*
  * Copyright (c) 1997-2001 Michael Shalayeff
@@ -86,7 +86,8 @@ int bios_print(void *, const char *);
 char *fixstring(char *);
 
 struct cfattach bios_ca = {
-	sizeof(struct bios_softc), biosprobe, biosattach
+	sizeof(struct bios_softc), biosprobe, biosattach, NULL,
+	config_activate_children
 };
 
 struct cfdriver bios_cd = {
@@ -110,6 +111,9 @@ struct smbios_entry smbios_entry;
 void		*bios_smpinfo;
 #endif
 bios_bootmac_t	*bios_bootmac;
+#ifdef DDB
+extern int	db_console;
+#endif
 
 void		smbios_info(char*);
 
@@ -450,6 +454,7 @@ void
 bios_getopt()
 {
 	bootarg_t *q;
+	bios_ddb_t *bios_ddb;
 
 #ifdef BIOS_DEBUG
 	printf("bootargv:");
@@ -527,6 +532,12 @@ bios_getopt()
 		case BOOTARG_BOOTMAC:
 			bios_bootmac = (bios_bootmac_t *)q->ba_arg;
 			break;
+
+		case BOOTARG_DDB:
+			bios_ddb = (bios_ddb_t *)q->ba_arg;
+#ifdef DDB
+			db_console = bios_ddb->db_console;
+#endif
 
 		default:
 #ifdef BIOS_DEBUG
@@ -959,7 +970,7 @@ smbios_info(char * str)
 		 * If the uuid value is all 0xff the uuid is present but not
 		 * set, if its all 0 then the uuid isn't present at all.
 		 */
-		uuidf |= SMBIOS_UUID_NPRESENT|SMBIOS_UUID_NSET;
+		uuidf = SMBIOS_UUID_NPRESENT|SMBIOS_UUID_NSET;
 		for (i = 0; i < sizeof(sys->uuid); i++) {
 			if (sys->uuid[i] != 0xff)
 				uuidf &= ~SMBIOS_UUID_NSET;

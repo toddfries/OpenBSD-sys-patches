@@ -1,4 +1,4 @@
-/*	$OpenBSD: ffs_alloc.c,v 1.87 2009/01/17 18:50:25 grange Exp $	*/
+/*	$OpenBSD: ffs_alloc.c,v 1.89 2010/07/13 18:52:25 otto Exp $	*/
 /*	$NetBSD: ffs_alloc.c,v 1.11 1996/05/11 18:27:09 mycroft Exp $	*/
 
 /*
@@ -585,7 +585,6 @@ ffs2_reallocblks(void *v)
 	struct buf *sbp, *ebp;
 	daddr64_t *bap, *sbap, *ebap = 0;
 	struct cluster_save *buflist;
-	struct ufsmount *ump;
 	daddr64_t start_lbn, end_lbn;
 	daddr64_t soff, newblk, blkno, pref;
 	struct indir start_ap[NIADDR + 1], end_ap[NIADDR + 1], *idp;
@@ -594,7 +593,6 @@ ffs2_reallocblks(void *v)
 	vp = ap->a_vp;
 	ip = VTOI(vp);
 	fs = ip->i_fs;
-	ump = ip->i_ump;
 
 	if (fs->fs_contigsumsize <= 0)
 		return (ENOSPC);
@@ -985,7 +983,10 @@ ffs_dirpref(struct inode *pip)
 	curdirsize = avgndir ? (cgsize - avgbfree * fs->fs_bsize) / avgndir : 0;
 	if (dirsize < curdirsize)
 		dirsize = curdirsize;
-	maxcontigdirs = min(avgbfree * fs->fs_bsize  / dirsize, 255);
+	if (dirsize <= 0)
+		maxcontigdirs = 0;		/* dirsize overflowed */
+	else
+		maxcontigdirs = min(avgbfree * fs->fs_bsize  / dirsize, 255);
 	if (fs->fs_avgfpdir > 0)
 		maxcontigdirs = min(maxcontigdirs,
 				    fs->fs_ipg / fs->fs_avgfpdir);

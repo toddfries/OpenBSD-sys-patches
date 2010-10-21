@@ -1,4 +1,4 @@
-/*	$OpenBSD: m88110.c,v 1.62 2009/02/16 23:03:33 miod Exp $	*/
+/*	$OpenBSD: m88110.c,v 1.65 2010/06/22 17:42:37 miod Exp $	*/
 /*
  * Copyright (c) 1998 Steve Murphree, Jr.
  * All rights reserved.
@@ -167,13 +167,12 @@ patc_clear(void)
 void
 m88110_setup_board_config(void)
 {
-	max_cpus = 1;
+	ncpusfound = 1;
 }
 
 void
 m88410_setup_board_config(void)
 {
-#ifdef MULTIPROCESSOR
 	struct mvmeprom_brdid brdid;
 
 	/*
@@ -184,13 +183,9 @@ m88410_setup_board_config(void)
 	bzero(&brdid, sizeof(brdid));
 	bugbrdid(&brdid);
 	if (bcmp(brdid.pwa, "01-W3815B04", 11) == 0)
-		max_cpus = 1;
+		ncpusfound = 1;
 	else
-		max_cpus = 2;
-	/* XXX what about 01-W3977B QP boards??? */
-#else
-	max_cpus = 1;
-#endif
+		ncpusfound = 2;
 }
 
 /*
@@ -493,6 +488,30 @@ m88110_flush_tlb(cpuid_t cpu, u_int kernel, vaddr_t vaddr, u_int count)
  * will occur before we do, it is not necessary to pay attention to this.
  */
 
+#ifdef MULTIPROCESSOR
+/*
+ * 88110 rev 4.2 errata #17:
+ * ``A copyback initiated by a flush page/line with invalidate command,
+ *   which is retried on the external bus, and is preceded by a snoop
+ *   copyback before the retry cycle occurs, can be incorrectly marked
+ *   as invalid, and not copied back to memory.
+ *   Suggested fix: Use flush page/line followed by flush page/line with
+ *   invalidate to avoid this condition.''
+ *
+ * This really only matters to us when running a MULTIPROCESSOR kernel
+ * (otherwise there is no snooping happening), and given the intrusive
+ * changes it requires (see the comment about invalidates being turned
+ * into flushes with invalidate in m88110_cmmu_inval_cache below), as
+ * well as the small performance impact it has), we define a specific
+ * symbol to enable the suggested workaround.
+ *
+ * Also, note that m88110_dma_cachectl() is never invoked when running on
+ * a multiprocessor system, therefore does not need to implement this
+ * workaround.
+ */
+#define	ENABLE_88110_ERRATA_17
+#endif
+
 #define	trunc_cache_line(a)	((a) & ~(MC88110_CACHE_LINE - 1))
 #define	round_cache_line(a)	trunc_cache_line((a) + MC88110_CACHE_LINE - 1)
 
@@ -582,19 +601,28 @@ m88410_flush_inst_cache(cpuid_t cpu, paddr_t pa, psize_t size)
 void
 m88110_cmmu_sync_cache(paddr_t pa, psize_t size)
 {
+#ifdef ENABLE_88110_ERRATA_17
+	mc88110_flush_data_page(pa);
+#else
 	if (size <= MC88110_CACHE_LINE)
 		mc88110_flush_data_line(pa);
 	else
 		mc88110_flush_data_page(pa);
+#endif
 }
 
 void
 m88110_cmmu_sync_inval_cache(paddr_t pa, psize_t size)
 {
+#ifdef ENABLE_88110_ERRATA_17
+	mc88110_flush_data_page(pa);
+	mc88110_sync_data_page(pa);
+#else
 	if (size <= MC88110_CACHE_LINE)
 		mc88110_sync_data_line(pa);
 	else
 		mc88110_sync_data_page(pa);
+#endif
 }
 
 void
@@ -618,6 +646,14 @@ m88110_cmmu_inval_cache(paddr_t pa, psize_t size)
 /*
  * High level cache handling functions (used by bus_dma).
  */
+
+#ifdef MULTIPROCESSOR
+void
+m88110_dma_cachectl_local(paddr_t _pa, psize_t _size, int op)
+{
+	/* Obviously nothing to do. */
+}
+#endif
 
 void
 m88110_dma_cachectl(paddr_t _pa, psize_t _size, int op)
@@ -683,7 +719,11 @@ m88410_dma_cachectl_local(paddr_t pa, psize_t size, int op)
 		ext_flusher = mc88410_sync;
 		break;
 	default:
+#ifdef ENABLE_88110_ERRATA_17
+		flusher = m88110_cmmu_sync_inval_cache;
+#else
 		flusher = m88110_cmmu_inval_cache;
+#endif
 #ifdef notyet
 		ext_flusher = mc88410_inval;
 #else
@@ -707,8 +747,12 @@ m88410_dma_cachectl_local(paddr_t pa, psize_t size, int op)
 	} else {
 		mc88110_inval_inst();
 		while (size != 0) {
+#ifdef ENABLE_88110_ERRATA_17
+			count = PAGE_SIZE;
+#else
 			count = (pa & PAGE_MASK) == 0 && size >= PAGE_SIZE ?
 			    PAGE_SIZE : MC88110_CACHE_LINE;
+#endif
 
 			(*flusher)(pa, count);
 
@@ -729,6 +773,15 @@ m88410_dma_cachectl(paddr_t _pa, psize_t _size, int op)
 	paddr_t pa;
 	psize_t size;
 
+#ifdef ENABLE_88110_ERRATA_17
+	pa = trunc_page(_pa);
+	size = round_page(_pa + _size) - pa;
+
+#if 0 /* not required since m88410_dma_cachectl_local() behaves identically */
+	if (op == DMA_CACHE_INV)
+		op = DMA_CACHE_SYNC_INVAL;
+#endif
+#else
 	if (op == DMA_CACHE_SYNC) {
 		pa = trunc_page(_pa);
 		size = round_page(_pa + _size) - pa;
@@ -741,17 +794,15 @@ m88410_dma_cachectl(paddr_t _pa, psize_t _size, int op)
 				op = DMA_CACHE_SYNC_INVAL;
 		}
 	}
+#endif
 
 	m88410_dma_cachectl_local(pa, size, op);
 #ifdef MULTIPROCESSOR
-	m197_broadcast_complex_ipi(CI_IPI_DMA_CACHECTL, pa, size | op);
+	/*
+	 * Since snooping is enabled, all we need is to propagate invalidate 
+	 * requests if necessary.
+	 */
+	if (op != DMA_CACHE_SYNC)
+		m197_broadcast_complex_ipi(CI_IPI_DMA_CACHECTL, pa, size);
 #endif
 }
-
-#ifdef MULTIPROCESSOR
-void
-m88110_dma_cachectl_local(paddr_t _pa, psize_t _size, int op)
-{
-	/* Obviously nothing to do. */
-}
-#endif

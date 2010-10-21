@@ -1,4 +1,4 @@
-/*	$OpenBSD: diskprobe.c,v 1.6 2008/12/10 23:41:19 krw Exp $	*/
+/*	$OpenBSD: diskprobe.c,v 1.8 2010/04/23 15:25:20 jsing Exp $	*/
 
 /*
  * Copyright (c) 1997 Tobias Weingartner
@@ -253,8 +253,6 @@ cdprobe(void)
 	strncpy(dip->disklabel.d_packname, "fictitious",
 	    sizeof(dip->disklabel.d_packname));
 	dip->disklabel.d_secperunit = 100;
-	dip->disklabel.d_rpm = 300;
-	dip->disklabel.d_interleave = 1;
 
 	dip->disklabel.d_bbsize = 2048;
 	dip->disklabel.d_sbsize = 2048;
@@ -269,7 +267,7 @@ cdprobe(void)
 	dip->disklabel.d_partitions[RAW_PART].p_size = 100;
 	dip->disklabel.d_partitions[RAW_PART].p_fstype = FS_UNUSED;
 
-	dip->disklabel.d_npartitions = RAW_PART + 1;
+	dip->disklabel.d_npartitions = MAXPARTITIONS;
 
 	dip->disklabel.d_magic = DISKMAGIC;
 	dip->disklabel.d_magic2 = DISKMAGIC;

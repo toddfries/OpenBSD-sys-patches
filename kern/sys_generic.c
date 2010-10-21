@@ -1,4 +1,4 @@
-/*	$OpenBSD: sys_generic.c,v 1.60 2009/03/24 13:49:38 kurt Exp $	*/
+/*	$OpenBSD: sys_generic.c,v 1.71 2010/08/18 17:42:12 marco Exp $	*/
 /*	$NetBSD: sys_generic.c,v 1.24 1996/03/29 00:25:32 cgd Exp $	*/
 
 /*
@@ -63,7 +63,6 @@
 #include <uvm/uvm_extern.h>
 
 int selscan(struct proc *, fd_set *, fd_set *, int, int, register_t *);
-int seltrue(dev_t, int, struct proc *);
 void pollscan(struct proc *, struct pollfd *, u_int, register_t *);
 int pollout(struct pollfd *, struct pollfd *, u_int);
 
@@ -79,6 +78,7 @@ sys_read(struct proc *p, void *v, register_t *retval)
 		syscallarg(void *) buf;
 		syscallarg(size_t) nbyte;
 	} */ *uap = v;
+	struct iovec iov;
 	int fd = SCARG(uap, fd);
 	struct file *fp;
 	struct filedesc *fdp = p->p_fd;
@@ -88,68 +88,13 @@ sys_read(struct proc *p, void *v, register_t *retval)
 	if ((fp->f_flag & FREAD) == 0)
 		return (EBADF);
 
+	iov.iov_base = SCARG(uap, buf);
+	iov.iov_len = SCARG(uap, nbyte);
+
 	FREF(fp);
 
-	/* dofileread() will FRELE the descriptor for us */
-	return (dofileread(p, fd, fp, SCARG(uap, buf), SCARG(uap, nbyte),
-	    &fp->f_offset, retval));
-}
-
-int
-dofileread(struct proc *p, int fd, struct file *fp, void *buf, size_t nbyte,
-    off_t *offset, register_t *retval)
-{
-	struct uio auio;
-	struct iovec aiov;
-	long cnt, error = 0;
-#ifdef KTRACE
-	struct iovec ktriov;
-#endif
-
-	aiov.iov_base = buf;
-	aiov.iov_len = nbyte;
-	auio.uio_iov = &aiov;
-	auio.uio_iovcnt = 1;
-	auio.uio_resid = nbyte;
-	auio.uio_rw = UIO_READ;
-	auio.uio_segflg = UIO_USERSPACE;
-	auio.uio_procp = p;
-
-	/*
-	 * Reads return ssize_t because -1 is returned on error.  Therefore
-	 * we must restrict the length to SSIZE_MAX to avoid garbage return
-	 * values.
-	 */
-	if (auio.uio_resid > SSIZE_MAX) {
-		error = EINVAL;
-		goto out;
-	}
-
-#ifdef KTRACE
-	/*
-	 * if tracing, save a copy of iovec
-	 */
-	if (KTRPOINT(p, KTR_GENIO))
-		ktriov = aiov;
-#endif
-	cnt = auio.uio_resid;
-	error = (*fp->f_ops->fo_read)(fp, offset, &auio, fp->f_cred);
-	if (error)
-		if (auio.uio_resid != cnt && (error == ERESTART ||
-		    error == EINTR || error == EWOULDBLOCK))
-			error = 0;
-	cnt -= auio.uio_resid;
-
-	fp->f_rxfer++;
-	fp->f_rbytes += cnt;
-#ifdef KTRACE
-	if (KTRPOINT(p, KTR_GENIO) && error == 0)
-		ktrgenio(p, fd, UIO_READ, &ktriov, cnt, error);
-#endif
-	*retval = cnt;
- out:
-	FRELE(fp);
-	return (error);
+	/* dofilereadv() will FRELE the descriptor for us */
+	return (dofilereadv(p, fd, fp, &iov, 1, 0, &fp->f_offset, retval));
 }
 
 /*
@@ -175,18 +120,18 @@ sys_readv(struct proc *p, void *v, register_t *retval)
 	FREF(fp);
 
 	/* dofilereadv() will FRELE the descriptor for us */
-	return (dofilereadv(p, fd, fp, SCARG(uap, iovp), SCARG(uap, iovcnt),
+	return (dofilereadv(p, fd, fp, SCARG(uap, iovp), SCARG(uap, iovcnt), 1,
 	    &fp->f_offset, retval));
 }
 
 int
 dofilereadv(struct proc *p, int fd, struct file *fp, const struct iovec *iovp,
-    int iovcnt, off_t *offset, register_t *retval)
+    int iovcnt, int userspace, off_t *offset, register_t *retval)
 {
+	struct iovec aiov[UIO_SMALLIOV];
 	struct uio auio;
 	struct iovec *iov;
-	struct iovec *needfree;
-	struct iovec aiov[UIO_SMALLIOV];
+	struct iovec *needfree = NULL;
 	long i, cnt, error = 0;
 	u_int iovlen;
 #ifdef KTRACE
@@ -195,18 +140,29 @@ dofilereadv(struct proc *p, int fd, struct file *fp, const struct iovec *iovp,
 
 	/* note: can't use iovlen until iovcnt is validated */
 	iovlen = iovcnt * sizeof(struct iovec);
-	if ((u_int)iovcnt > UIO_SMALLIOV) {
-		if ((u_int)iovcnt > IOV_MAX) {
+
+	/*
+	 * If the iovec array exists in userspace, it needs to be copied in;
+	 * otherwise, it can be used directly.
+	 */
+	if (userspace) {
+		if ((u_int)iovcnt > UIO_SMALLIOV) {
+			if ((u_int)iovcnt > IOV_MAX) {
+				error = EINVAL;
+				goto out;
+			}
+			iov = needfree = malloc(iovlen, M_IOV, M_WAITOK);
+		} else if ((u_int)iovcnt > 0) {
+			iov = aiov;
+			needfree = NULL;
+		} else {
 			error = EINVAL;
 			goto out;
 		}
-		iov = needfree = malloc(iovlen, M_IOV, M_WAITOK);
-	} else if ((u_int)iovcnt > 0) {
-		iov = aiov;
-		needfree = NULL;
+		if ((error = copyin(iovp, iov, iovlen)))
+			goto done;
 	} else {
-		error = EINVAL;
-		goto out;
+		iov = (struct iovec *)iovp;		/* de-constify */
 	}
 
 	auio.uio_iov = iov;
@@ -214,9 +170,6 @@ dofilereadv(struct proc *p, int fd, struct file *fp, const struct iovec *iovp,
 	auio.uio_rw = UIO_READ;
 	auio.uio_segflg = UIO_USERSPACE;
 	auio.uio_procp = p;
-	error = copyin(iovp, iov, iovlen);
-	if (error)
-		goto done;
 	auio.uio_resid = 0;
 	for (i = 0; i < iovcnt; i++) {
 		auio.uio_resid += iov->iov_len;
@@ -235,7 +188,7 @@ dofilereadv(struct proc *p, int fd, struct file *fp, const struct iovec *iovp,
 	/*
 	 * if tracing, save a copy of iovec
 	 */
-	if (KTRPOINT(p, KTR_GENIO))  {
+	if (KTRPOINT(p, KTR_GENIO)) {
 		ktriov = malloc(iovlen, M_TEMP, M_WAITOK);
 		bcopy(auio.uio_iov, ktriov, iovlen);
 	}
@@ -252,7 +205,7 @@ dofilereadv(struct proc *p, int fd, struct file *fp, const struct iovec *iovp,
 	fp->f_rbytes += cnt;
 #ifdef KTRACE
 	if (ktriov != NULL) {
-		if (error == 0) 
+		if (error == 0)
 			ktrgenio(p, fd, UIO_READ, ktriov, cnt,
 			    error);
 		free(ktriov, M_TEMP);
@@ -278,6 +231,7 @@ sys_write(struct proc *p, void *v, register_t *retval)
 		syscallarg(const void *) buf;
 		syscallarg(size_t) nbyte;
 	} */ *uap = v;
+	struct iovec iov;
 	int fd = SCARG(uap, fd);
 	struct file *fp;
 	struct filedesc *fdp = p->p_fd;
@@ -287,71 +241,13 @@ sys_write(struct proc *p, void *v, register_t *retval)
 	if ((fp->f_flag & FWRITE) == 0)
 		return (EBADF);
 
+	iov.iov_base = (void *)SCARG(uap, buf);
+	iov.iov_len = SCARG(uap, nbyte);
+
 	FREF(fp);
 
-	/* dofilewrite() will FRELE the descriptor for us */
-	return (dofilewrite(p, fd, fp, SCARG(uap, buf), SCARG(uap, nbyte),
-	    &fp->f_offset, retval));
-}
-
-int
-dofilewrite(struct proc *p, int fd, struct file *fp, const void *buf,
-    size_t nbyte, off_t *offset, register_t *retval)
-{
-	struct uio auio;
-	struct iovec aiov;
-	long cnt, error = 0;
-#ifdef KTRACE
-	struct iovec ktriov;
-#endif
-
-	aiov.iov_base = (void *)buf;		/* XXX kills const */
-	aiov.iov_len = nbyte;
-	auio.uio_iov = &aiov;
-	auio.uio_iovcnt = 1;
-	auio.uio_resid = nbyte;
-	auio.uio_rw = UIO_WRITE;
-	auio.uio_segflg = UIO_USERSPACE;
-	auio.uio_procp = p;
-
-	/*
-	 * Writes return ssize_t because -1 is returned on error.  Therefore
-	 * we must restrict the length to SSIZE_MAX to avoid garbage return
-	 * values.
-	 */
-	if (auio.uio_resid > SSIZE_MAX) {
-		error = EINVAL;
-		goto out;
-	}
-
-#ifdef KTRACE
-	/*
-	 * if tracing, save a copy of iovec
-	 */
-	if (KTRPOINT(p, KTR_GENIO))
-		ktriov = aiov;
-#endif
-	cnt = auio.uio_resid;
-	error = (*fp->f_ops->fo_write)(fp, offset, &auio, fp->f_cred);
-	if (error) {
-		if (auio.uio_resid != cnt && (error == ERESTART ||
-		    error == EINTR || error == EWOULDBLOCK))
-			error = 0;
-		if (error == EPIPE)
-			ptsignal(p, SIGPIPE, STHREAD);
-	}
-	cnt -= auio.uio_resid;
-
-	fp->f_wxfer++;
-	fp->f_wbytes += cnt;
-#ifdef KTRACE
-	if (KTRPOINT(p, KTR_GENIO) && error == 0)
-		ktrgenio(p, fd, UIO_WRITE, &ktriov, cnt, error);
-#endif
-	*retval = cnt;
- out:
-	FRELE(fp);
-	return (error);
+	/* dofilewritev() will FRELE the descriptor for us */
+	return (dofilewritev(p, fd, fp, &iov, 1, 0, &fp->f_offset, retval));
 }
 
 /*
@@ -377,18 +273,18 @@ sys_writev(struct proc *p, void *v, register_t *retval)
 	FREF(fp);
 
 	/* dofilewritev() will FRELE the descriptor for us */
-	return (dofilewritev(p, fd, fp, SCARG(uap, iovp), SCARG(uap, iovcnt),
+	return (dofilewritev(p, fd, fp, SCARG(uap, iovp), SCARG(uap, iovcnt), 1,
 	    &fp->f_offset, retval));
 }
 
 int
 dofilewritev(struct proc *p, int fd, struct file *fp, const struct iovec *iovp,
-    int iovcnt, off_t *offset, register_t *retval)
+    int iovcnt, int userspace, off_t *offset, register_t *retval)
 {
+	struct iovec aiov[UIO_SMALLIOV];
 	struct uio auio;
 	struct iovec *iov;
-	struct iovec *needfree;
-	struct iovec aiov[UIO_SMALLIOV];
+	struct iovec *needfree = NULL;
 	long i, cnt, error = 0;
 	u_int iovlen;
 #ifdef KTRACE
@@ -397,18 +293,29 @@ dofilewritev(struct proc *p, int fd, struct file *fp, const struct iovec *iovp,
 
 	/* note: can't use iovlen until iovcnt is validated */
 	iovlen = iovcnt * sizeof(struct iovec);
-	if ((u_int)iovcnt > UIO_SMALLIOV) {
-		if ((u_int)iovcnt > IOV_MAX) {
+
+	/*
+	 * If the iovec array exists in userspace, it needs to be copied in;
+	 * otherwise, it can be used directly.
+	 */
+	if (userspace) {
+		if ((u_int)iovcnt > UIO_SMALLIOV) {
+			if ((u_int)iovcnt > IOV_MAX) {
+				error = EINVAL;
+				goto out;
+			}
+			iov = needfree = malloc(iovlen, M_IOV, M_WAITOK);
+		} else if ((u_int)iovcnt > 0) {
+			iov = aiov;
+			needfree = NULL;
+		} else {
 			error = EINVAL;
 			goto out;
 		}
-		iov = needfree = malloc(iovlen, M_IOV, M_WAITOK);
-	} else if ((u_int)iovcnt > 0) {
-		iov = aiov;
-		needfree = NULL;
+		if ((error = copyin(iovp, iov, iovlen)))
+			goto done;
 	} else {
-		error = EINVAL;
-		goto out;
+		iov = (struct iovec *)iovp;		/* de-constify */
 	}
 
 	auio.uio_iov = iov;
@@ -416,9 +323,6 @@ dofilewritev(struct proc *p, int fd, struct file *fp, const struct iovec *iovp,
 	auio.uio_rw = UIO_WRITE;
 	auio.uio_segflg = UIO_USERSPACE;
 	auio.uio_procp = p;
-	error = copyin(iovp, iov, iovlen);
-	if (error)
-		goto done;
 	auio.uio_resid = 0;
 	for (i = 0; i < iovcnt; i++) {
 		auio.uio_resid += iov->iov_len;
@@ -437,7 +341,7 @@ dofilewritev(struct proc *p, int fd, struct file *fp, const struct iovec *iovp,
 	/*
 	 * if tracing, save a copy of iovec
 	 */
-	if (KTRPOINT(p, KTR_GENIO))  {
+	if (KTRPOINT(p, KTR_GENIO)) {
 		ktriov = malloc(iovlen, M_TEMP, M_WAITOK);
 		bcopy(auio.uio_iov, ktriov, iovlen);
 	}
@@ -457,7 +361,7 @@ dofilewritev(struct proc *p, int fd, struct file *fp, const struct iovec *iovp,
 	fp->f_wbytes += cnt;
 #ifdef KTRACE
 	if (ktriov != NULL) {
-		if (error == 0) 
+		if (error == 0)
 			ktrgenio(p, fd, UIO_WRITE, ktriov, cnt, error);
 		free(ktriov, M_TEMP);
 	}
@@ -491,7 +395,7 @@ sys_ioctl(struct proc *p, void *v, register_t *retval)
 	caddr_t data, memp;
 	int tmp;
 #define STK_PARAMS	128
-	char stkbuf[STK_PARAMS];
+	u_long stkbuf[STK_PARAMS / sizeof(u_long)];
 
 	fdp = p->p_fd;
 	if ((fp = fd_getfile(fdp, SCARG(uap, fd))) == NULL)
@@ -522,7 +426,7 @@ sys_ioctl(struct proc *p, void *v, register_t *retval)
 		memp = (caddr_t)malloc((u_long)size, M_IOCTLOPS, M_WAITOK);
 		data = memp;
 	} else
-		data = stkbuf;
+		data = (caddr_t)stkbuf;
 	if (com&IOC_IN) {
 		if (size) {
 			error = copyin(SCARG(uap, data), data, (u_int)size);
@@ -572,12 +476,12 @@ sys_ioctl(struct proc *p, void *v, register_t *retval)
 		if (tmp <= 0) {
 			tmp = -tmp;
 		} else {
-			struct proc *p1 = pfind(tmp);
-			if (p1 == 0) {
+			struct process *pr = prfind(tmp);
+			if (pr == NULL) {
 				error = ESRCH;
 				break;
 			}
-			tmp = p1->p_pgrp->pg_id;
+			tmp = pr->ps_pgrp->pg_id;
 		}
 		error = (*fp->f_ops->fo_ioctl)
 			(fp, TIOCSPGRP, (caddr_t)&tmp, p);
@@ -726,7 +630,7 @@ done:
 		putbits(ex, 2);
 #undef putbits
 	}
-	
+
 	if (pibits[0] != (fd_set *)&bits[0])
 		free(pibits[0], M_TEMP);
 	return (error);
@@ -775,6 +679,13 @@ seltrue(dev_t dev, int events, struct proc *p)
 	return (events & (POLLIN | POLLOUT | POLLRDNORM | POLLWRNORM));
 }
 
+int
+selfalse(dev_t dev, int events, struct proc *p)
+{
+
+	return (0);
+}
+
 /*
  * Record a select request.
  */
@@ -803,6 +714,7 @@ selwakeup(struct selinfo *sip)
 	struct proc *p;
 	int s;
 
+	KNOTE(&sip->si_note, 0);
 	if (sip->si_selpid == 0)
 		return;
 	if (sip->si_flags & SI_COLL) {
@@ -861,7 +773,7 @@ pollout(struct pollfd *pl, struct pollfd *upl, u_int nfds)
 {
 	int error = 0;
 	u_int i = 0;
-	
+
 	while (!error && i++ < nfds) {
 		error = copyout(&pl->revents, &upl->revents,
 		    sizeof(upl->revents));
@@ -897,7 +809,7 @@ sys_poll(struct proc *p, void *v, register_t *retval)
 		return (EINVAL);
 
 	sz = sizeof(struct pollfd) * nfds;
-	
+
 	/* optimize for the default case, of a small nfds value */
 	if (sz > sizeof(pfds))
 		pl = (struct pollfd *) malloc(sz, M_TEMP, M_WAITOK);
