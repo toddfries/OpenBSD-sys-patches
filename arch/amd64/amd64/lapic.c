@@ -1,4 +1,4 @@
-/*	$OpenBSD: lapic.c,v 1.17 2009/04/27 17:48:22 deraadt Exp $	*/
+/*	$OpenBSD: lapic.c,v 1.27 2010/09/20 06:33:46 matthew Exp $	*/
 /* $NetBSD: lapic.c,v 1.2 2003/05/08 01:04:35 fvdl Exp $ */
 
 /*-
@@ -34,7 +34,6 @@
 
 #include <sys/param.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 
@@ -63,7 +62,9 @@
 #endif
 
 struct evcount clk_count;
+#ifdef MULTIPROCESSOR
 struct evcount ipi_count;
+#endif
 
 void	lapic_delay(int);
 static u_int32_t lapic_gettick(void);
@@ -113,7 +114,7 @@ lapic_map(paddr_t lapic_base)
 	invlpg(va);
 
 #ifdef MULTIPROCESSOR
-	cpu_init_first();	/* catch up to changed cpu_number() */
+	cpu_init_first();
 #endif
 
 	lapic_tpr = s;
@@ -221,7 +222,9 @@ void
 lapic_boot_init(paddr_t lapic_base)
 {
 	static u_int64_t clk_irq = 0;
+#ifdef MULTIPROCESSOR
 	static u_int64_t ipi_irq = 0;
+#endif
 
 	lapic_map(lapic_base);
 
@@ -241,8 +244,10 @@ lapic_boot_init(paddr_t lapic_base)
 	idt_allocmap[LAPIC_TIMER_VECTOR] = 1;
 	idt_vec_set(LAPIC_TIMER_VECTOR, Xintr_lapic_ltimer);
 
-	evcount_attach(&clk_count, "clock", (void *)&clk_irq, &evcount_intr);
-	evcount_attach(&ipi_count, "ipi", (void *)&ipi_irq, &evcount_intr);
+	evcount_attach(&clk_count, "clock", &clk_irq);
+#ifdef MULTIPROCESSOR
+	evcount_attach(&ipi_count, "ipi", &ipi_irq);
+#endif
 }
 
 static __inline u_int32_t
@@ -273,7 +278,7 @@ lapic_clockintr(void *arg, struct intrframe frame)
 }
 
 void
-lapic_initclocks(void)
+lapic_startclock(void)
 {
 	/*
 	 * Start local apic countdown timer running, in repeated mode.
@@ -288,9 +293,17 @@ lapic_initclocks(void)
 	i82489_writereg(LAPIC_LVTT, LAPIC_LVTT_TM|LAPIC_TIMER_VECTOR);
 }
 
+void
+lapic_initclocks(void)
+{
+	lapic_startclock();
+
+	i8254_inittimecounter_simple();
+}
+
+
 extern int gettick(void);	/* XXX put in header file */
 extern u_long rtclock_tval; /* XXX put in header file */
-extern void (*initclock_func)(void); /* XXX put in header file */
 
 /*
  * Calibrate the local apic count-down timer (which is running at
@@ -454,6 +467,7 @@ i82489_icr_wait(void)
 	}
 }
 
+#ifdef MULTIPROCESSOR
 int
 x86_ipi_init(int target)
 {
@@ -481,7 +495,7 @@ x86_ipi(int vec, int target, int dl)
 {
 	int result, s;
 
-	s = splclock();
+	s = splhigh();
 
 	i82489_icr_wait();
 
@@ -499,6 +513,7 @@ x86_ipi(int vec, int target, int dl)
 
 	return result;
 }
+#endif /* MULTIPROCESSOR */
 
 
 /*

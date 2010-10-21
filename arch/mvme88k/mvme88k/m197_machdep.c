@@ -1,4 +1,4 @@
-/*	$OpenBSD: m197_machdep.c,v 1.40 2009/03/15 20:39:53 miod Exp $	*/
+/*	$OpenBSD: m197_machdep.c,v 1.42 2010/06/22 17:42:37 miod Exp $	*/
 
 /*
  * Copyright (c) 2009 Miodrag Vallat.
@@ -168,7 +168,7 @@ m197_startup()
 	uvm_map(kernel_map, (vaddr_t *)&flashva, FLASH_SIZE,
 	    NULL, UVM_UNKNOWN_OFFSET, 0,
 	      UVM_MAPFLAG(UVM_PROT_NONE, UVM_PROT_NONE, UVM_INH_NONE,
-	        UVM_ADV_NORMAL, 0));
+	        UVM_ADV_NORMAL, UVM_FLAG_FIXED));
 	if (flashva != FLASH_START)
 		panic("flashva %lx: FLASH not free", flashva);
 
@@ -179,7 +179,7 @@ m197_startup()
 	uvm_map(kernel_map, (vaddr_t *)&obiova, OBIO197_SIZE,
 	    NULL, UVM_UNKNOWN_OFFSET, 0,
 	      UVM_MAPFLAG(UVM_PROT_NONE, UVM_PROT_NONE, UVM_INH_NONE,
-	        UVM_ADV_NORMAL, 0));
+	        UVM_ADV_NORMAL, UVM_FLAG_FIXED));
 	if (obiova != OBIO197_START)
 		panic("obiova %lx: OBIO not free", obiova);
 }
@@ -615,8 +615,7 @@ m197_ipi_handler(struct trapframe *eframe)
 			cmmu_flush_inst_cache(ci->ci_cpuid, arg1, arg2);
 		}
 		else if (ipi & CI_IPI_DMA_CACHECTL) {
-			dma_cachectl_local(arg1, arg2 & ~DMA_CACHE_MASK,
-			    arg2 & DMA_CACHE_MASK);
+			dma_cachectl_local(arg1, arg2, DMA_CACHE_INV);
 		}
 
 		return 0;

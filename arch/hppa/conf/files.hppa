@@ -1,4 +1,4 @@
-#	$OpenBSD: files.hppa,v 1.80 2008/07/16 16:32:08 miod Exp $
+#	$OpenBSD: files.hppa,v 1.86 2010/08/18 21:01:14 jasper Exp $
 #
 # hppa-specific configuration info
 
@@ -288,17 +288,6 @@ file	arch/hppa/gsc/gsckbc.c			gsckbc
 include	"dev/pckbc/files.pckbc"
 
 #
-# Compatibility
-#
-include "compat/hpux/hppa/files.hpux"
-file	arch/hppa/hppa/hpux_machdep.c		compat_hpux
-include "compat/osf1/files.osf1"
-file	arch/hppa/hppa/osf1_machdep.c		compat_osf1
-include	"compat/linux/files.linux"
-include "compat/ossaudio/files.ossaudio"
-file	arch/hppa/hppa/linux_machdep.c		compat_linux
-
-#
 # Non-device files
 #
 
@@ -307,6 +296,9 @@ file	arch/hppa/hppa/conf.c
 file	arch/hppa/hppa/db_interface.c		ddb
 file	arch/hppa/hppa/db_disasm.c		ddb
 file	arch/hppa/hppa/disksubr.c		disk
+file	arch/hppa/hppa/fpu.c
+file	arch/hppa/hppa/ipi.c			multiprocessor
+file	arch/hppa/hppa/lock_machdep.c		multiprocessor
 file	arch/hppa/hppa/machdep.c
 file	arch/hppa/hppa/mutex.c
 file	arch/hppa/hppa/pmap.c

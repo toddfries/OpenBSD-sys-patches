@@ -1,4 +1,4 @@
-/*	$OpenBSD: lcore_float.S,v 1.15 2007/10/18 04:32:25 miod Exp $ */
+/*	$OpenBSD: lcore_float.S,v 1.20 2010/09/21 20:29:17 miod Exp $ */
 
 /*
  * Copyright (c) 2001-2003 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -29,15 +29,12 @@
 #include <sys/syscall.h>
 
 #include <machine/param.h>
-#include <machine/psl.h>
 #include <machine/asm.h>
 #include <machine/cpu.h>
 #include <machine/regnum.h>
 #include <machine/cpustate.h>
 
 #include "assym.h"
-
-#define curproc	(cpu_info_primary + CI_CURPROC)
 
 	.set	noreorder		# Noreorder is default style!
 
@@ -155,7 +152,6 @@ LEAF(MipsSwitchFPState, 0)
 	ldc1	$f30, PCB_FPREGS+(30 * REGSZ)(a1)
 	ldc1	$f31, PCB_FPREGS+(31 * REGSZ)(a1)
 
-	and	t0, t0, ~FPC_EXCEPTION_BITS
 	ctc1	t0, FPC_CSR
 	nop
 
@@ -259,7 +255,6 @@ LEAF(MipsSwitchFPState16, 0)
 	lwc1	$f30, PCB_FPREGS+(30 * REGSZ)(a1)
 	lwc1	$f31, PCB_FPREGS+(31 * REGSZ)(a1)
 
-	and	t0, t0, ~FPC_EXCEPTION_BITS
 	ctc1	t0, FPC_CSR
 	nop
 
@@ -282,7 +277,7 @@ END(MipsSwitchFPState16)
  *	None.
  *
  * Side effects:
- *	machFPCurProcPtr is cleared.
+ *	curcpu()->ci_fpuproc is cleared.
  *
  *----------------------------------------------------------------------------
  */
@@ -292,7 +287,8 @@ LEAF(MipsSaveCurFPState, 0)
 	or	t0, t1, SR_COP_1_BIT|SR_FR_32	# enable the coprocessor
 	mtc0	t0, COP_0_STATUS_REG
 	ITLBNOPFIX
-	PTR_S	zero, machFPCurProcPtr		# indicate state has been saved
+	GET_CPU_INFO(t2, t3)
+	PTR_S	zero, CI_FPUPROC(t2)		# indicate state has been saved
 /*
  * First read out the status register to make sure that all FP operations
  * have completed.
@@ -352,7 +348,8 @@ LEAF(MipsSaveCurFPState16, 0)
 	or	t0, t1, SR_COP_1_BIT	# enable the coprocessor
 	mtc0	t0, COP_0_STATUS_REG
 	ITLBNOPFIX
-	PTR_S	zero, machFPCurProcPtr		# indicate state has been saved
+	GET_CPU_INFO(t2, t3)
+	PTR_S	zero, CI_FPUPROC(t2)		# indicate state has been saved
 /*
  * First read out the status register to make sure that all FP operations
  * have completed.
@@ -408,131 +405,6 @@ END(MipsSaveCurFPState16)
 
 /*----------------------------------------------------------------------------
  *
- * MipsFPTrap --
- *
- *	Handle a floating point Trap.
- *
- *	MipsFPTrap(statusReg, causeReg, pc)
- *		unsigned statusReg;
- *		unsigned causeReg;
- *		unsigned pc;
- *
- * Results:
- *	None.
- *
- * Side effects:
- *	None.
- *
- *----------------------------------------------------------------------------
- */
-NON_LEAF(MipsFPTrap, FRAMESZ(CF_SZ), ra)
-	PTR_SUBU sp, sp, FRAMESZ(CF_SZ)
-	mfc0	t0, COP_0_STATUS_REG
-	PTR_S	ra, CF_RA_OFFS(sp)
-	.mask	0x80000000, (CF_RA_OFFS - FRAMESZ(CF_SZ))
-
-	PTR_S	a2, 2*REGSZ(sp)
-	PTR_S	a3, 3*REGSZ(sp)
-	or	t1, t0, SR_COP_1_BIT
-	mtc0	t1, COP_0_STATUS_REG
-	ITLBNOPFIX
-	cfc1	t1, FPC_CSR		# stall til FP done
-	cfc1	t1, FPC_CSR		# now get status
-	nop
-	sll	t2, t1, (31-17)		# unimplemented operation?
-	bgez	t2, 3f			# no, normal trap
-	nop
-/*
- * We got an unimplemented operation trap so fetch the instruction,
- * compute the next PC and emulate the instruction.
- */
-	bgez	a1, 1f			# Check the branch delay bit.
-	nop
-/*
- * The instruction is in the branch delay slot so the branch will have to
- * be emulated to get the resulting PC.
- */
-	PTR_L	a0, curprocpaddr	# first arg is ptr to CPU regs
-	move	a1, a2			# second arg is instruction PC
-	move	a2, t1			# third arg is the FP CSR
-	jal	MipsEmulateBranch	# compute PC after branch
-	move	a3, zero		# fourth arg is FALSE
-/*
- * Now load the floating-point instruction in the branch delay slot
- * to be emulated.
- */
-	PTR_L	a2, 2*REGSZ(sp)		# restore EXC pc
-	b	2f
-	lw	a0, 4(a2)		# a0 = coproc instruction
-/*
- * This is not in the branch delay slot so calculate the resulting
- * PC (epc + 4) into v0 and continue to MipsEmulateFP().
- */
-1:
-	lw	a0, 0(a2)		# a0 = coproc instruction
-	PTR_ADDU v0, a2, 4		# v0 = next pc
-2:
-	PTR_L	a3, curprocpaddr	# first arg is ptr to CPU regs
-	PTR_S	v0, PCB_REGS+(PC * REGSZ)(a3)	# save new pc
-/*
- * Check to see if the instruction to be emulated is a floating-point
- * instruction.
- */
-	srl	a3, a0, OPCODE_SHIFT
-	beq	a3, OPCODE_C1, 5f	# this should never fail
-	nop
-/*
- * Send a floating point exception signal to the current process.
- */
-3:
-	cfc1	a2, FPC_CSR		# code = FP exceptions
-	PTR_L	a0, curproc		# get current process
-	PTR_L	a4, 3*REGSZ(sp)
-	and	v0, a2, FPC_EXCEPTION_INEXACT
-	bnez	v0, 4f
-	li	a3, 6
-	and	v0, a2, FPC_EXCEPTION_UNDERFLOW
-	bnez	v0, 4f
-	li	a3, 5
-	and	v0, a2, FPC_EXCEPTION_OVERFLOW
-	bnez	v0, 4f
-	li	a3, 4
-	and	v0, a2, FPC_EXCEPTION_DIV0
-	bnez	v0, 4f
-	li	a3, 3
-	li	a3, 7			# XXX FPE_FLTINV
-4:
-	ctc1	zero, FPC_CSR		# Clear exceptions
-	jal	trapsignal
-	li	a1, SIGFPE
-	b	FPReturn
-	nop
-
-/*
- * Finally, we can call MipsEmulateFP() where a0 is the instruction to emulate.
- */
-5:
-	jal	MipsEmulateFP
-	nop
-
-	bnez	v0, 3b			# Emulation failed.
-	nop
-
-/*
- * Turn off the floating point coprocessor and return.
- */
-FPReturn:
-	mfc0	t0, COP_0_STATUS_REG
-	PTR_L	ra, CF_RA_OFFS(sp)
-	and	t0, t0, ~SR_COP_1_BIT
-	mtc0	t0, COP_0_STATUS_REG
-	ITLBNOPFIX
-	j	ra
-	PTR_ADDU sp, sp, FRAMESZ(CF_SZ)
-END(MipsFPTrap)
-
-/*----------------------------------------------------------------------------
- *
  * cp1_get_prid
  *
  *	Get the floating point co-processor id.
@@ -560,4 +432,3 @@ LEAF(cp1_get_prid, 0)
 	jr	ra
 	nop
 END(cp1_get_prid)
-

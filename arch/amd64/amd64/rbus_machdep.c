@@ -1,4 +1,4 @@
-/*	$OpenBSD: rbus_machdep.c,v 1.9 2009/04/28 18:37:13 kettenis Exp $	*/
+/*	$OpenBSD: rbus_machdep.c,v 1.12 2010/09/22 02:28:37 jsg Exp $	*/
 /*	$NetBSD: rbus_machdep.c,v 1.2 1999/10/15 06:43:06 haya Exp $	*/
 
 /*
@@ -13,11 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by HAYAKAWA Koichi.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -68,7 +63,7 @@ rbus_pccbb_parent_mem(struct device *self, struct pci_attach_args *pa)
 	start = RBUS_MEM_START;
 	size = ex->ex_end - start;
 
-	return (rbus_new_root_share(pa->pa_memt, ex, start, size, 0));
+	return (rbus_new_root_share(pa->pa_memt, ex, start, size));
 }
 
 rbus_tag_t
@@ -82,17 +77,18 @@ rbus_pccbb_parent_io(struct device *self, struct pci_attach_args *pa)
 		return &rbus_null;
 
 	start = ex->ex_start;
-	if (pa->pa_bridgetag == NULL) {
+	if (ex == pciio_ex) {
 		/*
-		 * If we're not behind a PCI-PCI bridge, we must be on
-		 * the root bus.  To avoid conflicts with onboard
-		 * legacy devices, we only make a subregion available.
+		 * We're on the root bus, or behind a subtractive
+		 * decode PCI-PCI bridge.  To avoid conflicts with
+		 * onboard legacy devices, we only make a subregion
+		 * available.
 		 */
 		start = max(start, RBUS_IO_START);
 	}
 	size = ex->ex_end - start;
 
-	return (rbus_new_root_share(pa->pa_iot, ex, start, size, 0));
+	return (rbus_new_root_share(pa->pa_iot, ex, start, size));
 }
 
 void

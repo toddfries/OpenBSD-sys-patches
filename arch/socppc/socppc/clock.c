@@ -1,4 +1,4 @@
-/*	$OpenBSD: clock.c,v 1.3 2008/12/06 20:05:08 maja Exp $	*/
+/*	$OpenBSD: clock.c,v 1.8 2010/09/20 06:33:48 matthew Exp $	*/
 /*	$NetBSD: clock.c,v 1.1 1996/09/30 16:34:40 ws Exp $	*/
 
 /*
@@ -150,7 +150,7 @@ resettodr(void)
 
 	microtime(&tv);
 
-	if (todr_handle == NULL || todr_settime(todr_handle, &tv) != 0)
+	if (todr_handle != NULL && todr_settime(todr_handle, &tv) != 0)
 		printf("Cannot set time in time-of-day clock\n");
 }
 
@@ -202,7 +202,7 @@ decr_intr(struct clockframe *frame)
 	 */
 	ppc_mtdec(nextevent - tb);
 
-	if (curcpu()->ci_cpl & SPL_CLOCK) {
+	if (curcpu()->ci_cpl & SPL_CLOCKMASK) {
 		ci->ci_statspending += nstats;
 	} else {
 		KERNEL_LOCK();
@@ -262,8 +262,8 @@ cpu_initclocks(void)
 		statvar >>= 1;
 	statmin = statint - (statvar >> 1);
 
-	evcount_attach(&clk_count, "clock", (void *)&clk_irq, &evcount_intr);
-	evcount_attach(&stat_count, "stat", (void *)&stat_irq, &evcount_intr);
+	evcount_attach(&clk_count, "clock", &clk_irq);
+	evcount_attach(&stat_count, "stat", &stat_irq);
 
 	ticks_per_intr = ticks_per_sec / hz;
 	cpu_startclock();

@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus.h,v 1.17 2009/04/21 17:05:29 oga Exp $	*/
+/*	$OpenBSD: bus.h,v 1.24 2010/09/06 19:05:48 kettenis Exp $	*/
 /*	$NetBSD: bus.h,v 1.6 1996/11/10 03:19:25 thorpej Exp $	*/
 
 /*-
@@ -67,6 +67,7 @@
 #define _X86_BUS_H_
 
 #include <sys/mutex.h>
+#include <sys/tree.h>
 
 #include <machine/pio.h>
 
@@ -115,7 +116,7 @@ void	_bus_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh,
 
 /* like bus_space_map(), but without extent map checking/allocation */
 int	_bus_space_map(bus_space_tag_t t, bus_addr_t addr,
-	    bus_size_t size, int cacheable, bus_space_handle_t *bshp);
+	    bus_size_t size, int flags, bus_space_handle_t *bshp);
 
 /*
  *      int bus_space_subregion(bus_space_tag_t t,
@@ -392,16 +393,11 @@ void	bus_space_set_region_4(bus_space_tag_t, bus_space_handle_t,
  * at tag/bsh1/off1 to bus space starting at tag/bsh2/off2.
  */
 
-#define bus_space_copy_1 bus_space_copy_region_1
-#define bus_space_copy_2 bus_space_copy_region_2
-#define bus_space_copy_4 bus_space_copy_region_4
-#define bus_space_copy_8 bus_space_copy_region_8
-
-void	bus_space_copy_region_1(bus_space_tag_t, bus_space_handle_t,
+void	bus_space_copy_1(bus_space_tag_t, bus_space_handle_t,
 	    bus_size_t, bus_space_handle_t, bus_size_t, size_t);
-void	bus_space_copy_region_2(bus_space_tag_t, bus_space_handle_t,
+void	bus_space_copy_2(bus_space_tag_t, bus_space_handle_t,
 	    bus_size_t, bus_space_handle_t, bus_size_t, size_t);
-void	bus_space_copy_region_4(bus_space_tag_t, bus_space_handle_t,
+void	bus_space_copy_4(bus_space_tag_t, bus_space_handle_t,
 	    bus_size_t, bus_space_handle_t, bus_size_t, size_t);
 
 #if 0	/* Cause a link error for bus_space_copy_8 */
@@ -414,9 +410,6 @@ void	bus_space_copy_region_4(bus_space_tag_t, bus_space_handle_t,
  */
 #define	BUS_SPACE_BARRIER_READ	0x01		/* force read barrier */
 #define	BUS_SPACE_BARRIER_WRITE	0x02		/* force write barrier */
-/* Compatibility defines */
-#define	BUS_BARRIER_READ	BUS_SPACE_BARRIER_READ
-#define	BUS_BARRIER_WRITE	BUS_SPACE_BARRIER_WRITE
 
 void	bus_space_barrier(bus_space_tag_t, bus_space_handle_t,
 	    bus_size_t, bus_size_t, int);
@@ -450,6 +443,13 @@ void	bus_space_barrier(bus_space_tag_t, bus_space_handle_t,
 #define	BUS_DMA_NOCACHE		0x0800	/* map memory uncached */
 #define	BUS_DMA_ZERO		0x1000	/* zero memory in dmamem_alloc */
 #define	BUS_DMA_SG		0x2000	/* Internal. memory is for SG map */
+
+/* types for _dm_buftype */
+#define	BUS_BUFTYPE_INVALID	0
+#define	BUS_BUFTYPE_LINEAR	1
+#define	BUS_BUFTYPE_MBUF	2
+#define	BUS_BUFTYPE_UIO		3
+#define	BUS_BUFTYPE_RAW		4
 
 /* Forwards needed by prototypes below. */
 struct mbuf;
@@ -543,8 +543,7 @@ struct bus_dma_tag {
 #define	bus_dmamap_unload(t, p)					\
 	(*(t)->_dmamap_unload)((t), (p))
 #define	bus_dmamap_sync(t, p, o, l, ops)			\
-	(void)((t)->_dmamap_sync ?				\
-	    (*(t)->_dmamap_sync)((t), (p), (o), (l), (ops)) : (void)0)
+	(*(t)->_dmamap_sync)((t), (p), (o), (l), (ops))
 
 #define	bus_dmamem_alloc(t, s, a, b, sg, n, r, f)		\
 	(*(t)->_dmamem_alloc)((t), (s), (a), (b), (sg), (n), (r), (f))
@@ -621,9 +620,34 @@ struct sg_cookie {
 	struct mutex	 sg_mtx;
 	struct extent	*sg_ex;
 	void		*sg_hdl;
-	void		(*bind_page)(void *, vaddr_t, paddr_t, int);
-	void		(*unbind_page)(void *, vaddr_t);
+
+	void		(*bind_page)(void *, bus_addr_t, paddr_t, int);
+	void		(*unbind_page)(void *, bus_addr_t);
 	void		(*flush_tlb)(void *);
+};
+
+/* 
+ * per-map DVMA page table
+ */
+struct sg_page_entry {
+	SPLAY_ENTRY(sg_page_entry)	spe_node;
+	paddr_t				spe_pa;
+	bus_addr_t			spe_va;
+};
+
+/* for sg_dma this will be in the map's dm_cookie. */
+struct sg_page_map {
+	SPLAY_HEAD(sg_page_tree, sg_page_entry) spm_tree;
+
+	void			*spm_origbuf;	/* pointer to original data */
+	int			 spm_buftype;	/* type of data */
+	struct proc		*spm_proc;	/* proc that owns the mapping */
+
+	int			 spm_maxpage;	/* Size of allocated page map */
+	int			 spm_pagecnt;	/* Number of entries in use */
+	bus_addr_t		 spm_start;	/* dva when bound */
+	bus_size_t		 spm_size;	/* size of bound map */
+	struct sg_page_entry	 spm_map[1];
 };
 
 struct sg_cookie	*sg_dmatag_init(char *, void *, bus_addr_t, bus_size_t,

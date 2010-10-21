@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia.h,v 1.43 2009/04/24 16:05:06 jakemsr Exp $	*/
+/*	$OpenBSD: azalia.h,v 1.62 2010/09/10 15:11:23 jakemsr Exp $	*/
 /*	$NetBSD: azalia.h,v 1.6 2006/01/16 14:15:26 kent Exp $	*/
 
 /*-
@@ -257,12 +257,14 @@
 #define			COP_PINCAP_OUTPUT	0x00000010
 #define			COP_PINCAP_INPUT	0x00000020
 #define			COP_PINCAP_BALANCE	0x00000040
+#define			COP_PINCAP_HDMI		0x00000080
 #define			COP_PINCAP_VREF(x)	((x >> 8) & 0xff)
 #define			COP_PINCAP_EAPD		0x00010000
 #define		COP_INPUT_AMPCAP	0x0d
 #define			COP_AMPCAP_OFFSET(x)	(x & 0x0000007f)
 #define			COP_AMPCAP_NUMSTEPS(x)	((x >> 8) & 0x7f)
 #define			COP_AMPCAP_STEPSIZE(x)	((x >> 16) & 0x7f)
+#define			COP_AMPCAP_CTLOFF(x)	((x >> 24) & 0x7f)
 #define			COP_AMPCAP_MUTE		0x80000000
 #define		COP_CONNECTION_LIST_LENGTH	0x0e
 #define			COP_CLL_LONG		0x00000080
@@ -482,6 +484,7 @@
 #define CORB_NID_ROOT		0
 #define HDA_MAX_CHANNELS	16
 #define HDA_MAX_SENSE_PINS	16
+#define HDA_MAX_CODECS		15
 
 #define AZ_MAX_VOL_SLAVES	16
 #define AZ_TAG_SPKR		0x01
@@ -490,6 +493,23 @@
 #define AZ_CLASS_INPUT	0
 #define AZ_CLASS_OUTPUT	1
 #define AZ_CLASS_RECORD	2
+
+#define AZ_QRK_NONE		0x00000000
+#define AZ_QRK_GPIO_MASK	0x00000fff
+#define AZ_QRK_GPIO_UNMUTE_0	0x00000001
+#define AZ_QRK_GPIO_UNMUTE_1	0x00000002
+#define AZ_QRK_GPIO_UNMUTE_2	0x00000004
+#define AZ_QRK_GPIO_UNMUTE_3	0x00000008
+#define AZ_QRK_GPIO_UNMUTE_4	0x00000010
+#define AZ_QRK_GPIO_UNMUTE_5	0x00000020
+#define AZ_QRK_GPIO_UNMUTE_6	0x00000040
+#define AZ_QRK_GPIO_UNMUTE_7	0x00000080
+#define AZ_QRK_GPIO_POL_0	0x00000100
+#define AZ_QRK_WID_MASK		0x000ff000
+#define AZ_QRK_WID_CDIN_1C	0x00001000
+#define AZ_QRK_WID_BEEP_1D	0x00002000
+#define AZ_QRK_WID_OVREF50	0x00004000
+#define AZ_QRK_WID_AD1981_OAMP	0x00008000
 
 /* memory-mapped types */
 typedef struct {
@@ -531,6 +551,7 @@ typedef struct {
 	int enable;
 	uint32_t widgetcap;
 	int type;		/* = bit20-24 of widgetcap */
+	nid_t parent;
 	int mixer_class;
 	int nconnections;
 	nid_t *connections;
@@ -580,6 +601,11 @@ typedef struct {
 #define MI_TARGET_PLAYVOL	0x10d
 #define MI_TARGET_RECVOL	0x10e
 #define MI_TARGET_MIXERSET	0x10f
+	union {
+		int ord;
+		int mask;
+		mixer_level_t value;
+	} saved;
 } mixer_item_t;
 
 #define VALID_WIDGET_NID(nid, codec)	(nid == (codec)->audiofunc || \
@@ -588,12 +614,12 @@ typedef struct {
 
 typedef struct {
 	int nconv;
-	nid_t conv[HDA_MAX_CHANNELS]; /* front, surround, clfe, side, ... */
+	nid_t conv[HDA_MAX_CHANNELS];
 } convgroup_t;
 typedef struct {
 	int cur;
 	int ngroups;
-	convgroup_t groups[32];
+	convgroup_t groups[2];
 } convgroupset_t;
 
 typedef struct {
@@ -616,15 +642,6 @@ struct io_pin {
 };
 
 typedef struct codec_t {
-	int (*comresp)(const struct codec_t *, nid_t, uint32_t, uint32_t, uint32_t *);
-	int (*init_dacgroup)(struct codec_t *);
-	int (*init_widget)(const struct codec_t *, widget_t *, nid_t);
-	int (*mixer_init)(struct codec_t *);
-	int (*mixer_delete)(struct codec_t *);
-	int (*set_port)(struct codec_t *, mixer_ctrl_t *);
-	int (*get_port)(struct codec_t *, mixer_ctrl_t *);
-	int (*unsol_event)(struct codec_t *, int);
-
 	struct azalia_t *az;
 	uint32_t vid;		/* codec vendor/device ID */
 	uint32_t subid;		/* PCI subvendor/device ID */
@@ -637,6 +654,13 @@ typedef struct codec_t {
 	widget_t *w;		/* widgets in the audio function.
 				 * w[0] to w[wstart-1] are unused. */
 #define FOR_EACH_WIDGET(this, i)	for (i = (this)->wstart; i < (this)->wend; i++)
+
+	int codec_type;
+#define AZ_CODEC_TYPE_ANALOG	0
+#define AZ_CODEC_TYPE_DIGITAL	1
+#define AZ_CODEC_TYPE_HDMI	2
+
+	int qrks;
 
 	convgroupset_t dacs;
 	convgroupset_t adcs;
@@ -667,22 +691,41 @@ typedef struct codec_t {
 	nid_t mic;		/* fixed (internal) mic */
 	nid_t mic_adc;
 	nid_t speaker;		/* fixed (internal) speaker */
-	nid_t spkr_dac;
+	nid_t speaker2;		/* 2nd fixed (internal) speaker */
+	nid_t spkr_dac;		/* default DAC for speaker and speaker2 */
+	nid_t input_mixer;
+	nid_t fhp;		/* front headphone jack */
+	nid_t fhp_dac;
+	int nout_jacks;		/* number of default output jacks */
 
+	int spkr_muted;
 	int spkr_muters;
+	int spkr_mute_method;
+#define	AZ_SPKR_MUTE_NONE	0
+#define	AZ_SPKR_MUTE_SPKR_MUTE	1
+#define	AZ_SPKR_MUTE_SPKR_DIR	2
+#define	AZ_SPKR_MUTE_DAC_MUTE	3
 
 	volgroup_t playvols;
 	volgroup_t recvols;
 
 	nid_t sense_pins[HDA_MAX_SENSE_PINS];
 	int nsense_pins;
-
-	uint32_t *extra;
-	u_int rate;
 } codec_t;
 
 int	azalia_codec_init_vtbl(codec_t *);
 int	azalia_codec_construct_format(codec_t *, int, int);
 int	azalia_widget_enabled(const codec_t *, nid_t);
 int	azalia_codec_gpio_quirks(codec_t *);
+int	azalia_codec_widget_quirks(codec_t *, nid_t);
 int	azalia_codec_fnode(codec_t *, nid_t, int, int);
+
+int	azalia_init_dacgroup(codec_t *);
+int	azalia_mixer_init(codec_t *);
+int	azalia_mixer_delete(codec_t *);
+int	azalia_unsol_event(codec_t *, int);
+int	azalia_comresp(const codec_t *, nid_t, uint32_t, uint32_t, uint32_t *);
+int	azalia_mixer_get(const codec_t *, nid_t, int, mixer_ctrl_t *);
+int	azalia_mixer_set(codec_t *, nid_t, int, const mixer_ctrl_t *);
+
+int	azalia_codec_enable_unsol(codec_t *);

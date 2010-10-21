@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpls.h,v 1.21 2009/04/28 12:07:43 michele Exp $	*/
+/*	$OpenBSD: mpls.h,v 1.25 2010/09/08 08:00:56 claudio Exp $	*/
 
 /*
  * Copyright (C) 1999, 2000 and 2001 AYAME Project, WIDE Project.
@@ -122,23 +122,23 @@ struct rt_mpls {
 #define MPLSCTL_MAXID			7	
 
 #define MPLSCTL_NAMES { \
-	{ 0, 0 }, \
-	{ "enable", CTLTYPE_INT }, \
+	{ NULL, 0 }, \
+	{ NULL, 0 }, \
 	{ "ttl", CTLTYPE_INT }, \
 	{ "ifq", CTLTYPE_NODE },\
 	{ "maxloop_inkernel", CTLTYPE_INT }, \
 	{ "mapttl_ip", CTLTYPE_INT }, \
-	{ "mapttl_ip6", CTLTYPE_INT }, \
+	{ "mapttl_ip6", CTLTYPE_INT } \
 }
 
 #define MPLSCTL_VARS { \
-	0, \
-	&mpls_enable, \
+	NULL, \
+	NULL, \
 	&mpls_defttl, \
-	0, \
+	NULL, \
 	&mpls_inkloop, \
 	&mpls_mapttl_ip, \
-	&mpls_mapttl_ip6, \
+	&mpls_mapttl_ip6 \
 }
 
 #endif
@@ -167,8 +167,10 @@ extern int mpls_raw_usrreq(struct socket *, int, struct mbuf *,
 
 extern struct ifqueue	mplsintrq;	/* MPLS input queue */
 extern int		mplsqmaxlen;	/* MPLS input queue length */
-extern int		mpls_enable;
 extern int		mpls_defttl;
+extern int		mpls_mapttl_ip;
+extern int		mpls_mapttl_ip6;
+
 
 void	mpls_init(void);
 void	mplsintr(void);
@@ -179,9 +181,7 @@ struct mbuf	*mpls_shim_push(struct mbuf *, struct rt_mpls *);
 
 int		 mpls_sysctl(int *, u_int, void *, size_t *, void *, size_t);
 void		 mpls_input(struct mbuf *);
-struct mbuf	*mpls_output(struct mbuf *, struct rtentry *);
-
-void		 mpls_ip_input(struct mbuf *, u_int8_t);
-void		 mpls_ip6_input(struct mbuf *, u_int8_t);
+int		 mpls_output(struct ifnet *, struct mbuf *, struct sockaddr *,
+		    struct rtentry *);
 
 #endif /* _KERNEL */

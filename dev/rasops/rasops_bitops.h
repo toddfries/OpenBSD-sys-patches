@@ -1,4 +1,4 @@
-/*	$OpenBSD: rasops_bitops.h,v 1.4 2008/06/26 05:42:18 ray Exp $ */
+/*	$OpenBSD: rasops_bitops.h,v 1.6 2010/08/28 12:48:14 miod Exp $ */
 /* 	$NetBSD: rasops_bitops.h,v 1.6 2000/04/12 14:22:30 pk Exp $	*/
 
 /*-
@@ -36,11 +36,8 @@
 /*
  * Erase columns.
  */
-void
-NAME(erasecols)(cookie, row, col, num, attr)
-	void *cookie;
-	int row, col, num;
-	long attr;
+int
+NAME(erasecols)(void *cookie, int row, int col, int num, long attr)
 {
 	int lmask, rmask, lclr, rclr, clr;
 	struct rasops_info *ri;
@@ -51,7 +48,7 @@ NAME(erasecols)(cookie, row, col, num, attr)
 
 #ifdef RASOPS_CLIPPING
 	if ((unsigned)row >= (unsigned)ri->ri_rows)
-		return;
+		return 0;
 
 	if (col < 0) {
 		num += col;
@@ -62,7 +59,7 @@ NAME(erasecols)(cookie, row, col, num, attr)
 		num = ri->ri_cols - col;
 
 	if (num <= 0)
-		return;
+		return 0;
 #endif
 	col *= ri->ri_font->fontwidth << PIXEL_SHIFT;
 	num *= ri->ri_font->fontwidth << PIXEL_SHIFT;
@@ -108,14 +105,15 @@ NAME(erasecols)(cookie, row, col, num, attr)
 				*dp = (*dp & rmask) | rclr;
 		}
 	}
+
+	return 0;
 }
 
 /*
  * Actually paint the cursor.
  */
-void
-NAME(do_cursor)(ri)
-	struct rasops_info *ri;
+int
+NAME(do_cursor)(struct rasops_info *ri)
 {
 	int lmask, rmask, height, row, col, num;
 	int32_t *dp, *rp;
@@ -149,15 +147,15 @@ NAME(do_cursor)(ri)
 				*dp ^= rmask;
 		}
 	}
+
+	return 0;
 }
 
 /*
  * Copy columns. Ick!
  */
-void
-NAME(copycols)(cookie, row, src, dst, num)
-	void *cookie;
-	int row, src, dst, num;
+int
+NAME(copycols)(void *cookie, int row, int src, int dst, int num)
 {
 	int tmp, lmask, rmask, height, lnum, rnum, sb, db, cnt, full;
 	int32_t *sp, *dp, *srp, *drp;
@@ -167,11 +165,11 @@ NAME(copycols)(cookie, row, src, dst, num)
 
 #ifdef RASOPS_CLIPPING
 	if (dst == src)
-		return;
+		return 0;
 
 	/* Catches < 0 case too */
 	if ((unsigned)row >= (unsigned)ri->ri_rows)
-		return;
+		return 0;
 
 	if (src < 0) {
 		num += src;
@@ -190,7 +188,7 @@ NAME(copycols)(cookie, row, src, dst, num)
 		num = ri->ri_cols - dst;
 
 	if (num <= 0)
-		return;
+		return 0;
 #endif
 
 	cnt = ri->ri_font->fontwidth << PIXEL_SHIFT;
@@ -214,7 +212,7 @@ NAME(copycols)(cookie, row, src, dst, num)
 			DELTA(drp, ri->ri_stride, int32_t *);
 		}
 
-		return;
+		return 0;
 	}
 
 	lmask = rasops_rmask[db];
@@ -308,6 +306,8 @@ NAME(copycols)(cookie, row, src, dst, num)
  			}
  		}
  	}
+
+	return 0;
 }
 
 #endif /* _RASOPS_BITOPS_H_ */

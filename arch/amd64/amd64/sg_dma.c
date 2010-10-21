@@ -1,4 +1,4 @@
-/*	$OpenBSD: sg_dma.c,v 1.1 2009/04/21 17:05:29 oga Exp $	*/
+/*	$OpenBSD: sg_dma.c,v 1.9 2010/04/20 23:12:01 phessler Exp $	*/
 /*
  * Copyright (c) 2009 Owain G. Ainsworth <oga@openbsd.org>
  *
@@ -54,6 +54,7 @@
 #include <sys/device.h>
 #include <sys/mbuf.h>
 #include <sys/mutex.h>
+#include <sys/proc.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -64,44 +65,24 @@
 #define MAX_DMA_SEGS	20
 #endif
 
-#ifndef SMALL_KERNEL /* no bigmem needed in ramdisks */
-
-/* 
- * per-map DVMA page table
- */
-struct sg_page_entry {
-	SPLAY_ENTRY(sg_page_entry)	spe_node;
-	paddr_t				spe_pa;
-	vaddr_t				spe_va;
-};
-
-/* this should be in the map's dm_cookie. */
-struct sg_page_map {
-	SPLAY_HEAD(sg_page_tree, sg_page_entry) spm_tree;
-	int			 spm_maxpage;	/* Size of allocated page map */
-	int			 spm_pagecnt;	/* Number of entries in use */
-	bus_addr_t		 spm_start;	/* dva when bound */
-	bus_size_t		 spm_size;	/* size of bound map */
-	struct sg_page_entry	 spm_map[1];
-};
-
-int	sg_dmamap_load_seg(bus_dma_tag_t, struct sg_cookie *, bus_dmamap_t,
-	    bus_dma_segment_t *, int, int, bus_size_t, bus_size_t);
+int		sg_dmamap_load_seg(bus_dma_tag_t, struct sg_cookie *,
+		    bus_dmamap_t, bus_dma_segment_t *, int, int, bus_size_t,
+		    bus_size_t);
 struct sg_page_map *sg_iomap_create(int);
-int	sg_dmamap_append_range(bus_dma_tag_t, bus_dmamap_t, paddr_t,
-	    bus_size_t, int, bus_size_t);
-int	sg_iomap_insert_page(struct sg_page_map *, paddr_t);
-vaddr_t	sg_iomap_translate(struct sg_page_map *, paddr_t);
-void	sg_iomap_load_map(struct sg_cookie *, struct sg_page_map *,
-	    vaddr_t, int);
-void	sg_iomap_unload_map(struct sg_cookie *, struct sg_page_map *);
-void	sg_iomap_destroy(struct sg_page_map *);
-void	sg_iomap_clear_pages(struct sg_page_map *);
+int		sg_dmamap_append_range(bus_dma_tag_t, bus_dmamap_t, paddr_t,
+		    bus_size_t, int, bus_size_t);
+int		sg_iomap_insert_page(struct sg_page_map *, paddr_t);
+bus_addr_t	sg_iomap_translate(struct sg_page_map *, paddr_t);
+void		sg_iomap_load_map(struct sg_cookie *, struct sg_page_map *,
+		    bus_addr_t, int);
+void		sg_iomap_unload_map(struct sg_cookie *, struct sg_page_map *);
+void		sg_iomap_destroy(struct sg_page_map *);
+void		sg_iomap_clear_pages(struct sg_page_map *);
 
 struct sg_cookie *
 sg_dmatag_init(char *name, void *hdl, bus_addr_t start, bus_size_t size,
-    void bind(void *, vaddr_t, paddr_t, int),
-    void unbind(void *, vaddr_t), void flush_tlb(void *))
+    void bind(void *, bus_addr_t, paddr_t, int),
+    void unbind(void *, bus_addr_t), void flush_tlb(void *))
 {
 	struct sg_cookie	*cookie;
 
@@ -229,13 +210,13 @@ sg_dmamap_load(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
 		boundary = map->_dm_boundary;
 	align = MAX(map->dm_segs[0]._ds_align, PAGE_SIZE);
 
-	pmap = p ? p->p_vmspace->vm_map.pmap : pmap = pmap_kernel();
+	pmap = p ? p->p_vmspace->vm_map.pmap : pmap_kernel();
 
 	/* Count up the total number of pages we need */
 	sg_iomap_clear_pages(spm);
 	{ /* Scope */
 		bus_addr_t a, aend;
-		bus_addr_t addr = (vaddr_t)buf;
+		bus_addr_t addr = (bus_addr_t)buf;
 		int seg_len = buflen;
 
 		aend = round_page(addr + seg_len);
@@ -278,8 +259,10 @@ sg_dmamap_load(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
 	    sgsize, align, 0, (sgsize > boundary) ? 0 : boundary, 
 	    EX_NOWAIT | EX_BOUNDZERO, (u_long *)&dvmaddr);
 	mtx_leave(&is->sg_mtx);
-	if (err != 0)
+	if (err != 0) {
+		sg_iomap_clear_pages(spm);
 		return (err);
+	}
 
 	/* Set the active DVMA map */
 	spm->spm_start = dvmaddr;
@@ -291,7 +274,7 @@ sg_dmamap_load(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
 
 	{ /* Scope */
 		bus_addr_t a, aend;
-		bus_addr_t addr = (vaddr_t)buf;
+		bus_addr_t addr = (bus_addr_t)buf;
 		int seg_len = buflen;
 
 		aend = round_page(addr + seg_len);
@@ -330,15 +313,11 @@ sg_dmamap_load(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
 		}
 	}
 	if (err) {
-		sg_iomap_unload_map(is, spm);
-		sg_iomap_clear_pages(spm);
-		map->dm_mapsize = 0;
-		map->dm_nsegs = 0;
-		mtx_enter(&is->sg_mtx);
-		extent_free(is->sg_ex, dvmaddr, sgsize, EX_NOWAIT);
-		spm->spm_start = 0;
-		spm->spm_size = 0;
-		mtx_leave(&is->sg_mtx);
+		sg_dmamap_unload(t, map);
+	} else {
+		spm->spm_origbuf = buf;
+		spm->spm_buftype = BUS_BUFTYPE_LINEAR;
+		spm->spm_proc = p;
 	}
 
 	return (err);
@@ -356,9 +335,10 @@ sg_dmamap_load_mbuf(bus_dma_tag_t t, bus_dmamap_t map, struct mbuf *mb,
 	 * This code is adapted from sparc64, for very fragmented data
 	 * we may need to adapt the algorithm
 	 */
-	bus_dma_segment_t	segs[MAX_DMA_SEGS];
-	size_t			len;
-	int			i;
+	bus_dma_segment_t	 segs[MAX_DMA_SEGS];
+	struct sg_page_map	*spm = map->_dm_cookie;
+	size_t			 len;
+	int			 i, err;
 
 	/*
 	 * Make sure that on error condition we return "no valid mappings".
@@ -408,7 +388,13 @@ sg_dmamap_load_mbuf(bus_dma_tag_t t, bus_dmamap_t map, struct mbuf *mb,
 		}
 	}
 
-	return (sg_dmamap_load_raw(t, map, segs, i, (bus_size_t)len, flags));
+	err = sg_dmamap_load_raw(t, map, segs, i, (bus_size_t)len, flags);
+
+	if (err == 0) {
+		spm->spm_origbuf = mb;
+		spm->spm_buftype = BUS_BUFTYPE_MBUF;
+	}
+	return (err);
 }
 
 /*
@@ -423,9 +409,10 @@ sg_dmamap_load_uio(bus_dma_tag_t t, bus_dmamap_t map, struct uio *uio,
 	 * and unlock them at unload. Perhaps page loaning is the answer.
 	 * 'till then we only accept kernel data
 	 */
-	bus_dma_segment_t	segs[MAX_DMA_SEGS];
-	size_t			len;
-	int			i, j;
+	bus_dma_segment_t	 segs[MAX_DMA_SEGS];
+	struct sg_page_map	*spm = map->_dm_cookie;
+	size_t			 len;
+	int			 i, j, err;
 
 	/*
 	 * Make sure that on errror we return "no valid mappings".
@@ -476,7 +463,13 @@ sg_dmamap_load_uio(bus_dma_tag_t t, bus_dmamap_t map, struct uio *uio,
 
 	}
 
-	return (sg_dmamap_load_raw(t, map, segs, i, (bus_size_t)len, flags));
+	err = sg_dmamap_load_raw(t, map, segs, i, (bus_size_t)len, flags);
+
+	if (err == 0) {
+		spm->spm_origbuf = uio;
+		spm->spm_buftype = BUS_BUFTYPE_UIO;
+	}
+	return (err);
 }
 
 /*
@@ -511,7 +504,8 @@ sg_dmamap_load_raw(bus_dma_tag_t t, bus_dmamap_t map,
 	if ((boundary = segs[0]._ds_boundary) == 0)
 		boundary = map->_dm_boundary;
 
-	align = MAX(segs[0]._ds_align, PAGE_SIZE);
+	align = MAX(MAX(segs[0]._ds_align, map->dm_segs[0]._ds_align),
+	    PAGE_SIZE);
 
 	/*
 	 * Make sure that on error condition we return "no valid mappings".
@@ -563,8 +557,10 @@ sg_dmamap_load_raw(bus_dma_tag_t t, bus_dmamap_t map,
 	    EX_NOWAIT | EX_BOUNDZERO, (u_long *)&dvmaddr);
 	mtx_leave(&is->sg_mtx);
 
-	if (err != 0)
+	if (err != 0) {
+		sg_iomap_clear_pages(spm);
 		return (err);
+	}
 
 	/* Set the active DVMA map */
 	spm->spm_start = dvmaddr;
@@ -578,15 +574,11 @@ sg_dmamap_load_raw(bus_dma_tag_t t, bus_dmamap_t map,
 	    size, boundary);
 
 	if (err) {
-		sg_iomap_unload_map(is, spm);
-		sg_iomap_clear_pages(spm);
-		map->dm_mapsize = 0;
-		map->dm_nsegs = 0;
-		mtx_enter(&is->sg_mtx);
-		extent_free(is->sg_ex, dvmaddr, sgsize, EX_NOWAIT);
-		spm->spm_start = 0;
-		spm->spm_size = 0;
-		mtx_leave(&is->sg_mtx);
+		sg_dmamap_unload(t, map);
+	} else {
+		/* This will be overwritten if mbuf or uio called us */
+		spm->spm_origbuf = segs;
+		spm->spm_buftype = BUS_BUFTYPE_RAW;
 	}
 
 	return (err);
@@ -787,6 +779,10 @@ sg_dmamap_unload(bus_dma_tag_t t, bus_dmamap_t map)
 	mtx_leave(&is->sg_mtx);
 	if (error != 0)
 		printf("warning: %qd of DVMA space lost\n", sgsize);
+
+	spm->spm_buftype = BUS_BUFTYPE_INVALID;
+	spm->spm_origbuf = NULL;
+	spm->spm_proc = NULL;
 	_bus_dmamap_unload(t, map);
 }
 
@@ -899,7 +895,7 @@ sg_iomap_insert_page(struct sg_page_map *spm, paddr_t pa)
  */
 void
 sg_iomap_load_map(struct sg_cookie *sc, struct sg_page_map *spm,
-    vaddr_t vmaddr, int flags)
+    bus_addr_t vmaddr, int flags)
 {
 	struct sg_page_entry	*e;
 	int			 i;
@@ -930,7 +926,7 @@ sg_iomap_unload_map(struct sg_cookie *sc, struct sg_page_map *spm)
 /*
  * Translate a physical address (pa) into a DVMA address.
  */
-vaddr_t
+bus_addr_t
 sg_iomap_translate(struct sg_page_map *spm, paddr_t pa)
 {
 	struct sg_page_entry	*e, pe;
@@ -955,6 +951,3 @@ sg_iomap_clear_pages(struct sg_page_map *spm)
 	spm->spm_pagecnt = 0;
 	SPLAY_INIT(&spm->spm_tree);
 }
-
-
-#endif /* !SMALL_KERNEL */

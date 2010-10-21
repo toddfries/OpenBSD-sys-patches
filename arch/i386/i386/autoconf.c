@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.81 2008/07/21 04:35:54 todd Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.85 2010/07/25 21:43:35 deraadt Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.20 1996/05/03 19:41:56 christos Exp $	*/
 
 /*-
@@ -45,6 +45,7 @@
  */
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/proc.h>
 #include <sys/user.h>
 #include <sys/buf.h>
 #include <sys/dkstat.h>
@@ -103,8 +104,6 @@ cpu_configure(void)
 	 * Note, on i386, configure is not running under splhigh unlike other
 	 * architectures.  This fact is used by the pcmcia irq line probing.
 	 */
-
-	startrtclock();
 
 	gdt_init();		/* XXX - pcibios uses gdt stuff */
 

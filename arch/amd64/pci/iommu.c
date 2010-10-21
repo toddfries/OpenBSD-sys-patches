@@ -1,4 +1,4 @@
-/*	$OpenBSD: iommu.c,v 1.28 2009/04/21 17:05:29 oga Exp $	*/
+/*	$OpenBSD: iommu.c,v 1.30 2010/09/10 21:37:03 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2005 Jason L. Wright (jason@thought.net)
@@ -120,8 +120,8 @@ void	amdgart_dumpregs(struct amdgart_softc *);
 int	amdgart_ok(pci_chipset_tag_t, pcitag_t);
 int	amdgart_enabled(pci_chipset_tag_t, pcitag_t);
 void	amdgart_initpt(struct amdgart_softc *, u_long);
-void	amdgart_bind_page(void *, vaddr_t, paddr_t,  int);
-void	amdgart_unbind_page(void *, vaddr_t);
+void	amdgart_bind_page(void *, bus_addr_t, paddr_t,  int);
+void	amdgart_unbind_page(void *, bus_addr_t);
 void	amdgart_invalidate(void *);
 void	amdgart_invalidate_wait(struct amdgart_softc *);
 
@@ -134,7 +134,7 @@ struct bus_dma_tag amdgart_bus_dma_tag = {
 	sg_dmamap_load_uio,
 	sg_dmamap_load_raw,
 	sg_dmamap_unload,
-	NULL,
+	_bus_dmamap_sync,
 	sg_dmamem_alloc,
 	_bus_dmamem_free,
 	_bus_dmamem_map,
@@ -143,7 +143,7 @@ struct bus_dma_tag amdgart_bus_dma_tag = {
 };
 
 void
-amdgart_bind_page(void *handle, vaddr_t offset, paddr_t page,  int flags)
+amdgart_bind_page(void *handle, bus_addr_t offset, paddr_t page,  int flags)
 {
 	struct amdgart_softc	*sc = handle;
 	u_int32_t		 pgno, pte;
@@ -155,7 +155,7 @@ amdgart_bind_page(void *handle, vaddr_t offset, paddr_t page,  int flags)
 }
 
 void
-amdgart_unbind_page(void *handle, vaddr_t offset)
+amdgart_unbind_page(void *handle, bus_addr_t offset)
 {
 	struct amdgart_softc	*sc = handle;
 	u_int32_t		 pgno;

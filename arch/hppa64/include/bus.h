@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus.h,v 1.3 2009/04/20 00:42:06 oga Exp $	*/
+/*	$OpenBSD: bus.h,v 1.5 2009/07/30 21:39:54 miod Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -166,8 +166,8 @@ typedef struct hppa64_bus_space_tag *bus_space_tag_t;
 #define	bus_space_free(t,h,c) \
 	(((t)->hbt_free)((t)->hbt_cookie,(h),(c)))
 
-#define	BUS_SPACE_BARRIER_READ	0
-#define	BUS_SPACE_BARRIER_WRITE	1
+#define	BUS_SPACE_BARRIER_READ	0x01
+#define	BUS_SPACE_BARRIER_WRITE	0x02
 
 #define	bus_space_barrier(t,h,o,l,op) \
 	((t)->hbt_barrier((t)->hbt_cookie, (h), (o), (l), (op)))
@@ -278,7 +278,6 @@ typedef struct hppa64_bus_space_tag *bus_space_tag_t;
 #define	BUS_DMA_NOWAIT		0x0001	/* not safe to sleep */
 #define	BUS_DMA_ALLOCNOW	0x0002	/* perform resource allocation now */
 #define	BUS_DMA_COHERENT	0x0004	/* hint: map memory DMA coherent */
-#define	BUS_DMAMEM_NOSYNC	0x0010
 #define	BUS_DMA_BUS1		0x0020	/* placeholders for bus functions... */
 #define	BUS_DMA_BUS2		0x0040
 #define	BUS_DMA_BUS3		0x0080

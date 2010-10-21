@@ -1,4 +1,4 @@
-/* $OpenBSD: pci_6600.c,v 1.17 2008/07/22 18:45:51 miod Exp $ */
+/* $OpenBSD: pci_6600.c,v 1.19 2009/09/30 20:16:30 miod Exp $ */
 /* $NetBSD: pci_6600.c,v 1.5 2000/06/06 00:50:15 thorpej Exp $ */
 
 /*-
@@ -73,12 +73,11 @@
 #define	DEC_6600_LINE_IS_ISA(line)	((line) >= 0xe0 && (line) <= 0xef)
 #define	DEC_6600_LINE_ISA_IRQ(line)	((line) & 0x0f)
 
-static char *irqtype = "6600 irq";
 static struct tsp_config *sioprimary;
 
 void dec_6600_intr_disestablish(void *, void *);
 void *dec_6600_intr_establish(void *, pci_intr_handle_t, int,
-    int (*func)(void *), void *, char *);
+    int (*func)(void *), void *, const char *);
 const char *dec_6600_intr_string(void *, pci_intr_handle_t);
 int dec_6600_intr_line(void *, pci_intr_handle_t);
 int dec_6600_intr_map(struct pci_attach_args *, pci_intr_handle_t *);
@@ -219,7 +218,7 @@ dec_6600_intr_establish(acv, ih, level, func, arg, name)
         pci_intr_handle_t ih;
         int level;
         int (*func)(void *);
-	char *name;
+	const char *name;
 {
 	void *cookie;
 
@@ -268,7 +267,7 @@ dec_6600_intr_disestablish(acv, cookie)
  
 	s = splhigh();
 
-	alpha_shared_intr_disestablish(dec_6600_pci_intr, cookie, irqtype);
+	alpha_shared_intr_disestablish(dec_6600_pci_intr, cookie);
 	if (alpha_shared_intr_isactive(dec_6600_pci_intr, irq) == 0) {
 		dec_6600_intr_disable(irq);
 		alpha_shared_intr_set_dfltsharetype(dec_6600_pci_intr, irq,
@@ -292,8 +291,7 @@ dec_6600_iointr(arg, vec)
 		panic("iointr: irq %d is too high", irq);
 
 	if (!alpha_shared_intr_dispatch(dec_6600_pci_intr, irq)) {
-		alpha_shared_intr_stray(dec_6600_pci_intr, irq,
-		    irqtype);
+		alpha_shared_intr_stray(dec_6600_pci_intr, irq, "6600 irq");
 		if (ALPHA_SHARED_INTR_DISABLE(dec_6600_pci_intr, irq))
 			dec_6600_intr_disable(irq);
 	} else

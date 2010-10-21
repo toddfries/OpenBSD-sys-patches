@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_syscalls.c,v 1.76 2009/01/28 12:02:00 bluhm Exp $	*/
+/*	$OpenBSD: nfs_syscalls.c,v 1.91 2010/08/07 03:50:02 krw Exp $	*/
 /*	$NetBSD: nfs_syscalls.c,v 1.19 1996/02/18 11:53:52 fvdl Exp $	*/
 
 /*
@@ -42,6 +42,7 @@
 #include <sys/stat.h>
 #include <sys/vnode.h>
 #include <sys/mount.h>
+#include <sys/pool.h>
 #include <sys/proc.h>
 #include <sys/uio.h>
 #include <sys/malloc.h>
@@ -70,21 +71,20 @@
 #include <nfs/nfsrvcache.h>
 #include <nfs/nfsmount.h>
 #include <nfs/nfsnode.h>
-#include <nfs/nfsrtt.h>
 #include <nfs/nfs_var.h>
 
 /* Global defs. */
 extern int nfs_numasync;
-extern int nfsrtton;
 extern struct nfsstats nfsstats;
-extern int nfsrvw_procrastinate;
-extern struct timeval nfsrvw_procrastinate_tv;
 struct nfssvc_sock *nfs_udpsock;
 int nfsd_waiting = 0;
 
 #ifdef NFSSERVER
+struct pool nfsrv_descript_pl;
+
+int nfsrv_getslp(struct nfsd *nfsd);
+
 static int nfs_numnfsd = 0;
-static struct nfsdrt nfsdrt;
 int (*nfsrv3_procs[NFS_NPROCS])(struct nfsrv_descript *,
     struct nfssvc_sock *, struct proc *, struct mbuf **) = {
 	nfsrv_null,
@@ -109,9 +109,6 @@ int (*nfsrv3_procs[NFS_NPROCS])(struct nfsrv_descript *,
 	nfsrv_fsinfo,
 	nfsrv_pathconf,
 	nfsrv_commit,
-	nfsrv_noop,
-	nfsrv_noop,
-	nfsrv_noop,
 	nfsrv_noop
 };
 #endif
@@ -125,10 +122,6 @@ int nfsd_head_flag;
 #ifdef NFSCLIENT
 struct proc *nfs_asyncdaemon[NFS_MAXASYNCDAEMON];
 int nfs_niothreads = -1;
-#endif
-
-#ifdef NFSSERVER
-static void nfsd_rt(int, struct nfsrv_descript *, int);
 #endif
 
 /*
@@ -151,6 +144,7 @@ sys_nfssvc(struct proc *p, void *v, register_t *retval)
 	struct mbuf *nam;
 	struct nfsd_args nfsdarg;
 	struct nfsd_srvargs nfsd_srvargs, *nsd = &nfsd_srvargs;
+	struct nfsd *nfsd;
 #endif
 
 	/* Must be super user */
@@ -198,7 +192,11 @@ sys_nfssvc(struct proc *p, void *v, register_t *retval)
 		if (error)
 			return (error);
 
-		error = nfssvc_nfsd(nsd, SCARG(uap, argp), p);
+		nfsd = malloc(sizeof(*nfsd), M_NFSD, M_WAITOK|M_ZERO);
+		nfsd->nfsd_procp = p;
+		nfsd->nfsd_slp = NULL;
+
+		error = nfssvc_nfsd(nfsd);
 		break;
 	default:
 		error = EINVAL;
@@ -217,9 +215,7 @@ sys_nfssvc(struct proc *p, void *v, register_t *retval)
  * Adds a socket to the list for servicing by nfsds.
  */
 int
-nfssvc_addsock(fp, mynam)
-	struct file *fp;
-	struct mbuf *mynam;
+nfssvc_addsock(struct file *fp, struct mbuf *mynam)
 {
 	struct mbuf *m;
 	int siz;
@@ -229,7 +225,7 @@ nfssvc_addsock(fp, mynam)
 	int error, s;
 
 	so = (struct socket *)fp->f_data;
-	tslp = (struct nfssvc_sock *)0;
+	tslp = NULL;
 	/*
 	 * Add it to the list, as required.
 	 */
@@ -297,237 +293,170 @@ nfssvc_addsock(fp, mynam)
  * until it is killed by a signal.
  */
 int
-nfssvc_nfsd(nsd, argp, p)
-	struct nfsd_srvargs *nsd;
-	caddr_t argp;
-	struct proc *p;
+nfssvc_nfsd(struct nfsd *nfsd)
 {
 	struct mbuf *m;
 	int siz;
 	struct nfssvc_sock *slp;
 	struct socket *so;
 	int *solockp;
-	struct nfsd *nfsd = nsd->nsd_nfsd;
 	struct nfsrv_descript *nd = NULL;
 	struct mbuf *mreq;
-	int error = 0, cacherep, s, sotype, writes_todo;
-	struct timeval tv;
+	int error = 0, cacherep, s, sotype;
 
 	cacherep = RC_DOIT;
-	writes_todo = 0;
 
 	s = splsoftnet();
-	if (nfsd == NULL) {
-		nsd->nsd_nfsd = nfsd = malloc(sizeof(struct nfsd), M_NFSD,
-		    M_WAITOK|M_ZERO);
-		nfsd->nfsd_procp = p;
-		TAILQ_INSERT_TAIL(&nfsd_head, nfsd, nfsd_chain);
-		nfs_numnfsd++;
+	TAILQ_INSERT_TAIL(&nfsd_head, nfsd, nfsd_chain);
+	nfs_numnfsd++;
+
+	/* Loop getting rpc requests until SIGKILL. */
+loop:
+	if (!ISSET(nfsd->nfsd_flag, NFSD_REQINPROG)) {
+
+		/* attach an nfssvc_sock to nfsd */
+		error = nfsrv_getslp(nfsd);
+		if (error)
+			goto done;
+
+		slp = nfsd->nfsd_slp;
+
+		if (ISSET(slp->ns_flag, SLP_VALID)) {
+			if (ISSET(slp->ns_flag, SLP_DISCONN)) {
+				nfsrv_zapsock(slp);
+			} else if (ISSET(slp->ns_flag, SLP_NEEDQ)) {
+				CLR(slp->ns_flag, SLP_NEEDQ);
+				nfs_sndlock(&slp->ns_solock, NULL);
+				nfsrv_rcv(slp->ns_so, (caddr_t)slp, M_WAIT);
+				nfs_sndunlock(&slp->ns_solock);
+			}
+
+			error = nfsrv_dorec(slp, nfsd, &nd);
+			SET(nfsd->nfsd_flag, NFSD_REQINPROG);
+		}
+	} else {
+		error = 0;
+		slp = nfsd->nfsd_slp;
 	}
-	/*
-	 * Loop getting rpc requests until SIGKILL.
-	 */
-	for (;;) {
-		if ((nfsd->nfsd_flag & NFSD_REQINPROG) == 0) {
-			while (nfsd->nfsd_slp == (struct nfssvc_sock *)0 &&
-			    (nfsd_head_flag & NFSD_CHECKSLP) == 0) {
-				nfsd->nfsd_flag |= NFSD_WAITING;
-				nfsd_waiting++;
-				error = tsleep((caddr_t)nfsd, PSOCK | PCATCH,
-				    "nfsd", 0);
-				nfsd_waiting--;
-				if (error)
-					goto done;
-			}
-			if (nfsd->nfsd_slp == NULL &&
-			    (nfsd_head_flag & NFSD_CHECKSLP) != 0) {
-				TAILQ_FOREACH(slp, &nfssvc_sockhead, ns_chain) {
-				    if ((slp->ns_flag & (SLP_VALID | SLP_DOREC))
-					== (SLP_VALID | SLP_DOREC)) {
-					    slp->ns_flag &= ~SLP_DOREC;
-					    slp->ns_sref++;
-					    nfsd->nfsd_slp = slp;
-					    break;
-				    }
-				}
-				if (slp == 0)
-					nfsd_head_flag &= ~NFSD_CHECKSLP;
-			}
-			if ((slp = nfsd->nfsd_slp) == (struct nfssvc_sock *)0)
-				continue;
-			if (slp->ns_flag & SLP_VALID) {
-				if (slp->ns_flag & SLP_DISCONN)
-					nfsrv_zapsock(slp);
-				else if (slp->ns_flag & SLP_NEEDQ) {
-					slp->ns_flag &= ~SLP_NEEDQ;
-					(void) nfs_sndlock(&slp->ns_solock,
-						(struct nfsreq *)0);
-					nfsrv_rcv(slp->ns_so, (caddr_t)slp,
-						M_WAIT);
-					nfs_sndunlock(&slp->ns_solock);
-				}
-				error = nfsrv_dorec(slp, nfsd, &nd);
-				getmicrotime(&tv);
-				if (error && LIST_FIRST(&slp->ns_tq) &&
-				    timercmp(&LIST_FIRST(&slp->ns_tq)->nd_time,
-				    &tv, <=)) {
-					error = 0;
-					cacherep = RC_DOIT;
-					writes_todo = 1;
-				} else
-					writes_todo = 0;
-				nfsd->nfsd_flag |= NFSD_REQINPROG;
-			}
-		} else {
-			error = 0;
-			slp = nfsd->nfsd_slp;
+
+	if (error || !ISSET(slp->ns_flag, SLP_VALID)) {
+		if (nd != NULL) {
+			pool_put(&nfsrv_descript_pl, nd);
+			nd = NULL;
 		}
-		if (error || (slp->ns_flag & SLP_VALID) == 0) {
-			if (nd) {
-				free((caddr_t)nd, M_NFSRVDESC);
-				nd = NULL;
-			}
-			nfsd->nfsd_slp = (struct nfssvc_sock *)0;
-			nfsd->nfsd_flag &= ~NFSD_REQINPROG;
-			nfsrv_slpderef(slp);
-			continue;
-		}
-		splx(s);
-		so = slp->ns_so;
-		sotype = so->so_type;
-		if (so->so_proto->pr_flags & PR_CONNREQUIRED)
-			solockp = &slp->ns_solock;
-		else
-			solockp = (int *)0;
-		if (nd) {
-		    getmicrotime(&nd->nd_starttime);
-		    if (nd->nd_nam2)
+		nfsd->nfsd_slp = NULL;
+		CLR(nfsd->nfsd_flag, NFSD_REQINPROG);
+		nfsrv_slpderef(slp);
+		goto loop;
+	}
+
+	splx(s);
+
+	so = slp->ns_so;
+	sotype = so->so_type;
+	if (ISSET(so->so_proto->pr_flags, PR_CONNREQUIRED))
+		solockp = &slp->ns_solock;
+	else
+		solockp = NULL;
+
+	if (nd) {
+		if (nd->nd_nam2)
 			nd->nd_nam = nd->nd_nam2;
-		    else
+		else
 			nd->nd_nam = slp->ns_nam;
+	}
 
-		    cacherep = nfsrv_getcache(nd, slp, &mreq);
+	cacherep = nfsrv_getcache(nd, slp, &mreq);
+	switch (cacherep) {
+	case RC_DOIT:
+		error = (*(nfsrv3_procs[nd->nd_procnum]))(nd, slp, nfsd->nfsd_procp, &mreq);
+		if (mreq == NULL) {
+			if (nd != NULL) {
+				m_freem(nd->nd_nam2);
+				m_freem(nd->nd_mrep);
+			}
+			break;
 		}
-
-		/*
-		 * Loop to get all the write rpc relies that have been
-		 * gathered together.
-		 */
-		do {
-		    switch (cacherep) {
-		    case RC_DOIT:
-			if (writes_todo || (!(nd->nd_flag & ND_NFSV3) &&
-			    nd->nd_procnum == NFSPROC_WRITE &&
-			    nfsrvw_procrastinate > 0))
-				error = nfsrv_writegather(&nd, slp,
-				    nfsd->nfsd_procp, &mreq);
-			else
-				error = (*(nfsrv3_procs[nd->nd_procnum]))(nd,
-				    slp, nfsd->nfsd_procp, &mreq);
-			if (mreq == NULL) {
-				if (nd != NULL) {
-					m_freem(nd->nd_nam2);
-					m_freem(nd->nd_mrep);
-				}
-				break;
-			}
-			if (error) {
-				nfsstats.srv_errs++;
-				nfsrv_updatecache(nd, 0, mreq);
-				if (nd->nd_nam2)
-					m_freem(nd->nd_nam2);
-				break;
-			}
-			nfsstats.srvrpccnt[nd->nd_procnum]++;
-			nfsrv_updatecache(nd, 1, mreq);
-			nd->nd_mrep = (struct mbuf *)0;
-
-			/* FALLTHROUGH */
-		    case RC_REPLY:
-			m = mreq;
-			siz = 0;
-			while (m) {
-				siz += m->m_len;
-				m = m->m_next;
-			}
-			if (siz <= 0 || siz > NFS_MAXPACKET) {
-				printf("mbuf siz=%d\n",siz);
-				panic("Bad nfs svc reply");
-			}
-			m = mreq;
-			m->m_pkthdr.len = siz;
-			m->m_pkthdr.rcvif = (struct ifnet *)0;
-			/*
-			 * For stream protocols, prepend a Sun RPC
-			 * Record Mark.
-			 */
-			if (sotype == SOCK_STREAM) {
-				M_PREPEND(m, NFSX_UNSIGNED, M_WAIT);
-				*mtod(m, u_int32_t *) = htonl(0x80000000 | siz);
-			}
-			if (solockp)
-				(void) nfs_sndlock(solockp, (struct nfsreq *)0);
-			if (slp->ns_flag & SLP_VALID)
-			    error = nfs_send(so, nd->nd_nam2, m, NULL);
-			else {
-			    error = EPIPE;
-			    m_freem(m);
-			}
-			if (nfsrtton)
-				nfsd_rt(sotype, nd, cacherep);
+		if (error) {
+			nfsstats.srv_errs++;
+			nfsrv_updatecache(nd, 0, mreq);
 			if (nd->nd_nam2)
 				m_freem(nd->nd_nam2);
-			if (nd->nd_mrep)
-				m_freem(nd->nd_mrep);
-			if (error == EPIPE)
-				nfsrv_zapsock(slp);
-			if (solockp)
-				nfs_sndunlock(solockp);
-			if (error == EINTR || error == ERESTART) {
-				free((caddr_t)nd, M_NFSRVDESC);
-				nfsrv_slpderef(slp);
-				s = splsoftnet();
-				goto done;
-			}
 			break;
-		    case RC_DROPIT:
-			if (nfsrtton)
-				nfsd_rt(sotype, nd, cacherep);
-			m_freem(nd->nd_mrep);
-			m_freem(nd->nd_nam2);
-			break;
-		    };
-		    if (nd) {
-		    	free(nd, M_NFSRVDESC);
-			nd = NULL;
-		    }
-
-		    /*
-		     * Check to see if there are outstanding writes that
-		     * need to be serviced.
-		     */
-		    getmicrotime(&tv);
-		    s = splsoftclock();
-		    if (LIST_FIRST(&slp->ns_tq) &&
-			timercmp(&LIST_FIRST(&slp->ns_tq)->nd_time, &tv, <=)) {
-			cacherep = RC_DOIT;
-			writes_todo = 1;
-		    } else
-			writes_todo = 0;
-		    splx(s);
-		} while (writes_todo);
-		s = splsoftnet();
-		if (nfsrv_dorec(slp, nfsd, &nd)) {
-			nfsd->nfsd_flag &= ~NFSD_REQINPROG;
-			nfsd->nfsd_slp = NULL;
-			nfsrv_slpderef(slp);
 		}
+		nfsstats.srvrpccnt[nd->nd_procnum]++;
+		nfsrv_updatecache(nd, 1, mreq);
+		nd->nd_mrep = NULL;
+
+		/* FALLTHROUGH */
+	case RC_REPLY:
+		m = mreq;
+		siz = 0;
+		while (m) {
+			siz += m->m_len;
+			m = m->m_next;
+		}
+
+		if (siz <= 0 || siz > NFS_MAXPACKET)
+			panic("bad nfs svc reply, siz = %i", siz);
+
+		m = mreq;
+		m->m_pkthdr.len = siz;
+		m->m_pkthdr.rcvif = NULL;
+
+		/* For stream protocols, prepend a Sun RPC Record Mark. */
+		if (sotype == SOCK_STREAM) {
+			M_PREPEND(m, NFSX_UNSIGNED, M_WAIT);
+			*mtod(m, u_int32_t *) = htonl(0x80000000 | siz);
+		}
+
+		if (solockp)
+			nfs_sndlock(solockp, NULL);
+
+		if (ISSET(slp->ns_flag, SLP_VALID))
+		    error = nfs_send(so, nd->nd_nam2, m, NULL);
+		else {
+		    error = EPIPE;
+		    m_freem(m);
+		}
+		if (nd->nd_nam2)
+			m_freem(nd->nd_nam2);
+		if (nd->nd_mrep)
+			m_freem(nd->nd_mrep);
+		if (error == EPIPE)
+			nfsrv_zapsock(slp);
+		if (solockp)
+			nfs_sndunlock(solockp);
+		if (error == EINTR || error == ERESTART) {
+			pool_put(&nfsrv_descript_pl, nd);
+			nfsrv_slpderef(slp);
+			s = splsoftnet();
+			goto done;
+		}
+		break;
+	case RC_DROPIT:
+		m_freem(nd->nd_mrep);
+		m_freem(nd->nd_nam2);
+		break;
+	};
+
+	if (nd) {
+		pool_put(&nfsrv_descript_pl, nd);
+		nd = NULL;
 	}
+
+	s = splsoftnet();
+	if (nfsrv_dorec(slp, nfsd, &nd)) {
+		nfsd->nfsd_flag &= ~NFSD_REQINPROG;
+		nfsd->nfsd_slp = NULL;
+		nfsrv_slpderef(slp);
+	}
+	goto loop;
+
 done:
 	TAILQ_REMOVE(&nfsd_head, nfsd, nfsd_chain);
 	splx(s);
 	free((caddr_t)nfsd, M_NFSD);
-	nsd->nsd_nfsd = (struct nfsd *)0;
 	if (--nfs_numnfsd == 0)
 		nfsrv_init(1);	/* Reinitialize everything */
 	return (error);
@@ -541,14 +470,11 @@ done:
  * reassigned during cleanup.
  */
 void
-nfsrv_zapsock(slp)
-	struct nfssvc_sock *slp;
+nfsrv_zapsock(struct nfssvc_sock *slp)
 {
-	struct nfsrv_descript *nwp, *nnwp;
 	struct socket *so;
 	struct file *fp;
 	struct mbuf *m, *n;
-	int s;
 
 	slp->ns_flag &= ~SLP_ALLFLAGS;
 	fp = slp->ns_fp;
@@ -568,14 +494,6 @@ nfsrv_zapsock(slp)
 			m_freem(m);
 			m = n;
 		}
-		s = splsoftclock();
-		for (nwp = LIST_FIRST(&slp->ns_tq); nwp != NULL; nwp = nnwp) {
-			nnwp = LIST_NEXT(nwp, nd_tq);
-			LIST_REMOVE(nwp, nd_tq);
-			free((caddr_t)nwp, M_NFSRVDESC);
-		}
-		LIST_INIT(&slp->ns_tq);
-		splx(s);
 	}
 }
 
@@ -584,8 +502,7 @@ nfsrv_zapsock(slp)
  * is no longer valid, you can throw it away.
  */
 void
-nfsrv_slpderef(slp)
-	struct nfssvc_sock *slp;
+nfsrv_slpderef(struct nfssvc_sock *slp)
 {
 	if (--(slp->ns_sref) == 0 && (slp->ns_flag & SLP_VALID) == 0) {
 		TAILQ_REMOVE(&nfssvc_sockhead, slp, ns_chain);
@@ -599,8 +516,7 @@ nfsrv_slpderef(slp)
  * corruption.
  */
 void
-nfsrv_init(terminating)
-	int terminating;
+nfsrv_init(int terminating)
 {
 	struct nfssvc_sock *slp, *nslp;
 
@@ -632,40 +548,9 @@ nfsrv_init(terminating)
 	nfs_udpsock =  malloc(sizeof(struct nfssvc_sock), M_NFSSVC,
 	    M_WAITOK|M_ZERO);
 	TAILQ_INSERT_HEAD(&nfssvc_sockhead, nfs_udpsock, ns_chain);
-}
 
-/*
- * Add entries to the server monitor log.
- */
-static void
-nfsd_rt(sotype, nd, cacherep)
-	int sotype;
-	struct nfsrv_descript *nd;
-	int cacherep;
-{
-	struct drt *rt;
-
-	rt = &nfsdrt.drt[nfsdrt.pos];
-	if (cacherep == RC_DOIT)
-		rt->flag = 0;
-	else if (cacherep == RC_REPLY)
-		rt->flag = DRT_CACHEREPLY;
-	else
-		rt->flag = DRT_CACHEDROP;
-	if (sotype == SOCK_STREAM)
-		rt->flag |= DRT_TCP;
-	else if (nd->nd_flag & ND_NFSV3)
-		rt->flag |= DRT_NFSV3;
-	rt->proc = nd->nd_procnum;
-	if (mtod(nd->nd_nam, struct sockaddr *)->sa_family == AF_INET)
-		rt->ipadr = mtod(nd->nd_nam, struct sockaddr_in *)->sin_addr.s_addr;
-	else
-		rt->ipadr = INADDR_ANY;
-	getmicrotime(&rt->tstamp);
-	rt->resptime =
-	    ((rt->tstamp.tv_sec - nd->nd_starttime.tv_sec) * 1000000) +
-		(rt->tstamp.tv_usec - nd->nd_starttime.tv_usec);
-	nfsdrt.pos = (nfsdrt.pos + 1) % NFSRTTLOGSIZ;
+	pool_init(&nfsrv_descript_pl, sizeof(struct nfsrv_descript), 0, 0, 0,
+	    "ndscpl", &pool_allocator_nointr);
 }
 #endif /* NFSSERVER */
 
@@ -707,6 +592,7 @@ nfssvc_iod(void *arg)
 	}
 
 	nfs_bufqmax += bufcount;
+	wakeup(&nfs_bufqlen); /* wake up anyone waiting for room to enqueue IO */
 
 	/* Just loop around doin our stuff until SIGKILL. */
 	for (;;) {
@@ -733,8 +619,8 @@ nfssvc_iod(void *arg)
 			if ((nbp->b_flags &
 			    (B_BUSY|B_DELWRI|B_NEEDCOMMIT|B_NOCACHE))!=B_DELWRI)
 			    continue;
-			bremfree(nbp);
 			nbp->b_flags |= B_ASYNC;
+			bremfree(nbp);
 			buf_acquire(nbp);
 			break;
 		    }
@@ -751,6 +637,7 @@ nfssvc_iod(void *arg)
 
 		    (void) nfs_doio(bp, NULL);
 		} while ((bp = nbp) != NULL);
+		wakeup_one(&nfs_bufqlen); /* wake up anyone waiting for room to enqueue IO */
 	    }
 	    if (error) {
 		nfs_asyncdaemon[myiod] = NULL;
@@ -762,8 +649,7 @@ nfssvc_iod(void *arg)
 }
 
 void
-nfs_getset_niothreads(set)
-	int set;
+nfs_getset_niothreads(int set)
 {
 	struct proc *p;
 	int i, have, start;
@@ -794,3 +680,46 @@ nfs_getset_niothreads(set)
 	}
 }
 #endif /* NFSCLIENT */
+
+#ifdef NFSSERVER
+/*
+ * Find an nfssrv_sock for nfsd, sleeping if needed.
+ */
+int
+nfsrv_getslp(struct nfsd *nfsd)
+{
+	struct nfssvc_sock *slp;
+	int error;
+
+again:
+	while (nfsd->nfsd_slp == NULL &&
+	    (nfsd_head_flag & NFSD_CHECKSLP) == 0) {
+		nfsd->nfsd_flag |= NFSD_WAITING;
+		nfsd_waiting++;
+		error = tsleep(nfsd, PSOCK | PCATCH, "nfsd", 0);
+		nfsd_waiting--;
+		if (error)
+			return (error);
+	}
+
+	if (nfsd->nfsd_slp == NULL &&
+	    (nfsd_head_flag & NFSD_CHECKSLP) != 0) {
+		TAILQ_FOREACH(slp, &nfssvc_sockhead, ns_chain) {
+			if ((slp->ns_flag & (SLP_VALID | SLP_DOREC)) ==
+			    (SLP_VALID | SLP_DOREC)) {
+				slp->ns_flag &= ~SLP_DOREC;
+				slp->ns_sref++;
+				nfsd->nfsd_slp = slp;
+				break;
+			}
+		}
+		if (slp == NULL)
+			nfsd_head_flag &= ~NFSD_CHECKSLP;
+	}
+
+	if (nfsd->nfsd_slp == NULL)
+		goto again;
+
+	return (0);
+}
+#endif /* NFSSERVER */

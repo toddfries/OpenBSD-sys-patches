@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpcpcibus.c,v 1.38 2009/03/29 22:58:31 kettenis Exp $ */
+/*	$OpenBSD: mpcpcibus.c,v 1.40 2009/08/22 02:54:50 mk Exp $ */
 
 /*
  * Copyright (c) 1997 Per Fogelstrom
@@ -68,7 +68,7 @@ int      mpc_intr_map(void *, pcitag_t, int, int, pci_intr_handle_t *);
 const char *mpc_intr_string(void *, pci_intr_handle_t);
 int	mpc_intr_line(void *, pci_intr_handle_t);
 void     *mpc_intr_establish(void *, pci_intr_handle_t,
-            int, int (*func)(void *), void *, char *);
+            int, int (*func)(void *), void *, const char *);
 void     mpc_intr_disestablish(void *, void *);
 int      mpc_ether_hw_addr(struct ppc_pci_chipset *, u_int8_t *);
 u_int32_t mpc_gen_config_reg(void *cpv, pcitag_t tag, int offset);
@@ -384,7 +384,7 @@ mpcpcibrattach(struct device *parent, struct device *self, void *aux)
 
 	snprintf(sc->sc_ioex_name, sizeof(sc->sc_ioex_name),
 	    "%s pciio", sc->sc_dev.dv_xname);
-	sc->sc_ioex = extent_create(sc->sc_ioex_name, 0x00000000, 0x007fffff,
+	sc->sc_ioex = extent_create(sc->sc_ioex_name, 0x00000000, 0xffffffff,
 	    M_DEVBUF, NULL, 0, EX_NOWAIT | EX_FILLED);
 	snprintf(sc->sc_memex_name, sizeof(sc->sc_memex_name),
 	    "%s pcimem", sc->sc_dev.dv_xname);
@@ -907,7 +907,7 @@ mpc_intr_line(void *lcv, pci_intr_handle_t ih)
 
 void *
 mpc_intr_establish(void *lcv, pci_intr_handle_t ih, int level,
-    int (*func)(void *), void *arg, char *name)
+    int (*func)(void *), void *arg, const char *name)
 {
 	return (*intr_establish_func)(lcv, ih, IST_LEVEL, level, func, arg,
 		name);

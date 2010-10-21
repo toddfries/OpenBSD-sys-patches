@@ -1,4 +1,4 @@
-/*	$OpenBSD: mutex.c,v 1.4 2009/04/27 21:48:56 kettenis Exp $	*/
+/*	$OpenBSD: mutex.c,v 1.9 2010/09/28 20:27:54 miod Exp $	*/
 
 /*
  * Copyright (c) 2004 Artur Grabowski <art@openbsd.org>
@@ -31,36 +31,97 @@
 
 #include <machine/intr.h>
 
-#ifdef MULTIPROCESSOR
-#error This code needs more work
-#endif
+#include <ddb/db_output.h>
 
-/*
- * Single processor systems don't need any mutexes, but they need the spl
- * raising semantics of the mutexes.
- */
+static inline int
+try_lock(struct mutex *mtx)
+{
+	volatile int *lock = (int *)(((vaddr_t)mtx->mtx_lock + 0xf) & ~0xf);
+	volatile register_t ret = 0;
+
+	/* Note: lock must be 16-byte aligned. */
+	asm volatile (
+		"ldcws      0(%2), %0"
+		: "=&r" (ret), "+m" (lock)
+		: "r" (lock)
+	);
+
+	return ret;
+}
+
 void
 mtx_init(struct mutex *mtx, int wantipl)
 {
-	mtx->mtx_oldipl = 0;
+	mtx->mtx_lock[0] = 1;
+	mtx->mtx_lock[1] = 1;
+	mtx->mtx_lock[2] = 1;
+	mtx->mtx_lock[3] = 1;
 	mtx->mtx_wantipl = wantipl;
-	mtx->mtx_lock = 0;
+	mtx->mtx_oldipl = IPL_NONE;
 }
 
 void
 mtx_enter(struct mutex *mtx)
 {
+	int s;
+
+	for (;;) {
+		if (mtx->mtx_wantipl != IPL_NONE)
+			s = splraise(mtx->mtx_wantipl);
+		if (try_lock(mtx)) {
+			if (mtx->mtx_wantipl != IPL_NONE)
+				mtx->mtx_oldipl = s;
+			mtx->mtx_owner = curcpu();
+#ifdef DIAGNOSTIC
+			curcpu()->ci_mutex_level++;
+#endif
+			return;
+		}
+		if (mtx->mtx_wantipl != IPL_NONE)
+			splx(s);
+	}
+}
+
+int
+mtx_enter_try(struct mutex *mtx)
+{
+	int s;
+	
+ 	if (mtx->mtx_wantipl != IPL_NONE)
+		s = splraise(mtx->mtx_wantipl);
+	if (try_lock(mtx)) {
+		if (mtx->mtx_wantipl != IPL_NONE)
+			mtx->mtx_oldipl = s;
+		mtx->mtx_owner = curcpu();
+#ifdef DIAGNOSTIC
+		curcpu()->ci_mutex_level++;
+#endif
+		return 1;
+	}
 	if (mtx->mtx_wantipl != IPL_NONE)
-		mtx->mtx_oldipl = splraise(mtx->mtx_wantipl);
-	MUTEX_ASSERT_UNLOCKED(mtx);
-	mtx->mtx_lock = 1;
+		splx(s);
+
+	return 0;
 }
 
 void
 mtx_leave(struct mutex *mtx)
 {
+	int s;
+
 	MUTEX_ASSERT_LOCKED(mtx);
-	mtx->mtx_lock = 0;
+
+#ifdef DIAGNOSTIC
+	curcpu()->ci_mutex_level--;
+#endif
+	s = mtx->mtx_oldipl;
+	mtx->mtx_owner = NULL;
+
+	mtx->mtx_lock[0] = 1;
+	mtx->mtx_lock[1] = 1;
+	mtx->mtx_lock[2] = 1;
+	mtx->mtx_lock[3] = 1;
+
 	if (mtx->mtx_wantipl != IPL_NONE)
-		splx(mtx->mtx_oldipl);
+		splx(s);
 }

@@ -1,4 +1,4 @@
-/* $OpenBSD: pci_eb164.c,v 1.22 2008/07/22 18:45:51 miod Exp $ */
+/* $OpenBSD: pci_eb164.c,v 1.25 2009/09/30 20:18:06 miod Exp $ */
 /* $NetBSD: pci_eb164.c,v 1.27 2000/06/06 00:50:15 thorpej Exp $ */
 
 /*-
@@ -91,7 +91,7 @@ int	dec_eb164_intr_map(struct pci_attach_args *, pci_intr_handle_t *);
 const char *dec_eb164_intr_string(void *, pci_intr_handle_t);
 int	dec_eb164_intr_line(void *, pci_intr_handle_t);
 void	*dec_eb164_intr_establish(void *, pci_intr_handle_t,
-	    int, int (*func)(void *), void *, char *);
+	    int, int (*func)(void *), void *, const char *);
 void	dec_eb164_intr_disestablish(void *, void *);
 
 void	*dec_eb164_pciide_compat_intr_establish(void *, struct device *,
@@ -239,7 +239,7 @@ dec_eb164_intr_string(ccv, ih)
 #endif
         static char irqstr[15];          /* 11 + 2 + NULL + sanity */
 
-        if (ih > EB164_MAX_IRQ)
+        if (ih >= EB164_MAX_IRQ)
                 panic("dec_eb164_intr_string: bogus eb164 IRQ 0x%lx", ih);
         snprintf(irqstr, sizeof irqstr, "eb164 irq %ld", ih);
         return (irqstr);
@@ -259,14 +259,14 @@ dec_eb164_intr_establish(ccv, ih, level, func, arg, name)
         pci_intr_handle_t ih;
         int level;
         int (*func)(void *);
-	char *name;
+	const char *name;
 {
 #if 0
 	struct cia_config *ccp = ccv;
 #endif
 	void *cookie;
 
-	if (ih > EB164_MAX_IRQ)
+	if (ih >= EB164_MAX_IRQ)
 		panic("dec_eb164_intr_establish: bogus eb164 IRQ 0x%lx", ih);
 
 	cookie = alpha_shared_intr_establish(eb164_pci_intr, ih, IST_LEVEL,
@@ -293,8 +293,7 @@ dec_eb164_intr_disestablish(ccv, cookie)
  
 	s = splhigh();
 
-	alpha_shared_intr_disestablish(eb164_pci_intr, cookie,
-	    "eb164 irq");
+	alpha_shared_intr_disestablish(eb164_pci_intr, cookie);
 	if (alpha_shared_intr_isactive(eb164_pci_intr, irq) == 0) {
 		eb164_intr_disable(irq);
 		alpha_shared_intr_set_dfltsharetype(eb164_pci_intr, irq,

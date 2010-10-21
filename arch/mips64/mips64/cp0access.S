@@ -1,4 +1,4 @@
-/*	$OpenBSD: cp0access.S,v 1.8 2007/10/18 04:32:25 miod Exp $ */
+/*	$OpenBSD: cp0access.S,v 1.14 2010/09/11 11:29:50 syuu Exp $ */
 
 /*
  * Copyright (c) 2001-2003 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -34,7 +34,6 @@
 #include <sys/syscall.h>
 
 #include <machine/param.h>
-#include <machine/psl.h>
 #include <machine/asm.h>
 #include <machine/cpu.h>
 #include <machine/regnum.h>
@@ -112,7 +111,7 @@ LEAF(updateimask, 0)
 	lw	t0, idle_mask
 	not	a0, a0			# 1 means masked so invert.
 	and	a0, t0			# never upgrade to higher than max
-#ifndef IMASK_EXTERNAL
+#ifdef RM7000_ICR
 	cfc0	v0, COP_0_ICR
 	li	v1, ~IC_INT_MASK
 	and	v1, v0
@@ -127,6 +126,9 @@ LEAF(updateimask, 0)
 	and	v1, v0
 	and	v0, a0, SR_INT_MASK
 	or	v1, v0
+	mtc0	v1, COP_0_STATUS_REG
+	ITLBNOPFIX
+	ori	v1, SR_INT_ENAB		# enable interrupts
 	mtc0	v1, COP_0_STATUS_REG
 	ITLBNOPFIX
 	jr	ra
@@ -145,6 +147,12 @@ LEAF(getsr, 0)
 	jr	ra
 	nop
 END(getsr)
+
+LEAF(cp0_get_config, 0)
+	mfc0	v0, COP_0_CONFIG
+	j	ra
+	nop
+END(cp0_get_config)
 
 LEAF(cp0_get_prid, 0)
 	mfc0	v0, COP_0_PRID

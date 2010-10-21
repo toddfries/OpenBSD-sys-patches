@@ -1,4 +1,4 @@
-/*	$OpenBSD: sys_pipe.c,v 1.55 2009/01/29 22:08:45 guenther Exp $	*/
+/*	$OpenBSD: sys_pipe.c,v 1.58 2010/01/14 23:12:11 schwarze Exp $	*/
 
 /*
  * Copyright (c) 1996 John S. Dyson
@@ -255,10 +255,10 @@ pipeselwakeup(struct pipe *cpipe)
 	if (cpipe->pipe_state & PIPE_SEL) {
 		cpipe->pipe_state &= ~PIPE_SEL;
 		selwakeup(&cpipe->pipe_sel);
-	}
+	} else
+		KNOTE(&cpipe->pipe_sel.si_note, 0);
 	if ((cpipe->pipe_state & PIPE_ASYNC) && cpipe->pipe_pgid != NO_PID)
 		gsignal(cpipe->pipe_pgid, SIGIO);
-	KNOTE(&cpipe->pipe_sel.si_note, 0);
 }
 
 /* ARGSUSED */
@@ -415,7 +415,7 @@ pipe_write(struct file *fp, off_t *poff, struct uio *uio, struct ucred *cred)
 	}
 
 	/*
-	 * If an early error occured unbusy and return, waking up any pending
+	 * If an early error occurred unbusy and return, waking up any pending
 	 * readers.
 	 */
 	if (error) {
@@ -750,7 +750,6 @@ pipeclose(struct pipe *cpipe)
 
 			ppipe->pipe_state |= PIPE_EOF;
 			wakeup(ppipe);
-			KNOTE(&ppipe->pipe_sel.si_note, 0);
 			ppipe->pipe_peer = NULL;
 		}
 

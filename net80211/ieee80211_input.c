@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_input.c,v 1.111 2009/03/26 20:34:54 damien Exp $	*/
+/*	$OpenBSD: ieee80211_input.c,v 1.116 2010/06/07 16:51:22 damien Exp $	*/
 
 /*-
  * Copyright (c) 2001 Atsushi Onoe
@@ -42,7 +42,6 @@
 #include <sys/errno.h>
 #include <sys/proc.h>
 #include <sys/sysctl.h>
-#include <sys/endian.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
@@ -834,6 +833,7 @@ ieee80211_deliver_data(struct ieee80211com *ic, struct mbuf *m,
 	}
 }
 
+#ifdef __STRICT_ALIGNMENT
 /*
  * Make sure protocol header (e.g. IP) is aligned on a 32-bit boundary.
  * This is achieved by copying mbufs so drivers should try to map their
@@ -861,7 +861,11 @@ ieee80211_align_mbuf(struct mbuf *m)
 				m_freem(m);
 				return NULL;
 			}
-			M_DUP_PKTHDR(n, m);
+			if (m_dup_pkthdr(n, m)) {
+				m_free(n);
+				m_freem(m);
+				return (NULL);
+			}
 			n->m_len = MHLEN;
 		} else {
 			MGET(n, M_DONTWAIT, MT_DATA);
@@ -893,13 +897,14 @@ ieee80211_align_mbuf(struct mbuf *m)
 	m_freem(m);
 	return n0;
 }
+#endif	/* __STRICT_ALIGNMENT */
 
 void
 ieee80211_decap(struct ieee80211com *ic, struct mbuf *m,
     struct ieee80211_node *ni, int hdrlen)
 {
-	struct ieee80211_qosframe_addr4 wh;	/* largest 802.11 header */
-	struct ether_header *eh;
+	struct ether_header eh;
+	struct ieee80211_frame *wh;
 	struct llc *llc;
 
 	if (m->m_len < hdrlen + LLC_SNAPFRAMELEN &&
@@ -907,48 +912,48 @@ ieee80211_decap(struct ieee80211com *ic, struct mbuf *m,
 		ic->ic_stats.is_rx_decap++;
 		return;
 	}
-	memcpy(&wh, mtod(m, caddr_t), hdrlen);
-	llc = (struct llc *)(mtod(m, caddr_t) + hdrlen);
+	wh = mtod(m, struct ieee80211_frame *);
+	switch (wh->i_fc[1] & IEEE80211_FC1_DIR_MASK) {
+	case IEEE80211_FC1_DIR_NODS:
+		IEEE80211_ADDR_COPY(eh.ether_dhost, wh->i_addr1);
+		IEEE80211_ADDR_COPY(eh.ether_shost, wh->i_addr2);
+		break;
+	case IEEE80211_FC1_DIR_TODS:
+		IEEE80211_ADDR_COPY(eh.ether_dhost, wh->i_addr3);
+		IEEE80211_ADDR_COPY(eh.ether_shost, wh->i_addr2);
+		break;
+	case IEEE80211_FC1_DIR_FROMDS:
+		IEEE80211_ADDR_COPY(eh.ether_dhost, wh->i_addr1);
+		IEEE80211_ADDR_COPY(eh.ether_shost, wh->i_addr3);
+		break;
+	case IEEE80211_FC1_DIR_DSTODS:
+		IEEE80211_ADDR_COPY(eh.ether_dhost, wh->i_addr3);
+		IEEE80211_ADDR_COPY(eh.ether_shost,
+		    ((struct ieee80211_frame_addr4 *)wh)->i_addr4);
+		break;
+	}
+	llc = (struct llc *)((caddr_t)wh + hdrlen);
 	if (llc->llc_dsap == LLC_SNAP_LSAP &&
 	    llc->llc_ssap == LLC_SNAP_LSAP &&
 	    llc->llc_control == LLC_UI &&
 	    llc->llc_snap.org_code[0] == 0 &&
 	    llc->llc_snap.org_code[1] == 0 &&
 	    llc->llc_snap.org_code[2] == 0) {
+		eh.ether_type = llc->llc_snap.ether_type;
 		m_adj(m, hdrlen + LLC_SNAPFRAMELEN - ETHER_HDR_LEN);
-		llc = NULL;
 	} else {
+		eh.ether_type = htons(m->m_pkthdr.len - hdrlen);
 		m_adj(m, hdrlen - ETHER_HDR_LEN);
 	}
-	eh = mtod(m, struct ether_header *);
-	switch (wh.i_fc[1] & IEEE80211_FC1_DIR_MASK) {
-	case IEEE80211_FC1_DIR_NODS:
-		IEEE80211_ADDR_COPY(eh->ether_dhost, wh.i_addr1);
-		IEEE80211_ADDR_COPY(eh->ether_shost, wh.i_addr2);
-		break;
-	case IEEE80211_FC1_DIR_TODS:
-		IEEE80211_ADDR_COPY(eh->ether_dhost, wh.i_addr3);
-		IEEE80211_ADDR_COPY(eh->ether_shost, wh.i_addr2);
-		break;
-	case IEEE80211_FC1_DIR_FROMDS:
-		IEEE80211_ADDR_COPY(eh->ether_dhost, wh.i_addr1);
-		IEEE80211_ADDR_COPY(eh->ether_shost, wh.i_addr3);
-		break;
-	case IEEE80211_FC1_DIR_DSTODS:
-		IEEE80211_ADDR_COPY(eh->ether_dhost, wh.i_addr3);
-		IEEE80211_ADDR_COPY(eh->ether_shost, wh.i_addr4);
-		break;
-	}
+	memcpy(mtod(m, caddr_t), &eh, ETHER_HDR_LEN);
+#ifdef __STRICT_ALIGNMENT
 	if (!ALIGNED_POINTER(mtod(m, caddr_t) + ETHER_HDR_LEN, u_int32_t)) {
 		if ((m = ieee80211_align_mbuf(m)) == NULL) {
 			ic->ic_stats.is_rx_decap++;
 			return;
 		}
 	}
-	if (llc != NULL) {
-		eh = mtod(m, struct ether_header *);
-		eh->ether_type = htons(m->m_pkthdr.len - ETHER_HDR_LEN);
-	}
+#endif
 	ieee80211_deliver_data(ic, m, ni);
 }
 
@@ -2563,9 +2568,9 @@ ieee80211_recv_delba(struct ieee80211com *ic, struct mbuf *m,
 
 /*-
  * SA Query Request frame format:
- * [1]  Category
- * [1]  Action
- * [16] Transaction Identifier
+ * [1] Category
+ * [1] Action
+ * [2] Transaction Identifier
  */
 void
 ieee80211_recv_sa_query_req(struct ieee80211com *ic, struct mbuf *m,
@@ -2600,9 +2605,9 @@ ieee80211_recv_sa_query_req(struct ieee80211com *ic, struct mbuf *m,
 #ifndef IEEE80211_STA_ONLY
 /*-
  * SA Query Response frame format:
- * [1]  Category
- * [1]  Action
- * [16] Transaction Identifier
+ * [1] Category
+ * [1] Action
+ * [2] Transaction Identifier
  */
 void
 ieee80211_recv_sa_query_resp(struct ieee80211com *ic, struct mbuf *m,

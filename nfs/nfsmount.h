@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfsmount.h,v 1.18 2008/12/27 14:14:30 thib Exp $	*/
+/*	$OpenBSD: nfsmount.h,v 1.24 2009/09/02 18:20:54 thib Exp $	*/
 /*	$NetBSD: nfsmount.h,v 1.10 1996/02/18 11:54:03 fvdl Exp $	*/
 
 /*
@@ -45,6 +45,11 @@
  * Holds NFS specific information for mount.
  */
 struct	nfsmount {
+	RB_HEAD(nfs_nodetree, nfsnode)
+		nm_ntree;		/* filehandle/node tree */
+	TAILQ_HEAD(reqs, nfsreq)
+		nm_reqsq;		/* request queue for this mount. */
+	struct timeout nm_rtimeout;	/* timeout (scans/resends nm_reqsq). */
 	int	nm_flag;		/* Flags for soft/hard... */
 	struct	mount *nm_mountp;	/* Vfs structure for this filesystem */
 	int	nm_numgrps;		/* Max. size of groupslist */
@@ -57,12 +62,11 @@ struct	nfsmount {
 	struct	mbuf *nm_nam;		/* Addr of server */
 	int	nm_timeo;		/* Init timer for NFSMNT_DUMBTIMR */
 	int	nm_retry;		/* Max retries */
-	int	nm_srtt[4];		/* Timers for rpcs */
-	int	nm_sdrtt[4];
+	int	nm_srtt[NFS_MAX_TIMER];	/* RTT Timers for RPCs */
+	int	nm_sdrtt[NFS_MAX_TIMER];
 	int	nm_sent;		/* Request send count */
 	int	nm_cwnd;		/* Request send window */
 	int	nm_timeouts;		/* Request timeouts */
-	int	nm_deadthresh;		/* Threshold of timeouts-->dead server*/
 	int	nm_rsize;		/* Max size of read rpc */
 	int	nm_wsize;		/* Max size of write rpc */
 	int	nm_readdirsize;		/* Size of a readdir rpc */

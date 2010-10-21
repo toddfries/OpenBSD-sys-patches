@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.c,v 1.47 2009/04/13 21:22:38 kettenis Exp $	*/
+/*	$OpenBSD: pci_machdep.c,v 1.54 2010/09/06 19:05:48 kettenis Exp $	*/
 /*	$NetBSD: pci_machdep.c,v 1.28 1997/06/06 23:29:17 thorpej Exp $	*/
 
 /*-
@@ -167,7 +167,7 @@ struct bus_dma_tag pci_bus_dma_tag = {
 	_bus_dmamap_load_uio,
 	_bus_dmamap_load_raw,
 	_bus_dmamap_unload,
-	NULL,			/* _dmamap_sync */
+	_bus_dmamap_sync,
 	_bus_dmamem_alloc,
 	_bus_dmamem_free,
 	_bus_dmamem_map,
@@ -569,7 +569,7 @@ void	acpiprt_route_interrupt(int bus, int dev, int pin);
 
 void *
 pci_intr_establish(pci_chipset_tag_t pc, pci_intr_handle_t ih, int level,
-    int (*func)(void *), void *arg, char *what)
+    int (*func)(void *), void *arg, const char *what)
 {
 	void *ret;
 	int bus, dev;
@@ -612,9 +612,19 @@ pci_init_extents(void)
 	bios_memmap_t *bmp;
 	u_int64_t size;
 
-	if (pciio_ex == NULL)
-		pciio_ex = extent_create("pciio", 0, 0xffff, M_DEVBUF,
-		    NULL, 0, EX_NOWAIT);
+	if (pciio_ex == NULL) {
+		/*
+		 * We only have 64K of addressable I/O space.
+		 * However, since BARs may contain garbage, we cover
+		 * the full 32-bit address space defined by PCI of
+		 * which we only make the first 64K available.
+		 */
+		pciio_ex = extent_create("pciio", 0, 0xffffffff, M_DEVBUF,
+		    NULL, 0, EX_NOWAIT | EX_FILLED);
+		if (pciio_ex == NULL)
+			return;
+		extent_free(pciio_ex, 0, 0x10000, M_NOWAIT);
+	}
 
 	if (pcimem_ex == NULL) {
 		pcimem_ex = extent_create("pcimem", 0, 0xffffffff, M_DEVBUF,
@@ -641,5 +651,22 @@ pci_init_extents(void)
 				printf("memory map conflict 0x%llx/0x%llx\n",
 				    bmp->addr, bmp->size);
 		}
+
+		/* Take out the video buffer area and BIOS areas. */
+		extent_alloc_region(pcimem_ex, IOM_BEGIN, IOM_SIZE,
+		    EX_CONFLICTOK | EX_NOWAIT);
 	}
+}
+
+#include "acpi.h"
+#if NACPI > 0
+void acpi_pci_match(struct device *, struct pci_attach_args *);
+#endif
+
+void
+pci_dev_postattach(struct device *dev, struct pci_attach_args *pa)
+{
+#if NACPI > 0
+	acpi_pci_match(dev, pa);
+#endif
 }

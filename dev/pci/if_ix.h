@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ix.h,v 1.4 2009/04/24 12:54:15 jsg Exp $	*/
+/*	$OpenBSD: if_ix.h,v 1.11 2010/08/27 08:24:53 deraadt Exp $	*/
 
 /******************************************************************************
 
@@ -116,7 +116,8 @@
 #define HW_DEBUGOUT2(S, A, B)       if (DEBUG_HW) printf(S "\n", A, B)
 
 #define MAX_NUM_MULTICAST_ADDRESSES     128
-#define IXGBE_MAX_SCATTER		100
+#define IXGBE_82598_SCATTER		100
+#define IXGBE_82599_SCATTER		32
 #define IXGBE_MSIX_BAR			3
 #if 0
 #define IXGBE_TSO_SIZE			65535
@@ -236,8 +237,6 @@ struct ix_softc {
 
 	struct ixgbe_hw	hw;
 	struct ixgbe_osdep	 osdep;
-	void			*powerhook;
-	void			*shutdownhook;
 
 	struct resource	*pci_mem;
 	struct resource	*msix_mem;
@@ -260,6 +259,7 @@ struct ix_softc {
 	struct mutex	core_mtx;
 
 	/* Legacy Fast Intr handling */
+	int		sfp_probe;
 	workq_fn	link_task;
 
 	/* Info about the board itself */

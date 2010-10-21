@@ -1,4 +1,4 @@
-/*	$OpenBSD: ubsa.c,v 1.45 2009/02/24 13:23:03 yuo Exp $ 	*/
+/*	$OpenBSD: ubsa.c,v 1.50 2010/09/24 08:33:59 yuo Exp $ 	*/
 /*	$NetBSD: ubsa.c,v 1.5 2002/11/25 00:51:33 fvdl Exp $	*/
 /*-
  * Copyright (c) 2002, Alexander Kabaev <kan.FreeBSD.org>.
@@ -70,7 +70,6 @@
 #include <sys/proc.h>
 #include <sys/vnode.h>
 #include <sys/poll.h>
-#include <sys/sysctl.h>
 
 #include <dev/usb/usb.h>
 #include <dev/usb/usbcdc.h>
@@ -215,17 +214,17 @@ const struct usb_devno ubsa_devs[] = {
 	{ USB_VENDOR_GOHUBS, USB_PRODUCT_GOHUBS_GOCOM232 },
 	/* Peracom */
 	{ USB_VENDOR_PERACOM, USB_PRODUCT_PERACOM_SERIAL1 },
-	/* Qualcomm Inc. ZTE CMDMA MSM modem */
-	{ USB_VENDOR_QUALCOMM3, USB_PRODUCT_QUALCOMM3_CDMA_MSM },
-	/* Qualcomm Inc. AC8700 */
-	{ USB_VENDOR_QUALCOMM3, USB_PRODUCT_QUALCOMM3_AC8700 },
+	/* ZTE Inc. CMDMA MSM modem */
+	{ USB_VENDOR_ZTE, USB_PRODUCT_ZTE_CDMA_MSM },
+	/* ZTE Inc. AC8700 */
+	{ USB_VENDOR_ZTE, USB_PRODUCT_ZTE_AC8700 },
 };
 #define ubsa_lookup(v, p) usb_lookup(ubsa_devs, v, p)
 
 int ubsa_match(struct device *, void *, void *); 
 void ubsa_attach(struct device *, struct device *, void *); 
 int ubsa_detach(struct device *, int); 
-int ubsa_activate(struct device *, enum devact); 
+int ubsa_activate(struct device *, int); 
 
 struct cfdriver ubsa_cd = { 
 	NULL, "ubsa", DV_DULL 
@@ -395,7 +394,6 @@ ubsa_detach(struct device *self, int flags)
 		sc->sc_intr_pipe = NULL;
 	}
 
-	sc->sc_dying = 1;
 	if (sc->sc_subdev != NULL) {
 		rv = config_detach(sc->sc_subdev, flags);
 		sc->sc_subdev = NULL;
@@ -408,7 +406,7 @@ ubsa_detach(struct device *self, int flags)
 }
 
 int
-ubsa_activate(struct device *self, enum devact act)
+ubsa_activate(struct device *self, int act)
 {
 	struct ubsa_softc *sc = (struct ubsa_softc *)self;
 	int rv = 0;
@@ -717,7 +715,7 @@ ubsa_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 		if (cdcbuf->bNotification == UCDC_N_SERIAL_STATE)
 			printf("%s:notify serial state, len=%d, data=0x%02x\n",
 			    sc->sc_dev.dv_xname,
-			    cdcbuf->wLength, cdcbuf->data[0]);
+			    UGETW(cdcbuf->wLength), cdcbuf->data[0]);
 	}
 #endif
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: hypervisor.h,v 1.10 2009/01/02 15:35:54 kettenis Exp $	*/
+/*	$OpenBSD: hypervisor.h,v 1.12 2009/12/31 11:50:33 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2008 Mark Kettenis
@@ -134,6 +134,9 @@ int64_t	hv_cons_getchar(int64_t *ch);
 int64_t	hv_cons_putchar(int64_t ch);
 int64_t	hv_api_putchar(int64_t ch);
 
+#define CONS_BREAK	-1
+#define CONS_HUP	-2
+
 /*
  * Domain state services
  */
@@ -196,10 +199,14 @@ int64_t	hv_ldc_set_map_table(uint64_t ldc_id, paddr_t base_raddr,
 int64_t	hv_ldc_get_map_table(uint64_t ldc_id, paddr_t *base_raddr,
 	    uint64_t *nentries);
 int64_t hv_ldc_copy(uint64_t ldc_id, uint64_t flags, uint64_t cookie,
-	    paddr_t raddr, psize_t length, paddr_t *ret_length);
+	    paddr_t raddr, psize_t length, psize_t *ret_length);
 
 #define LDC_COPY_IN		0
 #define LDC_COPY_OUT		1
+
+int64_t hv_ldc_mapin(uint64_t ldc_id, uint64_t cookie, paddr_t *raddr,
+	    uint64_t *perms);
+int64_t hv_ldc_unmap(paddr_t raddr, uint64_t *perms);
 
 /*
  * Cryptographic services

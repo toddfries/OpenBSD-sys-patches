@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.43 2009/04/27 17:48:25 deraadt Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.58 2010/10/02 23:13:27 deraadt Exp $	*/
 /*	$NetBSD: cpu.h,v 1.1 2003/04/26 18:39:39 fvdl Exp $	*/
 
 /*-
@@ -69,16 +69,13 @@ struct cpu_info {
 	struct simplelock ci_slock;
 	u_int ci_cpuid;
 	u_int ci_apicid;
-	u_long ci_spin_locks;
-	u_long ci_simple_locks;
 	u_int32_t ci_randseed;
 
 	u_int64_t ci_scratch;
 
 	struct proc *ci_fpcurproc;
+	struct proc *ci_fpsaveproc;
 	int ci_fpsaving;
-
-	volatile u_int32_t ci_tlb_ipi_mask;
 
 	struct pcb *ci_curpcb;
 	struct pcb *ci_idle_pcb;
@@ -90,9 +87,11 @@ struct cpu_info {
 	int		ci_idepth;
 	u_int32_t	ci_imask[NIPL];
 	u_int32_t	ci_iunmask[NIPL];
+#ifdef DIAGNOSTIC
+	int		ci_mutex_level;
+#endif
 
-	paddr_t 	ci_idle_pcb_paddr;
-	u_int		ci_flags;
+	volatile u_int	ci_flags;
 	u_int32_t	ci_ipis;
 
 	u_int32_t	ci_feature_flags;
@@ -100,6 +99,7 @@ struct cpu_info {
 	u_int32_t	ci_signature;
 	u_int32_t	ci_family;
 	u_int32_t	ci_model;
+	u_int32_t	ci_cflushsz;
 	u_int64_t	ci_tsc_freq;
 
 	struct cpu_functions *ci_func;
@@ -109,11 +109,6 @@ struct cpu_info {
 	int		ci_want_resched;
 
 	struct x86_cache_info ci_cinfo[CAI_COUNT];
-
-	struct timeval 	ci_cc_time;
-	int64_t		ci_cc_cc;
-	int64_t		ci_cc_ms_delta;
-	int64_t		ci_cc_denom;
 
 	char		*ci_gdt;
 
@@ -284,6 +279,9 @@ void	x86_64_bufinit(void);
 void	x86_64_init_pcb_tss_ldt(struct cpu_info *);
 void	cpu_proc_fork(struct proc *, struct proc *);
 int	amd64_pa_used(paddr_t);
+extern void (*cpu_idle_enter_fcn)(void);
+extern void (*cpu_idle_cycle_fcn)(void);
+extern void (*cpu_idle_leave_fcn)(void);
 
 struct region_descriptor;
 void	lgdt(struct region_descriptor *);
@@ -295,12 +293,18 @@ void	proc_trampoline(void);
 void	child_trampoline(void);
 
 /* clock.c */
-void	initrtclock(void);
-void	startrtclock(void);
+extern void (*initclock_func)(void);
+void	startclocks(void);
+void	rtcstart(void);
+void	rtcstop(void);
 void	i8254_delay(int);
 void	i8254_initclocks(void);
+void	i8254_startclock(void);
 void	i8254_inittimecounter(void);
 void	i8254_inittimecounter_simple(void);
+
+/* i8259.c */
+void	i8259_default_setup(void);
 
 
 void cpu_init_msrs(struct cpu_info *);
@@ -347,7 +351,9 @@ void mp_setperf_init(void);
 #define CPU_APMWARN		9	/* APM battery warning percentage */
 #define CPU_KBDRESET		10	/* keyboard reset under pcvt */
 #define CPU_APMHALT		11	/* halt -p hack */
-#define CPU_MAXID		12	/* number of valid machdep ids */
+#define CPU_XCRYPT		12	/* supports VIA xcrypt in userland */
+#define CPU_LIDSUSPEND		13	/* lid close causes a suspend */
+#define CPU_MAXID		14	/* number of valid machdep ids */
 
 #define	CTL_MACHDEP_NAMES { \
 	{ 0, 0 }, \
@@ -362,6 +368,8 @@ void mp_setperf_init(void);
 	{ "apmwarn", CTLTYPE_INT }, \
 	{ "kbdreset", CTLTYPE_INT }, \
 	{ "apmhalt", CTLTYPE_INT }, \
+	{ "xcrypt", CTLTYPE_INT }, \
+	{ "lidsuspend", CTLTYPE_INT }, \
 }
 
 /*

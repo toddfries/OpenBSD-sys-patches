@@ -1,4 +1,4 @@
-/*	$OpenBSD: dpt.c,v 1.20 2009/02/16 21:19:06 miod Exp $	*/
+/*	$OpenBSD: dpt.c,v 1.28 2010/07/20 20:46:18 mk Exp $	*/
 /*	$NetBSD: dpt.c,v 1.12 1999/10/23 16:26:33 ad Exp $	*/
 
 /*-
@@ -95,18 +95,15 @@ struct cfdriver dpt_cd = {
 };
 #endif /* __OpenBSD__ */
 
-/* A default for our link struct */
 #ifdef __NetBSD__
+/* A default for our link struct */
 static struct scsipi_device dpt_dev = {
-#endif /* __NetBSD__ */
-#ifdef __OpenBSD__
-static struct scsi_device dpt_dev = {
-#endif /* __OpenBSD__ */
 	NULL,			/* Use default error handler */
 	NULL,			/* have a queue, served by this */
 	NULL,			/* have no async handler */
 	NULL,			/* Use default 'done' routine */
 };
+#endif /* __NetBSD__ */
 
 #ifndef offsetof
 #define offsetof(type, member) (int)((&((type *)0)->member))
@@ -318,7 +315,7 @@ dpt_init(sc, intrstr)
 	sc->sc_statpack->sp_ccbid = -1;
 
 	/* Initialize the CCBs */
-	TAILQ_INIT(&sc->sc_free_ccb);
+	SLIST_INIT(&sc->sc_free_ccb);
 	i = dpt_create_ccbs(sc, sc->sc_ccbs, sc->sc_nccbs);
 
 	if (i == 0) {
@@ -394,6 +391,7 @@ dpt_init(sc, intrstr)
 		link->scsipi_scsi.max_lun = ec->ec_maxlun;
 		link->scsipi_scsi.max_target = ec->ec_maxtarget;
 		link->type = BUS_SCSI;
+		link->device = &dpt_dev;
 #endif /* __NetBSD__ */
 #ifdef __OpenBSD__
 		link->scsibus = i;
@@ -401,7 +399,6 @@ dpt_init(sc, intrstr)
 		link->luns = ec->ec_maxlun + 1;
 		link->adapter_buswidth = ec->ec_maxtarget + 1;
 #endif /* __OpenBSD__ */
-		link->device = &dpt_dev;
 		link->adapter = &sc->sc_adapter;
 		link->adapter_softc = sc;
 		link->openings = sc->sc_nccbs;
@@ -658,10 +655,8 @@ dpt_free_ccb(sc, ccb)
 
 	s = splbio();
 	ccb->ccb_flg = 0;
-	TAILQ_INSERT_HEAD(&sc->sc_free_ccb, ccb, ccb_chain);
 
-	/* Wake anybody waiting for a free ccb */
-	if (TAILQ_NEXT(ccb, ccb_chain) == NULL)
+	if (SLIST_NEXT(ccb, ccb_chain) == NULL)
 		wakeup(&sc->sc_free_ccb);
 	splx(s);
 }
@@ -714,7 +709,7 @@ dpt_create_ccbs(sc, ccbstore, count)
 			break;
 		}
 		ccb->ccb_id = i;
-		TAILQ_INSERT_TAIL(&sc->sc_free_ccb, ccb, ccb_chain);
+		SLIST_INSERT_HEAD(&sc->sc_free_ccb, ccb, ccb_chain);
 	}
 
 	return (i);
@@ -736,9 +731,9 @@ dpt_alloc_ccb(sc, flg)
 	s = splbio();
 
 	for (;;) {
-		ccb = TAILQ_FIRST(&sc->sc_free_ccb);
+		ccb = SLIST_FIRST(&sc->sc_free_ccb);
 		if (ccb) {
-			TAILQ_REMOVE(&sc->sc_free_ccb, ccb, ccb_chain);
+			SLIST_REMOVE_HEAD(&sc->sc_free_ccb, ccb_chain);
 			break;
 		}
 #ifdef __NetBSD__
@@ -854,7 +849,6 @@ dpt_done_ccb(sc, ccb)
 	scsipi_done(xs);
 #endif /* __NetBSD__ */
 #ifdef __OpenBSD__
-	xs->flags |= ITSDONE;
 	scsi_done(xs);
 #endif /* __OpenBSD__ */
 }
@@ -862,13 +856,13 @@ dpt_done_ccb(sc, ccb)
 /*
  * Start a SCSI command.
  */
-int
-dpt_scsi_cmd(xs)
 #ifdef __NetBSD__
-	struct scsipi_xfer *xs;
+int
+dpt_scsi_cmd(struct scsipi_xfer *xs)
 #endif /* __NetBSD__ */
 #ifdef __OpenBSD__
-	struct scsi_xfer *xs;
+void
+dpt_scsi_cmd(struct scsi_xfer *xs)
 #endif /* __OpenBSD__ */
 {
 	int error, i, flags, s;
@@ -902,9 +896,10 @@ dpt_scsi_cmd(xs)
 
 	/* Cmds must be no more than 12 bytes for us */
 	if (xs->cmdlen > 12) {
-		splx(s);
 		xs->error = XS_DRIVER_STUFFUP;
-		return (COMPLETE);
+		scsi_done(xs);
+		splx(s);
+		return;
 	}
 
 		/* XXX we can't reset devices just yet */
@@ -914,9 +909,10 @@ dpt_scsi_cmd(xs)
 #ifdef __OpenBSD__
 		if ((xs->flags & SCSI_RESET) != 0) {
 #endif /* __OpenBSD__ */
-			splx(s);
 			xs->error = XS_DRIVER_STUFFUP;
-			return (COMPLETE);
+			scsi_done(xs);
+			splx(s);
+			return;
 		}
 
 	/* Get a CCB */
@@ -926,8 +922,10 @@ dpt_scsi_cmd(xs)
 #ifdef __OpenBSD__
 	if ((ccb = dpt_alloc_ccb(sc, xs->flags)) == NULL) {
 #endif /* __OpenBSD__ */
+		xs->error = XS_NO_CCB;
+		scsi_done(xs);
 		splx(s);
-		return (NO_CCB);
+		return;
 	}
 
 	splx(s);
@@ -1001,7 +999,8 @@ dpt_scsi_cmd(xs)
 		
 			xs->error = XS_DRIVER_STUFFUP;
 			dpt_free_ccb(sc, ccb);
-			return (COMPLETE);
+			scsi_done(xs);
+			return;
 		}
 
 		bus_dmamap_sync(dmat, xfer, 0, xfer->dm_mapsize,
@@ -1054,11 +1053,13 @@ dpt_scsi_cmd(xs)
 	if (dpt_cmd(sc, &ccb->ccb_eata_cp, ccb->ccb_ccbpa, CP_DMA_CMD, 0)) {
 		printf("%s: dpt_cmd failed\n", sc->sc_dv.dv_xname);
 		dpt_free_ccb(sc, ccb);
-		return (TRY_AGAIN_LATER);
+		xs->error = XS_NO_CCB;
+		scsi_done(xs);
+		return;
 	}
 
 	if ((xs->flags & SCSI_POLL) == 0)
-		return (SUCCESSFULLY_QUEUED);
+		return;
 
 	/* Don't wait longer than this single command wants to wait */
 	if (dpt_poll(sc, ccb)) {
@@ -1071,8 +1072,6 @@ dpt_scsi_cmd(xs)
 	s = splbio();
 	dpt_done_ccb(sc, ccb);
 	splx(s);
-
-	return (COMPLETE);
 }
 
 /*

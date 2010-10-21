@@ -1,4 +1,4 @@
-/*	$OpenBSD: dsrtc.c,v 1.3 2009/04/20 20:31:06 miod Exp $ */
+/*	$OpenBSD: dsrtc.c,v 1.11 2009/11/07 14:49:01 miod Exp $ */
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -31,32 +31,35 @@
 #include <sys/systm.h>
 #include <sys/device.h>
 
-#include <dev/ic/ds1687reg.h>
-
 #include <machine/autoconf.h>
 #include <machine/bus.h>
+
+#include <dev/ic/ds1687reg.h>
+#define	todr_chip_handle_t void *	/* XXX that's just to eat prototypes */
+#include <dev/ic/mk48txxreg.h>
 
 #include <mips64/archtype.h>
 #include <mips64/dev/clockvar.h>
 
-#include <sgi/localbus/macebus.h>
+#include <sgi/dev/dsrtcvar.h>
+#include <sgi/localbus/macebusvar.h>
 #include <sgi/pci/iocreg.h>
 #include <sgi/pci/iocvar.h>
-
-bus_space_handle_t clock_h;	/* XXX */
+#include <sgi/pci/iofvar.h>
 
 struct	dsrtc_softc {
 	struct device		sc_dev;
 	bus_space_tag_t		sc_clkt;
 	bus_space_handle_t	sc_clkh, sc_clkh2;
+	int			sc_yrbase;
 
 	int			(*read)(struct dsrtc_softc *, int);
 	void			(*write)(struct dsrtc_softc *, int, int);
 };
 
-int	dsrtc_match_ioc(struct device *, void *, void *);
+int	dsrtc_match(struct device *, void *, void *);
 void	dsrtc_attach_ioc(struct device *, struct device *, void *);
-int	dsrtc_match_macebus(struct device *, void *, void *);
+void	dsrtc_attach_iof(struct device *, struct device *, void *);
 void	dsrtc_attach_macebus(struct device *, struct device *, void *);
 
 struct cfdriver dsrtc_cd = {
@@ -64,96 +67,51 @@ struct cfdriver dsrtc_cd = {
 };
 
 struct cfattach dsrtc_macebus_ca = {
-	sizeof(struct dsrtc_softc), dsrtc_match_macebus, dsrtc_attach_macebus
+	sizeof(struct dsrtc_softc), dsrtc_match, dsrtc_attach_macebus
 };
 
 struct cfattach dsrtc_ioc_ca = {
-	sizeof(struct dsrtc_softc), dsrtc_match_ioc, dsrtc_attach_ioc
+	sizeof(struct dsrtc_softc), dsrtc_match, dsrtc_attach_ioc
+};
+
+struct cfattach dsrtc_iof_ca = {
+	sizeof(struct dsrtc_softc), dsrtc_match, dsrtc_attach_ioc
 };
 
 int	ip32_dsrtc_read(struct dsrtc_softc *, int);
 void	ip32_dsrtc_write(struct dsrtc_softc *, int, int);
-int	ip30_dsrtc_read(struct dsrtc_softc *, int);
-void	ip30_dsrtc_write(struct dsrtc_softc *, int, int);
+int	ioc_ds1687_dsrtc_read(struct dsrtc_softc *, int);
+void	ioc_ds1687_dsrtc_write(struct dsrtc_softc *, int, int);
 
 void	ds1687_get(void *, time_t, struct tod_time *);
 void	ds1687_set(void *, struct tod_time *);
+void	ds1742_get(void *, time_t, struct tod_time *);
+void	ds1742_set(void *, struct tod_time *);
 
-static inline int frombcd(int);
-static inline int tobcd(int);
+static inline int frombcd(int, int);
+static inline int tobcd(int, int);
 static inline int
-frombcd(int x)
+frombcd(int x, int binary)
 {
-	return (x >> 4) * 10 + (x & 0xf);
+	return binary ? x : (x >> 4) * 10 + (x & 0xf);
 }
 static inline int
-tobcd(int x)
+tobcd(int x, int binary)
 {
-	return (x / 10 * 16) + (x % 10);
+	return binary ? x : (x / 10 * 16) + (x % 10);
 }
 
 int
-dsrtc_match_ioc(struct device *parent, void *match, void *aux)
+dsrtc_match(struct device *parent, void *match, void *aux)
 {
-	struct ioc_attach_args *iaa = aux;
-	bus_space_handle_t ih, ih2;
-	uint c, c2, c3;
-	int rc = 0;
-
 	/*
-	 * The IOC3 RTC is either a Dallas (now Maxim) DS1386 or compatible
-	 * (likely a more recent DS1687), or a Mostek (now SGS Thomson)
-	 * MK48T35.
+	 * Depending on what dsrtc attaches to, the actual attach_args
+	 * may be a different struct, but all of them start with the
+	 * same name field.
 	 */
+	struct mainbus_attach_args *maa = aux;
 
-	if (bus_space_map(iaa->iaa_memt, IOC3_BYTEBUS_1, 1, 0, &ih) != 0)
-		return 0;
-
-	if (bus_space_map(iaa->iaa_memt, IOC3_BYTEBUS_2, 1, 0, &ih2) != 0)
-		goto unmap;
-
-	/*
-	 * Check the low 4 bits of control register C. If any is set,
-	 * or if the values written to them stick, then this is not
-	 * a Dallas chip.
-	 *
-	 * Note that the value we read the next few times can't be
-	 * compared to the first value read, as the upper four bits
-	 * are cleared by reading them. And might get set again
-	 * between two reads.
-	 */
-
-	bus_space_write_1(iaa->iaa_memt, ih, 0, DS1687_CTRL_C);
-	c = bus_space_read_1(iaa->iaa_memt, ih2, 0);
-	if ((c & 0x0f) != 0)
-		goto done;
-
-	bus_space_write_1(iaa->iaa_memt, ih, 0, DS1687_CTRL_C);
-	bus_space_write_1(iaa->iaa_memt, ih2, 0, c | 0x0f);
-
-	bus_space_write_1(iaa->iaa_memt, ih, 0, DS1687_CTRL_C);
-	c2 = bus_space_read_1(iaa->iaa_memt, ih2, 0);
-	if ((c2 & 0x0f) == 0)
-		rc = 1;
-	
-	bus_space_write_1(iaa->iaa_memt, ih, 0, DS1687_CTRL_C);
-	bus_space_write_1(iaa->iaa_memt, ih2, 0, c2 | 0x0f);
-
-	bus_space_write_1(iaa->iaa_memt, ih, 0, DS1687_CTRL_C);
-	c3 = bus_space_read_1(iaa->iaa_memt, ih2, 0);
-	if ((c3 & 0x0f) != 0)
-		rc = 0;
-
-	/* write back first value read in case this is not a Dallas chip */
-	bus_space_write_1(iaa->iaa_memt, ih, 0, DS1687_CTRL_C);
-	bus_space_write_1(iaa->iaa_memt, ih2, 0, c);
-	
-done:
-	bus_space_unmap(iaa->iaa_memt, ih2, 1);
-unmap:
-	bus_space_unmap(iaa->iaa_memt, ih, 1);
-
-	return rc;
+	return strcmp(maa->maa_name, dsrtc_cd.cd_name) == 0;
 }
 
 void
@@ -161,38 +119,124 @@ dsrtc_attach_ioc(struct device *parent, struct device *self, void *aux)
 {
 	struct dsrtc_softc *sc = (void *)self;
 	struct ioc_attach_args *iaa = aux;
+	bus_space_handle_t ih, ih2;
+
+	/*
+	 * The IOC3 RTC is either a Dallas (now Maxim) DS1386 or compatible
+	 * (likely a more recent DS1687), or a DS1747 or compatible
+	 * (itself being a Mostek MK48T35 clone).
+	 *
+	 * Surprisingly, the chip found on Fuel has a DS1742W label,
+	 * which has much less memory than the DS1747. I guess whatever
+	 * the chip is, it is mapped to the end of the DS1747 address
+	 * space, so that the clock registers always appear at the same
+	 * addresses in memory.
+	 */
 
 	sc->sc_clkt = iaa->iaa_memt;
-	if (bus_space_map(sc->sc_clkt, IOC3_BYTEBUS_1, 1, 0, &sc->sc_clkh) ||
-	    bus_space_map(sc->sc_clkt, IOC3_BYTEBUS_2, 1, 0, &sc->sc_clkh2)) {
-		printf(": can't map registers\n");
-		return;
+
+	if (iaa->iaa_base != IOC3_BYTEBUS_0) {
+		/* DS1687 */
+
+		if (bus_space_subregion(iaa->iaa_memt, iaa->iaa_memh,
+		    IOC3_BYTEBUS_1, 1, &ih) != 0 ||
+		    bus_space_subregion(iaa->iaa_memt, iaa->iaa_memh,
+		    IOC3_BYTEBUS_2, 1, &ih2) != 0)
+			goto fail;
+
+		printf(": DS1687\n");
+
+		sc->sc_clkh = ih;
+		sc->sc_clkh2 = ih2;
+
+		sc->read = ioc_ds1687_dsrtc_read;
+		sc->write = ioc_ds1687_dsrtc_write;
+
+		sys_tod.tod_get = ds1687_get;
+		sys_tod.tod_set = ds1687_set;
+	} else {
+		/* DS1742W */
+
+		bus_space_unmap(iaa->iaa_memt, ih, 1);
+		bus_space_unmap(iaa->iaa_memt, ih2, 1);
+
+		if (bus_space_subregion(iaa->iaa_memt, iaa->iaa_memh,
+		    iaa->iaa_base + MK48T35_CLKOFF,
+		    MK48T35_CLKSZ - MK48T35_CLKOFF, &ih) != 0)
+			goto fail;
+
+		printf(": DS1742W\n");
+
+		sc->sc_clkh = ih;
+
+		/*
+		 * For some reason, the base year differs between IP27
+		 * and IP35.
+		 */
+		sc->sc_yrbase = sys_config.system_type == SGI_IP35 ?
+		    POSIX_BASE_YEAR - 2 : POSIX_BASE_YEAR;
+		/* mips64 clock code expects year relative to 1900 */
+		sc->sc_yrbase -= 1900;
+
+		sys_tod.tod_get = ds1742_get;
+		sys_tod.tod_set = ds1742_set;
 	}
-
-	printf(": DS1687\n");
-
-	sc->read = ip30_dsrtc_read;
-	sc->write = ip30_dsrtc_write;
-
 	sys_tod.tod_cookie = self;
-	sys_tod.tod_get = ds1687_get;
-	sys_tod.tod_set = ds1687_set;
+
+	return;
+
+fail:
+	printf(": can't map registers\n");
 }
 
-int
-dsrtc_match_macebus(struct device *parent, void *match, void *aux)
+void
+dsrtc_attach_iof(struct device *parent, struct device *self, void *aux)
 {
-	return 1;
+	struct dsrtc_softc *sc = (void *)self;
+	struct iof_attach_args *iaa = aux;
+	bus_space_handle_t ih;
+
+	/*
+	 * The IOC4 RTC is a DS1747 or compatible (itself being a Mostek
+	 * MK48T35 clone).
+	 */
+
+	if (bus_space_subregion(iaa->iaa_memt, iaa->iaa_memh,
+	    iaa->iaa_base + MK48T35_CLKOFF,
+	    MK48T35_CLKSZ - MK48T35_CLKOFF, &ih) != 0)
+		goto fail;
+
+	printf(": DS1742W\n");
+
+	sc->sc_clkh = ih;
+
+	/*
+	 * For some reason, the base year differs between IP27
+	 * and IP35.
+	 */
+	sc->sc_yrbase = sys_config.system_type == SGI_IP35 ?
+	    POSIX_BASE_YEAR - 2 : POSIX_BASE_YEAR;
+	/* mips64 clock code expects year relative to 1900 */
+	sc->sc_yrbase -= 1900;
+
+	sys_tod.tod_cookie = self;
+	sys_tod.tod_get = ds1742_get;
+	sys_tod.tod_set = ds1742_set;
+
+	return;
+
+fail:
+	printf(": can't map registers\n");
 }
 
 void
 dsrtc_attach_macebus(struct device *parent, struct device *self, void *aux)
 {
 	struct dsrtc_softc *sc = (void *)self;
-	struct confargs *ca = aux;
+	struct macebus_attach_args *maa = aux;
 
-	sc->sc_clkt = ca->ca_iot;
-	if (bus_space_map(sc->sc_clkt, MACE_ISA_RTC_OFFS, 128*256, 0,
+	sc->sc_clkt = maa->maa_iot;
+	if (bus_space_map(sc->sc_clkt, maa->maa_baseaddr, 128 * 256, 0,
 	    &sc->sc_clkh)) {
 		printf(": can't map registers\n");
 		return;
@@ -206,13 +250,6 @@ dsrtc_attach_macebus(struct device *parent, struct device *self, void *aux)
 	sys_tod.tod_cookie = self;
 	sys_tod.tod_get = ds1687_get;
 	sys_tod.tod_set = ds1687_set;
-
-	/*
-	 * XXX Expose the clock address space so that it can be used
-	 * outside of clock(4). This is rather inelegant, however it
-	 * will have to do for now...
-	 */
-	clock_h = sc->sc_clkh;
 }
 
 int
@@ -228,44 +265,48 @@ ip32_dsrtc_write(struct dsrtc_softc *sc, int reg, int val)
 }
 
 int
-ip30_dsrtc_read(struct dsrtc_softc *sc, int reg)
+ioc_ds1687_dsrtc_read(struct dsrtc_softc *sc, int reg)
 {
 	bus_space_write_1(sc->sc_clkt, sc->sc_clkh, 0, reg);
 	return bus_space_read_1(sc->sc_clkt, sc->sc_clkh2, 0);
 }
 
 void
-ip30_dsrtc_write(struct dsrtc_softc *sc, int reg, int val)
+ioc_ds1687_dsrtc_write(struct dsrtc_softc *sc, int reg, int val)
 {
 	bus_space_write_1(sc->sc_clkt, sc->sc_clkh, 0, reg);
 	bus_space_write_1(sc->sc_clkt, sc->sc_clkh2, 0, val);
 }
 
 /*
- * Dallas clock driver.
+ * Dallas DS1687 clock driver.
  */
+
 void
 ds1687_get(void *v, time_t base, struct tod_time *ct)
 {
 	struct dsrtc_softc *sc = v;
-	int ctrl, century;
+	int ctrl, century, dm;
 
 	/* Select bank 1. */
 	ctrl = (*sc->read)(sc, DS1687_CTRL_A);
 	(*sc->write)(sc, DS1687_CTRL_A, ctrl | DS1687_BANK_1);
+
+	/* Figure out which data mode to use. */
+	dm = (*sc->read)(sc, DS1687_CTRL_B) & DS1687_DM_1;
 
 	/* Wait for no update in progress. */
 	while ((*sc->read)(sc, DS1687_CTRL_A) & DS1687_UIP)
 		/* Do nothing. */;
 
 	/* Read the RTC. */
-	ct->sec = frombcd((*sc->read)(sc, DS1687_SEC));
-	ct->min = frombcd((*sc->read)(sc, DS1687_MIN));
-	ct->hour = frombcd((*sc->read)(sc, DS1687_HOUR));
-	ct->day = frombcd((*sc->read)(sc, DS1687_DAY));
-	ct->mon = frombcd((*sc->read)(sc, DS1687_MONTH));
-	ct->year = frombcd((*sc->read)(sc, DS1687_YEAR));
-	century = frombcd((*sc->read)(sc, DS1687_CENTURY));
+	ct->sec = frombcd((*sc->read)(sc, DS1687_SEC), dm);
+	ct->min = frombcd((*sc->read)(sc, DS1687_MIN), dm);
+	ct->hour = frombcd((*sc->read)(sc, DS1687_HOUR), dm);
+	ct->day = frombcd((*sc->read)(sc, DS1687_DAY), dm);
+	ct->mon = frombcd((*sc->read)(sc, DS1687_MONTH), dm);
+	ct->year = frombcd((*sc->read)(sc, DS1687_YEAR), dm);
+	century = frombcd((*sc->read)(sc, DS1687_CENTURY), dm);
 
 	ct->year += 100 * (century - 19);
 }
@@ -274,7 +315,7 @@ void
 ds1687_set(void *v, struct tod_time *ct)
 {
 	struct dsrtc_softc *sc = v;
-	int year, century, ctrl;
+	int year, century, ctrl, dm;
 
 	century = ct->year / 100 + 19;
 	year = ct->year % 100;
@@ -283,25 +324,124 @@ ds1687_set(void *v, struct tod_time *ct)
 	ctrl = (*sc->read)(sc, DS1687_CTRL_A);
 	(*sc->write)(sc, DS1687_CTRL_A, ctrl | DS1687_BANK_1);
 
-	/* Select data mode 0 (BCD) and 24 hour time. */
+	/* Figure out which data mode to use, and select 24 hour time. */
 	ctrl = (*sc->read)(sc, DS1687_CTRL_B);
-	(*sc->write)(sc, DS1687_CTRL_B,
-	    (ctrl & ~DS1687_DM_1) | DS1687_24_HR);
+	dm = ctrl & DS1687_DM_1;
+	(*sc->write)(sc, DS1687_CTRL_B, ctrl | DS1687_24_HR);
 
 	/* Prevent updates. */
 	ctrl = (*sc->read)(sc, DS1687_CTRL_B);
 	(*sc->write)(sc, DS1687_CTRL_B, ctrl | DS1687_SET_CLOCK);
 
 	/* Update the RTC. */
-	(*sc->write)(sc, DS1687_SEC, tobcd(ct->sec));
-	(*sc->write)(sc, DS1687_MIN, tobcd(ct->min));
-	(*sc->write)(sc, DS1687_HOUR, tobcd(ct->hour));
-	(*sc->write)(sc, DS1687_DOW, tobcd(ct->dow));
-	(*sc->write)(sc, DS1687_DAY, tobcd(ct->day));
-	(*sc->write)(sc, DS1687_MONTH, tobcd(ct->mon));
-	(*sc->write)(sc, DS1687_YEAR, tobcd(year));
-	(*sc->write)(sc, DS1687_CENTURY, tobcd(century));
+	(*sc->write)(sc, DS1687_SEC, tobcd(ct->sec, dm));
+	(*sc->write)(sc, DS1687_MIN, tobcd(ct->min, dm));
+	(*sc->write)(sc, DS1687_HOUR, tobcd(ct->hour, dm));
+	(*sc->write)(sc, DS1687_DOW, tobcd(ct->dow, dm));
+	(*sc->write)(sc, DS1687_DAY, tobcd(ct->day, dm));
+	(*sc->write)(sc, DS1687_MONTH, tobcd(ct->mon, dm));
+	(*sc->write)(sc, DS1687_YEAR, tobcd(year, dm));
+	(*sc->write)(sc, DS1687_CENTURY, tobcd(century, dm));
 
 	/* Enable updates. */
 	(*sc->write)(sc, DS1687_CTRL_B, ctrl);
+}
+
+/*
+ * Dallas DS1742 clock driver.
+ */
+
+void
+ds1742_get(void *v, time_t base, struct tod_time *ct)
+{
+	struct dsrtc_softc *sc = v;
+	int csr;
+
+	/* Freeze update. */
+	csr = bus_space_read_1(sc->sc_clkt, sc->sc_clkh, MK48TXX_ICSR);
+	csr |= MK48TXX_CSR_READ;
+	bus_space_write_1(sc->sc_clkt, sc->sc_clkh, MK48TXX_ICSR, csr);
+
+	/* Read the RTC. */
+	ct->sec = frombcd(bus_space_read_1(sc->sc_clkt, sc->sc_clkh,
+	    MK48TXX_ISEC), 0);
+	ct->min = frombcd(bus_space_read_1(sc->sc_clkt, sc->sc_clkh,
+	    MK48TXX_IMIN), 0);
+	ct->hour = frombcd(bus_space_read_1(sc->sc_clkt, sc->sc_clkh,
+	    MK48TXX_IHOUR), 0);
+	ct->day = frombcd(bus_space_read_1(sc->sc_clkt, sc->sc_clkh,
+	    MK48TXX_IDAY), 0);
+	ct->mon = frombcd(bus_space_read_1(sc->sc_clkt, sc->sc_clkh,
+	    MK48TXX_IMON), 0);
+	ct->year = frombcd(bus_space_read_1(sc->sc_clkt, sc->sc_clkh,
+	    MK48TXX_IYEAR), 0) + sc->sc_yrbase;
+
+	/* Enable updates again. */
+	csr = bus_space_read_1(sc->sc_clkt, sc->sc_clkh, MK48TXX_ICSR);
+	csr &= ~MK48TXX_CSR_READ;
+	bus_space_write_1(sc->sc_clkt, sc->sc_clkh, MK48TXX_ICSR, csr);
+}
+
+void
+ds1742_set(void *v, struct tod_time *ct)
+{
+	struct dsrtc_softc *sc = v;
+	int csr;
+
+	/* Enable write. */
+	csr = bus_space_read_1(sc->sc_clkt, sc->sc_clkh, MK48TXX_ICSR);
+	csr |= MK48TXX_CSR_WRITE;
+	bus_space_write_1(sc->sc_clkt, sc->sc_clkh, MK48TXX_ICSR, csr);
+
+	/* Update the RTC. */
+	bus_space_write_1(sc->sc_clkt, sc->sc_clkh, MK48TXX_ISEC,
+	    tobcd(ct->sec, 0));
+	bus_space_write_1(sc->sc_clkt, sc->sc_clkh, MK48TXX_IMIN,
+	    tobcd(ct->min, 0));
+	bus_space_write_1(sc->sc_clkt, sc->sc_clkh, MK48TXX_IHOUR,
+	    tobcd(ct->hour, 0));
+	bus_space_write_1(sc->sc_clkt, sc->sc_clkh, MK48TXX_IWDAY,
+	    tobcd(ct->dow, 0));
+	bus_space_write_1(sc->sc_clkt, sc->sc_clkh, MK48TXX_IDAY,
+	    tobcd(ct->day, 0));
+	bus_space_write_1(sc->sc_clkt, sc->sc_clkh, MK48TXX_IMON,
+	    tobcd(ct->mon, 0));
+	bus_space_write_1(sc->sc_clkt, sc->sc_clkh, MK48TXX_IYEAR,
+	    tobcd(ct->year - sc->sc_yrbase, 0));
+
+	/* Load new values. */
+	csr = bus_space_read_1(sc->sc_clkt, sc->sc_clkh, MK48TXX_ICSR);
+	csr &= ~MK48TXX_CSR_WRITE;
+	bus_space_write_1(sc->sc_clkt, sc->sc_clkh, MK48TXX_ICSR, csr);
+}
+
+/*
+ * Routines allowing external access to the RTC registers, used by
+ * power(4).
+ */
+
+int
+dsrtc_register_read(int reg)
+{
+	struct dsrtc_softc *sc;
+
+	if (dsrtc_cd.cd_ndevs == 0 ||
+	    (sc = (struct dsrtc_softc *)dsrtc_cd.cd_devs[0]) == NULL ||
+	    sc->read == NULL)
+		return -1;
+
+	return (*sc->read)(sc, reg);
+}
+
+void
+dsrtc_register_write(int reg, int val)
+{
+	struct dsrtc_softc *sc;
+
+	if (dsrtc_cd.cd_ndevs == 0 ||
+	    (sc = (struct dsrtc_softc *)dsrtc_cd.cd_devs[0]) == NULL ||
+	    sc->write == NULL)
+		return;
+
+	(*sc->write)(sc, reg, val);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: adw.c,v 1.38 2009/02/16 21:19:06 miod Exp $ */
+/*	$OpenBSD: adw.c,v 1.48 2010/10/03 21:23:35 krw Exp $ */
 /* $NetBSD: adw.c,v 1.23 2000/05/27 18:24:50 dante Exp $	 */
 
 /*
@@ -41,7 +41,6 @@
 #include <sys/malloc.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/timeout.h>
 
 #include <machine/bus.h>
@@ -54,23 +53,19 @@
 #include <dev/microcode/adw/adwmcode.h>
 #include <dev/ic/adw.h>
 
-#ifndef DDB
-#define	Debugger()	panic("should call debugger here (adw.c)")
-#endif				/* ! DDB */
-
 /******************************************************************************/
 
 
 int adw_alloc_controls(ADW_SOFTC *);
 int adw_alloc_carriers(ADW_SOFTC *);
 int adw_create_ccbs(ADW_SOFTC *, ADW_CCB *, int);
-void adw_free_ccb(ADW_SOFTC *, ADW_CCB *);
+void adw_ccb_free(void *, void *);
 void adw_reset_ccb(ADW_CCB *);
 int adw_init_ccb(ADW_SOFTC *, ADW_CCB *);
-ADW_CCB *adw_get_ccb(ADW_SOFTC *, int);
+void *adw_ccb_alloc(void *);
 int adw_queue_ccb(ADW_SOFTC *, ADW_CCB *, int);
 
-int adw_scsi_cmd(struct scsi_xfer *);
+void adw_scsi_cmd(struct scsi_xfer *);
 int adw_build_req(struct scsi_xfer *, ADW_CCB *, int);
 void adw_build_sglist(ADW_CCB *, ADW_SCSI_REQ_Q *, ADW_SG_BLOCK *);
 void adw_minphys(struct buf *, struct scsi_link *);
@@ -91,16 +86,6 @@ struct cfdriver adw_cd = {
 	NULL, "adw", DV_DULL
 };
 
-/* the below structure is so we have a default dev struct for our link struct */
-struct scsi_device adw_dev =
-{
-	NULL,			/* Use default error handler */
-	NULL,			/* have a queue, served by this */
-	NULL,			/* have no async handler */
-	NULL,			/* Use default 'done' routine */
-};
-
-
 /******************************************************************************/
 /*                       DMA Mapping for Control Blocks                       */
 /******************************************************************************/
@@ -117,7 +102,7 @@ adw_alloc_controls(sc)
          * Allocate the control structure.
          */
 	if ((error = bus_dmamem_alloc(sc->sc_dmat, sizeof(struct adw_control),
-			   NBPG, 0, &seg, 1, &rseg, BUS_DMA_NOWAIT)) != 0) {
+	    NBPG, 0, &seg, 1, &rseg, BUS_DMA_NOWAIT | BUS_DMA_ZERO)) != 0) {
 		printf("%s: unable to allocate control structures,"
 		       " error = %d\n", sc->sc_dev.dv_xname, error);
 		return (error);
@@ -245,25 +230,17 @@ adw_create_ccbs(sc, ccbstore, count)
  * A ccb is put onto the free list.
  */
 void
-adw_free_ccb(sc, ccb)
-	ADW_SOFTC      *sc;
-	ADW_CCB        *ccb;
+adw_ccb_free(xsc, xccb)
+	void *xsc, *xccb;
 {
-	int             s;
-
-	s = splbio();
+	ADW_SOFTC *sc = xsc;
+	ADW_CCB *ccb = xccb;
 
 	adw_reset_ccb(ccb);
+
+	mtx_enter(&sc->sc_ccb_mtx);
 	TAILQ_INSERT_HEAD(&sc->sc_free_ccb, ccb, chain);
-
-	/*
-         * If there were none, wake anybody waiting for one to come free,
-         * starting with queued entries.
-         */
-	if (TAILQ_NEXT(ccb, chain) == NULL)
-		wakeup(&sc->sc_free_ccb);
-
-	splx(s);
+	mtx_leave(&sc->sc_ccb_mtx);
 }
 
 
@@ -315,36 +292,21 @@ adw_init_ccb(sc, ccb)
  *
  * If there are none, see if we can allocate a new one
  */
-ADW_CCB *
-adw_get_ccb(sc, flags)
-	ADW_SOFTC      *sc;
-	int             flags;
+void *
+adw_ccb_alloc(xsc)
+	void *xsc;
 {
-	ADW_CCB        *ccb = 0;
-	int             s;
+	ADW_SOFTC *sc = xsc;
+	ADW_CCB *ccb;
 
-	s = splbio();
-
-	/*
-         * If we can and have to, sleep waiting for one to come free
-         * but only if we can't allocate a new one.
-         */
-	for (;;) {
-		ccb = TAILQ_FIRST(&sc->sc_free_ccb);
-		if (ccb) {
-			TAILQ_REMOVE(&sc->sc_free_ccb, ccb, chain);
-			break;
-		}
-		if ((flags & SCSI_NOSLEEP) != 0)
-			goto out;
-
-		tsleep(&sc->sc_free_ccb, PRIBIO, "adwccb", 0);
+	mtx_enter(&sc->sc_ccb_mtx);
+	ccb = TAILQ_FIRST(&sc->sc_free_ccb);
+	if (ccb) {
+		TAILQ_REMOVE(&sc->sc_free_ccb, ccb, chain);
+		ccb->flags |= CCB_ALLOC;
 	}
+	mtx_leave(&sc->sc_ccb_mtx);
 
-	ccb->flags |= CCB_ALLOC;
-
-out:
-	splx(s);
 	return (ccb);
 }
 
@@ -470,6 +432,8 @@ adw_attach(sc)
 	TAILQ_INIT(&sc->sc_waiting_ccb);
 	TAILQ_INIT(&sc->sc_pending_ccb);
 
+	mtx_init(&sc->sc_ccb_mtx, IPL_BIO);
+	scsi_iopool_init(&sc->sc_iopool, sc, adw_ccb_alloc, adw_ccb_free);
 
 	/*
          * Allocate the Control Blocks.
@@ -477,8 +441,6 @@ adw_attach(sc)
 	error = adw_alloc_controls(sc);
 	if (error)
 		return; /* (error) */ ;
-
-	bzero(sc->sc_control, sizeof(struct adw_control));
 
 	/*
 	 * Create and initialize the Control Blocks.
@@ -569,9 +531,9 @@ adw_attach(sc)
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = sc->chip_scsi_id;
 	sc->sc_link.adapter = &sc->sc_adapter;
-	sc->sc_link.device = &adw_dev;
 	sc->sc_link.openings = 4;
 	sc->sc_link.adapter_buswidth = ADW_MAX_TID+1;
+	sc->sc_link.pool = &sc->sc_iopool;
 
 	bzero(&saa, sizeof(saa));
 	saa.saa_sc_link = &sc->sc_link;
@@ -594,7 +556,7 @@ adw_minphys(struct buf *bp, struct scsi_link *sl)
  * start a scsi operation given the command and the data address.
  * Also needs the unit, target and lu.
  */
-int
+void
 adw_scsi_cmd(xs)
 	struct scsi_xfer *xs;
 {
@@ -603,8 +565,6 @@ adw_scsi_cmd(xs)
 	ADW_CCB        *ccb;
 	int             s, nowait = 0, retry = 0;
 	int		flags;
-
-	s = splbio();		/* protect the queue */
 
 	/*
          * get a ccb to use. If the transfer
@@ -615,11 +575,7 @@ adw_scsi_cmd(xs)
 	flags = xs->flags;
 	if (nowait)
 		flags |= SCSI_NOSLEEP;
-	if ((ccb = adw_get_ccb(sc, flags)) == NULL) {
-		splx(s);
-		return (NO_CCB);
-	}
-	splx(s);		/* done playing with the queue */
+	ccb = xs->io;
 
 	ccb->xs = xs;
 	ccb->timeout = xs->timeout;
@@ -636,14 +592,15 @@ retryagain:
 
 		case ADW_ERROR:
 			xs->error = XS_DRIVER_STUFFUP;
-			return (COMPLETE);
+			scsi_done(xs);
+			return;
 		}
 
 		/*
 	         * Usually return SUCCESSFULLY QUEUED
 	         */
 		if ((xs->flags & SCSI_POLL) == 0)
-			return (SUCCESSFULLY_QUEUED);
+			return;
 
 		/*
 	         * If we can't use interrupts, poll on completion
@@ -653,8 +610,10 @@ retryagain:
 			if (adw_poll(sc, xs, ccb->timeout))
 				adw_timeout(ccb);
 		}
+	} else {
+		/* adw_build_req() has set xs->error already */
+		scsi_done(xs);
 	}
-	return (COMPLETE);
 }
 
 
@@ -691,10 +650,9 @@ adw_build_req(xs, ccb, flags)
 	 * For wide  boards a CDB length maximum of 16 bytes
 	 * is supported.
 	 */
-	bcopy(xs->cmd, &scsiqp->cdb, ((scsiqp->cdb_len = xs->cmdlen) <= 12)?
-			xs->cmdlen : 12 );
-	if(xs->cmdlen > 12)
-		bcopy(&(xs->cmd[12]),  &scsiqp->cdb16, xs->cmdlen - 12);
+	scsiqp->cdb_len = xs->cmdlen;
+	bcopy((caddr_t)xs->cmd, &scsiqp->cdb, 12);
+	bcopy((caddr_t)xs->cmd + 12, &scsiqp->cdb16, 4);
 
 	scsiqp->target_id = sc_link->target;
 	scsiqp->target_lun = sc_link->lun;
@@ -728,7 +686,6 @@ adw_build_req(xs, ccb, flags)
 			}
 
 			xs->error = XS_DRIVER_STUFFUP;
-			adw_free_ccb(sc, ccb);
 			return (0);
 		}
 		bus_dmamap_sync(dmat, ccb->dmamap_xfer,
@@ -1058,10 +1015,8 @@ adw_isr_callback(sc, scsiq)
 	TAILQ_REMOVE(&sc->sc_pending_ccb, ccb, chain);
 
 	if ((ccb->flags & CCB_ALLOC) == 0) {
-		printf("%s: unallocated ccb found on pending list!\n",
+		panic("%s: unallocated ccb found on pending list!",
 		    sc->sc_dev.dv_xname);
-		Debugger();
-		adw_free_ccb(sc, ccb);
 		return;
 	}
 
@@ -1221,9 +1176,6 @@ NO_ERROR:
 		break;
 	}
 
-	adw_free_ccb(sc, ccb);
-
-	xs->flags |= ITSDONE;
 	scsi_done(xs);
 }
 

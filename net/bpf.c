@@ -1,4 +1,4 @@
-/*	$OpenBSD: bpf.c,v 1.71 2008/11/26 18:01:43 dlg Exp $	*/
+/*	$OpenBSD: bpf.c,v 1.76 2010/09/21 04:06:37 henning Exp $	*/
 /*	$NetBSD: bpf.c,v 1.33 1997/02/21 23:59:35 thorpej Exp $	*/
 
 /*
@@ -64,6 +64,11 @@
 #include <net/if_vlan_var.h>
 #endif
 
+#include "pflog.h"
+#if NPFLOG > 0
+#include <net/if_pflog.h>
+#endif
+
 #define BPF_BUFSIZE 32768
 
 #define PRINET  26			/* interruptible */
@@ -95,7 +100,7 @@ void	bpf_detachd(struct bpf_d *);
 int	bpf_setif(struct bpf_d *, struct ifreq *);
 int	bpfpoll(dev_t, int, struct proc *);
 int	bpfkqfilter(dev_t, struct knote *);
-static __inline void bpf_wakeup(struct bpf_d *);
+void	bpf_wakeup(struct bpf_d *);
 void	bpf_catchpacket(struct bpf_d *, u_char *, size_t, size_t,
 	    void (*)(const void *, void *, size_t));
 void	bpf_reset_d(struct bpf_d *);
@@ -495,7 +500,7 @@ bpfread(dev_t dev, struct uio *uio, int ioflag)
 /*
  * If there are processes sleeping on this descriptor, wake them up.
  */
-static __inline void
+void
 bpf_wakeup(struct bpf_d *d)
 {
 	wakeup((caddr_t)d);
@@ -506,7 +511,6 @@ bpf_wakeup(struct bpf_d *d)
 	selwakeup(&d->bd_sel);
 	/* XXX */
 	d->bd_sel.si_selpid = 0;
-	KNOTE(&d->bd_sel.si_note, 0);
 }
 
 int
@@ -539,6 +543,8 @@ bpfwrite(dev_t dev, struct uio *uio, int ioflag)
 		m_freem(m);
 		return (EMSGSIZE);
 	}
+
+	m->m_pkthdr.rdomain = ifp->if_rdomain;
 
 	if (d->bd_hdrcmplt)
 		dst.ss_family = pseudo_AF_HDRCMPLT;
@@ -1070,6 +1076,7 @@ bpfkqfilter(dev_t dev, struct knote *kn)
 	kn->kn_hook = (caddr_t)((u_long)dev);
 
 	s = splnet();
+	D_GET(d);
 	SLIST_INSERT_HEAD(klist, kn, kn_selnext);
 	splx(s);
 
@@ -1086,6 +1093,7 @@ filt_bpfrdetach(struct knote *kn)
 	d = bpfilter_lookup(minor(dev));
 	s = splnet();
 	SLIST_REMOVE(&d->bd_sel.si_note, kn, knote, kn_selnext);
+	D_PUT(d);
 	splx(s);
 }
 
@@ -1287,6 +1295,45 @@ bpf_mtap_ether(caddr_t arg, struct mbuf *m, u_int direction)
 	m->m_data -= ETHER_HDR_LEN;
 #endif
 }
+
+void
+bpf_mtap_pflog(caddr_t arg, caddr_t data, struct mbuf *m)
+{
+#if NPFLOG > 0
+	struct m_hdr mh;
+	struct bpf_if *bp = (struct bpf_if *)arg;
+	struct bpf_d *d;
+	size_t pktlen, slen;
+	struct mbuf *m0;
+
+	if (m == NULL)
+		return;
+
+	mh.mh_flags = 0;
+	mh.mh_next = m;
+	mh.mh_len = PFLOG_HDRLEN;
+	mh.mh_data = data;
+
+	pktlen = mh.mh_len;
+	for (m0 = m; m0 != 0; m0 = m0->m_next)
+		pktlen += m0->m_len;
+
+	for (d = bp->bif_dlist; d != 0; d = d->bd_next) {
+		++d->bd_rcount;
+		if ((BPF_DIRECTION_OUT & d->bd_dirfilt) != 0)
+			slen = 0;
+		else
+			slen = bpf_filter(d->bd_rfilter, (u_char *)&mh,
+			    pktlen, 0);
+
+		if (slen == 0)
+		    continue;
+
+		bpf_catchpacket(d, (u_char *)&mh, pktlen, slen, pflog_bpfcopy);
+	}
+#endif
+}
+
 
 /*
  * Move the packet data from interface memory (pkt) into the

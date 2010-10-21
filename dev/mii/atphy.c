@@ -1,4 +1,4 @@
-/*	$OpenBSD: atphy.c,v 1.2 2009/03/23 05:26:47 kevlo Exp $	*/
+/*	$OpenBSD: atphy.c,v 1.4 2009/07/25 12:23:40 martynas Exp $	*/
 
 /*-
  * Copyright (c) 2008, Pyun YongHyeon <yongari@FreeBSD.org>
@@ -186,7 +186,7 @@ atphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 			/*
 			 * XXX
 			 * Due to an unknown reason powering down PHY resulted
-			 * in unexpected results such as inaccessbility of
+			 * in unexpected results such as inaccessibility of
 			 * hardware of freshly rebooted system. Disable
 			 * powering down PHY until I got more information for
 			 * Attansic/Atheros PHY hardwares.
@@ -202,7 +202,7 @@ atphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 			bmcr |= BMCR_FDX;
 			/* Enable pause. */
 			if (sc->mii_flags & MIIF_DOPAUSE)
-				anar |= (3 << 10);
+				anar |= ANAR_PAUSE_TOWARDS;
 		}
 
 		if ((sc->mii_extcapabilities & (EXTSR_1000TFDX |
@@ -374,7 +374,7 @@ atphy_mii_phy_auto(struct mii_softc *sc)
 
 	anar = BMSR_MEDIA_TO_ANAR(sc->mii_capabilities) | ANAR_CSMA;
 	if (sc->mii_flags & MIIF_DOPAUSE)
-		anar |= (3 << 10);
+		anar |= ANAR_PAUSE_TOWARDS;
 	PHY_WRITE(sc, MII_ANAR, anar);
 	if (sc->mii_extcapabilities & (EXTSR_1000TFDX | EXTSR_1000THDX))
 		PHY_WRITE(sc, MII_100T2CR, GTCR_ADV_1000TFDX |

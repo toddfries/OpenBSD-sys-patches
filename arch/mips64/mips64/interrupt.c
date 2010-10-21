@@ -1,4 +1,4 @@
-/*	$OpenBSD: interrupt.c,v 1.35 2009/04/25 20:35:06 miod Exp $ */
+/*	$OpenBSD: interrupt.c,v 1.60 2010/09/20 06:33:47 matthew Exp $ */
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -29,52 +29,37 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
-#include <sys/signalvar.h>
+#include <sys/proc.h>
 #include <sys/user.h>
-#include <sys/malloc.h>
-#include <sys/device.h>
-#ifdef KTRACE
-#include <sys/ktrace.h>
-#endif
 
-#include <machine/trap.h>
-#include <machine/psl.h>
+#include <uvm/uvm_extern.h>
+
 #include <machine/cpu.h>
 #include <machine/intr.h>
-#include <machine/autoconf.h>
 #include <machine/frame.h>
-#include <machine/regnum.h>
-#include <machine/atomic.h>
 
 #include <mips64/rm7000.h>
-
-#include <mips64/archtype.h>
 
 #ifdef DDB
 #include <mips64/db_machdep.h>
 #include <ddb/db_sym.h>
 #endif
 
+void	dummy_splx(int);
+void	interrupt(struct trap_frame *);
 
 static struct evcount soft_count;
 static int soft_irq = 0;
 
-volatile intrmask_t cpl;
-volatile intrmask_t ipending, astpending;
-
-intrmask_t imask[NIPLS];
-
-intrmask_t idle_mask;
+uint32_t idle_mask;
 int	last_low_int;
 
 struct {
-	intrmask_t int_mask;
-	intrmask_t (*int_hand)(intrmask_t, struct trap_frame *);
+	uint32_t int_mask;
+	uint32_t (*int_hand)(uint32_t, struct trap_frame *);
 } cpu_int_tab[NLOWINT];
 
-void dummy_do_pending_int(int);
-
-int_f *pending_hand = &dummy_do_pending_int;
+int_f	*splx_hand = &dummy_splx;
 
 /*
  *  Modern versions of MIPS processors have extended interrupt
@@ -89,7 +74,7 @@ int_f *pending_hand = &dummy_do_pending_int;
  *  an interrupt handler for that particular interrupt. More than one
  *  handler can register to an interrupt input and one handler may register
  *  for more than one interrupt input. A handler is only called once even
- *  if it register for more than one interrupt input.
+ *  if it registers for more than one interrupt input.
  *
  *  The interrupt mechanism in this port uses a delayed masking model
  *  where interrupts are not really masked when doing an spl(). Instead
@@ -98,48 +83,24 @@ int_f *pending_hand = &dummy_do_pending_int;
  *  register this interrupt as pending and return a new mask to this
  *  code that will turn off the interrupt hardware wise. Later when
  *  the pending interrupt is unmasked it will be processed as usual
- *  and the hardware mask will be restored.
+ *  and the regular hardware mask will be restored.
  */
 
 /*
- *  Interrupt mapping is as follows:
- *
- *  irq can be between 1 and 10. This maps to CPU IPL2..IPL11.
- *  The two software interrupts IPL0 and IPL1 are reserved for
- *  kernel functions. IPL13 is used for the performance counters
- *  in the RM7000. IPL12 extra timer is currently not used.
- *
- *  irq's maps into the software spl register to the bit corresponding
- *  to its status/mask bit in the cause/sr register shifted right eight
- *  places.
- *
- *  A well designed system uses the CPUs interrupt inputs in a way, such
- *  that masking can be done according to the IPL in the CPU status and
- *  interrupt control register. However support for an external masking
- *  register is provided but will cause a slightly higher overhead when
- *  used. When an external masking register is used, no masking in the
- *  CPU is done. Instead a fixed mask is set and used throughout.
- */
-
-void interrupt(struct trap_frame *);
-void softintr(void);
-
-/*
- * Handle an interrupt. Both kernel and user mode is handled here.
+ * Handle an interrupt. Both kernel and user mode are handled here.
  *
  * The interrupt handler is called with the CR_INT bits set that
- * was given when the handlers was registered that needs servicing.
+ * were given when the handler was registered.
  * The handler should return a similar word with a mask indicating
- * which CR_INT bits that has been served.
+ * which CR_INT bits have been handled.
  */
 
 void
 interrupt(struct trap_frame *trapframe)
 {
+	struct cpu_info *ci = curcpu();
 	u_int32_t pending;
-	u_int32_t cause;
-	int i;
-	intrmask_t xcpl;
+	int i, s;
 
 	/*
 	 *  Paranoic? Perhaps. But if we got here with the enable
@@ -148,120 +109,84 @@ interrupt(struct trap_frame *trapframe)
 	 *  enough... i don't know but better safe than sorry...
 	 *  The main effect is not the interrupts but the spl mechanism.
 	 */
-	if (!(trapframe->sr & SR_INT_ENAB)) {
+	if (!(trapframe->sr & SR_INT_ENAB))
 		return;
-	}
+
+	ci->ci_intrdepth++;
 
 #ifdef DEBUG_INTERRUPT
-	trapdebug_enter(trapframe, 0);
+	trapdebug_enter(ci, trapframe, T_INT);
 #endif
-
-	uvmexp.intrs++;
+	atomic_add_int(&uvmexp.intrs, 1);
 
 	/* Mask out interrupts from cause that are unmasked */
 	pending = trapframe->cause & CR_IPEND & trapframe->sr;
-	cause = pending;
 
-	if (cause & SOFT_INT_MASK_0) {
+	if (pending & SOFT_INT_MASK_0) {
 		clearsoftintr0();
-		soft_count.ec_count++;
+		atomic_add_uint64(&soft_count.ec_count, 1);
 	}
 
-	if (cause & CR_INT_PERF) {
+#ifdef RM7K_PERFCNTR
+	if (pending & CR_INT_PERF)
 		rm7k_perfintr(trapframe);
-		cause &= ~CR_INT_PERF;
-	}
+#endif
 
 	for (i = 0; i <= last_low_int; i++) {
-		intrmask_t active;
+		uint32_t active;
 		active = cpu_int_tab[i].int_mask & pending;
-		if (active) {
-			cause &= ~(*cpu_int_tab[i].int_hand)(active, trapframe);
-		}
+		if (active != 0)
+			(*cpu_int_tab[i].int_hand)(active, trapframe);
 	}
 
 	/*
-	 *  Reenable all non served hardware levels.
+	 * Dispatch soft interrupts if current ipl allows them.
 	 */
-#if 0
-	/* XXX the following should, when req., change the IC reg as well */
-	setsr((trapframe->sr & ~pending) | SR_INT_ENAB);
-#endif
-
-	xcpl = splsoft();
-	if ((ipending & SINT_ALLMASK) & ~xcpl) {
-		dosoftint(xcpl);
+	if (ci->ci_ipl < IPL_SOFTINT && ci->ci_softpending != 0) {
+		s = splsoft();
+		dosoftint();
+		__asm__ (".set noreorder\n");
+		ci->ci_ipl = s;	/* no-overhead splx */
+		__asm__ ("sync\n\t.set reorder\n");
 	}
 
-	__asm__ (" .set noreorder\n");
-	cpl = xcpl;
-	__asm__ (" sync\n .set reorder\n");
+	ci->ci_intrdepth--;
 }
 
 
 /*
- *  Set up handler for external interrupt events.
- *  Use CR_INT_<n> to select the proper interrupt
- *  condition to dispatch on. We also enable the
- *  software ints here since they are always on.
+ * Set up handler for external interrupt events.
+ * Use CR_INT_<n> to select the proper interrupt condition to dispatch on.
+ * We also enable the software ints here since they are always on.
  */
 void
-set_intr(int pri, intrmask_t mask,
-	intrmask_t (*int_hand)(intrmask_t, struct trap_frame *))
+set_intr(int pri, uint32_t mask,
+    uint32_t (*int_hand)(uint32_t, struct trap_frame *))
 {
 	if ((idle_mask & SOFT_INT_MASK) == 0)
-		evcount_attach(&soft_count, "soft", (void *)&soft_irq, &evcount_intr);
-	if (pri < 0 || pri >= NLOWINT) {
-		panic("set_intr: to high priority");
-	}
+		evcount_attach(&soft_count, "soft", &soft_irq);
+	if (pri < 0 || pri >= NLOWINT)
+		panic("set_intr: too high priority (%d), increase NLOWINT",
+		    pri);
 
 	if (pri > last_low_int)
 		last_low_int = pri;
 
-	if ((mask & ~CR_IPEND) != 0) {
+	if ((mask & ~CR_IPEND) != 0)
 		panic("set_intr: invalid mask 0x%x", mask);
-	}
 
 	if (cpu_int_tab[pri].int_mask != 0 &&
 	   (cpu_int_tab[pri].int_mask != mask ||
-	    cpu_int_tab[pri].int_hand != int_hand)) {
+	    cpu_int_tab[pri].int_hand != int_hand))
 		panic("set_intr: int already set at pri %d", pri);
-	}
 
 	cpu_int_tab[pri].int_hand = int_hand;
 	cpu_int_tab[pri].int_mask = mask;
 	idle_mask |= mask | SOFT_INT_MASK;
 }
 
-/*
- * This is called from MipsUserIntr() if astpending is set.
- */
 void
-softintr()
-{
-	struct proc *p = curproc;
-	int sig;
-
-	uvmexp.softs++;
-
-	astpending = 0;
-	if (p->p_flag & P_OWEUPC) {
-		ADDUPROF(p);
-	}
-	if (want_resched)
-		preempt(NULL);
-
-	/* inline userret(p) */
-
-	while ((sig = CURSIG(p)) != 0)		/* take pending signals */
-		postsig(sig);
-	p->p_cpu->ci_schedstate.spc_curpriority = p->p_priority = p->p_usrpri;
-}
-
-struct intrhand *intrhand[INTMASKSIZE];
-
-void
-dummy_do_pending_int(int newcpl)
+dummy_splx(int newcpl)
 {
 	/* Dummy handler */
 }
@@ -276,27 +201,52 @@ dummy_do_pending_int(int newcpl)
 void
 splinit()
 {
-	u_int32_t sr;
+	struct proc *p = curproc;
+	struct pcb *pcb = &p->p_addr->u_pcb;
+
+	/*
+	 * Update proc0 pcb to contain proper values.
+	 */
+#ifdef RM7000_ICR
+	pcb->pcb_context.val[12] = (idle_mask << 8) & IC_INT_MASK;
+#endif
+	pcb->pcb_context.val[11] = (pcb->pcb_regs.sr & ~SR_INT_MASK) |
+	    (idle_mask & SR_INT_MASK);
 
 	spl0();
-	sr = updateimask(0);
-	sr |= SR_INT_ENAB;
-	setsr(sr);
-#ifdef IMASK_EXTERNAL
-	hw_setintrmask(0);
-#endif
+	(void)updateimask(0);
 }
 
-#ifndef INLINE_SPLRAISE
 int
-splraise(int newcpl)
+splraise(int newipl)
 {
-        int oldcpl;
+	struct cpu_info *ci = curcpu();
+        int oldipl;
 
-	__asm__ (" .set noreorder\n");
-	oldcpl = cpl;
-	cpl = oldcpl | newcpl;
-	__asm__ (" sync\n .set reorder\n");
-	return (oldcpl);
+	__asm__ (".set noreorder\n");
+	oldipl = ci->ci_ipl;
+	if (oldipl < newipl) {
+		/* XXX to kill warning about dla being used in a delay slot */
+		__asm__("nop");
+		ci->ci_ipl = newipl;
+	}
+	__asm__ ("sync\n\t.set reorder\n");
+	return oldipl;
 }
-#endif
+
+void
+splx(int newipl)
+{
+	(*splx_hand)(newipl);
+}
+
+int
+spllower(int newipl)
+{
+	struct cpu_info *ci = curcpu();
+	int oldipl;
+
+	oldipl = ci->ci_ipl;
+	splx(newipl);
+	return oldipl;
+}

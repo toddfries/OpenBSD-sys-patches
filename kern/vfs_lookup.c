@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_lookup.c,v 1.39 2009/03/09 16:56:55 blambert Exp $	*/
+/*	$OpenBSD: vfs_lookup.c,v 1.43 2010/09/09 10:37:03 thib Exp $	*/
 /*	$NetBSD: vfs_lookup.c,v 1.17 1996/02/09 19:00:59 christos Exp $	*/
 
 /*
@@ -166,10 +166,10 @@ namei(struct nameidata *ndp)
 	 */
 	if (cnp->cn_pnbuf[0] == '/') {
 		dp = ndp->ni_rootdir;
-		VREF(dp);
+		vref(dp);
 	} else {
 		dp = fdp->fd_cdir;
-		VREF(dp);
+		vref(dp);
 	}
 	for (;;) {
 		if (!dp->v_mount) {
@@ -179,7 +179,7 @@ namei(struct nameidata *ndp)
 		}
 		cnp->cn_nameptr = cnp->cn_pnbuf;
 		ndp->ni_startdir = dp;
-		if ((error = lookup(ndp)) != 0) {
+		if ((error = vfs_lookup(ndp)) != 0) {
 			pool_put(&namei_pool, cnp->cn_pnbuf);
 			return (error);
 		}
@@ -243,7 +243,7 @@ badlink:
 		if (cnp->cn_pnbuf[0] == '/') {
 			vrele(dp);
 			dp = ndp->ni_rootdir;
-			VREF(dp);
+			vref(dp);
 		}
 	}
 	pool_put(&namei_pool, cnp->cn_pnbuf);
@@ -293,7 +293,7 @@ badlink:
  *	    if WANTPARENT set, return unlocked parent in ni_dvp
  */
 int
-lookup(struct nameidata *ndp)
+vfs_lookup(struct nameidata *ndp)
 {
 	char *cp;			/* pointer into pathname argument */
 	struct vnode *dp = 0;		/* the directory we are searching */
@@ -360,20 +360,23 @@ dirloop:
 	/*
 	 * Search a new directory.
 	 *
-	 * The cn_hash value is for use by vfs_cache.
 	 * The last component of the filename is left accessible via
 	 * cnp->cn_nameptr for callers that need the name. Callers needing
 	 * the name set the SAVENAME flag. When done, they assume
 	 * responsibility for freeing the pathname buffer.
 	 */
-	cp = NULL;
 	cnp->cn_consume = 0;
-	cnp->cn_hash = hash32_stre(cnp->cn_nameptr, '/', &cp, HASHINIT);
+
+	/* XXX: Figure out the length of the last component. */
+	cp = cnp->cn_nameptr;
+	while (*cp && (*cp != '/'))
+		cp++;
 	cnp->cn_namelen = cp - cnp->cn_nameptr;
 	if (cnp->cn_namelen > NAME_MAX) {
 		error = ENAMETOOLONG;
 		goto bad;
 	}
+
 #ifdef NAMEI_DIAGNOSTIC
 	{ char c = *cp;
 	*cp = '\0';
@@ -434,7 +437,7 @@ dirloop:
 			if (dp == ndp->ni_rootdir || dp == rootvnode) {
 				ndp->ni_dvp = dp;
 				ndp->ni_vp = dp;
-				VREF(dp);
+				vref(dp);
 				goto nextname;
 			}
 			if ((dp->v_flag & VROOT) == 0 ||
@@ -443,7 +446,7 @@ dirloop:
 			tdp = dp;
 			dp = dp->v_mount->mnt_vnodecovered;
 			vput(tdp);
-			VREF(dp);
+			vref(dp);
 			vn_lock(dp, LK_EXCLUSIVE | LK_RETRY, p);
 		}
 	}
@@ -488,7 +491,7 @@ dirloop:
 		 */
 		if (cnp->cn_flags & SAVESTART) {
 			ndp->ni_startdir = ndp->ni_dvp;
-			VREF(ndp->ni_startdir);
+			vref(ndp->ni_startdir);
 		}
 		return (0);
 	}
@@ -583,7 +586,7 @@ terminal:
 	if (ndp->ni_dvp != NULL) {
 		if (cnp->cn_flags & SAVESTART) {
 			ndp->ni_startdir = ndp->ni_dvp;
-			VREF(ndp->ni_startdir);
+			vref(ndp->ni_startdir);
 		}
 		if (!wantparent)
 			vrele(ndp->ni_dvp);
@@ -610,7 +613,7 @@ bad:
  * Reacquire a path name component.
  */
 int
-relookup(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp)
+vfs_relookup(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp)
 {
 	struct proc *p = cnp->cn_proc;
 	struct vnode *dp = 0;		/* the directory we are searching */
@@ -618,7 +621,6 @@ relookup(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp)
 	int rdonly;			/* lookup read-only flag bit */
 	int error = 0;
 #ifdef NAMEI_DIAGNOSTIC
-	u_int32_t newhash;		/* DEBUG: check name hash */
 	char *cp;			/* DEBUG: check name ptr/len */
 #endif
 
@@ -635,19 +637,20 @@ relookup(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp)
 	/*
 	 * Search a new directory.
 	 *
-	 * The cn_hash value is for use by vfs_cache.
 	 * The last component of the filename is left accessible via
 	 * cnp->cn_nameptr for callers that need the name. Callers needing
 	 * the name set the SAVENAME flag. When done, they assume
 	 * responsibility for freeing the pathname buffer.
 	 */
+
 #ifdef NAMEI_DIAGNOSTIC
-	cp = NULL;
-	newhash = hash32_stre(cnp->cn_nameptr, '/', &cp, HASHINIT);
-	if (newhash != cnp->cn_hash)
-		panic("relookup: bad hash");
+	/* XXX: Figure out the length of the last component. */
+	cp = cnp->cn_nameptr;
+	while (*cp && (*cp != '/')) {
+		*cp++;
+	}
 	if (cnp->cn_namelen != cp - cnp->cn_nameptr)
-		panic ("relookup: bad len");
+		panic("relookup: bad len");
 	if (*cp != 0)
 		panic("relookup: not last component");
 	printf("{%s}: ", cnp->cn_nameptr);
@@ -684,7 +687,7 @@ relookup(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp)
 		}
 		/* ASSERT(dvp == ndp->ni_startdir) */
 		if (cnp->cn_flags & SAVESTART)
-			VREF(dvp);
+			vref(dvp);
 		/*
 		 * We return with ni_vp NULL to indicate that the entry
 		 * doesn't currently exist, leaving a pointer to the
@@ -719,7 +722,7 @@ relookup(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp)
 	}
 	/* ASSERT(dvp == ndp->ni_startdir) */
 	if (cnp->cn_flags & SAVESTART)
-		VREF(dvp);
+		vref(dvp);
 	if (!wantparent)
 		vrele(dvp);
 	if ((cnp->cn_flags & LOCKLEAF) == 0)
