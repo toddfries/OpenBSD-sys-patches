@@ -1,4 +1,4 @@
-/* $OpenBSD: pms.c,v 1.8 2010/10/07 01:52:25 krw Exp $ */
+/* $OpenBSD: pms.c,v 1.11 2010/10/19 11:00:50 krw Exp $ */
 /* $NetBSD: psm.c,v 1.11 2000/06/05 22:20:57 sommerfeld Exp $ */
 
 /*-
@@ -119,10 +119,7 @@ pms_setintellimode(struct pms_softc *sc)
 }
 
 int
-pmsprobe(parent, match, aux)
-	struct device *parent;
-	void *match;
-	void *aux;
+pmsprobe(struct device *parent, void *match, void *aux)
 {
 	struct pckbc_attach_args *pa = aux;
 	u_char cmd[1], resp[2];
@@ -137,21 +134,10 @@ pmsprobe(parent, match, aux)
 	/* reset the device */
 	cmd[0] = PMS_RESET;
 	res = pckbc_poll_cmd(pa->pa_tag, pa->pa_slot, cmd, 1, 2, resp, 1);
-	if (res) {
+	if (res || resp[0] != PMS_RSTDONE || resp[1] != 0) {
 #ifdef DEBUG
-		printf("pmsprobe: reset error %d\n", res);
-#endif
-		return (0);
-	}
-	if (resp[0] != PMS_RSTDONE) {
-		printf("pmsprobe: reset response 0x%x\n", resp[0]);
-		return (0);
-	}
-
-	/* get type number (0 = mouse) */
-	if (resp[1] != 0) {
-#ifdef DEBUG
-		printf("pmsprobe: type 0x%x\n", resp[1]);
+		printf("pms: reset error %d (response 0x%02x, type 0x%02x)\n",
+		    res, resp[0], resp[1]);
 #endif
 		return (0);
 	}
@@ -160,36 +146,16 @@ pmsprobe(parent, match, aux)
 }
 
 void
-pmsattach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+pmsattach(struct device *parent, struct device *self, void *aux)
 {
 	struct pms_softc *sc = (void *)self;
 	struct pckbc_attach_args *pa = aux;
 	struct wsmousedev_attach_args a;
-	u_char cmd[1], resp[2];
-	int res;
 
 	sc->sc_kbctag = pa->pa_tag;
 	sc->sc_kbcslot = pa->pa_slot;
 
 	printf("\n");
-
-	/* Flush any garbage. */
-	pckbc_flush(pa->pa_tag, pa->pa_slot);
-
-	/* reset the device */
-	cmd[0] = PMS_RESET;
-	res = pckbc_poll_cmd(pa->pa_tag, pa->pa_slot, cmd, 1, 2, resp, 1);
-#ifdef DEBUG
-	if (res || resp[0] != PMS_RSTDONE || resp[1] != 0) {
-		printf("pmsattach: reset error\n");
-		return;
-	}
-#endif
-
-	sc->inputstate = 0;
-	sc->oldbuttons = 0;
 
 	pckbc_set_inputhandler(sc->sc_kbctag, sc->sc_kbcslot,
 			       pmsinput, sc, sc->sc_dev.dv_xname);
@@ -300,8 +266,7 @@ pms_change_state(struct pms_softc *sc, int newstate)
 }
 
 int
-pms_enable(v)
-	void *v;
+pms_enable(void *v)
 {
 	struct pms_softc *sc = v;
 
@@ -309,8 +274,7 @@ pms_enable(v)
 }
 
 void
-pms_disable(v)
-	void *v;
+pms_disable(void *v)
 {
 	struct pms_softc *sc = v;
 
@@ -318,12 +282,7 @@ pms_disable(v)
 }
 
 int
-pms_ioctl(v, cmd, data, flag, p)
-	void *v;
-	u_long cmd;
-	caddr_t data;
-	int flag;
-	struct proc *p;
+pms_ioctl(void *v, u_long cmd, caddr_t data, int flag, struct proc *p)
 {
 	struct pms_softc *sc = v;
 	u_char kbcmd[2];
@@ -362,9 +321,8 @@ pms_ioctl(v, cmd, data, flag, p)
 #define PS2RBUTMASK 0x02
 #define PS2MBUTMASK 0x04
 
-void pmsinput(vsc, data)
-void *vsc;
-int data;
+void
+pmsinput(void *vsc, int data)
 {
 	struct pms_softc *sc = vsc;
 	signed char dz = 0;
