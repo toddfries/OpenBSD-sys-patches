@@ -1,4 +1,4 @@
-/*	$OpenBSD: in_pcb.h,v 1.66 2008/07/10 02:19:28 djm Exp $	*/
+/*	$OpenBSD: in_pcb.h,v 1.70 2010/09/23 04:45:15 yasuoka Exp $	*/
 /*	$NetBSD: in_pcb.h,v 1.14 1996/02/13 23:42:00 christos Exp $	*/
 
 /*
@@ -146,6 +146,8 @@ struct inpcb {
 #endif
 	struct	icmp6_filter *inp_icmp6filt;
 	void	*inp_pf_sk;
+	u_int	inp_rtableid;
+	int	inp_pipex;		/* pipex indication */
 };
 
 struct inpcbtable {
@@ -250,10 +252,10 @@ void	 in_pcbdetach(void *);
 void	 in_pcbdisconnect(void *);
 struct inpcb *
 	 in_pcbhashlookup(struct inpcbtable *, struct in_addr,
-			       u_int, struct in_addr, u_int);
+			       u_int, struct in_addr, u_int, u_int);
 struct inpcb *
 	 in_pcblookup_listen(struct inpcbtable *, struct in_addr, u_int, int,
-	    struct mbuf *);
+	    struct mbuf *, u_int);
 #ifdef INET6
 struct inpcb *
 	 in6_pcbhashlookup(struct inpcbtable *, struct in6_addr *,
@@ -269,16 +271,16 @@ int	 in6_setpeeraddr(struct inpcb *, struct mbuf *);
 void	 in_pcbinit(struct inpcbtable *, int);
 struct inpcb *
 	 in_pcblookup(struct inpcbtable *, void *, u_int, void *,
-	    u_int, int);
+	    u_int, int, u_int);
 void	 in_pcbnotifyall(struct inpcbtable *, struct sockaddr *,
-	    int, void (*)(struct inpcb *, int));
+	    u_int, int, void (*)(struct inpcb *, int));
 void	 in_pcbrehash(struct inpcb *);
 void	 in_rtchange(struct inpcb *, int);
 void	 in_setpeeraddr(struct inpcb *, struct mbuf *);
 void	 in_setsockaddr(struct inpcb *, struct mbuf *);
 int	 in_baddynamic(u_int16_t, u_int16_t);
 extern struct sockaddr_in *in_selectsrc(struct sockaddr_in *,
-	struct route *, int, struct ip_moptions *, int *);
+	struct route *, int, struct ip_moptions *, int *, u_int);
 struct rtentry *
 	in_pcbrtentry(struct inpcb *);
 

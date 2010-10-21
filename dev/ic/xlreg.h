@@ -1,4 +1,4 @@
-/*	$OpenBSD: xlreg.h,v 1.19 2004/05/30 23:49:39 brad Exp $	*/
+/*	$OpenBSD: xlreg.h,v 1.26 2010/09/21 01:05:12 claudio Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -480,7 +480,9 @@ struct xl_chain_data {
 	struct xl_chain_onefrag	xl_rx_chain[XL_RX_LIST_CNT];
 	struct xl_chain		xl_tx_chain[XL_TX_LIST_CNT];
 
-	struct xl_chain_onefrag	*xl_rx_head;
+	struct xl_chain_onefrag	*xl_rx_cons;
+	struct xl_chain_onefrag *xl_rx_prod;
+	int			xl_rx_cnt;
 
 	/* 3c90x "boomerang" queuing stuff */
 	struct xl_chain		*xl_tx_head;
@@ -591,12 +593,10 @@ struct xl_softc {
 	u_int16_t		xl_caps;
 	u_int8_t		xl_stats_no_timeout;
 	u_int16_t		xl_tx_thresh;
-	int			xl_if_flags;
 	struct xl_list_data	*xl_ldata;
 	struct xl_chain_data	xl_cdata;
 	int			xl_flags;
 	void (*intr_ack)(struct xl_softc *);
-	void *			sc_sdhook, *sc_pwrhook;
 	bus_dma_tag_t		sc_dmat;
 	bus_dmamap_t		sc_listmap;
 	bus_dma_segment_t	sc_listseg[1];
@@ -744,3 +744,7 @@ struct xl_stats {
 extern int xl_intr(void *);
 extern void xl_attach(struct xl_softc *);
 extern int xl_detach(struct xl_softc *);
+void xl_init(void *);
+void xl_stop(struct xl_softc *);
+void xl_reset(struct xl_softc *);
+int xl_activate(struct device *, int);

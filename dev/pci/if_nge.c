@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_nge.c,v 1.67 2008/11/28 02:44:18 brad Exp $	*/
+/*	$OpenBSD: if_nge.c,v 1.70 2010/09/20 07:40:38 deraadt Exp $	*/
 /*
  * Copyright (c) 2001 Wind River Systems
  * Copyright (c) 1997, 1998, 1999, 2000, 2001
@@ -154,7 +154,6 @@ int nge_ioctl(struct ifnet *, u_long, caddr_t);
 void nge_init(void *);
 void nge_stop(struct nge_softc *);
 void nge_watchdog(struct ifnet *);
-void nge_shutdown(void *);
 int nge_ifmedia_mii_upd(struct ifnet *);
 void nge_ifmedia_mii_sts(struct ifnet *, struct ifmediareq *);
 int nge_ifmedia_tbi_upd(struct ifnet *);
@@ -834,7 +833,8 @@ nge_attach(parent, self, aux)
 	sc->sc_dmatag = pa->pa_dmat;
 	DPRINTFN(5, ("%s: bus_dmamem_alloc\n", sc->sc_dv.dv_xname));
 	if (bus_dmamem_alloc(sc->sc_dmatag, sizeof(struct nge_list_data),
-			     PAGE_SIZE, 0, &seg, 1, &rseg, BUS_DMA_NOWAIT)) {
+			     PAGE_SIZE, 0, &seg, 1, &rseg, BUS_DMA_NOWAIT |
+			     BUS_DMA_ZERO)) {
 		printf("%s: can't alloc rx buffers\n", sc->sc_dv.dv_xname);
 		goto fail_2;
 	}
@@ -862,7 +862,6 @@ nge_attach(parent, self, aux)
 
 	DPRINTFN(5, ("%s: bzero\n", sc->sc_dv.dv_xname));
 	sc->nge_ldata = (struct nge_list_data *)kva;
-	bzero(sc->nge_ldata, sizeof(struct nge_list_data));
 
 	/* Try to allocate memory for jumbo buffers. */
 	DPRINTFN(5, ("%s: nge_alloc_jumbo_mem\n", sc->sc_dv.dv_xname));
@@ -2220,24 +2219,10 @@ nge_stop(sc)
 		sizeof(sc->nge_ldata->nge_tx_list));
 }
 
-/*
- * Stop all chip I/O so that the kernel's probe routines don't
- * get confused by errant DMAs when rebooting.
- */
-void
-nge_shutdown(xsc)
-	void *xsc;
-{
-	struct nge_softc *sc = (struct nge_softc *)xsc;
-
-	nge_reset(sc);
-	nge_stop(sc);
-}
-
 struct cfattach nge_ca = {
 	sizeof(struct nge_softc), nge_probe, nge_attach
 };
 
 struct cfdriver nge_cd = {
-	0, "nge", DV_IFNET
+	NULL, "nge", DV_IFNET
 };

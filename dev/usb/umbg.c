@@ -1,4 +1,4 @@
-/*	$OpenBSD: umbg.c,v 1.8 2008/11/21 11:38:12 mbalmer Exp $ */
+/*	$OpenBSD: umbg.c,v 1.12 2010/09/24 08:33:59 yuo Exp $ */
 
 /*
  * Copyright (c) 2007 Marc Balmer <mbalmer@openbsd.org>
@@ -138,7 +138,7 @@ void umbg_it_intr(void *);
 int umbg_match(struct device *, void *, void *); 
 void umbg_attach(struct device *, struct device *, void *); 
 int umbg_detach(struct device *, int); 
-int umbg_activate(struct device *, enum devact); 
+int umbg_activate(struct device *, int); 
 
 void umbg_task(void *);
 
@@ -191,15 +191,11 @@ umbg_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->sc_timedelta.type = SENSOR_TIMEDELTA;
 	sc->sc_timedelta.status = SENSOR_S_UNKNOWN;
-	sc->sc_timedelta.value = 0LL;
-	sc->sc_timedelta.flags = 0;
 	strlcpy(sc->sc_timedelta.desc, "USB5131",
 	    sizeof(sc->sc_timedelta.desc));
 	sensor_attach(&sc->sc_sensordev, &sc->sc_timedelta);
 
 	sc->sc_signal.type = SENSOR_PERCENT;
-	sc->sc_signal.value = 0LL;
-	sc->sc_signal.flags = 0;
 	strlcpy(sc->sc_signal.desc, "Signal", sizeof(sc->sc_signal.desc));
 	sensor_attach(&sc->sc_sensordev, &sc->sc_signal);
 	sensordev_install(&sc->sc_sensordev);
@@ -300,10 +296,10 @@ umbg_detach(struct device *self, int flags)
 	struct umbg_softc *sc = (struct umbg_softc *)self;
 	usbd_status err;
 
-	sc->sc_dying = 1;
-
 	timeout_del(&sc->sc_to);
 	timeout_del(&sc->sc_it_to);
+
+	usb_rem_task(sc->sc_udev, &sc->sc_task);
 
 	if (sc->sc_bulkin_pipe != NULL) {
 		err = usbd_abort_pipe(sc->sc_bulkin_pipe);
@@ -327,8 +323,6 @@ umbg_detach(struct device *self, int flags)
 			    sc->sc_dev.dv_xname, usbd_errstr(err));
 		sc->sc_bulkout_pipe = NULL;
 	}
-
-	usb_rem_task(sc->sc_udev, &sc->sc_task);
 
 	/* Unregister the clock with the kernel */
 	sensordev_deinstall(&sc->sc_sensordev);
@@ -457,7 +451,7 @@ umbg_it_intr(void *xsc)
 }
 
 int
-umbg_activate(struct device *self, enum devact act)
+umbg_activate(struct device *self, int act)
 {
 	struct umbg_softc *sc = (struct umbg_softc *)self;
 

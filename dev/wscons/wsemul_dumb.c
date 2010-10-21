@@ -1,4 +1,4 @@
-/* $OpenBSD: wsemul_dumb.c,v 1.7 2007/11/27 16:37:27 miod Exp $ */
+/* $OpenBSD: wsemul_dumb.c,v 1.10 2010/08/28 12:48:14 miod Exp $ */
 /* $NetBSD: wsemul_dumb.c,v 1.7 2000/01/05 11:19:36 drochner Exp $ */
 
 /*
@@ -44,12 +44,11 @@
 
 void	*wsemul_dumb_cnattach(const struct wsscreen_descr *, void *,
 				   int, int, long);
-void	*wsemul_dumb_attach(int console, const struct wsscreen_descr *,
+void	*wsemul_dumb_attach(int, const struct wsscreen_descr *,
 				 void *, int, int, void *, long);
-void	wsemul_dumb_output(void *cookie, const u_char *data, u_int count,
-				int);
-int	wsemul_dumb_translate(void *cookie, keysym_t, const char **);
-void	wsemul_dumb_detach(void *cookie, u_int *crowp, u_int *ccolp);
+u_int	wsemul_dumb_output(void *, const u_char *, u_int, int);
+int	wsemul_dumb_translate(void *, keysym_t, const char **);
+void	wsemul_dumb_detach(void *, u_int *, u_int *);
 void	wsemul_dumb_resetop(void *, enum wsemul_resetops);
 
 const struct wsemul_ops wsemul_dumb_ops = {
@@ -64,6 +63,7 @@ const struct wsemul_ops wsemul_dumb_ops = {
 
 struct wsemul_dumb_emuldata {
 	const struct wsdisplay_emulops *emulops;
+	struct wsemul_abortstate abortstate;
 	void *emulcookie;
 	void *cbcookie;
 	int crippled;
@@ -74,11 +74,8 @@ struct wsemul_dumb_emuldata {
 struct wsemul_dumb_emuldata wsemul_dumb_console_emuldata;
 
 void *
-wsemul_dumb_cnattach(type, cookie, ccol, crow, defattr)
-	const struct wsscreen_descr *type;
-	void *cookie;
-	int ccol, crow;
-	long defattr;
+wsemul_dumb_cnattach(const struct wsscreen_descr *type, void *cookie, int ccol,
+    int crow, long defattr)
 {
 	struct wsemul_dumb_emuldata *edp;
 	const struct wsdisplay_emulops *emulops;
@@ -96,18 +93,14 @@ wsemul_dumb_cnattach(type, cookie, ccol, crow, defattr)
 	edp->crippled = emulops->cursor == NULL ||
 	    emulops->copycols == NULL || emulops->copyrows == NULL ||
 	    emulops->erasecols == NULL || emulops->eraserows == NULL;
+	wsemul_reset_abortstate(&edp->abortstate);
 
 	return (edp);
 }
 
 void *
-wsemul_dumb_attach(console, type, cookie, ccol, crow, cbcookie, defattr)
-	int console;
-	const struct wsscreen_descr *type;
-	void *cookie;
-	int ccol, crow;
-	void *cbcookie;
-	long defattr;
+wsemul_dumb_attach(int console, const struct wsscreen_descr *type, void *cookie,
+    int ccol, int crow, void *cbcookie, long defattr)
 {
 	struct wsemul_dumb_emuldata *edp;
 
@@ -123,6 +116,7 @@ wsemul_dumb_attach(console, type, cookie, ccol, crow, cbcookie, defattr)
 		edp->crow = crow;
 		edp->ccol = ccol;
 		edp->defattr = defattr;
+		wsemul_reset_abortstate(&edp->abortstate);
 	}
 
 	edp->cbcookie = cbcookie;
@@ -130,35 +124,61 @@ wsemul_dumb_attach(console, type, cookie, ccol, crow, cbcookie, defattr)
 	return (edp);
 }
 
-void
-wsemul_dumb_output(cookie, data, count, kernel)
-	void *cookie;
-	const u_char *data;
-	u_int count;
-	int kernel; /* ignored */
+u_int
+wsemul_dumb_output(void *cookie, const u_char *data, u_int count, int kernel)
 {
 	struct wsemul_dumb_emuldata *edp = cookie;
+	u_int processed = 0;
 	u_char c;
 	int n;
+	int rc = 0;
 
 	if (edp->crippled) {
 		while (count-- > 0) {
-			c = *data++;
+			wsemul_resume_abort(&edp->abortstate);
 
+			c = *data++;
 			if (c == ASCII_BEL)
 				wsdisplay_emulbell(edp->cbcookie);
-			else
-				(*edp->emulops->putchar)(edp->emulcookie, 0,
-				    0, c, 0);
+			else {
+				WSEMULOP(rc, edp, &edp->abortstate, putchar,
+				    (edp->emulcookie, 0, 0, c, 0));
+				if (rc != 0)
+					break;
+			}
+			processed++;
 		}
-		return;
+		if (rc != 0)
+			wsemul_abort_other(&edp->abortstate);
+		return processed;
 	}
 
-	/* XXX */
-	(*edp->emulops->cursor)(edp->emulcookie, 0, edp->crow, edp->ccol);
-	while (count-- > 0) {
-		c = *data++;
+	switch (edp->abortstate.state) {
+	case ABORT_FAILED_CURSOR:
+		/*
+		 * If we could not display the cursor back, we pretended not
+		 * having been able to display the last character. But this
+		 * is a lie, so compensate here.
+		 */
+		data++, count--;
+		processed++;
+		wsemul_reset_abortstate(&edp->abortstate);
+		break;
+	case ABORT_OK:
+		/* remove cursor image */
+		rc = (*edp->emulops->cursor)
+		    (edp->emulcookie, 0, edp->crow, edp->ccol);
+		if (rc != 0)
+			return 0;
+		break;
+	default:
+		break;
+	}
 
+	while (count-- > 0) {
+		wsemul_resume_abort(&edp->abortstate);
+
+		c = *data++;
 		switch (c) {
 		case ASCII_BEL:
 			wsdisplay_emulbell(edp->cbcookie);
@@ -176,14 +196,19 @@ wsemul_dumb_output(cookie, data, count, kernel)
 		case ASCII_HT:
 			n = min(8 - (edp->ccol & 7),
 			    edp->ncols - edp->ccol - 1);
-			(*edp->emulops->erasecols)(edp->emulcookie,
-			    edp->crow, edp->ccol, n, edp->defattr);
+			WSEMULOP(rc, edp, &edp->abortstate, erasecols,
+			     (edp->emulcookie, edp->crow, edp->ccol, n,
+			      edp->defattr));
+			if (rc != 0)
+				break;
 			edp->ccol += n;
 			break;
 
 		case ASCII_FF:
-			(*edp->emulops->eraserows)(edp->emulcookie, 0,
-			    edp->nrows, edp->defattr);
+			WSEMULOP(rc, edp, &edp->abortstate, eraserows,
+			    (edp->emulcookie, 0, edp->nrows, edp->defattr));
+			if (rc != 0)
+				break;
 			edp->ccol = 0;
 			edp->crow = 0;
 			break;
@@ -194,8 +219,11 @@ wsemul_dumb_output(cookie, data, count, kernel)
 			break;
 
 		default:
-			(*edp->emulops->putchar)(edp->emulcookie, edp->crow,
-			    edp->ccol, c, edp->defattr);
+			WSEMULOP(rc, edp, &edp->abortstate, putchar,
+			    (edp->emulcookie, edp->crow, edp->ccol, c,
+			     edp->defattr));
+			if (rc != 0)
+				break;
 			edp->ccol++;
 
 			/* if cur col is still on cur line, done. */
@@ -214,31 +242,56 @@ wsemul_dumb_output(cookie, data, count, kernel)
 				break;
 			}
 			n = 1;		/* number of lines to scroll */
-			(*edp->emulops->copyrows)(edp->emulcookie, n, 0,
-			    edp->nrows - n);
-			(*edp->emulops->eraserows)(edp->emulcookie,
-			    edp->nrows - n, n, edp->defattr);
+			WSEMULOP(rc, edp, &edp->abortstate, copyrows,
+			    (edp->emulcookie, n, 0, edp->nrows - n));
+			if (rc == 0)
+				WSEMULOP(rc, edp, &edp->abortstate, eraserows,
+				    (edp->emulcookie, edp->nrows - n, n,
+				     edp->defattr));
+			if (rc != 0) {
+				/* undo wrap-at-eol processing if necessary */
+				if (c != ASCII_LF)
+					edp->ccol = edp->ncols - 1;
+				break;
+			}
 			edp->crow -= n - 1;
 			break;
 		}
+		if (rc != 0)
+			break;
+		processed++;
 	}
-	/* XXX */
-	(*edp->emulops->cursor)(edp->emulcookie, 1, edp->crow, edp->ccol);
+
+	if (rc != 0)
+		wsemul_abort_other(&edp->abortstate);
+	else {
+		/* put cursor image back */
+		rc = (*edp->emulops->cursor)
+		    (edp->emulcookie, 1, edp->crow, edp->ccol);
+		if (rc != 0) {
+			/*
+			 * Fail the last character output, remembering that
+			 * only the cursor operation really needs to be done.
+			 */
+			wsemul_abort_cursor(&edp->abortstate);
+			processed--;
+		}
+	}
+
+	if (rc == 0)
+		wsemul_reset_abortstate(&edp->abortstate);
+
+	return processed;
 }
 
 int
-wsemul_dumb_translate(cookie, in, out)
-	void *cookie;
-	keysym_t in;
-	const char **out;
+wsemul_dumb_translate(void *cookie, keysym_t in, const char **out)
 {
 	return (0);
 }
 
 void
-wsemul_dumb_detach(cookie, crowp, ccolp)
-	void *cookie;
-	u_int *crowp, *ccolp;
+wsemul_dumb_detach(void *cookie, u_int *crowp, u_int *ccolp)
 {
 	struct wsemul_dumb_emuldata *edp = cookie;
 
@@ -249,9 +302,7 @@ wsemul_dumb_detach(cookie, crowp, ccolp)
 }
 
 void
-wsemul_dumb_resetop(cookie, op)
-	void *cookie;
-	enum wsemul_resetops op;
+wsemul_dumb_resetop(void *cookie, enum wsemul_resetops op)
 {
 	struct wsemul_dumb_emuldata *edp = cookie;
 

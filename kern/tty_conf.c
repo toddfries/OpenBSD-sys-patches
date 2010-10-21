@@ -1,4 +1,4 @@
-/*	$OpenBSD: tty_conf.c,v 1.12 2008/01/05 17:33:28 mbalmer Exp $	*/
+/*	$OpenBSD: tty_conf.c,v 1.16 2010/06/29 19:09:12 tedu Exp $	*/
 /*	$NetBSD: tty_conf.c,v 1.18 1996/05/19 17:17:55 jonathan Exp $	*/
 
 /*-
@@ -44,8 +44,8 @@
 #include <sys/tty.h>
 #include <sys/conf.h>
 
-#define	ttynodisc ((int (*)(dev_t, struct tty *))enodev)
-#define	ttyerrclose ((int (*)(struct tty *, int flags))enodev)
+#define	ttynodisc ((int (*)(dev_t, struct tty *, struct proc *))enodev)
+#define	ttyerrclose ((int (*)(struct tty *, int flags, struct proc *))enodev)
 #define	ttyerrio ((int (*)(struct tty *, struct uio *, int))enodev)
 #define	ttyerrinput ((int (*)(int c, struct tty *))enodev)
 #define	ttyerrstart ((int (*)(struct tty *))enodev)
@@ -54,8 +54,8 @@ int	nullioctl(struct tty *, u_long, caddr_t, int, struct proc *);
 
 #include "sl.h"
 #if NSL > 0
-int	slopen(dev_t dev, struct tty *tp);
-int	slclose(struct tty *tp, int flags);
+int	slopen(dev_t dev, struct tty *tp, struct proc *);
+int	slclose(struct tty *tp, int flags, struct proc *);
 int	sltioctl(struct tty *tp, u_long cmd, caddr_t data,
 			int flag, struct proc *p);
 int	slinput(int c, struct tty *tp);
@@ -64,8 +64,8 @@ int	slstart(struct tty *tp);
 
 #include "ppp.h"
 #if NPPP > 0
-int	pppopen(dev_t dev, struct tty *tp);
-int	pppclose(struct tty *tp, int flags);
+int	pppopen(dev_t dev, struct tty *tp, struct proc *);
+int	pppclose(struct tty *tp, int flags, struct proc *);
 int	ppptioctl(struct tty *tp, u_long cmd, caddr_t data,
 			int flag, struct proc *p);
 int	pppinput(int c, struct tty *tp);
@@ -74,28 +74,25 @@ int	pppread(struct tty *tp, struct uio *uio, int flag);
 int	pppwrite(struct tty *tp, struct uio *uio, int flag);
 #endif
 
-#include "strip.h"
-#if NSTRIP > 0
-int	stripopen(dev_t dev, struct tty *tp);
-int	stripclose(struct tty *tp, int flags);
-int	striptioctl(struct tty *tp, u_long cmd, caddr_t data,
-			int flag, struct proc *p);
-int	stripinput(int c, struct tty *tp);
-int	stripstart(struct tty *tp);
-#endif
-
 #include "nmea.h"
 #if NNMEA > 0
-int	nmeaopen(dev_t, struct tty *);
-int	nmeaclose(struct tty *, int);
+int	nmeaopen(dev_t, struct tty *, struct proc *);
+int	nmeaclose(struct tty *, int, struct proc *);
 int	nmeainput(int, struct tty *);
 #endif
 
 #include "msts.h"
 #if NMSTS > 0
-int	mstsopen(dev_t, struct tty *);
-int	mstsclose(struct tty *, int);
+int	mstsopen(dev_t, struct tty *, struct proc *);
+int	mstsclose(struct tty *, int, struct proc *);
 int	mstsinput(int, struct tty *);
+#endif
+
+#include "endrun.h"
+#if NENDRUN > 0
+int	endrunopen(dev_t, struct tty *, struct proc *);
+int	endrunclose(struct tty *, int, struct proc *);
+int	endruninput(int, struct tty *);
 #endif
 
 struct	linesw linesw[] =
@@ -106,13 +103,8 @@ struct	linesw linesw[] =
 	{ ttynodisc, ttyerrclose, ttyerrio, ttyerrio, nullioctl,
 	  ttyerrinput, ttyerrstart, nullmodem },	/* 1- defunct */
 
-#if defined(COMPAT_43) || defined(COMPAT_FREEBSD) || defined(COMPAT_BSDOS)
 	{ ttyopen, ttylclose, ttread, ttwrite, nullioctl,
 	  ttyinput, ttstart, ttymodem },		/* 2- old NTTYDISC */
-#else
-	{ ttynodisc, ttyerrclose, ttyerrio, ttyerrio, nullioctl,
-	  ttyerrinput, ttyerrstart, nullmodem },	/* 2- defunct */
-#endif
 
 	/* 3- TABLDISC (defunct) */
 	{ ttynodisc, ttyerrclose, ttyerrio, ttyerrio, nullioctl,
@@ -134,13 +126,9 @@ struct	linesw linesw[] =
 	  ttyerrinput, ttyerrstart, nullmodem },
 #endif
 
-#if NSTRIP > 0
-	{ stripopen, stripclose, ttyerrio, ttyerrio, striptioctl,
-	  stripinput, stripstart, nullmodem },		/* 6- STRIPDISC */
-#else
+	/* 6- STRIPDISC (defunct) */
 	{ ttynodisc, ttyerrclose, ttyerrio, ttyerrio, nullioctl,
 	  ttyerrinput, ttyerrstart, nullmodem },
-#endif
 
 #if NNMEA > 0
 	{ nmeaopen, nmeaclose, ttread, ttwrite, nullioctl,
@@ -153,6 +141,14 @@ struct	linesw linesw[] =
 #if NMSTS > 0
 	{ mstsopen, mstsclose, ttread, ttwrite, nullioctl,
 	  mstsinput, ttstart, ttymodem },		/* 8- MSTSDISC */
+#else
+	{ ttynodisc, ttyerrclose, ttyerrio, ttyerrio, nullioctl,
+	  ttyerrinput, ttyerrstart, nullmodem },
+#endif
+
+#if NENDRUN > 0
+	{ endrunopen, endrunclose, ttread, ttwrite, nullioctl,
+	  endruninput, ttstart, ttymodem },		/* 9- ENDRUNDISC */
 #else
 	{ ttynodisc, ttyerrclose, ttyerrio, ttyerrio, nullioctl,
 	  ttyerrinput, ttyerrstart, nullmodem },

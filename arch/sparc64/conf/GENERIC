@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.234 2009/03/01 20:38:02 kettenis Exp $
+#	$OpenBSD: GENERIC,v 1.258 2010/09/26 20:39:08 miod Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -83,6 +83,7 @@ epic*	at pci?			# SMC EPIC/100 ethernet
 em*	at pci?			# Intel Pro/1000 ethernet
 #ixgb*	at pci?			# Intel Pro/10Gb ethernet
 bge*	at pci?			# Broadcom BCM570x (aka Tigon3)
+bnx*	at pci?			# Broadcom BCM5706/5708 GigE
 stge*	at pci?			# Sundance TC9021 GigE
 rl*	at pci?			# RealTek 81[23]9 ethernet
 vr*	at pci?			# VIA Rhine ethernet
@@ -96,6 +97,8 @@ jme*	at pci?			# JMicron JMC250/JMC260 Ethernet
 
 ath*	at pci?			# Atheros AR5k (802.11a/b/g)
 ath*	at cardbus?		# Atheros AR5k (802.11a/b/g)
+athn*	at pci?			# Atheros AR9k (802.11a/g/n)
+athn*	at cardbus?		# Atheros AR9k (802.11a/g/n)
 pgt*	at pci?			# Prism54 (only full-mac varients)
 acx*	at pci?			# TI ACX100/ACX111 (802.11b/g)
 acx*	at cardbus?		# TI ACX100/ACX111 (802.11b/g)
@@ -111,7 +114,6 @@ scsibus* at ahc?
 siop*	at pci?			# NCR 538XX SCSI controllers
 scsibus* at siop?
 isp*	at pci?			# Qlogic ISP [12]0x0 SCSI/FibreChannel
-option ISP_COMPILE_FW=1
 pcscp*	at pci?			# AMD 53c974 PCscsi-PCI SCSI
 scsibus* at pcscp?
 mpi*	at pci?			# LSI Logic Fusion MPT Message Passing Interface
@@ -155,13 +157,8 @@ audio*	at eap?
 audio*	at emu?
 audio*	at eso?
 
-# OPL[23] FM synthesizers
-opl*	at cmpci?
-opl*	at eso?
-
 # MIDI support
 midi*	at autri?
-midi*	at opl?
 midi*	at eap?
 
 # USB Controllers
@@ -223,6 +220,7 @@ axe*	at uhub?		# ASIX Electronics AX88172 USB Ethernet
 cue*	at uhub?		# CATC USB-EL1201A based Ethernet
 kue*	at uhub?		# Kawasaki KL5KUSB101B based Ethernet
 cdce*	at uhub?		# CDC Ethernet
+urndis*	at uhub?		# Remote NDIS devices
 udav*	at uhub?		# Davicom DM9601 based Ethernet
 mos*	at uhub?		# MOSCHIP MCS7730/7830 10/100 Ethernet
 upl*	at uhub?		# Prolific PL2301/PL2302 host-to-host `network'
@@ -230,18 +228,19 @@ ural*	at uhub?		# Ralink RT2500USB
 uath*	at uhub?		# Atheros AR5005UG/AR5005UX
 rum*	at uhub?		# Ralink RT2501USB/RT2601USB
 run*	at uhub?		# Ralink RT2700U/RT2800U/RT3000U
+zyd*	at uhub?		# Zydas ZD1211
 url*	at uhub?		# Realtek RTL8150L based adapters
 wi*	at uhub?		# WaveLAN IEEE 802.11DS
 urio*	at uhub?		# Diamond Multimedia Rio 500
 uscanner* at uhub?		# USB Scanners
-usscanner* at uhub?		# USB SCSI scanners, e.g., HP5300
-scsibus* at usscanner?
 #uyap*	at uhub?		# Y@P firmware loader
 udsbr*	at uhub?		# D-Link DSB-R100 radio
 radio*	at udsbr?		# USB radio
 ugen*	at uhub?		# USB Generic driver
 udcf*	at uhub?		# Gude Expert mouseCLOCK
 umbg*	at uhub?		# Meinberg Funkuhren USB5131
+uthum*	at uhidev?		# TEMPerHUM sensor
+utwitch* at uhidev?		# UYUREX BBU sensor
 uow*	at uhub?		# Maxim/Dallas DS2490 1-Wire adapter
 onewire* at uow?
 
@@ -283,6 +282,8 @@ sabtty* at sab?
 com*	at ebus?
 comkbd*	at ebus?
 wskbd* at comkbd? mux 1
+comms*	at ebus?
+wsmouse* at comms? mux 0
 
 # Z8530 based serial ports
 zs*	at sbus?
@@ -290,6 +291,8 @@ zs*	at fhc?
 zstty*	at zs?
 zskbd*	at zs?
 wskbd*	at zskbd? mux 1
+zsms*	at zs?
+wsmouse* at zsms? mux 0
 
 # i8042 based serial ports (PS/2 ports)
 pckbc*	at ebus?			# controller
@@ -297,8 +300,6 @@ pckbd*	at pckbc?			#  ps2 keyboard
 wskbd*	at pckbd? mux 1			#   generic keyboard layer
 pms*	at pckbc?			#  ps2 mouse
 wsmouse* at pms? mux 0			#   generic mouse
-pmsi*	at pckbc?			#  ps2 "intelli"mouse
-wsmouse* at pmsi? mux 0			#   generic mouse
 
 audioce*	at ebus?		# ebus cs4231
 
@@ -308,8 +309,12 @@ lpt*	at ebus?
 
 bbc*	at ebus?
 led*	at ebus?
+lom*	at ebus?
 pmc*	at ebus?
 ppm*	at ebus?
+wbsd*	at ebus?
+sdmmc*	at wbsd?
+scsibus* at sdmmc?
 
 # performance counters
 uperf*	at ebus?
@@ -340,6 +345,12 @@ vrng0	at vbus?
 vdsk*	at cbus?
 scsibus* at vdsk?
 vnet*	at cbus?
+vcc*	at cbus?
+vcctty*	at vcc?
+vds*	at cbus?
+vdsp*	at vds?
+vsw*	at cbus?
+vnet*	at vsw?
 
 ## Lance Ethernet - AMD7990
 le*		at sbus?
@@ -354,7 +365,8 @@ qe*		at qec?
 be*		at qec?
 
 hme*		at sbus?
-#gem*		at sbus?
+ti*		at sbus?
+gem*		at sbus?
 
 # Magma serial/parallel port devices
 magma*		at sbus?
@@ -387,9 +399,7 @@ wd*	at wdc? flags 0x0000
 dma*	at sbus?				# SBus
 esp*	at dma?					# SBus
 esp*	at sbus?
-
 isp*	at sbus?
-option ISP_COMPILE_1000_FW=1
 
 # SCSI bus layer.  SCSI devices attach to the SCSI bus, which attaches
 # to the underlying hardware controller.
@@ -402,7 +412,6 @@ sd*		at scsibus?		# SCSI disks
 st*		at scsibus?		# SCSI tapes
 cd*		at scsibus?		# SCSI CD-ROMs
 ch*		at scsibus?		# SCSI changer devices
-ss*		at scsibus?		# SCSI scanners
 safte*		at scsibus?		# SCSI accessed fault-tolerant encl
 ses*		at scsibus?		# SCSI enclosure services
 uk*		at scsibus?		# unknown SCSI devices
@@ -473,10 +482,16 @@ wsdisplay*	at cgtwelve?
 creator*	at mainbus0		# Creator3D/Elite3D framebuffers
 creator*	at upa0
 wsdisplay*	at creator?
+gfxp*		at pci?			# PGX32 framebuffer
+wsdisplay*	at gfxp?
 ifb*		at pci?			# Expert3D/XVR-500 framebuffers
 wsdisplay*	at ifb?
+machfb*		at pci?			# PGX/PGX64 framebuffers
+wsdisplay*	at machfb?
 mgx*		at sbus?		# SMS MGX/MGXPlus framebuffer
 wsdisplay*	at mgx?
+radeonfb*	at pci?			# XVR-100 framebuffer
+wsdisplay*	at radeonfb?
 raptor*		at pci?			# Raptor framebuffer
 wsdisplay*	at raptor?
 rfx*		at sbus?		# RasterFlex framebuffer series
@@ -519,6 +534,7 @@ option ONEWIREVERBOSE
 owid*	at onewire?			# ID
 owsbm*	at onewire?			# Smart Battery Monitor
 owtemp* at onewire?			# Temperature
+owctr*	at onewire?			# Counter device
 
 pseudo-device	hotplug	1		# devices hot plugging
 pseudo-device	wsmux	2		# mouse & keyboard multiplexor

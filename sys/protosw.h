@@ -1,4 +1,4 @@
-/*	$OpenBSD: protosw.h,v 1.12 2008/05/25 17:57:13 deraadt Exp $	*/
+/*	$OpenBSD: protosw.h,v 1.14 2010/10/18 04:31:01 guenther Exp $	*/
 /*	$NetBSD: protosw.h,v 1.10 1996/04/09 20:55:32 cgd Exp $	*/
 
 /*-
@@ -73,7 +73,7 @@ struct protosw {
 					/* output to protocol (from above) */
 	int	(*pr_output)(struct mbuf *, ...);
 					/* control input (from below) */
-	void	*(*pr_ctlinput)(int, struct sockaddr *, void *);
+	void	*(*pr_ctlinput)(int, struct sockaddr *, u_int, void *);
 					/* control output (from above) */
 	int	(*pr_ctloutput)(int, struct socket *, int, int, struct mbuf **);
 
@@ -142,7 +142,9 @@ struct protosw {
 #define	PRU_SLOWTIMO		19	/* 500ms timeout */
 #define	PRU_PROTORCV		20	/* receive from below */
 #define	PRU_PROTOSEND		21	/* send to below */
+#ifdef COMPAT_O47
 #define PRU_PEEREID		22	/* get local peer eid */
+#endif /* COMPAT_O47 */
 
 #define	PRU_NREQ		22
 

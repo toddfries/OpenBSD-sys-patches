@@ -1,4 +1,4 @@
-/*	$OpenBSD: tda.c,v 1.4 2008/02/27 17:25:00 robert Exp $ */
+/*	$OpenBSD: tda.c,v 1.7 2010/08/27 18:58:57 robert Exp $ */
 
 /*
  * Copyright (c) 2008 Robert Nagy <robert@openbsd.org>
@@ -39,14 +39,14 @@
 #define TDA_PSFAN_ON            0x1f
 #define TDA_PSFAN_OFF           0x00
 
-/* Internal and External temperature senor numbers */
+/* Internal and External temperature sensor numbers */
 #define SENSOR_TEMP_EXT		0
 #define SENSOR_TEMP_INT		1
 
 #define CPU_TEMP_MAX		(67 * 1000000 + 273150000)
 #define CPU_TEMP_MIN		(57 * 1000000 + 273150000)
-#define SYS_TEMP_MAX		(30 * 1000000 + 273150000)
-#define SYS_TEMP_MIN		(20 * 1000000 + 273150000)
+#define SYS_TEMP_MAX		(35 * 1000000 + 273150000)
+#define SYS_TEMP_MIN		(25 * 1000000 + 273150000)
 
 struct tda_softc {
 	struct device		sc_dev;
@@ -99,6 +99,7 @@ tda_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct tda_softc *sc = (struct tda_softc *)self;
 	struct i2c_attach_args *ia = aux;
+	struct ksensordev *ksens;
 	int i;
 
 	sc->sc_tag = ia->ia_tag;
@@ -114,8 +115,8 @@ tda_attach(struct device *parent, struct device *self, void *aux)
 	tda_setspeed(sc);
 
 	/* Get the number of sensor devices. */
-	for (i = 0; i < MAXSENSORDEVICES; i++) {
-		if (sensordev_get(i) == NULL)
+	for (i = 0; ; i++) {
+		if (sensordev_get(i, &ksens) == ENOENT)
 			break;
 	}
 	sc->sc_nsensors = i;
@@ -184,23 +185,23 @@ tda_adjust(void *v)
 	struct tda_softc *sc = v;
 	struct ksensor *ks;
 	u_int64_t ctemp, stemp;
-	int i;
+	int i, err;
 
 	/* Default to running the fans at maximum speed. */
 	sc->sc_cfan_speed = sc->sc_sfan_speed = TDA_FANSPEED_MAX;
 
 	ctemp = stemp = 0;
 	for (i = 0; i < sc->sc_nsensors; i++) {
-		ks = sensor_find(i, SENSOR_TEMP, SENSOR_TEMP_EXT);
-		if (ks == NULL) {
+		err = sensor_find(i, SENSOR_TEMP, SENSOR_TEMP_EXT, &ks);
+		if (err) {
 			printf("%s: failed to get external sensor\n",
 			    DEVNAME(sc));
 			goto out;
 		}
 		ctemp = MAX(ctemp, ks->value);
 
-		ks = sensor_find(i, SENSOR_TEMP, SENSOR_TEMP_INT);
-		if (ks == NULL) {
+		err = sensor_find(i, SENSOR_TEMP, SENSOR_TEMP_INT, &ks);
+		if (err) {
 			printf("%s: failed to get internal sensors\n",
 			    DEVNAME(sc));
 			goto out;

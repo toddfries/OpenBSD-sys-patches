@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_iwnvar.h,v 1.9 2009/02/15 08:58:22 damien Exp $	*/
+/*	$OpenBSD: if_iwnvar.h,v 1.21 2010/09/07 16:21:45 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 2007, 2008
@@ -79,30 +79,19 @@ struct iwn_tx_ring {
 	int			cur;
 };
 
-#define IWN_RBUF_COUNT	(IWN_RX_RING_COUNT + 32)
-
 struct iwn_softc;
-
-struct iwn_rbuf {
-	struct iwn_softc	*sc;
-	caddr_t			vaddr;
-	bus_addr_t		paddr;
-	SLIST_ENTRY(iwn_rbuf)	next;
-};
 
 struct iwn_rx_data {
 	struct mbuf	*m;
+	bus_dmamap_t	map;
 };
 
 struct iwn_rx_ring {
 	struct iwn_dma_info	desc_dma;
 	struct iwn_dma_info	stat_dma;
-	struct iwn_dma_info	buf_dma;
 	uint32_t		*desc;
 	struct iwn_rx_status	*stat;
 	struct iwn_rx_data	data[IWN_RX_RING_COUNT];
-	struct iwn_rbuf		rbuf[IWN_RBUF_COUNT];
-	SLIST_HEAD(, iwn_rbuf)	freelist;
 	int			cur;
 };
 
@@ -161,6 +150,7 @@ struct iwn_fw_part {
 
 struct iwn_fw_info {
 	u_char			*data;
+	size_t			size;
 	struct iwn_fw_part	init;
 	struct iwn_fw_part	main;
 	struct iwn_fw_part	boot;
@@ -170,7 +160,6 @@ struct iwn_hal {
 	int		(*load_firmware)(struct iwn_softc *);
 	void		(*read_eeprom)(struct iwn_softc *);
 	int		(*post_alive)(struct iwn_softc *);
-	int		(*apm_init)(struct iwn_softc *);
 	int		(*nic_config)(struct iwn_softc *);
 	void		(*update_sched)(struct iwn_softc *, int, int, uint8_t,
 			    uint16_t);
@@ -181,15 +170,16 @@ struct iwn_hal {
 	int		(*set_gains)(struct iwn_softc *);
 	int		(*add_node)(struct iwn_softc *, struct iwn_node_info *,
 			    int);
-	void		(*tx_done)(struct iwn_softc *, struct iwn_rx_desc *);
+	void		(*tx_done)(struct iwn_softc *, struct iwn_rx_desc *,
+			    struct iwn_rx_data *);
 #ifndef IEEE80211_NO_HT
 	void		(*ampdu_tx_start)(struct iwn_softc *,
 			    struct ieee80211_node *, uint8_t, uint16_t);
 	void		(*ampdu_tx_stop)(struct iwn_softc *, uint8_t,
 			    uint16_t);
 #endif
-	const struct	iwn_sensitivity_limits *limits;
 	int		ntxqs;
+	int		ndmachnls;
 	uint8_t		broadcast_id;
 	int		rxonsz;
 	int		schedsz;
@@ -213,11 +203,17 @@ struct iwn_softc {
 
 	u_int			sc_flags;
 #define IWN_FLAG_HAS_5GHZ	(1 << 0)
-#define IWN_FLAG_FIRST_BOOT	(1 << 1)
+#define IWN_FLAG_HAS_OTPROM	(1 << 1)
+#define IWN_FLAG_CALIB_DONE	(1 << 2)
+#define IWN_FLAG_USE_ICT	(1 << 3)
+#define IWN_FLAG_INTERNAL_PA	(1 << 4)
+#define IWN_FLAG_BUSY		(1 << 5)
 
 	uint8_t 		hw_type;
 	const struct iwn_hal	*sc_hal;
 	const char		*fwname;
+	const struct iwn_sensitivity_limits
+				*limits;
 
 	/* TX scheduler rings. */
 	struct iwn_dma_info	sched_dma;
@@ -229,6 +225,11 @@ struct iwn_softc {
 
 	/* Firmware DMA transfer. */
 	struct iwn_dma_info	fw_dma;
+
+	/* ICT table. */
+	struct iwn_dma_info	ict_dma;
+	uint32_t		*ict;
+	int			ict_cur;
 
 	/* TX/RX rings. */
 	struct iwn_tx_ring	txq[IWN5000_NTXQUEUES];
@@ -261,25 +262,29 @@ struct iwn_softc {
 	int			noise;
 	uint32_t		qfullmsk;
 
+	uint32_t		prom_base;
 	struct iwn4965_eeprom_band
 				bands[IWN_NBANDS];
 	uint16_t		rfcfg;
+	uint8_t			calib_ver;
 	char			eeprom_domain[4];
 	uint32_t		eeprom_crystal;
 	int16_t			eeprom_voltage;
 	int8_t			maxpwr2GHz;
 	int8_t			maxpwr5GHz;
 	int8_t			maxpwr[IEEE80211_CHAN_MAX];
+	int8_t			enh_maxpwr[35];
 
-	uint32_t		critical_temp;
+	int32_t			temp_off;
+	uint32_t		int_mask;
 	uint8_t			ntxchains;
 	uint8_t			nrxchains;
-	uint8_t			txantmsk;
-	uint8_t			rxantmsk;
-	uint8_t			antmsk;
+	uint8_t			txchainmask;
+	uint8_t			rxchainmask;
+	uint8_t			chainmask;
 
 	int			sc_tx_timer;
-	void			*powerhook;
+	struct workq_task	sc_resume_wqt;
 
 #if NBPFILTER > 0
 	caddr_t			sc_drvbpf;

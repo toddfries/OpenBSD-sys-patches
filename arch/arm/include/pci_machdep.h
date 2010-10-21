@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.h,v 1.6 2008/12/06 19:59:38 tedu Exp $	*/
+/*	$OpenBSD: pci_machdep.h,v 1.8 2010/06/29 22:08:28 jordan Exp $	*/
 /*	$NetBSD: pci_machdep.h,v 1.2 2002/05/15 19:23:52 thorpej Exp $	*/
 
 /*
@@ -68,7 +68,7 @@ struct arm32_pci_chipset {
 			    pci_intr_handle_t *);
 	const char	*(*pc_intr_string)(void *, pci_intr_handle_t);
 	void		*(*pc_intr_establish)(void *, pci_intr_handle_t,
-			    int, int (*)(void *), void *, char *);
+			    int, int (*)(void *), void *, const char *);
 	void		(*pc_intr_disestablish)(void *, void *);
 };
 
@@ -95,3 +95,5 @@ struct arm32_pci_chipset {
     (*(c)->pc_intr_establish)((c)->pc_intr_v, (ih), (l), (h), (a), (n))
 #define	pci_intr_disestablish(c, iv)					\
     (*(c)->pc_intr_disestablish)((c)->pc_intr_v, (iv))
+
+#define	pci_dev_postattach(a, b)

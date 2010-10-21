@@ -1,4 +1,4 @@
-/*	$OpenBSD: agp_ali.c,v 1.7 2008/11/09 22:47:54 oga Exp $	*/
+/*	$OpenBSD: agp_ali.c,v 1.12 2010/08/07 18:15:38 oga Exp $	*/
 /*	$NetBSD: agp_ali.c,v 1.2 2001/09/15 00:25:00 thorpej Exp $	*/
 
 
@@ -34,7 +34,6 @@
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/systm.h>
-#include <sys/proc.h>
 #include <sys/conf.h>
 #include <sys/device.h>
 #include <sys/lock.h>
@@ -55,19 +54,26 @@ struct agp_ali_softc {
 	struct agp_gatt		*gatt;
 	pci_chipset_tag_t	 asc_pc;
 	pcitag_t		 asc_tag;
-	bus_size_t		 initial_aperture;
+	bus_addr_t		 asc_apaddr;
+	bus_size_t		 asc_apsize;
+	pcireg_t		 asc_attbase;
+	pcireg_t		 asc_tlbctrl;
 };
 
 void	agp_ali_attach(struct device *, struct device *, void *);
+int	agp_ali_activate(struct device *, int);
+void	agp_ali_save(struct agp_ali_softc *);
+void	agp_ali_restore(struct agp_ali_softc *);
 int	agp_ali_probe(struct device *, void *, void *);
 bus_size_t agp_ali_get_aperture(void *);
 int	agp_ali_set_aperture(void *sc, bus_size_t);
-int	agp_ali_bind_page(void *, off_t, bus_addr_t);
-int	agp_ali_unbind_page(void *, off_t);
+void	agp_ali_bind_page(void *, bus_addr_t, paddr_t, int);
+void	agp_ali_unbind_page(void *, bus_addr_t);
 void	agp_ali_flush_tlb(void *);
 
 struct cfattach aliagp_ca = {
-        sizeof(struct agp_ali_softc), agp_ali_probe, agp_ali_attach
+	sizeof(struct agp_ali_softc), agp_ali_probe, agp_ali_attach,
+	NULL, agp_ali_activate
 };
 
 struct cfdriver aliagp_cd = {
@@ -75,7 +81,6 @@ struct cfdriver aliagp_cd = {
 };
 
 const struct agp_methods agp_ali_methods = {
-	agp_ali_get_aperture,
 	agp_ali_bind_page,
 	agp_ali_unbind_page,
 	agp_ali_flush_tlb,
@@ -105,18 +110,24 @@ agp_ali_attach(struct device *parent, struct device *self, void *aux)
 
 	asc->asc_tag = pa->pa_tag;
 	asc->asc_pc = pa->pa_pc;
-	asc->initial_aperture = agp_ali_get_aperture(asc);
+	asc->asc_apsize = agp_ali_get_aperture(asc);
+
+	if (pci_mapreg_info(pa->pa_pc, pa->pa_tag, AGP_APBASE,
+	    PCI_MAPREG_TYPE_MEM, &asc->asc_apaddr, NULL, NULL) != 0) {
+		printf(": can't get aperture info\n");
+		return;
+	}
 
 	for (;;) {
-		bus_size_t size = agp_ali_get_aperture(asc);
-		gatt = agp_alloc_gatt(pa->pa_dmat, size);
+		gatt = agp_alloc_gatt(pa->pa_dmat, asc->asc_apsize);
 		if (gatt != NULL)
 			break;
 		/*
 		 * almost certainly error allocating contigious dma memory
 		 * so reduce aperture so that the gatt size reduces.
 		 */
-		if (agp_ali_set_aperture(asc, size / 2)) {
+		asc->asc_apsize /= 2;
+		if (agp_ali_set_aperture(asc, asc->asc_apsize)) {
 			printf("failed to set aperture\n");
 			return;
 		}
@@ -134,7 +145,7 @@ agp_ali_attach(struct device *parent, struct device *self, void *aux)
 	pci_conf_write(asc->asc_pc, asc->asc_tag, AGP_ALI_TLBCTRL, reg);
 
 	asc->agpdev = (struct agp_softc *)agp_attach_bus(pa, &agp_ali_methods,
-	    AGP_APBASE, PCI_MAPREG_TYPE_MEM, &asc->dev);
+	    asc->asc_apaddr, asc->asc_apsize, &asc->dev);
 	return;
 }
 
@@ -166,6 +177,45 @@ agp_ali_detach(struct agp_softc *sc)
 	return (0);
 }
 #endif
+
+int
+agp_ali_activate(struct device *arg, int act)
+{
+	struct agp_ali_softc *asc = (struct agp_ali_softc *)arg;
+
+	switch (act) {
+	case DVACT_SUSPEND:
+		agp_ali_save(asc);
+		break;
+	case DVACT_RESUME:
+		agp_ali_restore(asc);
+		break;
+	}
+
+	return (0);
+}
+
+void
+agp_ali_save(struct agp_ali_softc *asc)
+{
+	asc->asc_attbase = pci_conf_read(asc->asc_pc, asc->asc_tag,
+	    AGP_ALI_ATTBASE);
+	asc->asc_tlbctrl = pci_conf_read(asc->asc_pc, asc->asc_tag,
+	    AGP_ALI_TLBCTRL);
+}
+
+void
+agp_ali_restore(struct agp_ali_softc *asc)
+{
+
+	/* Install the gatt and aperture size. */
+	pci_conf_write(asc->asc_pc, asc->asc_tag, AGP_ALI_ATTBASE,
+	    asc->asc_attbase);
+	
+	/* Enable the TLB. */
+	pci_conf_write(asc->asc_pc, asc->asc_tag, AGP_ALI_TLBCTRL,
+	    asc->asc_tlbctrl);
+}
 
 #define M 1024*1024
 
@@ -221,28 +271,21 @@ agp_ali_set_aperture(void *sc, bus_size_t aperture)
 	return (0);
 }
 
-int
-agp_ali_bind_page(void *sc, off_t offset, bus_addr_t physical)
+void
+agp_ali_bind_page(void *sc, bus_addr_t offset, paddr_t physical, int flags)
 {
 	struct agp_ali_softc *asc = sc;
 
-	if (offset < 0 || offset >= (asc->gatt->ag_entries << AGP_PAGE_SHIFT))
-		return (EINVAL);
-
-	asc->gatt->ag_virtual[offset >> AGP_PAGE_SHIFT] = physical;
-	return (0);
+	asc->gatt->ag_virtual[(offset - asc->asc_apaddr) >> AGP_PAGE_SHIFT] =
+	    physical;
 }
 
-int
-agp_ali_unbind_page(void *sc, off_t offset)
+void
+agp_ali_unbind_page(void *sc, bus_size_t offset)
 {
 	struct agp_ali_softc *asc = sc;
 
-	if (offset < 0 || offset >= (asc->gatt->ag_entries << AGP_PAGE_SHIFT))
-		return (EINVAL);
-
-	asc->gatt->ag_virtual[offset >> AGP_PAGE_SHIFT] = 0;
-	return (0);
+	asc->gatt->ag_virtual[(offset - asc->asc_apaddr) >> AGP_PAGE_SHIFT] = 0;
 }
 
 void

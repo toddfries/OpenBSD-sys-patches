@@ -1,4 +1,4 @@
-/*	$OpenBSD: ffs_softdep.c,v 1.98 2008/06/14 10:55:21 mk Exp $	*/
+/*	$OpenBSD: ffs_softdep.c,v 1.102 2010/03/29 23:33:39 krw Exp $	*/
 
 /*
  * Copyright 1998, 2000 Marshall Kirk McKusick. All Rights Reserved.
@@ -5417,7 +5417,7 @@ clear_inodedeps(p)
 	struct proc *p;
 {
 	struct inodedep_hashhead *inodedephd;
-	struct inodedep *inodedep;
+	struct inodedep *inodedep = NULL;
 	static int next = 0;
 	struct mount *mp;
 	struct vnode *vp;
@@ -5724,7 +5724,7 @@ worklist_print(struct worklist *wk, int full, int (*pr)(const char *, ...))
 		break;
 	case D_NEWBLK:
 		newblk = WK_NEWBLK(wk);
-		(*pr)("fs %p newblk %d state %d bmsafemap %p\n",
+		(*pr)("fs %p newblk %lld state %d bmsafemap %p\n",
 		    newblk->nb_fs, newblk->nb_newblkno, newblk->nb_state,
 		    newblk->nb_bmsafemap);
 		break;
@@ -5754,7 +5754,7 @@ worklist_print(struct worklist *wk, int full, int (*pr)(const char *, ...))
 		break;
 	case D_FREEFRAG:
 		freefrag = WK_FREEFRAG(wk);
-		(*pr)("vnode %p mp %p blkno %d fsize %ld ino %u\n",
+		(*pr)("vnode %p mp %p blkno %lld fsize %ld ino %u\n",
 		    freefrag->ff_devvp, freefrag->ff_mnt, freefrag->ff_blkno,
 		    freefrag->ff_fragsize, freefrag->ff_inum);
 		break;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: iha.h,v 1.16 2009/02/16 21:19:06 miod Exp $ */
+/*	$OpenBSD: iha.h,v 1.18 2010/10/03 21:14:40 krw Exp $ */
 /*-------------------------------------------------------------------------
  *
  * Device driver for the INI-9XXXU/UW or INIC-940/950  PCI SCSI Controller.
@@ -167,6 +167,9 @@ struct iha_softc {
 	TAILQ_HEAD(, iha_scb) HCS_FreeScb, HCS_PendScb, HCS_DoneScb;
 
 	struct tcs HCS_Tcs[IHA_MAX_TARGETS];
+
+	struct mutex		sc_scb_mtx;	/* scb queue protection */
+	struct scsi_iopool	sc_iopool;
 };
 
 /*
@@ -422,7 +425,7 @@ struct iha_nvram {
 
 /* Functions used by higher SCSI layers, the kernel, or iha.c and iha_pci.c  */
 
-int  iha_scsi_cmd(struct scsi_xfer *);
+void iha_scsi_cmd(struct scsi_xfer *);
 int  iha_intr(void *);
 void iha_minphys(struct buf *, struct scsi_link *);
 int  iha_init_tulip(struct iha_softc *);

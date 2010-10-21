@@ -1,4 +1,4 @@
-/*	$OpenBSD: mptramp.s,v 1.11 2009/02/03 11:24:19 mikeb Exp $	*/
+/*	$OpenBSD: mptramp.s,v 1.13 2010/04/01 19:48:50 kettenis Exp $	*/
 
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -104,8 +104,8 @@
 #define HALT(x)	1: movl (%edi),%ebx;cmpl $ x,%ebx ; jle 1b ; movl $x,4(%edi)
 #define HALTT(x,y)	movl y,8(%edi); HALT(x)
 #else
-#define HALT(x)	/**/
-#define HALTT(x,y) /**/
+#define HALT(x)
+#define HALTT(x,y)
 #endif
 
 	.globl	_C_LABEL(cpu),_C_LABEL(cpu_id),_C_LABEL(cpu_vendor)
@@ -171,10 +171,16 @@ _TRMP_LABEL(mp_startup)
 # ok, we're now running with paging enabled and sharing page tables with cpu0.
 # figure out which processor we really are, what stack we should be on, etc.
 
-	movl	_C_LABEL(local_apic)+LAPIC_ID,%ecx
-	shrl	$LAPIC_ID_SHIFT,%ecx
-	leal	0(,%ecx,4),%ecx
+	movl	_C_LABEL(local_apic)+LAPIC_ID,%eax
+	shrl	$LAPIC_ID_SHIFT,%eax
+	xorl	%ebx,%ebx
+1:
+	leal	0(,%ebx,4),%ecx
+	incl	%ebx
 	movl	_C_LABEL(cpu_info)(%ecx),%ecx
+	movl	CPU_INFO_APICID(%ecx),%edx
+	cmpl	%eax,%edx
+	jne 1b
 
 	HALTT(0x7, %ecx)
 

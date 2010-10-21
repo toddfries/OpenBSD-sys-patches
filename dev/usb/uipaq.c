@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipaq.c,v 1.16 2008/06/26 05:42:18 ray Exp $	*/
+/*	$OpenBSD: uipaq.c,v 1.18 2010/09/24 08:33:59 yuo Exp $	*/
 
 /*
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -128,7 +128,7 @@ static const struct uipaq_type uipaq_devs[] = {
 int uipaq_match(struct device *, void *, void *); 
 void uipaq_attach(struct device *, struct device *, void *); 
 int uipaq_detach(struct device *, int); 
-int uipaq_activate(struct device *, enum devact); 
+int uipaq_activate(struct device *, int); 
 
 struct cfdriver uipaq_cd = { 
 	NULL, "uipaq", DV_DULL 
@@ -358,7 +358,7 @@ uipaq_set(void *addr, int portno, int reg, int onoff)
 
 
 int
-uipaq_activate(struct device *self, enum devact act)
+uipaq_activate(struct device *self, int act)
 {
 	struct uipaq_softc *sc = (struct uipaq_softc *)self;
 	int rv = 0;
@@ -383,7 +383,6 @@ uipaq_detach(struct device *self, int flags)
 	int rv = 0;
 
 	DPRINTF(("uipaq_detach: sc=%p flags=%d\n", sc, flags));
-	sc->sc_dying = 1;
 	if (sc->sc_subdev != NULL) {
 		rv |= config_detach(sc->sc_subdev, flags);
 		sc->sc_subdev = NULL;

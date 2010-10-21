@@ -1,4 +1,4 @@
-/*	$OpenBSD: rt2560.c,v 1.43 2009/03/29 21:53:52 sthen Exp $  */
+/*	$OpenBSD: rt2560.c,v 1.57 2010/09/07 16:21:42 deraadt Exp $  */
 
 /*-
  * Copyright (c) 2005, 2006
@@ -26,7 +26,6 @@
 
 #include <sys/param.h>
 #include <sys/sockio.h>
-#include <sys/sysctl.h>
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
@@ -149,7 +148,6 @@ void		rt2560_read_eeprom(struct rt2560_softc *);
 int		rt2560_bbp_init(struct rt2560_softc *);
 int		rt2560_init(struct ifnet *);
 void		rt2560_stop(struct ifnet *, int);
-void		rt2560_power(int, void *);
 
 static const struct {
 	uint32_t	reg;
@@ -266,7 +264,6 @@ rt2560_attach(void *xsc, int id)
 
 	ifp->if_softc = sc;
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
-	ifp->if_init = rt2560_init;
 	ifp->if_ioctl = rt2560_ioctl;
 	ifp->if_start = rt2560_start;
 	ifp->if_watchdog = rt2560_watchdog;
@@ -296,20 +293,6 @@ rt2560_attach(void *xsc, int id)
 	sc->sc_txtap.wt_ihdr.it_len = htole16(sc->sc_txtap_len);
 	sc->sc_txtap.wt_ihdr.it_present = htole32(RT2560_TX_RADIOTAP_PRESENT);
 #endif
-
-	/*
-	 * Make sure the interface is shutdown during reboot.
-	 */
-	sc->sc_sdhook = shutdownhook_establish(rt2560_shutdown, sc);
-	if (sc->sc_sdhook == NULL) {
-		printf("%s: WARNING: unable to establish shutdown hook\n",
-		    sc->sc_dev.dv_xname);
-	}
-	sc->sc_powerhook = powerhook_establish(rt2560_power, sc);
-	if (sc->sc_powerhook == NULL) {
-		printf("%s: WARNING: unable to establish power hook\n",
-		    sc->sc_dev.dv_xname);
-	}
 	return 0;
 
 fail5:	rt2560_free_tx_ring(sc, &sc->bcnq);
@@ -330,11 +313,6 @@ rt2560_detach(void *xsc)
 
 	ieee80211_ifdetach(ifp);	/* free all nodes */
 	if_detach(ifp);
-	
-	if (sc->sc_powerhook != NULL)
-		powerhook_disestablish(sc->sc_powerhook);
-	if (sc->sc_sdhook != NULL)
-		shutdownhook_disestablish(sc->sc_sdhook);
 
 	rt2560_free_tx_ring(sc, &sc->txq);
 	rt2560_free_tx_ring(sc, &sc->atimq);
@@ -343,6 +321,26 @@ rt2560_detach(void *xsc)
 	rt2560_free_rx_ring(sc, &sc->rxq);
 
 	return 0;
+}
+
+void
+rt2560_suspend(void *xsc)
+{
+	struct rt2560_softc *sc = xsc;
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
+
+	if (ifp->if_flags & IFF_RUNNING)
+		rt2560_stop(ifp, 1);
+}
+
+void
+rt2560_resume(void *xsc)
+{
+	struct rt2560_softc *sc = xsc;
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
+
+	if (ifp->if_flags & IFF_UP)
+		rt2560_init(ifp);
 }
 
 int
@@ -365,7 +363,7 @@ rt2560_alloc_tx_ring(struct rt2560_softc *sc, struct rt2560_tx_ring *ring,
 	}
 
 	error = bus_dmamem_alloc(sc->sc_dmat, count * RT2560_TX_DESC_SIZE,
-	    PAGE_SIZE, 0, &ring->seg, 1, &nsegs, BUS_DMA_NOWAIT);
+	    PAGE_SIZE, 0, &ring->seg, 1, &nsegs, BUS_DMA_NOWAIT | BUS_DMA_ZERO);
 	if (error != 0) {
 		printf("%s: could not allocate DMA memory\n",
 		    sc->sc_dev.dv_xname);
@@ -389,7 +387,6 @@ rt2560_alloc_tx_ring(struct rt2560_softc *sc, struct rt2560_tx_ring *ring,
 		goto fail;
 	}
 
-	memset(ring->desc, 0, count * RT2560_TX_DESC_SIZE);
 	ring->physaddr = ring->map->dm_segs->ds_addr;
 
 	ring->data = malloc(count * sizeof (struct rt2560_tx_data), M_DEVBUF,
@@ -510,7 +507,7 @@ rt2560_alloc_rx_ring(struct rt2560_softc *sc, struct rt2560_rx_ring *ring,
 	}
 
 	error = bus_dmamem_alloc(sc->sc_dmat, count * RT2560_RX_DESC_SIZE,
-	    PAGE_SIZE, 0, &ring->seg, 1, &nsegs, BUS_DMA_NOWAIT);
+	    PAGE_SIZE, 0, &ring->seg, 1, &nsegs, BUS_DMA_NOWAIT | BUS_DMA_ZERO);
 	if (error != 0) {
 		printf("%s: could not allocate DMA memory\n",
 		    sc->sc_dev.dv_xname);
@@ -534,7 +531,6 @@ rt2560_alloc_rx_ring(struct rt2560_softc *sc, struct rt2560_rx_ring *ring,
 		goto fail;
 	}
 
-	memset(ring->desc, 0, count * RT2560_RX_DESC_SIZE);
 	ring->physaddr = ring->map->dm_segs->ds_addr;
 
 	ring->data = malloc(count * sizeof (struct rt2560_rx_data), M_DEVBUF,
@@ -715,7 +711,7 @@ rt2560_amrr_timeout(void *arg)
 #endif
 	splx(s);
 
-	timeout_add(&sc->amrr_to, hz / 2);
+	timeout_add_msec(&sc->amrr_to, 500);
 }
 
 void
@@ -758,7 +754,7 @@ rt2560_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 
 	case IEEE80211_S_SCAN:
 		rt2560_set_chan(sc, ic->ic_bss->ni_chan);
-		timeout_add(&sc->scan_to, hz / 5);
+		timeout_add_msec(&sc->scan_to, 200);
 		break;
 
 	case IEEE80211_S_AUTH:
@@ -809,7 +805,7 @@ rt2560_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 		if (ic->ic_opmode != IEEE80211_M_MONITOR) {
 			/* start automatic rate control timer */
 			if (ic->ic_fixed_rate == -1)
-				timeout_add(&sc->amrr_to, hz / 2);
+				timeout_add_msec(&sc->amrr_to, 500);
 
 			rt2560_enable_tsf_sync(sc);
 		}
@@ -1331,7 +1327,10 @@ rt2560_intr(void *arg)
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
 	uint32_t r;
 
-	if ((r = RAL_READ(sc, RT2560_CSR7)) == 0)
+	r = RAL_READ(sc, RT2560_CSR7);
+	if (__predict_false(r == 0xffffffff))
+		return 0;	/* device likely went away */
+	if (r == 0)
 		return 0;	/* not for us */
 
 	/* disable interrupts */
@@ -2721,44 +2720,6 @@ rt2560_stop(struct ifnet *ifp, int disable)
 			sc->sc_flags &= ~RT2560_ENABLED;
 		}
 	}
-}
-
-void
-rt2560_power(int why, void *arg)
-{
-	struct rt2560_softc *sc = arg;
-	struct ifnet *ifp = &sc->sc_ic.ic_if;
-	int s;
-
-	DPRINTF(("%s: rt2560_power(%d)\n", sc->sc_dev.dv_xname, why));
-
-	s = splnet();
-	switch (why) {
-	case PWR_SUSPEND:
-	case PWR_STANDBY:
-		rt2560_stop(ifp, 1);
-		if (sc->sc_power != NULL)
-			(*sc->sc_power)(sc, why);
-		break;
-	case PWR_RESUME:
-		if (ifp->if_flags & IFF_UP) {
-			rt2560_init(ifp);
-			if (sc->sc_power != NULL)
-				(*sc->sc_power)(sc, why);
-			if (ifp->if_flags & IFF_RUNNING)
-				rt2560_start(ifp);
-		}
-		break;
-	}
-	splx(s);
-}
-
-void
-rt2560_shutdown(void *arg)
-{
-	struct rt2560_softc *sc = arg;
-
-	rt2560_stop(&sc->sc_ic.ic_if, 1);
 }
 
 struct cfdriver ral_cd = {

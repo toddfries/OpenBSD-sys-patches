@@ -1,4 +1,4 @@
-/*	$OpenBSD: shpcic.c,v 1.7 2007/07/11 18:21:35 miod Exp $	*/
+/*	$OpenBSD: shpcic.c,v 1.11 2010/04/04 12:49:30 miod Exp $	*/
 /*	$NetBSD: shpcic.c,v 1.10 2005/12/24 20:07:32 perry Exp $	*/
 
 /*
@@ -142,6 +142,8 @@ shpcic_attach(struct device *parent, struct device *self, void *aux)
 	const struct shpcic_product *spp;
 	struct shpcic_softc *sc = (struct shpcic_softc *)self;
 	struct pcibus_attach_args pba;
+	struct extent *io_ex;
+	struct extent *mem_ex;
 
 	shpcic_found = 1;
 
@@ -248,15 +250,25 @@ shpcic_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_iobus_space.bus_size =  SH4_PCIC_IO_SIZE;
 	sc->sc_iobus_space.bus_io = 1;;
 
+	io_ex = extent_create("pciio", 0, 0xffffffff, M_DEVBUF, NULL, 0,
+	    EX_NOWAIT | EX_FILLED);
+	if (io_ex != NULL)
+		extent_free(io_ex, SH4_PCIC_IO, SH4_PCIC_IO_SIZE, EX_NOWAIT);
+	mem_ex = extent_create("pcimem", 0, 0xffffffff, M_DEVBUF, NULL, 0,
+	    EX_NOWAIT | EX_FILLED);
+	if (mem_ex != NULL)
+		extent_free(mem_ex, SH4_PCIC_MEM, SH4_PCIC_MEM_SIZE, EX_NOWAIT);
+
 	sc->sc_pci_chipset = shpcic_get_bus_mem_tag();
-	pci_addr_fixup(sc, 1);
-	
+
 	/* PCI bus */
 	memset(&pba, 0, sizeof(pba));
 	pba.pba_busname = "pci";
 	pba.pba_iot = shpcic_get_bus_io_tag();
 	pba.pba_memt = shpcic_get_bus_mem_tag();
 	pba.pba_dmat = shpcic_get_bus_dma_tag();
+	pba.pba_ioex = io_ex;
+	pba.pba_memex = mem_ex;
 	pba.pba_pc = NULL;
 	pba.pba_domain = pci_ndomains++;
 	pba.pba_bus = 0;
@@ -367,6 +379,12 @@ void
 shpcic_iomem_free(void *v, bus_space_handle_t bsh, bus_size_t size)
 {
 	/* Nothing to do */
+}
+
+void *
+shpcic_iomem_vaddr(void *v, bus_space_handle_t bsh)
+{
+	return ((void *)bsh);
 }
 
 /*
@@ -1174,7 +1192,7 @@ shpcic_mem_set_region_4(void *v, bus_space_handle_t bsh,
  * copy region
  */
 void
-shpcic_io_copy_region_1(void *v, bus_space_handle_t bsh1,
+shpcic_io_copy_1(void *v, bus_space_handle_t bsh1,
     bus_size_t off1, bus_space_handle_t bsh2, bus_size_t off2, bus_size_t count)
 {
 	u_long addr1 = bsh1 + off1;
@@ -1201,7 +1219,7 @@ shpcic_io_copy_region_1(void *v, bus_space_handle_t bsh1,
 }
 
 void
-shpcic_io_copy_region_2(void *v, bus_space_handle_t bsh1,
+shpcic_io_copy_2(void *v, bus_space_handle_t bsh1,
     bus_size_t off1, bus_space_handle_t bsh2, bus_size_t off2, bus_size_t count)
 {
 	u_long addr1 = bsh1 + off1;
@@ -1228,7 +1246,7 @@ shpcic_io_copy_region_2(void *v, bus_space_handle_t bsh1,
 }
 
 void
-shpcic_io_copy_region_4(void *v, bus_space_handle_t bsh1,
+shpcic_io_copy_4(void *v, bus_space_handle_t bsh1,
     bus_size_t off1, bus_space_handle_t bsh2, bus_size_t off2, bus_size_t count)
 {
 	u_long addr1 = bsh1 + off1;
@@ -1255,7 +1273,7 @@ shpcic_io_copy_region_4(void *v, bus_space_handle_t bsh1,
 }
 
 void
-shpcic_mem_copy_region_1(void *v, bus_space_handle_t bsh1,
+shpcic_mem_copy_1(void *v, bus_space_handle_t bsh1,
     bus_size_t off1, bus_space_handle_t bsh2, bus_size_t off2, bus_size_t count)
 {
 	u_long addr1 = bsh1 + off1;
@@ -1282,7 +1300,7 @@ shpcic_mem_copy_region_1(void *v, bus_space_handle_t bsh1,
 }
 
 void
-shpcic_mem_copy_region_2(void *v, bus_space_handle_t bsh1,
+shpcic_mem_copy_2(void *v, bus_space_handle_t bsh1,
     bus_size_t off1, bus_space_handle_t bsh2, bus_size_t off2, bus_size_t count)
 {
 	u_long addr1 = bsh1 + off1;
@@ -1309,7 +1327,7 @@ shpcic_mem_copy_region_2(void *v, bus_space_handle_t bsh1,
 }
 
 void
-shpcic_mem_copy_region_4(void *v, bus_space_handle_t bsh1,
+shpcic_mem_copy_4(void *v, bus_space_handle_t bsh1,
     bus_size_t off1, bus_space_handle_t bsh2, bus_size_t off2, bus_size_t count)
 {
 	u_long addr1 = bsh1 + off1;

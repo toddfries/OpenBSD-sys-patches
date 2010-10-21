@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.19 2009/03/26 17:24:33 oga Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.21 2010/09/28 20:27:55 miod Exp $	*/
 /*	$NetBSD: cpu.h,v 1.41 2006/01/21 04:24:12 uwe Exp $	*/
 
 /*-
@@ -54,12 +54,17 @@
  * Per-CPU information.
  */
 
+#include <machine/intr.h>
 #include <sys/sched.h>
+
 struct cpu_info {
 	struct proc *ci_curproc;
 
 	struct schedstate_percpu ci_schedstate; /* scheduler state */
 	u_int32_t ci_randseed;
+#ifdef DIAGNOSTIC
+	int	ci_mutex_level;
+#endif
 };
 
 extern struct cpu_info cpu_info_store;

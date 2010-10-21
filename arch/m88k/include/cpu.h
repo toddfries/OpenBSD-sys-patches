@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.47 2009/03/26 17:24:33 oga Exp $ */
+/*	$OpenBSD: cpu.h,v 1.50 2010/09/28 20:27:55 miod Exp $ */
 /*
  * Copyright (c) 1996 Nivas Madhur
  * Copyright (c) 1992, 1993
@@ -77,13 +77,13 @@
 
 #ifndef _LOCORE
 
-extern u_int max_cpus;
-
 #include <machine/lock.h>
 
 /*
  * Per-CPU data structure
  */
+
+struct pmap;
 
 struct cpu_info {
 	u_int		 ci_flags;
@@ -91,7 +91,8 @@ struct cpu_info {
 #define	CIF_PRIMARY		0x02		/* primary cpu */
 
 	struct proc	*ci_curproc;		/* current process... */
-	struct pcb	*ci_curpcb;		/* ...and its pcb */
+	struct pcb	*ci_curpcb;		/* ...its pcb... */
+	struct pmap	*ci_curpmap;		/* ...and its pmap */
 
 	u_int		 ci_cpuid;		/* cpu number */
 
@@ -162,6 +163,10 @@ struct cpu_info {
 #define	CI_IPI_ICACHE_FLUSH	0x00000080
 #define	CI_IPI_DMA_CACHECTL	0x00000100
 	void		(*ci_softipi_cb)(void);	/* 88110 softipi callback */
+
+#ifdef DIAGNOSTIC
+	int	ci_mutex_level;
+#endif
 };
 
 extern cpuid_t master_cpu;

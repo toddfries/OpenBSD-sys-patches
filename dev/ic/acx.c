@@ -1,4 +1,4 @@
-/*	$OpenBSD: acx.c,v 1.93 2009/03/31 22:06:04 claudio Exp $ */
+/*	$OpenBSD: acx.c,v 1.97 2010/08/27 17:08:00 jsg Exp $ */
 
 /*
  * Copyright (c) 2006 Jonathan Gray <jsg@openbsd.org>
@@ -203,7 +203,6 @@ void	 acx_iter_func(void *, struct ieee80211_node *);
 void	 acx_amrr_timeout(void *);
 void	 acx_newassoc(struct ieee80211com *, struct ieee80211_node *, int);
 
-static int	acx_chanscan_rate = 5;	/* 5 channels per second */
 int		acx_beacon_intvl = 100;	/* 100 TU */
 
 /*
@@ -290,7 +289,6 @@ acx_attach(struct acx_softc *sc)
 	}
 
 	ifp->if_softc = sc;
-	ifp->if_init = acx_init;
 	ifp->if_ioctl = acx_ioctl;
 	ifp->if_start = acx_start;
 	ifp->if_watchdog = acx_watchdog;
@@ -1749,8 +1747,8 @@ acx_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 				goto back;
 			}
 
-			timeout_add(&sc->sc_chanscan_timer,
-			    hz / acx_chanscan_rate);
+			/* 200ms => 5 channels per second */
+			timeout_add_msec(&sc->sc_chanscan_timer, 200);
 		}
 		break;
 	case IEEE80211_S_AUTH:
@@ -1835,7 +1833,7 @@ acx_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 
 		/* start automatic rate control timer */
 		if (ic->ic_fixed_rate == -1)
-			timeout_add(&sc->amrr_ch, hz / 2);
+			timeout_add_msec(&sc->amrr_ch, 500);
 		break;
 	default:
 		break;
@@ -2198,7 +2196,7 @@ acx_encap(struct acx_softc *sc, struct acx_txbuf *txbuf, struct mbuf *m,
 	int error;
 
 	if (txbuf->tb_mbuf != NULL)
-		panic("free TX buf has mbuf installed\n");
+		panic("free TX buf has mbuf installed");
 
 	error = 0;
 
@@ -2223,38 +2221,10 @@ acx_encap(struct acx_softc *sc, struct acx_txbuf *txbuf, struct mbuf *m,
 
 	if (error) {	/* error == EFBIG */
 		/* too many fragments, linearize */
-		struct mbuf *mnew;
-
-		error = 0;
-
-		MGETHDR(mnew, M_DONTWAIT, MT_DATA);
-		if (mnew == NULL) {
-			m_freem(m);
-			error = ENOBUFS;
+		if (m_defrag(m, M_DONTWAIT)) {
 			printf("%s: can't defrag tx mbuf\n", ifp->if_xname);
 			goto back;
 		}
-
-		M_DUP_PKTHDR(mnew, m);
-		if (m->m_pkthdr.len > MHLEN) {
-			MCLGET(mnew, M_DONTWAIT);
-			if (!(mnew->m_flags & M_EXT)) {
-				m_freem(m);
-				m_freem(mnew);
-				error = ENOBUFS;
-			}
-		}
-
-		if (error) {
-			printf("%s: can't defrag tx mbuf\n", ifp->if_xname);
-			goto back;
-		}
-
-		m_copydata(m, 0, m->m_pkthdr.len, mtod(mnew, caddr_t));
-		m_freem(m);
-		mnew->m_len = mnew->m_pkthdr.len;
-		m = mnew;
-
 		error = bus_dmamap_load_mbuf(sc->sc_dmat,
 		    txbuf->tb_mbuf_dmamap, m, BUS_DMA_NOWAIT);
 		if (error) {
@@ -2746,7 +2716,7 @@ acx_amrr_timeout(void *arg)
 	else
 		ieee80211_iterate_nodes(ic, acx_iter_func, sc);
 
-	timeout_add(&sc->amrr_ch, hz / 2);
+	timeout_add_msec(&sc->amrr_ch, 500);
 }
 
 void

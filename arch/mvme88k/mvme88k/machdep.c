@@ -1,4 +1,4 @@
-/* $OpenBSD: machdep.c,v 1.228 2009/03/15 20:39:53 miod Exp $	*/
+/* $OpenBSD: machdep.c,v 1.238 2010/09/20 06:33:47 matthew Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -56,9 +56,6 @@
 #include <sys/mount.h>
 #include <sys/msgbuf.h>
 #include <sys/syscallargs.h>
-#ifdef SYSVMSG
-#include <sys/msg.h>
-#endif
 #include <sys/exec.h>
 #include <sys/sysctl.h>
 #include <sys/errno.h>
@@ -84,8 +81,7 @@
 
 #include <dev/cons.h>
 
-#include <uvm/uvm_extern.h>
-#include <uvm/uvm_swap.h>
+#include <uvm/uvm.h>
 
 #include "ksyms.h"
 #if DDB
@@ -95,7 +91,6 @@
 #include <ddb/db_var.h>
 #endif /* DDB */
 
-caddr_t	allocsys(caddr_t);
 void	consinit(void);
 void	cpu_hatch_secondary_processors(void *);
 void	dumb_delay(int);
@@ -164,6 +159,14 @@ int bufpages = BUFPAGES;
 int bufpages = 0;
 #endif
 int bufcachepercent = BUFCACHEPERCENT;
+
+/*
+ * 32 or 34 bit physical address bus depending upon the CPU flavor.
+ * 32 bit DMA. "I am not aware of any system where the upper 2 bits
+ * have ever been used" - miod@
+ */
+struct uvm_constraint_range  dma_constraint = { 0x0, 0xffffffffUL};
+struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
 
 /*
  * Info for CTL_HW
@@ -342,8 +345,7 @@ setstatclockrate(int newhz)
 void
 cpu_startup()
 {
-	caddr_t v;
-	int sz, i;
+	int i;
 	vaddr_t minaddr, maxaddr;
 
 	/*
@@ -363,17 +365,6 @@ cpu_startup()
 	identifycpu();
 	printf("real mem = %u (%uMB)\n", ptoa(physmem),
 	    ptoa(physmem)/1024/1024);
-
-	/*
-	 * Find out how much space we need, allocate it,
-	 * and then give everything true virtual addresses.
-	 */
-	sz = (int)allocsys((caddr_t)0);
-
-	if ((v = (caddr_t)uvm_km_zalloc(kernel_map, round_page(sz))) == 0)
-		panic("startup: no room for tables");
-	if (allocsys(v) - v != sz)
-		panic("startup: table size inconsistency");
 
 	/*
 	 * Grab machine dependent memory spaces
@@ -396,19 +387,6 @@ cpu_startup()
 		break;
 #endif
 	}
-
-	/*
-	 * Determine how many buffers to allocate.
-	 * We allocate bufcachepercent% of memory for buffer space.
-	 */
-	if (bufpages == 0)
-		bufpages = physmem * bufcachepercent / 100;
-
-	/* Restrict to at most 25% filled kvm */
-	if (bufpages >
-	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) / PAGE_SIZE / 4) 
-		bufpages = (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) /
-		    PAGE_SIZE / 4;
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
@@ -448,33 +426,6 @@ cpu_startup()
 		printf("kernel does not support -c; continuing..\n");
 #endif
 	}
-}
-
-/*
- * Allocate space for system data structures.  We are given
- * a starting virtual address and we return a final virtual
- * address; along the way we set each data structure pointer.
- *
- * We call allocsys() with 0 to find out how much space we want,
- * allocate that much and fill it with zeroes, and then call
- * allocsys() again with the correct base virtual address.
- */
-caddr_t
-allocsys(v)
-	caddr_t v;
-{
-
-#define	valloc(name, type, num) \
-	    v = (caddr_t)(((name) = (type *)v) + (num))
-
-#ifdef SYSVMSG
-	valloc(msgpool, char, msginfo.msgmax);
-	valloc(msgmaps, struct msgmap, msginfo.msgseg);
-	valloc(msghdrs, struct msg, msginfo.msgtql);
-	valloc(msqids, struct msqid_ds, msginfo.msgmni);
-#endif
-
-	return v;
 }
 
 __dead void
@@ -826,8 +777,7 @@ intr_establish(int vec, struct intrhand *ih, const char *name)
 		}
 	}
 
-	evcount_attach(&ih->ih_count, name, (void *)&ih->ih_ipl,
-	    &evcount_intr);
+	evcount_attach(&ih->ih_count, name, &ih->ih_ipl);
 	SLIST_INSERT_HEAD(list, ih, ih_link);
 
 #ifdef MVME188
@@ -1090,7 +1040,7 @@ cpu_hatch_secondary_processors(void *unused)
 #ifdef MVME197
 	case BRD_197:
 #endif
-		for (cpu = 0; cpu < max_cpus; cpu++) {
+		for (cpu = 0; cpu < ncpusfound; cpu++) {
 			if (cpu != ci->ci_cpuid) {
 				__cpu_simple_lock(&cpu_hatch_mutex);
 				rc = spin_cpu(cpu, (vaddr_t)secondary_start);

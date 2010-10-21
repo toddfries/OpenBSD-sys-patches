@@ -1,4 +1,4 @@
-/*	$OpenBSD: xd.c,v 1.44 2009/01/04 16:51:05 miod Exp $	*/
+/*	$OpenBSD: xd.c,v 1.52 2010/09/22 06:40:25 krw Exp $	*/
 /*	$NetBSD: xd.c,v 1.37 1997/07/29 09:58:16 fair Exp $	*/
 
 /*
@@ -75,6 +75,7 @@
 #include <sys/dkbad.h>
 #include <sys/conf.h>
 #include <sys/timeout.h>
+#include <sys/dkio.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -268,12 +269,6 @@ struct xdc_attach_args {	/* this is the "aux" args to xdattach */
 };
 
 /*
- * dkdriver
- */
-
-struct dkdriver xddkdriver = {xdstrategy};
-
-/*
  * start: disk label fix code (XXX)
  */
 
@@ -296,7 +291,7 @@ xdgetdisklabel(xd, b)
 {
 	struct disklabel *lp = xd->sc_dk.dk_label;
 	struct sun_disklabel *sl = b;
-	char *err;
+	int error;
 
 	bzero(lp, sizeof(struct disklabel));
 	/* Required parameters for readdisklabel() */
@@ -311,12 +306,10 @@ xdgetdisklabel(xd, b)
 	/* We already have the label data in `b'; setup for dummy strategy */
 	xd_labeldata = b;
 
-	err = readdisklabel(MAKEDISKDEV(0, xd->sc_dev.dv_unit, RAW_PART),
+	error = readdisklabel(MAKEDISKDEV(0, xd->sc_dev.dv_unit, RAW_PART),
 	    xddummystrat, lp, 0);
-	if (err) {
-		/*printf("%s: %s\n", xd->sc_dev.dv_xname, err);*/
-		return (XD_ERR_FAIL);
-	}
+	if (error)
+		return (error);
 
 	/* Ok, we have the label; fill in `pcyl' if there's SunOS magic */
 	sl = b;
@@ -336,7 +329,7 @@ xdgetdisklabel(xd, b)
 	xd->nhead = lp->d_ntracks;
 	xd->nsect = lp->d_nsectors;
 	xd->sectpercyl = lp->d_secpercyl;
-	return (XD_ERR_AOK);
+	return (0);
 }
 
 /*
@@ -563,7 +556,6 @@ xdattach(parent, self, aux)
 	 * to start with a clean slate.
 	 */
 	bzero(&xd->sc_dk, sizeof(xd->sc_dk));
-	xd->sc_dk.dk_driver = &xddkdriver;
 	xd->sc_dk.dk_name = xd->sc_dev.dv_xname;
 
 	/* if booting, init the xd_softc */
@@ -664,7 +656,7 @@ xdattach(parent, self, aux)
 
 	xd->hw_spt = spt;
 	/* Attach the disk: must be before getdisklabel to malloc label */
-	disk_attach(&xd->sc_dk);
+	disk_attach(&xd->sc_dev, &xd->sc_dk);
 
 	if (xdgetdisklabel(xd, xa->buf) != XD_ERR_AOK)
 		goto done;
@@ -847,6 +839,7 @@ xdioctl(dev, command, addr, flag, p)
 		return 0;
 
 	case DIOCGDINFO:	/* get disk label */
+	case DIOCGPDINFO:	/* no separate 'physical' info available. */
 		bcopy(xd->sc_dk.dk_label, addr, sizeof(struct disklabel));
 		return 0;
 
@@ -855,17 +848,6 @@ xdioctl(dev, command, addr, flag, p)
 		((struct partinfo *) addr)->part =
 		    &xd->sc_dk.dk_label->d_partitions[DISKPART(dev)];
 		return 0;
-
-	case DIOCSDINFO:	/* set disk label */
-		if ((flag & FWRITE) == 0)
-			return EBADF;
-		error = setdisklabel(xd->sc_dk.dk_label,
-		    (struct disklabel *) addr, /* xd->sc_dk.dk_openmask : */ 0);
-		if (error == 0) {
-			if (xd->state == XD_DRIVE_NOLABEL)
-				xd->state = XD_DRIVE_ONLINE;
-		}
-		return error;
 
 	case DIOCWLABEL:	/* change write status of disk label */
 		if ((flag & FWRITE) == 0)
@@ -877,6 +859,7 @@ xdioctl(dev, command, addr, flag, p)
 		return 0;
 
 	case DIOCWDINFO:	/* write disk label */
+	case DIOCSDINFO:	/* set disk label */
 		if ((flag & FWRITE) == 0)
 			return EBADF;
 		error = setdisklabel(xd->sc_dk.dk_label,
@@ -885,12 +868,17 @@ xdioctl(dev, command, addr, flag, p)
 			if (xd->state == XD_DRIVE_NOLABEL)
 				xd->state = XD_DRIVE_ONLINE;
 
-			/* Simulate opening partition 0 so write succeeds. */
-			xd->sc_dk.dk_openmask |= (1 << 0);
-			error = writedisklabel(DISKLABELDEV(dev), xdstrategy,
-			    xd->sc_dk.dk_label);
-			xd->sc_dk.dk_openmask =
-			    xd->sc_dk.dk_copenmask | xd->sc_dk.dk_bopenmask;
+			if (command == DIOCWDINFO) {
+				/*
+				 * Simulate opening partition 0 so write
+				 * succeeds.
+				 */
+				xd->sc_dk.dk_openmask |= (1 << 0);
+				error = writedisklabel(DISKLABELDEV(dev),
+				    xdstrategy, xd->sc_dk.dk_label);
+				xd->sc_dk.dk_openmask = xd->sc_dk.dk_copenmask |
+				    xd->sc_dk.dk_bopenmask;
+			}
 		}
 		return error;
 
@@ -967,7 +955,7 @@ xdread(dev, uio, flags)
 	int flags;
 {
 
-	return (physio(xdstrategy, NULL, dev, B_READ, minphys, uio));
+	return (physio(xdstrategy, dev, B_READ, minphys, uio));
 }
 
 int
@@ -977,7 +965,7 @@ xdwrite(dev, uio, flags)
 	int flags;
 {
 
-	return (physio(xdstrategy, NULL, dev, B_WRITE, minphys, uio));
+	return (physio(xdstrategy, dev, B_WRITE, minphys, uio));
 }
 
 

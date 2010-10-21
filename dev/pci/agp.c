@@ -1,4 +1,4 @@
-/* $OpenBSD: agp.c,v 1.28 2009/04/15 03:09:47 oga Exp $ */
+/* $OpenBSD: agp.c,v 1.33 2009/12/15 20:26:21 jasper Exp $ */
 /*-
  * Copyright (c) 2000 Doug Rabson
  * All rights reserved.
@@ -115,14 +115,14 @@ agpvga_match(struct pci_attach_args *pa)
 
 struct device *
 agp_attach_bus(struct pci_attach_args *pa, const struct agp_methods *methods,
-    int bar, pcireg_t type, struct device *dev)
+    bus_addr_t apaddr, bus_size_t apsize, struct device *dev)
 {
 	struct agpbus_attach_args arg;
 
 	arg.aa_methods = methods;
 	arg.aa_pa = pa;
-	arg.aa_bar = bar;
-	arg.aa_type = type;
+	arg.aa_apaddr = apaddr;
+	arg.aa_apsize = apsize;
 
 	printf("\n"); /* newline from the driver that called us */
 	return (config_found(dev, &arg, agpdev_print));
@@ -149,6 +149,8 @@ agp_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->sc_chipc = parent;
 	sc->sc_methods = aa->aa_methods;
+	sc->sc_apaddr = aa->aa_apaddr;
+	sc->sc_apsize = aa->aa_apsize;
 
 	static const int agp_max[][2] = {
 		{0,		0},
@@ -161,7 +163,6 @@ agp_attach(struct device *parent, struct device *self, void *aux)
 		{2048,		1920},
 		{4096,		3932}
 	};
-#define	agp_max_size	 (sizeof(agp_max)/sizeof(agp_max[0]))
 
 	/*
 	 * Work out an upper bound for agp memory allocation. This
@@ -169,10 +170,10 @@ agp_attach(struct device *parent, struct device *self, void *aux)
 	 */
 	memsize = ptoa(physmem) >> 20;
 
-	for (i = 0; i < agp_max_size && memsize > agp_max[i][0]; i++)
+	for (i = 0; i < nitems(agp_max) && memsize > agp_max[i][0]; i++)
 		;
-	if (i == agp_max_size)
-		i = agp_max_size - 1;
+	if (i == nitems(agp_max))
+		i = nitems(agp_max) - 1;
 	sc->sc_maxmem = agp_max[i][1] << 20;
 
 	/*
@@ -191,15 +192,8 @@ agp_attach(struct device *parent, struct device *self, void *aux)
 	pci_get_capability(sc->sc_pc, sc->sc_pcitag, PCI_CAP_AGP,
 	    &sc->sc_capoff, NULL);
 
-	printf(": ");
-	if (agp_map_aperture(pa, sc, aa->aa_bar, aa->aa_type) != 0) {
-		printf("can't map aperture\n");
-		sc->sc_chipc = NULL;
-		return;
-	}
-
-	printf("aperture at 0x%lx, size 0x%lx\n", (u_long)sc->sc_apaddr,
-	    (u_long)sc->sc_methods->get_aperture(sc->sc_chipc));
+	printf(": aperture at 0x%lx, size 0x%lx\n", (u_long)sc->sc_apaddr,
+	    (u_long)sc->sc_apsize);
 }
 
 struct cfattach agp_ca = {
@@ -218,7 +212,7 @@ agpmmap(void *v, off_t off, int prot)
 
 	if (sc->sc_apaddr) {
 
-		if (off > sc->sc_methods->get_aperture(sc->sc_chipc))
+		if (off > sc->sc_apsize)
 			return (-1);
 
 		/*
@@ -329,36 +323,29 @@ agp_find_memory(struct agp_softc *sc, int id)
 	return (0);
 }
 
-int
-agp_map_aperture(struct pci_attach_args *pa, struct agp_softc *sc, u_int32_t bar, u_int32_t memtype)
-{
-	/* Find the aperture. Don't map it (yet), this would eat KVA */
-	if (pci_mapreg_info(pa->pa_pc, pa->pa_tag, bar, memtype,
-	    &sc->sc_apaddr, NULL, NULL) != 0)
-		return (ENXIO);
-
-	return (0);
-}
-
 struct agp_gatt *
 agp_alloc_gatt(bus_dma_tag_t dmat, u_int32_t apsize)
 {
-	struct agp_gatt	*gatt;
-	u_int32_t	 entries = apsize >> AGP_PAGE_SHIFT;
-	int		 nseg;
+	struct agp_gatt		*gatt;
+	u_int32_t	 	 entries = apsize >> AGP_PAGE_SHIFT;
 
 	gatt = malloc(sizeof(*gatt), M_AGP, M_NOWAIT | M_ZERO);
 	if (!gatt)
 		return (NULL);
 	gatt->ag_entries = entries;
+	gatt->ag_size = entries * sizeof(u_int32_t);
 
-	if (agp_alloc_dmamem(dmat, entries * sizeof(u_int32_t),
-	    0, &gatt->ag_dmamap, (caddr_t *)&gatt->ag_virtual,
-	    &gatt->ag_physical, &gatt->ag_dmaseg, 1, &nseg) != 0)
+	if (agp_alloc_dmamem(dmat, gatt->ag_size, &gatt->ag_dmamap,
+	    &gatt->ag_physical, &gatt->ag_dmaseg) != 0)
 		return (NULL);
 
-	gatt->ag_size = entries * sizeof(u_int32_t);
-	memset(gatt->ag_virtual, 0, gatt->ag_size);
+	if (bus_dmamem_map(dmat, &gatt->ag_dmaseg, 1, gatt->ag_size,
+	    (caddr_t *)&gatt->ag_virtual, BUS_DMA_NOWAIT) != 0) {
+		agp_free_dmamem(dmat, gatt->ag_size, gatt->ag_dmamap,
+		    &gatt->ag_dmaseg);
+		return (NULL);
+	}
+
 	agp_flush_cache();
 
 	return (gatt);
@@ -367,8 +354,8 @@ agp_alloc_gatt(bus_dma_tag_t dmat, u_int32_t apsize)
 void
 agp_free_gatt(bus_dma_tag_t dmat, struct agp_gatt *gatt)
 {
-	agp_free_dmamem(dmat, gatt->ag_size, gatt->ag_dmamap,
-	    (caddr_t)gatt->ag_virtual, &gatt->ag_dmaseg, 1);
+	bus_dmamem_unmap(dmat, (caddr_t)gatt->ag_virtual, gatt->ag_size);
+	agp_free_dmamem(dmat, gatt->ag_size, gatt->ag_dmamap, &gatt->ag_dmaseg);
 	free(gatt, M_AGP);
 }
 
@@ -474,13 +461,12 @@ agp_generic_free_memory(struct agp_softc *sc, struct agp_memory *mem)
 
 int
 agp_generic_bind_memory(struct agp_softc *sc, struct agp_memory *mem,
-			off_t offset)
+    bus_size_t offset)
 {
-	bus_dma_segment_t *segs, *seg;
-	bus_size_t done, j;
-	bus_addr_t pa;
-	off_t i, k;
-	int nseg, error;
+	bus_dma_segment_t	*segs, *seg;
+	bus_addr_t		 apaddr = sc->sc_apaddr + offset;
+	bus_size_t		 done, i, j;
+	int			 nseg, error;
 
 	rw_enter_write(&sc->sc_lock);
 
@@ -490,9 +476,8 @@ agp_generic_bind_memory(struct agp_softc *sc, struct agp_memory *mem,
 		return (EINVAL);
 	}
 
-	if (offset < 0 || (offset & (AGP_PAGE_SIZE - 1)) != 0
-	    || offset + mem->am_size >
-	    sc->sc_methods->get_aperture(sc->sc_chipc)) {
+	if (offset < 0 || (offset & (AGP_PAGE_SIZE - 1)) != 0 ||
+	    offset + mem->am_size > sc->sc_apsize) {
 		printf("AGP: binding memory at bad offset %#lx\n",
 		    (unsigned long) offset);
 		rw_exit_write(&sc->sc_lock);
@@ -509,25 +494,14 @@ agp_generic_bind_memory(struct agp_softc *sc, struct agp_memory *mem,
 	nseg = (mem->am_size + PAGE_SIZE - 1) / PAGE_SIZE;
 	segs = malloc(nseg * sizeof *segs, M_AGP, M_WAITOK);
 	if ((error = bus_dmamem_alloc(sc->sc_dmat, mem->am_size, PAGE_SIZE, 0,
-	    segs, nseg, &mem->am_nseg, BUS_DMA_WAITOK)) != 0) {
+	    segs, nseg, &mem->am_nseg, BUS_DMA_ZERO | BUS_DMA_WAITOK)) != 0) {
 		free(segs, M_AGP);
 		rw_exit_write(&sc->sc_lock);
 		AGP_DPF("bus_dmamem_alloc failed %d\n", error);
 		return (error);
 	}
-	if ((error = bus_dmamem_map(sc->sc_dmat, segs, mem->am_nseg,
-	    mem->am_size, &mem->am_virtual, BUS_DMA_WAITOK)) != 0) {
-		bus_dmamem_free(sc->sc_dmat, segs, mem->am_nseg);
-		free(segs, M_AGP);
-		rw_exit_write(&sc->sc_lock);
-		AGP_DPF("bus_dmamem_map failed %d\n", error);
-		return (error);
-	}
-	if ((error = bus_dmamap_load(sc->sc_dmat, mem->am_dmamap,
-	    mem->am_virtual, mem->am_size, NULL,
-	    BUS_DMA_WAITOK)) != 0) {
-		bus_dmamem_unmap(sc->sc_dmat, mem->am_virtual,
-		    mem->am_size);
+	if ((error = bus_dmamap_load_raw(sc->sc_dmat, mem->am_dmamap, segs,
+	    mem->am_nseg, mem->am_size, BUS_DMA_WAITOK)) != 0) {
 		bus_dmamem_free(sc->sc_dmat, segs, mem->am_nseg);
 		free(segs, M_AGP);
 		rw_exit_write(&sc->sc_lock);
@@ -537,45 +511,21 @@ agp_generic_bind_memory(struct agp_softc *sc, struct agp_memory *mem,
 	mem->am_dmaseg = segs;
 
 	/*
-	 * Bind the individual pages and flush the chipset's
-	 * TLB.
+	 * Install entries in the GATT, making sure that if
+	 * AGP_PAGE_SIZE < PAGE_SIZE and mem->am_size is not
+	 * aligned to PAGE_SIZE, we don't modify too many GATT
+	 * entries. Flush chipset tlb when done.
 	 */
 	done = 0;
 	for (i = 0; i < mem->am_dmamap->dm_nsegs; i++) {
 		seg = &mem->am_dmamap->dm_segs[i];
-		/*
-		 * Install entries in the GATT, making sure that if
-		 * AGP_PAGE_SIZE < PAGE_SIZE and mem->am_size is not
-		 * aligned to PAGE_SIZE, we don't modify too many GATT
-		 * entries.
-		 */
 		for (j = 0; j < seg->ds_len && (done + j) < mem->am_size;
 		    j += AGP_PAGE_SIZE) {
-			pa = seg->ds_addr + j;
 			AGP_DPF("binding offset %#lx to pa %#lx\n",
 			    (unsigned long)(offset + done + j),
-			    (unsigned long)pa);
-			error = sc->sc_methods->bind_page(sc->sc_chipc,
-			    offset + done + j, pa);
-			if (error) {
-				/*
-				 * Bail out. Reverse all the mappings
-				 * and unwire the pages.
-				 */
-				for (k = 0; k < done + j; k += AGP_PAGE_SIZE)
-					sc->sc_methods->unbind_page(
-					    sc->sc_chipc, offset + k);
-
-				bus_dmamap_unload(sc->sc_dmat, mem->am_dmamap);
-				bus_dmamem_unmap(sc->sc_dmat, mem->am_virtual,
-				    mem->am_size);
-				bus_dmamem_free(sc->sc_dmat, mem->am_dmaseg,
-				    mem->am_nseg);
-				free(mem->am_dmaseg, M_AGP);
-				rw_exit_write(&sc->sc_lock);
-				AGP_DPF("AGP_BIND_PAGE failed %d\n", error);
-				return (error);
-			}
+			    (unsigned long)seg->ds_addr + j);
+			sc->sc_methods->bind_page(sc->sc_chipc,
+			    apaddr + done + j, seg->ds_addr + j, 0);
 		}
 		done += seg->ds_len;
 	}
@@ -602,7 +552,8 @@ agp_generic_bind_memory(struct agp_softc *sc, struct agp_memory *mem,
 int
 agp_generic_unbind_memory(struct agp_softc *sc, struct agp_memory *mem)
 {
-	int i;
+	bus_addr_t	apaddr = sc->sc_apaddr + mem->am_offset;
+	bus_size_t	i;
 
 	rw_enter_write(&sc->sc_lock);
 
@@ -618,13 +569,12 @@ agp_generic_unbind_memory(struct agp_softc *sc, struct agp_memory *mem)
 	 * TLB. Unwire the pages so they can be swapped.
 	 */
 	for (i = 0; i < mem->am_size; i += AGP_PAGE_SIZE)
-		sc->sc_methods->unbind_page(sc->sc_chipc, mem->am_offset + i);
+		sc->sc_methods->unbind_page(sc->sc_chipc, apaddr + i);
 
 	agp_flush_cache();
 	sc->sc_methods->flush_tlb(sc->sc_chipc);
 
 	bus_dmamap_unload(sc->sc_dmat, mem->am_dmamap);
-	bus_dmamem_unmap(sc->sc_dmat, mem->am_virtual, mem->am_size);
 	bus_dmamem_free(sc->sc_dmat, mem->am_dmaseg, mem->am_nseg);
 
 	free(mem->am_dmaseg, M_AGP);
@@ -637,30 +587,26 @@ agp_generic_unbind_memory(struct agp_softc *sc, struct agp_memory *mem)
 	return (0);
 }
 
+/*
+ * Allocates a single-segment block of zeroed, wired dma memory.
+ */
 int
-agp_alloc_dmamem(bus_dma_tag_t tag, size_t size, int flags,
-    bus_dmamap_t *mapp, caddr_t *vaddr, bus_addr_t *baddr,
-    bus_dma_segment_t *seg, int nseg, int *rseg)
-
+agp_alloc_dmamem(bus_dma_tag_t tag, size_t size, bus_dmamap_t *mapp,
+    bus_addr_t *baddr, bus_dma_segment_t *seg)
 {
-	int error, level = 0;
+	int error, level = 0, nseg;
 
 	if ((error = bus_dmamem_alloc(tag, size, PAGE_SIZE, 0,
-	    seg, nseg, rseg, BUS_DMA_NOWAIT)) != 0)
+	    seg, 1, &nseg, BUS_DMA_NOWAIT | BUS_DMA_ZERO)) != 0)
 		goto out;
 	level++;
 
-	if ((error = bus_dmamem_map(tag, seg, *rseg, size, vaddr,
-	    BUS_DMA_NOWAIT | flags)) != 0)
-		goto out;
-	level++;
-
-	if ((error = bus_dmamap_create(tag, size, *rseg, size, 0,
+	if ((error = bus_dmamap_create(tag, size, nseg, size, 0,
 	    BUS_DMA_NOWAIT, mapp)) != 0)
 		goto out;
 	level++;
 
-	if ((error = bus_dmamap_load(tag, *mapp, *vaddr, size, NULL,
+	if ((error = bus_dmamap_load_raw(tag, *mapp, seg, nseg, size,
 	    BUS_DMA_NOWAIT)) != 0)
 		goto out;
 
@@ -669,14 +615,11 @@ agp_alloc_dmamem(bus_dma_tag_t tag, size_t size, int flags,
 	return (0);
 out:
 	switch (level) {
-	case 3:
+	case 2:
 		bus_dmamap_destroy(tag, *mapp);
 		/* FALLTHROUGH */
-	case 2:
-		bus_dmamem_unmap(tag, *vaddr, size);
-		/* FALLTHROUGH */
 	case 1:
-		bus_dmamem_free(tag, seg, *rseg);
+		bus_dmamem_free(tag, seg, nseg);
 		break;
 	default:
 		break;
@@ -687,13 +630,11 @@ out:
 
 void
 agp_free_dmamem(bus_dma_tag_t tag, size_t size, bus_dmamap_t map,
-    caddr_t vaddr, bus_dma_segment_t *seg, int nseg)
+    bus_dma_segment_t *seg)
 {
-
 	bus_dmamap_unload(tag, map);
 	bus_dmamap_destroy(tag, map);
-	bus_dmamem_unmap(tag, vaddr, size);
-	bus_dmamem_free(tag, seg, nseg);
+	bus_dmamem_free(tag, seg, 1);
 }
 
 /* Helper functions used in both user and kernel APIs */
@@ -758,7 +699,7 @@ agp_info_user(void *dev, agp_info *info)
 	else
 		info->agp_mode = 0; /* i810 doesn't have real AGP */
 	info->aper_base = sc->sc_apaddr;
-	info->aper_size = sc->sc_methods->get_aperture(sc->sc_chipc) >> 20;
+	info->aper_size = sc->sc_apsize >> 20;
 	info->pg_total =
 	info->pg_system = sc->sc_maxmem >> AGP_PAGE_SHIFT;
 	info->pg_used = sc->sc_allocated >> AGP_PAGE_SHIFT;
@@ -858,7 +799,7 @@ agp_get_info(void *dev, struct agp_info *info)
 	else
 		info->ai_mode = 0; /* i810 doesn't have real AGP */
 	info->ai_aperture_base = sc->sc_apaddr;
-	info->ai_aperture_size = sc->sc_methods->get_aperture(sc->sc_chipc);
+	info->ai_aperture_size = sc->sc_apsize;
         info->ai_memory_allowed = sc->sc_maxmem;
         info->ai_memory_used = sc->sc_allocated;
 }

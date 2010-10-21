@@ -1,4 +1,4 @@
-/*	$OpenBSD: mount.h,v 1.91 2008/07/22 08:05:02 thib Exp $	*/
+/*	$OpenBSD: mount.h,v 1.100 2010/06/29 04:09:32 tedu Exp $	*/
 /*	$NetBSD: mount.h,v 1.48 1996/02/18 11:55:47 fvdl Exp $	*/
 
 /*
@@ -371,7 +371,8 @@ struct ostatfs {
 #define	MOUNT_CD9660	"cd9660"	/* ISO9660 (aka CDROM) Filesystem */
 #define	MOUNT_EXT2FS	"ext2fs"	/* Second Extended Filesystem */
 #define	MOUNT_NCPFS	"ncpfs"		/* NetWare Network File System */
-#define	MOUNT_XFS	"xfs"		/* xfs */
+#define	MOUNT_XFS	"nnpfs"		/* nnpfs (temp) */
+#define	MOUNT_NNPFS	"nnpfs"		/* nnpfs */
 #define	MOUNT_NTFS	"ntfs"		/* NTFS */
 #define	MOUNT_UDF	"udf"		/* UDF */
 
@@ -501,10 +502,18 @@ struct bcachestats {
 	int64_t numwrites;		/* total writes started */
 	int64_t numreads;		/* total reads started */
 	int64_t cachehits;		/* total reads found in cache */
+	int64_t busymapped;		/* number of busy and mapped buffers */
 };
 #ifdef _KERNEL
 extern struct bcachestats bcstats;
-#define BUFPAGES_DEFICIT (bufpages - bcstats.numbufpages)
+extern long buflowpages, bufhighpages, bufbackpages;
+#define BUFPAGES_DEFICIT (((buflowpages - bcstats.numbufpages) < 0) ? 0 \
+    : buflowpages - bcstats.numbufpages)
+#define BUFPAGES_INACT (((bcstats.numcleanpages - buflowpages) < 0) ? 0 \
+    : bcstats.numcleanpages - buflowpages)
+extern int bufcachepercent;
+extern void bufadjust(int);
+extern int bufbackoff(void);
 #endif
 
 /*
@@ -634,7 +643,6 @@ int	speedup_syncer(void);
 
 int	vfs_syncwait(int);	/* sync and wait for complete */
 void	vfs_shutdown(void);	/* unmount and sync file systems */
-long	makefstype(char *);
 int	dounmount(struct mount *, int, struct proc *, struct vnode *);
 void	vfsinit(void);
 int	vfs_register(struct vfsconf *);

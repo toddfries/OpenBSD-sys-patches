@@ -1,4 +1,4 @@
-/*	$OpenBSD: procfs_subr.c,v 1.29 2009/04/02 18:43:08 oga Exp $	*/
+/*	$OpenBSD: procfs_subr.c,v 1.33 2010/09/10 16:34:08 thib Exp $	*/
 /*	$NetBSD: procfs_subr.c,v 1.15 1996/02/12 15:01:42 christos Exp $	*/
 
 /*
@@ -40,10 +40,10 @@
 #include <sys/systm.h>
 #include <sys/time.h>
 #include <sys/kernel.h>
-#include <sys/rwlock.h>
 #include <sys/proc.h>
 #include <sys/vnode.h>
 #include <sys/malloc.h>
+#include <sys/rwlock.h>
 #include <sys/stat.h>
 #include <sys/ptrace.h>
 
@@ -92,7 +92,7 @@ procfs_allocvp(struct mount *mp, struct vnode **vpp, pid_t pid, pfstype pfs_type
 	struct proc *p = curproc;
 	struct pfsnode *pfs;
 	struct vnode *vp;
-	int error;
+	int error = 0;
 
 	/*
 	 * Lock the vp list, getnewvnode can sleep.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfsnode.h,v 1.33 2009/01/24 23:30:42 thib Exp $	*/
+/*	$OpenBSD: nfsnode.h,v 1.39 2009/12/15 15:53:48 beck Exp $	*/
 /*	$NetBSD: nfsnode.h,v 1.16 1996/02/18 11:54:04 fvdl Exp $	*/
 
 /*
@@ -53,7 +53,7 @@ struct sillyrename {
 	struct	ucred *s_cred;
 	struct	vnode *s_dvp;
 	long	s_namlen;
-	char	s_name[20];
+	char	s_name[24];
 };
 
 /*
@@ -70,7 +70,7 @@ struct sillyrename {
  *     be well aligned and, therefore, tightly packed.
  */
 struct nfsnode {
-	LIST_ENTRY(nfsnode)	n_hash;		/* Hash chain */
+	RB_ENTRY(nfsnode)	n_entry;	/* filehandle/node tree. */
 	u_quad_t		n_size;		/* Current size of file */
 	struct vattr		n_vattr;	/* Vnode attribute cache */
 	time_t			n_attrstamp;	/* Attr. cache timestamp */

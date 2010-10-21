@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6_proto.c,v 1.57 2008/11/25 12:11:45 markus Exp $	*/
+/*	$OpenBSD: in6_proto.c,v 1.59 2010/07/08 19:42:46 jsg Exp $	*/
 /*	$KAME: in6_proto.c,v 1.66 2000/10/10 15:35:47 itojun Exp $	*/
 
 /*
@@ -113,6 +113,11 @@
 #include <netinet/ip_carp.h>
 #endif
 
+#include "pf.h"
+#if NPF > 0
+#include <netinet6/ip6_divert.h>
+#endif
+
 /*
  * TCP/IP protocol family: IP6, ICMP6, UDP, TCP.
  */
@@ -224,15 +229,22 @@ struct ip6protosw inet6sw[] = {
 #endif
 #if NCARP > 0
 { SOCK_RAW,	&inet6domain,	IPPROTO_CARP,	PR_ATOMIC|PR_ADDR,
-  carp6_proto_input,	rip6_output,	0,		rip6_ctloutput,
+  carp6_proto_input,	rip6_output,	0,	rip6_ctloutput,
   rip6_usrreq,
   0,		0,		0,		0,		carp_sysctl
 },
 #endif /* NCARP */
+#if NPF > 0
+{ SOCK_RAW,	&inet6domain,	IPPROTO_DIVERT,	PR_ATOMIC|PR_ADDR,
+  divert6_input,	0,		0,	rip6_ctloutput,
+  divert6_usrreq,
+  divert6_init,	0,		0,		0,		divert6_sysctl
+},
+#endif /* NPF > 0 */
 /* raw wildcard */
 { SOCK_RAW,	&inet6domain,	0,		PR_ATOMIC|PR_ADDR,
   rip6_input,	rip6_output,	0,		rip6_ctloutput,
-  rip6_usrreq, rip6_init,
+  rip6_usrreq,	rip6_init,
   0,		0,		0,
 },
 };
@@ -276,7 +288,6 @@ int	ip6_neighborgcthresh = 2048; /* Threshold # of NDP entries for GC */
 int	ip6_maxifprefixes = 16; /* Max acceptable prefixes via RA per IF */
 int	ip6_maxifdefrouters = 16; /* Max acceptable def routers via RA */
 int	ip6_maxdynroutes = 4096; /* Max # of routes created via redirect */
-u_int32_t ip6_id = 0UL;
 int	ip6_keepfaith = 0;
 time_t	ip6_log_time = (time_t)0L;
 
@@ -301,11 +312,5 @@ u_long	rip6_recvspace = RIPV6RCVQ;
 /* ICMPV6 parameters */
 int	icmp6_rediraccept = 1;		/* accept and process redirects */
 int	icmp6_redirtimeout = 10 * 60;	/* 10 minutes */
-struct timeval icmp6errratelim = { 0, 0 };	/* no ratelimit */
 int	icmp6errppslim = 100;		/* 100pps */
 int	icmp6_nodeinfo = 1;		/* enable/disable NI response */
-
-/* UDP on IP6 parameters */
-int	udp6_sendspace = 9216;		/* really max datagram size */
-int	udp6_recvspace = 40 * (1024 + sizeof(struct sockaddr_in6));
-					/* 40 1K datagrams */

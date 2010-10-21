@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_trace.c,v 1.4 2007/01/15 23:19:05 jsg Exp $	*/
+/*	$OpenBSD: db_trace.c,v 1.7 2010/09/27 10:08:28 mikeb Exp $	*/
 /*	$NetBSD: db_trace.c,v 1.1 2003/04/26 18:39:27 fvdl Exp $	*/
 
 /* 
@@ -110,6 +110,7 @@ struct x86_64_frame {
 	struct x86_64_frame	*f_frame;
 	long			f_retaddr;
 	long			f_arg0;
+	long			f_arg1;
 };
 
 #define	NONE		0
@@ -208,7 +209,7 @@ db_stack_trace_print(db_expr_t addr, boolean_t have_addr, db_expr_t count,
 	db_addr_t	callpc;
 	int		is_trap = 0;
 	boolean_t	kernel_only = TRUE;
-	boolean_t	trace_thread = FALSE;
+	boolean_t	trace_proc = FALSE;
 
 #if 0
 	if (!db_trace_symbols_found)
@@ -220,8 +221,8 @@ db_stack_trace_print(db_expr_t addr, boolean_t have_addr, db_expr_t count,
 		char c;
 
 		while ((c = *cp++) != 0) {
-			if (c == 't')
-				trace_thread = TRUE;
+			if (c == 'p')
+				trace_proc = TRUE;
 			if (c == 'u')
 				kernel_only = FALSE;
 		}
@@ -231,28 +232,16 @@ db_stack_trace_print(db_expr_t addr, boolean_t have_addr, db_expr_t count,
 		frame = (struct x86_64_frame *)ddb_regs.tf_rbp;
 		callpc = (db_addr_t)ddb_regs.tf_rip;
 	} else {
-#if 0
-		if (trace_thread) {
-			struct proc *p;
-			struct user *u;
-			struct lwp *l;
-			(*pr)("trace: pid %d ", (int)addr);
-			p = pfind(addr);
+		if (trace_proc) {
+			struct proc *p = pfind((pid_t)addr);
 			if (p == NULL) {
-				(*pr)("not found\n");
+				(*pr) ("db_trace.c: process not found\n");
 				return;
 			}
-			l = proc_representative_lwp(p);
-			if (!(l->l_flag&L_INMEM)) {
-				(*pr)("swapped out\n");
-				return;
-			}
-			u = l->l_addr;
-			frame = (struct x86_64_frame *) u->u_pcb.pcb_rbp;
-			(*pr)("at %p\n", frame);
-		} else
-#endif
+			frame = (struct x86_64_frame *)p->p_addr->u_pcb.pcb_rbp;
+		} else {
 			frame = (struct x86_64_frame *)addr;
+		}
 		callpc = (db_addr_t)
 			 db_get_value((db_addr_t)&frame->f_retaddr, 8, FALSE);
 		frame = (struct x86_64_frame *)frame->f_frame;
@@ -283,7 +272,6 @@ db_stack_trace_print(db_expr_t addr, boolean_t have_addr, db_expr_t count,
 			}
 		}
 		if (INKERNEL(frame) && name) {
-#ifdef __ELF__
 			if (!strcmp(name, "trap")) {
 				is_trap = TRAP;
 			} else if (!strcmp(name, "syscall")) {
@@ -302,26 +290,6 @@ db_stack_trace_print(db_expr_t addr, boolean_t have_addr, db_expr_t count,
 			} else
 				goto normal;
 			narg = 0;
-#else
-			if (!strcmp(name, "_trap")) {
-				is_trap = TRAP;
-			} else if (!strcmp(name, "_syscall")) {
-				is_trap = SYSCALL;
-			} else if (name[0] == '_' && name[1] == 'X') {
-				if (!strncmp(name, "_Xintr", 6) ||
-				    !strncmp(name, "_Xresume", 8) ||
-				    !strncmp(name, "_Xstray", 7) ||
-				    !strncmp(name, "_Xhold", 6) ||
-				    !strncmp(name, "_Xrecurse", 9) ||
-				    !strcmp(name, "_Xdoreti") ||
-				    !strncmp(name, "_Xsoft", 6)) {
-					is_trap = INTERRUPT;
-				} else
-					goto normal;
-			} else
-				goto normal;
-			narg = 0;
-#endif /* __ELF__ */
 		} else {
 		normal:
 			is_trap = NONE;
@@ -365,8 +333,12 @@ db_stack_trace_print(db_expr_t addr, boolean_t have_addr, db_expr_t count,
 			continue;
 		}
 
+		if (is_trap == INTERRUPT)
+			argp = &lastframe->f_arg1;
+		else
+			argp = &frame->f_arg0;
 		lastframe = frame;
-		db_nextframe(&frame, &callpc, &frame->f_arg0, is_trap, pr);
+		db_nextframe(&frame, &callpc, argp, is_trap, pr);
 
 		if (frame == 0) {
 			/* end of chain */

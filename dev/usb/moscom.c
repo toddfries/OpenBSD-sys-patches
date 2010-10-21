@@ -1,4 +1,4 @@
-/*	$OpenBSD: moscom.c,v 1.11 2007/10/11 18:33:14 deraadt Exp $	*/
+/*	$OpenBSD: moscom.c,v 1.14 2010/09/24 08:33:59 yuo Exp $	*/
 
 /*
  * Copyright (c) 2006 Jonathan Gray <jsg@openbsd.org>
@@ -145,7 +145,6 @@ struct moscom_softc {
 	u_char			 sc_dying;
 };
 
-void	moscom_get_status(void *, int, u_char *, u_char *);
 void	moscom_set(void *, int, int, int);
 int	moscom_param(void *, int, struct termios *);
 int	moscom_open(void *, int);
@@ -169,7 +168,7 @@ static const struct usb_devno moscom_devs[] = {
 int moscom_match(struct device *, void *, void *); 
 void moscom_attach(struct device *, struct device *, void *); 
 int moscom_detach(struct device *, int); 
-int moscom_activate(struct device *, enum devact); 
+int moscom_activate(struct device *, int); 
 
 struct cfdriver moscom_cd = { 
 	NULL, "moscom", DV_DULL 
@@ -274,7 +273,6 @@ moscom_detach(struct device *self, int flags)
 	struct moscom_softc *sc = (struct moscom_softc *)self;
 	int rv = 0;
 
-	sc->sc_dying = 1;
 	if (sc->sc_subdev != NULL) {
 		rv = config_detach(sc->sc_subdev, flags);
 		sc->sc_subdev = NULL;
@@ -287,7 +285,7 @@ moscom_detach(struct device *self, int flags)
 }
 
 int
-moscom_activate(struct device *self, enum devact act)
+moscom_activate(struct device *self, int act)
 {
 	struct moscom_softc *sc = (struct moscom_softc *)self;
 	int rv = 0;
@@ -420,17 +418,6 @@ moscom_param(void *vsc, int portno, struct termios *t)
 #endif
 
 	return (0);
-}
-
-void
-moscom_get_status(void *vsc, int portno, u_char *lsr, u_char *msr)
-{
-	struct moscom_softc *sc = vsc;
-	
-	if (msr != NULL)
-		*msr = sc->sc_msr;
-	if (lsr != NULL)
-		*lsr = sc->sc_lsr;
 }
 
 int

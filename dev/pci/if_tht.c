@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tht.c,v 1.122 2009/04/07 05:03:25 dlg Exp $ */
+/*	$OpenBSD: if_tht.c,v 1.124 2010/05/19 15:27:35 oga Exp $ */
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>
@@ -34,7 +34,7 @@
 #include <sys/socket.h>
 #include <sys/malloc.h>
 #include <sys/device.h>
-#include <sys/proc.h>
+#include <sys/timeout.h>
 #include <sys/queue.h>
 #include <sys/rwlock.h>
 #include <sys/time.h>
@@ -1826,7 +1826,7 @@ tht_dmamem_alloc(struct tht_softc *sc, bus_size_t size, bus_size_t align)
 		goto tdmfree;
 
 	if (bus_dmamem_alloc(dmat, size, align, 0, &tdm->tdm_seg, 1, &nsegs,
-	    BUS_DMA_WAITOK) != 0)
+	    BUS_DMA_WAITOK | BUS_DMA_ZERO) != 0)
 		goto destroy;
 
 	if (bus_dmamem_map(dmat, &tdm->tdm_seg, nsegs, size, &tdm->tdm_kva,
@@ -1836,8 +1836,6 @@ tht_dmamem_alloc(struct tht_softc *sc, bus_size_t size, bus_size_t align)
 	if (bus_dmamap_load(dmat, tdm->tdm_map, tdm->tdm_kva, size,
 	    NULL, BUS_DMA_WAITOK) != 0)
 		goto unmap;
-
-	bzero(tdm->tdm_kva, size);
 
 	return (tdm);
 

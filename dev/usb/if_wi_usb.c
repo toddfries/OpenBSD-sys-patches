@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wi_usb.c,v 1.45 2009/02/14 20:05:09 chl Exp $ */
+/*	$OpenBSD: if_wi_usb.c,v 1.48 2010/09/24 08:33:59 yuo Exp $ */
 
 /*
  * Copyright (c) 2003 Dale Rahn. All rights reserved.
@@ -265,7 +265,7 @@ const struct wi_usb_type {
 int wi_usb_match(struct device *, void *, void *); 
 void wi_usb_attach(struct device *, struct device *, void *); 
 int wi_usb_detach(struct device *, int); 
-int wi_usb_activate(struct device *, enum devact); 
+int wi_usb_activate(struct device *, int); 
 
 struct cfdriver wi_usb_cd = { 
 	NULL, "wi_usb", DV_IFNET 
@@ -400,7 +400,10 @@ wi_usb_detach(struct device *self, int flags)
 	int s;
 	int err;
 
-	sc->wi_usb_dying = 1;
+	/* Detached before attach finished, so just bail out. */
+	if (!sc->wi_usb_attached)
+		return (0);
+
 	if (sc->wi_thread_info != NULL) {
 		sc->wi_thread_info->dying = 1;
 
@@ -409,10 +412,6 @@ wi_usb_detach(struct device *self, int flags)
 			wakeup(sc->wi_thread_info);
 	}
 
-	if (!sc->wi_usb_attached) {
-		/* Detached before attach finished, so just bail out. */
-		return (0);
-	}
 	/* tasks? */
 
 	s = splusb();
@@ -459,7 +458,7 @@ wi_usb_detach(struct device *self, int flags)
 		sc->wi_usb_ep[WI_USB_ENDPT_INTR] = NULL;
 	}
 	if (sc->wi_usb_ep[WI_USB_ENDPT_TX] != NULL) {
-		usbd_abort_pipe(sc->wi_usb_ep[WI_USB_ENDPT_TX]);
+		err = usbd_abort_pipe(sc->wi_usb_ep[WI_USB_ENDPT_TX]);
 		if (err) {
 			printf("%s: abort tx pipe failed: %s\n",
 			    sc->wi_usb_dev.dv_xname, usbd_errstr(err));
@@ -472,7 +471,7 @@ wi_usb_detach(struct device *self, int flags)
 		sc->wi_usb_ep[WI_USB_ENDPT_TX] = NULL;
 	}
 	if (sc->wi_usb_ep[WI_USB_ENDPT_RX] != NULL) {
-		usbd_abort_pipe(sc->wi_usb_ep[WI_USB_ENDPT_RX]);
+		err = usbd_abort_pipe(sc->wi_usb_ep[WI_USB_ENDPT_RX]);
 		if (err) {
 			printf("%s: abort rx pipe failed: %s\n",
 			    sc->wi_usb_dev.dv_xname, usbd_errstr(err));
@@ -657,7 +656,7 @@ wi_read_record_usb(struct wi_softc *wsc, struct wi_ltv_gen *ltv)
 	struct wi_rridreq	*prid;
 	int			total_len, rnd_len;
 	int			err;
-	struct wi_ltv_gen	*oltv, p2ltv;
+	struct wi_ltv_gen	*oltv = NULL, p2ltv;
 
 	DPRINTFN(5,("%s: %s: enter rid=%x\n",
 	    sc->wi_usb_dev.dv_xname, __func__, ltv->wi_type));
@@ -1336,7 +1335,7 @@ wi_get_fid_usb(struct wi_softc *sc, int fid)
 }
 
 int
-wi_usb_activate(struct device *self, enum devact act)
+wi_usb_activate(struct device *self, int act)
 {
 	struct wi_usb_softc *sc = (struct wi_usb_softc *)self;
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pchb.c,v 1.77 2009/04/11 14:59:59 kettenis Exp $ */
+/*	$OpenBSD: pchb.c,v 1.85 2010/08/31 17:13:46 deraadt Exp $ */
 /*	$NetBSD: pchb.c,v 1.65 2007/08/15 02:26:13 markd Exp $	*/
 
 /*
@@ -67,6 +67,7 @@
 #include <dev/pci/pcidevs.h>
 
 #include <dev/pci/agpvar.h>
+#include <dev/pci/ppbreg.h>
 
 #include <dev/rndvar.h>
 
@@ -101,8 +102,10 @@
 #define AMD64HT_LDT1_TYPE	0xb8
 #define AMD64HT_LDT2_BUS	0xd4
 #define AMD64HT_LDT2_TYPE	0xd8
+#define AMD64HT_LDT3_BUS	0xf4
+#define AMD64HT_LDT3_TYPE	0xf8
 
-#define AMD64HT_NUM_LDT		3
+#define AMD64HT_NUM_LDT		4
 
 #define AMD64HT_LDT_TYPE_MASK		0x0000001f
 #define  AMD64HT_LDT_INIT_COMPLETE	0x00000002
@@ -117,6 +120,7 @@ struct pchb_softc {
 	bus_space_handle_t sc_bh;
 
 	/* rng stuff */
+	int sc_rng_active;
 	int sc_rng_ax;
 	int sc_rng_i;
 	struct timeout sc_rng_to;
@@ -124,9 +128,11 @@ struct pchb_softc {
 
 int	pchbmatch(struct device *, void *, void *);
 void	pchbattach(struct device *, struct device *, void *);
+int	pchbactivate(struct device *, int);
 
 struct cfattach pchb_ca = {
-	sizeof(struct pchb_softc), pchbmatch, pchbattach
+	sizeof(struct pchb_softc), pchbmatch, pchbattach, NULL,
+	pchbactivate
 };
 
 struct cfdriver pchb_cd = {
@@ -168,7 +174,7 @@ pchbattach(struct device *parent, struct device *self, void *aux)
 	struct pchb_softc *sc = (struct pchb_softc *)self;
 	struct pci_attach_args *pa = aux;
 	struct pcibus_attach_args pba;
-	pcireg_t bcreg;
+	pcireg_t bcreg, bir;
 	u_char bdnum, pbnum;
 	pcitag_t tag;
 	int i, r;
@@ -341,6 +347,35 @@ pchbattach(struct device *parent, struct device *self, void *aux)
 			timeout_set(&sc->sc_rng_to, pchb_rnd, sc);
 			sc->sc_rng_i = 4;
 			pchb_rnd(sc);
+			sc->sc_rng_active = 1;
+			break;
+		}
+		printf("\n");
+		break;
+	case PCI_VENDOR_VIATECH:
+		switch (PCI_PRODUCT(pa->pa_id)) {
+		case PCI_PRODUCT_VIATECH_VT8251_PCIE_0:
+			/*
+			 * Bump the host bridge into PCI-PCI bridge
+			 * mode by clearing magic bit on the VLINK
+			 * device.  This allows us to read the bus
+			 * number for the PCI bus attached to this
+			 * host bridge.
+			 */
+			tag = pci_make_tag(pa->pa_pc, 0, 17, 7);
+			bcreg = pci_conf_read(pa->pa_pc, tag, 0xfc);
+			bcreg &= ~0x00000004; /* XXX Magic */
+			pci_conf_write(pa->pa_pc, tag, 0xfc, bcreg);
+
+			bir = pci_conf_read(pa->pa_pc,
+			    pa->pa_tag, PPB_REG_BUSINFO);
+			pbnum = PPB_BUSINFO_PRIMARY(bir);
+			if (pbnum > 0)
+				doattach = 1;
+
+			/* Switch back to host bridge mode. */
+			bcreg |= 0x00000004; /* XXX Magic */
+			pci_conf_write(pa->pa_pc, tag, 0xfc, bcreg);
 			break;
 		}
 		printf("\n");
@@ -365,7 +400,7 @@ pchbattach(struct device *parent, struct device *self, void *aux)
 		config_found(self, &aa, agpdev_print);
 	}
 #endif /* NAGP > 0 */
-#ifdef __i386__
+
 	if (doattach == 0)
 		return;
 
@@ -378,8 +413,34 @@ pchbattach(struct device *parent, struct device *self, void *aux)
 	pba.pba_bus = pbnum;
 	pba.pba_pc = pa->pa_pc;
 	config_found(self, &pba, pchb_print);
-#endif /* __i386__ */
 }
+
+int
+pchbactivate(struct device *self, int act)
+{
+	struct pchb_softc *sc = (struct pchb_softc *)self;
+	int rv = 0;
+
+	switch (act) {
+	case DVACT_QUIESCE:
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_SUSPEND:
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_RESUME:
+		/* re-enable RNG, if we have it */
+		if (sc->sc_rng_active)
+			bus_space_write_1(sc->sc_bt, sc->sc_bh,
+			    I82802_RNG_HWST,
+			    bus_space_read_1(sc->sc_bt, sc->sc_bh,
+			    I82802_RNG_HWST) | I82802_RNG_HWST_ENABLE);
+		rv = config_activate_children(self, act);
+		break;
+	}
+	return (rv);
+}
+
 
 int
 pchb_print(void *aux, const char *pnp)

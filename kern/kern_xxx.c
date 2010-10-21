@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_xxx.c,v 1.11 2009/04/03 09:30:15 art Exp $	*/
+/*	$OpenBSD: kern_xxx.c,v 1.18 2010/07/28 16:15:25 deraadt Exp $	*/
 /*	$NetBSD: kern_xxx.c,v 1.32 1996/04/22 01:38:41 christos Exp $	*/
 
 /*
@@ -42,6 +42,8 @@
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
 
+#include <net/if.h>
+
 /* ARGSUSED */
 int
 sys_reboot(struct proc *p, void *v, register_t *retval)
@@ -49,13 +51,16 @@ sys_reboot(struct proc *p, void *v, register_t *retval)
 	struct sys_reboot_args /* {
 		syscallarg(int) opt;
 	} */ *uap = v;
+#ifdef MULTIPROCESSOR
 	CPU_INFO_ITERATOR cii;
 	struct cpu_info *ci;
+#endif
 	int error;
 
 	if ((error = suser(p, 0)) != 0)
 		return (error);
 
+#ifdef MULTIPROCESSOR
 	/*
 	 * Make sure this thread only runs on the primary cpu.
 	 */
@@ -65,6 +70,11 @@ sys_reboot(struct proc *p, void *v, register_t *retval)
 			break;
 		}
 	}
+
+	sched_stop_secondary_cpus();
+#endif
+
+	if_downall();
 
 	boot(SCARG(uap, opt));
 

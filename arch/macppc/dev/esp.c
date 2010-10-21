@@ -1,4 +1,4 @@
-/* $OpenBSD: esp.c,v 1.5 2009/02/16 21:19:06 miod Exp $ */
+/* $OpenBSD: esp.c,v 1.7 2010/06/28 18:31:01 krw Exp $ */
 
 /*-
  * Copyright (c) 1997, 1998 The NetBSD Foundation, Inc.
@@ -80,7 +80,6 @@
 #include <sys/device.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/queue.h>
 #include <sys/malloc.h>
 
@@ -138,10 +137,6 @@ struct cfattach esp_ca = {
 struct scsi_adapter esp_switch = {
 	/* no max at this level; handled by DMA code */
 	ncr53c9x_scsi_cmd, scsi_minphys, NULL, NULL,
-};
-
-struct scsi_device esp_dev = {
-	NULL, NULL, NULL, NULL,
 };
 
 /*
@@ -271,7 +266,7 @@ espattach(struct device *parent, struct device *self, void *aux)
 	/* Turn on target selection using the `DMA' method */
 	sc->sc_features |= NCR_F_DMASELECT;
 
-	ncr53c9x_attach(sc, &esp_switch, &esp_dev);
+	ncr53c9x_attach(sc, &esp_switch);
 
 }
 

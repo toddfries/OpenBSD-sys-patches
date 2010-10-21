@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vrreg.h,v 1.21 2008/07/18 13:38:40 thib Exp $	*/
+/*	$OpenBSD: if_vrreg.h,v 1.27 2009/06/18 17:48:15 claudio Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -43,6 +43,7 @@
 #define VR_RXCFG		0x06	/* receiver config register */
 #define VR_TXCFG		0x07	/* transmit config register */
 #define VR_COMMAND		0x08	/* command register */
+#define VR_TQWK			0x0A	/* transmit queue wake */
 #define VR_ISR			0x0C	/* interrupt/status register */
 #define VR_IMR			0x0E	/* interrupt mask register */
 #define VR_MAR0			0x10	/* multicast hash 0 */
@@ -109,10 +110,9 @@
 /*
  * TX config bits.
  */
-#define VR_TXCFG_RSVD0		0x01
+#define VR_TXCFG_TXTAGEN	0x01	/* 6105M */
 #define VR_TXCFG_LOOPBKMODE	0x06
 #define VR_TXCFG_BACKOFF	0x08
-#define VR_TXCFG_RSVD1		0x10
 #define VR_TXCFG_TX_THRESH	0xE0
 
 #define VR_TXTHRESH_32BYTES	0x00
@@ -245,13 +245,13 @@
 /*
  * Config register bits.
  */
-#define VR_CFG_GPIO2OUTENB	0x00000001
-#define VR_CFG_GPIO2OUT		0x00000002	/* gen. purp. pin */
-#define VR_CFG_GPIO2IN		0x00000004	/* gen. purp. pin */
-#define VR_CFG_AUTOOPT		0x00000008	/* enable rx/tx autopoll */
-#define VR_CFG_MIIOPT		0x00000010
-#define VR_CFG_MMIENB		0x00000020	/* memory mapped mode enb */
-#define VR_CFG_JUMPER		0x00000040	/* PHY and oper. mode select */
+#define VR_CFG_PREACPIWAKE	0x00000001	/* pre-acpi wake */
+#define VR_CFG_ABNORMALWAKE	0x00000002	/* abnormal shut down wake */
+#define VR_CFG_RSVD0		0x00000004
+#define VR_CFG_LED0		0x00000008
+#define VR_CFG_LED1		0x00000010
+#define VR_CFG_TAGCRC		0x00000020	/* 6105M tag in CRC */
+#define VR_CFG_MIIOPT		0x00000040	/* MII extension clock */
 #define VR_CFG_EELOAD		0x00000080	/* enable EEPROM programming */
 #define VR_CFG_LATMENB		0x00000100	/* larency timer effect enb. */
 #define VR_CFG_MRREADWAIT	0x00000200
@@ -265,10 +265,10 @@
 #define VR_CFG_ROMSEL1		0x00020000
 #define VR_CFG_ROMSEL2		0x00040000
 #define VR_CFG_ROMTIMESEL	0x00080000
-#define VR_CFG_RSVD0		0x00100000
+#define VR_CFG_RSVD1		0x00100000
 #define VR_CFG_ROMDLY		0x00200000
 #define VR_CFG_ROMOPT		0x00400000
-#define VR_CFG_RSVD1		0x00800000
+#define VR_CFG_RSVD2		0x00800000
 #define VR_CFG_BACKOFFOPT	0x01000000
 #define VR_CFG_BACKOFFMOD	0x02000000
 #define VR_CFG_CAPEFFECT	0x04000000
@@ -324,6 +324,7 @@
 #define VR_BCR1_TXTHRESH512BYTES 0x20
 #define VR_BCR1_TXTHRESH1024BYTES 0x28
 #define VR_BCR1_TXTHRESHSTORENFWD 0x38
+#define VR_BCR1_VLANFILT_ENB	0x80		/* 6105M */
 
 /*
  * Rhine TX/RX list structure.
@@ -343,6 +344,7 @@ struct vr_desc {
 #define VR_RXSTAT_GIANT		0x00000010
 #define VR_RXSTAT_RUNT		0x00000020
 #define VR_RXSTAT_BUSERR	0x00000040
+#define VR_RXSTAT_FRAG		0x00000040	/* 6105M */
 #define VR_RXSTAT_BUFFERR	0x00000080
 #define VR_RXSTAT_LASTFRAG	0x00000100
 #define VR_RXSTAT_FIRSTFRAG	0x00000200
@@ -350,7 +352,8 @@ struct vr_desc {
 #define VR_RXSTAT_RX_PHYS	0x00000800
 #define VR_RXSTAT_RX_BROAD	0x00001000
 #define VR_RXSTAT_RX_MULTI	0x00002000
-#define VR_RXSTAT_RX_OK		0x00004000
+#define VR_RXSTAT_RX_VIDHIT	0x00004000	/* 6105M */
+#define VR_RXSTAT_RX_OK		0x00008000
 #define VR_RXSTAT_RXLEN		0x07FF0000
 #define VR_RXSTAT_RXLEN_EXT	0x78000000
 #define VR_RXSTAT_OWN		0x80000000
@@ -361,6 +364,14 @@ struct vr_desc {
 #define VR_RXCTL_BUFLEN		0x000007FF
 #define VR_RXCTL_BUFLEN_EXT	0x00007800
 #define VR_RXCTL_CHAIN		0x00008000
+#define VR_RXCTL_TAG		0x00010000
+#define VR_RXCTL_UDP		0x00020000
+#define VR_RXCTL_TCP		0x00040000
+#define VR_RXCTL_IP		0x00080000
+#define VR_RXCTL_TCPUDPOK	0x00100000
+#define VR_RXCTL_IPOK		0x00200000
+#define VR_RXCTL_SNAPTAG	0x00400000
+#define VR_RXCTL_RXLERR		0x00800000	/* 6105M */
 #define VR_RXCTL_RX_INTR	0x00800000
 
 #define VR_RXCTL (VR_RXCTL_CHAIN|VR_RXCTL_RX_INTR)
@@ -376,11 +387,17 @@ struct vr_desc {
 #define VR_TXSTAT_BUSERR	0x00002000
 #define VR_TXSTAT_JABTIMEO	0x00004000
 #define VR_TXSTAT_ERRSUM	0x00008000
+#define VR_TXSTAT_PQMASK	0x7FFF0000
 #define VR_TXSTAT_OWN		0x80000000
 
 #define VR_TXCTL_BUFLEN		0x000007FF
 #define VR_TXCTL_BUFLEN_EXT	0x00007800
 #define VR_TXCTL_TLINK		0x00008000
+#define VR_TXCTL_NOCRC		0x00010000
+#define VR_TXCTL_INSERTTAG	0x00020000
+#define VR_TXCTL_IPCSUM		0x00040000
+#define VR_TXCTL_UDPCSUM	0x00080000
+#define VR_TXCTL_TCPCSUM	0x00100000
 #define VR_TXCTL_FIRSTFRAG	0x00200000
 #define VR_TXCTL_LASTFRAG	0x00400000
 #define VR_TXCTL_FINT		0x00800000
@@ -418,16 +435,12 @@ struct vr_chain_data {
 	struct vr_chain_onefrag	vr_rx_chain[VR_RX_LIST_CNT];
 	struct vr_chain		vr_tx_chain[VR_TX_LIST_CNT];
 
-	struct vr_chain_onefrag	*vr_rx_head;
+	struct vr_chain_onefrag	*vr_rx_cons;
+	struct vr_chain_onefrag	*vr_rx_prod;
+	int			 vr_rx_cnt;
 
 	struct vr_chain		*vr_tx_cons;
 	struct vr_chain		*vr_tx_prod;
-};
-
-struct vr_type {
-	u_int16_t		vr_vid;
-	u_int16_t		vr_did;
-	char			*vr_name;
 };
 
 struct vr_mii_frame {
@@ -467,8 +480,9 @@ struct vr_softc {
 	struct timeout		sc_to;
 	bus_dmamap_t		sc_listmap;	/* descriptor list map */
 	bus_dma_segment_t	sc_listseg;
-	int			sc_if_flags;
 	int			sc_rxbufs;
+	int			vr_link;
+	int			vr_quirks;
 };
 
 #define VR_F_RESTART		0x01		/* Restart unit on next tick */
@@ -493,43 +507,6 @@ struct vr_softc {
 #define VR_TIMEOUT		1000
 
 /*
- * General constants that are fun to know.
- *
- * VIA vendor ID
- */
-#define	VIA_VENDORID			0x1106
-
-/*
- * VIA Rhine device IDs.
- */
-#define	VIA_DEVICEID_RHINE		0x3043
-#define VIA_DEVICEID_RHINE_II		0x6100
-#define VIA_DEVICEID_RHINE_II_2		0x3065
-#define VIA_DEVICEID_RHINE_III		0x3106
-#define VIA_DEVICEID_RHINE_III_M	0x3053
-
-/*
- * Delta Electronics device ID.
- */
-#define DELTA_VENDORID			0x1500
-
-/*
- * Delta device IDs.
- */
-#define DELTA_DEVICEID_RHINE_II		0x1320
-
-/*
- * Addtron vendor ID.
- */
-#define ADDTRON_VENDORID		0x4033
-
-/*
- * Addtron device IDs.
- */
-#define ADDTRON_DEVICEID_RHINE_II	0x1320
-
-
-/*
  * VIA Rhine revision IDs
  */
 
@@ -544,6 +521,8 @@ struct vr_softc {
 #define REV_ID_VT3106			0x80
 #define REV_ID_VT3106_J			0x80	/* 0x80-0x8F */
 #define REV_ID_VT3106_S			0x90	/* 0x90-0xA0 */
+#define REV_ID_VT6105M_A0		0x90
+#define REV_ID_VT6105M_B1		0x94
 
 /*
  * PCI low memory base and low I/O base register, and

@@ -1,4 +1,4 @@
-/*      $OpenBSD: ath.c,v 1.80 2009/01/21 21:53:59 grange Exp $  */
+/*      $OpenBSD: ath.c,v 1.91 2010/09/07 16:21:42 deraadt Exp $  */
 /*	$NetBSD: ath.c,v 1.37 2004/08/18 21:59:39 dyoung Exp $	*/
 
 /*-
@@ -45,7 +45,6 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/sysctl.h>
 #include <sys/mbuf.h>
 #include <sys/malloc.h>
 #include <sys/lock.h>
@@ -141,7 +140,6 @@ void	ath_recv_mgmt(struct ieee80211com *, struct mbuf *,
 	    struct ieee80211_node *, struct ieee80211_rxinfo *, int);
 #endif
 void	ath_disable(struct ath_softc *);
-void	ath_power(int, void *);
 
 int	ath_gpio_attach(struct ath_softc *, u_int16_t);
 int	ath_gpio_pin_read(void *, int);
@@ -164,25 +162,30 @@ struct cfdriver ath_cd = {
 	NULL, "ath", DV_IFNET
 };
 
-#if 0
 int
-ath_activate(struct device *self, enum devact act)
+ath_activate(struct device *self, int act)
 {
 	struct ath_softc *sc = (struct ath_softc *)self;
-	int rv = 0, s;
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
 
-	s = splnet();
 	switch (act) {
-	case DVACT_ACTIVATE:
+	case DVACT_SUSPEND:
+		if (ifp->if_flags & IFF_RUNNING) {
+			ath_stop(ifp);
+			if (sc->sc_power != NULL)
+				(*sc->sc_power)(sc, act);
+		}
 		break;
-	case DVACT_DEACTIVATE:
-		if_deactivate(&sc->sc_ic.ic_if);
+	case DVACT_RESUME:
+		if (ifp->if_flags & IFF_UP) {
+			ath_init(ifp);
+			if (ifp->if_flags & IFF_RUNNING)
+				ath_start(ifp);
+		}
 		break;
 	}
-	splx(s);
-	return rv;
+	return 0;
 }
-#endif
 
 int
 ath_enable(struct ath_softc *sc)
@@ -352,7 +355,6 @@ ath_attach(u_int16_t devid, struct ath_softc *sc)
 	ifp->if_watchdog = ath_watchdog;
 	ifp->if_ioctl = ath_ioctl;
 #ifndef __OpenBSD__
-	ifp->if_init = ath_init;
 	ifp->if_stop = ath_stop;		/* XXX */
 #endif
 	IFQ_SET_MAXLEN(&ifp->if_snd, ATH_TXBUF * ATH_TXDESC);
@@ -424,15 +426,6 @@ ath_attach(u_int16_t devid, struct ath_softc *sc)
 #endif
 
 	sc->sc_flags |= ATH_ATTACHED;
-	/*
-	 * Make sure the interface is shutdown during reboot.
-	 */
-	sc->sc_sdhook = shutdownhook_establish(ath_shutdown, sc);
-	if (sc->sc_sdhook == NULL)
-		printf(": WARNING: unable to establish shutdown hook\n");
-	sc->sc_powerhook = powerhook_establish(ath_power, sc);
-	if (sc->sc_powerhook == NULL)
-		printf(": WARNING: unable to establish power hook\n");
 
 	/*
 	 * Print regulation domain and the mac address. The regulation domain
@@ -482,82 +475,12 @@ ath_detach(struct ath_softc *sc, int flags)
 	if_detach(ifp);
 
 	splx(s);
-	if (sc->sc_powerhook != NULL)
-		powerhook_disestablish(sc->sc_powerhook);
-	if (sc->sc_sdhook != NULL)
-		shutdownhook_disestablish(sc->sc_sdhook);
 #ifdef __FreeBSD__
 	ATH_TXBUF_LOCK_DESTROY(sc);
 	ATH_TXQ_LOCK_DESTROY(sc);
 #endif
 
 	return 0;
-}
-
-void
-ath_power(int why, void *arg)
-{
-	struct ath_softc *sc = arg;
-	int s;
-
-	DPRINTF(ATH_DEBUG_ANY, ("ath_power(%d)\n", why));
-
-	s = splnet();
-	switch (why) {
-	case PWR_SUSPEND:
-	case PWR_STANDBY:
-		ath_suspend(sc, why);
-		break;
-	case PWR_RESUME:
-		ath_resume(sc, why);
-		break;
-#if !defined(__OpenBSD__)
-	case PWR_SOFTSUSPEND:
-	case PWR_SOFTSTANDBY:
-	case PWR_SOFTRESUME:
-		break;
-#endif
-	}
-	splx(s);
-}
-
-void
-ath_suspend(struct ath_softc *sc, int why)
-{
-	struct ifnet *ifp = &sc->sc_ic.ic_if;
-
-	DPRINTF(ATH_DEBUG_ANY, ("%s: if_flags %x\n", __func__, ifp->if_flags));
-
-	ath_stop(ifp);
-	if (sc->sc_power != NULL)
-		(*sc->sc_power)(sc, why);
-}
-
-void
-ath_resume(struct ath_softc *sc, int why)
-{
-	struct ifnet *ifp = &sc->sc_ic.ic_if;
-
-	DPRINTF(ATH_DEBUG_ANY, ("%s: if_flags %x\n", __func__, ifp->if_flags));
-
-	if (ifp->if_flags & IFF_UP) {
-		ath_init(ifp);
-#if 0
-		(void)ath_intr(sc);
-#endif
-		if (sc->sc_power != NULL)
-			(*sc->sc_power)(sc, why);
-		if (ifp->if_flags & IFF_RUNNING)
-			ath_start(ifp);
-	}
-}
-
-void
-ath_shutdown(void *arg)
-{
-	struct ath_softc *sc = arg;
-
-	ath_stop(&sc->sc_ic.ic_if);
 }
 
 int
@@ -2148,7 +2071,6 @@ ath_tx_start(struct ath_softc *sc, struct ieee80211_node *ni,
 	int i, error, iswep, hdrlen, pktlen, len, s;
 	u_int8_t rix, cix, txrate, ctsrate;
 	struct ath_desc *ds;
-	struct mbuf *m;
 	struct ieee80211_frame *wh;
 	struct ieee80211_key *k;
 	u_int32_t iv;
@@ -2251,25 +2173,11 @@ ath_tx_start(struct ath_softc *sc, struct ieee80211_node *ni,
 	 */
 	if (error == EFBIG) {		/* too many desc's, linearize */
 		sc->sc_stats.ast_tx_linear++;
-		MGETHDR(m, M_DONTWAIT, MT_DATA);
-		if (m == NULL) {
-			sc->sc_stats.ast_tx_nombuf++;
-			m_freem(m0);
-			return ENOMEM;
-		}
-
-		M_DUP_PKTHDR(m, m0);
-		MCLGET(m, M_DONTWAIT);
-		if ((m->m_flags & M_EXT) == 0) {
+		if (m_defrag(m0, M_DONTWAIT)) {
 			sc->sc_stats.ast_tx_nomcl++;
 			m_freem(m0);
-			m_free(m);
 			return ENOMEM;
 		}
-		m_copydata(m0, 0, m0->m_pkthdr.len, mtod(m, caddr_t));
-		m_freem(m0);
-		m->m_len = m->m_pkthdr.len;
-		m0 = m;
 		error = bus_dmamap_load_mbuf(sc->sc_dmat, bf->bf_dmamap, m0,
 		    BUS_DMA_NOWAIT);
 		if (error != 0) {
@@ -3027,7 +2935,7 @@ ath_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 		timeout_add_sec(&sc->sc_cal_to, ath_calinterval);
 
 		if (ic->ic_opmode != IEEE80211_M_MONITOR)
-			timeout_add(&sc->sc_rssadapt_to, hz / 10);
+			timeout_add_msec(&sc->sc_rssadapt_to, 100);
 	} else if (nstate == IEEE80211_S_SCAN) {
 		/* start ap/neighbor scan timer */
 		timeout_add_msec(&sc->sc_scan_to, ath_dwelltime);
@@ -3224,7 +3132,7 @@ ath_rssadapt_updatestats(void *arg)
 		ieee80211_iterate_nodes(ic, ath_rssadapt_updatenode, arg);
 	}
 
-	timeout_add(&sc->sc_rssadapt_to, hz / 10);
+	timeout_add_msec(&sc->sc_rssadapt_to, 100);
 }
 
 #ifdef AR_DEBUG
