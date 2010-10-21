@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_lge.c,v 1.50 2008/11/28 02:44:18 brad Exp $	*/
+/*	$OpenBSD: if_lge.c,v 1.53 2010/05/19 15:27:35 oga Exp $	*/
 /*
  * Copyright (c) 2001 Wind River Systems
  * Copyright (c) 1997, 1998, 1999, 2000, 2001
@@ -123,7 +123,7 @@ struct cfattach lge_ca = {
 };
 
 struct cfdriver lge_cd = {
-	0, "lge", DV_IFNET
+	NULL, "lge", DV_IFNET
 };
 
 int lge_alloc_jumbo_mem(struct lge_softc *);
@@ -142,7 +142,6 @@ int lge_ioctl(struct ifnet *, u_long, caddr_t);
 void lge_init(void *);
 void lge_stop(struct lge_softc *);
 void lge_watchdog(struct ifnet *);
-void lge_shutdown(void *);
 int lge_ifmedia_upd(struct ifnet *);
 void lge_ifmedia_sts(struct ifnet *, struct ifmediareq *);
 
@@ -505,7 +504,7 @@ lge_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_dmatag = pa->pa_dmat;
 	DPRINTFN(5, ("bus_dmamem_alloc\n"));
 	if (bus_dmamem_alloc(sc->sc_dmatag, sizeof(struct lge_list_data),
-			     PAGE_SIZE, 0, &seg, 1, &rseg, BUS_DMA_NOWAIT)) {
+	    PAGE_SIZE, 0, &seg, 1, &rseg, BUS_DMA_NOWAIT | BUS_DMA_ZERO)) {
 		printf("%s: can't alloc rx buffers\n", sc->sc_dv.dv_xname);
 		goto fail_2;
 	}
@@ -533,7 +532,6 @@ lge_attach(struct device *parent, struct device *self, void *aux)
 
 	DPRINTFN(5, ("bzero\n"));
 	sc->lge_ldata = (struct lge_list_data *)kva;
-	bzero(sc->lge_ldata, sizeof(struct lge_list_data));
 
 	/* Try to allocate memory for jumbo buffers. */
 	DPRINTFN(5, ("lge_alloc_jumbo_mem\n"));
@@ -1497,17 +1495,4 @@ lge_stop(struct lge_softc *sc)
 
 	bzero((char *)&sc->lge_ldata->lge_tx_list,
 		sizeof(sc->lge_ldata->lge_tx_list));
-}
-
-/*
- * Stop all chip I/O so that the kernel's probe routines don't
- * get confused by errant DMAs when rebooting.
- */
-void
-lge_shutdown(void *xsc)
-{
-	struct lge_softc	*sc = (struct lge_softc *)xsc;
-
-	lge_reset(sc);
-	lge_stop(sc);
 }

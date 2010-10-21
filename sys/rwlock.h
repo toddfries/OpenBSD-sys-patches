@@ -1,4 +1,4 @@
-/*	$OpenBSD: rwlock.h,v 1.11 2007/05/29 00:17:32 thib Exp $	*/
+/*	$OpenBSD: rwlock.h,v 1.13 2010/09/24 13:21:30 matthew Exp $	*/
 /*
  * Copyright (c) 2002 Artur Grabowski <art@openbsd.org>
  * All rights reserved. 
@@ -94,6 +94,16 @@ void rw_enter_read(struct rwlock *);
 void rw_enter_write(struct rwlock *);
 void rw_exit_read(struct rwlock *);
 void rw_exit_write(struct rwlock *);
+
+#ifdef DIAGNOSTIC
+void rw_assert_wrlock(struct rwlock *);
+void rw_assert_rdlock(struct rwlock *);
+void rw_assert_unlocked(struct rwlock *);
+#else
+#define rw_assert_wrlock(rwl) ((void)0)
+#define rw_assert_rdlock(rwl) ((void)0)
+#define rw_assert_unlocked(rwl) ((void)0)
+#endif
 
 int rw_enter(struct rwlock *, int);
 void rw_exit(struct rwlock *);

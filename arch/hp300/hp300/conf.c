@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.44 2009/01/25 17:30:48 miod Exp $	*/
+/*	$OpenBSD: conf.c,v 1.49 2010/09/23 05:02:14 claudio Exp $	*/
 /*	$NetBSD: conf.c,v 1.39 1997/05/12 08:17:53 thorpej Exp $	*/
 
 /*-
@@ -51,7 +51,6 @@ bdev_decl(mt);
 bdev_decl(hd);
 #include "rd.h"
 #include "sd.h"
-#include "ss.h"
 #include "st.h"
 #include "uk.h"
 #include "vnd.h"
@@ -103,9 +102,9 @@ cdev_decl(fd);
 #include "bpfilter.h"
 #include "tun.h"
 #include "ksyms.h"
-#ifdef XFS
-#include <xfs/nxfs.h>
-cdev_decl(xfs_dev);
+#ifdef NNPFS
+#include <nnpfs/nnnpfs.h>
+cdev_decl(nnpfs_dev);
 #endif
 #include "wsdisplay.h"
 #include "wskbd.h"
@@ -113,6 +112,8 @@ cdev_decl(xfs_dev);
 #include "wsmux.h"
 #include "pf.h"
 #include "systrace.h"
+#include "vscsi.h"
+#include "pppx.h"
 
 struct cdevsw	cdevsw[] =
 {
@@ -154,7 +155,7 @@ struct cdevsw	cdevsw[] =
 	cdev_tty_init(NAPCI,apci),	/* 35: Apollo APCI UARTs */
 	cdev_ksyms_init(NKSYMS,ksyms),	/* 36: Kernel symbols device */
 	cdev_uk_init(NUK,uk),		/* 37 */
-	cdev_ss_init(NSS,ss),		/* 38 */
+	cdev_notdef(),			/* 38 */
 	cdev_ch_init(NCH,ch),		/* 39 */
 	cdev_wsdisplay_init(NWSDISPLAY,wsdisplay), /* 40: frame buffers */
 	cdev_mouse_init(NWSKBD,wskbd),	/* 41: keyboards */
@@ -167,13 +168,15 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 48 */
 	cdev_bio_init(NBIO,bio),	/* 49: ioctl tunnel */
 	cdev_systrace_init(NSYSTRACE,systrace),	/* 50 system call tracing */
-#ifdef XFS
-	cdev_xfs_init(NXFS,xfs_dev),	/* 51: xfs communication device */
+#ifdef NNPFS
+	cdev_nnpfs_init(NNNPFS,nnpfs_dev),	/* 51: nnpfs communication device */
 #else
 	cdev_notdef(),			/* 51 */
 #endif
 	cdev_ptm_init(NPTY,ptm),	/* 52: pseudo-tty ptm device */
-
+	cdev_vscsi_init(NVSCSI,vscsi),	/* 53: vscsi */
+	cdev_disk_init(1,diskmap),	/* 54: disk mapper */
+	cdev_pppx_init(NPPPX,pppx),	/* 55: pppx */
 };
 int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
 

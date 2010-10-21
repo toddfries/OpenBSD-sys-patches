@@ -1,4 +1,4 @@
-/*	$OpenBSD: iommu.c,v 1.26 2009/03/11 23:38:51 oga Exp $	*/
+/*	$OpenBSD: iommu.c,v 1.30 2010/09/10 21:37:03 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2005 Jason L. Wright (jason@thought.net)
@@ -99,7 +99,9 @@
 #define	IOMMU_SIZE		512		/* size in MB */
 #define	IOMMU_ALIGN		IOMMU_SIZE
 
-int amdgart_enable = 1;
+int amdgart_enable = 0;
+
+#ifndef SMALL_KERNEL /* no bigmem in ramdisks */
 
 struct amdgart_softc {
 	pci_chipset_tag_t	 g_pc;
@@ -118,22 +120,22 @@ void	amdgart_dumpregs(struct amdgart_softc *);
 int	amdgart_ok(pci_chipset_tag_t, pcitag_t);
 int	amdgart_enabled(pci_chipset_tag_t, pcitag_t);
 void	amdgart_initpt(struct amdgart_softc *, u_long);
-void	amdgart_bind_page(void *, vaddr_t, paddr_t,  int);
-void	amdgart_unbind_page(void *, vaddr_t);
+void	amdgart_bind_page(void *, bus_addr_t, paddr_t,  int);
+void	amdgart_unbind_page(void *, bus_addr_t);
 void	amdgart_invalidate(void *);
 void	amdgart_invalidate_wait(struct amdgart_softc *);
 
 struct bus_dma_tag amdgart_bus_dma_tag = {
 	NULL,			/* _may_bounce */
-	_sg_dmamap_create,
-	_sg_dmamap_destroy,
-	_sg_dmamap_load,
-	_sg_dmamap_load_mbuf,
-	_sg_dmamap_load_uio,
-	_sg_dmamap_load_raw,
-	_sg_dmamap_unload,
-	NULL,
-	_sg_dmamem_alloc,
+	sg_dmamap_create,
+	sg_dmamap_destroy,
+	sg_dmamap_load,
+	sg_dmamap_load_mbuf,
+	sg_dmamap_load_uio,
+	sg_dmamap_load_raw,
+	sg_dmamap_unload,
+	_bus_dmamap_sync,
+	sg_dmamem_alloc,
 	_bus_dmamem_free,
 	_bus_dmamem_map,
 	_bus_dmamem_unmap,
@@ -141,7 +143,7 @@ struct bus_dma_tag amdgart_bus_dma_tag = {
 };
 
 void
-amdgart_bind_page(void *handle, vaddr_t offset, paddr_t page,  int flags)
+amdgart_bind_page(void *handle, bus_addr_t offset, paddr_t page,  int flags)
 {
 	struct amdgart_softc	*sc = handle;
 	u_int32_t		 pgno, pte;
@@ -153,7 +155,7 @@ amdgart_bind_page(void *handle, vaddr_t offset, paddr_t page,  int flags)
 }
 
 void
-amdgart_unbind_page(void *handle, vaddr_t offset)
+amdgart_unbind_page(void *handle, bus_addr_t offset)
 {
 	struct amdgart_softc	*sc = handle;
 	u_int32_t		 pgno;
@@ -364,7 +366,7 @@ amdgart_probe(struct pcibus_attach_args *pba)
 	sc->g_pte = pte;
 	sc->g_dmat = pba->pba_dmat;
 
-	if ((cookie = _sg_dmatag_init("iommu", sc, sc->g_pa, mapsize,
+	if ((cookie = sg_dmatag_init("iommu", sc, sc->g_pa, mapsize,
 	    amdgart_bind_page, amdgart_unbind_page,
 	    amdgart_invalidate)) == NULL) {
 		printf("\nGART: didn't get dma cookie\n");
@@ -441,7 +443,7 @@ nofreeseg:
 	if (scrib != NULL)
 		free(scrib, M_DEVBUF);
 	if (cookie != NULL)
-		_sg_dmatag_destroy(cookie);
+		sg_dmatag_destroy(cookie);
 	if (sc != NULL)
 		free(sc, M_DEVBUF);
 }
@@ -455,3 +457,5 @@ amdgart_initpt(struct amdgart_softc *sc, u_long nent)
 		sc->g_pte[i] = sc->g_scribpte;
 	amdgart_invalidate(sc);
 }
+
+#endif /* !SMALL_KERNEL */

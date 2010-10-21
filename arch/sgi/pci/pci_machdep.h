@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.h,v 1.4 2008/02/16 18:42:21 miod Exp $ */
+/*	$OpenBSD: pci_machdep.h,v 1.11 2010/06/29 22:08:29 jordan Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -30,6 +30,7 @@ typedef u_long pcitag_t;
 typedef u_long pci_intr_handle_t;
 
 struct pci_attach_args;
+struct sgi_device_location;
 
 /*
  * mips-specific PCI structure and type definitions.
@@ -45,13 +46,22 @@ struct mips_pci_chipset {
 		    int *, int *);
     pcireg_t	(*pc_conf_read)(void *, pcitag_t, int);
     void	(*pc_conf_write)(void *, pcitag_t, int, pcireg_t);
+    int		(*pc_get_widget)(void *);
+    int		(*pc_get_dl)(void *, pcitag_t, struct sgi_device_location *);
 
     void	*pc_intr_v;
     int		(*pc_intr_map)(struct pci_attach_args *, pci_intr_handle_t *);
     const char	*(*pc_intr_string)(void *, pci_intr_handle_t);
     void	*(*pc_intr_establish)(void *, pci_intr_handle_t,
-		    int, int (*)(void *), void *, char *);
+		    int, int (*)(void *), void *, const char *);
     void	(*pc_intr_disestablish)(void *, void *);
+    int		(*pc_intr_line)(void *, pci_intr_handle_t);
+
+    int		(*pc_ppb_setup)(void *, pcitag_t, bus_addr_t *, bus_addr_t *,
+		    bus_addr_t *, bus_addr_t *);
+
+    void	*(*pc_rbus_parent_io)(struct pci_attach_args *);
+    void	*(*pc_rbus_parent_mem)(struct pci_attach_args *);
 };
 
 /*
@@ -69,7 +79,11 @@ struct mips_pci_chipset {
     (*(c)->pc_conf_read)((c)->pc_conf_v, (t), (r))
 #define	pci_conf_write(c, t, r, v)					\
     (*(c)->pc_conf_write)((c)->pc_conf_v, (t), (r), (v))
-#define	pci_intr_map(c, ihp)				\
+#define	pci_get_widget(c)						\
+    (*(c)->pc_get_widget)((c)->pc_conf_v)
+#define pci_get_device_location(c,t,l)					\
+    (*(c)->pc_get_dl)((c)->pc_conf_v, (t), (l))
+#define	pci_intr_map(c, ihp)						\
     (*(c)->pa_pc->pc_intr_map)((c), (ihp))
 #define	pci_intr_string(c, ih)						\
     (*(c)->pc_intr_string)((c)->pc_intr_v, (ih))
@@ -77,3 +91,14 @@ struct mips_pci_chipset {
     (*(c)->pc_intr_establish)((c)->pc_intr_v, (ih), (l), (h), (a), (nm))
 #define	pci_intr_disestablish(c, iv)					\
     (*(c)->pc_intr_disestablish)((c)->pc_intr_v, (iv))
+#define pci_intr_line(c, ih)						\
+    (*(c)->pc_intr_line)((c)->pc_intr_v, (ih))
+#define	rbus_pccbb_parent_io(dev, pa)					\
+    (rbus_tag_t)((*(pa)->pa_pc->pc_rbus_parent_io)(pa))
+#define	rbus_pccbb_parent_mem(dev, pa)					\
+    (rbus_tag_t)((*(pa)->pa_pc->pc_rbus_parent_mem)(pa))
+
+void	pccbb_initialize(pci_chipset_tag_t, pcitag_t, uint, uint, uint);
+void	ppb_initialize(pci_chipset_tag_t, pcitag_t, uint, uint, uint);
+
+#define	pci_dev_postattach(a, b)

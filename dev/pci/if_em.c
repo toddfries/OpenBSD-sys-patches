@@ -31,10 +31,11 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 
-/* $OpenBSD: if_em.c,v 1.207 2009/01/27 09:17:51 dlg Exp $ */
+/* $OpenBSD: if_em.c,v 1.248 2010/09/19 13:10:21 yasuoka Exp $ */
 /* $FreeBSD: if_em.c,v 1.46 2004/09/29 18:28:28 mlaier Exp $ */
 
 #include <dev/pci/if_em.h>
+#include <dev/pci/if_em_soc.h>
 
 #ifdef EM_DEBUG
 /*********************************************************************
@@ -116,6 +117,26 @@ const struct pci_matchid em_devices[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82573L_PL_1 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82573L_PL_2 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82573V_PM },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82574L },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82574LA },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82575EB_COPPER },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82575EB_SERDES },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82575GB_QUAD_CPR },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82575GB_QP_PM },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576_FIBER },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576_SERDES },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576_QUAD_COPPER },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576_QUAD_CU_ET2 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576_NS },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576_NS_SERDES },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576_SERDES_QUAD },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82577LC },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82577LM },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82578DC },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82578DM },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82583V },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_82567V_3 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IFE },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IFE_G },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IFE_GT },
@@ -123,13 +144,23 @@ const struct pci_matchid em_devices[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IGP_C },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IGP_M },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IGP_M_AMT },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH9_BM },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH9_IFE },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH9_IFE_G },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH9_IFE_GT },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH9_IGP_AMT },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH9_IGP_C },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH9_IGP_M },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH9_IGP_M_AMT }
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH9_IGP_M_AMT },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH9_IGP_M_V },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH10_D_BM_LF },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH10_D_BM_LM },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH10_R_BM_LF },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH10_R_BM_LM },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH10_R_BM_V },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_EP80579_LAN_1 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_EP80579_LAN_2 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_EP80579_LAN_3 }
 };
 
 /*********************************************************************
@@ -137,14 +168,15 @@ const struct pci_matchid em_devices[] = {
  *********************************************************************/
 int  em_probe(struct device *, void *, void *);
 void em_attach(struct device *, struct device *, void *);
-void em_shutdown(void *);
+void em_defer_attach(struct device*);
+int  em_detach(struct device *, int);
+int  em_activate(struct device *, int);
 int  em_intr(void *);
-void em_power(int, void *);
 void em_start(struct ifnet *);
 int  em_ioctl(struct ifnet *, u_long, caddr_t);
 void em_watchdog(struct ifnet *);
 void em_init(void *);
-void em_stop(void *);
+void em_stop(void *, int);
 void em_media_status(struct ifnet *, struct ifmediareq *);
 int  em_media_change(struct ifnet *);
 int  em_flowstatus(struct em_softc *);
@@ -179,8 +211,7 @@ void em_receive_checksum(struct em_softc *, struct em_rx_desc *,
 void em_transmit_checksum_setup(struct em_softc *, struct mbuf *,
 				u_int32_t *, u_int32_t *);
 #endif
-void em_set_promisc(struct em_softc *);
-void em_set_multi(struct em_softc *);
+void em_iff(struct em_softc *);
 #ifdef EM_DEBUG
 void em_print_hw_stats(struct em_softc *);
 #endif
@@ -206,11 +237,12 @@ u_int32_t em_fill_descriptors(u_int64_t address, u_int32_t length,
  *********************************************************************/
 
 struct cfattach em_ca = {
-	sizeof(struct em_softc), em_probe, em_attach
+	sizeof(struct em_softc), em_probe, em_attach, em_detach,
+	em_activate
 };
 
 struct cfdriver em_cd = {
-	0, "em", DV_IFNET
+	NULL, "em", DV_IFNET
 };
 
 static int em_smart_pwr_down = FALSE;
@@ -233,6 +265,42 @@ em_probe(struct device *parent, void *match, void *aux)
 	    sizeof(em_devices)/sizeof(em_devices[0])));
 }
 
+void
+em_defer_attach(struct device *self)
+{
+	struct em_softc *sc = (struct em_softc *)self;
+	struct pci_attach_args *pa = &sc->osdep.em_pa;
+	pci_chipset_tag_t	pc = pa->pa_pc;
+	void *gcu;
+
+	if ((gcu = em_lookup_gcu(self)) == 0) {
+		printf("%s: No GCU found, defered attachment failed\n",
+		    sc->sc_dv.dv_xname);
+
+		if (sc->sc_intrhand)
+			pci_intr_disestablish(pc, sc->sc_intrhand);
+		sc->sc_intrhand = 0;
+
+		em_stop(sc, 1);
+
+		em_free_pci_resources(sc);
+		em_dma_free(sc, &sc->rxdma);
+		em_dma_free(sc, &sc->txdma);
+
+		return;
+	}
+	
+	sc->hw.gcu = gcu;
+	
+	em_attach_miibus(self);			
+
+	em_setup_interface(sc);			
+
+	em_update_link_status(sc);		
+
+	em_setup_link(&sc->hw);			
+}
+
 /*********************************************************************
  *  Device initialization routine
  *
@@ -247,8 +315,9 @@ em_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct pci_attach_args *pa = aux;
 	struct em_softc *sc;
-	int		tsize, rsize;
-
+	int tsize, rsize;
+	int defer = 0;
+    
 	INIT_DEBUGOUT("em_attach: begin");
 
 	sc = (struct em_softc *)self;
@@ -293,11 +362,8 @@ em_attach(struct device *parent, struct device *self, void *aux)
 	 */
 	sc->hw.report_tx_early = 1;
 
-	if (em_allocate_pci_resources(sc)) {
-		printf("%s: Allocation of PCI resources failed\n",
-		    sc->sc_dv.dv_xname);
+	if (em_allocate_pci_resources(sc))
 		goto err_pci;
-	}
 
 	/* Initialize eeprom parameters */
 	em_init_eeprom_params(&sc->hw);
@@ -321,18 +387,26 @@ em_attach(struct device *parent, struct device *self, void *aux)
 				sc->hw.max_frame_size = ETHER_MAX_LEN;
 				break;
 			}
-			/* Allow Jumbo frames - FALLTHROUGH */
+			/* Allow Jumbo frames */
+			/* FALLTHROUGH */
 		}
 		case em_82571:
 		case em_82572:
+		case em_82574:
+		case em_82575:
 		case em_ich9lan:
-		case em_80003es2lan:	/* Limit Jumbo Frame size */
+		case em_ich10lan:
+		case em_80003es2lan:
+			/* Limit Jumbo Frame size */
 			sc->hw.max_frame_size = 9234;
 			break;
-			/* Adapters that do not support Jumbo frames */
+		case em_pchlan:
+			sc->hw.max_frame_size = 4096;
+			break;
 		case em_82542_rev2_0:
 		case em_82542_rev2_1:
 		case em_ich8lan:
+			/* Adapters that do not support Jumbo frames */
 			sc->hw.max_frame_size = ETHER_MAX_LEN;
 			break;
 		default:
@@ -376,10 +450,14 @@ em_attach(struct device *parent, struct device *self, void *aux)
 	sc->rx_desc_base = (struct em_rx_desc *) sc->rxdma.dma_vaddr;
 
 	/* Initialize the hardware */
-	if (em_hardware_init(sc)) {
-		printf("%s: Unable to initialize the hardware\n",
-		       sc->sc_dv.dv_xname);
-		goto err_hw_init;
+	if ((defer = em_hardware_init(sc))) {
+		if (defer == EAGAIN)
+			config_defer(self, em_defer_attach);
+		else {
+			printf("%s: Unable to initialize the hardware\n",
+			    sc->sc_dv.dv_xname);
+			goto err_hw_init;
+		}
 	}
 
 	/* Copy the permanent MAC address out of the EEPROM */
@@ -395,16 +473,18 @@ em_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	bcopy(sc->hw.mac_addr, sc->interface_data.ac_enaddr,
-	      ETHER_ADDR_LEN);
+	    ETHER_ADDR_LEN);
 
 	/* Setup OS specific network interface */
-	em_setup_interface(sc);
+	if (!defer)
+		em_setup_interface(sc);
 
 	/* Initialize statistics */
 	em_clear_hw_cntrs(&sc->hw);
 	em_update_stats_counters(sc);
 	sc->hw.get_link_status = 1;
-	em_update_link_status(sc);
+	if (!defer)
+		em_update_link_status(sc);
 
 	printf(", address %s\n", ether_sprintf(sc->interface_data.ac_enaddr));
 
@@ -420,9 +500,10 @@ em_attach(struct device *parent, struct device *self, void *aux)
 		sc->pcix_82544 = TRUE;
         else
 		sc->pcix_82544 = FALSE;
+
+	sc->hw.icp_xxxx_is_link_up = FALSE;
+
 	INIT_DEBUGOUT("em_attach: end");
-	sc->sc_powerhook = powerhook_establish(em_power, sc);
-	sc->sc_shutdownhook = shutdownhook_establish(em_shutdown, sc);
 	return;
 
 err_mac_addr:
@@ -433,33 +514,6 @@ err_rx_desc:
 err_tx_desc:
 err_pci:
 	em_free_pci_resources(sc);
-}
-
-void
-em_power(int why, void *arg)
-{
-	struct em_softc *sc = (struct em_softc *)arg;
-	struct ifnet *ifp;
-
-	if (why == PWR_RESUME) {
-		ifp = &sc->interface_data.ac_if;
-		if (ifp->if_flags & IFF_UP)
-			em_init(sc);
-	}
-}
-
-/*********************************************************************
- *
- *  Shutdown entry point
- *
- **********************************************************************/ 
-
-void
-em_shutdown(void *arg)
-{
-	struct em_softc *sc = arg;
-
-	em_stop(sc);
 }
 
 /*********************************************************************
@@ -566,24 +620,14 @@ em_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 	case SIOCSIFFLAGS:
 		IOCTL_DEBUGOUT("ioctl rcv'd: SIOCSIFFLAGS (Set Interface Flags)");
 		if (ifp->if_flags & IFF_UP) {
-			/*
-			 * If only the PROMISC or ALLMULTI flag changes, then
-			 * don't do a full re-init of the chip, just update
-			 * the Rx filter.
-			 */
-			if ((ifp->if_flags & IFF_RUNNING) &&
-			    ((ifp->if_flags ^ sc->if_flags) &
-			     (IFF_ALLMULTI | IFF_PROMISC)) != 0) {
-				em_set_promisc(sc);
-			} else {
-				if (!(ifp->if_flags & IFF_RUNNING))
-					em_init(sc);
-			}
+			if (ifp->if_flags & IFF_RUNNING)
+				error = ENETRESET;
+			else
+				em_init(sc);
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
-				em_stop(sc);
+				em_stop(sc, 0);
 		}
-		sc->if_flags = ifp->if_flags;
 		break;
 
 	case SIOCSIFMEDIA:
@@ -605,7 +649,7 @@ em_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 	if (error == ENETRESET) {
 		if (ifp->if_flags & IFF_RUNNING) {
 			em_disable_intr(sc);
-			em_set_multi(sc);
+			em_iff(sc);
 			if (sc->hw.mac_type == em_82542_rev2_0)
 				em_initialize_receive_unit(sc);
 			em_enable_intr(sc);
@@ -636,7 +680,6 @@ em_watchdog(struct ifnet *ifp)
 		ifp->if_timer = EM_TX_TIMEOUT;
 		return;
 	}
-
 	printf("%s: watchdog timeout -- resetting\n", sc->sc_dv.dv_xname);
 
 	em_init(sc);
@@ -666,7 +709,7 @@ em_init(void *arg)
 
 	INIT_DEBUGOUT("em_init: begin");
 
-	em_stop(sc);
+	em_stop(sc, 0);
 
 	/*
 	 * Packet Buffer Allocation (PBA)
@@ -692,6 +735,7 @@ em_init(void *arg)
 		break;
 	case em_82571:
 	case em_82572: /* Total Packet Buffer on these is 48k */
+	case em_82575:
 	case em_80003es2lan:
 		pba = E1000_PBA_32K; /* 32K for Rx, 16K for Tx */
 		break;
@@ -699,10 +743,15 @@ em_init(void *arg)
 		/* Jumbo frames not supported */
 		pba = E1000_PBA_12K; /* 12K for Rx, 20K for Tx */
 		break;
+	case em_82574: /* Total Packet Buffer is 40k */
+		pba = E1000_PBA_30K; /* 30K for Rx, 10K for Tx */
+		break;
 	case em_ich8lan:
 		pba = E1000_PBA_8K;
 		break;
 	case em_ich9lan:
+	case em_ich10lan:
+	case em_pchlan:
 		pba = E1000_PBA_10K;
 		break;
 	default:
@@ -736,27 +785,24 @@ em_init(void *arg)
 	if (em_setup_transmit_structures(sc)) {
 		printf("%s: Could not setup transmit structures\n", 
 		       sc->sc_dv.dv_xname);
-		em_stop(sc);
+		em_stop(sc, 0);
 		splx(s);
 		return;
 	}
 	em_initialize_transmit_unit(sc);
 
-	/* Setup Multicast table */
-	em_set_multi(sc);
-
 	/* Prepare receive descriptors and buffers */
 	if (em_setup_receive_structures(sc)) {
 		printf("%s: Could not setup receive structures\n", 
 		       sc->sc_dv.dv_xname);
-		em_stop(sc);
+		em_stop(sc, 0);
 		splx(s);
 		return;
 	}
 	em_initialize_receive_unit(sc);
 
-	/* Don't lose promiscuous settings */
-	em_set_promisc(sc);
+	/* Program promiscuous mode and multicast filters. */
+	em_iff(sc);
 
 	ifp->if_flags |= IFF_RUNNING;
 	ifp->if_flags &= ~IFF_OACTIVE;
@@ -814,7 +860,6 @@ em_intr(void *arg)
 
 		if (reg_icr & E1000_ICR_RXO) {
 			sc->rx_overruns++;
-			ifp->if_ierrors++;
 			refill = 1;
 		}
 
@@ -1291,44 +1336,17 @@ em_82547_tx_fifo_reset(struct em_softc *sc)
 }
 
 void
-em_set_promisc(struct em_softc *sc)
+em_iff(struct em_softc *sc)
 {
-	u_int32_t	reg_rctl;
-	struct ifnet   *ifp = &sc->interface_data.ac_if;
-
-	reg_rctl = E1000_READ_REG(&sc->hw, RCTL);
-
-	if (ifp->if_flags & IFF_PROMISC) {
-		reg_rctl |= (E1000_RCTL_UPE | E1000_RCTL_MPE);
-	} else if (ifp->if_flags & IFF_ALLMULTI) {
-		reg_rctl |= E1000_RCTL_MPE;
-		reg_rctl &= ~E1000_RCTL_UPE;
-	} else {
-		reg_rctl &= ~(E1000_RCTL_UPE | E1000_RCTL_MPE);
-	}
-	E1000_WRITE_REG(&sc->hw, RCTL, reg_rctl);
-}
-
-/*********************************************************************
- *  Multicast Update
- *
- *  This routine is called whenever multicast address list is updated.
- *
- **********************************************************************/
-
-void
-em_set_multi(struct em_softc *sc)
-{
-	u_int32_t reg_rctl = 0;
-	u_int8_t  mta[MAX_NUM_MULTICAST_ADDRESSES * ETH_LENGTH_OF_ADDRESS];
 	struct ifnet *ifp = &sc->interface_data.ac_if;
 	struct arpcom *ac = &sc->interface_data;
+	u_int32_t reg_rctl = 0;
+	u_int8_t  mta[MAX_NUM_MULTICAST_ADDRESSES * ETH_LENGTH_OF_ADDRESS];
 	struct ether_multi *enm;
 	struct ether_multistep step;
 	int i = 0;
 
-	IOCTL_DEBUGOUT("em_set_multi: begin");
-	ifp->if_flags &= ~IFF_ALLMULTI;
+	IOCTL_DEBUGOUT("em_iff: begin");
 
 	if (sc->hw.mac_type == em_82542_rev2_0) {
 		reg_rctl = E1000_READ_REG(&sc->hw, RCTL);
@@ -1340,13 +1358,17 @@ em_set_multi(struct em_softc *sc)
 	}
 
 	reg_rctl = E1000_READ_REG(&sc->hw, RCTL);
-	if (ac->ac_multirangecnt > 0 ||
+	reg_rctl &= ~(E1000_RCTL_MPE | E1000_RCTL_UPE);
+	ifp->if_flags &= ~IFF_ALLMULTI;
+
+	if (ifp->if_flags & IFF_PROMISC || ac->ac_multirangecnt > 0 ||
 	    ac->ac_multicnt > MAX_NUM_MULTICAST_ADDRESSES) {
 		ifp->if_flags |= IFF_ALLMULTI;
 		reg_rctl |= E1000_RCTL_MPE;
+		if (ifp->if_flags & IFF_PROMISC)
+			reg_rctl |= E1000_RCTL_UPE;
 	} else {
 		ETHER_FIRST_MULTI(step, ac, enm);
-
 		while (enm != NULL) {
 			bcopy(enm->enm_addrlo, mta + i, ETH_LENGTH_OF_ADDRESS);
 			i += ETH_LENGTH_OF_ADDRESS;
@@ -1355,8 +1377,8 @@ em_set_multi(struct em_softc *sc)
 		}
 
 		em_mc_addr_list_update(&sc->hw, mta, ac->ac_multicnt, 0, 1);
-		reg_rctl &= ~E1000_RCTL_MPE;
 	}
+
 	E1000_WRITE_REG(&sc->hw, RCTL, reg_rctl);
 
 	if (sc->hw.mac_type == em_82542_rev2_0) {
@@ -1414,7 +1436,8 @@ em_update_link_status(struct em_softc *sc)
 			/* Check if we may set SPEED_MODE bit on PCI-E */
 			if ((sc->link_speed == SPEED_1000) &&
 			    ((sc->hw.mac_type == em_82571) ||
-			    (sc->hw.mac_type == em_82572))) {
+			    (sc->hw.mac_type == em_82572) ||
+			    (sc->hw.mac_type == em_82575))) {
 				int tarc0;
 
 				tarc0 = E1000_READ_REG(&sc->hw, TARC0);
@@ -1453,20 +1476,24 @@ em_update_link_status(struct em_softc *sc)
  **********************************************************************/
 
 void
-em_stop(void *arg)
+em_stop(void *arg, int softonly)
 {
-	struct ifnet   *ifp;
 	struct em_softc *sc = arg;
-	ifp = &sc->interface_data.ac_if;
+	struct ifnet   *ifp = &sc->interface_data.ac_if;
 
 	/* Tell the stack that the interface is no longer active */
 	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
+	ifp->if_timer = 0;
 
 	INIT_DEBUGOUT("em_stop: begin");
-	em_disable_intr(sc);
-	em_reset_hw(&sc->hw);
+
 	timeout_del(&sc->timer_handle);
 	timeout_del(&sc->tx_fifo_timer_handle);
+
+	if (!softonly) {
+		em_disable_intr(sc);
+		em_reset_hw(&sc->hw);
+	}
 
 	em_free_transmit_structures(sc);
 	em_free_receive_structures(sc);
@@ -1501,6 +1528,9 @@ em_identify_hardware(struct em_softc *sc)
 	/* Identify the MAC */
 	if (em_set_mac_type(&sc->hw))
 		printf("%s: Unknown MAC Type\n", sc->sc_dv.dv_xname);
+
+	if (sc->hw.mac_type == em_pchlan)
+		sc->hw.revision_id = PCI_PRODUCT(pa->pa_id) & 0x0f;
 
 	if (sc->hw.mac_type == em_82541 ||
 	    sc->hw.mac_type == em_82541_rev_2 ||
@@ -1556,7 +1586,9 @@ em_allocate_pci_resources(struct em_softc *sc)
 
 	/* for ICH8 and family we need to find the flash memory */
 	if (sc->hw.mac_type == em_ich8lan ||
-	    sc->hw.mac_type == em_ich9lan) {
+	    sc->hw.mac_type == em_ich9lan ||
+	    sc->hw.mac_type == em_ich10lan ||
+	    sc->hw.mac_type == em_pchlan) {
 		val = pci_conf_read(pa->pa_pc, pa->pa_tag, EM_FLASH);
 		if (PCI_MAPREG_TYPE(val) != PCI_MAPREG_TYPE_MEM) {
 			printf(": flash is not mem space\n");
@@ -1576,6 +1608,7 @@ em_allocate_pci_resources(struct em_softc *sc)
 		return (ENXIO);
 	}
 
+	sc->osdep.dev = (struct device *)sc;
 	sc->hw.back = &sc->osdep;
 
 	intrstr = pci_intr_string(pc, ih);
@@ -1590,6 +1623,26 @@ em_allocate_pci_resources(struct em_softc *sc)
 	}
 	printf(": %s", intrstr);
 
+	/*
+	 * the ICP_xxxx device has multiple, duplicate register sets for
+	 * use when it is being used as a network processor. Disable those
+	 * registers here, as they are not necessary in this context and
+	 * can confuse the system
+	 */
+	if(sc->hw.mac_type == em_icp_xxxx) {
+		int offset;
+		pcireg_t val;
+		
+		if (!pci_get_capability(sc->osdep.em_pa.pa_pc, 
+		    sc->osdep.em_pa.pa_tag, PCI_CAP_ID_ST, &offset, &val)) {
+			return (0);
+		}
+		offset += PCI_ST_SMIA_OFFSET;
+		pci_conf_write(sc->osdep.em_pa.pa_pc, sc->osdep.em_pa.pa_tag,
+		    offset, 0x06);
+		E1000_WRITE_REG(&sc->hw, IMC1, ~0x0);
+		E1000_WRITE_REG(&sc->hw, IMC2, ~0x0);
+	}
 	return (0);
 }
 
@@ -1630,6 +1683,7 @@ em_free_pci_resources(struct em_softc *sc)
 int
 em_hardware_init(struct em_softc *sc)
 {
+	uint32_t ret_val;
 	u_int16_t rx_buffer_size;
 
 	INIT_DEBUGOUT("em_hardware_init: begin");
@@ -1662,7 +1716,8 @@ em_hardware_init(struct em_softc *sc)
 	/* Set up smart power down as default off on newer adapters */
 	if (!em_smart_pwr_down &&
 	     (sc->hw.mac_type == em_82571 ||
-	      sc->hw.mac_type == em_82572)) {
+	      sc->hw.mac_type == em_82572 ||
+	      sc->hw.mac_type == em_82575)) {
 		uint16_t phy_tmp = 0;
 
 		/* Speed up time to link by disabling smart power down */
@@ -1697,7 +1752,11 @@ em_hardware_init(struct em_softc *sc)
 	sc->hw.fc_send_xon = TRUE;
 	sc->hw.fc = E1000_FC_FULL;
 
-	if (em_init_hw(&sc->hw) < 0) {
+	if ((ret_val = em_init_hw(&sc->hw)) != 0) {
+		if (ret_val == E1000_DEFER_INIT) {
+			INIT_DEBUGOUT("\nHardware Initialization Deferred ");
+			return (EAGAIN);
+		}
 		printf("%s: Hardware Initialization Failed",
 		       sc->sc_dv.dv_xname);
 		return (EIO);
@@ -1738,7 +1797,8 @@ em_setup_interface(struct em_softc *sc)
 	ifp->if_capabilities = IFCAP_VLAN_MTU;
 
 #if NVLAN > 0
-	ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
+	if (sc->hw.mac_type != em_82575)
+		ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
 #endif
 
 #ifdef EM_CSUM_OFFLOAD
@@ -1781,6 +1841,55 @@ em_setup_interface(struct em_softc *sc)
 	ether_ifattach(ifp);
 }
 
+int
+em_detach(struct device *self, int flags)
+{
+	struct em_softc *sc = (struct em_softc *)self;
+	struct ifnet *ifp = &sc->interface_data.ac_if;
+	struct pci_attach_args *pa = &sc->osdep.em_pa;
+	pci_chipset_tag_t	pc = pa->pa_pc;
+
+	if (sc->sc_intrhand)
+		pci_intr_disestablish(pc, sc->sc_intrhand);
+	sc->sc_intrhand = 0;
+
+	em_stop(sc, 1);
+
+	em_free_pci_resources(sc);
+	em_dma_free(sc, &sc->rxdma);
+	em_dma_free(sc, &sc->txdma);
+
+	ether_ifdetach(ifp);
+	if_detach(ifp);
+
+	return (0);
+}
+
+int
+em_activate(struct device *self, int act)
+{
+	struct em_softc *sc = (struct em_softc *)self;
+	struct ifnet *ifp = &sc->interface_data.ac_if;
+	int rv = 0;
+
+	switch (act) {
+	case DVACT_QUIESCE:
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_SUSPEND:
+		if (ifp->if_flags & IFF_RUNNING)
+			em_stop(sc, 0);
+		/* We have no children atm, but we will soon */
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_RESUME:
+		rv = config_activate_children(self, act);
+		if (ifp->if_flags & IFF_UP)
+			em_init(sc);
+		break;
+	}
+	return (rv);
+}
 
 /*********************************************************************
  *
@@ -2040,10 +2149,22 @@ em_initialize_transmit_unit(struct em_softc *sc)
 		reg_tipg |= DEFAULT_82543_TIPG_IPGR2 << E1000_TIPG_IPGR2_SHIFT;
 	}
 
+
 	E1000_WRITE_REG(&sc->hw, TIPG, reg_tipg);
 	E1000_WRITE_REG(&sc->hw, TIDV, sc->tx_int_delay);
 	if (sc->hw.mac_type >= em_82540)
 		E1000_WRITE_REG(&sc->hw, TADV, sc->tx_abs_int_delay);
+
+	/* Setup Transmit Descriptor Base Settings */   
+	sc->txd_cmd = E1000_TXD_CMD_IFCS;
+
+	if (sc->hw.mac_type == em_82575) {
+		/* 82575/6 need to enable the TX queue and lack the IDE bit */
+		reg_tctl = E1000_READ_REG(&sc->hw, TXDCTL);
+		reg_tctl |= E1000_TXDCTL_QUEUE_ENABLE;
+		E1000_WRITE_REG(&sc->hw, TXDCTL, reg_tctl);
+	} else if (sc->tx_int_delay > 0)
+		sc->txd_cmd |= E1000_TXD_CMD_IDE;
 
 	/* Program the Transmit Control Register */
 	reg_tctl = E1000_TCTL_PSP | E1000_TCTL_EN |
@@ -2056,12 +2177,6 @@ em_initialize_transmit_unit(struct em_softc *sc)
 		reg_tctl |= E1000_HDX_COLLISION_DISTANCE << E1000_COLD_SHIFT;
 	/* This write will effectively turn on the transmit unit */
 	E1000_WRITE_REG(&sc->hw, TCTL, reg_tctl);
-
-	/* Setup Transmit Descriptor Base Settings */   
-	sc->txd_cmd = E1000_TXD_CMD_IFCS;
-
-	if (sc->tx_int_delay > 0)
-		sc->txd_cmd |= E1000_TXD_CMD_IDE;
 }
 
 /*********************************************************************
@@ -2313,14 +2428,8 @@ em_get_buf(struct em_softc *sc, int i)
 		return (ENOBUFS);
 	}
 
-	MGETHDR(m, M_DONTWAIT, MT_DATA);
-	if (m == NULL) {
-		sc->mbuf_alloc_failed++;
-		return (ENOBUFS);
-	}
-	MCLGETI(m, M_DONTWAIT, &sc->interface_data.ac_if, MCLBYTES);
-	if ((m->m_flags & M_EXT) == 0) {
-		m_freem(m);
+	m = MCLGETI(NULL, M_DONTWAIT, &sc->interface_data.ac_if, MCLBYTES);
+	if (!m) {
 		sc->mbuf_cluster_failed++;
 		return (ENOBUFS);
 	}
@@ -2415,6 +2524,7 @@ em_setup_receive_structures(struct em_softc *sc)
 	/* Setup our descriptor pointers */
 	sc->next_rx_desc_to_check = 0;
 	sc->last_rx_desc_filled = sc->num_rx_desc - 1;
+	sc->rx_ndescs = 0;
 
 	em_rxfill(sc);
 	if (sc->rx_ndescs < 1) {
@@ -2495,6 +2605,13 @@ em_initialize_receive_unit(struct em_softc *sc)
 		reg_rxcsum |= (E1000_RXCSUM_IPOFL | E1000_RXCSUM_TUOFL);
 		E1000_WRITE_REG(&sc->hw, RXCSUM, reg_rxcsum);
 	}
+
+	/*
+	 * XXX TEMPORARY WORKAROUND: on some systems with 82573
+	 * long latencies are observed, like Lenovo X60.
+	 */
+	if (sc->hw.mac_type == em_82573)
+		E1000_WRITE_REG(&sc->hw, RDTR, 0x20);
 
 	/* Enable Receives */
 	E1000_WRITE_REG(&sc->hw, RCTL, reg_rctl);
@@ -2752,7 +2869,7 @@ em_rxeof(struct em_softc *sc, int count)
 #if NVLAN > 0
 				if (desc->status & E1000_RXD_STAT_VP) {
 					m->m_pkthdr.ether_vtag =
-					    (desc->special &
+					    (letoh16(desc->special) &
 					     E1000_RXD_SPC_VLAN_MASK);
 					m->m_flags |= M_VLANTAG;
 				}

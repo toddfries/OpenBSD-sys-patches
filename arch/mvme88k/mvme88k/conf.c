@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.37 2009/01/25 17:30:49 miod Exp $	*/
+/*	$OpenBSD: conf.c,v 1.42 2010/09/23 05:02:14 claudio Exp $	*/
 
 /*-
  * Copyright (c) 1991 The Regents of the University of California.
@@ -50,13 +50,12 @@
 #include "cd.h"
 #include "ch.h"
 #include "sd.h"
-#include "ss.h"
 #include "st.h"
 #include "uk.h"
 
-#ifdef XFS
-#include <xfs/nxfs.h>
-cdev_decl(xfs_dev);
+#ifdef NNPFS
+#include <nnpfs/nnnpfs.h>
+cdev_decl(nnpfs_dev);
 #endif
 #include "ksyms.h"
 
@@ -102,6 +101,9 @@ cdev_decl(lptwo);
 #include "pf.h"
 
 #include "systrace.h"
+
+#include "vscsi.h"
+#include "pppx.h"
 
 struct bdevsw	bdevsw[] =
 {
@@ -186,7 +188,7 @@ struct cdevsw	cdevsw[] =
 	cdev_pf_init(NPF,pf),		/* 39: packet filter */
 	cdev_random_init(1,random),	/* 40: random data source */
 	cdev_uk_init(NUK,uk),		/* 41 */
-	cdev_ss_init(NSS,ss),		/* 42 */
+	cdev_notdef(),			/* 42 */
 	cdev_ksyms_init(NKSYMS,ksyms),	/* 43: Kernel symbols device */
 	cdev_ch_init(NCH,ch),		/* 44: SCSI autochanger */
 	cdev_notdef(),			/* 45 */
@@ -195,12 +197,15 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 48 */
 	cdev_bio_init(NBIO,bio),	/* 49: ioctl tunnel */
 	cdev_systrace_init(NSYSTRACE,systrace),	/* 50 system call tracing */
-#ifdef XFS
-	cdev_xfs_init(NXFS,xfs_dev),	/* 51: xfs communication device */
+#ifdef NNPFS
+	cdev_nnpfs_init(NNNPFS,nnpfs_dev),	/* 51: nnpfs communication device */
 #else
 	cdev_notdef(),			/* 51 */
 #endif
 	cdev_ptm_init(NPTY,ptm),	/* 52: pseudo-tty ptm device */
+	cdev_vscsi_init(NVSCSI,vscsi),	/* 53: vscsi */
+	cdev_disk_init(1,diskmap),	/* 54: disk mapper */
+	cdev_pppx_init(NPPPX,pppx),	/* 55: pppx */
 };
 int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
 

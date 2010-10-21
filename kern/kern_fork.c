@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_fork.c,v 1.103 2009/04/14 09:13:25 art Exp $	*/
+/*	$OpenBSD: kern_fork.c,v 1.122 2010/07/26 01:56:27 guenther Exp $	*/
 /*	$NetBSD: kern_fork.c,v 1.29 1996/02/09 18:59:34 christos Exp $	*/
 
 /*
@@ -141,10 +141,9 @@ sys_rfork(struct proc *p, void *v, register_t *retval)
 
 	if (rforkflags & RFMEM)
 		flags |= FORK_SHAREVM;
-#ifdef RTHREADS
+
 	if (rforkflags & RFTHREAD)
-		flags |= FORK_THREAD | FORK_SIGHAND;
-#endif
+		flags |= FORK_THREAD | FORK_SIGHAND | FORK_NOZOMBIE;
 
 	return (fork1(p, SIGCHLD, flags, NULL, 0, NULL, NULL, retval, NULL));
 }
@@ -153,15 +152,42 @@ sys_rfork(struct proc *p, void *v, register_t *retval)
  * Allocate and initialize a new process.
  */
 void
-process_new(struct proc *newproc, struct proc *parent)
+process_new(struct proc *newproc, struct proc *parentproc)
 {
-	struct process *pr;
+	struct process *pr, *parent;
 
 	pr = pool_get(&process_pool, PR_WAITOK);
 	pr->ps_mainproc = newproc;
+	parent = parentproc->p_p;
+
 	TAILQ_INIT(&pr->ps_threads);
 	TAILQ_INSERT_TAIL(&pr->ps_threads, newproc, p_thr_link);
+	LIST_INSERT_AFTER(parent, pr, ps_pglist);
+	pr->ps_pptr = parent;
+	LIST_INSERT_HEAD(&parent->ps_children, pr, ps_sibling);
+	LIST_INIT(&pr->ps_children);
 	pr->ps_refcnt = 1;
+
+	/*
+	 * Make a process structure for the new process.
+	 * Start by zeroing the section of proc that is zero-initialized,
+	 * then copy the section that is copied directly from the parent.
+	 */
+	bzero(&pr->ps_startzero,
+	    (unsigned) ((caddr_t)&pr->ps_endzero - (caddr_t)&pr->ps_startzero));
+	bcopy(&parent->ps_startcopy, &pr->ps_startcopy,
+	    (unsigned) ((caddr_t)&pr->ps_endcopy - (caddr_t)&pr->ps_startcopy));
+
+	/* post-copy fixups */
+	pr->ps_cred = pool_get(&pcred_pool, PR_WAITOK);
+	bcopy(parent->ps_cred, pr->ps_cred, sizeof(*pr->ps_cred));
+	crhold(parent->ps_cred->pc_ucred);
+	pr->ps_limit->p_refcnt++;
+
+	if (parent->ps_session->s_ttyvp != NULL &&
+	    parent->ps_flags & PS_CONTROLT)
+		atomic_setbits_int(&pr->ps_flags, PS_CONTROLT);
+
 	newproc->p_p = pr;
 }
 
@@ -185,6 +211,17 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 #if NSYSTRACE > 0
 	void *newstrp = NULL;
 #endif
+
+	/* sanity check some flag combinations */
+	if (flags & FORK_THREAD) {
+		if (!rthreads_enabled)
+			return (ENOTSUP);
+		if ((flags & (FORK_SIGHAND | FORK_NOZOMBIE)) !=
+		    (FORK_SIGHAND | FORK_NOZOMBIE))
+			return (EINVAL);
+	}
+	if (flags & FORK_SIGHAND && (flags & FORK_SHAREVM) == 0)
+		return (EINVAL);
 
 	/*
 	 * Although process entries are dynamically created, we still keep
@@ -213,7 +250,10 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 		return (EAGAIN);
 	}
 
-	uaddr = uvm_km_alloc1(kernel_map, USPACE, USPACE_ALIGN, 1);
+	uaddr = uvm_km_kmemalloc_pla(kernel_map, uvm.kernel_object, USPACE,
+	    USPACE_ALIGN, UVM_KMF_ZERO,
+	    dma_constraint.ucr_low, dma_constraint.ucr_high,
+	    0, 0, USPACE/PAGE_SIZE);
 	if (uaddr == 0) {
 		chgproccnt(uid, -1);
 		nprocs--;
@@ -231,7 +271,6 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 	p2->p_exitsig = exitsig;
 	p2->p_flag = 0;
 
-#ifdef RTHREADS
 	if (flags & FORK_THREAD) {
 		atomic_setbits_int(&p2->p_flag, P_THREAD);
 		p2->p_p = p1->p_p;
@@ -240,9 +279,6 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 	} else {
 		process_new(p2, p1);
 	}
-#else
-	process_new(p2, p1);
-#endif
 
 	/*
 	 * Make a proc table entry for the new process.
@@ -265,28 +301,16 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 	 * Increase reference counts on shared objects.
 	 * The p_stats and p_sigacts substructs are set in vm_fork.
 	 */
-	p2->p_emul = p1->p_emul;
 	if (p1->p_flag & P_PROFIL)
 		startprofclock(p2);
 	atomic_setbits_int(&p2->p_flag, p1->p_flag & (P_SUGID | P_SUGIDEXEC));
 	if (flags & FORK_PTRACE)
 		atomic_setbits_int(&p2->p_flag, p1->p_flag & P_TRACED);
-#ifdef RTHREADS
-	if (flags & FORK_THREAD) {
-		/* nothing */
-	} else
-#endif
-	{
-		p2->p_p->ps_cred = pool_get(&pcred_pool, PR_WAITOK);
-		bcopy(p1->p_p->ps_cred, p2->p_p->ps_cred, sizeof(*p2->p_p->ps_cred));
-		p2->p_p->ps_cred->p_refcnt = 1;
-		crhold(p1->p_ucred);
-	}
 
 	/* bump references to the text vnode (for procfs) */
 	p2->p_textvp = p1->p_textvp;
 	if (p2->p_textvp)
-		VREF(p2->p_textvp);
+		vref(p2->p_textvp);
 
 	if (flags & FORK_CLEANFILES)
 		p2->p_fd = fdinit(p1);
@@ -295,34 +319,10 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 	else
 		p2->p_fd = fdcopy(p1);
 
-	/*
-	 * If ps_limit is still copy-on-write, bump refcnt,
-	 * otherwise get a copy that won't be modified.
-	 * (If PL_SHAREMOD is clear, the structure is shared
-	 * copy-on-write.)
-	 */
-#ifdef RTHREADS
-	if (flags & FORK_THREAD) {
-		/* nothing */
-	} else
-#endif
-	{
-		if (p1->p_p->ps_limit->p_lflags & PL_SHAREMOD)
-			p2->p_p->ps_limit = limcopy(p1->p_p->ps_limit);
-		else {
-			p2->p_p->ps_limit = p1->p_p->ps_limit;
-			p2->p_p->ps_limit->p_refcnt++;
-		}
-	}
-
-	if (p1->p_session->s_ttyvp != NULL && p1->p_flag & P_CONTROLT)
-		atomic_setbits_int(&p2->p_flag, P_CONTROLT);
 	if (flags & FORK_PPWAIT)
 		atomic_setbits_int(&p2->p_flag, P_PPWAIT);
-	p2->p_pptr = p1;
 	if (flags & FORK_NOZOMBIE)
 		atomic_setbits_int(&p2->p_flag, P_NOZOMBIE);
-	LIST_INIT(&p2->p_children);
 
 #ifdef KTRACE
 	/*
@@ -332,7 +332,7 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 	if (p1->p_traceflag & KTRFAC_INHERIT) {
 		p2->p_traceflag = p1->p_traceflag;
 		if ((p2->p_tracep = p1->p_tracep) != NULL)
-			VREF(p2->p_tracep);
+			vref(p2->p_tracep);
 	}
 #endif
 
@@ -400,12 +400,12 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 
 	LIST_INSERT_HEAD(&allproc, p2, p_list);
 	LIST_INSERT_HEAD(PIDHASH(p2->p_pid), p2, p_hash);
-	LIST_INSERT_HEAD(&p1->p_children, p2, p_sibling);
-	LIST_INSERT_AFTER(p1, p2, p_pglist);
+
 	if (p2->p_flag & P_TRACED) {
 		p2->p_oppid = p1->p_pid;
-		if (p2->p_pptr != p1->p_pptr)
-			proc_reparent(p2, p1->p_pptr);
+		if ((flags & FORK_THREAD) == 0 &&
+		    p2->p_p->ps_pptr != p1->p_p->ps_pptr)
+			proc_reparent(p2->p_p, p1->p_p->ps_pptr);
 
 		/*
 		 * Set ptrace status.
@@ -442,10 +442,11 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 	/*
 	 * Notify any interested parties about the new process.
 	 */
-	KNOTE(&p1->p_klist, NOTE_FORK | p2->p_pid);
+	if ((flags & FORK_THREAD) == 0)
+		KNOTE(&p1->p_p->ps_klist, NOTE_FORK | p2->p_pid);
 
 	/*
-	 * Update stats now that we know the fork was successfull.
+	 * Update stats now that we know the fork was successful.
 	 */
 	uvmexp.forks++;
 	if (flags & FORK_PPWAIT)
@@ -462,11 +463,11 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 	/*
 	 * Preserve synchronization semantics of vfork.  If waiting for
 	 * child to exec or exit, set P_PPWAIT on child, and sleep on our
-	 * proc (in case of exit).
+	 * process (in case of exit).
 	 */
 	if (flags & FORK_PPWAIT)
 		while (p2->p_flag & P_PPWAIT)
-			tsleep(p1, PWAIT, "ppwait", 0);
+			tsleep(p1->p_p, PWAIT, "ppwait", 0);
 
 	/*
 	 * If we're tracing the child, alert the parent too.
@@ -497,9 +498,10 @@ pidtaken(pid_t pid)
 		return (1);
 	if (pgfind(pid) != NULL)
 		return (1);
-	LIST_FOREACH(p, &zombproc, p_list)
-		if (p->p_pid == pid || p->p_pgid == pid)
+	LIST_FOREACH(p, &zombproc, p_list) {
+		if (p->p_pid == pid || (p->p_p->ps_pgrp && p->p_p->ps_pgrp->pg_id == pid))
 			return (1);
+	}
 	return (0);
 }
 

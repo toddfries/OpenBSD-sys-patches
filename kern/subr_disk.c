@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_disk.c,v 1.85 2009/03/28 14:58:10 dlg Exp $	*/
+/*	$OpenBSD: subr_disk.c,v 1.112 2010/09/24 07:08:50 deraadt Exp $	*/
 /*	$NetBSD: subr_disk.c,v 1.17 1996/03/16 23:17:08 christos Exp $	*/
 
 /*
@@ -56,6 +56,8 @@
 #include <sys/dkio.h>
 #include <sys/dkstat.h>		/* XXX */
 #include <sys/proc.h>
+#include <sys/vnode.h>
+#include <sys/workq.h>
 #include <uvm/uvm_extern.h>
 
 #include <sys/socket.h>
@@ -76,6 +78,12 @@ int	disk_change;		/* set if a disk has been attached/detached
 				 * since last we looked at this variable. This
 				 * is reset by hw_sysctl()
 				 */
+
+/* softraid callback, do not use! */
+void (*softraid_disk_attach)(struct disk *, int);
+
+char *disk_readlabel(struct disklabel *, dev_t, char *, size_t);
+void disk_attach_callback(void *, void *);
 
 /*
  * Seek sort for disks.  We depend on the driver which calls us using b_resid
@@ -186,7 +194,7 @@ dkcksum(struct disklabel *lp)
 	return (sum);
 }
 
-char *
+int
 initdisklabel(struct disklabel *lp)
 {
 	int i;
@@ -197,8 +205,8 @@ initdisklabel(struct disklabel *lp)
 	if (DL_GETDSIZE(lp) == 0)
 		DL_SETDSIZE(lp, MAXDISKSIZE);
 	if (lp->d_secpercyl == 0)
-		return ("invalid geometry");
-	lp->d_npartitions = RAW_PART + 1;
+		return (ERANGE);
+	lp->d_npartitions = MAXPARTITIONS;
 	for (i = 0; i < RAW_PART; i++) {
 		DL_SETPSIZE(&lp->d_partitions[i], 0);
 		DL_SETPOFFSET(&lp->d_partitions[i], 0);
@@ -206,48 +214,51 @@ initdisklabel(struct disklabel *lp)
 	if (DL_GETPSIZE(&lp->d_partitions[RAW_PART]) == 0)
 		DL_SETPSIZE(&lp->d_partitions[RAW_PART], DL_GETDSIZE(lp));
 	DL_SETPOFFSET(&lp->d_partitions[RAW_PART], 0);
+	DL_SETBSTART(lp, 0);
+	DL_SETBEND(lp, DL_GETDSIZE(lp));
 	lp->d_version = 1;
 	lp->d_bbsize = 8192;
 	lp->d_sbsize = 64*1024;			/* XXX ? */
-	return (NULL);
+	return (0);
 }
 
 /*
  * Check an incoming block to make sure it is a disklabel, convert it to
  * a newer version if needed, etc etc.
  */
-char *
-checkdisklabel(void *rlp, struct disklabel *lp)
+int
+checkdisklabel(void *rlp, struct disklabel *lp,
+	u_int64_t boundstart, u_int64_t boundend)
 {
 	struct disklabel *dlp = rlp;
 	struct __partitionv0 *v0pp;
 	struct partition *pp;
 	daddr64_t disksize;
-	char *msg = NULL;
+	int error = 0;
 	int i;
 
 	if (dlp->d_magic != DISKMAGIC || dlp->d_magic2 != DISKMAGIC)
-		msg = "no disk label";
+		error = ENOENT;	/* no disk label */
 	else if (dlp->d_npartitions > MAXPARTITIONS)
-		msg = "invalid label, partition count > MAXPARTITIONS";
+		error = E2BIG;	/* too many partitions */
 	else if (dlp->d_secpercyl == 0)
-		msg = "invalid label, d_secpercyl == 0";
+		error = EINVAL;	/* invalid label */
 	else if (dlp->d_secsize == 0)
-		msg = "invalid label, d_secsize == 0";
+		error = ENOSPC;	/* disk too small */
 	else if (dkcksum(dlp) != 0)
-		msg = "invalid label, incorrect checksum";
+		error = EINVAL;	/* incorrect checksum */
 
-	if (msg) {
+	if (error) {
 		u_int16_t *start, *end, sum = 0;
 
 		/* If it is byte-swapped, attempt to convert it */
 		if (swap32(dlp->d_magic) != DISKMAGIC ||
 		    swap32(dlp->d_magic2) != DISKMAGIC ||
 		    swap16(dlp->d_npartitions) > MAXPARTITIONS)
-			return (msg);
+			return (error);
 
 		/*
-		 * Need a byte-swap aware dkcksum varient
+		 * Need a byte-swap aware dkcksum variant
 		 * inlined, because dkcksum uses a sub-field
 		 */
 		start = (u_int16_t *)dlp;
@@ -256,7 +267,7 @@ checkdisklabel(void *rlp, struct disklabel *lp)
 		while (start < end)
 			sum ^= *start++;
 		if (sum != 0)
-			return (msg);
+			return (error);
 
 		dlp->d_magic = swap32(dlp->d_magic);
 		dlp->d_type = swap16(dlp->d_type);
@@ -271,17 +282,10 @@ checkdisklabel(void *rlp, struct disklabel *lp)
 		dlp->d_secpercyl = swap32(dlp->d_secpercyl);
 		dlp->d_secperunit = swap32(dlp->d_secperunit);
 
-		dlp->d_sparespertrack = swap16(dlp->d_sparespertrack);
-		dlp->d_sparespercyl = swap16(dlp->d_sparespercyl);
+		/* d_uid is a string */
 
 		dlp->d_acylinders = swap32(dlp->d_acylinders);
 
-		dlp->d_rpm = swap16(dlp->d_rpm);
-		dlp->d_interleave = swap16(dlp->d_interleave);
-		dlp->d_trackskew = swap16(dlp->d_trackskew);
-		dlp->d_cylskew = swap16(dlp->d_cylskew);
-		dlp->d_headswitch = swap32(dlp->d_headswitch);
-		dlp->d_trkseek = swap32(dlp->d_trkseek);
 		dlp->d_flags = swap32(dlp->d_flags);
 
 		for (i = 0; i < NDDATA; i++)
@@ -316,13 +320,13 @@ checkdisklabel(void *rlp, struct disklabel *lp)
 
 		dlp->d_checksum = 0;
 		dlp->d_checksum = dkcksum(dlp);
-		msg = NULL;
+		error = 0;
 	}
 
 	/* XXX should verify lots of other fields and whine a lot */
 
-	if (msg)
-		return (msg);
+	if (error)
+		return (error);
 
 	/* Initial passed in lp contains the real disk size. */
 	disksize = DL_GETDSIZE(lp);
@@ -358,10 +362,12 @@ checkdisklabel(void *rlp, struct disklabel *lp)
 	DL_SETDSIZE(lp, disksize);
 	DL_SETPSIZE(&lp->d_partitions[RAW_PART], disksize);
 	DL_SETPOFFSET(&lp->d_partitions[RAW_PART], 0);
+	DL_SETBSTART(lp, boundstart);
+	DL_SETBEND(lp, boundend < DL_GETDSIZE(lp) ? boundend : DL_GETDSIZE(lp));
 
 	lp->d_checksum = 0;
 	lp->d_checksum = dkcksum(lp);
-	return (msg);
+	return (0);
 }
 
 /*
@@ -373,21 +379,21 @@ checkdisklabel(void *rlp, struct disklabel *lp)
  * we cannot because it doesn't always exist. So.. we assume the
  * MBR is valid.
  */
-char *
+int
 readdoslabel(struct buf *bp, void (*strat)(struct buf *),
     struct disklabel *lp, int *partoffp, int spoofonly)
 {
+	u_int64_t dospartoff = 0, dospartend = DL_GETBEND(lp);
+	int i, ourpart = -1, wander = 1, n = 0, loop = 0, offset;
 	struct dos_partition dp[NDOSPART], *dp2;
-	u_int32_t extoff = 0;
 	daddr64_t part_blkno = DOSBBSECTOR;
-	int dospartoff = 0, i, ourpart = -1;
-	int wander = 1, n = 0, loop = 0;
-	int offset;
+	u_int32_t extoff = 0;
+	int error;
 
 	if (lp->d_secpercyl == 0)
-		return ("invalid label, d_secpercyl == 0");
+		return (EINVAL);	/* invalid label */
 	if (lp->d_secsize == 0)
-		return ("invalid label, d_secsize == 0");
+		return (ENOSPC);	/* disk too small */
 
 	/* do DOS partitions in the process of getting disklabel? */
 
@@ -407,13 +413,24 @@ readdoslabel(struct buf *bp, void (*strat)(struct buf *),
 		bp->b_bcount = lp->d_secsize;
 		bp->b_flags = B_BUSY | B_READ | B_RAW;
 		(*strat)(bp);
-		if (biowait(bp)) {
+		error = biowait(bp);
+		if (error) {
 /*wrong*/		if (partoffp)
 /*wrong*/			*partoffp = -1;
-			return ("dos partition I/O error");
+			return (error);
 		}
 
 		bcopy(bp->b_data + offset, dp, sizeof(dp));
+
+		if (n == 0 && part_blkno == DOSBBSECTOR) {
+			u_int16_t fattest;
+
+			/* Check the end of sector marker. */
+			fattest = ((bp->b_data[510] << 8) & 0xff00) |
+			    (bp->b_data[511] & 0xff);
+			if (fattest != 0x55aa)
+				goto notfat;
+		}
 
 		if (ourpart == -1) {
 			/* Search for our MBR partition */
@@ -431,6 +448,7 @@ readdoslabel(struct buf *bp, void (*strat)(struct buf *),
 			 */
 			dp2 = &dp[ourpart];
 			dospartoff = letoh32(dp2->dp_start) + part_blkno;
+			dospartend = dospartoff + letoh32(dp2->dp_size);
 
 			/* found our OpenBSD partition, finish up */
 			if (partoffp)
@@ -495,6 +513,7 @@ donot:
 					part_blkno = 0;
 				}
 				wander = 1;
+				continue;
 				break;
 			default:
 				fstype = FS_OTHER;
@@ -503,11 +522,11 @@ donot:
 			}
 
 			/*
-			 * Don't set fstype/offset/size when wandering or just
-			 * looking for the offset of the OpenBSD partition. It
-			 * would invalidate the disklabel checksum!
+			 * Don't set fstype/offset/size when just looking for
+			 * the offset of the OpenBSD partition. It would
+			 * invalidate the disklabel checksum!
 			 */
-			if (wander || partoffp)
+			if (partoffp)
 				continue;
 
 			pp->p_fstype = fstype;
@@ -553,12 +572,6 @@ donot:
 		if (fattest < 512 || fattest > 4096 || (fattest % 512 != 0))
 			goto notfat;
 
-		/* Check the end of sector marker. */
-		fattest = ((bp->b_data[510] << 8) & 0xff00) |
-		    (bp->b_data[511] & 0xff);
-		if (fattest != 0x55aa)
-			goto notfat;
-
 		/* Looks like a FAT filesystem. Spoof 'i'. */
 		DL_SETPSIZE(&lp->d_partitions['i' - 'a'],
 		    DL_GETPSIZE(&lp->d_partitions[RAW_PART]));
@@ -566,14 +579,18 @@ donot:
 		lp->d_partitions['i' - 'a'].p_fstype = FS_MSDOS;
 	}
 notfat:
-
 	/* record the OpenBSD partition's placement for the caller */
 	if (partoffp)
 		*partoffp = dospartoff;
+	else {
+		DL_SETBSTART(lp, dospartoff);
+		DL_SETBEND(lp,
+		    dospartend < DL_GETDSIZE(lp) ? dospartend : DL_GETDSIZE(lp));
+	}
 
 	/* don't read the on-disk label if we are in spoofed-only mode */
 	if (spoofonly)
-		return (NULL);
+		return (0);
 
 	bp->b_blkno = DL_BLKTOSEC(lp, dospartoff + DOS_LABELSECTOR) *
 	    DL_BLKSPERSEC(lp);
@@ -582,21 +599,22 @@ notfat:
 	bp->b_flags = B_BUSY | B_READ | B_RAW;
 	(*strat)(bp);
 	if (biowait(bp))
-		return ("disk label I/O error");
+		return (bp->b_error);
 
 	/* sub-MBR disklabels are always at a LABELOFFSET of 0 */
-	return checkdisklabel(bp->b_data + offset, lp);
+	return checkdisklabel(bp->b_data + offset, lp, dospartoff, dospartend);
 }
 
 /*
- * Check new disk label for sensibility
- * before setting it.
+ * Check new disk label for sensibility before setting it.
  */
 int
 setdisklabel(struct disklabel *olp, struct disklabel *nlp, u_int openmask)
 {
-	int i;
 	struct partition *opp, *npp;
+	struct disk *dk;
+	u_int64_t uid;
+	int i;
 
 	/* sanity clause */
 	if (nlp->d_secpercyl == 0 || nlp->d_secsize == 0 ||
@@ -635,6 +653,19 @@ setdisklabel(struct disklabel *olp, struct disklabel *nlp, u_int openmask)
 			npp->p_cpg = opp->p_cpg;
 		}
 	}
+
+	/* Generate a UID if the disklabel does not already have one. */
+	uid = 0;
+	if (bcmp(nlp->d_uid, &uid, sizeof(nlp->d_uid)) == 0) {
+		do {
+			arc4random_buf(nlp->d_uid, sizeof(nlp->d_uid));
+			TAILQ_FOREACH(dk, &disklist, dk_link)
+				if (dk->dk_label && bcmp(dk->dk_label->d_uid,
+				    nlp->d_uid, sizeof(nlp->d_uid)) == 0)
+					break;
+		} while (dk != NULL);
+	}
+
 	nlp->d_checksum = 0;
 	nlp->d_checksum = dkcksum(nlp);
 	*olp = *nlp;
@@ -652,12 +683,9 @@ bounds_check_with_label(struct buf *bp, struct disklabel *lp, int wlabel)
 	struct partition *p = &lp->d_partitions[DISKPART(bp->b_dev)];
 	daddr64_t sz = howmany(bp->b_bcount, DEV_BSIZE);
 
-	/* avoid division by zero */
-	if (lp->d_secpercyl == 0)
+	/* Avoid division by zero, negative offsets and negative sizes. */
+	if (lp->d_secpercyl == 0 || bp->b_blkno < 0 || sz < 0)
 		goto bad;
-
-	if (bp->b_blkno < 0 || sz < 0)
-		panic("bounds_check_with_label %lld %lld\n", bp->b_blkno, sz);
 
 	/* beyond partition? */
 	if (bp->b_blkno + sz > DL_SECTOBLK(lp, DL_GETPSIZE(p))) {
@@ -754,7 +782,7 @@ disk_construct(struct disk *diskp, char *lockname)
 {
 	rw_init(&diskp->dk_lock, "dklk");
 	mtx_init(&diskp->dk_mtx, IPL_BIO);
-	
+
 	diskp->dk_flags |= DKF_CONSTRUCTED;
 	    
 	return (0);
@@ -764,8 +792,9 @@ disk_construct(struct disk *diskp, char *lockname)
  * Attach a disk.
  */
 void
-disk_attach(struct disk *diskp)
+disk_attach(struct device *dv, struct disk *diskp)
 {
+	int majdev;
 
 	if (!ISSET(diskp->dk_flags, DKF_CONSTRUCTED))
 		disk_construct(diskp, diskp->dk_name);
@@ -791,6 +820,45 @@ disk_attach(struct disk *diskp)
 	TAILQ_INSERT_TAIL(&disklist, diskp, dk_link);
 	++disk_count;
 	disk_change = 1;
+
+	/*
+	 * Store device structure and number for later use.
+	 */
+	diskp->dk_device = dv;
+	diskp->dk_devno = NODEV;
+	if (dv != NULL) {
+		majdev = findblkmajor(dv);
+		if (majdev >= 0)
+			diskp->dk_devno =
+			    MAKEDISKDEV(majdev, dv->dv_unit, RAW_PART);
+	}
+	if (diskp->dk_devno != NODEV)
+		workq_add_task(NULL, 0, disk_attach_callback,
+		    (void *)(long)(diskp->dk_devno), NULL);
+
+	if (softraid_disk_attach)
+		softraid_disk_attach(diskp, 1);
+}
+
+void
+disk_attach_callback(void *arg1, void *arg2)
+{
+	char errbuf[100];
+	struct disklabel dl;
+	struct disk *dk;
+	dev_t dev = (dev_t)(long)arg1;
+
+	/* Locate disk associated with device no. */
+	TAILQ_FOREACH(dk, &disklist, dk_link) {
+		if (dk->dk_devno == dev)
+			break;
+	}
+	if (dk == NULL || (dk->dk_flags & (DKF_OPENED | DKF_NOLABELREAD)))
+		return;
+
+	/* Read disklabel. */
+	disk_readlabel(&dl, dev, errbuf, sizeof(errbuf));
+	dk->dk_flags |= DKF_OPENED;
 }
 
 /*
@@ -799,6 +867,9 @@ disk_attach(struct disk *diskp)
 void
 disk_detach(struct disk *diskp)
 {
+
+	if (softraid_disk_attach)
+		softraid_disk_attach(diskp, -1);
 
 	/*
 	 * Free the space used by the disklabel structures.
@@ -887,34 +958,15 @@ disk_unlock(struct disk *dk)
 int
 dk_mountroot(void)
 {
-	dev_t rawdev, rrootdev;
+	char errbuf[100];
 	int part = DISKPART(rootdev);
 	int (*mountrootfn)(void);
 	struct disklabel dl;
-	int error;
+	char *error;
 
-	rrootdev = blktochr(rootdev);
-	rawdev = MAKEDISKDEV(major(rrootdev), DISKUNIT(rootdev), RAW_PART);
-#ifdef DEBUG
-	printf("rootdev=0x%x rrootdev=0x%x rawdev=0x%x\n", rootdev,
-	    rrootdev, rawdev);
-#endif
-
-	/*
-	 * open device, ioctl for the disklabel, and close it.
-	 */
-	error = (cdevsw[major(rrootdev)].d_open)(rawdev, FREAD,
-	    S_IFCHR, curproc);
+	error = disk_readlabel(&dl, rootdev, errbuf, sizeof(errbuf));
 	if (error)
-		panic("cannot open disk, 0x%x/0x%x, error %d",
-		    rootdev, rrootdev, error);
-	error = (cdevsw[major(rrootdev)].d_ioctl)(rawdev, DIOCGDINFO,
-	    (caddr_t)&dl, FREAD, curproc);
-	if (error)
-		panic("cannot read disk label, 0x%x/0x%x, error %d",
-		    rootdev, rrootdev, error);
-	(void) (cdevsw[major(rrootdev)].d_close)(rawdev, FREAD,
-	    S_IFCHR, curproc);
+		panic(error);
 
 	if (DL_GETPSIZE(&dl.d_partitions[part]) == 0)
 		panic("root filesystem has size 0");
@@ -953,68 +1005,11 @@ dk_mountroot(void)
 		mountrootfn = ffs_mountroot;
 		}
 #else
-		panic("disk 0x%x/0x%x filesystem type %d not known", 
-		    rootdev, rrootdev, dl.d_partitions[part].p_fstype);
+		panic("disk 0x%x filesystem type %d not known", 
+		    rootdev, dl.d_partitions[part].p_fstype);
 #endif
 	}
 	return (*mountrootfn)();
-}
-
-struct bufq *
-bufq_default_alloc(void)
-{
-	struct bufq_default *bq;
-
-	bq = malloc(sizeof(*bq), M_DEVBUF, M_NOWAIT|M_ZERO);
-	if (bq == NULL)
-		panic("bufq_default_alloc: no memory");
-
-	bq->bufq.bufq_free = bufq_default_free;
-	bq->bufq.bufq_add = bufq_default_add;
-	bq->bufq.bufq_get = bufq_default_get;
-
-	return ((struct bufq *)bq);
-}
-
-void
-bufq_default_free(struct bufq *bq)
-{
-	free(bq, M_DEVBUF);
-}
-
-void
-bufq_default_add(struct bufq *bq, struct buf *bp)
-{
-	struct bufq_default *bufq = (struct bufq_default *)bq;
-	struct proc *p = bp->b_proc;
-	struct buf *head;
-
-	if (p == NULL || p->p_nice < NZERO)
-		head = &bufq->bufq_head[0];
-	else if (p->p_nice == NZERO)
-		head = &bufq->bufq_head[1];
-	else
-		head = &bufq->bufq_head[2];
-
-	disksort(head, bp);
-}
-
-struct buf *
-bufq_default_get(struct bufq *bq)
-{
-	struct bufq_default *bufq = (struct bufq_default *)bq;
-	struct buf *bp, *head;
-	int i;
-
-	for (i = 0; i < 3; i++) {
-		head = &bufq->bufq_head[i];
-		if ((bp = head->b_actf))
-			break;
-	}
-	if (bp == NULL)
-		return (NULL);
-	head->b_actf = bp->b_actf;
-	return (bp);
 }
 
 struct device *
@@ -1058,7 +1053,7 @@ parsedisk(char *str, int len, int defpart, dev_t *devp)
 		    dv->dv_xname[len] == '\0') {
 			majdev = findblkmajor(dv);
 			if (majdev < 0)
-				panic("parsedisk");
+				return NULL;
 			*devp = MAKEDISKDEV(majdev, dv->dv_unit, part);
 			break;
 		}
@@ -1304,4 +1299,142 @@ findblkname(int maj)
 		if (nam2blk[i].maj == maj)
 			return (nam2blk[i].name);
 	return (NULL);
+}
+
+char *
+disk_readlabel(struct disklabel *dl, dev_t dev, char *errbuf, size_t errsize)
+{
+	struct vnode *vn;
+	dev_t chrdev, rawdev;
+	int error;
+
+	chrdev = blktochr(dev);
+	rawdev = MAKEDISKDEV(major(chrdev), DISKUNIT(chrdev), RAW_PART);
+
+#ifdef DEBUG
+	printf("dev=0x%x chrdev=0x%x rawdev=0x%x\n", dev, chrdev, rawdev);
+#endif
+
+	if (cdevvp(rawdev, &vn)) {
+		snprintf(errbuf, errsize,
+		    "cannot obtain vnode for 0x%x/0x%x", dev, rawdev);
+		return (errbuf);
+	}
+
+	error = VOP_OPEN(vn, FREAD, NOCRED, curproc);
+	if (error) {
+		snprintf(errbuf, errsize,
+		    "cannot open disk, 0x%x/0x%x, error %d",
+		    dev, rawdev, error);
+		goto done;
+	}
+
+	error = VOP_IOCTL(vn, DIOCGDINFO, (caddr_t)dl, FREAD, NOCRED, curproc);
+	if (error) {
+		snprintf(errbuf, errsize,
+		    "cannot read disk label, 0x%x/0x%x, error %d",
+		    dev, rawdev, error);
+	}
+done:
+	VOP_CLOSE(vn, FREAD, NOCRED, curproc);
+	vput(vn);
+	if (error)
+		return (errbuf);
+	return (NULL);
+}
+
+int
+disk_map(char *path, char *mappath, int size, int flags)
+{
+	struct disk *dk, *mdk;
+	u_char uid[8];
+	char c, part;
+	int i;
+
+	/*
+	 * Attempt to map a request for a disklabel UID to the correct device.
+	 * We should be supplied with a disklabel UID which has the following
+	 * format:
+	 *
+	 * [disklabel uid] . [partition]
+	 *
+	 * Alternatively, if the DM_OPENPART flag is set the disklabel UID can
+	 * based passed on its own.
+	 */
+
+	if (strchr(path, '/') != NULL)
+		return -1;
+
+	/* Verify that the device name is properly formed. */
+	if (!((strlen(path) == 16 && (flags & DM_OPENPART)) ||
+	    (strlen(path) == 18 && path[16] == '.')))
+		return -1;
+
+	/* Get partition. */
+	if (flags & DM_OPENPART)
+		part = 'a' + RAW_PART;
+	else
+		part = path[17];
+
+	if (part < 'a' || part >= 'a' + MAXPARTITIONS)
+		return -1;
+
+	/* Derive label UID. */
+	bzero(uid, sizeof(uid));
+	for (i = 0; i < 16; i++) {
+		c = path[i];
+		if (c >= '0' && c <= '9')
+			c -= '0';
+		else if (c >= 'a' && c <= 'f')
+			c -= ('a' - 10);
+                else
+			return -1;
+
+		uid[i / 2] <<= 4;
+		uid[i / 2] |= c & 0xf;
+	}
+
+	mdk = NULL;
+	TAILQ_FOREACH(dk, &disklist, dk_link) {
+		if (dk->dk_label && bcmp(dk->dk_label->d_uid, uid,
+		    sizeof(dk->dk_label->d_uid)) == 0) {
+			/* Fail if there are duplicate UIDs! */
+			if (mdk != NULL)
+				return -1;
+			mdk = dk;
+		}
+	}
+
+	if (mdk == NULL || mdk->dk_name == NULL)
+		return -1;
+
+	snprintf(mappath, size, "/dev/%s%s%c",
+	    (flags & DM_OPENBLCK) ? "" : "r", mdk->dk_name, part);
+
+	return 0;
+}
+
+/*
+ * Lookup a disk device and verify that it has completed attaching.
+ */
+struct device *
+disk_lookup(struct cfdriver *cd, int unit)
+{
+	struct device *dv;
+	struct disk *dk;
+
+	dv = device_lookup(cd, unit);
+	if (dv == NULL)
+		return (NULL);
+
+	TAILQ_FOREACH(dk, &disklist, dk_link)
+		if (dk->dk_device == dv)
+			break;
+
+	if (dk == NULL) {
+		device_unref(dv);
+		return (NULL);
+	}
+
+	return (dv);
 }

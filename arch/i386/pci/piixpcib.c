@@ -1,4 +1,4 @@
-/*	$OpenBSD: piixpcib.c,v 1.4 2008/06/26 05:42:11 ray Exp $ */
+/*	$OpenBSD: piixpcib.c,v 1.7 2010/07/08 20:17:54 deraadt Exp $ */
 
 /*
  * Copyright (c) 2007 Stefan Sperling <stsp@stsp.in-berlin.de>
@@ -55,6 +55,7 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
+#include <sys/proc.h>
 #include <sys/sysctl.h>
 
 #include <machine/bus.h>
@@ -116,7 +117,9 @@ extern void	p3_update_cpuspeed(void);
 struct cfattach piixpcib_ca = {
 	sizeof(struct piixpcib_softc),
 	piixpcib_match,
-	piixpcib_attach
+	piixpcib_attach,
+	NULL,
+	config_activate_children
 };
 
 struct cfdriver piixpcib_cd = {
@@ -345,7 +348,7 @@ piixpcib_setperf(int level)
 	 *
 	 * And yes, I've tried it the way the Linux speedstep-smi
 	 * driver does it, thank you very much. It doesn't work
-	 * half the time (my machine has more than 4Mhz ;-) and
+	 * half the time (my machine has more than 4MHz ;-) and
 	 * even crashes some machines without specific workarounds.
 	 *
 	 * So call p3_update_cpuspeed() from arch/i386/i386/machdep.c

@@ -1,4 +1,4 @@
-/*	$OpenBSD: m8820x_machdep.c,v 1.37 2009/02/16 23:03:33 miod Exp $	*/
+/*	$OpenBSD: m8820x_machdep.c,v 1.40 2010/04/25 21:03:53 miod Exp $	*/
 /*
  * Copyright (c) 2004, 2007, Miodrag Vallat.
  *
@@ -179,6 +179,10 @@ m8820x_cmmu_set_reg(int reg, u_int val, int flags, int cpu, int mode)
 	 * values there.
 	 */
 	for (cnt = 1 << cmmu_shift; cnt != 0; cnt--, mmu++, cmmu++) {
+#ifdef M88200_HAS_ASYMMETRICAL_ASSOCIATION
+		if (cmmu->cmmu_regs == NULL)
+			continue;
+#endif
 		if ((flags & MODE_VAL) != 0) {
 			if (CMMU_MODE(mmu) != mode)
 				continue;
@@ -201,6 +205,10 @@ m8820x_cmmu_set_cmd(u_int cmd, int flags, int cpu, int mode, vaddr_t addr)
 	 * values there.
 	 */
 	for (cnt = 1 << cmmu_shift; cnt != 0; cnt--, mmu++, cmmu++) {
+#ifdef M88200_HAS_ASYMMETRICAL_ASSOCIATION
+		if (cmmu->cmmu_regs == NULL)
+			continue;
+#endif
 		if ((flags & MODE_VAL) != 0) {
 			if (CMMU_MODE(mmu) != mode)
 				continue;
@@ -234,6 +242,10 @@ m8820x_cmmu_wait(int cpu)
 	 * We scan all related CMMUs and read their status register.
 	 */
 	for (cnt = 1 << cmmu_shift; cnt != 0; cnt--, mmu++, cmmu++) {
+#ifdef M88200_HAS_ASYMMETRICAL_ASSOCIATION
+		if (cmmu->cmmu_regs == NULL)
+			continue;
+#endif
 #ifdef DEBUG
 		if (cmmu->cmmu_regs[CMMU_SSR] & CMMU_SSR_BE) {
 			panic("cache flush failed!");
@@ -258,7 +270,7 @@ m8820x_cpu_configuration_print(int main)
 	int pid = get_cpu_pid();
 	int proctype = (pid & PID_ARN) >> ARN_SHIFT;
 	int procvers = (pid & PID_VN) >> VN_SHIFT;
-	int mmu, cnt, cpu = cpu_number();
+	int reported, nmmu, mmu, cnt, cpu = cpu_number();
 #ifdef M88200_HAS_SPLIT_ADDRESS
 	int aline, abit, amask;
 #endif
@@ -275,15 +287,31 @@ m8820x_cpu_configuration_print(int main)
 		if (main == 0)
 			printf(", secondary");
 #endif
-		printf(", %d CMMU", 1 << cmmu_shift);
+		nmmu = 1 << cmmu_shift;
+#ifdef M88200_HAS_ASYMMETRICAL_ASSOCIATION
+		mmu = cpu << cmmu_shift;
+		cmmu = m8820x_cmmu + mmu;
+		for (cnt = 1 << cmmu_shift; cnt != 0; cnt--, mmu++, cmmu++)
+			if (cmmu->cmmu_regs == NULL)
+				nmmu--;
+#endif
+		printf(", %d CMMU", nmmu);
 
 		mmu = cpu << cmmu_shift;
 		cmmu = m8820x_cmmu + mmu;
+		reported = 0;
 		for (cnt = 1 << cmmu_shift; cnt != 0; cnt--, mmu++, cmmu++) {
-			int idr = cmmu->cmmu_regs[CMMU_IDR];
-			int mmuid = CMMU_TYPE(idr);
+			int idr, mmuid;
 
-			if (mmu % 2 == 0)
+#ifdef M88200_HAS_ASYMMETRICAL_ASSOCIATION
+			if (cmmu->cmmu_regs == NULL)
+				continue;
+#endif
+
+			idr = cmmu->cmmu_regs[CMMU_IDR];
+			mmuid = CMMU_TYPE(idr);
+
+			if (reported++ % 2 == 0)
 				printf("\ncpu%d: ", cpu);
 			else
 				printf(", ");
@@ -320,6 +348,9 @@ m8820x_cpu_configuration_print(int main)
 						    abit);
 					amask ^= 1 << abit;
 				}
+			} else if (cmmu_shift != 1) {
+				/* unknown split scheme */
+				printf(" split");
 			} else
 #endif
 				printf(" full");
@@ -382,8 +413,8 @@ m8820x_initialize_cpu(cpuid_t cpu)
 	ci = &m88k_cpus[cpu];
 	switch (cmmu_shift) {
 	default:
-		/* exception code does not use ci_pfsr_* fields */
-		break;
+		/* exception code may not use ci_pfsr fields, compute anyway */
+		/* FALLTHROUGH */
 	case 2:
 		ci->ci_pfsr_d1 = (u_int)cmmu[3].cmmu_regs + CMMU_PFSR * 4;
 		ci->ci_pfsr_i1 = (u_int)cmmu[2].cmmu_regs + CMMU_PFSR * 4;
@@ -395,6 +426,10 @@ m8820x_initialize_cpu(cpuid_t cpu)
 	}
 
 	for (cnt = 1 << cmmu_shift; cnt != 0; cnt--, cmmu++) {
+#ifdef M88200_HAS_ASYMMETRICAL_ASSOCIATION
+		if (cmmu->cmmu_regs == NULL)
+			continue;
+#endif
 		type = CMMU_TYPE(cmmu->cmmu_regs[CMMU_IDR]);
 
 		/*
@@ -416,14 +451,15 @@ m8820x_initialize_cpu(cpuid_t cpu)
 
 		/*
 		 * Set the SCTR, SAPR, and UAPR to some known state.
-		 * Snooping is enabled on multiprocessor systems; for
-		 * instruction CMMUs as well so that we can share breakpoints.
-		 * XXX Investigate why enabling parity at this point
-		 * doesn't work.
+		 * Snooping is enabled as soon as the system uses more than
+		 * two CMMUs; for instruction CMMUs as well so that we can
+		 * share breakpoints.
 		 */
 		sctr = 0;
+		if (cmmu_shift > 1)
+			sctr |= CMMU_SCTR_SE;
 #ifdef MULTIPROCESSOR
-		if (max_cpus > 1)
+		if (ncpusfound > 1)
 			sctr |= CMMU_SCTR_SE;
 #endif
 		cmmu->cmmu_regs[CMMU_SCTR] = sctr;
@@ -455,13 +491,17 @@ m8820x_initialize_cpu(cpuid_t cpu)
 void
 m8820x_shutdown()
 {
-	unsigned cmmu_num;
+	u_int cmmu_num;
 	struct m8820x_cmmu *cmmu;
 
 	CMMU_LOCK;
 
 	cmmu = m8820x_cmmu;
 	for (cmmu_num = 0; cmmu_num < max_cmmus; cmmu_num++, cmmu++) {
+#ifdef M88200_HAS_ASYMMETRICAL_ASSOCIATION
+		if (cmmu->cmmu_regs == NULL)
+			continue;
+#endif
 		cmmu->cmmu_regs[CMMU_SAPR] = cmmu->cmmu_regs[CMMU_UAPR] =
 		    ((0x00000 << PG_BITS) | CACHE_INH) &
 		    ~(CACHE_WT | CACHE_GLOBAL | APR_V);
@@ -506,7 +546,7 @@ m8820x_set_uapr(apr_t ap)
  *	flush any tlb
  */
 void
-m8820x_flush_tlb(cpuid_t cpu, unsigned kernel, vaddr_t vaddr, u_int count)
+m8820x_flush_tlb(cpuid_t cpu, u_int kernel, vaddr_t vaddr, u_int count)
 {
 	u_int32_t psr;
 
@@ -554,8 +594,9 @@ m8820x_flush_tlb(cpuid_t cpu, unsigned kernel, vaddr_t vaddr, u_int count)
  * snooped and never modified (I guess it doesn't matter then which form
  * of the command we use then).
  *
- * XXX On systems with more than two CMMUs per CPU, we do not honor the
- * address split - this does not work...
+ * Note that on systems with more than two CMMUs per CPU, we can not benefit
+ * from the address split - the split is done on virtual (not translated yet)
+ * addresses, but caches are physically indexed.
  */
 
 #define	trunc_cache_line(a)	((a) & ~(MC88200_CACHE_LINE - 1))
@@ -583,10 +624,10 @@ m8820x_flush_cache(cpuid_t cpu, paddr_t pa, psize_t size)
 
 		if (count <= MC88200_CACHE_LINE)
 			m8820x_cmmu_set_cmd(CMMU_FLUSH_CACHE_CBI_LINE,
-			    0 /* ADDR_VAL */, cpu, 0, pa);
+			    0, cpu, 0, pa);
 		else
 			m8820x_cmmu_set_cmd(CMMU_FLUSH_CACHE_CBI_PAGE,
-			    0 /* ADDR_VAL */, cpu, 0, pa);
+			    0, cpu, 0, pa);
 
 		pa += count;
 		size -= count;
@@ -619,10 +660,10 @@ m8820x_flush_inst_cache(cpuid_t cpu, paddr_t pa, psize_t size)
 
 		if (count <= MC88200_CACHE_LINE)
 			m8820x_cmmu_set_cmd(CMMU_FLUSH_CACHE_INV_LINE,
-			    MODE_VAL /* | ADDR_VAL */, cpu, INST_CMMU, pa);
+			    MODE_VAL, cpu, INST_CMMU, pa);
 		else
 			m8820x_cmmu_set_cmd(CMMU_FLUSH_CACHE_INV_PAGE,
-			    MODE_VAL /* | ADDR_VAL */, cpu, INST_CMMU, pa);
+			    MODE_VAL, cpu, INST_CMMU, pa);
 
 		pa += count;
 		size -= count;
@@ -641,10 +682,10 @@ m8820x_cmmu_sync_cache(int cpu, paddr_t pa, psize_t size)
 {
 	if (size <= MC88200_CACHE_LINE) {
 		m8820x_cmmu_set_cmd(CMMU_FLUSH_CACHE_CB_LINE,
-		    MODE_VAL /* | ADDR_VAL */, cpu, DATA_CMMU, pa);
+		    MODE_VAL, cpu, DATA_CMMU, pa);
 	} else {
 		m8820x_cmmu_set_cmd(CMMU_FLUSH_CACHE_CB_PAGE,
-		    MODE_VAL /* | ADDR_VAL */, cpu, DATA_CMMU, pa);
+		    MODE_VAL, cpu, DATA_CMMU, pa);
 	}
 	m8820x_cmmu_wait(cpu);
 }
@@ -654,14 +695,14 @@ m8820x_cmmu_sync_inval_cache(int cpu, paddr_t pa, psize_t size)
 {
 	if (size <= MC88200_CACHE_LINE) {
 		m8820x_cmmu_set_cmd(CMMU_FLUSH_CACHE_INV_LINE,
-		    MODE_VAL /* | ADDR_VAL */, cpu, INST_CMMU, pa);
+		    MODE_VAL, cpu, INST_CMMU, pa);
 		m8820x_cmmu_set_cmd(CMMU_FLUSH_CACHE_CBI_LINE,
-		    MODE_VAL /* | ADDR_VAL */, cpu, DATA_CMMU, pa);
+		    MODE_VAL, cpu, DATA_CMMU, pa);
 	} else {
 		m8820x_cmmu_set_cmd(CMMU_FLUSH_CACHE_INV_PAGE,
-		    MODE_VAL /* | ADDR_VAL */, cpu, INST_CMMU, pa);
+		    MODE_VAL, cpu, INST_CMMU, pa);
 		m8820x_cmmu_set_cmd(CMMU_FLUSH_CACHE_CBI_PAGE,
-		    MODE_VAL /* | ADDR_VAL */, cpu, DATA_CMMU, pa);
+		    MODE_VAL, cpu, DATA_CMMU, pa);
 	}
 	m8820x_cmmu_wait(cpu);
 }
@@ -670,11 +711,9 @@ void
 m8820x_cmmu_inval_cache(int cpu, paddr_t pa, psize_t size)
 {
 	if (size <= MC88200_CACHE_LINE) {
-		m8820x_cmmu_set_cmd(CMMU_FLUSH_CACHE_INV_LINE,
-		    0 /* ADDR_VAL */, cpu, 0, pa);
+		m8820x_cmmu_set_cmd(CMMU_FLUSH_CACHE_INV_LINE, 0, cpu, 0, pa);
 	} else {
-		m8820x_cmmu_set_cmd(CMMU_FLUSH_CACHE_INV_PAGE,
-		    0 /* ADDR_VAL */, cpu, 0, pa);
+		m8820x_cmmu_set_cmd(CMMU_FLUSH_CACHE_INV_PAGE, 0, cpu, 0, pa);
 	}
 	m8820x_cmmu_wait(cpu);
 }
@@ -710,10 +749,16 @@ m8820x_dma_cachectl(paddr_t _pa, psize_t _size, int op)
 		flusher = m8820x_cmmu_sync_inval_cache;
 		break;
 	default:
-		if (pa != _pa || size != _size)
-			flusher = m8820x_cmmu_sync_inval_cache;
-		else
-			flusher = m8820x_cmmu_inval_cache;
+		if (pa != _pa || size != _size) {
+			/*
+			 * Theoretically, we should preserve the data from
+			 * the two incomplete cache lines.
+			 * However, callers are expected to have asked
+			 * for a cache sync before, so we do not risk too
+			 * much by not doing this.
+			 */
+		}
+		flusher = m8820x_cmmu_inval_cache;
 		break;
 	}
 

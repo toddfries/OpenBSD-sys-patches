@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.48 2009/01/25 17:30:49 miod Exp $	*/
+/*	$OpenBSD: conf.c,v 1.54 2010/09/23 05:02:14 claudio Exp $	*/
 /*	$NetBSD: conf.c,v 1.40 1996/04/11 19:20:03 thorpej Exp $ */
 
 /*
@@ -60,7 +60,6 @@
 #include "ccd.h"
 #include "raid.h"
 #include "ch.h"
-#include "ss.h"
 #include "uk.h"
 #include "sd.h"
 #include "st.h"
@@ -87,9 +86,9 @@
 #include "wsmouse.h"
 #include "wsmux.h"
 
-#ifdef XFS
-#include <xfs/nxfs.h>
-cdev_decl(xfs_dev);
+#ifdef NNPFS
+#include <nnpfs/nnnpfs.h>
+cdev_decl(nnpfs_dev);
 #endif
 #include "ksyms.h"
 
@@ -128,6 +127,8 @@ int	nblkdev = sizeof(bdevsw) / sizeof(bdevsw[0]);
 #include "pf.h"
 #include "systrace.h"
 #include "tctrl.h"
+#include "vscsi.h"
+#include "pppx.h"
 
 struct cdevsw	cdevsw[] =
 {
@@ -182,8 +183,8 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 48 */
 	cdev_notdef(),			/* 49 */
 	cdev_systrace_init(NSYSTRACE,systrace),	/* 50 system call tracing */
-#ifdef XFS
-	cdev_xfs_init(NXFS,xfs_dev),	/* 51: xfs communication device */
+#ifdef NNPFS
+	cdev_nnpfs_init(NNNPFS,nnpfs_dev),	/* 51: nnpfs communication device */
 #else
 	cdev_notdef(),			/* 51 */
 #endif
@@ -205,7 +206,7 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 67: was /dev/cgsix */
 	cdev_notdef(),			/* 68 */
 	cdev_gen_init(NAUDIO,audio),	/* 69: /dev/audio */
-#if defined(SUN4) || defined(SUN4C) || defined(SUN4M)
+#if defined(SUN4) || defined(SUN4C) || defined(SUN4D) || defined(SUN4E) || defined(SUN4M)
 	cdev_openprom_init(1,openprom),	/* 70: /dev/openprom */
 #else
 	cdev_notdef(),			/* 70 */
@@ -261,11 +262,14 @@ struct cdevsw	cdevsw[] =
 	cdev_lkm_dummy(),		/* 118 */
 	cdev_random_init(1,random),	/* 119: random generator */
 	cdev_uk_init(NUK,uk),		/* 120: unknown SCSI */
-	cdev_ss_init(NSS,ss),           /* 121: SCSI scanner */
+	cdev_notdef(),			/* 121 */
 	cdev_ksyms_init(NKSYMS,ksyms),	/* 122: Kernel symbols device */
 	cdev_disk_init(NRAID,raid),     /* 123: RAIDframe disk driver */
 	cdev_bio_init(NBIO,bio),	/* 124: ioctl tunnel */
 	cdev_ptm_init(NPTY,ptm),	/* 125: pseudo-tty ptm device */
+	cdev_vscsi_init(NVSCSI,vscsi),	/* 128: vscsi */
+	cdev_disk_init(1,diskmap),	/* 129: disk mapper */
+	cdev_pppx_init(NPPPX,pppx),	/* 130: pppx */
 };
 int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
 

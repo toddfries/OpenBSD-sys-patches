@@ -1,4 +1,4 @@
-/*	$OpenBSD: vector.S,v 1.16 2008/12/06 19:59:38 tedu Exp $	*/
+/*	$OpenBSD: vector.S,v 1.26 2010/09/28 03:53:14 guenther Exp $	*/
 /*	$NetBSD: vector.S,v 1.5 2004/06/28 09:13:11 fvdl Exp $	*/
 
 /*
@@ -137,8 +137,46 @@ IDTVEC(trap0b)
 	TRAP(T_SEGNPFLT)
 IDTVEC(trap0c)
 	TRAP(T_STKFLT)
+
+	/*
+	 * If iretq faults, we'll get a trap at doreti_iret with CPL==0 but
+	 * the user's GS.base, which INTRENTRY wouldn't handle correctly
+	 * (it would skip the swapgs), so locally expand both it and
+	 * INTR_SAVE_GPRS, but add an extra test comparing %rip to doreti_iret
+	 * so that we can do the necessary swapgs in that case.
+	 */
 IDTVEC(trap0d)
-	TRAP(T_PROTFLT)
+	subq	$TF_ERR,%rsp
+	movl	$T_PROTFLT,TF_TRAPNO(%rsp)
+	movq	%rdi,TF_RDI(%rsp)
+	leaq	_C_LABEL(doreti_iret)(%rip),%rdi
+	cmpq	%rdi,TF_RIP(%rsp)
+	je	1f
+	testq	$SEL_UPL,TF_CS(%rsp)
+	jz	2f
+1:	swapgs
+2:	movw	%gs,TF_GS(%rsp)
+	movw	%fs,TF_FS(%rsp)
+	movw	%es,TF_ES(%rsp)
+	movw	%ds,TF_DS(%rsp)
+	movq	%r15,TF_R15(%rsp)
+	movq	%r14,TF_R14(%rsp)
+	movq	%r13,TF_R13(%rsp)
+	movq	%r12,TF_R12(%rsp)
+	movq	%r11,TF_R11(%rsp)
+	movq	%r10,TF_R10(%rsp)
+	movq	%r9,TF_R9(%rsp)
+	movq	%r8,TF_R8(%rsp)
+	/*movq	%rdi,TF_RDI(%rsp)	done above */
+	movq	%rsi,TF_RSI(%rsp)
+	movq	%rbp,TF_RBP(%rsp)
+	movq	%rbx,TF_RBX(%rsp)
+	movq	%rdx,TF_RDX(%rsp)
+	movq	%rcx,TF_RCX(%rsp)
+	movq	%rax,TF_RAX(%rsp)
+	sti
+	jmp	calltrap
+
 IDTVEC(trap0e)
 	TRAP(T_PAGEFLT)
 IDTVEC(intrspurious)
@@ -187,12 +225,21 @@ IDTVEC(exceptions)
 
 /*
  * If an error is detected during trap, syscall, or interrupt exit, trap() will
- * change %eip to point to one of these labels.  We clean up the stack, if
- * necessary, and resume as if we were handling a general protection fault.
- * This will cause the process to get a SIGBUS.
+ * change %rip to point to this label.  At that point, we'll be running with
+ * the kernel GS.base, but the trap frame will be from CPL==3, so we can't
+ * go through INTRENTRY as it would do the swapgs that we don't want/need.
+ * So, locally expand INTRENTRY but without the swapgs: manually
+ * clean up the stack and resume as if we were handling a general
+ * protection fault.  This will cause the process to get a SIGBUS.
  */
 NENTRY(resume_iret)
-	ZTRAP(T_PROTFLT)
+	pushq	$0
+	pushq	$T_PROTFLT
+	subq	$32,%rsp
+	INTR_SAVE_GPRS
+	sti
+	jmp	calltrap
+
 /*
  * All traps go through here. Call the generic trap handler, and
  * check for ASTs afterwards.
@@ -239,9 +286,6 @@ calltrap:
 #endif /* DIAGNOSTIC */
 
 
-#define __HAVE_GENERIC_SOFT_INTERRUPTS	/* XXX */
-
-
 /*
  * Macros for interrupt entry, call to handler, and exit.
  *
@@ -265,9 +309,9 @@ calltrap:
 
 /* XXX See comment in locore.s */
 #ifdef __ELF__
-#define	XINTR(name,num)		Xintr_/**/name/**/num
+#define	XINTR(name,num)		Xintr_##name##num
 #else
-#define	XINTR(name,num)		_Xintr_/**/name/**/num
+#define	XINTR(name,num)		_Xintr_##name##num
 #endif
 
 #if NLAPIC > 0
@@ -398,23 +442,23 @@ IDTVEC(resume_lapic_ltimer)
  */
 
 #define	INTRSTUB(name, num, early_ack, late_ack, mask, unmask, level_mask) \
-IDTVEC(recurse_/**/name/**/num)						;\
+IDTVEC(recurse_##name##num)						;\
 	INTR_RECURSE_HWFRAME						;\
 	subq	$8,%rsp							;\
 	pushq	$T_ASTFLT		/* trap # for doing ASTs */	;\
 	INTRENTRY							;\
-IDTVEC(resume_/**/name/**/num)						\
+IDTVEC(resume_##name##num)						\
 	movq	$IREENT_MAGIC,TF_ERR(%rsp)				;\
 	movl	%ebx,%r13d						;\
 	movq	CPUVAR(ISOURCES) + (num) * 8, %r14			;\
 	movl	IS_MAXLEVEL(%r14),%ebx					;\
 	jmp	1f							;\
-IDTVEC(intr_/**/name/**/num)						;\
+IDTVEC(intr_##name##num)						;\
 	pushq	$0			/* dummy error code */		;\
 	pushq	$T_ASTFLT		/* trap # for doing ASTs */	;\
 	INTRENTRY							;\
-	movq	CPUVAR(ISOURCES) + (num) * 8, %r14		;\
-	mask(num)		/* mask it in hardware */	;\
+	movq	CPUVAR(ISOURCES) + (num) * 8, %r14			;\
+	mask(num)			/* mask it in hardware */	;\
 	early_ack(num)			/* and allow other intrs */	;\
 	testq	%r14,%r14						;\
 	jz	9f			/* stray */			;\

@@ -1,4 +1,4 @@
-/*	$OpenBSD: aic79xx.c,v 1.44 2008/06/25 18:21:48 deraadt Exp $	*/
+/*	$OpenBSD: aic79xx.c,v 1.47 2010/09/22 00:35:19 jsg Exp $	*/
 
 /*
  * Copyright (c) 2004 Milos Urbanek, Kenneth R. Westerback & Marco Peereboom
@@ -1081,7 +1081,6 @@ ahd_handle_seqint(struct ahd_softc *ahd, u_int intstat)
 			struct	scb *scb;
 			struct	ahd_initiator_tinfo *targ_info;
 			struct	ahd_tmode_tstate *tstate;
-			struct	ahd_transinfo *tinfo;
 			u_int	scbid;
 
 			/*
@@ -1114,7 +1113,6 @@ ahd_handle_seqint(struct ahd_softc *ahd, u_int intstat)
 							devinfo.our_scsiid,
 							devinfo.target,
 							&tstate);
-			tinfo = &targ_info->curr;
 			ahd_set_width(ahd, &devinfo, MSG_EXT_WDTR_BUS_8_BIT,
 				      AHD_TRANS_ACTIVE, /*paused*/TRUE);
 			ahd_set_syncrate(ahd, &devinfo, /*period*/0,
@@ -2253,7 +2251,6 @@ ahd_handle_nonpkt_busfree(struct ahd_softc *ahd)
 			found = ahd_abort_scbs(ahd, target, 'A', saved_lun,
 					       tag, ROLE_INITIATOR,
 					       CAM_REQ_ABORTED);
-			printf("found == 0x%x\n", found);
 			printerror = 0;
 		} else if (ahd_sent_msg(ahd, AHDMSG_1B,
 					MSG_BUS_DEV_RESET, TRUE)) {
@@ -7049,8 +7046,8 @@ ahd_resume(struct ahd_softc *ahd)
  * scbid that should be restored once manipualtion
  * of the TCL entry is complete.
  */
-__inline u_int ahd_index_busy_tcl(struct ahd_softc *, u_int *, u_int);
-__inline u_int
+u_int ahd_index_busy_tcl(struct ahd_softc *, u_int *, u_int);
+u_int
 ahd_index_busy_tcl(struct ahd_softc *ahd, u_int *saved_scbid, u_int tcl)
 {
 	/*

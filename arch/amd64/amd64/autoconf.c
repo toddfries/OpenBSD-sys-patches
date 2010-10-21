@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.29 2008/08/19 02:02:02 deraadt Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.36 2010/09/07 16:22:48 mikeb Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.1 2003/04/26 18:39:26 fvdl Exp $	*/
 
 /*-
@@ -58,6 +58,7 @@
 #include <sys/reboot.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
+#include <sys/timeout.h>
 
 #include <net/if.h>
 #include <net/if_types.h>
@@ -91,6 +92,19 @@
 int	cold = 1;	/* if 1, still working on cold-start */
 extern dev_t bootdev;
 
+/* Support for VIA C3 RNG */
+extern struct timeout viac3_rnd_tmo;
+extern int	viac3_rnd_present;
+void		viac3_rnd(void *);
+
+#ifdef CRYPTO
+void		viac3_crypto_setup(void);
+extern int	amd64_has_xcrypt;
+
+void		aesni_setup(void);
+extern int	amd64_has_aesni;
+#endif
+
 /*
  * Determine i/o configuration for a machine.
  */
@@ -102,8 +116,6 @@ cpu_configure(void)
 #endif
 
 	x86_64_proc0_tss_ldt_init();
-
-	startrtclock();
 
 	if (config_rootfound("mainbus", NULL) == NULL)
 		panic("configure: mainbus not configured");
@@ -122,6 +134,25 @@ cpu_configure(void)
 	lcr8(0);
 	spl0();
 	cold = 0;
+
+	/*
+	 * At this point the RNG is running, and if FSXR is set we can
+	 * use it.  Here we setup a periodic timeout to collect the data.
+	 */
+	if (viac3_rnd_present) {
+		timeout_set(&viac3_rnd_tmo, viac3_rnd, &viac3_rnd_tmo);
+		viac3_rnd(&viac3_rnd_tmo);
+	}
+#ifdef CRYPTO
+	/*
+	 * Also, if the chip has crypto available, enable it.
+	 */
+	if (amd64_has_xcrypt)
+		viac3_crypto_setup();
+
+	if (amd64_has_aesni)
+		aesni_setup();
+#endif
 }
 
 void

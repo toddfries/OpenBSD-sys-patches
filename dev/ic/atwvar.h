@@ -1,4 +1,4 @@
-/*	$OpenBSD: atwvar.h,v 1.15 2008/07/21 18:43:19 damien Exp $	*/
+/*	$OpenBSD: atwvar.h,v 1.23 2010/09/07 16:21:42 deraadt Exp $	*/
 /*	$NetBSD: atwvar.h,v 1.13 2004/07/23 07:07:55 dyoung Exp $	*/
 
 /*
@@ -35,6 +35,7 @@
 #include <sys/queue.h>
 #include <sys/time.h>
 #include <sys/timeout.h>
+#include <sys/workq.h>
 
 /*
  * Some misc. statics, useful for debugging.
@@ -130,22 +131,6 @@ struct atw_txthresh_tab {
 	const char *txth_name;		/* name of mode */
 };
 
-#define	ATW_TXTHRESH_TAB_LO_RATE {					\
-	{ ATW_NAR_TR_L64,	"64 bytes" },				\
-	{ ATW_NAR_TR_L160,	"160 bytes" },				\
-	{ ATW_NAR_TR_L192,	"192 bytes" },				\
-	{ ATW_NAR_SF,		"store and forward" },			\
-	{ 0,			NULL },					\
-}
-
-#define	ATW_TXTHRESH_TAB_HI_RATE {					\
-	{ ATW_NAR_TR_H96,	"96 bytes" },				\
-	{ ATW_NAR_TR_H288,	"288 bytes" },				\
-	{ ATW_NAR_TR_H544,	"544 bytes" },				\
-	{ ATW_NAR_SF,		"store and forward" },			\
-	{ 0,			NULL },					\
-}
-
 enum atw_rftype { ATW_RFTYPE_INTERSIL = 0, ATW_RFTYPE_RFMD  = 1,
        ATW_RFTYPE_MARVEL = 2 };
 
@@ -209,9 +194,8 @@ struct atw_softc {
 
 	bus_space_tag_t		sc_st;		/* bus space tag */
 	bus_space_handle_t	sc_sh;		/* bus space handle */
+	bus_size_t		sc_mapsize;	/* mapping size */
 	bus_dma_tag_t		sc_dmat;	/* bus dma tag */
-	void			*sc_sdhook;	/* shutdown hook */
-	void			*sc_powerhook;	/* power management hook */
 	u_int32_t		sc_cacheline;	/* cache line size */
 	u_int32_t		sc_maxburst;	/* maximum burst length */
 
@@ -294,6 +278,8 @@ struct atw_softc {
 		struct atw_tx_radiotap_header	tap;
 		u_int8_t			pad[64];
 	} sc_txtapu;
+
+	struct workq_task	sc_resume_wqt;
 };
 
 #define sc_rxtap	sc_rxtapu.tap
@@ -348,14 +334,14 @@ struct atw_frame {
 #define atw_keyid	u.s1.keyid
 #define atw_ihdr	u.s2.ihdr
 
-#define ATW_HDRCTL_SHORT_PREAMBLE	BIT(0)	/* use short preamble */
-#define ATW_HDRCTL_RTSCTS		BIT(4)	/* send RTS */
-#define ATW_HDRCTL_WEP			BIT(5)
-#define ATW_HDRCTL_UNKNOWN1		BIT(15) /* MAC adds FCS? */
-#define ATW_HDRCTL_UNKNOWN2		BIT(8)
+#define ATW_HDRCTL_SHORT_PREAMBLE	(1<<0)	/* use short preamble */
+#define ATW_HDRCTL_RTSCTS		(1<<4)	/* send RTS */
+#define ATW_HDRCTL_WEP			(1<<5)
+#define ATW_HDRCTL_UNKNOWN1		(1<<15) /* MAC adds FCS? */
+#define ATW_HDRCTL_UNKNOWN2		(1<<8)
 
-#define ATW_FRAGTHR_FRAGTHR_MASK	BITS(0, 11)
-#define ATW_FRAGNUM_FRAGNUM_MASK	BITS(4, 7)
+#define ATW_FRAGTHR_FRAGTHR_MASK	0x0fff
+#define ATW_FRAGNUM_FRAGNUM_MASK	0x00f0
 
 /* Values for sc_flags. */
 #define	ATWF_MRL		0x00000010	/* memory read line okay */
@@ -451,10 +437,9 @@ do {									\
 
 void	atw_attach(struct atw_softc *);
 int	atw_detach(struct atw_softc *);
-int	atw_activate(struct device *, enum devact);
+int	atw_activate(struct device *, int);
 int	atw_intr(void *arg);
 int	atw_enable(struct atw_softc *);
-void	atw_power(int, void *);
-void	atw_shutdown(void *);
+void	atw_resume(void *, void *);
 
 #endif /* _DEV_IC_ATWVAR_H_ */

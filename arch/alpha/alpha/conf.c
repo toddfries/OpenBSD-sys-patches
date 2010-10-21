@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.58 2009/01/25 17:30:48 miod Exp $	*/
+/*	$OpenBSD: conf.c,v 1.64 2010/09/23 05:02:14 claudio Exp $	*/
 /*	$NetBSD: conf.c,v 1.16 1996/10/18 21:26:57 cgd Exp $	*/
 
 /*-
@@ -49,7 +49,6 @@ bdev_decl(fd);
 #include "st.h"
 #include "cd.h"
 #include "sd.h"
-#include "ss.h"
 #include "uk.h"
 #include "vnd.h"
 #include "raid.h"
@@ -114,9 +113,9 @@ cdev_decl(wd);
 cdev_decl(fd);
 #include "cy.h"
 cdev_decl(cy);
-#ifdef XFS
-#include <xfs/nxfs.h>
-cdev_decl(xfs_dev);
+#ifdef NNPFS
+#include <nnpfs/nnnpfs.h>
+cdev_decl(nnpfs_dev);
 #endif
 #include "ksyms.h"
 
@@ -131,9 +130,12 @@ cdev_decl(xfs_dev);
 #include "pci.h"
 cdev_decl(pci);
 #endif
+#include "bthub.h"
 
 #include "systrace.h"
 #include "hotplug.h"
+#include "vscsi.h"
+#include "pppx.h"
 
 struct cdevsw	cdevsw[] =
 {
@@ -169,7 +171,7 @@ struct cdevsw	cdevsw[] =
 	cdev_mouse_init(NWSKBD,wskbd),	/* 29: /dev/kbd XXX */
 	cdev_mouse_init(NWSMOUSE,wsmouse),	/* 30: /dev/mouse XXX */
 	cdev_lpt_init(NLPT,lpt),	/* 31: parallel printer */
-	cdev_scanner_init(NSS,ss),	/* 32: SCSI scanner */
+	cdev_notdef(),			/* 32: */
 	cdev_uk_init(NUK,uk),		/* 33: SCSI unknown */
 	cdev_random_init(1,random),	/* 34: random data source */
 	cdev_pf_init(NPF, pf),		/* 35: packet filter */
@@ -188,8 +190,8 @@ struct cdevsw	cdevsw[] =
 	cdev_usbdev_init(NUGEN,ugen),	/* 48: USB generic driver */
 	cdev_tty_init(NUCOM, ucom),	/* 49: USB tty */
 	cdev_systrace_init(NSYSTRACE,systrace),	/* 50 system call tracing */
-#ifdef XFS
-	cdev_xfs_init(NXFS,xfs_dev),	/* 51: xfs communication device */
+#ifdef NNPFS
+	cdev_nnpfs_init(NNNPFS,nnpfs_dev),/* 51: nnpfs communication device */
 #else
 	cdev_notdef(),			/* 51 */
 #endif
@@ -206,6 +208,10 @@ struct cdevsw	cdevsw[] =
 	cdev_bktr_init(NBKTR,bktr),	/* 58: Bt848 video capture device */
 	cdev_radio_init(NRADIO,radio), /* 59: generic radio I/O */
 	cdev_mouse_init(NWSMUX, wsmux),	/* 60: ws multiplexor */
+	cdev_vscsi_init(NVSCSI, vscsi),	/* 61: vscsi */
+	cdev_bthub_init(NBTHUB, bthub), /* 62: bthub */
+	cdev_disk_init(1,diskmap),	/* 63: disk mapper */
+	cdev_pppx_init(NPPPX,pppx),	/* 64: pppx */
 };
 int	nchrdev = sizeof (cdevsw) / sizeof (cdevsw[0]);
 

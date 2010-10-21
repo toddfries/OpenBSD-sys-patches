@@ -1,4 +1,4 @@
-/*      $OpenBSD: neo.c,v 1.23 2008/10/25 22:30:43 jakemsr Exp $       */
+/*      $OpenBSD: neo.c,v 1.26 2010/09/07 16:21:45 deraadt Exp $       */
 
 /*
  * Copyright (c) 1999 Cameron Grant <gandalf@vilnya.demon.co.uk>
@@ -154,8 +154,6 @@ struct neo_softc {
 
 	struct ac97_codec_if *codec_if;
 	struct ac97_host_if host_if;
-
-	void *powerhook;
 };
 
 static struct neo_firmware *nf;
@@ -179,6 +177,7 @@ static void	 nm_wrbuf(struct neo_softc *, int, u_int32_t, int);
 
 int	neo_match(struct device *, void *, void *);
 void	neo_attach(struct device *, struct device *, void *);
+int	neo_activate(struct device *, int);
 int	neo_intr(void *);
 
 int	neo_open(void *, int);
@@ -207,8 +206,6 @@ void	neo_free(void *, void *, int);
 size_t	neo_round_buffersize(void *, int, size_t);
 int	neo_get_props(void *);
 void	neo_set_mixer(struct neo_softc *sc, int a, int d);
-void    neo_power(int why, void *arg);
-
 
 struct cfdriver neo_cd = {
 	NULL, "neo", DV_DULL
@@ -216,7 +213,8 @@ struct cfdriver neo_cd = {
 
 
 struct cfattach neo_ca = {
-	sizeof(struct neo_softc), neo_match, neo_attach
+	sizeof(struct neo_softc), neo_match, neo_attach, NULL,
+	neo_activate
 };
 
 
@@ -619,25 +617,26 @@ neo_attach(parent, self, aux)
 	if ((error = ac97_attach(&sc->host_if)) != 0)
 		return;
 
-	sc->powerhook = powerhook_establish(neo_power, sc);
-
 	audio_attach_mi(&neo_hw_if, sc, &sc->dev);
 
 	return;
 }
 
-void
-neo_power(int why, void *addr)
+int
+neo_activate(struct device *self, int act)
 {
-	struct neo_softc *sc = (struct neo_softc *)addr;
+	struct neo_softc *sc = (struct neo_softc *)self;
 
-	if (why == PWR_RESUME) {
+	switch (act) {
+	case DVACT_SUSPEND:
+		break;
+	case DVACT_RESUME:
 		nm_init(sc);
 		(sc->codec_if->vtbl->restore_ports)(sc->codec_if);
+		break;
 	}
+	return 0;
 }
-
-
 
 int
 neo_match(parent, match, aux)
@@ -782,52 +781,56 @@ neo_query_encoding(addr, fp)
 		fp->encoding = AUDIO_ENCODING_ULINEAR;
 		fp->precision = 8;
 		fp->flags = 0;
-		return (0);
+		break;
 	case 1:
 		strlcpy(fp->name, AudioEmulaw, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_ULAW;
 		fp->precision = 8;
 		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	case 2:
 		strlcpy(fp->name, AudioEalaw, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_ALAW;
 		fp->precision = 8;
 		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	case 3:
 		strlcpy(fp->name, AudioEslinear, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_SLINEAR;
 		fp->precision = 8;
 		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	case 4:
 		strlcpy(fp->name, AudioEslinear_le, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_SLINEAR_LE;
 		fp->precision = 16;
 		fp->flags = 0;
-		return (0);
+		break;
 	case 5:
 		strlcpy(fp->name, AudioEulinear_le, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_ULINEAR_LE;
 		fp->precision = 16;
 		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	case 6:
 		strlcpy(fp->name, AudioEslinear_be, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_SLINEAR_BE;
 		fp->precision = 16;
 		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	case 7:
 		strlcpy(fp->name, AudioEulinear_be, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_ULINEAR_BE;
 		fp->precision = 16;
 		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	default:
 		return (EINVAL);
 	}
+	fp->bps = AUDIO_BPS(fp->precision);
+	fp->msb = 1;
+
+	return (0);
 }
 
 void
@@ -916,8 +919,9 @@ neo_set_params(addr, setmode, usemode, play, rec)
 		default:
 			return (EINVAL);
 		}
+		p->bps = AUDIO_BPS(p->precision);
+		p->msb = 1;
 	}
-
 
 	return (0);
 }

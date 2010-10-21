@@ -1,4 +1,4 @@
-/*	$OpenBSD: boot.c,v 1.14 2007/05/29 00:03:13 deraadt Exp $	*/
+/*	$OpenBSD: boot.c,v 1.18 2010/08/25 12:53:38 jsing Exp $	*/
 /*	$NetBSD: boot.c,v 1.3 2001/05/31 08:55:19 mrg Exp $	*/
 /*
  * Copyright (c) 1997, 1999 Eduardo E. Horvath.  All rights reserved.
@@ -59,6 +59,13 @@
 #include "ofdev.h"
 #include "openfirm.h"
 
+#ifdef BOOT_DEBUG
+uint32_t	boot_debug = 0
+		    /* | BOOT_D_OFDEV */
+		    /* | BOOT_D_OFNET */
+		;
+#endif
+
 #define	MEG	(1024*1024)
 
 /*
@@ -75,15 +82,11 @@ char bootfile[128];
 int boothowto;
 int debug;
 
-
-#ifdef SPARC_BOOT_ELF
 int	elf64_exec(int, Elf64_Ehdr *, u_int64_t *, void **, void **);
-#endif
 
 #if 0
 static void
-prom2boot(dev)
-	char *dev;
+prom2boot(char *dev)
 {
 	char *cp, *lp = 0;
 	int handle;
@@ -107,9 +110,7 @@ prom2boot(dev)
  */
 
 static int
-parseargs(str, howtop)
-	char *str;
-	int *howtop;
+parseargs(char *str, int *howtop)
 {
 	char *cp;
 	int i;
@@ -153,11 +154,7 @@ parseargs(str, howtop)
 
 
 static void
-chain(pentry, args, ssym, esym)
-	u_int64_t pentry;
-	char *args;
-	void *ssym;
-	void *esym;
+chain(u_int64_t pentry, char *args, void *ssym, void *esym)
 {
 	extern char end[];
 	void (*entry)();
@@ -210,14 +207,10 @@ chain(pentry, args, ssym, esym)
 }
 
 int
-loadfile(fd, args)
-	int fd;
-	char *args;
+loadfile(int fd, char *args)
 {
 	union {
-#ifdef SPARC_BOOT_ELF
 		Elf64_Ehdr elf64;
-#endif
 	} hdr;
 	int rval;
 	u_int64_t entry = 0;
@@ -242,13 +235,11 @@ loadfile(fd, args)
 	}
 
 	/* Determine file type, load kernel. */
-#ifdef SPARC_BOOT_ELF
 	if (bcmp(hdr.elf64.e_ident, ELFMAG, SELFMAG) == 0 &&
 	    hdr.elf64.e_ident[EI_CLASS] == ELFCLASS64) {
+		printf("Booting %s\n", opened_name);
 		rval = elf64_exec(fd, &hdr.elf64, &entry, &ssym, &esym);
-	} else
-#endif
-	{
+	} else {
 		rval = 1;
 		printf("unknown executable format\n");
 	}
@@ -267,10 +258,6 @@ loadfile(fd, args)
 	close(fd);
 	return (rval);
 }
-
-#ifdef SPARC_BOOT_ELF
-#include "elfXX_exec.c"
-#endif /* SPARC_BOOT_ELF */
 
 int
 main()

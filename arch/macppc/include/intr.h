@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.6 2008/11/21 17:35:52 deraadt Exp $	*/
+/*	$OpenBSD: intr.h,v 1.8 2009/06/09 01:12:38 deraadt Exp $	*/
 
 #include <powerpc/intr.h>
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus_space.c,v 1.13 2009/03/26 19:04:56 oga Exp $	*/
+/*	$OpenBSD: bus_space.c,v 1.17 2010/05/08 16:54:07 oga Exp $	*/
 /*	$NetBSD: bus_space.c,v 1.2 2003/03/14 18:47:53 christos Exp $	*/
 
 /*-
@@ -81,7 +81,7 @@ x86_bus_space_init(void)
 	ioport_ex = extent_create("ioport", 0x0, 0xffff, M_DEVBUF,
 	    (caddr_t)ioport_ex_storage, sizeof(ioport_ex_storage),
 	    EX_NOCOALESCE|EX_NOWAIT);
-	iomem_ex = extent_create("iomem", 0x0, 0xffffffff, M_DEVBUF,
+	iomem_ex = extent_create("iomem", 0x0, 0xffffffffffff, M_DEVBUF,
 	    (caddr_t)iomem_ex_storage, sizeof(iomem_ex_storage),
 	    EX_NOCOALESCE|EX_NOWAIT);
 }
@@ -238,10 +238,10 @@ int
 x86_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int flags,
     bus_space_handle_t *bshp)
 {
-	u_long pa, endpa;
-	vaddr_t va, sva;
-	pt_entry_t *pte;
+	paddr_t pa, endpa;
+	vaddr_t va;
 	bus_size_t map_size;
+	int pmap_flags = PMAP_NOCACHE;
 
 	pa = trunc_page(bpa);
 	endpa = round_page(bpa + size);
@@ -259,19 +259,15 @@ x86_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int flags,
 
 	*bshp = (bus_space_handle_t)(va + (bpa & PGOFSET));
 
-	sva = va;
-	for (; map_size > 0;
-	    pa += PAGE_SIZE, va += PAGE_SIZE, map_size -= PAGE_SIZE) {
-		pmap_kenter_pa(va, pa, VM_PROT_READ | VM_PROT_WRITE);
+	if (flags & BUS_SPACE_MAP_CACHEABLE)
+		pmap_flags = 0;
+	else if (flags & BUS_SPACE_MAP_PREFETCHABLE)
+		pmap_flags = PMAP_WC;
 
-		pte = kvtopte(va);
-		if (flags & BUS_SPACE_MAP_CACHEABLE)
-			*pte &= ~PG_N;
-		else
-			*pte |= PG_N;
-	}
-	pmap_tlb_shootrange(pmap_kernel(), sva, va);
-	pmap_tlb_shootwait();
+	for (; map_size > 0;
+	    pa += PAGE_SIZE, va += PAGE_SIZE, map_size -= PAGE_SIZE)
+		pmap_kenter_pa(va, pa | pmap_flags,
+		    VM_PROT_READ | VM_PROT_WRITE);
 	pmap_update(pmap_kernel());
 
 	return 0;
@@ -866,7 +862,7 @@ bus_space_set_region_4(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
 }
 
 void
-bus_space_copy_region_1(bus_space_tag_t t,
+bus_space_copy_1(bus_space_tag_t t,
     bus_space_handle_t h1, bus_size_t o1,
     bus_space_handle_t h2, bus_size_t o2, size_t c)
 {
@@ -901,7 +897,7 @@ bus_space_copy_region_1(bus_space_tag_t t,
 }
 
 void
-bus_space_copy_region_2(bus_space_tag_t t,
+bus_space_copy_2(bus_space_tag_t t,
     bus_space_handle_t h1, bus_size_t o1,
     bus_space_handle_t h2, bus_size_t o2, size_t c)
 {
@@ -936,7 +932,7 @@ bus_space_copy_region_2(bus_space_tag_t t,
 }
 
 void
-bus_space_copy_region_4(bus_space_tag_t t,
+bus_space_copy_4(bus_space_tag_t t,
     bus_space_handle_t h1, bus_size_t o1,
     bus_space_handle_t h2, bus_size_t o2, size_t c)
 {

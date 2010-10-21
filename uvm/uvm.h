@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm.h,v 1.30 2009/04/14 20:12:05 oga Exp $	*/
+/*	$OpenBSD: uvm.h,v 1.41 2010/06/29 20:39:27 thib Exp $	*/
 /*	$NetBSD: uvm.h,v 1.24 2000/11/27 08:40:02 chs Exp $	*/
 
 /*
@@ -56,8 +56,8 @@
 #include <uvm/uvm_object.h>
 #include <uvm/uvm_page.h>
 #include <uvm/uvm_pager.h>
-#include <uvm/uvm_pdaemon.h>
 #include <uvm/uvm_swap.h>
+#include <uvm/uvm_pmemrange.h>
 #ifdef UVM_SWAP_ENCRYPT
 #include <uvm/uvm_swap_encrypt.h>
 #endif
@@ -68,6 +68,30 @@
 #include <machine/vmparam.h>
 
 /*
+ * uvm_constraint_range's:
+ * MD code is allowed to setup constraint ranges for memory allocators, the
+ * primary use for this is to keep allocation for certain memory consumers
+ * such as mbuf pools withing address ranges that are reachable by devices
+ * that perform DMA.
+ *
+ * It is also to discourge memory allocations from being satisfied from ranges
+ * such as the ISA memory range, if they can be satisfied with allocation
+ * from other ranges.
+ *
+ * the MD ranges are defined in arch/ARCH/ARCH/machdep.c
+ */
+struct uvm_constraint_range {
+	paddr_t	ucr_low;
+	paddr_t ucr_high;
+};
+
+/* Constraint ranges, set by MD code. */
+extern struct uvm_constraint_range  isa_constraint;
+extern struct uvm_constraint_range  dma_constraint;
+extern struct uvm_constraint_range  no_constraint;
+extern struct uvm_constraint_range *uvm_md_constraints[];
+
+/*
  * uvm structure (vm global state: collected in one structure for ease
  * of reference...)
  */
@@ -75,17 +99,17 @@
 struct uvm {
 	/* vm_page related parameters */
 
-		/* vm_page queues */
-	struct pgfreelist page_free[VM_NFREELIST]; /* unallocated pages */
+	/* vm_page queues */
 	struct pglist page_active;	/* allocated pages, in use */
 	struct pglist page_inactive_swp;/* pages inactive (reclaim or free) */
 	struct pglist page_inactive_obj;/* pages inactive (reclaim or free) */
 	/* Lock order: object lock,  pageqlock, then fpageqlock. */
-	struct mutex pageqlock;		/* lock for active/inactive page q */
+	simple_lock_data_t pageqlock;	/* lock for active/inactive page q */
 	struct mutex fpageqlock;	/* lock for free page q  + pdaemon */
 	boolean_t page_init_done;	/* TRUE if uvm_page_init() finished */
 	boolean_t page_idle_zero;	/* TRUE if we should try to zero
 					   pages in the idle loop */
+	struct uvm_pmr_control pmr_control; /* pmemrange data */
 
 		/* page daemon trigger */
 	int pagedaemon;			/* daemon sleeps on this */

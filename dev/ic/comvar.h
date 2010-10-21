@@ -1,4 +1,4 @@
-/*	$OpenBSD: comvar.h,v 1.45 2008/06/08 13:55:06 kettenis Exp $	*/
+/*	$OpenBSD: comvar.h,v 1.50 2010/08/06 21:04:14 kettenis Exp $	*/
 /*	$NetBSD: comvar.h,v 1.5 1996/05/05 19:50:47 christos Exp $	*/
 
 /*
@@ -66,7 +66,7 @@ struct commulti_attach_args {
 	int		ca_noien;
 };
 
-#define	COM_IBUFSIZE	(2 * 512)
+#define	COM_IBUFSIZE	(32 * 512)
 #define	COM_IHIGHWATER	((3 * COM_IBUFSIZE) / 4)
 
 struct com_softc {
@@ -76,11 +76,7 @@ struct com_softc {
 	struct tty *sc_tty;
 	struct timeout sc_dtr_tmo;
 	struct timeout sc_diag_tmo;
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 	void *sc_si;
-#else
-	struct timeout sc_comsoft_tmo;
-#endif
 
 	int sc_overflows;
 	int sc_floods;
@@ -141,7 +137,8 @@ int	comprobe1(bus_space_tag_t, bus_space_handle_t);
 int	comstop(struct tty *, int);
 int	comintr(void *);
 int	com_detach(struct device *, int);
-int	com_activate(struct device *, enum devact);
+int	com_activate(struct device *, int);
+void	com_resume(struct com_softc *);
 
 void	comdiag(void *);
 int	comspeed(long, long);

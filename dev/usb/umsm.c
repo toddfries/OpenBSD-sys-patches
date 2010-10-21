@@ -1,4 +1,4 @@
-/*	$OpenBSD: umsm.c,v 1.45 2009/03/25 15:02:13 yuo Exp $	*/
+/*	$OpenBSD: umsm.c,v 1.68 2010/10/12 21:08:08 mpf Exp $	*/
 
 /*
  * Copyright (c) 2008 Yojiro UO <yuo@nui.org>
@@ -52,11 +52,12 @@ int     umsmdebug = 0;
 #define UMSMBUFSZ	4096
 #define	UMSM_INTR_INTERVAL	100	/* ms */
 #define E220_MODE_CHANGE_REQUEST 0x2
+#define TRUINSTALL_CHANGEMODE_REQUEST 0x0b
 
 int umsm_match(struct device *, void *, void *); 
 void umsm_attach(struct device *, struct device *, void *); 
 int umsm_detach(struct device *, int); 
-int umsm_activate(struct device *, enum devact); 
+int umsm_activate(struct device *, int); 
 
 int umsm_open(void *, int);
 void umsm_close(void *, int);
@@ -86,6 +87,7 @@ struct umsm_softc {
 };
 
 usbd_status umsm_huawei_changemode(usbd_device_handle);
+usbd_status umsm_truinstall_changemode(usbd_device_handle);
 usbd_status umsm_umass_changemode(struct umsm_softc *);
 
 struct ucom_methods umsm_methods = {
@@ -105,10 +107,15 @@ struct umsm_type {
 /* device type */
 #define	DEV_NORMAL	0x0000
 #define	DEV_HUAWEI	0x0001
+#define DEV_TRUINSTALL	0x0002
 #define	DEV_UMASS1	0x0010
 #define	DEV_UMASS2	0x0020
 #define	DEV_UMASS3	0x0040
-#define DEV_UMASS	(DEV_UMASS1 | DEV_UMASS2 | DEV_UMASS3)
+#define	DEV_UMASS4	0x0080
+#define	DEV_UMASS5	0x0100
+#define	DEV_UMASS6	0x0200
+#define DEV_UMASS	(DEV_UMASS1 | DEV_UMASS2 | DEV_UMASS3 | DEV_UMASS4 | \
+    DEV_UMASS5 | DEV_UMASS6)
 };
  
 static const struct umsm_type umsm_devs[] = {
@@ -121,10 +128,19 @@ static const struct umsm_type umsm_devs[] = {
 	{{ USB_VENDOR_DELL,	USB_PRODUCT_DELL_U740 }, 0},
 	{{ USB_VENDOR_DELL,	USB_PRODUCT_DELL_W5500 }, 0},
 
+	{{ USB_VENDOR_HUAWEI,	USB_PRODUCT_HUAWEI_E161 }, DEV_UMASS5},
+	{{ USB_VENDOR_HUAWEI,	USB_PRODUCT_HUAWEI_E180 }, DEV_HUAWEI},
+	{{ USB_VENDOR_HUAWEI,	USB_PRODUCT_HUAWEI_E182 }, DEV_UMASS5},
+	{{ USB_VENDOR_HUAWEI,	USB_PRODUCT_HUAWEI_E1820 }, DEV_UMASS5},
 	{{ USB_VENDOR_HUAWEI,	USB_PRODUCT_HUAWEI_E220 }, DEV_HUAWEI},
 	{{ USB_VENDOR_HUAWEI,	USB_PRODUCT_HUAWEI_E510 }, DEV_HUAWEI},
 	{{ USB_VENDOR_HUAWEI,	USB_PRODUCT_HUAWEI_E618 }, DEV_HUAWEI},
-
+	{{ USB_VENDOR_HUAWEI,	USB_PRODUCT_HUAWEI_Mobile }, DEV_HUAWEI},
+	{{ USB_VENDOR_HUAWEI,	USB_PRODUCT_HUAWEI_K3765_INIT }, DEV_UMASS5},
+	{{ USB_VENDOR_HUAWEI,	USB_PRODUCT_HUAWEI_K3765 }, 0},
+	
+	{{ USB_VENDOR_HYUNDAI,	USB_PRODUCT_HYUNDAI_UM175 }, 0},
+	
 	{{ USB_VENDOR_LONGCHEER, USB_PRODUCT_LONGCHEER_D21LCMASS }, DEV_UMASS3},
 	{{ USB_VENDOR_LONGCHEER, USB_PRODUCT_LONGCHEER_D21LC }, 0},
 
@@ -135,6 +151,15 @@ static const struct umsm_type umsm_devs[] = {
 	{{ USB_VENDOR_QUALCOMM,	USB_PRODUCT_QUALCOMM_MSM_HSDPA }, 0},
 	{{ USB_VENDOR_QUALCOMM,	USB_PRODUCT_QUALCOMM_MSM_HSDPA2 }, 0},
 
+	{{ USB_VENDOR_QUANTA2, USB_PRODUCT_QUANTA2_UMASS }, DEV_UMASS4},
+	{{ USB_VENDOR_QUANTA2, USB_PRODUCT_QUANTA2_Q101 }, 0},
+
+	{{ USB_VENDOR_ZTE, USB_PRODUCT_ZTE_UMASS_INSTALLER2 }, DEV_UMASS6},
+	{{ USB_VENDOR_ZTE, USB_PRODUCT_ZTE_UMASS_INSTALLER }, DEV_UMASS4},
+	{{ USB_VENDOR_ZTE, USB_PRODUCT_ZTE_K3565Z }, 0},
+	{{ USB_VENDOR_ZTE, USB_PRODUCT_ZTE_MF633 }, 0},
+	{{ USB_VENDOR_ZTE, USB_PRODUCT_ZTE_MF637 }, 0},
+
 	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_EXPRESSCARD }, 0},
 	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_MERLINV620 }, 0},
 	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_MERLINV740 }, 0},
@@ -143,16 +168,22 @@ static const struct umsm_type umsm_devs[] = {
 	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_MERLINU740_2 }, 0},
 	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_U870 }, 0},
 	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_XU870 }, 0},
+	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_EU870D }, 0},
 	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_X950D }, 0},
 	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_ES620 }, 0},
 	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_U720 }, 0},
 	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_U727 }, DEV_UMASS1},
 	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_MC950D }, 0},
-	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_MERLINX950D }, 0},
-	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_ZEROCD2 }, 0},
-	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_U760 }, 0},
+	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_MERLINX950D }, DEV_UMASS4},
+	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_ZEROCD2 }, DEV_UMASS4},
+	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_U760 }, DEV_UMASS4},
+	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_MC760 }, 0},
+	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_MC760CD }, DEV_UMASS4},
 
 	{{ USB_VENDOR_NOVATEL1,	USB_PRODUCT_NOVATEL1_FLEXPACKGPS }, 0},
+
+	{{ USB_VENDOR_NOKIA2, USB_PRODUCT_NOKIA2_CS15UMASS }, DEV_UMASS4},
+	{{ USB_VENDOR_NOKIA2, USB_PRODUCT_NOKIA2_CS15 }, 0},
 
 	{{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_GT3GFUSION }, 0},
 	{{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_GT3GPLUS }, 0},
@@ -160,6 +191,7 @@ static const struct umsm_type umsm_devs[] = {
 	{{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_GT3GQUADPLUS }, 0},
 	{{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_GSICON72 }, DEV_UMASS1},
 	{{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_GTHSDPA225 }, DEV_UMASS2},
+	{{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_GTHSUPA380E }, 0},
 	{{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_GTMAX36 }, 0},
 	{{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_SCORPION }, 0},
 	{{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_VODAFONEMC3G }, 0},
@@ -183,6 +215,7 @@ static const struct umsm_type umsm_devs[] = {
 	{{ USB_VENDOR_SIERRA, USB_PRODUCT_SIERRA_AIRCARD_875 }, 0},
 	{{ USB_VENDOR_SIERRA, USB_PRODUCT_SIERRA_MC8780 }, 0},
 	{{ USB_VENDOR_SIERRA, USB_PRODUCT_SIERRA_MC8781 }, 0},
+	{{ USB_VENDOR_SIERRA, USB_PRODUCT_SIERRA_MC8790 }, 0},
 	{{ USB_VENDOR_SIERRA, USB_PRODUCT_SIERRA_AC880 }, 0},
 	{{ USB_VENDOR_SIERRA, USB_PRODUCT_SIERRA_AC881 }, 0},
 	{{ USB_VENDOR_SIERRA, USB_PRODUCT_SIERRA_AC880E }, 0},
@@ -190,7 +223,11 @@ static const struct umsm_type umsm_devs[] = {
 	{{ USB_VENDOR_SIERRA, USB_PRODUCT_SIERRA_AC880U }, 0},
 	{{ USB_VENDOR_SIERRA, USB_PRODUCT_SIERRA_AC881U }, 0},
 	{{ USB_VENDOR_SIERRA, USB_PRODUCT_SIERRA_AC885U }, 0},
-	{{ USB_VENDOR_SIERRA, USB_PRODUCT_SIERRA_TRUINSTALL }, DEV_UMASS1},
+	{{ USB_VENDOR_SIERRA, USB_PRODUCT_SIERRA_C01SW }, 0},
+	{{ USB_VENDOR_SIERRA, USB_PRODUCT_SIERRA_TRUINSTALL }, DEV_TRUINSTALL},
+
+	{{ USB_VENDOR_TCTMOBILE, USB_PRODUCT_TCTMOBILE_UMASS }, DEV_UMASS3},
+	{{ USB_VENDOR_TCTMOBILE, USB_PRODUCT_TCTMOBILE_UMSM }, 0},
 
 	{{ USB_VENDOR_HP, USB_PRODUCT_HP_HS2300 }, 0},
 
@@ -198,6 +235,7 @@ static const struct umsm_type umsm_devs[] = {
 	{{ USB_VENDOR_CMOTECH, USB_PRODUCT_CMOTECH_CCU550 }, 0}, /* ??? */
 	{{ USB_VENDOR_CMOTECH, USB_PRODUCT_CMOTECH_CGU628 }, DEV_UMASS1},
 	{{ USB_VENDOR_CMOTECH, USB_PRODUCT_CMOTECH_CGU628_DISK }, 0},
+	{{ USB_VENDOR_CMOTECH, USB_PRODUCT_CMOTECH_CNU680 }, DEV_UMASS1},
 };
 
 #define umsm_lookup(v, p) ((const struct umsm_type *)usb_lookup(umsm_devs, v, p))
@@ -237,13 +275,15 @@ umsm_match(struct device *parent, void *match, void *aux)
 			 * Some high-speed modems require special care.
 			 */
 			if (flag & DEV_HUAWEI) {
-				if  (uaa->ifaceno != 2) 
+				if (uaa->ifaceno != 2) 
 					return UMATCH_VENDOR_IFACESUBCLASS;
 				else
 					return UMATCH_NONE;
-			} else if (flag & DEV_UMASS)
+			} else if (flag & DEV_UMASS) {
 				return UMATCH_VENDOR_IFACESUBCLASS;
-			else
+			} else if (flag & DEV_TRUINSTALL) {
+				return UMATCH_VENDOR_IFACESUBCLASS;
+			} else
 				return UMATCH_NONE;
 		} else
 			return UMATCH_VENDOR_IFACESUBCLASS;
@@ -281,6 +321,11 @@ umsm_attach(struct device *parent, struct device *self, void *aux)
 		if ((sc->sc_flag & DEV_HUAWEI) && uaa->ifaceno == 0) {
                         umsm_huawei_changemode(uaa->device);
 			printf("%s: umass only mode. need to reattach\n", 
+				sc->sc_dev.dv_xname);
+		} else if ((sc->sc_flag & DEV_TRUINSTALL) &&
+			    uaa->ifaceno == 0) {
+			umsm_truinstall_changemode(uaa->device);
+			printf("%s: truinstall mode. need to reattach\n", 
 				sc->sc_dev.dv_xname);
 		} else if ((sc->sc_flag & DEV_UMASS) && uaa->ifaceno == 0) {
 			umsm_umass_changemode(sc);
@@ -371,7 +416,7 @@ umsm_detach(struct device *self, int flags)
 }
 
 int
-umsm_activate(struct device *self, enum devact act)
+umsm_activate(struct device *self, int act)
 {
 	struct umsm_softc *sc = (struct umsm_softc *)self;
 	int rv = 0;
@@ -572,9 +617,29 @@ umsm_huawei_changemode(usbd_device_handle dev)
 }
 
 usbd_status
+umsm_truinstall_changemode(usbd_device_handle dev)
+{
+	usb_device_request_t req;
+	usbd_status err;
+	req.bmRequestType = UT_WRITE_VENDOR_DEVICE;
+	req.bRequest = TRUINSTALL_CHANGEMODE_REQUEST;
+	USETW(req.wValue, 0x1);
+	USETW(req.wIndex, 0);
+	USETW(req.wLength, 0);
+
+	err = usbd_do_request(dev, &req, 0);
+	if (err) 
+		return (EIO);
+
+	return (0);
+}
+
+usbd_status
 umsm_umass_changemode(struct umsm_softc *sc) 
 {
 #define UMASS_CMD_REZERO_UNIT	0x01
+#define UMASS_CMD_START_STOP	0x1b
+#define UMASS_CMDPARAM_EJECT	0x02
 	usb_interface_descriptor_t *id;
 	usb_endpoint_descriptor_t *ed;
 	usbd_xfer_handle xfer;
@@ -615,6 +680,33 @@ umsm_umass_changemode(struct umsm_softc *sc)
 		cbw.CBWCDB[3] = 0x02;
 		cbw.CBWCDB[4] = 0x52;
 		cbw.CBWCDB[5] = 0x70;
+		break;
+	case DEV_UMASS4:
+		USETDW(cbw.dCBWDataTransferLength, 0x0); 
+		cbw.bCBWFlags = CBWFLAGS_OUT;
+		cbw.CBWCDB[0] = UMASS_CMD_START_STOP;
+		cbw.CBWCDB[1] = 0x00;	/* target LUN: 0 */
+		cbw.CBWCDB[4] = UMASS_CMDPARAM_EJECT;
+		break;
+	case DEV_UMASS5:
+		cbw.bCBWFlags = CBWFLAGS_OUT;
+		cbw.CBWCDB[0] = 0x11;
+		cbw.CBWCDB[1] = 0x06;
+		break;
+	case DEV_UMASS6:	/* ZTE */
+		USETDW(cbw.dCBWDataTransferLength, 0x20); 
+		cbw.bCBWFlags = CBWFLAGS_IN;
+		cbw.bCDBLength= 12; 
+		cbw.CBWCDB[0] = 0x85;
+		cbw.CBWCDB[1] = 0x01;
+		cbw.CBWCDB[2] = 0x01;
+		cbw.CBWCDB[3] = 0x01;
+		cbw.CBWCDB[4] = 0x18;
+		cbw.CBWCDB[5] = 0x01;
+		cbw.CBWCDB[6] = 0x01;
+		cbw.CBWCDB[7] = 0x01;
+		cbw.CBWCDB[8] = 0x01;
+		cbw.CBWCDB[9] = 0x01;
 		break;
 	default:
 		DPRINTF(("%s: unknown device type.\n", sc->sc_dev.dv_xname));

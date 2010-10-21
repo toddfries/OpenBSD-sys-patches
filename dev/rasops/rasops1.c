@@ -1,4 +1,4 @@
-/*	$OpenBSD: rasops1.c,v 1.6 2008/06/26 05:42:17 ray Exp $	*/
+/*	$OpenBSD: rasops1.c,v 1.8 2010/08/28 12:48:14 miod Exp $	*/
 /*	$NetBSD: rasops1.c,v 1.11 2000/04/12 14:22:29 pk Exp $	*/
 
 /*-
@@ -40,21 +40,20 @@
 #include <dev/rasops/rasops.h>
 #include <dev/rasops/rasops_masks.h>
 
-void	rasops1_copycols(void *, int, int, int, int);
-void	rasops1_erasecols(void *, int, int, int, long);
-void	rasops1_do_cursor(struct rasops_info *);
-void	rasops1_putchar(void *, int, int col, u_int, long);
+int	rasops1_copycols(void *, int, int, int, int);
+int	rasops1_erasecols(void *, int, int, int, long);
+int	rasops1_do_cursor(struct rasops_info *);
+int	rasops1_putchar(void *, int, int col, u_int, long);
 #ifndef RASOPS_SMALL
-void	rasops1_putchar8(void *, int, int col, u_int, long);
-void	rasops1_putchar16(void *, int, int col, u_int, long);
+int	rasops1_putchar8(void *, int, int col, u_int, long);
+int	rasops1_putchar16(void *, int, int col, u_int, long);
 #endif
 
 /*
  * Initialize rasops_info struct for this colordepth.
  */
 void
-rasops1_init(ri)
-	struct rasops_info *ri;
+rasops1_init(struct rasops_info *ri)
 {
 	rasops_masks_init();
 
@@ -82,12 +81,8 @@ rasops1_init(ri)
 /*
  * Paint a single character. This is the generic version, this is ugly.
  */
-void
-rasops1_putchar(cookie, row, col, uc, attr)
-	void *cookie;
-	int row, col;
-	u_int uc;
-	long attr;
+int
+rasops1_putchar(void *cookie, int row, int col, u_int uc, long attr)
 {
 	u_int fs, rs, fb, bg, fg, lmask, rmask;
 	u_int32_t height, width;
@@ -100,10 +95,10 @@ rasops1_putchar(cookie, row, col, uc, attr)
 #ifdef RASOPS_CLIPPING
 	/* Catches 'row < 0' case too */
 	if ((unsigned)row >= (unsigned)ri->ri_rows)
-		return;
+		return 0;
 
 	if ((unsigned)col >= (unsigned)ri->ri_cols)
-		return;
+		return 0;
 #endif
 
 	col *= ri->ri_font->fontwidth;
@@ -224,18 +219,16 @@ rasops1_putchar(cookie, row, col, uc, attr)
 			rp[1] = (rp[1] & rmask) | (fg & ~rmask);
 		}
 	}
+
+	return 0;
 }
 
 #ifndef RASOPS_SMALL
 /*
  * Paint a single character. This is for 8-pixel wide fonts.
  */
-void
-rasops1_putchar8(cookie, row, col, uc, attr)
-	void *cookie;
-	int row, col;
-	u_int uc;
-	long attr;
+int
+rasops1_putchar8(void *cookie, int row, int col, u_int uc, long attr)
 {
 	int height, fs, rs, bg, fg;
 	struct rasops_info *ri;
@@ -246,10 +239,10 @@ rasops1_putchar8(cookie, row, col, uc, attr)
 #ifdef RASOPS_CLIPPING
 	/* Catches 'row < 0' case too */
 	if ((unsigned)row >= (unsigned)ri->ri_rows)
-		return;
+		return 0;
 
 	if ((unsigned)col >= (unsigned)ri->ri_cols)
-		return;
+		return 0;
 #endif
 
 	rp = ri->ri_bits + row * ri->ri_yscale + col * ri->ri_xscale;
@@ -290,17 +283,15 @@ rasops1_putchar8(cookie, row, col, uc, attr)
 	/* Do underline */
 	if ((attr & 1) != 0)
 		rp[-(ri->ri_stride << 1)] = fg;
+
+	return 0;
 }
 
 /*
  * Paint a single character. This is for 16-pixel wide fonts.
  */
-void
-rasops1_putchar16(cookie, row, col, uc, attr)
-	void *cookie;
-	int row, col;
-	u_int uc;
-	long attr;
+int
+rasops1_putchar16(void *cookie, int row, int col, u_int uc, long attr)
 {
 	int height, fs, rs, bg, fg;
 	struct rasops_info *ri;
@@ -311,10 +302,10 @@ rasops1_putchar16(cookie, row, col, uc, attr)
 #ifdef RASOPS_CLIPPING
 	/* Catches 'row < 0' case too */
 	if ((unsigned)row >= (unsigned)ri->ri_rows)
-		return;
+		return 0;
 
 	if ((unsigned)col >= (unsigned)ri->ri_cols)
-		return;
+		return 0;
 #endif
 
 	rp = ri->ri_bits + row * ri->ri_yscale + col * ri->ri_xscale;
@@ -356,6 +347,8 @@ rasops1_putchar16(cookie, row, col, uc, attr)
 	/* Do underline */
 	if ((attr & 1) != 0)
 		*(int16_t *)(rp - (ri->ri_stride << 1)) = fg;
+
+	return 0;
 }
 #endif	/* !RASOPS_SMALL */
 

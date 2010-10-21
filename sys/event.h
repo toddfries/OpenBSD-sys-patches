@@ -1,4 +1,4 @@
-/*	$OpenBSD: event.h,v 1.13 2008/11/05 09:20:17 dlg Exp $	*/
+/*	$OpenBSD: event.h,v 1.15 2010/08/02 19:54:07 guenther Exp $	*/
 
 /*-
  * Copyright (c) 1999,2000,2001 Jonathan Lemon <jlemon@FreeBSD.org>
@@ -169,9 +169,11 @@ struct proc;
 extern void	knote(struct klist *list, long hint);
 extern void	knote_remove(struct proc *p, struct klist *list);
 extern void	knote_fdclose(struct proc *p, int fd);
+extern void	knote_processexit(struct process *);
 extern int	kqueue_register(struct kqueue *kq,
 		    struct kevent *kev, struct proc *p);
 extern int	filt_seltrue(struct knote *kn, long hint);
+extern int	seltrue_kqfilter(dev_t, struct knote *);
 extern void	klist_invalidate(struct klist *);
 
 #else	/* !_KERNEL */

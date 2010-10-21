@@ -1,4 +1,4 @@
-/*	$OpenBSD: ldc.c,v 1.3 2009/01/16 16:58:09 kettenis Exp $	*/
+/*	$OpenBSD: ldc.c,v 1.7 2009/12/26 21:21:10 kettenis Exp $	*/
 /*
  * Copyright (c) 2009 Mark Kettenis
  *
@@ -33,7 +33,9 @@
 void	ldc_rx_ctrl_vers(struct ldc_conn *, struct ldc_pkt *);
 void	ldc_rx_ctrl_rtr(struct ldc_conn *, struct ldc_pkt *);
 void	ldc_rx_ctrl_rts(struct ldc_conn *, struct ldc_pkt *);
+void	ldc_rx_ctrl_rdx(struct ldc_conn *, struct ldc_pkt *);
 
+void	ldc_send_ack(struct ldc_conn *);
 void	ldc_send_rtr(struct ldc_conn *);
 void	ldc_send_rts(struct ldc_conn *);
 void	ldc_send_rdx(struct ldc_conn *);
@@ -54,6 +56,10 @@ ldc_rx_ctrl(struct ldc_conn *lc, struct ldc_pkt *lp)
 		ldc_rx_ctrl_rtr(lc, lp);
 		break;
 
+	case LDC_RDX:
+		ldc_rx_ctrl_rdx(lc, lp);
+		break;
+
 	default:
 		DPRINTF(("CTRL/0x%02x/0x%02x\n", lp->stype, lp->ctrl));
 		ldc_reset(lc);
@@ -66,7 +72,13 @@ ldc_rx_ctrl_vers(struct ldc_conn *lc, struct ldc_pkt *lp)
 {
 	switch (lp->stype) {
 	case LDC_INFO:
-		/* XXX do nothing for now. */
+		DPRINTF(("CTRL/INFO/VERS\n"));
+		if (lp->major == LDC_VERSION_MAJOR &&
+		    lp->minor == LDC_VERSION_MINOR)
+			ldc_send_ack(lc);
+		else
+			/* XXX do nothing for now. */
+			;
 		break;
 
 	case LDC_ACK:
@@ -158,8 +170,42 @@ ldc_rx_ctrl_rtr(struct ldc_conn *lc, struct ldc_pkt *lp)
 }
 
 void
+ldc_rx_ctrl_rdx(struct ldc_conn *lc, struct ldc_pkt *lp)
+{
+	switch (lp->stype) {
+	case LDC_INFO:
+		if (lc->lc_state != LDC_SND_RTR) {
+			DPRINTF(("Spurious CTRL/INFO/RTR: state %d\n",
+			    lc->lc_state));
+			ldc_reset(lc);
+			return;
+		}
+		DPRINTF(("CTRL/INFO/RDX\n"));
+		lc->lc_start(lc);
+		break;
+
+	case LDC_ACK:
+		DPRINTF(("CTRL/ACK/RDX\n"));
+		ldc_reset(lc);
+		break;
+
+	case LDC_NACK:
+		DPRINTF(("CTRL/NACK/RDX\n"));
+		ldc_reset(lc);
+		break;
+
+	default:
+		DPRINTF(("CTRL/0x%02x/RDX\n", lp->stype));
+		ldc_reset(lc);
+		break;
+	}
+}
+
+void
 ldc_rx_data(struct ldc_conn *lc, struct ldc_pkt *lp)
 {
+	size_t len;
+
 	if (lp->stype != LDC_INFO) {
 		DPRINTF(("DATA/0x%02x\n", lp->stype));
 		ldc_reset(lc);
@@ -173,7 +219,23 @@ ldc_rx_data(struct ldc_conn *lc, struct ldc_pkt *lp)
 		return;
 	}
 
-	lc->lc_rx_data(lc, lp);
+	if (lp->env & LDC_FRAG_START) {
+		lc->lc_len = (lp->env & LDC_LEN_MASK) + 8;
+		KASSERT(lc->lc_len <= sizeof(lc->lc_msg));
+		memcpy((uint8_t *)lc->lc_msg, lp, lc->lc_len);
+	} else {
+		len = (lp->env & LDC_LEN_MASK);
+		if (lc->lc_len + len > sizeof(lc->lc_msg)) {
+			DPRINTF(("Buffer overrun\n"));
+			ldc_reset(lc);
+			return;
+		}
+		memcpy(((uint8_t *)lc->lc_msg) + lc->lc_len, &lp->major, len);
+		lc->lc_len += len;
+	}
+
+	if (lp->env & LDC_FRAG_STOP)
+		lc->lc_rx_data(lc, (struct ldc_pkt *)lc->lc_msg);
 }
 
 void
@@ -204,6 +266,36 @@ ldc_send_vers(struct ldc_conn *lc)
 	}
 
 	lc->lc_state = LDC_SND_VERS;
+}
+
+void
+ldc_send_ack(struct ldc_conn *lc)
+{
+	struct ldc_pkt *lp;
+	uint64_t tx_head, tx_tail, tx_state;
+	int err;
+
+	err = hv_ldc_tx_get_state(lc->lc_id, &tx_head, &tx_tail, &tx_state);
+	if (err != H_EOK || tx_state != LDC_CHANNEL_UP)
+		return;
+
+	lp = (struct ldc_pkt *)(lc->lc_txq->lq_va + tx_tail);
+	bzero(lp, sizeof(struct ldc_pkt));
+	lp->type = LDC_CTRL;
+	lp->stype = LDC_ACK;
+	lp->ctrl = LDC_VERS;
+	lp->major = 1;
+	lp->minor = 0;
+
+	tx_tail += sizeof(*lp);
+	tx_tail &= ((lc->lc_txq->lq_nentries * sizeof(*lp)) - 1);
+	err = hv_ldc_tx_set_qtail(lc->lc_id, tx_tail);
+	if (err != H_EOK) {
+		printf("%s: hv_ldc_tx_set_qtail: %d\n", __func__, err);
+		return;
+	}
+
+	lc->lc_state = LDC_RCV_VERS;
 }
 
 void

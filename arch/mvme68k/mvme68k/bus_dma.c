@@ -1,4 +1,4 @@
-/*      $OpenBSD: bus_dma.c,v 1.3 2009/04/14 16:01:04 oga Exp $	*/
+/*      $OpenBSD: bus_dma.c,v 1.7 2010/06/26 23:24:43 guenther Exp $	*/
 /*      $NetBSD: bus_dma.c,v 1.2 2001/06/10 02:31:25 briggs Exp $        */
 
 /*-
@@ -33,7 +33,6 @@
 
 #include <sys/param.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/extent.h>
 #include <sys/buf.h>
 #include <sys/device.h>
@@ -468,18 +467,8 @@ bus_dmamem_alloc(t, size, alignment, boundary, segs, nsegs, rsegs, flags)
         int *rsegs;
         int flags;
 {
-        paddr_t avail_start = (paddr_t)-1, avail_end = 0;
-        int bank;
-
-        for (bank = 0; bank < vm_nphysseg; bank++) {
-                if (avail_start > vm_physmem[bank].avail_start << PGSHIFT)
-                        avail_start = vm_physmem[bank].avail_start << PGSHIFT;
-                if (avail_end < vm_physmem[bank].avail_end << PGSHIFT)
-                        avail_end = vm_physmem[bank].avail_end << PGSHIFT;
-        }
-
         return _bus_dmamem_alloc_range(t, size, alignment, boundary, segs,
-            nsegs, rsegs, flags, avail_start, avail_end - PAGE_SIZE);
+            nsegs, rsegs, flags, 0, -1);
 }
 
 /*
@@ -526,9 +515,10 @@ bus_dmamem_map(t, segs, nsegs, size, kvap, flags)
         caddr_t *kvap;
         int flags;
 {
-        vaddr_t va;
+	vaddr_t va, sva;
+	size_t ssize;
         bus_addr_t addr;
-        int curseg;
+        int curseg, error;
 
         size = round_page(size);
 
@@ -539,15 +529,26 @@ bus_dmamem_map(t, segs, nsegs, size, kvap, flags)
 
         *kvap = (caddr_t)va;
 
+	sva = va;
+	ssize = size;
         for (curseg = 0; curseg < nsegs; curseg++) {
                 for (addr = segs[curseg].ds_addr;
                     addr < (segs[curseg].ds_addr + segs[curseg].ds_len);
                     addr += PAGE_SIZE, va += PAGE_SIZE, size -= PAGE_SIZE) {
                         if (size == 0)
                                 panic("bus_dmamem_map: size botch");
-                        pmap_enter(pmap_kernel(), va, addr,
-                            VM_PROT_READ | VM_PROT_WRITE,
-                            VM_PROT_READ | VM_PROT_WRITE | PMAP_WIRED);
+                        error = pmap_enter(pmap_kernel(), va, addr,
+			    VM_PROT_READ | VM_PROT_WRITE, VM_PROT_READ |
+			    VM_PROT_WRITE | PMAP_WIRED | PMAP_CANFAIL);
+			if (error) {
+				/*
+				 * Clean up after ourselves.
+				 * XXX uvm_wait on WAITOK
+				 */
+				pmap_update(pmap_kernel());
+				uvm_km_free(kernel_map, va, ssize);
+				return (error);
+			}
                 }
         }
 	pmap_update(pmap_kernel());
@@ -639,6 +640,8 @@ _bus_dmamem_alloc_range(t, size, alignment, boundary, segs, nsegs, rsegs,
          * Allocate pages from the VM system.
          */
 	plaflag = flags & BUS_DMA_NOWAIT ? UVM_PLA_NOWAIT : UVM_PLA_WAITOK;
+	if (flags & BUS_DMA_ZERO)
+		plaflag |= UVM_PLA_ZERO;
 
         TAILQ_INIT(&mlist);
         error = uvm_pglistalloc(size, low, high, alignment, boundary,

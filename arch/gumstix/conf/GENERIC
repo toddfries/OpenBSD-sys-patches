@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.4 2009/02/10 18:35:44 damien Exp $
+#	$OpenBSD: GENERIC,v 1.9 2010/09/23 16:21:46 yuo Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -20,7 +20,6 @@ options		CACHE_CLEAN_BLOCK_INTR
 
 makeoptions	KERNEL_BASE_PHYS="0xa0200000"
 makeoptions	KERNEL_BASE_VIRT="0xc0200000"
-makeoptions	BOARDTYPE="gumstix"
 
 # CPU options
 options		CPU_XSCALE_PXA2X0	# Support the XScale core
@@ -118,6 +117,7 @@ axe*		at uhub?		# ASIX Electronics AX88172 USB Ethernet
 cue*		at uhub?		# CATC USB-EL1201A based Ethernet
 kue*		at uhub?		# Kawasaki KL5KUSB101B based Ethernet
 cdce*		at uhub?		# CDC Ethernet
+urndis*		at uhub?		# Remote NDIS Ethernet
 upl*		at uhub?		# Prolific PL2301/PL2302 host-to-host
 udav*		at uhub?		# Davicom DM9601 based Ethernet
 ural*		at uhub?		# Ralink RT2500USB
@@ -127,8 +127,6 @@ url*		at uhub?		# Realtek RTL8150L based adapters
 wi*		at uhub?		# WaveLAN IEEE 802.11DS
 urio*		at uhub?		# Diamond Multimedia Rio 500
 uscanner*	at uhub?		# USB Scanners
-usscanner*	at uhub?		# USB SCSI scanners, e.g., HP5300
-scsibus*	at usscanner?
 #uyap*		at uhub?		# Y@P firmware loader
 udsbr*		at uhub?		# D-Link DSB-R100 radio
 radio*		at udsbr?		# USB radio
@@ -137,12 +135,12 @@ udcf*		at uhub?		# Gude Expert mouseCLOCK
 umbg*		at uhub?		# Meinberg Funkuhren USB5131
 uow*		at uhub?		# Maxim/Dallas DS2490 1-Wire adapter
 onewire* at uow?
+utwitch*	at uhidev?		# YUREX BBU sensor
 
 sd*		at scsibus?		# SCSI disk drives
 #st*		at scsibus?		# SCSI tape drives
 cd*		at scsibus?		# SCSI CD-ROM drives
 #ch*		at scsibus?		# SCSI autochangers
-#ss*		at scsibus?		# SCSI scanners
 #uk*		at scsibus?		# unknown SCSI
 
 # integrated 16550 UARTs
@@ -227,6 +225,7 @@ option ONEWIREVERBOSE
 owid*	at onewire?			# ID
 owsbm*	at onewire?			# Smart Battery Monitor
 owtemp* at onewire?			# Temperature
+owctr*	at onewire?			# Counter device
 
 # Pseudo-Devices
 pseudo-device	wsmux		2	# mouse & keyboard multiplexor

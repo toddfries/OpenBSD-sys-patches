@@ -1,4 +1,4 @@
-/*	$OpenBSD: ehci_obio.c,v 1.1 2008/05/10 12:02:20 kettenis Exp $	*/
+/*	$OpenBSD: ehci_obio.c,v 1.3 2009/09/12 21:40:45 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2008 Mark Kettenis
@@ -24,6 +24,8 @@
 
 #include <machine/autoconf.h>
 
+#include <dev/ofw/openfirm.h>
+
 #include <dev/usb/usb.h>
 #include <dev/usb/usbdi.h>
 #include <dev/usb/usbdivar.h>
@@ -33,6 +35,12 @@
 #include <dev/usb/ehcivar.h>
 
 #include <dev/pci/pcidevs.h>
+
+#define USB_EHCI_OFFSET		0x00100
+#define USB_SNOOP1		0x00400 - USB_EHCI_OFFSET
+#define  USB_SNOOP_2GB		0x1e000000
+#define USB_CONTROL		0x00500 - USB_EHCI_OFFSET
+#define  USB_CONTROL_USB_EN	0x04000000
 
 int	ehci_obio_match(struct device *, void *, void *);
 void	ehci_obio_attach(struct device *, struct device *, void *);
@@ -65,6 +73,13 @@ struct powerpc_bus_dma_tag ehci_bus_dma_tag = {
 int
 ehci_obio_match(struct device *parent, void *cfdata, void *aux)
 {
+	struct obio_attach_args *oa = aux;
+	char buf[32];
+
+	if (OF_getprop(oa->oa_node, "compatible", buf, sizeof(buf)) <= 0 ||
+	    strcmp(buf, "fsl-usb2-mph") != 0)
+		return (0);
+
 	return (1);
 }
 
@@ -77,8 +92,9 @@ ehci_obio_attach(struct device *parent, struct device *self, void *aux)
 	int s;
 
 	sc->iot = oa->oa_iot;
-	sc->sc_size = 1024;
-	if (bus_space_map(sc->iot, oa->oa_offset, sc->sc_size, 0, &sc->ioh)) {
+	sc->sc_size = 1028;
+	if (bus_space_map(sc->iot, oa->oa_offset + USB_EHCI_OFFSET,
+	    sc->sc_size, 0, &sc->ioh)) {
 		printf(": can't map registers\n");
 		return;
 	}
@@ -88,8 +104,8 @@ ehci_obio_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->sc_bus.dmatag = &ehci_bus_dma_tag;
 
-	bus_space_write_4(sc->iot, sc->ioh, 0x400, 0x04000000);
-	bus_space_write_4(sc->iot, sc->ioh, 0x300, 0x1e000000);
+	bus_space_write_4(sc->iot, sc->ioh, USB_CONTROL, USB_CONTROL_USB_EN);
+	bus_space_write_4(sc->iot, sc->ioh, USB_SNOOP1, USB_SNOOP_2GB);
 
 	s = splhardusb();
 	sc->sc_offs = EREAD1(sc, EHCI_CAPLENGTH);

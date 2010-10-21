@@ -1,4 +1,4 @@
-/*	$OpenBSD: wdc.c,v 1.102 2009/02/07 08:07:28 grange Exp $	*/
+/*	$OpenBSD: wdc.c,v 1.109 2010/09/21 03:33:32 matthew Exp $	*/
 /*	$NetBSD: wdc.c,v 1.68 1999/06/23 19:00:17 bouyer Exp $	*/
 /*
  * Copyright (c) 1998, 2001 Manuel Bouyer.  All rights reserved.
@@ -11,11 +11,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *  This product includes software developed by Manuel Bouyer.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -288,9 +283,7 @@ wdc_get_log(unsigned int * size, unsigned int *left)
 #endif /* WDCDEBUG */
 
 u_int8_t
-wdc_default_read_reg(chp, reg)
-	struct channel_softc *chp;
-	enum wdc_regs reg;
+wdc_default_read_reg(struct channel_softc *chp, enum wdc_regs reg)
 {
 #ifdef DIAGNOSTIC
 	if (reg & _WDC_WRONLY) {
@@ -307,10 +300,7 @@ wdc_default_read_reg(chp, reg)
 }
 
 void
-wdc_default_write_reg(chp, reg, val)
-	struct channel_softc *chp;
-	enum wdc_regs reg;
-	u_int8_t val;
+wdc_default_write_reg(struct channel_softc *chp, enum wdc_regs reg, u_int8_t val)
 {
 #ifdef DIAGNOSTIC
 	if (reg & _WDC_RDONLY) {
@@ -327,10 +317,8 @@ wdc_default_write_reg(chp, reg, val)
 }
 
 void
-wdc_default_lba48_write_reg(chp, reg, val)
-	struct channel_softc *chp;
-	enum wdc_regs reg;
-	u_int16_t val;
+wdc_default_lba48_write_reg(struct channel_softc *chp, enum wdc_regs reg,
+    u_int16_t val)
 {
 	/* All registers are two byte deep FIFOs. */
 	CHP_WRITE_REG(chp, reg, val >> 8);
@@ -338,10 +326,8 @@ wdc_default_lba48_write_reg(chp, reg, val)
 }
 
 void
-wdc_default_read_raw_multi_2(chp, data, nbytes)
-	struct channel_softc *chp;
-	void *data;
-	unsigned int nbytes;
+wdc_default_read_raw_multi_2(struct channel_softc *chp, void *data,
+    unsigned int nbytes)
 {
 	if (data == NULL) {
 		unsigned int i;
@@ -359,10 +345,8 @@ wdc_default_read_raw_multi_2(chp, data, nbytes)
 
 
 void
-wdc_default_write_raw_multi_2(chp, data, nbytes)
-	struct channel_softc *chp;
-	void *data;
-	unsigned int nbytes;
+wdc_default_write_raw_multi_2(struct channel_softc *chp, void *data,
+    unsigned int nbytes)
 {
 	if (data == NULL) {
 		unsigned int i;
@@ -380,10 +364,8 @@ wdc_default_write_raw_multi_2(chp, data, nbytes)
 
 
 void
-wdc_default_write_raw_multi_4(chp, data, nbytes)
-	struct channel_softc *chp;
-	void *data;
-	unsigned int nbytes;
+wdc_default_write_raw_multi_4(struct channel_softc *chp, void *data,
+    unsigned int nbytes)
 {
 	if (data == NULL) {
 		unsigned int i;
@@ -401,10 +383,8 @@ wdc_default_write_raw_multi_4(chp, data, nbytes)
 
 
 void
-wdc_default_read_raw_multi_4(chp, data, nbytes)
-	struct channel_softc *chp;
-	void *data;
-	unsigned int nbytes;
+wdc_default_read_raw_multi_4(struct channel_softc *chp, void *data,
+    unsigned int nbytes)
 {
 	if (data == NULL) {
 		unsigned int i;
@@ -420,11 +400,8 @@ wdc_default_read_raw_multi_4(chp, data, nbytes)
 	    data, nbytes);
 }
 
-
 int
-wdprint(aux, pnp)
-	void *aux;
-	const char *pnp;
+wdprint(void *aux, const char *pnp)
 {
 	struct ata_atapi_attach *aa_link = aux;
 	if (pnp)
@@ -435,15 +412,13 @@ wdprint(aux, pnp)
 }
 
 void
-wdc_disable_intr(chp)
-	struct channel_softc *chp;
+wdc_disable_intr(struct channel_softc *chp)
 {
 	CHP_WRITE_REG(chp, wdr_ctlr, WDCTL_IDS);
 }
 
 void
-wdc_enable_intr(chp)
-	struct channel_softc *chp;
+wdc_enable_intr(struct channel_softc *chp)
 {
 	CHP_WRITE_REG(chp, wdr_ctlr, WDCTL_4BIT);
 }
@@ -456,10 +431,7 @@ wdc_set_drive(struct channel_softc *chp, int drive)
 }
 
 int
-wdc_floating_bus(chp, drive)
-	struct channel_softc *chp;
-	int drive;
-
+wdc_floating_bus(struct channel_softc *chp, int drive)
 {
 	u_int8_t cumulative_status, status;
 	int      iter;
@@ -490,12 +462,8 @@ wdc_floating_bus(chp, drive)
 	return 0;
 }
 
-
 int
-wdc_preata_drive(chp, drive)
-	struct channel_softc *chp;
-	int drive;
-
+wdc_preata_drive(struct channel_softc *chp, int drive)
 {
 	if (wdc_floating_bus(chp, drive)) {
 		WDCDEBUG_PRINT(("%s:%d:%d: floating bus detected\n",
@@ -526,9 +494,7 @@ wdc_preata_drive(chp, drive)
 }
 
 int
-wdc_ata_present(chp, drive)
-	struct channel_softc *chp;
-	int drive;
+wdc_ata_present(struct channel_softc *chp, int drive)
 {
 	int time_to_done;
 	int retry_cnt = 0;
@@ -614,8 +580,7 @@ retry:
  */
 
 int
-wdcprobe(chp)
-	struct channel_softc *chp;
+wdcprobe(struct channel_softc *chp)
 {
 	u_int8_t st0, st1, sc, sn, cl, ch;
 	u_int8_t ret_value = 0x03;
@@ -731,27 +696,8 @@ wdcprobe(chp)
 	return (ret_value);
 }
 
-/*
- * Call activate routine of underlying devices.
- */
-int
-wdcactivate(self, act)
-	struct device *self;
-	enum devact act;
-{
-	int error = 0;
-	int s;
-
-	s = splbio();
-	config_activate_children(self, act);
-	splx(s);
-
-	return (error);
-}
-
 void
-wdcattach(chp)
-	struct channel_softc *chp;
+wdcattach(struct channel_softc *chp)
 {
 	int channel_flags, ctrl_flags, i;
 	struct ata_atapi_attach aa_link;
@@ -891,8 +837,7 @@ exit:
  * are shared.
  */
 void
-wdcstart(chp)
-	struct channel_softc *chp;
+wdcstart(struct channel_softc *chp)
 {
 	struct wdc_xfer *xfer;
 
@@ -928,9 +873,7 @@ wdcstart(chp)
 }
 
 int
-wdcdetach(chp, flags)
-	struct channel_softc *chp;
-	int flags;
+wdcdetach(struct channel_softc *chp, int flags)
 {
 	int s, rv;
 
@@ -950,8 +893,7 @@ wdcdetach(chp, flags)
  * the next chunk if so.
  */
 int
-wdcintr(arg)
-	void *arg;
+wdcintr(void *arg)
 {
 	struct channel_softc *chp = arg;
 	struct wdc_xfer *xfer;
@@ -990,11 +932,12 @@ wdcintr(arg)
 }
 
 /* Put all disk in RESET state */
-void wdc_reset_channel(drvp)
-	struct ata_drive_datas *drvp;
+void
+wdc_reset_channel(struct ata_drive_datas *drvp)
 {
 	struct channel_softc *chp = drvp->chnl_softc;
 	int drive;
+
 	WDCDEBUG_PRINT(("ata_reset_channel %s:%d for drive %d\n",
 	    chp->wdc->sc_dev.dv_xname, chp->channel, drvp->drive),
 	    DEBUG_FUNCS);
@@ -1005,9 +948,7 @@ void wdc_reset_channel(drvp)
 }
 
 int
-wdcreset(chp, verb)
-	struct channel_softc *chp;
-	int verb;
+wdcreset(struct channel_softc *chp, int verb)
 {
 	int drv_mask1, drv_mask2;
 
@@ -1044,9 +985,7 @@ wdc_do_reset(struct channel_softc *chp)
 }
 
 int
-__wdcwait_reset(chp, drv_mask)
-	struct channel_softc *chp;
-	int drv_mask;
+__wdcwait_reset(struct channel_softc *chp, int drv_mask)
 {
 	int timeout;
 	u_int8_t st0, er0, st1, er1;
@@ -1102,9 +1041,7 @@ end:
  * return -1 for a timeout after "timeout" ms.
  */
 int
-wdc_wait_for_status(chp, mask, bits, timeout)
-	struct channel_softc *chp;
-	int mask, bits, timeout;
+wdc_wait_for_status(struct channel_softc *chp, int mask, int bits, int timeout)
 {
 	u_char status;
 	int time = 0;
@@ -1166,10 +1103,7 @@ wdc_wait_for_status(chp, mask, bits, timeout)
  * Busy-wait for DMA to complete
  */
 int
-wdc_dmawait(chp, xfer, timeout)
-	struct channel_softc *chp;
-	struct wdc_xfer *xfer;
-	int timeout;
+wdc_dmawait(struct channel_softc *chp, struct wdc_xfer *xfer, int timeout)
 {
 	int time;
 	for (time = 0; time < timeout * 1000 / WDCDELAY; time++) {
@@ -1187,8 +1121,7 @@ wdc_dmawait(chp, xfer, timeout)
 }
 
 void
-wdctimeout(arg)
-	void *arg;
+wdctimeout(void *arg)
 {
 	struct channel_softc *chp = (struct channel_softc *)arg;
 	struct wdc_xfer *xfer;
@@ -1236,29 +1169,12 @@ wdctimeout(arg)
  * XXX this should be a controller-indep function
  */
 void
-wdc_probe_caps(drvp, params)
-	struct ata_drive_datas *drvp;
-	struct ataparams *params;
+wdc_probe_caps(struct ata_drive_datas *drvp, struct ataparams *params)
 {
 	struct channel_softc *chp = drvp->chnl_softc;
 	struct wdc_softc *wdc = chp->wdc;
 	int i, valid_mode_found;
 	int cf_flags = drvp->cf_flags;
-
-	if ((wdc->cap & WDC_CAPABILITY_SATA) != 0 &&
-	    (params->atap_sata_caps != 0x0000 &&
-	    params->atap_sata_caps != 0xffff)) {
-		WDCDEBUG_PRINT(("%s: atap_sata_caps=0x%x\n", __func__,
-		    params->atap_sata_caps), DEBUG_PROBE);
-
-		/* Skip ATA modes detection for native SATA drives */
-		drvp->PIO_mode = drvp->PIO_cap = 4;
-		drvp->DMA_mode = drvp->DMA_cap = 2;
-		drvp->UDMA_mode = drvp->UDMA_cap = 5;
-		drvp->drive_flags |= DRIVE_SATA | DRIVE_MODE | DRIVE_UDMA;
-		drvp->ata_vers = 4;
-		return;
-	}
 
 	if ((wdc->cap & (WDC_CAPABILITY_DATA16 | WDC_CAPABILITY_DATA32)) ==
 	    (WDC_CAPABILITY_DATA16 | WDC_CAPABILITY_DATA32)) {
@@ -1479,10 +1395,7 @@ wdc_probe_caps(drvp, params)
 }
 
 void
-wdc_output_bytes(drvp, bytes, buflen)
-	struct ata_drive_datas *drvp;
-	void *bytes;
-	unsigned int buflen;
+wdc_output_bytes(struct ata_drive_datas *drvp, void *bytes, unsigned int buflen)
 {
 	struct channel_softc *chp = drvp->chnl_softc;
 	unsigned int off = 0;
@@ -1507,10 +1420,7 @@ wdc_output_bytes(drvp, bytes, buflen)
 }
 
 void
-wdc_input_bytes(drvp, bytes, buflen)
-	struct ata_drive_datas *drvp;
-	void *bytes;
-	unsigned int buflen;
+wdc_input_bytes(struct ata_drive_datas *drvp, void *bytes, unsigned int buflen)
 {
 	struct channel_softc *chp = drvp->chnl_softc;
 	unsigned int off = 0;
@@ -1535,8 +1445,7 @@ wdc_input_bytes(drvp, bytes, buflen)
 }
 
 void
-wdc_print_caps(drvp)
-	struct ata_drive_datas *drvp;
+wdc_print_caps(struct ata_drive_datas *drvp)
 {
 	/* This is actually a lie until we fix the _probe_caps
 	   algorithm. Don't print out lies */
@@ -1563,8 +1472,7 @@ wdc_print_caps(drvp)
 }
 
 void
-wdc_print_current_modes(chp)
-	struct channel_softc *chp;
+wdc_print_current_modes(struct channel_softc *chp)
 {
 	int drive;
 	struct ata_drive_datas *drvp;
@@ -1596,8 +1504,7 @@ wdc_print_current_modes(chp)
  * downgrade was possible, 0 otherwise.
  */
 int
-wdc_downgrade_mode(drvp)
-	struct ata_drive_datas *drvp;
+wdc_downgrade_mode(struct ata_drive_datas *drvp)
 {
 	struct channel_softc *chp = drvp->chnl_softc;
 	struct wdc_softc *wdc = chp->wdc;
@@ -1651,9 +1558,7 @@ wdc_downgrade_mode(drvp)
 }
 
 int
-wdc_exec_command(drvp, wdc_c)
-	struct ata_drive_datas *drvp;
-	struct wdc_command *wdc_c;
+wdc_exec_command(struct ata_drive_datas *drvp, struct wdc_command *wdc_c)
 {
 	struct channel_softc *chp = drvp->chnl_softc;
 	struct wdc_xfer *xfer;
@@ -1707,9 +1612,7 @@ wdc_exec_command(drvp, wdc_c)
 }
 
 void
-__wdccommand_start(chp, xfer)
-	struct channel_softc *chp;
-	struct wdc_xfer *xfer;
+__wdccommand_start(struct channel_softc *chp, struct wdc_xfer *xfer)
 {
 	int drive = xfer->drive;
 	struct wdc_command *wdc_c = xfer->cmd;
@@ -1781,10 +1684,7 @@ timeout:
 }
 
 int
-__wdccommand_intr(chp, xfer, irq)
-	struct channel_softc *chp;
-	struct wdc_xfer *xfer;
-	int irq;
+__wdccommand_intr(struct channel_softc *chp, struct wdc_xfer *xfer, int irq)
 {
 	struct ata_drive_datas *drvp = &chp->ch_drive[xfer->drive];
 	struct wdc_command *wdc_c = xfer->cmd;
@@ -1817,9 +1717,7 @@ out:
 }
 
 void
-__wdccommand_done(chp, xfer)
-	struct channel_softc *chp;
-	struct wdc_xfer *xfer;
+__wdccommand_done(struct channel_softc *chp, struct wdc_xfer *xfer)
 {
 	struct wdc_command *wdc_c = xfer->cmd;
 
@@ -1867,12 +1765,9 @@ __wdccommand_done(chp, xfer)
  * Assumes interrupts are blocked.
  */
 void
-wdccommand(chp, drive, command, cylin, head, sector, count, precomp)
-	struct channel_softc *chp;
-	u_int8_t drive;
-	u_int8_t command;
-	u_int16_t cylin;
-	u_int8_t head, sector, count, precomp;
+wdccommand(struct channel_softc *chp, u_int8_t drive, u_int8_t command,
+    u_int16_t cylin, u_int8_t head, u_int8_t sector, u_int8_t count,
+    u_int8_t precomp)
 {
 	WDCDEBUG_PRINT(("wdccommand %s:%d:%d: command=0x%x cylin=%d head=%d "
 	    "sector=%d count=%d precomp=%d\n", chp->wdc->sc_dev.dv_xname,
@@ -1900,12 +1795,8 @@ wdccommand(chp, drive, command, cylin, head, sector, count, precomp)
  * Assumes interrupts are blocked.
  */
 void
-wdccommandext(chp, drive, command, blkno, count)
-	struct channel_softc *chp;
-	u_int8_t drive;
-	u_int8_t command;
-	u_int64_t blkno;
-	u_int16_t count;
+wdccommandext(struct channel_softc *chp, u_int8_t drive, u_int8_t command,
+    u_int64_t blkno, u_int16_t count)
 {
 	WDCDEBUG_PRINT(("wdccommandext %s:%d:%d: command=0x%x blkno=%llu "
 	    "count=%d\n", chp->wdc->sc_dev.dv_xname,
@@ -1935,10 +1826,7 @@ wdccommandext(chp, drive, command, blkno, count)
  * tested by the caller.
  */
 void
-wdccommandshort(chp, drive, command)
-	struct channel_softc *chp;
-	int drive;
-	int command;
+wdccommandshort(struct channel_softc *chp, int drive, int command)
 {
 
 	WDCDEBUG_PRINT(("wdccommandshort %s:%d:%d command 0x%x\n",
@@ -1954,9 +1842,7 @@ wdccommandshort(chp, drive, command)
 /* Add a command to the queue and start controller. Must be called at splbio */
 
 void
-wdc_exec_xfer(chp, xfer)
-	struct channel_softc *chp;
-	struct wdc_xfer *xfer;
+wdc_exec_xfer(struct channel_softc *chp, struct wdc_xfer *xfer)
 {
 	WDCDEBUG_PRINT(("wdc_exec_xfer %p flags 0x%x channel %d drive %d\n",
 	    xfer, xfer->c_flags, chp->channel, xfer->drive), DEBUG_XFERS);
@@ -1981,8 +1867,7 @@ wdc_exec_xfer(chp, xfer)
 }
 
 struct wdc_xfer *
-wdc_get_xfer(flags)
-	int flags;
+wdc_get_xfer(int flags)
 {
 	struct wdc_xfer *xfer;
 	int s;
@@ -1997,9 +1882,7 @@ wdc_get_xfer(flags)
 }
 
 void
-wdc_free_xfer(chp, xfer)
-	struct channel_softc *chp;
-	struct wdc_xfer *xfer;
+wdc_free_xfer(struct channel_softc *chp, struct wdc_xfer *xfer)
 {
 	struct wdc_softc *wdc = chp->wdc;
 	int s;
@@ -2020,8 +1903,7 @@ wdc_free_xfer(chp, xfer)
  * Must be called at splbio().
  */
 void
-wdc_kill_pending(chp)
-	struct channel_softc *chp;
+wdc_kill_pending(struct channel_softc *chp)
 {
 	struct wdc_xfer *xfer;
 
@@ -2032,9 +1914,7 @@ wdc_kill_pending(chp)
 }
 
 void
-__wdcerror(chp, msg)
-	struct channel_softc *chp;
-	char *msg;
+__wdcerror(struct channel_softc *chp, char *msg)
 {
 	struct wdc_xfer *xfer = TAILQ_FIRST(&chp->ch_queue->sc_xfer);
 	if (xfer == NULL)
@@ -2051,9 +1931,7 @@ __wdcerror(chp, msg)
  * the bit bucket
  */
 void
-wdcbit_bucket(chp, size)
-	struct channel_softc *chp;
-	int size;
+wdcbit_bucket(struct channel_softc *chp, int size)
 {
 	CHP_READ_RAW_MULTI_2(chp, NULL, size);
 }
@@ -2061,213 +1939,108 @@ wdcbit_bucket(chp, size)
 
 #include <sys/ataio.h>
 #include <sys/file.h>
-#include <sys/buf.h>
 
-/*
- * Glue necessary to hook ATAIOCCOMMAND into physio
- */
+int wdc_ioc_ata_cmd(struct ata_drive_datas *, atareq_t *);
 
-struct wdc_ioctl {
-	LIST_ENTRY(wdc_ioctl) wi_list;
-	struct buf wi_bp;
-	struct uio wi_uio;
-	struct iovec wi_iov;
-	atareq_t wi_atareq;
-	struct ata_drive_datas *wi_drvp;
-};
-
-struct	wdc_ioctl *wdc_ioctl_find(struct buf *);
-void	wdc_ioctl_free(struct wdc_ioctl *);
-struct	wdc_ioctl *wdc_ioctl_get(void);
-void	wdc_ioctl_strategy(struct buf *);
-
-LIST_HEAD(, wdc_ioctl) wi_head;
-
-/*
- * Allocate space for a ioctl queue structure.  Mostly taken from
- * scsipi_ioctl.c
- */
-struct wdc_ioctl *
-wdc_ioctl_get()
+int
+wdc_ioc_ata_cmd(struct ata_drive_datas *drvp, atareq_t *atareq)
 {
-	struct wdc_ioctl *wi;
-	int s;
-
-	wi = malloc(sizeof(*wi), M_TEMP, M_WAITOK | M_ZERO);
-	s = splbio();
-	LIST_INSERT_HEAD(&wi_head, wi, wi_list);
-	splx(s);
-	return (wi);
-}
-
-/*
- * Free an ioctl structure and remove it from our list
- */
-
-void
-wdc_ioctl_free(wi)
-	struct wdc_ioctl *wi;
-{
-	int s;
-
-	s = splbio();
-	LIST_REMOVE(wi, wi_list);
-	splx(s);
-	free(wi, M_TEMP);
-}
-
-/*
- * Find a wdc_ioctl structure based on the struct buf.
- */
-
-struct wdc_ioctl *
-wdc_ioctl_find(bp)
-	struct buf *bp;
-{
-	struct wdc_ioctl *wi;
-	int s;
-
-	s = splbio();
-	LIST_FOREACH(wi, &wi_head, wi_list)
-		if (bp == &wi->wi_bp)
-			break;
-	splx(s);
-	return (wi);
-}
-
-/*
- * Ioctl pseudo strategy routine
- *
- * This is mostly stolen from scsipi_ioctl.c:scsistrategy().  What
- * happens here is:
- *
- * - wdioctl() queues a wdc_ioctl structure.
- *
- * - wdioctl() calls physio/wdc_ioctl_strategy based on whether or not
- *   user space I/O is required.  If physio() is called, physio() eventually
- *   calls wdc_ioctl_strategy().
- *
- * - In either case, wdc_ioctl_strategy() calls wdc_exec_command()
- *   to perform the actual command
- *
- * The reason for the use of the pseudo strategy routine is because
- * when doing I/O to/from user space, physio _really_ wants to be in
- * the loop.  We could put the entire buffer into the ioctl request
- * structure, but that won't scale if we want to do things like download
- * microcode.
- */
-
-void
-wdc_ioctl_strategy(bp)
-	struct buf *bp;
-{
-	struct wdc_ioctl *wi;
 	struct wdc_command wdc_c;
-	int error = 0;
-	int s;
-
-	wi = wdc_ioctl_find(bp);
-	if (wi == NULL) {
-		printf("user_strat: No ioctl\n");
-		error = EINVAL;
-		goto bad;
-	}
-
-	bzero(&wdc_c, sizeof(wdc_c));
-
-	/*
-	 * Abort if physio broke up the transfer
-	 */
-
-	if ((u_long)bp->b_bcount != wi->wi_atareq.datalen) {
-		printf("physio split wd ioctl request... cannot proceed\n");
-		error = EIO;
-		goto bad;
-	}
+	int err = 0;
 
 	/*
 	 * Make sure a timeout was supplied in the ioctl request
 	 */
+	if (atareq->timeout == 0)
+		return (EINVAL);
 
-	if (wi->wi_atareq.timeout == 0) {
-		error = EINVAL;
-		goto bad;
+	if (atareq->datalen > MAXPHYS)
+		return (EINVAL);
+
+	bzero(&wdc_c, sizeof(wdc_c));
+
+	if (atareq->datalen > 0) {
+		/* XXX dma accessible */
+		wdc_c.data = malloc(atareq->datalen, M_TEMP,
+		    M_WAITOK | M_CANFAIL | M_ZERO);
+		if (wdc_c.data == NULL) {
+			err = ENOMEM;
+			goto err;
+		}
+		wdc_c.bcount = atareq->datalen;
 	}
 
-	if (wi->wi_atareq.flags & ATACMD_READ)
+	wdc_c.flags = AT_WAIT;
+	if (atareq->flags & ATACMD_READ)
 		wdc_c.flags |= AT_READ;
-	else if (wi->wi_atareq.flags & ATACMD_WRITE)
+	if (atareq->flags & ATACMD_WRITE) {
+		if (atareq->datalen > 0) {
+			err = copyin(atareq->databuf, wdc_c.data,
+			    atareq->datalen);
+			if (err != 0)
+				goto err;
+		}
 		wdc_c.flags |= AT_WRITE;
-
-	if (wi->wi_atareq.flags & ATACMD_READREG)
+	}
+	if (atareq->flags & ATACMD_READREG)
 		wdc_c.flags |= AT_READREG;
 
-	wdc_c.flags |= AT_WAIT;
-
-	wdc_c.timeout = wi->wi_atareq.timeout;
-	wdc_c.r_command = wi->wi_atareq.command;
-	wdc_c.r_head = wi->wi_atareq.head & 0x0f;
-	wdc_c.r_cyl = wi->wi_atareq.cylinder;
-	wdc_c.r_sector = wi->wi_atareq.sec_num;
-	wdc_c.r_count = wi->wi_atareq.sec_count;
-	wdc_c.r_precomp = wi->wi_atareq.features;
-	if (wi->wi_drvp->drive_flags & DRIVE_ATAPI) {
-		wdc_c.r_st_bmask = 0;
-		wdc_c.r_st_pmask = 0;
+	wdc_c.timeout = atareq->timeout;
+	wdc_c.r_command = atareq->command;
+	wdc_c.r_head = atareq->head & 0x0f;
+	wdc_c.r_cyl = atareq->cylinder;
+	wdc_c.r_sector = atareq->sec_num;
+	wdc_c.r_count = atareq->sec_count;
+	wdc_c.r_precomp = atareq->features;
+	if (drvp->drive_flags & DRIVE_ATAPI) {
 		if (wdc_c.r_command == WDCC_IDENTIFY)
 			wdc_c.r_command = ATAPI_IDENTIFY_DEVICE;
 	} else {
 		wdc_c.r_st_bmask = WDCS_DRDY;
 		wdc_c.r_st_pmask = WDCS_DRDY;
 	}
-	wdc_c.data = wi->wi_bp.b_data;
-	wdc_c.bcount = wi->wi_bp.b_bcount;
 
-	if (wdc_exec_command(wi->wi_drvp, &wdc_c) != WDC_COMPLETE) {
-		wi->wi_atareq.retsts = ATACMD_ERROR;
-		goto bad;
+	if (wdc_exec_command(drvp, &wdc_c) != WDC_COMPLETE) {
+		atareq->retsts = ATACMD_ERROR;
+		goto copyout;
 	}
 
 	if (wdc_c.flags & (AT_ERROR | AT_TIMEOU | AT_DF)) {
 		if (wdc_c.flags & AT_ERROR) {
-			wi->wi_atareq.retsts = ATACMD_ERROR;
-			wi->wi_atareq.error = wdc_c.r_error;
+			atareq->retsts = ATACMD_ERROR;
+			atareq->error = wdc_c.r_error;
 		} else if (wdc_c.flags & AT_DF)
-			wi->wi_atareq.retsts = ATACMD_DF;
+			atareq->retsts = ATACMD_DF;
 		else
-			wi->wi_atareq.retsts = ATACMD_TIMEOUT;
+			atareq->retsts = ATACMD_TIMEOUT;
 	} else {
-		wi->wi_atareq.retsts = ATACMD_OK;
-		if (wi->wi_atareq.flags & ATACMD_READREG) {
-			wi->wi_atareq.head = wdc_c.r_head ;
-			wi->wi_atareq.cylinder = wdc_c.r_cyl;
-			wi->wi_atareq.sec_num = wdc_c.r_sector;
-			wi->wi_atareq.sec_count = wdc_c.r_count;
-			wi->wi_atareq.features = wdc_c.r_precomp;
-			wi->wi_atareq.error = wdc_c.r_error;
+		atareq->retsts = ATACMD_OK;
+		if (atareq->flags & ATACMD_READREG) {
+			atareq->head = wdc_c.r_head;
+			atareq->cylinder = wdc_c.r_cyl;
+			atareq->sec_num = wdc_c.r_sector;
+			atareq->sec_count = wdc_c.r_count;
+			atareq->features = wdc_c.r_precomp;
+			atareq->error = wdc_c.r_error;
 		}
 	}
 
-	bp->b_error = 0;
-	s = splbio();
-	biodone(bp);
-	splx(s);
-	return;
-bad:
-	bp->b_flags |= B_ERROR;
-	bp->b_error = error;
-	s = splbio();
-	biodone(bp);
-	splx(s);
+copyout:
+	if (atareq->datalen > 0 && atareq->flags & ATACMD_READ) {
+		err = copyout(wdc_c.data, atareq->databuf, atareq->datalen);
+		if (err != 0)
+			goto err;
+	}
+
+err:
+	if (wdc_c.data)
+		free(wdc_c.data, M_TEMP);
+	return (err);
 }
 
 int
-wdc_ioctl(drvp, xfer, addr, flag, p)
-	struct ata_drive_datas *drvp;
-	u_long xfer;
-	caddr_t addr;
-	int flag;
-	struct proc *p;
+wdc_ioctl(struct ata_drive_datas *drvp, u_long xfer, caddr_t addr, int flag,
+    struct proc *p)
 {
 	int error = 0;
 
@@ -2295,54 +2068,19 @@ wdc_ioctl(drvp, xfer, addr, flag, p)
 	}
 #endif /* WDCDEBUG */
 
-	case ATAIOCCOMMAND:
+	case ATAIOCCOMMAND: {
+		atareq_t *atareq = (atareq_t *)addr;
+
 		/*
 		 * Make sure this command is (relatively) safe first
 		 */
-		if ((((atareq_t *) addr)->flags & ATACMD_READ) == 0 &&
-		    (flag & FWRITE) == 0) {
-			error = EBADF;
-			goto exit;
-		}
-		{
-		struct wdc_ioctl *wi;
-		atareq_t *atareq = (atareq_t *) addr;
+		if ((flag & FWRITE) == 0 && atareq->flags & ATACMD_WRITE)
+			error = EPERM;
+		else
+			error = wdc_ioc_ata_cmd(drvp, atareq);
+		break;
+	}
 
-		wi = wdc_ioctl_get();
-		wi->wi_drvp = drvp;
-		wi->wi_atareq = *atareq;
-
-		if (atareq->datalen && atareq->flags &
-		    (ATACMD_READ | ATACMD_WRITE)) {
-			wi->wi_iov.iov_base = atareq->databuf;
-			wi->wi_iov.iov_len = atareq->datalen;
-			wi->wi_uio.uio_iov = &wi->wi_iov;
-			wi->wi_uio.uio_iovcnt = 1;
-			wi->wi_uio.uio_resid = atareq->datalen;
-			wi->wi_uio.uio_offset = 0;
-			wi->wi_uio.uio_segflg = UIO_USERSPACE;
-			wi->wi_uio.uio_rw =
-			    (atareq->flags & ATACMD_READ) ? B_READ : B_WRITE;
-			wi->wi_uio.uio_procp = curproc;
-			error = physio(wdc_ioctl_strategy, &wi->wi_bp, 0,
-			    (atareq->flags & ATACMD_READ) ? B_READ : B_WRITE,
-			    minphys, &wi->wi_uio);
-		} else {
-			/* No need to call physio if we don't have any
-			   user data */
-			wi->wi_bp.b_flags = 0;
-			wi->wi_bp.b_data = 0;
-			wi->wi_bp.b_bcount = 0;
-			wi->wi_bp.b_dev = 0;
-			wi->wi_bp.b_proc = curproc;
-			LIST_INIT(&wi->wi_bp.b_dep);
-			wdc_ioctl_strategy(&wi->wi_bp);
-			error = wi->wi_bp.b_error;
-		}
-		*atareq = wi->wi_atareq;
-		wdc_ioctl_free(wi);
-		goto exit;
-		}
 	default:
 		error = ENOTTY;
 		goto exit;

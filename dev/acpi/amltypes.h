@@ -1,4 +1,4 @@
-/* $OpenBSD: amltypes.h,v 1.30 2008/06/08 02:51:55 deraadt Exp $ */
+/* $OpenBSD: amltypes.h,v 1.39 2010/10/15 20:25:04 jordan Exp $ */
 /*
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
  *
@@ -108,7 +108,6 @@
 #define AMLOP_NOTIFY		0x86
 #define AMLOP_SIZEOF		0x87
 #define AMLOP_INDEX		0x88
-#define AMLOP_DEREFOF		0x83
 #define AMLOP_MATCH		0x89
 #define AMLOP_CREATEDWORDFIELD	0x8A
 #define AMLOP_CREATEWORDFIELD	0x8B
@@ -157,8 +156,6 @@
 #define AML_MATCH_GE		4
 #define AML_MATCH_GT		5
 
-#define AML_STATIC		0x8000
-
 /* Defined types for ObjectType() */
 enum aml_objecttype {
 	AML_OBJTYPE_UNINITIALIZED = 0,
@@ -183,7 +180,8 @@ enum aml_objecttype {
 	AML_OBJTYPE_OBJREF,
 	AML_OBJTYPE_SCOPE,
 	AML_OBJTYPE_NOTARGET,
-	AML_OBJTYPE_STATICINT = AML_OBJTYPE_INTEGER|AML_STATIC,
+	AML_OBJTYPE_HEXSTRING,
+	AML_OBJTYPE_DECSTRING,
 };
 
 /* AML Opcode Arguments */
@@ -214,7 +212,6 @@ enum aml_objecttype {
 #define AML_ARG_TERMOBJ		't'
 
 #define AML_ARG_IFELSE          'I'
-#define AML_ARG_WHILE           'W'
 #define AML_ARG_BUFFER          'B'
 #define AML_ARG_SEARCHNAME      'n'
 #define AML_ARG_CREATENAME      'N'
@@ -315,7 +312,7 @@ struct aml_value {
 			int               synclvl;
 			int               savelvl;
 			int               count;
-		  	char              ownername[5];
+			char              ownername[5];
 			struct aml_scope *owner;
 			struct aml_waitq_head    waiters;
 		} Vmutex;
@@ -349,21 +346,32 @@ struct aml_value {
 #define aml_pkglen(v)		((v)->length)
 #define aml_pkgval(v,i)		(&(v)->v_package[(i)])
 
+struct acpi_pci {
+	TAILQ_ENTRY(acpi_pci)		next;
+
+	struct aml_node			*node;
+	struct device			*device;
+
+	int				sub;
+	int				seg;
+	int				bus;
+	int				dev;
+	int				fun;
+};
+
 struct aml_node {
 	struct aml_node *parent;
-	struct aml_node *child;
-	struct aml_node *sibling;
+
+	SIMPLEQ_HEAD(,aml_node)	son;
+	SIMPLEQ_ENTRY(aml_node)	sib;
 
 	char		name[5];
 	u_int16_t	opcode;
 	u_int8_t	*start;
 	u_int8_t	*end;
-  //	const char	*name;
-  //	const char	*mnem;
 
 	struct aml_value *value;
-
-	int		depth;
+	struct acpi_pci  *pci;
 };
 
 #define aml_bitmask(n)		(1L << ((n) & 0x7))

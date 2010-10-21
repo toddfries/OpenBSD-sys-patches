@@ -1,4 +1,4 @@
-/*	$OpenBSD: mbg.c,v 1.27 2008/11/23 14:19:40 mbalmer Exp $ */
+/*	$OpenBSD: mbg.c,v 1.29 2010/04/08 00:23:53 tedu Exp $ */
 
 /*
  * Copyright (c) 2006, 2007 Marc Balmer <mbalmer@openbsd.org>
@@ -20,7 +20,7 @@
 #include <sys/param.h>
 #include <sys/device.h>
 #include <sys/kernel.h>
-#include <sys/proc.h>
+#include <sys/timeout.h>
 #include <sys/systm.h>
 #include <sys/sensors.h>
 #include <sys/syslog.h>
@@ -208,14 +208,10 @@ mbg_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->sc_timedelta.type = SENSOR_TIMEDELTA;
 	sc->sc_timedelta.status = SENSOR_S_UNKNOWN;
-	sc->sc_timedelta.value = 0LL;
-	sc->sc_timedelta.flags = 0;
 	sensor_attach(&sc->sc_sensordev, &sc->sc_timedelta);
 
 	sc->sc_signal.type = SENSOR_PERCENT;
 	sc->sc_signal.status = SENSOR_S_UNKNOWN;
-	sc->sc_signal.value = 0LL;
-	sc->sc_signal.flags = 0;
 	strlcpy(sc->sc_signal.desc, "Signal", sizeof(sc->sc_signal.desc));
 	sensor_attach(&sc->sc_sensordev, &sc->sc_signal);
 

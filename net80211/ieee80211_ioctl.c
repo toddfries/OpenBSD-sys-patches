@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_ioctl.c,v 1.31 2009/02/15 08:34:36 damien Exp $	*/
+/*	$OpenBSD: ieee80211_ioctl.c,v 1.34 2010/09/29 20:00:51 kettenis Exp $	*/
 /*	$NetBSD: ieee80211_ioctl.c,v 1.15 2004/05/06 02:58:16 dyoung Exp $	*/
 
 /*-
@@ -584,7 +584,8 @@ ieee80211_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 #endif
 	case SIOCG80211STATS:
 		ifr = (struct ifreq *)data;
-		copyout(&ic->ic_stats, ifr->ifr_data, sizeof (ic->ic_stats));
+		error = copyout(&ic->ic_stats, ifr->ifr_data,
+		    sizeof(ic->ic_stats));
 #if 0
 		if (cmd == SIOCG80211ZSTATS)
 			memset(&ic->ic_stats, 0, sizeof(ic->ic_stats));
@@ -628,7 +629,8 @@ ieee80211_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		if (ic->ic_opmode == IEEE80211_M_HOSTAP)
 			break;
 #endif
-		if ((ifp->if_flags & IFF_UP) == 0) {
+		if ((ifp->if_flags & (IFF_UP | IFF_RUNNING)) !=
+		    (IFF_UP | IFF_RUNNING)) {
 			error = ENETDOWN;
 			break;
 		}
@@ -674,6 +676,7 @@ ieee80211_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		if (nr->nr_flags & IEEE80211_NODEREQ_COPY)
 			ieee80211_req2node(ic, nr, ni);
 		break;
+#ifndef IEEE80211_STA_ONLY
 	case SIOCS80211DELNODE:
 		if ((error = suser(curproc, 0)) != 0)
 			break;
@@ -699,9 +702,10 @@ ieee80211_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 				    IEEE80211_FC0_SUBTYPE_DEAUTH,
 				    IEEE80211_REASON_AUTH_LEAVE);
 
-			ieee80211_release_node(ic, ni);
+			ieee80211_node_leave(ic, ni);
 		}
 		break;
+#endif
 	case SIOCG80211ALLNODES:
 		na = (struct ieee80211_nodereq_all *)data;
 		na->na_nodes = i = 0;

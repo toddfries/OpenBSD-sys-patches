@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.44 2008/06/29 01:27:42 miod Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.47 2010/07/10 19:32:24 miod Exp $	*/
 /*	$NetBSD: cpu.c,v 1.56 1997/09/15 20:52:36 pk Exp $ */
 
 /*
@@ -138,20 +138,6 @@ static char *iu_vendor[16] = {
 };
 #endif
 
-/*
- * 4/110 comment: the 4/110 chops off the top 4 bits of an OBIO address.
- *	this confuses autoconf.  for example, if you try and map
- *	0xfe000000 in obio space on a 4/110 it actually maps 0x0e000000.
- *	this is easy to verify with the PROM.   this causes problems
- *	with devices like "esp0 at obio0 addr 0xfa000000" because the
- *	4/110 treats it as esp0 at obio0 addr 0x0a000000" which is the
- *	address of the 4/110's "sw0" scsi chip.   the same thing happens
- *	between zs1 and zs2.    since the sun4 line is "closed" and
- *	we know all the "obio" devices that will ever be on it we just
- *	put in some special case "if"'s in the match routines of esp,
- *	dma, and zs.
- */
-
 int
 cpu_match(parent, vcf, aux)
 	struct device *parent;
@@ -203,20 +189,30 @@ cpu_attach(parent, self, aux)
 		bcopy(&cpuinfo, sc, sizeof(cpuinfo));
 	}
 
-#if defined(SUN4C) || defined(SUN4M)
+#if defined(SUN4C) || defined(SUN4D) || defined(SUN4E) || defined(SUN4M)
 	switch (cputyp) {
 #if defined(SUN4C)
 	case CPU_SUN4C:
 		cpu_class = "sun4c";
 		break;
 #endif /* defined(SUN4C) */
+#if defined(SUN4D)
+	case CPU_SUN4D:
+		cpu_class = "sun4d";
+		break;
+#endif /* defined(SUN4D) */
+#if defined(SUN4E)
+	case CPU_SUN4E:
+		cpu_class = "sun4e";
+		break;
+#endif /* defined(SUN4E) */
 #if defined(SUN4M)
 	case CPU_SUN4M:
 		cpu_class = "sun4m";
 		break;
 #endif /* defined(SUN4M) */
 	}
-#endif /* defined(SUN4C) || defined(SUN4M) */
+#endif /* SUN4C || SUN4D || SUN4E || SUN4M */
 
 	getcpuinfo(sc, node);
 
@@ -257,10 +253,12 @@ cpu_attach(parent, self, aux)
 		 * nasty to happen to the pagetables while the cache is
 		 * enabled and we haven't uncached them yet.
 		 */
-		s = splhigh();
-		sc->cache_enable();
-		pmap_cache_enable();
-		splx(s);
+		if (sc->cacheinfo.c_totalsize != 0) {
+			s = splhigh();
+			sc->cache_enable();
+			pmap_cache_enable();
+			splx(s);
+		}
 		return;
 	}
 
@@ -547,7 +545,7 @@ cpumatch_sun4(sc, mp, node)
 }
 #endif /* SUN4 */
 
-#if defined(SUN4C)
+#if defined(SUN4C) || defined(SUN4E)
 struct module_info module_sun4c = {
 	CPUTYP_UNKNOWN,
 	VAC_WRITETHROUGH,
@@ -580,7 +578,7 @@ cpumatch_sun4c(sc, mp, node)
 
 	rnode = findroot();
 	sc->mmu_npmeg = sc->mmu_nsegment =
-		getpropint(rnode, "mmu-npmg", 128);
+		getpropint(rnode, "mmu-npmg", CPU_ISSUN4E ? 256 : 128);
 	sc->mmu_ncontext = getpropint(rnode, "mmu-nctx", 8);
                               
 	/* Get clock frequency */ 
@@ -629,7 +627,7 @@ getcacheinfo_sun4c(sc, node)
 	if (getpropint(node, "buserr-type", 0) == 1)
 		sc->flags |= CPUFLG_SUN4CACHEBUG;
 }
-#endif /* SUN4C */
+#endif /* SUN4C || SUN4E */
 
 #if defined(solbourne)
 struct module_info module_kap = {
@@ -1206,6 +1204,10 @@ struct cpu_conf {
 	{ CPU_SUN4C, 1, 0, ANY, ANY, "L64811", &module_sun4c },
 	{ CPU_SUN4C, 1, 1, ANY, ANY, "CY7C601", &module_sun4c },
 	{ CPU_SUN4C, 9, 0, ANY, ANY, "W8601/8701 or MB86903", &module_sun4c },
+#endif
+
+#if defined(SUN4E)
+	{ CPU_SUN4E, 0, 0, ANY, ANY, "MB86900/1A or L64801", &module_sun4c },
 #endif
 
 #if defined(SUN4M)

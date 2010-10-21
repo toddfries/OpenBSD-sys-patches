@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_atw_cardbus.c,v 1.15 2008/06/26 05:42:14 ray Exp $	*/
+/*	$OpenBSD: if_atw_cardbus.c,v 1.19 2010/09/06 19:20:21 deraadt Exp $	*/
 /*	$NetBSD: if_atw_cardbus.c,v 1.9 2004/07/23 07:07:55 dyoung Exp $	*/
 
 /*-
@@ -92,7 +92,7 @@ struct atw_cardbus_softc {
 	/* CardBus-specific goo. */
 	void	*sc_ih;			/* interrupt handle */
 	cardbus_devfunc_t sc_ct;	/* our CardBus devfuncs */
-	cardbustag_t sc_tag;		/* our CardBus tag */
+	pcitag_t sc_tag;		/* our CardBus tag */
 	int	sc_csr;			/* CSR bits */
 	bus_size_t sc_mapsize;		/* the size of mapped bus space
 					   region */
@@ -102,6 +102,7 @@ struct atw_cardbus_softc {
 	pcireg_t sc_bar_val;		/* value of the BAR */
 
 	int	sc_intrline;		/* interrupt line */
+	pci_chipset_tag_t sc_pc;
 };
 
 int	atw_cardbus_match(struct device *, void *, void *);
@@ -119,7 +120,7 @@ int	atw_cardbus_enable(struct atw_softc *);
 void	atw_cardbus_disable(struct atw_softc *);
 void	atw_cardbus_power(struct atw_softc *, int);
 
-const struct cardbus_matchid atw_cardbus_devices[] = {
+const struct pci_matchid atw_cardbus_devices[] = {
 	{ PCI_VENDOR_ADMTEK, PCI_PRODUCT_ADMTEK_ADM8211 },
 	{ PCI_VENDOR_3COM, PCI_PRODUCT_3COM_3CRSHPW796 },
 };
@@ -144,6 +145,7 @@ atw_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_dmat = ca->ca_dmat;
 	csc->sc_ct = ct;
 	csc->sc_tag = ca->ca_tag;
+	csc->sc_pc = ca->ca_pc;
 
 	/*
 	 * Power management hooks.
@@ -157,36 +159,36 @@ atw_cardbus_attach(struct device *parent, struct device *self, void *aux)
 
 #if 0
 	printf(": signature %08x\n%s",
-	    cardbus_conf_read(ct->ct_cc, ct->ct_cf, csc->sc_tag, 0x80),
+	    pci_conf_read(ca->ca_pc, csc->sc_tag, 0x80),
 	    sc->sc_dev.dv_xname);
 #endif
 
 	/*
 	 * Map the device.
 	 */
-	csc->sc_csr = CARDBUS_COMMAND_MASTER_ENABLE;
+	csc->sc_csr = PCI_COMMAND_MASTER_ENABLE;
 	if (Cardbus_mapreg_map(ct, ATW_PCI_MMBA,
-	    CARDBUS_MAPREG_TYPE_MEM, 0, &sc->sc_st, &sc->sc_sh, &adr,
+	    PCI_MAPREG_TYPE_MEM, 0, &sc->sc_st, &sc->sc_sh, &adr,
 	    &csc->sc_mapsize) == 0) {
 #if 0
 		printf(": atw_cardbus_attach mapped %d bytes mem space\n%s",
 		    csc->sc_mapsize, sc->sc_dev.dv_xname);
 #endif
 		csc->sc_cben = CARDBUS_MEM_ENABLE;
-		csc->sc_csr |= CARDBUS_COMMAND_MEM_ENABLE;
+		csc->sc_csr |= PCI_COMMAND_MEM_ENABLE;
 		csc->sc_bar_reg = ATW_PCI_MMBA;
-		csc->sc_bar_val = adr | CARDBUS_MAPREG_TYPE_MEM;
+		csc->sc_bar_val = adr | PCI_MAPREG_TYPE_MEM;
 	} else if (Cardbus_mapreg_map(ct, ATW_PCI_IOBA,
-	    CARDBUS_MAPREG_TYPE_IO, 0, &sc->sc_st, &sc->sc_sh, &adr,
+	    PCI_MAPREG_TYPE_IO, 0, &sc->sc_st, &sc->sc_sh, &adr,
 	    &csc->sc_mapsize) == 0) {
 #if 0
 		printf(": atw_cardbus_attach mapped %d bytes I/O space\n%s",
 		    csc->sc_mapsize, sc->sc_dev.dv_xname);
 #endif
 		csc->sc_cben = CARDBUS_IO_ENABLE;
-		csc->sc_csr |= CARDBUS_COMMAND_IO_ENABLE;
+		csc->sc_csr |= PCI_COMMAND_IO_ENABLE;
 		csc->sc_bar_reg = ATW_PCI_IOBA;
-		csc->sc_bar_val = adr | CARDBUS_MAPREG_TYPE_IO;
+		csc->sc_bar_val = adr | PCI_MAPREG_TYPE_IO;
 	} else {
 		printf(": unable to map device registers\n");
 		return;
@@ -310,7 +312,7 @@ atw_cardbus_disable(struct atw_softc *sc)
 void
 atw_cardbus_power(struct atw_softc *sc, int why)
 {
-	if (why == PWR_RESUME)
+	if (why == DVACT_RESUME)
 		atw_enable(sc);
 }
 
@@ -322,7 +324,7 @@ atw_cardbus_setup(struct atw_cardbus_softc *csc)
 #endif
 	cardbus_devfunc_t ct = csc->sc_ct;
 	cardbus_chipset_tag_t cc = ct->ct_cc;
-	cardbus_function_tag_t cf = ct->ct_cf;
+	pci_chipset_tag_t pc = csc->sc_pc;
 	pcireg_t reg;
 
 #ifdef notyet
@@ -331,7 +333,7 @@ atw_cardbus_setup(struct atw_cardbus_softc *csc)
 #endif
 
 	/* Program the BAR. */
-	cardbus_conf_write(cc, cf, csc->sc_tag, csc->sc_bar_reg,
+	pci_conf_write(pc, csc->sc_tag, csc->sc_bar_reg,
 	    csc->sc_bar_val);
 
 	/* Make sure the right access type is on the CardBus bridge. */
@@ -339,21 +341,21 @@ atw_cardbus_setup(struct atw_cardbus_softc *csc)
 	(*ct->ct_cf->cardbus_ctrl)(cc, CARDBUS_BM_ENABLE);
 
 	/* Enable the appropriate bits in the PCI CSR. */
-	reg = cardbus_conf_read(cc, cf, csc->sc_tag,
-	    CARDBUS_COMMAND_STATUS_REG);
-	reg &= ~(CARDBUS_COMMAND_IO_ENABLE|CARDBUS_COMMAND_MEM_ENABLE);
+	reg = pci_conf_read(pc, csc->sc_tag,
+	    PCI_COMMAND_STATUS_REG);
+	reg &= ~(PCI_COMMAND_IO_ENABLE|PCI_COMMAND_MEM_ENABLE);
 	reg |= csc->sc_csr;
-	cardbus_conf_write(cc, cf, csc->sc_tag, CARDBUS_COMMAND_STATUS_REG,
+	pci_conf_write(pc, csc->sc_tag, PCI_COMMAND_STATUS_REG,
 	    reg);
 
 	/*
 	 * Make sure the latency timer is set to some reasonable
 	 * value.
 	 */
-	reg = cardbus_conf_read(cc, cf, csc->sc_tag, CARDBUS_BHLC_REG);
-	if (CARDBUS_LATTIMER(reg) < 0x20) {
-		reg &= ~(CARDBUS_LATTIMER_MASK << CARDBUS_LATTIMER_SHIFT);
-		reg |= (0x20 << CARDBUS_LATTIMER_SHIFT);
-		cardbus_conf_write(cc, cf, csc->sc_tag, CARDBUS_BHLC_REG, reg);
+	reg = pci_conf_read(pc, csc->sc_tag, PCI_BHLC_REG);
+	if (PCI_LATTIMER(reg) < 0x20) {
+		reg &= ~(PCI_LATTIMER_MASK << PCI_LATTIMER_SHIFT);
+		reg |= (0x20 << PCI_LATTIMER_SHIFT);
+		pci_conf_write(pc, csc->sc_tag, PCI_BHLC_REG, reg);
 	}
 }

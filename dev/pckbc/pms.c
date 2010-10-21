@@ -1,4 +1,4 @@
-/* $OpenBSD: pms.c,v 1.2 2007/10/17 01:32:46 deraadt Exp $ */
+/* $OpenBSD: pms.c,v 1.11 2010/10/19 11:00:50 krw Exp $ */
 /* $NetBSD: psm.c,v 1.11 2000/06/05 22:20:57 sommerfeld Exp $ */
 
 /*-
@@ -44,25 +44,38 @@ struct pms_softc {		/* driver status information */
 	pckbc_tag_t sc_kbctag;
 	int sc_kbcslot;
 
-	int sc_enabled;		/* input enabled? */
+	int sc_state;
+#define PMS_STATE_DISABLED	0
+#define PMS_STATE_ENABLED	1
+#define PMS_STATE_SUSPENDED	2
+
+	int poll;
+	int intelli;
 	int inputstate;
 	u_int buttons, oldbuttons;	/* mouse button status */
-	signed char dx;
+	signed char dx, dy;
 
 	struct device *sc_wsmousedev;
 };
 
 int pmsprobe(struct device *, void *, void *);
 void pmsattach(struct device *, struct device *, void *);
+int pmsactivate(struct device *, int);
 void pmsinput(void *, int);
 
 struct cfattach pms_ca = {
-	sizeof(struct pms_softc), pmsprobe, pmsattach,
+	sizeof(struct pms_softc), pmsprobe, pmsattach, NULL,
+	pmsactivate
 };
 
-int	pms_enable(void *);
+int	pms_change_state(struct pms_softc *, int);
 int	pms_ioctl(void *, u_long, caddr_t, int, struct proc *);
+int	pms_enable(void *);
 void	pms_disable(void *);
+
+int	pms_cmd(struct pms_softc *, u_char *, int, u_char *, int);
+
+int	pms_setintellimode(struct pms_softc *sc);
 
 const struct wsmouse_accessops pms_accessops = {
 	pms_enable,
@@ -71,10 +84,42 @@ const struct wsmouse_accessops pms_accessops = {
 };
 
 int
-pmsprobe(parent, match, aux)
-	struct device *parent;
-	void *match;
-	void *aux;
+pms_cmd(struct pms_softc *sc, u_char *cmd, int len, u_char *resp, int resplen)
+{
+	if (sc->poll) {
+		return pckbc_poll_cmd(sc->sc_kbctag, sc->sc_kbcslot,
+		    cmd, len, resplen, resp, 1);
+	} else {
+		return pckbc_enqueue_cmd(sc->sc_kbctag, sc->sc_kbcslot,
+		    cmd, len, resplen, 1, resp);
+	}
+}
+
+int
+pms_setintellimode(struct pms_softc *sc)
+{
+	u_char cmd[2], resp[1];
+	int i, res;
+	static const u_char rates[] = {200, 100, 80};
+
+	cmd[0] = PMS_SET_SAMPLE;
+	for (i = 0; i < 3; i++) {
+		cmd[1] = rates[i];
+		res = pms_cmd(sc, cmd, 2, NULL, 0);
+		if (res)
+			return (0);
+	}
+
+	cmd[0] = PMS_SEND_DEV_ID;
+	res = pms_cmd(sc, cmd, 1, resp, 1);
+	if (res || resp[0] != 3)
+		return (0);
+
+	return (1);
+}
+
+int
+pmsprobe(struct device *parent, void *match, void *aux)
 {
 	struct pckbc_attach_args *pa = aux;
 	u_char cmd[1], resp[2];
@@ -89,59 +134,28 @@ pmsprobe(parent, match, aux)
 	/* reset the device */
 	cmd[0] = PMS_RESET;
 	res = pckbc_poll_cmd(pa->pa_tag, pa->pa_slot, cmd, 1, 2, resp, 1);
-	if (res) {
+	if (res || resp[0] != PMS_RSTDONE || resp[1] != 0) {
 #ifdef DEBUG
-		printf("pmsprobe: reset error %d\n", res);
-#endif
-		return (0);
-	}
-	if (resp[0] != PMS_RSTDONE) {
-		printf("pmsprobe: reset response 0x%x\n", resp[0]);
-		return (0);
-	}
-
-	/* get type number (0 = mouse) */
-	if (resp[1] != 0) {
-#ifdef DEBUG
-		printf("pmsprobe: type 0x%x\n", resp[1]);
+		printf("pms: reset error %d (response 0x%02x, type 0x%02x)\n",
+		    res, resp[0], resp[1]);
 #endif
 		return (0);
 	}
 
-	return (10);
+	return (1);
 }
 
 void
-pmsattach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+pmsattach(struct device *parent, struct device *self, void *aux)
 {
 	struct pms_softc *sc = (void *)self;
 	struct pckbc_attach_args *pa = aux;
 	struct wsmousedev_attach_args a;
-	u_char cmd[1], resp[2];
-	int res;
 
 	sc->sc_kbctag = pa->pa_tag;
 	sc->sc_kbcslot = pa->pa_slot;
 
 	printf("\n");
-
-	/* Flush any garbage. */
-	pckbc_flush(pa->pa_tag, pa->pa_slot);
-
-	/* reset the device */
-	cmd[0] = PMS_RESET;
-	res = pckbc_poll_cmd(pa->pa_tag, pa->pa_slot, cmd, 1, 2, resp, 1);
-#ifdef DEBUG
-	if (res || resp[0] != PMS_RSTDONE || resp[1] != 0) {
-		printf("pmsattach: reset error\n");
-		return;
-	}
-#endif
-
-	sc->inputstate = 0;
-	sc->oldbuttons = 0;
 
 	pckbc_set_inputhandler(sc->sc_kbctag, sc->sc_kbcslot,
 			       pmsinput, sc, sc->sc_dev.dv_xname);
@@ -158,88 +172,117 @@ pmsattach(parent, self, aux)
 	sc->sc_wsmousedev = config_found(self, &a, wsmousedevprint);
 
 	/* no interrupts until enabled */
-	cmd[0] = PMS_DEV_DISABLE;
-	res = pckbc_poll_cmd(pa->pa_tag, pa->pa_slot, cmd, 1, 0, NULL, 0);
-	if (res)
-		printf("pmsattach: disable error\n");
-	pckbc_slot_enable(sc->sc_kbctag, sc->sc_kbcslot, 0);
+	sc->poll = 1;
+	pms_change_state(sc, PMS_STATE_DISABLED);
 }
 
 int
-pms_enable(v)
-	void *v;
+pmsactivate(struct device *self, int act)
 {
-	struct pms_softc *sc = v;
-	u_char cmd[1];
+	struct pms_softc *sc = (struct pms_softc *)self;
+
+	switch (act) {
+	case DVACT_SUSPEND:
+		if (sc->sc_state == PMS_STATE_ENABLED)
+			pms_change_state(sc, PMS_STATE_SUSPENDED);
+		break;
+	case DVACT_RESUME:
+		if (sc->sc_state == PMS_STATE_SUSPENDED)
+			pms_change_state(sc, PMS_STATE_ENABLED);
+		break;
+	}
+	return (0);
+}
+
+int
+pms_change_state(struct pms_softc *sc, int newstate)
+{
+	u_char cmd[1], resp[2];
 	int res;
 
-	if (sc->sc_enabled)
-		return EBUSY;
+	switch (newstate) {
+	case PMS_STATE_ENABLED:
+		if (sc->sc_state == PMS_STATE_ENABLED)
+			return EBUSY;
+		sc->inputstate = 0;
+		sc->oldbuttons = 0;
 
-	sc->sc_enabled = 1;
-	sc->inputstate = 0;
-	sc->oldbuttons = 0;
+		pckbc_slot_enable(sc->sc_kbctag, sc->sc_kbcslot, 1);
 
-	pckbc_slot_enable(sc->sc_kbctag, sc->sc_kbcslot, 1);
+		if (sc->poll)
+			pckbc_flush(sc->sc_kbctag, sc->sc_kbcslot);
 
-	cmd[0] = PMS_DEV_ENABLE;
-	res = pckbc_enqueue_cmd(sc->sc_kbctag, sc->sc_kbcslot, cmd, 1, 0, 1, 0);
-	if (res)
-		printf("pms_enable: command error\n");
+		cmd[0] = PMS_RESET;
+		res = pms_cmd(sc, cmd, 1, resp, 2);
+
+		sc->intelli = pms_setintellimode(sc);
+
+		cmd[0] = PMS_DEV_ENABLE;
+		res = pms_cmd(sc, cmd, 1, NULL, 0);
+		if (res)
+			printf("pms_enable: command error\n");
 #if 0
-	{
-		u_char scmd[2];
+		{
+			u_char scmd[2];
 
-		scmd[0] = PMS_SET_RES;
-		scmd[1] = 3; /* 8 counts/mm */
-		res = pckbc_enqueue_cmd(sc->sc_kbctag, sc->sc_kbcslot, scmd,
-					2, 0, 1, 0);
-		if (res)
-			printf("pms_enable: setup error1 (%d)\n", res);
+			scmd[0] = PMS_SET_RES;
+			scmd[1] = 3; /* 8 counts/mm */
+			res = pckbc_enqueue_cmd(sc->sc_kbctag, sc->sc_kbcslot, scmd,
+						2, 0, 1, 0);
+			if (res)
+				printf("pms_enable: setup error1 (%d)\n", res);
 
-		scmd[0] = PMS_SET_SCALE21;
-		res = pckbc_enqueue_cmd(sc->sc_kbctag, sc->sc_kbcslot, scmd,
-					1, 0, 1, 0);
-		if (res)
-			printf("pms_enable: setup error2 (%d)\n", res);
+			scmd[0] = PMS_SET_SCALE21;
+			res = pckbc_enqueue_cmd(sc->sc_kbctag, sc->sc_kbcslot, scmd,
+						1, 0, 1, 0);
+			if (res)
+				printf("pms_enable: setup error2 (%d)\n", res);
 
-		scmd[0] = PMS_SET_SAMPLE;
-		scmd[1] = 100; /* 100 samples/sec */
-		res = pckbc_enqueue_cmd(sc->sc_kbctag, sc->sc_kbcslot, scmd,
-					2, 0, 1, 0);
-		if (res)
-			printf("pms_enable: setup error3 (%d)\n", res);
-	}
+			scmd[0] = PMS_SET_SAMPLE;
+			scmd[1] = 100; /* 100 samples/sec */
+			res = pckbc_enqueue_cmd(sc->sc_kbctag, sc->sc_kbcslot, scmd,
+						2, 0, 1, 0);
+			if (res)
+				printf("pms_enable: setup error3 (%d)\n", res);
+		}
 #endif
+		sc->sc_state = newstate;
+		sc->poll = 0;
+		break;
+	case PMS_STATE_DISABLED:
 
+		/* FALLTHROUGH */
+	case PMS_STATE_SUSPENDED:
+		cmd[0] = PMS_DEV_DISABLE;
+		res = pms_cmd(sc, cmd, 1, NULL, 0);
+		if (res)
+			printf("pms_disable: command error\n");
+		pckbc_slot_enable(sc->sc_kbctag, sc->sc_kbcslot, 0);
+		sc->sc_state = newstate;
+		sc->poll = (newstate == PMS_STATE_SUSPENDED) ? 1 : 0;
+		break;
+	}
 	return 0;
 }
 
-void
-pms_disable(v)
-	void *v;
+int
+pms_enable(void *v)
 {
 	struct pms_softc *sc = v;
-	u_char cmd[1];
-	int res;
 
-	cmd[0] = PMS_DEV_DISABLE;
-	res = pckbc_enqueue_cmd(sc->sc_kbctag, sc->sc_kbcslot, cmd, 1, 0, 1, 0);
-	if (res)
-		printf("pms_disable: command error\n");
+	return pms_change_state(sc, PMS_STATE_ENABLED);
+}
 
-	pckbc_slot_enable(sc->sc_kbctag, sc->sc_kbcslot, 0);
+void
+pms_disable(void *v)
+{
+	struct pms_softc *sc = v;
 
-	sc->sc_enabled = 0;
+	pms_change_state(sc, PMS_STATE_DISABLED);
 }
 
 int
-pms_ioctl(v, cmd, data, flag, p)
-	void *v;
-	u_long cmd;
-	caddr_t data;
-	int flag;
-	struct proc *p;
+pms_ioctl(void *v, u_long cmd, caddr_t data, int flag, struct proc *p)
 {
 	struct pms_softc *sc = v;
 	u_char kbcmd[2];
@@ -278,15 +321,14 @@ pms_ioctl(v, cmd, data, flag, p)
 #define PS2RBUTMASK 0x02
 #define PS2MBUTMASK 0x04
 
-void pmsinput(vsc, data)
-void *vsc;
-int data;
+void
+pmsinput(void *vsc, int data)
 {
 	struct pms_softc *sc = vsc;
-	signed char dy;
+	signed char dz = 0;
 	u_int changed;
 
-	if (!sc->sc_enabled) {
+	if (sc->sc_state != PMS_STATE_ENABLED) {
 		/* Interrupts are not expected.  Discard the byte. */
 		return;
 	}
@@ -310,18 +352,28 @@ int data;
 		break;
 
 	case 2:
-		dy = data;
-		dy = (dy == -128) ? -127 : dy;
+		sc->dy = data;
+		sc->dy = (sc->dy == -128) ? -127 : sc->dy;
+		++sc->inputstate;
+		break;
+
+	case 3:
+		dz = data;
+		dz = (dz == -128) ? -127 : dz;
+		++sc->inputstate;
+		break;
+	}
+
+	if ((sc->inputstate == 3 && sc->intelli == 0) || sc->inputstate == 4) {
 		sc->inputstate = 0;
 
 		changed = (sc->buttons ^ sc->oldbuttons);
 		sc->oldbuttons = sc->buttons;
 
-		if (sc->dx || dy || changed)
+		if (sc->dx || sc->dy || dz || changed)
 			wsmouse_input(sc->sc_wsmousedev,
-				      sc->buttons, sc->dx, dy, 0, 0,
+				      sc->buttons, sc->dx, sc->dy, dz, 0,
 				      WSMOUSE_INPUT_DELTA);
-		break;
 	}
 
 	return;

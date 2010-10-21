@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK,v 1.38 2008/06/27 05:29:54 todd Exp $
+#	$OpenBSD: RAMDISK,v 1.41 2010/07/03 03:59:17 krw Exp $
 
 machine	zaurus	arm
 
@@ -11,6 +11,7 @@ options	INET		# IP + ICMP + TCP + UDP
 options	INET6		# IPv6 (needs INET)
 options	DDB		# kernel debugger
 options	EXT2FS		# Second Extended Filesystem
+options	CRYPTO		# Cryptographic framework
 
 options		ARM32
 options		PXAGPIO_HAS_GPION_INTRS
@@ -19,7 +20,6 @@ options		CACHE_CLEAN_BLOCK_INTR
 
 makeoptions	KERNEL_BASE_PHYS="0xa0200000"
 makeoptions	KERNEL_BASE_VIRT="0xc0200000"
-makeoptions	BOARDTYPE="zaurus"
 
 # estimated number of users
 
@@ -90,8 +90,6 @@ url*		at uhub?		# Realtek RTL8150L based adapters
 wi*		at uhub?		# WaveLAN IEEE 802.11DS
 upl*		at uhub?		# Prolific PL2301/PL2302 host-to-host
 #uscanner*	at uhub?		# USB Scanner driver
-#usscanner*	at uhub?		# USB SCSI scanners
-#scsibus*	at usscanner?
 #uyap*		at uhub?		# Y@P firmware loader
 #ugen*		at uhub?		# USB Generic driver
 umass*		at uhub?		# USB Mass Storage devices
@@ -101,12 +99,13 @@ scsibus*	at umass?
 pxammc0		at pxaip?		# MMC/SD/SDIO controller
 sdmmc*		at pxammc?		# SD/MMC bus
 scsibus*	at sdmmc?		# SCSI emulation
+softraid0	at root			# Software RAID
+scsibus*	at softraid?
 
 sd*		at scsibus?
 #st*		at scsibus?
 cd*		at scsibus?
 #ch*		at scsibus?
-#ss*		at scsibus?
 #uk*		at scsibus?
 
 # integrated 16550 UARTs

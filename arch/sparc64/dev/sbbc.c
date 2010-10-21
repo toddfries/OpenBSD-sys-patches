@@ -1,4 +1,4 @@
-/*	$OpenBSD: sbbc.c,v 1.5 2008/10/05 10:51:39 kettenis Exp $	*/
+/*	$OpenBSD: sbbc.c,v 1.10 2010/07/02 17:27:01 nicm Exp $	*/
 /*
  * Copyright (c) 2008 Mark Kettenis
  *
@@ -515,7 +515,7 @@ sbbcopen(dev_t dev, int flag, int mode, struct proc *p)
 	if (sc->sc_tty)
 		tp = sc->sc_tty;
 	else
-		tp = sc->sc_tty = ttymalloc();
+		tp = sc->sc_tty = ttymalloc(0);
 
 	tp->t_oproc = sbbcstart;
 	tp->t_param = sbbcparam;
@@ -532,7 +532,7 @@ sbbcopen(dev_t dev, int flag, int mode, struct proc *p)
 		return (EBUSY);
 	tp->t_state |= TS_CARR_ON;
 
-	return ((*linesw[tp->t_line].l_open)(dev, tp));
+	return ((*linesw[tp->t_line].l_open)(dev, tp, p));
 }
 
 int
@@ -549,7 +549,7 @@ sbbcclose(dev_t dev, int flag, int mode, struct proc *p)
 		return (ENXIO);
 
 	tp = sc->sc_tty;
-	(*linesw[tp->t_line].l_close)(tp, flag);
+	(*linesw[tp->t_line].l_close)(tp, flag, p);
 	ttyclose(tp);
 	return (0);
 }
@@ -623,13 +623,7 @@ sbbcstart(struct tty *tp)
 		splx(s);
 		return;
 	}
-	if (tp->t_outq.c_cc <= tp->t_lowat) {
-		if (tp->t_state & TS_ASLEEP) {
-			tp->t_state &= ~TS_ASLEEP;
-			wakeup((caddr_t)&tp->t_outq);
-		}
-		selwakeup(&tp->t_wsel);
-	}
+	ttwakeupwr(tp);
 	tp->t_state |= TS_BUSY;
 	while (tp->t_outq.c_cc != 0)
 		sbbc_cnputc(tp->t_dev, getc(&tp->t_outq));

@@ -1,4 +1,4 @@
-/*	$OpenBSD: nviic.c,v 1.13 2008/05/22 05:27:01 brad Exp $ */
+/*	$OpenBSD: nviic.c,v 1.15 2010/04/08 00:23:53 tedu Exp $ */
 
 /*
  * Copyright (c) 2005 David Gwynne <dlg@openbsd.org>
@@ -21,7 +21,6 @@
 #include <sys/device.h>
 #include <sys/kernel.h>
 #include <sys/rwlock.h>
-#include <sys/proc.h>
 
 #include <machine/bus.h>
 
@@ -126,8 +125,7 @@ const struct pci_matchid nviic_ids[] = {
 	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP67_SMB },
 	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP73_SMB },
 	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP77_SMB },
-	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP79_SMB },
-	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP7B_SMB }
+	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP79_SMB }
 };
 
 int

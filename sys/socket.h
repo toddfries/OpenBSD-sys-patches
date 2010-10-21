@@ -1,4 +1,4 @@
-/*	$OpenBSD: socket.h,v 1.59 2008/09/16 15:48:12 gollo Exp $	*/
+/*	$OpenBSD: socket.h,v 1.70 2010/07/05 22:20:22 tedu Exp $	*/
 /*	$NetBSD: socket.h,v 1.14 1996/02/09 18:25:36 christos Exp $	*/
 
 /*
@@ -44,6 +44,9 @@
  * Definitions related to sockets: types, address families, options.
  */
 
+/* Maximum number of alternate routing tables */
+#define	RT_TABLEID_MAX	255
+
 /*
  * Types
  */
@@ -68,7 +71,7 @@
 #define	SO_REUSEPORT	0x0200		/* allow local address & port reuse */
 #define SO_JUMBO	0x0400		/* try to use jumbograms */
 #define SO_TIMESTAMP	0x0800		/* timestamp received dgram traffic */
-#define	SO_BINDANY	0x1000		/* allow bind to any address */
+#define SO_BINDANY	0x1000		/* allow bind to any address */
 
 /*
  * Additional options, not kept in so_options.
@@ -82,6 +85,8 @@
 #define	SO_ERROR	0x1007		/* get error status and clear */
 #define	SO_TYPE		0x1008		/* get socket type */
 #define	SO_NETPROC	0x1020		/* multiplex; network processing */
+#define	SO_RTABLE	0x1021		/* routing table to be used */
+#define	SO_PEERCRED	0x1022		/* get connect-time credentials */
 
 /*
  * Structure used for manipulating linger option.
@@ -240,6 +245,15 @@ struct sockcred {
 	gid_t	sc_groups[1];		/* variable length */
 };
 
+#if __BSD_VISIBLE
+/* Read using getsockopt() with SOL_SOCKET, SO_PEERCRED */
+struct sockpeercred {
+	uid_t		uid;		/* effective user id */
+	gid_t		gid;		/* effective group id */
+	pid_t		pid;
+};
+#endif /* __BSD_VISIBLE */
+
 /*
  * Compute size of a sockcred structure with groups.
  */
@@ -302,12 +316,14 @@ struct sockcred {
  *	Fifth: type of info, defined below
  *	Sixth: flag(s) to mask with for NET_RT_FLAGS
  *	Seventh: routing table to use (facultative, defaults to 0)
+ *		 NET_RT_TABLE has the table id as sixth element.
  */
 #define NET_RT_DUMP	1		/* dump; may limit to a.f. */
 #define NET_RT_FLAGS	2		/* by flags, e.g. RESOLVING */
 #define NET_RT_IFLIST	3		/* survey interface list */
 #define	NET_RT_STATS	4		/* routing table statistics */
-#define	NET_RT_MAXID	5
+#define	NET_RT_TABLE	5
+#define	NET_RT_MAXID	6
 
 #define CTL_NET_RT_NAMES { \
 	{ 0, 0 }, \
@@ -315,6 +331,7 @@ struct sockcred {
 	{ "flags", CTLTYPE_STRUCT }, \
 	{ "iflist", CTLTYPE_STRUCT }, \
 	{ "stats", CTLTYPE_STRUCT }, \
+	{ "table", CTLTYPE_STRUCT }, \
 }
 
 /*
@@ -481,11 +498,12 @@ int	setsockopt(int, int, int, const void *, socklen_t);
 int	shutdown(int, int);
 int	socket(int, int, int);
 int	socketpair(int, int, int, int *);
+int	getrtable(void);
+int	setrtable(int);
 __END_DECLS
 #else
-# if defined(COMPAT_43) || defined(COMPAT_SUNOS) || defined(COMPAT_LINUX) || \
-     defined(COMPAT_HPUX) || defined(COMPAT_FREEBSD) || defined(COMPAT_BSDOS) \
-     || defined(COMPAT_OSF1)
+# if defined(COMPAT_43) || defined(COMPAT_LINUX) || \
+     defined(COMPAT_FREEBSD)
 #  define COMPAT_OLDSOCK
 #  define MSG_COMPAT	0x8000
 # endif

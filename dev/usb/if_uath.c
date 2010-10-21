@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_uath.c,v 1.38 2008/12/15 17:01:54 damien Exp $	*/
+/*	$OpenBSD: if_uath.c,v 1.43 2010/08/27 17:08:01 jsg Exp $	*/
 
 /*-
  * Copyright (c) 2006
@@ -32,7 +32,6 @@
 
 #include <sys/param.h>
 #include <sys/sockio.h>
-#include <sys/sysctl.h>
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
@@ -184,15 +183,15 @@ int	uath_switch_channel(struct uath_softc *, struct ieee80211_channel *);
 int	uath_init(struct ifnet *);
 void	uath_stop(struct ifnet *, int);
 int	uath_loadfirmware(struct uath_softc *, const u_char *, int);
-int	uath_activate(struct device *, enum devact);
+int	uath_activate(struct device *, int);
 
 int uath_match(struct device *, void *, void *); 
 void uath_attach(struct device *, struct device *, void *); 
 int uath_detach(struct device *, int); 
-int uath_activate(struct device *, enum devact); 
+int uath_activate(struct device *, int); 
 
 struct cfdriver uath_cd = { 
-	NULL, "uath", DV_DULL 
+	NULL, "uath", DV_IFNET
 }; 
 
 const struct cfattach uath_ca = { 
@@ -392,7 +391,6 @@ uath_attach(struct device *parent, struct device *self, void *aux)
 
 	ifp->if_softc = sc;
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
-	ifp->if_init = uath_init;
 	ifp->if_ioctl = uath_ioctl;
 	ifp->if_start = uath_start;
 	ifp->if_watchdog = uath_watchdog;
@@ -812,7 +810,7 @@ uath_task(void *arg)
 			    sc->sc_dev.dv_xname);
 			break;
 		}
-		timeout_add(&sc->scan_to, hz / 4);
+		timeout_add_msec(&sc->scan_to, 250);
 		break;
 
 	case IEEE80211_S_AUTH:
@@ -2126,7 +2124,7 @@ fail1:	return error;
 }
 
 int
-uath_activate(struct device *self, enum devact act)
+uath_activate(struct device *self, int act)
 {
 	switch (act) {
 	case DVACT_ACTIVATE:

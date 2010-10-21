@@ -1,4 +1,4 @@
-/*	$OpenBSD: iopsp.c,v 1.15 2009/04/02 18:44:49 oga Exp $	*/
+/*	$OpenBSD: iopsp.c,v 1.18 2010/06/28 18:31:01 krw Exp $	*/
 /*	$NetBSD$	*/
 
 /*-
@@ -71,15 +71,11 @@ struct cfattach iopsp_ca = {
 	sizeof(struct iopsp_softc), iopsp_match, iopsp_attach
 };
 
-int	iopsp_scsi_cmd(struct scsi_xfer *);
+void	iopsp_scsi_cmd(struct scsi_xfer *);
 void	iopspminphys(struct buf *bp, struct scsi_link *sl);
 
 struct scsi_adapter iopsp_switch = {
 	iopsp_scsi_cmd, iopspminphys, 0, 0,
-};
-
-struct scsi_device iopsp_dev = {
-	NULL, NULL, NULL, NULL
 };
 
 void	iopsp_adjqparam(struct device *, int);
@@ -189,7 +185,6 @@ iopsp_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter = &iopsp_switch;
 	sc->sc_link.adapter_target = letoh32(param.p.sci.initiatorid);
-	sc->sc_link.device = &iopsp_dev;
 	sc->sc_link.openings = 1;
 	sc->sc_link.adapter_buswidth = fcal?
 	    IOPSP_MAX_FCAL_TARGET : param.p.sci.maxdatawidth;
@@ -404,7 +399,7 @@ iopspminphys(struct buf *bp, struct scsi_link *sl)
 /*
  * Start a SCSI command.
  */
-int
+void
 iopsp_scsi_cmd(xs)
 	struct scsi_xfer *xs;
 {
@@ -419,10 +414,8 @@ iopsp_scsi_cmd(xs)
 	tid = IOPSP_TIDMAP(sc->sc_tidmap, link->target, link->lun);
 	if (tid == IOPSP_TID_ABSENT || tid == IOPSP_TID_INUSE) {
 		xs->error = XS_SELTIMEOUT;
-		s = splbio();
 		scsi_done(xs);
-		splx(s);
-		return (COMPLETE);
+		return;
 	}
 
 	SC_DEBUG(xs->sc_link, SDEV_DB2, ("iopsp_scsi_cmd: run_xfer\n"));
@@ -439,10 +432,8 @@ iopsp_scsi_cmd(xs)
 		} else
 			xs->error = XS_NOERROR;
 
-		s = splbio();
 		scsi_done(xs);
-		splx(s);
-		return (COMPLETE);
+		return;
 	}
 
 #if defined(I2ODEBUG) || defined(SCSIDEBUG)
@@ -486,10 +477,8 @@ iopsp_scsi_cmd(xs)
 		if (error) {
 			xs->error = XS_DRIVER_STUFFUP;
 			iop_msg_free(iop, im);
-			s = splbio();
 			scsi_done(xs);
-			splx(s);
-			return (COMPLETE);
+			return;
 		}
 		if ((xs->flags & SCSI_DATA_IN) == 0)
 			mf->flags |= I2O_SCB_FLAG_XFER_TO_DEVICE;
@@ -509,13 +498,8 @@ iopsp_scsi_cmd(xs)
 			iop_msg_unmap(iop, im);
 		iop_msg_free(iop, im);
 		xs->error = XS_DRIVER_STUFFUP;
-		s = splbio();
 		scsi_done(xs);
-		splx(s);
-		return (COMPLETE);
 	}
-
-	return (xs->flags & SCSI_POLL? COMPLETE : SUCCESSFULLY_QUEUED);
 }
 
 #ifdef notyet
