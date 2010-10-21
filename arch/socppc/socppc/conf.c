@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.5 2009/01/25 17:30:49 miod Exp $ */
+/*	$OpenBSD: conf.c,v 1.11 2010/09/23 05:02:14 claudio Exp $ */
 
 /*
  * Copyright (c) 1997 Per Fogelstrom
@@ -81,9 +81,15 @@ int nblkdev = sizeof bdevsw / sizeof bdevsw[0];
 #include "com.h"
 cdev_decl(com);
 
+#include "wsdisplay.h"
+#include "wskbd.h"
+#include "wsmouse.h"
+
 #include "bpfilter.h"
 
 #include "tun.h"
+
+#include "wsmux.h"
 
 #ifdef USER_PCICONF
 #include "pci.h"
@@ -102,6 +108,11 @@ cdev_decl(pci);
 
 #include "ksyms.h"
 #include "usb.h"
+#include "uhid.h"
+
+#include "bthub.h"
+#include "vscsi.h"
+#include "pppx.h"
 
 struct cdevsw cdevsw[] = {
 	cdev_cn_init(1,cn),		/* 0: virtual console */
@@ -166,15 +177,17 @@ struct cdevsw cdevsw[] = {
 	cdev_notdef(),			/* 59 */
 	cdev_notdef(),			/* 60 */
 	cdev_usb_init(NUSB,usb),	/* 61: USB controller */
-	cdev_notdef(),			/* 62 */
+	cdev_usbdev_init(NUHID,uhid),	/* 62: USB generic HID */
 	cdev_notdef(),			/* 63 */
 	cdev_notdef(),			/* 64 */
 	cdev_notdef(),			/* 65 */
 	cdev_notdef(),			/* 66 */
-	cdev_notdef(),			/* 67 */
-	cdev_notdef(),			/* 68 */
-	cdev_notdef(),			/* 69 */
-	cdev_notdef(),			/* 70 */
+	cdev_wsdisplay_init(NWSDISPLAY,	/* 67: frame buffers, etc. */
+		wsdisplay),
+	cdev_mouse_init(NWSKBD, wskbd),	/* 68: keyboards */
+	cdev_mouse_init(NWSMOUSE,	/* 69: mice */
+		wsmouse),
+	cdev_mouse_init(NWSMUX, wsmux),	/* 70: ws multiplexor */
 #ifdef USER_PCICONF
 	cdev_pci_init(NPCI,pci),	/* 71: PCI user */
 #else
@@ -186,6 +199,12 @@ struct cdevsw cdevsw[] = {
 	cdev_notdef(),			/* 75 */
 	cdev_notdef(),			/* 76 */
 	cdev_ptm_init(NPTY,ptm),	/* 77: pseudo-tty ptm device */
+	cdev_vscsi_init(NVSCSI,vscsi),	/* 78: vscsi */
+	cdev_notdef(),			/* 79 */
+	cdev_notdef(),			/* 80 */
+	cdev_bthub_init(NBTHUB,bthub),	/* 81: bluetooth hub */
+	cdev_disk_init(1,diskmap),	/* 82: disk mapper */
+	cdev_pppx_init(NPPPX,pppx),	/* 83: pppx */
 };
 int nchrdev = sizeof cdevsw / sizeof cdevsw[0];
 

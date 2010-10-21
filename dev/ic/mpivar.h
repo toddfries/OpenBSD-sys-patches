@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpivar.h,v 1.24 2008/11/01 18:42:26 marco Exp $ */
+/*	$OpenBSD: mpivar.h,v 1.35 2010/09/13 07:48:12 dlg Exp $ */
 
 /*
  * Copyright (c) 2005 David Gwynne <dlg@openbsd.org>
@@ -39,7 +39,8 @@ extern uint32_t			mpi_debug;
 #endif
 
 #define MPI_REQUEST_SIZE	512
-#define MPI_REPLY_SIZE		128
+#define MPI_REPLY_SIZE		80
+#define MPI_REPLYQ_DEPTH	128
 #define MPI_REPLY_COUNT		(PAGE_SIZE / MPI_REPLY_SIZE)
 
 /*
@@ -67,15 +68,18 @@ struct mpi_ccb_bundle {
 struct mpi_softc;
 
 struct mpi_rcb {
+	SIMPLEQ_ENTRY(mpi_rcb)	rcb_link;
 	void			*rcb_reply;
+	bus_addr_t		rcb_offset;
 	u_int32_t		rcb_reply_dva;
 };
+SIMPLEQ_HEAD(mpi_rcb_list, mpi_rcb);
 
 struct mpi_ccb {
 	struct mpi_softc	*ccb_sc;
 	int			ccb_id;
 
-	struct scsi_xfer	*ccb_xs;
+	void 			*ccb_cookie;
 	bus_dmamap_t		ccb_dmamap;
 
 	bus_addr_t		ccb_offset;
@@ -90,10 +94,10 @@ struct mpi_ccb {
 	void			(*ccb_done)(struct mpi_ccb *);
 	struct mpi_rcb		*ccb_rcb;
 
-	TAILQ_ENTRY(mpi_ccb)	ccb_link;
+	SLIST_ENTRY(mpi_ccb)	ccb_link;
 };
 
-TAILQ_HEAD(mpi_ccb_list, mpi_ccb);
+SLIST_HEAD(mpi_ccb_list, mpi_ccb);
 
 struct mpi_softc {
 	struct device		sc_dev;
@@ -124,9 +128,25 @@ struct mpi_softc {
 	struct mpi_dmamem	*sc_requests;
 	struct mpi_ccb		*sc_ccbs;
 	struct mpi_ccb_list	sc_ccb_free;
+	struct mutex		sc_ccb_mtx;
+	struct scsi_iopool	sc_iopool;
 
 	struct mpi_dmamem	*sc_replies;
 	struct mpi_rcb		*sc_rcbs;
+	int			sc_repq;
+
+	struct mpi_ccb		*sc_evt_ccb;
+	struct mpi_rcb_list	sc_evt_ack_queue;
+	struct mutex		sc_evt_ack_mtx;
+	struct scsi_iohandler	sc_evt_ack_handler;
+
+	struct mpi_rcb_list	sc_evt_scan_queue;
+	struct mutex		sc_evt_scan_mtx;
+	struct scsi_iohandler	sc_evt_scan_handler;
+
+	struct workq_task	sc_evt_rescan;
+	struct mutex		sc_evt_rescan_mtx;
+	u_int			sc_evt_rescan_sem;
 
 	size_t			sc_fw_len;
 	struct mpi_dmamem	*sc_fw;

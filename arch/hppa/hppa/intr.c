@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.c,v 1.25 2008/05/19 18:42:12 miod Exp $	*/
+/*	$OpenBSD: intr.c,v 1.35 2010/09/20 06:33:47 matthew Exp $	*/
 
 /*
  * Copyright (c) 2002-2004 Michael Shalayeff
@@ -60,22 +60,21 @@ struct hppa_iv {
 	struct evcount *cnt;
 } __packed;
 
-register_t kpsw = PSL_Q | PSL_P | PSL_C | PSL_D;
-volatile int cpu_inintr, cpl = IPL_NESTED;
-u_long cpu_mask;
 struct hppa_iv intr_store[8*2*CPU_NINTS] __attribute__ ((aligned(32))),
     *intr_more = intr_store, *intr_list;
 struct hppa_iv intr_table[CPU_NINTS] __attribute__ ((aligned(32))) = {
 	{ IPL_SOFTCLOCK, 0, HPPA_IV_SOFT, 0, 0, NULL },
 	{ IPL_SOFTNET  , 0, HPPA_IV_SOFT, 0, 0, (int (*)(void *))&softnet },
-	{ 0 }, { 0 },
+	{ 0 },
+	{ 0 },
 	{ IPL_SOFTTTY  , 0, HPPA_IV_SOFT, 0, 0, NULL }
 };
-volatile u_long ipending, imask[NIPL] = {
+volatile u_long imask[NIPL] = {
 	0,
 	1 << (IPL_SOFTCLOCK - 1),
 	1 << (IPL_SOFTNET - 1),
-	0, 0,
+	0,
+	0,
 	1 << (IPL_SOFTTTY - 1)
 };
 
@@ -83,9 +82,10 @@ volatile u_long ipending, imask[NIPL] = {
 void
 splassert_check(int wantipl, const char *func)
 {
-	if (cpl < wantipl) {
-		splassert_fail(wantipl, cpl, func);
-	}
+	struct cpu_info *ci = curcpu();
+
+	if (ci->ci_cpl < wantipl)
+		splassert_fail(wantipl, ci->ci_cpl, func);
 }
 #endif
 
@@ -104,9 +104,12 @@ softnet(void)
 void
 cpu_intr_init(void)
 {
-	u_long mask = cpu_mask | SOFTINT_MASK;
+	struct cpu_info *ci = curcpu();
 	struct hppa_iv *iv;
 	int level, bit;
+	u_long mask;
+
+	mask = ci->ci_mask | SOFTINT_MASK;
 
 	/* map the shared ints */
 	while (intr_list) {
@@ -140,13 +143,13 @@ cpu_intr_init(void)
 	mfctl(CR_ITMR, mask);
 	mtctl(mask - 1, CR_ITMR);
 
-	mtctl(cpu_mask, CR_EIEM);
+	mtctl(ci->ci_mask, CR_EIEM);
 	/* ack the unwanted interrupts */
 	mfctl(CR_EIRR, mask);
 	mtctl(mask & (1 << 31), CR_EIRR);
 
 	/* in spl*() we trust, clock is started in initclocks() */
-	kpsw |= PSL_I;
+	ci->ci_psw |= PSL_I;
 	ssm(PSL_I, mask);
 }
 
@@ -190,7 +193,7 @@ cpu_intr_map(void *v, int pri, int irq, int (*handler)(void *), void *arg,
 		}
 	}
 
-	evcount_attach(cnt, name, NULL, &evcount_intr);
+	evcount_attach(cnt, name, NULL);
 	iv->pri = pri;
 	iv->irq = irq;
 	iv->flags = 0;
@@ -207,17 +210,21 @@ void *
 cpu_intr_establish(int pri, int irq, int (*handler)(void *), void *arg,
     const char *name)
 {
+	struct cpu_info *ci = curcpu();
 	struct hppa_iv *iv, *ev;
 	struct evcount *cnt;
 
 	if (irq < 0 || irq >= CPU_NINTS || intr_table[irq].handler)
 		return (NULL);
 
+	if ((intr_table[irq].flags & HPPA_IV_SOFT) != 0)
+		return (NULL);
+
 	cnt = (struct evcount *)malloc(sizeof *cnt, M_DEVBUF, M_NOWAIT);
 	if (!cnt)
 		return (NULL);
 
-	cpu_mask |= (1 << irq);
+	ci->ci_mask |= (1 << irq);
 	imask[pri] |= (1 << irq);
 
 	iv = &intr_table[irq];
@@ -240,10 +247,12 @@ cpu_intr_establish(int pri, int irq, int (*handler)(void *), void *arg,
 		free(cnt, M_DEVBUF);
 		iv->cnt = NULL;
 	} else
-		evcount_attach(cnt, name, NULL, &evcount_intr);
+		evcount_attach(cnt, name, NULL);
 
 	return (iv);
 }
+
+int	fls(u_int mask);
 
 int
 fls(u_int mask)
@@ -282,18 +291,32 @@ fls(u_int mask)
 void
 cpu_intr(void *v)
 {
+	struct cpu_info *ci = curcpu();
 	struct trapframe *frame = v;
 	u_long mask;
-	int s = cpl;
+#ifdef MULTIPROCESSOR
+	int pri;
+#endif
+	int s;
 
-	if (cpu_inintr++)
+	mtctl(0, CR_EIEM);
+
+	s = ci->ci_cpl;
+	if (ci->ci_in_intr++)
 		frame->tf_flags |= TFF_INTR;
 
-	while ((mask = ipending & ~imask[s])) {
+	while ((mask = ci->ci_ipending & ~imask[s])) {
 		int r, bit = fls(mask) - 1;
+
+#ifdef MULTIPROCESSOR
+		/* XXX - Ensure that IPIs run first. */
+		if (mask & (1 << 30))
+			bit = 30;
+#endif
+
 		struct hppa_iv *iv = &intr_table[bit];
 
-		ipending &= ~(1L << bit);
+		ci->ci_ipending &= ~(1L << bit);
 		if (iv->flags & HPPA_IV_CALL)
 			continue;
 
@@ -301,8 +324,15 @@ cpu_intr(void *v)
 		if (iv->flags & HPPA_IV_SOFT)
 			uvmexp.softs++;
 
-		cpl = iv->pri;
+		ci->ci_cpl = iv->pri;
 		mtctl(frame->tf_eiem, CR_EIEM);
+
+#ifdef MULTIPROCESSOR
+		pri = iv->pri;
+		if (pri < IPL_IPI && s < IPL_SCHED)
+			__mp_lock(&kernel_lock);
+#endif
+
 		for (r = iv->flags & HPPA_IV_SOFT;
 		    iv && iv->handler; iv = iv->next)
 			/* no arg means pass the frame */
@@ -313,16 +343,22 @@ cpu_intr(void *v)
 			}
 #if 0	/* XXX this does not work, lasi gives us double ints */
 		if (!r) {
-			cpl = 0;
+			ci->ci_cpl = 0;
 			printf("stray interrupt %d\n", bit);
 		}
 #endif
+
+#ifdef MULTIPROCESSOR
+		if (pri < IPL_IPI && s < IPL_SCHED)
+			__mp_unlock(&kernel_lock);
+#endif
 		mtctl(0, CR_EIEM);
 	}
-	cpu_inintr--;
-	cpl = s;
-}
+	ci->ci_in_intr--;
+	ci->ci_cpl = s;
 
+	mtctl(frame->tf_eiem, CR_EIEM);
+}
 
 void *
 softintr_establish(int pri, void (*handler)(void *), void *arg)
@@ -341,10 +377,8 @@ softintr_establish(int pri, void (*handler)(void *), void *arg)
 	if (iv->handler) {
 		iv->next = malloc(sizeof *iv, M_DEVBUF, M_NOWAIT);
 		iv = iv->next;
-	} else {
-		cpu_mask |= (1 << irq);
+	} else
 		imask[pri] |= (1 << irq);
-	}
 
 	if (iv != NULL) {
 		iv->pri = pri;

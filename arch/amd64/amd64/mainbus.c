@@ -1,4 +1,4 @@
-/*	$OpenBSD: mainbus.c,v 1.18 2009/04/11 17:13:33 kettenis Exp $	*/
+/*	$OpenBSD: mainbus.c,v 1.22 2009/12/28 14:22:09 dlg Exp $	*/
 /*	$NetBSD: mainbus.c,v 1.1 2003/04/26 18:39:29 fvdl Exp $	*/
 
 /*
@@ -48,6 +48,7 @@
 #include "ipmi.h"
 #include "bios.h"
 #include "mpbios.h"
+#include "vmt.h"
 
 #include <machine/cpuvar.h>
 #include <machine/i82093var.h>
@@ -59,6 +60,10 @@
 #include <dev/ipmivar.h>
 #endif
 
+#if NVMT > 0
+#include <dev/vmtvar.h>
+#endif
+
 #if NBIOS > 0
 #include <machine/biosvar.h>
 #endif
@@ -67,7 +72,8 @@ int	mainbus_match(struct device *, void *, void *);
 void	mainbus_attach(struct device *, struct device *, void *);
 
 struct cfattach mainbus_ca = {
-	sizeof(struct device), mainbus_match, mainbus_attach
+	sizeof(struct device), mainbus_match, mainbus_attach, NULL,
+	config_activate_children
 };
 
 struct cfdriver mainbus_cd = {
@@ -146,10 +152,6 @@ mainbus_attach(struct device *parent, struct device *self, void *aux)
 
 	printf("\n");
 
-#if NPCI > 0
-	pci_mode = pci_mode_detect();
-#endif
-
 #if NBIOS > 0
 	{
 		mba.mba_bios.ba_name = "bios";
@@ -167,6 +169,13 @@ mainbus_attach(struct device *parent, struct device *self, void *aux)
 		mba.mba_iaa.iaa_memt = X86_BUS_SPACE_MEM;
 		if (ipmi_probe(&mba.mba_iaa))
 			config_found(self, &mba.mba_iaa, mainbus_print);
+	}
+#endif
+
+#if NVMT > 0
+	if (vmt_probe()) {
+		mba.mba_busname = "vmware";
+		config_found(self, &mba.mba_busname, mainbus_print);
 	}
 #endif
 
@@ -195,7 +204,7 @@ mainbus_attach(struct device *parent, struct device *self, void *aux)
 #endif
 
 #if NPCI > 0
-	if (pci_mode != 0) {
+	{
 		pci_init_extents();
 
 		bzero(&mba.mba_pba, sizeof(mba.mba_pba));

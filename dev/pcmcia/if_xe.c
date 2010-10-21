@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_xe.c,v 1.37 2009/02/09 19:14:31 chl Exp $	*/
+/*	$OpenBSD: if_xe.c,v 1.39 2010/08/30 20:33:18 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1999 Niklas Hallqvist, Brandon Creighton, Job de Haas
@@ -115,7 +115,7 @@ int xedebug = XEDEBUG_DEF;
 int	xe_pcmcia_match(struct device *, void *, void *);
 void	xe_pcmcia_attach(struct device *, struct device *, void *);
 int	xe_pcmcia_detach(struct device *, int);
-int	xe_pcmcia_activate(struct device *, enum devact);
+int	xe_pcmcia_activate(struct device *, int);
 
 /*
  * In case this chipset ever turns up out of pcmcia attachments (very
@@ -420,11 +420,6 @@ xe_pcmcia_attach(parent, self, aux)
 		ifmedia_set(&sc->sc_mii.mii_media, IFM_ETHER | IFM_NONE);
 		xe_stop(sc);
 	}
-
-#ifdef notyet
-	pcmcia_function_disable(pa->pf);
-#endif	/* notyet */
-
 	return;
 
 bad:
@@ -462,30 +457,46 @@ xe_pcmcia_detach(dev, flags)
 int
 xe_pcmcia_activate(dev, act)
 	struct device *dev;
-	enum devact act;
+	int act;
 {
 	struct xe_pcmcia_softc *sc = (struct xe_pcmcia_softc *)dev;
 	struct ifnet *ifp = &sc->sc_xe.sc_arpcom.ac_if;
-	int s;
 
-	s = splnet();
 	switch (act) {
 	case DVACT_ACTIVATE:
+		if (sc->sc_xe.sc_ih == NULL) {
+			pcmcia_function_enable(sc->sc_pf);
+			sc->sc_xe.sc_ih = pcmcia_intr_establish(sc->sc_pf, IPL_NET,
+			    xe_intr, sc, sc->sc_xe.sc_dev.dv_xname);
+		}
+		break;
+	case DVACT_SUSPEND:
+		if (ifp->if_flags & IFF_RUNNING)
+			xe_stop(&sc->sc_xe);
+		ifp->if_flags &= ~IFF_RUNNING;
+		if (sc->sc_xe.sc_ih)
+			pcmcia_intr_disestablish(sc->sc_pf, sc->sc_xe.sc_ih);
+		sc->sc_xe.sc_ih = NULL;
+		pcmcia_function_disable(sc->sc_pf);
+		break;
+	case DVACT_RESUME:
 		pcmcia_function_enable(sc->sc_pf);
 		sc->sc_xe.sc_ih = pcmcia_intr_establish(sc->sc_pf, IPL_NET,
 		    xe_intr, sc, sc->sc_xe.sc_dev.dv_xname);
-		xe_init(&sc->sc_xe);
+		/* XXX this is a ridiculous */
+		xe_reset(&sc->sc_xe);
+		if ((ifp->if_flags & IFF_UP) == 0)
+			xe_stop(&sc->sc_xe);
 		break;
-
 	case DVACT_DEACTIVATE:
 		ifp->if_timer = 0;
-		if (ifp->if_flags & IFF_RUNNING)
-			xe_stop(&sc->sc_xe);
-		pcmcia_intr_disestablish(sc->sc_pf, sc->sc_xe.sc_ih);
+		ifp->if_flags &= ~IFF_RUNNING;
+		if (sc->sc_xe.sc_ih)
+			pcmcia_intr_disestablish(sc->sc_pf, sc->sc_xe.sc_ih);
+		sc->sc_xe.sc_ih = NULL;
 		pcmcia_function_disable(sc->sc_pf);
 		break;
 	}
-	splx(s);
 	return (0);
 }
 

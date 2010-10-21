@@ -1,4 +1,4 @@
-/*	$OpenBSD: dino.c,v 1.25 2009/03/30 21:24:57 kettenis Exp $	*/
+/*	$OpenBSD: dino.c,v 1.28 2010/09/22 02:28:37 jsg Exp $	*/
 
 /*
  * Copyright (c) 2003-2005 Michael Shalayeff
@@ -165,7 +165,7 @@ void	dino_conf_write(void *, pcitag_t, int, pcireg_t);
 int	dino_intr_map(struct pci_attach_args *, pci_intr_handle_t *);
 const char *dino_intr_string(void *, pci_intr_handle_t);
 void *	dino_intr_establish(void *, pci_intr_handle_t, int, int (*)(void *),
-	    void *, char *);
+	    void *, const char *);
 void	dino_intr_disestablish(void *, void *);
 int	dino_iomap(void *, bus_addr_t, bus_size_t, int, bus_space_handle_t *);
 int	dino_memmap(void *, bus_addr_t, bus_size_t, int, bus_space_handle_t *);
@@ -391,7 +391,7 @@ dino_intr_string(void *v, pci_intr_handle_t ih)
 
 void *
 dino_intr_establish(void *v, pci_intr_handle_t ih,
-    int pri, int (*handler)(void *), void *arg, char *name)
+    int pri, int (*handler)(void *), void *arg, const char *name)
 {
 	struct dino_softc *sc = v;
 	volatile struct dino_regs *r = sc->sc_regs;
@@ -639,7 +639,7 @@ dino_alloc_parent(struct device *self, struct pci_attach_args *pa, int io)
 		return (NULL);
 
 	extent_free(ex, start, size, EX_NOWAIT);
-	return rbus_new_root_share(tag, ex, start, size, 0);
+	return rbus_new_root_share(tag, ex, start, size);
 }
 #endif
 
@@ -1781,7 +1781,7 @@ dinoattach(parent, self, aux)
 
 	/* scan for ps2 kbd/ms, serial, and flying toasters */
 	ca->ca_hpamask = -1;
-	pdc_scanbus(self, ca, MAXMODBUS, 0);
+	pdc_scanbus(self, ca, MAXMODBUS, 0, 0);
 
 	bzero(&pba, sizeof(pba));
 	pba.pba_busname = "pci";

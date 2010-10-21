@@ -1,4 +1,4 @@
-/*	$OpenBSD: disklabel.h,v 1.44 2008/08/10 15:52:50 krw Exp $	*/
+/*	$OpenBSD: disklabel.h,v 1.48 2010/04/25 06:15:16 deraadt Exp $	*/
 /*	$NetBSD: disklabel.h,v 1.41 1996/05/10 23:07:37 mark Exp $	*/
 
 /*
@@ -108,14 +108,8 @@ struct disklabel {
 	u_int32_t d_secpercyl;		/* # of data sectors per cylinder */
 	u_int32_t d_secperunit;		/* # of data sectors per unit */
 
-	/*
-	 * Spares (bad sector replacements) below are not counted in
-	 * d_nsectors or d_secpercyl.  Spare sectors are assumed to
-	 * be physical sectors which occupy space at the end of each
-	 * track and/or cylinder.
-	 */
-	u_int16_t d_sparespertrack;	/* # of spare sectors per track */
-	u_int16_t d_sparespercyl;	/* # of spare sectors per cylinder */
+	u_char	d_uid[8];		/* Unique label identifier. */
+
 	/*
 	 * Alternate cylinders include maintenance, replacement, configuration
 	 * description areas, etc.
@@ -123,28 +117,10 @@ struct disklabel {
 	u_int32_t d_acylinders;		/* # of alt. cylinders per unit */
 
 			/* hardware characteristics: */
-	/*
-	 * d_interleave, d_trackskew and d_cylskew describe perturbations
-	 * in the media format used to compensate for a slow controller.
-	 * Interleave is physical sector interleave, set up by the
-	 * formatter or controller when formatting.  When interleaving is
-	 * in use, logically adjacent sectors are not physically
-	 * contiguous, but instead are separated by some number of
-	 * sectors.  It is specified as the ratio of physical sectors
-	 * traversed per logical sector.  Thus an interleave of 1:1
-	 * implies contiguous layout, while 2:1 implies that logical
-	 * sector 0 is separated by one sector from logical sector 1.
-	 * d_trackskew is the offset of sector 0 on track N relative to
-	 * sector 0 on track N-1 on the same cylinder.  Finally, d_cylskew
-	 * is the offset of sector 0 on cylinder N relative to sector 0
-	 * on cylinder N-1.
-	 */
-	u_int16_t d_rpm;		/* rotational speed */
-	u_int16_t d_interleave;		/* hardware sector interleave */
-	u_int16_t d_trackskew;		/* sector 0 skew, per track */
-	u_int16_t d_cylskew;		/* sector 0 skew, per cylinder */
-	u_int32_t d_headswitch;		/* head switch time, usec */
-	u_int32_t d_trkseek;		/* track-to-track seek, usec */
+	u_int16_t d_bstarth;		/* start of useable region (high part) */
+	u_int16_t d_bendh;		/* size of useable region (high part) */
+	u_int32_t d_bstart;		/* start of useable region */
+	u_int32_t d_bend;		/* end of useable region */
 	u_int32_t d_flags;		/* generic flags */
 #define NDDATA 5
 	u_int32_t d_drivedata[NDDATA];	/* drive-type specific information */
@@ -207,24 +183,38 @@ struct	__partitionv0 {		/* the partition table */
 	(DISKLABELV1_FFS_BSIZE(i) / DISKLABELV1_FFS_FRAG(i)))
 
 #define DL_GETPSIZE(p)		(((u_int64_t)(p)->p_sizeh << 32) + (p)->p_size)
-#define DL_GETPOFFSET(p)	(((u_int64_t)(p)->p_offseth << 32) + (p)->p_offset)
-#define DL_GETDSIZE(d)		(((u_int64_t)(d)->d_secperunith << 32) + \
-				    (d)->d_secperunit)
-
 #define DL_SETPSIZE(p, n)	do { \
 					daddr64_t x = (n); \
 					(p)->p_sizeh = x >> 32; \
 					(p)->p_size = x; \
 				} while (0)
+#define DL_GETPOFFSET(p)	(((u_int64_t)(p)->p_offseth << 32) + (p)->p_offset)
 #define DL_SETPOFFSET(p, n)	do { \
 					daddr64_t x = (n); \
 					(p)->p_offseth = x >> 32; \
 					(p)->p_offset = x; \
 				} while (0)
+
+#define DL_GETDSIZE(d)		(((u_int64_t)(d)->d_secperunith << 32) + \
+				    (d)->d_secperunit)
 #define DL_SETDSIZE(d, n)	do { \
 					daddr64_t x = (n); \
 					(d)->d_secperunith = x >> 32; \
 					(d)->d_secperunit = x; \
+				} while (0)
+#define DL_GETBSTART(d)		(((u_int64_t)(d)->d_bstarth << 32) + \
+				    (d)->d_bstart)
+#define DL_SETBSTART(d, n)	do { \
+					daddr64_t x = (n); \
+					(d)->d_bstarth = x >> 32; \
+					(d)->d_bstart = x; \
+				} while (0)
+#define DL_GETBEND(d)		(((u_int64_t)(d)->d_bendh << 32) + \
+				    (d)->d_bend)
+#define DL_SETBEND(d, n)	do { \
+					daddr64_t x = (n); \
+					(d)->d_bendh = x >> 32; \
+					(d)->d_bend = x; \
 				} while (0)
 
 #define DL_BLKSPERSEC(d)	((d)->d_secsize / DEV_BSIZE)
@@ -457,13 +447,13 @@ struct dos_mbr {
 void	 diskerr(struct buf *, char *, char *, int, int, struct disklabel *);
 void	 disksort(struct buf *, struct buf *);
 u_int	 dkcksum(struct disklabel *);
-char	*initdisklabel(struct disklabel *);
-char	*checkdisklabel(void *, struct disklabel *);
+int	 initdisklabel(struct disklabel *);
+int	 checkdisklabel(void *, struct disklabel *, u_int64_t, u_int64_t);
 int	 setdisklabel(struct disklabel *, struct disklabel *, u_int);
-char	*readdisklabel(dev_t, void (*)(struct buf *), struct disklabel *, int);
+int	 readdisklabel(dev_t, void (*)(struct buf *), struct disklabel *, int);
 int	 writedisklabel(dev_t, void (*)(struct buf *), struct disklabel *);
 int	 bounds_check_with_label(struct buf *, struct disklabel *, int);
-char	*readdoslabel(struct buf *, void (*)(struct buf *),
+int	 readdoslabel(struct buf *, void (*)(struct buf *),
 	    struct disklabel *, int *, int);
 #ifdef CD9660
 int iso_disklabelspoof(dev_t dev, void (*strat)(struct buf *),

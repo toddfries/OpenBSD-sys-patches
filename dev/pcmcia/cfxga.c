@@ -1,4 +1,4 @@
-/*	$OpenBSD: cfxga.c,v 1.17 2008/11/22 11:35:58 deraadt Exp $	*/
+/*	$OpenBSD: cfxga.c,v 1.20 2010/08/30 20:33:18 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006, Matthieu Herrb and Miodrag Vallat
@@ -97,7 +97,7 @@ struct cfxga_softc {
 int	cfxga_match(struct device *, void *,  void *);
 void	cfxga_attach(struct device *, struct device *, void *);
 int	cfxga_detach(struct device *, int);
-int	cfxga_activate(struct device *, enum devact);
+int	cfxga_activate(struct device *, int);
 
 struct cfattach cfxga_ca = {
 	sizeof(struct cfxga_softc), cfxga_match, cfxga_attach,
@@ -140,12 +140,12 @@ struct cfxga_screen {
 	struct wsdisplay_charcell *scr_mem;	/* backing memory */
 };
 	
-void	cfxga_copycols(void *, int, int, int, int);
-void	cfxga_copyrows(void *, int, int, int);
-void	cfxga_do_cursor(struct rasops_info *);
-void	cfxga_erasecols(void *, int, int, int, long);
-void	cfxga_eraserows(void *, int, int, long);
-void	cfxga_putchar(void *, int, int, u_int, long);
+int	cfxga_copycols(void *, int, int, int, int);
+int	cfxga_copyrows(void *, int, int, int);
+int	cfxga_do_cursor(struct rasops_info *);
+int	cfxga_erasecols(void *, int, int, int, long);
+int	cfxga_eraserows(void *, int, int, long);
+int	cfxga_putchar(void *, int, int, u_int, long);
 
 int	cfxga_install_function(struct pcmcia_function *);
 void	cfxga_remove_function(struct pcmcia_function *);
@@ -313,18 +313,14 @@ out:
 }
 
 int
-cfxga_activate(struct device *dev, enum devact act)
+cfxga_activate(struct device *dev, int act)
 {
 	struct cfxga_softc *sc = (void *)dev;
 
 	switch (act) {
 	case DVACT_ACTIVATE:
-		if (pcmcia_function_enable(sc->sc_pf) != 0) {
-			printf("%s: function enable failed\n",
-			    sc->sc_dev.dv_xname);
-		} else {
-			cfxga_reset_and_repaint(sc);
-		}
+		pcmcia_function_enable(sc->sc_pf);
+		cfxga_reset_and_repaint(sc);
 		break;
 	case DVACT_DEACTIVATE:
 		pcmcia_function_disable(sc->sc_pf);
@@ -1047,7 +1043,7 @@ cfxga_standalone_rop(struct cfxga_screen *scr, u_int rop, int sx, int sy,
  * by only storing actual character cell values (a la mda).
  */
 
-void
+int
 cfxga_copycols(void *cookie, int row, int src, int dst, int num)
 {
 	struct rasops_info *ri = cookie;
@@ -1060,17 +1056,17 @@ cfxga_copycols(void *cookie, int row, int src, int dst, int num)
 	    num * sizeof(struct wsdisplay_charcell));
 
 	if (scr != scr->scr_sc->sc_active)
-		return;
+		return 0;
 
 	sx = src * ri->ri_font->fontwidth + ri->ri_xorigin;
 	dx = dst * ri->ri_font->fontwidth + ri->ri_xorigin;
 	y = row * ri->ri_font->fontheight + ri->ri_yorigin;
 	cx = num * ri->ri_font->fontwidth;
 	cy = ri->ri_font->fontheight;
-	cfxga_standalone_rop(scr, ROP_SRC, sx, y, dx, y, cx, cy);
+	return cfxga_standalone_rop(scr, ROP_SRC, sx, y, dx, y, cx, cy);
 }
 
-void
+int
 cfxga_copyrows(void *cookie, int src, int dst, int num)
 {
 	struct rasops_info *ri = cookie;
@@ -1083,34 +1079,34 @@ cfxga_copyrows(void *cookie, int src, int dst, int num)
 	    num * ri->ri_cols * sizeof(struct wsdisplay_charcell));
 
 	if (scr != scr->scr_sc->sc_active)
-		return;
+		return 0;
 
 	x = ri->ri_xorigin;
 	sy = src * ri->ri_font->fontheight + ri->ri_yorigin;
 	dy = dst * ri->ri_font->fontheight + ri->ri_yorigin;
 	cx = ri->ri_emuwidth;
 	cy = num * ri->ri_font->fontheight;
-	cfxga_standalone_rop(scr, ROP_SRC, x, sy, x, dy, cx, cy);
+	return cfxga_standalone_rop(scr, ROP_SRC, x, sy, x, dy, cx, cy);
 }
 
-void
+int
 cfxga_do_cursor(struct rasops_info *ri)
 {
 	struct cfxga_screen *scr = ri->ri_hw;
 	int x, y, cx, cy;
 
 	if (scr != scr->scr_sc->sc_active)
-		return;
+		return 0;
 
 	x = ri->ri_ccol * ri->ri_font->fontwidth + ri->ri_xorigin;
 	y = ri->ri_crow * ri->ri_font->fontheight + ri->ri_yorigin;
 	cx = ri->ri_font->fontwidth;
 	cy = ri->ri_font->fontheight;
-	cfxga_standalone_rop(scr, ROP_ONES ^ ROP_SRC /* i.e. not SRC */,
+	return cfxga_standalone_rop(scr, ROP_ONES ^ ROP_SRC /* i.e. not SRC */,
 	    x, y, x, y, cx, cy);
 }
 
-void
+int
 cfxga_erasecols(void *cookie, int row, int col, int num, long attr)
 {
 	struct rasops_info *ri = cookie;
@@ -1125,17 +1121,17 @@ cfxga_erasecols(void *cookie, int row, int col, int num, long attr)
 	}
 
 	if (scr != scr->scr_sc->sc_active)
-		return;
+		return 0;
 
 	ri->ri_ops.unpack_attr(cookie, attr, &fg, &bg, NULL);
 	x = col * ri->ri_font->fontwidth + ri->ri_xorigin;
 	y = row * ri->ri_font->fontheight + ri->ri_yorigin;
 	cx = num * ri->ri_font->fontwidth;
 	cy = ri->ri_font->fontheight;
-	cfxga_solid_fill(scr, x, y, cx, cy, ri->ri_devcmap[bg]);
+	return cfxga_solid_fill(scr, x, y, cx, cy, ri->ri_devcmap[bg]);
 }
 
-void
+int
 cfxga_eraserows(void *cookie, int row, int num, long attr)
 {
 	struct rasops_info *ri = cookie;
@@ -1154,17 +1150,17 @@ cfxga_eraserows(void *cookie, int row, int num, long attr)
 		    ri->ri_cols * sizeof(struct wsdisplay_charcell));
 
 	if (scr != scr->scr_sc->sc_active)
-		return;
+		return 0;
 
 	ri->ri_ops.unpack_attr(cookie, attr, &fg, &bg, NULL);
 	x = ri->ri_xorigin;
 	y = row * ri->ri_font->fontheight + ri->ri_yorigin;
 	cx = ri->ri_emuwidth;
 	cy = num * ri->ri_font->fontheight;
-	cfxga_solid_fill(scr, x, y, cx, cy, ri->ri_devcmap[bg]);
+	return cfxga_solid_fill(scr, x, y, cx, cy, ri->ri_devcmap[bg]);
 }
 
-void
+int
 cfxga_putchar(void *cookie, int row, int col, u_int uc, long attr)
 {
 	struct rasops_info *ri = cookie;
@@ -1175,7 +1171,7 @@ cfxga_putchar(void *cookie, int row, int col, u_int uc, long attr)
 	scr->scr_mem[row * ri->ri_cols + col].attr = attr;
 
 	if (scr != scr->scr_sc->sc_active)
-		return;
+		return 0;
 
 	x = col * ri->ri_font->fontwidth + ri->ri_xorigin;
 	y = row * ri->ri_font->fontheight + ri->ri_yorigin;
@@ -1186,8 +1182,8 @@ cfxga_putchar(void *cookie, int row, int col, u_int uc, long attr)
 		ri->ri_ops.unpack_attr(cookie, attr, &fg, &bg, NULL);
 		cx = ri->ri_font->fontwidth;
 		cy = ri->ri_font->fontheight;
-		cfxga_solid_fill(scr, x, y, cx, cy, ri->ri_devcmap[bg]);
+		return cfxga_solid_fill(scr, x, y, cx, cy, ri->ri_devcmap[bg]);
 	} else {
-		cfxga_expand_char(scr, uc, x, y, attr);
+		return cfxga_expand_char(scr, uc, x, y, attr);
 	}
 }

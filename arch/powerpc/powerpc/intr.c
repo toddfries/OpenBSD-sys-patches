@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.c,v 1.4 2008/11/21 17:35:52 deraadt Exp $	*/
+/*	$OpenBSD: intr.c,v 1.6 2009/06/09 01:12:38 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1997 Per Fogelstrom, Opsycon AB and RTMX Inc, USA.

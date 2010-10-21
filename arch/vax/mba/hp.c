@@ -1,4 +1,4 @@
-/*	$OpenBSD: hp.c,v 1.19 2007/09/01 12:45:42 miod Exp $ */
+/*	$OpenBSD: hp.c,v 1.23 2010/09/22 06:40:25 krw Exp $ */
 /*	$NetBSD: hp.c,v 1.22 2000/02/12 16:09:33 ragge Exp $ */
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.
@@ -146,7 +146,7 @@ hpattach(parent, self, aux)
 	 * Init and attach the disk structure.
 	 */
 	sc->sc_disk.dk_name = sc->sc_dev.dv_xname;
-	disk_attach(&sc->sc_disk);
+	disk_attach(&sc->sc_dev, &sc->sc_disk);
 
 	/*
 	 * Fake a disklabel to be able to read in the real label.
@@ -329,6 +329,7 @@ hpioctl(dev, cmd, addr, flag, p)
 
 	switch (cmd) {
 	case	DIOCGDINFO:
+	case	DIOCGPDINFO:	/* no separate 'physical' info available. */
 		bcopy(lp, addr, sizeof (struct disklabel));
 		return 0;
 
@@ -338,19 +339,18 @@ hpioctl(dev, cmd, addr, flag, p)
 		    &lp->d_partitions[DISKPART(dev)];
 		break;
 
+	case	DIOCWDINFO:
 	case	DIOCSDINFO:
 		if ((flag & FWRITE) == 0)
 			return EBADF;
 
-		return setdisklabel(lp, (struct disklabel *)addr, 0, 0);
-
-	case	DIOCWDINFO:
-		if ((flag & FWRITE) == 0)
-			error = EBADF;
-		else {
-			sc->sc_wlabel = 1;
-			error = writedisklabel(dev, hpstrategy, lp, 0);
-			sc->sc_wlabel = 0;
+		error = setdisklabel(lp, (struct disklabel *)addr, 0);
+		if (error == 0) {
+			if (cmd == DIOCWDINFO) {
+				sc->sc_wlabel = 1;
+				error = writedisklabel(dev, hpstrategy, lp, 0);
+				sc->sc_wlabel = 0;
+			}
 		}
 		return error;
 	case	DIOCWLABEL:
@@ -476,7 +476,7 @@ hpread(dev, uio)
 	dev_t dev;
 	struct uio *uio;
 {
-	return (physio(hpstrategy, NULL, dev, B_READ, minphys, uio));
+	return (physio(hpstrategy, dev, B_READ, minphys, uio));
 }
 
 int
@@ -484,5 +484,5 @@ hpwrite(dev, uio)
 	dev_t dev;
 	struct uio *uio;
 {
-	return (physio(hpstrategy, NULL, dev, B_WRITE, minphys, uio));
+	return (physio(hpstrategy, dev, B_WRITE, minphys, uio));
 }

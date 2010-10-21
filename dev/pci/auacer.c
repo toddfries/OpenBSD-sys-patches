@@ -1,4 +1,4 @@
-/*	$OpenBSD: auacer.c,v 1.4 2008/10/25 22:30:43 jakemsr Exp $	*/
+/*	$OpenBSD: auacer.c,v 1.10 2010/09/21 02:12:20 jakemsr Exp $	*/
 /*	$NetBSD: auacer.c,v 1.3 2004/11/10 04:20:26 kent Exp $	*/
 
 /*-
@@ -45,7 +45,6 @@
 #include <sys/malloc.h>
 #include <sys/device.h>
 #include <sys/fcntl.h>
-#include <sys/proc.h>
 
 #include <dev/pci/pcidevs.h>
 #include <dev/pci/pcivar.h>
@@ -119,10 +118,6 @@ struct auacer_softc {
 	pcitag_t sc_pt;
 
 	int sc_dmamap_flags;
-
-	/* Power Management */
-	void *sc_powerhook;
-	int sc_suspend;
 };
 
 #define READ1(sc, a) bus_space_read_1(sc->iot, sc->aud_ioh, a)
@@ -151,10 +146,12 @@ struct cfdriver auacer_cd = {
 
 int	auacer_match(struct device *, void *, void *);
 void	auacer_attach(struct device *, struct device *, void *); 
+int	auacer_activate(struct device *, int);
 int	auacer_intr(void *); 
 
 struct cfattach auacer_ca = {
-        sizeof(struct auacer_softc), auacer_match, auacer_attach
+        sizeof(struct auacer_softc), auacer_match, auacer_attach, NULL,
+	auacer_activate
 };
 
 int	auacer_open(void *, int);
@@ -186,7 +183,6 @@ int	auacer_allocmem(struct auacer_softc *, size_t, size_t,
 	    struct auacer_dma *);
 int	auacer_freemem(struct auacer_softc *, struct auacer_dma *);
 
-void	auacer_powerhook(int, void *);
 int	auacer_set_rate(struct auacer_softc *, int, u_long);
 void	auacer_finish_attach(struct device *);
 
@@ -296,10 +292,6 @@ auacer_attach(struct device *parent, struct device *self, void *aux)
 
 	if (ac97_attach(&sc->host_if) != 0)
 		return;
-
-	/* Watch for power change */
-	sc->sc_suspend = PWR_RESUME;
-	sc->sc_powerhook = powerhook_establish(auacer_powerhook, sc);
 
 	audio_attach_mi(&auacer_hw_if, sc, &sc->sc_dev);
 
@@ -462,52 +454,56 @@ auacer_query_encoding(void *v, struct audio_encoding *aep)
 		aep->encoding = AUDIO_ENCODING_ULINEAR;
 		aep->precision = 8;
 		aep->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	case 1:
 		strlcpy(aep->name, AudioEmulaw, sizeof aep->name);
 		aep->encoding = AUDIO_ENCODING_ULAW;
 		aep->precision = 8;
 		aep->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	case 2:
 		strlcpy(aep->name, AudioEalaw, sizeof aep->name);
 		aep->encoding = AUDIO_ENCODING_ALAW;
 		aep->precision = 8;
 		aep->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	case 3:
 		strlcpy(aep->name, AudioEslinear, sizeof aep->name);
 		aep->encoding = AUDIO_ENCODING_SLINEAR;
 		aep->precision = 8;
 		aep->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	case 4:
 		strlcpy(aep->name, AudioEslinear_le, sizeof aep->name);
 		aep->encoding = AUDIO_ENCODING_SLINEAR_LE;
 		aep->precision = 16;
 		aep->flags = 0;
-		return (0);
+		break;
 	case 5:
 		strlcpy(aep->name, AudioEulinear_le, sizeof aep->name);
 		aep->encoding = AUDIO_ENCODING_ULINEAR_LE;
 		aep->precision = 16;
 		aep->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	case 6:
 		strlcpy(aep->name, AudioEslinear_be, sizeof aep->name);
 		aep->encoding = AUDIO_ENCODING_SLINEAR_BE;
 		aep->precision = 16;
 		aep->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	case 7:
 		strlcpy(aep->name, AudioEulinear_be, sizeof aep->name);
 		aep->encoding = AUDIO_ENCODING_ULINEAR_BE;
 		aep->precision = 16;
 		aep->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	default:
 		return (EINVAL);
 	}
+	aep->bps = AUDIO_BPS(aep->precision);
+	aep->msb = 1;
+
+	return (0);
 }
 
 int
@@ -647,6 +643,8 @@ auacer_set_params(void *v, int setmode, int usemode, struct audio_params *play,
 		default:
 			return (EINVAL);
 		}
+		p->bps = AUDIO_BPS(p->precision);
+		p->msb = 1;
 
 		if (AC97_IS_FIXED_RATE(sc->codec_if))
 			p->sample_rate = AC97_SINGLE_RATE;
@@ -670,7 +668,7 @@ auacer_set_params(void *v, int setmode, int usemode, struct audio_params *play,
 int
 auacer_round_blocksize(void *v, int blk)
 {
-	return (blk & ~0x3f);		/* keep good alignment */
+	return ((blk + 0x3f) & ~0x3f);		/* keep good alignment */
 }
 
 static void
@@ -1077,27 +1075,26 @@ auacer_alloc_cdata(struct auacer_softc *sc)
 	return (error);
 }
 
-void
-auacer_powerhook(int why, void *addr)
+int
+auacer_activate(struct device *self, int act)
 {
-	struct auacer_softc *sc = (struct auacer_softc *)addr;
+	struct auacer_softc *sc = (struct auacer_softc *)self;
+	int rv = 0;
 
-	if (why != PWR_RESUME) {
-		/* Power down */
-		DPRINTF(1, ("%s: power down\n", sc->sc_dev.dv_xname));
-		sc->sc_suspend = why;
-	} else {
-		/* Wake up */
-		DPRINTF(1, ("%s: power resume\n", sc->sc_dev.dv_xname));
-		if (sc->sc_suspend == PWR_RESUME) {
-			printf("%s: resume without suspend.\n",
-			    sc->sc_dev.dv_xname);
-			sc->sc_suspend = why;
-			return;
-		}
-		sc->sc_suspend = why;
-		auacer_reset_codec(sc);
-		delay(1000);
-		(sc->codec_if->vtbl->restore_ports)(sc->codec_if);
+	switch (act) {
+	case DVACT_ACTIVATE:
+		break;
+	case DVACT_QUIESCE:
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_SUSPEND:
+		break;
+	case DVACT_RESUME:
+		ac97_resume(&sc->host_if, sc->codec_if);
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_DEACTIVATE:
+		break;
 	}
+	return (rv);
 }

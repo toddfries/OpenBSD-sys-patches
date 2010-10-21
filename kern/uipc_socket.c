@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_socket.c,v 1.76 2009/03/15 19:40:41 miod Exp $	*/
+/*	$OpenBSD: uipc_socket.c,v 1.84 2010/09/24 02:59:45 claudio Exp $	*/
 /*	$NetBSD: uipc_socket.c,v 1.21 1996/02/04 02:17:52 christos Exp $	*/
 
 /*
@@ -43,9 +43,11 @@
 #include <sys/event.h>
 #include <sys/protosw.h>
 #include <sys/socket.h>
+#include <sys/unpcb.h>
 #include <sys/socketvar.h>
 #include <sys/signalvar.h>
 #include <sys/resourcevar.h>
+#include <net/route.h>
 #include <sys/pool.h>
 
 void 	filt_sordetach(struct knote *kn);
@@ -107,7 +109,7 @@ socreate(int dom, struct socket **aso, int type, int proto)
 	TAILQ_INIT(&so->so_q0);
 	TAILQ_INIT(&so->so_q);
 	so->so_type = type;
-	if (p->p_ucred->cr_uid == 0)
+	if (suser(p, 0) == 0)
 		so->so_state = SS_PRIV;
 	so->so_ruid = p->p_cred->p_ruid;
 	so->so_euid = p->p_ucred->cr_uid;
@@ -123,13 +125,6 @@ socreate(int dom, struct socket **aso, int type, int proto)
 		splx(s);
 		return (error);
 	}
-#ifdef COMPAT_SUNOS
-	{
-		extern struct emul emul_sunos;
-		if (p->p_emul == &emul_sunos && type == SOCK_DGRAM)
-			so->so_options |= SO_BROADCAST;
-	}
-#endif
 	splx(s);
 	*aso = so;
 	return (0);
@@ -229,7 +224,7 @@ soclose(struct socket *so)
 				goto drop;
 			while (so->so_state & SS_ISCONNECTED) {
 				error = tsleep(&so->so_timeo,
-				    PSOCK | PCATCH, netcls,
+				    PSOCK | PCATCH, "netcls",
 				    so->so_linger * hz);
 				if (error)
 					break;
@@ -1041,19 +1036,21 @@ sosetopt(struct socket *so, int level, int optname, struct mbuf *m0)
 			switch (optname) {
 
 			case SO_SNDBUF:
-				if (sbcheckreserve(cnt, so->so_snd.sb_hiwat) ||
+				if (sbcheckreserve(cnt, so->so_snd.sb_wat) ||
 				    sbreserve(&so->so_snd, cnt)) {
 					error = ENOBUFS;
 					goto bad;
 				}
+				so->so_snd.sb_wat = cnt;
 				break;
 
 			case SO_RCVBUF:
-				if (sbcheckreserve(cnt, so->so_rcv.sb_hiwat) ||
+				if (sbcheckreserve(cnt, so->so_rcv.sb_wat) ||
 				    sbreserve(&so->so_rcv, cnt)) {
 					error = ENOBUFS;
 					goto bad;
 				}
+				so->so_rcv.sb_wat = cnt;
 				break;
 
 			case SO_SNDLOWAT:
@@ -1190,6 +1187,22 @@ sogetopt(struct socket *so, int level, int optname, struct mbuf **mp)
 			    (val % hz) * tick;
 			break;
 		    }
+
+		case SO_PEERCRED:
+			if (so->so_proto->pr_protocol == AF_UNIX) {
+				struct unpcb *unp = sotounpcb(so);
+
+				if (unp->unp_flags & UNP_FEIDS) {
+					*mp = m = m_get(M_WAIT, MT_SOOPTS);
+					m->m_len = sizeof(unp->unp_connid);
+					bcopy((caddr_t)(&(unp->unp_connid)),
+					    mtod(m, caddr_t),
+					    (unsigned)m->m_len);
+				} else
+					return (ENOTCONN);
+			} else
+				return (EOPNOTSUPP);
+			break;
 
 		default:
 			(void)m_free(m);

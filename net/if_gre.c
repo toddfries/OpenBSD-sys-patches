@@ -1,4 +1,4 @@
-/*      $OpenBSD: if_gre.c,v 1.44 2008/06/26 05:42:20 ray Exp $ */
+/*      $OpenBSD: if_gre.c,v 1.52 2010/09/23 11:34:50 blambert Exp $ */
 /*	$NetBSD: if_gre.c,v 1.9 1999/10/25 19:18:11 drochner Exp $ */
 
 /*
@@ -42,6 +42,7 @@
 #if NGRE > 0
 
 #include "bpfilter.h"
+#include "pf.h"
 
 #include <sys/param.h>
 #include <sys/proc.h>
@@ -77,6 +78,10 @@
 #include <net/bpf.h>
 #endif
 
+#if NPF > 0
+#include <net/pfvar.h>
+#endif
+
 #include <net/if_gre.h>
 
 #ifndef GRE_RECURSION_LIMIT
@@ -110,7 +115,10 @@ int gre_allow = 0;
 int gre_wccp = 0;
 int ip_mobile_allow = 0;
 
-static void gre_compute_route(struct gre_softc *sc);
+void gre_compute_route(struct gre_softc *);
+void gre_keepalive(void *);
+void gre_send_keepalive(void *);
+void gre_link_state(struct gre_softc *);
 
 void
 greattach(int n)
@@ -146,6 +154,10 @@ gre_clone_create(struct if_clone *ifc, int unit)
 	sc->g_dst.s_addr = sc->g_src.s_addr = INADDR_ANY;
 	sc->g_proto = IPPROTO_GRE;
 	sc->sc_if.if_flags |= IFF_LINK0;
+	sc->sc_ka_state = GRE_STATE_UKNWN;
+
+	timeout_set(&sc->sc_ka_hold, gre_keepalive, sc);
+	timeout_set(&sc->sc_ka_snd, gre_send_keepalive, sc);
 
 	if_attach(&sc->sc_if);
 	if_alloc_sadl(&sc->sc_if);
@@ -168,6 +180,8 @@ gre_clone_destroy(struct ifnet *ifp)
 	int s;
 
 	s = splnet();
+	timeout_del(&sc->sc_ka_snd);
+	timeout_del(&sc->sc_ka_hold);
 	LIST_REMOVE(sc, sc_list);
 	splx(s);
 
@@ -202,6 +216,15 @@ gre_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 		goto end;
 	}
 
+#ifdef DIAGNOSTIC
+	if (ifp->if_rdomain != rtable_l2(m->m_pkthdr.rdomain)) {
+		printf("%s: trying to send packet on wrong domain. "
+		    "if %d vs. mbuf %d, AF %d\n", ifp->if_xname,
+		    ifp->if_rdomain, rtable_l2(m->m_pkthdr.rdomain),
+		    dst->sa_family);
+	}
+#endif
+
 	/* Try to limit infinite recursion through misconfiguration. */
 	for (mtag = m_tag_find(m, PACKET_TAG_GRE, NULL); mtag;
 	     mtag = m_tag_find(m, PACKET_TAG_GRE, mtag)) {
@@ -225,7 +248,7 @@ gre_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 
 	m->m_flags &= ~(M_BCAST|M_MCAST);
 
-#if NBPFILTER >0
+#if NBPFILTER > 0
 	if (ifp->if_bpf)
 		bpf_mtap_af(ifp->if_bpf, dst->sa_family, m, BPF_DIRECTION_OUT);
 #endif
@@ -363,6 +386,14 @@ gre_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 			etype = ETHERTYPE_IPV6;
 			break;
 #endif
+#ifdef MPLS
+		case AF_MPLS:
+			if (m->m_flags & (M_BCAST | M_MCAST))
+				etype = ETHERTYPE_MPLS_MCAST;
+			else
+				etype = ETHERTYPE_MPLS;
+			break;
+#endif
 		default:
 			IF_DROP(&ifp->if_snd);
 			m_freem(m);
@@ -405,6 +436,13 @@ gre_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 	ifp->if_opackets++;
 	ifp->if_obytes += m->m_pkthdr.len;
 
+
+	m->m_pkthdr.rdomain = sc->g_rtableid;
+
+#if NPF > 0
+	pf_pkt_addr_changed(m);
+#endif
+
 	/* Send it off */
 	error = ip_output(m, (void *)NULL, &sc->route, 0, (void *)NULL, (void *)NULL);
   end:
@@ -419,6 +457,7 @@ gre_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	struct ifreq *ifr = (struct ifreq *) data;
 	struct if_laddrreq *lifr = (struct if_laddrreq *)data;
+	struct ifkalivereq *ikar = (struct ifkalivereq *)data;
 	struct gre_softc *sc = ifp->if_softc;
 	int s;
 	struct sockaddr_in si;
@@ -505,7 +544,7 @@ gre_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			sc->g_src = (satosin(sa))->sin_addr;
 		if (cmd == GRESADDRD )
 			sc->g_dst = (satosin(sa))->sin_addr;
-	recompute:
+recompute:
 		if ((sc->g_src.s_addr != INADDR_ANY) &&
 		    (sc->g_dst.s_addr != INADDR_ANY)) {
 			if (sc->route.ro_rt != 0) {
@@ -532,6 +571,34 @@ gre_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		si.sin_addr.s_addr = sc->g_dst.s_addr;
 		sa = sintosa(&si);
 		ifr->ifr_addr = *sa;
+		break;
+	case SIOCSETKALIVE:
+		if ((error = suser(prc, 0)) != 0)
+			break;
+		if (ikar->ikar_timeo < 0 || ikar->ikar_timeo > 86400 ||
+		    ikar->ikar_cnt < 0 || ikar->ikar_cnt > 256) {
+			error = EINVAL;
+			break;
+		}
+		sc->sc_ka_timout = ikar->ikar_timeo;
+		sc->sc_ka_cnt = ikar->ikar_cnt;
+		if (sc->sc_ka_timout == 0 || sc->sc_ka_cnt == 0) {
+			sc->sc_ka_timout = 0;
+			sc->sc_ka_cnt = 0;
+			sc->sc_ka_state = GRE_STATE_UKNWN;
+			gre_link_state(sc);
+			break;
+		}
+		if (!timeout_pending(&sc->sc_ka_snd)) {
+			sc->sc_ka_holdmax = sc->sc_ka_cnt;
+			timeout_add(&sc->sc_ka_snd, 1);
+			timeout_add_sec(&sc->sc_ka_hold, sc->sc_ka_timout *
+			    sc->sc_ka_cnt);
+		}
+		break;
+	case SIOCGETKALIVE:
+		ikar->ikar_timeo = sc->sc_ka_timout;
+		ikar->ikar_cnt = sc->sc_ka_cnt;
 		break;
 	case SIOCSLIFPHYADDR:
 		if ((error = suser(prc, 0)) != 0)
@@ -570,6 +637,20 @@ gre_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		si.sin_addr.s_addr = sc->g_dst.s_addr;
 		memcpy(&lifr->dstaddr, &si, sizeof(si));
 		break;
+	case SIOCSLIFPHYRTABLE:
+		if ((error = suser(prc, 0)) != 0)
+			break;
+		if (ifr->ifr_rdomainid < 0 ||
+		    ifr->ifr_rdomainid > RT_TABLEID_MAX ||
+		    !rtable_exists(ifr->ifr_rdomainid)) {
+			error = EINVAL;
+			break;
+		}
+		sc->g_rtableid = ifr->ifr_rdomainid;
+		goto recompute;
+	case SIOCGLIFPHYRTABLE:
+		ifr->ifr_rdomainid = sc->g_rtableid;
+		break;
 	default:
 		error = ENOTTY;
 	}
@@ -590,7 +671,7 @@ gre_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
  * at least a default route which matches.
  */
 
-static void
+void
 gre_compute_route(struct gre_softc *sc)
 {
 	struct route *ro;
@@ -618,8 +699,9 @@ gre_compute_route(struct gre_softc *sc)
 		((struct sockaddr_in *) &ro->ro_dst)->sin_addr.s_addr = htonl(a);
 	}
 
-	rtalloc(ro);
-	if (ro->ro_rt == 0)
+	ro->ro_rt = rtalloc1(&ro->ro_dst, RT_REPORT | RT_NOCLONING,
+	    sc->g_rtableid);
+	if (ro->ro_rt == NULL)
 		return;
 
 	/*
@@ -629,7 +711,7 @@ gre_compute_route(struct gre_softc *sc)
 	 */
 	if (ro->ro_rt->rt_ifp == &sc->sc_if) {
 		RTFREE(ro->ro_rt);
-		ro->ro_rt = (struct rtentry *) 0;
+		ro->ro_rt = NULL;
 		return;
 	}
 
@@ -654,19 +736,135 @@ gre_in_cksum(u_int16_t *p, u_int len)
 	while (nwords-- != 0)
 		sum += *p++;
 
-		if (len & 1) {
-			union {
-				u_short w;
-				u_char c[2];
-			} u;
-			u.c[0] = *(u_char *) p;
-			u.c[1] = 0;
-			sum += u.w;
-		}
+	if (len & 1) {
+		union {
+			u_short w;
+			u_char c[2];
+		} u;
+		u.c[0] = *(u_char *) p;
+		u.c[1] = 0;
+		sum += u.w;
+	}
 
-		/* end-around-carry */
-		sum = (sum >> 16) + (sum & 0xffff);
-		sum += (sum >> 16);
-		return (~sum);
+	/* end-around-carry */
+	sum = (sum >> 16) + (sum & 0xffff);
+	sum += (sum >> 16);
+	return (~sum);
+}
+
+void
+gre_keepalive(void *arg)
+{
+	struct gre_softc *sc = arg;
+
+	if (!sc->sc_ka_timout)
+		return;
+
+	sc->sc_ka_state = GRE_STATE_DOWN;
+	gre_link_state(sc);
+}
+
+void
+gre_send_keepalive(void *arg)
+{
+	struct gre_softc *sc = arg;
+	struct mbuf *m;
+	struct ip *ip;
+	struct gre_h *gh;
+	struct sockaddr dst;
+	int s;
+
+	if (sc->sc_ka_timout)
+		timeout_add_sec(&sc->sc_ka_snd, sc->sc_ka_timout);
+
+	if (sc->g_proto != IPPROTO_GRE)
+		return;
+	if ((sc->sc_if.if_flags & IFF_UP) == 0 ||
+	    sc->g_src.s_addr == INADDR_ANY || sc->g_dst.s_addr == INADDR_ANY)
+		return;
+
+	MGETHDR(m, M_DONTWAIT, MT_DATA);
+	if (m == NULL) {
+		sc->sc_if.if_oerrors++;
+		return;
+	}
+
+	m->m_len = m->m_pkthdr.len = sizeof(*ip) + sizeof(*gh);
+	MH_ALIGN(m, m->m_len);
+
+	/* build the ip header */
+	ip = (struct ip *)m->m_data;
+
+	ip->ip_v = IPVERSION;
+	ip->ip_hl = sizeof(*ip) >> 2;
+	ip->ip_tos = IPTOS_LOWDELAY;
+	ip->ip_len = htons(m->m_pkthdr.len);
+	ip->ip_id = htons(ip_randomid());
+	ip->ip_off = htons(IP_DF);
+	ip->ip_ttl = ip_defttl;
+	ip->ip_p = IPPROTO_GRE;
+	ip->ip_src.s_addr = sc->g_dst.s_addr;
+	ip->ip_dst.s_addr = sc->g_src.s_addr;
+	ip->ip_sum = 0;
+	ip->ip_sum = in_cksum(m, sizeof(*ip));
+
+	gh = (struct gre_h *)(ip + 1);
+	/* We don't support any GRE flags for now */
+	bzero(gh, sizeof(*gh));
+
+	bzero(&dst, sizeof(dst));
+	dst.sa_family = AF_INET;
+
+	s = splsoftnet();
+	/* should we care about the error? */
+	gre_output(&sc->sc_if, m, &dst, NULL);
+	splx(s);
+}
+
+void
+gre_recv_keepalive(struct gre_softc *sc)
+{
+	if (!sc->sc_ka_timout)
+		return;
+
+	/* link state flap dampening */
+	switch (sc->sc_ka_state) {
+	case GRE_STATE_UKNWN:
+	case GRE_STATE_DOWN:
+		sc->sc_ka_state = GRE_STATE_HOLD;
+		sc->sc_ka_holdcnt = sc->sc_ka_holdmax;
+		sc->sc_ka_holdmax = MIN(sc->sc_ka_holdmax * 2,
+		    16 * sc->sc_ka_cnt);
+		break;
+	case GRE_STATE_HOLD:
+		if (--sc->sc_ka_holdcnt < 1) {
+			sc->sc_ka_state = GRE_STATE_UP;
+			gre_link_state(sc);
+		}
+		break;
+	case GRE_STATE_UP:
+		sc->sc_ka_holdmax = MAX(sc->sc_ka_holdmax--, sc->sc_ka_cnt);
+		break;
+	}
+
+	/* rescedule hold timer */
+	timeout_add_sec(&sc->sc_ka_hold, sc->sc_ka_timout * sc->sc_ka_cnt);
+}
+
+void
+gre_link_state(struct gre_softc *sc)
+{
+	struct ifnet *ifp = &sc->sc_if;
+	int link_state = LINK_STATE_UNKNOWN;
+
+	if (sc->sc_ka_state == GRE_STATE_UP)
+		link_state = LINK_STATE_UP;
+	else if (sc->sc_ka_state != GRE_STATE_UKNWN)
+		link_state = LINK_STATE_KALIVE_DOWN;
+
+	if (ifp->if_link_state != link_state) {
+		ifp->if_link_state = link_state;
+		if_link_state_change(ifp);
+	}
 }
 #endif

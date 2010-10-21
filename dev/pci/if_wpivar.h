@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wpivar.h,v 1.18 2008/12/03 17:17:08 damien Exp $	*/
+/*	$OpenBSD: if_wpivar.h,v 1.23 2010/09/07 16:21:45 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 2006-2008
@@ -80,28 +80,17 @@ struct wpi_tx_ring {
 	int			cur;
 };
 
-#define WPI_RBUF_COUNT	(WPI_RX_RING_COUNT + 32)
-
 struct wpi_softc;
-
-struct wpi_rbuf {
-	struct wpi_softc	*sc;
-	caddr_t			vaddr;
-	bus_addr_t		paddr;
-	SLIST_ENTRY(wpi_rbuf)	next;
-};
 
 struct wpi_rx_data {
 	struct mbuf	*m;
+	bus_dmamap_t	map;
 };
 
 struct wpi_rx_ring {
 	struct wpi_dma_info	desc_dma;
-	struct wpi_dma_info	buf_dma;
 	uint32_t		*desc;
 	struct wpi_rx_data	data[WPI_RX_RING_COUNT];
-	struct wpi_rbuf		rbuf[WPI_RBUF_COUNT];
-	SLIST_HEAD(, wpi_rbuf)	freelist;
 	int			cur;
 };
 
@@ -153,6 +142,7 @@ struct wpi_softc {
 
 	u_int			sc_flags;
 #define WPI_FLAG_HAS_5GHZ	(1 << 0)
+#define WPI_FLAG_BUSY		(1 << 1)
 
 	/* Shared area. */
 	struct wpi_dma_info	shared_dma;
@@ -173,8 +163,6 @@ struct wpi_softc {
 	bus_size_t		sc_sz;
 	int			sc_cap_off;	/* PCIe Capabilities. */
 
-	struct ksensordev	sensordev;
-	struct ksensor		sensor;
 	struct timeout		calib_to;
 	int			calib_cnt;
 
@@ -192,7 +180,7 @@ struct wpi_softc {
 	int8_t			maxpwr[IEEE80211_CHAN_MAX];
 
 	int			sc_tx_timer;
-	void			*powerhook;
+	struct workq_task	sc_resume_wqt;
 
 #if NBPFILTER > 0
 	caddr_t			sc_drvbpf;

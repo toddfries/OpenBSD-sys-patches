@@ -1,4 +1,4 @@
-#	$OpenBSD: files.pci,v 1.260 2009/04/15 06:54:44 oga Exp $
+#	$OpenBSD: files.pci,v 1.276 2010/10/14 21:23:04 pirofti Exp $
 #	$NetBSD: files.pci,v 1.20 1996/09/24 17:47:15 christos Exp $
 #
 # Config file and device description for machine-independent PCI code.
@@ -116,9 +116,6 @@ device	eso {}: audio, auconv, mulaw, midibus
 attach	eso at pci
 file	dev/pci/eso.c			eso
 
-attach	opl at eso with opl_eso
-file	dev/pci/opl_eso.c		opl_eso
-
 # Acer Labs M5455
 device	auacer: audio, auconv, mulaw, ac97
 attach	auacer at pci
@@ -136,7 +133,7 @@ file	dev/pci/azalia.c		azalia
 file	dev/pci/azalia_codec.c		azalia
 
 # VIA Envy24 (aka ICE1712)
-device	envy: audio, auconv, mulaw
+device	envy: audio, ac97, midibus
 attach	envy at pci
 file	dev/pci/envy.c			envy
 
@@ -180,9 +177,6 @@ device	yds {}: audio, auconv, mulaw, ac97, firmload
 attach	yds at pci
 file	dev/pci/yds.c			yds
 
-attach	opl at yds with opl_yds
-file	dev/pci/opl_yds.c		opl_yds
-
 # Forte Media FM801
 device	fms: audio, auconv, mulaw, ac97, midibus, tea5757, radiobus
 attach	fms at pci
@@ -221,6 +215,11 @@ file	dev/pci/isp_pci.c		isp_pci
 # LSI Logic Fusion-MPT Message Passing Interface
 attach	mpi at pci with mpi_pci
 file	dev/pci/mpi_pci.c		mpi_pci
+
+# LSI Logic Fusion-MPT Message Passing Interface 2.0
+device	mpii: scsi
+attach	mpii at pci
+file	dev/pci/mpii.c			mpii
 
 # Emulex Light Pulse Fibre Channel (Service Level Interface)
 attach	sli at pci with sli_pci
@@ -346,6 +345,7 @@ device	em: ether, ifnet, ifmedia
 attach	em at pci
 file	dev/pci/if_em.c			em
 file	dev/pci/if_em_hw.c		em
+file	dev/pci/if_em_soc.c		em
 
 # Intel Pro/10GbE
 device	ixgb: ether, ifnet, ifmedia
@@ -360,6 +360,7 @@ attach	ix at pci
 file	dev/pci/if_ix.c			ix
 file	dev/pci/ixgbe.c			ix
 file	dev/pci/ixgbe_82598.c		ix
+file	dev/pci/ixgbe_82599.c		ix
 file	dev/pci/ixgbe_phy.c		ix
 
 # Neterion Xframe 10 Gigabit ethernet 
@@ -400,9 +401,8 @@ attach	epic at pci with epic_pci
 file	dev/pci/if_epic_pci.c		epic_pci
 
 # Alteon Tigon I & II
-device	ti: ether, ifnet, ifmedia, firmload
-attach	ti at pci
-file	dev/pci/if_ti.c			ti
+attach	ti at pci with ti_pci
+file	dev/pci/if_ti_pci.c		ti_pci
 
 # NE2000-compatible PCI Ethernet cards
 attach	ne at pci with ne_pci: rtl80x9
@@ -461,6 +461,11 @@ device	sis: ether, ifnet, mii, ifmedia
 attach	sis at pci
 file	dev/pci/if_sis.c		sis
 
+# SiS 190/191 ethernet
+device	se: ether, ifnet, mii, ifmedia
+attach	se at pci
+file	dev/pci/if_se.c			se
+
 # Sundance ST201 ethernet
 device	ste: ether, ifnet, mii, ifmedia
 attach	ste at pci
@@ -470,6 +475,11 @@ file	dev/pci/if_ste.c		ste
 device	wdt: pcibus
 attach	wdt at pci
 file	dev/pci/wdt.c			wdt
+
+# Berkshire PCI-PC Watchdog
+device	berkwdt: pcibus
+attach	berkwdt at pci
+file	dev/pci/berkwdt.c		berkwdt
 
 # Quancom PWDOG1
 device	pwdog: pcibus
@@ -555,9 +565,6 @@ device	cmpci {}: audio, auconv, mulaw
 attach	cmpci at pci
 file	dev/pci/cmpci.c			cmpci
 
-attach	opl at cmpci with opl_cmpci
-file	dev/pci/opl_cmpci.c		opl_cmpci
-
 # Initio ULTRA WIDE/ULTRA2 WIDE SCSI Controllers
 attach	iha at pci with iha_pci
 file	dev/pci/iha_pci.c		iha_pci
@@ -631,6 +638,11 @@ device	age: ether, ifnet, mii, ifmedia, mii_phy
 attach	age at pci
 file	dev/pci/if_age.c		age
 
+# Attansic/Atheros L1C/L2C Gigabit Ethernet
+device	alc: ether, ifnet, mii, ifmedia, mii_phy
+attach	alc at pci
+file	dev/pci/if_alc.c		alc
+
 # Attansic/Atheros L1E Gigabit Ethernet
 device	ale: ether, ifnet, mii, ifmedia, mii_phy
 attach	ale at pci
@@ -654,6 +666,10 @@ file	dev/pci/if_bce.c		bce
 # Atheros AR5k (802.11a/b/g) PCI/Mini-PCI
 attach	ath at pci with ath_pci
 file	dev/pci/if_ath_pci.c		ath_pci
+
+# Atheros AR9k (802.11a/g/n)
+attach	athn at pci with athn_pci
+file	dev/pci/if_athn_pci.c		athn_pci
 
 # ADMtek ADM8211 PCI/Mini-PCI
 attach	atw at pci with atw_pci
@@ -770,3 +786,23 @@ file	dev/pci/kate.c			kate
 device	km
 attach	km at pci
 file	dev/pci/km.c			km
+
+# Intel SOC GCU
+device	gcu
+attach	gcu at pci
+file	dev/pci/gcu.c			gcu
+
+# AMD Geode CS5536 Audio
+device	auglx: audio, ac97
+attach	auglx at pci
+file	dev/pci/auglx.c			auglx
+
+# Intel 3400 Thermal 
+device	itherm
+attach	itherm at pci
+file	dev/pci/itherm.c		itherm
+
+# AMD Geode CS5536 PCI-ISA bridge
+device	glxpcib: isabus, gpiobus
+attach	glxpcib at pci
+file	dev/pci/glxpcib.c		glxpcib

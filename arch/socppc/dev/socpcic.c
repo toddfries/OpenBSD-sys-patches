@@ -1,4 +1,4 @@
-/*	$OpenBSD: socpcic.c,v 1.3 2009/03/30 20:09:50 kettenis Exp $	*/
+/*	$OpenBSD: socpcic.c,v 1.8 2009/09/09 20:42:41 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2008 Mark Kettenis
@@ -23,30 +23,55 @@
 #include <machine/autoconf.h>
 #include <machine/bus.h>
 
+#include <dev/ofw/openfirm.h>
+#include <dev/ofw/ofw_pci.h>
+
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcidevs.h>
 
 struct socpcic_softc {
 	struct device	sc_dev;
+
+	int		sc_node;
+
 	bus_space_tag_t	sc_iot;
 	bus_space_handle_t sc_cfg_ioh;
 	struct ppc_bus_space sc_mem_bus_space;
 	struct ppc_bus_space sc_io_bus_space;
+	bus_dma_tag_t	sc_dmat;
 	struct ppc_pci_chipset sc_pc;
+
+	/* Interrupt mapping. */
+	int		sc_map_mask[4];
+	int		*sc_map;
+	int		sc_map_len;
+
+	/* Addres space. */
+	uint32_t	*sc_ranges;
+	int		sc_ranges_len;
 };
 
-int	socpcic_match(struct device *, void *, void *);
-void	socpcic_attach(struct device *, struct device *, void *);
+int	socpcic_mainbus_match(struct device *, void *, void *);
+void	socpcic_mainbus_attach(struct device *, struct device *, void *);
+int	socpcic_obio_match(struct device *, void *, void *);
+void	socpcic_obio_attach(struct device *, struct device *, void *);
 
-struct cfattach socpcic_ca = {
-	sizeof(struct socpcic_softc), socpcic_match, socpcic_attach
+struct cfattach socpcic_mainbus_ca = {
+	sizeof(struct socpcic_softc),
+	socpcic_mainbus_match, socpcic_mainbus_attach
+};
+
+struct cfattach socpcic_obio_ca = {
+	sizeof(struct socpcic_softc),
+	socpcic_obio_match, socpcic_obio_attach
 };
 
 struct cfdriver socpcic_cd = {
 	NULL, "socpcic", DV_DULL
 };
 
+void	socpcic_attach(struct socpcic_softc *sc);
 void	socpcic_attach_hook(struct device *, struct device *,
 	    struct pcibus_attach_args *);
 int	socpcic_bus_maxdevs(void *, int);
@@ -58,24 +83,77 @@ int	 socpcic_intr_map(void *, pcitag_t, int, int, pci_intr_handle_t *);
 const char *socpcic_intr_string(void *, pci_intr_handle_t);
 int	 socpcic_intr_line(void *, pci_intr_handle_t);
 void	*socpcic_intr_establish(void *, pci_intr_handle_t, int,
-	     int (*)(void *), void *, char *);
+	     int (*)(void *), void *, const char *);
 void	 socpcic_intr_disestablish(void *, void *);
 int	 socpcic_ether_hw_addr(struct ppc_pci_chipset *, u_int8_t *);
 
 int	 socpcic_print(void *, const char *);
 
 int
-socpcic_match(struct device *parent, void *cfdata, void *aux)
+socpcic_mainbus_match(struct device *parent, void *cfdata, void *aux)
 {
+	struct mainbus_attach_args *ma = aux;
+	char buf[32];
+
+	if (OF_getprop(ma->ma_node, "device_type", buf, sizeof(buf)) <= 0 ||
+	    strcmp(buf, "pci") != 0)
+		return (0);
+
+	if (OF_getprop(ma->ma_node, "compatible", buf, sizeof(buf)) <= 0 ||
+	    strcmp(buf, "fsl,mpc8349-pci") != 0)
+		return (0);
+
 	return (1);
 }
 
 void
-socpcic_attach(struct device *parent, struct device *self, void *aux)
+socpcic_mainbus_attach(struct device *parent, struct device *self, void *aux)
+{
+	struct socpcic_softc *sc = (void *)self;
+	struct mainbus_attach_args *ma = aux;
+	int reg[4];
+
+	if (OF_getprop(ma->ma_node, "reg", &reg, sizeof(reg)) < sizeof(reg)) {
+		printf(": missing registers\n");
+		return;
+	}
+
+	sc->sc_iot = ma->ma_iot;
+	if (bus_space_map(sc->sc_iot, reg[2], 16, 0, &sc->sc_cfg_ioh)) {
+		printf(": can't map configuration registers\n");
+		return;
+	}
+
+	sc->sc_node = ma->ma_node;
+	sc->sc_dmat = ma->ma_dmat;
+	socpcic_attach(sc);
+}
+
+int
+socpcic_obio_match(struct device *parent, void *cfdata, void *aux)
+{
+	struct obio_attach_args *oa = aux;
+	char buf[32];
+
+	if (OF_getprop(oa->oa_node, "device_type", buf, sizeof(buf)) <= 0 ||
+	    strcmp(buf, "pci") != 0)
+		return (0);
+
+	if (OF_getprop(oa->oa_node, "compatible", buf, sizeof(buf)) <= 0 ||
+	    strcmp(buf, "83xx") != 0)
+		return (0);
+
+	return (1);
+}
+
+void
+socpcic_obio_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct socpcic_softc *sc = (void *)self;
 	struct obio_attach_args *oa = aux;
-	struct pcibus_attach_args pba;
+
+	if (oa->oa_offset == 0x8500)
+		oa->oa_offset = 0x8300;
 
 	sc->sc_iot = oa->oa_iot;
 	if (bus_space_map(sc->sc_iot, oa->oa_offset, 16, 0, &sc->sc_cfg_ioh)) {
@@ -83,8 +161,78 @@ socpcic_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
-	sc->sc_io_bus_space.bus_base = 0xe2000000;
-	sc->sc_io_bus_space.bus_size = 0x01000000;
+	sc->sc_node = oa->oa_node;
+	sc->sc_dmat = oa->oa_dmat;
+	socpcic_attach(sc);
+}
+
+void
+socpcic_attach(struct socpcic_softc *sc)
+{
+	struct pcibus_attach_args pba;
+	struct extent *io_ex;
+	struct extent *mem_ex;
+	bus_addr_t io_base, mem_base;
+	bus_size_t io_size, mem_size;
+	uint32_t *ranges;
+	int len;
+
+	if (OF_getprop(sc->sc_node, "interrupt-map-mask", sc->sc_map_mask,
+	    sizeof(sc->sc_map_mask)) != sizeof(sc->sc_map_mask)) {
+		printf(": missing interrupt-map-mask\n");
+		return;
+	}
+
+	sc->sc_map_len = OF_getproplen(sc->sc_node, "interrupt-map");
+	if (sc->sc_map_len > 0) {
+		sc->sc_map = malloc(sc->sc_map_len, M_DEVBUF, M_NOWAIT);
+		if (sc->sc_map == NULL)
+			panic("out of memory");
+
+		len = OF_getprop(sc->sc_node, "interrupt-map",
+		    sc->sc_map, sc->sc_map_len);
+		KASSERT(len == sc->sc_map_len);
+	}
+
+	sc->sc_ranges_len = OF_getproplen(sc->sc_node, "ranges");
+	if (sc->sc_ranges_len <= 0) {
+		printf(": missing ranges\n");
+		return;
+	}
+
+	sc->sc_ranges = malloc(sc->sc_ranges_len, M_DEVBUF, M_NOWAIT);
+	if (ranges == NULL)
+		panic("out of memory");
+
+	len = OF_getprop(sc->sc_node, "ranges", sc->sc_ranges,
+	    sc->sc_ranges_len);
+	KASSERT(len == sc->sc_ranges_len);
+
+	ranges = sc->sc_ranges;
+	while (len >= 6 * sizeof(uint32_t)) {
+		switch (ranges[0] & OFW_PCI_PHYS_HI_SPACEMASK) {
+		case OFW_PCI_PHYS_HI_SPACE_IO:
+			KASSERT(ranges[1] == 0);
+			KASSERT(ranges[4] == 0);
+			sc->sc_io_bus_space.bus_base = ranges[3];
+			sc->sc_io_bus_space.bus_size = ranges[5];
+			sc->sc_io_bus_space.bus_io = 1;
+			io_base = ranges[2];
+			io_size = ranges[5];
+			break;
+		case  OFW_PCI_PHYS_HI_SPACE_MEM32:
+			KASSERT(ranges[1] == 0);
+			KASSERT(ranges[4] == 0);
+			sc->sc_mem_bus_space.bus_base = ranges[3];
+			sc->sc_mem_bus_space.bus_size = ranges[5];
+			sc->sc_mem_bus_space.bus_io = 0;
+			mem_base = ranges[2];
+			mem_size = ranges[5];
+			break;
+		}
+		len -= 6 * sizeof(uint32_t);
+		ranges += 6;
+	}
 
 	sc->sc_pc.pc_conf_v = sc;
 	sc->sc_pc.pc_attach_hook = socpcic_attach_hook;
@@ -102,18 +250,29 @@ socpcic_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_pc.pc_intr_disestablish = socpcic_intr_disestablish;
 	sc->sc_pc.pc_ether_hw_addr = socpcic_ether_hw_addr;
 
+	io_ex = extent_create("pciio", 0, 0xffffffff, M_DEVBUF, NULL, 0,
+	    EX_NOWAIT | EX_FILLED);
+	if (io_ex != NULL && io_size)
+		extent_free(io_ex, io_base, io_size, EX_NOWAIT);
+	mem_ex = extent_create("pcimem", 0, 0xffffffff, M_DEVBUF, NULL, 0,
+	    EX_NOWAIT | EX_FILLED);
+	if (mem_ex != NULL)
+		extent_free(mem_ex, mem_base, mem_size, EX_NOWAIT);
+
 	bzero(&pba, sizeof(pba));
 	pba.pba_busname = "pci";
 	pba.pba_iot = &sc->sc_io_bus_space;
 	pba.pba_memt = &sc->sc_mem_bus_space;
-	pba.pba_dmat = oa->oa_dmat;
+	pba.pba_dmat = sc->sc_dmat;
+	pba.pba_ioex = io_ex;
+	pba.pba_memex = mem_ex;
 	pba.pba_pc = &sc->sc_pc;
 	pba.pba_domain = pci_ndomains++;
 	pba.pba_bus = 0;
 
 	printf("\n");
 
-	config_found(self, &pba, socpcic_print);
+	config_found((struct device *)sc, &pba, socpcic_print);
 }
 
 void
@@ -197,8 +356,33 @@ int
 socpcic_intr_map(void *cpv, pcitag_t tag, int pin, int line,
     pci_intr_handle_t *ihp)
 {
-	*ihp = 20;		/* XXX */
-	return (0);
+	struct socpcic_softc *sc = cpv;
+	int bus, dev, func;
+	int reg[4];
+	int *map;
+	int len;
+
+	pci_decompose_tag(&sc->sc_pc, tag, &bus, &dev, &func);
+
+	reg[0] = (dev << 11) | (func << 8);
+	reg[1] = reg[2] = 0;
+	reg[3] = pin;
+	
+	map = sc->sc_map;
+	len = sc->sc_map_len;
+	while (len >= 7 * sizeof(int)) {
+		if ((reg[0] & sc->sc_map_mask[0]) == map[0] &&
+		    (reg[1] & sc->sc_map_mask[1]) == map[1] &&
+		    (reg[2] & sc->sc_map_mask[2]) == map[2] &&
+		    (reg[3] & sc->sc_map_mask[3]) == map[3]) {
+			*ihp = map[5];
+			return (0);
+		}
+		len -= 7 * sizeof(int);
+		map += 7;
+	}
+
+	return (1);
 }
 
 const char *
@@ -218,7 +402,7 @@ socpcic_intr_line(void *cpv, pci_intr_handle_t ih)
 
 void *
 socpcic_intr_establish(void *cpv, pci_intr_handle_t ih, int level,
-    int (*func)(void *), void *arg, char *name)
+    int (*func)(void *), void *arg, const char *name)
 {
 	return (intr_establish(ih, IST_LEVEL, level, func, arg, name));
 }

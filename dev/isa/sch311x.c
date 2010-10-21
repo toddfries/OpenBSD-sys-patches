@@ -1,4 +1,4 @@
-/*	$OpenBSD: sch311x.c,v 1.9 2009/04/17 21:48:54 mk Exp $	*/
+/*	$OpenBSD: sch311x.c,v 1.12 2009/08/22 03:51:07 mk Exp $	*/
 /*
  * Copyright (c) 2008 Mark Kettenis <kettenis@openbsd.org>
  * Copyright (c) 2009 Michael Knudsen <mk@openbsd.org>
@@ -160,7 +160,6 @@ struct schsio_softc {
 
 int	schsio_probe(struct device *, void *, void *);
 void	schsio_attach(struct device *, struct device *, void *);
-int	schsio_print(void *, const char *);
 
 static __inline void schsio_config_enable(bus_space_tag_t iot,
     bus_space_handle_t ioh);
@@ -309,7 +308,6 @@ schsio_attach(struct device *parent, struct device *self, void *aux)
 		printf(": can't map i/o space\n");
 		return;
 	}
-	    
 
 	schsio_wdt_init(sc);
 	schsio_hwm_init(sc);
@@ -318,7 +316,6 @@ schsio_attach(struct device *parent, struct device *self, void *aux)
 
 	/* Escape from configuration mode */
 	schsio_config_disable(sc->sc_iot, sc->sc_ioh);
-
 }
 
 void
@@ -477,8 +474,7 @@ schsio_wdt_init(struct schsio_softc *sc)
 	bus_space_write_1(sc->sc_iot, sc->sc_ioh_rr, SCHSIO_WDT_VAL, 0);
 
 	/* Clear triggered status */
-	reg = bus_space_read_1(sc->sc_iot, sc->sc_ioh_rr,
-	    SCHSIO_WDT_CTRL);
+	reg = bus_space_read_1(sc->sc_iot, sc->sc_ioh_rr, SCHSIO_WDT_CTRL);
 	if (reg & SCHSIO_WDT_CTRL_TRIGGERED) {
 		printf(", warning: watchdog triggered");
 		reg &= ~SCHSIO_WDT_CTRL_TRIGGERED;
@@ -520,7 +516,7 @@ schsio_wdt_cb(void *arg, int period)
 
 	bus_space_write_1(sc->sc_iot, sc->sc_ioh_rr, SCHSIO_WDT_TIMEOUT,
 	    reg);
-	    
+
 	/* Set value */
 	bus_space_write_1(sc->sc_iot, sc->sc_ioh_rr, SCHSIO_WDT_VAL, val);
 

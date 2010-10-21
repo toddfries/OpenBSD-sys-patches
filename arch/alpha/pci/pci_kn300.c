@@ -1,4 +1,4 @@
-/* $OpenBSD: pci_kn300.c,v 1.2 2008/07/22 18:45:51 miod Exp $ */
+/* $OpenBSD: pci_kn300.c,v 1.4 2009/09/30 20:18:06 miod Exp $ */
 /* $NetBSD: pci_kn300.c,v 1.28 2005/12/11 12:16:17 christos Exp $ */
 
 /*
@@ -63,7 +63,7 @@ int	dec_kn300_intr_map(struct pci_attach_args *, pci_intr_handle_t *);
 
 const char *dec_kn300_intr_string(void *, pci_intr_handle_t);
 void	*dec_kn300_intr_establish(void *, pci_intr_handle_t,
-	    int, int (*func)(void *), void *, char *);
+	    int, int (*func)(void *), void *, const char *);
 void	dec_kn300_intr_disestablish(void *, void *);
 
 #define	KN300_PCEB_IRQ	16
@@ -180,7 +180,7 @@ dec_kn300_intr_string(ccv, ih)
 	int irq;
 
 	irq = ih & 0x3ff;
-	if (irq > NIRQ)
+	if (irq >= NIRQ)
 		panic("dec_kn300_intr_string: bogus kn300 IRQ 0x%x", irq);
 
 	snprintf(irqstr, sizeof irqstr, "kn300 irq %ld", irq);
@@ -194,14 +194,14 @@ dec_kn300_intr_establish(ccv, ih, level, func, arg, name)
         pci_intr_handle_t ih;
         int level;
         int (*func) (void *);
-	char *name;
+	const char *name;
 {           
 	struct mcpcia_config *ccp = ccv;
 	void *cookie;
 	int irq;
 
 	irq = ih & 0x3ff;
-	if (irq > NIRQ)
+	if (irq >= NIRQ)
 		panic("dec_kn300_intr_establish: bogus kn300 IRQ 0x%x", irq);
 
 	cookie = alpha_shared_intr_establish(kn300_pci_intr, irq, IST_LEVEL,

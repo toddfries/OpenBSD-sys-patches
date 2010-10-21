@@ -1,4 +1,4 @@
-/*	$OpenBSD: agp_intel.c,v 1.12 2008/11/09 15:11:19 oga Exp $	*/
+/*	$OpenBSD: agp_intel.c,v 1.18 2010/08/07 20:47:24 deraadt Exp $	*/
 /*	$NetBSD: agp_intel.c,v 1.3 2001/09/15 00:25:00 thorpej Exp $	*/
 
 /*-
@@ -34,7 +34,6 @@
 #include <sys/malloc.h>
 #include <sys/kernel.h>
 #include <sys/lock.h>
-#include <sys/proc.h>
 #include <sys/agpio.h>
 #include <sys/device.h>
 #include <sys/agpio.h>
@@ -53,6 +52,8 @@ struct agp_intel_softc {
 	struct agp_gatt 	*gatt;
 	pci_chipset_tag_t	 isc_pc;
 	pcitag_t		 isc_tag;
+	bus_addr_t		 isc_apaddr;
+	bus_size_t		 isc_apsize;
 	u_int			 aperture_mask;
 	enum {
 		CHIP_INTEL,
@@ -62,20 +63,27 @@ struct agp_intel_softc {
 		CHIP_I850,
 		CHIP_I865
 	}			 chiptype; 
-	bus_size_t		 initial_aperture; /* startup aperture size */
+	/* registers saved during a suspend/resume cycle. */
+	pcireg_t		 savectrl;
+	pcireg_t		 savecmd;
+	pcireg_t		 savecfg;
 };
 
 
 void	agp_intel_attach(struct device *, struct device *, void *);
+int	agp_intel_activate(struct device *, int);
+void	agp_intel_save(struct agp_intel_softc *);
+void	agp_intel_restore(struct agp_intel_softc *);
 int	agp_intel_probe(struct device *, void *, void *);
 bus_size_t agp_intel_get_aperture(void *);
 int	agp_intel_set_aperture(void *, bus_size_t);
-int	agp_intel_bind_page(void *, off_t, bus_addr_t);
-int	agp_intel_unbind_page(void *, off_t);
+void	agp_intel_bind_page(void *, bus_addr_t, paddr_t, int);
+void	agp_intel_unbind_page(void *, bus_addr_t);
 void	agp_intel_flush_tlb(void *);
 
 struct cfattach intelagp_ca = {
-	sizeof(struct agp_intel_softc), agp_intel_probe, agp_intel_attach
+	sizeof(struct agp_intel_softc), agp_intel_probe, agp_intel_attach,
+	NULL, agp_intel_activate
 };
 
 struct cfdriver intelagp_cd = {
@@ -83,7 +91,6 @@ struct cfdriver intelagp_cd = {
 };
 
 const struct agp_methods agp_intel_methods = {
-	agp_intel_get_aperture,
 	agp_intel_bind_page,
 	agp_intel_unbind_page,
 	agp_intel_flush_tlb,
@@ -161,6 +168,13 @@ agp_intel_attach(struct device *parent, struct device *self, void *aux)
 		break;
 	default:
 		isc->chiptype = CHIP_INTEL;
+		break;
+	}
+
+	if (pci_mapreg_info(pa->pa_pc, pa->pa_tag, AGP_APBASE,
+	    PCI_MAPREG_TYPE_MEM, &isc->isc_apaddr, NULL, NULL) != 0) {
+		printf(": can't get aperture info\n");
+		return;
 	}
 
 	/* Determine maximum supported aperture size. */
@@ -169,11 +183,10 @@ agp_intel_attach(struct device *parent, struct device *self, void *aux)
 	isc->aperture_mask = pci_conf_read(pa->pa_pc, pa->pa_tag,
 		AGP_INTEL_APSIZE) & APSIZE_MASK;
 	pci_conf_write(pa->pa_pc, pa->pa_tag, AGP_INTEL_APSIZE, value);
-	isc->initial_aperture = agp_intel_get_aperture(isc);
+	isc->isc_apsize = agp_intel_get_aperture(isc);
 
 	for (;;) {
-		bus_size_t size = agp_intel_get_aperture(isc);
-		gatt = agp_alloc_gatt(pa->pa_dmat, size);
+		gatt = agp_alloc_gatt(pa->pa_dmat, isc->isc_apsize);
 		if (gatt != NULL)
 			break;
 
@@ -181,7 +194,8 @@ agp_intel_attach(struct device *parent, struct device *self, void *aux)
 		 * almost certainly error allocating contigious dma memory
 		 * so reduce aperture so that the gatt size reduces.
 		 */
-		if (agp_intel_set_aperture(isc, size / 2)) {
+		isc->isc_apsize /= 2;
+		if (agp_intel_set_aperture(isc, isc->isc_apsize)) {
 			printf(": failed to set aperture\n");
 			return;
 		}
@@ -202,6 +216,7 @@ agp_intel_attach(struct device *parent, struct device *self, void *aux)
 		pci_conf_write(isc->isc_pc, isc->isc_tag, AGP_INTEL_AGPCTRL,
 		    pci_conf_read(isc->isc_pc, isc->isc_tag,
 		    AGP_INTEL_AGPCTRL) | AGPCTRL_GTLB);
+		break;
 	}
 
 	/* Enable things, clear errors etc. */
@@ -228,6 +243,7 @@ agp_intel_attach(struct device *parent, struct device *self, void *aux)
 		reg &= ~NBXCFG_APAE;
 		reg |=  NBXCFG_AAGN;
 		pci_conf_write(pa->pa_pc, pa->pa_tag, AGP_INTEL_NBXCFG, reg);
+		break;
 	}
 
 	/* Clear Error status */
@@ -248,8 +264,120 @@ agp_intel_attach(struct device *parent, struct device *self, void *aux)
 	}
 	
 	isc->agpdev = (struct agp_softc *)agp_attach_bus(pa, &agp_intel_methods,
-	    AGP_APBASE, PCI_MAPREG_TYPE_MEM, &isc->dev);
+	    isc->isc_apaddr, isc->isc_apsize, &isc->dev);
 	return;
+}
+
+int
+agp_intel_activate(struct device *arg, int act)
+{
+	struct agp_intel_softc *isc = (struct agp_intel_softc *)arg;
+
+	switch (act) {
+	case DVACT_SUSPEND:
+		agp_intel_save(isc);
+		break;
+	case DVACT_RESUME:
+		agp_intel_restore(isc);
+		break;
+	}
+
+	return (0);
+}
+
+void
+agp_intel_save(struct agp_intel_softc *isc)
+{
+
+	if (isc->chiptype != CHIP_I443) {
+		isc->savectrl = pci_conf_read(isc->isc_pc, isc->isc_tag,
+		    AGP_INTEL_AGPCTRL);
+	}
+
+	switch (isc->chiptype) {
+	case CHIP_I845:
+	case CHIP_I865:
+		isc->savecmd = pci_conf_read(isc->isc_pc, isc->isc_tag,
+		    AGP_I840_MCHCFG);
+
+		break;
+	case CHIP_I840:
+	case CHIP_I850:
+		isc->savecmd = pci_conf_read(isc->isc_pc, isc->isc_tag,
+		    AGP_INTEL_AGPCMD);
+		isc->savecfg = pci_conf_read(isc->isc_pc, isc->isc_tag,
+		    AGP_I840_MCHCFG);
+
+		break;
+	default:
+		isc->savecfg = pci_conf_read(isc->isc_pc, isc->isc_tag,
+		    AGP_INTEL_NBXCFG);
+		break;
+	}
+}
+
+void
+agp_intel_restore(struct agp_intel_softc *isc)
+{
+	/*
+	 * reset size now just in case, if it worked before then sanity
+	 * checking will not fail
+	 */
+	(void)agp_intel_set_aperture(isc, isc->isc_apsize);
+
+	/* Install the gatt. */
+	pci_conf_write(isc->isc_pc, isc->isc_tag, AGP_INTEL_ATTBASE,
+	    isc->gatt->ag_physical);
+	
+	/* Enable the GLTB and setup the control register. */
+	switch (isc->chiptype) {
+	case CHIP_I443:
+		pci_conf_write(isc->isc_pc, isc->isc_tag, AGP_INTEL_AGPCTRL,
+		    AGPCTRL_AGPRSE | AGPCTRL_GTLB);
+		break;
+	default:
+		pci_conf_write(isc->isc_pc, isc->isc_tag, AGP_INTEL_AGPCTRL,
+		    isc->savectrl);
+		break;
+	}
+
+	/* Enable things, clear errors etc. */
+	switch (isc->chiptype) {
+	case CHIP_I845:
+	case CHIP_I865:
+		pci_conf_write(isc->isc_pc, isc->isc_tag,
+		    AGP_I840_MCHCFG, isc->savecmd);
+		break;
+	case CHIP_I840:
+	case CHIP_I850:
+		pci_conf_write(isc->isc_pc, isc->isc_tag,
+		    AGP_INTEL_AGPCMD, isc->savecmd);
+		pci_conf_write(isc->isc_pc, isc->isc_tag,
+		    AGP_I840_MCHCFG, isc->savecfg);
+		break;
+	default:
+		pci_conf_write(isc->isc_pc, isc->isc_tag,
+		    AGP_INTEL_NBXCFG, isc->savecfg);
+		break;
+	}
+
+	/* Clear Error status */
+	switch (isc->chiptype) {
+	case CHIP_I840:
+		pci_conf_write(isc->isc_pc, isc->isc_tag,
+		    AGP_INTEL_I8XX_ERRSTS, 0xc000);
+		break;
+	case CHIP_I845:
+	case CHIP_I850:
+	case CHIP_I865:
+		pci_conf_write(isc->isc_pc, isc->isc_tag,
+		    AGP_INTEL_I8XX_ERRSTS, 0x00ff);
+		break;
+	default:
+		pci_conf_write(isc->isc_pc, isc->isc_tag,
+		    AGP_INTEL_ERRSTS, 0x70);
+		break;
+	}
 }
 
 #if 0
@@ -319,28 +447,21 @@ agp_intel_set_aperture(void *sc, bus_size_t aperture)
 	return (0);
 }
 
-int
-agp_intel_bind_page(void *sc, off_t offset, bus_addr_t physical)
+void
+agp_intel_bind_page(void *sc, bus_addr_t offset, paddr_t physical, int flags)
 {
 	struct agp_intel_softc *isc = sc;
 
-	if (offset < 0 || offset >= (isc->gatt->ag_entries << AGP_PAGE_SHIFT))
-		return (EINVAL);
-
-	isc->gatt->ag_virtual[offset >> AGP_PAGE_SHIFT] = physical | 0x17;
-	return (0);
+	isc->gatt->ag_virtual[(offset - isc->isc_apaddr) >> AGP_PAGE_SHIFT] =
+	    physical | 0x17;
 }
 
-int
-agp_intel_unbind_page(void *sc, off_t offset)
+void
+agp_intel_unbind_page(void *sc, bus_size_t offset)
 {
 	struct agp_intel_softc *isc = sc;
 
-	if (offset < 0 || offset >= (isc->gatt->ag_entries << AGP_PAGE_SHIFT))
-		return (EINVAL);
-
-	isc->gatt->ag_virtual[offset >> AGP_PAGE_SHIFT] = 0;
-	return (0);
+	isc->gatt->ag_virtual[(offset - isc->isc_apaddr) >> AGP_PAGE_SHIFT] = 0;
 }
 
 void
@@ -368,5 +489,6 @@ agp_intel_flush_tlb(void *sc)
 		    0x2200);
 		pci_conf_write(isc->isc_pc, isc->isc_tag, AGP_INTEL_AGPCTRL,
 		    0x2280);
+		break;
 	}
 }

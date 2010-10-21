@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.h,v 1.19 2009/04/12 22:17:52 kettenis Exp $	*/
+/*	$OpenBSD: conf.h,v 1.21 2010/07/21 15:40:04 deraadt Exp $	*/
 /*	$NetBSD: conf.h,v 1.9 2001/03/26 12:33:26 lukem Exp $	*/
 
 /*-
@@ -40,7 +40,7 @@ cdev_decl(openprom);
 #define cdev_openprom_init(c,n) { \
 	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
 	(dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
-	(dev_type_stop((*))) nullop, 0, (dev_type_poll((*))) enodev, \
+	(dev_type_stop((*))) nullop, 0, selfalse, \
 	(dev_type_mmap((*))) enodev }
 
 cdev_decl(uperf);
@@ -49,7 +49,7 @@ cdev_decl(uperf);
 #define cdev_uperf_init(c,n) { \
 	dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) enodev, \
 	(dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
-	(dev_type_stop((*))) nullop, 0, (dev_type_poll((*))) enodev, \
+	(dev_type_stop((*))) nullop, 0, selfalse, \
 	(dev_type_mmap((*))) enodev }
 
 #define	cdev_gen_init(c,n) { \
@@ -99,6 +99,7 @@ cdev_decl(sabtty);
 
 cdev_decl(pcons);
 cdev_decl(vcons);
+cdev_decl(vcctty);
 cdev_decl(sbbc);
 
 cdev_decl(com);

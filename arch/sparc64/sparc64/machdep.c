@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.118 2009/04/20 00:42:06 oga Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.124 2010/06/27 03:03:48 thib Exp $	*/
 /*	$NetBSD: machdep.c,v 1.108 2001/07/24 19:30:14 eeh Exp $ */
 
 /*-
@@ -97,10 +97,6 @@
 #include <sys/exec_elf.h>
 #include <dev/rndvar.h>
 
-#ifdef SYSVMSG
-#include <sys/msg.h>
-#endif
-
 #define _SPARC_BUS_DMA_PRIVATE
 #include <machine/autoconf.h>
 #include <machine/bus.h>
@@ -179,6 +175,9 @@ int	bufpages = 0;
 #endif
 int	bufcachepercent = BUFCACHEPERCENT;
 
+struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
+struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
+
 int	physmem;
 extern	caddr_t msgbufaddr;
 
@@ -211,7 +210,6 @@ extern int64_t cecclast;
 int   safepri = 0;
 
 void blink_led_timeout(void *);
-caddr_t	allocsys(caddr_t);
 void	dumpsys(void);
 void	stackdump(void);
 
@@ -221,8 +219,6 @@ void	stackdump(void);
 void
 cpu_startup()
 {
-	caddr_t v;
-	long sz;
 #ifdef DEBUG
 	extern int pmapdebug;
 	int opmapdebug = pmapdebug;
@@ -243,22 +239,6 @@ cpu_startup()
 	/*identifycpu();*/
 	printf("real mem = %lu (%luMB)\n", ptoa((psize_t)physmem),
 	    ptoa((psize_t)physmem)/1024/1024);
-	/*
-	 * Find out how much space we need, allocate it,
-	 * and then give everything true virtual addresses.
-	 */
-	sz = (long)allocsys(NULL);
-	if ((v = (caddr_t)uvm_km_alloc(kernel_map, round_page(sz))) == 0)
-		panic("startup: no room for %lx bytes of tables", sz);
-	if (allocsys(v) - v != sz)
-		panic("startup: table size inconsistency");
-
-	/*
-	 * Determine how many buffers to allocate.
-	 * We allocate bufcachepercent% of memory for buffer space.
-	 */
-	if (bufpages == 0)
-		bufpages = physmem * bufcachepercent / 100;
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
@@ -282,21 +262,6 @@ cpu_startup()
 #if 0
 	pmap_redzone();
 #endif
-}
-
-caddr_t
-allocsys(caddr_t v)
-{
-#define valloc(name, type, num) \
-	    v = (caddr_t)(((name) = (type *)v) + (num))
-#ifdef SYSVMSG
-	valloc(msgpool, char, msginfo.msgmax);
-	valloc(msgmaps, struct msgmap, msginfo.msgseg);
-	valloc(msghdrs, struct msg, msginfo.msgtql);
-	valloc(msqids, struct msqid_ds, msginfo.msgmni);
-#endif
-
-	return (v);
 }
 
 /*
@@ -1513,9 +1478,11 @@ _bus_dmamem_map(t, t0, segs, nsegs, size, kvap, flags)
 	int flags;
 {
 	struct vm_page *m;
-	vaddr_t va;
+	vaddr_t va, sva;
+	size_t ssize;
 	bus_addr_t addr, cbit;
 	struct pglist *mlist;
+	int error;
 
 #ifdef DIAGNOSTIC
 	if (nsegs != 1)
@@ -1533,6 +1500,8 @@ _bus_dmamem_map(t, t0, segs, nsegs, size, kvap, flags)
 	if (flags & BUS_DMA_NOCACHE)
 		cbit |= PMAP_NC;
 
+	sva = va;
+	ssize = size;
 	mlist = segs[0]._ds_mlist;
 	TAILQ_FOREACH(m, mlist, pageq) {
 #ifdef DIAGNOSTIC
@@ -1540,9 +1509,18 @@ _bus_dmamem_map(t, t0, segs, nsegs, size, kvap, flags)
 			panic("_bus_dmamem_map: size botch");
 #endif
 		addr = VM_PAGE_TO_PHYS(m);
-		pmap_enter(pmap_kernel(), va, addr | cbit,
-		    VM_PROT_READ | VM_PROT_WRITE,
-		    VM_PROT_READ | VM_PROT_WRITE | PMAP_WIRED);
+		error = pmap_enter(pmap_kernel(), va, addr | cbit,
+		    VM_PROT_READ | VM_PROT_WRITE, VM_PROT_READ |
+		    VM_PROT_WRITE | PMAP_WIRED | PMAP_CANFAIL);
+		if (error) {
+			/*
+			 * Clean up after ourselves.
+			 * XXX uvm_wait on WAITOK
+			 */
+			pmap_update(pmap_kernel());
+			uvm_km_free(kernel_map, va, ssize);
+			return (error);
+		}
 		va += PAGE_SIZE;
 		size -= PAGE_SIZE;
 	}
@@ -1568,7 +1546,7 @@ _bus_dmamem_unmap(t, t0, kva, size)
 #endif
 
 	size = round_page(size);
-	uvm_km_free(kernel_map, (vaddr_t)kva, (vaddr_t)kva + size);
+	uvm_km_free(kernel_map, (vaddr_t)kva, size);
 }
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_syscalls.c,v 1.70 2009/02/22 07:47:22 otto Exp $	*/
+/*	$OpenBSD: uipc_syscalls.c,v 1.78 2010/09/22 04:57:55 matthew Exp $	*/
 /*	$NetBSD: uipc_syscalls.c,v 1.19 1996/02/09 19:00:48 christos Exp $	*/
 
 /*
@@ -53,6 +53,8 @@
 
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
+
+#include <net/route.h>
 
 /*
  * System call interface to the socket abstraction.
@@ -176,7 +178,7 @@ sys_accept(struct proc *p, void *v, register_t *retval)
 			head->so_error = ECONNABORTED;
 			break;
 		}
-		error = tsleep(&head->so_timeo, PSOCK | PCATCH, netcon, 0);
+		error = tsleep(&head->so_timeo, PSOCK | PCATCH, "netcon", 0);
 		if (error) {
 			goto bad;
 		}
@@ -209,12 +211,9 @@ sys_accept(struct proc *p, void *v, register_t *retval)
 		 * do another wakeup so some other process might
 		 * have a chance at it.
 		 */
-		so->so_head = head;
-		head->so_qlen++;
-		so->so_onq = &head->so_q;
-		TAILQ_INSERT_HEAD(so->so_onq, so, so_qe);
+		soqinsque(head, so, 1);
 		wakeup_one(&head->so_timeo);
-		goto bad;
+		goto unlock;
 	}
 	*retval = tmpfd;
 
@@ -244,8 +243,9 @@ sys_accept(struct proc *p, void *v, register_t *retval)
 		FILE_SET_MATURE(fp);
 	}
 	m_freem(nam);
-bad:
+unlock:
 	fdpunlock(p->p_fd);
+bad:
 	splx(s);
 	FRELE(headfp);
 	return (error);
@@ -287,7 +287,7 @@ sys_connect(struct proc *p, void *v, register_t *retval)
 	s = splsoftnet();
 	while ((so->so_state & SS_ISCONNECTING) && so->so_error == 0) {
 		error = tsleep(&so->so_timeo, PSOCK | PCATCH,
-		    netcon, 0);
+		    "netcon2", 0);
 		if (error)
 			break;
 	}
@@ -993,14 +993,15 @@ bad:
 	return (error);
 }
 
+#ifdef COMPAT_O47
 /*
  * Get eid of peer for connected socket.
  */
 /* ARGSUSED */
 int
-sys_getpeereid(struct proc *p, void *v, register_t *retval)
+compat_o47_sys_getpeereid(struct proc *p, void *v, register_t *retval)
 {
-	struct sys_getpeereid_args /* {
+	struct compat_o47_sys_getpeereid_args /* {
 		syscallarg(int) fdes;
 		syscallarg(uid_t *) euid;
 		syscallarg(gid_t *) egid;
@@ -1008,7 +1009,7 @@ sys_getpeereid(struct proc *p, void *v, register_t *retval)
 	struct file *fp;
 	struct socket *so;
 	struct mbuf *m = NULL;
-	struct unpcbid *id;
+	struct sockpeercred *id;
 	int error;
 
 	if ((error = getsock(p->p_fd, SCARG(uap, fdes), &fp)) != 0)
@@ -1024,19 +1025,20 @@ sys_getpeereid(struct proc *p, void *v, register_t *retval)
 		goto bad;
 	}	
 	error = (*so->so_proto->pr_usrreq)(so, PRU_PEEREID, 0, m, 0, p);
-	if (!error && m->m_len != sizeof(struct unpcbid))
+	if (!error && m->m_len != sizeof(struct sockpeercred))
 		error = EOPNOTSUPP;
 	if (error)
 		goto bad;
-	id = mtod(m, struct unpcbid *);
-	error = copyout(&(id->unp_euid), SCARG(uap, euid), sizeof(uid_t));
+	id = mtod(m, struct sockpeercred *);
+	error = copyout(&(id->uid), SCARG(uap, euid), sizeof(uid_t));
 	if (error == 0)
-		error = copyout(&(id->unp_egid), SCARG(uap, egid), sizeof(gid_t));
+		error = copyout(&(id->gid), SCARG(uap, egid), sizeof(gid_t));
 bad:
 	FRELE(fp);
 	m_freem(m);
 	return (error);
 }
+#endif /* COMPAT_O47 */
 
 int
 sockargs(struct mbuf **mp, const void *buf, size_t buflen, int type)
@@ -1092,5 +1094,35 @@ getsock(struct filedesc *fdp, int fdes, struct file **fpp)
 	*fpp = fp;
 	FREF(fp);
 
+	return (0);
+}
+
+/* ARGSUSED */
+int
+sys_setrtable(struct proc *p, void *v, register_t *retval)
+{
+	struct sys_setrtable_args /* {
+		syscallarg(int) rtableid;
+	} */ *uap = v;
+	int rtableid, error;
+
+	rtableid = SCARG(uap, rtableid);
+
+	if (p->p_p->ps_rtableid == (u_int)rtableid)
+		return (0);
+	if (p->p_p->ps_rtableid != 0 && (error = suser(p, 0)) != 0)
+		return (error);
+	if (rtableid < 0 || !rtable_exists((u_int)rtableid))
+		return (EINVAL);
+
+	p->p_p->ps_rtableid = (u_int)rtableid;
+	return (0);
+}
+
+/* ARGSUSED */
+int
+sys_getrtable(struct proc *p, void *v, register_t *retval)
+{
+	*retval = (int)p->p_p->ps_rtableid;
 	return (0);
 }

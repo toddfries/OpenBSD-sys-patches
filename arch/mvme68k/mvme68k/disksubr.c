@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.63 2008/06/12 06:58:36 deraadt Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.68 2010/04/23 15:25:20 jsing Exp $	*/
 /*
  * Copyright (c) 1998 Steve Murphree, Jr.
  * Copyright (c) 1995 Dale Rahn.
@@ -33,8 +33,8 @@
 #include <sys/disklabel.h>
 #include <sys/disk.h>
 
-void bsdtocpulabel(struct disklabel *, struct mvmedisklabel *);
-void cputobsdlabel(struct disklabel *, struct mvmedisklabel *);
+void	bsdtocpulabel(struct disklabel *, struct mvmedisklabel *);
+int	cputobsdlabel(struct disklabel *, struct mvmedisklabel *);
 
 /*
  * Attempt to read a disk label from a device
@@ -45,16 +45,14 @@ void cputobsdlabel(struct disklabel *, struct mvmedisklabel *);
  * Returns NULL on success and an error string on failure.
  */
 
-char *
+int
 readdisklabel(dev_t dev, void (*strat)(struct buf *),
     struct disklabel *lp, int spoofonly)
 {
 	struct buf *bp = NULL;
-	struct mvmedisklabel *mlp;
 	int error;
-	char *msg;
 
-	if ((msg = initdisklabel(lp)))
+	if ((error = initdisklabel(lp)))
 		goto done;
 
 	/* get a buffer and initialize it */
@@ -69,34 +67,24 @@ readdisklabel(dev_t dev, void (*strat)(struct buf *),
 	bp->b_bcount = lp->d_secsize;
 	bp->b_flags = B_BUSY | B_READ | B_RAW;
 	(*strat)(bp);
-	error = biowait(bp);
-	if (error) {
-		msg = "disk label read error";
+	if (biowait(bp)) {
+		error = bp->b_error;
 		goto done;
 	}
 
-	mlp = (struct mvmedisklabel *)bp->b_data;
-	if (mlp->magic1 != DISKMAGIC || mlp->magic2 != DISKMAGIC) {
-		msg = "no disk label";
+	error = cputobsdlabel(lp, (struct mvmedisklabel *)bp->b_data);
+	if (error == 0)
 		goto done;
-	}
-
-	cputobsdlabel(lp, mlp);
-	if (dkcksum(lp) == 0)
-		goto done;
-	msg = "disk label corrupted";
 
 #if defined(CD9660)
-	if (iso_disklabelspoof(dev, strat, lp) == 0) {
-		msg = NULL;
+	error = iso_disklabelspoof(dev, strat, lp);
+	if (error == 0)
 		goto done;
-	}
 #endif
 #if defined(UDF)
-	if (udf_disklabelspoof(dev, strat, lp) == 0) {
-		msg = NULL;
+	error = udf_disklabelspoof(dev, strat, lp);
+	if (error == 0)
 		goto done;
-	}
 #endif
 
 done:
@@ -104,7 +92,7 @@ done:
 		bp->b_flags |= B_INVAL;
 		brelse(bp);
 	}
-	return (msg);
+	return (error);
 }
 
 /*
@@ -120,6 +108,7 @@ writedisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp)
 	bp = geteblk((int)lp->d_secsize);
 	bp->b_dev = dev;
 
+	/* Read it in, slap the new label in, and write it back out */
 	bp->b_blkno = LABELSECTOR;
 	bp->b_bcount = lp->d_secsize;
 	bp->b_flags = B_BUSY | B_READ | B_RAW;
@@ -146,6 +135,20 @@ bsdtocpulabel(struct disklabel *lp, struct mvmedisklabel *clp)
 {
 	char *tmot = "MOTOROLA", *id = "M68K", *mot;
 	int i;
+	u_short osa_u, osa_l, osl;
+	u_int oss;
+
+	/* preserve existing VID boot code information */
+	osa_u = clp->vid_osa_u;
+	osa_l = clp->vid_osa_l;
+	osl = clp->vid_osl;
+	oss = clp->vid_oss;
+	bzero(clp, sizeof(*clp));
+	clp->vid_osa_u = osa_u;
+	clp->vid_osa_l = osa_l;
+	clp->vid_osl = osl;
+	clp->vid_oss = oss;
+	clp->vid_cas = clp->vid_cal = 1;
 
 	clp->magic1 = lp->d_magic;
 	clp->type = lp->d_type;
@@ -159,28 +162,13 @@ bsdtocpulabel(struct disklabel *lp, struct mvmedisklabel *clp)
 
 	clp->secpercyl = lp->d_secpercyl;
 	clp->secperunit = DL_GETDSIZE(lp);
-	clp->sparespertrack = lp->d_sparespertrack;
-	clp->sparespercyl = lp->d_sparespercyl;
 	clp->acylinders = lp->d_acylinders;
-	clp->rpm = lp->d_rpm;
 
-	clp->cfg_ilv = lp->d_interleave;
-	clp->cfg_sof = lp->d_trackskew;
-	clp->cylskew = lp->d_cylskew;
-	clp->headswitch = lp->d_headswitch;
-
-	/* this silly table is for winchester drives */
-	if (lp->d_trkseek < 6)
-		clp->cfg_ssr = 0;
-	else if (lp->d_trkseek < 10)
-		clp->cfg_ssr = 1;
-	else if (lp->d_trkseek < 15)
-		clp->cfg_ssr = 2;
-	else if (lp->d_trkseek < 20)
-		clp->cfg_ssr = 3;
-	else
-		clp->cfg_ssr = 4;
-
+	clp->cfg_ilv = 1;
+	clp->cfg_sof = 1;
+	clp->cylskew = 1;
+	clp->headswitch = 0;
+	clp->cfg_ssr = 0;
 	clp->flags = lp->d_flags;
 	for (i = 0; i < NDDATA; i++)
 		clp->drivedata[i] = lp->d_drivedata[i];
@@ -206,10 +194,13 @@ bsdtocpulabel(struct disklabel *lp, struct mvmedisklabel *clp)
 		*mot++ = *id++;
 }
 
-void
+int
 cputobsdlabel(struct disklabel *lp, struct mvmedisklabel *clp)
 {
 	int i;
+
+	if (clp->magic1 != DISKMAGIC || clp->magic2 != DISKMAGIC)
+		return (EINVAL);	/* no disk label */
 
 	lp->d_magic = clp->magic1;
 	lp->d_type = clp->type;
@@ -224,33 +215,7 @@ cputobsdlabel(struct disklabel *lp, struct mvmedisklabel *clp)
 	lp->d_secpercyl = clp->secpercyl;
 	if (DL_GETDSIZE(lp) == 0)
 		DL_SETDSIZE(lp, clp->secperunit);
-	lp->d_sparespertrack = clp->sparespertrack;
-	lp->d_sparespercyl = clp->sparespercyl;
 	lp->d_acylinders = clp->acylinders;
-	lp->d_rpm = clp->rpm;
-	lp->d_interleave = clp->cfg_ilv;
-	lp->d_trackskew = clp->cfg_sof;
-	lp->d_cylskew = clp->cylskew;
-	lp->d_headswitch = clp->headswitch;
-
-	/* this silly table is for winchester drives */
-	switch (clp->cfg_ssr) {
-	case 1:
-		lp->d_trkseek = 6;
-		break;
-	case 2:
-		lp->d_trkseek = 10;
-		break;
-	case 3:
-		lp->d_trkseek = 15;
-		break;
-	case 4:
-		lp->d_trkseek = 20;
-		break;
-	default:
-		lp->d_trkseek = 0;
-	}
-
 	lp->d_flags = clp->flags;
 	for (i = 0; i < NDDATA; i++)
 		lp->d_drivedata[i] = clp->drivedata[i];
@@ -280,4 +245,5 @@ cputobsdlabel(struct disklabel *lp, struct mvmedisklabel *clp)
 	lp->d_version = 1;
 	lp->d_checksum = 0;
 	lp->d_checksum = dkcksum(lp);
+	return (0);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uhub.c,v 1.49 2008/06/26 05:42:18 ray Exp $ */
+/*	$OpenBSD: uhub.c,v 1.55 2010/09/23 05:44:15 jakemsr Exp $ */
 /*	$NetBSD: uhub.c,v 1.64 2003/02/08 03:32:51 ichiro Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/uhub.c,v 1.18 1999/11/17 22:33:43 n_hibma Exp $	*/
 
@@ -65,7 +65,8 @@ struct uhub_softc {
 	struct device		sc_dev;		/* base device */
 	usbd_device_handle	sc_hub;		/* USB device */
 	usbd_pipe_handle	sc_ipipe;	/* interrupt pipe */
-	u_int8_t		sc_status[1];	/* XXX more ports */
+	u_int8_t		*sc_statusbuf;	/* per port status buffer */
+	size_t			sc_statuslen;	/* status bufferlen */
 	u_char			sc_running;
 };
 #define UHUB_PROTO(sc) ((sc)->sc_hub->ddesc.bDeviceProtocol)
@@ -84,7 +85,7 @@ void uhub_intr(usbd_xfer_handle, usbd_private_handle,usbd_status);
 int uhub_match(struct device *, void *, void *); 
 void uhub_attach(struct device *, struct device *, void *); 
 int uhub_detach(struct device *, int); 
-int uhub_activate(struct device *, enum devact); 
+int uhub_activate(struct device *, int); 
 
 struct cfdriver uhub_cd = { 
 	NULL, "uhub", DV_DULL 
@@ -191,10 +192,15 @@ uhub_attach(struct device *parent, struct device *self, void *aux)
 		goto bad;
 	}
 
-	hub = malloc(sizeof(*hub) + (nports-1) * sizeof(struct usbd_port),
-		     M_USBDEV, M_NOWAIT);
+	hub = malloc(sizeof(*hub), M_USBDEV, M_NOWAIT);
 	if (hub == NULL)
 		return;
+	hub->ports = malloc(sizeof(struct usbd_port) * nports,
+	    M_USBDEV, M_NOWAIT);
+	if (hub->ports == NULL) {
+		free(hub, M_USBDEV);
+		return;
+	}
 	dev->hub = hub;
 	dev->hub->hubsoftc = sc;
 	hub->explore = uhub_explore;
@@ -229,9 +235,14 @@ uhub_attach(struct device *parent, struct device *self, void *aux)
 		goto bad;
 	}
 
+	sc->sc_statuslen = (nports + 1 + 7) / 8;
+	sc->sc_statusbuf = malloc(sc->sc_statuslen, M_USBDEV, M_NOWAIT);
+	if (!sc->sc_statusbuf)
+		goto bad;
+
 	err = usbd_open_pipe_intr(iface, ed->bEndpointAddress,
-		  USBD_SHORT_XFER_OK, &sc->sc_ipipe, sc, sc->sc_status,
-		  sizeof(sc->sc_status), uhub_intr, UHUB_INTR_INTERVAL);
+		  USBD_SHORT_XFER_OK, &sc->sc_ipipe, sc, sc->sc_statusbuf,
+		  sc->sc_statuslen, uhub_intr, UHUB_INTR_INTERVAL);
 	if (err) {
 		printf("%s: cannot open interrupt pipe\n",
 		       sc->sc_dev.dv_xname);
@@ -320,6 +331,10 @@ uhub_attach(struct device *parent, struct device *self, void *aux)
 	return;
 
  bad:
+	if (sc->sc_statusbuf)
+		free(sc->sc_statusbuf, M_USBDEV);
+	if (hub->ports)
+		free(hub->ports, M_USBDEV);
 	if (hub)
 		free(hub, M_USBDEV);
 	dev->hub = NULL;
@@ -338,6 +353,11 @@ uhub_explore(usbd_device_handle dev)
 
 	DPRINTFN(10, ("uhub_explore dev=%p addr=%d\n", dev, dev->address));
 
+	if (dev->bus->dying) {
+		DPRINTF(("%s: root hub gone at start\n", __func__));
+		return (USBD_IOERROR);
+	}
+
 	if (!sc->sc_running)
 		return (USBD_NOT_STARTED);
 
@@ -345,7 +365,7 @@ uhub_explore(usbd_device_handle dev)
 	if (dev->depth > USB_HUB_MAX_DEPTH)
 		return (USBD_TOO_DEEP);
 
-	for(port = 1; port <= hd->bNbrPorts; port++) {
+	for (port = 1; port <= hd->bNbrPorts; port++) {
 		up = &dev->hub->ports[port-1];
 		err = usbd_get_port_status(dev, port, &up->status);
 		if (err) {
@@ -497,7 +517,7 @@ uhub_explore(usbd_device_handle dev)
 }
 
 int
-uhub_activate(struct device *self, enum devact act)
+uhub_activate(struct device *self, int act)
 {
 	struct uhub_softc *sc = (struct uhub_softc *)self;
 	struct usbd_hub *hub = sc->sc_hub->hub;
@@ -556,6 +576,10 @@ uhub_detach(struct device *self, int flags)
 
 	if (hub->ports[0].tt)
 		free(hub->ports[0].tt, M_USBDEV);
+	if (sc->sc_statusbuf)
+		free(sc->sc_statusbuf, M_USBDEV);
+	if (hub->ports)
+		free(hub->ports, M_USBDEV);
 	free(hub, M_USBDEV);
 	sc->sc_hub->hub = NULL;
 
@@ -577,5 +601,7 @@ uhub_intr(usbd_xfer_handle xfer, usbd_private_handle addr, usbd_status status)
 	if (status == USBD_STALLED)
 		usbd_clear_endpoint_stall_async(sc->sc_ipipe);
 	else if (status == USBD_NORMAL_COMPLETION)
-		usb_needs_explore(sc->sc_hub);
+		usb_needs_explore(sc->sc_hub, 0);
+	else
+		DPRINTFN(8, ("uhub_intr: unknown status, %d\n", status));
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus.h,v 1.3 2009/04/20 00:42:06 oga Exp $	*/
+/*	$OpenBSD: bus.h,v 1.6 2009/07/30 21:39:54 miod Exp $	*/
 /*
  * Copyright (c) 2004, Miodrag Vallat.
  *
@@ -54,11 +54,12 @@ struct mvme68k_bus_space_tag {
 
 typedef const struct mvme68k_bus_space_tag *bus_space_tag_t;
 
-#define	BUS_SPACE_BARRIER_READ	0
-#define	BUS_SPACE_BARRIER_WRITE	1
+#define	BUS_SPACE_BARRIER_READ	0x01
+#define	BUS_SPACE_BARRIER_WRITE	0x02
 
-#define	BUS_SPACE_MAP_CACHEABLE	0x01
-#define	BUS_SPACE_MAP_LINEAR	0x02
+#define	BUS_SPACE_MAP_CACHEABLE		0x01
+#define	BUS_SPACE_MAP_LINEAR		0x02
+#define	BUS_SPACE_MAP_PREFETCHABLE	0x04
 
 /* 
  * General bus_space function set
@@ -720,7 +721,6 @@ void d16_bzero(void *, size_t);
 #define	BUS_DMA_NOWAIT		0x001	/* not safe to sleep */
 #define	BUS_DMA_ALLOCNOW	0x002	/* perform resource allocation now */
 #define	BUS_DMA_COHERENT	0x004	/* hint: map memory DMA coherent */
-#define	BUS_DMAMEM_NOSYNC	0x008
 #define	BUS_DMA_BUS1		0x010	/* placeholders for bus functions... */
 #define	BUS_DMA_BUS2		0x020
 #define	BUS_DMA_BUS3		0x040

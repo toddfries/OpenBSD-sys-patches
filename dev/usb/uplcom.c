@@ -1,4 +1,4 @@
-/*	$OpenBSD: uplcom.c,v 1.51 2008/06/26 05:42:19 ray Exp $	*/
+/*	$OpenBSD: uplcom.c,v 1.53 2010/09/24 08:33:59 yuo Exp $	*/
 /*	$NetBSD: uplcom.c,v 1.29 2002/09/23 05:51:23 simonb Exp $	*/
 /*
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -189,7 +189,7 @@ static const struct usb_devno uplcom_devs[] = {
 int uplcom_match(struct device *, void *, void *); 
 void uplcom_attach(struct device *, struct device *, void *); 
 int uplcom_detach(struct device *, int); 
-int uplcom_activate(struct device *, enum devact); 
+int uplcom_activate(struct device *, int); 
 
 struct cfdriver uplcom_cd = { 
 	NULL, "uplcom", DV_DULL 
@@ -432,7 +432,6 @@ uplcom_detach(struct device *self, int flags)
                 sc->sc_intr_pipe = NULL;
         }
 
-	sc->sc_dying = 1;
 	if (sc->sc_subdev != NULL) {
 		rv = config_detach(sc->sc_subdev, flags);
 		sc->sc_subdev = NULL;
@@ -445,7 +444,7 @@ uplcom_detach(struct device *self, int flags)
 }
 
 int
-uplcom_activate(struct device *self, enum devact act)
+uplcom_activate(struct device *self, int act)
 {
 	struct uplcom_softc *sc = (struct uplcom_softc *)self;
 	int rv = 0;

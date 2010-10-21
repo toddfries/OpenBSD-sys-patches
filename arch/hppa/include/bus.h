@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus.h,v 1.26 2009/04/20 00:42:06 oga Exp $	*/
+/*	$OpenBSD: bus.h,v 1.29 2010/06/19 14:06:56 miod Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff
@@ -167,7 +167,6 @@ extern const struct hppa_bus_space_tag hppa_bustag;
 #define	BUS_SPACE_MAP_LINEAR		0x0002
 #define	BUS_SPACE_MAP_READONLY		0x0004
 #define	BUS_SPACE_MAP_PREFETCHABLE	0x0008
-#define	BUS_SPACE_MAP_NOEXTENT		0x8000	/* no extent ops */
 
 /* bus access routines */
 
@@ -283,8 +282,8 @@ extern const struct hppa_bus_space_tag hppa_bustag;
 #define	bus_space_copy_8(t, h1, o1, h2, o2, c) \
 	(((t)->hbt_cp_8)((t)->hbt_cookie, (h1), (o1), (h2), (o2), (c)))
 
-#define	BUS_SPACE_BARRIER_READ	0
-#define	BUS_SPACE_BARRIER_WRITE	1
+#define	BUS_SPACE_BARRIER_READ	0x01
+#define	BUS_SPACE_BARRIER_WRITE	0x02
 
 #define	bus_space_barrier(t,h,o,l,op) \
 	((t)->hbt_barrier((t)->hbt_cookie, (h), (o), (l), (op)))
@@ -295,7 +294,6 @@ extern const struct hppa_bus_space_tag hppa_bustag;
 #define	BUS_DMA_NOWAIT		0x0001	/* not safe to sleep */
 #define	BUS_DMA_ALLOCNOW	0x0002	/* perform resource allocation now */
 #define	BUS_DMA_COHERENT	0x0004	/* hint: map memory DMA coherent */
-#define	BUS_DMAMEM_NOSYNC	0x0010
 #define	BUS_DMA_BUS1		0x0020	/* placeholders for bus functions... */
 #define	BUS_DMA_BUS2		0x0040
 #define	BUS_DMA_BUS3		0x0080

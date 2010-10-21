@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_xl_pci.c,v 1.22 2006/08/10 20:10:19 brad Exp $	*/
+/*	$OpenBSD: if_xl_pci.c,v 1.34 2010/09/19 09:22:58 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -45,7 +45,6 @@
 #include <sys/errno.h>
 #include <sys/malloc.h>
 #include <sys/kernel.h>
-#include <sys/proc.h>   /* only for declaration of wakeup() used by vm.h */
 #include <sys/device.h>
 
 #include <net/if.h>
@@ -91,10 +90,19 @@
 
 int xl_pci_match(struct device *, void *, void *);
 void xl_pci_attach(struct device *, struct device *, void *);
+int xl_pci_detach(struct device *, int);
 void xl_pci_intr_ack(struct xl_softc *);
 
+struct xl_pci_softc {
+	struct xl_softc		psc_softc;
+	pci_chipset_tag_t	psc_pc;
+	bus_size_t		psc_iosize;
+	bus_size_t		psc_funsize;
+};
+
 struct cfattach xl_pci_ca = {
-	sizeof(struct xl_softc), xl_pci_match, xl_pci_attach,
+	sizeof(struct xl_pci_softc), xl_pci_match, xl_pci_attach,
+	xl_pci_detach, xl_activate
 };
 
 const struct pci_matchid xl_pci_devices[] = {
@@ -120,6 +128,12 @@ const struct pci_matchid xl_pci_devices[] = {
 	{ PCI_VENDOR_3COM, PCI_PRODUCT_3COM_3C556B },
 	{ PCI_VENDOR_3COM, PCI_PRODUCT_3COM_3C9201 },
 	{ PCI_VENDOR_3COM, PCI_PRODUCT_3COM_3C920BEMBW },
+	{ PCI_VENDOR_3COM, PCI_PRODUCT_3COM_3C575 },
+	{ PCI_VENDOR_3COM, PCI_PRODUCT_3COM_3CCFE575BT },
+	{ PCI_VENDOR_3COM, PCI_PRODUCT_3COM_3CCFE575CT },
+	{ PCI_VENDOR_3COM, PCI_PRODUCT_3COM_3CCFEM656 },
+	{ PCI_VENDOR_3COM, PCI_PRODUCT_3COM_3CCFEM656B },
+	{ PCI_VENDOR_3COM, PCI_PRODUCT_3COM_3CCFEM656C },
 };
 
 int
@@ -132,7 +146,8 @@ xl_pci_match(struct device *parent, void *match, void *aux)
 void
 xl_pci_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct xl_softc *sc = (struct xl_softc *)self;
+	struct xl_pci_softc *psc = (void *)self;
+	struct xl_softc *sc = &psc->psc_softc;
 	struct pci_attach_args *pa = aux;
 	pci_chipset_tag_t pc = pa->pa_pc;
 	pci_intr_handle_t ih;
@@ -140,6 +155,7 @@ xl_pci_attach(struct device *parent, struct device *self, void *aux)
 	bus_size_t iosize, funsize;
 	u_int32_t command;
 
+	psc->psc_pc = pc;
 	sc->sc_dmat = pa->pa_dmat;
 
 	sc->xl_flags = 0;
@@ -166,6 +182,37 @@ xl_pci_attach(struct device *parent, struct device *self, void *aux)
 		break;
 	case TC_DEVICEID_BOOMERANG_10_100BT:
 		sc->xl_flags |= XL_FLAG_NO_MMIO;
+		break;
+	case PCI_PRODUCT_3COM_3C575:
+		sc->xl_flags |= XL_FLAG_PHYOK | XL_FLAG_EEPROM_OFFSET_30 |
+		   XL_FLAG_8BITROM;
+		break;
+	case PCI_PRODUCT_3COM_3CCFE575BT:
+		sc->xl_flags = XL_FLAG_PHYOK | XL_FLAG_EEPROM_OFFSET_30 |
+		    XL_FLAG_8BITROM | XL_FLAG_INVERT_LED_PWR;
+		sc->xl_flags |= XL_FLAG_FUNCREG;
+		break;
+	case PCI_PRODUCT_3COM_3CCFE575CT:
+		sc->xl_flags = XL_FLAG_PHYOK | XL_FLAG_EEPROM_OFFSET_30 |
+		    XL_FLAG_8BITROM | XL_FLAG_INVERT_MII_PWR;
+		sc->xl_flags |= XL_FLAG_FUNCREG;
+		break;
+	case PCI_PRODUCT_3COM_3CCFEM656:
+		sc->xl_flags = XL_FLAG_PHYOK | XL_FLAG_EEPROM_OFFSET_30 |
+		    XL_FLAG_8BITROM | XL_FLAG_INVERT_LED_PWR |
+		    XL_FLAG_INVERT_MII_PWR;
+		sc->xl_flags |= XL_FLAG_FUNCREG;
+		break;
+	case PCI_PRODUCT_3COM_3CCFEM656B:
+		sc->xl_flags = XL_FLAG_PHYOK | XL_FLAG_EEPROM_OFFSET_30 |
+		    XL_FLAG_8BITROM | XL_FLAG_INVERT_LED_PWR |
+		    XL_FLAG_INVERT_MII_PWR;
+		sc->xl_flags |= XL_FLAG_FUNCREG;
+		break;
+	case PCI_PRODUCT_3COM_3CCFEM656C:
+		sc->xl_flags = XL_FLAG_PHYOK | XL_FLAG_EEPROM_OFFSET_30 |
+		    XL_FLAG_8BITROM | XL_FLAG_INVERT_MII_PWR;
+		sc->xl_flags |= XL_FLAG_FUNCREG;
 		break;
 	default:
 		break;
@@ -231,6 +278,7 @@ xl_pci_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 #endif
+	psc->psc_iosize = iosize;
 
 	if (sc->xl_flags & XL_FLAG_FUNCREG) {
 		if (pci_mapreg_map(pa, XL_PCI_FUNCMEM, PCI_MAPREG_TYPE_MEM, 0,
@@ -239,6 +287,7 @@ xl_pci_attach(struct device *parent, struct device *self, void *aux)
 			bus_space_unmap(sc->xl_btag, sc->xl_bhandle, iosize);
 			return;
 		}
+		psc->psc_funsize = funsize;
 		sc->intr_ack = xl_pci_intr_ack;
 	}
 
@@ -270,6 +319,22 @@ xl_pci_attach(struct device *parent, struct device *self, void *aux)
 	xl_attach(sc);
 }
 
+int
+xl_pci_detach(struct device *self, int flags)
+{
+	struct xl_pci_softc *psc = (void *)self;
+	struct xl_softc *sc = &psc->psc_softc;
+
+	if (sc->xl_intrhand != NULL) {
+		pci_intr_disestablish(psc->psc_pc, sc->xl_intrhand);
+		xl_detach(sc);
+	}
+	if (psc->psc_iosize > 0)
+		bus_space_unmap(sc->xl_btag, sc->xl_bhandle, psc->psc_iosize);
+	if (psc->psc_funsize > 0)
+		bus_space_unmap(sc->xl_funct, sc->xl_funch, psc->psc_funsize);
+	return (0);
+}
 
 void            
 xl_pci_intr_ack(struct xl_softc *sc)

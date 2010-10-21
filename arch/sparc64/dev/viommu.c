@@ -1,4 +1,4 @@
-/*	$OpenBSD: viommu.c,v 1.5 2009/04/05 21:57:41 oga Exp $	*/
+/*	$OpenBSD: viommu.c,v 1.10 2010/08/07 03:50:01 krw Exp $	*/
 /*	$NetBSD: iommu.c,v 1.47 2002/02/08 20:03:45 eeh Exp $	*/
 
 /*
@@ -40,6 +40,7 @@
 #include <sys/extent.h>
 #include <sys/malloc.h>
 #include <sys/systm.h>
+#include <sys/proc.h>
 #include <sys/device.h>
 #include <sys/mbuf.h>
 
@@ -75,9 +76,9 @@ extern int iommudebug;
 #define DPRINTF(l, s)
 #endif
 
-void viommu_enter(struct iommu_state *, struct strbuf_ctl *, vaddr_t, paddr_t,
-    int);
-void viommu_remove(struct iommu_state *, struct strbuf_ctl *, vaddr_t);
+void viommu_enter(struct iommu_state *, struct strbuf_ctl *, bus_addr_t,
+    paddr_t, int);
+void viommu_remove(struct iommu_state *, struct strbuf_ctl *, bus_addr_t);
 int viommu_dvmamap_load_seg(bus_dma_tag_t, struct iommu_state *,
     bus_dmamap_t, bus_dma_segment_t *, int, int, bus_size_t, bus_size_t);
 int viommu_dvmamap_load_mlist(bus_dma_tag_t, struct iommu_state *,
@@ -85,9 +86,9 @@ int viommu_dvmamap_load_mlist(bus_dma_tag_t, struct iommu_state *,
 int viommu_dvmamap_append_range(bus_dma_tag_t, bus_dmamap_t, paddr_t,
     bus_size_t, int, bus_size_t);
 int iommu_iomap_insert_page(struct iommu_map_state *, paddr_t);
-vaddr_t iommu_iomap_translate(struct iommu_map_state *, paddr_t);
+bus_addr_t iommu_iomap_translate(struct iommu_map_state *, paddr_t);
 void viommu_iomap_load_map(struct iommu_state *, struct iommu_map_state *,
-    vaddr_t, int);
+    bus_addr_t, int);
 void viommu_iomap_unload_map(struct iommu_state *, struct iommu_map_state *);
 struct iommu_map_state *viommu_iomap_create(int);
 void iommu_iomap_destroy(struct iommu_map_state *);
@@ -136,7 +137,7 @@ viommu_init(char *name, struct iommu_state *is, int tsbsize,
  * Add an entry to the IOMMU table.
  */
 void
-viommu_enter(struct iommu_state *is, struct strbuf_ctl *sb, vaddr_t va,
+viommu_enter(struct iommu_state *is, struct strbuf_ctl *sb, bus_addr_t va,
     paddr_t pa, int flags)
 {
 	u_int64_t tsbid = IOTSBSLOT(va, is->is_tsbsize);
@@ -159,7 +160,7 @@ viommu_enter(struct iommu_state *is, struct strbuf_ctl *sb, vaddr_t va,
 
 	page_list[0] = trunc_page(pa);
 	if (!pmap_extract(pmap_kernel(), (vaddr_t)page_list, &addr))
-		panic("viommu_enter: pmap_extract failed\n");
+		panic("viommu_enter: pmap_extract failed");
 	err = hv_pci_iommu_map(is->is_devhandle, tsbid, 1, attr,
 	    addr, &nmapped);
 	if (err != H_EOK || nmapped != 1)
@@ -170,7 +171,7 @@ viommu_enter(struct iommu_state *is, struct strbuf_ctl *sb, vaddr_t va,
  * Remove an entry from the IOMMU table.
  */
 void
-viommu_remove(struct iommu_state *is, struct strbuf_ctl *sb, vaddr_t va)
+viommu_remove(struct iommu_state *is, struct strbuf_ctl *sb, bus_addr_t va)
 {
 	u_int64_t tsbid = IOTSBSLOT(va, is->is_tsbsize);
 	u_int64_t ndemapped;
@@ -319,7 +320,7 @@ viommu_dvmamap_load(bus_dma_tag_t t, bus_dma_tag_t t0, bus_dmamap_t map,
 	iommu_iomap_clear_pages(ims);
 	{ /* Scope */
 		bus_addr_t a, aend;
-		bus_addr_t addr = (vaddr_t)buf;
+		bus_addr_t addr = (bus_addr_t)buf;
 		int seg_len = buflen;
 
 		aend = round_page(addr + seg_len);
@@ -373,8 +374,10 @@ viommu_dvmamap_load(bus_dma_tag_t t, bus_dma_tag_t t0, bus_dmamap_t map,
 #endif
 	}		
 #endif	
-	if (err != 0)
+	if (err != 0) {
+		iommu_iomap_clear_pages(ims);
 		return (err);
+	}
 
 	/* Set the active DVMA map */
 	map->_dm_dvmastart = dvmaddr;
@@ -386,7 +389,7 @@ viommu_dvmamap_load(bus_dma_tag_t t, bus_dma_tag_t t0, bus_dmamap_t map,
 
 	{ /* Scope */
 		bus_addr_t a, aend;
-		bus_addr_t addr = (vaddr_t)buf;
+		bus_addr_t addr = (bus_addr_t)buf;
 		int seg_len = buflen;
 
 		aend = round_page(addr + seg_len);
@@ -424,18 +427,9 @@ viommu_dvmamap_load(bus_dma_tag_t t, bus_dma_tag_t t0, bus_dmamap_t map,
 			}
 		}
 	}
-	if (err) {
-		/* XXX keep enough state and just call unload here? */
-		viommu_iomap_unload_map(is, ims);
-		iommu_iomap_clear_pages(ims);
-		map->dm_mapsize = 0;
-		map->dm_nsegs = 0;
-		mtx_enter(&is->is_mtx);
-		err = extent_free(is->is_dvmamap, dvmaddr, sgsize, EX_NOWAIT);
-		map->_dm_dvmastart = 0;
-		map->_dm_dvmasize = 0;
-		mtx_leave(&is->is_mtx);
-	}
+
+	if (err)
+		viommu_dvmamap_unload(t, t0, map);
 
 	return (err);
 }
@@ -556,8 +550,10 @@ viommu_dvmamap_load_raw(bus_dma_tag_t t, bus_dma_tag_t t0, bus_dmamap_t map,
 	    EX_NOWAIT | EX_BOUNDZERO, (u_long *)&dvmaddr);
 	mtx_leave(&is->is_mtx);
 
-	if (err != 0)
+	if (err != 0) {
+		iommu_iomap_clear_pages(ims);
 		return (err);
+	}
 
 #ifdef DEBUG
 	if (dvmaddr == (bus_addr_t)-1)	{ 
@@ -587,18 +583,8 @@ viommu_dvmamap_load_raw(bus_dma_tag_t t, bus_dma_tag_t t0, bus_dmamap_t map,
 		err = viommu_dvmamap_load_seg(t, is, map, segs, nsegs,
 		    flags, size, boundary);
 
-	if (err) {
-		/* XXX keep enough state and just call unload here? */
-		viommu_iomap_unload_map(is, ims);
-		iommu_iomap_clear_pages(ims);
-		map->dm_mapsize = 0;
-		map->dm_nsegs = 0;
-		mtx_enter(&is->is_mtx);
-		err = extent_free(is->is_dvmamap, dvmaddr, sgsize, EX_NOWAIT);
-		map->_dm_dvmastart = 0;
-		map->_dm_dvmasize = 0;
-		mtx_leave(&is->is_mtx);
-	}
+	if (err)
+		viommu_dvmamap_unload(t, t0, map);
 
 	return (err);
 }
@@ -853,8 +839,7 @@ viommu_dvmamap_unload(bus_dma_tag_t t, bus_dma_tag_t t0, bus_dmamap_t map)
 	map->dm_nsegs = 0;
 
 	mtx_enter(&is->is_mtx);
-	error = extent_free(is->is_dvmamap, dvmaddr, 
-		sgsize, EX_NOWAIT);
+	error = extent_free(is->is_dvmamap, dvmaddr, sgsize, EX_NOWAIT);
 	map->_dm_dvmastart = 0;
 	map->_dm_dvmasize = 0;
 	mtx_leave(&is->is_mtx);
@@ -946,7 +931,7 @@ viommu_iomap_create(int n)
  */
 void
 viommu_iomap_load_map(struct iommu_state *is, struct iommu_map_state *ims,
-    vaddr_t vmaddr, int flags)
+    bus_addr_t vmaddr, int flags)
 {
 	struct iommu_page_map *ipm = &ims->ims_map;
 	struct iommu_page_entry *e;

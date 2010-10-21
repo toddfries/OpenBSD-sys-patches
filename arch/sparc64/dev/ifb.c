@@ -1,4 +1,4 @@
-/*	$OpenBSD: ifb.c,v 1.16 2009/01/21 17:01:31 miod Exp $	*/
+/*	$OpenBSD: ifb.c,v 1.19 2010/07/20 20:47:17 miod Exp $	*/
 
 /*
  * Copyright (c) 2007, 2008, 2009 Miodrag Vallat.
@@ -48,7 +48,6 @@
 
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
-#include <dev/pci/pcidevs.h>
 
 #include <dev/wscons/wsconsio.h>
 #include <dev/wscons/wsdisplayvar.h>
@@ -89,7 +88,7 @@ extern int allowaperture;
  *
  * Moreover, high pixel values in the overlay planes (such as 0xff or 0xfe)
  * seem to enable other planes with random contents, so we'll limit ourselves
- * to 7bpp opration.
+ * to 7bpp operation.
  */
 
 /*
@@ -316,7 +315,7 @@ struct cfdriver ifb_cd = {
 	NULL, "ifb", DV_DULL
 };
 
-int	ifb_accel_identify(struct pci_attach_args *);
+int	ifb_accel_identify(const char *);
 static inline
 u_int	ifb_dac_value(u_int, u_int, u_int);
 int	ifb_getcmap(struct ifb_softc *, struct wsdisplay_cmap *);
@@ -339,19 +338,19 @@ void	ifb_rop_ifb(void *, int, int, int, int, int, int, uint32_t, int32_t);
 void	ifb_rop_jfb(void *, int, int, int, int, int, int, uint32_t, int32_t);
 int	ifb_rop_wait(struct ifb_softc *);
 
-void	ifb_putchar_dumb(void *, int, int, u_int, long);
-void	ifb_copycols_dumb(void *, int, int, int, int);
-void	ifb_erasecols_dumb(void *, int, int, int, long);
-void	ifb_copyrows_dumb(void *, int, int, int);
-void	ifb_eraserows_dumb(void *, int, int, long);
-void	ifb_do_cursor_dumb(struct rasops_info *);
+int	ifb_putchar_dumb(void *, int, int, u_int, long);
+int	ifb_copycols_dumb(void *, int, int, int, int);
+int	ifb_erasecols_dumb(void *, int, int, int, long);
+int	ifb_copyrows_dumb(void *, int, int, int);
+int	ifb_eraserows_dumb(void *, int, int, long);
+int	ifb_do_cursor_dumb(struct rasops_info *);
 
-void	ifb_putchar(void *, int, int, u_int, long);
-void	ifb_copycols(void *, int, int, int, int);
-void	ifb_erasecols(void *, int, int, int, long);
-void	ifb_copyrows(void *, int, int, int);
-void	ifb_eraserows(void *, int, int, long);
-void	ifb_do_cursor(struct rasops_info *);
+int	ifb_putchar(void *, int, int, u_int, long);
+int	ifb_copycols(void *, int, int, int, int);
+int	ifb_erasecols(void *, int, int, int, long);
+int	ifb_copyrows(void *, int, int, int);
+int	ifb_eraserows(void *, int, int, long);
+int	ifb_do_cursor(struct rasops_info *);
 
 int
 ifbmatch(struct device *parent, void *cf, void *aux)
@@ -367,7 +366,7 @@ ifbattach(struct device *parent, struct device *self, void *aux)
 	struct rasops_info *ri;
 	uint32_t dev_comm;
 	int node, console;
-	char *text;
+	char *name, *text;
 
 	sc->sc_mem_t = paa->pa_memt;
 	sc->sc_pcitag = paa->pa_tag;
@@ -393,7 +392,7 @@ ifbattach(struct device *parent, struct device *self, void *aux)
 	 * Describe the beast.
 	 */
 
-	text = getpropstring(node, "name");
+	name = text = getpropstring(node, "name");
 	if (strncmp(text, "SUNW,", 5) == 0)
 		text += 5;
 	printf("%s: %s", self->dv_xname, text);
@@ -445,7 +444,7 @@ ifbattach(struct device *parent, struct device *self, void *aux)
 	 * Find out what flavour of ifb we are...
 	 */
 
-	sc->sc_acceltype = ifb_accel_identify(paa);
+	sc->sc_acceltype = ifb_accel_identify(name);
 
 	switch (sc->sc_acceltype) {
 	case IFB_ACCEL_IFB:
@@ -527,35 +526,16 @@ ifbattach(struct device *parent, struct device *self, void *aux)
  * proper acceleration information.
  */
 int
-ifb_accel_identify(struct pci_attach_args *pa)
+ifb_accel_identify(const char *name)
 {
-	uint32_t subid;
-
-	subid = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_SUBSYS_ID_REG);
-
-	/*
-	 * If we have an exact Expert3D match, or the subsystem id
-	 * matches Expert3D or Expert3D-Lite, we have an IFB.
-	 */
-
-	if (pa->pa_id ==
-	    PCI_ID_CODE(PCI_VENDOR_INTERGRAPH, PCI_PRODUCT_INTERGRAPH_EXPERT3D))
-		return IFB_ACCEL_IFB;
-	if (subid == PCI_ID_CODE(PCI_VENDOR_INTERGRAPH, 0x108) ||
-	    subid == PCI_ID_CODE(PCI_VENDOR_INTERGRAPH, 0x140))
+	if (strcmp(name, "SUNW,Expert3D") == 0 ||
+	    strcmp(name, "SUNW,Expert3D-Lite") == 0)
 		return IFB_ACCEL_IFB;
 
-	/*
-	 * If we have an exact 5110 match, or the subsystem id matches
-	 * another set of magic values, we have a JFB.
-	 */
+	if (strcmp(name, "SUNW,XVR-1200") == 0)
+		return IFB_ACCEL_JFB;
 
-	if (pa->pa_id ==
-	    PCI_ID_CODE(PCI_VENDOR_3DLABS, PCI_PRODUCT_3DLABS_WILDCAT_5110))
-		return IFB_ACCEL_JFB;
-	if (subid == PCI_ID_CODE(PCI_VENDOR_3DLABS, 0x1044) ||
-	    subid == PCI_ID_CODE(PCI_VENDOR_3DLABS, 0x1047))
-		return IFB_ACCEL_JFB;
+	/* XVR-500 is bobcat, XVR-600 is xvr600 */
 
 	return IFB_ACCEL_NONE;
 }
@@ -865,7 +845,7 @@ ifb_mapregs(struct ifb_softc *sc, struct pci_attach_args *pa)
  * Non accelerated routines.
  */
 
-void
+int
 ifb_putchar_dumb(void *cookie, int row, int col, u_int uc, long attr)
 {
 	struct rasops_info *ri = cookie;
@@ -875,9 +855,11 @@ ifb_putchar_dumb(void *cookie, int row, int col, u_int uc, long attr)
 	sc->sc_old_ops.putchar(cookie, row, col, uc, attr);
 	ri->ri_bits = (void *)sc->sc_fb8bank1_vaddr;
 	sc->sc_old_ops.putchar(cookie, row, col, uc, attr);
+
+	return 0;
 }
 
-void
+int
 ifb_copycols_dumb(void *cookie, int row, int src, int dst, int num)
 {
 	struct rasops_info *ri = cookie;
@@ -887,9 +869,11 @@ ifb_copycols_dumb(void *cookie, int row, int src, int dst, int num)
 	sc->sc_old_ops.copycols(cookie, row, src, dst, num);
 	ri->ri_bits = (void *)sc->sc_fb8bank1_vaddr;
 	sc->sc_old_ops.copycols(cookie, row, src, dst, num);
+
+	return 0;
 }
 
-void
+int
 ifb_erasecols_dumb(void *cookie, int row, int col, int num, long attr)
 {
 	struct rasops_info *ri = cookie;
@@ -899,9 +883,11 @@ ifb_erasecols_dumb(void *cookie, int row, int col, int num, long attr)
 	sc->sc_old_ops.erasecols(cookie, row, col, num, attr);
 	ri->ri_bits = (void *)sc->sc_fb8bank1_vaddr;
 	sc->sc_old_ops.erasecols(cookie, row, col, num, attr);
+
+	return 0;
 }
 
-void
+int
 ifb_copyrows_dumb(void *cookie, int src, int dst, int num)
 {
 	struct rasops_info *ri = cookie;
@@ -911,9 +897,11 @@ ifb_copyrows_dumb(void *cookie, int src, int dst, int num)
 	sc->sc_old_ops.copyrows(cookie, src, dst, num);
 	ri->ri_bits = (void *)sc->sc_fb8bank1_vaddr;
 	sc->sc_old_ops.copyrows(cookie, src, dst, num);
+
+	return 0;
 }
 
-void
+int
 ifb_eraserows_dumb(void *cookie, int row, int num, long attr)
 {
 	struct rasops_info *ri = cookie;
@@ -923,13 +911,15 @@ ifb_eraserows_dumb(void *cookie, int row, int num, long attr)
 	sc->sc_old_ops.eraserows(cookie, row, num, attr);
 	ri->ri_bits = (void *)sc->sc_fb8bank1_vaddr;
 	sc->sc_old_ops.eraserows(cookie, row, num, attr);
+
+	return 0;
 }
 
 /* Similar to rasops_do_cursor(), but using a 7bit pixel mask. */
 
 #define	CURSOR_MASK	0x7f7f7f7f
 
-void
+int
 ifb_do_cursor_dumb(struct rasops_info *ri)
 {
 	struct ifb_softc *sc = ri->ri_hw;
@@ -1002,13 +992,15 @@ ifb_do_cursor_dumb(struct rasops_info *ri)
 			}
 		}
 	}
+
+	return 0;
 }
 
 /*
  * Accelerated routines.
  */
 
-void
+int
 ifb_copycols(void *cookie, int row, int src, int dst, int num)
 {
 	struct rasops_info *ri = cookie;
@@ -1022,9 +1014,11 @@ ifb_copycols(void *cookie, int row, int src, int dst, int num)
 	ifb_copyrect(sc, ri->ri_xorigin + src, ri->ri_yorigin + row,
 	    ri->ri_xorigin + dst, ri->ri_yorigin + row,
 	    num, ri->ri_font->fontheight);
+
+	return 0;
 }
 
-void
+int
 ifb_erasecols(void *cookie, int row, int col, int num, long attr)
 {
 	struct rasops_info *ri = cookie;
@@ -1039,9 +1033,11 @@ ifb_erasecols(void *cookie, int row, int col, int num, long attr)
 
 	ifb_fillrect(sc, ri->ri_xorigin + col, ri->ri_yorigin + row,
 	    num, ri->ri_font->fontheight, ri->ri_devcmap[bg]);
+
+	return 0;
 }
 
-void
+int
 ifb_copyrows(void *cookie, int src, int dst, int num)
 {
 	struct rasops_info *ri = cookie;
@@ -1053,9 +1049,11 @@ ifb_copyrows(void *cookie, int src, int dst, int num)
 
 	ifb_copyrect(sc, ri->ri_xorigin, ri->ri_yorigin + src,
 	    ri->ri_xorigin, ri->ri_yorigin + dst, ri->ri_emuwidth, num);
+
+	return 0;
 }
 
-void
+int
 ifb_eraserows(void *cookie, int row, int num, long attr)
 {
 	struct rasops_info *ri = cookie;
@@ -1076,6 +1074,8 @@ ifb_eraserows(void *cookie, int row, int num, long attr)
 		w = ri->ri_emuwidth;
 	}
 	ifb_fillrect(sc, x, y, w, num, ri->ri_devcmap[bg]);
+
+	return 0;
 }
 
 void
@@ -1227,7 +1227,7 @@ ifb_rop_wait(struct ifb_softc *sc)
 	return i;
 }
 
-void
+int
 ifb_do_cursor(struct rasops_info *ri)
 {
 	struct ifb_softc *sc = ri->ri_hw;
@@ -1239,4 +1239,6 @@ ifb_do_cursor(struct rasops_info *ri)
 	ifb_rop(sc, x, y, x, y, ri->ri_font->fontwidth, ri->ri_font->fontheight,
 	    IFB_ROP_XOR, IFB_PIXELMASK);
 	ifb_rop_wait(sc);
+
+	return 0;
 }

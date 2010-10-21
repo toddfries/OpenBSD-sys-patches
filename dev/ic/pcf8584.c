@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcf8584.c,v 1.9 2007/10/20 18:46:21 kettenis Exp $ */
+/*	$OpenBSD: pcf8584.c,v 1.11 2010/08/01 18:48:41 kettenis Exp $ */
 
 /*
  * Copyright (c) 2006 David Gwynne <dlg@openbsd.org>
@@ -75,8 +75,8 @@ int		pcfiic_xmit(struct pcfiic_softc *, u_int8_t, const u_int8_t *,
 int		pcfiic_recv(struct pcfiic_softc *, u_int8_t, u_int8_t *,
 		    size_t);
 
-volatile u_int8_t pcfiic_read(struct pcfiic_softc *, bus_size_t);
-volatile void	pcfiic_write(struct pcfiic_softc *, bus_size_t, u_int8_t);
+u_int8_t	pcfiic_read(struct pcfiic_softc *, bus_size_t);
+void		pcfiic_write(struct pcfiic_softc *, bus_size_t, u_int8_t);
 void		pcfiic_choose_bus(struct pcfiic_softc *, u_int8_t);
 int		pcfiic_wait_nBB(struct pcfiic_softc *);
 int		pcfiic_wait_pin(struct pcfiic_softc *, volatile u_int8_t *);
@@ -263,7 +263,7 @@ pcfiic_recv(struct pcfiic_softc *sc, u_int8_t addr, u_int8_t *buf, size_t len)
 	return (err);
 }
 
-volatile u_int8_t
+u_int8_t
 pcfiic_read(struct pcfiic_softc *sc, bus_size_t r)
 {
 	bus_space_barrier(sc->sc_iot, sc->sc_ioh, sc->sc_regmap[r], 1,
@@ -271,12 +271,13 @@ pcfiic_read(struct pcfiic_softc *sc, bus_size_t r)
 	return (bus_space_read_1(sc->sc_iot, sc->sc_ioh, sc->sc_regmap[r]));
 }
 
-volatile void
+void
 pcfiic_write(struct pcfiic_softc *sc, bus_size_t r, u_int8_t v)
 {
 	bus_space_write_1(sc->sc_iot, sc->sc_ioh, sc->sc_regmap[r], v);
-	bus_space_barrier(sc->sc_iot, sc->sc_ioh, sc->sc_regmap[r], 1,
-	    BUS_SPACE_BARRIER_WRITE);
+	bus_space_barrier(sc->sc_iot, sc->sc_ioh, 0, 4,
+	    BUS_SPACE_BARRIER_WRITE | BUS_SPACE_BARRIER_READ);
+	bus_space_read_1(sc->sc_iot, sc->sc_ioh, sc->sc_regmap[PCF_S1]);
 }
 
 void

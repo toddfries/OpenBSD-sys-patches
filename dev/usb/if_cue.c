@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_cue.c,v 1.51 2008/11/28 02:44:18 brad Exp $ */
+/*	$OpenBSD: if_cue.c,v 1.53 2010/09/24 08:33:58 yuo Exp $ */
 /*	$NetBSD: if_cue.c,v 1.40 2002/07/11 21:14:26 augustss Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -112,7 +112,7 @@ struct usb_devno cue_devs[] = {
 int cue_match(struct device *, void *, void *); 
 void cue_attach(struct device *, struct device *, void *); 
 int cue_detach(struct device *, int); 
-int cue_activate(struct device *, enum devact); 
+int cue_activate(struct device *, int); 
 
 struct cfdriver cue_cd = { 
 	NULL, "cue", DV_IFNET 
@@ -555,18 +555,18 @@ cue_detach(struct device *self, int flags)
 
 	DPRINTFN(2,("%s: %s: enter\n", sc->cue_dev.dv_xname, __func__));
 
+	/* Detached before attached finished, so just bail out. */
+	if (!sc->cue_attached)
+		return (0);
+
 	timeout_del(&sc->cue_stat_ch);
+
 	/*
 	 * Remove any pending task.  It cannot be executing because it run
 	 * in the same thread as detach.
 	 */
 	usb_rem_task(sc->cue_udev, &sc->cue_tick_task);
 	usb_rem_task(sc->cue_udev, &sc->cue_stop_task);
-
-	if (!sc->cue_attached) {
-		/* Detached before attached finished, so just bail out. */
-		return (0);
-	}
 
 	s = splusb();
 
@@ -595,7 +595,7 @@ cue_detach(struct device *self, int flags)
 }
 
 int
-cue_activate(struct device *self, enum devact act)
+cue_activate(struct device *self, int act)
 {
 	struct cue_softc *sc = (struct cue_softc *)self;
 

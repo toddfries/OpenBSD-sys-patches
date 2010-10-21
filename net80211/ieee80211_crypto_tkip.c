@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_crypto_tkip.c,v 1.14 2009/04/16 18:32:24 damien Exp $	*/
+/*	$OpenBSD: ieee80211_crypto_tkip.c,v 1.18 2010/07/20 15:36:03 matthew Exp $	*/
 
 /*-
  * Copyright (c) 2008 Damien Bergamini <damien.bergamini@free.fr>
@@ -198,7 +198,8 @@ ieee80211_tkip_encrypt(struct ieee80211com *ic, struct mbuf *m0,
 	MGET(n0, M_DONTWAIT, m0->m_type);
 	if (n0 == NULL)
 		goto nospace;
-	M_DUP_PKTHDR(n0, m0);
+	if (m_dup_pkthdr(n0, m0))
+		goto nospace;
 	n0->m_pkthdr.len += IEEE80211_TKIP_HDRLEN;
 	n0->m_len = MHLEN;
 	if (n0->m_pkthdr.len >= MINCLSIZE - IEEE80211_TKIP_TAILLEN) {
@@ -367,7 +368,8 @@ ieee80211_tkip_decrypt(struct ieee80211com *ic, struct mbuf *m0,
 	MGET(n0, M_DONTWAIT, m0->m_type);
 	if (n0 == NULL)
 		goto nospace;
-	M_DUP_PKTHDR(n0, m0);
+	if (m_dup_pkthdr(n0, m0))
+		goto nospace;
 	n0->m_pkthdr.len -= IEEE80211_TKIP_OVHD;
 	n0->m_len = MHLEN;
 	if (n0->m_pkthdr.len >= MINCLSIZE) {
@@ -452,7 +454,7 @@ ieee80211_tkip_decrypt(struct ieee80211com *ic, struct mbuf *m0,
 	/* compute TKIP MIC over decrypted message */
 	ieee80211_tkip_mic(n0, hdrlen, ctx->rxmic, mic);
 	/* check that it matches the MIC in received frame */
-	if (memcmp(mic0, mic, IEEE80211_TKIP_MICLEN) != 0) {
+	if (timingsafe_bcmp(mic0, mic, IEEE80211_TKIP_MICLEN) != 0) {
 		m_freem(m0);
 		m_freem(n0);
 		ic->ic_stats.is_rx_locmicfail++;
@@ -508,7 +510,7 @@ ieee80211_michael_mic_failure(struct ieee80211com *ic, u_int64_t tsc)
 	if (ic->ic_flags & IEEE80211_F_COUNTERM)
 		return;	/* countermeasures already active */
 
-	log(LOG_WARNING, "%s: Michael MIC failure", ic->ic_if.if_xname);
+	log(LOG_WARNING, "%s: Michael MIC failure\n", ic->ic_if.if_xname);
 
 	/*
 	 * NB. do not send Michael MIC Failure reports as recommended since

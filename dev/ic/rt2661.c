@@ -1,4 +1,4 @@
-/*	$OpenBSD: rt2661.c,v 1.48 2009/03/29 21:53:52 sthen Exp $	*/
+/*	$OpenBSD: rt2661.c,v 1.63 2010/09/07 16:21:42 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 2006
@@ -26,7 +26,6 @@
 
 #include <sys/param.h>
 #include <sys/sockio.h>
-#include <sys/sysctl.h>
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
@@ -59,8 +58,8 @@
 #include <net80211/ieee80211_amrr.h>
 #include <net80211/ieee80211_radiotap.h>
 
-#include <dev/ic/rt2661reg.h>
 #include <dev/ic/rt2661var.h>
+#include <dev/ic/rt2661reg.h>
 
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
@@ -75,6 +74,7 @@ int rt2661_debug = 1;
 #define DPRINTFN(n, x)
 #endif
 
+void		rt2661_attachhook(void *);
 int		rt2661_alloc_tx_ring(struct rt2661_softc *,
 		    struct rt2661_tx_ring *, int);
 void		rt2661_reset_tx_ring(struct rt2661_softc *,
@@ -145,8 +145,7 @@ void		rt2661_read_eeprom(struct rt2661_softc *);
 int		rt2661_bbp_init(struct rt2661_softc *);
 int		rt2661_init(struct ifnet *);
 void		rt2661_stop(struct ifnet *, int);
-int		rt2661_load_microcode(struct rt2661_softc *, const uint8_t *,
-		    int);
+int		rt2661_load_microcode(struct rt2661_softc *);
 void		rt2661_rx_tune(struct rt2661_softc *);
 #ifdef notyet
 void		rt2661_radar_start(struct rt2661_softc *);
@@ -157,7 +156,6 @@ int		rt2661_prepare_beacon(struct rt2661_softc *);
 #endif
 void		rt2661_enable_tsf_sync(struct rt2661_softc *);
 int		rt2661_get_rssi(struct rt2661_softc *, uint8_t);
-void		rt2661_power(int, void *);
 
 static const struct {
 	uint32_t	reg;
@@ -187,9 +185,8 @@ rt2661_attach(void *xsc, int id)
 {
 	struct rt2661_softc *sc = xsc;
 	struct ieee80211com *ic = &sc->sc_ic;
-	struct ifnet *ifp = &ic->ic_if;
 	uint32_t val;
-	int error, ac, i, ntries;
+	int error, ac, ntries;
 
 	sc->sc_id = id;
 
@@ -242,6 +239,45 @@ rt2661_attach(void *xsc, int id)
 		printf("%s: could not allocate Rx ring\n",
 		    sc->sc_dev.dv_xname);
 		goto fail2;
+	}
+
+	if (rootvp == NULL)
+		mountroothook_establish(rt2661_attachhook, sc);
+	else
+		rt2661_attachhook(sc);
+
+	return 0;
+
+fail2:	rt2661_free_tx_ring(sc, &sc->mgtq);
+fail1:	while (--ac >= 0)
+		rt2661_free_tx_ring(sc, &sc->txq[ac]);
+	return ENXIO;
+}
+
+void
+rt2661_attachhook(void *xsc)
+{
+	struct rt2661_softc *sc = xsc;
+	struct ieee80211com *ic = &sc->sc_ic;
+	struct ifnet *ifp = &ic->ic_if;
+	const char *name = NULL;	/* make lint happy */
+	int i, error;
+
+	switch (sc->sc_id) {
+	case PCI_PRODUCT_RALINK_RT2561:
+		name = "ral-rt2561";
+		break;
+	case PCI_PRODUCT_RALINK_RT2561S:
+		name = "ral-rt2561s";
+		break;
+	case PCI_PRODUCT_RALINK_RT2661:
+		name = "ral-rt2661";
+		break;
+	}
+	if ((error = loadfirmware(name, &sc->ucode, &sc->ucsize)) != 0) {
+		printf("%s: error %d, could not read firmware %s\n",
+		    sc->sc_dev.dv_xname, error, name);
+		return;
 	}
 
 	ic->ic_phytype = IEEE80211_T_OFDM; /* not only, but not used */
@@ -299,7 +335,6 @@ rt2661_attach(void *xsc, int id)
 
 	ifp->if_softc = sc;
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
-	ifp->if_init = rt2661_init;
 	ifp->if_ioctl = rt2661_ioctl;
 	ifp->if_start = rt2661_start;
 	ifp->if_watchdog = rt2661_watchdog;
@@ -329,28 +364,6 @@ rt2661_attach(void *xsc, int id)
 	sc->sc_txtap.wt_ihdr.it_len = htole16(sc->sc_txtap_len);
 	sc->sc_txtap.wt_ihdr.it_present = htole32(RT2661_TX_RADIOTAP_PRESENT);
 #endif
-
-	/*
-	 * Make sure the interface is shutdown during reboot.
-	 */
-	sc->sc_sdhook = shutdownhook_establish(rt2661_shutdown, sc);
-	if (sc->sc_sdhook == NULL) {
-		printf("%s: WARNING: unable to establish shutdown hook\n",
-		    sc->sc_dev.dv_xname);
-	}
-
-	sc->sc_powerhook = powerhook_establish(rt2661_power, sc);
-	if (sc->sc_powerhook == NULL) {
-		printf("%s: WARNING: unable to establish power hook\n",
-		    sc->sc_dev.dv_xname);
-	}
-
-	return 0;
-
-fail2:	rt2661_free_tx_ring(sc, &sc->mgtq);
-fail1:	while (--ac >= 0)
-		rt2661_free_tx_ring(sc, &sc->txq[ac]);
-	return ENXIO;
 }
 
 int
@@ -366,18 +379,35 @@ rt2661_detach(void *xsc)
 	ieee80211_ifdetach(ifp);	/* free all nodes */
 	if_detach(ifp);
 
-	if (sc->sc_powerhook != NULL)
-		powerhook_disestablish(sc->sc_powerhook);
-
-	if (sc->sc_sdhook != NULL)
-		shutdownhook_disestablish(sc->sc_sdhook);
-
 	for (ac = 0; ac < 4; ac++)
 		rt2661_free_tx_ring(sc, &sc->txq[ac]);
 	rt2661_free_tx_ring(sc, &sc->mgtq);
 	rt2661_free_rx_ring(sc, &sc->rxq);
 
+	if (sc->ucode != NULL)
+		free(sc->ucode, M_DEVBUF);
+
 	return 0;
+}
+
+void
+rt2661_suspend(void *xsc)
+{
+	struct rt2661_softc *sc = xsc;
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
+
+	if (ifp->if_flags & IFF_RUNNING)
+		rt2661_stop(ifp, 1);
+}
+
+void
+rt2661_resume(void *xsc)
+{
+	struct rt2661_softc *sc = xsc;
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
+
+	if (ifp->if_flags & IFF_UP)
+		rt2661_init(ifp);	
 }
 
 int
@@ -399,7 +429,7 @@ rt2661_alloc_tx_ring(struct rt2661_softc *sc, struct rt2661_tx_ring *ring,
 	}
 
 	error = bus_dmamem_alloc(sc->sc_dmat, count * RT2661_TX_DESC_SIZE,
-	    PAGE_SIZE, 0, &ring->seg, 1, &nsegs, BUS_DMA_NOWAIT);
+	    PAGE_SIZE, 0, &ring->seg, 1, &nsegs, BUS_DMA_NOWAIT | BUS_DMA_ZERO);
 	if (error != 0) {
 		printf("%s: could not allocate DMA memory\n",
 		    sc->sc_dev.dv_xname);
@@ -423,7 +453,6 @@ rt2661_alloc_tx_ring(struct rt2661_softc *sc, struct rt2661_tx_ring *ring,
 		goto fail;
 	}
 
-	memset(ring->desc, 0, count * RT2661_TX_DESC_SIZE);
 	ring->physaddr = ring->map->dm_segs->ds_addr;
 
 	ring->data = malloc(count * sizeof (struct rt2661_tx_data), M_DEVBUF,
@@ -541,7 +570,7 @@ rt2661_alloc_rx_ring(struct rt2661_softc *sc, struct rt2661_rx_ring *ring,
 	}
 
 	error = bus_dmamem_alloc(sc->sc_dmat, count * RT2661_RX_DESC_SIZE,
-	    PAGE_SIZE, 0, &ring->seg, 1, &nsegs, BUS_DMA_NOWAIT);
+	    PAGE_SIZE, 0, &ring->seg, 1, &nsegs, BUS_DMA_NOWAIT | BUS_DMA_ZERO);
 	if (error != 0) {
 		printf("%s: could not allocate DMA memory\n",
 		    sc->sc_dev.dv_xname);
@@ -565,7 +594,6 @@ rt2661_alloc_rx_ring(struct rt2661_softc *sc, struct rt2661_rx_ring *ring,
 		goto fail;
 	}
 
-	memset(ring->desc, 0, count * RT2661_RX_DESC_SIZE);
 	ring->physaddr = ring->map->dm_segs->ds_addr;
 
 	ring->data = malloc(count * sizeof (struct rt2661_rx_data), M_DEVBUF,
@@ -749,7 +777,7 @@ rt2661_updatestats(void *arg)
 		rt2661_rx_tune(sc);
 	splx(s);
 
-	timeout_add(&sc->amrr_to, hz / 2);
+	timeout_add_msec(&sc->amrr_to, 500);
 }
 
 void
@@ -790,7 +818,7 @@ rt2661_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 
 	case IEEE80211_S_SCAN:
 		rt2661_set_chan(sc, ic->ic_bss->ni_chan);
-		timeout_add(&sc->scan_to, hz / 5);
+		timeout_add_msec(&sc->scan_to, 200);
 		break;
 
 	case IEEE80211_S_AUTH:
@@ -825,7 +853,7 @@ rt2661_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 		if (ic->ic_opmode != IEEE80211_M_MONITOR) {
 			sc->ncalls = 0;
 			sc->avg_rssi = -95;	/* reset EMA */
-			timeout_add(&sc->amrr_to, hz / 2);
+			timeout_add_msec(&sc->amrr_to, 500);
 			rt2661_enable_tsf_sync(sc);
 		}
 		break;
@@ -1209,6 +1237,8 @@ rt2661_intr(void *arg)
 
 	r1 = RAL_READ(sc, RT2661_INT_SOURCE_CSR);
 	r2 = RAL_READ(sc, RT2661_MCU_INT_SOURCE_CSR);
+	if (__predict_false(r1 == 0xffffffff && r2 == 0xffffffff))
+		return 0;	/* device likely went away */
 	if (r1 == 0 && r2 == 0)
 		return 0;	/* not for us */
 
@@ -2419,11 +2449,8 @@ rt2661_init(struct ifnet *ifp)
 {
 	struct rt2661_softc *sc = ifp->if_softc;
 	struct ieee80211com *ic = &sc->sc_ic;
-	const char *name = NULL;	/* make lint happy */
-	uint8_t *ucode;
-	size_t size;
 	uint32_t tmp, sta[3];
-	int i, ntries, error;
+	int i, ntries;
 
 	/* for CardBus, power on the socket */
 	if (!(sc->sc_flags & RT2661_ENABLED)) {
@@ -2437,36 +2464,11 @@ rt2661_init(struct ifnet *ifp)
 
 	rt2661_stop(ifp, 0);
 
-	if (!(sc->sc_flags & RT2661_FWLOADED)) {
-		switch (sc->sc_id) {
-		case PCI_PRODUCT_RALINK_RT2561:
-			name = "ral-rt2561";
-			break;
-		case PCI_PRODUCT_RALINK_RT2561S:
-			name = "ral-rt2561s";
-			break;
-		case PCI_PRODUCT_RALINK_RT2661:
-			name = "ral-rt2661";
-			break;
-		}
-
-		if ((error = loadfirmware(name, &ucode, &size)) != 0) {
-			printf("%s: error %d, could not read firmware %s\n",
-			    sc->sc_dev.dv_xname, error, name);
-			rt2661_stop(ifp, 1);
-			return EIO;
-		}
-
-		if (rt2661_load_microcode(sc, ucode, size) != 0) {
-			printf("%s: could not load 8051 microcode\n",
-			    sc->sc_dev.dv_xname);
-			free(ucode, M_DEVBUF);
-			rt2661_stop(ifp, 1);
-			return EIO;
-		}
-
-		free(ucode, M_DEVBUF);
-		sc->sc_flags |= RT2661_FWLOADED;
+	if (rt2661_load_microcode(sc) != 0) {
+		printf("%s: could not load 8051 microcode\n",
+		    sc->sc_dev.dv_xname);
+		rt2661_stop(ifp, 1);
+		return EIO;
 	}
 
 	/* initialize Tx rings */
@@ -2629,13 +2631,13 @@ rt2661_stop(struct ifnet *ifp, int disable)
 	if (disable && sc->sc_disable != NULL) {
 		if (sc->sc_flags & RT2661_ENABLED) {
 			(*sc->sc_disable)(sc);
-			sc->sc_flags &= ~(RT2661_ENABLED | RT2661_FWLOADED);
+			sc->sc_flags &= ~RT2661_ENABLED;
 		}
 	}
 }
 
 int
-rt2661_load_microcode(struct rt2661_softc *sc, const uint8_t *ucode, int size)
+rt2661_load_microcode(struct rt2661_softc *sc)
 {
 	int ntries;
 
@@ -2649,7 +2651,7 @@ rt2661_load_microcode(struct rt2661_softc *sc, const uint8_t *ucode, int size)
 
 	/* write 8051's microcode */
 	RAL_WRITE(sc, RT2661_MCU_CNTL_CSR, RT2661_MCU_RESET | RT2661_MCU_SEL);
-	RAL_WRITE_REGION_1(sc, RT2661_MCU_CODE_BASE, ucode, size);
+	RAL_WRITE_REGION_1(sc, RT2661_MCU_CODE_BASE, sc->ucode, sc->ucsize);
 	RAL_WRITE(sc, RT2661_MCU_CNTL_CSR, RT2661_MCU_RESET);
 
 	/* kick 8051's ass */
@@ -2912,44 +2914,4 @@ rt2661_get_rssi(struct rt2661_softc *sc, uint8_t raw)
 			rssi -= 100;
 	}
 	return rssi;
-}
-
-void
-rt2661_power(int why, void *arg)
-{
-	struct rt2661_softc *sc = arg;
-	struct ifnet *ifp = &sc->sc_ic.ic_if;
-	int s;
-
-	DPRINTF(("%s: rt2661_power(%d)\n", sc->sc_dev.dv_xname, why));
-
-	s = splnet();
-	switch (why) {
-	case PWR_SUSPEND:
-	case PWR_STANDBY:
-		rt2661_stop(ifp, 1);
-		sc->sc_flags &= ~RT2661_FWLOADED; 
-		if (sc->sc_power != NULL)
-			(*sc->sc_power)(sc, why);
-		break;
-	case PWR_RESUME:
-		if (ifp->if_flags & IFF_UP) {
-			rt2661_init(ifp);	
-			if (sc->sc_power != NULL)
-				(*sc->sc_power)(sc, why);
-			if (ifp->if_flags & IFF_RUNNING)
-				rt2661_start(ifp);
-		}
-		break;
-	}
-	splx(s);
-}
-
-void
-rt2661_shutdown(void *arg)
-{
-	struct rt2661_softc *sc = arg;
-	struct ifnet *ifp = &sc->sc_ic.ic_if;
-
-	rt2661_stop(ifp, 1);
 }
