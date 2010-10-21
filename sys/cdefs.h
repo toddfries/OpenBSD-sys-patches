@@ -1,4 +1,4 @@
-/*	$OpenBSD: cdefs.h,v 1.28 2009/01/14 21:26:48 guenther Exp $	*/
+/*	$OpenBSD: cdefs.h,v 1.31 2010/10/01 04:51:49 guenther Exp $	*/
 /*	$NetBSD: cdefs.h,v 1.16 1996/04/03 20:46:39 christos Exp $	*/
 
 /*
@@ -127,6 +127,47 @@
 #elif !defined(__STRICT_ANSI__)
 #define __dead		__attribute__((__noreturn__))
 #define __pure		__attribute__((__const__))
+#endif
+
+#if __GNUC_PREREQ__(2, 7)
+#define	__unused	__attribute__((__unused__))
+#else
+#define	__unused	/* delete */
+#endif
+
+#if __GNUC_PREREQ__(3, 1)
+#define	__used		__attribute__((__used__))
+#else
+#define	__used		__unused	/* suppress -Wunused warnings */
+#endif
+
+/*
+ * __returns_twice makes the compiler not assume the function
+ * only returns once.  This affects registerisation of variables:
+ * even local variables need to be in memory across such a call.
+ * Example: setjmp()
+ */
+#if __GNUC_PREREQ__(4, 1)
+#define __returns_twice	__attribute__((returns_twice))
+#else
+#define __returns_twice
+#endif
+
+/*
+ * __only_inline makes the compiler only use this function definition
+ * for inlining; references that can't be inlined will be left as
+ * external references instead of generating a local copy.  The
+ * matching library should include a simple extern definition for
+ * the function to handle those references.  c.f. ctype.h
+ */
+#ifdef __GNUC__
+#  if __GNUC_PREREQ__(4, 2)
+#define __only_inline	extern __inline __attribute__((__gnu_inline__))
+#  else
+#define __only_inline	extern __inline
+#  endif
+#else
+#define __only_inline	static __inline
 #endif
 
 /*

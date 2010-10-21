@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sisreg.h,v 1.28 2009/02/24 21:10:14 claudio Exp $ */
+/*	$OpenBSD: if_sisreg.h,v 1.31 2009/07/22 21:32:50 miod Exp $ */
 /*
  * Copyright (c) 1997, 1998, 1999
  *	Bill Paul <wpaul@ee.columbia.edu>.  All rights reserved.
@@ -340,10 +340,11 @@ struct sis_desc {
 #define SIS_CMDSTS_MORE		0x40000000
 #define SIS_CMDSTS_OWN		0x80000000
 
-#define SIS_LASTDESC(x)		(!((x)->sis_ctl & SIS_CMDSTS_MORE)))
-#define SIS_OWNDESC(x)		((x)->sis_ctl & SIS_CMDSTS_OWN)
+#define SIS_LASTDESC(x)		(!(letoh32((x)->sis_ctl) & SIS_CMDSTS_MORE)))
+#define SIS_OWNDESC(x)		(letoh32((x)->sis_ctl) & SIS_CMDSTS_OWN)
 #define SIS_INC(x, y)		(x) = ((x) == ((y)-1)) ? 0 : (x)+1
-#define SIS_RXBYTES(x)		(((x)->sis_ctl & SIS_CMDSTS_BUFLEN) - ETHER_CRC_LEN)
+#define SIS_RXBYTES(x)	\
+	((letoh32((x)->sis_ctl) & SIS_CMDSTS_BUFLEN) - ETHER_CRC_LEN)
 
 #define SIS_RXSTAT_COLL		0x00010000
 #define SIS_RXSTAT_LOOPBK	0x00020000
@@ -375,17 +376,18 @@ struct sis_desc {
 #define SIS_TXSTAT_UNDERRUN	0x02000000
 #define SIS_TXSTAT_TX_ABORT	0x04000000
 
-#define SIS_RX_LIST_CNT_MIN	4
-#define SIS_RX_LIST_CNT_MAX	64
+#define SIS_RX_LIST_CNT		64
 #define SIS_TX_LIST_CNT		128
 
 struct sis_list_data {
-	struct sis_desc		sis_rx_list[SIS_RX_LIST_CNT_MAX];
+	struct sis_desc		sis_rx_list[SIS_RX_LIST_CNT];
 	struct sis_desc		sis_tx_list[SIS_TX_LIST_CNT];
 };
 
 struct sis_ring_data {
-	struct sis_desc		*sis_rx_pdsc;
+	int			sis_rx_prod;
+	int			sis_rx_cons;
+	int			sis_rx_cnt;
 	int			sis_tx_prod;
 	int			sis_tx_cons;
 	int			sis_tx_cnt;
@@ -462,11 +464,8 @@ struct sis_softc {
 	bus_dma_segment_t	sc_listseg[1];
 	int			sc_listnseg;
 	caddr_t			sc_listkva;
-	bus_dmamap_t		sc_rx_sparemap;
 	bus_dmamap_t		sc_tx_sparemap;
 	int			sis_stopped;
-	int			sc_rxbufs;
-	int			sc_if_flags;
 };
 
 /*

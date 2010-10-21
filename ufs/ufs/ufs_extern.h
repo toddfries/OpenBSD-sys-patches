@@ -1,4 +1,4 @@
-/*	$OpenBSD: ufs_extern.h,v 1.29 2008/01/05 19:49:26 otto Exp $	*/
+/*	$OpenBSD: ufs_extern.h,v 1.31 2010/09/10 16:34:09 thib Exp $	*/
 /*	$NetBSD: ufs_extern.h,v 1.5 1996/02/09 22:36:03 christos Exp $	*/
 
 /*-

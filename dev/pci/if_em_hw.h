@@ -31,7 +31,7 @@
 
 *******************************************************************************/
 
-/* $OpenBSD: if_em_hw.h,v 1.27 2008/08/28 01:17:29 brad Exp $ */
+/* $OpenBSD: if_em_hw.h,v 1.46 2010/09/19 13:10:21 yasuoka Exp $ */
 /* $FreeBSD: if_em_hw.h,v 1.15 2005/05/26 23:32:02 tackerman Exp $ */
 
 /* if_em_hw.h
@@ -58,6 +58,7 @@ typedef enum {
     em_82540,
     em_82545,
     em_82545_rev_3,
+    em_icp_xxxx,
     em_82546,
     em_82546_rev_3,
     em_82541,
@@ -67,9 +68,13 @@ typedef enum {
     em_82571,
     em_82572,
     em_82573,
+    em_82574,
+    em_82575,
     em_80003es2lan,
     em_ich8lan,
     em_ich9lan,
+    em_ich10lan,
+    em_pchlan,
     em_num_macs
 } em_mac_type;
 
@@ -88,6 +93,7 @@ typedef enum {
     em_media_type_copper = 0,
     em_media_type_fiber = 1,
     em_media_type_internal_serdes = 2,
+    em_media_type_oem = 3,
     em_num_media_types
 } em_media_type;
 
@@ -109,6 +115,7 @@ typedef enum {
     em_bus_type_pci,
     em_bus_type_pcix,
     em_bus_type_pci_express,
+    em_bus_type_cpp,
     em_bus_type_reserved
 } em_bus_type;
 
@@ -227,6 +234,10 @@ typedef enum {
     em_phy_gg82563,
     em_phy_igp_3,
     em_phy_ife,
+    em_phy_bm,		/* phy used in i82574L, ICH10 and some ICH9 */
+    em_phy_oem,
+    em_phy_82577,
+    em_phy_82578,
     em_phy_undefined = 0xFF
 } em_phy_type;
 
@@ -300,6 +311,7 @@ typedef enum {
 #define E1000_BLK_PHY_RESET   12
 #define E1000_ERR_SWFW_SYNC 13
 #define E1000_NOT_IMPLEMENTED 14
+#define E1000_DEFER_INIT 15
 
 #define E1000_BYTE_SWAP_WORD(_value) ((((_value) & 0x00ff) << 8) | \
                                      (((_value) & 0xff00) >> 8))
@@ -318,6 +330,8 @@ void em_config_collision_dist(struct em_hw *hw);
 int32_t em_check_for_link(struct em_hw *hw);
 int32_t em_get_speed_and_duplex(struct em_hw *hw, uint16_t *speed, uint16_t *duplex);
 int32_t em_force_mac_fc(struct em_hw *hw);
+int32_t em_copper_link_autoneg(struct em_hw *hw);
+int32_t em_copper_link_postconfig(struct em_hw *hw);
 
 /* PHY */
 int32_t em_read_phy_reg(struct em_hw *hw, uint32_t reg_addr, uint16_t *phy_data);
@@ -476,6 +490,7 @@ int32_t em_check_phy_reset_block(struct em_hw *hw);
 #define E1000_DEV_ID_82573E_IAMT         0x108C
 #define E1000_DEV_ID_82573L              0x109A
 #define E1000_DEV_ID_82574L              0x10D3
+#define E1000_DEV_ID_82574LA             0x10F6
 #define E1000_DEV_ID_82546GB_2           0x109B
 #define E1000_DEV_ID_82571EB_AT          0x10A0
 #define E1000_DEV_ID_82571EB_AF          0x10A1
@@ -488,6 +503,7 @@ int32_t em_check_phy_reset_block(struct em_hw *hw);
 #define E1000_DEV_ID_80003ES2LAN_SERDES_DPT 0x1098
 #define E1000_DEV_ID_80003ES2LAN_COPPER_SPT 0x10BA
 #define E1000_DEV_ID_80003ES2LAN_SERDES_SPT 0x10BB
+#define E1000_DEV_ID_ICH8_82567V_3       0x1501
 #define E1000_DEV_ID_ICH8_IGP_M_AMT      0x1049
 #define E1000_DEV_ID_ICH8_IGP_AMT        0x104A
 #define E1000_DEV_ID_ICH8_IGP_C          0x104B
@@ -509,6 +525,32 @@ int32_t em_check_phy_reset_block(struct em_hw *hw);
 #define E1000_DEV_ID_ICH10_R_BM_V        0x10CE
 #define E1000_DEV_ID_ICH10_D_BM_LM       0x10DE
 #define E1000_DEV_ID_ICH10_D_BM_LF       0x10DF
+#define E1000_DEV_ID_PCH_M_HV_LM         0x10EA
+#define E1000_DEV_ID_PCH_M_HV_LC         0x10EB
+#define E1000_DEV_ID_PCH_D_HV_DM         0x10EF
+#define E1000_DEV_ID_PCH_D_HV_DC         0x10F0
+#define E1000_DEV_ID_82575EB_PT          0x10A7
+#define E1000_DEV_ID_82575EB_PF          0x10A9
+#define E1000_DEV_ID_82575GB_QP          0x10D6
+#define E1000_DEV_ID_82575GB_QP_PM       0x10E2
+#define E1000_DEV_ID_82576               0x10C9
+#define E1000_DEV_ID_82576_FIBER         0x10E6
+#define E1000_DEV_ID_82576_SERDES        0x10E7
+#define E1000_DEV_ID_82576_QUAD_COPPER   0x10E8
+#define E1000_DEV_ID_82576_NS            0x150A
+#define E1000_DEV_ID_82583V              0x150C
+#define E1000_DEV_ID_82576_NS_SERDES     0x1518
+#define E1000_DEV_ID_82576_SERDES_QUAD   0x150D
+#define E1000_DEV_ID_82580_COPPER        0x150E
+#define E1000_DEV_ID_82580_FIBER         0x150F
+#define E1000_DEV_ID_82580_SERDES        0x1510
+#define E1000_DEV_ID_82580_SGMII         0x1511
+#define E1000_DEV_ID_82580_COPPER_DUAL   0x1516
+#define E1000_DEV_ID_82576_QUAD_CU_ET2   0x1526
+#define E1000_DEV_ID_82574L              0x10D3
+#define E1000_DEV_ID_EP80579_LAN_1       0x5040
+#define E1000_DEV_ID_EP80579_LAN_2       0x5044
+#define E1000_DEV_ID_EP80579_LAN_3       0x5048
 
 #define NODE_ADDRESS_SIZE 6
 #define ETH_LENGTH_OF_ADDRESS 6
@@ -900,6 +942,7 @@ struct em_ffvt_entry {
 #define E1000_FCAL     0x00028  /* Flow Control Address Low - RW */
 #define E1000_FCAH     0x0002C  /* Flow Control Address High -RW */
 #define E1000_FCT      0x00030  /* Flow Control Type - RW */
+#define E1000_CONNSW   0x00034  /* Copper/Fiber switch control - RW */
 #define E1000_VET      0x00038  /* VLAN Ether Type - RW */
 #define E1000_ICR      0x000C0  /* Interrupt Cause Read - R/clr */
 #define E1000_ITR      0x000C4  /* Interrupt Throttling Rate - RW */
@@ -971,7 +1014,7 @@ struct em_ffvt_entry {
 #define E1000_TDBAH    0x03804  /* TX Descriptor Base Address High - RW */
 #define E1000_TDLEN    0x03808  /* TX Descriptor Length - RW */
 #define E1000_TDH      0x03810  /* TX Descriptor Head - RW */
-#define E1000_TDT      0x03818  /* TX Descripotr Tail - RW */
+#define E1000_TDT      0x03818  /* TX Descriptor Tail - RW */
 #define E1000_TIDV     0x03820  /* TX Interrupt Delay Value - RW */
 #define E1000_TXDCTL   0x03828  /* TX Descriptor Control - RW */
 #define E1000_TADV     0x0382C  /* TX Interrupt Absolute Delay Val - RW */
@@ -1051,6 +1094,9 @@ struct em_ffvt_entry {
 #define E1000_ICTXQMTC 0x0411C  /* Interrupt Cause Tx Queue Minimum Threshold Count */
 #define E1000_ICRXDMTC 0x04120  /* Interrupt Cause Rx Descriptor Minimum Threshold Count */
 #define E1000_ICRXOC   0x04124  /* Interrupt Cause Receiver Overrun Count */
+#define E1000_PCS_CFG0 0x04200  /* PCS Configuration 0 - RW */
+#define E1000_PCS_LCTL 0x04208  /* PCS Link Control - RW */
+#define E1000_PCS_LSTAT 0x0420C /* PCS Link Status - RO */
 #define E1000_RXCSUM   0x05000  /* RX Checksum Control - RW */
 #define E1000_RFCTL    0x05008  /* Receive Filter Control*/
 #define E1000_MTA      0x05200  /* Multicast Table Array - RW Array */
@@ -1066,6 +1112,8 @@ struct em_ffvt_entry {
 #define E1000_WUPL     0x05900  /* Wakeup Packet Length - RW */
 #define E1000_WUPM     0x05A00  /* Wakeup Packet Memory - RO A */
 #define E1000_FFLT     0x05F00  /* Flexible Filter Length Table - RW Array */
+#define E1000_FCRTV_PCH  0x05F40  /* PCH Flow Control Refresh Timer Value */
+#define E1000_CRC_OFFSET 0x05F50  /* CRC Offset Register */
 #define E1000_HOST_IF  0x08800  /* Host Interface */
 #define E1000_FFMT     0x09000  /* Flexible Filter Mask Table - RW Array */
 #define E1000_FFVT     0x09800  /* Flexible Filter Value Table - RW Array */
@@ -1112,6 +1160,7 @@ struct em_ffvt_entry {
 #define E1000_82542_FCAL     E1000_FCAL
 #define E1000_82542_FCAH     E1000_FCAH
 #define E1000_82542_FCT      E1000_FCT
+#define E1000_82542_CONNSW   E1000_CONNSW
 #define E1000_82542_VET      E1000_VET
 #define E1000_82542_RA       0x00040
 #define E1000_82542_ICR      E1000_ICR
@@ -1265,10 +1314,12 @@ struct em_ffvt_entry {
 #define E1000_82542_WUPL     E1000_WUPL
 #define E1000_82542_WUPM     E1000_WUPM
 #define E1000_82542_FFLT     E1000_FFLT
+#define E1000_82542_FCRTV_PCH E1000_FCRTV_PCH
 #define E1000_82542_TDFH     0x08010
 #define E1000_82542_TDFT     0x08018
 #define E1000_82542_FFMT     E1000_FFMT
 #define E1000_82542_FFVT     E1000_FFVT
+#define E1000_82542_CRC_OFFSET E1000_CRC_OFFSET
 #define E1000_82542_HOST_IF  E1000_HOST_IF
 #define E1000_82542_IAM         E1000_IAM
 #define E1000_82542_EEMNGCTL    E1000_EEMNGCTL
@@ -1302,6 +1353,9 @@ struct em_ffvt_entry {
 #define E1000_82542_ICRXDMTC    E1000_ICRXDMTC
 #define E1000_82542_ICRXOC      E1000_ICRXOC
 #define E1000_82542_HICR        E1000_HICR
+#define E1000_82542_PCS_CFG0	E1000_PCS_CFG0
+#define E1000_82542_PCS_LCTL	E1000_PCS_LCTL
+#define E1000_82542_PCS_LSTAT	E1000_PCS_LSTAT
 
 #define E1000_82542_CPUVEC      E1000_CPUVEC
 #define E1000_82542_MRQC        E1000_MRQC
@@ -1468,6 +1522,9 @@ struct em_hw {
     boolean_t mng_reg_access_disabled;
     boolean_t leave_av_bit_off;
     boolean_t kmrn_lock_loss_workaround_disabled;
+    boolean_t icp_xxxx_is_link_up;
+    uint32_t  icp_xxxx_port_num;
+    struct gcu_softc * gcu;
 };
 
 #define E1000_EEPROM_SWDPIN0   0x0001   /* SWDPIN 0 EEPROM Value */
@@ -1500,7 +1557,9 @@ struct em_hw {
 #define E1000_CTRL_D_UD_EN  0x00002000  /* Dock/Undock enable */
 #define E1000_CTRL_D_UD_POLARITY 0x00004000 /* Defined polarity of Dock/Undock indication in SDP[0] */
 #define E1000_CTRL_FORCE_PHY_RESET 0x00008000 /* Reset both PHY ports, through PHYRST_N pin */
-#define E1000_CTRL_EXT_LINK_EN 0x00010000 /* enable link status from external LINK_0 and LINK_1 pins */
+#define E1000_CTRL_LANPHYPC_OVERRIDE 0x00010000 /* SW control of LANPHYPC */
+#define E1000_CTRL_LANPHYPC_VALUE    0x00020000 /* SW value of LANPHYPC */
+#define E1000_CTRL_EXT_PHYPDEN 0x00100000
 #define E1000_CTRL_SWDPIN0  0x00040000  /* SWDPIN 0 value */
 #define E1000_CTRL_SWDPIN1  0x00080000  /* SWDPIN 1 value */
 #define E1000_CTRL_SWDPIN2  0x00100000  /* SWDPIN 2 value */
@@ -1516,6 +1575,16 @@ struct em_hw {
 #define E1000_CTRL_VME      0x40000000  /* IEEE VLAN mode enable */
 #define E1000_CTRL_PHY_RST  0x80000000  /* PHY Reset */
 #define E1000_CTRL_SW2FW_INT 0x02000000  /* Initiate an interrupt to manageability engine */
+#define E1000_CTRL_I2C_ENA  0x02000000  /* I2C enable */
+
+#define E1000_CONNSW_ENRGSRC	0x4
+#define E1000_PCS_CFG_PCS_EN	8
+
+#define E1000_PCS_LSTS_LINK_OK		0x01
+#define E1000_PCS_LSTS_SPEED_100	0x02
+#define E1000_PCS_LSTS_SPEED_1000	0x04
+#define E1000_PCS_LSTS_DUPLEX_FULL	0x08
+#define E1000_PCS_LSTS_SYNK_OK		0x10
 
 /* Device Status */
 #define E1000_STATUS_FD         0x00000001      /* Full duplex.0=half,1=full */
@@ -1536,7 +1605,7 @@ struct em_hw {
 #define E1000_STATUS_DOCK_CI    0x00000800      /* Change in Dock/Undock state. Clear on write '0'. */
 #define E1000_STATUS_GIO_MASTER_ENABLE 0x00080000 /* Status of Master requests. */
 #define E1000_STATUS_MTXCKOK    0x00000400      /* MTX clock running OK */
-#define E1000_STATUS_PCI66      0x00000800      /* In 66Mhz slot */
+#define E1000_STATUS_PCI66      0x00000800      /* In 66MHz slot */
 #define E1000_STATUS_BUS64      0x00001000      /* In 64 bit slot */
 #define E1000_STATUS_PCIX_MODE  0x00002000      /* PCI-X mode */
 #define E1000_STATUS_PCIX_SPEED 0x0000C000      /* PCI-X bus speed */
@@ -1619,6 +1688,7 @@ struct em_hw {
 #define E1000_CTRL_EXT_PHY_INT   E1000_CTRL_EXT_SDP5_DATA
 #define E1000_CTRL_EXT_SDP6_DATA 0x00000040 /* Value of SW Defineable Pin 6 */
 #define E1000_CTRL_EXT_SDP7_DATA 0x00000080 /* Value of SW Defineable Pin 7 */
+#define E1000_CTRL_EXT_SDP3_DATA 0x00000080 /* Value of SW Defineable Pin 3 */
 #define E1000_CTRL_EXT_SDP4_DIR  0x00000100 /* Direction of SDP4 0=in 1=out */
 #define E1000_CTRL_EXT_SDP5_DIR  0x00000200 /* Direction of SDP5 0=in 1=out */
 #define E1000_CTRL_EXT_SDP6_DIR  0x00000400 /* Direction of SDP6 0=in 1=out */
@@ -1632,7 +1702,8 @@ struct em_hw {
 #define E1000_CTRL_EXT_LINK_MODE_GMII 0x00000000
 #define E1000_CTRL_EXT_LINK_MODE_TBI  0x00C00000
 #define E1000_CTRL_EXT_LINK_MODE_KMRN 0x00000000
-#define E1000_CTRL_EXT_LINK_MODE_SERDES  0x00C00000
+#define E1000_CTRL_EXT_LINK_MODE_PCIE_SERDES  0x00C00000
+#define E1000_CTRL_EXT_LINK_MODE_1000BASE_KX  0x00400000
 #define E1000_CTRL_EXT_LINK_MODE_SGMII   0x00800000
 #define E1000_CTRL_EXT_WR_WMARK_MASK  0x03000000
 #define E1000_CTRL_EXT_WR_WMARK_256   0x00000000
@@ -1702,6 +1773,7 @@ struct em_hw {
 #define E1000_PHY_CTRL_NOND0A_GBE_DISABLE      0x00000008
 #define E1000_PHY_CTRL_GBE_DISABLE             0x00000040
 #define E1000_PHY_CTRL_B2B_EN                  0x00000080
+#define E1000_PHY_CTRL_LOOPBACK                0x00004000
 
 /* LED Control */
 #define E1000_LEDCTL_LED0_MODE_MASK       0x0000000F
@@ -1989,6 +2061,8 @@ struct em_hw {
 #define E1000_TXDCTL_FULL_TX_DESC_WB 0x01010000 /* GRAN=1, WTHRESH=1 */
 #define E1000_TXDCTL_COUNT_DESC 0x00400000 /* Enable the counting of desc.
                                               still to be processed. */
+#define E1000_TXDCTL_QUEUE_ENABLE 0x02000000
+
 /* Transmit Configuration Word */
 #define E1000_TXCW_FD         0x00000020        /* TXCW full duplex */
 #define E1000_TXCW_HD         0x00000040        /* TXCW half duplex */
@@ -2210,6 +2284,11 @@ struct em_host_command_info {
 #define E1000_GCR_TXDSCW_NO_SNOOP       0x00000010
 #define E1000_GCR_TXDSCR_NO_SNOOP       0x00000020
 
+#define E1000_GCR_CMPL_TMOUT_MASK       0x0000F000
+#define E1000_GCR_CMPL_TMOUT_10ms       0x00001000
+#define E1000_GCR_CMPL_TMOUT_RESEND     0x00010000
+#define E1000_GCR_CAP_VER2              0x00040000
+
 #define PCI_EX_NO_SNOOP_ALL (E1000_GCR_RXD_NO_SNOOP         | \
                              E1000_GCR_RXDSCW_NO_SNOOP      | \
                              E1000_GCR_RXDSCR_NO_SNOOP      | \
@@ -2248,6 +2327,9 @@ struct em_host_command_info {
 #define PCI_EX_LINK_STATUS           0x12
 #define PCI_EX_LINK_WIDTH_MASK       0x3F0
 #define PCI_EX_LINK_WIDTH_SHIFT      4
+
+#define PCI_EX_DEVICE_CONTROL2       0x28
+#define PCI_EX_DEVICE_CONTROL2_16ms  0x0005
 
 /* EEPROM Commands - Microwire */
 #define EEPROM_READ_OPCODE_MICROWIRE  0x6  /* EEPROM read opcode */
@@ -2434,6 +2516,7 @@ struct em_host_command_info {
 #define E1000_PBA_16K 0x0010    /* 16KB, default TX allocation */
 #define E1000_PBA_22K 0x0016
 #define E1000_PBA_24K 0x0018
+#define E1000_PBA_26K 0x001A
 #define E1000_PBA_30K 0x001E
 #define E1000_PBA_32K 0x0020
 #define E1000_PBA_34K 0x0022
@@ -2585,6 +2668,13 @@ struct em_host_command_info {
 #define M88E1000_PHY_VCO_REG_BIT8  0x100 /* Bits 8 & 11 are adjusted for */
 #define M88E1000_PHY_VCO_REG_BIT11 0x800    /* improved BER performance */
 
+/* BME1000 PHY Specific Control Register */
+#define BME1000_PSCR_ENABLE_DOWNSHIFT   0x0800 /* 1 = enable downshift */
+#define BM_PHY_PAGE_SELECT                22   /* Page Select for BM */
+#define BM_REG_BIAS1                      29
+#define BM_REG_BIAS2                      30
+#define BM_PORT_CTRL_PAGE		769
+
 #define IGP01E1000_IEEE_REGS_PAGE  0x0000
 #define IGP01E1000_IEEE_RESTART_AUTONEG 0x3300
 #define IGP01E1000_IEEE_FORCE_GIGA      0x0140
@@ -2712,6 +2802,22 @@ struct em_host_command_info {
         GG82563_REG(194, 25) /* Link Partner Advertised Next page */
 #define GG82563_PHY_KMRN_MISC           \
         GG82563_REG(194, 26) /* Misc. */
+
+/* I82577 Specific Registers */
+#define I82577_PHY_ADDR_REG 16
+#define I82577_PHY_CFG_REG  22
+#define I82577_PHY_CTRL_REG 23
+
+/* I82577 Config Register */
+#define I82577_PHY_CFG_ENABLE_CRS_ON_TX (1 << 15)
+#define I82577_PHY_CFG_ENABLE_DOWNSHIFT ((1 << 10) + (1 << 11))
+
+/* I82578 Specific Registers */
+#define I82578_PHY_ADDR_REG 29
+
+/* I82578 Downshift settings (Extended PHY Specific Control Register) */
+#define I82578_EPSCR_DOWNSHIFT_ENABLE          0x0020
+#define I82578_EPSCR_DOWNSHIFT_COUNTER_MASK    0x001C
 
 /* PHY Control Register */
 #define MII_CR_SPEED_SELECT_MSB 0x0040  /* bits 6,13: 10=1000, 01=100, 00=10 */
@@ -2933,6 +3039,10 @@ struct em_host_command_info {
 #define M88EC018_EPSCR_DOWNSHIFT_COUNTER_7X    0x0C00
 #define M88EC018_EPSCR_DOWNSHIFT_COUNTER_8X    0x0E00
 
+/* M88E1141 specific */
+#define M88E1000_EPSCR_TX_TIME_CTRL       0x0002 /* Add Delay */
+#define M88E1000_EPSCR_RX_TIME_CTRL       0x0080 /* Add Delay */
+
 /* IGP01E1000 Specific Port Config Register - R/W */
 #define IGP01E1000_PSCFR_AUTO_MDIX_PAR_DETECT  0x0010
 #define IGP01E1000_PSCFR_PRE_EN                0x0020
@@ -3147,17 +3257,24 @@ struct em_host_command_info {
 /* I = Integrated
  * E = External
  */
-#define M88_VENDOR         0x0141
-#define M88E1000_E_PHY_ID  0x01410C50
-#define M88E1000_I_PHY_ID  0x01410C30
-#define M88E1011_I_PHY_ID  0x01410C20
+#define M88_VENDOR           0x0141
+#define M88E1000_E_PHY_ID    0x01410C50
+#define M88E1000_I_PHY_ID    0x01410C30
+#define M88E1011_I_PHY_ID    0x01410C20
 #define IGP01E1000_I_PHY_ID  0x02A80380
-#define M88E1000_12_PHY_ID M88E1000_E_PHY_ID
-#define M88E1000_14_PHY_ID M88E1000_E_PHY_ID
-#define M88E1011_I_REV_4   0x04
-#define M88E1111_I_PHY_ID  0x01410CC0
-#define L1LXT971A_PHY_ID   0x001378E0
-#define GG82563_E_PHY_ID   0x01410CA0
+#define M88E1000_12_PHY_ID   M88E1000_E_PHY_ID
+#define M88E1000_14_PHY_ID   M88E1000_E_PHY_ID
+#define M88E1011_I_REV_4     0x04
+#define M88E1111_I_PHY_ID    0x01410CC0
+#define L1LXT971A_PHY_ID     0x001378E0
+#define GG82563_E_PHY_ID     0x01410CA0
+#define BME1000_E_PHY_ID     0x01410CB0
+#define BME1000_E_PHY_ID_R2  0x01410CB1
+#define I82577_E_PHY_ID      0x01540050
+#define I82578_E_PHY_ID      0x004DD040
+#define I82580_I_PHY_ID      0x015403A0
+#define IGP04E1000_E_PHY_ID  0x02A80391
+#define M88E1141_E_PHY_ID    0x01410CD0
 
 /* Bits...
  * 15-5: page
@@ -3376,5 +3493,113 @@ union ich8_hws_flash_regacc {
 #define AUTONEG_ADVERTISE_SPEED_DEFAULT 0x002F  /* Everything but 1000-Half */
 #define AUTONEG_ADVERTISE_10_100_ALL    0x000F /* All 10/100 speeds*/
 #define AUTONEG_ADVERTISE_10_ALL        0x0003 /* 10Mbps Full & Half speeds*/
+
+/* ICP PCI Dev ID xxxx macros to calculate word offsets for IA, IPv4 and IPv6 */
+#define EEPROM_MGMT_CONTROL_ICP_xxxx(device_num)  (((device_num) + 1) << 4)
+#define EEPROM_INIT_CONTROL3_ICP_xxxx(device_num) ((((device_num) + 1) << 4) + 1)
+#define EEPROM_IA_START_ICP_xxxx(device_num)      ((((device_num) + 1) << 4) + 2)
+#define EEPROM_IPV4_START_ICP_xxxx(device_num)    ((((device_num) + 1) << 4) + 5)
+#define EEPROM_IPV6_START_ICP_xxxx(device_num)    ((((device_num) + 1) << 4) + 7)
+#define EEPROM_CHECKSUM_REG_ICP_xxxx                EEPROM_CHECKSUM_REG
+#define PCI_CAP_ID_ST      0x09
+#define PCI_ST_SMIA_OFFSET 0x04
+
+#define E1000_IMC1     0x008D8  /* Interrupt Mask Clear 1 - RW */
+#define E1000_IMC2     0x008F8  /* Interrupt Mask Clear 2 - RW */ 
+#define E1000_82542_IMC1     E1000_IMC1
+#define E1000_82542_IMC2     E1000_IMC2
+
+#define E1000_NVM_K1_CONFIG 0x1B /* NVM K1 Config Word */
+#define E1000_NVM_K1_ENABLE 0x1  /* NVM Enable K1 bit */
+
+#define E1000_KMRNCTRLSTA_OFFSET		0x001F0000
+#define E1000_KMRNCTRLSTA_OFFSET_SHIFT		16
+#define E1000_KMRNCTRLSTA_REN			0x00200000
+#define E1000_KMRNCTRLSTA_DIAG_OFFSET		0x3    /* Diagnostic */
+#define E1000_KMRNCTRLSTA_TIMEOUTS		0x4    /* Timeouts */
+#define E1000_KMRNCTRLSTA_INBAND_PARAM		0x9    /* InBand Parameters */
+#define E1000_KMRNCTRLSTA_DIAG_NELPBK		0x1000 /* Loopback mode */
+#define E1000_KMRNCTRLSTA_K1_CONFIG		0x7
+#define E1000_KMRNCTRLSTA_K1_ENABLE		0x0002
+
+
+/* Extended Configuration Control and Size */
+#define E1000_EXTCNF_CTRL_MDIO_SW_OWNERSHIP      0x00000020
+#define E1000_EXTCNF_CTRL_LCD_WRITE_ENABLE       0x00000001
+#define E1000_EXTCNF_CTRL_OEM_WRITE_ENABLE       0x00000008
+#define E1000_EXTCNF_CTRL_SWFLAG                 0x00000020
+#define E1000_EXTCNF_SIZE_EXT_PCIE_LENGTH_MASK   0x00FF0000
+#define E1000_EXTCNF_SIZE_EXT_PCIE_LENGTH_SHIFT          16
+#define E1000_EXTCNF_CTRL_EXT_CNF_POINTER_MASK   0x0FFF0000
+#define E1000_EXTCNF_CTRL_EXT_CNF_POINTER_SHIFT          16
+
+/* Hanksville definitions */
+#define HV_INTC_FC_PAGE_START   768
+
+#define HV_SCC_UPPER            PHY_REG(778, 16) /* Single Collision Count */
+#define HV_SCC_LOWER            PHY_REG(778, 17)
+#define HV_ECOL_UPPER           PHY_REG(778, 18) /* Excessive Collision Count */
+#define HV_ECOL_LOWER           PHY_REG(778, 19)
+#define HV_MCC_UPPER            PHY_REG(778, 20) /* Multiple Collision Count */
+#define HV_MCC_LOWER            PHY_REG(778, 21)
+#define HV_LATECOL_UPPER        PHY_REG(778, 23) /* Late Collision Count */
+#define HV_LATECOL_LOWER        PHY_REG(778, 24)
+#define HV_COLC_UPPER           PHY_REG(778, 25) /* Collision Count */
+#define HV_COLC_LOWER           PHY_REG(778, 26)
+#define HV_DC_UPPER             PHY_REG(778, 27) /* Defer Count */
+#define HV_DC_LOWER             PHY_REG(778, 28)
+#define HV_TNCRS_UPPER          PHY_REG(778, 29) /* Transmit with no CRS */
+#define HV_TNCRS_LOWER          PHY_REG(778, 30)
+
+/* OEM Bits Phy Register */
+#define HV_OEM_BITS		PHY_REG(768, 25)
+#define HV_OEM_BITS_LPLU	0x0004 /* Low Power Link Up */
+#define HV_OEM_BITS_GBE_DIS	0x0040 /* Gigabit Disable */
+#define HV_OEM_BITS_RESTART_AN	0x0400 /* Restart Auto-negotiation */
+
+#define HV_MUX_DATA_CTRL               PHY_REG(776, 16)
+#define HV_MUX_DATA_CTRL_GEN_TO_MAC    0x0400
+#define HV_MUX_DATA_CTRL_FORCE_SPEED   0x0004
+
+#define HV_KMRN_MODE_CTRL	PHY_REG(769, 16)
+#define HV_KMRN_MDIO_SLOW	0x0400
+
+/* BM/HV Specific Registers */
+#define BM_PORT_CTRL_PAGE                 769
+#define BM_PCIE_PAGE                      770
+#define BM_WUC_PAGE                       800
+#define BM_WUC_ADDRESS_OPCODE             0x11
+#define BM_WUC_DATA_OPCODE                0x12
+#define BM_WUC_ENABLE_PAGE                BM_PORT_CTRL_PAGE
+#define BM_WUC_ENABLE_REG                 17
+#define BM_WUC_ENABLE_BIT                 (1 << 2)
+#define BM_WUC_HOST_WU_BIT                (1 << 4)
+
+/* BM PHY Copper Specific Status */
+#define BM_CS_STATUS                      17
+#define BM_CS_STATUS_ENERGY_DETECT        0x0010 /* Energy Detect Status */
+#define BM_CS_STATUS_LINK_UP              0x0400
+#define BM_CS_STATUS_RESOLVED             0x0800
+#define BM_CS_STATUS_SPEED_MASK           0xC000
+#define BM_CS_STATUS_SPEED_1000           0x8000
+
+/* 82577 Mobile Phy Status Register */
+#define HV_M_STATUS                       26
+#define HV_M_STATUS_AUTONEG_COMPLETE      0x1000
+#define HV_M_STATUS_SPEED_MASK            0x0300
+#define HV_M_STATUS_SPEED_1000            0x0200
+#define HV_M_STATUS_LINK_UP               0x0040
+
+#define PHY_UPPER_SHIFT                   21
+#define BM_PHY_REG(page, reg) \
+        (((reg) & MAX_PHY_REG_ADDRESS) |\
+         (((page) & 0xFFFF) << PHY_PAGE_SHIFT) |\
+         (((reg) & ~MAX_PHY_REG_ADDRESS) << (PHY_UPPER_SHIFT - PHY_PAGE_SHIFT)))
+#define BM_PHY_REG_PAGE(offset) \
+        ((uint16_t)(((offset) >> PHY_PAGE_SHIFT) & 0xFFFF))
+#define BM_PHY_REG_NUM(offset) \
+        ((uint16_t)(((offset) & MAX_PHY_REG_ADDRESS) |\
+         (((offset) >> (PHY_UPPER_SHIFT - PHY_PAGE_SHIFT)) &\
+                ~MAX_PHY_REG_ADDRESS)))
 
 #endif /* _EM_HW_H_ */

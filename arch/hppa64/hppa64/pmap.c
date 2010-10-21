@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.6 2008/04/27 17:48:10 martin Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.13 2010/07/24 16:25:33 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -22,8 +22,8 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/lock.h>
-#include <sys/user.h>
 #include <sys/proc.h>
+#include <sys/user.h>
 #include <sys/pool.h>
 #include <sys/extent.h>
 
@@ -97,6 +97,25 @@ pt_entry_t	kernel_ptes[] = {
 
 #define	pmap_pvh_attrs(a) \
 	(((a) & PTE_DIRTY) | ((a) ^ PTE_REFTRAP))
+
+struct vm_page	*pmap_pagealloc(int wait);
+volatile pt_entry_t *pmap_pde_get(volatile u_int32_t *pd, vaddr_t va);
+void		 pmap_pde_set(struct pmap *pm, vaddr_t va, paddr_t ptp);
+void		 pmap_pte_flush(struct pmap *pmap, vaddr_t va, pt_entry_t pte);
+pt_entry_t *	 pmap_pde_alloc(struct pmap *pm, vaddr_t va,
+		    struct vm_page **pdep);
+#ifdef DDB
+void		 pmap_dump_table(pa_space_t space, vaddr_t sva);
+void		 pmap_dump_pv(paddr_t pa);
+#endif
+int		 pmap_check_alias(struct pv_entry *pve, vaddr_t va,
+		    pt_entry_t pte);
+void		 pmap_pv_free(struct pv_entry *pv);
+void		 pmap_pv_enter(struct vm_page *pg, struct pv_entry *pve,
+		    struct pmap *pm, vaddr_t va, struct vm_page *pdep);
+struct pv_entry *pmap_pv_remove(struct vm_page *pg, struct pmap *pmap,
+		    vaddr_t va);
+void		 pmap_maphys(paddr_t spa, paddr_t epa);
 
 struct vm_page *
 pmap_pagealloc(int wait)
@@ -393,7 +412,6 @@ const pt_entry_t hppa_pgs[] = {
 	PTE_PG16M,
 	PTE_PG64M
 };
-#define	nhppa_pgs	sizeof(hppa_pgs)/sizeof(hppa_pgs[0])
 
 void
 pmap_maphys(paddr_t spa, paddr_t epa)
@@ -407,22 +425,22 @@ pmap_maphys(paddr_t spa, paddr_t epa)
 	s = ffs(spa) - 12;
 	e = ffs(epa) - 12;
 
-	if (s < e || (s == e && s / 2 < nhppa_pgs)) {
+	if (s < e || (s == e && s / 2 < nitems(hppa_pgs))) {
 		i = s / 2;
-		if (i > nhppa_pgs)
-			i = nhppa_pgs;
+		if (i > nitems(hppa_pgs))
+			i = nitems(hppa_pgs);
 		pa = spa;
 		spa = tpa = 0x1000 << ((i + 1) * 2);
 	} else if (s > e) {
 		i = e / 2;
-		if (i > nhppa_pgs)
-			i = nhppa_pgs;
+		if (i > nitems(hppa_pgs))
+			i = nitems(hppa_pgs);
 		epa = pa = epa & (0xfffff000 << ((i + 1) * 2));
 		tpa = epa;
 	} else {
 		i = s / 2;
-		if (i > nhppa_pgs)
-			i = nhppa_pgs;
+		if (i > nitems(hppa_pgs))
+			i = nitems(hppa_pgs);
 		pa = spa;
 		spa = tpa = epa;
 	}
@@ -554,7 +572,7 @@ pmap_steal_memory(vsize_t size, vaddr_t *vstartp, vaddr_t *vendp)
 
 	vm_physmem[0].end -= npg;
 	vm_physmem[0].avail_end -= npg;
-	va = ptoa(vm_physmem[0].avail_end) - size;
+	va = ptoa(vm_physmem[0].avail_end);
 	bzero((void *)va, size);
 
 	DPRINTF(PDB_FOLLOW|PDB_PHYS, ("pmap_steal_memory: 0x%lx\n", va));
@@ -621,8 +639,8 @@ pmap_create()
 	pmap->pm_ptphint = NULL;
 
 	TAILQ_INIT(&pmap->pm_pglist);
-	if (uvm_pglistalloc(2 * PAGE_SIZE, 0, VM_MIN_KERNEL_ADDRESS,
-	    PAGE_SIZE, 2 * PAGE_SIZE, &pmap->pm_pglist, 1, 1))
+	if (uvm_pglistalloc(2 * PAGE_SIZE, 0, VM_MIN_KERNEL_ADDRESS - 1,
+	    PAGE_SIZE, 2 * PAGE_SIZE, &pmap->pm_pglist, 1, UVM_PLA_WAITOK))
 		panic("pmap_create: no pages");
 
 	pg = TAILQ_FIRST(&pmap->pm_pglist);
@@ -1039,6 +1057,7 @@ pmap_extract(pmap, va, pap)
 	paddr_t *pap;
 {
 	pt_entry_t pte;
+	vaddr_t mask;
 
 	DPRINTF(PDB_FOLLOW|PDB_EXTRACT, ("pmap_extract(%p, %lx)\n", pmap, va));
 
@@ -1047,8 +1066,10 @@ pmap_extract(pmap, va, pap)
 	simple_unlock(&pmap->pm_lock);
 
 	if (pte) {
-		if (pap)
-			*pap = PTE_PAGE(pte) | (va & PAGE_MASK);
+		if (pap) {
+			mask = PTE_PAGE_SIZE(pte) - 1;
+			*pap = PTE_PAGE(pte) | (va & mask);
+		}
 		return (TRUE);
 	}
 

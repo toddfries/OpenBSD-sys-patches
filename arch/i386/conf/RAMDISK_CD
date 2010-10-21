@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK_CD,v 1.168 2009/03/10 09:54:14 kevlo Exp $
+#	$OpenBSD: RAMDISK_CD,v 1.181 2010/10/19 20:23:53 deraadt Exp $
 
 machine		i386		# architecture, used by config; REQUIRED
 
@@ -31,7 +31,7 @@ option		BOOT_CONFIG	# boot-time kernel config
 option		CRYPTO		# Cryptographic framework
 
 option		RAMDISK_HOOKS
-option		MINIROOTSIZE=3800
+option		MINIROOTSIZE=3872
 
 config		bsd	root on rd0a swap on rd0b and wd0b and sd0b
 
@@ -58,10 +58,10 @@ pcibios0 at bios0 flags 0x0000
 
 isa0	at mainbus0
 isa0	at pcib?
-isa0	at ichpcib?
-isa0	at gscpcib?
-isa0	at glxpcib?
-isa0	at amdpcib?
+#isa0	at ichpcib?
+#isa0	at gscpcib?
+#isa0	at glxpcib?
+#isa0	at amdpcib?
 eisa0	at mainbus0
 pci*	at mainbus0
 
@@ -73,10 +73,10 @@ ppb*	at pci?			# PCI-PCI bridges
 pci*	at ppb?
 pci*	at pchb?
 pcib*	at pci?			# PCI-ISA bridge
-ichpcib* at pci?		# Intel ICHx/ICHx-M LPC bridges
-gscpcib* at pci?		# NS Geode SC1100 PCI-ISA bridge
-glxpcib* at pci?		# AMD CS5536 PCI-ISA bridge
-amdpcib* at pci?		# AMD 8111 LPC bridge
+#ichpcib* at pci?		# Intel ICHx/ICHx-M LPC bridges
+#gscpcib* at pci?		# NS Geode SC1100 PCI-ISA bridge
+#glxpcib* at pci?		# AMD CS5536 PCI-ISA bridge
+#amdpcib* at pci?		# AMD 8111 LPC bridge
 geodesc* at pci?		# Geode SC1100/SCx200 IAOC
 
 # CardBus bus support
@@ -133,15 +133,13 @@ axe*	at uhub?		# ASIX Electronics AX88172 USB Ethernet
 cue*	at uhub?		# CATC USB-EL1201A based Ethernet
 kue*	at uhub?		# Kawasaki KL5KUSB101B based Ethernet
 upl*	at uhub?		# Prolific PL2301/PL2302 host-to-host `network'
-urio*	at uhub?		# Diamond Multimedia Rio 500
+#urio*	at uhub?		# Diamond Multimedia Rio 500
 cdce*	at uhub?		# CDC Ethernet
 udav*	at uhub?		# Davicom DM9601 based Ethernet
 mos*	at uhub?		# MOSCHIP MCS7730/7830 10/100 Ethernet
 url*	at uhub?		# Realtek RTL8150L based adapters
 wi*	at uhub?		# WaveLAN IEEE 802.11DS
 #uscanner* at uhub?		# USB Scanners
-#usscanner* at uhub?		# USB SCSI scanners, e.g., HP5300
-#scsibus* at usscanner?
 #uyap*	at uhub?		# Y@P firmware loader
 #ugen*	at uhub?		# USB Generic driver
 ural*	at uhub?		# Ralink RT2500
@@ -216,6 +214,8 @@ arc*	at pci?			# Areca RAID Controllers
 scsibus* at arc?
 mpi*	at pci?			# LSI Logic Fusion-MPT Message Passing Interface
 scsibus* at mpi?
+mpii*	at pci?			# LSI Fusion-MPT Message Passing Interface II
+scsibus* at mpii?
 gdt*	at pci?			# ICP Vortex GDT RAID controllers
 scsibus* at gdt?
 #aac*	at pci?			# Adaptec FSA RAID controllers
@@ -345,6 +345,7 @@ dc*	at pci?				# 21143, "tulip" clone ethernet
 dc*	at cardbus?			# 21143, "tulip" clone ethernet
 ste*	at pci?				# Sundance ST201 ethernet
 sis*	at pci?				# SiS 900/7016 ethernet
+se*	at pci?				# SiS 190/191 ethernet
 wb*	at pci?				# Winbond W89C840F ethernet
 sf*	at pci?				# Adaptec AIC-6915 ethernet
 ti*	at pci?				# Alteon Tigon 1Gb ethernet
@@ -353,7 +354,9 @@ sk*	at skc?				#  each port of above
 mskc*	at pci?				# Marvell Yukon-2
 msk*	at mskc?			#  each port of above
 em*	at pci?				# Intel Pro/1000 ethernet
+gcu*    at pci?                         # Intel EP80579 auxlliary mii device
 ixgb*	at pci?				# Intel Pro/10Gb ethernet
+ix*	at pci?				# Intel 82598EB 10Gb ethernet
 txp*	at pci?				# 3com 3CR990
 nge*	at pci?				# NS DP83820/DP83821 GigE
 re*	at pci?				# Realtek 8169/8169S/8110S
@@ -364,13 +367,14 @@ bnx*	at pci?				# Broadcom BCM5706/5708 GigE
 lge*	at pci?				# Level1 LXT1001 GigE
 mtd*	at pci?				# Myson MTD803
 hme*	at pci?				# Sun Happy Meal
-bce*	at pci?				# Broadcom BCM4401
+#bce*	at pci?				# Broadcom BCM4401
 vge*	at pci?				# VIA VT612x
 nfe*	at pci?				# NVIDIA nForce Ethernet
 xge*	at pci?				# Neterion Xframe-I/II 10Gb ethernet
 vic*	at pci?				# VMware VMXnet virtual interface
 et*	at pci?				# Agere/LSI ET1310
 age*	at pci?				# Attansic L1 Ethernet
+alc*	at pci?				# Attansic L1C/L2C Ethernet
 ale*	at pci?				# Attansic L1E Ethernet
 lii*	at pci?				# Attansic L2 Ethernet
 jme*	at pci?				# JMicron JMC250/JMC260 Ethernet
@@ -380,6 +384,8 @@ acx*	at pci?				# TI ACX100/ACX111 (802.11b/g)
 acx*	at cardbus?			# TI ACX100/ACX111 (802.11b/g)
 ath*	at pci?				# Atheros AR5k (802.11a/b/g)
 ath*	at cardbus?			# Atheros AR5k (802.11a/b/g)
+athn*	at pci?				# Atheros AR9k (802.11a/g/n)
+athn*	at cardbus?			# Atheros AR9k (802.11a/g/n)
 atw*	at pci?				# ADMtek ADM8211 (802.11)
 atw*	at cardbus?			# ADMtek ADM8211 (802.11)
 bwi*	at pci?				# Broadcom AirForce (802.11b/g)
@@ -435,6 +441,7 @@ ukphy*	at mii?				# "unknown" PHYs
 pseudo-device	loop	1		# network loopback
 #pseudo-device	sl	1		# CSLIP
 #pseudo-device	ppp	1		# PPP
+pseudo-device	vlan			# IEEE 802.1Q VLAN 
 pseudo-device	bpfilter 1		# packet filter
 pseudo-device	rd	1		# ramdisk
 pseudo-device	ccd	4		# concatenated disk devices

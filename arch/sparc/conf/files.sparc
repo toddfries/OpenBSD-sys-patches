@@ -1,4 +1,4 @@
-#	$OpenBSD: files.sparc,v 1.81 2008/04/25 14:51:35 jmc Exp $
+#	$OpenBSD: files.sparc,v 1.87 2010/07/24 00:26:50 jakemsr Exp $
 #	$NetBSD: files.sparc,v 1.44 1997/08/31 21:29:16 pk Exp $
 
 # @(#)files.sparc	8.1 (Berkeley) 7/19/93
@@ -90,7 +90,7 @@ attach	zstty at zs
 file	arch/sparc/dev/z8530tty.c		zstty needs-flag
 file	arch/sparc/dev/zs_kgdb.c		kgdb
 
-device	zskbd: tty, wskbddev, sunkbd
+device	zskbd: wskbddev, sunkbd
 attach	zskbd at zs
 file	arch/sparc/dev/z8530kbd.c		zskbd needs-flag
 
@@ -130,6 +130,12 @@ device	qe: ifnet, ether, ifmedia
 attach	qe at qec
 file	arch/sparc/dev/qe.c		qe
 
+attach	gem at sbus with gem_sbus
+file	arch/sparc/dev/if_gem_sbus.c	gem_sbus
+
+attach	ti at sbus with ti_sbus
+file	arch/sparc/dev/if_ti_sbus.c	ti_sbus
+
 # HappyMeal (hme) ethernet
 device	hme: ifnet, ether, mii, ifmedia
 attach	hme at sbus
@@ -138,7 +144,7 @@ file	arch/sparc/dev/hme.c		hme
 attach	esp at sbus, dma, obio
 file	arch/sparc/dev/esp.c		esp
 
-device	audioamd: audio, mulaw
+device	audioamd: audio
 attach	audioamd at mainbus, obio, sbus
 file	arch/sparc/dev/amd7930.c	audio
 file	arch/sparc/sparc/amd7930intr.s	audio
@@ -259,11 +265,6 @@ device	sw: scsi, ncr5380sbc
 attach	sw at obio
 file	arch/sparc/dev/si.c		si | sw
 
-# Efficient Networks, Inc. ATM interface
-# device declaration in sys/conf/files
-#attach	en at sbus with en_sbus
-#file	arch/sparc/dev/if_en_sbus.c	en_sbus
-
 # Qlogic ISP 10x0 (SBus) family
 # device declaration in sys/conf/files
 attach	isp at sbus with isp_sbus
@@ -312,10 +313,6 @@ file	arch/sparc/sparc/db_disasm.c	ddb
 # SVR4 Binary Compatibility (COMPAT_SVR4)
 include	"../../../compat/svr4/files.svr4"
 file	arch/sparc/sparc/svr4_machdep.c	compat_svr4
-file	arch/sparc/sparc/sunos_machdep.c compat_sunos
-
-# SunOS Binary Compatibility (COMPAT_SUNOS)
-include	"../../../compat/sunos/files.sunos"
 
 # Magma Serial/Parallel boards
 device	magma {}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cryptodev.h,v 1.47 2008/06/09 16:07:00 djm Exp $	*/
+/*	$OpenBSD: cryptodev.h,v 1.53 2010/10/06 22:19:20 mikeb Exp $	*/
 
 /*
  * The author of this code is Angelos D. Keromytis (angelos@cis.upenn.edu)
@@ -53,13 +53,20 @@
 #define _CRYPTO_CRYPTO_H_
 
 #include <sys/ioccom.h>
+#include <sys/workq.h>
 
 /* Some initial values */
 #define CRYPTO_DRIVERS_INITIAL	4
 #define CRYPTO_SW_SESSIONS	32
 
 /* HMAC values */
-#define HMAC_BLOCK_LEN		64
+#define HMAC_MD5_BLOCK_LEN	64
+#define HMAC_SHA1_BLOCK_LEN	64
+#define HMAC_RIPEMD160_BLOCK_LEN 64
+#define HMAC_SHA2_256_BLOCK_LEN	64
+#define HMAC_SHA2_384_BLOCK_LEN	128
+#define HMAC_SHA2_512_BLOCK_LEN	128
+#define HMAC_MAX_BLOCK_LEN	HMAC_SHA2_512_BLOCK_LEN	/* keep in sync */
 #define HMAC_IPAD_VAL		0x36
 #define HMAC_OPAD_VAL		0x5C
 
@@ -67,7 +74,6 @@
 #define DES_BLOCK_LEN		8
 #define DES3_BLOCK_LEN		8
 #define BLOWFISH_BLOCK_LEN	8
-#define SKIPJACK_BLOCK_LEN	8
 #define CAST128_BLOCK_LEN	8
 #define RIJNDAEL128_BLOCK_LEN	16
 #define EALG_MAX_BLOCK_LEN	16 /* Keep this updated */
@@ -79,7 +85,6 @@
 #define CRYPTO_3DES_CBC		2
 #define CRYPTO_BLF_CBC		3
 #define CRYPTO_CAST_CBC		4
-#define CRYPTO_SKIPJACK_CBC	5
 #define CRYPTO_MD5_HMAC		6
 #define CRYPTO_SHA1_HMAC	7
 #define CRYPTO_RIPEMD160_HMAC	8
@@ -98,9 +103,12 @@
 #define CRYPTO_SHA2_512_HMAC	20
 #define CRYPTO_AES_CTR		21
 #define CRYPTO_AES_XTS		22
-#define CRYPTO_ALGORITHM_MAX	22 /* Keep updated - see below */
-
-#define	CRYPTO_ALGORITHM_ALL	(CRYPTO_ALGORITHM_MAX + 1)
+#define CRYPTO_AES_GCM_16	23
+#define CRYPTO_AES_128_GMAC	24
+#define CRYPTO_AES_192_GMAC	25
+#define CRYPTO_AES_256_GMAC	26
+#define CRYPTO_AES_GMAC		27
+#define CRYPTO_ALGORITHM_MAX	27 /* Keep updated */
 
 /* Algorithm flags */
 #define	CRYPTO_ALG_FLAG_SUPPORTED	0x01 /* Algorithm is supported */
@@ -143,6 +151,8 @@ struct cryptodesc {
 
 /* Structure describing complete operation */
 struct cryptop {
+	struct workq_task crp_wqt;
+
 	u_int64_t	crp_sid;	/* Session ID */
 	int		crp_ilen;	/* Input data total length */
 	int		crp_olen;	/* Result total length */
@@ -202,7 +212,7 @@ struct crypt_kop {
 #define CRK_DSA_SIGN		2
 #define CRK_DSA_VERIFY		3
 #define CRK_DH_COMPUTE_KEY	4
-#define CRK_ALGORITHM_MAX	4 /* Keep updated - see below */
+#define CRK_ALGORITHM_MAX	4 /* Keep updated */
 
 #define CRF_MOD_EXP		(1 << CRK_MOD_EXP)
 #define CRF_MOD_EXP_CRT		(1 << CRK_MOD_EXP_CRT)
@@ -211,6 +221,8 @@ struct crypt_kop {
 #define CRF_DH_COMPUTE_KEY	(1 << CRK_DH_COMPUTE_KEY)
 
 struct cryptkop {
+	struct workq_task krp_wqt;
+
 	u_int		krp_op;		/* ie. CRK_MOD_EXP or other */
 	u_int		krp_status;	/* return status */
 	u_short		krp_iparams;	/* # of input parameters */
@@ -306,7 +318,6 @@ int	crypto_register(u_int32_t, int *,
 int	crypto_kregister(u_int32_t, int *, int (*)(struct cryptkop *));
 int	crypto_unregister(u_int32_t, int);
 int32_t	crypto_get_driverid(u_int8_t);
-void	crypto_thread(void);
 int	crypto_invoke(struct cryptop *);
 int	crypto_kinvoke(struct cryptkop *);
 void	crypto_done(struct cryptop *);

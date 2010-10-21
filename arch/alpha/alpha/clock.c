@@ -1,4 +1,4 @@
-/*	$OpenBSD: clock.c,v 1.18 2007/04/30 04:35:05 miod Exp $	*/
+/*	$OpenBSD: clock.c,v 1.20 2010/09/20 06:33:46 matthew Exp $	*/
 /*	$NetBSD: clock.c,v 1.29 2000/06/05 21:47:10 thorpej Exp $	*/
 
 /*
@@ -55,18 +55,7 @@
 #include <alpha/alpha/clockvar.h>
 
 #define MINYEAR 1998 /* "today" */
-#ifdef CLOCK_COMPAT_OSF1
-/*
- * According to OSF/1's /usr/sys/include/arch/alpha/clock.h,
- * the console adjusts the RTC years 13..19 to 93..99 and
- * 20..40 to 00..20. (historical reasons?)
- * DEC Unix uses an offset to the year to stay outside
- * the dangerous area for the next couple of years.
- */
-#define UNIX_YEAR_OFFSET 52 /* 41=>1993, 12=>2064 */
-#else
 #define UNIX_YEAR_OFFSET 0
-#endif
  
 extern int schedhz;
 
@@ -143,7 +132,7 @@ cpu_initclocks(void)
 	platform.clockintr = hardclock;
 	schedhz = 16;
 
-	evcount_attach(&clk_count, "clock", (void *)&clk_irq, &evcount_intr);
+	evcount_attach(&clk_count, "clock", &clk_irq);
 
 	/*
 	 * Get the clock started.

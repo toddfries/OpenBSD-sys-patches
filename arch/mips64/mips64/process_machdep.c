@@ -1,4 +1,4 @@
-/*	$OpenBSD: process_machdep.c,v 1.9 2008/07/28 18:48:25 miod Exp $	*/
+/*	$OpenBSD: process_machdep.c,v 1.15 2010/09/21 20:29:17 miod Exp $	*/
 
 /*
  * Copyright (c) 1994 Adam Glass
@@ -40,7 +40,7 @@
  * From:
  *	Id: procfs_i386.c,v 4.1 1993/12/17 10:47:45 jsp Rel
  *
- *	$Id: process_machdep.c,v 1.9 2008/07/28 18:48:25 miod Exp $
+ *	$Id: process_machdep.c,v 1.15 2010/09/21 20:29:17 miod Exp $
  */
 
 /*
@@ -70,13 +70,13 @@
 #include <sys/time.h>
 #include <sys/kernel.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/vnode.h>
 #include <sys/ptrace.h>
-#include <machine/psl.h>
+#include <machine/fpu.h>
 #include <machine/frame.h>
+#include <machine/reg.h>
 
-#define	REGSIZE sizeof(struct trap_frame)
+#define	REGSIZE (sizeof(struct trap_frame) - sizeof(register_t))
 
 extern void cpu_singlestep(struct proc *);
 
@@ -85,15 +85,13 @@ process_read_regs(p, regs)
 	struct proc *p;
 	struct reg *regs;
 {
-	extern struct proc *machFPCurProcPtr;
+	struct cpu_info *ci = curcpu();
 
-	if (p == machFPCurProcPtr) {
-		if (p->p_md.md_regs->sr & SR_FR_32)
-			MipsSaveCurFPState(p);
-		else
-			MipsSaveCurFPState16(p);
-	}
-	bcopy((caddr_t)p->p_md.md_regs, (caddr_t)regs, REGSIZE);
+	if (p == ci->ci_fpuproc)
+		save_fpu();
+
+	bcopy(&p->p_md.md_regs->ast, &regs->r_regs[AST], REGSIZE);
+	regs->r_regs[ZERO] = 0;
 	return (0);
 }
 
@@ -104,22 +102,20 @@ process_write_regs(p, regs)
 	struct proc *p;
 	struct reg *regs;
 {
-	register_t sr, ic, cpl;
-	extern struct proc *machFPCurProcPtr;
+	struct cpu_info *ci = curcpu();
+	register_t sr, ic, ipl;
 
-	if (p == machFPCurProcPtr) {
-		if (p->p_md.md_regs->sr & SR_FR_32)
-			MipsSaveCurFPState(p);
-		else
-			MipsSaveCurFPState16(p);
-	}
+	if (p == ci->ci_fpuproc)
+		save_fpu();
+
 	sr = p->p_md.md_regs->sr;
 	ic = p->p_md.md_regs->ic;
-	cpl = p->p_md.md_regs->cpl;
-	bcopy((caddr_t)regs, (caddr_t)p->p_md.md_regs, REGSIZE);
+	ipl = p->p_md.md_regs->ipl;
+	bcopy(&regs->r_regs[AST], &p->p_md.md_regs->ast, REGSIZE);
+	p->p_md.md_regs->fsr &= ~FPCSR_C_MASK;
 	p->p_md.md_regs->sr = sr;
 	p->p_md.md_regs->ic = ic;
-	p->p_md.md_regs->cpl = cpl;
+	p->p_md.md_regs->ipl = ipl;
 	return (0);
 }
 

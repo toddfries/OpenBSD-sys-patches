@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.5 2008/08/24 12:56:17 krw Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.11 2009/08/17 23:27:57 dms Exp $	*/
 /*	$NetBSD: disksubr.c,v 1.21 1996/05/03 19:42:03 christos Exp $	*/
 
 /*
@@ -37,7 +37,7 @@
 #include <sys/disklabel.h>
 #include <sys/disk.h>
 
-char   *readdpmelabel(struct buf *, void (*)(struct buf *),
+int	readdpmelabel(struct buf *, void (*)(struct buf *),
 	    struct disklabel *, int *, int);
 
 /*
@@ -58,39 +58,37 @@ char   *readdpmelabel(struct buf *, void (*)(struct buf *),
  *
  * Returns null on success and an error string on failure.
  */
-char *
+int
 readdisklabel(dev_t dev, void (*strat)(struct buf *),
     struct disklabel *lp, int spoofonly)
 {
 	struct buf *bp = NULL;
-	char *msg;
+	int error;
 
-	if ((msg = initdisklabel(lp)))
+	if ((error = initdisklabel(lp)))
 		goto done;
 
 	/* get a buffer and initialize it */
 	bp = geteblk((int)lp->d_secsize);
 	bp->b_dev = dev;
 
-	msg = readdpmelabel(bp, strat, lp, NULL, spoofonly);
-	if (msg == NULL)
+	error = readdpmelabel(bp, strat, lp, NULL, spoofonly);
+	if (error == 0)
 		goto done;
 
-	msg = readdoslabel(bp, strat, lp, NULL, spoofonly);
-	if (msg == NULL)
+	error = readdoslabel(bp, strat, lp, NULL, spoofonly);
+	if (error == 0)
 		goto done;
 
 #if defined(CD9660)
-	if (iso_disklabelspoof(dev, strat, lp) == 0) {
-		msg = NULL;
+	error = iso_disklabelspoof(dev, strat, lp);
+	if (error == 0)
 		goto done;
-	}
 #endif
 #if defined(UDF)
-	if (udf_disklabelspoof(dev, strat, lp) == 0) {
-		msg = NULL;
+	error = udf_disklabelspoof(dev, strat, lp);
+	if (error == 0)
 		goto done;
-	}
 #endif
 
 done:
@@ -98,18 +96,16 @@ done:
 		bp->b_flags |= B_INVAL;
 		brelse(bp);
 	}
-	return (msg);
+	return (error);
 }
 
-char *
+int
 readdpmelabel(struct buf *bp, void (*strat)(struct buf *),
     struct disklabel *lp, int *partoffp, int spoofonly)
 {
 	int i, part_cnt, n, hfspartoff = -1;
+	u_int64_t hfspartend = DL_GETDSIZE(lp);
 	struct part_map_entry *part;
-
-	if (partoffp)
-		*partoffp = hfspartoff;
 
 	/* First check for a DPME (HFS) disklabel */
 	bp->b_blkno = 1;
@@ -117,13 +113,13 @@ readdpmelabel(struct buf *bp, void (*strat)(struct buf *),
 	bp->b_flags = B_BUSY | B_READ | B_RAW;
 	(*strat)(bp);
 	if (biowait(bp))
-		return ("DPME partition I/O error");
+		return (bp->b_error);
 
 	/* if successful, wander through DPME partition table */
 	part = (struct part_map_entry *)bp->b_data;
 	/* if first partition is not valid, assume not HFS/DPME partitioned */
 	if (part->pmSig != PART_ENTRY_MAGIC)
-		return ("not a DPMI partition");
+		return (EINVAL);	/* not a DPME partition */
 	part_cnt = part->pmMapBlkCnt;
 	n = 8;
 	for (i = 0; i < part_cnt; i++) {
@@ -135,7 +131,7 @@ readdpmelabel(struct buf *bp, void (*strat)(struct buf *),
 		bp->b_flags = B_BUSY | B_READ | B_RAW;
 		(*strat)(bp);
 		if (biowait(bp))
-			return ("DPME partition I/O error");
+			return (bp->b_error);
 
 		part = (struct part_map_entry *)bp->b_data;
 		/* toupper the string, in case caps are different... */
@@ -145,9 +141,15 @@ readdpmelabel(struct buf *bp, void (*strat)(struct buf *),
 
 		if (strcmp(part->pmPartType, PART_TYPE_OPENBSD) == 0) {
 			hfspartoff = part->pmPyPartStart - LABELSECTOR;
+			hfspartend = hfspartoff + part->pmPartBlkCnt;
 			if (partoffp) {
 				*partoffp = hfspartoff;
-				return (NULL);
+				return (0);
+			} else {
+				DL_SETBSTART(lp, hfspartoff);
+				DL_SETBEND(lp,
+				    hfspartend < DL_GETDSIZE(lp) ? hfspartend :
+				    DL_GETDSIZE(lp));
 			}
 			continue;
 		}
@@ -164,13 +166,12 @@ readdpmelabel(struct buf *bp, void (*strat)(struct buf *),
 			n++;
 		}
 	}
-	if (hfspartoff == -1)
-		return ("no OpenBSD partition inside DPME label");
 
-	lp->d_npartitions = MAXPARTITIONS;
+	if (hfspartoff == -1)
+		return (EINVAL);
 
 	if (spoofonly)
-		return (NULL);
+		return (0);
 
 	/* next, dig out disk label */
 	bp->b_blkno = hfspartoff + LABELSECTOR;
@@ -178,9 +179,10 @@ readdpmelabel(struct buf *bp, void (*strat)(struct buf *),
 	bp->b_flags = B_BUSY | B_READ | B_RAW;
 	(*strat)(bp);
 	if (biowait(bp))
-		return("disk label I/O error");
+		return (bp->b_error);
 
-	return checkdisklabel(bp->b_data + LABELOFFSET, lp);
+	return checkdisklabel(bp->b_data + LABELOFFSET, lp, hfspartoff,
+	    hfspartend);
 }
 
 /*

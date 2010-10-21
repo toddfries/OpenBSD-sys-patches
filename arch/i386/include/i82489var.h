@@ -1,4 +1,4 @@
-/*	$OpenBSD: i82489var.h,v 1.9 2008/06/26 05:42:10 ray Exp $	*/
+/*	$OpenBSD: i82489var.h,v 1.11 2010/07/25 21:43:37 deraadt Exp $	*/
 /*	$NetBSD: i82489var.h,v 1.1.2.2 2000/02/21 18:46:14 sommerfeld Exp $	*/
 
 /*-
@@ -103,10 +103,12 @@ extern void Xintrltimer(void);
 #define LAPIC_IPI_INVLTLB		(LAPIC_IPI_OFFSET + 0)
 #define LAPIC_IPI_INVLPG		(LAPIC_IPI_OFFSET + 1)
 #define LAPIC_IPI_INVLRANGE		(LAPIC_IPI_OFFSET + 2)
+#define LAPIC_IPI_RELOADCR3		(LAPIC_IPI_OFFSET + 3)
 
 extern void Xintripi_invltlb(void);
 extern void Xintripi_invlpg(void);
 extern void Xintripi_invlrange(void);
+extern void Xintripi_reloadcr3(void);
 
 extern void Xintrsoftclock(void);
 extern void Xintrsoftnet(void);
@@ -117,6 +119,7 @@ extern void (*apichandler[])(void);
 struct cpu_info;
 
 extern void lapic_boot_init(paddr_t);
+extern void lapic_startclock(void);
 extern void lapic_initclocks(void);
 extern void lapic_set_lvt(void);
 extern void lapic_set_softvectors(void);

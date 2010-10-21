@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysv_shm.c,v 1.49 2007/09/15 10:10:37 martin Exp $	*/
+/*	$OpenBSD: sysv_shm.c,v 1.51 2010/07/03 03:04:55 tedu Exp $	*/
 /*	$NetBSD: sysv_shm.c,v 1.50 1998/10/21 22:24:29 tron Exp $	*/
 
 /*
@@ -280,7 +280,7 @@ sys_shmat(struct proc *p, void *v, register_t *retval)
 
 	shmmap_s->va = attach_va;
 	shmmap_s->shmid = SCARG(uap, shmid);
-	shmseg->shm_lpid = p->p_pid;
+	shmseg->shm_lpid = p->p_p->ps_mainproc->p_pid;
 	shmseg->shm_atime = time_second;
 	shmseg->shm_nattch++;
 	*retval = attach_va;
@@ -411,7 +411,8 @@ shmget_allocate_segment(struct proc *p,
 	 * the key we want in the meantime.  Yes, this is ugly.
 	 */
 	key = SCARG(uap, key);
-	shmseg = pool_get(&shm_pool, key == IPC_PRIVATE ? PR_WAITOK : 0);
+	shmseg = pool_get(&shm_pool, key == IPC_PRIVATE ? PR_WAITOK :
+	    PR_NOWAIT);
 	if (shmseg == NULL) {
 		shmseg = pool_get(&shm_pool, PR_WAITOK);
 		if (shm_find_segment_by_key(key) != -1) {
@@ -445,7 +446,7 @@ shmget_allocate_segment(struct proc *p,
 	shmseg->shm_perm.seq = shmseqs[segnum] = (shmseqs[segnum] + 1) & 0x7fff;
 	shmseg->shm_perm.key = key;
 	shmseg->shm_segsz = SCARG(uap, size);
-	shmseg->shm_cpid = p->p_pid;
+	shmseg->shm_cpid = p->p_p->ps_mainproc->p_pid;
 	shmseg->shm_lpid = shmseg->shm_nattch = 0;
 	shmseg->shm_atime = shmseg->shm_dtime = 0;
 	shmseg->shm_ctime = time_second;

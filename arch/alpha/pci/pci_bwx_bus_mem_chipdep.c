@@ -1,4 +1,4 @@
-/* $OpenBSD: pci_bwx_bus_mem_chipdep.c,v 1.6 2003/09/02 17:25:21 miod Exp $ */
+/* $OpenBSD: pci_bwx_bus_mem_chipdep.c,v 1.9 2009/12/25 20:52:34 miod Exp $ */
 /* $NetBSD: pcs_bus_mem_common.c,v 1.15 1996/12/02 22:19:36 cgd Exp $ */
 
 /*
@@ -76,6 +76,9 @@ int		__C(CHIP,_mem_alloc)(void *, bus_addr_t, bus_addr_t,
                     bus_space_handle_t *);
 void		__C(CHIP,_mem_free)(void *, bus_space_handle_t,
 		    bus_size_t);
+
+/* get kernel virtual address */
+void *		__C(CHIP,_mem_vaddr)(void *, bus_space_handle_t);
 
 /* barrier */
 inline void	__C(CHIP,_mem_barrier)(void *, bus_space_handle_t,
@@ -213,6 +216,9 @@ __C(CHIP,_bus_mem_init)(t, v)
 	t->abs_alloc =		__C(CHIP,_mem_alloc);
 	t->abs_free = 		__C(CHIP,_mem_free);
 
+	/* get kernel virtual address */
+	t->abs_vaddr =		__C(CHIP,_mem_vaddr);
+
 	/* barrier */
 	t->abs_barrier =	__C(CHIP,_mem_barrier);
 	
@@ -289,11 +295,11 @@ __C(CHIP,_bus_mem_init)(t, v)
 }
 
 int
-__C(CHIP,_mem_map)(v, memaddr, memsize, cacheable, memhp)
+__C(CHIP,_mem_map)(v, memaddr, memsize, flags, memhp)
 	void *v;
 	bus_addr_t memaddr;
 	bus_size_t memsize;
-	int cacheable;
+	int flags;
 	bus_space_handle_t *memhp;
 {
 	int error;
@@ -358,12 +364,12 @@ __C(CHIP,_mem_subregion)(v, memh, offset, size, nmemh)
 }
 
 int
-__C(CHIP,_mem_alloc)(v, rstart, rend, size, align, boundary, cacheable,
+__C(CHIP,_mem_alloc)(v, rstart, rend, size, align, boundary, flags,
     addrp, bshp)
 	void *v;
 	bus_addr_t rstart, rend, *addrp;
 	bus_size_t size, align, boundary;
-	int cacheable;
+	int flags;
 	bus_space_handle_t *bshp;
 {
 	bus_addr_t memaddr;
@@ -407,6 +413,15 @@ __C(CHIP,_mem_free)(v, bsh, size)
 	__C(CHIP,_mem_unmap)(v, bsh, size);
 }
 
+void *
+__C(CHIP,_mem_vaddr)(v, bsh)
+	void *v;
+	bus_space_handle_t bsh;
+{
+
+	return ((void *)bsh);
+}
+
 inline void
 __C(CHIP,_mem_barrier)(v, h, o, l, f)
 	void *v;
@@ -415,9 +430,9 @@ __C(CHIP,_mem_barrier)(v, h, o, l, f)
 	int f;
 {
 
-	if ((f & BUS_BARRIER_READ) != 0)
+	if ((f & BUS_SPACE_BARRIER_READ) != 0)
 		alpha_mb();
-	else if ((f & BUS_BARRIER_WRITE) != 0)
+	else if ((f & BUS_SPACE_BARRIER_WRITE) != 0)
 		alpha_wmb();
 }
 
@@ -494,7 +509,7 @@ __C(__C(CHIP,_mem_read_multi_),BYTES)(v, h, o, a, c)			\
 									\
 	while (c-- > 0) {						\
 		__C(CHIP,_mem_barrier)(v, h, o, sizeof *a,		\
-		    BUS_BARRIER_READ);					\
+		    BUS_SPACE_BARRIER_READ);				\
 		*a++ = __C(__C(CHIP,_mem_read_),BYTES)(v, h, o);	\
 	}								\
 }
@@ -599,7 +614,7 @@ __C(__C(CHIP,_mem_write_multi_),BYTES)(v, h, o, a, c)			\
 	while (c-- > 0) {						\
 		__C(__C(CHIP,_mem_write_),BYTES)(v, h, o, *a++);	\
 		__C(CHIP,_mem_barrier)(v, h, o, sizeof *a,		\
-		    BUS_BARRIER_WRITE);					\
+		    BUS_SPACE_BARRIER_WRITE);				\
 	}								\
 }
 CHIP_mem_write_multi_N(1,u_int8_t)
@@ -638,7 +653,7 @@ __C(__C(CHIP,_mem_set_multi_),BYTES)(v, h, o, val, c)			\
 	while (c-- > 0) {						\
 		__C(__C(CHIP,_mem_write_),BYTES)(v, h, o, val);		\
 		__C(CHIP,_mem_barrier)(v, h, o, sizeof val,		\
-		    BUS_BARRIER_WRITE);					\
+		    BUS_SPACE_BARRIER_WRITE);				\
 	}								\
 }
 CHIP_mem_set_multi_N(1,u_int8_t)
@@ -706,7 +721,8 @@ __C(__C(CHIP,_mem_read_raw_multi_),BYTES)(v, h, o, a, c)			\
 	int i;								\
 									\
 	while (c > 0) {							\
-		__C(CHIP,_mem_barrier)(v, h, o, BYTES, BUS_BARRIER_READ); \
+		__C(CHIP,_mem_barrier)(v, h, o, BYTES,			\
+		    BUS_SPACE_BARRIER_READ);				\
 		temp = __C(__C(CHIP,_mem_read_),BYTES)(v, h, o);	\
 		i = MIN(c, BYTES);					\
 		c -= i;							\
@@ -739,7 +755,8 @@ __C(__C(CHIP,_mem_write_raw_multi_),BYTES)(v, h, o, a, c)		\
 				temp |= *(a + i);			\
 		}							\
 		__C(__C(CHIP,_mem_write_),BYTES)(v, h, o, temp);	\
-		__C(CHIP,_mem_barrier)(v, h, o, BYTES, BUS_BARRIER_WRITE); \
+		__C(CHIP,_mem_barrier)(v, h, o, BYTES,			\
+		    BUS_SPACE_BARRIER_WRITE);				\
 		i = MIN(c, BYTES);					\
 		c -= i;							\
 		a += i;							\

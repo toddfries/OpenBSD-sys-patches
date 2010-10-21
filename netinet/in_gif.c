@@ -1,4 +1,4 @@
-/*	$OpenBSD: in_gif.c,v 1.35 2008/09/28 16:14:40 jsing Exp $	*/
+/*	$OpenBSD: in_gif.c,v 1.38 2010/05/11 09:36:07 claudio Exp $	*/
 /*	$KAME: in_gif.c,v 1.50 2001/01/22 07:27:16 itojun Exp $	*/
 
 /*
@@ -54,13 +54,16 @@
 
 #include "gif.h"
 #include "bridge.h"
+#if NBRIDGE > 0
+#include <netinet/ip_ether.h>
+#endif
 
 #if NPF > 0
 #include <net/pfvar.h>
 #endif
 
 int
-in_gif_output(struct ifnet *ifp, int family, struct mbuf *m)
+in_gif_output(struct ifnet *ifp, int family, struct mbuf **m0)
 {
 	struct gif_softc *sc = (struct gif_softc*)ifp;
 	struct sockaddr_in *sin_src = (struct sockaddr_in *)sc->gif_psrc;
@@ -68,7 +71,7 @@ in_gif_output(struct ifnet *ifp, int family, struct mbuf *m)
 	struct tdb tdb;
 	struct xformsw xfs;
 	int error;
-	struct mbuf *mp;
+	struct mbuf *m = *m0;
 
 	if (sin_src == NULL || sin_dst == NULL ||
 	    sin_src->sin_family != AF_INET ||
@@ -77,7 +80,15 @@ in_gif_output(struct ifnet *ifp, int family, struct mbuf *m)
 		return EAFNOSUPPORT;
 	}
 
-	/* setup dummy tdb.  it highly depends on ipipoutput() code. */
+#ifdef DIAGNOSTIC
+	if (ifp->if_rdomain != rtable_l2(m->m_pkthdr.rdomain)) {
+		printf("%s: trying to send packet on wrong domain. "
+		    "if %d vs. mbuf %d, AF %d\n", ifp->if_xname,
+		    ifp->if_rdomain, rtable_l2(m->m_pkthdr.rdomain));
+	}
+#endif
+
+	/* setup dummy tdb.  it highly depends on ipip_output() code. */
 	bzero(&tdb, sizeof(tdb));
 	bzero(&xfs, sizeof(xfs));
 	tdb.tdb_src.sin.sin_family = AF_INET;
@@ -99,7 +110,11 @@ in_gif_output(struct ifnet *ifp, int family, struct mbuf *m)
 #if NBRIDGE > 0
 	case AF_LINK:
 		break;
-#endif /* NBRIDGE */
+#endif
+#if MPLS
+	case AF_MPLS:
+		break;
+#endif
 	default:
 #ifdef DEBUG
 	        printf("in_gif_output: warning: unknown family %d passed\n",
@@ -110,25 +125,30 @@ in_gif_output(struct ifnet *ifp, int family, struct mbuf *m)
 	}
 
 	/* encapsulate into IPv4 packet */
-	mp = NULL;
+	*m0 = NULL;
 #if NBRIDGE > 0
 	if (family == AF_LINK)
-		error = etherip_output(m, &tdb, &mp, 0, 0);
+		error = etherip_output(m, &tdb, m0, IPPROTO_ETHERIP);
 	else
 #endif /* NBRIDGE */
-	error = ipip_output(m, &tdb, &mp, 0, 0);
+#ifdef MPLS
+	if (family == AF_MPLS)
+		error = etherip_output(m, &tdb, m0, IPPROTO_MPLS);
+	else
+#endif
+	error = ipip_output(m, &tdb, m0, 0, 0);
 	if (error)
 		return error;
-	else if (mp == NULL)
+	else if (*m0 == NULL)
 		return EFAULT;
 
-	m = mp;
+	m = *m0;
 
+	m->m_pkthdr.rdomain = sc->gif_rtableid;
 #if NPF > 0
 	pf_pkt_addr_changed(m);
 #endif
-	return ip_output(m, (void *)NULL, (void *)NULL, 0, (void *)NULL,
-	    (void *)NULL);
+	return 0;
 }
 
 void
@@ -153,11 +173,12 @@ in_gif_input(struct mbuf *m, ...)
 	ip = mtod(m, struct ip *);
 
 	/* this code will be soon improved. */
-#define	satosin(sa)	((struct sockaddr_in *)(sa))
 	LIST_FOREACH(sc, &gif_softc_list, gif_list) {
 		if (sc->gif_psrc == NULL || sc->gif_pdst == NULL ||
 		    sc->gif_psrc->sa_family != AF_INET ||
-		    sc->gif_pdst->sa_family != AF_INET) {
+		    sc->gif_pdst->sa_family != AF_INET ||
+		    rtable_l2(sc->gif_rtableid) !=
+		    rtable_l2(m->m_pkthdr.rdomain)) {
 			continue;
 		}
 
@@ -165,8 +186,7 @@ in_gif_input(struct mbuf *m, ...)
 			continue;
 
 		if (in_hosteq(satosin(sc->gif_psrc)->sin_addr, ip->ip_dst) &&
-		    in_hosteq(satosin(sc->gif_pdst)->sin_addr, ip->ip_src))
-		{
+		    in_hosteq(satosin(sc->gif_pdst)->sin_addr, ip->ip_src)) {
 			gifp = &sc->gif_if;
 			break;
 		}
@@ -174,9 +194,11 @@ in_gif_input(struct mbuf *m, ...)
 
 	if (gifp) {
 		m->m_pkthdr.rcvif = gifp;
+		m->m_pkthdr.rdomain = gifp->if_rdomain;
 		gifp->if_ipackets++;
 		gifp->if_ibytes += m->m_pkthdr.len;
-		ipip_input(m, off, gifp); /* We have a configured GIF */
+		/* We have a configured GIF */
+		ipip_input(m, off, gifp, ip->ip_p);
 		return;
 	}
 

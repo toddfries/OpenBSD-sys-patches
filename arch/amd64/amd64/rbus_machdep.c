@@ -1,4 +1,4 @@
-/*	$OpenBSD: rbus_machdep.c,v 1.8 2008/07/07 23:41:58 brad Exp $	*/
+/*	$OpenBSD: rbus_machdep.c,v 1.12 2010/09/22 02:28:37 jsg Exp $	*/
 /*	$NetBSD: rbus_machdep.c,v 1.2 1999/10/15 06:43:06 haya Exp $	*/
 
 /*
@@ -13,11 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by HAYAKAWA Koichi.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -33,122 +28,71 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/device.h>
 #include <sys/extent.h>
 
 #include <uvm/uvm_extern.h>
-
-#include <sys/device.h>
 
 #include <machine/bus.h>
 #include <dev/cardbus/rbus.h>
 
 #include <dev/pci/pcivar.h>
 
+#ifndef RBUS_MEM_START
+/* Avoid the ISA hole and everything below it. */
+#define RBUS_MEM_START	0x00100000
+#endif
+
 #ifndef RBUS_IO_START
+/* Try to avoid onboard legacy devices; just a guess. */
 #define RBUS_IO_START	0xa000
 #endif
-#ifndef RBUS_IO_SIZE
-#define RBUS_IO_SIZE	0x1000
-#endif
 
-#ifndef RBUS_MIN_START
-#define RBUS_MIN_START	0x40000000	/* 1 GB */
-#endif
+struct rbustag rbus_null;
 
-/*
- * Dynamically set the start address for rbus.  This must be called
- * before rbus is initialized.  The start address should be determined
- * by the amount of installed memory.  Generally 1 GB has been found
- * to be a good value, but it fails on some Thinkpads (e.g. 2645-4AU),
- * for which 0.5 GB is a good value.  It also fails on (at least)
- * Thinkpads with 2GB of RAM, for which 2 GB is a good value.
- *
- * Thus, a general strategy of setting rbus_min_start to the amount of
- * memory seems in order.  However, the actual amount of memory is
- * generally slightly more than the amount found, e.g. 1014MB vs 1024,
- * or 2046 vs 2048.
- */
-bus_addr_t
-rbus_min_start_hint(void)
-{
-	bus_addr_t rbus_min_start = RBUS_MIN_START;
-	size_t ram = ptoa(physmem);
-
-	if (ram <= 192 * 1024 * 1024UL) {
-		/*
-		 * <= 192 MB, so try 0.5 GB.  This will work on
-		 * Thinkpad 600E (2645-4AU), which fails at 1 GB, and
-		 * on some other older machines that may have trouble
-		 * with addresses needing more than 20 bits.
-		 */
-		rbus_min_start = 512 * 1024 * 1024UL;
-	}
-
-	if (ram >= 1024 * 1024 * 1024UL) {
-		/*
-		 * > 1 GB, so try 2 GB.
-		 */
-		rbus_min_start =  2 * 1024 * 1024 * 1024UL;
-	}
-
-	/* Not tested in > 2 GB case. */
-	if (ram > 2 * 1024 * 1024 * 1024UL) {
-		/*
-		 * > 2 GB, so try 3 GB.
-		 */
-		rbus_min_start =  3 * 1024 * 1024 * 1024UL;
-	}
-
-	return (rbus_min_start);
-}
-
-/*
- * This function makes an rbus tag for memory space.  This rbus tag
- * shares the all memory region of ex_iomem.
- */
 rbus_tag_t
 rbus_pccbb_parent_mem(struct device *self, struct pci_attach_args *pa)
 {
-	bus_addr_t start, rbus_min_start;
+	struct extent *ex = pa->pa_memex;
+	bus_addr_t start;
 	bus_size_t size;
-	extern struct extent *iomem_ex;
-	struct extent *ex = iomem_ex;
 
-	start = ex->ex_start;
+	if (ex == NULL)
+		return &rbus_null;
 
-	/* XXX: unfortunately, iomem_ex cannot be used for the
-	 * dynamic bus_space allocation.  There are some
-	 * hidden memory (or some obstacles which do not
-	 * recognised by the kernel) in the region governed by
-	 * iomem_ex.  So I decide to use only very high
-	 * address region.
-	 */
-
-	rbus_min_start = rbus_min_start_hint();
-	if (start < rbus_min_start)
-		start = rbus_min_start;
-
+	start = RBUS_MEM_START;
 	size = ex->ex_end - start;
 
-	return (rbus_new_root_share(pa->pa_memt, ex, start, size, 0));
+	return (rbus_new_root_share(pa->pa_memt, ex, start, size));
 }
 
 rbus_tag_t
 rbus_pccbb_parent_io(struct device *self, struct pci_attach_args *pa)
 {
+	struct extent *ex = pa->pa_ioex;
 	bus_addr_t start;
 	bus_size_t size;
-	extern struct extent *ioport_ex;
-	struct extent *ex = ioport_ex;
 
-	size = RBUS_IO_SIZE;
-	start = RBUS_IO_START;
+	if (ex == NULL)
+		return &rbus_null;
 
-	return (rbus_new_root_share(pa->pa_iot, ex, start, size, 0));
+	start = ex->ex_start;
+	if (ex == pciio_ex) {
+		/*
+		 * We're on the root bus, or behind a subtractive
+		 * decode PCI-PCI bridge.  To avoid conflicts with
+		 * onboard legacy devices, we only make a subregion
+		 * available.
+		 */
+		start = max(start, RBUS_IO_START);
+	}
+	size = ex->ex_end - start;
+
+	return (rbus_new_root_share(pa->pa_iot, ex, start, size));
 }
 
 void
 pccbb_attach_hook(struct device *parent, struct device *self,
     struct pci_attach_args *pa)
 {
-}                 
+}

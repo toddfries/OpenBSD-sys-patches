@@ -1,9 +1,11 @@
-/*	$OpenBSD: lock.h,v 1.1 2007/05/01 18:56:31 miod Exp $	*/
+/*	$OpenBSD: lock.h,v 1.3 2010/09/05 18:07:12 kettenis Exp $	*/
 
 /* public domain */
 
 #ifndef	_SPARC_LOCK_H_
 #define	_SPARC_LOCK_H_
+
+#include <machine/atomic.h>
 
 typedef volatile u_int8_t __cpu_simple_lock_t;
 
@@ -24,7 +26,7 @@ __cpu_simple_lock(__cpu_simple_lock_t *l)
 	do {
 		old = __SIMPLELOCK_LOCKED;
 		__asm__ __volatile__
-		    ("ldstub %0, %1" : "=m" (*l), "=r" (old) : "0" (*l));
+		    ("ldstub [%0], %1" : "=r" (l), "=r" (old) : "0" (l));
 	} while (old != __SIMPLELOCK_UNLOCKED);
 }
 
@@ -34,7 +36,7 @@ __cpu_simple_lock_try(__cpu_simple_lock_t *l)
 	__cpu_simple_lock_t old = __SIMPLELOCK_LOCKED;
 
 	__asm__ __volatile__
-	    ("ldstub %0, %1" : "=m" (*l), "=r" (old) : "0" (*l));
+	    ("ldstub [%0], %1" : "=r" (l), "=r" (old) : "0" (l));
 
 	return (old == __SIMPLELOCK_UNLOCKED);
 }

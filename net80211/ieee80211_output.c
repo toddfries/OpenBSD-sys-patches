@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_output.c,v 1.85 2009/03/26 20:34:54 damien Exp $	*/
+/*	$OpenBSD: ieee80211_output.c,v 1.88 2010/07/17 16:30:01 damien Exp $	*/
 /*	$NetBSD: ieee80211_output.c,v 1.13 2004/05/31 11:02:55 dyoung Exp $	*/
 
 /*-
@@ -116,6 +116,7 @@ int
 ieee80211_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
     struct rtentry *rt)
 {
+	struct ieee80211_frame *wh;
 	struct m_tag *mtag;
 	int s, len, error = 0;
 	u_short mflags;
@@ -129,11 +130,23 @@ ieee80211_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 
 	/* Try to get the DLT from a mbuf tag */
 	if ((mtag = m_tag_find(m, PACKET_TAG_DLT, NULL)) != NULL) {
+		struct ieee80211com *ic = (void *)ifp;
 		u_int dlt = *(u_int *)(mtag + 1);
 
 		/* Fallback to ethernet for non-802.11 linktypes */
 		if (!(dlt == DLT_IEEE802_11 || dlt == DLT_IEEE802_11_RADIO))
 			goto fallback;
+
+		if (m->m_pkthdr.len < sizeof(struct ieee80211_frame_min))
+			return (EINVAL);
+		wh = mtod(m, struct ieee80211_frame *);
+		if ((wh->i_fc[0] & IEEE80211_FC0_VERSION_MASK) !=
+		    IEEE80211_FC0_VERSION_0)
+			return (EINVAL);
+		if (!(ic->ic_caps & IEEE80211_C_RAWCTL) &&
+		    (wh->i_fc[0] & IEEE80211_FC0_TYPE_MASK) ==
+		    IEEE80211_FC0_TYPE_CTL)
+			return (EINVAL);
 
 		/*
 		 * Queue message on interface without adding any
@@ -495,14 +508,6 @@ ieee80211_encap(struct ifnet *ifp, struct mbuf *m, struct ieee80211_node **pni)
 			goto fallback;
 
 		wh = mtod(m, struct ieee80211_frame *);
-
-		if (m->m_pkthdr.len < sizeof(struct ieee80211_frame_min))
-			goto bad;
-
-		if ((wh->i_fc[0] & IEEE80211_FC0_VERSION_MASK) !=
-		    IEEE80211_FC0_VERSION_0)
-			goto bad;
-
 		switch (wh->i_fc[1] & IEEE80211_FC1_DIR_MASK) {
 		case IEEE80211_FC1_DIR_NODS:
 		case IEEE80211_FC1_DIR_FROMDS:
@@ -1477,7 +1482,7 @@ struct mbuf *
 ieee80211_get_addba_resp(struct ieee80211com *ic, struct ieee80211_node *ni,
     u_int8_t tid, u_int8_t token, u_int16_t status)
 {
-	struct ieee80211_tx_ba *ba = &ni->ni_tx_ba[tid];
+	struct ieee80211_rx_ba *ba = &ni->ni_rx_ba[tid];
 	struct mbuf *m;
 	u_int8_t *frm;
 	u_int16_t params;

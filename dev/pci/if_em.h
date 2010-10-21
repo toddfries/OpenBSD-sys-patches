@@ -32,7 +32,7 @@ POSSIBILITY OF SUCH DAMAGE.
 ***************************************************************************/
 
 /* $FreeBSD: if_em.h,v 1.26 2004/09/01 23:22:41 pdeuskar Exp $ */
-/* $OpenBSD: if_em.h,v 1.43 2008/12/15 02:33:04 brad Exp $ */
+/* $OpenBSD: if_em.h,v 1.48 2010/09/07 16:21:44 deraadt Exp $ */
 
 #ifndef _EM_H_DEFINED_
 #define _EM_H_DEFINED_
@@ -48,6 +48,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <sys/kernel.h>
 #include <sys/device.h>
 #include <sys/socket.h>
+#include <sys/timeout.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
@@ -324,9 +325,6 @@ struct em_softc {
 	struct timeout	em_intr_enable;
 	struct timeout	timer_handle;
 	struct timeout	tx_fifo_timer_handle;
-	int		if_flags;
-	void		*sc_powerhook;
-	void		*sc_shutdownhook;
 
 #ifdef __STRICT_ALIGNMENT
 	/* Used for carrying forward alignment adjustments */
@@ -419,7 +417,6 @@ struct em_softc {
 
 	/* For 82544 PCI-X Workaround */
 	boolean_t	pcix_82544;
-
 	struct em_hw_stats stats;
 };
 

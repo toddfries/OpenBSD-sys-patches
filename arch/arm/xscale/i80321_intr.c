@@ -1,4 +1,4 @@
-/* $OpenBSD: i80321_intr.c,v 1.12 2009/04/08 21:19:31 kettenis Exp $ */
+/* $OpenBSD: i80321_intr.c,v 1.14 2010/09/20 06:33:47 matthew Exp $ */
 
 /*
  * Copyright (c) 2006 Dale Rahn <drahn@openbsd.org>
@@ -301,7 +301,7 @@ i80321intc_init(void)
 
 void *
 i80321_intr_establish(int irq, int ipl, int (*func)(void *), void *arg,
-    char *name)
+    const char *name)
 {
 	struct intrq *iq;
 	struct intrhand *ih;
@@ -323,8 +323,7 @@ i80321_intr_establish(int irq, int ipl, int (*func)(void *), void *arg,
 	iq = &i80321_handler[irq];
 
 	if (name != NULL)
-		evcount_attach(&ih->ih_count, name, (void *)&ih->ih_irq,
-		    &evcount_intr);
+		evcount_attach(&ih->ih_count, name, &ih->ih_irq);
 
 	/* All IOP321 interrupts are level-triggered. */
 	iq->iq_ist = IST_LEVEL;

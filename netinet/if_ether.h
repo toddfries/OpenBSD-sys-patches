@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ether.h,v 1.44 2008/11/08 12:54:58 dlg Exp $	*/
+/*	$OpenBSD: if_ether.h,v 1.47 2010/02/08 13:32:50 claudio Exp $	*/
 /*	$NetBSD: if_ether.h,v 1.22 1996/05/11 13:00:00 mycroft Exp $	*/
 
 /*
@@ -122,6 +122,8 @@ do {									\
 	(enaddr)[4] = ((u_int8_t *)ip6addr)[14];			\
 	(enaddr)[5] = ((u_int8_t *)ip6addr)[15];			\
 } while (/* CONSTCOND */ 0)
+
+void	ether_fakeaddr(struct ifnet *);
 #endif
 
 /*
@@ -166,7 +168,6 @@ struct llinfo_arp {
 	struct	mbuf *la_hold_tail;
 	int	la_hold_count;		/* number of packets queued */
 	long	la_asked;		/* last time we QUERIED for this addr */
-#define la_timer la_rt->rt_rmx.rmx_expire /* deletion time in seconds */
 };
 #define MAX_HOLD_QUEUE 10
 #define MAX_HOLD_TOTAL 100
@@ -277,7 +278,6 @@ do {									\
 
 extern struct ifnet *myip_ifp;
 
-int arpioctl(u_long, caddr_t);
 void arprequest(struct ifnet *, u_int32_t *, u_int32_t *, u_int8_t *);
 void revarpinput(struct mbuf *);
 void in_revarpinput(struct mbuf *);

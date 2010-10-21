@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_rl_pci.c,v 1.15 2008/08/13 03:47:16 brad Exp $ */
+/*	$OpenBSD: if_rl_pci.c,v 1.20 2010/08/27 20:21:43 deraadt Exp $ */
 
 /*
  * Copyright (c) 1997, 1998
@@ -84,9 +84,17 @@
 
 int rl_pci_match(struct device *, void *, void *);
 void rl_pci_attach(struct device *, struct device *, void *);
+int rl_pci_detach(struct device *, int);
+
+struct rl_pci_softc {
+	struct rl_softc		psc_softc;
+	pci_chipset_tag_t	psc_pc;
+	bus_size_t		psc_mapsize;
+};
 
 struct cfattach rl_pci_ca = {
-	sizeof(struct rl_softc), rl_pci_match, rl_pci_attach,
+	sizeof(struct rl_pci_softc), rl_pci_match, rl_pci_attach, rl_pci_detach,
+	rl_activate
 };
 
 const struct pci_matchid rl_pci_devices[] = {
@@ -96,14 +104,18 @@ const struct pci_matchid rl_pci_devices[] = {
 	{ PCI_VENDOR_DLINK, PCI_PRODUCT_DLINK_530TXPLUS },
 	{ PCI_VENDOR_NORTEL, PCI_PRODUCT_NORTEL_BS21 },
 	{ PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_RT8129 },
-	{ PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_RT8139D }
+	{ PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_RT8139D },
+	{ PCI_VENDOR_ABOCOM, PCI_PRODUCT_ABOCOM_FE2000VX },
+	{ PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_RT8138 },
+	{ PCI_VENDOR_COREGA, PCI_PRODUCT_COREGA_CB_TXD },
+	{ PCI_VENDOR_COREGA, PCI_PRODUCT_COREGA_2CB_TXD },
+	{ PCI_VENDOR_DLINK, PCI_PRODUCT_DLINK_DFE690TXD },
+	{ PCI_VENDOR_PLANEX, PCI_PRODUCT_PLANEX_FNW_3603_TX },
+	{ PCI_VENDOR_PLANEX, PCI_PRODUCT_PLANEX_FNW_3800_TX }
 };
 
 int
-rl_pci_match(parent, match, aux)
-	struct device *parent;
-	void *match;
-	void *aux;
+rl_pci_match(struct device *parent, void *match, void *aux)
 {
 	struct pci_attach_args *pa = aux;
 
@@ -117,16 +129,14 @@ rl_pci_match(parent, match, aux)
 }
 
 void
-rl_pci_attach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+rl_pci_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct rl_softc *sc = (struct rl_softc *)self;
-	struct pci_attach_args *pa = aux;
-	pci_chipset_tag_t pc = pa->pa_pc;
-	pci_intr_handle_t ih;
-	const char *intrstr = NULL;
-	bus_size_t size;
+	struct rl_pci_softc	*psc = (void *)self;
+	struct rl_softc		*sc = &psc->psc_softc;
+	struct pci_attach_args	*pa = aux;
+	pci_chipset_tag_t	pc = pa->pa_pc;
+	pci_intr_handle_t	ih;
+	const char		*intrstr = NULL;
 
 	/*
 	 * Map control/status registers.
@@ -134,13 +144,13 @@ rl_pci_attach(parent, self, aux)
 
 #ifdef RL_USEIOSPACE
 	if (pci_mapreg_map(pa, RL_PCI_LOIO, PCI_MAPREG_TYPE_IO, 0,
-	    &sc->rl_btag, &sc->rl_bhandle, NULL, &size, 0)) {
+	    &sc->rl_btag, &sc->rl_bhandle, NULL, &psc->psc_mapsize, 0)) {
 		printf(": can't map i/o space\n");
 		return;
 	}
 #else
 	if (pci_mapreg_map(pa, RL_PCI_LOMEM, PCI_MAPREG_TYPE_MEM, 0,
-	    &sc->rl_btag, &sc->rl_bhandle, NULL, &size, 0)){
+	    &sc->rl_btag, &sc->rl_bhandle, NULL, &psc->psc_mapsize, 0)){
 		printf(": can't map mem space\n");
 		return;
 	}
@@ -151,10 +161,11 @@ rl_pci_attach(parent, self, aux)
 	 */
 	if (pci_intr_map(pa, &ih)) {
 		printf(": couldn't map interrupt\n");
-		bus_space_unmap(sc->rl_btag, sc->rl_bhandle, size);
+		bus_space_unmap(sc->rl_btag, sc->rl_bhandle, psc->psc_mapsize);
 		return;
 	}
 
+	psc->psc_pc = pa->pa_pc;
 	intrstr = pci_intr_string(pc, ih);
 	sc->sc_ih = pci_intr_establish(pc, ih, IPL_NET, rl_intr, sc,
 	    self->dv_xname);
@@ -163,7 +174,7 @@ rl_pci_attach(parent, self, aux)
 		if (intrstr != NULL)
 			printf(" at %s", intrstr);
 		printf("\n");
-		bus_space_unmap(sc->rl_btag, sc->rl_bhandle, size);
+		bus_space_unmap(sc->rl_btag, sc->rl_bhandle, psc->psc_mapsize);
 		return;
 	}
 	printf(": %s", intrstr);
@@ -171,4 +182,23 @@ rl_pci_attach(parent, self, aux)
 	sc->sc_dmat = pa->pa_dmat;
 
 	rl_attach(sc);
+}
+
+int
+rl_pci_detach(struct device *self, int flags)
+{
+	struct rl_pci_softc	*psc = (void *)self;
+	struct rl_softc		*sc = &psc->psc_softc;
+	int			rv;
+
+	rv = rl_detach(sc);
+	if (rv)
+		return (rv);
+
+	if (sc->sc_ih != NULL)
+		pci_intr_disestablish(psc->psc_pc, sc->sc_ih);
+
+	bus_space_unmap(sc->rl_btag, sc->rl_bhandle, psc->psc_mapsize);
+
+	return (0);
 }

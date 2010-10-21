@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_re_pci.c,v 1.24 2009/01/22 19:26:07 kettenis Exp $	*/
+/*	$OpenBSD: if_re_pci.c,v 1.30 2010/09/07 16:21:45 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2005 Peter Valchev <pvalchev@openbsd.org>
@@ -81,6 +81,7 @@ const struct pci_matchid re_pci_devices[] = {
 int	re_pci_probe(struct device *, void *, void *);
 void	re_pci_attach(struct device *, struct device *, void *);
 int	re_pci_detach(struct device *, int);
+int	re_pci_activate(struct device *, int);
 
 /*
  * PCI autoconfig definitions
@@ -89,7 +90,8 @@ struct cfattach re_pci_ca = {
 	sizeof(struct re_pci_softc),
 	re_pci_probe,
 	re_pci_attach,
-	re_pci_detach
+	re_pci_detach,
+	re_pci_activate
 };
 
 /*
@@ -224,18 +226,34 @@ re_pci_detach(struct device *self, int flags)
 	ether_ifdetach(ifp);
 	if_detach(ifp);
 
-	/* No more hooks */
-	if (sc->sc_sdhook != NULL)
-		shutdownhook_disestablish(sc->sc_sdhook);
-	if (sc->sc_pwrhook != NULL)
-		powerhook_disestablish(sc->sc_pwrhook);
-
 	/* Disable interrupts */
 	if (psc->sc_ih != NULL)
 		pci_intr_disestablish(psc->sc_pc, psc->sc_ih);
 
 	/* Free pci resources */
 	bus_space_unmap(sc->rl_btag, sc->rl_bhandle, psc->sc_iosize);
+
+	return (0);
+}
+
+int
+re_pci_activate(struct device *self, int act)
+{
+	struct re_pci_softc	*psc = (struct re_pci_softc *)self;
+	struct rl_softc		*sc = &psc->sc_rl;
+	struct ifnet 		*ifp = &sc->sc_arpcom.ac_if;
+
+	switch (act) {
+	case DVACT_SUSPEND:
+		if (ifp->if_flags & IFF_RUNNING)
+			re_stop(ifp);
+		break;
+	case DVACT_RESUME:
+		re_reset(sc);
+		if (ifp->if_flags & IFF_UP)
+			re_init(ifp);
+		break;
+	}
 
 	return (0);
 }

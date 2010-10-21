@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_esp.c,v 1.105 2008/06/09 07:07:17 djm Exp $ */
+/*	$OpenBSD: ip_esp.c,v 1.114 2010/10/06 22:19:20 mikeb Exp $ */
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and
@@ -131,16 +131,20 @@ esp_init(struct tdb *tdbp, struct xformsw *xsp, struct ipsecinit *ii)
 			txform = &enc_xform_aes_ctr;
 			break;
 
+		case SADB_X_EALG_AESGCM16:
+			txform = &enc_xform_aes_gcm;
+			break;
+
+		case SADB_X_EALG_AESGMAC:
+			txform = &enc_xform_aes_gmac;
+			break;
+
 		case SADB_X_EALG_BLF:
 			txform = &enc_xform_blf;
 			break;
 
 		case SADB_X_EALG_CAST:
 			txform = &enc_xform_cast5;
-			break;
-
-		case SADB_X_EALG_SKIPJACK:
-			txform = &enc_xform_skipjack;
 			break;
 
 		default:
@@ -156,6 +160,23 @@ esp_init(struct tdb *tdbp, struct xformsw *xsp, struct ipsecinit *ii)
 		if (ii->ii_enckeylen > txform->maxkey) {
 			DPRINTF(("esp_init(): keylength %d too large (max length is %d) for algorithm %s\n", ii->ii_enckeylen, txform->maxkey, txform->name));
 			return EINVAL;
+		}
+
+		if (ii->ii_encalg == SADB_X_EALG_AESGCM16 ||
+		    ii->ii_encalg == SADB_X_EALG_AESGMAC) {
+			switch (ii->ii_enckeylen) {
+			case 20:
+				ii->ii_authalg = SADB_X_AALG_AES128GMAC;
+				break;
+			case 28:
+				ii->ii_authalg = SADB_X_AALG_AES192GMAC;
+				break;
+			case 36:
+				ii->ii_authalg = SADB_X_AALG_AES256GMAC;
+				break;
+			}
+			ii->ii_authkeylen = ii->ii_enckeylen;
+			ii->ii_authkey = ii->ii_enckey;
 		}
 
 		tdbp->tdb_encalgxform = txform;
@@ -183,15 +204,27 @@ esp_init(struct tdb *tdbp, struct xformsw *xsp, struct ipsecinit *ii)
 			break;
 
 		case SADB_X_AALG_SHA2_256:
-			thash = &auth_hash_hmac_sha2_256_96;
+			thash = &auth_hash_hmac_sha2_256_128;
 			break;
 
 		case SADB_X_AALG_SHA2_384:
-			thash = &auth_hash_hmac_sha2_384_96;
+			thash = &auth_hash_hmac_sha2_384_192;
 			break;
 
 		case SADB_X_AALG_SHA2_512:
-			thash = &auth_hash_hmac_sha2_512_96;
+			thash = &auth_hash_hmac_sha2_512_256;
+			break;
+
+		case SADB_X_AALG_AES128GMAC:
+			thash = &auth_hash_gmac_aes_128;
+			break;
+
+		case SADB_X_AALG_AES192GMAC:
+			thash = &auth_hash_gmac_aes_192;
+			break;
+
+		case SADB_X_AALG_AES256GMAC:
+			thash = &auth_hash_gmac_aes_256;
 			break;
 
 		default:
@@ -290,13 +323,12 @@ esp_input(struct mbuf *m, struct tdb *tdb, int skip, int protoff)
 {
 	struct auth_hash *esph = (struct auth_hash *) tdb->tdb_authalgxform;
 	struct enc_xform *espx = (struct enc_xform *) tdb->tdb_encalgxform;
+	struct cryptodesc *crde = NULL, *crda = NULL;
+	struct cryptop *crp;
 	struct tdb_crypto *tc;
 	int plen, alen, hlen;
 	struct m_tag *mtag;
 	u_int32_t btsx;
-
-	struct cryptodesc *crde = NULL, *crda = NULL;
-	struct cryptop *crp;
 
 	/* Determine the ESP header length */
 	if (tdb->tdb_flags & TDBF_NOREPLAY)
@@ -304,11 +336,7 @@ esp_input(struct mbuf *m, struct tdb *tdb, int skip, int protoff)
 	else
 		hlen = 2 * sizeof(u_int32_t) + tdb->tdb_ivlen; /* "new" ESP */
 
-	if (esph)
-		alen = AH_HMAC_HASHLEN;
-	else
-		alen = 0;
-
+	alen = esph ? esph->authsize : 0;
 	plen = m->m_pkthdr.len - (skip + hlen + alen);
 	if (plen <= 0) {
 		DPRINTF(("esp_input: invalid payload length\n"));
@@ -390,7 +418,8 @@ esp_input(struct mbuf *m, struct tdb *tdb, int skip, int protoff)
 
 		tdbi = (struct tdb_ident *) (mtag + 1);
 		if (tdbi->proto == tdb->tdb_sproto && tdbi->spi == tdb->tdb_spi &&
-		    !bcmp(&tdbi->dst, &tdb->tdb_dst, sizeof(union sockaddr_union)))
+		    tdbi->rdomain == tdb->tdb_rdomain && !bcmp(&tdbi->dst,
+		    &tdb->tdb_dst, sizeof(union sockaddr_union)))
 			break;
 	}
 #else
@@ -427,12 +456,16 @@ esp_input(struct mbuf *m, struct tdb *tdb, int skip, int protoff)
 
 		/* Authentication descriptor */
 		crda->crd_skip = skip;
-		crda->crd_len = m->m_pkthdr.len - (skip + alen);
 		crda->crd_inject = m->m_pkthdr.len - alen;
 
 		crda->crd_alg = esph->type;
 		crda->crd_key = tdb->tdb_amxkey;
 		crda->crd_klen = tdb->tdb_amxkeylen * 8;
+
+		if (espx && espx->type == CRYPTO_AES_GCM_16)
+			crda->crd_len = hlen - tdb->tdb_ivlen;
+		else
+			crda->crd_len = m->m_pkthdr.len - (skip + alen);
 
 		/* Copy the authenticator */
 		if (mtag == NULL)
@@ -453,12 +486,12 @@ esp_input(struct mbuf *m, struct tdb *tdb, int skip, int protoff)
 	tc->tc_protoff = protoff;
 	tc->tc_spi = tdb->tdb_spi;
 	tc->tc_proto = tdb->tdb_sproto;
+	tc->tc_rdomain = tdb->tdb_rdomain;
 	bcopy(&tdb->tdb_dst, &tc->tc_dst, sizeof(union sockaddr_union));
 
 	/* Decryption descriptor */
 	if (espx) {
 		crde->crd_skip = skip + hlen;
-		crde->crd_len = m->m_pkthdr.len - (skip + hlen + alen);
 		crde->crd_inject = skip + hlen - tdb->tdb_ivlen;
 
 		if (tdb->tdb_flags & TDBF_HALFIV) {
@@ -476,6 +509,11 @@ esp_input(struct mbuf *m, struct tdb *tdb, int skip, int protoff)
 		crde->crd_key = tdb->tdb_emxkey;
 		crde->crd_klen = tdb->tdb_emxkeylen * 8;
 		/* XXX Rounds ? */
+
+		if (crde->crd_alg == CRYPTO_AES_GMAC)
+			crde->crd_len = 0;
+		else
+			crde->crd_len = m->m_pkthdr.len - (skip + hlen + alen);
 	}
 
 	if (mtag == NULL)
@@ -490,7 +528,7 @@ esp_input(struct mbuf *m, struct tdb *tdb, int skip, int protoff)
 int
 esp_input_cb(void *op)
 {
-	u_int8_t lastthree[3], aalg[AH_HMAC_HASHLEN];
+	u_int8_t lastthree[3], aalg[AH_HMAC_MAX_HASHLEN];
 	int s, hlen, roff, skip, protoff, error;
 	struct mbuf *m1, *mo, *m;
 	struct auth_hash *esph;
@@ -520,7 +558,7 @@ esp_input_cb(void *op)
 
 	s = spltdb();
 
-	tdb = gettdb(tc->tc_spi, &tc->tc_dst, tc->tc_proto);
+	tdb = gettdb(tc->tc_rdomain, tc->tc_spi, &tc->tc_dst, tc->tc_proto);
 	if (tdb == NULL) {
 		free(tc, M_XDATA);
 		espstat.esps_notdb++;
@@ -561,7 +599,7 @@ esp_input_cb(void *op)
 			ptr = (caddr_t) (tc + 1);
 
 			/* Verify authenticator */
-			if (bcmp(ptr, aalg, esph->authsize)) {
+			if (timingsafe_bcmp(ptr, aalg, esph->authsize)) {
 				free(tc, M_XDATA);
 				DPRINTF(("esp_input_cb(): authentication failed for packet in SA %s/%08x\n", ipsp_address(tdb->tdb_dst), ntohl(tdb->tdb_spi)));
 				espstat.esps_badauth++;
@@ -699,7 +737,7 @@ esp_input_cb(void *op)
 	m_adj(m, -(lastthree[1] + 2));
 
 	/* Restore the Next Protocol field */
-	m_copyback(m, protoff, sizeof(u_int8_t), lastthree + 2);
+	m_copyback(m, protoff, sizeof(u_int8_t), lastthree + 2, M_NOWAIT);
 
 	/* Back to generic IPsec input processing */
 	error = ipsec_common_input_cb(m, tdb, skip, protoff, mtag);
@@ -735,25 +773,27 @@ esp_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 	struct cryptodesc *crde = NULL, *crda = NULL;
 	struct cryptop *crp;
 #if NBPFILTER > 0
-	struct ifnet *ifn = &(encif[0].sc_if);
+	struct ifnet *encif;
 
-	ifn->if_opackets++;
-	ifn->if_obytes += m->m_pkthdr.len;
+	if ((encif = enc_getif(tdb->tdb_rdomain, tdb->tdb_tap)) != NULL) {
+		encif->if_opackets++;
+		encif->if_obytes += m->m_pkthdr.len;
 
-	if (ifn->if_bpf) {
-		struct enchdr hdr;
+		if (encif->if_bpf) {
+			struct enchdr hdr;
 
-		bzero (&hdr, sizeof(hdr));
+			bzero (&hdr, sizeof(hdr));
 
-		hdr.af = tdb->tdb_dst.sa.sa_family;
-		hdr.spi = tdb->tdb_spi;
-		if (espx)
-			hdr.flags |= M_CONF;
-		if (esph)
-			hdr.flags |= M_AUTH;
+			hdr.af = tdb->tdb_dst.sa.sa_family;
+			hdr.spi = tdb->tdb_spi;
+			if (espx)
+				hdr.flags |= M_CONF;
+			if (esph)
+				hdr.flags |= M_AUTH;
 
-		bpf_mtap_hdr(ifn->if_bpf, (char *)&hdr, ENC_HDRLEN, m,
-		    BPF_DIRECTION_OUT);
+			bpf_mtap_hdr(encif->if_bpf, (char *)&hdr,
+			    ENC_HDRLEN, m, BPF_DIRECTION_OUT);
+		}
 	}
 #endif
 
@@ -764,17 +804,13 @@ esp_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 
 	rlen = m->m_pkthdr.len - skip; /* Raw payload length. */
 	if (espx)
-		blks = espx->blocksize;
+		blks = MAX(espx->blocksize, 4);
 	else
 		blks = 4; /* If no encryption, we have to be 4-byte aligned. */
 
 	padding = ((blks - ((rlen + 2) % blks)) % blks) + 2;
 
-	if (esph)
-		alen = AH_HMAC_HASHLEN;
-	else
-		alen = 0;
-
+	alen = esph ? esph->authsize : 0;
 	espstat.esps_output++;
 
 	switch (tdb->tdb_dst.sa.sa_family) {
@@ -892,12 +928,13 @@ esp_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 	 * Add padding -- better to do it ourselves than use the crypto engine,
 	 * although if/when we support compression, we'd have to do that.
 	 */
-	pad = (u_char *) m_pad(m, padding + alen);
-	if (pad == NULL) {
-		DPRINTF(("esp_output(): m_pad() failed for SA %s/%08x\n",
+	mo = m_inject(m, m->m_pkthdr.len, padding + alen, M_DONTWAIT);
+	if (mo == NULL) {
+		DPRINTF(("esp_output(): m_inject failed for SA %s/%08x\n",
 		    ipsp_address(tdb->tdb_dst), ntohl(tdb->tdb_spi)));
 		return ENOBUFS;
 	}
+	pad = mtod(mo, u_char *);
 
 	/* Self-describing or random padding ? */
 	if (!(tdb->tdb_flags & TDBF_RANDOMPADDING))
@@ -912,7 +949,7 @@ esp_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 
 	/* Fix Next Protocol in IPv4/IPv6 header. */
 	prot = IPPROTO_ESP;
-	m_copyback(m, protoff, sizeof(u_int8_t), &prot);
+	m_copyback(m, protoff, sizeof(u_int8_t), &prot, M_NOWAIT);
 
 	/* Get crypto descriptors. */
 	crp = crypto_getreq(esph && espx ? 2 : 1);
@@ -930,14 +967,13 @@ esp_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 
 		/* Encryption descriptor. */
 		crde->crd_skip = skip + hlen;
-		crde->crd_len = m->m_pkthdr.len - (skip + hlen + alen);
 		crde->crd_flags = CRD_F_ENCRYPT;
 		crde->crd_inject = skip + hlen - tdb->tdb_ivlen;
 
 		if (tdb->tdb_flags & TDBF_HALFIV) {
 			/* Copy half-iv in the packet. */
 			m_copyback(m, crde->crd_inject, tdb->tdb_ivlen,
-			    tdb->tdb_iv);
+			    tdb->tdb_iv, M_NOWAIT);
 
 			/* Cook half-iv. */
 			bcopy(tdb->tdb_iv, crde->crd_iv, tdb->tdb_ivlen);
@@ -954,6 +990,11 @@ esp_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 		crde->crd_key = tdb->tdb_emxkey;
 		crde->crd_klen = tdb->tdb_emxkeylen * 8;
 		/* XXX Rounds ? */
+
+		if (crde->crd_alg == CRYPTO_AES_GMAC)
+			crde->crd_len = 0;
+		else
+			crde->crd_len = m->m_pkthdr.len - (skip + hlen + alen);
 	} else
 		crda = crp->crp_desc;
 
@@ -969,6 +1010,7 @@ esp_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 
 	tc->tc_spi = tdb->tdb_spi;
 	tc->tc_proto = tdb->tdb_sproto;
+	tc->tc_rdomain = tdb->tdb_rdomain;
 	bcopy(&tdb->tdb_dst, &tc->tc_dst, sizeof(union sockaddr_union));
 
 	/* Crypto operation descriptor. */
@@ -982,13 +1024,17 @@ esp_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 	if (esph) {
 		/* Authentication descriptor. */
 		crda->crd_skip = skip;
-		crda->crd_len = m->m_pkthdr.len - (skip + alen);
 		crda->crd_inject = m->m_pkthdr.len - alen;
 
 		/* Authentication operation. */
 		crda->crd_alg = esph->type;
 		crda->crd_key = tdb->tdb_amxkey;
 		crda->crd_klen = tdb->tdb_amxkeylen * 8;
+
+		if (espx && espx->type == CRYPTO_AES_GCM_16)
+			crda->crd_len = hlen - tdb->tdb_ivlen;
+		else
+			crda->crd_len = m->m_pkthdr.len - (skip + alen);
 	}
 
 	if ((tdb->tdb_flags & TDBF_SKIPCRYPTO) == 0)
@@ -1025,7 +1071,7 @@ esp_output_cb(void *op)
 
 	s = spltdb();
 
-	tdb = gettdb(tc->tc_spi, &tc->tc_dst, tc->tc_proto);
+	tdb = gettdb(tc->tc_rdomain, tc->tc_spi, &tc->tc_dst, tc->tc_proto);
 	if (tdb == NULL) {
 		free(tc, M_XDATA);
 		espstat.esps_notdb++;
@@ -1129,77 +1175,4 @@ checkreplaywindow32(u_int32_t seq, u_int32_t initial, u_int32_t *lastseq,
 
 	*bitmap |= (((u_int32_t) 1) << diff);
 	return 0;
-}
-
-/*
- * m_pad(m, n) pads <m> with <n> bytes at the end. The packet header
- * length is updated, and a pointer to the first byte of the padding
- * (which is guaranteed to be all in one mbuf) is returned.
- */
-
-caddr_t
-m_pad(struct mbuf *m, int n)
-{
-	struct mbuf *m0, *m1;
-	int len, pad;
-	caddr_t retval;
-
-	if (n <= 0) {  /* No stupid arguments. */
-		DPRINTF(("m_pad(): pad length invalid (%d)\n", n));
-		m_freem(m);
-		return NULL;
-	}
-
-	len = m->m_pkthdr.len;
-	pad = n;
-	m0 = m;
-
-	while (m0->m_len < len) {
-		len -= m0->m_len;
-		m0 = m0->m_next;
-	}
-
-	if (m0->m_len != len) {
-		DPRINTF(("m_pad(): length mismatch (should be %d instead of "
-		    "%d)\n", m->m_pkthdr.len,
-		    m->m_pkthdr.len + m0->m_len - len));
-
-		m_freem(m);
-		return NULL;
-	}
-
-	/* Check for zero-length trailing mbufs, and find the last one. */
-	for (m1 = m0; m1->m_next; m1 = m1->m_next) {
-		if (m1->m_next->m_len != 0) {
-			DPRINTF(("m_pad(): length mismatch (should be %d "
-			    "instead of %d)\n", m->m_pkthdr.len,
-			    m->m_pkthdr.len + m1->m_next->m_len));
-
-			m_freem(m);
-			return NULL;
-		}
-
-		m0 = m1->m_next;
-	}
-
-	if ((m0->m_flags & M_EXT) ||
-	    m0->m_data + m0->m_len + pad >= &(m0->m_dat[MLEN])) {
-		/* Add an mbuf to the chain. */
-		MGET(m1, M_DONTWAIT, MT_DATA);
-		if (m1 == 0) {
-			m_freem(m0);
-			DPRINTF(("m_pad(): cannot append\n"));
-			return NULL;
-		}
-
-		m0->m_next = m1;
-		m0 = m1;
-		m0->m_len = 0;
-	}
-
-	retval = m0->m_data + m0->m_len;
-	m0->m_len += pad;
-	m->m_pkthdr.len += pad;
-
-	return retval;
 }

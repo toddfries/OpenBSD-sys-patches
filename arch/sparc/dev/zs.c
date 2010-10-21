@@ -1,4 +1,4 @@
-/*	$OpenBSD: zs.c,v 1.46 2008/06/26 05:42:13 ray Exp $	*/
+/*	$OpenBSD: zs.c,v 1.48 2010/07/10 19:32:24 miod Exp $	*/
 /*	$NetBSD: zs.c,v 1.50 1997/10/18 00:00:40 gwr Exp $	*/
 
 /*-
@@ -96,24 +96,11 @@ int zs_major = 12;
  */
 #define PCLK	(9600 * 512)	/* PCLK pin input clock rate */
 
-/*
- * Select software interrupt bit based on TTY ipl.
- */
-#if IPL_TTY == 1
-# define IE_ZSSOFT IE_L1
-#elif IPL_TTY == 4
-# define IE_ZSSOFT IE_L4
-#elif IPL_TTY == 6
-# define IE_ZSSOFT IE_L6
-#else
-# error "no suitable software interrupt bit"
-#endif
-
-#define	ZS_DELAY()		(CPU_ISSUN4C ? (0) : delay(2))
+#define	ZS_DELAY()		((CPU_ISSUN4C || CPU_ISSUN4E) ? (0) : delay(2))
 
 /* The layout of this is hardware-dependent (padding, order). */
 struct zschan {
-#if defined(SUN4) || defined(SUN4C) || defined(SUN4M)
+#if defined(SUN4) || defined(SUN4C) || defined(SUN4D) || defined(SUN4E) || defined(SUN4M)
 	volatile u_char	zc_csr;		/* ctrl,status, and indirect access */
 	u_char		zc_xxx0;
 	volatile u_char	zc_data;	/* data */
@@ -213,9 +200,8 @@ struct cfdriver zs_cd = {
 
 /* Interrupt handlers. */
 int zshard(void *);
-int zssoft(void *);
+void zssoft(void *);
 struct intrhand levelhard = { zshard };
-struct intrhand levelsoft = { zssoft };
 
 int zs_get_speed(struct zs_chanstate *);
 
@@ -240,7 +226,7 @@ zs_match(parent, vcf, aux)
 		return (ca->ca_bustype == BUS_OBIO);
 #endif
 
-	if ((ca->ca_bustype == BUS_MAIN && !CPU_ISSUN4) ||
+	if ((ca->ca_bustype == BUS_MAIN && (CPU_ISSUN4C || CPU_ISSUN4E)) ||
 	    (ca->ca_bustype == BUS_OBIO && CPU_ISSUN4M))
 		return (getpropint(ra->ra_node, "slave", -2) == cf->cf_unit);
 	ra->ra_len = NBPG;
@@ -360,9 +346,10 @@ zs_attach(parent, self, aux)
 		didintr = 1;
 		prevpri = pri;
 		intr_establish(pri, &levelhard, IPL_ZS, self->dv_xname);
-		intr_establish(IPL_TTY, &levelsoft, IPL_TTY, self->dv_xname);
 	} else if (pri != prevpri)
 		panic("broken zs interrupt scheme");
+
+	zsc->zsc_softih = softintr_establish(IPL_SOFTTTY, zssoft, zsc);
 
 	/*
 	 * Set the master interrupt enable and interrupt vector.
@@ -419,8 +406,6 @@ zs_print(aux, name)
 	return UNCONF;
 }
 
-volatile int zssoftpending;
-
 /*
  * Our ZS chips all share a common, autovectored interrupt,
  * so we have to look at all of them on each interrupt.
@@ -442,56 +427,27 @@ zshard(arg)
 		if (rr3) {
 			rval |= rr3;
 		}
-		softreq |= zsc->zsc_cs[0].cs_softreq;
-		softreq |= zsc->zsc_cs[1].cs_softreq;
+		if (zsc->zsc_cs[0].cs_softreq || zsc->zsc_cs[1].cs_softreq)
+			softintr_schedule(zsc->zsc_softih);
 	}
 
-	/* We are at splzs here, so no need to lock. */
-	if (softreq && (zssoftpending == 0)) {
-		zssoftpending = IE_ZSSOFT;
-#if defined(SUN4M)
-		if (CPU_ISSUN4M)
-			raise(0, IPL_TTY);
-		else
-#endif
-		ienab_bis(IE_ZSSOFT);
-	}
 	return (rval);
 }
 
 /*
  * Similar scheme as for zshard (look at all of them)
  */
-int
+void
 zssoft(arg)
 	void *arg;
 {
-	struct zsc_softc *zsc;
-	int s, unit;
-
-	/* This is not the only ISR on this IPL. */
-	if (zssoftpending == 0)
-		return (0);
-
-	/*
-	 * The soft intr. bit will be set by zshard only if
-	 * the variable zssoftpending is zero.  The order of
-	 * these next two statements prevents our clearing
-	 * the soft intr bit just after zshard has set it.
-	 */
-	/* ienab_bic(IE_ZSSOFT); */
-	zssoftpending = 0;
+	struct zsc_softc *zsc = (struct zsc_softc *)arg;
+	int s;
 
 	/* Make sure we call the tty layer at spltty. */
 	s = spltty();
-	for (unit = 0; unit < zs_cd.cd_ndevs; unit++) {
-		zsc = zs_cd.cd_devs[unit];
-		if (zsc == NULL)
-			continue;
-		(void)zsc_intr_soft(zsc);
-	}
+	(void)zsc_intr_soft(zsc);
 	splx(s);
-	return (1);
 }
 
 
@@ -872,7 +828,7 @@ zscnpollc(dev, on)
 
 /*****************************************************************/
 
-#if defined(SUN4) || defined(SUN4C) || defined(SUN4M)
+#if defined(SUN4) || defined(SUN4C) || defined(SUN4D) || defined(SUN4E) || defined(SUN4M)
 
 cons_decl(prom);
 
@@ -978,7 +934,7 @@ promcnputc(dev, c)
 	splx(s);
 }
 
-#endif	/* SUN4 || SUN4C || SUN4M */
+#endif	/* SUN4 || SUN4C || SUN4D || SUN4E || SUN4M */
 
 /*****************************************************************/
 
@@ -1004,7 +960,7 @@ consinit()
 	int channel, zs_unit;
 	int inSource, outSink;
 
-#if defined(SUN4) || defined(SUN4C) || defined(SUN4M)
+#if defined(SUN4) || defined(SUN4C) || defined(SUN4D) || defined(SUN4E) || defined(SUN4M)
 	if (promvec->pv_romvec_vers > 2) {
 		/* We need to probe the PROM device tree */
 		int node,fd;
@@ -1112,7 +1068,7 @@ setup_output:
 		inSource = *promvec->pv_stdin;
 		outSink  = *promvec->pv_stdout;
 	}
-#endif	/* SUN4 || SUN4C || SUN4M */
+#endif	/* SUN4 || SUN4C || SUN4D || SUN4E || SUN4M */
 #ifdef solbourne
 	if (CPU_ISKAP) {
 		const char *dev;
@@ -1137,7 +1093,7 @@ setup_output:
 	}
 #endif
 
-#if defined(SUN4) || defined(SUN4C) || defined(SUN4M)
+#if defined(SUN4) || defined(SUN4C) || defined(SUN4D) || defined(SUN4E) || defined(SUN4M)
 setup_console:
 #endif
 

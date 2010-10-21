@@ -1,4 +1,4 @@
-/* $OpenBSD: wskbd.c,v 1.60 2009/01/21 21:54:00 grange Exp $ */
+/* $OpenBSD: wskbd.c,v 1.62 2010/07/26 01:56:27 guenther Exp $ */
 /* $NetBSD: wskbd.c,v 1.80 2005/05/04 01:52:16 augustss Exp $ */
 
 /*
@@ -205,7 +205,7 @@ keysym_t ksym_upcase(keysym_t);
 int	wskbd_match(struct device *, void *, void *);
 void	wskbd_attach(struct device *, struct device *, void *);
 int	wskbd_detach(struct device *, int);
-int	wskbd_activate(struct device *, enum devact);
+int	wskbd_activate(struct device *, int);
 
 int	wskbd_displayioctl(struct device *, u_long, caddr_t, int, struct proc *);
 
@@ -528,7 +528,7 @@ wskbd_repeat(void *v)
 #endif
 
 int
-wskbd_activate(struct device *self, enum devact act)
+wskbd_activate(struct device *self, int act)
 {
 	struct wskbd_softc *sc = (struct wskbd_softc *)self;
 
@@ -815,7 +815,7 @@ wskbdopen(dev_t dev, int flags, int mode, struct proc *p)
 
 	evar = &sc->sc_base.me_evar;
 	wsevent_init(evar);
-	evar->io = p;
+	evar->io = p->p_p;
 
 	error = wskbd_do_open(sc, evar);
 	if (error) {
@@ -937,15 +937,15 @@ wskbd_do_ioctl_sc(struct wskbd_softc *sc, u_long cmd, caddr_t data, int flag,
 	case FIOSETOWN:
 		if (sc->sc_base.me_evp == NULL)
 			return (EINVAL);
-		if (-*(int *)data != sc->sc_base.me_evp->io->p_pgid &&
-		    *(int *)data != sc->sc_base.me_evp->io->p_pid)
+		if (-*(int *)data != sc->sc_base.me_evp->io->ps_pgid &&
+		    *(int *)data != sc->sc_base.me_evp->io->ps_pid)
 			return (EPERM);
 		return (0);
 		   
 	case TIOCSPGRP:
 		if (sc->sc_base.me_evp == NULL)
 			return (EINVAL);
-		if (*(int *)data != sc->sc_base.me_evp->io->p_pgid)
+		if (*(int *)data != sc->sc_base.me_evp->io->ps_pgid)
 			return (EPERM);
 		return (0);
 	}

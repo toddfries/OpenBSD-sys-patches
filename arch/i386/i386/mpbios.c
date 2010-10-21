@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpbios.c,v 1.31 2009/01/13 19:38:44 grange Exp $	*/
+/*	$OpenBSD: mpbios.c,v 1.33 2009/08/13 13:24:48 kettenis Exp $	*/
 /*	$NetBSD: mpbios.c,v 1.2 2002/10/01 12:56:57 fvdl Exp $	*/
 
 /*-
@@ -744,8 +744,10 @@ mpbios_cpu(const u_int8_t *ent, struct device *self)
 	/* check for BSP flag */
 	if (entry->cpu_flags & PROCENTRY_FLAG_BP)
 		caa.cpu_role = CPU_ROLE_BP;
-	else
+	else {
 		caa.cpu_role = CPU_ROLE_AP;
+		ncpusfound++;
+	}
 
 	caa.caa_name = "cpu";
 	caa.cpu_number = entry->apic_id;
@@ -1138,7 +1140,7 @@ mpbios_int(const u_int8_t *ent, struct mp_intr_map *mpi)
 			    (altmpi->flags != flags)) {
 				printf(
 				    "%s: conflicting map entries for pin %d\n",
-				    sc->sc_dev.dv_xname, pin);
+				    sc->sc_pic.pic_dev.dv_xname, pin);
 			}
 		} else {
 			sc->sc_pins[pin].ip_map = mpi;
@@ -1155,7 +1157,7 @@ mpbios_int(const u_int8_t *ent, struct mp_intr_map *mpi)
 
 	if (mp_verbose) {
 		printf("%s: int%d attached to %s",
-		    sc ? sc->sc_dev.dv_xname : "local apic", pin,
+		    sc ? sc->sc_pic.pic_dev.dv_xname : "local apic", pin,
 		    mpb->mb_name);
 		if (mpb->mb_idx != -1)
 			printf("%d", mpb->mb_idx);

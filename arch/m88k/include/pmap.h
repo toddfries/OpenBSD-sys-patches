@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.h,v 1.13 2009/03/04 19:39:02 miod Exp $	*/
+/*	$OpenBSD: pmap.h,v 1.15 2010/05/02 22:01:46 miod Exp $	*/
 /*
  * Mach Operating System
  * Copyright (c) 1991 Carnegie Mellon University
@@ -27,8 +27,6 @@ struct pmap {
 	sdt_entry_t		*pm_stab;	/* virtual pointer to sdt */
 	apr_t			 pm_apr;
 	int			 pm_count;	/* reference count */
-	/* cpus using of this pmap; NCPU must be <= 32 */
-	u_int32_t		 pm_cpus;
 #ifdef MULTIPROCESSOR
 	__cpu_simple_lock_t	 pm_lock;
 #endif
@@ -50,6 +48,7 @@ typedef struct pv_entry *pv_entry_t;
 extern	pmap_t		kernel_pmap;
 extern	struct pmap	kernel_pmap_store;
 extern	caddr_t		vmmap;
+extern	apr_t		default_apr;
 
 #define	pmap_kernel()			(&kernel_pmap_store)
 #define pmap_resident_count(pmap)	((pmap)->pm_stats.resident_count)

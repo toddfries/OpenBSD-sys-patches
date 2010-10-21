@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_machdep.c,v 1.17 2008/06/22 21:02:10 miod Exp $ */
+/*	$OpenBSD: db_machdep.c,v 1.31 2010/09/17 00:25:11 miod Exp $ */
 
 /*
  * Copyright (c) 1998-2003 Opsycon AB (www.opsycon.se)
@@ -46,28 +46,43 @@
 #include <ddb/db_output.h>
 #include <ddb/db_variables.h>
 #include <ddb/db_interface.h>
+#include <ddb/db_run.h>
 
 #define MIPS_JR_RA        0x03e00008      /* instruction code for jr ra */
 
-extern void trapDump(char *);
-u_long MipsEmulateBranch(db_regs_t *, int, int, u_int);
-void  stacktrace_subr(db_regs_t *, int (*)(const char*, ...));
+void  stacktrace_subr(db_regs_t *, int, int (*)(const char*, ...));
 
-int   kdbpeek(void *);
-int64_t kdbpeekd(void *);
-short kdbpeekw(void *);
-char  kdbpeekb(void *);
-void  kdbpoke(vaddr_t, int);
-void  kdbpoked(vaddr_t, int64_t);
-void  kdbpokew(vaddr_t, short);
-void  kdbpokeb(vaddr_t, char);
+uint32_t kdbpeek(vaddr_t);
+uint64_t kdbpeekd(vaddr_t);
+uint16_t kdbpeekw(vaddr_t);
+uint8_t  kdbpeekb(vaddr_t);
+void  kdbpoke(vaddr_t, uint32_t);
+void  kdbpoked(vaddr_t, uint64_t);
+void  kdbpokew(vaddr_t, uint16_t);
+void  kdbpokeb(vaddr_t, uint8_t);
 int   kdb_trap(int, struct trap_frame *);
 
 void db_trap_trace_cmd(db_expr_t, int, db_expr_t, char *);
 void db_dump_tlb_cmd(db_expr_t, int, db_expr_t, char *);
 
+
+#ifdef MULTIPROCESSOR
+struct mutex ddb_mp_mutex = MUTEX_INITIALIZER(IPL_HIGH);
+volatile int ddb_state = DDB_STATE_NOT_RUNNING;
+volatile cpuid_t ddb_active_cpu;
+boolean_t        db_switch_cpu;
+long             db_switch_to_cpu;
+#endif
+
 int   db_active = 0;
 db_regs_t ddb_regs;
+
+#ifdef MULTIPROCESSOR
+void db_cpuinfo_cmd(db_expr_t, int, db_expr_t, char *);
+void db_startproc_cmd(db_expr_t, int, db_expr_t, char *);
+void db_stopproc_cmd(db_expr_t, int, db_expr_t, char *);
+void db_ddbproc_cmd(db_expr_t, int, db_expr_t, char *);
+#endif
 
 struct db_variable db_regs[] = {
     { "at",  (long *)&ddb_regs.ast,     FCN_NULL },
@@ -136,18 +151,135 @@ kdb_trap(type, fp)
 		}
 		printf("stopped on non ddb fault\n");
 	}
+	
+#ifdef MULTIPROCESSOR
+	mtx_enter(&ddb_mp_mutex);
+	if (ddb_state == DDB_STATE_EXITING)
+		ddb_state = DDB_STATE_NOT_RUNNING;
+	mtx_leave(&ddb_mp_mutex);
+	
+	while (db_enter_ddb()) {
+#endif
+		bcopy((void *)fp, (void *)&ddb_regs, NUMSAVEREGS * sizeof(register_t));
 
-	bcopy((void *)fp, (void *)&ddb_regs, NUMSAVEREGS * sizeof(register_t));
-
-	db_active++;
-	cnpollc(TRUE);
-	db_trap(type, 0);
-	cnpollc(FALSE);
-	db_active--;
-
-	bcopy((void *)&ddb_regs, (void *)fp, NUMSAVEREGS * sizeof(register_t));
+		db_active++;
+		cnpollc(TRUE);
+		db_trap(type, 0);
+		cnpollc(FALSE);
+		db_active--;
+		
+		bcopy((void *)&ddb_regs, (void *)fp, NUMSAVEREGS * sizeof(register_t));
+#ifdef MULTIPROCESSOR
+		if (!db_switch_cpu)
+			ddb_state = DDB_STATE_EXITING;
+	}
+#endif
 	return(TRUE);
 }
+
+#ifdef MULTIPROCESSOR
+int
+db_enter_ddb(void)
+{
+	int i;
+	struct cpu_info *ci = curcpu();
+	mtx_enter(&ddb_mp_mutex);
+
+#ifdef DEBUG
+	printf("db_enter_ddb %d: state %x pause %x\n", ci->ci_cpuid,
+	    ddb_state, ci->ci_ddb);
+#endif
+	/* If we are first in, grab ddb and stop all other CPUs */
+	if (ddb_state == DDB_STATE_NOT_RUNNING) {
+		ddb_active_cpu = cpu_number();
+		ddb_state = DDB_STATE_RUNNING;
+		ci->ci_ddb = CI_DDB_INDDB;
+		for (i = 0; i < ncpus; i++) {
+			if (i != cpu_number() &&
+			    get_cpu_info(i)->ci_ddb != CI_DDB_STOPPED) {
+				get_cpu_info(i)->ci_ddb = CI_DDB_SHOULDSTOP;
+				mips64_send_ipi(get_cpu_info(i)->ci_cpuid, MIPS64_IPI_DDB);
+			}
+		}
+		mtx_leave(&ddb_mp_mutex);
+		return (1);
+	}
+
+	/* Leaving ddb completely.  Start all other CPUs and return 0 */
+	if (ddb_active_cpu == cpu_number() && ddb_state == DDB_STATE_EXITING) {
+		for (i = 0; i < ncpus; i++) {
+			get_cpu_info(i)->ci_ddb = CI_DDB_RUNNING;
+		}
+		mtx_leave(&ddb_mp_mutex);
+		return (0);
+	}
+
+	/* We are switching to another CPU. ddb_ddbproc_cmd() has made sure
+	 * it is waiting for ddb, we just have to set ddb_active_cpu. */
+	if (ddb_active_cpu == cpu_number() && db_switch_cpu) {
+		ci->ci_ddb = CI_DDB_SHOULDSTOP;
+		db_switch_cpu = 0;
+		ddb_active_cpu = db_switch_to_cpu;
+		get_cpu_info(db_switch_to_cpu)->ci_ddb = CI_DDB_ENTERDDB;
+	}
+
+	/* Wait until we should enter ddb or resume */
+	while (ddb_active_cpu != cpu_number() &&
+	    ci->ci_ddb != CI_DDB_RUNNING) {
+		if (ci->ci_ddb == CI_DDB_SHOULDSTOP)
+			ci->ci_ddb = CI_DDB_STOPPED;
+		mtx_leave(&ddb_mp_mutex);
+		/* Busy wait without locking, we will confirm with lock later */
+		while (ddb_active_cpu != cpu_number() &&
+		    ci->ci_ddb != CI_DDB_RUNNING)
+			;	/* Do nothing */
+		mtx_enter(&ddb_mp_mutex);
+	}
+
+	/* Either enter ddb or exit */
+	if (ddb_active_cpu == cpu_number() && ddb_state == DDB_STATE_RUNNING) {
+		ci->ci_ddb = CI_DDB_INDDB;
+		mtx_leave(&ddb_mp_mutex);
+		return (1);
+	} else {
+		mtx_leave(&ddb_mp_mutex);
+		return (0);
+	}
+}
+
+
+void
+db_cpuinfo_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
+{
+	int i;
+
+	for (i = 0; i < ncpus; i++) {
+		db_printf("%c%4d: ", (i == cpu_number()) ? '*' : ' ',
+		    get_cpu_info(i)->ci_cpuid);
+		switch(get_cpu_info(i)->ci_ddb) {
+		case CI_DDB_RUNNING:
+			db_printf("running\n");
+			break;
+		case CI_DDB_SHOULDSTOP:
+			db_printf("stopping\n");
+			break;
+		case CI_DDB_STOPPED:
+			db_printf("stopped\n");
+			break;
+		case CI_DDB_ENTERDDB:
+			db_printf("entering ddb\n");
+			break;
+		case CI_DDB_INDDB:
+			db_printf("ddb\n");
+			break;
+		default:
+			db_printf("? (%d)\n",
+			    get_cpu_info(i)->ci_ddb);
+			break;
+		}
+	}
+}
+#endif
 
 void
 db_read_bytes(addr, size, data)
@@ -155,21 +287,22 @@ db_read_bytes(addr, size, data)
 	size_t      size;
 	char       *data;
 {
-	while (size >= sizeof(int)) {
-		*((int *)data)++ = kdbpeek((void *)addr);
-		addr += sizeof(int);
-		size -= sizeof(int);
+	while (size >= sizeof(uint32_t)) {
+		*(uint32_t *)data = kdbpeek(addr);
+		data += sizeof(uint32_t);
+		addr += sizeof(uint32_t);
+		size -= sizeof(uint32_t);
 	}
 
-	if (size >= sizeof(short)) {
-		*((short *)data)++ = kdbpeekw((void *)addr);
-		addr += sizeof(short);
-		size -= sizeof(short);
+	if (size >= sizeof(uint16_t)) {
+		*(uint16_t *)data = kdbpeekw(addr);
+		data += sizeof(uint16_t);
+		addr += sizeof(uint16_t);
+		size -= sizeof(uint16_t);
 	}
 
-	if (size) {
-		*data++ = kdbpeekb((void *)addr);
-	}
+	if (size)
+		*(uint8_t *)data = kdbpeekb(addr);
 }
 
 void
@@ -181,24 +314,30 @@ db_write_bytes(addr, size, data)
 	vaddr_t ptr = addr;
 	size_t len = size;
 
-	while (len >= sizeof(int)) {
-		kdbpoke(ptr, *((int *)data)++);
-		ptr += sizeof(int);
-		len -= sizeof(int);
+	while (len >= sizeof(uint32_t)) {
+		kdbpoke(ptr, *(uint32_t *)data);
+		data += sizeof(uint32_t);
+		ptr += sizeof(uint32_t);
+		len -= sizeof(uint32_t);
 	}
 
-	if (len >= sizeof(short)) {
-		kdbpokew(ptr, *((short *)data)++);
-		ptr += sizeof(int);
-		len -= sizeof(int);
+	if (len >= sizeof(uint16_t)) {
+		kdbpokew(ptr, *(uint16_t *)data);
+		data += sizeof(uint16_t);
+		ptr += sizeof(uint16_t);
+		len -= sizeof(uint16_t);
 	}
 
-	if (len) {
-		kdbpokeb(ptr, *data++);
-	}
+	if (len)
+		kdbpokeb(ptr, *(uint8_t *)data);
+
 	if (addr < VM_MAXUSER_ADDRESS) {
-		Mips_HitSyncDCache(addr, size);
-		Mips_InvalidateICache(PHYS_TO_KSEG0(addr & 0xffff), size);
+		struct cpu_info *ci = curcpu();
+
+		/* XXX we don't know where this page is mapped... */
+		Mips_HitSyncDCache(ci, addr, PHYS_TO_XKPHYS(addr, CCA_CACHED),
+		    size);
+		Mips_InvalidateICache(ci, PHYS_TO_CKSEG0(addr & 0xffff), size);
 	}
 }
 
@@ -210,18 +349,6 @@ db_stack_trace_print(addr, have_addr, count, modif, pr)
 	char		*modif;
 	int		(*pr)(const char *, ...);
 {
-	db_sym_t sym;
-	db_expr_t diff;
-	db_addr_t subr;
-	char *symname;
-	vaddr_t pc, sp, ra, va;
-	register_t a0, a1, a2, a3;
-	unsigned instr, mask;
-	InstFmt i;
-	int more, stksize;
-	extern char edata[];
-	extern char k_intr[];
-	extern char k_general[];
 	struct trap_frame *regs = &ddb_regs;
 
 	if (have_addr) {
@@ -229,212 +356,7 @@ db_stack_trace_print(addr, have_addr, count, modif, pr)
 		return;
 	}
 
-	/* get initial values from the exception frame */
-	sp = (vaddr_t)regs->sp;
-	pc = (vaddr_t)regs->pc;
-	ra = (vaddr_t)regs->ra;		/* May be a 'leaf' function */
-	a0 = regs->a0;
-	a1 = regs->a1;
-	a2 = regs->a2;
-	a3 = regs->a3;
-
-/* Jump here when done with a frame, to start a new one */
-loop:
-
-/* Jump here after a nonstandard (interrupt handler) frame */
-	stksize = 0;
-
-	/* check for bad SP: could foul up next frame */
-	if (sp & 3 || (!IS_XKPHYS(sp) && sp < KSEG0_BASE)) {
-		(*pr)("SP %p: not in kernel\n", sp);
-		ra = 0;
-		subr = 0;
-		goto done;
-	}
-
-#if 0
-	/* Backtraces should contine through interrupts from kernel mode */
-	if (pc >= (vaddr_t)MipsKernIntr && pc < (vaddr_t)MipsUserIntr) {
-		(*pr)("MipsKernIntr+%x: (%x, %x ,%x) -------\n",
-		       pc - (vaddr_t)MipsKernIntr, a0, a1, a2);
-		regs = (struct trap_frame *)(sp + STAND_ARG_SIZE);
-		a0 = kdbpeek(&regs->a0);
-		a1 = kdbpeek(&regs->a1);
-		a2 = kdbpeek(&regs->a2);
-		a3 = kdbpeek(&regs->a3);
-
-		pc = kdbpeek(&regs->pc); /* exc_pc - pc at time of exception */
-		ra = kdbpeek(&regs->ra); /* ra at time of exception */
-		sp = kdbpeek(&regs->sp);
-		goto specialframe;
-	}
-#endif
-
-
-	/* check for bad PC */
-	if (pc & 3 || (!IS_XKPHYS(pc) && pc < KSEG0_BASE) ||
-	    pc >= (vaddr_t)edata) {
-		(*pr)("PC %p: not in kernel\n", pc);
-		ra = 0;
-		goto done;
-	}
-
-	/*
-	 * Dig out the function from the symbol table.
-	 * Watch out for function tail optimizations.
-	 */
-	sym = db_search_symbol(pc, DB_STGY_ANY, &diff);
-	if (sym != DB_SYM_NULL && diff == 0)
-		sym = db_search_symbol(pc - 4, DB_STGY_ANY, &diff);
-	db_symbol_values(sym, &symname, 0);
-	if (sym != DB_SYM_NULL) {
-		subr = pc - diff;
-	} else {
-		subr = 0;
-	}
-
-	/*
-	 * Find the beginning of the current subroutine by scanning backwards
-	 * from the current PC for the end of the previous subroutine.
-	 */
-	if (!subr) {
-		va = pc - sizeof(int);
-		while ((instr = kdbpeek((int *)va)) != MIPS_JR_RA)
-			va -= sizeof(int);
-		va += 2 * sizeof(int);	/* skip back over branch & delay slot */
-		/* skip over nulls which might separate .o files */
-		while ((instr = kdbpeek((int *)va)) == 0)
-			va += sizeof(int);
-		subr = va;
-	}
-
-	/*
-	 * Jump here for locore entry points for which the preceding
-	 * function doesn't end in "j ra"
-	 */
-	/* scan forwards to find stack size and any saved registers */
-	stksize = 0;
-	more = 3;
-	mask = 0;
-	for (va = subr; more; va += sizeof(int),
-	    more = (more == 3) ? 3 : more - 1) {
-		/* stop if hit our current position */
-		if (va >= pc)
-			break;
-		instr = kdbpeek((int *)va);
-		i.word = instr;
-		switch (i.JType.op) {
-		case OP_SPECIAL:
-			switch (i.RType.func) {
-			case OP_JR:
-			case OP_JALR:
-				more = 2; /* stop after next instruction */
-				break;
-
-			case OP_SYSCALL:
-			case OP_BREAK:
-				more = 1; /* stop now */
-			};
-			break;
-
-		case OP_BCOND:
-		case OP_J:
-		case OP_JAL:
-		case OP_BEQ:
-		case OP_BNE:
-		case OP_BLEZ:
-		case OP_BGTZ:
-			more = 2; /* stop after next instruction */
-			break;
-
-		case OP_COP0:
-		case OP_COP1:
-		case OP_COP2:
-		case OP_COP3:
-			switch (i.RType.rs) {
-			case OP_BCx:
-			case OP_BCy:
-				more = 2; /* stop after next instruction */
-			};
-			break;
-
-		case OP_SW:
-		case OP_SD:
-			/* look for saved registers on the stack */
-			if (i.IType.rs != 29)
-				break;
-			/* only restore the first one */
-			if (mask & (1 << i.IType.rt))
-				break;
-			mask |= (1 << i.IType.rt);
-			switch (i.IType.rt) {
-			case 4: /* a0 */
-				a0 = kdbpeekd((long *)(sp + (short)i.IType.imm));
-				break;
-
-			case 5: /* a1 */
-				a1 = kdbpeekd((long *)(sp + (short)i.IType.imm));
-				break;
-
-			case 6: /* a2 */
-				a2 = kdbpeekd((long *)(sp + (short)i.IType.imm));
-				break;
-
-			case 7: /* a3 */
-				a3 = kdbpeekd((long *)(sp + (short)i.IType.imm));
-				break;
-
-			case 31: /* ra */
-				ra = kdbpeekd((long *)(sp + (short)i.IType.imm));
-				break;
-			}
-			break;
-
-		case OP_ADDI:
-		case OP_ADDIU:
-		case OP_DADDI:
-		case OP_DADDIU:
-			/* look for stack pointer adjustment */
-			if (i.IType.rs != 29 || i.IType.rt != 29)
-				break;
-			stksize = - ((short)i.IType.imm);
-		}
-	}
-
-done:
-	if (symname == NULL)
-		(*pr)("%p ", subr);
-	else
-		(*pr)("%s+%p ", symname, diff);
-	(*pr)("(%llx,%llx,%llx,%llx) sp %llx ra %llx, sz %d\n", a0, a1, a2, a3, sp, ra, stksize);
-
-	if (subr == (vaddr_t)k_intr || subr == (vaddr_t)k_general) {
-		if (subr == (vaddr_t)k_intr)
-			(*pr)("(KERNEL INTERRUPT)\n");
-		else
-			(*pr)("(KERNEL TRAP)\n");
-		sp = *(register_t *)sp;
-		pc = ((struct trap_frame *)sp)->pc;
-		ra = ((struct trap_frame *)sp)->ra;
-		sp = ((struct trap_frame *)sp)->sp;	/* last */
-		goto loop;
-	}
-
-	if (ra) {
-		if (pc == ra && stksize == 0)
-			(*pr)("stacktrace: loop!\n");
-		else {
-			pc = ra;
-			sp += stksize;
-			ra = 0;
-			goto loop;
-		}
-	} else {
-		if (curproc)
-			(*pr)("User-level: pid %d\n", curproc->p_pid);
-		else
-			(*pr)("User-level: curproc NULL\n");
-	}
+	stacktrace_subr(regs, count, pr);
 }
 
 /*
@@ -450,7 +372,7 @@ next_instr_address(db_addr_t pc, boolean_t bd)
 {
 	db_addr_t next;
 
-	next = MipsEmulateBranch(&ddb_regs, pc, 0, 0);
+	next = MipsEmulateBranch(&ddb_regs, (vaddr_t)pc, 0, 0);
 	return(next);
 }
 
@@ -515,8 +437,7 @@ db_inst_type(ins)
 
 	case OP_COP1:
 		switch (inst.RType.rs) {
-		case OP_BCx:
-		case OP_BCy:
+		case OP_BC:
 			ityp = IT_BRANCH;
 			break;
 		}
@@ -565,6 +486,7 @@ db_dump_tlb_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *m)
 {
 	int tlbno, last, check, pid;
 	struct tlb_entry tlb, tlbp;
+	struct cpu_info *ci = curcpu();
 char *attr[] = {
 	"WTNA", "WTA ", "UCBL", "CWB ", "RES ", "RES ", "UCNB", "BPAS"
 };
@@ -575,10 +497,10 @@ char *attr[] = {
 		if (have_addr && addr < 256) {
 			pid = addr;
 			tlbno = 0;
-			count = sys_config.cpu[0].tlbsize;
+			count = ci->ci_hw.tlbsize;
 		}
 	} else if (m[0] == 'c') {
-		last = sys_config.cpu[0].tlbsize;
+		last = ci->ci_hw.tlbsize;
 		for (tlbno = 0; tlbno < last; tlbno++) {
 			tlb_read(tlbno, &tlb);
 			for (check = tlbno + 1; check < last; check++) {
@@ -586,7 +508,7 @@ char *attr[] = {
 if ((tlbp.tlb_hi == tlb.tlb_hi && (tlb.tlb_lo0 & PG_V || tlb.tlb_lo1 & PG_V)) ||
 (pfn_to_pad(tlb.tlb_lo0) == pfn_to_pad(tlbp.tlb_lo0) && tlb.tlb_lo0 & PG_V) ||
 (pfn_to_pad(tlb.tlb_lo1) == pfn_to_pad(tlbp.tlb_lo1) && tlb.tlb_lo1 & PG_V)) {
-					printf("MATCH:\n");
+					db_printf("MATCH:\n");
 					db_dump_tlb_cmd(tlbno, 1, 1, "");
 					db_dump_tlb_cmd(check, 1, 1, "");
 				}
@@ -594,49 +516,48 @@ if ((tlbp.tlb_hi == tlb.tlb_hi && (tlb.tlb_lo0 & PG_V || tlb.tlb_lo1 & PG_V)) ||
 		}
 		return;
 	} else {
-		if (have_addr && addr < sys_config.cpu[0].tlbsize) {
+		if (have_addr && addr < ci->ci_hw.tlbsize) {
 			tlbno = addr;
-		}
-			else {
+		} else {
 			tlbno = 0;
-			count = sys_config.cpu[0].tlbsize;
+			count = ci->ci_hw.tlbsize;
 		}
 	}
 	last = tlbno + count;
 
-	for (; tlbno < sys_config.cpu[0].tlbsize && tlbno < last; tlbno++) {
+	for (; tlbno < ci->ci_hw.tlbsize && tlbno < last; tlbno++) {
 		tlb_read(tlbno, &tlb);
 
 		if (pid >= 0 && (tlb.tlb_hi & 0xff) != pid)
 			continue;
 
 		if (tlb.tlb_lo0 & PG_V || tlb.tlb_lo1 & PG_V) {
-			printf("%2d v=%16llx", tlbno, tlb.tlb_hi & ~0xffL);
-			printf("/%02x ", tlb.tlb_hi & 0xff);
+			db_printf("%2d v=%16llx", tlbno, tlb.tlb_hi & ~0xffL);
+			db_printf("/%02x ", tlb.tlb_hi & 0xff);
 
 			if (tlb.tlb_lo0 & PG_V) {
-				printf("%16llx ", pfn_to_pad(tlb.tlb_lo0));
-				printf("%c", tlb.tlb_lo0 & PG_M ? 'M' : ' ');
-				printf("%c", tlb.tlb_lo0 & PG_G ? 'G' : ' ');
-				printf("%s ", attr[(tlb.tlb_lo0 >> 3) & 7]);
+				db_printf("%16llx ", pfn_to_pad(tlb.tlb_lo0));
+				db_printf("%c", tlb.tlb_lo0 & PG_M ? 'M' : ' ');
+				db_printf("%c", tlb.tlb_lo0 & PG_G ? 'G' : ' ');
+				db_printf("%s ", attr[(tlb.tlb_lo0 >> 3) & 7]);
 			} else {
-				printf("invalid             ");
+				db_printf("invalid                 ");
 			}
 
 			if (tlb.tlb_lo1 & PG_V) {
-				printf("%16llx ", pfn_to_pad(tlb.tlb_lo1));
-				printf("%c", tlb.tlb_lo1 & PG_M ? 'M' : ' ');
-				printf("%c", tlb.tlb_lo1 & PG_G ? 'G' : ' ');
-				printf("%s ", attr[(tlb.tlb_lo1 >> 3) & 7]);
+				db_printf("%16llx ", pfn_to_pad(tlb.tlb_lo1));
+				db_printf("%c", tlb.tlb_lo1 & PG_M ? 'M' : ' ');
+				db_printf("%c", tlb.tlb_lo1 & PG_G ? 'G' : ' ');
+				db_printf("%s ", attr[(tlb.tlb_lo1 >> 3) & 7]);
 			} else {
-				printf("invalid             ");
+				db_printf("invalid                 ");
 			}
-			printf(" sz=%x", tlb.tlb_mask);
+			db_printf(" sz=%x", tlb.tlb_mask);
 		}
 		else if (pid < 0) {
-			printf("%2d v=invalid    ", tlbno);
+			db_printf("%2d v=invalid    ", tlbno);
 		}
-		printf("\n");
+		db_printf("\n");
 	}
 }
 
@@ -644,15 +565,120 @@ if ((tlbp.tlb_hi == tlb.tlb_hi && (tlb.tlb_lo0 & PG_V || tlb.tlb_lo1 & PG_V)) ||
 struct db_command mips_db_command_table[] = {
 	{ "tlb",	db_dump_tlb_cmd,	0,	NULL },
 	{ "trap",	db_trap_trace_cmd,	0,	NULL },
+#ifdef MULTIPROCESSOR
+	{ "cpuinfo",    db_cpuinfo_cmd,         0,      NULL },
+	{ "startcpu",   db_startproc_cmd,       0,      NULL },
+	{ "stopcpu",    db_stopproc_cmd,        0,      NULL },
+	{ "ddbcpu",     db_ddbproc_cmd,         0,      NULL },
+#endif   
 	{ NULL,		NULL,			0,	NULL }
 };
 
 void
 db_machine_init()
 {
+#ifdef MULTIPROCESSOR
+	int i;
+#endif
+
 extern char *ssym;
 	db_machine_commands_install(mips_db_command_table);
+#ifdef MULTIPROCESSOR
+	for (i = 0; i < ncpus; i++) {
+		get_cpu_info(i)->ci_ddb = CI_DDB_RUNNING;
+	}
+#endif
 	if (ssym != NULL) {
 		ddb_init();	/* Init symbols */
 	}
 }
+
+
+#ifdef MULTIPROCESSOR
+void
+db_ddbproc_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
+{
+	int cpu_n;
+
+	if (have_addr) {
+		cpu_n = addr;
+		if (cpu_n >= 0 && cpu_n < ncpus &&
+		    cpu_n != cpu_number()) {
+			db_stopcpu(cpu_n);
+			db_switch_to_cpu = cpu_n;
+			db_switch_cpu = 1;
+			db_cmd_loop_done = 1;
+		} else {
+			db_printf("Invalid cpu %d\n", (int)addr);
+		}
+	} else {
+		db_printf("CPU not specified\n");
+	}
+}
+
+void
+db_startproc_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
+{
+	int cpu_n;
+
+	if (have_addr) {
+		cpu_n = addr;
+		if (cpu_n >= 0 && cpu_n < ncpus &&
+		    cpu_n != cpu_number())
+			db_startcpu(cpu_n);
+		else
+			db_printf("Invalid cpu %d\n", (int)addr);
+	} else {
+		for (cpu_n = 0; cpu_n < ncpus; cpu_n++) {
+			if (cpu_n != cpu_number()) {
+				db_startcpu(cpu_n);
+			}
+		}
+	}
+}
+
+void
+db_stopproc_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
+{
+	int cpu_n;
+	
+	if (have_addr) {
+		cpu_n = addr;
+		if (cpu_n >= 0 && cpu_n < ncpus &&
+		    cpu_n != cpu_number())
+			db_stopcpu(cpu_n);
+		else
+			db_printf("Invalid cpu %d\n", (int)addr);
+	} else {
+		for (cpu_n = 0; cpu_n < ncpus; cpu_n++) {
+			if (cpu_n != cpu_number()) {
+				db_stopcpu(cpu_n);
+			}
+		}
+	}
+}
+
+void
+db_startcpu(int cpu)
+{
+	if (cpu != cpu_number() && cpu < ncpus) {
+		mtx_enter(&ddb_mp_mutex);
+		get_cpu_info(cpu)->ci_ddb = CI_DDB_RUNNING;
+		mtx_leave(&ddb_mp_mutex);
+	}
+}   
+
+void
+db_stopcpu(int cpu)
+{
+	mtx_enter(&ddb_mp_mutex);
+	if (cpu != cpu_number() && cpu < ncpus &&
+	    get_cpu_info(cpu)->ci_ddb != CI_DDB_STOPPED) {
+		get_cpu_info(cpu)->ci_ddb = CI_DDB_SHOULDSTOP;  
+		mtx_leave(&ddb_mp_mutex);
+		mips64_send_ipi(cpu, MIPS64_IPI_DDB);
+	} else {
+		mtx_leave(&ddb_mp_mutex);
+	}
+}
+#endif

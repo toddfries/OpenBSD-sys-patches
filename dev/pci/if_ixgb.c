@@ -31,7 +31,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 
-/* $OpenBSD: if_ixgb.c,v 1.52 2008/11/28 02:44:18 brad Exp $ */
+/* $OpenBSD: if_ixgb.c,v 1.57 2010/09/20 07:50:19 deraadt Exp $ */
 
 #include <dev/pci/if_ixgb.h>
 
@@ -64,9 +64,7 @@ const struct pci_matchid ixgb_devices[] = {
  *********************************************************************/
 int  ixgb_probe(struct device *, void *, void *);
 void ixgb_attach(struct device *, struct device *, void *);
-void ixgb_shutdown(void *);
 int  ixgb_intr(void *);
-void ixgb_power(int, void *);
 void ixgb_start(struct ifnet *);
 int  ixgb_ioctl(struct ifnet *, u_long, caddr_t);
 void ixgb_watchdog(struct ifnet *);
@@ -126,7 +124,7 @@ struct cfattach ixgb_ca = {
 };
 
 struct cfdriver ixgb_cd = {
-	0, "ixgb", DV_IFNET
+	NULL, "ixgb", DV_IFNET
 };
 
 /* some defines for controlling descriptor fetches in h/w */
@@ -201,11 +199,8 @@ ixgb_attach(struct device *parent, struct device *self, void *aux)
 	/* Set the max frame size assuming standard ethernet sized frames */
 	sc->hw.max_frame_size = IXGB_MAX_JUMBO_FRAME_SIZE;
 
-	if (ixgb_allocate_pci_resources(sc)) {
-		printf("%s: Allocation of PCI resources failed\n",
-		       sc->sc_dv.dv_xname);
+	if (ixgb_allocate_pci_resources(sc))
 		goto err_pci;
-	}
 
 	tsize = IXGB_ROUNDUP(sc->num_tx_desc * sizeof(struct ixgb_tx_desc),
 	    IXGB_MAX_TXD * sizeof(struct ixgb_tx_desc));
@@ -249,8 +244,6 @@ ixgb_attach(struct device *parent, struct device *self, void *aux)
 	printf(", address %s\n", ether_sprintf(sc->interface_data.ac_enaddr));
 
 	INIT_DEBUGOUT("ixgb_attach: end");
-	sc->sc_powerhook = powerhook_establish(ixgb_power, sc);
-	sc->sc_shutdownhook = shutdownhook_establish(ixgb_shutdown, sc);
 	return;
 
 err_hw_init:
@@ -260,33 +253,6 @@ err_rx_desc:
 err_tx_desc:
 err_pci:
 	ixgb_free_pci_resources(sc);
-}
-
-void
-ixgb_power(int why, void *arg)
-{
-	struct ixgb_softc *sc = (struct ixgb_softc *)arg;
-	struct ifnet *ifp;
-
-	if (why == PWR_RESUME) {
-		ifp = &sc->interface_data.ac_if;
-		if (ifp->if_flags & IFF_UP)
-			ixgb_init(sc);
-	}
-}
-
-/*********************************************************************
- *
- *  Shutdown entry point
- *
- **********************************************************************/ 
-
-void
-ixgb_shutdown(void *arg)
-{
-	struct ixgb_softc *sc = arg;
-
-	ixgb_stop(sc);
 }
 
 /*********************************************************************
@@ -724,10 +690,10 @@ ixgb_encap(struct ixgb_softc *sc, struct mbuf *m_head)
 	/* Find out if we are in VLAN mode */
 	if (m_head->m_flags & M_VLANTAG) {
 		/* Set the VLAN id */
-		current_tx_desc->vlan = m_head->m_pkthdr.ether_vtag;
+		current_tx_desc->vlan = htole16(m_head->m_pkthdr.ether_vtag);
 
 		/* Tell hardware to add tag */
-		current_tx_desc->cmd_type_len |= IXGB_TX_DESC_CMD_VLE;
+		current_tx_desc->cmd_type_len |= htole32(IXGB_TX_DESC_CMD_VLE);
 	}
 
 	tx_buffer->m_head = m_head;
@@ -1510,6 +1476,7 @@ ixgb_get_buf(struct ixgb_softc *sc, int i,
 		return (error);
 	}
 	rx_buffer->m_head = mp;
+	bzero(&sc->rx_desc_base[i], sizeof(sc->rx_desc_base[i]));
 	sc->rx_desc_base[i].buff_addr = htole64(rx_buffer->map->dm_segs[0].ds_addr);
 	bus_dmamap_sync(sc->rxtag, rx_buffer->map, 0,
 	    rx_buffer->map->dm_mapsize, BUS_DMASYNC_PREREAD);
@@ -1776,7 +1743,7 @@ ixgb_rxeof(struct ixgb_softc *sc, int count)
 		} else {
 			eop = 0;
 		}
-		len = current_desc->length;
+		len = letoh16(current_desc->length);
 
 		if (current_desc->errors & (IXGB_RX_DESC_ERRORS_CE |
 			    IXGB_RX_DESC_ERRORS_SE | IXGB_RX_DESC_ERRORS_P |
@@ -1808,7 +1775,7 @@ ixgb_rxeof(struct ixgb_softc *sc, int count)
 #if NVLAN > 0
 				if (current_desc->status & IXGB_RX_DESC_STATUS_VP) {
 					sc->fmp->m_pkthdr.ether_vtag =
-					    current_desc->special;
+					    letoh16(current_desc->special);
 					sc->fmp->m_flags |= M_VLANTAG;
 				}
 #endif

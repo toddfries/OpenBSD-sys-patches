@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wb.c,v 1.43 2008/11/28 02:44:18 brad Exp $	*/
+/*	$OpenBSD: if_wb.c,v 1.46 2010/05/19 15:27:35 oga Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -149,7 +149,6 @@ int wb_ioctl(struct ifnet *, u_long, caddr_t);
 void wb_init(void *);
 void wb_stop(struct wb_softc *);
 void wb_watchdog(struct ifnet *);
-void wb_shutdown(void *);
 int wb_ifmedia_upd(struct ifnet *);
 void wb_ifmedia_sts(struct ifnet *, struct ifmediareq *);
 
@@ -798,7 +797,7 @@ wb_attach(parent, self, aux)
 	printf(", address %s\n", ether_sprintf(sc->arpcom.ac_enaddr));
 
 	if (bus_dmamem_alloc(pa->pa_dmat, sizeof(struct wb_list_data),
-	    PAGE_SIZE, 0, &seg, 1, &rseg, BUS_DMA_NOWAIT)) {
+	    PAGE_SIZE, 0, &seg, 1, &rseg, BUS_DMA_NOWAIT | BUS_DMA_ZERO)) {
 		printf(": can't alloc list data\n");
 		goto fail_2;
 	}
@@ -819,7 +818,6 @@ wb_attach(parent, self, aux)
 		goto fail_5;
 	}
 	sc->wb_ldata = (struct wb_list_data *)kva;
-	bzero(sc->wb_ldata, sizeof(struct wb_list_data));
 
 	ifp->if_softc = sc;
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
@@ -855,8 +853,6 @@ wb_attach(parent, self, aux)
 	 */
 	if_attach(ifp);
 	ether_ifattach(ifp);
-
-	shutdownhook_establish(wb_shutdown, sc);
 	return;
 
 fail_5:
@@ -1689,24 +1685,10 @@ void wb_stop(sc)
 		sizeof(sc->wb_ldata->wb_tx_list));
 }
 
-/*
- * Stop all chip I/O so that the kernel's probe routines don't
- * get confused by errant DMAs when rebooting.
- */
-void wb_shutdown(arg)
-	void			*arg;
-{
-	struct wb_softc		*sc = (struct wb_softc *)arg;
-
-	wb_stop(sc);
-
-	return;
-}
-
 struct cfattach wb_ca = {
 	sizeof(struct wb_softc), wb_probe, wb_attach
 };
 
 struct cfdriver wb_cd = {
-	0, "wb", DV_IFNET
+	NULL, "wb", DV_IFNET
 };

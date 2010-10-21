@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.10 2009/01/25 17:30:48 miod Exp $	*/
+/*	$OpenBSD: conf.c,v 1.17 2010/09/23 05:02:14 claudio Exp $	*/
 
 /*
  * Copyright (c) 1994-1998 Mark Brinicombe.
@@ -111,7 +111,6 @@ cdev_decl(pci);
 #include "cd.h"
 #include "ch.h"
 #include "uk.h"
-#include "ss.h"
 
 /*
  * Audio devices
@@ -133,9 +132,13 @@ cdev_decl(pci);
 #include "uscanner.h"
 
 /*
+ * Bluetooth devices
+ */
+#include "bthub.h"
+
+/*
  * WSCONS devices
  */
-#if 0
 #include "wsdisplay.h"
 /*
 #include "wsfont.h"
@@ -143,12 +146,6 @@ cdev_decl(pci);
 #include "wskbd.h"
 #include "wsmouse.h"
 #include "wsmux.h"
-#else
-#define	NWSDISPLAY	0
-#define	NWSMOUSE	0
-#define	NWSKBD	0
-#define	NWSMUX	0
-#endif
 cdev_decl(wskbd);
 cdev_decl(wsmouse);
 
@@ -264,14 +261,16 @@ struct bdevsw bdevsw[] = {
 #define ptctty          ptytty
 #define ptcioctl        ptyioctl
 
-#ifdef XFS
-#include <xfs/nxfs.h>
-cdev_decl(xfs_dev);
+#ifdef NNPFS
+#include <nnpfs/nnnpfs.h>
+cdev_decl(nnpfs_dev);
 #endif
 #include "systrace.h"
 
 #include "hotplug.h"
 #include "scif.h"
+#include "vscsi.h"
+#include "pppx.h"
 
 #ifdef CONF_HAVE_GPIO
 #include "gpio.h"
@@ -309,7 +308,7 @@ struct cdevsw cdevsw[] = {
 	cdev_disk_init(NCD,cd),			/* 26: SCSI CD-ROM */
 	cdev_ch_init(NCH,ch),	 		/* 27: SCSI autochanger */
 	cdev_uk_init(NUK,uk),	 		/* 28: SCSI unknown */
-	cdev_scanner_init(NSS,ss),		/* 29: SCSI scanner */
+	cdev_notdef(),				/* 29: */
 	cdev_lkm_dummy(),			/* 30: */
 	cdev_lkm_dummy(),			/* 31: */
 	cdev_lkm_dummy(),			/* 32: */
@@ -331,8 +330,8 @@ struct cdevsw cdevsw[] = {
 	cdev_lkm_dummy(),			/* 48: reserved */
 	cdev_lkm_dummy(),			/* 49: reserved */
 	cdev_systrace_init(NSYSTRACE,systrace),	/* 50: system call tracing */
-#ifdef XFS
-	cdev_xfs_init(NXFS,xfs_dev),		/* 51: xfs communication device */
+#ifdef NNPFS
+	cdev_nnpfs_init(NNNPFS,nnpfs_dev),		/* 51: nnpfs communication device */
 #else
 	cdev_notdef(),				/* 51: reserved */
 #endif
@@ -387,6 +386,10 @@ struct cdevsw cdevsw[] = {
 	cdev_notdef(),                          /* 96: removed device */
 	cdev_radio_init(NRADIO,radio),		/* 97: generic radio I/O */
 	cdev_ptm_init(NPTY,ptm),		/* 98: pseudo-tty ptm device */
+	cdev_vscsi_init(NVSCSI,vscsi),		/* 99: vscsi */
+	cdev_bthub_init(NBTHUB,bthub),		/* 100: bthub */
+	cdev_disk_init(1,diskmap),		/* 101: disk mapper */
+	cdev_pppx_init(NPPPX,pppx),		/* 102: pppx */
 };
 
 int nblkdev = sizeof(bdevsw) / sizeof(bdevsw[0]);

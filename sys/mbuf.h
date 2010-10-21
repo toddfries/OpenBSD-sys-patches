@@ -1,4 +1,4 @@
-/*	$OpenBSD: mbuf.h,v 1.121 2009/01/27 09:17:51 dlg Exp $	*/
+/*	$OpenBSD: mbuf.h,v 1.142 2010/07/14 10:31:54 matthew Exp $	*/
 /*	$NetBSD: mbuf.h,v 1.19 1996/02/09 18:25:14 christos Exp $	*/
 
 /*
@@ -78,7 +78,6 @@ struct m_hdr {
 struct pkthdr_pf {
 	void		*hdr;		/* saved hdr pos in mbuf, for ECN */
 	void		*statekey;	/* pf stackside statekey */
-	u_int		 rtableid;	/* alternate routing table id */
 	u_int32_t	 qid;		/* queue id */
 	u_int16_t	 tag;		/* tag id */
 	u_int8_t	 flags;
@@ -90,14 +89,19 @@ struct pkthdr_pf {
 #define	PF_TAG_FRAGCACHE		0x02
 #define	PF_TAG_TRANSLATE_LOCALHOST	0x04
 #define	PF_TAG_DIVERTED			0x08
+#define	PF_TAG_DIVERTED_PACKET		0x10
+#define	PF_TAG_REROUTE			0x20
 
 /* record/packet header in first mbuf of chain; valid if M_PKTHDR set */
 struct	pkthdr {
 	struct ifnet		*rcvif;		/* rcv interface */
 	SLIST_HEAD(packet_tags, m_tag) tags; /* list of packet tags */
 	int			 len;		/* total packet length */
+	u_int16_t		 tagsset;	/* mtags attached */
+	u_int16_t		 pad;
 	u_int16_t		 csum_flags;	/* checksum flags */
 	u_int16_t		 ether_vtag;	/* Ethernet 802.1p+Q vlan tag */
+	u_int			 rdomain;	/* routing domain id */
 	struct pkthdr_pf	 pf;
 };
 
@@ -267,7 +271,7 @@ struct mbuf {
 	MCLINITREFERENCE(m);						\
 } while (/* CONSTCOND */ 0)
 
-#define MCLGET(m, how) m_clget((m), (how), NULL, MCLBYTES)
+#define MCLGET(m, how) (void) m_clget((m), (how), NULL, MCLBYTES)
 #define MCLGETI(m, how, ifp, l) m_clget((m), (how), (ifp), (l))
 
 /*
@@ -284,28 +288,6 @@ struct mbuf {
 #define M_MOVE_HDR(to, from) do {					\
 	(to)->m_pkthdr = (from)->m_pkthdr;				\
 	(from)->m_flags &= ~M_PKTHDR;					\
-	SLIST_INIT(&(from)->m_pkthdr.tags);				\
-} while (/* CONSTCOND */ 0)
-
-/*
- * Duplicate just m_pkthdr from from to to.
- */
-#define M_DUP_HDR(to, from) do {					\
-	(to)->m_pkthdr = (from)->m_pkthdr;				\
-	SLIST_INIT(&(to)->m_pkthdr.tags);				\
-	m_tag_copy_chain((to), (from));					\
-} while (/* CONSTCOND */ 0)
-
-/*
- * Duplicate mbuf pkthdr from from to to.
- * from must have M_PKTHDR set, and to must be empty.
- */
-#define M_DUP_PKTHDR(to, from) do {					\
-	(to)->m_flags = ((to)->m_flags & (M_EXT | M_CLUSTER));		\
-	(to)->m_flags |= (from)->m_flags & M_COPYFLAGS;			\
-	M_DUP_HDR((to), (from));					\
-	if (((to)->m_flags & M_EXT) == 0)				\
-		(to)->m_data = (to)->m_pktdat;				\
 } while (/* CONSTCOND */ 0)
 
 /*
@@ -360,15 +342,8 @@ struct mbuf {
  * If how is M_DONTWAIT and allocation fails, the original mbuf chain
  * is freed and m is set to NULL.
  */
-#define	M_PREPEND(m, plen, how) do {					\
-	if (M_LEADINGSPACE(m) >= (plen)) {				\
-		(m)->m_data -= (plen);					\
-		(m)->m_len += (plen);					\
-	} else								\
-		(m) = m_prepend((m), (plen), (how));			\
-	if ((m) && (m)->m_flags & M_PKTHDR)				\
-		(m)->m_pkthdr.len += (plen);				\
-} while (/* CONSTCOND */ 0)
+#define	M_PREPEND(m, plen, how) \
+		(m) = m_prepend((m), (plen), (how))
 
 /* length to m_copy to copy all */
 #define	M_COPYALL	1000000000
@@ -407,12 +382,12 @@ extern	int max_linkhdr;		/* largest link-level header */
 extern	int max_protohdr;		/* largest protocol header */
 extern	int max_hdr;			/* largest link+protocol header */
 extern	int max_datalen;		/* MHLEN - max_hdr */
-extern	int mbtypes[];			/* XXX */
 
 void	mbinit(void);
 struct	mbuf *m_copym2(struct mbuf *, int, int, int);
 struct	mbuf *m_copym(struct mbuf *, int, int, int);
 struct	mbuf *m_free(struct mbuf *);
+struct	mbuf *m_free_unlocked(struct mbuf *);
 struct	mbuf *m_get(int, int);
 struct	mbuf *m_getclr(int, int);
 struct	mbuf *m_gethdr(int, int);
@@ -427,14 +402,14 @@ struct  mbuf *m_inject(struct mbuf *, int, int, int);
 struct  mbuf *m_getptr(struct mbuf *, int, int *);
 int	m_leadingspace(struct mbuf *);
 int	m_trailingspace(struct mbuf *);
-void	m_clget(struct mbuf *, int, struct ifnet *, u_int);
+struct mbuf *m_clget(struct mbuf *, int, struct ifnet *, u_int);
 void	m_clsetwms(struct ifnet *, u_int, u_int, u_int);
 int	m_cldrop(struct ifnet *, int);
 void	m_clcount(struct ifnet *, int);
 void	m_cluncount(struct mbuf *, int);
 void	m_clinitifp(struct ifnet *);
 void	m_adj(struct mbuf *, int);
-void	m_copyback(struct mbuf *, int, int, const void *);
+int	m_copyback(struct mbuf *, int, int, const void *, int);
 void	m_freem(struct mbuf *);
 void	m_reclaim(void *, int);
 void	m_copydata(struct mbuf *, int, int, caddr_t);
@@ -444,6 +419,7 @@ struct mbuf *m_devget(char *, int, int, struct ifnet *,
 void	m_zero(struct mbuf *);
 int	m_apply(struct mbuf *, int, int,
 	    int (*)(caddr_t, caddr_t, unsigned int), caddr_t);
+int	m_dup_pkthdr(struct mbuf *, struct mbuf *);
 
 /* Packet tag routines */
 struct m_tag *m_tag_get(int, int, int);
@@ -458,30 +434,16 @@ struct m_tag *m_tag_first(struct mbuf *);
 struct m_tag *m_tag_next(struct mbuf *, struct m_tag *);
 
 /* Packet tag types */
-#define PACKET_TAG_NONE				0  /* Nadda */
-#define PACKET_TAG_IPSEC_IN_DONE		1  /* IPsec applied, in */
-#define PACKET_TAG_IPSEC_OUT_DONE		2  /* IPsec applied, out */
-#define PACKET_TAG_IPSEC_IN_CRYPTO_DONE		3  /* NIC IPsec crypto done */
-#define PACKET_TAG_IPSEC_OUT_CRYPTO_NEEDED	4  /* NIC IPsec crypto req'ed */
-#define PACKET_TAG_IPSEC_IN_COULD_DO_CRYPTO	5  /* NIC notifies IPsec */
-#define PACKET_TAG_IPSEC_PENDING_TDB		6  /* Reminder to do IPsec */
-#define PACKET_TAG_BRIDGE			7  /* Bridge processing done */
-#define PACKET_TAG_GIF				8  /* GIF processing done */
-#define PACKET_TAG_GRE				9  /* GRE processing done */
-#define PACKET_TAG_IN_PACKET_CHECKSUM		10 /* NIC checksumming done */
-#define PACKET_TAG_DLT				17 /* data link layer type */
-#define PACKET_TAG_PF_DIVERT			18 /* pf(4) diverted packet */
+#define PACKET_TAG_IPSEC_IN_DONE	0x0001  /* IPsec applied, in */
+#define PACKET_TAG_IPSEC_OUT_DONE	0x0002  /* IPsec applied, out */
+#define PACKET_TAG_IPSEC_IN_CRYPTO_DONE	0x0004  /* NIC IPsec crypto done */
+#define PACKET_TAG_IPSEC_OUT_CRYPTO_NEEDED 0x0008  /* NIC IPsec crypto req'ed */
+#define PACKET_TAG_IPSEC_PENDING_TDB	0x0010  /* Reminder to do IPsec */
+#define PACKET_TAG_BRIDGE		0x0020  /* Bridge processing done */
+#define PACKET_TAG_GIF			0x0040  /* GIF processing done */
+#define PACKET_TAG_GRE			0x0080  /* GRE processing done */
+#define PACKET_TAG_DLT			0x0100 /* data link layer type */
+#define PACKET_TAG_PF_DIVERT		0x0200 /* pf(4) diverted packet */
+#define PACKET_TAG_PIPEX		0x0400 /* pipex context XXX */
 
-#ifdef MBTYPES
-int mbtypes[] = {				/* XXX */
-	M_FREE,		/* MT_FREE	0	   should be on free list */
-	M_MBUF,		/* MT_DATA	1	   dynamic (data) allocation */
-	M_MBUF,		/* MT_HEADER	2	   packet header */
-	M_MBUF,		/* MT_SONAME	8	   socket name */
-	M_SOOPTS,	/* MT_SOOPTS	10	   socket options */
-	M_FTABLE,	/* MT_FTABLE	11	   fragment reassembly header */
-	M_MBUF,		/* MT_CONTROL	14	   extra-data protocol message */
-	M_MBUF,		/* MT_OOBDATA	15	   expedited data  */
-};
-#endif /* MBTYPES */
 #endif

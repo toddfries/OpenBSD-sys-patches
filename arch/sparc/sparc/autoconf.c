@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.82 2008/07/21 04:35:54 todd Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.92 2010/07/10 19:32:24 miod Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.73 1997/07/29 09:41:53 fair Exp $ */
 
 /*
@@ -56,6 +56,7 @@
 #include <sys/socket.h>
 #include <sys/malloc.h>
 #include <sys/queue.h>
+#include <sys/proc.h>
 #include <sys/user.h>
 
 #include <net/if.h>
@@ -167,6 +168,43 @@ struct om_vector *oldpvec = (struct om_vector *)PROM_BASE;
 void
 bootstrap()
 {
+#if defined(SUN4C) || defined(SUN4E)
+	/*
+	 * If we are running on a sun4e system, we need to differentiate it
+	 * from sun4c now. Note that we can't use CPU_ISSUN4C here because
+	 * it might have been optimized depending upon the kernel
+	 * configuration.
+	 */
+	if (cputyp == CPU_SUN4C) {
+		char tmpstr[24];
+		u_long pgsiz;
+
+		pgsiz = 0;
+		snprintf(tmpstr, sizeof tmpstr, "pagesize %x l!",
+		    (u_long)&pgsiz);
+		rominterpret(tmpstr);
+		if (pgsiz == 1 << SUN4_PGSHIFT) {
+#if defined(SUN4E)
+			extern int nbpg, pgofset;
+
+			cputyp = CPU_SUN4E;
+			nbpg = 1 << SUN4_PGSHIFT;
+			pgofset = nbpg - 1;
+#else
+			printf("OpenBSD/sparc: this kernel does not support the sun4e\n");
+			romhalt();
+#endif
+		} else {
+#if defined(SUN4C)
+			/* cputyp, nbpg and pgofset already set in locore */
+#else
+			printf("OpenBSD/sparc: this kernel does not support the sun4c\n");
+			romhalt();
+#endif
+		}
+	}
+#endif
+
 #if defined(SUN4)
 	if (CPU_ISSUN4) {
 		extern void oldmon_w_cmd(u_long, char *);
@@ -279,7 +317,7 @@ bootstrap()
 		setpte4m(SI_INTR_VA, pte);
 
 		/* Now disable interrupts */
-		ienab_bis(SINTR_MA);
+		intreg_set_4m(SINTR_MA);
 
 		/* Send all interrupts to primary processor */
 		*((u_int *)ICR_ITR) = 0;
@@ -311,15 +349,21 @@ bootstrap()
 	}
 #endif /* SUN4M */
 
-	if (CPU_ISSUN4OR4C) {
+#if defined(SUN4) || defined(SUN4C) || defined(SUN4E)
+	if (CPU_ISSUN4OR4COR4E) {
 		/* Map Interrupt Enable Register */
-		pmap_kenter_pa(INTRREG_VA,
-			   INT_ENABLE_REG_PHYSADR | PMAP_NC | PMAP_OBIO,
-			   VM_PROT_READ | VM_PROT_WRITE);
+		/*
+		 * XXX on non-Sun4, we ought to get the address from
+		 * XXX the `interrupt-enable' node.
+		 */
+		pmap_kenter_pa(INTRREG_VA, PMAP_NC | PMAP_OBIO |
+		    (CPU_ISSUN4E ? INT_ENABLE_REG_PHYSADR_4E :
+		     INT_ENABLE_REG_PHYSADR_44C), VM_PROT_READ | VM_PROT_WRITE);
 		pmap_update(pmap_kernel());
 		/* Disable all interrupts */
 		*((unsigned char *)INTRREG_VA) = 0;
 	}
+#endif
 }
 
 /*
@@ -470,13 +514,6 @@ bootpath_fake(bp, cp)
 	nbootpath++; \
 }
 
-#if defined(SUN4)
-	if (CPU_ISSUN4M) {
-		printf("twas brillig..\n");
-		return;
-	}
-#endif
-
 	pp = cp + 2;
 	v0val[0] = v0val[1] = v0val[2] = 0;
 	if (*pp == '(' 					/* for vi: ) */
@@ -566,7 +603,7 @@ bootpath_fake(bp, cp)
 	}
 #endif /* SUN4 */
 
-#if defined(SUN4C)
+#if defined(SUN4C) || defined(SUN4E)
 	/*
 	 * sun4c stuff
 	 */
@@ -614,7 +651,7 @@ bootpath_fake(bp, cp)
 		BP_APPEND(bp, tmpname, target, lun, v0val[2]);
 		return;
 	}
-#endif /* SUN4C */
+#endif /* SUN4C || SUN4E */
 
 
 	/*
@@ -771,20 +808,6 @@ cpu_configure()
 			if (cf->cf_driver != &memreg_cd ||
 				cf->cf_loc[0] == -1) /* avoid sun4m memreg0 */
 				continue;
-			/*
-			 * On the 4/100 obio addresses must be mapped at
-			 * 0x0YYYYYYY, but alias higher up (we avoid the
-			 * alias condition because it causes pmap difficulties)
-			 * XXX: We also assume that 4/[23]00 obio addresses
-			 * must be 0xZYYYYYYY, where (Z != 0)
-			 * make sure we get the correct memreg cfdriver!
-			 */
-			if (cpuinfo.cpu_type == CPUTYP_4_100 &&
-			    (cf->cf_loc[0] & 0xf0000000))
-				continue;
-			if (cpuinfo.cpu_type != CPUTYP_4_100 &&
-			    !(cf->cf_loc[0] & 0xf0000000))
-				continue;
 			for (p = cf->cf_parents; memregcf==NULL && *p >= 0; p++)
 				if (cfdata[*p].cf_driver == &obio_cd)
 					memregcf = cf;
@@ -800,8 +823,8 @@ cpu_configure()
 			panic("cpu_configure: ROM hasn't mapped memreg!");
 	}
 #endif
-#if defined(SUN4C)
-	if (CPU_ISSUN4C) {
+#if defined(SUN4C) || defined(SUN4E)
+	if (CPU_ISSUN4C || CPU_ISSUN4E) {
 		node = findroot();
 		cp = getpropstring(node, "device_type");
 		if (strcmp(cp, "cpu") != 0)
@@ -813,7 +836,8 @@ cpu_configure()
 		node = findroot();
 #endif
 
-	*promvec->pv_synchook = sync_crash;
+	if (!CPU_ISSUN4)
+		*promvec->pv_synchook = sync_crash;
 
 	oca.ca_ra.ra_node = node;
 	oca.ca_ra.ra_name = cp = "mainbus";
@@ -823,11 +847,11 @@ cpu_configure()
 	/* Enable device interrupts */
 #if defined(SUN4M)
 	if (CPU_ISSUN4M)
-		ienab_bic(SINTR_MA);
+		intreg_clr_4m(SINTR_MA);
 #endif
-#if defined(SUN4) || defined(SUN4C)
-	if (CPU_ISSUN4OR4C)
-		ienab_bis(IE_ALLIE);
+#if defined(SUN4) || defined(SUN4C) || defined(SUN4E)
+	if (CPU_ISSUN4OR4COR4E)
+		intreg_set_44c(IE_ALLIE);
 #endif
 	(void)spl0();
 
@@ -1075,7 +1099,7 @@ mainbus_attach(parent, dev, aux)
 	struct confargs oca;
 	register const char *const *ssp, *sp = NULL;
 	struct confargs *ca = aux;
-#if defined(SUN4C) || defined(SUN4M)
+#if defined(SUN4C) || defined(SUN4D) || defined(SUN4E) || defined(SUN4M)
 	register int node0, node;
 	const char *const *openboot_special;
 #define L1A_HACK		/* XXX hack to allow L1-A during autoconf */
@@ -1111,8 +1135,22 @@ mainbus_attach(parent, dev, aux)
 		"virtual-memory",
 		NULL
 	};
-#else
-#define openboot_special4c	((void *)0)
+#endif
+#if defined(SUN4E)
+	static const char *const openboot_special4e[] = {
+		/* find these first (end with empty string) */
+		"memory-error",	/* as early as convenient, in case of error */
+		"eeprom",
+		"counter-timer",
+		"auxiliary-io",
+		"",
+
+		/* ignore these (end with NULL) */
+		"interrupt-enable",
+		"options",
+		"p2bus",	/* memory bus, has `eccmem' child */
+		NULL
+	};
 #endif
 #if defined(SUN4M)
 	static const char *const openboot_special4m[] = {
@@ -1136,8 +1174,6 @@ mainbus_attach(parent, dev, aux)
 		/* we also skip any nodes with device_type == "cpu" */
 		NULL
 	};
-#else
-#define openboot_special4m	((void *)0)
 #endif
 
 	if (CPU_ISSUN4)
@@ -1183,11 +1219,29 @@ mainbus_attach(parent, dev, aux)
 /*
  * The rest of this routine is for OBP machines exclusively.
  */
-#if defined(SUN4C) || defined(SUN4M)
+#if defined(SUN4C) || defined(SUN4D) || defined(SUN4E) || defined(SUN4M)
 
-	openboot_special = CPU_ISSUN4M
-				? openboot_special4m
-				: openboot_special4c;
+	switch (cputyp) {
+#ifdef SUN4C
+	case CPU_SUN4C:
+		openboot_special = openboot_special4c;
+		break;
+#endif
+#ifdef SUN4E
+	case CPU_SUN4E:
+		openboot_special = openboot_special4e;
+		break;
+#endif
+#ifdef SUN4M
+	case CPU_SUN4M:
+		openboot_special = openboot_special4m;
+		break;
+#endif
+	default:
+		/* panic("can't happen"); */
+		openboot_special = NULL;
+		break;
+	}
 
 	node = ca->ca_ra.ra_node;	/* i.e., the root node */
 
@@ -1207,7 +1261,7 @@ mainbus_attach(parent, dev, aux)
 				config_found(dev, (void *)&oca, mbprint);
 			}
 		}
-	} else if (CPU_ISSUN4C) {
+	} else if (CPU_ISSUN4C || CPU_ISSUN4E) {
 		bzero(&oca, sizeof(oca));
 		oca.ca_ra.ra_node = node;
 		oca.ca_ra.ra_name = "cpu";
@@ -1224,12 +1278,15 @@ mainbus_attach(parent, dev, aux)
 		 * node if a framebuffer is installed, even if console is
 		 * set to serial.
 		 */
-		if (*promvec->pv_stdout != PROMDEV_SCREEN)
+		if (*promvec->pv_stdout != PROMDEV_SCREEN ||
+		    *promvec->pv_stdin != PROMDEV_KBD)
 			fbnode = 0;
 		else {
 			/* remember which frame buffer is the console */
 			fbnode = getpropint(node, "fb", 0);
 		}
+	} else {
+		/* fbnode already initialized in consinit() */
 	}
 
 	/* Find the "options" node */
@@ -1260,8 +1317,8 @@ mainbus_attach(parent, dev, aux)
 	for (node = node0; node; node = nextsibling(node)) {
 		register const char *cp;
 
-#if defined(SUN4M)
-		if (CPU_ISSUN4M) /* skip the CPUs */
+#if defined(SUN4D) || defined(SUN4M)
+		if (CPU_ISSUN4DOR4M) /* skip the CPUs */
 			if (node_has_property(node, "device_type") &&
 			    !strcmp(getpropstring(node, "device_type"), "cpu"))
 				continue;
@@ -1283,7 +1340,22 @@ mainbus_attach(parent, dev, aux)
 			(void) config_found(dev, (void *)&oca, mbprint);
 		}
 	}
-#endif /* SUN4C || SUN4M */
+
+#if defined(SUN4E)
+	if (CPU_ISSUN4E) {
+		/*
+		 * Attach the leds.
+		 * XXX This is not a natural attachment, but since there
+		 * XXX is more than one led, this does not fit in the usual
+		 * XXX auxio blink framework.
+		 */
+		bzero(&oca, sizeof(oca));
+		oca.ca_bustype = BUS_MAIN;
+		oca.ca_ra.ra_name = "led";
+		config_found(dev, (void *)&oca, mbprint);
+	}
+#endif
+#endif /* SUN4C || SUN4D || SUN4E || SUN4M */
 }
 
 struct cfattach mainbus_ca = {
@@ -1337,8 +1409,8 @@ findzs(zs)
 	}
 #endif
 
-#if defined(SUN4C) || defined(SUN4M)
-	if (CPU_ISSUN4COR4M) {
+#if defined(SUN4C) || defined(SUN4D) || defined(SUN4E) || defined(SUN4M)
+	if (!CPU_ISSUN4) {
 		int node;
 
 		node = firstchild(findroot());
@@ -1371,130 +1443,81 @@ findzs(zs)
 	/* NOTREACHED */
 }
 
-#if defined(SUN4C) || defined(SUN4M)
-struct v2rmi {
-	int	zero;
-	int	addr;
-	int	len;
-} v2rmi[200];		/* version 2 rom meminfo layout */
+int
+makememarr(struct memarr *ap, u_int xmax, int which)
+{
+#if defined(SUN4C) || defined(SUN4D) || defined(SUN4E) || defined(SUN4M)
+	struct v0mlist *mp;
+	int node, n;
+	char *prop;
 #endif
 
-int
-makememarr(ap, max, which)
-	register struct memarr *ap;
-	int max, which;
-{
-#if defined(SUN4C) || defined(SUN4M)
-#define	MAXMEMINFO (sizeof(v2rmi) / sizeof(*v2rmi))
-	register struct v0mlist *mp;
-	register int i, node, len;
-	char *prop;
+#ifdef DIAGNOSTIC
+	if (which != MEMARR_AVAILPHYS && which != MEMARR_TOTALPHYS)
+		panic("makememarr");
+#endif
+
+#ifdef DIAGNOSTIC
+	if (which != MEMARR_AVAILPHYS && which != MEMARR_TOTALPHYS)
+		panic("makememarr");
 #endif
 
 #if defined(SUN4)
 	if (CPU_ISSUN4) {
-		switch (which) {
-		case MEMARR_AVAILPHYS:
-			ap[0].addr = 0;
-			ap[0].len = *oldpvec->memoryAvail;
-			break;
-		case MEMARR_TOTALPHYS:
-			ap[0].addr = 0;
-			ap[0].len = *oldpvec->memorySize;
-			break;
-		default:
-			printf("pre_panic: makememarr");
-			break;
+		if (ap != NULL && xmax != 0) {
+			ap[0].addr_hi = 0;
+			ap[0].addr_lo = 0;
+			ap[0].len = which == MEMARR_AVAILPHYS ?
+			    *oldpvec->memoryAvail : *oldpvec->memorySize;
 		}
-		return (1);
+		return 1;
 	}
 #endif
-#if defined(SUN4C) || defined(SUN4M)
-	switch (i = promvec->pv_romvec_vers) {
-
+#if defined(SUN4C) || defined(SUN4D) || defined(SUN4E) || defined(SUN4M)
+	switch (n = promvec->pv_romvec_vers) {
 	case 0:
 		/*
 		 * Version 0 PROMs use a linked list to describe these
 		 * guys.
 		 */
-		switch (which) {
+		mp = which == MEMARR_AVAILPHYS ?
+		    *promvec->pv_v0mem.v0_physavail :
+		    *promvec->pv_v0mem.v0_phystot;
 
-		case MEMARR_AVAILPHYS:
-			mp = *promvec->pv_v0mem.v0_physavail;
-			break;
-
-		case MEMARR_TOTALPHYS:
-			mp = *promvec->pv_v0mem.v0_phystot;
-			break;
-
-		default:
-			panic("makememarr");
-		}
-		for (i = 0; mp != NULL; mp = mp->next, i++) {
-			if (i >= max)
-				goto overflow;
-			ap->addr = (u_int)mp->addr;
+		for (n = 0; mp != NULL; mp = mp->next, n++) {
+			if (ap == NULL || n >= xmax)
+				continue;
+			ap->addr_hi = 0;
+			ap->addr_lo = (uint32_t)mp->addr;
 			ap->len = mp->nbytes;
 			ap++;
 		}
 		break;
-
 	default:
 		printf("makememarr: hope version %d PROM is like version 2\n",
-		    i);
+		    n);
 		/* FALLTHROUGH */
-
-        case 3:
+	case 3:
 	case 2:
 		/*
 		 * Version 2 PROMs use a property array to describe them.
 		 */
-		if (max > MAXMEMINFO) {
-			printf("makememarr: limited to %d\n", MAXMEMINFO);
-			max = MAXMEMINFO;
-		}
 		if ((node = findnode(firstchild(findroot()), "memory")) == 0)
 			panic("makememarr: cannot find \"memory\" node");
-		switch (which) {
-
-		case MEMARR_AVAILPHYS:
-			prop = "available";
-			break;
-
-		case MEMARR_TOTALPHYS:
-			prop = "reg";
-			break;
-
-		default:
-			panic("makememarr");
-		}
-		len = getprop(node, prop, (void *)v2rmi, sizeof v2rmi) /
-		    sizeof(struct v2rmi);
-		for (i = 0; i < len; i++) {
-			if (i >= max)
-				goto overflow;
-			ap->addr = v2rmi[i].addr;
-			ap->len = v2rmi[i].len;
-			ap++;
+		prop = which == MEMARR_AVAILPHYS ? "available" : "reg";
+		n = getproplen(node, prop) / sizeof(struct memarr);
+		if (ap != NULL) {
+			if (getprop(node, prop, ap,
+			    xmax * sizeof(struct memarr)) <= 0)
+				panic("makememarr: cannot get property");
 		}
 		break;
 	}
 
-	/*
-	 * Success!  (Hooray)
-	 */
-	if (i == 0)
+	if (n <= 0)
 		panic("makememarr: no memory found");
-	return (i);
-
-overflow:
-	/*
-	 * Oops, there are more things in the PROM than our caller
-	 * provided space for.  Truncate any extras.
-	 */
-	printf("makememarr: WARNING: lost some memory\n");
-	return (i);
-#endif
+	return (n);
+#endif	/* SUN4C || SUN4D || SUN4E || SUN4M */
 }
 
 /*
@@ -1507,7 +1530,7 @@ getprop(node, name, buf, bufsiz)
 	void *buf;
 	register int bufsiz;
 {
-#if defined(SUN4C) || defined(SUN4M)
+#if defined(SUN4C) || defined(SUN4D) || defined(SUN4E) || defined(SUN4M)
 	register struct nodeops *no;
 	register int len;
 #endif
@@ -1519,7 +1542,7 @@ getprop(node, name, buf, bufsiz)
 	}
 #endif
 
-#if defined(SUN4C) || defined(SUN4M)
+#if defined(SUN4C) || defined(SUN4D) || defined(SUN4E) || defined(SUN4M)
 	no = promvec->pv_nodeops;
 	len = no->no_proplen(node, name);
 	if (len > bufsiz) {
@@ -1709,7 +1732,7 @@ romgetcursoraddr(rowp, colp)
 void
 romhalt()
 {
-	if (CPU_ISSUN4COR4M)
+	if (!CPU_ISSUN4)
 		*promvec->pv_synchook = NULL;
 
 	promvec->pv_halt();
@@ -1720,7 +1743,7 @@ void
 romboot(str)
 	char *str;
 {
-	if (CPU_ISSUN4COR4M)
+	if (!CPU_ISSUN4)
 		*promvec->pv_synchook = NULL;
 
 	promvec->pv_reboot(str);
@@ -1757,8 +1780,8 @@ device_register(struct device *dev, void *aux)
 	/*
 	 * scsi: sd,cd
 	 */
-	if (strncmp("sd", dev->dv_xname, 2) == 0 ||
-	    strncmp("cd", dev->dv_xname, 2) == 0) {
+	if (strcmp("sd", dev->dv_cfdata->cf_driver->cd_name) == 0 ||
+	    strcmp("cd", dev->dv_cfdata->cf_driver->cd_name) == 0) {
 		struct scsi_attach_args *sa = aux;
 		struct scsibus_softc *sbsc;
 		int target, lun;
@@ -1770,14 +1793,14 @@ device_register(struct device *dev, void *aux)
 
 #if defined(SUN4)
 		if (CPU_ISSUN4 && dev->dv_xname[0] == 's' &&
-		    target == 0 && sbsc->sc_link[0][0] == NULL) {
+		    target == 0 && scsi_get_link(sbsc, 0, 0) == NULL) {
 			/*
 			 * disk unit 0 is magic: if there is actually no
 			 * target 0 scsi device, the PROM will call
 			 * target 3 `sd0'.
 			 * XXX - what if someone puts a tape at target 0?
 			 */
-			/* Note that sc_link[0][0] will be NULL when we are
+			/* Note that sbsc:0:0 will be NULL when we are
 			 * invoked to match the device for target 0, if it
 			 * exists. But then the attachment args will have
 			 * its own target set to zero. It this case, skip
@@ -1790,8 +1813,8 @@ device_register(struct device *dev, void *aux)
 		}
 #endif
 
-#if defined(SUN4C)
-		if (CPU_ISSUN4C && dev->dv_xname[0] == 's')
+#if defined(SUN4C) || defined(SUN4E)
+		if ((CPU_ISSUN4C || CPU_ISSUN4E) && dev->dv_xname[0] == 's')
 			target = sd_crazymap(target);
 #endif
 

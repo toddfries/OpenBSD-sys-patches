@@ -1,8 +1,9 @@
-/* $OpenBSD: softraid_crypto.c,v 1.32 2008/11/25 23:05:17 marco Exp $ */
+/* $OpenBSD: softraid_crypto.c,v 1.57 2010/09/27 19:49:43 thib Exp $ */
 /*
  * Copyright (c) 2007 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Hans-Joerg Hoexer <hshoexer@openbsd.org>
  * Copyright (c) 2008 Damien Miller <djm@mindrot.org>
+ * Copyright (c) 2009 Joel Sing <jsing@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -38,6 +39,7 @@
 #include <sys/stat.h>
 #include <sys/conf.h>
 #include <sys/uio.h>
+#include <sys/dkio.h>
 
 #include <crypto/cryptodev.h>
 #include <crypto/cryptosoft.h>
@@ -55,25 +57,183 @@
 #include <dev/rndvar.h>
 
 struct cryptop	*sr_crypto_getcryptop(struct sr_workunit *, int);
-int		 sr_crypto_create_keys(struct sr_discipline *);
+int		sr_crypto_create_keys(struct sr_discipline *);
 void		*sr_crypto_putcryptop(struct cryptop *);
-int		 sr_crypto_get_kdf(struct bioc_createraid *,
-		     struct sr_discipline *);
-int		 sr_crypto_decrypt_key(struct sr_discipline *);
-int		 sr_crypto_alloc_resources(struct sr_discipline *);
-int		 sr_crypto_free_resources(struct sr_discipline *);
-int		 sr_crypto_write(struct cryptop *);
-int		 sr_crypto_rw(struct sr_workunit *);
-int		 sr_crypto_rw2(struct sr_workunit *, struct cryptop *);
-void		 sr_crypto_intr(struct buf *);
-int		 sr_crypto_read(struct cryptop *);
-void		 sr_crypto_finish_io(struct sr_workunit *);
-void		 sr_crypto_calculate_check_hmac_sha1(struct sr_discipline *,
-		    u_char[SHA1_DIGEST_LENGTH]);
+int		sr_crypto_get_kdf(struct bioc_createraid *,
+		    struct sr_discipline *);
+int		sr_crypto_decrypt(u_char *, u_char *, u_char *, size_t, int);
+int		sr_crypto_encrypt(u_char *, u_char *, u_char *, size_t, int);
+int		sr_crypto_decrypt_key(struct sr_discipline *);
+int		sr_crypto_change_maskkey(struct sr_discipline *,
+		    struct sr_crypto_kdfinfo *, struct sr_crypto_kdfinfo *);
+int		sr_crypto_create(struct sr_discipline *,
+		    struct bioc_createraid *, int, int64_t);
+int		sr_crypto_assemble(struct sr_discipline *,
+		    struct bioc_createraid *, int);
+int		sr_crypto_alloc_resources(struct sr_discipline *);
+int		sr_crypto_free_resources(struct sr_discipline *);
+int		sr_crypto_ioctl(struct sr_discipline *,
+		    struct bioc_discipline *);
+int		sr_crypto_meta_opt_load(struct sr_discipline *,
+		    struct sr_meta_opt *);
+int		sr_crypto_write(struct cryptop *);
+int		sr_crypto_rw(struct sr_workunit *);
+int		sr_crypto_rw2(struct sr_workunit *, struct cryptop *);
+void		sr_crypto_intr(struct buf *);
+int		sr_crypto_read(struct cryptop *);
+void		sr_crypto_finish_io(struct sr_workunit *);
+void		sr_crypto_calculate_check_hmac_sha1(u_int8_t *, int,
+		   u_int8_t *, int, u_char *);
+void		sr_crypto_hotplug(struct sr_discipline *, struct disk *, int);
 
 #ifdef SR_DEBUG0
 void		 sr_crypto_dumpkeys(struct sr_discipline *);
 #endif
+
+/* Discipline initialisation. */
+void
+sr_crypto_discipline_init(struct sr_discipline *sd)
+{
+	int i;
+
+	/* Fill out discipline members. */
+	sd->sd_type = SR_MD_CRYPTO;
+	sd->sd_capabilities = SR_CAP_SYSTEM_DISK;
+	sd->sd_max_wu = SR_CRYPTO_NOWU;
+
+	for (i = 0; i < SR_CRYPTO_MAXKEYS; i++)
+		sd->mds.mdd_crypto.scr_sid[i] = (u_int64_t)-1;
+
+	/* Setup discipline pointers. */
+	sd->sd_create = sr_crypto_create;
+	sd->sd_assemble = sr_crypto_assemble;
+	sd->sd_alloc_resources = sr_crypto_alloc_resources;
+	sd->sd_free_resources = sr_crypto_free_resources;
+	sd->sd_start_discipline = NULL;
+	sd->sd_ioctl_handler = sr_crypto_ioctl;
+	sd->sd_meta_opt_load = sr_crypto_meta_opt_load;
+	sd->sd_scsi_inquiry = sr_raid_inquiry;
+	sd->sd_scsi_read_cap = sr_raid_read_cap;
+	sd->sd_scsi_tur = sr_raid_tur;
+	sd->sd_scsi_req_sense = sr_raid_request_sense;
+	sd->sd_scsi_start_stop = sr_raid_start_stop;
+	sd->sd_scsi_sync = sr_raid_sync;
+	sd->sd_scsi_rw = sr_crypto_rw;
+	/* XXX reuse raid 1 functions for now FIXME */
+	sd->sd_set_chunk_state = sr_raid1_set_chunk_state;
+	sd->sd_set_vol_state = sr_raid1_set_vol_state;
+}
+
+int
+sr_crypto_create(struct sr_discipline *sd, struct bioc_createraid *bc,
+    int no_chunk, int64_t coerced_size)
+{
+	struct sr_meta_opt_item	*omi;
+	int			rv = EINVAL;
+
+	if (no_chunk != 1)
+		goto done;
+
+	/* Create crypto optional metadata. */
+	omi = malloc(sizeof(struct sr_meta_opt_item), M_DEVBUF,
+	    M_WAITOK | M_ZERO);
+	omi->omi_om.somi.som_type = SR_OPT_CRYPTO;
+	SLIST_INSERT_HEAD(&sd->sd_meta_opt, omi, omi_link);
+	sd->mds.mdd_crypto.scr_meta = &omi->omi_om.somi.som_meta.smm_crypto;
+	sd->sd_meta->ssdi.ssd_opt_no++;
+
+	sd->mds.mdd_crypto.key_disk = NULL;
+
+	if (bc->bc_key_disk != NODEV) {
+
+		/* Create a key disk. */
+		if (sr_crypto_get_kdf(bc, sd))
+			goto done;
+		sd->mds.mdd_crypto.key_disk =
+		    sr_crypto_create_key_disk(sd, bc->bc_key_disk);
+		if (sd->mds.mdd_crypto.key_disk == NULL)
+			goto done;
+		sd->sd_capabilities |= SR_CAP_AUTO_ASSEMBLE;
+
+	} else if (bc->bc_opaque_flags & BIOC_SOOUT) {
+
+		/* No hint available yet. */
+		bc->bc_opaque_status = BIOC_SOINOUT_FAILED;
+		rv = EAGAIN;
+		goto done;
+
+	} else if (sr_crypto_get_kdf(bc, sd))
+		goto done;
+ 
+	/* Passphrase volumes cannot be automatically assembled. */
+	if (!(bc->bc_flags & BIOC_SCNOAUTOASSEMBLE) && bc->bc_key_disk == NODEV)
+		goto done;
+ 
+	strlcpy(sd->sd_name, "CRYPTO", sizeof(sd->sd_name));
+	sd->sd_meta->ssdi.ssd_size = coerced_size;
+
+	sr_crypto_create_keys(sd);
+
+	sd->sd_max_ccb_per_wu = no_chunk;
+
+	rv = 0;
+done:
+	return (rv);
+}
+
+int
+sr_crypto_assemble(struct sr_discipline *sd, struct bioc_createraid *bc,
+    int no_chunk)
+{
+	int	rv = EINVAL;
+
+	sd->mds.mdd_crypto.key_disk = NULL;
+
+	/* Crypto optional metadata must already exist... */
+	if (sd->mds.mdd_crypto.scr_meta == NULL)
+		goto done;
+
+	if (bc->bc_key_disk != NODEV) {
+
+		/* Read the mask key from the key disk. */
+		sd->mds.mdd_crypto.key_disk =
+		    sr_crypto_read_key_disk(sd, bc->bc_key_disk);
+		if (sd->mds.mdd_crypto.key_disk == NULL)
+			goto done;
+
+	} else if (bc->bc_opaque_flags & BIOC_SOOUT) {
+
+		/* provide userland with kdf hint */
+		if (bc->bc_opaque == NULL)
+			goto done;
+
+		if (sizeof(sd->mds.mdd_crypto.scr_meta->scm_kdfhint) <
+		    bc->bc_opaque_size)
+			goto done;
+
+		if (copyout(sd->mds.mdd_crypto.scr_meta->scm_kdfhint,
+		    bc->bc_opaque, bc->bc_opaque_size))
+			goto done;
+
+		/* we're done */
+		bc->bc_opaque_status = BIOC_SOINOUT_OK;
+		rv = EAGAIN;
+ 		goto done;
+
+	} else if (bc->bc_opaque_flags & BIOC_SOIN) {
+
+		/* get kdf with maskkey from userland */
+		if (sr_crypto_get_kdf(bc, sd))
+			goto done;
+
+	}
+
+	sd->sd_max_ccb_per_wu = sd->sd_meta->ssdi.ssd_chunk_no;
+
+	rv = 0;
+done:
+	return (rv);
+}
 
 struct cryptop *
 sr_crypto_getcryptop(struct sr_workunit *wu, int encrypt)
@@ -91,10 +251,10 @@ sr_crypto_getcryptop(struct sr_workunit *wu, int encrypt)
 	    DEVNAME(sd->sd_sc), wu, encrypt);
 
 	s = splbio();
-	uio = pool_get(&sd->mds.mdd_crypto.sr_uiopl, PR_ZERO);
+	uio = pool_get(&sd->mds.mdd_crypto.sr_uiopl, PR_ZERO | PR_NOWAIT);
 	if (uio == NULL)
 		goto unwind;
-	uio->uio_iov = pool_get(&sd->mds.mdd_crypto.sr_iovpl, 0);
+	uio->uio_iov = pool_get(&sd->mds.mdd_crypto.sr_iovpl, PR_NOWAIT);
 	if (uio->uio_iov == NULL)
 		goto unwind;
 	splx(s);
@@ -104,6 +264,8 @@ sr_crypto_getcryptop(struct sr_workunit *wu, int encrypt)
 	if (xs->flags & SCSI_DATA_OUT) {
 		uio->uio_iov->iov_base = malloc(xs->datalen, M_DEVBUF,
 		    M_NOWAIT);
+		if (uio->uio_iov->iov_base == NULL)
+			goto unwind;
 		bcopy(xs->data, uio->uio_iov->iov_base, xs->datalen);
 	} else
 		uio->uio_iov->iov_base = xs->data;
@@ -125,7 +287,7 @@ sr_crypto_getcryptop(struct sr_workunit *wu, int encrypt)
 
 	/* Select crypto session based on block number */
 	keyndx = blk >> SR_CRYPTO_KEY_BLKSHIFT;
-	if (keyndx > SR_CRYPTO_MAXKEYS)
+	if (keyndx >= SR_CRYPTO_MAXKEYS)
 		goto unwind;
 	crp->crp_sid = sd->mds.mdd_crypto.scr_sid[keyndx];
 	if (crp->crp_sid == (u_int64_t)-1)
@@ -141,7 +303,7 @@ sr_crypto_getcryptop(struct sr_workunit *wu, int encrypt)
 		crd->crd_flags = flags;
 		crd->crd_alg = CRYPTO_AES_XTS;
 
-		switch (sd->mds.mdd_crypto.scr_meta.scm_alg) {
+		switch (sd->mds.mdd_crypto.scr_meta->scm_alg) {
 		case SR_CRYPTOA_AES_XTS_128:
 			crd->crd_klen = 256;
 			break;
@@ -159,8 +321,9 @@ sr_crypto_getcryptop(struct sr_workunit *wu, int encrypt)
 unwind:
 	if (crp)
 		crypto_freereq(crp);
-	if (wu->swu_xs->flags & SCSI_DATA_OUT)
-		free(uio->uio_iov->iov_base, M_DEVBUF);
+	if (uio && uio->uio_iov)
+		if (wu->swu_xs->flags & SCSI_DATA_OUT)
+			free(uio->uio_iov->iov_base, M_DEVBUF);
 
 	s = splbio();
 	if (uio && uio->uio_iov)
@@ -197,8 +360,8 @@ sr_crypto_putcryptop(struct cryptop *crp)
 int
 sr_crypto_get_kdf(struct bioc_createraid *bc, struct sr_discipline *sd)
 {
-	struct sr_crypto_kdfinfo	*kdfinfo;
-	int				 rv = EINVAL;
+	int			rv = EINVAL;
+	struct sr_crypto_kdfinfo *kdfinfo;
 
 	if (!(bc->bc_opaque_flags & BIOC_SOIN))
 		return (rv);
@@ -216,11 +379,11 @@ sr_crypto_get_kdf(struct bioc_createraid *bc, struct sr_discipline *sd)
 
 	/* copy KDF hint to disk meta data */
 	if (kdfinfo->flags & SR_CRYPTOKDF_HINT) {
-		if (sizeof(sd->mds.mdd_crypto.scr_meta.scm_kdfhint) <
+		if (sizeof(sd->mds.mdd_crypto.scr_meta->scm_kdfhint) <
 		    kdfinfo->genkdf.len)
 			goto out;
 		bcopy(&kdfinfo->genkdf,
-		    sd->mds.mdd_crypto.scr_meta.scm_kdfhint,
+		    sd->mds.mdd_crypto.scr_meta->scm_kdfhint,
 		    kdfinfo->genkdf.len);
 	}
 
@@ -242,13 +405,65 @@ out:
 	return (rv);
 }
 
-void
-sr_crypto_calculate_check_hmac_sha1(struct sr_discipline *sd,
-    u_char check_digest[SHA1_DIGEST_LENGTH])
+int
+sr_crypto_encrypt(u_char *p, u_char *c, u_char *key, size_t size, int alg)
 {
-	u_char		check_key[SHA1_DIGEST_LENGTH];
-	HMAC_SHA1_CTX	hmacctx;
-	SHA1_CTX	shactx;
+	rijndael_ctx		ctx;
+	int			i, rv = 1;
+
+	switch (alg) {
+	case SR_CRYPTOM_AES_ECB_256:
+		if (rijndael_set_key_enc_only(&ctx, key, 256) != 0)
+			goto out;
+		for (i = 0; i < size; i += RIJNDAEL128_BLOCK_LEN)
+			rijndael_encrypt(&ctx, &p[i], &c[i]);
+		rv = 0;
+		break;
+	default:
+		DNPRINTF(SR_D_DIS, "%s: unsupported encryption algorithm %u\n",
+		    "softraid", alg);
+		rv = -1;
+		goto out;
+	}
+
+out:
+	bzero(&ctx, sizeof(ctx));
+	return (rv);
+}
+
+int
+sr_crypto_decrypt(u_char *c, u_char *p, u_char *key, size_t size, int alg)
+{
+	rijndael_ctx		ctx;
+	int			i, rv = 1;
+
+	switch (alg) {
+	case SR_CRYPTOM_AES_ECB_256:
+		if (rijndael_set_key(&ctx, key, 256) != 0)
+			goto out;
+		for (i = 0; i < size; i += RIJNDAEL128_BLOCK_LEN)
+			rijndael_decrypt(&ctx, &c[i], &p[i]);
+		rv = 0;
+		break;
+	default:
+		DNPRINTF(SR_D_DIS, "%s: unsupported encryption algorithm %u\n",
+		    "softraid", alg);
+		rv = -1;
+		goto out;
+	}
+
+out:
+	bzero(&ctx, sizeof(ctx));
+	return (rv);
+}
+
+void
+sr_crypto_calculate_check_hmac_sha1(u_int8_t *maskkey, int maskkey_size,
+    u_int8_t *key, int key_size, u_char *check_digest)
+{
+	u_char			check_key[SHA1_DIGEST_LENGTH];
+	HMAC_SHA1_CTX		hmacctx;
+	SHA1_CTX		shactx;
 
 	bzero(check_key, sizeof(check_key));
 	bzero(&hmacctx, sizeof(hmacctx));
@@ -256,14 +471,12 @@ sr_crypto_calculate_check_hmac_sha1(struct sr_discipline *sd,
 
 	/* k = SHA1(mask_key) */
 	SHA1Init(&shactx);
-	SHA1Update(&shactx, sd->mds.mdd_crypto.scr_maskkey,
-	    sizeof(sd->mds.mdd_crypto.scr_maskkey));
+	SHA1Update(&shactx, maskkey, maskkey_size);
 	SHA1Final(check_key, &shactx);
 
-	/* sch_mac = HMAC_SHA1_k(unencrypted scm_key) */
+	/* mac = HMAC_SHA1_k(unencrypted key) */
 	HMAC_SHA1_Init(&hmacctx, check_key, sizeof(check_key));
-	HMAC_SHA1_Update(&hmacctx, (u_int8_t *)sd->mds.mdd_crypto.scr_key,
-	    sizeof(sd->mds.mdd_crypto.scr_key));
+	HMAC_SHA1_Update(&hmacctx, key, key_size);
 	HMAC_SHA1_Final(check_digest, &hmacctx);
 
 	bzero(check_key, sizeof(check_key));
@@ -274,66 +487,51 @@ sr_crypto_calculate_check_hmac_sha1(struct sr_discipline *sd,
 int
 sr_crypto_decrypt_key(struct sr_discipline *sd)
 {
-	rijndael_ctx	 ctx;
-	u_char		*p, *c;
-	size_t		 ksz;
-	int		 i, rv = 1;
-	u_char		check_digest[SHA1_DIGEST_LENGTH];
+	u_char			check_digest[SHA1_DIGEST_LENGTH];
+	int			rv = 1;
 
 	DNPRINTF(SR_D_DIS, "%s: sr_crypto_decrypt_key\n", DEVNAME(sd->sd_sc));
 
-	if (sd->mds.mdd_crypto.scr_meta.scm_check_alg != SR_CRYPTOC_HMAC_SHA1)
+	if (sd->mds.mdd_crypto.scr_meta->scm_check_alg != SR_CRYPTOC_HMAC_SHA1)
 		goto out;
 
-	c = (u_char *)sd->mds.mdd_crypto.scr_meta.scm_key;
-	p = (u_char *)sd->mds.mdd_crypto.scr_key;
-	ksz = sizeof(sd->mds.mdd_crypto.scr_key);
-
-	switch (sd->mds.mdd_crypto.scr_meta.scm_mask_alg) {
-	case SR_CRYPTOM_AES_ECB_256:
-		if (rijndael_set_key(&ctx, sd->mds.mdd_crypto.scr_maskkey,
-		    256) != 0)
-			goto out;
-		for (i = 0; i < ksz; i += RIJNDAEL128_BLOCK_LEN)
-			rijndael_decrypt(&ctx, &c[i], &p[i]);
-		break;
-	default:
-		DNPRINTF(SR_D_DIS, "%s: unsuppored scm_mask_alg %u\n",
-		    DEVNAME(sd->sd_sc),
-		    sd->mds.mdd_crypto.scr_meta.scm_mask_alg);
+	if (sr_crypto_decrypt((u_char *)sd->mds.mdd_crypto.scr_meta->scm_key,
+	    (u_char *)sd->mds.mdd_crypto.scr_key,
+	    sd->mds.mdd_crypto.scr_maskkey, sizeof(sd->mds.mdd_crypto.scr_key),
+	    sd->mds.mdd_crypto.scr_meta->scm_mask_alg) == -1)
 		goto out;
-	}
+
 #ifdef SR_DEBUG0
 	sr_crypto_dumpkeys(sd);
 #endif
 
-	/* Check that the key decrypted properly */
-	sr_crypto_calculate_check_hmac_sha1(sd, check_digest);
-	if (memcmp(sd->mds.mdd_crypto.scr_meta.chk_hmac_sha1.sch_mac,
+	/* Check that the key decrypted properly. */
+	sr_crypto_calculate_check_hmac_sha1(sd->mds.mdd_crypto.scr_maskkey,
+	    sizeof(sd->mds.mdd_crypto.scr_maskkey),
+	    (u_int8_t *)sd->mds.mdd_crypto.scr_key,
+	    sizeof(sd->mds.mdd_crypto.scr_key),
+	    check_digest);
+	if (memcmp(sd->mds.mdd_crypto.scr_meta->chk_hmac_sha1.sch_mac,
 	    check_digest, sizeof(check_digest)) != 0) {
 		bzero(sd->mds.mdd_crypto.scr_key,
 		    sizeof(sd->mds.mdd_crypto.scr_key));
-		bzero(check_digest, sizeof(check_digest));
 		goto out;
 	}
-	bzero(check_digest, sizeof(check_digest));
 
 	rv = 0; /* Success */
- out:
+out:
 	/* we don't need the mask key anymore */
 	bzero(&sd->mds.mdd_crypto.scr_maskkey,
 	    sizeof(sd->mds.mdd_crypto.scr_maskkey));
-	bzero(&ctx, sizeof(ctx));
+	
+	bzero(check_digest, sizeof(check_digest));
+
 	return rv;
 }
 
 int
 sr_crypto_create_keys(struct sr_discipline *sd)
 {
-	rijndael_ctx	 ctx;
-	u_char		*p, *c;
-	size_t		 ksz;
-	int		 i;
 
 	DNPRINTF(SR_D_DIS, "%s: sr_crypto_create_keys\n",
 	    DEVNAME(sd->sd_sc));
@@ -342,52 +540,410 @@ sr_crypto_create_keys(struct sr_discipline *sd)
 		return (1);
 
 	/* XXX allow user to specify */
-	sd->mds.mdd_crypto.scr_meta.scm_alg = SR_CRYPTOA_AES_XTS_256;
+	sd->mds.mdd_crypto.scr_meta->scm_alg = SR_CRYPTOA_AES_XTS_256;
 
 	/* generate crypto keys */
 	arc4random_buf(sd->mds.mdd_crypto.scr_key,
 	    sizeof(sd->mds.mdd_crypto.scr_key));
 
-	/* Mask the disk keys */
-	sd->mds.mdd_crypto.scr_meta.scm_mask_alg = SR_CRYPTOM_AES_ECB_256;
-	if (rijndael_set_key_enc_only(&ctx, sd->mds.mdd_crypto.scr_maskkey,
-	    256) != 0) {
-		bzero(sd->mds.mdd_crypto.scr_key,
-		    sizeof(sd->mds.mdd_crypto.scr_key));
-		bzero(&ctx, sizeof(ctx));
-		return (1);
-	}
-	p = (u_char *)sd->mds.mdd_crypto.scr_key;
-	c = (u_char *)sd->mds.mdd_crypto.scr_meta.scm_key;
-	ksz = sizeof(sd->mds.mdd_crypto.scr_key);
-	for (i = 0; i < ksz; i += RIJNDAEL128_BLOCK_LEN)
-		rijndael_encrypt(&ctx, &p[i], &c[i]);
-	bzero(&ctx, sizeof(ctx));
+	/* Mask the disk keys. */
+	sd->mds.mdd_crypto.scr_meta->scm_mask_alg = SR_CRYPTOM_AES_ECB_256;
+	sr_crypto_encrypt((u_char *)sd->mds.mdd_crypto.scr_key,
+	    (u_char *)sd->mds.mdd_crypto.scr_meta->scm_key,
+	    sd->mds.mdd_crypto.scr_maskkey, sizeof(sd->mds.mdd_crypto.scr_key),
+	    sd->mds.mdd_crypto.scr_meta->scm_mask_alg);
 
-	/* Prepare key decryption check code */
-	sd->mds.mdd_crypto.scr_meta.scm_check_alg = SR_CRYPTOC_HMAC_SHA1;
-	sr_crypto_calculate_check_hmac_sha1(sd,
-	    sd->mds.mdd_crypto.scr_meta.chk_hmac_sha1.sch_mac);
+	/* Prepare key decryption check code. */
+	sd->mds.mdd_crypto.scr_meta->scm_check_alg = SR_CRYPTOC_HMAC_SHA1;
+	sr_crypto_calculate_check_hmac_sha1(sd->mds.mdd_crypto.scr_maskkey,
+	    sizeof(sd->mds.mdd_crypto.scr_maskkey),
+	    (u_int8_t *)sd->mds.mdd_crypto.scr_key,
+	    sizeof(sd->mds.mdd_crypto.scr_key),
+	    sd->mds.mdd_crypto.scr_meta->chk_hmac_sha1.sch_mac);
 
 	/* Erase the plaintext disk keys */
 	bzero(sd->mds.mdd_crypto.scr_key, sizeof(sd->mds.mdd_crypto.scr_key));
-
 
 #ifdef SR_DEBUG0
 	sr_crypto_dumpkeys(sd);
 #endif
 
-	sd->mds.mdd_crypto.scr_meta.scm_flags = SR_CRYPTOF_KEY |
+	sd->mds.mdd_crypto.scr_meta->scm_flags = SR_CRYPTOF_KEY |
 	    SR_CRYPTOF_KDFHINT;
 
 	return (0);
 }
 
 int
+sr_crypto_change_maskkey(struct sr_discipline *sd,
+  struct sr_crypto_kdfinfo *kdfinfo1, struct sr_crypto_kdfinfo *kdfinfo2)
+{
+	u_char			check_digest[SHA1_DIGEST_LENGTH];
+	u_char			*c, *p = NULL;
+	size_t			ksz;
+	int			rv = 1;
+
+	DNPRINTF(SR_D_DIS, "%s: sr_crypto_change_maskkey\n",
+	    DEVNAME(sd->sd_sc));
+
+	if (sd->mds.mdd_crypto.scr_meta->scm_check_alg != SR_CRYPTOC_HMAC_SHA1)
+		goto out;
+
+	c = (u_char *)sd->mds.mdd_crypto.scr_meta->scm_key;
+	ksz = sizeof(sd->mds.mdd_crypto.scr_key);
+	p = malloc(ksz, M_DEVBUF, M_WAITOK | M_ZERO);
+	if (p == NULL)
+		goto out;
+
+	if (sr_crypto_decrypt(c, p, kdfinfo1->maskkey, ksz,
+	    sd->mds.mdd_crypto.scr_meta->scm_mask_alg) == -1)
+		goto out;
+
+#ifdef SR_DEBUG0
+	sr_crypto_dumpkeys(sd);
+#endif
+
+	sr_crypto_calculate_check_hmac_sha1(kdfinfo1->maskkey,
+	    sizeof(kdfinfo1->maskkey), p, ksz, check_digest);
+	if (memcmp(sd->mds.mdd_crypto.scr_meta->chk_hmac_sha1.sch_mac,
+	    check_digest, sizeof(check_digest)) != 0) {
+		rv = EPERM;
+		goto out;
+	}
+
+	/* Mask the disk keys. */
+	c = (u_char *)sd->mds.mdd_crypto.scr_meta->scm_key;
+	if (sr_crypto_encrypt(p, c, kdfinfo2->maskkey, ksz,
+	    sd->mds.mdd_crypto.scr_meta->scm_mask_alg) == -1)
+		goto out;
+
+	/* Prepare key decryption check code. */
+	sd->mds.mdd_crypto.scr_meta->scm_check_alg = SR_CRYPTOC_HMAC_SHA1;
+	sr_crypto_calculate_check_hmac_sha1(kdfinfo2->maskkey,
+	    sizeof(kdfinfo2->maskkey), (u_int8_t *)sd->mds.mdd_crypto.scr_key,
+	    sizeof(sd->mds.mdd_crypto.scr_key), check_digest);
+
+	/* Copy new encrypted key and HMAC to metadata. */
+	bcopy(check_digest, sd->mds.mdd_crypto.scr_meta->chk_hmac_sha1.sch_mac,
+	    sizeof(sd->mds.mdd_crypto.scr_meta->chk_hmac_sha1.sch_mac));
+
+	rv = 0; /* Success */
+
+out:
+	if (p) {
+		bzero(p, ksz);
+		free(p, M_DEVBUF);
+	}
+
+	bzero(check_digest, sizeof(check_digest));
+	bzero(&kdfinfo1->maskkey, sizeof(kdfinfo1->maskkey));
+	bzero(&kdfinfo2->maskkey, sizeof(kdfinfo2->maskkey));
+
+	return (rv);
+}
+
+struct sr_chunk *
+sr_crypto_create_key_disk(struct sr_discipline *sd, dev_t dev)
+{
+	struct sr_softc		*sc = sd->sd_sc;
+	struct sr_discipline	*fakesd = NULL;
+	struct sr_metadata	*sm = NULL;
+	struct sr_meta_chunk    *km;
+	struct sr_meta_opt_item *omi = NULL;
+	struct sr_chunk		*key_disk = NULL;
+	struct disklabel	label;
+	struct vnode		*vn;
+	char			devname[32];
+	int			c, part, open = 0;
+
+	/*
+	 * Create a metadata structure on the key disk and store
+	 * keying material in the optional metadata.
+	 */
+
+	sr_meta_getdevname(sc, dev, devname, sizeof(devname));
+
+	/* Make sure chunk is not already in use. */
+	c = sr_chunk_in_use(sc, dev);
+	if (c != BIOC_SDINVALID && c != BIOC_SDOFFLINE) {
+		printf("%s: %s is already in use\n", DEVNAME(sc), devname);
+		goto done;
+	}
+
+	/* Open device. */
+	if (bdevvp(dev, &vn)) {
+		printf("%s:, sr_create_key_disk: can't allocate vnode\n",
+		    DEVNAME(sc));
+		goto done;
+	}
+	if (VOP_OPEN(vn, FREAD | FWRITE, NOCRED, curproc)) {
+		DNPRINTF(SR_D_META,"%s: sr_create_key_disk cannot open %s\n",
+		    DEVNAME(sc), devname);
+		vput(vn);
+		goto fail;
+	}
+	open = 1; /* close dev on error */
+
+	/* Get partition details. */
+	part = DISKPART(dev);
+	if (VOP_IOCTL(vn, DIOCGDINFO, (caddr_t)&label,
+	    FREAD, NOCRED, curproc)) {
+		DNPRINTF(SR_D_META, "%s: sr_create_key_disk ioctl failed\n",
+		    DEVNAME(sc));
+		VOP_CLOSE(vn, FREAD | FWRITE, NOCRED, curproc);
+		vput(vn);
+		goto fail;
+	}
+	if (label.d_partitions[part].p_fstype != FS_RAID) {
+		printf("%s: %s partition not of type RAID (%d)\n",
+		    DEVNAME(sc), devname,
+		    label.d_partitions[part].p_fstype);
+		goto fail;
+	}
+
+	/*
+	 * Create and populate chunk metadata.
+	 */
+
+	key_disk = malloc(sizeof(struct sr_chunk), M_DEVBUF, M_WAITOK | M_ZERO);
+	km = &key_disk->src_meta;
+
+	key_disk->src_dev_mm = dev;
+	key_disk->src_vn = vn;
+	strlcpy(key_disk->src_devname, devname, sizeof(km->scmi.scm_devname));
+	key_disk->src_size = 0;
+
+	km->scmi.scm_volid = sd->sd_meta->ssdi.ssd_level;
+	km->scmi.scm_chunk_id = 0;
+	km->scmi.scm_size = 0;
+	km->scmi.scm_coerced_size = 0;
+	strlcpy(km->scmi.scm_devname, devname, sizeof(km->scmi.scm_devname));
+	bcopy(&sd->sd_meta->ssdi.ssd_uuid, &km->scmi.scm_uuid,
+	    sizeof(struct sr_uuid));
+
+	sr_checksum(sc, km, &km->scm_checksum,
+	    sizeof(struct sr_meta_chunk_invariant));
+
+	km->scm_status = BIOC_SDONLINE;
+
+	/*
+	 * Create and populate our own discipline and metadata.
+	 */
+
+	sm = malloc(sizeof(struct sr_metadata), M_DEVBUF, M_WAITOK | M_ZERO);
+	sm->ssdi.ssd_magic = SR_MAGIC;
+	sm->ssdi.ssd_version = SR_META_VERSION;
+	sm->ssd_ondisk = 0;
+	sm->ssdi.ssd_vol_flags = 0;
+	bcopy(&sd->sd_meta->ssdi.ssd_uuid, &sm->ssdi.ssd_uuid,
+	    sizeof(struct sr_uuid));
+	sm->ssdi.ssd_chunk_no = 1;
+	sm->ssdi.ssd_volid = SR_KEYDISK_VOLID;
+	sm->ssdi.ssd_level = SR_KEYDISK_LEVEL;
+	sm->ssdi.ssd_size = 0;
+	strlcpy(sm->ssdi.ssd_vendor, "OPENBSD", sizeof(sm->ssdi.ssd_vendor));
+	snprintf(sm->ssdi.ssd_product, sizeof(sm->ssdi.ssd_product),
+	    "SR %s", "KEYDISK");
+	snprintf(sm->ssdi.ssd_revision, sizeof(sm->ssdi.ssd_revision),
+	    "%03d", SR_META_VERSION);
+
+	fakesd = malloc(sizeof(struct sr_discipline), M_DEVBUF,
+	    M_WAITOK | M_ZERO);
+	fakesd->sd_sc = sd->sd_sc;
+	fakesd->sd_meta = sm;
+	fakesd->sd_meta_type = SR_META_F_NATIVE;
+	fakesd->sd_vol_status = BIOC_SVONLINE;
+	strlcpy(fakesd->sd_name, "KEYDISK", sizeof(fakesd->sd_name));
+	SLIST_INIT(&fakesd->sd_meta_opt);
+
+	/* Add chunk to volume. */
+	fakesd->sd_vol.sv_chunks = malloc(sizeof(struct sr_chunk *), M_DEVBUF,
+	    M_WAITOK | M_ZERO);
+	fakesd->sd_vol.sv_chunks[0] = key_disk;
+	SLIST_INIT(&fakesd->sd_vol.sv_chunk_list);
+	SLIST_INSERT_HEAD(&fakesd->sd_vol.sv_chunk_list, key_disk, src_link);
+
+	/* Generate mask key. */
+	arc4random_buf(sd->mds.mdd_crypto.scr_maskkey,
+	    sizeof(sd->mds.mdd_crypto.scr_maskkey));
+
+	/* Copy mask key to optional metadata area. */
+	sm->ssdi.ssd_opt_no = 1;
+	omi = malloc(sizeof(struct sr_meta_opt_item), M_DEVBUF,
+	    M_WAITOK | M_ZERO);
+	omi->omi_om.somi.som_type = SR_OPT_KEYDISK;
+	bcopy(sd->mds.mdd_crypto.scr_maskkey,
+	    omi->omi_om.somi.som_meta.smm_keydisk.skm_maskkey,
+	    sizeof(omi->omi_om.somi.som_meta.smm_keydisk.skm_maskkey));
+	SLIST_INSERT_HEAD(&fakesd->sd_meta_opt, omi, omi_link);
+
+	/* Save metadata. */
+	if (sr_meta_save(fakesd, SR_META_DIRTY)) {
+		printf("%s: could not save metadata to %s\n",
+		    DEVNAME(sc), devname);
+		goto fail;
+	}
+	
+	goto done;
+
+fail:
+	if (key_disk)
+		free(key_disk, M_DEVBUF);
+	key_disk = NULL;
+
+done:
+	if (omi)
+		free(omi, M_DEVBUF);
+	if (fakesd && fakesd->sd_vol.sv_chunks)
+		free(fakesd->sd_vol.sv_chunks, M_DEVBUF);
+	if (fakesd)
+		free(fakesd, M_DEVBUF);
+	if (sm)
+		free(sm, M_DEVBUF);
+	if (open) {
+		VOP_CLOSE(vn, FREAD | FWRITE, NOCRED, curproc);
+		vput(vn);
+	}
+
+	return key_disk;
+}
+
+struct sr_chunk *
+sr_crypto_read_key_disk(struct sr_discipline *sd, dev_t dev)
+{
+	struct sr_softc		*sc = sd->sd_sc;
+	struct sr_metadata	*sm = NULL;
+	struct sr_meta_opt      *om;
+	struct sr_chunk		*key_disk = NULL;
+	struct disklabel	label;
+	struct vnode		*vn = NULL;
+	char			devname[32];
+	int			c, part, open = 0;
+
+	/*
+	 * Load a key disk and load keying material into memory.
+	 */
+
+	sr_meta_getdevname(sc, dev, devname, sizeof(devname));
+
+	/* Make sure chunk is not already in use. */
+	c = sr_chunk_in_use(sc, dev);
+	if (c != BIOC_SDINVALID && c != BIOC_SDOFFLINE) {
+		printf("%s: %s is already in use\n", DEVNAME(sc), devname);
+		goto done;
+	}
+
+	/* Open device. */
+	if (bdevvp(dev, &vn)) {
+		printf("%s:, sr_create_key_disk: can't allocate vnode\n",
+		    DEVNAME(sc));
+		goto done;
+	}
+	if (VOP_OPEN(vn, FREAD | FWRITE, NOCRED, curproc)) {
+		DNPRINTF(SR_D_META,"%s: sr_create_key_disk cannot open %s\n",
+		    DEVNAME(sc), devname);
+		vput(vn);
+		goto done;
+	}
+	open = 1; /* close dev on error */
+
+	/* Get partition details. */
+	part = DISKPART(dev);
+	if (VOP_IOCTL(vn, DIOCGDINFO, (caddr_t)&label, FREAD,
+	    NOCRED, curproc)) {
+		DNPRINTF(SR_D_META, "%s: sr_create_key_disk ioctl failed\n",
+		    DEVNAME(sc));
+		VOP_CLOSE(vn, FREAD | FWRITE, NOCRED, curproc);
+		vput(vn);
+		goto done;
+	}
+	if (label.d_partitions[part].p_fstype != FS_RAID) {
+		printf("%s: %s partition not of type RAID (%d)\n",
+		    DEVNAME(sc), devname,
+		    label.d_partitions[part].p_fstype);
+		goto done;
+	}
+
+	/*
+	 * Read and validate key disk metadata.
+	 */
+	sm = malloc(SR_META_SIZE * 512, M_DEVBUF, M_NOWAIT|M_ZERO);
+	if (sm == NULL) {
+		printf("%s: not enough memory for metadata buffer\n",
+		    DEVNAME(sc));
+		goto done;
+	}
+
+	if (sr_meta_native_read(sd, dev, sm, NULL)) {
+		printf("%s: native bootprobe could not read native "
+		    "metadata\n", DEVNAME(sc));
+		goto done;
+	}
+
+	if (sr_meta_validate(sd, dev, sm, NULL)) {
+		DNPRINTF(SR_D_META, "%s: invalid metadata\n",
+ 		    DEVNAME(sc));
+		goto done;
+	}
+
+	/* Make sure this is a key disk. */
+	if (sm->ssdi.ssd_level != SR_KEYDISK_LEVEL) {
+		printf("%s: %s is not a key disk\n", DEVNAME(sc), devname);
+		goto done;
+	}
+
+	/* Construct key disk chunk. */
+	key_disk = malloc(sizeof(struct sr_chunk), M_DEVBUF, M_NOWAIT|M_ZERO);
+	if (key_disk == NULL) {
+		printf("%s: not enough memory for chunk\n",
+		    DEVNAME(sc));
+		goto done;
+	}
+
+	key_disk->src_dev_mm = dev;
+	key_disk->src_vn = vn;
+	key_disk->src_size = 0;
+
+	bcopy((struct sr_meta_chunk *)(sm + 1), &key_disk->src_meta,
+	    sizeof(key_disk->src_meta));
+
+	/* Read mask key from optional metadata. */
+	om = (struct sr_meta_opt *)((u_int8_t *)(sm + 1) +
+	    sizeof(struct sr_meta_chunk) * sm->ssdi.ssd_chunk_no);
+	for (c = 0; c < sm->ssdi.ssd_opt_no; c++) {
+		if (om->somi.som_type == SR_OPT_KEYDISK) {
+			bcopy(&om->somi.som_meta.smm_keydisk.skm_maskkey,
+			    sd->mds.mdd_crypto.scr_maskkey,
+			    sizeof(sd->mds.mdd_crypto.scr_maskkey));
+			break;
+		} else if (om->somi.som_type == SR_OPT_CRYPTO) {
+			bcopy(&om->somi.som_meta.smm_crypto,
+			    sd->mds.mdd_crypto.scr_maskkey,
+			    sizeof(sd->mds.mdd_crypto.scr_maskkey));
+			break;
+		}
+		om++;
+	}
+
+	open = 0;
+
+done:
+	if (sm)
+		free(sm, M_DEVBUF);
+
+	if (vn && open) {
+		VOP_CLOSE(vn, FREAD, NOCRED, curproc);
+		vput(vn);
+	}
+
+	return key_disk;
+}
+
+int
 sr_crypto_alloc_resources(struct sr_discipline *sd)
 {
 	struct cryptoini	cri;
-	u_int num_keys, i;
+	u_int			num_keys, i;
 
 	if (!sd)
 		return (EINVAL);
@@ -408,11 +964,11 @@ sr_crypto_alloc_resources(struct sr_discipline *sd)
 	if (sr_ccb_alloc(sd))
 		return (ENOMEM);
 	if (sr_crypto_decrypt_key(sd))
-		return (EPERM);	
+		return (EPERM);
 
 	bzero(&cri, sizeof(cri));
 	cri.cri_alg = CRYPTO_AES_XTS;
-	switch (sd->mds.mdd_crypto.scr_meta.scm_alg) {
+	switch (sd->mds.mdd_crypto.scr_meta->scm_alg) {
 	case SR_CRYPTOA_AES_XTS_128:
 		cri.cri_klen = 256;
 		break;
@@ -442,14 +998,16 @@ sr_crypto_alloc_resources(struct sr_discipline *sd)
 		}
 	}
 
+	sr_hotplug_register(sd, sr_crypto_hotplug);
+
 	return (0);
 }
 
 int
 sr_crypto_free_resources(struct sr_discipline *sd)
 {
-	int		rv = EINVAL;
-	u_int		i;
+	int			rv = EINVAL;
+	u_int			i;
 
 	if (!sd)
 		return (rv);
@@ -457,33 +1015,114 @@ sr_crypto_free_resources(struct sr_discipline *sd)
 	DNPRINTF(SR_D_DIS, "%s: sr_crypto_free_resources\n",
 	    DEVNAME(sd->sd_sc));
 
+	if (sd->mds.mdd_crypto.key_disk != NULL)
+		free(sd->mds.mdd_crypto.key_disk, M_DEVBUF);
+
+	sr_hotplug_unregister(sd, sr_crypto_hotplug);
+
 	for (i = 0; sd->mds.mdd_crypto.scr_sid[i] != (u_int64_t)-1; i++) {
-		crypto_freesession(
-		    sd->mds.mdd_crypto.scr_sid[i]);
+		crypto_freesession(sd->mds.mdd_crypto.scr_sid[i]);
 		sd->mds.mdd_crypto.scr_sid[i] = (u_int64_t)-1;
 	}
 
 	sr_wu_free(sd);
 	sr_ccb_free(sd);
 
-	pool_destroy(&sd->mds.mdd_crypto.sr_uiopl);
-	pool_destroy(&sd->mds.mdd_crypto.sr_iovpl);
+	if (sd->mds.mdd_crypto.sr_uiopl.pr_serial != 0)
+		pool_destroy(&sd->mds.mdd_crypto.sr_uiopl);
+	if (sd->mds.mdd_crypto.sr_iovpl.pr_serial != 0)
+		pool_destroy(&sd->mds.mdd_crypto.sr_iovpl);
 
 	rv = 0;
 	return (rv);
 }
 
 int
+sr_crypto_ioctl(struct sr_discipline *sd, struct bioc_discipline *bd)
+{
+	struct sr_crypto_kdfpair kdfpair;
+	struct sr_crypto_kdfinfo kdfinfo1, kdfinfo2;
+	int			size, rv = 1;
+
+	DNPRINTF(SR_D_IOCTL, "%s: sr_crypto_ioctl %u\n",
+	    DEVNAME(sd->sd_sc), bd->bd_cmd);
+
+	switch (bd->bd_cmd) {
+	case SR_IOCTL_GET_KDFHINT:
+
+		/* Get KDF hint for userland. */
+		size = sizeof(sd->mds.mdd_crypto.scr_meta->scm_kdfhint);
+		if (bd->bd_data == NULL || bd->bd_size > size)
+			goto bad;
+		if (copyout(sd->mds.mdd_crypto.scr_meta->scm_kdfhint,
+		    bd->bd_data, bd->bd_size))
+			goto bad;
+
+		rv = 0;
+
+		break;
+
+	case SR_IOCTL_CHANGE_PASSPHRASE:
+
+		/* Attempt to change passphrase. */
+
+		size = sizeof(kdfpair);
+		if (bd->bd_data == NULL || bd->bd_size > size)
+			goto bad;
+		if (copyin(bd->bd_data, &kdfpair, size))
+			goto bad;
+
+		size = sizeof(kdfinfo1);
+		if (kdfpair.kdfinfo1 == NULL || kdfpair.kdfsize1 > size)
+			goto bad;
+		if (copyin(kdfpair.kdfinfo1, &kdfinfo1, size))
+			goto bad;
+
+		size = sizeof(kdfinfo2);
+		if (kdfpair.kdfinfo2 == NULL || kdfpair.kdfsize2 > size)
+			goto bad;
+		if (copyin(kdfpair.kdfinfo2, &kdfinfo2, size))
+			goto bad;
+
+		if (sr_crypto_change_maskkey(sd, &kdfinfo1, &kdfinfo2))
+			goto bad;
+
+		/* Save metadata to disk. */
+		rv = sr_meta_save(sd, SR_META_DIRTY);
+
+		break;
+	}
+
+bad:
+	return (rv);
+}
+
+int
+sr_crypto_meta_opt_load(struct sr_discipline *sd, struct sr_meta_opt *om)
+{
+	int rv = EINVAL;
+
+	if (om->somi.som_type == SR_OPT_CRYPTO) {
+		sd->mds.mdd_crypto.scr_meta =  &om->somi.som_meta.smm_crypto;
+		rv = 0;
+	}
+	
+	return rv;
+}
+
+int
 sr_crypto_rw(struct sr_workunit *wu)
 {
 	struct cryptop		*crp;
-	int			 s, rv = 0;
+	int			s, rv = 0;
 
 	DNPRINTF(SR_D_DIS, "%s: sr_crypto_rw wu: %p\n",
 	    DEVNAME(wu->swu_dis->sd_sc), wu);
 
 	if (wu->swu_xs->flags & SCSI_DATA_OUT) {
 		crp = sr_crypto_getcryptop(wu, 1);
+		if (crp == NULL)
+			panic("sr_crypto_getcryptop");
 		crp->crp_callback = sr_crypto_write;
 		crp->crp_opaque = wu;
 		s = splvm();
@@ -501,7 +1140,7 @@ sr_crypto_rw(struct sr_workunit *wu)
 int
 sr_crypto_write(struct cryptop *crp)
 {
-	int		 	 s;
+	int			s;
 	struct sr_workunit	*wu = crp->crp_opaque;
 
 	DNPRINTF(SR_D_INTR, "%s: sr_crypto_write: wu %x xs: %x\n",
@@ -526,13 +1165,13 @@ sr_crypto_rw2(struct sr_workunit *wu, struct cryptop *crp)
 	struct scsi_xfer	*xs = wu->swu_xs;
 	struct sr_ccb		*ccb;
 	struct uio		*uio;
-	int			 s;
-	daddr64_t		 blk;
+	int			s;
+	daddr64_t		blk;
 
 	if (sr_validate_io(wu, &blk, "sr_crypto_rw2"))
 		goto bad;
 
-	blk += SR_META_SIZE + SR_META_OFFSET;
+	blk += sd->sd_meta->ssd_data_offset;
 
 	wu->swu_io_count = 1;
 
@@ -544,7 +1183,7 @@ sr_crypto_rw2(struct sr_workunit *wu, struct cryptop *crp)
 		goto bad;
 	}
 
-	ccb->ccb_buf.b_flags = B_CALL;
+	ccb->ccb_buf.b_flags = B_CALL | B_PHYS;
 	ccb->ccb_buf.b_iodone = sr_crypto_intr;
 	ccb->ccb_buf.b_blkno = blk;
 	ccb->ccb_buf.b_bcount = xs->datalen;
@@ -566,17 +1205,19 @@ sr_crypto_rw2(struct sr_workunit *wu, struct cryptop *crp)
 	ccb->ccb_wu = wu;
 	ccb->ccb_target = 0;
 	ccb->ccb_buf.b_dev = sd->sd_vol.sv_chunks[0]->src_dev_mm;
-	ccb->ccb_buf.b_vp = NULL;
+	ccb->ccb_buf.b_vp = sd->sd_vol.sv_chunks[0]->src_vn;
+	if ((ccb->ccb_buf.b_flags & B_READ) == 0)
+		ccb->ccb_buf.b_vp->v_numoutput++;
 
 	LIST_INIT(&ccb->ccb_buf.b_dep);
 
 	TAILQ_INSERT_TAIL(&wu->swu_ccb, ccb, ccb_link);
 
-        DNPRINTF(SR_D_DIS, "%s: %s: sr_crypto_rw2: b_bcount: %d "
-            "b_blkno: %x b_flags 0x%0x b_data %p\n",
-            DEVNAME(sd->sd_sc), sd->sd_meta->ssd_devname,
-            ccb->ccb_buf.b_bcount, ccb->ccb_buf.b_blkno,
-            ccb->ccb_buf.b_flags, ccb->ccb_buf.b_data);
+	DNPRINTF(SR_D_DIS, "%s: %s: sr_crypto_rw2: b_bcount: %d "
+	    "b_blkno: %x b_flags 0x%0x b_data %p\n",
+	    DEVNAME(sd->sd_sc), sd->sd_meta->ssd_devname,
+	    ccb->ccb_buf.b_bcount, ccb->ccb_buf.b_blkno,
+	    ccb->ccb_buf.b_flags, ccb->ccb_buf.b_data);
 
 	s = splbio();
 
@@ -604,16 +1245,16 @@ sr_crypto_intr(struct buf *bp)
 	struct scsi_xfer	*xs = wu->swu_xs;
 	struct sr_softc		*sc = sd->sd_sc;
 	struct cryptop		*crp;
-	int			 s, s2, pend;
+	int			s, s2, pend;
 
-        DNPRINTF(SR_D_INTR, "%s: sr_crypto_intr bp: %x xs: %x\n",
-            DEVNAME(sc), bp, wu->swu_xs);
+	DNPRINTF(SR_D_INTR, "%s: sr_crypto_intr bp: %x xs: %x\n",
+	    DEVNAME(sc), bp, wu->swu_xs);
 
-        DNPRINTF(SR_D_INTR, "%s: sr_crypto_intr: b_bcount: %d b_resid: %d"
-            " b_flags: 0x%0x\n", DEVNAME(sc), ccb->ccb_buf.b_bcount,
-            ccb->ccb_buf.b_resid, ccb->ccb_buf.b_flags);
+	DNPRINTF(SR_D_INTR, "%s: sr_crypto_intr: b_bcount: %d b_resid: %d"
+	    " b_flags: 0x%0x\n", DEVNAME(sc), ccb->ccb_buf.b_bcount,
+	    ccb->ccb_buf.b_resid, ccb->ccb_buf.b_flags);
 
-        s = splbio();
+	s = splbio();
 
 	if (ccb->ccb_buf.b_flags & B_ERROR) {
 		printf("%s: i/o error on block %lld\n", DEVNAME(sc),
@@ -663,6 +1304,8 @@ sr_crypto_intr(struct buf *bp)
 
 		if ((xs->flags & SCSI_DATA_IN) && (xs->error == XS_NOERROR)) {
 			crp = sr_crypto_getcryptop(wu, 0);
+			if (crp == NULL)
+				panic("sr_crypto_getcryptop");
 			ccb->ccb_opaque = crp;
 			crp->crp_callback = sr_crypto_read;
 			crp->crp_opaque = wu;
@@ -697,7 +1340,6 @@ sr_crypto_finish_io(struct sr_workunit *wu)
 	    DEVNAME(sc), wu, xs);
 
 	xs->resid = 0;
-	xs->flags |= ITSDONE;
 
 	TAILQ_FOREACH(ccb, &wu->swu_ccb, ccb_link) {
 		if (ccb->ccb_opaque == NULL)
@@ -716,7 +1358,7 @@ sr_crypto_finish_io(struct sr_workunit *wu)
 int
 sr_crypto_read(struct cryptop *crp)
 {
-	int			 s;
+	int			s;
 	struct sr_workunit	*wu = crp->crp_opaque;
 
 	DNPRINTF(SR_D_INTR, "%s: sr_crypto_read: wu %x xs: %x\n",
@@ -732,18 +1374,25 @@ sr_crypto_read(struct cryptop *crp)
 	return (0);
 }
 
+void
+sr_crypto_hotplug(struct sr_discipline *sd, struct disk *diskp, int action)
+{
+	DNPRINTF(SR_D_MISC, "%s: sr_crypto_hotplug: %s %d\n",
+	    DEVNAME(sd->sd_sc), diskp->dk_name, action);
+}
+
 #ifdef SR_DEBUG0
 void
 sr_crypto_dumpkeys(struct sr_discipline *sd)
 {
-	int	i, j;
+	int			i, j;
 
 	printf("sr_crypto_dumpkeys:\n");
 	for (i = 0; i < SR_CRYPTO_MAXKEYS; i++) {
 		printf("\tscm_key[%d]: 0x", i);
 		for (j = 0; j < SR_CRYPTO_KEYBYTES; j++) {
 			printf("%02x",
-			    sd->mds.mdd_crypto.scr_meta.scm_key[i][j]);
+			    sd->mds.mdd_crypto.scr_meta->scm_key[i][j]);
 		}
 		printf("\n");
 	}

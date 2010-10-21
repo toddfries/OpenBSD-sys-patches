@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_mmap.c,v 1.72 2009/03/20 15:19:04 oga Exp $	*/
+/*	$OpenBSD: uvm_mmap.c,v 1.80 2010/05/21 23:22:33 oga Exp $	*/
 /*	$NetBSD: uvm_mmap.c,v 1.49 2001/02/18 21:19:08 chs Exp $	*/
 
 /*
@@ -237,7 +237,7 @@ sys_mincore(struct proc *p, void *v, register_t *retval)
 		syscallarg(char *) vec;
 	} */ *uap = v;
 	vm_page_t m;
-	char *vec, pgi;
+	char *vec, *pgi, *pgs;
 	struct uvm_object *uobj;
 	struct vm_amap *amap;
 	struct vm_anon *anon;
@@ -245,7 +245,7 @@ sys_mincore(struct proc *p, void *v, register_t *retval)
 	vaddr_t start, end, lim;
 	vm_map_t map;
 	vsize_t len, npgs;
-	int error = 0;
+	int error = 0; 
 
 	map = &p->p_vmspace->vm_map;
 
@@ -263,11 +263,24 @@ sys_mincore(struct proc *p, void *v, register_t *retval)
 	npgs = len >> PAGE_SHIFT;
 
 	/*
+ 	 * < art> Anyone trying to mincore more than 4GB of address space is
+	 *	clearly insane.
+	 */
+	if (npgs >= (0xffffffff >> PAGE_SHIFT))
+		return (E2BIG);
+	pgs = malloc(sizeof(*pgs) * npgs, M_TEMP, M_WAITOK | M_CANFAIL);
+	if (pgs == NULL)
+		return (ENOMEM);
+	pgi = pgs;
+
+	/*
 	 * Lock down vec, so our returned status isn't outdated by
 	 * storing the status byte for a page.
 	 */
-	if ((error = uvm_vslock(p, vec, npgs, VM_PROT_WRITE)) != 0)
+	if ((error = uvm_vslock(p, vec, npgs, VM_PROT_WRITE)) != 0) {
+		free(pgs, M_TEMP);
 		return (error);
+	}
 
 	vm_map_lock_read(map);
 
@@ -298,12 +311,10 @@ sys_mincore(struct proc *p, void *v, register_t *retval)
 		 */
 		if (UVM_ET_ISOBJ(entry)) {
 			KASSERT(!UVM_OBJ_IS_KERN_OBJECT(entry->object.uvm_obj));
-			if (entry->object.uvm_obj->pgops->pgo_releasepg
-			    == NULL) {
-				pgi = 1;
+			if (entry->object.uvm_obj->pgops->pgo_fault != NULL) {
 				for (/* nothing */; start < lim;
-				     start += PAGE_SIZE, vec++)
-					copyout(&pgi, vec, sizeof(char));
+				     start += PAGE_SIZE, pgi++)
+					*pgi = 1;
 				continue;
 			}
 		}
@@ -314,8 +325,8 @@ sys_mincore(struct proc *p, void *v, register_t *retval)
 		if (uobj != NULL)
 			simple_lock(&uobj->vmobjlock);
 
-		for (/* nothing */; start < lim; start += PAGE_SIZE, vec++) {
-			pgi = 0;
+		for (/* nothing */; start < lim; start += PAGE_SIZE, pgi++) {
+			*pgi = 0;
 			if (amap != NULL) {
 				/* Check the top layer first. */
 				anon = amap_lookup(&entry->aref,
@@ -326,11 +337,11 @@ sys_mincore(struct proc *p, void *v, register_t *retval)
 					 * Anon has the page for this entry
 					 * offset.
 					 */
-					pgi = 1;
+					*pgi = 1;
 				}
 			}
 
-			if (uobj != NULL && pgi == 0) {
+			if (uobj != NULL && *pgi == 0) {
 				/* Check the bottom layer. */
 				m = uvm_pagelookup(uobj,
 				    entry->offset + (start - entry->start));
@@ -339,11 +350,9 @@ sys_mincore(struct proc *p, void *v, register_t *retval)
 					 * Object has the page for this entry
 					 * offset.
 					 */
-					pgi = 1;
+					*pgi = 1;
 				}
 			}
-
-			copyout(&pgi, vec, sizeof(char));
 		}
 
 		if (uobj != NULL)
@@ -353,6 +362,10 @@ sys_mincore(struct proc *p, void *v, register_t *retval)
  out:
 	vm_map_unlock_read(map);
 	uvm_vsunlock(p, SCARG(uap, vec), npgs);
+	/* now the map is unlocked we can copyout without fear. */
+	if (error == 0)
+		copyout(pgs, vec, npgs * sizeof(char));
+	free(pgs, M_TEMP);
 	return (error);
 }
 
@@ -743,7 +756,7 @@ sys_munmap(struct proc *p, void *v, register_t *retval)
 	/*
 	 * doit!
 	 */
-	uvm_unmap_remove(map, addr, addr + size, &dead_entries, p);
+	uvm_unmap_remove(map, addr, addr + size, &dead_entries, p, FALSE);
 
 	vm_map_unlock(map);	/* and unlock */
 
@@ -1138,7 +1151,7 @@ uvm_mmap(vm_map_t map, vaddr_t *addr, vsize_t size, vm_prot_t prot,
 			}
 #else
 			/* XXX for now, attach doesn't gain a ref */
-			VREF(vp);
+			vref(vp);
 #endif
 		} else {
 			uobj = udv_attach((void *) &vp->v_rdev,

@@ -56,6 +56,7 @@
 
 #define _ACPI_TRMP_LABEL(a) a = . - _C_LABEL(acpi_real_mode_resume) + ACPI_TRAMPOLINE
 #define _ACPI_TRMP_OFFSET(a) a = . - _C_LABEL(acpi_real_mode_resume)
+#define _ACPI_RM_SEGMENT (ACPI_TRAMPOLINE >> 4)
 
 /*
  * On wakeup, we'll start executing at acpi_real_mode_resume.
@@ -78,10 +79,11 @@
 
 	.text
 	.code16
-	.align 4,0
+	.align 4
 	.global _C_LABEL(acpi_real_mode_resume)
 	.global _C_LABEL(acpi_protected_mode_resume)
 	.global _C_LABEL(acpi_resume_end)
+	.global _C_LABEL(do_real_mode_post)
 _C_LABEL(acpi_real_mode_resume):
 	nop
 	cli
@@ -95,7 +97,9 @@ _C_LABEL(acpi_real_mode_resume):
 	 */
 	movw	%cs,%ax
 	movw	%ax,%ds
+	movw	%ax,%es
 	movw	%ax,%ss
+	lidtl	clean_idt
 
 	/*
 	 * Set up stack to grow down from offset 0x0FFE.
@@ -124,7 +128,8 @@ _C_LABEL(acpi_real_mode_resume):
 	 * laptops), we might not restore the proper VGA mode
 	 * on resume. Caveat emptor.
 	 */
-	jmp	nobiosreset	/* XXX make this a tunable */
+	cmpl	$0, do_real_mode_post_off
+	jz	nobiosreset
 	lcall	$0xc000,$3
 
 	/*
@@ -206,25 +211,6 @@ _C_LABEL(acpi_protected_mode_resume):
 	movl    %esi, %esp
 	addl    $0x0FFE, %esp
 
-	/*
-	 * Shortly, we'll restore the TSS for the task that was running
-	 * immediately before suspend occured. Since that task was the
-	 * running task, it's TSS busy flag will have been set. We need
-	 * to clear that bit (since we're effectively "restarting" the OS)
-	 * in order to convince the processor that the task is no longer
-	 * running (which is true, now). If we don't do this, when the 
-	 * OS resumes and resumes this task, it will assume we're trying
-	 * to recurse into an already active task, which would cause
-	 * a GP violation (and probably, a crash).
-	 *
-	 * We accomplish this by changing the TSS descriptor from
-	 * BUSY (0x0B) to AVAILABLE (0x09). We keep the other
-	 * high 4 bits intact. 
-	 */
-	movl	acpi_saved_gdt+2,%ebx
-	movzxw	acpi_saved_tr,%ecx
-	leal	(%ebx,%ecx),%eax
-	andb	$0xF9,5(%eax)
 
 	/*
 	 * Reset our page size extension (via restoring cr4) to what 
@@ -283,6 +269,29 @@ _C_LABEL(acpi_protected_mode_resume):
 	movw	acpi_saved_ds,%ax
 	movw	%ax,%ds
 
+	/*
+	 * Shortly, we'll restore the TSS for the task that was running
+	 * immediately before suspend occured. Since that task was the
+	 * running task, it's TSS busy flag will have been set. We need
+	 * to clear that bit (since we're effectively "restarting" the OS)
+	 * in order to convince the processor that the task is no longer
+	 * running (which is true, now). If we don't do this, when the 
+	 * OS resumes and resumes this task, it will assume we're trying
+	 * to recurse into an already active task, which would cause
+	 * a GP violation (and probably, a crash).
+	 *
+	 * We accomplish this by changing the TSS descriptor from
+	 * BUSY (0x0B) to AVAILABLE (0x09). We keep the other
+	 * high 4 bits intact. 
+	 */
+	movl	acpi_saved_gdt+2,%ebx
+	xorl	%ecx, %ecx
+	movw	acpi_saved_tr,%cx
+	leal	(%ebx,%ecx),%eax
+	andb	$0xF9,5(%eax)
+
+	ltr	acpi_saved_tr 
+
 	/* 
 	 * Everything is almost reset back to the way it was immediately before
 	 * suspend. There are a few more registers to restore - this is 
@@ -301,25 +310,14 @@ _C_LABEL(acpi_protected_mode_resume):
 	push	acpi_saved_fl
 	popfl
 
-	/*
-	 * XXX - The following ltr instruction occasionally causes
-	 *       A GP(0) violation. According to Intel, this can
-	 *       happen for various reasons, none of which is 
-	 *       possible based on the register restore code above.
-	 *       The task register restore is thereby disabled
-	 *       until the reason for the occasional GP(0) can 
-	 *       be identified.
-	 * 
-	 *       It's either a bad DS (unlikely), or the saved TR
-	 *       points to something other than a TSS (equally 
-	 *       unlikely).
-	 */
-	 /* ltr	acpi_saved_tr */
+	/* Poke CR3 one more time. Might not be necessary */
+	movl	acpi_saved_cr3,%eax
+	movl	%eax,%cr3
 
 	/*
 	 * Return to the OS. We've previously saved the resume
 	 * address in acpi_saved_ret (via a call to acpi_savecpu
-	 * before we went to sleep.
+	 * before we went to sleep.)
 	 */
 	xorl  %eax, %eax
 	jmp	*acpi_saved_ret
@@ -329,7 +327,7 @@ _ACPI_TRMP_OFFSET(tmp_gdt)
 	.word	tmp_gdt_end - tmp_gdtable
 	.long	tmp_gdtable
 
-	.align 8,0
+	.align 8
 _ACPI_TRMP_LABEL(tmp_gdtable)
 	/*
 	 * null
@@ -368,6 +366,17 @@ _ACPI_TRMP_LABEL(tmp_gdtable)
 	.word	0xffff, 0
 	.byte	0, 0x93, 0xcf, 0
 _ACPI_TRMP_LABEL(tmp_gdt_end)
+
+	.align 8
+_ACPI_TRMP_OFFSET(clean_idt)
+	.word	0xffff
+	.long	0
+	.word	0
+
+	.align 4
+_C_LABEL(do_real_mode_post):
+_ACPI_TRMP_OFFSET(do_real_mode_post_off)
+	.long 0
 
 	.align 4
 _ACPI_TRMP_LABEL(acpi_saved_ebx)

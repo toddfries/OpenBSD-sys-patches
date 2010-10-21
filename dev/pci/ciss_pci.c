@@ -1,4 +1,4 @@
-/*	$OpenBSD: ciss_pci.c,v 1.13 2008/11/17 06:56:56 brad Exp $	*/
+/*	$OpenBSD: ciss_pci.c,v 1.15 2010/03/02 10:52:27 sthen Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -62,12 +62,15 @@ const struct pci_matchid ciss_pci_devices[] = {
 	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAE200I_1 },
 	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAE200I_2 },
 	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAE200I_3 },
-	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAE500 },
+	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAE200I_4 },
+	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAE500_1 },
+	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAE500_2 },
 	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAP212 },
 	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAP410 },
 	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAP410I },
 	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAP411 },
 	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAP600 },
+	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAP700M },
 	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAP711M },
 	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAP712M },
 	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAP800 },
@@ -83,17 +86,15 @@ const struct pci_matchid ciss_pci_devices[] = {
 	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSA_8 },
 	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSA_9 },
 	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSA_10 },
-	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSA_11 },
-	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSA_12 }
+	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSA_11 }
 };
-#define	CISS_PCI_NDEVS	sizeof(ciss_pci_devices)/sizeof(ciss_pci_devices[0])
 
 int
 ciss_pci_match(struct device *parent, void *match, void *aux)
 {
 	struct pci_attach_args *pa = aux;
 
-	return pci_matchbyid(pa, ciss_pci_devices, CISS_PCI_NDEVS);
+	return pci_matchbyid(pa, ciss_pci_devices, nitems(ciss_pci_devices));
 }
 
 void

@@ -1,4 +1,4 @@
-/* $OpenBSD: pckbcvar.h,v 1.7 2008/07/29 04:20:37 miod Exp $ */
+/* $OpenBSD: pckbcvar.h,v 1.9 2010/07/22 14:27:44 deraadt Exp $ */
 /* $NetBSD: pckbcvar.h,v 1.4 2000/06/09 04:58:35 soda Exp $ */
 
 /*
@@ -105,10 +105,17 @@ void pckbc_set_poll(pckbc_tag_t, pckbc_slot_t, int);
 int pckbc_xt_translation(pckbc_tag_t, pckbc_slot_t, int);
 void pckbc_slot_enable(pckbc_tag_t, pckbc_slot_t, int);
 
-void pckbc_attach(struct pckbc_softc *);
+void pckbc_attach(struct pckbc_softc *, int);
 int pckbc_cnattach(bus_space_tag_t, bus_addr_t, bus_size_t,
 			pckbc_slot_t, int);
 int pckbc_is_console(bus_space_tag_t, bus_addr_t);
+void pckbc_reset(struct pckbc_softc *);
 int pckbcintr(void *);
+
+/*
+ * Device configuration flags (cf_flags).
+ */
+
+#define	PCKBCF_FORCE_KEYBOARD_PRESENT	0x0001
 
 #endif /* _DEV_IC_PCKBCVAR_H_ */

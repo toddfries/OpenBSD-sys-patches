@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ep_pcmcia.c,v 1.37 2008/06/26 05:42:17 ray Exp $	*/
+/*	$OpenBSD: if_ep_pcmcia.c,v 1.39 2010/08/30 20:33:18 deraadt Exp $	*/
 /*	$NetBSD: if_ep_pcmcia.c,v 1.16 1998/08/17 23:20:40 thorpej Exp $  */
 
 /*-
@@ -107,7 +107,7 @@
 int	ep_pcmcia_match(struct device *, void *, void *);
 void	ep_pcmcia_attach(struct device *, struct device *, void *);
 int	ep_pcmcia_detach(struct device *, int);
-int	ep_pcmcia_activate(struct device *, enum devact);
+int	ep_pcmcia_activate(struct device *, int);
 
 int	ep_pcmcia_get_enaddr(struct pcmcia_tuple *, void *);
 #ifdef notyet
@@ -403,31 +403,45 @@ ep_pcmcia_detach(dev, flags)
 int
 ep_pcmcia_activate(dev, act)
 	struct device *dev;
-	enum devact act;
+	int act;
 {
 	struct ep_pcmcia_softc *sc = (struct ep_pcmcia_softc *)dev;
 	struct ep_softc *esc = &sc->sc_ep;
 	struct ifnet *ifp = &esc->sc_arpcom.ac_if;
-	int s;
 
-	s = splnet();
 	switch (act) {
 	case DVACT_ACTIVATE:
-		pcmcia_function_enable(sc->sc_pf);
-		sc->sc_ep.sc_ih = pcmcia_intr_establish(sc->sc_pf, IPL_NET,
-		    epintr, sc, esc->sc_dev.dv_xname);
-		epinit(esc);
+		if (sc->sc_ep.sc_ih == NULL) {
+			pcmcia_function_enable(sc->sc_pf);
+			sc->sc_ep.sc_ih = pcmcia_intr_establish(sc->sc_pf, IPL_NET,
+			    epintr, sc, esc->sc_dev.dv_xname);
+		}
+		if (ifp->if_flags & IFF_UP)
+			epinit(esc);
 		break;
-
-	case DVACT_DEACTIVATE:
+	case DVACT_SUSPEND:
 		ifp->if_timer = 0;
 		if (ifp->if_flags & IFF_RUNNING)
 			epstop(esc);
-		pcmcia_intr_disestablish(sc->sc_pf, sc->sc_ep.sc_ih);
+		if (sc->sc_ep.sc_ih)
+			pcmcia_intr_disestablish(sc->sc_pf, sc->sc_ep.sc_ih);
+		sc->sc_ep.sc_ih = NULL;
+		pcmcia_function_disable(sc->sc_pf);
+		break;
+	case DVACT_RESUME:
+		pcmcia_function_enable(sc->sc_pf);
+		sc->sc_ep.sc_ih = pcmcia_intr_establish(sc->sc_pf, IPL_NET,
+		    epintr, sc, esc->sc_dev.dv_xname);
+		if (ifp->if_flags & IFF_UP)
+			epinit(esc);
+		break;
+	case DVACT_DEACTIVATE:
+		if (sc->sc_ep.sc_ih)
+			pcmcia_intr_disestablish(sc->sc_pf, sc->sc_ep.sc_ih);
+		sc->sc_ep.sc_ih = NULL;
 		pcmcia_function_disable(sc->sc_pf);
 		break;
 	}
-	splx(s);
 	return (0);
 }
 
