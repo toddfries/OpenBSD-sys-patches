@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_zyd.c,v 1.82 2010/08/27 17:08:01 jsg Exp $	*/
+/*	$OpenBSD: if_zyd.c,v 1.84 2010/10/23 16:14:07 jakemsr Exp $	*/
 
 /*-
  * Copyright (c) 2006 by Damien Bergamini <damien.bergamini@free.fr>
@@ -323,7 +323,7 @@ zyd_complete_attach(struct zyd_softc *sc)
 	usbd_status error;
 	int i;
 
-	usb_init_task(&sc->sc_task, zyd_task, sc);
+	usb_init_task(&sc->sc_task, zyd_task, sc, USB_TASK_TYPE_GENERIC);
 	timeout_set(&sc->scan_to, zyd_next_scan, sc);
 
 	sc->amrr.amrr_min_success_threshold =  1;
@@ -443,8 +443,10 @@ zyd_detach(struct device *self, int flags)
 	s = splusb();
 
 	usb_rem_task(sc->sc_udev, &sc->sc_task);
-	timeout_del(&sc->scan_to);
-	timeout_del(&sc->amrr_to);
+	if (timeout_initialized(&sc->scan_to))
+		timeout_del(&sc->scan_to);
+	if (timeout_initialized(&sc->amrr_to))
+		timeout_del(&sc->amrr_to);
 
 	zyd_close_pipes(sc);
 
