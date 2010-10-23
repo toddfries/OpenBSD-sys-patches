@@ -165,7 +165,7 @@ trap(struct trapframe *frame)
 
 #ifdef DEBUG
 	if (trapdebug) {
-		printf("trap %d code %lx eip %lx cs %lx rflags %lx cr2 %lx "
+		printf("trap %d code %lx rip %lx cs %lx rflags %lx cr2 %lx "
 		       "cpl %x\n",
 		    type, frame->tf_err, frame->tf_rip, frame->tf_cs,
 		    frame->tf_rflags, rcr2(), curcpu()->ci_ilevel);
@@ -212,8 +212,8 @@ trap(struct trapframe *frame)
 		    type, frame->tf_err, (u_long)frame->tf_rip, frame->tf_cs,
 		    frame->tf_rflags, rcr2(), curcpu()->ci_ilevel, frame->tf_rsp);
 
-		/* panic("trap"); */
-		boot(RB_HALT);
+		panic("trap type %d, code=%lx, pc=%x",
+		    type, frame->tf_err, frame->tf_rip);
 		/*NOTREACHED*/
 
 	case T_PROTFLT:
