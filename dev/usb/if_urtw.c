@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_urtw.c,v 1.31 2010/08/27 17:08:01 jsg Exp $	*/
+/*	$OpenBSD: if_urtw.c,v 1.33 2010/10/23 16:14:07 jakemsr Exp $	*/
 
 /*-
  * Copyright (c) 2009 Martynas Venckus <martynas@openbsd.org>
@@ -690,8 +690,9 @@ urtw_attach(struct device *parent, struct device *self, void *aux)
 	/* XXX for what? */
 	sc->sc_preamble_mode = 2;
 
-	usb_init_task(&sc->sc_task, urtw_task, sc);
-	usb_init_task(&sc->sc_ledtask, urtw_ledusbtask, sc);
+	usb_init_task(&sc->sc_task, urtw_task, sc, USB_TASK_TYPE_GENERIC);
+	usb_init_task(&sc->sc_ledtask, urtw_ledusbtask, sc,
+	    USB_TASK_TYPE_GENERIC);
 	timeout_set(&sc->scan_to, urtw_next_scan, sc);
 	timeout_set(&sc->sc_led_ch, urtw_ledtask, sc);
 
@@ -779,8 +780,10 @@ urtw_detach(struct device *self, int flags)
 
 	usb_rem_task(sc->sc_udev, &sc->sc_task);
 	usb_rem_task(sc->sc_udev, &sc->sc_ledtask);
-	timeout_del(&sc->scan_to);
-	timeout_del(&sc->sc_led_ch);
+	if (timeout_initialized(&sc->scan_to))
+		timeout_del(&sc->scan_to);
+	if (timeout_initialized(&sc->sc_led_ch))
+		timeout_del(&sc->sc_led_ch);
 
 	/* abort and free xfers */
 	urtw_free_tx_data_list(sc);
