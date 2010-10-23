@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_run.c,v 1.72 2010/10/22 15:45:36 damien Exp $	*/
+/*	$OpenBSD: if_run.c,v 1.74 2010/10/23 16:14:07 jakemsr Exp $	*/
 
 /*-
  * Copyright (c) 2008-2010 Damien Bergamini <damien.bergamini@free.fr>
@@ -473,7 +473,7 @@ run_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
-	usb_init_task(&sc->sc_task, run_task, sc);
+	usb_init_task(&sc->sc_task, run_task, sc, USB_TASK_TYPE_GENERIC);
 	timeout_set(&sc->scan_to, run_next_scan, sc);
 	timeout_set(&sc->calib_to, run_calibrate_to, sc);
 
@@ -595,8 +595,10 @@ run_detach(struct device *self, int flags)
 	while (sc->cmdq.queued > 0)
 		tsleep(&sc->cmdq, 0, "cmdq", 0);
 
-	timeout_del(&sc->scan_to);
-	timeout_del(&sc->calib_to);
+	if (timeout_initialized(&sc->scan_to))
+		timeout_del(&sc->scan_to);
+	if (timeout_initialized(&sc->calib_to))
+		timeout_del(&sc->calib_to);
 
 	if (ifp->if_flags != 0) {	/* if_attach() has been called */
 		ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
