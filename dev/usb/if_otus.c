@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_otus.c,v 1.18 2010/08/27 17:08:00 jsg Exp $	*/
+/*	$OpenBSD: if_otus.c,v 1.20 2010/10/23 16:14:07 jakemsr Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -203,7 +203,7 @@ otus_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->sc_udev = uaa->device;
 
-	usb_init_task(&sc->sc_task, otus_task, sc);
+	usb_init_task(&sc->sc_task, otus_task, sc, USB_TASK_TYPE_GENERIC);
 	timeout_set(&sc->scan_to, otus_next_scan, sc);
 	timeout_set(&sc->calib_to, otus_calibrate_to, sc);
 
@@ -250,8 +250,10 @@ otus_detach(struct device *self, int flags)
 	while (sc->cmdq.queued > 0)
 		tsleep(&sc->cmdq, 0, "cmdq", 0);
 
-	timeout_del(&sc->scan_to);
-	timeout_del(&sc->calib_to);
+	if (timeout_initialized(&sc->scan_to))
+		timeout_del(&sc->scan_to);
+	if (timeout_initialized(&sc->calib_to))
+		timeout_del(&sc->calib_to);
 
 	if (ifp->if_flags != 0) {	/* if_attach() has been called. */
 		ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);

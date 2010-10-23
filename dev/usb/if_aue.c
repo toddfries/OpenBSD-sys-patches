@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_aue.c,v 1.79 2010/09/24 08:33:58 yuo Exp $ */
+/*	$OpenBSD: if_aue.c,v 1.81 2010/10/23 16:14:06 jakemsr Exp $ */
 /*	$NetBSD: if_aue.c,v 1.82 2003/03/05 17:37:36 shiba Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -734,8 +734,10 @@ aue_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
-	usb_init_task(&sc->aue_tick_task, aue_tick_task, sc);
-	usb_init_task(&sc->aue_stop_task, (void (*)(void *))aue_stop, sc);
+	usb_init_task(&sc->aue_tick_task, aue_tick_task, sc,
+	    USB_TASK_TYPE_GENERIC);
+	usb_init_task(&sc->aue_stop_task, (void (*)(void *))aue_stop, sc,
+	    USB_TASK_TYPE_GENERIC);
 	rw_init(&sc->aue_mii_lock, "auemii");
 
 	err = usbd_device2interface_handle(dev, AUE_IFACE_IDX, &iface);
@@ -853,7 +855,8 @@ aue_detach(struct device *self, int flags)
 	if (!sc->aue_attached) 
 		return (0);
 
-	timeout_del(&sc->aue_stat_ch);
+	if (timeout_initialized(&sc->aue_stat_ch))
+		timeout_del(&sc->aue_stat_ch);
 
 	/*
 	 * Remove any pending tasks.  They cannot be executing because they run
