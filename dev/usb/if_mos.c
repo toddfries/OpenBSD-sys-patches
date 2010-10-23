@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_mos.c,v 1.8 2010/09/24 08:33:58 yuo Exp $	*/
+/*	$OpenBSD: if_mos.c,v 1.10 2010/10/23 16:14:07 jakemsr Exp $	*/
 
 /*
  * Copyright (c) 2008 Johann Christian Rode <jcrode@gmx.net>
@@ -652,9 +652,11 @@ mos_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
-	usb_init_task(&sc->mos_tick_task, mos_tick_task, sc);
+	usb_init_task(&sc->mos_tick_task, mos_tick_task, sc,
+	    USB_TASK_TYPE_GENERIC);
 	rw_init(&sc->mos_mii_lock, "mosmii");
-	usb_init_task(&sc->mos_stop_task, (void (*)(void *))mos_stop, sc);
+	usb_init_task(&sc->mos_stop_task, (void (*)(void *))mos_stop, sc,
+	    USB_TASK_TYPE_GENERIC);
 
 	err = usbd_device2interface_handle(dev, MOS_IFACE_IDX, &sc->mos_iface);
 	if (err) {
@@ -769,7 +771,8 @@ mos_detach(struct device *self, int flags)
 	if (!sc->mos_attached)
 		return (0);
 
-	timeout_del(&sc->mos_stat_ch);
+	if (timeout_initialized(&sc->mos_stat_ch))
+		timeout_del(&sc->mos_stat_ch);
 
 	if (sc->mos_ep[MOS_ENDPT_TX] != NULL)
 		usbd_abort_pipe(sc->mos_ep[MOS_ENDPT_TX]);
