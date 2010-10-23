@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_cue.c,v 1.53 2010/09/24 08:33:58 yuo Exp $ */
+/*	$OpenBSD: if_cue.c,v 1.55 2010/10/23 16:14:07 jakemsr Exp $ */
 /*	$NetBSD: if_cue.c,v 1.40 2002/07/11 21:14:26 augustss Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -470,8 +470,10 @@ cue_attach(struct device *parent, struct device *self, void *aux)
 	sc->cue_product = uaa->product;
 	sc->cue_vendor = uaa->vendor;
 
-	usb_init_task(&sc->cue_tick_task, cue_tick_task, sc);
-	usb_init_task(&sc->cue_stop_task, (void (*)(void *))cue_stop, sc);
+	usb_init_task(&sc->cue_tick_task, cue_tick_task, sc,
+	    USB_TASK_TYPE_GENERIC);
+	usb_init_task(&sc->cue_stop_task, (void (*)(void *))cue_stop, sc,
+	    USB_TASK_TYPE_GENERIC);
 
 	err = usbd_device2interface_handle(dev, CUE_IFACE_IDX, &iface);
 	if (err) {
@@ -559,7 +561,8 @@ cue_detach(struct device *self, int flags)
 	if (!sc->cue_attached)
 		return (0);
 
-	timeout_del(&sc->cue_stat_ch);
+	if (timeout_initialized(&sc->cue_stat_ch))
+		timeout_del(&sc->cue_stat_ch);
 
 	/*
 	 * Remove any pending task.  It cannot be executing because it run

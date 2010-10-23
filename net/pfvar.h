@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfvar.h,v 1.315 2010/09/22 05:58:29 henning Exp $ */
+/*	$OpenBSD: pfvar.h,v 1.318 2010/10/23 15:38:18 tedu Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -1562,7 +1562,6 @@ struct pfioc_trans {
 	}		*array;
 };
 
-#define PFR_FLAG_ATOMIC		0x00000001
 #define PFR_FLAG_DUMMY		0x00000002
 #define PFR_FLAG_FEEDBACK	0x00000004
 #define PFR_FLAG_CLSTATS	0x00000008
