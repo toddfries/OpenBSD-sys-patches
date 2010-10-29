@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bridge.c,v 1.184 2010/09/28 08:13:11 blambert Exp $	*/
+/*	$OpenBSD: if_bridge.c,v 1.186 2010/10/28 19:00:57 mpf Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Jason L. Wright (jason@thought.net)
@@ -403,11 +403,10 @@ bridge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			if (strncmp(p->ifp->if_xname, req->ifbr_ifsname,
 			    sizeof(p->ifp->if_xname)) == 0) {
 				error = bridge_delete(sc, p);
-				p = NULL;
 				break;
 			}
 		}
-		if (p != NULL && p == LIST_END(&sc->sc_iflist)) {
+		if (p == LIST_END(&sc->sc_iflist)) {
 			error = ENOENT;
 			break;
 		}
@@ -741,11 +740,7 @@ bridge_ifdetach(struct ifnet *ifp)
 
 	LIST_FOREACH(bif, &sc->sc_iflist, next)
 		if (bif->ifp == ifp) {
-			LIST_REMOVE(bif, next);
-			bridge_rtdelete(sc, ifp, 0);
-			bridge_flushrule(bif);
-			free(bif, M_DEVBUF);
-			ifp->if_bridge = NULL;
+			bridge_delete(sc, bif);
 			break;
 		}
 }
@@ -1423,9 +1418,8 @@ bridge_input(struct ifnet *ifp, struct ether_header *eh, struct mbuf *m)
 	if (m->m_flags & (M_BCAST | M_MCAST)) {
 		/* Tap off 802.1D packets, they do not get forwarded */
 		if (bcmp(eh->ether_dhost, bstp_etheraddr, ETHER_ADDR_LEN) == 0) {
-			m = bstp_input(sc->sc_stp, ifl->bif_stp, eh, m);
-			if (m == NULL)
-				return (NULL);
+			bstp_input(sc->sc_stp, ifl->bif_stp, eh, m);
+			return (NULL);
 		}
 
 		/*
