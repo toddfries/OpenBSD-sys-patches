@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_run.c,v 1.74 2010/10/23 16:14:07 jakemsr Exp $	*/
+/*	$OpenBSD: if_run.c,v 1.80 2010/10/30 18:03:43 damien Exp $	*/
 
 /*-
  * Copyright (c) 2008-2010 Damien Bergamini <damien.bergamini@free.fr>
@@ -600,7 +600,7 @@ run_detach(struct device *self, int flags)
 	if (timeout_initialized(&sc->calib_to))
 		timeout_del(&sc->calib_to);
 
-	if (ifp->if_flags != 0) {	/* if_attach() has been called */
+	if (ifp->if_softc != NULL) {
 		ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 		ieee80211_ifdetach(ifp);
 		if_detach(ifp);
@@ -2064,22 +2064,23 @@ run_txeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
 	int s;
 
+	s = splnet();
+	txq->queued--;
+	sc->qfullmsk &= ~(1 << data->qid);
+
 	if (__predict_false(status != USBD_NORMAL_COMPLETION)) {
 		DPRINTF(("TX status=%d\n", status));
 		if (status == USBD_STALLED)
 			usbd_clear_endpoint_stall_async(txq->pipeh);
 		ifp->if_oerrors++;
+		splx(s);
 		return;
 	}
 
-	s = splnet();
 	sc->sc_tx_timer = 0;
 	ifp->if_opackets++;
-	if (--txq->queued < RUN_TX_RING_COUNT) {
-		sc->qfullmsk &= ~(1 << data->qid);
-		ifp->if_flags &= ~IFF_OACTIVE;
-		run_start(ifp);
-	}
+	ifp->if_flags &= ~IFF_OACTIVE;
+	run_start(ifp);
 	splx(s);
 }
 
@@ -2093,13 +2094,11 @@ run_tx(struct run_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 	struct run_tx_data *data;
 	struct rt2870_txd *txd;
 	struct rt2860_txwi *txwi;
-	u_int hdrlen;
 	uint16_t qos, dur;
 	uint8_t type, mcs, tid, qid;
 	int error, hasqos, ridx, ctl_ridx, xferlen;
 
 	wh = mtod(m, struct ieee80211_frame *);
-	hdrlen = ieee80211_get_hdrlen(wh);
 	type = wh->i_fc[0] & IEEE80211_FC0_TYPE_MASK;
 
 	if ((hasqos = ieee80211_has_qos(wh))) {
@@ -2141,7 +2140,7 @@ run_tx(struct run_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 	/* setup TX Wireless Information */
 	txwi = (struct rt2860_txwi *)(txd + 1);
 	txwi->flags = 0;
-	txwi->xflags = 0;
+	txwi->xflags = hasqos ? 0 : RT2860_TX_NSEQ;
 	txwi->wcid = (type == IEEE80211_FC0_TYPE_DATA) ?
 	    RUN_AID2WCID(ni->ni_associd) : 0xff;
 	txwi->len = htole16(m->m_pkthdr.len);
@@ -2192,7 +2191,6 @@ run_tx(struct run_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 
 	m_copydata(m, 0, m->m_pkthdr.len, (caddr_t)(txwi + 1));
 	m_freem(m);
-	ieee80211_release_node(ic, ni);
 
 	xferlen += sizeof (*txd) + 4;
 
@@ -2201,6 +2199,8 @@ run_tx(struct run_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 	error = usbd_transfer(data->xfer);
 	if (__predict_false(error != USBD_IN_PROGRESS && error != 0))
 		return error;
+
+	ieee80211_release_node(ic, ni);
 
 	ring->cur = (ring->cur + 1) % RUN_TX_RING_COUNT;
 	if (++ring->queued >= RUN_TX_RING_COUNT)
