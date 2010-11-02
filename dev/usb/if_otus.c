@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_otus.c,v 1.20 2010/10/23 16:14:07 jakemsr Exp $	*/
+/*	$OpenBSD: if_otus.c,v 1.24 2010/10/30 18:03:43 damien Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -255,7 +255,7 @@ otus_detach(struct device *self, int flags)
 	if (timeout_initialized(&sc->calib_to))
 		timeout_del(&sc->calib_to);
 
-	if (ifp->if_flags != 0) {	/* if_attach() has been called. */
+	if (ifp->if_softc != NULL) {
 		ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 		ieee80211_ifdetach(ifp);
 		if_detach(ifp);
@@ -1261,16 +1261,18 @@ otus_txeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 	struct ifnet *ifp = &ic->ic_if;
 	int s;
 
+	s = splnet();
+	sc->tx_queued--;
 	if (__predict_false(status != USBD_NORMAL_COMPLETION)) {
 		DPRINTF(("TX status=%d\n", status));
 		if (status == USBD_STALLED)
 			usbd_clear_endpoint_stall_async(sc->data_tx_pipe);
 		ifp->if_oerrors++;
+		splx(s);
 		return;
 	}
-	s = splnet();
-	sc->tx_queued--;
 	sc->sc_tx_timer = 0;
+	ifp->if_opackets++;
 	ifp->if_flags &= ~IFF_OACTIVE;
 	otus_start(ifp);
 	splx(s);
@@ -1381,7 +1383,6 @@ otus_tx(struct otus_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 	xferlen = sizeof (*head) + m->m_pkthdr.len;
 	m_copydata(m, 0, m->m_pkthdr.len, (caddr_t)&head[1]);
 	m_freem(m);
-	ieee80211_release_node(ic, ni);
 
 	DPRINTFN(5, ("tx queued=%d len=%d mac=0x%04x phy=0x%08x rate=%d\n",
 	    sc->tx_queued, head->len, head->macctl, head->phyctl,
@@ -1391,6 +1392,8 @@ otus_tx(struct otus_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 	error = usbd_transfer(data->xfer);
 	if (__predict_false(error != USBD_IN_PROGRESS && error != 0))
 		return error;
+
+	ieee80211_release_node(ic, ni);
 
 	sc->tx_queued++;
 	sc->tx_cur = (sc->tx_cur + 1) % OTUS_TX_DATA_LIST_COUNT;
