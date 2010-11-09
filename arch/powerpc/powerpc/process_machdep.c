@@ -1,4 +1,4 @@
-/*	$NetBSD: process_machdep.c,v 1.26 2007/10/17 19:56:48 garbled Exp $	*/
+/*	$NetBSD: process_machdep.c,v 1.22 2006/11/28 17:27:09 elad Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996 Wolfgang Solfrank.
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: process_machdep.c,v 1.26 2007/10/17 19:56:48 garbled Exp $");
+__KERNEL_RCSID(0, "$NetBSD: process_machdep.c,v 1.22 2006/11/28 17:27:09 elad Exp $");
 
 #include "opt_altivec.h"
 
@@ -122,7 +122,7 @@ process_write_fpregs(struct lwp *l, const struct fpreg *fpregs)
  * Set the process's program counter.
  */
 int
-process_set_pc(struct lwp *l, void *addr)
+process_set_pc(struct lwp *l, caddr_t addr)
 {
 	struct trapframe * const tf = trapframe(l);
 	
@@ -181,7 +181,7 @@ process_machdep_write_vecregs(struct lwp *l, struct vreg *vregs)
 
 int
 ptrace_machdep_dorequest(struct lwp *l, struct lwp *lt,
-	int req, void *addr, int data)
+	int req, caddr_t addr, int data)
 {
 	struct uio uio;
 	struct iovec iov;
@@ -233,7 +233,7 @@ process_machdep_dovecregs(struct lwp *curl, struct lwp *l, struct uio *uio)
 	if (kl > uio->uio_resid)
 		kl = uio->uio_resid;
 
-	uvm_lwp_hold(l);
+	PHOLD(l);
 
 	if (kl < 0)
 		error = EINVAL;
@@ -248,7 +248,7 @@ process_machdep_dovecregs(struct lwp *curl, struct lwp *l, struct uio *uio)
 			error = process_machdep_write_vecregs(l, &r);
 	}
 
-	uvm_lwp_rele(l);
+	PRELE(l);
 
 	uio->uio_offset = 0;
 	return (error);
@@ -257,7 +257,7 @@ process_machdep_dovecregs(struct lwp *curl, struct lwp *l, struct uio *uio)
 int
 process_machdep_validvecregs(struct proc *p)
 {
-	if (p->p_flag & PK_SYSTEM)
+	if (p->p_flag & P_SYSTEM)
 		return (0);
 
 	return (cpu_altivec);

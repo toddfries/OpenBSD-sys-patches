@@ -1,4 +1,4 @@
-/*	$NetBSD: mainbus.c,v 1.80 2009/02/19 00:54:08 jmcneill Exp $	*/
+/*	$NetBSD: mainbus.c,v 1.70 2006/11/26 12:30:05 cube Exp $	*/
 
 /*
  * Copyright (c) 1996 Christopher G. Demetriou.  All rights reserved.
@@ -31,13 +31,13 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mainbus.c,v 1.80 2009/02/19 00:54:08 jmcneill Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mainbus.c,v 1.70 2006/11/26 12:30:05 cube Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
-#include <sys/reboot.h>
-#include <sys/bus.h>
+
+#include <machine/bus.h>
 
 #include <dev/isa/isavar.h>
 #include <dev/eisa/eisavar.h>
@@ -53,6 +53,7 @@ __KERNEL_RCSID(0, "$NetBSD: mainbus.c,v 1.80 2009/02/19 00:54:08 jmcneill Exp $"
 #include "apmbios.h"
 #include "pnpbios.h"
 #include "acpi.h"
+#include "vesabios.h"
 #include "ipmi.h"
 
 #include "opt_acpi.h"
@@ -81,25 +82,28 @@ __KERNEL_RCSID(0, "$NetBSD: mainbus.c,v 1.80 2009/02/19 00:54:08 jmcneill Exp $"
 #include <dev/mca/mcavar.h>
 #endif
 
+#if NVESABIOS > 0
+#include <arch/i386/bios/vesabios.h>
+#endif
+
 #if NIPMI > 0
 #include <x86/ipmivar.h>
 #endif
 
 #if NPCI > 0
 #if defined(PCI_BUS_FIXUP)
-#include <arch/x86/pci/pci_bus_fixup.h>
+#include <arch/i386/pci/pci_bus_fixup.h>
 #if defined(PCI_ADDR_FIXUP)
-#include <arch/x86/pci/pci_addr_fixup.h>
+#include <arch/i386/pci/pci_addr_fixup.h>
 #endif
 #endif
 #endif
 
-void	mainbus_childdetached(device_t, device_t);
 int	mainbus_match(struct device *, struct cfdata *, void *);
 void	mainbus_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL2_NEW(mainbus, 0,
-    mainbus_match, mainbus_attach, NULL, NULL, NULL, mainbus_childdetached);
+CFATTACH_DECL(mainbus, sizeof(struct device),
+    mainbus_match, mainbus_attach, NULL, NULL);
 
 int	mainbus_print(void *, const char *);
 
@@ -160,11 +164,6 @@ int mp_verbose = 0;
 #endif
 #endif
 
-void
-mainbus_childdetached(device_t self, device_t child)
-{
-	/* mainbus holds no pointers to its children, so this is ok */
-}
 
 /*
  * Probe for the mainbus; always succeeds.
@@ -189,6 +188,9 @@ mainbus_attach(struct device *parent, struct device *self, void *aux)
 #ifdef MPBIOS
 	int mpbios_present = 0;
 #endif
+#if NACPI > 0 || defined(MPBIOS)
+	int numioapics = 0;
+#endif
 #if defined(PCI_BUS_FIXUP)
 	int pci_maxbus = 0;
 #endif
@@ -210,8 +212,7 @@ mainbus_attach(struct device *parent, struct device *self, void *aux)
 #if defined(PCI_BUS_FIXUP)
 	if (pci_mode != 0) {
 		pci_maxbus = pci_bus_fixup(NULL, 0);
-		aprint_debug("PCI bus max, after pci_bus_fixup: %i\n",
-		    pci_maxbus);
+		aprint_debug("PCI bus max, after pci_bus_fixup: %i\n", pci_maxbus);
 #if defined(PCI_ADDR_FIXUP)
 		pciaddr.extent_port = NULL;
 		pciaddr.extent_mem = NULL;
@@ -222,7 +223,7 @@ mainbus_attach(struct device *parent, struct device *self, void *aux)
 #endif
 
 #if NACPI > 0
-	if ((boothowto & RB_MD2) == 0 && acpi_check(self, "acpibus"))
+	if (acpi_check(self, "acpibus"))
 		acpi_present = acpi_probe();
 	/*
 	 * First, see if the MADT contains CPUs, and possibly I/O APICs.
@@ -230,19 +231,20 @@ mainbus_attach(struct device *parent, struct device *self, void *aux)
 	 * be done later (via a callback).
 	 */
 	if (acpi_present)
-		mpacpi_active = mpacpi_scan_apics(self, &numcpus);
+		mpacpi_active = mpacpi_scan_apics(self, &numcpus, &numioapics);
 #endif
 
 	if (!mpacpi_active) {
 #ifdef MPBIOS
 		if (mpbios_present)
-			mpbios_scan(self, &numcpus);
+			mpbios_scan(self, &numcpus, &numioapics);
 		else
 #endif
 		if (numcpus == 0) {
 			struct cpu_attach_args caa;
 
 			memset(&caa, 0, sizeof(caa));
+			caa.caa_name = "cpu";
 			caa.cpu_number = 0;
 			caa.cpu_role = CPU_ROLE_SP;
 			caa.cpu_func = 0;
@@ -250,6 +252,11 @@ mainbus_attach(struct device *parent, struct device *self, void *aux)
 			config_found_ia(self, "cpubus", &caa, mainbus_print);
 		}
 	}
+
+#if NVESABIOS > 0
+	if (vbeprobe())
+		config_found_ia(self, "vesabiosbus", 0, 0);
+#endif
 
 #if NISADMA > 0 && (NACPI > 0 || NPNPBIOS > 0)
 	/*
@@ -367,9 +374,6 @@ mainbus_attach(struct device *parent, struct device *self, void *aux)
 	if (apm_busprobe())
 		config_found_ia(self, "apmbus", 0, 0);
 #endif
-
-	if (!pmf_device_register(self, NULL, NULL))
-		aprint_error_dev(self, "couldn't establish power handler\n");
 }
 
 int

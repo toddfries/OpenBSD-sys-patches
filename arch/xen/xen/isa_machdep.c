@@ -1,4 +1,4 @@
-/*	$NetBSD: isa_machdep.c,v 1.14 2009/03/10 17:21:57 bouyer Exp $	*/
+/*	$NetBSD: isa_machdep.c,v 1.6 2006/09/28 18:53:16 bouyer Exp $	*/
 /*	NetBSD isa_machdep.c,v 1.11 2004/06/20 18:04:08 thorpej Exp 	*/
 
 /*-
@@ -17,6 +17,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -66,13 +73,14 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: isa_machdep.c,v 1.14 2009/03/10 17:21:57 bouyer Exp $");
+__KERNEL_RCSID(0, "$NetBSD: isa_machdep.c,v 1.6 2006/09/28 18:53:16 bouyer Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/syslog.h>
 #include <sys/device.h>
+#include <sys/malloc.h>
 #include <sys/proc.h>
 #include <sys/mbuf.h>
 
@@ -87,19 +95,9 @@ __KERNEL_RCSID(0, "$NetBSD: isa_machdep.c,v 1.14 2009/03/10 17:21:57 bouyer Exp 
 
 #include <uvm/uvm_extern.h>
 
-#ifdef XEN3
-#include "ioapic.h"
-#endif
-
-#if NIOAPIC > 0
-#include <machine/i82093var.h>
-#include <machine/mpconfig.h>
-#endif
-
 static int _isa_dma_may_bounce(bus_dma_tag_t, bus_dmamap_t, int, int *);
 
 struct x86_bus_dma_tag isa_bus_dma_tag = {
-	0,				/* _tag_needs_free */
 	ISA_DMA_BOUNCE_THRESHOLD,	/* _bounce_thresh */
 	0,				/* _bounce_alloc_lo */
 	ISA_DMA_BOUNCE_THRESHOLD,	/* _bounce_alloc_hi */
@@ -117,8 +115,6 @@ struct x86_bus_dma_tag isa_bus_dma_tag = {
 	_bus_dmamem_map,
 	_bus_dmamem_unmap,
 	_bus_dmamem_mmap,
-	_bus_dmatag_subregion,
-	_bus_dmatag_destroy,
 };
 
 #define	IDTVEC(name)	__CONCAT(X,name)
@@ -153,42 +149,11 @@ isa_intr_establish(ic, irq, type, level, ih_fun, ih_arg)
 {
 	int evtch;
 	char evname[8];
-	struct xen_intr_handle ih;
-#if NIOAPIC > 0
-	struct ioapic_softc *pic = NULL;
-#endif
 
-	ih.pirq = 0;
-
-#if NIOAPIC > 0
-	if (mp_busses != NULL) {
-		if (intr_find_mpmapping(mp_isa_bus, irq, &ih) == 0 ||
-		    intr_find_mpmapping(mp_eisa_bus, irq, &ih) == 0) {
-			if (!APIC_IRQ_ISLEGACY(ih.pirq)) {
-				pic = ioapic_find(APIC_IRQ_APIC(ih.pirq));
-				if (pic == NULL) {
-					printf("isa_intr_establish: "
-					    "unknown apic %d\n",
-					    APIC_IRQ_APIC(ih.pirq));
-					return NULL;
-				}
-			}
-		} else
-			printf("isa_intr_establish: no MP mapping found\n");
-	}
-#endif
-	ih.pirq |= (irq & 0xff);
-
-	evtch = xen_intr_map(&ih.pirq, type);
+	evtch = bind_pirq_to_evtch(irq);
 	if (evtch == -1)
 		return NULL;
-#if NIOAPIC > 0
-	if (pic)
-		snprintf(evname, sizeof(evname), "%s pin %d",
-		    device_xname(pic->sc_dev), APIC_IRQ_PIN(ih.pirq));
-	else
-#endif
-		snprintf(evname, sizeof(evname), "irq%d", irq);
+	snprintf(evname, sizeof(evname), "irq%d", irq);
 
 	return (void *)pirq_establish(irq, evtch, ih_fun, ih_arg, level,
 	    evname);

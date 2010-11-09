@@ -1,4 +1,4 @@
-/*	$NetBSD: cpu.h,v 1.90 2008/05/26 15:59:29 tsutsui Exp $	*/
+/*	$NetBSD: cpu.h,v 1.77 2006/03/23 16:16:45 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993
@@ -53,23 +53,34 @@
 
 struct cpu_info {
 	struct cpu_data ci_data;	/* MI per-cpu data */
-	struct cpu_info *ci_next;	/* Next CPU in list */
-	cpuid_t ci_cpuid;		/* Machine-level identifier */
 	u_long ci_cpu_freq;		/* CPU frequency */
 	u_long ci_cycles_per_hz;	/* CPU freq / hz */
 	u_long ci_divisor_delay;	/* for delay/DELAY */
-	u_long ci_divisor_recip;	/* unused, for obsolete microtime(9) */
-	struct lwp *ci_curlwp;		/* currently running lwp */
-	struct lwp *ci_fpcurlwp;	/* the current FPU owner */
-	int ci_want_resched;		/* user preemption pending */
-	int ci_mtx_count;		/* negative count of held mutexes */
-	int ci_mtx_oldspl;		/* saved SPL value */
-	int ci_idepth;			/* hardware interrupt depth */
+	u_long ci_divisor_recip;	/* scaled reciprocal of previous;
+					   see below */
 };
 
-#define	CPU_INFO_ITERATOR		int
-#define	CPU_INFO_FOREACH(cii, ci)	\
-    (void)(cii), ci = &cpu_info_store; ci != NULL; ci = ci->ci_next
+/*
+ * To implement a more accurate microtime using the CP0 COUNT register
+ * we need to divide that register by the number of cycles per MHz.
+ * But...
+ *
+ * DIV and DIVU are expensive on MIPS (eg 75 clocks on the R4000).  MULT
+ * and MULTU are only 12 clocks on the same CPU.
+ *
+ * The strategy we use is to calculate the reciprical of cycles per MHz,
+ * scaled by 1<<32.  Then we can simply issue a MULTU and pluck of the
+ * HI register and have the results of the division.
+ */
+#define	MIPS_SET_CI_RECIPRICAL(cpu)					\
+do {									\
+	KASSERT((cpu)->ci_divisor_delay != 0);				\
+	(cpu)->ci_divisor_recip = 0x100000000ULL / (cpu)->ci_divisor_delay; \
+} while (0)
+
+#define	MIPS_COUNT_TO_MHZ(cpu, count, res)				\
+	__asm volatile("multu %1,%2 ; mfhi %0"				\
+	    : "=r"((res)) : "r"((count)), "r"((cpu)->ci_divisor_recip))
 
 #endif /* !_LOCORE */
 #endif /* _KERNEL */
@@ -89,11 +100,18 @@ struct cpu_info {
 #ifndef CPU_MAXID
 #define CPU_MAXID		5	/* number of valid machdep ids */
 
+#define CTL_MACHDEP_NAMES { \
+	{ 0, 0 }, \
+	{ "console_device", CTLTYPE_STRUCT }, \
+	{ "booted_kernel", CTLTYPE_STRING }, \
+	{ "root_device", CTLTYPE_STRING }, \
+	{ "llsc", CTLTYPE_INT }, \
+}
 #endif
 
 #ifdef _KERNEL
-#if defined(_LKM) || defined(_STANDALONE)
-/* Assume all CPU architectures are valid for LKM's and standlone progs */
+#ifdef _LKM
+/* Assume all CPU architectures are valid for LKM's */
 #define	MIPS1	1
 #define	MIPS3	1
 #define	MIPS4	1
@@ -126,22 +144,11 @@ struct cpu_info {
 #define	CPU_ARCH_MIPS32	(1 << 5)
 #define	CPU_ARCH_MIPS64	(1 << 6)
 
-/* Note: must be kept in sync with -ffixed-?? Makefile.mips. */
-#define MIPS_CURLWP             $23
-#define MIPS_CURLWP_QUOTED      "$23"
-#define MIPS_CURLWP_CARD	23
-#define	MIPS_CURLWP_FRAME(x)	FRAME_S7(x)
-
 #ifndef _LOCORE
-
 extern struct cpu_info cpu_info_store;
-register struct lwp *mips_curlwp asm(MIPS_CURLWP_QUOTED);
 
-#define	curlwp			mips_curlwp
-#define	curcpu()		(curlwp->l_cpu)
-#define	curpcb			((struct pcb *)curlwp->l_addr)
-#define	fpcurlwp		(curcpu()->ci_fpcurlwp)
-#define	cpu_number()		(0)
+#define	curcpu()	(&cpu_info_store)
+#define	cpu_number()	(0)
 #define	cpu_proc_fork(p1, p2)
 
 /* XXX simonb
@@ -172,12 +179,8 @@ extern u_int mips3_pg_shift;
 #define	CPU_MIPS_I_D_CACHE_COHERENT	0x0800	/* I-cache funcs don't need to flush the D-cache */
 #define	MIPS_NOT_SUPP			0x8000
 
-#endif	/* !_LOCORE */
-
-#if ((MIPS1 + MIPS3 + MIPS4 + MIPS32 + MIPS64) == 1) || defined(_LOCORE)
-
-#if defined(MIPS1)
-
+#if (MIPS1 + MIPS3 + MIPS4 + MIPS32 + MIPS64) == 1
+#ifdef MIPS1
 # define CPUISMIPS3		0
 # define CPUIS64BITS		0
 # define CPUISMIPS32		0
@@ -186,9 +189,9 @@ extern u_int mips3_pg_shift;
 # define MIPS_HAS_R4K_MMU	0
 # define MIPS_HAS_CLOCK		0
 # define MIPS_HAS_LLSC		0
+#endif /* MIPS1 */
 
-#elif defined(MIPS3) || defined(MIPS4)
-
+#if defined(MIPS3) || defined(MIPS4)
 # define CPUISMIPS3		1
 # define CPUIS64BITS		1
 # define CPUISMIPS32		0
@@ -196,18 +199,10 @@ extern u_int mips3_pg_shift;
 # define CPUISMIPSNN		0
 # define MIPS_HAS_R4K_MMU	1
 # define MIPS_HAS_CLOCK		1
-# if defined(_LOCORE)
-#  if !defined(MIPS3_5900) && !defined(MIPS3_4100)
-#   define MIPS_HAS_LLSC	1
-#  else
-#   define MIPS_HAS_LLSC	0
-#  endif
-# else	/* _LOCORE */
-#  define MIPS_HAS_LLSC		(mips_has_llsc)
-# endif	/* _LOCORE */
+# define MIPS_HAS_LLSC		(mips_has_llsc)
+#endif /* MIPS3 || MIPS4 */
 
-#elif defined(MIPS32)
-
+#ifdef MIPS32
 # define CPUISMIPS3		1
 # define CPUIS64BITS		0
 # define CPUISMIPS32		1
@@ -216,9 +211,9 @@ extern u_int mips3_pg_shift;
 # define MIPS_HAS_R4K_MMU	1
 # define MIPS_HAS_CLOCK		1
 # define MIPS_HAS_LLSC		1
+#endif /* MIPS32 */
 
-#elif defined(MIPS64)
-
+#ifdef MIPS64
 # define CPUISMIPS3		1
 # define CPUIS64BITS		1
 # define CPUISMIPS32		0
@@ -227,12 +222,9 @@ extern u_int mips3_pg_shift;
 # define MIPS_HAS_R4K_MMU	1
 # define MIPS_HAS_CLOCK		1
 # define MIPS_HAS_LLSC		1
-
-#endif
+#endif /* MIPS64 */
 
 #else /* run-time test */
-
-#ifndef	_LOCORE
 
 #define	MIPS_HAS_R4K_MMU	(mips_has_r4k_mmu)
 #define	MIPS_HAS_LLSC		(mips_has_llsc)
@@ -249,16 +241,8 @@ extern u_int mips3_pg_shift;
 	(CPU_ARCH_MIPS3 | CPU_ARCH_MIPS4 | CPU_ARCH_MIPS64)) != 0)
 
 #define	MIPS_HAS_CLOCK	(cpu_arch >= CPU_ARCH_MIPS3)
-
-#else	/* !_LOCORE */
-
-#define	MIPS_HAS_LLSC	0
-
-#endif	/* !_LOCORE */
-
 #endif /* run-time test */
 
-#ifndef	_LOCORE
 
 /*
  * definitions of cpu-dependent requirements
@@ -279,31 +263,49 @@ struct clockframe {
 };
 
 /*
- * A port must provde CLKF_USERMODE() for use in machine-independent code.
- * These differ on r4000 and r3000 systems; provide them in the
- * port-dependent file that includes this one, using the macros below.
+ * A port must provde CLKF_USERMODE() and CLKF_BASEPRI() for use
+ * in machine-independent code. These differ on r4000 and r3000 systems;
+ * provide them in the port-dependent file that includes this one, using
+ * the macros below.
  */
 
 /* mips1 versions */
 #define	MIPS1_CLKF_USERMODE(framep)	((framep)->sr & MIPS_SR_KU_PREV)
+#define	MIPS1_CLKF_BASEPRI(framep)	\
+	((~(framep)->sr & (MIPS_INT_MASK | MIPS_SR_INT_ENA_PREV)) == 0)
 
 /* mips3 versions */
 #define	MIPS3_CLKF_USERMODE(framep)	((framep)->sr & MIPS_SR_KSU_USER)
+#define	MIPS3_CLKF_BASEPRI(framep)	\
+	((~(framep)->sr & (MIPS_INT_MASK | MIPS_SR_INT_IE)) == 0)
+
+#ifdef IPL_ICU_MASK
+#define ICU_CLKF_BASEPRI(framep)	((framep)->ppl == 0)
+#endif
 
 #define	CLKF_PC(framep)		((framep)->pc)
 #define	CLKF_INTR(framep)	(0)
 
 #if defined(MIPS3_PLUS) && !defined(MIPS1)		/* XXX bogus! */
 #define	CLKF_USERMODE(framep)	MIPS3_CLKF_USERMODE(framep)
+#define	CLKF_BASEPRI(framep)	MIPS3_CLKF_BASEPRI(framep)
 #endif
 
 #if !defined(MIPS3_PLUS) && defined(MIPS1)		/* XXX bogus! */
 #define	CLKF_USERMODE(framep)	MIPS1_CLKF_USERMODE(framep)
+#define	CLKF_BASEPRI(framep)	MIPS1_CLKF_BASEPRI(framep)
+#endif
+
+#ifdef IPL_ICU_MASK
+#undef CLKF_BASEPRI
+#define CLKF_BASEPRI(framep)	ICU_CLKF_BASEPRI(framep)
 #endif
 
 #if defined(MIPS3_PLUS) && defined(MIPS1)		/* XXX bogus! */
 #define CLKF_USERMODE(framep) \
     ((CPUISMIPS3) ? MIPS3_CLKF_USERMODE(framep):  MIPS1_CLKF_USERMODE(framep))
+#define CLKF_BASEPRI(framep) \
+    ((CPUISMIPS3) ? MIPS3_CLKF_BASEPRI(framep):  MIPS1_CLKF_BASEPRI(framep))
 #endif
 
 /*
@@ -317,26 +319,33 @@ struct clockframe {
  * Preempt the current process if in interrupt from user mode,
  * or after the current trap/syscall if in system mode.
  */
-void	cpu_need_resched(struct cpu_info *, int);
+#define	need_resched(ci)						\
+do {									\
+	want_resched = 1;						\
+	if (curproc != NULL)						\
+		aston(curproc);						\
+} while (/*CONSTCOND*/0)
 
 /*
  * Give a profiling tick to the current process when the user profiling
  * buffer pages are invalid.  On the MIPS, request an ast to send us
  * through trap, marking the proc as needing a profiling tick.
  */
-#define	cpu_need_proftick(l)						\
+#define	need_proftick(p)						\
 do {									\
-	(l)->l_pflag |= LP_OWEUPC;					\
-	aston(l);							\
+	(p)->p_flag |= P_OWEUPC;					\
+	aston(p);							\
 } while (/*CONSTCOND*/0)
 
 /*
- * Notify the current lwp (l) that it has a signal pending,
+ * Notify the current process (p) that it has a signal pending,
  * process as soon as possible.
  */
-#define	cpu_signotify(l)	aston(l)
+#define	signotify(p)	aston(p)
 
-#define aston(l)		((l)->l_md.md_astpending = 1)
+#define aston(p)	((p)->p_md.md_astpending = 1)
+
+extern int want_resched;		/* resched() was called */
 
 /*
  * Misc prototypes and variable declarations.
@@ -344,6 +353,8 @@ do {									\
 struct lwp;
 struct user;
 
+extern struct lwp *fpcurlwp;	/* the current FPU owner */
+extern struct pcb *curpcb;	/* the current running pcb */
 extern struct segtab *segbase;	/* current segtab base */
 
 /* trap.c */

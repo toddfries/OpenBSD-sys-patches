@@ -1,4 +1,4 @@
-/*	$NetBSD: com_dio.c,v 1.8 2008/04/28 20:23:19 martin Exp $	*/
+/*	$NetBSD: com_dio.c,v 1.5 2006/07/13 22:56:01 gdamore Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -61,7 +68,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: com_dio.c,v 1.8 2008/04/28 20:23:19 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: com_dio.c,v 1.5 2006/07/13 22:56:01 gdamore Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -87,10 +94,10 @@ struct com_dio_softc {
 	void	*sc_ih;			/* interrupt handler */
 };
 
-static int	com_dio_match(device_t, cfdata_t , void *);
-static void	com_dio_attach(device_t, device_t, void *);
+static int	com_dio_match(struct device *, struct cfdata *, void *);
+static void	com_dio_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(com_dio, sizeof(struct com_dio_softc),
+CFATTACH_DECL(com_dio, sizeof(struct com_dio_softc),
     com_dio_match, com_dio_attach, NULL, NULL);
 
 static int com_dio_speed = TTYDEF_SPEED;
@@ -99,7 +106,7 @@ static struct bus_space_tag comcntag;
 #define CONMODE	((TTYDEF_CFLAG & ~(CSIZE | CSTOPB | PARENB)) | CS8) /* 8N1 */
 
 static int
-com_dio_match(device_t parent, cfdata_t match, void *aux)
+com_dio_match(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct dio_attach_args *da = aux;
 
@@ -115,16 +122,15 @@ com_dio_match(device_t parent, cfdata_t match, void *aux)
 }
 
 static void
-com_dio_attach(device_t parent, device_t self, void *aux)
+com_dio_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct com_dio_softc *dsc = device_private(self);
+	struct com_dio_softc *dsc = (void *)self;
 	struct com_softc *sc = &dsc->sc_com;
 	bus_space_tag_t iot;
 	bus_space_handle_t iohdca, iohcom;
 	struct dio_attach_args *da = aux;
 	int isconsole;
 
-	sc->sc_dev = self;
 	isconsole = com_is_console(&comcntag, da->da_addr + DCA_COM_OFFSET,
 	    &iohcom);
 
@@ -140,7 +146,7 @@ com_dio_attach(device_t parent, device_t self, void *aux)
 	if (bus_space_map(iot, da->da_addr, DCA_SIZE, 0, &iohdca) ||
 	    bus_space_subregion(iot, iohdca, DCA_COM_OFFSET,
 	    COM_NPORTS << 1, &iohcom)) {
-		aprint_error(": can't map i/o space\n");
+		printf(": can't map i/o space\n");
 		return;
 	}
 
@@ -156,7 +162,8 @@ com_dio_attach(device_t parent, device_t self, void *aux)
 
 	com_attach_subr(sc);
 
-	dsc->sc_ih = dio_intr_establish(comintr, sc, da->da_ipl, IPL_VM);
+	dsc->sc_ih = dio_intr_establish(comintr, sc, da->da_ipl,
+	    ((sc->sc_hwflags & COM_HW_FIFO) != 0) ? IPL_TTY : IPL_TTYNOBUF);
 
 	/* Enable interrupts. */
 	bus_space_write_1(iot, iohdca, DCA_IC, IC_IE);

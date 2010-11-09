@@ -1,33 +1,4 @@
-/*	$NetBSD: vector.S,v 1.29 2008/11/25 16:25:29 ad Exp $	*/
-
-/*-
- * Copyright (c) 1998, 2007, 2008 The NetBSD Foundation, Inc.
- * All rights reserved.
- *
- * This code is derived from software contributed to The NetBSD Foundation
- * by Charles M. Hannum and by Andrew Doran.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
- * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
- * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
- * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
- */
+/*	$NetBSD: vector.S,v 1.9 2006/12/08 15:05:18 yamt Exp $	*/
 
 /*
  * Copyright (c) 2001 Wasabi Systems, Inc.
@@ -64,7 +35,41 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <machine/asm.h>
+/*-
+ * Copyright (c) 1998 The NetBSD Foundation, Inc.
+ * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Charles M. Hannum.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
 
 #include "opt_ddb.h"
 #include "opt_multiprocessor.h"
@@ -74,10 +79,14 @@
 #include <machine/i8259.h>
 #include <machine/i82093reg.h>
 #include <machine/i82489reg.h>
+#include <machine/asm.h>
 #include <machine/frameasm.h>
 #include <machine/segments.h>
 #include <machine/trap.h>
-#include <machine/specialreg.h>
+#include <machine/intr.h>
+#include <machine/psl.h>
+
+#include <net/netisr.h>
 
 #include "ioapic.h"
 #include "lapic.h"
@@ -98,60 +107,18 @@
 
 /*****************************************************************************/
 
-#ifndef	XEN
-#define PRE_TRAP
 #define	TRAP(a)		pushq $(a) ; jmp _C_LABEL(alltraps)
 #define	ZTRAP(a)	pushq $0 ; TRAP(a)
-#else
-#define	PRE_TRAP	movq (%rsp),%rcx ; movq 8(%rsp),%r11 ; addq $0x10,%rsp 
-#define	POST_TRAP(a)	pushq $(a) ; jmp _C_LABEL(alltraps)
-#define	TRAP(a)		PRE_TRAP ; POST_TRAP(a)
-#define ZTRAP(a)	PRE_TRAP ; pushq $0 ; POST_TRAP(a)
-#endif
 
 #define	BPTTRAP(a)	ZTRAP(a)
 
 	.text
-
 IDTVEC(trap00)
 	ZTRAP(T_DIVIDE)
 IDTVEC(trap01)
 	BPTTRAP(T_TRCTRAP)
 IDTVEC(trap02)
-#if defined(XEN)
 	ZTRAP(T_NMI)
-#else /* defined(XEN) */
-	pushq $0
-	pushq $T_NMI
-	subq	$TF_REGSIZE,%rsp
-	INTR_SAVE_GPRS
-	movl	$MSR_GSBASE,%ecx
-	rdmsr
-	cmpl	$VM_MIN_KERNEL_ADDRESS_HIGH32,%edx
-	jae	1f
-	swapgs
-	movw	%gs,TF_GS(%rsp)
-	movw	%fs,TF_FS(%rsp)
-	movw	%es,TF_ES(%rsp)
-	movw	%ds,TF_DS(%rsp)
-	movq	%rsp,%rdi
-	incl	CPUVAR(NTRAP)
-	call	_C_LABEL(trap)
-	swapgs
-	movw	TF_GS(%rsp),%gs
-	movw	TF_FS(%rsp),%fs
-	movw	TF_ES(%rsp),%es
-	movw	TF_DS(%rsp),%ds
-	jmp	2f
-1:
-	movq	%rsp,%rdi
-	incl	CPUVAR(NTRAP)
-	call	_C_LABEL(trap)
-2:
-	INTR_RESTORE_GPRS
-	addq	$TF_REGSIZE+16,%rsp
-	iretq
-#endif /* defined(XEN) */
 IDTVEC(trap03)
 	BPTTRAP(T_BPTFLT)
 IDTVEC(trap04)
@@ -161,16 +128,13 @@ IDTVEC(trap05)
 IDTVEC(trap06)
 	ZTRAP(T_PRIVINFLT)
 IDTVEC(trap07)
-	PRE_TRAP;
 	pushq	$0			# dummy error code
-	pushq	$T_ASTFLT
+	pushq	$T_DNA
 	INTRENTRY
-#ifdef DIAGNOSTIC
-	movl	CPUVAR(ILEVEL),%ebx
-#endif /* DIAGNOSTIC */
+	sti
 	movq	CPUVAR(SELF),%rdi
 	call	_C_LABEL(fpudna)
-	jmp	.Lalltraps_checkusr
+	INTRFASTEXIT
 IDTVEC(trap08)
 	TRAP(T_DOUBLEFLT)
 IDTVEC(trap09)
@@ -187,40 +151,15 @@ IDTVEC(trap0e)
 	TRAP(T_PAGEFLT)
 IDTVEC(intrspurious)
 IDTVEC(trap0f)
-	PRE_TRAP;
-	pushq	$0			# dummy error code
-	pushq	$T_ASTFLT
-	INTRENTRY
-#ifdef DIAGNOSTIC
-	movl	CPUVAR(ILEVEL),%ebx
-#endif /* DIAGNOSTIC */
-	jmp	.Lalltraps_checkusr
+	iretq
 IDTVEC(trap10)
-	PRE_TRAP;
-	pushq	$0			# dummy error code
-	pushq	$T_ARITHTRAP
-.Ldo_fputrap:
-	INTRENTRY
-#ifdef DIAGNOSTIC
-	movl	CPUVAR(ILEVEL),%ebx
-#endif /* DIAGNOSTIC */
-	testb	$SEL_RPL,TF_CS(%rsp)
-	jz	1f
-	movq	%rsp,%rdi
-	call	_C_LABEL(fputrap)
-	jmp	.Lalltraps_checkusr
-1:
-  	STI(si)
-	jmp	calltrap
+	ZTRAP(T_ARITHTRAP)
 IDTVEC(trap11)
 	ZTRAP(T_ALIGNFLT)
 IDTVEC(trap12)
 	ZTRAP(T_MCA)
 IDTVEC(trap13)
-	PRE_TRAP;
-	pushq	$0			# dummy error code
-	pushq	$T_XMM
-	jmp	.Ldo_fputrap
+	ZTRAP(T_XMM)
 IDTVEC(trap14)
 IDTVEC(trap15)
 IDTVEC(trap16)
@@ -281,52 +220,44 @@ NENTRY(resume_pop_es)
  */
 NENTRY(alltraps)
 	INTRENTRY
-  	STI(si)
+	sti
 calltrap:
 #ifdef DIAGNOSTIC
 	movl	CPUVAR(ILEVEL),%ebx
 #endif /* DIAGNOSTIC */
 	movq	%rsp,%rdi
-	incl	CPUVAR(NTRAP)
 	call	_C_LABEL(trap)
-.Lalltraps_checkusr:
+2:	/* Check for ASTs on exit to user mode. */
+	cli
+	CHECK_ASTPENDING(%r11)
+	je	1f
 	testb	$SEL_RPL,TF_CS(%rsp)
-	jz	6f
-.Lalltraps_checkast:
-	movq	CPUVAR(CURLWP),%r14
-	/* Check for ASTs on exit to user mode. */
-  	CLI(si)
-	CHECK_ASTPENDING(%r14)
-	je	3f
-	CLEAR_ASTPENDING(%r14)
-  	STI(si)
+	jz	1f
+5:	CLEAR_ASTPENDING(%r11)
+	sti
 	movl	$T_ASTFLT,TF_TRAPNO(%rsp)
 	movq	%rsp,%rdi
-	incl	CPUVAR(NTRAP)
 	call	_C_LABEL(trap)
-	jmp	.Lalltraps_checkast	/* re-check ASTs */
-3:	CHECK_DEFERRED_SWITCH
-	jnz	9f
+	jmp	2b
 #ifndef DIAGNOSTIC
-6:	INTRFASTEXIT
+1:	INTRFASTEXIT
 #else /* DIAGNOSTIC */
-6:	cmpl	CPUVAR(ILEVEL),%ebx
+1:	cmpl	CPUVAR(ILEVEL),%ebx
 	jne	3f
 	INTRFASTEXIT
-3:  	STI(si)
+3:	sti
 	movabsq	$4f,%rdi
 	movl	CPUVAR(ILEVEL),%esi
 	movl	%ebx,%edx
 	xorq	%rax,%rax
 	call	_C_LABEL(printf)
-	movl	%ebx,%edi
-	call	_C_LABEL(spllower)
-	jmp	.Lalltraps_checkast
+#ifdef DDB
+	int	$3
+#endif /* DDB */
+	movl	%ebx,CPUVAR(ILEVEL)
+	jmp	2b
 4:	.asciz	"WARNING: SPL NOT LOWERED ON TRAP EXIT %x %x\n"
 #endif /* DIAGNOSTIC */
-9:	STI(si)
-	call	_C_LABEL(do_pmap_load)
-	jmp	.Lalltraps_checkast	/* re-check ASTs */
 
 
 #define __HAVE_GENERIC_SOFT_INTERRUPTS	/* XXX */
@@ -374,18 +305,19 @@ IDTVEC(intr_lapic_ipi)
 	INTRENTRY		
 	movl	$0,_C_LABEL(local_apic)+LAPIC_EOI
 	movl	CPUVAR(ILEVEL),%ebx
-	cmpl	$IPL_HIGH,%ebx
+	cmpl	$IPL_IPI,%ebx
 	jae	2f
 IDTVEC(resume_lapic_ipi)
 1:
 	incl	CPUVAR(IDEPTH)
-	movl	$IPL_HIGH,CPUVAR(ILEVEL)
+	movl	$IPL_IPI,CPUVAR(ILEVEL)
         sti
 	pushq	%rbx
 	call	_C_LABEL(x86_ipi_handler)
 	jmp	_C_LABEL(Xdoreti)
 2:
 	orl	$(1 << LIR_IPI),CPUVAR(IPENDING)
+	sti
 	INTRFASTEXIT
 
 #if defined(DDB)
@@ -434,129 +366,13 @@ IDTVEC(resume_lapic_ltimer)
 	jmp	_C_LABEL(Xdoreti)
 2:
 	orl	$(1 << LIR_TIMER),CPUVAR(IPENDING)
+	sti
 	INTRFASTEXIT
 #endif /* NLAPIC > 0 */
 
-#ifndef XEN
-/*
- * Multicast TLB shootdown handler for !kernel_pmap.
- */
-IDTVEC(intr_lapic_tlb_mcast)
-	/*
-	 * Save state, ack interrupt and count it.  Count locally
-	 * so other CPUs don't have to touch the counter's line.
-	 */
-	testq	$SEL_UPL,8(%rsp)
-	jz	0f
-	swapgs
-0:
-	pushq	%rax
-	pushq	%rbx
-	pushq	%rcx
-	pushq	%rdx
-	incq	CPUVAR(TLB_EVCNT)+EV_COUNT
-	/* Find out what needs to be invalidated and unlock the mailbox. */
-	movq	CPUVAR(PMAP_CPU),%rcx
-	movq	MB_ADDR1(%rcx), %rax
-	movq	MB_ADDR2(%rcx), %rdx
-	xorq	%rbx, %rbx
-	xchgq	MB_POINTER(%rcx), %rbx
-	movl	$0, _C_LABEL(local_apic)+LAPIC_EOI
-	cmpq	$-1, %rax
-	je	5f
-1:
-	/* Invalidate a single page or a range of pages. */
-	invlpg	(%rax)
-	addq	$PAGE_SIZE, %rax
-	cmpq	%rdx, %rax
-	jb	1b
-2:
-	/* Ack the request. */
-	lock
-	incq	(%rbx)
-	/*
-	 * Check the current TLB state.  If we don't want further
-	 * invalidations for this pmap, then take the CPU out of
-	 * the pmap's bitmask.
-	 */
-	cmpl	$TLBSTATE_LAZY, CPUVAR(TLBSTATE)
-	jne	3f
-	movq	CPUVAR(PMAP), %rdx
-	movl	CPUVAR(CPUMASK), %ecx
-	notl	%ecx
-	lock
-	andl	%ecx, PM_CPUS(%rdx)
-	movl	$TLBSTATE_STALE, CPUVAR(TLBSTATE)
-3:
-	/* Restore state and return. */
-	popq	%rdx
-	popq	%rcx
-	popq	%rbx
-	popq	%rax
-	testq	$SEL_UPL, 8(%rsp)
-	jz	4f
-	swapgs
-4:
-	iretq
-5:
-	/* Invalidate all user pages. */
-	movq	%cr3, %rax
-	movq	%rax, %cr3
-	jmp	2b
-
-/*
- * Broadcast TLB shootdown handler for kernel_pmap.
- */
-IDTVEC(intr_lapic_tlb_bcast)
-	/* Save state. */
-	pushq	%rax
-	pushq	%rbx
-	pushq	%rdx
-	/* Find out what needs to be invalidated. */
-	movq	_C_LABEL(pmap_mbox)+MB_ADDR1, %rax
-	movq	_C_LABEL(pmap_mbox)+MB_ADDR2, %rdx
-	movq	_C_LABEL(pmap_mbox)+MB_GLOBAL, %rbx
-	movl	$0, _C_LABEL(local_apic)+LAPIC_EOI
-	cmpq	$-1, %rax
-	je,pn	3f
-1:
-	/* Invalidate a single page or a range of pages. */
-	invlpg	(%rax)
-	addq	$PAGE_SIZE, %rax
-	cmpq	%rdx, %rax
-	jb	1b
-2:
-	/* Notify waiter of completion, restore state & return */
-	lock
-	incq	_C_LABEL(pmap_mbox)+MB_TAIL
-	popq	%rdx
-	popq	%rbx
-	popq	%rax
-	iretq
-3:
-	testq	%rbx, %rbx
-	jz	4f
-	/*
-	 * If we have been asked to invalidate the entire TLB
-	 * we arrive here.
-	 */
-	movq	%cr4, %rax
-	movq	%rax, %rdx
-	andq	$~CR4_PGE, %rdx
-	movq	%rdx, %cr4
-	movq	%rax, %cr4
-	jmp	2b
-4:
-	/* Invalidate user TLB entries. */
-	movq	%cr3, %rax
-	movq	%rax, %cr3
-	jmp	2b
-
-#endif /* !XEN */
 
 #define voidop(num)
 
-#ifndef XEN
 
 /*
  * This macro defines the generic stub code. Its arguments modifiy it
@@ -625,10 +441,12 @@ IDTVEC(intr_/**/name/**/num)						;\
 	orl     $(1 << num),CPUVAR(IPENDING)				;\
 	level_mask(num)							;\
 	late_ack(num)							;\
+	sti								;\
 	INTRFASTEXIT							;\
 9:									\
 	unmask(num)							;\
 	late_ack(num)							;\
+	sti								;\
 	INTRFASTEXIT
 
 #define ICUADDR IO_ICU1
@@ -910,142 +728,71 @@ _C_LABEL(ioapic_level_stubs):
 	.quad _C_LABEL(Xresume_ioapic_level31)
 #endif
 
-#else	/* !XEN */
-/* Resume/recurse procedures for spl() */
-#define	XENINTRSTUB(name, num, early_ack, late_ack, mask, unmask, level_mask) \
-IDTVEC(recurse_/**/name/**/num)						;\
-  	INTR_RECURSE_HWFRAME						;\
-  	subq	$8,%rsp							;\
-  	pushq	$T_ASTFLT		/* trap # for doing ASTs */	;\
-  	INTRENTRY							;\
-IDTVEC(resume_/**/name/**/num)						\
-  	movq	$IREENT_MAGIC,TF_ERR(%rsp)				;\
-  	movl	%ebx,%r13d						;\
-  	movq	CPUVAR(ISOURCES) + (num) * 8, %r14			;\
-1:									\
-  	pushq	%r13							;\
-  	movl	$num,CPUVAR(ILEVEL)					;\
-  	STI(si)								;\
-  	incl	CPUVAR(IDEPTH)						;\
-  	movq	IS_HANDLERS(%r14),%rbx					;\
-6:									\
-  	movq	IH_ARG(%rbx),%rdi					;\
-  	movq	%rsp,%rsi						;\
-  	call	*IH_FUN(%rbx)		/* call it */			;\
-  	movq	IH_IPL_NEXT(%rbx),%rbx	/* next handler in chain */	;\
-  	testq	%rbx,%rbx						;\
-  	jnz	6b							;\
-5:									\
-  	CLI(si)								;\
-  	unmask(num)			/* unmask it in hardware */	;\
-  	late_ack(num)							;\
-  	STI(si)								;\
-  	jmp	_C_LABEL(Xdoreti)	/* lower spl and do ASTs */	;\
-  
-# The unmask func for Xen events
-#define hypervisor_asm_unmask(num)			\
-  	movq $num, %rdi					;\
-  	call _C_LABEL(hypervisor_enable_ipl)
-  
-XENINTRSTUB(xenev,0,voidop,voidop,voidop,hypervisor_asm_unmask,voidop)
-XENINTRSTUB(xenev,1,voidop,voidop,voidop,hypervisor_asm_unmask,voidop)
-XENINTRSTUB(xenev,2,voidop,voidop,voidop,hypervisor_asm_unmask,voidop)
-XENINTRSTUB(xenev,3,voidop,voidop,voidop,hypervisor_asm_unmask,voidop)
-XENINTRSTUB(xenev,4,voidop,voidop,voidop,hypervisor_asm_unmask,voidop)
-XENINTRSTUB(xenev,5,voidop,voidop,voidop,hypervisor_asm_unmask,voidop)
-XENINTRSTUB(xenev,6,voidop,voidop,voidop,hypervisor_asm_unmask,voidop)
-XENINTRSTUB(xenev,7,voidop,voidop,voidop,hypervisor_asm_unmask,voidop)
-XENINTRSTUB(xenev,8,voidop,voidop,voidop,hypervisor_asm_unmask,voidop)
-XENINTRSTUB(xenev,9,voidop,voidop,voidop,hypervisor_asm_unmask,voidop)
-XENINTRSTUB(xenev,10,voidop,voidop,voidop,hypervisor_asm_unmask,voidop)
-XENINTRSTUB(xenev,11,voidop,voidop,voidop,hypervisor_asm_unmask,voidop)
-XENINTRSTUB(xenev,12,voidop,voidop,voidop,hypervisor_asm_unmask,voidop)
-XENINTRSTUB(xenev,13,voidop,voidop,voidop,hypervisor_asm_unmask,voidop)
-XENINTRSTUB(xenev,14,voidop,voidop,voidop,hypervisor_asm_unmask,voidop)
-XENINTRSTUB(xenev,15,voidop,voidop,voidop,hypervisor_asm_unmask,voidop)
-XENINTRSTUB(xenev,16,voidop,voidop,voidop,hypervisor_asm_unmask,voidop)
-XENINTRSTUB(xenev,17,voidop,voidop,voidop,hypervisor_asm_unmask,voidop)
-XENINTRSTUB(xenev,18,voidop,voidop,voidop,hypervisor_asm_unmask,voidop)
-XENINTRSTUB(xenev,19,voidop,voidop,voidop,hypervisor_asm_unmask,voidop)
-XENINTRSTUB(xenev,20,voidop,voidop,voidop,hypervisor_asm_unmask,voidop)
-XENINTRSTUB(xenev,21,voidop,voidop,voidop,hypervisor_asm_unmask,voidop)
-XENINTRSTUB(xenev,22,voidop,voidop,voidop,hypervisor_asm_unmask,voidop)
-XENINTRSTUB(xenev,23,voidop,voidop,voidop,hypervisor_asm_unmask,voidop)
-XENINTRSTUB(xenev,24,voidop,voidop,voidop,hypervisor_asm_unmask,voidop)
-XENINTRSTUB(xenev,25,voidop,voidop,voidop,hypervisor_asm_unmask,voidop)
-XENINTRSTUB(xenev,26,voidop,voidop,voidop,hypervisor_asm_unmask,voidop)
-XENINTRSTUB(xenev,27,voidop,voidop,voidop,hypervisor_asm_unmask,voidop)
-XENINTRSTUB(xenev,28,voidop,voidop,voidop,hypervisor_asm_unmask,voidop)
-XENINTRSTUB(xenev,29,voidop,voidop,voidop,hypervisor_asm_unmask,voidop)
-XENINTRSTUB(xenev,30,voidop,voidop,voidop,hypervisor_asm_unmask,voidop)
-XENINTRSTUB(xenev,31,voidop,voidop,voidop,hypervisor_asm_unmask,voidop)
-  
-.globl _C_LABEL(xenev_stubs)
-_C_LABEL(xenev_stubs):
-  	.quad _C_LABEL(Xrecurse_xenev0), _C_LABEL(Xresume_xenev0)
-  	.quad _C_LABEL(Xrecurse_xenev1) ,_C_LABEL(Xresume_xenev1)
-  	.quad _C_LABEL(Xrecurse_xenev2) ,_C_LABEL(Xresume_xenev2)
-  	.quad _C_LABEL(Xrecurse_xenev3) ,_C_LABEL(Xresume_xenev3)
-  	.quad _C_LABEL(Xrecurse_xenev4) ,_C_LABEL(Xresume_xenev4)
-  	.quad _C_LABEL(Xrecurse_xenev5) ,_C_LABEL(Xresume_xenev5)
-  	.quad _C_LABEL(Xrecurse_xenev6) ,_C_LABEL(Xresume_xenev6)
-  	.quad _C_LABEL(Xrecurse_xenev7) ,_C_LABEL(Xresume_xenev7)
-  	.quad _C_LABEL(Xrecurse_xenev8) ,_C_LABEL(Xresume_xenev8)
-  	.quad _C_LABEL(Xrecurse_xenev9) ,_C_LABEL(Xresume_xenev9)
-  	.quad _C_LABEL(Xrecurse_xenev10), _C_LABEL(Xresume_xenev10)
-  	.quad _C_LABEL(Xrecurse_xenev11), _C_LABEL(Xresume_xenev11)
-  	.quad _C_LABEL(Xrecurse_xenev12), _C_LABEL(Xresume_xenev12)
-  	.quad _C_LABEL(Xrecurse_xenev13), _C_LABEL(Xresume_xenev13)
-  	.quad _C_LABEL(Xrecurse_xenev14), _C_LABEL(Xresume_xenev14)
-  	.quad _C_LABEL(Xrecurse_xenev15), _C_LABEL(Xresume_xenev15)
-  	.quad _C_LABEL(Xrecurse_xenev16), _C_LABEL(Xresume_xenev16)
-  	.quad _C_LABEL(Xrecurse_xenev17), _C_LABEL(Xresume_xenev17)
-  	.quad _C_LABEL(Xrecurse_xenev18), _C_LABEL(Xresume_xenev18)
-  	.quad _C_LABEL(Xrecurse_xenev19), _C_LABEL(Xresume_xenev19)
-  	.quad _C_LABEL(Xrecurse_xenev20), _C_LABEL(Xresume_xenev20)
-  	.quad _C_LABEL(Xrecurse_xenev21), _C_LABEL(Xresume_xenev21)
-  	.quad _C_LABEL(Xrecurse_xenev22), _C_LABEL(Xresume_xenev22)
-  	.quad _C_LABEL(Xrecurse_xenev23), _C_LABEL(Xresume_xenev23)
-  	.quad _C_LABEL(Xrecurse_xenev24), _C_LABEL(Xresume_xenev24)
-  	.quad _C_LABEL(Xrecurse_xenev25), _C_LABEL(Xresume_xenev25)
-  	.quad _C_LABEL(Xrecurse_xenev26), _C_LABEL(Xresume_xenev26)
-  	.quad _C_LABEL(Xrecurse_xenev27), _C_LABEL(Xresume_xenev27)
-  	.quad _C_LABEL(Xrecurse_xenev28), _C_LABEL(Xresume_xenev28)
-  	.quad _C_LABEL(Xrecurse_xenev29), _C_LABEL(Xresume_xenev29)
-  	.quad _C_LABEL(Xrecurse_xenev30), _C_LABEL(Xresume_xenev30)
-  	.quad _C_LABEL(Xrecurse_xenev31), _C_LABEL(Xresume_xenev31)
+/*
+ * Soft interrupt handlers
+ */
 
-# Xen callbacks
+IDTVEC(softserial)
+	movl	$IPL_SOFTSERIAL, CPUVAR(ILEVEL)
+	sti
+	incl	CPUVAR(IDEPTH)
+#ifdef MULTIPROCESSOR
+	call	_C_LABEL(x86_softintlock)
+#endif
+	movq	CPUVAR(ISOURCES) + SIR_SERIAL * 8, %r12
+	incq	IS_EVCNT(%r12)
+	movl	$X86_SOFTINTR_SOFTSERIAL,%edi
+	call	_C_LABEL(softintr_dispatch)
+#ifdef MULTIPROCESSOR	
+	call	_C_LABEL(x86_softintunlock)
+#endif
+	decl	CPUVAR(IDEPTH)
+	jmp	*%r13
 
-# Hypervisor callback
-NENTRY(hypervisor_callback)
-	movq (%rsp),%rcx
-	movq 8(%rsp),%r11
-	addq $16,%rsp
-	pushq	$0	# Dummy error code
-	pushq	$T_ASTFLT
-	INTRENTRY
-	# sti??
-	movq	%rsp, %rdi
-	subq	$8, %rdi; /* don't forget if_ppl */
-	call	do_hypervisor_callback
-	testb   $SEL_RPL,TF_CS(%rsp)
-	jnz	doreti_checkast
+IDTVEC(softnet)
+	movl	$IPL_SOFTNET, CPUVAR(ILEVEL)
+	sti
+	incl	CPUVAR(IDEPTH)
+#ifdef MULTIPROCESSOR	
+	call	_C_LABEL(x86_softintlock)
+#endif
+	movq	CPUVAR(ISOURCES) + SIR_NET * 8, %r12
+	incq    IS_EVCNT(%r12)
+
+	xorq	%r12,%r12
+	xchgl	_C_LABEL(netisr),%r12d
+
+	/* XXX Do the legacy netisrs here for now. */
+#define DONETISR(s, c) \
+	.globl  _C_LABEL(c)	;\
+	testl	$(1 << s),%r12d	;\
+	jz	1f		;\
+	call	_C_LABEL(c)	;\
 1:
-	INTRFASTEXIT
+#include <net/netisr_dispatch.h>
+	
+	movl	$X86_SOFTINTR_SOFTNET,%edi
+	call	_C_LABEL(softintr_dispatch)
+#ifdef MULTIPROCESSOR	
+	call	_C_LABEL(x86_softintunlock)	
+#endif
+	decl	CPUVAR(IDEPTH)
+	jmp	*%r13
 
-# Panic?
-NENTRY(failsafe_callback)
-	movq (%rsp),%rcx
-	movq 8(%rsp),%r11
-	addq $16,%rsp
-	pushq	$0
-	pushq	$T_ASTFLT
-	INTRENTRY
-	movq	%rsp, %rdi
-	subq	$8, %rdi; /* don't forget if_ppl */
-	call xen_failsafe_handler
-	INTRFASTEXIT
-#	jmp	HYPERVISOR_iret
+IDTVEC(softclock)
+	movl	$IPL_SOFTCLOCK, CPUVAR(ILEVEL)
+	sti
+	incl	CPUVAR(IDEPTH)
+#ifdef MULTIPROCESSOR	
+	call	_C_LABEL(x86_softintlock)
+#endif
+	movq	CPUVAR(ISOURCES) + SIR_CLOCK * 8, %r12
+	incq	IS_EVCNT(%r12)
 
-#endif	/* !XEN */
+	movl	$X86_SOFTINTR_SOFTCLOCK,%edi
+	call	_C_LABEL(softintr_dispatch)
+#ifdef MULTIPROCESSOR	
+	call	_C_LABEL(x86_softintunlock)		
+#endif
+	decl	CPUVAR(IDEPTH)
+	jmp	*%r13

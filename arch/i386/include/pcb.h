@@ -1,4 +1,4 @@
-/*	$NetBSD: pcb.h,v 1.46 2008/10/26 06:57:30 mrg Exp $	*/
+/*	$NetBSD: pcb.h,v 1.38 2006/05/02 19:03:24 drochner Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -78,30 +85,31 @@
 
 #include <machine/segments.h>
 #include <machine/tss.h>
-#include <i386/npx.h>
-#include <i386/sysarch.h>
+#include <machine/npx.h>
+#include <machine/sysarch.h>
+
+#define	NIOPORTS	1024		/* # of ports we allow to be mapped */
 
 struct pcb {
-	int	pcb_esp0;		/* ring0 esp */
-	int	pcb_esp;		/* kernel esp */
-	int	pcb_ebp;		/* kernel ebp */
-	int	pcb_ldt_sel;
+	struct	i386tss pcb_tss;
+#define	pcb_cr3	pcb_tss.tss_cr3
+#define	pcb_esp	pcb_tss.tss_esp
+#define	pcb_ebp	pcb_tss.tss_ebp
+#define	pcb_cs	pcb_tss.__tss_cs
+#define	pcb_ldt_sel	pcb_tss.tss_ldt
 	int	pcb_cr0;		/* saved image of CR0 */
 	int	pcb_cr2;		/* page fault address (CR2) */
-	int	pcb_cr3;		/* page directory pointer */
-	int	pcb_iopl;		/* i/o privilege level */
+	union	savefpu pcb_savefpu;	/* floating point state for FPU */
 
-	/* floating point state for FPU */
-	union	savefpu pcb_savefpu __aligned(16);
-
-	int	pcb_fsd[2];		/* %fs descriptor */
-	int	pcb_gsd[2];		/* %gs descriptor */
-	void *	pcb_onfault;		/* copyin/out fault recovery */
+/*
+ * Software pcb (extension)
+ */
+	caddr_t	pcb_onfault;		/* copyin/out fault recovery */
 	int	vm86_eflags;		/* virtual eflags for vm86 mode */
 	int	vm86_flagmask;		/* flag mask for vm86 mode */
 	void	*vm86_userp;		/* XXX performance hack */
 	struct cpu_info *pcb_fpcpu;	/* cpu holding our fp state. */
-	char	*pcb_iomap;		/* I/O permission bitmap */
+	u_long	pcb_iomap[NIOPORTS/32];	/* I/O bitmap */
 };
 
 /*    

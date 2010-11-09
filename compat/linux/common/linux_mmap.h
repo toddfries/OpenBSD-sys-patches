@@ -1,4 +1,4 @@
-/*	$NetBSD: linux_mmap.h,v 1.21 2008/04/28 20:23:43 martin Exp $	*/
+/*	$NetBSD: linux_mmap.h,v 1.18 2005/12/11 12:20:19 christos Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -75,7 +82,6 @@
 /*
  * Ensure the linux_sys_mmap syscall appears to exist:
  */
-struct linux_sys_mmap_args;
 struct linux_sys_mmap_args {
 	syscallarg(unsigned long) addr;
 	syscallarg(size_t) len;
@@ -93,9 +99,8 @@ struct linux_sys_mmap_args {
 
 #ifdef _KERNEL
 __BEGIN_DECLS
-int linux_sys_mmap(struct lwp *p, const struct linux_sys_mmap_args *v, register_t *retval);
-int linux_sys_mmap2(struct lwp *p, const struct linux_sys_mmap2_args *v, register_t *retval);
-
+int linux_sys_mmap __P((struct lwp *p, void *v, register_t *retval));
+int linux_sys_mmap2 __P((struct lwp *p, void *v, register_t *retval));
 __END_DECLS
 #endif /* !_KERNEL */
 

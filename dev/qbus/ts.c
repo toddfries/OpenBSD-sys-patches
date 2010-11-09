@@ -1,4 +1,4 @@
-/*	$NetBSD: ts.c,v 1.27 2009/01/13 13:35:53 yamt Exp $ */
+/*	$NetBSD: ts.c,v 1.21 2007/10/19 12:01:09 ad Exp $ */
 
 /*-
  * Copyright (c) 1991 The Regents of the University of California.
@@ -66,7 +66,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ts.c,v 1.27 2009/01/13 13:35:53 yamt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ts.c,v 1.21 2007/10/19 12:01:09 ad Exp $");
 
 #undef	TSDEBUG
 
@@ -101,10 +101,10 @@ __KERNEL_RCSID(0, "$NetBSD: ts.c,v 1.27 2009/01/13 13:35:53 yamt Exp $");
 
 #include "ioconf.h"
 
-struct ts {
-	struct cmd cmd;	/* command packet */
-	struct chr chr;	/* characteristics packet */
-	struct status status;	/* status packet */
+struct	ts {
+	struct	cmd cmd;	/* command packet */
+	struct	chr chr;	/* characteristics packet */
+	struct	status status;	/* status packet */
 };
 
 /*
@@ -112,30 +112,31 @@ struct ts {
  * also status per tape-unit, since only one unit per controller
  * (thus we have no struct ts_info)
  */
-struct ts_softc {
-	device_t sc_dev;		/* Autoconf ... */
-	struct uba_softc *sc_uh;	/* the parent UBA */
-	struct uba_unit sc_unit;	/* Struct common for UBA to talk */
-	struct evcnt sc_intrcnt;	/* Interrupt counting */
-	struct ubinfo sc_ui;		/* mapping info for struct ts */
-	struct uba_unit sc_uu;		/* Struct for UBA to communicate */
+struct	ts_softc {
+	struct	device sc_dev;		/* Autoconf ... */
+	struct	uba_unit sc_unit;	/* Struct common for UBA to talk */
+	struct	evcnt sc_intrcnt;	/* Interrupt counting */
+	struct	ubinfo sc_ui;		/* mapping info for struct ts */
+	struct	uba_unit sc_uu;		/* Struct for UBA to communicate */
 	bus_space_tag_t sc_iot;
 	bus_addr_t sc_ioh;
 	bus_dma_tag_t sc_dmat;
 	bus_dmamap_t sc_dmam;
 	volatile struct ts *sc_vts;	/* Memory address of ts struct */
-	struct ts *sc_bts;		/* Unibus address of ts struct */
+	struct	ts *sc_bts;		/* Unibus address of ts struct */
 	int	sc_type;		/* TS11 or TS05? */
 	short	sc_waddr;		/* Value to write to TSDB */
-	struct bufq_state *sc_bufq;	/* pending I/O requests */
+	struct	bufq_state *sc_bufq;	/* pending I/O requests */
 
 	short	sc_mapped;		/* Unibus map allocated ? */
 	short	sc_state;		/* see below: ST_xxx */
 	short	sc_rtc;			/* retry count for lcmd */
 	short	sc_openf;		/* lock against multiple opens */
 	short	sc_liowf;		/* last operation was write */
-	struct buf ts_cbuf;		/* internal cmd buffer (for ioctls) */
+	struct	buf ts_cbuf;		/* internal cmd buffer (for ioctls) */
 };
+
+#define	XNAME	sc->sc_dev.dv_xname
 
 #define	TS_WCSR(csr, val) \
 	bus_space_write_2(sc->sc_iot, sc->sc_ioh, csr, val)
@@ -159,12 +160,12 @@ static	void tsinit(struct ts_softc *);
 static	void tscommand(struct ts_softc *, dev_t, int, int);
 static	int tsstart(struct ts_softc *, int);
 static	void tswchar(struct ts_softc *);
-static	bool tsreset(struct ts_softc *);
-static	int tsmatch(device_t, cfdata_t, void *);
-static	void tsattach(device_t, device_t, void *);
+static	int tsreset(struct ts_softc *);
+static	int tsmatch(struct device *, struct cfdata *, void *);
+static	void tsattach(struct device *, struct device *, void *);
 static	int tsready(struct uba_unit *);
 
-CFATTACH_DECL_NEW(ts, sizeof(struct ts_softc),
+CFATTACH_DECL(ts, sizeof(struct ts_softc),
     tsmatch, tsattach, NULL, NULL);
 
 dev_type_open(tsopen);
@@ -195,9 +196,8 @@ const struct cdevsw ts_cdevsw = {
  * Probe for device. If found, try to raise an interrupt.
  */
 int
-tsmatch(device_t parent, cfdata_t match, void *aux)
+tsmatch(struct device *parent, struct cfdata *match, void *aux)
 {
-	struct device tsdev;
 	struct ts_softc ssc;
 	struct ts_softc *sc = &ssc;
 	struct uba_attach_args *ua = aux;
@@ -206,15 +206,13 @@ tsmatch(device_t parent, cfdata_t match, void *aux)
 	sc->sc_iot = ua->ua_iot;
 	sc->sc_ioh = ua->ua_ioh;
 	sc->sc_mapped = 0;
-	sc->sc_dev = &tsdev;
-	sc->sc_uh = device_private(parent);
-	strcpy(sc->sc_dev->dv_xname, "ts");
+	sc->sc_dev.dv_parent = parent;
+	strcpy(XNAME, "ts");
 
 	/* Try to reset the device */
-	for (i = 0; i < 3; i++) {
-		if (tsreset(sc))
+	for (i = 0; i < 3; i++)
+		if (tsreset(sc) == 1)
 			break;
-	}
 
 	if (i == 3)
 		return 0;
@@ -224,37 +222,33 @@ tsmatch(device_t parent, cfdata_t match, void *aux)
 				/* completion of this will raise the intr. */
 
 	DELAY(1000000);		/* Wait for interrupt */
-	ubmemfree(sc->sc_uh, &sc->sc_ui);
+	ubmemfree((void *)parent, &sc->sc_ui);
 	return 1;
 }
 
 /*
  */
 void
-tsattach(device_t parent, device_t self, void *aux)
+tsattach(struct device *parent, struct device *self, void *aux)
 {
+	struct uba_softc *uh = device_private(parent);
 	struct ts_softc *sc = device_private(self);
 	struct uba_attach_args *ua = aux;
 	int error;
-	const char *t;
+	char *t;
 
-	sc->sc_dev = self;
-	sc->sc_uh = device_private(parent);
 	sc->sc_iot = ua->ua_iot;
 	sc->sc_ioh = ua->ua_ioh;
 	sc->sc_dmat = ua->ua_dmat;
 
-	sc->sc_uu.uu_dev = self;
+	sc->sc_uu.uu_softc = sc;
 	sc->sc_uu.uu_ready = tsready;
 
 	tsinit(sc);	/* reset and map */
 
-	error = bus_dmamap_create(sc->sc_dmat, (64*1024), 16, (64*1024),
-	    0, BUS_DMA_NOWAIT, &sc->sc_dmam);
-	if (error) {
-		aprint_error(": failed create DMA map %d\n", error);
-		return;
-	}
+	if ((error = bus_dmamap_create(sc->sc_dmat, (64*1024), 16, (64*1024),
+	    0, BUS_DMA_NOWAIT, &sc->sc_dmam)))
+		return printf(": failed create DMA map %d\n", error);
 
 	bufq_alloc(&sc->sc_bufq, "fcfs", 0);
 
@@ -263,13 +257,11 @@ tsattach(device_t parent, device_t self, void *aux)
 	 */
 	sc->sc_state = TS_INIT;		/* tsintr() checks this ... */
 	tswchar(sc);
-	if (tsleep(sc, PRIBIO, "tsattach", 100)) {
-		aprint_error(": failed SET CHARACTERISTICS\n");
-		return;
-	}
+	if (tsleep(sc, PRIBIO, "tsattach", 100))
+		return printf(": failed SET CHARACTERISTICS\n");
 
 	sc->sc_state = TS_RUNNING;
-	if (sc->sc_uh->uh_type == UBA_UBA) {
+	if (uh->uh_type == UBA_UBA) {
 		if (sc->sc_vts->status.xst2 & TS_SF_TU80) {
 			sc->sc_type = TYPE_TU80;
 			t = "TU80";
@@ -282,17 +274,16 @@ tsattach(device_t parent, device_t self, void *aux)
 		t = "TS05";
 	}
 
-	aprint_normal(": %s\n", t);
-	aprint_normal_dev(sc->sc_dev, 
-	    "rev %d, extended features %s, transport %s\n",
-	    (sc->sc_vts->status.xst2 & TS_SF_MCRL) >> 2,
-	    (sc->sc_vts->status.xst2 & TS_SF_EFES ? "enabled" : "disabled"),
-	    (TS_RCSR(TSSR) & TS_OFL ? "offline" : "online"));
+	printf("\n%s: %s\n", XNAME, t);
+	printf("%s: rev %d, extended features %s, transport %s\n",
+		XNAME, (sc->sc_vts->status.xst2 & TS_SF_MCRL) >> 2,
+		(sc->sc_vts->status.xst2 & TS_SF_EFES ? "enabled" : "disabled"),
+		(TS_RCSR(TSSR) & TS_OFL ? "offline" : "online"));
 
 	uba_intr_establish(ua->ua_icookie, ua->ua_cvec, tsintr,
 	    sc, &sc->sc_intrcnt);
 	evcnt_attach_dynamic(&sc->sc_intrcnt, EVCNT_TYPE_INTR, ua->ua_evcnt,
-	    device_xname(sc->sc_dev), "intr");
+	    sc->sc_dev.dv_xname, "intr");
 }
 
 /*
@@ -309,7 +300,8 @@ tsinit(struct ts_softc *sc)
 		 * buffer into Unibus address space.
 		 */
 		sc->sc_ui.ui_size = sizeof(struct ts);
-		if (ubmemalloc(sc->sc_uh, &sc->sc_ui, UBA_CANTWAIT))
+		if ((ubmemalloc((void *)device_parent(&sc->sc_dev),
+		    &sc->sc_ui, UBA_CANTWAIT)))
 			return;
 		sc->sc_vts = (void *)sc->sc_ui.ui_vaddr;
 		sc->sc_bts = (void *)sc->sc_ui.ui_baddr;
@@ -329,6 +321,7 @@ void
 tscommand(struct ts_softc *sc, dev_t dev, int cmd, int count)
 {
 	struct buf *bp;
+	int s;
 
 #ifdef TSDEBUG
 	printf("tscommand (%x, %d)\n", cmd, count);
@@ -336,20 +329,20 @@ tscommand(struct ts_softc *sc, dev_t dev, int cmd, int count)
 
 	bp = &sc->ts_cbuf;
 
-	mutex_enter(&bufcache_lock);
-	while (bp->b_cflags & BC_BUSY) {
+	s = splbio();
+	while (bp->b_flags & B_BUSY) {
 		/*
-		 * This special check is because BC_BUSY never
+		 * This special check is because B_BUSY never
 		 * gets cleared in the non-waiting rewind case. ???
 		 */
-		if (bp->b_bcount == 0 && (bp->b_oflags & BO_DONE))
+		if (bp->b_bcount == 0 && (bp->b_flags & B_DONE))
 			break;
-		if (bbusy(bp, false, 0, NULL) == 0)
-			break;
+		bp->b_flags |= B_WANTED;
+		(void) tsleep(bp, PRIBIO, "tscmd", 0);
 		/* check MOT-flag !!! */
 	}
-	bp->b_flags = B_READ;
-	mutex_exit(&bufcache_lock);
+	bp->b_flags = B_BUSY | B_READ;
+	splx(s);
 
 	/*
 	 * Load the buffer.  The b_count field gets used to hold the command
@@ -361,8 +354,6 @@ tscommand(struct ts_softc *sc, dev_t dev, int cmd, int count)
 	bp->b_bcount = count;
 	bp->b_resid = cmd;
 	bp->b_blkno = 0;
-	bp->b_oflags = 0;
-	bp->b_objlock = &buffer_lock;
 	tsstrategy(bp);
 	/*
 	 * In case of rewind from close, don't wait.
@@ -371,10 +362,9 @@ tscommand(struct ts_softc *sc, dev_t dev, int cmd, int count)
 	if (count == 0)
 		return;
 	biowait(bp);
-	mutex_enter(&bufcache_lock);
-	cv_broadcast(&bp->b_busy);
-	bp->b_cflags = 0;
-	mutex_exit(&bufcache_lock);
+	if (bp->b_flags & B_WANTED)
+		wakeup((void *)bp);
+	bp->b_flags = 0;
 }
 
 /*
@@ -386,7 +376,7 @@ tsstart(struct ts_softc *sc, int isloaded)
 	struct buf *bp;
 	int cmd;
 
-	bp = bufq_peek(sc->sc_bufq);
+	bp = BUFQ_PEEK(sc->sc_bufq);
 	if (bp == NULL) {
 		return 0;
 	}
@@ -429,7 +419,7 @@ tsstart(struct ts_softc *sc, int isloaded)
 			cmd = TS_CMD_STAT;
 			break;
 		default:
-			aprint_error_dev(sc->sc_dev, "bad ioctl %d\n",
+			printf ("%s: bad ioctl %d\n", sc->sc_dev.dv_xname,
 				(int)bp->b_resid);
 			/* Need a no-op. get status */
 			cmd = TS_CMD_STAT;
@@ -468,7 +458,6 @@ tsstart(struct ts_softc *sc, int isloaded)
 	printf("tsstart: sending cmdr %x\n", sc->sc_vts->cmd.cmdr);
 #endif
 	TS_WCSR(TSDB, sc->sc_waddr);
-	return 1;
 }
 
 /*
@@ -477,8 +466,8 @@ tsstart(struct ts_softc *sc, int isloaded)
 int
 tsready(struct uba_unit *uu)
 {
-	struct ts_softc *sc = device_private(uu->uu_dev);
-	struct buf *bp = bufq_peek(sc->sc_bufq);
+	struct ts_softc *sc = uu->uu_softc;
+	struct buf *bp = BUFQ_PEEK(sc->sc_bufq);
 
 	if (bus_dmamap_load(sc->sc_dmat, sc->sc_dmam, bp->b_data,
 	    bp->b_bcount, bp->b_proc, BUS_DMA_NOWAIT))
@@ -517,7 +506,7 @@ tswchar(struct ts_softc *sc)
 /*
  * Reset the TS11. Return 1 if failed, 0 if succeeded.
  */
-bool
+int
 tsreset(struct ts_softc *sc)
 {
 	int timeout;
@@ -530,9 +519,9 @@ tsreset(struct ts_softc *sc)
 	while ((TS_RCSR(TSSR) & TS_SSR) == 0) {
 		DELAY(10000);
 		if (timeout++ > 1000)
-			return false;
+			return 0;
 	}
-	return true;
+	return 1;
 }
 
 static void
@@ -540,10 +529,10 @@ prtstat(struct ts_softc *sc, int sr)
 {
 	char buf[100];
 
-	snprintb(buf, sizeof(buf), TS_TSSR_BITS, sr);
-	aprint_normal_dev(sc->sc_dev, "TSSR=%s\n", buf);
-	snprintb(buf, sizeof(buf), TS_XST0_BITS, sc->sc_vts->status.xst0);
-	aprint_normal_dev(sc->sc_dev, "XST0=%s\n", buf);
+	bitmask_snprintf(sr, TS_TSSR_BITS, buf, sizeof(buf));
+	printf("%s: TSSR=%s\n", XNAME, buf);
+	bitmask_snprintf(sc->sc_vts->status.xst0,TS_XST0_BITS,buf,sizeof(buf));
+	printf("%s: XST0=%s\n", XNAME, buf);
 }
 
 /*
@@ -561,11 +550,10 @@ tsintr(void *arg)
 
 	short ccode = sc->sc_vts->cmd.cmdr & TS_CF_CCODE;
 
-	bp = bufq_peek(sc->sc_bufq);
 #ifdef TSDEBUG
 	{
 		char buf[100];
-		snprintb(buf, sizeof(buf), TS_TSSR_BITS, sr);
+		bitmask_snprintf(sr, TS_TSSR_BITS, buf, sizeof(buf));
 		printf("tsintr: sr %x mh %x\n", sr, mh);
 		printf("srbits: %s\n", buf);
 	}
@@ -588,7 +576,7 @@ tsintr(void *arg)
 		 * Ignore unsolicited interrupts.
 		 */
 		log(LOG_WARNING, "%s: stray intr [%x,%x]\n",
-			device_xname(sc->sc_dev), sr, mh);
+			sc->sc_dev.dv_xname, sr, mh);
 		return;
 
 	case TS_INIT:
@@ -610,9 +598,8 @@ tsintr(void *arg)
 		break;
 
 	default:
-		aprint_error_dev(sc->sc_dev,
-		    "unexpected interrupt during state %d [%x,%x]\n",
-		    sc->sc_state, sr, mh);
+		printf ("%s: unexpected interrupt during state %d [%x,%x]\n",
+			sc->sc_dev.dv_xname, sc->sc_state, sr, mh);
 		return;
 	}
 
@@ -658,16 +645,13 @@ tsintr(void *arg)
 #ifdef TSDEBUG
 		{
 			char buf[100];
-			snprintb(buf, sizeof(buf),
-			    TS_XST0_BITS, sc->sc_vts->status.xst0);
+			bitmask_snprintf(sc->sc_vts->status.xst0,
+			    TS_XST0_BITS, buf, sizeof(buf));
 			printf("TSA: sr %x bits %s\n",
 			    sc->sc_vts->status.xst0, buf);
 		}
 #endif
 		if (sc->sc_vts->status.xst0 & TS_SF_TMK) {
-#ifdef TSDEBUG
-			printf(("Tape Mark detected"));
-#endif
 			/* Read to end-of-file. No error. */
 			break;
 		}
@@ -676,17 +660,26 @@ tsintr(void *arg)
 #ifdef TSDEBUG
 			printf("TS_TC_TSA: EOT\n");
 #endif
-			if (bp != NULL)
-				bp->b_error = EIO;
+			bp->b_error = EIO;
 			break;
 		}
 		if (sc->sc_vts->status.xst0 & TS_SF_RLS)
 			break;
+		if (sc->sc_vts->status.xst0 & TS_SF_TMK) {
+#ifdef TSDEBUG
+			printf(("Tape Mark detected"));
+#endif
+		}
+		if (sc->sc_vts->status.xst0 & TS_SF_EOT) {
+#ifdef TSDEBUG
+			printf(("End of Tape"));
+#endif
+		}
 #ifndef TSDEBUG
 		{
 			char buf[100];
-			snprintb(buf, sizeof(buf),
-			    TS_XST0_BITS, sc->sc_vts->status.xst0);
+			bitmask_snprintf(sc->sc_vts->status.xst0,
+			    TS_XST0_BITS, buf, sizeof(buf));
 			printf("TSA: sr %x bits %s\n",
 			    sc->sc_vts->status.xst0, buf);
 		}
@@ -704,8 +697,8 @@ tsintr(void *arg)
 #ifdef TSDEBUG
 		{
 			char buf[100];
-			snprintb(buf, sizeof(buf),
-			    TS_XST0_BITS, sc->sc_vts->status.xst0);
+			bitmask_snprintf(sc->sc_vts->status.xst0,
+			    TS_XST0_BITS, buf, sizeof(buf));
 			printf("FR: sr %x bits %s\n",
 			    sc->sc_vts->status.xst0, buf);
 		}
@@ -734,16 +727,17 @@ tsintr(void *arg)
 		printf("TS_TC_TPD: errcnt %d\n", sc->sc_rtc);
 #endif
 		if (sc->sc_rtc++ == 8) {
-			aprint_error_dev(sc->sc_dev, "failed 8 retries\n");
+			printf("%s: failed 8 retries\n", XNAME);
 			prtstat(sc, sr);
-			if (bp != NULL)
-				bp->b_error = EIO;
+			bp->b_error = EIO;
 			break;
 		}
 		sc->sc_vts->cmd.cmdr = TS_CF_ACK | TS_CF_IE | TS_CMD_SRR;
 		sc->sc_vts->cmd.cw1 = 1;
 		TS_WCSR(TSDB, sc->sc_waddr);
 		return;
+
+		break;
 
 	case TS_TC_TNM:
 		/*
@@ -752,10 +746,9 @@ tsintr(void *arg)
 		 * reissue the original command.
 		 */
 		if (sc->sc_rtc++ == 8) {
-			aprint_error_dev(sc->sc_dev, "failed 8 retries\n");
+			printf("%s: failed 8 retries\n", XNAME);
 			prtstat(sc, sr);
-			if (bp != NULL)
-				bp->b_error = EIO;
+			bp->b_error = EIO;
 			break;
 		}
 		tsstart(sc, 1);
@@ -767,9 +760,8 @@ tsintr(void *arg)
 		 * No valid recovery procedures exist unless the tape
 		 * has labels or sequence numbers.
 		 */
-		aprint_error_dev(sc->sc_dev, "tape position lost\n");
-		if (bp != NULL)
-			bp->b_error = EIO;
+		printf("Tape position lost\n");
+		bp->b_error = EIO;
 		break;
 
 	case TS_TC_FCE:
@@ -780,22 +772,22 @@ tsintr(void *arg)
 		 * fatal class code field in the TSSR register for
 		 * additional information on the type of fatal error.
 		 */
-		aprint_error_dev(sc->sc_dev, "fatal controller error\n");
+		printf ("Fatal Controller Error\n");
 		prtstat(sc, sr);
 		break;
 
 	default:
-		aprint_error_dev(sc->sc_dev,
-		    "error 0x%x, resetting controller\n", sr & TS_TC);
+		printf ("%s: error 0x%x, resetting controller\n",
+			sc->sc_dev.dv_xname, sr & TS_TC);
 		tsreset(sc);
 	}
-	if ((bp = bufq_get(sc->sc_bufq)) != NULL) {
+	if ((bp = BUFQ_GET(sc->sc_bufq)) != NULL) {
 #ifdef TSDEBUG
-		printf("tsintr2: que %p\n", bufq_peek(sc->sc_bufq));
+		printf("tsintr2: que %p\n", BUFQ_PEEK(sc->sc_bufq));
 #endif
 		if (bp != &sc->ts_cbuf) {	/* no ioctl */
 			bus_dmamap_unload(sc->sc_dmat, sc->sc_dmam);
-			uba_done(sc->sc_uh);
+			uba_done((void *)device_parent(&sc->sc_dev));
 		}
 		bp->b_resid = sc->sc_vts->status.rbpcr;
 		biodone (bp);
@@ -809,11 +801,16 @@ tsintr(void *arg)
  * in the run state, call init to initialize the ts controller first.
  */
 int
-tsopen(dev_t dev, int flag, int type, struct lwp *l)
+tsopen(dev_t dev, int flag, int type, struct proc *p)
 {
-	struct ts_softc *sc = device_lookup_private(&ts_cd, TS_UNIT(dev));
+	struct ts_softc *sc;
+	int unit = TS_UNIT(dev);
 
-	if (sc == NULL)
+	if (unit >= ts_cd.cd_ndevs)
+		return ENXIO;
+
+	sc = ts_cd.cd_devs[unit];
+	if (sc == 0)
 		return ENXIO;
 
 	if (sc->sc_state < TS_RUNNING)
@@ -830,13 +827,13 @@ tsopen(dev_t dev, int flag, int type, struct lwp *l)
 	 * (ie. MTNOP) once and check the actual status.)
 	 */
 	if (TS_RCSR(TSSR) & TS_OFL) {
-		uprintf("%s: transport is offline.\n", device_xname(sc->sc_dev));
+		uprintf("%s: transport is offline.\n", XNAME);
 		sc->sc_openf = 0;
 		return EIO;		/* transport is offline */
 	}
 	tscommand(sc, dev, MTNOP, 1);
 	if ((flag & FWRITE) && (sc->sc_vts->status.xst0 & TS_SF_WLK)) {
-		uprintf("%s: no write ring.\n", device_xname(sc->sc_dev));
+		uprintf("%s: no write ring.\n", XNAME);
 		sc->sc_openf = 0;
 		return EROFS;
 	}
@@ -848,8 +845,8 @@ tsopen(dev_t dev, int flag, int type, struct lwp *l)
 #ifdef TSDEBUG
 	{
 		char buf[100];
-		snprintb(buf, sizeof(buf),
-		    TS_XST0_BITS, sc->sc_vts->status.xst0);
+		bitmask_snprintf(sc->sc_vts->status.xst0,
+		    TS_XST0_BITS, buf, sizeof(buf));
 		printf("tsopen: xst0 %s\n", buf);
 	}
 #endif
@@ -868,9 +865,9 @@ tsopen(dev_t dev, int flag, int type, struct lwp *l)
  * Make the tape available to others, by clearing openf flag.
  */
 int
-tsclose(dev_t dev, int flag, int type, struct lwp *l)
+tsclose(dev_t dev, int flag, int type, struct proc *p)
 {
-	struct ts_softc *sc = device_lookup_private(&ts_cd, TS_UNIT(dev));
+	struct ts_softc *sc = ts_cd.cd_devs[TS_UNIT(dev)];
 
 	if (flag == FWRITE || ((flag & FWRITE) && sc->sc_liowf)) {
 		/*
@@ -898,16 +895,16 @@ tsclose(dev_t dev, int flag, int type, struct lwp *l)
 void
 tsstrategy(struct buf *bp)
 {
-	struct ts_softc *sc = device_lookup_private(&ts_cd, TS_UNIT(bp->b_dev));
-	bool empty;
-	int s;
+	register int unit = TS_UNIT(bp->b_dev);
+	struct ts_softc *sc = (void *)ts_cd.cd_devs[unit];
+	int s, empty;
 
 #ifdef TSDEBUG
 	printf("buf: %p bcount %ld blkno %d\n", bp, bp->b_bcount, bp->b_blkno);
 #endif
 	s = splbio ();
-	empty = (bufq_peek(sc->sc_bufq) == NULL);
-	bufq_put(sc->sc_bufq, bp);
+	empty = (BUFQ_PEEK(sc->sc_bufq) == NULL);
+	BUFQ_PUT(sc->sc_bufq, bp);
 	if (empty)
 		tsstart(sc, 0);
 	splx(s);
@@ -918,14 +915,15 @@ tsstrategy(struct buf *bp)
  * Catch ioctl commands, and call the "command" routine to do them.
  */
 int
-tsioctl(dev_t dev,
-	u_long cmd,
-	void *data,
-	int flag,
-	struct lwp *l)
+tsioctl(dev, cmd, data, flag, p)
+	dev_t dev;
+	u_long cmd;
+	void *data;
+	int flag;
+	struct proc *p;
 {
 	struct buf *bp;
-	struct ts_softc * const sc = device_lookup_private(&ts_cd, TS_UNIT(dev));
+	struct ts_softc *sc;
 	struct mtop *mtop;	/* mag tape cmd op to perform */
 	struct mtget *mtget;	/* mag tape struct to get info in */
 	int callcount;		/* number of times to call routine */
@@ -937,6 +935,7 @@ tsioctl(dev_t dev,
 	printf("tsioctl (%x, %lx, %p, %d)\n", dev, cmd, data, flag);
 #endif
 
+	sc = ts_cd.cd_devs[TS_UNIT(dev)];
 	bp = &sc->ts_cbuf;
 
 	switch (cmd) {
@@ -1057,7 +1056,11 @@ tswrite(dev_t dev, struct uio *uio, int flag)
  *
  */
 int
-tsdump(dev_t dev, daddr_t blkno, void *va, size_t size)
+tsdump(dev, blkno, va, size)
+	dev_t dev;
+	daddr_t blkno;
+	void *va;
+	size_t size;
 {
 	return EIO;
 }

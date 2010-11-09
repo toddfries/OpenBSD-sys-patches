@@ -1,4 +1,4 @@
-/* $NetBSD: nsclpcsio_isa.c,v 1.28 2008/11/12 12:36:12 ad Exp $ */
+/* $NetBSD: nsclpcsio_isa.c,v 1.21 2007/11/09 01:09:47 xtraeme Exp $ */
 
 /*
  * Copyright (c) 2002
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: nsclpcsio_isa.c,v 1.28 2008/11/12 12:36:12 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: nsclpcsio_isa.c,v 1.21 2007/11/09 01:09:47 xtraeme Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -41,15 +41,15 @@ __KERNEL_RCSID(0, "$NetBSD: nsclpcsio_isa.c,v 1.28 2008/11/12 12:36:12 ad Exp $"
 #include <sys/gpio.h>
 #include <sys/bus.h>
 
-/* Don't use gpio for now in the module */
-#ifdef _MODULE
+/* Don't use gpio for now in the LKM */
+#ifdef _LKM
 #undef NGPIO
 #endif
 
 #include <dev/isa/isareg.h>
 #include <dev/isa/isavar.h>
 
-#ifndef _MODULE
+#ifndef _LKM
 #include "gpio.h"
 #endif
 #if NGPIO > 0
@@ -167,8 +167,7 @@ static const struct {
 #define SIO_VREF	1235	/* 1000.0 * VREF */
 
 struct nsclpcsio_softc {
-	device_t sc_dev;
-
+	struct device sc_dev;
 	bus_space_tag_t sc_iot;
 	bus_space_handle_t sc_ioh;
 
@@ -176,7 +175,7 @@ struct nsclpcsio_softc {
 	int sc_ld_en[SIO_LDNUM];
 
 	/* TMS and VLM */
-	struct sysmon_envsys *sc_sme;
+	struct sysmon_envsys sc_sysmon;
 	envsys_data_t sc_sensor[SIO_NUM_SENSORS];
 
 	kmutex_t sc_lock;
@@ -206,20 +205,20 @@ struct nsclpcsio_softc {
 	bus_space_read_1((sc)->sc_iot,			\
 	    (sc)->sc_ld_ioh[SIO_LDN_VLM], (reg))
 
-static int	nsclpcsio_isa_match(device_t, cfdata_t, void *);
-static void	nsclpcsio_isa_attach(device_t, device_t, void *);
-static int	nsclpcsio_isa_detach(device_t, int);
+static int	nsclpcsio_isa_match(struct device *, struct cfdata *, void *);
+static void	nsclpcsio_isa_attach(struct device *, struct device *, void *);
+static int	nsclpcsio_isa_detach(struct device *, int);
 
-CFATTACH_DECL_NEW(nsclpcsio_isa, sizeof(struct nsclpcsio_softc),
+CFATTACH_DECL(nsclpcsio_isa, sizeof(struct nsclpcsio_softc),
     nsclpcsio_isa_match, nsclpcsio_isa_attach, nsclpcsio_isa_detach, NULL);
 
 static uint8_t	nsread(bus_space_tag_t, bus_space_handle_t, int);
 static void	nswrite(bus_space_tag_t, bus_space_handle_t, int, uint8_t);
-static int	nscheck(bus_space_tag_t, int);
+static int nscheck(bus_space_tag_t, int);
 
 static void	nsclpcsio_tms_init(struct nsclpcsio_softc *);
 static void	nsclpcsio_vlm_init(struct nsclpcsio_softc *);
-static void	nsclpcsio_refresh(struct sysmon_envsys *, envsys_data_t *);
+static int	nsclpcsio_gtredata(struct sysmon_envsys *, envsys_data_t *);
 
 #if NGPIO > 0
 static void nsclpcsio_gpio_init(struct nsclpcsio_softc *);
@@ -261,7 +260,7 @@ nscheck(bus_space_tag_t iot, int base)
 }
 
 static int
-nsclpcsio_isa_match(device_t parent, cfdata_t match, void *aux)
+nsclpcsio_isa_match(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct isa_attach_args *ia = aux;
 	int iobase;
@@ -301,41 +300,8 @@ found:
 	return 1;
 }
 
-static struct sysmon_envsys *
-nsclpcsio_envsys_init(struct nsclpcsio_softc *sc)
-{
-	int i;
-	struct sysmon_envsys *sme;
-
-	sme = sysmon_envsys_create();
-	for (i = 0; i < SIO_NUM_SENSORS; i++) {
-		if (sysmon_envsys_sensor_attach(sme, &sc->sc_sensor[i]) != 0) {
-			aprint_error_dev(sc->sc_dev,
-			    "could not attach sensor %d", i);
-			goto err;
-		}
-	}
-
-	/*
-	 * Hook into the System Monitor.
-	 */
-	sme->sme_name = device_xname(sc->sc_dev);
-	sme->sme_cookie = sc;
-	sme->sme_refresh = nsclpcsio_refresh;
-
-	if ((i = sysmon_envsys_register(sme)) != 0) {
-		aprint_error_dev(sc->sc_dev,
-		    "unable to register with sysmon (%d)\n", i);
-		goto err;
-	}
-	return sme;
-err:
-	sysmon_envsys_destroy(sme);
-	return NULL;
-}
-
 static void
-nsclpcsio_isa_attach(device_t parent, device_t self, void *aux)
+nsclpcsio_isa_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct nsclpcsio_softc *sc = device_private(self);
 	struct isa_attach_args *ia = aux;
@@ -344,16 +310,15 @@ nsclpcsio_isa_attach(device_t parent, device_t self, void *aux)
 #endif
 	int i, iobase;
 
-	mutex_init(&sc->sc_lock, MUTEX_DEFAULT, IPL_NONE);
+	mutex_init(&sc->sc_lock, MUTEX_DRIVER, IPL_NONE);
 
-	sc->sc_dev = self;
 	sc->sc_iot = ia->ia_iot;
 	iobase = ia->ia_io[0].ir_addr;
 
 	if (bus_space_map(ia->ia_iot, iobase, 2, 0, &sc->sc_ioh)) {
 		aprint_error(": can't map i/o space\n");
-		return;
-	}
+			return;
+		}
 
 	aprint_normal(": NSC PC87366 rev. 0x%d ",
 	    nsread(sc->sc_iot, sc->sc_ioh, SIO_REG_SRID));
@@ -378,7 +343,7 @@ nsclpcsio_isa_attach(device_t parent, device_t self, void *aux)
 			    sio_ld[i].ld_iosize, 0,
 			    &sc->sc_ld_ioh[sio_ld[i].ld_num]))
 				continue;
-		}
+	}
 
 		sc->sc_ld_en[sio_ld[i].ld_num] = 1;
 		aprint_normal("%s ", sio_ld[i].ld_name);
@@ -386,12 +351,29 @@ nsclpcsio_isa_attach(device_t parent, device_t self, void *aux)
 
 	aprint_normal("\n");
 
+	for (i = 0; i < SIO_NUM_SENSORS; i++) {
+		sc->sc_sensor[i].sensor = i;
+		sc->sc_sensor[i].state = ENVSYS_SVALID;
+	}
+
 #if NGPIO > 0
 	nsclpcsio_gpio_init(sc);
 #endif
 	nsclpcsio_tms_init(sc);
 	nsclpcsio_vlm_init(sc);
-	sc->sc_sme = nsclpcsio_envsys_init(sc);
+
+	/*
+	 * Hook into the System Monitor.
+	 */
+	sc->sc_sysmon.sme_name = device_xname(&sc->sc_dev);
+	sc->sc_sysmon.sme_sensor_data = sc->sc_sensor;
+	sc->sc_sysmon.sme_cookie = sc;
+	sc->sc_sysmon.sme_gtredata = nsclpcsio_gtredata;
+	sc->sc_sysmon.sme_nsensors = SIO_NUM_SENSORS;
+
+	if (sysmon_envsys_register(&sc->sc_sysmon))
+		aprint_error("%s: unable to register with sysmon\n",
+		    sc->sc_dev.dv_xname);
 
 #if NGPIO > 0
 	/* attach GPIO framework */
@@ -399,32 +381,18 @@ nsclpcsio_isa_attach(device_t parent, device_t self, void *aux)
 		gba.gba_gc = &sc->sc_gpio_gc;
 		gba.gba_pins = sc->sc_gpio_pins;
 		gba.gba_npins = SIO_GPIO_NPINS;
-		config_found_ia(self, "gpiobus", &gba, NULL);
+		config_found_ia(&sc->sc_dev, "gpiobus", &gba, NULL);
 	}
 #endif
 }
 
 static int
-nsclpcsio_isa_detach(device_t self, int flags)
+nsclpcsio_isa_detach(struct device *self, int flags)
 {
-	int i, rc;
 	struct nsclpcsio_softc *sc = device_private(self);
 
-	if ((rc = config_detach_children(self, flags)) != 0)
-		return rc;
-
-	if (sc->sc_sme != NULL)
-		sysmon_envsys_unregister(sc->sc_sme);
+	sysmon_envsys_unregister(&sc->sc_sysmon);
 	mutex_destroy(&sc->sc_lock);
-
-	for (i = 0; i < __arraycount(sio_ld); i++) {
-		if (sc->sc_ld_en[sio_ld[i].ld_num] &&
-		    sio_ld[i].ld_iosize != 0) {
-			bus_space_unmap(sc->sc_iot,
-			    sc->sc_ld_ioh[sio_ld[i].ld_num],
-			    sio_ld[i].ld_iosize);
-		}
-	}
 
 	bus_space_unmap(sc->sc_iot, sc->sc_ioh, 2);
 
@@ -468,31 +436,31 @@ nsclpcsio_vlm_init(struct nsclpcsio_softc *sc)
 {
 	int i;
 	char tmp[16];
-	envsys_data_t *sensor = &sc->sc_sensor[SIO_VLM_OFF];
 
-	for (i = 0; i < SIO_NUM_SENSORS - SIO_VLM_OFF; i++) {
-		VLM_WRITE(sc, SIO_VLMBS, i);
+	for (i = SIO_VLM_OFF; i < SIO_NUM_SENSORS; i++) {
+		VLM_WRITE(sc, SIO_VLMBS, i - SIO_VLM_OFF);
 		VLM_WRITE(sc, SIO_VCHCFST, 0x01);
-		sensor[i].units = ENVSYS_SVOLTS_DC;
+		sc->sc_sensor[i].units = ENVSYS_SVOLTS_DC;
 	}
 
 	for (i = 0; i < 7; i++) {
 		(void)snprintf(tmp, sizeof(tmp), "VSENS%d", i);
-		COPYDESCR(sensor[i].desc, tmp);
+		COPYDESCR(sc->sc_sensor[i + SIO_VLM_OFF].desc, tmp);
 	}
 
-	COPYDESCR(sensor[7 ].desc, "VSB");
-	COPYDESCR(sensor[8 ].desc, "VDD");
-	COPYDESCR(sensor[9 ].desc, "VBAT");
-	COPYDESCR(sensor[10].desc, "AVDD");
-	COPYDESCR(sensor[11].desc, "TS1");
-	COPYDESCR(sensor[12].desc, "TS2");
-	COPYDESCR(sensor[13].desc, "TS3");
+	i += SIO_VLM_OFF;
+	COPYDESCR(sc->sc_sensor[i + 1].desc, "VSB");
+	COPYDESCR(sc->sc_sensor[i + 2].desc, "VDD");
+	COPYDESCR(sc->sc_sensor[i + 3].desc, "VBAT");
+	COPYDESCR(sc->sc_sensor[i + 4].desc, "AVDD");
+	COPYDESCR(sc->sc_sensor[i + 5].desc, "TS1");
+	COPYDESCR(sc->sc_sensor[i + 6].desc, "TS2");
+	COPYDESCR(sc->sc_sensor[i + 7].desc, "TS3");
 }
 
 
-static void
-nsclpcsio_refresh(struct sysmon_envsys *sme, envsys_data_t *edata)
+static int
+nsclpcsio_gtredata(struct sysmon_envsys *sme, envsys_data_t *edata)
 {
 	struct nsclpcsio_softc *sc = sme->sme_cookie;
 	uint8_t status, data;
@@ -538,6 +506,8 @@ nsclpcsio_refresh(struct sysmon_envsys *sme, envsys_data_t *edata)
 		}
 	}
 	mutex_exit(&sc->sc_lock);
+
+	return 0;
 }
 
 #if NGPIO > 0

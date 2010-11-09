@@ -1,4 +1,4 @@
-/*	$NetBSD: ofwgencfg_machdep.c,v 1.15 2008/11/30 18:21:32 martin Exp $	*/
+/*	$NetBSD: ofwgencfg_machdep.c,v 1.10 2006/10/26 22:49:36 bjh21 Exp $	*/
 
 /*
  * Copyright 1997
@@ -38,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ofwgencfg_machdep.c,v 1.15 2008/11/30 18:21:32 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ofwgencfg_machdep.c,v 1.10 2006/10/26 22:49:36 bjh21 Exp $");
 
 #include "opt_ddb.h"
 
@@ -63,9 +63,10 @@ __KERNEL_RCSID(0, "$NetBSD: ofwgencfg_machdep.c,v 1.15 2008/11/30 18:21:32 marti
 #include <machine/bootconfig.h>
 #include <machine/cpu.h>
 #include <machine/intr.h>
-#include <machine/irqhandler.h>
 #include <arm/arm32/machdep.h>
 #include <arm/undefined.h>
+
+#include "opt_ipkdb.h"
 
 #include <dev/ofw/openfirm.h>
 #include <machine/ofw.h>
@@ -201,6 +202,20 @@ initarm(void *cookie)
 
 	/* Set-up the IRQ system. */
 	irq_init();
+
+#if NKSYMS || defined(DDB) || defined(LKM)
+#ifdef __ELF__
+	ksyms_init(0, NULL, NULL);	/* XXX */
+#else
+	{
+		struct exec *kernexec = (struct exec *)KERNEL_TEXT_BASE;
+		extern int end;
+		extern char *esym;
+
+		ksyms_init(kernexec->a_syms, &end, esym);
+	}
+#endif /* __ELF__ */
+#endif
 
 #ifdef DDB
 	db_machine_init();

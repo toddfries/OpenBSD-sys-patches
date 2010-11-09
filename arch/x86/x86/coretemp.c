@@ -1,4 +1,4 @@
-/* $NetBSD: coretemp.c,v 1.11 2008/09/23 22:14:09 christos Exp $ */
+/* $NetBSD: coretemp.c,v 1.9 2008/01/28 22:49:49 xtraeme Exp $ */
 
 /*-
  * Copyright (c) 2007 Juan Romero Pardines.
@@ -36,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: coretemp.c,v 1.11 2008/09/23 22:14:09 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: coretemp.c,v 1.9 2008/01/28 22:49:49 xtraeme Exp $");
 
 #include <sys/param.h>
 #include <sys/kmem.h>
@@ -81,11 +81,11 @@ coretemp_register(struct cpu_info *ci)
 		return;
 
 	(void)snprintf(sc->sc_dvname, sizeof(sc->sc_dvname), "coretemp%d",
-	    (int)device_unit(ci->ci_dev));
-	cpumodel = CPUID2MODEL(ci->ci_signature);
+	    (int)ci->ci_cpuid);
+	cpumodel = CPUID2MODEL(ci->ci_cpuid);
 	/* extended model */
-	cpumodel += CPUID2EXTMODEL(ci->ci_signature);
-	cpumask = ci->ci_signature & 15;
+	cpumodel += CPUID2EXTMODEL(ci->ci_cpuid);
+	cpumask = ci->ci_cpuid & 15;
 
 	/*
 	 * Check for errata AE18.
@@ -118,15 +118,6 @@ coretemp_register(struct cpu_info *ci)
 			sc->sc_tjmax = 85;
 	}
 
-	/* 
-	 * Check if the MSR contains thermal reading valid bit, this
-	 * avoid false positives on systems that fake up a compatible
-	 * CPU that doesn't have access to these MSRs; such as VMWare.
-	 */
-	msr = rdmsr(MSR_THERM_STATUS);
-	if ((msr & __BIT(31)) == 0)
-		goto bad;
-
 	sc->sc_ci = ci;
 
 	/*
@@ -136,7 +127,7 @@ coretemp_register(struct cpu_info *ci)
 	sc->sc_sensor.flags = ENVSYS_FMONCRITICAL;
 	sc->sc_sensor.monitor = true;
 	(void)snprintf(sc->sc_sensor.desc, sizeof(sc->sc_sensor.desc),
-	    "%s temperature", device_xname(ci->ci_dev));
+	    "cpu%d temperature", (int)ci->ci_cpuid);
 
 	sc->sc_sme = sysmon_envsys_create();
 	if (sysmon_envsys_sensor_attach(sc->sc_sme, &sc->sc_sensor)) {

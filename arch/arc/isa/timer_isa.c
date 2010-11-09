@@ -1,4 +1,4 @@
-/*	$NetBSD: timer_isa.c,v 1.12 2008/07/05 08:46:25 tsutsui Exp $	*/
+/*	$NetBSD: timer_isa.c,v 1.10 2005/12/11 12:16:39 christos Exp $	*/
 /*	$OpenBSD: clock_mc.c,v 1.9 1998/03/16 09:38:26 pefo Exp $	*/
 /*	NetBSD: clock_mc.c,v 1.2 1995/06/28 04:30:30 cgd Exp 	*/
 
@@ -79,7 +79,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: timer_isa.c,v 1.12 2008/07/05 08:46:25 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: timer_isa.c,v 1.10 2005/12/11 12:16:39 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -91,6 +91,7 @@ __KERNEL_RCSID(0, "$NetBSD: timer_isa.c,v 1.12 2008/07/05 08:46:25 tsutsui Exp $
 #include <dev/isa/isareg.h>
 #include <dev/isa/isavar.h>
 
+#include <dev/isa/isareg.h>
 #include <dev/ic/i8253reg.h>
 
 #include <arc/arc/timervar.h>
@@ -100,21 +101,21 @@ __KERNEL_RCSID(0, "$NetBSD: timer_isa.c,v 1.12 2008/07/05 08:46:25 tsutsui Exp $
 #define TIMER_IRQ	0
 
 struct timer_isa_softc {
-	device_t sc_dev;
+	struct device sc_dev;
 
 	bus_space_tag_t sc_iot;
 	bus_space_handle_t sc_ioh;
 };
 
 /* Definition of the driver for autoconfig. */
-static int timer_isa_match(device_t, cfdata_t, void *);
-static void timer_isa_attach(device_t, device_t, void *);
+int timer_isa_match(struct device *, struct cfdata *, void *);
+void timer_isa_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(timer_isa, sizeof(struct timer_isa_softc),
+CFATTACH_DECL(timer_isa, sizeof(struct timer_isa_softc),
     timer_isa_match, timer_isa_attach, NULL, NULL);
 
 /* ISA timer access code */
-static void timer_isa_init(device_t);
+void timer_isa_init(struct device *);
 
 struct timerfns timerfns_isa = {
 	timer_isa_init
@@ -122,8 +123,8 @@ struct timerfns timerfns_isa = {
 
 int timer_isa_conf = 0;
 
-static int
-timer_isa_match(device_t parent, cfdata_t cf, void *aux)
+int
+timer_isa_match(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct isa_attach_args *ia = aux;
 	bus_space_handle_t ioh;
@@ -165,16 +166,14 @@ timer_isa_match(device_t parent, cfdata_t cf, void *aux)
 	return 1;
 }
 
-static void
-timer_isa_attach(device_t parent, device_t self, void *aux)
+void
+timer_isa_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct timer_isa_softc *sc = device_private(self);
+	struct timer_isa_softc *sc = (struct timer_isa_softc *)self;
 	struct isa_attach_args *ia = aux;
 	void *ih;
 
-	sc->sc_dev = self;
-
-	aprint_normal("\n");
+	printf("\n");
 
 	sc->sc_iot = ia->ia_iot;
 	if (bus_space_map(sc->sc_iot, ia->ia_io[0].ir_addr,
@@ -185,15 +184,15 @@ timer_isa_attach(device_t parent, device_t self, void *aux)
 	    IPL_CLOCK, (int (*)(void *))hardclock,
 	    NULL /* clockframe is hardcoded */);
 	if (ih == NULL)
-		aprint_error_dev(self, "can't establish interrupt\n");
+		printf("%s: can't establish interrupt\n", sc->sc_dev.dv_xname);
 
-	timerattach(self, &timerfns_isa);
+	timerattach(&sc->sc_dev, &timerfns_isa);
 }
 
-static void
-timer_isa_init(device_t self)
+void
+timer_isa_init(struct device *self)
 {
-	struct timer_isa_softc *sc = device_private(self);
+	struct timer_isa_softc *sc = (struct timer_isa_softc *)self;
 
 	bus_space_write_1(sc->sc_iot, sc->sc_ioh, TIMER_MODE,
 	    TIMER_SEL0 | TIMER_16BIT | TIMER_RATEGEN);

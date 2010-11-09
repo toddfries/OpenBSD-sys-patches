@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile,v 1.10 2009/01/12 07:56:31 tsutsui Exp $
+#	$NetBSD: Makefile,v 1.8 2006/06/29 03:46:43 lukem Exp $
 
 LIB=	iocs
 
@@ -6,9 +6,7 @@ NOLINT=# defined
 NOPROFILE=# defined
 NOPIC=# defined
 
-.include "../Makefile.booters"
-
-CPPFLAGS+=	-I.
+AWK?=	awk
 
 ASM=	b_keyinp.o b_keysns.o b_sftsns.o bitsns.o skeyset.o tvctrl.o \
 	ledmod.o tgusemd.o defchr.o crtmod.o contrast.o hsvtorgb.o tpalet.o \
@@ -56,9 +54,7 @@ MAKECALL=${.CURDIR}/makeiocscalls.awk
 ${ASM}: ${.CURDIR}/iocs.h ${MAKECALL}
 	${_MKTARGET_COMPILE}
 	@grep -i 'IOCS_${.PREFIX} ' ${.CURDIR}/iocs.h | \
-	    ${TOOL_AWK} -f ${MAKECALL} | \
-	    ${CPP} ${CPPFLAGS} | \
-	    ${AS} -o ${.TARGET}
+	    ${AWK} -f ${MAKECALL} | ${CPP} ${CPPFLAGS} | ${AS} -o ${.TARGET}
 
 # only needed during build
 libinstall::

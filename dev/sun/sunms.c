@@ -1,4 +1,4 @@
-/*	$NetBSD: sunms.c,v 1.29 2008/04/21 08:16:12 martin Exp $	*/
+/*	$NetBSD: sunms.c,v 1.27 2007/07/09 21:01:23 ad Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -52,7 +52,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sunms.c,v 1.29 2008/04/21 08:16:12 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sunms.c,v 1.27 2007/07/09 21:01:23 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -88,12 +88,12 @@ int	sunms_bps = SUN_MS_BPS;
 int	sunms_bps = MS_DEFAULT_BPS;
 #endif
 
-static int	sunms_match(device_t, cfdata_t, void *);
-static void	sunms_attach(device_t, device_t, void *);
+static int	sunms_match(struct device *, struct cfdata *, void *);
+static void	sunms_attach(struct device *, struct device *, void *);
 static int	sunmsiopen(struct device *, int mode);
 int	sunmsinput(int, struct tty *);
 
-CFATTACH_DECL_NEW(ms_tty, sizeof(struct ms_softc),
+CFATTACH_DECL(ms_tty, sizeof(struct ms_softc),
     sunms_match, sunms_attach, NULL, NULL);
 
 struct linesw sunms_disc = {
@@ -123,7 +123,10 @@ const struct wsmouse_accessops	sunms_accessops = {
  * ms_match: how is this zs channel configured?
  */
 int
-sunms_match(device_t parent, cfdata_t cf, void *aux)
+sunms_match(parent, cf, aux)
+	struct device *parent;
+	struct cfdata *cf;
+	void   *aux;
 {
 	struct kbd_ms_tty_attach_args *args = aux;
 
@@ -137,7 +140,10 @@ sunms_match(device_t parent, cfdata_t cf, void *aux)
 }
 
 void
-sunms_attach(device_t parent, device_t self, void *aux)
+sunms_attach(parent, self, aux)
+	struct device *parent, *self;
+	void   *aux;
+
 {
 	struct ms_softc *ms = device_private(self);
 	struct kbd_ms_tty_attach_args *args = aux;
@@ -148,16 +154,15 @@ sunms_attach(device_t parent, device_t self, void *aux)
 	struct wsmousedev_attach_args a;
 #endif
 
-	ms->ms_dev = self;
-	cf = device_cfdata(self);
-	ms_unit = device_unit(self);
+	cf = device_cfdata(&ms->ms_dev);
+	ms_unit = device_unit(&ms->ms_dev);
 	tp->t_sc  = ms;
 	tp->t_dev = args->kmta_dev;
-	ms->ms_priv = tp;
-	ms->ms_deviopen = sunmsiopen;
-	ms->ms_deviclose = NULL;
+	ms->ms_cs = (struct zs_chanstate *)tp;
+        ms->ms_deviopen = sunmsiopen;
+        ms->ms_deviclose = NULL;
 
-	aprint_normal("\n");
+	printf("\n");
 
 	/* Initialize the speed, etc. */
 	if (ttyldisc_attach(&sunms_disc) != 0)
@@ -187,10 +192,12 @@ sunms_attach(device_t parent, device_t self, void *aux)
  * mechanism.
  */
 int
-sunmsiopen(device_t dev, int flags)
+sunmsiopen(dev, flags)
+	struct device *dev;
+	int flags;
 {
-	struct ms_softc *ms = device_private(dev);
-	struct tty *tp = ms->ms_priv;
+	struct ms_softc *ms = (void *) dev;
+	struct tty *tp = (struct tty *)ms->ms_cs;
 	struct lwp *l = curlwp ? curlwp : &lwp0;
 	struct termios t;
 	int error;
@@ -211,9 +218,11 @@ sunmsiopen(device_t dev, int flags)
 }
 
 int
-sunmsinput(int c, struct tty *tp)
+sunmsinput(c, tp)
+	int c;
+	struct tty *tp;
 {
-	struct ms_softc *ms = tp->t_sc;
+	struct ms_softc *ms = (struct ms_softc *)tp->t_sc;
 
 	if (c & TTY_ERRORMASK) c = -1;
 	else c &= TTY_CHARMASK;
@@ -224,7 +233,12 @@ sunmsinput(int c, struct tty *tp)
 }
 
 int
-sunms_ioctl(void *v, u_long cmd, void *data, int flag, struct lwp *l)
+sunms_ioctl(v, cmd, data, flag, l)
+	void *v;
+	u_long cmd;
+	void *data;
+	int flag;
+	struct lwp *l;
 {
 /*	struct ms_softc *sc = v; */
 
@@ -240,7 +254,8 @@ sunms_ioctl(void *v, u_long cmd, void *data, int flag, struct lwp *l)
 }
 
 int
-sunms_enable(void *v)
+sunms_enable(v)
+	void *v;
 {
 	struct ms_softc *ms = v;
 	int err;
@@ -249,7 +264,7 @@ sunms_enable(void *v)
 	if (ms->ms_ready)
 		return EBUSY;
 
-	err = sunmsiopen(ms->ms_dev, 0);
+	err = sunmsiopen(v, 0);
 	if (err)
 		return err;
 
@@ -261,7 +276,8 @@ sunms_enable(void *v)
 }
 
 void
-sunms_disable(void *v)
+sunms_disable(v)
+	void *v;
 {
 	struct ms_softc *ms = v;
 	int s;

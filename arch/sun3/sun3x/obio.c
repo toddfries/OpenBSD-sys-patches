@@ -1,4 +1,4 @@
-/*	$NetBSD: obio.c,v 1.32 2008/06/28 12:13:38 tsutsui Exp $	*/
+/*	$NetBSD: obio.c,v 1.28 2006/10/03 13:02:32 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: obio.c,v 1.32 2008/06/28 12:13:38 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: obio.c,v 1.28 2006/10/03 13:02:32 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -38,27 +45,26 @@ __KERNEL_RCSID(0, "$NetBSD: obio.c,v 1.32 2008/06/28 12:13:38 tsutsui Exp $");
 
 #include <uvm/uvm_extern.h>
 
-#define _SUN68K_BUS_DMA_PRIVATE
 #include <machine/autoconf.h>
 #include <machine/bus.h>
-#include <machine/dvma.h>
 #include <machine/mon.h>
 #include <machine/pte.h>
 
 #include <sun3/sun3/machdep.h>
 #include <sun3/sun3x/obio.h>
 
-static int	obio_match(device_t, cfdata_t, void *);
-static void	obio_attach(device_t, device_t, void *);
+static int	obio_match(struct device *, struct cfdata *, void *);
+static void	obio_attach(struct device *, struct device *, void *);
 static int	obio_print(void *, const char *);
-static int	obio_submatch(device_t, cfdata_t, const int *, void *);
+static int	obio_submatch(struct device *, struct cfdata *,
+			      const int *, void *);
 
 struct obio_softc {
-	device_t	sc_dev;
+	struct device	sc_dev;
 	bus_space_tag_t	sc_bustag;
 	bus_dma_tag_t	sc_dmatag;
 };
-CFATTACH_DECL_NEW(obio, sizeof(struct obio_softc),
+CFATTACH_DECL(obio, sizeof(struct obio_softc),
     obio_match, obio_attach, NULL, NULL);
 
 static int obio_attached;
@@ -67,8 +73,6 @@ static int obio_bus_map(bus_space_tag_t, bus_type_t, bus_addr_t, bus_size_t,
     int, vaddr_t, bus_space_handle_t *);
 static paddr_t obio_bus_mmap(bus_space_tag_t, bus_type_t, bus_addr_t,
     off_t, int, int);
-static int obio_dmamap_load(bus_dma_tag_t, bus_dmamap_t, void *, bus_size_t,
-    struct proc *, int);
 
 static struct sun68k_bus_space_tag obio_space_tag = {
 	NULL,				/* cookie */
@@ -83,10 +87,8 @@ static struct sun68k_bus_space_tag obio_space_tag = {
 	NULL				/* bus_space_poke_N */
 };
 
-static struct sun68k_bus_dma_tag obio_dma_tag;
-
 static int 
-obio_match(device_t parent, cfdata_t cf, void *aux)
+obio_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct confargs *ca = aux;
 
@@ -154,20 +156,20 @@ static paddr_t obio_alist[] = {
 	OBIO_FDC,	/* floppy disk (3/80) */
 	OBIO_PRINTER_PORT, /* printer port (3/80) */
 };
-#define OBIO_ALIST_LEN	__arraycount(obio_alist)
+#define OBIO_ALIST_LEN (sizeof(obio_alist) / \
+                        sizeof(obio_alist[0]))
 
 static void 
 obio_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct confargs *ca = aux;
-	struct obio_softc *sc = device_private(self);
+	struct obio_softc *sc = (void *)self;
 	struct confargs oba;
 	int i;
 
 	obio_attached = 1;
-	sc->sc_dev = self;
 
-	aprint_normal("\n");
+	printf("\n");
 
 	sc->sc_bustag = ca->ca_bustag;
 	sc->sc_dmatag = ca->ca_dmatag;
@@ -175,13 +177,8 @@ obio_attach(struct device *parent, struct device *self, void *aux)
 	obio_space_tag.cookie = sc;
 	obio_space_tag.parent = sc->sc_bustag;
 
-	obio_dma_tag = *sc->sc_dmatag;
-	obio_dma_tag._cookie = sc;
-	obio_dma_tag._dmamap_load = obio_dmamap_load;
-
 	oba = *ca;
 	oba.ca_bustag = &obio_space_tag;
-	oba.ca_dmatag = &obio_dma_tag;
 
 	/* Configure these in the order listed above. */
 	for (i = 0; i < OBIO_ALIST_LEN; i++) {
@@ -205,14 +202,15 @@ obio_print(void *args, const char *name)
 
 	/* Be quiet about empty OBIO locations. */
 	if (name)
-		return QUIET;
+		return(QUIET);
 
 	/* Otherwise do the usual. */
-	return bus_print(args, name);
+	return(bus_print(args, name));
 }
 
 int 
-obio_submatch(device_t parent, cfdata_t cf, const int *ldesc, void *aux)
+obio_submatch(struct device *parent, struct cfdata *cf,
+	      const int *ldesc, void *aux)
 {
 	struct confargs *ca = aux;
 
@@ -225,8 +223,8 @@ obio_submatch(device_t parent, cfdata_t cf, const int *ldesc, void *aux)
 	 */
 #ifdef	DIAGNOSTIC
 	if (cf->cf_paddr == -1)
-		panic("%s: invalid address for: %s%d",
-		    __func__, cf->cf_name, cf->cf_unit);
+		panic("obio_submatch: invalid address for: %s%d",
+			cf->cf_name, cf->cf_unit);
 #endif
 
 	/*
@@ -247,7 +245,7 @@ obio_submatch(device_t parent, cfdata_t cf, const int *ldesc, void *aux)
 	ca->ca_intvec = cf->cf_intvec;
 
 	/* Now call the match function of the potential child. */
-	return config_match(parent, cf, aux);
+	return (config_match(parent, cf, aux));
 }
 
 
@@ -268,7 +266,8 @@ static struct prom_map {
 	{ OBIO_ZS_TTY_AB, 0 },	/* Serial Ports */
 	{ OBIO_EEPROM,    0 },	/* EEPROM/IDPROM/clock */
 };
-#define PROM_MAP_CNT	__arraycount(prom_mappings)
+#define PROM_MAP_CNT (sizeof(prom_mappings) / \
+		      sizeof(prom_mappings[0]))
 
 /*
  * Find a virtual address for a device at physical address 'pa'.
@@ -316,7 +315,8 @@ save_prom_mappings(void)
 	mon_pte = *romVectorPtr->monptaddr;
 
 	for (va = SUN3X_MON_KDB_BASE; va < SUN3X_MONEND;
-	    va += PAGE_SIZE, mon_pte++) {
+		 va += PAGE_SIZE, mon_pte++)
+	{
 		/* Is this a valid mapping to OBIO? */
 		/* XXX - Some macros would be nice... */
 		if ((*mon_pte & 0xF0000003) != 0x60000001)
@@ -333,6 +333,7 @@ save_prom_mappings(void)
 			}
 		}
 	}
+
 }
 
 /*
@@ -371,7 +372,6 @@ make_required_mappings(void)
 void 
 obio_init(void)
 {
-
 	save_prom_mappings();
 	make_required_mappings();
 
@@ -403,16 +403,4 @@ obio_bus_mmap(bus_space_tag_t t, bus_type_t btype, bus_addr_t paddr, off_t off,
 
 	return bus_space_mmap2(sc->sc_bustag, PMAP_OBIO, paddr, off, prot,
 	    flags);
-}
-
-static int
-obio_dmamap_load(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
-    bus_size_t buflen, struct proc *p, int flags)
-{
-	int error;
-
-	error = _bus_dmamap_load(t, map, buf, buflen, p, flags);
-	if (error == 0)
-		map->dm_segs[0].ds_addr &= DVMA_OBIO_SLAVE_MASK;
-	return error;
 }

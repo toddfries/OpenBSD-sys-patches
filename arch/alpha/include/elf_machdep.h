@@ -1,16 +1,13 @@
-/* $NetBSD: elf_machdep.h,v 1.10 2001/12/09 23:05:56 thorpej Exp $ */
+/* $NetBSD: elf_machdep.h,v 1.12 2010/09/30 09:11:19 skrll Exp $ */
 
 #ifndef	_ALPHA_ELF_MACHDEP_H_
 #define	_ALPHA_ELF_MACHDEP_H_
 
 /*
- * Alpha ELF uses different (non-standard) definitions of Elf64_Sword
- * and Elf64_Word.
+ * Alpha ELF uses different (non-standard) definitions for the symbol
+ * hash table section.
  */
-typedef	int64_t		Elf64_Sword;
-#define	ELF64_FSZ_SWORD	8
-typedef	uint64_t	Elf64_Word;
-#define	ELF64_FSZ_WORD	8
+#define	Elf_Symindx	uint64_t
 
 #define	ELF32_MACHDEP_ENDIANNESS	XXX	/* break compilation */
 #define	ELF32_MACHDEP_ID_CASES						\
@@ -57,6 +54,21 @@ typedef	uint64_t	Elf64_Word;
 #define	R_ALPHA_GLOB_DAT	25	/* Create GOT entry */
 #define	R_ALPHA_JMP_SLOT	26	/* Create PLT entry */
 #define	R_ALPHA_RELATIVE	27	/* Adjust by program base */
+
+/* TLS relocations */
+#define	R_ALPHA_TLS_GD		29
+#define	R_ALPHA_TLSLDM		30
+#define	R_ALPHA_DTPMOD64	31
+#define	R_ALPHA_GOTDTPREL	32
+#define	R_ALPHA_DTPREL64	33
+#define	R_ALPHA_DTPRELHI	34
+#define	R_ALPHA_DTPRELLO	35
+#define	R_ALPHA_DTPREL16	36
+#define	R_ALPHA_GOTTPREL	37
+#define	R_ALPHA_TPREL64		38
+#define	R_ALPHA_TPRELHI		39
+#define	R_ALPHA_TPRELLO		40
+#define	R_ALPHA_TPREL16		41
 
 #define	R_TYPE(name)		__CONCAT(R_ALPHA_,name)
 

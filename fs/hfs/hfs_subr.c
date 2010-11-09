@@ -1,4 +1,4 @@
-/*	$NetBSD: hfs_subr.c,v 1.11 2008/11/16 19:34:30 pooka Exp $	*/
+/*	$NetBSD: hfs_subr.c,v 1.14 2010/06/24 13:03:09 hannken Exp $	*/
 
 /*-
  * Copyright (c) 2005, 2007 The NetBSD Foundation, Inc.
@@ -30,7 +30,7 @@
  */                                     
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: hfs_subr.c,v 1.11 2008/11/16 19:34:30 pooka Exp $");
+__KERNEL_RCSID(0, "$NetBSD: hfs_subr.c,v 1.14 2010/06/24 13:03:09 hannken Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -156,7 +156,7 @@ hfs_libcb_opendev(
 	hfs_libcb_data* cbdata = NULL;
 	hfs_libcb_argsopen* args;
 	struct partinfo dpart;
-	int result;
+	int result, mode;
 
 	result = 0;
 	args = (hfs_libcb_argsopen*)(cbargs->openvol);
@@ -176,16 +176,19 @@ hfs_libcb_opendev(
 	cbdata->devvp = NULL;
 	
 	/* Open the device node. */
-	if ((result = VOP_OPEN(args->devvp, vol->readonly? FREAD : FREAD|FWRITE,
+	mode = vol->readonly ? FREAD : FREAD|FWRITE;
+	if ((result = VOP_OPEN(args->devvp, mode,
 		FSCRED)) != 0)
 		goto error;
 
 	/* Flush out any old buffers remaining from a previous use. */
 	vn_lock(args->devvp, LK_EXCLUSIVE | LK_RETRY);
 	result = vinvalbuf(args->devvp, V_SAVE, args->cred, args->l, 0, 0);
-	VOP_UNLOCK(args->devvp, 0);
-	if (result != 0)
+	VOP_UNLOCK(args->devvp);
+	if (result != 0) {
+		VOP_CLOSE(args->devvp, mode, FSCRED);
 		goto error;
+	}
 
 	cbdata->devvp = args->devvp;
 
@@ -204,7 +207,7 @@ error:
 			vn_lock(cbdata->devvp, LK_EXCLUSIVE | LK_RETRY);
 			(void)VOP_CLOSE(cbdata->devvp, vol->readonly ? FREAD :
 				FREAD | FWRITE, NOCRED);
-			VOP_UNLOCK(cbdata->devvp, 0);
+			VOP_UNLOCK(cbdata->devvp);
 		}
 		free(cbdata, M_HFSMNT);
 		vol->cbdata = NULL;
@@ -227,7 +230,7 @@ hfs_libcb_closedev(hfs_volume* in_vol, hfs_callback_args* cbargs)
 			vn_lock(devvp, LK_EXCLUSIVE | LK_RETRY);
 			(void)VOP_CLOSE(devvp,
 			    in_vol->readonly ? FREAD : FREAD | FWRITE, NOCRED);
-			/* XXX do we need a VOP_UNLOCK() here? */
+			VOP_UNLOCK(devvp);
 		}
 
 		free(in_vol->cbdata, M_HFSMNT);

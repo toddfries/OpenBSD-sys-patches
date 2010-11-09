@@ -1,4 +1,4 @@
-/*	$NetBSD: criov.c,v 1.6 2008/02/01 04:52:35 tls Exp $ */
+/*	$NetBSD: criov.c,v 1.4 2005/12/11 12:25:20 christos Exp $ */
 /*      $OpenBSD: criov.c,v 1.11 2002/06/10 19:36:43 espie Exp $	*/
 
 /*
@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: criov.c,v 1.6 2008/02/01 04:52:35 tls Exp $");
+__KERNEL_RCSID(0, "$NetBSD: criov.c,v 1.4 2005/12/11 12:25:20 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -49,7 +49,7 @@ void
 cuio_copydata(uio, off, len, cp)
 	struct uio *uio;
 	int off, len;
-	void *cp;
+	caddr_t cp;
 {
 	struct iovec *iov = uio->uio_iov;
 	int iol = uio->uio_iovcnt;
@@ -72,9 +72,9 @@ cuio_copydata(uio, off, len, cp)
 		if (iol == 0)
 			panic("cuio_copydata: empty");
 		count = min(iov->iov_len - off, len);
-		memcpy(cp, (char *)iov->iov_base + off, count);
+		bcopy(((caddr_t)iov->iov_base) + off, cp, count);
 		len -= count;
-		cp = (char *)cp + count;
+		cp += count;
 		off = 0;
 		iol--;
 		iov++;
@@ -85,7 +85,7 @@ void
 cuio_copyback(uio, off, len, cp)
 	struct uio *uio;
 	int off, len;
-	void *cp;
+	caddr_t cp;
 {
 	struct iovec *iov = uio->uio_iov;
 	int iol = uio->uio_iovcnt;
@@ -108,9 +108,9 @@ cuio_copyback(uio, off, len, cp)
 		if (iol == 0)
 			panic("uio_copyback: empty");
 		count = min(iov->iov_len - off, len);
-		memcpy((char *)iov->iov_base + off, cp, count);
+		bcopy(cp, ((caddr_t)iov->iov_base) + off, count);
 		len -= count;
-		cp = (char *)cp + count;
+		cp += count;
 		off = 0;
 		iol--;
 		iov++;
@@ -120,6 +120,37 @@ cuio_copyback(uio, off, len, cp)
 /*
  * Return a pointer to iov/offset of location in iovec list.
  */
+#ifdef __FreeBSD__
+struct iovec *
+cuio_getptr(struct uio *uio, int loc, int *off)
+{
+	struct iovec *iov = uio->uio_iov;
+	int iol = uio->uio_iovcnt;
+
+	while (loc >= 0) {
+		/* Normal end of search */
+		if (loc < iov->iov_len) {
+	    		*off = loc;
+	    		return (iov);
+		}
+
+		loc -= iov->iov_len;
+		if (iol == 0) {
+			if (loc == 0) {
+				/* Point at the end of valid data */
+				*off = iov->iov_len;
+				return (iov);
+			} else
+				return (NULL);
+		} else {
+			iov++, iol--;
+		}
+    	}
+
+	return (NULL);
+}
+
+#else
 
 int
 cuio_getptr(struct uio *uio, int loc, int *off)
@@ -145,10 +176,11 @@ cuio_getptr(struct uio *uio, int loc, int *off)
 
 	return (-1);
 }
+#endif
 
 int
 cuio_apply(struct uio *uio, int off, int len,
-    int (*f)(void *, void *, unsigned int), void *fstate)
+    int (*f)(caddr_t, caddr_t, unsigned int), caddr_t fstate)
 {
 	int rval, ind, uiolen;
 	unsigned int count;
@@ -174,7 +206,7 @@ cuio_apply(struct uio *uio, int off, int len,
 		count = min(uio->uio_iov[ind].iov_len - off, len);
 
 		rval = f(fstate,
-			 ((char *)uio->uio_iov[ind].iov_base + off), count);
+			 ((caddr_t)uio->uio_iov[ind].iov_base + off), count);
 		if (rval)
 			return (rval);
 

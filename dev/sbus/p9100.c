@@ -1,4 +1,4 @@
-/*	$NetBSD: p9100.c,v 1.40 2008/12/26 22:37:29 he Exp $ */
+/*	$NetBSD: p9100.c,v 1.36 2007/10/19 12:01:12 ad Exp $ */
 
 /*-
  * Copyright (c) 1998, 2005, 2006 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -38,7 +45,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: p9100.c,v 1.40 2008/12/26 22:37:29 he Exp $");
+__KERNEL_RCSID(0, "$NetBSD: p9100.c,v 1.36 2007/10/19 12:01:12 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -184,9 +191,7 @@ static uint8_t	p9100_ramdac_read(struct p9100_softc *, bus_size_t);
 static void	p9100_ramdac_write(struct p9100_softc *, bus_size_t, uint8_t);
 
 static uint8_t	p9100_ramdac_read_ctl(struct p9100_softc *, int);
-#if NTCTRL > 0
 static void	p9100_ramdac_write_ctl(struct p9100_softc *, int, uint8_t);
-#endif
 
 static void 	p9100_init_engine(struct p9100_softc *);
 
@@ -234,9 +239,7 @@ static int	p9100_intr(void *);
 /* power management stuff */
 static void p9100_power_hook(int, void *);
 
-#if NTCTRL > 0
 static void p9100_set_extvga(void *, int);
-#endif
 
 #if NWSDISPLAY > 0
 struct wsdisplay_accessops p9100_accessops = {
@@ -274,7 +277,7 @@ p9100_sbus_match(struct device *parent, struct cfdata *cf, void *aux)
 static void
 p9100_sbus_attach(struct device *parent, struct device *self, void *args)
 {
-	struct p9100_softc *sc = device_private(self);
+	struct p9100_softc *sc = (struct p9100_softc *)self;
 	struct sbus_attach_args *sa = args;
 	struct fbdevice *fb = &sc->sc_fb;
 	int isconsole;
@@ -319,8 +322,8 @@ p9100_sbus_attach(struct device *parent, struct device *self, void *args)
 	node = sa->sa_node;
 	isconsole = fb_is_console(node);
 	if (!isconsole) {
-		aprint_normal("\n");
-		aprint_error_dev(self, "fatal error: PROM didn't configure device\n");
+		printf("\n%s: fatal error: PROM didn't configure device\n",
+		    self->dv_xname);
 		return;
 	}
 
@@ -339,7 +342,7 @@ p9100_sbus_attach(struct device *parent, struct device *self, void *args)
 			  */
 			 /*sc->sc_ctl_psize*/ 0x8000,
 			 /*BUS_SPACE_MAP_LINEAR*/0, &sc->sc_ctl_memh) != 0) {
-		aprint_error_dev(self, "cannot map control registers\n");
+		printf("%s: cannot map control registers\n", self->dv_xname);
 		return;
 	}
 
@@ -352,7 +355,7 @@ p9100_sbus_attach(struct device *parent, struct device *self, void *args)
 				sa->sa_reg[2].oa_base,
 				sc->sc_fb_psize,
 				BUS_SPACE_MAP_LINEAR, &sc->sc_fb_memh) != 0) {
-			aprint_error_dev(self, "cannot map framebuffer\n");
+			printf("%s: cannot map framebuffer\n", self->dv_xname);
 			return;
 		}
 		fb->fb_pixels = (char *)sc->sc_fb_memh;
@@ -419,7 +422,7 @@ p9100_sbus_attach(struct device *parent, struct device *self, void *args)
 
 	if (shutdownhook_establish(p9100_shutdown, sc) == NULL) {
 		panic("%s: could not establish shutdown hook",
-		      device_xname(&sc->sc_dev));
+		      sc->sc_dev.dv_xname);
 	}
 
 	if (isconsole) {
@@ -470,7 +473,7 @@ p9100_sbus_attach(struct device *parent, struct device *self, void *args)
 	/* register with power management */
 	sc->sc_video = 1;
 	sc->sc_powerstate = PWR_RESUME;
-	powerhook_establish(device_xname(&sc->sc_dev), p9100_power_hook, sc);
+	powerhook_establish(sc->sc_dev.dv_xname, p9100_power_hook, sc);
 
 #if NTCTRL > 0
 	/* register callback for external monitor status change */
@@ -505,7 +508,7 @@ p9100open(dev_t dev, int flags, int mode, struct lwp *l)
 {
 	int unit = minor(dev);
 
-	if (device_lookup(&pnozz_cd, unit) == NULL)
+	if (unit >= pnozz_cd.cd_ndevs || pnozz_cd.cd_devs[unit] == NULL)
 		return (ENXIO);
 	return (0);
 }
@@ -513,7 +516,7 @@ p9100open(dev_t dev, int flags, int mode, struct lwp *l)
 int
 p9100ioctl(dev_t dev, u_long cmd, void *data, int flags, struct lwp *l)
 {
-	struct p9100_softc *sc = device_lookup_private(&pnozz_cd, minor(dev));
+	struct p9100_softc *sc = pnozz_cd.cd_devs[minor(dev)];
 	struct fbgattr *fba;
 	int error, v;
 
@@ -880,7 +883,6 @@ p9100_ramdac_read_ctl(struct p9100_softc *sc, int off)
 	return p9100_ramdac_read(sc, DAC_INDX_DATA);
 }
 
-#if NTCTRL > 0
 static void
 p9100_ramdac_write_ctl(struct p9100_softc *sc, int off, uint8_t val)
 {
@@ -888,7 +890,6 @@ p9100_ramdac_write_ctl(struct p9100_softc *sc, int off, uint8_t val)
 	p9100_ramdac_write(sc, DAC_INDX_HI, (off & 0xff00) >> 8);
 	p9100_ramdac_write(sc, DAC_INDX_DATA, val);
 }
-#endif /* NTCTRL > 0 */
 
 /*
  * Undo the effect of an FBIOSVIDEO that turns the video off.
@@ -896,7 +897,7 @@ p9100_ramdac_write_ctl(struct p9100_softc *sc, int off, uint8_t val)
 static void
 p9100unblank(struct device *dev)
 {
-	struct p9100_softc *sc = device_private(dev);
+	struct p9100_softc *sc = (struct p9100_softc *)dev;
 
 	p9100_set_video((struct p9100_softc *)dev, 1);
 
@@ -990,7 +991,7 @@ p9100loadcmap(struct p9100_softc *sc, int start, int ncolors)
 static paddr_t
 p9100mmap(dev_t dev, off_t off, int prot)
 {
-	struct p9100_softc *sc = device_lookup_private(&pnozz_cd, minor(dev));
+	struct p9100_softc *sc = pnozz_cd.cd_devs[minor(dev)];
 
 	if (off & PGOFSET)
 		panic("p9100mmap");
@@ -1549,7 +1550,6 @@ p9100_loadcursor(struct p9100_softc *sc)
 #endif
 }
 
-#if NTCTRL > 0
 static void
 p9100_set_extvga(void *cookie, int status)
 {
@@ -1560,7 +1560,7 @@ p9100_set_extvga(void *cookie, int status)
 	s = splhigh();
 #endif
 #ifdef DEBUG
-	printf("%s: external VGA %s\n", device_xname(&sc->sc_dev),
+	printf("%s: external VGA %s\n", sc->sc_dev.dv_xname,
 	    status ? "on" : "off");
 #endif
 	sc->sc_last_offset = 0xffffffff;
@@ -1578,4 +1578,3 @@ p9100_set_extvga(void *cookie, int status)
 	splx(s);
 #endif
 }
-#endif /* NTCTRL > 0 */

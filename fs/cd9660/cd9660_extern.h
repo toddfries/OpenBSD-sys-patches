@@ -1,4 +1,4 @@
-/*	$NetBSD: cd9660_extern.h,v 1.24 2008/06/28 01:34:05 rumble Exp $	*/
+/*	$NetBSD: cd9660_extern.h,v 1.20 2006/07/13 12:00:25 martin Exp $	*/
 
 /*-
  * Copyright (c) 1994
@@ -92,13 +92,30 @@ struct iso_mnt {
 
 #ifdef _KERNEL
 
-VFS_PROTOS(cd9660);
-
 #include <sys/mallocvar.h>
 MALLOC_DECLARE(M_ISOFSMNT);
 
 extern struct pool cd9660_node_pool;
 extern int cd9660_utf8_joliet;
+
+int cd9660_mount(struct mount *,
+	    const char *, void *, struct nameidata *, struct lwp *);
+int cd9660_start(struct mount *, int, struct lwp *);
+int cd9660_unmount(struct mount *, int, struct lwp *);
+int cd9660_root(struct mount *, struct vnode **);
+int cd9660_quotactl(struct mount *, int, uid_t, void *, struct lwp *);
+int cd9660_statvfs(struct mount *, struct statvfs *, struct lwp *);
+int cd9660_sync(struct mount *, int, kauth_cred_t, struct lwp *);
+int cd9660_vget(struct mount *, ino_t, struct vnode **);
+int cd9660_fhtovp(struct mount *, struct fid *, struct vnode **);
+int cd9660_vptofh(struct vnode *, struct fid *, size_t *);
+void cd9660_init(void);
+void cd9660_reinit(void);
+void cd9660_done(void);
+
+#ifdef SYSCTL_SETUP_PROTO
+SYSCTL_SETUP_PROTO(sysctl_vfs_cd9660_setup);
+#endif /* SYSCTL_SETUP_PROTO */
 
 int cd9660_mountroot(void);
 
@@ -108,7 +125,7 @@ extern int (**cd9660_fifoop_p)(void *);
 
 int isochar(const u_char *, const u_char *, int, u_int16_t *);
 int isofncmp(const u_char *, size_t, const u_char *, size_t, int);
-void isofntrans(const u_char *, int, u_char *, u_short *, int, int, int, int);
+void isofntrans(u_char *, int, u_char *, u_short *, int, int, int, int);
 ino_t isodirino(struct iso_directory_record *, struct iso_mnt *);
 #endif /* _KERNEL */
 

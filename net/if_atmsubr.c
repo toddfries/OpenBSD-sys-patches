@@ -1,4 +1,4 @@
-/*      $NetBSD: if_atmsubr.c,v 1.43 2008/12/17 20:51:36 cegger Exp $       */
+/*      $NetBSD: if_atmsubr.c,v 1.37 2005/12/11 23:05:24 thorpej Exp $       */
 
 /*
  *
@@ -37,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_atmsubr.c,v 1.43 2008/12/17 20:51:36 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_atmsubr.c,v 1.37 2005/12/11 23:05:24 thorpej Exp $");
 
 #include "opt_inet.h"
 #include "opt_gateway.h"
@@ -56,7 +56,7 @@ __KERNEL_RCSID(0, "$NetBSD: if_atmsubr.c,v 1.43 2008/12/17 20:51:36 cegger Exp $
 #include <sys/errno.h>
 #include <sys/syslog.h>
 
-#include <sys/cpu.h>
+#include <machine/cpu.h>
 
 #include <net/if.h>
 #include <net/netisr.h>
@@ -98,16 +98,16 @@ __KERNEL_RCSID(0, "$NetBSD: if_atmsubr.c,v 1.43 2008/12/17 20:51:36 cegger Exp $
  */
 
 int
-atm_output(struct ifnet *ifp, struct mbuf *m0, const struct sockaddr *dst,
+atm_output(struct ifnet *ifp, struct mbuf *m0, struct sockaddr *dst,
     struct rtentry *rt0)
 {
-	uint16_t etype = 0;			/* if using LLC/SNAP */
+	u_int16_t etype = 0;			/* if using LLC/SNAP */
 	int error = 0, sz;
 	struct atm_pseudohdr atmdst, *ad;
 	struct mbuf *m = m0;
 	struct rtentry *rt;
 	struct atmllc *atmllc;
-	uint32_t atm_flags;
+	u_int32_t atm_flags;
 	ALTQ_DECL(struct altq_pktattr pktattr;)
 
 	if ((ifp->if_flags & (IFF_UP|IFF_RUNNING)) != (IFF_UP|IFF_RUNNING))
@@ -237,7 +237,7 @@ atm_input(struct ifnet *ifp, struct atm_pseudohdr *ah, struct mbuf *m,
     void *rxhand)
 {
 	struct ifqueue *inq;
-	uint16_t etype = ETHERTYPE_IP; /* default */
+	u_int16_t etype = ETHERTYPE_IP; /* default */
 	int s;
 
 	if ((ifp->if_flags & IFF_UP) == 0) {
@@ -297,10 +297,6 @@ atm_input(struct ifnet *ifp, struct atm_pseudohdr *ah, struct mbuf *m,
 #endif /* INET */
 #ifdef INET6
 	  case ETHERTYPE_IPV6:
-#ifdef GATEWAY  
-		if (ip6flow_fastforward(m))
-			return;
-#endif
 		  schednetisr(NETISR_IPV6);
 		  inq = &ip6intrq;
 		  break;
@@ -357,10 +353,11 @@ pvcsif_alloc(void)
 
 	if (pvc_number >= pvc_max_number)
 		return (NULL);
-	pvcsif = malloc(sizeof(struct pvcsif),
-	       M_DEVBUF, M_WAITOK|M_ZERO);
+	MALLOC(pvcsif, struct pvcsif *, sizeof(struct pvcsif),
+	       M_DEVBUF, M_WAITOK);
 	if (pvcsif == NULL)
 		return (NULL);
+	memset(pvcsif, 0, sizeof(struct pvcsif));
 
 #ifdef __NetBSD__
 	snprintf(pvcsif->sif_if.if_xname, sizeof(pvcsif->sif_if.if_xname),

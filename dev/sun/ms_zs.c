@@ -1,4 +1,4 @@
-/*	$NetBSD: ms_zs.c,v 1.18 2008/04/20 15:44:01 tsutsui Exp $	*/
+/*	$NetBSD: ms_zs.c,v 1.16 2006/03/30 16:12:10 thorpej Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -52,7 +52,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ms_zs.c,v 1.18 2008/04/20 15:44:01 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ms_zs.c,v 1.16 2006/03/30 16:12:10 thorpej Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -93,17 +93,20 @@ int	ms_zs_bps = SUN_MS_BPS;
 int	ms_zs_bps = MS_DEFAULT_BPS;
 #endif
 
-static int	ms_zs_match(device_t, cfdata_t, void *);
-static void	ms_zs_attach(device_t, device_t, void *);
+static int	ms_zs_match(struct device *, struct cfdata *, void *);
+static void	ms_zs_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(ms_zs, sizeof(struct ms_softc),
+CFATTACH_DECL(ms_zs, sizeof(struct ms_softc),
     ms_zs_match, ms_zs_attach, NULL, NULL);
 
 /*
  * ms_match: how is this zs channel configured?
  */
 int
-ms_zs_match(device_t parent, cfdata_t cf, void *aux)
+ms_zs_match(parent, cf, aux)
+	struct device *parent;
+	struct cfdata *cf;
+	void   *aux;
 {
 	struct zsc_attach_args *args = aux;
 
@@ -118,7 +121,9 @@ ms_zs_match(device_t parent, cfdata_t cf, void *aux)
 }
 
 void
-ms_zs_attach(device_t parent, device_t self, void *aux)
+ms_zs_attach(parent, self, aux)
+	struct device *parent, *self;
+	void   *aux;
 
 {
 	struct zsc_softc *zsc = device_private(parent);
@@ -130,9 +135,8 @@ ms_zs_attach(device_t parent, device_t self, void *aux)
 	int reset, s;
 	int bps;
 
-	ms->ms_dev = self;
-	cf = device_cfdata(self);
-	ms_unit = device_unit(self);
+	cf = device_cfdata(&ms->ms_dev);
+	ms_unit = device_unit(&ms->ms_dev);
 	channel = args->channel;
 	cs = zsc->zsc_cs[channel];
 	cs->cs_private = ms;
@@ -144,18 +148,18 @@ ms_zs_attach(device_t parent, device_t self, void *aux)
 #endif
 		bps = ms_zs_bps;
 
-	aprint_normal(": baud rate %d\n", bps);
+	printf(": baud rate %d\n", bps);
 
 	/* Initialize the speed, etc. */
 	s = splzs();
 	/* May need reset... */
 	reset = (channel == 0) ?
-	    ZSWR9_A_RESET : ZSWR9_B_RESET;
+		ZSWR9_A_RESET : ZSWR9_B_RESET;
 	zs_write_reg(cs, 9, reset);
 	/* These are OK as set by zscc: WR3, WR4, WR5 */
 	/* We don't care about status or tx interrupts. */
 	cs->cs_preg[1] = ZSWR1_RIE;
-	(void)zs_set_speed(cs, bps);
+	(void) zs_set_speed(cs, bps);
 	zs_loadchannelregs(cs);
 	splx(s);
 
@@ -168,11 +172,12 @@ ms_zs_attach(device_t parent, device_t self, void *aux)
  ****************************************************************/
 
 static void
-ms_zs_rxint(struct zs_chanstate *cs)
+ms_zs_rxint(cs)
+	struct zs_chanstate *cs;
 {
 	struct ms_softc *ms;
 	int put, put_next;
-	uint8_t c, rr1;
+	u_char c, rr1;
 
 	ms = cs->cs_private;
 	put = ms->ms_rbput;
@@ -208,7 +213,8 @@ ms_zs_rxint(struct zs_chanstate *cs)
 }
 
 static void
-ms_zs_txint(struct zs_chanstate *cs)
+ms_zs_txint(cs)
+	struct zs_chanstate *cs;
 {
 	struct ms_softc *ms;
 
@@ -220,10 +226,12 @@ ms_zs_txint(struct zs_chanstate *cs)
 }
 
 static void
-ms_zs_stint(struct zs_chanstate *cs, int force)
+ms_zs_stint(cs, force)
+	struct zs_chanstate *cs;
+	int force;
 {
 	struct ms_softc *ms;
-	uint8_t rr0;
+	int rr0;
 
 	ms = cs->cs_private;
 
@@ -246,12 +254,13 @@ ms_zs_stint(struct zs_chanstate *cs, int force)
 }
 
 static void
-ms_zs_softint(struct zs_chanstate *cs)
+ms_zs_softint(cs)
+	struct zs_chanstate *cs;
 {
 	struct ms_softc *ms;
 	int get, c, s;
 	int intr_flags;
-	uint16_t ring_data;
+	u_short ring_data;
 
 	ms = cs->cs_private;
 
@@ -261,7 +270,7 @@ ms_zs_softint(struct zs_chanstate *cs)
 	ms->ms_intr_flags = 0;
 
 	/* Now lower to spltty for the rest. */
-	(void)spltty();
+	(void) spltty();
 
 	/*
 	 * Copy data from the receive ring to the event layer.
@@ -278,7 +287,7 @@ ms_zs_softint(struct zs_chanstate *cs)
 			intr_flags |= INTR_RX_OVERRUN;
 		if (ring_data & (ZSRR1_FE | ZSRR1_PE)) {
 			log(LOG_ERR, "%s: input error (0x%x)\n",
-			    device_xname(ms->ms_dev), ring_data);
+				ms->ms_dev.dv_xname, ring_data);
 			c = -1;	/* signal input error */
 		}
 
@@ -287,7 +296,7 @@ ms_zs_softint(struct zs_chanstate *cs)
 	}
 	if (intr_flags & INTR_RX_OVERRUN) {
 		log(LOG_ERR, "%s: input overrun\n",
-		    device_xname(ms->ms_dev));
+		    ms->ms_dev.dv_xname);
 	}
 	ms->ms_rbget = get;
 
@@ -296,7 +305,7 @@ ms_zs_softint(struct zs_chanstate *cs)
 		 * Transmit done.  (Not expected.)
 		 */
 		log(LOG_ERR, "%s: transmit interrupt?\n",
-		    device_xname(ms->ms_dev));
+		    ms->ms_dev.dv_xname);
 	}
 
 	if (intr_flags & INTR_ST_CHECK) {
@@ -304,7 +313,7 @@ ms_zs_softint(struct zs_chanstate *cs)
 		 * Status line change.  (Not expected.)
 		 */
 		log(LOG_ERR, "%s: status interrupt?\n",
-		    device_xname(ms->ms_dev));
+		    ms->ms_dev.dv_xname);
 		cs->cs_rr0_delta = 0;
 	}
 

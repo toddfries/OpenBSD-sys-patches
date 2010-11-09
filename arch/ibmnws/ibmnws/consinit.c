@@ -1,4 +1,4 @@
-/*	$NetBSD: consinit.c,v 1.4 2008/05/15 23:38:49 rjs Exp $	*/
+/*	$NetBSD: consinit.c,v 1.2 2005/12/11 12:17:50 christos Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996 Wolfgang Solfrank.
@@ -39,6 +39,14 @@
 
 #include <dev/cons.h>
 
+#include "vga.h"
+#if (NVGA > 0)
+#include <dev/ic/mc6845reg.h>
+#include <dev/ic/pcdisplayvar.h>
+#include <dev/ic/vgareg.h>
+#include <dev/ic/vgavar.h>
+#endif
+
 #include "pckbc.h"
 #if (NPCKBC > 0)
 #include <dev/isa/isareg.h>
@@ -67,17 +75,35 @@ consinit(void)
 		return;
 	initted = 1;
 
-	if (!strcmp(CONSOLE, "genfb")) {
+#if (NPFB > 0)
+	if (!strcmp(CONSOLE, "fb")) {
+		pfb_cnattach(CONSOLE_ADDR);
 #if (NPCKBC > 0)
-		pckbc_cnattach(&genppc_isa_io_space_tag, IO_KBD, KBCMDP,
+		pckbc_cnattach(&isa_io_bus_space_tag, IO_KBD, KBCMDP,
 		    PCKBC_KBD_SLOT);
 #endif
 		return;
 	}
+#endif
+
+#if (NVGA > 0)
+	if (!strcmp(CONSOLE, "vga")) {
+#if (NVGA > 0)
+		if (!vga_cnattach(&io_bus_space_tag, &mem_bus_space_tag, -1, 1))
+			goto dokbd;
+#endif
+dokbd:
+#if (NPCKBC > 0)
+		pckbc_cnattach(&isa_io_bus_space_tag, IO_KBD, KBCMDP,
+		    PCKBC_KBD_SLOT);
+#endif
+		return;
+	}
+#endif /* VGA */
 
 #if (NCOM > 0)
  	if (!strcmp(CONSOLE, "com")) {
-		if (comcnattach(&genppc_isa_io_space_tag, CONSOLE_ADDR,
+		if (comcnattach(&isa_io_bus_space_tag, CONSOLE_ADDR,
 			    CONSOLE_SPEED, COM_FREQ, COM_TYPE_NORMAL,
 			    (TTYDEF_CFLAG & ~(CSIZE | CSTOPB | PARENB)) | CS8))
 			panic("can't init serial console");

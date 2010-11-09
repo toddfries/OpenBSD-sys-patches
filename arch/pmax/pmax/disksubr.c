@@ -1,4 +1,4 @@
-/*	$NetBSD: disksubr.c,v 1.49 2008/11/15 11:19:07 ad Exp $	*/
+/*	$NetBSD: disksubr.c,v 1.44 2006/11/25 11:59:57 scw Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1988 Regents of the University of California.
@@ -32,7 +32,9 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: disksubr.c,v 1.49 2008/11/15 11:19:07 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: disksubr.c,v 1.44 2006/11/25 11:59:57 scw Exp $");
+
+#include "opt_compat_ultrix.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -40,12 +42,15 @@ __KERNEL_RCSID(0, "$NetBSD: disksubr.c,v 1.49 2008/11/15 11:19:07 ad Exp $");
 #include <sys/disk.h>
 #include <sys/disklabel.h>
 
+#ifdef COMPAT_ULTRIX
 #include <dev/dec/dec_boot.h>
 #include <ufs/ufs/dinode.h>		/* XXX for fs.h */
 #include <ufs/ffs/fs.h>			/* XXX for BBSIZE & SBSIZE */
 
 const char *compat_label __P((dev_t dev, void (*strat) __P((struct buf *bp)),
 	struct disklabel *lp, struct cpu_disklabel *osdep));	/* XXX */
+
+#endif
 
 /*
  * Attempt to read a disk label from a device
@@ -83,8 +88,7 @@ readdisklabel(dev, strat, lp, osdep)
 	if (biowait(bp)) {
 		msg = "I/O error";
 	} else for (dlp = (struct disklabel *)bp->b_data;
-	    dlp <= (struct disklabel *)
-	    ((char *)bp->b_data + DEV_BSIZE - sizeof(*dlp));
+	    dlp <= (struct disklabel *)(bp->b_data+DEV_BSIZE-sizeof(*dlp));
 	    dlp = (struct disklabel *)((char *)dlp + sizeof(long))) {
 		if (dlp->d_magic != DISKMAGIC || dlp->d_magic2 != DISKMAGIC) {
 			if (msg == NULL)
@@ -98,7 +102,8 @@ readdisklabel(dev, strat, lp, osdep)
 			break;
 		}
 	}
-	brelse(bp, 0);
+	brelse(bp);
+#ifdef COMPAT_ULTRIX
 	/*
 	 * If no NetBSD label was found, check for an Ultrix label and
 	 * construct tne incore label from the Ultrix partition information.
@@ -110,10 +115,12 @@ readdisklabel(dev, strat, lp, osdep)
 			/* set geometry? */
 		}
 	}
+#endif
 /* XXX If no NetBSD label or Ultrix label found, generate default label here */
 	return (msg);
 }
 
+#ifdef COMPAT_ULTRIX
 /*
  * Given a buffer bp, try and interpret it as an Ultrix disk label,
  * putting the partition info into a native NetBSD label
@@ -143,8 +150,7 @@ compat_label(dev, strat, lp, osdep)
 	}
 
 	for (dlp = (dec_disklabel *)bp->b_data;
-	     dlp <= (dec_disklabel *)
-	     ((char *)bp->b_data + DEV_BSIZE - sizeof(*dlp));
+	     dlp <= (dec_disklabel *)(bp->b_data+DEV_BSIZE-sizeof(*dlp));
 	     dlp = (dec_disklabel *)((char *)dlp + sizeof(long))) {
 
 		int part;
@@ -189,9 +195,11 @@ compat_label(dev, strat, lp, osdep)
 	}
 
 done:
-	brelse(bp, 0);
+	brelse(bp);
 	return (msg);
 }
+#endif /* COMPAT_ULTRIX */
+
 
 /*
  * Check new disk label for sensibility
@@ -266,13 +274,12 @@ writedisklabel(dev, strat, lp, osdep)
 		goto done;
 	for (dlp = (struct disklabel *)bp->b_data;
 	    dlp <= (struct disklabel *)
-	      ((char *)bp->b_data + lp->d_secsize - sizeof(*dlp));
+	      (bp->b_data + lp->d_secsize - sizeof(*dlp));
 	    dlp = (struct disklabel *)((char *)dlp + sizeof(long))) {
 		if (dlp->d_magic == DISKMAGIC && dlp->d_magic2 == DISKMAGIC &&
 		    dkcksum(dlp) == 0) {
 			*dlp = *lp;
-			bp->b_oflags &= ~(BO_DONE);
-			bp->b_flags &= ~(B_READ);
+			bp->b_flags &= ~(B_READ|B_DONE);
 			bp->b_flags |= B_WRITE;
 			(*strat)(bp);
 			error = biowait(bp);
@@ -281,6 +288,6 @@ writedisklabel(dev, strat, lp, osdep)
 	}
 	error = ESRCH;
 done:
-	brelse(bp, 0);
+	brelse(bp);
 	return (error);
 }

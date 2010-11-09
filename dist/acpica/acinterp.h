@@ -1,7 +1,7 @@
 /******************************************************************************
  *
  * Name: acinterp.h - Interpreter subcomponent prototypes and defines
- *       $Revision: 1.4 $
+ *       xRevision: 1.164 $
  *
  *****************************************************************************/
 
@@ -9,7 +9,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2008, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2006, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -127,14 +127,10 @@
 #define ACPI_EXD_TABLE_SIZE(name)   (sizeof(name) / sizeof (ACPI_EXDUMP_INFO))
 
 /*
- * If possible, pack the following structures to byte alignment, since we
- * don't care about performance for debug output. Two cases where we cannot
- * pack the structures:
- *
- * 1) Hardware does not support misaligned memory transfers
- * 2) Compiler does not support pointers within packed structures
+ * If possible, pack the following structure to byte alignment, since we
+ * don't care about performance for debug output
  */
-#if (!defined(ACPI_MISALIGNMENT_NOT_SUPPORTED) && !defined(ACPI_PACKED_POINTERS_NOT_SUPPORTED))
+#ifndef ACPI_MISALIGNMENT_NOT_SUPPORTED
 #pragma pack(1)
 #endif
 
@@ -334,6 +330,10 @@ AcpiExCreateRegion (
     ACPI_WALK_STATE         *WalkState);
 
 ACPI_STATUS
+AcpiExCreateTableRegion (
+    ACPI_WALK_STATE         *WalkState);
+
+ACPI_STATUS
 AcpiExCreateEvent (
     ACPI_WALK_STATE         *WalkState);
 
@@ -377,19 +377,9 @@ AcpiExAcquireMutex (
     ACPI_WALK_STATE         *WalkState);
 
 ACPI_STATUS
-AcpiExAcquireMutexObject (
-    UINT16                  Timeout,
-    ACPI_OPERAND_OBJECT     *ObjDesc,
-    ACPI_THREAD_ID          ThreadId);
-
-ACPI_STATUS
 AcpiExReleaseMutex (
     ACPI_OPERAND_OBJECT     *ObjDesc,
     ACPI_WALK_STATE         *WalkState);
-
-ACPI_STATUS
-AcpiExReleaseMutexObject (
-    ACPI_OPERAND_OBJECT     *ObjDesc);
 
 void
 AcpiExReleaseAllMutexes (
@@ -433,6 +423,15 @@ AcpiExSystemDoStall (
     UINT32                  Time);
 
 ACPI_STATUS
+AcpiExSystemAcquireMutex(
+    ACPI_OPERAND_OBJECT     *Time,
+    ACPI_OPERAND_OBJECT     *ObjDesc);
+
+ACPI_STATUS
+AcpiExSystemReleaseMutex(
+    ACPI_OPERAND_OBJECT     *ObjDesc);
+
+ACPI_STATUS
 AcpiExSystemSignalEvent(
     ACPI_OPERAND_OBJECT     *ObjDesc);
 
@@ -447,13 +446,9 @@ AcpiExSystemResetEvent(
 
 ACPI_STATUS
 AcpiExSystemWaitSemaphore (
-    ACPI_SEMAPHORE          Semaphore,
+    ACPI_HANDLE             Semaphore,
     UINT16                  Timeout);
 
-ACPI_STATUS
-AcpiExSystemWaitMutex (
-    ACPI_MUTEX              Mutex,
-    UINT16                  Timeout);
 
 /*
  * exoparg1 - ACPI AML execution, 1 operand
@@ -671,7 +666,7 @@ AcpiExCopyIntegerToBufferField (
 /*
  * exutils - interpreter/scanner utilities
  */
-void
+ACPI_STATUS
 AcpiExEnterInterpreter (
     void);
 
@@ -680,24 +675,16 @@ AcpiExExitInterpreter (
     void);
 
 void
-AcpiExReacquireInterpreter (
-    void);
-
-void
-AcpiExRelinquishInterpreter (
-    void);
-
-void
 AcpiExTruncateFor32bitTable (
     ACPI_OPERAND_OBJECT     *ObjDesc);
 
-void
+BOOLEAN
 AcpiExAcquireGlobalLock (
     UINT32                  Rule);
 
 void
 AcpiExReleaseGlobalLock (
-    UINT32                  Rule);
+    BOOLEAN                 Locked);
 
 void
 AcpiExEisaIdToString (

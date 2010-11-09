@@ -1,4 +1,4 @@
-/*	$NetBSD: autoconf.c,v 1.10 2008/02/12 17:30:57 joerg Exp $	*/
+/*	$NetBSD: autoconf.c,v 1.8 2005/12/11 12:17:12 christos Exp $	*/
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -44,7 +44,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.10 2008/02/12 17:30:57 joerg Exp $");
+__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.8 2005/12/11 12:17:12 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -63,10 +63,12 @@ void
 cpu_configure()
 {
         extern void init_interrupt __P((void));
+        extern void calc_delayconst __P((void));
 
 	extintr_disable();
 
         init_interrupt();
+        calc_delayconst();
 
 	if (config_rootfound("mainbus", NULL) == NULL)
 		panic("configure: mainbus not configured");
@@ -106,8 +108,9 @@ dev_t	bootdev = 0;
 void
 findroot(void)
 {
-	device_t dv;
+	struct device *dv;
 	const char *name;
+	char buf[32];
 
 #if 0
 	printf("howto %x bootdev %x ", boothowto, bootdev);
@@ -121,9 +124,13 @@ findroot(void)
 	if (name == NULL)
 		return;
 
-	if ((dv = device_find_by_driver_unit(name, B_UNIT(bootdev))) != NULL) {
-		booted_device = dv;
-		booted_partition = B_PARTITION(bootdev);
+	sprintf(buf, "%s%d", name, B_UNIT(bootdev));
+	TAILQ_FOREACH(dv, &alldevs, dv_list) {
+		if (strcmp(buf, dv->dv_xname) == 0) {
+			booted_device = dv;
+			booted_partition = B_PARTITION(bootdev);
+			return;
+		}
 	}
 }
 

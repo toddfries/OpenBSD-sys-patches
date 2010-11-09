@@ -1,4 +1,4 @@
-/*	$NetBSD: if_snvar.h,v 1.12 2008/04/09 15:40:30 tsutsui Exp $	*/
+/*	$NetBSD: if_snvar.h,v 1.7 2005/12/24 20:07:24 perry Exp $	*/
 
 /*
  * Copyright (c) 1991   Algorithmics Ltd (http://www.algor.co.uk)
@@ -31,8 +31,8 @@
 
 #define	SN_REGSIZE	(SN_NREGS * 4)
 
-#include <mips/locore.h>
-#undef wbflush	/* XXX */
+void mips3_wbflush(void);
+void apbus_wbflush(void);
 
 static inline void
 wbflush(void)
@@ -65,19 +65,19 @@ wbflush(void)
  * maximum receive packet size plus 2 byte pad to make each
  * one aligned. 4 byte slop (required for eobc)
  */
-#define RBASIZE(sc)	(ETHER_HDR_LEN + ETHERMTU + FCSSIZE + 6)
+#define RBASIZE(sc)	(sizeof(struct ether_header) + ETHERMTU + FCSSIZE + 6)
 
 /*
  * transmit buffer area
  */
 #define TXBSIZE	1536	/* 6*2^8 -- the same size as the 8390 TXBUF */
 
-#define	SN_NPAGES	2 + NRBA + (NTDA / 2)
+#define	SN_NPAGES	2 + NRBA + (NTDA/2)
 
 typedef struct mtd {
 	void		*mtd_txp;
 	uint32_t	mtd_vtxp;
-	void 		*mtd_buf;
+	caddr_t		mtd_buf;
 	uint32_t	mtd_vbuf;
 	struct mbuf	*mtd_mbuf;
 } mtd_t;
@@ -86,11 +86,11 @@ typedef struct mtd {
  * The sn_softc for NEWS5000 if_sn.
  */
 struct sn_softc {
-	device_t	sc_dev;
+	struct device	sc_dev;
 	struct ethercom	sc_ethercom;
 #define sc_if	sc_ethercom.ec_if	/* network visible interface */
 
-	void *		sc_hwbase;	/* hardware base address */
+	caddr_t		sc_hwbase;	/* hardware base address */
 	volatile uint16_t *sc_regbase;	/* register base address */
 
 	int		bitmode;	/* 32 bit mode == 1, 16 == 0 */
@@ -107,10 +107,10 @@ struct sn_softc {
 	int		sc_rxmark;	/* current hw pos in rda ring */
 	int		sc_rdamark;	/* current sw pos in rda ring */
 	int		sc_nrda;	/* total number of RDAs */
-	void		*p_rda;
+	caddr_t		p_rda;
 	uint32_t	v_rda;
 
-	void 		*rbuf[NRBA];
+	caddr_t		rbuf[NRBA];
 
 	struct mtd	mtda[NTDA];
 	int		mtd_hw;		/* idx of first mtd given to hw */

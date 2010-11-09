@@ -1,4 +1,4 @@
-/*	$NetBSD: if_mbe_g2.c,v 1.7 2008/04/12 06:27:01 tsutsui Exp $	*/
+/*	$NetBSD: if_mbe_g2.c,v 1.5 2005/12/11 12:17:06 christos Exp $	*/
 
 /*
  * Copyright (c) 2002 Christian Groessler
@@ -64,7 +64,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_mbe_g2.c,v 1.7 2008/04/12 06:27:01 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_mbe_g2.c,v 1.5 2005/12/11 12:17:06 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -85,24 +85,18 @@ __KERNEL_RCSID(0, "$NetBSD: if_mbe_g2.c,v 1.7 2008/04/12 06:27:01 tsutsui Exp $"
 #include <dreamcast/dev/g2/g2busvar.h>
 
 
-int	mbe_g2_match(device_t, cfdata_t, void *);
-void	mbe_g2_attach(device_t, device_t, void *);
+int	mbe_g2_match(struct device *, struct cfdata *, void *);
+void	mbe_g2_attach(struct device *, struct device *, void *);
 static int mbe_g2_detect(bus_space_tag_t, bus_space_handle_t, uint8_t *);
 
 struct mbe_g2_softc {
 	struct	mb86960_softc sc_mb86960;	/* real "mb86960" softc */
 };
 
-CFATTACH_DECL_NEW(mbe_g2bus, sizeof(struct mbe_g2_softc),
+CFATTACH_DECL(mbe_g2bus, sizeof(struct mbe_g2_softc),
     mbe_g2_match, mbe_g2_attach, NULL, NULL);
 
 #define LANA_NPORTS (0x20 * 4)
-
-#ifdef LANA_DEBUG
-#define DPRINTF	printf
-#else
-#define DPRINTF	while (/* CONSTCOND */0) printf
-#endif
 
 static struct dreamcast_bus_space mbe_g2_dbs;
 
@@ -110,7 +104,7 @@ static struct dreamcast_bus_space mbe_g2_dbs;
  * Determine if the device is present.
  */
 int
-mbe_g2_match(device_t parent, cfdata_t cf, void *aux)
+mbe_g2_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct g2bus_attach_args *ga = aux;
 	bus_space_handle_t memh;
@@ -131,14 +125,18 @@ mbe_g2_match(device_t parent, cfdata_t cf, void *aux)
 
 	/* Map i/o ports. */
 	if (bus_space_map(memt, 0x00600400, LANA_NPORTS, 0, &memh)) {
-		DPRINTF("%s: couldn't map iospace 0x%x\n",
-		    __func__, 0x00600400);
+#ifdef LANA_DEBUG
+		printf("mbe_g2_match: couldn't map iospace 0x%x\n",
+		    0x00600400);
+#endif
 		return 0;
 	}
 
 	rv = 0;
 	if (mbe_g2_detect(memt, memh, myea) == 0) {
-		DPRINTF("%s: LAN Adapter detection failed\n", __func__);
+#ifdef LANA_DEBUG
+		printf("mbe_g2_match: LAN Adapter detection failed\n");
+#endif
 		goto out;
 	}
 
@@ -161,7 +159,9 @@ mbe_g2_detect(bus_space_tag_t iot, bus_space_handle_t ioh, uint8_t *enaddr)
 	/* Read the chip type */
 	if ((bus_space_read_1(iot, ioh, FE_DLCR7) & FE_D7_IDENT) !=
 	    FE_D7_IDENT_86967) {
-		DPRINTF("%s: unknown chip type\n", __func__);
+#ifdef LANA_DEBUG
+		printf("mbe_g2_detect: unknown chip type\n");
+#endif
 		return 0;
 	}
 
@@ -171,12 +171,16 @@ mbe_g2_detect(bus_space_tag_t iot, bus_space_handle_t ioh, uint8_t *enaddr)
 	mb86965_read_eeprom(iot, ioh, eeprom);
 	memcpy(enaddr, eeprom, ETHER_ADDR_LEN);
 
-	DPRINTF("Ethernet address: %s\n", ether_sprintf(enaddr));
+#if LANA_DEBUG > 1
+	printf("Ethernet address: %s\n", ether_sprintf(enaddr));
+#endif
 
 	/* Make sure we got a valid station address. */
 	if ((enaddr[0] & 0x03) != 0x00 ||
 	    (enaddr[0] == 0x00 && enaddr[1] == 0x00 && enaddr[2] == 0x00)) {
-		DPRINTF("%s: invalid ethernet address\n", __func__);
+#ifdef LANA_DEBUG
+		printf("mbe_g2_detect: invalid ethernet address\n");
+#endif
 		return 0;
 	}
 
@@ -184,23 +188,21 @@ mbe_g2_detect(bus_space_tag_t iot, bus_space_handle_t ioh, uint8_t *enaddr)
 }
 
 void
-mbe_g2_attach(device_t parent, device_t self, void *aux)
+mbe_g2_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct mbe_g2_softc *isc = device_private(self);
-	struct mb86960_softc *sc = &isc->sc_mb86960;
 	struct g2bus_attach_args *ga = aux;
+	struct mbe_g2_softc *isc = (struct mbe_g2_softc *)self;
+	struct mb86960_softc *sc = &isc->sc_mb86960;
 	bus_space_tag_t memt = &mbe_g2_dbs;
 	bus_space_handle_t memh;
 	uint8_t myea[ETHER_ADDR_LEN];
-
-	sc->sc_dev = self;
 
 	memcpy(memt, ga->ga_memt, sizeof(struct dreamcast_bus_space));
 	g2bus_set_bus_mem_sparse(memt);
 
 	/* Map i/o ports. */
 	if (bus_space_map(memt, 0x00600400, LANA_NPORTS, 0, &memh)) {
-		aprint_error(": can't map i/o space\n");
+		printf(": can't map i/o space\n");
 		return;
 	}
 
@@ -209,11 +211,11 @@ mbe_g2_attach(device_t parent, device_t self, void *aux)
 
 	/* Determine the card type. */
 	if (mbe_g2_detect(memt, memh, myea) == 0) {
-		aprint_error(": where did the card go?!\n");
+		printf(": where did the card go?!\n");
 		panic("unknown card");
 	}
 
-	aprint_normal(": Sega LAN-Adapter Ethernet\n");
+	printf(": Sega LAN-Adapter Ethernet\n");
 
 	/* This interface is always enabled. */
 	sc->sc_stat |= FE_STAT_ENABLED;
@@ -228,6 +230,5 @@ mbe_g2_attach(device_t parent, device_t self, void *aux)
 
 	mb86960_config(sc, NULL, 0, 0);
 
-	sysasic_intr_establish(SYSASIC_EVENT_8BIT, IPL_NET, SYSASIC_IRL11,
-	    mb86960_intr, sc);
+	sysasic_intr_establish(SYSASIC_EVENT_8BIT, IPL_NET, mb86960_intr, sc);
 }

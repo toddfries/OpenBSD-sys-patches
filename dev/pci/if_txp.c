@@ -1,4 +1,4 @@
-/* $NetBSD: if_txp.c,v 1.28 2009/02/16 08:00:42 cegger Exp $ */
+/* $NetBSD: if_txp.c,v 1.26 2008/04/10 19:13:37 cegger Exp $ */
 
 /*
  * Copyright (c) 2001
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_txp.c,v 1.28 2009/02/16 08:00:42 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_txp.c,v 1.26 2008/04/10 19:13:37 cegger Exp $");
 
 #include "bpfilter.h"
 #include "opt_inet.h"
@@ -1254,7 +1254,10 @@ txp_dma_free(sc, dma)
 }
 
 int
-txp_ioctl(struct ifnet *ifp, u_long command, void *data)
+txp_ioctl(ifp, command, data)
+	struct ifnet *ifp;
+	u_long command;
+	void *data;
 {
 	struct txp_softc *sc = ifp->if_softc;
 	struct ifreq *ifr = (struct ifreq *)data;
@@ -1271,22 +1274,21 @@ txp_ioctl(struct ifnet *ifp, u_long command, void *data)
 #endif
 
 	switch(command) {
-	case SIOCINITIFADDR:
+	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
-		txp_init(sc);
 		switch (ifa->ifa_addr->sa_family) {
 #ifdef INET
 		case AF_INET:
+			txp_init(sc);
 			arp_ifinit(ifp, ifa);
 			break;
 #endif /* INET */
 		default:
+			txp_init(sc);
 			break;
 		}
 		break;
 	case SIOCSIFFLAGS:
-		if ((error = ifioctl_common(ifp, command, data)) != 0)
-			break;
 		if (ifp->if_flags & IFF_UP) {
 			txp_init(sc);
 		} else {
@@ -1316,7 +1318,7 @@ txp_ioctl(struct ifnet *ifp, u_long command, void *data)
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_ifmedia, command);
 		break;
 	default:
-		error = ether_ioctl(ifp, command, data);
+		error = EINVAL;
 		break;
 	}
 
@@ -1886,10 +1888,10 @@ txp_ifmedia_sts(ifp, ifmr)
 			return;
 		}
 
-		if (anlpar & ANLPAR_TX_FD)
-			ifmr->ifm_active |= IFM_100_TX|IFM_FDX;
-		else if (anlpar & ANLPAR_T4)
+		if (anlpar & ANLPAR_T4)
 			ifmr->ifm_active |= IFM_100_T4;
+		else if (anlpar & ANLPAR_TX_FD)
+			ifmr->ifm_active |= IFM_100_TX|IFM_FDX;
 		else if (anlpar & ANLPAR_TX)
 			ifmr->ifm_active |= IFM_100_TX;
 		else if (anlpar & ANLPAR_10_FD)

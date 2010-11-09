@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile.rumpnet,v 1.4 2009/01/23 19:34:37 pooka Exp $
+#	$NetBSD: Makefile.rumpnet,v 1.10 2010/01/19 22:08:18 pooka Exp $
 #
 
 .include "${RUMPTOP}/Makefile.rump"
@@ -6,11 +6,13 @@
 LIB=		rumpnet
 
 .PATH:	${RUMPTOP}/librump/rumpnet				\
-	${RUMPTOP}/../kern ${RUMPTOP}/../lib/libkern		\
+	${RUMPTOP}/../kern					\
 	${RUMPTOP}/../net					\
 	${RUMPTOP}/../compat/common
 
 SRCS=	net_stub.c netisr.c rump_net.c
+
+SRCS+=	rumpnet_if_wrappers.c
 
 # sys/kern networking (sockets, mbufs, etc.)
 SRCS+=	sys_socket.c uipc_accf.c uipc_domain.c uipc_mbuf.c uipc_mbuf2.c	\
@@ -19,18 +21,17 @@ SRCS+=	sys_socket.c uipc_accf.c uipc_domain.c uipc_mbuf.c uipc_mbuf2.c	\
 # radix trie support
 SRCS+=	radix.c
 
-# src/lib/libkern
-SRCS+=	intoa.c
-
 # compat
 SRCS+=	rtsock_50.c
+
+# bpf stubs, required for all kernels
+SRCS+=	bpf_stub.c
 
 # automatically in sync src/lib
 SHLIB_MAJOR=    0
 SHLIB_MINOR=    0
 
 CPPFLAGS+=	-I${RUMPTOP}/librump/rumpkern -I${RUMPTOP}/librump/rumpnet/opt
-CPPFLAGS+=	-DMAXUSERS=32
 
 .include <bsd.lib.mk>
 .include <bsd.klinks.mk>

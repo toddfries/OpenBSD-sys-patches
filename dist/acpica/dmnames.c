@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Module Name: dmnames - AML disassembler, names, namestrings, pathnames
- *              $Revision: 1.4 $
+ *              xRevision: 1.12 $
  *
  ******************************************************************************/
 
@@ -9,7 +9,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2008, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2006, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -115,6 +115,9 @@
  *****************************************************************************/
 
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: dmnames.c,v 1.1 2006/03/23 13:36:31 kochi Exp $");
+
 #include "acpi.h"
 #include "acparser.h"
 #include "amlcode.h"
@@ -154,33 +157,21 @@ AcpiDmDumpName (
 {
     UINT32                  i;
     UINT32                  Length;
-    char                    NewName[4];
+    char                    *End = Name + ACPI_NAME_SIZE;
 
 
-    /* Ensure that the name is printable, even if we have to fix it */
-
-    *(UINT32 *) NewName = AcpiUtRepairName (Name);
-
-    /* Remove all trailing underscores from the name */
-
-    Length = ACPI_NAME_SIZE;
-    for (i = (ACPI_NAME_SIZE - 1); i != 0; i--)
+    for (i = 0; i < ACPI_NAME_SIZE; i++)
     {
-        if (NewName[i] == '_')
+        if (Name[i] != '_')
         {
-            Length--;
-        }
-        else
-        {
-            break;
+            End = &Name[i];
         }
     }
 
-    /* Dump the name, up to the start of the trailing underscores */
-
+    Length = (UINT32)(End - Name) + 1;
     for (i = 0; i < Length; i++)
     {
-        AcpiOsPrintf ("%c", NewName[i]);
+        AcpiOsPrintf ("%c", Name[i]);
     }
 
     return (Length);
@@ -257,7 +248,7 @@ AcpiPsDisplayObjectPathname (
     }
 
     AcpiOsPrintf ("  (Path %s)", (char *) Buffer.Pointer);
-    ACPI_FREE (Buffer.Pointer);
+    ACPI_MEM_FREE (Buffer.Pointer);
 
 
 Exit:

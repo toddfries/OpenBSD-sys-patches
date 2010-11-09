@@ -1,4 +1,4 @@
-/*	$NetBSD: sequoia.c,v 1.10 2007/10/17 19:57:10 garbled Exp $	*/
+/*	$NetBSD: sequoia.c,v 1.7 2006/09/12 17:50:53 gdamore Exp $	*/
 
 /*
  * Copyright 1997
@@ -40,7 +40,7 @@
 */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sequoia.c,v 1.10 2007/10/17 19:57:10 garbled Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sequoia.c,v 1.7 2006/09/12 17:50:53 gdamore Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -133,7 +133,7 @@ static int      ledColor;           /* present color of led */
 static int      ledBlockCount;;     /* reference count of block calles */                            
 int sequoia_index_cache = -1;       /* set to silly value so that we dont cache on init */
 
-static callout_t led_timo_ch;
+static struct callout led_timo_ch = CALLOUT_INITIALIZER;
 
 /*
 **
@@ -141,7 +141,7 @@ static callout_t led_timo_ch;
 **
 */
 static void ledSetBiled(int color);
-static void ledTimeout(void *arg);
+static void ledTimeout(void * arg);
 
 /*
 ** 
@@ -151,8 +151,6 @@ static void ledTimeout(void *arg);
 void sequoiaInit(void)
 {
     u_int16_t  seqReg;
-
-    callout_init(&led_timo_ch, 0);
 
     /* map the sequoi registers */
     if (bus_space_map(&isa_io_bs_tag, SEQUOIA_BASE, SEQUOIA_NPORTS, 0,  &sequoia_ioh))
@@ -490,7 +488,7 @@ void ledPanic       (void)
     ledSetBiled(LED_BILED_RED);
 }
 
-static void   ledTimeout(void *arg)
+static void   ledTimeout(void * arg)
 {
     int timeSpan;   /* in usec */
     struct timeval now;

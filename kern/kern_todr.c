@@ -1,4 +1,4 @@
-/*	$NetBSD: kern_todr.c,v 1.28 2009/02/14 20:45:29 christos Exp $	*/
+/*	$NetBSD: kern_todr.c,v 1.24 2006/09/24 18:24:55 peter Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -76,16 +76,16 @@
  *	@(#)clock.c	8.1 (Berkeley) 6/10/93
  */
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kern_todr.c,v 1.28 2009/02/14 20:45:29 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kern_todr.c,v 1.24 2006/09/24 18:24:55 peter Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/timetc.h>
-#include <sys/intr.h>
-
 #include <dev/clock_subr.h>	/* hmm.. this should probably move to sys */
+
+#ifdef	__HAVE_GENERIC_TODR
 
 static todr_chip_handle_t todr_handle = NULL;
 
@@ -113,7 +113,9 @@ inittodr(time_t base)
 {
 	int badbase = 0, waszero = (base == 0), goodtime = 0, badrtc = 0;
 	int s;
+#ifdef	__HAVE_TIMECOUNTER
 	struct timespec ts;
+#endif
 	struct timeval tv;
 
 	if (base < 5 * SECYR) {
@@ -191,10 +193,14 @@ inittodr(time_t base)
 
 	timeset = 1;
 
+	s = splclock();
+#ifdef	__HAVE_TIMECOUNTER
 	ts.tv_sec = tv.tv_sec;
 	ts.tv_nsec = tv.tv_usec * 1000;
-	s = splclock();
 	tc_setclock(&ts);
+#else
+	time = tv;
+#endif
 	splx(s);
 
 	if (waszero || goodtime)
@@ -213,7 +219,9 @@ inittodr(time_t base)
 void
 resettodr(void)
 {
-	struct timeval tv;
+#ifdef	__HAVE_TIMECOUNTER
+	struct timeval	time;
+#endif
 
 	/*
 	 * We might have been called by boot() due to a crash early
@@ -223,15 +231,19 @@ resettodr(void)
 	if (!timeset)
 		return;
 
-	getmicrotime(&tv);
+#ifdef	__HAVE_TIMECOUNTER
+	getmicrotime(&time);
+#endif
 
-	if (tv.tv_sec == 0)
+	if (time.tv_sec == 0)
 		return;
 
 	if (todr_handle)
-		if (todr_settime(todr_handle, &tv) != 0)
+		if (todr_settime(todr_handle, &time) != 0)
 			printf("Cannot set TOD clock time\n");
 }
+
+#endif	/* __HAVE_GENERIC_TODR */
 
 #ifdef	TODR_DEBUG
 static void
@@ -275,8 +287,10 @@ todr_gettime(todr_chip_handle_t tch, volatile struct timeval *tvp)
 		 * Some unconverted ports have their own references to
 		 * rtc_offset.   A converted port must not do that.
 		 */
+#ifdef	__HAVE_GENERIC_TODR
 		if (rv == 0)
 			tvp->tv_sec += rtc_offset * 60;
+#endif
 		todr_debug("TODR-GET-SECS", rv, NULL, tvp);
 		return rv;
 	} else if (tch->todr_gettime_ymdhms) {
@@ -284,6 +298,16 @@ todr_gettime(todr_chip_handle_t tch, volatile struct timeval *tvp)
 		todr_debug("TODR-GET-YMDHMS", rv, &dt, NULL);
 		if (rv)
 			return rv;
+
+		/*
+		 * Formerly we had code here that explicitly checked
+		 * for 2038 year rollover.
+		 *
+		 * However, clock_ymdhms_to_secs performs the same
+		 * check for us, so we need not worry about it.  Note
+		 * that this assumes that the tvp->tv_sec member is
+		 * a time_t.
+		 */
 
 		/*
 		 * Simple sanity checks.  Note that this includes a
@@ -320,9 +344,13 @@ todr_settime(todr_chip_handle_t tch, volatile struct timeval *tvp)
 
 	if (tch->todr_settime) {
 		/* See comments above in gettime why this is ifdef'd */
+#ifdef	__HAVE_GENERIC_TODR
 		struct timeval	copy = *tvp;
 		copy.tv_sec -= rtc_offset * 60;
 		rv = tch->todr_settime(tch, &copy);
+#else
+		rv = tch->todr_settime(tch, tvp);
+#endif
 		todr_debug("TODR-SET-SECS", rv, NULL, tvp);
 		return rv;
 	} else if (tch->todr_settime_ymdhms) {

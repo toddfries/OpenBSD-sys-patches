@@ -1,4 +1,4 @@
-/*	$NetBSD: OsdSchedule.c,v 1.9 2009/01/30 12:51:03 jmcneill Exp $	*/
+/*	$NetBSD: OsdSchedule.c,v 1.1 2006/03/23 13:41:13 kochi Exp $	*/
 
 /*
  * Copyright 2001 Wasabi Systems, Inc.
@@ -42,15 +42,13 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: OsdSchedule.c,v 1.9 2009/01/30 12:51:03 jmcneill Exp $");
+__KERNEL_RCSID(0, "$NetBSD: OsdSchedule.c,v 1.1 2006/03/23 13:41:13 kochi Exp $");
 
 #include <sys/param.h>
 #include <sys/malloc.h>
 #include <sys/proc.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
-#include <sys/condvar.h>
-#include <sys/mutex.h>
 
 #include <dev/acpi/acpica.h>
 
@@ -58,13 +56,8 @@ __KERNEL_RCSID(0, "$NetBSD: OsdSchedule.c,v 1.9 2009/01/30 12:51:03 jmcneill Exp
 
 #include <dev/sysmon/sysmon_taskq.h>
 
-extern int acpi_suspended;
-
 #define	_COMPONENT	ACPI_OS_SERVICES
 ACPI_MODULE_NAME("SCHEDULE")
-
-static kcondvar_t	acpi_osd_sleep_cv;
-static kmutex_t		acpi_osd_sleep_mtx;
 
 /*
  * acpi_osd_sched_init:
@@ -75,11 +68,9 @@ void
 acpi_osd_sched_init(void)
 {
 
-	ACPI_FUNCTION_TRACE(__func__);
+	ACPI_FUNCTION_TRACE(__FUNCTION__);
 
 	sysmon_task_queue_init();
-	mutex_init(&acpi_osd_sleep_mtx, MUTEX_DEFAULT, IPL_NONE);
-	cv_init(&acpi_osd_sleep_cv, "acpislp");
 
 	return_VOID;
 }
@@ -93,7 +84,7 @@ void
 acpi_osd_sched_fini(void)
 {
 
-	ACPI_FUNCTION_TRACE(__func__);
+	ACPI_FUNCTION_TRACE(__FUNCTION__);
 
 	sysmon_task_queue_fini();
 
@@ -105,10 +96,16 @@ acpi_osd_sched_fini(void)
  *
  *	Obtain the ID of the currently executing thread.
  */
-ACPI_THREAD_ID
+UINT32
 AcpiOsGetThreadId(void)
 {
-	return (ACPI_THREAD_ID)curlwp;
+
+	/* XXX ACPI CA can call this function in interrupt context */
+	if (curlwp == NULL)
+		return 1;
+
+	/* XXX Bleh, we're not allowed to return 0 (how stupid!) */
+	return (curlwp->l_proc->p_pid + 1);
 }
 
 /*
@@ -117,28 +114,30 @@ AcpiOsGetThreadId(void)
  *	Schedule a procedure for deferred execution.
  */
 ACPI_STATUS
-AcpiOsExecute(ACPI_EXECUTE_TYPE Type, ACPI_OSD_EXEC_CALLBACK Function,
+AcpiOsQueueForExecution(UINT32 Priority, ACPI_OSD_EXEC_CALLBACK Function,
     void *Context)
 {
 	int pri;
 
-	ACPI_FUNCTION_TRACE(__func__);
+	ACPI_FUNCTION_TRACE(__FUNCTION__);
 
-	switch (Type) {
-	case OSL_GPE_HANDLER:
-		pri = 10;
-		break;
-	case OSL_GLOBAL_LOCK_HANDLER:
-	case OSL_EC_POLL_HANDLER:
-	case OSL_EC_BURST_HANDLER:
-		pri = 5;
-		break;
-	case OSL_NOTIFY_HANDLER:
+	switch (Priority) {
+	case OSD_PRIORITY_GPE:
 		pri = 3;
 		break;
-	case OSL_DEBUGGER_THREAD:
+
+	case OSD_PRIORITY_HIGH:
+		pri = 2;
+		break;
+
+	case OSD_PRIORITY_MED:
+		pri = 1;
+		break;
+
+	case OSD_PRIORITY_LO:
 		pri = 0;
 		break;
+
 	default:
 		return_ACPI_STATUS(AE_BAD_PARAMETER);
 	}
@@ -163,16 +162,17 @@ AcpiOsExecute(ACPI_EXECUTE_TYPE Type, ACPI_OSD_EXEC_CALLBACK Function,
 void
 AcpiOsSleep(ACPI_INTEGER Milliseconds)
 {
-	ACPI_FUNCTION_TRACE(__func__);
+	int timo;
 
-	if (cold || acpi_suspended)
-		DELAY(Milliseconds * 1000);
-	else {
-		mutex_enter(&acpi_osd_sleep_mtx);
-		cv_timedwait_sig(&acpi_osd_sleep_cv, &acpi_osd_sleep_mtx,
-		    MAX(mstohz(Milliseconds), 1));
-		mutex_exit(&acpi_osd_sleep_mtx);
-	}
+	ACPI_FUNCTION_TRACE(__FUNCTION__);
+
+	timo = Milliseconds * hz / 1000;
+	if (timo == 0)
+		timo = 1;
+
+	(void) tsleep(&timo, PVM, "acpislp", timo);
+
+	return_VOID;
 }
 
 /*
@@ -184,7 +184,7 @@ void
 AcpiOsStall(UINT32 Microseconds)
 {
 
-	ACPI_FUNCTION_TRACE(__func__);
+	ACPI_FUNCTION_TRACE(__FUNCTION__);
 
 	/*
 	 * sleep(9) isn't safe because AcpiOsStall may be called
@@ -204,7 +204,7 @@ AcpiOsStall(UINT32 Microseconds)
 }
 
 /*
- * AcpiOsGetTimer:
+ * AcpiOsStall:
  *
  *	Get the current system time in 100 nanosecond units
  */

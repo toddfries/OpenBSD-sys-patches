@@ -1,4 +1,4 @@
-/*	$NetBSD: sab.c,v 1.42 2008/06/11 18:52:32 cegger Exp $	*/
+/*	$NetBSD: sab.c,v 1.36 2006/10/19 21:52:12 martin Exp $	*/
 /*	$OpenBSD: sab.c,v 1.7 2002/04/08 17:49:42 jason Exp $	*/
 
 /*
@@ -42,7 +42,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sab.c,v 1.42 2008/06/11 18:52:32 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sab.c,v 1.36 2006/10/19 21:52:12 martin Exp $");
 
 #include "opt_kgdb.h"
 #include <sys/types.h>
@@ -58,7 +58,6 @@ __KERNEL_RCSID(0, "$NetBSD: sab.c,v 1.42 2008/06/11 18:52:32 cegger Exp $");
 #include <sys/syslog.h>
 #include <sys/kauth.h>
 #include <sys/kgdb.h>
-#include <sys/intr.h>
 
 #include <machine/autoconf.h>
 #include <machine/openfirm.h>
@@ -265,7 +264,7 @@ sab_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
-	sc->sc_softintr = softint_establish(SOFTINT_SERIAL, sab_softintr, sc);
+	sc->sc_softintr = softintr_establish(IPL_TTY, sab_softintr, sc);
 	if (sc->sc_softintr == NULL) {
 		printf(": can't get soft intr\n");
 		return;
@@ -345,7 +344,7 @@ sab_intr(void *vsc)
 		r |= sabtty_intr(sc->sc_child[1], &needsoft);
 
 	if (needsoft)
-		softint_schedule(sc->sc_softintr);
+		softintr_schedule(sc->sc_softintr);
 
 	return (r);
 }
@@ -657,7 +656,7 @@ sabopen(dev_t dev, int flags, int mode, struct lwp *l)
 	struct proc *p;
 	int s, s1;
 
-	sc = device_lookup_private(&sabtty_cd, SABUNIT(dev));
+	sc = device_lookup(&sabtty_cd, SABUNIT(dev));
 	if (sc == NULL)
 		return (ENXIO);
 
@@ -668,7 +667,6 @@ sabopen(dev_t dev, int flags, int mode, struct lwp *l)
 	if (kauth_authorize_device_tty(l->l_cred, KAUTH_DEVICE_TTY_OPEN, tp))
 		return (EBUSY);
 
-	mutex_spin_enter(&tty_lock);
 	if ((tp->t_state & TS_ISOPEN) == 0) {
 		ttychars(tp);
 		tp->t_iflag = TTYDEF_IFLAG;
@@ -684,6 +682,8 @@ sabopen(dev_t dev, int flags, int mode, struct lwp *l)
 		tp->t_ispeed = tp->t_ospeed = TTYDEF_SPEED;
 
 		sc->sc_rput = sc->sc_rget = sc->sc_rbuf;
+
+		s = spltty();
 
 		ttsetwater(tp);
 
@@ -710,6 +710,8 @@ sabopen(dev_t dev, int flags, int mode, struct lwp *l)
 			tp->t_state |= TS_CARR_ON;
 		else
 			tp->t_state &= ~TS_CARR_ON;
+	} else {
+		s = spltty();
 	}
 
 	if ((flags & O_NONBLOCK) == 0) {
@@ -717,26 +719,25 @@ sabopen(dev_t dev, int flags, int mode, struct lwp *l)
 		    (tp->t_state & TS_CARR_ON) == 0) {
 			int error;
 
-			error = ttysleep(tp, &tp->t_rawcv, true, 0);
+			error = ttysleep(tp, &tp->t_rawq, TTIPRI | PCATCH,
+			    "sabttycd", 0);
 			if (error != 0) {
-				mutex_spin_exit(&tty_lock);
+				splx(s);
 				return (error);
 			}
 		}
 	}
 
-	mutex_spin_exit(&tty_lock);
+	splx(s);
 
 	s = (*tp->t_linesw->l_open)(dev, tp);
 	if (s != 0) {
-		mutex_spin_enter(&tty_lock);
-		if (tp->t_state & TS_ISOPEN) {
-			mutex_spin_exit(&tty_lock);
+		if (tp->t_state & TS_ISOPEN)
 			return (s);
-		}
+
 		if (tp->t_cflag & HUPCL) {
 			sabtty_mdmctrl(sc, 0, DMSET);
-			cv_wait(&lbolt, &tty_lock);
+			(void)tsleep(sc, TTIPRI, ttclos, hz);
 		}
 
 		if ((sc->sc_flags & (SABTTYF_CONS_IN | SABTTYF_CONS_OUT)) == 0) {
@@ -744,7 +745,6 @@ sabopen(dev_t dev, int flags, int mode, struct lwp *l)
 			sabtty_flush(sc);
 			sabtty_reset(sc);
 		}
-		mutex_spin_exit(&tty_lock);
 	}
 	return (s);
 }
@@ -752,7 +752,7 @@ sabopen(dev_t dev, int flags, int mode, struct lwp *l)
 int
 sabclose(dev_t dev, int flags, int mode, struct lwp *l)
 {
-	struct sabtty_softc *sc = device_lookup_private(&sabtty_cd, SABUNIT(dev));
+	struct sabtty_softc *sc = device_lookup(&sabtty_cd, SABUNIT(dev));
 	struct sab_softc *bc = sc->sc_parent;
 	struct tty *tp = sc->sc_tty;
 	int s;
@@ -792,7 +792,7 @@ sabclose(dev_t dev, int flags, int mode, struct lwp *l)
 int
 sabread(dev_t dev, struct uio *uio, int flags)
 {
-	struct sabtty_softc *sc = device_lookup_private(&sabtty_cd, SABUNIT(dev));
+	struct sabtty_softc *sc = device_lookup(&sabtty_cd, SABUNIT(dev));
 	struct tty *tp = sc->sc_tty;
 
 	return ((*tp->t_linesw->l_read)(tp, uio, flags));
@@ -801,16 +801,16 @@ sabread(dev_t dev, struct uio *uio, int flags)
 int
 sabwrite(dev_t dev, struct uio *uio, int flags)
 {
-	struct sabtty_softc *sc = device_lookup_private(&sabtty_cd, SABUNIT(dev));
+	struct sabtty_softc *sc = device_lookup(&sabtty_cd, SABUNIT(dev));
 	struct tty *tp = sc->sc_tty;
 
 	return ((*tp->t_linesw->l_write)(tp, uio, flags));
 }
 
 int
-sabioctl(dev_t dev, u_long cmd, void *data, int flags, struct lwp *l)
+sabioctl(dev_t dev, u_long cmd, caddr_t data, int flags, struct lwp *l)
 {
-	struct sabtty_softc *sc = device_lookup_private(&sabtty_cd, SABUNIT(dev));
+	struct sabtty_softc *sc = device_lookup(&sabtty_cd, SABUNIT(dev));
 	struct tty *tp = sc->sc_tty;
 	int error;
 
@@ -873,7 +873,7 @@ sabioctl(dev_t dev, u_long cmd, void *data, int flags, struct lwp *l)
 struct tty *
 sabtty(dev_t dev)
 {
-	struct sabtty_softc *sc = device_lookup_private(&sabtty_cd, SABUNIT(dev));
+	struct sabtty_softc *sc = device_lookup(&sabtty_cd, SABUNIT(dev));
 
 	return (sc->sc_tty);
 }
@@ -881,7 +881,7 @@ sabtty(dev_t dev)
 void
 sabstop(struct tty *tp, int flag)
 {
-	struct sabtty_softc *sc = device_lookup_private(&sabtty_cd, SABUNIT(tp->t_dev));
+	struct sabtty_softc *sc = device_lookup(&sabtty_cd, SABUNIT(tp->t_dev));
 	int s;
 
 	s = spltty();
@@ -898,7 +898,7 @@ sabstop(struct tty *tp, int flag)
 int
 sabpoll(dev_t dev, int events, struct lwp *l)
 {
-	struct sabtty_softc *sc = device_lookup_private(&sabtty_cd, SABUNIT(dev));
+	struct sabtty_softc *sc = device_lookup(&sabtty_cd, SABUNIT(dev));
 	struct tty *tp = sc->sc_tty;
 
 	return ((*tp->t_linesw->l_poll)(tp, events, l));
@@ -1063,7 +1063,7 @@ sabttyparam(struct sabtty_softc *sc, struct tty *tp, struct termios *t)
 int
 sabtty_param(struct tty *tp, struct termios *t)
 {
-	struct sabtty_softc *sc = device_lookup_private(&sabtty_cd, SABUNIT(tp->t_dev));
+	struct sabtty_softc *sc = device_lookup(&sabtty_cd, SABUNIT(tp->t_dev));
 
 	return (sabttyparam(sc, tp, t));
 }
@@ -1071,12 +1071,19 @@ sabtty_param(struct tty *tp, struct termios *t)
 void
 sabtty_start(struct tty *tp)
 {
-	struct sabtty_softc *sc = device_lookup_private(&sabtty_cd, SABUNIT(tp->t_dev));
+	struct sabtty_softc *sc = device_lookup(&sabtty_cd, SABUNIT(tp->t_dev));
 	int s;
 
 	s = spltty();
 	if ((tp->t_state & (TS_TTSTOP | TS_TIMEOUT | TS_BUSY)) == 0) {
-		if (ttypull(tp)) {
+		if (tp->t_outq.c_cc <= tp->t_lowat) {
+			if (tp->t_state & TS_ASLEEP) {
+				tp->t_state &= ~TS_ASLEEP;
+				wakeup(&tp->t_outq);
+			}
+			selwakeup(&tp->t_wsel);
+		}
+		if (tp->t_outq.c_cc) {
 			sc->sc_txc = ndqb(&tp->t_outq, 0);
 			sc->sc_txp = tp->t_outq.c_cf;
 			tp->t_state |= TS_BUSY;

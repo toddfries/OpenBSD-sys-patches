@@ -1,4 +1,4 @@
-/*	$NetBSD: debug.h,v 1.9 2008/04/28 20:23:20 martin Exp $	*/
+/*	$NetBSD: debug.h,v 1.7 2005/12/11 12:17:25 christos Exp $	*/
 
 /*-
  * Copyright (c) 1999-2002 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -52,7 +59,7 @@
 /*
  * debug printf with Function name 
  */
-#define	PRINTF(fmt, args...)	printf("%s: " fmt, __func__ , ##args) 
+#define	PRINTF(fmt, args...)	printf("%s: " fmt, __FUNCTION__ , ##args) 
 #ifdef DPRINTF_ENABLE
 #ifndef DPRINTF_DEBUG
 #error "specify unique debug symbol"
@@ -114,7 +121,7 @@ void dbg_banner_title(const char *, size_t);
 void dbg_banner_line(void);
 #define dbg_banner_function()						\
 {									\
-	const char funcname[] = __func__;				\
+	const char funcname[] = __FUNCTION__;				\
 	dbg_banner_title(funcname, sizeof funcname);			\
 }
 

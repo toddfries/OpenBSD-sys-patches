@@ -1,4 +1,4 @@
-/*	$NetBSD: fdcvar.h,v 1.10 2008/04/28 20:23:52 martin Exp $	*/
+/*	$NetBSD: fdcvar.h,v 1.7 2005/12/11 12:22:02 christos Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -63,9 +70,6 @@
  *	@(#)fd.c	7.4 (Berkeley) 5/25/91
  */
 
-#include <sys/mutex.h>
-#include <sys/condvar.h>
-
 /*
  * Floppy formatting facilities merged from FreeBSD fd.c driver:
  *	Id: fd.c,v 1.53 1995/03/12 22:40:56 joerg Exp
@@ -105,7 +109,7 @@ enum fdc_state {
 
 /* software state, per controller */
 struct fdc_softc {
-	device_t sc_dev;		/* boilerplate */
+	struct device sc_dev;		/* boilerplate */
 	void *sc_ih;
 
 	bus_space_tag_t sc_iot;		/* ISA i/o space identifier */
@@ -136,14 +140,9 @@ struct fdc_softc {
 	int sc_known;			/* direct configuration if non-zero */
 	int sc_present;			/* bitmap of available fds */
 	const struct fd_type *sc_knownfds[4];	/* drive info known fds */
-	kmutex_t sc_mtx;
-	kcondvar_t sc_cv;
-	int sc_probe;
 };
 
 int	out_fdc(bus_space_tag_t iot, bus_space_handle_t ioh, u_char x);
 
 void	fdcattach(struct fdc_softc *);
-void	fdc_childdet(device_t, device_t);
-int	fdcdetach(device_t self, int flags);
 int	fdcintr(void *);

@@ -1,4 +1,4 @@
-/*	$NetBSD: stand_user.c,v 1.6 2008/12/14 18:46:33 christos Exp $	*/
+/*	$NetBSD: stand_user.c,v 1.4 2005/12/11 12:17:49 christos Exp $	*/
 
 /*
  * Copyright (c) 1998
@@ -49,34 +49,35 @@
 #define HEAPSIZE (128*1024)
 #endif
 
-int samain(void);
+int samain __P((void));
 
 int
-main(void)
+main()
 {
 	char *h = malloc(HEAPSIZE);
 	setheap(h, h + HEAPSIZE);
 
-	return samain();
+	return (samain());
 }
 
 void
-_rtt(void)
+_rtt()
 {
 	warnx("_rtt called");
 	_exit(1);
 }
 
 int
-getsecs(void)
+getsecs()
 {
 	struct timeval t;
 	gettimeofday(&t, 0);
-	return t.tv_sec;
+	return (t.tv_sec);
 }
 
 void
-delay(int t)
+delay(t)
+	int t;
 {
 	struct timeval to;
 	to.tv_sec = 0;
@@ -86,7 +87,8 @@ delay(int t)
 
 /* make output appear unbuffered */
 void
-saputchar(int c)
+saputchar(c)
+	int c;
 {
 	putchar(c);
 	fflush(stdout);
@@ -98,31 +100,33 @@ saputchar(int c)
 
 static int memfd, memcnt;
 
-void *
-mapmem(int offset, int len)
+caddr_t
+mapmem(offset, len)
+	int offset, len;
 {
-	void *base;
+	caddr_t base;
 
 	if (memcnt == 0)
 		memfd = open("/dev/mem", O_RDWR, 0);
 	if (memfd < 0) {
 		warn("open /dev/mem");
-		return 0;
+		return (0);
 	}
 	base = mmap(0, len, PROT_READ | PROT_WRITE, MAP_SHARED,
 		    memfd, offset);
-	if (base == (void *)-1) {
+	if (base == (caddr_t)-1) {
 		warn("mmap %x-%x", offset, offset + len - 1);
-		return 0;
+		return (0);
 	}
 	memcnt++;
-	return base;
+	return (base);
 }
 
 void
-unmapmem(void *addr, int len)
+unmapmem(addr, len)
+	caddr_t addr;
+	int len;
 {
-
 	munmap(addr, len);
 	memcnt--;
 	if (memcnt == 0)
@@ -130,14 +134,14 @@ unmapmem(void *addr, int len)
 }
 
 int
-mapio(void)
+mapio()
 {
 	int res;
 
 	res = i386_iopl(1);
 	if (res)
 		warn("i386_iopl");
-	return res;
+	return (res);
 }
 
 int ourseg = 12345;

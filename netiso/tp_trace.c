@@ -1,4 +1,4 @@
-/*	$NetBSD: tp_trace.c,v 1.13 2007/03/04 06:03:33 christos Exp $	*/
+/*	$NetBSD: tp_trace.c,v 1.11 2005/12/11 12:25:12 christos Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993
@@ -65,7 +65,7 @@ SOFTWARE.
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: tp_trace.c,v 1.13 2007/03/04 06:03:33 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: tp_trace.c,v 1.11 2005/12/11 12:25:12 christos Exp $");
 
 #define TP_TRACEFILE
 
@@ -78,6 +78,7 @@ __KERNEL_RCSID(0, "$NetBSD: tp_trace.c,v 1.13 2007/03/04 06:03:33 christos Exp $
 #include <netiso/tp_param.h>
 #include <netiso/tp_timer.h>
 #include <netiso/tp_stat.h>
+#include <netiso/tp_param.h>
 #include <netiso/tp_ip.h>
 #include <netiso/tp_pcb.h>
 #include <netiso/tp_tpdu.h>
@@ -111,12 +112,12 @@ tpTrace(struct tp_pcb  *tpcb, u_int event, u_int arg, u_int src, u_int len,
 	tp->tpt_arg = arg;
 	if (tpcb)
 		tp->tpt_arg2 = tpcb->tp_lref;
-	bcopy((void *) & time, (void *) & tp->tpt_time, sizeof(struct timeval));
+	bcopy((caddr_t) & time, (caddr_t) & tp->tpt_time, sizeof(struct timeval));
 
 	switch (event) {
 
 	case TPPTertpdu:
-		bcopy((void *) src, (void *) & tp->tpt_ertpdu,
+		bcopy((caddr_t) src, (caddr_t) & tp->tpt_ertpdu,
 		      (unsigned) MIN((int) len, sizeof(struct tp_Trace)));
 		break;
 
@@ -124,8 +125,8 @@ tpTrace(struct tp_pcb  *tpcb, u_int event, u_int arg, u_int src, u_int len,
 	case TPPTmisc:
 
 		/* arg is a string */
-		bcopy((void *) arg, (void *) tp->tpt_str,
-		 (unsigned) MIN(1 + strlen((void *) arg), TPTRACE_STRLEN));
+		bcopy((caddr_t) arg, (caddr_t) tp->tpt_str,
+		 (unsigned) MIN(1 + strlen((caddr_t) arg), TPTRACE_STRLEN));
 		tp->tpt_m2 = src;
 		tp->tpt_m3 = len;
 		tp->tpt_m4 = arg4;
@@ -147,16 +148,16 @@ tpTrace(struct tp_pcb  *tpcb, u_int event, u_int arg, u_int src, u_int len,
 		tp->tpt_m1 = arg5;
 		break;
 	case TPPTparam:
-		bcopy((void *) src, (void *) & tp->tpt_param, sizeof(struct tp_param));
+		bcopy((caddr_t) src, (caddr_t) & tp->tpt_param, sizeof(struct tp_param));
 		break;
 	case TPPTref:
-		bcopy((void *) src, (void *) & tp->tpt_ref, sizeof(struct tp_ref));
+		bcopy((caddr_t) src, (caddr_t) & tp->tpt_ref, sizeof(struct tp_ref));
 		break;
 
 	case TPPTtpduin:
 	case TPPTtpduout:
 		tp->tpt_arg2 = arg4;
-		bcopy((void *) src, (void *) & tp->tpt_tpdu,
+		bcopy((caddr_t) src, (caddr_t) & tp->tpt_tpdu,
 		      (unsigned) MIN((int) len, sizeof(struct tp_Trace)));
 		break;
 	}

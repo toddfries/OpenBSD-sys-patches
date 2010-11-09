@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile,v 1.17 2007/02/09 21:55:04 ad Exp $
+#	$NetBSD: Makefile,v 1.16 2006/07/26 19:54:57 drochner Exp $
 
 INCSDIR= /usr/include/hpcsh
 
@@ -12,9 +12,9 @@ INCS=	ansi.h aout_machdep.h apmvar.h asm.h \
 	int_const.h int_fmtio.h int_limits.h int_mwgwtypes.h int_types.h \
 	intr.h \
 	limits.h lock.h \
-	math.h mcontext.h mutex.h \
+	math.h mcontext.h \
 	param.h pcb.h pmap.h pmc.h proc.h profile.h psl.h pte.h ptrace.h \
-	reg.h rwlock.h \
+	reg.h \
 	setjmp.h signal.h stdarg.h \
 	types.h \
 	varargs.h vmparam.h \

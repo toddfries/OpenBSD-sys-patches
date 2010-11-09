@@ -1,7 +1,7 @@
-/*	$NetBSD: cpufunc.S,v 1.15 2008/06/24 16:32:53 ad Exp $	*/
+/*	$NetBSD: cpufunc.S,v 1.7 2008/02/08 18:17:39 ad Exp $	*/
 
 /*-
- * Copyright (c) 1998, 2007, 2008 The NetBSD Foundation, Inc.
+ * Copyright (c) 1998, 2007 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -45,78 +52,69 @@
 #undef _ALIGN_TEXT
 #define	_ALIGN_TEXT	.align 8
 
-ENTRY(x86_lfence)
+NENTRY(x86_lfence)
 	lfence
 	ret
 
-ENTRY(x86_sfence)
+NENTRY(x86_sfence)
 	sfence
 	ret
 
-ENTRY(x86_mfence)
+NENTRY(x86_mfence)
 	mfence
 	ret
 
 #ifndef XEN
-ENTRY(invlpg)
+NENTRY(invlpg)
 	invlpg	(%rdi)
 	ret
 
-ENTRY(lidt)
+NENTRY(lidt)
 	lidt	(%rdi)
 	ret
 
-ENTRY(lldt)
-	cmpl	%edi, CPUVAR(CURLDT)
-	jne	1f
-	ret
-1:
-	movl	%edi, CPUVAR(CURLDT)
+NENTRY(lldt)
 	lldt	%di
 	ret
 
-ENTRY(ltr)
+NENTRY(ltr)
 	ltr	%di
 	ret
 
-ENTRY(lcr0)
+NENTRY(lcr0)
 	movq	%rdi, %cr0
 	ret
 
-ENTRY(rcr0)
+NENTRY(rcr0)
 	movq	%cr0, %rax
 	ret
 
-ENTRY(lcr2)
-	movq	%rdi, %cr2
-	ret
-
-ENTRY(rcr2)
+NENTRY(rcr2)
 	movq	%cr2, %rax
 	ret
 
-ENTRY(lcr3)
+NENTRY(lcr3)
 	movq	%rdi, %cr3
 	ret
 
-ENTRY(rcr3)
+NENTRY(rcr3)
 	movq	%cr3, %rax
 	ret
 #endif
 
-ENTRY(lcr4)
+NENTRY(lcr4)
 	movq	%rdi, %cr4
 	ret
 
-ENTRY(rcr4)
+NENTRY(rcr4)
 	movq	%cr4, %rax
 	ret
 
-ENTRY(lcr8)
+NENTRY(lcr8)
 	movq	%rdi, %cr8
 	ret
 
-ENTRY(rcr8)
+NENTRY(rcr8)
 	movq	%cr8, %rax
 	ret
 
@@ -137,7 +135,7 @@ ENTRY(rcr8)
  * (the alternatives not quoted above are not an option here.)
  */
 #ifndef XEN
-ENTRY(tlbflushg)
+NENTRY(tlbflushg)
 	movq	%cr4, %rax
 	movq	%rax, %rdx
 	andq	$~CR4_PGE, %rdx
@@ -145,35 +143,35 @@ ENTRY(tlbflushg)
 	movq	%rax, %cr4
 	ret
 
-ENTRY(tlbflush)
+NENTRY(tlbflush)
 	movq	%cr3, %rax
 	movq	%rax, %cr3
 	ret
 
-ENTRY(ldr6)
+NENTRY(ldr6)
 	movq	%rdi, %dr6
 	ret
 
-ENTRY(rdr6)
+NENTRY(rdr6)
 	movq	%dr6, %rdi
 	ret
 
-ENTRY(x86_disable_intr)
+NENTRY(x86_disable_intr)
 	cli
 	ret
 
-ENTRY(x86_enable_intr)
+NENTRY(x86_enable_intr)
 	sti
 	ret
 
-ENTRY(x86_read_flags)
+NENTRY(x86_read_flags)
 	pushfq
 	popq	%rax
 	ret
 
 STRONG_ALIAS(x86_read_psl,x86_read_flags)
 
-ENTRY(x86_write_flags)
+NENTRY(x86_write_flags)
 	pushq	%rdi
 	popfq
 	ret
@@ -181,7 +179,7 @@ ENTRY(x86_write_flags)
 STRONG_ALIAS(x86_write_psl,x86_write_flags)
 #endif /* XEN */
 
-ENTRY(rdmsr)
+NENTRY(rdmsr)
 	movq	%rdi, %rcx
 	xorq	%rax, %rax
 	rdmsr
@@ -189,7 +187,7 @@ ENTRY(rdmsr)
 	orq	%rdx, %rax
 	ret
 
-ENTRY(wrmsr)
+NENTRY(wrmsr)
 	movq	%rdi, %rcx
 	movq	%rsi, %rax
 	movq	%rsi, %rdx
@@ -197,7 +195,7 @@ ENTRY(wrmsr)
 	wrmsr
 	ret
 
-ENTRY(rdmsr_locked)
+NENTRY(rdmsr_locked)
 	movq	%rdi, %rcx
 	xorq	%rax, %rax
 	movl	$OPTERON_MSR_PASSCODE, %edi
@@ -206,7 +204,7 @@ ENTRY(rdmsr_locked)
 	orq	%rdx, %rax
 	ret
 
-ENTRY(wrmsr_locked)
+NENTRY(wrmsr_locked)
 	movq	%rdi, %rcx
 	movq	%rsi, %rax
 	movq	%rsi, %rdx
@@ -216,25 +214,19 @@ ENTRY(wrmsr_locked)
 	ret
 
 #ifndef XEN
-ENTRY(wbinvd)
+NENTRY(wbinvd)
 	wbinvd
 	ret
 #endif
 
-ENTRY(cpu_counter)
+NENTRY(rdtsc)
 	xorq	%rax, %rax
 	rdtsc
 	shlq	$32, %rdx
 	orq	%rdx, %rax
-	addq	CPUVAR(CC_SKEW), %rax
 	ret
 
-ENTRY(cpu_counter32)
-	rdtsc
-	addl	CPUVAR(CC_SKEW), %eax
-	ret
-
-ENTRY(rdpmc)
+NENTRY(rdpmc)
 	movq	%rdi, %rcx
 	xorq	%rax, %rax
 	rdpmc
@@ -242,31 +234,27 @@ ENTRY(rdpmc)
 	orq	%rdx, %rax
 	ret
 
-ENTRY(breakpoint)
+NENTRY(breakpoint)
 	pushq	%rbp
 	movq	%rsp, %rbp
 	int	$0x03		/* paranoid, not 'int3' */
 	leave
 	ret
 
-ENTRY(x86_curcpu)
+NENTRY(x86_curcpu)
 	movq	%gs:(CPU_INFO_SELF), %rax
 	ret
 
-ENTRY(x86_curlwp)
+NENTRY(x86_curlwp)
 	movq	%gs:(CPU_INFO_CURLWP), %rax
 	ret
 
-ENTRY(cpu_set_curpri)
-	movl	%edi, %gs:(CPU_INFO_CURPRIORITY)
-	ret
-
-ENTRY(__byte_swap_u32_variable)
+NENTRY(__byte_swap_u32_variable)
 	movl	%edi, %eax
 	bswapl	%eax
 	ret
 
-ENTRY(__byte_swap_u16_variable)
+NENTRY(__byte_swap_u16_variable)
 	movl	%edi, %eax
 	xchgb	%al, %ah
 	ret
@@ -281,7 +269,7 @@ ENTRY(__byte_swap_u16_variable)
  * this only happens at run time when the GDT is resized.
  */
 #ifndef XEN
-ENTRY(lgdt)
+NENTRY(lgdt)
 	/* Reload the descriptor table. */
 	movq	%rdi,%rax
 	lgdt	(%rax)
@@ -294,7 +282,7 @@ ENTRY(lgdt)
  * void lgdt_finish(void);
  * Reload segments after a GDT change
  */
-ENTRY(lgdt_finish)
+NENTRY(lgdt_finish)
 #endif /* XEN */
 	movl	$GSEL(GDATA_SEL, SEL_KPL),%eax
 	movl	%eax,%ds
@@ -307,14 +295,14 @@ ENTRY(lgdt_finish)
  *
  * Flush instruction pipelines by doing an intersegment (far) return.
  */
-ENTRY(x86_flush)
+NENTRY(x86_flush)
 	popq	%rax
 	pushq	$GSEL(GCODE_SEL, SEL_KPL)
 	pushq	%rax
 	lretq
 
 /* Waits - set up stack frame. */
-ENTRY(x86_hlt)
+NENTRY(x86_hlt)
 	pushq	%rbp
 	movq	%rsp, %rbp
 	hlt
@@ -322,7 +310,7 @@ ENTRY(x86_hlt)
 	ret
 
 /* Waits - set up stack frame. */
-ENTRY(x86_stihlt)
+NENTRY(x86_stihlt)
 	pushq	%rbp
 	movq	%rsp, %rbp
 	sti
@@ -330,14 +318,14 @@ ENTRY(x86_stihlt)
 	leave
 	ret
 
-ENTRY(x86_monitor)
+NENTRY(x86_monitor)
 	movq	%rdi, %rax
 	movq	%rsi, %rcx
 	monitor	%eax, %ecx, %edx	/* XXXgas %rax */
 	ret
 
 /* Waits - set up stack frame. */
-ENTRY(x86_mwait)  
+NENTRY(x86_mwait)  
 	pushq	%rbp
 	movq	%rsp, %rbp
 	movq	%rdi, %rax
@@ -350,7 +338,7 @@ NENTRY(x86_pause)
 	pause
 	ret
 
-ENTRY(x86_cpuid2)
+NENTRY(x86_cpuid2)
 	movq	%rbx, %r8
 	movq	%rdi, %rax
 	movq	%rsi, %rcx
@@ -363,42 +351,42 @@ ENTRY(x86_cpuid2)
 	movq	%r8, %rbx
 	ret
 
-ENTRY(x86_getss)
+NENTRY(getss)
 	movl	%ss, %eax
 	ret
 
-ENTRY(fldcw)
+NENTRY(fldcw)
 	fldcw	(%rdi)
 	ret
 
-ENTRY(fnclex)	
+NENTRY(fnclex)	
 	fnclex
 	ret
 
-ENTRY(fninit)
+NENTRY(fninit)
 	fninit
 	ret
 
-ENTRY(fnsave)
+NENTRY(fnsave)
 	fnsave	(%rdi)
 	ret
 
-ENTRY(fnstcw)
+NENTRY(fnstcw)
 	fnstcw	(%rdi)
 	ret
 
-ENTRY(fnstsw)
+NENTRY(fnstsw)
 	fnstsw	(%rdi)
 	ret
 
-ENTRY(fp_divide_by_0)
+NENTRY(fp_divide_by_0)
 	fldz
 	fld1
 	fdiv	%st, %st(1)
 	fwait
 	ret
 
-ENTRY(frstor)
+NENTRY(frstor)
 	frstor	(%rdi)
 	ret
 
@@ -416,30 +404,30 @@ ENTRY(stts)
 	movq	%rax, %cr0
 	ret
 
-ENTRY(fxsave)
+NENTRY(fxsave)
 	fxsave	(%rdi)
 	ret
 
-ENTRY(fxrstor)
+NENTRY(fxrstor)
 	fxrstor	(%rdi)
 	ret
 
-ENTRY(fldummy)
+NENTRY(fldummy)
 	ffree	%st(7)
 	fld	(%rdi)
 	ret
 
-ENTRY(x86_ldmxcsr)
+NENTRY(x86_ldmxcsr)
 	ldmxcsr	(%rdi)
 	ret
 
-ENTRY(inb)
+NENTRY(inb)
 	movq	%rdi, %rdx
 	xorq	%rax, %rax
 	inb	%dx, %al
 	ret
 
-ENTRY(insb)
+NENTRY(insb)
 	movl	%edx, %ecx
 	movl	%edi, %edx
 	movq	%rsi, %rdi
@@ -447,13 +435,13 @@ ENTRY(insb)
 	insb
 	ret
 
-ENTRY(inw)
+NENTRY(inw)
 	movq	%rdi, %rdx
 	xorq	%rax, %rax
 	inw	%dx, %ax
 	ret
 
-ENTRY(insw)
+NENTRY(insw)
 	movl	%edx, %ecx
 	movl	%edi, %edx
 	movq	%rsi, %rdi
@@ -461,13 +449,13 @@ ENTRY(insw)
 	insw
 	ret
 
-ENTRY(inl)
+NENTRY(inl)
 	movq	%rdi, %rdx
 	xorq	%rax, %rax
 	inl	%dx, %eax
 	ret
 
-ENTRY(insl)
+NENTRY(insl)
 	movl	%edx, %ecx
 	movl	%edi, %edx
 	movq	%rsi, %rdi
@@ -475,39 +463,39 @@ ENTRY(insl)
 	insl
 	ret
 
-ENTRY(outb)
+NENTRY(outb)
 	movq	%rdi, %rdx
 	movq	%rsi, %rax
 	outb	%al, %dx
 	ret
 
-ENTRY(outsb)
+NENTRY(outsb)
 	movl	%edx, %ecx
 	movl	%edi, %edx
 	rep
 	outsb
 	ret
 
-ENTRY(outw)
+NENTRY(outw)
 	movq	%rdi, %rdx
 	movq	%rsi, %rax
 	outw	%ax, %dx
 	ret
 
-ENTRY(outsw)
+NENTRY(outsw)
 	movl	%edx, %ecx
 	movl	%edi, %edx
 	rep
 	outsw
 	ret
 
-ENTRY(outl)
+NENTRY(outl)
 	movq	%rdi, %rdx
 	movq	%rsi, %rax
 	outl	%eax, %dx
 	ret
 
-ENTRY(outsl)
+NENTRY(outsl)
 	movl	%edx, %ecx
 	movl	%edi, %edx
 	rep

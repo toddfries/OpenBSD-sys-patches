@@ -1,4 +1,4 @@
-/*	$NetBSD: acpi_resource.c,v 1.27 2009/02/17 12:46:01 jmcneill Exp $	*/
+/*	$NetBSD: acpi_resource.c,v 1.22 2007/09/28 15:16:16 njoly Exp $	*/
 
 /*
  * Copyright 2001 Wasabi Systems, Inc.
@@ -67,7 +67,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: acpi_resource.c,v 1.27 2009/02/17 12:46:01 jmcneill Exp $");
+__KERNEL_RCSID(0, "$NetBSD: acpi_resource.c,v 1.22 2007/09/28 15:16:16 njoly Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -95,7 +95,7 @@ acpi_resource_parse_callback(ACPI_RESOURCE *res, void *context)
 	const struct acpi_resource_parse_ops *ops;
 	int i;
 
-	ACPI_FUNCTION_TRACE(__func__);
+	ACPI_FUNCTION_TRACE(__FUNCTION__);
 
 	ops = arg->ops;
 
@@ -340,7 +340,7 @@ acpi_resource_parse(struct device *dev, ACPI_HANDLE handle, const char *path,
 	struct resource_parse_callback_arg cbarg;
 	ACPI_STATUS rv;
 
-	ACPI_FUNCTION_TRACE(__func__);
+	ACPI_FUNCTION_TRACE(__FUNCTION__);
 
 	if (ops->init)
 		(*ops->init)(dev, arg, &cbarg.context);
@@ -352,8 +352,8 @@ acpi_resource_parse(struct device *dev, ACPI_HANDLE handle, const char *path,
 	rv = AcpiWalkResources(handle, path, acpi_resource_parse_callback,
 	    &cbarg);
 	if (ACPI_FAILURE(rv)) {
-		aprint_error_dev(dev, "ACPI: unable to get %s resources: %s\n",
-		    path, AcpiFormatException(rv));
+		printf("%s: ACPI: unable to get %s resources: %s\n",
+		    dev->dv_xname, path, AcpiFormatException(rv));
 		return_ACPI_STATUS(rv);
 	}
 
@@ -381,17 +381,17 @@ acpi_resource_print(struct device *dev, struct acpi_resources *res)
 	    SIMPLEQ_EMPTY(&res->ar_drq))
 		return;
 
-	aprint_normal(":");
+	printf("%s:", dev->dv_xname);
 
 	if (SIMPLEQ_EMPTY(&res->ar_io) == 0) {
 		struct acpi_io *ar;
 
 		sep = "";
-		aprint_normal(" io ");
+		printf(" io ");
 		SIMPLEQ_FOREACH(ar, &res->ar_io, ar_list) {
-			aprint_normal("%s0x%x", sep, ar->ar_base);
+			printf("%s0x%x", sep, ar->ar_base);
 			if (ar->ar_length > 1)
-				aprint_normal("-0x%x", ar->ar_base +
+				printf("-0x%x", ar->ar_base +
 				    ar->ar_length - 1);
 			sep = ",";
 		}
@@ -403,11 +403,11 @@ acpi_resource_print(struct device *dev, struct acpi_resources *res)
 		struct acpi_mem *ar;
 
 		sep = "";
-		aprint_normal(" mem ");
+		printf(" mem ");
 		SIMPLEQ_FOREACH(ar, &res->ar_mem, ar_list) {
-			aprint_normal("%s0x%x", sep, ar->ar_base);
+			printf("%s0x%x", sep, ar->ar_base);
 			if (ar->ar_length > 1)
-				aprint_normal("-0x%x", ar->ar_base +
+				printf("-0x%x", ar->ar_base +
 				    ar->ar_length - 1);
 			sep = ",";
 		}
@@ -419,9 +419,9 @@ acpi_resource_print(struct device *dev, struct acpi_resources *res)
 		struct acpi_irq *ar;
 
 		sep = "";
-		aprint_normal(" irq ");
+		printf(" irq ");
 		SIMPLEQ_FOREACH(ar, &res->ar_irq, ar_list) {
-			aprint_normal("%s%d", sep, ar->ar_irq);
+			printf("%s%d", sep, ar->ar_irq);
 			sep = ",";
 		}
 	}
@@ -430,15 +430,14 @@ acpi_resource_print(struct device *dev, struct acpi_resources *res)
 		struct acpi_drq *ar;
 
 		sep = "";
-		aprint_normal(" drq ");
+		printf(" drq ");
 		SIMPLEQ_FOREACH(ar, &res->ar_drq, ar_list) {
-			aprint_normal("%s%d", sep, ar->ar_drq);
+			printf("%s%d", sep, ar->ar_drq);
 			sep = ",";
 		}
 	}
 
-	aprint_normal("\n");
-	aprint_naive("\n");
+	printf("\n");
 }
 
 /*
@@ -674,8 +673,8 @@ acpi_res_parse_ioport(struct device *dev, void *context, uint32_t base,
 
 	ar = AcpiOsAllocate(sizeof(*ar));
 	if (ar == NULL) {
-		aprint_error_dev(dev, "ACPI: unable to allocate I/O resource %d\n",
-		    res->ar_nio);
+		printf("%s: ACPI: unable to allocate I/O resource %d\n",
+		    dev->dv_xname, res->ar_nio);
 		res->ar_nio++;
 		return;
 	}
@@ -696,8 +695,8 @@ acpi_res_parse_iorange(struct device *dev, void *context, uint32_t low,
 
 	ar = AcpiOsAllocate(sizeof(*ar));
 	if (ar == NULL) {
-		aprint_error_dev(dev, "ACPI: unable to allocate I/O range resource %d\n",
-		    res->ar_niorange);
+		printf("%s: ACPI: unable to allocate I/O range resource %d\n",
+		    dev->dv_xname, res->ar_niorange);
 		res->ar_niorange++;
 		return;
 	}
@@ -720,8 +719,8 @@ acpi_res_parse_memory(struct device *dev, void *context, uint32_t base,
 
 	ar = AcpiOsAllocate(sizeof(*ar));
 	if (ar == NULL) {
-		aprint_error_dev(dev, "ACPI: unable to allocate Memory resource %d\n",
-		    res->ar_nmem);
+		printf("%s: ACPI: unable to allocate Memory resource %d\n",
+		    dev->dv_xname, res->ar_nmem);
 		res->ar_nmem++;
 		return;
 	}
@@ -742,8 +741,8 @@ acpi_res_parse_memrange(struct device *dev, void *context, uint32_t low,
 
 	ar = AcpiOsAllocate(sizeof(*ar));
 	if (ar == NULL) {
-		aprint_error_dev(dev, "ACPI: unable to allocate Memory range resource %d\n",
-		    res->ar_nmemrange);
+		printf("%s: ACPI: unable to allocate Memory range resource "
+		    "%d\n", dev->dv_xname, res->ar_nmemrange);
 		res->ar_nmemrange++;
 		return;
 	}
@@ -765,8 +764,8 @@ acpi_res_parse_irq(struct device *dev, void *context, uint32_t irq, uint32_t typ
 
 	ar = AcpiOsAllocate(sizeof(*ar));
 	if (ar == NULL) {
-		aprint_error_dev(dev, "ACPI: unable to allocate IRQ resource %d\n",
-		    res->ar_nirq);
+		printf("%s: ACPI: unable to allocate IRQ resource %d\n",
+		    dev->dv_xname, res->ar_nirq);
 		res->ar_nirq++;
 		return;
 	}
@@ -786,8 +785,8 @@ acpi_res_parse_drq(struct device *dev, void *context, uint32_t drq)
 
 	ar = AcpiOsAllocate(sizeof(*ar));
 	if (ar == NULL) {
-		aprint_error_dev(dev, "ACPI: unable to allocate DRQ resource %d\n",
-		    res->ar_ndrq);
+		printf("%s: ACPI: unable to allocate DRQ resource %d\n",
+		    dev->dv_xname, res->ar_ndrq);
 		res->ar_ndrq++;
 		return;
 	}
@@ -803,7 +802,8 @@ acpi_res_parse_start_dep(struct device *dev, void *context,
     int preference)
 {
 
-	aprint_error_dev(dev, "ACPI: dependant functions not supported\n");
+	printf("%s: ACPI: dependant functions not supported\n",
+	    dev->dv_xname);
 }
 
 static void

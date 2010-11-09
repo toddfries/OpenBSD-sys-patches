@@ -1,4 +1,4 @@
-/*	$NetBSD: ccd.c,v 1.132 2009/01/13 13:35:52 yamt Exp $	*/
+/*	$NetBSD: ccd.c,v 1.123 2007/10/08 16:41:10 ad Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997, 1998, 1999, 2007 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -118,7 +125,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ccd.c,v 1.132 2009/01/13 13:35:52 yamt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ccd.c,v 1.123 2007/10/08 16:41:10 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -254,7 +261,7 @@ ccdattach(int num)
 	for (i = 0; i < num; i++) {
 		cs = &ccd_softc[i];
 		snprintf(cs->sc_xname, sizeof(cs->sc_xname), "ccd%d", i);
-		mutex_init(&cs->sc_lock, MUTEX_DEFAULT, IPL_NONE);
+		mutex_init(&cs->sc_lock, MUTEX_DRIVER, IPL_NONE);
 		disk_init(&cs->sc_dkdev, cs->sc_xname, NULL); /* XXX */
 	}
 }
@@ -318,7 +325,7 @@ ccdinit(struct ccd_softc *cs, char **cpaths, struct vnode **vpp,
 		/*
 		 * XXX: Cache the component's dev_t.
 		 */
-		if ((error = VOP_GETATTR(vpp[ix], &va, l->l_cred)) != 0) {
+		if ((error = VOP_GETATTR(vpp[ix], &va, l->l_cred, l)) != 0) {
 #ifdef DEBUG
 			if (ccddebug & (CCDB_FOLLOW|CCDB_INIT))
 				printf("%s: %s: getattr failed %s = %d\n",
@@ -333,7 +340,7 @@ ccdinit(struct ccd_softc *cs, char **cpaths, struct vnode **vpp,
 		 * Get partition information for the component.
 		 */
 		error = VOP_IOCTL(vpp[ix], DIOCGPART, &dpart,
-		    FREAD, l->l_cred);
+		    FREAD, l->l_cred, l);
 		if (error) {
 #ifdef DEBUG
 			if (ccddebug & (CCDB_FOLLOW|CCDB_INIT))
@@ -549,7 +556,7 @@ ccdopen(dev_t dev, int flags, int fmt, struct lwp *l)
 
 #ifdef DEBUG
 	if (ccddebug & CCDB_FOLLOW)
-		printf("ccdopen(0x%"PRIx64", 0x%x)\n", dev, flags);
+		printf("ccdopen(0x%x, 0x%x)\n", dev, flags);
 #endif
 	if (unit >= numccd)
 		return (ENXIO);
@@ -610,7 +617,7 @@ ccdclose(dev_t dev, int flags, int fmt, struct lwp *l)
 
 #ifdef DEBUG
 	if (ccddebug & CCDB_FOLLOW)
-		printf("ccdclose(0x%"PRIx64", 0x%x)\n", dev, flags);
+		printf("ccdclose(0x%x, 0x%x)\n", dev, flags);
 #endif
 
 	if (unit >= numccd)
@@ -688,7 +695,7 @@ ccdstrategy(struct buf *bp)
 
 	/* Place it in the queue and start I/O on the unit. */
 	s = splbio();
-	bufq_put(cs->sc_bufq, bp);
+	BUFQ_PUT(cs->sc_bufq, bp);
 	ccdstart(cs);
 	splx(s);
 	return;
@@ -714,7 +721,7 @@ ccdstart(struct ccd_softc *cs)
 #endif
 
 	/* See if there is work for us to do. */
-	while ((bp = bufq_peek(cs->sc_bufq)) != NULL) {
+	while ((bp = BUFQ_PEEK(cs->sc_bufq)) != NULL) {
 		/* Instrumentation. */
 		disk_busy(&cs->sc_dkdev);
 
@@ -750,7 +757,7 @@ ccdstart(struct ccd_softc *cs)
 		}
 
 		/* Transfer all set up, remove job from the queue. */
-		(void) bufq_get(cs->sc_bufq);
+		(void) BUFQ_GET(cs->sc_bufq);
 
 		/* Now fire off the requests. */
 		while ((cbp = SIMPLEQ_FIRST(&cbufq)) != NULL) {
@@ -830,17 +837,14 @@ ccdbuffer(struct ccd_softc *cs, struct buf *bp, daddr_t bn, void *addr,
 	cbp = CCD_GETBUF();
 	if (cbp == NULL)
 		return (NULL);
-	buf_init(&cbp->cb_buf);
-	cbp->cb_buf.b_flags = bp->b_flags;
-	cbp->cb_buf.b_oflags = bp->b_oflags;
-	cbp->cb_buf.b_cflags = bp->b_cflags;
+	BUF_INIT(&cbp->cb_buf);
+	cbp->cb_buf.b_flags = bp->b_flags | B_CALL;
 	cbp->cb_buf.b_iodone = ccdiodone;
 	cbp->cb_buf.b_proc = bp->b_proc;
 	cbp->cb_buf.b_dev = ci->ci_dev;
 	cbp->cb_buf.b_blkno = cbn + cboff;
 	cbp->cb_buf.b_data = addr;
 	cbp->cb_buf.b_vp = ci->ci_vp;
-	cbp->cb_buf.b_objlock = &ci->ci_vp->v_interlock;
 	if (cs->sc_ileave == 0)
 		cbc = dbtob((u_int64_t)(ci->ci_size - cbn));
 	else
@@ -858,7 +862,7 @@ ccdbuffer(struct ccd_softc *cs, struct buf *bp, daddr_t bn, void *addr,
 
 #ifdef DEBUG
 	if (ccddebug & CCDB_IO)
-		printf(" dev 0x%"PRIx64"(u%lu): cbp %p bn %" PRId64 " addr %p"
+		printf(" dev 0x%x(u%lu): cbp %p bn %" PRId64 " addr %p"
 		       " bcnt %d\n",
 		    ci->ci_dev, (unsigned long) (ci-cs->sc_cinfo), cbp,
 		    cbp->cb_buf.b_blkno, cbp->cb_buf.b_data,
@@ -906,7 +910,7 @@ ccdiodone(struct buf *vbp)
 	if (ccddebug & CCDB_IO) {
 		printf("ccdiodone: bp %p bcount %d resid %d\n",
 		       bp, bp->b_bcount, bp->b_resid);
-		printf(" dev 0x%"PRIx64"(u%d), cbp %p bn %" PRId64 " addr %p"
+		printf(" dev 0x%x(u%d), cbp %p bn %" PRId64 " addr %p"
 		       " bcnt %d\n",
 		       cbp->cb_buf.b_dev, cbp->cb_comp, cbp,
 		       cbp->cb_buf.b_blkno, cbp->cb_buf.b_data,
@@ -920,7 +924,6 @@ ccdiodone(struct buf *vbp)
 		       cs->sc_xname, bp->b_error, cbp->cb_comp);
 	}
 	count = cbp->cb_buf.b_bcount;
-	buf_destroy(&cbp->cb_buf);
 	CCD_PUTBUF(cbp);
 
 	/*
@@ -943,7 +946,7 @@ ccdread(dev_t dev, struct uio *uio, int flags)
 
 #ifdef DEBUG
 	if (ccddebug & CCDB_FOLLOW)
-		printf("ccdread(0x%"PRIx64", %p)\n", dev, uio);
+		printf("ccdread(0x%x, %p)\n", dev, uio);
 #endif
 	if (unit >= numccd)
 		return (ENXIO);
@@ -964,7 +967,7 @@ ccdwrite(dev_t dev, struct uio *uio, int flags)
 
 #ifdef DEBUG
 	if (ccddebug & CCDB_FOLLOW)
-		printf("ccdwrite(0x%"PRIx64", %p)\n", dev, uio);
+		printf("ccdwrite(0x%x, %p)\n", dev, uio);
 #endif
 	if (unit >= numccd)
 		return (ENXIO);
@@ -1094,7 +1097,7 @@ ccdioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 			    UIO_USERSPACE)) != 0) {
 				for (j = 0; j < lookedup; ++j)
 					(void)vn_close(vpp[j], FREAD|FWRITE,
-					    uc);
+					    uc, l);
 				free(vpp, M_DEVBUF);
 				free(cpp, M_DEVBUF);
 				goto out;
@@ -1108,7 +1111,7 @@ ccdioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 		if ((error = ccdinit(cs, cpp, vpp, l)) != 0) {
 			for (j = 0; j < lookedup; ++j)
 				(void)vn_close(vpp[j], FREAD|FWRITE,
-				    uc);
+				    uc, l);
 			free(vpp, M_DEVBUF);
 			free(cpp, M_DEVBUF);
 			goto out;
@@ -1176,7 +1179,7 @@ ccdioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 				    cs->sc_cinfo[i].ci_vp);
 #endif
 			(void)vn_close(cs->sc_cinfo[i].ci_vp, FREAD|FWRITE,
-			    uc);
+			    uc, l);
 			free(cs->sc_cinfo[i].ci_path, M_DEVBUF);
 		}
 
@@ -1225,7 +1228,7 @@ ccdioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 		 */
 		for (error = 0, i = 0; i < cs->sc_nccdisks; i++) {
 			j = VOP_IOCTL(cs->sc_cinfo[i].ci_vp, cmd, data,
-				      flag, uc);
+				      flag, uc, l);
 			if (j != 0 && error == 0)
 				error = j;
 		}

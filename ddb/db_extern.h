@@ -1,4 +1,4 @@
-/*	$NetBSD: db_extern.h,v 1.16 2008/04/28 20:23:46 martin Exp $	*/
+/*	$NetBSD: db_extern.h,v 1.13 2005/12/11 12:20:53 christos Exp $	*/
 
 /*-
  * Copyright (c) 1995 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -36,14 +43,14 @@
 void ddb_init(int, void *, void *);
 
 /* db_command.c */
-extern bool db_cmd_loop_done;
+extern int db_cmd_loop_done;
 extern label_t *db_recover;
 
 /* db_examine.c */
-void	db_examine_cmd(db_expr_t, bool, db_expr_t, const char *);
-void	db_print_cmd(db_expr_t, bool, db_expr_t, const char *);
+void	db_examine_cmd(db_expr_t, int, db_expr_t, const char *);
+void	db_print_cmd(db_expr_t, int, db_expr_t, const char *);
 void	db_print_loc_and_inst(db_addr_t);
-void	db_search_cmd(db_expr_t, bool, db_expr_t, const char *);
+void	db_search_cmd(db_expr_t, boolean_t, db_expr_t, const char *);
 
 /* db_expr.c */
 int db_expression(db_expr_t *);
@@ -53,14 +60,14 @@ int	db_readline(char *, int);
 void	db_check_interrupt(void);
 
 /* db_print.c */
-void	db_show_regs(db_expr_t, bool, db_expr_t, const char *);
+void	db_show_regs(db_expr_t, boolean_t, db_expr_t, const char *);
 
 /* db_trap.c */
 extern int	db_trap_type;
 void	db_trap(int, int);
 
 /* db_write_cmd.c */
-void	db_write_cmd(db_expr_t, bool, db_expr_t, const char *);
+void	db_write_cmd(db_expr_t, boolean_t, db_expr_t, const char *);
 
 /* Callback for MD platform code to manage watchdogs, etc. */
 extern void (*db_trap_callback)(int);

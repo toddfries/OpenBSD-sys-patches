@@ -1,4 +1,4 @@
-/*	$NetBSD: sbdsp.c,v 1.131 2008/04/28 20:23:52 martin Exp $	*/
+/*	$NetBSD: sbdsp.c,v 1.127 2007/10/19 12:00:22 ad Exp $	*/
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *	  Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -74,7 +81,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sbdsp.c,v 1.131 2008/04/28 20:23:52 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sbdsp.c,v 1.127 2007/10/19 12:00:22 ad Exp $");
 
 #include "midi.h"
 #include "mpu.h"
@@ -224,7 +231,7 @@ static	int sbdsp_adjust(int, int);
 
 int	sbdsp_midi_intr(void *);
 
-static bool	sbdsp_resume(device_t PMF_FN_PROTO);
+static void	sbdsp_powerhook(int, void*);
 
 #ifdef AUDIO_DEBUG
 void	sb_printsc(struct sbdsp_softc *);
@@ -260,7 +267,7 @@ sb_printsc(struct sbdsp_softc *sc)
  * Probe for the soundblaster hardware.
  */
 int
-sbdsp_probe(struct sbdsp_softc *sc, cfdata_t match)
+sbdsp_probe(struct sbdsp_softc *sc)
 {
 
 	if (sbdsp_reset(sc) < 0) {
@@ -268,7 +275,7 @@ sbdsp_probe(struct sbdsp_softc *sc, cfdata_t match)
 		return 0;
 	}
 	/* if flags set, go and probe the jazz16 stuff */
-	if (match->cf_flags & 1)
+	if (device_cfdata(&sc->sc_dev)->cf_flags & 1)
 		sbdsp_jazz16_probe(sc);
 	else
 		sbversion(sc);
@@ -415,8 +422,8 @@ sbdsp_attach(struct sbdsp_softc *sc)
 		error = isa_dmamap_create(sc->sc_ic, sc->sc_drq8,
 		    sc->sc_drq8_maxsize, BUS_DMA_NOWAIT|BUS_DMA_ALLOCNOW);
 		if (error) {
-			aprint_error_dev(sc->sc_dev,
-			    "can't create map for drq %d\n", sc->sc_drq8);
+			printf("%s: can't create map for drq %d\n",
+			    sc->sc_dev.dv_xname, sc->sc_drq8);
 			return;
 		}
 	}
@@ -427,26 +434,30 @@ sbdsp_attach(struct sbdsp_softc *sc)
 		error = isa_dmamap_create(sc->sc_ic, sc->sc_drq16,
 		    sc->sc_drq16_maxsize, BUS_DMA_NOWAIT|BUS_DMA_ALLOCNOW);
 		if (error) {
-			aprint_error_dev(sc->sc_dev,
-			    "can't create map for drq %d\n", sc->sc_drq16);
+			printf("%s: can't create map for drq %d\n",
+			    sc->sc_dev.dv_xname, sc->sc_drq16);
 			isa_dmamap_destroy(sc->sc_ic, sc->sc_drq8);
 			return;
 		}
 	}
 
-	if (!pmf_device_register(sc->sc_dev, NULL, sbdsp_resume))
-		aprint_error_dev(sc->sc_dev, "couldn't establish power handler\n");
+	powerhook_establish(sc->sc_dev.dv_xname, sbdsp_powerhook, sc);
 }
 
-static bool
-sbdsp_resume(device_t dv PMF_FN_ARGS)
+static void
+sbdsp_powerhook(int why, void *arg)
 {
-	struct sbdsp_softc *sc = device_private(dv);
+	struct sbdsp_softc *sc;
+	int i;
+
+	sc = arg;
+	if (!sc || why != PWR_RESUME)
+		return;
 
 	/* Reset the mixer. */
 	sbdsp_mix_write(sc, SBP_MIX_RESET, SBP_MIX_RESET);
-
-	return true;
+	for (i = 0; i < SB_NDEVS; i++)
+		sbdsp_set_mixer_gain (sc, i);
 }
 
 void
@@ -1530,12 +1541,10 @@ sbdsp_halt_input(void *addr)
 int
 sbdsp_intr(void *arg)
 {
-	struct sbdsp_softc *sc = arg;
-#if NMPU > 0
-	struct mpu_softc *sc_mpu = device_private(sc->sc_mpudev);
-#endif
+	struct sbdsp_softc *sc;
 	u_char irq;
 
+	sc = arg;
 	DPRINTFN(2, ("sbdsp_intr: intr8=%p, intr16=%p\n",
 		   sc->sc_intr8, sc->sc_intr16));
 	if (ISSB16CLASS(sc)) {
@@ -1564,8 +1573,8 @@ sbdsp_intr(void *arg)
 			sc->sc_intr16(arg);
 	}
 #if NMPU > 0
-	if ((irq & SBP_IRQ_MPU401) && sc_mpu) {
-		mpu_intr(sc_mpu);
+	if ((irq & SBP_IRQ_MPU401) && sc->sc_mpudev) {
+		mpu_intr(sc->sc_mpudev);
 	}
 #endif
 	return 1;

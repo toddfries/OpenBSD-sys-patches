@@ -1,4 +1,4 @@
-/*	$NetBSD: iavc.c,v 1.8 2009/01/23 19:49:16 christos Exp $	*/
+/*	$NetBSD: iavc.c,v 1.6 2007/10/19 11:59:53 ad Exp $	*/
 
 /*
  * Copyright (c) 2001-2003 Cubical Solutions Ltd. All rights reserved.
@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: iavc.c,v 1.8 2009/01/23 19:49:16 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: iavc.c,v 1.6 2007/10/19 11:59:53 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -321,7 +321,7 @@ int iavc_load(capi_softc_t *capi_sc, int len, u_int8_t *cp)
     iavc_softc_t *sc = (iavc_softc_t*) capi_sc->ctx;
     u_int8_t val;
 
-    aprint_debug_dev(&sc->sc_dev, "reset card ....\n");
+    aprint_debug("%s: reset card ....\n", sc->sc_dev.dv_xname);
 
     if (sc->sc_dma)
 	iavc_b1dma_reset(sc);	/* PCI cards */
@@ -332,17 +332,19 @@ int iavc_load(capi_softc_t *capi_sc, int len, u_int8_t *cp)
 
     DELAY(1000);
 
-    aprint_debug_dev(&sc->sc_dev, "start loading %d bytes firmware\n", len);
+    aprint_debug("%s: start loading %d bytes firmware\n",
+      sc->sc_dev.dv_xname, len);
 
     while (len && b1io_save_put_byte(sc, *cp++) == 0)
 	len--;
 
     if (len) {
-	aprint_error_dev(&sc->sc_dev, "loading failed, can't write to card, len = %d\n", len);
+	aprint_error("%s: loading failed, can't write to card, len = %d\n",
+	    sc->sc_dev.dv_xname, len);
 	return (EIO);
     }
 
-    aprint_debug_dev(&sc->sc_dev, "firmware loaded, wait for ACK\n");
+    aprint_debug("%s: firmware loaded, wait for ACK\n", sc->sc_dev.dv_xname);
 
     if(sc->sc_capi.card_type == CARD_TYPEC_AVM_B1_ISA)
 	    iavc_put_byte(sc, SEND_POLL);
@@ -353,7 +355,7 @@ int iavc_load(capi_softc_t *capi_sc, int len, u_int8_t *cp)
 	DELAY(100);
 
     if (!iavc_rx_full(sc)) {
-	aprint_error_dev(&sc->sc_dev, "loading failed, no ack\n");
+	aprint_error("%s: loading failed, no ack\n", sc->sc_dev.dv_xname);
 	return (EIO);
     }
 
@@ -361,11 +363,12 @@ int iavc_load(capi_softc_t *capi_sc, int len, u_int8_t *cp)
 
     if ((sc->sc_dma && val != RECEIVE_POLLDWORD) ||
       (!sc->sc_dma && val != RECEIVE_POLL)) {
-	aprint_error_dev(&sc->sc_dev, "loading failed, bad ack = %02x\n", val);
+	aprint_error("%s: loading failed, bad ack = %02x\n",
+	  sc->sc_dev.dv_xname, val);
 	return (EIO);
     }
 
-    aprint_debug_dev(&sc->sc_dev, "got ACK = 0x%02x\n", val);
+    aprint_debug("%s: got ACK = 0x%02x\n", sc->sc_dev.dv_xname, val);
 
     /* Start the DMA engine */
     if (sc->sc_dma) {
@@ -452,7 +455,7 @@ int iavc_release(capi_softc_t *capi_sc, int applid)
     u_int8_t *p;
 
     if (!m) {
-	aprint_error_dev(&sc->sc_dev, "can't get memory\n");
+	printf("%s: can't get memory\n", sc->sc_dev.dv_xname);
 	return (ENOMEM);
     }
 
@@ -477,7 +480,7 @@ int iavc_send(capi_softc_t *capi_sc, struct mbuf *m)
     iavc_softc_t *sc = (iavc_softc_t*) capi_sc->ctx;
 
     if (sc->sc_state != IAVC_UP) {
-	aprint_error_dev(&sc->sc_dev, "attempt to send before device up\n");
+	printf("%s: attempt to send before device up\n", sc->sc_dev.dv_xname);
 
 	if (m->m_next) i4b_Bfreembuf(m->m_next);
 	i4b_Dfreembuf(m);
@@ -488,7 +491,7 @@ int iavc_send(capi_softc_t *capi_sc, struct mbuf *m)
     if (IF_QFULL(&sc->sc_txq)) {
 	IF_DROP(&sc->sc_txq);
 
-	aprint_error_dev(&sc->sc_dev, "tx overflow, message dropped\n");
+	printf("%s: tx overflow, message dropped\n", sc->sc_dev.dv_xname);
 
 	if (m->m_next) i4b_Bfreembuf(m->m_next);
 	i4b_Dfreembuf(m);
@@ -518,7 +521,7 @@ static int iavc_send_init(iavc_softc_t *sc)
     int s;
 
     if (!m) {
-	aprint_error_dev(&sc->sc_dev, "can't get memory\n");
+	printf("%s: can't get memory\n", sc->sc_dev.dv_xname);
 	return (ENOMEM);
     }
 
@@ -591,7 +594,7 @@ static int iavc_receive_init(iavc_softc_t *sc, u_int8_t *dmabuf)
 #if 0
     {
 	int len = 0;
-	printf("%s: rx_init: ", device_xname(&sc->sc_dev));
+	printf("%s: rx_init: ", sc->sc_dev.dv_xname);
 	    while (len < Length) {
 		printf(" %02x", p[len]);
 		if (len && (len % 16) == 0) printf("\n");
@@ -617,14 +620,14 @@ static int iavc_receive_init(iavc_softc_t *sc, u_int8_t *dmabuf)
     if (cardtype && serial && profile) {
 	int nbch = ((profile[3]<<8) | profile[2]);
 
-	aprint_normal_dev(&sc->sc_dev, "AVM %s, s/n %s, %d chans, f/w rev %s, prot %s\n",
-		cardtype, serial, nbch, vers, prot);
-	aprint_verbose_dev(&sc->sc_dev, "%s\n", caps);
+	aprint_normal("%s: AVM %s, s/n %s, %d chans, f/w rev %s, prot %s\n",
+		sc->sc_dev.dv_xname, cardtype, serial, nbch, vers, prot);
+	aprint_verbose("%s: %s\n", sc->sc_dev.dv_xname, caps);
 
         capi_ll_control(&sc->sc_capi, CAPI_CTRL_PROFILE, (int) profile);
 
     } else {
-	printf("%s: no profile data in info response?\n", device_xname(&sc->sc_dev));
+	printf("%s: no profile data in info response?\n", sc->sc_dev.dv_xname);
     }
 
     sc->sc_blocked = 1; /* controller will send START when ready */
@@ -637,10 +640,10 @@ static int iavc_receive_start(iavc_softc_t *sc)
     u_int8_t *p;
 
     if (sc->sc_blocked && sc->sc_state == IAVC_UP)
-	printf("%s: receive_start\n", device_xname(&sc->sc_dev));
+	printf("%s: receive_start\n", sc->sc_dev.dv_xname);
 
     if (!m) {
-	aprint_error_dev(&sc->sc_dev, "can't get memory\n");
+	printf("%s: can't get memory\n", sc->sc_dev.dv_xname);
 	return (ENOMEM);
     }
 
@@ -655,7 +658,7 @@ static int iavc_receive_start(iavc_softc_t *sc)
     IF_PREPEND(&sc->sc_txq, m);
 
     NDBGL4(L4_IAVCDBG, "%s: blocked = %d, state = %d",
-      device_xname(&sc->sc_dev), sc->sc_blocked, sc->sc_state);
+      sc->sc_dev.dv_xname, sc->sc_blocked, sc->sc_state);
 
     sc->sc_blocked = 0;
     iavc_start_tx(sc);
@@ -671,7 +674,7 @@ static int iavc_receive_start(iavc_softc_t *sc)
 
 static int iavc_receive_stop(iavc_softc_t *sc)
 {
-    printf("%s: receive_stop\n", device_xname(&sc->sc_dev));
+    printf("%s: receive_stop\n", sc->sc_dev.dv_xname);
     sc->sc_blocked = 1;
     return 0;
 }
@@ -714,7 +717,7 @@ static int iavc_receive_task_ready(iavc_softc_t *sc, u_int8_t *dmabuf)
 {
     u_int32_t TaskId, Length;
     u_int8_t *p;
-    printf("%s: receive_task_ready\n", device_xname(&sc->sc_dev));
+    printf("%s: receive_task_ready\n", sc->sc_dev.dv_xname);
 
     if (sc->sc_dma) {
 	p = amcc_get_word(dmabuf, &TaskId);
@@ -733,7 +736,7 @@ static int iavc_receive_debugmsg(iavc_softc_t *sc, u_int8_t *dmabuf)
 {
     u_int32_t Length;
     u_int8_t *p;
-    printf("%s: receive_debugmsg\n", device_xname(&sc->sc_dev));
+    printf("%s: receive_debugmsg\n", sc->sc_dev.dv_xname);
 
     if (sc->sc_dma) {
 	p = amcc_get_word(dmabuf, &Length);
@@ -778,7 +781,7 @@ static int iavc_receive(iavc_softc_t *sc, u_int8_t *dmabuf, int b3data)
 
     m = i4b_Dgetmbuf(Length);
     if (!m) {
-	aprint_error_dev(&sc->sc_dev, "can't get memory for receive\n");
+	printf("%s: can't get memory for receive\n", sc->sc_dev.dv_xname);
 	return (ENOMEM);
     }
 
@@ -788,7 +791,7 @@ static int iavc_receive(iavc_softc_t *sc, u_int8_t *dmabuf, int b3data)
 	{
 	    u_int8_t *p = mtod(m, u_int8_t*);
 	    int len = 0;
-	    printf("%s: applid=%d, len=%d\n", device_xname(&sc->sc_dev),
+	    printf("%s: applid=%d, len=%d\n", sc->sc_dev.dv_xname,
 	      ApplId, Length);
 	    while (len < m->m_len) {
 		printf(" %02x", p[len]);
@@ -809,7 +812,7 @@ static int iavc_receive(iavc_softc_t *sc, u_int8_t *dmabuf, int b3data)
 
 	m->m_next = i4b_Bgetmbuf(Length);
 	if (!m->m_next) {
-	    aprint_error_dev(&sc->sc_dev, "can't get memory for receive\n");
+	    printf("%s: can't get memory for receive\n", sc->sc_dev.dv_xname);
 	    i4b_Dfreembuf(m);
 	    return (ENOMEM);
 	}
@@ -892,7 +895,7 @@ static void iavc_handle_rx(iavc_softc_t *sc)
     u_int8_t *dmabuf = 0, cmd;
 
     if (sc->sc_dma) {
-	dmabuf = amcc_get_byte(sc->sc_recvbuf, &cmd);
+	dmabuf = amcc_get_byte(&sc->sc_recvbuf[0], &cmd);
     } else {
 	cmd = iavc_get_byte(sc);
     }
@@ -937,7 +940,7 @@ static void iavc_handle_rx(iavc_softc_t *sc)
 	break;
 
     default:
-	aprint_error_dev(&sc->sc_dev, "unknown msg %02x\n", cmd);
+	printf("%s: unknown msg %02x\n", sc->sc_dev.dv_xname, cmd);
     }
 }
 
@@ -1004,9 +1007,9 @@ iavc_tx_capimsg(iavc_softc_t *sc, struct mbuf *m)
 	/* Copy message to DMA buffer. */
 
 	if (m->m_next)
-	    dmabuf = amcc_put_byte(sc->sc_sendbuf, SEND_DATA_B3_REQ);
+	    dmabuf = amcc_put_byte(&sc->sc_sendbuf[0], SEND_DATA_B3_REQ);
 	else
-	    dmabuf = amcc_put_byte(sc->sc_sendbuf, SEND_MESSAGE);
+	    dmabuf = amcc_put_byte(&sc->sc_sendbuf[0], SEND_MESSAGE);
 
 	dmabuf = amcc_put_word(dmabuf, m->m_len);
 	memcpy(dmabuf, m->m_data, m->m_len);
@@ -1061,7 +1064,7 @@ iavc_tx_ctrlmsg(iavc_softc_t *sc, struct mbuf *m)
     uint8_t *dmabuf;
 
     if (sc->sc_dma) {
-	memcpy(sc->sc_sendbuf, m->m_data + 2, m->m_len - 2);
+	memcpy(&sc->sc_sendbuf[0], m->m_data + 2, m->m_len - 2);
 	txlen = m->m_len - 2;
     } else {
 
@@ -1070,7 +1073,7 @@ iavc_tx_ctrlmsg(iavc_softc_t *sc, struct mbuf *m)
 	u_int8_t *p = mtod(m, u_int8_t*) + 2;
 	int len;
 
-	printf("%s: tx BDC msg, len = %d, msg =", device_xname(&sc->sc_dev),
+	printf("%s: tx BDC msg, len = %d, msg =", sc->sc_dev.dv_xname,
 	  m->m_len-2);
 	for (len = 0; len < m->m_len-2; len++) {
 		printf(" %02x", *p++);

@@ -1,4 +1,4 @@
-/*	$NetBSD: cgeight.c,v 1.46 2008/06/11 21:25:31 drochner Exp $	*/
+/*	$NetBSD: cgeight.c,v 1.43 2006/03/29 04:16:47 thorpej Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -102,7 +109,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: cgeight.c,v 1.46 2008/06/11 21:25:31 drochner Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cgeight.c,v 1.43 2006/03/29 04:16:47 thorpej Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -207,7 +214,7 @@ cgeightattach(struct device *parent, struct device *self, void *aux)
 #if defined(SUN4)
 	union obio_attach_args *uoba = aux;
 	struct obio4_attach_args *oba = &uoba->uoba_oba4;
-	struct cgeight_softc *sc = device_private(self);
+	struct cgeight_softc *sc = (struct cgeight_softc *)self;
 	struct fbdevice *fb = &sc->sc_fb;
 	bus_space_handle_t bh;
 	volatile struct bt_regs *bt;
@@ -327,17 +334,16 @@ cgeightopen(dev_t dev, int flags, int mode, struct lwp *l)
 {
 	int unit = minor(dev);
 
-	if (device_lookup(&cgeight_cd, unit) == NULL)
+	if (unit >= cgeight_cd.cd_ndevs || cgeight_cd.cd_devs[unit] == NULL)
 		return (ENXIO);
 	return (0);
 }
 
 int
-cgeightioctl(dev_t dev, u_long cmd, void *data, int flags, struct lwp *l)
+cgeightioctl(dev_t dev, u_long cmd, caddr_t data, int flags, struct lwp *l)
 {
 #if defined(SUN4)
-	struct cgeight_softc *sc = device_lookup_private(&cgeight_cd,
-							 minor(dev));
+	struct cgeight_softc *sc = cgeight_cd.cd_devs[minor(dev)];
 	struct fbgattr *fba;
 	int error;
 
@@ -402,8 +408,7 @@ cgeightioctl(dev_t dev, u_long cmd, void *data, int flags, struct lwp *l)
 paddr_t
 cgeightmmap(dev_t dev, off_t off, int prot)
 {
-	struct cgeight_softc *sc = device_lookup_private(&cgeight_cd,
-							 minor(dev));
+	struct cgeight_softc *sc = cgeight_cd.cd_devs[minor(dev)];
 	off_t poff;
 
 #define START_ENABLE	(128*1024)
@@ -484,7 +489,7 @@ static void
 cgeightunblank(struct device *dev)
 {
 
-	cgeight_set_video(device_private(dev), 1);
+	cgeight_set_video((struct cgeight_softc *)dev, 1);
 }
 
 static int

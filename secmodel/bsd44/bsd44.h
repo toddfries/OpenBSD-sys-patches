@@ -1,4 +1,4 @@
-/* $NetBSD: bsd44.h,v 1.4 2007/01/16 00:11:39 elad Exp $ */
+/* $NetBSD: bsd44.h,v 1.2 2007/01/02 23:35:37 elad Exp $ */
 /*-
  * Copyright (c) 2006 Elad Efrat <elad@NetBSD.org>
  * All rights reserved.
@@ -11,7 +11,10 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed by Elad Efrat.
+ * 4. The name of the author may not be used to endorse or promote products
  *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
@@ -33,7 +36,6 @@ void secmodel_bsd44_init(void);
 void secmodel_bsd44_start(void);
 
 #if defined(_LKM)
-void secmodel_bsd44_stop(void);
 SYSCTL_SETUP_PROTO(sysctl_security_bsd44_setup);
 #endif /* _LKM */
 

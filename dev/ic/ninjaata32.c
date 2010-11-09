@@ -1,4 +1,4 @@
-/*	$NetBSD: ninjaata32.c,v 1.10 2008/03/18 20:46:36 cube Exp $	*/
+/*	$NetBSD: ninjaata32.c,v 1.9 2007/10/19 11:59:57 ad Exp $	*/
 
 /*
  * Copyright (c) 2006 ITOH Yasufumi <itohy@NetBSD.org>.
@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ninjaata32.c,v 1.10 2008/03/18 20:46:36 cube Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ninjaata32.c,v 1.9 2007/10/19 11:59:57 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -74,7 +74,9 @@ static const uint8_t njata32_timing_pio[NJATA32_MODE_MAX_PIO + 1] = {
 };
 
 static void
-njata32_init(struct njata32_softc *sc, int nosleep)
+njata32_init(sc, nosleep)
+	struct njata32_softc *sc;
+	int nosleep;	/* can't sleep (during cold boot and in interrupt) */
 {
 
 	/* disable interrupts */
@@ -105,7 +107,8 @@ njata32_init(struct njata32_softc *sc, int nosleep)
 }
 
 void
-njata32_attach(struct njata32_softc *sc)
+njata32_attach(sc)
+	struct njata32_softc *sc;
 {
 	bus_addr_t dmaaddr;
 	int i, devno, error;
@@ -117,7 +120,7 @@ njata32_attach(struct njata32_softc *sc)
 	if ((error = bus_dmamem_alloc(sc->sc_dmat,
 	    sizeof(struct njata32_dma_page), PAGE_SIZE, 0,
 	    &sc->sc_sgt_seg, 1, &sc->sc_sgt_nsegs, BUS_DMA_NOWAIT)) != 0) {
-		aprint_error("%s: unable to allocate sgt page, error = %d\n",
+		printf("%s: unable to allocate sgt page, error = %d\n",
 		    NJATA32NAME(sc), error);
 		return;
 	}
@@ -125,7 +128,7 @@ njata32_attach(struct njata32_softc *sc)
 	    sc->sc_sgt_nsegs, sizeof(struct njata32_dma_page),
 	    (void **)&sc->sc_sgtpg,
 	    BUS_DMA_NOWAIT | BUS_DMA_COHERENT)) != 0) {
-		aprint_error("%s: unable to map sgt page, error = %d\n",
+		printf("%s: unable to map sgt page, error = %d\n",
 		    NJATA32NAME(sc), error);
 		goto fail1;
 	}
@@ -133,14 +136,14 @@ njata32_attach(struct njata32_softc *sc)
 	    sizeof(struct njata32_dma_page), 1,
 	    sizeof(struct njata32_dma_page), 0, BUS_DMA_NOWAIT,
 	    &sc->sc_dmamap_sgt)) != 0) {
-		aprint_error("%s: unable to create sgt DMA map, error = %d\n",
+		printf("%s: unable to create sgt DMA map, error = %d\n",
 		    NJATA32NAME(sc), error);
 		goto fail2;
 	}
 	if ((error = bus_dmamap_load(sc->sc_dmat, sc->sc_dmamap_sgt,
 	    sc->sc_sgtpg, sizeof(struct njata32_dma_page),
 	    NULL, BUS_DMA_NOWAIT)) != 0) {
-		aprint_error("%s: unable to load sgt DMA map, error = %d\n",
+		printf("%s: unable to load sgt DMA map, error = %d\n",
 		    NJATA32NAME(sc), error);
 		goto fail3;
 	}
@@ -160,8 +163,8 @@ njata32_attach(struct njata32_softc *sc)
 		    BUS_DMA_NOWAIT | BUS_DMA_ALLOCNOW,
 		    &sc->sc_dev[devno].d_dmamap_xfer);
 		if (error) {
-			aprint_error("%s: failed to create DMA map "
-			    "(error = %d)\n", NJATA32NAME(sc), error);
+			printf("%s: failed to create DMA map (error = %d)\n",
+			    NJATA32NAME(sc), error);
 			goto fail4;
 		}
 	}
@@ -223,7 +226,7 @@ njata32_attach(struct njata32_softc *sc)
 
 	/* use flags value as busmaster wait */
 	if ((sc->sc_atawait =
-	    (uint8_t)device_cfdata(sc->sc_wdcdev.sc_atac.atac_dev)->cf_flags))
+	    (uint8_t)device_cfdata(&sc->sc_wdcdev.sc_atac.atac_dev)->cf_flags))
 		aprint_normal("%s: ATA wait = %#x\n",
 		    NJATA32NAME(sc), sc->sc_atawait);
 
@@ -248,12 +251,14 @@ fail1:	bus_dmamem_free(sc->sc_dmat, &sc->sc_sgt_seg, sc->sc_sgt_nsegs);
 }
 
 int
-njata32_detach(struct njata32_softc *sc, int flags)
+njata32_detach(sc, flags)
+	struct njata32_softc *sc;
+	int flags;
 {
 	int rv, devno;
 
 	if (sc->sc_flags & NJATA32_CMDPG_MAPPED) {
-		if ((rv = wdcdetach(sc->sc_wdcdev.sc_atac.atac_dev, flags)))
+		if ((rv = wdcdetach(&sc->sc_wdcdev.sc_atac.atac_dev, flags)))
 			return rv;
 
 		/* free DMA resource */
@@ -272,7 +277,8 @@ njata32_detach(struct njata32_softc *sc, int flags)
 }
 
 static void
-njata32_irqack(struct ata_channel *chp)
+njata32_irqack(chp)
+	struct ata_channel *chp;
 {
 	struct njata32_softc *sc = (void *)chp->ch_atac;
 
@@ -282,11 +288,13 @@ njata32_irqack(struct ata_channel *chp)
 }
 
 static void
-njata32_clearirq(struct ata_channel *chp, int irq)
+njata32_clearirq(chp, irq)
+	struct ata_channel *chp;
+	int irq;
 {
 	struct njata32_softc *sc = (void *)chp->ch_atac;
 
-	aprint_error("%s: unhandled intr: irq %#x, bm %#x, ",
+	printf("%s: unhandled intr: irq %#x, bm %#x, ",
 	    NJATA32NAME(sc), irq,
 	    bus_space_read_1(NJATA32_REGT(sc), NJATA32_REGH(sc),
 		NJATA32_REG_BM));
@@ -295,7 +303,7 @@ njata32_clearirq(struct ata_channel *chp, int irq)
 	njata32_irqack(chp);
 
 	/* clear device interrupt */
-	aprint_normal("err %#x, seccnt %#x, cyl %#x, sdh %#x, ",
+	printf("err %#x, seccnt %#x, cyl %#x, sdh %#x, ",
 	    bus_space_read_1(NJATA32_REGT(sc), NJATA32_REGH(sc),
 		NJATA32_REG_WD_ERROR),
 	    bus_space_read_1(NJATA32_REGT(sc), NJATA32_REGH(sc),
@@ -306,13 +314,14 @@ njata32_clearirq(struct ata_channel *chp, int irq)
 		NJATA32_REG_WD_CYL_HI) << 8),
 	    bus_space_read_1(NJATA32_REGT(sc), NJATA32_REGH(sc),
 		NJATA32_REG_WD_SDH));
-	aprint_normal("status %#x\n",
+	printf("status %#x\n",
 	    bus_space_read_1(NJATA32_REGT(sc), NJATA32_REGH(sc),
 	    NJATA32_REG_WD_STATUS));
 }
 
 static void
-njata32_setup_channel(struct ata_channel *chp)
+njata32_setup_channel(chp)
+	struct ata_channel *chp;
 {
 	struct njata32_softc *sc = (void *)chp->ch_atac;
 	struct ata_drive_datas *drvp;

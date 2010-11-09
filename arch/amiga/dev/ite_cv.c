@@ -1,4 +1,4 @@
-/*	$NetBSD: ite_cv.c,v 1.8 2007/03/05 20:29:07 he Exp $ */
+/*	$NetBSD: ite_cv.c,v 1.6 2002/01/28 09:57:00 aymeric Exp $ */
 
 /*
  * Copyright (c) 1995 Michael Teske
@@ -40,7 +40,7 @@
 #include "opt_amigacons.h"
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ite_cv.c,v 1.8 2007/03/05 20:29:07 he Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ite_cv.c,v 1.6 2002/01/28 09:57:00 aymeric Exp $");
 
 #include "grfcv.h"
 #if NGRFCV > 0
@@ -180,7 +180,7 @@ cv_ite_init(register struct ite_softc *ip)
 void
 cv_cursor(struct ite_softc *ip, int flag)
 {
-	volatile void *ba = ip->grf->g_regkva;
+	volatile caddr_t ba = ip->grf->g_regkva;
 
 	switch (flag) {
 	    case DRAW_CURSOR:
@@ -205,9 +205,9 @@ cv_cursor(struct ite_softc *ip, int flag)
 void
 cv_putc(struct ite_softc *ip, int c, int dy, int dx, int mode)
 {
-	volatile char *fb = ip->grf->g_fbkva;
+	caddr_t fb = ip->grf->g_fbkva;
 	unsigned char attr;
-	volatile unsigned char *cp;
+	unsigned char *cp;
 
 	attr = (unsigned char) ((mode & ATTR_INV) ? (0x70) : (0x07));
 	if (mode & ATTR_UL)     attr  = 0x01;
@@ -231,12 +231,10 @@ cv_clear(struct ite_softc *ip, int sy, int sx, int h, int w)
 	 * which describe continuous regions.  For a VT200 terminal,
 	 * this is safe behavior.
 	 */
-	volatile unsigned short  *dst;
+	unsigned short  *dst;
 	int len;
 
-	dst = (volatile unsigned short *)
-		((volatile char*)ip->grf->g_fbkva +
-		 (((sy * ip->cols) + sx) << 2));
+	dst = (unsigned short *) (ip->grf->g_fbkva + (((sy * ip->cols) + sx) << 2));
 
 	for (len = w * h; len > 0 ; len--) {
 		*dst = 0x2007;
@@ -252,12 +250,11 @@ cv_clear(struct ite_softc *ip, int sy, int sx, int h, int w)
 void
 cv_scroll(struct ite_softc *ip, int sy, int sx, int count, int dir)
 {
-	volatile unsigned short *src, *dst, *dst2;
+	unsigned short *src, *dst, *dst2;
 	int i;
 	int len;
 
-	src = (volatile unsigned short *)
-		((volatile char*)ip->grf->g_fbkva + (cv_rowc[sy] << 2));
+	src = (unsigned short *)(ip->grf->g_fbkva + (cv_rowc[sy] << 2));
 
 	switch (dir) {
 	    case SCROLL_UP:
@@ -268,13 +265,13 @@ cv_scroll(struct ite_softc *ip, int sy, int sx, int count, int dir)
 
 		if (count > sy) { /* boundary checks */
 			dst2 = console_buffer;
-			dst = (volatile unsigned short *)(ip->grf->g_fbkva);
+			dst = (unsigned short *)(ip->grf->g_fbkva);
 			len -= cv_rowc[(count - sy)];
 			src += cv_rowc[(count - sy)];
 		} else
 			dst2 = &console_buffer[cv_rowc[(sy-count)]];
 
-		bcopy (__UNVOLATILE(src), __UNVOLATILE(dst2), len << 1);
+		bcopy (src, dst2, len << 1);
 
 		for (i = 0; i < len; i++) {
 			*dst++ = *dst2++;
@@ -291,7 +288,7 @@ cv_scroll(struct ite_softc *ip, int sy, int sx, int count, int dir)
 		if (len < 0)
 			return;  /* do some boundary check */
 
-		bcopy (__UNVOLATILE(src), __UNVOLATILE(dst2), len << 1);
+		bcopy (src, dst2, len << 1);
 
 		for (i = 0; i < len; i++) {
 			*dst++ = *dst2++;
@@ -303,7 +300,7 @@ cv_scroll(struct ite_softc *ip, int sy, int sx, int count, int dir)
 		src = &console_buffer[cv_rowc[sy] + sx];
 		len = ip->cols - (sx + count);
 		dst2 = &console_buffer[cv_rowc[sy] + sx + count];
-		bcopy (__UNVOLATILE(src), __UNVOLATILE(dst2), len << 1);
+		bcopy (src, dst2, len << 1);
 
 		for (i = 0; i < len; i++) {
 			*dst++ = *dst2++;
@@ -315,7 +312,7 @@ cv_scroll(struct ite_softc *ip, int sy, int sx, int count, int dir)
 		src = &console_buffer[cv_rowc[sy] + sx];
 		len = ip->cols - sx;
 		dst2 = &console_buffer[cv_rowc[sy] + sx - count];
-		bcopy (__UNVOLATILE(src), __UNVOLATILE(dst2), len << 1);
+		bcopy (src, dst2, len << 1);
 
 		for (i = 0; i < len; i++) {
 			*dst++ = *dst2++;

@@ -1,4 +1,4 @@
-/*	$NetBSD: mhavar.h,v 1.9 2008/11/29 05:59:40 isaki Exp $	*/
+/*	$NetBSD: mhavar.h,v 1.7 2005/12/11 12:19:37 christos Exp $	*/
 
 /*
  * Copyright (c) 1994 Peter Galbavy.  All rights reserved.
@@ -85,7 +85,7 @@ struct spc_tinfo {
 } tinfo_t;
 
 struct mha_softc {
-	device_t sc_dev;
+	struct device sc_dev;			/* us as a device */
 	volatile void *sc_iobase;
 	volatile u_char	*sc_pc;
 	volatile u_short *sc_ps;
@@ -138,7 +138,7 @@ struct mha_softc {
 	bus_dma_segment_t	sc_dmaseg[1];
 	int			sc_ndmasegs;
 	bus_dmamap_t		sc_dmamap;
-	void *			sc_dmabuf;
+	caddr_t			sc_dmabuf;
 	u_char			*sc_p;
 	u_int32_t		sc_dmasize;
 };

@@ -1,4 +1,4 @@
-/*	$NetBSD: ss_scanjet.c,v 1.49 2009/01/13 13:35:54 yamt Exp $	*/
+/*	$NetBSD: ss_scanjet.c,v 1.47 2006/11/16 01:33:26 christos Exp $	*/
 
 /*
  * Copyright (c) 1995 Kenneth Stailey.  All rights reserved.
@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ss_scanjet.c,v 1.49 2009/01/13 13:35:54 yamt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ss_scanjet.c,v 1.47 2006/11/16 01:33:26 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -96,7 +96,7 @@ scanjet_attach(struct ss_softc *ss, struct scsipibus_attach_args *sa)
 	SC_DEBUG(ss->sc_periph, SCSIPI_DB1, ("scanjet_attach: start\n"));
 	ss->sio.scan_scanner_type = 0;
 
-	printf("%s: ", device_xname(&ss->sc_dev));
+	printf("%s: ", ss->sc_dev.dv_xname);
 
 	/* first, check the model (which determines nothing yet) */
 
@@ -213,12 +213,12 @@ scanjet_set_params(struct ss_softc *ss, struct scan_io *sio)
 
 	error = scanjet_set_window(ss);
 	if (error) {
-		uprintf("%s: set_window failed\n", device_xname(&ss->sc_dev));
+		uprintf("%s: set_window failed\n", ss->sc_dev.dv_xname);
 		return (error);
 	}
 	error = scanjet_compute_sizes(ss);
 	if (error) {
-		uprintf("%s: compute_sizes failed\n", device_xname(&ss->sc_dev));
+		uprintf("%s: compute_sizes failed\n", ss->sc_dev.dv_xname);
 		return (error);
 	}
 
@@ -238,12 +238,12 @@ scanjet_trigger_scanner(struct ss_softc *ss)
 
 	error = scanjet_set_window(ss);
 	if (error) {
-		uprintf("%s: set_window failed\n", device_xname(&ss->sc_dev));
+		uprintf("%s: set_window failed\n", ss->sc_dev.dv_xname);
 		return (error);
 	}
 	error = scanjet_compute_sizes(ss);
 	if (error) {
-		uprintf("%s: compute_sizes failed\n", device_xname(&ss->sc_dev));
+		uprintf("%s: compute_sizes failed\n", ss->sc_dev.dv_xname);
 		return (error);
 	}
 
@@ -251,7 +251,7 @@ scanjet_trigger_scanner(struct ss_softc *ss)
 	strlcpy(escape_codes, "\033*f0S", sizeof(escape_codes));
 	error = scanjet_ctl_write(ss, escape_codes, strlen(escape_codes));
 	if (error) {
-		uprintf("%s: trigger_scanner failed\n", device_xname(&ss->sc_dev));
+		uprintf("%s: trigger_scanner failed\n", ss->sc_dev.dv_xname);
 		return (error);
 	}
 
@@ -296,10 +296,10 @@ scanjet_read(struct ss_softc *ss, struct buf *bp)
 		return(0);
 	}
 #ifdef DIAGNOSTIC
-	if (bufq_get(ss->buf_queue) != bp)
+	if (BUFQ_GET(ss->buf_queue) != bp)
 		panic("ssstart(): dequeued wrong buf");
 #else
-	bufq_get(ss->buf_queue);
+	BUFQ_GET(ss->buf_queue);
 #endif
 	error = scsipi_execute_xs(xs);
 	/* with a scsipi_xfer preallocated, scsipi_command can't fail */
@@ -475,17 +475,17 @@ scanjet_compute_sizes(struct ss_softc *ss)
 	}
 	error = scanjet_ctl_write(ss, escape_codes, strlen(escape_codes));
 	if (error) {
-		uprintf(wfail, device_xname(&ss->sc_dev));
+		uprintf(wfail, ss->sc_dev.dv_xname);
 		return (error);
 	}
 	error = scanjet_ctl_read(ss, response, 20);
 	if (error) {
-		uprintf(rfail, device_xname(&ss->sc_dev));
+		uprintf(rfail, ss->sc_dev.dv_xname);
 		return (error);
 	}
 	p = strchr(response, 'd');
 	if (p == 0) {
-		uprintf(dfail, device_xname(&ss->sc_dev));
+		uprintf(dfail, ss->sc_dev.dv_xname);
 		return (EIO);
 	}
 	ss->sio.scan_pixels_per_line = strtoul(p + 1, NULL, 10);
@@ -496,17 +496,17 @@ scanjet_compute_sizes(struct ss_softc *ss)
 	strlcpy(escape_codes, "\033*s1026E", sizeof(escape_codes));
 	error = scanjet_ctl_write(ss, escape_codes, strlen(escape_codes));
 	if (error) {
-		uprintf(wfail, device_xname(&ss->sc_dev));
+		uprintf(wfail, ss->sc_dev.dv_xname);
 		return (error);
 	}
 	error = scanjet_ctl_read(ss, response, 20);
 	if (error) {
-		uprintf(rfail, device_xname(&ss->sc_dev));
+		uprintf(rfail, ss->sc_dev.dv_xname);
 		return (error);
 	}
 	p = strchr(response, 'd');
 	if (p == 0) {
-		uprintf(dfail, device_xname(&ss->sc_dev));
+		uprintf(dfail, ss->sc_dev.dv_xname);
 		return (EIO);
 	}
 	ss->sio.scan_lines = strtoul(p + 1, NULL, 10);

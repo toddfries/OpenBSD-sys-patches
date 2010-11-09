@@ -1,4 +1,4 @@
-/* 	$NetBSD: pxg.c,v 1.30 2008/07/09 13:19:33 joerg Exp $	*/
+/* 	$NetBSD: pxg.c,v 1.28 2007/10/19 12:01:19 ad Exp $	*/
 
 /*-
  * Copyright (c) 1999, 2000, 2001 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -35,7 +42,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: pxg.c,v 1.30 2008/07/09 13:19:33 joerg Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pxg.c,v 1.28 2007/10/19 12:01:19 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -94,10 +101,11 @@ static int	pxg_probe_sram(struct stic_info *);
 void	pxg_cnattach(tc_addr_t);
 
 struct pxg_softc {
+	struct	device pxg_dv;
 	struct	stic_info *pxg_si;
 };
 
-CFATTACH_DECL_NEW(pxg, sizeof(struct pxg_softc),
+CFATTACH_DECL(pxg, sizeof(struct pxg_softc),
     pxg_match, pxg_attach, NULL, NULL);
 
 static const char *pxg_types[] = {
@@ -109,7 +117,7 @@ static const char *pxg_types[] = {
 };
 
 static int
-pxg_match(device_t parent, cfdata_t match, void *aux)
+pxg_match(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct tc_attach_args *ta;
 	int i;
@@ -124,7 +132,7 @@ pxg_match(device_t parent, cfdata_t match, void *aux)
 }
 
 static void
-pxg_attach(device_t parent, device_t self, void *aux)
+pxg_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct stic_info *si;
 	struct tc_attach_args *ta;

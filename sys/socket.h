@@ -1,4 +1,4 @@
-/*	$NetBSD: socket.h,v 1.94 2009/01/19 02:27:57 christos Exp $	*/
+/*	$NetBSD: socket.h,v 1.89 2007/09/19 04:33:45 dyoung Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -120,9 +120,7 @@ typedef	_BSD_SSIZE_T_	ssize_t;
 #define	SO_LINGER	0x0080		/* linger on close if data present */
 #define	SO_OOBINLINE	0x0100		/* leave received OOB data in line */
 #define	SO_REUSEPORT	0x0200		/* allow local address & port reuse */
-/* 	SO_OTIMESTAMP	0x0400		*/
-#define	SO_ACCEPTFILTER	0x1000		/* there is an accept filter */
-#define	SO_TIMESTAMP	0x2000		/* timestamp received dgram traffic */
+#define	SO_TIMESTAMP	0x0400		/* timestamp received dgram traffic */
 
 
 /*
@@ -132,8 +130,8 @@ typedef	_BSD_SSIZE_T_	ssize_t;
 #define SO_RCVBUF	0x1002		/* receive buffer size */
 #define SO_SNDLOWAT	0x1003		/* send low-water mark */
 #define SO_RCVLOWAT	0x1004		/* receive low-water mark */
-/* SO_OSNDTIMEO		0x1005 */
-/* SO_ORCVTIMEO		0x1006 */
+#define SO_SNDTIMEO	0x1005		/* send timeout */
+#define SO_RCVTIMEO	0x1006		/* receive timeout */
 #define	SO_ERROR	0x1007		/* get error status and clear */
 #define	SO_TYPE		0x1008		/* get socket type */
 #define	SO_OVERFLOWED	0x1009		/* datagrams: return packets dropped */
@@ -142,19 +140,12 @@ typedef	_BSD_SSIZE_T_	ssize_t;
 					 * kernel removes header and supplies
 					 * payload
 					 */
-#define SO_SNDTIMEO	0x100b		/* send timeout */
-#define SO_RCVTIMEO	0x100c		/* receive timeout */
 /*
  * Structure used for manipulating linger option.
  */
 struct	linger {
 	int	l_onoff;		/* option on/off */
 	int	l_linger;		/* linger time in seconds */
-};
-
-struct	accept_filter_arg {
-	char	af_name[16];
-	char	af_arg[256-16];
 };
 
 /*
@@ -209,9 +200,8 @@ struct	accept_filter_arg {
 					   in interface output routine */
 #endif
 #define AF_BLUETOOTH	31		/* Bluetooth: HCI, SCO, L2CAP, RFCOMM */
-#define	AF_IEEE80211	32		/* IEEE80211 */
 
-#define	AF_MAX		33
+#define	AF_MAX		32
 
 /*
  * Structure used by kernel to store most
@@ -432,16 +422,14 @@ struct kinfo_pcb {
  */
 #define NET_RT_DUMP	1		/* dump; may limit to a.f. */
 #define NET_RT_FLAGS	2		/* by flags, e.g. RESOLVING */
-#define NET_RT_OOIFLIST	3		/* old NET_RT_IFLIST (pre 1.5) */
-#define NET_RT_OIFLIST	4		/* survey interface list */
-#define	NET_RT_IFLIST	5
-#define	NET_RT_MAXID	6
+#define NET_RT_OIFLIST	3		/* old NET_RT_IFLIST (pre 1.5) */
+#define NET_RT_IFLIST	4		/* survey interface list */
+#define	NET_RT_MAXID	5
 
 #define CTL_NET_RT_NAMES { \
 	{ 0, 0 }, \
 	{ "dump", CTLTYPE_STRUCT }, \
 	{ "flags", CTLTYPE_STRUCT }, \
-	{ 0, 0 }, \
 	{ 0, 0 }, \
 	{ "iflist", CTLTYPE_STRUCT }, \
 }
@@ -545,9 +533,8 @@ struct cmsghdr {
 /* "Socket"-level control message types: */
 #define	SCM_RIGHTS	0x01		/* access rights (array of int) */
 #if defined(_NETBSD_SOURCE)
-/* 			0x02		   timestamp (struct timeval50) */
+#define	SCM_TIMESTAMP	0x02		/* timestamp (struct timeval) */
 #define	SCM_CREDS	0x04		/* credentials (struct sockcred) */
-#define	SCM_TIMESTAMP	0x08		/* timestamp (struct timeval) */
 #endif
 
 /*

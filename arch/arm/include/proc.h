@@ -1,4 +1,4 @@
-/*	$NetBSD: proc.h,v 1.8 2008/08/29 18:58:22 matt Exp $	*/
+/*	$NetBSD: proc.h,v 1.6 2003/03/05 11:28:14 agc Exp $	*/
 
 /*
  * Copyright (c) 1994 Mark Brinicombe.
@@ -43,15 +43,11 @@ struct trapframe;
 struct lwp;
 
 struct mdlwp {
-	int	md_flags;
+	int	md_dummy;		/* must have at least one member */
 };
 
-/* Flags setttings for md_flags */
-#define MDP_VFPUSED	0x00000001	/* Process used the VFP */
-
-
 struct mdproc {
-	void	(*md_syscall)(struct trapframe *, struct lwp *, uint32_t);
+	void	(*md_syscall)(struct trapframe *, struct lwp *, u_int32_t);
 	int	pmc_enabled;		/* bitfield of enabled counters */
 	void	*pmc_state;		/* port-specific pmc state */
 };

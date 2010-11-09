@@ -1,4 +1,4 @@
-/*	$NetBSD: sysv_msg.c,v 1.61 2009/01/28 00:59:03 njoly Exp $	*/
+/*	$NetBSD: sysv_msg.c,v 1.52 2007/11/04 13:09:32 yamt Exp $	*/
 
 /*-
  * Copyright (c) 1999, 2006, 2007 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -50,7 +57,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sysv_msg.c,v 1.61 2009/01/28 00:59:03 njoly Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sysv_msg.c,v 1.52 2007/11/04 13:09:32 yamt Exp $");
 
 #define SYSVMSG
 
@@ -121,11 +128,11 @@ msginit(void)
 	if (v == 0)
 		panic("sysv_msg: cannot allocate memory");
 	msgpool = (void *)v;
-	msgmaps = (void *)((uintptr_t)msgpool + ALIGN(msginfo.msgmax));
-	msghdrs = (void *)((uintptr_t)msgmaps +
-	    ALIGN(msginfo.msgseg * sizeof(struct msgmap)));
-	msqs = (void *)((uintptr_t)msghdrs +
-	    ALIGN(msginfo.msgtql * sizeof(struct __msg)));
+	msgmaps = (void *)(ALIGN(msgpool) + msginfo.msgmax);
+	msghdrs = (void *)(ALIGN(msgmaps) +
+	    msginfo.msgseg * sizeof(struct msgmap));
+	msqs = (void *)(ALIGN(msghdrs) +
+	    msginfo.msgtql * sizeof(struct __msg));
 
 	for (i = 0; i < (msginfo.msgseg - 1); i++)
 		msgmaps[i].next = i + 1;
@@ -218,11 +225,11 @@ msgrealloc(int newmsgmni, int newmsgseg)
 	}
 
 	new_msgpool = (void *)v;
-	new_msgmaps = (void *)((uintptr_t)new_msgpool + ALIGN(newmsgmax));
-	new_msghdrs = (void *)((uintptr_t)new_msgmaps +
-	    ALIGN(newmsgseg * sizeof(struct msgmap)));
-	new_msqs = (void *)((uintptr_t)new_msghdrs +
-	    ALIGN(msginfo.msgtql * sizeof(struct __msg)));
+	new_msgmaps = (void *)(ALIGN(new_msgpool) + newmsgmax);
+	new_msghdrs = (void *)(ALIGN(new_msgmaps) +
+	    newmsgseg * sizeof(struct msgmap));
+	new_msqs = (void *)(ALIGN(new_msghdrs) +
+	    msginfo.msgtql * sizeof(struct __msg));
 
 	/* Initialize the structures */
 	for (i = 0; i < (newmsgseg - 1); i++)
@@ -392,14 +399,13 @@ msg_freehdr(struct __msg *msghdr)
 }
 
 int
-sys___msgctl50(struct lwp *l, const struct sys___msgctl50_args *uap,
-    register_t *retval)
+sys___msgctl13(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct sys___msgctl13_args /* {
 		syscallarg(int) msqid;
 		syscallarg(int) cmd;
 		syscallarg(struct msqid_ds *) buf;
-	} */
+	} */ *uap = v;
 	struct msqid_ds msqbuf;
 	int cmd, error;
 
@@ -530,12 +536,12 @@ unlock:
 }
 
 int
-sys_msgget(struct lwp *l, const struct sys_msgget_args *uap, register_t *retval)
+sys_msgget(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct sys_msgget_args /* {
 		syscallarg(key_t) key;
 		syscallarg(int) msgflg;
-	} */
+	} */ *uap = v;
 	int msqid, error = 0;
 	int key = SCARG(uap, key);
 	int msgflg = SCARG(uap, msgflg);
@@ -627,14 +633,14 @@ unlock:
 }
 
 int
-sys_msgsnd(struct lwp *l, const struct sys_msgsnd_args *uap, register_t *retval)
+sys_msgsnd(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct sys_msgsnd_args /* {
 		syscallarg(int) msqid;
 		syscallarg(const void *) msgp;
 		syscallarg(size_t) msgsz;
 		syscallarg(int) msgflg;
-	} */
+	} */ *uap = v;
 
 	return msgsnd1(l, SCARG(uap, msqid), SCARG(uap, msgp),
 	    SCARG(uap, msgsz), SCARG(uap, msgflg), sizeof(long), copyin);
@@ -654,16 +660,14 @@ msgsnd1(struct lwp *l, int msqidr, const char *user_msgp, size_t msgsz,
 	MSG_PRINTF(("call to msgsnd(%d, %p, %lld, %d)\n", msqid, user_msgp,
 	    (long long)msgsz, msgflg));
 
-	if ((ssize_t)msgsz < 0)
-		return EINVAL;
-
-restart:
 	msqid = IPCID_TO_IX(msqidr);
 
 	mutex_enter(&msgmutex);
-	/* In case of reallocation, we will wait for completion */
-	while (__predict_false(msg_realloc_state))
-		cv_wait(&msg_realloc_cv, &msgmutex);
+	if (msg_realloc_state) {
+		/* In case of reallocation, we will wait for completion */
+		while (msg_realloc_state)
+			cv_wait(&msg_realloc_cv, &msgmutex);
+	}
 
 	if (msqid < 0 || msqid >= msginfo.msgmni) {
 		MSG_PRINTF(("msqid (%d) out of range (0<=msqid<%d)\n", msqid,
@@ -752,20 +756,13 @@ restart:
 			MSG_PRINTF(("good morning, error=%d\n", error));
 			msg_waiters--;
 
+			/* Notify reallocator, in case of such state */
+			if (msg_realloc_state)
+				cv_broadcast(&msg_realloc_cv);
+
 			if (we_own_it)
 				msqptr->msg_perm.mode &= ~MSG_LOCKED;
-
-			/*
-			 * In case of such state, notify reallocator and
-			 * restart the call.
-			 */
-			if (msg_realloc_state) {
-				cv_broadcast(&msg_realloc_cv);
-				mutex_exit(&msgmutex);
-				goto restart;
-			}
-
-			if (error != 0) {
+			if (error || msg_realloc_state) {
 				MSG_PRINTF(("msgsnd: interrupted system "
 				    "call\n"));
 				error = EINTR;
@@ -856,7 +853,6 @@ restart:
 		msqptr->msg_perm.mode &= ~MSG_LOCKED;
 		cv_broadcast(&msq->msq_cv);
 		MSG_PRINTF(("mtype (%ld) < 1\n", msghdr->msg_type));
-		error = EINVAL;
 		goto unlock;
 	}
 
@@ -934,15 +930,15 @@ unlock:
 }
 
 int
-sys_msgrcv(struct lwp *l, const struct sys_msgrcv_args *uap, register_t *retval)
+sys_msgrcv(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct sys_msgrcv_args /* {
 		syscallarg(int) msqid;
 		syscallarg(void *) msgp;
 		syscallarg(size_t) msgsz;
 		syscallarg(long) msgtyp;
 		syscallarg(int) msgflg;
-	} */
+	} */ *uap = v;
 
 	return msgrcv1(l, SCARG(uap, msqid), SCARG(uap, msgp),
 	    SCARG(uap, msgsz), SCARG(uap, msgtyp), SCARG(uap, msgflg),
@@ -964,16 +960,14 @@ msgrcv1(struct lwp *l, int msqidr, char *user_msgp, size_t msgsz, long msgtyp,
 	MSG_PRINTF(("call to msgrcv(%d, %p, %lld, %ld, %d)\n", msqid,
 	    user_msgp, (long long)msgsz, msgtyp, msgflg));
 
-	if ((ssize_t)msgsz < 0)
-		return EINVAL;
-
-restart:
 	msqid = IPCID_TO_IX(msqidr);
 
 	mutex_enter(&msgmutex);
-	/* In case of reallocation, we will wait for completion */
-	while (__predict_false(msg_realloc_state))
-		cv_wait(&msg_realloc_cv, &msgmutex);
+	if (msg_realloc_state) {
+		/* In case of reallocation, we will wait for completion */
+		while (msg_realloc_state)
+			cv_wait(&msg_realloc_cv, &msgmutex);
+	}
 
 	if (msqid < 0 || msqid >= msginfo.msgmni) {
 		MSG_PRINTF(("msqid (%d) out of range (0<=msqid<%d)\n", msqid,
@@ -1096,17 +1090,11 @@ restart:
 		MSG_PRINTF(("msgrcv: good morning (error=%d)\n", error));
 		msg_waiters--;
 
-		/*
-		 * In case of such state, notify reallocator and
-		 * restart the call.
-		 */
-		if (msg_realloc_state) {
+		/* Notify reallocator, in case of such state */
+		if (msg_realloc_state)
 			cv_broadcast(&msg_realloc_cv);
-			mutex_exit(&msgmutex);
-			goto restart;
-		}
 
-		if (error != 0) {
+		if (error || msg_realloc_state) {
 			MSG_PRINTF(("msgsnd: interrupted system call\n"));
 			error = EINTR;
 			goto unlock;
@@ -1175,7 +1163,7 @@ restart:
 		else
 			tlen = msgsz - len;
 		mutex_exit(&msgmutex);
-		error = copyout(&msgpool[next * msginfo.msgssz],
+		error = (*put_type)(&msgpool[next * msginfo.msgssz],
 		    user_msgp, tlen);
 		mutex_enter(&msgmutex);
 		if (error != 0) {
@@ -1219,10 +1207,7 @@ sysctl_ipc_msgmni(SYSCTLFN_ARGS)
 	if (error || newp == NULL)
 		return error;
 
-	sysctl_unlock();
-	error = msgrealloc(newsize, msginfo.msgseg);
-	sysctl_relock();
-	return error;
+	return msgrealloc(newsize, msginfo.msgseg);
 }
 
 static int
@@ -1238,10 +1223,7 @@ sysctl_ipc_msgseg(SYSCTLFN_ARGS)
 	if (error || newp == NULL)
 		return error;
 
-	sysctl_unlock();
-	error = msgrealloc(msginfo.msgmni, newsize);
-	sysctl_relock();
-	return error;
+	return msgrealloc(msginfo.msgmni, newsize);
 }
 
 SYSCTL_SETUP(sysctl_ipc_msg_setup, "sysctl kern.ipc subtree setup")

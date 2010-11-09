@@ -1,7 +1,7 @@
-/*	$NetBSD: darwin_ioctl.c,v 1.12 2009/01/11 02:45:47 christos Exp $ */
+/*	$NetBSD: darwin_ioctl.c,v 1.5 2005/12/11 12:19:56 christos Exp $ */
 
 /*-
- * Copyright (c) 2003, 2008 The NetBSD Foundation, Inc.
+ * Copyright (c) 2003 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: darwin_ioctl.c,v 1.12 2009/01/11 02:45:47 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: darwin_ioctl.c,v 1.5 2005/12/11 12:19:56 christos Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -41,6 +48,7 @@ __KERNEL_RCSID(0, "$NetBSD: darwin_ioctl.c,v 1.12 2009/01/11 02:45:47 christos E
 #include <sys/dirent.h>
 #include <sys/vnode.h>
 #include <sys/proc.h>
+#include <sys/sa.h>
 
 #include <sys/syscallargs.h>
 
@@ -49,7 +57,6 @@ __KERNEL_RCSID(0, "$NetBSD: darwin_ioctl.c,v 1.12 2009/01/11 02:45:47 christos E
 #include <compat/mach/mach_types.h>
 #include <compat/mach/mach_vm.h>
 
-#include <compat/darwin/darwin_types.h>
 #include <compat/darwin/darwin_audit.h>
 #include <compat/darwin/darwin_ioctl.h>
 #include <compat/darwin/darwin_syscallargs.h>
@@ -57,30 +64,34 @@ __KERNEL_RCSID(0, "$NetBSD: darwin_ioctl.c,v 1.12 2009/01/11 02:45:47 christos E
 static int vtype_to_dtype(int);
 
 int
-darwin_sys_ioctl(struct lwp *l, const struct darwin_sys_ioctl_args *uap, register_t *retval)
+darwin_sys_ioctl(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct darwin_sys_ioctl_args /* {
 		syscallarg(int) fd;
 		syscallarg(u_long) com;
 		syscallarg(void *) data;
-	} */
+	} */ *uap = v;
 	struct sys_ioctl_args cup;
 	int error;
 
 	switch (SCARG(uap, com)) {
 	case DARWIN_FIODTYPE: { /* Get file d_type */
-		file_t *fp;
+		struct proc *p = l->l_proc;
+		struct file *fp;
 		struct vnode *vp;
 		int *data = SCARG(uap, data);
 		int type;
 
-		/* fd_getvnode() will use the descriptor for us */
-		if ((error = fd_getvnode(SCARG(uap, fd), &fp)))
+		/* getvnode() will use the descriptor for us */
+		if ((error = getvnode(p->p_fd, SCARG(uap, fd), &fp)))
 			return (error);
 
 		vp = fp->f_data;
 		type = vtype_to_dtype(vp->v_type);
-		fd_putfile(SCARG(uap, fd));
+		FILE_UNUSE(fp, l);
 
 		error = copyout(&type, data, sizeof(*data));
 
@@ -103,7 +114,8 @@ darwin_sys_ioctl(struct lwp *l, const struct darwin_sys_ioctl_args *uap, registe
 }
 
 static int
-vtype_to_dtype(int dtype)
+vtype_to_dtype(dtype)
+	int dtype;
 {
 	switch (dtype) {
 	case VNON:

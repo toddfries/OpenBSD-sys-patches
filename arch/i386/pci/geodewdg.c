@@ -1,4 +1,4 @@
-/*	$NetBSD: geodewdg.c,v 1.9 2008/05/05 11:49:40 xtraeme Exp $	*/
+/*	$NetBSD: geodewdg.c,v 1.5 2006/11/16 01:32:39 christos Exp $	*/
 
 /*-
  * Copyright (c) 2005 David Young.  All rights reserved.
@@ -48,6 +48,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -69,7 +76,7 @@
 
 #include <sys/cdefs.h>
 
-__KERNEL_RCSID(0, "$NetBSD: geodewdg.c,v 1.9 2008/05/05 11:49:40 xtraeme Exp $");
+__KERNEL_RCSID(0, "$NetBSD: geodewdg.c,v 1.5 2006/11/16 01:32:39 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -90,6 +97,7 @@ __KERNEL_RCSID(0, "$NetBSD: geodewdg.c,v 1.9 2008/05/05 11:49:40 xtraeme Exp $")
 #endif
 
 struct geode_wdog_softc {
+	struct device		sc_dev;
 	struct geode_gcb_softc *sc_gcb_dev;
 
 	uint16_t		sc_countdown;
@@ -106,11 +114,10 @@ geode_wdog_disable(struct geode_wdog_softc *sc)
 
 	/* cancel any pending countdown */
 	sc->sc_countdown = 0;
-	bus_space_write_2(sc->sc_gcb_dev->sc_iot, sc->sc_gcb_dev->sc_ioh,
-	    SC1100_GCB_WDTO, 0);
+	bus_space_write_2(sc->sc_gcb_dev->sc_iot, sc->sc_gcb_dev->sc_ioh, SC1100_GCB_WDTO, 0);
 	/* power-down clock */
-	wdcnfg = bus_space_read_2(sc->sc_gcb_dev->sc_iot,
-	    sc->sc_gcb_dev->sc_ioh, SC1100_GCB_WDCNFG);
+	wdcnfg = bus_space_read_2(sc->sc_gcb_dev->sc_iot, sc->sc_gcb_dev->sc_ioh,
+	    SC1100_GCB_WDCNFG);
 
 	GEODE_DPRINTF(("%s: wdcnfg %#04" PRIx16 " -> ", __func__, wdcnfg));
 
@@ -119,8 +126,7 @@ geode_wdog_disable(struct geode_wdog_softc *sc)
 	/* This no-op is for the reader's benefit. */
         wdcnfg |= SC1100_WDCNFG_WDTYPE1_NOACTION |
                   SC1100_WDCNFG_WDTYPE2_NOACTION;
-	bus_space_write_2(sc->sc_gcb_dev->sc_iot, sc->sc_gcb_dev->sc_ioh,
-	    SC1100_GCB_WDCNFG, wdcnfg);
+	bus_space_write_2(sc->sc_gcb_dev->sc_iot, sc->sc_gcb_dev->sc_ioh, SC1100_GCB_WDCNFG, wdcnfg);
 
 	GEODE_DPRINTF(("%#04" PRIx16 "\n", wdcnfg));
 }
@@ -131,8 +137,7 @@ geode_wdog_enable(struct geode_wdog_softc *sc)
 	uint16_t wdcnfg;
 
 	/* power-up clock and set prescale */
-	wdcnfg = bus_space_read_2(sc->sc_gcb_dev->sc_iot,
-	    sc->sc_gcb_dev->sc_ioh, SC1100_GCB_WDCNFG);
+	wdcnfg = bus_space_read_2(sc->sc_gcb_dev->sc_iot, sc->sc_gcb_dev->sc_ioh, SC1100_GCB_WDCNFG);
 
 	GEODE_DPRINTF(("%s: wdcnfg %#04" PRIx16 " -> ", __func__, wdcnfg));
 
@@ -141,8 +146,7 @@ geode_wdog_enable(struct geode_wdog_softc *sc)
 	wdcnfg |= __SHIFTIN(sc->sc_prescale, SC1100_WDCNFG_WDPRES_MASK);
         wdcnfg |= SC1100_WDCNFG_WDTYPE1_RESET | SC1100_WDCNFG_WDTYPE2_NOACTION;
 
-	bus_space_write_2(sc->sc_gcb_dev->sc_iot, sc->sc_gcb_dev->sc_ioh,
-	    SC1100_GCB_WDCNFG, wdcnfg);
+	bus_space_write_2(sc->sc_gcb_dev->sc_iot, sc->sc_gcb_dev->sc_ioh, SC1100_GCB_WDCNFG, wdcnfg);
 
 	GEODE_DPRINTF(("%#04" PRIx16 "\n", wdcnfg));
 }
@@ -151,8 +155,8 @@ static void
 geode_wdog_reset(struct geode_wdog_softc *sc)
 {
 	/* set countdown */ 
-	bus_space_write_2(sc->sc_gcb_dev->sc_iot, sc->sc_gcb_dev->sc_ioh,
-	    SC1100_GCB_WDTO, sc->sc_countdown);
+	bus_space_write_2(sc->sc_gcb_dev->sc_iot, sc->sc_gcb_dev->sc_ioh, SC1100_GCB_WDTO,
+	    sc->sc_countdown);
 }
 
 static int
@@ -214,15 +218,17 @@ geode_wdog_setmode(struct sysmon_wdog *smw)
 }
 
 static int
-geode_wdog_match(device_t parent, cfdata_t match, void *aux)
+geode_wdog_match(struct device *parent, struct cfdata *match,
+    void *aux)
 {
 	return !attached;
 }
 
 static void
-geode_wdog_attach(device_t parent, device_t self, void *aux)
+geode_wdog_attach(struct device *parent, struct device *self,
+    void *aux)
 {
-	struct geode_wdog_softc *sc = device_private(self);
+	struct geode_wdog_softc *sc = (void *) self;
 	uint8_t wdsts;
 
 	aprint_naive(": Watchdog Timer\n");
@@ -232,8 +238,8 @@ geode_wdog_attach(device_t parent, device_t self, void *aux)
 	/*
 	 * Hook up the watchdog timer.
 	 */
-	sc->sc_gcb_dev = device_private(parent);
-	sc->sc_smw.smw_name = device_xname(self);
+	sc->sc_gcb_dev = (struct geode_gcb_softc *)parent;
+	sc->sc_smw.smw_name = sc->sc_dev.dv_xname;
 	sc->sc_smw.smw_cookie = sc;
 	sc->sc_smw.smw_setmode = geode_wdog_setmode;
 	sc->sc_smw.smw_tickle = geode_wdog_tickle;
@@ -243,24 +249,23 @@ geode_wdog_attach(device_t parent, device_t self, void *aux)
 	 * Determine cause of the last reset, and issue a warning if it
 	 * was due to watchdog expiry.
 	 */
-	wdsts = bus_space_read_1(sc->sc_gcb_dev->sc_iot, sc->sc_gcb_dev->sc_ioh,
-	    SC1100_GCB_WDSTS);
+	wdsts = bus_space_read_1(sc->sc_gcb_dev->sc_iot, sc->sc_gcb_dev->sc_ioh, SC1100_GCB_WDSTS);
 
-	GEODE_DPRINTF(("%s: status %#02" PRIx8 "\n", device_xname(self),
+	GEODE_DPRINTF(("%s: status %#02" PRIx8 "\n", sc->sc_dev.dv_xname,
 	    wdsts));
 
 	if (wdsts & SC1100_WDSTS_WDRST)
 		aprint_error(
 		    "%s: WARNING: LAST RESET DUE TO WATCHDOG EXPIRATION!\n",
-		    device_xname(self));
+		    sc->sc_dev.dv_xname);
 
 	/* reset WDOVF by writing 1 to it */
-	bus_space_write_1(sc->sc_gcb_dev->sc_iot, sc->sc_gcb_dev->sc_ioh,
-	    SC1100_GCB_WDSTS, wdsts & SC1100_WDSTS_WDOVF);
+	bus_space_write_1(sc->sc_gcb_dev->sc_iot, sc->sc_gcb_dev->sc_ioh, SC1100_GCB_WDSTS,
+	    wdsts & SC1100_WDSTS_WDOVF);
 
 	if (sysmon_wdog_register(&sc->sc_smw) != 0)
 		aprint_error("%s: unable to register watchdog with sysmon\n",
-		    device_xname(self));
+		    sc->sc_dev.dv_xname);
 
 	/* cancel any pending countdown */
 	geode_wdog_disable(sc);
@@ -268,25 +273,5 @@ geode_wdog_attach(device_t parent, device_t self, void *aux)
 	attached = 1;
 }
 
-static int
-geode_wdog_detach(device_t self, int flags)
-{
-	int rc;
-	struct geode_wdog_softc *sc = device_private(self);
-
-	if ((rc = sysmon_wdog_unregister(&sc->sc_smw)) != 0) {
-		if (rc == ERESTART)
-			rc = EINTR;
-		return rc;
-	}
-
-	/* cancel any pending countdown */
-	geode_wdog_disable(sc);
-
-	attached = 0;
-
-	return 0;
-}
-
-CFATTACH_DECL_NEW(geodewdog, sizeof(struct geode_wdog_softc),
-	      geode_wdog_match, geode_wdog_attach, geode_wdog_detach, NULL);
+CFATTACH_DECL(geodewdog, sizeof(struct geode_wdog_softc),
+	      geode_wdog_match, geode_wdog_attach, NULL, NULL);

@@ -1,4 +1,4 @@
-/*	$NetBSD: autoconf.c,v 1.22 2008/04/28 20:23:33 martin Exp $	*/
+/*	$NetBSD: autoconf.c,v 1.19 2006/06/23 03:08:41 garbled Exp $	*/
 
 /*-
  * Copyright (c) 2006 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -34,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.22 2008/04/28 20:23:33 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.19 2006/06/23 03:08:41 garbled Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -50,7 +57,6 @@ __KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.22 2008/04/28 20:23:33 martin Exp $")
 #include <machine/intr.h>
 
 #include <dev/pci/pcivar.h>
-#include <dev/pci/pcidevs.h>
 #include <dev/scsipi/scsi_all.h>
 #include <dev/scsipi/scsipi_all.h>
 #include <dev/scsipi/scsiconf.h>
@@ -76,7 +82,12 @@ cpu_configure(void)
 	if (config_rootfound("mainbus", NULL) == NULL)
 		panic("configure: mainbus not configured");
 
-	genppc_cpu_configure();
+	printf("biomask %x netmask %x ttymask %x\n",
+	    imask[IPL_BIO] & 0x1fffffff,
+	    imask[IPL_NET] & 0x1fffffff,
+	    imask[IPL_TTY] & 0x1fffffff);
+
+	spl0();
 }
 
 void
@@ -84,7 +95,7 @@ cpu_rootconf(void)
 {
 	findroot();
 
-	aprint_normal("boot device: %s\n",
+	printf("boot device: %s\n",
 	    booted_device ? booted_device->dv_xname : "<unknown>");
 
 	setroot(booted_device, booted_partition);
@@ -118,21 +129,6 @@ device_register(struct device *dev, void *aux)
 	    device_is_a(dev, "wskbd") || device_is_a(dev, "wsmouse") ||
 	    device_is_a(dev, "pms") || device_is_a(dev, "cpu"))
 		return;
-
-	if (device_is_a(dev, "pchb")) {
-		struct pci_attach_args *pa = aux;
-		prop_bool_t rav;
-
-		if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_MOT &&
-		    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_MOT_RAVEN) {
-			rav = prop_bool_create(true);
-			KASSERT(rav != NULL);
-			(void) prop_dictionary_set(
-			    device_properties(device_parent(dev)),
-			    "prep-raven-pchb", rav);
-			prop_object_release(rav);
-		}
-	}
 
 	if (device_is_a(dev, "mainbus")) {
 		str1 = prop_string_create_cstring("/");

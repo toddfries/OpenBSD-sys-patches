@@ -1,4 +1,4 @@
-/*	$NetBSD: autoconf.c,v 1.10 2008/02/12 17:30:58 joerg Exp $	*/
+/*	$NetBSD: autoconf.c,v 1.7 2005/12/11 12:18:20 christos Exp $	*/
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -44,7 +44,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.10 2008/02/12 17:30:58 joerg Exp $");
+__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.7 2005/12/11 12:18:20 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -57,7 +57,7 @@ __KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.10 2008/02/12 17:30:58 joerg Exp $");
 #include <machine/pte.h>
 #include <machine/intr.h>
 
-static void findroot(void);
+static void findroot __P((void));
 
 /*
  * Determine i/o configuration for a machine.
@@ -65,11 +65,16 @@ static void findroot(void);
 void
 cpu_configure()
 {
+	/* startrtclock(); */
 
 	if (config_rootfound("mainbus", NULL) == NULL)
 		panic("configure: mainbus not configured");
 
-	genppc_cpu_configure();
+	printf("biomask %x netmask %x ttymask %x\n",
+	    (u_short)imask[IPL_BIO], (u_short)imask[IPL_NET],
+	    (u_short)imask[IPL_TTY]);
+
+	spl0();
 }
 
 void
@@ -77,7 +82,7 @@ cpu_rootconf()
 {
 	findroot();
 
-	aprint_normal("boot device: %s\n",
+	printf("boot device: %s\n",
 	    booted_device ? booted_device->dv_xname : "<unknown>");
 
 	setroot(booted_device, booted_partition);
@@ -94,11 +99,12 @@ void
 findroot(void)
 {
 	int unit, part;
-	device_t dv;
+	struct device *dv;
+	char buf[32];
 	const char *name;
 
 #if 0
-	aprint_normal("howto %x bootdev %x ", boothowto, bootdev);
+	printf("howto %x bootdev %x ", boothowto, bootdev);
 #endif
 
 	if ((bootdev & B_MAGICMASK) != (u_long)B_DEVMAGIC)
@@ -111,14 +117,12 @@ findroot(void)
 	part = (bootdev >> B_PARTITIONSHIFT) & B_PARTITIONMASK;
 	unit = (bootdev >> B_UNITSHIFT) & B_UNITMASK;
 
-	if ((dv = device_find_by_driver_unit(name, unit)) != NULL) {
-		booted_device = dv;
-		booted_partition = part;
+	sprintf(buf, "%s%d", name, unit);
+	for (dv = alldevs.tqh_first; dv != NULL; dv = dv->dv_list.tqe_next) {
+		if (strcmp(buf, dv->dv_xname) == 0) {
+			booted_device = dv;
+			booted_partition = part;
+			return;
+		}
 	}
-}
-
-void
-device_register(struct device *dev, void *aux)
-{
-	/* do nothing */
 }

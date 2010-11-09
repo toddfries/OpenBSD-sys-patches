@@ -1,4 +1,4 @@
-/*	$NetBSD: power.h,v 1.12 2008/08/22 11:27:50 pgoyette Exp $	*/
+/*	$NetBSD: power.h,v 1.10 2007/10/11 17:31:06 xtraeme Exp $	*/
 
 /*
  * Copyright (c) 2003 Wasabi Systems, Inc.
@@ -86,13 +86,6 @@
 #define	PSWITCH_TYPE_LID	2	/* lid switch */
 #define	PSWITCH_TYPE_RESET	3	/* reset button */
 #define	PSWITCH_TYPE_ACADAPTER	4	/* AC adapter presence */
-#define	PSWITCH_TYPE_HOTKEY	5	/* hotkey button */
-#define		PSWITCH_HK_DISPLAY_CYCLE	"display-cycle"
-#define		PSWITCH_HK_LOCK_SCREEN		"lock-screen"
-#define		PSWITCH_HK_BATTERY_INFO		"battery-info"
-#define		PSWITCH_HK_EJECT_BUTTON		"eject-button"
-#define		PSWITCH_HK_ZOOM_BUTTON		"zoom-button"
-#define		PSWITCH_HK_VENDOR_BUTTON	"vendor-button"
 
 #define	PSWITCH_EVENT_PRESSED	0	/* button pressed, lid closed, AC off */
 #define	PSWITCH_EVENT_RELEASED	1	/* button released, lid open, AC on */
@@ -110,7 +103,7 @@ struct pswitch_state {
  * envsys(4) events:
  *
  * envsys events are sent by the sysmon envsys framework when
- * a warning or critical condition happens in a sensor.
+ * a critical condition happens in a sensor.
  *
  * We define the folowing types of envsys events:
  *
@@ -160,12 +153,8 @@ struct pswitch_state {
  *
  * 	PENVSYS_EVENT_USER_CRITMIN	User critical min limit.
  *
- *	PENVSYS_EVENT_USER_WARNMAX	User warning max limit.
- *
- *	PENVSYS_EVENT_USER_WARNMIN	User warning min limit.
- *
  * The folowing event apply to all sensors, when the state is
- * valid or the warning or critical limit is not valid anymore:
+ * valid or the critical limit is not valid anymore:
  *
  * 	PENVSYS_EVENT_NORMAL		Normal state in the sensor.
  */
@@ -177,23 +166,18 @@ struct pswitch_state {
 #define PENVSYS_EVENT_WARNOVER 		130
 #define PENVSYS_EVENT_WARNUNDER 	140
 #define PENVSYS_EVENT_USER_CRITMAX 	150
-#define PENVSYS_EVENT_USER_WARNMAX  	155
 #define PENVSYS_EVENT_USER_CRITMIN  	160
-#define PENVSYS_EVENT_USER_WARNMIN  	165
 
 /*
  * The following events apply for battery sensors:
  *
- * 	PENVSYS_EVENT_BATT_USERCAP	User critical capacity.
- *
- *	PENVSYS_EVENT_BATT_USERWARN	User warning capacity.
+ * 	PENVSYS_EVENT_BATT_USERCAP	User capacity.
  *
  * 	PENVSYS_EVENT_LOW_POWER		AC Adapter is OFF and all batteries
  * 					are discharged.
  */
 
 #define PENVSYS_EVENT_BATT_USERCAP 	170
-#define PENVSYS_EVENT_BATT_USERWARN 	175
 #define PENVSYS_EVENT_LOW_POWER 	180
 
 /*
@@ -204,13 +188,6 @@ struct pswitch_state {
  */
 #define PENVSYS_EVENT_STATE_CHANGED 	190
 
-/*
- * The following events are used internally to associate multiple
- * external states with a single event monitor
- */
-#define PENVSYS_EVENT_HW_LIMITS		200
-#define PENVSYS_EVENT_USER_LIMITS	210
-#define PENVSYS_EVENT_BATT_USER_LIMITS	220
 
 /*
  * This structure defines the properties of an envsys event.

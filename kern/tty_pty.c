@@ -1,4 +1,4 @@
-/*	$NetBSD: tty_pty.c,v 1.116 2009/03/09 16:19:22 uebayasi Exp $	*/
+/*	$NetBSD: tty_pty.c,v 1.102 2007/11/07 15:56:22 ad Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1989, 1993
@@ -37,14 +37,14 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: tty_pty.c,v 1.116 2009/03/09 16:19:22 uebayasi Exp $");
+__KERNEL_RCSID(0, "$NetBSD: tty_pty.c,v 1.102 2007/11/07 15:56:22 ad Exp $");
 
+#include "opt_compat_sunos.h"
 #include "opt_ptm.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/ioctl.h>
-#include <sys/ioctl_compat.h>
 #include <sys/proc.h>
 #include <sys/tty.h>
 #include <sys/stat.h>
@@ -57,6 +57,7 @@ __KERNEL_RCSID(0, "$NetBSD: tty_pty.c,v 1.116 2009/03/09 16:19:22 uebayasi Exp $
 #include <sys/filedesc.h>
 #include <sys/conf.h>
 #include <sys/poll.h>
+#include <sys/malloc.h>
 #include <sys/pty.h>
 #include <sys/kauth.h>
 
@@ -150,20 +151,13 @@ pty_isfree(int minor, int lock)
  * Allocate and zero array of nelem elements.
  */
 static struct pt_softc **
-ptyarralloc(int nelem)
+ptyarralloc(nelem)
+	int nelem;
 {
 	struct pt_softc **pt;
 	nelem += 10;
-	pt = kmem_zalloc(nelem * sizeof(*pt), KM_SLEEP);
+	pt = malloc(nelem * sizeof *pt, M_DEVBUF, M_WAITOK | M_ZERO);
 	return pt;
-}
-
-static void
-ptyarrfree(struct pt_softc **pt, int nelem)
-{
-
-	nelem += 10;
-	kmem_free(pt, nelem * sizeof(*pt));
 }
 
 /*
@@ -178,7 +172,6 @@ pty_check(int ptn)
 	if (ptn >= npty) {
 		struct pt_softc **newpt, **oldpt;
 		int newnpty;
-		int oldnpty;
 
 		/* check if the requested pty can be granted */
 		if (ptn >= maxptys) {
@@ -204,12 +197,12 @@ pty_check(int ptn)
 
 		if (newnpty >= maxptys) {
 			/* limit cut away beneath us... */
-			if (ptn >= maxptys) {
+			newnpty = maxptys;
+			if (ptn >= newnpty) {
 				mutex_exit(&pt_softc_mutex);
-				ptyarrfree(newpt, newnpty);
+				free(newpt, M_DEVBUF);
 				goto limit_reached;
 			}
-			newnpty = maxptys;
 		}
 
 		/*
@@ -220,17 +213,15 @@ pty_check(int ptn)
 		if (newnpty > npty) {
 			memcpy(newpt, pt_softc, npty*sizeof(struct pt_softc *));
 			oldpt = pt_softc;
-			oldnpty = npty;
 			pt_softc = newpt;
 			npty = newnpty;
 		} else {
 			/* was enlarged when waited for lock, free new space */
 			oldpt = newpt;
-			oldnpty = newnpty;
 		}
 
 		mutex_exit(&pt_softc_mutex);
-		ptyarrfree(oldpt, oldnpty);
+		free(oldpt, M_DEVBUF);
 	}
 
 	/*
@@ -239,11 +230,11 @@ pty_check(int ptn)
 	 * in case it has been lengthened above.
 	 */
 	if (!pt_softc[ptn]) {
-		pti = kmem_zalloc(sizeof(*pti), KM_SLEEP);
+		MALLOC(pti, struct pt_softc *, sizeof(struct pt_softc),
+			M_DEVBUF, M_WAITOK);
+		memset(pti, 0, sizeof(struct pt_softc));
 
-		selinit(&pti->pt_selr);
-		selinit(&pti->pt_selw);
-		pti->pt_tty = ttymalloc();
+	 	pti->pt_tty = ttymalloc();
 
 		mutex_enter(&pt_softc_mutex);
 
@@ -251,16 +242,13 @@ pty_check(int ptn)
 		 * Check the entry again - it might have been
 		 * added while we were waiting for mutex.
 		 */
-		if (pt_softc[ptn]) {
-			mutex_exit(&pt_softc_mutex);
+		if (!pt_softc[ptn]) {
+			tty_attach(pti->pt_tty);
+			pt_softc[ptn] = pti;
+		} else {
 			ttyfree(pti->pt_tty);
-			seldestroy(&pti->pt_selr);
-			seldestroy(&pti->pt_selw);
-			kmem_free(pti, sizeof(*pti));
-			return (0);
+			free(pti, M_DEVBUF);
 		}
-		tty_attach(pti->pt_tty);
-		pt_softc[ptn] = pti;
 
 		mutex_exit(&pt_softc_mutex);
 	}
@@ -273,7 +261,8 @@ pty_check(int ptn)
  * new value of maxptys.
  */
 int
-pty_maxptys(int newmax, int set)
+pty_maxptys(newmax, set)
+	int newmax, set;
 {
 	if (!set)
 		return (maxptys);
@@ -302,7 +291,8 @@ pty_maxptys(int newmax, int set)
  * Establish n (or default if n is 1) ptys in the system.
  */
 void
-ptyattach(int n)
+ptyattach(n)
+	int n;
 {
 
 	mutex_init(&pt_softc_mutex, MUTEX_DEFAULT, IPL_NONE);
@@ -329,9 +319,9 @@ ptsopen(dev_t dev, int flag, int devtype, struct lwp *l)
 	if ((error = pty_check(ptn)) != 0)
 		return (error);
 
-	mutex_spin_enter(&tty_lock);
 	pti = pt_softc[ptn];
 	tp = pti->pt_tty;
+
 	if (!ISSET(tp->t_state, TS_ISOPEN)) {
 		ttychars(tp);		/* Set up default chars */
 		tp->t_iflag = TTYDEF_IFLAG;
@@ -341,24 +331,24 @@ ptsopen(dev_t dev, int flag, int devtype, struct lwp *l)
 		tp->t_ispeed = tp->t_ospeed = TTYDEF_SPEED;
 		ttsetwater(tp);		/* would be done in xxparam() */
 	} else if (kauth_authorize_device_tty(l->l_cred, KAUTH_DEVICE_TTY_OPEN,
-	    tp) != 0) {
-		mutex_spin_exit(&tty_lock);
+	    tp) != 0)
 		return (EBUSY);
-	}
 	if (tp->t_oproc)			/* Ctrlr still around. */
 		SET(tp->t_state, TS_CARR_ON);
+
 	if (!ISSET(flag, O_NONBLOCK)) {
+		mutex_spin_enter(&tty_lock);
 		while (!ISSET(tp->t_state, TS_CARR_ON)) {
 			tp->t_wopen++;
-			error = ttysleep(tp, &tp->t_rawcv, true, 0);
+			error = ttysleep(tp, &tp->t_rawq.c_cv, true, 0);
 			tp->t_wopen--;
 			if (error) {
 				mutex_spin_exit(&tty_lock);
 				return (error);
 			}
 		}
+		mutex_spin_exit(&tty_lock);
 	}
-	mutex_spin_exit(&tty_lock);
 	error = (*tp->t_linesw->l_open)(dev, tp);
 	ptcwakeup(tp, FREAD|FWRITE);
 	return (error);
@@ -378,46 +368,46 @@ ptsclose(dev_t dev, int flag, int mode, struct lwp *l)
 }
 
 int
-ptsread(dev_t dev, struct uio *uio, int flag)
+ptsread(dev, uio, flag)
+	dev_t dev;
+	struct uio *uio;
+	int flag;
 {
 	struct proc *p = curproc;
 	struct pt_softc *pti = pt_softc[minor(dev)];
 	struct tty *tp = pti->pt_tty;
 	int error = 0;
-	int cc, c;
+	int cc;
 
 again:
 	if (pti->pt_flags & PF_REMOTE) {
-		mutex_spin_enter(&tty_lock);
 		while (isbackground(p, tp)) {	/* XXXSMP */
 			if (sigismasked(curlwp, SIGTTIN) ||
 			    p->p_pgrp->pg_jobc == 0 ||
-			    p->p_lflag & PL_PPWAIT) {
-				mutex_spin_exit(&tty_lock);
+			    p->p_flag & PS_PPWAIT)
 				return (EIO);
-			}
+			mutex_spin_enter(&tty_lock);
 			ttysig(tp, TTYSIG_PG1, SIGTTIN);
 			error = ttysleep(tp, &lbolt, true, 0);
-			if (error) {
-				mutex_spin_exit(&tty_lock);
+			mutex_spin_exit(&tty_lock);
+			if (error)
 				return (error);
-			}
 		}
+		mutex_spin_enter(&tty_lock);
 		if (tp->t_canq.c_cc == 0) {
 			if (flag & IO_NDELAY) {
 				mutex_spin_exit(&tty_lock);
 				return (EWOULDBLOCK);
 			}
-			error = ttysleep(tp, &tp->t_cancv, true, 0);
+			error = ttysleep(tp, &tp->t_canq.c_cv, true, 0);
 			mutex_spin_exit(&tty_lock);
 			if (error)
 				return (error);
 			goto again;
 		}
 		while(error == 0 && tp->t_canq.c_cc > 1 && uio->uio_resid > 0) {
-			c = getc(&tp->t_canq);
 			mutex_spin_exit(&tty_lock);
-			error = ureadc(c, uio);
+			error = ureadc(getc(&tp->t_canq), uio);
 			mutex_spin_enter(&tty_lock);
 			/* Re-check terminal state here? */
 		}
@@ -427,8 +417,9 @@ again:
 		mutex_spin_exit(&tty_lock);
 		if (cc)
 			return (error);
-	} else if (tp->t_oproc)
-		error = (*tp->t_linesw->l_read)(tp, uio, flag);
+	} else
+		if (tp->t_oproc)
+			error = (*tp->t_linesw->l_read)(tp, uio, flag);
 	ptcwakeup(tp, FWRITE);
 	return (error);
 }
@@ -439,7 +430,10 @@ again:
  * indirectly, when tty driver calls ptsstart.
  */
 int
-ptswrite(dev_t dev, struct uio *uio, int flag)
+ptswrite(dev, uio, flag)
+	dev_t dev;
+	struct uio *uio;
+	int flag;
 {
 	struct pt_softc *pti = pt_softc[minor(dev)];
 	struct tty *tp = pti->pt_tty;
@@ -453,7 +447,10 @@ ptswrite(dev_t dev, struct uio *uio, int flag)
  * Poll pseudo-tty.
  */
 int
-ptspoll(dev_t dev, int events, struct lwp *l)
+ptspoll(dev, events, l)
+	dev_t dev;
+	int events;
+	struct lwp *l;
 {
 	struct pt_softc *pti = pt_softc[minor(dev)];
 	struct tty *tp = pti->pt_tty;
@@ -467,13 +464,13 @@ ptspoll(dev_t dev, int events, struct lwp *l)
 /*
  * Start output on pseudo-tty.
  * Wake up process polling or sleeping for input from controlling tty.
+ * Called with tty lock held.
  */
 void
-ptsstart(struct tty *tp)
+ptsstart(tp)
+	struct tty *tp;
 {
 	struct pt_softc *pti = pt_softc[minor(tp->t_dev)];
-
-	KASSERT(mutex_owned(&tty_lock));
 
 	if (ISSET(tp->t_state, TS_TTSTOP))
 		return;
@@ -482,19 +479,20 @@ ptsstart(struct tty *tp)
 		pti->pt_send = TIOCPKT_START;
 	}
 
-	selnotify(&pti->pt_selr, 0, NOTE_SUBMIT);
-	cv_broadcast(&tp->t_outcvf);
+	selnotify(&pti->pt_selr, NOTE_SUBMIT);
+	cv_broadcast(&tp->t_outq.c_cvf);
 }
 
 /*
  * Stop output.
+ * Called with tty lock held.
  */
 void
-ptsstop(struct tty *tp, int flush)
+ptsstop(tp, flush)
+	struct tty *tp;
+	int flush;
 {
 	struct pt_softc *pti = pt_softc[minor(tp->t_dev)];
-
-	KASSERT(mutex_owned(&tty_lock));
 
 	/* note: FLUSHREAD and FLUSHWRITE already ok */
 	if (flush == 0) {
@@ -506,28 +504,30 @@ ptsstop(struct tty *tp, int flush)
 
 	/* change of perspective */
 	if (flush & FREAD) {
-		selnotify(&pti->pt_selw, 0, NOTE_SUBMIT);
-		cv_broadcast(&tp->t_rawcvf);
+		selnotify(&pti->pt_selw, NOTE_SUBMIT);
+		cv_broadcast(&tp->t_rawq.c_cvf);
 	}
 	if (flush & FWRITE) {
-		selnotify(&pti->pt_selr, 0, NOTE_SUBMIT);
-		cv_broadcast(&tp->t_outcvf);
+		selnotify(&pti->pt_selr, NOTE_SUBMIT);
+		cv_broadcast(&tp->t_outq.c_cvf);
 	}
 }
 
 void
-ptcwakeup(struct tty *tp, int flag)
+ptcwakeup(tp, flag)
+	struct tty *tp;
+	int flag;
 {
 	struct pt_softc *pti = pt_softc[minor(tp->t_dev)];
 
 	mutex_spin_enter(&tty_lock);
 	if (flag & FREAD) {
-		selnotify(&pti->pt_selr, 0, NOTE_SUBMIT);
-		cv_broadcast(&tp->t_outcvf);
+		selnotify(&pti->pt_selr, NOTE_SUBMIT);
+		cv_broadcast(&tp->t_outq.c_cvf);
 	}
 	if (flag & FWRITE) {
-		selnotify(&pti->pt_selw, 0, NOTE_SUBMIT);
-		cv_broadcast(&tp->t_rawcvf);
+		selnotify(&pti->pt_selw, NOTE_SUBMIT);
+		cv_broadcast(&tp->t_rawq.c_cvf);
 	}
 	mutex_spin_exit(&tty_lock);
 }
@@ -570,15 +570,18 @@ ptcclose(dev_t dev, int flag, int devtype, struct lwp *l)
 	struct tty *tp = pti->pt_tty;
 
 	(void)(*tp->t_linesw->l_modem)(tp, 0);
-	mutex_spin_enter(&tty_lock);
 	CLR(tp->t_state, TS_CARR_ON);
+	mutex_spin_enter(&tty_lock);
 	tp->t_oproc = 0;		/* mark closed */
 	mutex_spin_exit(&tty_lock);
 	return (0);
 }
 
 int
-ptcread(dev_t dev, struct uio *uio, int flag)
+ptcread(dev, uio, flag)
+	dev_t dev;
+	struct uio *uio;
+	int flag;
 {
 	struct pt_softc *pti = pt_softc[minor(dev)];
 	struct tty *tp = pti->pt_tty;
@@ -633,7 +636,7 @@ ptcread(dev_t dev, struct uio *uio, int flag)
 			error = EWOULDBLOCK;
 			goto out;
 		}
-		error = cv_wait_sig(&tp->t_outcvf, &tty_lock);
+		error = cv_wait_sig(&tp->t_outq.c_cvf, &tty_lock);
 		if (error)
 			goto out;
 	}
@@ -655,7 +658,14 @@ ptcread(dev_t dev, struct uio *uio, int flag)
 		if (error == 0 && !ISSET(tp->t_state, TS_ISOPEN))
 			error = EIO;
 	}
-	ttypull(tp);
+
+	if (tp->t_outq.c_cc <= tp->t_lowat) {
+		if (ISSET(tp->t_state, TS_ASLEEP)) {
+			CLR(tp->t_state, TS_ASLEEP);
+			cv_broadcast(&tp->t_outq.c_cv);
+		}
+		selnotify(&tp->t_wsel, NOTE_SUBMIT);
+	}
 out:
 	mutex_spin_exit(&tty_lock);
 	return (error);
@@ -663,7 +673,10 @@ out:
 
 
 int
-ptcwrite(dev_t dev, struct uio *uio, int flag)
+ptcwrite(dev, uio, flag)
+	dev_t dev;
+	struct uio *uio;
+	int flag;
 {
 	struct pt_softc *pti = pt_softc[minor(dev)];
 	struct tty *tp = pti->pt_tty;
@@ -707,7 +720,7 @@ again:
 		}
 		(void) putc(0, &tp->t_canq);
 		ttwakeup(tp);
-		cv_broadcast(&tp->t_cancv);
+		cv_broadcast(&tp->t_canq.c_cv);
 		error = 0;
 		goto out;
 	}
@@ -731,7 +744,7 @@ again:
 		while (cc > 0) {
 			if ((tp->t_rawq.c_cc + tp->t_canq.c_cc) >= TTYHOG - 2 &&
 			   (tp->t_canq.c_cc > 0 || !ISSET(tp->t_lflag, ICANON))) {
-				cv_broadcast(&tp->t_rawcv);
+				cv_broadcast(&tp->t_rawq.c_cv);
 				goto block;
 			}
 			/* XXX - should change l_rint to be called with lock
@@ -765,7 +778,7 @@ block:
 		error = cnt == 0 ? EWOULDBLOCK : 0;
 		goto out;
 	}
-	error = cv_wait_sig(&tp->t_rawcv, &tty_lock);
+	error = cv_wait_sig(&tp->t_rawq.c_cv, &tty_lock);
 	mutex_spin_exit(&tty_lock);
 	if (error) {
 		/* adjust for data copied in but not written */
@@ -780,7 +793,10 @@ out:
 }
 
 int
-ptcpoll(dev_t dev, int events, struct lwp *l)
+ptcpoll(dev, events, l)
+	dev_t dev;
+	int events;
+	struct lwp *l;
 {
 	struct pt_softc *pti = pt_softc[minor(dev)];
 	struct tty *tp = pti->pt_tty;
@@ -844,9 +860,7 @@ filt_ptcread(struct knote *kn, long hint)
 	pti = kn->kn_hook;
 	tp = pti->pt_tty;
 
-	if ((hint & NOTE_SUBMIT) == 0) {
-		mutex_spin_enter(&tty_lock);
-	}
+	mutex_spin_enter(&tty_lock);
 
 	canread = (ISSET(tp->t_state, TS_ISOPEN) &&
 		    ((tp->t_outq.c_cc > 0 && !ISSET(tp->t_state, TS_TTSTOP)) ||
@@ -865,9 +879,7 @@ filt_ptcread(struct knote *kn, long hint)
 			kn->kn_data++;
 	}
 
-	if ((hint & NOTE_SUBMIT) == 0) {
-		mutex_spin_exit(&tty_lock);
-	}
+	mutex_spin_exit(&tty_lock);
 
 	return (canread);
 }
@@ -897,9 +909,7 @@ filt_ptcwrite(struct knote *kn, long hint)
 	pti = kn->kn_hook;
 	tp = pti->pt_tty;
 
-	if ((hint & NOTE_SUBMIT) == 0) {
-		mutex_spin_enter(&tty_lock);
-	}
+	mutex_spin_enter(&tty_lock);
 
 	canwrite = (ISSET(tp->t_state, TS_ISOPEN) &&
 		    ((pti->pt_flags & PF_REMOTE) ?
@@ -918,9 +928,7 @@ filt_ptcwrite(struct knote *kn, long hint)
 		kn->kn_data = nwrite;
 	}
 
-	if ((hint & NOTE_SUBMIT) == 0) {
-		mutex_spin_exit(&tty_lock);
-	}
+	mutex_spin_exit(&tty_lock);
 
 	return (canwrite);
 }
@@ -946,7 +954,7 @@ ptckqfilter(dev_t dev, struct knote *kn)
 		kn->kn_fop = &ptcwrite_filtops;
 		break;
 	default:
-		return (EINVAL);
+		return (1);
 	}
 
 	kn->kn_hook = pti;
@@ -959,7 +967,8 @@ ptckqfilter(dev_t dev, struct knote *kn)
 }
 
 struct tty *
-ptytty(dev_t dev)
+ptytty(dev)
+	dev_t dev;
 {
 	struct pt_softc *pti = pt_softc[minor(dev)];
 	struct tty *tp = pti->pt_tty;
@@ -969,7 +978,12 @@ ptytty(dev_t dev)
 
 /*ARGSUSED*/
 int
-ptyioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
+ptyioctl(dev, cmd, data, flag, l)
+	dev_t dev;
+	u_long cmd;
+	void *data;
+	int flag;
+	struct lwp *l;
 {
 	struct pt_softc *pti = pt_softc[minor(dev)];
 	struct tty *tp = pti->pt_tty;
@@ -1054,8 +1068,10 @@ ptyioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 			mutex_spin_exit(&tty_lock);
 			return (0);
 
+#ifdef COMPAT_OLDTTY
 		case TIOCSETP:
 		case TIOCSETN:
+#endif
 		case TIOCSETD:
 		case TIOCSETA:
 		case TIOCSETAW:
@@ -1072,16 +1088,12 @@ ptyioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 			mutex_spin_enter(&tty_lock);
 			if (!ISSET(tp->t_lflag, NOFLSH))
 				ttyflush(tp, FREAD|FWRITE);
-			tp->t_state |= TS_SIGINFO;
+			if ((sig == SIGINFO) &&
+			    (!ISSET(tp->t_lflag, NOKERNINFO)))
+				ttyinfo(tp, 1);
 			ttysig(tp, TTYSIG_PG1, sig);
 			mutex_spin_exit(&tty_lock);
-			return (0);
-
-		case FIONREAD:
-			mutex_spin_enter(&tty_lock);
-			*(int *)data = tp->t_outq.c_cc;
-			mutex_spin_exit(&tty_lock);
-			return (0);
+			return(0);
 		}
 
 	error = (*tp->t_linesw->l_ioctl)(tp, cmd, data, flag, l);
@@ -1105,6 +1117,7 @@ ptyioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 		case TIOCSETA:
 		case TIOCSETAW:
 		case TIOCSETAF:
+#ifdef COMPAT_OLDTTY
 		case TIOCSETP:
 		case TIOCSETN:
 		case TIOCSETC:
@@ -1112,6 +1125,7 @@ ptyioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 		case TIOCLBIS:
 		case TIOCLBIC:
 		case TIOCLSET:
+#endif
 			pti->pt_send |= TIOCPKT_IOCTL;
 			ptcwakeup(tp, FREAD);
 		default:

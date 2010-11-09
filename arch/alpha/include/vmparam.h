@@ -1,4 +1,4 @@
-/* $NetBSD: vmparam.h,v 1.33 2009/03/06 20:31:46 joerg Exp $ */
+/* $NetBSD: vmparam.h,v 1.29 2005/12/11 12:16:16 christos Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -129,6 +129,14 @@
 #endif
 
 /*
+ * PTEs for system V style shared memory.
+ * This is basically slop for kmempt which we actually allocate (malloc) from.
+ */
+#ifndef SHMMAXPGS
+#define SHMMAXPGS	1024		/* 8mb */
+#endif
+
+/*
  * Mach derived constants
  */
 
@@ -158,14 +166,14 @@
 #define	__HAVE_VM_PAGE_MD
 struct vm_page_md {
 	struct pv_entry *pvh_list;		/* pv_entry list */
+	struct simplelock pvh_slock;		/* lock on this head */
 	int pvh_attrs;				/* page attributes */
-	unsigned pvh_refcnt;
 };
 
 #define	VM_MDPAGE_INIT(pg)						\
 do {									\
 	(pg)->mdpage.pvh_list = NULL;					\
-	(pg)->mdpage.pvh_refcnt = 0;					\
+	simple_lock_init(&(pg)->mdpage.pvh_slock);			\
 } while (/*CONSTCOND*/0)
 
 #endif	/* ! _ALPHA_VMPARAM_H_ */

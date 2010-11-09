@@ -1,4 +1,4 @@
-/*	$NetBSD: obmem.c,v 1.17 2008/07/06 13:29:50 tsutsui Exp $	*/
+/*	$NetBSD: obmem.c,v 1.15 2005/12/11 12:19:16 christos Exp $	*/
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: obmem.c,v 1.17 2008/07/06 13:29:50 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: obmem.c,v 1.15 2005/12/11 12:19:16 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -44,16 +51,16 @@ __KERNEL_RCSID(0, "$NetBSD: obmem.c,v 1.17 2008/07/06 13:29:50 tsutsui Exp $");
 #include <sun2/sun2/control.h>
 #include <sun2/sun2/machdep.h>
 
-static int  obmem_match(device_t, cfdata_t, void *);
-static void obmem_attach(device_t, device_t, void *);
+static int  obmem_match(struct device *, struct cfdata *, void *);
+static void obmem_attach(struct device *, struct device *, void *);
 
 struct obmem_softc {
-	device_t	sc_dev;		/* base device */
+	struct device	sc_dev;		/* base device */
 	bus_space_tag_t	sc_bustag;	/* parent bus tag */
 	bus_dma_tag_t	sc_dmatag;	/* parent bus dma tag */
 };
 
-CFATTACH_DECL_NEW(obmem, sizeof(struct obmem_softc),
+CFATTACH_DECL(obmem, sizeof(struct obmem_softc),
     obmem_match, obmem_attach, NULL, NULL);
 
 static int obmem_attached;
@@ -84,14 +91,14 @@ obmem_match(struct device *parent, struct cfdata *cf, void *aux)
 	if (obmem_attached)
 		return 0;
 
-	return ma->ma_name == NULL || strcmp(cf->cf_name, ma->ma_name) == 0;
+	return (ma->ma_name == NULL || strcmp(cf->cf_name, ma->ma_name) == 0);
 }
 
 static void 
-obmem_attach(device_t parent, device_t self, void *aux)
+obmem_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct mainbus_attach_args *ma = aux;
-	struct obmem_softc *sc = device_private(self);
+	struct obmem_softc *sc = (struct obmem_softc *)self;
 	struct obmem_attach_args obma;
 	const char *const *cpp;
 	static const char *const special[] = {
@@ -101,8 +108,7 @@ obmem_attach(device_t parent, device_t self, void *aux)
 
 	obmem_attached = 1;
 
-	sc->sc_dev = self;
-	aprint_normal("\n");
+	printf("\n");
 
 	sc->sc_bustag = ma->ma_bustag;
 	sc->sc_dmatag = ma->ma_dmatag;
@@ -138,8 +144,8 @@ _obmem_bus_map(bus_space_tag_t t, bus_type_t btype, bus_addr_t paddr,
 {
 	struct obmem_softc *sc = t->cookie;
 
-	return bus_space_map2(sc->sc_bustag, PMAP_OBMEM, paddr,
-	    size, flags, vaddr, hp);
+	return (bus_space_map2(sc->sc_bustag, PMAP_OBMEM, paddr,
+				size, flags, vaddr, hp));
 }
 
 paddr_t
@@ -148,6 +154,6 @@ obmem_bus_mmap(bus_space_tag_t t, bus_type_t btype, bus_addr_t paddr, off_t off,
 {
 	struct obmem_softc *sc = t->cookie;
 
-	return bus_space_mmap2(sc->sc_bustag, PMAP_OBMEM, paddr, off,
-	    prot, flags);
+	return (bus_space_mmap2(sc->sc_bustag, PMAP_OBMEM, paddr, off,
+				prot, flags));
 }

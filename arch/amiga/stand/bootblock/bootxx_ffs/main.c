@@ -1,5 +1,5 @@
 /*
- * $NetBSD: main.c,v 1.8 2009/01/12 07:42:30 tsutsui Exp $
+ * $NetBSD: main.c,v 1.6 2006/01/25 18:28:25 christos Exp $
  *
  *
  * Copyright (c) 1996,1999 Ignatios Souvatzis
@@ -45,7 +45,6 @@
 
 #include <saerrno.h>
 #include <lib/libsa/stand.h>
-#include <lib/libkern/libkern.h>
 
 #include "libstubs.h"
 #include "samachdep.h"
@@ -76,7 +75,7 @@ int
 pain(void *aio)
 {
 	long int io = 0;
-	void *kp;
+	caddr_t kp;
 	int ksize;
 	struct stat sb;
 

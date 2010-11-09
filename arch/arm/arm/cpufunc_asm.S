@@ -1,4 +1,4 @@
-/*	$NetBSD: cpufunc_asm.S,v 1.14 2008/04/27 18:58:43 matt Exp $	*/
+/*	$NetBSD: cpufunc_asm.S,v 1.13 2005/12/11 12:16:41 christos Exp $	*/
 
 /*
  * Copyright (c) 1997,1998 Mark Brinicombe.
@@ -41,14 +41,14 @@
  * Created      : 30/01/97
  */
  
-#include <machine/asm.h>
 #include <machine/cpu.h>
+#include <machine/asm.h>
 
 	.text
 	.align	0
 
 ENTRY(cpufunc_nullop)
-	RET
+	mov	pc, lr
 
 /*
  * Generic functions to read the internal coprocessor registers
@@ -62,23 +62,23 @@ ENTRY(cpufunc_nullop)
 
 ENTRY(cpufunc_id)
 	mrc	p15, 0, r0, c0, c0, 0
-	RET
+	mov	pc, lr
 
 ENTRY(cpu_get_control)
 	mrc	p15, 0, r0, c1, c0, 0
-	RET
+	mov	pc, lr
 
 ENTRY(cpu_read_cache_config)
 	mrc	p15, 0, r0, c0, c0, 1
-	RET
+	mov	pc, lr
 
 ENTRY(cpufunc_faultstatus)
 	mrc	p15, 0, r0, c5, c0, 0
-	RET
+	mov	pc, lr
 
 ENTRY(cpufunc_faultaddress)
 	mrc	p15, 0, r0, c6, c0, 0
-	RET
+	mov	pc, lr
 
 
 /*
@@ -95,12 +95,12 @@ ENTRY(cpufunc_faultaddress)
 #if 0 /* See below. */
 ENTRY(cpufunc_control)
 	mcr	p15, 0, r0, c1, c0, 0
-	RET
+	mov	pc, lr
 #endif
 
 ENTRY(cpufunc_domains)
 	mcr	p15, 0, r0, c3, c0, 0
-	RET
+	mov	pc, lr
 
 /*
  * Generic functions to read/modify/write the internal coprocessor registers
@@ -120,7 +120,7 @@ ENTRY(cpufunc_control)
 	teq	r2, r3			/* Only write if there is a change */
 	mcrne	p15, 0, r2, c1, c0, 0	/* Write new control register */
 	mov	r0, r3			/* Return old value */
-	RET
+	mov	pc, lr
 
 /*
  * other potentially useful software functions are:

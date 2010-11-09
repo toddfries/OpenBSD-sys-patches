@@ -1,4 +1,4 @@
-/*	$NetBSD: grfvar.h,v 1.24 2008/03/29 06:47:07 tsutsui Exp $	*/
+/*	$NetBSD: grfvar.h,v 1.20 2005/12/11 12:17:14 christos Exp $	*/
 
 /*
  * Copyright (c) 1990, 1993
@@ -87,14 +87,14 @@ struct	grf_lockpage {
 struct	grf_data {
 	int	g_flags;		/* software flags */
 	struct  grfsw *g_sw;		/* static configuration info */
-	uint8_t *g_regkva;		/* KVA of registers */
-	uint8_t *g_fbkva;		/* KVA of framebuffer */
+	caddr_t	g_regkva;		/* KVA of registers */
+	caddr_t	g_fbkva;		/* KVA of framebuffer */
 	struct	grfinfo g_display;	/* hardware description (for ioctl) */
 	struct	grf_lockpage *g_lock;	/* lock page associated with device */
 	struct	proc *g_lockp;		/* process holding lock */
 	short	*g_pid;			/* array of pids with device open */
 	int	g_lockpslot;		/* g_pid entry of g_lockp */
-	void *	g_data;			/* device dependent data */
+	caddr_t	g_data;			/* device dependent data */
 };
 
 /*
@@ -105,20 +105,20 @@ struct	grfsw {
 	int	gd_swid;	/* id to be returned by software */
 	const char *gd_desc;	/* description printed at config time */
 				/* boot time init routine */
-	int	(*gd_init)(struct grf_data *, int, uint8_t *);
+	int	(*gd_init)(struct grf_data *, int, caddr_t);
 				/* misc function routine */
-	int	(*gd_mode)(struct grf_data *, int, void *);
+	int	(*gd_mode)(struct grf_data *, int, caddr_t);
 };
 
 struct	grf_softc {
-	device_t sc_dev;		/* generic device info */
+	struct	device sc_dev;		/* generic device info */
 	int	sc_scode;		/* select code; for grfdevno() */
 	struct	grf_data *sc_data;	/* display state information */
 	struct	ite_softc *sc_ite;	/* pointer to ite; may be NULL */
 };
 
 struct	grfdev_softc {
-	device_t sc_dev;		/* generic device info */
+	struct	device sc_dev;		/* generic device info */
 	struct	grf_data *sc_data;	/* generic grf data */
 	int	sc_scode;		/* select code, -1 for intio */
 	int	sc_isconsole;		/* device is the console */
@@ -160,15 +160,35 @@ struct	grfdev_attach_args {
 extern	struct grf_data grf_cn;		/* grf_data for console device */
 
 /* grf.c prototypes */
-int	grfmap(dev_t, void **, struct proc *);
-int	grfunmap(dev_t, void *, struct proc *);
+int	grfmap(dev_t, caddr_t *, struct proc *);
+int	grfunmap(dev_t, caddr_t, struct proc *);
 int	grfon(dev_t);
 int	grfoff(dev_t);
 paddr_t	grfaddr(struct grf_softc *, off_t);
 
+#ifndef _LKM
+#include "opt_compat_hpux.h"
+#endif
+
+#ifdef COMPAT_HPUX
+int	hpuxgrfioctl(dev_t, int, caddr_t, int, struct proc *);
+
+int	grflock(struct grf_data *, int);
+int	grfunlock(struct grf_data *);
+int	grfdevno(dev_t);
+
+int	iommap(dev_t, caddr_t *);
+int	iounmmap(dev_t, caddr_t);
+
+int	grffindpid(struct grf_data *);
+void	grfrmpid(struct grf_data *);
+int	grflckmmap(dev_t, caddr_t *);
+int	grflckunmmap(dev_t, caddr_t);
+#endif /* COMPAT_HPUX */
+
 /* grf_subr.c prototypes */
 void	grfdev_attach(struct grfdev_softc *,
-	    int (*init)(struct grf_data *, int, uint8_t *),
-	    void *, struct grfsw *);
+	    int (*init)(struct grf_data *, int, caddr_t),
+	    caddr_t, struct grfsw *);
 
 #endif /* _KERNEL */

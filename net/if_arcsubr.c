@@ -1,4 +1,4 @@
-/*	$NetBSD: if_arcsubr.c,v 1.60 2008/11/07 00:20:13 dyoung Exp $	*/
+/*	$NetBSD: if_arcsubr.c,v 1.52 2006/06/07 22:33:42 kardel Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995 Ignatios Souvatzis
@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_arcsubr.c,v 1.60 2008/11/07 00:20:13 dyoung Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_arcsubr.c,v 1.52 2006/06/07 22:33:42 kardel Exp $");
 
 #include "opt_inet.h"
 
@@ -52,7 +52,7 @@ __KERNEL_RCSID(0, "$NetBSD: if_arcsubr.c,v 1.60 2008/11/07 00:20:13 dyoung Exp $
 #include <sys/errno.h>
 #include <sys/syslog.h>
 
-#include <sys/cpu.h>
+#include <machine/cpu.h>
 
 #include <net/if.h>
 #include <net/netisr.h>
@@ -99,12 +99,13 @@ static struct mbuf *arc_defrag(struct ifnet *, struct mbuf *);
 ERROR: The arc_ipmtu is ARC_IPMTU, but must not exceed 60480.
 #endif
 int arc_ipmtu = ARC_IPMTU;
-uint8_t  arcbroadcastaddr = 0;
+u_int8_t  arcbroadcastaddr = 0;
 
 #define senderr(e) { error = (e); goto bad;}
+#define SIN(s) ((struct sockaddr_in *)s)
 
 static	int arc_output(struct ifnet *, struct mbuf *,
-	    const struct sockaddr *, struct rtentry *);
+	    struct sockaddr *, struct rtentry *);
 static	void arc_input(struct ifnet *, struct mbuf *);
 
 /*
@@ -113,17 +114,16 @@ static	void arc_input(struct ifnet *, struct mbuf *);
  * Assumes that ifp is actually pointer to arccom structure.
  */
 static int
-arc_output(struct ifnet *ifp, struct mbuf *m0, const struct sockaddr *dst,
+arc_output(struct ifnet *ifp, struct mbuf *m0, struct sockaddr *dst,
     struct rtentry *rt0)
 {
 	struct mbuf		*m, *m1, *mcopy;
 	struct rtentry		*rt;
 	struct arccom		*ac;
-	const struct arc_header	*cah;
 	struct arc_header	*ah;
 	struct arphdr		*arph;
 	int			error, newencoding;
-	uint8_t			atype, adst, myself;
+	u_int8_t		atype, adst, myself;
 	int			tfrags, sflag, fsflag, rsflag;
 	ALTQ_DECL(struct altq_pktattr pktattr;)
 
@@ -135,7 +135,7 @@ arc_output(struct ifnet *ifp, struct mbuf *m0, const struct sockaddr *dst,
 	m = m0;
 	mcopy = m1 = NULL;
 
-	myself = *CLLADDR(ifp->if_sadl);
+	myself = *LLADDR(ifp->if_sadl);
 
 	if ((rt = rt0)) {
 		if ((rt->rt_flags & RTF_UP) == 0) {
@@ -176,7 +176,7 @@ arc_output(struct ifnet *ifp, struct mbuf *m0, const struct sockaddr *dst,
 		if (m->m_flags & (M_BCAST|M_MCAST))
 			adst = arcbroadcastaddr; /* ARCnet broadcast address */
 		else if (ifp->if_flags & IFF_NOARP)
-			adst = ntohl(satocsin(dst)->sin_addr.s_addr) & 0xFF;
+			adst = ntohl(SIN(dst)->sin_addr.s_addr) & 0xFF;
 		else if (!arpresolve(ifp, rt, m, dst, &adst))
 			return 0;	/* not resolved yet */
 
@@ -240,7 +240,7 @@ arc_output(struct ifnet *ifp, struct mbuf *m0, const struct sockaddr *dst,
 #endif
 #ifdef INET6
 	case AF_INET6:
-		if (!nd6_storelladdr(ifp, rt, m, dst, &adst, sizeof(adst)))
+		if (!nd6_storelladdr(ifp, rt, m, dst, (u_char *)&adst))
 			return (0); /* it must be impossible, but... */
 		atype = htons(ARCTYPE_INET6);
 		newencoding = 1;
@@ -248,9 +248,9 @@ arc_output(struct ifnet *ifp, struct mbuf *m0, const struct sockaddr *dst,
 #endif
 
 	case AF_UNSPEC:
-		cah = (const struct arc_header *)dst->sa_data;
- 		adst = cah->arc_dhost;
-		atype = cah->arc_type;
+		ah = (struct arc_header *)dst->sa_data;
+ 		adst = ah->arc_dhost;
+		atype = ah->arc_type;
 		break;
 
 	default:
@@ -525,7 +525,7 @@ arc_input(struct ifnet *ifp, struct mbuf *m)
 {
 	struct arc_header *ah;
 	struct ifqueue *inq;
-	uint8_t atype;
+	u_int8_t atype;
 	int s;
 
 	if ((ifp->if_flags & IFF_UP) == 0) {
@@ -617,6 +617,17 @@ arc_sprintf(uint8_t *ap)
 }
 
 /*
+ * Register (new) link level address.
+ */
+void
+arc_storelladdr(struct ifnet *ifp, uint8_t lla)
+{
+
+	*(LLADDR(ifp->if_sadl)) = lla;
+	ifp->if_mtu = ARC_PHDS_MAXMTU;
+}
+
+/*
  * Perform common duties while attaching to interface list
  */
 void
@@ -645,7 +656,8 @@ arc_ifattach(struct ifnet *ifp, uint8_t lla)
 		   ifp->if_xname, ifp->if_xname);
 	}
 	if_attach(ifp);
-	if_set_sadl(ifp, &lla, sizeof(lla), true);
+	if_alloc_sadl(ifp);
+	arc_storelladdr(ifp, lla);
 
 	ifp->if_broadcastaddr = &arcbroadcastaddr;
 

@@ -1,4 +1,4 @@
-/*	$NetBSD: zs.c,v 1.19 2008/06/13 13:11:26 cegger Exp $	*/
+/*	$NetBSD: zs.c,v 1.13 2006/10/05 14:12:36 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -38,7 +45,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: zs.c,v 1.19 2008/06/13 13:11:26 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: zs.c,v 1.13 2006/10/05 14:12:36 tsutsui Exp $");
 
 #include "opt_ddb.h"
 #include "opt_kgdb.h"
@@ -54,7 +61,6 @@ __KERNEL_RCSID(0, "$NetBSD: zs.c,v 1.19 2008/06/13 13:11:26 cegger Exp $");
 #include <sys/tty.h>
 #include <sys/time.h>
 #include <sys/syslog.h>
-#include <sys/intr.h>
 
 #include <machine/autoconf.h>
 #include <machine/promlib.h>
@@ -70,7 +76,6 @@ __KERNEL_RCSID(0, "$NetBSD: zs.c,v 1.19 2008/06/13 13:11:26 cegger Exp $");
 
 #include <sun2/dev/cons.h>
 
-#include "ioconf.h"
 #include "kbd.h"	/* NKBD */
 #include "ms.h"		/* NMS */
 
@@ -84,7 +89,7 @@ int zs_def_cflag = (CREAD | CS8 | HUPCL);
 /* ZS channel used as the console device (if any) */
 void *zs_conschan_get, *zs_conschan_put;
 
-static uint8_t zs_init_reg[16] = {
+static u_char zs_init_reg[16] = {
 	0,	/* 0: CMD (reset, etc.) */
 	0,	/* 1: No interrupts yet. */
 #ifdef  ZS_INIT_IVECT
@@ -132,6 +137,8 @@ struct consdev zs_consdev = {
 
 static int  zs_print(void *, const char *name);
 
+extern struct cfdriver zs_cd;
+
 /* Interrupt handlers. */
 int zscheckintr(void *);
 static int zshard(void *);
@@ -150,19 +157,14 @@ zs_attach(struct zsc_softc *zsc, struct zsdevice *zsd, int pri)
 {
 	struct zsc_attach_args zsc_args;
 	struct zs_chanstate *cs;
-	int s, channel;
+	int s, channel, softpri = IPL_SOFTSERIAL;
 
 	if (zsd == NULL) {
-		aprint_error(": configuration incomplete\n");
+		printf("configuration incomplete\n");
 		return;
 	}
 
-#if 0
-	/* we should use ipl2si(softpri) but it isn't exported */
-	aprint_normal(" softpri %d\n", _IPL_SOFT_LEVEL3);
-#else
-	aprint_normal("\n");
-#endif
+	printf(" softpri %d\n", softpri);
 
 	/*
 	 * Initialize software state for each channel.
@@ -175,7 +177,7 @@ zs_attach(struct zsc_softc *zsc, struct zsdevice *zsd, int pri)
 		cs = &zsc->zsc_cs_store[channel];
 		zsc->zsc_cs[channel] = cs;
 
-		zs_lock_init(cs);
+		simple_lock_init(&cs->cs_lock);
 		cs->cs_channel = channel;
 		cs->cs_private = NULL;
 		cs->cs_ops = &zsops_null;
@@ -230,10 +232,10 @@ zs_attach(struct zsc_softc *zsc, struct zsdevice *zsd, int pri)
 		 * Look for a child driver for this channel.
 		 * The child attach will setup the hardware.
 		 */
-		if ((child = config_found(zsc->zsc_dev, (void *)&zsc_args,
-		    zs_print)) == NULL) {
+		if (!(child = 
+		      config_found(&zsc->zsc_dev, (void *)&zsc_args, zs_print))) {
 			/* No sub-driver.  Just reset it. */
-			uint8_t reset = (channel == 0) ?
+			u_char reset = (channel == 0) ?
 				ZSWR9_A_RESET : ZSWR9_B_RESET;
 			s = splzs();
 			zs_write_reg(cs,  9, reset);
@@ -249,14 +251,11 @@ zs_attach(struct zsc_softc *zsc, struct zsdevice *zsd, int pri)
 		    && device_is_a(child, "zstty")) {
 			struct kbd_ms_tty_attach_args kma;
 			struct zstty_softc {	
-				/*
-				 * The following are the only fields
-				 * we need here
-				 */
-				device_t zst_dev;
+				/* The following are the only fields we need here */
+				struct	device zst_dev;
 				struct  tty *zst_tty;
 				struct	zs_chanstate *zst_cs;
-			} *zst = device_private(child);
+			} *zst = (struct zstty_softc *)child;
 			struct tty *tp;
 
 			kma.kmta_tp = tp = zst->zst_tty;
@@ -292,12 +291,11 @@ zs_attach(struct zsc_softc *zsc, struct zsdevice *zsd, int pri)
 	 * Now safe to install interrupt handlers.
 	 */
 	bus_intr_establish(zsc->zsc_bustag, pri, IPL_SERIAL, 0, zshard, zsc);
-	if ((zsc->zsc_softintr = softint_establish(SOFTINT_SERIAL,
-	    zssoft, zsc)) == NULL)
-		panic("%s: could not establish soft interrupt", __func__);
+	if (!(zsc->zsc_softintr = softintr_establish(softpri, zssoft, zsc)))
+		panic("zsattach: could not establish soft interrupt");
 
 	evcnt_attach_dynamic(&zsc->zsc_intrcnt, EVCNT_TYPE_INTR, NULL,
-	    device_xname(zsc->zsc_dev), "intr");
+	    zsc->zsc_dev.dv_xname, "intr");
 
 
 	/*
@@ -331,9 +329,8 @@ zs_print(void *aux, const char *name)
 static int 
 zshard(void *arg)
 {
-	struct zsc_softc *zsc = arg;
-	int rval;
-	uint8_t rr3;
+	struct zsc_softc *zsc = (struct zsc_softc *)arg;
+	int rr3, rval;
 
 	rval = 0;
 	while ((rr3 = zsc_intr_hard(zsc))) {
@@ -344,7 +341,7 @@ zshard(void *arg)
 	if (((zsc->zsc_cs[0] && zsc->zsc_cs[0]->cs_softreq) ||
 	     (zsc->zsc_cs[1] && zsc->zsc_cs[1]->cs_softreq)) &&
 	    zsc->zsc_softintr) {
-		softint_schedule(zsc->zsc_softintr);
+		softintr_schedule(zsc->zsc_softintr);
 	}
 	return (rval);
 }
@@ -358,7 +355,7 @@ zscheckintr(void *arg)
 	rval = 0;
 	for (unit = 0; unit < zs_cd.cd_ndevs; unit++) {
 
-		zsc = device_lookup_private(&zs_cd, unit);
+		zsc = zs_cd.cd_devs[unit];
 		if (zsc == NULL)
 			continue;
 		rval = (zshard((void *)zsc) || rval);
@@ -373,7 +370,7 @@ zscheckintr(void *arg)
 static void 
 zssoft(void *arg)
 {
-	struct zsc_softc *zsc = arg;
+	struct zsc_softc *zsc = (struct zsc_softc *)arg;
 	int s;
 
 	/* Make sure we call the tty layer at spltty. */
@@ -384,10 +381,10 @@ zssoft(void *arg)
 		struct zstty_softc *zst0 = zsc->zsc_cs[0]->cs_private;
 		struct zstty_softc *zst1 = zsc->zsc_cs[1]->cs_private;
 		if (zst0->zst_overflows || zst1->zst_overflows ) {
-			struct trapframe *frame = arg;	/* XXX */
+			struct trapframe *frame = (struct trapframe *)arg;
 			
 			printf("zs silo overflow from %p\n",
-			    (long)frame->tf_pc);
+			       (long)frame->tf_pc);
 		}
 	}
 #endif
@@ -490,10 +487,10 @@ zs_set_modes(struct zs_chanstate *cs, int cflag	/* bits per second */)
  * Read or write the chip with suitable delays.
  */
 
-uint8_t
-zs_read_reg(struct zs_chanstate *cs, uint8_t reg)
+u_char
+zs_read_reg(struct zs_chanstate *cs, u_char reg)
 {
-	uint8_t val;
+	u_char val;
 
 	*cs->cs_reg_csr = reg;
 	ZS_DELAY();
@@ -503,7 +500,7 @@ zs_read_reg(struct zs_chanstate *cs, uint8_t reg)
 }
 
 void
-zs_write_reg(struct zs_chanstate *cs, uint8_t reg, uint8_t val)
+zs_write_reg(struct zs_chanstate *cs, u_char reg, u_char val)
 {
 	*cs->cs_reg_csr = reg;
 	ZS_DELAY();
@@ -511,10 +508,10 @@ zs_write_reg(struct zs_chanstate *cs, uint8_t reg, uint8_t val)
 	ZS_DELAY();
 }
 
-uint8_t
+u_char
 zs_read_csr(struct zs_chanstate *cs)
 {
-	uint8_t val;
+	u_char val;
 
 	val = *cs->cs_reg_csr;
 	ZS_DELAY();
@@ -522,16 +519,16 @@ zs_read_csr(struct zs_chanstate *cs)
 }
 
 void
-zs_write_csr(struct zs_chanstate *cs, uint8_t val)
+zs_write_csr(struct zs_chanstate *cs, u_char val)
 {
 	*cs->cs_reg_csr = val;
 	ZS_DELAY();
 }
 
-uint8_t
+u_char
 zs_read_data(struct zs_chanstate *cs)
 {
-	uint8_t val;
+	u_char val;
 
 	val = *cs->cs_reg_data;
 	ZS_DELAY();
@@ -539,7 +536,7 @@ zs_read_data(struct zs_chanstate *cs)
 }
 
 void
-zs_write_data(struct zs_chanstate *cs, uint8_t val)
+zs_write_data(struct zs_chanstate *cs, u_char val)
 {
 	*cs->cs_reg_data = val;
 	ZS_DELAY();

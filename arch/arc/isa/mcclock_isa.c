@@ -1,4 +1,4 @@
-/*	$NetBSD: mcclock_isa.c,v 1.13 2008/03/29 05:42:45 tsutsui Exp $	*/
+/*	$NetBSD: mcclock_isa.c,v 1.10 2005/12/11 12:16:39 christos Exp $	*/
 /*	$OpenBSD: clock_mc.c,v 1.9 1998/03/16 09:38:26 pefo Exp $	*/
 /*	NetBSD: clock_mc.c,v 1.2 1995/06/28 04:30:30 cgd Exp 	*/
 
@@ -79,7 +79,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mcclock_isa.c,v 1.13 2008/03/29 05:42:45 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mcclock_isa.c,v 1.10 2005/12/11 12:16:39 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -97,10 +97,10 @@ __KERNEL_RCSID(0, "$NetBSD: mcclock_isa.c,v 1.13 2008/03/29 05:42:45 tsutsui Exp
 
 #include <arc/isa/mcclock_isavar.h>
 
-int mcclock_isa_match(device_t, cfdata_t, void *);
-void mcclock_isa_attach(device_t, device_t, void *);
+int mcclock_isa_match(struct device *, struct cfdata *, void *);
+void mcclock_isa_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(mcclock_isa, sizeof(struct mc146818_softc),
+CFATTACH_DECL(mcclock_isa, sizeof(struct mc146818_softc),
     mcclock_isa_match, mcclock_isa_attach, NULL, NULL);
 
 /* Deskstation clock access code */
@@ -110,7 +110,7 @@ static void mc_isa_write(struct mc146818_softc *, u_int, u_int);
 int mcclock_isa_conf = 0;
 
 int
-mcclock_isa_match(device_t parent, cfdata_t cf, void *aux)
+mcclock_isa_match(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct isa_attach_args *ia = aux;
 	bus_space_handle_t ioh;
@@ -152,12 +152,11 @@ mcclock_isa_match(device_t parent, cfdata_t cf, void *aux)
 }
 
 void
-mcclock_isa_attach(device_t parent, device_t self, void *aux)
+mcclock_isa_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct mc146818_softc *sc = device_private(self);
+	struct mc146818_softc *sc = (void *)self;
 	struct isa_attach_args *ia = aux;
 
-	sc->sc_dev = self;
 	sc->sc_bst = ia->ia_iot;
 	if (bus_space_map(sc->sc_bst, ia->ia_io[0].ir_addr,
 	    ia->ia_io[0].ir_size, 0, &sc->sc_bsh))
@@ -169,10 +168,12 @@ mcclock_isa_attach(device_t parent, device_t self, void *aux)
 
 	mc146818_attach(sc);
 
-	aprint_normal("\n");
+	printf("\n");
 
 	/* Turn interrupts off, just in case. */
 	mc_isa_write(sc, MC_REGB, MC_REGB_BINARY | MC_REGB_24HR);
+
+	todr_attach(&sc->sc_handle);
 }
 
 u_int

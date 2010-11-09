@@ -1,4 +1,4 @@
-/*	$NetBSD: uk.c,v 1.56 2009/01/11 10:58:26 cegger Exp $	*/
+/*	$NetBSD: uk.c,v 1.52 2007/03/04 06:02:44 christos Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -35,7 +42,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: uk.c,v 1.56 2009/01/11 10:58:26 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: uk.c,v 1.52 2007/03/04 06:02:44 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -155,7 +162,9 @@ ukopen(dev_t dev, int flag, int fmt, struct lwp *l)
 	struct scsipi_adapter *adapt;
 
 	unit = UKUNIT(dev);
-	uk = device_lookup_private(&uk_cd, unit);
+	if (unit >= uk_cd.cd_ndevs)
+		return (ENXIO);
+	uk = uk_cd.cd_devs[unit];
 	if (uk == NULL)
 		return (ENXIO);
 
@@ -163,14 +172,14 @@ ukopen(dev_t dev, int flag, int fmt, struct lwp *l)
 	adapt = periph->periph_channel->chan_adapter;
 
 	SC_DEBUG(periph, SCSIPI_DB1,
-	    ("ukopen: dev=0x%"PRIx64" (unit %d (of %d))\n", dev, unit,
+	    ("ukopen: dev=0x%x (unit %d (of %d))\n", dev, unit,
 		uk_cd.cd_ndevs));
 
 	/*
 	 * Only allow one at a time
 	 */
 	if (periph->periph_flags & PERIPH_OPEN) {
-		aprint_error_dev(&uk->sc_dev, "already open\n");
+		printf("%s: already open\n", uk->sc_dev.dv_xname);
 		return (EBUSY);
 	}
 
@@ -189,7 +198,7 @@ ukopen(dev_t dev, int flag, int fmt, struct lwp *l)
 static int
 ukclose(dev_t dev, int flag, int fmt, struct lwp *l)
 {
-	struct uk_softc *uk = device_lookup_private(&uk_cd, UKUNIT(dev));
+	struct uk_softc *uk = uk_cd.cd_devs[UKUNIT(dev)];
 	struct scsipi_periph *periph = uk->sc_periph;
 	struct scsipi_adapter *adapt = periph->periph_channel->chan_adapter;
 
@@ -210,7 +219,7 @@ ukclose(dev_t dev, int flag, int fmt, struct lwp *l)
 static int
 ukioctl(dev_t dev, u_long cmd, void *addr, int flag, struct lwp *l)
 {
-	struct uk_softc *uk = device_lookup_private(&uk_cd, UKUNIT(dev));
+	register struct uk_softc *uk = uk_cd.cd_devs[UKUNIT(dev)];
 
 	return (scsipi_do_ioctl(uk->sc_periph, dev, cmd, addr, flag, l));
 }

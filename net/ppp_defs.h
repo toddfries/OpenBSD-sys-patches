@@ -1,4 +1,4 @@
-/*	$NetBSD: ppp_defs.h,v 1.13 2008/02/20 17:05:53 matt Exp $	*/
+/*	$NetBSD: ppp_defs.h,v 1.11 2005/12/10 23:21:39 elad Exp $	*/
 /*	Id: ppp_defs.h,v 1.11 1997/04/30 05:46:24 paulus Exp 	*/
 
 /*
@@ -60,10 +60,9 @@
 #define PPP_MAXMRU	65000	/* Largest MRU we allow */
 #define PPP_MINMRU	128
 
-#define PPP_ADDRESS(p)	(((const u_char *)(p))[0])
-#define PPP_CONTROL(p)	(((const u_char *)(p))[1])
-#define PPP_PROTOCOL(p)	\
-    ((((const u_char *)(p))[2] << 8) + ((const u_char *)(p))[3])
+#define PPP_ADDRESS(p)	(((u_char *)(p))[0])
+#define PPP_CONTROL(p)	(((u_char *)(p))[1])
+#define PPP_PROTOCOL(p)	((((u_char *)(p))[2] << 8) + ((u_char *)(p))[3])
 
 /*
  * Significant octet values.
@@ -107,9 +106,20 @@
 #define PPP_FCS(fcs, c)	(((fcs) >> 8) ^ fcstab[((fcs) ^ (c)) & 0xff])
 
 /*
+ * A 32-bit unsigned integral type.
+ */
+#if !defined(__BIT_TYPES_DEFINED__) && !defined(_BITYPES) && !defined(__FreeBSD__)
+#ifdef	UINT32_T
+typedef UINT32_T	u_int32_t;
+#else
+typedef unsigned int	u_int32_t;
+#endif
+#endif
+
+/*
  * Extended asyncmap - allows any character to be escaped.
  */
-typedef uint32_t	ext_accm[8];
+typedef u_int32_t	ext_accm[8];
 
 /*
  * What to do with network protocol (NP) packets.

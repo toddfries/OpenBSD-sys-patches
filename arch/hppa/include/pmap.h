@@ -1,4 +1,4 @@
-/*	$NetBSD: pmap.h,v 1.17 2008/12/09 20:45:44 pooka Exp $	*/
+/*	$NetBSD: pmap.h,v 1.11 2006/02/16 20:17:13 perry Exp $	*/
 
 /*	$OpenBSD: pmap.h,v 1.14 2001/05/09 15:31:24 art Exp $	*/
 
@@ -82,9 +82,9 @@
 #ifndef	_HPPA_PMAP_H_
 #define	_HPPA_PMAP_H_
 
-#include <sys/simplelock.h>
 #include <machine/pte.h>
 
+typedef
 struct pmap {
 	TAILQ_ENTRY(pmap)	pmap_list;	/* pmap free list */
 	struct simplelock	pmap_lock;	/* lock on map */
@@ -92,7 +92,8 @@ struct pmap {
 	pa_space_t		pmap_space;	/* space for this pmap */
 	u_int			pmap_pid;	/* protection id for pmap */
 	struct pmap_statistics	pmap_stats;	/* statistics */
-};
+} *pmap_t;
+extern pmap_t	kernel_pmap;			/* The kernel's map */
 
 #ifdef _KERNEL
 
@@ -118,6 +119,7 @@ extern int dcache_line_mask;
 #define pmap_kernel_va(VA)	\
 	(((VA) >= VM_MIN_KERNEL_ADDRESS) && ((VA) <= VM_MAX_KERNEL_ADDRESS))
 
+#define pmap_kernel()			(kernel_pmap)
 #define	pmap_resident_count(pmap)	((pmap)->pmap_stats.resident_count)
 #define pmap_wired_count(pmap)		((pmap)->pmap_stats.wired_count)
 #define pmap_reference(pmap) \
@@ -130,10 +132,10 @@ do { if (pmap) { \
 #define pmap_release(pmap)
 #define pmap_copy(dpmap,spmap,da,len,sa)
 #define	pmap_update(p)
-void	pmap_activate(struct lwp *);
+void	pmap_activate __P((struct lwp *));
 
 static __inline void
-pmap_deactivate(struct lwp *l)
+pmap_deactivate(struct lwp *lwp)
 {
 }
 
@@ -151,7 +153,7 @@ pmap_prot(struct pmap *pmap, vm_prot_t prot)
 {
 	extern u_int kern_prot[], user_prot[];
 
-	return (pmap == pmap_kernel() ? kern_prot : user_prot)[prot];
+	return (pmap == kernel_pmap ? kern_prot : user_prot)[prot];
 }
 
 #define	pmap_sid(pmap, va) \

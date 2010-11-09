@@ -1,4 +1,4 @@
-#	$NetBSD: genassym.cf,v 1.14 2008/02/23 19:34:53 matt Exp $
+#	$NetBSD: genassym.cf,v 1.9 2005/12/11 12:18:44 christos Exp $
 
 #
 # Copyright (C) 1995, 1996 Wolfgang Solfrank.
@@ -33,13 +33,8 @@
 
 include "opt_ppcarch.h"
 
-quote #define __MUTEX_PRIVATE
-quote #define __RWLOCK_PRIVATE
-
 include <sys/param.h>
 include <sys/time.h>
-include <sys/mutex.h>
-include <sys/rwlock.h>
 include <sys/proc.h>
 
 include <uvm/uvm_extern.h>
@@ -48,7 +43,6 @@ include <machine/pcb.h>
 include <machine/pmap.h>
 
 include <powerpc/cpu.h>
-include <powerpc/oea/cpufeat.h>
 
 define	FRAMELEN	FRAMELEN
 define	FRAME_0		offsetof(struct trapframe, fixreg[0])
@@ -162,13 +156,14 @@ define	PCB_PM		offsetof(struct pcb, pcb_pm)
 define	PCB_SP		offsetof(struct pcb, pcb_sp)
 define	PCB_FAULT	offsetof(struct pcb, pcb_onfault)
 
+define	L_FORW		offsetof(struct lwp, l_forw)
+define	L_BACK		offsetof(struct lwp, l_back)
 define	L_ADDR		offsetof(struct lwp, l_addr)
 define	L_STAT		offsetof(struct lwp, l_stat)
 define	L_CPU		offsetof(struct lwp, l_cpu)
 define	L_PRIORITY	offsetof(struct lwp, l_priority)
 define	L_PROC		offsetof(struct lwp, l_proc)
 
-define	LSRUN		LSRUN
 define	LSONPROC	LSONPROC
 define	P_MD_SYSCALL	offsetof(struct proc, p_md.md_syscall)
 
@@ -176,6 +171,7 @@ define	CI_SIZE		sizeof(struct cpu_info)
 define	CI_CURLWP	offsetof(struct cpu_info, ci_curlwp)
 define	CI_CURPCB	offsetof(struct cpu_info, ci_curpcb)
 define	CI_CURPM	offsetof(struct cpu_info, ci_curpm)
+define	CI_IDLE_PCB	offsetof(struct cpu_info, ci_idle_pcb)
 define	CI_ASTPENDING	offsetof(struct cpu_info, ci_astpending)
 define	CI_WANT_RESCHED	offsetof(struct cpu_info, ci_want_resched)
 define	CI_CPL		offsetof(struct cpu_info, ci_cpl)
@@ -223,29 +219,3 @@ define	FB_R31		offsetof(struct faultbuf, fb_fixreg[18])
 define	CACHELINESIZE	CACHELINESIZE
 
 define	CPU_CI		offsetof(struct cpu_info, ci_ci)
-
-define	OEACPU_64	OEACPU_64
-define	OEACPU_64_BRIDGE	OEACPU_64_BRIDGE
-define	OEACPU_NOBAT	OEACPU_NOBAT
-define	OEACPU_HIGHBAT	OEACPU_HIGHBAT
-define	OEACPU_601	OEACPU_601
-define	OEACPU_HIGHSPRG	OEACPU_HIGHSPRG
-define	OEACPU_ALTIVEC	OEACPU_ALTIVEC
-
-ifdef	__HAVE_MUTEX_STUBS
-define	__HAVE_MUTEX_STUBS	__HAVE_MUTEX_STUBS
-endif
-ifdef	__HAVE_MUTEX_SPIN_STUBS
-define	__HAVE_MUTEX_SPIN_STUBS	__HAVE_MUTEX_SPIN_STUBS
-endif
-define	MTX_OWNER	offsetof(struct kmutex, mtx_owner)
-define	MTX_LOCK	offsetof(struct kmutex, mtx_lock)
-define	MTX_IPL		offsetof(struct kmutex, mtx_ipl)
-
-ifdef	__HAVE_RW_STUBS
-define	__HAVE_RW_STUBS	__HAVE_RW_STUBS
-endif
-define	RW_OWNER	offsetof(struct krwlock, rw_owner)
-define	RW_WRITE_LOCKED	RW_WRITE_LOCKED
-define	RW_READ_INCR	RW_READ_INCR
-define	RW_READER	RW_READER

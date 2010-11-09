@@ -1,4 +1,4 @@
-/*	$NetBSD: leo.c,v 1.13 2008/06/13 08:50:12 cegger Exp $	*/
+/*	$NetBSD: leo.c,v 1.10 2005/12/11 12:17:02 christos Exp $	*/
 
 /*-
  * Copyright (c) 1997 maximum entropy <entropy@zippy.bernstein.com>
@@ -13,6 +13,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -47,7 +54,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: leo.c,v 1.13 2008/06/13 08:50:12 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: leo.c,v 1.10 2005/12/11 12:17:02 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -247,12 +254,18 @@ leo_attach(parent, self, aux)
 }
 
 int
-leoopen(dev_t dev, int flags, int devtype, struct proc *p)
+leoopen(dev, flags, devtype, p)
+	dev_t dev;
+	int flags, devtype;
+	struct proc *p;
 {
+	int unit = minor(dev);
 	struct leo_softc *sc;
 	int r;
 
-	sc = device_lookup_private(&leo_cd, minor(dev));
+	if (unit >= leo_cd.cd_ndevs)
+		return ENXIO;
+	sc = leo_cd.cd_devs[unit];
 	if (!sc)
 		return ENXIO;
 	if (sc->sc_flags & LEO_SC_FLAGS_INUSE)
@@ -340,11 +353,14 @@ leo_scroll(sc, scroll)
 }
 
 int
-leoclose(dev_t dev, int flags, int devtype, struct proc *p)
+leoclose(dev, flags, devtype, p)
+	dev_t dev;
+	int flags, devtype;
+	struct proc *p;
 {
 	struct leo_softc *sc;
 
-	sc = device_lookup_private(&leo_cd, minor(dev));
+	sc = leo_cd.cd_devs[minor(dev)];
 	sc->sc_flags &= ~LEO_SC_FLAGS_INUSE;
 	return 0;
 }
@@ -352,14 +368,17 @@ leoclose(dev_t dev, int flags, int devtype, struct proc *p)
 #define SMALLBSIZE      32
 
 int
-leomove(dev_t dev, struct uio *uio, int flags)
+leomove(dev, uio, flags)
+        dev_t dev;
+        struct uio *uio;
+        int flags;
 {
         struct leo_softc *sc;
         int length, size, error;
         u_int8_t smallbuf[SMALLBSIZE];
 	off_t offset;
 
-        sc = device_lookup_private(&leo_cd,minor(dev));
+        sc = leo_cd.cd_devs[minor(dev)];
         if (uio->uio_offset > sc->sc_msize)
                 return 0;
         length = sc->sc_msize - uio->uio_offset;
@@ -374,7 +393,7 @@ leomove(dev_t dev, struct uio *uio, int flags)
                 if (uio->uio_rw == UIO_READ)
                         bus_space_read_region_1(sc->sc_memt, sc->sc_memh,
                                         offset, smallbuf, size);
-                if ((error = uiomove((void *)smallbuf, size, uio)))
+                if ((error = uiomove((caddr_t)smallbuf, size, uio)))
                         return (error);
                 if (uio->uio_rw == UIO_WRITE)
                         bus_space_write_region_1(sc->sc_memt, sc->sc_memh,
@@ -384,11 +403,16 @@ leomove(dev_t dev, struct uio *uio, int flags)
 }
 
 int
-leoioctl(dev_t dev, u_long cmd, void *data, int flags, struct proc *p)
+leoioctl(dev, cmd, data, flags, p)
+	dev_t dev;
+	u_long cmd;
+	caddr_t data;
+	int flags;
+	struct proc *p;
 {
 	struct leo_softc *sc;
 
-	sc = device_lookup_private(&leo_cd,minor(dev));
+	sc = leo_cd.cd_devs[minor(dev)];
         switch (cmd) {
         case LIOCYRES:
 		return leo_init(sc, *(int *)data);
@@ -403,11 +427,14 @@ leoioctl(dev_t dev, u_long cmd, void *data, int flags, struct proc *p)
 }
 
 paddr_t
-leommap(dev_t dev, off_t offset, int prot)
+leommap(dev, offset, prot)
+	dev_t dev;
+	off_t offset;
+	int prot;
 {
 	struct leo_softc *sc;
 
-	sc = device_lookup_private(&leo_cd, minor(dev));
+	sc = leo_cd.cd_devs[minor(dev)];
 	if (offset >= 0 && offset < sc->sc_msize)
 		return m68k_btop(sc->sc_maddr + offset);
 	return -1;

@@ -1,4 +1,4 @@
-/*	$NetBSD: nca_pcmcia.c,v 1.24 2008/04/28 20:23:56 martin Exp $	*/
+/*	$NetBSD: nca_pcmcia.c,v 1.22 2007/10/19 12:01:06 ad Exp $	*/
 
 /*-
  * Copyright (c) 2000, 2004 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: nca_pcmcia.c,v 1.24 2008/04/28 20:23:56 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: nca_pcmcia.c,v 1.22 2007/10/19 12:01:06 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -63,13 +70,13 @@ struct nca_pcmcia_softc {
 #define NCA_PCMCIA_ATTACHED	3
 };
 
-int	nca_pcmcia_match(device_t, cfdata_t, void *);
+int	nca_pcmcia_match(struct device *, struct cfdata *, void *);
 int	nca_pcmcia_validate_config(struct pcmcia_config_entry *);
-void	nca_pcmcia_attach(device_t, device_t, void *);
-int	nca_pcmcia_detach(device_t, int);
-int	nca_pcmcia_enable(device_t, int);
+void	nca_pcmcia_attach(struct device *, struct device *, void *);
+int	nca_pcmcia_detach(struct device *, int);
+int	nca_pcmcia_enable(struct device *, int);
 
-CFATTACH_DECL_NEW(nca_pcmcia, sizeof(struct nca_pcmcia_softc),
+CFATTACH_DECL(nca_pcmcia, sizeof(struct nca_pcmcia_softc),
     nca_pcmcia_match, nca_pcmcia_attach, nca_pcmcia_detach, NULL);
 
 #define MIN_DMA_LEN 128
@@ -83,34 +90,39 @@ const struct pcmcia_product nca_pcmcia_products[] = {
 	  PCMCIA_CIS_INVALID },
 };
 const size_t nca_pcmcia_nproducts =
-    __arraycount(nca_pcmcia_products);
+    sizeof(nca_pcmcia_products) / sizeof(nca_pcmcia_products[0]);
 
 int
-nca_pcmcia_match(device_t parent,  cfdata_t cf, void *aux)
+nca_pcmcia_match(parent, match, aux)
+	struct device *parent;
+	struct cfdata *match;
+	void *aux;
 {
 	struct pcmcia_attach_args *pa = aux;
 
 	if (pcmcia_product_lookup(pa, nca_pcmcia_products, nca_pcmcia_nproducts,
 	    sizeof(nca_pcmcia_products[0]), NULL))
-		return 1;
-	return 0;
+		return (1);
+	return (0);
 }
 
 int
-nca_pcmcia_validate_config(struct pcmcia_config_entry *cfe)
+nca_pcmcia_validate_config(cfe)
+	struct pcmcia_config_entry *cfe;
 {
-
 	if (cfe->iftype != PCMCIA_IFTYPE_IO ||
 	    cfe->num_memspace != 0 ||
 	    cfe->num_iospace != 1)
-		return EINVAL;
-	return 0;
+		return (EINVAL);
+	return (0);
 }
 
 void
-nca_pcmcia_attach(device_t parent, device_t self, void *aux)
+nca_pcmcia_attach(parent, self, aux)
+	struct device *parent, *self;
+	void *aux;
 {
-	struct nca_pcmcia_softc *esc = device_private(self);
+	struct nca_pcmcia_softc *esc = (void *)self;
 	struct ncr5380_softc *sc = &esc->sc_ncr5380;
 	struct pcmcia_attach_args *pa = aux;
 	struct pcmcia_config_entry *cfe;
@@ -118,12 +130,12 @@ nca_pcmcia_attach(device_t parent, device_t self, void *aux)
 	int flags;
 	int error;
 
-	sc->sc_dev = self;
 	esc->sc_pf = pf;
 
 	error = pcmcia_function_configure(pf, nca_pcmcia_validate_config);
 	if (error) {
-		aprint_error_dev(self, "configure failed, error=%d\n", error);
+		aprint_error("%s: configure failed, error=%d\n", self->dv_xname,
+		    error);
 		return;
 	}
 
@@ -190,41 +202,45 @@ fail:
 }
 
 int
-nca_pcmcia_detach(device_t self, int flags)
+nca_pcmcia_detach(self, flags)
+	struct device *self;
+	int flags;
 {
-	struct nca_pcmcia_softc *sc = device_private(self);
+	struct nca_pcmcia_softc *sc = (void *)self;
 	int error;
 
 	if (sc->sc_state != NCA_PCMCIA_ATTACHED)
-		return 0;
+		return (0);
 
 	error = ncr5380_detach(&sc->sc_ncr5380, flags);
 	if (error)
-		return error;
+		return (error);
 
 	pcmcia_function_unconfigure(sc->sc_pf);
 
-	return 0;
+	return (0);
 }
 
 int
-nca_pcmcia_enable(device_t self, int onoff)
+nca_pcmcia_enable(arg, onoff)
+	struct device *arg;
+	int onoff;
 {
-	struct nca_pcmcia_softc *sc = device_private(self);
+	struct nca_pcmcia_softc *sc = (struct nca_pcmcia_softc*)arg;
 	int error;
 
 	if (onoff) {
 		/* Establish the interrupt handler. */
 		sc->sc_ih = pcmcia_intr_establish(sc->sc_pf, IPL_BIO,
 		    ncr5380_intr, &sc->sc_ncr5380);
-		if (sc->sc_ih == NULL)
-			return EIO;
+		if (!sc->sc_ih)
+			return (EIO);
 
 		error = pcmcia_function_enable(sc->sc_pf);
 		if (error) {
 			pcmcia_intr_disestablish(sc->sc_pf, sc->sc_ih);
 			sc->sc_ih = 0;
-			return error;
+			return (error);
 		}
 
 		/* Initialize only chip.  */
@@ -235,5 +251,5 @@ nca_pcmcia_enable(device_t self, int onoff)
 		sc->sc_ih = 0;
 	}
 
-	return 0;
+	return (0);
 }

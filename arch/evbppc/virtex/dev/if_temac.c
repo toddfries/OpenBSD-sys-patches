@@ -1,4 +1,4 @@
-/* 	$NetBSD: if_temac.c,v 1.4 2008/02/12 18:03:43 dyoung Exp $ */
+/* 	$NetBSD: if_temac.c,v 1.1 2006/12/02 22:18:47 freza Exp $ */
 
 /*
  * Copyright (c) 2006 Jachym Holecek
@@ -40,7 +40,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_temac.c,v 1.4 2008/02/12 18:03:43 dyoung Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_temac.c,v 1.1 2006/12/02 22:18:47 freza Exp $");
 
 #include "bpfilter.h"
 
@@ -200,11 +200,13 @@ static void 	temac_attach(struct device *, struct device *, void *);
 
 /* Ifnet interface. */
 static int 	temac_init(struct ifnet *);
-static int 	temac_ioctl(struct ifnet *, u_long, void *);
+static int 	temac_ioctl(struct ifnet *, u_long, caddr_t);
 static void 	temac_start(struct ifnet *);
 static void 	temac_stop(struct ifnet *, int);
 
 /* Media management. */
+static int	temac_mediachange(struct ifnet *);
+static void	temac_mediastatus(struct ifnet *, struct ifmediareq *);
 static int	temac_mii_readreg(struct device *, int, int);
 static void	temac_mii_statchg(struct device *);
 static void	temac_mii_tick(void *);
@@ -389,7 +391,7 @@ temac_attach(struct device *parent, struct device *self, void *aux)
 
 	if ((error = bus_dmamem_map(sc->sc_dmat, &seg, nseg,
 	    sizeof(struct temac_control),
-	    (void **)&sc->sc_control_data, BUS_DMA_COHERENT)) != 0) {
+	    (caddr_t *)&sc->sc_control_data, BUS_DMA_COHERENT)) != 0) {
 	    	printf("%s: could not map control data\n",
 	    	    sc->sc_dev.dv_xname);
 		goto fail_1;
@@ -498,8 +500,8 @@ temac_attach(struct device *parent, struct device *self, void *aux)
 	mii->mii_readreg = temac_mii_readreg;
 	mii->mii_writereg = temac_mii_writereg;
 	mii->mii_statchg = temac_mii_statchg;
-	sc->sc_ec.ec_mii = mii;
-	ifmedia_init(&mii->mii_media, 0, ether_mediachange, ether_mediastatus);
+	ifmedia_init(&mii->mii_media, 0, temac_mediachange,
+	    temac_mediastatus);
 
 	mii_attach(&sc->sc_dev, mii, 0xffffffff, MII_PHY_ANY,
 	    MII_OFFSET_ANY, 0);
@@ -568,7 +570,7 @@ temac_attach(struct device *parent, struct device *self, void *aux)
  fail_3:
 	bus_dmamap_destroy(sc->sc_dmat, sc->sc_control_dmap);
  fail_2:
-	bus_dmamem_unmap(sc->sc_dmat, (void *)sc->sc_control_data,
+	bus_dmamem_unmap(sc->sc_dmat, (caddr_t)sc->sc_control_data,
 	    sizeof(struct temac_control));
  fail_1:
 	bus_dmamem_free(sc->sc_dmat, &seg, nseg);
@@ -591,9 +593,7 @@ temac_init(struct ifnet *ifp)
 	cdmac_rx_reset(sc);
 
 	/* Set current media. */
-	if ((error = ether_mediachange(ifp)) != 0)
-		return error;
-
+	mii_mediachg(&sc->sc_mii);
 	callout_schedule(&sc->sc_mii_tick, hz);
 
 	/* Enable EMAC engine. */
@@ -646,17 +646,28 @@ temac_init(struct ifnet *ifp)
 }
 
 static int
-temac_ioctl(struct ifnet *ifp, u_long cmd, void *data)
+temac_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	struct temac_softc 	*sc = (struct temac_softc *)ifp->if_softc;
 	struct ifreq 		*ifr = (struct ifreq *)data;
 	int 			s, ret;
 
 	s = splnet();
-	if (sc->sc_dead)
+	if (sc->sc_dead) {
 		ret = EIO;
-	else
-		ret = ether_ioctl(ifp, cmd, data);
+	} else
+		switch (cmd) {
+		case SIOCSIFMEDIA:
+		case SIOCGIFMEDIA:
+			ret = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media,
+			    cmd);
+			break;
+
+		default:
+			ret = ether_ioctl(ifp, cmd, data);
+			break;
+		}
+
 	splx(s);
 	return (ret);
 }
@@ -828,6 +839,30 @@ temac_stop(struct ifnet *ifp, int disable)
 	ifp->if_flags &= ~(IFF_RUNNING|IFF_OACTIVE);
 }
 
+/*
+ * Media management.
+ */
+static int
+temac_mediachange(struct ifnet *ifp)
+{
+	struct temac_softc 	*sc = (struct temac_softc *)ifp->if_softc;
+
+	if (ifp->if_flags & IFF_UP)
+		mii_mediachg(&sc->sc_mii);
+	return (0);
+}
+
+static void
+temac_mediastatus(struct ifnet *ifp, struct ifmediareq *imr)
+{
+	struct temac_softc 	*sc = (struct temac_softc *)ifp->if_softc;
+
+	mii_pollstat(&sc->sc_mii);
+
+	imr->ifm_status = sc->sc_mii.mii_media_status;
+	imr->ifm_active = sc->sc_mii.mii_media_active;
+}
+
 static int
 temac_mii_readreg(struct device *self, int phy, int reg)
 {
@@ -895,8 +930,8 @@ temac_mii_tick(void *arg)
 	struct temac_softc 	*sc = (struct temac_softc *)arg;
 	int 			s;
 
-	if (!device_is_active(&sc->sc_dev))
-		return;
+	if ((sc->sc_dev.dv_flags & DVF_ACTIVE) == 0)
+		return ;
 
 	s = splnet();
 	mii_tick(&sc->sc_mii);

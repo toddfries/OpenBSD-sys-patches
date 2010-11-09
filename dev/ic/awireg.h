@@ -1,4 +1,4 @@
-/* $NetBSD: awireg.h,v 1.12 2008/04/28 20:23:49 martin Exp $ */
+/* $NetBSD: awireg.h,v 1.10 2005/12/11 12:21:26 christos Exp $ */
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -349,7 +356,7 @@ struct awi_mib_local {
 	u_int8_t	Rx_Buffer_Size[4];
 	u_int8_t	Acting_as_AP;
 	u_int8_t	Fill_CFP;
-} __packed;
+} __attribute__((__packed__));
 
 struct awi_mib_mac {
 	u_int8_t	_Reserved1[2];
@@ -371,7 +378,7 @@ struct awi_mib_mac {
 	u_int8_t	aMax_Receive_MSDU_Lifetime[4];
 	u_int8_t	aStation_Basic_Rate[2];
 	u_int8_t	aDesired_ESS_ID[AWI_ESS_ID_SIZE];
-} __packed;
+} __attribute__((__packed__));
 
 struct awi_mib_stat {
 	u_int8_t	aTransmitted_MPDU_Count[4];
@@ -393,7 +400,7 @@ struct awi_mib_stat {
 	u_int8_t	aFCS_Error_Count[4];
 	u_int8_t	aError_Count[4];
 	u_int8_t	aWEP_Undecryptable_Count[4];
-} __packed;
+} __attribute__((__packed__));
 
 struct awi_mib_mgt {
 	u_int8_t	aPower_Mgt_Mode;
@@ -419,7 +426,7 @@ struct awi_mib_mgt {
 	u_int8_t	aStation_ID[2];
 	u_int8_t	aCurrent_BSS_ID[ETHER_ADDR_LEN];
 	u_int8_t	aCurrent_ESS_ID[AWI_ESS_ID_SIZE];
-} __packed;
+} __attribute__((__packed__));
 
 #define	AWI_GROUP_ADDR_SIZE	4
 struct awi_mib_addr {
@@ -427,7 +434,7 @@ struct awi_mib_addr {
 	u_int8_t	aGroup_Addresses[AWI_GROUP_ADDR_SIZE][ETHER_ADDR_LEN];
 	u_int8_t	aTransmit_Enable_Status;
 	u_int8_t	_Reserved1;
-} __packed;
+} __attribute__((__packed__));
 
 #define AWI_PWR_LEVEL_SIZE 4
 struct awi_mib_phy {
@@ -451,6 +458,6 @@ struct awi_mib_phy {
 #define	AWI_PHY_TYPE_DS		2
 #define	AWI_PHY_TYPE_IR		3
 	u_int8_t	RCR_33A_Bits[8];
-} __packed;
+} __attribute__((__packed__));
 
 #endif /* _DEV_IC_AWIREG_H */

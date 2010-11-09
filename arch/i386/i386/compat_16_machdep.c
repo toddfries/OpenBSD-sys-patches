@@ -1,4 +1,4 @@
-/*	$NetBSD: compat_16_machdep.c,v 1.19 2008/11/19 18:35:58 ad Exp $	*/
+/*	$NetBSD: compat_16_machdep.c,v 1.10 2006/11/16 01:32:38 christos Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997, 1998, 2000 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,13 +37,11 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: compat_16_machdep.c,v 1.19 2008/11/19 18:35:58 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: compat_16_machdep.c,v 1.10 2006/11/16 01:32:38 christos Exp $");
 
-#ifdef _KERNEL_OPT
 #include "opt_vm86.h"
 #include "opt_compat_netbsd.h"
 #include "opt_compat_ibcs2.h"
-#endif
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -46,6 +51,7 @@ __KERNEL_RCSID(0, "$NetBSD: compat_16_machdep.c,v 1.19 2008/11/19 18:35:58 ad Ex
 #include <sys/proc.h>
 #include <sys/user.h>
 #include <sys/mount.h>
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 
 #ifdef VM86
@@ -72,14 +78,14 @@ __KERNEL_RCSID(0, "$NetBSD: compat_16_machdep.c,v 1.19 2008/11/19 18:35:58 ad Ex
  * psl to gain improper privileges or to cause
  * a machine fault.
  */
-int compat_16_sys___sigreturn14(struct lwp *, const struct compat_16_sys___sigreturn14_args *, register_t *);
+int compat_16_sys___sigreturn14(struct lwp *, void *, register_t *);
 
 int
-compat_16_sys___sigreturn14(struct lwp *l, const struct compat_16_sys___sigreturn14_args *uap, register_t *retval)
+compat_16_sys___sigreturn14(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct compat_16_sys___sigreturn14_args /* {
 		syscallarg(struct sigcontext *) sigcntxp;
-	} */
+	} */ *uap = v;
 	struct proc *p = l->l_proc;
 	struct sigcontext *scp, context;
 	struct trapframe *tf;
@@ -90,7 +96,7 @@ compat_16_sys___sigreturn14(struct lwp *l, const struct compat_16_sys___sigretur
 	 * program jumps out of a signal handler.
 	 */
 	scp = SCARG(uap, sigcntxp);
-	if (copyin((void *)scp, &context, sizeof(*scp)) != 0)
+	if (copyin((caddr_t)scp, &context, sizeof(*scp)) != 0)
 		return (EFAULT);
 
 	/* Restore register context. */
@@ -122,8 +128,7 @@ compat_16_sys___sigreturn14(struct lwp *l, const struct compat_16_sys___sigretur
 		tf->tf_fs = context.sc_fs;
 		tf->tf_es = context.sc_es;
 		tf->tf_ds = context.sc_ds;
-		tf->tf_eflags &= ~PSL_USER;
-		tf->tf_eflags |= context.sc_eflags & PSL_USER;
+		tf->tf_eflags = context.sc_eflags;
 	}
 	tf->tf_edi = context.sc_edi;
 	tf->tf_esi = context.sc_esi;
@@ -138,14 +143,13 @@ compat_16_sys___sigreturn14(struct lwp *l, const struct compat_16_sys___sigretur
 	tf->tf_ss = context.sc_ss;
 
 	/* Restore signal stack. */
-	mutex_enter(p->p_lock);
 	if (context.sc_onstack & SS_ONSTACK)
-		l->l_sigstk.ss_flags |= SS_ONSTACK;
+		p->p_sigctx.ps_sigstk.ss_flags |= SS_ONSTACK;
 	else
-		l->l_sigstk.ss_flags &= ~SS_ONSTACK;
+		p->p_sigctx.ps_sigstk.ss_flags &= ~SS_ONSTACK;
+
 	/* Restore signal mask. */
-	(void) sigprocmask1(l, SIG_SETMASK, &context.sc_mask, 0);
-	mutex_exit(p->p_lock);
+	(void) sigprocmask1(p, SIG_SETMASK, &context.sc_mask, 0);
 
 	return (EJUSTRETURN);
 }
@@ -172,7 +176,7 @@ sendsig_sigcontext(const ksiginfo_t *ksi, const sigset_t *mask)
 	    GUCODEBIG_SEL : GUCODE_SEL;
 	struct sigacts *ps = p->p_sigacts;
 	struct trapframe *tf = l->l_md.md_regs;
-	int onstack, error;
+	int onstack;
 	int sig = ksi->ksi_signo;
 	u_long code = KSI_TRAPCODE(ksi);
 	struct sigframe_sigcontext *fp = getframe(l, sig, &onstack), frame;
@@ -232,7 +236,7 @@ sendsig_sigcontext(const ksiginfo_t *ksi, const sigset_t *mask)
 	frame.sf_sc.sc_err = tf->tf_err;
 
 	/* Save signal stack. */
-	frame.sf_sc.sc_onstack = l->l_sigstk.ss_flags & SS_ONSTACK;
+	frame.sf_sc.sc_onstack = p->p_sigctx.ps_sigstk.ss_flags & SS_ONSTACK;
 
 	/* Save signal mask. */
 	frame.sf_sc.sc_mask = *mask;
@@ -247,13 +251,7 @@ sendsig_sigcontext(const ksiginfo_t *ksi, const sigset_t *mask)
 	native_sigset_to_sigset13(mask, &frame.sf_sc.__sc_mask13);
 #endif
 
-	sendsig_reset(l, sig);
-
-	mutex_exit(p->p_lock);
-	error = copyout(&frame, fp, sizeof(frame));
-	mutex_enter(p->p_lock);
-
-	if (error != 0) {
+	if (copyout(&frame, fp, sizeof(frame)) != 0) {
 		/*
 		 * Process has trashed its stack; give it an illegal
 		 * instruction to halt it in its tracks.
@@ -266,6 +264,95 @@ sendsig_sigcontext(const ksiginfo_t *ksi, const sigset_t *mask)
 
 	/* Remember that we're now on the signal stack. */
 	if (onstack)
-		l->l_sigstk.ss_flags |= SS_ONSTACK;
+		p->p_sigctx.ps_sigstk.ss_flags |= SS_ONSTACK;
 }
 #endif
+
+#if defined(COMPAT_16) && defined(VM86)
+struct compat_16_vm86_kern {
+	struct sigcontext regs;
+	unsigned long ss_cpu_type;
+};
+
+struct compat_16_vm86_struct {
+	struct compat_16_vm86_kern substr;
+	unsigned long screen_bitmap;	/* not used/supported (yet) */
+	unsigned long flags;		/* not used/supported (yet) */
+	unsigned char int_byuser[32];	/* 256 bits each: pass control to user */
+	unsigned char int21_byuser[32];	/* otherwise, handle directly */
+};
+
+int
+compat_16_i386_vm86(struct lwp *l, char *args, register_t *retval)
+{
+	struct trapframe *tf = l->l_md.md_regs;
+	struct pcb *pcb = &l->l_addr->u_pcb;
+	struct compat_16_vm86_kern vm86s;
+	int error;
+
+	error = copyin(args, &vm86s, sizeof(vm86s));
+	if (error)
+		return (error);
+
+	pcb->vm86_userp = (void *)(args +
+	    (offsetof(struct compat_16_vm86_struct, screen_bitmap)
+	    - offsetof(struct vm86_struct, screen_bitmap)));
+	printf("offsetting by %lu\n", (unsigned long)
+	    (offsetof(struct compat_16_vm86_struct, screen_bitmap)
+	    - offsetof(struct vm86_struct, screen_bitmap)));
+
+	/*
+	 * Keep mask of flags we simulate to simulate a particular type of
+	 * processor.
+	 */
+	switch (vm86s.ss_cpu_type) {
+	case VCPU_086:
+	case VCPU_186:
+	case VCPU_286:
+		pcb->vm86_flagmask = PSL_ID|PSL_AC|PSL_NT|PSL_IOPL;
+		break;
+	case VCPU_386:
+		pcb->vm86_flagmask = PSL_ID|PSL_AC;
+		break;
+	case VCPU_486:
+		pcb->vm86_flagmask = PSL_ID;
+		break;
+	case VCPU_586:
+		pcb->vm86_flagmask = 0;
+		break;
+	default:
+		return (EINVAL);
+	}
+
+#define DOVREG(reg) tf->tf_vm86_##reg = (u_short) vm86s.regs.sc_##reg
+#define DOREG(reg) tf->tf_##reg = (u_short) vm86s.regs.sc_##reg
+
+	DOVREG(ds);
+	DOVREG(es);
+	DOVREG(fs);
+	DOVREG(gs);
+	DOREG(edi);
+	DOREG(esi);
+	DOREG(ebp);
+	DOREG(eax);
+	DOREG(ebx);
+	DOREG(ecx);
+	DOREG(edx);
+	DOREG(eip);
+	DOREG(cs);
+	DOREG(esp);
+	DOREG(ss);
+
+#undef	DOVREG
+#undef	DOREG
+
+	/* Going into vm86 mode jumps off the signal stack. */
+	l->l_proc->p_sigctx.ps_sigstk.ss_flags &= ~SS_ONSTACK;
+
+	set_vflags(l, vm86s.regs.sc_eflags | PSL_VM);
+
+	return (EJUSTRETURN);
+}
+
+#endif
+

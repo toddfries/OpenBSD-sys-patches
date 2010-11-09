@@ -1,4 +1,4 @@
-/*	$NetBSD: kern_resource.c,v 1.150 2009/02/09 11:13:20 rmind Exp $	*/
+/*	$NetBSD: kern_resource.c,v 1.124 2007/11/06 00:42:42 ad Exp $	*/
 
 /*-
  * Copyright (c) 1982, 1986, 1991, 1993
@@ -37,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kern_resource.c,v 1.150 2009/02/09 11:13:20 rmind Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kern_resource.c,v 1.124 2007/11/06 00:42:42 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -45,17 +45,14 @@ __KERNEL_RCSID(0, "$NetBSD: kern_resource.c,v 1.150 2009/02/09 11:13:20 rmind Ex
 #include <sys/file.h>
 #include <sys/resourcevar.h>
 #include <sys/malloc.h>
-#include <sys/kmem.h>
 #include <sys/namei.h>
 #include <sys/pool.h>
 #include <sys/proc.h>
 #include <sys/sysctl.h>
-#include <sys/timevar.h>
 #include <sys/kauth.h>
-#include <sys/atomic.h>
+
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
-#include <sys/atomic.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -66,36 +63,26 @@ __KERNEL_RCSID(0, "$NetBSD: kern_resource.c,v 1.150 2009/02/09 11:13:20 rmind Ex
 rlim_t maxdmap = MAXDSIZ;
 rlim_t maxsmap = MAXSSIZ;
 
-static pool_cache_t	plimit_cache;
-static pool_cache_t	pstats_cache;
-
-void
-resource_init(void)
-{
-
-	plimit_cache = pool_cache_init(sizeof(struct plimit), 0, 0, 0,
-	    "plimitpl", NULL, IPL_NONE, NULL, NULL, NULL);
-	pstats_cache = pool_cache_init(sizeof(struct pstats), 0, 0, 0,
-	    "pstatspl", NULL, IPL_NONE, NULL, NULL, NULL);
-}
+struct uihashhead *uihashtbl;
+u_long uihash;		/* size of hash table - 1 */
+kmutex_t uihashtbl_lock;
 
 /*
  * Resource controls and accounting.
  */
 
 int
-sys_getpriority(struct lwp *l, const struct sys_getpriority_args *uap,
-    register_t *retval)
+sys_getpriority(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct sys_getpriority_args /* {
 		syscallarg(int) which;
 		syscallarg(id_t) who;
-	} */
+	} */ *uap = v;
 	struct proc *curp = l->l_proc, *p;
 	int low = NZERO + PRIO_MAX + 1;
 	int who = SCARG(uap, who);
 
-	mutex_enter(proc_lock);
+	mutex_enter(&proclist_lock);
 	switch (SCARG(uap, which)) {
 	case PRIO_PROCESS:
 		if (who == 0)
@@ -124,21 +111,19 @@ sys_getpriority(struct lwp *l, const struct sys_getpriority_args *uap,
 		if (who == 0)
 			who = (int)kauth_cred_geteuid(l->l_cred);
 		PROCLIST_FOREACH(p, &allproc) {
-			if ((p->p_flag & PK_MARKER) != 0)
-				continue;
-			mutex_enter(p->p_lock);
+			mutex_enter(&p->p_mutex);
 			if (kauth_cred_geteuid(p->p_cred) ==
 			    (uid_t)who && p->p_nice < low)
 				low = p->p_nice;
-			mutex_exit(p->p_lock);
+			mutex_exit(&p->p_mutex);
 		}
 		break;
 
 	default:
-		mutex_exit(proc_lock);
+		mutex_exit(&proclist_lock);
 		return (EINVAL);
 	}
-	mutex_exit(proc_lock);
+	mutex_exit(&proclist_lock);
 
 	if (low == NZERO + PRIO_MAX + 1)
 		return (ESRCH);
@@ -148,19 +133,18 @@ sys_getpriority(struct lwp *l, const struct sys_getpriority_args *uap,
 
 /* ARGSUSED */
 int
-sys_setpriority(struct lwp *l, const struct sys_setpriority_args *uap,
-    register_t *retval)
+sys_setpriority(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct sys_setpriority_args /* {
 		syscallarg(int) which;
 		syscallarg(id_t) who;
 		syscallarg(int) prio;
-	} */
+	} */ *uap = v;
 	struct proc *curp = l->l_proc, *p;
 	int found = 0, error = 0;
 	int who = SCARG(uap, who);
 
-	mutex_enter(proc_lock);
+	mutex_enter(&proclist_lock);
 	switch (SCARG(uap, which)) {
 	case PRIO_PROCESS:
 		if (who == 0)
@@ -168,11 +152,11 @@ sys_setpriority(struct lwp *l, const struct sys_setpriority_args *uap,
 		else
 			p = p_find(who, PFIND_LOCKED);
 		if (p != 0) {
-			mutex_enter(p->p_lock);
+			mutex_enter(&p->p_mutex);
 			error = donice(l, p, SCARG(uap, prio));
-			mutex_exit(p->p_lock);
-			found++;
+			mutex_exit(&p->p_mutex);
 		}
+		found++;
 		break;
 
 	case PRIO_PGRP: {
@@ -183,9 +167,9 @@ sys_setpriority(struct lwp *l, const struct sys_setpriority_args *uap,
 		else if ((pg = pg_find(who, PFIND_LOCKED)) == NULL)
 			break;
 		LIST_FOREACH(p, &pg->pg_members, p_pglist) {
-			mutex_enter(p->p_lock);
+			mutex_enter(&p->p_mutex);
 			error = donice(l, p, SCARG(uap, prio));
-			mutex_exit(p->p_lock);
+			mutex_exit(&p->p_mutex);
 			found++;
 		}
 		break;
@@ -195,23 +179,21 @@ sys_setpriority(struct lwp *l, const struct sys_setpriority_args *uap,
 		if (who == 0)
 			who = (int)kauth_cred_geteuid(l->l_cred);
 		PROCLIST_FOREACH(p, &allproc) {
-			if ((p->p_flag & PK_MARKER) != 0)
-				continue;
-			mutex_enter(p->p_lock);
+			mutex_enter(&p->p_mutex);
 			if (kauth_cred_geteuid(p->p_cred) ==
 			    (uid_t)SCARG(uap, who)) {
 				error = donice(l, p, SCARG(uap, prio));
 				found++;
 			}
-			mutex_exit(p->p_lock);
+			mutex_exit(&p->p_mutex);
 		}
 		break;
 
 	default:
-		mutex_exit(proc_lock);
-		return EINVAL;
+		error = EINVAL;
+		break;
 	}
-	mutex_exit(proc_lock);
+	mutex_exit(&proclist_lock);
 	if (found == 0)
 		return (ESRCH);
 	return (error);
@@ -226,30 +208,40 @@ int
 donice(struct lwp *l, struct proc *chgp, int n)
 {
 	kauth_cred_t cred = l->l_cred;
+	int onice;
 
-	KASSERT(mutex_owned(chgp->p_lock));
+	KASSERT(mutex_owned(&chgp->p_mutex));
 
 	if (n > PRIO_MAX)
 		n = PRIO_MAX;
 	if (n < PRIO_MIN)
 		n = PRIO_MIN;
 	n += NZERO;
+	onice = chgp->p_nice;
+	onice = chgp->p_nice;
+
+  again:
 	if (kauth_authorize_process(cred, KAUTH_PROCESS_NICE, chgp,
 	    KAUTH_ARG(n), NULL, NULL))
 		return (EACCES);
+	mutex_spin_enter(&chgp->p_smutex);
+	if (onice != chgp->p_nice) {
+		mutex_spin_exit(&chgp->p_smutex);
+		goto again;
+	}
 	sched_nice(chgp, n);
+	mutex_spin_exit(&chgp->p_smutex);
 	return (0);
 }
 
 /* ARGSUSED */
 int
-sys_setrlimit(struct lwp *l, const struct sys_setrlimit_args *uap,
-    register_t *retval)
+sys_setrlimit(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct sys_setrlimit_args /* {
 		syscallarg(int) which;
 		syscallarg(const struct rlimit *) rlp;
-	} */
+	} */ *uap = v;
 	int which = SCARG(uap, which);
 	struct rlimit alim;
 	int error;
@@ -269,6 +261,9 @@ dosetrlimit(struct lwp *l, struct proc *p, int which, struct rlimit *limp)
 	if ((u_int)which >= RLIM_NLIMITS)
 		return (EINVAL);
 
+	if (limp->rlim_cur < 0 || limp->rlim_max < 0)
+		return (EINVAL);
+
 	if (limp->rlim_cur > limp->rlim_max) {
 		/*
 		 * This is programming error. According to SUSv2, we should
@@ -284,7 +279,7 @@ dosetrlimit(struct lwp *l, struct proc *p, int which, struct rlimit *limp)
 		return 0;
 
 	error = kauth_authorize_process(l->l_cred, KAUTH_PROCESS_RLIMIT,
-	    p, KAUTH_ARG(KAUTH_REQ_PROCESS_RLIMIT_SET), limp, KAUTH_ARG(which));
+	    p, limp, KAUTH_ARG(which), NULL);
 	if (error)
 		return (error);
 
@@ -374,13 +369,12 @@ dosetrlimit(struct lwp *l, struct proc *p, int which, struct rlimit *limp)
 
 /* ARGSUSED */
 int
-sys_getrlimit(struct lwp *l, const struct sys_getrlimit_args *uap,
-    register_t *retval)
+sys_getrlimit(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct sys_getrlimit_args /* {
 		syscallarg(int) which;
 		syscallarg(struct rlimit *) rlp;
-	} */
+	} */ *uap = v;
 	struct proc *p = l->l_proc;
 	int which = SCARG(uap, which);
 	struct rlimit rl;
@@ -388,9 +382,9 @@ sys_getrlimit(struct lwp *l, const struct sys_getrlimit_args *uap,
 	if ((u_int)which >= RLIM_NLIMITS)
 		return (EINVAL);
 
-	mutex_enter(p->p_lock);
+	mutex_enter(&p->p_mutex);
 	memcpy(&rl, &p->p_rlimit[which], sizeof(rl));
-	mutex_exit(p->p_lock);
+	mutex_exit(&p->p_mutex);
 
 	return copyout(&rl, SCARG(uap, rlp), sizeof(rl));
 }
@@ -399,16 +393,17 @@ sys_getrlimit(struct lwp *l, const struct sys_getrlimit_args *uap,
  * Transform the running time and tick information in proc p into user,
  * system, and interrupt time usage.
  *
- * Should be called with p->p_lock held unless called from exit1().
+ * Should be called with p->p_smutex held unless called from exit1().
  */
 void
 calcru(struct proc *p, struct timeval *up, struct timeval *sp,
     struct timeval *ip, struct timeval *rp)
 {
-	uint64_t u, st, ut, it, tot;
+	u_quad_t u, st, ut, it, tot;
+	unsigned long sec;
+	long usec;
+ 	struct timeval tv;
 	struct lwp *l;
-	struct bintime tm;
-	struct timeval tv;
 
 	mutex_spin_enter(&p->p_stmutex);
 	st = p->p_sticks;
@@ -416,13 +411,17 @@ calcru(struct proc *p, struct timeval *up, struct timeval *sp,
 	it = p->p_iticks;
 	mutex_spin_exit(&p->p_stmutex);
 
-	tm = p->p_rtime;
+	sec = p->p_rtime.tv_sec;
+	usec = p->p_rtime.tv_usec;
 
 	LIST_FOREACH(l, &p->p_lwps, l_sibling) {
 		lwp_lock(l);
-		bintime_add(&tm, &l->l_rtime);
-		if ((l->l_pflag & LP_RUNNING) != 0) {
-			struct bintime diff;
+		sec += l->l_rtime.tv_sec;
+		if ((usec += l->l_rtime.tv_usec) >= 1000000) {
+			sec++;
+			usec -= 1000000;
+		}
+		if ((l->l_flag & LW_RUNNING) != 0) {
 			/*
 			 * Adjust for the current time slice.  This is
 			 * actually fairly important since the error
@@ -430,16 +429,19 @@ calcru(struct proc *p, struct timeval *up, struct timeval *sp,
 			 * which is much greater than the sampling
 			 * error.
 			 */
-			binuptime(&diff);
-			bintime_sub(&diff, &l->l_stime);
-			bintime_add(&tm, &diff);
+			microtime(&tv);
+			sec += tv.tv_sec - l->l_stime.tv_sec;
+			usec += tv.tv_usec - l->l_stime.tv_usec;
+			if (usec >= 1000000) {
+				sec++;
+				usec -= 1000000;
+			}
 		}
 		lwp_unlock(l);
 	}
 
 	tot = st + ut + it;
-	bintime2timeval(&tm, &tv);
-	u = (uint64_t)tv.tv_sec * 1000000ul + tv.tv_usec;
+	u = sec * 1000000ull + usec;
 
 	if (tot == 0) {
 		/* No ticks, so can't use to share time out, split 50-50 */
@@ -463,35 +465,34 @@ calcru(struct proc *p, struct timeval *up, struct timeval *sp,
 		ip->tv_usec = it % 1000000;
 	}
 	if (rp != NULL) {
-		*rp = tv;
+		rp->tv_sec = sec;
+		rp->tv_usec = usec;
 	}
 }
 
 /* ARGSUSED */
 int
-sys___getrusage50(struct lwp *l, const struct sys___getrusage50_args *uap,
-    register_t *retval)
+sys_getrusage(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct sys_getrusage_args /* {
 		syscallarg(int) who;
 		syscallarg(struct rusage *) rusage;
-	} */
+	} */ *uap = v;
 	struct rusage ru;
 	struct proc *p = l->l_proc;
 
 	switch (SCARG(uap, who)) {
 	case RUSAGE_SELF:
-		mutex_enter(p->p_lock);
+		mutex_enter(&p->p_smutex);
 		memcpy(&ru, &p->p_stats->p_ru, sizeof(ru));
 		calcru(p, &ru.ru_utime, &ru.ru_stime, NULL, NULL);
-		rulwps(p, &ru);
-		mutex_exit(p->p_lock);
+		mutex_exit(&p->p_smutex);
 		break;
 
 	case RUSAGE_CHILDREN:
-		mutex_enter(p->p_lock);
+		mutex_enter(&p->p_smutex);
 		memcpy(&ru, &p->p_stats->p_cru, sizeof(ru));
-		mutex_exit(p->p_lock);
+		mutex_exit(&p->p_smutex);
 		break;
 
 	default:
@@ -516,20 +517,6 @@ ruadd(struct rusage *ru, struct rusage *ru2)
 		*ip++ += *ip2++;
 }
 
-void
-rulwps(proc_t *p, struct rusage *ru)
-{
-	lwp_t *l;
-
-	KASSERT(mutex_owned(p->p_lock));
-
-	LIST_FOREACH(l, &p->p_lwps, l_sibling) {
-		ruadd(ru, &l->l_ru);
-		ru->ru_nvcsw += (l->l_ncsw - l->l_nivcsw);
-		ru->ru_nivcsw += l->l_nivcsw;
-	}
-}
-
 /*
  * Make a copy of the plimit structure.
  * We share these structures copy-on-write after fork,
@@ -545,7 +532,7 @@ lim_copy(struct plimit *lim)
 	char *corename;
 	size_t alen, len;
 
-	newlim = pool_cache_get(plimit_cache, PR_WAITOK);
+	newlim = pool_get(&plimit_pool, PR_WAITOK);
 	mutex_init(&newlim->pl_lock, MUTEX_DEFAULT, IPL_NONE);
 	newlim->pl_flags = 0;
 	newlim->pl_refcnt = 1;
@@ -585,7 +572,9 @@ lim_copy(struct plimit *lim)
 void
 lim_addref(struct plimit *lim)
 {
-	atomic_inc_uint(&lim->pl_refcnt);
+	mutex_enter(&lim->pl_lock);
+	lim->pl_refcnt++;
+	mutex_exit(&lim->pl_lock);
 }
 
 /*
@@ -609,10 +598,10 @@ lim_privatise(struct proc *p, bool set_shared)
 
 	newlim = lim_copy(lim);
 
-	mutex_enter(p->p_lock);
+	mutex_enter(&p->p_mutex);
 	if (p->p_limit->pl_flags & PL_WRITEABLE) {
 		/* Someone crept in while we were busy */
-		mutex_exit(p->p_lock);
+		mutex_exit(&p->p_mutex);
 		limfree(newlim);
 		if (set_shared)
 			p->p_limit->pl_flags |= PL_SHAREMOD;
@@ -628,22 +617,30 @@ lim_privatise(struct proc *p, bool set_shared)
 	if (set_shared)
 		newlim->pl_flags |= PL_SHAREMOD;
 	p->p_limit = newlim;
-	mutex_exit(p->p_lock);
+	mutex_exit(&p->p_mutex);
 }
 
 void
 limfree(struct plimit *lim)
 {
 	struct plimit *sv_lim;
+	int n;
 
 	do {
-		if (atomic_dec_uint_nv(&lim->pl_refcnt) > 0)
+		mutex_enter(&lim->pl_lock);
+		n = --lim->pl_refcnt;
+		mutex_exit(&lim->pl_lock);
+		if (n > 0)
 			return;
+#ifdef DIAGNOSTIC
+		if (n < 0)
+			panic("limfree");
+#endif
 		if (lim->pl_corename != defcorename)
 			free(lim->pl_corename, M_TEMP);
 		sv_lim = lim->pl_sv_limit;
 		mutex_destroy(&lim->pl_lock);
-		pool_cache_put(plimit_cache, lim);
+		pool_put(&plimit_pool, lim);
 	} while ((lim = sv_lim) != NULL);
 }
 
@@ -653,7 +650,7 @@ pstatscopy(struct pstats *ps)
 
 	struct pstats *newps;
 
-	newps = pool_cache_get(pstats_cache, PR_WAITOK);
+	newps = pool_get(&pstats_pool, PR_WAITOK);
 
 	memset(&newps->pstat_startzero, 0,
 	(unsigned) ((char *)&newps->pstat_endzero -
@@ -670,7 +667,7 @@ void
 pstatsfree(struct pstats *ps)
 {
 
-	pool_cache_put(pstats_cache, ps);
+	pool_put(&pstats_pool, ps);
 }
 
 /*
@@ -727,19 +724,11 @@ sysctl_proc_corename(SYSCTLFN_ARGS)
 	if (error)
 		return (error);
 
-	/* XXX-elad */
-	error = kauth_authorize_process(l->l_cred, KAUTH_PROCESS_CANSEE, ptmp,
-	    KAUTH_ARG(KAUTH_REQ_PROCESS_CANSEE_ENTRY), NULL, NULL);
+	/* XXX this should be in p_find() */
+	error = kauth_authorize_process(l->l_cred, KAUTH_PROCESS_CANSEE,
+	    ptmp, NULL, NULL, NULL);
 	if (error)
 		return (error);
-
-	if (newp == NULL) {
-		error = kauth_authorize_process(l->l_cred,
-		    KAUTH_PROCESS_CORENAME, ptmp,
-		    KAUTH_ARG(KAUTH_REQ_PROCESS_CORENAME_GET), NULL, NULL);
-		if (error)
-			return (error);
-	}
 
 	/*
 	 * let them modify a temporary copy of the core name
@@ -769,7 +758,7 @@ sysctl_proc_corename(SYSCTLFN_ARGS)
 		goto done;
 
 	error = kauth_authorize_process(l->l_cred, KAUTH_PROCESS_CORENAME,
-	    ptmp, KAUTH_ARG(KAUTH_REQ_PROCESS_CORENAME_SET), cname, NULL);
+	    ptmp, cname, NULL, NULL);
 	if (error)
 		return (error);
 
@@ -832,9 +821,9 @@ sysctl_proc_stop(SYSCTLFN_ARGS)
 	if (error)
 		return (error);
 
-	/* XXX-elad */
-	error = kauth_authorize_process(l->l_cred, KAUTH_PROCESS_CANSEE, ptmp,
-	    KAUTH_ARG(KAUTH_REQ_PROCESS_CANSEE_ENTRY), NULL, NULL);
+	/* XXX this should be in p_find() */
+	error = kauth_authorize_process(l->l_cred, KAUTH_PROCESS_CANSEE,
+	    ptmp, NULL, NULL, NULL);
 	if (error)
 		return (error);
 
@@ -859,19 +848,18 @@ sysctl_proc_stop(SYSCTLFN_ARGS)
 	if (error || newp == NULL)
 		return (error);
 
-	mutex_enter(ptmp->p_lock);
+	mutex_enter(&ptmp->p_smutex);
 	error = kauth_authorize_process(l->l_cred, KAUTH_PROCESS_STOPFLAG,
 	    ptmp, KAUTH_ARG(f), NULL, NULL);
-	if (!error) {
-		if (i) {
-			ptmp->p_sflag |= f;
-		} else {
-			ptmp->p_sflag &= ~f;
-		}
-	}
-	mutex_exit(ptmp->p_lock);
+	if (error)
+		return (error);
+	if (i)
+		ptmp->p_sflag |= f;
+	else
+		ptmp->p_sflag &= ~f;
+	mutex_exit(&ptmp->p_smutex);
 
-	return error;
+	return (0);
 }
 
 /*
@@ -905,20 +893,11 @@ sysctl_proc_plimit(SYSCTLFN_ARGS)
 	if (error)
 		return (error);
 
-	/* XXX-elad */
-	error = kauth_authorize_process(l->l_cred, KAUTH_PROCESS_CANSEE, ptmp,
-	    KAUTH_ARG(KAUTH_REQ_PROCESS_CANSEE_ENTRY), NULL, NULL);
+	/* XXX this should be in p_find() */
+	error = kauth_authorize_process(l->l_cred, KAUTH_PROCESS_CANSEE,
+	    ptmp, NULL, NULL, NULL);
 	if (error)
 		return (error);
-
-	/* Check if we can view limits. */
-	if (newp == NULL) {
-		error = kauth_authorize_process(l->l_cred, KAUTH_PROCESS_RLIMIT,
-		    ptmp, KAUTH_ARG(KAUTH_REQ_PROCESS_RLIMIT_GET), &alim,
-		    KAUTH_ARG(which));
-		if (error)
-			return (error);
-	}
 
 	node = *rnode;
 	memcpy(&alim, &ptmp->p_rlimit[limitno], sizeof(alim));
@@ -1020,4 +999,96 @@ SYSCTL_SETUP(sysctl_proc_setup, "sysctl proc subtree setup")
 		       SYSCTL_DESCR("Stop process before completing exit"),
 		       sysctl_proc_stop, 0, NULL, 0,
 		       CTL_PROC, PROC_CURPROC, PROC_PID_STOPEXIT, CTL_EOL);
+}
+
+void
+uid_init(void)
+{
+
+	/*
+	 * XXXSMP This could be at IPL_SOFTNET, but for now we want
+	 * to to be deadlock free, so it must be at IPL_VM.
+	 */
+	mutex_init(&uihashtbl_lock, MUTEX_DRIVER, IPL_VM);
+
+	/*
+	 * Ensure that uid 0 is always in the user hash table, as
+	 * sbreserve() expects it available from interrupt context.
+	 */
+	(void)uid_find(0);
+}
+
+struct uidinfo *
+uid_find(uid_t uid)
+{
+	struct uidinfo *uip;
+	struct uidinfo *newuip = NULL;
+	struct uihashhead *uipp;
+
+	uipp = UIHASH(uid);
+
+again:
+	mutex_enter(&uihashtbl_lock);
+	LIST_FOREACH(uip, uipp, ui_hash)
+		if (uip->ui_uid == uid) {
+			mutex_exit(&uihashtbl_lock);
+			if (newuip) {
+				mutex_destroy(&newuip->ui_lock);
+				free(newuip, M_PROC);
+			}
+			return uip;
+		}
+	if (newuip == NULL) {
+		mutex_exit(&uihashtbl_lock);
+		/* Must not be called from interrupt context. */
+		newuip = malloc(sizeof(*uip), M_PROC, M_WAITOK | M_ZERO);
+		/* XXX this could be IPL_SOFTNET */
+		mutex_init(&newuip->ui_lock, MUTEX_DRIVER, IPL_VM);
+		goto again;
+	}
+	uip = newuip;
+
+	LIST_INSERT_HEAD(uipp, uip, ui_hash);
+	uip->ui_uid = uid;
+	mutex_exit(&uihashtbl_lock);
+
+	return uip;
+}
+
+/*
+ * Change the count associated with number of processes
+ * a given user is using.
+ */
+int
+chgproccnt(uid_t uid, int diff)
+{
+	struct uidinfo *uip;
+
+	if (diff == 0)
+		return 0;
+
+	uip = uid_find(uid);
+	mutex_enter(&uip->ui_lock);
+	uip->ui_proccnt += diff;
+	KASSERT(uip->ui_proccnt >= 0);
+	mutex_exit(&uip->ui_lock);
+	return uip->ui_proccnt;
+}
+
+int
+chgsbsize(struct uidinfo *uip, u_long *hiwat, u_long to, rlim_t xmax)
+{
+	rlim_t nsb;
+
+	mutex_enter(&uip->ui_lock);
+	nsb = uip->ui_sbsize + to - *hiwat;
+	if (to > *hiwat && nsb > xmax) {
+		mutex_exit(&uip->ui_lock);
+		return 0;
+	}
+	*hiwat = to;
+	uip->ui_sbsize = nsb;
+	KASSERT(uip->ui_sbsize >= 0);
+	mutex_exit(&uip->ui_lock);
+	return 1;
 }

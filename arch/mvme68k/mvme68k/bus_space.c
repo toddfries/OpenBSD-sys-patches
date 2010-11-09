@@ -1,4 +1,4 @@
-/*	$NetBSD: bus_space.c,v 1.10 2008/04/28 20:23:29 martin Exp $	*/
+/*	$NetBSD: bus_space.c,v 1.6 2005/12/11 12:18:17 christos Exp $	*/
 
 /*-
  * Copyright (c) 1998, 2000 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -35,7 +42,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: bus_space.c,v 1.10 2008/04/28 20:23:29 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: bus_space.c,v 1.6 2005/12/11 12:18:17 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -66,24 +73,28 @@ label_t *nofault;
 
 /* ARGSUSED */
 int
-_bus_space_map(void *cookie, bus_addr_t addr, bus_size_t size, int flags,
-    bus_space_handle_t *bushp)
+_bus_space_map(cookie, addr, size, flags, bushp)
+	void *cookie;
+	bus_addr_t addr;
+	bus_size_t size;
+	int flags;
+	bus_space_handle_t *bushp;
 {
 	bus_dma_segment_t seg;
-	void *va;
+	caddr_t va;
 
 	if (addr >= intiobase_phys && addr < intiotop_phys) {
 #ifdef DEBUG
 		if ((addr + size) >= intiotop_phys)
-			panic("%s: Invalid INTIO range!", __func__);
+			panic("mvme68k_bus_space_map: Invalid INTIO range!");
 #endif
 		/*
 		 * Intio space is direct-mapped in pmap_bootstrap(); just
 		 * do the translation.
 		 */
 		addr -= intiobase_phys;
-		*bushp = (bus_space_handle_t)&(intiobase[addr]);
-		return 0;
+		*bushp = (bus_space_handle_t) &(intiobase[addr]);
+		return (0);
 	}
 
 	/*
@@ -99,14 +110,17 @@ _bus_space_map(void *cookie, bus_addr_t addr, bus_size_t size, int flags,
 	/*
 	 * The handle is really the virtual address we just mapped
 	 */
-	*bushp = (bus_space_handle_t)((char *)va + m68k_page_offset(addr));
+	*bushp = (bus_space_handle_t) (va + m68k_page_offset(addr));
 
-	return 0;
+	return (0);
 }
 
 /* ARGSUSED */
 void
-_bus_space_unmap(void *cookie, bus_space_handle_t bush, bus_size_t size)
+_bus_space_unmap(cookie, bush, size)
+	void *cookie;
+	bus_space_handle_t bush;
+	bus_size_t size;
 {
 	/* Nothing to do for INTIO space */
 	if ((char *)bush >= intiobase && (char *)bush < intiolimit)
@@ -115,147 +129,174 @@ _bus_space_unmap(void *cookie, bus_space_handle_t bush, bus_size_t size)
 	bush = m68k_trunc_page(bush);
 	size = m68k_round_page(size);
 
-	_bus_dmamem_unmap(NULL, (void *) bush, size);
+	_bus_dmamem_unmap(NULL, (caddr_t) bush, size);
 }
 
 /* ARGSUSED */
 int
-_bus_space_peek_1(void *cookie, bus_space_handle_t bush, bus_size_t offset,
-    uint8_t *valuep)
+_bus_space_peek_1(cookie, bush, offset, valuep)
+	void *cookie;
+	bus_space_handle_t bush;
+	bus_size_t offset;
+	u_int8_t *valuep;
 {
-	uint8_t v;
+	u_int8_t v;
 
 	if (valuep == NULL)
 		valuep = &v;
 
-	return do_peek(&peek1, (void *)(bush + offset), (void *)valuep);
+	return (do_peek(&peek1, (void *)(bush + offset), (void *)valuep));
 }
 
 /* ARGSUSED */
 int
-_bus_space_peek_2(void *cookie, bus_space_handle_t bush, bus_size_t offset,
-    uint16_t *valuep)
+_bus_space_peek_2(cookie, bush, offset, valuep)
+	void *cookie;
+	bus_space_handle_t bush;
+	bus_size_t offset;
+	u_int16_t *valuep;
 {
-	uint16_t v;
+	u_int16_t v;
 
 	if (valuep == NULL)
 		valuep = &v;
 
-	return do_peek(&peek2, (void *)(bush + offset), (void *)valuep);
+	return (do_peek(&peek2, (void *)(bush + offset), (void *)valuep));
 }
 
 /* ARGSUSED */
 int
-_bus_space_peek_4(void *cookie, bus_space_handle_t bush, bus_size_t offset,
-    uint32_t *valuep)
+_bus_space_peek_4(cookie, bush, offset, valuep)
+	void *cookie;
+	bus_space_handle_t bush;
+	bus_size_t offset;
+	u_int32_t *valuep;
 {
-	uint32_t v;
+	u_int32_t v;
 
 	if (valuep == NULL)
 		valuep = &v;
 
-	return do_peek(&peek4, (void *)(bush + offset), (void *)valuep);
+	return (do_peek(&peek4, (void *)(bush + offset), (void *)valuep));
 }
 
 /* ARGSUSED */
 int
-_bus_space_poke_1(void *cookie, bus_space_handle_t bush, bus_size_t offset,
-    uint8_t value)
+_bus_space_poke_1(cookie, bush, offset, value)
+	void *cookie;
+	bus_space_handle_t bush;
+	bus_size_t offset;
+	u_int8_t value;
 {
-
-	return do_poke(&poke1, (void *)(bush + offset), (u_int)value);
+	return (do_poke(&poke1, (void *)(bush + offset), (u_int)value));
 }
 
 /* ARGSUSED */
 int
-_bus_space_poke_2(void *cookie, bus_space_handle_t bush, bus_size_t offset,
-    uint16_t value)
+_bus_space_poke_2(cookie, bush, offset, value)
+	void *cookie;
+	bus_space_handle_t bush;
+	bus_size_t offset;
+	u_int16_t value;
 {
-
-	return do_poke(&poke2, (void *)(bush + offset), (u_int)value);
+	return (do_poke(&poke2, (void *)(bush + offset), (u_int)value));
 }
 
 /* ARGSUSED */
 int
-_bus_space_poke_4(void *cookie, bus_space_handle_t bush, bus_size_t offset,
-    uint32_t value)
+_bus_space_poke_4(cookie, bush, offset, value)
+	void *cookie;
+	bus_space_handle_t bush;
+	bus_size_t offset;
+	u_int32_t value;
 {
-
-	return do_poke(&poke4, (void *)(bush + offset), (u_int)value);
+	return (do_poke(&poke4, (void *)(bush + offset), (u_int)value));
 }
 
 static void
-peek1(void *addr, void *vp)
+peek1(addr, vp)
+	void *addr;
+	void *vp;
 {
-
-	*((uint8_t *)vp) =  *((uint8_t *)addr);
+	*((u_int8_t *)vp) =  *((u_int8_t *)addr);
 }
 
 static void
-peek2(void *addr, void *vp)
+peek2(addr, vp)
+	void *addr;
+	void *vp;
 {
-
-	*((uint16_t *)vp) = *((uint16_t *)addr);
+	*((u_int16_t *)vp) = *((u_int16_t *)addr);
 }
 
 static void
-peek4(void *addr, void *vp)
+peek4(addr, vp)
+	void *addr;
+	void *vp;
 {
-
-	*((uint32_t *)vp) = *((uint32_t *)addr);
+	*((u_int32_t *)vp) = *((u_int32_t *)addr);
 }
 
 static void
-poke1(void *addr, u_int value)
+poke1(addr, value)
+	void *addr;
+	u_int value;
 {
-
-	*((uint8_t *)addr) = value;
+	*((u_int8_t *)addr) = value;
 }
 
 static void
-poke2(void *addr, u_int value)
+poke2(addr, value)
+	void *addr;
+	u_int value;
 {
-
-	*((uint16_t *)addr) = value;
+	*((u_int16_t *)addr) = value;
 }
 
 static void
-poke4(void *addr, u_int value)
+poke4(addr, value)
+	void *addr;
+	u_int value;
 {
-
-	*((uint32_t *)addr) = value;
+	*((u_int32_t *)addr) = value;
 }
 
 static int
-do_peek(void (*peekfn)(void *, void *), void *addr, void *valuep)
+do_peek(peekfn, addr, valuep)
+	void (*peekfn)(void *, void *);
+	void *addr;
+	void *valuep;
 {
 	label_t faultbuf;
 
 	nofault = &faultbuf;
 	if (setjmp(&faultbuf)) {
 		nofault = NULL;
-		return 1;
+		return (1);
 	}
 
 	(*peekfn)(addr, valuep);
 
 	nofault = NULL;
-	return 0;
+	return (0);
 }
 
 static int
-do_poke(void (*pokefn)(void *, u_int), void *addr, u_int value)
+do_poke(pokefn, addr, value)
+	void (*pokefn)(void *, u_int);
+	void *addr;
+	u_int value;
 {
 	label_t faultbuf;
 
 	nofault = &faultbuf;
 	if (setjmp(&faultbuf)) {
 		nofault = NULL;
-		return 1;
+		return (1);
 	}
 
 	(*pokefn)(addr, value);
 
 	nofault = NULL;
-	return 0;
+	return (0);
 }

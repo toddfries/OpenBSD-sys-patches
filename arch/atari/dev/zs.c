@@ -1,4 +1,4 @@
-/*	$NetBSD: zs.c,v 1.58 2009/01/28 19:55:51 tjam Exp $	*/
+/*	$NetBSD: zs.c,v 1.51 2006/10/01 20:31:50 elad Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -56,6 +56,9 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -79,7 +82,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: zs.c,v 1.58 2009/01/28 19:55:51 tjam Exp $");
+__KERNEL_RCSID(0, "$NetBSD: zs.c,v 1.51 2006/10/01 20:31:50 elad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -124,7 +127,7 @@ struct zs_softc {
     struct	zs_chanstate	zi_cs[2];  /* chan A and B software state */
 };
 
-static void	*zs_softint_cookie;	/* for callback */
+static u_char	cb_scheduled = 0;	/* Already asked for callback? */
 /*
  * Define the registers for a closed port
  */
@@ -260,6 +263,8 @@ static int	zs_modem __P((struct zs_chanstate *, int, int));
 static void	zs_loadchannelregs __P((volatile struct zschan *, u_char *));
 static void	zs_shutdown __P((struct zs_chanstate *));
 
+static int zsshortcuts;	/* number of "shortcut" software interrupts */
+
 static int
 zsmatch(pdp, cfp, auxp)
 struct device	*pdp;
@@ -351,9 +356,6 @@ void		*aux;
 	cs->cs_unit  = 1;
 	cs->cs_zc    = &addr->zs_chan[ZS_CHAN_B];
 
-	zs_softint_cookie = softint_establish(SOFTINT_SERIAL,
-	    (void (*)(void *))zssoft, 0);
-
 	printf(": serial2 on channel a and modem2 on channel b\n");
 }
 
@@ -374,8 +376,7 @@ struct lwp	*l;
 		 int			zs = unit >> 1;
 		 int			error, s;
 
-	zi = device_lookup_private(&zs_cd, zs);
-	if (zi == NULL)
+	if(zs >= zs_cd.cd_ndevs || (zi = zs_cd.cd_devs[zs]) == NULL)
 		return (ENXIO);
 	cs = &zi->zi_cs[unit & 1];
 
@@ -473,7 +474,7 @@ struct lwp	*l;
 		 struct zs_softc	*zi;
 		 int			unit = ZS_UNIT(dev);
 
-	zi = device_lookup_private(&zs_cd, unit >> 1);
+	zi = zs_cd.cd_devs[unit >> 1];
 	cs = &zi->zi_cs[unit & 1];
 	tp = cs->cs_ttyp;
 
@@ -506,7 +507,7 @@ int		flags;
 		 int			unit;
 
 	unit = ZS_UNIT(dev);
-	zi   = device_lookup_private(&zs_cd, unit >> 1);
+	zi   = zs_cd.cd_devs[unit >> 1];
 	cs   = &zi->zi_cs[unit & 1];
 	tp   = cs->cs_ttyp;
 
@@ -525,7 +526,7 @@ int		flags;
 		 int			unit;
 
 	unit = ZS_UNIT(dev);
-	zi   = device_lookup_private(&zs_cd, unit >> 1);
+	zi   = zs_cd.cd_devs[unit >> 1];
 	cs   = &zi->zi_cs[unit & 1];
 	tp   = cs->cs_ttyp;
 
@@ -544,7 +545,7 @@ struct lwp	*l;
 		 int			unit;
 
 	unit = ZS_UNIT(dev);
-	zi   = device_lookup_private(&zs_cd, unit >> 1);
+	zi   = zs_cd.cd_devs[unit >> 1];
 	cs   = &zi->zi_cs[unit & 1];
 	tp   = cs->cs_ttyp;
  
@@ -560,7 +561,7 @@ dev_t	dev;
 		 int			unit;
 
 	unit = ZS_UNIT(dev);
-	zi   = device_lookup_private(&zs_cd, unit >> 1);
+	zi   = zs_cd.cd_devs[unit >> 1];
 	cs   = &zi->zi_cs[unit & 1];
 	return(cs->cs_ttyp);
 }
@@ -630,9 +631,17 @@ long sr;
 	} while(intflags & 4);
 #undef b
 
-	if(intflags & 1)
-		softint_schedule(zs_softint_cookie);
-
+	if(intflags & 1) {
+		if(BASEPRI(sr)) {
+			spl1();
+			zsshortcuts++;
+			return(zssoft(sr));
+		}
+		else if(!cb_scheduled) {
+			cb_scheduled++;
+			add_sicallback((si_farg)zssoft, 0, 0);
+		}
+	}
 	return(intflags & 2);
 }
 
@@ -717,10 +726,9 @@ int	unit;
 long	*ptime;
 const char *what;
 {
-	time_t cur_sec = time_second;
 
-	if(*ptime != cur_sec) {
-		*ptime = cur_sec;
+	if(*ptime != time.tv_sec) {
+		*ptime = time.tv_sec;
 		log(LOG_WARNING, "zs%d%c: %s overrun\n", unit >> 1,
 		    (unit & 1) + 'a', what);
 	}
@@ -740,6 +748,7 @@ long sr;
     register int			get, n, c, cc, unit, s;
  	     int			retval = 0;
 
+    cb_scheduled = 0;
     s = spltty();
     for(cs = zslist; cs != NULL; cs = cs->cs_next) {
 	get = cs->cs_rbget;
@@ -796,8 +805,8 @@ again:
 				c = zc->zc_csr;
 				if((c & ZSRR0_DCD) == 0)
 					cs->cs_preg[3] &= ~ZSWR3_HFC;
-				bcopy((void *)cs->cs_preg,
-				    (void *)cs->cs_creg, 16);
+				bcopy((caddr_t)cs->cs_preg,
+				    (caddr_t)cs->cs_creg, 16);
 				zs_loadchannelregs(zc, cs->cs_creg);
 				splx(sps);
 				cs->cs_heldchange = 0;
@@ -812,7 +821,7 @@ again:
 			if(tp->t_state & TS_FLUSH)
 				tp->t_state &= ~TS_FLUSH;
 			else ndflush(&tp->t_outq,cs->cs_tba
-						- tp->t_outq.c_cf);
+						- (caddr_t)tp->t_outq.c_cf);
 			line->l_start(tp);
 			break;
 
@@ -849,12 +858,12 @@ int
 zsioctl(dev, cmd, data, flag, l)
 dev_t		dev;
 u_long		cmd;
-void *		data;
+caddr_t		data;
 int		flag;
 struct lwp	*l;
 {
 		 int			unit = ZS_UNIT(dev);
-		 struct zs_softc	*zi = device_lookup_private(&zs_cd, unit >> 1);
+		 struct zs_softc	*zi = zs_cd.cd_devs[unit >> 1];
 	register struct tty		*tp = zi->zi_cs[unit & 1].cs_ttyp;
 	register int			error, s;
 	register struct zs_chanstate	*cs = &zi->zi_cs[unit & 1];
@@ -977,7 +986,7 @@ register struct tty *tp;
 	register struct zs_chanstate	*cs;
 	register int			s, nch;
 		 int			unit = ZS_UNIT(tp->t_dev);
-		 struct zs_softc	*zi = device_lookup_private(&zs_cd, unit >> 1);
+		 struct zs_softc	*zi = zs_cd.cd_devs[unit >> 1];
 
 	cs = &zi->zi_cs[unit & 1];
 	s  = spltty();
@@ -992,7 +1001,13 @@ register struct tty *tp;
 	 * If there are sleepers, and output has drained below low
 	 * water mark, awaken.
 	 */
-	ttypull(tp);
+	if(tp->t_outq.c_cc <= tp->t_lowat) {
+		if(tp->t_state & TS_ASLEEP) {
+			tp->t_state &= ~TS_ASLEEP;
+			wakeup((caddr_t)&tp->t_outq);
+		}
+		selwakeup(&tp->t_wsel);
+	}
 
 	nch = ndqb(&tp->t_outq, 0);	/* XXX */
 	if(nch) {
@@ -1031,7 +1046,7 @@ register struct tty	*tp;
 {
 	register struct zs_chanstate	*cs;
 	register int			s, unit = ZS_UNIT(tp->t_dev);
-		 struct zs_softc	*zi = device_lookup_private(&zs_cd, unit >> 1);
+		 struct zs_softc	*zi = zs_cd.cd_devs[unit >> 1];
 
 	cs = &zi->zi_cs[unit & 1];
 	s  = splzs();
@@ -1061,7 +1076,7 @@ zs_shutdown(cs)
 	 */
 	if(tp->t_cflag & HUPCL) {
 		zs_modem(cs, 0, DMSET);
-		(void)tsleep((void *)cs, TTIPRI, ttclos, hz);
+		(void)tsleep((caddr_t)cs, TTIPRI, ttclos, hz);
 	}
 
 	/* Clear any break condition set with TIOCSBRK. */
@@ -1090,7 +1105,7 @@ register struct tty	*tp;
 register struct termios	*t;
 {
 		 int			unit = ZS_UNIT(tp->t_dev);
-		 struct zs_softc	*zi = device_lookup_private(&zs_cd, unit >> 1);
+		 struct zs_softc	*zi = zs_cd.cd_devs[unit >> 1];
 	register struct zs_chanstate	*cs = &zi->zi_cs[unit & 1];
 		 int			cdiv = 0,	/* XXX gcc4 -Wuninitialized */
 					clkm = 0,	/* XXX gcc4 -Wuninitialized */
@@ -1179,7 +1194,7 @@ register struct termios	*t;
 			cs->cs_tbc = 0;
 			cs->cs_heldchange = 1;
 		} else {
-			bcopy((void *)cs->cs_preg, (void *)cs->cs_creg, 16);
+			bcopy((caddr_t)cs->cs_preg, (caddr_t)cs->cs_creg, 16);
 			zs_loadchannelregs(cs->cs_zc, cs->cs_creg);
 		}
 	}

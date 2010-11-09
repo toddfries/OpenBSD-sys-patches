@@ -1,4 +1,4 @@
-/*	$NetBSD: irix_systeminfo.c,v 1.16 2008/04/28 20:23:42 martin Exp $ */
+/*	$NetBSD: irix_systeminfo.c,v 1.11 2005/12/11 12:20:12 christos Exp $ */
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: irix_systeminfo.c,v 1.16 2008/04/28 20:23:42 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: irix_systeminfo.c,v 1.11 2005/12/11 12:20:12 christos Exp $");
 
 #include <sys/types.h>
 #include <sys/signal.h>
@@ -40,6 +47,7 @@ __KERNEL_RCSID(0, "$NetBSD: irix_systeminfo.c,v 1.16 2008/04/28 20:23:42 martin 
 #include <sys/proc.h>
 #include <sys/systm.h>
 #include <sys/sysctl.h>
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 
 #include <compat/common/compat_util.h>
@@ -69,13 +77,16 @@ char irix_si_version[128] = "04131232";
 #define BUF_SIZE 16
 
 int
-irix_sys_systeminfo(struct lwp *l, const struct irix_sys_systeminfo_args *uap, register_t *retval)
+irix_sys_systeminfo(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct irix_sys_systeminfo_args /* {
 		syscallarg(int) what;
 		syscallarg(char *) buf;
 		syscallarg(long) len;
-	} */
+	} */ *uap = v;
 	const char *str = NULL;
 	char strbuf[BUF_SIZE + 1];
 	int error = 0;
@@ -119,8 +130,18 @@ irix_sys_systeminfo(struct lwp *l, const struct irix_sys_systeminfo_args *uap, r
 
 	case SVR4_MIPS_SI_NUM_PROCESSORS:
 	case SVR4_MIPS_SI_AVAIL_PROCESSORS: {
+		int ncpu, name[2];
+		size_t sz;
+
+		name[0] = CTL_HW;
+		name[1] = HW_NCPU;
+		sz = sizeof(ncpu);
+		error = old_sysctl(&name[0], 2, &ncpu, &sz, NULL, 0, NULL);
+		if (error)
+			return error;
 		snprintf(strbuf, BUF_SIZE, "%d", ncpu);
 		str = strbuf;
+
 		break;
 	}
 
@@ -136,7 +157,7 @@ irix_sys_systeminfo(struct lwp *l, const struct irix_sys_systeminfo_args *uap, r
 
 	case SVR4_MIPS_SI_SERIAL: /* Unimplemented yet */
 	default:
-		return svr4_sys_systeminfo(l, (const void *)uap, retval);
+		return svr4_sys_systeminfo(l, v, retval);
 		break;
 	}
 

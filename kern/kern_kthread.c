@@ -1,7 +1,7 @@
-/*	$NetBSD: kern_kthread.c,v 1.26 2009/01/30 04:09:35 agc Exp $	*/
+/*	$NetBSD: kern_kthread.c,v 1.19 2007/11/06 00:42:41 ad Exp $	*/
 
 /*-
- * Copyright (c) 1998, 1999, 2007, 2009 The NetBSD Foundation, Inc.
+ * Copyright (c) 1998, 1999, 2007 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -31,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kern_kthread.c,v 1.26 2009/01/30 04:09:35 agc Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kern_kthread.c,v 1.19 2007/11/06 00:42:41 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -63,18 +70,12 @@ kthread_create(pri_t pri, int flag, struct cpu_info *ci,
 	bool inmem;
 	int error;
 	va_list ap;
-	int lc;
 
 	inmem = uvm_uarea_alloc(&uaddr);
 	if (uaddr == 0)
 		return ENOMEM;
-	if ((flag & KTHREAD_TS) != 0) {
-		lc = SCHED_OTHER;
-	} else {
-		lc = SCHED_RR;
-	}
 	error = lwp_create(&lwp0, &proc0, uaddr, inmem, LWP_DETACHED, NULL,
-	    0, func, arg, &l, lc);
+	    0, func, arg, &l, SCHED_FIFO);
 	if (error) {
 		uvm_uarea_free(uaddr, curcpu());
 		return error;
@@ -99,15 +100,10 @@ kthread_create(pri_t pri, int flag, struct cpu_info *ci,
 	}
 
 	if (pri == PRI_NONE) {
-		if ((flag & KTHREAD_TS) != 0) {
-			/* Maximum user priority level. */
-			pri = MAXPRI_USER;
-		} else {
-			/* Minimum kernel priority level. */
-			pri = PRI_KTHREAD;
-		}
+		/* Minimum kernel priority level. */
+		pri = PRI_KTHREAD;
 	}
-	mutex_enter(proc0.p_lock);
+	mutex_enter(&proc0.p_smutex);
 	lwp_lock(l);
 	l->l_priority = pri;
 	if (ci != NULL) {
@@ -115,13 +111,13 @@ kthread_create(pri_t pri, int flag, struct cpu_info *ci,
 			lwp_unlock_to(l, ci->ci_schedstate.spc_mutex);
 			lwp_lock(l);
 		}
-		l->l_pflag |= LP_BOUND;
+		l->l_flag |= LW_BOUND;
 		l->l_cpu = ci;
 	}
 	if ((flag & KTHREAD_INTR) != 0)
 		l->l_pflag |= LP_INTR;
-	if ((flag & KTHREAD_MPSAFE) == 0)
-		l->l_pflag &= ~LP_MPSAFE;
+	if ((flag & KTHREAD_MPSAFE) != 0)
+		l->l_pflag |= LP_MPSAFE;
 
 	/*
 	 * Set the new LWP running, unless the caller has requested
@@ -132,14 +128,14 @@ kthread_create(pri_t pri, int flag, struct cpu_info *ci,
 		sched_enqueue(l, false);
 		lwp_unlock(l);
 	} else
-		lwp_unlock_to(l, ci->ci_schedstate.spc_lwplock);
+		lwp_unlock_to(l, &ci->ci_schedstate.spc_lwplock);
 
 	/*
 	 * The LWP is not created suspended or stopped and cannot be set
 	 * into those states later, so must be considered runnable.
 	 */
 	proc0.p_nrlwps++;
-	mutex_exit(proc0.p_lock);
+	mutex_exit(&proc0.p_smutex);
 
 	/* All done! */
 	if (lp != NULL)

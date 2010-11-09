@@ -1,4 +1,4 @@
-/*	$NetBSD: clock.c,v 1.42 2008/11/04 16:43:47 abs Exp $	*/
+/*	$NetBSD: clock.c,v 1.37 2005/12/24 20:06:58 perry Exp $	*/
 
 /*
  * Copyright (c) 1982, 1990 The Regents of the University of California.
@@ -77,7 +77,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: clock.c,v 1.42 2008/11/04 16:43:47 abs Exp $");
+__KERNEL_RCSID(0, "$NetBSD: clock.c,v 1.37 2005/12/24 20:06:58 perry Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -87,7 +87,6 @@ __KERNEL_RCSID(0, "$NetBSD: clock.c,v 1.42 2008/11/04 16:43:47 abs Exp $");
 #include <sys/conf.h>
 #include <sys/proc.h>
 #include <sys/event.h>
-#include <sys/timetc.h>
 
 #include <dev/clock_subr.h>
 
@@ -102,28 +101,12 @@ __KERNEL_RCSID(0, "$NetBSD: clock.c,v 1.42 2008/11/04 16:43:47 abs Exp $");
 #include <machine/profile.h>
 #endif
 
-static int	atari_rtc_get(todr_chip_handle_t, struct clock_ymdhms *);
-static int	atari_rtc_set(todr_chip_handle_t, struct clock_ymdhms *);
-
 /*
  * The MFP clock runs at 2457600Hz. We use a {system,stat,prof}clock divider
  * of 200. Therefore the timer runs at an effective rate of:
  * 2457600/200 = 12288Hz.
  */
 #define CLOCK_HZ	12288
-
-static u_int clk_getcounter(struct timecounter *);
-
-static struct timecounter clk_timecounter = {
-	clk_getcounter,	/* get_timecount */
-	0,		/* no poll_pps */
-	~0u,		/* counter_mask */
-	CLOCK_HZ,	/* frequency */
-	"clock",	/* name, overriden later */
-	100,		/* quality */
-	NULL,		/* prev */
-	NULL,		/* next */
-};
 
 /*
  * Machine-dependent clock routines.
@@ -164,6 +147,7 @@ const struct cdevsw rtc_cdevsw = {
 
 void statintr __P((struct clockframe));
 
+static u_long	gettod __P((void));
 static int	twodigits __P((char *, int));
 
 static int	divisor;	/* Systemclock divisor	*/
@@ -202,6 +186,12 @@ void		*auxp;
 	    MFP->mf_tbdr  = 0;	
 	    MFP->mf_tbcr  = T_Q004;	/* Start timer			*/
 
+	    /*
+	     * Initialize the time structure
+	     */
+	    time.tv_sec  = 0;
+	    time.tv_usec = 0;
+
 	    return 0;
 	}
 	if(!strcmp("clock", auxp))
@@ -217,13 +207,6 @@ struct device	*pdp, *dp;
 void		*auxp;
 {
 	struct clock_softc *sc = (void *)dp;
-	static struct todr_chip_handle	tch;
-
-	tch.todr_gettime_ymdhms = atari_rtc_get;
-	tch.todr_settime_ymdhms = atari_rtc_set;
-	tch.todr_setwen = NULL;
-
-	todr_attach(&tch);
 
 	sc->sc_flags = 0;
 
@@ -238,15 +221,12 @@ void		*auxp;
 	MFP->mf_iera &= ~IA_TIMA;	/* Disable timer interrupts	*/
 	MFP->mf_tadr  = divisor;	/* Set divisor			*/
 
-	clk_timecounter.tc_frequency = CLOCK_HZ;
-
 	if (hz != 48 && hz != 64 && hz != 96) { /* XXX */
 		printf (": illegal value %d for systemclock, reset to %d\n\t",
 								hz, 64);
 		hz = 64;
 	}
 	printf(": system hz %d timer-A divisor 200/%d\n", hz, divisor);
-	tc_init(&clk_timecounter);
 
 #ifdef STATCLOCK
 	if ((stathz == 0) || (stathz > hz) || (CLOCK_HZ % stathz))
@@ -316,24 +296,32 @@ statintr(frame)
 }
 #endif /* STATCLOCK */
 
-static u_int
-clk_getcounter(struct timecounter *tc)
+/*
+ * Returns number of usec since last recorded clock "tick"
+ * (i.e. clock interrupt).
+ */
+long
+clkread()
 {
-	u_int delta;
-	u_char ipra, tadr;
-	int s, cur_hardclock;
+	u_int	delta;
+	u_char	ipra, tadr;
 
-	s = splhigh();
-	ipra = MFP->mf_ipra;
-	tadr = MFP->mf_tadr;
-	delta = divisor - tadr;
+	/*
+	 * Note: Order is important!
+	 * By reading 'ipra' before 'tadr' and caching the data, I try to avoid
+	 * the situation that very low value in 'tadr' is read (== a big delta)
+	 * while also acccounting for a full 'tick' because the counter went
+	 * through zero during the calculations.
+	 */
+	ipra = MFP->mf_ipra; tadr = MFP->mf_tadr;
 
-	if (ipra & IA_TIMA)
-		delta += divisor;
-	cur_hardclock = hardclock_ticks;
-	splx(s);
-
-	return (divisor - tadr) + divisor * cur_hardclock;
+	delta = ((divisor - tadr) * tick) / divisor;
+	/*
+	 * Account for pending clock interrupts
+	 */
+	if(ipra & IA_TIMA)
+		return(delta + tick);
+	return(delta);
 }
 
 #define TIMB_FREQ	614400
@@ -345,9 +333,10 @@ clk_getcounter(struct timecounter *tc)
  * Note: timer had better have been programmed before this is first used!
  */
 void
-delay(unsigned int n)
+delay(n)
+int	n;
 {
-	int	ticks, otick, remaining;
+	int	ticks, otick;
 
 	/*
 	 * Read the counter first, so that the rest of the setup overhead is
@@ -355,25 +344,28 @@ delay(unsigned int n)
 	 */
 	otick = MFP->mf_tbdr;
 
-	if (n <= UINT_MAX / TIMB_FREQ) {
-		/*
-		 * For unsigned arithmetic, division can be replaced with
-		 * multiplication with the inverse and a shift.
-		 */
-		remaining = n * TIMB_FREQ / 1000000;
-	} else {
-		/* This is a very long delay.
-		 * Being slow here doesn't matter.
-		 */
-		remaining = (unsigned long long) n * TIMB_FREQ / 1000000;
+	/*
+	 * Calculate ((n * TIMER_FREQ) / 1e6) using explicit assembler code so
+	 * we can take advantage of the intermediate 64-bit quantity to prevent
+	 * loss of significance.
+	 */
+	n -= 5;
+	if(n < 0)
+		return;
+	{
+	    u_int	temp;
+		
+	    __asm volatile ("mulul %2,%1:%0" : "=d" (n), "=d" (temp)
+					       : "d" (TIMB_FREQ), "d" (n));
+	    __asm volatile ("divul %1,%2:%0" : "=d" (n)
+					       : "d"(1000000),"d"(temp),"0"(n));
 	}
 
-	while(remaining > 0) {
+	while(n > 0) {
 		ticks = MFP->mf_tbdr;
 		if(ticks > otick)
-			remaining -= TIMB_LIMIT - (ticks - otick);
-		else
-			remaining -= otick - ticks;
+			n -= TIMB_LIMIT - (ticks - otick);
+		else n -= otick - ticks;
 		otick = ticks;
 	}
 }
@@ -384,7 +376,7 @@ delay(unsigned int n)
  * Assumes it is called with clock interrupts blocked.
  */
 profclock(pc, ps)
-	void *pc;
+	caddr_t pc;
 	int ps;
 {
 	/*
@@ -438,12 +430,38 @@ u_int	regno, value;
 	((struct rtc *)rtc)->rtc_data  = value;
 }
 
-static int
-atari_rtc_get(todr_chip_handle_t todr, struct clock_ymdhms *dtp)
+/*
+ * Initialize the time of day register, assuming the RTC runs in UTC.
+ * Since we've got the 'rtc' device, this functionality should be removed
+ * from the kernel. The only problem to be solved before that can happen
+ * is the possibility of init(1) providing a way (rc.boot?) to set
+ * the RTC before single-user mode is entered.
+ */
+void
+inittodr(base)
+time_t base;
+{
+	/* Battery clock does not store usec's, so forget about it. */
+	time.tv_sec  = gettod();
+	time.tv_usec = 0;
+}
+
+/*
+ * Function turned into a No-op. Use /dev/rtc to update the RTC.
+ */
+void
+resettodr()
+{
+	return;
+}
+
+static u_long
+gettod()
 {
 	int			sps;
 	mc_todregs		clkregs;
 	u_int			regb;
+	struct clock_ymdhms	dt;
 
 	sps = splhigh();
 	regb = mc146818_read(RTC, MC_REGB);
@@ -458,48 +476,27 @@ atari_rtc_get(todr_chip_handle_t todr, struct clock_ymdhms *dtp)
 			return(0);
 	}
 	if(clkregs[MC_SEC] > 59)
-		return -1;
+		return(0);
 	if(clkregs[MC_MIN] > 59)
-		return -1;
+		return(0);
 	if(clkregs[MC_HOUR] > 23)
-		return -1;
+		return(0);
 	if(range_test(clkregs[MC_DOM], 1, 31))
-		return -1;
+		return(0);
 	if (range_test(clkregs[MC_MONTH], 1, 12))
-		return -1;
+		return(0);
 	if(clkregs[MC_YEAR] > 99)
-		return -1;
+		return(0);
 
-	dtp->dt_year = clkregs[MC_YEAR] + GEMSTARTOFTIME;
-	dtp->dt_mon  = clkregs[MC_MONTH];
-	dtp->dt_day  = clkregs[MC_DOM];
-	dtp->dt_hour = clkregs[MC_HOUR];
-	dtp->dt_min  = clkregs[MC_MIN];
-	dtp->dt_sec  = clkregs[MC_SEC];
+	dt.dt_year = clkregs[MC_YEAR] + GEMSTARTOFTIME;
+	dt.dt_mon  = clkregs[MC_MONTH];
+	dt.dt_day  = clkregs[MC_DOM];
+	dt.dt_hour = clkregs[MC_HOUR];
+	dt.dt_min  = clkregs[MC_MIN];
+	dt.dt_sec  = clkregs[MC_SEC];
 
-	return 0;
+	return(clock_ymdhms_to_secs(&dt));
 }
-
-static int
-atari_rtc_set(todr_chip_handle_t todr, struct clock_ymdhms *dtp)
-{
-	int s;
-	mc_todregs clkregs;
-
-	clkregs[MC_YEAR] = dtp->dt_year - GEMSTARTOFTIME;
-	clkregs[MC_MONTH] = dtp->dt_mon;
-	clkregs[MC_DOM] = dtp->dt_day;
-	clkregs[MC_HOUR] = dtp->dt_hour;
-	clkregs[MC_MIN] = dtp->dt_min;
-	clkregs[MC_SEC] = dtp->dt_sec;
-
-	s = splclock();
-	MC146818_PUTTOD(RTC, &clkregs);
-	splx(s);
-
-	return 0;
-}
-
 /***********************************************************************
  *                   RTC-device support				       *
  ***********************************************************************/
@@ -512,8 +509,10 @@ rtcopen(dev, flag, mode, l)
 	int			unit = minor(dev);
 	struct clock_softc	*sc;
 
-	sc = device_lookup_private(&clock_cd, unit);
-	if (sc == NULL)
+	if (unit >= clock_cd.cd_ndevs)
+		return ENXIO;
+	sc = clock_cd.cd_devs[unit];
+	if (!sc)
 		return ENXIO;
 	if (sc->sc_flags & RTC_OPEN)
 		return EBUSY;
@@ -530,7 +529,7 @@ rtcclose(dev, flag, mode, l)
 	struct lwp	*l;
 {
 	int			unit = minor(dev);
-	struct clock_softc	*sc = device_lookup_private(&clock_cd, unit);
+	struct clock_softc	*sc = clock_cd.cd_devs[unit];
 
 	sc->sc_flags = 0;
 	return 0;
@@ -547,7 +546,7 @@ rtcread(dev, uio, flags)
 	int			s, length;
 	char			buffer[16];
 
-	sc = device_lookup_private(&clock_cd, minor(dev));
+	sc = clock_cd.cd_devs[minor(dev)];
 
 	s = splhigh();
 	MC146818_GETTOD(RTC, &clkregs);
@@ -565,7 +564,7 @@ rtcread(dev, uio, flags)
 	if (length > uio->uio_resid)
 		length = uio->uio_resid;
 
-	return(uiomove((void *)buffer, length, uio));
+	return(uiomove((caddr_t)buffer, length, uio));
 }
 
 static int
@@ -600,7 +599,7 @@ rtcwrite(dev, uio, flags)
 	  && length != sizeof(buffer - 1)))
 		return(EINVAL);
 	
-	if ((error = uiomove((void *)buffer, sizeof(buffer), uio)))
+	if ((error = uiomove((caddr_t)buffer, sizeof(buffer), uio)))
 		return(error);
 
 	if (length == sizeof(buffer) && buffer[sizeof(buffer) - 1] != '\n')

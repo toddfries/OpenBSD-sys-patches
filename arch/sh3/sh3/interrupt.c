@@ -1,4 +1,4 @@
-/*	$NetBSD: interrupt.c,v 1.27 2008/04/28 20:23:35 martin Exp $	*/
+/*	$NetBSD: interrupt.c,v 1.20 2006/10/10 00:40:47 uwe Exp $	*/
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,19 +37,20 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: interrupt.c,v 1.27 2008/04/28 20:23:35 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: interrupt.c,v 1.20 2006/10/10 00:40:47 uwe Exp $");
 
 #include <sys/param.h>
 #include <sys/malloc.h>
-#include <sys/intr.h>
-#include <sys/cpu.h>
 
 #include <uvm/uvm_extern.h>	/* uvmexp.intrs */
+
+#include <net/netisr.h>
 
 #include <sh3/exception.h>
 #include <sh3/clock.h>
 #include <sh3/intcreg.h>
 #include <sh3/tmureg.h>
+#include <machine/intr.h>
 
 static void intc_intr_priority(int, int);
 static struct intc_intrhand *intc_alloc_ih(void);
@@ -54,6 +62,9 @@ static void intpri_intr_enable(int);
 static void intpri_intr_disable(int);
 #endif
 
+static void netintr(void);
+static int tmu1_intr(void *);
+
 /*
  * EVTCODE to intc_intrhand mapper.
  * max #76 is SH4_INTEVT_TMU4 (0xb80)
@@ -64,6 +75,9 @@ struct intc_intrhand __intc_intrhand[_INTR_N + 1] = {
 	/* Place holder interrupt handler for unregistered interrupt. */
 	[0] = { .ih_func = intc_unknown_intr, .ih_level = 0xf0 }
 };
+
+struct sh_soft_intr sh_soft_intrs[_IPL_NSOFT];
+struct sh_soft_intrhand *softnet_intrhand;
 
 /*
  * SH INTC support.
@@ -168,8 +182,6 @@ intc_intr_disable(int evtcode)
 	case SH4_INTEVT_PCIPWON:
 	case SH4_INTEVT_PCIPWDWN:
 	case SH4_INTEVT_PCIERR:
-	case SH4_INTEVT_TMU3:
-	case SH4_INTEVT_TMU4:
 		intpri_intr_disable(evtcode);
 		break;
 #endif
@@ -201,8 +213,6 @@ intc_intr_enable(int evtcode)
 	case SH4_INTEVT_PCIPWON:
 	case SH4_INTEVT_PCIPWDWN:
 	case SH4_INTEVT_PCIERR:
-	case SH4_INTEVT_TMU3:
-	case SH4_INTEVT_TMU4:
 		intpri_intr_enable(evtcode);
 		break;
 #endif
@@ -559,9 +569,178 @@ intpri_intr_disable(int evtcode)
 }
 #endif /* SH4 */
 
-bool
-cpu_intr_p(void)
+/*
+ * Software interrupt support
+ */
+void
+softintr_init(void)
+{
+	static const char *softintr_names[] = IPL_SOFTNAMES;
+	struct sh_soft_intr *asi;
+	int i;
+
+	for (i = 0; i < _IPL_NSOFT; i++) {
+		asi = &sh_soft_intrs[i];
+		TAILQ_INIT(&asi->softintr_q);
+
+		asi->softintr_ipl = IPL_SOFT + i;
+		simple_lock_init(&asi->softintr_slock);
+		evcnt_attach_dynamic(&asi->softintr_evcnt, EVCNT_TYPE_INTR,
+		    NULL, "soft", softintr_names[i]);
+	}
+
+	/* XXX Establish legacy soft interrupt handlers. */
+	softnet_intrhand = softintr_establish(IPL_SOFTNET,
+	    (void (*)(void *))netintr, NULL);
+	KDASSERT(softnet_intrhand != NULL);
+
+	/*
+	 * This runs at the lowest soft priority, so that when splx() sets
+	 * a higher priority it blocks all soft interrupts.  Effectively, we
+	 * have only a single soft interrupt level this way.
+	 */
+	intc_intr_establish(SH_INTEVT_TMU1_TUNI1, IST_LEVEL, IPL_SOFT,
+	    tmu1_intr, NULL);
+}
+
+void
+softintr_dispatch(int ipl)
+{
+	struct sh_soft_intr *asi;
+	struct sh_soft_intrhand *sih;
+	int s;
+
+	s = _cpu_intr_suspend();
+
+	asi = &sh_soft_intrs[ipl - IPL_SOFT];
+
+	if (TAILQ_FIRST(&asi->softintr_q) != NULL)
+		asi->softintr_evcnt.ev_count++;
+
+	while ((sih = TAILQ_FIRST(&asi->softintr_q)) != NULL) {
+		TAILQ_REMOVE(&asi->softintr_q, sih, sih_q);
+		sih->sih_pending = 0;
+
+		uvmexp.softs++;
+
+		_cpu_intr_resume(s);
+		(*sih->sih_fn)(sih->sih_arg);
+		s = _cpu_intr_suspend();
+	}
+
+	_cpu_intr_resume(s);
+}
+
+/* Register a software interrupt handler. */
+void *
+softintr_establish(int ipl, void (*func)(void *), void *arg)
+{
+	struct sh_soft_intr *asi;
+	struct sh_soft_intrhand *sih;
+	int s;
+
+	if (__predict_false(ipl >= (IPL_SOFT + _IPL_NSOFT) ||
+			    ipl < IPL_SOFT))
+		panic("softintr_establish");
+
+	sih = malloc(sizeof(*sih), M_DEVBUF, M_NOWAIT);
+
+	s = _cpu_intr_suspend();
+	asi = &sh_soft_intrs[ipl - IPL_SOFT];
+	if (__predict_true(sih != NULL)) {
+		sih->sih_intrhead = asi;
+		sih->sih_fn = func;
+		sih->sih_arg = arg;
+		sih->sih_pending = 0;
+	}
+	_cpu_intr_resume(s);
+
+	return (sih);
+}
+
+/* Unregister a software interrupt handler. */
+void
+softintr_disestablish(void *arg)
+{
+	struct sh_soft_intrhand *sih = arg;
+	struct sh_soft_intr *asi = sih->sih_intrhead;
+	int s;
+
+	s = _cpu_intr_suspend();
+	if (sih->sih_pending) {
+		TAILQ_REMOVE(&asi->softintr_q, sih, sih_q);
+		sih->sih_pending = 0;
+	}
+	_cpu_intr_resume(s);
+
+	free(sih, M_DEVBUF);
+}
+
+/*
+ * Software (low priority) network interrupt. i.e. softnet().
+ */
+static void
+netintr(void)
+{
+#define	DONETISR(bit, fn)						\
+	do {								\
+		if (n & (1 << bit))					\
+			fn();						\
+	} while (/*CONSTCOND*/0)
+
+	int s, n;
+
+	s = splnet();
+	n = netisr;
+	netisr = 0;
+	splx(s);
+#include <net/netisr_dispatch.h>
+
+#undef DONETISR
+}
+
+/*
+ * Software interrupt is simulated with TMU one-shot timer.
+ */
+static volatile u_int softpend;
+
+
+/*
+ * Called by softintr_schedule() with interrupts blocked.
+ */
+void
+setsoft(int ipl)
 {
 
-	return curcpu()->ci_idepth >= 0;
+	softpend |= (1 << ipl);
+	_reg_bclr_1(SH_(TSTR), TSTR_STR1);
+	_reg_write_4(SH_(TCNT1), 0);
+	_reg_bset_1(SH_(TSTR), TSTR_STR1);
 }
+
+static int
+tmu1_intr(void *arg)
+{
+	u_int pend;
+	int s;
+
+	s = splhigh();
+	pend = softpend;
+	softpend = 0;
+	splx(s);
+
+	_reg_bclr_1(SH_(TSTR), TSTR_STR1);
+	_reg_bclr_2(SH_(TCR1), TCR_UNF);
+
+	if (pend & (1 << IPL_SOFTSERIAL))
+		softintr_dispatch(IPL_SOFTSERIAL);
+	if (pend & (1 << IPL_SOFTNET))
+		softintr_dispatch(IPL_SOFTNET);
+	if (pend & (1 << IPL_SOFTCLOCK))
+		softintr_dispatch(IPL_SOFTCLOCK);
+	if (pend & (1 << IPL_SOFT))
+		softintr_dispatch(IPL_SOFT);
+		
+	return (0);
+}
+

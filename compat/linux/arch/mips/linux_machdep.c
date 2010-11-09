@@ -1,4 +1,4 @@
-/*	$NetBSD: linux_machdep.c,v 1.38 2008/04/28 20:23:43 martin Exp $ */
+/*	$NetBSD: linux_machdep.c,v 1.28 2007/01/04 18:27:36 elad Exp $ */
 
 /*-
  * Copyright (c) 1995, 2000, 2001 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: linux_machdep.c,v 1.38 2008/04/28 20:23:43 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: linux_machdep.c,v 1.28 2007/01/04 18:27:36 elad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -50,6 +57,7 @@ __KERNEL_RCSID(0, "$NetBSD: linux_machdep.c,v 1.38 2008/04/28 20:23:43 martin Ex
 #include <sys/mount.h>
 #include <sys/vnode.h>
 #include <sys/device.h>
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 #include <sys/filedesc.h>
 #include <sys/exec_elf.h>
@@ -69,7 +77,7 @@ __KERNEL_RCSID(0, "$NetBSD: linux_machdep.c,v 1.38 2008/04/28 20:23:43 martin Ex
 
 #include <compat/linux/linux_syscallargs.h>
 
-#include <sys/cpu.h>
+#include <machine/cpu.h>
 #include <machine/psl.h>
 #include <machine/reg.h>
 #include <machine/regnum.h>
@@ -95,7 +103,10 @@ __KERNEL_RCSID(0, "$NetBSD: linux_machdep.c,v 1.38 2008/04/28 20:23:43 martin Ex
  * entry uses NetBSD's native setregs instead of linux_setregs
  */
 void
-linux_setregs(struct lwp *l, struct exec_package *pack, u_long stack)
+linux_setregs(l, pack, stack)
+	struct lwp *l;
+	struct exec_package *pack;
+	u_long stack;
 {
 	setregs(l, pack, stack);
 	return;
@@ -111,14 +122,16 @@ linux_setregs(struct lwp *l, struct exec_package *pack, u_long stack)
  */
 
 void
-linux_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
+linux_sendsig(ksi, mask)
+	const ksiginfo_t *ksi;
+	const sigset_t *mask;
 {
 	const int sig = ksi->ksi_signo;
 	struct lwp *l = curlwp;
 	struct proc *p = l->l_proc;
 	struct linux_sigframe *fp;
 	struct frame *f;
-	int i, onstack, error;
+	int i,onstack;
 	sig_t catcher = SIGACTION(p, sig).sa_handler;
 	struct linux_sigframe sf;
 
@@ -131,7 +144,7 @@ linux_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
 	 * Do we need to jump onto the signal stack?
 	 */
 	onstack =
-	    (l->l_sigstk.ss_flags & (SS_DISABLE | SS_ONSTACK)) == 0 &&
+	    (p->p_sigctx.ps_sigstk.ss_flags & (SS_DISABLE | SS_ONSTACK)) == 0 &&
 	    (SIGACTION(p, sig).sa_flags & SA_ONSTACK) != 0;
 
 	/*
@@ -145,8 +158,8 @@ linux_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
 	 */
 	if (onstack)
 		fp = (struct linux_sigframe *)
-		    ((uint8_t *)l->l_sigstk.ss_sp
-		    + l->l_sigstk.ss_size);
+		    ((caddr_t)p->p_sigctx.ps_sigstk.ss_sp
+		    + p->p_sigctx.ps_sigstk.ss_size);
 	else
 		/* cast for _MIPS_BSD_API == _MIPS_BSD_API_LP32_64CLEAN case */
 		fp = (struct linux_sigframe *)(u_int32_t)f->f_regs[_R_SP];
@@ -173,22 +186,17 @@ linux_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
 	sf.lsf_sc.lsc_status = f->f_regs[_R_SR];
 	sf.lsf_sc.lsc_cause = f->f_regs[_R_CAUSE];
 	sf.lsf_sc.lsc_badvaddr = f->f_regs[_R_BADVADDR];
-	sendsig_reset(l, sig);
 
 	/*
 	 * Save signal stack.  XXX broken
 	 */
-	/* kregs.sc_onstack = l->l_sigstk.ss_flags & SS_ONSTACK; */
+	/* kregs.sc_onstack = p->p_sigctx.ps_sigstk.ss_flags & SS_ONSTACK; */
 
 	/*
 	 * Install the sigframe onto the stack
 	 */
 	fp -= sizeof(struct linux_sigframe);
-	mutex_exit(p->p_lock);
-	error = copyout(&sf, fp, sizeof(sf));
-	mutex_enter(p->p_lock);
-
-	if (error != 0) {
+	if (copyout(&sf, fp, sizeof(sf)) != 0) {
 		/*
 		 * Process has trashed its stack; give it an illegal
 		 * instruction to halt it in its tracks.
@@ -217,7 +225,7 @@ linux_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
 
 	/* Remember that we're now on the signal stack. */
 	if (onstack)
-		l->l_sigstk.ss_flags |= SS_ONSTACK;
+		p->p_sigctx.ps_sigstk.ss_flags |= SS_ONSTACK;
 
 	return;
 }
@@ -228,11 +236,14 @@ linux_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
  * stack state from context left by sendsig (above).
  */
 int
-linux_sys_sigreturn(struct lwp *l, const struct linux_sys_sigreturn_args *uap, register_t *retval)
+linux_sys_sigreturn(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct linux_sys_sigreturn_args /* {
 		syscallarg(struct linux_sigframe *) sf;
-	} */
+	} */ *uap = v;
 	struct proc *p = l->l_proc;
 	struct linux_sigframe *sf, ksf;
 	struct frame *f;
@@ -263,23 +274,22 @@ linux_sys_sigreturn(struct lwp *l, const struct linux_sys_sigreturn_args *uap, r
 	f->f_regs[_R_BADVADDR] = ksf.lsf_sc.lsc_badvaddr;
 	f->f_regs[_R_CAUSE] = ksf.lsf_sc.lsc_cause;
 
-	mutex_enter(p->p_lock);
-
 	/* Restore signal stack. */
-	l->l_sigstk.ss_flags &= ~SS_ONSTACK;
+	p->p_sigctx.ps_sigstk.ss_flags &= ~SS_ONSTACK;
 
 	/* Restore signal mask. */
 	linux_to_native_sigset(&mask, (linux_sigset_t *)&ksf.lsf_mask);
-	(void)sigprocmask1(l, SIG_SETMASK, &mask, 0);
-
-	mutex_exit(p->p_lock);
+	(void)sigprocmask1(p, SIG_SETMASK, &mask, 0);
 
 	return (EJUSTRETURN);
 }
 
 
 int
-linux_sys_rt_sigreturn(struct lwp *l, const void *v, register_t *retval)
+linux_sys_rt_sigreturn(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
 	return (ENOSYS);
 }
@@ -287,7 +297,10 @@ linux_sys_rt_sigreturn(struct lwp *l, const void *v, register_t *retval)
 
 #if 0
 int
-linux_sys_modify_ldt(struct lwp *l, const struct linux_sys_modify_ldt_args *uap, register_t *retval)
+linux_sys_modify_ldt(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
 	/*
 	 * This syscall is not implemented in Linux/Mips: we should not
@@ -304,7 +317,9 @@ linux_sys_modify_ldt(struct lwp *l, const struct linux_sys_modify_ldt_args *uap,
  * major device numbers remapping
  */
 dev_t
-linux_fakedev(dev_t dev, int raw)
+linux_fakedev(dev, raw)
+	dev_t dev;
+	int raw;
 {
 	/* XXX write me */
 	return dev;
@@ -314,7 +329,10 @@ linux_fakedev(dev_t dev, int raw)
  * We come here in a last attempt to satisfy a Linux ioctl() call
  */
 int
-linux_machdepioctl(struct lwp *l, const struct linux_sys_ioctl_args *uap, register_t *retval)
+linux_machdepioctl(p, v, retval)
+	struct proc *p;
+	void *v;
+	register_t *retval;
 {
 	return 0;
 }
@@ -324,7 +342,10 @@ linux_machdepioctl(struct lwp *l, const struct linux_sys_ioctl_args *uap, regist
  * just let it have the whole range.
  */
 int
-linux_sys_ioperm(struct lwp *l, const struct linux_sys_ioperm_args *uap, register_t *retval)
+linux_sys_ioperm(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
 	/*
 	 * This syscall is not implemented in Linux/Mips: we should not be here
@@ -339,7 +360,10 @@ linux_sys_ioperm(struct lwp *l, const struct linux_sys_ioperm_args *uap, registe
  * wrapper linux_sys_new_uname() -> linux_sys_uname()
  */
 int
-linux_sys_new_uname(struct lwp *l, const struct linux_sys_new_uname_args *uap, register_t *retval)
+linux_sys_new_uname(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
 /*
  * Use this if you want to try Linux emulation with a glibc-2.2
@@ -351,16 +375,16 @@ linux_sys_new_uname(struct lwp *l, const struct linux_sys_new_uname_args *uap, r
         } */ *uap = v;
         struct linux_utsname luts;
 
-        strlcpy(luts.l_sysname, linux_sysname, sizeof(luts.l_sysname));
-        strlcpy(luts.l_nodename, hostname, sizeof(luts.l_nodename));
-        strlcpy(luts.l_release, "2.4.0", sizeof(luts.l_release));
-        strlcpy(luts.l_version, linux_version, sizeof(luts.l_version));
-        strlcpy(luts.l_machine, machine, sizeof(luts.l_machine));
-        strlcpy(luts.l_domainname, domainname, sizeof(luts.l_domainname));
+        strncpy(luts.l_sysname, linux_sysname, sizeof(luts.l_sysname));
+        strncpy(luts.l_nodename, hostname, sizeof(luts.l_nodename));
+        strncpy(luts.l_release, "2.4.0", sizeof(luts.l_release));
+        strncpy(luts.l_version, linux_version, sizeof(luts.l_version));
+        strncpy(luts.l_machine, machine, sizeof(luts.l_machine));
+        strncpy(luts.l_domainname, domainname, sizeof(luts.l_domainname));
 
         return copyout(&luts, SCARG(uap, up), sizeof(luts));
 #else
-	return linux_sys_uname(l, (const void *)uap, retval);
+	return linux_sys_uname(l, v, retval);
 #endif
 }
 
@@ -370,7 +394,10 @@ linux_sys_new_uname(struct lwp *l, const struct linux_sys_new_uname_args *uap, r
  * we emulate this broken beahior.
  */
 int
-linux_sys_cacheflush(struct lwp *l, const struct linux_sys_cacheflush_args *uap, register_t *retval)
+linux_sys_cacheflush(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
 	mips_icache_sync_all();
 	mips_dcache_wbinv_all();
@@ -382,16 +409,17 @@ linux_sys_cacheflush(struct lwp *l, const struct linux_sys_cacheflush_args *uap,
  * some binaries and some libraries use it.
  */
 int
-linux_sys_sysmips(struct lwp *l, const struct linux_sys_sysmips_args *uap, register_t *retval)
+linux_sys_sysmips(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-#if 0
 	struct linux_sys_sysmips_args {
 		syscallarg(int) cmd;
 		syscallarg(int) arg1;
 		syscallarg(int) arg2;
 		syscallarg(int) arg3;
 	} *uap = v;
-#endif
 	int error;
 
 	switch (SCARG(uap, cmd)) {
@@ -400,6 +428,9 @@ linux_sys_sysmips(struct lwp *l, const struct linux_sys_sysmips_args *uap, regis
 		int name[2];
 		size_t len;
 
+		if ((error = kauth_authorize_generic(l->l_cred,
+		    KAUTH_GENERIC_ISSUSER, NULL)) != 0)
+			return error;
 		if ((error = copyinstr((char *)SCARG(uap, arg1), nodename,
 		    LINUX___NEW_UTS_LEN, &len)) != 0)
 			return error;

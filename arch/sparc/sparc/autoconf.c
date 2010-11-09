@@ -1,4 +1,4 @@
-/*	$NetBSD: autoconf.c,v 1.232 2009/02/13 22:41:03 apb Exp $ */
+/*	$NetBSD: autoconf.c,v 1.221 2006/03/29 04:16:47 thorpej Exp $ */
 
 /*
  * Copyright (c) 1996
@@ -48,11 +48,10 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.232 2009/02/13 22:41:03 apb Exp $");
+__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.221 2006/03/29 04:16:47 thorpej Exp $");
 
 #include "opt_ddb.h"
 #include "opt_kgdb.h"
-#include "opt_modular.h"
 #include "opt_multiprocessor.h"
 #include "opt_sparc_arch.h"
 
@@ -120,7 +119,7 @@ extern	int kgdb_debug_panic;
 #endif
 extern void *bootinfo;
 
-#if !NKSYMS && !defined(DDB) && !defined(MODULAR)
+#if !NKSYMS && !defined(DDB) && !defined(LKM)
 void bootinfo_relocate(void *);
 #endif
 
@@ -264,7 +263,7 @@ void
 bootstrap(void)
 {
 	extern struct user *proc0paddr;
-#if NKSYMS || defined(DDB) || defined(MODULAR)
+#if NKSYMS || defined(DDB) || defined(LKM)
 	struct btinfo_symtab *bi_sym;
 #else
 	extern int end[];
@@ -289,7 +288,7 @@ bootstrap(void)
 	}
 #endif /* SUN4M || SUN4D */
 
-#if !NKSYMS && !defined(DDB) && !defined(MODULAR)
+#if !NKSYMS && !defined(DDB) && !defined(LKM)
 	/*
 	 * We want to reuse the memory where the symbols were stored
 	 * by the loader. Relocate the bootinfo array which is loaded
@@ -312,17 +311,17 @@ bootstrap(void)
 	 * bytes available for the buffer at this location (see the
 	 * comment in locore.s at the top of the .text segment).
 	 */
-	initmsgbuf((void *)KERNBASE, 8192);
+	initmsgbuf((caddr_t)KERNBASE, 8192);
 #endif
 
-#if NKSYMS || defined(DDB) || defined(MODULAR)
+#if NKSYMS || defined(DDB) || defined(LKM)
 	if ((bi_sym = lookup_bootinfo(BTINFO_SYMTAB)) != NULL) {
 		if (bi_sym->ssym < KERNBASE) {
 			/* Assume low-loading boot loader */
 			bi_sym->ssym += KERNBASE;
 			bi_sym->esym += KERNBASE;
 		}
-		ksyms_addsyms_elf(bi_sym->nsym, (int *)bi_sym->ssym,
+		ksyms_init(bi_sym->nsym, (int *)bi_sym->ssym,
 		    (int *)bi_sym->esym);
 	}
 #endif
@@ -914,9 +913,10 @@ st_crazymap(int n)
 void
 cpu_configure(void)
 {
+	extern struct user *proc0paddr;	/* XXX see below */
 
 	/* initialise the softintr system */
-	sparc_softintr_init();
+	softintr_init();
 
 	/* build the bootpath */
 	bootpath_build();
@@ -973,10 +973,7 @@ cpu_configure(void)
 	 * XXX stack running into it during auto-configuration.
 	 * XXX - should fix stack usage.
 	 */
-	{
-		extern struct user *proc0paddr;
-		bzero(proc0paddr, sizeof(struct user));
-	}
+	bzero(proc0paddr, sizeof(struct user));
 
 	spl0();
 }
@@ -1467,6 +1464,32 @@ romgetcursoraddr(int **rowp, int **colp)
 #endif /* RASTERCONSOLE */
 
 /*
+ * find a device matching "name" and unit number
+ */
+struct device *
+getdevunit(const char *name, int unit)
+{
+	struct device *dev = alldevs.tqh_first;
+	char num[10], fullname[16];
+	int lunit;
+
+	/* compute length of name and decimal expansion of unit number */
+	sprintf(num, "%d", unit);
+	lunit = strlen(num);
+	if (strlen(name) + lunit >= sizeof(fullname) - 1)
+		panic("config_attach: device name too long");
+
+	strcpy(fullname, name);
+	strcat(fullname, num);
+
+	while (strcmp(dev->dv_xname, fullname) != 0) {
+		if ((dev = dev->dv_list.tqe_next) == NULL)
+			return NULL;
+	}
+	return dev;
+}
+
+/*
  * Device registration used to determine the boot device.
  */
 #include <dev/scsipi/scsi_all.h>
@@ -1768,12 +1791,12 @@ device_register(struct device *dev, void *aux)
 		struct scsipi_periph *periph = sa->sa_periph;
 		struct scsipi_channel *chan = periph->periph_channel;
 		struct scsibus_softc *sbsc =
-			device_private(device_parent(dev));
+			(struct scsibus_softc *)device_parent(dev);
 		u_int target = bp->val[0];
 		u_int lun = bp->val[1];
 
 		/* Check the controller that this scsibus is on */
-		if ((bp-1)->dev != device_parent(sbsc->sc_dev))
+		if ((bp-1)->dev != device_parent(&sbsc->sc_dev))
 			return;
 
 		/*
@@ -1868,7 +1891,7 @@ lookup_bootinfo(int type)
 	return (NULL);
 }
 
-#if !NKSYMS && !defined(DDB) && !defined(MODULAR)
+#if !NKSYMS && !defined(DDB) && !defined(LKM)
 /*
  * Move bootinfo from the current kernel top to the proposed
  * location. As a side-effect, `kernel_top' is adjusted to point
@@ -1930,4 +1953,4 @@ bootinfo_relocate(void *newloc)
 	bootinfo = newloc;
 	kernel_top = (char *)newloc + ALIGN(bi_size);
 }
-#endif /* !NKSYMS && !defined(DDB) && !defined(MODULAR) */
+#endif /* !NKSYMS && !defined(DDB) && !defined(LKM) */

@@ -1,4 +1,4 @@
-/*	$NetBSD: sunos32_exec.c,v 1.31 2008/11/19 18:36:05 ad Exp $	 */
+/*	$NetBSD: sunos32_exec.c,v 1.25 2006/10/15 21:12:08 martin Exp $	 */
 
 /*
  * Copyright (c) 2001 Matthew R. Green
@@ -12,6 +12,8 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -27,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sunos32_exec.c,v 1.31 2008/11/19 18:36:05 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sunos32_exec.c,v 1.25 2006/10/15 21:12:08 martin Exp $");
 
 #if defined(_KERNEL_OPT)
 #include "opt_syscall_debug.h"
@@ -39,8 +41,6 @@ __KERNEL_RCSID(0, "$NetBSD: sunos32_exec.c,v 1.31 2008/11/19 18:36:05 ad Exp $")
 
 #include <uvm/uvm_extern.h>
 
-#include <compat/netbsd32/netbsd32.h>
-#include <compat/netbsd32/netbsd32_syscallargs.h>
 #include <compat/sunos32/sunos32.h>
 #include <compat/sunos32/sunos32_syscall.h>
 #include <compat/sunos32/sunos32_exec.h>
@@ -60,7 +60,7 @@ void	syscall(void);
 
 struct uvm_object *emul_sunos32_object;
 
-struct emul emul_sunos = {
+const struct emul emul_sunos = {
 	"sunos32",
 	"/emul/sunos",
 #ifndef __HAVE_MINIMAL_EMUL
@@ -96,7 +96,5 @@ struct emul emul_sunos = {
 	NULL,
 	uvm_default_mapaddr,
 	NULL,
-	NULL,
-	0,
-	NULL,
+	NULL
 };

@@ -1,4 +1,4 @@
-/*	$NetBSD: pcons.c,v 1.29 2008/06/13 13:10:49 cegger Exp $	*/
+/*	$NetBSD: pcons.c,v 1.23 2006/10/01 18:56:22 elad Exp $	*/
 
 /*-
  * Copyright (c) 2000 Eduardo E. Horvath
@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: pcons.c,v 1.29 2008/06/13 13:10:49 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pcons.c,v 1.23 2006/10/01 18:56:22 elad Exp $");
 
 #include "opt_ddb.h"
 
@@ -110,7 +110,7 @@ pconsattach(struct device *parent, struct device *self, void *aux)
 
 	cn_init_magic(&pcons_cnm_state);
 	cn_set_magic("+++++");
-	callout_init(&sc->sc_poll_ch, 0);
+	callout_init(&sc->sc_poll_ch);
 }
 
 static void pconsstart(struct tty *);
@@ -121,12 +121,15 @@ int
 pconsopen(dev_t dev, int flag, int mode, struct lwp *l)
 {
 	struct pconssoftc *sc;
+	int unit = minor(dev);
 	struct tty *tp;
 	struct proc *p;
 
 	p = l->l_proc;
 	
-	sc = device_lookup_private(&pcons_cd, minor(dev));
+	if (unit >= pcons_cd.cd_ndevs)
+		return ENXIO;
+	sc = pcons_cd.cd_devs[unit];
 	if (!sc)
 		return ENXIO;
 	if (!(tp = sc->of_tty))
@@ -160,7 +163,7 @@ pconsopen(dev_t dev, int flag, int mode, struct lwp *l)
 int
 pconsclose(dev_t dev, int flag, int mode, struct lwp *l)
 {
-	struct pconssoftc *sc = device_lookup_private(&pcons_cd,minor(dev));
+	struct pconssoftc *sc = pcons_cd.cd_devs[minor(dev)];
 	struct tty *tp = sc->of_tty;
 
 	callout_stop(&sc->sc_poll_ch);
@@ -173,7 +176,7 @@ pconsclose(dev_t dev, int flag, int mode, struct lwp *l)
 int
 pconsread(dev_t dev, struct uio *uio, int flag)
 {
-	struct pconssoftc *sc = device_lookup_private(&pcons_cd, minor(dev));
+	struct pconssoftc *sc = pcons_cd.cd_devs[minor(dev)];
 	struct tty *tp = sc->of_tty;
 	
 	return (*tp->t_linesw->l_read)(tp, uio, flag);
@@ -182,7 +185,7 @@ pconsread(dev_t dev, struct uio *uio, int flag)
 int
 pconswrite(dev_t dev, struct uio *uio, int flag)
 {
-	struct pconssoftc *sc = device_lookup_private(&pcons_cd, minor(dev));
+	struct pconssoftc *sc = pcons_cd.cd_devs[minor(dev)];
 	struct tty *tp = sc->of_tty;
 	
 	return (*tp->t_linesw->l_write)(tp, uio, flag);
@@ -191,16 +194,16 @@ pconswrite(dev_t dev, struct uio *uio, int flag)
 int
 pconspoll(dev_t dev, int events, struct lwp *l)
 {
-	struct pconssoftc *sc = device_lookup_private(&pcons_cd, minor(dev));
+	struct pconssoftc *sc = pcons_cd.cd_devs[minor(dev)];
 	struct tty *tp = sc->of_tty;
  
 	return ((*tp->t_linesw->l_poll)(tp, events, l));
 }
 
 int
-pconsioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
+pconsioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct lwp *l)
 {
-	struct pconssoftc *sc = device_lookup_private(&pcons_cd, minor(dev));
+	struct pconssoftc *sc = pcons_cd.cd_devs[minor(dev)];
 	struct tty *tp = sc->of_tty;
 	int error;
 	
@@ -212,7 +215,7 @@ pconsioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 struct tty *
 pconstty(dev_t dev)
 {
-	struct pconssoftc *sc = device_lookup_private(&pcons_cd, minor(dev));
+	struct pconssoftc *sc = pcons_cd.cd_devs[minor(dev)];
 
 	return sc->of_tty;
 }
@@ -236,9 +239,16 @@ pconsstart(struct tty *tp)
 	prom_write(prom_stdout(), buf, len);
 	s = spltty();
 	tp->t_state &= ~TS_BUSY;
-	if (ttypull(tp)) {
+	if (cl->c_cc) {
 		tp->t_state |= TS_TIMEOUT;
-		callout_schedule(&tp->t_rstrt_ch, 1);
+		callout_reset(&tp->t_rstrt_ch, 1, ttrstrt, (void *)tp);
+	}
+	if (cl->c_cc <= tp->t_lowat) {
+		if (tp->t_state & TS_ASLEEP) {
+			tp->t_state &= ~TS_ASLEEP;
+			wakeup(cl);
+		}
+		selwakeup(&tp->t_wsel);
 	}
 	splx(s);
 }
@@ -268,7 +278,7 @@ pcons_poll(void *aux)
 }
 
 int
-pconsprobe(void)
+pconsprobe()
 {
 
 	return (prom_stdin() && prom_stdout());
@@ -277,19 +287,19 @@ pconsprobe(void)
 void
 pcons_cnpollc(dev_t dev, int on)
 {
-	struct pconssoftc *sc;
+	struct pconssoftc *sc = NULL;
 
-	sc = device_lookup_private(&pcons_cd, minor(dev));
-	if (sc == NULL)
-		return;
+	if (pcons_cd.cd_devs) 
+		sc = pcons_cd.cd_devs[minor(dev)];
 
 	if (on) {
+		if (!sc) return;
 		if (sc->of_flags & OFPOLL)
 			callout_stop(&sc->sc_poll_ch);
 		sc->of_flags &= ~OFPOLL;
 	} else {
                 /* Resuming kernel. */
-		if (!(sc->of_flags & OFPOLL)) {
+		if (sc && !(sc->of_flags & OFPOLL)) {
 			sc->of_flags |= OFPOLL;
 			callout_reset(&sc->sc_poll_ch, 1, pcons_poll, sc);
 		}
@@ -298,7 +308,6 @@ pcons_cnpollc(dev_t dev, int on)
 
 void pcons_dopoll(void);
 void
-pcons_dopoll(void)
-{
-		pcons_poll(device_lookup_private(&pcons_cd, 0));
+pcons_dopoll() {
+		pcons_poll((void*)pcons_cd.cd_devs[0]);
 }

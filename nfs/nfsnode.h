@@ -1,4 +1,4 @@
-/*	 $NetBSD: nfsnode.h,v 1.70 2009/01/02 21:06:11 christos Exp $	*/
+/*	 $NetBSD: nfsnode.h,v 1.60 2006/12/28 00:39:03 yamt Exp $	*/
 
 /*
  * Copyright (c) 1989, 1993
@@ -38,15 +38,22 @@
 #ifndef _NFS_NFSNODE_H_
 #define _NFS_NFSNODE_H_
 
-#include <sys/condvar.h>
-#include <sys/mutex.h>
-#include <sys/rb.h>
-
 #ifndef _NFS_NFS_H_
 #include <nfs/nfs.h>
 #endif
 #include <miscfs/genfs/genfs.h>
 #include <miscfs/genfs/genfs_node.h>
+
+/*
+ * Silly rename structure that hangs off the nfsnode until the name
+ * can be removed by nfs_inactive()
+ */
+struct sillyrename {
+	kauth_cred_t	s_cred;
+	struct	vnode *s_dvp;
+	long	s_namlen;
+	char	s_name[20];
+};
 
 /*
  * Definitions for the directory cache. Because directory cookies
@@ -103,7 +110,7 @@ struct nfsnode_reg {
 	off_t nreg_pushedhi;		/* Last block in range */
 	off_t nreg_pushlo;		/* 1st block in commit range */
 	off_t nreg_pushhi;		/* Last block in range */
-	kmutex_t nreg_commitlock;	/* Serialize commits XXX */
+	struct lock nreg_commitlock;	/* Serialize commits XXX */
 	int nreg_commitflags;
 	int nreg_error;			/* Save write error value */
 };
@@ -153,7 +160,7 @@ struct nfsnode {
 #define n_sillyrename	n_un2.nf_silly
 #define n_dirgens	n_un2.ndir_dirgens
 
-	struct rb_node		n_rbnode;	/* red/black node */
+	LIST_ENTRY(nfsnode)	n_hash;		/* Hash chain */
 	nfsfh_t			*n_fhp;		/* NFS File Handle */
 	struct vattr		*n_vattr;	/* Vnode attribute cache */
 	struct vnode		*n_vnode;	/* associated vnode */
@@ -171,6 +178,7 @@ struct nfsnode {
 	kauth_cred_t		n_rcred;
 	kauth_cred_t		n_wcred;
 };
+LIST_HEAD(nfsnodehashhead, nfsnode);
 
 /*
  * Values for n_commitflags
@@ -202,38 +210,19 @@ struct nfsnode {
 #define VTONFS(vp)	((struct nfsnode *)(vp)->v_data)
 #define NFSTOV(np)	((np)->n_vnode)
 
-#ifdef _KERNEL
-
-#include <sys/workqueue.h>
-/*
- * Silly rename structure that hangs off the nfsnode until the name
- * can be removed by nfs_inactive()
- */
-struct sillyrename {
-	struct work	s_work;
-	kauth_cred_t	s_cred;
-	struct	vnode *s_dvp;
-	long	s_namlen;
-	char	s_name[20];
-};
-
 /*
  * Per-nfsiod datas
  */
 struct nfs_iod {
-	kmutex_t nid_lock;
-	kcondvar_t nid_cv;
-	LIST_ENTRY(nfs_iod) nid_idle;
+	struct simplelock nid_slock;
+	struct proc *nid_proc;
+	struct proc *nid_want;
 	struct nfsmount *nid_mount;
-	bool nid_exiting;
-
-	LIST_ENTRY(nfs_iod) nid_all;
 };
 
-LIST_HEAD(nfs_iodlist, nfs_iod);
-extern kmutex_t nfs_iodlist_lock;
-extern struct nfs_iodlist nfs_iodlist_idle;
-extern struct nfs_iodlist nfs_iodlist_all;
+#ifdef _KERNEL
+
+extern struct nfs_iod nfs_asyncdaemon[NFS_MAXASYNCDAEMON];
 extern u_long nfsdirhashmask;
 
 /*
@@ -252,6 +241,7 @@ int	nfs_getattr	__P((void *));
 int	nfs_setattr	__P((void *));
 int	nfs_read	__P((void *));
 int	nfs_write	__P((void *));
+#define	nfs_lease_check	genfs_nullop
 int	nfsspec_read	__P((void *));
 int	nfsspec_write	__P((void *));
 int	nfsfifo_read	__P((void *));
@@ -283,6 +273,7 @@ int	nfs_pathconf	__P((void *));
 int	nfs_advlock	__P((void *));
 int	nfs_getpages	__P((void *));
 int	nfs_putpages	__P((void *));
+int	nfs_gop_write(struct vnode *, struct vm_page **, int, int);
 int	nfs_kqfilter	__P((void *));
 
 extern int (**nfsv2_vnodeop_p) __P((void *));

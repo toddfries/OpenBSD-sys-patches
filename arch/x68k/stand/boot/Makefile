@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile,v 1.17 2009/02/14 10:39:17 abs Exp $
+#	$NetBSD: Makefile,v 1.13 2006/06/29 03:46:43 lukem Exp $
 
 NOMAN=		# defined
 
@@ -6,8 +6,7 @@ NOMAN=		# defined
 
 BOOT=		Multi-boot
 VERSIONFILE=	${.CURDIR}/version
-VERSION!=	${TOOL_AWK} -F: '$$1 ~ /^[0-9.]*$$/ { it = $$1; } \
-			END { print it }' ${VERSIONFILE}
+VERSION!=	awk -F: '$$1 ~ /^[0-9.]*$$/ { it = $$1; } END { print it }' ${VERSIONFILE}
 NEWVERSWHAT=	"${BOOT}"
 
 # text address
@@ -24,7 +23,7 @@ OBJCOPY?=	/usr/bin/objcopy
 
 SRCS=		srt0.S boot.c conf.c exec_image.S
 S=		${.CURDIR}/../../../..
-M=		${.CURDIR}/../..
+M=		$S/arch/${MACHINE}
 COMMONDIR=	$M/stand/common
 .PATH:		${COMMONDIR}
 
@@ -51,8 +50,8 @@ LDLIBS=		-L${LIBSA} -lsa -L${LIBIOCS} -liocs
 
 .include "../Makefile.booters"
 
-realall: ${PROG}
-${PROG}:	${OBJS} ${LIBSA}/libsa.a ${LIBIOCS}/libiocs.a
+realall: machine-links ${PROG}
+${PROG}:	${OBJS}
 	${_MKTARGET_LINK}
 	${LD} ${LINKFLAGS} -o ${PROG}.sym ${OBJS} ${LDLIBS}
 	${STRIP} -F ${BFDNAME} -o ${PROG} ${PROG}.sym

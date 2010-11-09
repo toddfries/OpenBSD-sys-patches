@@ -1,4 +1,4 @@
-#	$NetBSD: majors.x68k,v 1.21 2008/12/20 13:20:59 isaki Exp $
+#	$NetBSD: majors.x68k,v 1.18 2006/11/24 22:04:24 wiz Exp $
 #
 # Device majors for x68k
 #
@@ -27,6 +27,7 @@ device-major	st		char 20  block 5	st
 device-major	filedesc	char 21
 device-major	bpf		char 22			bpfilter
 device-major	sram		char 23			sram
+device-major	lkm		char 24			lkm
 
 device-major	tun		char 31			tun
 device-major	pow		char 32			pow
@@ -46,6 +47,7 @@ device-major	isdnbchan	char 45			isdnbchan
 device-major	isdntrc		char 46			isdntrc
 device-major	isdntel		char 47			isdntel
 device-major	clockctl	char 48			clockctl
+device-major	systrace	char 49			systrace
 device-major	usb		char 50			usb
 device-major	ugen		char 51			ugen
 device-major	cgd		char 52  block 17	cgd
@@ -57,7 +59,7 @@ device-major	ulpt		char 57			ulpt
 device-major	ucom		char 58			ucom
 device-major	urio		char 59			urio
 device-major	uscanner	char 60			uscanner
-device-major	sysmon		char 61			sysmon_power
+
 device-major	nsmb		char 98			nsmb
 
 # Majors up to 143 are reserved for machine-dependant drivers.

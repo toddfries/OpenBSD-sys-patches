@@ -1,4 +1,4 @@
-/*	$NetBSD: rlphy.c,v 1.25 2009/02/16 08:00:42 cegger Exp $	*/
+/*	$NetBSD: rlphy.c,v 1.18 2007/11/06 00:58:32 uwe Exp $	*/
 /*	$OpenBSD: rlphy.c,v 1.20 2005/07/31 05:27:30 pvalchev Exp $	*/
 
 /*
@@ -38,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: rlphy.c,v 1.25 2009/02/16 08:00:42 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: rlphy.c,v 1.18 2007/11/06 00:58:32 uwe Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -61,10 +61,10 @@ struct rlphy_softc {
 	int sc_rtl8201l;
 };
 
-int	rlphymatch(device_t, cfdata_t, void *);
-void	rlphyattach(device_t, device_t, void *);
+int	rlphymatch(struct device *, struct cfdata *, void *);
+void	rlphyattach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(rlphy, sizeof(struct rlphy_softc),
+CFATTACH_DECL(rlphy, sizeof(struct rlphy_softc),
     rlphymatch, rlphyattach, mii_phy_detach, mii_phy_activate);
 
 int	rlphy_service(struct mii_softc *, struct mii_data *, int);
@@ -87,7 +87,7 @@ static const struct mii_phydesc rlphys[] = {
 };
 
 int
-rlphymatch(device_t parent, cfdata_t match, void *aux)
+rlphymatch(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct mii_attach_args *ma = aux;
 
@@ -109,7 +109,7 @@ rlphymatch(device_t parent, cfdata_t match, void *aux)
 }
 
 void
-rlphyattach(device_t parent, device_t self, void *aux)
+rlphyattach(struct device *parent, struct device *self, void *aux)
 {
 	struct rlphy_softc *rsc = device_private(self);
 	struct mii_softc *sc = &rsc->sc_mii;
@@ -124,7 +124,6 @@ rlphyattach(device_t parent, device_t self, void *aux)
 	} else
 		aprint_normal(": Realtek internal PHY\n");
 
-	sc->mii_dev = self;
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
 	sc->mii_funcs = &rlphy_funcs;
@@ -135,7 +134,7 @@ rlphyattach(device_t parent, device_t self, void *aux)
 
 	PHY_RESET(sc);
 
-	aprint_normal_dev(self, "");
+	aprint_normal("%s: ", sc->mii_dev.dv_xname);
 	sc->mii_capabilities =
 	    PHY_READ(sc, MII_BMSR) & ma->mii_capmask;
 	if (sc->mii_capabilities & BMSR_MEDIAMASK)
@@ -147,6 +146,11 @@ int
 rlphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 {
 	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
+
+	int rv;
+
+	if (!device_is_active(&sc->mii_dev))
+		return ENXIO;
 
 	/*
 	 * Can't isolate the RTL8139 phy, so it has to be the only one.
@@ -183,7 +187,29 @@ rlphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 			/*
 			 * BMCR data is stored in the ifmedia entry.
 			 */
-			PHY_WRITE(sc, MII_ANAR, mii_anar(ife->ifm_media));
+			switch (ife->ifm_media &
+			    (IFM_TMASK|IFM_NMASK|IFM_FDX)) {
+				case IFM_ETHER|IFM_10_T:
+					rv = ANAR_10|ANAR_CSMA;
+					break;
+				case IFM_ETHER|IFM_10_T|IFM_FDX:
+					rv = ANAR_10_FD|ANAR_CSMA;
+					break;
+				case IFM_ETHER|IFM_100_TX:
+					rv = ANAR_TX|ANAR_CSMA;
+					break;
+				case IFM_ETHER|IFM_100_TX|IFM_FDX:
+					rv = ANAR_TX_FD|ANAR_CSMA;
+					break;
+				case IFM_ETHER|IFM_100_T4:
+					rv = ANAR_T4|ANAR_CSMA;
+					break;
+				default:
+					rv = 0;
+					break;
+			}
+
+			PHY_WRITE(sc, MII_ANAR, rv);
 			PHY_WRITE(sc, MII_BMCR, ife->ifm_data);
 		}
 		break;
@@ -259,10 +285,10 @@ rlphy_status(struct mii_softc *sc)
 
 		if ((anlpar = PHY_READ(sc, MII_ANAR) &
 		    PHY_READ(sc, MII_ANLPAR))) {
-			if (anlpar & ANLPAR_TX_FD)
-				mii->mii_media_active |= IFM_100_TX|IFM_FDX;
-			else if (anlpar & ANLPAR_T4)
+			if (anlpar & ANLPAR_T4)
 				mii->mii_media_active |= IFM_100_T4;
+			else if (anlpar & ANLPAR_TX_FD)
+				mii->mii_media_active |= IFM_100_TX|IFM_FDX;
 			else if (anlpar & ANLPAR_TX)
 				mii->mii_media_active |= IFM_100_TX;
 			else if (anlpar & ANLPAR_10_FD)

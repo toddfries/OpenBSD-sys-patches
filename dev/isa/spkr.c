@@ -1,4 +1,4 @@
-/*	$NetBSD: spkr.c,v 1.29 2009/01/11 10:43:06 cegger Exp $	*/
+/*	$NetBSD: spkr.c,v 1.25 2007/10/19 12:00:23 ad Exp $	*/
 
 /*
  * Copyright (c) 1990 Eric S. Raymond (esr@snark.thyrsus.com)
@@ -43,7 +43,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: spkr.c,v 1.29 2009/01/11 10:43:06 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: spkr.c,v 1.25 2007/10/19 12:00:23 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -62,10 +62,14 @@ __KERNEL_RCSID(0, "$NetBSD: spkr.c,v 1.29 2009/01/11 10:43:06 cegger Exp $");
 
 #include <dev/isa/spkrio.h>
 
-int spkrprobe(device_t, cfdata_t, void *);
-void spkrattach(device_t, device_t, void *);
+int spkrprobe(struct device *, struct cfdata *, void *);
+void spkrattach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(spkr, 0,
+struct spkr_softc {
+	struct device sc_dev;
+};
+
+CFATTACH_DECL(spkr, sizeof(struct spkr_softc),
     spkrprobe, spkrattach, NULL, NULL);
 
 dev_type_open(spkropen);
@@ -168,7 +172,7 @@ static const int pitchtab[] =
 /* 5 */ 2093, 2217, 2349, 2489, 2637, 2794, 2960, 3136, 3322, 3520, 3729, 3951,
 /* 6 */ 4186, 4435, 4698, 4978, 5274, 5588, 5920, 6272, 6644, 7040, 7459, 7902,
 };
-#define NOCTAVES (__arraycount(pitchtab) / OCTAVE_NOTES)
+#define NOCTAVES (sizeof(pitchtab) / sizeof(pitchtab[0]) / OCTAVE_NOTES)
 
 static void
 playinit()
@@ -403,29 +407,27 @@ static void *spkr_inbuf;
 static int spkr_attached = 0;
 
 int
-spkrprobe(device_t parent, cfdata_t match, void *aux)
+spkrprobe(struct device *parent, struct cfdata *match,
+    void *aux)
 {
 	return (!spkr_attached);
 }
 
 void
-spkrattach(device_t parent, device_t self, void *aux)
+spkrattach(struct device *parent, struct device *self,
+    void *aux)
 {
 	printf("\n");
 	ppicookie = ((struct pcppi_attach_args *)aux)->pa_cookie;
 	spkr_attached = 1;
-        if (!device_pmf_is_registered(self))
-		if (!pmf_device_register(self, NULL, NULL))
-			aprint_error_dev(self,
-			    "couldn't establish power handler\n"); 
-
 }
 
 int
-spkropen(dev_t dev, int	flags, int mode, struct lwp *l)
+spkropen(dev_t dev, int	flags, int mode,
+    struct lwp *l)
 {
 #ifdef SPKRDEBUG
-    printf("spkropen: entering with dev = %"PRIx64"\n", dev);
+    printf("spkropen: entering with dev = %x\n", dev);
 #endif /* SPKRDEBUG */
 
     if (minor(dev) != 0 || !spkr_attached)
@@ -447,7 +449,7 @@ spkrwrite(dev_t dev, struct uio *uio, int flags)
     int n;
     int error;
 #ifdef SPKRDEBUG
-    printf("spkrwrite: entering with dev = %"PRIx64", count = %d\n",
+    printf("spkrwrite: entering with dev = %x, count = %d\n",
 		dev, uio->uio_resid);
 #endif /* SPKRDEBUG */
 
@@ -467,7 +469,7 @@ int spkrclose(dev_t dev, int flags, int mode,
     struct lwp *l)
 {
 #ifdef SPKRDEBUG
-    printf("spkrclose: entering with dev = %"PRIx64"\n", dev);
+    printf("spkrclose: entering with dev = %x\n", dev);
 #endif /* SPKRDEBUG */
 
     if (minor(dev) != 0)
@@ -485,7 +487,7 @@ int spkrioctl(dev_t dev, u_long cmd, void *data, int	flag,
     struct lwp *l)
 {
 #ifdef SPKRDEBUG
-    printf("spkrioctl: entering with dev = %"PRIx64", cmd = %lx\n", dev, cmd);
+    printf("spkrioctl: entering with dev = %x, cmd = %lx\n", dev, cmd);
 #endif /* SPKRDEBUG */
 
     if (minor(dev) != 0)

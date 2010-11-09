@@ -1,4 +1,4 @@
-/*	$NetBSD: irix_exec.h,v 1.26 2008/11/19 18:36:03 ad Exp $ */
+/*	$NetBSD: irix_exec.h,v 1.22 2005/12/11 12:20:12 christos Exp $ */
 
 /*-
  * Copyright (c) 2001-2002 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -36,7 +43,7 @@
 #include <sys/exec.h>
 #include <sys/signal.h>
 #include <sys/queue.h>
-#include <sys/rwlock.h>
+#include <sys/lock.h>
 #include <sys/exec_elf.h>
 
 #include <machine/vmparam.h>
@@ -76,29 +83,29 @@ struct irix_emuldata {
 #define IRIX_AUX_ARGSIZ howmany(IRIX_ELF_AUX_ENTRIES * \
     sizeof(Aux32Info), sizeof (Elf32_Addr))
 
-int irix_elf32_copyargs(struct lwp *, struct exec_package *,
-    struct ps_strings *, char **, void *);
+int irix_elf32_copyargs __P((struct lwp *, struct exec_package *,
+    struct ps_strings *, char **, void *));
 
-int irix_elf32_probe_o32(struct lwp *, struct exec_package *, void *,
-    char *, vaddr_t *);
+int irix_elf32_probe_o32 __P((struct lwp *, struct exec_package *, void *,
+    char *, vaddr_t *));
 
-int irix_elf32_probe_n32(struct lwp *, struct exec_package *, void *,
-    char *, vaddr_t *);
+int irix_elf32_probe_n32 __P((struct lwp *, struct exec_package *, void *,
+    char *, vaddr_t *));
 #endif
 
 #ifdef EXEC_ELF64
 /* #define IRIX_AUX_ARGSIZ howmany(IRIX_ELF_AUX_ENTRIES * \
     sizeof(Aux64Info), sizeof (Elf64_Addr))  */
 
-int irix_elf64_copyargs(struct lwp *, struct exec_package *,
-    struct ps_strings *, char **, void *);
+int irix_elf64_copyargs __P((struct lwp *, struct exec_package *,
+    struct ps_strings *, char **, void *));
 
-int irix_elf64_probe(struct lwp *, struct exec_package *, void *,
-    char *, vaddr_t *);
+int irix_elf64_probe __P((struct lwp *, struct exec_package *, void *,
+    char *, vaddr_t *));
 #endif
 
-void irix_n32_setregs(struct lwp *, struct exec_package *, u_long);
+void irix_n32_setregs __P((struct lwp *, struct exec_package *, u_long));
 
-extern struct emul emul_irix;
+extern const struct emul emul_irix;
 
 #endif /* !_IRIX_EXEC_H_ */

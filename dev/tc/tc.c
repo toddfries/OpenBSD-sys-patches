@@ -1,4 +1,4 @@
-/*	$NetBSD: tc.c,v 1.48 2008/06/11 16:46:11 tsutsui Exp $	*/
+/*	$NetBSD: tc.c,v 1.46 2007/04/12 21:35:08 matt Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995 Carnegie-Mellon University.
@@ -28,15 +28,13 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: tc.c,v 1.48 2008/06/11 16:46:11 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: tc.c,v 1.46 2007/04/12 21:35:08 matt Exp $");
 
 #include "opt_tcverbose.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
-
-#include <machine/cpu.h>	/* for badaddr */
 
 #include <dev/tc/tcreg.h>
 #include <dev/tc/tcvar.h>
@@ -197,11 +195,10 @@ tcprint(void *aux, const char *pnp)
 }
 
 
-static const tc_offset_t tc_slot_romoffs[] = {
+#define	NTC_ROMOFFS	2
+static const tc_offset_t tc_slot_romoffs[NTC_ROMOFFS] = {
 	TC_SLOT_ROM,
-#ifndef __vax__
 	TC_SLOT_PROTOROM,
-#endif
 };
 
 int
@@ -210,7 +207,7 @@ tc_checkslot(tc_addr_t slotbase, char *namep)
 	struct tc_rommap *romp;
 	int i, j;
 
-	for (i = 0; i < __arraycount(tc_slot_romoffs); i++) {
+	for (i = 0; i < NTC_ROMOFFS; i++) {
 		romp = (struct tc_rommap *)
 		    (slotbase + tc_slot_romoffs[i]);
 
@@ -245,7 +242,7 @@ tc_checkslot(tc_addr_t slotbase, char *namep)
 const struct evcnt *
 tc_intr_evcnt(struct device *dev, void *cookie)
 {
-	struct tc_softc *sc = device_lookup_private(&tc_cd, 0);
+	struct tc_softc *sc = tc_cd.cd_devs[0];
 
 	return ((*sc->sc_intr_evcnt)(dev, cookie));
 }
@@ -254,7 +251,7 @@ void
 tc_intr_establish(struct device *dev, void *cookie, int level,
     int (*handler)(void *), void *arg)
 {
-	struct tc_softc *sc = device_lookup_private(&tc_cd, 0);
+	struct tc_softc *sc = tc_cd.cd_devs[0];
 
 	(*sc->sc_intr_establish)(dev, cookie, level, handler, arg);
 }
@@ -262,7 +259,7 @@ tc_intr_establish(struct device *dev, void *cookie, int level,
 void
 tc_intr_disestablish(struct device *dev, void *cookie)
 {
-	struct tc_softc *sc = device_lookup_private(&tc_cd, 0);
+	struct tc_softc *sc = tc_cd.cd_devs[0];
 
 	(*sc->sc_intr_disestablish)(dev, cookie);
 }

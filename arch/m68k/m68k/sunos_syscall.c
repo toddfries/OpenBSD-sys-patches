@@ -1,4 +1,4 @@
-/*	$NetBSD: sunos_syscall.c,v 1.20 2008/11/25 14:02:16 tsutsui Exp $	*/
+/*	$NetBSD: sunos_syscall.c,v 1.14 2006/07/22 06:58:17 tsutsui Exp $	*/
 
 /*-
  * Portions Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -110,11 +110,9 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sunos_syscall.c,v 1.20 2008/11/25 14:02:16 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sunos_syscall.c,v 1.14 2006/07/22 06:58:17 tsutsui Exp $");
 
-#ifdef _KERNEL_OPT
 #include "opt_execfmt.h"
-#endif
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -122,7 +120,6 @@ __KERNEL_RCSID(0, "$NetBSD: sunos_syscall.c,v 1.20 2008/11/25 14:02:16 tsutsui E
 #include <sys/acct.h>
 #include <sys/kernel.h>
 #include <sys/syscall.h>
-#include <sys/syscallvar.h>
 #include <sys/syslog.h>
 #include <sys/user.h>
 
@@ -153,7 +150,7 @@ static void
 sunos_syscall_plain(register_t code, struct lwp *l, struct frame *frame)
 {
 	struct proc *p = l->l_proc;
-	char *params;
+	caddr_t params;
 	const struct sysent *callp;
 	int error, nsys;
 	size_t argsize;
@@ -169,7 +166,7 @@ sunos_syscall_plain(register_t code, struct lwp *l, struct frame *frame)
 	 * code assumes the kernel pops the syscall argument the
 	 * glue pushed on the stack. Sigh...
 	 */
-	code = fuword((void *)frame->f_regs[SP]);
+	code = fuword((caddr_t)frame->f_regs[SP]);
 
 	/*
 	 * XXX
@@ -188,7 +185,7 @@ sunos_syscall_plain(register_t code, struct lwp *l, struct frame *frame)
 	} else
 		l->l_md.md_flags &= ~MDL_STACKADJ;
 
-	params = (char *)frame->f_regs[SP] + sizeof(int);
+	params = (caddr_t)frame->f_regs[SP] + sizeof(int);
 
 	switch (code) {
 	case SUNOS_SYS_syscall:
@@ -209,14 +206,14 @@ sunos_syscall_plain(register_t code, struct lwp *l, struct frame *frame)
 
 	argsize = callp->sy_argsize;
 	if (argsize) {
-		error = copyin(params, (void *)args, argsize);
+		error = copyin(params, (caddr_t)args, argsize);
 		if (error)
 			goto bad;
 	}
 
 	rval[0] = 0;
 	rval[1] = frame->f_regs[D1];
-	error = sy_call(callp, l, args, rval);
+	error = (*callp->sy_call)(l, args, rval);
 
 	switch (error) {
 	case 0:
@@ -258,7 +255,7 @@ static void
 sunos_syscall_fancy(register_t code, struct lwp *l, struct frame *frame)
 {
 	struct proc *p = l->l_proc;
-	char *params;
+	caddr_t params;
 	const struct sysent *callp;
 	int error, nsys;
 	size_t argsize;
@@ -274,7 +271,7 @@ sunos_syscall_fancy(register_t code, struct lwp *l, struct frame *frame)
 	 * code assumes the kernel pops the syscall argument the
 	 * glue pushed on the stack. Sigh...
 	 */
-	code = fuword((void *)frame->f_regs[SP]);
+	code = fuword((caddr_t)frame->f_regs[SP]);
 
 	/*
 	 * XXX
@@ -293,7 +290,7 @@ sunos_syscall_fancy(register_t code, struct lwp *l, struct frame *frame)
 	} else
 		l->l_md.md_flags &= ~MDL_STACKADJ;
 
-	params = (char *)frame->f_regs[SP] + sizeof(int);
+	params = (caddr_t)frame->f_regs[SP] + sizeof(int);
 
 	switch (code) {
 	case SUNOS_SYS_syscall:
@@ -314,17 +311,17 @@ sunos_syscall_fancy(register_t code, struct lwp *l, struct frame *frame)
 
 	argsize = callp->sy_argsize;
 	if (argsize) {
-		error = copyin(params, (void *)args, argsize);
+		error = copyin(params, (caddr_t)args, argsize);
 		if (error)
 			goto bad;
 	}
 
-	if ((error = trace_enter(code, args, callp->sy_narg)) != 0)
+	if ((error = trace_enter(l, code, code, NULL, args)) != 0)
 		goto out;
 
 	rval[0] = 0;
 	rval[1] = frame->f_regs[D1];
-	error = sy_call(callp, l, args, rval);
+	error = (*callp->sy_call)(l, args, rval);
 out:
 	switch (error) {
 	case 0:
@@ -361,5 +358,5 @@ out:
 			frame->f_regs[SP] -= sizeof (int);
 	}
 
-	trace_exit(code, rval, error);
+	trace_exit(l, code, args, rval, error);
 }

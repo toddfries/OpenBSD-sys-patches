@@ -1,4 +1,4 @@
-/*	$NetBSD: autoconf.c,v 1.21 2008/02/12 17:30:57 joerg Exp $	*/
+/*	$NetBSD: autoconf.c,v 1.17 2005/12/11 12:17:33 christos Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -77,12 +77,11 @@
  */
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
-__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.21 2008/02/12 17:30:57 joerg Exp $");
+__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.17 2005/12/11 12:17:33 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/conf.h>	/* setroot() */
-#include <sys/device.h>
 
 #include <machine/disklabel.h>
 
@@ -104,6 +103,8 @@ static void get_device(const char *);
 void
 cpu_configure()
 {
+
+	softintr_init();
 
 	/* Kick off autoconfiguration. */
 	(void)splhigh();
@@ -140,9 +141,9 @@ static void
 get_device(const char *name)
 {
 	int unit, part;
-	char devname[16];
+	char devname[16], buf[32];
 	const char *cp;
-	device_t dv;
+	struct device *dv;
 
 	if (strncmp(name, "/dev/", 5) == 0)
 		name += 5;
@@ -163,8 +164,12 @@ get_device(const char *name)
 		part = *cp - 'a';
 	else if (*cp != '\0' && *cp != ' ')
 		return;
-	if ((dv = device_find_by_driver_unit(devname, unit)) != NULL) {
-		booted_device = dv;
-		booted_partition = part;
+	sprintf(buf, "%s%d", devname, unit);
+	for (dv = alldevs.tqh_first; dv != NULL; dv = dv->dv_list.tqe_next) {
+		if (strcmp(buf, dv->dv_xname) == 0) {
+			booted_device = dv;
+			booted_partition = part;
+			return;
+		}
 	}
 }

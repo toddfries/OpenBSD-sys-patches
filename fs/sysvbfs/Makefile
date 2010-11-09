@@ -1,7 +1,7 @@
-#	$NetBSD: Makefile,v 1.2 2008/09/04 12:07:30 pooka Exp $
+#	$NetBSD: Makefile,v 1.1 2005/12/29 14:53:45 tsutsui Exp $
 
 INCSDIR= /usr/include/fs/sysvbfs
 
-INCS=	bfs.h sysvbfs_args.h
+INCS=	bfs.h
 
 .include <bsd.kinc.mk>

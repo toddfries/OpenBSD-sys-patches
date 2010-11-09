@@ -1,4 +1,4 @@
-/*	$NetBSD: ata_raid.c,v 1.32 2008/09/11 11:08:50 tron Exp $	*/
+/*	$NetBSD: ata_raid.c,v 1.23 2007/07/09 21:00:30 ad Exp $	*/
 
 /*
  * Copyright (c) 2003 Wasabi Systems, Inc.
@@ -40,7 +40,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ata_raid.c,v 1.32 2008/09/11 11:08:50 tron Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ata_raid.c,v 1.23 2007/07/09 21:00:30 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/buf.h>
@@ -73,17 +73,17 @@ __KERNEL_RCSID(0, "$NetBSD: ata_raid.c,v 1.32 2008/09/11 11:08:50 tron Exp $");
 
 void		ataraidattach(int);
 
-static int	ataraid_match(device_t, cfdata_t, void *);
-static void	ataraid_attach(device_t, device_t, void *);
+static int	ataraid_match(struct device *, struct cfdata *, void *);
+static void	ataraid_attach(struct device *, struct device *, void *);
 static int	ataraid_print(void *, const char *);
 
-static int	ata_raid_finalize(device_t );
+static int	ata_raid_finalize(struct device *);
 
 ataraid_array_info_list_t ataraid_array_info_list =
     TAILQ_HEAD_INITIALIZER(ataraid_array_info_list);
 u_int ataraid_array_info_count;
 
-CFATTACH_DECL_NEW(ataraid, 0,
+CFATTACH_DECL(ataraid, sizeof(struct device),
     ataraid_match, ataraid_attach, NULL, NULL);
 
 /*
@@ -115,12 +115,9 @@ ata_raid_type_name(u_int type)
 		"Promise",
 		"Adaptec",
 		"VIA V-RAID",
-		"nVidia",
-		"JMicron",
-		"Intel MatrixRAID"
 	};
 
-	if (type < __arraycount(ata_raid_type_names))
+	if (type < sizeof(ata_raid_type_names) / sizeof(ata_raid_type_names[0]))
 		return (ata_raid_type_names[type]);
 
 	return (NULL);
@@ -132,7 +129,7 @@ ata_raid_type_name(u_int type)
  *	Autoconfiguration finalizer for ATA RAID.
  */
 static int
-ata_raid_finalize(device_t self)
+ata_raid_finalize(struct device *self)
 {
 	static struct cfdata ataraid_cfdata = {
 		.cf_name = "ataraid",
@@ -177,7 +174,7 @@ ata_raid_finalize(device_t self)
  *	Autoconfiguration glue: match routine.
  */
 static int
-ataraid_match(device_t parent, cfdata_t cf,
+ataraid_match(struct device *parent, struct cfdata *cf,
     void *aux)
 {
 
@@ -191,7 +188,7 @@ ataraid_match(device_t parent, cfdata_t cf,
  *	Autoconfiguration glue: attach routine.  We attach the children.
  */
 static void
-ataraid_attach(device_t parent, device_t self,
+ataraid_attach(struct device *parent, struct device *self,
     void *aux)
 {
 	struct ataraid_array_info *aai;
@@ -201,8 +198,8 @@ ataraid_attach(device_t parent, device_t self,
 	 * We're a pseudo-device, so we get to announce our own
 	 * presence.
 	 */
-	aprint_normal_dev(self, "found %u RAID volume%s\n",
-	    ataraid_array_info_count,
+	aprint_normal("%s: found %u RAID volume%s\n",
+	    self->dv_xname, ataraid_array_info_count,
 	    ataraid_array_info_count == 1 ? "" : "s");
 
 	TAILQ_FOREACH(aai, &ataraid_array_info_list, aai_list) {
@@ -237,21 +234,15 @@ ataraid_print(void *aux, const char *pnp)
  *	Called via autoconfiguration callback.
  */
 void
-ata_raid_check_component(device_t self)
+ata_raid_check_component(struct device *self)
 {
-	struct wd_softc *sc = device_private(self);
+	struct wd_softc *sc = (void *) self;
 
 	if (ata_raid_read_config_adaptec(sc) == 0)
 		return;
 	if (ata_raid_read_config_promise(sc) == 0)
 		return;
 	if (ata_raid_read_config_via(sc) == 0)
-		return;
-	if (ata_raid_read_config_nvidia(sc) == 0)
-		return;
-	if (ata_raid_read_config_jmicron(sc) == 0)
-		return;
-	if (ata_raid_read_config_intel(sc) == 0)
 		return;
 }
 
@@ -303,13 +294,13 @@ ata_raid_config_block_rw(struct vnode *vp, daddr_t blkno, void *tbuf,
 	struct buf *bp;
 	int error;
 
-	bp = getiobuf(vp, false);
+	bp = getiobuf();
+	bp->b_vp = vp;
 	bp->b_blkno = blkno;
 	bp->b_bcount = bp->b_resid = size;
 	bp->b_flags = bflags;
 	bp->b_proc = curproc;
 	bp->b_data = tbuf;
-	SET(bp->b_cflags, BC_BUSY);	/* mark buffer busy */
 
 	VOP_STRATEGY(vp, bp);
 	error = biowait(bp);

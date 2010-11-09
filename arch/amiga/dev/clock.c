@@ -1,4 +1,4 @@
-/*	$NetBSD: clock.c,v 1.48 2008/12/07 03:48:43 mhitch Exp $ */
+/*	$NetBSD: clock.c,v 1.45 2006/09/05 05:32:30 mhitch Exp $ */
 
 /*
  * Copyright (c) 1982, 1990 The Regents of the University of California.
@@ -77,13 +77,12 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: clock.c,v 1.48 2008/12/07 03:48:43 mhitch Exp $");
+__KERNEL_RCSID(0, "$NetBSD: clock.c,v 1.45 2006/09/05 05:32:30 mhitch Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
 #include <sys/systm.h>
-#include <sys/timetc.h>
 #include <machine/psl.h>
 #include <machine/cpu.h>
 #include <amiga/amiga/device.h>
@@ -102,23 +101,11 @@ __KERNEL_RCSID(0, "$NetBSD: clock.c,v 1.48 2008/12/07 03:48:43 mhitch Exp $");
 
 /* the clocks run at NTSC: 715.909kHz or PAL: 709.379kHz.
    We're using a 100 Hz clock. */
+
+#define CLK_INTERVAL amiga_clk_interval
 int amiga_clk_interval;
 int eclockfreq;
-unsigned int fast_delay_limit;
 struct CIA *clockcia;
-
-static u_int clk_getcounter(struct timecounter *);
-
-static struct timecounter clk_timecounter = {
-	clk_getcounter,	/* get_timecount */
-	0,		/* no poll_pps */
-	0x0fffu,	/* counter_mask */
-	0,		/* frequency */
-	"clock",	/* name, overriden later */
-	100,		/* quality */
-	NULL,		/* prev */
-	NULL,		/* next */
-};
 
 /*
  * Machine-dependent clock routines.
@@ -132,7 +119,7 @@ static struct timecounter clk_timecounter = {
  * Resettodr restores the time of day hardware after a time change.
  *
  * A note on the real-time clock:
- * We actually load the clock with amiga_clk_interval-1 instead of amiga_clk_interval.
+ * We actually load the clock with CLK_INTERVAL-1 instead of CLK_INTERVAL.
  * This is because the counter decrements to zero after N+1 enabled clock
  * periods where N is the value loaded into the counter.
  */
@@ -140,6 +127,7 @@ static struct timecounter clk_timecounter = {
 int clockmatch(struct device *, struct cfdata *, void *);
 void clockattach(struct device *, struct device *, void *);
 void cpu_initclocks(void);
+void calibrate_delay(struct device *);
 
 CFATTACH_DECL(clock, sizeof(struct device),
     clockmatch, clockattach, NULL, NULL);
@@ -159,23 +147,20 @@ void
 clockattach(struct device *pdp, struct device *dp, void *auxp)
 {
 	const char *clockchip;
-	u_int counter_mask;
 	unsigned short interval;
 #ifdef DRACO
 	u_char dracorev;
 #endif
 
-#ifdef DRACO
-	dracorev = is_draco();
-#endif
-
 	if (eclockfreq == 0)
 		eclockfreq = 715909;	/* guess NTSC */
 
+	CLK_INTERVAL = (eclockfreq / 100);
+
 #ifdef DRACO
+	dracorev = is_draco();
 	if (dracorev >= 4) {
-		if (amiga_clk_interval == 0)	/* Only do this 1st time */
-			eclockfreq /= 7;
+		CLK_INTERVAL = (eclockfreq / 700);
 		clockchip = "QuickLogic";
 	} else if (dracorev) {
 		clockcia = (struct CIA *)CIAAbase;
@@ -187,24 +172,13 @@ clockattach(struct device *pdp, struct device *dp, void *auxp)
 		clockchip = "CIA B";
 	}
 
-	amiga_clk_interval = (eclockfreq / hz);
-
-	counter_mask = 0x8000;
-	while (counter_mask != 0 && (counter_mask & amiga_clk_interval) == 0)
-		counter_mask >>= 1;
-	counter_mask -= 1;
-
-	clk_timecounter.tc_name = clockchip;
-	clk_timecounter.tc_frequency = eclockfreq;
-	clk_timecounter.tc_counter_mask = counter_mask;
-
-	fast_delay_limit = UINT_MAX / amiga_clk_interval;
-
-	if (dp != NULL) {	/* real autoconfig? */
+	if (dp)
 		printf(": %s system hz %d hardware hz %d\n", clockchip, hz,
-		    eclockfreq);
-		tc_init(&clk_timecounter);
-	}
+#ifdef DRACO
+		dracorev >= 4 ? eclockfreq / 7 : eclockfreq);
+#else
+		eclockfreq);
+#endif
 
 #ifdef DRACO
 	if (dracorev >= 4) {
@@ -213,8 +187,10 @@ clockattach(struct device *pdp, struct device *dp, void *auxp)
 		 * but need this for delay calibration.
 		 */
 
-		draco_ioct->io_timerlo = amiga_clk_interval & 0xff;
-		draco_ioct->io_timerhi = amiga_clk_interval >> 8;
+		draco_ioct->io_timerlo = CLK_INTERVAL & 0xff;
+		draco_ioct->io_timerhi = CLK_INTERVAL >> 8;
+
+		calibrate_delay(dp);
 
 		return;
 	}
@@ -231,7 +207,7 @@ clockattach(struct device *pdp, struct device *dp, void *auxp)
          * the clocks run at NTSC: 715.909kHz or PAL: 709.379kHz
 	 * supprort for PAL WHEN?!?! XXX
 	 */
-	interval = amiga_clk_interval - 1;
+	interval = CLK_INTERVAL - 1;
 
 	/*
 	 * order of setting is important !
@@ -242,6 +218,67 @@ clockattach(struct device *pdp, struct device *dp, void *auxp)
 	 * start timer A in continuous mode
 	 */
 	clockcia->cra = (clockcia->cra & 0xc0) | 1;
+
+	calibrate_delay(dp);
+}
+
+/*
+ * Calibrate delay loop.
+ * We use two iterations because we don't have enough bits to do a factor of
+ * 8 with better than 1%.
+ *
+ * XXX Note that we MUST stay below 1 tick if using clkread(), even for
+ * underestimated values of delaydivisor.
+ *
+ * XXX the "ns" below is only correct for a shift of 10 bits, and even then
+ * off by 2.4%
+ */
+
+void
+calibrate_delay(struct device *dp)
+{
+	unsigned long t1, t2;
+	extern u_int32_t delaydivisor;
+		/* XXX this should be defined elsewhere */
+
+	if (dp)
+		printf("Calibrating delay loop... ");
+
+	do {
+		t1 = clkread();
+		delay(1024);
+		t2 = clkread();
+	} while (t2 <= t1);
+	t2 -= t1;
+	delaydivisor = (delaydivisor * t2 + 1023) >> 10;
+#ifdef DEBUG
+	if (dp)
+		printf("\ndiff %ld us, new divisor %u/1024 us\n", t2,
+		    delaydivisor);
+	do {
+		t1 = clkread();
+		delay(1024);
+		t2 = clkread();
+	} while (t2 <= t1);
+	t2 -= t1;
+	delaydivisor = (delaydivisor * t2 + 1023) >> 10;
+	if (dp)
+		printf("diff %ld us, new divisor %u/1024 us\n", t2,
+		    delaydivisor);
+#endif
+	do {
+		t1 = clkread();
+		delay(1024);
+		t2 = clkread();
+	} while (t2 <= t1);
+	t2 -= t1;
+	delaydivisor = (delaydivisor * t2 + 1023) >> 10;
+#ifdef DEBUG
+	if (dp)
+		printf("diff %ld us, new divisor ", t2);
+#endif
+	if (dp)
+		printf("%u/1024 us\n", delaydivisor);
 }
 
 void
@@ -251,8 +288,8 @@ cpu_initclocks(void)
 	unsigned char dracorev;
 	dracorev = is_draco();
 	if (dracorev >= 4) {
-		draco_ioct->io_timerlo = amiga_clk_interval & 0xFF;
-		draco_ioct->io_timerhi = amiga_clk_interval >> 8;
+		draco_ioct->io_timerlo = CLK_INTERVAL & 0xFF;
+		draco_ioct->io_timerhi = CLK_INTERVAL >> 8;
 		draco_ioct->io_timerrst = 0;	/* any value resets */
 		single_inst_bset_b(draco_ioct->io_status2, DRSTAT2_TMRINTENA);
 
@@ -287,11 +324,11 @@ setstatclockrate(int hertz)
 }
 
 /*
- * Returns ticks  since last recorded clock "tick"
+ * Returns number of usec since last recorded clock "tick"
  * (i.e. clock interrupt).
  */
-static u_int
-clk_gettick(void)
+u_long
+clkread(void)
 {
 	u_int interval;
 	u_char hi, hi2, lo;
@@ -302,10 +339,10 @@ clk_gettick(void)
 		hi = draco_ioct->io_timerhi;
 		lo = draco_ioct->io_timerlo;
 		interval = ((hi<<8) | lo);
-		if (interval > amiga_clk_interval)	/* timer underflow */
-			interval = 65536 + amiga_clk_interval - interval;
+		if (interval > CLK_INTERVAL)	/* timer underflow */
+			interval = 65536 + CLK_INTERVAL - interval;
 		else
-			interval = amiga_clk_interval - interval;
+			interval = CLK_INTERVAL - interval;
 
 	} else
 #endif
@@ -318,7 +355,7 @@ clk_gettick(void)
 			hi = hi2;
 		}
 
-		interval = (amiga_clk_interval - 1) - ((hi<<8) | lo);
+		interval = (CLK_INTERVAL - 1) - ((hi<<8) | lo);
 
 		/*
 		 * should read ICR and if there's an int pending, adjust
@@ -327,21 +364,7 @@ clk_gettick(void)
 		 */
 	}
 
-	return interval;
-}
-
-static u_int
-clk_getcounter(struct timecounter *tc)
-{
-	int old_hardclock_ticks;
-	u_int clock_tick;
-
-	do {
-		old_hardclock_ticks = hardclock_ticks;
-		clock_tick = clk_gettick();
-	} while (old_hardclock_ticks != hardclock_ticks);
-
-	return old_hardclock_ticks * amiga_clk_interval + clock_tick;
+	return((interval * tick) / CLK_INTERVAL);
 }
 
 #if notyet
@@ -410,7 +433,7 @@ clockopen(dev_t dev, int flags)
 int
 clockclose(dev_t dev, int flags)
 {
-	(void) clockunmmap(dev, (void *)0, curproc);	/* XXX */
+	(void) clockunmmap(dev, (caddr_t)0, curproc);	/* XXX */
 	stopclock();
 	clockon = 0;
 	return(0);
@@ -418,18 +441,18 @@ clockclose(dev_t dev, int flags)
 
 /*ARGSUSED*/
 int
-clockioctl(dev_t dev, u_long cmd, void *data, int flag, struct proc *p)
+clockioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 {
 	int error = 0;
 
 	switch (cmd) {
 
 	case CLOCKMAP:
-		error = clockmmap(dev, (void **)data, p);
+		error = clockmmap(dev, (caddr_t *)data, p);
 		break;
 
 	case CLOCKUNMAP:
-		error = clockunmmap(dev, *(void **)data, p);
+		error = clockunmmap(dev, *(caddr_t *)data, p);
 		break;
 
 	case CLOCKGETRES:
@@ -451,7 +474,7 @@ clockmap(dev_t dev, int off, int prot)
 }
 
 int
-clockmmap(dev_t dev, void **addrp, struct proc *p)
+clockmmap(dev_t dev, caddr_t *addrp, struct proc *p)
 {
 	int error;
 	struct vnode vn;
@@ -462,17 +485,17 @@ clockmmap(dev_t dev, void **addrp, struct proc *p)
 	if (*addrp)
 		flags |= MAP_FIXED;
 	else
-		*addrp = (void *)0x1000000;	/* XXX */
+		*addrp = (caddr_t)0x1000000;	/* XXX */
 	vn.v_type = VCHR;			/* XXX */
 	vn.v_specinfo = &si;			/* XXX */
 	vn.v_rdev = dev;			/* XXX */
 	error = vm_mmap(&p->p_vmspace->vm_map, (vm_offset_t *)addrp,
-			PAGE_SIZE, VM_PROT_ALL, flags, (void *)&vn, 0);
+			PAGE_SIZE, VM_PROT_ALL, flags, (caddr_t)&vn, 0);
 	return(error);
 }
 
 int
-clockunmmap(dev_t dev, void *addr, struct proc *p)
+clockunmmap(dev_t dev, caddr_t addr, struct proc *p)
 {
 	int rv;
 
@@ -566,12 +589,12 @@ initprofclock(void)
 #endif
 	/*
 	 * The profile interrupt interval must be an even divisor
-	 * of the amiga_clk_interval so that scaling from a system clock
+	 * of the CLK_INTERVAL so that scaling from a system clock
 	 * tick to a profile clock tick is possible using integer math.
 	 */
-	if (profint > amiga_clk_interval || (amiga_clk_interval % profint) != 0)
-		profint = amiga_clk_interval;
-	profscale = amiga_clk_interval / profint;
+	if (profint > CLK_INTERVAL || (CLK_INTERVAL % profint) != 0)
+		profint = CLK_INTERVAL;
+	profscale = CLK_INTERVAL / profint;
 }
 
 void
@@ -611,7 +634,7 @@ stopprofclock(void)
  * Assumes it is called with clock interrupts blocked.
  */
 void
-profclock(void *pc, int ps)
+profclock(caddr_t pc, int ps)
 {
 	/*
 	 * Came from user mode.
@@ -644,51 +667,3 @@ profclock(void *pc, int ps)
 }
 #endif
 #endif
-
-void
-delay(unsigned int n)
-{
-	unsigned int cur_tick, initial_tick;
-	int remaining;
-
-	/*
-	 * Read the counter first, so that the rest of the setup overhead is
-	 * counted.
-	 */
-	initial_tick = clk_gettick();
-
-	if (amiga_clk_interval == 0) {
-		/*
-		 * Clock is not initialised yet,
-		 * so just do some ad-hoc loop.
-		 */
-		static uint32_t dummy;
-
-		n *= 4;
-		while (n--)
-			dummy *= eclockfreq;
-		return;
-	}
-
-	if (n <= fast_delay_limit) {
-		/*
-		 * For unsigned arithmetic, division can be replaced with
-		 * multiplication with the inverse and a shift.
-		 */
-		remaining = n * eclockfreq / 1000000;
-	} else {
-		/* This is a very long delay.
-		 * Being slow here doesn't matter.
-		 */
-		remaining = (unsigned long long) n * eclockfreq / 1000000;
-	}
-
-	while (remaining > 0) {
-		cur_tick = clk_gettick();
-		if (cur_tick > initial_tick)
-			remaining -= amiga_clk_interval - (cur_tick - initial_tick);
-		else
-			remaining -= initial_tick - cur_tick;
-		initial_tick = cur_tick;
-	}
-}

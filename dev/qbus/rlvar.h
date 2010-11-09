@@ -1,4 +1,4 @@
-/*	$NetBSD: rlvar.h,v 1.8 2008/03/11 05:34:02 matt Exp $	*/
+/*	$NetBSD: rlvar.h,v 1.7 2007/03/04 06:02:30 christos Exp $	*/
 
 /*
  * Copyright (c) 2000 Ludd, University of Lule}, Sweden. All rights reserved.
@@ -36,11 +36,10 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: rlvar.h,v 1.8 2008/03/11 05:34:02 matt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: rlvar.h,v 1.7 2007/03/04 06:02:30 christos Exp $");
 
 struct rlc_softc {
-	device_t sc_dev;
-	struct uba_softc *sc_uh;
+	struct device sc_dev;
 	struct evcnt sc_intrcnt;
 	bus_space_tag_t sc_iot;
 	bus_space_handle_t sc_ioh;
@@ -54,8 +53,7 @@ struct rlc_softc {
 };
 
 struct rl_softc {
-	device_t rc_dev;
-	struct rlc_softc *rc_rlc;
+	struct device rc_dev;
 	struct disk rc_disk;
 	int rc_state;
 	int rc_head;

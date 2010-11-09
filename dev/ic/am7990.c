@@ -1,4 +1,4 @@
-/*	$NetBSD: am7990.c,v 1.71 2008/04/28 20:23:49 martin Exp $	*/
+/*	$NetBSD: am7990.c,v 1.69 2007/08/26 22:36:35 dyoung Exp $	*/
 
 /*-
  * Copyright (c) 1997, 1998 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -65,7 +72,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: am7990.c,v 1.71 2008/04/28 20:23:49 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: am7990.c,v 1.69 2007/08/26 22:36:35 dyoung Exp $");
 
 #include "bpfilter.h"
 #include "rnd.h"
@@ -150,7 +157,7 @@ am7990_meminit(struct lance_softc *sc)
 	struct leinit init;
 	struct lermd rmd;
 	struct letmd tmd;
-	uint8_t *myaddr;
+	u_int8_t *myaddr;
 
 #if NBPFILTER > 0
 	if (ifp->if_flags & IFF_PROMISC)
@@ -238,25 +245,25 @@ am7990_rint(struct lance_softc *sc)
 				if ((rmd.rmd1_bits & LE_R1_OFLO) == 0) {
 					if (rmd.rmd1_bits & LE_R1_FRAM)
 						printf("%s: framing error\n",
-						    device_xname(sc->sc_dev));
+						    sc->sc_dev.dv_xname);
 					if (rmd.rmd1_bits & LE_R1_CRC)
 						printf("%s: crc mismatch\n",
-						    device_xname(sc->sc_dev));
+						    sc->sc_dev.dv_xname);
 				}
 #endif
 			} else {
 				if (rmd.rmd1_bits & LE_R1_OFLO)
 					printf("%s: overflow\n",
-					    device_xname(sc->sc_dev));
+					    sc->sc_dev.dv_xname);
 			}
 			if (rmd.rmd1_bits & LE_R1_BUFF)
 				printf("%s: receive buffer error\n",
-				    device_xname(sc->sc_dev));
+				    sc->sc_dev.dv_xname);
 			ifp->if_ierrors++;
 		} else if ((rmd.rmd1_bits & (LE_R1_STP | LE_R1_ENP)) !=
 		    (LE_R1_STP | LE_R1_ENP)) {
 			printf("%s: dropping chained buffer\n",
-			    device_xname(sc->sc_dev));
+			    sc->sc_dev.dv_xname);
 			ifp->if_ierrors++;
 		} else {
 #ifdef LEDEBUG
@@ -321,10 +328,9 @@ am7990_tint(struct lance_softc *sc)
 		if (tmd.tmd1_bits & LE_T1_ERR) {
 			if (tmd.tmd3 & LE_T3_BUFF)
 				printf("%s: transmit buffer error\n",
-				    device_xname(sc->sc_dev));
+				    sc->sc_dev.dv_xname);
 			else if (tmd.tmd3 & LE_T3_UFLO)
-				printf("%s: underflow\n",
-				    device_xname(sc->sc_dev));
+				printf("%s: underflow\n", sc->sc_dev.dv_xname);
 			if (tmd.tmd3 & (LE_T3_BUFF | LE_T3_UFLO)) {
 				lance_reset(sc);
 				return;
@@ -335,14 +341,14 @@ am7990_tint(struct lance_softc *sc)
 					(*sc->sc_nocarrier)(sc);
 				else
 					printf("%s: lost carrier\n",
-					    device_xname(sc->sc_dev));
+					    sc->sc_dev.dv_xname);
 			}
 			if (tmd.tmd3 & LE_T3_LCOL)
 				ifp->if_collisions++;
 			if (tmd.tmd3 & LE_T3_RTRY) {
 #ifdef LEDEBUG
 				printf("%s: excessive collisions, tdr %d\n",
-				    device_xname(sc->sc_dev),
+				    sc->sc_dev.dv_xname,
 				    tmd.tmd3 & LE_T3_TDR_MASK);
 #endif
 				ifp->if_collisions += 16;
@@ -378,14 +384,14 @@ int
 am7990_intr(void *arg)
 {
 	struct lance_softc *sc = arg;
-	uint16_t isr;
+	u_int16_t isr;
 
 	isr = (*sc->sc_rdcsr)(sc, LE_CSR0) | sc->sc_saved_csr0;
 	sc->sc_saved_csr0 = 0;
 #if defined(LEDEBUG) && LEDEBUG > 1
 	if (sc->sc_debug)
 		printf("%s: am7990_intr entering with isr=%04x\n",
-		    device_xname(sc->sc_dev), isr);
+		    sc->sc_dev.dv_xname, isr);
 #endif
 	if ((isr & LE_C0_INTR) == 0)
 		return (0);
@@ -406,38 +412,37 @@ am7990_intr(void *arg)
 	if (isr & LE_C0_ERR) {
 		if (isr & LE_C0_BABL) {
 #ifdef LEDEBUG
-			printf("%s: babble\n", device_xname(sc->sc_dev));
+			printf("%s: babble\n", sc->sc_dev.dv_xname);
 #endif
 			ifp->if_oerrors++;
 		}
 #if 0
 		if (isr & LE_C0_CERR) {
-			printf("%s: collision error\n",
-			    device_xname(sc->sc_dev));
+			printf("%s: collision error\n", sc->sc_dev.dv_xname);
 			ifp->if_collisions++;
 		}
 #endif
 		if (isr & LE_C0_MISS) {
 #ifdef LEDEBUG
-			printf("%s: missed packet\n", device_xname(sc->sc_dev));
+			printf("%s: missed packet\n", sc->sc_dev.dv_xname);
 #endif
 			ifp->if_ierrors++;
 		}
 		if (isr & LE_C0_MERR) {
-			printf("%s: memory error\n", device_xname(sc->sc_dev));
+			printf("%s: memory error\n", sc->sc_dev.dv_xname);
 			lance_reset(sc);
 			return (1);
 		}
 	}
 
 	if ((isr & LE_C0_RXON) == 0) {
-		printf("%s: receiver disabled\n", device_xname(sc->sc_dev));
+		printf("%s: receiver disabled\n", sc->sc_dev.dv_xname);
 		ifp->if_ierrors++;
 		lance_reset(sc);
 		return (1);
 	}
 	if ((isr & LE_C0_TXON) == 0) {
-		printf("%s: transmitter disabled\n", device_xname(sc->sc_dev));
+		printf("%s: transmitter disabled\n", sc->sc_dev.dv_xname);
 		ifp->if_oerrors++;
 		lance_reset(sc);
 		return (1);
@@ -553,21 +558,21 @@ static void
 am7990_recv_print(struct lance_softc *sc, int no)
 {
 	struct lermd rmd;
-	uint16_t len;
+	u_int16_t len;
 	struct ether_header eh;
 
 	(*sc->sc_copyfromdesc)(sc, &rmd, LE_RMDADDR(sc, no), sizeof(rmd));
 	len = rmd.rmd3;
-	printf("%s: receive buffer %d, len = %d\n",
-	    device_xname(sc->sc_dev), no, len);
-	printf("%s: status %04x\n", device_xname(sc->sc_dev),
+	printf("%s: receive buffer %d, len = %d\n", sc->sc_dev.dv_xname, no,
+	    len);
+	printf("%s: status %04x\n", sc->sc_dev.dv_xname,
 	    (*sc->sc_rdcsr)(sc, LE_CSR0));
 	printf("%s: ladr %04x, hadr %02x, flags %02x, bcnt %04x, mcnt %04x\n",
-	    device_xname(sc->sc_dev),
+	    sc->sc_dev.dv_xname,
 	    rmd.rmd0, rmd.rmd1_hadr, rmd.rmd1_bits, rmd.rmd2, rmd.rmd3);
 	if (len >= sizeof(eh)) {
 		(*sc->sc_copyfrombuf)(sc, &eh, LE_RBUFADDR(sc, no), sizeof(eh));
-		printf("%s: dst %s", device_xname(sc->sc_dev),
+		printf("%s: dst %s", sc->sc_dev.dv_xname,
 			ether_sprintf(eh.ether_dhost));
 		printf(" src %s type %04x\n", ether_sprintf(eh.ether_shost),
 			ntohs(eh.ether_type));
@@ -578,21 +583,21 @@ static void
 am7990_xmit_print(struct lance_softc *sc, int no)
 {
 	struct letmd tmd;
-	uint16_t len;
+	u_int16_t len;
 	struct ether_header eh;
 
 	(*sc->sc_copyfromdesc)(sc, &tmd, LE_TMDADDR(sc, no), sizeof(tmd));
 	len = -tmd.tmd2;
-	printf("%s: transmit buffer %d, len = %d\n",
-	    device_xname(sc->sc_dev), no, len);
-	printf("%s: status %04x\n", device_xname(sc->sc_dev),
+	printf("%s: transmit buffer %d, len = %d\n", sc->sc_dev.dv_xname, no,
+	    len);
+	printf("%s: status %04x\n", sc->sc_dev.dv_xname,
 	    (*sc->sc_rdcsr)(sc, LE_CSR0));
 	printf("%s: ladr %04x, hadr %02x, flags %02x, bcnt %04x, mcnt %04x\n",
-	    device_xname(sc->sc_dev),
+	    sc->sc_dev.dv_xname,
 	    tmd.tmd0, tmd.tmd1_hadr, tmd.tmd1_bits, tmd.tmd2, tmd.tmd3);
 	if (len >= sizeof(eh)) {
 		(*sc->sc_copyfrombuf)(sc, &eh, LE_TBUFADDR(sc, no), sizeof(eh));
-		printf("%s: dst %s", device_xname(sc->sc_dev),
+		printf("%s: dst %s", sc->sc_dev.dv_xname,
 			ether_sprintf(eh.ether_dhost));
 		printf(" src %s type %04x\n", ether_sprintf(eh.ether_shost),
 		    ntohs(eh.ether_type));

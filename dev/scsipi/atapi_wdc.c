@@ -1,4 +1,4 @@
-/*	$NetBSD: atapi_wdc.c,v 1.109 2008/11/16 19:31:21 bouyer Exp $	*/
+/*	$NetBSD: atapi_wdc.c,v 1.105 2007/10/19 12:01:18 ad Exp $	*/
 
 /*
  * Copyright (c) 1998, 2001 Manuel Bouyer.
@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: atapi_wdc.c,v 1.109 2008/11/16 19:31:21 bouyer Exp $");
+__KERNEL_RCSID(0, "$NetBSD: atapi_wdc.c,v 1.105 2007/10/19 12:01:18 ad Exp $");
 
 #ifndef ATADEBUG
 #define ATADEBUG
@@ -120,7 +120,7 @@ wdc_atapibus_attach(struct atabus_softc *ata_sc)
 	/*
 	 * Fill in the scsipi_adapter.
 	 */
-	adapt->adapt_dev = atac->atac_dev;
+	adapt->adapt_dev = &atac->atac_dev;
 	adapt->adapt_nchannels = atac->atac_nchannels;
 	adapt->adapt_request = wdc_atapi_scsipi_request;
 	adapt->adapt_minphys = wdc_atapi_minphys;
@@ -141,7 +141,7 @@ wdc_atapibus_attach(struct atabus_softc *ata_sc)
 	chan->chan_ntargets = 2;
 	chan->chan_nluns = 1;
 
-	chp->atapibus = config_found_ia(ata_sc->sc_dev, "atapi", chan,
+	chp->atapibus = config_found_ia(&ata_sc->sc_dev, "atapi", chan,
 		atapiprint);
 }
 
@@ -163,7 +163,7 @@ static void
 wdc_atapi_kill_pending(struct scsipi_periph *periph)
 {
 	struct atac_softc *atac =
-	    device_private(periph->periph_channel->chan_adapter->adapt_dev);
+	    (void *)periph->periph_channel->chan_adapter->adapt_dev;
 	struct ata_channel *chp =
 	    atac->atac_channels[periph->periph_channel->chan_channel];
 
@@ -196,7 +196,7 @@ static int
 wdc_atapi_get_params(struct scsipi_channel *chan, int drive,
     struct ataparams *id)
 {
-	struct wdc_softc *wdc = device_private(chan->chan_adapter->adapt_dev);
+	struct wdc_softc *wdc = (void *)chan->chan_adapter->adapt_dev;
 	struct atac_softc *atac = &wdc->sc_atac;
 	struct wdc_regs *wdr = &wdc->regs[chan->chan_channel];
 	struct ata_channel *chp = atac->atac_channels[chan->chan_channel];
@@ -218,13 +218,13 @@ wdc_atapi_get_params(struct scsipi_channel *chan, int drive,
 	if (wdc_exec_command(&chp->ch_drive[drive], &ata_c) != ATACMD_COMPLETE) {
 		printf("wdc_atapi_get_params: ATAPI_SOFT_RESET failed for"
 		    " drive %s:%d:%d: driver failed\n",
-		    device_xname(atac->atac_dev), chp->ch_channel, drive);
+		    atac->atac_dev.dv_xname, chp->ch_channel, drive);
 		panic("wdc_atapi_get_params");
 	}
 	if (ata_c.flags & (AT_ERROR | AT_TIMEOU | AT_DF)) {
 		ATADEBUG_PRINT(("wdc_atapi_get_params: ATAPI_SOFT_RESET "
 		    "failed for drive %s:%d:%d: error 0x%x\n",
-		    device_xname(atac->atac_dev), chp->ch_channel, drive,
+		    atac->atac_dev.dv_xname, chp->ch_channel, drive,
 		    ata_c.r_error), DEBUG_PROBE);
 		return -1;
 	}
@@ -237,7 +237,7 @@ wdc_atapi_get_params(struct scsipi_channel *chan, int drive,
 	if (ata_get_params(&chp->ch_drive[drive], AT_WAIT, id) != 0) {
 		ATADEBUG_PRINT(("wdc_atapi_get_params: ATAPI_IDENTIFY_DEVICE "
 		    "failed for drive %s:%d:%d: error 0x%x\n",
-		    device_xname(atac->atac_dev), chp->ch_channel, drive,
+		    atac->atac_dev.dv_xname, chp->ch_channel, drive,
 		    ata_c.r_error), DEBUG_PROBE);
 		return -1;
 	}
@@ -251,7 +251,7 @@ wdc_atapi_probe_device(struct atapibus_softc *sc, int target)
 	struct scsipi_periph *periph;
 	struct ataparams ids;
 	struct ataparams *id = &ids;
-	struct wdc_softc *wdc = device_private(chan->chan_adapter->adapt_dev);
+	struct wdc_softc *wdc = (void *)chan->chan_adapter->adapt_dev;
 	struct atac_softc *atac = &wdc->sc_atac;
 	struct ata_channel *chp = atac->atac_channels[chan->chan_channel];
 	struct ata_drive_datas *drvp = &chp->ch_drive[target];
@@ -266,15 +266,14 @@ wdc_atapi_probe_device(struct atapibus_softc *sc, int target)
 	if (wdc_atapi_get_params(chan, target, id) == 0) {
 #ifdef ATAPI_DEBUG_PROBE
 		printf("%s drive %d: cmdsz 0x%x drqtype 0x%x\n",
-		    device_xname(sc->sc_dev), target,
+		    sc->sc_dev.dv_xname, target,
 		    id->atap_config & ATAPI_CFG_CMD_MASK,
 		    id->atap_config & ATAPI_CFG_DRQ_MASK);
 #endif
 		periph = scsipi_alloc_periph(M_NOWAIT);
 		if (periph == NULL) {
-			aprint_error_dev(sc->sc_dev,
-			    "unable to allocate periph for drive %d\n",
-			    target);
+			printf("%s: unable to allocate periph for drive %d\n",
+			    sc->sc_dev.dv_xname, target);
 			return;
 		}
 		periph->periph_dev = NULL;
@@ -342,7 +341,7 @@ wdc_atapi_scsipi_request(struct scsipi_channel *chan, scsipi_adapter_req_t req,
 	struct scsipi_adapter *adapt = chan->chan_adapter;
 	struct scsipi_periph *periph;
 	struct scsipi_xfer *sc_xfer;
-	struct wdc_softc *wdc = device_private(adapt->adapt_dev);
+	struct wdc_softc *wdc = (void *)adapt->adapt_dev;
 	struct atac_softc *atac = &wdc->sc_atac;
 	struct ata_xfer *xfer;
 	int channel = chan->chan_channel;
@@ -355,9 +354,8 @@ wdc_atapi_scsipi_request(struct scsipi_channel *chan, scsipi_adapter_req_t req,
 		drive = periph->periph_target;
 
 		ATADEBUG_PRINT(("wdc_atapi_scsipi_request %s:%d:%d\n",
-		    device_xname(atac->atac_dev), channel, drive),
-		    DEBUG_XFERS);
-		if (!device_is_active(atac->atac_dev)) {
+		    atac->atac_dev.dv_xname, channel, drive), DEBUG_XFERS);
+		if (!device_is_active(&atac->atac_dev)) {
 			sc_xfer->error = XS_DRIVER_STUFFUP;
 			scsipi_done(sc_xfer);
 			return;
@@ -461,7 +459,7 @@ wdc_atapi_start(struct ata_channel *chp, struct ata_xfer *xfer)
 	const char *errstring;
 
 	ATADEBUG_PRINT(("wdc_atapi_start %s:%d:%d, scsi flags 0x%x \n",
-	    device_xname(atac->atac_dev), chp->ch_channel, drvp->drive,
+	    atac->atac_dev.dv_xname, chp->ch_channel, drvp->drive,
 	    sc_xfer->xs_control), DEBUG_XFERS);
 #if NATA_DMA
 	if ((xfer->c_flags & C_DMA) && (drvp->n_xfers <= NXFER))
@@ -509,7 +507,7 @@ wdc_atapi_start(struct ata_channel *chp, struct ata_xfer *xfer)
 				 */
 				printf("%s:%d:%d: PIO mode %d rejected, "
 				    "falling back to PIO mode 3\n",
-				    device_xname(atac->atac_dev),
+				    atac->atac_dev.dv_xname,
 				    chp->ch_channel, xfer->c_drive,
 				    drvp->PIO_mode);
 				if (drvp->PIO_mode > 3)
@@ -547,7 +545,7 @@ wdc_atapi_start(struct ata_channel *chp, struct ata_xfer *xfer)
 					 */
 					printf("%s:%d:%d: DMA mode %d rejected, "
 					    "falling back to DMA mode 0\n",
-					    device_xname(atac->atac_dev),
+					    atac->atac_dev.dv_xname,
 					    chp->ch_channel, xfer->c_drive,
 					    drvp->DMA_mode);
 					if (drvp->DMA_mode > 0)
@@ -665,7 +663,7 @@ ready:
 	return;
 timeout:
 	printf("%s:%d:%d: %s timed out\n",
-	    device_xname(atac->atac_dev), chp->ch_channel, xfer->c_drive,
+	    atac->atac_dev.dv_xname, chp->ch_channel, xfer->c_drive,
 	    errstring);
 	sc_xfer->error = XS_TIMEOUT;
 	bus_space_write_1(wdr->ctl_iot, wdr->ctl_ioh, wd_aux_ctlr, WDCTL_4BIT);
@@ -674,7 +672,7 @@ timeout:
 	return;
 error:
 	printf("%s:%d:%d: %s ",
-	    device_xname(atac->atac_dev), chp->ch_channel, xfer->c_drive,
+	    atac->atac_dev.dv_xname, chp->ch_channel, xfer->c_drive,
 	    errstring);
 	printf("error (0x%x)\n", chp->ch_error);
 	sc_xfer->error = XS_SHORTSENSE;
@@ -704,14 +702,14 @@ wdc_atapi_intr(struct ata_channel *chp, struct ata_xfer *xfer, int irq)
 	void *cmd;
 
 	ATADEBUG_PRINT(("wdc_atapi_intr %s:%d:%d\n",
-	    device_xname(atac->atac_dev), chp->ch_channel, drvp->drive),
+	    atac->atac_dev.dv_xname, chp->ch_channel, drvp->drive),
 	    DEBUG_INTR);
 
 	/* Is it not a transfer, but a control operation? */
 	if (drvp->state < READY) {
 		printf("%s:%d:%d: bad state %d in wdc_atapi_intr\n",
-		    device_xname(atac->atac_dev), chp->ch_channel,
-		    xfer->c_drive, drvp->state);
+		    atac->atac_dev.dv_xname, chp->ch_channel, xfer->c_drive,
+		    drvp->state);
 		panic("wdc_atapi_intr: bad state");
 	}
 	/*
@@ -751,8 +749,8 @@ wdc_atapi_intr(struct ata_channel *chp, struct ata_xfer *xfer, int irq)
 		if (irq && (xfer->c_flags & C_TIMEOU) == 0)
 			return 0; /* IRQ was not for us */
 		printf("%s:%d:%d: device timeout, c_bcount=%d, c_skip=%d\n",
-		    device_xname(atac->atac_dev), chp->ch_channel,
-		    xfer->c_drive, xfer->c_bcount, xfer->c_skip);
+		    atac->atac_dev.dv_xname, chp->ch_channel, xfer->c_drive,
+		    xfer->c_bcount, xfer->c_skip);
 #if NATA_DMA
 		if (xfer->c_flags & C_DMA) {
 			ata_dmaerr(drvp,
@@ -1001,8 +999,7 @@ wdc_atapi_phase_complete(struct ata_xfer *xfer)
 	/* wait for DSC if needed */
 	if (drvp->drive_flags & DRIVE_ATAPIST) {
 		ATADEBUG_PRINT(("wdc_atapi_phase_complete(%s:%d:%d) "
-		    "polldsc %d\n", device_xname(atac->atac_dev),
-		    chp->ch_channel,
+		    "polldsc %d\n", atac->atac_dev.dv_xname, chp->ch_channel,
 		    xfer->c_drive, xfer->c_dscpoll), DEBUG_XFERS);
 #if 1
 		if (cold)
@@ -1015,7 +1012,7 @@ wdc_atapi_phase_complete(struct ata_xfer *xfer)
 			    mstohz(sc_xfer->timeout)) {
 				printf("%s:%d:%d: wait_for_dsc "
 				    "failed\n",
-				    device_xname(atac->atac_dev),
+				    atac->atac_dev.dv_xname,
 				    chp->ch_channel, xfer->c_drive);
 				sc_xfer->error = XS_TIMEOUT;
 				wdc_atapi_reset(chp, xfer);
@@ -1082,7 +1079,7 @@ wdc_atapi_done(struct ata_channel *chp, struct ata_xfer *xfer)
 	int drive = xfer->c_drive;
 
 	ATADEBUG_PRINT(("wdc_atapi_done %s:%d:%d: flags 0x%x\n",
-	    device_xname(atac->atac_dev), chp->ch_channel, xfer->c_drive,
+	    atac->atac_dev.dv_xname, chp->ch_channel, xfer->c_drive,
 	    (u_int)xfer->c_flags), DEBUG_XFERS);
 	callout_stop(&chp->ch_callout);
 	/* mark controller inactive and free the command */
@@ -1113,7 +1110,7 @@ wdc_atapi_reset(struct ata_channel *chp, struct ata_xfer *xfer)
 	drvp->state = 0;
 	if (wdc_wait_for_unbusy(chp, WDC_RESET_WAIT, AT_POLL) != 0) {
 		printf("%s:%d:%d: reset failed\n",
-		    device_xname(atac->atac_dev), chp->ch_channel,
+		    atac->atac_dev.dv_xname, chp->ch_channel,
 		    xfer->c_drive);
 		sc_xfer->error = XS_SELTIMEOUT;
 	}

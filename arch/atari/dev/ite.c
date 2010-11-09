@@ -1,4 +1,4 @@
-/*	$NetBSD: ite.c,v 1.59 2008/06/11 14:35:53 tsutsui Exp $	*/
+/*	$NetBSD: ite.c,v 1.53 2006/10/01 18:56:21 elad Exp $	*/
 
 /*
  * Copyright (c) 1990 The Regents of the University of California.
@@ -81,7 +81,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ite.c,v 1.59 2008/06/11 14:35:53 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ite.c,v 1.53 2006/10/01 18:56:21 elad Exp $");
 
 #include "opt_ddb.h"
 
@@ -285,7 +285,7 @@ getitesp(dev)
 	dev_t dev;
 {
 	if(atari_realconfig && (con_itesoftc.grf == NULL))
-		return(device_lookup_private(&ite_cd, ITEUNIT(dev)));
+		return(ite_cd.cd_devs[ITEUNIT(dev)]);
 
 	if(con_itesoftc.grf == NULL)
 		panic("no ite_softc for console");
@@ -559,7 +559,7 @@ iteioctl(dev, cmd, addr, flag, l)
 	dev_t		dev;
 	u_long		cmd;
 	int		flag;
-	void *		addr;
+	caddr_t		addr;
 	struct lwp	*l;
 {
 	struct iterepeat	*irp;
@@ -677,9 +677,17 @@ itestart(tp)
 	s = spltty(); {
 		tp->t_state &= ~TS_BUSY;
 		/* we have characters remaining. */
-		if (ttypull(tp)) {
+		if (rbp->c_cc) {
 			tp->t_state |= TS_TIMEOUT;
-			callout_schedule(&tp->t_rstrt_ch, 1);
+			callout_reset(&tp->t_rstrt_ch, 1, ttrstrt, tp);
+		}
+		/* wakeup we are below */
+		if (rbp->c_cc <= tp->t_lowat) {
+			if (tp->t_state & TS_ASLEEP) {
+				tp->t_state &= ~TS_ASLEEP;
+				wakeup((caddr_t) rbp);
+			}
+			selwakeup(&tp->t_wsel);
 		}
 	      out: ;
 	} splx(s);
@@ -911,7 +919,7 @@ enum caller	caller;
 static u_int last_char;
 static u_char tout_pending;
 
-static callout_t repeat_ch;
+static struct callout repeat_ch = CALLOUT_INITIALIZER;
 
 /*ARGSUSED*/
 static void
@@ -934,13 +942,6 @@ enum caller	caller;
 	u_char		code, *str, up, mask;
 	struct key	key;
 	int		s, i;
-	static bool	again;
-
-	if (!again) {
-		/* XXX */
-		callout_init(&repeat_ch, 0);
-		again = true;
-	}
 
 	if(kbd_ite == NULL)
 		return;

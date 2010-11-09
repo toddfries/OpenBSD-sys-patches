@@ -1,4 +1,4 @@
-/*	$NetBSD: tx39power.c,v 1.19 2008/04/28 20:23:21 martin Exp $ */
+/*	$NetBSD: tx39power.c,v 1.17 2006/03/24 21:45:48 tsutsui Exp $ */
 
 /*-
  * Copyright (c) 1999, 2000 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: tx39power.c,v 1.19 2008/04/28 20:23:21 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: tx39power.c,v 1.17 2006/03/24 21:45:48 tsutsui Exp $");
 
 #include "opt_tx39power_debug.h"
 
@@ -180,11 +187,11 @@ tx39power_suspend_cpu() /* I assume already splhigh */
 	/* enable power button interrupt only */
 	tx_conf_write(tc, TX39_INTRCLEAR5_REG, TX39_INTRSTATUS5_NEGONBUTNINT);
 	tx_conf_write(tc, TX39_INTRENABLE5_REG, TX39_INTRSTATUS5_NEGONBUTNINT);
-	__asm volatile(".set push; .set mips2; sync; .set pop");
+	__asm volatile("sync");
 
 	/* stop CPU clock */
 	tx_conf_write(tc, TX39_POWERCTRL_REG, reg);
-	__asm volatile(".set push; .set mips2; sync; .set pop");
+	__asm volatile("sync");
 	/* wait until power button pressed */
 	/* clear interrupt */
 	tx_conf_write(tc, TX39_INTRCLEAR5_REG, TX39_INTRSTATUS5_NEGONBUTNINT);

@@ -1,4 +1,4 @@
-/*	$NetBSD: unistd.h,v 1.47 2008/08/27 08:58:16 christos Exp $	*/
+/*	$NetBSD: unistd.h,v 1.39 2007/10/15 14:12:55 ad Exp $	*/
 
 /*
  * Copyright (c) 1989, 1993
@@ -37,8 +37,7 @@
 #include <sys/featuretest.h>
 
 /* compile-time symbolic constants */
-#define	_POSIX_JOB_CONTROL	1
-				/* implementation supports job control */
+#define	_POSIX_JOB_CONTROL	/* implementation supports job control */
 
 /*
  * According to POSIX 1003.1:
@@ -55,8 +54,7 @@
  * extra privileges.
  */
 #ifdef	_NOT_AVAILABLE
-#define	_POSIX_SAVED_IDS	1
-				/* saved set-user-ID and set-group-ID */
+#define	_POSIX_SAVED_IDS	/* saved set-user-ID and set-group-ID */
 #endif
 
 #define	_POSIX_VERSION		199009L
@@ -89,16 +87,8 @@
 #define	_POSIX_MESSAGE_PASSING	200112L
 				/* monotonic clock */
 #define	_POSIX_MONOTONIC_CLOCK	200112L
-				/* priority scheduling */
-#define	_POSIX_PRIORITY_SCHEDULING	200112L
 				/* threads */
 #define	_POSIX_THREADS		200112L
-				/* _r functions */
-#define	_POSIX_THREAD_SAFE_FUNCTIONS	200112L
-				/* pthread_attr functions for stack size */
-#define	_POSIX_THREAD_ATTR_STACKSIZE	200112L
-				/* pthread_attr functions for stack address */
-#define	_POSIX_THREAD_ATTR_STACKADDR	200112L
 				/* semaphores */
 #define	_POSIX_SEMAPHORES	0
 				/* barriers */
@@ -111,12 +101,6 @@
 #define	_POSIX_READER_WRITER_LOCKS	200112L
 				/* XPG4.2 shared memory */
 #define	_XOPEN_SHM		0
-				/* shell */
-#define	_POSIX_SHELL		1
-				/* regular expressions */
-#define	_POSIX_REGEXP		1
-				/* C binding */
-#define	_POSIX2_C_BIND		200112L
 
 /* access function */
 #define	F_OK		0	/* test for existence of file */
@@ -160,8 +144,6 @@
 #define	_PC_VDISABLE		 9
 #define	_PC_SYNC_IO		10
 #define	_PC_FILESIZEBITS	11
-#define	_PC_SYMLINK_MAX		12
-#define	_PC_2_SYMLINKS		13
 
 /* configurable system variables; use as argument to sysconf(3) */
 /*
@@ -224,45 +206,11 @@
 #define	_SC_MESSAGE_PASSING	53
 #define	_SC_MQ_OPEN_MAX		54
 #define	_SC_MQ_PRIO_MAX		55
-#define	_SC_PRIORITY_SCHEDULING	56
-#define	_SC_THREAD_DESTRUCTOR_ITERATIONS 57
-#define	_SC_THREAD_KEYS_MAX		58
-#define	_SC_THREAD_STACK_MIN		59
-#define	_SC_THREAD_THREADS_MAX		60
-#define	_SC_THREAD_ATTR_STACKADDR	61
-#define	_SC_THREAD_ATTR_STACKSIZE 	62
-#define	_SC_THREAD_PRIORITY_SCHEDULING	63
-#define	_SC_THREAD_PRIO_INHERIT 	64
-#define	_SC_THREAD_PRIO_PROTECT		65
-#define	_SC_THREAD_PROCESS_SHARED	66
-#define	_SC_THREAD_SAFE_FUNCTIONS	67
-#define	_SC_TTY_NAME_MAX		68
-#define	_SC_HOST_NAME_MAX		69
-#define	_SC_PASS_MAX			70
-#define	_SC_REGEXP			71
-#define	_SC_SHELL			72
-#define	_SC_SYMLOOP_MAX			73
-
-/* Actually, they are not supported or implemented yet */
-#define	_SC_V6_ILP32_OFF32		74
-#define	_SC_V6_ILP32_OFFBIG		75
-#define	_SC_V6_LP64_OFF64		76
-#define	_SC_V6_LPBIG_OFFBIG		77
-#define	_SC_2_PBS			80
-#define	_SC_2_PBS_ACCOUNTING		81
-#define	_SC_2_PBS_CHECKPOINT		82
-#define	_SC_2_PBS_LOCATE		83
-#define	_SC_2_PBS_MESSAGE		84
-#define	_SC_2_PBS_TRACK			85
 
 #ifdef _NETBSD_SOURCE
 /* Commonly provided sysconf() extensions */
 #define	_SC_NPROCESSORS_CONF	1001
 #define	_SC_NPROCESSORS_ONLN	1002
-/* Native variables */
-#define	_SC_SCHED_RT_TS		2001
-#define	_SC_SCHED_PRI_MIN	2002
-#define	_SC_SCHED_PRI_MAX	2003
 #endif	/* _NETBSD_SOURCE */
 
 /* configurable system strings */

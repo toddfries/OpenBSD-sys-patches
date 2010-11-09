@@ -1,4 +1,4 @@
-/*	$NetBSD: wrtvid.c,v 1.8 2008/04/28 20:23:29 martin Exp $	*/
+/*	$NetBSD: wrtvid.c,v 1.6 2002/03/24 18:15:03 scw Exp $	*/
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -82,32 +89,30 @@
  * Write a big-endian 32-bit value at the specified address
  */
 static void
-write32(uint8_t *vp, uint32_t value)
+write32(u_int8_t *vp, u_int32_t value)
 {
-
-	*vp++ = (uint8_t)((value >> 24) & 0xff);
-	*vp++ = (uint8_t)((value >> 16) & 0xff);
-	*vp++ = (uint8_t)((value >> 8) & 0xff);
-	*vp = (uint8_t)(value & 0xff);
+	*vp++ = (u_int8_t) ((value >> 24) & 0xff);
+	*vp++ = (u_int8_t) ((value >> 16) & 0xff);
+	*vp++ = (u_int8_t) ((value >> 8) & 0xff);
+	*vp = (u_int8_t) (value & 0xff);
 }
 
 /*
  * Write a big-endian 16-bit value at the specified address
  */
 static void
-write16(uint8_t *vp, uint16_t value)
+write16(u_int8_t *vp, u_int16_t value)
 {
-
-	*vp++ = (uint8_t)((value >> 8) & 0xff);
-	*vp = (uint8_t)(value & 0xff);
+	*vp++ = (u_int8_t) ((value >> 8) & 0xff);
+	*vp = (u_int8_t) (value & 0xff);
 }
 
 int
 main(int argc, char **argv)
 {
 	struct stat st;
-	uint16_t len;
-	uint8_t *vid;
+	u_int16_t len;
+	u_int8_t *vid;
 	char *fn;
 	int is_disk;
 	int fd;
@@ -134,7 +139,7 @@ usage:
 	}
 
 	/* How many 256-byte logical blocks (rounded up) */
-	len = (uint16_t)((st.st_size + 255) / 256);
+	len = (u_int16_t) ((st.st_size + 255) / 256);
 
 	/* For tapes, round up to 8k */
 	if (is_disk == 0) {
@@ -173,5 +178,5 @@ usage:
 	close(fd);
 	free(vid);
 
-	return 0;
+	return(0);
 }

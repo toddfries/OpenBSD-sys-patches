@@ -1,4 +1,4 @@
-/* $NetBSD: pckbc_jensenio.c,v 1.10 2008/04/28 20:23:11 martin Exp $ */
+/* $NetBSD: pckbc_jensenio.c,v 1.6 2002/10/02 04:06:38 thorpej Exp $ */
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -31,7 +38,7 @@
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
 
-__KERNEL_RCSID(0, "$NetBSD: pckbc_jensenio.c,v 1.10 2008/04/28 20:23:11 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pckbc_jensenio.c,v 1.6 2002/10/02 04:06:38 thorpej Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -41,8 +48,10 @@ __KERNEL_RCSID(0, "$NetBSD: pckbc_jensenio.c,v 1.10 2008/04/28 20:23:11 martin E
 #include <sys/malloc.h>
 #include <sys/errno.h>
 #include <sys/queue.h>
-#include <sys/intr.h>
-#include <sys/bus.h>
+#include <sys/lock.h> 
+
+#include <machine/intr.h>
+#include <machine/bus.h>
 
 #include <dev/ic/i8042reg.h>
 #include <dev/ic/pckbcvar.h> 
@@ -67,17 +76,17 @@ struct pckbc_jensenio_softc {
 	struct pckbc_jensenio_intrcookie sc_ic[PCKBC_NSLOTS];
 };
 
-int	pckbc_jensenio_match(device_t, cfdata_t, void *);
-void	pckbc_jensenio_attach(device_t, device_t, void *);
+int	pckbc_jensenio_match(struct device *, struct cfdata *, void *);
+void	pckbc_jensenio_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(pckbc_jensenio, sizeof(struct pckbc_jensenio_softc),
+CFATTACH_DECL(pckbc_jensenio, sizeof(struct pckbc_jensenio_softc),
     pckbc_jensenio_match, pckbc_jensenio_attach, NULL, NULL);
 
 void	pckbc_jensenio_intr_establish(struct pckbc_softc *, pckbc_slot_t);
 void	pckbc_jensenio_intr(void *, u_long);
 
 int
-pckbc_jensenio_match(device_t parent, cfdata_t match, void *aux)
+pckbc_jensenio_match(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct jensenio_attach_args *ja = aux;
 
@@ -89,15 +98,13 @@ pckbc_jensenio_match(device_t parent, cfdata_t match, void *aux)
 }
 
 void
-pckbc_jensenio_attach(device_t parent, device_t self, void *aux)
+pckbc_jensenio_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct pckbc_jensenio_softc *jsc = device_private(self);
+	struct pckbc_jensenio_softc *jsc = (void *)self;
 	struct pckbc_softc *sc = &jsc->sc_pckbc;
 	struct jensenio_attach_args *ja = aux;
 	struct pckbc_internal *t;
 	bus_space_handle_t ioh_d, ioh_c;
-
-	sc->sc_dv = self;
 
 	/*
 	 * Set up IRQs.
@@ -130,7 +137,7 @@ pckbc_jensenio_attach(device_t parent, device_t self, void *aux)
 	t->t_sc = sc;
 	sc->id = t;
 
-	aprint_normal("\n");
+	printf("\n");
 
 	/* Finish off the attach. */
 	pckbc_attach(sc);
@@ -144,8 +151,8 @@ pckbc_jensenio_intr_establish(struct pckbc_softc *sc, pckbc_slot_t slot)
 	jsc->sc_ic[slot].ic_sc = sc;
 
 	scb_set(jsc->sc_ic[slot].ic_vector, pckbc_jensenio_intr,
-	    &jsc->sc_ic[slot], IPL_VM);
-	aprint_normal_dev(sc->sc_dv, "%s slot interrupting at vector 0x%lx\n",
+	    &jsc->sc_ic[slot]);
+	printf("%s: %s slot interrupting at vector 0x%lx\n", sc->sc_dv.dv_xname,
 	    pckbc_slot_names[slot], jsc->sc_ic[slot].ic_vector);
 
 	sprintf(jsc->sc_ic[slot].ic_vecstr, "0x%lx",

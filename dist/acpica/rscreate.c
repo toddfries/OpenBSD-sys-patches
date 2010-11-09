@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Module Name: rscreate - Create resource lists/tables
- *              $Revision: 1.4 $
+ *              xRevision: 1.75 $
  *
  ******************************************************************************/
 
@@ -9,7 +9,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2008, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2006, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -115,6 +115,9 @@
  *****************************************************************************/
 
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: rscreate.c,v 1.1 2006/03/23 13:36:31 kochi Exp $");
+
 #define __RSCREATE_C__
 
 #include "acpi.h"
@@ -154,10 +157,9 @@ AcpiRsCreateResourceList (
     UINT8                   *AmlStart;
     ACPI_SIZE               ListSizeNeeded = 0;
     UINT32                  AmlBufferLength;
-    void                    *Resource;
 
 
-    ACPI_FUNCTION_TRACE (RsCreateResourceList);
+    ACPI_FUNCTION_TRACE ("RsCreateResourceList");
 
 
     ACPI_DEBUG_PRINT ((ACPI_DB_INFO, "AmlBuffer = %p\n",
@@ -192,9 +194,8 @@ AcpiRsCreateResourceList (
 
     /* Do the conversion */
 
-    Resource = OutputBuffer->Pointer;
-    Status = AcpiUtWalkAmlResources (AmlStart, AmlBufferLength,
-                AcpiRsConvertAmlToResources, &Resource);
+    Status = AcpiRsConvertAmlToResources (AmlStart, AmlBufferLength,
+                    OutputBuffer->Pointer);
     if (ACPI_FAILURE (Status))
     {
         return_ACPI_STATUS (Status);
@@ -245,7 +246,7 @@ AcpiRsCreatePciRoutingTable (
     ACPI_BUFFER             PathBuffer;
 
 
-    ACPI_FUNCTION_TRACE (RsCreatePciRoutingTable);
+    ACPI_FUNCTION_TRACE ("RsCreatePciRoutingTable");
 
 
     /* Params already validated, so we don't re-validate here */
@@ -480,7 +481,7 @@ AcpiRsCreateAmlResources (
     ACPI_SIZE               AmlSizeNeeded = 0;
 
 
-    ACPI_FUNCTION_TRACE (RsCreateAmlResources);
+    ACPI_FUNCTION_TRACE ("RsCreateAmlResources");
 
 
     ACPI_DEBUG_PRINT ((ACPI_DB_INFO, "LinkedListBuffer = %p\n",

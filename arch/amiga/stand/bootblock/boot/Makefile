@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile,v 1.39 2009/01/12 07:42:30 tsutsui Exp $
+#	$NetBSD: Makefile,v 1.38 2006/01/25 13:23:50 is Exp $
 
 .include <bsd.sys.mk>		# for HOST_SH
 
@@ -26,6 +26,7 @@ DIR_LIBC=	${DIR_TOP}/../common/lib/libc
 
 S=	${DIR_TOP}	# ????
 Z_AS= library
+ZMISCCPPFLAGS=-DDYNAMIC_CRC_TABLE -DNOBYFOUR -UBYFOUR 
 .include "${DIR_TOP}/lib/libz/Makefile.inc"
 LIBZ= ${ZLIB}
 
@@ -72,19 +73,15 @@ CLEANFILES += boot.amiga x.out xxstart.o libboot.a vers.c machine m68k
 
 ### special  rules for bootblocks ###
 
-INCPATH = -nostdinc -I${DIR_TOP} -I${DIR_TOP}/lib/libsa
-INCPATH += -I${DIR_TOP}/../common/dist/zlib
-INCPATH += -I${.CURDIR}
+INCPATH = -nostdinc -I${DIR_TOP} -I${DIR_TOP}/lib/libsa -I${.CURDIR}
 INCPATH += -I${.CURDIR}/../../.. -I${.OBJDIR}
-INCPATH += -I${.CURDIR}/../aout2bb
+INCPATH += -I${.CURDIR}/../aout2bb -I${DESTDIR}/usr/include
 
 AFLAGS += -m68030 -l
 CAFLAGS += -Wa,-l -Wa,-m68030 ${INCPATH}
 
 COPTIM= -Os -fomit-frame-pointer -fcse-follow-jumps -fcse-skip-blocks  -Wa,-l -m68060 -Wa,-m68030
-CFLAGS= -ffreestanding ${COPTIM} ${INCPATH} ${DEFS}
-CFLAGS+= -Werror
-CFLAGS+= -Wall -Wmissing-prototypes -Wstrict-prototypes -Wpointer-arith
+CFLAGS= -ffreestanding ${COPTIM} ${INCPATH} ${DEFS} -Wall #-Wstrict-prototypes
 
 .c.o:
 	${CC} ${CFLAGS} -S $< -o $*.s
@@ -114,10 +111,6 @@ libboot.a: ${OBJS}
 vers.c:	${.CURDIR}/version
 	${HOST_SH} ${DIR_TOP}/conf/newvers_stand.sh -N ${.CURDIR}/version "amiga"
 
-.if !make(obj) && !make(clean) && !make(cleandir)
-.NOPATH: machine m68k
-.BEGIN: machine m68k
-
 machine:
 	-rm -f $@
 	ln -s ${DIR_TOP}/arch/amiga/include $@
@@ -125,7 +118,6 @@ machine:
 m68k:
 	-rm -f $@
 	ln -s ${DIR_TOP}/arch/m68k/include $@
-.endif
 
 # make sure these are built:
 

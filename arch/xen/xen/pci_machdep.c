@@ -1,4 +1,4 @@
-/*      $NetBSD: pci_machdep.c,v 1.13 2008/04/14 13:38:03 cegger Exp $      */
+/*      $NetBSD: pci_machdep.c,v 1.9 2006/05/15 20:16:31 dogcow Exp $      */
 
 /*
  * Copyright (c) 2005 Manuel Bouyer.
@@ -30,9 +30,6 @@
  *
  */
 
-#include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: pci_machdep.c,v 1.13 2008/04/14 13:38:03 cegger Exp $");
-
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -47,10 +44,9 @@ __KERNEL_RCSID(0, "$NetBSD: pci_machdep.c,v 1.13 2008/04/14 13:38:03 cegger Exp 
 #include "opt_ddb.h"
 
 /* mask of already-known busses */
-uint32_t pci_bus_attached[256 / 32];
+u_int32_t pci_bus_attached[256 / 32];
 
 struct x86_bus_dma_tag pci_bus_dma_tag = {
-	0,				/* _tag_needs_free */
 	0,
 	0,
 	0,
@@ -68,8 +64,6 @@ struct x86_bus_dma_tag pci_bus_dma_tag = {
 	_bus_dmamem_map,
 	_bus_dmamem_unmap,
 	_bus_dmamem_mmap,
-	_bus_dmatag_subregion,
-	_bus_dmatag_destroy,
 };
 
 void

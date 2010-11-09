@@ -1,4 +1,4 @@
-/*	$NetBSD: pmap.c,v 1.52 2008/12/10 11:10:19 pooka Exp $	*/
+/*	$NetBSD: pmap.c,v 1.44 2006/11/29 19:56:46 freza Exp $	*/
 
 /*
  * Copyright 2001 Wasabi Systems, Inc.
@@ -67,7 +67,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: pmap.c,v 1.52 2008/12/10 11:10:19 pooka Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pmap.c,v 1.44 2006/11/29 19:56:46 freza Exp $");
 
 #include <sys/param.h>
 #include <sys/malloc.h>
@@ -92,7 +92,7 @@ __KERNEL_RCSID(0, "$NetBSD: pmap.c,v 1.52 2008/12/10 11:10:19 pooka Exp $");
  * 4GB.  At 16KB/page it is 256K entries or 2MB.
  */
 #define KERNMAP_SIZE	((0xffffffffU/PAGE_SIZE)+1)
-void *kernmap;
+caddr_t kernmap;
 
 #define MINCTX		2
 #define NUMCTX		256
@@ -128,7 +128,6 @@ struct evcnt tlbenter_ev = EVCNT_INITIALIZER(EVCNT_TYPE_TRAP,
 	NULL, "cpu", "tlbenter");
 
 struct pmap kernel_pmap_;
-struct pmap *const kernel_pmap_ptr = &kernel_pmap_;
 
 int physmem;
 static int npgs;
@@ -182,7 +181,7 @@ static inline char *pa_to_attr(paddr_t);
 static inline volatile u_int *pte_find(struct pmap *, vaddr_t);
 static inline int pte_enter(struct pmap *, vaddr_t, u_int);
 
-static inline int pmap_enter_pv(struct pmap *, vaddr_t, paddr_t, int);
+static inline int pmap_enter_pv(struct pmap *, vaddr_t, paddr_t, boolean_t);
 static void pmap_remove_pv(struct pmap *, vaddr_t, paddr_t);
 
 static int ppc4xx_tlb_size_mask(size_t, int *, int *);
@@ -274,7 +273,7 @@ pmap_bootstrap(u_int kernelstart, u_int kernelend)
 	 * Allocate the kernel page table at the end of
 	 * kernel space so it's in the locked TTE.
 	 */
-	kernmap = (void *)kernelend;
+	kernmap = (caddr_t)kernelend;
 
 	/*
 	 * Initialize kernel page table.
@@ -484,8 +483,7 @@ pmap_init(void)
 	splx(s);
 
 	/* Setup a pool for additional pvlist structures */
-	pool_init(&pv_pool, sizeof(struct pv_entry), 0, 0, 0, "pv_entry", NULL,
-	    IPL_VM);
+	pool_init(&pv_pool, sizeof(struct pv_entry), 0, 0, 0, "pv_entry", NULL);
 }
 
 /*
@@ -695,7 +693,7 @@ pmap_zero_page(paddr_t pa)
 {
 
 #ifdef PPC_4XX_NOCACHE
-	memset((void *)pa, 0, PAGE_SIZE);
+	memset((caddr_t)pa, 0, PAGE_SIZE);
 #else
 	int i;
 
@@ -713,15 +711,15 @@ void
 pmap_copy_page(paddr_t src, paddr_t dst)
 {
 
-	memcpy((void *)dst, (void *)src, PAGE_SIZE);
+	memcpy((caddr_t)dst, (caddr_t)src, PAGE_SIZE);
 	dcache_flush_page(dst);
 }
 
 /*
- * This returns != 0 on success.
+ * This returns whether this is the first mapping of a page.
  */
 static inline int
-pmap_enter_pv(struct pmap *pm, vaddr_t va, paddr_t pa, int flags)
+pmap_enter_pv(struct pmap *pm, vaddr_t va, paddr_t pa, boolean_t wired)
 {
 	struct pv_entry *pv, *npv = NULL;
 	int s;
@@ -743,20 +741,14 @@ pmap_enter_pv(struct pmap *pm, vaddr_t va, paddr_t pa, int flags)
 		 * There is at least one other VA mapping this page.
 		 * Place this entry after the header.
 		 */
-		npv = pool_get(&pv_pool, PR_NOWAIT);
-		if (npv == NULL) {
-			if ((flags & PMAP_CANFAIL) == 0)
-				panic("pmap_enter_pv: failed");
-			splx(s);
-			return 0;
-		}
+		npv = pool_get(&pv_pool, PR_WAITOK);
 		npv->pv_va = va;
 		npv->pv_pm = pm;
 		npv->pv_next = pv->pv_next;
 		pv->pv_next = npv;
 		pv = npv;
 	}
-	if (flags & PMAP_WIRED) {
+	if (wired) {
 		PV_WIRE(pv);
 		pm->pm_stats.wired_count++;
 	}
@@ -865,7 +857,7 @@ pmap_enter(struct pmap *pm, vaddr_t va, paddr_t pa, vm_prot_t prot, int flags)
 	if (pmap_initialized && managed) {
 		char *attr;
 
-		if (!pmap_enter_pv(pm, va, pa, flags)) {
+		if (!pmap_enter_pv(pm, va, pa, flags & PMAP_WIRED)) {
 			/* Could not enter pv on a managed page */
 			return 1;
 		}
@@ -1020,7 +1012,7 @@ pmap_remove(struct pmap *pm, vaddr_t va, vaddr_t endva)
 /*
  * Get the physical page address for the given pmap/virtual address.
  */
-bool
+boolean_t
 pmap_extract(struct pmap *pm, vaddr_t va, paddr_t *pap)
 {
 	int seg = STIDX(va);
@@ -1073,7 +1065,7 @@ pmap_protect(struct pmap *pm, vaddr_t sva, vaddr_t eva, vm_prot_t prot)
 	splx(s);
 }
 
-bool
+boolean_t
 pmap_check_attr(struct vm_page *pg, u_int mask, int clear)
 {
 	paddr_t pa;
@@ -1086,7 +1078,7 @@ pmap_check_attr(struct vm_page *pg, u_int mask, int clear)
 	pa = VM_PAGE_TO_PHYS(pg);
 	attr = pa_to_attr(pa);
 	if (attr == NULL)
-		return false;
+		return FALSE;
 
 	s = splvm();
 	rv = ((*attr & mask) != 0);

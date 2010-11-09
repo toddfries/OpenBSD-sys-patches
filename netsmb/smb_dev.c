@@ -1,4 +1,4 @@
-/*	$NetBSD: smb_dev.c,v 1.29 2008/03/21 21:55:01 ad Exp $	*/
+/*	$NetBSD: smb_dev.c,v 1.25 2006/11/16 01:33:51 christos Exp $	*/
 
 /*
  * Copyright (c) 2000-2001 Boris Popov
@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: smb_dev.c,v 1.29 2008/03/21 21:55:01 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: smb_dev.c,v 1.25 2006/11/16 01:33:51 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -208,7 +208,7 @@ nsmb_dev_open(dev_t dev, int oflags, int devtype,
 /*
 	STAILQ_INIT(&sdp->sd_rqlist);
 	STAILQ_INIT(&sdp->sd_rplist);
-	selinit(&sdp->sd_pollinfo);
+	bzero(&sdp->sd_pollinfo, sizeof(struct selinfo));
 */
 	s = splnet();
 	sdp->sd_level = -1;
@@ -238,18 +238,17 @@ nsmb_dev_close(dev_t dev, int flag, int fmt, struct lwp *l)
 	smb_makescred(&scred, l, NULL);
 	ssp = sdp->sd_share;
 	if (ssp != NULL) {
-		smb_share_lock(ssp);
+		smb_share_lock(ssp, 0);
 		smb_share_rele(ssp, &scred);
 	}
 	vcp = sdp->sd_vc;
 	if (vcp != NULL) {
-		smb_vc_lock(vcp);
+		smb_vc_lock(vcp, 0);
 		smb_vc_rele(vcp, &scred);
 	}
 /*
 	smb_flushq(&sdp->sd_rqlist);
 	smb_flushq(&sdp->sd_rplist);
-	seldestroy(&sdp->sd_pollinfo);
 */
 	smb_devtbl[minor(dev)] = NULL;
 	free(sdp, M_NSMBDEV);
@@ -262,7 +261,7 @@ nsmb_dev_close(dev_t dev, int flag, int fmt, struct lwp *l)
 
 
 int
-nsmb_dev_ioctl(dev_t dev, u_long cmd, void *data, int flag,
+nsmb_dev_ioctl(dev_t dev, u_long cmd, caddr_t data, int flag,
     struct lwp *l)
 {
 	struct smb_dev *sdp;
@@ -287,7 +286,7 @@ nsmb_dev_ioctl(dev_t dev, u_long cmd, void *data, int flag,
 		if (error)
 			break;
 		sdp->sd_vc = vcp;
-		smb_vc_unlock(vcp);
+		smb_vc_unlock(vcp, 0);
 		sdp->sd_level = SMBL_VC;
 		break;
 	    case SMBIOC_OPENSHARE:
@@ -300,7 +299,7 @@ nsmb_dev_ioctl(dev_t dev, u_long cmd, void *data, int flag,
 		if (error)
 			break;
 		sdp->sd_share = ssp;
-		smb_share_unlock(ssp);
+		smb_share_unlock(ssp, 0);
 		sdp->sd_level = SMBL_SHARE;
 		break;
 	    case SMBIOC_REQUEST:
@@ -324,7 +323,7 @@ nsmb_dev_ioctl(dev_t dev, u_long cmd, void *data, int flag,
 				on = fl->ioc_flags & SMBV_PERMANENT;
 				if ((vcp = sdp->sd_vc) == NULL)
 					return ENOTCONN;
-				error = smb_vc_get(vcp, &scred);
+				error = smb_vc_get(vcp, LK_EXCLUSIVE, &scred);
 				if (error)
 					break;
 				if (on && (vcp->obj.co_flags & SMBV_PERMANENT) == 0) {
@@ -342,7 +341,7 @@ nsmb_dev_ioctl(dev_t dev, u_long cmd, void *data, int flag,
 				on = fl->ioc_flags & SMBS_PERMANENT;
 				if ((ssp = sdp->sd_share) == NULL)
 					return ENOTCONN;
-				error = smb_share_get(ssp, &scred);
+				error = smb_share_get(ssp, LK_EXCLUSIVE, &scred);
 				if (error)
 					break;
 				if (on && (ssp->obj.co_flags & SMBS_PERMANENT) == 0) {
@@ -370,12 +369,12 @@ nsmb_dev_ioctl(dev_t dev, u_long cmd, void *data, int flag,
 			break;
 		if (vcp) {
 			sdp->sd_vc = vcp;
-			smb_vc_unlock(vcp);
+			smb_vc_unlock(vcp, 0);
 			sdp->sd_level = SMBL_VC;
 		}
 		if (ssp) {
 			sdp->sd_share = ssp;
-			smb_share_unlock(ssp);
+			smb_share_unlock(ssp, 0);
 			sdp->sd_level = SMBL_SHARE;
 		}
 		break;
@@ -470,28 +469,31 @@ int
 smb_dev2share(int fd, int mode, struct smb_cred *scred,
     struct smb_share **sspp)
 {
-	file_t *fp;
+	struct lwp *l = scred->scr_l;
+	struct file *fp;
 	struct vnode *vp;
 	struct smb_dev *sdp;
 	struct smb_share *ssp;
 	dev_t dev;
 	int error;
 
-	if ((fp = fd_getfile(fd)) == NULL)
+	if ((fp = fd_getfile(l->l_proc->p_fd, fd)) == NULL)
 		return (EBADF);
 
-	vp = fp->f_data;
+	FILE_USE(fp);
+
+	vp = (struct vnode *) fp->f_data;
 	if (fp->f_type != DTYPE_VNODE
 	    || (fp->f_flag & (FREAD|FWRITE)) == 0
 	    || vp->v_type != VCHR
 	    || vp->v_rdev == NODEV) {
-		fd_putfile(fd);
+		FILE_UNUSE(fp, l);
 		return (EBADF);
 	}
 
 	dev = vp->v_rdev;
 
-	fd_putfile(fd);
+	FILE_UNUSE(fp, l);
 
 	sdp = SMB_GETDEV(dev);
 	if (!sdp)
@@ -500,7 +502,7 @@ smb_dev2share(int fd, int mode, struct smb_cred *scred,
 	if (ssp == NULL)
 		return ENOTCONN;
 
-	error = smb_share_get(ssp, scred);
+	error = smb_share_get(ssp, LK_EXCLUSIVE, scred);
 	if (error)
 		return error;
 

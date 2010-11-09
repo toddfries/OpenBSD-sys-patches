@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile.amiga,v 1.106 2009/01/25 22:25:08 abs Exp $
+#	$NetBSD: Makefile.amiga,v 1.104 2005/12/11 12:16:26 christos Exp $
 
 # Makefile for NetBSD
 #
@@ -32,9 +32,10 @@ GENASSYM_CONF=	${AMIGA}/amiga/genassym.cf
 ## (2) compile settings
 ##
 CPPFLAGS+=	-Damiga -DFPCOPROC
-.if !defined(CMACHFLAGS)
-.include "$S/arch/m68k/Makefile.cmachflags"
-CMACHFLAGS+=	-Wa,-m68030 -Wa,-m68851
+.if empty(IDENT:M-DM68060)
+CMACHFLAGS=	-m68020
+.else
+CMACHFLAGS=	-m68060 -Wa,-m68030 -Wa,-m68851
 .endif
 CFLAGS+=	${CMACHFLAGS} -msoft-float
 AFLAGS+=	-x assembler-with-cpp -traditional-cpp
@@ -56,8 +57,6 @@ KERN_AS=	obj
 MD_OBJS=	locore.o ${FPSP}
 MD_CFILES=
 MD_SFILES=	${AMIGA}/amiga/locore.s
-
-copy.o copypage.o lock_stubs.o: assym.h
 
 locore.o: ${AMIGA}/amiga/locore.s assym.h
 	${NORMAL_S}

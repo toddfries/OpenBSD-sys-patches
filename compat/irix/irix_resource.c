@@ -1,4 +1,4 @@
-/*	$NetBSD: irix_resource.c,v 1.14 2008/04/28 20:23:42 martin Exp $ */
+/*	$NetBSD: irix_resource.c,v 1.6 2005/12/11 12:20:12 christos Exp $ */
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: irix_resource.c,v 1.14 2008/04/28 20:23:42 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: irix_resource.c,v 1.6 2005/12/11 12:20:12 christos Exp $");
 
 #include <sys/types.h>
 #include <sys/signal.h>
@@ -39,7 +46,7 @@ __KERNEL_RCSID(0, "$NetBSD: irix_resource.c,v 1.14 2008/04/28 20:23:42 martin Ex
 #include <sys/proc.h>
 #include <sys/systm.h>
 #include <sys/resource.h>
-#include <sys/resourcevar.h>
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 
 #include <compat/common/compat_util.h>
@@ -49,10 +56,11 @@ __KERNEL_RCSID(0, "$NetBSD: irix_resource.c,v 1.14 2008/04/28 20:23:42 martin Ex
 #include <compat/irix/irix_resource.h>
 #include <compat/irix/irix_syscallargs.h>
 
-static int irix_to_native_resource(int);
+static int irix_to_native_resource __P((int));
 
 static int
-irix_to_native_resource(int irix_res)
+irix_to_native_resource(irix_res)
+	int irix_res;
 {
 	int bsd_res;
 
@@ -89,80 +97,108 @@ irix_to_native_resource(int irix_res)
 }
 
 int
-irix_sys_getrlimit(struct lwp *l, const struct irix_sys_getrlimit_args *uap, register_t *retval)
+irix_sys_getrlimit(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct irix_sys_getrlimit_args /* {
 		syscallarg(int) resource;
 		syscallarg(struct irix_rlimit *) rlp;
-	} */
-	struct rlimit *rlp;
-	struct irix_rlimit irlp;
-	int which;
-
-	which = irix_to_native_resource(SCARG(uap, resource));
-	if (which < 0)
-		return EINVAL;
-
-	rlp = &l->l_proc->p_rlimit[which];
-
-	if (rlp->rlim_cur == RLIM_INFINITY)
-		irlp.rlim_cur = IRIX_RLIM_INFINITY;
-	else
-		irlp.rlim_cur = rlp->rlim_cur;
-
-	if (rlp->rlim_max == RLIM_INFINITY)
-		irlp.rlim_max = IRIX_RLIM_INFINITY;
-	else
-		irlp.rlim_max = rlp->rlim_cur;
-
-	return copyout(&irlp, SCARG(uap, rlp), sizeof(irlp));
-}
-
-int
-irix_sys_getrlimit64(struct lwp *l, const struct irix_sys_getrlimit64_args *uap, register_t *retval)
-{
-	/* {
-		syscallarg(int) resource;
-		syscallarg(struct irix_rlimit64 *) rlp;
-	} */
-	struct rlimit *rlp;
-	struct irix_rlimit64 irlp;
-	int which;
-
-	which = irix_to_native_resource(SCARG(uap, resource));
-	if (which < 0)
-		return EINVAL;
-
-	rlp = &l->l_proc->p_rlimit[which];
-
-	if (rlp->rlim_cur == RLIM_INFINITY)
-		irlp.rlim_cur = IRIX_RLIM64_INFINITY;
-	else
-		irlp.rlim_cur = rlp->rlim_cur;
-
-	if (rlp->rlim_max == RLIM_INFINITY)
-		irlp.rlim_max = IRIX_RLIM64_INFINITY;
-	else
-		irlp.rlim_max = rlp->rlim_cur;
-
-	return copyout(&irlp, SCARG(uap, rlp), sizeof(irlp));
-}
-
-int
-irix_sys_setrlimit(struct lwp *l, const struct irix_sys_setrlimit_args *uap, register_t *retval)
-{
-	/* {
-		syscallarg(int) resource;
-		syscallarg(const struct irix_rlimit *) rlp;
-	} */
-	struct irix_rlimit irlp;
+	} */ *uap = v;
+	struct proc *p = l->l_proc;
+	caddr_t sg = stackgap_init(p, 0);
+	struct sys_getrlimit_args cup;
 	struct rlimit rlp;
-	int which;
+	struct irix_rlimit irlp;
 	int error;
 
-	which = irix_to_native_resource(SCARG(uap, resource));
-	if (which < 0)
-		return EINVAL;
+	SCARG(&cup, which) = irix_to_native_resource(SCARG(uap, resource));
+	SCARG(&cup, rlp) = stackgap_alloc(p, &sg, sizeof(struct rlimit));
+
+	if ((error = sys_getrlimit(l, &cup, retval)) != 0)
+		return error;
+
+	if ((error = copyin(SCARG(&cup, rlp), &rlp, sizeof(rlp))) != 0)
+		return error;
+
+	if (rlp.rlim_cur == RLIM_INFINITY)
+		irlp.rlim_cur = IRIX_RLIM_INFINITY;
+	else
+		irlp.rlim_cur = rlp.rlim_cur;
+
+	if (rlp.rlim_max == RLIM_INFINITY)
+		irlp.rlim_max = IRIX_RLIM_INFINITY;
+	else
+		irlp.rlim_max = rlp.rlim_cur;
+
+	if ((error = copyout(&irlp, SCARG(uap, rlp), sizeof(irlp))) != 0)
+		return error;
+
+	return 0;
+}
+
+int
+irix_sys_getrlimit64(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
+{
+	struct irix_sys_getrlimit64_args /* {
+		syscallarg(int) resource;
+		syscallarg(struct irix_rlimit64 *) rlp;
+	} */ *uap = v;
+	struct proc *p = l->l_proc;
+	caddr_t sg = stackgap_init(p, 0);
+	struct sys_getrlimit_args cup;
+	struct rlimit rlp;
+	struct irix_rlimit64 irlp;
+	int error;
+
+	SCARG(&cup, which) = irix_to_native_resource(SCARG(uap, resource));
+	SCARG(&cup, rlp) = stackgap_alloc(p, &sg, sizeof(struct rlimit));
+
+	if ((error = sys_getrlimit(l, &cup, retval)) != 0)
+		return error;
+
+	if ((error = copyin(SCARG(&cup, rlp), &rlp, sizeof(rlp))) != 0)
+		return error;
+
+	if (rlp.rlim_cur == RLIM_INFINITY)
+		irlp.rlim_cur = IRIX_RLIM64_INFINITY;
+	else
+		irlp.rlim_cur = rlp.rlim_cur;
+
+	if (rlp.rlim_max == RLIM_INFINITY)
+		irlp.rlim_max = IRIX_RLIM64_INFINITY;
+	else
+		irlp.rlim_max = rlp.rlim_cur;
+
+	if ((error = copyout(&irlp, SCARG(uap, rlp), sizeof(irlp))) != 0)
+		return error;
+
+	return 0;
+}
+
+int
+irix_sys_setrlimit(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
+{
+	struct irix_sys_getrlimit_args /* {
+		syscallarg(int) resource;
+		syscallarg(const struct irix_rlimit *) rlp;
+	} */ *uap = v;
+	struct proc *p = l->l_proc;
+	caddr_t sg = stackgap_init(p, 0);
+	struct sys_setrlimit_args cup;
+	struct rlimit rlp;
+	struct irix_rlimit irlp;
+	int error;
+
+	SCARG(&cup, which) = irix_to_native_resource(SCARG(uap, resource));
+	SCARG(&cup, rlp) = stackgap_alloc(p, &sg, sizeof(struct rlimit));
 
 	if ((error = copyin(SCARG(uap, rlp), &irlp, sizeof(irlp))) != 0)
 		return error;
@@ -177,24 +213,31 @@ irix_sys_setrlimit(struct lwp *l, const struct irix_sys_setrlimit_args *uap, reg
 	else
 		rlp.rlim_max = irlp.rlim_cur;
 
-	return dosetrlimit(l, l->l_proc, which, &rlp);
+	if ((error = sys_setrlimit(l, &cup, retval)) != 0)
+		return error;
+
+	return 0;
 }
 
 int
-irix_sys_setrlimit64(struct lwp *l, const struct irix_sys_setrlimit64_args *uap, register_t *retval)
+irix_sys_setrlimit64(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct irix_sys_getrlimit_args /* {
 		syscallarg(int) resource;
 		syscallarg(const struct irix_rlimit64 *) rlp;
-	} */
+	} */ *uap = v;
+	struct proc *p = l->l_proc;
+	caddr_t sg = stackgap_init(p, 0);
+	struct sys_setrlimit_args cup;
 	struct rlimit rlp;
 	struct irix_rlimit64 irlp;
-	int which;
 	int error;
 
-	which = irix_to_native_resource(SCARG(uap, resource));
-	if (which < 0)
-		return EINVAL;
+	SCARG(&cup, which) = irix_to_native_resource(SCARG(uap, resource));
+	SCARG(&cup, rlp) = stackgap_alloc(p, &sg, sizeof(struct rlimit));
 
 	if ((error = copyin(SCARG(uap, rlp), &irlp, sizeof(irlp))) != 0)
 		return error;
@@ -209,5 +252,8 @@ irix_sys_setrlimit64(struct lwp *l, const struct irix_sys_setrlimit64_args *uap,
 	else
 		rlp.rlim_max = irlp.rlim_cur;
 
-	return dosetrlimit(l, l->l_proc, which, &rlp);
+	if ((error = sys_setrlimit(l, &cup, retval)) != 0)
+		return error;
+
+	return 0;
 }

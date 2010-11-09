@@ -1,4 +1,4 @@
-/*	$NetBSD: linux_ioctl.h,v 1.26 2008/04/28 20:23:43 martin Exp $	*/
+/*	$NetBSD: linux_ioctl.h,v 1.23 2005/12/11 12:20:19 christos Exp $	*/
 
 /*-
  * Copyright (c) 1995, 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -36,23 +43,23 @@ struct linux_sys_ioctl_args;
 
 #ifdef _KERNEL
 __BEGIN_DECLS
-int linux_machdepioctl(struct lwp *, const struct linux_sys_ioctl_args *, register_t *);
-int linux_ioctl_cdrom(struct lwp *, const struct linux_sys_ioctl_args *,
-    register_t *);
-int linux_ioctl_termios(struct lwp *, const struct linux_sys_ioctl_args *,
-    register_t *);
-int linux_ioctl_socket(struct lwp *, const struct linux_sys_ioctl_args *,
-    register_t *);
-int linux_ioctl_hdio(struct lwp *, const struct linux_sys_ioctl_args *,
-    register_t *);
-int linux_ioctl_fdio(struct lwp *, const struct linux_sys_ioctl_args *uap,
-                 register_t *retval);
-int linux_ioctl_blkio(struct lwp *, const struct linux_sys_ioctl_args *uap,
-                 register_t *retval);
-int linux_ioctl_sg(struct lwp *, const struct linux_sys_ioctl_args *uap,
-                 register_t *retval);
-int linux_ioctl_mtio(struct lwp *, const struct linux_sys_ioctl_args *uap, 
-                 register_t *retval);
+int linux_machdepioctl __P((struct lwp *, void *, register_t *));
+int linux_ioctl_cdrom __P((struct lwp *, struct linux_sys_ioctl_args *,
+    register_t *));
+int linux_ioctl_termios __P((struct lwp *, struct linux_sys_ioctl_args *,
+    register_t *));
+int linux_ioctl_socket __P((struct lwp *, struct linux_sys_ioctl_args *,
+    register_t *));
+int linux_ioctl_hdio __P((struct lwp *, struct linux_sys_ioctl_args *,
+    register_t *));
+int linux_ioctl_fdio __P((struct lwp *, struct linux_sys_ioctl_args *uap,
+                 register_t *retval));
+int linux_ioctl_blkio __P((struct lwp *, struct linux_sys_ioctl_args *uap,
+                 register_t *retval));
+int linux_ioctl_sg __P((struct lwp *, struct linux_sys_ioctl_args *uap,
+                 register_t *retval));
+int linux_ioctl_mtio __P((struct lwp *, struct linux_sys_ioctl_args *uap, 
+                 register_t *retval));
 __END_DECLS
 #endif	/* !_KERNEL */
 

@@ -1,5 +1,5 @@
-#	$NetBSD: Makefile,v 1.2 2009/03/02 09:33:02 nonaka Exp $
+#	$NetBSD: Makefile,v 1.1 2007/08/09 16:08:59 nonaka Exp $
 
-SUBDIR=	zbsdmod zboot
+SUBDIR=	zbsdmod
 
 .include <bsd.subdir.mk>

@@ -1,4 +1,4 @@
-/*	$NetBSD: mba.c,v 1.38 2009/01/13 13:35:52 yamt Exp $ */
+/*	$NetBSD: mba.c,v 1.35 2005/12/11 12:19:35 christos Exp $ */
 /*
  * Copyright (c) 1994, 1996 Ludd, University of Lule}, Sweden.
  * All rights reserved.
@@ -38,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mba.c,v 1.38 2009/01/13 13:35:52 yamt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mba.c,v 1.35 2005/12/11 12:19:35 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -63,7 +63,7 @@ __KERNEL_RCSID(0, "$NetBSD: mba.c,v 1.38 2009/01/13 13:35:52 yamt Exp $");
 
 #include "locators.h"
 
-const struct mbaunit mbaunit[] = {
+struct	mbaunit mbaunit[] = {
 	{MBADT_RP04,	"rp04", MB_RP},
 	{MBADT_RP05,	"rp05", MB_RP},
 	{MBADT_RP06,	"rp06", MB_RP},
@@ -75,18 +75,18 @@ const struct mbaunit mbaunit[] = {
 	{0,		0,	0}
 };
 
+int	mbamatch(struct device *, struct cfdata *, void *);
+void	mbaattach(struct device *, struct device *, void *);
+void	mbaintr(void *);
+int	mbaprint(void *, const char *);
 void	mbaqueue(struct mba_device *);
+void	mbastart(struct mba_softc *);
+void	mbamapregs(struct mba_softc *);
 
-static int	mbamatch(device_t, cfdata_t, void *);
-static void	mbaattach(device_t, device_t, void *);
-static void	mbaintr(void *);
-static int	mbaprint(void *, const char *);
-static void	mbastart(struct mba_softc *);
-
-CFATTACH_DECL_NEW(mba_cmi, sizeof(struct mba_softc),
+CFATTACH_DECL(mba_cmi, sizeof(struct mba_softc),
     mbamatch, mbaattach, NULL, NULL);
 
-CFATTACH_DECL_NEW(mba_sbi, sizeof(struct mba_softc),
+CFATTACH_DECL(mba_sbi, sizeof(struct mba_softc),
     mbamatch, mbaattach, NULL, NULL);
 
 #define	MBA_WCSR(reg, val) \
@@ -98,9 +98,9 @@ CFATTACH_DECL_NEW(mba_sbi, sizeof(struct mba_softc),
  * Look if this is a massbuss adapter.
  */
 int
-mbamatch(device_t parent, cfdata_t cf, void *aux)
+mbamatch(struct device *parent, struct cfdata *cf, void *aux)
 {
-	struct sbi_attach_args * const sa = aux;
+	struct	sbi_attach_args *sa = (struct sbi_attach_args *)aux;
 
 	if (vax_cputype == VAX_750) {
 		if (cf->cf_loc[CMICF_TR] != CMICF_TR_DEFAULT &&
@@ -123,16 +123,14 @@ mbamatch(device_t parent, cfdata_t cf, void *aux)
  * reset it and go searching for drives on it.
  */
 void
-mbaattach(device_t parent, device_t self, void *aux)
+mbaattach(struct device *parent, struct device *self, void *aux)
 {
-	struct mba_softc * const sc = device_private(self);
-	struct sbi_attach_args * const sa = aux;
-	struct mba_attach_args ma;
+	struct	mba_softc *sc = (void *)self;
+	struct	sbi_attach_args *sa = (struct sbi_attach_args *)aux;
+	struct	mba_attach_args ma;
 	int	i, j;
 
-	aprint_normal("\n");
-
-	sc->sc_dev = self;
+	printf("\n");
 	sc->sc_iot = sa->sa_iot;
 	sc->sc_ioh = sa->sa_ioh;
 	/*
@@ -142,9 +140,10 @@ mbaattach(device_t parent, device_t self, void *aux)
 		scb_vecalloc(vecnum(0, i, sa->sa_nexnum),
 		    mbaintr, sc, SCB_ISTACK, &sc->sc_intrcnt);
 	evcnt_attach_dynamic(&sc->sc_intrcnt, EVCNT_TYPE_INTR, NULL,
-		device_xname(self), "intr");
+		self->dv_xname, "intr");
 
-	STAILQ_INIT(&sc->sc_xfers);
+	sc->sc_first = 0;
+	sc->sc_last = (void *)&sc->sc_first;
 	MBA_WCSR(MBA_CR, MBACR_INIT);	/* Reset adapter */
 	MBA_WCSR(MBA_CR, MBACR_IE);	/* Enable interrupts */
 
@@ -154,15 +153,16 @@ mbaattach(device_t parent, device_t self, void *aux)
 			continue;
 		/* We have a drive, ok. */
 		ma.ma_unit = i;
-		ma.ma_type = MBA_RCSR(MUREG(i, MU_DT)) & 0xf1ff;
-		for (j = 0; mbaunit[j].nr; j++)
+		ma.ma_type = MBA_RCSR(MUREG(i, MU_DT)) & 0777;
+		j = 0;
+		while (mbaunit[j++].nr)
 			if (mbaunit[j].nr == ma.ma_type)
 				break;
 		ma.ma_devtyp = mbaunit[j].devtyp;
 		ma.ma_name = mbaunit[j].name;
 		ma.ma_iot = sc->sc_iot;
 		ma.ma_ioh = sc->sc_ioh + MUREG(i, 0);
-		config_found(sc->sc_dev, &ma, mbaprint);
+		config_found(&sc->sc_dev, (void *)&ma, mbaprint);
 	}
 }
 
@@ -173,10 +173,10 @@ mbaattach(device_t parent, device_t self, void *aux)
 void
 mbaintr(void *mba)
 {
-	struct mba_softc * const sc = mba;
-	struct mba_device *md;
-	struct buf *bp;
-	int itype, attn, anr;
+	struct	mba_softc *sc = mba;
+	struct	mba_device *md;
+	struct	buf *bp;
+	int	itype, attn, anr;
 
 	itype = MBA_RCSR(MBA_SR);
 	MBA_WCSR(MBA_SR, itype);
@@ -187,13 +187,14 @@ mbaintr(void *mba)
 	if (sc->sc_state == SC_AUTOCONF)
 		return;	/* During autoconfig */
 
-	md = STAILQ_FIRST(&sc->sc_xfers);
-	bp = bufq_peek(md->md_q);
+	md = sc->sc_first;
+	bp = BUFQ_PEEK(md->md_q);
 	/*
 	 * A data-transfer interrupt. Current operation is finished,
 	 * call that device's finish routine to see what to do next.
 	 */
 	if (sc->sc_state == SC_ACTIVE) {
+
 		sc->sc_state = SC_IDLE;
 		switch ((*md->md_finish)(md, itype, &attn)) {
 
@@ -204,15 +205,20 @@ mbaintr(void *mba)
 			 * If more to transfer, start the adapter again
 			 * by calling mbastart().
 			 */
-			(void)bufq_get(md->md_q);
-			STAILQ_REMOVE_HEAD(&sc->sc_xfers, md_link);
-			if (bufq_peek(md->md_q) != NULL) {
-				STAILQ_INSERT_TAIL(&sc->sc_xfers, md, md_link);
+			(void)BUFQ_GET(md->md_q);
+			sc->sc_first = md->md_back;
+			md->md_back = 0;
+			if (sc->sc_first == 0)
+				sc->sc_last = (void *)&sc->sc_first;
+
+			if (BUFQ_PEEK(md->md_q) != NULL) {
+				sc->sc_last->md_back = md;
+				sc->sc_last = md;
 			}
 	
 			bp->b_resid = 0;
 			biodone(bp);
-			if (!STAILQ_EMPTY(&sc->sc_xfers))
+			if (sc->sc_first)
 				mbastart(sc);
 			break;
 
@@ -237,7 +243,7 @@ mbaintr(void *mba)
 int
 mbaprint(void *aux, const char *mbaname)
 {
-	struct mba_attach_args * const ma = aux;
+	struct  mba_attach_args *ma = aux;
 
 	if (mbaname) {
 		if (ma->ma_name)
@@ -257,24 +263,25 @@ mbaprint(void *aux, const char *mbaname)
 void
 mbaqueue(struct mba_device *md)
 {
-	struct mba_softc * const sc = md->md_mba;
-	bool was_empty = STAILQ_EMPTY(&sc->sc_xfers);
+	struct	mba_softc *sc = md->md_mba;
+	int	i = (int)sc->sc_first;
 
-	STAILQ_INSERT_TAIL(&sc->sc_xfers, md, md_link);
+	sc->sc_last->md_back = md;
+	sc->sc_last = md;
 
-	if (was_empty)
+	if (i == 0)
 		mbastart(sc);
 }
 
 /*
- * Start activity on (idling) adapter. Calls disk_reallymapin() to setup
+ * Start activity on (idling) adapter. Calls mbamapregs() to setup
  * for DMA transfer, then the unit-specific start routine.
  */
 void
 mbastart(struct mba_softc *sc)
 {
-	struct mba_device * const md = STAILQ_FIRST(&sc->sc_xfers);
-	struct buf *bp = bufq_peek(md->md_q);
+	struct	mba_device *md = sc->sc_first;
+	struct	buf *bp = BUFQ_PEEK(md->md_q);
 
 	disk_reallymapin(bp, (void *)(sc->sc_ioh + MAPREG(0)), 0, PG_V);
 

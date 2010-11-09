@@ -1,4 +1,4 @@
-/*	$NetBSD: lock_stubs.S,v 1.21 2008/12/05 13:08:11 ad Exp $	*/
+/*	$NetBSD: lock_stubs.S,v 1.13 2008/01/25 19:02:32 ad Exp $	*/
 
 /*-
  * Copyright (c) 2006, 2007, 2008 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *      
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -46,7 +53,11 @@
 
 #include "assym.h"
 
-#define	ENDLABEL(name,a) .align	a; LABEL(name)
+#if defined(DIAGNOSTIC) || defined(MULTIPROCESSOR) || defined(LOCKDEBUG)
+#define	FULL
+#endif
+
+#define	END(name,a)	.align	a; LABEL(name)
 #define	LOCK(num)	.Lpatch/**/num: lock
 
 #ifndef LOCKDEBUG
@@ -58,15 +69,13 @@
  */
 	.align	64
 
-ENTRY(mutex_enter)
+NENTRY(mutex_enter)
 	movq	CPUVAR(CURLWP), %rcx
 	xorq	%rax, %rax
 	LOCK(1)
-	cmpxchgq %rcx, (%rdi)
-	jnz	1f
+	cmpxchgq %rcx, MTX_OWNER(%rdi)
+	jnz,pn	_C_LABEL(mutex_vector_enter)
 	ret
-1:
-	jmp	_C_LABEL(mutex_vector_enter)
 
 /*
  * void mutex_exit(kmutex_t *mtx);
@@ -77,51 +86,50 @@ ENTRY(mutex_enter)
  * on multiprocessor systems, and comments in arch/x86/include/lock.h about
  * memory ordering on Intel x86 systems.
  */
-ENTRY(mutex_exit)
+NENTRY(mutex_exit)
 	movq	CPUVAR(CURLWP), %rax
 	xorq	%rdx, %rdx
-	cmpxchgq %rdx, (%rdi)
-	jnz	1f
+	cmpxchgq %rdx, MTX_OWNER(%rdi)
+	jnz,pn	_C_LABEL(mutex_vector_exit)
 	ret
-1:
-	jmp	_C_LABEL(mutex_vector_exit)
 
 /*
  * void mutex_spin_enter(kmutex_t *mtx);
  *
  * Acquire a spin mutex and post a load fence.
  */
-ENTRY(mutex_spin_enter)
-	movl	$1, %eax
-	movl	CPUVAR(ILEVEL), %esi
+NENTRY(mutex_spin_enter)
+	movq	CPUVAR(SELF), %r8
+#if defined(FULL)
+	movl	$0x0100, %eax			/* new + expected value */
+#endif
+	movl	CPU_INFO_ILEVEL(%r8), %esi
+	subl	$1, CPU_INFO_MTX_COUNT(%r8)	/* decl doesnt set CF */
 	movzbl	MTX_IPL(%rdi), %ecx		/* new SPL */
+	cmovncl	CPU_INFO_MTX_OLDSPL(%r8), %esi
 	cmpl	%ecx, %esi			/* higher? */
+	movl	%esi, CPU_INFO_MTX_OLDSPL(%r8)
 	cmovgl	%esi, %ecx
-	movl	%ecx, CPUVAR(ILEVEL)		/* splraiseipl() */
-	subl	%eax, CPUVAR(MTX_COUNT)		/* decl doesnt set CF */
-	cmovncl	CPUVAR(MTX_OLDSPL), %esi
-	movl	%esi, CPUVAR(MTX_OLDSPL)
-	xchgb	%al, MTX_LOCK(%rdi)		/* lock */
-#ifdef MULTIPROCESSOR	/* XXX for xen */
-	testb	%al, %al
-	jnz	1f
+	movl	%ecx, CPU_INFO_ILEVEL(%r8)	/* splraiseipl() */
+#if defined(FULL)
+	LOCK(11)
+	cmpxchgb %ah, MTX_LOCK(%rdi)		/* lock */
+	jnz,pn	_C_LABEL(mutex_spin_retry)	/* failed; hard case */
 #endif
 	ret
-1:
-	jmp	_C_LABEL(mutex_spin_retry)	/* failed; hard case */
 
 /*
  * void mutex_spin_exit(kmutex_t *mtx);
  *
  * Release a spin mutex and post a load fence.
  */
-ENTRY(mutex_spin_exit)
+NENTRY(mutex_spin_exit)
 #ifdef DIAGNOSTIC
 
 	movl	$0x0001, %eax			/* new + expected value */
 	movq	CPUVAR(SELF), %r8
 	cmpxchgb %ah, MTX_LOCK(%rdi)		/* unlock */
-	jnz	_C_LABEL(mutex_vector_exit)	/* hard case if problems */
+	jnz,pn	_C_LABEL(mutex_vector_exit)	/* hard case if problems */
 	movl	CPU_INFO_MTX_OLDSPL(%r8), %edi
 	incl	CPU_INFO_MTX_COUNT(%r8)
 	jnz	1f
@@ -139,21 +147,23 @@ ENTRY(mutex_spin_exit)
 #else	/* DIAGNOSTIC */
 
 	movq	CPUVAR(SELF), %rsi
+#ifdef MULTIPROCESSOR
 	movb	$0x00, MTX_LOCK(%rdi)
+#endif
 	movl	CPU_INFO_MTX_OLDSPL(%rsi), %ecx
 	incl	CPU_INFO_MTX_COUNT(%rsi)
 	movl	CPU_INFO_ILEVEL(%rsi),%edx
 	cmovnzl	%edx,%ecx
-	pushq	%rbx
 	cmpl	%edx,%ecx			/* new level is lower? */
-	jae	2f
+	pushq	%rbx
+	jae,pn	2f
 1:
 	movl	CPU_INFO_IPENDING(%rsi),%eax
 	testl	%eax,CPU_INFO_IUNMASK(%rsi,%rcx,4)/* deferred interrupts? */
-	jnz	3f
 	movl	%eax,%ebx
+	jnz,pn	3f
 	cmpxchg8b CPU_INFO_ISTATE(%rsi)		/* swap in new ilevel */
-	jnz	4f
+	jnz,pn	1b
 2:
 	popq	%rbx
 	ret
@@ -161,8 +171,6 @@ ENTRY(mutex_spin_exit)
 	popq	%rbx
 	movl	%ecx, %edi
 	jmp	_C_LABEL(Xspllower)
-4:
-	jmp	1b
 
 #endif	/* DIAGNOSTIC */
 
@@ -171,24 +179,21 @@ ENTRY(mutex_spin_exit)
  *
  * Acquire one hold on a RW lock.
  */
-ENTRY(rw_enter)
+NENTRY(rw_enter)
 	cmpl	$RW_READER, %esi
 	jne	2f
 
 	/*
 	 * Reader: this is the most common case.
 	 */
-	movq	(%rdi), %rax
-0:
+1:	movq	RW_OWNER(%rdi), %rax
 	testb	$(RW_WRITE_LOCKED|RW_WRITE_WANTED), %al
-	jnz	3f
 	leaq	RW_READ_INCR(%rax), %rdx 
+	jnz,pn	_C_LABEL(rw_vector_enter)
 	LOCK(2)
-	cmpxchgq %rdx, (%rdi)
-	jnz	1f
+	cmpxchgq %rdx, RW_OWNER(%rdi)
+	jnz,pn	1b
 	ret
-1:
-	jmp	0b
 
 	/*
 	 * Writer: if the compare-and-set fails, don't bother retrying.
@@ -197,45 +202,41 @@ ENTRY(rw_enter)
 	xorq	%rax, %rax
 	orq	$RW_WRITE_LOCKED, %rcx
 	LOCK(3)
-	cmpxchgq %rcx, (%rdi)
-	jnz	3f
+	cmpxchgq %rcx, RW_OWNER(%rdi)
+	jnz,pn	_C_LABEL(rw_vector_enter)
 	ret
-3:
-	jmp	_C_LABEL(rw_vector_enter)
 
 /*
  * void	rw_exit(krwlock_t *rwl);
  *
  * Release one hold on a RW lock.
  */
-ENTRY(rw_exit)
-	movq	(%rdi), %rax
+NENTRY(rw_exit)
+	movq	RW_OWNER(%rdi), %rax
 	testb	$RW_WRITE_LOCKED, %al
 	jnz	2f
 
 	/*
 	 * Reader
 	 */
-0:	testb	$RW_HAS_WAITERS, %al
-	jnz	3f
+1:	testb	$RW_HAS_WAITERS, %al
+	jnz,pn	3f
 	cmpq	$RW_READ_INCR, %rax
-	jb	3f
 	leaq	-RW_READ_INCR(%rax), %rdx
+	jb,pn	3f
 	LOCK(4)
-	cmpxchgq %rdx, (%rdi)
-	jnz	1f
+	cmpxchgq %rdx, RW_OWNER(%rdi)
+	jnz,pn	1b
 	ret
-1:
-	jmp	0b
 
 	/*
 	 * Writer
 	 */
 2:	leaq	-RW_WRITE_LOCKED(%rax), %rdx
 	subq	CPUVAR(CURLWP), %rdx
-	jnz	3f
+	jnz,pn	3f
 	LOCK(5)
-	cmpxchgq %rdx, (%rdi)
+	cmpxchgq %rdx, RW_OWNER(%rdi)
 	jnz	3f
 	ret
 
@@ -246,25 +247,22 @@ ENTRY(rw_exit)
  *
  * Try to acquire one hold on a RW lock.
  */
-ENTRY(rw_tryenter)
+NENTRY(rw_tryenter)
 	cmpl	$RW_READER, %esi
 	jne	2f
 
 	/*
 	 * Reader: this is the most common case.
 	 */
-	movq	(%rdi), %rax
-0:
+1:	movq	RW_OWNER(%rdi), %rax
 	testb	$(RW_WRITE_LOCKED|RW_WRITE_WANTED), %al
-	jnz	3f
 	leaq	RW_READ_INCR(%rax), %rdx 
+	jnz	3f
 	LOCK(8)
-	cmpxchgq %rdx, (%rdi)
-	jnz	1f
-	movl	%edx, %eax			/* nonzero */
+	cmpxchgq %rdx, RW_OWNER(%rdi)
+	movl	$0, %eax
+	setz	%al
 	ret
-1:
-	jmp	0b
 
 	/*
 	 * Writer: if the compare-and-set fails, don't bother retrying.
@@ -273,7 +271,7 @@ ENTRY(rw_tryenter)
 	xorq	%rax, %rax
 	orq	$RW_WRITE_LOCKED, %rcx
 	LOCK(9)
-	cmpxchgq %rcx, (%rdi)
+	cmpxchgq %rcx, RW_OWNER(%rdi)
 	movl	$0, %eax
 	setz	%al
 	ret
@@ -286,7 +284,7 @@ ENTRY(rw_tryenter)
 /*
  * Spinlocks.
  */
-ENTRY(__cpu_simple_lock_init)
+NENTRY(__cpu_simple_lock_init)
 	movb	$0, (%rdi)
 	ret
 
@@ -306,11 +304,11 @@ NENTRY(__cpu_simple_lock)
 	je	1b
 	jmp	2b
 
-ENTRY(__cpu_simple_unlock)
+NENTRY(__cpu_simple_unlock)
 	movb	$0, (%rdi)
 	ret
 
-ENTRY(__cpu_simple_lock_try)
+NENTRY(__cpu_simple_lock_try)
 	movl	$0x0100, %eax
 	LOCK(7)
 	cmpxchgb %ah, (%rdi)
@@ -326,5 +324,8 @@ LABEL(x86_lockpatch)
 	.quad	.Lpatch1, .Lpatch2, .Lpatch3, .Lpatch4
 	.quad	.Lpatch5, .Lpatch6, .Lpatch7, .Lpatch8
 	.quad	.Lpatch9
+#ifdef FULL
+	.quad	.Lpatch11
+#endif
 	.quad	0
 #endif

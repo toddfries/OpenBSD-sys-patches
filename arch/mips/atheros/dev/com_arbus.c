@@ -1,4 +1,4 @@
-/* $Id: com_arbus.c,v 1.7 2008/04/28 20:23:28 martin Exp $ */
+/* $Id: com_arbus.c,v 1.4 2006/09/04 05:17:26 gdamore Exp $ */
 /*-
  * Copyright (c) 2006 Urbana-Champaign Independent Media Center.
  * Copyright (c) 2006 Garrett D'Amore.
@@ -55,6 +55,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -101,7 +108,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: com_arbus.c,v 1.7 2008/04/28 20:23:28 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: com_arbus.c,v 1.4 2006/09/04 05:17:26 gdamore Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -121,18 +128,16 @@ __KERNEL_RCSID(0, "$NetBSD: com_arbus.c,v 1.7 2008/04/28 20:23:28 martin Exp $")
 #include <mips/atheros/include/arbusvar.h>
 #include <mips/atheros/include/ar531xvar.h>
 
-#include "opt_com.h"
-
 struct com_arbus_softc {
 	struct com_softc sc_com;
 };
 
 static void com_arbus_initmap(struct com_regs *);
 //static bus_space_tag_t com_arbus_get_bus_space_tag(void);
-static int com_arbus_match(device_t, cfdata_t , void *);
-static void com_arbus_attach(device_t, device_t, void *);
+static int com_arbus_match(struct device *, struct cfdata *, void *);
+static void com_arbus_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(com_arbus, sizeof(struct com_arbus_softc),
+CFATTACH_DECL(com_arbus, sizeof(struct com_arbus_softc),
     com_arbus_match, com_arbus_attach, NULL, NULL);
 
 #if 0
@@ -142,10 +147,7 @@ CFATTACH_DECL_NEW(com_arbus, sizeof(struct com_arbus_softc),
 #define	COM_ARBUS_BAUD	115200
 #endif
 #endif
-
-#ifndef COM_ARBUS_BAUD
 #define	COM_ARBUS_BAUD	115200
-#endif
 
 int	com_arbus_baud = COM_ARBUS_BAUD;
 
@@ -156,7 +158,7 @@ int	com_arbus_baud = COM_ARBUS_BAUD;
 #endif
 
 int
-com_arbus_match(device_t parent, cfdata_t cf, void *aux)
+com_arbus_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct arbus_attach_args	*aa = aux;
 	struct com_regs			regs;
@@ -185,20 +187,18 @@ com_arbus_match(device_t parent, cfdata_t cf, void *aux)
 }
 
 void
-com_arbus_attach(device_t parent, device_t self, void *aux)
+com_arbus_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct com_arbus_softc *arsc = device_private(self);
+	struct com_arbus_softc *arsc = (void *)self;
 	struct com_softc *sc = &arsc->sc_com;
 	struct arbus_attach_args *aa = aux;
 	prop_number_t prop;
 	bus_space_handle_t ioh;
 
-	sc->sc_dev = self;
-
-	prop = prop_dictionary_get(device_properties(sc->sc_dev),
+	prop = prop_dictionary_get(device_properties(&sc->sc_dev),
 	    "frequency");
 	if (prop == NULL) {
-		aprint_error(": unable to get frequency property\n");
+		printf(": unable to get frequency property\n");
 		return;
 	}
 	KASSERT(prop_object_type(prop) == PROP_TYPE_NUMBER);
@@ -208,7 +208,7 @@ com_arbus_attach(device_t parent, device_t self, void *aux)
 	if (!com_is_console(aa->aa_bst, aa->aa_addr, &ioh) &&
 	    bus_space_map(aa->aa_bst, aa->aa_addr, aa->aa_size, 0,
 		&ioh) != 0) {
-		aprint_error(": can't map registers\n");
+		printf(": can't map registers\n");
 		return;
 	}
 

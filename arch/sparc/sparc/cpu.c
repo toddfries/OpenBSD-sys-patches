@@ -1,4 +1,4 @@
-/*	$NetBSD: cpu.c,v 1.212 2008/12/19 18:49:38 cegger Exp $ */
+/*	$NetBSD: cpu.c,v 1.198 2006/06/07 22:38:49 kardel Exp $ */
 
 /*
  * Copyright (c) 1996
@@ -52,7 +52,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: cpu.c,v 1.212 2008/12/19 18:49:38 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cpu.c,v 1.198 2006/06/07 22:38:49 kardel Exp $");
 
 #include "opt_multiprocessor.h"
 #include "opt_lockdebug.h"
@@ -63,7 +63,7 @@ __KERNEL_RCSID(0, "$NetBSD: cpu.c,v 1.212 2008/12/19 18:49:38 cegger Exp $");
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
-#include <sys/simplelock.h>
+#include <sys/lock.h>
 #include <sys/kernel.h>
 
 #include <uvm/uvm.h>
@@ -90,7 +90,7 @@ __KERNEL_RCSID(0, "$NetBSD: cpu.c,v 1.212 2008/12/19 18:49:38 cegger Exp $");
 #endif
 
 struct cpu_softc {
-	struct device	sc_dev;		/* generic device info */
+	struct device	sc_dv;		/* generic device info */
 	struct cpu_info	*sc_cpuinfo;
 };
 
@@ -225,7 +225,7 @@ alloc_cpuinfo(void)
 		panic("alloc_cpuinfo: no pages");
 
 	/* Map the pages */
-	for (m = TAILQ_FIRST(&mlist); m != NULL; m = TAILQ_NEXT(m, pageq.queue)) {
+	for (m = TAILQ_FIRST(&mlist); m != NULL; m = TAILQ_NEXT(m, pageq)) {
 		paddr_t pa = VM_PAGE_TO_PHYS(m);
 		pmap_kenter_pa(va, pa, VM_PROT_READ | VM_PROT_WRITE);
 		va += PAGE_SIZE;
@@ -235,18 +235,18 @@ alloc_cpuinfo(void)
 	bzero((void *)cpi, sz);
 
 	/*
-	 * Arrange pcb and interrupt stack in the same
+	 * Arrange pcb, idle stack and interrupt stack in the same
 	 * way as is done for the boot CPU in locore.
 	 */
-	cpi->eintstack = (void *)((vaddr_t)cpi + sz - USPACE);
+	cpi->eintstack = cpi->idle_u = (void *)((vaddr_t)cpi + sz - USPACE);
 
 	/* Allocate virtual space for pmap page_copy/page_zero */
 	va = uvm_km_alloc(kernel_map, 2*PAGE_SIZE, 0, UVM_KMF_VAONLY);
 	if (va == 0)
 		panic("alloc_cpuinfo: no virtual space");
 
-	cpi->vpage[0] = (void *)(va + 0);
-	cpi->vpage[1] = (void *)(va + PAGE_SIZE);
+	cpi->vpage[0] = (caddr_t)(va + 0);
+	cpi->vpage[1] = (caddr_t)(va + PAGE_SIZE);
 
 	return (cpi);
 }
@@ -411,8 +411,10 @@ cpu_attach(struct cpu_softc *sc, int node, int mid)
 	 * (see autoconf.c and cpuunit.c)
 	 */
 	if (cpus == NULL) {
-		cpus = malloc(sparc_ncpus * sizeof(cpi),
-				M_DEVBUF, M_NOWAIT|M_ZERO);
+		extern struct pcb idle_u[];
+
+		cpus = malloc(sparc_ncpus * sizeof(cpi), M_DEVBUF, M_NOWAIT);
+		bzero(cpus, sparc_ncpus * sizeof(cpi));
 
 		getcpuinfo(&cpuinfo, node);
 
@@ -425,20 +427,17 @@ cpu_attach(struct cpu_softc *sc, int node, int mid)
 		 */
 		cpi = sc->sc_cpuinfo = alloc_cpuinfo_global_va(1, NULL);
 		pmap_globalize_boot_cpuinfo(cpi);
-
 		cpuinfo.ci_self = cpi;
 
-		/* XXX - fixup lwp0 and idlelwp l_cpu */
+		/* XXX - fixup lwp.l_cpu */
 		lwp0.l_cpu = cpi;
-		cpi->ci_data.cpu_idlelwp->l_cpu = cpi;
-		cpi->ci_data.cpu_idlelwp->l_mutex =
-		    cpi->ci_schedstate.spc_lwplock;
 #else
 		/* The `local' VA is global for uniprocessor. */
 		cpi = sc->sc_cpuinfo = (struct cpu_info *)CPUINFO_VA;
 #endif
 		cpi->master = 1;
 		cpi->eintstack = eintstack;
+		cpi->idle_u = idle_u;
 		/* Note: `curpcb' is set to `proc0' in locore */
 
 		/*
@@ -450,34 +449,15 @@ cpu_attach(struct cpu_softc *sc, int node, int mid)
 			bootmid = mid;
 	} else {
 #if defined(MULTIPROCESSOR)
-		int error;
-
-		/*
-		 * Allocate and initiize this cpu's cpu_info.
-		 */
 		cpi = sc->sc_cpuinfo = alloc_cpuinfo();
 		cpi->ci_self = cpi;
-
+		cpi->curpcb = cpi->idle_u;
+		cpi->curpcb->pcb_wim = 1;
 		/*
-		 * Call the MI attach which creates an idle LWP for us.
-		 */
-		error = mi_cpu_attach(cpi);
-		if (error != 0) {
-			aprint_normal("\n");
-			aprint_error("%s: mi_cpu_attach failed with %d\n",
-			    sc->sc_dev.dv_xname, error);
-			return;
-		}
-
-		/*
-		 * Note: `eintstack' is set in alloc_cpuinfo() above.
+		 * Note: `idle_u' and `eintstack' are set in alloc_cpuinfo().
 		 * The %wim register will be initialized in cpu_hatch().
 		 */
-		cpi->ci_curlwp = cpi->ci_data.cpu_idlelwp;
-		cpi->curpcb = (struct pcb *)cpi->ci_curlwp->l_addr;
-		cpi->curpcb->pcb_wim = 1;
 		getcpuinfo(cpi, node);
-
 #else
 		sc->sc_cpuinfo = NULL;
 		printf(": no SMP support in kernel\n");
@@ -486,7 +466,7 @@ cpu_attach(struct cpu_softc *sc, int node, int mid)
 	}
 
 #ifdef DEBUG
-	cpi->redzone = (void *)((long)cpi->eintstack + REDSIZE);
+	cpi->redzone = (void *)((long)cpi->idle_u + REDSIZE);
 #endif
 
 	/*
@@ -574,6 +554,12 @@ cpu_boot_secondary_processors(void)
 			(cpi->flags & CPUFLG_HATCHED) == 0)
 			continue;
 
+		/*
+		 * XXX - the first process run on this CPU will be charged
+		 *	 with the leading idle time.
+		 */
+		getmicrotime(&cpi->ci_schedstate.spc_runtime);
+
 		printf(" cpu%d", cpi->ci_cpuid);
 		cpi->flags |= CPUFLG_READY;
 		cpu_ready_mask |= (1 << n);
@@ -621,7 +607,7 @@ void
 cpu_spinup(struct cpu_info *cpi)
 {
 	struct openprom_addr oa;
-	void *pc = (void *)cpu_hatch;
+	caddr_t pc = (caddr_t)cpu_hatch;
 	int n;
 
 	/* Setup CPU-specific MMU tables */
@@ -648,7 +634,7 @@ cpu_spinup(struct cpu_info *cpi)
 	 * Wait for this CPU to spin up.
 	 */
 	for (n = 10000; n != 0; n--) {
-		cache_flush((void *) __UNVOLATILE(&cpi->flags),
+		cache_flush((caddr_t) __UNVOLATILE(&cpi->flags),
 			    sizeof(cpi->flags));
 		if (cpi->flags & CPUFLG_HATCHED)
 			return;
@@ -710,9 +696,6 @@ xcall(xcall_func_t func, xcall_trap_t trap, int arg0, int arg1, int arg2,
 	for (n = 0; n < sparc_ncpus; n++) {
 		struct cpu_info *cpi = cpus[n];
 
-		if (!cpi)
-			continue;
-
 		/* Note: n == cpi->ci_cpuid */
 		if ((cpuset & (1 << n)) == 0)
 			continue;
@@ -753,7 +736,7 @@ xcall(xcall_func_t func, xcall_trap_t trap, int arg0, int arg1, int arg2,
 		for (n = 0; n < sparc_ncpus; n++) {
 			struct cpu_info *cpi = cpus[n];
 
-			if (!cpi || (cpuset & (1 << n)) == 0)
+			if ((cpuset & (1 << n)) == 0)
 				continue;
 
 			if (cpi->msg.complete == 0) {
@@ -941,9 +924,9 @@ cache_print(struct cpu_softc *sc)
 
 	if (sc->sc_cpuinfo->flags & CPUFLG_SUN4CACHEBUG)
 		printf("%s: cache chip bug; trap page uncached\n",
-		    sc->sc_dev.dv_xname);
+		    sc->sc_dv.dv_xname);
 
-	printf("%s: ", sc->sc_dev.dv_xname);
+	printf("%s: ", sc->sc_dv.dv_xname);
 
 	if (ci->c_totalsize == 0) {
 		printf("no cache\n");
@@ -1260,7 +1243,7 @@ sun4_hotfix(struct cpu_info *sc)
 {
 
 	if ((sc->flags & CPUFLG_SUN4CACHEBUG) != 0)
-		kvm_uncache((char *)trapbase, 1);
+		kvm_uncache((caddr_t)trapbase, 1);
 
 	/* Use the hardware-assisted page flush routine, if present */
 	if (sc->cacheinfo.c_hwflush)
@@ -1711,11 +1694,9 @@ static	int mxcc = -1;
 		else
 			sc->flags |= CPUFLG_CACHEPAGETABLES;
 	} else {
-#ifdef MULTIPROCESSOR
-		if ((sparc_ncpus > 1) && (sc->cacheinfo.ec_totalsize == 0))
-			sc->cache_flush = srmmu_cache_flush;
-#endif
+		sc->cache_flush = viking_cache_flush;
 	}
+
 	/* Check all modules have the same MXCC configuration */
 	if (mxcc != -1 && sc->mxcc != mxcc)
 		panic("MXCC module mismatch");

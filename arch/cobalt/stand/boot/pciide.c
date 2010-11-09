@@ -1,4 +1,4 @@
-/*	$NetBSD: pciide.c,v 1.8 2008/04/28 20:23:16 martin Exp $	*/
+/*	$NetBSD: pciide.c,v 1.5 2005/12/11 12:17:06 christos Exp $	*/
 
 /*-
  * Copyright (c) 2003 The NetBSD Foundation, Inc.
@@ -12,6 +12,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -36,9 +43,11 @@
 #define COBALT_IO_SPACE_BASE	0x10000000	/* XXX VT82C586 ISA I/O space */
 
 int
-pciide_init(struct wdc_channel *chp, u_int *unit)
+pciide_init(chp, unit)
+	struct wdc_channel *chp;
+	u_int *unit;
 {
-	uint32_t cmdreg, ctlreg;
+	u_int32_t cmdreg, ctlreg;
 	int i, compatchan = 0;
 
 	/*
@@ -60,15 +69,15 @@ pciide_init(struct wdc_channel *chp, u_int *unit)
 	    PCIIDE_COMPAT_CTL_BASE(compatchan));
 
 	/* set up cmd regsiters */
-	chp->c_cmdbase = (uint8_t *)cmdreg;
-	chp->c_data = (uint16_t *)(cmdreg + wd_data);
+	chp->c_cmdbase = (u_int8_t *)cmdreg;
+	chp->c_data = (u_int16_t *)(cmdreg + wd_data);
 	for (i = 0; i < WDC_NPORTS; i++)
 		chp->c_cmdreg[i] = chp->c_cmdbase + i;
 	/* set up shadow registers */
 	chp->c_cmdreg[wd_status]   = chp->c_cmdreg[wd_command];
 	chp->c_cmdreg[wd_features] = chp->c_cmdreg[wd_precomp];
 	/* set up ctl registers */
-	chp->c_ctlbase = (uint8_t *)ctlreg;
+	chp->c_ctlbase = (u_int8_t *)ctlreg;
 
-	return 0;
+	return (0);
 }

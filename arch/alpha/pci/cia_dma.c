@@ -1,4 +1,4 @@
-/* $NetBSD: cia_dma.c,v 1.22 2008/04/28 20:23:11 martin Exp $ */
+/* $NetBSD: cia_dma.c,v 1.20 2005/12/11 12:16:17 christos Exp $ */
 
 /*-
  * Copyright (c) 1997, 1998 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -32,7 +39,7 @@
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
 
-__KERNEL_RCSID(0, "$NetBSD: cia_dma.c,v 1.22 2008/04/28 20:23:11 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cia_dma.c,v 1.20 2005/12/11 12:16:17 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -109,7 +116,7 @@ cia_dma_init(ccp)
 	t->_cookie = ccp;
 	t->_wbase = CIA_DIRECT_MAPPED_BASE;
 	t->_wsize = CIA_DIRECT_MAPPED_SIZE;
-	t->_next_window = &ccp->cc_dmat_sgmap;
+	t->_next_window = NULL;
 	t->_boundary = 0;
 	t->_sgmap = NULL;
 	t->_get_tag = cia_dma_get_tag;
@@ -264,12 +271,6 @@ cia_dma_get_tag(t, bustype)
 		 * Systems with a CIA can only support 1G
 		 * of memory, so we use the direct-mapped window
 		 * on busses that have 32-bit DMA.
-		 *
-		 * Ahem:  I have a PWS 500au with 1.5G of memory, and it
-		 * had problems doing DMA because it was not falling back
-		 * to using SGMAPs.  I've fixed that and my PWS now works with
-		 * 1.5G.  There have been other reports about failures with
-		 * more than 1.0G of memory.  Michael Hitch
 		 */
 		return (&ccp->cc_dmat_direct);
 

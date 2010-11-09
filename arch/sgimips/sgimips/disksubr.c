@@ -1,4 +1,4 @@
-/*	$NetBSD: disksubr.c,v 1.23 2008/01/02 11:48:28 ad Exp $	*/
+/*	$NetBSD: disksubr.c,v 1.18 2006/11/25 11:59:57 scw Exp $	*/
 
 /*
  * Copyright (c) 2001 Christopher Sekiya
@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: disksubr.c,v 1.23 2008/01/02 11:48:28 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: disksubr.c,v 1.18 2006/11/25 11:59:57 scw Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -94,13 +94,13 @@ readdisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp, stru
 	bp->b_cylinder = bp->b_blkno / lp->d_secpercyl;
 	(*strat)(bp);
 	err = biowait(bp);
-	brelse(bp, 0);
+	brelse(bp);
 
 	if (err)
 		return "error reading disklabel";
 
 	/* Check for NetBSD label in second sector */
-	dlp = (struct disklabel *)((char *)bp->b_data + LABELOFFSET);
+	dlp = (struct disklabel *)(bp->b_un.b_addr + LABELOFFSET);
 	if (dlp->d_magic == DISKMAGIC)
 		if (!dkcksum(dlp)) {
 			memcpy(lp, dlp, LABELSIZE(dlp));
@@ -115,13 +115,13 @@ readdisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp, stru
 	bp->b_cylinder = bp->b_blkno / lp->d_secpercyl;
 	(*strat)(bp);
 	err = biowait(bp);
-	brelse(bp, 0);
+	brelse(bp);
 
 	if (err)
 		return "error reading volume header";
 
 	/* Check for a SGI label. */
-	slp = (struct sgi_boot_block *)bp->b_data;
+	slp = (struct sgi_boot_block *)bp->b_un.b_addr;
 	if (be32toh(slp->magic) != SGI_BOOT_BLOCK_MAGIC)
 		return "no disk label";
 
@@ -197,8 +197,7 @@ writedisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp, str
 		goto ioerror;
 
 	/* Write sgimips label to first sector */
-	bp->b_oflags &= ~(BO_DONE);
-	bp->b_flags &= ~(B_READ);
+	bp->b_flags &= ~(B_READ|B_DONE);
 	bp->b_flags |= B_WRITE;
 	(*strat)(bp);
 	if ((error = biowait(bp)) != 0)
@@ -210,14 +209,13 @@ writedisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp, str
 	bp->b_blkno = LABELSECTOR;
 	bp->b_bcount = lp->d_secsize;
 	bp->b_cylinder = bp->b_blkno / lp->d_secpercyl;
-	bp->b_oflags &= ~(BO_DONE);
-	bp->b_flags &= ~(B_READ);
+	bp->b_flags &= ~(B_READ | B_DONE);
 	bp->b_flags |= B_WRITE;
 	(*strat)(bp);
 	error = biowait(bp);
 
 ioerror:
-	brelse(bp, 0);
+	brelse(bp);
 	return error;
 }
 

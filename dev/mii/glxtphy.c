@@ -1,4 +1,4 @@
-/*	$NetBSD: glxtphy.c,v 1.22 2008/11/17 03:04:27 dyoung Exp $	*/
+/*	$NetBSD: glxtphy.c,v 1.17 2006/11/16 21:24:07 christos Exp $	*/
 
 /*-
  * Copyright (c) 1998, 1999, 2000, 2001 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -64,7 +71,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: glxtphy.c,v 1.22 2008/11/17 03:04:27 dyoung Exp $");
+__KERNEL_RCSID(0, "$NetBSD: glxtphy.c,v 1.17 2006/11/16 21:24:07 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -82,10 +89,10 @@ __KERNEL_RCSID(0, "$NetBSD: glxtphy.c,v 1.22 2008/11/17 03:04:27 dyoung Exp $");
 
 #include <dev/mii/glxtphyreg.h>
 
-static int	glxtphymatch(device_t, cfdata_t, void *);
-static void	glxtphyattach(device_t, device_t, void *);
+static int	glxtphymatch(struct device *, struct cfdata *, void *);
+static void	glxtphyattach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(glxtphy, sizeof(struct mii_softc),
+CFATTACH_DECL(glxtphy, sizeof(struct mii_softc),
     glxtphymatch, glxtphyattach, mii_phy_detach, mii_phy_activate);
 
 static int	glxtphy_service(struct mii_softc *, struct mii_data *, int);
@@ -107,7 +114,7 @@ static const struct mii_phydesc glxtphys[] = {
 };
 
 static int
-glxtphymatch(device_t parent, cfdata_t match,
+glxtphymatch(struct device *parent, struct cfdata *match,
     void *aux)
 {
 	struct mii_attach_args *ma = aux;
@@ -119,7 +126,7 @@ glxtphymatch(device_t parent, cfdata_t match,
 }
 
 static void
-glxtphyattach(device_t parent, device_t self, void *aux)
+glxtphyattach(struct device *parent, struct device *self, void *aux)
 {
 	struct mii_softc *sc = device_private(self);
 	struct mii_attach_args *ma = aux;
@@ -130,7 +137,6 @@ glxtphyattach(device_t parent, device_t self, void *aux)
 	aprint_naive(": Media interface\n");
 	aprint_normal(": %s, rev. %d\n", mpd->mpd_name, MII_REV(ma->mii_id2));
 
-	sc->mii_dev = self;
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
 	sc->mii_funcs = &glxtphy_funcs;
@@ -145,7 +151,7 @@ glxtphyattach(device_t parent, device_t self, void *aux)
 	if (sc->mii_capabilities & BMSR_EXTSTAT)
 		sc->mii_extcapabilities = PHY_READ(sc, MII_EXTSR);
 
-	aprint_normal_dev(self, "");
+	aprint_normal("%s: ", sc->mii_dev.dv_xname);
 	if ((sc->mii_capabilities & BMSR_MEDIAMASK) == 0 &&
 	    (sc->mii_extcapabilities & EXTSR_MEDIAMASK) == 0)
 		aprint_error("no media present");

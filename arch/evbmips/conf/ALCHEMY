@@ -1,11 +1,11 @@
-#	$NetBSD: ALCHEMY,v 1.23 2009/03/06 20:31:48 joerg Exp $
+#	$NetBSD: ALCHEMY,v 1.15 2006/09/27 21:42:05 manu Exp $
 #
 # Kernel config for the Alchemy Semiconductor (AMD) PB1000, PB1500,
 # DBAu1000 and DBAu1500 evaluation boards.
 
 include 	"arch/evbmips/conf/std.alchemy"
 
-#ident 		"ALCHEMY-$Revision: 1.23 $"
+#ident 		"ALCHEMY-$Revision: 1.15 $"
 
 maxusers	32
 
@@ -37,6 +37,8 @@ options 	KTRACE		# system call tracing support
 options 	SYSVMSG		# System V message queues
 options 	SYSVSEM		# System V semaphores
 options 	SYSVSHM		# System V shared memory
+#options 	SHMMAXPGS=1024	# 1024 pages is the default
+#options 	LKM		# loadable kernel modules
 options 	NTP		# network time protocol
 
 # Debugging options
@@ -46,7 +48,7 @@ options 	DEBUG		# extra kernel debugging support
 options 	DDB		# kernel dynamic debugger
 options 	DDB_HISTORY_SIZE=100 # enable history editing in DDB
 makeoptions 	DEBUG="-g"	# compile full symbol table
-options 	SYMTAB_SPACE=340000	# size for embedded symbol table
+options 	SYMTAB_SPACE=200000	# size for embedded symbol table
 
 # Compatibility options
 #options 	COMPAT_43	# compatibility with 4.3BSD binaries
@@ -60,7 +62,6 @@ options 	SYMTAB_SPACE=340000	# size for embedded symbol table
 options 	COMPAT_16	# NetBSD 1.6 binary compatibility
 options 	COMPAT_20	# NetBSD 2.0 binary compatibility
 options 	COMPAT_30	# NetBSD 3.0 compatibility.
-options 	COMPAT_40	# NetBSD 4.0 compatibility.
 #options 	EXEC_ECOFF	# exec ECOFF binaries
 #options 	COMPAT_ULTRIX	# binary compatibility with Ultrix
 options 	COMPAT_BSDPTY	# /dev/[pt]ty?? ptys.
@@ -88,7 +89,7 @@ file-system	FDESC		# user file descriptor filesystem
 #options 	NFSSERVER	# Sun NFS-compatible filesystem server
 #options 	QUOTA		# FFS quotas
 #options 	FFS_EI		# FFS Endian Independant support
-options 	WAPBL		# File system journaling support - Experimental
+#options 	SOFTDEP         # FFS soft updates support.
 options 	FFS_NO_SNAPSHOT	# No FFS snapshot support
 #options 	EXT2FS_SYSTEM_FLAGS # makes ext2fs file flags (append and
 				# immutable) behave as system flags.
@@ -166,7 +167,7 @@ usb*		at ohci?
 
 # USB Hubs
 uhub*		at usb?
-uhub*		at uhub? port ?
+uhub*		at uhub? port ? configuration ? interface ?
 
 # USB HID device
 uhidev* at uhub? port ? configuration ? interface ?

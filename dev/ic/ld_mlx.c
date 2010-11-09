@@ -1,4 +1,4 @@
-/*	$NetBSD: ld_mlx.c,v 1.19 2009/01/16 04:20:28 mhitch Exp $	*/
+/*	$NetBSD: ld_mlx.c,v 1.15 2007/10/19 11:59:55 ad Exp $	*/
 
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -34,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ld_mlx.c,v 1.19 2009/01/16 04:20:28 mhitch Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ld_mlx.c,v 1.15 2007/10/19 11:59:55 ad Exp $");
 
 #include "rnd.h"
 
@@ -65,36 +72,41 @@ struct ld_mlx_softc {
 	int	sc_hwunit;
 };
 
-static void	ld_mlx_attach(device_t, device_t, void *);
-static int	ld_mlx_detach(device_t, int);
+static void	ld_mlx_attach(struct device *, struct device *, void *);
+static int	ld_mlx_detach(struct device *, int);
 static int	ld_mlx_dobio(struct ld_mlx_softc *, void *, int, int, int,
 			     struct buf *);
 static int	ld_mlx_dump(struct ld_softc *, void *, int, int);
 static void	ld_mlx_handler(struct mlx_ccb *);
-static int	ld_mlx_match(device_t, cfdata_t, void *);
+static int	ld_mlx_match(struct device *, struct cfdata *, void *);
 static int	ld_mlx_start(struct ld_softc *, struct buf *);
 
-CFATTACH_DECL_NEW(ld_mlx, sizeof(struct ld_mlx_softc),
+CFATTACH_DECL(ld_mlx, sizeof(struct ld_mlx_softc),
     ld_mlx_match, ld_mlx_attach, ld_mlx_detach, NULL);
 
 static int
-ld_mlx_match(device_t parent, cfdata_t match, void *aux)
+ld_mlx_match(struct device *parent, struct cfdata *match,
+    void *aux)
 {
 
 	return (1);
 }
 
 static void
-ld_mlx_attach(device_t parent, device_t self, void *aux)
+ld_mlx_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct mlx_attach_args *mlxa = aux;
-	struct ld_mlx_softc *sc = device_private(self);
-	struct ld_softc *ld = &sc->sc_ld;
-	struct mlx_softc *mlx = device_private(parent);
-	struct mlx_sysdrive *ms = &mlx->mlx_sysdrive[mlxa->mlxa_unit];
+	struct mlx_attach_args *mlxa;
+	struct ld_mlx_softc *sc;
+	struct ld_softc *ld;
+	struct mlx_softc *mlx;
+	struct mlx_sysdrive *ms;
 	const char *statestr;
 
-	ld->sc_dv = self;
+	sc = (struct ld_mlx_softc *)self;
+	ld = &sc->sc_ld;
+	mlx = (struct mlx_softc *)parent;
+	mlxa = aux;
+	ms = &mlx->mlx_sysdrive[mlxa->mlxa_unit];
 
 	sc->sc_hwunit = mlxa->mlxa_unit;
 	ld->sc_maxxfer = MLX_MAX_XFER;
@@ -136,17 +148,14 @@ ld_mlx_attach(device_t parent, device_t self, void *aux)
 }
 
 static int
-ld_mlx_detach(device_t dv, int flags)
+ld_mlx_detach(struct device *dv, int flags)
 {
-	struct ld_mlx_softc *sc = device_private(dv);
-	struct ld_softc *ld = &sc->sc_ld;
-	struct mlx_softc *mlx = device_private(device_parent(dv));
 	int rv;
 
-	if ((rv = ldbegindetach(ld, flags)) != 0)
+	if ((rv = ldbegindetach((struct ld_softc *)dv, flags)) != 0)
 		return (rv);
-	ldenddetach(ld);
-	mlx_flush(mlx, 1);
+	ldenddetach((struct ld_softc *)dv);
+	mlx_flush((struct mlx_softc *)device_parent(dv), 1);
 
 	return (0);
 }
@@ -160,7 +169,7 @@ ld_mlx_dobio(struct ld_mlx_softc *sc, void *data, int datasize, int blkno,
 	int s, rv;
 	bus_addr_t sgphys;
 
-	mlx = device_private(device_parent(sc->sc_ld.sc_dv));
+	mlx = (struct mlx_softc *)device_parent(&sc->sc_ld.sc_dv);
 
 	if ((rv = mlx_ccb_alloc(mlx, &mc, bp == NULL)) != 0)
 		return (rv);
@@ -198,7 +207,7 @@ ld_mlx_dobio(struct ld_mlx_softc *sc, void *data, int datasize, int blkno,
 	} else {
  		mc->mc_mx.mx_handler = ld_mlx_handler;
 		mc->mc_mx.mx_context = bp;
-		mc->mc_mx.mx_dv = sc->sc_ld.sc_dv;
+		mc->mc_mx.mx_dv = &sc->sc_ld.sc_dv;
 		mlx_ccb_enqueue(mlx, mc);
 		rv = 0;
 	}
@@ -224,8 +233,8 @@ ld_mlx_handler(struct mlx_ccb *mc)
 
 	mx = &mc->mc_mx;
 	bp = mx->mx_context;
-	sc = device_private(mx->mx_dv);
-	mlx = device_private(device_parent(sc->sc_ld.sc_dv));
+	sc = (struct ld_mlx_softc *)mx->mx_dv;
+	mlx = (struct mlx_softc *)device_parent(&sc->sc_ld.sc_dv);
 
 	if (mc->mc_status != MLX_STATUS_OK) {
 		bp->b_error = EIO;
@@ -233,10 +242,10 @@ ld_mlx_handler(struct mlx_ccb *mc)
 
 		if (mc->mc_status == MLX_STATUS_RDWROFFLINE)
 			printf("%s: drive offline\n",
-			    device_xname(sc->sc_ld.sc_dv));
+			    sc->sc_ld.sc_dv.dv_xname);
 		else
 			printf("%s: I/O error - %s\n",
-			    device_xname(sc->sc_ld.sc_dv),
+			    sc->sc_ld.sc_dv.dv_xname,
 			    mlx_ccb_diagnose(mc));
 	} else
 		bp->b_resid = 0;

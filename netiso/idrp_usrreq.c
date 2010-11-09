@@ -1,4 +1,4 @@
-/*	$NetBSD: idrp_usrreq.c,v 1.20 2008/12/17 20:51:38 cegger Exp $	*/
+/*	$NetBSD: idrp_usrreq.c,v 1.17 2006/08/30 15:32:23 christos Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: idrp_usrreq.c,v 1.20 2008/12/17 20:51:38 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: idrp_usrreq.c,v 1.17 2006/08/30 15:32:23 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/proc.h>
@@ -114,10 +114,10 @@ bad:		m_freem(m);
 		return;
 	}
 	bzero(idrp_addrs[0].siso_data, sizeof(idrp_addrs[0].siso_data));
-	bcopy((void *) & (src->siso_addr), (void *) & idrp_addrs[0].siso_addr,
+	bcopy((caddr_t) & (src->siso_addr), (caddr_t) & idrp_addrs[0].siso_addr,
 	      1 + src->siso_nlen);
 	bzero(idrp_addrs[1].siso_data, sizeof(idrp_addrs[1].siso_data));
-	bcopy((void *) & (dst->siso_addr), (void *) & idrp_addrs[1].siso_addr,
+	bcopy((caddr_t) & (dst->siso_addr), (caddr_t) & idrp_addrs[1].siso_addr,
 	      1 + dst->siso_nlen);
 	if (sbappendaddr(&idrp_isop.isop_socket->so_rcv,
 			 sisotosa(idrp_addrs), m, (struct mbuf *) 0) == 0)
@@ -136,11 +136,11 @@ idrp_output(struct mbuf *m, ...)
 	siso = va_arg(ap, struct sockaddr_iso *);
 	va_end(ap);
 
-	bcopy((void *) & (siso->siso_addr),
-	  (void *) & idrp_isop.isop_sfaddr.siso_addr, 1 + siso->siso_nlen);
+	bcopy((caddr_t) & (siso->siso_addr),
+	  (caddr_t) & idrp_isop.isop_sfaddr.siso_addr, 1 + siso->siso_nlen);
 	siso++;
-	bcopy((void *) & (siso->siso_addr),
-	  (void *) & idrp_isop.isop_sladdr.siso_addr, 1 + siso->siso_nlen);
+	bcopy((caddr_t) & (siso->siso_addr),
+	  (caddr_t) & idrp_isop.isop_sladdr.siso_addr, 1 + siso->siso_nlen);
 	i = clnp_output(m, idrp_isop, m->m_pkthdr.len, 0);
 	splx(s);
 	return (i);
@@ -179,7 +179,6 @@ idrp_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 	switch (req) {
 
 	case PRU_ATTACH:
-		sosetlock(so);
 		if (rp != 0) {
 			error = EISCONN;
 			break;
@@ -189,7 +188,7 @@ idrp_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 			if (error)
 				break;
 		}
-		rp = malloc(sizeof(*rp), M_PCB, M_WAITOK|M_ZERO);
+		MALLOC(rp, struct rawcb *, sizeof(*rp), M_PCB, M_WAITOK|M_ZERO);
 		if (rp == 0) {
 			error = ENOBUFS;
 			break;

@@ -1,30 +1,7 @@
-/*	$NetBSD: kern_ntptime.c,v 1.52 2009/01/11 21:00:11 christos Exp $	*/
-
-/*-
- * Copyright (c) 2008 The NetBSD Foundation, Inc.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
- * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
- * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
- * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
- */
+/*	$NetBSD: kern_ntptime.c,v 1.44 2007/10/19 12:16:43 ad Exp $	*/
+#include <sys/types.h> 	/* XXX to get __HAVE_TIMECOUNTER, remove
+			   after all ports are converted. */
+#ifdef __HAVE_TIMECOUNTER
 
 /*-
  ***********************************************************************
@@ -60,9 +37,10 @@
 
 #include <sys/cdefs.h>
 /* __FBSDID("$FreeBSD: src/sys/kern/kern_ntptime.c,v 1.59 2005/05/28 14:34:41 rwatson Exp $"); */
-__KERNEL_RCSID(0, "$NetBSD: kern_ntptime.c,v 1.52 2009/01/11 21:00:11 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kern_ntptime.c,v 1.44 2007/10/19 12:16:43 ad Exp $");
 
 #include "opt_ntp.h"
+#include "opt_compat_netbsd.h"
 
 #include <sys/param.h>
 #include <sys/resourcevar.h>
@@ -71,13 +49,16 @@ __KERNEL_RCSID(0, "$NetBSD: kern_ntptime.c,v 1.52 2009/01/11 21:00:11 christos E
 #include <sys/proc.h>
 #include <sys/sysctl.h>
 #include <sys/timex.h>
+#ifdef COMPAT_30
+#include <compat/sys/timex.h>
+#endif
 #include <sys/vnode.h>
 #include <sys/kauth.h>
+
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
-#include <sys/cpu.h>
 
-#include <compat/sys/timex.h>
+#include <sys/cpu.h>
 
 /*
  * Single-precision macros for 64-bit machines
@@ -235,16 +216,14 @@ static void hardupdate(long offset);
  * ntp_gettime() - NTP user application interface
  */
 void
-ntp_gettime(struct ntptimeval *ntv)
+ntp_gettime(ntv)
+	struct ntptimeval *ntv;
 {
-
-	mutex_spin_enter(&timecounter_lock);
 	nanotime(&ntv->time);
 	ntv->maxerror = time_maxerror;
 	ntv->esterror = time_esterror;
 	ntv->tai = time_tai;
 	ntv->time_state = time_state;
-	mutex_spin_exit(&timecounter_lock);
 }
 
 /* ARGSUSED */
@@ -252,11 +231,14 @@ ntp_gettime(struct ntptimeval *ntv)
  * ntp_adjtime() - NTP daemon application interface
  */
 int
-sys_ntp_adjtime(struct lwp *l, const struct sys_ntp_adjtime_args *uap, register_t *retval)
+sys_ntp_adjtime(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct sys_ntp_adjtime_args /* {
 		syscallarg(struct timex *) tp;
-	} */
+	} */ *uap = v;
 	struct timex ntv;
 	int error = 0;
 
@@ -279,10 +261,12 @@ sys_ntp_adjtime(struct lwp *l, const struct sys_ntp_adjtime_args *uap, register_
 }
 
 void
-ntp_adjtime1(struct timex *ntv)
+ntp_adjtime1(ntv)
+	struct timex *ntv;
 {
 	long freq;
 	int modes;
+	int s;
 
 	/*
 	 * Update selected clock variables - only the superuser can
@@ -293,11 +277,11 @@ ntp_adjtime1(struct timex *ntv)
 	 * the STA_PLL bit in the status word is cleared, the state and
 	 * status words are reset to the initial values at boot.
 	 */
-	mutex_spin_enter(&timecounter_lock);
 	modes = ntv->modes;
 	if (modes != 0)
 		/* We need to save the system time during shutdown */
 		time_adjusted |= 2;
+	s = splclock();
 	if (modes & MOD_MAXERROR)
 		time_maxerror = ntv->maxerror;
 	if (modes & MOD_ESTERROR)
@@ -398,7 +382,7 @@ ntp_adjtime1(struct timex *ntv)
 	ntv->jitcnt = pps_jitcnt;
 	ntv->stbcnt = pps_stbcnt;
 #endif /* PPS_SYNC */
-	mutex_spin_exit(&timecounter_lock);
+	splx(s);
 }
 #endif /* NTP */
 
@@ -415,8 +399,6 @@ ntp_update_second(int64_t *adjustment, time_t *newsec)
 {
 	int tickrate;
 	l_fp ftemp;		/* 32/64-bit temporary */
-
-	KASSERT(mutex_owned(&timecounter_lock));
 
 #ifdef NTP
 
@@ -610,8 +592,6 @@ hardupdate(long offset)
 	long mtemp;
 	l_fp ftemp;
 
-	KASSERT(mutex_owned(&timecounter_lock));
-
 	/*
 	 * Select how the phase is to be controlled and from which
 	 * source. If the PPS signal is present and enabled to
@@ -693,8 +673,6 @@ hardpps(struct timespec *tsp,		/* time at PPS */
 {
 	long u_sec, u_nsec, v_nsec; /* temps */
 	l_fp ftemp;
-
-	KASSERT(mutex_owned(&timecounter_lock));
 
 	/*
 	 * The signal is first processed by a range gate and frequency
@@ -874,13 +852,256 @@ hardpps(struct timespec *tsp,		/* time at PPS */
 }
 #endif /* PPS_SYNC */
 #endif /* NTP */
+#else /* !__HAVE_TIMECOUNTER */
+/******************************************************************************
+ *                                                                            *
+ * Copyright (c) David L. Mills 1993, 1994                                    *
+ *                                                                            *
+ * Permission to use, copy, modify, and distribute this software and its      *
+ * documentation for any purpose and without fee is hereby granted, provided  *
+ * that the above copyright notice appears in all copies and that both the    *
+ * copyright notice and this permission notice appear in supporting           *
+ * documentation, and that the name University of Delaware not be used in     *
+ * advertising or publicity pertaining to distribution of the software        *
+ * without specific, written prior permission.  The University of Delaware    *
+ * makes no representations about the suitability this software for any       *
+ * purpose.  It is provided "as is" without express or implied warranty.      *
+ *                                                                            *
+ ******************************************************************************/
+
+/*
+ * Modification history kern_ntptime.c
+ *
+ * 24 Sep 94	David L. Mills
+ *	Tightened code at exits.
+ *
+ * 24 Mar 94	David L. Mills
+ *	Revised syscall interface to include new variables for PPS
+ *	time discipline.
+ *
+ * 14 Feb 94	David L. Mills
+ *	Added code for external clock
+ *
+ * 28 Nov 93	David L. Mills
+ *	Revised frequency scaling to conform with adjusted parameters
+ *
+ * 17 Sep 93	David L. Mills
+ *	Created file
+ */
+/*
+ * ntp_gettime(), ntp_adjtime() - precision time interface for SunOS
+ * V4.1.1 and V4.1.3
+ *
+ * These routines consitute the Network Time Protocol (NTP) interfaces
+ * for user and daemon application programs. The ntp_gettime() routine
+ * provides the time, maximum error (synch distance) and estimated error
+ * (dispersion) to client user application programs. The ntp_adjtime()
+ * routine is used by the NTP daemon to adjust the system clock to an
+ * externally derived time. The time offset and related variables set by
+ * this routine are used by hardclock() to adjust the phase and
+ * frequency of the phase-lock loop which controls the system clock.
+ */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: kern_ntptime.c,v 1.44 2007/10/19 12:16:43 ad Exp $");
+
+#include "opt_ntp.h"
+#include "opt_compat_netbsd.h"
+
+#include <sys/param.h>
+#include <sys/resourcevar.h>
+#include <sys/systm.h>
+#include <sys/kernel.h>
+#include <sys/proc.h>
+#include <sys/sysctl.h>
+#include <sys/timex.h>
+#ifdef COMPAT_30
+#include <compat/sys/timex.h>
+#endif
+#include <sys/vnode.h>
+#include <sys/kauth.h>
+
+#include <sys/mount.h>
+#include <sys/syscallargs.h>
+
+#include <sys/cpu.h>
+
+#ifdef NTP
+/*
+ * The following variables are used by the hardclock() routine in the
+ * kern_clock.c module and are described in that module.
+ */
+extern int time_state;		/* clock state */
+extern int time_status;		/* clock status bits */
+extern long time_offset;	/* time adjustment (us) */
+extern long time_freq;		/* frequency offset (scaled ppm) */
+extern long time_maxerror;	/* maximum error (us) */
+extern long time_esterror;	/* estimated error (us) */
+extern long time_constant;	/* pll time constant */
+extern long time_precision;	/* clock precision (us) */
+extern long time_tolerance;	/* frequency tolerance (scaled ppm) */
+extern int time_adjusted;	/* ntp might have changed the system time */
+
+#ifdef PPS_SYNC
+/*
+ * The following variables are used only if the PPS signal discipline
+ * is configured in the kernel.
+ */
+extern int pps_shift;		/* interval duration (s) (shift) */
+extern long pps_freq;		/* pps frequency offset (scaled ppm) */
+extern long pps_jitter;		/* pps jitter (us) */
+extern long pps_stabil;		/* pps stability (scaled ppm) */
+extern long pps_jitcnt;		/* jitter limit exceeded */
+extern long pps_calcnt;		/* calibration intervals */
+extern long pps_errcnt;		/* calibration errors */
+extern long pps_stbcnt;		/* stability limit exceeded */
+#endif /* PPS_SYNC */
+
+/*ARGSUSED*/
+/*
+ * ntp_gettime() - NTP user application interface
+ */
+void
+ntp_gettime(ntvp)
+	struct ntptimeval *ntvp;
+{
+	struct timeval atv;
+	int s;
+
+	memset(ntvp, 0, sizeof(struct ntptimeval));
+
+	s = splclock();
+#ifdef EXT_CLOCK
+	/*
+	 * The microtime() external clock routine returns a
+	 * status code. If less than zero, we declare an error
+	 * in the clock status word and return the kernel
+	 * (software) time variable. While there are other
+	 * places that call microtime(), this is the only place
+	 * that matters from an application point of view.
+	 */
+	if (microtime(&atv) < 0) {
+		time_status |= STA_CLOCKERR;
+		ntvp->time = time;
+	} else
+		time_status &= ~STA_CLOCKERR;
+#else /* EXT_CLOCK */
+	microtime(&atv);
+#endif /* EXT_CLOCK */
+	ntvp->maxerror = time_maxerror;
+	ntvp->esterror = time_esterror;
+	(void) splx(s);
+	TIMEVAL_TO_TIMESPEC(&atv, &ntvp->time);
+}
+ 
+
+/* ARGSUSED */
+/*
+ * ntp_adjtime() - NTP daemon application interface
+ */
+int
+sys_ntp_adjtime(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
+{
+	struct sys_ntp_adjtime_args /* {
+		syscallarg(struct timex *) tp;
+	} */ *uap = v;
+	struct timex ntv;
+	int error = 0;
+
+	error = copyin((void *)SCARG(uap, tp), (void *)&ntv, sizeof(ntv));
+	if (error != 0)
+		return (error);
+
+	if (ntv.modes != 0 && (error = kauth_authorize_system(l->l_cred,
+	    KAUTH_SYSTEM_TIME, KAUTH_REQ_SYSTEM_TIME_NTPADJTIME, NULL,
+	    NULL, NULL)) != 0)
+		return (error);
+
+	ntp_adjtime1(&ntv);
+
+	error = copyout((void *)&ntv, (void *)SCARG(uap, tp), sizeof(ntv));
+	if (error == 0)
+		*retval = ntp_timestatus();
+
+	return error;
+}
+
+void
+ntp_adjtime1(ntv)
+	struct timex *ntv;
+{
+	int modes;
+	int s;
+
+	/*
+	 * Update selected clock variables. Note that there is no error
+	 * checking here on the assumption the superuser should know
+	 * what it is doing.
+	 */
+	modes = ntv->modes;
+	if (modes != 0)
+		/* We need to save the system time during shutdown */
+		time_adjusted |= 2;
+	s = splclock();
+	if (modes & MOD_FREQUENCY)
+#ifdef PPS_SYNC
+		time_freq = ntv->freq - pps_freq;
+#else /* PPS_SYNC */
+		time_freq = ntv->freq;
+#endif /* PPS_SYNC */
+	if (modes & MOD_MAXERROR)
+		time_maxerror = ntv->maxerror;
+	if (modes & MOD_ESTERROR)
+		time_esterror = ntv->esterror;
+	if (modes & MOD_STATUS) {
+		time_status &= STA_RONLY;
+		time_status |= ntv->status & ~STA_RONLY;
+	}
+	if (modes & MOD_TIMECONST)
+		time_constant = ntv->constant;
+	if (modes & MOD_OFFSET)
+		hardupdate(ntv->offset);
+
+	/*
+	 * Retrieve all clock variables
+	 */
+	if (time_offset < 0)
+		ntv->offset = -(-time_offset >> SHIFT_UPDATE);
+	else
+		ntv->offset = time_offset >> SHIFT_UPDATE;
+#ifdef PPS_SYNC
+	ntv->freq = time_freq + pps_freq;
+#else /* PPS_SYNC */
+	ntv->freq = time_freq;
+#endif /* PPS_SYNC */
+	ntv->maxerror = time_maxerror;
+	ntv->esterror = time_esterror;
+	ntv->status = time_status;
+	ntv->constant = time_constant;
+	ntv->precision = time_precision;
+	ntv->tolerance = time_tolerance;
+#ifdef PPS_SYNC
+	ntv->shift = pps_shift;
+	ntv->ppsfreq = pps_freq;
+	ntv->jitter = pps_jitter >> PPS_AVG;
+	ntv->stabil = pps_stabil;
+	ntv->calcnt = pps_calcnt;
+	ntv->errcnt = pps_errcnt;
+	ntv->jitcnt = pps_jitcnt;
+	ntv->stbcnt = pps_stbcnt;
+#endif /* PPS_SYNC */
+	(void)splx(s);
+}
+#endif /* NTP */
+#endif /* !__HAVE_TIMECOUNTER */
 
 #ifdef NTP
 int
-ntp_timestatus(void)
+ntp_timestatus()
 {
-	int rv;
-
 	/*
 	 * Status word error decode. If any of these conditions
 	 * occur, an error is returned, instead of the status
@@ -890,7 +1111,6 @@ ntp_timestatus(void)
 	 *
 	 * Hardware or software error
 	 */
-	mutex_spin_enter(&timecounter_lock);
 	if ((time_status & (STA_UNSYNC | STA_CLOCKERR)) ||
 
 	/*
@@ -913,12 +1133,9 @@ ntp_timestatus(void)
 	 */
 	    (time_status & STA_PPSFREQ &&
 	     time_status & (STA_PPSWANDER | STA_PPSERROR)))
-		rv = TIME_ERROR;
+		return (TIME_ERROR);
 	else
-		rv = time_state;
-	mutex_spin_exit(&timecounter_lock);
-
-	return rv;
+		return (time_state);
 }
 
 /*ARGSUSED*/
@@ -926,11 +1143,11 @@ ntp_timestatus(void)
  * ntp_gettime() - NTP user application interface
  */
 int
-sys___ntp_gettime50(struct lwp *l, const struct sys___ntp_gettime50_args *uap, register_t *retval)
+sys___ntp_gettime30(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct sys___ntp_gettime30_args /* {
 		syscallarg(struct ntptimeval *) ntvp;
-	} */
+	} */ *uap = v;
 	struct ntptimeval ntv;
 	int error = 0;
 
@@ -945,6 +1162,33 @@ sys___ntp_gettime50(struct lwp *l, const struct sys___ntp_gettime50_args *uap, r
 	}
 	return(error);
 }
+
+#ifdef COMPAT_30
+int
+compat_30_sys_ntp_gettime(struct lwp *l, void *v, register_t *retval)
+{
+	struct compat_30_sys_ntp_gettime_args /* {
+		syscallarg(struct ntptimeval30 *) ontvp;
+	} */ *uap = v;
+	struct ntptimeval ntv;
+	struct ntptimeval30 ontv;
+	int error = 0;
+
+	if (SCARG(uap, ntvp)) {
+		ntp_gettime(&ntv);
+		TIMESPEC_TO_TIMEVAL(&ontv.time, &ntv.time);
+		ontv.maxerror = ntv.maxerror;
+		ontv.esterror = ntv.esterror;
+
+		error = copyout((void *)&ontv, (void *)SCARG(uap, ntvp),
+				sizeof(ontv));
+ 	}
+	if (!error)
+		*retval = ntp_timestatus();
+
+	return (error);
+}
+#endif
 
 /*
  * return information about kernel precision timekeeping
@@ -980,4 +1224,22 @@ SYSCTL_SETUP(sysctl_kern_ntptime_setup, "sysctl kern.ntptime node setup")
 		       sizeof(struct ntptimeval),
 		       CTL_KERN, KERN_NTPTIME, CTL_EOL);
 }
+#else /* !NTP */
+/* For some reason, raising SIGSYS (as sys_nosys would) is problematic. */
+
+int
+sys___ntp_gettime30(struct lwp *l, void *v, register_t *retval)
+{
+
+	return(ENOSYS);
+}
+
+#ifdef COMPAT_30
+int
+compat_30_sys_ntp_gettime(struct lwp *l, void *v, register_t *retval)
+{
+
+ 	return(ENOSYS);
+}
+#endif
 #endif /* !NTP */

@@ -1,4 +1,4 @@
-/*	$NetBSD: cpu.h,v 1.62 2009/03/05 13:00:45 tsutsui Exp $	*/
+/*	$NetBSD: cpu.h,v 1.48 2006/12/22 18:00:19 jdc Exp $	*/
 
 /*
  * Copyright (c) 1982, 1990 The Regents of the University of California.
@@ -98,10 +98,6 @@
 #include <sys/cpu_data.h>
 struct cpu_info {
 	struct cpu_data ci_data;	/* MI per-cpu data */
-	cpuid_t	ci_cpuid;
-	int	ci_want_resched;
-	int	ci_mtx_count;
-	int	ci_mtx_oldspl;
 };
 
 extern struct cpu_info cpu_info_store;
@@ -131,6 +127,7 @@ struct clockframe {
 } __attribute__((packed));
 
 #define	CLKF_USERMODE(framep)	(((framep)->cf_sr & PSL_S) == 0)
+#define	CLKF_BASEPRI(framep)	(((framep)->cf_sr & PSL_IPL) == 0)
 #define	CLKF_PC(framep)		((framep)->cf_pc)
 #if 0
 /* We would like to do it this way... */
@@ -145,25 +142,29 @@ struct clockframe {
  * Preempt the current process if in interrupt from user mode,
  * or after the current trap/syscall if in system mode.
  */
-#define	cpu_need_resched(ci,flags)	{ci->ci_want_resched = 1; setsoftast();}
+#define	need_resched(ci)	{want_resched = 1; setsoftast();}
 
 /*
  * Give a profiling tick to the current process from the softclock
  * interrupt.  On hp300, request an ast to send us through trap(),
  * marking the proc as needing a profiling tick.
  */
-#define	profile_tick(l, framep)	((l)->l_pflag |= LP_OWEUPC, setsoftast())
-#define	cpu_need_proftick(l)	((l)->l_pflag |= LP_OWEUPC, setsoftast())
+#define	profile_tick(p, framep)	((p)->p_flag |= P_OWEUPC, setsoftast())
+#define	need_proftick(p)	((p)->p_flag |= P_OWEUPC, setsoftast())
 
 /*
  * Notify the current process (p) that it has a signal pending,
  * process as soon as possible.
  */
-#define	cpu_signotify(l)	setsoftast()
+#define	signotify(p)	setsoftast()
 
 #define setsoftast()	(astpending = 1)
 
 extern int	astpending;	/* need trap before returning to user mode */
+extern int	want_resched;	/* resched() was called */
+
+/* include support for software interrupts */
+#include <machine/mtpr.h>
 
 /*
  * The rest of this should probably be moved to ../atari/ataricpu.h,
@@ -203,62 +204,92 @@ extern int machineid;
 #define CPU_CONSDEV	1	/* dev_t: console terminal device */
 #define CPU_MAXID	2	/* number of valid machdep ids */
 
+#define CTL_MACHDEP_NAMES { \
+	{ 0, 0 }, \
+	{ "console_device", CTLTYPE_STRUCT }, \
+}
+
 #ifdef _KERNEL
 /*
  * Prototypes from atari_init.c
  */
-int	cpu_dump(int (*)(dev_t, daddr_t, void *, size_t), daddr_t *);
-int	cpu_dumpsize(void);
+int	cpu_dump __P((int (*)(dev_t, daddr_t, caddr_t, size_t), daddr_t *));
+int	cpu_dumpsize __P((void));
 
 /*
  * Prototypes from autoconf.c
  */
-void	config_console(void);
+void	config_console __P((void));
+
+/*
+ * Prototypes from clock.c
+ */
+long	clkread __P((void));
 
 /*
  * Prototypes from fpu.c
  */
-const char *fpu_describe(int);
-int	fpu_probe(void);
+const char *fpu_describe __P((int));
+int	fpu_probe __P((void));
+
+/*
+ * Prototypes from vm_machdep.c
+ */
+int	badbaddr __P((caddr_t, int));
+void	consinit __P((void));
+void	dumpconf __P((void));
+int	kvtop __P((caddr_t));
+void	physaccess __P((caddr_t, caddr_t, int, int));
+void	physunaccess __P((caddr_t, int));
+void	setredzone __P((u_int *, caddr_t));
 
 /*
  * Prototypes from locore.s
  */
 struct fpframe;
 struct user;
+struct pcb;
 
-void	clearseg(paddr_t);
-void	doboot(void);
-void	loadustp(int);
-void	m68881_save(struct fpframe *);
-void	m68881_restore(struct fpframe *);
-void	physcopyseg(paddr_t, paddr_t);
-u_int	probeva(u_int, u_int);
-int	suline(void *, void *);
+void	clearseg __P((paddr_t));
+void	doboot __P((void));
+void	loadustp __P((int));
+void	m68881_save __P((struct fpframe *));
+void	m68881_restore __P((struct fpframe *));
+void	physcopyseg __P((paddr_t, paddr_t));
+u_int	probeva __P((u_int, u_int));
+void	proc_trampoline __P((void));
+void	savectx __P((struct pcb *));
+int	suline __P((caddr_t, caddr_t));
+void	switch_exit __P((struct lwp *));
+void	switch_lwp_exit __P((struct lwp *));
 
 /*
  * Prototypes from machdep.c:
  */
-int	badbaddr(void *, int);
-void	consinit(void);
 typedef void (*si_farg)(void *, void *);	/* XXX */
-void	init_sicallback(void);			/* XXX */
-void	add_sicallback(si_farg, void *, void *);
-void	rem_sicallback(si_farg);
-void	dumpsys(void);
-vaddr_t reserve_dumppages(vaddr_t);
+void	add_sicallback __P((si_farg, void *, void *));
+void	rem_sicallback __P((si_farg));
+void	dumpsys __P((void));
+vaddr_t reserve_dumppages __P((vaddr_t));
+void	softint __P((void));
 
 
 /*
  * Prototypes from nvram.c:
  */
 struct uio;
-int	nvram_uio(struct uio *);
+int	nvram_uio __P((struct uio *));
+
+/*
+ * Prototypes from sys_machdep.c:
+ */
+int	cachectl1 __P((unsigned long, vaddr_t, size_t, struct proc *));
+int	dma_cachectl __P((caddr_t, int));
 
 /*
  * Prototypes from pci_machdep.c
  */
-void init_pci_bus(void);
+void init_pci_bus __P((void));
 
 #endif /* _KERNEL */
 #endif /* !_MACHINE_CPU_H_ */

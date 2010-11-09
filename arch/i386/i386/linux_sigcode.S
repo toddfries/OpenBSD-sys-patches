@@ -1,4 +1,4 @@
-/*	$NetBSD: linux_sigcode.S,v 1.8 2008/04/28 20:23:24 martin Exp $	*/
+/*	$NetBSD: linux_sigcode.S,v 1.6 2005/12/11 12:17:41 christos Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -63,14 +70,13 @@
  *	@(#)locore.s	7.3 (Berkeley) 5/13/91
  */
 
-#include <machine/asm.h>
-__KERNEL_RCSID(0, "$NetBSD: linux_sigcode.S,v 1.8 2008/04/28 20:23:24 martin Exp $");
-
 #if defined(_KERNEL_OPT)
 #include "opt_vm86.h"
 #endif
 
 #include "assym.h"
+
+#include <machine/asm.h>
 
 #include <compat/linux/linux_syscall.h>
 

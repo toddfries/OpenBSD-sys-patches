@@ -1,4 +1,4 @@
-/*	$NetBSD: if_hme_sbus.c,v 1.24 2008/04/28 20:23:57 martin Exp $	*/
+/*	$NetBSD: if_hme_sbus.c,v 1.22 2007/10/19 12:01:11 ad Exp $	*/
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -34,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_hme_sbus.c,v 1.24 2008/04/28 20:23:57 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_hme_sbus.c,v 1.22 2007/10/19 12:01:11 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -105,7 +112,7 @@ hmeattach_sbus(parent, self, aux)
 
 	if (sa->sa_nreg < 5) {
 		printf("%s: only %d register sets\n",
-			device_xname(self), sa->sa_nreg);
+			self->dv_xname, sa->sa_nreg);
 		return;
 	}
 
@@ -124,7 +131,7 @@ hmeattach_sbus(parent, self, aux)
 			 sa->sa_reg[0].oa_base,
 			 (bus_size_t)sa->sa_reg[0].oa_size,
 			 0, &sc->sc_seb) != 0) {
-		aprint_error_dev(self, "cannot map SEB registers\n");
+		printf("%s: cannot map SEB registers\n", self->dv_xname);
 		return;
 	}
 	if (sbus_bus_map(sa->sa_bustag,
@@ -132,7 +139,7 @@ hmeattach_sbus(parent, self, aux)
 			 sa->sa_reg[1].oa_base,
 			 (bus_size_t)sa->sa_reg[1].oa_size,
 			 0, &sc->sc_etx) != 0) {
-		aprint_error_dev(self, "cannot map ETX registers\n");
+		printf("%s: cannot map ETX registers\n", self->dv_xname);
 		return;
 	}
 	if (sbus_bus_map(sa->sa_bustag,
@@ -140,7 +147,7 @@ hmeattach_sbus(parent, self, aux)
 			 sa->sa_reg[2].oa_base,
 			 (bus_size_t)sa->sa_reg[2].oa_size,
 			 0, &sc->sc_erx) != 0) {
-		aprint_error_dev(self, "cannot map ERX registers\n");
+		printf("%s: cannot map ERX registers\n", self->dv_xname);
 		return;
 	}
 	if (sbus_bus_map(sa->sa_bustag,
@@ -148,7 +155,7 @@ hmeattach_sbus(parent, self, aux)
 			 sa->sa_reg[3].oa_base,
 			 (bus_size_t)sa->sa_reg[3].oa_size,
 			 0, &sc->sc_mac) != 0) {
-		aprint_error_dev(self, "cannot map MAC registers\n");
+		printf("%s: cannot map MAC registers\n", self->dv_xname);
 		return;
 	}
 	if (sbus_bus_map(sa->sa_bustag,
@@ -156,7 +163,7 @@ hmeattach_sbus(parent, self, aux)
 			 sa->sa_reg[4].oa_base,
 			 (bus_size_t)sa->sa_reg[4].oa_size,
 			 0, &sc->sc_mif) != 0) {
-		aprint_error_dev(self, "cannot map MIF registers\n");
+		printf("%s: cannot map MIF registers\n", self->dv_xname);
 		return;
 	}
 

@@ -1,4 +1,4 @@
-/*	$NetBSD: lms.c,v 1.54 2008/07/09 20:50:41 joerg Exp $	*/
+/*	$NetBSD: lms.c,v 1.51 2006/11/16 01:32:38 christos Exp $	*/
 
 /*-
  * Copyright (c) 1993, 1994 Charles M. Hannum.
@@ -24,7 +24,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: lms.c,v 1.54 2008/07/09 20:50:41 joerg Exp $");
+__KERNEL_RCSID(0, "$NetBSD: lms.c,v 1.51 2006/11/16 01:32:38 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -47,6 +47,7 @@ __KERNEL_RCSID(0, "$NetBSD: lms.c,v 1.54 2008/07/09 20:50:41 joerg Exp $");
 #define	LMS_NPORTS	4
 
 struct lms_softc {		/* driver status information */
+	struct device sc_dev;
 	void *sc_ih;
 
 	bus_space_tag_t sc_iot;		/* bus i/o space identifier */
@@ -58,25 +59,26 @@ struct lms_softc {		/* driver status information */
 	struct device *sc_wsmousedev;
 };
 
-static int lmsprobe(device_t, cfdata_t, void *);
-static void lmsattach(device_t, device_t, void *);
-static int lmsintr(void *);
+int lmsprobe(struct device *, struct cfdata *, void *);
+void lmsattach(struct device *, struct device *, void *);
+int lmsintr(void *);
 
-CFATTACH_DECL_NEW(lms, sizeof(struct lms_softc),
+CFATTACH_DECL(lms, sizeof(struct lms_softc),
     lmsprobe, lmsattach, NULL, NULL);
 
-static int	lms_enable(void *);
-static int	lms_ioctl(void *, u_long, void *, int, struct lwp *);
-static void	lms_disable(void *);
+int	lms_enable(void *);
+int	lms_ioctl(void *, u_long, caddr_t, int, struct lwp *);
+void	lms_disable(void *);
 
-static const struct wsmouse_accessops lms_accessops = {
+const struct wsmouse_accessops lms_accessops = {
 	lms_enable,
 	lms_ioctl,
 	lms_disable,
 };
 
-static int
-lmsprobe(device_t parent, cfdata_t match, void *aux)
+int
+lmsprobe(struct device *parent, struct cfdata *match,
+    void *aux)
 {
 	struct isa_attach_args *ia = aux;
 	bus_space_tag_t iot = ia->ia_iot;
@@ -132,10 +134,10 @@ out:
 	return rv;
 }
 
-static void
-lmsattach(device_t parent, device_t self, void *aux)
+void
+lmsattach(struct device *parent, struct device *self, void *aux)
 {
-	struct lms_softc *sc = device_private(self);
+	struct lms_softc *sc = (void *)self;
 	struct isa_attach_args *ia = aux;
 	bus_space_tag_t iot = ia->ia_iot;
 	bus_space_handle_t ioh;
@@ -145,7 +147,7 @@ lmsattach(device_t parent, device_t self, void *aux)
 	aprint_normal(": Logitech Mouse\n");
 
 	if (bus_space_map(iot, ia->ia_io[0].ir_addr, LMS_NPORTS, 0, &ioh)) {
-		aprint_error_dev(self, "can't map i/o space\n");
+		aprint_error("%s: can't map i/o space\n", sc->sc_dev.dv_xname);
 		return;
 	}
 
@@ -169,7 +171,7 @@ lmsattach(device_t parent, device_t self, void *aux)
 	sc->sc_wsmousedev = config_found(self, &a, wsmousedevprint);
 }
 
-static int
+int
 lms_enable(void *v)
 {
 	struct lms_softc *sc = v;
@@ -186,7 +188,7 @@ lms_enable(void *v)
 	return 0;
 }
 
-static void
+void
 lms_disable(void *v)
 {
 	struct lms_softc *sc = v;
@@ -197,8 +199,8 @@ lms_disable(void *v)
 	sc->sc_enabled = 0;
 }
 
-static int
-lms_ioctl(void *v, u_long cmd, void *data, int flag,
+int
+lms_ioctl(void *v, u_long cmd, caddr_t data, int flag,
     struct lwp *l)
 {
 #if 0
@@ -213,7 +215,7 @@ lms_ioctl(void *v, u_long cmd, void *data, int flag,
 	return (EPASSTHROUGH);
 }
 
-static int
+int
 lmsintr(void *arg)
 {
 	struct lms_softc *sc = arg;

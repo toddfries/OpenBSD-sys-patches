@@ -1,4 +1,4 @@
-/*	$NetBSD: rtclock.c,v 1.23 2009/01/03 09:32:13 isaki Exp $	*/
+/*	$NetBSD: rtclock.c,v 1.19 2006/09/14 01:18:11 gdamore Exp $	*/
 
 /*
  * Copyright 1993, 1994 Masaru Oki
@@ -36,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: rtclock.c,v 1.23 2009/01/03 09:32:13 isaki Exp $");
+__KERNEL_RCSID(0, "$NetBSD: rtclock.c,v 1.19 2006/09/14 01:18:11 gdamore Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -58,20 +58,22 @@ __KERNEL_RCSID(0, "$NetBSD: rtclock.c,v 1.23 2009/01/03 09:32:13 isaki Exp $");
 static int rtgettod(todr_chip_handle_t, struct clock_ymdhms *);
 static int rtsettod(todr_chip_handle_t, struct clock_ymdhms *);
 
-static int rtc_match(device_t, cfdata_t, void *);
-static void rtc_attach(device_t, device_t, void *);
+static int rtc_match(struct device *, struct cfdata *, void *);
+static void rtc_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(rtc, sizeof(struct rtc_softc),
+int rtclockinit(void);
+
+CFATTACH_DECL(rtc, sizeof(struct rtc_softc),
     rtc_match, rtc_attach, NULL, NULL);
 
 static int rtc_attached;
 
-static int
-rtc_match(device_t parent, cfdata_t cf, void *aux)
+static int 
+rtc_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct intio_attach_args *ia = aux;
 
-	if (strcmp(ia->ia_name, "rtc") != 0)
+	if (strcmp (ia->ia_name, "rtc") != 0)
 		return (0);
 	if (rtc_attached)
 		return (0);
@@ -85,20 +87,20 @@ rtc_match(device_t parent, cfdata_t cf, void *aux)
 	return (1);
 }
 
-static void
-rtc_attach(device_t parent, device_t self, void *aux)
+static void 
+rtc_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct rtc_softc *sc = device_private(self);
+	struct rtc_softc *sc = (struct rtc_softc *)self;
 	struct intio_attach_args *ia = aux;
 	int r;
 
 	rtc_attached = 1;
 
 	ia->ia_size = 0x20;
-	r = intio_map_allocate_region(parent, ia, INTIO_MAP_ALLOCATE);
+	r = intio_map_allocate_region (parent, ia, INTIO_MAP_ALLOCATE);
 #ifdef DIAGNOSTIC
 	if (r)
-		panic("IO map for RTC corruption??");
+		panic ("IO map for RTC corruption??");
 #endif
 
 
@@ -110,7 +112,7 @@ rtc_attach(device_t parent, device_t self, void *aux)
 	sc->sc_todr.todr_settime_ymdhms = rtsettod;
 	todr_attach(&sc->sc_todr);
 
-	aprint_normal(": RP5C15\n");
+	printf (": RP5C15\n");
 }
 
 static int

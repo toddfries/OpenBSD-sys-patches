@@ -1,4 +1,4 @@
-/*	$NetBSD: pfil.c,v 1.27 2008/06/23 03:13:12 dyoung Exp $	*/
+/*	$NetBSD: pfil.c,v 1.24 2005/12/11 12:24:51 christos Exp $	*/
 
 /*
  * Copyright (c) 1996 Matthew R. Green
@@ -12,6 +12,8 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -27,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: pfil.c,v 1.27 2008/06/23 03:13:12 dyoung Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pfil.c,v 1.24 2005/12/11 12:24:51 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/errno.h>
@@ -94,7 +96,8 @@ pfil_head_register(struct pfil_head *ph)
 {
 	struct pfil_head *lph;
 
-	LIST_FOREACH(lph, &pfil_head_list, ph_list) {
+	for (lph = LIST_FIRST(&pfil_head_list); lph != NULL;
+	     lph = LIST_NEXT(lph, ph_list)) {
 		if (ph->ph_type == lph->ph_type &&
 		    ph->ph_un.phu_val == lph->ph_un.phu_val)
 			return EEXIST;
@@ -130,8 +133,10 @@ pfil_head_get(int type, u_long val)
 {
 	struct pfil_head *ph;
 
-	LIST_FOREACH(ph, &pfil_head_list, ph_list) {
-		if (ph->ph_type == type && ph->ph_un.phu_val == val)
+	for (ph = LIST_FIRST(&pfil_head_list); ph != NULL;
+	     ph = LIST_NEXT(ph, ph_list)) {
+		if (ph->ph_type == type &&
+		    ph->ph_un.phu_val == val)
 			break;
 	}
 
@@ -203,8 +208,10 @@ pfil_list_add(pfil_list_t *list,
 	/*
 	 * First make sure the hook is not already there.
 	 */
-	TAILQ_FOREACH(pfh, list, pfil_link) {
-		if (pfh->pfil_func == func && pfh->pfil_arg == arg)
+	for (pfh = TAILQ_FIRST(list); pfh != NULL;
+	     pfh = TAILQ_NEXT(pfh, pfil_link)) {
+		if (pfh->pfil_func == func &&
+		    pfh->pfil_arg == arg)
 			return EEXIST;
 	}
 
@@ -260,7 +267,8 @@ pfil_list_remove(pfil_list_t *list,
 {
 	struct packet_filter_hook *pfh;
 
-	TAILQ_FOREACH(pfh, list, pfil_link) {
+	for (pfh = TAILQ_FIRST(list); pfh != NULL;
+	     pfh = TAILQ_NEXT(pfh, pfil_link)) {
 		if (pfh->pfil_func == func && pfh->pfil_arg == arg) {
 			TAILQ_REMOVE(list, pfh, pfil_link);
 			free(pfh, M_IFADDR);

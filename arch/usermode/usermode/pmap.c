@@ -1,4 +1,4 @@
-/* $NetBSD: pmap.c,v 1.1 2007/12/29 14:38:37 jmcneill Exp $ */
+/* $NetBSD: pmap.c,v 1.5 2009/11/07 07:27:48 cegger Exp $ */
 
 /*-
  * Copyright (c) 2007 Jared D. McNeill <jmcneill@invisible.ca>
@@ -12,12 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by Jared D. McNeill.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -33,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: pmap.c,v 1.1 2007/12/29 14:38:37 jmcneill Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pmap.c,v 1.5 2009/11/07 07:27:48 cegger Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -150,7 +144,7 @@ pmap_wired_count(pmap_t pmap)
 }
 
 int
-pmap_enter(pmap_t pmap, vaddr_t va, paddr_t pa, vm_prot_t prot, int flags)
+pmap_enter(pmap_t pmap, vaddr_t va, paddr_t pa, vm_prot_t prot, u_int flags)
 {
 	return 0;
 }
@@ -184,7 +178,7 @@ pmap_extract(pmap_t pmap, vaddr_t va, paddr_t *pap)
 }
 
 void
-pmap_kenter_pa(vaddr_t va, paddr_t pa, vm_prot_t prot)
+pmap_kenter_pa(vaddr_t va, paddr_t pa, vm_prot_t prot, u_int flags)
 {
 }
 
@@ -196,11 +190,6 @@ pmap_kremove(vaddr_t va, vsize_t size)
 void
 pmap_copy(pmap_t dst_map, pmap_t src_map, vaddr_t dst_addr, vsize_t len,
     vaddr_t src_addr)
-{
-}
-
-void
-pmap_collect(pmap_t pmap)
 {
 }
 

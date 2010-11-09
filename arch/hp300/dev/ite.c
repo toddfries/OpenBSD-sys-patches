@@ -1,4 +1,4 @@
-/*	$NetBSD: ite.c,v 1.82 2008/06/13 09:41:15 cegger Exp $	*/
+/*	$NetBSD: ite.c,v 1.76 2006/10/01 18:56:22 elad Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -112,7 +119,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ite.c,v 1.82 2008/06/13 09:41:15 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ite.c,v 1.76 2006/10/01 18:56:22 elad Exp $");
 
 #include "hil.h"
 
@@ -151,10 +158,10 @@ __KERNEL_RCSID(0, "$NetBSD: ite.c,v 1.82 2008/06/13 09:41:15 cegger Exp $");
  */
 int	iteburst = 64;
 
-static int	itematch(device_t, cfdata_t, void *);
-static void	iteattach(device_t, device_t, void *);
+static int	itematch(struct device *, struct cfdata *, void *);
+static void	iteattach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(ite, sizeof(struct ite_softc),
+CFATTACH_DECL(ite, sizeof(struct ite_softc),
     itematch, iteattach, NULL, NULL);
 
 /* XXX this has always been global, but shouldn't be */
@@ -231,38 +238,36 @@ static u_char  ite_console_attributes[0x2200];
 }
 
 static int
-itematch(device_t parent, cfdata_t cf, void *aux)
+itematch(struct device *parent, struct cfdata *match, void *aux)
 {
 
 	return 1;
 }
 
 static void
-iteattach(device_t parent, device_t self, void *aux)
+iteattach(struct device *parent, struct device *self, void *aux)
 {
-	struct ite_softc *ite = device_private(self);
-	struct grf_softc *grf = device_private(parent);
+	struct ite_softc *ite = (struct ite_softc *)self;
+	struct grf_softc *grf = (struct grf_softc *)parent;
 	struct grfdev_attach_args *ga = aux;
-
-	ite->sc_dev = self;
 
 	/* Allocate the ite_data. */
 	if (ga->ga_isconsole) {
 		ite->sc_data = &ite_cn;
-		aprint_normal(": console");
+		printf(": console");
 
 		/*
 		 * We didn't know which unit this would be during
 		 * the console probe, so we have to fixup cn_dev here.
 		 */
 		cn_tab->cn_dev = makedev(cdevsw_lookup_major(&ite_cdevsw),
-		    device_unit(self));
+					 device_unit(self));
 	} else {
 		ite->sc_data = malloc(sizeof(struct ite_data), M_DEVBUF,
 		    M_NOWAIT | M_ZERO);
 		if (ite->sc_data == NULL) {
-			aprint_normal("\n");
-			aprint_error_dev(self, "malloc for ite_data failed\n");
+			printf("\n%s: malloc for ite_data failed\n",
+			    ite->sc_dev.dv_xname);
 			return;
 		}
 		ite->sc_data->flags = ITE_ALIVE;
@@ -274,7 +279,7 @@ iteattach(device_t parent, device_t self, void *aux)
 	ite->sc_grf = grf;
 	grf->sc_ite = ite;
 
-	aprint_normal("\n");
+	printf("\n");
 }
 
 void
@@ -385,8 +390,8 @@ iteopen(dev_t dev, int mode, int devtype, struct lwp *l)
 	int error;
 	int first = 0;
 
-	sc = device_lookup_private(&ite_cd, unit);
-	if (sc == NULL)
+	if (unit >= ite_cd.cd_ndevs ||
+	    (sc = ite_cd.cd_devs[unit]) == NULL)
 		return ENXIO;
 	ip = sc->sc_data;
 
@@ -429,7 +434,7 @@ iteopen(dev_t dev, int mode, int devtype, struct lwp *l)
 static int
 iteclose(dev_t dev, int flag, int mode, struct lwp *l)
 {
-	struct ite_softc *sc = device_lookup_private(&ite_cd,ITEUNIT(dev));
+	struct ite_softc *sc = ite_cd.cd_devs[ITEUNIT(dev)];
 	struct ite_data *ip = sc->sc_data;
 	struct tty *tp = ip->tty;
 
@@ -447,7 +452,7 @@ iteclose(dev_t dev, int flag, int mode, struct lwp *l)
 static int
 iteread(dev_t dev, struct uio *uio, int flag)
 {
-	struct ite_softc *sc = device_lookup_private(&ite_cd,ITEUNIT(dev));
+	struct ite_softc *sc = ite_cd.cd_devs[ITEUNIT(dev)];
 	struct tty *tp = sc->sc_data->tty;
 
 	return (*tp->t_linesw->l_read)(tp, uio, flag);
@@ -456,7 +461,7 @@ iteread(dev_t dev, struct uio *uio, int flag)
 int
 itewrite(dev_t dev, struct uio *uio, int flag)
 {
-	struct ite_softc *sc = device_lookup_private(&ite_cd,ITEUNIT(dev));
+	struct ite_softc *sc = ite_cd.cd_devs[ITEUNIT(dev)];
 	struct tty *tp = sc->sc_data->tty;
 
 	return (*tp->t_linesw->l_write)(tp, uio, flag);
@@ -465,7 +470,7 @@ itewrite(dev_t dev, struct uio *uio, int flag)
 int
 itepoll(dev_t dev, int events, struct lwp *l)
 {
-	struct ite_softc *sc = device_lookup_private(&ite_cd,ITEUNIT(dev));
+	struct ite_softc *sc = ite_cd.cd_devs[ITEUNIT(dev)];
 	struct tty *tp = sc->sc_data->tty;
 
 	return (*tp->t_linesw->l_poll)(tp, events, l);
@@ -474,15 +479,15 @@ itepoll(dev_t dev, int events, struct lwp *l)
 struct tty *
 itetty(dev_t dev)
 {
-	struct ite_softc *sc = device_lookup_private(&ite_cd,ITEUNIT(dev));
+	struct ite_softc *sc = ite_cd.cd_devs[ITEUNIT(dev)];
 
 	return sc->sc_data->tty;
 }
 
 int
-iteioctl(dev_t dev, u_long cmd, void *addr, int flag, struct lwp *l)
+iteioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct lwp *l)
 {
-	struct ite_softc *sc = device_lookup_private(&ite_cd,ITEUNIT(dev));
+	struct ite_softc *sc = ite_cd.cd_devs[ITEUNIT(dev)];
 	struct ite_data *ip = sc->sc_data;
 	struct tty *tp = ip->tty;
 	int error;
@@ -501,7 +506,7 @@ itestart(struct tty *tp)
 	struct ite_softc *sc;
 	struct ite_data *ip;
 
-	sc = device_lookup_private(&ite_cd,ITEUNIT(tp->t_dev));
+	sc = ite_cd.cd_devs[ITEUNIT(tp->t_dev)];
 	ip = sc->sc_data;
 
 	s = splkbd();
@@ -511,7 +516,13 @@ itestart(struct tty *tp)
 	}
 	tp->t_state |= TS_BUSY;
 	cc = tp->t_outq.c_cc;
-	ttypull(tp);
+	if (cc <= tp->t_lowat) {
+		if (tp->t_state & TS_ASLEEP) {
+			tp->t_state &= ~TS_ASLEEP;
+			wakeup((caddr_t)&tp->t_outq);
+		}
+		selwakeup(&tp->t_wsel);
+	}
 	/*
 	 * Handle common (?) case
 	 */
@@ -543,7 +554,7 @@ itestart(struct tty *tp)
 		}
 		if (hiwat) {
 			tp->t_state |= TS_TIMEOUT;
-			callout_schedule(&tp->t_rstrt_ch, 1);
+			callout_reset(&tp->t_rstrt_ch, 1, ttrstrt, tp);
 		}
 	}
 	tp->t_state &= ~TS_BUSY;

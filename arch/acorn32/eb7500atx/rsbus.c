@@ -1,4 +1,4 @@
-/* $NetBSD: rsbus.c,v 1.5 2007/03/26 22:46:20 hubertf Exp $ */
+/* $NetBSD: rsbus.c,v 1.7 2009/10/21 16:16:24 rmind Exp $ */
 
 /*
  * Copyright (c) 2002
@@ -13,12 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Ichiro FUKUHARA.
- * 4. The name of the company nor the name of the author may be used to
- *    endorse or promote products derived from this software without specific
- *    prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY ICHIRO FUKUHARA ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -35,7 +29,7 @@
 
 #include <sys/cdefs.h>
 
-__KERNEL_RCSID(0, "$NetBSD: rsbus.c,v 1.5 2007/03/26 22:46:20 hubertf Exp $");
+__KERNEL_RCSID(0, "$NetBSD: rsbus.c,v 1.7 2009/10/21 16:16:24 rmind Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -61,10 +55,7 @@ CFATTACH_DECL(rsbus, sizeof(struct rsbus_softc),
     rsbus_match, rsbus_attach, NULL, NULL);
  
 static int
-rsbus_match(parent, cf, aux)
-	struct device *parent;
-	struct cfdata *cf;
-	void *aux;
+rsbus_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 	return(1);
 }
@@ -84,11 +75,7 @@ rsbus_attach(struct device *parent, struct device *self, void *aux)
 }
 
 static int
-rsbus_search(parent, cf, ldesc, aux)
-	struct device *parent;
-	struct cfdata *cf;
-	const int *ldesc;
-	void *aux;
+rsbus_search(struct device *parent, struct cfdata *cf, const int *ldesc, void *aux)
 {
 	struct rsbus_softc *sc = (struct rsbus_softc *)parent;
 	struct rsbus_attach_args sa;
@@ -105,9 +92,7 @@ rsbus_search(parent, cf, ldesc, aux)
 }
 
 static int
-rsbus_print(aux, name)
-	void *aux;
-	const char *name;
+rsbus_print(void *aux, const char *name)
 {
         struct rsbus_attach_args *sa = (struct rsbus_attach_args*)aux;
 

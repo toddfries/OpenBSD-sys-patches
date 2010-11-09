@@ -1,4 +1,4 @@
-/*	$NetBSD: consinit.c,v 1.8 2007/10/28 18:01:55 jmmv Exp $	*/
+/*	$NetBSD: consinit.c,v 1.5 2006/12/07 03:10:14 macallan Exp $	*/
 
 /*
  * Copyright (c) 1998
@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: consinit.c,v 1.8 2007/10/28 18:01:55 jmmv Exp $");
+__KERNEL_RCSID(0, "$NetBSD: consinit.c,v 1.5 2006/12/07 03:10:14 macallan Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -56,6 +56,13 @@ __KERNEL_RCSID(0, "$NetBSD: consinit.c,v 1.8 2007/10/28 18:01:55 jmmv Exp $");
 #include <dev/pckbport/pckbportvar.h>
 #endif
 #include "pckbd.h" /* for pckbc_machdep_cnattach */
+
+#include "pc.h"
+#if (NPC > 0)
+#include <machine/pccons.h>
+cons_decl(pc)
+static struct consdev pccons = cons_init(pc);
+#endif
 
 #include "com.h"
 #if (NCOM > 0)
@@ -106,15 +113,8 @@ consinit()
 	initted = 1;
 	cp = NULL;
 
-#if (NVGA > 0)
-	/* The font built into the VGA ROM is broken: all the characters
-	 * above the 127th do not match the standard set expected by the
-	 * console.  E.g. boxes drawn using the ACS are incorrect. */
-	vga_no_builtinfont = 1;
-#endif
-
 	if (!comconsole) {
-#if (NVGA > 0) || (NIGSFB_OFBUS > 0)
+#if (NPC > 0) || (NVGA > 0) || (NIGSFB_OFBUS > 0)
 #if (NIGSFB_OFBUS > 0)
 		if (!igsfb_ofbus_cnattach(&isa_io_bs_tag, &isa_mem_bs_tag)) {
 #if (NPCKBC > 0)
@@ -133,7 +133,16 @@ consinit()
 			return;
 		}
 #endif /* NVGA_OFBUS */
-#else /* NVGA */
+#if (NPC > 0)
+		cp = &pccons;
+		pccnprobe(cp);
+		if (cp->cn_pri == CN_INTERNAL) {
+			pccninit(cp);
+			cn_tab = cp;
+			return;
+		}
+#endif /* NPC */
+#else /* NPC || NVGA */
 #if (NOFCONS > 0)
 		cp = &ofcons;
 		ofcons_cnprobe(cp);
@@ -143,7 +152,7 @@ consinit()
 			return;
 		}
 #endif /* NOFCONS */
-#endif /* NVGA */
+#endif /* NPC || NVGA */
 	}
 #if (NCOM > 0)
 	if (comcnattach(&isa_io_bs_tag, CONADDR, CONSPEED, COM_FREQ,

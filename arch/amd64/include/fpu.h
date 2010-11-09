@@ -1,4 +1,4 @@
-/*	$NetBSD: fpu.h,v 1.5 2008/04/16 21:51:03 cegger Exp $	*/
+/*	$NetBSD: fpu.h,v 1.1 2003/04/26 18:39:40 fvdl Exp $	*/
 
 #ifndef	_AMD64_FPU_H_
 #define	_AMD64_FPU_H_
@@ -11,25 +11,25 @@
  */
 
 struct fxsave64 {
-	uint16_t  fx_fcw;
-	uint16_t  fx_fsw;
-	uint8_t   fx_ftw;
-	uint8_t   fx_unused1;
-	uint16_t  fx_fop;
-	uint64_t  fx_rip;
-	uint64_t  fx_rdp;
-	uint32_t  fx_mxcsr;
-	uint32_t  fx_mxcsr_mask;
-	uint64_t  fx_st[8][2];   /* 8 normal FP regs */
-	uint64_t  fx_xmm[16][2]; /* 16 SSE2 registers */
-	uint8_t   fx_unused3[96];
-} __packed;
+	u_int16_t  fx_fcw;
+	u_int16_t  fx_fsw;
+	u_int8_t   fx_ftw;
+	u_int8_t   fx_unused1;
+	u_int16_t  fx_fop;
+	u_int64_t  fx_rip;
+	u_int64_t  fx_rdp;
+	u_int32_t  fx_mxcsr;
+	u_int32_t  fx_mxcsr_mask;
+	u_int64_t  fx_st[8][2];   /* 8 normal FP regs */
+	u_int64_t  fx_xmm[16][2]; /* 16 SSE2 registers */
+	u_int8_t   fx_unused3[96];
+} __attribute__((packed));
 
 struct savefpu {
 	struct fxsave64 fp_fxsave;	/* see above */
-	uint16_t fp_ex_sw;		/* saved status from last exception */
-	uint16_t fp_ex_tw;		/* saved tag from last exception */
-} __aligned(16);
+	u_int16_t fp_ex_sw;		/* saved status from last exception */
+	u_int16_t fp_ex_tw;		/* saved tag from last exception */
+};
 
 #ifdef _KERNEL
 
@@ -37,17 +37,17 @@ struct savefpu {
  * This one only used for backward compat coredumping.
  */
 struct oldfsave {
-	uint16_t	fs_control;
-	uint16_t	fs_unused0;
-	uint16_t	fs_status;
-	uint16_t	fs_unused1;
-	uint16_t	fs_tag;
-	uint16_t	fs_unused2;
-	uint32_t	fs_ipoff;
-	uint16_t	fs_ipsel;
-	uint16_t	fs_op;
-	uint32_t	fs_opoff;
-	uint16_t	fs_opsel;
+	u_int16_t	fs_control;
+	u_int16_t	fs_unused0;
+	u_int16_t	fs_status;
+	u_int16_t	fs_unused1;
+	u_int16_t	fs_tag;
+	u_int16_t	fs_unused2;
+	u_int32_t	fs_ipoff;
+	u_int16_t	fs_ipsel;
+	u_int16_t	fs_op;
+	u_int32_t	fs_opoff;
+	u_int16_t	fs_opsel;
 } __attribute__ ((packed));
 
 #endif
@@ -95,8 +95,8 @@ void fpudrop(void);
 void fpusave(struct lwp *);
 void fpudiscard(struct lwp *);
 void fputrap(struct trapframe *);
-void fpusave_lwp(struct lwp *, bool);
-void fpusave_cpu(bool);
+void fpusave_lwp(struct lwp *, int);
+void fpusave_cpu(struct cpu_info *, int);
 
 #endif
 

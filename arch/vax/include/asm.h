@@ -1,4 +1,4 @@
-/*	$NetBSD: asm.h,v 1.21 2008/08/31 23:23:42 mrg Exp $ */
+/*	$NetBSD: asm.h,v 1.18 2006/01/20 22:02:41 christos Exp $ */
 /*
  * Copyright (c) 1982, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -46,7 +46,15 @@
 #define R10	0x400
 #define R11	0x800
 
-#define _C_LABEL(x)	x
+#ifdef __ELF__
+# define _C_LABEL(x)	x
+#else
+# ifdef __STDC__
+#  define _C_LABEL(x)	_ ## x
+# else
+#  define _C_LABEL(x)	_/**/x
+# endif
+#endif
 
 #define	_ASM_LABEL(x)	x
 
@@ -60,15 +68,24 @@
 
 /* let kernels and others override entrypoint alignment */
 #ifndef _ALIGN_TEXT
-# define _ALIGN_TEXT .align 4
+# ifdef __ELF__
+#  define _ALIGN_TEXT .align 4
+# else
+#  define _ALIGN_TEXT .align 2
+# endif
 #endif
 
 #define	_ENTRY(x, regs) \
 	.text; _ALIGN_TEXT; .globl x; .type x@function; x: .word regs
 
 #ifdef GPROF
-# define _PROF_PROLOGUE	\
+# ifdef __ELF__
+#  define _PROF_PROLOGUE	\
 	.data; 1:; .long 0; .text; moval 1b,%r0; jsb _ASM_LABEL(__mcount)
+# else 
+#  define _PROF_PROLOGUE	\
+	.data; 1:; .long 0; .text; moval 1b,r0; jsb _ASM_LABEL(mcount)
+# endif
 #else
 # define _PROF_PROLOGUE
 #endif
@@ -78,13 +95,13 @@
 #define ASENTRY(x, regs)	_ENTRY(_ASM_LABEL(x), regs); _PROF_PROLOGUE
 
 #define ALTENTRY(x)		.globl _C_LABEL(x); _C_LABEL(x):
-#define RCSID(name)		.pushsection ".ident"; .asciz name; .popsection
+#define RCSID(x)		.text; .asciz x
 
-
+#ifdef __ELF__
 #define	WEAK_ALIAS(alias,sym)						\
 	.weak alias;							\
 	alias = sym
-
+#endif
 /*
  * STRONG_ALIAS: create a strong alias.
  */

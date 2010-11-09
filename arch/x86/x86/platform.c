@@ -1,4 +1,4 @@
-/* $NetBSD: platform.c,v 1.8 2009/02/17 21:15:19 ad Exp $ */
+/* $NetBSD: platform.c,v 1.4 2008/03/30 15:26:20 ad Exp $ */
 
 /*-
  * Copyright (c) 2007 Jared D. McNeill <jmcneill@invisible.ca>
@@ -12,6 +12,12 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by Jared D. McNeill.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -29,10 +35,11 @@
 #include "isa.h"
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: platform.c,v 1.8 2009/02/17 21:15:19 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: platform.c,v 1.4 2008/03/30 15:26:20 ad Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
+#include <sys/malloc.h>
 #include <sys/kernel.h>
 #include <sys/pmf.h>
 
@@ -98,16 +105,16 @@ platform_print(void)
 	ver = pmf_get_platform("system-version");
 
 	if (manuf == NULL)
-		aprint_verbose("Generic");
+		aprint_normal("Generic");
 	else
-		aprint_verbose("%s", manuf);
+		aprint_normal("%s", manuf);
 	if (prod == NULL)
-		aprint_verbose(" PC");
+		aprint_normal(" PC");
 	else
-		aprint_verbose(" %s", prod);
+		aprint_normal(" %s", prod);
 	if (ver != NULL)
-		aprint_verbose(" (%s)", ver);
-	aprint_verbose("\n");
+		aprint_normal(" (%s)", ver);
+	aprint_normal("\n");
 }
 
 static void

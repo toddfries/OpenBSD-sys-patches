@@ -1,4 +1,4 @@
-/*	$NetBSD: ofnet.c,v 1.42 2008/11/07 00:20:07 dyoung Exp $	*/
+/*	$NetBSD: ofnet.c,v 1.40 2007/07/09 21:00:52 ad Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996 Wolfgang Solfrank.
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ofnet.c,v 1.42 2008/11/07 00:20:07 dyoung Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ofnet.c,v 1.40 2007/07/09 21:00:52 ad Exp $");
 
 #include "ofnet.h"
 #include "opt_inet.h"
@@ -154,7 +154,7 @@ ofnet_attach(struct device *parent, struct device *self, void *aux)
 
 	callout_init(&of->sc_callout, 0);
 
-	strlcpy(ifp->if_xname, device_xname(&of->sc_dev), IFNAMSIZ);
+	bcopy(of->sc_dev.dv_xname, ifp->if_xname, IFNAMSIZ);
 	ifp->if_softc = of;
 	ifp->if_start = ofnet_start;
 	ifp->if_ioctl = ofnet_ioctl;
@@ -374,7 +374,7 @@ ofnet_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 	int error = 0;
 
 	switch (cmd) {
-	case SIOCINITIFADDR:
+	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 
 		switch (ifa->ifa_addr->sa_family) {
@@ -389,25 +389,20 @@ ofnet_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 		ofnet_init(of);
 		break;
 	case SIOCSIFFLAGS:
-		if ((error = ifioctl_common(ifp, cmd, data)) != 0)
-			break;
-		/* XXX re-use ether_ioctl() */
-		switch (ifp->if_flags & (IFF_UP|IFF_RUNNING)) {
-		case IFF_RUNNING:
+		if ((ifp->if_flags & IFF_UP) == 0 &&
+		    (ifp->if_flags & IFF_RUNNING) != 0) {
 			/* If interface is down, but running, stop it. */
 			ofnet_stop(of);
-			break;
-		case IFF_UP:
+		} else if ((ifp->if_flags & IFF_UP) != 0 &&
+			   (ifp->if_flags & IFF_RUNNING) == 0) {
 			/* If interface is up, but not running, start it. */
 			ofnet_init(of);
-			break;
-		default:
+		} else {
 			/* Other flags are ignored. */
-			break;
 		}
 		break;
 	default:
-		error = ether_ioctl(ifp, cmd, data);
+		error = EINVAL;
 		break;
 	}
 	return error;
@@ -418,7 +413,7 @@ ofnet_watchdog(struct ifnet *ifp)
 {
 	struct ofnet_softc *of = ifp->if_softc;
 
-	log(LOG_ERR, "%s: device timeout\n", device_xname(&of->sc_dev));
+	log(LOG_ERR, "%s: device timeout\n", of->sc_dev.dv_xname);
 	ifp->if_oerrors++;
 	ofnet_stop(of);
 	ofnet_init(of);

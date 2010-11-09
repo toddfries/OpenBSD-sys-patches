@@ -1,4 +1,4 @@
-/* $NetBSD: ioc.c,v 1.8 2009/03/03 19:45:55 macallan Exp $	 */
+/* $NetBSD: ioc.c,v 1.5 2006/12/22 01:32:37 rumble Exp $	 */
 
 /*
  * Copyright (c) 2003 Christopher Sekiya
@@ -37,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ioc.c,v 1.8 2009/03/03 19:45:55 macallan Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ioc.c,v 1.5 2006/12/22 01:32:37 rumble Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -82,7 +82,7 @@ CFATTACH_DECL(ioc, sizeof(struct ioc_softc),
 	      ioc_match, ioc_attach, NULL, NULL);
 
 #if defined(BLINK)
-static callout_t ioc_blink_ch;
+static struct callout ioc_blink_ch = CALLOUT_INITIALIZER;
 static void     ioc_blink(void *);
 #endif
 
@@ -101,10 +101,6 @@ ioc_attach(struct device * parent, struct device * self, void *aux)
 	struct ioc_softc *sc = (struct ioc_softc *) self;
 	struct mainbus_attach_args *maa = aux;
 	u_int32_t       sysid;
-
-#ifdef BLINK
-	callout_init(&ioc_blink_ch, 0);
-#endif
 
 	sc->sc_iot = SGIMIPS_BUS_SPACE_HPC;
 
@@ -140,13 +136,10 @@ ioc_attach(struct device * parent, struct device * self, void *aux)
 			  IOC_WRITE_ENET_AUTO | IOC_WRITE_ENET_UTP |
 			  IOC_WRITE_PC_UART2 | IOC_WRITE_PC_UART1);
 
-/* XXX: the firmware should have taken care of this already */
-#if 0
 	if (mach_subtype == MACH_SGI_IP22_GUINNESS) {
 		bus_space_write_4(sc->sc_iot, sc->sc_ioh, IOC_GCSEL, 0xff);
 		bus_space_write_4(sc->sc_iot, sc->sc_ioh, IOC_GCREG, 0xff);
 	}
-#endif
 
 #if defined(BLINK)
 	ioc_blink(sc);

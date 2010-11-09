@@ -1,4 +1,4 @@
-/*	$NetBSD: autoconf.c,v 1.72 2008/06/13 10:01:32 cegger Exp $	*/
+/*	$NetBSD: autoconf.c,v 1.65 2006/03/28 17:38:25 thorpej Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -49,7 +49,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.72 2008/06/13 10:01:32 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.65 2006/03/28 17:38:25 thorpej Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -69,12 +69,8 @@ __KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.72 2008/06/13 10:01:32 cegger Exp $")
 #include <dev/scsipi/scsipi_all.h>
 #include <dev/scsipi/scsiconf.h>
 
-#include "scsibus.h"
-
 static void findbootdev(void);
-#if NSCSIBUS > 0
 static int target_to_unit(u_long, u_long, u_long);
-#endif /* NSCSIBUS > 0 */
 
 /*
  * cpu_configure:
@@ -114,8 +110,9 @@ u_long	bootdev;
 static void
 findbootdev(void)
 {
-	device_t dv;
+	struct device *dv;
 	int major, unit, controller;
+	char buf[32];
 	const char *name;
 
 	booted_device = NULL;
@@ -130,14 +127,9 @@ findbootdev(void)
 
 	switch (major) {
 	case 4: /* SCSI drive */
-#if NSCSIBUS > 0
 		bootdev &= ~(B_UNITMASK << B_UNITSHIFT); /* XXX */
 		unit = target_to_unit(-1, unit, 0);
 		bootdev |= (unit << B_UNITSHIFT); /* XXX */
-#else /* NSCSIBUS > 0 */
-		panic("Boot device is on a SCSI drive but SCSI support "
-		    "is not present");
-#endif /* NSCSIBUS > 0 */
 		break;
 	case 22: /* IDE drive */
 		/*
@@ -149,8 +141,13 @@ findbootdev(void)
 		break;
 	}
 
-	if ((dv = device_find_by_driver_unit(name, unit)) != NULL)
-		booted_device = dv;
+	sprintf(buf, "%s%d", name, unit);
+	for (dv = alldevs.tqh_first; dv != NULL; dv = dv->dv_list.tqe_next) {
+		if (strcmp(buf, dv->dv_xname) == 0) {
+			booted_device = dv;
+			return;
+		}
+	}
 }
 
 /*
@@ -158,12 +155,12 @@ findbootdev(void)
  * This could be tape, disk, CD.  The calling routine, though,
  * assumes DISK.  It would be nice to allow CD, too...
  */
-#if NSCSIBUS > 0
 static int
 target_to_unit(u_long bus, u_long target, u_long lun)
 {
 	struct scsibus_softc	*scsi;
 	struct scsipi_periph	*periph;
+	struct device		*sc_dev;
 extern	struct cfdriver		scsibus_cd;
 
 	if (target < 0 || target > 7 || lun < 0 || lun > 7) {
@@ -174,14 +171,17 @@ extern	struct cfdriver		scsibus_cd;
 
 	if (bus == -1) {
 		for (bus = 0 ; bus < scsibus_cd.cd_ndevs ; bus++) {
-			scsi = device_lookup_private(&scsibus_cd, bus);
-			if (!scsi)
-				continue;
-			periph = scsipi_lookup_periph(scsi->sc_channel,
-			    target, lun);
-			if (!periph)
-				continue;
-			return device_unit(periph->periph_dev);
+			if (scsibus_cd.cd_devs[bus]) {
+				scsi = (struct scsibus_softc *)
+						scsibus_cd.cd_devs[bus];
+				periph = scsipi_lookup_periph(scsi->sc_channel,
+				    target, lun);
+				if (periph != NULL) {
+					sc_dev = (struct device *)
+							periph->periph_dev;
+					return device_unit(sc_dev);
+				}
+			}
 		}
 		return -1;
 	}
@@ -189,14 +189,14 @@ extern	struct cfdriver		scsibus_cd;
 		printf("scsi target to unit, bus (%ld) out of range.\n", bus);
 		return -1;
 	}
-	scsi = device_lookup_private(&scsibus_cd, bus);
-	if (!scsi)
-		return -1;
-
-	periph = scsipi_lookup_periph(scsi->sc_channel,
-	    target, lun);
-	if (!periph)
-		return -1;
-	return device_unit(periph->periph_dev);
+	if (scsibus_cd.cd_devs[bus]) {
+		scsi = (struct scsibus_softc *) scsibus_cd.cd_devs[bus];
+		periph = scsipi_lookup_periph(scsi->sc_channel,
+		    target, lun);
+		if (periph != NULL) {
+			sc_dev = (struct device *) periph->periph_dev;
+			return device_unit(sc_dev);
+		}
+	}
+	return -1;
 }
-#endif /* NSCSIBUS > 0 */

@@ -1,4 +1,4 @@
-/*	$NetBSD: ip_encap.h,v 1.13 2008/11/25 18:28:05 pooka Exp $	*/
+/*	$NetBSD: ip_encap.h,v 1.10 2005/12/10 23:36:23 elad Exp $	*/
 /*	$KAME: ip_encap.h,v 1.7 2000/03/25 07:23:37 sumikawa Exp $	*/
 
 /*
@@ -55,24 +55,7 @@ struct encaptab {
 	void *arg;			/* passed via PACKET_TAG_ENCAP */
 };
 
-/* to lookup a pair of address using radix tree */
-struct sockaddr_pack {
-	u_int8_t sp_len;
-	u_int8_t sp_family;	/* not really used */
-	/* followed by variable-length data */
-};
-
-struct ip_pack4 {
-	struct sockaddr_pack p;
-	struct sockaddr_in mine;
-	struct sockaddr_in yours;
-};
-struct ip_pack6 {
-	struct sockaddr_pack p;
-	struct sockaddr_in6 mine;
-	struct sockaddr_in6 yours;
-};
-
+void	encap_setkeylen(void);
 void	encap_init(void);
 void	encap4_input(struct mbuf *, ...);
 int	encap6_input(struct mbuf **, int *, int);
@@ -82,7 +65,7 @@ const struct encaptab *encap_attach(int, int, const struct sockaddr *,
 const struct encaptab *encap_attach_func(int, int,
 	int (*)(struct mbuf *, int, int, void *),
 	const struct protosw *, void *);
-void	*encap6_ctlinput(int, const struct sockaddr *, void *);
+void	encap6_ctlinput(int, struct sockaddr *, void *);
 int	encap_detach(const struct encaptab *);
 void	*encap_getarg(struct mbuf *);
 #endif

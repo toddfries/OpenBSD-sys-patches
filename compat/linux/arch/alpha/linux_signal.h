@@ -1,4 +1,4 @@
-/* 	$NetBSD: linux_signal.h,v 1.9 2008/04/28 20:23:42 martin Exp $	*/
+/* 	$NetBSD: linux_signal.h,v 1.7 2005/12/11 12:20:12 christos Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -104,7 +111,7 @@
 #define LINUX_SIG_UNBLOCK	2
 #define LINUX_SIG_SETMASK	3
 
-typedef void	(*linux_handler_t)(int);
+typedef void	(*linux_handler_t) __P((int));
 
 typedef u_long	linux_old_sigset_t;
 typedef struct {
@@ -127,7 +134,7 @@ struct linux_sigaction {
 
 struct linux_k_sigaction {
 	struct linux_sigaction sa;
-	void		(*k_sa_restorer)(void);
+	void		(*k_sa_restorer) __P((void));
 };
 
 typedef struct linux_sigaltstack {

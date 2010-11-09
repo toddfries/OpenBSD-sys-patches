@@ -1,4 +1,4 @@
-/*	$NetBSD: if_es.c,v 1.43 2008/11/07 00:20:01 dyoung Exp $ */
+/*	$NetBSD: if_es.c,v 1.37 2005/12/11 12:16:28 christos Exp $ */
 
 /*
  * Copyright (c) 1995 Michael L. Hitch
@@ -38,7 +38,7 @@
 #include "opt_ns.h"
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_es.c,v 1.43 2008/11/07 00:20:01 dyoung Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_es.c,v 1.37 2005/12/11 12:16:28 christos Exp $");
 
 #include "bpfilter.h"
 
@@ -123,7 +123,7 @@ void	es_dump_smcregs(char *, union smcregs *);
 int esintr(void *);
 void esstart(struct ifnet *);
 void eswatchdog(struct ifnet *);
-int esioctl(struct ifnet *, u_long, void *);
+int esioctl(struct ifnet *, u_long, caddr_t);
 void esrint(struct es_softc *);
 void estint(struct es_softc *);
 void esinit(struct es_softc *);
@@ -287,9 +287,9 @@ esinit(struct es_softc *sc)
 	smc->b1.bsr = BSR_BANK1;	/* Select bank 1 */
 	smc->b1.cr = CR_RAM32K | CR_NO_WAIT_ST | CR_SET_SQLCH;
 	smc->b1.ctr = CTR_AUTO_RLSE | CTR_TE_ENA;
-	smc->b1.iar[0] = *((const unsigned short *) &CLLADDR(ifp->if_sadl)[0]);
-	smc->b1.iar[1] = *((const unsigned short *) &CLLADDR(ifp->if_sadl)[2]);
-	smc->b1.iar[2] = *((const unsigned short *) &CLLADDR(ifp->if_sadl)[4]);
+	smc->b1.iar[0] = *((unsigned short *) &LLADDR(ifp->if_sadl)[0]);
+	smc->b1.iar[1] = *((unsigned short *) &LLADDR(ifp->if_sadl)[2]);
+	smc->b1.iar[2] = *((unsigned short *) &LLADDR(ifp->if_sadl)[4]);
 	smc->b2.bsr = BSR_BANK2;	/* Select bank 2 */
 	smc->b2.mmucr = MMUCR_RESET;
 	smc->b0.bsr = BSR_BANK0;	/* Select bank 0 */
@@ -699,7 +699,7 @@ esrint(struct es_softc *sc)
 		}
 		m->m_len = len = min(pktlen, len);
 #ifdef USEPKTBUF
-		bcopy((void *)b, mtod(m, void *), len);
+		bcopy((caddr_t)b, mtod(m, caddr_t), len);
 		b += len;
 #else	/* USEPKTBUF */
 		buf = mtod(m, u_short *);
@@ -848,7 +848,7 @@ esstart(struct ifnet *ifp)
 #ifdef USEPKTBUF
 		i = 0;
 		for (m0 = m; m; m = m->m_next) {
-			bcopy(mtod(m, void *), (char *)pktbuf + i, m->m_len);
+			bcopy(mtod(m, caddr_t), (char *)pktbuf + i, m->m_len);
 			i += m->m_len;
 		}
 
@@ -961,7 +961,7 @@ esstart(struct ifnet *ifp)
 }
 
 int
-esioctl(struct ifnet *ifp, u_long cmd, void *data)
+esioctl(register struct ifnet *ifp, u_long command, caddr_t data)
 {
 	struct es_softc *sc = ifp->if_softc;
 	register struct ifaddr *ifa = (struct ifaddr *)data;
@@ -970,9 +970,9 @@ esioctl(struct ifnet *ifp, u_long cmd, void *data)
 
 	s = splnet();
 
-	switch (cmd) {
+	switch (command) {
 
-	case SIOCINITIFADDR:
+	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 
 		switch (ifa->ifa_addr->sa_family) {
@@ -1005,9 +1005,6 @@ esioctl(struct ifnet *ifp, u_long cmd, void *data)
 		break;
 
 	case SIOCSIFFLAGS:
-		if ((error = ifioctl_common(ifp, cmd, data)) != 0)
-			break;
-		/* XXX see the comment in ed_ioctl() about code re-use */
 		/*
 		 * If interface is marked down and it is running, then stop it
 		 */
@@ -1044,7 +1041,11 @@ esioctl(struct ifnet *ifp, u_long cmd, void *data)
 
 	case SIOCADDMULTI:
 	case SIOCDELMULTI:
-		if ((error = ether_ioctl(ifp, cmd, data)) == ENETRESET) {
+		error = (command == SIOCADDMULTI) ?
+		    ether_addmulti(ifr, &sc->sc_ethercom) :
+		    ether_delmulti(ifr, &sc->sc_ethercom);
+
+		if (error == ENETRESET) {
 			/*
 			 * Multicast list has changed; set the hardware filter
 			 * accordingly.
@@ -1058,12 +1059,11 @@ esioctl(struct ifnet *ifp, u_long cmd, void *data)
 
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
-		error = ifmedia_ioctl(ifp, ifr, &sc->sc_media, cmd);
+		error = ifmedia_ioctl(ifp, ifr, &sc->sc_media, command);
 		break;
 
 	default:
-		error = ether_ioctl(ifp, cmd, data);
-		break;
+		error = EINVAL;
 	}
 
 	splx(s);

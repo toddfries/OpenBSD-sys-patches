@@ -1,4 +1,4 @@
-/*	$NetBSD: siginfo.h,v 1.18 2009/01/13 15:38:34 christos Exp $	 */
+/*	$NetBSD: siginfo.h,v 1.16 2007/05/21 15:35:48 christos Exp $	 */
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -220,7 +227,7 @@ typedef union siginfo {
 #define	POLL_MSG	3	/* Input message available		*/
 #define	POLL_ERR	4	/* I/O Error				*/
 #define	POLL_PRI	5	/* High priority input available	*/
-#define	POLL_HUP	6	/* Device disconnected			*/
+#define	POLL_HUP	4	/* Device disconnected			*/
 
 
 /** si_code */

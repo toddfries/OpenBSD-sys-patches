@@ -1,4 +1,4 @@
-/* $NetBSD: osf1_misc.c,v 1.82 2008/04/22 21:29:21 ad Exp $ */
+/* $NetBSD: osf1_misc.c,v 1.73 2006/04/06 15:45:20 drochner Exp $ */
 
 /*
  * Copyright (c) 1999 Christopher G. Demetriou.  All rights reserved.
@@ -58,7 +58,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: osf1_misc.c,v 1.82 2008/04/22 21:29:21 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: osf1_misc.c,v 1.73 2006/04/06 15:45:20 drochner Exp $");
 
 #if defined(_KERNEL_OPT)
 #include "opt_syscall_debug.h"
@@ -78,6 +78,7 @@ __KERNEL_RCSID(0, "$NetBSD: osf1_misc.c,v 1.82 2008/04/22 21:29:21 ad Exp $");
 #include <sys/signal.h>
 #include <sys/signalvar.h>
 #include <sys/reboot.h>
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 #include <sys/exec.h>
 #include <sys/vnode.h>
@@ -102,7 +103,10 @@ extern int scdebug;
 #endif
 
 int
-osf1_sys_classcntl(struct lwp *l, const struct osf1_sys_classcntl_args *uap, register_t *retval)
+osf1_sys_classcntl(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
 
 	/* XXX */
@@ -110,8 +114,12 @@ osf1_sys_classcntl(struct lwp *l, const struct osf1_sys_classcntl_args *uap, reg
 }
 
 int
-osf1_sys_reboot(struct lwp *l, const struct osf1_sys_reboot_args *uap, register_t *retval)
+osf1_sys_reboot(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
+	struct osf1_sys_reboot_args *uap = v;
 	struct sys_reboot_args a;
 	unsigned long leftovers;
 
@@ -127,8 +135,12 @@ osf1_sys_reboot(struct lwp *l, const struct osf1_sys_reboot_args *uap, register_
 }
 
 int
-osf1_sys_set_program_attributes(struct lwp *l, const struct osf1_sys_set_program_attributes_args *uap, register_t *retval)
+osf1_sys_set_program_attributes(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
+	struct osf1_sys_set_program_attributes_args *uap = v;
 	struct proc *p = l->l_proc;
 	segsz_t tsize, dsize;
 
@@ -140,7 +152,6 @@ osf1_sys_set_program_attributes(struct lwp *l, const struct osf1_sys_set_program
 	if (tsize > MAXTSIZ)
 		return (ENOMEM);
 
-	/* XXXSMP unlocked */
 	p->p_vmspace->vm_taddr = SCARG(uap, taddr);
 	p->p_vmspace->vm_tsize = tsize;
 	p->p_vmspace->vm_daddr = SCARG(uap, daddr);
@@ -150,9 +161,10 @@ osf1_sys_set_program_attributes(struct lwp *l, const struct osf1_sys_set_program
 }
 
 int
-osf1_sys_getsysinfo(struct lwp *l, const struct osf1_sys_getsysinfo_args *uap, register_t *retval)
+osf1_sys_getsysinfo(struct lwp *l, void *v, register_t *retval)
 {
 	extern int ncpus;
+	struct osf1_sys_getsysinfo_args *uap = v;
 	int error;
 	int unit;
 	long percpu;
@@ -240,8 +252,12 @@ osf1_sys_getsysinfo(struct lwp *l, const struct osf1_sys_getsysinfo_args *uap, r
 }
 
 int
-osf1_sys_setsysinfo(struct lwp *l, const struct osf1_sys_setsysinfo_args *uap, register_t *retval)
+osf1_sys_setsysinfo(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
+	struct osf1_sys_setsysinfo_args *uap = v;
 	u_int64_t temp;
 	int error;
 
@@ -265,8 +281,12 @@ osf1_sys_setsysinfo(struct lwp *l, const struct osf1_sys_setsysinfo_args *uap, r
 }
 
 int
-osf1_sys_sysinfo(struct lwp *l, const struct osf1_sys_sysinfo_args *uap, register_t *retval)
+osf1_sys_sysinfo(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
+	struct osf1_sys_sysinfo_args *uap = v;
 	const char *string;
 	size_t slen;
 	int error;
@@ -338,11 +358,17 @@ dont_care:
 }
 
 int
-osf1_sys_uname(struct lwp *l, const struct osf1_sys_uname_args *uap, register_t *retval)
+osf1_sys_uname(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
+	struct osf1_sys_uname_args *uap = v;
         struct osf1_utsname u;
         const char *cp;
         char *dp, *ep;
+
+	/* XXX would use stackgap, but our struct utsname is too big! */
 
         strncpy(u.sysname, ostype, sizeof(u.sysname));
         strncpy(u.nodename, hostname, sizeof(u.nodename));
@@ -359,16 +385,20 @@ osf1_sys_uname(struct lwp *l, const struct osf1_sys_uname_args *uap, register_t 
                 *dp++ = *cp;
         *dp = '\0';
         strncpy(u.machine, MACHINE, sizeof(u.machine));
-        return (copyout((void *)&u, (void *)SCARG(uap, name), sizeof u));
+        return (copyout((caddr_t)&u, (caddr_t)SCARG(uap, name), sizeof u));
 }
 
 int
-osf1_sys_usleep_thread(struct lwp *l, const struct osf1_sys_usleep_thread_args *uap, register_t *retval)
+osf1_sys_usleep_thread(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
+	struct osf1_sys_usleep_thread_args *uap = v;
 	struct osf1_timeval otv, endotv;
-	struct timeval tv, ntv, endtv;
+	struct timeval tv, endtv;
 	u_long ticks;
-	int error;
+	int error, s;
 
 	if ((error = copyin(SCARG(uap, sleep), &otv, sizeof otv)))
 		return (error);
@@ -379,13 +409,16 @@ osf1_sys_usleep_thread(struct lwp *l, const struct osf1_sys_usleep_thread_args *
 	if (ticks == 0)
 		ticks = 1;
 
-	getmicrotime(&tv);
+	s = splclock();
+	tv = time;
+	splx(s);
 
 	tsleep(l, PUSER|PCATCH, "uslpthrd", ticks);	/* XXX */
 
 	if (SCARG(uap, slept) != NULL) {
-		getmicrotime(&ntv);
-		timersub(&ntv, &tv, &endtv);
+		s = splclock();
+		timersub(&time, &tv, &endtv);
+		splx(s);
 		if (endtv.tv_sec < 0 || endtv.tv_usec < 0)
 			endtv.tv_sec = endtv.tv_usec = 0;
 
@@ -397,36 +430,48 @@ osf1_sys_usleep_thread(struct lwp *l, const struct osf1_sys_usleep_thread_args *
 }
 
 int
-osf1_sys_wait4(struct lwp *l, const struct osf1_sys_wait4_args *uap, register_t *retval)
+osf1_sys_wait4(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
+	struct osf1_sys_wait4_args *uap = v;
+	struct proc *p = l->l_proc;
+	struct sys_wait4_args a;
 	struct osf1_rusage osf1_rusage;
 	struct rusage netbsd_rusage;
 	unsigned long leftovers;
-	int error, status, was_zombie;
-	int options = SCARG(uap, options);
-	int pid = SCARG(uap, pid);
+	caddr_t sg;
+	int error;
+
+	SCARG(&a, pid) = SCARG(uap, pid);
+	SCARG(&a, status) = SCARG(uap, status);
 
 	/* translate options */
-	options = emul_flags_translate(osf1_wait_options_xtab,
-	    options, &leftovers);
+	SCARG(&a, options) = emul_flags_translate(osf1_wait_options_xtab,
+	    SCARG(uap, options), &leftovers);
 	if (leftovers != 0)
 		return (EINVAL);
 
-	error = do_sys_wait(l, & pid, &status, options | WOPTSCHECKED,
-	    SCARG(uap, rusage) != NULL ? &netbsd_rusage : NULL, &was_zombie);
-
-	retval[0] = pid;
-	if (pid == 0)
-		return error;
-
-	if (SCARG(uap, rusage)) {
-		osf1_cvt_rusage_from_native(&netbsd_rusage, &osf1_rusage);
-		error = copyout(&osf1_rusage, SCARG(uap, rusage),
-		    sizeof osf1_rusage);
+	if (SCARG(uap, rusage) == NULL)
+		SCARG(&a, rusage) = NULL;
+	else {
+		sg = stackgap_init(p, 0);
+		SCARG(&a, rusage) = stackgap_alloc(p, &sg, sizeof netbsd_rusage);
 	}
 
-	if (error == 0 && SCARG(uap, status))
-		error = copyout(&status, SCARG(uap, status), sizeof(status));
+	error = sys_wait4(l, &a, retval);
 
-	return error;
+	if (error == 0 && SCARG(&a, rusage) != NULL) {
+		error = copyin((caddr_t)SCARG(&a, rusage),
+		    (caddr_t)&netbsd_rusage, sizeof netbsd_rusage);
+		if (error == 0) {
+			osf1_cvt_rusage_from_native(&netbsd_rusage,
+			    &osf1_rusage);
+			error = copyout((caddr_t)&osf1_rusage,
+			    (caddr_t)SCARG(uap, rusage), sizeof osf1_rusage);
+		}
+	}
+
+	return (error);
 }

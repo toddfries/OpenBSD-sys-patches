@@ -1,4 +1,4 @@
-/*	$NetBSD: spl.h,v 1.9 2009/03/07 21:59:25 ad Exp $	*/
+/*	$NetBSD: spl.h,v 1.7 2007/10/08 14:07:23 ad Exp $	*/
 
 /*-
  * Copyright (c)2005 YAMAMOTO Takashi,
@@ -34,9 +34,9 @@
  * splxxx() functions, rather than using this header.
  */
 
-#if !defined(_KERNEL) && !defined(_KMEMUSER)
+#if !defined(_KERNEL)
 #error not supposed to be exposed to userland.
-#endif /* !defined(_KERNEL) && !defined(_KMEMUSER) */
+#endif /* !defined(_KERNEL) */
 
 #define	_SPL_DECL(x, X)	\
 	static __inline int \
@@ -53,8 +53,26 @@ _SPL_DECL(softnet, SOFTNET)
 _SPL_DECL(softserial, SOFTSERIAL)
 #endif /* defined(IPL_SOFTSERIAL) */
 
+_SPL_DECL(bio, BIO)
+_SPL_DECL(net, NET)
+_SPL_DECL(tty, TTY)
 _SPL_DECL(vm, VM)
+_SPL_DECL(clock, CLOCK)
 _SPL_DECL(sched, SCHED)
 _SPL_DECL(high, HIGH)
+
+#if defined(IPL_SERIAL)
+_SPL_DECL(serial, SERIAL)
+#endif /* defined(IPL_SERIAL) */
+#if defined(IPL_AUDIO)
+_SPL_DECL(audio, AUDIO)
+#endif /* defined(IPL_AUDIO) */
+#if defined(IPL_LPT)
+_SPL_DECL(lpt, LPT)
+#endif /* defined(IPL_LPT) */
+
+#if defined(IPL_IPI)
+_SPL_DECL(ipi, IPI)
+#endif /* defined(IPL_IPI) */
 
 #undef _SPL_DECL

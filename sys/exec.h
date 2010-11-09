@@ -1,4 +1,4 @@
-/*	$NetBSD: exec.h,v 1.126 2008/11/19 18:36:10 ad Exp $	*/
+/*	$NetBSD: exec.h,v 1.117 2007/06/24 20:35:37 christos Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993
@@ -113,6 +113,12 @@ struct ps_strings {
 };
 
 /*
+ * Below the ps_strings and sigtramp, we may require a gap on the stack
+ * (used to copyin/copyout various emulation data structures).
+ */
+#define	STACKGAPLEN	4096	/* plenty enough for now */
+
+/*
  * the following structures allow execve() to put together processes
  * in a more extensible and cleaner way.
  *
@@ -143,7 +149,7 @@ struct execsw {
 		int (*ecoff_probe_func)(struct lwp *, struct exec_package *);
 		int (*mach_probe_func)(const char **);
 	} u;
-	struct  emul *es_emul;		/* os emulation */
+	const struct  emul *es_emul;	/* os emulation */
 	int	es_prio;		/* entry priority */
 	int	es_arglen;		/* Extra argument size in words */
 					/* Copy arguments on the new stack */
@@ -189,18 +195,13 @@ struct exec_package {
 	vaddr_t	ep_vm_minaddr;		/* bottom of process address space */
 	vaddr_t	ep_vm_maxaddr;		/* top of process address space */
 	u_int	ep_flags;		/* flags; see below. */
-	size_t	ep_fa_len;		/* byte size of ep_fa */
-	struct exec_fakearg {
-		char *fa_arg;
-		size_t fa_len;
-	} *ep_fa;			/* a fake args vector for scripts */
+	char	**ep_fa;		/* a fake args vector for scripts */
 	int	ep_fd;			/* a file descriptor we're holding */
 	void	*ep_emul_arg;		/* emulation argument */
 	const struct	execsw *ep_esch;/* execsw entry */
 	struct vnode *ep_emul_root;     /* base of emulation filesystem */
 	struct vnode *ep_interp;        /* vnode of (elf) interpeter */
 	uint32_t ep_pax_flags;		/* pax flags */
-	char	*ep_path;		/* absolute path of executable */
 };
 #define	EXEC_INDIR	0x0001		/* script handling already done */
 #define	EXEC_HASFD	0x0002		/* holding a shell script */
@@ -225,6 +226,10 @@ struct exec_vmcmd {
 };
 
 #ifdef _KERNEL
+#include <sys/mallocvar.h>
+
+MALLOC_DECLARE(M_EXEC);
+
 /*
  * funtions used either by execve() or the various CPU-dependent execve()
  * hooks.
@@ -258,8 +263,15 @@ struct core32;
 int	cpu_coredump(struct lwp *, void *, struct core *);
 int	cpu_coredump32(struct lwp *, void *, struct core32 *);
 
-int	exec_add(struct execsw *, int);
-int	exec_remove(struct execsw *, int);
+
+#ifdef LKM
+int	emul_register		(const struct emul *, int);
+int	emul_unregister		(const char *);
+const struct emul *emul_search(const char *);
+
+int	exec_add		(struct execsw *, const char *);
+int	exec_remove		(const struct execsw *);
+#endif /* LKM */
 
 void	new_vmcmd(struct exec_vmcmd_set *,
 		    int (*)(struct lwp *, struct exec_vmcmd *),
@@ -272,8 +284,6 @@ void	new_vmcmd(struct exec_vmcmd_set *,
 typedef	int (*execve_fetch_element_t)(char * const *, size_t, char **);
 int	execve1(struct lwp *, const char *, char * const *, char * const *,
     execve_fetch_element_t);
-
-extern int	maxexec;
 
 #endif /* _KERNEL */
 

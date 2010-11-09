@@ -1,7 +1,7 @@
-/*	$NetBSD: ibm4xx_intr.h,v 1.16 2008/04/28 20:23:32 martin Exp $	*/
+/*	$NetBSD: ibm4xx_intr.h,v 1.14 2006/12/21 15:55:24 yamt Exp $	*/
 
 /*-
- * Copyright (c) 1998, 2007 The NetBSD Foundation, Inc.
+ * Copyright (c) 1998 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -32,17 +39,26 @@
 #ifndef _IBM4XX_INTR_H_
 #define _IBM4XX_INTR_H_
 
+#include <powerpc/softintr.h>
+
 /* Interrupt priority `levels'. */
 #define	IPL_NONE	12	/* nothing */
 #define	IPL_SOFTCLOCK	11	/* software clock interrupt */
 #define	IPL_SOFTNET	10	/* software network interrupt */
+#define	IPL_BIO		9	/* block I/O */
+#define	IPL_NET		8	/* network */
+#define	IPL_SOFTSERIAL	7	/* software serial interrupt */
+#define	IPL_TTY		6	/* terminal */
+#define	IPL_LPT		IPL_TTY
 #define	IPL_VM		5	/* memory allocation */
-#define	IPL_SCHED	3	/* clock */
+#define	IPL_AUDIO	4	/* audio */
+#define	IPL_CLOCK	3	/* clock */
+#define	IPL_STATCLOCK	2
 #define	IPL_HIGH	1	/* everything */
+#define	IPL_SCHED	IPL_HIGH
+#define	IPL_LOCK	IPL_HIGH
+#define	IPL_SERIAL	0	/* serial */
 #define	NIPL		13
-
-#define	IPL_SOFTBIO	IPL_SOFTNET
-#define	IPL_SOFTSERIAL	IPL_SOFTNET
 
 /* Interrupt sharing types. */
 #define	IST_NONE	0	/* none */
@@ -89,6 +105,11 @@ splraiseipl(ipl_cookie_t icookie)
 }
 
 #include <sys/spl.h>
+
+/* Note the constants here are indices to softintr()'s private table. */
+#define	setsoftclock()		softintr(0);
+#define	setsoftnet()		softintr(1);
+#define	setsoftserial()		softintr(2);
 
 #define	spl0()			spllower(0)
 

@@ -1,4 +1,4 @@
-/*	$NetBSD: if_xennet.c,v 1.61 2009/01/16 20:16:47 jym Exp $	*/
+/*	$NetBSD: if_xennet.c,v 1.48 2006/05/27 19:54:59 bouyer Exp $	*/
 
 /*
  *
@@ -33,7 +33,7 @@
 
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_xennet.c,v 1.61 2009/01/16 20:16:47 jym Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_xennet.c,v 1.48 2006/05/27 19:54:59 bouyer Exp $");
 
 #include "opt_inet.h"
 #include "opt_nfs_boot.h"
@@ -49,7 +49,6 @@ __KERNEL_RCSID(0, "$NetBSD: if_xennet.c,v 1.61 2009/01/16 20:16:47 jym Exp $");
 #include <sys/device.h>
 #include <sys/ioctl.h>
 #include <sys/errno.h>
-#include <sys/intr.h>
 #if NRND > 0
 #include <sys/rnd.h>
 #endif
@@ -89,12 +88,12 @@ __KERNEL_RCSID(0, "$NetBSD: if_xennet.c,v 1.61 2009/01/16 20:16:47 jym Exp $");
 #include <uvm/uvm_extern.h>
 #include <uvm/uvm_page.h>
 
-#include <xen/xen.h>
-#include <xen/hypervisor.h>
-#include <xen/evtchn.h>
-#include <xen/ctrl_if.h>
+#include <machine/xen.h>
+#include <machine/hypervisor.h>
+#include <machine/evtchn.h>
+#include <machine/ctrl_if.h>
 
-#include <xen/if_xennetvar.h>
+#include <machine/if_xennetvar.h>
 
 #ifdef DEBUG
 #define XENNET_DEBUG
@@ -136,7 +135,7 @@ union xennet_bufarray {
 };
 
 struct xennet_softc {
-	device_t		sc_dev;		/* base device glue */
+	struct device		sc_dev;		/* base device glue */
 	struct ethercom		sc_ethercom;	/* Ethernet common part */
 
 	int			sc_ifno;
@@ -176,13 +175,13 @@ struct xennet_softc {
 #endif
 };
 
-int xennet_match (device_t, cfdata_t, void *);
-void xennet_attach (device_t, device_t, void *);
+int xennet_match (struct device *, struct cfdata *, void *);
+void xennet_attach (struct device *, struct device *, void *);
 static void xennet_ctrlif_rx(ctrl_msg_t *, unsigned long);
 static int xennet_driver_count_connected(void);
 static void xennet_driver_status_change(netif_fe_driver_status_t *);
 static void xennet_interface_status_change(netif_fe_interface_status_t *);
-static void xennet_rx_mbuf_free(struct mbuf *, void *, size_t, void *);
+static void xennet_rx_mbuf_free(struct mbuf *, caddr_t, size_t, void *);
 static int xen_network_handler(void *);
 static void network_tx_buf_gc(struct xennet_softc *);
 static void network_alloc_rx_buffers(struct xennet_softc *);
@@ -195,10 +194,10 @@ static int xennet_mediachange (struct ifnet *);
 static void xennet_mediastatus(struct ifnet *, struct ifmediareq *);
 #endif
 void xennet_start(struct ifnet *);
-int  xennet_ioctl(struct ifnet *ifp, u_long cmd, void *data);
+int  xennet_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data);
 void xennet_watchdog(struct ifnet *ifp);
 
-CFATTACH_DECL_NEW(xennet_hypervisor, sizeof(struct xennet_softc),
+CFATTACH_DECL(xennet_hypervisor, sizeof(struct xennet_softc),
     xennet_match, xennet_attach, NULL, NULL);
 
 #define RX_MAX_ENTRIES (NETIF_RX_RING_SIZE - 2)
@@ -220,7 +219,7 @@ struct xennet_ctrl {
 	int xc_up;
 
 	cfprint_t xc_cfprint;
-	device_t xc_parent;
+	struct device *xc_parent;
 };
 
 static struct xennet_ctrl netctrl = { -1, 0, 0 };
@@ -236,13 +235,13 @@ int in_autoconf = 0;
 
 
 int
-xennet_scan(device_t self, struct xennet_attach_args *xneta,
+xennet_scan(struct device *self, struct xennet_attach_args *xneta,
     cfprint_t print)
 {
 	ctrl_msg_t cmsg;
 	netif_fe_driver_status_t st;
 
-	if (xendomain_is_dom0() ||
+	if ((xen_start_info.flags & SIF_INITDOMAIN) ||
 	    (xen_start_info.flags & SIF_NET_BE_DOMAIN))
 		return 0;
 
@@ -269,7 +268,7 @@ xennet_scan(device_t self, struct xennet_attach_args *xneta,
 }
 
 int
-xennet_match(device_t parent, cfdata_t match, void *aux)
+xennet_match(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct xennet_attach_args *xa = (struct xennet_attach_args *)aux;
 
@@ -279,22 +278,20 @@ xennet_match(device_t parent, cfdata_t match, void *aux)
 }
 
 void
-xennet_attach(device_t parent, device_t self, void *aux)
+xennet_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct xennet_attach_args *xneta = (struct xennet_attach_args *)aux;
-	struct xennet_softc *sc = device_private(self);
+	struct xennet_softc *sc = (struct xennet_softc *)self;
 	struct ifnet *ifp = &sc->sc_ethercom.ec_if;
 	int idx;
 	extern int ifqmaxlen; /* XXX */
 
 	aprint_normal(": Xen Virtual Network Interface\n");
 
-	sc->sc_dev = self;
-
 	sc->sc_ifno = xneta->xa_handle;
 
 	/* Initialize ifnet structure. */
-	strlcpy(ifp->if_xname, device_xname(sc->sc_dev), IFNAMSIZ);
+	memcpy(ifp->if_xname, sc->sc_dev.dv_xname, IFNAMSIZ);
 	ifp->if_softc = sc;
 	ifp->if_start = xennet_start;
 	ifp->if_ioctl = xennet_ioctl;
@@ -324,13 +321,13 @@ xennet_attach(device_t parent, device_t self, void *aux)
 static struct xennet_softc *
 find_device(int handle)
 {
-	device_t dv;
+	struct device *dv;
 	struct xennet_softc *xs = NULL;
 
 	TAILQ_FOREACH(dv, &alldevs, dv_list) {
 		if (!device_is_a(dv, "xennet"))
 			continue;
-		xs = device_private(dv);
+		xs = (struct xennet_softc *)dv;
 		if (xs->sc_ifno == handle)
 			break;
 	}
@@ -382,14 +379,14 @@ xennet_driver_status_change(netif_fe_driver_status_t *status)
 static int
 xennet_driver_count_connected(void)
 {
-	device_t dv;
+	struct device *dv;
 	struct xennet_softc *xs = NULL;
 
 	netctrl.xc_interfaces = netctrl.xc_connected = 0;
 	TAILQ_FOREACH(dv, &alldevs, dv_list) {
 		if (!device_is_a(dv, "xennet"))
 			continue;
-		xs = device_private(dv);
+		xs = (struct xennet_softc *)dv;
 		netctrl.xc_interfaces++;
 		if (xs->sc_backend_state == BEST_CONNECTED)
 			netctrl.xc_connected++;
@@ -551,31 +548,31 @@ xennet_interface_status_change(netif_fe_interface_status_t *status)
 		 * we've probably just requeued some packets.
 		 */
 		sc->sc_backend_state = BEST_CONNECTED;
-		xen_wmb();
+		x86_sfence();
 		hypervisor_notify_via_evtchn(status->evtchn);  
 		network_tx_buf_gc(sc);
 
 		if_attach(ifp);
 		ether_ifattach(ifp, sc->sc_enaddr);
 
-		sc->sc_softintr = softint_establish(SOFTINT_NET,
+		sc->sc_softintr = softintr_establish(IPL_SOFTNET,
 		    xennet_softstart, sc);
 		if (sc->sc_softintr == NULL)
 			panic(" xennet: can't establish soft interrupt");
 
 		sc->sc_evtchn = status->evtchn;
-		aprint_verbose_dev(sc->sc_dev, "using event channel %d\n",
-		    sc->sc_evtchn);
+		aprint_verbose("%s: using event channel %d\n",
+		    sc->sc_dev.dv_xname, sc->sc_evtchn);
 		event_set_handler(sc->sc_evtchn,
-		    &xen_network_handler, sc, IPL_NET, device_xname(sc->sc_dev));
+		    &xen_network_handler, sc, IPL_NET, sc->sc_dev.dv_xname);
 		hypervisor_enable_event(sc->sc_evtchn);
 		xennet_driver_count_connected();
 
-		aprint_normal_dev(sc->sc_dev, "MAC address %s\n",
+		aprint_normal("%s: MAC address %s\n", sc->sc_dev.dv_xname,
 		    ether_sprintf(sc->sc_enaddr));
 
 #if NRND > 0
-		rnd_attach_source(&sc->sc_rnd_source, device_xname(sc->sc_dev),
+		rnd_attach_source(&sc->sc_rnd_source, sc->sc_dev.dv_xname,
 		    RND_TYPE_NET, 0);
 #endif
 		if (in_autoconf) {
@@ -665,7 +662,7 @@ xennet_rx_push_buffer(struct xennet_softc *sc, int id)
 }
 
 static void
-xennet_rx_mbuf_free(struct mbuf *m, void *buf, size_t size, void *arg)
+xennet_rx_mbuf_free(struct mbuf *m, caddr_t buf, size_t size, void *arg)
 {
 	union xennet_bufarray *xb = (union xennet_bufarray *)arg;
 	struct xennet_softc *sc = xb->xb_rx.xbrx_sc;
@@ -677,7 +674,7 @@ xennet_rx_mbuf_free(struct mbuf *m, void *buf, size_t size, void *arg)
 	xennet_rx_push_buffer(sc, id);
 
 	if (m != NULL) {
-		pool_cache_put(mb_cache, m);
+		pool_cache_put(&mbpool_cache, m);
 	}
 }
 
@@ -702,7 +699,7 @@ xen_network_handler(void *arg)
 
  again:
 	resp_prod = sc->sc_rx->resp_prod;
-	xen_rmb(); /* ensure we see all requests up to resp_prod */
+	x86_lfence(); /* ensure we see all requests up to resp_prod */
 	for (ringidx = sc->sc_rx_resp_cons;
 	     ringidx != resp_prod;
 	     ringidx++) {
@@ -768,7 +765,7 @@ xen_network_handler(void *arg)
 		if ((ifp->if_flags & IFF_PROMISC) == 0) {
 			struct ether_header *eh = pktp;
 			if (ETHER_IS_MULTICAST(eh->ether_dhost) == 0 &&
-			    memcmp(CLLADDR(ifp->if_sadl), eh->ether_dhost,
+			    memcmp(LLADDR(ifp->if_sadl), eh->ether_dhost,
 			    ETHER_ADDR_LEN) != 0) {
 				xennet_rx_push_buffer(sc, rx->id);
 				m_freem(m);
@@ -826,7 +823,7 @@ xen_network_handler(void *arg)
 
 	sc->sc_rx_resp_cons = ringidx;
 	sc->sc_rx->event = resp_prod + 1;
-	xen_rmb();
+	x86_lfence();
 	  /* ensure backend see the new sc_rx->event before we start again */
 
 	if (sc->sc_rx->resp_prod != resp_prod)
@@ -892,7 +889,7 @@ network_tx_buf_gc(struct xennet_softc *sc)
 		 */
 		sc->sc_tx->event = /* atomic */
 			prod + (sc->sc_tx_entries >> 1) + 1;
-		xen_rmb();
+		x86_lfence();
 	} while (prod != sc->sc_tx->resp_prod);
 
 	if (sc->sc_tx->resp_prod == sc->sc_tx->req_prod)
@@ -1012,7 +1009,7 @@ xennet_start(struct ifnet *ifp)
 {
 	struct xennet_softc *sc = ifp->if_softc;
 
-	DPRINTFN(XEDB_FOLLOW, ("%s: xennet_start()\n", device_xname(sc->sc_dev)));
+	DPRINTFN(XEDB_FOLLOW, ("%s: xennet_start()\n", sc->sc_dev.dv_xname));
 
 #if NRND > 0
 	rnd_add_uint32(&sc->sc_rnd_source, sc->sc_tx->req_prod);
@@ -1031,7 +1028,7 @@ xennet_start(struct ifnet *ifp)
 	 * stack will enqueue all pending mbufs in the interface's send queue
 	 * before it is processed by xennet_softstart().
 	 */
-	softint_schedule(sc->sc_softintr);
+	softintr_schedule(sc->sc_softintr);
 	return;
 }
 
@@ -1107,7 +1104,7 @@ xennet_softstart(void *arg)
 			}
 			IFQ_DEQUEUE(&ifp->if_snd, m);
 
-			m_copydata(m, 0, m->m_pkthdr.len, mtod(new_m, void *));
+			m_copydata(m, 0, m->m_pkthdr.len, mtod(new_m, caddr_t));
 			new_m->m_len = new_m->m_pkthdr.len = m->m_pkthdr.len;
 
 			m_freem(m);
@@ -1143,12 +1140,12 @@ xennet_softstart(void *arg)
 		txreq->addr = xpmap_ptom(pa);
 		txreq->size = m->m_pkthdr.len;
 
-		xen_rmb();
+		x86_lfence();
 		idx++;
 		sc->sc_tx->req_prod = idx;
 
 		sc->sc_tx_entries++; /* XXX atomic */
-		xen_rmb();
+		x86_lfence();
 
 #ifdef XENNET_DEBUG
 		DPRINTFN(XEDB_MEM, ("packet addr %p/%p, physical %p/%p, "
@@ -1168,7 +1165,7 @@ xennet_softstart(void *arg)
 #endif
 	}
 
-	xen_rmb();
+	x86_lfence();
 	if (sc->sc_tx->resp_prod != idx) {
 		hypervisor_notify_via_evtchn(sc->sc_evtchn);
 		ifp->if_timer = 5;
@@ -1176,11 +1173,11 @@ xennet_softstart(void *arg)
 	splx(s);
 
 	DPRINTFN(XEDB_FOLLOW, ("%s: xennet_start() done\n",
-	    device_xname(sc->sc_dev)));
+	    sc->sc_dev.dv_xname));
 }
 
 int
-xennet_ioctl(struct ifnet *ifp, u_long cmd, void *data)
+xennet_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 #ifdef mediacode
 	struct ifreq *ifr = (struct ifreq *)data;
@@ -1192,14 +1189,14 @@ xennet_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 
 	s = splnet();
 
-	DPRINTFN(XEDB_FOLLOW, ("%s: xennet_ioctl()\n", device_xname(sc->sc_dev)));
+	DPRINTFN(XEDB_FOLLOW, ("%s: xennet_ioctl()\n", sc->sc_dev.dv_xname));
 	error = ether_ioctl(ifp, cmd, data);
 	if (error == ENETRESET)
 		error = 0;
 	splx(s);
 
 	DPRINTFN(XEDB_FOLLOW, ("%s: xennet_ioctl() returning %d\n",
-	    device_xname(sc->sc_dev), error));
+	    sc->sc_dev.dv_xname, error));
 
 	return error;
 }
@@ -1209,7 +1206,7 @@ xennet_watchdog(struct ifnet *ifp)
 {
 	struct xennet_softc *sc = ifp->if_softc;
 
-	printf("%s: xennet_watchdog\n", device_xname(sc->sc_dev));
+	printf("%s: xennet_watchdog\n", sc->sc_dev.dv_xname);
 }
 
 int
@@ -1218,7 +1215,7 @@ xennet_init(struct ifnet *ifp)
 	struct xennet_softc *sc = ifp->if_softc;
 	int s = splnet();
 
-	DPRINTFN(XEDB_FOLLOW, ("%s: xennet_init()\n", device_xname(sc->sc_dev)));
+	DPRINTFN(XEDB_FOLLOW, ("%s: xennet_init()\n", sc->sc_dev.dv_xname));
 
 	if (ifp->if_flags & IFF_UP) {
 		if ((ifp->if_flags & IFF_RUNNING) == 0)
@@ -1245,7 +1242,7 @@ void
 xennet_reset(struct xennet_softc *sc)
 {
 
-	DPRINTFN(XEDB_FOLLOW, ("%s: xennet_reset()\n", device_xname(sc->sc_dev)));
+	DPRINTFN(XEDB_FOLLOW, ("%s: xennet_reset()\n", sc->sc_dev.dv_xname));
 }
 
 #ifdef mediacode
@@ -1287,9 +1284,8 @@ xennet_mediastatus(struct ifnet *ifp, struct ifmediareq *ifmr)
 int
 xennet_bootstatic_callback(struct nfs_diskless *nd)
 {
-	int flags = 0;
 	struct ifnet *ifp = nd->nd_ifp;
-	struct xennet_softc *sc = ifp->if_softc;
+	struct xennet_softc *sc = (struct xennet_softc *)ifp->if_softc;
 	union xen_cmdline_parseinfo xcp;
 	struct sockaddr_in *sin;
 
@@ -1298,32 +1294,19 @@ xennet_bootstatic_callback(struct nfs_diskless *nd)
 	xcp.xcp_netinfo.xi_root = nd->nd_root.ndm_host;
 	xen_parse_cmdline(XEN_PARSE_NETINFO, &xcp);
 
-	if (xcp.xcp_netinfo.xi_root[0] != '\0') {
-		flags |= NFS_BOOT_HAS_SERVER;
-		if (strchr(xcp.xcp_netinfo.xi_root, ':') != NULL)
-			flags |= NFS_BOOT_HAS_ROOTPATH;
-	}
-
 	nd->nd_myip.s_addr = ntohl(xcp.xcp_netinfo.xi_ip[0]);
 	nd->nd_gwip.s_addr = ntohl(xcp.xcp_netinfo.xi_ip[2]);
 	nd->nd_mask.s_addr = ntohl(xcp.xcp_netinfo.xi_ip[3]);
 
 	sin = (struct sockaddr_in *) &nd->nd_root.ndm_saddr;
-	memset((void *)sin, 0, sizeof(*sin));
+	memset((caddr_t)sin, 0, sizeof(*sin));
 	sin->sin_len = sizeof(*sin);
 	sin->sin_family = AF_INET;
 	sin->sin_addr.s_addr = ntohl(xcp.xcp_netinfo.xi_ip[1]);
 
-	if (nd->nd_myip.s_addr)
-		flags |= NFS_BOOT_HAS_MYIP;
-	if (nd->nd_gwip.s_addr)
-		flags |= NFS_BOOT_HAS_GWIP;
-	if (nd->nd_mask.s_addr)
-		flags |= NFS_BOOT_HAS_MASK;
-	if (sin->sin_addr.s_addr)
-		flags |= NFS_BOOT_HAS_SERVADDR;
-
-	return flags;
+	return (NFS_BOOTSTATIC_HAS_MYIP|NFS_BOOTSTATIC_HAS_GWIP|
+	    NFS_BOOTSTATIC_HAS_MASK|NFS_BOOTSTATIC_HAS_SERVADDR|
+	    NFS_BOOTSTATIC_HAS_SERVER);
 }
 #endif /* defined(NFS_BOOT_BOOTSTATIC) */
 

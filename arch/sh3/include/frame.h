@@ -1,4 +1,4 @@
-/*	$NetBSD: frame.h,v 1.19 2008/11/22 01:53:41 uwe Exp $	*/
+/*	$NetBSD: frame.h,v 1.14 2005/12/11 12:18:58 christos Exp $	*/
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc. All rights reserved.
@@ -76,6 +76,7 @@
 #define	_SH3_FRAME_H_
 
 #include <sys/signal.h>
+#include <sys/sa.h>
 
 /*
  * Exception Stack Frame
@@ -87,7 +88,6 @@ struct trapframe {
 	/* hardware registers */
 	int	tf_spc;
 	int	tf_ssr;
-	int	tf_gbr;
 	int	tf_macl;
 	int	tf_mach;
 	int	tf_pr;
@@ -113,18 +113,17 @@ struct trapframe {
  * Stack frame inside cpu_switch()
  */
 struct switchframe {
-	int	sf_gbr;
-	int	sf_sr;
-	int	sf_pr;
-	int	sf_r8;
-	int	sf_r9;
-	int	sf_r10;
-	int	sf_r11;
-	int	sf_r12;
-	int	sf_r13;
-	int	sf_r14;
 	int	sf_r15;
+	int	sf_r14;
+	int	sf_r13;
+	int	sf_r12;
+	int	sf_r11;
+	int	sf_r10;
+	int	sf_r9;
+	int	sf_r8;
+	int	sf_pr;
 	int	sf_r6_bank;
+	int	sf_sr;
 	int	sf_r7_bank;
 };
 
@@ -173,9 +172,5 @@ struct saframe {
 #endif
 	void *		sa_arg;
 };
-
-#ifdef _KERNEL
-void *getframe(const struct lwp *, int, int *);
-#endif
 
 #endif /* !_SH3_FRAME_H_ */

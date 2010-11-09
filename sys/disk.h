@@ -1,4 +1,4 @@
-/*	$NetBSD: disk.h,v 1.51 2008/04/28 20:24:10 martin Exp $	*/
+/*	$NetBSD: disk.h,v 1.46 2007/10/08 16:41:15 ad Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997, 2004 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -79,9 +86,7 @@
  * Disk device structures.
  */
 
-#ifdef _KERNEL
 #include <sys/device.h>
-#endif
 #include <sys/dkio.h>
 #include <sys/time.h>
 #include <sys/queue.h>
@@ -229,7 +234,6 @@ __link_set_add_data(dkwedge_methods, name ## _ddm)
 #define	DKW_PTYPE_CCD		"ccd"
 #define	DKW_PTYPE_APPLEUFS	"appleufs"
 #define	DKW_PTYPE_NTFS		"ntfs"
-#define	DKW_PTYPE_CGD		"cgd"
 
 /*
  * Disk geometry dictionary.
@@ -403,7 +407,7 @@ struct disk_geom {
 
 struct disk {
 	TAILQ_ENTRY(disk) dk_link;	/* link in global disklist */
-	const char	*dk_name;	/* disk name */
+	char		*dk_name;	/* disk name */
 	prop_dictionary_t dk_info;	/* reference to disk-info dictionary */
 	int		dk_bopenmask;	/* block devices open */
 	int		dk_copenmask;	/* character devices open */
@@ -418,7 +422,7 @@ struct disk {
 	 */
 	struct io_stats	*dk_stats;
 
-	const struct dkdriver *dk_driver;	/* pointer to driver */
+	struct	dkdriver *dk_driver;	/* pointer to driver */
 
 	/*
 	 * Information required to be the parent of a disk wedge.
@@ -498,7 +502,7 @@ struct proc;
 
 void	disk_attach(struct disk *);
 void	disk_detach(struct disk *);
-void	disk_init(struct disk *, const char *, const struct dkdriver *);
+void	disk_init(struct disk *, char *, struct dkdriver *);
 void	disk_destroy(struct disk *);
 void	disk_busy(struct disk *);
 void	disk_unbusy(struct disk *, long, int);

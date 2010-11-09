@@ -1,4 +1,4 @@
-/*	$NetBSD: installboot.c,v 1.15 2008/04/28 20:23:29 martin Exp $ */
+/*	$NetBSD: installboot.c,v 1.11 2005/12/11 12:18:19 christos Exp $ */
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -75,24 +82,25 @@ int32_t	*block_table;		/* block number array in prototype image */
 int	maxblocknum;		/* size of this array */
 
 
-char		*loadprotoblocks(char *, size_t *);
-int		loadblocknums(char *, int);
-static void	devread(int, void *, daddr_t, size_t, char *);
-static void	usage(void);
-int 		main(int, char *[]);
+char		*loadprotoblocks __P((char *, size_t *));
+int		loadblocknums __P((char *, int));
+static void	devread __P((int, void *, daddr_t, size_t, char *));
+static void	usage __P((void));
+int 		main __P((int, char *[]));
 
 
 static void
-usage(void)
+usage()
 {
-
 	fprintf(stderr,
-	    "usage: installboot [-n] [-v] [-h] <boot> <proto> <device>\n");
+		"usage: installboot [-n] [-v] [-h] <boot> <proto> <device>\n");
 	exit(1);
 }
 
 int
-main(int argc, char *argv[])
+main(argc, argv)
+	int argc;
+	char *argv[];
 {
 	int	c;
 	int	devfd;
@@ -176,7 +184,9 @@ main(int argc, char *argv[])
 }
 
 char *
-loadprotoblocks(char *fname, size_t *size)
+loadprotoblocks(fname, size)
+	char *fname;
+	size_t *size;
 {
 	int	fd;
 	u_long	marks[MARK_MAX], bp, offs;
@@ -205,10 +215,10 @@ loadprotoblocks(char *fname, size_t *size)
 	(void)close(fd);
 
 	/* Calculate the symbols' locations within the proto file */
-	block_size_p  =   (int *)(bp + (nl[X_BLOCK_SIZE ].n_value - offs));
-	block_count_p =   (int *)(bp + (nl[X_BLOCK_COUNT].n_value - offs));
+	block_size_p  =   (int *) (bp + (nl[X_BLOCK_SIZE ].n_value - offs));
+	block_count_p =   (int *) (bp + (nl[X_BLOCK_COUNT].n_value - offs));
 	/* XXX ondisk32 */
-	block_table = (int32_t *)(bp + (nl[X_BLOCK_TABLE].n_value - offs));
+	block_table = (int32_t *) (bp + (nl[X_BLOCK_TABLE].n_value - offs));
 	maxblocknum = *block_count_p;
 
 	if (verbose) {
@@ -218,7 +228,7 @@ loadprotoblocks(char *fname, size_t *size)
 			maxblocknum, nl[X_BLOCK_TABLE].n_value);
 	}
 
-	return (char *)bp;
+	return (char *) bp;
 
 	if (bp)
 		free((void *)bp);
@@ -226,9 +236,13 @@ loadprotoblocks(char *fname, size_t *size)
 }
 
 static void
-devread(int fd, void *buf, daddr_t blk, size_t size, char *msg)
+devread(fd, buf, blk, size, msg)
+	int	fd;
+	void	*buf;
+	daddr_t	blk;
+	size_t	size;
+	char	*msg;
 {
-
 	if (lseek(fd, dbtob(blk), SEEK_SET) != dbtob(blk))
 		err(1, "%s: devread: lseek", msg);
 
@@ -239,7 +253,9 @@ devread(int fd, void *buf, daddr_t blk, size_t size, char *msg)
 static char sblock[SBLOCKSIZE];
 
 int
-loadblocknums(char *boot, int devfd)
+loadblocknums(boot, devfd)
+char	*boot;
+int	devfd;
 {
 	int		i, fd;
 	struct	stat	statbuf;
@@ -264,10 +280,8 @@ loadblocknums(char *boot, int devfd)
 	if (fstatvfs(fd, &statvfsbuf) != 0)
 		err(1, "statfs: %s", boot);
 
-	if (strncmp(statvfsbuf.f_fstypename, "ffs",
-	    sizeof(statvfsbuf.f_fstypename)) &&
-	    strncmp(statvfsbuf.f_fstypename, "ufs",
-	    sizeof(statvfsbuf.f_fstypename))) {
+	if (strncmp(statvfsbuf.f_fstypename, "ffs", MFSNAMELEN) &&
+	    strncmp(statvfsbuf.f_fstypename, "ufs", MFSNAMELEN) ) {
 		errx(1, "%s: must be on an FFS filesystem", boot);
 	}
 
@@ -308,7 +322,7 @@ loadblocknums(char *boot, int devfd)
 	*block_size_p = fs->fs_bsize;
 	if (verbose)
 		printf("Will load %d blocks of size %d each.\n",
-		    ndb, fs->fs_bsize);
+			   ndb, fs->fs_bsize);
 
 	/*
 	 * Get the block numbers; we don't handle fragments
@@ -340,3 +354,4 @@ loadblocknums(char *boot, int devfd)
 
 	return 0;
 }
+

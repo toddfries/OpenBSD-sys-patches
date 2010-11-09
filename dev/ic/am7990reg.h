@@ -1,4 +1,4 @@
-/*	$NetBSD: am7990reg.h,v 1.13 2008/04/28 20:23:49 martin Exp $	*/
+/*	$NetBSD: am7990reg.h,v 1.11 2005/12/11 12:21:25 christos Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -77,7 +84,7 @@ struct lermd {
 #endif
 	int16_t	  rmd2;
 	u_int16_t rmd3;
-} __packed;
+} __attribute__((__packed__));
 
 /*
  * Transmit message descriptor
@@ -93,7 +100,7 @@ struct letmd {
 #endif
 	int16_t	  tmd2;
 	u_int16_t tmd3;
-} __packed;
+} __attribute__((__packed__));
 
 /*
  * Initialization block
@@ -107,7 +114,7 @@ struct leinit {
 	u_int16_t init_tdra;		/* +0x0014 */
 	u_int16_t init_tlen;		/* +0x0016 */
 	int16_t	  pad0[4];		/* Pad to 16 shorts */
-} __packed;
+} __attribute__((__packed__));
 
 /* Receive message descriptor 1 (rmd1_bits) */
 #define	LE_R1_OWN	0x80		/* LANCE owns the packet */

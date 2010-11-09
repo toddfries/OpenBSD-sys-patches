@@ -1,4 +1,4 @@
-/*	$NetBSD: hppa_machdep.c,v 1.15 2008/10/16 17:49:23 skrll Exp $	*/
+/*	$NetBSD: hppa_machdep.c,v 1.6 2006/10/25 11:06:02 skrll Exp $	*/
 
 /*-
  * Copyright (c) 1997 The NetBSD Foundation, Inc.
@@ -12,6 +12,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -27,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: hppa_machdep.c,v 1.15 2008/10/16 17:49:23 skrll Exp $");
+__KERNEL_RCSID(0, "$NetBSD: hppa_machdep.c,v 1.6 2006/10/25 11:06:02 skrll Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -37,7 +44,6 @@ __KERNEL_RCSID(0, "$NetBSD: hppa_machdep.c,v 1.15 2008/10/16 17:49:23 skrll Exp 
 #include <sys/user.h>
 #include <sys/proc.h>
 #include <sys/ras.h>
-#include <sys/cpu.h>
 
 #include <sys/kernel.h>
 
@@ -82,7 +88,6 @@ cpu_upcall(struct lwp *l, int type, int nevents, int ninterrupted,
 	   void *sas, void *ap, void *sp, sa_upcall_t upcall)
 {
 	struct saframe *sf, frame;
-	struct proc *p = l->l_proc;
 	struct trapframe *tf;
 	uintptr_t upva;
 	vaddr_t va;
@@ -100,7 +105,6 @@ cpu_upcall(struct lwp *l, int type, int nevents, int ninterrupted,
 	sf = (void *)(va - 32 - sizeof(frame));
 	if (copyout(&frame, sf, sizeof(frame)) != 0) {
 		/* Copying onto the stack didn't work. Die. */
-		mutex_enter(p->p_lock);
 		sigexit(l, SIGILL);
 		/* NOTREACHED */
 	}
@@ -114,15 +118,11 @@ cpu_upcall(struct lwp *l, int type, int nevents, int ninterrupted,
 		upva &= ~3;
 		if (copyin((void *)(upva + 4), &tf->tf_t4, 4)) {
 			printf("copyin t4 failed\n");
-			mutex_enter(p->p_lock);
 			sigexit(l, SIGILL);
-			/* NOTREACHED */
 		}
 		if (copyin((void *)upva, &upcall, 4)) {
 			printf("copyin upcall failed\n");
-			mutex_enter(p->p_lock);
 			sigexit(l, SIGILL);
-			/* NOTREACHED */
 		}
 	}
 
@@ -193,7 +193,7 @@ cpu_getmcontext(struct lwp *l, mcontext_t *mcp, unsigned int *flags)
 #endif
 
 	ras_pc = (__greg_t)ras_lookup(l->l_proc,
-	    (void *)(gr[_REG_PCOQH] & ~HPPA_PC_PRIV_MASK));
+	    (caddr_t)(gr[_REG_PCOQH] & ~HPPA_PC_PRIV_MASK));
 	if (ras_pc != -1) {
 		ras_pc |= HPPA_PC_PRIV_USER;
 		gr[_REG_PCOQH] = ras_pc;
@@ -323,12 +323,10 @@ cpu_setmcontext(struct lwp *l, const mcontext_t *mcp, unsigned int flags)
 			sizeof(l->l_addr->u_pcb.pcb_fpregs));
 	}
 
-	mutex_enter(p->p_lock);
 	if (flags & _UC_SETSTACK)
-		l->l_sigstk.ss_flags |= SS_ONSTACK;
+		l->l_proc->p_sigctx.ps_sigstk.ss_flags |= SS_ONSTACK;
 	if (flags & _UC_CLRSTACK)
-		l->l_sigstk.ss_flags &= ~SS_ONSTACK;
-	mutex_exit(p->p_lock);
+		l->l_proc->p_sigctx.ps_sigstk.ss_flags &= ~SS_ONSTACK;
 
 	return 0;
 }
@@ -346,25 +344,10 @@ hppa_ras(struct lwp *l)
 
 	p = l->l_proc;
 	tf = l->l_md.md_regs;
-	rasaddr = (intptr_t)ras_lookup(p, (void *)tf->tf_iioq_head);
+	rasaddr = (intptr_t)ras_lookup(p, (caddr_t)tf->tf_iioq_head);
 	if (rasaddr != -1) {
 		rasaddr |= HPPA_PC_PRIV_USER;
 		tf->tf_iioq_head = rasaddr;
 		tf->tf_iioq_tail = rasaddr + 4;
-	}
-}
-
-void
-cpu_need_resched(struct cpu_info *ci, int flags)
-{
-	bool immed = (flags & RESCHED_IMMED) != 0;
-
-	if (ci->ci_want_resched && !immed)
-		return;
-	ci->ci_want_resched = 1;
-
-        if (ci->ci_curlwp != ci->ci_data.cpu_idlelwp) {
-		/* aston(ci->ci_curlwp); */
-		setsoftast();
 	}
 }

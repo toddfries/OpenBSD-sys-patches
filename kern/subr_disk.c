@@ -1,4 +1,4 @@
-/*	$NetBSD: subr_disk.c,v 1.94 2009/01/22 14:38:35 yamt Exp $	*/
+/*	$NetBSD: subr_disk.c,v 1.89 2007/10/08 16:41:15 ad Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997, 1999, 2000 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -67,11 +74,11 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: subr_disk.c,v 1.94 2009/01/22 14:38:35 yamt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: subr_disk.c,v 1.89 2007/10/08 16:41:15 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
-#include <sys/kmem.h>
+#include <sys/malloc.h>
 #include <sys/buf.h>
 #include <sys/syslog.h>
 #include <sys/disklabel.h>
@@ -178,7 +185,7 @@ disk_find(const char *name)
 }
 
 void
-disk_init(struct disk *diskp, const char *name, const struct dkdriver *driver)
+disk_init(struct disk *diskp, char *name, struct dkdriver *driver)
 {
 
 	/*
@@ -202,13 +209,18 @@ disk_attach(struct disk *diskp)
 {
 
 	/*
-	 * Allocate and initialize the disklabel structures.
+	 * Allocate and initialize the disklabel structures.  Note that
+	 * it's not safe to sleep here, since we're probably going to be
+	 * called during autoconfiguration.
 	 */
-	diskp->dk_label = kmem_zalloc(sizeof(struct disklabel), KM_SLEEP);
-	diskp->dk_cpulabel = kmem_zalloc(sizeof(struct cpu_disklabel),
-	    KM_SLEEP);
+	diskp->dk_label = malloc(sizeof(struct disklabel), M_DEVBUF, M_NOWAIT);
+	diskp->dk_cpulabel = malloc(sizeof(struct cpu_disklabel), M_DEVBUF,
+	    M_NOWAIT);
 	if ((diskp->dk_label == NULL) || (diskp->dk_cpulabel == NULL))
 		panic("disk_attach: can't allocate storage for disklabel");
+
+	memset(diskp->dk_label, 0, sizeof(struct disklabel));
+	memset(diskp->dk_cpulabel, 0, sizeof(struct cpu_disklabel));
 
 	/*
 	 * Set up the stats collection.
@@ -239,8 +251,8 @@ disk_detach(struct disk *diskp)
 	/*
 	 * Free the space used by the disklabel structures.
 	 */
-	kmem_free(diskp->dk_label, sizeof(*diskp->dk_label));
-	kmem_free(diskp->dk_cpulabel, sizeof(*diskp->dk_cpulabel));
+	free(diskp->dk_label, M_DEVBUF);
+	free(diskp->dk_cpulabel, M_DEVBUF);
 }
 
 void
@@ -379,8 +391,7 @@ disk_read_sectors(void (*strat)(struct buf *), const struct disklabel *lp,
 {
 	bp->b_blkno = sector;
 	bp->b_bcount = count * lp->d_secsize;
-	bp->b_flags = (bp->b_flags & ~B_WRITE) | B_READ;
-	bp->b_oflags &= ~BO_DONE;
+	bp->b_flags = (bp->b_flags & ~(B_WRITE | B_DONE)) | B_READ;
 	bp->b_cylinder = sector / lp->d_secpercyl;
 	(*strat)(bp);
 	return biowait(bp);

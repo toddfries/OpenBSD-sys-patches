@@ -1,4 +1,4 @@
-/*      $NetBSD: scsi.c,v 1.10 2008/03/30 16:28:08 he Exp $        */
+/*      $NetBSD: scsi.c,v 1.6 2003/05/03 18:10:56 wiz Exp $        */
 /*
  * Copyright (c) 1994, 1997 Rolf Grossmann
  * All rights reserved.
@@ -53,7 +53,7 @@ int dma_done(void);
 
 void scsi_init(void);
 void scsierror(char *error);
-short scsi_getbyte(volatile uint8_t *sr);
+short scsi_getbyte(volatile caddr_t sr);
 int scsi_wait_for_intr(void);
 int scsiicmd(char target, char lun,
 	 u_char *cbuf, int clen, char *addr, int *len);
@@ -70,7 +70,7 @@ int scsiicmd(char target, char lun,
 void
 scsi_init(void)
 {
-    volatile uint8_t *sr;
+    volatile caddr_t sr;
     struct dma_dev *dma;
 
     sr = P_SCSI;
@@ -123,7 +123,7 @@ scsierror(char *error)
 }
 
 short
-scsi_getbyte(volatile uint8_t *sr)
+scsi_getbyte(volatile caddr_t sr)
 {
     if ((sr[NCR_FFLAG] & NCRFIFO_FF) == 0) 
     {
@@ -165,7 +165,7 @@ scsiicmd(char target, char lun,
 	 u_char *cbuf, int clen,
 	 char *addr, int *len)
 {
-    volatile uint8_t *sr;
+    volatile caddr_t sr;
     int i;
 
     DPRINTF(("scsiicmd: [%x, %d] -> %d (%lx, %d)\n",*cbuf, clen,
@@ -314,7 +314,7 @@ scsiicmd(char target, char lun,
 int
 scsi_msgin(void)
 {
-    volatile uint8_t *sr;
+    volatile caddr_t sr;
     u_char msg;
 
     sr = P_SCSI;
@@ -338,7 +338,7 @@ scsi_msgin(void)
 int
 dma_start(char *addr, int len)
 {
-    volatile uint8_t *sr;
+    volatile caddr_t sr;
     struct dma_dev *dma;
     
     
@@ -401,7 +401,7 @@ dma_start(char *addr, int len)
 int
 dma_done(void)
 {
-    volatile uint8_t *sr;
+    volatile caddr_t sr;
     struct dma_dev *dma;
     int resid, state;
     int flushcount = 0;
@@ -461,7 +461,7 @@ dma_done(void)
     sc->dma_len -= resid;
     if (sc->dma_len < 0)
 	    sc->dma_len = 0;
-    memcpy(sc->dma_addr, dma_buffer, sc->dma_len);
+    bcopy(dma_buffer, sc->dma_addr, sc->dma_len);
     sc->sc_state = SCSI_HASBUS;
     DPRINTF(("DMA done. got %d.\n", sc->dma_len));
     return sc->dma_len;

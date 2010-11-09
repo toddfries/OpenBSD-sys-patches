@@ -1,4 +1,4 @@
-/*	$NetBSD: ast.c,v 1.17 2008/12/19 15:20:10 njoly Exp $	*/
+/*	$NetBSD: ast.c,v 1.7 2005/12/11 12:16:41 christos Exp $	*/
 
 /*
  * Copyright (c) 1994,1995 Mark Brinicombe
@@ -41,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ast.c,v 1.17 2008/12/19 15:20:10 njoly Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ast.c,v 1.7 2005/12/11 12:16:41 christos Exp $");
 
 #include "opt_ddb.h"
 
@@ -52,11 +52,13 @@ __KERNEL_RCSID(0, "$NetBSD: ast.c,v 1.17 2008/12/19 15:20:10 njoly Exp $");
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/signal.h>
+#include <sys/savar.h>
 #include <sys/vmmeter.h>
 #include <sys/userret.h>
 
 #include <machine/cpu.h>
 #include <machine/frame.h>
+#include <machine/cpu.h>
 
 #include <arm/cpufunc.h>
 
@@ -69,17 +71,19 @@ __KERNEL_RCSID(0, "$NetBSD: ast.c,v 1.17 2008/12/19 15:20:10 njoly Exp $");
 /*
  * Prototypes
  */
-void ast(struct trapframe *);
+void ast __P((struct trapframe *));
  
+int want_resched = 0;
+int astpending;
+
 void
 userret(struct lwp *l)
 {
+
 	/* Invoke MI userret code */
 	mi_userret(l);
 
-#ifdef __PROG32
-	KASSERT((l->l_addr->u_pcb.pcb_tf->tf_spsr & IF32_bits) == 0);
-#endif
+	curcpu()->ci_schedstate.spc_curpriority = l->l_priority = l->l_usrpri;
 }
 
 
@@ -103,32 +107,28 @@ ast(struct trapframe *tf)
 	/* Interrupts were restored by exception_exit. */
 #endif
 
-#ifdef __PROG32
-	KASSERT((tf->tf_spsr & IF32_bits) == 0);
-#endif
-
-
 	uvmexp.traps++;
 	uvmexp.softs++;
 
 #ifdef DEBUG
-	KDASSERT(curcpu()->ci_cpl == IPL_NONE);
 	if (l == NULL)
 		panic("ast: no curlwp!");
-	if (&l->l_addr->u_pcb == NULL)
+	if (&l->l_addr->u_pcb == 0)
 		panic("ast: no pcb!");
 #endif	
 
 	p = l->l_proc;
 
-	if (l->l_pflag & LP_OWEUPC) {
-		l->l_pflag &= ~LP_OWEUPC;
-		ADDUPROF(l);
+	if (p->p_flag & P_OWEUPC) {
+		p->p_flag &= ~P_OWEUPC;
+		ADDUPROF(p);
 	}
 
 	/* Allow a forced task switch. */
-	if (l->l_cpu->ci_want_resched)
-		preempt();
+	if (want_resched)
+		preempt(0);
 
 	userret(l);
 }
+
+/* End of ast.c */

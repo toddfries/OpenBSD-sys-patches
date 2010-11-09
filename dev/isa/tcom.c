@@ -1,4 +1,4 @@
-/*	$NetBSD: tcom.c,v 1.17 2008/09/28 15:39:40 martin Exp $	*/
+/*	$NetBSD: tcom.c,v 1.14 2007/10/19 12:00:23 ad Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -70,7 +77,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: tcom.c,v 1.17 2008/09/28 15:39:40 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: tcom.c,v 1.14 2007/10/19 12:00:23 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -91,27 +98,28 @@ __KERNEL_RCSID(0, "$NetBSD: tcom.c,v 1.17 2008/09/28 15:39:40 martin Exp $");
 #define	STATUS_SIZE	8		/* 8 bytes reserved for irq status */
 
 struct tcom_softc {
-	device_t sc_dev;
+	struct device sc_dev;
 	void *sc_ih;
 
 	bus_space_tag_t sc_iot;
 	int sc_iobase;
 
 	int sc_alive;			/* mask of slave units attached */
-	void *sc_slaves[NSLAVES];	/* com device softc pointers */
+	void *sc_slaves[NSLAVES];	/* com device unit numbers */
 	bus_space_handle_t sc_slaveioh[NSLAVES];
 	bus_space_handle_t sc_statusioh;
 };
 
-int tcomprobe(struct device *, cfdata_t, void *);
-void tcomattach(struct device *, device_t, void *);
+int tcomprobe(struct device *, struct cfdata *, void *);
+void tcomattach(struct device *, struct device *, void *);
 int tcomintr(void *);
 
-CFATTACH_DECL_NEW(tcom, sizeof(struct tcom_softc),
+CFATTACH_DECL(tcom, sizeof(struct tcom_softc),
     tcomprobe, tcomattach, NULL, NULL);
 
 int
-tcomprobe(struct device *parent, cfdata_t self, void *aux)
+tcomprobe(struct device *parent, struct cfdata *self,
+    void *aux)
 {
 	struct isa_attach_args *ia = aux;
 	bus_space_tag_t iot = ia->ia_iot;
@@ -180,18 +188,16 @@ out:
 }
 
 void
-tcomattach(struct device *parent, device_t self, void *aux)
+tcomattach(struct device *parent, struct device *self, void *aux)
 {
-	struct tcom_softc *sc = device_private(self);
+	struct tcom_softc *sc = (void *)self;
 	struct isa_attach_args *ia = aux;
 	struct commulti_attach_args ca;
 	bus_space_tag_t iot = ia->ia_iot;
 	int i, iobase;
-	device_t slave;
 
 	printf("\n");
 
-	sc->sc_dev = self;
 	sc->sc_iot = ia->ia_iot;
 	sc->sc_iobase = ia->ia_io[0].ir_addr;
 
@@ -200,14 +206,15 @@ tcomattach(struct device *parent, device_t self, void *aux)
 		if (!com_is_console(iot, iobase, &sc->sc_slaveioh[i]) &&
 		    bus_space_map(iot, iobase, COM_NPORTS, 0,
 			&sc->sc_slaveioh[i])) {
-			aprint_error_dev(sc->sc_dev, "can't map i/o space for slave %d\n", i);
+			printf("%s: can't map i/o space for slave %d\n",
+			     sc->sc_dev.dv_xname, i);
 			return;
 		}
 	}
 
 	if (bus_space_map(iot, sc->sc_iobase + STATUS_OFFSET, STATUS_SIZE, 0,
 	    &sc->sc_statusioh)) {
-		aprint_error_dev(sc->sc_dev, "can't map status space\n");
+		printf("%s: can't map status space\n", sc->sc_dev.dv_xname);
 		return;
 	}
 
@@ -218,11 +225,9 @@ tcomattach(struct device *parent, device_t self, void *aux)
 		ca.ca_iobase = sc->sc_iobase + i * COM_NPORTS;
 		ca.ca_noien = 0;
 
-		slave = config_found(self, &ca, commultiprint);
-		if (slave != NULL) {
+		sc->sc_slaves[i] = config_found(self, &ca, commultiprint);
+		if (sc->sc_slaves[i] != NULL)
 			sc->sc_alive |= 1 << i;
-			sc->sc_slaves[i] = device_private(slave);
-		}
 	}
 
 	sc->sc_ih = isa_intr_establish(ia->ia_ic, ia->ia_irq[0].ir_irq,

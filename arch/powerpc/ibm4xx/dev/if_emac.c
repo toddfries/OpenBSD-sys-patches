@@ -1,4 +1,4 @@
-/*	$NetBSD: if_emac.c,v 1.33 2008/07/08 17:32:56 kiyohara Exp $	*/
+/*	$NetBSD: if_emac.c,v 1.27 2006/10/16 18:14:35 kiyohara Exp $	*/
 
 /*
  * Copyright 2001, 2002 Wasabi Systems, Inc.
@@ -36,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_emac.c,v 1.33 2008/07/08 17:32:56 kiyohara Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_emac.c,v 1.27 2006/10/16 18:14:35 kiyohara Exp $");
 
 #include "bpfilter.h"
 
@@ -252,7 +252,7 @@ static void	emac_attach(struct device *, struct device *, void *);
 
 static int	emac_add_rxbuf(struct emac_softc *, int);
 static int	emac_init(struct ifnet *);
-static int	emac_ioctl(struct ifnet *, u_long, void *);
+static int	emac_ioctl(struct ifnet *, u_long, caddr_t);
 static void	emac_reset(struct emac_softc *);
 static void	emac_rxdrain(struct emac_softc *);
 static int	emac_txreap(struct emac_softc *);
@@ -270,6 +270,8 @@ static int	emac_txde_intr(void *);
 static int	emac_rxde_intr(void *);
 static int	emac_intr(void *);
 
+static int	emac_mediachange(struct ifnet *);
+static void	emac_mediastatus(struct ifnet *, struct ifmediareq *);
 static int	emac_mii_readreg(struct device *, int, int);
 static void	emac_mii_statchg(struct device *);
 static void	emac_mii_tick(void *);
@@ -311,8 +313,6 @@ emac_attach(struct device *parent, struct device *self, void *aux)
 
 	printf(": 405GP EMAC\n");
 
-	callout_init(&sc->sc_callout, 0);
-
 	/*
 	 * Set up Mode Register 1 - set receive and transmit FIFOs to maximum
 	 * size, allow transmit of multiple packets (only channel 0 is used).
@@ -343,7 +343,7 @@ emac_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	if ((error = bus_dmamem_map(sc->sc_dmat, &seg, nseg,
-	    sizeof(struct emac_control_data), (void **)&sc->sc_control_data,
+	    sizeof(struct emac_control_data), (caddr_t *)&sc->sc_control_data,
 	    BUS_DMA_COHERENT)) != 0) {
 		printf("%s: unable to map control data, error = %d\n",
 		    sc->sc_dev.dv_xname, error);
@@ -419,8 +419,8 @@ emac_attach(struct device *parent, struct device *self, void *aux)
 	mii->mii_writereg = emac_mii_writereg;
 	mii->mii_statchg = emac_mii_statchg;
 
-	sc->sc_ethercom.ec_mii = mii;
-	ifmedia_init(&mii->mii_media, 0, ether_mediachange, ether_mediastatus);
+	ifmedia_init(&mii->mii_media, 0, emac_mediachange,
+	    emac_mediastatus);
 	mii_attach(&sc->sc_dev, mii, 0xffffffff,
 	    MII_PHY_ANY, MII_OFFSET_ANY, 0);
 	if (LIST_FIRST(&mii->mii_phys) == NULL) {
@@ -512,7 +512,7 @@ fail_4:
 fail_3:
 	bus_dmamap_destroy(sc->sc_dmat, sc->sc_cddmamap);
 fail_2:
-	bus_dmamem_unmap(sc->sc_dmat, (void *)sc->sc_control_data,
+	bus_dmamem_unmap(sc->sc_dmat, (caddr_t)sc->sc_control_data,
 	    sizeof(struct emac_control_data));
 fail_1:
 	bus_dmamem_free(sc->sc_dmat, &seg, nseg);
@@ -721,7 +721,7 @@ emac_init(struct ifnet *ifp)
 {
 	struct emac_softc *sc = ifp->if_softc;
 	struct emac_rxsoft *rxs;
-	const uint8_t *enaddr = CLLADDR(ifp->if_sadl);
+	uint8_t *enaddr = LLADDR(ifp->if_sadl);
 	int error, i;
 
 	error = 0;
@@ -778,8 +778,7 @@ emac_init(struct ifnet *ifp)
 	/*
 	 * Set the current media.
 	 */
-	if ((error = ether_mediachange(ifp)) != 0)
-		goto out;
+	mii_mediachg(&sc->sc_mii);
 
 	/*
 	 * Give the transmit and receive rings to the MAL.
@@ -1011,23 +1010,33 @@ emac_stop(struct ifnet *ifp, int disable)
 
 /* ifnet interface function */
 static int
-emac_ioctl(struct ifnet *ifp, u_long cmd, void *data)
+emac_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	struct emac_softc *sc = ifp->if_softc;
+	struct ifreq *ifr = (struct ifreq *)data;
 	int s, error;
 
 	s = splnet();
 
-	error = ether_ioctl(ifp, cmd, data);
-	if (error == ENETRESET) { 
-		/*
-		 * Multicast list has changed; set the hardware filter
-		 * accordingly.
-		 */
-		if (ifp->if_flags & IFF_RUNNING)
-			error = emac_set_filter(sc);
-		else
-			error = 0;
+	switch (cmd) {
+	case SIOCSIFMEDIA:
+	case SIOCGIFMEDIA:
+		error = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media, cmd);
+		break;
+
+	default:
+		error = ether_ioctl(ifp, cmd, data);
+		if (error == ENETRESET) { 
+			/*
+			 * Multicast list has changed; set the hardware filter
+			 * accordingly.
+			 */
+			if (ifp->if_flags & IFF_RUNNING)
+				error = emac_set_filter(sc);
+			else
+				error = 0;
+		}
+		break;
 	}
 
 	/* try to get more packets going */
@@ -1358,8 +1367,8 @@ emac_rxeob_intr(void *arg)
 			MGETHDR(m, M_DONTWAIT, MT_DATA);
 			if (m == NULL)
 				goto dropit;
-			memcpy(mtod(m, void *),
-			    mtod(rxs->rxs_mbuf, void *), len);
+			memcpy(mtod(m, caddr_t),
+			    mtod(rxs->rxs_mbuf, caddr_t), len);
 			EMAC_INIT_RXDESC(sc, i);
 			bus_dmamap_sync(sc->sc_dmat, rxs->rxs_dmamap, 0,
 			    rxs->rxs_dmamap->dm_mapsize,
@@ -1554,4 +1563,27 @@ emac_mii_tick(void *arg)
 	splx(s);
 
 	callout_reset(&sc->sc_callout, hz, emac_mii_tick, sc);
+}
+
+/* ifmedia interface function */
+static void
+emac_mediastatus(struct ifnet *ifp, struct ifmediareq *ifmr)
+{
+	struct emac_softc *sc = ifp->if_softc;
+
+	mii_pollstat(&sc->sc_mii);
+
+	ifmr->ifm_status = sc->sc_mii.mii_media_status;
+	ifmr->ifm_active = sc->sc_mii.mii_media_active;
+}
+
+/* ifmedia interface function */
+static int
+emac_mediachange(struct ifnet *ifp)
+{
+	struct emac_softc *sc = ifp->if_softc;
+
+	if (ifp->if_flags & IFF_UP)
+		mii_mediachg(&sc->sc_mii);
+	return (0);
 }

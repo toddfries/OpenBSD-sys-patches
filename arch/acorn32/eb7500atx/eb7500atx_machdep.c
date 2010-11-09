@@ -1,4 +1,4 @@
-/*	$NetBSD: eb7500atx_machdep.c,v 1.14 2009/02/13 22:41:00 apb Exp $	*/
+/*	$NetBSD: eb7500atx_machdep.c,v 1.19 2009/12/28 03:22:19 uebayasi Exp $	*/
 
 /*
  * Copyright (c) 2000-2002 Reinoud Zandijk.
@@ -55,7 +55,7 @@
 
 #include <sys/param.h>
 
-__KERNEL_RCSID(0, "$NetBSD: eb7500atx_machdep.c,v 1.14 2009/02/13 22:41:00 apb Exp $");
+__KERNEL_RCSID(0, "$NetBSD: eb7500atx_machdep.c,v 1.19 2009/12/28 03:22:19 uebayasi Exp $");
 
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -63,6 +63,7 @@ __KERNEL_RCSID(0, "$NetBSD: eb7500atx_machdep.c,v 1.14 2009/02/13 22:41:00 apb E
 #include <sys/proc.h>
 #include <sys/msgbuf.h>
 #include <sys/exec.h>
+#include <sys/exec_aout.h>
 #include <sys/ksyms.h>
 
 #include <dev/cons.h>
@@ -120,7 +121,6 @@ __KERNEL_RCSID(0, "$NetBSD: eb7500atx_machdep.c,v 1.14 2009/02/13 22:41:00 apb E
  */
 u_int cpu_reset_address = 0x0; /* XXX 0x3800000 too for rev0 RiscPC 600 */
 
-
 #define VERBOSE_INIT_ARM
 
 
@@ -148,7 +148,6 @@ paddr_t dma_range_begin;
 paddr_t dma_range_end;
 
 u_int free_pages;
-int physmem = 0;
 paddr_t memoryblock_end;
 
 #ifndef PMAP_STATIC_L1S
@@ -183,7 +182,6 @@ extern int pmap_debug_level;
 
 pv_addr_t kernel_pt_table[NUM_KERNEL_PTS];
 
-struct user *proc0paddr;
 
 #ifdef CPU_SA110
 #define CPU_SA110_CACHE_CLEAN_SIZE (0x4000 * 2)
@@ -763,12 +761,12 @@ initarm(void *cookie)
 #ifdef VERBOSE_INIT_ARM
 	printf("switching to new L1 page table\n");
 #endif
-	setttb(kernel_l1pt.pv_pa);
+	cpu_setttb(kernel_l1pt.pv_pa);
 
 	/*
 	 * We must now clean the cache again....
 	 * Cleaning may be done by reading new data to displace any
-	 * dirty data in the cache. This will have happened in setttb()
+	 * dirty data in the cache. This will have happened in cpu_setttb()
 	 * but since we are boot strapping the addresses used for the read
 	 * may have just been remapped and thus the cache could be out
 	 * of sync. A re-clean after the switch will cure this.
@@ -783,8 +781,7 @@ initarm(void *cookie)
 	 * Moved from cpu_startup() as data_abort_handler() references
 	 * this during uvm init
 	 */
-	proc0paddr = (struct user *)kernelstack.pv_va;
-	lwp0.l_addr = proc0paddr;
+	uvm_lwp_setuarea(&lwp0, kernelstack.pv_va);
 
 	/* 
 	 * if there is support for a serial console ...we should now

@@ -1,4 +1,4 @@
-/*	$NetBSD: ofdev.c,v 1.16 2009/01/12 07:49:57 tsutsui Exp $	*/
+/*	$NetBSD: ofdev.c,v 1.14 2006/06/28 22:22:50 he Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996 Wolfgang Solfrank.
@@ -317,7 +317,6 @@ devopen(struct open_file *of, const char *name, char **file)
 
 		strcat(fname, ":0");
 	}
-	DPRINTF("calling OF_open(fname=%s)\n", fname);
 	if ((handle = OF_open(fname)) == -1)
 		return ENXIO;
 	memset(&ofdev, 0, sizeof ofdev);
@@ -354,12 +353,6 @@ devopen(struct open_file *of, const char *name, char **file)
 		} else {
 			part = partition ? partition - 'a' : 0;
 			ofdev.partoff = label.d_partitions[part].p_offset;
-			if (label.d_partitions[part].p_fstype == FS_RAID) {
-#define RF_PROTECTED_SECTORS 64
-				ofdev.partoff += RF_PROTECTED_SECTORS;
-				DPRINTF("devopen: found RAID partition, "
-				    "adjusting offset to %lx\n", ofdev.partoff);
-			}
 		}
 
 		of->f_dev = devsw;

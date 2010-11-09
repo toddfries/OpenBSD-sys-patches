@@ -1,4 +1,4 @@
-/* $NetBSD: isp_netbsd.h,v 1.66 2008/05/11 02:08:11 mjacob Exp $ */
+/* $NetBSD: isp_netbsd.h,v 1.63 2007/10/19 11:59:54 ad Exp $ */
 /*
  * NetBSD Specific definitions for the Qlogic ISP Host Adapter
  */
@@ -56,8 +56,6 @@
 #include <dev/scsipi/scsi_message.h>
 #include <dev/scsipi/scsipi_debug.h>
 
-#include <machine/stdarg.h>
-
 #include "opt_isp.h"
 
 /*
@@ -69,13 +67,14 @@
 #define	ISP_SBUS_SUPPORTED	0
 #endif
 
-#define	ISP_PLATFORM_VERSION_MAJOR	4
+#define	ISP_PLATFORM_VERSION_MAJOR	3
 #define	ISP_PLATFORM_VERSION_MINOR	0
 
 struct isposinfo {
-	struct device		dev;
-	struct scsipi_adapter   adapter;
-	struct scsipi_channel * chan;
+	struct device		_dev;
+	struct scsipi_channel	_chan;
+	struct scsipi_channel	_chan_b;
+	struct scsipi_adapter   _adapter;
 	bus_dma_tag_t		dmatag;
 	bus_dmamap_t		rqdmap;
 	bus_dmamap_t		rsdmap;
@@ -99,9 +98,12 @@ struct isposinfo {
 		blocked		: 1;
 	struct callout		ldt;	/* loop down timer */
 	struct callout		gdt;	/* gone device timer */
-	uint64_t		wwn;
-	uint16_t		framesize;
-	uint16_t		exec_throttle;
+	union {
+		uint64_t	_wwn;
+		uint16_t	_discovered[2];
+#define	wwn_seed	un._wwn
+#define	discovered	un._discovered
+	} un;
 	struct lwp *		thread;
 };
 #define	isp_dmatag		isp_osinfo.dmatag
@@ -116,7 +118,7 @@ struct isposinfo {
  * Required Macros/Defines
  */
 
-#define	ISP_FC_SCRLEN		0x1000
+#define	ISP2100_SCRLEN		0x1000
 
 #define	MEMZERO(dst, amt)	memset((dst), 0, (amt))
 #define	MEMCPY(dst, src, amt)	memcpy((dst), (src), (amt))
@@ -176,8 +178,8 @@ default:							\
 #define	MBOX_NOTIFY_COMPLETE	isp_mbox_notify_done
 #define	MBOX_RELEASE		isp_mbox_release
 
-#define	FC_SCRATCH_ACQUIRE(isp, chan)	0
-#define	FC_SCRATCH_RELEASE(isp, chan)	do { } while (0)
+#define	FC_SCRATCH_ACQUIRE(isp)
+#define	FC_SCRATCH_RELEASE(isp)
 
 #ifndef	SCSI_GOOD
 #define	SCSI_GOOD	0x0
@@ -241,20 +243,12 @@ default:							\
 
 #define	XS_SET_STATE_STAT(a, b, c)
 
-#define	DEFAULT_FRAMESIZE(isp)		(isp)->isp_osinfo.framesize
-#define	DEFAULT_EXEC_THROTTLE(isp)	(isp)->isp_osinfo.exec_throttle
-#define	GET_DEFAULT_ROLE(isp, chan)	ISP_ROLE_INITIATOR
-#define	SET_DEFAULT_ROLE(isp, chan)	do { } while (0)
-#define	DEFAULT_IID(x, chan)		7
-#define	DEFAULT_LOOPID(x, chan)		108
-#define	DEFAULT_NODEWWN(isp, chan)	(isp)->isp_osinfo.wwn
-#define	DEFAULT_PORTWWN(isp, chan)	(isp)->isp_osinfo.wwn
-#define	ACTIVE_NODEWWN(isp, chan)				\
-	(isp)->isp_osinfo.wwn? (isp)->isp_osinfo.wwn :	\
-	FCPARAM(isp, chan)->isp_wwnn_nvram
-#define	ACTIVE_PORTWWN(isp, chan)				\
-	(isp)->isp_osinfo.wwn? (isp)->isp_osinfo.wwn :	\
-	FCPARAM(isp, chan)->isp_wwpn_nvram
+#define	DEFAULT_IID(x)		7
+#define	DEFAULT_LOOPID(x)	108
+#define	DEFAULT_NODEWWN(isp)	(isp)->isp_osinfo.un._wwn
+#define	DEFAULT_PORTWWN(isp)	(isp)->isp_osinfo.un._wwn
+#define	ISP_NODEWWN(isp)	FCPARAM(isp)->isp_wwnn_nvram
+#define	ISP_PORTWWN(isp)	FCPARAM(isp)->isp_wwpn_nvram
 
 #if	_BYTE_ORDER == _BIG_ENDIAN
 #ifdef	ISP_SBUS_SUPPORTED
@@ -324,7 +318,10 @@ default:							\
 /*
  * isp_osinfo definitions, extensions and shorthand.
  */
-#define	isp_unit	isp_osinfo.dev.dv_unit
+#define	isp_name	isp_osinfo._dev.dv_xname
+#define	isp_unit	isp_osinfo._dev.dv_unit
+#define	isp_chanA	isp_osinfo._chan
+#define	isp_chanB	isp_osinfo._chan_b
 
 
 /*

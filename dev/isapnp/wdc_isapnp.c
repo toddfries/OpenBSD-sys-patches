@@ -1,4 +1,4 @@
-/*	$NetBSD: wdc_isapnp.c,v 1.39 2008/04/28 20:23:53 martin Exp $	*/
+/*	$NetBSD: wdc_isapnp.c,v 1.37 2007/10/19 12:00:33 ad Exp $	*/
 
 /*-
  * Copyright (c) 1998, 2003 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: wdc_isapnp.c,v 1.39 2008/04/28 20:23:53 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: wdc_isapnp.c,v 1.37 2007/10/19 12:00:33 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -62,10 +69,10 @@ struct wdc_isapnp_softc {
 	int	sc_drq;
 };
 
-static int	wdc_isapnp_probe(device_t, cfdata_t, void *);
-static void	wdc_isapnp_attach(device_t, device_t, void *);
+static int	wdc_isapnp_probe(struct device *, struct cfdata *, void *);
+static void	wdc_isapnp_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(wdc_isapnp, sizeof(struct wdc_isapnp_softc),
+CFATTACH_DECL(wdc_isapnp, sizeof(struct wdc_isapnp_softc),
     wdc_isapnp_probe, wdc_isapnp_attach, NULL, NULL);
 
 #ifdef notyet
@@ -75,7 +82,8 @@ static void	wdc_isapnp_dma_finish(void *);
 #endif
 
 static int
-wdc_isapnp_probe(device_t parent, cfdata_t match, void *aux)
+wdc_isapnp_probe(struct device *parent, struct cfdata *match,
+    void *aux)
 {
 	int pri, variant;
 
@@ -86,7 +94,8 @@ wdc_isapnp_probe(device_t parent, cfdata_t match, void *aux)
 }
 
 static void
-wdc_isapnp_attach(device_t parent, device_t self, void *aux)
+wdc_isapnp_attach(struct device *parent, struct device *self,
+    void *aux)
 {
 	struct wdc_isapnp_softc *sc = device_private(self);
 	struct wdc_regs *wdr;
@@ -98,18 +107,17 @@ wdc_isapnp_attach(device_t parent, device_t self, void *aux)
 	    ipa->ipa_nmem32 != 0 ||
 	    ipa->ipa_nirq != 1 ||
 	    ipa->ipa_ndrq > 1) {
-		aprint_error(": unexpected configuration\n");
+		printf(": unexpected configuration\n");
 		return;
 	}
 
 	if (isapnp_config(ipa->ipa_iot, ipa->ipa_memt, ipa)) {
-		aprint_error(": couldn't map registers\n");
+		printf(": couldn't map registers\n");
 		return;
 	}
 
-	aprint_normal(": %s %s\n", ipa->ipa_devident, ipa->ipa_devclass);
+	printf(": %s %s\n", ipa->ipa_devident, ipa->ipa_devclass);
 
-	sc->sc_wdcdev.sc_atac.atac_dev = self;
 	sc->sc_wdcdev.regs = wdr = &sc->wdc_regs;
 	wdr->cmd_iot = ipa->ipa_iot;
 	wdr->ctl_iot = ipa->ipa_iot;
@@ -130,7 +138,7 @@ wdc_isapnp_attach(device_t parent, device_t self, void *aux)
 		if (bus_space_subregion(wdr->cmd_iot,
 		    wdr->cmd_baseioh, i, i == 0 ? 4 : 1,
 		    &wdr->cmd_iohs[i]) != 0) {
-			aprint_error(": couldn't subregion registers\n");
+			printf(": couldn't subregion registers\n");
 			return;
 		}
 	}
@@ -173,8 +181,8 @@ wdc_isapnp_dma_setup(struct wdc_isapnp_softc *sc)
 
 	if (isa_dmamap_create(sc->sc_ic, sc->sc_drq,
 	    MAXPHYS, BUS_DMA_NOWAIT|BUS_DMA_ALLOCNOW)) {
-		aprint_error_dev(sc->sc_wdcdev.sc_atac.atac_dev,
-		    "can't create map for drq %d\n", sc->sc_drq);
+		printf("%s: can't create map for drq %d\n",
+		    sc->sc_wdcdev.sc_dev.dv_xname, sc->sc_drq);
 		sc->sc_wdcdev.sc_atac.atac_cap &= ~ATAC_CAP_DMA;
 	}
 }

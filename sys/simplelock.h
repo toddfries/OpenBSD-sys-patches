@@ -1,4 +1,4 @@
-/*	$NetBSD: simplelock.h,v 1.8 2008/04/28 20:24:11 martin Exp $	*/
+/*	$NetBSD: simplelock.h,v 1.5 2007/10/11 19:49:04 ad Exp $	*/
 
 /*-
  * Copyright (c) 1999, 2000, 2006, 2007 The NetBSD Foundation, Inc.
@@ -19,6 +19,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -95,6 +102,13 @@ struct simplelock {
 #endif
 };
 
+/*
+ * Indicator that no process/cpu holds exclusive lock
+ */
+#define	LK_KERNPROC	((pid_t) -2)
+#define	LK_NOPROC	((pid_t) -1)
+#define	LK_NOCPU	((cpuid_t) -1)
+
 #define	SIMPLELOCK_INITIALIZER	{ .lock_data = __SIMPLELOCK_UNLOCKED }
 
 #ifdef _KERNEL
@@ -115,6 +129,16 @@ do {					\
 #define	simple_lock_held(alp)	1
 #define	simple_lock_try(alp)	1
 #define	simple_unlock(alp)	simple_lock_nothing(alp)
+#endif
+
+#define	simple_lock_only_held(x,y)			/* nothing */
+#define simple_lock_assert_locked(alp,lockname)		/* nothing */
+#define simple_lock_assert_unlocked(alp,lockname)	/* nothing */
+
+#ifdef LOCKDEBUG
+#define	LOCK_ASSERT(x)		KASSERT(x)
+#else
+#define	LOCK_ASSERT(x)		/* nothing */
 #endif
 
 #endif	/* _KERNEL */

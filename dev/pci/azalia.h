@@ -1,4 +1,4 @@
-/*	$NetBSD: azalia.h,v 1.20 2008/08/14 23:43:27 jmcneill Exp $	*/
+/*	$NetBSD: azalia.h,v 1.17 2007/05/13 03:30:46 kent Exp $	*/
 
 /*-
  * Copyright (c) 2005 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -531,15 +538,6 @@ typedef struct {
 					 (nid >= (codec)->wstart &&   \
 					  nid < (codec)->wend))
 
-#define PIN_STATUS(wid, conn)						\
-	do {								\
-		if ((wid)->type != COP_AWTYPE_PIN_COMPLEX)		\
-			(conn) = 0;					\
-		else							\
-			(conn) =					\
-			    ((wid)->d.pin.config & CORB_CD_PORT_MASK) >> 30; \
-	} while (0)
-
 typedef struct {
 	int nconv;
 	nid_t conv[HDA_MAX_CHANNELS]; /* front, surround, clfe, side, ... */
@@ -560,7 +558,7 @@ typedef struct codec_t {
 	int (*get_port)(struct codec_t *, mixer_ctrl_t *);
 	int (*unsol_event)(struct codec_t *, int);
 
-	device_t dev; 		/* parent azalia(4) instance */
+	struct azalia_t *az;
 	uint32_t vid;		/* codec vendor/device ID */
 	uint32_t subid;		/* PCI subvendor/device ID */
 	const char *name;

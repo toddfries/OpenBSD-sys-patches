@@ -1,4 +1,4 @@
-/*	$NetBSD: ibcs2_exec_xout.c,v 1.18 2007/12/08 18:36:01 dsl Exp $	*/
+/*	$NetBSD: ibcs2_exec_xout.c,v 1.13 2006/07/23 22:06:08 ad Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995, 1998 Scott Bartram
@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ibcs2_exec_xout.c,v 1.18 2007/12/08 18:36:01 dsl Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ibcs2_exec_xout.c,v 1.13 2006/07/23 22:06:08 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -49,9 +49,10 @@ __KERNEL_RCSID(0, "$NetBSD: ibcs2_exec_xout.c,v 1.18 2007/12/08 18:36:01 dsl Exp
 #include <sys/resourcevar.h>
 
 #include <sys/mman.h>
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 
-#include <sys/cpu.h>
+#include <machine/cpu.h>
 #include <machine/reg.h>
 #include <machine/ibcs2_machdep.h>
 
@@ -61,13 +62,15 @@ __KERNEL_RCSID(0, "$NetBSD: ibcs2_exec_xout.c,v 1.18 2007/12/08 18:36:01 dsl Exp
 #include <compat/ibcs2/ibcs2_util.h>
 #include <compat/ibcs2/ibcs2_syscall.h>
 
-int exec_ibcs2_xout_prep_nmagic(struct lwp *, struct exec_package *,
-				     struct xexec *, struct xext *);
-int exec_ibcs2_xout_prep_zmagic(struct lwp *, struct exec_package *,
-				     struct xexec *, struct xext *);
+int exec_ibcs2_xout_prep_nmagic __P((struct lwp *, struct exec_package *,
+				     struct xexec *, struct xext *));
+int exec_ibcs2_xout_prep_zmagic __P((struct lwp *, struct exec_package *,
+				     struct xexec *, struct xext *));
 
 int
-exec_ibcs2_xout_makecmds(struct lwp *l, struct exec_package *epp)
+exec_ibcs2_xout_makecmds(l, epp)
+	struct lwp *l;
+	struct exec_package *epp;
 {
 	int error;
 	struct xexec *xp = epp->ep_hdr;
@@ -101,7 +104,11 @@ exec_ibcs2_xout_makecmds(struct lwp *l, struct exec_package *epp)
  */
 
 int
-exec_ibcs2_xout_prep_nmagic(struct lwp *l, struct exec_package *epp, struct xexec *xp, struct xext *xep)
+exec_ibcs2_xout_prep_nmagic(l, epp, xp, xep)
+	struct lwp *l;
+	struct exec_package *epp;
+	struct xexec *xp;
+	struct xext *xep;
 {
 	int error;
 	size_t nseg, i;
@@ -115,7 +122,7 @@ exec_ibcs2_xout_prep_nmagic(struct lwp *l, struct exec_package *epp, struct xexe
 
 	/* read in segment table */
 	xs = (struct xseg *)malloc(segsize, M_TEMP, M_WAITOK);
-	error = vn_rdwr(UIO_READ, epp->ep_vp, (void *)xs,
+	error = vn_rdwr(UIO_READ, epp->ep_vp, (caddr_t)xs,
 			segsize, xep->xe_segpos,
 			UIO_SYSSPACE, IO_NODELOCKED, l->l_cred,
 			&resid, NULL);

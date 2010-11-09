@@ -1,4 +1,4 @@
-/*	$NetBSD: mips_machdep.c,v 1.208 2009/01/22 11:01:32 dogcow Exp $	*/
+/*	$NetBSD: mips_machdep.c,v 1.190 2006/10/23 19:49:47 he Exp $	*/
 
 /*
  * Copyright 2002 Wasabi Systems, Inc.
@@ -83,6 +83,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -112,7 +119,7 @@
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
 
-__KERNEL_RCSID(0, "$NetBSD: mips_machdep.c,v 1.208 2009/01/22 11:01:32 dogcow Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mips_machdep.c,v 1.190 2006/10/23 19:49:47 he Exp $");
 
 #include "opt_cputype.h"
 
@@ -123,6 +130,7 @@ __KERNEL_RCSID(0, "$NetBSD: mips_machdep.c,v 1.208 2009/01/22 11:01:32 dogcow Ex
 #include <sys/reboot.h>
 #include <sys/mount.h>			/* fsid_t for syscallargs */
 #include <sys/lwp.h>
+#include <sys/proc.h>
 #include <sys/sysctl.h>
 #include <sys/user.h>
 #include <sys/msgbuf.h>
@@ -134,12 +142,9 @@ __KERNEL_RCSID(0, "$NetBSD: mips_machdep.c,v 1.208 2009/01/22 11:01:32 dogcow Ex
 #include <sys/ras.h>
 #include <sys/sa.h>
 #include <sys/savar.h>
-#include <sys/cpu.h>
+
 #include <sys/ucontext.h>
-
 #include <machine/kcore.h>
-#include <machine/cpu.h>
-
 #include <uvm/uvm_extern.h>
 
 #include <dev/cons.h>
@@ -151,6 +156,7 @@ __KERNEL_RCSID(0, "$NetBSD: mips_machdep.c,v 1.208 2009/01/22 11:01:32 dogcow Ex
 #include <mips/locore.h>
 #include <mips/psl.h>
 #include <mips/pte.h>
+#include <machine/cpu.h>
 #include <mips/userret.h>
 
 #ifdef __HAVE_BOOTINFO_H
@@ -205,9 +211,11 @@ int mips3_pg_cached;
 u_int mips3_pg_shift;
 
 struct	user *proc0paddr;
+struct	lwp  *fpcurlwp;
+struct	pcb  *curpcb;
 struct	segtab *segbase;
 
-void *	msgbufaddr;
+caddr_t	msgbufaddr;
 
 /* the following is used externally (sysctl_hw) */
 char	machine[] = MACHINE;		/* from <machine/param.h> */
@@ -244,8 +252,6 @@ static const struct pridtab *mycpu;
 static const struct pridtab cputab[] = {
 	{ 0, MIPS_R2000, -1, -1,		CPU_ARCH_MIPS1, 64,
 	  CPU_MIPS_NO_LLSC,			"MIPS R2000 CPU"	},
-	{ 0, MIPS_R3000, MIPS_REV_R2000A, -1,	CPU_ARCH_MIPS1, 64,
-	  CPU_MIPS_NO_LLSC,			"MIPS R2000A CPU"	},
 	{ 0, MIPS_R3000, MIPS_REV_R3000, -1,	CPU_ARCH_MIPS1, 64,
 	  CPU_MIPS_NO_LLSC,			"MIPS R3000 CPU"	},
 	{ 0, MIPS_R3000, MIPS_REV_R3000A, -1,	CPU_ARCH_MIPS1, 64,
@@ -298,14 +304,11 @@ static const struct pridtab cputab[] = {
 	{ 0, MIPS_R8000, -1, -1,		CPU_ARCH_MIPS4, 384,
 	  MIPS_NOT_SUPP | CPU_MIPS_R4K_MMU,	"MIPS R8000 Blackbird/TFP CPU" },
 	{ 0, MIPS_R10000, -1, -1,		CPU_ARCH_MIPS4, 64,
-	  CPU_MIPS_R4K_MMU | CPU_MIPS_DOUBLE_COUNT,
-						"MIPS R10000 CPU"	},
+	  MIPS_NOT_SUPP | CPU_MIPS_R4K_MMU,	"MIPS R10000 CPU"	},
 	{ 0, MIPS_R12000, -1, -1,		CPU_ARCH_MIPS4, 64,
-	  CPU_MIPS_R4K_MMU | CPU_MIPS_DOUBLE_COUNT,
-						"MIPS R12000 CPU"	},
+	  MIPS_NOT_SUPP | CPU_MIPS_R4K_MMU,	"MIPS R12000 CPU"	},
 	{ 0, MIPS_R14000, -1, -1,		CPU_ARCH_MIPS4, 64,
-	  CPU_MIPS_R4K_MMU | CPU_MIPS_DOUBLE_COUNT,
-						"MIPS R14000 CPU"	},
+	  MIPS_NOT_SUPP | CPU_MIPS_R4K_MMU,	"MIPS R14000 CPU"	},
 
 	/* XXX
 	 * If the Processor Revision ID of the 4650 isn't 0, the following
@@ -386,14 +389,6 @@ static const struct pridtab cputab[] = {
 	  MIPS64_FLAGS | CPU_MIPS_DOUBLE_COUNT,	"5Kc"			},
 	{ MIPS_PRID_CID_MTI, MIPS_20Kc, -1, -1,	-1, 0,
 	  MIPS64_FLAGS,				"20Kc"			},
-	{ MIPS_PRID_CID_MTI, MIPS_24K, -1, -1,	-1, 0,
-	  MIPS64_FLAGS | CPU_MIPS_DOUBLE_COUNT,	"24K"			},
-	{ MIPS_PRID_CID_MTI, MIPS_24KE, -1, -1,	-1, 0,
-	  MIPS64_FLAGS | CPU_MIPS_DOUBLE_COUNT,	"24KE"			},
-	{ MIPS_PRID_CID_MTI, MIPS_34K, -1, -1,	-1, 0,
-	  MIPS64_FLAGS | CPU_MIPS_DOUBLE_COUNT,	"34K"			},
-	{ MIPS_PRID_CID_MTI, MIPS_74K, -1, -1,	-1, 0,
-	  MIPS64_FLAGS | CPU_MIPS_DOUBLE_COUNT,	"74K"			},
 
 	{ MIPS_PRID_CID_ALCHEMY, MIPS_AU_REV1, -1, MIPS_AU1000, -1, 0,
 	  MIPS32_FLAGS | CPU_MIPS_NO_WAIT | CPU_MIPS_I_D_CACHE_COHERENT,
@@ -786,14 +781,6 @@ void
 mips_vector_init(void)
 {
 	const struct pridtab *ct;
-
-	/*
-	 * XXX Set-up curlwp/curcpu again.  They may have been clobbered
-	 * beween verylocore and here.
-	 */
-	lwp0.l_cpu = &cpu_info_store;
-	cpu_info_store.ci_curlwp = &lwp0;
-	curlwp = &lwp0;
 
 	mycpu = NULL;
 	for (ct = cputab; ct->cpu_name != NULL; ct++) {
@@ -1259,7 +1246,7 @@ cpu_dump_mempagecnt(void)
 int
 cpu_dump(void)
 {
-	int (*dump)(dev_t, daddr_t, void *, size_t);
+	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
 	char buf[dbtob(1)];
 	kcore_seg_t *segp;
 	cpu_kcore_hdr_t *cpuhdrp;
@@ -1311,7 +1298,7 @@ cpu_dump(void)
 		memsegp[i].size = mem_clusters[i].size;
 	}
 
-	return (dump(dumpdev, dumplo, (void *)buf, dbtob(1)));
+	return (dump(dumpdev, dumplo, (caddr_t)buf, dbtob(1)));
 }
 
 /*
@@ -1373,7 +1360,7 @@ dumpsys(void)
 	int psize;
 	daddr_t blkno;
 	const struct bdevsw *bdev;
-	int (*dump)(dev_t, daddr_t, void *, size_t);
+	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
 	int error;
 
 	/* Save registers. */
@@ -1423,8 +1410,7 @@ dumpsys(void)
 		for (i = 0; i < bytes; i += n, totalbytesleft -= n) {
 			/* Print out how many MBs we have left to go. */
 			if ((totalbytesleft % (1024*1024)) == 0)
-				printf_nolog("%ld ",
-				    totalbytesleft / (1024 * 1024));
+				printf("%ld ", totalbytesleft / (1024 * 1024));
 
 			/* Limit size for next transfer. */
 			n = bytes - i;
@@ -1432,7 +1418,7 @@ dumpsys(void)
 				n = BYTES_PER_DUMP;
 
 			error = (*dump)(dumpdev, blkno,
-			    (void *)MIPS_PHYS_TO_KSEG0(maddr), n);
+			    (caddr_t)MIPS_PHYS_TO_KSEG0(maddr), n);
 			if (error)
 				goto err;
 			maddr += n;
@@ -1492,7 +1478,7 @@ mips_init_msgbuf(void)
 
 	vps->end -= atop(sz);
 	vps->avail_end -= atop(sz);
-	msgbufaddr = (void *) MIPS_PHYS_TO_KSEG0(ptoa(vps->end));
+	msgbufaddr = (caddr_t) MIPS_PHYS_TO_KSEG0(ptoa(vps->end));
 	initmsgbuf(msgbufaddr, sz);
 
 	/* Remove the last segment if it now has no pages. */
@@ -1714,7 +1700,6 @@ cpu_upcall(struct lwp *l, int type, int nevents, int ninterrupted,
 	sf = (struct saframe *)sp - 1;
 	if (copyout(&frame, sf, sizeof(frame)) != 0) {
 		/* Copying onto the stack didn't work. Die. */
-		mutex_enter(l->l_proc->p_lock);
 		sigexit(l, SIGILL);
 		/* NOTREACHED */
 	}
@@ -1751,7 +1736,7 @@ cpu_getmcontext(l, mcp, flags)
 	gr[_REG_SR]    = f->f_regs[_R_SR];
 
 	if ((ras_pc = (__greg_t)ras_lookup(l->l_proc,
-	    (void *) gr[_REG_EPC])) != -1)
+	    (caddr_t) gr[_REG_EPC])) != -1)
 		gr[_REG_EPC] = ras_pc;
 
 	*flags |= _UC_CPU;
@@ -1785,7 +1770,6 @@ cpu_setmcontext(l, mcp, flags)
 {
 	struct frame *f = (struct frame *)l->l_md.md_regs;
 	const __greg_t *gr = mcp->__gregs;
-	struct proc *p = l->l_proc;
 
 	/* Restore register context, if any. */
 	if (flags & _UC_CPU) {
@@ -1817,36 +1801,10 @@ cpu_setmcontext(l, mcp, flags)
 		l->l_addr->u_pcb.pcb_fpregs.r_regs[32] = mcp->__fpregs.__fp_csr;
 	}
 
-	mutex_enter(p->p_lock);
 	if (flags & _UC_SETSTACK)
-		l->l_sigstk.ss_flags |= SS_ONSTACK;
+		l->l_proc->p_sigctx.ps_sigstk.ss_flags |= SS_ONSTACK;
 	if (flags & _UC_CLRSTACK)
-		l->l_sigstk.ss_flags &= ~SS_ONSTACK;
-	mutex_exit(p->p_lock);
+		l->l_proc->p_sigctx.ps_sigstk.ss_flags &= ~SS_ONSTACK;
 
 	return (0);
-}
-
-void
-cpu_need_resched(struct cpu_info *ci, int flags)
-{
-
-	aston(ci->ci_data.cpu_onproc);
-	ci->ci_want_resched = 1;
-}
-
-void
-cpu_idle(void)
-{
-	void (*mach_idle)(void) = (void (*)(void))CPU_IDLE;
-
-	while (!curcpu()->ci_want_resched)
-		(*mach_idle)();
-}
-
-bool
-cpu_intr_p(void)
-{
-
-	return curcpu()->ci_idepth != 0;
 }

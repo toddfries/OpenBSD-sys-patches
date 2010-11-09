@@ -1,4 +1,4 @@
-/*	$NetBSD: pci.c,v 1.121 2008/12/16 22:35:33 christos Exp $	*/
+/*	$NetBSD: pci.c,v 1.116 2008/04/09 17:01:53 dyoung Exp $	*/
 
 /*
  * Copyright (c) 1995, 1996, 1997, 1998
@@ -36,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: pci.c,v 1.121 2008/12/16 22:35:33 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pci.c,v 1.116 2008/04/09 17:01:53 dyoung Exp $");
 
 #include "opt_pci.h"
 
@@ -255,11 +255,12 @@ pciprint(void *aux, const char *pnp)
 		if (qd == NULL) {
 			printf(" no quirks");
 		} else {
-			snprintb(devinfo, sizeof (devinfo),
+			bitmask_snprintf(qd->quirks,
 			    "\002\001multifn\002singlefn\003skipfunc0"
 			    "\004skipfunc1\005skipfunc2\006skipfunc3"
 			    "\007skipfunc4\010skipfunc5\011skipfunc6"
-			    "\012skipfunc7", qd->quirks);
+			    "\012skipfunc7",
+			    devinfo, sizeof (devinfo));
 			printf(" quirks %s", devinfo);
 		}
 		printf(")");
@@ -281,7 +282,7 @@ pci_probe_device(struct pci_softc *sc, pcitag_t tag,
 	pci_decompose_tag(pc, tag, &bus, &device, &function);
 
 	/* a driver already attached? */
-	if (sc->PCI_SC_DEVICESC(device, function).c_dev != NULL && !match)
+	if (sc->PCI_SC_DEVICESC(device, function) && !match)
 		return (0);
 
 	bhlcr = pci_conf_read(pc, tag, PCI_BHLC_REG);
@@ -359,20 +360,12 @@ pci_probe_device(struct pci_softc *sc, pcitag_t tag,
 		if (ret != 0 && pap != NULL)
 			*pap = pa;
 	} else {
-		struct pci_child *c;
 		locs[PCICF_DEV] = device;
 		locs[PCICF_FUNCTION] = function;
 
 		subdev = config_found_sm_loc(sc->sc_dev, "pci", locs, &pa,
 					     pciprint, config_stdsubmatch);
-
-		c = &sc->PCI_SC_DEVICESC(device, function);
-		c->c_dev = subdev;
-		pci_conf_capture(pc, tag, &c->c_conf);
-		if (pci_get_powerstate(pc, tag, &c->c_powerstate) == 0)
-			c->c_psok = true;
-		else
-			c->c_psok = false;
+		sc->PCI_SC_DEVICESC(device, function) = subdev;
 		ret = (subdev != NULL);
 	}
 
@@ -382,23 +375,15 @@ pci_probe_device(struct pci_softc *sc, pcitag_t tag,
 void
 pcidevdetached(device_t self, device_t child)
 {
-	struct pci_softc *sc = device_private(self);
+	struct pci_softc *psc = device_private(self);
 	int d, f;
-	pcitag_t tag;
-	struct pci_child *c;
 
 	d = device_locator(child, PCICF_DEV);
 	f = device_locator(child, PCICF_FUNCTION);
 
-	c = &sc->PCI_SC_DEVICESC(d, f);
+	KASSERT(psc->PCI_SC_DEVICESC(d, f) == child);
 
-	KASSERT(c->c_dev == child);
-
-	tag = pci_make_tag(sc->sc_pc, sc->sc_bus, d, f);
-	if (c->c_psok)
-		pci_set_powerstate(sc->sc_pc, tag, c->c_powerstate);
-	pci_conf_restore(sc->sc_pc, tag, &c->c_conf);
-	c->c_dev = NULL;
+	psc->PCI_SC_DEVICESC(d, f) = 0;
 }
 
 CFATTACH_DECL2_NEW(pci, sizeof(struct pci_softc),
@@ -431,15 +416,10 @@ pci_get_capability(pci_chipset_tag_t pc, pcitag_t tag, int capid,
 
 	ofs = PCI_CAPLIST_PTR(pci_conf_read(pc, tag, ofs));
 	while (ofs != 0) {
-		if ((ofs & 3) || (ofs < 0x40)) {
-			int bus, device, function;
-
-			pci_decompose_tag(pc, tag, &bus, &device, &function);
-
-			printf("Skipping broken PCI header on %d:%d:%d\n",
-			    bus, device, function);
-			break;
-		}
+#ifdef DIAGNOSTIC
+		if ((ofs & 3) || (ofs < 0x40))
+			panic("pci_get_capability");
+#endif
 		reg = pci_conf_read(pc, tag, ofs);
 		if (PCI_CAPLIST_CAP(reg) == capid) {
 			if (offset)
@@ -467,7 +447,7 @@ pci_find_device(struct pci_attach_args *pa,
 	};
 
 	for (i = 0; i < pci_cd.cd_ndevs; i++) {
-		pcidev = device_lookup(&pci_cd, i);
+		pcidev = pci_cd.cd_devs[i];
 		if (pcidev != NULL &&
 		    pci_enumerate_bus(device_private(pcidev), wildcard,
 		    		      match, pa) != 0)
@@ -632,7 +612,8 @@ int
 pci_dma64_available(struct pci_attach_args *pa)
 {
 #ifdef _PCI_HAVE_DMA64
-	if (BUS_DMA_TAG_VALID(pa->pa_dmat64))
+	if (BUS_DMA_TAG_VALID(pa->pa_dmat64) &&
+		((uint64_t)physmem << PAGE_SHIFT) > 0xffffffffULL)
                         return 1;
 #endif
         return 0;

@@ -1,4 +1,4 @@
-/*	$NetBSD: ddp_usrreq.c,v 1.34 2008/12/17 20:51:37 cegger Exp $	 */
+/*	$NetBSD: ddp_usrreq.c,v 1.22 2007/01/04 19:07:03 elad Exp $	 */
 
 /*
  * Copyright (c) 1990,1991 Regents of The University of Michigan.
@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ddp_usrreq.c,v 1.34 2008/12/17 20:51:37 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ddp_usrreq.c,v 1.22 2007/01/04 19:07:03 elad Exp $");
 
 #include "opt_mbuftrace.h"
 
@@ -37,22 +37,18 @@ __KERNEL_RCSID(0, "$NetBSD: ddp_usrreq.c,v 1.34 2008/12/17 20:51:37 cegger Exp $
 #include <sys/proc.h>
 #include <sys/mbuf.h>
 #include <sys/ioctl.h>
-#include <sys/queue.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/protosw.h>
 #include <sys/kauth.h>
-#include <sys/sysctl.h>
 #include <net/if.h>
 #include <net/route.h>
 #include <net/if_ether.h>
-#include <net/net_stats.h>
 #include <netinet/in.h>
 
 #include <netatalk/at.h>
 #include <netatalk/at_var.h>
 #include <netatalk/ddp_var.h>
-#include <netatalk/ddp_private.h>
 #include <netatalk/aarp.h>
 #include <netatalk/at_extern.h>
 
@@ -66,7 +62,7 @@ static int at_pcballoc __P((struct socket *));
 struct ifqueue atintrq1, atintrq2;
 struct ddpcb   *ddp_ports[ATPORT_LAST];
 struct ddpcb   *ddpcb = NULL;
-percpu_t *ddpstat_percpu;
+struct ddpstat	ddpstat;
 struct at_ifaddrhead at_ifaddr;		/* Here as inited in this file */
 u_long ddp_sendspace = DDP_MAXSZ;	/* Max ddp size + 1 (ddp_type) */
 u_long ddp_recvspace = 25 * (587 + sizeof(struct sockaddr_at));
@@ -92,13 +88,11 @@ ddp_usrreq(so, req, m, addr, rights, l)
 	ddp = sotoddpcb(so);
 
 	if (req == PRU_CONTROL) {
-		return (at_control((long) m, (void *) addr,
+		return (at_control((long) m, (caddr_t) addr,
 		    (struct ifnet *) rights, l));
 	}
 	if (req == PRU_PURGEIF) {
-		mutex_enter(softnet_lock);
 		at_purgeif((struct ifnet *) rights);
-		mutex_exit(softnet_lock);
 		return (0);
 	}
 	if (rights && rights->m_len) {
@@ -115,7 +109,6 @@ ddp_usrreq(so, req, m, addr, rights, l)
 			error = EINVAL;
 			break;
 		}
-		sosetlock(so);
 		if ((error = at_pcballoc(so)) != 0) {
 			break;
 		}
@@ -263,7 +256,8 @@ at_pcbsetaddr(ddp, addr, l)
 
 		if (sat->sat_addr.s_node != ATADDR_ANYNODE ||
 		    sat->sat_addr.s_net != ATADDR_ANYNET) {
-			TAILQ_FOREACH(aa, &at_ifaddr, aa_list) {
+			for (aa = at_ifaddr.tqh_first; aa;
+			    aa = aa->aa_list.tqe_next) {
 				if ((sat->sat_addr.s_net ==
 				    AA_SAT(aa)->sat_addr.s_net) &&
 				    (sat->sat_addr.s_node ==
@@ -284,7 +278,7 @@ at_pcbsetaddr(ddp, addr, l)
 				return (EACCES);
 		}
 	} else {
-		bzero((void *) & lsat, sizeof(struct sockaddr_at));
+		bzero((caddr_t) & lsat, sizeof(struct sockaddr_at));
 		lsat.sat_len = sizeof(struct sockaddr_at);
 		lsat.sat_addr.s_node = ATADDR_ANYNODE;
 		lsat.sat_addr.s_net = ATADDR_ANYNET;
@@ -294,9 +288,9 @@ at_pcbsetaddr(ddp, addr, l)
 
 	if (sat->sat_addr.s_node == ATADDR_ANYNODE &&
 	    sat->sat_addr.s_net == ATADDR_ANYNET) {
-		if (TAILQ_EMPTY(&at_ifaddr))
-			return EADDRNOTAVAIL;
-		sat->sat_addr = AA_SAT(TAILQ_FIRST(&at_ifaddr))->sat_addr;
+		if (at_ifaddr.tqh_first == NULL)
+			return (EADDRNOTAVAIL);
+		sat->sat_addr = AA_SAT(at_ifaddr.tqh_first)->sat_addr;
 	}
 	ddp->ddp_lsat = *sat;
 
@@ -341,18 +335,16 @@ at_pcbconnect(ddp, addr, l)
 	struct mbuf    *addr;
 	struct lwp     *l;
 {
-	struct rtentry *rt;
-	const struct sockaddr_at *cdst;
 	struct sockaddr_at *sat = mtod(addr, struct sockaddr_at *);
-	struct route *ro;
-	struct at_ifaddr *aa;
+	struct route   *ro;
+	struct at_ifaddr *aa = 0;
 	struct ifnet   *ifp;
 	u_short         hintnet = 0, net;
 
 	if (addr->m_len != sizeof(*sat))
-		return EINVAL;
+		return (EINVAL);
 	if (sat->sat_family != AF_APPLETALK) {
-		return EAFNOSUPPORT;
+		return (EAFNOSUPPORT);
 	}
 	/*
          * Under phase 2, network 0 means "the network".  We take "the
@@ -362,7 +354,7 @@ at_pcbconnect(ddp, addr, l)
 	if (sat->sat_addr.s_net == ATADDR_ANYNET
 	    && sat->sat_addr.s_node != ATADDR_ANYNODE) {
 		if (ddp->ddp_lsat.sat_port == ATADDR_ANYPORT) {
-			return EADDRNOTAVAIL;
+			return (EADDRNOTAVAIL);
 		}
 		hintnet = ddp->ddp_lsat.sat_addr.s_net;
 	}
@@ -372,61 +364,65 @@ at_pcbconnect(ddp, addr, l)
          * If we've changed our address, we may have an old "good looking"
          * route here.  Attempt to detect it.
          */
-	if ((rt = rtcache_validate(ro)) != NULL ||
-	    (rt = rtcache_update(ro, 1)) != NULL) {
+	rtcache_check(ro);
+	if (ro->ro_rt != NULL) {
 		if (hintnet) {
 			net = hintnet;
 		} else {
 			net = sat->sat_addr.s_net;
 		}
-		if ((ifp = rt->rt_ifp) != NULL) {
-			TAILQ_FOREACH(aa, &at_ifaddr, aa_list) {
+		aa = 0;
+		if ((ifp = ro->ro_rt->rt_ifp) != NULL) {
+			for (aa = at_ifaddr.tqh_first; aa;
+			    aa = aa->aa_list.tqe_next) {
 				if (aa->aa_ifp == ifp &&
 				    ntohs(net) >= ntohs(aa->aa_firstnet) &&
 				    ntohs(net) <= ntohs(aa->aa_lastnet)) {
 					break;
 				}
 			}
-		} else
-			aa = NULL;
-		cdst = satocsat(rtcache_getdst(ro));
-		if (aa == NULL || (cdst->sat_addr.s_net !=
-		    (hintnet ? hintnet : sat->sat_addr.s_net) ||
-		    cdst->sat_addr.s_node != sat->sat_addr.s_node)) {
-			rtcache_free(ro);
-			rt = NULL;
 		}
+		if (aa == NULL || (satosat(&ro->ro_dst)->sat_addr.s_net !=
+		    (hintnet ? hintnet : sat->sat_addr.s_net) ||
+		    satosat(&ro->ro_dst)->sat_addr.s_node !=
+		    sat->sat_addr.s_node))
+			rtcache_free(ro);
 	}
 	/*
          * If we've got no route for this interface, try to find one.
          */
-	if (rt == NULL) {
-		union {
-			struct sockaddr		dst;
-			struct sockaddr_at	dsta;
-		} u;
-
-		sockaddr_at_init(&u.dsta, &sat->sat_addr, 0);
-		if (hintnet)
-			u.dsta.sat_addr.s_net = hintnet;
-		rt = rtcache_lookup(ro, &u.dst);
+	if (ro->ro_rt == NULL) {
+		bzero(&ro->ro_dst, sizeof(struct sockaddr_at));
+		ro->ro_dst.sa_len = sizeof(struct sockaddr_at);
+		ro->ro_dst.sa_family = AF_APPLETALK;
+		if (hintnet) {
+			satosat(&ro->ro_dst)->sat_addr.s_net = hintnet;
+		} else {
+			satosat(&ro->ro_dst)->sat_addr.s_net =
+			    sat->sat_addr.s_net;
+		}
+		satosat(&ro->ro_dst)->sat_addr.s_node = sat->sat_addr.s_node;
+		rtcache_init(ro);
 	}
 	/*
          * Make sure any route that we have has a valid interface.
          */
-	if (rt != NULL && (ifp = rt->rt_ifp) != NULL) {
-		TAILQ_FOREACH(aa, &at_ifaddr, aa_list) {
-			if (aa->aa_ifp == ifp)
+	aa = 0;
+	if (ro->ro_rt && (ifp = ro->ro_rt->rt_ifp)) {
+		for (aa = at_ifaddr.tqh_first; aa; aa = aa->aa_list.tqe_next) {
+			if (aa->aa_ifp == ifp) {
 				break;
+			}
 		}
-	} else
-		aa = NULL;
-	if (aa == NULL)
-		return ENETUNREACH;
+	}
+	if (aa == 0) {
+		return (ENETUNREACH);
+	}
 	ddp->ddp_fsat = *sat;
-	if (ddp->ddp_lsat.sat_port == ATADDR_ANYPORT)
-		return at_pcbsetaddr(ddp, NULL, l);
-	return 0;
+	if (ddp->ddp_lsat.sat_port == ATADDR_ANYPORT) {
+		return (at_pcbsetaddr(ddp, (struct mbuf *) 0, l));
+	}
+	return (0);
 }
 
 static void
@@ -444,7 +440,7 @@ at_pcballoc(so)
 {
 	struct ddpcb   *ddp;
 
-	ddp = malloc(sizeof(*ddp), M_PCB, M_WAITOK|M_ZERO);
+	MALLOC(ddp, struct ddpcb *, sizeof(*ddp), M_PCB, M_WAITOK|M_ZERO);
 	if (!ddp)
 		panic("at_pcballoc");
 	ddp->ddp_lsat.sat_port = ATADDR_ANYPORT;
@@ -459,12 +455,12 @@ at_pcballoc(so)
 	ddpcb = ddp;
 
 	ddp->ddp_socket = so;
-	so->so_pcb = (void *) ddp;
+	so->so_pcb = (caddr_t) ddp;
 #ifdef MBUFTRACE
 	so->so_rcv.sb_mowner = &atalk_rx_mowner;
 	so->so_snd.sb_mowner = &atalk_tx_mowner;
 #endif
-	return 0;
+	return (0);
 }
 
 static void
@@ -474,9 +470,7 @@ at_pcbdetach(so, ddp)
 {
 	soisdisconnected(so);
 	so->so_pcb = 0;
-	/* sofree drops the lock */
 	sofree(so);
-	mutex_enter(softnet_lock);
 
 	/* remove ddp from ddp_ports list */
 	if (ddp->ddp_lsat.sat_port != ATADDR_ANYPORT &&
@@ -490,7 +484,9 @@ at_pcbdetach(so, ddp)
 			ddp->ddp_pnext->ddp_pprev = ddp->ddp_pprev;
 		}
 	}
-	rtcache_free(&ddp->ddp_route);
+	if (ddp->ddp_route.ro_rt) {
+		rtfree(ddp->ddp_route.ro_rt);
+	}
 	if (ddp->ddp_prev) {
 		ddp->ddp_prev->ddp_next = ddp->ddp_next;
 	} else {
@@ -519,9 +515,9 @@ ddp_search(
 	/*
          * Check for bad ports.
          */
-	if (to->sat_port < ATPORT_FIRST || to->sat_port >= ATPORT_LAST)
-		return NULL;
-
+	if (to->sat_port < ATPORT_FIRST || to->sat_port >= ATPORT_LAST) {
+		return (NULL);
+	}
 	/*
          * Make sure the local address matches the sent address.  What about
          * the interface?
@@ -558,11 +554,8 @@ ddp_search(
  * Initialize all the ddp & appletalk stuff
  */
 void
-ddp_init(void)
+ddp_init()
 {
-
-	ddpstat_percpu = percpu_alloc(sizeof(uint64_t) * DDP_NSTATS);
-
 	TAILQ_INIT(&at_ifaddr);
 	atintrq1.ifq_maxlen = IFQ_MAXLEN;
 	atintrq2.ifq_maxlen = IFQ_MAXLEN;
@@ -581,42 +574,3 @@ ddp_clean()
 		at_pcbdetach(ddp->ddp_socket, ddp);
 }
 #endif
-
-static int
-sysctl_net_atalk_ddp_stats(SYSCTLFN_ARGS)
-{
-
-	return (NETSTAT_SYSCTL(ddpstat_percpu, DDP_NSTATS));
-}
-
-/*
- * Sysctl for DDP variables.
- */
-SYSCTL_SETUP(sysctl_net_atalk_ddp_setup, "sysctl net.atalk.ddp subtree setup")
-{
-
-	sysctl_createv(clog, 0, NULL, NULL,
-		       CTLFLAG_PERMANENT,
-		       CTLTYPE_NODE, "net", NULL,
-		       NULL, 0, NULL, 0,
-		       CTL_NET, CTL_EOL);
-	sysctl_createv(clog, 0, NULL, NULL,
-		       CTLFLAG_PERMANENT,
-		       CTLTYPE_NODE, "atalk", NULL,
-		       NULL, 0, NULL, 0,
-		       CTL_NET, PF_APPLETALK, CTL_EOL);
-	sysctl_createv(clog, 0, NULL, NULL,
-		       CTLFLAG_PERMANENT,
-		       CTLTYPE_NODE, "ddp",
-		       SYSCTL_DESCR("DDP related settings"),
-		       NULL, 0, NULL, 0,
-		       CTL_NET, PF_APPLETALK, ATPROTO_DDP, CTL_EOL);
-	
-	sysctl_createv(clog, 0, NULL, NULL,
-		       CTLFLAG_PERMANENT,
-		       CTLTYPE_STRUCT, "stats",
-		       SYSCTL_DESCR("DDP statistics"),
-		       sysctl_net_atalk_ddp_stats, 0, NULL, 0,
-		       CTL_NET, PF_APPLETALK, ATPROTO_DDP, CTL_CREATE,
-		       CTL_EOL);
-}

@@ -1,4 +1,4 @@
-/*	$NetBSD: hpcdma.h,v 1.8 2008/05/10 15:31:05 martin Exp $	*/
+/*	$NetBSD: hpcdma.h,v 1.6 2005/12/11 12:18:53 christos Exp $	*/
 
 /*
  * Copyright (c) 2001 Wayne Knowles

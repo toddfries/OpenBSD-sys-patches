@@ -1,4 +1,4 @@
-/*	$NetBSD: db_interface.c,v 1.62 2008/10/15 08:13:17 ad Exp $	*/
+/*	$NetBSD: db_interface.c,v 1.49 2006/11/16 01:32:38 christos Exp $	*/
 
 /*
  * Mach Operating System
@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: db_interface.c,v 1.62 2008/10/15 08:13:17 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: db_interface.c,v 1.49 2006/11/16 01:32:38 christos Exp $");
 
 #include "opt_ddb.h"
 #include "opt_multiprocessor.h"
@@ -42,9 +42,6 @@ __KERNEL_RCSID(0, "$NetBSD: db_interface.c,v 1.62 2008/10/15 08:13:17 ad Exp $")
 #include <sys/proc.h>
 #include <sys/reboot.h>
 #include <sys/systm.h>
-#include <sys/atomic.h>
-#include <sys/simplelock.h>
-#include <sys/cpu.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -56,6 +53,7 @@ __KERNEL_RCSID(0, "$NetBSD: db_interface.c,v 1.62 2008/10/15 08:13:17 ad Exp $")
 #include <machine/i82093var.h>
 #include <machine/i82489reg.h>
 #include <machine/i82489var.h>
+#include <machine/atomic.h>
 
 #include <ddb/db_sym.h>
 #include <ddb/db_command.h>
@@ -70,14 +68,13 @@ extern int trap_types;
 int	db_active = 0;
 db_regs_t ddb_regs;	/* register state */
 
-void db_mach_cpu (db_expr_t, bool, db_expr_t, const char *);
+void db_mach_cpu (db_expr_t, int, db_expr_t, const char *);
 
 const struct db_command db_machine_command_table[] = {
 #ifdef MULTIPROCESSOR
-	{ DDB_ADD_CMD("cpu",	db_mach_cpu,	0, NULL,NULL,NULL) },
+	{ "cpu",	db_mach_cpu,	0,	0 },
 #endif
-		
-	{ DDB_ADD_CMD(NULL, NULL, 0,  NULL,NULL,NULL) },
+	{ NULL, NULL, 0, 0 },
 };
 
 void kdbprinttrap(int, int);
@@ -86,7 +83,6 @@ extern void ddb_ipi(int, struct trapframe);
 extern void ddb_ipi_tss(struct i386tss *);
 static void ddb_suspend(struct trapframe *);
 int ddb_vec;
-static bool ddb_mp_online;
 #endif
 
 db_regs_t *ddb_regp = 0;
@@ -104,7 +100,8 @@ db_machine_init()
 
 #ifdef MULTIPROCESSOR
 	ddb_vec = idt_vec_alloc(0xf0, 0xff);
-	idt_vec_set(ddb_vec, &Xintrddbipi);
+	setgate((struct gate_descriptor *)&idt[ddb_vec], &Xintrddbipi, 0,
+	    SDT_SYS386IGT, SEL_KPL, GSEL(GCODE_SEL, SEL_KPL));
 #endif
 }
 
@@ -129,26 +126,26 @@ db_suspend_others(void)
 	if (win) {
 		x86_ipi(ddb_vec, LAPIC_DEST_ALLEXCL, LAPIC_DLMODE_FIXED);
 	}
-	ddb_mp_online = x86_mp_online;
-	x86_mp_online = false;
 	return win;
 }
 
 static void
 db_resume_others(void)
 {
-	CPU_INFO_ITERATOR cii;
-	struct cpu_info *ci;
+	int i;
 
-	x86_mp_online = ddb_mp_online;
 	__cpu_simple_lock(&db_lock);
 	ddb_cpu = NOCPU;
 	__cpu_simple_unlock(&db_lock);
 
-	for (CPU_INFO_FOREACH(cii, ci)) {
+	for (i=0; i < X86_MAXPROCS; i++) {
+		struct cpu_info *ci = cpu_info[i];
+		if (ci == NULL)
+			continue;
 		if (ci->ci_flags & CPUF_PAUSE)
-			atomic_and_32(&ci->ci_flags, ~CPUF_PAUSE);
+			x86_atomic_clearbits_l(&ci->ci_flags, CPUF_PAUSE);
 	}
+
 }
 
 #endif
@@ -214,7 +211,7 @@ kdb_trap(type, code, regs)
 		 * Kernel mode - esp and ss not saved
 		 */
 		ddb_regs.tf_esp = (int)&regs->tf_esp;	/* kernel stack pointer */
-		ddb_regs.tf_ss = x86_getss();
+		__asm("movw %%ss,%w0" : "=r" (ddb_regs.tf_ss));
 	}
 
 	ddb_regs.tf_cs &= 0xffff;
@@ -225,9 +222,9 @@ kdb_trap(type, code, regs)
 	ddb_regs.tf_ss &= 0xffff;
 	s = splhigh();
 	db_active++;
-	cnpollc(true);
+	cnpollc(TRUE);
 	db_trap(type, code);
-	cnpollc(false);
+	cnpollc(FALSE);
 	db_active--;
 	splx(s);
 #ifdef MULTIPROCESSOR
@@ -327,16 +324,16 @@ ddb_suspend(struct trapframe *frame)
 		 * Kernel mode - esp and ss not saved
 		 */
 		regs.tf_esp = (int)&frame->tf_esp; /* kernel stack pointer */
-		regs.tf_ss = x86_getss();
+		__asm("movw %%ss,%w0" : "=r" (regs.tf_ss));
 	}
 
 	ci->ci_ddb_regs = &regs;
 
-	atomic_or_32(&ci->ci_flags, CPUF_PAUSE);
+	x86_atomic_setbits_l(&ci->ci_flags, CPUF_PAUSE);
+
 	while (ci->ci_flags & CPUF_PAUSE)
 		;
 	ci->ci_ddb_regs = 0;
-	tlbflushg();
 }
 
 
@@ -345,7 +342,7 @@ extern void cpu_debug_dump(void); /* XXX */
 void
 db_mach_cpu(
 	db_expr_t	addr,
-	bool		have_addr,
+	int		have_addr,
 	db_expr_t	count,
 	const char *	modif)
 {
@@ -355,11 +352,11 @@ db_mach_cpu(
 		return;
 	}
 
-	if (addr < 0) {
+	if ((addr < 0) || (addr >= X86_MAXPROCS)) {
 		db_printf("%ld: CPU out of range\n", addr);
 		return;
 	}
-	ci = cpu_lookup(addr);
+	ci = cpu_info[addr];
 	if (ci == NULL) {
 		db_printf("CPU %ld not configured\n", addr);
 		return;

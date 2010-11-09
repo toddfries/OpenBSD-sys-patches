@@ -1,4 +1,4 @@
-/*	$NetBSD: rf_diskqueue.c,v 1.51 2008/06/17 14:53:11 reinoud Exp $	*/
+/*	$NetBSD: rf_diskqueue.c,v 1.49 2007/03/04 06:02:37 christos Exp $	*/
 /*
  * Copyright (c) 1995 Carnegie-Mellon University.
  * All rights reserved.
@@ -66,7 +66,7 @@
  ****************************************************************************/
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: rf_diskqueue.c,v 1.51 2008/06/17 14:53:11 reinoud Exp $");
+__KERNEL_RCSID(0, "$NetBSD: rf_diskqueue.c,v 1.49 2007/03/04 06:02:37 christos Exp $");
 
 #include <dev/raidframe/raidframevar.h>
 
@@ -449,22 +449,27 @@ rf_CreateDiskQueueData(RF_IoType_t typ, RF_SectorNum_t ssect,
 		       int waitflag)
 {
 	RF_DiskQueueData_t *p;
+	int s;
 
+	s = splbio();
 	p = pool_get(&rf_pools.dqd, waitflag);
+	splx(s);
 	if (p == NULL)
 		return (NULL);
 
 	memset(p, 0, sizeof(RF_DiskQueueData_t));
 	if (waitflag == PR_WAITOK) {
-		p->bp = getiobuf(NULL, true);
+		p->bp = getiobuf();
 	} else {
-		p->bp = getiobuf(NULL, false);
+		p->bp = getiobuf_nowait();
 	}
 	if (p->bp == NULL) {
+		/* no memory for the buffer!?!? */
+		s = splbio();
 		pool_put(&rf_pools.dqd, p);
+		splx(s);
 		return (NULL);
 	}
-	SET(p->bp->b_cflags, BC_BUSY);	/* mark buffer busy */
 
 	p->sectorOffset = ssect + rf_protectedSectors;
 	p->numSector = nsect;

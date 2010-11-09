@@ -1,4 +1,4 @@
-/*	$NetBSD: locore.S,v 1.41 2009/02/13 22:41:02 apb Exp $	*/
+/*	$NetBSD: locore.S,v 1.35 2005/12/11 12:18:29 christos Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996 Wolfgang Solfrank.
@@ -34,7 +34,6 @@
 #include "opt_ddb.h"
 #include "opt_ipkdb.h"
 #include "opt_lockdebug.h"
-#include "opt_modular.h"
 #include "opt_multiprocessor.h"
 #include "opt_ppcparam.h"
 #include "assym.h"
@@ -61,13 +60,12 @@
 /*
  * Globals
  */
-	.data
-GLOBAL(esym)
+GLOBAL(startsym)
+	.long	0			/* start of symbol table */
+GLOBAL(endsym)
 	.long	0			/* end of symbol table */
 GLOBAL(proc0paddr)
 	.long	0			/* proc0 p_addr */
-GLOBAL(oeacpufeat)
-	.long	0			/* cpu features */
 
 /*
  * This symbol is here for the benefit of kvm_mkdb, and is supposed to
@@ -88,36 +86,44 @@ __start:
 
 	li	0,0
 	mtmsr	0			/* Disable FPU/MMU/exceptions */
-
-	bl	_C_LABEL(cpu_model_init)
-	lis	12,oeacpufeat@ha
-	lwz	12,oeacpufeat@l(12)
-	andi.	12,12,OEACPU_64_BRIDGE	/* Compare against OEACPU_64_BRIDGE */
-	beq	2f			/* skip if this is a 32bit part */
-	li	0,0
-	sync
-	slbia				/* invalidate the slb table */
-	sync
-	clrldi	0,0,32			/* clear SF/ISF (high order bits) */
-	mtmsrd	0
-	mtspr	0x118,0		/* clear ASR[V] to enable segregs */
-2:
 	isync
+
 	/* compute end of kernel memory */
-        lis	4,_C_LABEL(end)@ha
-        addi	4,4,_C_LABEL(end)@l
-#if NKSYMS || defined(DDB) || defined(MODULAR)
+#if NKSYMS || defined(DDB) || defined(LKM)
 	/* skip symbol table */
 	cmpwi	6,0
 	beq	1f
 	add	9,6,7			/* r9 = args + l */
-	lwz	9,-8(9)			/* esym */
-	cmpwi	9,0
-	beq	1f
-	mr	4,9
+
+	/* If the resulting address is misaligned, abort. */
+	andi.	8,9,3
+	bne	1f			/* misaligned */
+
+	/* First, see if the loader even put the symbols there. */
+	lwz	9,-12(9)
+	lis	8,0x19730224@h		/* magic number */
+	ori	8,8,0x19730224@l
+	cmplw	8,9
+	bne	1f			/* nope */
+
+	/* Okay, ssym and esym are here -- fetch them. */
+	add	9,6,7
+	lwz	9,-8(9)
+	lis	8,_C_LABEL(startsym)@ha
+	stw	9,_C_LABEL(startsym)@l(8)
+
+	add	9,6,7
+	lwz	9,-4(9)
+	lis	8,_C_LABEL(endsym)@ha
+	stw	9,_C_LABEL(endsym)@l(8)
+
+	mr	4,9			/* r8 = end of kernel + symbols */
+	b	2f
 1:
 #endif
-
+	lis	4,_C_LABEL(end)@ha
+	addi	4,4,_C_LABEL(end)@l
+2:
 
 	/*
 	 * Initialize cpu_info[0]
@@ -130,7 +136,7 @@ __start:
 	bl	_C_LABEL(initppc)
 	bl	_C_LABEL(main)
 	b	_C_LABEL(OF_exit)
-	
+
 /*
  * Pull in common OFW code.
  */
@@ -145,8 +151,3 @@ __start:
  * Pull in common trap vector code.
  */
 #include <powerpc/powerpc/trap_subr.S>
-
-/*
- * Pull in common pio / bus_space code.
- */
-#include <powerpc/powerpc/pio_subr.S>

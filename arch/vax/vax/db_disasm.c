@@ -1,4 +1,4 @@
-/*	$NetBSD: db_disasm.c,v 1.18 2008/03/11 05:34:03 matt Exp $ */
+/*	$NetBSD: db_disasm.c,v 1.16 2005/12/11 12:19:36 christos Exp $ */
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.
  * All rights reserved.
@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: db_disasm.c,v 1.18 2008/03/11 05:34:03 matt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: db_disasm.c,v 1.16 2005/12/11 12:19:36 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/proc.h>
@@ -75,8 +75,8 @@ __KERNEL_RCSID(0, "$NetBSD: db_disasm.c,v 1.18 2008/03/11 05:34:03 matt Exp $");
 #define BROKEN_DB_REGS
 */
 #ifdef	BROKEN_DB_REGS
-const struct {		/* Due to order and contents of db_regs[], we can't */
-	const char *name;	/* use this array to extract register-names. */
+struct {		/* Due to order and contents of db_regs[], we can't */
+	char *name;	/* use this array to extract register-names. */
 	void *valuep;	/* eg. "psl" vs "pc", "pc" vs "sp" */
 } my_db_regs[16] = {
 	{ "r0",		NULL },
@@ -117,20 +117,20 @@ typedef struct {
 #define ITYPE_BRANCH	1
 #define ITYPE_CALL	2
 
-static inline int get_byte(inst_buffer * ib);
-static inline int get_word(inst_buffer * ib);
-static inline int get_long(inst_buffer * ib);
+int get_byte	__P((inst_buffer * ib));
+int get_word	__P((inst_buffer * ib));
+int get_long	__P((inst_buffer * ib));
 
-static int get_opcode(inst_buffer * ib);
-static int get_operands(inst_buffer * ib);
-static int get_operand(inst_buffer * ib, int size);
+int get_opcode	__P((inst_buffer * ib));
+int get_operands __P((inst_buffer * ib));
+int get_operand __P((inst_buffer * ib, int size));
 
-static inline void add_char(inst_buffer * ib, char c);
-static inline void add_str(inst_buffer * ib, const char *s);
-static void add_int(inst_buffer * ib, int i);
-static void add_xint(inst_buffer * ib, int i);
-static void add_sym(inst_buffer * ib, int i);
-static void add_off(inst_buffer * ib, int i);
+void add_char	__P((inst_buffer * ib, int c));
+void add_str	__P((inst_buffer * ib, const char *s));
+void add_int	__P((inst_buffer * ib, int i));
+void add_xint	__P((inst_buffer * ib, int i));
+void add_sym	__P((inst_buffer * ib, int i));
+void add_off	__P((inst_buffer * ib, int i));
 
 #define err_print  printf
 
@@ -144,7 +144,9 @@ static void add_off(inst_buffer * ib, int i);
  * be executed but the 'linear' next instruction.
  */
 db_addr_t
-db_disasm(db_addr_t loc, bool altfmt)
+db_disasm(loc, altfmt)
+	db_addr_t	loc;
+	boolean_t	altfmt;
 {
 	db_expr_t	diff;
 	db_sym_t	sym;
@@ -176,7 +178,8 @@ db_disasm(db_addr_t loc, bool altfmt)
 }
 
 int
-get_opcode(inst_buffer *ib)
+get_opcode(ib)
+	inst_buffer    *ib;
 {
 	ib->opc = get_byte(ib);
 	if (ib->opc >> 2 == 0x3F) {	/* two byte op-code */
@@ -208,7 +211,8 @@ get_opcode(inst_buffer *ib)
 }
 
 int
-get_operands(inst_buffer *ib)
+get_operands(ib)
+	inst_buffer    *ib;
 {
 	int		aa = 0; /* absolute address mode ? */
 	int		size;
@@ -299,7 +303,9 @@ get_operands(inst_buffer *ib)
 }
 
 int
-get_operand(inst_buffer *ib, int size)
+get_operand(ib, size)
+	inst_buffer    *ib;
+	int		size;
 {
 	int		c = get_byte(ib);
 	int		mode = c >> 4;
@@ -436,61 +442,80 @@ get_operand(inst_buffer *ib, int size)
 }
 
 int
-get_byte(inst_buffer *ib)
+get_byte(ib)
+	inst_buffer    *ib;
 {
 	return ((unsigned char) *(ib->ppc++));
 }
 
 int
-get_word(inst_buffer *ib)
+get_word(ib)
+	inst_buffer    *ib;
 {
-	int tmp = *(uint16_t *)ib->ppc;
-	ib->ppc += 2;
-	return tmp;
+	int		tmp;
+	char	       *p = (void *) &tmp;
+	*p++ = get_byte(ib);
+	*p++ = get_byte(ib);
+	return (tmp);
 }
 
 int
-get_long(inst_buffer *ib)
+get_long(ib)
+	inst_buffer    *ib;
 {
-	int tmp = *(int *)ib->ppc;
-	ib->ppc += 4;
+	int		tmp;
+	char	       *p = (void *) &tmp;
+	*p++ = get_byte(ib);
+	*p++ = get_byte(ib);
+	*p++ = get_byte(ib);
+	*p++ = get_byte(ib);
 	return (tmp);
 }
 
 void
-add_char(inst_buffer *ib, char c)
+add_char(ib, c)
+	inst_buffer    *ib;
+	int		c;
 {
 	*ib->curp++ = c;
 }
 
 void
-add_str(inst_buffer *ib, const char *s)
+add_str(ib, s)
+	inst_buffer    *ib;
+	const char	*s;
 {
 	while ((*ib->curp++ = *s++));
-	--ib->curp;
+	*--ib->curp = '\0';
 }
 
 void
-add_int(inst_buffer *ib, int i)
+add_int(ib, i)
+	inst_buffer    *ib;
+	int		i;
 {
-	char buf[32];
+	char		buf[32];
 	if (i < 100 && i > -100)
-		sprintf(ib->curp, "%d", i);
+		sprintf(buf, "%d", i);
 	else
 		sprintf(buf, "0x%x", i);
 	add_str(ib, buf);
 }
 
 void
-add_xint(inst_buffer *ib, int val)
+add_xint(ib, val)
+	inst_buffer    *ib;
+	int		val;
 {
-	char buf[32];
+	char		buf[32];
 	sprintf(buf, "0x%x", val);
 	add_str(ib, buf);
 }
 
 void
-add_sym(inst_buffer *ib, int loc)
+add_sym(ib, loc)
+	inst_buffer    *ib;
+	int		loc;
 {
 	db_expr_t	diff;
 	db_sym_t	sym;
@@ -508,12 +533,15 @@ add_sym(inst_buffer *ib, int loc)
 		/* add_char(ib, '<'); */
 		add_str(ib, symname);
 		/* add_char(ib, '>'); */
-	} else
+	}
+	else
 		add_xint(ib, loc);
 }
 
 void
-add_off(inst_buffer *ib, int loc)
+add_off(ib, loc)
+	inst_buffer    *ib;
+	int		loc;
 {
 	db_expr_t	diff;
 	db_sym_t	sym;
@@ -535,6 +563,7 @@ add_off(inst_buffer *ib, int loc)
 			add_xint(ib, diff);
 		}
 		/* add_char(ib, '>'); */
-	} else
+	}
+	else
 		add_xint(ib, loc);
 }

@@ -1,4 +1,4 @@
-/*	$NetBSD: userret.h,v 1.8 2008/06/30 14:12:20 nakayama Exp $ */
+/*	$NetBSD: userret.h,v 1.5 2006/02/20 19:00:27 cdi Exp $ */
 
 /*
  * Copyright (c) 1996-2002 Eduardo Horvath.  All rights reserved.
@@ -65,17 +65,19 @@ userret(struct lwp *l, int pc, u_quad_t oticks)
 
 	if (want_ast) {
 		want_ast = 0;
-		if (l->l_pflag & LP_OWEUPC) {
-			l->l_pflag &= ~LP_OWEUPC;
-			ADDUPROF(l);
+		if (p->p_flag & P_OWEUPC) {
+			p->p_flag &= ~P_OWEUPC;
+			ADDUPROF(p);
 		}
 	}
 
 	/*
 	 * If profiling, charge recent system time to the trapped pc.
 	 */
-	if (p->p_stflag & PST_PROFIL)
-		addupc_task(l, pc, (int)(p->p_sticks - oticks));
+	if (p->p_flag & P_PROFIL)
+		addupc_task(p, pc, (int)(p->p_sticks - oticks));
+
+	curcpu()->ci_schedstate.spc_curpriority = l->l_priority = l->l_usrpri;
 }
 
 static __inline void share_fpu(struct lwp *, struct trapframe64 *);
@@ -90,6 +92,7 @@ static __inline void share_fpu(struct lwp *, struct trapframe64 *);
 static __inline void
 share_fpu(struct lwp *l, struct trapframe64 *tf)
 {
-	if (!(tf->tf_tstate & TSTATE_PRIV) && fplwp != l)
-		tf->tf_tstate &= ~TSTATE_PEF;
+	if (!(tf->tf_tstate & (PSTATE_PRIV << TSTATE_PSTATE_SHIFT)) &&
+	    fplwp != l)
+		tf->tf_tstate &= ~(PSTATE_PEF << TSTATE_PSTATE_SHIFT);
 }

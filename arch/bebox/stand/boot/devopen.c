@@ -1,4 +1,4 @@
-/*	$NetBSD: devopen.c,v 1.9 2008/05/26 16:28:39 kiyohara Exp $	*/
+/*	$NetBSD: devopen.c,v 1.8 2005/12/11 12:17:04 christos Exp $	*/
 
 /*-
  *  Copyright (c) 1993 John Brezak
@@ -35,12 +35,7 @@
 
 #define	ispart(c)	((c) >= 'a' && (c) <= 'h')
 
-static int atoi(char *);
-static int devlookup(char *);
-static int devparse(const char *, int *, int *, int *, int *, int *, char **);
-
-
-static int
+int
 atoi(char *cp)
 {
 	int val = 0;
@@ -50,7 +45,7 @@ atoi(char *cp)
 	return val;
 }
 
-static int
+int
 devlookup(char *d)
 {
 	struct devsw *dp = devsw;
@@ -72,7 +67,7 @@ devlookup(char *d)
  * Parse a device spec in one of two forms.
  *   dev(ctlr, unit, part)file
  */
-static int
+int
 devparse(const char *fname, int *dev, int *adapt, int *ctlr, int *unit,
 	 int *part, char **file)
 {

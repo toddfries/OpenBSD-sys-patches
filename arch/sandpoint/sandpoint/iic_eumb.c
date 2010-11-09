@@ -1,4 +1,4 @@
-/* $NetBSD: iic_eumb.c,v 1.6 2009/02/04 13:53:19 pgoyette Exp $ */
+/* $NetBSD: iic_eumb.c,v 1.4 2008/04/19 01:22:35 nisimura Exp $ */
 
 /*-
  * Copyright (c) 2007 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: iic_eumb.c,v 1.6 2009/02/04 13:53:19 pgoyette Exp $");
+__KERNEL_RCSID(0, "$NetBSD: iic_eumb.c,v 1.4 2008/04/19 01:22:35 nisimura Exp $");
 
 #include <sys/param.h>
 #include <sys/device.h>
@@ -230,8 +237,6 @@ motoi2c_initiate_xfer(void *v, i2c_addr_t addr, int flags)
 	rd_req = !!(flags & I2C_F_READ);
 	CSR_WRITE(I2CCR, CR_MIEN | CR_MEN | CR_MSTA | CR_MTX);
 	CSR_WRITE(I2CDR, (addr << 1) | rd_req);
-	if (flags & I2C_F_STOP)
-		CSR_WRITE(I2CCR, CR_MIEN | CR_MEN | CR_TXAK);
 	waitxferdone(SR_MIF);
 	return 0;
 }

@@ -1,4 +1,4 @@
-/*	$NetBSD: if_qn.c,v 1.32 2008/11/07 00:20:01 dyoung Exp $ */
+/*	$NetBSD: if_qn.c,v 1.25 2006/05/10 06:24:02 skrll Exp $ */
 
 /*
  * Copyright (c) 1995 Mika Kortelainen
@@ -66,7 +66,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_qn.c,v 1.32 2008/11/07 00:20:01 dyoung Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_qn.c,v 1.25 2006/05/10 06:24:02 skrll Exp $");
 
 #include "qn.h"
 #if NQN > 0
@@ -149,7 +149,7 @@ struct	qn_softc {
 	u_short	volatile *nic_len;
 	u_char	transmit_pending;
 #if NBPFILTER > 0
-	void *	sc_bpf;
+	caddr_t	sc_bpf;
 #endif
 } qn_softc[NQN];
 
@@ -162,7 +162,7 @@ struct	qn_softc {
 int	qnmatch(struct device *, struct cfdata *, void *);
 void	qnattach(struct device *, struct device *, void *);
 int	qnintr(void *);
-int	qnioctl(struct ifnet *, u_long, void *);
+int	qnioctl(struct ifnet *, u_long, caddr_t);
 void	qnstart(struct ifnet *);
 void	qnwatchdog(struct ifnet *);
 void	qnreset(struct qn_softc *);
@@ -285,8 +285,8 @@ qninit(struct qn_softc *sc)
 	for (i = 0; i < ETHER_ADDR_LEN; i++)
 		*((u_short volatile *)(sc->sc_nic_base+
 				       QNET_HARDWARE_ADDRESS+2*i)) =
-		    ((((u_short)CLLADDR(ifp->if_sadl)[i]) << 8) |
-		    CLLADDR(ifp->if_sadl)[i]);
+		    ((((u_short)LLADDR(ifp->if_sadl)[i]) << 8) |
+		    LLADDR(ifp->if_sadl)[i]);
 
 	ifp->if_flags |= IFF_RUNNING;
 	ifp->if_flags &= ~IFF_OACTIVE;
@@ -592,7 +592,7 @@ qn_get_packet(struct qn_softc *sc, u_short len)
 			len1 = amount;
 
 		word_copy_from_card(nic_fifo_ptr,
-		    (u_short *)(mtod(m, char *) + m->m_len),
+		    (u_short *)(mtod(m, caddr_t) + m->m_len),
 		    len1);
 		m->m_len += len1;
 		len -= len1;
@@ -817,7 +817,7 @@ qnintr(void *arg)
  * I somehow think that this is quite a common excuse... ;-)
  */
 int
-qnioctl(register struct ifnet *ifp, u_long cmd, void *data)
+qnioctl(register struct ifnet *ifp, u_long command, caddr_t data)
 {
 	struct qn_softc *sc = ifp->if_softc;
 	register struct ifaddr *ifa = (struct ifaddr *)data;
@@ -828,9 +828,9 @@ qnioctl(register struct ifnet *ifp, u_long cmd, void *data)
 
 	s = splnet();
 
-	switch (cmd) {
+	switch (command) {
 
-	case SIOCINITIFADDR:
+	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 
 		switch (ifa->ifa_addr->sa_family) {
@@ -866,9 +866,6 @@ qnioctl(register struct ifnet *ifp, u_long cmd, void *data)
 		break;
 
 	case SIOCSIFFLAGS:
-		if ((error = ifioctl_common(ifp, cmd, data)) != 0)
-			break;
-		/* XXX see the comment in ed_ioctl() about code re-use */
 		if ((ifp->if_flags & IFF_UP) == 0 &&
 		    (ifp->if_flags & IFF_RUNNING) != 0) {
 			/*
@@ -902,7 +899,11 @@ qnioctl(register struct ifnet *ifp, u_long cmd, void *data)
 	case SIOCDELMULTI:
 		log(LOG_INFO, "qnioctl: multicast not done yet\n");
 #if 0
-		if ((error = ether_ioctl(ifp, cmd, data)) == ENETRESET) {
+		error = (command == SIOCADDMULTI) ?
+		    ether_addmulti(ifr, &sc->sc_ethercom) :
+		    ether_delmulti(ifr, &sc->sc_ethercom);
+
+		if (error == ENETRESET) {
 			/*
 			 * Multicast list has changed; set the hardware filter
 			 * accordingly.
@@ -916,7 +917,8 @@ qnioctl(register struct ifnet *ifp, u_long cmd, void *data)
 		break;
 
 	default:
-		error = ether_ioctl(ifp, cmd, data);
+		log(LOG_INFO, "qnioctl: default\n");
+		error = EINVAL;
 	}
 
 	splx(s);

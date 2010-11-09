@@ -1,4 +1,4 @@
-/* $NetBSD: jensenio_intr.c,v 1.9 2008/04/28 20:23:11 martin Exp $ */
+/* $NetBSD: jensenio_intr.c,v 1.5 2005/12/24 20:06:46 perry Exp $ */
 
 /*-
  * Copyright (c) 1999, 2000 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -31,7 +38,7 @@
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
 
-__KERNEL_RCSID(0, "$NetBSD: jensenio_intr.c,v 1.9 2008/04/28 20:23:11 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: jensenio_intr.c,v 1.5 2005/12/24 20:06:46 perry Exp $");
 
 #include <sys/types.h> 
 #include <sys/param.h> 
@@ -160,11 +167,8 @@ int
 jensenio_eisa_intr_map(void *v, u_int eirq, eisa_intr_handle_t *ihp)
 {
 
-	if (eirq >= JENSEN_MAX_IRQ) {
-		printf("jensenio_eisa_intr_map: bogus IRQ %d", eirq);
-		*ihp = -1;
-		return (1);
-	}
+	if (*ihp >= JENSEN_MAX_IRQ)
+		panic("jensenio_eisa_intr_map: bogus IRQ %d", *ihp);
 
 	if (jensenio_intr_deftype[eirq] == IST_UNUSABLE) {
 		printf("jensenio_eisa_intr_map: unusable irq %d\n",
@@ -220,8 +224,7 @@ jensenio_eisa_intr_establish(void *v, int irq, int type, int level,
 
 	if (cookie != NULL &&
 	    alpha_shared_intr_firstactive(jensenio_eisa_intr, irq)) {
-		scb_set(0x800 + SCB_IDXTOVEC(irq), jensenio_iointr, NULL,
-		    level);
+		scb_set(0x800 + SCB_IDXTOVEC(irq), jensenio_iointr, NULL);
 		jensenio_setlevel(irq,
 		    alpha_shared_intr_get_sharetype(jensenio_eisa_intr,
 						    irq) == IST_LEVEL);

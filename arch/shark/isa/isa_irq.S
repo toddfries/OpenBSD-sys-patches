@@ -1,4 +1,4 @@
-/*	$NetBSD: isa_irq.S,v 1.12 2008/04/27 18:58:47 matt Exp $	*/
+/*	$NetBSD: isa_irq.S,v 1.4 2005/12/11 12:19:02 christos Exp $	*/
 
 /*
  * Copyright 1997
@@ -74,6 +74,8 @@
  * Created      : 27/09/94
  */
 
+#include "opt_irqstats.h"
+
 #include "assym.h"
 #include <machine/asm.h>
 #include <machine/cpu.h>
@@ -101,13 +103,19 @@
  * is zero then a pointer to the IRQ frame on the stack is passed instead.
  */
 
-.Ldisabled_mask:
+Ldisabled_mask:
 	.word	_C_LABEL(disabled_mask)
 
-.Lvam_io_data:
+Lcurrent_spl_level:	
+	.word	_C_LABEL(current_spl_level)
+
+Lcurrent_intr_depth:
+	.word	_C_LABEL(current_intr_depth)
+
+Lvam_io_data:
 	.word	_C_LABEL(isa_io_bs_tag)
 
-.Lspl_masks:
+Lspl_masks:
 	.word	_C_LABEL(spl_masks)
 
 /*
@@ -125,18 +133,18 @@ ASENTRY_NP(irq_entry)
 	sub	lr, lr, #0x00000004	/* Adjust the lr */
 
 	PUSHFRAMEINSVC			/* Push an interrupt frame */
-	ENABLE_ALIGNMENT_FAULTS		/* cpuinfo is in r4 after execution */
+	ENABLE_ALIGNMENT_FAULTS
 
 	/* Load r8 with the ISA 8259 irqs */
 	/* r8 <- irq's pending [15:0] */
 
 	/* address of 8259 #1 */
-	ldr	r0, .Lvam_io_data
+	ldr	r0, Lvam_io_data
 	ldr	r0, [r0]
 	ldrb	r8, [r0, #IO_ICU1]                /* ocw3 = irr */
 	
 	/* clear the IRR bits that are currently masked. */
-	ldr	r2, .Li8259_mask
+	ldr	r2, Li8259_mask
 	ldr	r2, [r2]
 	mvn	r2, r2                            /* disabled -> enabled */
 
@@ -158,13 +166,14 @@ ASENTRY_NP(irq_entry)
 	 * each time the interrupt handler is nested.
 	 */
 
-	ldr	r1, [r4, #CI_INTR_DEPTH]
+	ldr	r0, Lcurrent_intr_depth
+	ldr	r1, [r0]
 	add	r1, r1, #1
-	str	r1, [r4, #CI_INTR_DEPTH]
+	str	r1, [r0]
 
 	/* Block the current requested interrupts */
 
-	ldr	r1, .Ldisabled_mask
+	ldr	r1, Ldisabled_mask
 	ldr	r0, [r1]
 	stmfd	sp!, {r0}
 	orr	r0, r0, r8
@@ -182,14 +191,14 @@ ASENTRY_NP(irq_entry)
 	 * This would benefit from a special ffs type routine
 	 */
 
-	mov	r9, #(NIPL - 1)
-	ldr	r7, .Lspl_masks
+	mov	r9, #(_SPL_LEVELS - 1)
+	ldr	r7, Lspl_masks
 
-.Lfind_highest_ipl:
+Lfind_highest_ipl:
 	ldr	r2, [r7, r9, lsl #2]
 	tst	r8, r2
 	subeq	r9, r9, #1
-	beq	.Lfind_highest_ipl
+	beq	Lfind_highest_ipl
 
 	/* r9 = SPL level of highest priority interrupt */
 	add	r9, r9, #1
@@ -199,19 +208,20 @@ ASENTRY_NP(irq_entry)
 
 	str	r0, [r1]	
 
-	ldr	r1, [r4, #CI_CPL]
-	str	r9, [r4, #CI_CPL]
+	ldr	r0, Lcurrent_spl_level
+	ldr	r1, [r0]
+	str	r9, [r0]
 	stmfd	sp!, {r1}
 
 	/* Update the IOMD irq masks */
 	bl	_C_LABEL(irq_setmasks)
 
-	mrs     r0, cpsr_all		/* Enable IRQ's */
+        mrs     r0, cpsr_all		/* Enable IRQ's */
 	bic	r0, r0, #I32_bit
 	msr	cpsr_all, r0
 
-	ldr	r7, .Lirqhandlers
-	mov	r9, #0x00000001
+	ldr	r7, Lirqhandlers
+        mov	r9, #0x00000001
 
 irqloop:
 	/* This would benefit from a special ffs type routine */
@@ -224,16 +234,30 @@ irqloop:
 	moveq	r0, r8			/* IRQ requests as arg 0 */
 	beq	_C_LABEL(stray_irqhandler) /* call special handler */
 
-	ldr	r0, .Lcnt
+	ldr	r0, Lcnt
 	ldr	r1, [r0, #(V_INTR)]
 	add	r1, r1, #0x00000001
 	str	r1, [r0, #(V_INTR)]
+
+	/*
+	 * XXX: Should stats be accumlated for every interrupt routine called
+	 * or for every physical interrupt that is serviced.
+	 */
+
+#ifdef IRQSTATS
+        ldr	r0, Lintrcnt
+	ldr	r1, [r6, #(IH_NUM)]
+
+	add	r0, r0, r1, lsl #2
+	ldr	r1, [r0]
+	add	r1, r1, #0x00000001
+	str	r1, [r0]
+#endif	/* IRQSTATS */
 
 irqchainloop:
 	ldr	r0, [r6, #(IH_ARG)]	/* Get argument pointer */
 	teq	r0, #0x00000000		/* If arg is zero pass stack frame */
 	addeq	r0, sp, #8		/* ... stack frame */
-
 	mov	lr, pc			/* return address */
 	ldr	pc, [r6, #(IH_FUNC)]	/* Call handler */
 
@@ -243,15 +267,8 @@ irqchainloop:
 	ldr	r6, [r6, #(IH_NEXT)]
 	teq	r6, #0x00000000
 	bne	irqchainloop
-	b	nextirq
 
 irqdone:
-	add	r3, r6, #IH_EV_COUNT	/* get address of ih's ev_count */
-	ldmia   r3, {r1-r2}		/* load ev_count */
-	adds	r1, r1, #0x00000001	/* 64bit incr (lo) */
-	adc     r2, r2, #0x00000000	/* 64bit incr (hi) */
-	stmia   r3, {r1-r2}		/* store ev_count */
-
 nextirq:
 	add	r7, r7, #0x00000004	/* update pointer to handlers */
 	mov	r9, r9, lsl #1		/* move on to next bit */
@@ -259,29 +276,27 @@ nextirq:
 	bne	irqloop			/* no - loop back. */
 
 	ldmfd	sp!, {r2}
-	str	r2, [r4, #CI_CPL]
+	ldr	r1, Lcurrent_spl_level
+	str	r2, [r1]
 
 	/* Restore previous disabled mask */
 	ldmfd	sp!, {r2}
-	ldr	r1, .Ldisabled_mask
+	ldr	r1, Ldisabled_mask
 	str	r2, [r1]
 	bl	_C_LABEL(irq_setmasks)
 
-#ifdef __HAVE_FAST_SOFTINTS
 	bl	_C_LABEL(dosoftints)	/* Handle the soft interrupts */
-#endif
 
 	/* Kill IRQ's in preparation for exit */
-	mrs     r0, cpsr_all
-	orr     r0, r0, #(I32_bit)
-	msr     cpsr_all, r0
+        mrs     r0, cpsr_all
+        orr     r0, r0, #(I32_bit)
+        msr     cpsr_all, r0
 
 	/* Decrement the nest count */
-	ldr	r1, [r4, #CI_INTR_DEPTH]
+	ldr	r0, Lcurrent_intr_depth
+	ldr	r1, [r0]
 	sub	r1, r1, #1
-	str	r1, [r4, #CI_INTR_DEPTH]
-
-	LOCK_CAS_CHECK
+	str	r1, [r0]
 
 	DO_AST_AND_RESTORE_ALIGNMENT_FAULTS
 	PULLFRAMEFROMSVCANDEXIT
@@ -289,13 +304,11 @@ nextirq:
 	/* NOT REACHED */
 	b	. - 8
 
-.Lcurrent_mask:
+Lspl_mask:
+	.word	_C_LABEL(spl_mask)	/* irq's allowed at current spl level */
+
+Lcurrent_mask:
 	.word	_C_LABEL(current_mask)	/* irq's that are usable */
-
-.Lcpu_info_store:
-	.word	_C_LABEL(cpu_info_store)
-
-LOCK_CAS_CHECK_LOCALS
 
 AST_ALIGNMENT_FAULT_LOCALS
 
@@ -307,15 +320,13 @@ ENTRY(irq_setmasks)
 	msr	cpsr_all, r1
 
 	/* Calculate interrupt mask */
-	ldr	r1, .Lcurrent_mask	/* All the enabled interrupts */
+	ldr	r1, Lcurrent_mask	/* All the enabled interrupts */
 	ldrh	r1, [r1]		/* get hardware bits of mask */
 /*	.word	0xe0d110b0 */		/* hand-assembled ldrh r1, [r1] */
-	ldr	r0, .Lspl_masks
-	ldr	r2, .Lcpu_info_store
-	ldr	r2, [r2, #CI_CPL]
-	ldr	r2, [r0, r2, lsl #2]
+	ldr	r2, Lspl_mask		/* Block due to current spl level */
+	ldr	r2, [r2]
 	and	r1, r1, r2
-	ldr	r2, .Ldisabled_mask	/* Block due to active interrupts */
+	ldr	r2, Ldisabled_mask	/* Block due to active interrupts */
 	ldr	r2, [r2]
 	bic	r1, r1, r2
 
@@ -323,7 +334,7 @@ ENTRY(irq_setmasks)
 	   possible to avoid them */
 
 	/* get current mask: these are the bits */
-	ldr	r0, .Li8259_mask
+	ldr	r0, Li8259_mask
 	ldr	r2, [r0]
 	/*       r2 = 0000.0000.0000.0000.ZZZZ.ZZZZ.ZZZZ.ZZZZ   */
 
@@ -333,23 +344,23 @@ ENTRY(irq_setmasks)
 	biceq	r1, r1, #(1 << IRQ_SLAVE)  /* no, so disable it */
 	orrne	r1, r1, #(1 << IRQ_SLAVE)  /* yes, so enable it */
 	/* eq => r1 = 0000.0000.0000.0000.0000.0000.MMMM.M0MM
-	   ne => r1 = 0000.0000.0000.0000.MMMM.MMMM.MMMM.M1MM   */
+           ne => r1 = 0000.0000.0000.0000.MMMM.MMMM.MMMM.M1MM   */
 
 	/* 8259 bit high => disable */
 	mvn	r1, r1
 	/* eq => r1 = 1111.1111.1111.1111.1111.1111.YYYY.Y1YY
-	   ne => r1 = 1111.1111.1111.1111.YYYY.YYYY.YYYY.Y0YY
-	   (for each bit position Y = !M)                       */
+           ne => r1 = 1111.1111.1111.1111.YYYY.YYYY.YYYY.Y0YY
+           (for each bit position Y = !M)                       */
 
 	orreq	r1, r2, r1, lsl #16
 	/* eq => r1 = 1111.1111.YYYY.Y1YY.ZZZZ.ZZZZ.ZZZZ.ZZZZ
-	   ne => r1 = 1111.1111.1111.1111.YYYY.YYYY.YYYY.Y0YY   */
+           ne => r1 = 1111.1111.1111.1111.YYYY.YYYY.YYYY.Y0YY   */
 	orreq	r1, r1, #0x000000FF
 	/* eq => r1 = 1111.1111.YYYY.Y1YY.ZZZZ.ZZZZ.1111.1111
-	   ne => r1 = 1111.1111.1111.1111.YYYY.YYYY.YYYY.Y0YY   */
+           ne => r1 = 1111.1111.1111.1111.YYYY.YYYY.YYYY.Y0YY   */
 	and	r1, r1, r1, lsr #16
 	/* eq => r1 = 0000.0000.0000.0000.ZZZZ.ZZZZ.YYYY.Y1YY
-	   ne => r1 = 0000.0000.0000.0000.YYYY.YYYY.YYYY.Y0YY   */
+           ne => r1 = 0000.0000.0000.0000.YYYY.YYYY.YYYY.Y0YY   */
 
 	/* if old = new, don't bother to set again.
 	   fast path to exit, since 8259's are so slow anyway */
@@ -359,7 +370,7 @@ ENTRY(irq_setmasks)
 
 	/* have to set at least one of the 8259's, store new mask */
 	str	r1, [r0]
-	ldr	r0, .Lvam_io_data
+	ldr	r0, Lvam_io_data
 	ldr	r0, [r0]
 
 	/* see if there's any change for 8259 #1 (master) */
@@ -375,11 +386,117 @@ ENTRY(irq_setmasks)
 	msr	cpsr_all, r3
 	mov	pc, lr
 
-.Lcnt:
+Lcnt:
 	.word	_C_LABEL(uvmexp)
 
-.Li8259_mask:
+Lintrcnt:
+	.word	_C_LABEL(intrcnt)
+
+Li8259_mask:
 	.word	_C_LABEL(i8259_mask)
 
-.Lirqhandlers:
+Lirqhandlers:
 	.word	_C_LABEL(irqhandlers)	/* Pointer to array of irqhandlers */
+
+#ifdef IRQSTATS
+/* These symbols are used by vmstat */
+
+	.text
+	.global	_C_LABEL(_intrnames)
+_C_LABEL(_intrnames):
+	.word	_C_LABEL(intrnames)
+
+	.data
+
+	/* XXX fix */
+        .globl  _C_LABEL(intrnames), _C_LABEL(eintrnames), _C_LABEL(intrcnt), _C_LABEL(sintrcnt), _C_LABEL(eintrcnt)
+_C_LABEL(intrnames):
+	.asciz	"interrupt  0 "
+	.asciz	"interrupt  1 "
+	.asciz	"interrupt  2 "
+	.asciz	"interrupt  3 "
+	.asciz	"interrupt  4 "
+	.asciz	"interrupt  5 "
+	.asciz	"interrupt  6 "
+	.asciz	"interrupt  7 "
+	.asciz	"interrupt  8 "
+	.asciz	"interrupt  9 "
+	.asciz	"interrupt 10 "
+	.asciz	"interrupt 11 "
+	.asciz	"interrupt 12 "
+	.asciz	"interrupt 13 "
+	.asciz	"interrupt 14 "
+	.asciz	"interrupt 15 "
+	.asciz	"interrupt 16 "
+	.asciz	"interrupt 17 "
+	.asciz	"interrupt 18 "
+	.asciz	"interrupt 19 "
+	.asciz	"interrupt 20 "
+	.asciz	"interrupt 21 "
+	.asciz	"interrupt 22 "
+	.asciz	"interrupt 23 "
+	.asciz	"interrupt 24 "
+	.asciz	"interrupt 25 "
+	.asciz	"interrupt 26 "
+	.asciz	"interrupt 27 "
+	.asciz	"interrupt 28 "
+	.asciz	"interrupt 29 "
+	.asciz	"interrupt 30 "
+	.asciz	"interrupt 31 "
+
+_C_LABEL(sintrnames):
+	.asciz	"soft int  0  "
+	.asciz	"soft int  1  "
+	.asciz	"soft int  2  "
+	.asciz	"soft int  3  "
+	.asciz	"soft int  4  "
+	.asciz	"soft int  5  "
+	.asciz	"soft int  6  "
+	.asciz	"soft int  7  "
+	.asciz	"soft int  8  "
+	.asciz	"soft int  9  "
+	.asciz	"soft int 10  "
+	.asciz	"soft int 11  "
+	.asciz	"soft int 12  "
+	.asciz	"soft int 13  "
+	.asciz	"soft int 14  "
+	.asciz	"soft int 15  "
+	.asciz	"soft int 16  "
+	.asciz	"soft int 17  "
+	.asciz	"soft int 18  "
+	.asciz	"soft int 19  "
+	.asciz	"soft int 20  "
+	.asciz	"soft int 21  "
+	.asciz	"soft int 22  "
+	.asciz	"soft int 23  "
+	.asciz	"soft int 24  "
+	.asciz	"soft int 25  "
+	.asciz	"soft int 26  "
+	.asciz	"soft int 27  "
+	.asciz	"soft int 28  "
+	.asciz	"soft int 29  "
+	.asciz	"soft int 30  "
+	.asciz	"soft int 31  "
+_C_LABEL(eintrnames):
+
+	.bss
+	.align	0
+_C_LABEL(intrcnt):
+	.space	32*4	/* XXX Should be linked to number of interrupts */
+_C_LABEL(sintrcnt):
+	.space	32*4	/* XXX Should be linked to number of soft ints */
+_C_LABEL(eintrcnt):
+
+#else	/* IRQSTATS */
+	/* Dummy entries to keep vmstat happy */
+
+	.text
+        .globl  _C_LABEL(intrnames), _C_LABEL(eintrnames), _C_LABEL(intrcnt), _C_LABEL(eintrcnt)
+_C_LABEL(intrnames):
+	.long	0
+_C_LABEL(eintrnames):
+
+_C_LABEL(intrcnt):
+	.long	0
+_C_LABEL(eintrcnt):
+#endif	/* IRQSTATS */

@@ -1,4 +1,4 @@
-/*	$NetBSD: zs.c,v 1.40 2008/12/31 09:50:21 isaki Exp $	*/
+/*	$NetBSD: zs.c,v 1.29 2006/03/28 17:38:28 thorpej Exp $	*/
 
 /*-
  * Copyright (c) 1998 Minoura Makoto
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -40,7 +47,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: zs.c,v 1.40 2008/12/31 09:50:21 isaki Exp $");
+__KERNEL_RCSID(0, "$NetBSD: zs.c,v 1.29 2006/03/28 17:38:28 thorpej Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -53,16 +60,14 @@ __KERNEL_RCSID(0, "$NetBSD: zs.c,v 1.40 2008/12/31 09:50:21 isaki Exp $");
 #include <sys/tty.h>
 #include <sys/time.h>
 #include <sys/syslog.h>
-#include <sys/cpu.h>
-#include <sys/bus.h>
-#include <sys/intr.h>
 
+#include <machine/cpu.h>
+#include <machine/bus.h>
 #include <arch/x68k/dev/intiovar.h>
 #include <machine/z8530var.h>
 
 #include <dev/ic/z8530reg.h>
 
-#include "ioconf.h"
 #include "zsc.h"	/* NZSC */
 #include "opt_zsc.h"
 #ifndef ZSCN_SPEED
@@ -97,7 +102,7 @@ static bus_addr_t zs_physaddr[ZS_MAXDEV] = {
 	0x00eafc30
 };
 
-static uint8_t zs_init_reg[16] = {
+static u_char zs_init_reg[16] = {
 	0,	/* 0: CMD (reset, etc.) */
 	0,	/* 1: No interrupts yet. */
 	0x70,	/* 2: XXX: IVECT */
@@ -124,41 +129,44 @@ static volatile struct zschan *conschan = 0;
  ****************************************************************/
 
 /* Definition of the driver for autoconfig. */
-static int	zs_match(device_t, cfdata_t, void *);
-static void	zs_attach(device_t, device_t, void *);
+static int	zs_match(struct device *, struct cfdata *, void *);
+static void	zs_attach(struct device *, struct device *, void *);
 static int	zs_print(void *, const char *name);
 
-CFATTACH_DECL_NEW(zsc, sizeof(struct zsc_softc),
+CFATTACH_DECL(zsc, sizeof(struct zsc_softc),
     zs_match, zs_attach, NULL, NULL);
 
+extern struct cfdriver zsc_cd;
+
 static int zshard(void *);
+int zssoft(void *);
 static int zs_get_speed(struct zs_chanstate *);
 
 
 /*
  * Is the zs chip present?
  */
-static int
-zs_match(device_t parent, cfdata_t cf, void *aux)
+static int 
+zs_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct intio_attach_args *ia = aux;
-	struct zsdevice *zsaddr = (void *)ia->ia_addr;
+	struct zsdevice *zsaddr = (void*) ia->ia_addr;
 	int i;
 
-	if (strcmp(ia->ia_name, "zsc") != 0)
+	if (strcmp (ia->ia_name, "zsc") != 0)
 		return 0;
 
 	for (i = 0; i < ZS_MAXDEV; i++)
-		if (zsaddr == (void *)zs_physaddr[i]) /* XXX */
+		if (zsaddr == (void*) zs_physaddr[i]) /* XXX */
 			break;
 
 	ia->ia_size = 8;
-	if (intio_map_allocate_region(parent, ia, INTIO_MAP_TESTONLY))
+	if (intio_map_allocate_region (parent, ia, INTIO_MAP_TESTONLY))
 		return 0;
 
-	if (zsaddr != (void *)zs_physaddr[i])
+	if (zsaddr != (void*) zs_physaddr[i])
 		return 0;
-	if (badaddr((void *)IIOV(zsaddr)))
+	if (badaddr(INTIO_ADDR(zsaddr)))
 		return 0;
 
 	return (1);
@@ -167,50 +175,49 @@ zs_match(device_t parent, cfdata_t cf, void *aux)
 /*
  * Attach a found zs.
  */
-static void
-zs_attach(device_t parent, device_t self, void *aux)
+static void 
+zs_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct zsc_softc *zsc = device_private(self);
+	struct zsc_softc *zsc = (void *) self;
 	struct intio_attach_args *ia = aux;
 	struct zsc_attach_args zsc_args;
 	volatile struct zschan *zc;
 	struct zs_chanstate *cs;
 	int r, s, zs_unit, channel;
 
-	zsc->zsc_dev = self;
-	aprint_normal("\n");
-
-	zs_unit = device_unit(self);
-	zsc->zsc_addr = (void *)ia->ia_addr;
+	zs_unit = device_unit(&zsc->zsc_dev);
+	zsc->zsc_addr = (void*) ia->ia_addr;
 
 	ia->ia_size = 8;
-	r = intio_map_allocate_region(parent, ia, INTIO_MAP_ALLOCATE);
+	r = intio_map_allocate_region (parent, ia, INTIO_MAP_ALLOCATE);
 #ifdef DIAGNOSTIC
 	if (r)
-		panic("zs: intio IO map corruption");
+		panic ("zs: intio IO map corruption");
 #endif
+
+	printf("\n");
 
 	/*
 	 * Initialize software state for each channel.
 	 */
 	for (channel = 0; channel < 2; channel++) {
-		device_t child;
+		struct device *child;
 
 		zsc_args.channel = channel;
 		zsc_args.hwflags = 0;
 		cs = &zsc->zsc_cs_store[channel];
 		zsc->zsc_cs[channel] = cs;
 
-		zs_lock_init(cs);
+		simple_lock_init(&cs->cs_lock);
 		cs->cs_channel = channel;
 		cs->cs_private = NULL;
 		cs->cs_ops = &zsops_null;
 		cs->cs_brg_clk = PCLK / 16;
 
 		if (channel == 0)
-			zc = (volatile void *)IIOV(&zsc->zsc_addr->zs_chan_a);
+			zc = (volatile void*) INTIO_ADDR(&zsc->zsc_addr->zs_chan_a);
 		else
-			zc = (volatile void *)IIOV(&zsc->zsc_addr->zs_chan_b);
+			zc = (volatile void*) INTIO_ADDR(&zsc->zsc_addr->zs_chan_b);
 		cs->cs_reg_csr  = &zc->zc_csr;
 		cs->cs_reg_data = &zc->zc_data;
 
@@ -251,13 +258,13 @@ zs_attach(device_t parent, device_t self, void *aux)
 		child = config_found(self, (void *)&zsc_args, zs_print);
 #if ZSTTY > 0
 		if (zc == conschan &&
-		    ((child && strcmp(device_xname(child), "zstty0")) ||
+		    ((child && strcmp (child->dv_xname, "zstty0")) ||
 		     child == NULL)) /* XXX */
-			panic("%s: console device mismatch", __func__);
+			panic ("zs_attach: console device mismatch");
 #endif
 		if (child == NULL) {
 			/* No sub-driver.  Just reset it. */
-			uint8_t reset = (channel == 0) ?
+			u_char reset = (channel == 0) ?
 				ZSWR9_A_RESET : ZSWR9_B_RESET;
 			s = splzs();
 			zs_write_reg(cs,  9, reset);
@@ -269,9 +276,7 @@ zs_attach(device_t parent, device_t self, void *aux)
 	 * Now safe to install interrupt handlers.
 	 */
 	if (intio_intr_establish(ia->ia_intr, "zs", zshard, zsc))
-		panic("%s: interrupt vector busy", __func__);
-	zsc->zsc_softintr_cookie = softint_establish(SOFTINT_SERIAL,
-	    (void (*)(void *))zsc_intr_soft, zsc);
+		panic("zs_attach: interrupt vector busy");
 	/* XXX; evcnt_attach() ? */
 
 	/*
@@ -287,7 +292,7 @@ zs_attach(device_t parent, device_t self, void *aux)
 	splx(s);
 }
 
-static int
+static int 
 zs_print(void *aux, const char *name)
 {
 	struct zsc_attach_args *args = aux;
@@ -306,7 +311,7 @@ zs_print(void *aux, const char *name)
  * For x68k-port, we don't use autovectored interrupt.
  * We do not need to look at all of the zs chips.
  */
-static int
+static int 
 zshard(void *arg)
 {
 	struct zsc_softc *zsc = arg;
@@ -316,7 +321,7 @@ zshard(void *arg)
 	/*
 	 * Actually, zs hardware ipl is 5.
 	 * Here we disable all interrupts to shorten the zshard
-	 * handling time.  Otherwise, too many characters are
+	 * handling time.  Otherwise, too many characters are 
 	 * dropped.
 	 */
 	s = splhigh();
@@ -324,15 +329,38 @@ zshard(void *arg)
 
 	/* We are at splzs here, so no need to lock. */
 	if (zsc->zsc_cs[0]->cs_softreq || zsc->zsc_cs[1]->cs_softreq)
-		softint_schedule(zsc->zsc_softintr_cookie);
+		setsoftserial();
 
 	return (rval);
 }
 
 /*
+ * Shared among the all chips. We have to look at all of them.
+ */
+int 
+zssoft(void *arg)
+{
+	struct zsc_softc *zsc;
+	int s, unit;
+
+	/* Make sure we call the tty layer at spltty. */
+	s = spltty();
+	for (unit = 0; unit < zsc_cd.cd_ndevs; unit++) {
+		zsc = zsc_cd.cd_devs[unit];
+		if (zsc == NULL)
+			continue;
+		(void) zsc_intr_soft(zsc);
+	}
+	splx(s);
+
+	return (1);
+}
+
+
+/*
  * Compute the current baud rate given a ZS channel.
  */
-static int
+static int 
 zs_get_speed(struct zs_chanstate *cs)
 {
 	int tconst;
@@ -345,7 +373,7 @@ zs_get_speed(struct zs_chanstate *cs)
 /*
  * MD functions for setting the baud rate and control modes.
  */
-int
+int 
 zs_set_speed(struct zs_chanstate *cs, int bps	/* bits per second */)
 {
 	int tconst, real_bps;
@@ -385,7 +413,7 @@ zs_set_speed(struct zs_chanstate *cs, int bps	/* bits per second */)
 	return (0);
 }
 
-int
+int 
 zs_set_modes(struct zs_chanstate *cs, int cflag	/* bits per second */)
 {
 	int s;
@@ -429,10 +457,12 @@ zs_set_modes(struct zs_chanstate *cs, int cflag	/* bits per second */)
  * Read or write the chip with suitable delays.
  */
 
-uint8_t
-zs_read_reg(struct zs_chanstate *cs, uint8_t reg)
+u_char
+zs_read_reg(cs, reg)
+	struct zs_chanstate *cs;
+	u_char reg;
 {
-	uint8_t val;
+	u_char val;
 
 	*cs->cs_reg_csr = reg;
 	ZS_DELAY();
@@ -442,7 +472,9 @@ zs_read_reg(struct zs_chanstate *cs, uint8_t reg)
 }
 
 void
-zs_write_reg(struct zs_chanstate *cs, uint8_t reg, uint8_t val)
+zs_write_reg(cs, reg, val)
+	struct zs_chanstate *cs;
+	u_char reg, val;
 {
 	*cs->cs_reg_csr = reg;
 	ZS_DELAY();
@@ -450,40 +482,44 @@ zs_write_reg(struct zs_chanstate *cs, uint8_t reg, uint8_t val)
 	ZS_DELAY();
 }
 
-uint8_t
-zs_read_csr(struct zs_chanstate *cs)
+u_char zs_read_csr(cs)
+	struct zs_chanstate *cs;
 {
-	uint8_t val;
+	u_char val;
 
 	val = *cs->cs_reg_csr;
 	ZS_DELAY();
 	return val;
 }
 
-void
-zs_write_csr(struct zs_chanstate *cs, uint8_t val)
+void  zs_write_csr(cs, val)
+	struct zs_chanstate *cs;
+	u_char val;
 {
 	*cs->cs_reg_csr = val;
 	ZS_DELAY();
 }
 
-uint8_t
-zs_read_data(struct zs_chanstate *cs)
+u_char zs_read_data(cs)
+	struct zs_chanstate *cs;
 {
-	uint8_t val;
+	u_char val;
 
 	val = *cs->cs_reg_data;
 	ZS_DELAY();
 	return val;
 }
 
-void
-zs_write_data(struct zs_chanstate *cs, uint8_t val)
+void  zs_write_data(cs, val)
+	struct zs_chanstate *cs;
+	u_char val;
 {
 	*cs->cs_reg_data = val;
 	ZS_DELAY();
 }
 
+
+static struct zs_chanstate zscn_cs;
 
 /****************************************************************
  * Console support functions (x68k specific!)
@@ -495,7 +531,7 @@ zs_write_data(struct zs_chanstate *cs, uint8_t val)
 /*
  * Handle user request to enter kernel debugger.
  */
-void
+void 
 zs_abort(struct zs_chanstate *cs)
 {
 	int rr0;
@@ -510,7 +546,7 @@ zs_abort(struct zs_chanstate *cs)
 #ifdef DDB
 	Debugger();
 #else
-	printf("BREAK!!\n");
+	printf ("BREAK!!\n");
 #endif
 }
 
@@ -522,8 +558,6 @@ cons_decl(zs);
 
 static int zs_getc(void);
 static void zs_putc(int);
-
-static struct zs_chanstate zscn_cs;
 
 /*
  * Polled input char.
@@ -539,7 +573,7 @@ zs_getc(void)
 		rr0 = zs_read_csr(&zscn_cs);
 	} while ((rr0 & ZSRR0_RX_READY) == 0);
 
-	c = zs_read_data(&zscn_cs);
+	c = zs_read_data (&zscn_cs);
 	splx(s);
 
 	/*
@@ -552,7 +586,7 @@ zs_getc(void)
 /*
  * Polled output char.
  */
-static void
+static void 
 zs_putc(int c)
 {
 	int s, rr0;
@@ -560,20 +594,20 @@ zs_putc(int c)
 	s = splzs();
 	/* Wait for transmitter to become ready. */
 	do {
-		rr0 = zs_read_csr(&zscn_cs);
+		rr0 = zs_read_csr (&zscn_cs);
 	} while ((rr0 & ZSRR0_TX_READY) == 0);
 
 	zs_write_data(&zscn_cs, c);
 	splx(s);
 }
 
-void
+void 
 zscninit(struct consdev *cn)
 {
-	volatile struct zschan *cnchan = (volatile void *)IIOV(ZSCN_PHYSADDR);
+	volatile struct zschan *cnchan = (volatile void*) INTIO_ADDR(ZSCN_PHYSADDR);
 	int s;
 
-	memset(&zscn_cs, 0, sizeof(struct zs_chanstate));
+	memset(&zscn_cs, 0, sizeof (struct zs_chanstate));
 	zscn_cs.cs_reg_csr = &cnchan->zc_csr;
 	zscn_cs.cs_reg_data = &cnchan->zc_data;
 	zscn_cs.cs_channel = 0;
@@ -591,7 +625,7 @@ zscninit(struct consdev *cn)
 /*
  * Polled console input putchar.
  */
-int
+int 
 zscngetc(dev_t dev)
 {
 	return (zs_getc());
@@ -600,13 +634,13 @@ zscngetc(dev_t dev)
 /*
  * Polled console output putchar.
  */
-void
+void 
 zscnputc(dev_t dev, int c)
 {
 	zs_putc(c);
 }
 
-void
+void 
 zscnprobe(struct consdev *cd)
 {
 	int maj;
@@ -628,7 +662,7 @@ zscnprobe(struct consdev *cd)
 	}
 }
 
-void
+void 
 zscnpollc(dev_t dev, int on)
 {
 }

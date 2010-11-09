@@ -1,4 +1,4 @@
-/*	$NetBSD: wdc_spd.c,v 1.24 2008/04/28 20:23:31 martin Exp $	*/
+/*	$NetBSD: wdc_spd.c,v 1.22 2006/01/16 20:30:19 bouyer Exp $	*/
 
 /*-
  * Copyright (c) 2001, 2003 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: wdc_spd.c,v 1.24 2008/04/28 20:23:31 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: wdc_spd.c,v 1.22 2006/01/16 20:30:19 bouyer Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -81,10 +88,10 @@ struct wdc_spd_softc {
 #define STATIC static
 #endif
 
-STATIC int wdc_spd_match(device_t, cfdata_t, void *);
-STATIC void wdc_spd_attach(device_t, device_t, void *);
+STATIC int wdc_spd_match(struct device *, struct cfdata *, void *);
+STATIC void wdc_spd_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(wdc_spd, sizeof (struct wdc_spd_softc),
+CFATTACH_DECL(wdc_spd, sizeof (struct wdc_spd_softc),
     wdc_spd_match, wdc_spd_attach, NULL, NULL);
 
 extern struct cfdriver wdc_cd;
@@ -163,7 +170,7 @@ STATIC const struct playstation2_bus_space _wdc_spd_space = {
 };
 
 int
-wdc_spd_match(device_t parent, cfdata_t cf, void *aux)
+wdc_spd_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct spd_attach_args *spa = aux;
 	struct ata_channel ch;
@@ -191,16 +198,15 @@ wdc_spd_match(device_t parent, cfdata_t cf, void *aux)
 }
 
 void
-wdc_spd_attach(device_t parent, device_t self, void *aux)
+wdc_spd_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct spd_attach_args *spa = aux;
-	struct wdc_spd_softc *sc = device_private(self);
+	struct wdc_spd_softc *sc = (void *)self;
 	struct wdc_softc *wdc = &sc->sc_wdcdev;
 	struct ata_channel *ch = &sc->sc_channel;
 
-	aprint_normal(": %s\n", spa->spa_product_name);
+	printf(": %s\n", spa->spa_product_name);
 
-	sc->sc_wdcdev.sc_atac.atac_dev = self;
 	sc->sc_wdcdev.regs = &sc->sc_wdc_regs;
 
 	wdc->sc_atac.atac_cap =

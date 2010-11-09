@@ -27,7 +27,7 @@
  *	i4b_tel.c - device driver for ISDN telephony
  *	--------------------------------------------
  *
- *	$Id: i4b_tel.c,v 1.22 2008/03/01 14:16:52 rmind Exp $
+ *	$Id: i4b_tel.c,v 1.18 2006/11/16 01:33:49 christos Exp $
  *
  * $FreeBSD$
  *
@@ -36,7 +36,7 @@
  *---------------------------------------------------------------------------*/
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: i4b_tel.c,v 1.22 2008/03/01 14:16:52 rmind Exp $");
+__KERNEL_RCSID(0, "$NetBSD: i4b_tel.c,v 1.18 2006/11/16 01:33:49 christos Exp $");
 
 #include "isdntel.h"
 
@@ -97,6 +97,9 @@ __KERNEL_RCSID(0, "$NetBSD: i4b_tel.c,v 1.22 2008/03/01 14:16:52 rmind Exp $");
 #include <netisdn/i4b_l4.h>
 
 /* minor number: lower 6 bits = unit number */
+
+#include <netisdn/i4b_l4.h>
+
 #define UNITBITS	6
 #define UNITMASK	0x3f
 #define	UNIT(n)		(minor(n) & UNITMASK)
@@ -176,7 +179,7 @@ static u_char sinetab[];
 #ifndef __FreeBSD__
 #define	PDEVSTATIC	/* - not static - */
 PDEVSTATIC void isdntelattach __P((void));
-PDEVSTATIC int isdntelioctl __P((dev_t dev, u_long cmd, void *data, int flag, struct lwp *l));
+PDEVSTATIC int isdntelioctl __P((dev_t dev, u_long cmd, caddr_t data, int flag, struct lwp *l));
 
 int isdntelopen __P((dev_t dev, int flag, int fmt, struct lwp *l));
 int isdntelclose __P((dev_t dev, int flag, int fmt, struct lwp *l));
@@ -338,8 +341,6 @@ isdntelattach()
 	{
 		for(j=0; j < NOFUNCS; j++)
 		{
-			selinit(&tel_sc[i][j].selp);
-
 			tel_sc[i][j].devstate = ST_IDLE;
 			tel_sc[i][j].audiofmt = CVT_NONE;
 			tel_sc[i][j].rcvttab = 0;
@@ -440,7 +441,7 @@ isdntelclose(dev_t dev, int flag, int fmt,
 		{
 			sc->devstate |= ST_WRWAITEMPTY;
 
-			if((error = tsleep((void *) &sc->isdn_linktab->tx_queue,
+			if((error = tsleep((caddr_t) &sc->isdn_linktab->tx_queue,
 					TTIPRI | PCATCH, "wtcl", 0)) != 0)
 			{
 				break;
@@ -451,7 +452,7 @@ isdntelclose(dev_t dev, int flag, int fmt,
 
 	sc->devstate &= ~ST_ISOPEN;
 	splx(x);
-	wakeup((void *) &sc->tones);
+	wakeup((caddr_t) &sc->tones);
 
 	return(error);
 }
@@ -460,7 +461,7 @@ isdntelclose(dev_t dev, int flag, int fmt,
  *	i4btelioctl - device driver ioctl routine
  *---------------------------------------------------------------------------*/
 PDEVSTATIC int
-isdntelioctl(dev_t dev, u_long cmd, void *data, int flag,
+isdntelioctl(dev_t dev, u_long cmd, caddr_t data, int flag,
 	struct lwp *l)
 {
 	int unit = UNIT(dev);
@@ -538,7 +539,7 @@ isdntelioctl(dev_t dev, u_long cmd, void *data, int flag,
 				s = splnet();
 				while ((sc->devstate & ST_TONE) &&
 				    sc->tones.duration[sc->toneidx] != 0) {
-					if((error = tsleep((void *) &sc->tones,
+					if((error = tsleep((caddr_t) &sc->tones,
 					    TTIPRI | PCATCH, "rtone", 0 )) != 0) {
 					    	splx(s);
 						return(error);
@@ -608,7 +609,7 @@ isdntelread(dev_t dev, struct uio *uio, int ioflag)
 
 			NDBGL4(L4_TELDBG, "i4btel%d, queue empty!", unit);
 
-			if((error = tsleep((void *) &sc->isdn_linktab->rx_queue,
+			if((error = tsleep((caddr_t) &sc->isdn_linktab->rx_queue,
 						TTIPRI | PCATCH,
 						"rtel", 0 )) != 0)
 			{
@@ -668,7 +669,7 @@ isdntelread(dev_t dev, struct uio *uio, int ioflag)
 		{
 			sc->devstate |= ST_RDWAITDATA;
 
-			if((error = tsleep((void *) &sc->result,
+			if((error = tsleep((caddr_t) &sc->result,
 						TTIPRI | PCATCH,
 						"rtel1", 0 )) != 0)
 			{
@@ -732,7 +733,7 @@ isdntelwrite(dev_t dev, struct uio * uio, int ioflag)
 		{
 			sc->devstate |= ST_WRWAITEMPTY;
 
-			if((error = tsleep((void *) &sc->isdn_linktab->tx_queue,
+			if((error = tsleep((caddr_t) &sc->isdn_linktab->tx_queue,
 					TTIPRI | PCATCH, "wtel", 0)) != 0)
 			{
 				sc->devstate &= ~ST_WRWAITEMPTY;
@@ -850,7 +851,7 @@ tel_tone(tel_sc_t *sc)
 					sc->tonefreq = sc->tones.frequency[sc->toneidx];
 				}
 				if (sc->tones.duration[sc->toneidx] == 0) {
-					wakeup((void *) &sc->tones);
+					wakeup((caddr_t) &sc->tones);
 				}
 			}
 		}
@@ -1032,7 +1033,7 @@ isdntelkqfilter(dev_t dev, struct knote *kn)
 		else if (func == FUNCDIAL)
 			kn->kn_fop = &i4btel_dialread_filtops;
 		else
-			return (ENXIO);
+			return (1);
 		break;
 
 	case EVFILT_WRITE:
@@ -1042,11 +1043,11 @@ isdntelkqfilter(dev_t dev, struct knote *kn)
 		else if (func == FUNCDIAL)
 			kn->kn_fop = &i4btel_seltrue_filtops;
 		else
-			return (ENXIO);
+			return (1);
 		break;
 
 	default:
-		return (EINVAL);
+		return (1);
 	}
 
 	kn->kn_hook = sc;
@@ -1166,9 +1167,9 @@ tel_connect(void *softc, void *cdp)
 		if(sc->devstate & ST_RDWAITDATA)
 		{
 			sc->devstate &= ~ST_RDWAITDATA;
-			wakeup((void *) &sc->result);
+			wakeup((caddr_t) &sc->result);
 		}
-		selnotify(&sc->selp, 0, 0);
+		selnotify(&sc->selp, 0);
 	}
 }
 
@@ -1187,13 +1188,13 @@ tel_disconnect(void *softc, void *cdp)
 	if(sc->devstate & ST_RDWAITDATA)
 	{
 		sc->devstate &= ~ST_RDWAITDATA;
-		wakeup((void *) &sc->isdn_linktab->rx_queue);
+		wakeup((caddr_t) &sc->isdn_linktab->rx_queue);
 	}
 
 	if(sc->devstate & ST_WRWAITEMPTY)
 	{
 		sc->devstate &= ~ST_WRWAITEMPTY;
-		wakeup((void *) &sc->isdn_linktab->tx_queue);
+		wakeup((caddr_t) &sc->isdn_linktab->tx_queue);
 	}
 
 	/* dialer device */
@@ -1207,13 +1208,13 @@ tel_disconnect(void *softc, void *cdp)
 		if(sc->devstate & ST_RDWAITDATA)
 		{
 			sc->devstate &= ~ST_RDWAITDATA;
-			wakeup((void *) &sc->result);
+			wakeup((caddr_t) &sc->result);
 		}
-		selnotify(&sc->selp, 0, 0);
+		selnotify(&sc->selp, 0);
 
 		if (sc->devstate & ST_TONE) {
 			sc->devstate &= ~ST_TONE;
-			wakeup((void *) &sc->tones);
+			wakeup((caddr_t) &sc->tones);
 		}
 	}
 }
@@ -1235,9 +1236,9 @@ tel_dialresponse(void *softc, int status, cause_t cause)
 		if(sc->devstate & ST_RDWAITDATA)
 		{
 			sc->devstate &= ~ST_RDWAITDATA;
-			wakeup((void *) &sc->result);
+			wakeup((caddr_t) &sc->result);
 		}
-		selnotify(&sc->selp, 0, 0);
+		selnotify(&sc->selp, 0);
 	}
 }
 
@@ -1262,9 +1263,9 @@ tel_rx_data_rdy(void *softc)
 	if(sc->devstate & ST_RDWAITDATA)
 	{
 		sc->devstate &= ~ST_RDWAITDATA;
-		wakeup((void *) &sc->isdn_linktab->rx_queue);
+		wakeup((caddr_t) &sc->isdn_linktab->rx_queue);
 	}
-	selnotify(&sc->selp, 0, 0);
+	selnotify(&sc->selp, 0);
 }
 
 /*---------------------------------------------------------------------------*
@@ -1280,12 +1281,12 @@ tel_tx_queue_empty(void *softc)
 	if(sc->devstate & ST_WRWAITEMPTY)
 	{
 		sc->devstate &= ~ST_WRWAITEMPTY;
-		wakeup((void *) &sc->isdn_linktab->tx_queue);
+		wakeup((caddr_t) &sc->isdn_linktab->tx_queue);
 	}
 	if(sc->devstate & ST_TONE) {
 		tel_tone(sc);
 	} else {
-		selnotify(&sc->selp, 0, 0);
+		selnotify(&sc->selp, 0);
 	}
 }
 

@@ -1,4 +1,4 @@
-/*	$NetBSD: ipcomp_core.c,v 1.28 2008/05/05 13:41:30 ad Exp $	*/
+/*	$NetBSD: ipcomp_core.c,v 1.23 2006/11/16 01:33:45 christos Exp $	*/
 /*	$KAME: ipcomp_core.c,v 1.25 2001/07/26 06:53:17 jinmei Exp $	*/
 
 /*
@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ipcomp_core.c,v 1.28 2008/05/05 13:41:30 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ipcomp_core.c,v 1.23 2006/11/16 01:33:45 christos Exp $");
 
 #include "opt_inet.h"
 
@@ -56,7 +56,7 @@ __KERNEL_RCSID(0, "$NetBSD: ipcomp_core.c,v 1.28 2008/05/05 13:41:30 ad Exp $");
 #include <net/route.h>
 #include <net/netisr.h>
 #include <net/zlib.h>
-#include <sys/cpu.h>
+#include <machine/cpu.h>
 
 #include <netinet6/ipcomp.h>
 #include <netinet6/ipsec.h>
@@ -65,11 +65,11 @@ __KERNEL_RCSID(0, "$NetBSD: ipcomp_core.c,v 1.28 2008/05/05 13:41:30 ad Exp $");
 
 #include <net/net_osdep.h>
 
-static void *deflate_alloc(void *, u_int, u_int);
-static void deflate_free(void *, void *);
-static int deflate_common(struct mbuf *, struct mbuf *, size_t *, int);
-static int deflate_compress(struct mbuf *, struct mbuf *, size_t *);
-static int deflate_decompress(struct mbuf *, struct mbuf *, size_t *);
+static void *deflate_alloc __P((void *, u_int, u_int));
+static void deflate_free __P((void *, void *));
+static int deflate_common __P((struct mbuf *, struct mbuf *, size_t *, int));
+static int deflate_compress __P((struct mbuf *, struct mbuf *, size_t *));
+static int deflate_decompress __P((struct mbuf *, struct mbuf *, size_t *));
 
 /*
  * We need to use default window size (2^15 = 32Kbytes as of writing) for
@@ -87,7 +87,8 @@ static const struct ipcomp_algorithm ipcomp_algorithms[] = {
 };
 
 const struct ipcomp_algorithm *
-ipcomp_algorithm_lookup(int idx)
+ipcomp_algorithm_lookup(idx)
+	int idx;
 {
 
 	if (idx == SADB_X_CALG_DEFLATE)
@@ -109,12 +110,12 @@ deflate_free(void *aux, void *ptr)
 	free(ptr, M_TEMP);
 }
 
-/*
- * mode - 0: compress 1: decompress
- */
-
 static int
-deflate_common(struct mbuf *m, struct mbuf *md, size_t *lenp, int mode)
+deflate_common(m, md, lenp, mode)
+	struct mbuf *m;
+	struct mbuf *md;
+	size_t *lenp;
+	int mode;	/* 0: compress 1: decompress */
 {
 	struct mbuf *mprev;
 	struct mbuf *p;
@@ -312,7 +313,10 @@ fail:
 }
 
 static int
-deflate_compress(struct mbuf *m, struct mbuf *md, size_t *lenp)
+deflate_compress(m, md, lenp)
+	struct mbuf *m;
+	struct mbuf *md;
+	size_t *lenp;
 {
 	if (!m)
 		panic("m == NULL in deflate_compress");
@@ -325,7 +329,10 @@ deflate_compress(struct mbuf *m, struct mbuf *md, size_t *lenp)
 }
 
 static int
-deflate_decompress(struct mbuf *m, struct mbuf *md, size_t *lenp)
+deflate_decompress(m, md, lenp)
+	struct mbuf *m;
+	struct mbuf *md;
+	size_t *lenp;
 {
 	if (!m)
 		panic("m == NULL in deflate_decompress");

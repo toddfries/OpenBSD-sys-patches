@@ -1,4 +1,4 @@
-/*	$NetBSD: jazzisabr.c,v 1.12 2008/07/05 08:46:25 tsutsui Exp $	*/
+/*	$NetBSD: jazzisabr.c,v 1.11 2006/06/24 03:50:38 tsutsui Exp $	*/
 /*	$OpenBSD: isabus.c,v 1.15 1998/03/16 09:38:46 pefo Exp $	*/
 /*	NetBSD: isa.c,v 1.33 1995/06/28 04:30:51 cgd Exp 	*/
 
@@ -75,7 +75,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: jazzisabr.c,v 1.12 2008/07/05 08:46:25 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: jazzisabr.c,v 1.11 2006/06/24 03:50:38 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -92,14 +92,15 @@ __KERNEL_RCSID(0, "$NetBSD: jazzisabr.c,v 1.12 2008/07/05 08:46:25 tsutsui Exp $
 #include "ioconf.h"
 
 /* Definition of the driver for autoconfig. */
-static int	jazzisabrmatch(device_t,  cfdata_t, void *);
-static void	jazzisabrattach(device_t , device_t, void *);
+int	jazzisabrmatch(struct device *, struct cfdata *, void *);
+void	jazzisabrattach(struct device *, struct device *, void *);
+uint32_t jazzisabr_iointr(uint32_t, struct clockframe *);
 
-CFATTACH_DECL_NEW(jazzisabr, sizeof(struct isabr_softc),
+CFATTACH_DECL(jazzisabr, sizeof(struct isabr_softc),
     jazzisabrmatch, jazzisabrattach, NULL, NULL);
 
 int
-jazzisabrmatch(device_t parent, cfdata_t cf, void *aux)
+jazzisabrmatch(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct confargs *ca = aux;
 
@@ -111,11 +112,9 @@ jazzisabrmatch(device_t parent, cfdata_t cf, void *aux)
 }
 
 void
-jazzisabrattach(device_t parent, device_t self, void *aux)
+jazzisabrattach(struct device *parent, struct device *self, void *aux)
 {
-	struct isabr_softc *sc = device_private(self);
-
-	sc->sc_dev = self;
+	struct isabr_softc *sc = (struct isabr_softc *)self;
 
 	jazz_bus_dma_tag_init(&sc->sc_dmat);
 	(*platform->set_intr)(MIPS_INT_MASK_2, isabr_iointr, ARC_INTPRI_PCIISA);

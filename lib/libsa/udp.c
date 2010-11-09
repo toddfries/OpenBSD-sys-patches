@@ -1,4 +1,4 @@
-/*	$NetBSD: udp.c,v 1.8 2009/01/12 11:32:45 tsutsui Exp $	*/
+/*	$NetBSD: udp.c,v 1.5 2006/01/24 17:07:19 christos Exp $	*/
 
 /*
  * Copyright (c) 1992 Regents of the University of California.
@@ -64,7 +64,10 @@
 
 /* Caller must leave room for ethernet, ip and udp headers in front!! */
 ssize_t
-sendudp(struct iodesc *d, void *pkt, size_t len)
+sendudp(d, pkt, len)
+	struct iodesc *d;
+	void *pkt;
+	size_t len;
 {
 	ssize_t cc;
 	struct ip *ip;
@@ -87,7 +90,7 @@ sendudp(struct iodesc *d, void *pkt, size_t len)
 	ip = (struct ip *)uh - 1;
 	len += sizeof(*ip) + sizeof(*uh);
 
-	(void)memset(ip, 0, sizeof(*ip) + sizeof(*uh));
+	bzero(ip, sizeof(*ip) + sizeof(*uh));
 
 	ip->ip_v = IPVERSION;			/* half-char */
 	ip->ip_hl = sizeof(*ip) >> 2;		/* half-char */
@@ -110,7 +113,7 @@ sendudp(struct iodesc *d, void *pkt, size_t len)
 		/* Calculate checksum (must save and restore ip header) */
 		tip = *ip;
 		ui = (struct udpiphdr *)ip;
-		(void)memset(ui->ui_x1, 0, sizeof(ui->ui_x1));
+		bzero(ui->ui_x1, sizeof(ui->ui_x1));
 		ui->ui_len = uh->uh_ulen;
 		uh->uh_sum = ip_cksum(ui, len);
 		*ip = tip;
@@ -125,7 +128,7 @@ sendudp(struct iodesc *d, void *pkt, size_t len)
 
 	cc = sendether(d, ip, len, ea, ETHERTYPE_IP);
 	if (cc == -1)
-		return -1;
+		return (-1);
 	if ((size_t)cc != len)
 		panic("sendudp: bad write (%d != %d)", cc, len);
 	return (cc - (sizeof(*ip) + sizeof(*uh)));
@@ -136,7 +139,11 @@ sendudp(struct iodesc *d, void *pkt, size_t len)
  * Caller leaves room for the headers (Ether, IP, UDP)
  */
 ssize_t
-readudp(struct iodesc *d, void *pkt, size_t len, saseconds_t tleft)
+readudp(d, pkt, len, tleft)
+	struct iodesc *d;
+	void *pkt;
+	size_t len;
+	time_t tleft;
 {
 	ssize_t n;
 	size_t hlen;
@@ -180,16 +187,15 @@ readudp(struct iodesc *d, void *pkt, size_t len, saseconds_t tleft)
 	if (ip->ip_v != IPVERSION ||
 	    ip->ip_p != IPPROTO_UDP) {	/* half char */
 #ifdef NET_DEBUG
-		if (debug) {
-			printf("readudp: IP version or not UDP. "
-			       "ip_v=%d ip_p=%d\n", ip->ip_v, ip->ip_p);
-		}
+		if (debug)
+			printf("readudp: IP version or not UDP. ip_v=%d ip_p=%d\n", ip->ip_v, ip->ip_p);
 #endif
 		return -1;
 	}
 
 	hlen = ip->ip_hl << 2;
-	if (hlen < sizeof(*ip) || ip_cksum(ip, hlen) != 0) {
+	if (hlen < sizeof(*ip) ||
+	    ip_cksum(ip, hlen) != 0) {
 #ifdef NET_DEBUG
 		if (debug)
 			printf("readudp: short hdr or bad cksum.\n");
@@ -216,7 +222,7 @@ readudp(struct iodesc *d, void *pkt, size_t len, saseconds_t tleft)
 
 	/* If there were ip options, make them go away */
 	if (hlen != sizeof(*ip)) {
-		(void)memcpy(uh, ((u_char *)ip) + hlen, len - hlen);
+		bcopy(((u_char *)ip) + hlen, uh, len - hlen);
 		ip->ip_len = htons(sizeof(*ip));
 		n -= hlen - sizeof(*ip);
 	}
@@ -243,7 +249,7 @@ readudp(struct iodesc *d, void *pkt, size_t len, saseconds_t tleft)
 		/* Check checksum (must save and restore ip header) */
 		tip = *ip;
 		ui = (struct udpiphdr *)ip;
-		(void)memset(ui->ui_x1, 0, sizeof(ui->ui_x1));
+		bzero(ui->ui_x1, sizeof(ui->ui_x1));
 		ui->ui_len = uh->uh_ulen;
 		if (ip_cksum(ui, n) != 0) {
 #ifdef NET_DEBUG
@@ -266,5 +272,5 @@ readudp(struct iodesc *d, void *pkt, size_t len, saseconds_t tleft)
 	}
 
 	n -= sizeof(*ip) + sizeof(*uh);
-	return n;
+	return (n);
 }

@@ -1,4 +1,4 @@
-/*	$NetBSD: rf_driver.c,v 1.120 2008/12/20 17:04:51 oster Exp $	*/
+/*	$NetBSD: rf_driver.c,v 1.114 2007/03/04 06:02:37 christos Exp $	*/
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
  * All rights reserved.
@@ -14,6 +14,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -66,11 +73,9 @@
 
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: rf_driver.c,v 1.120 2008/12/20 17:04:51 oster Exp $");
+__KERNEL_RCSID(0, "$NetBSD: rf_driver.c,v 1.114 2007/03/04 06:02:37 christos Exp $");
 
-#ifdef _KERNEL_OPT
 #include "opt_raid_diagnostic.h"
-#endif
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -143,7 +148,7 @@ RF_DECLARE_MUTEX(rf_printf_mutex)	/* debug only:  avoids interleaved
 
 static int configureCount = 0;	/* number of active configurations */
 static int isconfigged = 0;	/* is basic raidframe (non per-array)
-				 * stuff configured */
+				 * stuff configged */
 RF_DECLARE_LKMGR_STATIC_MUTEX(configureMutex)	/* used to lock the configuration
 					 * stuff */
 static RF_ShutdownList_t *globalShutdown;	/* non array-specific
@@ -161,7 +166,7 @@ rf_BootRaidframe()
 	if (raidframe_booted)
 		return (EBUSY);
 	raidframe_booted = 1;
-	mutex_init(&configureMutex, MUTEX_DEFAULT, IPL_NONE);
+	lockinit(&configureMutex, PRIBIO, "RAIDframe lock", 0, 0);
  	configureCount = 0;
 	isconfigged = 0;
 	globalShutdown = NULL;
@@ -225,18 +230,9 @@ rf_Shutdown(RF_Raid_t *raidPtr)
 
 	/* Wait for any parity re-writes to stop... */
 	while (raidPtr->parity_rewrite_in_progress) {
-		printf("raid%d: Waiting for parity re-write to exit...\n",
-		       raidPtr->raidid);
+		printf("Waiting for parity re-write to exit...\n");
 		tsleep(&raidPtr->parity_rewrite_in_progress, PRIBIO,
 		       "rfprwshutdown", 0);
-	}
-
-	/* Wait for any reconstruction to stop... */
-	while (raidPtr->reconInProgress) {
-		printf("raid%d: Waiting for reconstruction to stop...\n",
-		       raidPtr->raidid);
-		tsleep(&raidPtr->waitForReconCond, PRIBIO,
-		       "rfreshutdown",0);
 	}
 
 	raidPtr->valid = 0;
@@ -429,10 +425,10 @@ rf_Configure(RF_Raid_t *raidPtr, RF_Config_t *cfgPtr, RF_AutoConfig_t *ac)
 		}
 	}
 	printf("\n");
-	printf("raid%d: Total Sectors: %" PRIu64 " (%" PRIu64 " MB)\n",
+	printf("raid%d: Total Sectors: %lu (%lu MB)\n",
 	       raidPtr->raidid,
-	       raidPtr->totalSectors,
-	       (raidPtr->totalSectors / 1024 *
+	       (unsigned long) raidPtr->totalSectors,
+	       (unsigned long) (raidPtr->totalSectors / 1024 *
 				(1 << raidPtr->logBytesPerSector) / 1024));
 
 	return (0);
@@ -805,7 +801,7 @@ rf_ResumeNewRequests(RF_Raid_t *raidPtr)
 
 #if RF_DEBUG_QUIESCE
 	if (rf_quiesceDebug)
-		printf("raid%d: Resuming new requests\n", raidPtr->raidid);
+		printf("Resuming new reqs\n");
 #endif
 
 	RF_LOCK_MUTEX(raidPtr->access_suspend_mutex);

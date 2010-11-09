@@ -1,4 +1,4 @@
-/*	$NetBSD: wdc_ts.c,v 1.5 2008/04/28 20:23:17 martin Exp $ */
+/*	$NetBSD: wdc_ts.c,v 1.3 2006/01/16 20:30:19 bouyer Exp $ */
 
 /*-
  * Copyright (c) 1998, 2003 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: wdc_ts.c,v 1.5 2008/04/28 20:23:17 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: wdc_ts.c,v 1.3 2006/01/16 20:30:19 bouyer Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -56,47 +63,46 @@ struct wdc_ts_softc {
 	void	*sc_ih;
 };
 
-static int	wdc_ts_probe(device_t, cfdata_t, void *);
-static void	wdc_ts_attach(device_t, device_t, void *);
+static int	wdc_ts_probe(struct device *, struct cfdata *, void *);
+static void	wdc_ts_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(wdc_ts, sizeof(struct wdc_ts_softc),
+CFATTACH_DECL(wdc_ts, sizeof(struct wdc_ts_softc),
     wdc_ts_probe, wdc_ts_attach, NULL, NULL);
 
 static int
-wdc_ts_probe(device_t parent, cfdata_t match, void *aux)
+wdc_ts_probe(struct device *parent, struct cfdata *match, void *aux)
 {
 	return 1;
 }
 
 static void
-wdc_ts_attach(device_t parent, device_t self, void *aux)
+wdc_ts_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct wdc_ts_softc *sc = device_private(self);
+	struct wdc_ts_softc *sc = (void *)self;
 	struct wdc_regs *wdr;
 	struct tspld_attach_args *ta = aux;
 	int i;
 
-	sc->sc_wdcdev.sc_atac.atac_dev = self;
 	sc->sc_wdcdev.regs = wdr = &sc->wdc_regs;
 	wdr->cmd_iot = ta->ta_iot;
 	wdr->ctl_iot = ta->ta_iot;
 	if (bus_space_map(wdr->cmd_iot, 0x11000000, 8, 0, &wdr->cmd_baseioh) ||
 	    bus_space_map(wdr->ctl_iot, 0x10400006, 1, 0, &wdr->ctl_ioh)) {
-		aprint_error(": couldn't map registers\n");
+		printf(": couldn't map registers\n");
 		return;
 	}
 
 	for (i = 0; i < 8; i++) {
 		if (bus_space_subregion(wdr->cmd_iot,
 		      wdr->cmd_baseioh, i, 1, &wdr->cmd_iohs[i]) != 0) {
-			aprint_error(": couldn't subregion registers\n");
+			printf(": couldn't subregion registers\n");
 			return;
 		}
 	}
 
 
 	if (bus_space_map(wdr->cmd_iot, 0x21000000, 2, 0, &wdr->cmd_iohs[0])) {
-		aprint_error(": couldn't map registers\n");
+		printf(": couldn't map registers\n");
 		return;
 	}
 
@@ -113,7 +119,7 @@ wdc_ts_attach(device_t parent, device_t self, void *aux)
 	sc->ata_channel.ch_ndrive = 2;
 	wdc_init_shadow_regs(&sc->ata_channel);
 
-	aprint_normal("\n");
+	printf("\n");
 
 	sc->sc_ih = ep93xx_intr_establish(32, IPL_BIO, wdcintr, &sc->ata_channel);
 

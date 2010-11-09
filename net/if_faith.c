@@ -1,4 +1,4 @@
-/*	$NetBSD: if_faith.c,v 1.45 2008/11/07 00:20:13 dyoung Exp $	*/
+/*	$NetBSD: if_faith.c,v 1.37 2006/11/16 01:33:40 christos Exp $	*/
 /*	$KAME: if_faith.c,v 1.21 2001/02/20 07:59:26 itojun Exp $	*/
 
 /*
@@ -40,7 +40,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_faith.c,v 1.45 2008/11/07 00:20:13 dyoung Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_faith.c,v 1.37 2006/11/16 01:33:40 christos Exp $");
 
 #include "opt_inet.h"
 
@@ -54,7 +54,7 @@ __KERNEL_RCSID(0, "$NetBSD: if_faith.c,v 1.45 2008/11/07 00:20:13 dyoung Exp $")
 #include <sys/time.h>
 #include <sys/queue.h>
 
-#include <sys/cpu.h>
+#include <machine/cpu.h>
 
 #include <net/if.h>
 #include <net/if_types.h>
@@ -83,11 +83,10 @@ __KERNEL_RCSID(0, "$NetBSD: if_faith.c,v 1.45 2008/11/07 00:20:13 dyoung Exp $")
 
 #include <net/net_osdep.h>
 
-static int	faithioctl(struct ifnet *, u_long, void *);
-static int	faithoutput(struct ifnet *, struct mbuf *,
-		            const struct sockaddr *, struct rtentry *);
-static void	faithrtrequest(int, struct rtentry *,
-		               const struct rt_addrinfo *);
+static int	faithioctl(struct ifnet *, u_long, caddr_t);
+static int	faithoutput(struct ifnet *, struct mbuf *, struct sockaddr *,
+			    struct rtentry *);
+static void	faithrtrequest(int, struct rtentry *, struct rt_addrinfo *);
 
 void	faithattach(int);
 
@@ -112,9 +111,10 @@ faith_clone_create(struct if_clone *ifc, int unit)
 {
 	struct ifnet *ifp;
 
-	ifp = if_alloc(IFT_FAITH);
+	ifp = malloc(sizeof(*ifp), M_DEVBUF, M_WAITOK | M_ZERO);
 
-	if_initname(ifp, ifc->ifc_name, unit);
+	snprintf(ifp->if_xname, sizeof(ifp->if_xname), "%s%d",
+	    ifc->ifc_name, unit);
 
 	ifp->if_mtu = FAITHMTU;
 	/* Change to BROADCAST experimentaly to announce its prefix. */
@@ -146,26 +146,26 @@ faith_clone_destroy(struct ifnet *ifp)
 	return (0);
 }
 
-static int
-faithoutput(struct ifnet *ifp, struct mbuf *m, const struct sockaddr *dst,
+int
+faithoutput(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
     struct rtentry *rt)
 {
 	int s, isr;
-	uint32_t af;
 	struct ifqueue *ifq = 0;
 
 	if ((m->m_flags & M_PKTHDR) == 0)
 		panic("faithoutput no HDR");
-	af = dst->sa_family;
 #if NBPFILTER > 0
 	/* BPF write needs to be handled specially */
-	if (af == AF_UNSPEC) {
-		af = *(mtod(m, int *));
-		m_adj(m, sizeof(int));
+	if (dst->sa_family == AF_UNSPEC) {
+		dst->sa_family = *(mtod(m, int *));
+		m->m_len -= sizeof(int);
+		m->m_pkthdr.len -= sizeof(int);
+		m->m_data += sizeof(int);
 	}
 
 	if (ifp->if_bpf)
-		bpf_mtap_af(ifp->if_bpf, af, m);
+		bpf_mtap_af(ifp->if_bpf, dst->sa_family, m);
 #endif
 
 	if (rt && rt->rt_flags & (RTF_REJECT|RTF_BLACKHOLE)) {
@@ -175,7 +175,7 @@ faithoutput(struct ifnet *ifp, struct mbuf *m, const struct sockaddr *dst,
 	}
 	ifp->if_opackets++;
 	ifp->if_obytes += m->m_pkthdr.len;
-	switch (af) {
+	switch (dst->sa_family) {
 #ifdef INET
 	case AF_INET:
 		ifq = &ipintrq;
@@ -214,7 +214,7 @@ faithoutput(struct ifnet *ifp, struct mbuf *m, const struct sockaddr *dst,
 /* ARGSUSED */
 static void
 faithrtrequest(int cmd, struct rtentry *rt,
-    const struct rt_addrinfo *info)
+    struct rt_addrinfo *info)
 {
 	if (rt)
 		rt->rt_rmx.rmx_mtu = rt->rt_ifp->if_mtu; /* for ISO */
@@ -225,7 +225,7 @@ faithrtrequest(int cmd, struct rtentry *rt,
  */
 /* ARGSUSED */
 static int
-faithioctl(struct ifnet *ifp, u_long cmd, void *data)
+faithioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	struct ifaddr *ifa;
 	struct ifreq *ifr = (struct ifreq *)data;
@@ -233,7 +233,7 @@ faithioctl(struct ifnet *ifp, u_long cmd, void *data)
 
 	switch (cmd) {
 
-	case SIOCINITIFADDR:
+	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP | IFF_RUNNING;
 		ifa = (struct ifaddr *)data;
 		ifa->ifa_rtrequest = faithrtrequest;
@@ -264,10 +264,17 @@ faithioctl(struct ifnet *ifp, u_long cmd, void *data)
 		}
 		break;
 
-	default:
-		if ((error = ifioctl_common(ifp, cmd, data)) == ENETRESET)
-			error = 0;
+#ifdef SIOCSIFMTU
+	case SIOCSIFMTU:
+		ifp->if_mtu = ifr->ifr_mtu;
 		break;
+#endif
+
+	case SIOCSIFFLAGS:
+		break;
+
+	default:
+		error = EINVAL;
 	}
 	return (error);
 }

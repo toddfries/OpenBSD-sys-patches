@@ -1,4 +1,4 @@
-/*	$NetBSD: pckbc_elb.c,v 1.6 2008/04/28 20:23:17 martin Exp $	*/
+/*	$NetBSD: pckbc_elb.c,v 1.3 2005/12/11 12:17:12 christos Exp $	*/
 
 /*-
  * Copyright (c) 2003 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed by the NetBSD
+ *      Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: pckbc_elb.c,v 1.6 2008/04/28 20:23:17 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pckbc_elb.c,v 1.3 2005/12/11 12:17:12 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/conf.h>
@@ -50,15 +57,15 @@ struct pckbc_elb_softc {
 	int sc_irq;
 };
 
-static int	pckbc_elb_probe(device_t, cfdata_t, void *);
-static void	pckbc_elb_attach(device_t, device_t, void *);
+static int	pckbc_elb_probe(struct device *, struct cfdata *, void *);
+static void	pckbc_elb_attach(struct device *, struct device *, void *);
 static void	pckbc_elb_intr_establish(struct pckbc_softc *, pckbc_slot_t);
 
-CFATTACH_DECL_NEW(pckbc_elb, sizeof(struct pckbc_elb_softc),
+CFATTACH_DECL(pckbc_elb, sizeof(struct pckbc_elb_softc),
     pckbc_elb_probe, pckbc_elb_attach, NULL, NULL);
 
 int
-pckbc_elb_probe(device_t parent, cfdata_t cf, void *aux)
+pckbc_elb_probe(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct elb_attach_args *oaa = aux;
 
@@ -69,14 +76,12 @@ pckbc_elb_probe(device_t parent, cfdata_t cf, void *aux)
 }
 
 void
-pckbc_elb_attach(device_t parent, device_t self, void *aux)
+pckbc_elb_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct pckbc_elb_softc *msc = device_private(self);
+	struct pckbc_elb_softc *msc = (void *)self;
 	struct pckbc_softc *sc = &msc->sc_pckbc;
 	struct elb_attach_args *eaa = aux;
 	struct pckbc_internal *t;
-
-	sc->sc_dv = self;
 
 	/*
 	 * Setup interrupt data.
@@ -93,15 +98,13 @@ pckbc_elb_attach(device_t parent, device_t self, void *aux)
 	}
 
 	t->t_iot = eaa->elb_bt;
-	bus_space_map(eaa->elb_bt,
-	    _BUS_SPACE_UNSTRIDE(eaa->elb_bt, eaa->elb_base), 1, 0, &t->t_ioh_d);
-	bus_space_map(eaa->elb_bt,
-	    _BUS_SPACE_UNSTRIDE(eaa->elb_bt, eaa->elb_base2), 1, 0, &t->t_ioh_c);
+	bus_space_map(eaa->elb_bt, eaa->elb_base, 1, 0, &t->t_ioh_d);
+	bus_space_map(eaa->elb_bt, eaa->elb_base2, 1, 0, &t->t_ioh_c);
 	t->t_addr = eaa->elb_base;
 	t->t_sc = sc;
 	sc->id = t;
 
-	aprint_normal("\n");
+	printf("\n");
 
 	pckbc_attach(sc);
 }

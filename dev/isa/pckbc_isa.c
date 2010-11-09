@@ -1,4 +1,4 @@
-/* $NetBSD: pckbc_isa.c,v 1.25 2008/05/25 16:19:12 jmcneill Exp $ */
+/* $NetBSD: pckbc_isa.c,v 1.22 2007/10/19 12:00:22 ad Exp $ */
 
 /*
  * Copyright (c) 1998
@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: pckbc_isa.c,v 1.25 2008/05/25 16:19:12 jmcneill Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pckbc_isa.c,v 1.22 2007/10/19 12:00:22 ad Exp $");
 
 #include "opt_pckbc.h"
 
@@ -38,6 +38,7 @@ __KERNEL_RCSID(0, "$NetBSD: pckbc_isa.c,v 1.25 2008/05/25 16:19:12 jmcneill Exp 
 #include <sys/malloc.h>
 #include <sys/errno.h>
 #include <sys/queue.h>
+#include <sys/lock.h>
 
 #include <sys/bus.h>
 
@@ -47,8 +48,8 @@ __KERNEL_RCSID(0, "$NetBSD: pckbc_isa.c,v 1.25 2008/05/25 16:19:12 jmcneill Exp 
 #include <dev/ic/i8042reg.h>
 #include <dev/ic/pckbcvar.h>
 
-int	pckbc_isa_match(device_t, cfdata_t, void *);
-void	pckbc_isa_attach(device_t, device_t, void *);
+int	pckbc_isa_match(struct device *, struct cfdata *, void *);
+void	pckbc_isa_attach(struct device *, struct device *, void *);
 
 struct pckbc_isa_softc {
 	struct pckbc_softc sc_pckbc;
@@ -57,13 +58,14 @@ struct pckbc_isa_softc {
 	int sc_irq[PCKBC_NSLOTS];
 };
 
-CFATTACH_DECL_NEW(pckbc_isa, sizeof(struct pckbc_isa_softc),
+CFATTACH_DECL(pckbc_isa, sizeof(struct pckbc_isa_softc),
     pckbc_isa_match, pckbc_isa_attach, NULL, NULL);
 
 void	pckbc_isa_intr_establish(struct pckbc_softc *, pckbc_slot_t);
 
 int
-pckbc_isa_match(device_t parent, cfdata_t match, void *aux)
+pckbc_isa_match(struct device *parent, struct cfdata *match,
+    void *aux)
 {
 	struct isa_attach_args *ia = aux;
 	bus_space_tag_t iot = ia->ia_iot;
@@ -119,7 +121,7 @@ pckbc_isa_match(device_t parent, cfdata_t match, void *aux)
 #ifndef PCKBCNOTEST
 		if (res != 0x55) {
 #ifdef PCKBCDEBUG
-			aprint_verbose("kbc selftest: %x\n", res);
+			printf("kbc selftest: %x\n", res);
 #endif
 			ok = 0;
 		}
@@ -142,16 +144,15 @@ pckbc_isa_match(device_t parent, cfdata_t match, void *aux)
 }
 
 void
-pckbc_isa_attach(device_t parent, device_t self, void *aux)
+pckbc_isa_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct pckbc_isa_softc *isc = device_private(self);
+	struct pckbc_isa_softc *isc = (void *)self;
 	struct pckbc_softc *sc = &isc->sc_pckbc;
 	struct isa_attach_args *ia = aux;
 	struct pckbc_internal *t;
 	bus_space_tag_t iot;
 	bus_space_handle_t ioh_d, ioh_c;
 
-	sc->sc_dv = self;
 	isc->sc_ic = ia->ia_ic;
 	iot = ia->ia_iot;
 
@@ -201,17 +202,16 @@ pckbc_isa_attach(device_t parent, device_t self, void *aux)
 	t->t_sc = sc;
 	sc->id = t;
 
-	aprint_normal("\n");
-
-	if (!pmf_device_register(self, NULL, pckbc_resume))
-		aprint_error_dev(self, "couldn't establish power handler\n");
+	printf("\n");
 
 	/* Finish off the attach. */
 	pckbc_attach(sc);
 }
 
 void
-pckbc_isa_intr_establish(struct pckbc_softc *sc, pckbc_slot_t slot)
+pckbc_isa_intr_establish(sc, slot)
+	struct pckbc_softc *sc;
+	pckbc_slot_t slot;
 {
 	struct pckbc_isa_softc *isc = (void *) sc;
 	void *rv;
@@ -219,11 +219,10 @@ pckbc_isa_intr_establish(struct pckbc_softc *sc, pckbc_slot_t slot)
 	rv = isa_intr_establish(isc->sc_ic, isc->sc_irq[slot], IST_EDGE,
 	    IPL_TTY, pckbcintr, sc);
 	if (rv == NULL) {
-		aprint_error_dev(sc->sc_dv,
-		    "unable to establish interrupt for %s slot\n",
-		    pckbc_slot_names[slot]);
+		printf("%s: unable to establish interrupt for %s slot\n",
+		    sc->sc_dv.dv_xname, pckbc_slot_names[slot]);
 	} else {
-		aprint_normal_dev(sc->sc_dv, "using irq %d for %s slot\n",
+		printf("%s: using irq %d for %s slot\n", sc->sc_dv.dv_xname,
 		    isc->sc_irq[slot], pckbc_slot_names[slot]);
 	}
 }

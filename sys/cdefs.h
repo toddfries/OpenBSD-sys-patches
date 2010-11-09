@@ -1,4 +1,4 @@
-/*	$NetBSD: cdefs.h,v 1.72 2009/01/14 19:41:55 pooka Exp $	*/
+/*	$NetBSD: cdefs.h,v 1.65 2007/09/15 14:24:27 ragge Exp $	*/
 
 /*
  * Copyright (c) 1991, 1993
@@ -171,30 +171,18 @@
  * these work for GNU C++ (modulo a slight glitch in the C++ grammar
  * in the distribution version of 2.5.5).
  */
-#if !__GNUC_PREREQ__(2, 0)
-#define __attribute__(x)
-#endif
-
-#if __GNUC_PREREQ__(2, 5)
-#define	__dead		__attribute__((__noreturn__))
-#elif defined(__GNUC__)
+#if !__GNUC_PREREQ__(2, 5)
+#define	__attribute__(x)	/* delete __attribute__ if non-gcc or gcc1 */
+#if defined(__GNUC__) && !defined(__STRICT_ANSI__)
 #define	__dead		__volatile
-#else
-#define	__dead
-#endif
-
-#if __GNUC_PREREQ__(2, 96)
-#define	__pure		__attribute__((__pure__))
-#elif defined(__GNUC__)
 #define	__pure		__const
-#else
-#define	__pure
+#endif
 #endif
 
-#if __GNUC_PREREQ__(3, 0)
-#define	__noinline	__attribute__((__noinline__))
-#else
-#define	__noinline	/* nothing */
+/* Delete pseudo-keywords wherever they are not available or needed. */
+#ifndef __dead
+#define	__dead
+#define	__pure
 #endif
 
 #if __GNUC_PREREQ__(2, 7)
@@ -214,9 +202,9 @@
 #define	__aligned(x)	__attribute__((__aligned__(x)))
 #define	__section(x)	__attribute__((__section__(x)))
 #elif defined(__PCC__)
-#define	__packed	_Pragma("packed")
-#define	__aligned(x)   	_Pragma("aligned " #x)
-#define	__section(x)   	_Pragma("section " ## x)
+#define	__packed	/* XXX ignore for now */
+#define	__aligned(x)   	/* XXX ignore for now */
+#define	__section(x)   	/* XXX ignore for now */
 #elif defined(__lint__)
 #define	__packed	/* delete */
 #define	__aligned(x)	/* delete */
@@ -231,12 +219,12 @@
  * C99 defines the restrict type qualifier keyword, which was made available
  * in GCC 2.92.
  */
-#if defined(__lint__)
-#define	__restrict	/* delete __restrict when not supported */
-#elif __STDC_VERSION__ >= 199901L
+#if __STDC_VERSION__ >= 199901L
 #define	__restrict	restrict
-#elif !__GNUC_PREREQ__(2, 92)
+#else
+#if !__GNUC_PREREQ__(2, 92)
 #define	__restrict	/* delete __restrict when not supported */
+#endif
 #endif
 
 /*
@@ -319,24 +307,6 @@
 #else
 #define	__predict_true(exp)	(exp)
 #define	__predict_false(exp)	(exp)
-#endif
-
-/*
- * Compiler-dependent macros to declare that functions take printf-like
- * or scanf-like arguments.  They are null except for versions of gcc
- * that are known to support the features properly (old versions of gcc-2
- * didn't permit keeping the keywords out of the application namespace).
- */
-#if __GNUC_PREREQ__(2, 7)
-#define __printflike(fmtarg, firstvararg)	\
-	    __attribute__((__format__ (__printf__, fmtarg, firstvararg)))
-#define __scanflike(fmtarg, firstvararg)	\
-	    __attribute__((__format__ (__scanf__, fmtarg, firstvararg)))
-#define __format_arg(fmtarg)    __attribute__((__format_arg__ (fmtarg)))
-#else
-#define __printflike(fmtarg, firstvararg)	/* nothing */
-#define __scanflike(fmtarg, firstvararg)	/* nothing */
-#define __format_arg(fmtarg)			/* nothing */
 #endif
 
 /*

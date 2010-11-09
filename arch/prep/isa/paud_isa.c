@@ -1,4 +1,4 @@
-/*	$NetBSD: paud_isa.c,v 1.12 2008/04/28 20:23:33 martin Exp $	*/
+/*	$NetBSD: paud_isa.c,v 1.10 2005/12/11 12:18:47 christos Exp $	*/
 
 /*-
  * Copyright (c) 1998, 1999 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: paud_isa.c,v 1.12 2008/04/28 20:23:33 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: paud_isa.c,v 1.10 2005/12/11 12:18:47 christos Exp $");
 
 #include "audio.h"
 #if NAUDIO > 0
@@ -158,7 +165,7 @@ paud_attach_isa(struct device *parent, struct device *self, void *aux)
 	sc->sc_ic = ia->ia_ic;
 
 	if (ad1848_isa_mapprobe(sc, ia->ia_io[0].ir_addr) == 0) {
-		aprint_error(": attach failed\n");
+		printf(": attach failed\n");
 		return;
 	}
 	sc->sc_playdrq = ia->ia_drq[0].ir_drq;
@@ -166,7 +173,7 @@ paud_attach_isa(struct device *parent, struct device *self, void *aux)
 	sc->sc_ih = isa_intr_establish(ia->ia_ic, ia->ia_irq[0].ir_irq,
 	    IST_EDGE, IPL_AUDIO, ad1848_isa_intr, sc);
 	ad1848_isa_attach(sc);
-	aprint_normal("\n");
+	printf("\n");
 	audio_attach_mi(&paud_hw_if, &sc->sc_ad1848, &sc->sc_ad1848.sc_dev);
 
 }

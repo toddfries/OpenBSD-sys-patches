@@ -1,4 +1,4 @@
-/*	$NetBSD: rf_states.c,v 1.43 2008/05/20 00:29:54 oster Exp $	*/
+/*	$NetBSD: rf_states.c,v 1.41 2007/07/29 12:50:22 ad Exp $	*/
 /*
  * Copyright (c) 1995 Carnegie-Mellon University.
  * All rights reserved.
@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: rf_states.c,v 1.43 2008/05/20 00:29:54 oster Exp $");
+__KERNEL_RCSID(0, "$NetBSD: rf_states.c,v 1.41 2007/07/29 12:50:22 ad Exp $");
 
 #include <sys/errno.h>
 
@@ -497,7 +497,7 @@ rf_State_CreateDAG(RF_RaidAccessDesc_t *desc)
 	if (rf_printDAGsDebug) {
 		dagList = desc->dagList;
 		for (i = 0; i < desc->numStripes; i++) {
-			rf_PrintDAGList(dagList->dags);
+			rf_PrintDAGList(dagList.dags);
 			dagList = dagList->next;
 		}
 	}
@@ -529,7 +529,6 @@ rf_State_CreateDAG(RF_RaidAccessDesc_t *desc)
 		desc->state = rf_CleanupState;
 		bp = (struct buf *)desc->bp;
 		bp->b_error = EIO;
-		bp->b_resid = bp->b_bcount;
 	} else {
 		/* bind dags to desc */
 		dagList = desc->dagList;

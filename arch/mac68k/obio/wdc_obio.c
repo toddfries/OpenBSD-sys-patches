@@ -1,4 +1,4 @@
-/*	$NetBSD: wdc_obio.c,v 1.23 2008/03/18 20:46:36 cube Exp $ */
+/*	$NetBSD: wdc_obio.c,v 1.22 2006/10/05 09:34:52 tsutsui Exp $ */
 
 /*
  * Copyright (c) 2002 Takeshi Shibagaki  All rights reserved.
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: wdc_obio.c,v 1.23 2008/03/18 20:46:36 cube Exp $");
+__KERNEL_RCSID(0, "$NetBSD: wdc_obio.c,v 1.22 2006/10/05 09:34:52 tsutsui Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -73,11 +73,11 @@ struct wdc_obio_softc {
 	void    *sc_ih;
 };
 
-int	wdc_obio_match(device_t, cfdata_t, void *);
-void	wdc_obio_attach(device_t, device_t, void *);
+int	wdc_obio_match(struct device *, struct cfdata *, void *);
+void	wdc_obio_attach(struct device *, struct device *, void *);
 void	wdc_obio_intr(void *);
 
-CFATTACH_DECL_NEW(wdc_obio, sizeof(struct wdc_obio_softc),
+CFATTACH_DECL(wdc_obio, sizeof(struct wdc_obio_softc),
     wdc_obio_match, wdc_obio_attach, NULL, NULL);
 
 static bus_space_tag_t		wdc_obio_isr_tag;
@@ -85,7 +85,7 @@ static bus_space_handle_t	wdc_obio_isr_hdl;
 static struct ata_channel	*ch_sc;
 
 int
-wdc_obio_match(device_t parent, cfdata_t match, void *aux)
+wdc_obio_match(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct obio_attach_args *oa = (struct obio_attach_args *) aux;
 	struct ata_channel ch;
@@ -140,15 +140,14 @@ wdc_obio_match(device_t parent, cfdata_t match, void *aux)
 }
 
 void
-wdc_obio_attach(device_t parent, device_t self, void *aux)
+wdc_obio_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct wdc_obio_softc *sc = device_private(self);
+	struct wdc_obio_softc *sc = (void *)self;
 	struct wdc_regs *wdr;
 	struct obio_attach_args *oa = aux;
 	struct ata_channel *chp = &sc->sc_channel;
 	int i;
 
-	sc->sc_wdcdev.sc_atac.atac_dev = self;
 	sc->sc_wdcdev.regs = wdr = &sc->sc_wdc_regs;
 
 	oa->oa_addr = IDEBase;
@@ -156,7 +155,8 @@ wdc_obio_attach(device_t parent, device_t self, void *aux)
 
 	if (bus_space_map(wdr->cmd_iot, oa->oa_addr,
 		      WDC_OBIO_REG_NPORTS, 0, &wdr->cmd_baseioh)) {
-		aprint_error_dev(self, "couldn't map registers\n");
+		printf("%s: couldn't map registers\n",
+			sc->sc_wdcdev.sc_atac.atac_dev.dv_xname);
 		return;
 	}
 
@@ -167,8 +167,8 @@ wdc_obio_attach(device_t parent, device_t self, void *aux)
 		if (bus_space_subregion(wdr->cmd_iot,
 				    wdr->cmd_baseioh, 4 * i, 4,
 				    &wdr->cmd_iohs[i]) != 0) {
-			aprint_error_dev(self,
-			    "unable to subregion control register\n");
+			printf("%s: unable to subregion control register\n",
+			    sc->sc_wdcdev.sc_atac.atac_dev.dv_xname);
 			return;
 		}
 	}
@@ -177,7 +177,8 @@ wdc_obio_attach(device_t parent, device_t self, void *aux)
 				wdr->cmd_baseioh,
 				WDC_OBIO_AUXREG_OFFSET, WDC_OBIO_AUXREG_NPORTS,
 				&wdr->ctl_ioh)) {
-		aprint_error_dev(self, "unable to subregion aux register\n");
+		printf("%s: unable to subregion aux register\n",
+		    sc->sc_wdcdev.sc_atac.atac_dev.dv_xname);
 		return;
 	}
 
@@ -186,7 +187,8 @@ wdc_obio_attach(device_t parent, device_t self, void *aux)
 	if (bus_space_map(wdc_obio_isr_tag,
 			  oa->oa_addr+WDC_OBIO_ISR_OFFSET,
 			  WDC_OBIO_ISR_NPORTS, 0, &wdc_obio_isr_hdl)) {
-		aprint_error_dev(self, " couldn't map intr status register\n");
+		printf("%s: couldn't map intr status register\n",
+			sc->sc_wdcdev.sc_atac.atac_dev.dv_xname);
 		return;
 	}
 
@@ -196,7 +198,7 @@ wdc_obio_attach(device_t parent, device_t self, void *aux)
 		/*
 		 * Quadra/Performa IDE generates pseudo Nubus intr at slot F
 		 */
-		aprint_normal(" (Quadra/Performa series IDE interface)");
+		printf(" (Quadra/Performa series IDE interface)");
 
 		add_nubus_intr(0xf, (void (*)(void*))wdc_obio_intr, (void *)sc);
 
@@ -207,7 +209,7 @@ wdc_obio_attach(device_t parent, device_t self, void *aux)
 		/*
 		 * PowerBook IDE generates pseudo NuBus intr at slot C
 		 */
-		aprint_normal(" (PowerBook series IDE interface)");
+		printf(" (PowerBook series IDE interface)");
 
 		add_nubus_intr(0xc, (void (*)(void*))wdc_obio_intr, (void *)sc);
 
@@ -215,7 +217,7 @@ wdc_obio_attach(device_t parent, device_t self, void *aux)
 	}
 
 	ch_sc = chp;
-	if (device_cfdata(sc->sc_wdcdev.sc_atac.atac_dev)->cf_flags &
+	if (device_cfdata(&sc->sc_wdcdev.sc_atac.atac_dev)->cf_flags &
 	    ATAC_CAP_NOIRQ)
 		sc->sc_wdcdev.sc_atac.atac_cap |= ATAC_CAP_NOIRQ;
 	sc->sc_wdcdev.sc_atac.atac_cap |= ATAC_CAP_DATA16;
@@ -229,7 +231,7 @@ wdc_obio_attach(device_t parent, device_t self, void *aux)
 	chp->ch_ndrive = 2;
 	wdc_init_shadow_regs(chp);
 
-	aprint_normal("\n");
+	printf("\n");
 
 	wdcattach(chp);
 }

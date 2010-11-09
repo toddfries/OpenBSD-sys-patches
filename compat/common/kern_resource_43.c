@@ -1,4 +1,4 @@
-/*	$NetBSD: kern_resource_43.c,v 1.21 2007/12/20 23:02:44 dsl Exp $	*/
+/*	$NetBSD: kern_resource_43.c,v 1.17 2006/11/16 01:32:41 christos Exp $	*/
 
 /*-
  * Copyright (c) 1982, 1986, 1991, 1993
@@ -37,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kern_resource_43.c,v 1.21 2007/12/20 23:02:44 dsl Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kern_resource_43.c,v 1.17 2006/11/16 01:32:41 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -47,16 +47,17 @@ __KERNEL_RCSID(0, "$NetBSD: kern_resource_43.c,v 1.21 2007/12/20 23:02:44 dsl Ex
 #include <sys/proc.h>
 
 #include <sys/mount.h>
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 
 /* ARGSUSED */
 int
-compat_43_sys_getrlimit(struct lwp *l, const struct compat_43_sys_getrlimit_args *uap, register_t *retval)
+compat_43_sys_getrlimit(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct compat_43_sys_getrlimit_args /* {
 		syscallarg(int) which;
 		syscallarg(struct orlimit *) rlp;
-	} */
+	} */ *uap = v;
 	struct proc *p = l->l_proc;
 	int which = SCARG(uap, which);
 	struct orlimit olim;
@@ -69,17 +70,18 @@ compat_43_sys_getrlimit(struct lwp *l, const struct compat_43_sys_getrlimit_args
 	olim.rlim_max = p->p_rlimit[which].rlim_max;
 	if (olim.rlim_max == -1)
 		olim.rlim_max = 0x7fffffff;
-	return copyout(&olim, SCARG(uap, rlp), sizeof(olim));
+	return (copyout((caddr_t)&olim, (caddr_t)SCARG(uap, rlp),
+	    sizeof(olim)));
 }
 
 /* ARGSUSED */
 int
-compat_43_sys_setrlimit(struct lwp *l, const struct compat_43_sys_setrlimit_args *uap, register_t *retval)
+compat_43_sys_setrlimit(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct compat_43_sys_setrlimit_args /* {
 		syscallarg(int) which;
 		syscallarg(const struct orlimit *) rlp;
-	} */
+	} */ *uap = v;
 	int which = SCARG(uap, which);
 	struct orlimit olim;
 	struct rlimit lim;

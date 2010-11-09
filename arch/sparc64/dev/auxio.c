@@ -1,4 +1,4 @@
-/*	$NetBSD: auxio.c,v 1.20 2008/06/13 13:10:49 cegger Exp $	*/
+/*	$NetBSD: auxio.c,v 1.16 2006/10/06 08:44:59 jnemeth Exp $	*/
 
 /*
  * Copyright (c) 2000, 2001 Matthew R. Green
@@ -12,6 +12,8 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -32,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: auxio.c,v 1.20 2008/06/13 13:10:49 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: auxio.c,v 1.16 2006/10/06 08:44:59 jnemeth Exp $");
 
 #include "opt_auxio.h"
 
@@ -95,7 +97,8 @@ CFATTACH_DECL(auxio_sbus, sizeof(struct auxio_softc),
 extern struct cfdriver auxio_cd;
 
 #ifdef BLINK
-static callout_t blink_ch;
+static struct callout blink_ch = CALLOUT_INITIALIZER;
+
 static void auxio_blink(void *);
 
 /* let someone disable it if it's already turned on; XXX sysctl? */
@@ -144,7 +147,6 @@ auxio_attach_common(struct auxio_softc *sc)
 
 	/* only start one blinker */
 	if (do_once) {
-		callout_init(&blink_ch, 0);
 		auxio_blink(sc);
 		do_once = 0;
 	}
@@ -265,7 +267,7 @@ auxio_fd_control(u_int32_t bits)
 	 * XXX This does not handle > 1 auxio correctly.
 	 * We'll assume the floppy drive is tied to first auxio found.
 	 */
-	sc = device_lookup_private(&auxio_cd, 0);
+	sc = (struct auxio_softc *)auxio_cd.cd_devs[0];
 	if (sc->sc_flags & AUXIO_EBUS)
 		led = le32toh(bus_space_read_4(sc->sc_tag, sc->sc_led, 0));
 	else

@@ -1,4 +1,4 @@
-/*	$NetBSD: rdvar.h,v 1.19 2009/01/11 18:19:53 tsutsui Exp $	*/
+/*	$NetBSD: rdvar.h,v 1.17 2005/12/11 12:17:14 christos Exp $	*/
 
 /*
  * Copyright (c) 1982, 1990, 1993
@@ -97,7 +97,7 @@ struct rdstats {
 };
 
 struct	rd_softc {
-	device_t sc_dev;
+	struct	device sc_dev;
 	struct	disk sc_dkdev;
 	struct	callout sc_restart_ch;
 	int	sc_slave;		/* HP-IB slave */
@@ -132,8 +132,8 @@ struct	rd_softc {
 #define RDF_WANTED	0x20
 #define RDF_WLABEL	0x40
 
-#define	rdunit(x)	((int)(minor(x) >> 3))
-#define rdpart(x)	((int)(minor(x) & 0x7))
+#define	rdunit(x)	(minor(x) >> 3)
+#define rdpart(x)	(minor(x) & 0x7)
 #define	rdpunit(x)	((x) & 7)
 #define rdlabdev(d)	(dev_t)(((int)(d)&~7)|2)	/* rd?c */
 

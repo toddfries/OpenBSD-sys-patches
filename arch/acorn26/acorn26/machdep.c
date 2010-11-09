@@ -1,4 +1,4 @@
-/* $NetBSD: machdep.c,v 1.28 2009/01/16 01:03:47 bjh21 Exp $ */
+/* $NetBSD: machdep.c,v 1.33 2010/02/08 19:02:25 joerg Exp $ */
 
 /*-
  * Copyright (c) 1998 Ben Harris
@@ -32,7 +32,7 @@
 
 #include <sys/param.h>
 
-__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.28 2009/01/16 01:03:47 bjh21 Exp $");
+__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.33 2010/02/08 19:02:25 joerg Exp $");
 
 #include <sys/buf.h>
 #include <sys/kernel.h>
@@ -54,18 +54,14 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.28 2009/01/16 01:03:47 bjh21 Exp $");
 #include <machine/machdep.h>
 #include <machine/memcreg.h>
 
-int physmem;
 char cpu_model[] = "Archimedes";
 
 struct vm_map *phys_map = NULL;
-struct vm_map *mb_map = NULL; /* and ever more shall be so */
 
 int waittime = -1;
 
 void
-cpu_reboot(howto, b)
-	int howto;
-	char *b;
+cpu_reboot(int howto, char *b)
 {
 
 	/* If "always halt" was specified as a boot flag, obey. */
@@ -141,7 +137,7 @@ haltsys:
  * initialize CPU, and do autoconfiguration.
  */
 void
-cpu_startup()
+cpu_startup(void)
 {
 	vaddr_t minaddr, maxaddr;
 	char pbuf[9];
@@ -171,7 +167,7 @@ cpu_startup()
 	format_bytes(pbuf, sizeof(pbuf), ptoa(uvmexp.free));
 	printf("avail memory = %s\n", pbuf);
 
-	curpcb = &lwp0.l_addr->u_pcb;
+	curpcb = lwp_getpcb(&lwp0);
 
 #if 0
 	/* Test exception handlers */

@@ -1,4 +1,4 @@
-/*	$NetBSD: llparse.c,v 1.12 2007/02/22 06:16:03 thorpej Exp $	*/
+/*	$NetBSD: llparse.c,v 1.10 2005/12/11 12:25:16 christos Exp $	*/
 
 /*
  * ************************* NOTICE *******************************
@@ -13,7 +13,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: llparse.c,v 1.12 2007/02/22 06:16:03 thorpej Exp $");
+__KERNEL_RCSID(0, "$NetBSD: llparse.c,v 1.10 2005/12/11 12:25:16 christos Exp $");
 
 #include "xebec.h"
 #include "llparse.h"
@@ -33,11 +33,11 @@ void		prt_token();
 int
 llparse()
 {
-	register int		havetoken = false;
+	register int		havetoken = FALSE;
 	register int		sym;
 	register LLtoken	*t = &lltoken;
 	register int		parseaction;
-	register int		accepted = false;
+	register int		accepted = FALSE;
 
 	llpushprod(llnprods-1); /* $$$ ::= <start symbol>  */
 
@@ -68,7 +68,7 @@ llparse()
 
 			if(!havetoken) {
 				llgettoken(t);
-				havetoken = true;
+				havetoken = TRUE;
 			}
 
 			if(sym == t->llterm) {
@@ -76,13 +76,13 @@ llparse()
 				llaccept(t);
 				llstackptr--; /* pop terminal */
 				if(t->llterm == llnterms-1) { /* end symbol $$$ */
-					accepted = true;
+					accepted = TRUE;
 				} else {
-					havetoken = false;
+					havetoken = FALSE;
 				}
 			} else {
 				llparsererror(t); /* wrong terminal on input */
-				havetoken = false;
+				havetoken = FALSE;
 			}
 			continue;
 		}
@@ -91,7 +91,7 @@ llparse()
 
 		if(!havetoken) {
 			llgettoken(t);
-			havetoken = true;
+			havetoken = TRUE;
 		}
 
 		/* consult parse table  for new production */
@@ -100,7 +100,7 @@ llparse()
 		if(parseaction == 0) {
 			/* error entry */
 			llparsererror(t);
-			havetoken = false;
+			havetoken = FALSE;
 			continue;
 		}
 
@@ -111,7 +111,7 @@ llparse()
 				llpushprod(parseaction); /* push rhs of production */
 			} else {
 				llparsererror(t);
-				havetoken = false;
+				havetoken = FALSE;
 			}
 		} else {
 			llstackptr--; /* pop nonterminal */
@@ -172,7 +172,6 @@ llpushprod(prod) 	/* recognize production prod - push rhs on stack */
 
 int
 llepsilonok(term)
-	int term;
 {
 	register int	ptr;
 	register int	sym;
@@ -183,7 +182,7 @@ llepsilonok(term)
 	IFDEBUG(L)
 		printf("llepsilonok() enter\n");
 	ENDDEBUG
-	rval = true;
+	rval = TRUE;
 
 	ptr = llstackptr;
 
@@ -197,7 +196,7 @@ llepsilonok(term)
 		}
 
 		if(sym < llnterms) {
-			nomore = true;
+			nomore = TRUE;
 			rval = sym == term;
 			continue;
 		}
@@ -205,17 +204,17 @@ llepsilonok(term)
 		pact = llfindaction(sym, term);
 
 		if(pact == 0) {
-			nomore = true;
-			rval = false;
+			nomore = TRUE;
+			rval = FALSE;
 			continue;
 		}
 
-		if(llepsilon[pact] == true) {
+		if(llepsilon[pact] == TRUE) {
 			ptr--;
 			nomore = ptr == 0;
 		}
 		else {
-			nomore = true;
+			nomore = TRUE;
 		}
 
 	} while(!nomore);
@@ -226,8 +225,6 @@ llepsilonok(term)
 
 short
 llfindaction(sym, term)
-	int sym;
-	int term;
 {
 	register int	index;
 

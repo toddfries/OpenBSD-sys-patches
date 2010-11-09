@@ -1,4 +1,4 @@
-/*	$NetBSD: linux_misc.h,v 1.19 2009/01/19 13:31:40 njoly Exp $	*/
+/*	$NetBSD: linux_misc.h,v 1.13 2005/12/11 12:20:19 christos Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -110,7 +117,6 @@ struct linux_sysinfo {
 #define	LINUX_SYSV2_SUPER_MAGIC		(LINUX_SYSV_MAGIC_BASE + 3)
 #define	LINUX_SYSV4_SUPER_MAGIC		(LINUX_SYSV_MAGIC_BASE + 2)
 #define	LINUX_SYSV_MAGIC_BASE		0x012FF7B3
-#define	LINUX_TMPFS_SUPER_MAGIC		0x01021994
 #define	LINUX_USBDEVICE_SUPER_MAGIC	0x00009fa2
 #define	LINUX_DEVPTS_SUPER_MAGIC	0x00001cd1
 #define	LINUX_XENIX_SUPER_MAGIC		(LINUX_SYSV_MAGIC_BASE + 1)
@@ -122,16 +128,11 @@ struct linux_mnttypes {
 extern const struct linux_mnttypes linux_fstypes[];
 extern const int linux_fstypes_cnt;
 
-/* Personality types. */
-#define LINUX_PER_LINUX		0x00000000
-#define LINUX_PER_LINUX32	0x00000008
-#define LINUX_PER_QUERY		0xffffffff
-
 #ifdef _KERNEL
 __BEGIN_DECLS
-int bsd_to_linux_wstat(int);
-int linux_select1(struct lwp *, register_t *, int, fd_set *, fd_set *,
-		       fd_set *, struct linux_timeval *);
+void bsd_to_linux_wstat __P((int *));
+int linux_select1 __P((struct lwp *, register_t *, int, fd_set *, fd_set *,
+		       fd_set *, struct timeval *));
 __END_DECLS
 #endif /* !_KERNEL */
 

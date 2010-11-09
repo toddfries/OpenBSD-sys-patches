@@ -1,4 +1,4 @@
-/* $NetBSD: osf1_file.c,v 1.32 2009/01/13 11:35:24 rtr Exp $ */
+/* $NetBSD: osf1_file.c,v 1.20 2005/12/11 12:20:23 christos Exp $ */
 
 /*
  * Copyright (c) 1999 Christopher G. Demetriou.  All rights reserved.
@@ -58,7 +58,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: osf1_file.c,v 1.32 2009/01/13 11:35:24 rtr Exp $");
+__KERNEL_RCSID(0, "$NetBSD: osf1_file.c,v 1.20 2005/12/11 12:20:23 christos Exp $");
 
 #if defined(_KERNEL_OPT)
 #include "opt_syscall_debug.h"
@@ -78,6 +78,7 @@ __KERNEL_RCSID(0, "$NetBSD: osf1_file.c,v 1.32 2009/01/13 11:35:24 rtr Exp $");
 #include <sys/signal.h>
 #include <sys/signalvar.h>
 #include <sys/reboot.h>
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 #include <sys/exec.h>
 #include <sys/vnode.h>
@@ -85,20 +86,26 @@ __KERNEL_RCSID(0, "$NetBSD: osf1_file.c,v 1.32 2009/01/13 11:35:24 rtr Exp $");
 #include <sys/resource.h>
 #include <sys/resourcevar.h>
 #include <sys/wait.h>
-#include <sys/vfs_syscalls.h>
-#include <sys/dirent.h>
 
 #include <compat/osf1/osf1.h>
 #include <compat/osf1/osf1_syscallargs.h>
 #include <compat/common/compat_util.h>
 #include <compat/osf1/osf1_cvt.h>
-#include <compat/osf1/osf1_dirent.h>
 
 int
-osf1_sys_access(struct lwp *l, const struct osf1_sys_access_args *uap, register_t *retval)
+osf1_sys_access(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
+	struct osf1_sys_access_args *uap = v;
+	struct proc *p = l->l_proc;
 	struct sys_access_args a;
 	unsigned long leftovers;
+	caddr_t sg;
+
+	sg = stackgap_init(p, 0);
+	CHECK_ALT_EXIST(l, &sg, SCARG(uap, path));
 
 	SCARG(&a, path) = SCARG(uap, path);
 
@@ -112,9 +119,18 @@ osf1_sys_access(struct lwp *l, const struct osf1_sys_access_args *uap, register_
 }
 
 int
-osf1_sys_execve(struct lwp *l, const struct osf1_sys_execve_args *uap, register_t *retval)
+osf1_sys_execve(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
+	struct osf1_sys_execve_args *uap = v;
+	struct proc *p = l->l_proc;
 	struct sys_execve_args ap;
+	caddr_t sg;
+
+	sg = stackgap_init(p, 0);
+	CHECK_ALT_EXIST(l, &sg, SCARG(uap, path));
 
 	SCARG(&ap, path) = SCARG(uap, path);
 	SCARG(&ap, argp) = SCARG(uap, argp);
@@ -123,149 +139,37 @@ osf1_sys_execve(struct lwp *l, const struct osf1_sys_execve_args *uap, register_
 	return sys_execve(l, &ap, retval);
 }
 
-int
-osf1_sys_getdirentries(struct lwp *l, const struct osf1_sys_getdirentries_args *uap, register_t *retval)
-{
-	/* {
-		syscallarg(int) fd;
-		syscallarg(char *) buf;
-		syscallarg(u_int) nbytes;
-		syscallarg(long *) basep;
-	} */
-	struct dirent *bdp;
-	struct vnode *vp;
-	char *inp, *buf;        /* BSD-format */
-	int len, reclen;        /* BSD-format */
-	char *outp;             /* OSF1-format */
-	int resid, osf1_reclen; /* OSF1-format */
-	struct file *fp;
-	struct uio auio;
-	struct iovec aiov;
-	struct osf1_dirent idb;
-	off_t off;              /* true file offset */
-	int buflen, error, eofflag;
-	off_t *cookiebuf = NULL, *cookie;
-	int ncookies, fd;
-
-	fd = SCARG(uap, fd);
-	if ((error = fd_getvnode(fd, &fp)) != 0)
-		return (error);
-	if ((fp->f_flag & FREAD) == 0) {
-		error = EBADF;
-		goto out1;
-	}
-
-	vp = (struct vnode *)fp->f_data;
-	if (vp->v_type != VDIR) {
-		error = EINVAL;
-		goto out1;
-	}
-
-	buflen = min(MAXBSIZE, SCARG(uap, nbytes));
-	buf = malloc(buflen, M_TEMP, M_WAITOK);
-	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
-	off = fp->f_offset;
-again:
-	aiov.iov_base = buf;
-	aiov.iov_len = buflen;
-	auio.uio_iov = &aiov;
-	auio.uio_iovcnt = 1;
-	auio.uio_rw = UIO_READ;
-	auio.uio_resid = buflen;
-	auio.uio_offset = off;
-	UIO_SETUP_SYSSPACE(&auio);
-	/*
-	 * First we read into the malloc'ed buffer, then
-	 * we massage it into user space, one record at a time.
-	 */
-	error = VOP_READDIR(vp, &auio, fp->f_cred, &eofflag, &cookiebuf,
-	    &ncookies);
-	if (error)
-		goto out;
-
-	inp = buf;
-	outp = (char *)SCARG(uap, buf);
-	resid = SCARG(uap, nbytes);
-	if ((len = buflen - auio.uio_resid) == 0)
-		goto eof;
-
-	for (cookie = cookiebuf; len > 0; len -= reclen) {
-		bdp = (struct dirent *)inp;
-		reclen = bdp->d_reclen;
-		if (reclen & 3)
-			panic("osf1_sys_getdirentries: bad reclen");
-		if (cookie)
-			off = *cookie++; /* each entry points to the next */
-		else
-			off += reclen;
-		if ((off >> 32) != 0) {
-			compat_offseterr(vp, "osf1_sys_getdirentries");
-			error = EINVAL;
-			goto out;
-		}
-		if (bdp->d_fileno == 0) {
-			inp += reclen;  /* it is a hole; squish it out */
-			continue;
-		}
-		osf1_reclen = OSF1_RECLEN(&idb, bdp->d_namlen);
-		if (reclen > len || resid < osf1_reclen) {
-			/* entry too big for buffer, so just stop */
-			outp++;
-			break;
-		}
-		/*
-		 * Massage in place to make a OSF1-shaped dirent (otherwise
-		 * we have to worry about touching user memory outside of
-		 * the copyout() call).
-		 */
-		idb.d_ino = (osf1_ino_t)bdp->d_fileno;
-		idb.d_reclen = (u_short)osf1_reclen;
-		idb.d_namlen = (u_short)bdp->d_namlen;
-		strlcpy(idb.d_name, bdp->d_name, sizeof(idb.d_name));
-		if ((error = copyout((void *)&idb, outp, osf1_reclen)))
-			goto out;
-		/* advance past this real entry */
-		inp += reclen;
-		/* advance output past OSF1-shaped entry */
-		outp += osf1_reclen;
-		resid -= osf1_reclen;
-	}
-
-	/* if we squished out the whole block, try again */
-	if (outp == (char *)SCARG(uap, buf))
-		goto again;
-	fp->f_offset = off;     /* update the vnode offset */
-
-eof:
-	*retval = SCARG(uap, nbytes) - resid;
-out:
-	VOP_UNLOCK(vp, 0);
-	if (cookiebuf)
-		free(cookiebuf, M_TEMP);
-	free(buf, M_TEMP);
-out1:
-	fd_putfile(fd);
-	if (SCARG(uap, basep) != NULL)
-		error = copyout(&eofflag, SCARG(uap, basep), sizeof(long));
-	return error;
-}
-
 /*
  * Get file status; this version does not follow links.
  */
 /* ARGSUSED */
 int
-osf1_sys_lstat(struct lwp *l, const struct osf1_sys_lstat_args *uap, register_t *retval)
+osf1_sys_lstat(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
+	struct osf1_sys_lstat_args *uap = v;
+	struct proc *p = l->l_proc;
 	struct stat sb;
 	struct osf1_stat osb;
 	int error;
+	struct nameidata nd;
+	caddr_t sg;
 
-	error = do_sys_stat(SCARG(uap, path), NOFOLLOW, &sb);
+	sg = stackgap_init(p, 0);
+	CHECK_ALT_EXIST(l, &sg, SCARG(uap, path));
+
+	NDINIT(&nd, LOOKUP, NOFOLLOW | LOCKLEAF, UIO_USERSPACE,
+	    SCARG(uap, path), l);
+	if ((error = namei(&nd)))
+		return (error);
+	error = vn_stat(nd.ni_vp, &sb, l);
+	vput(nd.ni_vp);
 	if (error)
 		return (error);
 	osf1_cvt_stat_from_native(&sb, &osb);
-	error = copyout(&osb, SCARG(uap, ub), sizeof (osb));
+	error = copyout((caddr_t)&osb, (caddr_t)SCARG(uap, ub), sizeof (osb));
 	return (error);
 }
 
@@ -274,33 +178,67 @@ osf1_sys_lstat(struct lwp *l, const struct osf1_sys_lstat_args *uap, register_t 
  */
 /* ARGSUSED */
 int
-osf1_sys_lstat2(struct lwp *l, const struct osf1_sys_lstat2_args *uap, register_t *retval)
+osf1_sys_lstat2(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
+	struct osf1_sys_lstat2_args *uap = v;
+	struct proc *p = l->l_proc;
 	struct stat sb;
 	struct osf1_stat2 osb;
 	int error;
+	struct nameidata nd;
+	caddr_t sg;
 
-	error = do_sys_stat(SCARG(uap, path), NOFOLLOW, &sb);
+	sg = stackgap_init(p, 0);
+	CHECK_ALT_EXIST(l, &sg, SCARG(uap, path));
+
+	NDINIT(&nd, LOOKUP, NOFOLLOW | LOCKLEAF, UIO_USERSPACE,
+	    SCARG(uap, path), l);
+	if ((error = namei(&nd)))
+		return (error);
+	error = vn_stat(nd.ni_vp, &sb, l);
+	vput(nd.ni_vp);
 	if (error)
 		return (error);
 	osf1_cvt_stat2_from_native(&sb, &osb);
-	error = copyout((void *)&osb, (void *)SCARG(uap, ub), sizeof (osb));
+	error = copyout((caddr_t)&osb, (caddr_t)SCARG(uap, ub), sizeof (osb));
 	return (error);
 }
 
 int
-osf1_sys_mknod(struct lwp *l, const struct osf1_sys_mknod_args *uap, register_t *retval)
+osf1_sys_mknod(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
+	struct osf1_sys_mknod_args *uap = v;
+	struct proc *p = l->l_proc;
+	struct sys_mknod_args a;
+	caddr_t sg;
 
-	return do_sys_mknod(l, SCARG(uap, path), SCARG(uap, mode),
-	    osf1_cvt_dev_to_native(SCARG(uap, dev)), retval);
+	sg = stackgap_init(p, 0);
+	CHECK_ALT_EXIST(l, &sg, SCARG(uap, path));
+
+	SCARG(&a, path) = SCARG(uap, path);
+	SCARG(&a, mode) = SCARG(uap, mode);
+	SCARG(&a, dev) = osf1_cvt_dev_to_native(SCARG(uap, dev));
+
+	return sys_mknod(l, &a, retval);
 }
 
 int
-osf1_sys_open(struct lwp *l, const struct osf1_sys_open_args *uap, register_t *retval)
+osf1_sys_open(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
+	struct osf1_sys_open_args *uap = v;
+	struct proc *p = l->l_proc;
 	struct sys_open_args a;
 	const char *path;
+	caddr_t sg;
 	unsigned long leftovers;
 #ifdef SYSCALL_DEBUG
 	char pnbuf[1024];
@@ -309,6 +247,8 @@ osf1_sys_open(struct lwp *l, const struct osf1_sys_open_args *uap, register_t *r
 	    copyinstr(SCARG(uap, path), pnbuf, sizeof pnbuf, NULL) == 0)
 		printf("osf1_open: open: %s\n", pnbuf);
 #endif
+
+	sg = stackgap_init(p, 0);
 
 	/* translate flags */
 	SCARG(&a, flags) = emul_flags_translate(osf1_open_flags_xtab,
@@ -321,17 +261,30 @@ osf1_sys_open(struct lwp *l, const struct osf1_sys_open_args *uap, register_t *r
 
 	/* pick appropriate path */
 	path = SCARG(uap, path);
+	if (SCARG(&a, flags) & O_CREAT)
+		CHECK_ALT_CREAT(l, &sg, path);
+	else
+		CHECK_ALT_EXIST(l, &sg, path);
 	SCARG(&a, path) = path;
 
 	return sys_open(l, &a, retval);
 }
 
 int
-osf1_sys_pathconf(struct lwp *l, const struct osf1_sys_pathconf_args *uap, register_t *retval)
+osf1_sys_pathconf(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
+	struct osf1_sys_pathconf_args *uap = v;
+	struct proc *p = l->l_proc;
 	struct sys_pathconf_args a;
+	caddr_t sg;
 	int error;
 
+	sg = stackgap_init(p, 0);
+
+	CHECK_ALT_EXIST(l, &sg, SCARG(uap, path));
 	SCARG(&a, path) = SCARG(uap, path);
 
 	error = osf1_cvt_pathconf_name_to_native(SCARG(uap, name),
@@ -348,17 +301,32 @@ osf1_sys_pathconf(struct lwp *l, const struct osf1_sys_pathconf_args *uap, regis
  */
 /* ARGSUSED */
 int
-osf1_sys_stat(struct lwp *l, const struct osf1_sys_stat_args *uap, register_t *retval)
+osf1_sys_stat(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
+	struct osf1_sys_stat_args *uap = v;
+	struct proc *p = l->l_proc;
 	struct stat sb;
 	struct osf1_stat osb;
 	int error;
+	struct nameidata nd;
+	caddr_t sg;
 
-	error = do_sys_stat(SCARG(uap, path), FOLLOW, &sb);
+	sg = stackgap_init(p, 0);
+	CHECK_ALT_EXIST(l, &sg, SCARG(uap, path));
+
+	NDINIT(&nd, LOOKUP, FOLLOW | LOCKLEAF, UIO_USERSPACE,
+	    SCARG(uap, path), l);
+	if ((error = namei(&nd)))
+		return (error);
+	error = vn_stat(nd.ni_vp, &sb, l);
+	vput(nd.ni_vp);
 	if (error)
 		return (error);
 	osf1_cvt_stat_from_native(&sb, &osb);
-	error = copyout((void *)&osb, (void *)SCARG(uap, ub), sizeof (osb));
+	error = copyout((caddr_t)&osb, (caddr_t)SCARG(uap, ub), sizeof (osb));
 	return (error);
 }
 
@@ -367,24 +335,48 @@ osf1_sys_stat(struct lwp *l, const struct osf1_sys_stat_args *uap, register_t *r
  */
 /* ARGSUSED */
 int
-osf1_sys_stat2(struct lwp *l, const struct osf1_sys_stat2_args *uap, register_t *retval)
+osf1_sys_stat2(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
+	struct osf1_sys_stat2_args *uap = v;
+	struct proc *p = l->l_proc;
 	struct stat sb;
 	struct osf1_stat2 osb;
 	int error;
+	struct nameidata nd;
+	caddr_t sg;
 
-	error = do_sys_stat(SCARG(uap, path), FOLLOW, &sb);
+	sg = stackgap_init(p, 0);
+	CHECK_ALT_EXIST(l, &sg, SCARG(uap, path));
+
+	NDINIT(&nd, LOOKUP, FOLLOW | LOCKLEAF, UIO_USERSPACE,
+	    SCARG(uap, path), l);
+	if ((error = namei(&nd)))
+		return (error);
+	error = vn_stat(nd.ni_vp, &sb, l);
+	vput(nd.ni_vp);
 	if (error)
 		return (error);
 	osf1_cvt_stat2_from_native(&sb, &osb);
-	error = copyout((void *)&osb, (void *)SCARG(uap, ub), sizeof (osb));
+	error = copyout((caddr_t)&osb, (caddr_t)SCARG(uap, ub), sizeof (osb));
 	return (error);
 }
 
 int
-osf1_sys_truncate(struct lwp *l, const struct osf1_sys_truncate_args *uap, register_t *retval)
+osf1_sys_truncate(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
+	struct osf1_sys_truncate_args *uap = v;
+	struct proc *p = l->l_proc;
 	struct sys_truncate_args a;
+	caddr_t sg;
+
+	sg = stackgap_init(p, 0);
+	CHECK_ALT_EXIST(l, &sg, SCARG(uap, path));
 
 	SCARG(&a, path) = SCARG(uap, path);
 	SCARG(&a, pad) = 0;
@@ -394,29 +386,47 @@ osf1_sys_truncate(struct lwp *l, const struct osf1_sys_truncate_args *uap, regis
 }
 
 int
-osf1_sys_utimes(struct lwp *l, const struct osf1_sys_utimes_args *uap, register_t *retval)
+osf1_sys_utimes(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
+	struct osf1_sys_utimes_args *uap = v;
+	struct proc *p = l->l_proc;
+	struct sys_utimes_args a;
 	struct osf1_timeval otv;
-	struct timeval tv[2], *tvp;
+	struct timeval tv;
+	caddr_t sg;
 	int error;
 
-	if (SCARG(uap, tptr) == NULL)
-		tvp = NULL;
-	else {
-		/* get the OSF/1 timeval argument */
-		error = copyin(SCARG(uap, tptr), &otv, sizeof otv);
-		if (error != 0)
-			return error;
+	sg = stackgap_init(p, 0);
 
-		/* fill in and copy out the NetBSD timeval */
-		tv[0].tv_sec = otv.tv_sec;
-		tv[0].tv_usec = otv.tv_usec;
-		/* Set access and modified to the same time */
-		tv[1].tv_sec = otv.tv_sec;
-		tv[1].tv_usec = otv.tv_usec;
-		tvp = tv;
+	CHECK_ALT_EXIST(l, &sg, SCARG(uap, path));
+	SCARG(&a, path) = SCARG(uap, path);
+
+	error = 0;
+	if (SCARG(uap, tptr) == NULL)
+		SCARG(&a, tptr) = NULL;
+	else {
+		SCARG(&a, tptr) = stackgap_alloc(p, &sg, sizeof tv);
+
+		/* get the OSF/1 timeval argument */
+		error = copyin(SCARG(uap, tptr),
+		    (caddr_t)&otv, sizeof otv);
+		if (error == 0) {
+
+			/* fill in and copy out the NetBSD timeval */
+			memset(&tv, 0, sizeof tv);
+			tv.tv_sec = otv.tv_sec;
+			tv.tv_usec = otv.tv_usec;
+
+			error = copyout((caddr_t)&tv,
+			    __UNCONST(SCARG(&a, tptr)), sizeof tv);
+		}
 	}
 
-	return do_sys_utimes(l, NULL, SCARG(uap, path), FOLLOW,
-			    tvp, UIO_SYSSPACE);
+	if (error == 0)
+		error = sys_utimes(l, &a, retval);
+
+	return (error);
 }

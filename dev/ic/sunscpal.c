@@ -1,4 +1,4 @@
-/*	$NetBSD: sunscpal.c,v 1.24 2008/12/16 22:35:31 christos Exp $	*/
+/*	$NetBSD: sunscpal.c,v 1.21 2006/11/24 19:46:59 christos Exp $	*/
 
 /*
  * Copyright (c) 2001 Matthew Fredette
@@ -76,7 +76,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sunscpal.c,v 1.24 2008/12/16 22:35:31 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sunscpal.c,v 1.21 2006/11/24 19:46:59 christos Exp $");
 
 #include "opt_ddb.h"
 
@@ -107,7 +107,8 @@ static void	sunscpal_reset_scsibus(struct sunscpal_softc *);
 static void	sunscpal_sched(struct sunscpal_softc *);
 static void	sunscpal_done(struct sunscpal_softc *);
 
-static int	sunscpal_select(struct sunscpal_softc *, struct sunscpal_req *);
+static int	sunscpal_select
+	(struct sunscpal_softc *, struct sunscpal_req *);
 static void	sunscpal_reselect(struct sunscpal_softc *);
 
 static int	sunscpal_msg_in(struct sunscpal_softc *);
@@ -205,10 +206,10 @@ static inline int sunscpal_wait_not_req(struct sunscpal_softc *);
 static inline void sunscpal_sched_msgout(struct sunscpal_softc *, int);
 
 /* Return zero on success. */
-static inline int sunscpal_wait_req(struct sunscpal_softc *sc)
+static inline int sunscpal_wait_req(sc)
+	struct sunscpal_softc *sc;
 {
 	int timo = sunscpal_wait_req_timo;
-
 	for (;;) {
 		if (SUNSCPAL_READ_2(sc, sunscpal_icr) & SUNSCPAL_ICR_REQUEST) {
 			timo = 0;	/* return 0 */
@@ -218,17 +219,16 @@ static inline int sunscpal_wait_req(struct sunscpal_softc *sc)
 			break;	/* return -1 */
 		delay(2);
 	}
-	return timo;
+	return (timo);
 }
 
 /* Return zero on success. */
-static inline int sunscpal_wait_not_req(struct sunscpal_softc *sc)
+static inline int sunscpal_wait_not_req(sc)
+	struct sunscpal_softc *sc;
 {
 	int timo = sunscpal_wait_nrq_timo;
-
 	for (;;) {
-		if ((SUNSCPAL_READ_2(sc, sunscpal_icr) &
-		    SUNSCPAL_ICR_REQUEST) == 0) {
+		if ((SUNSCPAL_READ_2(sc, sunscpal_icr) & SUNSCPAL_ICR_REQUEST) == 0) {
 			timo = 0;	/* return 0 */
 			break;
 		}
@@ -236,7 +236,7 @@ static inline int sunscpal_wait_not_req(struct sunscpal_softc *sc)
 			break;	/* return -1 */
 		delay(2);
 	}
-	return timo;
+	return (timo);
 }
 
 /*
@@ -248,11 +248,12 @@ static void sunscpal_dma_poll(struct sunscpal_softc *);
 static void sunscpal_dma_stop(struct sunscpal_softc *);
 
 static void
-sunscpal_dma_start(struct sunscpal_softc *sc)
+sunscpal_dma_start(sc)
+	struct sunscpal_softc *sc;
 {
 	struct sunscpal_req *sr = sc->sc_current;
 	int xlen;
-	uint16_t icr;
+	u_int16_t icr;
 
 	xlen = sc->sc_reqlen;
 
@@ -267,8 +268,8 @@ sunscpal_dma_start(struct sunscpal_softc *sc)
 
 #ifdef	SUNSCPAL_DEBUG
 	if (sunscpal_debug & SUNSCPAL_DBG_DMA) {
-		printf("%s: started, flags=0x%x\n",
-		    __func__, sc->sc_state);
+		printf("sunscpal_dma_start: started, flags=0x%x\n",
+			   sc->sc_state);
 	}
 #endif
 }
@@ -282,7 +283,8 @@ sunscpal_dma_start(struct sunscpal_softc *sc)
  * xx_dma_stop() will be called next.
  */
 static void
-sunscpal_dma_poll(struct sunscpal_softc *sc)
+sunscpal_dma_poll(sc)
+	struct sunscpal_softc *sc;
 {
 	struct sunscpal_req *sr = sc->sc_current;
 	int tmo;
@@ -304,29 +306,30 @@ sunscpal_dma_poll(struct sunscpal_softc *sc)
 		}
 		delay(100);
 	}
-	SUNSCPAL_TRACE("sunscpal_dma_poll: waited %d\n", POLL_TIMO - tmo);
+	SUNSCPAL_TRACE("sunscpal_dma_poll: waited %d\n",
+			  POLL_TIMO - tmo);
 
 #ifdef	SUNSCPAL_DEBUG
 	if (sunscpal_debug & SUNSCPAL_DBG_DMA) {
 		char buffer[64];
-		snprintb(buffer, sizeof(buffer),
-		    SUNSCPAL_READ_2(sc, sunscpal_icr), SUNSCPAL_ICR_BITS);
-		printf("%s: done, icr=%s\n", __func__, buffer);
+		bitmask_snprintf(SUNSCPAL_READ_2(sc, sunscpal_icr), SUNSCPAL_ICR_BITS, buffer, sizeof(buffer));
+		printf("sunscpal_dma_poll: done, icr=%s\n", buffer);
 	}
 #endif
 }
 
 static void
-sunscpal_dma_stop(struct sunscpal_softc *sc)
+sunscpal_dma_stop(sc)
+	struct sunscpal_softc *sc;
 {
 	struct sunscpal_req *sr = sc->sc_current;
 	struct scsipi_xfer *xs = sr->sr_xs;
 	int resid, ntrans;
-	uint16_t icr;
+	u_int16_t icr;
 
 	if ((sc->sc_state & SUNSCPAL_DOINGDMA) == 0) {
 #ifdef	DEBUG
-		printf("%s: DMA not running\n", __func__);
+		printf("sunscpal_dma_stop: DMA not running\n");
 #endif
 		return;
 	}
@@ -334,8 +337,7 @@ sunscpal_dma_stop(struct sunscpal_softc *sc)
 
 	/* First, halt the DMA engine. */
 	icr = SUNSCPAL_READ_2(sc, sunscpal_icr);
-	icr &= ~(SUNSCPAL_ICR_DMA_ENABLE | SUNSCPAL_ICR_WORD_MODE |
-	    SUNSCPAL_ICR_INTERRUPT_ENABLE);
+	icr &= ~(SUNSCPAL_ICR_DMA_ENABLE | SUNSCPAL_ICR_WORD_MODE | SUNSCPAL_ICR_INTERRUPT_ENABLE);
 	SUNSCPAL_WRITE_2(sc, sunscpal_icr, icr);
 
 #ifdef	SUNSCPAL_USE_BUS_DMA
@@ -348,15 +350,14 @@ sunscpal_dma_stop(struct sunscpal_softc *sc)
 
 	 /* sync the DMA map: */
 	 bus_dmamap_sync(sc->sunscpal_dmat, dh->dh_dmamap, 0, dh->dh_maplen,
-	     ((xs->xs_control & XS_CTL_DATA_OUT) == 0 ?
-	    BUS_DMASYNC_POSTREAD : BUS_DMASYNC_POSTWRITE));
+	     ((xs->xs_control & XS_CTL_DATA_OUT) == 0 ? BUS_DMASYNC_POSTREAD : BUS_DMASYNC_POSTWRITE));
  }
 #endif /* SUNSCPAL_USE_BUS_DMA */
 
 
 	if (icr & (SUNSCPAL_ICR_BUS_ERROR)) {
 		char buffer[64];
-		snprintb(buffer, sizeof(buffer), SUNSCPAL_ICR_BITS, icr);
+		bitmask_snprintf(icr, SUNSCPAL_ICR_BITS, buffer, sizeof(buffer));
 		printf("sc: DMA error, icr=%s, reset\n", buffer);
 		sr->sr_xs->error = XS_DRIVER_STUFFUP;
 		sc->sc_state |= SUNSCPAL_ABORTING;
@@ -373,14 +374,13 @@ sunscpal_dma_stop(struct sunscpal_softc *sc)
 	 * Now try to figure out how much actually transferred
 	 */
 
-	resid = SUNSCPAL_DMA_COUNT_FLIP(SUNSCPAL_READ_2(sc,
-	    sunscpal_dma_count));
+	resid = SUNSCPAL_DMA_COUNT_FLIP(SUNSCPAL_READ_2(sc, sunscpal_dma_count));
 	ntrans = sc->sc_reqlen - resid;
 
 #ifdef	SUNSCPAL_DEBUG
 	if (sunscpal_debug & SUNSCPAL_DBG_DMA) {
-		printf("%s: resid=0x%x ntrans=0x%x\n",
-		    __func__, resid, ntrans);
+		printf("sunscpal_dma_stop: resid=0x%x ntrans=0x%x\n",
+		       resid, ntrans);
 	}
 #endif
 
@@ -390,7 +390,7 @@ sunscpal_dma_stop(struct sunscpal_softc *sc)
 		goto out;
 	}
 	if (ntrans > sc->sc_datalen)
-		panic("%s: excess transfer", __func__);
+		panic("sunscpal_dma_stop: excess transfer");
 
 	/* Adjust data pointer */
 	sc->sc_dataptr += ntrans;
@@ -401,7 +401,8 @@ sunscpal_dma_stop(struct sunscpal_softc *sc)
 	 * "Left-over bytes" (yuck!)
 	 */
 	if (((xs->xs_control & XS_CTL_DATA_OUT) == 0) &&
-	    ((icr & SUNSCPAL_ICR_ODD_LENGTH) != 0)) {
+		((icr & SUNSCPAL_ICR_ODD_LENGTH) != 0))
+	{
 #ifdef DEBUG
 		printf("sc: Got Left-over bytes!\n");
 #endif
@@ -409,14 +410,16 @@ sunscpal_dma_stop(struct sunscpal_softc *sc)
 		sc->sc_datalen--;
 	}
 
- out:
+out:
 	SUNSCPAL_WRITE_2(sc, sunscpal_dma_count, SUNSCPAL_DMA_COUNT_FLIP(0));
 
 }
 
 /* Ask the target for a MSG_OUT phase. */
 static inline void
-sunscpal_sched_msgout(struct sunscpal_softc *sc, int msg_code)
+sunscpal_sched_msgout(sc, msg_code)
+	struct sunscpal_softc *sc;
+	int msg_code;
 {
 	/*
 	 * This controller does not allow you to assert ATN, which
@@ -424,12 +427,15 @@ sunscpal_sched_msgout(struct sunscpal_softc *sc, int msg_code)
 	 * the bus.  We keep this function as a placeholder, though,
 	 * and this printf will eventually go away or get #ifdef'ed:
 	 */
-	printf("%s: trying to schedule 0x%0x\n", __func__, msg_code);
+	printf("sunscpal_sched_msgout: trying to schedule 0x%0x\n", msg_code);
 	sc->sc_msgpriq |= msg_code;
 }
 
 int
-sunscpal_pio_out(struct sunscpal_softc *sc, int phase, int count, uint8_t *data)
+sunscpal_pio_out(sc, phase, count, data)
+	struct sunscpal_softc *sc;
+	int phase, count;
+	unsigned char *data;
 {
 	int resid;
 
@@ -443,8 +449,7 @@ sunscpal_pio_out(struct sunscpal_softc *sc, int phase, int count, uint8_t *data)
 			SUNSCPAL_TRACE("pio_out: no REQ, resid=%d\n", resid);
 			break;
 		}
-		if (SUNSCPAL_BUS_PHASE(SUNSCPAL_READ_2(sc, sunscpal_icr)) !=
-		    phase)
+		if (SUNSCPAL_BUS_PHASE(SUNSCPAL_READ_2(sc, sunscpal_icr)) != phase)
 			break;
 
 		/* Put the data on the bus. */
@@ -457,12 +462,15 @@ sunscpal_pio_out(struct sunscpal_softc *sc, int phase, int count, uint8_t *data)
 		--resid;
 	}
 
-	return count - resid;
+	return (count - resid);
 }
 
 
 int
-sunscpal_pio_in(struct sunscpal_softc *sc, int phase, int count, uint8_t *data)
+sunscpal_pio_in(sc, phase, count, data)
+	struct sunscpal_softc *sc;
+	int phase, count;
+	unsigned char			*data;
 {
 	int resid;
 
@@ -477,25 +485,25 @@ sunscpal_pio_in(struct sunscpal_softc *sc, int phase, int count, uint8_t *data)
 			break;
 		}
 		/* A phase change is not valid until AFTER REQ rises! */
-		if (SUNSCPAL_BUS_PHASE(SUNSCPAL_READ_2(sc, sunscpal_icr)) !=
-		    phase)
+		if (SUNSCPAL_BUS_PHASE(SUNSCPAL_READ_2(sc, sunscpal_icr)) != phase)
 			break;
 
 		/* Read the data bus. */
 		if (data)
 			*data++ = SUNSCPAL_BYTE_READ(sc, phase);
 		else
-			(void)SUNSCPAL_BYTE_READ(sc, phase);
+			(void) SUNSCPAL_BYTE_READ(sc, phase);
 
 		--resid;
 	}
 
-	return count - resid;
+	return (count - resid);
 }
 
 
 void
-sunscpal_init(struct sunscpal_softc *sc)
+sunscpal_init(sc)
+	struct sunscpal_softc *sc;
 {
 	int i, j;
 
@@ -528,10 +536,12 @@ sunscpal_init(struct sunscpal_softc *sc)
 
 
 static void
-sunscpal_reset_scsibus(struct sunscpal_softc *sc)
+sunscpal_reset_scsibus(sc)
+	struct sunscpal_softc *sc;
 {
 
-	SUNSCPAL_TRACE("reset_scsibus, cur=0x%x\n", (long)sc->sc_current);
+	SUNSCPAL_TRACE("reset_scsibus, cur=0x%x\n",
+			  (long) sc->sc_current);
 
 	SUNSCPAL_WRITE_2(sc, sunscpal_icr, SUNSCPAL_ICR_RESET);
 	delay(500);
@@ -550,7 +560,8 @@ sunscpal_reset_scsibus(struct sunscpal_softc *sc)
  * This may also called for a DMA timeout (at splbio).
  */
 int
-sunscpal_intr(void *arg)
+sunscpal_intr(arg)
+	void *arg;
 {
 	struct sunscpal_softc *sc = arg;
 	int claimed = 0;
@@ -587,21 +598,21 @@ sunscpal_intr(void *arg)
 	 */
 	if (sc->sc_state & SUNSCPAL_WORKING) {
 		SUNSCPAL_TRACE("intr: call machine, cur=0x%x\n",
-		    (long)sc->sc_current);
+				  (long) sc->sc_current);
 		/* This will usually free-up the nexus. */
 		sunscpal_machine(sc);
 		SUNSCPAL_TRACE("intr: machine done, cur=0x%x\n",
-		    (long)sc->sc_current);
+				  (long) sc->sc_current);
 		claimed = 1;
 	}
 
 	/* Maybe we can run some commands now... */
 	if (sc->sc_state == SUNSCPAL_IDLE) {
 		SUNSCPAL_TRACE("intr: call sched, cur=0x%x\n",
-		    (long)sc->sc_current);
+				  (long) sc->sc_current);
 		sunscpal_sched(sc);
 		SUNSCPAL_TRACE("intr: sched done, cur=0x%x\n",
-		    (long)sc->sc_current);
+				  (long) sc->sc_current);
 	}
 
 	return claimed;
@@ -612,7 +623,8 @@ sunscpal_intr(void *arg)
  * Abort the current command (i.e. due to timeout)
  */
 void
-sunscpal_abort(struct sunscpal_softc *sc)
+sunscpal_abort(sc)
+	struct sunscpal_softc *sc;
 {
 
 	/*
@@ -632,15 +644,15 @@ sunscpal_abort(struct sunscpal_softc *sc)
 		sunscpal_sched_msgout(sc, SEND_ABORT);
 	}
 	SUNSCPAL_TRACE("abort: call machine, cur=0x%x\n",
-	    (long)sc->sc_current);
+			  (long) sc->sc_current);
 	sunscpal_machine(sc);
 	SUNSCPAL_TRACE("abort: machine done, cur=0x%x\n",
-	    (long)sc->sc_current);
+			  (long) sc->sc_current);
 
 	/* Another hack (Er.. hook!) for anything that needs it: */
 	if (sc->sc_intr_on) {
 		SUNSCPAL_TRACE("abort: intr ON\n", 0);
-		sc->sc_intr_on(sc);
+	    sc->sc_intr_on(sc);
 	}
 }
 
@@ -648,7 +660,8 @@ sunscpal_abort(struct sunscpal_softc *sc)
  * Timeout handler, scheduled for each SCSI command.
  */
 void
-sunscpal_cmd_timeout(void *arg)
+sunscpal_cmd_timeout(arg)
+	void *arg;
 {
 	struct sunscpal_req *sr = arg;
 	struct scsipi_xfer *xs;
@@ -661,14 +674,14 @@ sunscpal_cmd_timeout(void *arg)
 	/* Get all our variables... */
 	xs = sr->sr_xs;
 	if (xs == NULL) {
-		printf("%s: no scsipi_xfer\n", __func__);
+		printf("sunscpal_cmd_timeout: no scsipi_xfer\n");
 		goto out;
 	}
 	periph = xs->xs_periph;
-	sc = device_private(periph->periph_channel->chan_adapter->adapt_dev);
+	sc = (void *)periph->periph_channel->chan_adapter->adapt_dev;
 
 	printf("%s: cmd timeout, targ=%d, lun=%d\n",
-	    device_xname(sc->sc_dev),
+	    sc->sc_dev.dv_xname,
 	    sr->sr_target, sr->sr_lun);
 
 	/*
@@ -679,7 +692,7 @@ sunscpal_cmd_timeout(void *arg)
 	 */
 	sr->sr_flags |= SR_OVERDUE;
 	if (sc->sc_current == sr) {
-		SUNSCPAL_TRACE("cmd_tmo: call abort, sr=0x%x\n", (long)sr);
+		SUNSCPAL_TRACE("cmd_tmo: call abort, sr=0x%x\n", (long) sr);
 		sunscpal_abort(sc);
 	} else {
 		/*
@@ -687,7 +700,7 @@ sunscpal_cmd_timeout(void *arg)
 		 * Arrange for sunscpal_sched() to do the deed.
 		 */
 		SUNSCPAL_TRACE("cmd_tmo: clear matrix, t/l=0x%02x\n",
-		    (sr->sr_target << 4) | sr->sr_lun);
+				  (sr->sr_target << 4) | sr->sr_lun);
 		sc->sc_matrix[sr->sr_target][sr->sr_lun] = NULL;
 	}
 
@@ -698,13 +711,13 @@ sunscpal_cmd_timeout(void *arg)
 	 */
 	if (sc->sc_state == SUNSCPAL_IDLE) {
 		SUNSCPAL_TRACE("cmd_tmo: call sched, cur=0x%x\n",
-		    (long)sc->sc_current);
+				  (long) sc->sc_current);
 		sunscpal_sched(sc);
 		SUNSCPAL_TRACE("cmd_tmo: sched done, cur=0x%x\n",
-		    (long)sc->sc_current);
+				  (long) sc->sc_current);
 	}
 
- out:
+out:
 	splx(s);
 }
 
@@ -722,16 +735,16 @@ sunscpal_cmd_timeout(void *arg)
  * (see comment in sunscpal_done)
  */
 void
-sunscpal_scsipi_request(struct scsipi_channel *chan, scsipi_adapter_req_t req,
-    void *arg)
+sunscpal_scsipi_request(chan, req, arg)
+	struct scsipi_channel *chan;
+	scsipi_adapter_req_t req;
+	void *arg;
 {
 	struct scsipi_xfer *xs;
 	struct scsipi_periph *periph;
-	struct sunscpal_softc *sc;
-	struct sunscpal_req *sr;
+	struct	sunscpal_softc *sc = (void *)chan->chan_adapter->adapt_dev;
+	struct sunscpal_req	*sr;
 	int s, i, flags;
-
-	sc = device_private(chan->chan_adapter->adapt_dev);
 
 	switch (req) {
 	case ADAPTER_REQ_RUN_XFER:
@@ -747,15 +760,14 @@ sunscpal_scsipi_request(struct scsipi_channel *chan, scsipi_adapter_req_t req,
 		if (flags & XS_CTL_POLL) {
 			/* Terminate any current command. */
 			sr = sc->sc_current;
-			if (sr != NULL) {
+			if (sr) {
 				printf("%s: polled request aborting %d/%d\n",
-				    device_xname(sc->sc_dev), sr->sr_target,
-				    sr->sr_lun);
+				    sc->sc_dev.dv_xname,
+				    sr->sr_target, sr->sr_lun);
 				sunscpal_abort(sc);
 			}
 			if (sc->sc_state != SUNSCPAL_IDLE) {
-				panic("%s: polled request, abort failed",
-				    __func__);
+				panic("sunscpal_scsi_cmd: polled request, abort failed");
 			}
 		}
 
@@ -771,7 +783,7 @@ sunscpal_scsipi_request(struct scsipi_channel *chan, scsipi_adapter_req_t req,
 		SUNSCPAL_TRACE("scsipi_cmd: no openings, rv=%d\n", rv);
 		goto out;
 
- new:
+new:
 		/* Create queue entry */
 		sr = &sc->sc_ring[i];
 		sr->sr_xs = xs;
@@ -796,19 +808,19 @@ sunscpal_scsipi_request(struct scsipi_channel *chan, scsipi_adapter_req_t req,
 		 */
 		if (sc->sc_state == SUNSCPAL_IDLE) {
 			SUNSCPAL_TRACE("scsipi_cmd: call sched, cur=0x%x\n",
-			    (long)sc->sc_current);
+				  (long) sc->sc_current);
 			sunscpal_sched(sc);
 			SUNSCPAL_TRACE("scsipi_cmd: sched done, cur=0x%x\n",
-			    (long)sc->sc_current);
+				  (long) sc->sc_current);
 		}
 
 		if (flags & XS_CTL_POLL) {
 			/* Make sure sunscpal_sched() finished it. */
 			if ((xs->xs_status & XS_STS_DONE) == 0)
-				panic("%s: poll didn't finish", __func__);
+				panic("sunscpal_scsi_cmd: poll didn't finish");
 		}
 
- out:
+out:
 		splx(s);
 		return;
 
@@ -839,34 +851,35 @@ sunscpal_scsipi_request(struct scsipi_channel *chan, scsipi_adapter_req_t req,
  * Called by sunscpal_sched(), sunscpal_machine()
  */
 static void
-sunscpal_done(struct sunscpal_softc *sc)
+sunscpal_done(sc)
+	struct sunscpal_softc *sc;
 {
 	struct	sunscpal_req *sr;
 	struct	scsipi_xfer *xs;
 
 #ifdef	DIAGNOSTIC
 	if (sc->sc_state == SUNSCPAL_IDLE)
-		panic("%s: state=idle", __func__);
+		panic("sunscpal_done: state=idle");
 	if (sc->sc_current == NULL)
-		panic("%s: current=0", __func__);
+		panic("sunscpal_done: current=0");
 #endif
 
 	sr = sc->sc_current;
 	xs = sr->sr_xs;
 
-	SUNSCPAL_TRACE("done: top, cur=0x%x\n", (long)sc->sc_current);
+	SUNSCPAL_TRACE("done: top, cur=0x%x\n", (long) sc->sc_current);
 
 	/*
 	 * Clean up DMA resources for this command.
 	 */
 	if (sr->sr_dma_hand) {
 		SUNSCPAL_TRACE("done: dma_free, dh=0x%x\n",
-		    (long)sr->sr_dma_hand);
+				  (long) sr->sr_dma_hand);
 		sunscpal_dma_free(sc);
 	}
 #ifdef	DIAGNOSTIC
 	if (sr->sr_dma_hand)
-		panic("%s: DMA free did not", __func__);
+		panic("sunscpal_done: DMA free did not");
 #endif
 
 	if (sc->sc_state & SUNSCPAL_ABORTING) {
@@ -875,7 +888,7 @@ sunscpal_done(struct sunscpal_softc *sc)
 			xs->error = XS_TIMEOUT;
 	}
 
-	SUNSCPAL_TRACE("done: check error=%d\n", (long)xs->error);
+	SUNSCPAL_TRACE("done: check error=%d\n", (long) xs->error);
 
 	/* If error is already set, ignore sr_status value. */
 	if (xs->error != XS_NOERROR)
@@ -898,12 +911,12 @@ sunscpal_done(struct sunscpal_softc *sc)
 		/* fallthrough */
 	default:
 		printf("%s: target %d, bad status=%d\n",
-		    device_xname(sc->sc_dev), sr->sr_target, sr->sr_status);
+		    sc->sc_dev.dv_xname, sr->sr_target, sr->sr_status);
 		xs->error = XS_DRIVER_STUFFUP;
 		break;
 	}
 
- finish:
+finish:
 
 	SUNSCPAL_TRACE("done: finish, error=%d\n", xs->error);
 
@@ -916,7 +929,7 @@ sunscpal_done(struct sunscpal_softc *sc)
 	 */
 #ifdef	DIAGNOSTIC
 	if ((sc->sc_state & SUNSCPAL_WORKING) == 0)
-		panic("%s: bad state", __func__);
+		panic("sunscpal_done: bad state");
 #endif
 
 	/* Clear our pointers to the request. */
@@ -943,7 +956,8 @@ sunscpal_done(struct sunscpal_softc *sc)
  *  	No more work can be started.
  */
 static void
-sunscpal_sched(struct sunscpal_softc *sc)
+sunscpal_sched(sc)
+	struct	sunscpal_softc *sc;
 {
 	struct sunscpal_req	*sr;
 	struct scsipi_xfer *xs;
@@ -953,18 +967,18 @@ sunscpal_sched(struct sunscpal_softc *sc)
 	/* Another hack (Er.. hook!) for anything that needs it: */
 	if (sc->sc_intr_off) {
 		SUNSCPAL_TRACE("sched: top, intr off\n", 0);
-		sc->sc_intr_off(sc);
+	    sc->sc_intr_off(sc);
 	}
 
- next_job:
+next_job:
 	/*
 	 * Grab the next job from queue.  Must be idle.
 	 */
 #ifdef	DIAGNOSTIC
 	if (sc->sc_state != SUNSCPAL_IDLE)
-		panic("%s: not idle", __func__);
+		panic("sunscpal_sched: not idle");
 	if (sc->sc_current)
-		panic("%s: current set", __func__);
+		panic("sunscpal_sched: current set");
 #endif
 
 	/*
@@ -996,19 +1010,19 @@ sunscpal_sched(struct sunscpal_softc *sc)
 
 	if (sr == NULL) {
 		SUNSCPAL_TRACE("sched: no work, cur=0x%x\n",
-		    (long)sc->sc_current);
+				  (long) sc->sc_current);
 
 		/* Another hack (Er.. hook!) for anything that needs it: */
 		if (sc->sc_intr_on) {
 			SUNSCPAL_TRACE("sched: ret, intr ON\n", 0);
-			sc->sc_intr_on(sc);
+		    sc->sc_intr_on(sc);
 		}
 
 		return;		/* No more work to do. */
 	}
 
 	SUNSCPAL_TRACE("sched: select for t/l=0x%02x\n",
-	    (sr->sr_target << 4) | sr->sr_lun);
+			  (sr->sr_target << 4) | sr->sr_lun);
 
 	sc->sc_state = SUNSCPAL_WORKING;
 	error = sunscpal_select(sc, sr);
@@ -1017,7 +1031,7 @@ sunscpal_sched(struct sunscpal_softc *sc)
 		/* Work with the reselected job. */
 		if (sr->sr_flags & SR_IMMED) {
 			printf("%s: reselected while polling (abort)\n",
-			    device_xname(sc->sc_dev));
+			    sc->sc_dev.dv_xname);
 			/* Abort the reselected job. */
 			sc->sc_state |= SUNSCPAL_ABORTING;
 			sc->sc_msgpriq |= SEND_ABORT;
@@ -1052,7 +1066,7 @@ sunscpal_sched(struct sunscpal_softc *sc)
 	case XS_BUSY:
 		/* XXX - Reset and try again. */
 		printf("%s: select found SCSI bus busy, resetting...\n",
-		    device_xname(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		sunscpal_reset_scsibus(sc);
 		/* fallthrough */
 	case XS_SELTIMEOUT:
@@ -1093,7 +1107,7 @@ sunscpal_sched(struct sunscpal_softc *sc)
 	 */
 #ifdef	SUNSCPAL_DEBUG
 	if (sunscpal_debug & SUNSCPAL_DBG_CMDS) {
-		printf("%s: begin, target=%d, LUN=%d\n", __func__,
+		printf("sunscpal_sched: begin, target=%d, LUN=%d\n",
 		    xs->xs_periph->periph_target, xs->xs_periph->periph_lun);
 		sunscpal_show_scsi_cmd(xs);
 	}
@@ -1109,7 +1123,7 @@ sunscpal_sched(struct sunscpal_softc *sc)
 	if ((xs->xs_control & (XS_CTL_DATA_IN | XS_CTL_DATA_OUT)) == 0) {
 		if (sc->sc_dataptr) {
 			printf("%s: ptr but no data in/out flags?\n",
-			    device_xname(sc->sc_dev));
+			    sc->sc_dev.dv_xname);
 			SUNSCPAL_BREAK();
 			sc->sc_dataptr = NULL;
 		}
@@ -1134,7 +1148,7 @@ sunscpal_sched(struct sunscpal_softc *sc)
 	 */
 	if (sr->sr_dma_hand) {
 		SUNSCPAL_TRACE("sched: dma_setup, dh=0x%x\n",
-		    (long) sr->sr_dma_hand);
+				  (long) sr->sr_dma_hand);
 	    sunscpal_dma_setup(sc);
 	}
 
@@ -1148,13 +1162,13 @@ sunscpal_sched(struct sunscpal_softc *sc)
 		    sunscpal_cmd_timeout, sr);
 	}
 
- have_nexus:
+have_nexus:
 
 	SUNSCPAL_TRACE("sched: call machine, cur=0x%x\n",
-	    (long)sc->sc_current);
+			  (long) sc->sc_current);
 	sunscpal_machine(sc);
 	SUNSCPAL_TRACE("sched: machine done, cur=0x%x\n",
-	    (long)sc->sc_current);
+			  (long) sc->sc_current);
 
 	/*
 	 * What state did sunscpal_machine() leave us in?
@@ -1177,9 +1191,9 @@ sunscpal_sched(struct sunscpal_softc *sc)
  *	BSY is FALSE
  */
 void
-sunscpal_reselect(struct sunscpal_softc *sc)
+sunscpal_reselect(sc)
+	struct sunscpal_softc *sc;
 {
-
 	/*
 	 * This controller does not implement disconnect/reselect, so
 	 * we really don't have anything to do here.  We keep this
@@ -1198,7 +1212,9 @@ sunscpal_reselect(struct sunscpal_softc *sc)
  *	XS_SELTIMEOUT   	==> no response to selection
  */
 static int
-sunscpal_select(struct sunscpal_softc *sc, struct sunscpal_req *sr)
+sunscpal_select(sc, sr)
+	struct sunscpal_softc *sc;
+	struct sunscpal_req *sr;
 {
 	int timo, target_mask;
 	u_short	mode;
@@ -1207,7 +1223,7 @@ sunscpal_select(struct sunscpal_softc *sc, struct sunscpal_req *sr)
 	sunscpal_reselect(sc);
 	if (sc->sc_current) {
 		SUNSCPAL_TRACE("select: reselect, cur=0x%x\n",
-		    (long)sc->sc_current);
+				  (long) sc->sc_current);
 		return XS_BUSY;	/* reselected */
 	}
 
@@ -1236,7 +1252,7 @@ sunscpal_select(struct sunscpal_softc *sc, struct sunscpal_req *sr)
 	SUNSCPAL_TRACE("select: device down, rc=%d\n", XS_SELTIMEOUT);
 	return XS_SELTIMEOUT;
 
- success:
+success:
 
 	/*
 	 * The target is now driving BSY, so we can stop
@@ -1292,7 +1308,8 @@ sunscpal_select(struct sunscpal_softc *sc, struct sunscpal_req *sr)
  * will expect to see another REQ (and possibly phase change).
  */
 static int
-sunscpal_msg_in(struct sunscpal_softc *sc)
+sunscpal_msg_in(sc)
+	struct sunscpal_softc *sc;
 {
 	struct sunscpal_req *sr = sc->sc_current;
 	struct scsipi_xfer *xs = sr->sr_xs;
@@ -1311,11 +1328,11 @@ sunscpal_msg_in(struct sunscpal_softc *sc)
 	/* This is a new MESSAGE IN phase.  Clean up our state. */
 	sc->sc_state &= ~SUNSCPAL_DROP_MSGIN;
 
- nextmsg:
+nextmsg:
 	n = 0;
 	sc->sc_imp = &sc->sc_imess[n];
 
- nextbyte:
+nextbyte:
 	/*
 	 * Read a whole message, but don't ack the last byte.  If we reject the
 	 * message, we have to assert ATN during the message transfer phase
@@ -1330,12 +1347,12 @@ sunscpal_msg_in(struct sunscpal_softc *sc)
 			SUNSCPAL_TRACE("msg_in: lost BSY, n=%d\n", n);
 			/* XXX - Assume the command completed? */
 			act_flags |= (ACT_DISCONNECT | ACT_CMD_DONE);
-			return act_flags;
+			return (act_flags);
 		}
 		if (sunscpal_wait_req(sc)) {
 			SUNSCPAL_TRACE("msg_in: BSY but no REQ, n=%d\n", n);
 			/* Just let sunscpal_machine() handle it... */
-			return act_flags;
+			return (act_flags);
 		}
 		phase = SUNSCPAL_BUS_PHASE(SUNSCPAL_READ_2(sc, sunscpal_icr));
 		if (phase != SUNSCPAL_PHASE_MSG_IN) {
@@ -1344,11 +1361,10 @@ sunscpal_msg_in(struct sunscpal_softc *sc)
 			 * a) noticed our ATN signal, or
 			 * b) ran out of messages.
 			 */
-			return act_flags;
+			return (act_flags);
 		}
 		/* Still in MESSAGE IN phase, and REQ is asserted. */
-		if ((SUNSCPAL_READ_2(sc, sunscpal_icr) &
-		    SUNSCPAL_ICR_PARITY_ERROR) != 0) {
+		if (SUNSCPAL_READ_2(sc, sunscpal_icr) & SUNSCPAL_ICR_PARITY_ERROR) {
 			sunscpal_sched_msgout(sc, SEND_PARITY_ERROR);
 			sc->sc_state |= SUNSCPAL_DROP_MSGIN;
 		}
@@ -1359,8 +1375,7 @@ sunscpal_msg_in(struct sunscpal_softc *sc)
 				sunscpal_sched_msgout(sc, SEND_REJECT);
 				sc->sc_state |= SUNSCPAL_DROP_MSGIN;
 			} else {
-				*sc->sc_imp++ =
-				    SUNSCPAL_READ_1(sc, sunscpal_cmd_stat);
+				*sc->sc_imp++ = SUNSCPAL_READ_1(sc, sunscpal_cmd_stat);
 				n++;
 				/*
 				 * This testing is suboptimal, but most
@@ -1385,12 +1400,12 @@ sunscpal_msg_in(struct sunscpal_softc *sc)
 		 */
 
 		if (act_flags != ACT_CONTINUE)
-			return act_flags;
+			return (act_flags);
 
 		/* back to nextbyte */
 	}
 
- have_msg:
+have_msg:
 	/* We now have a complete message.  Parse it. */
 
 	switch (sc->sc_imess[0]) {
@@ -1447,12 +1462,11 @@ sunscpal_msg_in(struct sunscpal_softc *sc)
 		switch (sc->sc_imess[2]) {
 		case MSG_EXT_SDTR:
 		case MSG_EXT_WDTR:
-			/* This controller can not do synchronous mode. */
+			/* The ncr5380 can not do synchronous mode. */
 			goto reject;
 		default:
-			printf("%s: unrecognized MESSAGE EXTENDED; "
-			    "sending REJECT\n",
-			    device_xname(sc->sc_dev));
+			printf("%s: unrecognized MESSAGE EXTENDED; sending REJECT\n",
+			    sc->sc_dev.dv_xname);
 			SUNSCPAL_BREAK();
 			goto reject;
 		}
@@ -1461,9 +1475,9 @@ sunscpal_msg_in(struct sunscpal_softc *sc)
 	default:
 		SUNSCPAL_TRACE("msg_in: eh? imsg=0x%x\n", sc->sc_imess[0]);
 		printf("%s: unrecognized MESSAGE; sending REJECT\n",
-		    device_xname(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		SUNSCPAL_BREAK();
-		/* FALLTHROUGH */
+		/* fallthrough */
 	reject:
 		sunscpal_sched_msgout(sc, SEND_REJECT);
 		break;
@@ -1478,7 +1492,7 @@ sunscpal_msg_in(struct sunscpal_softc *sc)
 	if (act_flags == ACT_CONTINUE)
 		goto nextmsg;
 
-	return act_flags;
+	return (act_flags);
 }
 
 
@@ -1502,7 +1516,8 @@ sunscpal_msg_in(struct sunscpal_softc *sc)
  * when sending ABORT for unwanted reselections.
  */
 static int
-sunscpal_msg_out(struct sunscpal_softc *sc)
+sunscpal_msg_out(sc)
+	struct sunscpal_softc *sc;
 {
 	/*
 	 * This controller does not allow you to assert ATN, which
@@ -1513,15 +1528,16 @@ sunscpal_msg_out(struct sunscpal_softc *sc)
 	 * though, and this printf will eventually go away or get
 	 * #ifdef'ed:
 	 */
-	printf("%s: bus is in MSG_OUT phase?\n", __func__);
-	return ACT_CONTINUE | ACT_RESET_BUS;
+	printf("sunscpal_msg_out: bus is in MSG_OUT phase?\n");
+	return (ACT_CONTINUE | ACT_RESET_BUS);
 }
 
 /*
  * Handle command phase.
  */
 static int
-sunscpal_command(struct sunscpal_softc *sc)
+sunscpal_command(sc)
+	struct sunscpal_softc *sc;
 {
 	struct sunscpal_req *sr = sc->sc_current;
 	struct scsipi_xfer *xs = sr->sr_xs;
@@ -1530,12 +1546,12 @@ sunscpal_command(struct sunscpal_softc *sc)
 	/* Assume command can be sent in one go. */
 	/* XXX: Do this using DMA, and get a phase change intr? */
 	len = sunscpal_pio_out(sc, SUNSCPAL_PHASE_COMMAND, xs->cmdlen,
-	    (uint8_t *)xs->cmd);
+		(u_char *)xs->cmd);
 
 	if (len != xs->cmdlen) {
 #ifdef	SUNSCPAL_DEBUG
-		printf("%s: short transfer: wanted %d got %d.\n",
-		    __func__, xs->cmdlen, len);
+		printf("sunscpal_command: short transfer: wanted %d got %d.\n",
+		    xs->cmdlen, len);
 		sunscpal_show_scsi_cmd(xs);
 		SUNSCPAL_BREAK();
 #endif
@@ -1555,7 +1571,9 @@ sunscpal_command(struct sunscpal_softc *sc)
  * Handle either data_in or data_out
  */
 static int
-sunscpal_data_xfer(struct sunscpal_softc *sc, int phase)
+sunscpal_data_xfer(sc, phase)
+	struct sunscpal_softc *sc;
+	int phase;
 {
 	struct sunscpal_req *sr = sc->sc_current;
 	struct scsipi_xfer *xs = sr->sr_xs;
@@ -1567,15 +1585,15 @@ sunscpal_data_xfer(struct sunscpal_softc *sc, int phase)
 	 */
 	if (sc->sc_state & SUNSCPAL_ABORTING) {
 		printf("%s: aborting, bus phase=%s (reset)\n",
-		    device_xname(sc->sc_dev), phase_names[(phase >> 8) & 7]);
+		    sc->sc_dev.dv_xname, phase_names[(phase >> 8) & 7]);
 		return ACT_RESET_BUS;	/* XXX */
 	}
 
 	/* Validate expected phase (data_in or data_out) */
 	expected_phase = (xs->xs_control & XS_CTL_DATA_OUT) ?
-	    SUNSCPAL_PHASE_DATA_OUT : SUNSCPAL_PHASE_DATA_IN;
+		SUNSCPAL_PHASE_DATA_OUT : SUNSCPAL_PHASE_DATA_IN;
 	if (phase != expected_phase) {
-		printf("%s: data phase error\n", device_xname(sc->sc_dev));
+		printf("%s: data phase error\n", sc->sc_dev.dv_xname);
 		goto abort;
 	}
 
@@ -1587,11 +1605,10 @@ sunscpal_data_xfer(struct sunscpal_softc *sc, int phase)
 		else
 			sunscpal_pio_out(sc, phase, 4096, NULL);
 		/* Make sure that caused a phase change. */
-		if (SUNSCPAL_BUS_PHASE(SUNSCPAL_READ_2(sc, sunscpal_icr)) ==
-		    phase) {
+		if (SUNSCPAL_BUS_PHASE(SUNSCPAL_READ_2(sc, sunscpal_icr)) == phase) {
 			/* More than 4k is just too much! */
 			printf("%s: too much data padding\n",
-			    device_xname(sc->sc_dev));
+				sc->sc_dev.dv_xname);
 			goto abort;
 		}
 		return ACT_CONTINUE;
@@ -1601,14 +1618,16 @@ sunscpal_data_xfer(struct sunscpal_softc *sc, int phase)
 	 * Attempt DMA only if dma_alloc gave us a DMA handle AND
 	 * there is enough left to transfer so DMA is worth while.
 	 */
-	if (sr->sr_dma_hand && (sc->sc_datalen >= sc->sc_min_dma_len)) {
+	if (sr->sr_dma_hand &&
+		(sc->sc_datalen >= sc->sc_min_dma_len))
+	{
 		/*
 		 * OK, really start DMA.  Note, the MD start function
 		 * is responsible for setting the TCMD register, etc.
 		 * (Acknowledge the phase change there, not here.)
 		 */
 		SUNSCPAL_TRACE("data_xfer: dma_start, dh=0x%x\n",
-		    (long)sr->sr_dma_hand);
+		          (long) sr->sr_dma_hand);
 		sunscpal_dma_start(sc);
 		return ACT_WAIT_DMA;
 	}
@@ -1619,37 +1638,36 @@ sunscpal_data_xfer(struct sunscpal_softc *sc, int phase)
 	 */
 	SUNSCPAL_TRACE("data_xfer: doing PIO, len=%d\n", sc->sc_datalen);
 	if (phase == SUNSCPAL_PHASE_DATA_OUT) {
-		len = sunscpal_pio_out(sc, phase,
-		    sc->sc_datalen, sc->sc_dataptr);
+		len = sunscpal_pio_out(sc, phase, sc->sc_datalen, sc->sc_dataptr);
 	} else {
-		len = sunscpal_pio_in(sc, phase,
-		    sc->sc_datalen, sc->sc_dataptr);
+		len = sunscpal_pio_in(sc, phase, sc->sc_datalen, sc->sc_dataptr);
 	}
 	sc->sc_dataptr += len;
 	sc->sc_datalen -= len;
 
 	SUNSCPAL_TRACE("data_xfer: did PIO, resid=%d\n", sc->sc_datalen);
-	return ACT_CONTINUE;
+	return (ACT_CONTINUE);
 
- abort:
+abort:
 	sc->sc_state |= SUNSCPAL_ABORTING;
 	sunscpal_sched_msgout(sc, SEND_ABORT);
-	return ACT_CONTINUE;
+	return (ACT_CONTINUE);
 }
 
 
 static int
-sunscpal_status(struct sunscpal_softc *sc)
+sunscpal_status(sc)
+	struct sunscpal_softc *sc;
 {
 	int len;
-	uint8_t status;
+	u_char status;
 	struct sunscpal_req *sr = sc->sc_current;
 
 	len = sunscpal_pio_in(sc, SUNSCPAL_PHASE_STATUS, 1, &status);
 	if (len) {
 		sr->sr_status = status;
 	} else {
-		printf("%s: none?\n", __func__);
+		printf("sunscpal_status: none?\n");
 	}
 
 	return ACT_CONTINUE;
@@ -1666,7 +1684,8 @@ sunscpal_status(struct sunscpal_softc *sc)
  * being undertaken.
  */
 static void
-sunscpal_machine(struct sunscpal_softc *sc)
+sunscpal_machine(sc)
+	struct sunscpal_softc *sc;
 {
 	struct sunscpal_req *sr;
 	struct scsipi_xfer *xs;
@@ -1674,9 +1693,9 @@ sunscpal_machine(struct sunscpal_softc *sc)
 
 #ifdef	DIAGNOSTIC
 	if (sc->sc_state == SUNSCPAL_IDLE)
-		panic("%s: state=idle", __func__);
+		panic("sunscpal_machine: state=idle");
 	if (sc->sc_current == NULL)
-		panic("%s: no current cmd", __func__);
+		panic("sunscpal_machine: no current cmd");
 #endif
 
 	sr = sc->sc_current;
@@ -1688,16 +1707,16 @@ sunscpal_machine(struct sunscpal_softc *sc)
 	 * complete.  Must stop DMA before touching the PAL or
 	 * there will be "register conflict" errors.
 	 */
-	if ((sc->sc_state & SUNSCPAL_DOINGDMA) != 0) {
+	if (sc->sc_state & SUNSCPAL_DOINGDMA) {
 		/* Pick-up where where we left off... */
 		goto dma_done;
 	}
 
- next_phase:
+next_phase:
 
 	if (!SUNSCPAL_BUSY(sc)) {
 		/* Unexpected disconnect */
-		printf("%s: unexpected disconnect.\n", __func__);
+		printf("sunscpal_machine: unexpected disconnect.\n");
 		xs->error = XS_DRIVER_STUFFUP;
 		act_flags |= (ACT_DISCONNECT | ACT_CMD_DONE);
 		goto do_actions;
@@ -1715,12 +1734,12 @@ sunscpal_machine(struct sunscpal_softc *sc)
 		if (--timo <= 0) {
 			if (sc->sc_state & SUNSCPAL_ABORTING) {
 				printf("%s: no REQ while aborting, reset\n",
-				    device_xname(sc->sc_dev));
+				    sc->sc_dev.dv_xname);
 				act_flags |= ACT_RESET_BUS;
 				goto do_actions;
 			}
 			printf("%s: no REQ for next phase, abort\n",
-			    device_xname(sc->sc_dev));
+			    sc->sc_dev.dv_xname);
 			sc->sc_state |= SUNSCPAL_ABORTING;
 			sunscpal_sched_msgout(sc, SEND_ABORT);
 			goto next_phase;
@@ -1730,7 +1749,7 @@ sunscpal_machine(struct sunscpal_softc *sc)
 
 	phase = SUNSCPAL_BUS_PHASE(SUNSCPAL_READ_2(sc, sunscpal_icr));
 	SUNSCPAL_TRACE("machine: phase=%s\n",
-	    (long)phase_names[(phase >> 8) & 7]);
+			  (long) phase_names[(phase >> 8) & 7]);
 
 	/*
 	 * We assume that the device knows what it's doing,
@@ -1761,7 +1780,7 @@ sunscpal_machine(struct sunscpal_softc *sc)
 		break;
 
 	default:
-		printf("%s: Unexpected phase 0x%x\n", __func__, phase);
+		printf("sunscpal_machine: Unexpected phase 0x%x\n", phase);
 		sc->sc_state |= SUNSCPAL_ABORTING;
 		sunscpal_sched_msgout(sc, SEND_ABORT);
 		goto next_phase;
@@ -1769,7 +1788,7 @@ sunscpal_machine(struct sunscpal_softc *sc)
 	} /* switch */
 	sc->sc_prevphase = phase;
 
- do_actions:
+do_actions:
 
 	if (act_flags & ACT_WAIT_DMA) {
 		act_flags &= ~ACT_WAIT_DMA;
@@ -1780,14 +1799,14 @@ sunscpal_machine(struct sunscpal_softc *sc)
 		}
 		/* Busy-wait for it to finish. */
 		SUNSCPAL_TRACE("machine: dma_poll, dh=0x%x\n",
-		    (long)sr->sr_dma_hand);
+				  (long) sr->sr_dma_hand);
 		sunscpal_dma_poll(sc);
- dma_done:
+	dma_done:
 		/* Return here after interrupt. */
 		if (sr->sr_flags & SR_OVERDUE)
 			sc->sc_state |= SUNSCPAL_ABORTING;
 		SUNSCPAL_TRACE("machine: dma_stop, dh=0x%x\n",
-		    (long)sr->sr_dma_hand);
+				  (long) sr->sr_dma_hand);
 		sunscpal_dma_stop(sc);
 		SUNSCPAL_CLR_INTR(sc);	/* XXX */
 		/*
@@ -1805,7 +1824,7 @@ sunscpal_machine(struct sunscpal_softc *sc)
 	 * XXX - better place to check?
 	 */
 	if (SUNSCPAL_READ_2(sc, sunscpal_icr) & SUNSCPAL_ICR_PARITY_ERROR) {
-		printf("%s: parity error!\n", device_xname(sc->sc_dev));
+		printf("%s: parity error!\n", sc->sc_dev.dv_xname);
 		/* XXX: sc->sc_state |= SUNSCPAL_ABORTING; */
 		sunscpal_sched_msgout(sc, SEND_PARITY_ERROR);
 	}
@@ -1824,7 +1843,7 @@ sunscpal_machine(struct sunscpal_softc *sc)
 		 */
 		sc->sc_state |= SUNSCPAL_ABORTING;
 		printf("%s: reset SCSI bus for TID=%d LUN=%d\n",
-		    device_xname(sc->sc_dev), sr->sr_target, sr->sr_lun);
+		    sc->sc_dev.dv_xname, sr->sr_target, sr->sr_lun);
 		sunscpal_reset_scsibus(sc);
 	}
 
@@ -1834,7 +1853,7 @@ sunscpal_machine(struct sunscpal_softc *sc)
 		/* XXX: from the aic6360 driver, but why? */
 		if (sc->sc_datalen < 0) {
 			printf("%s: %d extra bytes from %d:%d\n",
-			    device_xname(sc->sc_dev), -sc->sc_datalen,
+			    sc->sc_dev.dv_xname, -sc->sc_datalen,
 			    sr->sr_target, sr->sr_lun);
 			sc->sc_datalen = 0;
 		}
@@ -1860,9 +1879,9 @@ sunscpal_machine(struct sunscpal_softc *sc)
 		}
 		/* Device is sitting on the bus! */
 		printf("%s: Target %d LUN %d stuck busy, resetting...\n",
-		    device_xname(sc->sc_dev), sr->sr_target, sr->sr_lun);
+		    sc->sc_dev.dv_xname, sr->sr_target, sr->sr_lun);
 		sunscpal_reset_scsibus(sc);
- busfree:
+	busfree:
 		SUNSCPAL_TRACE("machine: discon, waited %d\n",
 			sunscpal_wait_req_timo - timo);
 
@@ -1896,21 +1915,22 @@ sunscpal_machine(struct sunscpal_softc *sc)
 #ifdef	SUNSCPAL_DEBUG
 
 static void
-sunscpal_show_scsi_cmd(struct scsipi_xfer *xs)
+sunscpal_show_scsi_cmd(xs)
+	struct scsipi_xfer *xs;
 {
-	uint8_t *b = (uint8_t *)xs->cmd;
-	int i = 0;
+	u_char	*b = (u_char *) xs->cmd;
+	int	i  = 0;
 
 	scsipi_printaddr(xs->xs_periph);
-	if ((xs->xs_control & XS_CTL_RESET) == 0) {
+	if ( ! ( xs->xs_control & XS_CTL_RESET ) ) {
 		printf("-");
 		while (i < xs->cmdlen) {
-			if (i != 0)
-				printf(",");
-			printf("%x", b[i++]);
+			if (i) printf(",");
+			printf("%x",b[i++]);
 		}
 		printf("-\n");
 	} else {
+
 		printf("-RESET-\n");
 	}
 }
@@ -1925,7 +1945,9 @@ struct trace_ent {
 } sunscpal_tracebuf[TRACE_MAX];
 
 void
-sunscpal_trace(char *msg, long val)
+sunscpal_trace(msg, val)
+	char *msg;
+	long  val;
 {
 	struct trace_ent *tr;
 	int s;
@@ -1946,15 +1968,14 @@ sunscpal_trace(char *msg, long val)
 
 #ifdef	DDB
 void
-sunscpal_clear_trace(void)
+sunscpal_clear_trace()
 {
-
 	sunscpal_traceidx = 0;
-	memset((void *)sunscpal_tracebuf, 0, sizeof(sunscpal_tracebuf));
+	memset((char*) sunscpal_tracebuf, 0, sizeof(sunscpal_tracebuf));
 }
 
 void
-sunscpal_show_trace(void)
+sunscpal_show_trace()
 {
 	struct trace_ent *tr;
 	int idx;
@@ -1971,7 +1992,8 @@ sunscpal_show_trace(void)
 }
 
 void
-sunscpal_show_req(struct sunscpal_req *sr)
+sunscpal_show_req(sr)
+	struct sunscpal_req *sr;
 {
 	struct scsipi_xfer *xs = sr->sr_xs;
 
@@ -1996,7 +2018,7 @@ sunscpal_show_req(struct sunscpal_req *sr)
 }
 
 void
-sunscpal_show_state(void)
+sunscpal_show_state()
 {
 	struct sunscpal_softc *sc;
 	struct sunscpal_req *sr;
@@ -2044,13 +2066,15 @@ sunscpal_show_state(void)
 #endif	/* SUNSCPAL_DEBUG */
 
 void
-sunscpal_attach(struct sunscpal_softc *sc, int options)
+sunscpal_attach(sc, options)
+	struct sunscpal_softc *sc;
+	int options;
 {
 
 	/*
 	 * Handle our options.
 	 */
-	aprint_normal(": options=0x%x\n", options);
+	printf(": options=0x%x\n", options);
 	sc->sc_parity_disable = (options & SUNSCPAL_OPT_NO_PARITY_CHK);
 	if (options & SUNSCPAL_OPT_DISABLE_DMA)
 		sc->sc_flags |= SUNSCPAL_DISABLE_DMA;
@@ -2059,7 +2083,7 @@ sunscpal_attach(struct sunscpal_softc *sc, int options)
 	 * Fill in the adapter.
 	 */
 	memset(&sc->sc_adapter, 0, sizeof(sc->sc_adapter));
-	sc->sc_adapter.adapt_dev = sc->sc_dev;
+	sc->sc_adapter.adapt_dev = &sc->sc_dev;
 	sc->sc_adapter.adapt_nchannels = 1;
 	sc->sc_adapter.adapt_openings = SUNSCPAL_OPENINGS;
 	sc->sc_adapter.adapt_max_periph = 1;
@@ -2080,7 +2104,8 @@ sunscpal_attach(struct sunscpal_softc *sc, int options)
 	 * config_found() to make sure the adatper is disabled.
 	 */
 	if (scsipi_adapter_addref(&sc->sc_adapter) != 0) {
-		aprint_error_dev(sc->sc_dev, "unable to enable controller\n");
+		printf("%s: unable to enable controller\n",
+		    sc->sc_dev.dv_xname);
 		return;
 	}
 
@@ -2090,31 +2115,32 @@ sunscpal_attach(struct sunscpal_softc *sc, int options)
 	/*
 	 * Ask the adapter what subunits are present
 	 */
-	(void)config_found(sc->sc_dev, &sc->sc_channel, scsiprint);
+	(void) config_found(&sc->sc_dev, &sc->sc_channel, scsiprint);
 	scsipi_adapter_delref(&sc->sc_adapter);
 }
 
 int
-sunscpal_detach(struct sunscpal_softc *sc, int flags)
+sunscpal_detach(sc, flags)
+	struct sunscpal_softc *sc;
+	int flags;
 {
 
-	return EOPNOTSUPP;
+	return (EOPNOTSUPP);
 }
 
 static void
 sunscpal_minphys(struct buf *bp)
 {
-
 	if (bp->b_bcount > SUNSCPAL_MAX_DMA_LEN) {
 #ifdef	SUNSCPAL_DEBUG
 		if (sunscpal_debug & SUNSCPAL_DBG_DMA) {
-			printf("%s: len = 0x%lx.\n", __func__, bp->b_bcount);
+			printf("sunscpal_minphys len = 0x%lx.\n", bp->b_bcount);
 			Debugger();
 		}
 #endif
 		bp->b_bcount = SUNSCPAL_MAX_DMA_LEN;
 	}
-	return minphys(bp);
+	return (minphys(bp));
 }
 
 #ifdef SUNSCPAL_USE_BUS_DMA
@@ -2124,7 +2150,8 @@ sunscpal_minphys(struct buf *bp)
  * for DMA transfer.
  */
 static void
-sunscpal_dma_alloc(struct sunscpal_softc *sc)
+sunscpal_dma_alloc(sc)
+	struct sunscpal_softc *sc;
 {
 	struct sunscpal_req *sr = sc->sc_current;
 	sunscpal_dma_handle_t dh;
@@ -2133,21 +2160,21 @@ sunscpal_dma_alloc(struct sunscpal_softc *sc)
 
 #ifdef	DIAGNOSTIC
 	if (sr->sr_dma_hand != NULL)
-		panic("%s: already have DMA handle", __func__);
+		panic("sunscpal_dma_alloc: already have DMA handle");
 #endif
 
-	addr = (u_long)sc->sc_dataptr;
+	addr = (u_long) sc->sc_dataptr;
 	xlen = sc->sc_datalen;
 
 	/* If the DMA start addr is misaligned then do PIO */
 	if ((addr & 1) || (xlen & 1)) {
-		printf("%s: misaligned.\n", __func__);
+		printf("sunscpal_dma_alloc: misaligned.\n");
 		return;
 	}
 
 	/* Make sure our caller checked sc_min_dma_len. */
 	if (xlen < sc->sc_min_dma_len)
-		panic("%s: xlen=0x%x", __func__, xlen);
+		panic("sunscpal_dma_alloc: xlen=0x%x", xlen);
 
 	/*
 	 * Never attempt single transfers of more than 63k, because
@@ -2156,7 +2183,7 @@ sunscpal_dma_alloc(struct sunscpal_softc *sc)
 	 * XXX - Should just segment these...
 	 */
 	if (xlen > SUNSCPAL_MAX_DMA_LEN) {
-		printf("%s: excessive xlen=0x%x\n", __func__, xlen);
+		printf("sunscpal_dma_alloc: excessive xlen=0x%x\n", xlen);
 		Debugger();
 		sc->sc_datalen = xlen = SUNSCPAL_MAX_DMA_LEN;
 	}
@@ -2167,42 +2194,44 @@ sunscpal_dma_alloc(struct sunscpal_softc *sc)
 		if ((sc->sc_dma_handles[i].dh_flags & SUNSCDH_BUSY) == 0)
 			goto found;
 	}
-	panic("%s: no free DMA handles.", device_xname(sc->sc_dev));
- found:
+	panic("sc: no free DMA handles.");
+found:
 
 	dh = &sc->sc_dma_handles[i];
 	dh->dh_flags = SUNSCDH_BUSY;
-	dh->dh_mapaddr = (uint8_t *)addr;
+	dh->dh_mapaddr = (u_char*) addr;
 	dh->dh_maplen  = xlen;
 	dh->dh_dvma = 0;
 
 	/* Load the DMA map. */
-	if (bus_dmamap_load(sc->sunscpal_dmat, dh->dh_dmamap,
-	    dh->dh_mapaddr, dh->dh_maplen, NULL, BUS_DMA_NOWAIT) != 0) {
+	if (bus_dmamap_load(sc->sunscpal_dmat, dh->dh_dmamap, dh->dh_mapaddr, dh->dh_maplen, NULL, BUS_DMA_NOWAIT) != 0) {
 		/* Can't load map */
-		printf("%s: can't DMA %p/0x%x\n", __func__,
-		    dh->dh_mapaddr, dh->dh_maplen);
+		printf("sunscpal_dma_alloc: can't DMA %p/0x%x\n",
+			dh->dh_mapaddr, dh->dh_maplen);
 		dh->dh_flags = 0;
 		return;
 	}
 
 	/* success */
 	sr->sr_dma_hand = dh;
+
+	return;
 }
 
 static void
-sunscpal_dma_free(struct sunscpal_softc *sc)
+sunscpal_dma_free(sc)
+	struct sunscpal_softc *sc;
 {
 	struct sunscpal_req *sr = sc->sc_current;
 	sunscpal_dma_handle_t dh = sr->sr_dma_hand;
 
 #ifdef	DIAGNOSTIC
 	if (dh == NULL)
-		panic("%s: no DMA handle", __func__);
+		panic("sunscpal_dma_free: no DMA handle");
 #endif
 
 	if (sc->sc_state & SUNSCPAL_DOINGDMA)
-		panic("%s: free while in progress", __func__);
+		panic("sunscpal_dma_free: free while in progress");
 
 	if (dh->dh_flags & SUNSCDH_BUSY) {
 		/* XXX - Should separate allocation and mapping. */
@@ -2221,7 +2250,8 @@ sunscpal_dma_free(struct sunscpal_softc *sc)
  * On the sc version, setup the start address and the count.
  */
 static void
-sunscpal_dma_setup(struct sunscpal_softc *sc)
+sunscpal_dma_setup(sc)
+	struct sunscpal_softc *sc;
 {
 	struct sunscpal_req *sr = sc->sc_current;
 	struct scsipi_xfer *xs = sr->sr_xs;
@@ -2236,23 +2266,22 @@ sunscpal_dma_setup(struct sunscpal_softc *sc)
 	data_pa = dh->dh_dvma;
 	data_pa += (sc->sc_dataptr - dh->dh_mapaddr);
 	if (data_pa & 1)
-		panic("%s: bad pa=0x%lx", __func__, data_pa);
+		panic("sunscpal_dma_setup: bad pa=0x%lx", data_pa);
 	xlen = sc->sc_datalen;
 	if (xlen & 1)
-		panic("%s: bad xlen=0x%x", __func__, xlen);
+		panic("sunscpal_dma_setup: bad xlen=0x%x", xlen);
 	sc->sc_reqlen = xlen; 	/* XXX: or less? */
 
 #ifdef	SUNSCPAL_DEBUG
 	if (sunscpal_debug & SUNSCPAL_DBG_DMA) {
-		printf("%s: dh=%p, pa=0x%lx, xlen=0x%x\n",
-		    __func__, dh, data_pa, xlen);
+		printf("sunscpal_dma_setup: dh=%p, pa=0x%lx, xlen=0x%x\n",
+			   dh, data_pa, xlen);
 	}
 #endif
 
 	/* sync the DMA map: */
 	bus_dmamap_sync(sc->sunscpal_dmat, dh->dh_dmamap, 0, dh->dh_maplen,
-	    ((xs->xs_control & XS_CTL_DATA_OUT) == 0 ?
-	    BUS_DMASYNC_PREREAD : BUS_DMASYNC_PREWRITE));
+	    ((xs->xs_control & XS_CTL_DATA_OUT) == 0 ? BUS_DMASYNC_PREREAD : BUS_DMASYNC_PREWRITE));
 
 	/* Load the start address and the count. */
 	SUNSCPAL_WRITE_2(sc, sunscpal_dma_addr_h, (data_pa >> 16) & 0xFFFF);

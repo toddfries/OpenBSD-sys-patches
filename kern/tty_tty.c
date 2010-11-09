@@ -1,4 +1,4 @@
-/*	$NetBSD: tty_tty.c,v 1.37 2008/04/24 15:35:30 ad Exp $	*/
+/*	$NetBSD: tty_tty.c,v 1.35 2007/04/03 16:11:31 hannken Exp $	*/
 
 /*-
  * Copyright (c) 1982, 1986, 1991, 1993, 1995
@@ -36,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: tty_tty.c,v 1.37 2008/04/24 15:35:30 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: tty_tty.c,v 1.35 2007/04/03 16:11:31 hannken Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -74,7 +74,7 @@ cttyopen(dev_t dev, int flag, int mode, struct lwp *l)
 	  (flag&FREAD ? VREAD : 0) | (flag&FWRITE ? VWRITE : 0), l->l_cred, l);
 	if (!error)
 #endif /* PARANOID */
-		error = VOP_OPEN(ttyvp, flag, NOCRED);
+		error = VOP_OPEN(ttyvp, flag, NOCRED, l);
 	VOP_UNLOCK(ttyvp, 0);
 	return (error);
 }
@@ -121,16 +121,16 @@ cttyioctl(dev_t dev, u_long cmd, void *addr, int flag, struct lwp *l)
 	if (cmd == TIOCSCTTY)		/* XXX */
 		return (EINVAL);
 	if (cmd == TIOCNOTTY) {
-		mutex_enter(proc_lock);
+		mutex_enter(&proclist_lock);
 		if (!SESS_LEADER(l->l_proc)) {
 			l->l_proc->p_lflag &= ~PL_CONTROLT;
 			rv = 0;
 		} else
 			rv = EINVAL;
-		mutex_exit(proc_lock);
+		mutex_exit(&proclist_lock);
 		return (rv);
 	}
-	return (VOP_IOCTL(ttyvp, cmd, addr, flag, NOCRED));
+	return (VOP_IOCTL(ttyvp, cmd, addr, flag, NOCRED, l));
 }
 
 /*ARGSUSED*/
@@ -141,7 +141,7 @@ cttypoll(dev_t dev, int events, struct lwp *l)
 
 	if (ttyvp == NULL)
 		return (seltrue(dev, events, l));
-	return (VOP_POLL(ttyvp, events));
+	return (VOP_POLL(ttyvp, events, l));
 }
 
 static int

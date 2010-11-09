@@ -1,4 +1,4 @@
-/*	$NetBSD: intr.h,v 1.9 2008/04/27 18:58:47 matt Exp $	*/
+/*	$NetBSD: intr.h,v 1.5 2006/12/21 15:55:23 yamt Exp $	*/
 
 /*
  * Copyright (c) 2001, 2003 Wasabi Systems, Inc.
@@ -42,15 +42,23 @@
 
 /* Interrupt priority "levels". */
 #define	IPL_NONE	0	/* nothing */
-#define	IPL_SOFTCLOCK	1	/* software clock interrupt */
-#define	IPL_SOFTBIO	2	/* generic software interrupts */
+#define	IPL_SOFT	1	/* generic software interrupts */
+#define	IPL_SOFTCLOCK	2	/* software clock interrupt */
 #define	IPL_SOFTNET	3	/* software network interrupt */
-#define	IPL_SOFTSERIAL	4	/* software serial interrupt */
-#define	IPL_VM		5	/* memory allocation */
-#define	IPL_SCHED	6	/* scheduler */
-#define	IPL_HIGH	6	/* everything */
+#define	IPL_BIO		4	/* block I/O */
+#define	IPL_NET		5	/* network */
+#define	IPL_SOFTSERIAL	6	/* software serial interrupt */
+#define	IPL_TTY		7	/* terminals */
+#define	IPL_VM		8	/* memory allocation */
+#define	IPL_AUDIO	9	/* audio device */
+#define	IPL_CLOCK	10	/* clock interrupt */
+#define	IPL_STATCLOCK	11	/* statistics clock interrupt */
+#define	IPL_HIGH	12	/* everything */
+#define	IPL_SCHED	IPL_HIGH
+#define	IPL_LOCK	IPL_HIGH
+#define	IPL_SERIAL	13	/* serial device */
 
-#define	NIPL		7
+#define	NIPL		14
 
 /* Interrupt sharing types. */
 #define	IST_NONE	0	/* none */
@@ -68,11 +76,15 @@
 
 #ifndef _LOCORE
 
+#include <sys/device.h>
+#include <sys/queue.h>
+
 #if defined(_LKM)
 
 int	_splraise(int);
 int	_spllower(int);
 void	splx(int);
+void	_setsoftintr(int);
 
 #else	/* _LKM */
 
@@ -122,7 +134,9 @@ void	splx(int);
 
 #endif /* _LKM */
 
-typedef uint8_t ipl_t;
+#define	splsoft()	_splraise(IPL_SOFT)
+
+typedef int ipl_t;
 typedef struct {
 	ipl_t _ipl;
 } ipl_cookie_t;
@@ -142,8 +156,12 @@ splraiseipl(ipl_cookie_t icookie)
 }
 
 #define	spl0()		_spllower(IPL_NONE)
+#define	spllowersoftclock() _spllower(IPL_SOFTCLOCK)
 
 #include <sys/spl.h>
+
+/* Use generic software interrupt support. */
+#include <arm/softintr.h>
 
 #endif /* ! _LOCORE */
 

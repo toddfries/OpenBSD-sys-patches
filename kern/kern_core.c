@@ -1,4 +1,4 @@
-/*	$NetBSD: kern_core.c,v 1.14 2009/01/11 02:45:52 christos Exp $	*/
+/*	$NetBSD: kern_core.c,v 1.6 2007/09/22 13:34:23 dsl Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1989, 1991, 1993
@@ -37,7 +37,9 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kern_core.c,v 1.14 2009/01/11 02:45:52 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kern_core.c,v 1.6 2007/09/22 13:34:23 dsl Exp $");
+
+#include "opt_coredump.h"
 
 #include <sys/param.h>
 #include <sys/vnode.h>
@@ -49,9 +51,17 @@ __KERNEL_RCSID(0, "$NetBSD: kern_core.c,v 1.14 2009/01/11 02:45:52 christos Exp 
 #include <sys/exec.h>
 #include <sys/filedesc.h>
 #include <sys/kauth.h>
-#include <sys/module.h>
 
-MODULE(MODULE_CLASS_MISC, coredump, NULL);
+#if !defined(COREDUMP)
+
+int
+coredump(struct lwp *l, const char *pattern)
+{
+
+	return (ENOSYS);
+}
+
+#else	/* COREDUMP */
 
 struct coredump_iostate {
 	struct lwp *io_lwp;
@@ -60,36 +70,13 @@ struct coredump_iostate {
 	off_t io_offset;
 };
 
-static int	coredump(struct lwp *, const char *);
 static int	coredump_buildname(struct proc *, char *, const char *, size_t);
-
-static int
-coredump_modcmd(modcmd_t cmd, void *arg)
-{
-
-	switch (cmd) {
-	case MODULE_CMD_INIT:
-		coredump_vec = coredump;
-		return 0;
-	case MODULE_CMD_FINI:
-		/*
-		 * In theory we don't need to patch this, as the various
-		 * exec formats depend on this module.  If this module has
-		 * no references, and so can be unloaded, no user programs
-		 * can be running and so nothing can call *coredump_vec.
-		 */
-		coredump_vec = (int (*)(struct lwp *, const char *))enosys;
-		return 0;
-	default:
-		return ENOTTY;
-	}
-}
 
 /*
  * Dump core, into a file named "progname.core" or "core" (depending on the
  * value of shortcorename), unless the process was setuid/setgid.
  */
-static int
+int
 coredump(struct lwp *l, const char *pattern)
 {
 	struct vnode		*vp;
@@ -108,8 +95,8 @@ coredump(struct lwp *l, const char *pattern)
 	p = l->l_proc;
 	vm = p->p_vmspace;
 
-	mutex_enter(proc_lock);		/* p_session */
-	mutex_enter(p->p_lock);
+	mutex_enter(&proclist_lock);	/* p_session */
+	mutex_enter(&p->p_mutex);
 
 	/*
 	 * Refuse to core if the data + stack + user size is larger than
@@ -119,8 +106,8 @@ coredump(struct lwp *l, const char *pattern)
 	if (USPACE + ctob(vm->vm_dsize + vm->vm_ssize) >=
 	    p->p_rlimit[RLIMIT_CORE].rlim_cur) {
 		error = EFBIG;		/* better error code? */
-		mutex_exit(p->p_lock);
-		mutex_exit(proc_lock);
+		mutex_exit(&p->p_mutex);
+		mutex_exit(&proclist_lock);
 		goto done;
 	}
 
@@ -144,8 +131,8 @@ coredump(struct lwp *l, const char *pattern)
 	if (vp->v_mount == NULL ||
 	    (vp->v_mount->mnt_flag & MNT_NOCOREDUMP) != 0) {
 		error = EPERM;
-		mutex_exit(p->p_lock);
-		mutex_exit(proc_lock);
+		mutex_exit(&p->p_mutex);
+		mutex_exit(&proclist_lock);
 		goto done;
 	}
 
@@ -156,8 +143,8 @@ coredump(struct lwp *l, const char *pattern)
 	if (p->p_flag & PK_SUGID) {
 		if (!security_setidcore_dump) {
 			error = EPERM;
-			mutex_exit(p->p_lock);
-			mutex_exit(proc_lock);
+			mutex_exit(&p->p_mutex);
+			mutex_exit(&proclist_lock);
 			goto done;
 		}
 		pattern = security_setidcore_path;
@@ -170,11 +157,11 @@ coredump(struct lwp *l, const char *pattern)
 		pattern = lim->pl_corename;
 	error = coredump_buildname(p, name, pattern, MAXPATHLEN);
 	mutex_exit(&lim->pl_lock);
-	mutex_exit(p->p_lock);
-	mutex_exit(proc_lock);
+	mutex_exit(&p->p_mutex);
+	mutex_exit(&proclist_lock);
 	if (error)
 		goto done;
-	NDINIT(&nd, LOOKUP, NOFOLLOW, UIO_SYSSPACE, name);
+	NDINIT(&nd, LOOKUP, NOFOLLOW, UIO_SYSSPACE, name, l);
 	if ((error = vn_open(&nd, O_CREAT | O_NOFOLLOW | FWRITE,
 	    S_IRUSR | S_IWUSR)) != 0)
 		goto done;
@@ -182,7 +169,7 @@ coredump(struct lwp *l, const char *pattern)
 
 	/* Don't dump to non-regular files or files with links. */
 	if (vp->v_type != VREG ||
-	    VOP_GETATTR(vp, &vattr, cred) || vattr.va_nlink != 1) {
+	    VOP_GETATTR(vp, &vattr, cred, l) || vattr.va_nlink != 1) {
 		error = EINVAL;
 		goto out;
 	}
@@ -195,7 +182,8 @@ coredump(struct lwp *l, const char *pattern)
 		vattr.va_mode = security_setidcore_mode;
 	}
 
-	VOP_SETATTR(vp, &vattr, cred);
+	VOP_LEASE(vp, l, cred, LEASE_WRITE);
+	VOP_SETATTR(vp, &vattr, cred, l);
 	p->p_acflag |= ACORE;
 
 	io.io_lwp = l;
@@ -207,7 +195,7 @@ coredump(struct lwp *l, const char *pattern)
 	error = (*p->p_execsw->es_coredump)(l, &io);
  out:
 	VOP_UNLOCK(vp, 0);
-	error1 = vn_close(vp, FWRITE, cred);
+	error1 = vn_close(vp, FWRITE, cred, l);
 	if (error == 0)
 		error = error1;
 done:
@@ -223,7 +211,7 @@ coredump_buildname(struct proc *p, char *dst, const char *src, size_t len)
 	char		*d, *end;
 	int		i;
 
-	KASSERT(mutex_owned(proc_lock));
+	KASSERT(mutex_owned(&proclist_lock));
 
 	for (s = src, d = dst, end = d + len; *s != '\0'; s++) {
 		if (*s == '%') {
@@ -240,8 +228,8 @@ coredump_buildname(struct proc *p, char *dst, const char *src, size_t len)
 				    p->p_pgrp->pg_session->s_login);
 				break;
 			case 't':
-				i = snprintf(d, end - d, "%lld",
-				    (long long)p->p_stats->p_start.tv_sec);
+				i = snprintf(d, end - d, "%ld",
+				    p->p_stats->p_start.tv_sec);
 				break;
 			default:
 				goto copy;
@@ -280,3 +268,5 @@ coredump_write(void *cookie, enum uio_seg segflg, const void *data, size_t len)
 	io->io_offset += len;
 	return (0);
 }
+
+#endif	/* COREDUMP */

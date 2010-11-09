@@ -1,7 +1,7 @@
-/*	$NetBSD: loadfile.h,v 1.10 2008/09/25 20:59:38 christos Exp $	 */
+/*	$NetBSD: loadfile.h,v 1.5 2003/04/29 13:03:55 scw Exp $	 */
 
 /*-
- * Copyright (c) 1998, 2008 The NetBSD Foundation, Inc.
+ * Copyright (c) 1998 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -34,11 +41,10 @@
  */
 #define MARK_START	0
 #define MARK_ENTRY	1
-#define	MARK_DATA	2
-#define	MARK_NSYM	3
-#define MARK_SYM	4
-#define	MARK_END	5
-#define	MARK_MAX	6
+#define	MARK_NSYM	2
+#define MARK_SYM	3
+#define	MARK_END	4
+#define	MARK_MAX	5
 
 /*
  * Bit flags for sections to load
@@ -49,8 +55,7 @@
 #define	LOAD_BSS	0x0008
 #define	LOAD_SYM	0x0010
 #define	LOAD_HDR	0x0020
-#define LOAD_NOTE	0x0040
-#define LOAD_ALL	0x007f
+#define LOAD_ALL	0x003f
 
 #define	COUNT_TEXT	0x0100
 #define	COUNT_TEXTA	0x0200
@@ -87,6 +92,3 @@ int	loadfile_elf64(int, Elf64_Ehdr *, u_long *, int);
 #include <sys/exec_aout.h>
 int	loadfile_aout(int, struct exec *, u_long *, int);
 #endif
-
-extern uint32_t	netbsd_version;
-extern u_int netbsd_elf_class;

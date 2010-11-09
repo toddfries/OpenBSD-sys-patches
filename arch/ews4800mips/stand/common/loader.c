@@ -1,4 +1,4 @@
-/*	$NetBSD: loader.c,v 1.4 2008/04/28 20:23:18 martin Exp $	*/
+/*	$NetBSD: loader.c,v 1.2 2006/01/26 16:26:58 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 2004 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -135,7 +142,7 @@ cmd_boot_ux(int argc, char *argp[], int interactive)
 	uint32_t entry;
 
 	marks[MARK_START] = 0;
-	console_cursor(false);
+	console_cursor(FALSE);
 	if (loadfile("sd0d:iopboot", marks, LOAD_KERNEL) != 0) {
 		printf("load iopboot failed.\n");
 		return 1;
@@ -165,7 +172,7 @@ cmd_boot_ux(int argc, char *argp[], int interactive)
 			"m"(ipl_args.v1));
 		/* NOTREACHED */
 	}
-	console_cursor(true);
+	console_cursor(TRUE);
 
 	return 0;
 }
@@ -186,7 +193,7 @@ cmd_boot(int argc, char *argp[], int interactive)
 	}
 
 	marks[MARK_START] = 0;
-	console_cursor(false);
+	console_cursor(FALSE);
 	if (loadfile(filename, marks, LOAD_KERNEL) != 0) {
 		printf("load file failed.\n");
 		return 1;
@@ -222,7 +229,7 @@ cmd_boot(int argc, char *argp[], int interactive)
 			:: "r"(entry), "m"(argc), "m"(argp), "m"(bi));
 		/* NOTREACHED */
 	}
-	console_cursor(true);
+	console_cursor(TRUE);
 
 	return 0;
 }

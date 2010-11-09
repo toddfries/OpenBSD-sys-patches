@@ -1,4 +1,4 @@
-/*	$NetBSD: irix_sysctl.h,v 1.7 2008/11/19 18:36:03 ad Exp $ */
+/*	$NetBSD: irix_sysctl.h,v 1.4 2005/12/11 12:20:12 christos Exp $ */
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -74,10 +81,11 @@ extern char irix_si_version[128];
 	{ "version", CTLTYPE_STRING }, \
 }
 
-int irix_sysctl(int *, u_int, void *, size_t *,
-    void *, size_t, struct proc *);
+int irix_sysctl __P((int *, u_int, void *, size_t *,
+    void *, size_t, struct proc *));
 
-void irix_sysctl_init(void);
-void irix_sysctl_fini(void);
+#ifdef SYSCTL_SETUP_PROTO
+SYSCTL_SETUP_PROTO(sysctl_emul_irix_setup);
+#endif /* SYSCTL_SETUP_PROTO */
 
 #endif /* _IRIX_SYSCTL_H_ */

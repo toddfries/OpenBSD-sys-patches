@@ -1,4 +1,4 @@
-/*	$NetBSD: ka820.c,v 1.50 2008/12/16 22:35:28 christos Exp $	*/
+/*	$NetBSD: ka820.c,v 1.46 2006/09/05 19:32:57 matt Exp $	*/
 /*
  * Copyright (c) 1988 Regents of the University of California.
  * All rights reserved.
@@ -39,7 +39,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ka820.c,v 1.50 2008/12/16 22:35:28 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ka820.c,v 1.46 2006/09/05 19:32:57 matt Exp $");
 
 #include "opt_multiprocessor.h"
 
@@ -61,7 +61,6 @@ __KERNEL_RCSID(0, "$NetBSD: ka820.c,v 1.50 2008/12/16 22:35:28 christos Exp $");
 #include <machine/clock.h>
 #include <machine/scb.h>
 #include <machine/bus.h>
-#include <machine/mainbus.h>
 
 #include <dev/cons.h>
 
@@ -78,32 +77,18 @@ struct rx50device *rx50device_ptr;
 static volatile struct ka820clock *ka820_clkpage;
 static int mastercpu;
 
-static int ka820_match(device_t, cfdata_t, void *);
-static void ka820_attach(device_t, device_t, void*);
+static int ka820_match(struct device *, struct cfdata *, void *);
+static void ka820_attach(struct device *, struct device *, void*);
 static void ka820_memerr(void);
 static void ka820_conf(void);
-static int ka820_mchk(void *);
+static int ka820_mchk(caddr_t);
 static int ka820_gettime(volatile struct timeval *);
 static void ka820_settime(volatile struct timeval *);
 static void rxcdintr(void *);
 static void vaxbierr(void *);
-
-static const char * const ka820_devs[] = { "bi", NULL };
-
-const struct cpu_dep ka820_calls = {
-	.cpu_mchk	= ka820_mchk,
-	.cpu_memerr	= ka820_memerr,
-	.cpu_conf	= ka820_conf,
-	.cpu_gettime	= ka820_gettime,
-	.cpu_settime	= ka820_settime,
-	.cpu_devs	= ka820_devs,
-	.cpu_vups	= 3,      /* ~VUPS */
-	.cpu_scbsz	= 5,	/* SCB pages */
-};
-
 #if defined(MULTIPROCESSOR)
-static void ka820_startslave(struct cpu_info *);
-static void ka820_send_ipi(struct cpu_info *);
+static void ka820_startslave(struct device *, struct cpu_info *);
+static void ka820_send_ipi(struct device *);
 static void ka820_txrx(int, const char *, int);
 static void ka820_sendstr(int, const char *);
 static void ka820_sergeant(int);
@@ -112,15 +97,39 @@ static void ka820_putc(int);
 static void ka820_cnintr(void);
 static void ka820_ipintr(void *);
 cons_decl(gen);
+#endif
 
-const struct cpu_mp_dep ka820_mp_dep = {
-	.cpu_startslave	= ka820_startslave,
-	.cpu_send_ipi	= ka820_send_ipi,
-	.cpu_cnintr	= ka820_cnintr,
+struct	cpu_dep ka820_calls = {
+	0,
+	ka820_mchk,
+	ka820_memerr,
+	ka820_conf,
+	ka820_gettime,
+	ka820_settime,
+	3,      /* ~VUPS */
+	5,	/* SCB pages */
+	0,
+	0,
+	0,
+	0,
+	0,
+};
+
+#if defined(MULTIPROCESSOR)
+struct cpu_mp_dep ka820_mp_dep = {
+	ka820_startslave,
+	ka820_send_ipi,
+	ka820_cnintr,
 };
 #endif
 
-CFATTACH_DECL_NEW(cpu_bi, 0,
+struct ka820_softc {
+	struct device sc_dev;
+	struct cpu_info sc_ci;
+	int sc_binid;		/* CPU node ID */
+};
+
+CFATTACH_DECL(cpu_bi, sizeof(struct ka820_softc),
     ka820_match, ka820_attach, NULL, NULL);
 
 #ifdef notyet
@@ -131,9 +140,9 @@ char eeprom[KA820_EEPAGES * VAX_NBPG];
 #endif
 
 static int
-ka820_match(device_t parent, cfdata_t cf, void *aux)
+ka820_match(struct device *parent, struct cfdata *cf, void *aux)
 {
-	struct bi_attach_args * const ba = aux;
+	struct bi_attach_args *ba = aux;
 
 	if (bus_space_read_2(ba->ba_iot, ba->ba_ioh, BIREG_DTYPE) != BIDT_KA820)
 		return 0;
@@ -146,11 +155,11 @@ ka820_match(device_t parent, cfdata_t cf, void *aux)
 }
 
 static void
-ka820_attach(device_t parent, device_t self, void *aux)
+ka820_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct bi_attach_args * const ba = aux;
-	struct cpu_info *ci;
-	int csr;
+	struct ka820_softc *sc = (void *)self;
+	struct bi_attach_args *ba = aux;
+	register int csr;
 	u_short rev;
 
 	rev = bus_space_read_4(ba->ba_iot, ba->ba_ioh, BIREG_DTYPE) >> 16;
@@ -160,6 +169,7 @@ ka820_attach(device_t parent, device_t self, void *aux)
 	printf(": ka82%c (%s) CPU rev %d, u patch rev %d, sec patch %d\n",
 	    cpu_model[6], mastercpu == ba->ba_nodenr ? "master" : "slave",
 	    ((rev >> 11) & 15), ((rev >> 1) &1023), rev & 1);
+	sc->sc_binid = ba->ba_nodenr;
 
 	/* Allow for IPINTR */
 	bus_space_write_4(ba->ba_iot, ba->ba_ioh,
@@ -168,24 +178,25 @@ ka820_attach(device_t parent, device_t self, void *aux)
 #if defined(MULTIPROCESSOR)
 	if (ba->ba_nodenr != mastercpu) {
 		v_putc = ka820_putc;	/* Need special console handling */
-		cpu_slavesetup(self, ba->ba_nodenr);
-		return;
+		return cpu_slavesetup(self);
 	}
 #endif
-
-	ci = curcpu();
-	self->dv_private = ci;	/* eww. but curcpu() is already too */
-				/* entrenched to change */
-	ci->ci_slotid = ba->ba_nodenr;
-	ci->ci_cpuid = device_unit(self);
-	ci->ci_dev = self;
 
 #if defined(MULTIPROCESSOR)
 	/*
 	 * Catch interprocessor interrupts.
 	 */
-	scb_vecalloc(KA820_INT_IPINTR, ka820_ipintr, ci, SCB_ISTACK, NULL);
+	scb_vecalloc(KA820_INT_IPINTR, ka820_ipintr, sc, SCB_ISTACK, NULL);
 #endif
+	/*
+	 * Copy cpu_info into new position.
+	 */
+	bcopy(curcpu(), &sc->sc_ci, sizeof(struct cpu_info));
+	mtpr((uintptr_t)&sc->sc_ci, PR_SSP);
+	lwp0.l_addr->u_pcb.SSP = mfpr(PR_SSP);
+	lwp0.l_cpu = curcpu();
+	curcpu()->ci_dev = self;
+
 	/* reset the console and enable the RX50 */
 	ka820port_ptr = (void *)vax_map_physmem(KA820_PORTADDR, 1);
 	csr = ka820port_ptr->csr;
@@ -201,7 +212,7 @@ ka820_attach(device_t parent, device_t self, void *aux)
 }
 
 void
-ka820_conf(void)
+ka820_conf()
 {
 	/*
 	 * Setup parameters necessary to read time from clock chip.
@@ -281,22 +292,22 @@ struct ms820regs {
 #define MS2_INTLVADDR	0x00000100	/* error was in bank 1 (ro) */
 #define MS2_SYN		0x0000007f	/* error syndrome (ro, rw diag) */
 
-static int ms820_match(device_t, cfdata_t, void *);
-static void ms820_attach(device_t, device_t, void*);
+static int ms820_match(struct device *, struct cfdata *, void *);
+static void ms820_attach(struct device *, struct device *, void*);
 
 struct mem_bi_softc {
-	struct device *sc_dev;
+	struct device sc_dev;
 	bus_space_tag_t sc_iot;
 	bus_space_handle_t sc_ioh;
 };
 
-CFATTACH_DECL_NEW(mem_bi, sizeof(struct mem_bi_softc),
+CFATTACH_DECL(mem_bi, sizeof(struct mem_bi_softc),
     ms820_match, ms820_attach, NULL, NULL);
 
 static int
-ms820_match(device_t parent, cfdata_t cf, void *aux)
+ms820_match(struct device *parent, struct cfdata *cf, void *aux)
 {
-	struct bi_attach_args * const ba = aux;
+	struct bi_attach_args *ba = aux;
 
 	if (bus_space_read_2(ba->ba_iot, ba->ba_ioh, BIREG_DTYPE) != BIDT_MS820)
 		return 0;
@@ -309,19 +320,18 @@ ms820_match(device_t parent, cfdata_t cf, void *aux)
 }
 
 static void
-ms820_attach(device_t parent, device_t self, void *aux)
+ms820_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct mem_bi_softc * const sc = device_private(self);
-	struct bi_attach_args * const ba = aux;
+	struct mem_bi_softc *sc = (void *)self;
+	struct bi_attach_args *ba = aux;
 
-	sc->sc_dev = self;
 	sc->sc_iot = ba->ba_iot;
 	sc->sc_ioh = ba->ba_ioh;
 
 	if ((MEMRD(BIREG_VAXBICSR) & BICSR_STS) == 0)
-		aprint_error(": failed self test\n");
+		printf(": failed self test\n");
 	else
-		aprint_normal(": size %dMB, %s chips\n", ((MEMRD(MSREG_CSR1) & 
+		printf(": size %dMB, %s chips\n", ((MEMRD(MSREG_CSR1) & 
 		    MS1_MSIZEMASK) >> 20), (MEMRD(MSREG_CSR1) & MS1_RAMTYMASK
 		    ? MEMRD(MSREG_CSR1) & MS1_RAMTY256K ? "256K":"1M":"64K"));
 
@@ -333,27 +343,28 @@ ms820_attach(device_t parent, device_t self, void *aux)
 }
 
 static void
-ka820_memerr(void)
+ka820_memerr()
 {
 	struct mem_bi_softc *sc;
 	int m, hard, csr1, csr2;
 	const char *type;
 
-static const char b1[] = "\20\40ERRSUM\37ECCDIAG\36ECCDISABLE\20CRDINH\17VALID\
+static char b1[] = "\20\40ERRSUM\37ECCDIAG\36ECCDISABLE\20CRDINH\17VALID\
 \16INTLK\15BROKE\13MWRITEERR\12CNTLERR\11INTLV";
-static const char b2[] = "\20\40RDS\37HIERR\36CRD\35ADRS";
+static char b2[] = "\20\40RDS\37HIERR\36CRD\35ADRS";
 
 	char sbuf[sizeof(b1) + 64], sbuf2[sizeof(b2) + 64];
 
 	for (m = 0; m < mem_cd.cd_ndevs; m++) {
-		sc = device_lookup_private(&mem_cd, m);
+		sc = mem_cd.cd_devs[m];
 		if (sc == NULL)
 			continue;
 		csr1 = MEMRD(MSREG_CSR1);
 		csr2 = MEMRD(MSREG_CSR2);
-		snprintb(sbuf, sizeof(sbuf), b1, csr1);
-		snprintb(sbuf2, sizeof(sbuf2), b2, csr2);
-		aprint_error_dev(sc->sc_dev, "csr1=%s csr2=%s\n", sbuf, sbuf2);
+		bitmask_snprintf(csr1, b1, sbuf, sizeof(sbuf));
+		bitmask_snprintf(csr2, b2, sbuf2, sizeof(sbuf2));
+		printf("%s: csr1=%s csr2=%s\n", sc->sc_dev.dv_xname,
+		    sbuf, sbuf2);
 		if ((csr1 & MS1_ERRSUM) == 0)
 			continue;
 		hard = 1;
@@ -370,8 +381,8 @@ static const char b2[] = "\20\40RDS\37HIERR\36CRD\35ADRS";
 			type = "";
 		} else
 			type = "mysterious error";
-		aprint_error_dev(sc->sc_dev, "%s%s%s addr %x bank %x syn %x\n",
-		    hard ? "hard error: " : "soft ecc",
+		printf("%s: %s%s%s addr %x bank %x syn %x\n",
+		    sc->sc_dev.dv_xname, hard ? "hard error: " : "soft ecc",
 		    type, csr2 & MS2_HIERR ?  " (+ other rds or crd err)" : "",
 		    ((csr2 & MS2_ADDR) + MEMRD(BIREG_SADR)) >> 9,
 		    (csr2 & MS2_INTLVADDR) != 0, csr2 & MS2_SYN);
@@ -381,7 +392,7 @@ static const char b2[] = "\20\40RDS\37HIERR\36CRD\35ADRS";
 }
 
 /* these are bits 0 to 6 in the summary field */
-const char * const mc8200[] = {
+const char *mc8200[] = {
 	"cpu bad ipl",		"ucode lost err",
 	"ucode par err",	"DAL par err",
 	"BI bus err",		"BTB tag par",
@@ -410,10 +421,10 @@ struct mc8200frame {
 };
 
 static int
-ka820_mchk(void *cmcf)
+ka820_mchk(caddr_t cmcf)
 {
-	struct mc8200frame *mcf = (struct mc8200frame *)cmcf;
-	int i, type = mcf->mc82_summary;
+	register struct mc8200frame *mcf = (struct mc8200frame *)cmcf;
+	register int i, type = mcf->mc82_summary;
 
 	/* ignore BI bus errors during configuration */
 	if (cold && type == MC8200_BIERR) {
@@ -533,12 +544,13 @@ ka820_settime(volatile struct timeval *tvp)
 
 #if defined(MULTIPROCESSOR)
 static void
-ka820_startslave(struct cpu_info *ci)
+ka820_startslave(struct device *dev, struct cpu_info *ci)
 {
-	const int id = ci->ci_slotid;
+	struct ka820_softc *sc = (void *)dev;
+	int id = sc->sc_binid;
 	int i;
 
-	expect = id;
+	expect = sc->sc_binid;
 	/* First empty queue */
 	for (i = 0; i < 10000; i++)
 		if (rxchar())
@@ -548,17 +560,17 @@ ka820_startslave(struct cpu_info *ci)
 	ka820_txrx(id, "D/I 4 %x\r", ci->ci_istack);	/* Interrupt stack */
 	ka820_txrx(id, "D/I C %x\r", mfpr(PR_SBR));	/* SBR */
 	ka820_txrx(id, "D/I D %x\r", mfpr(PR_SLR));	/* SLR */
-	ka820_txrx(id, "D/I 10 %x\r",			/* PCB for idle proc */
-	    ci->ci_data.cpu_onproc->l_addr->u_pcb.pcb_paddr);
+	ka820_txrx(id, "D/I 10 %x\r", (int)ci->ci_pcb);	/* PCB for idle proc */
 	ka820_txrx(id, "D/I 11 %x\r", mfpr(PR_SCBB));	/* SCB */
 	ka820_txrx(id, "D/I 38 %x\r", mfpr(PR_MAPEN));	/* Enable MM */
 	ka820_txrx(id, "S %x\r", (int)&vax_mp_tramp);	/* Start! */
 	expect = 0;
 	for (i = 0; i < 10000; i++)
-		if (ci->ci_flags & CI_RUNNING)
+		if ((volatile int)ci->ci_flags & CI_RUNNING)
 			break;
 	if (i == 10000)
-		aprint_error_dev(ci->ci_dev, "(ID %d) failed starting??\n", id);
+		printf("%s: (ID %d) failed starting??\n",
+		    dev->dv_xname, sc->sc_binid);
 }
 
 void
@@ -643,7 +655,7 @@ ka820_putc(int c)
  * Got character IPI.
  */
 void
-ka820_cnintr(void)
+ka820_cnintr()
 {
 	if (ch != 0)
 		gencnputc(0, ch);
@@ -651,9 +663,11 @@ ka820_cnintr(void)
 }
 
 void
-ka820_send_ipi(struct cpu_info *ci)
+ka820_send_ipi(struct device *dev)
 {
-	mtpr(1 << ci->ci_cpuid, PR_IPIR);
+	struct ka820_softc *sc = (void *)dev;
+
+	mtpr(1 << sc->sc_binid, PR_IPIR);
 }
 
 void

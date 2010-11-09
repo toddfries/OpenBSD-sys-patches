@@ -1,4 +1,4 @@
-/*	$NetBSD: slcompress.c,v 1.34 2008/06/15 16:35:35 christos Exp $   */
+/*	$NetBSD: slcompress.c,v 1.31 2006/04/19 15:13:34 christos Exp $   */
 /*	Id: slcompress.c,v 1.3 1996/05/24 07:04:47 paulus Exp 	*/
 
 /*
@@ -41,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: slcompress.c,v 1.34 2008/06/15 16:35:35 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: slcompress.c,v 1.31 2006/04/19 15:13:34 christos Exp $");
 
 #include "opt_inet.h"
 #ifdef INET
@@ -72,7 +72,7 @@ sl_compress_init(struct slcompress *comp)
 	u_int i;
 	struct cstate *tstate = comp->tstate;
 
-	memset(comp, 0, sizeof(*comp));
+	memset((char *)comp, 0, sizeof(*comp));
 	for (i = MAX_STATES - 1; i > 0; --i) {
 		tstate[i].cs_id = i;
 		tstate[i].cs_next = &tstate[i - 1];
@@ -98,11 +98,11 @@ sl_compress_setup(struct slcompress *comp, int max_state)
 
 	if (max_state == -1) {
 		max_state = MAX_STATES - 1;
-		memset(comp, 0, sizeof(*comp));
+		memset((char *)comp, 0, sizeof(*comp));
 	} else {
 		/* Don't reset statistics */
-		memset(comp->tstate, 0, sizeof(comp->tstate));
-		memset(comp->rstate, 0, sizeof(comp->rstate));
+		memset((char *)comp->tstate, 0, sizeof(comp->tstate));
+		memset((char *)comp->rstate, 0, sizeof(comp->rstate));
 	}
 	for (i = max_state; i > 0; --i) {
 		tstate[i].cs_id = i;
@@ -122,7 +122,7 @@ sl_compress_setup(struct slcompress *comp, int max_state)
  * form).
  */
 #define ENCODE(n) { \
-	if ((uint16_t)(n) >= 256) { \
+	if ((u_int16_t)(n) >= 256) { \
 		*cp++ = 0; \
 		cp[1] = (n); \
 		cp[0] = (n) >> 8; \
@@ -132,7 +132,7 @@ sl_compress_setup(struct slcompress *comp, int max_state)
 	} \
 }
 #define ENCODEZ(n) { \
-	if ((uint16_t)(n) >= 256 || (uint16_t)(n) == 0) { \
+	if ((u_int16_t)(n) >= 256 || (u_int16_t)(n) == 0) { \
 		*cp++ = 0; \
 		cp[1] = (n); \
 		cp[0] = (n) >> 8; \
@@ -147,7 +147,7 @@ sl_compress_setup(struct slcompress *comp, int max_state)
 		(f) = htonl(ntohl(f) + ((cp[1] << 8) | cp[2])); \
 		cp += 3; \
 	} else { \
-		(f) = htonl(ntohl(f) + (uint32_t)*cp++); \
+		(f) = htonl(ntohl(f) + (u_int32_t)*cp++); \
 	} \
 }
 
@@ -156,7 +156,7 @@ sl_compress_setup(struct slcompress *comp, int max_state)
 		(f) = htons(ntohs(f) + ((cp[1] << 8) | cp[2])); \
 		cp += 3; \
 	} else { \
-		(f) = htons(ntohs(f) + (uint32_t)*cp++); \
+		(f) = htons(ntohs(f) + (u_int32_t)*cp++); \
 	} \
 }
 
@@ -165,7 +165,7 @@ sl_compress_setup(struct slcompress *comp, int max_state)
 		(f) = htons((cp[1] << 8) | cp[2]); \
 		cp += 3; \
 	} else { \
-		(f) = htons((uint32_t)*cp++); \
+		(f) = htons((u_int32_t)*cp++); \
 	} \
 }
 
@@ -277,9 +277,9 @@ sl_compress_tcp(struct mbuf *m, struct ip *ip, struct slcompress *comp,
 	if (hlen > m->m_len)
 		return (TYPE_IP);
 
-	if (((uint16_t *)ip)[0] != ((uint16_t *)&cs->cs_ip)[0] ||
-	    ((uint16_t *)ip)[3] != ((uint16_t *)&cs->cs_ip)[3] ||
-	    ((uint16_t *)ip)[4] != ((uint16_t *)&cs->cs_ip)[4] ||
+	if (((u_int16_t *)ip)[0] != ((u_int16_t *)&cs->cs_ip)[0] ||
+	    ((u_int16_t *)ip)[3] != ((u_int16_t *)&cs->cs_ip)[3] ||
+	    ((u_int16_t *)ip)[4] != ((u_int16_t *)&cs->cs_ip)[4] ||
 	    th->th_off != oth->th_off ||
 	    (deltaS > 5 &&
 	     BCMP(ip + 1, &cs->cs_ip + 1, (deltaS - 5) << 2)) ||
@@ -304,7 +304,7 @@ sl_compress_tcp(struct mbuf *m, struct ip *ip, struct slcompress *comp,
 		 * with it. */
 		 goto uncompressed;
 
-	deltaS = (uint16_t)(ntohs(th->th_win) - ntohs(oth->th_win));
+	deltaS = (u_int16_t)(ntohs(th->th_win) - ntohs(oth->th_win));
 	if (deltaS) {
 		ENCODE(deltaS);
 		changes |= NEW_W;
@@ -453,7 +453,7 @@ sl_uncompress_tcp(u_char **bufp, int len, u_int type, struct slcompress *comp)
 	 */
 	if ((long)cp & 3) {
 		if (len > 0)
-			memmove((void *)((long)cp &~ 3), cp, len);
+			memmove((caddr_t)((long)cp &~ 3), cp, len);
 		cp = (u_char *)((long)cp &~ 3);
 	}
 	cp -= hlen;
@@ -480,7 +480,7 @@ sl_uncompress_tcp_core(u_char *buf, int buflen, int total_len, u_int type,
 	struct tcphdr *th;
 	struct cstate *cs;
 	struct ip *ip;
-	uint16_t *bp;
+	u_int16_t *bp;
 	u_int vjlen;
 
 	switch (type) {
@@ -599,7 +599,7 @@ sl_uncompress_tcp_core(u_char *buf, int buflen, int total_len, u_int type,
 	cs->cs_ip.ip_len = htons(total_len);
 
 	/* recompute the ip header checksum */
-	bp = (uint16_t *) &cs->cs_ip;
+	bp = (u_int16_t *) &cs->cs_ip;
 	cs->cs_ip.ip_sum = 0;
 	for (changes = 0; hlen > 0; hlen -= 2)
 		changes += *bp++;

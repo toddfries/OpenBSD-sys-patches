@@ -1,4 +1,4 @@
-/* $NetBSD: pmf.h,v 1.14 2009/02/06 01:19:33 dyoung Exp $ */
+/* $NetBSD: pmf.h,v 1.10 2008/03/12 18:02:22 dyoung Exp $ */
 
 /*-
  * Copyright (c) 2007 Jared D. McNeill <jmcneill@invisible.ca>
@@ -12,6 +12,12 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by Jared D. McNeill.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -31,7 +37,7 @@
 
 #ifdef _KERNEL
 
-#include <sys/types.h>
+#include <sys/callout.h>
 
 typedef enum {
 	PMFE_DISPLAY_ON,
@@ -97,7 +103,6 @@ bool		pmf_device_resume_self(device_t);
 
 bool		pmf_device_recursive_suspend(device_t PMF_FN_PROTO);
 bool		pmf_device_recursive_resume(device_t PMF_FN_PROTO);
-bool		pmf_device_resume_descendants(device_t PMF_FN_PROTO);
 bool		pmf_device_resume_subtree(device_t PMF_FN_PROTO);
 
 struct ifnet;

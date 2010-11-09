@@ -1,4 +1,4 @@
-/*	$NetBSD: kern_acct.c,v 1.87 2009/02/11 00:32:45 enami Exp $	*/
+/*	$NetBSD: kern_acct.c,v 1.77 2007/09/29 12:22:30 dsl Exp $	*/
 
 /*-
  * Copyright (c) 1982, 1986, 1989, 1993
@@ -71,7 +71,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kern_acct.c,v 1.87 2009/02/11 00:32:45 enami Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kern_acct.c,v 1.77 2007/09/29 12:22:30 dsl Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -105,9 +105,9 @@ __KERNEL_RCSID(0, "$NetBSD: kern_acct.c,v 1.87 2009/02/11 00:32:45 enami Exp $")
  */
 
 /*
- * Lock to serialize system calls and kernel threads.
+ * Mutex to serialize system calls and kernel threads.
  */
-krwlock_t	acct_lock;
+kmutex_t	acct_lock;
 
 /*
  * The global accounting state and related data.  Gain the mutex before
@@ -179,7 +179,7 @@ acct_chkfree(void)
 	sb = kmem_alloc(sizeof(*sb), KM_SLEEP);
 	if (sb == NULL)
 		return (ENOMEM);
-	error = VFS_STATVFS(acct_vp->v_mount, sb);
+	error = VFS_STATVFS(acct_vp->v_mount, sb, NULL);
 	if (error != 0) {
 		kmem_free(sb, sizeof(*sb));
 		return (error);
@@ -212,10 +212,8 @@ acct_stop(void)
 {
 	int error;
 
-	KASSERT(rw_write_held(&acct_lock));
-
 	if (acct_vp != NULLVP && acct_vp->v_type != VBAD) {
-		error = vn_close(acct_vp, FWRITE, acct_cred);
+		error = vn_close(acct_vp, FWRITE, acct_cred, NULL);
 #ifdef DIAGNOSTIC
 		if (error != 0)
 			printf("acct_stop: failed to close, errno = %d\n",
@@ -242,7 +240,7 @@ acctwatch(void *arg)
 	int error;
 
 	log(LOG_NOTICE, "Accounting started\n");
-	rw_enter(&acct_lock, RW_WRITER);
+	mutex_enter(&acct_lock);
 	while (acct_state != ACCT_STOP) {
 		if (acct_vp->v_type == VBAD) {
 			log(LOG_NOTICE, "Accounting terminated\n");
@@ -256,16 +254,14 @@ acctwatch(void *arg)
 			printf("acctwatch: failed to statvfs, error = %d\n",
 			    error);
 #endif
-		rw_exit(&acct_lock);
-		error = kpause("actwat", false, acctchkfreq * hz, NULL);
-		rw_enter(&acct_lock, RW_WRITER);
+		error = kpause("actwat", false, acctchkfreq * hz, &acct_lock);
 #ifdef DIAGNOSTIC
 		if (error != 0 && error != EWOULDBLOCK)
 			printf("acctwatch: sleep error %d\n", error);
 #endif
 	}
 	acct_dkwatcher = NULL;
-	rw_exit(&acct_lock);
+	mutex_exit(&acct_lock);
 
 	kthread_exit(0);
 }
@@ -277,7 +273,7 @@ acct_init(void)
 	acct_state = ACCT_STOP;
 	acct_vp = NULLVP;
 	acct_cred = NULL;
-	rw_init(&acct_lock);
+	mutex_init(&acct_lock, MUTEX_DEFAULT, IPL_NONE);
 }
 
 /*
@@ -285,11 +281,11 @@ acct_init(void)
  * previous implementation done by Mark Tinguely.
  */
 int
-sys_acct(struct lwp *l, const struct sys_acct_args *uap, register_t *retval)
+sys_acct(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct sys_acct_args /* {
 		syscallarg(const char *) path;
-	} */
+	} */ *uap = v;
 	struct nameidata nd;
 	int error;
 
@@ -305,8 +301,8 @@ sys_acct(struct lwp *l, const struct sys_acct_args *uap, register_t *retval)
 	if (SCARG(uap, path) != NULL) {
 		struct vattr va;
 		size_t pad;
-		NDINIT(&nd, LOOKUP, FOLLOW | TRYEMULROOT, UIO_USERSPACE,
-		    SCARG(uap, path));
+		NDINIT(&nd, LOOKUP, NOFOLLOW | TRYEMULROOT, UIO_USERSPACE, SCARG(uap, path),
+		    l);
 		if ((error = vn_open(&nd, FWRITE|O_APPEND, 0)) != 0)
 			return (error);
 		if (nd.ni_vp->v_type != VREG) {
@@ -314,7 +310,7 @@ sys_acct(struct lwp *l, const struct sys_acct_args *uap, register_t *retval)
 			error = EACCES;
 			goto bad;
 		}
-		if ((error = VOP_GETATTR(nd.ni_vp, &va, l->l_cred)) != 0) {
+		if ((error = VOP_GETATTR(nd.ni_vp, &va, l->l_cred, l)) != 0) {
 			VOP_UNLOCK(nd.ni_vp, 0);
 			goto bad;
 		}
@@ -328,7 +324,7 @@ sys_acct(struct lwp *l, const struct sys_acct_args *uap, register_t *retval)
 #endif
 			VATTR_NULL(&va);
 			va.va_size = size;
-			error = VOP_SETATTR(nd.ni_vp, &va, l->l_cred);
+			error = VOP_SETATTR(nd.ni_vp, &va, l->l_cred, l);
 			if (error != 0) {
 				VOP_UNLOCK(nd.ni_vp, 0);
 				goto bad;
@@ -337,7 +333,7 @@ sys_acct(struct lwp *l, const struct sys_acct_args *uap, register_t *retval)
 		VOP_UNLOCK(nd.ni_vp, 0);
 	}
 
-	rw_enter(&acct_lock, RW_WRITER);
+	mutex_enter(&acct_lock);
 
 	/*
 	 * If accounting was previously enabled, kill the old space-watcher,
@@ -364,17 +360,17 @@ sys_acct(struct lwp *l, const struct sys_acct_args *uap, register_t *retval)
 	}
 
 	if (acct_dkwatcher == NULL) {
-		error = kthread_create(PRI_NONE, KTHREAD_MPSAFE, NULL,
-		    acctwatch, NULL, &acct_dkwatcher, "acctwatch");
+		error = kthread_create(PRI_NONE, 0, NULL, acctwatch, NULL,
+		    &acct_dkwatcher, "acctwatch");
 		if (error != 0)
 			acct_stop();
 	}
 
  out:
-	rw_exit(&acct_lock);
+	mutex_exit(&acct_lock);
 	return (error);
  bad:
-	vn_close(nd.ni_vp, FWRITE, l->l_cred);
+	vn_close(nd.ni_vp, FWRITE, l->l_cred, l);
 	return error;
 }
 
@@ -397,7 +393,7 @@ acct_process(struct lwp *l)
 	if (acct_state != ACCT_ACTIVE)
 		return 0;
 
-	rw_enter(&acct_lock, RW_READER);
+	mutex_enter(&acct_lock);
 
 	/* If accounting isn't enabled, don't bother */
 	if (acct_state != ACCT_ACTIVE)
@@ -423,9 +419,9 @@ acct_process(struct lwp *l)
 	memcpy(acct.ac_comm, p->p_comm, sizeof(acct.ac_comm));
 
 	/* (2) The amount of user and system time that was used */
-	mutex_enter(p->p_lock);
+	mutex_enter(&p->p_smutex);
 	calcru(p, &ut, &st, NULL, NULL);
-	mutex_exit(p->p_lock);
+	mutex_exit(&p->p_smutex);
 	acct.ac_utime = encode_comp_t(ut.tv_sec, ut.tv_usec);
 	acct.ac_stime = encode_comp_t(st.tv_sec, st.tv_usec);
 
@@ -452,12 +448,12 @@ acct_process(struct lwp *l)
 	acct.ac_gid = kauth_cred_getgid(l->l_cred);
 
 	/* (7) The terminal from which the process was started */
-	mutex_enter(proc_lock);
+	mutex_enter(&proclist_lock);
 	if ((p->p_lflag & PL_CONTROLT) && p->p_pgrp->pg_session->s_ttyp)
 		acct.ac_tty = p->p_pgrp->pg_session->s_ttyp->t_dev;
 	else
 		acct.ac_tty = NODEV;
-	mutex_exit(proc_lock);
+	mutex_exit(&proclist_lock);
 
 	/* (8) The boolean flags that tell how the process terminated, etc. */
 	acct.ac_flag = p->p_acflag;
@@ -465,6 +461,7 @@ acct_process(struct lwp *l)
 	/*
 	 * Now, just write the accounting information to the file.
 	 */
+	VOP_LEASE(acct_vp, l, l->l_cred, LEASE_WRITE);
 	error = vn_rdwr(UIO_WRITE, acct_vp, (void *)&acct,
 	    sizeof(acct), (off_t)0, UIO_SYSSPACE, IO_APPEND|IO_UNIT,
 	    acct_cred, NULL, NULL);
@@ -475,6 +472,6 @@ acct_process(struct lwp *l)
 	p->p_rlimit[RLIMIT_FSIZE] = orlim;
 
  out:
-	rw_exit(&acct_lock);
+	mutex_exit(&acct_lock);
 	return (error);
 }

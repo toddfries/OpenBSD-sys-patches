@@ -13,6 +13,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -28,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: isic_isapnp.c,v 1.29 2008/04/28 20:23:53 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: isic_isapnp.c,v 1.27 2007/10/19 12:00:32 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/errno.h>
@@ -180,7 +187,7 @@ isic_isapnp_probe(struct device *parent,
 #define	TERMFMT	" "
 #else
 #define	ISIC_FMT	"%s: "
-#define	ISIC_PARM	device_xname(&sc->sc_dev)
+#define	ISIC_PARM	sc->sc_dev.dv_xname
 #define	TERMFMT	"\n"
 #endif
 
@@ -212,7 +219,8 @@ isic_isapnp_attach(struct device *parent,
 	int i;
 
 	if (isapnp_config(ipa->ipa_iot, ipa->ipa_memt, ipa)) {
-		aprint_error_dev(&sc->sc_dev, "error in region allocation\n");
+		printf("%s: error in region allocation\n",
+		    sc->sc_dev.dv_xname);
 		return;
 	}
 
@@ -233,7 +241,8 @@ isic_isapnp_attach(struct device *parent,
 	/* establish interrupt handler */
 	if (isa_intr_establish(ipa->ipa_ic, ipa->ipa_irq[0].num, ipa->ipa_irq[0].type,
 		IPL_NET, isicintr, sc) == NULL)
-		aprint_error_dev(&sc->sc_dev, "couldn't establish interrupt handler\n");
+		printf("%s: couldn't establish interrupt handler\n",
+			sc->sc_dev.dv_xname);
 
 	/* init card */
 	desc->attach(sc);

@@ -1,4 +1,4 @@
-/*	$NetBSD: bus_dma.c,v 1.7 2008/06/04 12:41:41 ad Exp $	*/
+/*	$NetBSD: bus_dma.c,v 1.1 2006/09/01 21:26:18 uwe Exp $	*/
 
 /*
  * Copyright (c) 2005 NONAKA Kimihiro
@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: bus_dma.c,v 1.7 2008/06/04 12:41:41 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: bus_dma.c,v 1.1 2006/09/01 21:26:18 uwe Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -44,8 +44,7 @@ __KERNEL_RCSID(0, "$NetBSD: bus_dma.c,v 1.7 2008/06/04 12:41:41 ad Exp $");
 #include <machine/bus.h>
 
 #if defined(DEBUG) && defined(BUSDMA_DEBUG)
-int busdma_debug = 0;
-#define	DPRINTF(a)	if (busdma_debug) printf a
+#define	DPRINTF(a)	printf a
 #else
 #define	DPRINTF(a)
 #endif
@@ -79,42 +78,45 @@ _bus_dmamap_create(bus_dma_tag_t t, bus_size_t size, int nsegments,
 	bus_dmamap_t map;
 	void *mapstore;
 	size_t mapsize;
+	int error;
 
-	DPRINTF(("%s: t = %p, size = %ld, nsegments = %d, maxsegsz = %ld,"
-		 " boundary = %ld, flags = %x\n",
-		 __func__, t, size, nsegments, maxsegsz, boundary, flags));
+	DPRINTF(("bus_dmamap_create: t = %p, size = %ld, nsegments = %d, maxsegsz = %ld, boundary = %ld, flags = %x\n", t, size, nsegments, maxsegsz, boundary, flags));
 
 	/*
-	 * Allocate and initialize the DMA map.  The end of the map is
-	 * a variable-sized array of segments, so we allocate enough
-	 * room for them in one shot.  bus_dmamap_t includes one
-	 * bus_dma_segment_t already, hence the (nsegments - 1).
+	 * Allocate and initialize the DMA map.  The end of the map
+	 * is a variable-sized array of segments, so we allocate enough
+	 * room for them in one shot.
 	 *
-	 * Note that we don't preserve WAITOK and NOWAIT flags.
-	 * Preservation of ALLOCNOW notifies others that we've
-	 * reserved these resources, and they are not to be freed.
+	 * Note we don't preserve the WAITOK or NOWAIT flags.  Preservation
+	 * of ALLOCNOW notifies others that we've reserved these resources,
+	 * and they are not to be freed.
+	 *
+	 * The bus_dmamap_t includes one bus_dma_segment_t, hence
+	 * the (nsegments - 1).
 	 */
-	mapsize = sizeof(struct _bus_dmamap)
-		+ (sizeof(bus_dma_segment_t) * (nsegments - 1));
-	mapstore = malloc(mapsize, M_DMAMAP, M_ZERO
-			  | (flags & BUS_DMA_NOWAIT) ? M_NOWAIT : M_WAITOK);
-	if (mapstore == NULL)
-		return ENOMEM;
+	error = 0;
+	mapsize = sizeof(struct _bus_dmamap) +
+	    (sizeof(bus_dma_segment_t) * (nsegments - 1));
+	if ((mapstore = malloc(mapsize, M_DMAMAP,
+	    (flags & BUS_DMA_NOWAIT) ? M_NOWAIT : M_WAITOK)) == NULL)
+		return (ENOMEM);
 
-	DPRINTF(("%s: dmamp = %p\n", __func__, mapstore));
+	DPRINTF(("bus_dmamap_create: dmamp = %p\n", mapstore));
 
+	memset(mapstore, 0, mapsize);
 	map = (bus_dmamap_t)mapstore;
 	map->_dm_size = size;
 	map->_dm_segcnt = nsegments;
 	map->_dm_maxsegsz = maxsegsz;
 	map->_dm_boundary = boundary;
-	map->_dm_flags = flags & ~(BUS_DMA_WAITOK | BUS_DMA_NOWAIT);
+	map->_dm_flags = flags & ~(BUS_DMA_WAITOK|BUS_DMA_NOWAIT);
 
 	map->dm_mapsize = 0;		/* no valid mappings */
 	map->dm_nsegs = 0;
 
 	*dmamp = map;
-	return 0;
+
+	return (0);
 }
 
 /*
@@ -124,7 +126,7 @@ void
 _bus_dmamap_destroy(bus_dma_tag_t t, bus_dmamap_t map)
 {
 
-	DPRINTF(("%s: t = %p, map = %p\n", __func__, t, map));
+	DPRINTF(("bus_dmamap_destroy: t = %p, map = %p\n", t, map));
 
 	free(map, M_DMAMAP);
 }
@@ -143,11 +145,8 @@ _bus_dmamap_load_paddr(bus_dma_tag_t t, bus_dmamap_t map,
 	nseg = *segp;
 	lastaddr = *lastaddrp;
 
-	DPRINTF(("%s: t = %p, map = %p, paddr = 0x%08lx,"
-		 " vaddr = 0x%08lx, size = %d\n",
-		 __func__, t, map, paddr, vaddr, size));
-	DPRINTF(("%s: nseg = %d, bmask = 0x%08lx, lastaddr = 0x%08lx\n",
-		 __func__, nseg, bmask, lastaddr));
+	DPRINTF(("_bus_dmamap_load_paddr: t = %p, map = %p, paddr = 0x%08lx, vaddr = 0x%08lx, size = %d\n", t, map, paddr, vaddr, size));
+        DPRINTF(("_bus_dmamap_load_paddr: nseg = %d, bmask = 0x%08lx, lastaddr = 0x%08lx\n", nseg, bmask, lastaddr));
 
 	do {
 		sgsize = size;
@@ -163,59 +162,58 @@ _bus_dmamap_load_paddr(bus_dma_tag_t t, bus_dmamap_t map,
 				sgsize = (baddr - paddr);
 		}
 
-		DPRINTF(("%s: sgsize = %d\n", __func__, sgsize));
+		DPRINTF(("_bus_dmamap_load_paddr: sgsize = %d\n", sgsize));
 
 		/*
-		 * Insert chunk coalescing with previous segment if possible.
+		 * Insert chunk into a segment, coalescing with
+		 * previous segment if possible.
 		 */
 		if (first) {
-			DPRINTF(("%s: first\n", __func__));
-			first = 0;
-
+			/* first segment */
+			DPRINTF(("_bus_dmamap_load_paddr: first\n"));
 			segs[nseg].ds_addr = SH3_PHYS_TO_P2SEG(paddr);
 			segs[nseg].ds_len = sgsize;
 			segs[nseg]._ds_vaddr = vaddr;
-		}
-		else if ((paddr == lastaddr)
+			first = 0;
+		} else {
+			if ((paddr == lastaddr)
 			 && (segs[nseg].ds_len + sgsize <= map->_dm_maxsegsz)
 			 && (map->_dm_boundary == 0 ||
-			     (segs[nseg].ds_addr & bmask) == (paddr & bmask)))
-		{
-			DPRINTF(("%s: coalesce\n", __func__));
-
-			segs[nseg].ds_len += sgsize;
-		}
-		else {
-			DPRINTF(("%s: new\n", __func__));
-
-			++nseg;
-			if (nseg >= map->_dm_segcnt)
-				break;
-
-			segs[nseg].ds_addr = SH3_PHYS_TO_P2SEG(paddr);
-			segs[nseg].ds_len = sgsize;
-			segs[nseg]._ds_vaddr = vaddr;
+			     (segs[nseg].ds_addr & bmask) == (paddr & bmask))) {
+				/* coalesce */
+				DPRINTF(("_bus_dmamap_load_paddr: coalesce\n"));
+				segs[nseg].ds_len += sgsize;
+			} else {
+				if (++nseg >= map->_dm_segcnt) {
+					break;
+				}
+				/* new segment */
+				DPRINTF(("_bus_dmamap_load_paddr: new\n"));
+				segs[nseg].ds_addr = SH3_PHYS_TO_P2SEG(paddr);
+				segs[nseg].ds_len = sgsize;
+				segs[nseg]._ds_vaddr = vaddr;
+			}
 		}
 
+		lastaddr = paddr + sgsize;
 		paddr += sgsize;
 		vaddr += sgsize;
 		size -= sgsize;
-		lastaddr = paddr;
-
-		DPRINTF(("%s: lastaddr = 0x%08lx, paddr = 0x%08lx,"
-			 " vaddr = 0x%08lx, size = %d\n",
-			 __func__, lastaddr, paddr, vaddr, size));
+		DPRINTF(("_bus_dmamap_load_paddr: lastaddr = 0x%08lx, paddr = 0x%08lx, vaddr = 0x%08lx, size = %d\n", lastaddr, paddr, vaddr, size));
 	} while (size > 0);
 
-	DPRINTF(("%s: nseg = %d\n", __func__, nseg));
+	DPRINTF(("_bus_dmamap_load_paddr: nseg = %d\n", nseg));
 
 	*segp = nseg;
 	*lastaddrp = lastaddr;
 
+	/*
+	 * Did we fit?
+	 */
 	if (size != 0) {
 		/*
-		 * It didn't fit.  If there is a chained window, we
-		 * will automatically fall back to it.
+		 * If there is a chained window, we will automatically
+		 * fall back to it.
 		 */
 		return (EFBIG);		/* XXX better return value here? */
 	}
@@ -236,41 +234,41 @@ _bus_bus_dmamap_load_buffer(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
 	int first;
 	int error;
 
-	DPRINTF(("%s: t = %p, map = %p, buf = %p, buflen = %ld,"
-		 " p = %p, flags = %x\n",
-		 __func__, t, map, buf, buflen, p, flags));
+	DPRINTF(("_bus_dmamap_load_buffer: t = %p, map = %p, buf = %p, buflen = %ld, p = %p, flags = %x\n", t, map, buf, buflen, p, flags));
 
 	if (p != NULL)
 		pmap = p->p_vmspace->vm_map.pmap;
 	else
 		pmap = pmap_kernel();
 
+	*segp = 0;
 	first = 1;
-	lastaddr = 0;
-
 	len = buflen;
+	lastaddr = 0;		/* XXX: uwe: gag gcc4, but this is WRONG!!! */
 	while (len > 0) {
-		bool mapped;
+		/*
+		 * Get the physical address for this segment.
+		 */
+		(void)pmap_extract(pmap, vaddr, &curaddr);
 
-		mapped = pmap_extract(pmap, vaddr, &curaddr);
-		if (!mapped)
-			return EFAULT;
-
-		sgsize = PAGE_SIZE - (vaddr & PGOFSET);
+		/*
+		 * Compute the segment size, and adjust counts.
+		 */
+		sgsize = PAGE_SIZE - ((u_long)vaddr & PGOFSET);
 		if (len < sgsize)
 			sgsize = len;
 
 		error = _bus_dmamap_load_paddr(t, map, curaddr, vaddr, sgsize,
-					       segp, &lastaddr, first);
+		    segp, &lastaddr, first);
 		if (error)
-			return error;
+			return (error);
 
 		vaddr += sgsize;
 		len -= sgsize;
 		first = 0;
 	}
 
-	return 0;
+	return (0);
 }
 
 /*
@@ -286,30 +284,28 @@ _bus_dmamap_load(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
 	int first;
 	int error;
 
-	DPRINTF(("%s: t = %p, map = %p, buf = %p, buflen = %ld,"
-		 " p = %p, flags = %x\n",
-		 __func__, t, map, buf, buflen, p, flags));
+	DPRINTF(("bus_dmamap_load: t = %p, map = %p, buf = %p, buflen = %ld, p = %p, flags = %x\n", t, map, buf, buflen, p, flags));
 
-	/* make sure that on error condition we return "no valid mappings" */
+	/*
+	 * Make sure on error condition we return "no valid mappings."
+	 */
 	map->dm_mapsize = 0;
 	map->dm_nsegs = 0;
 
 	if (buflen > map->_dm_size)
 		return (EINVAL);
 
-	error = 0;
-	seg = 0;
+	lastaddr = 0;		/* XXX: uwe: gag gcc4, but this is WRONG!!! */
 
-	if (SH3_P1SEG_BASE <= addr && addr + buflen <= SH3_P2SEG_END) {
+	if ((addr >= SH3_P1SEG_BASE) && (addr + buflen <= SH3_P2SEG_END)) {
 		bus_addr_t curaddr;
 		bus_size_t sgsize;
 		bus_size_t len = buflen;
 
-		DPRINTF(("%s: P[12]SEG (0x%08lx)\n", __func__, addr));
+		DPRINTF(("bus_dmamap_load: P[12]SEG (0x%08lx)\n", addr));
 
+		seg = 0;
 		first = 1;
-		lastaddr = 0;
-
 		while (len > 0) {
 			curaddr = SH3_P1SEG_TO_PHYS(addr);
 
@@ -317,28 +313,30 @@ _bus_dmamap_load(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
 			if (len < sgsize)
 				sgsize = len;
 
-			error = _bus_dmamap_load_paddr(t, map,
-						       curaddr, addr, sgsize,
-						       &seg, &lastaddr, first);
+			error = _bus_dmamap_load_paddr(t, map, curaddr, addr,
+			    sgsize, &seg, &lastaddr, first);
 			if (error)
-				break;
+				return (error);
 
 			addr += sgsize;
 			len -= sgsize;
 			first = 0;
 		}
-	}
-	else {
-		error = _bus_bus_dmamap_load_buffer(t, map, buf, buflen,
-						    p, flags, &seg);
+
+		map->dm_nsegs = seg + 1;
+		map->dm_mapsize = buflen;
+		return (0);
 	}
 
-	if (error)
-		return (error);
+	error = _bus_bus_dmamap_load_buffer(t, map, buf, buflen, p, flags,
+	 &seg);
+	if (error == 0) {
+		map->dm_nsegs = seg + 1;
+		map->dm_mapsize = buflen;
+		return (0);
+	}
 
-	map->dm_nsegs = seg + 1;
-	map->dm_mapsize = buflen;
-	return 0;
+	return (error);
 }
 
 /*
@@ -354,10 +352,11 @@ _bus_dmamap_load_mbuf(bus_dma_tag_t t, bus_dmamap_t map, struct mbuf *m0,
 	int first;
 	int error;
 
-	DPRINTF(("%s: t = %p, map = %p, m0 = %p, flags = %x\n",
-		 __func__, t, map, m0, flags));
+	DPRINTF(("bus_dmamap_load_mbuf: t = %p, map = %p, m0 = %p, flags = %x\n", t, map, m0, flags));
 
-	/* make sure that on error condition we return "no valid mappings" */
+	/*
+	 * Make sure on error condition we return "no valid mappings."
+	 */
 	map->dm_nsegs = 0;
 	map->dm_mapsize = 0;
 
@@ -371,9 +370,9 @@ _bus_dmamap_load_mbuf(bus_dma_tag_t t, bus_dmamap_t map, struct mbuf *m0,
 
 	seg = 0;
 	first = 1;
-	lastaddr = 0;
-
-	for (m = m0; m != NULL; m = m->m_next) {
+	error = 0;
+	lastaddr = 0;		/* XXX: uwe: gag gcc4, but this is WRONG!!! */
+	for (m = m0; m != NULL && error == 0; m = m->m_next) {
 		paddr_t paddr;
 		vaddr_t vaddr;
 		int size;
@@ -381,50 +380,21 @@ _bus_dmamap_load_mbuf(bus_dma_tag_t t, bus_dmamap_t map, struct mbuf *m0,
 		if (m->m_len == 0)
 			continue;
 
-		vaddr = (vaddr_t)m->m_data;
+		vaddr = (vaddr_t)(m->m_data);
+		paddr = (paddr_t)(PMAP_UNMAP_POOLPAGE(vaddr));
 		size = m->m_len;
-
-		if (SH3_P1SEG_BASE <= vaddr && vaddr < SH3_P3SEG_BASE) {
-			paddr = (paddr_t)(PMAP_UNMAP_POOLPAGE(vaddr));
-			error = _bus_dmamap_load_paddr(t, map,
-						       paddr, vaddr, size,
-						       &seg, &lastaddr, first);
-			if (error)
-				return error;
-			first = 0;
-		}
-		else {
-			/* XXX: stolen from load_buffer, need to refactor */
-			while (size > 0) {
-				bus_size_t sgsize;
-				bool mapped;
-
-				mapped = pmap_extract(pmap_kernel(), vaddr,
-						      &paddr);
-				if (!mapped)
-					return EFAULT;
-
-				sgsize = PAGE_SIZE - (vaddr & PGOFSET);
-				if (size < sgsize)
-					sgsize = size;
-
-				error = _bus_dmamap_load_paddr(t, map,
-						paddr, vaddr, sgsize,
-						&seg, &lastaddr, first);
-				if (error)
-					return error;
-
-				vaddr += sgsize;
-				size -= sgsize;
-				first = 0;
-			}
-
-		}
+		error = _bus_dmamap_load_paddr(t, map, paddr, vaddr, size,
+		    &seg, &lastaddr, first);
+		first = 0;
 	}
 
-	map->dm_nsegs = seg + 1;
-	map->dm_mapsize = m0->m_pkthdr.len;
-	return 0;
+	if (error == 0) {
+		map->dm_nsegs = seg + 1;
+		map->dm_mapsize = m0->m_pkthdr.len;
+		return (0);
+	}
+
+	return (error);
 }
 
 /*
@@ -457,7 +427,7 @@ void
 _bus_dmamap_unload(bus_dma_tag_t t, bus_dmamap_t map)
 {
 
-	DPRINTF(("%s: t = %p, map = %p\n", __func__, t, map));
+	DPRINTF(("bus_dmamap_unload: t = %p, map = %p\n", t, map));
 
 	map->dm_nsegs = 0;
 	map->dm_mapsize = 0;
@@ -474,14 +444,16 @@ _bus_dmamap_sync(bus_dma_tag_t t, bus_dmamap_t map, bus_addr_t offset,
 	bus_addr_t addr, naddr;
 	int i;
 
-	DPRINTF(("%s: t = %p, map = %p, offset = %ld, len = %ld, ops = %x\n",
-		 __func__, t, map, offset, len, ops));
+	DPRINTF(("bus_dmamap_sync: t = %p, map = %p, offset = %ld, len = %ld, ops = %x\n", t, map, offset, len, ops));
 
-#ifdef DIAGNOSTIC
+	/*
+	 * Mixing PRE and POST operations is not allowed.
+	 */
 	if ((ops & (BUS_DMASYNC_PREREAD|BUS_DMASYNC_PREWRITE)) != 0 &&
 	    (ops & (BUS_DMASYNC_POSTREAD|BUS_DMASYNC_POSTWRITE)) != 0)
 		panic("_bus_dmamap_sync: mix PRE and POST");
 
+#ifdef DIAGNOSTIC
 	if (offset >= map->dm_mapsize)
 		panic("_bus_dmamap_sync: bad offset");
 	if ((offset + len) > map->dm_mapsize)
@@ -490,7 +462,7 @@ _bus_dmamap_sync(bus_dma_tag_t t, bus_dmamap_t map, bus_addr_t offset,
 
 	if (!sh_cache_enable_dcache) {
 		/* Nothing to do */
-		DPRINTF(("%s: disabled D-Cache\n", __func__));
+		DPRINTF(("bus_dmamap_sync: disabled D-Cache\n"));
 		return;
 	}
 
@@ -514,16 +486,15 @@ _bus_dmamap_sync(bus_dma_tag_t t, bus_dmamap_t map, bus_addr_t offset,
 
 		if ((naddr >= SH3_P2SEG_BASE)
 		 && (naddr + minlen <= SH3_P2SEG_END)) {
-			DPRINTF(("%s: P2SEG (0x%08lx)\n", __func__, naddr));
+			DPRINTF(("bus_dmamap_sync: P2SEG (0x%08lx)\n", naddr));
 			offset = 0;
 			len -= minlen;
 			continue;
 		}
 
-		DPRINTF(("%s: flushing segment %d "
-			 "(0x%lx+%lx, 0x%lx+0x%lx) (remain = %ld)\n",
-			 __func__, i,
-			 addr, offset, addr, offset + minlen - 1, len));
+		DPRINTF(("bus_dmamap_sync: flushing segment %d "
+		    "(0x%lx+%lx, 0x%lx+0x%lx) (remain = %ld)\n",
+		    i, addr, offset, addr, offset + minlen - 1, len));
 
 		switch (ops) {
 		case BUS_DMASYNC_PREREAD|BUS_DMASYNC_PREWRITE:
@@ -563,12 +534,8 @@ _bus_dmamem_alloc(bus_dma_tag_t t, bus_size_t size, bus_size_t alignment,
 	struct vm_page *m;
 	int curseg, error;
 
-	DPRINTF(("%s: t = %p, size = %ld, alignment = %ld, boundary = %ld,"
-		 " segs = %p, nsegs = %d, rsegs = %p, flags = %x\n",
-		 __func__, t, size, alignment, boundary,
-		 segs, nsegs, rsegs, flags));
-	DPRINTF(("%s: avail_start = 0x%08lx, avail_end = 0x%08lx\n",
-		 __func__, avail_start, avail_end));
+	DPRINTF(("bus_dmamem_alloc: t = %p, size = %ld, alignment = %ld, boundary = %ld, segs = %p, nsegs = %d, rsegs = %p, flags = %x\n", t, size, alignment, boundary, segs, nsegs, rsegs, flags));
+        DPRINTF(("bus_dmamem_alloc: avail_start = 0x%08lx, avail_end = 0x%08lx\n", avail_start, avail_end));
 
 	/* Always round the size. */
 	size = round_page(size);
@@ -590,17 +557,15 @@ _bus_dmamem_alloc(bus_dma_tag_t t, bus_size_t size, bus_size_t alignment,
 	lastaddr = segs[curseg].ds_addr = VM_PAGE_TO_PHYS(m);
 	segs[curseg].ds_len = PAGE_SIZE;
 
-	DPRINTF(("%s: m = %p, lastaddr = 0x%08lx\n", __func__, m, lastaddr));
+	DPRINTF(("bus_dmamem_alloc: m = %p, lastaddr = 0x%08lx\n",m,lastaddr));
 
-	while ((m = TAILQ_NEXT(m, pageq.queue)) != NULL) {
+	while ((m = TAILQ_NEXT(m, pageq)) != NULL) {
 		curaddr = VM_PAGE_TO_PHYS(m);
-		DPRINTF(("%s: m = %p, curaddr = 0x%08lx, lastaddr = 0x%08lx\n",
-			 __func__, m, curaddr, lastaddr));
-
+		DPRINTF(("bus_dmamem_alloc: m = %p, curaddr = 0x%08lx, lastaddr = 0x%08lx\n", m, curaddr, lastaddr));
 		if (curaddr == (lastaddr + PAGE_SIZE)) {
 			segs[curseg].ds_len += PAGE_SIZE;
 		} else {
-			DPRINTF(("%s: new segment\n", __func__));
+			DPRINTF(("bus_dmamem_alloc: new segment\n"));
 			curseg++;
 			segs[curseg].ds_addr = curaddr;
 			segs[curseg].ds_len = PAGE_SIZE;
@@ -610,7 +575,7 @@ _bus_dmamem_alloc(bus_dma_tag_t t, bus_size_t size, bus_size_t alignment,
 
 	*rsegs = curseg + 1;
 
-	DPRINTF(("%s: curseg = %d, *rsegs = %d\n", __func__, curseg, *rsegs));
+	DPRINTF(("bus_dmamem_alloc: curseg = %d, *rsegs = %d\n",curseg,*rsegs));
 
 	return (0);
 }
@@ -627,25 +592,20 @@ _bus_dmamem_free(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs)
 	struct pglist mlist;
 	int curseg;
 
-	DPRINTF(("%s: t = %p, segs = %p, nsegs = %d\n",
-		 __func__, t, segs, nsegs));
+	DPRINTF(("bus_dmamem_free: t = %p, segs = %p, nsegs = %d\n", t, segs, nsegs));
 
 	/*
 	 * Build a list of pages to free back to the VM system.
 	 */
 	TAILQ_INIT(&mlist);
 	for (curseg = 0; curseg < nsegs; curseg++) {
-		DPRINTF(("%s: segs[%d]: ds_addr = 0x%08lx, ds_len = %ld\n",
-			 __func__, curseg,
-			 segs[curseg].ds_addr, segs[curseg].ds_len));
-
+		DPRINTF(("bus_dmamem_free: segs[%d]: ds_addr = 0x%08lx, ds_len = %ld\n", curseg, segs[curseg].ds_addr, segs[curseg].ds_len));
 		for (addr = segs[curseg].ds_addr;
-		     addr < (segs[curseg].ds_addr + segs[curseg].ds_len);
-		     addr += PAGE_SIZE)
-		{
+		    addr < (segs[curseg].ds_addr + segs[curseg].ds_len);
+		    addr += PAGE_SIZE) {
 			m = PHYS_TO_VM_PAGE(addr);
-			DPRINTF(("%s: m = %p\n", __func__, m));
-			TAILQ_INSERT_TAIL(&mlist, m, pageq.queue);
+			DPRINTF(("bus_dmamem_free: m = %p\n", m));
+			TAILQ_INSERT_TAIL(&mlist, m, pageq);
 		}
 	}
 
@@ -655,83 +615,76 @@ _bus_dmamem_free(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs)
 
 int
 _bus_dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
-    size_t size, void **kvap, int flags)
+    size_t size, caddr_t *kvap, int flags)
 {
+	const uvm_flag_t kmflags = (flags & BUS_DMA_NOWAIT) ? UVM_KMF_NOWAIT:0;
 	vaddr_t va;
 	bus_addr_t addr;
 	int curseg;
 
-	DPRINTF(("%s: t = %p, segs = %p, nsegs = %d, size = %d,"
-		 " kvap = %p, flags = %x\n",
-		 __func__, t, segs, nsegs, size, kvap, flags));
+	DPRINTF(("bus_dmamem_map: t = %p, segs = %p, nsegs = %d, size = %d, kvap = %p, flags = %x\n", t, segs, nsegs, size, kvap, flags));
 
-	/*
-	 * If we're mapping only a single segment, use direct-mapped
-	 * va, to avoid thrashing the TLB.
+        /*
+	 * If we're only mapping 1 segment, use P2SEG, to avoid
+	 * TLB thrashing.
 	 */
 	if (nsegs == 1) {
-		if (flags & BUS_DMA_COHERENT)
-			*kvap = (void *)SH3_PHYS_TO_P2SEG(segs[0].ds_addr);
-		else
-			*kvap = (void *)SH3_PHYS_TO_P1SEG(segs[0].ds_addr);
-
-		DPRINTF(("%s: addr = 0x%08lx, kva = %p\n",
-			 __func__, segs[0].ds_addr, *kvap));
+		if (flags & BUS_DMA_COHERENT) {
+			*kvap = (caddr_t)SH3_PHYS_TO_P2SEG(segs[0].ds_addr);
+		} else {
+			*kvap = (caddr_t)SH3_PHYS_TO_P1SEG(segs[0].ds_addr);
+		}
+		DPRINTF(("bus_dmamem_map: addr = 0x%08lx, kva = %p\n", segs[0].ds_addr, *kvap));
 		return 0;
 	}
-
 
 	/* Always round the size. */
 	size = round_page(size);
 
-	va = uvm_km_alloc(kernel_map, size, 0, UVM_KMF_VAONLY
-			  | (flags & BUS_DMA_NOWAIT) ? UVM_KMF_NOWAIT : 0);
+	va = uvm_km_alloc(kernel_map, size, 0, UVM_KMF_VAONLY | kmflags);
 	if (va == 0)
 		return (ENOMEM);
 
+	*kvap = (caddr_t)va;
 	for (curseg = 0; curseg < nsegs; curseg++) {
-		DPRINTF(("%s: segs[%d]: ds_addr = 0x%08lx, ds_len = %ld\n",
-			 __func__, curseg,
-			 segs[curseg].ds_addr, segs[curseg].ds_len));
-
+		DPRINTF(("bus_dmamem_map: segs[%d]: ds_addr = 0x%08lx, ds_len = %ld\n", curseg, segs[curseg].ds_addr, segs[curseg].ds_len));
 		for (addr = segs[curseg].ds_addr;
 		     addr < segs[curseg].ds_addr + segs[curseg].ds_len;
-		     addr += PAGE_SIZE, va += PAGE_SIZE, size -= PAGE_SIZE)
-		{
-			if (__predict_false(size == 0))
+		     addr += PAGE_SIZE, va += PAGE_SIZE, size -= PAGE_SIZE) {
+			if (size == 0)
 				panic("_bus_dmamem_map: size botch");
-
 			pmap_kenter_pa(va, addr,
-				       VM_PROT_READ | VM_PROT_WRITE);
+			    VM_PROT_READ | VM_PROT_WRITE);
 		}
 	}
-
 	pmap_update(pmap_kernel());
-	*kvap = (void *)va;
+
 	return (0);
 }
 
 void
-_bus_dmamem_unmap(bus_dma_tag_t t, void *kva, size_t size)
+_bus_dmamem_unmap(bus_dma_tag_t t, caddr_t kva, size_t size)
 {
-	vaddr_t vaddr = (vaddr_t)kva;
 
-	DPRINTF(("%s: t = %p, kva = %p, size = %d\n",
-		 __func__, t, kva, size));
+	DPRINTF(("bus_dmamem_unmap: t = %p, kva = %p, size = %d\n", t, kva, size));
 
 #ifdef DIAGNOSTIC
-	if (vaddr & PAGE_MASK)
+	if ((u_long)kva & PAGE_MASK)
 		panic("_bus_dmamem_unmap");
 #endif
 
-	/* nothing to do if we mapped it via P1SEG or P2SEG */
-	if (SH3_P1SEG_BASE <= vaddr && vaddr <= SH3_P2SEG_END)
+        /*
+	 * Nothing to do if we mapped it with P[12]SEG.
+	 */
+	if ((kva >= (caddr_t)SH3_P1SEG_BASE)
+	 && (kva <= (caddr_t)SH3_P2SEG_END)) {
 		return;
+	}
 
 	size = round_page(size);
-	pmap_kremove(vaddr, size);
+	pmap_kremove((vaddr_t)kva, size);
 	pmap_update(pmap_kernel());
-	uvm_km_free(kernel_map, vaddr, size, UVM_KMF_VAONLY);
+	uvm_km_free(kernel_map, (vaddr_t)kva, size, UVM_KMF_VAONLY);
 }
 
 paddr_t

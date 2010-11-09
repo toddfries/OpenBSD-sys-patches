@@ -1,4 +1,4 @@
-/*	$NetBSD: uvm_meter.c,v 1.49 2008/06/04 12:45:28 ad Exp $	*/
+/*	$NetBSD: uvm_meter.c,v 1.47 2007/02/26 09:20:54 yamt Exp $	*/
 
 /*
  * Copyright (c) 1997 Charles D. Cranor and Washington University.
@@ -41,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: uvm_meter.c,v 1.49 2008/06/04 12:45:28 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: uvm_meter.c,v 1.47 2007/02/26 09:20:54 yamt Exp $");
 
 #include <sys/param.h>
 #include <sys/proc.h>
@@ -105,7 +105,7 @@ uvm_loadav(struct loadavg *avg)
 
 	nrun = 0;
 
-	mutex_enter(proc_lock);
+	mutex_enter(&proclist_mutex);
 	LIST_FOREACH(l, &alllwp, l_list) {
 		if ((l->l_flag & (LW_SINTR | LW_SYSTEM)) != 0)
 			continue;
@@ -120,7 +120,7 @@ uvm_loadav(struct loadavg *avg)
 			nrun++;
 		}
 	}
-	mutex_exit(proc_lock);
+	mutex_exit(&proclist_mutex);
 
 	for (i = 0; i < 3; i++)
 		avg->ldavg[i] = (cexp[i] * avg->ldavg[i] +
@@ -243,8 +243,6 @@ sysctl_vm_uvmexp2(SYSCTLFN_ARGS)
 	u.execpages = uvmexp.execpages;
 	u.colorhit = uvmexp.colorhit;
 	u.colormiss = uvmexp.colormiss;
-	u.cpuhit = uvmexp.cpuhit;
-	u.cpumiss = uvmexp.cpumiss;
 
 	node = *rnode;
 	node.sysctl_data = &u;
@@ -369,7 +367,7 @@ uvm_total(struct vmtotal *totalp)
 	/*
 	 * calculate process statistics
 	 */
-	mutex_enter(proc_lock);
+	mutex_enter(&proclist_mutex);
 	LIST_FOREACH(l, &alllwp, l_list) {
 		if (l->l_proc->p_flag & PK_SYSTEM)
 			continue;
@@ -423,7 +421,7 @@ uvm_total(struct vmtotal *totalp)
 			totalp->t_pw++;
 #endif
 	}
-	mutex_exit(proc_lock);
+	mutex_exit(&proclist_mutex);
 
 	/*
 	 * Calculate object memory usage statistics.

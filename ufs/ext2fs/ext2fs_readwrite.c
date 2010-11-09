@@ -1,4 +1,4 @@
-/*	$NetBSD: ext2fs_readwrite.c,v 1.53 2008/11/26 20:17:33 pooka Exp $	*/
+/*	$NetBSD: ext2fs_readwrite.c,v 1.44 2007/01/04 16:55:29 elad Exp $	*/
 
 /*-
  * Copyright (c) 1993
@@ -65,7 +65,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ext2fs_readwrite.c,v 1.53 2008/11/26 20:17:33 pooka Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ext2fs_readwrite.c,v 1.44 2007/01/04 16:55:29 elad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -110,11 +110,12 @@ ext2fs_read(void *v)
 	struct m_ext2fs *fs;
 	struct buf *bp;
 	struct ufsmount *ump;
+	void *win;
 	vsize_t bytelen;
 	daddr_t lbn, nextlbn;
 	off_t bytesinfile;
 	long size, xfersize, blkoffset;
-	int error;
+	int error, flags;
 
 	vp = ap->a_vp;
 	ip = VTOI(vp);
@@ -150,8 +151,11 @@ ext2fs_read(void *v)
 			if (bytelen == 0)
 				break;
 
-			error = ubc_uiomove(&vp->v_uobj, uio, bytelen, advice,
-			    UBC_READ | UBC_PARTIALOK | UBC_UNMAP_FLAG(vp));
+			win = ubc_alloc(&vp->v_uobj, uio->uio_offset,
+			    &bytelen, advice, UBC_READ);
+			error = uiomove(win, bytelen, uio);
+			flags = UBC_WANT_UNMAP(vp) ? UBC_UNMAP : 0;
+			ubc_release(win, flags);
 			if (error)
 				break;
 		}
@@ -173,11 +177,11 @@ ext2fs_read(void *v)
 			xfersize = bytesinfile;
 
 		if (lblktosize(fs, nextlbn) >= ext2fs_size(ip))
-			error = bread(vp, lbn, size, NOCRED, 0, &bp);
+			error = bread(vp, lbn, size, NOCRED, &bp);
 		else {
 			int nextsize = fs->e2fs_bsize;
 			error = breadn(vp, lbn,
-				size, &nextlbn, &nextsize, 1, NOCRED, 0, &bp);
+				size, &nextlbn, &nextsize, 1, NOCRED, &bp);
 		}
 		if (error)
 			break;
@@ -198,10 +202,10 @@ ext2fs_read(void *v)
 		error = uiomove((char *)bp->b_data + blkoffset, xfersize, uio);
 		if (error)
 			break;
-		brelse(bp, 0);
+		brelse(bp);
 	}
 	if (bp != NULL)
-		brelse(bp, 0);
+		brelse(bp);
 
 out:
 	if (!(vp->v_mount->mnt_flag & MNT_NOATIME)) {
@@ -235,13 +239,12 @@ ext2fs_write(void *v)
 	off_t osize;
 	int blkoffset, error, flags, ioflag, resid, xfersize;
 	vsize_t bytelen;
+	void *win;
 	off_t oldoff = 0;					/* XXX */
-	bool async;
+	boolean_t async;
 	int extended = 0;
-	int advice;
 
 	ioflag = ap->a_ioflag;
-	advice = IO_ADV_DECODE(ioflag);
 	uio = ap->a_uio;
 	vp = ap->a_vp;
 	ip = VTOI(vp);
@@ -283,9 +286,7 @@ ext2fs_write(void *v)
 	if (vp->v_type == VREG && p &&
 	    uio->uio_offset + uio->uio_resid >
 	    p->p_rlimit[RLIMIT_FSIZE].rlim_cur) {
-		mutex_enter(proc_lock);
 		psignal(p, SIGXFSZ);
-		mutex_exit(proc_lock);
 		return (EFBIG);
 	}
 	if (uio->uio_resid == 0)
@@ -302,15 +303,15 @@ ext2fs_write(void *v)
 			bytelen = MIN(fs->e2fs_bsize - blkoffset,
 			    uio->uio_resid);
 
-			if (vp->v_size < oldoff + bytelen) {
-				uvm_vnp_setwritesize(vp, oldoff + bytelen);
-			}
 			error = ufs_balloc_range(vp, uio->uio_offset,
 			    bytelen, ap->a_cred, 0);
 			if (error)
 				break;
-			error = ubc_uiomove(&vp->v_uobj, uio, bytelen, advice,
-			    UBC_WRITE | UBC_UNMAP_FLAG(vp));
+			win = ubc_alloc(&vp->v_uobj, uio->uio_offset,
+			    &bytelen, UVM_ADV_NORMAL, UBC_WRITE);
+			error = uiomove(win, bytelen, uio);
+			flags = UBC_WANT_UNMAP(vp) ? UBC_UNMAP : 0;
+			ubc_release(win, flags);
 			if (error)
 				break;
 
@@ -330,13 +331,13 @@ ext2fs_write(void *v)
 			 */
 
 			if (!async && oldoff >> 16 != uio->uio_offset >> 16) {
-				mutex_enter(&vp->v_interlock);
+				simple_lock(&vp->v_interlock);
 				error = VOP_PUTPAGES(vp, (oldoff >> 16) << 16,
 				    (uio->uio_offset >> 16) << 16, PGO_CLEANIT);
 			}
 		}
 		if (error == 0 && ioflag & IO_SYNC) {
-			mutex_enter(&vp->v_interlock);
+			simple_lock(&vp->v_interlock);
 			error = VOP_PUTPAGES(vp, trunc_page(oldoff),
 			    round_page(blkroundup(fs, uio->uio_offset)),
 			    PGO_CLEANIT | PGO_SYNCIO);
@@ -399,7 +400,8 @@ out:
 	if (resid > uio->uio_resid)
 		VN_KNOTE(vp, NOTE_WRITE | (extended ? NOTE_EXTEND : 0));
 	if (error) {
-		(void) ext2fs_truncate(vp, osize, ioflag & IO_SYNC, ap->a_cred);
+		(void) ext2fs_truncate(vp, osize, ioflag & IO_SYNC, ap->a_cred,
+		    p);
 		uio->uio_offset -= resid - uio->uio_resid;
 		uio->uio_resid = resid;
 	} else if (resid > uio->uio_resid && (ioflag & IO_SYNC) == IO_SYNC)

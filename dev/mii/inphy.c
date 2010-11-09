@@ -1,4 +1,4 @@
-/*	$NetBSD: inphy.c,v 1.51 2009/02/16 08:00:42 cegger Exp $	*/
+/*	$NetBSD: inphy.c,v 1.43 2006/11/16 21:24:07 christos Exp $	*/
 
 /*-
  * Copyright (c) 1998, 1999, 2000 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -65,7 +72,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: inphy.c,v 1.51 2009/02/16 08:00:42 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: inphy.c,v 1.43 2006/11/16 21:24:07 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -83,10 +90,10 @@ __KERNEL_RCSID(0, "$NetBSD: inphy.c,v 1.51 2009/02/16 08:00:42 cegger Exp $");
 
 #include <dev/mii/inphyreg.h>
 
-static int	inphymatch(device_t, cfdata_t, void *);
-static void	inphyattach(device_t, device_t, void *);
+static int	inphymatch(struct device *, struct cfdata *, void *);
+static void	inphyattach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(inphy, sizeof(struct mii_softc),
+CFATTACH_DECL(inphy, sizeof(struct mii_softc),
     inphymatch, inphyattach, mii_phy_detach, mii_phy_activate);
 
 static int	inphy_service(struct mii_softc *, struct mii_data *, int);
@@ -117,7 +124,8 @@ static const struct mii_phydesc inphys[] = {
 };
 
 static int
-inphymatch(device_t parent, cfdata_t match, void *aux)
+inphymatch(struct device *parent, struct cfdata *match,
+    void *aux)
 {
 	struct mii_attach_args *ma = aux;
 
@@ -128,7 +136,7 @@ inphymatch(device_t parent, cfdata_t match, void *aux)
 }
 
 static void
-inphyattach(device_t parent, device_t self, void *aux)
+inphyattach(struct device *parent, struct device *self, void *aux)
 {
 	struct mii_softc *sc = device_private(self);
 	struct mii_attach_args *ma = aux;
@@ -139,7 +147,6 @@ inphyattach(device_t parent, device_t self, void *aux)
 	aprint_naive(": Media interface\n");
 	aprint_normal(": %s, rev. %d\n", mpd->mpd_name, MII_REV(ma->mii_id2));
 
-	sc->mii_dev = self;
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
 	sc->mii_funcs = &inphy_funcs;
@@ -151,7 +158,7 @@ inphyattach(device_t parent, device_t self, void *aux)
 
 	sc->mii_capabilities =
 	    PHY_READ(sc, MII_BMSR) & ma->mii_capmask;
-	aprint_normal_dev(self, "");
+	aprint_normal("%s: ", sc->mii_dev.dv_xname);
 	if ((sc->mii_capabilities & BMSR_MEDIAMASK) == 0)
 		aprint_error("no media present");
 	else
@@ -164,6 +171,9 @@ inphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 {
 	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
 	int reg;
+
+	if (!device_is_active(&sc->mii_dev))
+		return (ENXIO);
 
 	switch (cmd) {
 	case MII_POLLSTAT:
@@ -249,19 +259,15 @@ inphy_status(struct mii_softc *sc)
 			mii->mii_media_active |= IFM_NONE;
 			return;
 		}
-
 		scr = PHY_READ(sc, MII_INPHY_SCR);
-		if (scr & SCR_S100)
-			mii->mii_media_active |= IFM_100_TX;
-		else if ((bmsr & BMSR_100T4) && (scr & SCR_T4))
+		if ((bmsr & BMSR_100T4) && (scr & SCR_T4))
 			mii->mii_media_active |= IFM_100_T4;
+		else if (scr & SCR_S100)
+			mii->mii_media_active |= IFM_100_TX;
 		else
 			mii->mii_media_active |= IFM_10_T;
 		if (scr & SCR_FDX)
 			mii->mii_media_active |= IFM_FDX;
-
-		if (mii->mii_media_active & IFM_FDX)
-			mii->mii_media_active |= mii_phy_flowstatus(sc);
 	} else
 		mii->mii_media_active = ife->ifm_media;
 }

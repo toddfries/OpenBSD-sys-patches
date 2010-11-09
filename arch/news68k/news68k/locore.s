@@ -1,4 +1,4 @@
-/*	$NetBSD: locore.s,v 1.47 2008/12/21 17:43:32 tsutsui Exp $	*/
+/*	$NetBSD: locore.s,v 1.40 2005/12/11 12:18:23 christos Exp $	*/
 
 /*
  * Copyright (c) 1980, 1990, 1993
@@ -448,8 +448,7 @@ Lenab1:
 /* set kernel stack, user SP, and initial pcb */
 	movl	_C_LABEL(proc0paddr),%a1| get lwp0 pcb addr
 	lea	%a1@(USPACE-4),%sp	| set kernel stack to end of area
-	lea	_C_LABEL(lwp0),%a2	| initialize lwp0.l_addr
-	movl	%a2,_C_LABEL(curlwp)	|   and curlwp so that
+	lea	_C_LABEL(lwp0),%a2	| initialize lwp0.l_addr so that
 	movl	%a1,%a2@(L_ADDR)	|   we don't deref NULL in trap()
 	movl	#USRSTACK-4,%a2
 	movl	%a2,%usp		| init user SP
@@ -680,8 +679,8 @@ ENTRY_NOPROFILE(trap0)
 	movl	%d0,%sp@-		| push syscall number
 	jbsr	_C_LABEL(syscall)	| handle it
 	addql	#4,%sp			| pop syscall arg
-	tstl	_C_LABEL(astpending)	| AST pending?
-	jne	Lrei			| yes, handle it via trap
+	tstl	_C_LABEL(astpending)
+	jne	Lrei2
 	movl	%sp@(FR_SP),%a0		| grab and restore
 	movl	%a0,%usp		|   user SP
 	moveml	%sp@+,#0x7FFF		| restore most registers
@@ -838,70 +837,56 @@ ENTRY_NOPROFILE(spurintr)	/* Level 0 */
 	rte
 
 ENTRY_NOPROFILE(intrhand_autovec)	/* Levels 1 through 6 */
-	addql	#1,_C_LABEL(idepth)
 	INTERRUPT_SAVEREG
 	movw	%sp@(22),%sp@-		| push exception vector
 	clrw	%sp@-
 	jbsr	_C_LABEL(isrdispatch_autovec) | call dispatcher
 	addql	#4,%sp
 	INTERRUPT_RESTOREREG
-	subql	#1,_C_LABEL(idepth)
 	rte
 
 ENTRY_NOPROFILE(lev1intr)		/* Level 1: AST interrupt */
-	addql	#1,_C_LABEL(idepth)
 	movl	%a0,%sp@-
 	addql	#1,_C_LABEL(intrcnt)+4
 	addql	#1,_C_LABEL(uvmexp)+UVMEXP_INTRS
 	movl	_C_LABEL(ctrl_ast),%a0
 	clrb	%a0@			| disable AST interrupt
 	movl	%sp@+,%a0
-	subql	#1,_C_LABEL(idepth)
 	jra	_ASM_LABEL(rei)		| handle AST
 
-#ifdef notyet
-ENTRY_NOPROFILE(_softintr)		/* Level 2: software interrupt */
+ENTRY_NOPROFILE(lev2intr)		/* Level 2: software interrupt */
 	INTERRUPT_SAVEREG
-	jbsr	_C_LABEL(softintr_dispatch)
+	jbsr	_C_LABEL(intrhand_lev2)
 	INTERRUPT_RESTOREREG
 	rte
-#endif
 
 ENTRY_NOPROFILE(lev3intr)		/* Level 3: fd, lpt, vme etc. */
-	addql	#1,_C_LABEL(idepth)
 	INTERRUPT_SAVEREG
 	jbsr	_C_LABEL(intrhand_lev3)
 	INTERRUPT_RESTOREREG
-	subql	#1,_C_LABEL(idepth)
 	rte
 
 ENTRY_NOPROFILE(lev4intr)		/* Level 4: scsi, le, vme etc. */
-	addql	#1,_C_LABEL(idepth)
 	INTERRUPT_SAVEREG
 	jbsr	_C_LABEL(intrhand_lev4)
 	INTERRUPT_RESTOREREG
-	subql	#1,_C_LABEL(idepth)
 	rte
 
 #if 0
 ENTRY_NOPROFILE(lev5intr)		/* Level 5: kb, ms (zs is vectored) */
-	addql	#1,_C_LABEL(idepth)
 	INTERRUPT_SAVEREG
 	jbsr	_C_LABEL(intrhand_lev5)
 	INTERRUPT_RESTOREREG
-	subql	#1,_C_LABEL(idepth)
 	rte
 #endif
 
 ENTRY_NOPROFILE(_isr_clock)		/* Level 6: clock (see clock_hb.c) */
-	addql	#1,_C_LABEL(idepth)
 	INTERRUPT_SAVEREG
 	lea	%sp@(16),%a1
 	movl	%a1,%sp@-
 	jbsr	_C_LABEL(clock_intr)
 	addql	#4,%sp
 	INTERRUPT_RESTOREREG
-	subql	#1,_C_LABEL(idepth)
 	rte
 
 #if 0
@@ -920,7 +905,6 @@ ENTRY_NOPROFILE(lev7intr)		/* Level 7: NMI */
 #endif
 
 ENTRY_NOPROFILE(intrhand_vectored)
-	addql	#1,_C_LABEL(idepth)
 	INTERRUPT_SAVEREG
 	lea	%sp@(16),%a1		| get pointer to frame
 	movl	%a1,%sp@-
@@ -930,7 +914,6 @@ ENTRY_NOPROFILE(intrhand_vectored)
 	jbsr	_C_LABEL(isrdispatch_vectored) | call dispatcher
 	lea	%sp@(12),%sp		| pop value args
 	INTERRUPT_RESTOREREG
-	subql	#1,_C_LABEL(idepth)
 	rte
 
 #undef INTERRUPT_SAVEREG
@@ -939,41 +922,41 @@ ENTRY_NOPROFILE(intrhand_vectored)
 /*
  * Emulation of VAX REI instruction.
  *
- * This code deals with checking for and servicing
- * ASTs (profiling, scheduling).
- * After identifing that we need an AST we drop the IPL
- * to allow device interrupts.
+ * This code deals with checking for and servicing ASTs
+ * (profiling, scheduling) and software interrupts (network, softclock).
+ * We check for ASTs first, just like the VAX.  To avoid excess overhead
+ * the T_ASTFLT handling code will also check for software interrupts so we
+ * do not have to do it here.  After identifing that we need an AST we
+ * drop the IPL to allow device interrupts.
  *
  * This code is complicated by the fact that sendsig may have been called
  * necessitating a stack cleanup.
  */
 /*
- * news68k has hardware support for AST,
- * so only traps (including system call) and
- * the AST interrupt use this REI function.
+ * news68k has hardware support for AST and software interrupt.
+ * We just use it rather than VAX REI emulation.
  */
 
 ASENTRY_NOPROFILE(rei)
 	tstl	_C_LABEL(astpending)	| AST pending?
-	jne	1f			| no, done
+	jne	Lrei1			| no, done
+	rte
+Lrei1:
+	btst	#5,%sp@			| yes, are we returning to user mode?
+	jeq	1f			| no, done
 	rte
 1:
-	btst	#5,%sp@			| yes, are we returning to user mode?
-	jeq	2f			| no, done
-	rte
-2:
 	movw	#PSL_LOWIPL,%sr		| lower SPL
 	clrl	%sp@-			| stack adjust
 	moveml	#0xFFFF,%sp@-		| save all registers
 	movl	%usp,%a1		| including
 	movl	%a1,%sp@(FR_SP)		|    the users SP
-Lrei:
+Lrei2:
 	clrl	%sp@-			| VA == none
 	clrl	%sp@-			| code == none
 	movl	#T_ASTFLT,%sp@-		| type == async system trap
-	pea	%sp@(12)		| fp == address of trap frame
 	jbsr	_C_LABEL(trap)		| go handle it
-	lea	%sp@(16),%sp		| pop value args
+	lea	%sp@(12),%sp		| pop value args
 	movl	%sp@(FR_SP),%a0		| restore user SP
 	movl	%a0,%usp		|   from save area
 	movw	%sp@(FR_ADJ),%d0	| need to adjust stack?
@@ -1012,6 +995,11 @@ Laststkadj:
  * Use common m68k support routines.
  */
 #include <m68k/m68k/support.s>
+
+/*
+ * Use common m68k process manipulation routines.
+ */
+#include <m68k/m68k/proc_subr.s>
 
 /*
  * Use common m68k process/lwp switch and context save subroutines.
@@ -1233,6 +1221,9 @@ GLOBAL(bootdevlun)
 GLOBAL(bootctrllun)
 	.long	0
 GLOBAL(bootaddr)
+	.long	0
+
+GLOBAL(want_resched)
 	.long	0
 
 GLOBAL(proc0paddr)

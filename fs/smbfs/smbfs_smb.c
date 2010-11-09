@@ -1,4 +1,4 @@
-/*	$NetBSD: smbfs_smb.c,v 1.37 2008/06/24 10:23:48 gmcgarry Exp $	*/
+/*	$NetBSD: smbfs_smb.c,v 1.34 2006/11/16 01:33:37 christos Exp $	*/
 
 /*-
  * Copyright (c) 2003 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -64,7 +71,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: smbfs_smb.c,v 1.37 2008/06/24 10:23:48 gmcgarry Exp $");
+__KERNEL_RCSID(0, "$NetBSD: smbfs_smb.c,v 1.34 2006/11/16 01:33:37 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -123,7 +130,7 @@ smbfs_getino(struct smbnode *dnp, const char *name, int nmlen)
 }
 
 static int
-smbfs_smb_lockandx(struct smbnode *np, int op, void *id, off_t start, off_t end,
+smbfs_smb_lockandx(struct smbnode *np, int op, caddr_t id, off_t start, off_t end,
 	struct smb_cred *scred)
 {
 	struct smb_share *ssp = np->n_mount->sm_share;
@@ -142,7 +149,7 @@ smbfs_smb_lockandx(struct smbnode *np, int op, void *id, off_t start, off_t end,
 	mb_put_uint8(mbp, 0xff);	/* secondary command */
 	mb_put_uint8(mbp, 0);		/* MBZ */
 	mb_put_uint16le(mbp, 0);
-	mb_put_mem(mbp, (void *)&np->n_fid, 2, MB_MSYSTEM);
+	mb_put_mem(mbp, (caddr_t)&np->n_fid, 2, MB_MSYSTEM);
 	mb_put_uint8(mbp, ltype);	/* locktype */
 	mb_put_uint8(mbp, 0);		/* oplocklevel - 0 seems is NO_OPLOCK */
 	mb_put_uint32le(mbp, 0);	/* timeout - break immediately */
@@ -160,7 +167,7 @@ smbfs_smb_lockandx(struct smbnode *np, int op, void *id, off_t start, off_t end,
 }
 
 int
-smbfs_smb_lock(struct smbnode *np, int op, void *id,
+smbfs_smb_lock(struct smbnode *np, int op, caddr_t id,
 	off_t start, off_t end,	struct smb_cred *scred)
 {
 	struct smb_share *ssp = np->n_mount->sm_share;
@@ -278,7 +285,7 @@ smbfs_smb_setfsize(struct smbnode *np, int newsize, struct smb_cred *scred)
 		return error;
 	smb_rq_getrequest(rqp, &mbp);
 	smb_rq_wstart(rqp);
-	mb_put_mem(mbp, (void *)&np->n_fid, 2, MB_MSYSTEM);
+	mb_put_mem(mbp, (caddr_t)&np->n_fid, 2, MB_MSYSTEM);
 	mb_put_uint16le(mbp, 0);
 	mb_put_uint32le(mbp, newsize);
 	mb_put_uint16le(mbp, 0);
@@ -462,7 +469,7 @@ smbfs_smb_setftime(struct smbnode *np, struct timespec *mtime,
 	tzoff = SSTOVC(ssp)->vc_sopt.sv_tz;
 	smb_rq_getrequest(rqp, &mbp);
 	smb_rq_wstart(rqp);
-	mb_put_mem(mbp, (void *)&np->n_fid, 2, MB_MSYSTEM);
+	mb_put_mem(mbp, (caddr_t)&np->n_fid, 2, MB_MSYSTEM);
 	mb_put_uint32le(mbp, 0);		/* creation time */
 
 	if (atime)
@@ -481,7 +488,7 @@ smbfs_smb_setftime(struct smbnode *np, struct timespec *mtime,
 	smb_rq_bstart(rqp);
 	smb_rq_bend(rqp);
 	error = smb_rq_simple(rqp);
-	SMBSDEBUG(("%d\n", error));
+	SMBSDEBUG("%d\n", error);
 	smb_rq_done(rqp);
 	return error;
 }
@@ -507,7 +514,7 @@ smbfs_smb_setfattrNT(struct smbnode *np, u_int16_t attr, struct timespec *mtime,
 	svtz = SSTOVC(ssp)->vc_sopt.sv_tz;
 	mbp = &t2p->t2_tparam;
 	mb_init(mbp);
-	mb_put_mem(mbp, (void *)&np->n_fid, 2, MB_MSYSTEM); 	/* FID */
+	mb_put_mem(mbp, (caddr_t)&np->n_fid, 2, MB_MSYSTEM); 	/* FID */
 	mb_put_uint16le(mbp, SMB_SET_FILE_BASIC_INFO);		/* info level */
 	mb_put_uint32le(mbp, 0);				/* reserved */
 	mbp = &t2p->t2_tdata;
@@ -601,7 +608,7 @@ smbfs_smb_close(struct smb_share *ssp, u_int16_t fid, struct timespec *mtime,
 		return error;
 	smb_rq_getrequest(rqp, &mbp);
 	smb_rq_wstart(rqp);
-	mb_put_mem(mbp, (void *)&fid, sizeof(fid), MB_MSYSTEM);
+	mb_put_mem(mbp, (caddr_t)&fid, sizeof(fid), MB_MSYSTEM);
 	if (mtime) {
 		smb_time_local2server(mtime, SSTOVC(ssp)->vc_sopt.sv_tz, &xtime);
 	} else
@@ -1001,7 +1008,7 @@ smbfs_smb_trans2find2(struct smbfs_fctx *ctx)
 		ctx->f_t2 = t2p;
 		mbp = &t2p->t2_tparam;
 		mb_init(mbp);
-		mb_put_mem(mbp, (void *)&ctx->f_Sid, 2, MB_MSYSTEM);
+		mb_put_mem(mbp, (caddr_t)&ctx->f_Sid, 2, MB_MSYSTEM);
 		mb_put_uint16le(mbp, ctx->f_limit);
 		mb_put_uint16le(mbp, ctx->f_infolevel);
 		mb_put_uint32le(mbp, 0);		/* resume key */
@@ -1073,7 +1080,7 @@ smbfs_smb_findclose2(struct smbfs_fctx *ctx)
 		return error;
 	smb_rq_getrequest(rqp, &mbp);
 	smb_rq_wstart(rqp);
-	mb_put_mem(mbp, (void *)&ctx->f_Sid, 2, MB_MSYSTEM);
+	mb_put_mem(mbp, (caddr_t)&ctx->f_Sid, 2, MB_MSYSTEM);
 	smb_rq_wend(rqp);
 	smb_rq_bstart(rqp);
 	smb_rq_bend(rqp);
@@ -1451,7 +1458,7 @@ smbfs_smb_nt_dirnotify_setup(struct smbnode *dnp, struct smb_rq **rqpp, struct s
 		FILE_NOTIFY_CHANGE_NAME|FILE_NOTIFY_CHANGE_ATTRIBUTES|
 		FILE_NOTIFY_CHANGE_SIZE|FILE_NOTIFY_CHANGE_LAST_WRITE|
 		FILE_NOTIFY_CHANGE_CREATION);	/* CompletionFilter */
-	mb_put_mem(mbp, (void *)&dnp->n_fid, 2, MB_MSYSTEM);	/* FID */
+	mb_put_mem(mbp, (caddr_t)&dnp->n_fid, 2, MB_MSYSTEM);	/* FID */
 	mb_put_uint8(mbp, 0);		/* WatchTree - Watch all subdirs too */
 	mb_put_uint8(mbp, 0);		/* Reserved - must be zero */
 	smb_rq_wend(rqp);

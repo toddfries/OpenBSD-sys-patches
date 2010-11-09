@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Module Name: dmobject - ACPI object decode and display
- *              $Revision: 1.4 $
+ *              xRevision: 1.19 $
  *
  ******************************************************************************/
 
@@ -9,7 +9,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2008, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2006, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -115,6 +115,9 @@
  *****************************************************************************/
 
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: dmobject.c,v 1.1 2006/03/23 13:36:31 kochi Exp $");
+
 #include "acpi.h"
 #include "amlcode.h"
 #include "acnamesp.h"
@@ -210,16 +213,13 @@ AcpiDmDumpMethodInfo (
 
         if (NextWalkState == WalkState)
         {
-            if (Op)
-            {
-                /* Display currently executing ASL statement */
+            /* Display currently executing ASL statement */
 
-                Next = Op->Common.Next;
-                Op->Common.Next = NULL;
+            Next = Op->Common.Next;
+            Op->Common.Next = NULL;
 
-                AcpiDmDisassemble (NextWalkState, Op, ACPI_UINT32_MAX);
-                Op->Common.Next = Next;
-            }
+            AcpiDmDisassemble (NextWalkState, Op, ACPI_UINT32_MAX);
+            Op->Common.Next = Next;
         }
         else
         {
@@ -352,22 +352,7 @@ AcpiDmDecodeNode (
         AcpiOsPrintf (" [Method Local]");
     }
 
-    switch (Node->Type)
-    {
-    /* These types have no attached object */
-
-    case ACPI_TYPE_DEVICE:
-        AcpiOsPrintf (" Device");
-        break;
-
-    case ACPI_TYPE_THERMAL:
-        AcpiOsPrintf (" Thermal Zone");
-        break;
-
-    default:
-        AcpiDmDecodeInternalObject (AcpiNsGetAttachedObject (Node));
-        break;
-    }
+    AcpiDmDecodeInternalObject (AcpiNsGetAttachedObject (Node));
 }
 
 
@@ -629,6 +614,8 @@ AcpiDmDisplayArguments (
 {
     UINT32                  i;
     ACPI_OPERAND_OBJECT     *ObjDesc;
+    UINT32                  NumArgs;
+    UINT32                  Concurrency;
     ACPI_NAMESPACE_NODE     *Node;
 
 
@@ -647,9 +634,12 @@ AcpiDmDisplayArguments (
         return;
     }
 
+    NumArgs     = ObjDesc->Method.ParamCount;
+    Concurrency = ObjDesc->Method.Concurrency;
+
     AcpiOsPrintf (
         "Arguments for Method [%4.4s]:  (%X arguments defined, max concurrency = %X)\n",
-        AcpiUtGetNodeName (Node), ObjDesc->Method.ParamCount, ObjDesc->Method.SyncLevel);
+        AcpiUtGetNodeName (Node), NumArgs, Concurrency);
 
     for (i = 0; i < ACPI_METHOD_NUM_ARGS; i++)
     {

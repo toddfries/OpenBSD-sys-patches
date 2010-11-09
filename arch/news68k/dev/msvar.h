@@ -1,4 +1,4 @@
-/*	$NetBSD: msvar.h,v 1.2 2008/03/28 18:19:56 tsutsui Exp $	*/
+/*	$NetBSD: msvar.h,v 1.1 2001/01/25 14:33:30 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 2001 Tsubai Masanari.  All rights reserved.
@@ -42,10 +42,10 @@
 #define MS_Y_DATA	0x7f		/* data bits of Y (third byte) */
 
 struct ms_softc {
-	device_t sc_dev;
+	struct device sc_dev;
 	bus_space_tag_t sc_bt;
 	bus_space_handle_t sc_bh;
-	device_t sc_wsmousedev;
+	struct device *sc_wsmousedev;
 	bus_size_t sc_offset; /* ms data port offset */
 	int sc_ndata;
 	u_char sc_buf[MS_DB_SIZE];

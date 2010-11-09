@@ -1,4 +1,4 @@
-/*	$NetBSD: dkwedge_gpt.c,v 1.10 2008/10/23 19:37:40 jakllsch Exp $	*/
+/*	$NetBSD: dkwedge_gpt.c,v 1.6 2007/03/04 06:01:45 christos Exp $	*/
 
 /*-
  * Copyright (c) 2004 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -34,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: dkwedge_gpt.c,v 1.10 2008/10/23 19:37:40 jakllsch Exp $");
+__KERNEL_RCSID(0, "$NetBSD: dkwedge_gpt.c,v 1.6 2007/03/04 06:01:45 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -47,29 +54,20 @@ __KERNEL_RCSID(0, "$NetBSD: dkwedge_gpt.c,v 1.10 2008/10/23 19:37:40 jakllsch Ex
 #include <sys/disklabel_gpt.h>
 #include <sys/uuid.h>
 
-/*
- * GUID to dkw_ptype mapping information.
- *
- * GPT_ENT_TYPE_MS_BASIC_DATA is not suited to mapping.  Aside from being
- * used for multiple Microsoft file systems, Linux uses it for it's own
- * set of native file systems.  Treating this GUID as unknown seems best.
- */
-
 static const struct {
 	struct uuid ptype_guid;
 	const char *ptype_str;
 } gpt_ptype_guid_to_str_tab[] = {
-	{ GPT_ENT_TYPE_EFI,			DKW_PTYPE_FAT },
-	{ GPT_ENT_TYPE_NETBSD_SWAP,		DKW_PTYPE_SWAP },
-	{ GPT_ENT_TYPE_FREEBSD_SWAP,		DKW_PTYPE_SWAP },
-	{ GPT_ENT_TYPE_NETBSD_FFS,		DKW_PTYPE_FFS },
-	{ GPT_ENT_TYPE_FREEBSD_UFS,		DKW_PTYPE_FFS },
-	{ GPT_ENT_TYPE_APPLE_UFS,		DKW_PTYPE_FFS },
-	{ GPT_ENT_TYPE_NETBSD_LFS,		DKW_PTYPE_LFS },
-	{ GPT_ENT_TYPE_NETBSD_RAIDFRAME,	DKW_PTYPE_RAIDFRAME },
-	{ GPT_ENT_TYPE_NETBSD_CCD,		DKW_PTYPE_CCD },
-	{ GPT_ENT_TYPE_NETBSD_CGD,		DKW_PTYPE_CGD },
-	{ GPT_ENT_TYPE_APPLE_HFS,		DKW_PTYPE_APPLEHFS },
+	{ GPT_ENT_TYPE_EFI,		"msdos" },	/* XXX yes? */
+#if 0
+	{ GPT_ENT_TYPE_FREEBSD,		??? },
+#endif
+	{ GPT_ENT_TYPE_FREEBSD_SWAP,	"swap" },	/* XXX for now */
+	{ GPT_ENT_TYPE_FREEBSD_UFS,	"ffs" },	/* XXX for now */
+
+	/* XXX What about the MS and Linux types? */
+
+	{ { .time_low = 0 },		NULL },
 };
 
 static const char *
@@ -77,13 +75,13 @@ gpt_ptype_guid_to_str(const struct uuid *guid)
 {
 	int i;
 
-	for (i = 0; i < __arraycount(gpt_ptype_guid_to_str_tab); i++) {
+	for (i = 0; gpt_ptype_guid_to_str_tab[i].ptype_str != NULL; i++) {
 		if (memcmp(&gpt_ptype_guid_to_str_tab[i].ptype_guid,
 			   guid, sizeof(*guid)) == 0)
 			return (gpt_ptype_guid_to_str_tab[i].ptype_str);
 	}
 
-	return (DKW_PTYPE_UNKNOWN);
+	return (NULL);
 }
 
 static const uint32_t gpt_crc_tab[16] = {
@@ -253,8 +251,16 @@ dkwedge_discover_gpt(struct disk *pdk, struct vnode *vp)
 		uuid_snprintf(ent_guid_str, sizeof(ent_guid_str),
 		    &ent_guid);
 
-		/* figure out the type */
-		ptype = gpt_ptype_guid_to_str(&ptype_guid);
+		/* Skip it if we don't grok this ptype. */
+		if ((ptype = gpt_ptype_guid_to_str(&ptype_guid)) == NULL) {
+			/*
+			 * XXX Should probably just add these... maybe
+			 * XXX just have an empty ptype?
+			 */
+			aprint_verbose("%s: skipping entry %u (%s), type %s\n",
+			    pdk->dk_name, i, ent_guid_str, ptype_guid_str);
+			continue;
+		}
 		strcpy(dkw.dkw_ptype, ptype);
 
 		strcpy(dkw.dkw_parent, pdk->dk_name);

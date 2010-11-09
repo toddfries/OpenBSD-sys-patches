@@ -1,4 +1,4 @@
-/* $NetBSD: pccons_isa.c,v 1.10 2008/09/13 16:15:38 tsutsui Exp $ */
+/* $NetBSD: pccons_isa.c,v 1.8 2005/12/11 12:16:39 christos Exp $ */
 /* NetBSD: vga_isa.c,v 1.4 2000/08/14 20:14:51 thorpej Exp  */
 
 /*
@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: pccons_isa.c,v 1.10 2008/09/13 16:15:38 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pccons_isa.c,v 1.8 2005/12/11 12:16:39 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -42,16 +42,16 @@ __KERNEL_RCSID(0, "$NetBSD: pccons_isa.c,v 1.10 2008/09/13 16:15:38 tsutsui Exp 
 #include <arc/dev/pcconsvar.h>
 #include <arc/isa/pccons_isavar.h>
 
-static int	pccons_isa_match(device_t, cfdata_t, void *);
-static void	pccons_isa_attach(device_t, device_t, void *);
+int	pccons_isa_match(struct device *, struct cfdata *, void *);
+void	pccons_isa_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(pc_isa, sizeof(struct pc_softc),
+CFATTACH_DECL(pc_isa, sizeof(struct pc_softc),
     pccons_isa_match, pccons_isa_attach, NULL, NULL);
 
 struct pccons_config *pccons_isa_conf;
 
-static int
-pccons_isa_match(device_t parent, cfdata_t cf, void *aux)
+int
+pccons_isa_match(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct isa_attach_args *ia = aux;
 	bus_addr_t iobase = 0x3b0;	/* XXX mono 0x3b0 color 0x3c0 */
@@ -111,16 +111,14 @@ pccons_isa_match(device_t parent, cfdata_t cf, void *aux)
 	return 1;
 }
 
-static void
-pccons_isa_attach(device_t parent, device_t self, void *aux)
+void
+pccons_isa_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct pc_softc *sc = device_private(self);
+	struct pc_softc *sc = (struct pc_softc *)self;
 	struct isa_attach_args *ia = aux;
 
-	sc->sc_dev = self;
-
 	isa_intr_establish(ia->ia_ic, ia->ia_irq[0].ir_irq, IST_EDGE, IPL_TTY,
-	    pcintr, sc);
+	    pcintr, self);
 	pccons_common_attach(sc, ia->ia_iot, ia->ia_memt, ia->ia_iot,
 	    pccons_isa_conf);
 }

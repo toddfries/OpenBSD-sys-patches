@@ -1,7 +1,7 @@
-/*	$NetBSD: procfs_fd.c,v 1.14 2008/04/28 20:24:08 martin Exp $	*/
+/*	$NetBSD: procfs_fd.c,v 1.10 2006/11/16 01:33:38 christos Exp $	*/
 
 /*-
- * Copyright (c) 2003, 2008 The NetBSD Foundation, Inc.
+ * Copyright (c) 2003 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -28,9 +35,8 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
-
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: procfs_fd.c,v 1.14 2008/04/28 20:24:08 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: procfs_fd.c,v 1.10 2006/11/16 01:33:38 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -40,18 +46,25 @@ __KERNEL_RCSID(0, "$NetBSD: procfs_fd.c,v 1.14 2008/04/28 20:24:08 martin Exp $"
 #include <sys/vnode.h>
 #include <sys/file.h>
 #include <sys/filedesc.h>
-
 #include <miscfs/procfs/procfs.h>
 
 int
-procfs_dofd(lwp_t *curl, proc_t *p, struct pfsnode *pfs, struct uio *uio)
+procfs_dofd(
+    struct lwp *curl,
+    struct proc *p,
+    struct pfsnode *pfs,
+    struct uio *uio
+)
 {
 	int error;
-	file_t *fp;
+	struct file *fp;
+	struct proc *pown;
 	off_t offs;
 
-	if ((fp = fd_getfile2(p, pfs->pfs_fd)) == NULL)
-		return EBADF;
+	if ((error = procfs_getfp(pfs, &pown, &fp)) != 0)
+		return error;
+
+	FILE_USE(fp);
 
 	offs = fp->f_offset;
 
@@ -60,13 +73,13 @@ procfs_dofd(lwp_t *curl, proc_t *p, struct pfsnode *pfs, struct uio *uio)
 		error = (*fp->f_ops->fo_read)(fp, &offs, uio, curl->l_cred, 0);
 		break;
 	case UIO_WRITE:
-		error = (*fp->f_ops->fo_write)(fp, &offs, uio, curl->l_cred, 0);
+		error = (*fp->f_ops->fo_write)(fp, &offs, uio, curl->l_cred,0);
 		break;
 	default:
 		panic("bad uio op");
 	}
 
-	closef(fp);
+	FILE_UNUSE(fp, proc_representative_lwp(pown));
 
 	return (error);
 }

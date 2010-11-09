@@ -1,4 +1,4 @@
-/*	$NetBSD: com_isa.c,v 1.34 2008/04/28 20:23:52 martin Exp $	*/
+/*	$NetBSD: com_isa.c,v 1.29 2007/10/19 12:00:15 ad Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -61,7 +68,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: com_isa.c,v 1.34 2008/04/28 20:23:52 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: com_isa.c,v 1.29 2007/10/19 12:00:15 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -91,27 +98,22 @@ struct com_isa_softc {
 	struct	com_softc sc_com;	/* real "com" softc */
 
 	/* ISA-specific goo. */
-	isa_chipset_tag_t sc_ic;
 	void	*sc_ih;			/* interrupt handler */
-	int	sc_irq;
 };
 
-static bool com_isa_suspend(device_t PMF_FN_PROTO);
-static bool com_isa_resume(device_t PMF_FN_PROTO);
-
-int com_isa_probe(device_t, cfdata_t , void *);
-void com_isa_attach(device_t, device_t, void *);
-static int com_isa_detach(device_t, int);
+int com_isa_probe(struct device *, struct cfdata *, void *);
+void com_isa_attach(struct device *, struct device *, void *);
 #ifdef COM_HAYESP
 int com_isa_isHAYESP(bus_space_handle_t, struct com_softc *);
 #endif
 
 
-CFATTACH_DECL_NEW(com_isa, sizeof(struct com_isa_softc),
-    com_isa_probe, com_isa_attach, com_isa_detach, com_activate);
+CFATTACH_DECL(com_isa, sizeof(struct com_isa_softc),
+    com_isa_probe, com_isa_attach, NULL, NULL);
 
 int
-com_isa_probe(device_t parent, cfdata_t match, void *aux)
+com_isa_probe(struct device *parent, struct cfdata *match,
+    void *aux)
 {
 	bus_space_tag_t iot;
 	bus_space_handle_t ioh;
@@ -160,9 +162,10 @@ com_isa_probe(device_t parent, cfdata_t match, void *aux)
 }
 
 void
-com_isa_attach(device_t parent, device_t self, void *aux)
+com_isa_attach(struct device *parent, struct device *self,
+    void *aux)
 {
-	struct com_isa_softc *isc = device_private(self);
+	struct com_isa_softc *isc = (void *)self;
 	struct com_softc *sc = &isc->sc_com;
 	int iobase, irq;
 	bus_space_tag_t iot;
@@ -185,8 +188,6 @@ com_isa_attach(device_t parent, device_t self, void *aux)
 		return;
 	}
 
-	sc->sc_dev = self;
-
 	COM_INIT_REGS(sc->sc_regs, iot, ioh, iobase);
 
 	sc->sc_frequency = COM_FREQ;
@@ -207,67 +208,15 @@ com_isa_attach(device_t parent, device_t self, void *aux)
 
 	com_attach_subr(sc);
 
-	if (!pmf_device_register1(self, com_isa_suspend, com_isa_resume,
-	    com_cleanup))
-		aprint_error_dev(self, "couldn't establish power handler\n");
-
-	isc->sc_ic = ia->ia_ic;
-	isc->sc_irq = irq;
 	isc->sc_ih = isa_intr_establish(ia->ia_ic, irq, IST_EDGE, IPL_SERIAL,
 	    comintr, sc);
-}
 
-static bool
-com_isa_suspend(device_t self PMF_FN_ARGS)
-{
-	struct com_isa_softc *isc = device_private(self);
-
-	if (!com_suspend(self PMF_FN_CALL))
-		return false;
-
-	isa_intr_disestablish(isc->sc_ic, isc->sc_ih);
-	isc->sc_ih = NULL;
-
-	return true;
-}
-
-static bool
-com_isa_resume(device_t self PMF_FN_ARGS)
-{
-	struct com_isa_softc *isc = device_private(self);
-	struct com_softc *sc = &isc->sc_com;
-
-	isc->sc_ih = isa_intr_establish(isc->sc_ic, isc->sc_irq, IST_EDGE,
-	    IPL_SERIAL, comintr, sc);
-
-	return com_resume(self PMF_FN_CALL);
-}
-
-static int
-com_isa_detach(device_t self, int flags)
-{
-	struct com_isa_softc *isc = device_private(self);
-	struct com_softc *sc = &isc->sc_com;
-	const struct com_regs *cr = &sc->sc_regs;
-	int rc;
-
-	if (isc->sc_ih != NULL)
-		isa_intr_disestablish(isc->sc_ic, isc->sc_ih);
-
-	pmf_device_deregister(self);
-
-	if ((rc = com_detach(self, flags)) != 0)
-		return rc;
-
-	com_cleanup(self, 0);
-
-#ifdef COM_HAYESP
-	if (sc->sc_type == COM_TYPE_HAYESP)
-		bus_space_unmap(cr->cr_iot, sc->sc_hayespioh, HAYESP_NPORTS);
-#endif
-	bus_space_unmap(cr->cr_iot, cr->cr_ioh, COM_NPORTS);
-
-	return 0;
+	/*
+	 * Shutdown hook for buggy BIOSs that don't recognize the UART
+	 * without a disabled FIFO.
+	 */
+	if (shutdownhook_establish(com_cleanup, sc) == NULL)
+		panic("com_isa_attach: could not establish shutdown hook");
 }
 
 #ifdef COM_HAYESP

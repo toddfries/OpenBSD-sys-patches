@@ -1,4 +1,4 @@
-/*	$NetBSD: cpu.c,v 1.3 2007/10/17 19:54:14 garbled Exp $	*/
+/*	$NetBSD: cpu.c,v 1.1 2006/03/21 08:15:19 gdamore Exp $	*/
 
 /*
  * Copyright 2002 Wasabi Systems, Inc.
@@ -36,12 +36,11 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: cpu.c,v 1.3 2007/10/17 19:54:14 garbled Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cpu.c,v 1.1 2006/03/21 08:15:19 gdamore Exp $");
 
 #include <sys/param.h>
 #include <sys/device.h>
 #include <sys/systm.h>
-#include <sys/cpu.h>
 
 static int	cpu_match(struct device *, struct cfdata *, void *);
 static void	cpu_attach(struct device *, struct device *, void *);

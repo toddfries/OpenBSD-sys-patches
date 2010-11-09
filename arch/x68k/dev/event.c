@@ -1,4 +1,4 @@
-/*	$NetBSD: event.c,v 1.13 2008/03/01 14:16:50 rmind Exp $ */
+/*	$NetBSD: event.c,v 1.11 2005/12/11 12:19:37 christos Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -45,7 +45,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: event.c,v 1.13 2008/03/01 14:16:50 rmind Exp $");
+__KERNEL_RCSID(0, "$NetBSD: event.c,v 1.11 2005/12/11 12:19:37 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/fcntl.h>
@@ -68,8 +68,8 @@ ev_init(struct evvar *ev)
 
 	ev->ev_get = ev->ev_put = 0;
 	ev->ev_q = malloc((u_long)EV_QSIZE * sizeof(struct firm_event),
-	    M_DEVBUF, M_WAITOK|M_ZERO);
-	selinit(&ev->ev_sel);
+	    M_DEVBUF, M_WAITOK);
+	memset((caddr_t)ev->ev_q, 0, EV_QSIZE * sizeof(struct firm_event));
 }
 
 /*
@@ -79,7 +79,6 @@ void
 ev_fini(struct evvar *ev)
 {
 
-	seldestroy(&ev->ev_sel);
 	free(ev->ev_q, M_DEVBUF);
 }
 
@@ -104,7 +103,7 @@ ev_read(struct evvar *ev, struct uio *uio, int flags)
 			return (EWOULDBLOCK);
 		}
 		ev->ev_wanted = 1;
-		error = tsleep((void *)ev, PEVENT | PCATCH, "firm_event", 0);
+		error = tsleep((caddr_t)ev, PEVENT | PCATCH, "firm_event", 0);
 		if (error) {
 			splx(s);
 			return (error);
@@ -122,7 +121,7 @@ ev_read(struct evvar *ev, struct uio *uio, int flags)
 	n = howmany(uio->uio_resid, sizeof(struct firm_event));
 	if (cnt > n)
 		cnt = n;
-	error = uiomove((void *)&ev->ev_q[ev->ev_get],
+	error = uiomove((caddr_t)&ev->ev_q[ev->ev_get],
 	    cnt * sizeof(struct firm_event), uio);
 	n -= cnt;
 	/*
@@ -135,7 +134,7 @@ ev_read(struct evvar *ev, struct uio *uio, int flags)
 		return (error);
 	if (cnt > n)
 		cnt = n;
-	error = uiomove((void *)&ev->ev_q[0],
+	error = uiomove((caddr_t)&ev->ev_q[0],
 	    cnt * sizeof(struct firm_event), uio);
 	ev->ev_get = cnt;
 	return (error);

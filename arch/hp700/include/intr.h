@@ -1,4 +1,4 @@
-/*	$NetBSD: intr.h,v 1.13 2008/07/07 12:29:30 skrll Exp $	*/
+/*	$NetBSD: intr.h,v 1.7 2006/12/21 15:55:22 yamt Exp $	*/
 
 /*-
  * Copyright (c) 1998, 2001, 2002 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -35,15 +42,23 @@
 #include <machine/psl.h>
 
 /* Interrupt priority `levels'. */
-#define	IPL_NONE	7	/* nothing */
-#define	IPL_SOFTCLOCK	6	/* timeouts */
-#define	IPL_SOFTBIO	5	/* block I/o */
-#define	IPL_SOFTNET	4	/* protocol stacks */
-#define	IPL_SOFTSERIAL	3	/* serial */
-#define	IPL_VM		2	/* memory allocation, low I/O */
-#define	IPL_SCHED	1	/* clock, medium I/O */
-#define	IPL_HIGH	0	/* everything */
-#define	NIPL		8
+#define	IPL_NONE	9	/* nothing */
+#define	IPL_SOFTCLOCK	8	/* timeouts */
+#define	IPL_SOFTNET	7	/* protocol stacks */
+#define	IPL_BIO		6	/* block I/O */
+#define	IPL_NET		5	/* network */
+#define	IPL_SOFTSERIAL	4	/* serial */
+#define	IPL_TTY		3	/* terminal */
+#define	IPL_LPT		IPL_TTY
+#define	IPL_VM		3	/* memory allocation */
+#define	IPL_AUDIO	2	/* audio */
+#define	IPL_CLOCK	1	/* clock */
+#define	IPL_STATCLOCK	IPL_CLOCK
+#define	IPL_HIGH	1	/* everything */
+#define	IPL_SCHED	IPL_HIGH
+#define	IPL_LOCK	IPL_HIGH
+#define	IPL_SERIAL	0	/* serial */
+#define	NIPL		10
 
 /* Interrupt sharing types. */
 #define	IST_NONE	0	/* none */
@@ -68,19 +83,28 @@ extern int softnetmask;
 /* 
  * Add a mask to cpl, and return the old value of cpl.
  */
+static __inline int splraise __P((int)); 
 static __inline int  
-splraise(register int ncpl)
+splraise(ncpl)
+	register int ncpl;
 {
 	register int ocpl = cpl;
 
 	cpl = ocpl | ncpl;      
-
 	return (ocpl);  
 }
 
 /* spllower() is in locore.S */
-void spllower(int);
+void spllower __P((int));
  
+/*
+ * Software interrupt masks
+ *
+ * NOTE: splsoftclock() is used by hardclock() to lower the priority from
+ * clock to softclock before it calls softclock().
+ */
+#define	spllowersoftclock() spllower(imask[IPL_SOFTCLOCK])
+
 /*
  * Miscellaneous
  */
@@ -111,8 +135,69 @@ splraiseipl(ipl_cookie_t icookie)
 #define	setsoftast()	(astpending = 1)
 #define	setsoftnet()	hp700_intr_schedule(softnetmask)
 
-void	hp700_intr_schedule(int);
-
 #endif /* !_LOCORE */
+
+/*
+ * Generic software interrupt support.
+ */
+
+#define	HP700_SOFTINTR_SOFTCLOCK	0
+#define	HP700_SOFTINTR_SOFTNET		1
+#define	HP700_SOFTINTR_SOFTSERIAL	2
+#define	HP700_NSOFTINTR			3
+
+#ifndef _LOCORE
+#include <sys/queue.h>
+#include <sys/device.h>
+
+struct hp700_soft_intrhand {
+	TAILQ_ENTRY(hp700_soft_intrhand)
+		sih_q;
+	struct hp700_soft_intr *sih_intrhead;
+	void	(*sih_fn)(void *);
+	void	*sih_arg;
+	int	sih_pending;
+};
+
+struct hp700_soft_intr {
+	TAILQ_HEAD(, hp700_soft_intrhand)
+		softintr_q;
+	int softintr_ssir;
+};
+
+#define	hp700_softintr_lock(si, s)					\
+do {									\
+	(s) = splhigh();						\
+} while (/*CONSTCOND*/ 0)
+
+#define	hp700_softintr_unlock(si, s)					\
+do {									\
+	splx((s));							\
+} while (/*CONSTCOND*/ 0)
+
+void	*softintr_establish __P((int, void (*)(void *), void *));
+void	softintr_disestablish __P((void *));
+void	softintr_bootstrap __P((void));
+void	softintr_init __P((void));
+int	softintr_dispatch __P((void *));
+
+#define	softintr_schedule(arg)						\
+do {									\
+	struct hp700_soft_intrhand *__sih = (arg);			\
+	struct hp700_soft_intr *__si = __sih->sih_intrhead;		\
+	int __s;							\
+									\
+	hp700_softintr_lock(__si, __s);					\
+	if (__sih->sih_pending == 0) {					\
+		TAILQ_INSERT_TAIL(&__si->softintr_q, __sih, sih_q);	\
+		__sih->sih_pending = 1;					\
+		hp700_intr_schedule(__si->softintr_ssir);		\
+	}								\
+	hp700_softintr_unlock(__si, __s);				\
+} while (/*CONSTCOND*/ 0)
+
+void	hp700_intr_schedule __P((int));
+
+#endif /* _LOCORE */
 
 #endif /* !_HP700_INTR_H_ */

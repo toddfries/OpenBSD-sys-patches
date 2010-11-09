@@ -1,4 +1,4 @@
-/*	$NetBSD: in_var.h,v 1.62 2008/04/28 20:24:09 martin Exp $	*/
+/*	$NetBSD: in_var.h,v 1.57 2006/07/23 22:06:13 ad Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -91,7 +98,6 @@ struct in_ifaddr {
 	LIST_HEAD(, in_multi) ia_multiaddrs; /* list of multicast addresses */
 	struct	in_multi *ia_allhosts;	/* multicast address record for
 					   the allhosts multicast group */
-	uint16_t ia_idsalt;		/* ip_id salt for this ia */
 };
 
 struct	in_aliasreq {
@@ -287,7 +293,7 @@ struct in_multistep {
 struct ifaddr;
 
 int	in_ifinit(struct ifnet *,
-	    struct in_ifaddr *, const struct sockaddr_in *, int);
+	    struct in_ifaddr *, struct sockaddr_in *, int);
 void	in_savemkludge(struct in_ifaddr *);
 void	in_restoremkludge(struct in_ifaddr *, struct ifnet *);
 void	in_purgemkludge(struct ifnet *);
@@ -296,52 +302,12 @@ void	in_delmulti(struct in_multi *);
 void	in_ifscrub(struct ifnet *, struct in_ifaddr *);
 void	in_setmaxmtu(void);
 const char *in_fmtaddr(struct in_addr);
-int	in_control(struct socket *, u_long, void *, struct ifnet *,
+int	in_control(struct socket *, u_long, caddr_t, struct ifnet *,
 	    struct lwp *);
-void	in_purgeaddr(struct ifaddr *);
+void	in_purgeaddr(struct ifaddr *, struct ifnet *);
 void	in_purgeif(struct ifnet *);
 void	ip_input(struct mbuf *);
 int	ipflow_fastforward(struct mbuf *);
-void	ip_initid(void);
-
-extern uint16_t	ip_id;
-static __inline uint16_t ip_newid(const struct in_ifaddr *);
-
-uint16_t ip_randomid(uint16_t);
-extern int ip_do_randomid;
-
-/*
- * ip_newid_range: "allocate" num contiguous ip_ids.
- *
- * => return the first id.
- */
-
-static __inline uint16_t
-ip_newid_range(const struct in_ifaddr *ia, unsigned int num)
-{
-	uint16_t id;
-
-	if (ip_do_randomid) {
-		/* XXX ignore num */
-		return ip_randomid(ia ? ia->ia_idsalt : 0);
-	}
-
-	/*
-	 * never allow an ip_id of 0. (detect wrap)
-	 */
-	if ((uint16_t)(ip_id + num) < ip_id)
-		ip_id = 1;
-	id = htons(ip_id);
-	ip_id += num;
-
-	return id;
-}
-
-static __inline uint16_t
-ip_newid(const struct in_ifaddr *ia)
-{
-	return ip_newid_range(ia, 1);
-}
 
 #ifdef SYSCTLFN_PROTO
 int	sysctl_inpcblist(SYSCTLFN_PROTO);

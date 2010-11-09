@@ -1,4 +1,4 @@
-/*	$NetBSD: copystr.S,v 1.10 2009/01/18 01:19:32 bjh21 Exp $	*/
+/*	$NetBSD: copystr.S,v 1.8 2002/10/13 14:54:48 bjh21 Exp $	*/
 
 /*
  * Copyright (c) 1995 Mark Brinicombe.
@@ -39,18 +39,24 @@
  */
 
 #include "opt_multiprocessor.h"
-#include "opt_cpuoptions.h"
 	
 #include "assym.h"
 #include <machine/asm.h>
-#include <machine/cpu.h>
 
-RCSID("$NetBSD: copystr.S,v 1.10 2009/01/18 01:19:32 bjh21 Exp $")
+RCSID("$NetBSD: copystr.S,v 1.8 2002/10/13 14:54:48 bjh21 Exp $")
 
 #include <sys/errno.h>
 
 	.text
 	.align	0
+#ifdef MULTIPROCESSOR
+.Lcpu_info:
+	.word	_C_LABEL(cpu_info)
+#else
+.Lcurpcb:
+	.word	_C_LABEL(curpcb)
+#endif
+
 /*
  * r0 - from
  * r1 - to
@@ -81,7 +87,7 @@ ENTRY(copystr)
 	strne	r5, [r3]
 
 	ldmfd	sp!, {r4-r5}			/* stack is 8 byte aligned */
-	RET
+	mov	pc, lr
 
 #ifdef __PROG32
 #define SAVE_REGS	stmfd	sp!, {r4-r6}
@@ -108,7 +114,18 @@ ENTRY(copyinstr)
 	moveq	r0, #ENAMETOOLONG
 	beq	2f
 
-	GET_CURPCB(r4)
+#ifdef MULTIPROCESSOR
+	/* XXX Probably not appropriate for non-Hydra SMPs */
+	stmfd	sp!, {r0-r3, r14}
+	bl	_C_LABEL(cpu_number)
+	ldr	r4, .Lcpu_info
+	ldr	r4, [r4, r0, lsl #2]
+	ldr	r4, [r4, #CI_CURPCB]
+	ldmfd	sp!, {r0-r3, r14}
+#else
+	ldr	r4, .Lcurpcb
+	ldr	r4, [r4]
+#endif
 
 #ifdef DIAGNOSTIC
 	teq	r4, #0x00000000
@@ -136,7 +153,7 @@ ENTRY(copyinstr)
 	strne	r6, [r3]
 
 	RESTORE_REGS
-	RET
+	mov	pc, lr
 
 /*
  * r0 - kernel space address
@@ -154,7 +171,18 @@ ENTRY(copyoutstr)
 	moveq	r0, #ENAMETOOLONG
 	beq	2f
 
-	GET_CURPCB(r4)
+#ifdef MULTIPROCESSOR
+	/* XXX Probably not appropriate for non-Hydra SMPs */
+	stmfd	sp!, {r0-r3, r14}
+	bl	_C_LABEL(cpu_number)
+	ldr	r4, .Lcpu_info
+	ldr	r4, [r4, r0, lsl #2]
+	ldr	r4, [r4, #CI_CURPCB]
+	ldmfd	sp!, {r0-r3, r14}
+#else
+	ldr	r4, .Lcurpcb
+	ldr	r4, [r4]
+#endif
 
 #ifdef DIAGNOSTIC
 	teq	r4, #0x00000000
@@ -182,14 +210,14 @@ ENTRY(copyoutstr)
 	strne	r6, [r3]
 
 	RESTORE_REGS
-	RET
+	mov	pc, lr
 
 /* A fault occurred during the copy */
 .Lcopystrfault:
 	mov	r1, #0x00000000
 	str	r1, [r4, #PCB_ONFAULT]
 	RESTORE_REGS
-	RET
+	mov	pc, lr
 
 #ifdef DIAGNOSTIC
 .Lcopystrpcbfault:

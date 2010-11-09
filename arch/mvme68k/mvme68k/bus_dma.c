@@ -1,4 +1,4 @@
-/* $NetBSD: bus_dma.c,v 1.36 2008/06/04 12:41:41 ad Exp $	*/
+/* $NetBSD: bus_dma.c,v 1.31 2006/03/01 12:38:11 yamt Exp $	*/
 
 /*
  * This file was taken from from next68k/dev/bus_dma.c, which was originally
@@ -23,6 +23,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -39,7 +46,7 @@
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
 
-__KERNEL_RCSID(0, "$NetBSD: bus_dma.c,v 1.36 2008/06/04 12:41:41 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: bus_dma.c,v 1.31 2006/03/01 12:38:11 yamt Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -60,17 +67,23 @@ __KERNEL_RCSID(0, "$NetBSD: bus_dma.c,v 1.36 2008/06/04 12:41:41 ad Exp $");
 
 extern	phys_ram_seg_t mem_clusters[];
 
-int	_bus_dmamap_load_buffer_direct_common(bus_dma_tag_t,
+int	_bus_dmamap_load_buffer_direct_common __P((bus_dma_tag_t,
 	    bus_dmamap_t, void *, bus_size_t, struct vmspace *, int,
-	    paddr_t *, int *, int);
+	    paddr_t *, int *, int));
 
 /*
  * Common function for DMA map creation.  May be called by bus-specific
  * DMA map creation functions.
  */
 int
-_bus_dmamap_create(bus_dma_tag_t t, bus_size_t size, int nsegments,
-    bus_size_t maxsegsz, bus_size_t boundary, int flags, bus_dmamap_t *dmamp)
+_bus_dmamap_create(t, size, nsegments, maxsegsz, boundary, flags, dmamp)
+	bus_dma_tag_t t;
+	bus_size_t size;
+	int nsegments;
+	bus_size_t maxsegsz;
+	bus_size_t boundary;
+	int flags;
+	bus_dmamap_t *dmamp;
 {
 	struct mvme68k_bus_dmamap *map;
 	void *mapstore;
@@ -92,7 +105,7 @@ _bus_dmamap_create(bus_dma_tag_t t, bus_size_t size, int nsegments,
 	    (sizeof(bus_dma_segment_t) * (nsegments - 1));
 	if ((mapstore = malloc(mapsize, M_DMAMAP,
 	    (flags & BUS_DMA_NOWAIT) ? M_NOWAIT : M_WAITOK)) == NULL)
-		return ENOMEM;
+		return (ENOMEM);
 
 	memset(mapstore, 0, mapsize);
 	map = (struct mvme68k_bus_dmamap *)mapstore;
@@ -106,7 +119,7 @@ _bus_dmamap_create(bus_dma_tag_t t, bus_size_t size, int nsegments,
 	map->dm_nsegs = 0;
 
 	*dmamp = map;
-	return 0;
+	return (0);
 }
 
 /*
@@ -114,7 +127,9 @@ _bus_dmamap_create(bus_dma_tag_t t, bus_size_t size, int nsegments,
  * DMA map destruction functions.
  */
 void
-_bus_dmamap_destroy(bus_dma_tag_t t, bus_dmamap_t map)
+_bus_dmamap_destroy(t, map)
+	bus_dma_tag_t t;
+	bus_dmamap_t map;
 {
 
 	free(map, M_DMAMAP);
@@ -127,9 +142,17 @@ _bus_dmamap_destroy(bus_dma_tag_t t, bus_dmamap_t map)
  * first indicates if this is the first invocation of this function.
  */
 int
-_bus_dmamap_load_buffer_direct_common(bus_dma_tag_t t, bus_dmamap_t map,
-    void *buf, bus_size_t buflen, struct vmspace *vm, int flags,
-    paddr_t *lastaddrp, int *segp, int first)
+_bus_dmamap_load_buffer_direct_common(t, map, buf, buflen, vm, flags,
+    lastaddrp, segp, first)
+	bus_dma_tag_t t;
+	bus_dmamap_t map;
+	void *buf;
+	bus_size_t buflen;
+	struct vmspace *vm;
+	int flags;
+	paddr_t *lastaddrp;
+	int *segp;
+	int first;
 {
 	bus_size_t sgsize;
 	bus_addr_t curaddr, lastaddr, baddr, bmask;
@@ -214,10 +237,10 @@ _bus_dmamap_load_buffer_direct_common(bus_dma_tag_t t, bus_dmamap_t map,
 		 * If there is a chained window, we will automatically
 		 * fall back to it.
 		 */
-		return EFBIG;		/* XXX better return value here? */
+		return (EFBIG);		/* XXX better return value here? */
 	}
 
-	return 0;
+	return (0);
 }
 
 /*
@@ -227,8 +250,13 @@ _bus_dmamap_load_buffer_direct_common(bus_dma_tag_t t, bus_dmamap_t map,
  * chipset.
  */
 int
-_bus_dmamap_load_direct(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
-    bus_size_t buflen, struct proc *p, int flags)
+_bus_dmamap_load_direct(t, map, buf, buflen, p, flags)
+	bus_dma_tag_t t;
+	bus_dmamap_t map;
+	void *buf;
+	bus_size_t buflen;
+	struct proc *p;
+	int flags;
 {
 	paddr_t lastaddr;
 	int seg, error;
@@ -242,7 +270,7 @@ _bus_dmamap_load_direct(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
 	KASSERT(map->dm_maxsegsz <= map->_dm_maxmaxsegsz);
 
 	if (buflen > map->_dm_size)
-		return EINVAL;
+		return (EINVAL);
 
 	if (p != NULL) {
 		vm = p->p_vmspace;
@@ -257,15 +285,18 @@ _bus_dmamap_load_direct(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
 		map->dm_mapsize = buflen;
 		map->dm_nsegs = seg + 1;
 	}
-	return error;
+	return (error);
 }
 
 /*
  * Like _bus_dmamap_load_direct_common(), but for mbufs.
  */
 int
-_bus_dmamap_load_mbuf_direct(bus_dma_tag_t t, bus_dmamap_t map,
-    struct mbuf *m0, int flags)
+_bus_dmamap_load_mbuf_direct(t, map, m0, flags)
+	bus_dma_tag_t t;
+	bus_dmamap_t map;
+	struct mbuf *m0;
+	int flags;
 {
 	paddr_t lastaddr;
 	int seg, error, first;
@@ -284,7 +315,7 @@ _bus_dmamap_load_mbuf_direct(bus_dma_tag_t t, bus_dmamap_t map,
 #endif
 
 	if (m0->m_pkthdr.len > map->_dm_size)
-		return EINVAL;
+		return (EINVAL);
 
 	first = 1;
 	seg = 0;
@@ -301,21 +332,24 @@ _bus_dmamap_load_mbuf_direct(bus_dma_tag_t t, bus_dmamap_t map,
 		map->dm_mapsize = m0->m_pkthdr.len;
 		map->dm_nsegs = seg + 1;
 	}
-	return error;
+	return (error);
 }
 
 /*
  * Like _bus_dmamap_load_direct_common(), but for uios.
  */
 int
-_bus_dmamap_load_uio_direct(bus_dma_tag_t t, bus_dmamap_t map, struct uio *uio,
-    int flags)
+_bus_dmamap_load_uio_direct(t, map, uio, flags)
+	bus_dma_tag_t t;
+	bus_dmamap_t map;
+	struct uio *uio;
+	int flags;
 {
 	paddr_t lastaddr;
 	int seg, i, error, first;
 	bus_size_t minlen, resid;
 	struct iovec *iov;
-	void *addr;
+	caddr_t addr;
 
 	/*
 	 * Make sure that on error condition we return "no valid mappings."
@@ -336,7 +370,7 @@ _bus_dmamap_load_uio_direct(bus_dma_tag_t t, bus_dmamap_t map, struct uio *uio,
 		 * until we have exhausted the residual count.
 		 */
 		minlen = resid < iov[i].iov_len ? resid : iov[i].iov_len;
-		addr = (void *)iov[i].iov_base;
+		addr = (caddr_t)iov[i].iov_base;
 
 		error = _bus_dmamap_load_buffer_direct_common(t, map,
 		    addr, minlen, uio->uio_vmspace, flags, &lastaddr, &seg,
@@ -349,18 +383,22 @@ _bus_dmamap_load_uio_direct(bus_dma_tag_t t, bus_dmamap_t map, struct uio *uio,
 		map->dm_mapsize = uio->uio_resid;
 		map->dm_nsegs = seg + 1;
 	}
-	return error;
+	return (error);
 }
 
 /*
  * Like _bus_dmamap_load_direct_common(), but for raw memory.
  */
 int
-_bus_dmamap_load_raw_direct(bus_dma_tag_t t, bus_dmamap_t map,
-    bus_dma_segment_t *segs, int nsegs, bus_size_t size, int flags)
+_bus_dmamap_load_raw_direct(t, map, segs, nsegs, size, flags)
+	bus_dma_tag_t t;
+	bus_dmamap_t map;
+	bus_dma_segment_t *segs;
+	int nsegs;
+	bus_size_t size;
+	int flags;
 {
-	/*
-	 * @@@ This routine doesn't enforce map boundary requirement
+	/* @@@ This routine doesn't enforce map boundary requirement
 	 * @@@ perhaps it should return an error instead of panicking
 	 */
 
@@ -375,11 +413,10 @@ _bus_dmamap_load_raw_direct(bus_dma_tag_t t, bus_dmamap_t map,
 
 	{
 		int i;
-		for (i = 0; i < nsegs; i++) {
+		for (i=0;i<nsegs;i++) {
 #ifdef DIAGNOSTIC
 			if (map->dm_maxsegsz < map->dm_segs[i].ds_len) {
-				panic("%s: segment too large for map",
-				    __func__);
+				panic("_bus_dmamap_load_raw_direct: segment too large for map");
 			}
 #endif
 			map->dm_segs[i] = segs[i];
@@ -389,7 +426,7 @@ _bus_dmamap_load_raw_direct(bus_dma_tag_t t, bus_dmamap_t map,
 	map->dm_nsegs   = nsegs;
 	map->dm_mapsize = size;
 
-	return 0;
+	return (0);
 }
 
 /*
@@ -397,7 +434,9 @@ _bus_dmamap_load_raw_direct(bus_dma_tag_t t, bus_dmamap_t map,
  * chipset-specific DMA map unload functions.
  */
 void
-_bus_dmamap_unload(bus_dma_tag_t t, bus_dmamap_t map)
+_bus_dmamap_unload(t, map)
+	bus_dma_tag_t t;
+	bus_dmamap_t map;
 {
 
 	/*
@@ -415,10 +454,13 @@ _bus_dmamap_unload(bus_dma_tag_t t, bus_dmamap_t map)
  * by chipset-specific DMA map synchronization functions.
  */
 void
-_bus_dmamap_sync_030(bus_dma_tag_t t, bus_dmamap_t map, bus_addr_t offset,
-    bus_size_t len, int ops)
+_bus_dmamap_sync_030(t, map, offset, len, ops)
+	bus_dma_tag_t t;
+	bus_dmamap_t map;
+	bus_addr_t offset;
+	bus_size_t len;
+	int ops;
 {
-
 	/* Nothing yet */
 }
 
@@ -427,8 +469,12 @@ _bus_dmamap_sync_030(bus_dma_tag_t t, bus_dmamap_t map, bus_addr_t offset,
  * by chipset-specific DMA map synchronization functions.
  */
 void
-_bus_dmamap_sync_0460(bus_dma_tag_t t, bus_dmamap_t map, bus_addr_t offset,
-    bus_size_t len, int ops)
+_bus_dmamap_sync_0460(t, map, offset, len, ops)
+	bus_dma_tag_t t;
+	bus_dmamap_t map;
+	bus_addr_t offset;
+	bus_size_t len;
+	int ops;
 {
 	bus_addr_t p, e, ps, pe;
 	bus_size_t seglen;
@@ -534,9 +580,15 @@ _bus_dmamap_sync_0460(bus_dma_tag_t t, bus_dmamap_t map, bus_addr_t offset,
  * by bus-specific DMA memory allocation functions.
  */
 int
-_bus_dmamem_alloc_common(bus_dma_tag_t t, bus_addr_t low, bus_addr_t high,
-    bus_size_t size, bus_size_t alignment, bus_size_t boundary,
-    bus_dma_segment_t *segs, int nsegs, int *rsegs, int flags) 
+_bus_dmamem_alloc_common(t, low, high, size, alignment, boundary,
+    segs, nsegs, rsegs, flags)
+	bus_dma_tag_t t; 
+	bus_addr_t low, high;
+	bus_size_t size, alignment, boundary;
+	bus_dma_segment_t *segs;
+	int nsegs;
+	int *rsegs;
+	int flags; 
 {
 	paddr_t curaddr, lastaddr;
 	struct vm_page *m;    
@@ -560,7 +612,7 @@ _bus_dmamem_alloc_common(bus_dma_tag_t t, bus_addr_t low, bus_addr_t high,
 	error = uvm_pglistalloc(size, low, high, alignment, boundary,
 	    &mlist, nsegs, (flags & BUS_DMA_NOWAIT) == 0);
 	if (error)
-		return error;
+		return (error);
 
 	/*
 	 * Compute the location, size, and number of segments actually
@@ -572,18 +624,18 @@ _bus_dmamem_alloc_common(bus_dma_tag_t t, bus_addr_t low, bus_addr_t high,
 	segs[curseg].ds_addr = segs[curseg]._ds_cpuaddr = lastaddr;
 	segs[curseg].ds_len = PAGE_SIZE;
 	segs[curseg]._ds_flags = 0;
-	m = m->pageq.queue.tqe_next;
+	m = m->pageq.tqe_next;
 
-	for (; m != NULL; m = m->pageq.queue.tqe_next) {
+	for (; m != NULL; m = m->pageq.tqe_next) {
 		if (curseg > nsegs) {
 #ifdef DIAGNOSTIC
-			printf("%s: too many segments\n", __func__);
+			printf("_bus_dmamem_alloc_common: too many segments\n");
 #ifdef DEBUG
-			panic("%s", __func__);
+			panic("_bus_dmamem_alloc_common");
 #endif
 #endif
 			uvm_pglistfree(&mlist);
-			return -1;
+			return (-1);
 		}
 
 		curaddr = VM_PAGE_TO_PHYS(m);
@@ -591,7 +643,7 @@ _bus_dmamem_alloc_common(bus_dma_tag_t t, bus_addr_t low, bus_addr_t high,
 		if (curaddr < low || curaddr > high) {
 			printf("uvm_pglistalloc returned non-sensical"
 			    " address 0x%lx\n", curaddr);
-			panic("%s", __func__);
+			panic("_bus_dmamem_alloc_common");
 		}
 #endif
 		if (curaddr == (lastaddr + PAGE_SIZE))
@@ -608,16 +660,20 @@ _bus_dmamem_alloc_common(bus_dma_tag_t t, bus_addr_t low, bus_addr_t high,
 
 	*rsegs = curseg + 1;
 
-	return 0;
+	return (0);
 }
 /*
  * Common function for DMA-safe memory allocation.  May be called
  * by bus-specific DMA memory allocation functions.
  */
 int
-_bus_dmamem_alloc(bus_dma_tag_t t, bus_size_t size, bus_size_t alignment,
-    bus_size_t boundary, bus_dma_segment_t *segs, int nsegs, int *rsegs,
-    int flags) 
+_bus_dmamem_alloc(t, size, alignment, boundary, segs, nsegs, rsegs, flags)
+	bus_dma_tag_t t; 
+	bus_size_t size, alignment, boundary;
+	bus_dma_segment_t *segs;
+	int nsegs;
+	int *rsegs;
+	int flags; 
 {
 	extern paddr_t avail_start, avail_end;
 	bus_addr_t high;
@@ -627,14 +683,14 @@ _bus_dmamem_alloc(bus_dma_tag_t t, bus_size_t size, bus_size_t alignment,
 	 */
 	high = avail_end;
 
-	if ((flags & BUS_DMA_ONBOARD_RAM) != 0) {
+	if ( (flags & BUS_DMA_ONBOARD_RAM) != 0 ) {
 		/*
 		 * Constrain the memory to 'onboard' RAM only
 		 */
 		high = mem_clusters[0].size;
 	}
 
-	if ((flags & BUS_DMA_24BIT) != 0 && (high & 0xff000000u) != 0) {
+	if ( (flags & BUS_DMA_24BIT) != 0 && (high & 0xff000000u) != 0 ) {
 		/*
 		 * We need to constrain the memory to a 24-bit address
 		 */
@@ -650,7 +706,10 @@ _bus_dmamem_alloc(bus_dma_tag_t t, bus_size_t size, bus_size_t alignment,
  * bus-specific DMA memory free functions.
  */
 void
-_bus_dmamem_free(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs)
+_bus_dmamem_free(t, segs, nsegs)
+	bus_dma_tag_t t;
+	bus_dma_segment_t *segs;
+	int nsegs;
 {
 	struct vm_page *m;
 	bus_addr_t addr;
@@ -666,7 +725,7 @@ _bus_dmamem_free(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs)
 		    addr < (segs[curseg]._ds_cpuaddr + segs[curseg].ds_len);
 		    addr += PAGE_SIZE) {
 			m = PHYS_TO_VM_PAGE(addr);
-			TAILQ_INSERT_TAIL(&mlist, m, pageq.queue);
+			TAILQ_INSERT_TAIL(&mlist, m, pageq);
 		}
 	}
 
@@ -678,8 +737,13 @@ _bus_dmamem_free(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs)
  * bus-specific DMA memory map functions.
  */
 int
-_bus_dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
-    size_t size, void **kvap, int flags)
+_bus_dmamem_map(t, segs, nsegs, size, kvap, flags)
+	bus_dma_tag_t t;
+	bus_dma_segment_t *segs;
+	int nsegs;
+	size_t size;
+	caddr_t *kvap;  
+	int flags;
 {
 	vaddr_t va;
 	bus_addr_t addr;
@@ -692,16 +756,16 @@ _bus_dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
 	va = uvm_km_alloc(kernel_map, size, 0, UVM_KMF_VAONLY | kmflags);
 
 	if (va == 0)
-		return ENOMEM;
+		return (ENOMEM);
 
-	*kvap = (void *)va;
+	*kvap = (caddr_t)va;
 
 	for (curseg = 0; curseg < nsegs; curseg++) {
 		for (addr = segs[curseg]._ds_cpuaddr;
 		    addr < (segs[curseg]._ds_cpuaddr + segs[curseg].ds_len);
 		    addr += PAGE_SIZE, va += PAGE_SIZE, size -= PAGE_SIZE) {
 			if (size == 0)
-				panic("%s: size botch", __func__);
+				panic("_bus_dmamem_map: size botch");
 
 			pmap_enter(pmap_kernel(), va, addr,
 			    VM_PROT_READ | VM_PROT_WRITE,
@@ -717,10 +781,10 @@ _bus_dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
 	}
 	pmap_update(pmap_kernel());
 
-	if ((flags & BUS_DMA_COHERENT) != 0)
+	if ( (flags & BUS_DMA_COHERENT) != 0 )
 		TBIAS();
 
-	return 0;
+	return (0);
 }
 
 /*
@@ -728,14 +792,17 @@ _bus_dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
  * bus-specific DMA memory unmapping functions.
  */
 void
-_bus_dmamem_unmap(bus_dma_tag_t t, void *kva, size_t size)
+_bus_dmamem_unmap(t, kva, size)
+	bus_dma_tag_t t;
+	caddr_t kva;
+	size_t size;
 {
-	vaddr_t va;
+	caddr_t va;
 	size_t s;
 
 #ifdef DIAGNOSTIC
 	if ((u_long)kva & PGOFSET)
-		panic("%s", __func__);
+		panic("_bus_dmamem_unmap");
 #endif
 
 	size = round_page(size);
@@ -745,9 +812,8 @@ _bus_dmamem_unmap(bus_dma_tag_t t, void *kva, size_t size)
 	 * XXXSCW: There should be some way to indicate that the pages
 	 * were mapped DMA_MAP_COHERENT in the first place...
 	 */
-	for (s = 0, va = (vaddr_t)kva; s < size;
-	     s += PAGE_SIZE, va += PAGE_SIZE)
-		_pmap_set_page_cacheable(pmap_kernel(), va);
+	for (s = 0, va = kva; s < size; s += PAGE_SIZE, va += PAGE_SIZE)
+		_pmap_set_page_cacheable(pmap_kernel(), (vaddr_t)va);
 
 	pmap_remove(pmap_kernel(), (vaddr_t)kva, (vaddr_t)kva + size);
 	pmap_update(pmap_kernel());
@@ -759,20 +825,24 @@ _bus_dmamem_unmap(bus_dma_tag_t t, void *kva, size_t size)
  * bus-specific DMA mmap(2)'ing functions.
  */
 paddr_t
-_bus_dmamem_mmap(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
-    off_t off, int prot, int flags)
+_bus_dmamem_mmap(t, segs, nsegs, off, prot, flags)
+	bus_dma_tag_t t;
+	bus_dma_segment_t *segs;
+	int nsegs;
+	off_t off;
+	int prot, flags;
 {
 	int i;
 
 	for (i = 0; i < nsegs; i++) {
 #ifdef DIAGNOSTIC
 		if (off & PGOFSET)
-			panic("%s: offset unaligned", __func__);
+			panic("_bus_dmamem_mmap: offset unaligned");
 		if (segs[i]._ds_cpuaddr & PGOFSET)
-			panic("%s: segment unaligned", __func__);
+			panic("_bus_dmamem_mmap: segment unaligned");
 		if (segs[i].ds_len & PGOFSET)
-			panic("%s: segment size not multiple of page size",
-			    __func__);
+			panic("_bus_dmamem_mmap: segment size not multiple"
+			    " of page size");
 #endif
 		if (off >= segs[i].ds_len) {
 			off -= segs[i].ds_len;
@@ -783,9 +853,9 @@ _bus_dmamem_mmap(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
 		 * XXXSCW: What about BUS_DMA_COHERENT ??
 		 */
 
-		return m68k_btop((char *)segs[i]._ds_cpuaddr + off);
+		return (m68k_btop((caddr_t)segs[i]._ds_cpuaddr + off));
 	}
 
 	/* Page not found. */
-	return -1;
+	return (-1);
 }

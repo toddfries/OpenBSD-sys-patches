@@ -1,4 +1,4 @@
-/*	$NetBSD: zs_ap.c,v 1.25 2008/04/28 20:23:30 martin Exp $	*/
+/*	$NetBSD: zs_ap.c,v 1.19 2006/03/28 17:38:26 thorpej Exp $	*/
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -38,17 +45,16 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: zs_ap.c,v 1.25 2008/04/28 20:23:30 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: zs_ap.c,v 1.19 2006/03/28 17:38:26 thorpej Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/tty.h>
 #include <sys/conf.h>
-#include <sys/cpu.h>
-#include <sys/intr.h>
 
 #include <machine/adrsmap.h>
+#include <machine/cpu.h>
 #include <machine/z8530var.h>
 
 #include <dev/cons.h>
@@ -101,13 +107,13 @@ extern void (*zs_delay)(void);
 
 /* The layout of this is hardware-dependent (padding, order). */
 struct zschan {
-	volatile uint8_t pad1[3];
-	volatile uint8_t zc_csr;	/* ctrl,status, and indirect access */
-	volatile uint8_t pad2[3];
-	volatile uint8_t zc_data;	/* data */
+	volatile u_char pad1[3];
+	volatile u_char zc_csr;		/* ctrl,status, and indirect access */
+	volatile u_char pad2[3];
+	volatile u_char zc_data;	/* data */
 };
 
-static void *zsaddr[NZS];
+static caddr_t zsaddr[NZS];
 
 /* Flags from cninit() */
 static int zs_hwflags[NZS][2];
@@ -115,7 +121,7 @@ static int zs_hwflags[NZS][2];
 /* Default speed for all channels */
 static int zs_defspeed = 9600;
 
-static uint8_t zs_init_reg[16] = {
+static u_char zs_init_reg[16] = {
 	0,	/* 0: CMD (reset, etc.) */
 	0,	/* 1: No interrupts yet. */
 	0,	/* IVECT */
@@ -143,7 +149,7 @@ static void zs_putc(void *, int);
 struct zschan *
 zs_get_chan_addr(int zs_unit, int channel)
 {
-	void *addr;
+	caddr_t addr;
 	struct zschan *zc;
 
 	if (zs_unit >= NZS)
@@ -152,9 +158,9 @@ zs_get_chan_addr(int zs_unit, int channel)
 	if (addr == NULL)
 		return NULL;
 	if (channel == 0) {
-		zc = (void *)((uint8_t *)addr + PORTA_OFFSET);
+		zc = (void *)(addr + PORTA_OFFSET);
 	} else {
-		zc = (void *)((uint8_t *)addr + PORTB_OFFSET);
+		zc = (void *)(addr + PORTB_OFFSET);
 	}
 	return zc;
 }
@@ -171,17 +177,17 @@ zs_ap_delay(void)
  ****************************************************************/
 
 /* Definition of the driver for autoconfig. */
-int zs_ap_match(device_t, cfdata_t, void *);
-void zs_ap_attach(device_t, device_t, void *);
+int zs_ap_match(struct device *, struct cfdata *, void *);
+void zs_ap_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(zsc_ap, sizeof(struct zsc_softc),
+CFATTACH_DECL(zsc_ap, sizeof(struct zsc_softc),
     zs_ap_match, zs_ap_attach, NULL, NULL);
 
 /*
  * Is the zs chip present?
  */
 int
-zs_ap_match(device_t parent, cfdata_t cf, void *aux)
+zs_ap_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct apbus_attach_args *apa = aux;
 
@@ -198,9 +204,9 @@ zs_ap_match(device_t parent, cfdata_t cf, void *aux)
  * not set up the keyboard as ttya, etc.
  */
 void
-zs_ap_attach(device_t parent, device_t self, void *aux)
+zs_ap_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct zsc_softc *zsc = device_private(self);
+	struct zsc_softc *zsc = (void *)self;
 	struct apbus_attach_args *apa = aux;
 	struct zsc_attach_args zsc_args;
 	volatile struct zschan *zc;
@@ -215,11 +221,10 @@ zs_ap_attach(device_t parent, device_t self, void *aux)
 	volatile u_int *esccregs = (void *)(apa->apa_hwbase + ESCC_REG);
 	static int didintr;
 
-	zsc->zsc_dev = self;
-	zs_unit = device_unit(self);
-	zsaddr[zs_unit] = (void *)apa->apa_hwbase;
+	zs_unit = device_unit(&zsc->zsc_dev);
+	zsaddr[zs_unit] = (caddr_t)apa->apa_hwbase;
 
-	aprint_normal(" slot%d addr 0x%lx\n", apa->apa_slotno, apa->apa_hwbase);
+	printf(" slot%d addr 0x%lx\n", apa->apa_slotno, apa->apa_hwbase);
 
 	txAfifo[DMA_MODE_REG] = rxAfifo[DMA_MODE_REG] = DMA_EXTRDY;
 	txBfifo[DMA_MODE_REG] = rxBfifo[DMA_MODE_REG] = DMA_EXTRDY;
@@ -244,7 +249,7 @@ zs_ap_attach(device_t parent, device_t self, void *aux)
 		cs = &zsc->zsc_cs_store[channel];
 		zsc->zsc_cs[channel] = cs;
 
-		zs_lock_init(cs);
+		simple_lock_init(&cs->cs_lock);
 		cs->cs_channel = channel;
 		cs->cs_private = NULL;
 		cs->cs_ops = &zsops_null;
@@ -286,8 +291,8 @@ zs_ap_attach(device_t parent, device_t self, void *aux)
 		 */
 		if (!config_found(self, (void *)&zsc_args, zs_print)) {
 			/* No sub-driver.  Just reset it. */
-			uint8_t reset = (channel == 0) ?
-			    ZSWR9_A_RESET : ZSWR9_B_RESET;
+			u_char reset = (channel == 0) ?
+				ZSWR9_A_RESET : ZSWR9_B_RESET;
 			s = splhigh();
 			zs_write_reg(cs, 9, reset);
 			splx(s);
@@ -302,7 +307,7 @@ zs_ap_attach(device_t parent, device_t self, void *aux)
 	if (!didintr) {
 		didintr = 1;
 
-		zsc->zsc_si = softint_establish(SOFTINT_SERIAL, zssoft, zsc);
+		zsc->zsc_si = softintr_establish(IPL_SOFTSERIAL, zssoft, zsc);
 		apbus_intr_establish(1, /* interrupt level ( 0 or 1 ) */
 				     NEWS5000_INT1_SCC,
 				     0, /* priority */
@@ -353,8 +358,7 @@ int
 zs_getc(void *arg)
 {
 	volatile struct zschan *zc = arg;
-	int s, c;
-	uint8_t rr0;
+	int s, c, rr0;
 
 	s = splhigh();
 	/* Wait for a character to arrive. */
@@ -381,8 +385,7 @@ void
 zs_putc(void *arg, int c)
 {
 	volatile struct zschan *zc = arg;
-	int s;
-	uint8_t rr0;
+	int s, rr0;
 
 	s = splhigh();
 	/* Wait for transmitter to become ready. */

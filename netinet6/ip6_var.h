@@ -1,4 +1,4 @@
-/*	$NetBSD: ip6_var.h,v 1.51 2008/08/06 15:01:23 plunky Exp $	*/
+/*	$NetBSD: ip6_var.h,v 1.37 2006/05/05 00:03:22 rpaulo Exp $	*/
 /*	$KAME: ip6_var.h,v 1.33 2000/06/11 14:59:20 jinmei Exp $	*/
 
 /*
@@ -64,9 +64,6 @@
 #ifndef _NETINET6_IP6_VAR_H_
 #define _NETINET6_IP6_VAR_H_
 
-#include <sys/socketvar.h>
-#include <net/route.h>
-
 /*
  * IP6 reassembly queue structure.  Each fragment
  * being reassembled is attached to one of these structures.
@@ -122,7 +119,7 @@ struct	ip6_moptions {
 /* Routing header related info */
 struct	ip6po_rhinfo {
 	struct	ip6_rthdr *ip6po_rhi_rthdr; /* Routing header */
-	struct	route ip6po_rhi_route; /* Route to the 1st hop */
+	struct	route_in6 ip6po_rhi_route; /* Route to the 1st hop */
 };
 #define ip6po_rthdr	ip6po_rhinfo.ip6po_rhi_rthdr
 #define ip6po_route	ip6po_rhinfo.ip6po_rhi_route
@@ -130,12 +127,13 @@ struct	ip6po_rhinfo {
 /* Nexthop related info */
 struct	ip6po_nhinfo {
 	struct	sockaddr *ip6po_nhi_nexthop;
-	struct	route ip6po_nhi_route; /* Route to the nexthop */
+	struct	route_in6 ip6po_nhi_route; /* Route to the nexthop */
 };
 #define ip6po_nexthop	ip6po_nhinfo.ip6po_nhi_nexthop
 #define ip6po_nextroute	ip6po_nhinfo.ip6po_nhi_route
 
 struct	ip6_pktopts {
+	struct	mbuf *ip6po_m;	/* Pointer to mbuf storing the data */
 	int	ip6po_hlim;		/* Hoplimit for outgoing packets */
 	struct	in6_pktinfo *ip6po_pktinfo; /* Outgoing IF/address information */
 	struct	ip6po_nhinfo ip6po_nhinfo; /* Next-hop address information */
@@ -156,92 +154,65 @@ struct	ip6_pktopts {
 #define IP6PO_DONTFRAG	0x04	/* disable fragmentation (IPV6_DONTFRAG) */
 };
 
-/*
- * IPv6 statistics.
- * Each counter is an unsigned 64-bit value.
- */
-#define	IP6_STAT_TOTAL		0	/* total packets received */
-#define	IP6_STAT_TOOSHORT	1	/* packet too short */
-#define	IP6_STAT_TOOSMALL	2	/* not enough data */
-#define	IP6_STAT_FRAGMENTS	3	/* fragments received */
-#define	IP6_STAT_FRAGDROPPED	4	/* frags dropped (dups, out of space) */
-#define	IP6_STAT_FRAGTIMEOUT	5	/* fragments timed out */
-#define	IP6_STAT_FRAGOVERFLOW	6	/* fragments that exceed limit */
-#define IP6_STAT_FORWARD	7	/* packets forwarded */
-#define	IP6_STAT_CANTFORWARD	8	/* packets rcvd for uncreachable dst */
-#define	IP6_STAT_REDIRECTSENT	9	/* packets forwarded on same net */
-#define	IP6_STAT_DELIVERED	10	/* datagrams delivered to upper level */
-#define	IP6_STAT_LOCALOUT	11	/* total IP packets generated here */
-#define	IP6_STAT_ODROPPED	12	/* lost packets due to nobufs, etc. */
-#define	IP6_STAT_REASSEMBLED	13	/* total packets reassembled ok */
-#define	IP6_STAT_FRAGMENTED	14	/* datagrams successfully fragmented */
-#define	IP6_STAT_OFRAGMENTS	15	/* output fragments created */
-#define	IP6_STAT_CANTFRAG	16	/* don't fragment flag was set, etc. */
-#define	IP6_STAT_BADOPTIONS	17	/* error in option processing */
-#define	IP6_STAT_NOROUTE	18	/* packets discarded due to no route */
-#define	IP6_STAT_BADVERS	19	/* ip6 version != 6 */
-#define	IP6_STAT_RAWOUT		20	/* total raw ip packets generated */
-#define	IP6_STAT_BADSCOPE	21	/* scope error */
-#define	IP6_STAT_NOTMEMBER	22	/* don't join this multicast group */
-#define	IP6_STAT_NXTHIST	23	/* next header histogram */
-		/* space for 256 counters */
-#define	IP6_STAT_M1		279	/* one mbuf */
-#define	IP6_STAT_M2M		280	/* two or more mbuf */
-		/* space for 32 counters */
-#define	IP6_STAT_MEXT1		312	/* one ext mbuf */
-#define	IP6_STAT_MEXT2M		313	/* two or more ext mbuf */
-#define	IP6_STAT_EXTHDRTOOLONG	314	/* ext hdr are not contiguous */
-#define	IP6_STAT_NOGIF		315	/* no match gif found */
-#define	IP6_STAT_TOOMANYHDR	316	/* discarded due to too many headers */
+struct	ip6stat {
+	u_quad_t ip6s_total;		/* total packets received */
+	u_quad_t ip6s_tooshort;		/* packet too short */
+	u_quad_t ip6s_toosmall;		/* not enough data */
+	u_quad_t ip6s_fragments;	/* fragments received */
+	u_quad_t ip6s_fragdropped;	/* frags dropped(dups, out of space) */
+	u_quad_t ip6s_fragtimeout;	/* fragments timed out */
+	u_quad_t ip6s_fragoverflow;	/* fragments that exceeded limit */
+	u_quad_t ip6s_forward;		/* packets forwarded */
+	u_quad_t ip6s_cantforward;	/* packets rcvd for unreachable dest */
+	u_quad_t ip6s_redirectsent;	/* packets forwarded on same net */
+	u_quad_t ip6s_delivered;	/* datagrams delivered to upper level*/
+	u_quad_t ip6s_localout;		/* total ip packets generated here */
+	u_quad_t ip6s_odropped;		/* lost packets due to nobufs, etc. */
+	u_quad_t ip6s_reassembled;	/* total packets reassembled ok */
+	u_quad_t ip6s_fragmented;	/* datagrams successfully fragmented */
+	u_quad_t ip6s_ofragments;	/* output fragments created */
+	u_quad_t ip6s_cantfrag;		/* don't fragment flag was set, etc. */
+	u_quad_t ip6s_badoptions;	/* error in option processing */
+	u_quad_t ip6s_noroute;		/* packets discarded due to no route */
+	u_quad_t ip6s_badvers;		/* ip6 version != 6 */
+	u_quad_t ip6s_rawout;		/* total raw ip packets generated */
+	u_quad_t ip6s_badscope;		/* scope error */
+	u_quad_t ip6s_notmember;	/* don't join this multicast group */
+	u_quad_t ip6s_nxthist[256];	/* next header history */
+	u_quad_t ip6s_m1;		/* one mbuf */
+	u_quad_t ip6s_m2m[32];		/* two or more mbuf */
+	u_quad_t ip6s_mext1;		/* one ext mbuf */
+	u_quad_t ip6s_mext2m;		/* two or more ext mbuf */
+	u_quad_t ip6s_exthdrtoolong;	/* ext hdr are not continuous */
+	u_quad_t ip6s_nogif;		/* no match gif found */
+	u_quad_t ip6s_toomanyhdr;	/* discarded due to too many headers */
+
 	/*
 	 * statistics for improvement of the source address selection
 	 * algorithm:
 	 * XXX: hardcoded 16 = # of ip6 multicast scope types + 1
 	 */
-#define	IP6_STAT_SOURCES_NONE	317	/* number of times that address
-					   selection fails */
-#define	IP6_STAT_SOURCES_SAMEIF	318	/* number of times that an address
-					   on the outgoing I/F is chosen */
-		/* space for 16 counters */
-#define	IP6_STAT_SOURCES_OTHERIF 334	/* number of times that an address on
-					   a non-outgoing I/F is chosen */
-		/* space for 16 counters */
-#define	IP6_STAT_SOURCES_SAMESCOPE 350	/* number of times that an address that
-					   has the same scope from the dest.
-					   is chosen */
-		/* space for 16 counters */
-#define	IP6_STAT_SOURCES_OTHERSCOPE 366	/* number of times that an address that
-					   has a different scope from the dest.
-					   is chosen */
-		/* space for 16 counters */
-#define	IP6_STAT_SOURCES_DEPRECATED 382	/* number of times that a deprecated
-					   address is chosen */
-		/* space for 16 counters */
-#define	IP6_STAT_FORWARD_CACHEHIT 398
-#define	IP6_STAT_FORWARD_CACHEMISS 399
-#define	IP6_STAT_FASTFORWARD	400	/* packets fast forwarded */
-#define	IP6_STAT_FASTFORWARDFLOWS 401	/* number of fast forward flows */
+	/* number of times that address selection fails */
+	u_quad_t ip6s_sources_none;
+	/* number of times that an address on the outgoing I/F is chosen */
+	u_quad_t ip6s_sources_sameif[16];
+	/* number of times that an address on a non-outgoing I/F is chosen */
+	u_quad_t ip6s_sources_otherif[16];
+	/*
+	 * number of times that an address that has the same scope
+	 * from the destination is chosen.
+	 */
+	u_quad_t ip6s_sources_samescope[16];
+	/*
+	 * number of times that an address that has a different scope
+	 * from the destination is chosen.
+	 */
+	u_quad_t ip6s_sources_otherscope[16];
+	/* number of times that an deprecated address is chosen */
+	u_quad_t ip6s_sources_deprecated[16];
 
-#define	IP6_NSTATS		402
-
-#define IP6FLOW_HASHBITS         6 /* should not be a multiple of 8 */
-
-/* 
- * Structure for an IPv6 flow (ip6_fastforward).
- */
-struct ip6flow {
-	LIST_ENTRY(ip6flow) ip6f_list;  /* next in active list */
-	LIST_ENTRY(ip6flow) ip6f_hash;  /* next ip6flow in bucket */
-	struct in6_addr ip6f_dst;       /* destination address */
-	struct in6_addr ip6f_src;       /* source address */
-	struct route ip6f_ro;       /* associated route entry */
-	u_int32_t ip6f_flow;		/* flow (tos) */
-	u_quad_t ip6f_uses;               /* number of uses in this period */
-	u_quad_t ip6f_last_uses;          /* number of uses in last period */
-	u_quad_t ip6f_dropped;            /* ENOBUFS returned by if_output */
-	u_quad_t ip6f_forwarded;          /* packets forwarded */
-	u_int ip6f_timer;               /* lifetime timer */
-	time_t ip6f_start;              /* creation time */
+	u_quad_t ip6s_forward_cachehit;
+	u_quad_t ip6s_forward_cachemiss;
 };
 
 #ifdef _KERNEL
@@ -252,9 +223,7 @@ struct ip6flow {
  */
 struct ip6aux {
 	/* ip6.ip6_dst */
-	struct in6_addr	ip6a_src;
-	uint32_t	ip6a_scope_id;
-	int		ip6a_flags;
+	struct in6_ifaddr *ip6a_dstia6;	/* my ifaddr that matches ip6_dst */
 };
 
 /* flags passed to ip6_output as last parameter */
@@ -262,6 +231,13 @@ struct ip6aux {
 #define	IPV6_FORWARDING		0x02	/* most of IPv6 header exists */
 #define	IPV6_MINMTU		0x04	/* use minimum MTU (IPV6_USE_MIN_MTU) */
 
+#ifdef __NO_STRICT_ALIGNMENT
+#define	IP6_HDR_ALIGNED_P(ip)	1
+#else
+#define	IP6_HDR_ALIGNED_P(ip)	((((vaddr_t) (ip)) & 3) == 0)
+#endif
+
+extern struct	ip6stat ip6stat;	/* statistics */
 extern u_int32_t ip6_id;		/* fragment identifier */
 extern int	ip6_defhlim;		/* default hop limit */
 extern int	ip6_defmcasthlim;	/* default multicast hop limit */
@@ -301,94 +277,77 @@ extern int	ip6_prefer_tempaddr; /* whether to prefer temporary addresses
 extern int	ip6_use_defzone; /* whether to use the default scope zone
 				    when unspecified */
 
-#ifdef GATEWAY
-extern int      ip6_maxflows;           /* maximum amount of flows for ip6ff */
-extern int	ip6_hashsize;		/* size of hash table */
-#endif
-
 struct in6pcb;
 
-int	icmp6_ctloutput(int, struct socket *, struct sockopt *);
+int	icmp6_ctloutput __P((int, struct socket *, int, int, struct mbuf **));
 
-void	ip6_init(void);
-void	ip6intr(void);
-void	ip6_input(struct mbuf *);
-const struct ip6aux *ip6_getdstifaddr(struct mbuf *);
-void	ip6_freepcbopts(struct ip6_pktopts *);
-void	ip6_freemoptions(struct ip6_moptions *);
-int	ip6_unknown_opt(u_int8_t *, struct mbuf *, int);
-u_int8_t *ip6_get_prevhdr(struct mbuf *, int);
-int	ip6_nexthdr(struct mbuf *, int, int, int *);
-int	ip6_lasthdr(struct mbuf *, int, int, int *);
+void	ip6_init __P((void));
+void	ip6intr __P((void));
+void	ip6_input __P((struct mbuf *));
+struct in6_ifaddr *ip6_getdstifaddr __P((struct mbuf *));
+void	ip6_freepcbopts __P((struct ip6_pktopts *));
+void	ip6_freemoptions __P((struct ip6_moptions *));
+int	ip6_unknown_opt __P((u_int8_t *, struct mbuf *, int));
+u_int8_t *ip6_get_prevhdr __P((struct mbuf *, int));
+int	ip6_nexthdr __P((struct mbuf *, int, int, int *));
+int	ip6_lasthdr __P((struct mbuf *, int, int, int *));
 
-struct m_tag *ip6_addaux(struct mbuf *);
-struct m_tag *ip6_findaux(struct mbuf *);
-void	ip6_delaux(struct mbuf *);
+struct m_tag *ip6_addaux __P((struct mbuf *));
+struct m_tag *ip6_findaux __P((struct mbuf *));
+void	ip6_delaux __P((struct mbuf *));
 
-int	ip6_mforward(struct ip6_hdr *, struct ifnet *, struct mbuf *);
-int	ip6_process_hopopts(struct mbuf *, u_int8_t *, int, u_int32_t *,
-				 u_int32_t *);
-void	ip6_savecontrol(struct in6pcb *, struct mbuf **, struct ip6_hdr *,
-		struct mbuf *);
-void	ip6_notify_pmtu(struct in6pcb *, const struct sockaddr_in6 *,
-		u_int32_t *);
-int	ip6_sysctl(int *, u_int, void *, size_t *, void *, size_t);
+int	ip6_mforward __P((struct ip6_hdr *, struct ifnet *, struct mbuf *));
+int	ip6_process_hopopts __P((struct mbuf *, u_int8_t *, int, u_int32_t *,
+				 u_int32_t *));
+void	ip6_savecontrol __P((struct in6pcb *, struct mbuf **, struct ip6_hdr *,
+		struct mbuf *));
+void	ip6_notify_pmtu __P((struct in6pcb *, struct sockaddr_in6 *,
+		u_int32_t *));
+int	ip6_sysctl __P((int *, u_int, void *, size_t *, void *, size_t));
 
-void	ip6_forward(struct mbuf *, int);
+void	ip6_forward __P((struct mbuf *, int));
 
-void	ip6_mloopback(struct ifnet *, struct mbuf *,
-	              const struct sockaddr_in6 *);
-int	ip6_output(struct mbuf *, struct ip6_pktopts *,
-			struct route *, int,
+void	ip6_mloopback __P((struct ifnet *, struct mbuf *, struct sockaddr_in6 *));
+int	ip6_output __P((struct mbuf *, struct ip6_pktopts *,
+			struct route_in6 *, int,
 			struct ip6_moptions *, struct socket *,
-			struct ifnet **);
-int	ip6_ctloutput(int, struct socket *, struct sockopt *);
-int	ip6_raw_ctloutput(int, struct socket *, struct sockopt *);
-void	ip6_initpktopts(struct ip6_pktopts *);
-int	ip6_setpktopts(struct mbuf *, struct ip6_pktopts *,
-			    struct ip6_pktopts *, int, int);
-void	ip6_clearpktopts(struct ip6_pktopts *, int);
-struct ip6_pktopts *ip6_copypktopts(struct ip6_pktopts *, int);
-int	ip6_optlen(struct in6pcb *);
+			struct ifnet **));
+int	ip6_ctloutput __P((int, struct socket *, int, int, struct mbuf **));
+int	ip6_raw_ctloutput __P((int, struct socket *, int, int, struct mbuf **));
+void	ip6_initpktopts __P((struct ip6_pktopts *));
+int	ip6_setpktopts __P((struct mbuf *, struct ip6_pktopts *,
+			    struct ip6_pktopts *, int, int));
+void	ip6_clearpktopts __P((struct ip6_pktopts *, int));
+struct ip6_pktopts *ip6_copypktopts __P((struct ip6_pktopts *, int));
+int	ip6_optlen __P((struct in6pcb *));
 
-void	ip6_statinc(u_int);
+int	route6_input __P((struct mbuf **, int *, int));
 
-int	route6_input(struct mbuf **, int *, int);
+void	frag6_init __P((void));
+int	frag6_input __P((struct mbuf **, int *, int));
+void	frag6_slowtimo __P((void));
+void	frag6_drain __P((void));
 
-void	frag6_init(void);
-int	frag6_input(struct mbuf **, int *, int);
-void	frag6_slowtimo(void);
-void	frag6_drain(void);
+void	rip6_init __P((void));
+int	rip6_input __P((struct mbuf **, int *, int));
+void	rip6_ctlinput __P((int, struct sockaddr *, void *));
+int	rip6_ctloutput __P((int, struct socket *, int, int, struct mbuf **));
+int	rip6_output __P((struct mbuf *, ...));
+int	rip6_usrreq __P((struct socket *,
+	    int, struct mbuf *, struct mbuf *, struct mbuf *, struct lwp *));
 
-int	ip6flow_init(int);
-struct  ip6flow *ip6flow_reap(int);
-void    ip6flow_create(const struct route *, struct mbuf *);
-void    ip6flow_slowtimo(void);
-int	ip6flow_invalidate_all(int);
+int	dest6_input __P((struct mbuf **, int *, int));
+int	none_input __P((struct mbuf **, int *, int));
 
-void	rip6_init(void);
-int	rip6_input(struct mbuf **, int *, int);
-void	*rip6_ctlinput(int, const struct sockaddr *, void *);
-int	rip6_ctloutput(int, struct socket *, struct sockopt *);
-int	rip6_output(struct mbuf *, struct socket *, struct sockaddr_in6 *,
-			 struct mbuf *);
-int	rip6_usrreq(struct socket *,
-	    int, struct mbuf *, struct mbuf *, struct mbuf *, struct lwp *);
+struct 	in6_addr *in6_selectsrc __P((struct sockaddr_in6 *,
+	struct ip6_pktopts *, struct ip6_moptions *, struct route_in6 *,
+	struct in6_addr *, struct ifnet **, int *));
+int in6_selectroute __P((struct sockaddr_in6 *, struct ip6_pktopts *,
+	struct ip6_moptions *, struct route_in6 *, struct ifnet **,
+	struct rtentry **, int));
 
-int	dest6_input(struct mbuf **, int *, int);
-int	none_input(struct mbuf **, int *, int);
-
-struct route;
-
-struct 	in6_addr *in6_selectsrc(struct sockaddr_in6 *,
-	struct ip6_pktopts *, struct ip6_moptions *, struct route *,
-	struct in6_addr *, struct ifnet **, int *);
-int in6_selectroute(struct sockaddr_in6 *, struct ip6_pktopts *,
-	struct ip6_moptions *, struct route *, struct ifnet **,
-	struct rtentry **, int);
-
-u_int32_t ip6_randomid(void);
-u_int32_t ip6_randomflowlabel(void);
+u_int32_t ip6_randomid __P((void));
+u_int32_t ip6_randomflowlabel __P((void));
 #endif /* _KERNEL */
 
 #endif /* !_NETINET6_IP6_VAR_H_ */

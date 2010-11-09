@@ -1,4 +1,4 @@
-/* $NetBSD: auspi.c,v 1.3 2007/02/28 04:21:53 thorpej Exp $ */
+/* $NetBSD: auspi.c,v 1.1 2006/10/02 08:00:07 gdamore Exp $ */
 
 /*-
  * Copyright (c) 2006 Urbana-Champaign Independent Media Center.
@@ -42,7 +42,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: auspi.c,v 1.3 2007/02/28 04:21:53 thorpej Exp $");
+__KERNEL_RCSID(0, "$NetBSD: auspi.c,v 1.1 2006/10/02 08:00:07 gdamore Exp $");
 
 #include "locators.h"
 
@@ -77,7 +77,7 @@ struct auspi_softc {
 	void			*sc_ih;		/* interrupt handler */
 
 	struct spi_transfer	*sc_transfer;
-	bool			sc_running;	/* is it processing stuff? */
+	boolean_t		sc_running;	/* is it processing stuff? */
 
 	SIMPLEQ_HEAD(,spi_transfer)	sc_q;
 };
@@ -337,11 +337,11 @@ auspi_sched(struct auspi_softc *sc)
 		auspi_send(sc);
 		/* now kick the master start to get the chip running */
 		PUTREG(sc, AUPSC_SPIPCR, SPIPCR_MS);
-		sc->sc_running = true;
+		sc->sc_running = TRUE;
 		return;
 	}
 	auspi_select(sc, -1);
-	sc->sc_running = false;
+	sc->sc_running = FALSE;
 }
 
 void

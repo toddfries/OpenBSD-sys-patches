@@ -1,4 +1,4 @@
-/*	$NetBSD: db_machdep.h,v 1.7 2007/04/07 08:38:28 skrll Exp $	*/
+/*	$NetBSD: db_machdep.h,v 1.5 2006/04/01 15:44:59 cherry Exp $	*/
 
 /*	$OpenBSD: db_machdep.h,v 1.5 2001/02/16 19:20:13 mickey Exp $	*/
 
@@ -100,10 +100,9 @@ static __inline int inst_load(u_int ins) {
 	       (ins & 0xfc001fc0) != 0x0c0011c0;
 }
 static __inline int inst_store(u_int ins) {
-	return (ins & 0xf0000000) == 0x60000000 ||	/* st */
-	       (ins & 0xf4000200) == 0x24000200 ||	/* fst/cst */
-	       (ins & 0xfc000200) == 0x0c000200 ||	/* stby */
-	       (ins & 0xfc0003c0) == 0xc0001c0;		/* ldcw */
+	return (ins & 0xf0000000) == 0x60000000 ||
+	       (ins & 0xf4000200) == 0x24000200 ||
+	       (ins & 0xfc000200) == 0x0c000200;
 }
 static __inline int inst_return(u_int ins) {
 	return (ins & 0xfc00e000) == 0xe800c000 ||
@@ -116,7 +115,7 @@ static __inline int inst_trap_return(u_int ins)	{
 #define db_clear_single_step(r)	((r)->tf_ipsw &= ~PSW_R)
 #define db_set_single_step(r)	((r)->tf_ipsw |= PSW_R)
 
-int db_valid_breakpoint(db_addr_t);
-int kdb_trap(int, int, db_regs_t *);
+int db_valid_breakpoint __P((db_addr_t));
+int kdb_trap __P((int, int, db_regs_t *));
 
 #endif /* _HPPA_DB_MACHDEP_H_ */

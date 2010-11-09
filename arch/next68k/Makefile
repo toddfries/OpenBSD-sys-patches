@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile,v 1.7 2008/10/25 22:27:38 apb Exp $
+#	$NetBSD: Makefile,v 1.6 2003/01/06 17:40:42 lukem Exp $
 
 # Makefile for next68k tags file and boot blocks
 
@@ -19,8 +19,7 @@ DNEXT68K=	dev next68k include
 tags:
 	-ctags -wdtf ${TNEXT68K} ${SNEXT68K} ${SM68K} ${COMM}
 	egrep "^ENTRY(.*)|^ALTENTRY(.*)" ${ANEXT68K} ${AM68K} | \
-	    ${TOOL_SED} -e \
-		"s;\([^:]*\):\([^(]*\)(\([^, )]*\)\(.*\);\3 \1 /^\2(\3\4$$/;" \
+	    sed "s;\([^:]*\):\([^(]*\)(\([^, )]*\)\(.*\);\3 \1 /^\2(\3\4$$/;" \
 	    >> ${TNEXT68K}
 	sort -o ${TNEXT68K} ${TNEXT68K}
 

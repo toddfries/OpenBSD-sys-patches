@@ -1,4 +1,4 @@
-/*	$NetBSD: timekeeper.c,v 1.13 2008/04/28 20:23:29 martin Exp $	*/
+/*	$NetBSD: timekeeper.c,v 1.9 2005/12/11 12:18:17 christos Exp $	*/
 
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,7 +44,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: timekeeper.c,v 1.13 2008/04/28 20:23:29 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: timekeeper.c,v 1.9 2005/12/11 12:18:17 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -54,16 +61,19 @@ __KERNEL_RCSID(0, "$NetBSD: timekeeper.c,v 1.13 2008/04/28 20:23:29 martin Exp $
 
 #include <mvme68k/dev/mainbus.h>
 
-#include "ioconf.h"
+int timekeeper_match(struct device *, struct cfdata *, void *);
+void timekeeper_attach(struct device *, struct device *, void *);
 
-int timekeeper_match(device_t, cfdata_t, void *);
-void timekeeper_attach(device_t, device_t, void *);
-
-CFATTACH_DECL_NEW(timekeeper, sizeof(struct mk48txx_softc),
+CFATTACH_DECL(timekeeper, sizeof(struct mk48txx_softc),
     timekeeper_match, timekeeper_attach, NULL, NULL);
 
+extern struct cfdriver timekeeper_cd;
+
 int
-timekeeper_match(device_t parent, cfdata_t cf, void *aux)
+timekeeper_match(parent, cf, aux)
+	struct device *parent;
+	struct cfdata *cf;
+	void *aux;
 {
 	struct mainbus_attach_args *ma = aux;
 
@@ -74,13 +84,15 @@ timekeeper_match(device_t parent, cfdata_t cf, void *aux)
 }
 
 void
-timekeeper_attach(device_t parent, device_t self, void *aux)
+timekeeper_attach(parent, self, aux)
+	struct device *parent;
+	struct device *self;
+	void *aux;
 {
-	struct mk48txx_softc *sc = device_private(self);
+	struct mk48txx_softc *sc = (void *)self;
 	struct mainbus_attach_args *ma = aux;
 	bus_size_t size;
 
-	sc->sc_dev = self;
 	sc->sc_bst = ma->ma_bust;
 
 	if (machineid == MVME_147) {
@@ -96,7 +108,9 @@ timekeeper_attach(device_t parent, device_t self, void *aux)
 	sc->sc_year0 = YEAR0;
 	mk48txx_attach(sc);
 
-	aprint_normal(" Time-Keeper RAM\n");
-	aprint_normal_dev(self, "%ld bytes NVRAM plus Realtime Clock\n",
-	    sc->sc_nvramsz);
+	printf(" Time-Keeper RAM\n");
+	printf("%s: %ld bytes NVRAM plus Realtime Clock\n",
+	    sc->sc_dev.dv_xname, sc->sc_nvramsz);
+
+	todr_attach(&sc->sc_handle);
 }

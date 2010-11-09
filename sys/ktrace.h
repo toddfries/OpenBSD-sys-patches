@@ -1,4 +1,4 @@
-/*	$NetBSD: ktrace.h,v 1.56 2009/01/11 02:45:55 christos Exp $	*/
+/*	$NetBSD: ktrace.h,v 1.50 2007/08/27 13:33:45 dsl Exp $	*/
 
 /*
  * Copyright (c) 1988, 1993
@@ -64,34 +64,20 @@ struct ktr_header {
 	pid_t	ktr_pid;		/* process id */
 	char	ktr_comm[MAXCOMLEN+1];	/* command name */
 	union {
-		struct { /* v0 */
-			struct {
-				int32_t tv_sec;
-				long tv_usec;
-			} _tv;
-			const void *_buf;
-		} _v0;
-		struct { /* v1 */
-			struct {
-				int32_t tv_sec;
-				long tv_nsec;
-			} _ts;
-			lwpid_t _lid;
-		} _v1;
-		struct { /* v2 */
-			struct timespec _ts;
-			lwpid_t _lid;
-		} _v2;
-	} _v;
+		struct timeval _tv;	/* v0 timestamp */
+		struct timespec _ts;	/* v1 timespec */
+	} _ktr_time;
+	union {
+		const void *_buf;	/* v0 unused */
+		lwpid_t _lid;		/* v1 lwp id */
+	} _ktr_id;
 };
 
-#define ktr_lid		_v._v2._lid
-#define ktr_olid	_v._v1._lid
-#define ktr_time	_v._v2._ts
-#define ktr_otv		_v._v0._tv
-#define ktr_ots		_v._v1._ts
-#define ktr_ts		_v._v2._ts
-#define ktr_unused	_v._v0._buf
+#define ktr_lid	_ktr_id._lid
+#define ktr_time _ktr_time._ts
+#define ktr_tv _ktr_time._tv
+#define ktr_ts _ktr_time._ts
+#define ktr_unused _ktr_id._buf
 
 #define	KTR_SHIMLEN	offsetof(struct ktr_header, ktr_pid)
 
@@ -227,6 +213,8 @@ struct ktr_mool {
 
 /*
  * KTR_SAUPCALL - scheduler activated upcall.
+ *
+ * The structure is no longer used, but retained for compatibility.
  */
 #define	KTR_SAUPCALL	13
 struct ktr_saupcall {
@@ -263,13 +251,11 @@ struct ktr_saupcall {
 #define KTRFAC_EXEC_ARG	(1<<KTR_EXEC_ARG)
 #define KTRFAC_EXEC_ENV	(1<<KTR_EXEC_ENV)
 #define KTRFAC_MOOL	(1<<KTR_MOOL)
-#define	KTRFAC_SAUPCALL	(1<<KTR_SAUPCALL)
 #define	KTRFAC_MIB	(1<<KTR_MIB)
 /*
  * trace flags (also in p_traceflags)
  */
-#define KTRFAC_PERSISTENT	0x80000000	/* persistent trace across sugid
-						   exec (exclusive) */
+#define KTRFAC_ROOT	0x80000000	/* root set this trace */
 #define KTRFAC_INHERIT	0x40000000	/* pass trace flags to children */
 #define KTRFAC_TRC_EMUL	0x10000000	/* ktrace KTR_EMUL before next trace */
 #define	KTRFAC_VER_MASK	0x0f000000	/* record version mask */
@@ -279,7 +265,6 @@ struct ktr_saupcall {
 
 #define	KTRFACv0	(0 << KTRFAC_VER_SHIFT)
 #define	KTRFACv1	(1 << KTRFAC_VER_SHIFT)
-#define	KTRFACv2	(2 << KTRFAC_VER_SHIFT)
 
 #ifndef	_KERNEL
 
@@ -311,7 +296,8 @@ void ktr_mibio(int, enum uio_rw, const void *, size_t, int);
 void ktr_namei(const char *, size_t);
 void ktr_namei2(const char *, size_t, const char *, size_t);
 void ktr_psig(int, sig_t, const sigset_t *, const ksiginfo_t *);
-void ktr_syscall(register_t, const register_t [], int);
+void ktr_syscall(register_t, register_t, const struct sysent *,
+    register_t []);
 void ktr_sysret(register_t, int, register_t *);
 void ktr_kuser(const char *, void *, size_t);
 void ktr_mmsg(const void *, size_t);
@@ -319,7 +305,6 @@ void ktr_mib(const int *a , u_int b);
 void ktr_mool(const void *, size_t, const void *);
 void ktr_execarg(const void *, size_t);
 void ktr_execenv(const void *, size_t);
-void ktr_saupcall(struct lwp *, int, int, int, void *, void *, void *);
 
 static inline bool
 ktrpoint(int fac)
@@ -352,7 +337,7 @@ static inline void
 ktrgeniov(int a, enum uio_rw b, struct iovec *c, int d, int e)
 {
 	if (__predict_false(ktrace_on))
-		ktr_geniov(a, b, c, d, e);
+		ktr_genio(a, b, c, d, e);
 }
 
 static inline void
@@ -384,10 +369,10 @@ ktrpsig(int a, sig_t b, const sigset_t *c, const ksiginfo_t * d)
 }
 
 static inline void
-ktrsyscall(register_t code, const register_t args[], int narg)
+ktrsyscall(register_t a, register_t b, const struct sysent *c, register_t d[])
 {
 	if (__predict_false(ktrace_on))
-		ktr_syscall(code, args, narg);
+		ktr_syscall(a, b, c, d);
 }
 
 static inline void
@@ -437,13 +422,6 @@ ktrexecenv(const void *a, size_t b)
 {
 	if (__predict_false(ktrace_on))
 		ktr_execenv(a, b);
-}
-
-static inline void
-ktrsaupcall(struct lwp *a, int b, int c, int d, void *e, void *f, void *g)
-{
-	if (__predict_false(ktrace_on))
-		ktr_saupcall(a, b, c, d, e, f, g);
 }
 
 #endif	/* !_KERNEL */

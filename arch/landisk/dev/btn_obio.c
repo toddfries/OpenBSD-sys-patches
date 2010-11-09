@@ -1,4 +1,4 @@
-/*	$NetBSD: btn_obio.c,v 1.5 2008/03/27 03:01:05 uwe Exp $	*/
+/*	$NetBSD: btn_obio.c,v 1.1 2006/09/01 21:26:18 uwe Exp $	*/
 
 /*-
  * Copyright (c) 2005 NONAKA Kimihiro
@@ -29,7 +29,7 @@
 #include "pwrsw_obio.h"
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: btn_obio.c,v 1.5 2008/03/27 03:01:05 uwe Exp $");
+__KERNEL_RCSID(0, "$NetBSD: btn_obio.c,v 1.1 2006/09/01 21:26:18 uwe Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -58,7 +58,7 @@ __KERNEL_RCSID(0, "$NetBSD: btn_obio.c,v 1.5 2008/03/27 03:01:05 uwe Exp $");
 #define	NBUTTON		3
 
 struct btn_obio_softc {
-	device_t		sc_dev;
+	struct device		sc_dev;
 	void			*sc_ih;
 
 	struct callout		sc_guard_ch;
@@ -72,8 +72,8 @@ struct btn_obio_softc {
 #define	BTN_TIMEOUT	(hz / 10)	/* 100ms */
 #endif
 
-static int btn_obio_probe(device_t, cfdata_t, void *);
-static void btn_obio_attach(device_t, device_t, void *);
+static int btn_obio_probe(struct device *, struct cfdata *, void *);
+static void btn_obio_attach(struct device *, struct device *, void *);
 
 static int btn_intr(void *aux);
 static void btn_sysmon_pressed_event(void *arg);
@@ -92,11 +92,11 @@ static const struct {
 	{ BTN_REMOVE,	BTN_REMOVE_BIT,	"remove" },
 };
 
-CFATTACH_DECL_NEW(btn_obio, sizeof(struct btn_obio_softc),
+CFATTACH_DECL(btn_obio, sizeof(struct btn_obio_softc),
     btn_obio_probe, btn_obio_attach, NULL, NULL);
 
 static int
-btn_obio_probe(device_t parent, cfdata_t cfp, void *aux)
+btn_obio_probe(struct device *parent, struct cfdata *cfp, void *aux)
 {
 	struct obio_attach_args *oa = aux;
 
@@ -112,32 +112,30 @@ btn_obio_probe(device_t parent, cfdata_t cfp, void *aux)
 }
 
 static void
-btn_obio_attach(device_t parent, device_t self, void *aux)
+btn_obio_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct btn_obio_softc *sc;
+	struct btn_obio_softc *sc = (void *)self;
 	int i;
 
-	aprint_naive("\n");
-	aprint_normal(": USL-5P buttons\n");
-
-	sc = device_private(self);
-	sc->sc_dev = self;
+	printf(": USL-5P Button\n");
 
 	btn_softc = sc;
 
-	callout_init(&sc->sc_guard_ch, 0);
+	callout_init(&sc->sc_guard_ch);
 	callout_setfunc(&sc->sc_guard_ch, btn_guard_timeout, sc);
 
 	sc->sc_ih = extintr_establish(LANDISK_INTR_BTN, IPL_TTY, btn_intr, sc);
 	if (sc->sc_ih == NULL) {
-		aprint_error_dev(self, "unable to establish interrupt");
+		printf("%s: couldn't establish intr handler",
+		    sc->sc_dev.dv_xname);
 		panic("extintr_establish");
 	}
 
-	sc->sc_smpsw.smpsw_name = device_xname(self);
+	sc->sc_smpsw.smpsw_name = sc->sc_dev.dv_xname;
 	sc->sc_smpsw.smpsw_type = PSWITCH_TYPE_RESET;
 	if (sysmon_pswitch_register(&sc->sc_smpsw) != 0) {
-		aprint_error_dev(self, "unable to register with sysmon\n");
+		printf("%s: unable to register with sysmon\n",
+		    sc->sc_dev.dv_xname);
 		return;
 	}
 	sc->sc_mask |= BTN_RESET_BIT;
@@ -146,9 +144,8 @@ btn_obio_attach(device_t parent, device_t self, void *aux)
 		int idx = btnlist[i].idx;
 		sc->sc_bev[idx].bev_name = btnlist[i].name;
 		if (btn_event_register(&sc->sc_bev[idx]) != 0) {
-			aprint_error_dev(self,
-					 "unable to register '%s' button\n",
-					 btnlist[i].name);
+			printf("%s: unable to register '%s' button\n",
+			    sc->sc_dev.dv_xname, btnlist[i].name);
 		} else {
 			sc->sc_mask |= btnlist[i].mask;
 		}
@@ -159,7 +156,6 @@ static int
 btn_intr(void *arg)
 {
 	struct btn_obio_softc *sc = (void *)arg;
-	device_t self = sc->sc_dev;
 	int status;
 	int i;
 
@@ -180,8 +176,8 @@ btn_intr(void *arg)
 				    btn_sysmon_pressed_event, sc);
 				return (1);
 			} else {
-				aprint_normal_dev(self,
-					"reset button pressed\n");
+				printf("%s: reset button pressed\n",
+				    sc->sc_dev.dv_xname);
 			}
 		}
 
@@ -194,9 +190,9 @@ btn_intr(void *arg)
 					    btn_pressed_event,
 					    &sc->sc_bev[btnlist[i].idx]);
 				} else {
-					aprint_normal_dev(self,
-						"%s button pressed\n",
-						btnlist[i].name);
+					printf("%s: %s button pressed\n",
+					    sc->sc_dev.dv_xname,
+					    btnlist[i].name);
 				}
 				rv = 1;
 			}

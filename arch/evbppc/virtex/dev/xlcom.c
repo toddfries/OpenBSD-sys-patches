@@ -1,4 +1,4 @@
-/* 	$NetBSD: xlcom.c,v 1.7 2008/06/11 23:52:36 cegger Exp $ */
+/* 	$NetBSD: xlcom.c,v 1.1 2006/12/02 22:18:47 freza Exp $ */
 
 /*
  * Copyright (c) 2006 Jachym Holecek
@@ -29,10 +29,10 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: xlcom.c,v 1.7 2008/06/11 23:52:36 cegger Exp $");
+/* TODO: kgdb support */
 
-#include "opt_kgdb.h"
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: xlcom.c,v 1.1 2006/12/02 22:18:47 freza Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -46,14 +46,11 @@ __KERNEL_RCSID(0, "$NetBSD: xlcom.c,v 1.7 2008/06/11 23:52:36 cegger Exp $");
 #include <sys/tty.h>
 #include <sys/time.h>
 #include <sys/syslog.h>
-#include <sys/intr.h>
-#include <sys/bus.h>
-
-#if defined(KGDB)
-#include <sys/kgdb.h>
-#endif /* KGDB */
 
 #include <dev/cons.h>
+
+#include <machine/intr.h>
+#include <machine/bus.h>
 
 #include <evbppc/virtex/virtex.h>
 #include <evbppc/virtex/dev/xcvbusvar.h>
@@ -99,21 +96,11 @@ static int 	xlcom_intr(void *);
 static void 	xlcom_rx_soft(void *);
 static void 	xlcom_tx_soft(void *);
 static void 	xlcom_reset(bus_space_tag_t, bus_space_handle_t);
-static int 	xlcom_busy_getc(bus_space_tag_t, bus_space_handle_t);
-static void 	xlcom_busy_putc(bus_space_tag_t, bus_space_handle_t, int);
 
 /* System console interface. */
 static int 	xlcom_cngetc(dev_t);
 static void 	xlcom_cnputc(dev_t, int);
 void 		xlcom_cninit(struct consdev *);
-
-#if defined(KGDB)
-
-void 		xlcom_kgdbinit(void);
-static void 	xlcom_kgdb_putc(void *, int);
-static int 	xlcom_kgdb_getc(void *);
-
-#endif /* KGDB */
 
 static struct cnm_state 	xlcom_cnm_state;
 
@@ -165,14 +152,6 @@ xlcom_attach(struct device *parent, struct device *self, void *aux)
 
 	printf(": UartLite serial port\n");
 
-#if defined(KGDB)
-	/* We don't want to share kgdb port with the user. */
-	if (sc->sc_iot == kgdb_iot && sc->sc_ioh == kgdb_ioh) {
-		printf("%s: already in use by kgdb\n", device_xname(self));
-		return;
-	}
-#endif /* KGDB */
-
 	if ((sc->sc_ih = intr_establish(vaa->vaa_intr, IST_LEVEL, IPL_SERIAL,
 	    xlcom_intr, sc)) == NULL) {
 		printf("%s: could not establish interrupt\n",
@@ -210,8 +189,8 @@ xlcom_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_rput = sc->sc_rget = 0;
 	sc->sc_ravail = XLCOM_RXBUF_SIZE;
 
-	sc->sc_rx_soft = softint_establish(SOFTINT_SERIAL, xlcom_rx_soft, sc);
-	sc->sc_tx_soft = softint_establish(SOFTINT_SERIAL, xlcom_tx_soft, sc);
+	sc->sc_rx_soft = softintr_establish(IPL_SOFTSERIAL, xlcom_rx_soft, sc);
+	sc->sc_tx_soft = softintr_establish(IPL_SOFTSERIAL, xlcom_tx_soft, sc);
 
 	if (sc->sc_rx_soft == NULL || sc->sc_tx_soft == NULL) {
 		printf("%s: could not establish Rx or Tx softintr\n",
@@ -317,7 +296,7 @@ xlcom_send_chunk(struct xlcom_softc *sc)
 	/* Try to grab more data while FIFO drains. */
 	if (sc->sc_tbc == 0) {
 		sc->sc_tty->t_state &= ~TS_BUSY;
-		softint_schedule(sc->sc_tx_soft);
+		softintr_schedule(sc->sc_tx_soft);
 	}
 }
 
@@ -349,7 +328,7 @@ xlcom_recv_chunk(struct xlcom_softc *sc)
 
 	/* Shedule completion hook if we received any. */
 	if (n != sc->sc_ravail)
-		softint_schedule(sc->sc_rx_soft);
+		softintr_schedule(sc->sc_rx_soft);
 }
 
 static int
@@ -394,18 +373,21 @@ xlcom_open(dev_t dev, int flags, int mode, struct lwp *l)
 {
 	struct xlcom_softc 	*sc;
 	struct tty 		*tp;
+	struct proc 		*p;
 	int 			error, s;
 
-	sc = device_lookup_private(&xlcom_cd, minor(dev));
+	sc = device_lookup(&xlcom_cd, minor(dev));
 	if (sc == NULL)
 		return (ENXIO);
 
 	tp = sc->sc_tty;
+	p = l->l_proc;
 
 	s = spltty(); 							/* { */
 
-	if (kauth_authorize_device_tty(l->l_cred, KAUTH_DEVICE_TTY_OPEN,
-	    tp) != 0) {
+	if ((tp->t_state & TS_ISOPEN) && (tp->t_state & TS_XCLUDE) &&
+	    kauth_authorize_generic(p->p_cred, KAUTH_GENERIC_ISSUSER,
+	    &p->p_acflag) != 0) {
 	    	error = EBUSY;
 	    	goto fail;
 	}
@@ -452,7 +434,7 @@ xlcom_read(dev_t dev, struct uio *uio, int flag)
 	struct xlcom_softc 	*sc;
 	struct tty 		*tp;
 
-	sc = device_lookup_private(&xlcom_cd, minor(dev));
+	sc = device_lookup(&xlcom_cd, minor(dev));
 	if (sc == NULL)
 		return (ENXIO);
 	tp = sc->sc_tty;
@@ -466,7 +448,7 @@ xlcom_write(dev_t dev, struct uio *uio, int flag)
 	struct xlcom_softc 	*sc;
 	struct tty 		*tp;
 
-	sc = device_lookup_private(&xlcom_cd, minor(dev));
+	sc = device_lookup(&xlcom_cd, minor(dev));
 	if (sc == NULL)
 		return (ENXIO);
 	tp = sc->sc_tty;
@@ -480,7 +462,7 @@ xlcom_poll(dev_t dev, int events, struct lwp *l)
 	struct xlcom_softc 	*sc;
 	struct tty 		*tp;
 
-	sc = device_lookup_private(&xlcom_cd, minor(dev));
+	sc = device_lookup(&xlcom_cd, minor(dev));
 	if (sc == NULL)
 		return (ENXIO);
 	tp = sc->sc_tty;
@@ -494,7 +476,7 @@ xlcom_tty(dev_t dev)
 	struct xlcom_softc 	*sc;
 	struct tty 		*tp;
 
-	sc = device_lookup_private(&xlcom_cd, minor(dev));
+	sc = device_lookup(&xlcom_cd, minor(dev));
 	if (sc == NULL)
 		return (NULL);
 	tp = sc->sc_tty;
@@ -503,13 +485,13 @@ xlcom_tty(dev_t dev)
 }
 
 static int
-xlcom_ioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
+xlcom_ioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct lwp *l)
 {
 	struct xlcom_softc 	*sc;
 	struct tty 		*tp;
 	int 			error;
 
-	sc = device_lookup_private(&xlcom_cd, minor(dev));
+	sc = device_lookup(&xlcom_cd, minor(dev));
 	if (sc == NULL)
 		return (ENXIO);
 	tp = sc->sc_tty;
@@ -533,7 +515,7 @@ xlcom_close(dev_t dev, int flag, int mode, struct lwp *l)
 	struct xlcom_softc 	*sc;
 	struct tty 		*tp;
 
-	sc = device_lookup_private(&xlcom_cd, minor(dev));
+	sc = device_lookup(&xlcom_cd, minor(dev));
 	if (sc == NULL)
 		return (ENXIO);
 	tp = sc->sc_tty;
@@ -554,7 +536,7 @@ xlcom_stop(struct tty *tp, int flag)
 	struct xlcom_softc 	*sc;
 	int 			s;
 
-	sc = device_lookup_private(&xlcom_cd, UNIT(tp->t_dev));
+	sc = device_lookup(&xlcom_cd, UNIT(tp->t_dev));
 	if (sc == NULL)
 		return ;
 
@@ -590,7 +572,7 @@ xlcom_start(struct tty *tp)
 	struct xlcom_softc 	*sc;
 	int 			s1, s2;
 
-	sc = device_lookup_private(&xlcom_cd, UNIT(tp->t_dev));
+	sc = device_lookup(&xlcom_cd, UNIT(tp->t_dev));
 	if (sc == NULL)
 		return ;
 
@@ -601,9 +583,17 @@ xlcom_start(struct tty *tp)
 		return ;
 	}
 
-	if (!ttypull(tp)) {
-		splx(s1);
-		return;
+	if (tp->t_outq.c_cc <= tp->t_lowat) {
+		if (tp->t_state & TS_ASLEEP) {
+			tp->t_state &= ~TS_ASLEEP;
+			wakeup(&tp->t_outq);
+		}
+		selwakeup(&tp->t_wsel);
+
+		if (tp->t_outq.c_cc == 0) {
+			splx(s1);
+			return ;
+		}
 	}
 
 	tp->t_state |= TS_BUSY;
@@ -626,24 +616,6 @@ xlcom_reset(bus_space_tag_t iot, bus_space_handle_t ioh)
 	bus_space_write_4(iot, ioh, XLCOM_CNTL, CNTL_RX_CLEAR | CNTL_TX_CLEAR);
 }
 
-static int
-xlcom_busy_getc(bus_space_tag_t t, bus_space_handle_t h)
-{
-	while (! (bus_space_read_4(t, h, XLCOM_STAT) & STAT_RX_DATA))
-		;
-
-	return (bus_space_read_4(t, h, XLCOM_RX_FIFO));
-}
-
-static void
-xlcom_busy_putc(bus_space_tag_t t, bus_space_handle_t h, int c)
-{
-	while (bus_space_read_4(t, h, XLCOM_STAT) & STAT_TX_FULL)
-		;
-
-	bus_space_write_4(t, h, XLCOM_TX_FIFO, c);
-}
-
 /*
  * Console on UartLite.
  */
@@ -664,42 +636,20 @@ xlcom_cninit(struct consdev *cn)
 static int 
 xlcom_cngetc(dev_t dev)
 {
-	return (xlcom_busy_getc(consdev_iot, consdev_ioh));
+	while (! (bus_space_read_4(consdev_iot, consdev_ioh, XLCOM_STAT) &
+	    STAT_RX_DATA))
+		;
+
+	return (bus_space_read_4(consdev_iot, consdev_ioh,
+	    XLCOM_RX_FIFO));
 }
 
 static void 
 xlcom_cnputc(dev_t dev, int c)
 {
-	xlcom_busy_putc(consdev_iot, consdev_ioh, c);
+	while (bus_space_read_4(consdev_iot, consdev_ioh, XLCOM_STAT) &
+	    STAT_TX_FULL)
+		;
+
+	bus_space_write_4(consdev_iot, consdev_ioh, XLCOM_TX_FIFO, c);
 }
-
-/*
- * Remote GDB (aka "kgdb") interface.
- */
-#if defined(KGDB)
-
-static int
-xlcom_kgdb_getc(void *arg)
-{
-	return (xlcom_busy_getc(kgdb_iot, kgdb_ioh));
-}
-
-static void
-xlcom_kgdb_putc(void *arg, int c)
-{
-	xlcom_busy_putc(kgdb_iot, kgdb_ioh, c);
-}
-
-void
-xlcom_kgdbinit(void)
-{
-	if (bus_space_map(kgdb_iot, KGDB_ADDR, XLCOM_SIZE, 0, &kgdb_ioh))
-		panic("xlcom_kgdbinit: could not map kgdb_ioh");
-
-	xlcom_reset(kgdb_iot, kgdb_ioh);
-
-	kgdb_attach(xlcom_kgdb_getc, xlcom_kgdb_putc, NULL);
-	kgdb_dev = 123; /* arbitrary strictly positive value */
-}
-
-#endif /* KGDB */

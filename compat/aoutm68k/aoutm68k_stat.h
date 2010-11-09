@@ -1,4 +1,4 @@
-/*	$NetBSD: aoutm68k_stat.h,v 1.8 2009/01/11 22:54:16 mhitch Exp $	*/
+/*	$NetBSD: aoutm68k_stat.h,v 1.5 2005/12/11 12:19:56 christos Exp $	*/
 
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -48,9 +55,9 @@ struct aoutm68k_stat43 {
 	u_int16_t st_gid;		/* group ID of the file's group */
 	u_int16_t st_rdev;		/* device type */
 	int32_t	  st_size;		/* file size, in bytes */
-	struct	  timespec50 st_atimespec;/* time of last access */
-	struct	  timespec50 st_mtimespec;/* time of last data modification */
-	struct	  timespec50 st_ctimespec;/* time of last file status change */
+	struct	  timespec st_atimespec;/* time of last access */
+	struct	  timespec st_mtimespec;/* time of last data modification */
+	struct	  timespec st_ctimespec;/* time of last file status change */
 	int32_t	  st_blksize;		/* optimal blocksize for I/O */
 	int32_t	  st_blocks;		/* blocks allocated for file */
 	u_int32_t st_flags;		/* user defined flags for file */
@@ -60,16 +67,16 @@ struct aoutm68k_stat43 {
 
 #ifdef COMPAT_12
 struct aoutm68k_stat12 {
-	u_int32_t st_dev;		/* inode's device */
+	dev_t	  st_dev;		/* inode's device */
 	u_int32_t st_ino;		/* inode's number */
 	u_int16_t st_mode;		/* inode protection mode */
 	u_int16_t st_nlink;		/* number of hard links */
 	uid_t	  st_uid;		/* user ID of the file's owner */
 	gid_t	  st_gid;		/* group ID of the file's group */
-	u_int32_t st_rdev;		/* device type */
-	struct	  timespec50 st_atimespec;/* time of last access */
-	struct	  timespec50 st_mtimespec;/* time of last data modification */
-	struct	  timespec50 st_ctimespec;/* time of last file status change */
+	dev_t	  st_rdev;		/* device type */
+	struct	  timespec st_atimespec;/* time of last access */
+	struct	  timespec st_mtimespec;/* time of last data modification */
+	struct	  timespec st_ctimespec;/* time of last file status change */
 	off_t	  st_size;		/* file size, in bytes */
 	int64_t	  st_blocks;		/* blocks allocated for file */
 	u_int32_t st_blksize;		/* optimal blocksize for I/O */
@@ -81,16 +88,16 @@ struct aoutm68k_stat12 {
 #endif
 
 struct aoutm68k_stat {
-	u_int32_t st_dev;		/* inode's device */
+	dev_t	  st_dev;		/* inode's device */
 	u_int32_t st_ino;		/* inode's number */
 	mode_t	  st_mode;		/* inode protection mode */
 	nlink_t	  st_nlink;		/* number of hard links */
 	uid_t	  st_uid;		/* user ID of the file's owner */
 	gid_t	  st_gid;		/* group ID of the file's group */
-	u_int32_t st_rdev;		/* device type */
-	struct	  timespec50 st_atimespec;/* time of last access */
-	struct	  timespec50 st_mtimespec;/* time of last data modification */
-	struct	  timespec50 st_ctimespec;/* time of last file status change */
+	dev_t	  st_rdev;		/* device type */
+	struct	  timespec st_atimespec;/* time of last access */
+	struct	  timespec st_mtimespec;/* time of last data modification */
+	struct	  timespec st_ctimespec;/* time of last file status change */
 	off_t	  st_size;		/* file size, in bytes */
 	blkcnt_t  st_blocks;		/* blocks allocated for file */
 	blksize_t st_blksize;		/* optimal blocksize for I/O */

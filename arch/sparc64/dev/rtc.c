@@ -1,4 +1,4 @@
-/*	$NetBSD: rtc.c,v 1.6 2008/12/14 23:13:18 mrg Exp $	*/
+/*	$NetBSD: rtc.c,v 1.2 2006/11/09 15:08:04 tsutsui Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -56,7 +56,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: rtc.c,v 1.6 2008/12/14 23:13:18 mrg Exp $");
+__KERNEL_RCSID(0, "$NetBSD: rtc.c,v 1.2 2006/11/09 15:08:04 tsutsui Exp $");
 
 /*
  * Clock driver for 'rtc' - mc146818 driver.
@@ -77,10 +77,10 @@ __KERNEL_RCSID(0, "$NetBSD: rtc.c,v 1.6 2008/12/14 23:13:18 mrg Exp $");
 #include <dev/ebus/ebusreg.h>
 #include <dev/ebus/ebusvar.h>
 
-static int	rtc_ebus_match(device_t, cfdata_t, void *);
-static void	rtc_ebus_attach(device_t, device_t, void *);
+static int	rtc_ebus_match(struct device *, struct cfdata *, void *);
+static void	rtc_ebus_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(rtc_ebus, sizeof(struct mc146818_softc),
+CFATTACH_DECL(rtc_ebus, sizeof(struct mc146818_softc),
     rtc_ebus_match, rtc_ebus_attach, NULL, NULL);
 
 u_int rtc_read_reg(struct mc146818_softc *, u_int);
@@ -89,7 +89,7 @@ u_int rtc_getcent(struct mc146818_softc *);
 void rtc_setcent(struct mc146818_softc *, u_int);
 
 static int
-rtc_ebus_match(device_t parent, cfdata_t cf, void *aux)
+rtc_ebus_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct ebus_attach_args *ea = aux;
 
@@ -129,14 +129,13 @@ rtc_write_reg(struct mc146818_softc *sc, u_int reg, u_int val)
 
 /* ARGSUSED */
 static void
-rtc_ebus_attach(device_t parent, device_t self, void *aux)
+rtc_ebus_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct mc146818_softc *sc = device_private(self);
+	struct mc146818_softc *sc = (void *)self;
 	struct ebus_attach_args *ea = aux;
 	char *model;
 	int sz;
 
-	sc->sc_dev = self;
 	sc->sc_bst = ea->ea_bustag;
 
 	/* hard code to 8K? */
@@ -144,9 +143,10 @@ rtc_ebus_attach(device_t parent, device_t self, void *aux)
 
 	if (bus_space_map(sc->sc_bst,
 			 EBUS_ADDR_FROM_REG(&ea->ea_reg[0]),
-			 sz, 0,
+			 sz,
+			 BUS_SPACE_MAP_LINEAR,
 			 &sc->sc_bsh) != 0) {
-		aprint_error(": can't map register\n");
+		printf("%s: can't map register\n", self->dv_xname);
 		return;
 	}
 
@@ -165,7 +165,7 @@ rtc_ebus_attach(device_t parent, device_t self, void *aux)
 	sc->sc_setcent = rtc_setcent;
 	mc146818_attach(sc);
 
-	aprint_normal(": %s\n", model);
+	printf(": %s\n", model);
 
 	/*
 	 * Turn interrupts off, just in case. (Although they shouldn't
@@ -178,6 +178,8 @@ rtc_ebus_attach(device_t parent, device_t self, void *aux)
 	 * physical page as the COM registers.  So we won't protect them.
 	 */
 	/*sc->sc_handle.todr_setwen = NULL;*/
+
+	todr_attach(&sc->sc_handle);
 }
 
 /*
@@ -188,13 +190,16 @@ rtc_ebus_attach(device_t parent, device_t self, void *aux)
 #define MC_CENT 0x32
 
 u_int
-rtc_getcent(struct mc146818_softc *sc)
+rtc_getcent(sc)
+	struct mc146818_softc *sc;
 {
 
 	return rtc_read_reg(sc, MC_CENT);
 }
 void 
-rtc_setcent(struct mc146818_softc *sc, u_int cent)
+rtc_setcent(sc, cent)
+	struct mc146818_softc *sc;
+	u_int cent;
 {
 
 	rtc_write_reg(sc, MC_CENT, cent);

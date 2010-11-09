@@ -1,4 +1,4 @@
-/*	$NetBSD: dp8390.c,v 1.6 2008/12/14 18:46:33 christos Exp $	*/
+/*	$NetBSD: dp8390.c,v 1.4 2005/12/26 19:24:00 perry Exp $	*/
 
 /*
  * Polling driver for National Semiconductor DS8390/WD83C690 based
@@ -45,29 +45,29 @@ static u_short next_packet;
 extern u_char eth_myaddr[6];
 
 #ifndef _STANDALONE
-static void *vmembase;
-extern void *mapmem(int, int);
-extern void unmapmem(void *, int);
-extern int mapio(void);
+static caddr_t vmembase;
+extern caddr_t mapmem __P((int, int));
+extern void unmapmem __P((caddr_t, int));
+extern int mapio __P((void));
 
-static void
-bbcopy(void *src, void *dst, int len)
+static void bbcopy(src, dst, len)
+caddr_t src, dst;
+int len;
 {
-	char *s = (char *)src;
-	char *d = (char *)dst;
+	char *s = (char *)src, *d = (char *)dst;
 
-	while (len--)
+	while(len--)
 		*d++ = *s++;
 }
 #endif
 
-static void dp8390_read(int, char *, u_short);
+static void dp8390_read __P((int, char *, u_short));
 
 #define NIC_GET(reg) inb(WE_IOBASE + reg)
 #define NIC_PUT(reg, val) outb(WE_IOBASE + reg, val)
 
 static void
-dp8390_init(void)
+dp8390_init()
 {
 	int i;
 
@@ -148,17 +148,17 @@ dp8390_init(void)
 }
 
 int
-dp8390_config(void)
+dp8390_config()
 {
 #ifndef _STANDALONE
 	if (mapio()) {
 		printf("no IO access\n");
-		return -1;
+		return(-1);
 	}
 	vmembase = mapmem(dp8390_membase, dp8390_memsize);
 	if (!vmembase) {
 		printf("no memory access\n");
-		return -1;
+		return(-1);
 	}
 #endif
 
@@ -167,11 +167,11 @@ dp8390_config(void)
 
 	dp8390_init();
 
-	return 0;
+	return(0);
 }
 
 void
-dp8390_stop(void)
+dp8390_stop()
 {
 	int n = 5000;
 
@@ -183,8 +183,7 @@ dp8390_stop(void)
 	 * 'n' (about 5ms).  It shouldn't even take 5us on modern DS8390's, but
 	 * just in case it's an old one.
 	 */
-	while (((NIC_GET(ED_P0_ISR) & ED_ISR_RST) == 0) && --n)
-		continue;
+	while (((NIC_GET(ED_P0_ISR) & ED_ISR_RST) == 0) && --n);
 
 #ifndef _STANDALONE
 	unmapmem(vmembase, dp8390_memsize);
@@ -192,7 +191,9 @@ dp8390_stop(void)
 }
 
 int
-EtherSend(char *pkt, int len)
+EtherSend(pkt, len)
+char *pkt;
+int len;
 {
 #ifdef SUPPORT_NE2000
 	ne2000_writemem(pkt, dp8390_membase, len);
@@ -214,11 +215,14 @@ EtherSend(char *pkt, int len)
 	/* Set page 0, remote DMA complete, transmit packet, and *start*. */
 	NIC_PUT(ED_P0_CR, dp8390_cr_proto | ED_CR_PAGE_0 | ED_CR_TXP | ED_CR_STA);
 
-	return len;
+	return(len);
 }
 
 static void
-dp8390_read(int buf, char *dest, u_short len)
+dp8390_read(buf, dest, len)
+	int buf;
+	char *dest;
+	u_short len;
 {
 	u_short tmp_amount;
 
@@ -253,7 +257,9 @@ dp8390_read(int buf, char *dest, u_short len)
 }
 
 int
-EtherReceive(char *pkt, int maxlen)
+EtherReceive(pkt, maxlen)
+char *pkt;
+int maxlen;
 {
 	struct dp8390_ring packet_hdr;
 	int packet_ptr;
@@ -264,7 +270,7 @@ EtherReceive(char *pkt, int maxlen)
 #endif
 
 	if (!(NIC_GET(ED_P0_RSR) & ED_RSR_PRX))
-		return 0; /* XXX error handling */
+		return(0); /* XXX error handling */
 
 	/* Set NIC to page 1 registers to get 'current' pointer. */
 	NIC_PUT(ED_P0_CR, dp8390_cr_proto | ED_CR_PAGE_1 | ED_CR_STA);
@@ -283,11 +289,11 @@ EtherReceive(char *pkt, int maxlen)
 	NIC_PUT(ED_P1_CR, dp8390_cr_proto | ED_CR_PAGE_0 | ED_CR_STA);
 
 	if (next_packet == current)
-		return 0;
+		return(0);
 
 	/* Get pointer to this buffer's header structure. */
 	packet_ptr = RX_BUFBASE + (next_packet << ED_PAGE_SHIFT);
-
+	
 	/*
 	 * The byte count includes a 4 byte header that was added by
 	 * the NIC.
@@ -358,5 +364,5 @@ EtherReceive(char *pkt, int maxlen)
 		boundary = rec_page_stop - 1;
 	NIC_PUT(ED_P0_BNRY, boundary);
 
-	return len;
+	return(len);
 }

@@ -1,4 +1,4 @@
-/*	$NetBSD: filecore_extern.h,v 1.18 2008/06/28 01:34:05 rumble Exp $	*/
+/*	$NetBSD: filecore_extern.h,v 1.14 2006/07/13 12:00:25 martin Exp $	*/
 
 /*-
  * Copyright (c) 1994 The Regents of the University of California.
@@ -79,7 +79,6 @@
 #include <sys/mallocvar.h>
 
 MALLOC_DECLARE(M_FILECOREMNT);
-MALLOC_DECLARE(M_FILECORETMP);
 
 struct filecore_mnt {
 	struct mount *fc_mountp;
@@ -108,7 +107,26 @@ struct filecore_mnt {
 
 extern struct pool filecore_node_pool;
 
-VFS_PROTOS(filecore);
+int filecore_mount __P((struct mount *,
+	    const char *, void *, struct nameidata *, struct lwp *));
+int filecore_start __P((struct mount *, int, struct lwp *));
+int filecore_unmount __P((struct mount *, int, struct lwp *));
+int filecore_root __P((struct mount *, struct vnode **));
+int filecore_quotactl __P((struct mount *, int, uid_t, void *, struct lwp *));
+int filecore_statvfs __P((struct mount *, struct statvfs *, struct lwp *));
+int filecore_sync __P((struct mount *, int, kauth_cred_t, struct lwp *));
+int filecore_vget __P((struct mount *, ino_t, struct vnode **));
+int filecore_fhtovp __P((struct mount *, struct fid *, struct vnode **));
+int filecore_checkexp __P((struct mount *, struct mbuf *, int *,
+	    kauth_cred_t *));
+int filecore_vptofh __P((struct vnode *, struct fid *, size_t *));
+void filecore_init __P((void));
+void filecore_reinit __P((void));
+void filecore_done __P((void));
+
+#ifdef SYSCTL_SETUP_PROTO
+SYSCTL_SETUP_PROTO(sysctl_vfs_filecore_setup);
+#endif /* SYSCTL_SETUP_PROTO */
 
 extern int (**filecore_vnodeop_p) __P((void *));
 

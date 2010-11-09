@@ -1,4 +1,4 @@
-/* $NetBSD: linux_sg.c,v 1.13 2008/03/21 21:54:58 ad Exp $ */
+/* $NetBSD: linux_sg.c,v 1.8 2006/09/13 00:51:12 christos Exp $ */
 
 /*
  * Copyright (c) 2004 Soren S. Jorvang.  All rights reserved.
@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: linux_sg.c,v 1.13 2008/03/21 21:54:58 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: linux_sg.c,v 1.8 2006/09/13 00:51:12 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -41,14 +41,13 @@ __KERNEL_RCSID(0, "$NetBSD: linux_sg.c,v 1.13 2008/03/21 21:54:58 ad Exp $");
 #include <dev/scsipi/scsipi_all.h>
 #include <dev/scsipi/scsiconf.h>
 
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 
 #include <compat/linux/common/linux_types.h>
 #include <compat/linux/common/linux_ioctl.h>
 #include <compat/linux/common/linux_signal.h>
 #include <compat/linux/common/linux_sg.h>
-#include <compat/linux/common/linux_ipc.h>
-#include <compat/linux/common/linux_sem.h>
 
 #include <compat/linux/linux_syscallargs.h>
 
@@ -69,19 +68,22 @@ static int bsd_to_linux_host_status(int);
 static int bsd_to_linux_driver_status(int);
 
 int
-linux_ioctl_sg(struct lwp *l, const struct linux_sys_ioctl_args *uap,
+linux_ioctl_sg(struct lwp *l, struct linux_sys_ioctl_args *uap,
     register_t *retval)
 {
-	file_t *fp;
+	struct file *fp;
+	struct filedesc *fdp;
 	u_long com = SCARG(uap, com);
 	int error = 0;
-	int (*ioctlf)(file_t *, u_long, void *);
+	int (*ioctlf)(struct file *, u_long, void *, struct lwp *);
 	struct linux_sg_io_hdr lreq;
 	struct scsireq req;
 
-	if ((fp = fd_getfile(SCARG(uap, fd))) == NULL)
+        fdp = l->l_proc->p_fd;
+	if ((fp = fd_getfile(fdp, SCARG(uap, fd))) == NULL)
 		return EBADF;
 
+	FILE_USE(fp);
 	ioctlf = fp->f_ops->fo_ioctl;
 
 	*retval = 0;
@@ -140,7 +142,7 @@ linux_ioctl_sg(struct lwp *l, const struct linux_sys_ioctl_args *uap,
 		req.datalen = lreq.dxfer_len;
 		req.databuf = lreq.dxferp;
 
-		error = ioctlf(fp, SCIOCCOMMAND, &req);
+		error = ioctlf(fp, SCIOCCOMMAND, (caddr_t)&req, l);
 		if (error) {
 			DPRINTF(("SCIOCCOMMAND failed %d\n", error));
 			break;
@@ -209,8 +211,8 @@ linux_ioctl_sg(struct lwp *l, const struct linux_sys_ioctl_args *uap,
 		break;
 	}
 
- done:
-	fd_putfile(SCARG(uap, fd));
+done:
+	FILE_UNUSE(fp, l);
 
 	DPRINTF(("Return=%d\n", error));
 	return error;

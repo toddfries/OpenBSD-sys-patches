@@ -1,4 +1,4 @@
-/*	$NetBSD: denode.h,v 1.16 2007/11/26 19:01:46 pooka Exp $	*/
+/*	$NetBSD: denode.h,v 1.14 2006/09/22 17:45:21 xtraeme Exp $	*/
 
 /*-
  * Copyright (C) 1994, 1995, 1997 Wolfgang Solfrank.
@@ -241,7 +241,7 @@ struct denode {
 		msdosfs_detimes(dep, acc, mod, cre, gmtoff)
 
 /*
- * This overlays the fid structure (see fstypes.h)
+ * This overlays the fid structure (see mount.h)
  */
 struct defid {
 	u_int16_t defid_len;	/* length of structure */
@@ -300,7 +300,7 @@ int createde(struct denode *, struct denode *,
 		struct denode **, struct componentname *);
 int deextend(struct denode *, u_long, kauth_cred_t);
 int deget(struct msdosfsmount *, u_long, u_long, struct denode **);
-int detrunc(struct denode *, u_long, int, kauth_cred_t);
+int detrunc(struct denode *, u_long, int, kauth_cred_t, struct lwp *);
 int deupdat(struct denode *, int);
 int doscheckpath(struct denode *, struct denode *);
 int dosdirempty(struct denode *);

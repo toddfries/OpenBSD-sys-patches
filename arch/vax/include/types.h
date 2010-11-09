@@ -1,4 +1,4 @@
-/*	$NetBSD: types.h,v 1.39 2008/02/20 16:37:52 matt Exp $	*/
+/*	$NetBSD: types.h,v 1.32 2006/09/05 19:33:55 matt Exp $	*/
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -54,10 +54,7 @@ typedef unsigned long	vsize_t;
 
 typedef int		register_t;
 
-/*
- * BBCCI/BBSSI can operate on bytes so let's save some space.
- */
-typedef volatile char	__cpu_simple_lock_t;
+typedef volatile int		__cpu_simple_lock_t;
 
 #define __SIMPLELOCK_LOCKED	1
 #define __SIMPLELOCK_UNLOCKED	0
@@ -66,7 +63,9 @@ typedef volatile char	__cpu_simple_lock_t;
 #define	__NO_STRICT_ALIGNMENT
 
 #define	__HAVE_DEVICE_REGISTER
+#define	__HAVE_GENERIC_SOFT_INTERRUPTS
+#define	__HAVE_GENERIC_TODR
+#define	__HAVE_MD_RUNQUEUE
 #define	__HAVE_SYSCALL_INTERN
-#define	__HAVE_FAST_SOFTINTS
 
 #endif	/* _MACHTYPES_H_ */

@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile.inc,v 1.16 2009/02/28 16:11:39 tsutsui Exp $
+#	$NetBSD: Makefile.inc,v 1.13 2006/03/05 22:03:30 aymeric Exp $
 #
 #	Configuration variables (default values are below):
 #
@@ -20,10 +20,8 @@ FPSPDOTDIR?= ../../.
 
 FPSPDIR=	${S:S@^.@${FPSPDOTDIR}@:Q}/arch/m68k/fpsp
 FPSPOBJ=	${FPSPDST}/fpsp.o
-HAS_FPSP!=	grep '^\#define	FPSP	1$$' opt_fpsp.h || echo
-.if !empty(HAS_FPSP)
-FPSP=		${FPSPOBJ}
-.endif
+FPSP!=	printf "\#include \"opt_fpsp.h\"\n\#ifdef FPSP\n${FPSPOBJ}\n\#endif\n" | ${CPP} -traditional -P
+
 
 #	    CC=${CC:Q} CFLAGS=${CFLAGS:Q} \
 #	    AS=${AS:Q} AFLAGS=${AFLAGS:Q} \

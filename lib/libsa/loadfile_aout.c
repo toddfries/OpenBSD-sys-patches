@@ -1,4 +1,4 @@
-/* $NetBSD: loadfile_aout.c,v 1.13 2008/04/28 20:24:06 martin Exp $ */
+/* $NetBSD: loadfile_aout.c,v 1.8 2005/12/11 12:24:46 christos Exp $ */
 
 /*-
  * Copyright (c) 1997 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -85,7 +92,11 @@
 #ifdef BOOT_AOUT
 
 int
-loadfile_aout(int fd, struct exec *x, u_long *marks, int flags)
+loadfile_aout(fd, x, marks, flags)
+	int fd;
+	struct exec *x;
+	u_long *marks;
+	int flags;
 {
 	u_long entry = x->a_entry;
 	paddr_t aoutp = 0;
@@ -94,7 +105,6 @@ loadfile_aout(int fd, struct exec *x, u_long *marks, int flags)
 	paddr_t offset = marks[MARK_START];
 	u_long magic = N_GETMAGIC(*x);
 	int sub;
-	ssize_t nr;
 
 	/* some ports dont use the offset */
 	offset = offset;
@@ -134,13 +144,8 @@ loadfile_aout(int fd, struct exec *x, u_long *marks, int flags)
 	if (flags & LOAD_TEXT) {
 		PROGRESS(("%ld", x->a_text));
 
-		nr = READ(fd, maxp, x->a_text - sub);
-		if (nr == -1) {
-			WARN(("read text"));
-			return 1;
-		}
-		if (nr != (ssize_t)(x->a_text - sub)) {
-			errno = EIO;
+		if (READ(fd, maxp, x->a_text - sub) !=
+		    (ssize_t)(x->a_text - sub)) {
 			WARN(("read text"));
 			return 1;
 		}
@@ -174,14 +179,7 @@ loadfile_aout(int fd, struct exec *x, u_long *marks, int flags)
 	if (flags & LOAD_DATA) {
 		PROGRESS(("+%ld", x->a_data));
 
-		marks[MARK_DATA] = LOADADDR(maxp);
-		nr = READ(fd, maxp, x->a_data);
-		if (nr == -1) {
-			WARN(("read data"));
-			return 1;
-		}
-		if (nr != (ssize_t)x->a_data) {
-			errno = EIO;
+		if (READ(fd, maxp, x->a_data) != (ssize_t)x->a_data) {
 			WARN(("read data"));
 			return 1;
 		}
@@ -226,13 +224,7 @@ loadfile_aout(int fd, struct exec *x, u_long *marks, int flags)
 		if (flags & LOAD_SYM) {
 			PROGRESS(("+[%ld", x->a_syms));
 
-			nr = READ(fd, maxp, x->a_syms);
-			if (nr == -1) {
-				WARN(("read symbols"));
-				return 1;
-			}
-			if (nr != (ssize_t)x->a_syms) {
-				errno = EIO;
+			if (READ(fd, maxp, x->a_syms) != (ssize_t)x->a_syms) {
 				WARN(("read symbols"));
 				return 1;
 			}
@@ -245,13 +237,7 @@ loadfile_aout(int fd, struct exec *x, u_long *marks, int flags)
 		if (flags & (LOAD_SYM|COUNT_SYM))
 			maxp += x->a_syms;
 
-		nr = read(fd, &cc, sizeof(cc));
-		if (nr == -1) {
-			WARN(("read string table"));
-			return 1;
-		}
-		if (nr != sizeof(cc)) {
-			errno = EIO;
+		if (read(fd, &cc, sizeof(cc)) != sizeof(cc)) {
 			WARN(("read string table"));
 			return 1;
 		}
@@ -273,13 +259,7 @@ loadfile_aout(int fd, struct exec *x, u_long *marks, int flags)
 		}
 
 		if (flags & LOAD_SYM) {
-			nr = READ(fd, maxp, cc);
-			if (nr == -1) {
-				WARN(("read strings"));
-				return 1;
-			}
-			if (nr != cc) {
-				errno = EIO;
+			if (READ(fd, maxp, cc) != cc) {
 				WARN(("read strings"));
 				return 1;
 			}

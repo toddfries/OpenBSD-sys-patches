@@ -1,30 +1,4 @@
-/* $NetBSD: kern_tc.c,v 1.38 2009/01/11 02:45:52 christos Exp $ */
-
-/*-
- * Copyright (c) 2008 The NetBSD Foundation, Inc.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
- * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
- * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
- * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
- */
+/* $NetBSD: kern_tc.c,v 1.21 2007/10/21 14:55:09 simonb Exp $ */
 
 /*-
  * ----------------------------------------------------------------------------
@@ -37,11 +11,12 @@
 
 #include <sys/cdefs.h>
 /* __FBSDID("$FreeBSD: src/sys/kern/kern_tc.c,v 1.166 2005/09/19 22:16:31 andre Exp $"); */
-__KERNEL_RCSID(0, "$NetBSD: kern_tc.c,v 1.38 2009/01/11 02:45:52 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kern_tc.c,v 1.21 2007/10/21 14:55:09 simonb Exp $");
 
 #include "opt_ntp.h"
 
 #include <sys/param.h>
+#ifdef __HAVE_TIMECOUNTER	/* XXX */
 #include <sys/kernel.h>
 #include <sys/reboot.h>	/* XXX just to get AB_VERBOSE */
 #include <sys/sysctl.h>
@@ -52,8 +27,6 @@ __KERNEL_RCSID(0, "$NetBSD: kern_tc.c,v 1.38 2009/01/11 02:45:52 christos Exp $"
 #include <sys/timex.h>
 #include <sys/evcnt.h>
 #include <sys/kauth.h>
-#include <sys/mutex.h>
-#include <sys/atomic.h>
 
 /*
  * A large step happens on boot.  This constant detects such steps.
@@ -124,17 +97,13 @@ static struct bintime timebasebin;
 
 static int timestepwarnings;
 
-kmutex_t timecounter_lock;
-static u_int timecounter_mods;
-static u_int timecounter_bad;
-
 #ifdef __FreeBSD__
 SYSCTL_INT(_kern_timecounter, OID_AUTO, stepwarnings, CTLFLAG_RW,
     &timestepwarnings, 0, "");
 #endif /* __FreeBSD__ */
 
 /*
- * sysctl helper routine for kern.timercounter.hardware
+ * sysctl helper routine for kern.timercounter.current
  */
 static int
 sysctl_kern_timecounter_hardware(SYSCTLFN_ARGS)
@@ -159,51 +128,54 @@ sysctl_kern_timecounter_hardware(SYSCTLFN_ARGS)
 	    strncmp(newname, tc->tc_name, sizeof(newname)) == 0)
 		return error;
 
-	if (l != NULL && (error = kauth_authorize_system(l->l_cred, 
-	    KAUTH_SYSTEM_TIME, KAUTH_REQ_SYSTEM_TIME_TIMECOUNTERS, newname,
-	    NULL, NULL)) != 0)
+	if (l != NULL && (error = kauth_authorize_generic(l->l_cred, 
+	    KAUTH_GENERIC_ISSUSER, NULL)) != 0)
 		return (error);
 
-	if (!cold)
-		mutex_spin_enter(&timecounter_lock);
-	error = EINVAL;
+	/* XXX locking */
+
 	for (newtc = timecounters; newtc != NULL; newtc = newtc->tc_next) {
 		if (strcmp(newname, newtc->tc_name) != 0)
 			continue;
+
 		/* Warm up new timecounter. */
 		(void)newtc->tc_get_timecount(newtc);
 		(void)newtc->tc_get_timecount(newtc);
+
 		timecounter = newtc;
-		error = 0;
-		break;
+
+		/* XXX unlock */
+
+		return (0);
 	}
-	if (!cold)
-		mutex_spin_exit(&timecounter_lock);
-	return error;
+
+	/* XXX unlock */
+
+	return (EINVAL);
 }
 
 static int
 sysctl_kern_timecounter_choice(SYSCTLFN_ARGS)
 {
 	char buf[MAX_TCNAMELEN+48];
-	char *where;
+	char *where = oldp;
 	const char *spc;
 	struct timecounter *tc;
 	size_t needed, left, slen;
-	int error, mods;
+	int error;
 
 	if (newp != NULL)
 		return (EPERM);
 	if (namelen != 0)
 		return (EINVAL);
 
-	mutex_spin_enter(&timecounter_lock);
- retry:
 	spc = "";
 	error = 0;
 	needed = 0;
 	left = *oldlenp;
-	where = oldp;
+
+	/* XXX locking */
+
 	for (tc = timecounters; error == 0 && tc != NULL; tc = tc->tc_next) {
 		if (where == NULL) {
 			needed += sizeof(buf);  /* be conservative */
@@ -213,20 +185,16 @@ sysctl_kern_timecounter_choice(SYSCTLFN_ARGS)
 					tc->tc_frequency);
 			if (left < slen + 1)
 				break;
-		 	mods = timecounter_mods;
-			mutex_spin_exit(&timecounter_lock);
+			/* XXX use sysctl_copyout? (from sysctl_hw_disknames) */
 			error = copyout(buf, where, slen + 1);
-			mutex_spin_enter(&timecounter_lock);
-			if (mods != timecounter_mods) {
-				goto retry;
-			}
 			spc = " ";
 			where += slen;
 			needed += slen;
 			left -= slen;
 		}
 	}
-	mutex_spin_exit(&timecounter_lock);
+
+	/* XXX unlock */
 
 	*oldlenp = needed;
 	return (error);
@@ -267,21 +235,18 @@ SYSCTL_SETUP(sysctl_timecounter_setup, "sysctl timecounter setup")
 	}
 }
 
-#ifdef TC_COUNTERS
 #define	TC_STATS(name)							\
 static struct evcnt n##name =						\
     EVCNT_INITIALIZER(EVCNT_TYPE_MISC, NULL, "timecounter", #name);	\
 EVCNT_ATTACH_STATIC(n##name)
+
 TC_STATS(binuptime);    TC_STATS(nanouptime);    TC_STATS(microuptime);
 TC_STATS(bintime);      TC_STATS(nanotime);      TC_STATS(microtime);
 TC_STATS(getbinuptime); TC_STATS(getnanouptime); TC_STATS(getmicrouptime);
 TC_STATS(getbintime);   TC_STATS(getnanotime);   TC_STATS(getmicrotime);
 TC_STATS(setclock);
-#define	TC_COUNT(var)	var.ev_count++
+
 #undef TC_STATS
-#else
-#define	TC_COUNT(var)	/* nothing */
-#endif	/* TC_COUNTERS */
 
 static void tc_windup(void);
 
@@ -311,12 +276,14 @@ binuptime(struct bintime *bt)
 	struct timehands *th;
 	u_int gen;
 
-	TC_COUNT(nbinuptime);
+	nbinuptime.ev_count++;
 	do {
 		th = timehands;
 		gen = th->th_generation;
+		mb_read();
 		*bt = th->th_offset;
 		bintime_addx(bt, th->th_scale * tc_delta(th));
+		mb_read();
 	} while (gen == 0 || gen != th->th_generation);
 }
 
@@ -325,7 +292,7 @@ nanouptime(struct timespec *tsp)
 {
 	struct bintime bt;
 
-	TC_COUNT(nnanouptime);
+	nnanouptime.ev_count++;
 	binuptime(&bt);
 	bintime2timespec(&bt, tsp);
 }
@@ -335,7 +302,7 @@ microuptime(struct timeval *tvp)
 {
 	struct bintime bt;
 
-	TC_COUNT(nmicrouptime);
+	nmicrouptime.ev_count++;
 	binuptime(&bt);
 	bintime2timeval(&bt, tvp);
 }
@@ -344,7 +311,7 @@ void
 bintime(struct bintime *bt)
 {
 
-	TC_COUNT(nbintime);
+	nbintime.ev_count++;
 	binuptime(bt);
 	bintime_add(bt, &timebasebin);
 }
@@ -354,7 +321,7 @@ nanotime(struct timespec *tsp)
 {
 	struct bintime bt;
 
-	TC_COUNT(nnanotime);
+	nnanotime.ev_count++;
 	bintime(&bt);
 	bintime2timespec(&bt, tsp);
 }
@@ -364,7 +331,7 @@ microtime(struct timeval *tvp)
 {
 	struct bintime bt;
 
-	TC_COUNT(nmicrotime);
+	nmicrotime.ev_count++;
 	bintime(&bt);
 	bintime2timeval(&bt, tvp);
 }
@@ -375,11 +342,13 @@ getbinuptime(struct bintime *bt)
 	struct timehands *th;
 	u_int gen;
 
-	TC_COUNT(ngetbinuptime);
+	ngetbinuptime.ev_count++;
 	do {
 		th = timehands;
 		gen = th->th_generation;
+		mb_read();
 		*bt = th->th_offset;
+		mb_read();
 	} while (gen == 0 || gen != th->th_generation);
 }
 
@@ -389,11 +358,13 @@ getnanouptime(struct timespec *tsp)
 	struct timehands *th;
 	u_int gen;
 
-	TC_COUNT(ngetnanouptime);
+	ngetnanouptime.ev_count++;
 	do {
 		th = timehands;
 		gen = th->th_generation;
+		mb_read();
 		bintime2timespec(&th->th_offset, tsp);
+		mb_read();
 	} while (gen == 0 || gen != th->th_generation);
 }
 
@@ -403,11 +374,13 @@ getmicrouptime(struct timeval *tvp)
 	struct timehands *th;
 	u_int gen;
 
-	TC_COUNT(ngetmicrouptime);
+	ngetmicrouptime.ev_count++;
 	do {
 		th = timehands;
 		gen = th->th_generation;
+		mb_read();
 		bintime2timeval(&th->th_offset, tvp);
+		mb_read();
 	} while (gen == 0 || gen != th->th_generation);
 }
 
@@ -417,11 +390,13 @@ getbintime(struct bintime *bt)
 	struct timehands *th;
 	u_int gen;
 
-	TC_COUNT(ngetbintime);
+	ngetbintime.ev_count++;
 	do {
 		th = timehands;
 		gen = th->th_generation;
+		mb_read();
 		*bt = th->th_offset;
+		mb_read();
 	} while (gen == 0 || gen != th->th_generation);
 	bintime_add(bt, &timebasebin);
 }
@@ -432,11 +407,13 @@ getnanotime(struct timespec *tsp)
 	struct timehands *th;
 	u_int gen;
 
-	TC_COUNT(ngetnanotime);
+	ngetnanotime.ev_count++;
 	do {
 		th = timehands;
 		gen = th->th_generation;
+		mb_read();
 		*tsp = th->th_nanotime;
+		mb_read();
 	} while (gen == 0 || gen != th->th_generation);
 }
 
@@ -446,11 +423,13 @@ getmicrotime(struct timeval *tvp)
 	struct timehands *th;
 	u_int gen;
 
-	TC_COUNT(ngetmicrotime);
+	ngetmicrotime.ev_count++;
 	do {
 		th = timehands;
 		gen = th->th_generation;
+		mb_read();
 		*tvp = th->th_microtime;
+		mb_read();
 	} while (gen == 0 || gen != th->th_generation);
 }
 
@@ -461,6 +440,7 @@ void
 tc_init(struct timecounter *tc)
 {
 	u_int u;
+	int s;
 
 	u = tc->tc_frequency / tc->tc_counter_mask;
 	/* XXX: We need some margin here, 10% is a guess */
@@ -479,91 +459,29 @@ tc_init(struct timecounter *tc)
 		    tc->tc_quality);
 	}
 
-	mutex_spin_enter(&timecounter_lock);
+	s = splclock();
+
 	tc->tc_next = timecounters;
 	timecounters = tc;
-	timecounter_mods++;
 	/*
 	 * Never automatically use a timecounter with negative quality.
 	 * Even though we run on the dummy counter, switching here may be
 	 * worse since this timecounter may not be monotonous.
 	 */
-	if (tc->tc_quality >= 0 && (tc->tc_quality > timecounter->tc_quality ||
-	    (tc->tc_quality == timecounter->tc_quality &&
-	    tc->tc_frequency > timecounter->tc_frequency))) {
-		(void)tc->tc_get_timecount(tc);
-		(void)tc->tc_get_timecount(tc);
-		timecounter = tc;
-		tc_windup();
-	}
-	mutex_spin_exit(&timecounter_lock);
-}
+	if (tc->tc_quality < 0)
+		goto out;
+	if (tc->tc_quality < timecounter->tc_quality)
+		goto out;
+	if (tc->tc_quality == timecounter->tc_quality &&
+	    tc->tc_frequency < timecounter->tc_frequency)
+		goto out;
+	(void)tc->tc_get_timecount(tc);
+	(void)tc->tc_get_timecount(tc);
+	timecounter = tc;
+	tc_windup();
 
-/*
- * Pick a new timecounter due to the existing counter going bad.
- */
-static void
-tc_pick(void)
-{
-	struct timecounter *best, *tc;
-
-	KASSERT(mutex_owned(&timecounter_lock));
-
-	for (best = tc = timecounters; tc != NULL; tc = tc->tc_next) {
-		if (tc->tc_quality > best->tc_quality)
-			best = tc;
-		else if (tc->tc_quality < best->tc_quality)
-			continue;
-		else if (tc->tc_frequency > best->tc_frequency)
-			best = tc;
-	}
-	(void)best->tc_get_timecount(best);
-	(void)best->tc_get_timecount(best);
-	timecounter = best;
-}
-
-/*
- * A timecounter has gone bad, arrange to pick a new one at the next
- * clock tick.
- */
-void
-tc_gonebad(struct timecounter *tc)
-{
-
-	tc->tc_quality = -100;
-	membar_producer();
-	atomic_inc_uint(&timecounter_bad);
-}
-
-/*
- * Stop using a timecounter and remove it from the timecounters list.
- */
-int
-tc_detach(struct timecounter *target)
-{
-	struct timecounter *tc;
-	struct timecounter **tcp = NULL;
-	int rc = 0;
-
-	mutex_spin_enter(&timecounter_lock);
-	for (tcp = &timecounters, tc = timecounters;
-	     tc != NULL;
-	     tcp = &tc->tc_next, tc = tc->tc_next) {
-		if (tc == target)
-			break;
-	}
-	if (tc == NULL) {
-		rc = ESRCH;
-	} else {
-		*tcp = tc->tc_next;
-		if (timecounter == target) {
-			tc_pick();
-			tc_windup();
-		}
-		timecounter_mods++;
-	}
-	mutex_spin_exit(&timecounter_lock);
-	return rc;
+ out:
+	splx(s);
 }
 
 /* Report the frequency of the current timecounter. */
@@ -577,28 +495,28 @@ tc_getfrequency(void)
 /*
  * Step our concept of UTC.  This is done by modifying our estimate of
  * when we booted.
+ * XXX: not locked.
  */
 void
-tc_setclock(const struct timespec *ts)
+tc_setclock(struct timespec *ts)
 {
 	struct timespec ts2;
 	struct bintime bt, bt2;
 
-	mutex_spin_enter(&timecounter_lock);
-	TC_COUNT(nsetclock);
+	nsetclock.ev_count++;
 	binuptime(&bt2);
 	timespec2bintime(ts, &bt);
 	bintime_sub(&bt, &bt2);
 	bintime_add(&bt2, &timebasebin);
 	timebasebin = bt;
-	tc_windup();
-	mutex_spin_exit(&timecounter_lock);
 
+	/* XXX fiddle all the little crinkly bits around the fiords... */
+	tc_windup();
 	if (timestepwarnings) {
 		bintime2timespec(&bt2, &ts2);
-		log(LOG_INFO, "Time stepped from %lld.%09ld to %lld.%09ld\n",
-		    (long long)ts2.tv_sec, ts2.tv_nsec,
-		    (long long)ts->tv_sec, ts->tv_nsec);
+		log(LOG_INFO, "Time stepped from %jd.%09ld to %jd.%09ld\n",
+		    (intmax_t)ts2.tv_sec, ts2.tv_nsec,
+		    (intmax_t)ts->tv_sec, ts->tv_nsec);
 	}
 }
 
@@ -617,8 +535,6 @@ tc_windup(void)
 	int i, s_update;
 	time_t t;
 
-	KASSERT(mutex_owned(&timecounter_lock));
-
 	s_update = 0;
 
 	/*
@@ -631,7 +547,7 @@ tc_windup(void)
 	th = tho->th_next;
 	ogen = th->th_generation;
 	th->th_generation = 0;
-	membar_producer();
+	mb_write();
 	bcopy(tho, th, offsetof(struct timehands, th_generation));
 
 	/*
@@ -687,6 +603,7 @@ tc_windup(void)
 	/* XXX shouldn't do this here.  Should force non-`get' versions. */
 	bintime2timeval(&bt, &th->th_microtime);
 	bintime2timespec(&bt, &th->th_nanotime);
+
 	/* Now is a good time to change timecounters. */
 	if (th->th_counter != timecounter) {
 		th->th_counter = timecounter;
@@ -730,7 +647,7 @@ tc_windup(void)
 	 */
 	if (++ogen == 0)
 		ogen = 1;
-	membar_producer();
+	mb_write();
 	th->th_generation = ogen;
 
 	/*
@@ -739,19 +656,67 @@ tc_windup(void)
 	 */
 	time_second = th->th_microtime.tv_sec;
 	time_uptime = th->th_offset.sec;
-	membar_producer();
+	mb_write();
 	timehands = th;
-
-	/*
-	 * Force users of the old timehand to move on.  This is
-	 * necessary for MP systems; we need to ensure that the
-	 * consumers will move away from the old timehand before
-	 * we begin updating it again when we eventually wrap
-	 * around.
-	 */
-	if (++tho->th_generation == 0)
-		tho->th_generation = 1;
 }
+
+#ifdef __FreeBSD__
+/* Report or change the active timecounter hardware. */
+static int
+sysctl_kern_timecounter_hardware(SYSCTL_HANDLER_ARGS)
+{
+	char newname[32];
+	struct timecounter *newtc, *tc;
+	int error;
+
+	tc = timecounter;
+	strlcpy(newname, tc->tc_name, sizeof(newname));
+
+	error = sysctl_handle_string(oidp, &newname[0], sizeof(newname), req);
+	if (error != 0 || req->newptr == NULL ||
+	    strcmp(newname, tc->tc_name) == 0)
+		return (error);
+
+	for (newtc = timecounters; newtc != NULL; newtc = newtc->tc_next) {
+		if (strcmp(newname, newtc->tc_name) != 0)
+			continue;
+
+		/* Warm up new timecounter. */
+		(void)newtc->tc_get_timecount(newtc);
+		(void)newtc->tc_get_timecount(newtc);
+
+		timecounter = newtc;
+		return (0);
+	}
+	return (EINVAL);
+}
+
+SYSCTL_PROC(_kern_timecounter, OID_AUTO, hardware, CTLTYPE_STRING | CTLFLAG_RW,
+    0, 0, sysctl_kern_timecounter_hardware, "A", "");
+
+
+/* Report or change the active timecounter hardware. */
+static int
+sysctl_kern_timecounter_choice(SYSCTL_HANDLER_ARGS)
+{
+	char buf[32], *spc;
+	struct timecounter *tc;
+	int error;
+
+	spc = "";
+	error = 0;
+	for (tc = timecounters; error == 0 && tc != NULL; tc = tc->tc_next) {
+		sprintf(buf, "%s%s(%d)",
+		    spc, tc->tc_name, tc->tc_quality);
+		error = SYSCTL_OUT(req, buf, strlen(buf));
+		spc = " ";
+	}
+	return (error);
+}
+
+SYSCTL_PROC(_kern_timecounter, OID_AUTO, choice, CTLTYPE_STRING | CTLFLAG_RD,
+    0, 0, sysctl_kern_timecounter_choice, "A", "");
+#endif /* __FreeBSD__ */
 
 /*
  * RFC 2783 PPS-API implementation.
@@ -765,8 +730,6 @@ pps_ioctl(u_long cmd, void *data, struct pps_state *pps)
 #ifdef PPS_SYNC
 	int *epi;
 #endif
-
-	KASSERT(mutex_owned(&timecounter_lock));
 
 	KASSERT(pps != NULL); /* XXX ("NULL pps pointer in pps_ioctl") */
 	switch (cmd) {
@@ -812,9 +775,6 @@ pps_ioctl(u_long cmd, void *data, struct pps_state *pps)
 void
 pps_init(struct pps_state *pps)
 {
-
-	KASSERT(mutex_owned(&timecounter_lock));
-
 	pps->ppscap |= PPS_TSFMT_TSPEC;
 	if (pps->ppscap & PPS_CAPTUREASSERT)
 		pps->ppscap |= PPS_OFFSETASSERT;
@@ -827,9 +787,7 @@ pps_capture(struct pps_state *pps)
 {
 	struct timehands *th;
 
-	KASSERT(mutex_owned(&timecounter_lock));
-	KASSERT(pps != NULL);
-
+	KASSERT(pps != NULL); /* XXX ("NULL pps pointer in pps_capture") */
 	th = timehands;
 	pps->capgen = th->th_generation;
 	pps->capth = th;
@@ -846,8 +804,6 @@ pps_event(struct pps_state *pps, int event)
 	u_int tcount, *pcount;
 	int foff, fhard;
 	pps_seq_t *pseq;
-
-	KASSERT(mutex_owned(&timecounter_lock));
 
 	KASSERT(pps != NULL); /* XXX ("NULL pps pointer in pps_event") */
 	/* If the timecounter was wound up underneath us, bail out. */
@@ -937,6 +893,9 @@ pps_event(struct pps_state *pps, int event)
  */
 
 static int tc_tick;
+#ifdef __FreeBSD__
+SYSCTL_INT(_kern_timecounter, OID_AUTO, tick, CTLFLAG_RD, &tc_tick, 0, "");
+#endif /* __FreeBSD__ */
 
 void
 tc_ticktock(void)
@@ -946,24 +905,13 @@ tc_ticktock(void)
 	if (++count < tc_tick)
 		return;
 	count = 0;
-	mutex_spin_enter(&timecounter_lock);
-	if (timecounter_bad != 0) {
-		/* An existing timecounter has gone bad, pick a new one. */
-		(void)atomic_swap_uint(&timecounter_bad, 0);
-		if (timecounter->tc_quality < 0) {
-			tc_pick();
-		}
-	}
 	tc_windup();
-	mutex_spin_exit(&timecounter_lock);
 }
 
 void
 inittimecounter(void)
 {
 	u_int p;
-
-	mutex_init(&timecounter_lock, MUTEX_DEFAULT, IPL_HIGH);
 
 	/*
 	 * Set the initial timeout to
@@ -985,3 +933,8 @@ inittimecounter(void)
 	(void)timecounter->tc_get_timecount(timecounter);
 	(void)timecounter->tc_get_timecount(timecounter);
 }
+
+#ifdef __FreeBSD__
+SYSINIT(timecounter, SI_SUB_CLOCKS, SI_ORDER_SECOND, inittimecounter, NULL)
+#endif /* __FreeBSD__ */
+#endif /* __HAVE_TIMECOUNTER */

@@ -1,7 +1,7 @@
-/*	$NetBSD: tprof_pmi.c,v 1.5 2009/03/10 14:45:02 yamt Exp $	*/
+/*	$NetBSD: tprof_pmi.c,v 1.2 2008/01/04 15:44:58 yamt Exp $	*/
 
 /*-
- * Copyright (c)2008,2009 YAMAMOTO Takashi,
+ * Copyright (c)2008 YAMAMOTO Takashi,
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -27,12 +27,11 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: tprof_pmi.c,v 1.5 2009/03/10 14:45:02 yamt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: tprof_pmi.c,v 1.2 2008/01/04 15:44:58 yamt Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
-#include <sys/module.h>
 
 #include <sys/cpu.h>
 #include <sys/xcall.h>
@@ -40,8 +39,6 @@ __KERNEL_RCSID(0, "$NetBSD: tprof_pmi.c,v 1.5 2009/03/10 14:45:02 yamt Exp $");
 #include <dev/tprof/tprof.h>
 
 #include <x86/tprof.h>
-#include <x86/nmi.h>
-
 #include <machine/db_machdep.h>	/* PC_REGS */
 #include <machine/cpuvar.h>	/* cpu_vendor */
 #include <machine/cputypes.h>	/* CPUVENDER_* */
@@ -102,9 +99,6 @@ static uint64_t counter_val = 5000000;
 static uint64_t counter_reset_val;
 static uint32_t tprof_pmi_lapic_saved[MAXCPUS];
 
-static nmi_handler_t *tprof_pmi_nmi_handle;
-static tprof_backend_cookie_t *tprof_cookie;
-
 static void
 tprof_pmi_start_cpu(void *arg1, void *arg2)
 {
@@ -156,15 +150,54 @@ tprof_pmi_stop_cpu(void *arg1, void *arg2)
 	i82489_writereg(LAPIC_PCINT, tprof_pmi_lapic_saved[cpu_index(ci)]);
 }
 
-static int
-tprof_pmi_nmi(const struct trapframe *tf, void *dummy)
+uint64_t
+tprof_backend_estimate_freq(void)
+{
+	uint64_t cpufreq = curcpu()->ci_tsc_freq;
+	uint64_t freq = 10000;
+
+	counter_val = cpufreq / freq;
+	if (counter_val == 0) {
+		counter_val = UINT64_C(4000000000) / freq;
+		return freq;
+	}
+	return freq;
+}
+
+int
+tprof_backend_start(void)
+{
+	struct cpu_info * const ci = curcpu();
+	uint64_t xc;
+
+	if (!(cpu_vendor == CPUVENDOR_INTEL &&
+	    CPUID2FAMILY(ci->ci_signature) == 15)) {
+		return ENOTSUP;
+	}
+
+	counter_reset_val = - counter_val + 1;
+	xc = xc_broadcast(0, tprof_pmi_start_cpu, NULL, NULL);
+	xc_wait(xc);
+
+	return 0;
+}
+
+void
+tprof_backend_stop(void)
+{
+	uint64_t xc;
+
+	xc = xc_broadcast(0, tprof_pmi_stop_cpu, NULL, NULL);
+	xc_wait(xc);
+}
+
+int
+tprof_pmi_nmi(const struct trapframe *tf)
 {
 	struct cpu_info * const ci = curcpu();
 	const struct msrs *msr;
 	uint32_t pcint;
 	uint64_t cccr;
-
-	KASSERT(dummy == NULL);
 
 	if (ci->ci_smtid >= 2) {
 		/* not ours */
@@ -180,7 +213,7 @@ tprof_pmi_nmi(const struct trapframe *tf, void *dummy)
 	}
 
 	/* record a sample */
-	tprof_sample(tprof_cookie, tf);
+	tprof_sample(tf);
 
 	/* reset counter */
 	wrmsr(msr->msr_counter, counter_reset_val);
@@ -192,82 +225,4 @@ tprof_pmi_nmi(const struct trapframe *tf, void *dummy)
 	i82489_writereg(LAPIC_PCINT, pcint & ~LAPIC_LVT_MASKED);
 
 	return 1;
-}
-
-static uint64_t
-tprof_pmi_estimate_freq(void)
-{
-	uint64_t cpufreq = curcpu()->ci_data.cpu_cc_freq;
-	uint64_t freq = 10000;
-
-	counter_val = cpufreq / freq;
-	if (counter_val == 0) {
-		counter_val = UINT64_C(4000000000) / freq;
-		return freq;
-	}
-	return freq;
-}
-
-static int
-tprof_pmi_start(tprof_backend_cookie_t *cookie)
-{
-	struct cpu_info * const ci = curcpu();
-	uint64_t xc;
-
-	if (!(cpu_vendor == CPUVENDOR_INTEL &&
-	    CPUID2FAMILY(ci->ci_signature) == 15)) {
-		return ENOTSUP;
-	}
-
-	KASSERT(tprof_pmi_nmi_handle == NULL);
-	tprof_pmi_nmi_handle = nmi_establish(tprof_pmi_nmi, NULL);
-
-	counter_reset_val = - counter_val + 1;
-	xc = xc_broadcast(0, tprof_pmi_start_cpu, NULL, NULL);
-	xc_wait(xc);
-
-	KASSERT(tprof_cookie == NULL);
-	tprof_cookie = cookie;
-
-	return 0;
-}
-
-static void
-tprof_pmi_stop(tprof_backend_cookie_t *cookie)
-{
-	uint64_t xc;
-
-	xc = xc_broadcast(0, tprof_pmi_stop_cpu, NULL, NULL);
-	xc_wait(xc);
-
-	KASSERT(tprof_pmi_nmi_handle != NULL);
-	KASSERT(tprof_cookie == cookie);
-	nmi_disestablish(tprof_pmi_nmi_handle);
-	tprof_pmi_nmi_handle = NULL;
-	tprof_cookie = NULL;
-}
-
-static const tprof_backend_ops_t tprof_pmi_ops = {
-	.tbo_estimate_freq = tprof_pmi_estimate_freq,
-	.tbo_start = tprof_pmi_start,
-	.tbo_stop = tprof_pmi_stop,
-};
-
-MODULE(MODULE_CLASS_DRIVER, tprof_pmi, "tprof");
-
-static int
-tprof_pmi_modcmd(modcmd_t cmd, void *arg)
-{
-
-	switch (cmd) {
-	case MODULE_CMD_INIT:
-		return tprof_backend_register("tprof_pmi", &tprof_pmi_ops,
-		    TPROF_BACKEND_VERSION);
-
-	case MODULE_CMD_FINI:
-		return tprof_backend_unregister("tprof_pmi");
-
-	default:
-		return ENOTTY;
-	}
 }

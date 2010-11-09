@@ -1,4 +1,4 @@
-/*	$NetBSD: krpc_subr.c,v 1.33 2008/04/24 11:38:39 ad Exp $	*/
+/*	$NetBSD: krpc_subr.c,v 1.31 2006/04/15 01:25:54 christos Exp $	*/
 
 /*
  * Copyright (c) 1995 Gordon Ross, Adam Glass
@@ -43,7 +43,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: krpc_subr.c,v 1.33 2008/04/24 11:38:39 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: krpc_subr.c,v 1.31 2006/04/15 01:25:54 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -246,7 +246,7 @@ krpc_call(sa, prog, vers, func, data, from_p, l)
 	/*
 	 * Create socket and set its receive timeout.
 	 */
-	if ((error = socreate(AF_INET, &so, SOCK_DGRAM, 0, l, NULL)))
+	if ((error = socreate(AF_INET, &so, SOCK_DGRAM, 0, l)))
 		goto out;
 
 	if ((error = nfs_boot_setrecvtimo(so)))
@@ -281,7 +281,7 @@ krpc_call(sa, prog, vers, func, data, from_p, l)
 	 */
 	nam = m_get(M_WAIT, MT_SONAME);
 	sin = mtod(nam, struct sockaddr_in *);
-	memcpy((void *)sin, (void *)sa,
+	memcpy((caddr_t)sin, (caddr_t)sa,
 		  (nam->m_len = sa->sin_len));
 
 	/*
@@ -291,7 +291,7 @@ krpc_call(sa, prog, vers, func, data, from_p, l)
 	mhead->m_next = *data;
 	call = mtod(mhead, struct rpc_call *);
 	mhead->m_len = sizeof(*call);
-	memset((void *)call, 0, sizeof(*call));
+	memset((caddr_t)call, 0, sizeof(*call));
 	/* rpc_call part */
 	xid++;
 	call->rp_xid = txdr_unsigned(xid);

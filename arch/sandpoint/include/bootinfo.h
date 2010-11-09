@@ -1,4 +1,4 @@
-/*	$NetBSD: bootinfo.h,v 1.4 2007/10/17 19:56:56 garbled Exp $	*/
+/*	$NetBSD: bootinfo.h,v 1.3 2005/12/11 12:18:51 christos Exp $	*/
 
 /*
  * Copyright (c) 1997
@@ -27,26 +27,16 @@
  */
 
 #ifndef	_MACHINE_BOOTINFO_H_
-#define _MACHINE_BOOTINFO_H_
-
-#define BOOTINFO_MAGIC	0xb007babe
+#define	_MACHINE_BOOTINFO_H_
 
 struct btinfo_common {
 	int next;		/* offset of next item, or zero */
 	int type;
 };
 
-#define BTINFO_MAGIC		1
-#define BTINFO_MEMORY		2
-#define BTINFO_CONSOLE		3
-#define BTINFO_CLOCK		4
-#define BTINFO_BOOTPATH		5
-#define BTINFO_ROOTDEVICE	6
-
-struct btinfo_magic {
-	struct btinfo_common common;
-	unsigned magic;
-};
+#define BTINFO_MEMORY	0
+#define BTINFO_CONSOLE	1
+#define	BTINFO_CLOCK	2
 
 struct btinfo_memory {
 	struct btinfo_common common;
@@ -55,7 +45,7 @@ struct btinfo_memory {
 
 struct btinfo_console {
 	struct btinfo_common common;
-	char devname[8];
+	char devname[4];
 	int addr;
 	int speed;
 };
@@ -65,21 +55,10 @@ struct btinfo_clock {
 	int ticks_per_sec;
 };
 
-struct btinfo_bootpath {
-	struct btinfo_common common;
-	char bootpath[80];
-};
-
-struct btinfo_rootdevice {
-	struct btinfo_common common;
-	char devname[16];
-	unsigned cookie;
-};
-
-#define BOOTINFO_MAXSIZE 4096
-
 #ifdef _KERNEL
-void *lookup_bootinfo(int);
+void *lookup_bootinfo __P((int));
 #endif
+
+#define BOOTINFO_MAXSIZE	0xd0
 
 #endif	/* _MACHINE_BOOTINFO_H_ */

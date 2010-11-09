@@ -1,4 +1,4 @@
-/*	$NetBSD: if_ep_pcmcia.c,v 1.62 2008/08/27 05:33:47 christos Exp $	*/
+/*	$NetBSD: if_ep_pcmcia.c,v 1.59 2007/10/19 12:01:04 ad Exp $	*/
 
 /*-
  * Copyright (c) 1998, 2000, 2004 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -60,7 +67,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_ep_pcmcia.c,v 1.62 2008/08/27 05:33:47 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_ep_pcmcia.c,v 1.59 2007/10/19 12:01:04 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -90,9 +97,9 @@ __KERNEL_RCSID(0, "$NetBSD: if_ep_pcmcia.c,v 1.62 2008/08/27 05:33:47 christos E
 #include <dev/pcmcia/pcmciavar.h>
 #include <dev/pcmcia/pcmciadevs.h>
 
-int	ep_pcmcia_match(device_t, cfdata_t, void *);
-void	ep_pcmcia_attach(device_t, device_t, void *);
-int	ep_pcmcia_detach(device_t, int);
+int	ep_pcmcia_match(struct device *, struct cfdata *, void *);
+void	ep_pcmcia_attach(struct device *, struct device *, void *);
+int	ep_pcmcia_detach(struct device *, int);
 
 int	ep_pcmcia_get_enaddr(struct pcmcia_tuple *, void *);
 int	ep_pcmcia_enable(struct ep_softc *);
@@ -107,9 +114,11 @@ struct ep_pcmcia_softc {
 	struct pcmcia_io_handle sc_pcioh;	/* PCMCIA i/o space info */
 	int sc_io_window;			/* our i/o window */
 	struct pcmcia_function *sc_pf;		/* our PCMCIA function */
+
+	void *sc_powerhook;			/* power management hook */
 };
 
-CFATTACH_DECL_NEW(ep_pcmcia, sizeof(struct ep_pcmcia_softc),
+CFATTACH_DECL(ep_pcmcia, sizeof(struct ep_pcmcia_softc),
     ep_pcmcia_match, ep_pcmcia_attach, ep_pcmcia_detach, ep_activate);
 
 const struct ep_pcmcia_product {
@@ -149,22 +158,24 @@ const size_t ep_pcmcia_nproducts =
     sizeof(ep_pcmcia_products) / sizeof(ep_pcmcia_products[0]);
 
 int
-ep_pcmcia_match(device_t parent, cfdata_t match, void *aux)
+ep_pcmcia_match(struct device *parent, struct cfdata *match,
+    void *aux)
 {
 	struct pcmcia_attach_args *pa = aux;
 
 	/* This is to differentiate the serial function of some cards. */
 	if (pa->pf->function != PCMCIA_FUNCTION_NETWORK)
-		return 0;
+		return (0);
 
 	if (pcmcia_product_lookup(pa, ep_pcmcia_products, ep_pcmcia_nproducts,
 	    sizeof(ep_pcmcia_products[0]), NULL))
-		return 1;
-	return 0;
+		return (1);
+	return (0);
 }
 
 int
-ep_pcmcia_enable(struct ep_softc *sc)
+ep_pcmcia_enable(sc)
+	struct ep_softc *sc;
 {
 	struct ep_pcmcia_softc *psc = (struct ep_pcmcia_softc *) sc;
 	struct pcmcia_function *pf = psc->sc_pf;
@@ -173,13 +184,13 @@ ep_pcmcia_enable(struct ep_softc *sc)
 	/* establish the interrupt. */
 	sc->sc_ih = pcmcia_intr_establish(pf, IPL_NET, epintr, sc);
 	if (!sc->sc_ih)
-		return EIO;
+		return (EIO);
 
 	error = pcmcia_function_enable(pf);
 	if (error) {
 		pcmcia_intr_disestablish(pf, sc->sc_ih);
 		sc->sc_ih = 0;
-		return error;
+		return (error);
 	}
 
 	if ((psc->sc_pf->sc->card.product == PCMCIA_PRODUCT_3COM_3C562) ||
@@ -197,11 +208,12 @@ ep_pcmcia_enable(struct ep_softc *sc)
 
 	}
 
-	return 0;
+	return (0);
 }
 
 void
-ep_pcmcia_disable(struct ep_softc *sc)
+ep_pcmcia_disable(sc)
+	struct ep_softc *sc;
 {
 	struct ep_pcmcia_softc *psc = (struct ep_pcmcia_softc *) sc;
 
@@ -211,9 +223,11 @@ ep_pcmcia_disable(struct ep_softc *sc)
 }
 
 void
-ep_pcmcia_attach(device_t parent, device_t self, void *aux)
+ep_pcmcia_attach(parent, self, aux)
+	struct device  *parent, *self;
+	void           *aux;
 {
-	struct ep_pcmcia_softc *psc = device_private(self);
+	struct ep_pcmcia_softc *psc = (void *) self;
 	struct ep_softc *sc = &psc->sc_ep;
 	struct pcmcia_attach_args *pa = aux;
 	struct pcmcia_config_entry *cfe;
@@ -223,7 +237,6 @@ ep_pcmcia_attach(device_t parent, device_t self, void *aux)
 	int i;
 	int error;
 
-	sc->sc_dev = self;
 	psc->sc_pf = pa->pf;
 
 	SIMPLEQ_FOREACH(cfe, &pa->pf->cfe_head, cfe_list) {
@@ -268,7 +281,8 @@ ep_pcmcia_attach(device_t parent, device_t self, void *aux)
 		}
 	}
 	if (!cfe) {
-		aprint_error_dev(self, "failed to allocate I/O space\n");
+		aprint_error("%s: failed to allocate I/O space\n",
+		    self->dv_xname);
 		goto ioalloc_failed;
 	}
 
@@ -281,7 +295,7 @@ ep_pcmcia_attach(device_t parent, device_t self, void *aux)
 	if (pcmcia_io_map(pa->pf, ((cfe->flags & PCMCIA_CFE_IO16) ?
 	    PCMCIA_WIDTH_AUTO : PCMCIA_WIDTH_IO8), &psc->sc_pcioh,
 	    &psc->sc_io_window)) {
-		aprint_error_dev(self, "can't map i/o space\n");
+		aprint_error("%s: can't map i/o space\n", self->dv_xname);
 		goto iomap_failed;
 	}
 
@@ -320,12 +334,13 @@ ep_pcmcia_attach(device_t parent, device_t self, void *aux)
 	sc->disable = ep_pcmcia_disable;
 
 	if (epconfig(sc, epp->epp_chipset, enaddr))
-		aprint_error_dev(self, "couldn't configure controller\n");
+		aprint_error("%s: couldn't configure controller\n",
+		    self->dv_xname);
 
-	if (!pmf_device_register(self, NULL, NULL))
-		aprint_error_dev(self, "couldn't establish power handler\n");
-	else
-		pmf_class_network_register(self, &sc->sc_ethercom.ec_if);
+	psc->sc_powerhook = powerhook_establish(self->dv_xname, ep_power, sc);
+	if (psc->sc_powerhook == NULL)
+		aprint_error("%s: WARNING: unable to establish power hook\n",
+		    self->dv_xname);
 
 	sc->enabled = 0;
 	ep_pcmcia_disable(sc);
@@ -340,20 +355,23 @@ ioalloc_failed:
 }
 
 int
-ep_pcmcia_detach(device_t self, int flags)
+ep_pcmcia_detach(self, flags)
+	struct device *self;
+	int flags;
 {
-	struct ep_pcmcia_softc *psc = device_private(self);
+	struct ep_pcmcia_softc *psc = (struct ep_pcmcia_softc *)self;
 	int rv;
 
 	if (psc->sc_io_window == -1)
 		/* Nothing to detach. */
-		return 0;
+		return (0);
 
-	pmf_device_deregister(self);
+	if (psc->sc_powerhook != NULL)
+		powerhook_disestablish(psc->sc_powerhook);
 
 	rv = ep_detach(self, flags);
 	if (rv != 0)
-		return rv;
+		return (rv);
 
 	/* Unmap our i/o window. */
 	pcmcia_io_unmap(psc->sc_pf, psc->sc_io_window);
@@ -361,11 +379,13 @@ ep_pcmcia_detach(device_t self, int flags)
 	/* Free our i/o space. */
 	pcmcia_io_free(psc->sc_pf, &psc->sc_pcioh);
 
-	return 0;
+	return (0);
 }
 
 int
-ep_pcmcia_get_enaddr(struct pcmcia_tuple *tuple, void *arg)
+ep_pcmcia_get_enaddr(tuple, arg)
+	struct pcmcia_tuple *tuple;
+	void *arg;
 {
 	u_int8_t *myla = arg;
 	int i;
@@ -373,14 +393,14 @@ ep_pcmcia_get_enaddr(struct pcmcia_tuple *tuple, void *arg)
 	/* this is 3c562a-c magic */
 	if (tuple->code == 0x88) {
 		if (tuple->length < ETHER_ADDR_LEN)
-			return 0;
+			return (0);
 
 		for (i = 0; i < ETHER_ADDR_LEN; i += 2) {
 			myla[i] = pcmcia_tuple_read_1(tuple, i + 1);
 			myla[i + 1] = pcmcia_tuple_read_1(tuple, i);
 		}
 
-		return 1;
+		return (1);
 	}
-	return 0;
+	return (0);
 }

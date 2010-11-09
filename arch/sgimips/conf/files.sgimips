@@ -1,10 +1,11 @@
-#	$NetBSD: files.sgimips,v 1.48 2009/02/12 06:33:56 rumble Exp $
+#	$NetBSD: files.sgimips,v 1.41 2006/09/16 08:50:27 gdamore Exp $
 
 maxpartitions 16
 
 maxusers 2 8 64
 
-device mainbus {[addr = -1]}
+# XXX: arcemu needs smc93cx6, so put it here pending a better solution
+device mainbus {[addr = -1]}: smc93cx6
 attach mainbus at root
 file arch/sgimips/sgimips/mainbus.c	mainbus
 
@@ -25,6 +26,7 @@ file arch/sgimips/sgimips/console.c
 file arch/sgimips/sgimips/disksubr.c
 file arch/sgimips/sgimips/machdep.c
 
+file arch/mips/mips/softintr.c
 file arch/mips/mips/mips3_clock.c	mips3
 file arch/mips/mips/mips3_clockintr.c	mips3
 
@@ -33,9 +35,8 @@ file dev/md_root.c			memory_disk_hooks
 file dev/cons.c
 
 # Machine-dependent drivers
+include "arch/sgimips/ioc/files.ioc"
 include "arch/sgimips/dev/files.dev"
-include "arch/sgimips/ioc/files.ioc"		# depends on int0 (files.dev)
-defflag opt_sgimace.h MACE_NEEDS_DELAYS
 include "arch/sgimips/mace/files.mace"
 
 # Machine-independent drivers.
@@ -48,6 +49,8 @@ include "dev/eisa/files.eisa"
 file	arch/sgimips/eisa/eisa_machdep.c	eisa
 
 include "dev/vme/files.vme"
+include "dev/wscons/files.wscons"
+include "dev/wsfont/files.wsfont"
 include "dev/pckbport/files.pckbport"
 include "dev/usb/files.usb"
 include "dev/scsipi/files.scsipi"

@@ -1,4 +1,4 @@
-/*	$NetBSD: if_lii.c,v 1.5 2008/07/08 12:39:27 sborrill Exp $	*/
+/*	$NetBSD: if_lii.c,v 1.3 2008/04/06 23:21:01 mjf Exp $	*/
 
 /*
  *  Copyright (c) 2008 The NetBSD Foundation.
@@ -12,6 +12,9 @@
  *  2. Redistributions in binary form must reproduce the above copyright
  *     notice, this list of conditions and the following disclaimer in the
  *     documentation and/or other materials provided with the distribution.
+ *  3. Neither the name of The NetBSD Foundation nor the names of its
+ *     contributors may be used to endorse or promote products derived
+ *     from this software without specific prior written permission.
  *
  *  THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  *  ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -31,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_lii.c,v 1.5 2008/07/08 12:39:27 sborrill Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_lii.c,v 1.3 2008/04/06 23:21:01 mjf Exp $");
 
 #include "bpfilter.h"
 
@@ -1191,9 +1194,9 @@ lii_setmulti(struct lii_softc *sc)
 		crc = ether_crc32_be(enm->enm_addrlo, ETHER_ADDR_LEN);
 
 		if (crc & (1 << 31))
-			mht1 |= (1 << ((crc >> 26) & 0x0000001f));
+			mht1 |= (1 << (crc & 0x0000001f));
 		else
-			mht0 |= (1 << ((crc >> 26) & 0x0000001f));
+			mht0 |= (1 << (crc & 0x0000001f));
 
 	     ETHER_NEXT_MULTI(step, enm);
 	}

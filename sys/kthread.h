@@ -1,7 +1,7 @@
-/*	$NetBSD: kthread.h,v 1.8 2009/01/29 22:00:26 ad Exp $	*/
+/*	$NetBSD: kthread.h,v 1.5 2007/07/09 21:11:32 ad Exp $	*/
 
 /*-
- * Copyright (c) 1998, 2007, 2009 The NetBSD Foundation, Inc.
+ * Copyright (c) 1998, 2007 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -43,13 +50,12 @@
 #define	KTHREAD_IDLE	0x01	/* do not set runnable */
 #define	KTHREAD_MPSAFE	0x02	/* does not need kernel_lock */
 #define	KTHREAD_INTR	0x04	/* interrupt handler */
-#define	KTHREAD_TS	0x08	/* timeshared */
 
 int	kthread_create(pri_t, int, struct cpu_info *,
 		       void (*)(void *), void *,
 		       lwp_t **, const char *, ...)
 	    __attribute__((__format__(__printf__,7,8)));
-void	kthread_exit(int) __dead;
+void	kthread_exit(int) __attribute__((__noreturn__));
 void	kthread_destroy(lwp_t *);
 #endif /* _KERNEL */
 

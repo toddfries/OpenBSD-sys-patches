@@ -1,4 +1,4 @@
-/*	$NetBSD: lpt_supio.c,v 1.12 2008/04/28 20:23:12 martin Exp $ */
+/*	$NetBSD: lpt_supio.c,v 1.10 2002/10/02 04:55:52 thorpej Exp $ */
 
 /*-
  * Copyright (c) 1997 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: lpt_supio.c,v 1.12 2008/04/28 20:23:12 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: lpt_supio.c,v 1.10 2002/10/02 04:55:52 thorpej Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -61,15 +68,15 @@ struct lptsupio_softc {
 	void (*sc_intack)(void *);
 };
 
-int lpt_supio_match(device_t, cfdata_t , void *);
-void lpt_supio_attach(device_t, device_t, void *);
+int lpt_supio_match(struct device *, struct cfdata *, void *);
+void lpt_supio_attach(struct device *, struct device *, void *);
 int lpt_supio_intr(void *p);
 
-CFATTACH_DECL_NEW(lpt_supio, sizeof(struct lptsupio_softc),
+CFATTACH_DECL(lpt_supio, sizeof(struct lptsupio_softc),
     lpt_supio_match, lpt_supio_attach, NULL, NULL);
 
 int
-lpt_supio_match(device_t parent, cfdata_t match, void *aux)
+lpt_supio_match(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct supio_attach_args *supa = aux;
 
@@ -92,9 +99,9 @@ lpt_supio_intr(void *p)
 }
 
 void
-lpt_supio_attach(device_t parent, device_t self, void *aux)
+lpt_supio_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct lptsupio_softc *sc = device_private(self);
+	struct lptsupio_softc *sc = (void *)self;
 	struct lpt_softc *lsc = &sc->sc_lpt;
 	int iobase;
 	bus_space_tag_t iot;
@@ -103,17 +110,14 @@ lpt_supio_attach(device_t parent, device_t self, void *aux)
 	/*
 	 * We're living on a superio chip.
 	 */
-	lsc->sc_dev = self;
 	iobase = supa->supio_iobase;
 	iot = lsc->sc_iot = supa->supio_iot;
 	sc->sc_intack = (void *)supa->supio_arg;
 
-	aprint_normal(" port 0x%04x ipl %d\n", iobase, supa->supio_ipl);
-        if (bus_space_map(iot, iobase, LPT_NPORTS, 0, &lsc->sc_ioh)) {
-		aprint_error_dev(self, "io mapping failed\n");
-		return;
-	}
+        if (bus_space_map(iot, iobase, LPT_NPORTS, 0, &lsc->sc_ioh))
+		panic("lpt_supio_attach: io mapping failed");
 
+	printf(" port 0x%04x ipl %d\n", iobase, supa->supio_ipl);
 	lpt_attach_subr(lsc);
 
 	sc->sc_isr.isr_intr = lpt_supio_intr;

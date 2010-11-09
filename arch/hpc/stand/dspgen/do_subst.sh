@@ -1,4 +1,4 @@
-# $NetBSD: do_subst.sh,v 1.5 2008/02/27 03:39:21 uwe Exp $
+# $NetBSD: do_subst.sh,v 1.4 2005/12/11 12:17:28 christos Exp $
 #
 # Copyright (c) 1999, 2000 Christopher G. Demetriou.  All rights reserved.
 #
@@ -44,6 +44,7 @@ AWK=gawk
 if [ `uname` = SunOS ]; then
 	AWK=nawk
 fi
+SED=sed
 
 STD_CPPDEF_LIST=''
 STD_INCDIR_LIST=''
@@ -55,10 +56,10 @@ export SRCFILE_LIST_ARM
 export SRCFILE_LIST_SH3
 export SRCFILE_LIST_MIPS
 export CPPDEF_LIST STD_CPPDEF_LIST
-export INCDIR_LIST STD_INCDIR_LIST
+export INCDIR_LIST STD_INCDIR_LIST 
 export LIBDEP_LIST
 export LIBRARY_LIST STD_LIBRARY_LIST
 
 . $name/$name.config
 ${AWK} -f dspgen/do_subst.awk \
-    dspgen/${TYPE}.tmpl | ${AWK} '{ printf "%s\r\n", $0 }'
+    dspgen/${TYPE}.tmpl | awk ' { printf "%s\r\n", $0 }' 

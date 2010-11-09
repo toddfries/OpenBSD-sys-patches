@@ -33,7 +33,7 @@
  *	isdn4bsd layer1 driver for Dynalink IS64PH isdn TA
  *	==================================================
  *
- *	$Id: isic_isapnp_dynalink.c,v 1.10 2008/04/08 20:09:27 cegger Exp $
+ *	$Id: isic_isapnp_dynalink.c,v 1.9 2007/10/19 12:00:32 ad Exp $
  *
  *      last edit-date: [Fri Jan  5 11:38:29 2001]
  *
@@ -75,7 +75,7 @@
 */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: isic_isapnp_dynalink.c,v 1.10 2008/04/08 20:09:27 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: isic_isapnp_dynalink.c,v 1.9 2007/10/19 12:00:32 ad Exp $");
 
 #include "opt_isicpnp.h"
 #ifdef ISICPNP_DYNALINK
@@ -431,11 +431,11 @@ void isic_attach_Dyn(struct isic_softc *sc)
 	if( ((HSCX_READ(0, H_VSTR) & 0xf) != 0x5) || ((HSCX_READ(1, H_VSTR) & 0xf) != 0x5) )
 	{
 		printf("%s: HSCX VSTR test failed for Dynalink PnP\n",
-			device_xname(&sc->sc_dev));
+			sc->sc_dev.dv_xname);
 		printf("%s: HSC0: VSTR: %#x\n",
-			device_xname(&sc->sc_dev), HSCX_READ(0, H_VSTR));
+			sc->sc_dev.dv_xname, HSCX_READ(0, H_VSTR));
 		printf("%s: HSC1: VSTR: %#x\n",
-			device_xname(&sc->sc_dev), HSCX_READ(1, H_VSTR));
+			sc->sc_dev.dv_xname, HSCX_READ(1, H_VSTR));
 		return;
 	}
 

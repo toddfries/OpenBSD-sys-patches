@@ -1,4 +1,4 @@
-/*	$NetBSD: tctrlvar.h,v 1.8 2008/04/28 20:23:35 martin Exp $ */
+/*	$NetBSD: tctrlvar.h,v 1.5 2006/03/06 21:43:29 macallan Exp $ */
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -34,7 +41,7 @@
 struct tctlrdriver {
         int     (*tctrld_open)(dev_t, int, int, struct proc *);
         int     (*tctrld_close)(dev_t, int, int, struct proc *);
-        int     (*tctrld_ioctl)(dev_t, u_long, void *, int, struct proc *);
+        int     (*tctrld_ioctl)(dev_t, u_long, caddr_t, int, struct proc *);
 	int	(*tctrld_poll)(dev_t, int, struct proc *);
 };
 
@@ -45,6 +52,7 @@ struct envsys_sensor {
 
 extern void tadpole_powerdown(void);
 extern void tadpole_set_video(int);
+extern int  tadpole_request(struct tctrl_req *, int);
 extern void tadpole_set_lcd(int, unsigned short);
 extern void tadpole_register_callback(void (*)(void *, int), void *);
 

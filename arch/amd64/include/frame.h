@@ -1,4 +1,4 @@
-/*	$NetBSD: frame.h,v 1.15 2008/10/26 00:08:15 mrg Exp $	*/
+/*	$NetBSD: frame.h,v 1.7 2005/12/11 12:16:25 christos Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -70,11 +77,8 @@
 #ifndef _AMD64_FRAME_H_
 #define _AMD64_FRAME_H_
 
-#ifdef __x86_64__
-
 #include <sys/signal.h>
 #include <machine/fpu.h>
-#include <machine/frame_regs.h>
 
 /*
  * System stack frames.
@@ -83,28 +87,81 @@
 /*
  * Exception/Trap Stack Frame
  */
-#define tf(reg, REG, idx) uint64_t tf_##reg;
 struct trapframe {
-    _FRAME_REG(tf, tf)
+	uint64_t	tf_rdi;
+	uint64_t	tf_rsi;
+	uint64_t	tf_rdx;
+	uint64_t	tf_rcx;
+	uint64_t	tf_r8;
+	uint64_t 	tf_r9;
+	uint64_t	tf_r10;
+	uint64_t 	tf_r11;
+	uint64_t 	tf_r12;
+	uint64_t 	tf_r13;
+	uint64_t 	tf_r14;
+	uint64_t 	tf_r15;
+	uint64_t	tf_rbp;
+	uint64_t	tf_rbx;
+	uint64_t	tf_rax;
+	uint64_t	tf_gs;
+	uint64_t	tf_fs;
+	uint64_t	tf_es;
+	uint64_t	tf_ds;
+	uint64_t	tf_trapno;
+	/* below portion defined in hardware */
+	uint64_t	tf_err;
+	uint64_t	tf_rip;
+	uint64_t	tf_cs;
+	uint64_t	tf_rflags;
+	/* These are pushed unconditionally on the x86-64 */
+	uint64_t	tf_rsp;
+	uint64_t	tf_ss;
 };
-#undef tf
 
 /*
  * Interrupt stack frame
  */
 struct intrframe {
-	uint64_t	if_ppl;		/* Old interrupt mask level */
-	struct trapframe if_tf;
+	uint64_t	if_ppl;
+	uint64_t	if_rdi;
+	uint64_t	if_rsi;
+	uint64_t	if_rdx;
+	uint64_t	if_rcx;
+	uint64_t	if_r8;
+	uint64_t	if_r9;
+	uint64_t	if_r10;
+	uint64_t	if_r11;
+	uint64_t	if_r12;
+	uint64_t	if_r13;
+	uint64_t	if_r14;
+	uint64_t	if_r15;
+	uint64_t	if_rbp;
+	uint64_t	if_rbx;
+	uint64_t	if_rax;
+	uint64_t	tf_gs;
+	uint64_t	tf_fs;
+	uint64_t	tf_es;
+	uint64_t	tf_ds;
+	u_int64_t __if_trapno; /* for compat with trap frame - trapno */
+	u_int64_t __if_err;	/* for compat with trap frame - err */
+	/* below portion defined in hardware */
+	uint64_t	if_rip;
+	uint64_t	if_cs;
+	uint64_t	if_rflags;
+	/* These are pushed unconditionally on the x86-64 */
+	uint64_t	if_rsp;
+	uint64_t	if_ss;
 };
 
 /*
- * Stack frame inside cpu_switchto()
+ * Stack frame inside cpu_switch()
  */
 struct switchframe {
 	uint64_t	sf_r15;
 	uint64_t	sf_r14;
 	uint64_t	sf_r13;
 	uint64_t	sf_r12;
+	uint64_t	sf_rbp;
 	uint64_t	sf_rbx;
 	uint64_t	sf_rip;
 };
@@ -121,11 +178,5 @@ struct sigframe_siginfo {
 #ifdef _KERNEL
 void buildcontext(struct lwp *, void *, void *);
 #endif
-
-#else	/*	__x86_64__	*/
-
-#include <i386/frame.h>
-
-#endif	/*	__x86_64__	*/
 
 #endif  /* _AMD64_FRAME_H_ */

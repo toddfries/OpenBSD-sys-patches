@@ -1,4 +1,4 @@
-/* $NetBSD: vfs_getcwd.c,v 1.43 2009/01/17 07:02:35 yamt Exp $ */
+/* $NetBSD: vfs_getcwd.c,v 1.37 2007/10/10 20:42:26 ad Exp $ */
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: vfs_getcwd.c,v 1.43 2009/01/17 07:02:35 yamt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: vfs_getcwd.c,v 1.37 2007/10/10 20:42:26 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -43,7 +50,7 @@ __KERNEL_RCSID(0, "$NetBSD: vfs_getcwd.c,v 1.43 2009/01/17 07:02:35 yamt Exp $")
 #include <sys/mount.h>
 #include <sys/proc.h>
 #include <sys/uio.h>
-#include <sys/kmem.h>
+#include <sys/malloc.h>
 #include <sys/dirent.h>
 #include <sys/kauth.h>
 
@@ -112,7 +119,7 @@ getcwd_scandir(struct vnode **lvpp, struct vnode **uvpp, char **bpp,
 	 * current directory is still locked.
 	 */
 	if (bufp != NULL) {
-		error = VOP_GETATTR(lvp, &va, cred);
+		error = VOP_GETATTR(lvp, &va, cred, l);
 		if (error) {
 			vput(lvp);
 			*lvpp = NULL;
@@ -127,6 +134,7 @@ getcwd_scandir(struct vnode **lvpp, struct vnode **uvpp, char **bpp,
 	 */
 	cn.cn_nameiop = LOOKUP;
 	cn.cn_flags = ISLASTCN | ISDOTDOT | RDONLY;
+	cn.cn_lwp = l;
 	cn.cn_cred = cred;
 	cn.cn_pnbuf = NULL;
 	cn.cn_nameptr = "..";
@@ -158,7 +166,7 @@ getcwd_scandir(struct vnode **lvpp, struct vnode **uvpp, char **bpp,
 	dirbuflen = DIRBLKSIZ;
 	if (dirbuflen < va.va_blocksize)
 		dirbuflen = va.va_blocksize;
-	dirbuf = kmem_alloc(dirbuflen, KM_SLEEP);
+	dirbuf = (char *)malloc(dirbuflen, M_TEMP, M_WAITOK);
 
 #if 0
 unionread:
@@ -258,7 +266,7 @@ unionread:
 
 out:
 	*lvpp = NULL;
-	kmem_free(dirbuf, dirbuflen);
+	free(dirbuf, M_TEMP);
 	return error;
 }
 
@@ -384,7 +392,7 @@ getcwd_common(struct vnode *lvp, struct vnode *rvp, char **bpp, char *bufp,
 		 * whether or not caller cares.
 		 */
 		if (flags & GETCWD_CHECK_ACCESS) {
-			error = VOP_ACCESS(lvp, perms, cred);
+			error = VOP_ACCESS(lvp, perms, cred, l);
 			if (error)
 				goto out;
 			perms = VEXEC|VREAD;
@@ -505,12 +513,12 @@ proc_isunder(struct proc *p1, struct lwp *l2)
  */
 
 int
-sys___getcwd(struct lwp *l, const struct sys___getcwd_args *uap, register_t *retval)
+sys___getcwd(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct sys___getcwd_args /* {
 		syscallarg(char *) bufp;
 		syscallarg(size_t) length;
-	} */
+	} */ *uap = v;
 
 	int     error;
 	char   *path;
@@ -524,7 +532,7 @@ sys___getcwd(struct lwp *l, const struct sys___getcwd_args *uap, register_t *ret
 	else if (len < 2)
 		return ERANGE;
 
-	path = kmem_alloc(len, KM_SLEEP);
+	path = (char *)malloc(len, M_TEMP, M_WAITOK);
 	if (!path)
 		return ENOMEM;
 
@@ -551,57 +559,6 @@ sys___getcwd(struct lwp *l, const struct sys___getcwd_args *uap, register_t *ret
 	error = copyout(bp, SCARG(uap, bufp), lenused);
 
 out:
-	kmem_free(path, len);
+	free(path, M_TEMP);
 	return error;
-}
-
-/*
- * Try to find a pathname for a vnode. Since there is no mapping
- * vnode -> parent directory, this needs the NAMECACHE_ENTER_REVERSE
- * option to work (to make cache_revlookup succeed).
- */
-int
-vnode_to_path(char *path, size_t len, struct vnode *vp, struct lwp *curl,
-    struct proc *p)
-{
-	struct proc *curp = curl->l_proc;
-	int error, lenused, elen;
-	char *bp, *bend;
-	struct vnode *dvp;
-
-	bp = bend = &path[len];
-	*(--bp) = '\0';
-
-	error = vget(vp, LK_EXCLUSIVE | LK_RETRY);
-	if (error != 0)
-		return error;
-	error = cache_revlookup(vp, &dvp, &bp, path);
-	vput(vp);
-	if (error != 0)
-		return (error == -1 ? ENOENT : error);
-
-	error = vget(dvp, 0);
-	if (error != 0)
-		return error;
-	*(--bp) = '/';
-	/* XXX GETCWD_CHECK_ACCESS == 0x0001 */
-	error = getcwd_common(dvp, NULL, &bp, path, len / 2, 1, curl);
-
-	/*
-	 * Strip off emulation path for emulated processes looking at
-	 * the maps file of a process of the same emulation. (Won't
-	 * work if /emul/xxx is a symlink..)
-	 */
-	if (curp->p_emul == p->p_emul && curp->p_emul->e_path != NULL) {
-		elen = strlen(curp->p_emul->e_path);
-		if (!strncmp(bp, curp->p_emul->e_path, elen))
-			bp = &bp[elen];
-	}
-
-	lenused = bend - bp;
-
-	memcpy(path, bp, lenused);
-	path[lenused] = 0;
-
-	return 0;
 }

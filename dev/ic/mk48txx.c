@@ -1,4 +1,4 @@
-/*	$NetBSD: mk48txx.c,v 1.25 2008/04/28 20:23:50 martin Exp $ */
+/*	$NetBSD: mk48txx.c,v 1.22 2007/10/19 11:59:56 ad Exp $ */
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
  * All rights reserved.
@@ -14,6 +14,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -33,7 +40,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mk48txx.c,v 1.25 2008/04/28 20:23:50 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mk48txx.c,v 1.22 2007/10/19 11:59:56 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -69,15 +76,15 @@ mk48txx_attach(struct mk48txx_softc *sc)
 	todr_chip_handle_t handle;
 	int i;
 
-	aprint_normal(": %s", sc->sc_model);
+	printf(": %s", sc->sc_model);
 
-	i = __arraycount(mk48txx_models);
+	i = sizeof(mk48txx_models) / sizeof(mk48txx_models[0]);
 	while (--i >= 0) {
 		if (strcmp(sc->sc_model, mk48txx_models[i].name) == 0)
 			break;
 	}
 	if (i < 0)
-		panic("%s: unsupported model", __func__);
+		panic("mk48txx_attach: unsupported model");
 
 	sc->sc_nvramsz = mk48txx_models[i].nvramsz;
 	sc->sc_clkoffset = mk48txx_models[i].clkoff;
@@ -88,13 +95,12 @@ mk48txx_attach(struct mk48txx_softc *sc)
 	handle->todr_settime = NULL;
 	handle->todr_gettime_ymdhms = mk48txx_gettime_ymdhms;
 	handle->todr_settime_ymdhms = mk48txx_settime_ymdhms;
+	handle->todr_setwen = NULL;
 
 	if (sc->sc_nvrd == NULL)
 		sc->sc_nvrd = mk48txx_def_nvrd;
 	if (sc->sc_nvwr == NULL)
 		sc->sc_nvwr = mk48txx_def_nvwr;
-
-	todr_attach(handle);
 }
 
 /*

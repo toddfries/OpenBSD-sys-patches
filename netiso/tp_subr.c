@@ -1,4 +1,4 @@
-/*	$NetBSD: tp_subr.c,v 1.22 2008/12/19 18:49:39 cegger Exp $	*/
+/*	$NetBSD: tp_subr.c,v 1.20 2005/12/11 12:25:12 christos Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993
@@ -67,7 +67,7 @@ SOFTWARE.
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: tp_subr.c,v 1.22 2008/12/19 18:49:39 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: tp_subr.c,v 1.20 2005/12/11 12:25:12 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -959,7 +959,7 @@ tp_rsyflush(struct tp_pcb *tpcb)
 			tpcb->tp_rsycnt = 0;
 		}
 	}
-	free((void *) tpcb->tp_rsyq, M_PCB);
+	free((caddr_t) tpcb->tp_rsyq, M_PCB);
 	tpcb->tp_rsyq = 0;
 }
 
@@ -969,7 +969,7 @@ tp_rsyset(struct tp_pcb *tpcb)
 	struct socket *so = tpcb->tp_sock;
 	int             maxcredit = tpcb->tp_xtd_format ? 0xffff : 0xf;
 	int             old_credit = tpcb->tp_maxlcredit;
-	void *        rsyq;
+	caddr_t         rsyq;
 
 	tpcb->tp_maxlcredit = maxcredit = min(maxcredit,
 					      (so->so_rcv.sb_hiwat + tpcb->tp_l_tpdusize) / tpcb->tp_l_tpdusize);
@@ -979,7 +979,8 @@ tp_rsyset(struct tp_pcb *tpcb)
 	maxcredit *= sizeof(struct mbuf *);
 	if (tpcb->tp_rsyq)
 		tp_rsyflush(tpcb);
-	rsyq = malloc(maxcredit, M_PCB, M_NOWAIT|M_ZERO);
+	if ((rsyq = (caddr_t) malloc(maxcredit, M_PCB, M_NOWAIT)) != NULL)
+		bzero(rsyq, maxcredit);
 	tpcb->tp_rsyq = (struct mbuf **) rsyq;
 }
 

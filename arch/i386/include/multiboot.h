@@ -1,4 +1,4 @@
-/*	$NetBSD: multiboot.h,v 1.8 2009/02/22 18:05:42 ahoka Exp $	*/
+/*	$NetBSD: multiboot.h,v 1.4 2006/10/25 13:56:16 jmmv Exp $	*/
 
 /*-
  * Copyright (c) 2005, 2006 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -28,6 +35,12 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
+
+#if defined(_KERNEL)
+
+#include "opt_multiboot.h"
+
+#if defined(MULTIBOOT)
 
 /* --------------------------------------------------------------------- */
 
@@ -64,9 +77,9 @@ struct multiboot_header {
 /*
  * Symbols defined in locore.S.
  */
-#if !defined(_LOCORE) && defined(_KERNEL)
+#if !defined(_LOCORE)
 extern struct multiboot_header *Multiboot_Header;
-#endif /* !defined(_LOCORE) && defined(_KERNEL) */
+#endif /* !defined(_LOCORE) */
 
 /* --------------------------------------------------------------------- */
 
@@ -105,8 +118,8 @@ struct multiboot_info {
 	char *		mi_cmdline;
 
 	/* Valid if mi_flags sets MULTIBOOT_INFO_HAS_MODS. */
-	uint32_t	mi_mods_count;
-	vaddr_t		mi_mods_addr;
+	uint32_t	unused_mi_mods_count;
+	vaddr_t		unused_mi_mods_addr;
 
 	/* Valid if mi_flags sets MULTIBOOT_INFO_HAS_{AOUT,ELF}_SYMS. */
 	uint32_t	mi_elfshdr_num;
@@ -174,18 +187,6 @@ struct multiboot_mmap {
 	uint32_t	mm_type;
 };
 
-/*
- * Modules. This describes an entry in the modules table as pointed
- * to by mi_mods_addr.
- */
-
-struct multiboot_module {
-	uint32_t	mmo_start;
-	uint32_t	mmo_end;
-	char *		mmo_string;
-	uint32_t	mmo_reserved;
-};
-
 #endif /* !defined(_LOCORE) */
 
 /* --------------------------------------------------------------------- */
@@ -193,11 +194,15 @@ struct multiboot_module {
 /*
  * Prototypes for public functions defined in multiboot.c.
  */
-#if !defined(_LOCORE) && defined(_KERNEL)
+#if !defined(_LOCORE)
 void		multiboot_pre_reloc(struct multiboot_info *);
 void		multiboot_post_reloc(void);
 void		multiboot_print_info(void);
-bool		multiboot_ksyms_addsyms_elf(void);
+boolean_t	multiboot_ksyms_init(void);
 #endif /* !defined(_LOCORE) */
 
 /* --------------------------------------------------------------------- */
+
+#endif /* defined(MULTIBOOT) */
+
+#endif /* defined(_KERNEL) */

@@ -1,4 +1,4 @@
-/*	$NetBSD: mach_vm.h,v 1.30 2008/04/28 20:23:45 martin Exp $ */
+/*	$NetBSD: mach_vm.h,v 1.28 2005/12/11 12:20:20 christos Exp $ */
 
 /*-
  * Copyright (c) 2002-2003 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -216,7 +223,7 @@ typedef struct {
 	mach_memory_object_size_t req_size;
 	mach_memory_object_offset_t req_offset;
 	mach_vm_prot_t req_perm;
-} __packed mach_make_memory_entry_64_request_t;
+} __attribute__((packed)) mach_make_memory_entry_64_request_t;
 
 typedef struct {
 	mach_msg_header_t rep_msgh;
@@ -225,7 +232,7 @@ typedef struct {
 	mach_ndr_record_t rep_ndr;
 	mach_memory_object_size_t rep_size;
 	mach_msg_trailer_t rep_trailer;
-} __packed mach_make_memory_entry_64_reply_t;
+} __attribute__((packed)) mach_make_memory_entry_64_reply_t;
 
 /* vm_region */
 

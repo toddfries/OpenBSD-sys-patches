@@ -1,4 +1,4 @@
-/*	$NetBSD: ieee80211_input.c,v 1.67 2008/12/17 20:51:37 cegger Exp $	*/
+/*	$NetBSD: ieee80211_input.c,v 1.64 2006/11/16 01:33:40 christos Exp $	*/
 /*-
  * Copyright (c) 2001 Atsushi Onoe
  * Copyright (c) 2002-2005 Sam Leffler, Errno Consulting
@@ -36,7 +36,7 @@
 __FBSDID("$FreeBSD: src/sys/net80211/ieee80211_input.c,v 1.81 2005/08/10 16:22:29 sam Exp $");
 #endif
 #ifdef __NetBSD__
-__KERNEL_RCSID(0, "$NetBSD: ieee80211_input.c,v 1.67 2008/12/17 20:51:37 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ieee80211_input.c,v 1.64 2006/11/16 01:33:40 christos Exp $");
 #endif
 
 #include "opt_inet.h"
@@ -802,8 +802,8 @@ ieee80211_decap(struct ieee80211com *ic, struct mbuf *m, int hdrlen)
 		/* XXX stat, msg */
 		return NULL;
 	}
-	memcpy(&wh, mtod(m, void *), hdrlen);
-	llc = (struct llc *)(mtod(m, char *) + hdrlen);
+	memcpy(&wh, mtod(m, caddr_t), hdrlen);
+	llc = (struct llc *)(mtod(m, caddr_t) + hdrlen);
 	if (llc->llc_dsap == LLC_SNAP_LSAP && llc->llc_ssap == LLC_SNAP_LSAP &&
 	    llc->llc_control == LLC_UI && llc->llc_snap.org_code[0] == 0 &&
 	    llc->llc_snap.org_code[1] == 0 && llc->llc_snap.org_code[2] == 0) {
@@ -832,9 +832,9 @@ ieee80211_decap(struct ieee80211com *ic, struct mbuf *m, int hdrlen)
 		break;
 	}
 #ifdef ALIGNED_POINTER
-	if (!ALIGNED_POINTER(mtod(m, char *) + sizeof(*eh), u_int32_t)) {
+	if (!ALIGNED_POINTER(mtod(m, caddr_t) + sizeof(*eh), u_int32_t)) {
 		struct mbuf *n, *n0, **np;
-		char *newdata;
+		caddr_t newdata;
 		int off, pktlen;
 
 		n0 = NULL;
@@ -866,14 +866,14 @@ ieee80211_decap(struct ieee80211com *ic, struct mbuf *m, int hdrlen)
 			}
 			if (n0 == NULL) {
 				newdata =
-				    (char *)ALIGN(n->m_data + sizeof(*eh)) -
+				    (caddr_t)ALIGN(n->m_data + sizeof(*eh)) -
 				    sizeof(*eh);
 				n->m_len -= newdata - n->m_data;
 				n->m_data = newdata;
 			}
 			if (n->m_len > pktlen - off)
 				n->m_len = pktlen - off;
-			m_copydata(m, off, n->m_len, mtod(n, void *));
+			m_copydata(m, off, n->m_len, mtod(n, caddr_t));
 			off += n->m_len;
 			*np = n;
 			np = &n->m_next;
@@ -1040,7 +1040,7 @@ static int
 alloc_challenge(struct ieee80211com *ic, struct ieee80211_node *ni)
 {
 	if (ni->ni_challenge == NULL)
-		ni->ni_challenge = malloc(IEEE80211_CHALLENGE_LEN,
+		MALLOC(ni->ni_challenge, u_int32_t*, IEEE80211_CHALLENGE_LEN,
 		    M_DEVBUF, M_NOWAIT);
 	if (ni->ni_challenge == NULL) {
 		IEEE80211_DPRINTF(ic, IEEE80211_MSG_DEBUG | IEEE80211_MSG_AUTH,
@@ -1231,7 +1231,7 @@ ieee80211_auth_shared(struct ieee80211com *ic, struct ieee80211_frame *wh,
 		switch (seq) {
 		case IEEE80211_AUTH_SHARED_PASS:
 			if (ni->ni_challenge != NULL) {
-				free(ni->ni_challenge, M_DEVBUF);
+				FREE(ni->ni_challenge, M_DEVBUF);
 				ni->ni_challenge = NULL;
 			}
 			if (status != 0) {
@@ -1779,7 +1779,7 @@ ieee80211_saveie(u_int8_t **iep, const u_int8_t *ie)
 	 */
 	if (*iep == NULL || (*iep)[1] != ie[1]) {
 		if (*iep != NULL)
-			free(*iep, M_DEVBUF);
+			FREE(*iep, M_DEVBUF);
 		*iep = malloc(ielen, M_DEVBUF, M_NOWAIT);
 	}
 	if (*iep != NULL)
@@ -2398,7 +2398,7 @@ ieee80211_recv_mgmt(struct ieee80211com *ic, struct mbuf *m0,
 		}
 		/* discard challenge after association */
 		if (ni->ni_challenge != NULL) {
-			free(ni->ni_challenge, M_DEVBUF);
+			FREE(ni->ni_challenge, M_DEVBUF);
 			ni->ni_challenge = NULL;
 		}
 		/* NB: 802.11 spec says to ignore station's privacy bit */
@@ -2453,7 +2453,7 @@ ieee80211_recv_mgmt(struct ieee80211com *ic, struct mbuf *m0,
 			/*
 			 * Flush any state from a previous association.
 			 */
-			free(ni->ni_wpa_ie, M_DEVBUF);
+			FREE(ni->ni_wpa_ie, M_DEVBUF);
 			ni->ni_wpa_ie = NULL;
 		}
 		if (wme != NULL) {
@@ -2468,7 +2468,7 @@ ieee80211_recv_mgmt(struct ieee80211com *ic, struct mbuf *m0,
 			/*
 			 * Flush any state from a previous association.
 			 */
-			free(ni->ni_wme_ie, M_DEVBUF);
+			FREE(ni->ni_wme_ie, M_DEVBUF);
 			ni->ni_wme_ie = NULL;
 			ni->ni_flags &= ~IEEE80211_NODE_QOS;
 		}

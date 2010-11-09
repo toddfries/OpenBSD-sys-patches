@@ -1,4 +1,4 @@
-/*	$NetBSD: mem.c,v 1.35 2007/10/17 19:55:38 garbled Exp $	*/
+/*	$NetBSD: mem.c,v 1.31 2005/12/11 12:18:09 christos Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1990, 1993
@@ -80,7 +80,7 @@
 #include "opt_mips_cache.h"
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mem.c,v 1.35 2007/10/17 19:55:38 garbled Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mem.c,v 1.31 2005/12/11 12:18:09 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/conf.h>
@@ -89,7 +89,6 @@ __KERNEL_RCSID(0, "$NetBSD: mem.c,v 1.35 2007/10/17 19:55:38 garbled Exp $");
 #include <sys/uio.h>
 #include <sys/malloc.h>
 #include <sys/msgbuf.h>
-#include <sys/event.h>
 
 #include <machine/cpu.h>
 
@@ -195,7 +194,7 @@ mmrw(dev, uio, flags)
 		}
 		if (error)
 			break;
-		iov->iov_base = (char *)iov->iov_base + c;
+		iov->iov_base = (caddr_t)iov->iov_base + c;
 		iov->iov_len -= c;
 		uio->uio_offset += c;
 		uio->uio_resid -= c;

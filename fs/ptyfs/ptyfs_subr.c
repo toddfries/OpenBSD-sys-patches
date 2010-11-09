@@ -1,4 +1,4 @@
-/*	$NetBSD: ptyfs_subr.c,v 1.17 2008/12/17 20:51:35 cegger Exp $	*/
+/*	$NetBSD: ptyfs_subr.c,v 1.7 2006/05/14 21:31:52 elad Exp $	*/
 
 /*
  * Copyright (c) 1993
@@ -73,15 +73,15 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ptyfs_subr.c,v 1.17 2008/12/17 20:51:35 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ptyfs_subr.c,v 1.7 2006/05/14 21:31:52 elad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/time.h>
 #include <sys/kernel.h>
 #include <sys/vnode.h>
-#include <sys/stat.h>
 #include <sys/malloc.h>
+#include <sys/stat.h>
 #include <sys/file.h>
 #include <sys/namei.h>
 #include <sys/filedesc.h>
@@ -89,26 +89,25 @@ __KERNEL_RCSID(0, "$NetBSD: ptyfs_subr.c,v 1.17 2008/12/17 20:51:35 cegger Exp $
 #include <sys/tty.h>
 #include <sys/pty.h>
 #include <sys/kauth.h>
-#include <sys/lwp.h>
 
 #include <fs/ptyfs/ptyfs.h>
 #include <miscfs/specfs/specdev.h>
 
-static kmutex_t ptyfs_hashlock;
+static struct lock ptyfs_hashlock;
 
 static LIST_HEAD(ptyfs_hashhead, ptyfsnode) *ptyfs_used_tbl, *ptyfs_free_tbl;
 static u_long ptyfs_used_mask, ptyfs_free_mask; /* size of hash table - 1 */
-static kmutex_t ptyfs_used_slock, ptyfs_free_slock;
+static struct simplelock ptyfs_used_slock, ptyfs_free_slock;
 
 static void ptyfs_getinfo(struct ptyfsnode *, struct lwp *);
 
 static void ptyfs_hashins(struct ptyfsnode *);
 static void ptyfs_hashrem(struct ptyfsnode *);
 
-static struct vnode *ptyfs_used_get(ptyfstype, int, struct mount *, int);
+static struct vnode *ptyfs_used_get(ptyfstype, int, struct mount *);
 static struct ptyfsnode *ptyfs_free_get(ptyfstype, int, struct lwp *);
 
-static void ptyfs_rehash(kmutex_t *, struct ptyfs_hashhead **,
+static void ptyfs_rehash(struct simplelock *, struct ptyfs_hashhead **,
     u_long *);
 
 #define PTYHASH(type, pty, mask) (PTYFS_FILENO(type, pty) % (mask + 1))
@@ -142,11 +141,12 @@ ptyfs_getinfo(struct ptyfsnode *ptyfs, struct lwp *l)
 			ptyfs->ptyfs_pty, ptyfs->ptyfs_type == PTYFSpts ? 't'
 			: 'p')) != 0)
 				goto out;
-		NDINIT(&nd, LOOKUP, NOFOLLOW|LOCKLEAF, UIO_SYSSPACE, ttyname);
+		NDINIT(&nd, LOOKUP, NOFOLLOW|LOCKLEAF, UIO_SYSSPACE, ttyname,
+		     l);
 		if ((error = namei(&nd)) != 0)
 			goto out;
 		cred = kauth_cred_alloc();
-		error = VOP_GETATTR(nd.ni_vp, &va, cred);
+		error = VOP_GETATTR(nd.ni_vp, &va, cred, l);
 		kauth_cred_free(cred);
 		VOP_UNLOCK(nd.ni_vp, 0);
 		vrele(nd.ni_vp);
@@ -203,23 +203,18 @@ ptyfs_allocvp(struct mount *mp, struct vnode **vpp, ptyfstype type, int pty,
     struct lwp *l)
 {
 	struct ptyfsnode *ptyfs;
-	struct vnode *vp;
+	struct vnode *vp, *nvp;
 	int error;
 
- retry:
-	if ((*vpp = ptyfs_used_get(type, pty, mp, LK_EXCLUSIVE)) != NULL)
-		return 0;
+	do {
+		if ((*vpp = ptyfs_used_get(type, pty, mp)) != NULL)
+			return 0;
+	} while (lockmgr(&ptyfs_hashlock, LK_EXCLUSIVE|LK_SLEEPFAIL, 0));
 
 	if ((error = getnewvnode(VT_PTYFS, mp, ptyfs_vnodeop_p, &vp)) != 0) {
 		*vpp = NULL;
+		lockmgr(&ptyfs_hashlock, LK_RELEASE, NULL);
 		return error;
-	}
-
-	mutex_enter(&ptyfs_hashlock);
-	if (ptyfs_used_get(type, pty, mp, 0) != NULL) {
-		mutex_exit(&ptyfs_hashlock);
-		ungetnewvnode(vp);
-		goto retry;
 	}
 
 	vp->v_data = ptyfs = ptyfs_free_get(type, pty, l);
@@ -228,13 +223,31 @@ ptyfs_allocvp(struct mount *mp, struct vnode **vpp, ptyfstype type, int pty,
 	switch (type) {
 	case PTYFSroot:	/* /pts = dr-xr-xr-x */
 		vp->v_type = VDIR;
-		vp->v_vflag = VV_ROOT;
+		vp->v_flag = VROOT;
 		break;
 
 	case PTYFSpts:	/* /pts/N = cxxxxxxxxx */
 	case PTYFSptc:	/* controlling side = cxxxxxxxxx */
 		vp->v_type = VCHR;
-		spec_node_init(vp, PTYFS_MAKEDEV(ptyfs));
+		if ((nvp = checkalias(vp, PTYFS_MAKEDEV(ptyfs), mp)) != NULL) {
+			/*
+			 * Discard unneeded vnode, but save its inode.
+			 */
+			nvp->v_data = vp->v_data;
+			vp->v_data = NULL;
+			/* XXX spec_vnodeops has no locking, do it explicitly */
+			VOP_UNLOCK(vp, 0);
+			vp->v_op = spec_vnodeop_p;
+			vp->v_flag &= ~VLOCKSWORK;
+			vrele(vp);
+			vgone(vp);
+			lockmgr(&nvp->v_lock, LK_EXCLUSIVE, &nvp->v_interlock);
+			/*
+			 * Reinitialize aliased inode.
+			 */
+			vp = nvp;
+			ptyfs->ptyfs_vnode = vp;
+		}
 		break;
 	default:
 		panic("ptyfs_allocvp");
@@ -242,7 +255,7 @@ ptyfs_allocvp(struct mount *mp, struct vnode **vpp, ptyfstype type, int pty,
 
 	ptyfs_hashins(ptyfs);
 	uvm_vnp_setsize(vp, 0);
-	mutex_exit(&ptyfs_hashlock);
+	lockmgr(&ptyfs_hashlock, LK_RELEASE, NULL);
 
 	*vpp = vp;
 	return 0;
@@ -264,33 +277,34 @@ ptyfs_freevp(struct vnode *vp)
 void
 ptyfs_hashinit(void)
 {
-	ptyfs_used_tbl = hashinit(desiredvnodes / 4, HASH_LIST, true,
-	    &ptyfs_used_mask);
-	ptyfs_free_tbl = hashinit(desiredvnodes / 4, HASH_LIST, true,
-	    &ptyfs_free_mask);
-	mutex_init(&ptyfs_hashlock, MUTEX_DEFAULT, IPL_NONE);
-	mutex_init(&ptyfs_used_slock, MUTEX_DEFAULT, IPL_NONE);
-	mutex_init(&ptyfs_free_slock, MUTEX_DEFAULT, IPL_NONE);
+	lockinit(&ptyfs_hashlock, PINOD, "ptyfs_hashlock", 0, 0);
+	ptyfs_used_tbl = hashinit(desiredvnodes / 4, HASH_LIST, M_UFSMNT,
+	    M_WAITOK, &ptyfs_used_mask);
+	ptyfs_free_tbl = hashinit(desiredvnodes / 4, HASH_LIST, M_UFSMNT,
+	    M_WAITOK, &ptyfs_free_mask);
+	simple_lock_init(&ptyfs_used_slock);
+	simple_lock_init(&ptyfs_free_slock);
 }
 
 void
 ptyfs_hashreinit(void)
 {
-	ptyfs_rehash(&ptyfs_used_slock, &ptyfs_used_tbl, &ptyfs_used_mask);
-	ptyfs_rehash(&ptyfs_free_slock, &ptyfs_free_tbl, &ptyfs_free_mask);
+    ptyfs_rehash(&ptyfs_used_slock, &ptyfs_used_tbl, &ptyfs_used_mask);
+    ptyfs_rehash(&ptyfs_free_slock, &ptyfs_free_tbl, &ptyfs_free_mask);
 }
 
 static void
-ptyfs_rehash(kmutex_t *hlock, struct ptyfs_hashhead **hhead,
+ptyfs_rehash(struct simplelock *hlock, struct ptyfs_hashhead **hhead,
     u_long *hmask)
 {
 	struct ptyfsnode *pp;
 	struct ptyfs_hashhead *oldhash, *hash;
 	u_long i, oldmask, mask, val;
 
-	hash = hashinit(desiredvnodes / 4, HASH_LIST, true, &mask);
+	hash = hashinit(desiredvnodes / 4, HASH_LIST, M_UFSMNT, M_WAITOK,
+	    &mask);
 
-	mutex_enter(hlock);
+	simple_lock(hlock);
 	oldhash = *hhead;
 	oldmask = *hmask;
 	*hhead = hash;
@@ -303,8 +317,8 @@ ptyfs_rehash(kmutex_t *hlock, struct ptyfs_hashhead **hhead,
 			LIST_INSERT_HEAD(&hash[val], pp, ptyfs_hash);
 		}
 	}
-	mutex_exit(hlock);
-	hashdone(oldhash, HASH_LIST, oldmask);
+	simple_unlock(hlock);
+	hashdone(oldhash, M_UFSMNT);
 }
 
 /*
@@ -313,9 +327,8 @@ ptyfs_rehash(kmutex_t *hlock, struct ptyfs_hashhead **hhead,
 void
 ptyfs_hashdone(void)
 {
-
-	hashdone(ptyfs_used_tbl, HASH_LIST, ptyfs_used_mask);
-	hashdone(ptyfs_free_tbl, HASH_LIST, ptyfs_free_mask);
+	hashdone(ptyfs_used_tbl, M_UFSMNT);
+	hashdone(ptyfs_free_tbl, M_UFSMNT);
 }
 
 /*
@@ -328,18 +341,18 @@ ptyfs_free_get(ptyfstype type, int pty, struct lwp *l)
 	struct ptyfs_hashhead *ppp;
 	struct ptyfsnode *pp;
 
-	mutex_enter(&ptyfs_free_slock);
+	simple_lock(&ptyfs_free_slock);
 	ppp = &ptyfs_free_tbl[PTYHASH(type, pty, ptyfs_free_mask)];
 	LIST_FOREACH(pp, ppp, ptyfs_hash) {
 		if (pty == pp->ptyfs_pty && pp->ptyfs_type == type) {
 			LIST_REMOVE(pp, ptyfs_hash);
-			mutex_exit(&ptyfs_free_slock);
+			simple_unlock(&ptyfs_free_slock);
 			return pp;
 		}
 	}
-	mutex_exit(&ptyfs_free_slock);
+	simple_unlock(&ptyfs_free_slock);
 
-	pp = malloc(sizeof(struct ptyfsnode), M_TEMP, M_WAITOK);
+	MALLOC(pp, void *, sizeof(struct ptyfsnode), M_TEMP, M_WAITOK);
 	pp->ptyfs_pty = pty;
 	pp->ptyfs_type = type;
 	pp->ptyfs_fileno = PTYFS_FILENO(pty, type);
@@ -348,31 +361,27 @@ ptyfs_free_get(ptyfstype type, int pty, struct lwp *l)
 }
 
 struct vnode *
-ptyfs_used_get(ptyfstype type, int pty, struct mount *mp, int flags)
+ptyfs_used_get(ptyfstype type, int pty, struct mount *mp)
 {
 	struct ptyfs_hashhead *ppp;
 	struct ptyfsnode *pp;
 	struct vnode *vp;
 
 loop:
-	mutex_enter(&ptyfs_used_slock);
+	simple_lock(&ptyfs_used_slock);
 	ppp = &ptyfs_used_tbl[PTYHASH(type, pty, ptyfs_used_mask)];
 	LIST_FOREACH(pp, ppp, ptyfs_hash) {
 		vp = PTYFSTOV(pp);
 		if (pty == pp->ptyfs_pty && pp->ptyfs_type == type &&
 		    vp->v_mount == mp) {
-		    	if (flags == 0) {
-				mutex_exit(&ptyfs_used_slock);
-			} else {
-				mutex_enter(&vp->v_interlock);
-				mutex_exit(&ptyfs_used_slock);
-				if (vget(vp, flags | LK_INTERLOCK))
-					goto loop;
-			}
+			simple_lock(&vp->v_interlock);
+			simple_unlock(&ptyfs_used_slock);
+			if (vget(vp, LK_EXCLUSIVE | LK_INTERLOCK))
+				goto loop;
 			return vp;
 		}
 	}
-	mutex_exit(&ptyfs_used_slock);
+	simple_unlock(&ptyfs_used_slock);
 	return NULL;
 }
 
@@ -385,13 +394,13 @@ ptyfs_hashins(struct ptyfsnode *pp)
 	struct ptyfs_hashhead *ppp;
 
 	/* lock the ptyfsnode, then put it on the appropriate hash list */
-	vlockmgr(&pp->ptyfs_vnode->v_lock, LK_EXCLUSIVE);
+	lockmgr(&pp->ptyfs_vnode->v_lock, LK_EXCLUSIVE, NULL);
 
-	mutex_enter(&ptyfs_used_slock);
+	simple_lock(&ptyfs_used_slock);
 	ppp = &ptyfs_used_tbl[PTYHASH(pp->ptyfs_type, pp->ptyfs_pty,
 	    ptyfs_used_mask)];
 	LIST_INSERT_HEAD(ppp, pp, ptyfs_hash);
-	mutex_exit(&ptyfs_used_slock);
+	simple_unlock(&ptyfs_used_slock);
 }
 
 /*
@@ -402,13 +411,13 @@ ptyfs_hashrem(struct ptyfsnode *pp)
 {
 	struct ptyfs_hashhead *ppp;
 
-	mutex_enter(&ptyfs_used_slock);
+	simple_lock(&ptyfs_used_slock);
 	LIST_REMOVE(pp, ptyfs_hash);
-	mutex_exit(&ptyfs_used_slock);
+	simple_unlock(&ptyfs_used_slock);
 
-	mutex_enter(&ptyfs_free_slock);
+	simple_lock(&ptyfs_free_slock);
 	ppp = &ptyfs_free_tbl[PTYHASH(pp->ptyfs_type, pp->ptyfs_pty,
 	    ptyfs_free_mask)];
 	LIST_INSERT_HEAD(ppp, pp, ptyfs_hash);
-	mutex_exit(&ptyfs_free_slock);
+	simple_unlock(&ptyfs_free_slock);
 }

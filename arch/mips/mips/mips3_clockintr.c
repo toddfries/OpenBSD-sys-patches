@@ -1,4 +1,4 @@
-/*	$NetBSD: mips3_clockintr.c,v 1.8 2008/08/03 09:14:28 tsutsui Exp $	*/
+/*	$NetBSD: mips3_clockintr.c,v 1.3 2006/11/17 21:01:03 tsutsui Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -78,16 +78,12 @@
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
 
-__KERNEL_RCSID(0, "$NetBSD: mips3_clockintr.c,v 1.8 2008/08/03 09:14:28 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mips3_clockintr.c,v 1.3 2006/11/17 21:01:03 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/cpu.h>
-#include <sys/evcnt.h>
-#include <sys/intr.h>
-
 #include <mips/mips3_clock.h>
-
+#include <machine/intr.h>
 #include <machine/locore.h>
 
 struct evcnt mips_int5_evcnt =
@@ -145,7 +141,9 @@ mips3_initclocks(void)
 	next_cp0_clk_intr = mips3_cp0_count_read() + curcpu()->ci_cycles_per_hz;
 	mips3_cp0_compare_write(next_cp0_clk_intr);
 
+#ifdef	__HAVE_TIMECOUNTER
 	mips3_init_tc();
+#endif
 
 	/*
 	 * Now we can enable all interrupts including hardclock(9)
@@ -166,5 +164,6 @@ mips3_setstatclockrate(int newhz)
 	/* nothing we can do */
 }
 
+__weak_alias(delay, mips3_delay);
 __weak_alias(setstatclockrate, mips3_setstatclockrate);
 __weak_alias(cpu_initclocks, mips3_initclocks);

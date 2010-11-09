@@ -1,4 +1,4 @@
-/* $NetBSD: if_wi_pcmcia.c,v 1.80 2008/11/12 12:36:16 ad Exp $ */
+/* $NetBSD: if_wi_pcmcia.c,v 1.76 2007/10/19 12:01:05 ad Exp $ */
 
 /*-
  * Copyright (c) 2001, 2004 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -34,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_wi_pcmcia.c,v 1.80 2008/11/12 12:36:16 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_wi_pcmcia.c,v 1.76 2007/10/19 12:01:05 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -64,7 +71,7 @@ __KERNEL_RCSID(0, "$NetBSD: if_wi_pcmcia.c,v 1.80 2008/11/12 12:36:16 ad Exp $")
 #include <dev/pcmcia/pcmciavar.h>
 #include <dev/pcmcia/pcmciadevs.h>
 
-#ifdef _MODULE
+#ifdef _LKM
 #define WI_PCMCIA_SPECTRUM24T_FW 1
 #else
 #include <opt_if_wi_pcmcia.h>
@@ -80,6 +87,8 @@ static void	wi_pcmcia_attach(struct device *, struct device *, void *);
 static int	wi_pcmcia_detach(struct device *, int);
 static int	wi_pcmcia_enable(struct wi_softc *);
 static void	wi_pcmcia_disable(struct wi_softc *);
+static void	wi_pcmcia_powerhook(int, void *);
+static void	wi_pcmcia_shutdown(void *);
 
 #if WI_PCMCIA_SPECTRUM24T_FW
 /* support to download firmware for symbol CF card */
@@ -91,6 +100,8 @@ static int	wi_pcmcia_set_hcr(struct wi_softc *, int);
 struct wi_pcmcia_softc {
 	struct wi_softc sc_wi;
 
+	void *sc_powerhook;			/* power hook descriptor */
+	void *sc_sdhook;			/* shutdown hook */
 	int sc_symbol_cf;			/* Spectrum24t CF card */
 
 	struct pcmcia_function *sc_pf;		/* PCMCIA function */
@@ -287,12 +298,14 @@ wi_pcmcia_enable(sc)
 		if (wi_pcmcia_load_firm(sc,
 		    spectrum24t_primsym, sizeof(spectrum24t_primsym),
 		    spectrum24t_secsym, sizeof(spectrum24t_secsym))) {
-			aprint_error_dev(&sc->sc_dev, "couldn't load firmware\n");
+			printf("%s: couldn't load firmware\n",
+			    sc->sc_dev.dv_xname);
 			wi_pcmcia_disable(sc);
 			return (EIO);
 		}
 #else
-		aprint_error_dev(&sc->sc_dev, "firmware load not configured\n");
+		printf("%s: firmware load not configured\n",
+		    sc->sc_dev.dv_xname);
 		return EIO;
 #endif
 	}
@@ -341,7 +354,7 @@ wi_pcmcia_attach(struct device  *parent, struct device *self,
 
 	error = pcmcia_function_configure(pa->pf, wi_pcmcia_validate_config);
 	if (error) {
-		aprint_error_dev(self, "configure failed, error=%d\n",
+		aprint_error("%s: configure failed, error=%d\n", self->dv_xname,
 		    error);
 		return;
 	}
@@ -371,18 +384,17 @@ wi_pcmcia_attach(struct device  *parent, struct device *self,
 	sc->sc_enable = wi_pcmcia_enable;
 	sc->sc_disable = wi_pcmcia_disable;
 
-	printf("%s:", device_xname(self));
+	printf("%s:", self->dv_xname);
 
 	haveaddr = pa->pf->pf_funce_lan_nidlen == IEEE80211_ADDR_LEN;
 	if (wi_attach(sc, haveaddr ? pa->pf->pf_funce_lan_nid : 0) != 0) {
-		aprint_error_dev(self, "failed to attach controller\n");
+		aprint_error("%s: failed to attach controller\n", self->dv_xname);
 		goto fail2;
 	}
 
-	if (!pmf_device_register(self, NULL, NULL))
-		aprint_error_dev(self, "couldn't establish power handler\n");
-	else
-		pmf_class_network_register(self, &sc->sc_if);
+	psc->sc_sdhook    = shutdownhook_establish(wi_pcmcia_shutdown, psc);
+	psc->sc_powerhook = powerhook_establish(self->dv_xname,
+	    wi_pcmcia_powerhook, psc);
 
 	wi_pcmcia_disable(sc);
 	psc->sc_state = WI_PCMCIA_ATTACHED;
@@ -403,6 +415,11 @@ wi_pcmcia_detach(struct device *self, int flags)
 	if (psc->sc_state != WI_PCMCIA_ATTACHED)
 		return (0);
 
+	if (psc->sc_powerhook)
+		powerhook_disestablish(psc->sc_powerhook);
+	if (psc->sc_sdhook)
+		shutdownhook_disestablish(psc->sc_sdhook);
+
 	error = wi_detach(&psc->sc_wi);
 	if (error != 0)
 		return (error);
@@ -410,6 +427,27 @@ wi_pcmcia_detach(struct device *self, int flags)
 	pcmcia_function_unconfigure(psc->sc_pf);
 
 	return (0);
+}
+
+static void
+wi_pcmcia_powerhook(why, arg)
+	int why;
+	void *arg;
+{
+	struct wi_pcmcia_softc *psc = arg;
+	struct wi_softc *sc = &psc->sc_wi;
+
+	wi_power(sc, why);
+}
+
+static void
+wi_pcmcia_shutdown(arg)
+	void *arg;
+{
+	struct wi_pcmcia_softc *psc = arg;
+	struct wi_softc *sc = &psc->sc_wi;
+
+	wi_shutdown(sc);
 }
 
 /*

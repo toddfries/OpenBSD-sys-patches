@@ -1,4 +1,4 @@
-/*	$NetBSD: clnp_timer.c,v 1.16 2008/12/17 20:51:38 cegger Exp $	*/
+/*	$NetBSD: clnp_timer.c,v 1.13 2005/12/11 12:25:12 christos Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993
@@ -59,7 +59,7 @@ SOFTWARE.
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: clnp_timer.c,v 1.16 2008/12/17 20:51:38 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: clnp_timer.c,v 1.13 2005/12/11 12:25:12 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/mbuf.h>
@@ -125,7 +125,7 @@ clnp_freefrags(
 	}
 
 	/* free the fragment header */
-	free(cfh, M_FTABLE);
+	FREE(cfh, M_FTABLE);
 
 	return (next);
 }
@@ -145,11 +145,9 @@ clnp_freefrags(
 void
 clnp_slowtimo(void)
 {
-	struct clnp_fragl *cfh;
+	struct clnp_fragl *cfh = clnp_frags;
+	int s = splsoftnet();
 
-	mutex_enter(softnet_lock);
-	KERNEL_LOCK(1, NULL);
-	cfh = clnp_frags;
 	while (cfh != NULL) {
 		if (--cfh->cfl_ttl == 0) {
 			cfh = clnp_freefrags(cfh);
@@ -158,8 +156,7 @@ clnp_slowtimo(void)
 			cfh = cfh->cfl_next;
 		}
 	}
-	KERNEL_UNLOCK_ONE(NULL);
-	mutex_exit(softnet_lock);
+	splx(s);
 }
 
 /*
@@ -177,11 +174,8 @@ clnp_slowtimo(void)
 void
 clnp_drain(void)
 {
-	struct clnp_fragl *cfh;
+	struct clnp_fragl *cfh = clnp_frags;
 
-	KERNEL_LOCK(1, NULL);
-	cfh = clnp_frags;
 	while (cfh != NULL)
 		cfh = clnp_freefrags(cfh);
-	KERNEL_UNLOCK_ONE(NULL);
 }

@@ -1,8 +1,5 @@
-/* $NetBSD: if_srt.c,v 1.9 2008/11/07 00:20:13 dyoung Exp $ */
+/* $NetBSD: if_srt.c,v 1.3 2007/01/05 06:32:48 mouse Exp $ */
 /* This file is in the public domain. */
-
-#include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_srt.c,v 1.9 2008/11/07 00:20:13 dyoung Exp $");
 
 #include "opt_inet.h"
 
@@ -131,16 +128,17 @@ static RT *find_rt(SOFTC *sc, int af, ...)
 
 /* Network device interface. */
 
-static int srt_if_ioctl(struct ifnet *intf, u_long cmd, void *data)
+static int srt_if_ioctl(struct ifnet *intf, u_long cmd, caddr_t data)
 {
  struct ifaddr *ifa;
+ struct ifreq *ifr;
  int s;
  int err;
 
  err = 0;
  s = splnet();
  switch (cmd)
-  { case SIOCINITIFADDR:
+  { case SIOCSIFADDR:
     case SIOCSIFDSTADDR:
        ifa = (void *) data;
        switch (ifa->ifa_addr->sa_family)
@@ -158,9 +156,16 @@ static int srt_if_ioctl(struct ifnet *intf, u_long cmd, void *data)
 	}
        /* XXX do we need to do more here for either of these? */
        break;
+    case SIOCSIFMTU:
+       ifr = (void *) data;
+       ((SOFTC *)intf->if_softc)->intf.if_mtu = ifr->ifr_mtu;
+       break;
+    case SIOCGIFMTU:
+       ifr = (void *) data;
+       ifr->ifr_mtu = intf->if_mtu;
+       break;
     default:
-       if ((err = ifioctl_common(intf, cmd, data)) == ENETRESET)
-             err = 0;
+       err = EINVAL;
        break;
   }
  splx(s);
@@ -170,7 +175,7 @@ static int srt_if_ioctl(struct ifnet *intf, u_long cmd, void *data)
 static int srt_if_output(
 	struct ifnet *intf,
 	struct mbuf *m,
-	const struct sockaddr *to,
+	struct sockaddr *to,
 	struct rtentry *rtp )
 {
  SOFTC *sc;
@@ -240,7 +245,7 @@ static int srt_clone_create(struct if_clone *cl, int unit)
  sc->rts = 0;
  sc->flags = 0;
  sc->kflags = 0;
- if_initname(&sc->intf,cl->ifc_name,unit);
+ snprintf(&sc->intf.if_xname[0],sizeof(sc->intf.if_xname),"%s%d",cl->ifc_name,unit);
  sc->intf.if_softc = sc;
  sc->intf.if_mtu = 65535;
  sc->intf.if_flags = IFF_POINTOPOINT;
@@ -323,7 +328,7 @@ static int srt_close(dev_t dev, int flag, int mode, struct lwp *l)
 static int srt_ioctl(
 	dev_t dev,
 	u_long cmd,
-	void *data,
+	caddr_t data,
 	int flag,
 	struct lwp *l )
 {

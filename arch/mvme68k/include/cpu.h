@@ -1,4 +1,4 @@
-/*	$NetBSD: cpu.h,v 1.42 2008/02/27 18:26:16 xtraeme Exp $	*/
+/*	$NetBSD: cpu.h,v 1.32 2005/12/11 12:18:17 christos Exp $	*/
 
 /*
  * Copyright (c) 1982, 1990, 1993
@@ -98,10 +98,6 @@
 #include <sys/cpu_data.h>
 struct cpu_info {
 	struct cpu_data ci_data;	/* MI per-cpu data */
-	cpuid_t	ci_cpuid;
-	int	ci_mtx_count;
-	int	ci_mtx_oldspl;
-	int	ci_want_resched;
 };
 
 extern struct cpu_info cpu_info_store;
@@ -131,6 +127,7 @@ struct clockframe {
 } __attribute__((packed));
 
 #define	CLKF_USERMODE(framep)	(((framep)->sr & PSL_S) == 0)
+#define	CLKF_BASEPRI(framep)	(((framep)->sr & PSL_IPL) == 0)
 #define	CLKF_PC(framep)		((framep)->pc)
 
 /*
@@ -147,22 +144,21 @@ extern volatile unsigned int interrupt_depth;
  * Preempt the current process if in interrupt from user mode,
  * or after the current trap/syscall if in system mode.
  */
-#define	cpu_need_resched(ci, flags)	\
-	do { ci->ci_want_resched++; aston(); } while (/* CONSTCOND */0)
+extern int want_resched;	/* resched() was called */
+#define	need_resched(ci)	{ want_resched++; aston(); }
 
 /*
  * Give a profiling tick to the current process when the user profiling
  * buffer pages are invalid.  On the hp300, request an ast to send us
  * through trap, marking the proc as needing a profiling tick.
  */
-#define	cpu_need_proftick(l)	\
-	do { (l)->l_pflag |= LP_OWEUPC; aston(); } while (/* CONSTCOND */0)
+#define	need_proftick(p)	{ (p)->p_flag |= P_OWEUPC; aston(); }
 
 /*
  * Notify the current process (p) that it has a signal pending,
  * process as soon as possible.
  */
-#define	cpu_signotify(l)	aston()
+#define	signotify(p)	aston()
 
 extern int astpending;		/* need to trap before returning to user mode */
 #define aston() (astpending++)
@@ -174,6 +170,11 @@ extern int astpending;		/* need to trap before returning to user mode */
  */
 #define	CPU_CONSDEV		1	/* dev_t: console terminal device */
 #define	CPU_MAXID		2	/* number of valid machdep ids */
+
+#define CTL_MACHDEP_NAMES { \
+	{ 0, 0 }, \
+	{ "console_device", CTLTYPE_STRUCT }, \
+}
 
 #ifdef _KERNEL
 /*
@@ -221,13 +222,26 @@ extern	u_int intiobase_phys, intiotop_phys;
 extern	u_long ether_data_buff_size;
 extern	u_char mvme_ea[6];
 
-void	doboot(int) 
+struct frame;
+struct pcb;
+void	doboot __P((int)) 
 	__attribute__((__noreturn__));
-int	nmihand(void *);
-void	mvme68k_abort(const char *);
-void	*iomap(u_long, size_t);
-void	iounmap(void *, size_t);
-void	loadustp(paddr_t);
+int	nmihand __P((void *));
+void	mvme68k_abort __P((const char *));
+void	physaccess __P((caddr_t, caddr_t, int, int));
+void	physunaccess __P((caddr_t, int));
+void	*iomap __P((u_long, size_t));
+void	iounmap __P((void *, size_t));
+int	kvtop __P((caddr_t));
+void	savectx __P((struct pcb *));
+void	switch_exit __P((struct lwp *));
+void	switch_lwp_exit __P((struct lwp *));
+void	proc_trampoline __P((void));
+void	loadustp __P((paddr_t));
+
+/* Prototypes from sys_machdep.c: */
+int	cachectl1 __P((unsigned long, vaddr_t, size_t, struct proc *));
+int	dma_cachectl __P((caddr_t, int));
 
 /* physical memory addresses where mvme147's onboard devices live */
 #define	INTIOBASE147	(0xfffe0000u)

@@ -1,4 +1,4 @@
-/* $NetBSD: osf1_generic.c,v 1.13 2007/12/20 23:03:02 dsl Exp $ */
+/* $NetBSD: osf1_generic.c,v 1.8 2005/12/11 12:20:23 christos Exp $ */
 
 /*
  * Copyright (c) 1999 Christopher G. Demetriou.  All rights reserved.
@@ -58,7 +58,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: osf1_generic.c,v 1.13 2007/12/20 23:03:02 dsl Exp $");
+__KERNEL_RCSID(0, "$NetBSD: osf1_generic.c,v 1.8 2005/12/11 12:20:23 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -69,7 +69,7 @@ __KERNEL_RCSID(0, "$NetBSD: osf1_generic.c,v 1.13 2007/12/20 23:03:02 dsl Exp $"
 #include <sys/malloc.h>
 #include <sys/mman.h>
 #include <sys/mount.h>
-#include <sys/select.h>
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 #include <sys/exec.h>
 
@@ -81,104 +81,139 @@ __KERNEL_RCSID(0, "$NetBSD: osf1_generic.c,v 1.13 2007/12/20 23:03:02 dsl Exp $"
  * The structures end up being the same... but we can't be sure that
  * the other word of our iov_len is zero!
  */
-
-#if __GNUC_PREREQ__(3, 0)
-__attribute ((noinline))
-#endif  
-static int
-osf1_get_iov(struct osf1_iovec *uiov, unsigned int iovcnt, struct iovec **iovp)
+int
+osf1_sys_readv(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	struct iovec *iov = *iovp;
-	struct osf1_iovec osf1_iov[UIO_SMALLIOV];
-	int i, j, n, error;
+	struct osf1_sys_readv_args *uap = v;
+	struct proc *p = l->l_proc;
+	struct sys_readv_args a;
+	struct osf1_iovec *oio;
+	struct iovec *nio;
+	caddr_t sg = stackgap_init(p, 0);
+	int error, osize, nsize, i;
 
-	if (iovcnt > IOV_MAX)
-		return EINVAL;
+	if (SCARG(uap, iovcnt) > (STACKGAPLEN / sizeof (struct iovec)))
+		return (EINVAL);
 
-	if (iovcnt > UIO_SMALLIOV) {
-		iov = malloc(iovcnt * sizeof *iov, M_IOV, M_WAITOK);
-		*iovp = iov;
-		/* Caller must free - even if we return an error */
+	osize = SCARG(uap, iovcnt) * sizeof (struct osf1_iovec);
+	nsize = SCARG(uap, iovcnt) * sizeof (struct iovec);
+
+	oio = malloc(osize, M_TEMP, M_WAITOK);
+	nio = malloc(nsize, M_TEMP, M_WAITOK);
+
+	error = 0;
+	if ((error = copyin(SCARG(uap, iovp), oio, osize)))
+		goto punt;
+	for (i = 0; i < SCARG(uap, iovcnt); i++) {
+		nio[i].iov_base = oio[i].iov_base;
+		nio[i].iov_len = oio[i].iov_len;
 	}
 
-	for (i = 0; i < iovcnt; uiov += UIO_SMALLIOV, i += UIO_SMALLIOV) {
-		n = iovcnt - i;
-		if (n > UIO_SMALLIOV)
-			n = UIO_SMALLIOV;
-		error = copyin(uiov, osf1_iov, n * sizeof osf1_iov[0]);
-		if (error != 0)
-			return error;
+	SCARG(&a, fd) = SCARG(uap, fd);
+	SCARG(&a, iovp) = stackgap_alloc(p, &sg, nsize);
+	SCARG(&a, iovcnt) = SCARG(uap, iovcnt);
 
-		for (j = 0; j < n; iov++, j++) {
-			iov->iov_base = osf1_iov[j].iov_base;
-			iov->iov_len = osf1_iov[j].iov_len;
+	if ((error = copyout(nio, __UNCONST(SCARG(&a, iovp)), nsize)))
+		goto punt;
+	error = sys_readv(l, &a, retval);
+
+punt:
+	free(oio, M_TEMP);
+	free(nio, M_TEMP);
+	return (error);
+}
+
+int
+osf1_sys_select(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
+{
+	struct osf1_sys_select_args *uap = v;
+	struct proc *p = l->l_proc;
+	struct sys_select_args a;
+	struct osf1_timeval otv;
+	struct timeval tv;
+	int error;
+	caddr_t sg;
+
+	SCARG(&a, nd) = SCARG(uap, nd);
+	SCARG(&a, in) = SCARG(uap, in);
+	SCARG(&a, ou) = SCARG(uap, ou);
+	SCARG(&a, ex) = SCARG(uap, ex);
+
+	error = 0;
+	if (SCARG(uap, tv) == NULL)
+		SCARG(&a, tv) = NULL;
+	else {
+		sg = stackgap_init(p, 0);
+		SCARG(&a, tv) = stackgap_alloc(p, &sg, sizeof tv);
+
+		/* get the OSF/1 timeval argument */
+		error = copyin((caddr_t)SCARG(uap, tv),
+		    (caddr_t)&otv, sizeof otv);
+		if (error == 0) {
+
+			/* fill in and copy out the NetBSD timeval */
+			memset(&tv, 0, sizeof tv);
+			tv.tv_sec = otv.tv_sec;
+			tv.tv_usec = otv.tv_usec;
+
+			error = copyout((caddr_t)&tv,
+			    (caddr_t)SCARG(&a, tv), sizeof tv);
 		}
 	}
 
-	return 0;
+	if (error == 0)
+		error = sys_select(l, &a, retval);
+
+	return (error);
 }
 
 int
-osf1_sys_readv(struct lwp *l, const struct osf1_sys_readv_args *uap, register_t *retval)
+osf1_sys_writev(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	struct iovec aiov[UIO_SMALLIOV], *niov = aiov;
-	int error;
+	struct osf1_sys_writev_args *uap = v;
+	struct proc *p = l->l_proc;
+	struct sys_writev_args a;
+	struct osf1_iovec *oio;
+	struct iovec *nio;
+	caddr_t sg = stackgap_init(p, 0);
+	int error, osize, nsize, i;
 
-	error = osf1_get_iov(SCARG(uap, iovp), SCARG(uap, iovcnt), &niov);
+	if (SCARG(uap, iovcnt) > (STACKGAPLEN / sizeof (struct iovec)))
+		return (EINVAL);
 
-	if (error == 0) {
-		error = do_filereadv(SCARG(uap, fd), niov,
-		    SCARG(uap, iovcnt), NULL,
-		    FOF_UPDATE_OFFSET | FOF_IOV_SYSSPACE, retval);
+	osize = SCARG(uap, iovcnt) * sizeof (struct osf1_iovec);
+	nsize = SCARG(uap, iovcnt) * sizeof (struct iovec);
+
+	oio = malloc(osize, M_TEMP, M_WAITOK);
+	nio = malloc(nsize, M_TEMP, M_WAITOK);
+
+	error = 0;
+	if ((error = copyin(SCARG(uap, iovp), oio, osize)))
+		goto punt;
+	for (i = 0; i < SCARG(uap, iovcnt); i++) {
+		nio[i].iov_base = oio[i].iov_base;
+		nio[i].iov_len = oio[i].iov_len;
 	}
 
-	if (niov != aiov)
-		free(niov, M_IOV);
+	SCARG(&a, fd) = SCARG(uap, fd);
+	SCARG(&a, iovp) = stackgap_alloc(p, &sg, nsize);
+	SCARG(&a, iovcnt) = SCARG(uap, iovcnt);
 
-	return error;
-}
+	if ((error = copyout(nio, __UNCONST(SCARG(&a, iovp)), nsize)))
+		goto punt;
+	error = sys_writev(l, &a, retval);
 
-int
-osf1_sys_writev(struct lwp *l, const struct osf1_sys_writev_args *uap, register_t *retval)
-{
-	struct iovec aiov[UIO_SMALLIOV], *niov = aiov;
-	int error;
-
-	error = osf1_get_iov(SCARG(uap, iovp), SCARG(uap, iovcnt), &niov);
-
-	if (error == 0) {
-		error = do_filewritev(SCARG(uap, fd), niov,
-		    SCARG(uap, iovcnt), NULL,
-		    FOF_UPDATE_OFFSET | FOF_IOV_SYSSPACE, retval);
-	}
-
-	if (niov != aiov)
-		free(niov, M_IOV);
-
-	return error;
-}
-
-int
-osf1_sys_select(struct lwp *l, const struct osf1_sys_select_args *uap, register_t *retval)
-{
-	struct osf1_timeval otv;
-	struct timeval tv, *tvp;
-	int error;
-
-	if (SCARG(uap, tv) == NULL)
-		tvp = NULL;
-	else {
-		/* get the OSF/1 timeval argument */
-		error = copyin(SCARG(uap, tv), &otv, sizeof otv);
-		if (error != 0)
-			return error;
-
-		/* copy to the NetBSD timeval */
-		tv.tv_sec = otv.tv_sec;
-		tv.tv_usec = otv.tv_usec;
-		tvp = &tv;
-	}
-
-	return selcommon(l, retval, SCARG(uap, nd), SCARG(uap, in),
-	    SCARG(uap, ou), SCARG(uap, ex), tvp, NULL);
+punt:
+	free(oio, M_TEMP);
+	free(nio, M_TEMP);
+	return (error);
 }

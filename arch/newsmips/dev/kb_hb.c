@@ -1,4 +1,4 @@
-/*	$NetBSD: kb_hb.c,v 1.12 2008/04/09 15:40:30 tsutsui Exp $	*/
+/*	$NetBSD: kb_hb.c,v 1.10 2005/12/11 12:18:24 christos Exp $	*/
 
 /*-
  * Copyright (c) 2000 Tsubai Masanari.  All rights reserved.
@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kb_hb.c,v 1.12 2008/04/09 15:40:30 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kb_hb.c,v 1.10 2005/12/11 12:18:24 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/device.h>
@@ -43,20 +43,20 @@ __KERNEL_RCSID(0, "$NetBSD: kb_hb.c,v 1.12 2008/04/09 15:40:30 tsutsui Exp $");
 #include <newsmips/dev/hbvar.h>
 
 struct kbreg {
-	volatile uint8_t kb_data;
-	volatile uint8_t kb_stat;
-	volatile uint8_t kb_reset;
-	volatile uint8_t kb_init;
+	u_char kb_data;
+	u_char kb_stat;
+	u_char kb_reset;
+	u_char kb_init;
 };
 
 struct kb_hb_softc {
-	device_t sc_dev;
-	struct kbreg *sc_reg;
+	struct device sc_dev;
+	volatile struct kbreg *sc_reg;
 	struct device *sc_wskbddev;
 };
 
-int kb_hb_match(device_t, cfdata_t, void *);
-void kb_hb_attach(device_t, device_t, void *);
+int kb_hb_match(struct device *, struct cfdata *, void *);
+void kb_hb_attach(struct device *, struct device *, void *);
 int kb_hb_intr(void *);
 
 void kb_hb_cnattach(void);
@@ -65,11 +65,11 @@ void kb_hb_cnpollc(void *, int);
 
 int kb_hb_enable(void *, int);
 void kb_hb_setleds(void *, int);
-int kb_hb_ioctl(void *, u_long, void *, int, struct lwp *);
+int kb_hb_ioctl(void *, u_long, caddr_t, int, struct lwp *);
 
 extern struct wscons_keydesc newskb_keydesctab[];
 
-CFATTACH_DECL_NEW(kb_hb, sizeof(struct kb_hb_softc),
+CFATTACH_DECL(kb_hb, sizeof(struct kb_hb_softc),
     kb_hb_match, kb_hb_attach, NULL, NULL);
 
 struct wskbd_accessops kb_hb_accessops = {
@@ -89,7 +89,7 @@ struct wskbd_mapdata kb_hb_keymapdata = {
 };
 
 int
-kb_hb_match(device_t parent, cfdata_t cf, void *aux)
+kb_hb_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct hb_attach_args *ha = aux;
 
@@ -100,16 +100,14 @@ kb_hb_match(device_t parent, cfdata_t cf, void *aux)
 }
 
 void
-kb_hb_attach(device_t parent, device_t self, void *aux)
+kb_hb_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct kb_hb_softc *sc = device_private(self);
+	struct kb_hb_softc *sc = (void *)self;
 	struct hb_attach_args *ha = aux;
-	struct kbreg *reg;
-	volatile uint32_t *dipsw = (void *)DIP_SWITCH;
+	volatile struct kbreg *reg;
+	volatile int *dipsw = (void *)DIP_SWITCH;
 	struct wskbddev_attach_args aa;
 	int intr, cons;
-
-	sc->sc_dev = self;
 
 	reg = (struct kbreg *)ha->ha_addr;
 	intr = ha->ha_level;
@@ -121,13 +119,13 @@ kb_hb_attach(device_t parent, device_t self, void *aux)
 	reg->kb_reset = 0x01;
 	reg->kb_init = 0xf0;	/* 9600 bps */
 
-	aprint_normal(" level %d", intr);
+	printf(" level %d", intr);
 	cons = 0;
 	if (*dipsw & 7) {
 		cons = 1;
-		aprint_normal(" (console)");
+		printf(" (console)");
 	}
-	aprint_normal("\n");
+	printf("\n");
 
 	hb_intr_establish(intr, INTEN0_KBDINT, IPL_TTY, kb_hb_intr, sc);
 
@@ -142,8 +140,8 @@ int
 kb_hb_intr(void *v)
 {
 	struct kb_hb_softc *sc = v;
-	struct kbreg *reg = sc->sc_reg;
-	volatile uint8_t *ien = (void *)INTEN0;
+	volatile struct kbreg *reg = sc->sc_reg;
+	volatile u_char *ien = (void *)INTEN0;
 	int code, type, release, val;
 	int rv = 0;
 
@@ -166,7 +164,7 @@ kb_hb_intr(void *v)
 void
 kb_hb_cnattach(void)
 {
-	volatile uint32_t *dipsw = (void *)DIP_SWITCH;
+	volatile int *dipsw = (void *)DIP_SWITCH;
 
 	if (*dipsw & 7)
 		wskbd_cnattach(&kb_hb_consops, (void *)KEYB_DATA,
@@ -176,8 +174,8 @@ kb_hb_cnattach(void)
 void
 kb_hb_cngetc(void *v, u_int *type, int *data)
 {
-	struct kbreg *reg = v;
-	volatile uint8_t *ien = (void *)INTEN0;
+	volatile struct kbreg *reg = v;
+	volatile u_char *ien = (void *)INTEN0;
 	int code, release, ointr;
 
 	ointr = *ien & RX_KBINTE;
@@ -212,7 +210,7 @@ kb_hb_setleds(void *v, int on)
 }
 
 int
-kb_hb_ioctl(void *v, u_long cmd, void *data, int flag, struct lwp *l)
+kb_hb_ioctl(void *v, u_long cmd, caddr_t data, int flag, struct lwp *l)
 {
 
 	switch (cmd) {

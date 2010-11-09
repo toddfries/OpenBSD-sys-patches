@@ -1,4 +1,4 @@
-/* $NetBSD: cia.c,v 1.66 2008/12/16 22:35:22 christos Exp $ */
+/* $NetBSD: cia.c,v 1.64 2005/12/11 12:16:17 christos Exp $ */
 
 /*-
  * Copyright (c) 1998, 2000 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -65,7 +72,7 @@
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
 
-__KERNEL_RCSID(0, "$NetBSD: cia.c,v 1.66 2008/12/16 22:35:22 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cia.c,v 1.64 2005/12/11 12:16:17 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -301,10 +308,10 @@ ciaattach(parent, self, aux)
 
 	printf(": DECchip 2117x Core Logic Chipset (%s), pass %d\n",
 	    name, pass);
-	if (ccp->cc_cnfg) {
-		snprintb(bits, sizeof(bits), CIA_CSR_CNFG_BITS, ccp->cc_cnfg);
-		printf("%s: extended capabilities: %s\n", self->dv_xname, bits);
-	}
+	if (ccp->cc_cnfg)
+		printf("%s: extended capabilities: %s\n", self->dv_xname,
+		    bitmask_snprintf(ccp->cc_cnfg, CIA_CSR_CNFG_BITS,
+		    bits, sizeof(bits)));
 
 	switch (ccp->cc_flags & (CCF_PCI_USE_BWX|CCF_BUS_USE_BWX)) {
 	case CCF_PCI_USE_BWX|CCF_BUS_USE_BWX:

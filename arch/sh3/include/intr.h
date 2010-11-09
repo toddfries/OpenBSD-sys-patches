@@ -1,4 +1,4 @@
-/*	$NetBSD: intr.h,v 1.25 2008/04/28 20:23:35 martin Exp $	*/
+/*	$NetBSD: intr.h,v 1.22 2006/01/24 23:51:42 uwe Exp $	*/
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -12,6 +12,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -29,6 +36,9 @@
 #ifndef _SH3_INTR_H_
 #define	_SH3_INTR_H_
 
+#include <sys/device.h>
+#include <sys/lock.h>
+#include <sys/queue.h>
 #include <sh3/psl.h>
 
 /* Interrupt sharing types. */
@@ -38,14 +48,21 @@
 #define	IST_LEVEL		3	/* level-triggered */
 
 /* Interrupt priority levels */
-#define	_IPL_N		8
+#define	_IPL_N		15
 #define	_IPL_NSOFT	4
 
 #define	IPL_NONE	0	/* nothing */
-#define	IPL_SOFTCLOCK	1
-#define	IPL_SOFTBIO	2	/* timeouts */
+#define	IPL_SOFT	1
+#define	IPL_SOFTCLOCK	2	/* timeouts */
 #define	IPL_SOFTNET	3	/* protocol stacks */
 #define	IPL_SOFTSERIAL	4	/* serial */
+
+#define	IPL_SOFTNAMES {							\
+	"misc",								\
+	"clock",							\
+	"net",								\
+	"serial",							\
+}
 
 struct intc_intrhand {
 	int	(*ih_func)(void *);
@@ -71,5 +88,51 @@ void intc_intr_disable(int);
 void intc_intr(int, int, int);
 
 void intpri_intr_priority(int evtcode, int level);
+
+/*
+ * software simulated interrupt
+ */
+struct sh_soft_intrhand {
+	TAILQ_ENTRY(sh_soft_intrhand) sih_q;
+	struct sh_soft_intr *sih_intrhead;
+	void	(*sih_fn)(void *);
+	void	*sih_arg;
+	int	sih_pending;
+};
+
+struct sh_soft_intr {
+	TAILQ_HEAD(, sh_soft_intrhand) softintr_q;
+	struct evcnt softintr_evcnt;
+	struct simplelock softintr_slock;
+	unsigned long softintr_ipl;
+};
+
+#define	softintr_schedule(arg)						\
+do {									\
+	struct sh_soft_intrhand *__sih = (arg);				\
+	struct sh_soft_intr *__si = __sih->sih_intrhead;		\
+	int __s;							\
+									\
+	__s = _cpu_intr_suspend();					\
+	simple_lock(&__si->softintr_slock);				\
+	if (__sih->sih_pending == 0) {					\
+		TAILQ_INSERT_TAIL(&__si->softintr_q, __sih, sih_q);	\
+		__sih->sih_pending = 1;					\
+		setsoft(__si->softintr_ipl);				\
+	}								\
+	simple_unlock(&__si->softintr_slock);				\
+	_cpu_intr_resume(__s);						\
+} while (/*CONSTCOND*/0)
+
+void softintr_init(void);
+void *softintr_establish(int, void (*)(void *), void *);
+void softintr_disestablish(void *);
+void softintr_dispatch(int);
+void setsoft(int);
+
+/* XXX For legacy software interrupts. */
+extern struct sh_soft_intrhand *softnet_intrhand;
+
+#define	setsoftnet()	softintr_schedule(softnet_intrhand)
 
 #endif /* !_SH3_INTR_H_ */

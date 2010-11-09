@@ -1,4 +1,4 @@
-/*	$NetBSD: mesh.c,v 1.27 2008/12/16 22:35:24 christos Exp $	*/
+/*	$NetBSD: mesh.c,v 1.26 2007/10/17 19:55:19 garbled Exp $	*/
 
 /*-
  * Copyright (c) 2000	Tsubai Masanari.
@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mesh.c,v 1.27 2008/12/16 22:35:24 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mesh.c,v 1.26 2007/10/17 19:55:19 garbled Exp $");
 
 #include <sys/param.h>
 #include <sys/buf.h>
@@ -346,8 +346,8 @@ mesh_intr(arg)
 {
 	char buf1[64], buf2[64];
 
-	snprintb(buf1, sizeof buf1, MESH_STATUS0_BITMASK, status0);
-	snprintb(buf2, sizeof buf2, MESH_EXC_BITMASK, exception);
+	bitmask_snprintf(status0, MESH_STATUS0_BITMASK, buf1, sizeof buf1);
+	bitmask_snprintf(exception, MESH_EXC_BITMASK, buf2, sizeof buf2);
 	printf("mesh_intr status0 = 0x%s (%s), exc = 0x%s\n",
 	    buf1, scsi_phase[status0 & 7], buf2);
 }

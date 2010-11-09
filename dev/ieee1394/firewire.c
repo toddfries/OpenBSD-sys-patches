@@ -1,4 +1,4 @@
-/*	$NetBSD: firewire.c,v 1.22 2008/11/12 12:36:11 ad Exp $	*/
+/*	$NetBSD: firewire.c,v 1.16 2007/11/05 19:08:56 kiyohara Exp $	*/
 /*-
  * Copyright (c) 2003 Hidetoshi Shimokawa
  * Copyright (c) 1998-2002 Katsushi Kobayashi and Hidetoshi Shimokawa
@@ -35,9 +35,6 @@
  * $FreeBSD: src/sys/dev/firewire/firewire.c,v 1.101 2007/10/20 23:23:14 julian Exp $
  *
  */
-
-#include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: firewire.c,v 1.22 2008/11/12 12:36:11 ad Exp $");
 
 #if defined(__FreeBSD__)
 #include <sys/param.h>
@@ -122,7 +119,7 @@ MALLOC_DEFINE(M_FWXFER, "fw_xfer", "XFER/FireWire");
 /*
  * Setup sysctl(3) MIB, hw.ieee1394if.*
  *
- * TBD condition CTLFLAG_PERMANENT on being a module or not
+ * TBD condition CTLFLAG_PERMANENT on being an LKM or not
  */
 SYSCTL_SETUP(sysctl_ieee1394if, "sysctl ieee1394if(4) subtree setup")
 {
@@ -196,11 +193,11 @@ static int firewire_shutdown    (device_t);
 #endif
 static device_t firewire_add_child   (device_t, int, const char *, int);
 #elif defined(__NetBSD__)
-int firewirematch (device_t, struct cfdata *, void *);
-void firewireattach (device_t, device_t, void *);
-int firewiredetach (device_t, int);
+int firewirematch (struct device *, struct cfdata *, void *);
+void firewireattach (struct device *, struct device *, void *);
+int firewiredetach (struct device *, int);
 int firewire_print (void *, const char *);
-int firewire_resume (struct firewire_comm *);
+int firewire_resume(struct firewire_comm *);
 #endif
 static void firewire_xfer_timeout(void *, int);
 static void fw_try_bmr (void *);
@@ -234,7 +231,7 @@ static device_method_t firewire_methods[] = {
 	{ 0, 0 }
 };
 #elif defined(__NetBSD__)
-CFATTACH_DECL_NEW(ieee1394if, sizeof(struct firewire_softc),
+CFATTACH_DECL(ieee1394if, sizeof (struct firewire_softc),
     firewirematch, firewireattach, firewiredetach, NULL);
 #endif
 const char *fw_linkspeed[] = {
@@ -452,7 +449,8 @@ firewire_probe(device_t dev)
 }
 #elif defined(__NetBSD__)
 int
-firewirematch(device_t parent, struct cfdata *cf, void *aux)
+firewirematch(struct device *parent, struct cfdata *cf,
+    void *aux)
 {
 	struct fwbus_attach_args *faa = (struct fwbus_attach_args *)aux;
 	 
@@ -564,11 +562,6 @@ FW_ATTACH(firewire)
 	/* bus_reset */
 	fw_busreset(fc, FWBUSNOTREADY);
 	fc->ibr(fc);
-
-#ifdef __NetBSD__
-	if (!pmf_device_register(self, NULL, NULL))
-		aprint_error_dev(self, "couldn't establish power handler\n");
-#endif
 
 	FW_ATTACH_RETURN(0);
 }
@@ -1147,7 +1140,7 @@ fw_tl_free(struct firewire_comm *fc, struct fw_xfer *xfer)
 	if (txfer == NULL) {
 		printf("%s: the xfer is not in the queue "
 		    "(tlabel=%d, flag=0x%x)\n",
-		    __func__, xfer->tl, xfer->flag);
+		    __FUNCTION__, xfer->tl, xfer->flag);
 		fw_dump_hdr(&xfer->send.hdr, "send");
 		fw_dump_hdr(&xfer->recv.hdr, "recv");
 		kdb_backtrace();
@@ -1184,7 +1177,7 @@ fw_tl2xfer(struct firewire_comm *fc, int node, int tlabel, int tcode)
 			req = xfer->send.hdr.mode.hdr.tcode;
 			if (xfer->fc->tcode[req].valid_res != tcode) {
 				printf("%s: invalid response tcode "
-				    "(0x%x for 0x%x)\n", __func__,
+				    "(0x%x for 0x%x)\n", __FUNCTION__,
 				    tcode, req);
 				return(NULL);
 			}
@@ -1474,16 +1467,16 @@ void fw_sidrcv(struct firewire_comm* fc, uint32_t *sid, u_int len)
 	bcopy(p, &CSRARC(fc, SPED_MAP + 8), (fc->speed_map->crc_len - 1)*4);
 
 	fc->max_hop = fc->max_node - i_branch;
-	aprint_normal(", maxhop <= %d", fc->max_hop);
+	printf(", maxhop <= %d", fc->max_hop);
 		
 	if(fc->irm == -1 ){
-		aprint_normal(", Not found IRM capable node");
+		printf(", Not found IRM capable node");
 	}else{
-		aprint_normal(", cable IRM = %d", fc->irm);
+		printf(", cable IRM = %d", fc->irm);
 		if (fc->irm == fc->nodeid)
-			aprint_normal(" (me)");
+			printf(" (me)");
 	}
-	aprint_normal("\n");
+	printf("\n");
 
 	if (try_bmr && (fc->irm != -1) && (CSRARC(fc, BUS_MGR_ID) == 0x3f)) {
 		if (fc->irm == fc->nodeid) {
@@ -1594,7 +1587,7 @@ fw_explore_csrblock(struct fw_device *fwdev, int offset, int recur)
 
 		off = offset + reg[i].val * sizeof(uint32_t);
 		if (off > CROMSIZE) {
-			printf("%s: invalid offset %d\n", __func__, off);
+			printf("%s: invalid offset %d\n", __FUNCTION__, off);
 			return(-1);
 		}
 		err = fw_explore_csrblock(fwdev, off, recur);
@@ -1763,7 +1756,7 @@ fw_explore(struct firewire_comm *fc)
 				nodes[todo2++] = nodes[i];
 			if (firewire_debug)
 				printf("%s: node %d, err = %d\n",
-					__func__, node, err);
+					__FUNCTION__, node, err);
 		}
 		todo = todo2;
 	}
@@ -2337,10 +2330,10 @@ fw_bmr(struct firewire_comm *fc)
 	fw_printf(fc->bdev, "bus manager %d ", CSRARC(fc, BUS_MGR_ID));
 	if(CSRARC(fc, BUS_MGR_ID) != fc->nodeid) {
 		/* We are not the bus manager */
-		aprint_normal("\n");
+		printf("\n");
 		return(0);
 	}
-	aprint_normal("(me)\n");
+	printf("(me)\n");
 
 	/* Optimize gapcount */
 	if(fc->max_hop <= MAX_GAPHOP )

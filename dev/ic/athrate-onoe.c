@@ -1,4 +1,4 @@
-/*	$NetBSD: athrate-onoe.c,v 1.13 2008/12/11 05:45:29 alc Exp $ */
+/*	$NetBSD: athrate-onoe.c,v 1.10 2007/10/19 11:59:47 ad Exp $ */
 
 /*-
  * Copyright (c) 2002-2005 Sam Leffler, Errno Consulting
@@ -41,7 +41,7 @@
 __FBSDID("$FreeBSD: src/sys/dev/ath/ath_rate/onoe/onoe.c,v 1.10 2005/08/09 10:19:43 rwatson Exp $");
 #endif
 #ifdef __NetBSD__
-__KERNEL_RCSID(0, "$NetBSD: athrate-onoe.c,v 1.13 2008/12/11 05:45:29 alc Exp $");
+__KERNEL_RCSID(0, "$NetBSD: athrate-onoe.c,v 1.10 2007/10/19 11:59:47 ad Exp $");
 #endif
 
 /*
@@ -53,9 +53,12 @@ __KERNEL_RCSID(0, "$NetBSD: athrate-onoe.c,v 1.13 2008/12/11 05:45:29 alc Exp $"
 #include <sys/systm.h> 
 #include <sys/sysctl.h>
 #include <sys/kernel.h>
+#include <sys/lock.h>
 #include <sys/errno.h>
 #include <sys/device.h>
+
 #include <sys/bus.h>
+
 #include <sys/socket.h>
  
 #include <net/if.h>
@@ -74,8 +77,7 @@ __KERNEL_RCSID(0, "$NetBSD: athrate-onoe.c,v 1.13 2008/12/11 05:45:29 alc Exp $"
 #include <dev/ic/ath_netbsd.h>
 #include <dev/ic/athvar.h>
 #include <dev/ic/athrate-onoe.h>
-
-#include <external/isc/atheros_hal/dist/ah.h>
+#include <contrib/dev/ath/ah_desc.h>
 
 #define	ONOE_DEBUG
 #ifdef ONOE_DEBUG
@@ -242,7 +244,7 @@ ath_rate_update(struct ath_softc *sc, struct ieee80211_node *ni, int rate)
 			/* NB: only do this if we didn't already do it above */
 			on->on_tx_rate3 = rt->info[0].rateCode;
 			on->on_tx_rate3sp =
-				on->on_tx_rate3 | rt->info[0].shortPreamble;
+				an->an_tx_rate3 | rt->info[0].shortPreamble;
 		} else {
 			on->on_tx_rate3 = on->on_tx_rate3sp = 0;
 		}
@@ -488,7 +490,7 @@ ath_rate_attach(struct ath_softc *sc)
 	if (osc == NULL)
 		return NULL;
 	osc->arc.arc_space = sizeof(struct onoe_node);
-	callout_init(&osc->timer, 0);
+	ATH_CALLOUT_INIT(&osc->timer, debug_mpsafenet ? CALLOUT_MPSAFE : 0);
 	ath_rate_sysctlattach(sc);
 
 	return &osc->arc;

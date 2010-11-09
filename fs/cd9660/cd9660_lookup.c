@@ -1,4 +1,4 @@
-/*	$NetBSD: cd9660_lookup.c,v 1.16 2008/05/16 09:21:59 hannken Exp $	*/
+/*	$NetBSD: cd9660_lookup.c,v 1.12 2006/12/09 16:11:50 chs Exp $	*/
 
 /*-
  * Copyright (c) 1989, 1993, 1994
@@ -39,7 +39,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: cd9660_lookup.c,v 1.16 2008/05/16 09:21:59 hannken Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cd9660_lookup.c,v 1.12 2006/12/09 16:11:50 chs Exp $");
 
 #include <sys/param.h>
 #include <sys/namei.h>
@@ -92,7 +92,8 @@ struct	nchstats iso_nchstats;
  *	  nor deleting, add name to cache
  */
 int
-cd9660_lookup(void *v)
+cd9660_lookup(v)
+	void *v;
 {
 	struct vop_lookup_args /* {
 		struct vnode *a_dvp;
@@ -137,7 +138,7 @@ cd9660_lookup(void *v)
 	/*
 	 * Check accessiblity of directory.
 	 */
-	if ((error = VOP_ACCESS(vdp, VEXEC, cred)) != 0)
+	if ((error = VOP_ACCESS(vdp, VEXEC, cred, cnp->cn_lwp)) != 0)
 		return (error);
 
 	if ((flags & ISLASTCN) && (vdp->v_mount->mnt_flag & MNT_RDONLY) &&
@@ -202,7 +203,7 @@ searchloop:
 		 */
 		if ((dp->i_offset & bmask) == 0) {
 			if (bp != NULL)
-				brelse(bp, 0);
+				brelse(bp);
 			error = cd9660_blkatoff(vdp, (off_t)dp->i_offset,
 					     NULL, &bp);
 			if (error)
@@ -307,7 +308,7 @@ foundino:
 			if (lblkno(imp, dp->i_offset) !=
 			    lblkno(imp, saveoffset)) {
 				if (bp != NULL)
-					brelse(bp, 0);
+					brelse(bp);
 				if ((error = cd9660_blkatoff(vdp,
 					    (off_t)saveoffset, NULL, &bp)) != 0)
 					return (error);
@@ -331,7 +332,7 @@ notfound:
 		goto searchloop;
 	}
 	if (bp != NULL)
-		brelse(bp, 0);
+		brelse(bp);
 
 	/*
 	 * Insert name into cache (as non-existent) if appropriate.
@@ -379,7 +380,7 @@ found:
 	 * If ino is different from dp->i_ino,
 	 * it's a relocated directory.
 	 */
-	brelse(bp, 0);
+	brelse(bp);
 	if (flags & ISDOTDOT) {
 		VOP_UNLOCK(pdp, 0);	/* race to get the inode */
 		error = cd9660_vget_internal(vdp->v_mount, dp->i_ino, &tdp,
@@ -426,8 +427,8 @@ cd9660_blkatoff(struct vnode *vp, off_t offset, char **res, struct buf **bpp)
 	lbn = lblkno(imp, offset);
 	bsize = blksize(imp, ip, lbn);
 
-	if ((error = bread(vp, lbn, bsize, NOCRED, 0, &bp)) != 0) {
-		brelse(bp, 0);
+	if ((error = bread(vp, lbn, bsize, NOCRED, &bp)) != 0) {
+		brelse(bp);
 		*bpp = NULL;
 		return (error);
 	}

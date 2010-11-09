@@ -1,4 +1,4 @@
-/* 	$NetBSD: sticvar.h,v 1.18 2008/07/09 13:19:33 joerg Exp $	*/
+/* 	$NetBSD: sticvar.h,v 1.16 2007/03/04 06:02:47 christos Exp $	*/
 
 /*-
  * Copyright (c) 1999, 2000, 2001 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -124,7 +131,7 @@ struct stic_info {
 #define	SI_DVOPEN		0x0010
 
 void	stic_init(struct stic_info *);
-void	stic_attach(device_t, struct stic_info *, int);
+void	stic_attach(struct device *, struct stic_info *, int);
 void	stic_cnattach(struct stic_info *);
 void	stic_reset(struct stic_info *);
 void	stic_flush(struct stic_info *);

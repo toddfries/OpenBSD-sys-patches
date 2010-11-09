@@ -1,4 +1,4 @@
-/*	$NetBSD: platform.c,v 1.24 2008/04/28 20:23:33 martin Exp $	*/
+/*	$NetBSD: platform.c,v 1.22 2006/09/07 20:13:05 garbled Exp $	*/
 
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: platform.c,v 1.24 2008/04/28 20:23:33 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: platform.c,v 1.22 2006/09/07 20:13:05 garbled Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -46,24 +53,19 @@ __KERNEL_RCSID(0, "$NetBSD: platform.c,v 1.24 2008/04/28 20:23:33 martin Exp $")
 
 #include <machine/pcipnp.h>
 
-u_int32_t prep_pci_baseaddr = 0x80000cf8;
-u_int32_t prep_pci_basedata = 0x80000cfc;
+volatile unsigned char *prep_pci_baseaddr = (unsigned char *)0x80000cf8;
+volatile unsigned char *prep_pci_basedata = (unsigned char *)0x80000cfc;
 
 struct pciroutinginfo *pciroutinginfo;
-extern struct prep_pci_chipset *genppc_pct;
+extern struct prep_pci_chipset *prep_pct;
 
 extern void pci_intr_fixup_ibm_6015(void);
-#if NMCCLOCK > 0
 /* from mcclock_pnpbus.c */
 extern void ds1585_reboot(void);
-#endif
 
 struct platform_quirkdata platform_quirks[] = {
 	{ "IBM PPS Model 6015", PLAT_QUIRK_INTRFIXUP,
 	   pci_intr_fixup_ibm_6015, NULL, 0 },
-	{ "(e1)", PLAT_QUIRK_ISA_HANDLER, NULL, NULL, EXT_INTR_I8259 },
-	{ "000000000000000000000000000(e2)", PLAT_QUIRK_ISA_HANDLER, NULL,
-	   NULL, EXT_INTR_I8259 },
 	{ NULL, 0, NULL, NULL, 0 }
 };
 
@@ -103,13 +105,11 @@ reset_prep_generic(void)
 
 	mtmsr(mfmsr() | PSL_IP);
 
-#if NMCCLOCK > 0
 	/* XXX This is a special hack for 7024 and 7025 models, which have
 	 * no obvious method of rebooting. We call this, because it will
 	 * return if we do not have a 1585.
 	 */
 	ds1585_reboot();
-#endif
 
 	reg = inb(PREP_BUS_SPACE_IO + 0x92);
 	reg &= ~1UL;
@@ -207,8 +207,8 @@ pci_chipset_tag_type(void)
 		else {
 			size = pnp_pci_configbase(p, &addr, &data);
 			if (addr != 0 && data != 0) {
-				prep_pci_baseaddr = addr;
-				prep_pci_basedata = data;
+				prep_pci_baseaddr = (unsigned char *)addr;
+				prep_pci_basedata = (unsigned char *)data;
 				break;
 			}
 		}
@@ -283,7 +283,7 @@ create_intr_map(void *v, prop_dictionary_t dict)
  * device was FOUND.
  */
 void
-setup_pciintr_map(struct genppc_pci_chipset_businfo *pbi, int bus, int device,
+setup_pciintr_map(struct prep_pci_chipset_businfo *pbi, int bus, int device,
 	int func)
 {
 	int devfunc, nbus, size, i, found = 0, nrofpcidevs = 0;
@@ -314,7 +314,7 @@ setup_pciintr_map(struct genppc_pci_chipset_businfo *pbi, int bus, int device,
 		}
 	}
 	if (!found) {
-		aprint_error("Couldn't find PNP data for bus %d devfunc 0x%x\n",
+		printf("Couldn't find PNP data for bus %d devfunc 0x%x\n",
 		    bus, devfunc);
 		return;
 	}

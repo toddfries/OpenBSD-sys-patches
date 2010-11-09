@@ -1,4 +1,4 @@
-/* $NetBSD: kern_fileassoc.c,v 1.31 2008/05/05 17:11:17 ad Exp $ */
+/* $NetBSD: kern_fileassoc.c,v 1.29 2007/05/15 19:47:45 elad Exp $ */
 
 /*-
  * Copyright (c) 2006 Elad Efrat <elad@NetBSD.org>
@@ -28,13 +28,14 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kern_fileassoc.c,v 1.31 2008/05/05 17:11:17 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kern_fileassoc.c,v 1.29 2007/05/15 19:47:45 elad Exp $");
 
 #include "opt_fileassoc.h"
 
 #include <sys/param.h>
 #include <sys/mount.h>
 #include <sys/queue.h>
+#include <sys/malloc.h>
 #include <sys/vnode.h>
 #include <sys/namei.h>
 #include <sys/exec.h>
@@ -163,7 +164,7 @@ table_dtor(void *vp)
 	}
 
 	/* Remove hash table and sysctl node */
-	hashdone(tbl->hash_tbl, HASH_LIST, tbl->hash_mask);
+	hashdone(tbl->hash_tbl, M_TEMP);
 	specificdata_fini(fileassoc_domain, &tbl->data);
 	kmem_free(tbl, sizeof(*tbl));
 }
@@ -320,8 +321,8 @@ fileassoc_table_resize(struct fileassoc_table *tbl)
 	newtbl->hash_size = (tbl->hash_size * 2);
 	if (newtbl->hash_size < tbl->hash_size)
 		newtbl->hash_size = tbl->hash_size;
-	newtbl->hash_tbl = hashinit(newtbl->hash_size, HASH_LIST,
-	    true, &newtbl->hash_mask);
+	newtbl->hash_tbl = hashinit(newtbl->hash_size, HASH_LIST, M_TEMP,
+	    M_WAITOK | M_ZERO, &newtbl->hash_mask);
 	newtbl->hash_used = 0;
 	specificdata_init(fileassoc_domain, &newtbl->data);
 
@@ -351,7 +352,7 @@ fileassoc_table_resize(struct fileassoc_table *tbl)
 		    "needed %zu entries, got %zu", tbl->hash_used,
 		    newtbl->hash_used);
 
-	hashdone(tbl->hash_tbl, HASH_LIST, tbl->hash_mask);
+	hashdone(tbl->hash_tbl, M_TEMP);
 	specificdata_fini(fileassoc_domain, &tbl->data);
 	kmem_free(tbl, sizeof(*tbl));
 
@@ -374,8 +375,8 @@ fileassoc_table_add(struct mount *mp)
 	/* Allocate and initialize a table. */
 	tbl = kmem_zalloc(sizeof(*tbl), KM_SLEEP);
 	tbl->hash_size = FILEASSOC_INITIAL_TABLESIZE;
-	tbl->hash_tbl = hashinit(tbl->hash_size, HASH_LIST, true,
-	    &tbl->hash_mask);
+	tbl->hash_tbl = hashinit(tbl->hash_size, HASH_LIST, M_TEMP,
+	    M_WAITOK | M_ZERO, &tbl->hash_mask);
 	tbl->hash_used = 0;
 	specificdata_init(fileassoc_domain, &tbl->data);
 
@@ -527,20 +528,14 @@ fileassoc_file_delete(struct vnode *vp)
 	struct fileassoc_table *tbl;
 	struct fileassoc_hash_entry *mhe;
 
-	KERNEL_LOCK(1, NULL);
-
 	mhe = fileassoc_file_lookup(vp, NULL);
-	if (mhe == NULL) {
-		KERNEL_UNLOCK_ONE(NULL);
+	if (mhe == NULL)
 		return (ENOENT);
-	}
 
 	file_free(mhe);
 
 	tbl = fileassoc_table_lookup(vp->v_mount);
 	--(tbl->hash_used); /* XXX gc? */
-
-	KERNEL_UNLOCK_ONE(NULL);
 
 	return (0);
 }

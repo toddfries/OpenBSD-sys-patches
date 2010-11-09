@@ -1,4 +1,4 @@
-/*	$NetBSD: ofwreal.S,v 1.11 2007/10/17 19:56:47 garbled Exp $	*/
+/*	$NetBSD: ofwreal.S,v 1.8 2006/09/25 01:45:27 briggs Exp $	*/
 
 /*
  * Copyright (C) 1996 Wolfgang Solfrank.
@@ -141,7 +141,7 @@ fwentry:
 	blr
 
 /*
- * Save everything related to the mmu to the saveare pointed to by r3.
+ * Save everyting related to the mmu to the saveare pointed to by r3.
  */
 savemmu:
 
@@ -246,10 +246,6 @@ copy:
  * Restore everyting related to the mmu from the saveare pointed to by r3.
  */
 restoremmu:
-	mfmsr	%r12
-	andi.	%r4,%r12,~(PSL_IR|PSL_DR)@l
-	mtmsr	%r4			/* Disable MMU */
-	isync
 
 	li	%r4,0			/* first, invalidate BATs */
 	mtibatu	0,%r4
@@ -350,6 +346,5 @@ restoremmu:
 	tlbsync
 	sync
 
-	mtmsr	%r12			/* restore MMU */
 	mtlr	%r11
 	blr

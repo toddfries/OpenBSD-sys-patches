@@ -1,4 +1,4 @@
-/*	$NetBSD: msdosfsmount.h,v 1.15 2008/06/28 01:34:05 rumble Exp $	*/
+/*	$NetBSD: msdosfsmount.h,v 1.12 2006/11/25 12:17:30 scw Exp $	*/
 
 /*-
  * Copyright (C) 1994, 1995, 1997 Wolfgang Solfrank.
@@ -93,7 +93,6 @@ struct msdosfs_args {
 #ifdef _KERNEL
 #include <sys/mallocvar.h>
 MALLOC_DECLARE(M_MSDOSFSMNT);
-MALLOC_DECLARE(M_MSDOSFSTMP);
 
 /*
  * Layout of the mount control block for a msdos file system.
@@ -161,7 +160,7 @@ struct msdosfsmount {
  * Convert pointer to buffer -> pointer to direntry
  */
 #define	bptoep(pmp, bp, dirofs) \
-	((struct direntry *)(((char *)(bp)->b_data)	\
+	((struct direntry *)(((bp)->b_data)	\
 	 + ((dirofs) & (pmp)->pm_crbomask)))
 
 /*
@@ -245,5 +244,8 @@ void msdosfs_init(void);
 void msdosfs_reinit(void);
 void msdosfs_done(void);
 
+#ifdef SYSCTL_SETUP_PROTO
+SYSCTL_SETUP_PROTO(sysctl_vfs_msdosfs_setup);
+#endif /* SYSCTL_SETUP_PROTO */
 #endif /* _KERNEL */
 #endif /* _MSDOSFS_MSDOSFSMOUNT_H_ */

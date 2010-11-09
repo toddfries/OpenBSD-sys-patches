@@ -1,4 +1,4 @@
-/* $NetBSD: vr41xx.c,v 1.5 2007/03/04 05:59:53 christos Exp $ */
+/* $NetBSD: vr41xx.c,v 1.4 2000/01/16 11:14:49 uch Exp $ */
 
 /*-
  * Copyright (c) 1999 Shin Takemura.
@@ -87,20 +87,20 @@ vr41xx_asm_code_holder()
  *    int i			t0
  *
  * struct map_s {
- *   void *entry;	+0
- *   void *base;	+4
+ *   caddr_t entry;	+0
+ *   caddr_t base;	+4
  *   int pagesize;	+8
  *   int leafsize;	+12
  *   int nleaves;	+16
- *   void *arg0;	+20
+ *   caddr_t arg0;	+20
 
- *   void *arg1;  +24
+ *   caddr_t arg1;  +24
 
- *   void *arg2;	+28
+ *   caddr_t arg2;	+28
 
- *   void *arg3;	+32
+ *   caddr_t arg3;	+32
 
- *   void **leaf[32];	+36
+ *   caddr_t *leaf[32];	+36
  *
  */
 __asm(

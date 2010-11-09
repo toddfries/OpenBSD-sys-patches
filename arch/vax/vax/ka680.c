@@ -1,4 +1,4 @@
-/*	$NetBSD: ka680.c,v 1.16 2008/03/11 05:34:03 matt Exp $	*/
+/*	$NetBSD: ka680.c,v 1.14 2006/09/05 19:32:57 matt Exp $	*/
 /*
  * Copyright (c) 2002 Hugh Graham.
  * Copyright (c) 2000 Ludd, University of Lule}, Sweden.
@@ -35,7 +35,7 @@
 /* minor modifications for KA690 cache support by isildur@vaxpower.org */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ka680.c,v 1.16 2008/03/11 05:34:03 matt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ka680.c,v 1.14 2006/09/05 19:32:57 matt Exp $");
 
 #include <sys/param.h>
 #include <sys/types.h>
@@ -53,14 +53,13 @@ __KERNEL_RCSID(0, "$NetBSD: ka680.c,v 1.16 2008/03/11 05:34:03 matt Exp $");
 #include <machine/clock.h>
 #include <machine/scb.h>
 
-static void	ka680_conf(void);
-static void	ka680_attach_cpu(device_t);
-static void	ka680_cache_enable(void);
-static void	ka680_softmem(void *);
-static void	ka680_hardmem(void *);
-static void	ka680_steal_pages(void);
-static void	ka680_memerr(void);
-static int	ka680_mchk(void *);
+static void	ka680_conf __P((void));
+static void	ka680_cache_enable __P((void));
+static void	ka680_softmem __P((void *));
+static void	ka680_hardmem __P((void *));
+static void	ka680_steal_pages __P((void));
+static void	ka680_memerr __P((void));
+static int	ka680_mchk __P((caddr_t));
  
 /*
  * KA680-specific IPRs. KA680 has the funny habit to control all caches
@@ -86,31 +85,31 @@ static int	ka680_mchk(void *);
 #define PCCTL_D_EN	0x01
 
  
-static const char * const ka680_devs[] = { "cpu", "sgec", "shac", "uba", NULL };
-
 /* 
  * Declaration of KA680-specific calls.
  */
-const struct cpu_dep ka680_calls = {
-	.cpu_steal_pages = ka680_steal_pages,
-	.cpu_mchk	= ka680_mchk,
-	.cpu_memerr	= ka680_memerr, 
-	.cpu_conf	= ka680_conf,
-	.cpu_gettime	= generic_gettime,
-	.cpu_settime	= generic_settime,
-	.cpu_vups	= 24,	 /* ~VUPS */
-	.cpu_scbsz	= 2,	/* SCB pages */
-	.cpu_halt	= generic_halt,
-	.cpu_reboot	= generic_reboot,
-	.cpu_flags	= CPU_RAISEIPL,
-	.cpu_devs	= ka680_devs,
-	.cpu_attach_cpu	= ka680_attach_cpu,
+struct cpu_dep ka680_calls = {
+	ka680_steal_pages,
+	ka680_mchk,
+	ka680_memerr, 
+	ka680_conf,
+	generic_gettime,
+	generic_settime,
+	24,	 /* ~VUPS */
+	2,	/* SCB pages */
+	generic_halt,
+	generic_reboot,
+	NULL,
+	NULL,
+	CPU_RAISEIPL,
 };
 
 
 void
-ka680_conf(void)
+ka680_conf()
 {
+	const char *cpuname;
+
 	/* Don't ask why, but we seem to need this... */
 
 	volatile int *hej = (void *)mfpr(PR_ISP);
@@ -119,39 +118,28 @@ ka680_conf(void)
 
 	cpmbx = (struct cpmbx *)vax_map_physmem(0x20140400, 1);
 
-}
-
-void
-ka680_attach_cpu(device_t self)
-{
-	const char *cpuname;
-
-	switch (vax_boardtype) {
-		case VAX_BTYP_680:
-			switch((vax_siedata & 0xff00) >> 8) {
+	switch(vax_boardtype) {
+		case VAX_BTYP_680: switch((vax_siedata & 0xff00) >> 8) {
 			case VAX_STYP_675: cpuname = "KA675"; break;
 			case VAX_STYP_680: cpuname = "KA680"; break;
 			case VAX_STYP_690: cpuname = "KA690"; break;
 			default: cpuname = "unknown KA680-class";
-			}
-			break;
-		case VAX_BTYP_681:
-			switch ((vax_siedata & 0xff00) >> 8) {
+		} break;
+		case VAX_BTYP_681: switch((vax_siedata & 0xff00) >> 8) {
 			case VAX_STYP_681: cpuname = "KA681"; break;
 			case VAX_STYP_691: cpuname = "KA691"; break;
 			case VAX_STYP_694: cpuname = (vax_cpudata & 0x1000) ?
 				"KA694" : "KA692"; break;
 			default: cpuname = "unknown KA681-class";
-			}
-			break;
-		default: cpuname = "unknown class"; break;
+		} break;
+		default: cpuname = "unknown NVAX class";
 	}
 
-	aprint_normal("%s, NVAX (ucode rev %d)\n", cpuname, vax_cpudata & 0xff);
+	printf("cpu0: %s, ucode rev %d\n", cpuname, vax_cpudata & 0xff);
 }
 
 void
-ka680_cache_enable(void)
+ka680_cache_enable()
 {
 	int start, pslut, fslut, cslut, havevic;
 
@@ -279,7 +267,7 @@ ka680_softmem(void *arg)
 }
 
 void
-ka680_steal_pages(void)
+ka680_steal_pages()
 {
 	/*
 	 * Get the soft and hard memory error vectors now.
@@ -292,13 +280,13 @@ ka680_steal_pages(void)
 }
 
 void
-ka680_memerr(void)
+ka680_memerr()
 {
 	printf("Memory err!\n");
 }
 
 int
-ka680_mchk(void *addr)
+ka680_mchk(caddr_t addr)
 {
 	panic("Machine check");
 	return 0;

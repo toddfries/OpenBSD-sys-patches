@@ -1,4 +1,4 @@
-/*	$NetBSD: if_arc.h,v 1.22 2008/02/20 17:05:52 matt Exp $	*/
+/*	$NetBSD: if_arc.h,v 1.19 2005/12/14 00:28:08 christos Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1993
@@ -40,31 +40,31 @@
  * don't know who uses this.
  */
 struct arc_addr {
-	uint8_t  arc_addr_octet[1];
-} __packed;
+	u_int8_t  arc_addr_octet[1];
+} __attribute__((__packed__));
 
 /*
  * Structure of a 2.5MB/s Arcnet header.
  * as given to interface code.
  */
 struct	arc_header {
-	uint8_t  arc_shost;
-	uint8_t  arc_dhost;
-	uint8_t  arc_type;
+	u_int8_t  arc_shost;
+	u_int8_t  arc_dhost;
+	u_int8_t  arc_type;
 	/*
 	 * only present for newstyle encoding with LL fragmentation.
 	 * Don't use sizeof(anything), use ARC_HDR{,NEW}LEN instead.
 	 */
-	uint8_t  arc_flag;
-	uint16_t arc_seqid;
+	u_int8_t  arc_flag;
+	u_int16_t arc_seqid;
 
 	/*
 	 * only present in exception packets (arc_flag == 0xff)
 	 */
-	uint8_t  arc_type2;	/* same as arc_type */
-	uint8_t  arc_flag2;	/* real flag value */
-	uint16_t arc_seqid2;	/* real seqid value */
-} __packed;
+	u_int8_t  arc_type2;	/* same as arc_type */
+	u_int8_t  arc_flag2;	/* real flag value */
+	u_int16_t arc_seqid2;	/* real seqid value */
+} __attribute__((__packed__));
 
 #define	ARC_ADDR_LEN		1
 
@@ -103,23 +103,24 @@ struct	arc_header {
 struct	arccom {
 	struct 	  ifnet ac_if;		/* network-visible interface */
 
-	uint16_t ac_seqid;		/* seq. id used by PHDS encap. */
+	u_int16_t ac_seqid;		/* seq. id used by PHDS encap. */
 
 	struct ac_frag {
-		uint8_t  af_maxflag;	/* from first packet */
-		uint8_t  af_lastseen;	/* last split flag seen */
-		uint16_t af_seqid;
+		u_int8_t  af_maxflag;	/* from first packet */
+		u_int8_t  af_lastseen;	/* last split flag seen */
+		u_int16_t af_seqid;
 		struct mbuf *af_packet;
 	} ac_fragtab[256];		/* indexed by sender ll address */
 
 };
 
 #ifdef _KERNEL
-extern uint8_t arcbroadcastaddr;
+extern u_int8_t arcbroadcastaddr;
 extern int arc_ipmtu;	/* XXX new ip only, no RFC 1051! */
 
-void	arc_ifattach(struct ifnet *, uint8_t);
-char	*arc_sprintf(uint8_t *);
+void	arc_ifattach(struct ifnet *, u_int8_t);
+void	arc_storelladdr(struct ifnet *, u_int8_t);
+char	*arc_sprintf(u_int8_t *);
 int	arc_isphds(uint8_t);
 #endif
 

@@ -1,4 +1,4 @@
-/*	$NetBSD: kobj_machdep.c,v 1.4 2008/11/21 23:18:11 uwe Exp $	*/
+/*	$NetBSD: kobj_machdep.c,v 1.2 2008/03/26 22:45:50 uwe Exp $	*/
 
 /*-
  * Copyright (c) 2008 The NetBSD Foundation, Inc.
@@ -12,6 +12,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -27,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kobj_machdep.c,v 1.4 2008/11/21 23:18:11 uwe Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kobj_machdep.c,v 1.2 2008/03/26 22:45:50 uwe Exp $");
 
 #define	ELFSIZE		ARCH_ELFSIZE
 
@@ -62,6 +69,17 @@ kobj_reloc(kobj_t ko, uintptr_t relocbase, const void *data,
 	case R_TYPE(NONE):
 		break;
 
+	case R_TYPE(REL32):
+		addr = kobj_sym_lookup(ko, symidx);
+		if (addr == 0)
+			return -1;
+
+		tmp = (Elf_Addr)(relocbase + addr + rela->r_addend) -
+		    (Elf_Addr)where;
+		if (*where != tmp)
+			*where = tmp;
+		break;
+
 	case R_TYPE(DIR32):
 		addr = kobj_sym_lookup(ko, symidx);
 		if (addr == 0)
@@ -69,6 +87,23 @@ kobj_reloc(kobj_t ko, uintptr_t relocbase, const void *data,
 
 		tmp = (Elf_Addr)(addr + *where + rela->r_addend);
 		*where = tmp;
+		break;
+
+	case R_TYPE(GLOB_DAT):
+		addr = kobj_sym_lookup(ko, symidx);
+		if (addr == 0)
+			return -1;
+
+		tmp = (Elf_Addr)(relocbase + addr + rela->r_addend);
+		if (*where != tmp)
+			*where = tmp;
+		break;
+
+	case R_TYPE(RELATIVE):
+		if (rela->r_addend)
+			*where = (Elf_Addr)(relocbase + rela->r_addend);
+		else
+			*where += (Elf_Addr)relocbase;
 		break;
 
 	default:

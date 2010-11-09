@@ -1,4 +1,4 @@
-/*	$NetBSD: obiovar.h,v 1.3 2008/04/28 20:23:26 martin Exp $	*/
+/*	$NetBSD: obiovar.h,v 1.1 2006/09/01 21:26:18 uwe Exp $	*/
 
 /*-
  * Copyright (c) 1997 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed by the NetBSD
+ *      Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -127,6 +134,17 @@ struct obio_attach_args {
 #define	IOBASEUNK	OBIOCF_PORT_DEFAULT	/* i/o address is unknown */
 #define	IRQUNK		OBIOCF_IRQ_DEFAULT	/* interrupt request line is unknown */
 #define	MADDRUNK	OBIOCF_IOMEM_DEFAULT	/* shared memory address is unknown */
+
+
+/*
+ * master bus
+ */
+struct obio_softc {
+	struct device sc_dev;		/* base device */
+
+	bus_space_tag_t sc_iot;		/* io space tag */
+	bus_space_tag_t sc_memt;	/* mem space tag */
+};
 
 #define		cf_iobase		cf_loc[OBIOCF_PORT]
 #define		cf_iosize		cf_loc[OBIOCF_SIZE]

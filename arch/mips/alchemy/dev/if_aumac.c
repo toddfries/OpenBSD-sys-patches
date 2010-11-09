@@ -1,4 +1,4 @@
-/* $NetBSD: if_aumac.c,v 1.25 2008/01/20 14:18:05 dogcow Exp $ */
+/* $NetBSD: if_aumac.c,v 1.18 2006/09/20 05:37:22 gdamore Exp $ */
 
 /*
  * Copyright (c) 2001 Wasabi Systems, Inc.
@@ -46,7 +46,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_aumac.c,v 1.25 2008/01/20 14:18:05 dogcow Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_aumac.c,v 1.18 2006/09/20 05:37:22 gdamore Exp $");
 
 #include "bpfilter.h"
 #include "rnd.h"
@@ -115,7 +115,7 @@ __KERNEL_RCSID(0, "$NetBSD: if_aumac.c,v 1.25 2008/01/20 14:18:05 dogcow Exp $")
 #define	AUMAC_BUFSIZE		(MAC_BUFLEN * (AUMAC_NTXDESC + AUMAC_NRXDESC))
 
 struct aumac_buf {
-	vaddr_t buf_vaddr;		/* virtual address of buffer */
+	caddr_t buf_vaddr;		/* virtual address of buffer */
 	bus_addr_t buf_paddr;		/* DMA address of buffer */
 };
 
@@ -140,7 +140,7 @@ struct aumac_softc {
 	/* Transmit and receive buffers */
 	struct aumac_buf sc_txbufs[AUMAC_NTXDESC];
 	struct aumac_buf sc_rxbufs[AUMAC_NRXDESC];
-	void *sc_bufaddr;
+	caddr_t sc_bufaddr;
 
 	int sc_txfree;			/* number of free Tx descriptors */
 	int sc_txnext;			/* next Tx descriptor to use */
@@ -180,7 +180,7 @@ do {									\
 
 static void	aumac_start(struct ifnet *);
 static void	aumac_watchdog(struct ifnet *);
-static int	aumac_ioctl(struct ifnet *, u_long, void *);
+static int	aumac_ioctl(struct ifnet *, u_long, caddr_t);
 static int	aumac_init(struct ifnet *);
 static void	aumac_stop(struct ifnet *, int);
 
@@ -201,6 +201,9 @@ static int	aumac_mii_readreg(struct device *, int, int);
 static void	aumac_mii_writereg(struct device *, int, int, int);
 static void	aumac_mii_statchg(struct device *);
 static int	aumac_mii_wait(struct aumac_softc *, const char *);
+
+static int	aumac_mediachange(struct ifnet *);
+static void	aumac_mediastatus(struct ifnet *, struct ifmediareq *);
 
 static int	aumac_match(struct device *, struct cfdata *, void *);
 static void	aumac_attach(struct device *, struct device *, void *);
@@ -231,10 +234,10 @@ aumac_attach(struct device *parent, struct device *self, void *aux)
 	struct ifnet *ifp = &sc->sc_ethercom.ec_if;
 	struct pglist pglist;
 	paddr_t bufaddr;
-	vaddr_t vbufaddr;
+	caddr_t vbufaddr;
 	int i;
 
-	callout_init(&sc->sc_tick_ch, 0);
+	callout_init(&sc->sc_tick_ch);
 
 	printf(": Au1X00 10/100 Ethernet\n");
 
@@ -294,7 +297,7 @@ aumac_attach(struct device *parent, struct device *self, void *aux)
 		return;
 
 	bufaddr = VM_PAGE_TO_PHYS(TAILQ_FIRST(&pglist));
-	vbufaddr = MIPS_PHYS_TO_KSEG0(bufaddr);
+	vbufaddr = (void *)MIPS_PHYS_TO_KSEG0(bufaddr);
 
 	for (i = 0; i < AUMAC_NTXDESC; i++) {
 		int offset = AUMAC_TXBUF_OFFSET + (i * MAC_BUFLEN);
@@ -323,9 +326,8 @@ aumac_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_mii.mii_readreg = aumac_mii_readreg;
 	sc->sc_mii.mii_writereg = aumac_mii_writereg;
 	sc->sc_mii.mii_statchg = aumac_mii_statchg;
-	sc->sc_ethercom.ec_mii = &sc->sc_mii;
-	ifmedia_init(&sc->sc_mii.mii_media, 0, ether_mediachange,
-	    ether_mediastatus);
+	ifmedia_init(&sc->sc_mii.mii_media, 0, aumac_mediachange,
+	    aumac_mediastatus);
 
 	mii_attach(&sc->sc_dev, &sc->sc_mii, 0xffffffff, MII_PHY_ANY,
 	    MII_OFFSET_ANY, 0);
@@ -435,11 +437,11 @@ aumac_start(struct ifnet *ifp)
 		 */
 
 		m_copydata(m, 0, m->m_pkthdr.len,
-		    (void *)sc->sc_txbufs[nexttx].buf_vaddr);
+		    sc->sc_txbufs[nexttx].buf_vaddr);
 
 		/* Zero out the remainder of any short packets. */
 		if (m->m_pkthdr.len < (ETHER_MIN_LEN - ETHER_CRC_LEN))
-			memset((char *)sc->sc_txbufs[nexttx].buf_vaddr +
+			memset(sc->sc_txbufs[nexttx].buf_vaddr +
 			    m->m_pkthdr.len, 0,
 			    ETHER_MIN_LEN - ETHER_CRC_LEN - m->m_pkthdr.len);
 
@@ -497,21 +499,31 @@ aumac_watchdog(struct ifnet *ifp)
  *	Handle control requests from the operator.
  */
 static int
-aumac_ioctl(struct ifnet *ifp, u_long cmd, void *data)
+aumac_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	struct aumac_softc *sc = ifp->if_softc;
+	struct ifreq *ifr = (struct ifreq *) data;
 	int s, error;
 
 	s = splnet();
 
-	error = ether_ioctl(ifp, cmd, data);
-	if (error == ENETRESET) {
-		/*
-		 * Multicast list has changed; set the hardware filter
-		 * accordingly.
-		 */
-		if (ifp->if_flags & IFF_RUNNING)
-			aumac_set_filter(sc);
+	switch (cmd) {
+	case SIOCSIFMEDIA:
+	case SIOCGIFMEDIA:
+		error = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media, cmd);
+		break;
+
+	default:
+		error = ether_ioctl(ifp, cmd, data);
+		if (error == ENETRESET) {
+			/*
+			 * Multicast list has changed; set the hardware filter
+			 * accordingly.
+			 */
+			if (ifp->if_flags & IFF_RUNNING)
+				aumac_set_filter(sc);
+		}
+		break;
 	}
 
 	/* Try to get more packets going. */
@@ -725,8 +737,8 @@ aumac_rxintr(struct aumac_softc *sc)
 		}
 
 		m->m_data += 2;		/* align payload */
-		memcpy(mtod(m, void *),
-		    (void *)sc->sc_rxbufs[i].buf_vaddr, len);
+		memcpy(mtod(m, caddr_t),
+		    sc->sc_rxbufs[i].buf_vaddr, len);
 		AUMAC_INIT_RXDESC(sc, i);
 
 		m->m_pkthdr.rcvif = ifp;
@@ -816,8 +828,7 @@ aumac_init(struct ifnet *ifp)
 #endif
 
 	/* Set the media. */
-	if ((error = ether_mediachange(ifp)) != 0)
-		goto out;
+	aumac_mediachange(ifp);
 
 	/*
 	 * Set the receive filter.  This will actually start the transmit
@@ -832,7 +843,6 @@ aumac_init(struct ifnet *ifp)
 	ifp->if_flags |= IFF_RUNNING; 
 	ifp->if_flags &= ~IFF_OACTIVE;
 
-out:
 	if (error)
 		printf("%s: interface not running\n", sc->sc_dev.dv_xname);
 	return (error);
@@ -911,7 +921,7 @@ aumac_set_filter(struct aumac_softc *sc)
 	struct ifnet *ifp = &sc->sc_ethercom.ec_if;
 	struct ether_multi *enm;
 	struct ether_multistep step;
-	const uint8_t *enaddr = CLLADDR(ifp->if_sadl);
+	const uint8_t *enaddr = LLADDR(ifp->if_sadl);
 	uint32_t mchash[2], crc;
 
 	sc->sc_control &= ~(CONTROL_PM | CONTROL_PR);
@@ -983,6 +993,36 @@ aumac_set_filter(struct aumac_softc *sc)
 	sc->sc_control |= CONTROL_PM;
 	bus_space_write_4(sc->sc_st, sc->sc_mac_sh, MAC_CONTROL,
 	    sc->sc_control);
+}
+
+/*
+ * aumac_mediastatus:	[ifmedia interface function]
+ *
+ *	Get the current interface media status.
+ */
+static void
+aumac_mediastatus(struct ifnet *ifp, struct ifmediareq *ifmr)
+{
+	struct aumac_softc *sc = ifp->if_softc;
+
+	mii_pollstat(&sc->sc_mii);
+	ifmr->ifm_status = sc->sc_mii.mii_media_status;
+	ifmr->ifm_active = sc->sc_mii.mii_media_active;
+}
+
+/*
+ * aumac_mediachange:	[ifmedia interface function]
+ *
+ *	Set hardware to newly selected media.
+ */
+static int
+aumac_mediachange(struct ifnet *ifp)
+{
+	struct aumac_softc *sc = ifp->if_softc;
+
+	if (ifp->if_flags & IFF_UP)
+		mii_mediachg(&sc->sc_mii);
+	return (0);
 }
 
 /*

@@ -1,4 +1,4 @@
-/*	$NetBSD: svr4_ioctl.h,v 1.11 2008/04/28 20:23:45 martin Exp $	 */
+/*	$NetBSD: svr4_ioctl.h,v 1.8 2003/01/18 08:44:26 thorpej Exp $	 */
 
 /*-
  * Copyright (c) 1994 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -47,17 +54,17 @@
 #define	SVR4_IOW(g,n,t)		SVR4_IOC(SVR4_IOC_IN,	(g), (n), sizeof(t))
 #define	SVR4_IOWR(g,n,t)	SVR4_IOC(SVR4_IOC_INOUT,(g), (n), sizeof(t))
 
-int	svr4_stream_ti_ioctl(struct file *, struct lwp *, register_t *,
-			          int, u_long, void *);
-int	svr4_stream_ioctl(struct file *, struct lwp *, register_t *,
-				  int, u_long, void *);
-int	svr4_term_ioctl(struct file *, struct lwp *, register_t *,
-				  int, u_long, void *);
-int	svr4_ttold_ioctl(struct file *, struct lwp *, register_t *,
-				  int, u_long, void *);
-int	svr4_fil_ioctl(struct file *, struct lwp *, register_t *,
-				  int, u_long, void *);
-int	svr4_sock_ioctl(struct file *, struct lwp *, register_t *,
-				  int, u_long, void *);
+int	svr4_stream_ti_ioctl __P((struct file *, struct lwp *, register_t *,
+			          int, u_long, caddr_t));
+int	svr4_stream_ioctl    __P((struct file *, struct lwp *, register_t *,
+				  int, u_long, caddr_t));
+int	svr4_term_ioctl      __P((struct file *, struct lwp *, register_t *,
+				  int, u_long, caddr_t));
+int	svr4_ttold_ioctl     __P((struct file *, struct lwp *, register_t *,
+				  int, u_long, caddr_t));
+int	svr4_fil_ioctl	     __P((struct file *, struct lwp *, register_t *,
+				  int, u_long, caddr_t));
+int	svr4_sock_ioctl	     __P((struct file *, struct lwp *, register_t *,
+				  int, u_long, caddr_t));
 
 #endif /* !_SVR4_IOCTL_H_ */

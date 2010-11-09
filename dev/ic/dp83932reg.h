@@ -1,4 +1,4 @@
-/*	$NetBSD: dp83932reg.h,v 1.7 2008/04/28 20:23:49 martin Exp $	*/
+/*	$NetBSD: dp83932reg.h,v 1.5 2007/06/02 10:48:24 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -48,7 +55,7 @@ struct sonic_rda16 {
 	uint16_t	rda_seqno;
 	uint16_t	rda_link;
 	uint16_t	rda_inuse;
-} __packed;
+} __attribute__((__packed__));
 
 struct sonic_rda32 {
 	uint32_t	rda_status;
@@ -58,7 +65,7 @@ struct sonic_rda32 {
 	uint32_t	rda_seqno;
 	uint32_t	rda_link;
 	uint32_t	rda_inuse;
-} __packed;
+} __attribute__((__packed__));
 
 #define	RDA_SEQNO_RBA(x)	(((x) >> 8) & 0xff)
 #define	RDA_SEQNO_RSN(x)	((x) & 0xff)
@@ -78,14 +85,14 @@ struct sonic_rra16 {
 	uint16_t	rra_ptr1;
 	uint16_t	rra_wc0;
 	uint16_t	rra_wc1;
-} __packed;
+} __attribute__((__packed__));
 
 struct sonic_rra32 {
 	uint32_t	rra_ptr0;
 	uint32_t	rra_ptr1;
 	uint32_t	rra_wc0;
 	uint32_t	rra_wc1;
-} __packed;
+} __attribute__((__packed__));
 
 /*
  * SONIC Transmit Descriptor Area
@@ -98,13 +105,13 @@ struct sonic_frag16 {
 	uint16_t	frag_ptr0;
 	uint16_t	frag_ptr1;
 	uint16_t	frag_size;
-} __packed;
+} __attribute__((__packed__));
 
 struct sonic_frag32 {
 	uint32_t	frag_ptr0;
 	uint32_t	frag_ptr1;
 	uint32_t	frag_size;
-} __packed;
+} __attribute__((__packed__));
 
 /*
  * Note the frag after the last frag is used to link up to the
@@ -120,7 +127,7 @@ struct sonic_tda16 {
 #if 0
 	uint16_t	tda_link;
 #endif
-} __packed;
+} __attribute__((__packed__));
 
 struct sonic_tda32 {
 	uint32_t	tda_status;
@@ -131,7 +138,7 @@ struct sonic_tda32 {
 #if 0
 	uint32_t	tda_link;
 #endif
-} __packed;
+} __attribute__((__packed__));
 
 #define	TDA_STATUS_NCOL(x)	(((x) >> 11) & 0x1f)
 
@@ -145,14 +152,14 @@ struct sonic_cda16 {
 	uint16_t	cda_addr0;
 	uint16_t	cda_addr1;
 	uint16_t	cda_addr2;
-} __packed;
+} __attribute__((__packed__));
 
 struct sonic_cda32 {
 	uint32_t	cda_entry;
 	uint32_t	cda_addr0;
 	uint32_t	cda_addr1;
 	uint32_t	cda_addr2;
-} __packed;
+} __attribute__((__packed__));
 
 /*
  * SONIC register file.

@@ -1,4 +1,4 @@
-/*	$NetBSD: smb_iod.c,v 1.29 2008/06/24 10:37:19 gmcgarry Exp $	*/
+/*	$NetBSD: smb_iod.c,v 1.26 2006/04/12 01:16:02 christos Exp $	*/
 
 /*
  * Copyright (c) 2000-2001 Boris Popov
@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: smb_iod.c,v 1.29 2008/06/24 10:37:19 gmcgarry Exp $");
+__KERNEL_RCSID(0, "$NetBSD: smb_iod.c,v 1.26 2006/04/12 01:16:02 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -136,10 +136,10 @@ smb_iod_connect(struct smbiod *iod)
 	struct lwp *l = iod->iod_l;
 	int error;
 
-	SMBIODEBUG(("%d\n", iod->iod_state));
+	SMBIODEBUG("%d\n", iod->iod_state);
 	switch(iod->iod_state) {
 	case SMBIOD_ST_VCACTIVE:
-		SMBIODEBUG(("called for already opened connection\n"));
+		SMBIODEBUG("called for already opened connection\n");
 		return EISCONN;
 	case SMBIOD_ST_DEAD:
 		return ENOTCONN;	/* XXX: last error code ? */
@@ -153,24 +153,24 @@ smb_iod_connect(struct smbiod *iod)
 			goto fail
 
 	ithrow(SMB_TRAN_CREATE(vcp, l));
-	SMBIODEBUG(("tcreate\n"));
+	SMBIODEBUG("tcreate\n");
 	if (vcp->vc_laddr) {
 		ithrow(SMB_TRAN_BIND(vcp, vcp->vc_laddr, l));
 	}
-	SMBIODEBUG(("tbind\n"));
+	SMBIODEBUG("tbind\n");
 	ithrow(SMB_TRAN_CONNECT(vcp, vcp->vc_paddr, l));
 	SMB_TRAN_SETPARAM(vcp, SMBTP_SELECTID, &iod->iod_flags);
 	iod->iod_state = SMBIOD_ST_TRANACTIVE;
-	SMBIODEBUG(("tconnect\n"));
+	SMBIODEBUG("tconnect\n");
 /*	vcp->vc_mid = 0;*/
 	ithrow(smb_smb_negotiate(vcp, &iod->iod_scred));
-	SMBIODEBUG(("snegotiate\n"));
+	SMBIODEBUG("snegotiate\n");
 	ithrow(smb_smb_ssnsetup(vcp, &iod->iod_scred));
 	iod->iod_state = SMBIOD_ST_VCACTIVE;
 
 #undef ithrow
 
-	SMBIODEBUG(("completed\n"));
+	SMBIODEBUG("completed\n");
 	smb_iod_invrq(iod);
 
 	return (0);
@@ -185,7 +185,7 @@ smb_iod_disconnect(struct smbiod *iod)
 {
 	struct smb_vc *vcp = iod->iod_vc;
 
-	SMBIODEBUG(("\n"));
+	SMBIODEBUG("\n");
 	if (iod->iod_state == SMBIOD_ST_VCACTIVE) {
 		smb_smb_ssnclose(vcp, &iod->iod_scred);
 		iod->iod_state = SMBIOD_ST_TRANACTIVE;
@@ -209,7 +209,7 @@ smb_iod_treeconnect(struct smbiod *iod, struct smb_share *ssp)
 		if (error)
 			return error;
 	}
-	SMBIODEBUG(("tree reconnect\n"));
+	SMBIODEBUG("tree reconnect\n");
 	SMBS_ST_LOCK(ssp);
 	ssp->ss_flags |= SMBS_RECONNECTING;
 	SMBS_ST_UNLOCK(ssp);
@@ -230,7 +230,7 @@ smb_iod_sendrq(struct smbiod *iod, struct smb_rq *rqp)
 	struct mbuf *m;
 	int error;
 
-	SMBIODEBUG(("iod_state = %d, rqmid %d\n", iod->iod_state, rqp->sr_mid));
+	SMBIODEBUG("iod_state = %d, rqmid %d\n", iod->iod_state, rqp->sr_mid);
 	switch (iod->iod_state) {
 	case SMBIOD_ST_NOTCONN:
 		smb_iod_rqprocessed(rqp, ENOTCONN);
@@ -263,13 +263,13 @@ smb_iod_sendrq(struct smbiod *iod, struct smb_rq *rqp)
 		 */
 		return ENOTCONN;
 	}
-	SMBSDEBUG(("M:%04x, P:%04x, U:%04x, T:%04x\n", rqp->sr_mid, 0, 0, 0));
+	SMBSDEBUG("M:%04x, P:%04x, U:%04x, T:%04x\n", rqp->sr_mid, 0, 0, 0);
 	m_dumpm(rqp->sr_rq.mb_top);
 	m = m_copym(rqp->sr_rq.mb_top, 0, M_COPYALL, M_WAIT);
 	error = rqp->sr_lerror = (m) ? SMB_TRAN_SEND(vcp, m, l) : ENOBUFS;
 	if (error == 0) {
 		if (rqp->sr_timo > 0) {
-			callout_init(&rqp->sr_timo_ch, 0);
+			callout_init(&rqp->sr_timo_ch);
 			callout_reset(&rqp->sr_timo_ch, rqp->sr_timo,
 				smb_iod_rqtimedout, rqp);
 		}
@@ -351,7 +351,7 @@ smb_iod_recvall(struct smbiod *iod)
 			continue;
 		}
 		mid = SMB_HDRMID(hp);
-		SMBSDEBUG(("mid %04x\n", (u_int)mid));
+		SMBSDEBUG("mid %04x\n", (u_int)mid);
 		SMB_IOD_RQLOCK(iod);
 		SIMPLEQ_FOREACH(rqp, &iod->iod_rqlist, sr_link) {
 			if (rqp->sr_mid != mid)
@@ -364,7 +364,7 @@ smb_iod_recvall(struct smbiod *iod)
 					md_append_record(&rqp->sr_rp, m);
 				} else {
 					SMBRQ_SUNLOCK(rqp);
-					SMBIODEBUG(("duplicate response %d (ignored)\n", mid));
+					SMBIODEBUG("duplicate response %d (ignored)\n", mid);
 					break;
 				}
 			}
@@ -374,7 +374,7 @@ smb_iod_recvall(struct smbiod *iod)
 		}
 		SMB_IOD_RQUNLOCK(iod);
 		if (rqp == NULL) {
-			SMBIODEBUG(("drop resp with mid %d\n", (u_int)mid));
+			SMBIODEBUG("drop resp with mid %d\n", (u_int)mid);
 /*			smb_printrqlist(vcp);*/
 			m_freem(m);
 		}
@@ -397,7 +397,7 @@ smb_iod_request(struct smbiod *iod, int event, void *ident)
 	struct smbiod_event *evp;
 	int error;
 
-	SMBIODEBUG(("\n"));
+	SMBIODEBUG("\n");
 	evp = smb_zmalloc(sizeof(*evp), M_SMBIOD, M_WAITOK);
 	evp->ev_type = event;
 	evp->ev_ident = ident;
@@ -409,7 +409,7 @@ smb_iod_request(struct smbiod *iod, int event, void *ident)
 		return 0;
 	}
 	smb_iod_wakeup(iod);
-	mtsleep(evp, PWAIT | PNORELOCK, "smbevw", 0, SMB_IOD_EVLOCKPTR(iod));
+	ltsleep(evp, PWAIT | PNORELOCK, "smbevw", 0, SMB_IOD_EVLOCKPTR(iod));
 	error = evp->ev_error;
 	free(evp, M_SMBIOD);
 	return error;
@@ -426,7 +426,7 @@ smb_iod_addrq(struct smb_rq *rqp)
 	struct smbiod *iod = vcp->vc_iod;
 	int error;
 
-	SMBIODEBUG(("\n"));
+	SMBIODEBUG("\n");
 	if (rqp->sr_cred->scr_l == iod->iod_l) {
 		rqp->sr_flags |= SMBR_INTERNAL;
 		SMB_IOD_RQLOCK(iod);
@@ -475,7 +475,7 @@ smb_iod_addrq(struct smb_rq *rqp)
 			break;
 		iod->iod_muxwant++;
 		/* XXX use interruptible sleep? */
-		mtsleep(&iod->iod_muxwant, PWAIT, "smbmux",
+		ltsleep(&iod->iod_muxwant, PWAIT, "smbmux",
 			0, SMB_IOD_RQLOCKPTR(iod));
 	}
 	iod->iod_muxcnt++;
@@ -491,7 +491,7 @@ smb_iod_removerq(struct smb_rq *rqp)
 	struct smb_vc *vcp = rqp->sr_vc;
 	struct smbiod *iod = vcp->vc_iod;
 
-	SMBIODEBUG(("\n"));
+	SMBIODEBUG("\n");
 	if (rqp->sr_flags & SMBR_INTERNAL) {
 		SMB_IOD_RQLOCK(iod);
 		SIMPLEQ_REMOVE(&iod->iod_rqlist, rqp, smb_rq, sr_link);
@@ -501,7 +501,7 @@ smb_iod_removerq(struct smb_rq *rqp)
 	SMB_IOD_RQLOCK(iod);
 	while (rqp->sr_flags & SMBR_XLOCK) {
 		rqp->sr_flags |= SMBR_XLOCKWANT;
-		mtsleep(rqp, PWAIT, "smbxrm", 0, SMB_IOD_RQLOCKPTR(iod));
+		ltsleep(rqp, PWAIT, "smbxrm", 0, SMB_IOD_RQLOCKPTR(iod));
 	}
 	SIMPLEQ_REMOVE(&iod->iod_rqlist, rqp, smb_rq, sr_link);
 	iod->iod_muxcnt--;
@@ -519,7 +519,7 @@ smb_iod_waitrq(struct smb_rq *rqp)
 	struct smbiod *iod = rqp->sr_vc->vc_iod;
 	int error;
 
-	SMBIODEBUG(("\n"));
+	SMBIODEBUG("\n");
 	if (rqp->sr_flags & SMBR_INTERNAL) {
 		for (;;) {
 			smb_iod_sendall(iod);
@@ -535,7 +535,7 @@ smb_iod_waitrq(struct smb_rq *rqp)
 	SMBRQ_SLOCK(rqp);
 	if (rqp->sr_rpgen == rqp->sr_rplast) {
 		/* XXX interruptible sleep? */
-		mtsleep(&rqp->sr_state, PWAIT, "smbwrq", 0,
+		ltsleep(&rqp->sr_state, PWAIT, "smbwrq", 0,
 			SMBRQ_SLOCKPTR(rqp));
 	}
 	rqp->sr_rplast++;
@@ -600,7 +600,7 @@ smb_iod_main(struct smbiod *iod)
 #endif
 	struct smbiod_event *evp;
 
-	SMBIODEBUG(("\n"));
+	SMBIODEBUG("\n");
 
 	/*
 	 * Check all interesting events
@@ -669,7 +669,7 @@ smb_iod_thread(void *arg)
 		smb_iod_main(iod);
 		if (iod->iod_flags & SMBIOD_SHUTDOWN)
 			break;
-		SMBIODEBUG(("going to sleep\n"));
+		SMBIODEBUG("going to sleep\n");
 		tsleep(&iod->iod_flags, PSOCK, "smbidle", 0);
 	}
 	splx(s);
@@ -680,6 +680,7 @@ int
 smb_iod_create(struct smb_vc *vcp)
 {
 	struct smbiod *iod;
+	struct proc *p;
 	int error;
 
 	iod = smb_zmalloc(sizeof(*iod), M_SMBIOD, M_WAITOK);
@@ -696,17 +697,20 @@ smb_iod_create(struct smb_vc *vcp)
 	smb_sl_init(&iod->iod_evlock, "smbevl");
 	SIMPLEQ_INIT(&iod->iod_evlist);
 #ifdef __NetBSD__
-	error = kthread_create(PRI_NONE, 0, NULL, smb_iod_thread, iod,
-	   &iod->iod_l, "smbiod%d", iod->iod_id);
+	error = kthread_create1(smb_iod_thread, iod, &p,
+				"smbiod%d", iod->iod_id);
 #else
 	error = kthread_create(smb_iod_thread, iod, &iod->iod_p,
 	    RFNOWAIT, "smbiod%d", iod->iod_id);
 #endif
 	if (error) {
-		SMBIODEBUG(("can't start smbiod: %d", error));
+		SMBIODEBUG("can't start smbiod: %d", error);
 		free(iod, M_SMBIOD);
 		return error;
 	}
+#ifdef __NetBSD__
+	iod->iod_l = LIST_FIRST(&p->p_lwps);
+#endif
 	return 0;
 }
 

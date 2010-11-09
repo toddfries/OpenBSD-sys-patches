@@ -1,4 +1,4 @@
-/*	$NetBSD: intr.h,v 1.20 2008/04/27 18:58:46 matt Exp $	*/
+/*	$NetBSD: intr.h,v 1.15 2006/12/21 15:55:22 yamt Exp $	*/
 
 /*
  * Copyright (c) 2001, 2003 Wasabi Systems, Inc.
@@ -41,29 +41,24 @@
 #ifdef _KERNEL
 
 /* Interrupt priority "levels". */
-#ifdef __HAVE_FAST_SOFTINTS
-#define	IPL_NONE	0		/* nothing */
-#define	IPL_SOFTCLOCK	1		/* clock */
-#define	IPL_SOFTBIO	2		/* block I/O */
-#define	IPL_SOFTNET	3		/* software network interrupt */
-#define	IPL_SOFTSERIAL	4		/* software serial interrupt */
-#define	IPL_VM		5		/* memory allocation */
-#define	IPL_SCHED	6		/* clock interrupt */
-#define	IPL_HIGH	7		/* everything */
+#define	IPL_NONE	0	/* nothing */
+#define	IPL_SOFT	1	/* generic software interrupts */
+#define	IPL_SOFTCLOCK	2	/* software clock interrupt */
+#define	IPL_SOFTNET	3	/* software network interrupt */
+#define	IPL_BIO		4	/* block I/O */
+#define	IPL_NET		5	/* network */
+#define	IPL_SOFTSERIAL	6	/* software serial interrupt */
+#define	IPL_TTY		7	/* terminals */
+#define	IPL_VM		8	/* memory allocation */
+#define	IPL_AUDIO	9	/* audio device */
+#define	IPL_CLOCK	10	/* clock interrupt */
+#define	IPL_STATCLOCK	11	/* statistics clock interrupt */
+#define	IPL_HIGH	12	/* everything */
+#define	IPL_SCHED	IPL_HIGH
+#define	IPL_LOCK	IPL_HIGH
+#define	IPL_SERIAL	13	/* serial device */
 
-#define	NIPL		8
-#else
-#define	IPL_NONE	0		/* nothing */
-#define	IPL_SOFTCLOCK	IPL_NONE	/* clock */
-#define	IPL_SOFTBIO	IPL_NONE	/* block I/O */
-#define	IPL_SOFTNET	IPL_NONE	/* software network interrupt */
-#define	IPL_SOFTSERIAL	IPL_NONE	/* software serial interrupt */
-#define	IPL_VM		1		/* memory allocation */
-#define	IPL_SCHED	2		/* clock interrupt */
-#define	IPL_HIGH	3		/* everything */
-
-#define	NIPL		4
-#endif
+#define	NIPL		14
 
 /* Interrupt sharing types. */
 #define	IST_NONE	0	/* none */
@@ -71,25 +66,21 @@
 #define	IST_EDGE	2	/* edge-triggered */
 #define	IST_LEVEL	3	/* level-triggered */
 
-#define IST_LEVEL_LOW	IST_LEVEL
-#define IST_LEVEL_HIGH	4
+#define IST_LEVEL_LOW	 IST_LEVEL
+#define IST_LEVEL_HIGH   4
 #define IST_EDGE_FALLING IST_EDGE
-#define IST_EDGE_RISING	5
-#define IST_EDGE_BOTH	6
-#define IST_SOFT	7
+#define IST_EDGE_RISING  5
+#define IST_EDGE_BOTH    6
 
 #ifdef __OLD_INTERRUPT_CODE	/* XXX XXX XXX */
 
 /* Software interrupt priority levels */
 
-#ifdef __HAVE_FAST_SOFTINTS
 #define SOFTIRQ_CLOCK   0
-#define SOFTIRQ_BIO     1
-#define SOFTIRQ_NET     2
-#define SOFTIRQ_SERIAL  3
+#define SOFTIRQ_NET     1
+#define SOFTIRQ_SERIAL  2
 
 #define SOFTIRQ_BIT(x)  (1 << x)
-#endif
 
 #include <arm/arm32/psl.h>
 
@@ -107,9 +98,7 @@
 int	_splraise(int);
 int	_spllower(int);
 void	splx(int);
-#ifdef __HAVE_FAST_SOFTINTS
 void	_setsoftintr(int);
-#endif
 
 #else	/* _LKM */
 
@@ -123,6 +112,7 @@ void	_setsoftintr(int);
  * int	_splraise(int);
  * int	_spllower(int);
  * void	splx(int);
+ * void	_setsoftintr(int);
  *
  * These may be defined as functions, static inline functions, or macros,
  * but there must be a _spllower() and splx() defined as functions callable
@@ -158,7 +148,9 @@ void	_setsoftintr(int);
 
 #endif /* _LKM */
 
-typedef uint8_t ipl_t;
+#define	splsoft()	_splraise(IPL_SOFT)
+
+typedef int ipl_t;
 typedef struct {
 	ipl_t _ipl;
 } ipl_cookie_t;
@@ -178,8 +170,12 @@ splraiseipl(ipl_cookie_t icookie)
 }
 
 #define	spl0()		_spllower(IPL_NONE)
+#define	spllowersoftclock() _spllower(IPL_SOFTCLOCK)
 
 #include <sys/spl.h>
+
+/* Use generic software interrupt support. */
+#include <arm/softintr.h>
 
 #endif /* ! _LOCORE */
 

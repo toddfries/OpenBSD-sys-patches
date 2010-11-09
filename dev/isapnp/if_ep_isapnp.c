@@ -1,4 +1,4 @@
-/*	$NetBSD: if_ep_isapnp.c,v 1.34 2008/08/27 05:33:47 christos Exp $	*/
+/*	$NetBSD: if_ep_isapnp.c,v 1.32 2007/10/19 12:00:31 ad Exp $	*/
 
 /*
  * Copyright (c) 1997 Jonathan Stone <jonathan@NetBSD.org>
@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_ep_isapnp.c,v 1.34 2008/08/27 05:33:47 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_ep_isapnp.c,v 1.32 2007/10/19 12:00:31 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -63,14 +63,15 @@ __KERNEL_RCSID(0, "$NetBSD: if_ep_isapnp.c,v 1.34 2008/08/27 05:33:47 christos E
 #include <dev/ic/elink3var.h>
 #include <dev/ic/elink3reg.h>
 
-int ep_isapnp_match(device_t , cfdata_t , void *);
-void ep_isapnp_attach(device_t , device_t , void *);
+int ep_isapnp_match(struct device *, struct cfdata *, void *);
+void ep_isapnp_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(ep_isapnp, sizeof(struct ep_softc),
+CFATTACH_DECL(ep_isapnp, sizeof(struct ep_softc),
     ep_isapnp_match, ep_isapnp_attach, NULL, NULL);
 
 int
-ep_isapnp_match(device_t parent, cfdata_t match, void *aux)
+ep_isapnp_match(struct device *parent, struct cfdata *match,
+    void *aux)
 {
 	int pri, variant;
 
@@ -81,7 +82,7 @@ ep_isapnp_match(device_t parent, cfdata_t match, void *aux)
 }
 
 void
-ep_isapnp_attach(device_t parent, device_t self, void *aux)
+ep_isapnp_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct ep_softc *sc = device_private(self);
 	struct isapnp_attach_args *ipa = aux;
@@ -89,13 +90,12 @@ ep_isapnp_attach(device_t parent, device_t self, void *aux)
 
 	printf("\n");
 
-	sc->sc_dev = self;
 	if (isapnp_config(ipa->ipa_iot, ipa->ipa_memt, ipa)) {
-		aprint_error_dev(sc->sc_dev, "error in region allocation\n");
+		printf("%s: error in region allocation\n", sc->sc_dev.dv_xname);
 		return;
 	}
 
-	printf("%s: %s %s\n", device_xname(sc->sc_dev), ipa->ipa_devident,
+	printf("%s: %s %s\n", sc->sc_dev.dv_xname, ipa->ipa_devident,
 	    ipa->ipa_devclass);
 
 	sc->sc_iot = ipa->ipa_iot;

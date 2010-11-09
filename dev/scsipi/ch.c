@@ -1,4 +1,4 @@
-/*	$NetBSD: ch.c,v 1.82 2008/06/08 18:18:34 tsutsui Exp $	*/
+/*	$NetBSD: ch.c,v 1.77 2007/03/04 06:02:42 christos Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997, 1998, 1999, 2004 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -31,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ch.c,v 1.82 2008/06/08 18:18:34 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ch.c,v 1.77 2007/03/04 06:02:42 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -193,8 +200,6 @@ chattach(struct device *parent, struct device *self, void *aux)
 	struct scsipibus_attach_args *sa = aux;
 	struct scsipi_periph *periph = sa->sa_periph;
 
-	selinit(&sc->sc_selq);
-
 	/* Glue into the SCSI bus */
 	sc->sc_periph = periph;
 	periph->periph_dev = &sc->sc_dev;
@@ -213,7 +218,7 @@ chattach(struct device *parent, struct device *self, void *aux)
 	 */
 	if (sc->sc_settledelay) {
 		printf("%s: waiting %d seconds for changer to settle...\n",
-		    device_xname(&sc->sc_dev), sc->sc_settledelay);
+		    sc->sc_dev.dv_xname, sc->sc_settledelay);
 		delay(1000000 * sc->sc_settledelay);
 	}
 
@@ -222,11 +227,11 @@ chattach(struct device *parent, struct device *self, void *aux)
 	 * interrupts yet.
 	 */
 	if (ch_get_params(sc, XS_CTL_DISCOVERY|XS_CTL_IGNORE_MEDIA_CHANGE))
-		printf("%s: offline\n", device_xname(&sc->sc_dev));
+		printf("%s: offline\n", sc->sc_dev.dv_xname);
 	else {
 #define PLURAL(c)	(c) == 1 ? "" : "s"
 		printf("%s: %d slot%s, %d drive%s, %d picker%s, %d portal%s\n",
-		    device_xname(&sc->sc_dev),
+		    sc->sc_dev.dv_xname,
 		    sc->sc_counts[CHET_ST], PLURAL(sc->sc_counts[CHET_ST]),
 		    sc->sc_counts[CHET_DT], PLURAL(sc->sc_counts[CHET_DT]),
 		    sc->sc_counts[CHET_MT], PLURAL(sc->sc_counts[CHET_MT]),
@@ -234,11 +239,11 @@ chattach(struct device *parent, struct device *self, void *aux)
 #undef PLURAL
 #ifdef CHANGER_DEBUG
 		printf("%s: move mask: 0x%x 0x%x 0x%x 0x%x\n",
-		    device_xname(&sc->sc_dev),
+		    sc->sc_dev.dv_xname,
 		    sc->sc_movemask[CHET_MT], sc->sc_movemask[CHET_ST],
 		    sc->sc_movemask[CHET_IE], sc->sc_movemask[CHET_DT]);
 		printf("%s: exchange mask: 0x%x 0x%x 0x%x 0x%x\n",
-		    device_xname(&sc->sc_dev),
+		    sc->sc_dev.dv_xname,
 		    sc->sc_exchangemask[CHET_MT], sc->sc_exchangemask[CHET_ST],
 		    sc->sc_exchangemask[CHET_IE], sc->sc_exchangemask[CHET_DT]);
 #endif /* CHANGER_DEBUG */
@@ -257,8 +262,8 @@ chopen(dev_t dev, int flags, int fmt, struct lwp *l)
 	int unit, error;
 
 	unit = CHUNIT(dev);
-	sc = device_lookup_private(&ch_cd, unit);
-	if (sc == NULL)
+	if ((unit >= ch_cd.cd_ndevs) ||
+	    ((sc = ch_cd.cd_devs[unit]) == NULL))
 		return (ENXIO);
 
 	periph = sc->sc_periph;
@@ -304,7 +309,7 @@ chopen(dev_t dev, int flags, int fmt, struct lwp *l)
 static int
 chclose(dev_t dev, int flags, int fmt, struct lwp *l)
 {
-	struct ch_softc *sc = device_lookup_private(&ch_cd, CHUNIT(dev));
+	struct ch_softc *sc = ch_cd.cd_devs[CHUNIT(dev)];
 	struct scsipi_periph *periph = sc->sc_periph;
 	struct scsipi_adapter *adapt = periph->periph_channel->chan_adapter;
 
@@ -321,7 +326,7 @@ chclose(dev_t dev, int flags, int fmt, struct lwp *l)
 static int
 chread(dev_t dev, struct uio *uio, int flags)
 {
-	struct ch_softc *sc = device_lookup_private(&ch_cd, CHUNIT(dev));
+	struct ch_softc *sc = ch_cd.cd_devs[CHUNIT(dev)];
 	int error;
 
 	if (uio->uio_resid != CHANGER_EVENT_SIZE)
@@ -340,7 +345,7 @@ chread(dev_t dev, struct uio *uio, int flags)
 static int
 chioctl(dev_t dev, u_long cmd, void *data, int flags, struct lwp *l)
 {
-	struct ch_softc *sc = device_lookup_private(&ch_cd, CHUNIT(dev));
+	struct ch_softc *sc = ch_cd.cd_devs[CHUNIT(dev)];
 	int error = 0;
 
 	/*
@@ -440,7 +445,7 @@ chioctl(dev_t dev, u_long cmd, void *data, int flags, struct lwp *l)
 static int
 chpoll(dev_t dev, int events, struct lwp *l)
 {
-	struct ch_softc *sc = device_lookup_private(&ch_cd, CHUNIT(dev));
+	struct ch_softc *sc = ch_cd.cd_devs[CHUNIT(dev)];
 	int revents;
 
 	revents = events & (POLLOUT | POLLWRNORM);
@@ -484,7 +489,7 @@ static const struct filterops chwrite_filtops =
 static int
 chkqfilter(dev_t dev, struct knote *kn)
 {
-	struct ch_softc *sc = device_lookup_private(&ch_cd, CHUNIT(dev));
+	struct ch_softc *sc = ch_cd.cd_devs[CHUNIT(dev)];
 	struct klist *klist;
 
 	switch (kn->kn_filter) {
@@ -499,7 +504,7 @@ chkqfilter(dev_t dev, struct knote *kn)
 		break;
 
 	default:
-		return (EINVAL);
+		return (1);
 	}
 
 	kn->kn_hook = sc;
@@ -567,7 +572,7 @@ ch_event(struct ch_softc *sc, u_int event)
 {
 
 	sc->sc_events |= event;
-	selnotify(&sc->sc_selq, 0, 0);
+	selnotify(&sc->sc_selq, 0);
 }
 
 static int
@@ -772,7 +777,7 @@ ch_ousergetelemstatus(struct ch_softc *sc, int chet, u_int8_t *uptr)
 
 	if (avail != sc->sc_counts[chet])
 		printf("%s: warning, READ ELEMENT STATUS avail != count\n",
-		    device_xname(&sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 
 	desc = (struct read_element_status_descriptor *)((u_long)data +
 	    sizeof(struct read_element_status_header) +
@@ -934,7 +939,7 @@ ch_usergetelemstatus(struct ch_softc *sc,
 			     ces.ces_target, ces.ces_lun)) != NULL &&
 			    dtperiph->periph_dev != NULL) {
 				strlcpy(ces.ces_xname,
-				    device_xname(dtperiph->periph_dev),
+				    dtperiph->periph_dev->dv_xname,
 				    sizeof(ces.ces_xname));
 				ces.ces_flags |= CESTATUS_XNAME_VALID;
 			}
@@ -1171,7 +1176,8 @@ ch_get_params(struct ch_softc *sc, int scsiflags)
 	    &sense_data.header, sizeof(sense_data),
 	    scsiflags | XS_CTL_DATA_ONSTACK, CHRETRIES, 6000);
 	if (error) {
-		aprint_error_dev(&sc->sc_dev, "could not sense element address page\n");
+		printf("%s: could not sense element address page\n",
+		    sc->sc_dev.dv_xname);
 		return (error);
 	}
 
@@ -1197,7 +1203,8 @@ ch_get_params(struct ch_softc *sc, int scsiflags)
 	    &sense_data.header, sizeof(sense_data),
 	    scsiflags | XS_CTL_DATA_ONSTACK, CHRETRIES, 6000);
 	if (error) {
-		aprint_error_dev(&sc->sc_dev, "could not sense capabilities page\n");
+		printf("%s: could not sense capabilities page\n",
+		    sc->sc_dev.dv_xname);
 		return (error);
 	}
 

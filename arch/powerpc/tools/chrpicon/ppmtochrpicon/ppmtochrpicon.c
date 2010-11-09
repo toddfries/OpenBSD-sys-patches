@@ -1,4 +1,4 @@
-/*	$NetBSD: ppmtochrpicon.c,v 1.6 2008/04/28 20:23:33 martin Exp $	*/
+/*	$NetBSD: ppmtochrpicon.c,v 1.4 2005/12/11 12:18:47 christos Exp $	*/
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -45,7 +52,7 @@
  */
 
 #include <sys/cdefs.h>
-__RCSID("$NetBSD: ppmtochrpicon.c,v 1.6 2008/04/28 20:23:33 martin Exp $");
+__RCSID("$NetBSD: ppmtochrpicon.c,v 1.4 2005/12/11 12:18:47 christos Exp $");
 
 #include <stdlib.h>
 
@@ -111,7 +118,7 @@ CHRPI_writeicon(FILE *fp, pixel **pixels, CHRPI_spec img)
 void
 CHRPI_putheader(FILE *fp, CHRPI_spec img)
 {
-    fprintf(fp, "<icon size=%d,%d color-space=%d,%d,%d>\n<bitmap>\n",
+    fprintf(fp, "<ICON SIZE=%d,%d COLOR-SPACE=%d,%d,%d>\n<BITMAP>\n",
             img->height, img->width,
             img->rbits, img->gbits, img->bbits);
 }
@@ -119,7 +126,7 @@ CHRPI_putheader(FILE *fp, CHRPI_spec img)
 void
 CHRPI_putfooter(FILE *fp, CHRPI_spec img)
 {
-    fprintf(fp, "</bitmap>\n</icon>\n");
+    fprintf(fp, "</BITMAP>\n</ICON>\n");
 }
     
 
@@ -147,11 +154,9 @@ CHRPI_putbitmap(FILE *fp, pixel** pixels, CHRPI_spec img)
             /* write the byte in hex */
             fputc(hex_digits[(pixbyte>>4) & 0x0f], fp);
             fputc(hex_digits[(pixbyte & 0x0f)], fp);
-	    fputc(' ', fp);
             pP++;
-	    if ((col+1)%16 == 0)
-        	fputc('\n', fp);
         }
 
+        fputc('\n', fp);
     }
 }

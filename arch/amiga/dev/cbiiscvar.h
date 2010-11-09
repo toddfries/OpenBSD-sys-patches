@@ -1,4 +1,4 @@
-/*	$NetBSD: cbiiscvar.h,v 1.3 2008/04/13 04:55:52 tsutsui Exp $	*/
+/*	$NetBSD: cbiiscvar.h,v 1.2 1999/09/25 21:47:07 is Exp $	*/
 
 /*
  * Copyright (c) 1997 Michael L. Hitch.
@@ -34,26 +34,27 @@
 struct cbiisc_softc {
 	struct ncr53c9x_softc	sc_ncr53c9x;	/* glue to MI code */
 
-	struct isr	sc_isr;			/* Interrupt chain struct */
+	struct	isr		 sc_isr;	/* Interrupt chain struct */
 
-	volatile uint8_t *sc_reg;		/* the registers */
-	volatile uint8_t *sc_dmabase;
+	volatile u_char *sc_reg;		/* the registers */
+	volatile u_char *sc_dmabase;
 
 	int		sc_active;		/* Pseudo-DMA state vars */
 	int		sc_datain;
 	int		sc_tc;
 	size_t		sc_dmasize;
 	size_t		sc_dmatrans;
-	uint8_t		**sc_dmaaddr;
+	char		**sc_dmaaddr;
 	size_t		*sc_pdmalen;
 	paddr_t		sc_pa;
 
-	uint8_t		sc_pad1[18];		/* XXX */
-	uint8_t		sc_alignbuf[256];
-	uint8_t		sc_pad2[16];
-	uint8_t		sc_hardbits;
-	uint8_t		sc_portbits;
-	uint8_t		sc_xfr_align;
+	u_char		sc_pad1[18];		/* XXX */
+	u_char		sc_alignbuf[256];
+	u_char		sc_pad2[16];
+	u_char		sc_hardbits;
+	u_char		sc_portbits;
+	u_char		sc_xfr_align;
+
 };
 
 #define CBIISC_PB_LED		0x02

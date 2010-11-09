@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Module Name: dbutils - AML debugger utilities
- *              $Revision: 1.5 $
+ *              xRevision: 1.80 $
  *
  ******************************************************************************/
 
@@ -9,7 +9,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2008, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2006, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -115,6 +115,9 @@
  *****************************************************************************/
 
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: dbutils.c,v 1.1 2006/03/23 13:36:31 kochi Exp $");
+
 #include "acpi.h"
 #include "acnamesp.h"
 #include "acdebug.h"
@@ -137,8 +140,6 @@ void
 AcpiDbDumpBuffer (
     UINT32                  Address);
 #endif
-
-static const char           *Converter = "0123456789ABCDEF";
 
 
 /*******************************************************************************
@@ -248,7 +249,8 @@ AcpiDbDumpExternalObject (
     {
     case ACPI_TYPE_ANY:
 
-        AcpiOsPrintf ("[Null Object] (Type=0)\n");
+        AcpiOsPrintf ("[Object Reference] = %p", ObjDesc->Reference.Handle);
+        AcpiDmDisplayInternalObject (ObjDesc->Reference.Handle, NULL);
         break;
 
 
@@ -299,7 +301,7 @@ AcpiDbDumpExternalObject (
 
     case ACPI_TYPE_LOCAL_REFERENCE:
 
-        AcpiOsPrintf ("[Object Reference] = ", ObjDesc->Reference.Handle);
+        AcpiOsPrintf ("[Object Reference] = %p", ObjDesc->Reference.Handle);
         AcpiDmDisplayInternalObject (ObjDesc->Reference.Handle, NULL);
         break;
 
@@ -424,49 +426,8 @@ AcpiDbLocalNsLookup (
                 Name, AcpiFormatException (Status));
     }
 
-    ACPI_FREE (InternalPath);
+    ACPI_MEM_FREE (InternalPath);
     return (Node);
-}
-
-
-/*******************************************************************************
- *
- * FUNCTION:    AcpiDbUInt32ToHexString
- *
- * PARAMETERS:  Value           - The value to be converted to string
- *              Buffer          - Buffer for result (not less than 11 bytes)
- *
- * RETURN:      None
- *
- * DESCRIPTION: Convert the unsigned 32-bit value to the hexadecimal image
- *
- * NOTE: It is the caller's responsibility to ensure that the length of buffer
- *       is sufficient.
- *
- ******************************************************************************/
-
-void
-AcpiDbUInt32ToHexString (
-    UINT32                  Value,
-    char                    *Buffer)
-{
-    UINT8                   i;
-
-
-    if (Value == 0)
-    {
-        ACPI_STRCPY (Buffer, "0");
-        return;
-    }
-
-    ACPI_STRCPY (Buffer, "0x");
-    Buffer[10] = '\0';
-
-    for (i = 9; i > 1; i--)
-    {
-        Buffer[i] = Converter [Value & 0x0F];
-        Value = Value >> 4;
-    }
 }
 
 

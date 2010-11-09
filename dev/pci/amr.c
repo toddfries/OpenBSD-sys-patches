@@ -1,4 +1,4 @@
-/*	$NetBSD: amr.c,v 1.49 2008/06/08 12:43:52 tsutsui Exp $	*/
+/*	$NetBSD: amr.c,v 1.47 2008/04/10 19:13:36 cegger Exp $	*/
 
 /*-
  * Copyright (c) 2002, 2003 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -64,7 +71,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: amr.c,v 1.49 2008/06/08 12:43:52 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: amr.c,v 1.47 2008/04/10 19:13:36 cegger Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -737,7 +744,7 @@ amr_shutdown(void *cookie)
 	int i, rv, s;
 
 	for (i = 0; i < amr_cd.cd_ndevs; i++) {
-		if ((amr = device_lookup_private(&amr_cd, i)) == NULL)
+		if ((amr = device_lookup(&amr_cd, i)) == NULL)
 			continue;
 
 		if ((rv = amr_ccb_alloc(amr, &ac)) == 0) {
@@ -1306,7 +1313,7 @@ amropen(dev_t dev, int flag, int mode, struct lwp *l)
 {
 	struct amr_softc *amr;
 	 
-	if ((amr = device_lookup_private(&amr_cd, minor(dev))) == NULL)
+	if ((amr = device_lookup(&amr_cd, minor(dev))) == NULL)
 		return (ENXIO);
 	if ((amr->amr_flags & AMRF_OPEN) != 0)
 		return (EBUSY);
@@ -1320,7 +1327,7 @@ amrclose(dev_t dev, int flag, int mode, struct lwp *l)
 {
 	struct amr_softc *amr;
 
-	amr = device_lookup_private(&amr_cd, minor(dev));
+	amr = device_lookup(&amr_cd, minor(dev));
 	amr->amr_flags &= ~AMRF_OPEN;
 	return (0);
 }
@@ -1338,7 +1345,7 @@ amrioctl(dev_t dev, u_long cmd, void *data, int flag,
 	int error;
 	void *dp = NULL, *au_buffer;
 
-	amr = device_lookup_private(&amr_cd, minor(dev));
+	amr = device_lookup(&amr_cd, minor(dev));
 
 	/* This should be compatible with the FreeBSD interface */
 

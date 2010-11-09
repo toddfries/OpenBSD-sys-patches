@@ -1,4 +1,4 @@
-/*	$NetBSD: zx.c,v 1.24 2008/06/11 21:25:31 drochner Exp $	*/
+/*	$NetBSD: zx.c,v 1.20 2007/10/19 12:01:13 ad Exp $	*/
 
 /*
  *  Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  *  2. Redistributions in binary form must reproduce the above copyright
  *     notice, this list of conditions and the following disclaimer in the
  *     documentation and/or other materials provided with the distribution.
+ *  3. All advertising materials mentioning features or use of this software
+ *     must display the following acknowledgement:
+ *         This product includes software developed by the NetBSD
+ *         Foundation, Inc. and its contributors.
+ *  4. Neither the name of The NetBSD Foundation nor the names of its
+ *     contributors may be used to endorse or promote products derived
+ *     from this software without specific prior written permission.
  *
  *  THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  *  ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -45,7 +52,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: zx.c,v 1.24 2008/06/11 21:25:31 drochner Exp $");
+__KERNEL_RCSID(0, "$NetBSD: zx.c,v 1.20 2007/10/19 12:01:13 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -163,7 +170,7 @@ zx_attach(struct device *parent, struct device *self, void *args)
 	volatile struct zx_command *zc;
 	int isconsole;
 
-	sc = device_private(self);
+	sc = (struct zx_softc *)self;
 	sa = args;
 	fb = &sc->sc_fb;
 	ri = &fb->fb_rinfo;
@@ -174,7 +181,7 @@ zx_attach(struct device *parent, struct device *self, void *args)
 
 	if (sbus_bus_map(bt, sa->sa_slot, sa->sa_offset + ZX_OFF_SS0,
 	    0x800000, BUS_SPACE_MAP_LINEAR, &bh) != 0) {
-		aprint_error_dev(self, "can't map bits\n");
+		printf("%s: can't map bits\n", self->dv_xname);
 		return;
 	}
 	fb->fb_pixels = (void *)bus_space_vaddr(bt, bh);
@@ -182,21 +189,21 @@ zx_attach(struct device *parent, struct device *self, void *args)
 
 	if (sbus_bus_map(bt, sa->sa_slot, sa->sa_offset + ZX_OFF_LC_SS0_USR,
 	    PAGE_SIZE, BUS_SPACE_MAP_LINEAR, &bh) != 0) {
-		aprint_error_dev(self, "can't map zc\n");
+		printf("%s: can't map zc\n", self->dv_xname);
 		return;
 	}
 	sc->sc_zc = (struct zx_command *)bus_space_vaddr(bt, bh);
 
 	if (sbus_bus_map(bt, sa->sa_slot, sa->sa_offset + ZX_OFF_LD_SS0,
 	    PAGE_SIZE, BUS_SPACE_MAP_LINEAR, &bh) != 0) {
-		aprint_error_dev(self, "can't map ld/ss0\n");
+		printf("%s: can't map ld/ss0\n", self->dv_xname);
 		return;
 	}
 	sc->sc_zd_ss0 = (struct zx_draw *)bus_space_vaddr(bt, bh);
 
 	if (sbus_bus_map(bt, sa->sa_slot, sa->sa_offset + ZX_OFF_LD_SS1,
 	    PAGE_SIZE, BUS_SPACE_MAP_LINEAR, &bh) != 0) {
-		aprint_error_dev(self, "can't map ld/ss1\n");
+		printf("%s: can't map ld/ss1\n", self->dv_xname);
 		return;
 	}
 	sc->sc_zd_ss1 =
@@ -204,14 +211,14 @@ zx_attach(struct device *parent, struct device *self, void *args)
 
 	if (sbus_bus_map(bt, sa->sa_slot, sa->sa_offset + ZX_OFF_LX_CROSS,
 	    PAGE_SIZE, BUS_SPACE_MAP_LINEAR, &bh) != 0) {
-		aprint_error_dev(self, "can't map zx\n");
+		printf("%s: can't map zx\n", self->dv_xname);
 		return;
 	}
 	sc->sc_zx = (struct zx_cross *)bus_space_vaddr(bt, bh);
 
 	if (sbus_bus_map(bt, sa->sa_slot, sa->sa_offset + ZX_OFF_LX_CURSOR,
 	    PAGE_SIZE, BUS_SPACE_MAP_LINEAR, &bh) != 0) {
-		aprint_error_dev(self, "can't map zcu\n");
+		printf("%s: can't map zcu\n", self->dv_xname);
 		return;
 	}
 	sc->sc_zcu = (struct zx_cursor *)bus_space_vaddr(bt, bh);
@@ -283,7 +290,7 @@ zxclose(dev_t dev, int flags, int mode, struct lwp *l)
 {
 	struct zx_softc *sc;
 
-	sc = device_lookup_private(&zx_cd, minor(dev));
+	sc = (struct zx_softc *)device_lookup(&zx_cd, minor(dev));
 
 	zx_reset(sc);
 	zx_cursor_blank(sc);
@@ -299,7 +306,7 @@ zxioctl(dev_t dev, u_long cmd, void *data, int flags, struct lwp *l)
 	uint32_t curbits[2][32];
 	int rv, v, count, i;
 
-	sc = device_lookup_private(&zx_cd, minor(dev));
+	sc = zx_cd.cd_devs[minor(dev)];
 
 	switch (cmd) {
 	case FBIOGTYPE:
@@ -711,7 +718,7 @@ zx_blank(struct device *dv)
 	struct zx_softc *sc;
 	volatile struct zx_cross *zx;
 
-	sc = device_private(dv);
+	sc = (struct zx_softc *)dv;
 
 	if ((sc->sc_flags & ZX_BLANKED) != 0)
 		return;
@@ -728,7 +735,7 @@ zx_unblank(struct device *dv)
 	struct zx_softc *sc;
 	volatile struct zx_cross *zx;
 
-	sc = device_private(dv);
+	sc = (struct zx_softc *)dv;
 
 	if ((sc->sc_flags & ZX_BLANKED) == 0)
 		return;
@@ -745,7 +752,7 @@ zxmmap(dev_t dev, off_t off, int prot)
 	struct zx_softc *sc;
 	const struct zx_mmo *mm, *mmmax;
 
-	sc = device_lookup_private(&zx_cd, minor(dev));
+	sc = device_lookup(&zx_cd, minor(dev));
 	off = trunc_page(off);
 	mm = zx_mmo;
 	mmmax = mm + sizeof(zx_mmo) / sizeof(zx_mmo[0]);

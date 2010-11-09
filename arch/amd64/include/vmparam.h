@@ -1,4 +1,4 @@
-/*	$NetBSD: vmparam.h,v 1.21 2009/03/06 20:31:47 joerg Exp $	*/
+/*	$NetBSD: vmparam.h,v 1.12 2006/09/27 17:10:34 cube Exp $	*/
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -34,16 +34,10 @@
  *	@(#)vmparam.h	5.9 (Berkeley) 5/12/91
  */
 
-#ifndef _X86_64_VMPARAM_H_
-#define _X86_64_VMPARAM_H_
-
-#ifdef __x86_64__
+#ifndef _VMPARAM_H_
+#define _VMPARAM_H_
 
 #include <sys/tree.h>
-#include <sys/mutex.h>
-#ifdef _KERNEL_OPT
-#include "opt_xen.h"
-#endif
 
 /*
  * Machine dependent constants for 386.
@@ -105,6 +99,13 @@
 #endif
 
 /*
+ * Size of shared memory map
+ */
+#ifndef SHMMAXPGS
+#define SHMMAXPGS	2048
+#endif
+
+/*
  * Size of User Raw I/O map
  */
 #define	USRIOSIZE 	300
@@ -117,12 +118,8 @@
 #define VM_MIN_ADDRESS		0
 #define VM_MAXUSER_ADDRESS	0x00007f8000000000
 #define VM_MAX_ADDRESS		0x00007fbfdfeff000
-#ifndef XEN
 #define VM_MIN_KERNEL_ADDRESS	0xffff800000000000
-#else /* XEN */
-#define VM_MIN_KERNEL_ADDRESS	0xffffa00000000000
-#endif
-#define VM_MAX_KERNEL_ADDRESS	0xffffff8000000000
+#define VM_MAX_KERNEL_ADDRESS	0xffff800100000000
 
 #define VM_MAXUSER_ADDRESS32	0xfffff000
 
@@ -156,21 +153,33 @@
 #define	VM_FREELIST_DEFAULT	0
 #define	VM_FREELIST_FIRST16	1
 
-#include <x86/pmap_pv.h>
+#define __HAVE_PMAP_PHYSSEG
 
-#define	__HAVE_VM_PAGE_MD
-#define	VM_MDPAGE_INIT(pg) \
-	memset(&(pg)->mdpage, 0, sizeof((pg)->mdpage)); \
-	PMAP_PAGE_INIT(&(pg)->mdpage.mp_pp)
+#define __HAVE_VM_PAGE_MD
+#define VM_MDPAGE_INIT(pg)                                      \
+        memset(&(pg)->mdpage, 0, sizeof((pg)->mdpage));         \
+        simple_lock_init(&(pg)->mdpage.mp_pvhead.pvh_lock);     \
+        SPLAY_INIT(&(pg)->mdpage.mp_pvhead.pvh_root);
 
-struct vm_page_md {
-	struct pmap_page mp_pp;
+struct pv_entry;
+
+struct pv_head {
+        struct simplelock pvh_lock;     /* locks every pv in this tree */
+        SPLAY_HEAD(pvtree, pv_entry) pvh_root;
+                                        /* head of tree (locked by pvh_lock) */
 };
 
-#else	/*	!__x86_64__	*/
+struct vm_page_md {
+        struct pv_head mp_pvhead;
+        int mp_attrs;
+};
 
-#include <i386/vmparam.h>
+/*
+ * pmap specific data stored in the vm_physmem[] array
+ */
+struct pmap_physseg {
+	struct pv_head *pvhead;		/* pv_head array */
+	unsigned char *attrs;		/* attrs array */
+};
 
-#endif	/*	__x86_64__	*/
-
-#endif /* _X86_64_VMPARAM_H_ */
+#endif /* _VMPARAM_H_ */

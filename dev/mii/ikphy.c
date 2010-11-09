@@ -1,4 +1,4 @@
-/*	$NetBSD: ikphy.c,v 1.8 2008/11/17 03:04:27 dyoung Exp $	*/
+/*	$NetBSD: ikphy.c,v 1.3 2006/11/16 21:24:07 christos Exp $	*/
 
 /*******************************************************************************
 Copyright (c) 2001-2005, Intel Corporation 
@@ -64,7 +64,7 @@ POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ikphy.c,v 1.8 2008/11/17 03:04:27 dyoung Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ikphy.c,v 1.3 2006/11/16 21:24:07 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -82,10 +82,10 @@ __KERNEL_RCSID(0, "$NetBSD: ikphy.c,v 1.8 2008/11/17 03:04:27 dyoung Exp $");
 
 #include <dev/mii/ikphyreg.h>
 
-static int	ikphymatch(device_t, cfdata_t, void *);
-static void	ikphyattach(device_t, device_t, void *);
+static int	ikphymatch(struct device *, struct cfdata *, void *);
+static void	ikphyattach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(ikphy, sizeof(struct mii_softc),
+CFATTACH_DECL(ikphy, sizeof(struct mii_softc),
     ikphymatch, ikphyattach, mii_phy_detach, mii_phy_activate);
 
 static int	ikphy_service(struct mii_softc *, struct mii_data *, int);
@@ -105,7 +105,8 @@ static const struct mii_phydesc ikphys[] = {
 };
 
 static int
-ikphymatch(device_t parent, cfdata_t match, void *aux)
+ikphymatch(struct device *parent, struct cfdata *match,
+    void *aux)
 {
 	struct mii_attach_args *ma = aux;
 
@@ -116,7 +117,7 @@ ikphymatch(device_t parent, cfdata_t match, void *aux)
 }
 
 static void
-ikphyattach(device_t parent, device_t self, void *aux)
+ikphyattach(struct device *parent, struct device *self, void *aux)
 {
 	struct mii_softc *sc = device_private(self);
 	struct mii_attach_args *ma = aux;
@@ -127,7 +128,6 @@ ikphyattach(device_t parent, device_t self, void *aux)
 	aprint_naive(": Media interface\n");
 	aprint_normal(": %s, rev. %d\n", mpd->mpd_name, MII_REV(ma->mii_id2));
 
-	sc->mii_dev = self;
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
 	sc->mii_funcs = &ikphy_funcs;
@@ -141,7 +141,7 @@ ikphyattach(device_t parent, device_t self, void *aux)
 	    PHY_READ(sc, MII_BMSR) & ma->mii_capmask;
 	if (sc->mii_capabilities & BMSR_EXTSTAT)
 	    sc->mii_extcapabilities = PHY_READ(sc, MII_EXTSR);
-	aprint_normal_dev(self, "");
+	aprint_normal("%s: ", sc->mii_dev.dv_xname);
 	if ((sc->mii_capabilities & BMSR_MEDIAMASK) == 0 &&
 	    (sc->mii_extcapabilities & EXTSR_MEDIAMASK) == 0)
 		aprint_error("no media present");
@@ -155,6 +155,9 @@ ikphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 {
 	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
 	int reg;
+
+	if (!device_is_active(&sc->mii_dev))
+		return (ENXIO);
 
 	switch (cmd) {
 	case MII_POLLSTAT:

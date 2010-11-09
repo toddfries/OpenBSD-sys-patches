@@ -1,4 +1,4 @@
-/*	$NetBSD: segments.h,v 1.19 2008/10/26 00:08:15 mrg Exp $	*/
+/*	$NetBSD: segments.h,v 1.7 2006/08/19 16:27:58 dsl Exp $	*/
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -85,23 +85,12 @@
 #ifndef _AMD64_SEGMENTS_H_
 #define _AMD64_SEGMENTS_H_
 
-#ifdef __x86_64__
-
-#ifdef _KERNEL_OPT
-#include "opt_xen.h"
-#endif
-
 /*
  * Selectors
  */
 
 #define	ISPL(s)		((s) & SEL_RPL)	/* what is the priority level of a selector */
-#ifdef XEN
-#define	SEL_KPL		3		/* kernel privilege level */	
-#define	SEL_XPL		0		/* Xen Hypervisor privilege level */	
-#else
 #define	SEL_KPL		0		/* kernel privilege level */	
-#endif
 #define	SEL_UPL		3		/* user privilege level */	
 #define	SEL_RPL		3		/* requester's privilege level mask */
 #define	ISLDT(s)	((s) & SEL_LDT)	/* is it local or global */
@@ -130,15 +119,7 @@
 #define LSEL(s,r)	((s) | r | SEL_LDT)
 
 #define	USERMODE(c, f)		(ISPL(c) == SEL_UPL)
-#ifdef XEN
-/*
- * As KPL == UPL, Xen emulate interrupt in kernel context by pushing
- * a fake CS with XPL privilege
- */
-#define	KERNELMODE(c, f)	(ISPL(c) == SEL_XPL)
-#else
 #define	KERNELMODE(c, f)	(ISPL(c) == SEL_KPL)
-#endif
 
 #ifndef _LOCORE
 
@@ -150,19 +131,19 @@
  * Below is used for TSS and LDT.
  */
 struct sys_segment_descriptor {
-/*BITFIELDTYPE*/ uint64_t sd_lolimit:16;/* segment extent (lsb) */
-/*BITFIELDTYPE*/ uint64_t sd_lobase:24;/* segment base address (lsb) */
-/*BITFIELDTYPE*/ uint64_t sd_type:5;	/* segment type */
-/*BITFIELDTYPE*/ uint64_t sd_dpl:2;	/* segment descriptor priority level */
-/*BITFIELDTYPE*/ uint64_t sd_p:1;	/* segment descriptor present */
-/*BITFIELDTYPE*/ uint64_t sd_hilimit:4;/* segment extent (msb) */
-/*BITFIELDTYPE*/ uint64_t sd_xx1:3;	/* avl, long and def32 (not used) */
-/*BITFIELDTYPE*/ uint64_t sd_gran:1;	/* limit granularity (byte/page) */
-/*BITFIELDTYPE*/ uint64_t sd_hibase:40;/* segment base address (msb) */
-/*BITFIELDTYPE*/ uint64_t sd_xx2:8;	/* reserved */
-/*BITFIELDTYPE*/ uint64_t sd_zero:5;	/* must be zero */
-/*BITFIELDTYPE*/ uint64_t sd_xx3:19;	/* reserved */
-} __packed;
+/*BITFIELDTYPE*/ u_int64_t sd_lolimit:16;/* segment extent (lsb) */
+/*BITFIELDTYPE*/ u_int64_t sd_lobase:24;/* segment base address (lsb) */
+/*BITFIELDTYPE*/ u_int64_t sd_type:5;	/* segment type */
+/*BITFIELDTYPE*/ u_int64_t sd_dpl:2;	/* segment descriptor priority level */
+/*BITFIELDTYPE*/ u_int64_t sd_p:1;	/* segment descriptor present */
+/*BITFIELDTYPE*/ u_int64_t sd_hilimit:4;/* segment extent (msb) */
+/*BITFIELDTYPE*/ u_int64_t sd_xx1:3;	/* avl, long and def32 (not used) */
+/*BITFIELDTYPE*/ u_int64_t sd_gran:1;	/* limit granularity (byte/page) */
+/*BITFIELDTYPE*/ u_int64_t sd_hibase:40;/* segment base address (msb) */
+/*BITFIELDTYPE*/ u_int64_t sd_xx2:8;	/* reserved */
+/*BITFIELDTYPE*/ u_int64_t sd_zero:5;	/* must be zero */
+/*BITFIELDTYPE*/ u_int64_t sd_xx3:19;	/* reserved */
+} __attribute__((packed));
 
 /*
  * Below is used for cs, ds, etc.
@@ -179,7 +160,7 @@ struct mem_segment_descriptor {
 	unsigned sd_def32:1;            /* default 32 vs 16 bit size */
 	unsigned sd_gran:1;             /* limit granularity (byte/page) */
 	unsigned sd_hibase:8;           /* segment base address (msb) */
-} __packed;
+} __attribute__((packed));
 
 /*
  * Common part of the above structures. Used to walk descriptor tables.
@@ -189,61 +170,52 @@ struct common_segment_descriptor {
 	unsigned sdc_lobase:24;
 	unsigned sdc_type:5;
 	unsigned sdc_other:19;
-} __packed;
+} __attribute__((packed));
 
 /*
  * Gate descriptors (e.g. indirect descriptors)
  */
 struct gate_descriptor {
-/*BITFIELDTYPE*/ uint64_t gd_looffset:16;/* gate offset (lsb) */
-/*BITFIELDTYPE*/ uint64_t gd_selector:16;/* gate segment selector */
-/*BITFIELDTYPE*/ uint64_t gd_ist:3;	/* IST select */
-/*BITFIELDTYPE*/ uint64_t gd_xx1:5;	/* reserved */
-/*BITFIELDTYPE*/ uint64_t gd_type:5;	/* segment type */
-/*BITFIELDTYPE*/ uint64_t gd_dpl:2;	/* segment descriptor priority level */
-/*BITFIELDTYPE*/ uint64_t gd_p:1;	/* segment descriptor present */
-/*BITFIELDTYPE*/ uint64_t gd_hioffset:48;/* gate offset (msb) */
-/*BITFIELDTYPE*/ uint64_t gd_xx2:8;	/* reserved */
-/*BITFIELDTYPE*/ uint64_t gd_zero:5;	/* must be zero */
-/*BITFIELDTYPE*/ uint64_t gd_xx3:19;	/* reserved */
-} __packed;
+/*BITFIELDTYPE*/ u_int64_t gd_looffset:16;/* gate offset (lsb) */
+/*BITFIELDTYPE*/ u_int64_t gd_selector:16;/* gate segment selector */
+/*BITFIELDTYPE*/ u_int64_t gd_ist:3;	/* IST select */
+/*BITFIELDTYPE*/ u_int64_t gd_xx1:5;	/* reserved */
+/*BITFIELDTYPE*/ u_int64_t gd_type:5;	/* segment type */
+/*BITFIELDTYPE*/ u_int64_t gd_dpl:2;	/* segment descriptor priority level */
+/*BITFIELDTYPE*/ u_int64_t gd_p:1;	/* segment descriptor present */
+/*BITFIELDTYPE*/ u_int64_t gd_hioffset:48;/* gate offset (msb) */
+/*BITFIELDTYPE*/ u_int64_t gd_xx2:8;	/* reserved */
+/*BITFIELDTYPE*/ u_int64_t gd_zero:5;	/* must be zero */
+/*BITFIELDTYPE*/ u_int64_t gd_xx3:19;	/* reserved */
+} __attribute__((packed));
 
 /*
  * region descriptors, used to load gdt/idt tables before segments yet exist.
  */
 struct region_descriptor {
-	uint16_t rd_limit;		/* segment extent */
-	uint64_t rd_base;		/* base address  */
-} __packed;
+	u_int16_t rd_limit;		/* segment extent */
+	u_int64_t rd_base;		/* base address  */
+} __attribute__((packed));
 
 #ifdef _KERNEL
 #if 0
 extern struct sys_segment_descriptor *ldt;
 #endif
-#ifdef XEN
-extern struct trap_info *idt;
-#else
 extern struct gate_descriptor *idt;
-#endif
 extern char *gdtstore;
 extern char *ldtstore;
 
 void setgate(struct gate_descriptor *, void *, int, int, int, int);
 void unsetgate(struct gate_descriptor *);
-void setregion(struct region_descriptor *, void *, uint16_t);
+void setregion(struct region_descriptor *, void *, u_int16_t);
 void set_sys_segment(struct sys_segment_descriptor *, void *, size_t,
 			  int, int, int);
 void set_mem_segment(struct mem_segment_descriptor *, void *, size_t,
 			  int, int, int, int, int);
-void cpu_init_idt(void);
-
-#if !defined(XEN)
-void idt_init(void);
-void idt_vec_reserve(int);
 int idt_vec_alloc(int, int);
 void idt_vec_set(int, void (*)(void));
 void idt_vec_free(int);
-#endif
+void cpu_init_idt(void);
 
 struct lwp;
 int memseg_baseaddr(struct lwp *, uint64_t, char *, int, uint64_t *);
@@ -353,6 +325,8 @@ int valid_user_selector(struct lwp *, uint64_t, char *, int);
 #define	GLDT_SEL	0	/* Default LDT descriptor */
 #define NGDT_SYS	1
 
+#define GDT_SYS_OFFSET	(NGDT_MEM << 3)
+
 #define GDT_ADDR_MEM(s,i)	\
     ((struct mem_segment_descriptor *)((s) + ((i) << 3)))
 #define GDT_ADDR_SYS(s,i)	\
@@ -380,22 +354,13 @@ int valid_user_selector(struct lwp *, uint64_t, char *, int);
  * ldt is active.
  */
 #define VALID_USER_DSEL32(s) \
-    (((s) & 0xffff) == GSEL(GUDATA32_SEL, SEL_UPL) || \
-     ((s) & 0xffff) == LSEL(LUDATA32_SEL, SEL_UPL))
-#if 0 /* not used */
+    ((s) == GSEL(GUDATA32_SEL, SEL_UPL) || (s) == LSEL(LUDATA32_SEL, SEL_UPL))
 #define VALID_USER_CSEL32(s) \
     ((s) == GSEL(GUCODE32_SEL, SEL_UPL) || (s) == LSEL(LUCODE32_SEL, SEL_UPL))
-#endif
 
 #define VALID_USER_CSEL(s) \
     ((s) == GSEL(GUCODE_SEL, SEL_UPL) || (s) == LSEL(LUCODE_SEL, SEL_UPL))
 #define VALID_USER_DSEL(s) \
     ((s) == GSEL(GUDATA_SEL, SEL_UPL) || (s) == LSEL(LUDATA_SEL, SEL_UPL))
-
-#else	/*	__x86_64__	*/
-
-#include <i386/segments.h>
-
-#endif	/*	__x86_64__	*/
 
 #endif /* _AMD64_SEGMENTS_H_ */

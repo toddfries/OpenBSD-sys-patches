@@ -1,4 +1,4 @@
-/*	$NetBSD: if_tokensubr.c,v 1.55 2008/11/07 00:20:13 dyoung Exp $	*/
+/*	$NetBSD: if_tokensubr.c,v 1.44 2006/12/10 14:52:29 is Exp $	*/
 
 /*
  * Copyright (c) 1982, 1989, 1993
@@ -46,6 +46,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by The NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -92,7 +99,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_tokensubr.c,v 1.55 2008/11/07 00:20:13 dyoung Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_tokensubr.c,v 1.44 2006/12/10 14:52:29 is Exp $");
 
 #include "opt_inet.h"
 #include "opt_atalk.h"
@@ -112,7 +119,7 @@ __KERNEL_RCSID(0, "$NetBSD: if_tokensubr.c,v 1.55 2008/11/07 00:20:13 dyoung Exp
 #include <sys/errno.h>
 #include <sys/syslog.h>
 
-#include <sys/cpu.h>
+#include <machine/cpu.h>
 
 #include <net/if.h>
 #include <net/netisr.h>
@@ -169,7 +176,7 @@ __KERNEL_RCSID(0, "$NetBSD: if_tokensubr.c,v 1.55 2008/11/07 00:20:13 dyoung Exp
 #define RCF_SINGLEROUTE (2 << 8) | TOKEN_RCF_FRAME2 | TOKEN_RCF_BROADCAST_SINGLE
 
 static int	token_output(struct ifnet *, struct mbuf *,
-			     const struct sockaddr *, struct rtentry *);
+			     struct sockaddr *, struct rtentry *);
 static void	token_input(struct ifnet *, struct mbuf *);
 
 /*
@@ -179,20 +186,20 @@ static void	token_input(struct ifnet *, struct mbuf *);
  * XXX route info has to go into the same mbuf as the header
  */
 static int
-token_output(struct ifnet *ifp0, struct mbuf *m0, const struct sockaddr *dst,
+token_output(struct ifnet *ifp0, struct mbuf *m0, struct sockaddr *dst,
     struct rtentry *rt0)
 {
-	uint16_t etype;
+	u_int16_t etype;
 	int error = 0;
 	u_char edst[ISO88025_ADDR_LEN];
 	struct mbuf *m = m0;
 	struct rtentry *rt;
-	struct mbuf *mcopy = NULL;
+	struct mbuf *mcopy = (struct mbuf *)0;
 	struct token_header *trh;
 #ifdef INET
 	struct arphdr *ah = (struct arphdr *)ifp0;
 #endif /* INET */
-	struct token_rif *rif = NULL;
+	struct token_rif *rif = (struct  token_rif *)0;
 	struct token_rif bcastrif;
 	struct ifnet *ifp = ifp0;
 	size_t riflen = 0;
@@ -308,10 +315,10 @@ token_output(struct ifnet *ifp0, struct mbuf *m0, const struct sockaddr *dst,
 			memcpy(edst, tokenbroadcastaddr, sizeof(edst));
 		}
 		else {
-			void *tha = (void *)ar_tha(ah);
+			caddr_t tha = (caddr_t)ar_tha(ah);
 			KASSERT(tha);
 			if (tha)
-				bcopy(tha, (void *)edst, sizeof(edst));
+				bcopy(tha, (caddr_t)edst, sizeof(edst));
 			trh = (struct token_header *)M_TRHSTART(m);
 			trh->token_ac = TOKEN_AC;
 			trh->token_fc = TOKEN_FC;
@@ -321,9 +328,9 @@ token_output(struct ifnet *ifp0, struct mbuf *m0, const struct sockaddr *dst,
 				trrif = TOKEN_RIF(trh);
 				riflen = (ntohs(trrif->tr_rcf) & TOKEN_RCF_LEN_MASK) >> 8;
 			}
-			bcopy((void *)edst, (void *)trh->token_dhost,
+			bcopy((caddr_t)edst, (caddr_t)trh->token_dhost,
 			    sizeof (edst));
-			bcopy(CLLADDR(ifp->if_sadl), (void *)trh->token_shost,
+			bcopy(LLADDR(ifp->if_sadl), (caddr_t)trh->token_shost,
 			    sizeof(trh->token_shost));
 			if (riflen != 0)
 				trh->token_shost[0] |= TOKEN_RI_PRESENT;
@@ -341,14 +348,15 @@ token_output(struct ifnet *ifp0, struct mbuf *m0, const struct sockaddr *dst,
 	case AF_ISO: {
 		int	snpalen;
 		struct	llc *l;
-		const struct sockaddr_dl *sdl;
+		struct sockaddr_dl *sdl;
 
-		if (rt && (sdl = satocsdl(rt->rt_gateway)) &&
+		if (rt && (sdl = (struct sockaddr_dl *)rt->rt_gateway) &&
 		    sdl->sdl_family == AF_LINK && sdl->sdl_alen > 0) {
-			memcpy(edst, CLLADDR(sdl), sizeof(edst));
+			bcopy(LLADDR(sdl), (caddr_t)edst, sizeof(edst));
 		}
-		else if ((error = iso_snparesolve(ifp,
-		    (const struct sockaddr_iso *)dst, (char *)edst, &snpalen)))
+		else if ((error =
+			    iso_snparesolve(ifp, (struct sockaddr_iso *)dst,
+					    (char *)edst, &snpalen)))
 			goto bad; /* Not resolved */
 		/* If broadcasting on a simplex interface, loopback a copy. */
 		if (*edst & 1)
@@ -358,10 +366,10 @@ token_output(struct ifnet *ifp0, struct mbuf *m0, const struct sockaddr *dst,
 			M_PREPEND(mcopy, sizeof (*trh), M_DONTWAIT);
 			if (mcopy) {
 				trh = mtod(mcopy, struct token_header *);
-				bcopy((void *)edst,
-				    (void *)trh->token_dhost, sizeof (edst));
-				bcopy(CLLADDR(ifp->if_sadl),
-				    (void *)trh->token_shost, sizeof (edst));
+				bcopy((caddr_t)edst,
+				    (caddr_t)trh->token_dhost, sizeof (edst));
+				bcopy(LLADDR(ifp->if_sadl),
+				    (caddr_t)trh->token_shost, sizeof (edst));
 			}
 		}
 		M_PREPEND(m, 3, M_DONTWAIT);
@@ -385,9 +393,9 @@ token_output(struct ifnet *ifp0, struct mbuf *m0, const struct sockaddr *dst,
 
 	case AF_UNSPEC:
 	{
-		const struct ether_header *eh;
-		eh = (const struct ether_header *)dst->sa_data;
-		memcpy(edst, eh->ether_dhost, sizeof(edst));
+		struct ether_header *eh;
+		eh = (struct ether_header *)dst->sa_data;
+		bcopy((caddr_t)eh->ether_dhost, (caddr_t)edst, sizeof (edst));
 		if (*edst & 1)
 			m->m_flags |= (M_BCAST|M_MCAST);
 		etype = TYPEHTONS(eh->ether_type);
@@ -423,8 +431,8 @@ token_output(struct ifnet *ifp0, struct mbuf *m0, const struct sockaddr *dst,
 		l->llc_dsap = l->llc_ssap = LLC_SNAP_LSAP;
 		l->llc_snap.org_code[0] = l->llc_snap.org_code[1] =
 		    l->llc_snap.org_code[2] = 0;
-		bcopy((void *) &etype, (void *) &l->llc_snap.ether_type,
-		    sizeof(uint16_t));
+		bcopy((caddr_t) &etype, (caddr_t) &l->llc_snap.ether_type,
+		    sizeof(u_int16_t));
 	}
 
 	/*
@@ -438,8 +446,8 @@ token_output(struct ifnet *ifp0, struct mbuf *m0, const struct sockaddr *dst,
 	trh = mtod(m, struct token_header *);
 	trh->token_ac = TOKEN_AC;
 	trh->token_fc = TOKEN_FC;
-	bcopy((void *)edst, (void *)trh->token_dhost, sizeof (edst));
-	bcopy(CLLADDR(ifp->if_sadl), (void *)trh->token_shost,
+	bcopy((caddr_t)edst, (caddr_t)trh->token_dhost, sizeof (edst));
+	bcopy(LLADDR(ifp->if_sadl), (caddr_t)trh->token_shost,
 	    sizeof(trh->token_shost));
 
 	if (riflen != 0) {
@@ -455,7 +463,7 @@ send:
 
 #if NCARP > 0
 	if (ifp0 != ifp && ifp0->if_type == IFT_CARP) {
-		bcopy(CLLADDR(ifp0->if_sadl), (void *)trh->token_shost,	    
+		bcopy(LLADDR(ifp0->if_sadl), (caddr_t)trh->token_shost,	    
 		    sizeof(trh->token_shost));
 	}
 #endif /* NCARP > 0 */
@@ -505,13 +513,13 @@ token_input(struct ifnet *ifp, struct mbuf *m)
 		lan_hdr_len += (ntohs(trrif->tr_rcf) & TOKEN_RCF_LEN_MASK) >> 8;
 	}
 
-	l = (struct llc *)(mtod(m, uint8_t *) + lan_hdr_len);
+	l = (struct llc *)(mtod(m, u_int8_t *) + lan_hdr_len);
 
 	switch (l->llc_dsap) {
 #if defined(INET) || defined(NS) || defined(DECNET)
 	case LLC_SNAP_LSAP:
 	{
-		uint16_t etype;
+		u_int16_t etype;
 		if (l->llc_control != LLC_UI || l->llc_ssap != LLC_SNAP_LSAP)
 			goto dropanyway;
 		if (l->llc_snap.org_code[0] != 0 ||
@@ -522,8 +530,8 @@ token_input(struct ifnet *ifp, struct mbuf *m)
 		m_adj(m, lan_hdr_len + LLC_SNAPFRAMELEN);
 #if NCARP > 0
 		if (ifp->if_carp && ifp->if_type != IFT_CARP &&
-		    (carp_input(m, (uint8_t *)&trh->token_shost,
-		    (uint8_t *)&trh->token_dhost, l->llc_snap.ether_type) == 0))
+		    (carp_input(m, (u_int8_t *)&trh->token_shost,
+		    (u_int8_t *)&trh->token_dhost, l->llc_snap.ether_type) == 0))
 			return;
 #endif /* NCARP > 0 */
 
@@ -594,8 +602,8 @@ token_input(struct ifnet *ifp, struct mbuf *m)
 			l->llc_dsap = l->llc_ssap;
 			l->llc_ssap = c;
 			if (m->m_flags & (M_BCAST | M_MCAST))
-				bcopy(CLLADDR(ifp->if_sadl),
-				    (void *)trh->token_dhost,
+				bcopy(LLADDR(ifp->if_sadl),
+				    (caddr_t)trh->token_dhost,
 				    ISO88025_ADDR_LEN);
 			sa.sa_family = AF_UNSPEC;
 			sa.sa_len = sizeof(sa);
@@ -642,10 +650,11 @@ token_input(struct ifnet *ifp, struct mbuf *m)
  * Perform common duties while attaching to interface list
  */
 void
-token_ifattach(struct ifnet *ifp, void *lla)
+token_ifattach(struct ifnet *ifp, caddr_t lla)
 {
 
 	ifp->if_type = IFT_ISO88025;
+	ifp->if_addrlen = ISO88025_ADDR_LEN;
 	ifp->if_hdrlen = 14;
 	ifp->if_dlt = DLT_IEEE802;
 	ifp->if_mtu = ISO88025_MTU;
@@ -656,7 +665,8 @@ token_ifattach(struct ifnet *ifp, void *lla)
 	ifp->if_flags |= IFF_NOTRAILERS;
 #endif
 
-	if_set_sadl(ifp, lla, ISO88025_ADDR_LEN, true);
+	if_alloc_sadl(ifp);
+	memcpy(LLADDR(ifp->if_sadl), lla, ifp->if_addrlen);
 
 #if NBPFILTER > 0
 	bpfattach(ifp, DLT_IEEE802, sizeof(struct token_header));

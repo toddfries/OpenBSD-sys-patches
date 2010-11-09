@@ -1,4 +1,4 @@
-/*	$NetBSD: hci_event.c,v 1.18 2008/04/24 11:38:37 ad Exp $	*/
+/*	$NetBSD: hci_event.c,v 1.2 2006/09/11 22:12:39 plunky Exp $	*/
 
 /*-
  * Copyright (c) 2005 Iain Hibbert.
@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: hci_event.c,v 1.18 2008/04/24 11:38:37 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: hci_event.c,v 1.2 2006/09/11 22:12:39 plunky Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -45,27 +45,19 @@ __KERNEL_RCSID(0, "$NetBSD: hci_event.c,v 1.18 2008/04/24 11:38:37 ad Exp $");
 #include <netbt/sco.h>
 
 static void hci_event_inquiry_result(struct hci_unit *, struct mbuf *);
-static void hci_event_rssi_result(struct hci_unit *, struct mbuf *);
 static void hci_event_command_status(struct hci_unit *, struct mbuf *);
 static void hci_event_command_compl(struct hci_unit *, struct mbuf *);
 static void hci_event_con_compl(struct hci_unit *, struct mbuf *);
 static void hci_event_discon_compl(struct hci_unit *, struct mbuf *);
 static void hci_event_con_req(struct hci_unit *, struct mbuf *);
 static void hci_event_num_compl_pkts(struct hci_unit *, struct mbuf *);
-static void hci_event_auth_compl(struct hci_unit *, struct mbuf *);
-static void hci_event_encryption_change(struct hci_unit *, struct mbuf *);
-static void hci_event_change_con_link_key_compl(struct hci_unit *, struct mbuf *);
-static void hci_event_read_clock_offset_compl(struct hci_unit *, struct mbuf *);
 static void hci_cmd_read_bdaddr(struct hci_unit *, struct mbuf *);
 static void hci_cmd_read_buffer_size(struct hci_unit *, struct mbuf *);
 static void hci_cmd_read_local_features(struct hci_unit *, struct mbuf *);
-static void hci_cmd_read_local_ver(struct hci_unit *, struct mbuf *);
-static void hci_cmd_read_local_commands(struct hci_unit *, struct mbuf *);
 static void hci_cmd_reset(struct hci_unit *, struct mbuf *);
-static void hci_cmd_create_con(struct hci_unit *unit, uint8_t status);
 
 #ifdef BLUETOOTH_DEBUG
-int bluetooth_debug;
+int bluetooth_debug = BLUETOOTH_DEBUG;
 
 static const char *hci_eventnames[] = {
 /* 0x00 */ "NULL",
@@ -103,43 +95,23 @@ static const char *hci_eventnames[] = {
 /* 0x20 */ "PAGE SCAN REP MODE CHANGE",
 /* 0x21 */ "FLOW SPECIFICATION COMPLETE",
 /* 0x22 */ "RSSI RESULT",
-/* 0x23 */ "READ REMOTE EXT FEATURES",
-/* 0x24 */ "UNKNOWN",
-/* 0x25 */ "UNKNOWN",
-/* 0x26 */ "UNKNOWN",
-/* 0x27 */ "UNKNOWN",
-/* 0x28 */ "UNKNOWN",
-/* 0x29 */ "UNKNOWN",
-/* 0x2a */ "UNKNOWN",
-/* 0x2b */ "UNKNOWN",
-/* 0x2c */ "SCO CON COMPLETE",
-/* 0x2d */ "SCO CON CHANGED",
-/* 0x2e */ "SNIFF SUBRATING",
-/* 0x2f */ "EXTENDED INQUIRY RESULT",
-/* 0x30 */ "ENCRYPTION KEY REFRESH",
-/* 0x31 */ "IO CAPABILITY REQUEST",
-/* 0x32 */ "IO CAPABILITY RESPONSE",
-/* 0x33 */ "USER CONFIRM REQUEST",
-/* 0x34 */ "USER PASSKEY REQUEST",
-/* 0x35 */ "REMOTE OOB DATA REQUEST",
-/* 0x36 */ "SIMPLE PAIRING COMPLETE",
-/* 0x37 */ "UNKNOWN",
-/* 0x38 */ "LINK SUPERVISION TIMEOUT CHANGED",
-/* 0x39 */ "ENHANCED FLUSH COMPLETE",
-/* 0x3a */ "UNKNOWN",
-/* 0x3b */ "USER PASSKEY NOTIFICATION",
-/* 0x3c */ "KEYPRESS NOTIFICATION",
-/* 0x3d */ "REMOTE HOST FEATURES NOTIFICATION",
+/* 0x23 */ "READ REMOTE EXT FEATURES"
 };
 
 static const char *
 hci_eventstr(unsigned int event)
 {
 
-	if (event < __arraycount(hci_eventnames))
+	if (event < (sizeof(hci_eventnames) / sizeof(*hci_eventnames)))
 		return hci_eventnames[event];
 
 	switch (event) {
+	case HCI_EVENT_SCO_CON_COMPL:	/* 0x2c */
+		return "SCO CON COMPLETE";
+
+	case HCI_EVENT_SCO_CON_CHANGED:	/* 0x2d */
+		return "SCO CON CHANGED";
+
 	case HCI_EVENT_BT_LOGO:		/* 0xfe */
 		return "BT_LOGO";
 
@@ -147,7 +119,7 @@ hci_eventstr(unsigned int event)
 		return "VENDOR";
 	}
 
-	return "UNKNOWN";
+	return "UNRECOGNISED";
 }
 #endif	/* BLUETOOTH_DEBUG */
 
@@ -171,8 +143,7 @@ hci_event(struct mbuf *m, struct hci_unit *unit)
 
 	KASSERT(hdr.type == HCI_EVENT_PKT);
 
-	DPRINTFN(1, "(%s) event %s\n",
-	    device_xname(unit->hci_dev), hci_eventstr(hdr.event));
+	DPRINTFN(1, "(%s) event %s\n", unit->hci_devname, hci_eventstr(hdr.event));
 
 	switch(hdr.event) {
 	case HCI_EVENT_COMMAND_STATUS:
@@ -191,10 +162,6 @@ hci_event(struct mbuf *m, struct hci_unit *unit)
 		hci_event_inquiry_result(unit, m);
 		break;
 
-	case HCI_EVENT_RSSI_RESULT:
-		hci_event_rssi_result(unit, m);
-		break;
-
 	case HCI_EVENT_CON_COMPL:
 		hci_event_con_compl(unit, m);
 		break;
@@ -207,23 +174,42 @@ hci_event(struct mbuf *m, struct hci_unit *unit)
 		hci_event_con_req(unit, m);
 		break;
 
+	case HCI_EVENT_SCO_CON_COMPL:
+	case HCI_EVENT_INQUIRY_COMPL:
 	case HCI_EVENT_AUTH_COMPL:
-		hci_event_auth_compl(unit, m);
-		break;
-
+	case HCI_EVENT_REMOTE_NAME_REQ_COMPL:
 	case HCI_EVENT_ENCRYPTION_CHANGE:
-		hci_event_encryption_change(unit, m);
-		break;
-
 	case HCI_EVENT_CHANGE_CON_LINK_KEY_COMPL:
-		hci_event_change_con_link_key_compl(unit, m);
-		break;
-
+	case HCI_EVENT_MASTER_LINK_KEY_COMPL:
+	case HCI_EVENT_READ_REMOTE_FEATURES_COMPL:
+	case HCI_EVENT_READ_REMOTE_VER_INFO_COMPL:
+	case HCI_EVENT_QOS_SETUP_COMPL:
+	case HCI_EVENT_HARDWARE_ERROR:
+	case HCI_EVENT_FLUSH_OCCUR:
+	case HCI_EVENT_ROLE_CHANGE:
+	case HCI_EVENT_MODE_CHANGE:
+	case HCI_EVENT_RETURN_LINK_KEYS:
+	case HCI_EVENT_PIN_CODE_REQ:
+	case HCI_EVENT_LINK_KEY_REQ:
+	case HCI_EVENT_LINK_KEY_NOTIFICATION:
+	case HCI_EVENT_LOOPBACK_COMMAND:
+	case HCI_EVENT_DATA_BUFFER_OVERFLOW:
+	case HCI_EVENT_MAX_SLOT_CHANGE:
 	case HCI_EVENT_READ_CLOCK_OFFSET_COMPL:
-		hci_event_read_clock_offset_compl(unit, m);
+	case HCI_EVENT_CON_PKT_TYPE_CHANGED:
+	case HCI_EVENT_QOS_VIOLATION:
+	case HCI_EVENT_PAGE_SCAN_MODE_CHANGE:
+	case HCI_EVENT_PAGE_SCAN_REP_MODE_CHANGE:
+	case HCI_EVENT_FLOW_SPECIFICATION_COMPL:
+	case HCI_EVENT_RSSI_RESULT:
+	case HCI_EVENT_READ_REMOTE_EXTENDED_FEATURES:
+	case HCI_EVENT_SCO_CON_CHANGED:
+	case HCI_EVENT_BT_LOGO:
+	case HCI_EVENT_VENDOR:
 		break;
 
 	default:
+		UNKNOWN(hdr.event);
 		break;
 	}
 
@@ -233,7 +219,8 @@ hci_event(struct mbuf *m, struct hci_unit *unit)
 /*
  * Command Status
  *
- * Restart command queue and post-process any pending commands
+ * Update our record of num_cmd_pkts then post-process any pending commands
+ * and optionally restart cmd output on the unit.
  */
 static void
 hci_event_command_status(struct hci_unit *unit, struct mbuf *m)
@@ -244,70 +231,48 @@ hci_event_command_status(struct hci_unit *unit, struct mbuf *m)
 	m_copydata(m, 0, sizeof(ep), &ep);
 	m_adj(m, sizeof(ep));
 
-	ep.opcode = le16toh(ep.opcode);
-
-	DPRINTFN(1, "(%s) opcode (%03x|%04x) status = 0x%x num_cmd_pkts = %d\n",
-		device_xname(unit->hci_dev),
-		HCI_OGF(ep.opcode), HCI_OCF(ep.opcode),
-		ep.status,
+	DPRINTFN(1, "(%s) opcode (%03x|%04x) num_cmd_pkts = %d\n",
+		unit->hci_devname,
+		HCI_OGF(le16toh(ep.opcode)), HCI_OCF(le16toh(ep.opcode)),
 		ep.num_cmd_pkts);
 
-	hci_num_cmds(unit, ep.num_cmd_pkts);
+	unit->hci_num_cmd_pkts = ep.num_cmd_pkts;
 
 	/*
 	 * post processing of pending commands
 	 */
-	switch(ep.opcode) {
-	case HCI_CMD_CREATE_CON:
-		hci_cmd_create_con(unit, ep.status);
-		break;
-
+	switch(le16toh(ep.opcode)) {
 	default:
-		if (ep.status == 0)
-			break;
-
-		aprint_error_dev(unit->hci_dev,
-		    "CommandStatus opcode (%03x|%04x) failed (status=0x%02x)\n",
-		    HCI_OGF(ep.opcode), HCI_OCF(ep.opcode),
-		    ep.status);
-
 		break;
+	}
+
+	while (unit->hci_num_cmd_pkts > 0 && MBUFQ_FIRST(&unit->hci_cmdwait)) {
+		MBUFQ_DEQUEUE(&unit->hci_cmdwait, m);
+		hci_output_cmd(unit, m);
 	}
 }
 
 /*
  * Command Complete
  *
- * Restart command queue and handle the completed command
+ * Update our record of num_cmd_pkts then handle the completed command,
+ * and optionally restart cmd output on the unit.
  */
 static void
 hci_event_command_compl(struct hci_unit *unit, struct mbuf *m)
 {
 	hci_command_compl_ep ep;
-	hci_status_rp rp;
 
 	KASSERT(m->m_pkthdr.len >= sizeof(ep));
 	m_copydata(m, 0, sizeof(ep), &ep);
 	m_adj(m, sizeof(ep));
 
 	DPRINTFN(1, "(%s) opcode (%03x|%04x) num_cmd_pkts = %d\n",
-		device_xname(unit->hci_dev),
+		unit->hci_devname,
 		HCI_OGF(le16toh(ep.opcode)), HCI_OCF(le16toh(ep.opcode)),
 		ep.num_cmd_pkts);
 
-	hci_num_cmds(unit, ep.num_cmd_pkts);
-
-	/*
-	 * I am not sure if this is completely correct, it is not guaranteed
-	 * that a command_complete packet will contain the status though most
-	 * do seem to.
-	 */
-	m_copydata(m, 0, sizeof(rp), &rp);
-	if (rp.status > 0)
-		aprint_error_dev(unit->hci_dev,
-		    "CommandComplete opcode (%03x|%04x) failed (status=0x%02x)\n",
-		    HCI_OGF(le16toh(ep.opcode)), HCI_OCF(le16toh(ep.opcode)),
-		    rp.status);
+	unit->hci_num_cmd_pkts = ep.num_cmd_pkts;
 
 	/*
 	 * post processing of completed commands
@@ -325,20 +290,17 @@ hci_event_command_compl(struct hci_unit *unit, struct mbuf *m)
 		hci_cmd_read_local_features(unit, m);
 		break;
 
-	case HCI_CMD_READ_LOCAL_VER:
-		hci_cmd_read_local_ver(unit, m);
-		break;
-
-	case HCI_CMD_READ_LOCAL_COMMANDS:
-		hci_cmd_read_local_commands(unit, m);
-		break;
-
 	case HCI_CMD_RESET:
 		hci_cmd_reset(unit, m);
 		break;
 
 	default:
 		break;
+	}
+
+	while (unit->hci_num_cmd_pkts > 0 && MBUFQ_FIRST(&unit->hci_cmdwait)) {
+		MBUFQ_DEQUEUE(&unit->hci_cmdwait, m);
+		hci_output_cmd(unit, m);
 	}
 }
 
@@ -364,11 +326,11 @@ hci_event_num_compl_pkts(struct hci_unit *unit, struct mbuf *m)
 	m_adj(m, sizeof(ep));
 
 	while (ep.num_con_handles--) {
-		m_copydata(m, 0, sizeof(handle), &handle);
+		m_copydata(m, 0, sizeof(handle), (caddr_t)&handle);
 		m_adj(m, sizeof(handle));
 		handle = le16toh(handle);
 
-		m_copydata(m, 0, sizeof(num), &num);
+		m_copydata(m, 0, sizeof(num), (caddr_t)&num);
 		m_adj(m, sizeof(num));
 		num = le16toh(num);
 
@@ -382,10 +344,11 @@ hci_event_num_compl_pkts(struct hci_unit *unit, struct mbuf *m)
 				hci_sco_complete(link, num);
 			}
 		} else {
-			/* XXX need to issue Read_Buffer_Size or Reset? */
-			aprint_error_dev(unit->hci_dev,
-			    "unknown handle %d! (losing track of %d packet buffer%s)\n",
-			    handle, num, (num == 1 ? "" : "s"));
+			// XXX need to issue Read_Buffer_Size or Reset?
+			printf("%s: unknown handle %d! "
+				"(losing track of %d packet buffer%s)\n",
+				unit->hci_devname, handle,
+				num, (num == 1 ? "" : "s"));
 		}
 	}
 
@@ -426,8 +389,8 @@ static void
 hci_event_inquiry_result(struct hci_unit *unit, struct mbuf *m)
 {
 	hci_inquiry_result_ep ep;
-	hci_inquiry_response ir;
 	struct hci_memo *memo;
+	bdaddr_t bdaddr;
 
 	KASSERT(m->m_pkthdr.len >= sizeof(ep));
 	m_copydata(m, 0, sizeof(ep), &ep);
@@ -437,57 +400,31 @@ hci_event_inquiry_result(struct hci_unit *unit, struct mbuf *m)
 				(ep.num_responses == 1 ? "" : "s"));
 
 	while(ep.num_responses--) {
-		KASSERT(m->m_pkthdr.len >= sizeof(ir));
-		m_copydata(m, 0, sizeof(ir), &ir);
-		m_adj(m, sizeof(ir));
+		m_copydata(m, 0, sizeof(bdaddr_t), (caddr_t)&bdaddr);
 
 		DPRINTFN(1, "bdaddr %02x:%02x:%02x:%02x:%02x:%02x\n",
-			ir.bdaddr.b[5], ir.bdaddr.b[4], ir.bdaddr.b[3],
-			ir.bdaddr.b[2], ir.bdaddr.b[1], ir.bdaddr.b[0]);
+			bdaddr.b[5], bdaddr.b[4], bdaddr.b[3],
+			bdaddr.b[2], bdaddr.b[1], bdaddr.b[0]);
 
-		memo = hci_memo_new(unit, &ir.bdaddr);
-		if (memo != NULL) {
-			memo->page_scan_rep_mode = ir.page_scan_rep_mode;
-			memo->page_scan_mode = ir.page_scan_mode;
-			memo->clock_offset = ir.clock_offset;
+		memo = hci_memo_find(unit, &bdaddr);
+		if (memo == NULL) {
+			memo = malloc(sizeof(struct hci_memo),
+				M_BLUETOOTH, M_NOWAIT | M_ZERO);
+			if (memo == NULL) {
+				DPRINTFN(0, "out of memo memory!\n");
+				break;
+			}
+
+			LIST_INSERT_HEAD(&unit->hci_memos, memo, next);
 		}
-	}
-}
 
-/*
- * Inquiry Result with RSSI
- *
- * as above but different packet when RSSI result is enabled
- */
-static void
-hci_event_rssi_result(struct hci_unit *unit, struct mbuf *m)
-{
-	hci_rssi_result_ep ep;
-	hci_rssi_response rr;
-	struct hci_memo *memo;
+		microtime(&memo->time);
+		m_copydata(m, 0, sizeof(hci_inquiry_response),
+			(caddr_t)&memo->response);
+		m_adj(m, sizeof(hci_inquiry_response));
 
-	KASSERT(m->m_pkthdr.len >= sizeof(ep));
-	m_copydata(m, 0, sizeof(ep), &ep);
-	m_adj(m, sizeof(ep));
-
-	DPRINTFN(1, "%d response%s\n", ep.num_responses,
-				(ep.num_responses == 1 ? "" : "s"));
-
-	while(ep.num_responses--) {
-		KASSERT(m->m_pkthdr.len >= sizeof(rr));
-		m_copydata(m, 0, sizeof(rr), &rr);
-		m_adj(m, sizeof(rr));
-
-		DPRINTFN(1, "bdaddr %02x:%02x:%02x:%02x:%02x:%02x\n",
-			rr.bdaddr.b[5], rr.bdaddr.b[4], rr.bdaddr.b[3],
-			rr.bdaddr.b[2], rr.bdaddr.b[1], rr.bdaddr.b[0]);
-
-		memo = hci_memo_new(unit, &rr.bdaddr);
-		if (memo != NULL) {
-			memo->page_scan_rep_mode = rr.page_scan_rep_mode;
-			memo->page_scan_mode = 0;
-			memo->clock_offset = rr.clock_offset;
-		}
+		memo->response.clock_offset =
+		    le16toh(memo->response.clock_offset);
 	}
 }
 
@@ -512,7 +449,7 @@ hci_event_con_compl(struct hci_unit *unit, struct mbuf *m)
 
 	DPRINTFN(1, "(%s) %s connection complete for "
 		"%02x:%02x:%02x:%02x:%02x:%02x status %#x\n",
-		device_xname(unit->hci_dev),
+		unit->hci_devname,
 		(ep.link_type == HCI_LINK_ACL ? "ACL" : "SCO"),
 		ep.bdaddr.b[5], ep.bdaddr.b[4], ep.bdaddr.b[3],
 		ep.bdaddr.b[2], ep.bdaddr.b[1], ep.bdaddr.b[0],
@@ -556,11 +493,6 @@ hci_event_con_compl(struct hci_unit *unit, struct mbuf *m)
 		return;
 	}
 
-	/* XXX could check auth_enable here */
-
-	if (ep.encryption_mode)
-		link->hl_flags |= (HCI_LINK_AUTH | HCI_LINK_ENCRYPT);
-
 	link->hl_state = HCI_LINK_OPEN;
 	link->hl_handle = HCI_CON_HANDLE(le16toh(ep.con_handle));
 
@@ -570,20 +502,10 @@ hci_event_con_compl(struct hci_unit *unit, struct mbuf *m)
 		err = hci_send_cmd(unit, HCI_CMD_WRITE_LINK_POLICY_SETTINGS,
 						&cp, sizeof(cp));
 		if (err)
-			aprint_error_dev(unit->hci_dev,
-			    "Warning, could not write link policy\n");
+			printf("%s: Warning, could not write link policy\n",
+				unit->hci_devname);
 
-		err = hci_send_cmd(unit, HCI_CMD_READ_CLOCK_OFFSET,
-				    &cp.con_handle, sizeof(cp.con_handle));
-		if (err)
-			aprint_error_dev(unit->hci_dev,
-			    "Warning, could not read clock offset\n");
-
-		err = hci_acl_setmode(link);
-		if (err == EINPROGRESS)
-			return;
-
-		hci_acl_linkmode(link);
+		hci_acl_start(link);
 	} else {
 		(*link->hl_sco->sp_proto->connected)(link->hl_sco->sp_upper);
 	}
@@ -663,167 +585,13 @@ hci_event_con_req(struct hci_unit *unit, struct mbuf *m)
 }
 
 /*
- * Auth Complete
- *
- * Authentication has been completed on an ACL link. We can notify the
- * upper layer protocols unless further mode changes are pending.
- */
-static void
-hci_event_auth_compl(struct hci_unit *unit, struct mbuf *m)
-{
-	hci_auth_compl_ep ep;
-	struct hci_link *link;
-	int err;
-
-	KASSERT(m->m_pkthdr.len >= sizeof(ep));
-	m_copydata(m, 0, sizeof(ep), &ep);
-	m_adj(m, sizeof(ep));
-
-	ep.con_handle = HCI_CON_HANDLE(le16toh(ep.con_handle));
-
-	DPRINTFN(1, "handle #%d, status=0x%x\n", ep.con_handle, ep.status);
-
-	link = hci_link_lookup_handle(unit, ep.con_handle);
-	if (link == NULL || link->hl_type != HCI_LINK_ACL)
-		return;
-
-	if (ep.status == 0) {
-		link->hl_flags |= HCI_LINK_AUTH;
-
-		if (link->hl_state == HCI_LINK_WAIT_AUTH)
-			link->hl_state = HCI_LINK_OPEN;
-
-		err = hci_acl_setmode(link);
-		if (err == EINPROGRESS)
-			return;
-	}
-
-	hci_acl_linkmode(link);
-}
-
-/*
- * Encryption Change
- *
- * The encryption status has changed. Basically, we note the change
- * then notify the upper layer protocol unless further mode changes
- * are pending.
- * Note that if encryption gets disabled when it has been requested,
- * we will attempt to enable it again.. (its a feature not a bug :)
- */
-static void
-hci_event_encryption_change(struct hci_unit *unit, struct mbuf *m)
-{
-	hci_encryption_change_ep ep;
-	struct hci_link *link;
-	int err;
-
-	KASSERT(m->m_pkthdr.len >= sizeof(ep));
-	m_copydata(m, 0, sizeof(ep), &ep);
-	m_adj(m, sizeof(ep));
-
-	ep.con_handle = HCI_CON_HANDLE(le16toh(ep.con_handle));
-
-	DPRINTFN(1, "handle #%d, status=0x%x, encryption_enable=0x%x\n",
-		 ep.con_handle, ep.status, ep.encryption_enable);
-
-	link = hci_link_lookup_handle(unit, ep.con_handle);
-	if (link == NULL || link->hl_type != HCI_LINK_ACL)
-		return;
-
-	if (ep.status == 0) {
-		if (ep.encryption_enable == 0)
-			link->hl_flags &= ~HCI_LINK_ENCRYPT;
-		else
-			link->hl_flags |= (HCI_LINK_AUTH | HCI_LINK_ENCRYPT);
-
-		if (link->hl_state == HCI_LINK_WAIT_ENCRYPT)
-			link->hl_state = HCI_LINK_OPEN;
-
-		err = hci_acl_setmode(link);
-		if (err == EINPROGRESS)
-			return;
-	}
-
-	hci_acl_linkmode(link);
-}
-
-/*
- * Change Connection Link Key Complete
- *
- * Link keys are handled in userland but if we are waiting to secure
- * this link, we should notify the upper protocols. A SECURE request
- * only needs a single key change, so we can cancel the request.
- */
-static void
-hci_event_change_con_link_key_compl(struct hci_unit *unit, struct mbuf *m)
-{
-	hci_change_con_link_key_compl_ep ep;
-	struct hci_link *link;
-	int err;
-
-	KASSERT(m->m_pkthdr.len >= sizeof(ep));
-	m_copydata(m, 0, sizeof(ep), &ep);
-	m_adj(m, sizeof(ep));
-
-	ep.con_handle = HCI_CON_HANDLE(le16toh(ep.con_handle));
-
-	DPRINTFN(1, "handle #%d, status=0x%x\n", ep.con_handle, ep.status);
-
-	link = hci_link_lookup_handle(unit, ep.con_handle);
-	if (link == NULL || link->hl_type != HCI_LINK_ACL)
-		return;
-
-	link->hl_flags &= ~HCI_LINK_SECURE_REQ;
-
-	if (ep.status == 0) {
-		link->hl_flags |= (HCI_LINK_AUTH | HCI_LINK_SECURE);
-
-		if (link->hl_state == HCI_LINK_WAIT_SECURE)
-			link->hl_state = HCI_LINK_OPEN;
-
-		err = hci_acl_setmode(link);
-		if (err == EINPROGRESS)
-			return;
-	}
-
-	hci_acl_linkmode(link);
-}
-
-/*
- * Read Clock Offset Complete
- *
- * We keep a note of the clock offset of remote devices when a
- * link is made, in order to facilitate reconnections to the device
- */
-static void
-hci_event_read_clock_offset_compl(struct hci_unit *unit, struct mbuf *m)
-{
-	hci_read_clock_offset_compl_ep ep;
-	struct hci_link *link;
-
-	KASSERT(m->m_pkthdr.len >= sizeof(ep));
-	m_copydata(m, 0, sizeof(ep), &ep);
-	m_adj(m, sizeof(ep));
-
-	DPRINTFN(1, "handle #%d, offset=%u, status=0x%x\n",
-		le16toh(ep.con_handle), le16toh(ep.clock_offset), ep.status);
-
-	ep.con_handle = HCI_CON_HANDLE(le16toh(ep.con_handle));
-	link = hci_link_lookup_handle(unit, ep.con_handle);
-
-	if (ep.status != 0 || link == NULL)
-		return;
-
-	link->hl_clock = ep.clock_offset;
-}
-
-/*
  * process results of read_bdaddr command_complete event
  */
 static void
 hci_cmd_read_bdaddr(struct hci_unit *unit, struct mbuf *m)
 {
 	hci_read_bdaddr_rp rp;
+	int s;
 
 	KASSERT(m->m_pkthdr.len >= sizeof(rp));
 	m_copydata(m, 0, sizeof(rp), &rp);
@@ -837,9 +605,11 @@ hci_cmd_read_bdaddr(struct hci_unit *unit, struct mbuf *m)
 
 	bdaddr_copy(&unit->hci_bdaddr, &rp.bdaddr);
 
+	s = splraiseipl(unit->hci_ipl);
 	unit->hci_flags &= ~BTF_INIT_BDADDR;
+	splx(s);
 
-	cv_broadcast(&unit->hci_init);
+	wakeup(unit);
 }
 
 /*
@@ -849,6 +619,7 @@ static void
 hci_cmd_read_buffer_size(struct hci_unit *unit, struct mbuf *m)
 {
 	hci_read_buffer_size_rp rp;
+	int s;
 
 	KASSERT(m->m_pkthdr.len >= sizeof(rp));
 	m_copydata(m, 0, sizeof(rp), &rp);
@@ -865,9 +636,11 @@ hci_cmd_read_buffer_size(struct hci_unit *unit, struct mbuf *m)
 	unit->hci_max_sco_size = rp.max_sco_size;
 	unit->hci_num_sco_pkts = le16toh(rp.num_sco_pkts);
 
+	s = splraiseipl(unit->hci_ipl);
 	unit->hci_flags &= ~BTF_INIT_BUFFER_SIZE;
+	splx(s);
 
-	cv_broadcast(&unit->hci_init);
+	wakeup(unit);
 }
 
 /*
@@ -877,6 +650,7 @@ static void
 hci_cmd_read_local_features(struct hci_unit *unit, struct mbuf *m)
 {
 	hci_read_local_features_rp rp;
+	int s;
 
 	KASSERT(m->m_pkthdr.len >= sizeof(rp));
 	m_copydata(m, 0, sizeof(rp), &rp);
@@ -951,68 +725,17 @@ hci_cmd_read_local_features(struct hci_unit *unit, struct mbuf *m)
 	if (rp.features[4] & HCI_LMP_EV5_PKT)
 		unit->hci_sco_mask |= HCI_PKT_EV5;
 
-	/* XXX what do 2MBPS/3MBPS/3SLOT eSCO mean? */
+	// XXX what do 2MBPS/3MBPS/3SLOT eSCO mean?
 
+	s = splraiseipl(unit->hci_ipl);
 	unit->hci_flags &= ~BTF_INIT_FEATURES;
+	splx(s);
 
-	cv_broadcast(&unit->hci_init);
+	wakeup(unit);
 
 	DPRINTFN(1, "%s: lmp_mask %4.4x, acl_mask %4.4x, sco_mask %4.4x\n",
-		device_xname(unit->hci_dev), unit->hci_lmp_mask,
+		unit->hci_devname, unit->hci_lmp_mask,
 		unit->hci_acl_mask, unit->hci_sco_mask);
-}
-
-/*
- * process results of read_local_ver command_complete event
- *
- * reading local supported commands is only supported from 1.2 spec
- */
-static void
-hci_cmd_read_local_ver(struct hci_unit *unit, struct mbuf *m)
-{
-	hci_read_local_ver_rp rp;
-
-	KASSERT(m->m_pkthdr.len >= sizeof(rp));
-	m_copydata(m, 0, sizeof(rp), &rp);
-	m_adj(m, sizeof(rp));
-
-	if (rp.status != 0)
-		return;
-
-	if ((unit->hci_flags & BTF_INIT_COMMANDS) == 0)
-		return;
-
-	if (rp.hci_version < HCI_SPEC_V12) {
-		unit->hci_flags &= ~BTF_INIT_COMMANDS;
-		cv_broadcast(&unit->hci_init);
-		return;
-	}
-
-	hci_send_cmd(unit, HCI_CMD_READ_LOCAL_COMMANDS, NULL, 0);
-}
-
-/*
- * process results of read_local_commands command_complete event
- */
-static void
-hci_cmd_read_local_commands(struct hci_unit *unit, struct mbuf *m)
-{
-	hci_read_local_commands_rp rp;
-
-	KASSERT(m->m_pkthdr.len >= sizeof(rp));
-	m_copydata(m, 0, sizeof(rp), &rp);
-	m_adj(m, sizeof(rp));
-
-	if (rp.status != 0)
-		return;
-
-	if ((unit->hci_flags & BTF_INIT_COMMANDS) == 0)
-		return;
-
-	unit->hci_flags &= ~BTF_INIT_COMMANDS;
-	memcpy(unit->hci_cmds, rp.commands, HCI_COMMANDS_SIZE);
-
-	cv_broadcast(&unit->hci_init);
 }
 
 /*
@@ -1059,49 +782,4 @@ hci_cmd_reset(struct hci_unit *unit, struct mbuf *m)
 
 	if (hci_send_cmd(unit, HCI_CMD_READ_LOCAL_FEATURES, NULL, 0))
 		return;
-
-	if (hci_send_cmd(unit, HCI_CMD_READ_LOCAL_VER, NULL, 0))
-		return;
-}
-
-/*
- * process command_status event for create_con command
- *
- * a "Create Connection" command can sometimes fail to start for whatever
- * reason and the command_status event returns failure but we get no
- * indication of which connection failed (for instance in the case where
- * we tried to open too many connections all at once) So, we keep a flag
- * on the link to indicate pending status until the command_status event
- * is returned to help us decide which needs to be failed.
- *
- * since created links are inserted at the tail of hci_links, we know that
- * the first pending link we find will be the one that this command status
- * refers to.
- */
-static void
-hci_cmd_create_con(struct hci_unit *unit, uint8_t status)
-{
-	struct hci_link *link;
-
-	TAILQ_FOREACH(link, &unit->hci_links, hl_next) {
-		if ((link->hl_flags & HCI_LINK_CREATE_CON) == 0)
-			continue;
-
-		link->hl_flags &= ~HCI_LINK_CREATE_CON;
-
-		switch(status) {
-		case 0x00:	/* success */
-			break;
-
-		case 0x0c:	/* "Command Disallowed" */
-			hci_link_free(link, EBUSY);
-			break;
-
-		default:	/* some other trouble */
-			hci_link_free(link, EPROTO);
-			break;
-		}
-
-		return;
-	}
 }

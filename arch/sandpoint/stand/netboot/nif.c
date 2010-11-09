@@ -1,4 +1,4 @@
-/* $NetBSD: nif.c,v 1.9 2009/01/12 11:32:44 tsutsui Exp $ */
+/* $NetBSD: nif.c,v 1.13 2010/06/26 21:45:49 phx Exp $ */
 
 /*-
  * Copyright (c) 2007 The NetBSD Foundation, Inc.
@@ -37,6 +37,8 @@
 #include <lib/libsa/stand.h>
 #include <lib/libsa/net.h>
 
+#include <machine/bootinfo.h>
+
 #include "globals.h"
 
 struct nifdv {
@@ -51,33 +53,26 @@ struct nifdv {
 
 static struct iodesc netdesc;
 
-static struct nifdv vnifdv[] = {
+static struct nifdv lnifdv[] = {
 	{ "fxp", fxp_match, fxp_init, fxp_send, fxp_recv },
 	{ "tlp", tlp_match, tlp_init, tlp_send, tlp_recv },
-	{ "nvt", nvt_match, nvt_init, nvt_send, nvt_recv },
-	{ "sip", sip_match, sip_init, sip_send, sip_recv },
-	{ "pcn", pcn_match, pcn_init, pcn_send, pcn_recv },
-	{ "kse", kse_match, kse_init, kse_send, kse_recv },
-	{ "sme", sme_match, sme_init, sme_send, sme_recv },
-	{ "vge", vge_match, vge_init, vge_send, vge_recv },
-	{ "rge", rge_match, rge_init, rge_send, rge_recv },
-	{ "wm",  wm_match, wm_init,  wm_send,  wm_recv  }
+	{ "re",  rge_match, rge_init, rge_send, rge_recv },
+	{ "sk",  skg_match, skg_init, skg_send, skg_recv },
 };
-static int nnifdv = sizeof(vnifdv)/sizeof(vnifdv[0]);
+static int nnifdv = sizeof(lnifdv)/sizeof(lnifdv[0]);
 
 int
-netif_init(tag)
-	unsigned tag;
+netif_init(unsigned tag)
 {
 	struct iodesc *s;
 	struct nifdv *dv;
 	int n;
 	uint8_t enaddr[6];
-	extern uint8_t en[6];
-	extern char rootdev[4];
+	extern struct btinfo_net bi_net;
+	extern struct btinfo_rootdevice bi_rdev;
 
 	for (n = 0; n < nnifdv; n++) {
-		dv = &vnifdv[n];
+		dv = &lnifdv[n];
 		if ((*dv->match)(tag, NULL) > 0)
 			goto found;
 	}
@@ -87,22 +82,25 @@ netif_init(tag)
 	s = &netdesc;
 	s->io_netif = dv;
 	memcpy(s->myea, enaddr, sizeof(s->myea));
-	memcpy(en, enaddr, sizeof(en));
-	snprintf(rootdev, sizeof(rootdev), "%s", dv->name);
+
+	/* build btinfo to identify NIF device */
+	snprintf(bi_net.devname, sizeof(bi_net.devname), dv->name);
+	memcpy(bi_net.mac_address, enaddr, sizeof(bi_net.mac_address));
+	bi_net.cookie = tag;
+	snprintf(bi_rdev.devname, sizeof(bi_rdev.devname), dv->name);
+	bi_rdev.cookie = tag;
 	return 1;
 }
 
 int
-netif_open(cookie)
-	void *cookie;
+netif_open(void *cookie)
 {
 	/* single action */
 	return 0;
 }
 
 int
-netif_close(sock)
-	int sock;
+netif_close(int sock)
 {
 	/* nothing to do for the HW */
 	return 0;
@@ -113,14 +111,11 @@ netif_close(sock)
  * Return the length sent (or -1 on error).
  */
 ssize_t
-netif_put(desc, pkt, len)
-	struct iodesc *desc;
-	void *pkt;
-	size_t len;
+netif_put(struct iodesc *desc, void *pkt, size_t len)
 {
 	struct nifdv *dv = desc->io_netif;
 
-	return (*dv->send)(dv->priv, pkt, len);
+	return dv ? (*dv->send)(dv->priv, pkt, len) : -1;
 }
 
 /*
@@ -128,24 +123,19 @@ netif_put(desc, pkt, len)
  * Return the total length received (or -1 on error).
  */
 ssize_t
-netif_get(desc, pkt, maxlen, timo)
-	struct iodesc *desc;
-	void *pkt;
-	size_t maxlen;
-	saseconds_t timo;
+netif_get(struct iodesc *desc, void *pkt, size_t maxlen, saseconds_t timo)
 {
 	struct nifdv *dv = desc->io_netif;
 	int len;
 
-	len = (*dv->recv)(dv->priv, pkt, maxlen, timo);
+	len = dv ? (*dv->recv)(dv->priv, pkt, maxlen, timo) : -1;
 	if (len == -1)
 		printf("timeout\n");
 	return len;
 }
 
 struct iodesc *
-socktodesc(num)
-	int num;
+socktodesc(int num)
 {
 
 	return (num == 0) ? &netdesc : NULL;

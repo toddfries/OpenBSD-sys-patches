@@ -1,4 +1,4 @@
-/*	$NetBSD: disk.c,v 1.7 2009/02/04 15:22:13 tsutsui Exp $	*/
+/*	$NetBSD: disk.c,v 1.2 2006/08/26 14:13:40 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 2004, 2005 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -39,10 +46,6 @@
 #include "local.h"
 #include "common.h"
 
-#if defined(LIBSA_NO_TWIDDLE)
-#define twiddle()
-#endif
-
 int dkopen(struct open_file *, ...);
 int dkclose(struct open_file *);
 int dkstrategy(void *, int, daddr_t, size_t, void *, size_t *);
@@ -52,7 +55,7 @@ struct devsw dkdevsw = {
 };
 
 struct disk {
-	bool active;
+	boolean_t active;
 	int type;	/* FD/HD */
 	int unit;
 	int format;	/* 2D/2HD */
@@ -62,17 +65,13 @@ struct disk {
 } __disk;
 
 void sector_init(void);
-bool __sector_rw(uint8_t *, int, int, int);
+boolean_t __sector_rw(uint8_t *, int, int, int);
 int __hd_rw(uint8_t *, int, int, int);
 int __fd_2d_rw(uint8_t *, int, int, int);
 int __fd_2hd_rw(uint8_t *, int, int, int);
-#ifdef DEBUG
 void __fd_progress_msg(int);
-#else
-#define __fd_progress_msg(pos)	twiddle()
-#endif
 
-bool
+boolean_t
 device_attach(int type, int unit, int partition)
 {
 
@@ -86,14 +85,14 @@ device_attach(int type, int unit, int partition)
 
 	__disk.partition = partition;
 
-	__disk.active = true;
+	__disk.active = TRUE;
 	__disk.offset = 0;
 
 	if (partition >= 0) {
 		if (!find_partition_start(__disk.partition, &__disk.offset)) {
 			printf("type %d, unit %d partition %d not found.\n",
 			    __disk.type, __disk.unit, __disk.partition);
-			return false;
+			return FALSE;
 		}
 	}
 	DEVICE_CAPABILITY.active_device = type;
@@ -109,14 +108,14 @@ device_attach(int type, int unit, int partition)
 		} else {
 			printf("unknown floppy disk format %d.\n",
 			    __disk.format);
-			return false;
+			return FALSE;
 		}
 	} else {
 		printf("unknown disk type %d.\n", __disk.type);
-		return false;
+		return FALSE;
 	}
 
-	return true;
+	return TRUE;
 }
 
 int
@@ -141,7 +140,7 @@ dkstrategy(void *devdata, int rw, daddr_t blk, size_t size, void *buf,
 
 	if ((int)size < 0) {
 		printf("%s: invalid request block %d size %d base %d\n",
-		    __func__, blk, size, __disk.offset);
+		    __FUNCTION__, blk, size, __disk.offset);
 		return -1;
 	}
 
@@ -166,42 +165,42 @@ void
 sector_fini(void *self)
 {
 
-	__disk.active = false;
+	__disk.active = FALSE;
 }
 
-bool
+boolean_t
 sector_read_n(void *self, uint8_t *buf, int sector, int count)
 {
 
 	if (!__sector_rw(buf, sector, 0, count))
-		return false;
-	return true;
+		return FALSE;
+	return TRUE;
 }
 
-bool
+boolean_t
 sector_read(void *self, uint8_t *buf, int sector)
 {
 
 	return __sector_rw(buf, sector, 0, 1);
 }
 
-bool
+boolean_t
 sector_write_n(void *self, uint8_t *buf, int sector, int count)
 {
 
 	if (!__sector_rw(buf, sector, 0x1000, count))
-		return false;
-	return true;
+		return FALSE;
+	return TRUE;
 }
 
-bool
+boolean_t
 sector_write(void *self, uint8_t *buf, int sector)
 {
 
 	return __sector_rw(buf, sector, 0x1000, 1);
 }
 
-bool
+boolean_t
 __sector_rw(uint8_t *buf, int block, int flag, int count)
 {
 	int err;
@@ -211,7 +210,7 @@ __sector_rw(uint8_t *buf, int block, int flag, int count)
 
 	if ((err = __disk.rw(buf, block, flag, count)) != 0)
 		printf("%s: type=%d unit=%d offset=%d block=%d err=%d\n",
-		    __func__, __disk.type, __disk.unit, __disk.offset,
+		    __FUNCTION__, __disk.type, __disk.unit, __disk.offset,
 		    block, err);
 
 	return err == 0;
@@ -227,27 +226,19 @@ __hd_rw(uint8_t *buf, int block, int flag, int count)
 int
 __fd_2d_rw(uint8_t *buf, int block, int flag, int count)
 {
-	int cnt, err;
+	int cnt, i, err;
 	uint32_t pos;
 
-	while (count > 0) {
-		if (!blk_to_2d_position(block, &pos, &cnt)) {
-			printf("%s: invalid block #%d.\n", __func__, block);
-			return -1;
-		}
+	if (!blk_to_2d_position(block, &pos, &cnt)) {
+		printf("%s: invalid block #%d.\n", __FUNCTION__, block);
+		return -1;
+	}
+	__fd_progress_msg(pos);
 
-		__fd_progress_msg(pos);
-
-		if (cnt > count)
-			cnt = count;
-
-		err = ROM_FD_RW(flag | __disk.unit, pos, cnt * 2, buf);
+	for (i = 0; i < count; i++, buf += DEV_BSIZE) {
+		err = ROM_FD_RW(flag | __disk.unit, pos, cnt, buf);
 		if (err)
 			return err;
-
-		count -= cnt;
-		block += cnt;
-		buf += DEV_BSIZE * cnt;
 	}
 	return 0;
 }
@@ -255,39 +246,30 @@ __fd_2d_rw(uint8_t *buf, int block, int flag, int count)
 int
 __fd_2hd_rw(uint8_t *buf, int block, int flag, int count)
 {
-	int cnt, err;
+	int cnt, i, err;
 	uint32_t pos;
 
-	while (count > 0) {
-		if (!blk_to_2hd_position(block, &pos, &cnt)) {
-			printf("%s: invalid block #%d.\n", __func__, block);
-			return -1;
-		}
-		if (cnt > count)
-			cnt = count;
+	if (!blk_to_2hd_position(block, &pos, &cnt)) {
+		printf("%s: invalid block #%d.\n", __FUNCTION__, block);
+		return -1;
+	}
+	__fd_progress_msg(pos);
 
-		__fd_progress_msg(pos);
-
+	for (i = 0; i < count; i++, buf += DEV_BSIZE) {
 		err = ROM_FD_RW(flag | __disk.unit | 0x1000000, pos, cnt, buf);
 		if (err)
 			return err;
-
-		count -= cnt;
-		block += cnt;
-		buf += DEV_BSIZE * cnt;
 	}
 	return 0;
 }
 
-#ifdef DEBUG
 void
 __fd_progress_msg(int pos)
 {
 	char msg[16];
 
 	memset(msg, 0, sizeof msg);
-	sprintf(msg, "C%d H%d S%d  \r", (pos >> 16) & 0xff, (pos >> 8) & 0xff,
+	sprintf(msg, "C%d H%d S%d\r", (pos >> 16) & 0xff, (pos >> 8) & 0xff,
 	    pos & 0xff);
 	printf("%s", msg);
 }
-#endif

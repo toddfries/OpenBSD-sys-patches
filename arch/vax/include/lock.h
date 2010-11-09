@@ -1,4 +1,4 @@
-/*	$NetBSD: lock.h,v 1.29 2009/01/14 23:20:34 pooka Exp $	*/
+/*	$NetBSD: lock.h,v 1.21 2005/12/28 19:09:30 perry Exp $	*/
 
 /*
  * Copyright (c) 2000 Ludd, University of Lule}, Sweden.
@@ -33,8 +33,6 @@
 #ifndef _VAX_LOCK_H_
 #define _VAX_LOCK_H_
 
-#include <sys/param.h>
-
 #ifdef _KERNEL
 #ifdef _KERNEL_OPT
 #include "opt_multiprocessor.h"
@@ -43,102 +41,111 @@
 #include <machine/cpu.h>
 #endif
 
-static __inline int
-__SIMPLELOCK_LOCKED_P(__cpu_simple_lock_t *__ptr)
-{
-	return *__ptr == __SIMPLELOCK_LOCKED;
-}
-
-static __inline int
-__SIMPLELOCK_UNLOCKED_P(__cpu_simple_lock_t *__ptr)
-{
-	return *__ptr == __SIMPLELOCK_UNLOCKED;
-}
-
 static __inline void
-__cpu_simple_lock_clear(__cpu_simple_lock_t *__ptr)
+__cpu_simple_lock_init(__cpu_simple_lock_t *alp)
 {
-	*__ptr = __SIMPLELOCK_UNLOCKED;
-}
-
-static __inline void
-__cpu_simple_lock_set(__cpu_simple_lock_t *__ptr)
-{
-	*__ptr = __SIMPLELOCK_LOCKED;
-}
-
-static __inline void __cpu_simple_lock_init(__cpu_simple_lock_t *);
-static __inline void
-__cpu_simple_lock_init(__cpu_simple_lock_t *__alp)
-{
-#ifdef _HARDKERNEL
-	__asm __volatile ("movl %0,%%r1;jsb Sunlock"
+#ifdef _KERNEL
+	__asm volatile ("movl %0,%%r1;jsb Sunlock"
 		: /* No output */
-		: "g"(__alp)
+		: "g"(alp)
 		: "r1","cc","memory");
 #else
-	__asm __volatile ("bbcci $0,%0,1f;1:"
+	__asm volatile ("bbcci $0,%0,1f;1:"
 		: /* No output */
-		: "m"(*__alp)
+		: "m"(*alp)
 		: "cc");
 #endif
 }
 
-static __inline int __cpu_simple_lock_try(__cpu_simple_lock_t *);
 static __inline int
-__cpu_simple_lock_try(__cpu_simple_lock_t *__alp)
+__cpu_simple_lock_try(__cpu_simple_lock_t *alp)
 {
 	int ret;
 
-#ifdef _HARDKERNEL
-	__asm __volatile ("movl %1,%%r1;jsb Slocktry;movl %%r0,%0"
+#ifdef _KERNEL
+	__asm volatile ("movl %1,%%r1;jsb Slocktry;movl %%r0,%0"
 		: "=&r"(ret)
-		: "g"(__alp)
+		: "g"(alp)
 		: "r0","r1","cc","memory");
 #else
-	__asm __volatile ("clrl %0;bbssi $0,%1,1f;incl %0;1:"
+	__asm volatile ("clrl %0;bbssi $0,%1,1f;incl %0;1:"
 		: "=&r"(ret)
-		: "m"(*__alp)
+		: "m"(*alp)
 		: "cc");
 #endif
 
 	return ret;
 }
 
-static __inline void __cpu_simple_lock(__cpu_simple_lock_t *);
-static __inline void
-__cpu_simple_lock(__cpu_simple_lock_t *__alp)
-{
-#if defined(_HARDKERNEL) && defined(MULTIPROCESSOR)
-	struct cpu_info * const __ci = curcpu();
-
-	while (__cpu_simple_lock_try(__alp) == 0) {
+#ifdef _KERNEL
 #define	VAX_LOCK_CHECKS ((1 << IPI_SEND_CNCHAR) | (1 << IPI_DDB))
-		if (__ci->ci_ipimsgs & VAX_LOCK_CHECKS) {
+#define	__cpu_simple_lock(alp)						\
+do {									\
+	struct cpu_info *__ci = curcpu();				\
+									\
+	while (__cpu_simple_lock_try(alp) == 0) {			\
+		int ___s;						\
+									\
+		if (__ci->ci_ipimsgs & VAX_LOCK_CHECKS) {		\
+			___s = splipi();				\
+			cpu_handle_ipi();				\
+			splx(___s);					\
+		}							\
+	}								\
+} while (0)
+#else
+static __inline void
+__cpu_simple_lock(__cpu_simple_lock_t *alp)
+{
+	__asm volatile ("1:bbssi $0,%0,1b"
+		: /* No outputs */
+		: "m"(*alp)
+		: "cc");
+}
+#endif /* _KERNEL */
+
+#if 0
+static __inline void
+__cpu_simple_lock(__cpu_simple_lock_t *alp)
+{
+	struct cpu_info *ci = curcpu();
+
+	while (__cpu_simple_lock_try(alp) == 0) {
+		int s;
+
+		if (ci->ci_ipimsgs & IPI_SEND_CNCHAR) {
+			s = splipi();
 			cpu_handle_ipi();
+			splx(s);
 		}
 	}
-#else /* _HARDKERNEL && MULTIPROCESSOR */
-	__asm __volatile ("1:bbssi $0,%0,1b"
-		: /* No outputs */
-		: "m"(*__alp)
-		: "cc");
-#endif /* _HARDKERNEL && MULTIPROCESSOR */
-}
 
-static __inline void __cpu_simple_unlock(__cpu_simple_lock_t *);
-static __inline void
-__cpu_simple_unlock(__cpu_simple_lock_t *__alp)
-{
-#ifdef _HARDKERNEL
-	__asm __volatile ("movl %0,%%r1;jsb Sunlock"
+#if 0
+	__asm volatile ("movl %0,%%r1;jsb Slock"
 		: /* No output */
-		: "g"(__alp)
+		: "g"(alp)
+		: "r0","r1","cc","memory");
+#endif
+#if 0
+	__asm volatile ("1:;bbssi $0, %0, 1b"
+		: /* No output */
+		: "m"(*alp));
+#endif
+}
+#endif
+
+static __inline void
+__cpu_simple_unlock(__cpu_simple_lock_t *alp)
+{
+#ifdef _KERNEL
+	__asm volatile ("movl %0,%%r1;jsb Sunlock"
+		: /* No output */
+		: "g"(alp)
 		: "r1","cc","memory");
 #else
-	__asm __volatile ("bbcci $0,%0,1f;1:"
+	__asm volatile ("bbcci $0,%0,1f;1:"
 		: /* No output */
-		: "m"(*__alp)
+		: "m"(*alp)
 		: "cc");
 #endif
 }
@@ -155,25 +162,16 @@ __cpu_simple_unlock(__cpu_simple_lock_t *__alp)
  */
 #define SPINLOCK_SPIN_HOOK						\
 do {									\
-	struct cpu_info * const __ci = curcpu();			\
+	struct cpu_info *__ci = curcpu();				\
+	int ___s;							\
 									\
 	if (__ci->ci_ipimsgs != 0) {					\
 		/* printf("CPU %lu has IPIs pending\n",			\
 		    __ci->ci_cpuid); */					\
+		___s = splipi();					\
 		cpu_handle_ipi();					\
+		splx(___s);						\
 	}								\
-} while (/*CONSTCOND*/0)
+} while (0)
 #endif /* MULTIPROCESSOR */
-
-static __inline void mb_read(void);
-static __inline void
-mb_read(void)
-{
-}
-
-static __inline void mb_write(void);
-static __inline void
-mb_write(void)
-{
-}
 #endif /* _VAX_LOCK_H_ */

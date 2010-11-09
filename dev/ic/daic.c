@@ -13,6 +13,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -29,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: daic.c,v 1.27 2008/04/28 20:23:49 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: daic.c,v 1.25 2007/10/19 11:59:50 ad Exp $");
 
 /*
  * daic.c: MI driver for Diehl active ISDN cards (S, SX, SXn, SCOM, QUADRO)
@@ -178,9 +185,9 @@ daic_attach(self, sc)
 	}
 
 	printf("\n");
-	printf("%s: EICON.Diehl %s\n", device_xname(&sc->sc_dev),
+	printf("%s: EICON.Diehl %s\n", sc->sc_dev.dv_xname,
 	    cardtypename(sc->sc_cardtype));
-	printf("%s: %d kByte on board RAM\n", device_xname(&sc->sc_dev), memsize);
+	printf("%s: %d kByte on board RAM\n", sc->sc_dev.dv_xname, memsize);
 	num_ports = sc->sc_cardtype == DAIC_TYPE_QUAD ? 4 : 1;
 	for (i = 0; i < num_ports; i++)
 		sc->sc_port[i].du_state = DAIC_STATE_DOWNLOAD;
@@ -242,8 +249,8 @@ daic_handle_intr(sc, port)
 		}
 		goto check_ind;
 	} else if ((rc & DAIC_RC_ASSIGN_MASK) == DAIC_RC_ASSIGN_RC) {
-		aprint_error_dev(&sc->sc_dev, "assign request failed, error 0x%02x: %s\n",
-			rc & DAIC_RC_ERRMASK,
+		printf("%s: assign request failed, error 0x%02x: %s\n",
+			sc->sc_dev.dv_xname, rc & DAIC_RC_ERRMASK,
 			err_codes[rc & DAIC_RC_ERRMASK]);
 		du->du_assign_res = 0;
 		/* assing rc is special, we tell the card it's done */
@@ -279,7 +286,7 @@ daic_handle_intr(sc, port)
 
 	/* not found? */
 	printf("%s: unknown id 0x%02x got rc 0x%02x: %s\n",
-		device_xname(&sc->sc_dev), rcid, rc,
+		sc->sc_dev.dv_xname, rcid, rc,
 		err_codes[rc & DAIC_RC_ERRMASK]);
 
 req_done:
@@ -299,7 +306,7 @@ check_ind:
 			int i;
 
 			printf("%s: got info indication\n",
-				device_xname(&sc->sc_dev));
+				sc->sc_dev.dv_xname);
 
 			for (i = 0; i < 48; i++) {
 				if (!(i % 16))
@@ -309,10 +316,10 @@ check_ind:
 			printf("\n");
 		} else if (ind == DAIC_IND_HANGUP) {
 			printf("%s: got global HANGUP indication\n",
-				device_xname(&sc->sc_dev));
+				sc->sc_dev.dv_xname);
 		} else {
 			printf("%s: unknown global indication: 0x%02x\n",
-				device_xname(&sc->sc_dev), ind);
+				sc->sc_dev.dv_xname, ind);
 		}
 		goto ind_done;
 	}
@@ -320,11 +327,11 @@ check_ind:
 	for (chan = 0; chan < 2; chan++) {
 		if (indid == sc->sc_con[port*2+chan].dchan_inst) {
 			printf("%s: D-Channel indication 0x%02x for channel %d\n",
-				device_xname(&sc->sc_dev), ind, chan);
+				sc->sc_dev.dv_xname, ind, chan);
 			goto ind_done;
 		} else if (indid == sc->sc_con[port*2+chan].bchan_inst) {
 			printf("%s: B-Channel indication 0x%02x for channel %d\n",
-				device_xname(&sc->sc_dev), ind, chan);
+				sc->sc_dev.dv_xname, ind, chan);
 			goto ind_done;
 		}
 	}
@@ -332,13 +339,13 @@ check_ind:
 	TAILQ_FOREACH(assoc, &sc->sc_outcalls[port], queue) {
 		if (indid == assoc->dchan_id) {
 			printf("%s: D-Channel indication 0x%02x for outgoing call with cdid %d\n",
-				sc-device_xname(&>sc_dev), ind, assoc->cdid);
+				sc->sc_dev.dv_xname, ind, assoc->cdid);
 			goto ind_done;
 		}
 	}
 
 	/* not found - something's wrong! */
-	printf("%s: got ind 0x%02x for id 0x%02x\n", device_xname(&sc->sc_dev), ind, indid);
+	printf("%s: got ind 0x%02x for id 0x%02x\n", sc->sc_dev.dv_xname, ind, indid);
 
 ind_done:
 	bus_space_write_1(sc->sc_iot, sc->sc_ioh, DAIC_COM_IND+off, 0);
@@ -394,10 +401,10 @@ daic_download(token, count, data)
 		sw_id = p[1] | (p[2] << 8) | (p[3] << 16) | (p[4] << 24);
 		if (sc->sc_cardtype == DAIC_TYPE_QUAD)
 			printf("%s port %d: downloading %s\n",
-				device_xname(&sc->sc_dev), i, data[i].microcode+4);
+				sc->sc_dev.dv_xname, i, data[i].microcode+4);
 		else
 			printf("%s: downloading %s\n",
-				device_xname(&sc->sc_dev), data[i].microcode+4);
+				sc->sc_dev.dv_xname, data[i].microcode+4);
 		x = splnet();
 		p = data[i].microcode;
 		while (s > 0) {
@@ -416,7 +423,8 @@ daic_download(token, count, data)
 		    }
 	    	    if (bus_space_read_1(sc->sc_iot, sc->sc_ioh, DAIC_BOOT_CTRL+off) != 0) {
 	    	    	splx(x);
-	    	    	aprint_error_dev(&sc->sc_dev, "download of microcode failed\n");
+	    	    	printf("%s: download of microcode failed\n",
+				sc->sc_dev.dv_xname);
 	    	    	return EIO;
 	    	    }
 		}
@@ -441,8 +449,8 @@ daic_download(token, count, data)
 			if (signature) {
 				if (signature != DAIC_SIGNATURE_VALUE) {
 					splx(x);
-					aprint_error_dev(&sc->sc_dev, "microcode signature bad: should be %04x, is %04x\n",
-						DAIC_SIGNATURE_VALUE,signature);
+					printf("%s: microcode signature bad: should be %04x, is %04x\n",
+						sc->sc_dev.dv_xname, DAIC_SIGNATURE_VALUE,signature);
 					return EIO;
 				}
 				break;
@@ -463,7 +471,7 @@ daic_download(token, count, data)
 		if (sc->sc_port[i].du_state != DAIC_STATE_RUNNING) {
 			splx(x);
 			printf("%s: download interrupt test timeout\n",
-				device_xname(&sc->sc_dev));
+				sc->sc_dev.dv_xname);
 			return EIO;
 		}
 
@@ -484,8 +492,8 @@ daic_download(token, count, data)
 		tsleep(&sc->sc_port[i].du_request_res, 0, "daic request", 0);
 		x = splnet();
 		if (sc->sc_port[i].du_request_res != DAIC_RC_OK) {
-			aprint_error_dev(&sc->sc_dev, "INDICATE request error (0x%02x): %s\n",
-				sc->sc_port[i].du_request_res,
+			printf("%s: INDICATE request error (0x%02x): %s\n",
+				sc->sc_dev.dv_xname, sc->sc_port[i].du_request_res,
 				err_codes[sc->sc_port[i].du_request_res & DAIC_RC_ERRMASK]);
 			splx(x);
 			return EIO;
@@ -568,13 +576,13 @@ daic_diagnostic(token, req)
 
 	/* validate parameters */
 	if (req->cmd > DAIC_DIAG_MAXCMD) {
-		aprint_error_dev(&sc->sc_dev, "daic_diagnostic: illegal cmd %d\n",
-			req->cmd);
+		printf("%s: daic_diagnostic: illegal cmd %d\n",
+			sc->sc_dev.dv_xname, req->cmd);
 		return EIO;
 	}
 	if (req->out_param_len > (DAIC_DIAG_DATA_SIZE+1)) {
-		aprint_error_dev(&sc->sc_dev, "daic_diagnostic: illegal out_param_len %d\n",
-			req->out_param_len);
+		printf("%s: daic_diagnostic: illegal out_param_len %d\n",
+			sc->sc_dev.dv_xname, req->out_param_len);
 		return EIO;
 	}
 
@@ -591,9 +599,9 @@ daic_diagnostic(token, req)
 		};
 
 		/* create the d-channel task for this call */
-		printf("%s: assigning id for pass-through call\n", device_xname(&sc->sc_dev));
+		printf("%s: assigning id for pass-through call\n", sc->sc_dev.dv_xname);
 		id = daic_assign(sc, port, DAIC_GLOBALID_DCHAN, sizeof(parms), parms);
-		printf("%s: got id 0x%02x\n", device_xname(&sc->sc_dev), id);
+		printf("%s: got id 0x%02x\n", sc->sc_dev.dv_xname, id);
 
 #ifdef DAIC_DEBUG
 		daic_dump_request(sc, port, DAIC_REQ_CALL, id, req->in_param_len, req->in_param);
@@ -689,9 +697,9 @@ daic_register_port(struct daic_softc *sc, int port)
 	/* make sure this hardware driver type is known to layer 4 */
 	if (sc->sc_cardtype == DAIC_TYPE_QUAD)
 		snprintf(devname, sizeof(devname), "%s port %d",
-		    device_xname(&sc->sc_dev), port);
+		    sc->sc_dev.dv_xname, port);
 	else
-		strlcpy(devname, device_xname(&sc->sc_dev), sizeof(devname));
+		strlcpy(devname, sc->sc_dev.dv_xname, sizeof(devname));
 	snprintf(cardname, sizeof(cardname), "EICON.Diehl %s",
 	    cardtypename(sc->sc_cardtype));
 	l3drv = isdn_attach_isdnif(
@@ -839,7 +847,7 @@ daic_dump_request(struct daic_softc *sc, int port, u_int req, u_int id, bus_size
 {
 	int i;
 	printf("%s: request 0x%02x to task id 0x%02x:",
-		device_xname(&sc->sc_dev), req, id);
+		sc->sc_dev.dv_xname, req, id);
 	for (i = 0; i < parmsize; i++) {
 		if (i % 16 == 0)
 			printf("\n%02x:", i);
@@ -985,7 +993,7 @@ daic_connect_request(struct call_desc *cd)
 		*p++ = 0x85;
 	} else {
 		printf("%s: daic_connect_request for unknown bchan protocol 0x%x\n",
-			device_xname(&sc->sc_dev), cd->bprot);
+			sc->sc_dev.dv_xname, cd->bprot);
 		return;
 	}
 	if (cd->src_telno[0]) {
@@ -1032,8 +1040,8 @@ daic_connect_request(struct call_desc *cd)
 	splx(x);
 	tsleep(assoc, 0, "daic call", 0);
 	if (assoc->rc != DAIC_RC_OK) {
-		aprint_error_dev(&sc->sc_dev, "call request failed, error 0x%02x: %s\n",
-			assoc->rc & DAIC_RC_ERRMASK,
+		printf("%s: call request failed, error 0x%02x: %s\n",
+			sc->sc_dev.dv_xname, assoc->rc & DAIC_RC_ERRMASK,
 			err_codes[assoc->rc & DAIC_RC_ERRMASK]);
 	}
 }

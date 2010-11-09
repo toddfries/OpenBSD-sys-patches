@@ -1,4 +1,4 @@
-/*	$NetBSD: emul.c,v 1.21 2008/04/28 20:23:37 martin Exp $	*/
+/*	$NetBSD: emul.c,v 1.18 2006/05/10 06:24:03 skrll Exp $	*/
 
 /*-
  * Copyright (c) 1997, 2001 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: emul.c,v 1.21 2008/04/28 20:23:37 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: emul.c,v 1.18 2006/05/10 06:24:03 skrll Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -246,7 +253,7 @@ fixalign(struct lwp *l, struct trapframe64 *tf)
 	int error;
 
 	/* fetch and check the instruction that caused the fault */
-	error = copyin((void *)(u_long)tf->tf_pc, &code.i_int, sizeof(code.i_int));
+	error = copyin((caddr_t)(u_long)tf->tf_pc, &code.i_int, sizeof(code.i_int));
 	if (error != 0) {
 		DPRINTF(("fixalign: Bad instruction fetch\n"));
 		return EINVAL;
@@ -298,7 +305,10 @@ fixalign(struct lwp *l, struct trapframe64 *tf)
 
 	if (op.bits.st) {
 		if (op.bits.fl) {
-			fpusave_lwp(l, true);
+			if (l == fplwp) {
+				savefpstate(l->l_md.md_fpstate);
+				fplwp = NULL;
+			}
 
 			error = readfpreg(l, code.i_op3.i_rd, &data.i[0]);
 			if (error)
@@ -323,13 +333,13 @@ fixalign(struct lwp *l, struct trapframe64 *tf)
 		}
 
 		if (size == 2)
-			return copyout(&data.s[1], (void *)(u_long)rs1, size);
+			return copyout(&data.s[1], (caddr_t)(u_long)rs1, size);
 		else
-			return copyout(&data.d, (void *)(u_long)rs1, size);
+			return copyout(&data.d, (caddr_t)(u_long)rs1, size);
 	}
 	else { /* load */
 		if (size == 2) {
-			error = copyin((void *)(u_long)rs1, &data.s[1], size);
+			error = copyin((caddr_t)(u_long)rs1, &data.s[1], size);
 			if (error)
 				return error;
 
@@ -340,7 +350,7 @@ fixalign(struct lwp *l, struct trapframe64 *tf)
 				data.s[0] = 0;
 		}
 		else
-			error = copyin((void *)(u_long)rs1, &data.d, size);
+			error = copyin((caddr_t)(u_long)rs1, &data.d, size);
 
 		if (error)
 			return error;
@@ -381,7 +391,7 @@ emulinstr(vaddr_t pc, struct trapframe64 *tf)
 	int error;
 
 	/* fetch and check the instruction that caused the fault */
-	error = copyin((void *) pc, &code.i_int, sizeof(code.i_int));
+	error = copyin((caddr_t) pc, &code.i_int, sizeof(code.i_int));
 	if (error != 0) {
 		DPRINTF(("emulinstr: Bad instruction fetch\n"));
 		return SIGILL;

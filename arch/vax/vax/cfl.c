@@ -1,4 +1,4 @@
-/*	$NetBSD: cfl.c,v 1.18 2008/03/11 05:34:03 matt Exp $	*/
+/*	$NetBSD: cfl.c,v 1.12 2005/12/11 12:19:36 christos Exp $	*/
 /*-
  * Copyright (c) 1982, 1986 The Regents of the University of California.
  * All rights reserved.
@@ -71,7 +71,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: cfl.c,v 1.18 2008/03/11 05:34:03 matt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cfl.c,v 1.12 2005/12/11 12:19:36 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -118,11 +118,11 @@ struct {
 #define	CFL_FINISH	6
 #define	CFL_GETIN	7
 
-static void cflstart(void);
+static	void cflstart __P((void));
 
-static dev_type_open(cflopen);
-static dev_type_close(cflclose);
-static dev_type_read(cflrw);
+dev_type_open(cflopen);
+dev_type_close(cflclose);
+dev_type_read(cflrw);
 
 const struct cdevsw cfl_cdevsw = {
 	cflopen, cflclose, cflrw, cflrw, noioctl,
@@ -131,7 +131,10 @@ const struct cdevsw cfl_cdevsw = {
 
 /*ARGSUSED*/
 int
-cflopen(dev_t dev, int flag, int mode, struct lwp *l)
+cflopen(dev, flag, mode, l)
+	dev_t dev;
+	int flag, mode;
+	struct lwp *l;
 {
 	if (vax_cputype != VAX_780)
 		return (ENXIO);
@@ -144,11 +147,14 @@ cflopen(dev_t dev, int flag, int mode, struct lwp *l)
 
 /*ARGSUSED*/
 int
-cflclose(dev_t dev, int flag, int mode, struct lwp *l)
+cflclose(dev, flag, mode, l)
+	dev_t dev;
+	int flag, mode;
+	struct lwp *l;
 {
 	int s;
 	s = splbio();
-	brelse(cfltab.cfl_buf, 0);
+	brelse(cfltab.cfl_buf);
 	splx(s);
 	cfltab.cfl_state = IDLE;
 	return 0;
@@ -156,11 +162,14 @@ cflclose(dev_t dev, int flag, int mode, struct lwp *l)
 
 /*ARGSUSED*/
 int
-cflrw(dev_t dev, struct uio *uio, int flag)
+cflrw(dev, uio, flag)
+	dev_t dev;
+	struct uio *uio;
+	int flag;
 {
-	struct buf *bp;
-	int i;
-	int s;
+	register struct buf *bp;
+	register int i;
+	register int s;
 	int error;
 
 	if (uio->uio_resid == 0) 
@@ -186,20 +195,19 @@ cflrw(dev_t dev, struct uio *uio, int flag)
 				break;
 		}
 		if (uio->uio_rw == UIO_WRITE) {
-			bp->b_oflags &= ~(BO_DONE);
-			bp->b_flags &= ~(B_READ);
+			bp->b_flags &= ~(B_READ|B_DONE);
 			bp->b_flags |= B_WRITE;
 		} else {
-			bp->b_oflags &= ~(BO_DONE);
-			bp->b_flags &= ~(B_WRITE);
+			bp->b_flags &= ~(B_WRITE|B_DONE);
 			bp->b_flags |= B_READ;
 		}
 		s = splconsmedia(); 
 		cflstart();
-		biowait(bp);
+		while ((bp->b_flags & B_DONE) == 0)
+			(void) tsleep(bp, PRIBIO, "cflrw", 0);
 		splx(s);
-		if (bp->b_error != 0) {
-			error = bp->b_error;
+		if (bp->b_flags & B_ERROR) {
+			error = EIO;
 			break;
 		}
 		if (uio->uio_rw == UIO_READ) {
@@ -209,14 +217,14 @@ cflrw(dev_t dev, struct uio *uio, int flag)
 		}
 	}
 	cfltab.cfl_state = OPEN;
-	wakeup((void *)&cfltab);
+	wakeup((caddr_t)&cfltab);
 	return (error);
 }
 
 void
-cflstart(void)
+cflstart()
 {
-	struct buf *bp;
+	register struct buf *bp;
 
 	bp = cfltab.cfl_buf;
 	cfltab.cfl_errcnt = 0;
@@ -236,12 +244,13 @@ cflstart(void)
 #endif
 }
 
-void cfltint(int);
+void cfltint __P((int));
 
 void
-cfltint(int arg)
+cfltint(arg)
+	int arg;
 {
-	struct buf *bp = cfltab.cfl_buf;
+	register struct buf *bp = cfltab.cfl_buf;
 
 	switch (cfltab.cfl_active) {
 	case CFL_START:/* do a read */
@@ -269,12 +278,13 @@ cfltint(int arg)
 	}
 }
 
-void cflrint(int);
+void cflrint __P((int));
 
 void
 cflrint(int ch)
 {
 	struct buf *bp = cfltab.cfl_buf;
+	int s;
 
 	switch (cfltab.cfl_active) {
 	case CFL_NEXT:
@@ -282,10 +292,10 @@ cflrint(int ch)
 			cfltab.cfl_active = CFL_GETIN;
 		else {
 			cfltab.cfl_active = CFL_IDLE;
-			mutex_enter(bp->b_objlock);
-			bp->b_oflags |= BO_DONE;
-			cv_broadcast(&bp->b_done);
-			mutex_exit(bp->b_objlock);
+			s = splbio();
+			bp->b_flags |= B_DONE;
+			splx(s);
+			wakeup(bp);
 		}
 		break;
 
@@ -293,10 +303,10 @@ cflrint(int ch)
 		*cfltab.cfl_xaddr++ = ch & 0377;
 		if (--bp->b_bcount==0) {
 			cfltab.cfl_active = CFL_IDLE;
-			mutex_enter(bp->b_objlock);
-			bp->b_oflags |= BO_DONE;
-			cv_broadcast(&bp->b_done);
-			mutex_exit(bp->b_objlock);
+			s = splbio();
+			bp->b_flags |= B_DONE;
+			splx(s);
+			wakeup(bp);
 		}
 		break;
 	}

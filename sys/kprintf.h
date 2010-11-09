@@ -1,4 +1,4 @@
-/*	$NetBSD: kprintf.h,v 1.10 2009/01/01 15:10:20 pooka Exp $	*/
+/*	$NetBSD: kprintf.h,v 1.8 2007/07/29 09:38:02 pooka Exp $	*/
 
 /*-
  * Copyright (c) 1986, 1988, 1991, 1993
@@ -37,6 +37,9 @@
 #ifndef _SYS_KPRINTF_H_
 #define	_SYS_KPRINTF_H_
 
+#include "opt_multiprocessor.h"
+#include <sys/lock.h>
+
 /*
  * Implementation internals of the kernel printf.  Exposing them here
  * allows other subsystems to implement precisely the printf semantics
@@ -46,6 +49,34 @@
 /* max size buffer kprintf needs to print quad_t [size in base 8 + \0] */
 #define KPRINTF_BUFSIZE         (sizeof(quad_t) * NBBY / 3 + 2)
 
+#if defined(MULTIPROCESSOR)
+
+extern struct simplelock kprintf_slock;
+
+/*
+ * Use cpu_simple_lock() and cpu_simple_unlock().  These are the actual
+ * atomic locking operations, and never attempt to print debugging
+ * information.
+ */
+#define	KPRINTF_MUTEX_ENTER(s)						\
+do {									\
+	(s) = splhigh();						\
+	__cpu_simple_lock(&kprintf_slock.lock_data);			\
+} while (/*CONSTCOND*/0)
+
+#define	KPRINTF_MUTEX_EXIT(s)						\
+do {									\
+	__cpu_simple_unlock(&kprintf_slock.lock_data);			\
+	splx((s));							\
+} while (/*CONSTCOND*/0)
+
+#else
+
+#define	KPRINTF_MUTEX_ENTER(s)	(s) = splhigh()
+#define	KPRINTF_MUTEX_EXIT(s)	splx((s))
+
+#endif /* MULTIPROCESSOR */
+
 /* flags for kprintf */
 #define	TOCONS		0x0001	/* to the console */
 #define	TOTTY		0x0002	/* to the process' tty */
@@ -54,9 +85,6 @@
 #define	TODDB		0x0010	/* to ddb console */
 #define	NOLOCK		0x1000	/* don't acquire a tty lock */
 
-void	kprintf_init(void);
-void	kprintf_lock(void);
-void	kprintf_unlock(void);
 /*
  * NOTE: the kprintf mutex must be held when these functions are called!
  */

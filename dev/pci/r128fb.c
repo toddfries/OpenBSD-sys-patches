@@ -1,4 +1,4 @@
-/*	$NetBSD: r128fb.c,v 1.7 2009/01/03 03:43:22 yamt Exp $	*/
+/*	$NetBSD: r128fb.c,v 1.3 2008/02/27 23:59:37 macallan Exp $	*/
 
 /*
  * Copyright (c) 2007 Michael Lorenz
@@ -12,6 +12,8 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -31,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: r128fb.c,v 1.7 2009/01/03 03:43:22 yamt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: r128fb.c,v 1.3 2008/02/27 23:59:37 macallan Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -165,15 +167,14 @@ r128fb_match(device_t parent, cfdata_t match, void *aux)
 {
 	struct pci_attach_args *pa = (struct pci_attach_args *)aux;
 
-	if (PCI_CLASS(pa->pa_class) != PCI_CLASS_DISPLAY)
+	if (PCI_CLASS(pa->pa_class) != PCI_CLASS_DISPLAY ||
+	    PCI_SUBCLASS(pa->pa_class) != PCI_SUBCLASS_DISPLAY_VGA)
 		return 0;
 	if (PCI_VENDOR(pa->pa_id) != PCI_VENDOR_ATI)
 		return 0;
 
-	/* only cards tested on so far - likely need a list */
-	if ((PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_ATI_RAGE1AGP4XT) ||
-	    (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_ATI_RAGE3AGP4XT) ||
-	    (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_ATI_RAGE_MOB_M3_AGP))
+	/* only card tested on so far - likely need a list */
+	if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_ATI_RAGE1AGP4XT)
 		return 100;
 	return (0);
 }
@@ -699,7 +700,7 @@ r128fb_cursor(void *cookie, int on, int row, int col)
 			x = ri->ri_ccol * wi + ri->ri_xorigin;
 			y = ri->ri_crow * he + ri->ri_yorigin;
 			r128fb_bitblt(sc, x, y, x, y, wi, he, R128_ROP3_Dn);
-			ri->ri_flg |= RI_CURSOR;
+			ri->ri_flg |= RI_CURSOR;;
 		}
 	} else {
 		scr->scr_ri.ri_crow = row;

@@ -1,4 +1,4 @@
-/*	$NetBSD: ath_netbsd.c,v 1.16 2008/11/12 12:36:11 ad Exp $ */
+/*	$NetBSD: ath_netbsd.c,v 1.11 2007/10/19 11:59:47 ad Exp $ */
 
 /*-
  * Copyright (c) 2003, 2004 David Young
@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ath_netbsd.c,v 1.16 2008/11/12 12:36:11 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ath_netbsd.c,v 1.11 2007/10/19 11:59:47 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/types.h>
@@ -37,6 +37,7 @@ __KERNEL_RCSID(0, "$NetBSD: ath_netbsd.c,v 1.16 2008/11/12 12:36:11 ad Exp $");
 #include <sys/sysctl.h>
 #include <sys/mbuf.h>
 #include <sys/malloc.h>
+#include <sys/lock.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
 #include <sys/sockio.h>
@@ -60,21 +61,40 @@ __KERNEL_RCSID(0, "$NetBSD: ath_netbsd.c,v 1.16 2008/11/12 12:36:11 ad Exp $");
 #include <dev/ic/athvar.h>
 
 void
-device_printf(device_t dev, const char *fmt, ...)
+device_printf(struct device dv, const char *fmt, ...)
 {
-	va_list ap;
+        va_list ap;
 
-	va_start(ap, fmt);
-	printf("%s: ", device_xname(dev));
-	vprintf(fmt, ap);
-	va_end(ap);
+        va_start(ap, fmt);
+        printf("%s: ", dv.dv_xname);
+        vprintf(fmt, ap);
+        va_end(ap);
 	return;
+}
+
+struct mbuf *
+m_defrag(struct mbuf *m0, int flags)
+{
+	struct mbuf *m;
+	MGETHDR(m, flags, MT_DATA);
+	if (m == NULL)
+		return NULL;
+
+	M_COPY_PKTHDR(m, m0);
+	MCLGET(m, flags);
+	if ((m->m_flags & M_EXT) == 0) {
+		m_free(m);
+		return NULL;
+	}
+	m_copydata(m0, 0, m0->m_pkthdr.len, mtod(m, void *));
+	m->m_len = m->m_pkthdr.len;
+	return m;
 }
 
 /*
  * Setup sysctl(3) MIB, hw.ath.*.
  *
- * TBD condition CTLFLAG_PERMANENT on being a module or not
+ * TBD condition CTLFLAG_PERMANENT on being an LKM or not
  */
 SYSCTL_SETUP(sysctl_ath, "sysctl ath subtree setup")
 {
@@ -451,7 +471,7 @@ ath_sysctlattach(struct ath_softc *sc)
 	sc->sc_debug = ath_debug;
 	sc->sc_txintrperiod = ATH_TXINTR_PERIOD;
 
-	if ((rnode = ath_sysctl_instance(device_xname(sc->sc_dev), log)) == NULL)
+	if ((rnode = ath_sysctl_instance(sc->sc_dev.dv_xname, log)) == NULL)
 		return;
 
 	if ((rc = SYSCTL_INT(0, countrycode, "EEPROM country code")) != 0)

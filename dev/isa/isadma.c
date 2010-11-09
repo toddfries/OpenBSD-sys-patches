@@ -1,4 +1,4 @@
-/*	$NetBSD: isadma.c,v 1.59 2009/02/13 23:31:23 bouyer Exp $	*/
+/*	$NetBSD: isadma.c,v 1.56 2007/10/19 12:00:19 ad Exp $	*/
 
 /*-
  * Copyright (c) 1997, 1998, 2000 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -35,7 +42,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: isadma.c,v 1.59 2009/02/13 23:31:23 bouyer Exp $");
+__KERNEL_RCSID(0, "$NetBSD: isadma.c,v 1.56 2007/10/19 12:00:19 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -221,12 +228,12 @@ _isa_dmacascade(ids, chan)
 	int ochan = chan & 3;
 
 	if (chan < 0 || chan > 7) {
-		printf("%s: bogus drq %d\n", device_xname(ids->ids_dev), chan);
+		printf("%s: bogus drq %d\n", ids->ids_dev->dv_xname, chan);
 		return (EINVAL);
 	}
 
 	if (ISA_DMA_DRQ_ISFREE(ids, chan) == 0) {
-		printf("%s: DRQ %d is not free\n", device_xname(ids->ids_dev),
+		printf("%s: DRQ %d is not free\n", ids->ids_dev->dv_xname,
 		    chan);
 		return (EAGAIN);
 	}
@@ -274,7 +281,7 @@ _isa_dmamaxsize(ids, chan)
 {
 
 	if (chan < 0 || chan > 7) {
-		printf("%s: bogus drq %d\n", device_xname(ids->ids_dev), chan);
+		printf("%s: bogus drq %d\n", ids->ids_dev->dv_xname, chan);
 		return (0);
 	}
 
@@ -291,7 +298,7 @@ _isa_dmamap_create(ids, chan, size, flags)
 	int error;
 
 	if (chan < 0 || chan > 7) {
-		printf("%s: bogus drq %d\n", device_xname(ids->ids_dev), chan);
+		printf("%s: bogus drq %d\n", ids->ids_dev->dv_xname, chan);
 		return (EINVAL);
 	}
 
@@ -311,7 +318,7 @@ _isa_dmamap_destroy(ids, chan)
 {
 
 	if (chan < 0 || chan > 7) {
-		printf("%s: bogus drq %d\n", device_xname(ids->ids_dev), chan);
+		printf("%s: bogus drq %d\n", ids->ids_dev->dv_xname, chan);
 		goto lose;
 	}
 
@@ -343,33 +350,33 @@ _isa_dmastart(ids, chan, addr, nbytes, p, flags, busdmaflags)
 	int error;
 
 	if (chan < 0 || chan > 7) {
-		printf("%s: bogus drq %d\n", device_xname(ids->ids_dev), chan);
+		printf("%s: bogus drq %d\n", ids->ids_dev->dv_xname, chan);
 		goto lose;
 	}
 
 #ifdef ISADMA_DEBUG
 	printf("_isa_dmastart: drq %d, addr %p, nbytes 0x%lx, p %p, "
 	    "flags 0x%x, dmaflags 0x%x\n",
-	    chan, addr, (u_long)nbytes, p, flags, busdmaflags);
+	    chan, addr, nbytes, p, flags, busdmaflags);
 #endif
 
 	if (ISA_DMA_DRQ_ISFREE(ids, chan)) {
 		printf("%s: dma start on free channel %d\n",
-		    device_xname(ids->ids_dev), chan);
+		    ids->ids_dev->dv_xname, chan);
 		goto lose;
 	}
 
 	if (chan & 4) {
 		if (nbytes > (1 << 17) || nbytes & 1 || (u_long)addr & 1) {
 			printf("%s: drq %d, nbytes 0x%lx, addr %p\n",
-			    device_xname(ids->ids_dev), chan,
+			    ids->ids_dev->dv_xname, chan,
 			    (unsigned long) nbytes, addr);
 			goto lose;
 		}
 	} else {
 		if (nbytes > (1 << 16)) {
 			printf("%s: drq %d, nbytes 0x%lx\n",
-			    device_xname(ids->ids_dev), chan,
+			    ids->ids_dev->dv_xname, chan,
 			    (unsigned long) nbytes);
 			goto lose;
 		}
@@ -468,7 +475,7 @@ _isa_dmaabort(ids, chan)
 {
 
 	if (chan < 0 || chan > 7) {
-		printf("%s: bogus drq %d\n", device_xname(ids->ids_dev), chan);
+		printf("%s: bogus drq %d\n", ids->ids_dev->dv_xname, chan);
 		panic("_isa_dmaabort");
 	}
 
@@ -487,7 +494,7 @@ _isa_dmacount(ids, chan)
 	int ochan = chan & 3;
 
 	if (chan < 0 || chan > 7) {
-		printf("%s: bogus drq %d\n", device_xname(ids->ids_dev), chan);
+		printf("%s: bogus drq %d\n", ids->ids_dev->dv_xname, chan);
 		panic("isa_dmacount");
 	}
 
@@ -532,7 +539,7 @@ _isa_dmafinished(ids, chan)
 {
 
 	if (chan < 0 || chan > 7) {
-		printf("%s: bogus drq %d\n", device_xname(ids->ids_dev), chan);
+		printf("%s: bogus drq %d\n", ids->ids_dev->dv_xname, chan);
 		panic("_isa_dmafinished");
 	}
 
@@ -555,7 +562,7 @@ _isa_dmadone(ids, chan)
 	bus_dmamap_t dmam;
 
 	if (chan < 0 || chan > 7) {
-		printf("%s: bogus drq %d\n", device_xname(ids->ids_dev), chan);
+		printf("%s: bogus drq %d\n", ids->ids_dev->dv_xname, chan);
 		panic("_isa_dmadone");
 	}
 
@@ -565,7 +572,7 @@ _isa_dmadone(ids, chan)
 
 	if (_isa_dmafinished(ids, chan) == 0)
 		printf("%s: _isa_dmadone: channel %d not finished\n",
-		    device_xname(ids->ids_dev), chan);
+		    ids->ids_dev->dv_xname, chan);
 
 	bus_dmamap_sync(ids->ids_dmat, dmam, 0, dmam->dm_mapsize,
 	    (ids->ids_dmareads & (1 << chan)) ? BUS_DMASYNC_POSTREAD :
@@ -631,7 +638,7 @@ _isa_dmamem_alloc(ids, chan, size, addrp, flags)
 	int error, boundary, rsegs;
 
 	if (chan < 0 || chan > 7) {
-		printf("%s: bogus drq %d\n", device_xname(ids->ids_dev), chan);
+		printf("%s: bogus drq %d\n", ids->ids_dev->dv_xname, chan);
 		panic("_isa_dmamem_alloc");
 	}
 
@@ -658,7 +665,7 @@ _isa_dmamem_free(ids, chan, addr, size)
 	bus_dma_segment_t seg;
 
 	if (chan < 0 || chan > 7) {
-		printf("%s: bogus drq %d\n", device_xname(ids->ids_dev), chan);
+		printf("%s: bogus drq %d\n", ids->ids_dev->dv_xname, chan);
 		panic("_isa_dmamem_free");
 	}
 
@@ -680,7 +687,7 @@ _isa_dmamem_map(ids, chan, addr, size, kvap, flags)
 	bus_dma_segment_t seg;
 
 	if (chan < 0 || chan > 7) {
-		printf("%s: bogus drq %d\n", device_xname(ids->ids_dev), chan);
+		printf("%s: bogus drq %d\n", ids->ids_dev->dv_xname, chan);
 		panic("_isa_dmamem_map");
 	}
 
@@ -699,7 +706,7 @@ _isa_dmamem_unmap(ids, chan, kva, size)
 {
 
 	if (chan < 0 || chan > 7) {
-		printf("%s: bogus drq %d\n", device_xname(ids->ids_dev), chan);
+		printf("%s: bogus drq %d\n", ids->ids_dev->dv_xname, chan);
 		panic("_isa_dmamem_unmap");
 	}
 
@@ -718,7 +725,7 @@ _isa_dmamem_mmap(ids, chan, addr, size, off, prot, flags)
 	bus_dma_segment_t seg;
 
 	if (chan < 0 || chan > 7) {
-		printf("%s: bogus drq %d\n", device_xname(ids->ids_dev), chan);
+		printf("%s: bogus drq %d\n", ids->ids_dev->dv_xname, chan);
 		panic("_isa_dmamem_mmap");
 	}
 
@@ -738,7 +745,7 @@ _isa_drq_isfree(ids, chan)
 {
 
 	if (chan < 0 || chan > 7) {
-		printf("%s: bogus drq %d\n", device_xname(ids->ids_dev), chan);
+		printf("%s: bogus drq %d\n", ids->ids_dev->dv_xname, chan);
 		panic("_isa_drq_isfree");
 	}
 

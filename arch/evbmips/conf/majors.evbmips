@@ -1,4 +1,4 @@
-#	$NetBSD: majors.evbmips,v 1.24 2008/11/12 12:35:59 ad Exp $
+#	$NetBSD: majors.evbmips,v 1.21 2006/11/24 22:04:22 wiz Exp $
 #
 # Device majors for evbmips
 #
@@ -19,6 +19,7 @@ device-major	st		char 12  block 2	st
 device-major	cd		char 13  block 3	cd
 device-major	ch		char 14			ch
 
+device-major	lkm		char 16			lkm
 device-major	sbjcn		char 17			jtagconsole
 device-major	sbscn		char 17			sbscn & !jtagconsole
 
@@ -67,6 +68,7 @@ device-major	mlx		char 65			mlx
 device-major	pci		char 66			pci
 
 device-major	clockctl	char 69			clockctl
+device-major	systrace	char 70			systrace
 device-major	kttcp		char 71			kttcp
 device-major	wsfont		char 72			wsfont
 
@@ -76,7 +78,6 @@ device-major	wsfont		char 72			wsfont
 device-major	sysmon		char 74			sysmon_envsys | sysmon_wdog
 device-major	cgd		char 75  block 18	cgd
 device-major	ksyms		char 76			ksyms
-device-major	uart		char 77			uart
 
 device-major	nsmb		char 98			nsmb
 device-major	athflash	char 99			athflash

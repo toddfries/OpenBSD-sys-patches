@@ -1,4 +1,4 @@
-/* $NetBSD: crmfb.c,v 1.26 2008/07/30 17:24:27 tsutsui Exp $ */
+/* $NetBSD: crmfb.c,v 1.24 2008/03/18 02:41:38 jmcneill Exp $ */
 
 /*-
  * Copyright (c) 2007 Jared D. McNeill <jmcneill@invisible.ca>
@@ -13,6 +13,12 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by Jared D. McNeill.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -32,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: crmfb.c,v 1.26 2008/07/30 17:24:27 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: crmfb.c,v 1.24 2008/03/18 02:41:38 jmcneill Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -304,8 +310,6 @@ crmfb_attach(struct device *parent, struct device *self, void *opaque)
 	for (i = 0; i < (sc->sc_tiles_x * sc->sc_tiles_y); i++) {
 		p[i] = ((uint32_t)v >> 16) + i;
 	}
-	bus_dmamap_sync(sc->sc_dmat, sc->sc_dmai.map, 0, sc->sc_dmai.size,
-	    BUS_DMASYNC_PREWRITE);
 	sc->sc_scratch = (char *)KERNADDR(sc->sc_dma) + (0xf0000 * sc->sc_tiles_x);
 	sc->sc_linear = (paddr_t)DMAADDR(sc->sc_dma) + 0x100000 * sc->sc_tiles_x;
 

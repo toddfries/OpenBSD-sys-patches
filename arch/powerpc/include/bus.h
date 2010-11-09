@@ -1,4 +1,4 @@
-/*	$NetBSD: bus.h,v 1.20 2008/04/28 20:23:32 martin Exp $	*/
+/*	$NetBSD: bus.h,v 1.15 2005/12/11 12:18:43 christos Exp $	*/
 /*	$OpenBSD: bus.h,v 1.1 1997/10/13 10:53:42 pefo Exp $	*/
 
 /*-
@@ -17,6 +17,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -108,64 +115,62 @@
 /*
  * Bus access types.
  */
-typedef uint32_t bus_addr_t;
-typedef uint32_t bus_size_t;
-
-#ifndef __HAVE_LOCAL_BUS_SPACE
-typedef	uint32_t bus_space_handle_t;
+typedef u_int32_t bus_addr_t;
+typedef u_int32_t bus_size_t;
+typedef	u_int32_t bus_space_handle_t;
 typedef	const struct powerpc_bus_space *bus_space_tag_t;
 
 struct extent;
 
 struct powerpc_bus_space_scalar {
-	uint8_t (*pbss_read_1)(bus_space_tag_t, bus_space_handle_t,
+	u_int8_t (*pbss_read_1)(bus_space_tag_t, bus_space_handle_t,
 	    bus_size_t);
-	uint16_t (*pbss_read_2)(bus_space_tag_t, bus_space_handle_t,
+	u_int16_t (*pbss_read_2)(bus_space_tag_t, bus_space_handle_t,
 	    bus_size_t);
-	uint32_t (*pbss_read_4)(bus_space_tag_t, bus_space_handle_t,
+	u_int32_t (*pbss_read_4)(bus_space_tag_t, bus_space_handle_t,
 	    bus_size_t);
-	uint64_t (*pbss_read_8)(bus_space_tag_t, bus_space_handle_t,
+	u_int64_t (*pbss_read_8)(bus_space_tag_t, bus_space_handle_t,
 	    bus_size_t);
 
 	void (*pbss_write_1)(bus_space_tag_t, bus_space_handle_t, bus_size_t,
-	    uint8_t);
+	    u_int8_t);
 	void (*pbss_write_2)(bus_space_tag_t, bus_space_handle_t, bus_size_t,
-	    uint16_t);
+	    u_int16_t);
 	void (*pbss_write_4)(bus_space_tag_t, bus_space_handle_t, bus_size_t,
-	    uint32_t);
+	    u_int32_t);
 	void (*pbss_write_8)(bus_space_tag_t, bus_space_handle_t, bus_size_t,
-	    uint64_t);
+	    u_int64_t);
 };
 
 struct powerpc_bus_space_group {
 	void (*pbsg_read_1)(bus_space_tag_t, bus_space_handle_t,
-	    bus_size_t, uint8_t *, size_t);
+	    bus_size_t, u_int8_t *, size_t);
 	void (*pbsg_read_2)(bus_space_tag_t, bus_space_handle_t,
-	    bus_size_t, uint16_t *, size_t);
+	    bus_size_t, u_int16_t *, size_t);
 	void (*pbsg_read_4)(bus_space_tag_t, bus_space_handle_t,
-	    bus_size_t, uint32_t *, size_t);
+	    bus_size_t, u_int32_t *, size_t);
 	void (*pbsg_read_8)(bus_space_tag_t, bus_space_handle_t,
-	    bus_size_t, uint64_t *, size_t);
+	    bus_size_t, u_int64_t *, size_t);
 
 	void (*pbsg_write_1)(bus_space_tag_t, bus_space_handle_t,
-	    bus_size_t, const uint8_t *, size_t);
+	    bus_size_t, const u_int8_t *, size_t);
 	void (*pbsg_write_2)(bus_space_tag_t, bus_space_handle_t,
-	    bus_size_t, const uint16_t *, size_t);
+	    bus_size_t, const u_int16_t *, size_t);
 	void (*pbsg_write_4)(bus_space_tag_t, bus_space_handle_t,
-	    bus_size_t, const uint32_t *, size_t);
+	    bus_size_t, const u_int32_t *, size_t);
 	void (*pbsg_write_8)(bus_space_tag_t, bus_space_handle_t,
-	    bus_size_t, const uint64_t *, size_t);
+	    bus_size_t, const u_int64_t *, size_t);
 };
 
 struct powerpc_bus_space_set {
 	void (*pbss_set_1)(bus_space_tag_t, bus_space_handle_t,
-	    bus_size_t, uint8_t, size_t);
+	    bus_size_t, u_int8_t, size_t);
 	void (*pbss_set_2)(bus_space_tag_t, bus_space_handle_t,
-	    bus_size_t, uint16_t, size_t);
+	    bus_size_t, u_int16_t, size_t);
 	void (*pbss_set_4)(bus_space_tag_t, bus_space_handle_t,
-	    bus_size_t, uint32_t, size_t);
+	    bus_size_t, u_int32_t, size_t);
 	void (*pbss_set_8)(bus_space_tag_t, bus_space_handle_t,
-	    bus_size_t, uint64_t, size_t);
+	    bus_size_t, u_int64_t, size_t);
 };
 
 struct powerpc_bus_space_copy {
@@ -230,7 +235,7 @@ struct powerpc_bus_space {
 #define CAT3(a,b,c)	a/**/b/**/c
 #endif
 
-int bus_space_init(struct powerpc_bus_space *, const char *, void *, size_t);
+int bus_space_init(struct powerpc_bus_space *, const char *, caddr_t, size_t);
 void bus_space_mallocok(void);
 
 /*
@@ -312,7 +317,7 @@ void bus_space_mallocok(void);
     ((void)(*(t)->pbs_free)((t), (h), (s)))
 
 /*
- *	uintN_t bus_space_read_N (bus_space_tag_t tag,
+ *	u_intN_t bus_space_read_N (bus_space_tag_t tag,
  *	    bus_space_handle_t bsh, bus_size_t offset);
  *
  * Read a 1, 2, 4, or 8 byte quantity from bus space
@@ -329,7 +334,7 @@ void bus_space_mallocok(void);
 	((*(t)->pbs_scalar.pbss_read_8)((t), (h), (o)))
 
 /*
- *	uintN_t bus_space_read_stream_N (bus_space_tag_t tag,
+ *	u_intN_t bus_space_read_stream_N (bus_space_tag_t tag,
  *	    bus_space_handle_t bsh, bus_size_t offset);
  *
  * Read a 2, 4, or 8 byte quantity from bus space
@@ -346,7 +351,7 @@ void bus_space_mallocok(void);
 /*
  *	void bus_space_read_multi_N _P((bus_space_tag_t tag,
  *	    bus_space_handle_t bsh, bus_size_t offset,
- *	    uintN_t *addr, size_t count);
+ *	    u_intN_t *addr, size_t count);
  *
  * Read `count' 1, 2, 4, or 8 byte quantities from bus space
  * described by tag/handle/offset and copy into buffer provided.
@@ -364,7 +369,7 @@ void bus_space_mallocok(void);
 /*
  *	void bus_space_read_multi_stream_N (bus_space_tag_t tag,
  *	    bus_space_handle_t bsh, bus_size_t offset,
- *	    uintN_t *addr, size_t count);
+ *	    u_intN_t *addr, size_t count);
  *
  * Read `count' 2, 4, or 8 byte stream quantities from bus space
  * described by tag/handle/offset and copy into buffer provided.
@@ -380,7 +385,7 @@ void bus_space_mallocok(void);
 /*
  *	void bus_space_write_N (bus_space_tag_t tag,
  *	    bus_space_handle_t bsh, bus_size_t offset,
- *	    uintN_t value);
+ *	    u_intN_t value);
  *
  * Write the 1, 2, 4, or 8 byte value `value' to bus space
  * described by tag/handle/offset.
@@ -398,7 +403,7 @@ void bus_space_mallocok(void);
 /*
  *	void bus_space_write_stream_N (bus_space_tag_t tag,
  *	    bus_space_handle_t bsh, bus_size_t offset,
- *	    uintN_t value);
+ *	    u_intN_t value);
  *
  * Write the 2, 4, or 8 byte stream value `value' to bus space
  * described by tag/handle/offset.
@@ -416,7 +421,7 @@ void bus_space_mallocok(void);
 /*
  *	void bus_space_write_multi_N (bus_space_tag_t tag,
  *	    bus_space_handle_t bsh, bus_size_t offset,
- *	    const uintN_t *addr, size_t count);
+ *	    const u_intN_t *addr, size_t count);
  *
  * Write `count' 1, 2, 4, or 8 byte quantities from the buffer
  * provided to bus space described by tag/handle/offset.
@@ -434,7 +439,7 @@ void bus_space_mallocok(void);
 /*
  *	void bus_space_write_multi_stream_N (bus_space_tag_t tag,
  *	    bus_space_handle_t bsh, bus_size_t offset,
- *	    const uintN_t *addr, size_t count);
+ *	    const u_intN_t *addr, size_t count);
  *
  * Write `count' 2, 4, or 8 byte stream quantities from the buffer
  * provided to bus space described by tag/handle/offset.
@@ -452,7 +457,7 @@ void bus_space_mallocok(void);
 /*
  *	void bus_space_read_region_N (bus_space_tag_t tag,
  *	    bus_space_handle_t bsh, bus_size_t offset,
- *	    uintN_t *addr, size_t count);
+ *	    u_intN_t *addr, size_t count);
  *
  * Read `count' 1, 2, 4, or 8 byte quantities from bus space
  * described by tag/handle and starting at `offset' and copy into
@@ -470,7 +475,7 @@ void bus_space_mallocok(void);
 /*
  *	void bus_space_read_region_stream_N (bus_space_tag_t tag,
  *	    bus_space_handle_t bsh, bus_size_t offset,
- *	    uintN_t *addr, size_t count);
+ *	    u_intN_t *addr, size_t count);
  *
  * Read `count' 2, 4, or 8 byte stream quantities from bus space
  * described by tag/handle and starting at `offset' and copy into
@@ -486,7 +491,7 @@ void bus_space_mallocok(void);
 /*
  *	void bus_space_write_region_N (bus_space_tag_t tag,
  *	    bus_space_handle_t bsh, bus_size_t offset,
- *	    const uintN_t *addr, size_t count);
+ *	    const u_intN_t *addr, size_t count);
  *
  * Write `count' 1, 2, 4, or 8 byte quantities from the buffer provided
  * to bus space described by tag/handle starting at `offset'.
@@ -503,7 +508,7 @@ void bus_space_mallocok(void);
 /*
  *	void bus_space_write_region_stream_N (bus_space_tag_t tag,
  *	    bus_space_handle_t bsh, bus_size_t offset,
- *	    const uintN_t *addr, size_t count);
+ *	    const u_intN_t *addr, size_t count);
  *
  * Write `count' 2, 4, or 8 byte stream quantities from the buffer provided
  * to bus space described by tag/handle starting at `offset'.
@@ -518,7 +523,7 @@ void bus_space_mallocok(void);
 #if 0
 /*
  *	void bus_space_set_multi_N (bus_space_tag_t tag,
- *	    bus_space_handle_t bsh, bus_size_t offset, uintN_t val,
+ *	    bus_space_handle_t bsh, bus_size_t offset, u_intN_t val,
  *	    size_t count);
  *
  * Write the 1, 2, 4, or 8 byte value `val' to bus space described
@@ -535,7 +540,7 @@ void bus_space_mallocok(void);
 
 /*
  *	void bus_space_set_multi_stream_N (bus_space_tag_t tag,
- *	    bus_space_handle_t bsh, bus_size_t offset, uintN_t val,
+ *	    bus_space_handle_t bsh, bus_size_t offset, u_intN_t val,
  *	    size_t count);
  *
  * Write the 2, 4, or 8 byte stream value `val' to bus space described
@@ -552,7 +557,7 @@ void bus_space_mallocok(void);
 
 /*
  *	void bus_space_set_region_N (bus_space_tag_t tag,
- *	    bus_space_handle_t bsh, bus_size_t offset, uintN_t val,
+ *	    bus_space_handle_t bsh, bus_size_t offset, u_intN_t val,
  *	    size_t count);
  *
  * Write `count' 1, 2, 4, or 8 byte value `val' to bus space described
@@ -569,7 +574,7 @@ void bus_space_mallocok(void);
 
 /*
  *	void bus_space_set_region_stream_N (bus_space_tag_t tag,
- *	    bus_space_handle_t bsh, bus_size_t offset, uintN_t val,
+ *	    bus_space_handle_t bsh, bus_size_t offset, u_intN_t val,
  *	    size_t count);
  *
  * Write `count' 2, 4, or 8 byte stream value `val' to bus space described
@@ -615,8 +620,6 @@ void bus_space_mallocok(void);
 #define	BUS_SPACE_BARRIER_WRITE	0x02		/* force write barrier */
 
 #define BUS_SPACE_ALIGNED_POINTER(p, t) ALIGNED_POINTER(p, t)
-
-#endif	/* !__HAVE_LOCAL_BUS_SPACE */
 
 /*
  * Bus DMA methods.
@@ -715,8 +718,8 @@ struct powerpc_bus_dma_tag {
 	void	(*_dmamem_free) (bus_dma_tag_t,
 		    bus_dma_segment_t *, int);
 	int	(*_dmamem_map) (bus_dma_tag_t, bus_dma_segment_t *,
-		    int, size_t, void **, int);
-	void	(*_dmamem_unmap) (bus_dma_tag_t, void *, size_t);
+		    int, size_t, caddr_t *, int);
+	void	(*_dmamem_unmap) (bus_dma_tag_t, caddr_t, size_t);
 	paddr_t	(*_dmamem_mmap) (bus_dma_tag_t, bus_dma_segment_t *,
 		    int, off_t, int, int);
 
@@ -758,9 +761,6 @@ struct powerpc_bus_dma_tag {
 	(*(t)->_dmamem_unmap)((t), (k), (s))
 #define	bus_dmamem_mmap(t, sg, n, o, p, f)			\
 	(*(t)->_dmamem_mmap)((t), (sg), (n), (o), (p), (f))
-
-#define bus_dmatag_subregion(t, mna, mxa, nt, f) EOPNOTSUPP
-#define bus_dmatag_destroy(t)
 
 /*
  *	bus_dmamap_t
@@ -811,8 +811,8 @@ int	_bus_dmamem_alloc (bus_dma_tag_t tag, bus_size_t size,
 void	_bus_dmamem_free (bus_dma_tag_t tag, bus_dma_segment_t *segs,
 	    int nsegs);
 int	_bus_dmamem_map (bus_dma_tag_t tag, bus_dma_segment_t *segs,
-	    int nsegs, size_t size, void **kvap, int flags);
-void	_bus_dmamem_unmap (bus_dma_tag_t tag, void *kva,
+	    int nsegs, size_t size, caddr_t *kvap, int flags);
+void	_bus_dmamem_unmap (bus_dma_tag_t tag, caddr_t kva,
 	    size_t size);
 paddr_t	_bus_dmamem_mmap (bus_dma_tag_t tag, bus_dma_segment_t *segs,
 	    int nsegs, off_t off, int prot, int flags);

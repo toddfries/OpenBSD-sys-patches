@@ -1,4 +1,4 @@
-/*	$NetBSD: cgsix_obio.c,v 1.23 2008/12/12 18:50:13 macallan Exp $ */
+/*	$NetBSD: cgsix_obio.c,v 1.18 2006/03/29 04:16:47 thorpej Exp $ */
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -34,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: cgsix_obio.c,v 1.23 2008/12/12 18:50:13 macallan Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cgsix_obio.c,v 1.18 2006/03/29 04:16:47 thorpej Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -64,8 +71,8 @@ __KERNEL_RCSID(0, "$NetBSD: cgsix_obio.c,v 1.23 2008/12/12 18:50:13 macallan Exp
 #include <dev/sun/pfourreg.h>
 
 /* autoconfiguration driver */
-static int	cgsixmatch(device_t, struct cfdata *, void *);
-static void	cgsixattach(device_t, device_t, void *);
+static int	cgsixmatch(struct device *, struct cfdata *, void *);
+static void	cgsixattach(struct device *, struct device *, void *);
 static int	cg6_pfour_probe(void *, void *);
 
 CFATTACH_DECL(cgsix_obio, sizeof(struct cgsix_softc),
@@ -75,7 +82,7 @@ CFATTACH_DECL(cgsix_obio, sizeof(struct cgsix_softc),
  * Match a cgsix.
  */
 static int
-cgsixmatch(device_t parent, struct cfdata *cf, void *aux)
+cgsixmatch(struct device *parent, struct cfdata *cf, void *aux)
 {
 	union obio_attach_args *uoba = aux;
 	struct obio4_attach_args *oba;
@@ -104,9 +111,9 @@ cg6_pfour_probe(void *vaddr, void *arg)
  * Attach a display.
  */
 static void
-cgsixattach(device_t parent, device_t self, void *aux)
+cgsixattach(struct device *parent, struct device *self, void *aux)
 {
-	struct cgsix_softc *sc = device_private(self);
+	struct cgsix_softc *sc = (struct cgsix_softc *)self;
 	union obio_attach_args *uoba = aux;
 	struct obio4_attach_args *oba;
 	struct eeprom *eep = (struct eeprom *)eeprom_va;
@@ -115,21 +122,18 @@ cgsixattach(device_t parent, device_t self, void *aux)
 	int constype, isconsole;
 	const char *name;
 
-	sc->sc_dev = self;
 	oba = &uoba->uoba_oba4;
 
 	/* Remember cookies for cgsix_mmap() */
 	sc->sc_bustag = oba->oba_bustag;
 	sc->sc_paddr = (bus_addr_t)oba->oba_paddr;
 
-	fb->fb_device = sc->sc_dev;
+	fb->fb_device = &sc->sc_dev;
 	fb->fb_type.fb_type = FBTYPE_SUNFAST_COLOR;
-	fb->fb_flags = device_cfdata(sc->sc_dev)->cf_flags & FB_USERMASK;
+	fb->fb_flags = device_cfdata(&sc->sc_dev)->cf_flags & FB_USERMASK;
 	fb->fb_type.fb_depth = 8;
 
 	fb_setsize_eeprom(fb, fb->fb_type.fb_depth, 1152, 900);
-
-	sc->sc_ramsize = 1024 * 1024;	/* All our cgsix's are 1MB */
 
 	/*
 	 * Dunno what the PROM has mapped, though obviously it must have
@@ -196,8 +200,8 @@ cgsixattach(device_t parent, device_t self, void *aux)
 	constype = (fb->fb_flags & FB_PFOUR) ? EE_CONS_P4OPT : EE_CONS_COLOR;
 
 	/*
-	 * Check to see if this is the console if there's no eeprom info
-	 * to be found, or if it's the correct framebuffer type.
+	 * Assume this is the console if there's no eeprom info
+	 * to be found.
 	 */
 	if (eep == NULL || eep->eeConsole == constype)
 		isconsole = fb_is_console(0);
@@ -205,15 +209,16 @@ cgsixattach(device_t parent, device_t self, void *aux)
 		isconsole = 0;
 
 	if (isconsole && cgsix_use_rasterconsole) {
+		int ramsize = fb->fb_type.fb_height * fb->fb_linebytes;
 		if (bus_space_map(oba->oba_bustag,
 				  oba->oba_paddr + CGSIX_RAM_OFFSET,
-				  sc->sc_ramsize,
+				  ramsize,
 				  BUS_SPACE_MAP_LINEAR,
 				  &bh) != 0) {
 			printf("%s: cannot map pixels\n", self->dv_xname);
 			return;
 		}
-		sc->sc_fb.fb_pixels = (void *)bh;
+		sc->sc_fb.fb_pixels = (caddr_t)bh;
 	}
 
 	cg6attach(sc, name, isconsole);

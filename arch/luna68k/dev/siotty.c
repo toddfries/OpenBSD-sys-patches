@@ -1,4 +1,4 @@
-/* $NetBSD: siotty.c,v 1.23 2008/06/13 09:58:06 cegger Exp $ */
+/* $NetBSD: siotty.c,v 1.19 2006/10/01 18:56:22 elad Exp $ */
 
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -31,7 +38,7 @@
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
 
-__KERNEL_RCSID(0, "$NetBSD: siotty.c,v 1.23 2008/06/13 09:58:06 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: siotty.c,v 1.19 2006/10/01 18:56:22 elad Exp $");
 
 #include "opt_ddb.h"
 
@@ -155,7 +162,8 @@ siotty_attach(parent, self, aux)
 /*--------------------  low level routine --------------------*/
 
 static void
-siottyintr(int chan)
+siottyintr(chan)
+	int chan;
 {
 	struct siotty_softc *sc;
 	struct sioreg *sio;
@@ -163,10 +171,9 @@ siottyintr(int chan)
 	unsigned int code;
 	int rr;
 
-	sc = device_lookup_private(&siotty_cd, chan);
-	if (sc == NULL)
+	if (chan >= siotty_cd.cd_ndevs)
 		return;
-
+	sc = siotty_cd.cd_devs[chan];
 	tp = sc->sc_tty;
 	sio = sc->sc_ctl;
 	rr = getsiocsr(sio);
@@ -201,16 +208,25 @@ siottyintr(int chan)
 }
 
 static void
-siostart(struct tty *tp)
+siostart(tp)
+	struct tty *tp;
 {
-	struct siotty_softc *sc = device_lookup_private(&siotty_cd,minor(tp->t_dev));
+	struct siotty_softc *sc = siotty_cd.cd_devs[minor(tp->t_dev)];
 	int s, c;
  
 	s = spltty();
 	if (tp->t_state & (TS_BUSY|TS_TIMEOUT|TS_TTSTOP))
 		goto out;
-	if (!ttypull(tp))
+	if (tp->t_outq.c_cc <= tp->t_lowat) {
+		if (tp->t_state & TS_ASLEEP) {
+			tp->t_state &= ~TS_ASLEEP;
+			wakeup((caddr_t)&tp->t_outq);
+		}
+		selwakeup(&tp->t_wsel);
+	}
+	if (tp->t_outq.c_cc == 0)
 		goto out;
+
 	tp->t_state |= TS_BUSY;
 	while (getsiocsr(sc->sc_ctl) & RR_TXRDY) {
 		if ((c = getc(&tp->t_outq)) == -1)
@@ -239,9 +255,11 @@ siostop(tp, flag)
 }
 
 static int
-sioparam(struct tty *tp, struct termios *t)
+sioparam(tp, t)
+	struct tty *tp;
+	struct termios *t;
 {
-	struct siotty_softc *sc = device_lookup_private(&siotty_cd,minor(tp->t_dev));
+	struct siotty_softc *sc = siotty_cd.cd_devs[minor(tp->t_dev)];
 	int wr4, s;
 
 	if (t->c_ispeed && t->c_ispeed != t->c_ospeed)
@@ -346,14 +364,16 @@ siomctl(sc, control, op)
 /*--------------------  cdevsw[] interface --------------------*/
 
 int
-sioopen(dev_t dev, int flag, int mode, struct lwp *l)
+sioopen(dev, flag, mode, l)
+	dev_t dev;
+	int flag, mode;
+	struct lwp *l;
 {
 	struct siotty_softc *sc;
 	struct tty *tp;
 	int error;
 
-	sc = device_lookup_private(&siotty_cd, minor(dev));
-	if (sc == NULL)
+	if ((sc = siotty_cd.cd_devs[minor(dev)]) == NULL)
 		return ENXIO;
 	if ((tp = sc->sc_tty) == NULL) {
 		tp = sc->sc_tty = ttymalloc();
@@ -400,9 +420,12 @@ sioopen(dev_t dev, int flag, int mode, struct lwp *l)
 }
  
 int
-sioclose(dev_t dev, int flag, int mode, struct lwp *l)
+sioclose(dev, flag, mode, l)
+	dev_t dev;
+	int flag, mode;
+	struct lwp *l;
 {
-	struct siotty_softc *sc = device_lookup_private(&siotty_cd,minor(dev));
+	struct siotty_softc *sc = siotty_cd.cd_devs[minor(dev)];
 	struct tty *tp = sc->sc_tty;
 	int s;
 
@@ -423,36 +446,50 @@ sioclose(dev_t dev, int flag, int mode, struct lwp *l)
 }
  
 int
-sioread(dev_t dev, struct uio *uio, int flag)
+sioread(dev, uio, flag)
+	dev_t dev;
+	struct uio *uio;
+	int flag;
 {
-	struct siotty_softc *sc = device_lookup_private(&siotty_cd,minor(dev));
+	struct siotty_softc *sc = siotty_cd.cd_devs[minor(dev)];
 	struct tty *tp = sc->sc_tty;
  
 	return (*tp->t_linesw->l_read)(tp, uio, flag);
 }
  
 int
-siowrite(dev_t dev, struct uio *uio, int flag)
+siowrite(dev, uio, flag)
+	dev_t dev;
+	struct uio *uio;
+	int flag;
 {
-	struct siotty_softc *sc = device_lookup_private(&siotty_cd,minor(dev));
+	struct siotty_softc *sc = siotty_cd.cd_devs[minor(dev)];
 	struct tty *tp = sc->sc_tty;
  
 	return (*tp->t_linesw->l_write)(tp, uio, flag);
 }
 
 int
-siopoll(dev_t dev, int events, struct lwp *l)
+siopoll(dev, events, l)
+	dev_t dev;
+	int events;
+	struct lwp *l;
 {
-	struct siotty_softc *sc = device_lookup_private(&siotty_cd,minor(dev));
+	struct siotty_softc *sc = siotty_cd.cd_devs[minor(dev)];
 	struct tty *tp = sc->sc_tty;
  
 	return ((*tp->t_linesw->l_poll)(tp, events, l));
 }
 
 int
-sioioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
+sioioctl(dev, cmd, data, flag, l)
+	dev_t dev;
+	u_long cmd;
+	caddr_t data;
+	int flag;
+	struct lwp *l;
 {
-	struct siotty_softc *sc = device_lookup_private(&siotty_cd,minor(dev));
+	struct siotty_softc *sc = siotty_cd.cd_devs[minor(dev)];
 	struct tty *tp = sc->sc_tty;
 	int error;
 
@@ -504,9 +541,10 @@ sioioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 
 /* ARSGUSED */
 struct tty *
-siotty(dev_t dev)
+siotty(dev)
+	dev_t dev;
 {
-	struct siotty_softc *sc = device_lookup_private(&siotty_cd,minor(dev));
+	struct siotty_softc *sc = siotty_cd.cd_devs[minor(dev)];
  
 	return sc->sc_tty;
 }
@@ -514,7 +552,9 @@ siotty(dev_t dev)
 /*--------------------  miscelleneous routine --------------------*/
 
 /* EXPORT */ void
-setsioreg(struct sioreg *sio, int regno, int val)
+setsioreg(sio, regno, val)
+	struct sioreg *sio;
+	int regno, val;
 {
 	if (regno != 0)
 		sio->sio_cmd = regno;	/* DELAY(); */
@@ -522,7 +562,8 @@ setsioreg(struct sioreg *sio, int regno, int val)
 }
 
 /* EXPORT */ int
-getsiocsr(struct sioreg *sio)
+getsiocsr(sio)
+	struct sioreg *sio;
 {
 	int val;
 

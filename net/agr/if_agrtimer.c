@@ -1,4 +1,4 @@
-/*	$NetBSD: if_agrtimer.c,v 1.5 2007/07/09 21:11:01 ad Exp $	*/
+/*	$NetBSD: if_agrtimer.c,v 1.3 2005/12/11 12:24:54 christos Exp $	*/
 
 /*-
  * Copyright (c)2005 YAMAMOTO Takashi,
@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_agrtimer.c,v 1.5 2007/07/09 21:11:01 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_agrtimer.c,v 1.3 2005/12/11 12:24:54 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/callout.h>
@@ -46,7 +46,7 @@ void
 agrtimer_init(struct agr_softc *sc)
 {
 
-	callout_init(&sc->sc_callout, 0);
+	callout_init(&sc->sc_callout);
 	callout_setfunc(&sc->sc_callout, agrtimer_tick, sc);
 }
 
@@ -69,10 +69,11 @@ agrtimer_tick(void *arg)
 {
 	struct agr_softc *sc = arg;
 	const struct agr_iftype_ops *iftop = sc->sc_iftop;
+	int s;
 
 	KASSERT(iftop);
 
-	AGR_LOCK(sc);
+	s = AGR_LOCK(sc);
 	if (iftop->iftop_tick) {
 		(*iftop->iftop_tick)(sc);
 	}
@@ -80,7 +81,7 @@ agrtimer_tick(void *arg)
 		agr_port_foreach(sc, agrtimer_port_tick, sc);
 	}
 	callout_schedule(&sc->sc_callout, hz);
-	AGR_UNLOCK(sc);
+	AGR_UNLOCK(sc, s);
 }
 
 static int

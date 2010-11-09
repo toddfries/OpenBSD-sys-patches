@@ -1,4 +1,4 @@
-/*	$NetBSD: wdcvar.h,v 1.89 2008/04/28 20:23:51 martin Exp $	*/
+/*	$NetBSD: wdcvar.h,v 1.87 2006/10/25 17:33:02 bouyer Exp $	*/
 
 /*-
  * Copyright (c) 1998, 2003, 2004 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *	notice, this list of conditions and the following disclaimer in the
  *	documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -139,9 +146,8 @@ void	wdc_init_shadow_regs(struct ata_channel *);
 
 int	wdcprobe(struct ata_channel *);
 void	wdcattach(struct ata_channel *);
-int	wdcdetach(device_t, int);
-void	wdc_childdetached(device_t, device_t);
-int	wdcactivate(device_t, enum devact);
+int	wdcdetach(struct device *, int);
+int	wdcactivate(struct device *, enum devact);
 int	wdcintr(void *);
 
 void	wdc_sataprobe(struct ata_channel *);

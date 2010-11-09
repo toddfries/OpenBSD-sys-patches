@@ -1,4 +1,4 @@
-/*	$NetBSD: cd9660_node.c,v 1.24 2008/05/05 17:11:16 ad Exp $	*/
+/*	$NetBSD: cd9660_node.c,v 1.13 2005/12/11 12:24:25 christos Exp $	*/
 
 /*-
  * Copyright (c) 1982, 1986, 1989, 1994
@@ -37,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: cd9660_node.c,v 1.24 2008/05/05 17:11:16 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cd9660_node.c,v 1.13 2005/12/11 12:24:25 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -64,28 +64,39 @@ __KERNEL_RCSID(0, "$NetBSD: cd9660_node.c,v 1.24 2008/05/05 17:11:16 ad Exp $");
 LIST_HEAD(ihashhead, iso_node) *isohashtbl;
 u_long isohash;
 #define	INOHASH(device, inum)	(((device) + ((inum)>>12)) & isohash)
-kmutex_t cd9660_ihash_lock;
-kmutex_t cd9660_hashlock;
+struct simplelock cd9660_ihash_slock;
+
+#ifdef ISODEVMAP
+LIST_HEAD(idvhashhead, iso_dnode) *idvhashtbl;
+u_long idvhash;
+#define	DNOHASH(device, inum)	(((device) + ((inum)>>12)) & idvhash)
+#endif
 
 extern int prtactive;	/* 1 => print out reclaim of active vnodes */
 
-struct pool cd9660_node_pool;
+POOL_INIT(cd9660_node_pool, sizeof(struct iso_node), 0, 0, 0, "cd9660nopl",
+    &pool_allocator_nointr);
 
-static u_int cd9660_chars2ui(const u_char *, int);
+static u_int cd9660_chars2ui(u_char *, int);
 
 /*
  * Initialize hash links for inodes and dnodes.
  */
 void
-cd9660_init(void)
+cd9660_init()
 {
-
+#ifdef _LKM
 	malloc_type_attach(M_ISOFSMNT);
 	pool_init(&cd9660_node_pool, sizeof(struct iso_node), 0, 0, 0,
-	    "cd9660nopl", &pool_allocator_nointr, IPL_NONE);
-	isohashtbl = hashinit(desiredvnodes, HASH_LIST, true, &isohash);
-	mutex_init(&cd9660_ihash_lock, MUTEX_DEFAULT, IPL_NONE);
-	mutex_init(&cd9660_hashlock, MUTEX_DEFAULT, IPL_NONE);
+	    "cd9660nopl", &pool_allocator_nointr);
+#endif
+	isohashtbl = hashinit(desiredvnodes, HASH_LIST, M_ISOFSMNT, M_WAITOK,
+	    &isohash);
+	simple_lock_init(&cd9660_ihash_slock);
+#ifdef ISODEVMAP
+	idvhashtbl = hashinit(desiredvnodes / 8, HASH_LIST, M_ISOFSMNT,
+	    M_WAITOK, &idvhash);
+#endif
 }
 
 /*
@@ -93,20 +104,43 @@ cd9660_init(void)
  */
 
 void
-cd9660_reinit(void)
+cd9660_reinit()
 {
 	struct iso_node *ip;
 	struct ihashhead *oldhash1, *hash1;
 	u_long oldmask1, mask1, val;
+#ifdef ISODEVMAP
+	struct iso_dnode *dp;
+	struct idvhashhead *oldhash2, *hash2;
+	u_long oldmask2, mask2;
+#endif
 	u_int i;
 
-	hash1 = hashinit(desiredvnodes, HASH_LIST, true, &mask1);
+	hash1 = hashinit(desiredvnodes, HASH_LIST, M_ISOFSMNT, M_WAITOK,
+	    &mask1);
+#ifdef ISODEVMAP
+	hash2 = hashinit(desiredvnodes / 8, HASH_LIST, M_ISOFSMNT, M_WAITOK,
+	    &mask2);
+#endif
 
-	mutex_enter(&cd9660_ihash_lock);
+	simple_lock(&cd9660_ihash_slock);
 	oldhash1 = isohashtbl;
 	oldmask1 = isohash;
 	isohashtbl = hash1;
 	isohash = mask1;
+#ifdef ISODEVMAP
+	oldhash2 = idvhashtbl;
+	oldmask2 = idvhash;
+	idvhashtbl = hash2;
+	idvhash = mask2;
+	for (i = 0; i <= oldmask2; i++) {
+		while ((dp = LIST_FIRST(&oldhash2[i])) != NULL) {
+			LIST_REMOVE(dp, d_hash);
+			val = DNOHASH(dp->i_dev, dp->i_number);
+			LIST_INSERT_HEAD(&hash2[val], dp, d_hash);
+		}
+	}
+#endif
 	for (i = 0; i <= oldmask1; i++) {
 		while ((ip = LIST_FIRST(&oldhash1[i])) != NULL) {
 			LIST_REMOVE(ip, i_hash);
@@ -114,50 +148,103 @@ cd9660_reinit(void)
 			LIST_INSERT_HEAD(&hash1[val], ip, i_hash);
 		}
 	}
-	mutex_exit(&cd9660_ihash_lock);
-	hashdone(oldhash1, HASH_LIST, oldmask1);
+	simple_unlock(&cd9660_ihash_slock);
+	hashdone(oldhash1, M_ISOFSMNT);
+#ifdef ISODEVMAP
+	hashdone(oldhash2, M_ISOFSMNT);
+#endif
 }
 
 /*
  * Destroy node pool and hash table.
  */
 void
-cd9660_done(void)
+cd9660_done()
 {
-	hashdone(isohashtbl, HASH_LIST, isohash);
+	hashdone(isohashtbl, M_ISOFSMNT);
+#ifdef ISODEVMAP
+	hashdone(idvhashtbl, M_ISOFSMNT);
+#endif
+#ifdef _LKM
 	pool_destroy(&cd9660_node_pool);
-	mutex_destroy(&cd9660_ihash_lock);
-	mutex_destroy(&cd9660_hashlock);
 	malloc_type_detach(M_ISOFSMNT);
+#endif
 }
+
+#ifdef ISODEVMAP
+/*
+ * Enter a new node into the device hash list
+ */
+struct iso_dnode *
+iso_dmap(device, inum, create)
+	dev_t	device;
+	ino_t	inum;
+	int	create;
+{
+	struct iso_dnode *dp;
+	struct idvhashhead *hp;
+
+	hp = &idvhashtbl[DNOHASH(device, inum)];
+	LIST_FOREACH(dp, hp, d_hash) {
+		if (inum == dp->i_number && device == dp->i_dev)
+			return (dp);
+	}
+
+	if (!create)
+		return (NULL);
+
+	MALLOC(dp, struct iso_dnode *, sizeof(struct iso_dnode), M_CACHE,
+	       M_WAITOK);
+	dp->i_dev = device;
+	dp->i_number = inum;
+	LIST_INSERT_HEAD(hp, dp, d_hash);
+	return (dp);
+}
+
+void
+iso_dunmap(device)
+	dev_t device;
+{
+	struct idvhashhead *dpp;
+	struct iso_dnode *dp, *dq;
+
+	for (dpp = idvhashtbl; dpp <= idvhashtbl + idvhash; dpp++) {
+		for (dp = LIST_FIRST(dpp); dp != NULL; dp = dq) {
+			dq = LIST_NEXT(dp, d_hash);
+			if (device == dp->i_dev) {
+				LIST_REMOVE(dp, d_hash);
+				FREE(dp, M_CACHE);
+			}
+		}
+	}
+}
+#endif
 
 /*
  * Use the device/inum pair to find the incore inode, and return a pointer
  * to it. If it is in core, but locked, wait for it.
  */
 struct vnode *
-cd9660_ihashget(dev_t dev, ino_t inum, int flags)
+cd9660_ihashget(dev, inum)
+	dev_t dev;
+	ino_t inum;
 {
 	struct iso_node *ip;
 	struct vnode *vp;
 
 loop:
-	mutex_enter(&cd9660_ihash_lock);
+	simple_lock(&cd9660_ihash_slock);
 	LIST_FOREACH(ip, &isohashtbl[INOHASH(dev, inum)], i_hash) {
 		if (inum == ip->i_number && dev == ip->i_dev) {
 			vp = ITOV(ip);
-			if (flags == 0) {
-				mutex_exit(&cd9660_ihash_lock);
-			} else {
-				mutex_enter(&vp->v_interlock);
-				mutex_exit(&cd9660_ihash_lock);
-				if (vget(vp, flags | LK_INTERLOCK))
-					goto loop;
-			}
+			simple_lock(&vp->v_interlock);
+			simple_unlock(&cd9660_ihash_slock);
+			if (vget(vp, LK_EXCLUSIVE | LK_INTERLOCK))
+				goto loop;
 			return (vp);
 		}
 	}
-	mutex_exit(&cd9660_ihash_lock);
+	simple_unlock(&cd9660_ihash_slock);
 	return (NULL);
 }
 
@@ -167,29 +254,29 @@ loop:
  * ip->i_vnode must be initialized first.
  */
 void
-cd9660_ihashins(struct iso_node *ip)
+cd9660_ihashins(ip)
+	struct iso_node *ip;
 {
 	struct ihashhead *ipp;
 
-	KASSERT(mutex_owned(&cd9660_hashlock));
-
-	mutex_enter(&cd9660_ihash_lock);
+	simple_lock(&cd9660_ihash_slock);
 	ipp = &isohashtbl[INOHASH(ip->i_dev, ip->i_number)];
 	LIST_INSERT_HEAD(ipp, ip, i_hash);
-	mutex_exit(&cd9660_ihash_lock);
+	simple_unlock(&cd9660_ihash_slock);
 
-	vlockmgr(&ip->i_vnode->v_lock, LK_EXCLUSIVE);
+	lockmgr(&ip->i_vnode->v_lock, LK_EXCLUSIVE, &ip->i_vnode->v_interlock);
 }
 
 /*
  * Remove the inode from the hash table.
  */
 void
-cd9660_ihashrem(struct iso_node *ip)
+cd9660_ihashrem(ip)
+	struct iso_node *ip;
 {
-	mutex_enter(&cd9660_ihash_lock);
+	simple_lock(&cd9660_ihash_slock);
 	LIST_REMOVE(ip, i_hash);
-	mutex_exit(&cd9660_ihash_lock);
+	simple_unlock(&cd9660_ihash_slock);
 }
 
 /*
@@ -197,23 +284,29 @@ cd9660_ihashrem(struct iso_node *ip)
  * truncate and deallocate the file.
  */
 int
-cd9660_inactive(void *v)
+cd9660_inactive(v)
+	void *v;
 {
 	struct vop_inactive_args /* {
 		struct vnode *a_vp;
-		bool *a_recycle;
+		struct lwp *a_l;
 	} */ *ap = v;
 	struct vnode *vp = ap->a_vp;
+	struct lwp *l = ap->a_l;
 	struct iso_node *ip = VTOI(vp);
 	int error = 0;
 
+	if (prtactive && vp->v_usecount != 0)
+		vprint("cd9660_inactive: pushing active", vp);
+
+	ip->i_flag = 0;
+	VOP_UNLOCK(vp, 0);
 	/*
 	 * If we are done with the inode, reclaim it
 	 * so that it can be reused immediately.
 	 */
-	ip->i_flag = 0;
-	*ap->a_recycle = (ip->inode.iso_mode == 0);
-	VOP_UNLOCK(vp, 0);
+	if (ip->inode.iso_mode == 0)
+		vrecycle(vp, (struct simplelock *)0, l);
 	return error;
 }
 
@@ -221,7 +314,8 @@ cd9660_inactive(void *v)
  * Reclaim an inode so that it can be used for other purposes.
  */
 int
-cd9660_reclaim(void *v)
+cd9660_reclaim(v)
+	void *v;
 {
 	struct vop_reclaim_args /* {
 		struct vnode *a_vp;
@@ -230,7 +324,7 @@ cd9660_reclaim(void *v)
 	struct vnode *vp = ap->a_vp;
 	struct iso_node *ip = VTOI(vp);
 
-	if (prtactive && vp->v_usecount > 1)
+	if (prtactive && vp->v_usecount != 0)
 		vprint("cd9660_reclaim: pushing active", vp);
 	/*
 	 * Remove the inode from its hash chain.
@@ -244,7 +338,6 @@ cd9660_reclaim(void *v)
 		vrele(ip->i_devvp);
 		ip->i_devvp = 0;
 	}
-	genfs_node_destroy(vp);
 	pool_put(&cd9660_node_pool, vp->v_data);
 	vp->v_data = NULL;
 	return (0);
@@ -254,8 +347,10 @@ cd9660_reclaim(void *v)
  * File attributes
  */
 void
-cd9660_defattr(struct iso_directory_record *isodir, struct iso_node *inop,
-	struct buf *bp)
+cd9660_defattr(isodir, inop, bp)
+	struct iso_directory_record *isodir;
+	struct iso_node *inop;
+	struct buf *bp;
 {
 	struct buf *bp2 = NULL;
 	struct iso_mnt *imp;
@@ -308,15 +403,17 @@ cd9660_defattr(struct iso_directory_record *isodir, struct iso_node *inop,
 		inop->inode.iso_gid = (gid_t)0;
 	}
 	if (bp2)
-		brelse(bp2, 0);
+		brelse(bp2);
 }
 
 /*
  * Time stamps
  */
 void
-cd9660_deftstamp(struct iso_directory_record *isodir, struct iso_node *inop,
-	struct buf *bp)
+cd9660_deftstamp(isodir,inop,bp)
+	struct iso_directory_record *isodir;
+	struct iso_node *inop;
+	struct buf *bp;
 {
 	struct buf *bp2 = NULL;
 	struct iso_mnt *imp;
@@ -349,11 +446,13 @@ cd9660_deftstamp(struct iso_directory_record *isodir, struct iso_node *inop,
 		inop->inode.iso_mtime = inop->inode.iso_ctime;
 	}
 	if (bp2)
-		brelse(bp2, 0);
+		brelse(bp2);
 }
 
 int
-cd9660_tstamp_conv7(const u_char *pi, struct timespec *pu)
+cd9660_tstamp_conv7(pi,pu)
+	u_char *pi;
+	struct timespec *pu;
 {
 	int crtime, days;
 	int y, m, d, hour, minute, second, tz;
@@ -394,7 +493,9 @@ cd9660_tstamp_conv7(const u_char *pi, struct timespec *pu)
 }
 
 static u_int
-cd9660_chars2ui(const u_char *begin, int len)
+cd9660_chars2ui(begin,len)
+	u_char *begin;
+	int len;
 {
 	u_int rc;
 
@@ -406,7 +507,9 @@ cd9660_chars2ui(const u_char *begin, int len)
 }
 
 int
-cd9660_tstamp_conv17(const u_char *pi, struct timespec *pu)
+cd9660_tstamp_conv17(pi,pu)
+	u_char *pi;
+	struct timespec *pu;
 {
 	u_char tbuf[7];
 
@@ -435,7 +538,9 @@ cd9660_tstamp_conv17(const u_char *pi, struct timespec *pu)
 }
 
 ino_t
-isodirino(struct iso_directory_record *isodir, struct iso_mnt *imp)
+isodirino(isodir, imp)
+	struct iso_directory_record *isodir;
+	struct iso_mnt *imp;
 {
 	ino_t ino;
 

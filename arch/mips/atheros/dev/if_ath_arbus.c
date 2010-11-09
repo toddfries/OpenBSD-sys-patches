@@ -1,4 +1,4 @@
-/* $NetBSD: if_ath_arbus.c,v 1.15 2008/07/09 19:47:23 joerg Exp $ */
+/* $NetBSD: if_ath_arbus.c,v 1.8 2006/09/26 06:37:32 gdamore Exp $ */
 
 /*-
  * Copyright (c) 2006 Jared D. McNeill <jmcneill@invisible.ca>
@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_ath_arbus.c,v 1.15 2008/07/09 19:47:23 joerg Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_ath_arbus.c,v 1.8 2006/09/26 06:37:32 gdamore Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -43,6 +43,7 @@ __KERNEL_RCSID(0, "$NetBSD: if_ath_arbus.c,v 1.15 2008/07/09 19:47:23 joerg Exp 
 #include <sys/malloc.h>
 #include <sys/kernel.h>
 #include <sys/errno.h>
+#include <sys/device.h>
 
 #include <machine/bus.h>
 #include <machine/intr.h>
@@ -73,17 +74,19 @@ struct ath_arbus_softc {
 	bus_space_handle_t	sc_ioh;
 	void			*sc_ih;
 	struct ar531x_config	sc_config;
+	void			*sc_sdhook;
 };
 
-static int	ath_arbus_match(device_t, cfdata_t, void *);
-static void	ath_arbus_attach(device_t, device_t, void *);
-static int	ath_arbus_detach(device_t, int);
+static int	ath_arbus_match(struct device *, struct cfdata *, void *);
+static void	ath_arbus_attach(struct device *, struct device *, void *);
+static int	ath_arbus_detach(struct device *, int);
+static void	ath_arbus_shutdown(void *);
 
-CFATTACH_DECL_NEW(ath_arbus, sizeof(struct ath_arbus_softc),
+CFATTACH_DECL(ath_arbus, sizeof(struct ath_arbus_softc),
     ath_arbus_match, ath_arbus_attach, ath_arbus_detach, NULL);
 
 static int
-ath_arbus_match(device_t parent, cfdata_t cf, void *opaque)
+ath_arbus_match(struct device *parent, struct cfdata *cf, void *opaque)
 {
 	struct arbus_attach_args *aa;
 
@@ -94,18 +97,8 @@ ath_arbus_match(device_t parent, cfdata_t cf, void *opaque)
 	return 0;
 }
 
-static bool
-ath_arbus_resume(device_t dv PMF_FN_ARGS)
-{
-	struct ath_arbus_softc *asc = device_private(dv);
-	ath_resume(&asc->sc_ath);
-
-	return true;
-}
-
-
 static void
-ath_arbus_attach(device_t parent, device_t self, void *opaque)
+ath_arbus_attach(struct device *parent, struct device *self, void *opaque)
 {
 	struct ath_arbus_softc *asc;
 	struct ath_softc *sc;
@@ -115,12 +108,11 @@ ath_arbus_attach(device_t parent, device_t self, void *opaque)
 	int rv;
 	uint16_t devid;
 
-	asc = device_private(self);
+	asc = (struct ath_arbus_softc *)self;
 	sc = &asc->sc_ath;
-	sc->sc_dev = self;
 	aa = (struct arbus_attach_args *)opaque;
 
-	prop = prop_dictionary_get(device_properties(sc->sc_dev),
+	prop = prop_dictionary_get(device_properties(&sc->sc_dev),
 	    "wmac-rev");
 	if (prop == NULL) {
 		printf(": unable to get wmac-rev property\n");
@@ -137,7 +129,8 @@ ath_arbus_attach(device_t parent, device_t self, void *opaque)
 	rv = bus_space_map(asc->sc_iot, aa->aa_addr, aa->aa_size, 0,
 	    &asc->sc_ioh);
 	if (rv) {
-		aprint_error_dev(self, "unable to map registers\n");
+		aprint_error("%s: unable to map registers\n",
+		    sc->sc_dev.dv_xname);
 		return;
 	}
 	/*
@@ -145,10 +138,11 @@ ath_arbus_attach(device_t parent, device_t self, void *opaque)
 	 */
 	rv = ar531x_board_config(&asc->sc_config);
 	if (rv) {
-		aprint_error_dev(self, "unable to locate board configuration\n");
+		aprint_error("%s: unable to locate board configuration\n",
+		    sc->sc_dev.dv_xname);
 		return;
 	}
-	asc->sc_config.unit = device_unit(sc->sc_dev);
+	asc->sc_config.unit = sc->sc_dev.dv_unit;	/* XXX? */
 	asc->sc_config.tag = asc->sc_iot;
 
 	/* NB: the HAL expects the config state passed as the tag */
@@ -156,22 +150,25 @@ ath_arbus_attach(device_t parent, device_t self, void *opaque)
 	sc->sc_sh = (HAL_BUS_HANDLE) asc->sc_ioh;
 	sc->sc_dmat = aa->aa_dmat;
 
+	sc->sc_invalid = 1;
+
 	asc->sc_ih = arbus_intr_establish(aa->aa_cirq, aa->aa_mirq, ath_intr,
 	    sc);
 	if (asc->sc_ih == NULL) {
-		aprint_error_dev(self, "couldn't establish interrupt\n");
+		aprint_error("%s: couldn't establish interrupt\n",
+		    sc->sc_dev.dv_xname);
 		return;
 	}
 
-	ATH_LOCK_INIT(sc);
-
-	if (!pmf_device_register(self, NULL, ath_arbus_resume))
-		aprint_error_dev(self, "couldn't establish power handler\n");
-	else
-		pmf_class_network_register(self, &sc->sc_if);
-
 	if (ath_attach(devid, sc) != 0) {
-		aprint_error_dev(self, "ath_attach failed\n");
+		aprint_error("%s: ath_attach failed\n", sc->sc_dev.dv_xname);
+		goto err;
+	}
+
+	asc->sc_sdhook = shutdownhook_establish(ath_arbus_shutdown, asc);
+	if (asc->sc_sdhook == NULL) {
+		aprint_error("%s: couldn't establish shutdown hook\n",
+		    sc->sc_dev.dv_xname);
 		goto err;
 	}
 
@@ -182,12 +179,23 @@ err:
 }
 
 static int
-ath_arbus_detach(device_t self, int flags)
+ath_arbus_detach(struct device *self, int flags)
 {
-	struct ath_arbus_softc *asc = device_private(self);
+	struct ath_arbus_softc *asc = (struct ath_arbus_softc *)self;
 
+	shutdownhook_disestablish(asc->sc_sdhook);
 	ath_detach(&asc->sc_ath);
 	arbus_intr_disestablish(asc->sc_ih);
 
 	return (0);
+}
+
+static void
+ath_arbus_shutdown(void *opaque)
+{
+	struct ath_arbus_softc *asc = opaque;
+
+	ath_shutdown(&asc->sc_ath);
+
+	return;
 }

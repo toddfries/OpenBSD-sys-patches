@@ -1,4 +1,4 @@
-/*	$NetBSD: cpuregs.h,v 1.74 2008/02/19 11:26:40 simonb Exp $	*/
+/*	$NetBSD: cpuregs.h,v 1.71 2006/08/26 20:04:59 matt Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -731,7 +731,6 @@
  */
 
 /* For MIPS_R3000 */
-#define	MIPS_REV_R2000A		0x16	/* R2000A uses R3000 proc revision */
 #define	MIPS_REV_R3000		0x20
 #define	MIPS_REV_R3000A		0x30
 
@@ -767,10 +766,6 @@
 #define	MIPS_4KEc_R2	0x90	/* MIPS 4KEc_R2			ISA 32  Rel 2 */
 #define	MIPS_4KEmp_R2	0x91	/* MIPS 4KEm/4KEp_R2		ISA 32  Rel 2 */
 #define	MIPS_4KSd	0x92	/* MIPS 4KSd			ISA 32  Rel 2 */
-#define	MIPS_24K	0x93	/* MIPS 24Kc/24Kf		ISA 32  Rel 2 */
-#define	MIPS_34K	0x95	/* MIPS 34K			ISA 32  R2 MT */
-#define	MIPS_24KE	0x96	/* MIPS 24KEc			ISA 32  Rel 2 */
-#define	MIPS_74K	0x97	/* MIPS 74Kc/74Kf		ISA 32  Rel 2 */
 
 /*
  * Alchemy (company ID 3) use the processor ID field to donote the CPU core

@@ -1,4 +1,4 @@
-/*	$NetBSD: ultrix_fs.c,v 1.50 2008/12/17 20:51:34 cegger Exp $	*/
+/*	$NetBSD: ultrix_fs.c,v 1.34 2005/12/11 12:20:30 christos Exp $	*/
 
 /*
  * Copyright (c) 1995, 1997 Jonathan Stone
@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ultrix_fs.c,v 1.50 2008/12/17 20:51:34 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ultrix_fs.c,v 1.34 2005/12/11 12:20:30 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -55,10 +55,10 @@ __KERNEL_RCSID(0, "$NetBSD: ultrix_fs.c,v 1.50 2008/12/17 20:51:34 cegger Exp $"
 #include <ufs/ufs/quota.h>
 #include <ufs/ufs/ufsmount.h>
 
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 #include <compat/ultrix/ultrix_syscallargs.h>
 #include <compat/common/compat_util.h>
-#include <compat/sys/mount.h>
 
 #define	ULTRIX_MAXPATHLEN	1024
 
@@ -204,8 +204,9 @@ make_ultrix_mntent(struct statvfs *sp, struct ultrix_fs_data *tem)
 }
 
 int
-ultrix_sys_getmnt(struct lwp *l, const struct ultrix_sys_getmnt_args *uap, register_t *retval)
+ultrix_sys_getmnt(struct lwp *l, void *v, register_t *retval)
 {
+	struct ultrix_sys_getmnt_args *uap = v;
 	struct mount *mp, *nmp;
 	struct statvfs *sp;
 	struct ultrix_fs_data *sfsp;
@@ -233,7 +234,7 @@ ultrix_sys_getmnt(struct lwp *l, const struct ultrix_sys_getmnt_args *uap, regis
 		 * Only get info on mountpoints that matches the path
 		 * provided.
 		 */
-		path = malloc(MAXPATHLEN, M_TEMP, M_WAITOK);
+		MALLOC(path, char *, MAXPATHLEN, M_TEMP, M_WAITOK);
 		if ((error = copyinstr(SCARG(uap, path), path,
 				       MAXPATHLEN, NULL)) != 0)
 			goto bad;
@@ -244,20 +245,21 @@ ultrix_sys_getmnt(struct lwp *l, const struct ultrix_sys_getmnt_args *uap, regis
 		 * Find out how many mount list entries to skip, and skip
 		 * them.
 		 */
-		if ((error = copyin((void *)SCARG(uap, start), &start,
+		if ((error = copyin((caddr_t)SCARG(uap, start), &start,
 				    sizeof(*SCARG(uap, start))))  != 0)
 			goto bad;
-		mutex_enter(&mountlist_lock);
+		simple_lock(&mountlist_slock);
 		for (skip = start, mp = mountlist.cqh_first;
 		    mp != (void*)&mountlist && skip-- > 0; mp = nmp)
 			nmp = mp->mnt_list.cqe_next;
-		mutex_exit(&mountlist_lock);
+		simple_unlock(&mountlist_slock);
 	}
 
-	mutex_enter(&mountlist_lock);
+	simple_lock(&mountlist_slock);
 	for (count = 0, mp = mountlist.cqh_first;
 	    mp != (void*)&mountlist && count < maxcount; mp = nmp) {
-		if (vfs_busy(mp, &nmp)) {
+		if (vfs_busy(mp, LK_NOWAIT, &mountlist_slock)) {
+			nmp = mp->mnt_list.cqe_next;
 			continue;
 		}
 		if (sfsp != NULL) {
@@ -268,7 +270,7 @@ ultrix_sys_getmnt(struct lwp *l, const struct ultrix_sys_getmnt_args *uap, regis
 			 * If requested, refresh the fsstat cache.
 			 */
 			if (mntflags != MNT_WAIT &&
-			    (error = VFS_STATVFS(mp, sp)) != 0)
+			    (error = VFS_STATVFS(mp, sp, l)) != 0)
 				continue;
 
 			/*
@@ -278,18 +280,18 @@ ultrix_sys_getmnt(struct lwp *l, const struct ultrix_sys_getmnt_args *uap, regis
 			if (path == NULL ||
 			    strcmp(path, sp->f_mntonname) == 0) {
 				make_ultrix_mntent(sp, &tem);
-				if ((error = copyout((void *)&tem, sfsp,
-				    sizeof(tem))) != 0) {
-					vfs_unbusy(mp, false, NULL);
+				if ((error = copyout((caddr_t)&tem, sfsp,
+						     sizeof(tem))) != 0)
 					goto bad;
-				}
 				sfsp++;
 				count++;
 			}
 		}
-		vfs_unbusy(mp, false, &nmp);
+		simple_lock(&mountlist_slock);
+		nmp = mp->mnt_list.cqe_next;
+		vfs_unbusy(mp);
 	}
-	mutex_exit(&mountlist_lock);
+	simple_unlock(&mountlist_slock);
 
 	if (sfsp != NULL && count > maxcount)
 		*retval = maxcount;
@@ -298,8 +300,8 @@ ultrix_sys_getmnt(struct lwp *l, const struct ultrix_sys_getmnt_args *uap, regis
 
 bad:
 	if (path)
-		free(path, M_TEMP);
-	return error;
+		FREE(path, M_TEMP);
+	return (error);
 }
 
 
@@ -342,68 +344,53 @@ struct ultrix_ufs_args {
 };
 
 int
-ultrix_sys_mount(struct lwp *l, const struct ultrix_sys_mount_args *uap, register_t *retval)
+ultrix_sys_mount(struct lwp *l, void *v, register_t *retval)
 {
+	struct ultrix_sys_mount_args *uap = v;
+	struct proc *p = l->l_proc;
 	int error;
 	int otype = SCARG(uap, type);
 	char fsname[MFSNAMELEN];
-	register_t dummy;
-	int nflags;
+	const char *fstype;
+	struct sys_mount_args nuap;
+	char *native_fstype;
 
-	nflags = 0;
+	caddr_t usp = stackgap_init(p, 0);
+
+	memset(&nuap, 0, sizeof(nuap));
+	SCARG(&nuap, flags) = 0;
 
 	/*
 	 * Translate Ultrix integer mount codes for UFS and NFS to
 	 * NetBSD fstype strings.  Other Ultrix filesystem types
 	 *  (msdos, DEC ods-2) are not supported.
+	 * Copy resulting string out to userspace (on stack)
+	 * so we can pass it to the native mount syscall.
 	 */
+	if (otype == ULTRIX_FSTYPE_ULTRIX)
+		fstype = "ufs";
+	else if (otype == ULTRIX_FSTYPE_NFS)
+		fstype = "nfs";
+	else
+		return (EINVAL);
 
 	/* Translate the Ultrix mount-readonly option parameter */
 	if (SCARG(uap, rdonly))
-		nflags |= MNT_RDONLY;
+		SCARG(&nuap, flags) |= MNT_RDONLY;
 
+	/* Copy string-ified version of mount type back out to user space */
+	native_fstype = (char *)usp;
+	SCARG(&nuap, type) = native_fstype;
+	if ((error = copyout(fstype, native_fstype,
+			    strlen(fstype)+1)) != 0) {
+		return (error);
+	}
+	usp += strlen(fstype)+1;
 
 #ifdef later
 	parse ultrix mount option string and set NetBSD flags
 #endif
-
-	if (otype == ULTRIX_FSTYPE_NFS) {
-		struct ultrix_nfs_args una;
-		struct nfs_args na;
-
-		if ((error = copyin(SCARG(uap, data), &una, sizeof(una))) != 0)
-			return error;
-#if 0
-		/*
-		 * This is the only syscall boundary the
-		 * address of the server passes, so do backwards
-		 * compatibility on 4.3style sockaddrs here.
-		 */
-		if ((error = copyin(una.addr, &osa, sizeof osa)) != 0) {
-			printf("ultrix_mount: nfs copyin osa\n");
-			return error;
-		}
-		sap->sin_family = (u_char)osa.sin_family;
-		sap->sin_len = sizeof(*sap);
-		/* XXXX teach nfs how to do the above */
-#endif
-		na.version = NFS_ARGSVERSION;
-		na.addr = (void *)una.addr;
-		na.addrlen = sizeof (struct sockaddr_in);
-		na.sotype = SOCK_DGRAM;
-		na.proto = IPPROTO_UDP;
-		na.fh = una.fh;
-		na.fhsize = NFSX_V2FH;
-		na.flags = /*una.flags;*/ NFSMNT_NOCONN | NFSMNT_RESVPORT;
-		na.wsize = una.wsize;
-		na.rsize = una.rsize;
-		na.timeo = una.timeo;
-		na.retrans = una.retrans;
-		na.hostname = una.hostname;
-		return do_sys_mount(l, vfs_getopsbyname("nfs"), NULL,
-		    SCARG(uap, special), nflags, &na, UIO_SYSSPACE,
-		    sizeof na, &dummy);
-	}
+	SCARG(&nuap, path) = SCARG(uap, dir);
 
 	/*
 	 * Translate fstype-dependent mount options from
@@ -415,25 +402,70 @@ ultrix_sys_mount(struct lwp *l, const struct ultrix_sys_mount_args *uap, registe
 
 		memset(&ua, 0, sizeof(ua));
 		ua.fspec = SCARG(uap, special);
+		SCARG(&nuap, data) = usp;
 
+		if ((error = copyout(&ua, SCARG(&nuap, data),
+				     sizeof ua)) !=0) {
+			return(error);
+		}
 		/*
 		 * Ultrix mount has no MNT_UPDATE flag.
 		 * Attempt to see if this is the root we're mounting,
 		 * and if so, set MNT_UPDATE so we can mount / read-write.
 		 */
 		fsname[0] = 0;
-		if ((error = copyinstr(SCARG(uap, dir), fsname,
+		if ((error = copyinstr(SCARG(&nuap, path), fsname,
 				      sizeof fsname, NULL)) != 0)
 			return(error);
 		if (strcmp(fsname, "/") == 0) {
-			nflags |= MNT_UPDATE;
+			SCARG(&nuap, flags) |= MNT_UPDATE;
 			printf("COMPAT_ULTRIX: mount with MNT_UPDATE on %s\n",
 			    fsname);
 		}
-		return do_sys_mount(l, vfs_getopsbyname("ffs"), NULL,
-		    SCARG(uap, dir), nflags, &ua, UIO_SYSSPACE, sizeof ua,
-		    &dummy);
-	}
+	} else if (otype == ULTRIX_FSTYPE_NFS) {
+		struct ultrix_nfs_args una;
+		struct nfs_args na;
+		struct osockaddr_in osa;
+		struct sockaddr_in *sap = (struct sockaddr_in *)& osa;
 
-	return EINVAL;
+		memset(&osa, 0, sizeof(osa));
+		memset(&una, 0, sizeof(una));
+		if ((error = copyin(SCARG(uap, data), &una, sizeof una)) !=0) {
+			return (error);
+		}
+		/*
+		 * This is the only syscall boundary the
+		 * address of the server passes, so do backwards
+		 * compatibility on 4.3style sockaddrs here.
+		 */
+		if ((error = copyin(una.addr, &osa, sizeof osa)) != 0) {
+			printf("ultrix_mount: nfs copyin osa\n");
+			return (error);
+		}
+		sap->sin_family = (u_char)osa.sin_family;
+		sap->sin_len = sizeof(*sap);
+		/* allocate space above caller's stack for nfs_args */
+		SCARG(&nuap, data) = usp;
+		usp +=  sizeof (na);
+		/* allocate space above caller's stack for server sockaddr */
+		na.version = NFS_ARGSVERSION;
+		na.addr = (struct sockaddr *)usp;
+		usp += sizeof(*sap);
+		na.addrlen = sap->sin_len;
+		na.sotype = SOCK_DGRAM;
+		na.proto = IPPROTO_UDP;
+		na.fh = una.fh;
+		na.fhsize = NFSX_V2FH;
+		na.flags = /*una.flags;*/ NFSMNT_NOCONN | NFSMNT_RESVPORT;
+		na.wsize = una.wsize;
+		na.rsize = una.rsize;
+		na.timeo = una.timeo;
+		na.retrans = una.retrans;
+		na.hostname = una.hostname;
+		if ((error = copyout(sap, na.addr, sizeof (*sap) )) != 0)
+			return (error);
+		if ((error = copyout(&na, SCARG(&nuap, data), sizeof na)) != 0)
+			return (error);
+	}
+	return (sys_mount(l, &nuap, retval));
 }

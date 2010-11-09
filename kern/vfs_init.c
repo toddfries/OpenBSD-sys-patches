@@ -1,7 +1,7 @@
-/*	$NetBSD: vfs_init.c,v 1.43 2009/01/17 07:02:35 yamt Exp $	*/
+/*	$NetBSD: vfs_init.c,v 1.36 2007/11/07 00:23:25 ad Exp $	*/
 
 /*-
- * Copyright (c) 1998, 2000, 2008 The NetBSD Foundation, Inc.
+ * Copyright (c) 1998, 2000 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -67,7 +74,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: vfs_init.c,v 1.43 2009/01/17 07:02:35 yamt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: vfs_init.c,v 1.36 2007/11/07 00:23:25 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/mount.h>
@@ -78,11 +85,8 @@ __KERNEL_RCSID(0, "$NetBSD: vfs_init.c,v 1.43 2009/01/17 07:02:35 yamt Exp $");
 #include <sys/ucred.h>
 #include <sys/buf.h>
 #include <sys/errno.h>
-#include <sys/kmem.h>
+#include <sys/malloc.h>
 #include <sys/systm.h>
-#include <sys/module.h>
-#include <sys/dirhash.h>
-#include <sys/sysctl.h>
 
 /*
  * Sigh, such primitive tools are these...
@@ -138,50 +142,6 @@ vn_default_error(void *v)
 
 	return (EOPNOTSUPP);
 }
-
-static struct sysctllog *vfs_sysctllog;
-
-/*
- * Top level filesystem related information gathering.
- */
-static void
-sysctl_vfs_setup(void)
-{
-	extern int dovfsusermount;
-	extern int vfs_magiclinks;
-
-	sysctl_createv(&vfs_sysctllog, 0, NULL, NULL,
-		       CTLFLAG_PERMANENT,
-		       CTLTYPE_NODE, "vfs", NULL,
-		       NULL, 0, NULL, 0,
-		       CTL_VFS, CTL_EOL);
-	sysctl_createv(&vfs_sysctllog, 0, NULL, NULL,
-		       CTLFLAG_PERMANENT,
-		       CTLTYPE_NODE, "generic",
-		       SYSCTL_DESCR("Non-specific vfs related information"),
-		       NULL, 0, NULL, 0,
-		       CTL_VFS, VFS_GENERIC, CTL_EOL);
-	sysctl_createv(&vfs_sysctllog, 0, NULL, NULL,
-		       CTLFLAG_PERMANENT|CTLFLAG_READWRITE,
-		       CTLTYPE_INT, "usermount",
-		       SYSCTL_DESCR("Whether unprivileged users may mount "
-				    "filesystems"),
-		       NULL, 0, &dovfsusermount, 0,
-		       CTL_VFS, VFS_GENERIC, VFS_USERMOUNT, CTL_EOL);
-	sysctl_createv(&vfs_sysctllog, 0, NULL, NULL,
-		       CTLFLAG_PERMANENT,
-		       CTLTYPE_STRING, "fstypes",
-		       SYSCTL_DESCR("List of file systems present"),
-		       sysctl_vfs_generic_fstypes, 0, NULL, 0,
-		       CTL_VFS, VFS_GENERIC, CTL_CREATE, CTL_EOL);
-	sysctl_createv(&vfs_sysctllog, 0, NULL, NULL,
-		       CTLFLAG_PERMANENT|CTLFLAG_READWRITE,
-		       CTLTYPE_INT, "magiclinks",
-		       SYSCTL_DESCR("Whether \"magic\" symlinks are expanded"),
-		       NULL, 0, &vfs_magiclinks, 0,
-		       CTL_VFS, VFS_GENERIC, VFS_MAGICLINKS, CTL_EOL);
-}
-
 
 /*
  * vfs_init.c
@@ -277,8 +237,9 @@ vfs_opv_init(const struct vnodeopv_desc * const *vopvdpp)
 	 * Allocate the vectors.
 	 */
 	for (i = 0; vopvdpp[i] != NULL; i++) {
+		/* XXX - shouldn't be M_VNODE */
 		opv_desc_vector =
-		    kmem_alloc(VNODE_OPS_COUNT * sizeof(PFI), KM_SLEEP);
+		    malloc(VNODE_OPS_COUNT * sizeof(PFI), M_VNODE, M_WAITOK);
 		memset(opv_desc_vector, 0, VNODE_OPS_COUNT * sizeof(PFI));
 		*(vopvdpp[i]->opv_desc_vector_p) = opv_desc_vector;
 		DODEBUG(printf("vector at %p allocated\n",
@@ -308,8 +269,8 @@ vfs_opv_free(const struct vnodeopv_desc * const *vopvdpp)
 	 * Free the vectors allocated in vfs_opv_init().
 	 */
 	for (i = 0; vopvdpp[i] != NULL; i++) {
-		kmem_free(*(vopvdpp[i]->opv_desc_vector_p),
-		    VNODE_OPS_COUNT * sizeof(PFI));
+		/* XXX - shouldn't be M_VNODE */
+		free(*(vopvdpp[i]->opv_desc_vector_p), M_VNODE);
 		*(vopvdpp[i]->opv_desc_vector_p) = NULL;
 	}
 }
@@ -345,11 +306,8 @@ vfs_op_check(void)
 void
 vfsinit(void)
 {
-
-	/*
-	 * Attach sysctl nodes
-	 */
-	sysctl_vfs_setup();
+	__link_set_decl(vfsops, struct vfsops);
+	struct vfsops * const *vfsp;
 
 	/*
 	 * Initialize the namei pathname buffer pool and cache.
@@ -381,20 +339,16 @@ vfsinit(void)
 	vfs_opv_init(vfs_special_vnodeopv_descs);
 
 	/*
-	 * Initialise generic dirhash.
-	 */
-	dirhash_init();
-
-	/*
-	 * Initialise VFS hooks.
-	 */
-	vfs_hooks_init();
-
-	/*
 	 * Establish each file system which was statically
 	 * included in the kernel.
 	 */
-	module_init_class(MODULE_CLASS_VFS);
+	__link_set_foreach(vfsp, vfsops) {
+		if (vfs_attach(*vfsp)) {
+			printf("multiple `%s' file systems",
+			    (*vfsp)->vfs_name);
+			panic("vfsinit");
+		}
+	}
 }
 
 /*

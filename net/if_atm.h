@@ -1,4 +1,4 @@
-/*      $NetBSD: if_atm.h,v 1.18 2008/02/20 17:05:52 matt Exp $       */
+/*      $NetBSD: if_atm.h,v 1.15 2005/12/11 23:05:24 thorpej Exp $       */
 
 /*
  *
@@ -64,7 +64,7 @@
  */
 
 struct atm_pseudohdr {
-  uint8_t atm_ph[4];	/* flags+VPI+VCI1(msb)+VCI2(lsb) */
+  u_int8_t atm_ph[4];	/* flags+VPI+VCI1(msb)+VCI2(lsb) */
 };
 
 #define ATM_PH_FLAGS(X)	((X)->atm_ph[0])
@@ -125,9 +125,9 @@ struct pvctxreq {
 
 #define ATMLLC_HDR "\252\252\3\0\0\0"
 struct atmllc {
-  uint8_t llchdr[6];	/* aa.aa.03.00.00.00 */
-  uint8_t type[2];	/* "ethernet" type */
-} __packed;
+  u_int8_t llchdr[6];	/* aa.aa.03.00.00.00 */
+  u_int8_t type[2];	/* "ethernet" type */
+} __attribute__((__packed__));
 
 /* ATM_LLC macros: note type code in host byte order */
 #define ATM_LLC_TYPE(X) (((X)->type[0] << 8) | ((X)->type[1]))
@@ -140,7 +140,7 @@ struct atmllc {
 void	atm_ifattach(struct ifnet *);
 void	atm_input(struct ifnet *, struct atm_pseudohdr *,
 		struct mbuf *, void *);
-int	atm_output(struct ifnet *, struct mbuf *, const struct sockaddr *,
+int	atm_output(struct ifnet *, struct mbuf *, struct sockaddr *,
 		struct rtentry *);
 #endif
 #ifdef ATM_PVCEXT

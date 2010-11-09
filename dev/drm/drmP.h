@@ -1,5 +1,3 @@
-/* $NetBSD: drmP.h,v 1.32 2008/07/07 00:33:23 mrg Exp $ */
-
 /* drmP.h -- Private header for Direct Rendering Manager -*- linux-c -*-
  * Created: Mon Jan  4 10:05:05 1999 by faith@precisioninsight.com
  */
@@ -47,9 +45,7 @@ typedef struct drm_device drm_device_t;
 typedef struct drm_file drm_file_t;
 
 #if defined(__FreeBSD__) || defined(__NetBSD__)
-#if defined(_KERNEL_OPT)
 #include <opt_drm.h>
-#endif
 #ifdef DRM_DEBUG
 #undef DRM_DEBUG
 #define DRM_DEBUG_DEFAULT_ON 1
@@ -122,7 +118,6 @@ typedef struct drm_file drm_file_t;
 #include <sys/kauth.h>
 #include <sys/types.h>
 #include <sys/file.h>
-#include <sys/atomic.h>
 #include <uvm/uvm.h>
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
@@ -138,9 +133,7 @@ typedef struct drm_file drm_file_t;
 #include "drm_atomic.h"
 
 #if defined(__FreeBSD__) || defined(__NetBSD__)
-#if defined(_KERNEL_OPT)
 #include <opt_drm.h>
-#endif
 #ifdef DRM_DEBUG
 #undef DRM_DEBUG
 #define DRM_DEBUG_DEFAULT_ON 1
@@ -194,11 +187,7 @@ typedef struct drm_file drm_file_t;
 
 #define DRM_IF_VERSION(maj, min) (maj << 16 | min)
 
-#if !defined(_MODULE)
 MALLOC_DECLARE(M_DRM);
-#else
-#define M_DRM M_TEMP
-#endif
 
 #define __OS_HAS_AGP	1
 
@@ -238,7 +227,7 @@ MALLOC_DECLARE(M_DRM);
 #define DRM_STRUCTPROC		struct proc
 #define DRM_STRUCTCDEVPROC	struct lwp
 #define DRM_SPINTYPE		kmutex_t
-#define DRM_SPININIT(l,name)	mutex_init(l, MUTEX_DEFAULT, IPL_VM)
+#define DRM_SPININIT(l,name)	mutex_init(l, MUTEX_DRIVER, IPL_TTY)
 #define DRM_SPINUNINIT(l)	mutex_destroy(l)
 #define DRM_SPINLOCK(l)		mutex_enter(l)
 #define DRM_SPINUNLOCK(u)	mutex_exit(u)
@@ -313,13 +302,6 @@ extern drm_device_t *drm_units[];
 #define DRM_DEVICE							\
 	drm_device_t *dev = (minor(kdev) < DRM_MAXUNITS) ?		\
 		drm_units[minor(kdev)] : NULL
-#ifdef __x86_64__
-#define DRM_NETBSD_ADDR2HANDLE(addr)	(addr   & 0x7fffffffffffffff)
-#define DRM_NETBSD_HANDLE2ADDR(handle)	(handle | 0x8000000000000000)
-#else
-#define DRM_NETBSD_ADDR2HANDLE(addr)	(addr)
-#define DRM_NETBSD_HANDLE2ADDR(handle)	(handle)
-#endif
 #elif defined(__OpenBSD__)
 #define DRM_DEVICE							\
 #define DRM_SUSER(p)		(suser(p->p_ucred, &p->p_acflag) == 0)
@@ -368,9 +350,9 @@ typedef u_int8_t u8;
 	below should be enough for x86, perhaps others. */
 
 #if defined(__NetBSD__) 
-#define DRM_READMEMORYBARRIER()		membar_consumer()
-#define DRM_WRITEMEMORYBARRIER()	membar_producer()
-#define DRM_MEMORYBARRIER()		membar_sync()
+#define DRM_READMEMORYBARRIER()		mb_read()
+#define DRM_WRITEMEMORYBARRIER()	mb_write()
+#define DRM_MEMORYBARRIER()		mb_memory()
 #elif defined(__i386__) 
 #define DRM_READMEMORYBARRIER()		__asm __volatile( \
 					"lock; addl $0,0(%%esp)" : : : "memory");
@@ -614,13 +596,15 @@ typedef struct drm_freelist {
 typedef struct drm_dma_handle {
 	void *vaddr;
 	bus_addr_t busaddr;
-	bus_dma_tag_t dmat;
+#if defined(__FreeBSD__)
+	bus_dma_tag_t tag;
 	bus_dmamap_t map;
-	bus_dma_segment_t segs[1];
-	size_t size;
+#elif defined(__NetBSD__)
+	bus_dma_segment_t seg;
 	void *addr;
+	bus_addr_t dmaaddr;
+#endif
 } drm_dma_handle_t;
-#define DRM_PCI_DMAADDR(p)   ((p)->map->dm_segs[0].ds_addr)
 
 typedef struct drm_buf_entry {
 	int		  buf_size;
@@ -684,7 +668,7 @@ typedef struct drm_agp_mem {
 } drm_agp_mem_t;
 
 typedef struct drm_agp_head {
-	void               *agpdev;
+	device_t	   agpdev;
 	struct agp_info    info;
 	const char         *chipset;
 	drm_agp_mem_t      *memory;
@@ -742,19 +726,13 @@ typedef struct drm_vbl_sig {
 #define DRM_ATI_GART_MAIN 1
 #define DRM_ATI_GART_FB   2
 
-/* GART type */
-#define DRM_ATI_GART_PCI  1
-#define DRM_ATI_GART_PCIE 2
-#define DRM_ATI_GART_IGP  3
-
-struct drm_ati_pcigart_info {
+typedef struct ati_pcigart_info {
 	int gart_table_location;
-	int gart_reg_if;
+	int is_pcie;
 	void *addr;
 	dma_addr_t bus_addr;
 	drm_local_map_t mapping;
-	int table_size;
-};
+} drm_ati_pcigart_info;
 
 struct drm_driver_info {
 	int	(*load)(struct drm_device *, unsigned long flags);
@@ -841,7 +819,7 @@ typedef struct {
  */
 struct drm_device {
 #if defined(__NetBSD__) || defined(__OpenBSD__)
-	struct device		*device;
+	struct device	  device; /* softc is an extension of struct device */
 #endif
 
 	struct drm_driver_info driver;
@@ -1041,7 +1019,7 @@ void	drm_vbl_send_signals(drm_device_t *dev);
 /* AGP/PCI Express/GART support (drm_agpsupport.c) */
 int	drm_device_is_agp(drm_device_t *dev);
 int	drm_device_is_pcie(drm_device_t *dev);
-drm_agp_head_t *drm_agp_init(drm_device_t *dev);
+drm_agp_head_t *drm_agp_init(void);
 int	drm_agp_acquire(drm_device_t *dev);
 int	drm_agp_release(drm_device_t *dev);
 int	drm_agp_info(drm_device_t * dev, drm_agp_info_t *info);
@@ -1066,9 +1044,9 @@ extern int		drm_sysctl_cleanup(drm_device_t *dev);
 
 /* ATI PCIGART support (ati_pcigart.c) */
 int	drm_ati_pcigart_init(drm_device_t *dev,
-			     struct drm_ati_pcigart_info *gart_info);
+			     drm_ati_pcigart_info *gart_info);
 int	drm_ati_pcigart_cleanup(drm_device_t *dev,
-				struct drm_ati_pcigart_info *gart_info);
+				drm_ati_pcigart_info *gart_info);
 
 /* Locking IOCTL support (drm_drv.c) */
 int	drm_lock(DRM_IOCTL_ARGS);

@@ -1,4 +1,4 @@
-# $NetBSD: GENERIC,v 1.97 2009/01/17 01:19:18 tsutsui Exp $
+# $NetBSD: GENERIC,v 1.86 2006/11/24 22:04:23 wiz Exp $
 #
 # GENERIC machine description file
 # 
@@ -22,7 +22,7 @@ include		"arch/news68k/conf/std.news68k"
 
 options 	INCLUDE_CONFIG_FILE	# embed config file in kernel binary
 
-#ident 		"GENERIC-$Revision: 1.97 $"
+#ident 		"GENERIC-$Revision: 1.86 $"
 
 maxusers	8
 
@@ -34,10 +34,17 @@ options 	CPU_SINGLE		# Will IOP be supported eventually?
 # Standard system options
 options 	NTP			# NTP phase/frequency locked loop
 options 	KTRACE			# system call tracing support
+#options 	SYSTRACE		# system call vetting via systrace(1)
 options 	SYSVMSG			# System V message queues
 options 	SYSVSEM			# System V semaphores
+#options 	SEMMNI=10		# number of semaphore identifiers
+#options 	SEMMNS=60		# number of semaphores in system
+#options 	SEMUME=10		# max number of undo entries per process
+#options 	SEMMNU=30		# number of undo structures in system
 options 	SYSVSHM			# System V shared memory
+#options 	SHMMAXPGS=1024		# 1024 pages is the default
 options 	P1003_1B_SEMAPHORE # p1003.1b semaphore support
+options 	LKM			# loadable kernel modules
 options 	USERCONF		# userconf(4) support
 #options 	PIPE_SOCKETPAIR		# smaller, but slower pipe(2)
 options 	SYSCTL_INCLUDE_DESCR	# Include sysctl descriptions in kernel
@@ -66,9 +73,7 @@ options 	COMPAT_14		# NetBSD 1.4 binary compatibility
 options 	COMPAT_15		# NetBSD 1.5 binary compatibility
 options 	COMPAT_16		# NetBSD 1.6 binary compatibility
 options 	COMPAT_20		# NetBSD 2.0 binary compatibility
-options 	COMPAT_30		# NetBSD 3.0 binary compatibility
-options 	COMPAT_40		# NetBSD 4.0 binary compatibility
-options 	COMPAT_50		# NetBSD 5.0 binary compatibility
+options 	COMPAT_30		# NetBSD 3.0 compatibility.
 options 	COMPAT_AOUT_M68K	# compatibility with NetBSD/m68k a.out
 
 #options 	COMPAT_SVR4		# binary compatibility with SVR4
@@ -101,7 +106,7 @@ file-system	PTYFS		# /dev/pts/N support
 options 	NFSSERVER	# nfs server support
 options 	QUOTA		# ffs quotas
 #options 	FFS_EI		# ffs endian independent support
-options 	WAPBL		# File system journaling support - Experimental
+options 	SOFTDEP		# ffs soft updates support
 #options 	FFS_NO_SNAPSHOT	# No FFS snapshot support
 #options 	UFS_DIRHASH	# UFS Large Directory Hashing - Experimental
 
@@ -206,7 +211,7 @@ zstty1	at zsc0 channel 1
 # For example: "flags 0x1000f" would disable DMA interrupts,
 # and disable disconnect/reselect for targets 0-3
 #
-si0	at hb0 addr 0xe0cc0000 ipl 4 flags 0x0
+si0	at hb0 addr 0xe0cc0000 ipl 4 flags 0xf
 scsibus* at si0
 
 sd*	at scsibus? target ? lun ?		# SCSI disks
@@ -215,11 +220,6 @@ cd*	at scsibus? target ? lun ?		# SCSI CD-ROMs
 ch*	at scsibus? target ? lun ?		# SCSI changer devices
 ss*	at scsibus? target ? lun ?		# SCSI scanners
 uk*	at scsibus? target ? lun ?		# unknown SCSI devices
-
-#
-# accept filters
-pseudo-device   accf_data		# "dataready" accept filter
-pseudo-device   accf_http		# "httpready" accept filter
 
 # Misc.
 pseudo-device	loop			# loopback interface; required
@@ -256,7 +256,6 @@ pseudo-device	stf			# 6to4 IPv6 over IPv4 encapsulation
 pseudo-device	vlan			# IEEE 802.1q encapsulation
 pseudo-device	bridge			# simple inter-network bridging
 #options 	BRIDGE_IPF		# bridge uses IP/IPv6 pfil hooks too
-pseudo-device	agr			# IEEE 802.3ad link aggregation
 pseudo-device	rnd			# /dev/random and in-kernle generator
 #pseudo-device	vcoda		4	# coda minicache <-> venus comm.
 pseudo-device	clockctl		# user control of clock subsystem

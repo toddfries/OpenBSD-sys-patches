@@ -1,4 +1,4 @@
-/*	$NetBSD: timer_jazzio.c,v 1.10 2008/07/05 08:46:25 tsutsui Exp $	*/
+/*	$NetBSD: timer_jazzio.c,v 1.9 2006/06/24 03:50:38 tsutsui Exp $	*/
 /*	$OpenBSD: clock.c,v 1.6 1998/10/15 21:30:15 imp Exp $	*/
 
 /*
@@ -80,7 +80,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: timer_jazzio.c,v 1.10 2008/07/05 08:46:25 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: timer_jazzio.c,v 1.9 2006/06/24 03:50:38 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -96,28 +96,31 @@ __KERNEL_RCSID(0, "$NetBSD: timer_jazzio.c,v 1.10 2008/07/05 08:46:25 tsutsui Ex
 #include <arc/jazz/jazziovar.h>
 #include <arc/jazz/timer_jazziovar.h>
 
-/* Definition of the driver for autoconfig. */
-static int timer_jazzio_match(device_t , cfdata_t, void *);
-static void timer_jazzio_attach(device_t , device_t , void *);
+struct timer_jazzio_softc {
+	struct device	sc_dev;
+};
 
-CFATTACH_DECL_NEW(timer_jazzio, 0,
+/* Definition of the driver for autoconfig. */
+int timer_jazzio_match(struct device *, struct cfdata *, void *);
+void timer_jazzio_attach(struct device *, struct device *, void *);
+
+CFATTACH_DECL(timer_jazzio, sizeof(struct timer_jazzio_softc),
     timer_jazzio_match, timer_jazzio_attach, NULL, NULL);
 
 /* Jazz timer access code */
-static void timer_jazzio_init(device_t);
+void timer_jazzio_init(struct device *sc);
 
 struct timerfns timerfns_jazzio = {
 	timer_jazzio_init,
 };
 
 struct timer_jazzio_config *timer_jazzio_conf = NULL;
+int timer_jazzio_found = 0;
 struct evcnt timer_jazzio_ev =
     EVCNT_INITIALIZER(EVCNT_TYPE_INTR, NULL, "jazzio", "timer");
 
-static int timer_jazzio_found = 0;
-
-static int
-timer_jazzio_match(device_t parent, cfdata_t cf, void *aux)
+int
+timer_jazzio_match(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct jazzio_attach_args *ja = aux;
 
@@ -131,20 +134,21 @@ timer_jazzio_match(device_t parent, cfdata_t cf, void *aux)
 	return 1;
 }
 
-static void
-timer_jazzio_attach(device_t parent, device_t self, void *aux)
+void
+timer_jazzio_attach(struct device *parent, struct device *self, void *aux)
 {
+	struct timer_jazzio_softc *sc = (struct timer_jazzio_softc *)self;
 
 	if (timer_jazzio_conf == NULL)
 		panic("timer_jazzio_conf isn't initialized");
 
-	aprint_normal("\n");
+	printf("\n");
 
 	evcnt_attach_static(&timer_jazzio_ev);
 	(*platform->set_intr)(timer_jazzio_conf->tjc_intr_mask,
 	    timer_jazzio_conf->tjc_intr, ARC_INTPRI_TIMER_INT);
 
-	timerattach(self, &timerfns_jazzio);
+	timerattach(&sc->sc_dev, &timerfns_jazzio);
 
 	timer_jazzio_found = 1;
 }

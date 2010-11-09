@@ -1,4 +1,4 @@
-/* $NetBSD: ppcstart.c,v 1.5 2008/04/28 20:23:13 martin Exp $ */
+/* $NetBSD: ppcstart.c,v 1.3 2002/01/26 13:21:11 aymeric Exp $ */
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -56,7 +63,7 @@ startit(kp, ksize, entry, fmem, fmemsz, cmemsz,
 	*(volatile u_int8_t *)0xf60000 = 0x10;
 	ONESEC *(volatile u_int16_t *)0xdff180 = 0xf80;
 
-	memcpy((void *)0xfff00100, kickstart, kicksize);
+	memcpy((caddr_t)0xfff00100, kickstart, kicksize);
 	*(volatile u_int32_t *)0xfff000f4 = fmem;
 	*(volatile u_int32_t *)0xfff000f8 = kp;
 	*(volatile u_int32_t *)0xfff000fc = ksize;

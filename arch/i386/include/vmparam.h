@@ -1,4 +1,4 @@
-/*	$NetBSD: vmparam.h,v 1.70 2009/03/06 20:31:49 joerg Exp $	*/
+/*	$NetBSD: vmparam.h,v 1.61 2006/09/27 17:10:34 cube Exp $	*/
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -34,11 +34,10 @@
  *	@(#)vmparam.h	5.9 (Berkeley) 5/12/91
  */
 
-#ifndef _I386_VMPARAM_H_
-#define _I386_VMPARAM_H_
+#ifndef _VMPARAM_H_
+#define _VMPARAM_H_
 
 #include <sys/tree.h>
-#include <sys/mutex.h>
 
 /*
  * Machine dependent constants for 386.
@@ -86,6 +85,13 @@
 #define I386_MAX_EXE_ADDR	(USRSTACK - MAXSSIZ)
 
 /*
+ * Size of shared memory map
+ */
+#ifndef SHMMAXPGS
+#define SHMMAXPGS	2048
+#endif
+
+/*
  * Size of User Raw I/O map
  */
 #define	USRIOSIZE 	300
@@ -96,18 +102,17 @@
 
 /* user/kernel map constants */
 #define VM_MIN_ADDRESS		((vaddr_t)0)
-#define	VM_MAXUSER_ADDRESS	((vaddr_t)(PDIR_SLOT_PTE << L2_SHIFT))
+#define	VM_MAXUSER_ADDRESS	((vaddr_t)(PDSLOT_PTE << PDSHIFT))
 #define	VM_MAX_ADDRESS		\
-	((vaddr_t)((PDIR_SLOT_PTE << L2_SHIFT) + (PDIR_SLOT_PTE << L1_SHIFT)))
-#define	VM_MIN_KERNEL_ADDRESS	((vaddr_t)(PDIR_SLOT_KERN << L2_SHIFT))
-#define	VM_MAX_KERNEL_ADDRESS	((vaddr_t)(PDIR_SLOT_APTE << L2_SHIFT))
+		((vaddr_t)((PDSLOT_PTE << PDSHIFT) + (PDSLOT_PTE << PGSHIFT)))
+#define	VM_MIN_KERNEL_ADDRESS	((vaddr_t)(PDSLOT_KERN << PDSHIFT))
+#define	VM_MAX_KERNEL_ADDRESS	((vaddr_t)(PDSLOT_APTE << PDSHIFT))
 
 /*
  * The address to which unspecified mapping requests default
  */
 #ifdef _KERNEL_OPT
 #include "opt_uvm.h"
-#include "opt_xen.h"
 #endif
 #define __USE_TOPDOWN_VM
 #define VM_DEFAULT_ADDRESS(da, sz) \
@@ -121,28 +126,31 @@
 /* virtual sizes (bytes) for various kernel submaps */
 #define VM_PHYS_SIZE		(USRIOSIZE*PAGE_SIZE)
 
+#define VM_PHYSSEG_MAX		10	/* 1 "hole" + 9 free lists */
 #define VM_PHYSSEG_STRAT	VM_PSTRAT_BIGFIRST
 #define VM_PHYSSEG_NOADD		/* can't add RAM after vm_mem_init */
 
-#ifdef XEN
-#define	VM_PHYSSEG_MAX		1
-#define	VM_NFREELIST		1
-#else
-#define	VM_PHYSSEG_MAX		10	/* 1 "hole" + 9 free lists */
 #define	VM_NFREELIST		2
-#define	VM_FREELIST_FIRST16	1
-#endif /* XEN */
 #define	VM_FREELIST_DEFAULT	0
-
-#include <x86/pmap_pv.h>
+#define	VM_FREELIST_FIRST16	1
 
 #define	__HAVE_VM_PAGE_MD
-#define	VM_MDPAGE_INIT(pg) \
-	memset(&(pg)->mdpage, 0, sizeof((pg)->mdpage)); \
-	PMAP_PAGE_INIT(&(pg)->mdpage.mp_pp)
+#define	VM_MDPAGE_INIT(pg)					\
+	memset(&(pg)->mdpage, 0, sizeof((pg)->mdpage));		\
+	simple_lock_init(&(pg)->mdpage.mp_pvhead.pvh_lock);	\
+	SPLAY_INIT(&(pg)->mdpage.mp_pvhead.pvh_root);
 
-struct vm_page_md {
-	struct pmap_page mp_pp;
+struct pv_entry;
+
+struct pv_head {
+	struct simplelock pvh_lock;	/* locks every pv in this tree */
+	SPLAY_HEAD(pvtree, pv_entry) pvh_root;
+					/* head of tree (locked by pvh_lock) */
 };
 
-#endif /* _I386_VMPARAM_H_ */
+struct vm_page_md {
+	struct pv_head mp_pvhead;
+	int mp_attrs;	/* only 2 bits (PG_U and PG_M) are actually used. */
+};
+
+#endif /* _VMPARAM_H_ */

@@ -1,4 +1,4 @@
-/*	$NetBSD: nfs.c,v 1.14 2008/11/25 13:18:37 ad Exp $	*/
+/*	$NetBSD: nfs.c,v 1.13 2006/12/29 13:05:48 yamt Exp $	*/
 
 /*-
  *  Copyright (c) 1993 John Brezak
@@ -508,7 +508,6 @@ out:
 #endif
 	if (!error) {
 		f->f_fsdata = (void *)currfd;
-		fsmod = "nfs";
 		return (0);
 	}
 

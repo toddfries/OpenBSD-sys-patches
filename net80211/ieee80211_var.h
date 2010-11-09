@@ -1,4 +1,4 @@
-/*	$NetBSD: ieee80211_var.h,v 1.27 2008/12/11 06:04:01 alc Exp $	*/
+/*	$NetBSD: ieee80211_var.h,v 1.25 2006/06/30 06:17:10 tacha Exp $	*/
 /*-
  * Copyright (c) 2001 Atsushi Onoe
  * Copyright (c) 2002-2005 Sam Leffler, Errno Consulting
@@ -143,7 +143,7 @@ struct ieee80211com {
 	u_int8_t		ic_dtim_period;	/* DTIM period */
 	u_int8_t		ic_dtim_count;	/* DTIM count for last bcn */
 	struct ifmedia		ic_media;	/* interface media config */
-	void *			ic_rawbpf;	/* packet filter structure */
+	caddr_t			ic_rawbpf;	/* packet filter structure */
 	struct ieee80211_node	*ic_bss;	/* information for this node */
 	struct ieee80211_channel *ic_ibss_chan;
 	struct ieee80211_channel *ic_curchan;	/* current channel */
@@ -276,9 +276,6 @@ extern struct ieee80211com_head ieee80211com_head;
 #define	IEEE80211_C_SHPREAMBLE	0x00008000	/* CAPABILITY: short preamble */
 #define	IEEE80211_C_MONITOR	0x00010000	/* CAPABILITY: monitor mode */
 #define	IEEE80211_C_TKIPMIC	0x00020000	/* CAPABILITY: TKIP MIC avail */
-#define IEEE80211_C_WME_TKIPMIC 0x00040000      /* CAPABILITY: TKIP MIC for QoS
-						   frame */
-/* 0x780000 available */
 #define	IEEE80211_C_WPA1	0x00800000	/* CAPABILITY: WPA1 avail */
 #define	IEEE80211_C_WPA2	0x01000000	/* CAPABILITY: WPA2 avail */
 #define	IEEE80211_C_WPA		0x01800000	/* CAPABILITY: WPA1+WPA2 avail*/
@@ -300,9 +297,9 @@ void	ieee80211_media_init(struct ieee80211com *,
 struct ieee80211com *ieee80211_find_vap(const u_int8_t mac[IEEE80211_ADDR_LEN]);
 int	ieee80211_media_change(struct ifnet *);
 void	ieee80211_media_status(struct ifnet *, struct ifmediareq *);
-int	ieee80211_ioctl(struct ieee80211com *, u_long, void *);
-int	ieee80211_cfgget(struct ieee80211com *, u_long, void *);
-int	ieee80211_cfgset(struct ieee80211com *, u_long, void *);
+int	ieee80211_ioctl(struct ieee80211com *, u_long, caddr_t);
+int	ieee80211_cfgget(struct ieee80211com *, u_long, caddr_t);
+int	ieee80211_cfgset(struct ieee80211com *, u_long, caddr_t);
 void	ieee80211_watchdog(struct ieee80211com *);
 int	ieee80211_rate2media(struct ieee80211com *, int,
 		enum ieee80211_phymode);

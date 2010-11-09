@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile.atari,v 1.73 2009/01/25 22:25:08 abs Exp $
+#	$NetBSD: Makefile.atari,v 1.71 2005/12/11 12:16:54 christos Exp $
 
 # Makefile for NetBSD
 #
@@ -27,9 +27,10 @@ GENASSYM_CONF=	${ATARI}/atari/genassym.cf
 ## (2) compile settings
 ##
 CPPFLAGS+=	-Datari
-.if !defined(CMACHFLAGS)
-.include "$S/arch/m68k/Makefile.cmachflags"
-CMACHFLAGS+= -Wa,-m68030
+.if empty(IDENT:M-DM68060)
+CMACHFLAGS=	-m68020
+.else
+CMACHFLAGS=	-m68060 -Wa,-m68030
 .endif
 CFLAGS+=	${CMACHFLAGS} -msoft-float
 AFLAGS+=	-x assembler-with-cpp -traditional-cpp
@@ -51,8 +52,6 @@ KERN_AS=	obj
 MD_OBJS=	locore.o ${FPSP}
 MD_CFILES=
 MD_SFILES=	${ATARI}/atari/locore.s
-
-copy.o copypage.o lock_stubs.o: assym.h
 
 locore.o: ${ATARI}/atari/locore.s assym.h
 	${NORMAL_S}

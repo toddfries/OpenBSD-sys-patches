@@ -1,4 +1,4 @@
-/*	$NetBSD: tspld.c,v 1.16 2009/01/01 03:34:42 kenh Exp $	*/
+/*	$NetBSD: tspld.c,v 1.11 2005/11/12 05:34:28 hamajima Exp $	*/
 
 /*-
  * Copyright (c) 2004 Jesse Off
@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: tspld.c,v 1.16 2009/01/01 03:34:42 kenh Exp $");
+__KERNEL_RCSID(0, "$NetBSD: tspld.c,v 1.11 2005/11/12 05:34:28 hamajima Exp $");
 
 #include <sys/param.h>
 #include <sys/callout.h>
@@ -394,7 +394,7 @@ tspldattach(parent, self, aux)
 	SSP_CLEARBITS(SSPCR1, 0x10);
 	SSP_SETBITS(SSPCR1, 0x10);
 	GPIO_SET(PFDR, 0x0);
-	callout_init(&sc->boardtemp_callout, 0);
+	callout_init(&sc->boardtemp_callout);
 	callout_setfunc(&sc->boardtemp_callout, boardtemp_poll, sc);
 	boardtemp_poll(sc);
 	delay(1000);
@@ -529,10 +529,6 @@ tspld_wdog_setmode(smw)
 		bus_space_write_2(sc->sc_iot, sc->sc_wdogfeed_ioh, 0, 0x5);
 		bus_space_write_2(sc->sc_iot, sc->sc_wdogctrl_ioh, 0, 0);
 	} else {
-		if (smw->smw_period == WDOG_PERIOD_DEFAULT) {
-			smw->smw_period = 8;
-		}
-
 		bus_space_write_2(sc->sc_iot, sc->sc_wdogfeed_ioh, 0, 0x5);
 		switch (smw->smw_period) {
 		case 1:

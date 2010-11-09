@@ -1,4 +1,4 @@
-/*	$NetBSD: ether_bpf.c,v 1.10 2008/12/14 18:46:33 christos Exp $	*/
+/*	$NetBSD: ether_bpf.c,v 1.4 2005/12/11 12:17:49 christos Exp $	*/
 
 /*
  * Copyright (c) 1998
@@ -34,7 +34,6 @@
 #include <stdlib.h>
 #include <limits.h>
 #include <sys/ioctl.h>
-#include <sys/queue.h>
 #include <sys/socket.h>
 #include <net/if.h>
 #include <net/bpf.h>
@@ -66,8 +65,8 @@ static struct nlist nl[] = {
 	{NULL}
 };
 
-int
-EtherInit(char *ha)
+int EtherInit(ha)
+	char *ha;
 {
 	int res;
 	u_int val;
@@ -83,66 +82,66 @@ EtherInit(char *ha)
 	bpf = open(BPFDEV, O_RDWR, 0);
 	if (bpf < 0) {
 		warn("open %s", BPFDEV);
-		return 0;
+		return (0);
 	}
 
 	val = MAXPKT;
 	res = ioctl(bpf, BIOCSBLEN, &val);
 	if (res < 0) {
 		warn("ioctl BIOCSBLEN");
-		return 0;
+		return (0);
 	}
 
 	val = 1;
 	res = ioctl(bpf, BIOCIMMEDIATE, &val);
 	if (res < 0) {
 		warn("ioctl BIOCIMMEDIATE");
-		return 0;
+		return (0);
 	}
 
 	val = 1;
 	res = ioctl(bpf, FIONBIO, &val);
 	if (res < 0) {
 		warn("ioctl FIONBIO");
-		return 0;
+		return (0);
 	}
 
 	memcpy(ifr.ifr_name, BPF_IFNAME, IFNAMSIZ);
 	res = ioctl(bpf, BIOCSETIF, &ifr);
 	if (res < 0) {
 		warn("ioctl BIOCSETIF %s", BPF_IFNAME);
-		return 0;
+		return (0);
 	}
 
 	kvm = kvm_openfiles(0, 0, 0, O_RDONLY, errbuf);
 	if (!kvm) {
 		warnx(errbuf);
-		return 0;
+		return (0);
 	}
 	if (kvm_nlist(kvm, nl) < 0) {
 		warnx("nlist failed (%s)", kvm_geterr(kvm));
 		kvm_close(kvm);
-		return 0;
+		return (0);
 	}
 
 	kvm_read(kvm, nl[0].n_value, &ifh, sizeof(struct ifnet_head));
-	ifp = TAILQ_FIRST(&ifh);
+	ifp = ifh.tqh_first;
 	while (ifp) {
 		struct ifnet ifnet;
 		kvm_read(kvm, (u_long)ifp, &ifnet, sizeof(struct ifnet));
 		if (!strcmp(ifnet.if_xname, BPF_IFNAME)) {
-			ifap = IFADDR_FIRST(&ifnet);
+			ifap = ifnet.if_addrlist.tqh_first;
 			break;
 		}
-		ifp = IFNET_NEXT(&ifnet);
+		ifp = ifnet.if_list.tqe_next;
 	}
 	if (!ifp) {
 		warnx("interface not found");
 		kvm_close(kvm);
-		return 0;
+		return (0);
 	}
 
-#define _offsetof(t, m) ((int)((void *)&((t *)0)->m))
+#define _offsetof(t, m) ((int)((caddr_t)&((t *)0)->m))
 	sdllen = _offsetof(struct sockaddr_dl,
 			   sdl_data[0]) + strlen(BPF_IFNAME) + 6;
 	sdlp = malloc(sdllen);
@@ -152,37 +151,37 @@ EtherInit(char *ha)
 		kvm_read(kvm, (u_long)ifap, &ifaddr, sizeof(struct ifaddr));
 		kvm_read(kvm, (u_long)ifaddr.ifa_addr, sdlp, sdllen);
 		if (sdlp->sdl_family == AF_LINK) {
-			memcpy(ha, CLLADDR(sdlp), 6);
+			memcpy(ha, LLADDR(sdlp), 6);
 			break;
 		}
-		ifap = IFADDR_NEXT(&ifaddr);
+		ifap = ifaddr.ifa_list.tqe_next;
 	}
 	free(sdlp);
 	kvm_close(kvm);
 	if (!ifap) {
 		warnx("interface hw addr not found");
-		return 0;
+		return (0);
 	}
-	return 1;
+	return (1);
 }
 
 void
-EtherStop(void)
+EtherStop()
 {
-
 	if (bpf != -1)
 		close(bpf);
 }
 
 int
-EtherSend(char *pkt, int len)
+EtherSend(pkt, len)
+	char *pkt;
+	int len;
 {
-
 	if (write(bpf, pkt, len) != len) {
 		warn("EtherSend");
-		return -1;
+		return (-1);
 	}
-	return len;
+	return (len);
 }
 
 static union {
@@ -191,7 +190,9 @@ static union {
 } rbuf;
 
 int
-EtherReceive(char *pkt, int maxlen)
+EtherReceive(pkt, maxlen)
+	char *pkt;
+	int maxlen;
 {
 	int res;
 
@@ -207,10 +208,10 @@ EtherReceive(char *pkt, int maxlen)
 		fprintf(stderr, "\n");
 #endif
 		if (rbuf.h.bh_caplen > maxlen)
-			return 0;
+			return (0);
 		memcpy(pkt, &rbuf.buf[rbuf.h.bh_hdrlen], rbuf.h.bh_caplen);
-		return rbuf.h.bh_caplen;
+		return (rbuf.h.bh_caplen);
 	}
 
-	return 0;
+	return (0);
 }

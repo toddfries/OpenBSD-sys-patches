@@ -1,4 +1,4 @@
-/*	$NetBSD: if_fddi.h,v 1.14 2007/12/25 18:33:45 perry Exp $	*/
+/*	$NetBSD: if_fddi.h,v 1.11 2005/12/11 23:05:25 thorpej Exp $	*/
 
 /*
  * Copyright (c) 1995 Matt Thomas (thomas@lkg.dec.com)
@@ -37,7 +37,7 @@ struct	fddi_header {
 	u_char	fddi_fc;
 	u_char	fddi_dhost[6];
 	u_char	fddi_shost[6];
-} __packed;
+} __attribute__((__packed__));
 
 #define	FDDIIPMTU		4352
 #define	FDDIMTU			4470
@@ -83,10 +83,12 @@ struct	fddi_header {
 #define	fddibroadcastaddr	etherbroadcastaddr
 #define	fddi_ipmulticast_min	ether_ipmulticast_min
 #define	fddi_ipmulticast_max	ether_ipmulticast_max
+#define	fddi_addmulti		ether_addmulti
+#define	fddi_delmulti		ether_delmulti
 #define	fddi_sprintf		ether_sprintf
 
 #if defined(__NetBSD__)
-void    fddi_ifattach(struct ifnet *, void *);
+void    fddi_ifattach(struct ifnet *, caddr_t);
 #else
 void    fddi_ifattach(struct ifnet *);
 #endif

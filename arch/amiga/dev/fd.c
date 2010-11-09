@@ -1,4 +1,4 @@
-/*	$NetBSD: fd.c,v 1.80 2009/01/13 13:35:51 yamt Exp $ */
+/*	$NetBSD: fd.c,v 1.67 2006/03/26 04:35:37 thorpej Exp $ */
 
 /*
  * Copyright (c) 1994 Christian E. Hopps
@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: fd.c,v 1.80 2009/01/13 13:35:51 yamt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: fd.c,v 1.67 2006/03/26 04:35:37 thorpej Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -348,7 +348,7 @@ fdcattach(struct device *pdp, struct device *dp, void *auxp)
 {
 	struct fdcargs args;
 
-	printf(": dmabuf pa 0x%x", (unsigned)kvtop(fdc_dmap));
+	printf(": dmabuf pa 0x%x", kvtop(fdc_dmap));
 	printf(": dmabuf ka %p\n", fdc_dmap);
 	args.unit = 0;
 	args.type = fdcgetfdtype(args.unit);
@@ -396,11 +396,11 @@ fdattach(struct device *pdp, struct device *dp, void *auxp)
 	int i;
 
 	ap = auxp;
-	sc = device_private(dp);
+	sc = (struct fd_softc *)dp;
 
 	bufq_alloc(&sc->bufq, "disksort", BUFQ_SORT_CYLINDER);
-	callout_init(&sc->calibrate_ch, 0);
-	callout_init(&sc->motor_ch, 0);
+	callout_init(&sc->calibrate_ch);
+	callout_init(&sc->motor_ch);
 
 	sc->curcyl = sc->cachetrk = -1;
 	sc->openpart = -1;
@@ -417,7 +417,8 @@ fdattach(struct device *pdp, struct device *dp, void *auxp)
 	/*
 	 * Initialize and attach the disk structure.
 	 */
-	disk_init(&sc->dkdev, sc->sc_dv.dv_xname, &fddkdriver);
+	sc->dkdev.dk_name = sc->sc_dv.dv_xname;
+	sc->dkdev.dk_driver = &fddkdriver;
 	disk_attach(&sc->dkdev);
 
 	/*
@@ -547,7 +548,7 @@ fdclose(dev_t dev, int flags, int devtype, struct lwp *l)
 }
 
 int
-fdioctl(dev_t dev, u_long cmd, void *addr, int flag, struct lwp *l)
+fdioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct lwp *l)
 {
 	struct fd_softc *sc;
 	int error, wlab;
@@ -662,7 +663,7 @@ fdstrategy(struct buf *bp)
 	lp = sc->dkdev.dk_label;
 	if ((sc->flags & FDF_HAVELABEL) == 0) {
 		bp->b_error = EIO;
-		goto done;
+		goto bad;
 	}
 	if (bounds_check_with_label(&sc->dkdev, bp, sc->wlabel) <= 0)
 		goto done;
@@ -680,10 +681,12 @@ fdstrategy(struct buf *bp)
 	 * queue the buf and kick the low level code
 	 */
 	s = splbio();
-	bufq_put(sc->bufq, bp);
+	BUFQ_PUT(sc->bufq, bp);
 	fdstart(sc);
 	splx(s);
 	return;
+bad:
+	bp->b_flags |= B_ERROR;
 done:
 	bp->b_resid = bp->b_bcount;
 	biodone(bp);
@@ -799,7 +802,7 @@ fdgetdisklabel(struct fd_softc *sc, dev_t dev)
 	fdstrategy(bp);
 	if ((error = biowait(bp)) != 0)
 		goto nolabel;
-	dlp = (struct disklabel *)((char*)bp->b_data + LABELOFFSET);
+	dlp = (struct disklabel *)(bp->b_data + LABELOFFSET);
 	if (dlp->d_magic != DISKMAGIC || dlp->d_magic2 != DISKMAGIC ||
 	    dkcksum(dlp)) {
 		error = EINVAL;
@@ -808,11 +811,11 @@ fdgetdisklabel(struct fd_softc *sc, dev_t dev)
 	bcopy(dlp, lp, sizeof(struct disklabel));
 	if (lp->d_trkseek > FDSTEPDELAY)
 		sc->stepdelay = lp->d_trkseek;
-	brelse(bp, 0);
+	brelse(bp);
 	return(0);
 nolabel:
 	fdgetdefaultlabel(sc, lp, part);
-	brelse(bp, 0);
+	brelse(bp);
 	return(0);
 }
 
@@ -908,17 +911,16 @@ fdputdisklabel(struct fd_softc *sc, dev_t dev)
 	/*
 	 * copy disklabel to buf and write it out synchronous
 	 */
-	dlp = (struct disklabel *)((char*)bp->b_data + LABELOFFSET);
+	dlp = (struct disklabel *)(bp->b_data + LABELOFFSET);
 	bcopy(lp, dlp, sizeof(struct disklabel));
 	bp->b_blkno = 0;
 	bp->b_cylinder = 0;
-	bp->b_flags &= ~(B_READ);
-	bp->b_oflags &= ~(BO_DONE);
+	bp->b_flags &= ~(B_READ|B_DONE);
 	bp->b_flags |= B_WRITE;
 	fdstrategy(bp);
 	error = biowait(bp);
 done:
-	brelse(bp, 0);
+	brelse(bp);
 	return(error);
 }
 
@@ -1180,7 +1182,7 @@ fdstart(struct fd_softc *sc)
 	 * get next buf if there.
 	 */
 	dp = &sc->curbuf;
-	if ((bp = bufq_peek(sc->bufq)) == NULL) {
+	if ((bp = BUFQ_PEEK(sc->bufq)) == NULL) {
 #ifdef FDDEBUG
 		printf("  nothing to do\n");
 #endif
@@ -1211,16 +1213,17 @@ printf("fdstart: disk changed\n");
 #endif
 		sc->flags &= ~FDF_HAVELABEL;
 		for (;;) {
-			bp = bufq_get(sc->bufq);
+			bp = BUFQ_GET(sc->bufq);
+			bp->b_flags |= B_ERROR;
 			bp->b_error = EIO;
-			if (bufq_peek(sc->bufq) == NULL)
+			if (BUFQ_PEEK(sc->bufq) == NULL)
 				break;
 			biodone(bp);
 		}
 		/*
 		 * do fddone() on last buf to allow other units to start.
 		 */
-		bufq_put(sc->bufq, bp);
+		BUFQ_PUT(sc->bufq, bp);
 		fddone(sc);
 		return;
 	}
@@ -1242,7 +1245,7 @@ printf("fdstart: disk changed\n");
 		write = 1;
 	else {
 		error = EPERM;
-		goto done;
+		goto bad;
 	}
 
 	/*
@@ -1279,7 +1282,8 @@ printf("fdstart: disk changed\n");
 	 */
 	fddmastart(sc, trk);
 	return;
-done:
+bad:
+	bp->b_flags |= B_ERROR;
 	bp->b_error = error;
 	fddone(sc);
 }
@@ -1295,8 +1299,8 @@ fdcont(struct fd_softc *sc)
 	int trk, write;
 
 	dp = &sc->curbuf;
-	bp = bufq_peek(sc->bufq);
-	dp->b_data = (char*)dp->b_data + (dp->b_bcount - bp->b_resid);
+	bp = BUFQ_PEEK(sc->bufq);
+	dp->b_data += (dp->b_bcount - bp->b_resid);
 	dp->b_blkno += (dp->b_bcount - bp->b_resid) / FDSECSIZE;
 	dp->b_bcount = bp->b_resid;
 
@@ -1535,7 +1539,7 @@ fddone(struct fd_softc *sc)
 		goto nobuf;
 
 	dp = &sc->curbuf;
-	if ((bp = bufq_peek(sc->bufq)) == NULL)
+	if ((bp = BUFQ_PEEK(sc->bufq)) == NULL)
 		panic ("fddone");
 	/*
 	 * check for an error that may have occurred
@@ -1543,8 +1547,9 @@ fddone(struct fd_softc *sc)
 	 */
 	if (sc->cachetrk == -1) {
 		sc->retried = 0;
+		bp->b_flags |= B_ERROR;
 		bp->b_error = EIO;
-	} else if (bp->b_error == 0) {
+	} else if ((bp->b_flags & B_ERROR) == 0) {
 		data = sc->cachep;
 		/*
 		 * get offset of data in track cache and limit
@@ -1574,7 +1579,7 @@ fddone(struct fd_softc *sc)
 	/*
 	 * remove from queue.
 	 */
-	(void)bufq_get(sc->bufq);
+	(void)BUFQ_GET(sc->bufq);
 
 	disk_unbusy(&sc->dkdev, (bp->b_bcount - bp->b_resid),
 	    (bp->b_flags & B_READ));
@@ -1612,7 +1617,7 @@ fdfindwork(int unit)
 			i = -1;
 			continue;
 		}
-		if ((sc = device_lookup_private(&fd_cd, i)) == NULL)
+		if ((sc = fd_cd.cd_devs[i]) == NULL)
 			continue;
 
 		/*
@@ -1620,7 +1625,7 @@ fdfindwork(int unit)
 		 * and it has no buf's queued do it now
 		 */
 		if (sc->flags & FDF_MOTOROFF) {
-			if (bufq_peek(sc->bufq) == NULL)
+			if (BUFQ_PEEK(sc->bufq) == NULL)
 				fdmotoroff(sc);
 			else {
 				/*
@@ -1640,7 +1645,7 @@ fdfindwork(int unit)
 		 * if we have no start unit and the current unit has
 		 * io waiting choose this unit to start.
 		 */
-		if (ssc == NULL && bufq_peek(sc->bufq) != NULL)
+		if (ssc == NULL && BUFQ_PEEK(sc->bufq) != NULL)
 			ssc = sc;
 	}
 	if (ssc)

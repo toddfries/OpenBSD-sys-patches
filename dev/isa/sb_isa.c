@@ -1,4 +1,4 @@
-/*	$NetBSD: sb_isa.c,v 1.36 2008/03/15 21:09:02 cube Exp $	*/
+/*	$NetBSD: sb_isa.c,v 1.35 2007/10/19 12:00:22 ad Exp $	*/
 
 /*
  * Copyright (c) 1991-1993 Regents of the University of California.
@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sb_isa.c,v 1.36 2008/03/15 21:09:02 cube Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sb_isa.c,v 1.35 2007/10/19 12:00:22 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -60,13 +60,13 @@ __KERNEL_RCSID(0, "$NetBSD: sb_isa.c,v 1.36 2008/03/15 21:09:02 cube Exp $");
 
 #include <dev/isa/sbdspvar.h>
 
-static	int sbfind(device_t, struct sbdsp_softc *, int,
-	    struct isa_attach_args *, cfdata_t);
+static	int sbfind(struct device *, struct sbdsp_softc *, int,
+	    struct isa_attach_args *);
 
-int	sb_isa_match(device_t, cfdata_t, void *);
-void	sb_isa_attach(device_t, device_t, void *);
+int	sb_isa_match(struct device *, struct cfdata *, void *);
+void	sb_isa_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(sb_isa, sizeof(struct sbdsp_softc),
+CFATTACH_DECL(sb_isa, sizeof(struct sbdsp_softc),
     sb_isa_match, sb_isa_attach, NULL, NULL);
 
 /*
@@ -77,7 +77,10 @@ CFATTACH_DECL_NEW(sb_isa, sizeof(struct sbdsp_softc),
  * Probe for the soundblaster hardware.
  */
 int
-sb_isa_match(device_t parent, cfdata_t match, void *aux)
+sb_isa_match(parent, match, aux)
+	struct device *parent;
+	struct cfdata *match;
+	void *aux;
 {
 	struct isa_attach_args *ia = aux;
 	struct sbdsp_softc probesc, *sc = &probesc;
@@ -93,12 +96,14 @@ sb_isa_match(device_t parent, cfdata_t match, void *aux)
 		return (0);
 
 	memset(sc, 0, sizeof *sc);
-	return sbfind(parent, sc, 1, aux, match);
+	strcpy(sc->sc_dev.dv_xname, "sb");
+	sc->sc_dev.dv_cfdata = match;
+	return sbfind(parent, sc, 1, aux);
 }
 
 static int
-sbfind(device_t parent, struct sbdsp_softc *sc, int probing,
-    struct isa_attach_args *ia, cfdata_t match)
+sbfind(struct device *parent, struct sbdsp_softc *sc, int probing,
+    struct isa_attach_args *ia)
 {
 	int rc = 0;
 
@@ -123,7 +128,7 @@ sbfind(device_t parent, struct sbdsp_softc *sc, int probing,
 	sc->sc_drq8 = ia->ia_drq[0].ir_drq;
 	sc->sc_drq16 = ia->ia_drq[1].ir_drq;
 
-	if (!sbmatch(sc, probing, match))
+	if (!sbmatch(sc))
 		goto bad;
 
 	rc = 1;
@@ -157,17 +162,17 @@ bad:
  * pseudo-device driver .
  */
 void
-sb_isa_attach(device_t parent, device_t self, void *aux)
+sb_isa_attach(parent, self, aux)
+	struct device *parent, *self;
+	void *aux;
 {
-	struct sbdsp_softc *sc = device_private(self);
+	struct sbdsp_softc *sc = (struct sbdsp_softc *)self;
 	struct isa_attach_args *ia = aux;
 
-	sc->sc_dev = self;
-
-	if (!sbfind(parent, sc, 0, ia, device_cfdata(self)) ||
+	if (!sbfind(parent, sc, 0, ia) ||
 	    bus_space_map(sc->sc_iot, ia->ia_io[0].ir_addr,
 	    ia->ia_io[0].ir_size, 0, &sc->sc_ioh)) {
-		aprint_error_dev(self, "sbfind failed\n");
+		printf("%s: sbfind failed\n", sc->sc_dev.dv_xname);
 		return;
 	}
 

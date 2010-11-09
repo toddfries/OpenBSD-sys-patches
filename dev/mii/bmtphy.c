@@ -1,4 +1,4 @@
-/*	$NetBSD: bmtphy.c,v 1.29 2009/01/18 10:00:51 mrg Exp $	*/
+/*	$NetBSD: bmtphy.c,v 1.22 2006/11/16 21:24:07 christos Exp $	*/
 
 /*-
  * Copyright (c) 1998, 1999, 2000, 2001 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -66,7 +73,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: bmtphy.c,v 1.29 2009/01/18 10:00:51 mrg Exp $");
+__KERNEL_RCSID(0, "$NetBSD: bmtphy.c,v 1.22 2006/11/16 21:24:07 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -84,18 +91,17 @@ __KERNEL_RCSID(0, "$NetBSD: bmtphy.c,v 1.29 2009/01/18 10:00:51 mrg Exp $");
 
 #include <dev/mii/bmtphyreg.h>
 
-static int	bmtphymatch(device_t, cfdata_t, void *);
-static void	bmtphyattach(device_t, device_t, void *);
+static int	bmtphymatch(struct device *, struct cfdata *, void *);
+static void	bmtphyattach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(bmtphy, sizeof(struct mii_softc),
+CFATTACH_DECL(bmtphy, sizeof(struct mii_softc),
     bmtphymatch, bmtphyattach, mii_phy_detach, mii_phy_activate);
 
 static int	bmtphy_service(struct mii_softc *, struct mii_data *, int);
 static void	bmtphy_status(struct mii_softc *);
-static void	bmtphy_reset(struct mii_softc *);
 
 static const struct mii_phy_funcs bmtphy_funcs = {
-	bmtphy_service, bmtphy_status, bmtphy_reset,
+	bmtphy_service, bmtphy_status, mii_phy_reset,
 };
 
 static const struct mii_phydesc bmtphys[] = {
@@ -119,7 +125,8 @@ static const struct mii_phydesc bmtphys[] = {
 };
 
 static int
-bmtphymatch(device_t parent, cfdata_t match, void *aux)
+bmtphymatch(struct device *parent, struct cfdata *match,
+    void *aux)
 {
 	struct mii_attach_args *ma = aux;
 
@@ -130,7 +137,7 @@ bmtphymatch(device_t parent, cfdata_t match, void *aux)
 }
 
 static void
-bmtphyattach(device_t parent, device_t self, void *aux)
+bmtphyattach(struct device *parent, struct device *self, void *aux)
 {
 	struct mii_softc *sc = device_private(self);
 	struct mii_attach_args *ma = aux;
@@ -141,8 +148,6 @@ bmtphyattach(device_t parent, device_t self, void *aux)
 	aprint_naive(": Media interface\n");
 	aprint_normal(": %s, rev. %d\n", mpd->mpd_name, MII_REV(ma->mii_id2));
 
-	sc->mii_dev = self;
-	sc->mii_mpd_model = MII_MODEL(ma->mii_id2);
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
 	sc->mii_funcs = &bmtphy_funcs;
@@ -158,7 +163,7 @@ bmtphyattach(device_t parent, device_t self, void *aux)
 
 	sc->mii_capabilities =
 	    PHY_READ(sc, MII_BMSR) & ma->mii_capmask;
-	aprint_normal_dev(self, "");
+	aprint_normal("%s: ", sc->mii_dev.dv_xname);
 	if ((sc->mii_capabilities & BMSR_MEDIAMASK) == 0)
 		aprint_error("no media present");
 	else
@@ -268,38 +273,6 @@ bmtphy_status(struct mii_softc *sc)
 			mii->mii_media_active |= IFM_10_T;
 		if (aux_csr & AUX_CSR_FDX)
 			mii->mii_media_active |= IFM_FDX;
-		else
-			mii->mii_media_active |= IFM_HDX;
-
-		if (mii->mii_media_active & IFM_FDX)
-			mii->mii_media_active |= mii_phy_flowstatus(sc);
 	} else
 		mii->mii_media_active = ife->ifm_media;
 }
-
-static void   
-bmtphy_reset(struct mii_softc *sc)
-{
-	u_int16_t data;
-
-	mii_phy_reset(sc);
-
-	if (sc->mii_mpd_model == MII_MODEL_xxBROADCOM_BCM5221) {
-		/* Enable shadow register mode */
-		data = PHY_READ(sc, 0x1f);
-		PHY_WRITE(sc, 0x1f, data | 0x0080);
-
-		/* Enable APD (Auto PowerDetect) */
-		data = PHY_READ(sc, MII_BMTPHY_AUX2);
-		PHY_WRITE(sc, MII_BMTPHY_AUX2, data | 0x0020);
-
-		/* Enable clocks across APD for
-		 * Auto-MDIX functionality */
-		data = PHY_READ(sc, MII_BMTPHY_INTR);
-		PHY_WRITE(sc, MII_BMTPHY_INTR, data | 0x0004);
-
-		/* Disable shadow register mode */
-		data = PHY_READ(sc, 0x1f);
-		PHY_WRITE(sc, 0x1f, data & ~0x0080);
-	}
-}      

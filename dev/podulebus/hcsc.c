@@ -1,4 +1,4 @@
-/*	$NetBSD: hcsc.c,v 1.19 2008/04/28 20:23:56 martin Exp $	*/
+/*	$NetBSD: hcsc.c,v 1.17 2006/03/29 07:12:56 thorpej Exp $	*/
 
 /*
  * Copyright (c) 2001 Ben Harris
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -67,7 +74,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: hcsc.c,v 1.19 2008/04/28 20:23:56 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: hcsc.c,v 1.17 2006/03/29 07:12:56 thorpej Exp $");
 
 #include <sys/param.h>
 
@@ -90,11 +97,11 @@ __KERNEL_RCSID(0, "$NetBSD: hcsc.c,v 1.19 2008/04/28 20:23:56 martin Exp $");
 
 #include <dev/podulebus/hcscreg.h>
 
-int  hcsc_match(device_t, cfdata_t, void *);
-void hcsc_attach(device_t, device_t, void *);
+void hcsc_attach (struct device *, struct device *, void *);
+int  hcsc_match  (struct device *, struct cfdata *, void *);
 
-static int hcsc_pdma_in(struct ncr5380_softc *, int, int, uint8_t *);
-static int hcsc_pdma_out(struct ncr5380_softc *, int, int, uint8_t *);
+static int hcsc_pdma_in(struct ncr5380_softc *, int, int, u_char *);
+static int hcsc_pdma_out(struct ncr5380_softc *, int, int, u_char *);
 
 
 /*
@@ -112,7 +119,7 @@ struct hcsc_softc {
 	struct evcnt	sc_intrcnt;
 };
 
-CFATTACH_DECL_NEW(hcsc, sizeof(struct hcsc_softc),
+CFATTACH_DECL(hcsc, sizeof(struct hcsc_softc),
     hcsc_match, hcsc_attach, NULL, NULL);
 
 /*
@@ -122,7 +129,7 @@ CFATTACH_DECL_NEW(hcsc, sizeof(struct hcsc_softc),
  */
 
 int
-hcsc_match(device_t parent, cfdata_t cf, void *aux)
+hcsc_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct podulebus_attach_args *pa = aux;
 
@@ -144,80 +151,78 @@ hcsc_match(device_t parent, cfdata_t cf, void *aux)
  */
 
 void
-hcsc_attach(device_t parent, device_t self, void *aux)
+hcsc_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct hcsc_softc *sc = device_private(self);
-	struct ncr5380_softc *ncr_sc = &sc->sc_ncr5380;
 	struct podulebus_attach_args *pa = aux;
 #ifndef NCR5380_USE_BUS_SPACE
-	uint8_t *iobase;
+	u_char *iobase;
 #endif
-	char hi_option[sizeof(self->dv_xname) + 8];
+	char hi_option[sizeof(sc->sc_ncr5380.sc_dev.dv_xname) + 8];
 
-	ncr_sc->sc_dev = self;
-	ncr_sc->sc_min_dma_len = 0;
-	ncr_sc->sc_no_disconnect = 0;
-	ncr_sc->sc_parity_disable = 0;
+	sc->sc_ncr5380.sc_min_dma_len = 0;
+	sc->sc_ncr5380.sc_no_disconnect = 0;
+	sc->sc_ncr5380.sc_parity_disable = 0;
 
-	ncr_sc->sc_dma_alloc = NULL;
-	ncr_sc->sc_dma_free = NULL;
-	ncr_sc->sc_dma_poll = NULL;
-	ncr_sc->sc_dma_setup = NULL;
-	ncr_sc->sc_dma_start = NULL;
-	ncr_sc->sc_dma_eop = NULL;
-	ncr_sc->sc_dma_stop = NULL;
-	ncr_sc->sc_intr_on = NULL;
-	ncr_sc->sc_intr_off = NULL;
+	sc->sc_ncr5380.sc_dma_alloc = NULL;
+	sc->sc_ncr5380.sc_dma_free = NULL;
+	sc->sc_ncr5380.sc_dma_poll = NULL;
+	sc->sc_ncr5380.sc_dma_setup = NULL;
+	sc->sc_ncr5380.sc_dma_start = NULL;
+	sc->sc_ncr5380.sc_dma_eop = NULL;
+	sc->sc_ncr5380.sc_dma_stop = NULL;
+	sc->sc_ncr5380.sc_intr_on = NULL;
+	sc->sc_ncr5380.sc_intr_off = NULL;
 
 #ifdef NCR5380_USE_BUS_SPACE
-	ncr_sc->sc_regt = pa->pa_fast_t;
-	bus_space_map(ncr_sc->sc_regt,
+	sc->sc_ncr5380.sc_regt = pa->pa_fast_t;
+	bus_space_map(sc->sc_ncr5380.sc_regt,
 	    pa->pa_fast_base + HCSC_DP8490_OFFSET, 8, 0,
-	    &ncr_sc->sc_regh);
-	ncr_sc->sci_r0 = 0;
-	ncr_sc->sci_r1 = 1;
-	ncr_sc->sci_r2 = 2;
-	ncr_sc->sci_r3 = 3;
-	ncr_sc->sci_r4 = 4;
-	ncr_sc->sci_r5 = 5;
-	ncr_sc->sci_r6 = 6;
-	ncr_sc->sci_r7 = 7;
+	    &sc->sc_ncr5380.sc_regh);
+	sc->sc_ncr5380.sci_r0 = 0;
+	sc->sc_ncr5380.sci_r1 = 1;
+	sc->sc_ncr5380.sci_r2 = 2;
+	sc->sc_ncr5380.sci_r3 = 3;
+	sc->sc_ncr5380.sci_r4 = 4;
+	sc->sc_ncr5380.sci_r5 = 5;
+	sc->sc_ncr5380.sci_r6 = 6;
+	sc->sc_ncr5380.sci_r7 = 7;
 #else
 	iobase = (u_char *)pa->pa_fast_base + HCSC_DP8490_OFFSET;
-	ncr_sc->sci_r0 = iobase + 0;
-	ncr_sc->sci_r1 = iobase + 4;
-	ncr_sc->sci_r2 = iobase + 8;
-	ncr_sc->sci_r3 = iobase + 12;
-	ncr_sc->sci_r4 = iobase + 16;
-	ncr_sc->sci_r5 = iobase + 20;
-	ncr_sc->sci_r6 = iobase + 24;
-	ncr_sc->sci_r7 = iobase + 28;
+	sc->sc_ncr5380.sci_r0 = iobase + 0;
+	sc->sc_ncr5380.sci_r1 = iobase + 4;
+	sc->sc_ncr5380.sci_r2 = iobase + 8;
+	sc->sc_ncr5380.sci_r3 = iobase + 12;
+	sc->sc_ncr5380.sci_r4 = iobase + 16;
+	sc->sc_ncr5380.sci_r5 = iobase + 20;
+	sc->sc_ncr5380.sci_r6 = iobase + 24;
+	sc->sc_ncr5380.sci_r7 = iobase + 28;
 #endif
 	sc->sc_pdmat = pa->pa_mod_t;
 	bus_space_map(sc->sc_pdmat, pa->pa_mod_base + HCSC_PDMA_OFFSET, 1, 0,
 	    &sc->sc_pdmah);
 
-	ncr_sc->sc_rev = NCR_VARIANT_DP8490;
+	sc->sc_ncr5380.sc_rev = NCR_VARIANT_DP8490;
 
-	ncr_sc->sc_pio_in = hcsc_pdma_in;
-	ncr_sc->sc_pio_out = hcsc_pdma_out;
+	sc->sc_ncr5380.sc_pio_in = hcsc_pdma_in;
+	sc->sc_ncr5380.sc_pio_out = hcsc_pdma_out;
 
 	/* Provide an override for the host id */
-	ncr_sc->sc_channel.chan_id = 7;
+	sc->sc_ncr5380.sc_channel.chan_id = 7;
 	snprintf(hi_option, sizeof(hi_option), "%s.hostid",
-	    device_xname(self));
+	    sc->sc_ncr5380.sc_dev.dv_xname);
 	(void)get_bootconf_option(boot_args, hi_option,
-	    BOOTOPT_TYPE_INT, &ncr_sc->sc_channel.chan_id);
-	ncr_sc->sc_adapter.adapt_minphys = minphys;
+	    BOOTOPT_TYPE_INT, &sc->sc_ncr5380.sc_channel.chan_id);
+	sc->sc_ncr5380.sc_adapter.adapt_minphys = minphys;
 
-	aprint_normal(": host ID %d\n", ncr_sc->sc_channel.chan_id);
+	printf(": host ID %d\n", sc->sc_ncr5380.sc_channel.chan_id);
 
 	evcnt_attach_dynamic(&sc->sc_intrcnt, EVCNT_TYPE_INTR, NULL,
-	    device_xname(self), "intr");
+	    self->dv_xname, "intr");
 	sc->sc_ih = podulebus_irq_establish(pa->pa_ih, IPL_BIO, ncr5380_intr,
 	    sc, &sc->sc_intrcnt);
 
-	ncr5380_attach(ncr_sc);
+	ncr5380_attach(&sc->sc_ncr5380);
 }
 
 #ifndef HCSC_TSIZE_OUT
@@ -239,14 +244,14 @@ hcsc_ready(struct ncr5380_softc *sc)
 		if ((NCR5380_READ(sc,sci_csr) &
 		    (SCI_CSR_DREQ | SCI_CSR_PHASE_MATCH)) ==
 		    (SCI_CSR_DREQ | SCI_CSR_PHASE_MATCH))
-		    	return 1;
+		    	return(1);
 
 		if ((NCR5380_READ(sc, sci_csr) & SCI_CSR_PHASE_MATCH) == 0 ||
 		    SCI_BUSY(sc) == 0)
-			return 0;
+			return(0);
 	}
-	printf("%s: ready timeout\n", device_xname(sc->sc_dev));
-	return 0;
+	printf("%s: ready timeout\n", sc->sc_dev.dv_xname);
+	return(0);
 }
 
 
@@ -255,7 +260,6 @@ hcsc_ready(struct ncr5380_softc *sc)
 static inline void hcsc_wait_not_req(struct ncr5380_softc *sc)
 {
 	int timo;
-
 	for (timo = TIMEOUT; timo; timo--) {
 		if ((NCR5380_READ(sc, sci_bus_csr) & SCI_BUS_REQ) == 0 ||
 		    (NCR5380_READ(sc, sci_csr) & SCI_CSR_PHASE_MATCH) == 0 ||
@@ -263,14 +267,14 @@ static inline void hcsc_wait_not_req(struct ncr5380_softc *sc)
 			return;
 		}
 	}
-	printf("%s: pdma not_req timeout\n", device_xname(sc->sc_dev));
+	printf("%s: pdma not_req timeout\n", sc->sc_dev.dv_xname);
 }
 
 static int
 hcsc_pdma_in(struct ncr5380_softc *ncr_sc, int phase, int datalen,
-    uint8_t *data)
+    u_char *data)
 {
-	struct hcsc_softc *sc = (struct hcsc_softc *)ncr_sc;
+	struct hcsc_softc *sc = (void *)ncr_sc;
 	bus_space_tag_t pdmat = sc->sc_pdmat;
 	bus_space_handle_t pdmah = sc->sc_pdmah;
 	int s, resid, len;
@@ -303,9 +307,9 @@ interrupt:
 
 static int
 hcsc_pdma_out(struct ncr5380_softc *ncr_sc, int phase, int datalen,
-    uint8_t *data)
+    u_char *data)
 {
-	struct hcsc_softc *sc = (struct hcsc_softc *)ncr_sc;
+	struct hcsc_softc *sc = (void *)ncr_sc;
 	bus_space_tag_t pdmat = sc->sc_pdmat;
 	bus_space_handle_t pdmah = sc->sc_pdmah;
 	int i, s, icmd, resid;
@@ -366,7 +370,7 @@ hcsc_pdma_out(struct ncr5380_softc *ncr_sc, int phase, int datalen,
 		bus_space_write_1(pdmat, pdmah, 0, 0);
 	else
 		printf("%s: timeout waiting for final SCI_DSR_DREQ.\n",
-		    device_xname(ncr_sc->sc_dev));
+			ncr_sc->sc_dev.dv_xname);
 
 	hcsc_wait_not_req(ncr_sc);
 interrupt:
@@ -375,5 +379,5 @@ interrupt:
 	    NCR5380_READ(ncr_sc, sci_mode) & ~SCI_MODE_DMA);
 	NCR5380_WRITE(ncr_sc, sci_icmd, icmd);
 	splx(s);
-	return datalen - resid;
+	return(datalen - resid);
 }

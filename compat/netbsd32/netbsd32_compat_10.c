@@ -1,4 +1,4 @@
-/*	$NetBSD: netbsd32_compat_10.c,v 1.23 2009/01/11 02:45:49 christos Exp $	*/
+/*	$NetBSD: netbsd32_compat_10.c,v 1.16 2005/11/10 18:47:53 christos Exp $	*/
 
 /*
  * Copyright (c) 1994 Adam Glass and Charles M. Hannum.  All rights reserved.
@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: netbsd32_compat_10.c,v 1.23 2009/01/11 02:45:49 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: netbsd32_compat_10.c,v 1.16 2005/11/10 18:47:53 christos Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_sysv.h"
@@ -45,24 +45,29 @@ __KERNEL_RCSID(0, "$NetBSD: netbsd32_compat_10.c,v 1.23 2009/01/11 02:45:49 chri
 #include <sys/malloc.h>
 
 #include <sys/mount.h>
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 
 #include <compat/netbsd32/netbsd32.h>
 #include <compat/netbsd32/netbsd32_syscallargs.h>
 #include <compat/sys/shm.h>
 
-#if defined(SYSVSEM) || !defined(_KERNEL_OPT)
+#if defined(SYSVSEM) || !defined(_KERNEL)
 int
-compat_10_netbsd32_semsys(struct lwp *l, const struct compat_10_netbsd32_semsys_args *uap, register_t *retval)
+compat_10_netbsd32_sys_semsys(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct proc *p = l->l_proc;
+	struct compat_10_netbsd32_sys_semsys_args /* {
 		syscallarg(int) which;
 		syscallarg(int) a2;
 		syscallarg(int) a3;
 		syscallarg(int) a4;
 		syscallarg(int) a5;
-	} */
-	struct compat_50_netbsd32___semctl14_args /* {
+	} */ *uap = v;
+	struct compat_14_sys___semctl_args /* {
 		syscallarg(int) semid;
 		syscallarg(int) semnum;
 		syscallarg(int) cmd;
@@ -81,15 +86,18 @@ compat_10_netbsd32_semsys(struct lwp *l, const struct compat_10_netbsd32_semsys_
 	struct sys_semconfig_args /* {
 		syscallarg(int) flag;
 	} */ semconfig_args;
-	int a5;
+	caddr_t sg = stackgap_init(p, 0);
 
 	switch (SCARG(uap, which)) {
 	case 0:						/* __semctl() */
 		SCARG(&__semctl_args, semid) = SCARG(uap, a2);
 		SCARG(&__semctl_args, semnum) = SCARG(uap, a3);
 		SCARG(&__semctl_args, cmd) = SCARG(uap, a4);
-		a5 = SCARG(uap, a5);
-		return do_netbsd32___semctl14(l, &__semctl_args, retval, &a5);
+		SCARG(&__semctl_args, arg) = stackgap_alloc(p, &sg,
+			sizeof(union semun *));
+		copyout(&SCARG(uap, a5), SCARG(&__semctl_args, arg),
+			sizeof(union __semun));
+		return (compat_14_sys___semctl(l, &__semctl_args, retval));
 
 	case 1:						/* semget() */
 		SCARG(&semget_args, key) = SCARG(uap, a2);
@@ -99,7 +107,8 @@ compat_10_netbsd32_semsys(struct lwp *l, const struct compat_10_netbsd32_semsys_
 
 	case 2:						/* semop() */
 		SCARG(&semop_args, semid) = SCARG(uap, a2);
-		SCARG(&semop_args, sops) = NETBSD32IPTR64(SCARG(uap, a3));
+		SCARG(&semop_args, sops) =
+		    (struct sembuf *)NETBSD32PTR64(SCARG(uap, a3));
 		SCARG(&semop_args, nsops) = SCARG(uap, a4);
 		return (sys_semop(l, &semop_args, retval));
 
@@ -113,16 +122,19 @@ compat_10_netbsd32_semsys(struct lwp *l, const struct compat_10_netbsd32_semsys_
 }
 #endif
 
-#if defined(SYSVSHM) || !defined(_KERNEL_OPT)
+#if defined(SYSVSHM) || !defined(_KERNEL)
 int
-compat_10_netbsd32_shmsys(struct lwp *l, const struct compat_10_netbsd32_shmsys_args *uap, register_t *retval)
+compat_10_netbsd32_sys_shmsys(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct compat_10_netbsd32_sys_shmsys_args /* {
 		syscallarg(int) which;
 		syscallarg(int) a2;
 		syscallarg(int) a3;
 		syscallarg(int) a4;
-	} */
+	} */ *uap = v;
 	struct sys_shmat_args /* {
 		syscallarg(int) shmid;
 		syscallarg(void *) shmaddr;
@@ -131,7 +143,7 @@ compat_10_netbsd32_shmsys(struct lwp *l, const struct compat_10_netbsd32_shmsys_
 	struct compat_14_sys_shmctl_args /* {
 		syscallarg(int) shmid;
 		syscallarg(int) cmd;
-		syscallarg(struct shmid_ds50 *) buf;
+		syscallarg(struct shmid_ds *) buf;
 	} */ shmctl_args;
 	struct sys_shmdt_args /* {
 		syscallarg(void *) shmaddr;
@@ -145,18 +157,21 @@ compat_10_netbsd32_shmsys(struct lwp *l, const struct compat_10_netbsd32_shmsys_
 	switch (SCARG(uap, which)) {
 	case 0:						/* shmat() */
 		SCARG(&shmat_args, shmid) = SCARG(uap, a2);
-		SCARG(&shmat_args, shmaddr) = NETBSD32IPTR64(SCARG(uap, a3));
+		SCARG(&shmat_args, shmaddr) =
+		    (void *)NETBSD32PTR64(SCARG(uap, a3));
 		SCARG(&shmat_args, shmflg) = SCARG(uap, a4);
 		return (sys_shmat(l, &shmat_args, retval));
 
 	case 1:						/* shmctl() */
 		SCARG(&shmctl_args, shmid) = SCARG(uap, a2);
 		SCARG(&shmctl_args, cmd) = SCARG(uap, a3);
-		SCARG(&shmctl_args, buf) = NETBSD32IPTR64(SCARG(uap, a4));
+		SCARG(&shmctl_args, buf) =
+		    (struct shmid_ds14 *)NETBSD32PTR64(SCARG(uap, a4));
 		return (compat_14_sys_shmctl(l, &shmctl_args, retval));
 
 	case 2:						/* shmdt() */
-		SCARG(&shmdt_args, shmaddr) = NETBSD32IPTR64(SCARG(uap, a2));
+		SCARG(&shmdt_args, shmaddr) =
+		    (void *)NETBSD32PTR64(SCARG(uap, a2));
 		return (sys_shmdt(l, &shmdt_args, retval));
 
 	case 3:						/* shmget() */
@@ -173,16 +188,19 @@ compat_10_netbsd32_shmsys(struct lwp *l, const struct compat_10_netbsd32_shmsys_
 
 #if defined(SYSVMSG) || !defined(_KERNEL)
 int
-compat_10_netbsd32_msgsys(struct lwp *l, const struct compat_10_netbsd32_msgsys_args *uap, register_t *retval)
+compat_10_netbsd32_sys_msgsys(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct compat_10_netbsd32_sys_msgsys_args /* {
 		syscallarg(int) which;
 		syscallarg(int) a2;
 		syscallarg(int) a3;
 		syscallarg(int) a4;
 		syscallarg(int) a5;
 		syscallarg(int) a6;
-	} */
+	} */ *uap = v;
 	struct compat_14_sys_msgctl_args /* {
 		syscallarg(int) msqid;
 		syscallarg(int) cmd;
@@ -210,7 +228,8 @@ compat_10_netbsd32_msgsys(struct lwp *l, const struct compat_10_netbsd32_msgsys_
 	case 0:					/* msgctl()*/
 		SCARG(&msgctl_args, msqid) = SCARG(uap, a2);
 		SCARG(&msgctl_args, cmd) = SCARG(uap, a3);
-		SCARG(&msgctl_args, buf) = NETBSD32IPTR64(SCARG(uap, a4));
+		SCARG(&msgctl_args, buf) =
+		    (struct msqid_ds14 *)NETBSD32PTR64(SCARG(uap, a4));
 		return (compat_14_sys_msgctl(l, &msgctl_args, retval));
 
 	case 1:					/* msgget() */
@@ -220,14 +239,16 @@ compat_10_netbsd32_msgsys(struct lwp *l, const struct compat_10_netbsd32_msgsys_
 
 	case 2:					/* msgsnd() */
 		SCARG(&msgsnd_args, msqid) = SCARG(uap, a2);
-		SCARG(&msgsnd_args, msgp) = NETBSD32IPTR64(SCARG(uap, a3));
+		SCARG(&msgsnd_args, msgp) =
+		    (void *)NETBSD32PTR64(SCARG(uap, a3));
 		SCARG(&msgsnd_args, msgsz) = SCARG(uap, a4);
 		SCARG(&msgsnd_args, msgflg) = SCARG(uap, a5);
 		return (sys_msgsnd(l, &msgsnd_args, retval));
 
 	case 3:					/* msgrcv() */
 		SCARG(&msgrcv_args, msqid) = SCARG(uap, a2);
-		SCARG(&msgrcv_args, msgp) = NETBSD32IPTR64(SCARG(uap, a3));
+		SCARG(&msgrcv_args, msgp) =
+		    (void *)NETBSD32PTR64(SCARG(uap, a3));
 		SCARG(&msgrcv_args, msgsz) = SCARG(uap, a4);
 		SCARG(&msgrcv_args, msgtyp) = SCARG(uap, a5);
 		SCARG(&msgrcv_args, msgflg) = SCARG(uap, a6);

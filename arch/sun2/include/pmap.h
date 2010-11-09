@@ -1,4 +1,4 @@
-/*	$NetBSD: pmap.h,v 1.21 2008/12/09 20:45:45 pooka Exp $	*/
+/*	$NetBSD: pmap.h,v 1.18 2006/02/16 20:17:15 perry Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -12,6 +12,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -29,7 +36,14 @@
 #ifndef	_MACHINE_PMAP_H
 #define	_MACHINE_PMAP_H
 
-#include <sys/simplelock.h>
+/*
+ * NB:  The details of struct pmap are exposed ONLY when
+ * building a kernel.  LKMs and user-level programs see
+ * only this anonymous declaration.  Note that the actual
+ * declaration may vary on different m68k kernels.
+ */
+struct pmap;
+typedef struct pmap *pmap_t;
 
 /*
  * Physical map structures exported to the VM code.
@@ -45,6 +59,9 @@ struct pmap {
 };
 
 #ifdef _KERNEL
+extern	struct pmap	kernel_pmap_store;
+#define	pmap_kernel()	(&kernel_pmap_store)
+
 /*
  * We give the pmap code a chance to resolve faults by
  * reloading translations that it was forced to unload.

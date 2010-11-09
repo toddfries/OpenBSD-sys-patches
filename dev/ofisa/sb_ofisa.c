@@ -1,4 +1,4 @@
-/*	$NetBSD: sb_ofisa.c,v 1.17 2008/04/28 20:23:54 martin Exp $	*/
+/*	$NetBSD: sb_ofisa.c,v 1.15 2007/10/19 12:00:38 ad Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -31,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sb_ofisa.c,v 1.17 2008/04/28 20:23:54 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sb_ofisa.c,v 1.15 2007/10/19 12:00:38 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -53,14 +60,17 @@ __KERNEL_RCSID(0, "$NetBSD: sb_ofisa.c,v 1.17 2008/04/28 20:23:54 martin Exp $")
 #include <dev/isa/sbvar.h>
 #include <dev/isa/sbdspvar.h>
 
-int	sb_ofisa_match(device_t, cfdata_t, void *);
-void	sb_ofisa_attach(device_t, device_t, void *);
+int	sb_ofisa_match(struct device *, struct cfdata *, void *);
+void	sb_ofisa_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(sb_ofisa, sizeof(struct sbdsp_softc),
+CFATTACH_DECL(sb_ofisa, sizeof(struct sbdsp_softc),
     sb_ofisa_match, sb_ofisa_attach, NULL, NULL);
 
 int
-sb_ofisa_match(device_t parent, cfdata_t cf, void *aux)
+sb_ofisa_match(parent, cf, aux)
+	struct device *parent;
+	struct cfdata *cf;
+	void *aux;
 {
 	struct ofisa_attach_args *aa = aux;
 	static const char *const compatible_strings[] = {
@@ -84,7 +94,9 @@ sb_ofisa_match(device_t parent, cfdata_t cf, void *aux)
 }
 
 void
-sb_ofisa_attach(device_t parent, device_t self, void *aux)
+sb_ofisa_attach(parent, self, aux)
+	struct device *parent, *self;
+	void *aux;
 {
 	struct sbdsp_softc *sc = device_private(self);
 	struct ofisa_attach_args *aa = aux;
@@ -93,8 +105,6 @@ sb_ofisa_attach(device_t parent, device_t self, void *aux)
 	struct ofisa_dma_desc dma[2];
 	int n, ndrq;
 	char *model;
-
-	sc->sc_dev = self;
 
 	/*
 	 * We're living on an OFW.  We have to ask the OFW what our
@@ -138,7 +148,7 @@ sb_ofisa_attach(device_t parent, device_t self, void *aux)
 
 	sc->sc_iot = aa->iot;
 	if (bus_space_map(sc->sc_iot, reg.addr, reg.len, 0, &sc->sc_ioh)) {
-		aprint_error(": unable to map register space\n");
+		printf(": unable to map register space\n");
 		return;
 	}
 
@@ -161,18 +171,18 @@ sb_ofisa_attach(device_t parent, device_t self, void *aux)
 				sc->sc_drq16 = dma[n].drq;
 			break;
 		default:
-			aprint_error(": weird DMA width %d\n", dma[n].width);
+			printf(": weird DMA width %d\n", dma[n].width);
 			return;
 		}
 	}
 
 	if (sc->sc_drq8 == DRQUNK) {
-		aprint_error(": no 8-bit DMA channel\n");
+		printf(": no 8-bit DMA channel\n");
 		return;
 	}
 
 	if (sbmatch(sc) == 0) {
-		aprint_error(": sbmatch failed\n");
+		printf(": sbmatch failed\n");
 		return;
 	}
 
@@ -183,7 +193,7 @@ sb_ofisa_attach(device_t parent, device_t self, void *aux)
 	if (n > 0) {
 		model = alloca(n);
 		if (OF_getprop(aa->oba.oba_phandle, "model", model, n) == n)
-			aprint_normal(": %s\n%s", model, device_xname(self));
+			printf(": %s\n%s", model, sc->sc_dev.dv_xname);
 	}
 
 	sbattach(sc);

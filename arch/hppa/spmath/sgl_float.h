@@ -1,6 +1,6 @@
-/*	$NetBSD: sgl_float.h,v 1.3 2009/01/27 11:49:54 skrll Exp $	*/
+/*	$NetBSD: sgl_float.h,v 1.1 2002/06/05 01:04:27 fredette Exp $	*/
 
-/*	$OpenBSD: sgl_float.h,v 1.10 2004/01/02 14:39:01 mickey Exp $	*/
+/*	$OpenBSD: sgl_float.h,v 1.5 2001/03/29 03:58:19 mickey Exp $	*/
 
 /*
  * Copyright 1996 1995 by Open Software Foundation, Inc.
@@ -218,10 +218,10 @@
     Deposit_sexponent(sgl_value,(exponent op SGL_WRAP))
 
 #define Sgl_setlargestpositive(sgl_value)				\
-    Sall(sgl_value) = ((SGL_EMAX+SGL_BIAS) << (32-(1+SGL_EXP_LENGTH)))	\
+    Sall(sgl_value) = ((FLT_MAX_EXP+SGL_BIAS) << (32-(1+SGL_EXP_LENGTH)))	\
 			| ((1<<(32-(1+SGL_EXP_LENGTH))) - 1)
 #define Sgl_setlargestnegative(sgl_value)				\
-    Sall(sgl_value) = ((SGL_EMAX+SGL_BIAS) << (32-(1+SGL_EXP_LENGTH)))	\
+    Sall(sgl_value) = ((FLT_MAX_EXP+SGL_BIAS) << (32-(1+SGL_EXP_LENGTH)))	\
 			| ((1<<(32-(1+SGL_EXP_LENGTH))) - 1 ) | (1<<31)
 
 #define Sgl_setnegativeinfinity(sgl_value)	\
@@ -229,11 +229,11 @@
     ((1<<SGL_EXP_LENGTH) | SGL_INFINITY_EXPONENT) << (32-(1+SGL_EXP_LENGTH))
 #define Sgl_setlargest(sgl_value,sign)					\
     Sall(sgl_value) = ((sign) << 31) |					\
-	(((SGL_EMAX+SGL_BIAS) << (32-(1+SGL_EXP_LENGTH)))		\
+	(((FLT_MAX_EXP+SGL_BIAS) << (32-(1+SGL_EXP_LENGTH)))		\
 	  | ((1 << (32-(1+SGL_EXP_LENGTH))) - 1 ))
 #define Sgl_setlargest_exponentmantissa(sgl_value)			\
     Sall(sgl_value) = (Sall(sgl_value) & (1<<31)) |			\
-	(((SGL_EMAX+SGL_BIAS) << (32-(1+SGL_EXP_LENGTH)))		\
+	(((FLT_MAX_EXP+SGL_BIAS) << (32-(1+SGL_EXP_LENGTH)))		\
 	  | ((1 << (32-(1+SGL_EXP_LENGTH))) - 1 ))
 
 /* The high bit is always zero so arithmetic or logical shifts will work. */
@@ -274,10 +274,10 @@
 
 /* Need to Initialize */
 #define Sgl_makequietnan(dest)						\
-    Sall(dest) = ((SGL_EMAX+SGL_BIAS)+1)<< (32-(1+SGL_EXP_LENGTH))	\
+    Sall(dest) = ((FLT_MAX_EXP+SGL_BIAS)+1)<< (32-(1+SGL_EXP_LENGTH))	\
 		| (1<<(32-(1+SGL_EXP_LENGTH+2)))
 #define Sgl_makesignalingnan(dest)					\
-    Sall(dest) = ((SGL_EMAX+SGL_BIAS)+1)<< (32-(1+SGL_EXP_LENGTH))	\
+    Sall(dest) = ((FLT_MAX_EXP+SGL_BIAS)+1)<< (32-(1+SGL_EXP_LENGTH))	\
 		| (1<<(32-(1+SGL_EXP_LENGTH+1)))
 
 #define Sgl_normalize(sgl_opnd,exponent)			\
@@ -335,13 +335,13 @@
 		Sgl_setzero(opnd);					\
 	}
 
-sgl_floating_point sgl_setoverflow(unsigned int);
-int sgl_fadd(sgl_floating_point *, sgl_floating_point *, sgl_floating_point *, unsigned int *);
-int sgl_fcmp(sgl_floating_point *, sgl_floating_point *, unsigned int, unsigned int *);
-int sgl_fdiv(sgl_floating_point *, sgl_floating_point *, sgl_floating_point *, unsigned int *);
-int sgl_fmpy(sgl_floating_point *, sgl_floating_point *, sgl_floating_point *, unsigned int *);
-int sgl_frem(sgl_floating_point *, sgl_floating_point *, sgl_floating_point *, unsigned int *);
-int sgl_fsqrt(sgl_floating_point *, sgl_floating_point *, unsigned int *);
-int sgl_fsub(sgl_floating_point *, sgl_floating_point *, sgl_floating_point *, unsigned int *);
-int sgl_frnd(sgl_floating_point *, sgl_floating_point *, unsigned int *);
+sgl_floating_point sgl_setoverflow __P((unsigned int));
+int sgl_fadd __P((sgl_floating_point *, sgl_floating_point *, sgl_floating_point *, unsigned int *));
+int sgl_fcmp __P((sgl_floating_point *, sgl_floating_point *, unsigned int, unsigned int *));
+int sgl_fdiv __P((sgl_floating_point *, sgl_floating_point *, sgl_floating_point *, unsigned int *));
+int sgl_fmpy __P((sgl_floating_point *, sgl_floating_point *, sgl_floating_point *, unsigned int *));
+int sgl_frem __P((sgl_floating_point *, sgl_floating_point *, sgl_floating_point *, unsigned int *));
+int sgl_fsqrt __P((sgl_floating_point *, sgl_floating_point *, unsigned int *));
+int sgl_fsub __P((sgl_floating_point *, sgl_floating_point *, sgl_floating_point *, unsigned int *));
+int sgl_frnd __P((sgl_floating_point *, sgl_floating_point *, unsigned int *));
 

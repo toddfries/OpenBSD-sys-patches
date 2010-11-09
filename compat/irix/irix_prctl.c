@@ -1,4 +1,4 @@
-/*	$NetBSD: irix_prctl.c,v 1.48 2008/07/02 19:49:58 rmind Exp $ */
+/*	$NetBSD: irix_prctl.c,v 1.34 2007/01/05 15:40:51 elad Exp $ */
 
 /*-
  * Copyright (c) 2001-2002 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: irix_prctl.c,v 1.48 2008/07/02 19:49:58 rmind Exp $");
+__KERNEL_RCSID(0, "$NetBSD: irix_prctl.c,v 1.34 2007/01/05 15:40:51 elad Exp $");
 
 #include <sys/errno.h>
 #include <sys/types.h>
@@ -41,7 +48,7 @@ __KERNEL_RCSID(0, "$NetBSD: irix_prctl.c,v 1.48 2008/07/02 19:49:58 rmind Exp $"
 #include <sys/exec.h>
 #include <sys/malloc.h>
 #include <sys/pool.h>
-#include <sys/rwlock.h>
+#include <sys/lock.h>
 #include <sys/filedesc.h>
 #include <sys/vnode.h>
 #include <sys/resourcevar.h>
@@ -71,23 +78,26 @@ struct irix_sproc_child_args {
 	struct irix_share_group *isc_share_group;
 	int isc_child_done;
 };
-static void irix_sproc_child(struct irix_sproc_child_args *);
-static int irix_sproc(void *, unsigned int, void *, void *, size_t,
-    pid_t, struct lwp *, register_t *);
-static struct irix_shared_regions_rec *irix_isrr_create(vaddr_t,
-    vsize_t, int);
+static void irix_sproc_child __P((struct irix_sproc_child_args *));
+static int irix_sproc __P((void *, unsigned int, void *, caddr_t, size_t,
+    pid_t, struct lwp *, register_t *));
+static struct irix_shared_regions_rec *irix_isrr_create __P((vaddr_t,
+    vsize_t, int));
 #ifdef DEBUG_IRIX
-static void irix_isrr_debug(struct proc *);
+static void irix_isrr_debug __P((struct proc *));
 #endif
-static void irix_isrr_cleanup(struct proc *);
+static void irix_isrr_cleanup __P((struct proc *));
 
 int
-irix_sys_prctl(struct lwp *l, const struct irix_sys_prctl_args *uap, register_t *retval)
+irix_sys_prctl(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct irix_sys_prctl_args /* {
 		syscallarg(unsigned) option;
 		syscallarg(void *) arg1;
-	} */
+	} */ *uap = v;
 	struct proc *p = l->l_proc;
 	unsigned int option = SCARG(uap, option);
 
@@ -141,10 +151,10 @@ irix_sys_prctl(struct lwp *l, const struct irix_sys_prctl_args *uap, register_t 
 		}
 
 		count = 0;
-		rw_enter(&isg->isg_lock, RW_READER);
+		(void)lockmgr(&isg->isg_lock, LK_SHARED, NULL);
 		LIST_FOREACH(iedp, &isg->isg_head, ied_sglist)
 			count++;
-		rw_exit(&isg->isg_lock);
+		(void)lockmgr(&isg->isg_lock, LK_RELEASE, NULL);
 
 		*retval = count;
 		return 0;
@@ -163,6 +173,7 @@ irix_sys_prctl(struct lwp *l, const struct irix_sys_prctl_args *uap, register_t 
 		pid_t pid = (pid_t)SCARG(uap, arg1);
 		struct irix_emuldata *ied;
 		struct proc *target;
+		kauth_cred_t pc;
 
 		if (pid == 0)
 			pid = p->p_pid;
@@ -173,9 +184,12 @@ irix_sys_prctl(struct lwp *l, const struct irix_sys_prctl_args *uap, register_t 
 		if (irix_check_exec(target) == 0)
 			return 0;
 
-		if (kauth_authorize_process(l->l_cred, KAUTH_PROCESS_CANSEE,
-		    target, KAUTH_ARG(KAUTH_REQ_PROCESS_CANSEE_ENTRY), NULL,
-		    NULL) != 0)
+		pc = l->l_cred;
+		if (!(kauth_authorize_generic(pc, KAUTH_GENERIC_ISSUSER, NULL) == 0 || \
+		    kauth_cred_getuid(pc) == kauth_cred_getuid(target->p_cred) || \
+		    kauth_cred_geteuid(pc) == kauth_cred_getuid(target->p_cred) || \
+		    kauth_cred_getuid(pc) == kauth_cred_geteuid(target->p_cred) || \
+		    kauth_cred_geteuid(pc) == kauth_cred_geteuid(target->p_cred)))
 			return EPERM;
 
 		ied = (struct irix_emuldata *)(target->p_emuldata);
@@ -195,16 +209,19 @@ irix_sys_prctl(struct lwp *l, const struct irix_sys_prctl_args *uap, register_t 
 
 
 int
-irix_sys_pidsprocsp(struct lwp *l, const struct irix_sys_pidsprocsp_args *uap, register_t *retval)
+irix_sys_pidsprocsp(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct irix_sys_pidsprocsp_args /* {
 		syscallarg(void *) entry;
 		syscallarg(unsigned) inh;
 		syscallarg(void *) arg;
-		syscallarg(void *) sp;
+		syscallarg(caddr_t) sp;
 		syscallarg(irix_size_t) len;
 		syscallarg(irix_pid_t) pid;
-	} */
+	} */ *uap = v;
 
 	/* pid is ignored for now */
 	printf("Warning: unsupported pid argument to IRIX sproc\n");
@@ -214,28 +231,34 @@ irix_sys_pidsprocsp(struct lwp *l, const struct irix_sys_pidsprocsp_args *uap, r
 }
 
 int
-irix_sys_sprocsp(struct lwp *l, const struct irix_sys_sprocsp_args *uap, register_t *retval)
+irix_sys_sprocsp(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct irix_sys_sprocsp_args /* {
 		syscallarg(void *) entry;
 		syscallarg(unsigned) inh;
 		syscallarg(void *) arg;
-		syscallarg(void *) sp;
+		syscallarg(caddr_t) sp;
 		syscallarg(irix_size_t) len;
-	} */
+	} */ *uap = v;
 
 	return irix_sproc(SCARG(uap, entry), SCARG(uap, inh), SCARG(uap, arg),
 	    SCARG(uap, sp), SCARG(uap, len), 0, l, retval);
 }
 
 int
-irix_sys_sproc(struct lwp *l, const struct irix_sys_sproc_args *uap, register_t *retval)
+irix_sys_sproc(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct irix_sys_sproc_args /* {
 		syscallarg(void *) entry;
 		syscallarg(unsigned) inh;
 		syscallarg(void *) arg;
-	} */
+	} */ *uap = v;
 	struct proc *p = l->l_proc;
 
 	return irix_sproc(SCARG(uap, entry), SCARG(uap, inh), SCARG(uap, arg),
@@ -244,7 +267,15 @@ irix_sys_sproc(struct lwp *l, const struct irix_sys_sproc_args *uap, register_t 
 
 
 static int
-irix_sproc(void *entry, unsigned int inh, void *arg, void *sp, size_t len, pid_t pid, struct lwp *l, register_t *retval)
+irix_sproc(entry, inh, arg, sp, len, pid, l, retval)
+	void *entry;
+	unsigned int inh;
+	void *arg;
+	caddr_t sp;
+	size_t len;
+	pid_t pid;
+	struct lwp *l;
+	register_t *retval;
 {
 	struct proc *p = l->l_proc;
 	int bsd_flags = 0;
@@ -266,7 +297,7 @@ irix_sproc(void *entry, unsigned int inh, void *arg, void *sp, size_t len, pid_t
 
 	if (inh & IRIX_PR_SFDS)
 		bsd_flags |= FORK_SHAREFILES;
-	if (inh & IRIX_PR_SUMASK && inh & IRIX_PR_SDIR) {
+	if (inh & (IRIX_PR_SUMASK|IRIX_PR_SDIR)) {
 		bsd_flags |= FORK_SHARECWD;
 		/* Forget them so that we don't get warning below */
 		inh &= ~(IRIX_PR_SUMASK|IRIX_PR_SDIR);
@@ -276,8 +307,6 @@ irix_sproc(void *entry, unsigned int inh, void *arg, void *sp, size_t len, pid_t
 		printf("Warning: unimplemented IRIX sproc flag PR_SUMASK\n");
 	if (inh & IRIX_PR_SDIR)
 		printf("Warning: unimplemented IRIX sproc flag PR_SDIR\n");
-	if (inh & IRIX_PR_SULIMIT)
-		bsd_flags |= FORK_SHARELIMIT;
 
 	/*
 	 * If relevant, initialize the share group structure
@@ -286,14 +315,14 @@ irix_sproc(void *entry, unsigned int inh, void *arg, void *sp, size_t len, pid_t
 	if (ied->ied_share_group == NULL) {
 		isg = malloc(sizeof(struct irix_share_group),
 		    M_EMULDATA, M_WAITOK);
-		rw_init(&isg->isg_lock);
+		lockinit(&isg->isg_lock, PZERO|PCATCH, "sharegroup", 0, 0);
 		isg->isg_refcount = 0;
 
-		rw_enter(&isg->isg_lock, RW_WRITER);
+		(void)lockmgr(&isg->isg_lock, LK_EXCLUSIVE, NULL);
 		LIST_INIT(&isg->isg_head);
 		LIST_INSERT_HEAD(&isg->isg_head, ied, ied_sglist);
 		isg->isg_refcount++;
-		rw_exit(&isg->isg_lock);
+		(void)lockmgr(&isg->isg_lock, LK_RELEASE, NULL);
 
 		ied->ied_share_group = isg;
 	}
@@ -311,7 +340,7 @@ irix_sproc(void *entry, unsigned int inh, void *arg, void *sp, size_t len, pid_t
 			sp = p->p_vmspace->vm_maxsaddr;
 
 			/* Compute new stacks's bottom address */
-			sp = (void *)trunc_page((u_long)sp - len);
+			sp = (caddr_t)trunc_page((u_long)sp - len);
 		}
 
 		/* Now map the new stack */
@@ -335,16 +364,15 @@ irix_sproc(void *entry, unsigned int inh, void *arg, void *sp, size_t len, pid_t
 
 		/* Update stack parameters for the share group members */
 		ied = (struct irix_emuldata *)p->p_emuldata;
-		stacksize = ((char *)p->p_vmspace->vm_minsaddr - (char *)sp)
-		    / PAGE_SIZE;
+		stacksize = (p->p_vmspace->vm_minsaddr - sp) / PAGE_SIZE;
 
 
-		rw_enter(&isg->isg_lock, RW_WRITER);
+		(void)lockmgr(&isg->isg_lock, LK_EXCLUSIVE, NULL);
 		LIST_FOREACH(iedp, &isg->isg_head, ied_sglist) {
-			iedp->ied_p->p_vmspace->vm_maxsaddr = (void *)sp;
+			iedp->ied_p->p_vmspace->vm_maxsaddr = (caddr_t)sp;
 			iedp->ied_p->p_vmspace->vm_ssize = stacksize;
 		}
-		rw_exit(&isg->isg_lock);
+		(void)lockmgr(&isg->isg_lock, LK_RELEASE, NULL);
 	}
 
 	/*
@@ -385,16 +413,18 @@ irix_sproc(void *entry, unsigned int inh, void *arg, void *sp, size_t len, pid_t
 }
 
 static void
-irix_sproc_child(struct irix_sproc_child_args *isc)
+irix_sproc_child(isc)
+	struct irix_sproc_child_args *isc;
 {
 	struct proc *p2 = *isc->isc_proc;
-	struct lwp *l2 = curlwp;
+	struct lwp *l2 = proc_representative_lwp(p2);
 	int inh = isc->isc_inh;
 	struct lwp *lparent = isc->isc_parent_lwp;
 	struct proc *parent = lparent->l_proc;
 	struct frame *tf = (struct frame *)l2->l_md.md_regs;
 	struct frame *ptf = (struct frame *)lparent->l_md.md_regs;
 	kauth_cred_t pc;
+	struct plimit *pl;
 	struct irix_emuldata *ied;
 	struct irix_emuldata *parent_ied;
 
@@ -438,10 +468,8 @@ irix_sproc_child(struct irix_sproc_child_args *isc)
 #endif
 				isc->isc_child_done = 1;
 				wakeup(&isc->isc_child_done);
-				mutex_enter(proc_lock);
 				killproc(p2,
 				    "failed to initialize share group VM");
-				mutex_exit(proc_lock);
 			}
 		}
 
@@ -450,9 +478,7 @@ irix_sproc_child(struct irix_sproc_child_args *isc)
 		if (error != 0) {
 			isc->isc_child_done = 1;
 			wakeup(&isc->isc_child_done);
-			mutex_enter(proc_lock);
 			killproc(p2, "failed to initialize the PRDA");
-			mutex_exit(proc_lock);
 		}
 	}
 
@@ -464,6 +490,17 @@ irix_sproc_child(struct irix_sproc_child_args *isc)
 		kauth_cred_hold(parent->p_cred);
 		p2->p_cred = parent->p_cred;
 		kauth_cred_free(pc);
+	}
+
+	/*
+	 * Handle shared process limits
+	 */
+	if (inh & IRIX_PR_SULIMIT) {
+		pl = p2->p_limit;
+		parent->p_limit->p_refcnt++;
+		p2->p_limit = parent->p_limit;
+		if(--pl->p_refcnt == 0)
+			limfree(pl);
 	}
 
 	/*
@@ -493,10 +530,10 @@ irix_sproc_child(struct irix_sproc_child_args *isc)
 	parent_ied = (struct irix_emuldata *)(parent->p_emuldata);
 	ied->ied_share_group = parent_ied->ied_share_group;
 
-	rw_enter(&ied->ied_share_group->isg_lock, RW_WRITER);
+	(void)lockmgr(&ied->ied_share_group->isg_lock, LK_EXCLUSIVE, NULL);
 	LIST_INSERT_HEAD(&ied->ied_share_group->isg_head, ied, ied_sglist);
 	ied->ied_share_group->isg_refcount++;
-	rw_exit(&ied->ied_share_group->isg_lock);
+	(void)lockmgr(&ied->ied_share_group->isg_lock, LK_RELEASE, NULL);
 
 	if (inh & IRIX_PR_SADDR)
 		ied->ied_shareaddr = 1;
@@ -516,18 +553,22 @@ irix_sproc_child(struct irix_sproc_child_args *isc)
 }
 
 int
-irix_sys_procblk(struct lwp *l, const struct irix_sys_procblk_args *uap, register_t *retval)
+irix_sys_procblk(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct irix_sys_procblk_args /* {
 		syscallarg(int) cmd;
 		syscallarg(pid_t) pid;
 		syscallarg(int) count;
-	} */
+	} */ *uap = v;
 	int cmd = SCARG(uap, cmd);
 	struct irix_emuldata *ied;
 	struct irix_emuldata *iedp;
 	struct irix_share_group *isg;
 	struct proc *target;
+	kauth_cred_t pc;
 	int oldcount;
 	struct lwp *ied_lwp;
 	int error, last_error;
@@ -538,9 +579,12 @@ irix_sys_procblk(struct lwp *l, const struct irix_sys_procblk_args *uap, registe
 		return ESRCH;
 
 	/* May we stop it? */
-	/* XXX-elad: Is hardcoding SIGSTOP here correct? */
-	if (kauth_authorize_process(l->l_cred, KAUTH_PROCESS_SIGNAL, target,
-	    KAUTH_ARG(SIGSTOP), NULL, NULL) != 0)
+	pc = l->l_cred;
+	if (!(kauth_authorize_generic(pc, KAUTH_GENERIC_ISSUSER, NULL) == 0 || \
+	    kauth_cred_getuid(pc) == kauth_cred_getuid(target->p_cred) || \
+	    kauth_cred_geteuid(pc) == kauth_cred_getuid(target->p_cred) || \
+	    kauth_cred_getuid(pc) == kauth_cred_geteuid(target->p_cred) || \
+	    kauth_cred_geteuid(pc) == kauth_cred_geteuid(target->p_cred)))
 		return EPERM;
 
 	/* Is it an IRIX process? */
@@ -582,19 +626,16 @@ irix_sys_procblk(struct lwp *l, const struct irix_sys_procblk_args *uap, registe
 			return irix_sys_procblk(l, &cup, retval);
 		}
 
-		rw_enter(&isg->isg_lock, RW_READER);
+		(void)lockmgr(&isg->isg_lock, LK_SHARED, NULL);
 		LIST_FOREACH(iedp, &isg->isg_head, ied_sglist) {
-			struct proc *p;
 			/* Recall procblk for this process */
-			p = iedp->ied_p;
-			SCARG(&cup, pid) = p->p_pid;
-			ied_lwp = LIST_FIRST(&p->p_lwps);
-			KASSERT(ied_lwp != NULL);
+			SCARG(&cup, pid) = iedp->ied_p->p_pid;
+			ied_lwp = proc_representative_lwp(iedp->ied_p);
 			error = irix_sys_procblk(ied_lwp, &cup, retval);
 			if (error != 0)
 				last_error = error;
 		}
-		rw_exit(&isg->isg_lock);
+		(void)lockmgr(&isg->isg_lock, LK_RELEASE, NULL);
 
 		return last_error;
 		break;
@@ -619,7 +660,8 @@ irix_sys_procblk(struct lwp *l, const struct irix_sys_procblk_args *uap, registe
 }
 
 int
-irix_prda_init(struct proc *p)
+irix_prda_init(p)
+	struct proc *p;
 {
 	int error;
 	struct exec_vmcmd evc;
@@ -632,10 +674,7 @@ irix_prda_init(struct proc *p)
 	evc.ev_len = sizeof(struct irix_prda);
 	evc.ev_prot = UVM_PROT_RW;
 	evc.ev_proc = *vmcmd_map_zero;
-
-	/* XXXSMP */
-	l = LIST_FIRST(&p->p_lwps);
-	KASSERT(l != NULL);
+	l = proc_representative_lwp(p);
 
 	if ((error = (*evc.ev_proc)(l, &evc)) != 0)
 		return error;
@@ -662,7 +701,10 @@ irix_prda_init(struct proc *p)
 }
 
 int
-irix_vm_fault(struct proc *p, vaddr_t vaddr, vm_prot_t access_type)
+irix_vm_fault(p, vaddr, access_type)
+	struct proc *p;
+	vaddr_t vaddr;
+	vm_prot_t access_type;
 {
 	int error;
 	struct irix_emuldata *ied;
@@ -675,10 +717,10 @@ irix_vm_fault(struct proc *p, vaddr_t vaddr, vm_prot_t access_type)
 		return uvm_fault(map, vaddr, access_type);
 
 	/* share group version */
-	rw_enter(&ied->ied_share_group->isg_lock, RW_WRITER);
+	(void)lockmgr(&ied->ied_share_group->isg_lock, LK_EXCLUSIVE, NULL);
 	error = uvm_fault(map, vaddr, access_type);
 	irix_vm_sync(p);
-	rw_exit(&ied->ied_share_group->isg_lock);
+	(void)lockmgr(&ied->ied_share_group->isg_lock, LK_RELEASE, NULL);
 
 	return error;
 }
@@ -687,7 +729,8 @@ irix_vm_fault(struct proc *p, vaddr_t vaddr, vm_prot_t access_type)
  * Propagate changes to address space to other members of the share group
  */
 void
-irix_vm_sync(struct proc *p)
+irix_vm_sync(p)
+	struct proc *p;
 {
 	struct proc *pp;
 	struct irix_emuldata *iedp;
@@ -732,18 +775,18 @@ irix_vm_sync(struct proc *p)
 				break;
 		}
 
-		if (error) {
-			mutex_enter(proc_lock);
+		if (error)
 			killproc(pp, "failed to keep share group VM in sync");
-			mutex_exit(proc_lock);
-		}
 	}
 
 	return;
 }
 
 static struct irix_shared_regions_rec *
-irix_isrr_create(vaddr_t start, vsize_t len, int shared)
+irix_isrr_create(start, len, shared)
+	vaddr_t start;
+	vsize_t len;
+	int shared;
 {
 	struct irix_shared_regions_rec *new_isrr;
 
@@ -761,7 +804,11 @@ irix_isrr_create(vaddr_t start, vsize_t len, int shared)
  * overlaping or be included in an existing region.
  */
 void
-irix_isrr_insert(vaddr_t start, vsize_t len, int shared, struct proc *p)
+irix_isrr_insert(start, len, shared, p)
+	vaddr_t start;
+	vsize_t len;
+	int shared;
+	struct proc *p;
 {
 	struct irix_emuldata *ied = (struct irix_emuldata *)p->p_emuldata;
 	struct irix_shared_regions_rec *isrr;
@@ -879,7 +926,8 @@ irix_isrr_insert(vaddr_t start, vsize_t len, int shared, struct proc *p)
  * (2) merging contiguous regions with the same status
  */
 static void
-irix_isrr_cleanup(struct proc *p)
+irix_isrr_cleanup(p)
+	struct proc *p;
 {
 	struct irix_emuldata *ied = (struct irix_emuldata *)p->p_emuldata;
 	struct irix_shared_regions_rec *isrr;
@@ -914,7 +962,8 @@ irix_isrr_cleanup(struct proc *p)
 
 #ifdef DEBUG_IRIX
 static void
-irix_isrr_debug(struct proc *p)
+irix_isrr_debug(p)
+	struct proc *p;
 {
 	struct irix_emuldata *ied = (struct irix_emuldata *)p->p_emuldata;
 	struct irix_shared_regions_rec *isrr;

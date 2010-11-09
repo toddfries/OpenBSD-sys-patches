@@ -1,4 +1,4 @@
-/*	$NetBSD: dk.c,v 1.43 2009/01/13 13:35:53 yamt Exp $	*/
+/*	$NetBSD: dk.c,v 1.29 2007/10/08 16:41:11 ad Exp $	*/
 
 /*-
  * Copyright (c) 2004, 2005, 2006, 2007 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: dk.c,v 1.43 2009/01/13 13:35:53 yamt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: dk.c,v 1.29 2007/10/08 16:41:11 ad Exp $");
 
 #include "opt_dkwedge.h"
 
@@ -143,8 +150,7 @@ dkwedge_attach(struct device *parent, struct device *self,
     void *aux)
 {
 
-	if (!pmf_device_register(self, NULL, NULL))
-		aprint_error_dev(self, "couldn't establish power handler\n");
+	/* Nothing to do. */
 }
 
 /*
@@ -156,13 +162,12 @@ static int
 dkwedge_detach(struct device *self, int flags)
 {
 
-	pmf_device_deregister(self);
 	/* Always succeeds. */
 	return (0);
 }
 
 CFDRIVER_DECL(dk, DV_DISK, NULL);
-CFATTACH_DECL_NEW(dk, 0,
+CFATTACH_DECL(dk, sizeof(struct device),
 	      dkwedge_match, dkwedge_attach, dkwedge_detach, NULL);
 
 /*
@@ -397,25 +402,24 @@ dkwedge_add(struct dkwedge_info *dkw)
 	}
 
 	/* Return the devname to the caller. */
-	strlcpy(dkw->dkw_devname, device_xname(sc->sc_dev),
-		sizeof(dkw->dkw_devname));
+	strcpy(dkw->dkw_devname, sc->sc_dev->dv_xname);
 
 	/*
 	 * XXX Really ought to make the disk_attach() and the changing
 	 * of state to RUNNING atomic.
 	 */
 
-	disk_init(&sc->sc_dk, device_xname(sc->sc_dev), NULL);
+	disk_init(&sc->sc_dk, sc->sc_dev->dv_xname, NULL);
 	disk_attach(&sc->sc_dk);
 
 	/* Disk wedge is ready for use! */
 	sc->sc_state = DKW_STATE_RUNNING;
 
 	/* Announce our arrival. */
-	aprint_normal("%s at %s: %s\n", device_xname(sc->sc_dev), pdk->dk_name,
+	aprint_normal("%s at %s: %s\n", sc->sc_dev->dv_xname, pdk->dk_name,
 	    sc->sc_wname);	/* XXX Unicode */
 	aprint_normal("%s: %"PRIu64" blocks at %"PRId64", type: %s\n",
-	    device_xname(sc->sc_dev), sc->sc_size, sc->sc_offset, sc->sc_ptype);
+	    sc->sc_dev->dv_xname, sc->sc_size, sc->sc_offset, sc->sc_ptype);
 
 	return (0);
 }
@@ -439,7 +443,7 @@ dkwedge_del(struct dkwedge_info *dkw)
 	rw_enter(&dkwedges_lock, RW_WRITER);
 	for (unit = 0; unit < ndkwedges; unit++) {
 		if ((sc = dkwedges[unit]) != NULL &&
-		    strcmp(device_xname(sc->sc_dev), dkw->dkw_devname) == 0 &&
+		    strcmp(sc->sc_dev->dv_xname, dkw->dkw_devname) == 0 &&
 		    strcmp(sc->sc_parent->dk_name, dkw->dkw_parent) == 0) {
 			/* Mark the wedge as dying. */
 			sc->sc_state = DKW_STATE_DYING;
@@ -480,7 +484,7 @@ dkwedge_del(struct dkwedge_info *dkw)
 		if (sc->sc_parent->dk_rawopens-- == 1) {
 			KASSERT(sc->sc_parent->dk_rawvp != NULL);
 			(void) vn_close(sc->sc_parent->dk_rawvp, FREAD | FWRITE,
-			    NOCRED);
+					NOCRED, curlwp);
 			sc->sc_parent->dk_rawvp = NULL;
 		}
 		sc->sc_dk.dk_openmask = 0;
@@ -489,7 +493,7 @@ dkwedge_del(struct dkwedge_info *dkw)
 	mutex_exit(&sc->sc_dk.dk_openlock);
 
 	/* Announce our departure. */
-	aprint_normal("%s at %s (%s) deleted\n", device_xname(sc->sc_dev),
+	aprint_normal("%s at %s (%s) deleted\n", sc->sc_dev->dv_xname,
 	    sc->sc_parent->dk_name,
 	    sc->sc_wname);	/* XXX Unicode */
 
@@ -506,7 +510,6 @@ dkwedge_del(struct dkwedge_info *dkw)
 
 	/* Detach from the disk list. */
 	disk_detach(&sc->sc_dk);
-	disk_destroy(&sc->sc_dk);
 
 	/* Poof. */
 	rw_enter(&dkwedges_lock, RW_WRITER);
@@ -539,8 +542,7 @@ dkwedge_delall(struct disk *pdk)
 			return;
 		}
 		strcpy(dkw.dkw_parent, pdk->dk_name);
-		strlcpy(dkw.dkw_devname, device_xname(sc->sc_dev),
-			sizeof(dkw.dkw_devname));
+		strcpy(dkw.dkw_devname, sc->sc_dev->dv_xname);
 		mutex_exit(&pdk->dk_openlock);
 		(void) dkwedge_del(&dkw);
 	}
@@ -591,8 +593,7 @@ dkwedge_list(struct disk *pdk, struct dkwedge_list *dkwl, struct lwp *l)
 		if (sc->sc_state != DKW_STATE_RUNNING)
 			continue;
 
-		strlcpy(dkw.dkw_devname, device_xname(sc->sc_dev),
-			sizeof(dkw.dkw_devname));
+		strcpy(dkw.dkw_devname, sc->sc_dev->dv_xname);
 		memcpy(dkw.dkw_wname, sc->sc_wname, sizeof(dkw.dkw_wname));
 		dkw.dkw_wname[sizeof(dkw.dkw_wname) - 1] = '\0';
 		strcpy(dkw.dkw_parent, sc->sc_parent->dk_name);
@@ -672,14 +673,14 @@ dkwedge_set_bootwedge(struct device *parent, daddr_t startblk, uint64_t nblks)
 	for (i = 0; i < ndkwedges; i++) {
 		if ((sc = dkwedges[i]) == NULL)
 			continue;
-		if (strcmp(sc->sc_parent->dk_name, device_xname(parent)) == 0 &&
+		if (strcmp(sc->sc_parent->dk_name, parent->dv_xname) == 0 &&
 		    sc->sc_offset == startblk &&
 		    sc->sc_size == nblks) {
 			if (booted_wedge) {
 				printf("WARNING: double match for boot wedge "
 				    "(%s, %s)\n",
-				    device_xname(booted_wedge),
-				    device_xname(sc->sc_dev));
+				    booted_wedge->dv_xname,
+				    sc->sc_dev->dv_xname);
 				continue;
 			}
 			booted_device = parent;
@@ -809,7 +810,7 @@ dkwedge_discover(struct disk *pdk)
 		goto out;
 	}
 
-	error = VOP_OPEN(vp, FREAD, NOCRED);
+	error = VOP_OPEN(vp, FREAD, NOCRED, 0);
 	if (error) {
 		aprint_error("%s: unable to open device, error = %d\n",
 		    pdk->dk_name, error);
@@ -831,7 +832,7 @@ dkwedge_discover(struct disk *pdk)
 		}
 	}
 
-	error = vn_close(vp, FREAD, NOCRED);
+	error = vn_close(vp, FREAD, NOCRED, curlwp);
 	if (error) {
 		aprint_error("%s: unable to close device, error = %d\n",
 		    pdk->dk_name, error);
@@ -844,31 +845,27 @@ dkwedge_discover(struct disk *pdk)
 /*
  * dkwedge_read:
  *
- *	Read some data from the specified disk, used for
+ *	Read the some data from the specified disk, used for
  *	partition discovery.
  */
 int
 dkwedge_read(struct disk *pdk, struct vnode *vp, daddr_t blkno,
     void *tbuf, size_t len)
 {
-	struct buf *bp;
-	int result;
+	struct buf b;
 
-	bp = getiobuf(vp, true);
+	BUF_INIT(&b);
 
-	bp->b_dev = vp->v_rdev;
-	bp->b_blkno = blkno;
-	bp->b_bcount = len;
-	bp->b_resid = len;
-	bp->b_flags = B_READ;
-	bp->b_data = tbuf;
-	SET(bp->b_cflags, BC_BUSY);	/* mark buffer busy */
+	b.b_vp = vp;
+	b.b_dev = vp->v_rdev;
+	b.b_blkno = blkno;
+	b.b_bcount = b.b_resid = len;
+	b.b_flags = B_READ;
+	b.b_proc = curproc;
+	b.b_data = tbuf;
 
-	VOP_STRATEGY(vp, bp);
-	result = biowait(bp);
-	putiobuf(bp);
-
-	return result;
+	VOP_STRATEGY(vp, &b);
+	return (biowait(&b));
 }
 
 /*
@@ -926,15 +923,13 @@ dkopen(dev_t dev, int flags, int fmt, struct lwp *l)
 				vrele(vp);
 				goto popen_fail;
 			}
-			error = VOP_OPEN(vp, FREAD | FWRITE, NOCRED);
+			error = VOP_OPEN(vp, FREAD | FWRITE, NOCRED, 0);
 			if (error) {
 				vput(vp);
 				goto popen_fail;
 			}
 			/* VOP_OPEN() doesn't do this for us. */
-			mutex_enter(&vp->v_interlock);
 			vp->v_writecount++;
-			mutex_exit(&vp->v_interlock);
 			VOP_UNLOCK(vp, 0);
 			sc->sc_parent->dk_rawvp = vp;
 		}
@@ -980,7 +975,7 @@ dkclose(dev_t dev, int flags, int fmt, struct lwp *l)
 		if (sc->sc_parent->dk_rawopens-- == 1) {
 			KASSERT(sc->sc_parent->dk_rawvp != NULL);
 			error = vn_close(sc->sc_parent->dk_rawvp,
-			    FREAD | FWRITE, NOCRED);
+					 FREAD | FWRITE, NOCRED, l);
 			sc->sc_parent->dk_rawvp = NULL;
 		}
 	}
@@ -1021,7 +1016,7 @@ dkstrategy(struct buf *bp)
 	/* Place it in the queue and start I/O on the unit. */
 	s = splbio();
 	sc->sc_iopend++;
-	bufq_put(sc->sc_bufq, bp);
+	BUFQ_PUT(sc->sc_bufq, bp);
 	dkstart(sc);
 	splx(s);
 	return;
@@ -1040,13 +1035,12 @@ dkstrategy(struct buf *bp)
 static void
 dkstart(struct dkwedge_softc *sc)
 {
-	struct vnode *vp;
 	struct buf *bp, *nbp;
 
 	/* Do as much work as has been enqueued. */
-	while ((bp = bufq_peek(sc->sc_bufq)) != NULL) {
+	while ((bp = BUFQ_PEEK(sc->sc_bufq)) != NULL) {
 		if (sc->sc_state != DKW_STATE_RUNNING) {
-			(void) bufq_get(sc->sc_bufq);
+			(void) BUFQ_GET(sc->sc_bufq);
 			if (sc->sc_iopend-- == 1 &&
 			    (sc->sc_flags & DK_F_WAIT_DRAIN) != 0) {
 				sc->sc_flags &= ~DK_F_WAIT_DRAIN;
@@ -1060,7 +1054,7 @@ dkstart(struct dkwedge_softc *sc)
 		/* Instrumentation. */
 		disk_busy(&sc->sc_dk);
 
-		nbp = getiobuf(sc->sc_parent->dk_rawvp, false);
+		nbp = getiobuf_nowait();
 		if (nbp == NULL) {
 			/*
 			 * No resources to run this request; leave the
@@ -1072,27 +1066,23 @@ dkstart(struct dkwedge_softc *sc)
 			return;
 		}
 
-		(void) bufq_get(sc->sc_bufq);
+		(void) BUFQ_GET(sc->sc_bufq);
 
+		BUF_INIT(nbp);
 		nbp->b_data = bp->b_data;
-		nbp->b_flags = bp->b_flags;
-		nbp->b_oflags = bp->b_oflags;
-		nbp->b_cflags = bp->b_cflags;
+		nbp->b_flags = bp->b_flags | B_CALL;
 		nbp->b_iodone = dkiodone;
 		nbp->b_proc = bp->b_proc;
 		nbp->b_blkno = bp->b_rawblkno;
 		nbp->b_dev = sc->sc_parent->dk_rawvp->v_rdev;
+		nbp->b_vp = sc->sc_parent->dk_rawvp;
 		nbp->b_bcount = bp->b_bcount;
 		nbp->b_private = bp;
 		BIO_COPYPRIO(nbp, bp);
 
-		vp = nbp->b_vp;
-		if ((nbp->b_flags & B_READ) == 0) {
-			mutex_enter(&vp->v_interlock);
-			vp->v_numoutput++;
-			mutex_exit(&vp->v_interlock);
-		}
-		VOP_STRATEGY(vp, nbp);
+		if ((nbp->b_flags & B_READ) == 0)
+			V_INCR_NUMOUTPUT(nbp->b_vp);
+		VOP_STRATEGY(nbp->b_vp, nbp);
 	}
 }
 
@@ -1203,14 +1193,13 @@ dkioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 		else
 			error = VOP_IOCTL(sc->sc_parent->dk_rawvp,
 					  cmd, data, flag,
-					  l != NULL ? l->l_cred : NOCRED);
+					  l != NULL ? l->l_cred : NOCRED, l);
 		break;
 	case DIOCGWEDGEINFO:
 	    {
 	    	struct dkwedge_info *dkw = (void *) data;
 
-		strlcpy(dkw->dkw_devname, device_xname(sc->sc_dev),
-			sizeof(dkw->dkw_devname));
+		strcpy(dkw->dkw_devname, sc->sc_dev->dv_xname);
 	    	memcpy(dkw->dkw_wname, sc->sc_wname, sizeof(dkw->dkw_wname));
 		dkw->dkw_wname[sizeof(dkw->dkw_wname) - 1] = '\0';
 		strcpy(dkw->dkw_parent, sc->sc_parent->dk_name);

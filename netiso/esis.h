@@ -1,4 +1,4 @@
-/*	$NetBSD: esis.h,v 1.23 2007/12/25 18:33:48 perry Exp $	*/
+/*	$NetBSD: esis.h,v 1.19 2005/12/11 12:25:12 christos Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993
@@ -85,7 +85,7 @@ struct esis_fixed {
 	u_char          esis_ht_lsb;	/* holding time (seconds) low byte */
 	u_char          esis_cksum_msb;	/* checksum high byte */
 	u_char          esis_cksum_lsb;	/* checksum low byte */
-} __packed;
+} __attribute__((packed));
 /*
  * Values for ESIS datagram options
  */
@@ -134,7 +134,7 @@ int esis_usrreq (struct socket *, int, struct mbuf *, struct mbuf *,
 void esis_input (struct mbuf *, ...);
 void esis_rdoutput (struct snpa_hdr *, struct mbuf *, struct clnp_optidx *,
 			struct iso_addr *, struct rtentry *);
-int esis_insert_addr (void **, int *, const struct iso_addr *, struct mbuf *,
+int esis_insert_addr (caddr_t *, int *, struct iso_addr *, struct mbuf *,
 			  int);
 void esis_eshinput (struct mbuf *, struct snpa_hdr *);
 void esis_ishinput (struct mbuf *, struct snpa_hdr *);
@@ -144,7 +144,7 @@ void esis_shoutput (struct ifnet *, int, int, const void *, int,
 	               struct iso_addr *);
 void isis_input (struct mbuf *, ...);
 int isis_output (struct mbuf *, ...);
-void *esis_ctlinput(int, const struct sockaddr *, void *);
+void *esis_ctlinput (int, struct sockaddr *, void *);
 #endif /* _KERNEL */
 
 #endif /* !_NETISO_ESIS_H_ */

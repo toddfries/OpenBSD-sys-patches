@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Module Name: nsnames - Name manipulation and search
- *              $Revision: 1.5 $
+ *              xRevision: 1.94 $
  *
  ******************************************************************************/
 
@@ -9,7 +9,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2008, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2006, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -114,6 +114,9 @@
  *
  *****************************************************************************/
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: nsnames.c,v 1.2 2006/05/14 21:38:18 elad Exp $");
+
 #define __NSNAMES_C__
 
 #include "acpi.h"
@@ -123,6 +126,14 @@
 
 #define _COMPONENT          ACPI_NAMESPACE
         ACPI_MODULE_NAME    ("nsnames")
+
+/* Local prototypes */
+
+static void
+AcpiNsBuildExternalPath (
+    ACPI_NAMESPACE_NODE     *Node,
+    ACPI_SIZE               Size,
+    char                    *NameBuffer);
 
 
 /*******************************************************************************
@@ -140,7 +151,7 @@
  *
  ******************************************************************************/
 
-void
+static void
 AcpiNsBuildExternalPath (
     ACPI_NAMESPACE_NODE     *Node,
     ACPI_SIZE               Size,
@@ -221,7 +232,7 @@ AcpiNsGetExternalPathname (
     ACPI_SIZE               Size;
 
 
-    ACPI_FUNCTION_TRACE_PTR (NsGetExternalPathname, Node);
+    ACPI_FUNCTION_TRACE_PTR ("NsGetExternalPathname", Node);
 
 
     /* Calculate required buffer size based on depth below root */
@@ -230,7 +241,7 @@ AcpiNsGetExternalPathname (
 
     /* Allocate a buffer to be returned to caller */
 
-    NameBuffer = ACPI_ALLOCATE_ZEROED (Size);
+    NameBuffer = ACPI_MEM_CALLOCATE (Size);
     if (!NameBuffer)
     {
         ACPI_ERROR ((AE_INFO, "Allocation failure"));
@@ -277,12 +288,6 @@ AcpiNsGetPathnameLength (
 
     while (NextNode && (NextNode != AcpiGbl_RootNode))
     {
-        if (ACPI_GET_DESCRIPTOR_TYPE (NextNode) != ACPI_DESC_TYPE_NAMED)
-        {
-            ACPI_ERROR ((AE_INFO, "Invalid NS Node (%p) while traversing path",
-                NextNode));
-            return 0;
-        }
         Size += ACPI_PATH_SEGMENT_LENGTH;
         NextNode = AcpiNsGetParentNode (NextNode);
     }
@@ -320,7 +325,7 @@ AcpiNsHandleToPathname (
     ACPI_SIZE               RequiredSize;
 
 
-    ACPI_FUNCTION_TRACE_PTR (NsHandleToPathname, TargetHandle);
+    ACPI_FUNCTION_TRACE_PTR ("NsHandleToPathname", TargetHandle);
 
 
     Node = AcpiNsMapHandleToNode (TargetHandle);

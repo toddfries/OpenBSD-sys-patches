@@ -1,4 +1,4 @@
-/*	$NetBSD: uvm_init.c,v 1.34 2008/10/18 03:46:22 rmind Exp $	*/
+/*	$NetBSD: uvm_init.c,v 1.29 2007/08/18 00:21:11 ad Exp $	*/
 
 /*
  *
@@ -39,15 +39,13 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: uvm_init.c,v 1.34 2008/10/18 03:46:22 rmind Exp $");
+__KERNEL_RCSID(0, "$NetBSD: uvm_init.c,v 1.29 2007/08/18 00:21:11 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/debug.h>
 #include <sys/file.h>
 #include <sys/filedesc.h>
 #include <sys/resourcevar.h>
-#include <sys/kmem.h>
 #include <sys/mman.h>
 #include <sys/proc.h>
 #include <sys/malloc.h>
@@ -55,7 +53,6 @@ __KERNEL_RCSID(0, "$NetBSD: uvm_init.c,v 1.34 2008/10/18 03:46:22 rmind Exp $");
 
 #include <uvm/uvm.h>
 #include <uvm/uvm_pdpolicy.h>
-#include <uvm/uvm_readahead.h>
 
 /*
  * struct uvm: we store most global vars in this structure to make them
@@ -66,8 +63,8 @@ struct uvm uvm;		/* decl */
 struct uvmexp uvmexp;	/* decl */
 struct uvm_object *uvm_kernel_object;
 
-kmutex_t uvm_pageqlock;
 kmutex_t uvm_fpageqlock;
+kmutex_t uvm_pagedaemon_lock;
 kmutex_t uvm_kentry_lock;
 kmutex_t uvm_swap_data_lock;
 kmutex_t uvm_scheduler_mutex;
@@ -137,10 +134,6 @@ uvm_init(void)
 
 	kmeminit();
 
-#ifdef DEBUG
-	debug_init();
-#endif
-
 	/*
 	 * step 7: init all pagers and the pager_map.
 	 */
@@ -154,6 +147,18 @@ uvm_init(void)
 	uvm_loan_init();
 
 	/*
+	 * the VM system is now up!  now that malloc is up we can resize the
+	 * <obj,off> => <page> hash table for general use and enable paging
+	 * of kernel objects.
+	 */
+
+	uvm_page_rehash();
+	uao_create(VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS,
+	    UAO_FLAG_KERNSWAP);
+
+	uvmpdpol_reinit();
+
+	/*
 	 * Initialize pools.  This must be done before anyone manipulates
 	 * any vm_maps because we use a pool for some map entry structures.
 	 */
@@ -161,33 +166,8 @@ uvm_init(void)
 	pool_subsystem_init();
 
 	/*
-	 * init slab memory allocator kmem(9).
-	 */
-
-	kmem_init();
-
-	/*
-	 * the VM system is now up!  now that kmem is up we can resize the
-	 * <obj,off> => <page> hash table for general use and enable paging
-	 * of kernel objects.
-	 */
-
-	uao_create(VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS,
-	    UAO_FLAG_KERNSWAP);
-
-	uvmpdpol_reinit();
-
-	/*
 	 * init anonymous memory systems
 	 */
 
 	uvm_anon_init();
-
-	uvm_uarea_init();
-
-	/*
-	 * init readahead module
-	 */
-
-	uvm_ra_init();
 }

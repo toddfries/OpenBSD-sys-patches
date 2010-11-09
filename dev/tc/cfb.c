@@ -1,11 +1,7 @@
-/* $NetBSD: cfb.c,v 1.56 2008/12/17 20:51:34 cegger Exp $ */
+/* $NetBSD: cfb.c,v 1.53 2007/10/19 12:01:19 ad Exp $ */
 
-/*-
- * Copyright (c) 1998, 1999 The NetBSD Foundation, Inc.
- * All rights reserved.
- *
- * This code is derived from software contributed to The NetBSD Foundation
- * by Tohru Nishimura.
+/*
+ * Copyright (c) 1998, 1999 Tohru Nishimura.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -15,22 +11,27 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed by Tohru Nishimura
+ *	for the NetBSD Project.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission
  *
- * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
- * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
- * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
- * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: cfb.c,v 1.56 2008/12/17 20:51:34 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cfb.c,v 1.53 2007/10/19 12:01:19 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -116,6 +117,7 @@ struct hwcursor64 {
 };
 
 struct cfb_softc {
+	struct device sc_dev;
 	vaddr_t sc_vaddr;
 	size_t sc_size;
 	struct rasops_info *sc_ri;
@@ -136,10 +138,10 @@ struct cfb_softc {
 #define	CX_BT459_OFFSET	0x200000
 #define	CX_OFFSET_IREQ	0x300000	/* Interrupt req. control */
 
-static int  cfbmatch(device_t, cfdata_t, void *);
-static void cfbattach(device_t, device_t, void *);
+static int  cfbmatch(struct device *, struct cfdata *, void *);
+static void cfbattach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(cfb, sizeof(struct cfb_softc),
+CFATTACH_DECL(cfb, sizeof(struct cfb_softc),
     cfbmatch, cfbattach, NULL, NULL);
 
 static void cfb_common_init(struct rasops_info *);
@@ -233,7 +235,7 @@ static const u_int8_t shuffle[256] = {
 };
 
 static int
-cfbmatch(device_t parent, cfdata_t match, void *aux)
+cfbmatch(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct tc_attach_args *ta = aux;
 
@@ -244,7 +246,7 @@ cfbmatch(device_t parent, cfdata_t match, void *aux)
 }
 
 static void
-cfbattach(device_t parent, device_t self, void *aux)
+cfbattach(struct device *parent, struct device *self, void *aux)
 {
 	struct cfb_softc *sc = device_private(self);
 	struct tc_attach_args *ta = aux;
@@ -258,12 +260,13 @@ cfbattach(device_t parent, device_t self, void *aux)
 		sc->nscreens = 1;
 	}
 	else {
-		ri = malloc(sizeof(struct rasops_info),
-			M_DEVBUF, M_NOWAIT|M_ZERO);
+		MALLOC(ri, struct rasops_info *, sizeof(struct rasops_info),
+			M_DEVBUF, M_NOWAIT);
 		if (ri == NULL) {
 			printf(": can't alloc memory\n");
 			return;
 		}
+		memset(ri, 0, sizeof(struct rasops_info));
 
 		ri->ri_hw = (void *)ta->ta_addr;
 		cfb_common_init(ri);

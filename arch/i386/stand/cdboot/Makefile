@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile,v 1.9 2009/02/14 13:52:51 abs Exp $
+#	$NetBSD: Makefile,v 1.6 2006/06/25 14:35:18 lukem Exp $
 
 S=	${.CURDIR}/../../../..
 
@@ -12,10 +12,6 @@ LIBC=		# nothing
 
 PRIMARY_LOAD_ADDRESS=0x600
 SECONDARY_LOAD_ADDRESS=0x10000
-
-PIE_CFLAGS=
-PIE_LDFLAGS=
-PIE_AFLAGS=
 
 .include <bsd.own.mk>
 
@@ -33,7 +29,7 @@ CPPFLAGS+= -DPRIMARY_LOAD_ADDRESS=${PRIMARY_LOAD_ADDRESS}
 CPPFLAGS+= -DSECONDARY_LOAD_ADDRESS=${SECONDARY_LOAD_ADDRESS}
 #CPPFLAGS+= -DDISABLE_KEYPRESS
 
-.if ${MACHINE_ARCH} == "x86_64"
+.if ${MACHINE} == "amd64"
 LDFLAGS+=  -Wl,-m,elf_i386
 AFLAGS+=   -m32
 .endif
@@ -61,8 +57,7 @@ CLEANFILES+= ${PROG}.tmp
 ${PROG}: ${OBJS}
 	${_MKTARGET_LINK}
 	${CC} -o ${PROG}.tmp ${LDFLAGS} -Wl,-Ttext,${PRIMARY_LOAD_ADDRESS} ${OBJS}
-	@ set -- $$( ${NM} -t d ${PROG}.tmp | grep '\<free_space\>' \
-		    | ${TOOL_SED} 's/^0*//'  ); \
+	@ set -- $$( ${NM} -t d ${PROG}.tmp | grep '\<free_space\>' | sed 's/^0*//'  ); \
 		echo "#### There are $$1 free bytes in ${PROG}"
 	${OBJCOPY} -O binary ${PROG}.tmp ${PROG}
 	rm -f ${PROG}.tmp

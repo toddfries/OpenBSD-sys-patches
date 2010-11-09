@@ -1,4 +1,4 @@
-/*	$NetBSD: subr_bufq.c,v 1.18 2009/01/19 14:54:28 yamt Exp $	*/
+/*	$NetBSD: subr_bufq.c,v 1.13 2007/07/29 12:15:45 ad Exp $	*/
 /*	NetBSD: subr_disk.c,v 1.70 2005/08/20 12:00:01 yamt Exp $	*/
 
 /*-
@@ -17,6 +17,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -68,14 +75,14 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: subr_bufq.c,v 1.18 2009/01/19 14:54:28 yamt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: subr_bufq.c,v 1.13 2007/07/29 12:15:45 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/buf.h>
 #include <sys/bufq.h>
 #include <sys/bufq_impl.h>
-#include <sys/kmem.h>
+#include <sys/malloc.h>
 #include <sys/sysctl.h>
 
 BUFQ_DEFINE(dummy, 0, NULL); /* so that bufq_strats won't be empty */
@@ -147,7 +154,7 @@ bufq_alloc(struct bufq_state **bufqp, const char *strategy, int flags)
 	printf("bufq_alloc: using '%s'\n", bsp->bs_name);
 #endif
 
-	*bufqp = bufq = kmem_zalloc(sizeof(*bufq), KM_SLEEP);
+	*bufqp = bufq = malloc(sizeof(*bufq), M_DEVBUF, M_WAITOK | M_ZERO);
 	bufq->bq_flags = flags;
 	bufq->bq_strat = bsp;
 	(*bsp->bs_initfn)(bufq);
@@ -177,13 +184,6 @@ bufq_peek(struct bufq_state *bufq)
 	return (*bufq->bq_get)(bufq, 0);
 }
 
-struct buf *
-bufq_cancel(struct bufq_state *bufq, struct buf *bp)
-{
-
-	return (*bufq->bq_cancel)(bufq, bp);
-}
-
 /*
  * Drain a device buffer queue.
  */
@@ -192,7 +192,7 @@ bufq_drain(struct bufq_state *bufq)
 {
 	struct buf *bp;
 
-	while ((bp = bufq_get(bufq)) != NULL) {
+	while ((bp = BUFQ_GET(bufq)) != NULL) {
 		bp->b_error = EIO;
 		bp->b_resid = bp->b_bcount;
 		biodone(bp);
@@ -206,10 +206,11 @@ void
 bufq_free(struct bufq_state *bufq)
 {
 
-	KASSERT(bufq_peek(bufq) == NULL);
+	KASSERT(bufq->bq_private != NULL);
+	KASSERT(BUFQ_PEEK(bufq) == NULL);
 
-	bufq->bq_fini(bufq);
-	kmem_free(bufq, sizeof(*bufq));
+	free(bufq->bq_private, M_DEVBUF);
+	free(bufq, M_DEVBUF);
 }
 
 /*
@@ -230,8 +231,8 @@ bufq_move(struct bufq_state *dst, struct bufq_state *src)
 {
 	struct buf *bp;
 
-	while ((bp = bufq_get(src)) != NULL) {
-		bufq_put(dst, bp);
+	while ((bp = BUFQ_GET(src)) != NULL) {
+		BUFQ_PUT(dst, bp);
 	}
 }
 

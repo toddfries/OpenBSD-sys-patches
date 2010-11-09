@@ -1,4 +1,4 @@
-/*	$NetBSD: ufs_vfsops.c,v 1.39 2008/05/06 18:43:45 ad Exp $	*/
+/*	$NetBSD: ufs_vfsops.c,v 1.32 2007/01/04 16:55:30 elad Exp $	*/
 
 /*
  * Copyright (c) 1991, 1993, 1994
@@ -37,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ufs_vfsops.c,v 1.39 2008/05/06 18:43:45 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ufs_vfsops.c,v 1.32 2007/01/04 16:55:30 elad Exp $");
 
 #if defined(_KERNEL_OPT)
 #include "opt_ffs.h"
@@ -66,7 +66,8 @@ __KERNEL_RCSID(0, "$NetBSD: ufs_vfsops.c,v 1.39 2008/05/06 18:43:45 ad Exp $");
 /* how many times ufs_init() was called */
 static int ufs_initcount = 0;
 
-pool_cache_t ufs_direct_cache;
+POOL_INIT(ufs_direct_pool, sizeof(struct direct), 0, 0, 0, "ufsdirpl",
+    &pool_allocator_nointr);
 
 /*
  * Make a filesystem operational.
@@ -74,7 +75,7 @@ pool_cache_t ufs_direct_cache;
  */
 /* ARGSUSED */
 int
-ufs_start(struct mount *mp, int flags)
+ufs_start(struct mount *mp, int flags, struct lwp *l)
 {
 
 	return (0);
@@ -99,9 +100,8 @@ ufs_root(struct mount *mp, struct vnode **vpp)
  * Do operations associated with quotas
  */
 int
-ufs_quotactl(struct mount *mp, int cmds, uid_t uid, void *arg)
+ufs_quotactl(struct mount *mp, int cmds, uid_t uid, void *arg, struct lwp *l)
 {
-	struct lwp *l = curlwp;
 
 #ifndef QUOTA
 	(void) mp;
@@ -133,11 +133,9 @@ ufs_quotactl(struct mount *mp, int cmds, uid_t uid, void *arg)
 	type = cmds & SUBCMDMASK;
 	if ((u_int)type >= MAXQUOTAS)
 		return (EINVAL);
-	error = vfs_busy(mp, NULL);
-	if (error != 0)
-		return (error);
+	if (vfs_busy(mp, LK_NOWAIT, 0))
+		return (0);
 
-	mutex_enter(&mp->mnt_updating);
 	switch (cmd) {
 
 	case Q_QUOTAON:
@@ -167,8 +165,7 @@ ufs_quotactl(struct mount *mp, int cmds, uid_t uid, void *arg)
 	default:
 		error = EINVAL;
 	}
-	mutex_exit(&mp->mnt_updating);
-	vfs_unbusy(mp, false, NULL);
+	vfs_unbusy(mp);
 	return (error);
 #endif
 }
@@ -207,8 +204,10 @@ ufs_init(void)
 	if (ufs_initcount++ > 0)
 		return;
 
-	ufs_direct_cache = pool_cache_init(sizeof(struct direct), 0, 0, 0,
-	    "ufsdir", NULL, IPL_NONE, NULL, NULL, NULL);
+#ifdef _LKM
+	pool_init(&ufs_direct_pool, sizeof(struct direct), 0, 0, 0, "ufsdirpl",
+	    &pool_allocator_nointr);
+#endif
 
 	ufs_ihashinit();
 #ifdef QUOTA
@@ -216,9 +215,6 @@ ufs_init(void)
 #endif
 #ifdef UFS_DIRHASH
 	ufsdirhash_init();
-#endif
-#ifdef UFS_EXTATTR
-	ufs_extattr_init();
 #endif
 }
 
@@ -244,11 +240,10 @@ ufs_done(void)
 #ifdef QUOTA
 	dqdone();
 #endif
-	pool_cache_destroy(ufs_direct_cache);
+#ifdef _LKM
+	pool_destroy(&ufs_direct_pool);
+#endif
 #ifdef UFS_DIRHASH
 	ufsdirhash_done();
-#endif
-#ifdef UFS_EXTATTR
-	ufs_extattr_done();
 #endif
 }

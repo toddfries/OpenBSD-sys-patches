@@ -1,4 +1,4 @@
-/* $NetBSD: ym_acpi.c,v 1.6 2009/02/17 12:46:01 jmcneill Exp $ */
+/* $NetBSD: ym_acpi.c,v 1.4 2007/10/19 11:59:36 ad Exp $ */
 
 /*
  * Copyright (c) 2006 Jasper Wallace <jasper@pointless.net>
@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ym_acpi.c,v 1.6 2009/02/17 12:46:01 jmcneill Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ym_acpi.c,v 1.4 2007/10/19 11:59:36 ad Exp $");
 
 #include "mpu_ym.h"
 
@@ -90,6 +90,9 @@ ym_acpi_attach(struct device *parent, struct device *self, void *aux)
 	struct ad1848_softc *ac = &sc->sc_ad1848.sc_ad1848;
 	ACPI_STATUS rv;
 
+	aprint_naive("\n");
+	aprint_normal("\n");
+
 	/* Parse our resources */
 	rv = acpi_resource_parse(&sc->sc_ad1848.sc_ad1848.sc_dev,
 	    aa->aa_node->ad_handle, "_CRS", &res,
@@ -120,34 +123,40 @@ ym_acpi_attach(struct device *parent, struct device *self, void *aux)
 	    mpu_io == NULL ||
 #endif
 	    control_io == NULL) {
-		aprint_error_dev(self, "unable to find i/o registers resource\n");
+		aprint_error("%s: unable to find i/o registers resource\n",
+		    self->dv_xname);
 		goto out;
 	}
 	if (bus_space_map(sc->sc_iot, sb_io->ar_base, sb_io->ar_length,
 	    0, &sc->sc_sb_ioh) != 0) {
-		aprint_error_dev(self, "unable to map i/o registers (sb)\n");
+		aprint_error("%s: unable to map i/o registers (sb)\n",
+		    self->dv_xname);
 		goto out;
 	}
 	if (bus_space_map(sc->sc_iot, codec_io->ar_base, codec_io->ar_length,
 	    0, &sc->sc_ioh) != 0) {
-		aprint_error_dev(self, "unable to map i/o registers (codec)\n");
+		aprint_error("%s: unable to map i/o registers (codec)\n",
+		    self->dv_xname);
 		goto out;
 	}
 	if (bus_space_map(sc->sc_iot, opl_io->ar_base, opl_io->ar_length,
 	    0, &sc->sc_opl_ioh) != 0) {
-		aprint_error_dev(self, "unable to map i/o registers (opl)\n");
+		aprint_error("%s: unable to map i/o registers (opl)\n",
+		    self->dv_xname);
 		goto out;
 	}
 #if NMPU_YM > 0
 	if (bus_space_map(sc->sc_iot, mpu_io->ar_base, mpu_io->ar_length,
 	    0, &sc->sc_mpu_ioh) != 0) {
-		aprint_error_dev(self, "unable to map i/o registers (mpu)\n");
+		aprint_error("%s: unable to map i/o registers (mpu)\n",
+		    self->dv_xname);
 		goto out;
 	}
 #endif
 	if (bus_space_map(sc->sc_iot, control_io->ar_base,
 	    control_io->ar_length, 0, &sc->sc_controlioh) != 0) {
-		aprint_error_dev(self, "unable to map i/o registers (control)\n");
+		aprint_error("%s: unable to map i/o registers (control)\n",
+		    self->dv_xname);
 		goto out;
 	}
 
@@ -156,7 +165,8 @@ ym_acpi_attach(struct device *parent, struct device *self, void *aux)
 	/* Find our IRQ */
 	irq = acpi_res_irq(&res, 0);
 	if (irq == NULL) {
-		aprint_error_dev(self, "unable to find irq resource\n");
+		aprint_error("%s: unable to find irq resource\n",
+		    self->dv_xname);
 		/* XXX bus_space_unmap */
 		goto out;
 	}
@@ -166,7 +176,8 @@ ym_acpi_attach(struct device *parent, struct device *self, void *aux)
 	playdrq = acpi_res_drq(&res, 0);
 	recdrq = acpi_res_drq(&res, 1);
 	if (playdrq == NULL) {
-		aprint_error_dev(self, "unable to find drq resources\n");
+		aprint_error("%s: unable to find drq resources\n",
+		    self->dv_xname);
 		/* XXX bus_space_unmap */
 		goto out;
 	}
@@ -181,12 +192,13 @@ ym_acpi_attach(struct device *parent, struct device *self, void *aux)
 	ac->sc_iot = sc->sc_iot;
 	if (bus_space_subregion(sc->sc_iot, sc->sc_ioh, WSS_CODEC,
 	    AD1848_NPORT, &ac->sc_ioh)) {
-		aprint_error_dev(self, "bus_space_subregion failed\n");
+		aprint_error("%s: bus_space_subregion failed\n",
+		    self->dv_xname);
 		/* XXX cleanup */
 		goto out;
 	}
 
-	aprint_normal_dev(self, "");
+	aprint_normal("%s", self->dv_xname);
 
 	ac->mode = 2;
 	ac->MCE_bit = MODE_CHANGE_ENABLE;

@@ -1,4 +1,3 @@
-/*	$NetBSD: zssp.c,v 1.6 2009/01/29 16:00:33 nonaka Exp $	*/
 /*	$OpenBSD: zaurus_ssp.c,v 1.6 2005/04/08 21:58:49 uwe Exp $	*/
 
 /*
@@ -18,7 +17,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: zssp.c,v 1.6 2009/01/29 16:00:33 nonaka Exp $");
+__KERNEL_RCSID(0, "$NetBSD: zssp.c,v 1.1 2006/12/16 05:23:49 ober Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -33,62 +32,56 @@ __KERNEL_RCSID(0, "$NetBSD: zssp.c,v 1.6 2009/01/29 16:00:33 nonaka Exp $");
 #include <zaurus/dev/zsspvar.h>
 #include <zaurus/zaurus/zaurus_var.h>
 
+#include "ioconf.h"
+
 #define GPIO_ADS7846_CS_C3000	14	/* SSP SFRM */
 #define GPIO_MAX1111_CS_C3000	20
 #define GPIO_TG_CS_C3000	53
 
-#define SSCR0_ADS7846_C3000	0x06ab /* 12bit/Microwire/div by 7 */
-#define SSCR0_MAX1111		0x0387
+#define SSCR0_ADS7846_C3000	0x06ab
 #define	SSCR0_LZ9JG18		0x01ab
+#define SSCR0_MAX1111		0x0387
 
 struct zssp_softc {
-	device_t sc_dev;
+	struct device sc_dev;
 	bus_space_tag_t sc_iot;
 	bus_space_handle_t sc_ioh;
 };
 
-static int	zssp_match(device_t, cfdata_t, void *);
-static void	zssp_attach(device_t, device_t, void *);
+static int	zssp_match(struct device *, struct cfdata *, void *);
+static void	zssp_attach(struct device *, struct device *, void *);
+static void	zssp_init(void);
+static void	zssp_powerhook(int, void *);
 
-CFATTACH_DECL_NEW(zssp, sizeof(struct zssp_softc),
+CFATTACH_DECL(zssp, sizeof(struct zssp_softc),
 	zssp_match, zssp_attach, NULL, NULL);
 
-static void	zssp_init(void);
-static bool	zssp_resume(device_t dv PMF_FN_ARGS);
-
-static struct zssp_softc *zssp_sc;
-
 static int
-zssp_match(device_t parent, cfdata_t cf, void *aux)
+zssp_match(struct device *parent, struct cfdata *cf, void *aux)
 {
-
-	if (zssp_sc != NULL)
-		return 0;
 
 	return 1;
 }
 
 static void
-zssp_attach(device_t parent, device_t self, void *aux)
+zssp_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct zssp_softc *sc = device_private(self);
-
-	sc->sc_dev = self;
-	zssp_sc = sc;
-
-	aprint_normal("\n");
-	aprint_naive("\n");
+	struct zssp_softc *sc = (struct zssp_softc *)self;
 
 	sc->sc_iot = &pxa2x0_bs_tag;
 	if (bus_space_map(sc->sc_iot, PXA2X0_SSP1_BASE, PXA2X0_SSP_SIZE,
 	    0, &sc->sc_ioh)) {
-		aprint_error_dev(sc->sc_dev, "can't map bus space\n");
+		printf(": can't map bus space\n");
 		return;
 	}
 
-	if (!pmf_device_register(sc->sc_dev, NULL, zssp_resume))
-		aprint_error_dev(sc->sc_dev,
-		    "couldn't establish power handler\n");
+	printf("\n");
+
+	if (powerhook_establish(sc->sc_dev.dv_xname, zssp_powerhook, sc)
+	    == NULL) {
+		printf("%s: can't establish power hook\n",
+		    sc->sc_dev.dv_xname);
+	}
 
 	zssp_init();
 }
@@ -102,8 +95,8 @@ zssp_init(void)
 {
 	struct zssp_softc *sc;
 
-	KASSERT(zssp_sc != NULL);
-	sc = zssp_sc;
+	KASSERT(zssp_cd.cd_ndevs > 0 && zssp_cd.cd_devs[0] != NULL);
+	sc = (struct zssp_softc *)zssp_cd.cd_devs[0];
 
 	pxa2x0_clkman_config(CKEN_SSP, 1);
 
@@ -115,16 +108,16 @@ zssp_init(void)
 	pxa2x0_gpio_set_function(GPIO_TG_CS_C3000, GPIO_OUT|GPIO_SET);
 }
 
-static bool
-zssp_resume(device_t dv PMF_FN_ARGS)
+static void
+zssp_powerhook(int why, void *arg)
 {
 	int s;
 
-	s = splhigh();
-	zssp_init();
-	splx(s);
-
-	return true;
+	if (why == PWR_RESUME) {
+		s = splhigh();
+		zssp_init();
+		splx(s);
+	}
 }
 
 /*
@@ -137,8 +130,8 @@ zssp_ic_start(int ic, uint32_t data)
 {
 	struct zssp_softc *sc;
 
-	KASSERT(zssp_sc != NULL);
-	sc = zssp_sc;
+	KASSERT(zssp_cd.cd_ndevs > 0 && zssp_cd.cd_devs[0] != NULL);
+	sc = (struct zssp_softc *)zssp_cd.cd_devs[0];
 
 	/* disable other ICs */
 	bus_space_write_4(sc->sc_iot, sc->sc_ioh, SSP_SSCR0, 0);
@@ -178,8 +171,8 @@ zssp_ic_stop(int ic)
 	struct zssp_softc *sc;
 	uint32_t rv;
 
-	KASSERT(zssp_sc != NULL);
-	sc = zssp_sc;
+	KASSERT(zssp_cd.cd_ndevs > 0 && zssp_cd.cd_devs[0] != NULL);
+	sc = (struct zssp_softc *)zssp_cd.cd_devs[0];
 
 	switch (ic) {
 	case ZSSP_IC_ADS7846:
@@ -221,7 +214,7 @@ zssp_ic_send(int ic, uint32_t data)
 		zssp_write_lz9jg18(data);
 		return 0;
 	default:
-		aprint_error("zssp: zssp_ic_send: invalid IC %d\n", ic);
+		printf("zssp_ic_send: invalid IC %d\n", ic);
 		return 0;
 	}
 }
@@ -230,12 +223,12 @@ int
 zssp_read_max1111(uint32_t cmd)
 {
 	struct zssp_softc *sc;
-	int voltage[2];
-	int i;
-	int s;
+	int	voltage[2];
+	int	i;
+	int	s;
 
-	KASSERT(zssp_sc != NULL);
-	sc = zssp_sc;
+	KASSERT(zssp_cd.cd_ndevs > 0 && zssp_cd.cd_devs[0] != NULL);
+	sc = (struct zssp_softc *)zssp_cd.cd_devs[0];
 
 	s = splhigh();
 
@@ -298,22 +291,24 @@ uint32_t
 zssp_read_ads7846(uint32_t cmd)
 {
 	struct zssp_softc *sc;
-	unsigned int cr0;
-	uint32_t val;
-	int s;
 
-	if (zssp_sc == NULL) {
+	sc = (struct zssp_softc *)zssp_cd.cd_devs[0];
+	unsigned int cr0;
+	int s;
+	uint32_t val;
+
+	if (zssp_cd.cd_ndevs < 1 || zssp_cd.cd_devs[0] == NULL) {
 		printf("zssp_read_ads7846: not configured\n");
 		return 0;
 	}
-	sc = zssp_sc;
+
+	sc = (struct zssp_softc *)zssp_cd.cd_devs[0];
 
 	s = splhigh();
-
-	if (ZAURUS_ISC3000) {
-		cr0 = SSCR0_ADS7846_C3000;
+	if (1) {
+		cr0 =  SSCR0_ADS7846_C3000;
 	} else {
-		cr0 = 0x00ab;
+		cr0 =  0x00ab;
 	}
         bus_space_write_4(sc->sc_iot, sc->sc_ioh, SSP_SSCR0, 0);
 	bus_space_write_4(sc->sc_iot, sc->sc_ioh, SSP_SSCR0, cr0);
@@ -336,7 +331,7 @@ zssp_read_ads7846(uint32_t cmd)
 
 	val = bus_space_read_4(sc->sc_iot, sc->sc_ioh, SSP_SSDR);
 
-	pxa2x0_gpio_set_bit(GPIO_ADS7846_CS_C3000);
+	pxa2x0_gpio_set_bit(GPIO_ADS7846_CS_C3000); /* deselect */
 
 	splx(s);
 
@@ -346,17 +341,18 @@ zssp_read_ads7846(uint32_t cmd)
 void
 zssp_write_lz9jg18(uint32_t data)
 {
+	int s;
 	int sclk_pin, sclk_fn;
 	int sfrm_pin, sfrm_fn;
 	int txd_pin, txd_fn;
 	int rxd_pin, rxd_fn;
 	int i;
-	int s;
 
 	/* XXX this creates a DAC command from a backlight duty value. */
 	data = 0x40 | (data & 0x1f);
 
 	if (ZAURUS_ISC3000) {
+		/* C3000 */
 		sclk_pin = 19;
 		sfrm_pin = 14;
 		txd_pin = 87;

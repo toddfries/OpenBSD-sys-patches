@@ -1,4 +1,4 @@
-/* $NetBSD: except.c,v 1.21 2008/06/23 17:58:17 matt Exp $ */
+/* $NetBSD: except.c,v 1.25 2010/07/07 01:17:26 chs Exp $ */
 /*-
  * Copyright (c) 1998, 1999, 2000 Ben Harris
  * All rights reserved.
@@ -31,7 +31,7 @@
 
 #include <sys/param.h>
 
-__KERNEL_RCSID(0, "$NetBSD: except.c,v 1.21 2008/06/23 17:58:17 matt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: except.c,v 1.25 2010/07/07 01:17:26 chs Exp $");
 
 #include "opt_ddb.h"
 
@@ -40,7 +40,6 @@ __KERNEL_RCSID(0, "$NetBSD: except.c,v 1.21 2008/06/23 17:58:17 matt Exp $");
 #include <sys/kernel.h>
 #include <sys/syslog.h>
 #include <sys/systm.h>
-#include <sys/user.h>
 #include <sys/cpu.h>
 
 #include <uvm/uvm_extern.h>
@@ -78,7 +77,7 @@ int want_resched;
 
 #ifdef DIAGNOSTIC
 void
-checkvectors()
+checkvectors(void)
 {
 	u_int32_t *ptr;
 
@@ -89,7 +88,6 @@ checkvectors()
 }
 #endif
 
-
 void
 prefetch_abort_handler(struct trapframe *tf)
 {
@@ -115,7 +113,8 @@ prefetch_abort_handler(struct trapframe *tf)
 	p = l->l_proc;
 
 	if ((tf->tf_r15 & R15_MODE) == R15_MODE_USR) {
-		l->l_addr->u_pcb.pcb_tf = tf;
+		struct pcb *pcb = lwp_getpcb(l);
+		pcb->pcb_tf = tf;
 		LWP_CACHE_CREDS(l, p);
 	}
 
@@ -139,7 +138,7 @@ prefetch_abort_handler(struct trapframe *tf)
 
 	userret(l);
 }
-
+
 void
 data_abort_handler(struct trapframe *tf)
 {
@@ -171,7 +170,8 @@ data_abort_handler(struct trapframe *tf)
 		l = &lwp0;
 	p = l->l_proc;
 	if ((tf->tf_r15 & R15_MODE) == R15_MODE_USR) {
-		l->l_addr->u_pcb.pcb_tf = tf;
+		struct pcb *pcb = lwp_getpcb(l);
+		pcb->pcb_tf = tf;
 		LWP_CACHE_CREDS(l, p);
 	}
 	pc = tf->tf_r15 & R15_PC;
@@ -200,25 +200,33 @@ do_fault(struct trapframe *tf, struct lwp *l,
     struct vm_map *map, vaddr_t va, vm_prot_t atype)
 {
 	int error;
-	struct pcb *cur_pcb;
+	struct pcb *pcb;
+	void *onfault;
+	bool user;
 
 	if (pmap_fault(map->pmap, va, atype))
 		return;
 
+	pcb = lwp_getpcb(l);
+	onfault = pcb->pcb_onfault;
+	user = (tf->tf_r15 & R15_MODE) == R15_MODE_USR;
+
 	if (cpu_intr_p()) {
-		KASSERT((tf->tf_r15 & R15_MODE) != R15_MODE_USR);
+		KASSERT(!user);
 		error = EFAULT;
-	} else
+	} else {
+		pcb->pcb_onfault = NULL;
 		error = uvm_fault(map, va, atype);
+		pcb->pcb_onfault = onfault;
+	}
 
 	if (error != 0) {
 		ksiginfo_t ksi;
 
-		cur_pcb = &l->l_addr->u_pcb;
-		if (cur_pcb->pcb_onfault != NULL) {
+		if (onfault != NULL) {
 			tf->tf_r0 = error;
 			tf->tf_r15 = (tf->tf_r15 & ~R15_PC) |
-			    (register_t)cur_pcb->pcb_onfault;
+			    (register_t)onfault;
 			return;
 		}
 #ifdef DDB
@@ -228,7 +236,7 @@ do_fault(struct trapframe *tf, struct lwp *l,
 			return;
 		}
 #endif
-		if ((tf->tf_r15 & R15_MODE) != R15_MODE_USR) {
+		if (!user) {
 #ifdef DDB
 			db_printf("Unhandled data abort in kernel mode\n");
 			kdb_trap(T_FAULT, tf);
@@ -254,6 +262,8 @@ do_fault(struct trapframe *tf, struct lwp *l,
 		ksi.ksi_code = (error == EPERM) ? SEGV_ACCERR : SEGV_MAPERR;
 		ksi.ksi_addr = (void *) va;
 		trapsignal(l, &ksi);
+	} else if (!user) {
+		ucas_ras_check(tf);
 	}
 }
 
@@ -455,7 +465,7 @@ data_abort_usrmode(struct trapframe *tf)
 		return true;
 	return false;
 }
-
+
 void
 address_exception_handler(struct trapframe *tf)
 {
@@ -471,7 +481,8 @@ address_exception_handler(struct trapframe *tf)
 	if (l == NULL)
 		l = &lwp0;
 	if ((tf->tf_r15 & R15_MODE) == R15_MODE_USR) {
-		l->l_addr->u_pcb.pcb_tf = tf;
+		struct pcb *pcb = lwp_getpcb(l);
+		pcb->pcb_tf = tf;
 		LWP_CACHE_CREDS(l, l->l_proc);
 	}
 
@@ -506,7 +517,7 @@ address_exception_handler(struct trapframe *tf)
 	trapsignal(l, &ksi);
 	userret(l);
 }
-
+
 #ifdef DEBUG
 static void
 printregs(struct trapframe *tf)

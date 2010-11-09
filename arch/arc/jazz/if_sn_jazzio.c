@@ -1,4 +1,4 @@
-/*	$NetBSD: if_sn_jazzio.c,v 1.11 2008/04/28 20:23:13 martin Exp $	*/
+/*	$NetBSD: if_sn_jazzio.c,v 1.7 2005/12/11 12:16:39 christos Exp $	*/
 
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -35,7 +42,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_sn_jazzio.c,v 1.11 2008/04/28 20:23:13 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_sn_jazzio.c,v 1.7 2005/12/11 12:16:39 christos Exp $");
 
 #include "bpfilter.h"
 
@@ -64,14 +71,14 @@ __KERNEL_RCSID(0, "$NetBSD: if_sn_jazzio.c,v 1.11 2008/04/28 20:23:13 martin Exp
 #include <arc/arc/arcbios.h>
 #include <arc/jazz/jazziovar.h>
 
-int	sonic_jazzio_match(device_t, cfdata_t, void *);
-void	sonic_jazzio_attach(device_t, device_t, void *);
+int	sonic_jazzio_match(struct device *, struct cfdata *, void *);
+void	sonic_jazzio_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(sn_jazzio, sizeof(struct sonic_softc),
+CFATTACH_DECL(sn_jazzio, sizeof(struct sonic_softc),
     sonic_jazzio_match, sonic_jazzio_attach, NULL, NULL);
 
 int
-sonic_jazzio_match(device_t parent, cfdata_t cf, void *aux)
+sonic_jazzio_match(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct jazzio_attach_args *ja = aux;
 
@@ -82,23 +89,23 @@ sonic_jazzio_match(device_t parent, cfdata_t cf, void *aux)
 }
 
 void
-sonic_jazzio_attach(device_t parent, device_t self, void *aux)
+sonic_jazzio_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct sonic_softc *sc = device_private(self);
+	struct sonic_softc *sc = (void *) self;
 	struct jazzio_attach_args *ja = aux;
 	int i;
 	uint8_t enaddr[ETHER_ADDR_LEN];
 
-	sc->sc_dev = self;
 	sc->sc_st = ja->ja_bust;
 	sc->sc_dmat = ja->ja_dmat;
 
-	aprint_normal(": SONIC Ethernet\n");
+	printf(": SONIC Ethernet\n");
 
 	/* Map the device. */
 	if (bus_space_map(sc->sc_st, ja->ja_addr, SONIC_NREGS * 4,
 	    0, &sc->sc_sh) != 0) {
-		aprint_error_dev(sc->sc_dev, "unable to map SONIC registers\n");
+		printf("%s: unable to map SONIC registers\n",
+		    sc->sc_dev.dv_xname);
 		return;
 	}
 
@@ -118,13 +125,8 @@ sonic_jazzio_attach(device_t parent, device_t self, void *aux)
 	 *	- Latched bug retry
 	 *	- Synchronous bus (memory cycle 2 clocks)
 	 *	- 0 wait states added (WC0,WC1 == 0,0)
-	 *	- 4 byte Rx DMA threshold (RFT0,RFT1 == 0,0)
-	 *	- 28 byte Tx DMA threshold (TFT0,TFT1 == 1,1)
-	 *	  XXX There was a comment
-	 *	  	"XXX RFT & TFT according to MIPS manual"
-	 *	      in old MD sys/arch/arc/dev/if_sn.c in Attic.
 	 */
-	sc->sc_dcr = DCR_LBR | DCR_SBUS | DCR_TFT0 | DCR_TFT1;
+	sc->sc_dcr = DCR_LBR | DCR_SBUS;
 	sc->sc_dcr2 = 0;
 
 	/* Hook up our interrupt handler. */

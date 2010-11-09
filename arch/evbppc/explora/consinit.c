@@ -1,4 +1,4 @@
-/*	$NetBSD: consinit.c,v 1.7 2008/04/28 20:23:17 martin Exp $	*/
+/*	$NetBSD: consinit.c,v 1.5 2005/12/11 12:17:12 christos Exp $	*/
 
 /*-
  * Copyright (c) 2003 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed by the NetBSD
+ *      Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: consinit.c,v 1.7 2008/04/28 20:23:17 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: consinit.c,v 1.5 2005/12/11 12:17:12 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -77,7 +84,7 @@ consinit(void)
 
 #ifdef COM_IS_CONSOLE
 	tag = elb_get_bus_space_tag(BASE_COM);
-	comcnattach(tag, _BUS_SPACE_UNSTRIDE(tag, BASE_COM), COM_CONSOLE_SPEED,
+	comcnattach(tag, BASE_COM, COM_CONSOLE_SPEED,
 	    COM_FREQ, COM_TYPE_NORMAL,
 	    (TTYDEF_CFLAG & ~(CSIZE | CSTOPB | PARENB)) | CS8);
 #else
@@ -87,7 +94,6 @@ consinit(void)
 	tag = elb_get_bus_space_tag(BASE_FB);
 	fb_cnattach(tag, BASE_FB2, (void *)BASE_FB);
 	tag = elb_get_bus_space_tag(BASE_PCKBC);
-	pckbc_cnattach(tag, _BUS_SPACE_UNSTRIDE(tag, BASE_PCKBC),
-	    _BUS_SPACE_UNSTRIDE(tag, BASE_PCKBC2-BASE_PCKBC), PCKBC_KBD_SLOT);
+	pckbc_cnattach(tag, BASE_PCKBC, BASE_PCKBC2-BASE_PCKBC, PCKBC_KBD_SLOT);
 #endif
 }

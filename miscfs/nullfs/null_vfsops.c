@@ -1,4 +1,4 @@
-/*	$NetBSD: null_vfsops.c,v 1.78 2008/12/05 13:05:37 ad Exp $	*/
+/*	$NetBSD: null_vfsops.c,v 1.61 2006/11/16 01:33:38 christos Exp $	*/
 
 /*
  * Copyright (c) 1999 National Aeronautics & Space Administration
@@ -74,7 +74,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: null_vfsops.c,v 1.78 2008/12/05 13:05:37 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: null_vfsops.c,v 1.61 2006/11/16 01:33:38 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -85,30 +85,26 @@ __KERNEL_RCSID(0, "$NetBSD: null_vfsops.c,v 1.78 2008/12/05 13:05:37 ad Exp $");
 #include <sys/mount.h>
 #include <sys/namei.h>
 #include <sys/malloc.h>
-#include <sys/module.h>
 
 #include <miscfs/nullfs/null.h>
 #include <miscfs/genfs/layer_extern.h>
 
-MODULE(MODULE_CLASS_VFS, nullfs, "layerfs");
-
-VFS_PROTOS(nullfs);
-
-static struct sysctllog *nullfs_sysctl_log;
+int	nullfs_mount(struct mount *, const char *, void *,
+	    struct nameidata *, struct lwp *);
+int	nullfs_unmount(struct mount *, int, struct lwp *);
 
 /*
  * Mount null layer
  */
 int
-nullfs_mount(mp, path, data, data_len)
+nullfs_mount(mp, path, data, ndp, l)
 	struct mount *mp;
 	const char *path;
 	void *data;
-	size_t *data_len;
+	struct nameidata *ndp;
+	struct lwp *l;
 {
-	struct lwp *l = curlwp;
-	struct nameidata nd;
-	struct null_args *args = data;
+	struct null_args args;
 	struct vnode *lowerrootvp, *vp;
 	struct null_mount *nmp;
 	struct layer_mount *lmp;
@@ -118,17 +114,19 @@ nullfs_mount(mp, path, data, data_len)
 	printf("nullfs_mount(mp = %p)\n", mp);
 #endif
 
-	if (*data_len < sizeof *args)
-		return EINVAL;
-
 	if (mp->mnt_flag & MNT_GETARGS) {
 		lmp = MOUNTTOLAYERMOUNT(mp);
 		if (lmp == NULL)
 			return EIO;
-		args->la.target = NULL;
-		*data_len = sizeof *args;
-		return 0;
+		args.la.target = NULL;
+		return copyout(&args, data, sizeof(args));
 	}
+	/*
+	 * Get argument
+	 */
+	error = copyin(data, &args, sizeof(struct null_args));
+	if (error)
+		return (error);
 
 	/*
 	 * Update is not supported
@@ -139,14 +137,15 @@ nullfs_mount(mp, path, data, data_len)
 	/*
 	 * Find lower node
 	 */
-	NDINIT(&nd, LOOKUP, FOLLOW|LOCKLEAF, UIO_USERSPACE, args->la.target);
-	if ((error = namei(&nd)) != 0)
+	NDINIT(ndp, LOOKUP, FOLLOW|LOCKLEAF,
+		UIO_USERSPACE, args.la.target, l);
+	if ((error = namei(ndp)) != 0)
 		return (error);
 
 	/*
 	 * Sanity check on lower vnode
 	 */
-	lowerrootvp = nd.ni_vp;
+	lowerrootvp = ndp->ni_vp;
 
 	/*
 	 * First cut at fixing up upper mount point
@@ -156,6 +155,7 @@ nullfs_mount(mp, path, data, data_len)
 	memset(nmp, 0, sizeof(struct null_mount));
 
 	mp->mnt_data = nmp;
+	mp->mnt_leaf = lowerrootvp->v_mount->mnt_leaf;
 	nmp->nullm_vfs = lowerrootvp->v_mount;
 	if (nmp->nullm_vfs->mnt_flag & MNT_LOCAL)
 		mp->mnt_flag |= MNT_LOCAL;
@@ -171,9 +171,9 @@ nullfs_mount(mp, path, data, data_len)
 	nmp->nullm_bypass = layer_bypass;
 	nmp->nullm_alloc = layer_node_alloc;	/* the default alloc is fine */
 	nmp->nullm_vnodeop_p = null_vnodeop_p;
-	mutex_init(&nmp->nullm_hashlock, MUTEX_DEFAULT, IPL_NONE);
-	nmp->nullm_node_hashtbl = hashinit(desiredvnodes, HASH_LIST, true,
-	    &nmp->nullm_node_hash);
+	simple_lock_init(&nmp->nullm_hashlock);
+	nmp->nullm_node_hashtbl = hashinit(desiredvnodes, HASH_LIST, M_CACHE,
+	    M_WAITOK, &nmp->nullm_node_hash);
 
 	/*
 	 * Fix up null node for root vnode
@@ -184,28 +184,24 @@ nullfs_mount(mp, path, data, data_len)
 	 */
 	if (error) {
 		vput(lowerrootvp);
-		hashdone(nmp->nullm_node_hashtbl, HASH_LIST,
-		    nmp->nullm_node_hash);
+		hashdone(nmp->nullm_node_hashtbl, M_CACHE);
 		free(nmp, M_UFSMNT);	/* XXX */
 		return (error);
 	}
-	/*
-	 * Keep a held reference to the root vnode.
-	 * It is vrele'd in nullfs_unmount.
-	 */
-	vp->v_vflag |= VV_ROOT;
-	nmp->nullm_rootvp = vp;
-
-	/* We don't need kernel_lock. */
-	mp->mnt_iflag |= IMNT_MPSAFE;
-
 	/*
 	 * Unlock the node
 	 */
 	VOP_UNLOCK(vp, 0);
 
-	error = set_statvfs_info(path, UIO_USERSPACE, args->la.target,
-	    UIO_USERSPACE, mp->mnt_op->vfs_name, mp, l);
+	/*
+	 * Keep a held reference to the root vnode.
+	 * It is vrele'd in nullfs_unmount.
+	 */
+	vp->v_flag |= VROOT;
+	nmp->nullm_rootvp = vp;
+
+	error = set_statvfs_info(path, UIO_USERSPACE, args.la.target,
+	    UIO_USERSPACE, mp, l);
 #ifdef NULLFS_DIAGNOSTIC
 	printf("nullfs_mount: lower %s, alias at %s\n",
 	    mp->mnt_stat.f_mntfromname, mp->mnt_stat.f_mntonname);
@@ -217,7 +213,7 @@ nullfs_mount(mp, path, data, data_len)
  * Free reference to null layer
  */
 int
-nullfs_unmount(struct mount *mp, int mntflags)
+nullfs_unmount(struct mount *mp, int mntflags, struct lwp *l)
 {
 	struct null_mount *nmp = MOUNTTONULLMOUNT(mp);
 	struct vnode *null_rootvp = nmp->nullm_rootvp;
@@ -231,7 +227,17 @@ nullfs_unmount(struct mount *mp, int mntflags)
 	if (mntflags & MNT_FORCE)
 		flags |= FORCECLOSE;
 
-	if (null_rootvp->v_usecount > 1 && (mntflags & MNT_FORCE) == 0)
+	/*
+	 * Clear out buffer cache.  I don't think we
+	 * ever get anything cached at this level at the
+	 * moment, but who knows...
+	 */
+#if 0
+	mntflushbuf(mp, 0);
+	if (mntinvalbuf(mp, 1))
+		return (EBUSY);
+#endif
+	if (null_rootvp->v_usecount > 1)
 		return (EBUSY);
 	if ((error = vflush(mp, null_rootvp, flags)) != 0)
 		return (error);
@@ -240,18 +246,43 @@ nullfs_unmount(struct mount *mp, int mntflags)
 	vprint("alias root of lower", null_rootvp);
 #endif
 	/*
-	 * Blow it away for future re-use
+	 * Release reference on underlying root vnode
+	 */
+	vrele(null_rootvp);
+
+	/*
+	 * And blow it away for future re-use
 	 */
 	vgone(null_rootvp);
 
 	/*
 	 * Finally, throw away the null_mount structure
 	 */
-	hashdone(nmp->nullm_node_hashtbl, HASH_LIST, nmp->nullm_node_hash);
-	mutex_destroy(&nmp->nullm_hashlock);
+	hashdone(nmp->nullm_node_hashtbl, M_CACHE);
 	free(mp->mnt_data, M_UFSMNT);	/* XXX */
 	mp->mnt_data = NULL;
 	return (0);
+}
+
+SYSCTL_SETUP(sysctl_vfs_null_setup, "sysctl vfs.null subtree setup")
+{
+
+	sysctl_createv(clog, 0, NULL, NULL,
+		       CTLFLAG_PERMANENT,
+		       CTLTYPE_NODE, "vfs", NULL,
+		       NULL, 0, NULL, 0,
+		       CTL_VFS, CTL_EOL);
+	sysctl_createv(clog, 0, NULL, NULL,
+		       CTLFLAG_PERMANENT,
+		       CTLTYPE_NODE, "null",
+		       SYSCTL_DESCR("Loopback file system"),
+		       NULL, 0, NULL, 0,
+		       CTL_VFS, 9, CTL_EOL);
+	/*
+	 * XXX the "9" above could be dynamic, thereby eliminating one
+	 * more instance of the "number to vfs" mapping problem, but
+	 * "9" is the order as taken from sys/mount.h
+	 */
 }
 
 extern const struct vnodeopv_desc null_vnodeop_opv_desc;
@@ -263,7 +294,6 @@ const struct vnodeopv_desc * const nullfs_vnodeopv_descs[] = {
 
 struct vfsops nullfs_vfsops = {
 	MOUNT_NULL,
-	sizeof (struct null_args),
 	nullfs_mount,
 	layerfs_start,
 	nullfs_unmount,
@@ -280,52 +310,8 @@ struct vfsops nullfs_vfsops = {
 	NULL,				/* vfs_mountroot */
 	layerfs_snapshot,
 	vfs_stdextattrctl,
-	(void *)eopnotsupp,		/* vfs_suspendctl */
-	layerfs_renamelock_enter,
-	layerfs_renamelock_exit,
-	(void *)eopnotsupp,
 	nullfs_vnodeopv_descs,
 	0,
 	{ NULL, NULL },
 };
-
-static int
-nullfs_modcmd(modcmd_t cmd, void *arg)
-{
-	int error;
-
-	switch (cmd) {
-	case MODULE_CMD_INIT:
-		error = vfs_attach(&nullfs_vfsops);
-		if (error != 0)
-			break;
-		sysctl_createv(&nullfs_sysctl_log, 0, NULL, NULL,
-		    CTLFLAG_PERMANENT,
-		    CTLTYPE_NODE, "vfs", NULL,
-		    NULL, 0, NULL, 0,
-		    CTL_VFS, CTL_EOL);
-		sysctl_createv(&nullfs_sysctl_log, 0, NULL, NULL,
-		    CTLFLAG_PERMANENT,
-		    CTLTYPE_NODE, "null",
-		    SYSCTL_DESCR("Loopback file system"),
-		    NULL, 0, NULL, 0,
-		    CTL_VFS, 9, CTL_EOL);
-		/*
-		 * XXX the "9" above could be dynamic, thereby eliminating
-		 * one more instance of the "number to vfs" mapping problem,
-		 * but "9" is the order as taken from sys/mount.h
-		 */
-		break;
-	case MODULE_CMD_FINI:
-		error = vfs_detach(&nullfs_vfsops);
-		if (error != 0)
-			break;
-		sysctl_teardown(&nullfs_sysctl_log);
-		break;
-	default:
-		error = ENOTTY;
-		break;
-	}
-	
-	return error;
-}
+VFS_ATTACH(nullfs_vfsops);

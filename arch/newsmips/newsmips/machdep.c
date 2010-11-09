@@ -1,4 +1,4 @@
-/*	$NetBSD: machdep.c,v 1.102 2009/02/13 22:41:02 apb Exp $	*/
+/*	$NetBSD: machdep.c,v 1.85 2006/12/21 15:55:24 yamt Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -76,14 +76,13 @@
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
 
-__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.102 2009/02/13 22:41:02 apb Exp $");
+__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.85 2006/12/21 15:55:24 yamt Exp $");
 
 /* from: Utah Hdr: machdep.c 1.63 91/04/24 */
 
 #include "fs_mfs.h"
 #include "opt_ddb.h"
 #include "opt_execfmt.h"
-#include "opt_modular.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -102,6 +101,7 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.102 2009/02/13 22:41:02 apb Exp $");
 #include <sys/user.h>
 #include <sys/exec.h>
 #include <sys/mount.h>
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 #include <sys/kcore.h>
 #include <sys/ksyms.h>
@@ -135,6 +135,7 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.102 2009/02/13 22:41:02 apb Exp $");
 
 #include <machine/adrsmap.h>
 #include <machine/machConst.h>
+#include <machine/intr.h>
 #include <newsmips/newsmips/machid.h>
 #include <dev/cons.h>
 
@@ -145,6 +146,7 @@ struct cpu_info cpu_info_store;
 
 /* maps for VM objects */
 
+struct vm_map *exec_map = NULL;
 struct vm_map *mb_map = NULL;
 struct vm_map *phys_map = NULL;
 
@@ -190,20 +192,44 @@ int safepri = MIPS3_PSL_LOWIPL;		/* XXX */
  * given interrupt priority level.
  */
 const uint32_t ipl_sr_bits[_IPL_N] = {
-	[IPL_NONE] = 0,
-	[IPL_SOFTCLOCK] =
-	    MIPS_SOFT_INT_MASK_0,
-	[IPL_SOFTNET] =
-	    MIPS_SOFT_INT_MASK_0 | MIPS_SOFT_INT_MASK_1,
-	[IPL_VM] =
-	    MIPS_SOFT_INT_MASK_0 | MIPS_SOFT_INT_MASK_1 |
-	    MIPS_INT_MASK_0 |
-	    MIPS_INT_MASK_1,
-	[IPL_SCHED] =
-	    MIPS_SOFT_INT_MASK_0 | MIPS_SOFT_INT_MASK_1 |
-	    MIPS_INT_MASK_0 |
-	    MIPS_INT_MASK_1 |
-	    MIPS_INT_MASK_2,
+	0,					/* IPL_NONE */
+
+	MIPS_SOFT_INT_MASK_0,			/* IPL_SOFT */
+
+	MIPS_SOFT_INT_MASK_0,			/* IPL_SOFTCLOCK */
+
+	MIPS_SOFT_INT_MASK_0|
+		MIPS_SOFT_INT_MASK_1,		/* IPL_SOFTNET */
+
+	MIPS_SOFT_INT_MASK_0|
+		MIPS_SOFT_INT_MASK_1,		/* IPL_SOFTSERIAL */
+
+	MIPS_SOFT_INT_MASK_0|
+		MIPS_SOFT_INT_MASK_1|
+		MIPS_INT_MASK_0,		/* IPL_BIO */
+
+	MIPS_SOFT_INT_MASK_0|
+		MIPS_SOFT_INT_MASK_1|
+		MIPS_INT_MASK_0|
+		MIPS_INT_MASK_1,		/* IPL_NET */
+
+	MIPS_SOFT_INT_MASK_0|
+		MIPS_SOFT_INT_MASK_1|
+		MIPS_INT_MASK_0|
+		MIPS_INT_MASK_1,		/* IPL_{TTY,SERIAL} */
+
+	MIPS_SOFT_INT_MASK_0|
+		MIPS_SOFT_INT_MASK_1|
+		MIPS_INT_MASK_0|
+		MIPS_INT_MASK_1|
+		MIPS_INT_MASK_2,		/* IPL_{CLOCK,HIGH} */
+};
+
+const uint32_t mips_ipl_si_to_sr[SI_NQUEUES] = {
+	[SI_SOFT] = MIPS_SOFT_INT_MASK_0,
+	[SI_SOFTCLOCK] = MIPS_SOFT_INT_MASK_0,
+	[SI_SOFTNET] = MIPS_SOFT_INT_MASK_1,
+	[SI_SOFTSERIAL] = MIPS_SOFT_INT_MASK_1,
 };
 
 extern struct user *proc0paddr;
@@ -219,11 +245,11 @@ void
 mach_init(int x_boothowto, int x_bootdev, int x_bootname, int x_maxmem)
 {
 	u_long first, last;
-	char *kernend, *v;
+	caddr_t kernend, v;
 	struct btinfo_magic *bi_magic;
 	struct btinfo_bootarg *bi_arg;
 	struct btinfo_systype *bi_systype;
-#if NKSYMS || defined(DDB) || defined(MODULAR)
+#if NKSYMS || defined(DDB) || defined(LKM)
 	struct btinfo_symtab *bi_sym;
 	int nsym = 0;
 	char *ssym, *esym;
@@ -231,6 +257,11 @@ mach_init(int x_boothowto, int x_bootdev, int x_bootname, int x_maxmem)
 	ssym = esym = NULL;	/* XXX: gcc */
 #endif
 	bi_arg = NULL;
+
+	/* clear the BSS segment */
+	memset(edata, 0, end - edata);
+
+	systype = NEWS3400;			/* XXX compatibility */
 
 	bootinfo = (void *)BOOTINFO_ADDR;	/* XXX */
 	bi_magic = lookup_bootinfo(BTINFO_MAGIC);
@@ -241,7 +272,7 @@ mach_init(int x_boothowto, int x_bootdev, int x_bootname, int x_maxmem)
 			x_bootdev = bi_arg->bootdev;
 			x_maxmem = bi_arg->maxmem;
 		}
-#if NKSYMS || defined(DDB) || defined(MODULAR)
+#if NKSYMS || defined(DDB) || defined(LKM)
 		bi_sym = lookup_bootinfo(BTINFO_SYMTAB);
 		if (bi_sym) {
 			nsym = bi_sym->nsym;
@@ -253,16 +284,7 @@ mach_init(int x_boothowto, int x_bootdev, int x_bootname, int x_maxmem)
 		bi_systype = lookup_bootinfo(BTINFO_SYSTYPE);
 		if (bi_systype)
 			systype = bi_systype->type;
-	} else {
-		/*
-		 * Running kernel is loaded by non-native loader;
-		 * clear the BSS segment here.
-		 */
-		memset(edata, 0, end - edata);
 	}
-
-	if (systype == 0) 
-		systype = NEWS3400;	/* XXX compatibility for old boot */
 
 #ifdef news5000
 	if (systype == NEWS5000) {
@@ -304,10 +326,10 @@ mach_init(int x_boothowto, int x_bootdev, int x_bootname, int x_maxmem)
 	*(int *)(MIPS_PHYS_TO_KSEG1(MACH_BOOTDEV_ADDR)) = x_bootdev;
 	*(int *)(MIPS_PHYS_TO_KSEG1(MACH_BOOTSW_ADDR)) = x_boothowto;
 
-	kernend = (char *)mips_round_page(end);
-#if NKSYMS || defined(DDB) || defined(MODULAR)
+	kernend = (caddr_t)mips_round_page(end);
+#if NKSYMS || defined(DDB) || defined(LKM)
 	if (nsym)
-		kernend = (char *)mips_round_page(esym);
+		kernend = (caddr_t)mips_round_page(esym);
 #endif
 
 	/*
@@ -340,9 +362,9 @@ mach_init(int x_boothowto, int x_bootdev, int x_bootname, int x_maxmem)
 	 */
 	newsmips_bus_dma_init();
 
-#if NKSYMS || defined(DDB) || defined(MODULAR)
+#if NKSYMS || defined(DDB) || defined(LKM)
 	if (nsym)
-		ksyms_addsyms_elf(esym - ssym, ssym, esym);
+		ksyms_init(esym - ssym, ssym, esym);
 #endif
 
 #ifdef KADB
@@ -379,11 +401,11 @@ mach_init(int x_boothowto, int x_bootdev, int x_bootname, int x_maxmem)
 	/*
 	 * Allocate space for lwp0's USPACE.
 	 */
-	v = (char *)uvm_pageboot_alloc(USPACE);
+	v = (caddr_t)uvm_pageboot_alloc(USPACE);
 	lwp0.l_addr = proc0paddr = (struct user *)v;
 	lwp0.l_md.md_regs = (struct frame *)(v + USPACE) - 1;
-	proc0paddr->u_pcb.pcb_context[11] =
-	    MIPS_INT_MASK | MIPS_SR_INT_IE; /* SR */
+	curpcb = &lwp0.l_addr->u_pcb;
+	curpcb->pcb_context[11] = MIPS_INT_MASK | MIPS_SR_INT_IE; /* SR */
 
 	/*
 	 * Determine what model of computer we are running on.
@@ -460,17 +482,21 @@ cpu_startup(void)
 	 * Good {morning,afternoon,evening,night}.
 	 */
 	printf("%s%s", copyright, version);
-	printf("SONY NET WORK STATION, Model %s, ", idrom.id_model);
-	printf("Machine ID #%d\n", idrom.id_serial);
 	format_bytes(pbuf, sizeof(pbuf), ctob(physmem));
 	printf("total memory = %s\n", pbuf);
 
 	minaddr = 0;
 	/*
+	 * Allocate a submap for exec arguments.  This map effectively
+	 * limits the number of processes exec'ing at any time.
+	 */
+	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
+	    16 * NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
+	/*
 	 * Allocate a submap for physio
 	 */
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-	    VM_PHYS_SIZE, 0, false, NULL);
+	    VM_PHYS_SIZE, 0, FALSE, NULL);
 
 	/*
 	 * No need to allocate an mbuf cluster submap.  Mbuf clusters
@@ -586,8 +612,6 @@ haltsys:
 	/* run any shutdown hooks */
 	doshutdownhooks();
 
-	pmf_system_shutdown(boothowto);
-
 	if ((howto & RB_POWERDOWN) == RB_POWERDOWN)
 		prom_halt(0x80);	/* rom monitor RB_PWOFF */
 
@@ -607,22 +631,18 @@ delay(int n)
 void
 cpu_intr(uint32_t status, uint32_t cause, uint32_t pc, uint32_t ipending)
 {
-	struct cpu_info *ci;
 
-	ci = curcpu();
 	uvmexp.intrs++;
 
 	/* device interrupts */
-	ci->ci_idepth++;
 	(*hardware_intr)(status, cause, pc, ipending);
-	ci->ci_idepth--;
 
-#ifdef __HAVE_FAST_SOFTINTS
 	/* software interrupts */
 	ipending &= (MIPS_SOFT_INT_MASK_1|MIPS_SOFT_INT_MASK_0);
 	if (ipending == 0)
 		return;
+
 	_clrsoftintr(ipending);
+
 	softintr_dispatch(ipending);
-#endif
 }

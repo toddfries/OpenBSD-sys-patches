@@ -1,4 +1,4 @@
-/* $NetBSD: if_iee_gsc.c,v 1.7 2008/04/04 17:03:42 tsutsui Exp $ */
+/* $NetBSD: if_iee_gsc.c,v 1.2 2005/12/11 12:17:24 christos Exp $ */
 
 /*
  * Copyright (c) 2003 Jochen Kunz.
@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_iee_gsc.c,v 1.7 2008/04/04 17:03:42 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_iee_gsc.c,v 1.2 2005/12/11 12:17:24 christos Exp $");
 
 /* autoconfig and device stuff */
 #include <sys/param.h>
@@ -85,9 +85,10 @@ __KERNEL_RCSID(0, "$NetBSD: if_iee_gsc.c,v 1.7 2008/04/04 17:03:42 tsutsui Exp $
 #define IEE_ISCP_BUSSY 0x1
 
 /* autoconfig stuff */
-static int iee_gsc_match(device_t, cfdata_t, void *);
-static void iee_gsc_attach(device_t, device_t, void *);
-static int iee_gsc_detach(device_t, int);
+static int iee_gsc_match(struct device *, struct cfdata *, void *);
+static void iee_gsc_attach(struct device *, struct device *, void *);
+static int iee_gsc_detach(struct device*, int);
+
 
 struct iee_gsc_softc {
 	struct iee_softc iee_sc;
@@ -96,7 +97,9 @@ struct iee_gsc_softc {
 	void *sc_ih;
 };
 
-CFATTACH_DECL_NEW(
+
+
+CFATTACH_DECL(
 	iee_gsc,
 	sizeof(struct iee_gsc_softc),
 	iee_gsc_match,
@@ -105,13 +108,17 @@ CFATTACH_DECL_NEW(
     	NULL
 );
 
+
+
 int iee_gsc_cmd(struct iee_softc *, u_int32_t);
 int iee_gsc_reset(struct iee_softc *);
+
+
 
 int
 iee_gsc_cmd(struct iee_softc *sc, u_int32_t cmd)
 {
-	struct iee_gsc_softc *sc_gsc = (struct iee_gsc_softc *)sc;
+	struct iee_gsc_softc *sc_gsc = (struct iee_gsc_softc *) sc;
 	int n;
 
 	SC_SCB->scb_cmd = cmd;
@@ -127,20 +134,21 @@ iee_gsc_cmd(struct iee_softc *sc, u_int32_t cmd)
 		if (SC_SCB->scb_cmd == 0)
 			break;
 	}
-	bus_dmamap_sync(sc->sc_dmat, sc->sc_shmem_map, IEE_SCB_OFF, IEE_SCB_SZ,
-	    BUS_DMASYNC_PREREAD);
+	bus_dmamap_sync(sc->sc_dmat, sc->sc_shmem_map, IEE_SCB_OFF, IEE_SCB_SZ, 	    BUS_DMASYNC_PREREAD);
 	if (n < 100000)
-		return 0;
-	printf("%s: iee_gsc_cmd: timeout n=%d\n", device_xname(sc->sc_dev), n);
-	return -1;
+		return(0);
+	printf("%s: iee_gsc_cmd: timeout n=%d\n", sc->sc_dev.dv_xname, n);
+	return(-1);
 }
+
+
 
 int
 iee_gsc_reset(struct iee_softc *sc)
 {
-	struct iee_gsc_softc *sc_gsc = (struct iee_gsc_softc *)sc;
+	struct iee_gsc_softc *sc_gsc = (struct iee_gsc_softc *) sc;
 	int n;
-	uint32_t cmd;
+	u_int32_t cmd;
 
 	/* Make sure the bussy byte is set and the cache is flushed. */
 	SC_ISCP->iscp_bussy = IEE_ISCP_BUSSY;
@@ -181,36 +189,40 @@ iee_gsc_reset(struct iee_softc *sc)
 	if (n < 1000) {
 		/* ACK interrupts we may have caused */
 		(sc->sc_iee_cmd)(sc, IEE_SCB_ACK);
-		return 0;
+		return(0);
 	}
-	printf("%s: iee_gsc_reset timeout bussy=0x%x\n",
-	    device_xname(sc->sc_dev), SC_ISCP->iscp_bussy);
-	return -1;
+	printf("%s: iee_gsc_reset timeout bussy=0x%x\n", sc->sc_dev.dv_xname, 
+	    SC_ISCP->iscp_bussy);
+	return(-1);
 }
 
+
+
 static int
-iee_gsc_match(device_t parent, cfdata_t cf, void *aux)
+iee_gsc_match(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct gsc_attach_args *ga = aux;
 
 	if (ga->ga_type.iodc_type == HPPA_TYPE_FIO
-	    && ga->ga_type.iodc_sv_model == HPPA_FIO_GLAN)
+	    && (ga->ga_type.iodc_sv_model == HPPA_FIO_LAN
+	    || ga->ga_type.iodc_sv_model == HPPA_FIO_GLAN))
 		/* beat old ie(4) i82586 driver */
-		return 10;
-	return 0;
+		return(10);
+	return(0);
 }
 
+
+
+
 static void
-iee_gsc_attach(device_t parent, device_t self, void *aux)
+iee_gsc_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct iee_gsc_softc *sc_gsc = device_private(self);
-	struct iee_softc *sc = &sc_gsc->iee_sc;
+	struct iee_gsc_softc *sc_gsc = (struct iee_gsc_softc *) self;
+	struct iee_softc *sc = (struct iee_softc *) self;
 	struct gsc_attach_args *ga = aux;
 	char cpu_spec;
 	int media[2];
 	int rsegs;
-
-	sc->sc_dev = self;
 
 	if (ga->ga_type.iodc_sv_model == HPPA_FIO_LAN)
 		sc->sc_type = I82596_DX;	/* ASP(2) based */
@@ -231,33 +243,33 @@ iee_gsc_attach(device_t parent, device_t self, void *aux)
 	sc_gsc->sc_iot = ga->ga_iot;
 	if (bus_space_map(sc_gsc->sc_iot, ga->ga_hpa, IEE_GSC_IO_SZ, 0, 
 	    &sc_gsc->sc_ioh)) {
-		aprint_error(": iee_gsc_attach: can't map I/O space\n");
+		aprint_normal(": iee_gsc_attach: can't map I/O space\n");
 		return;
 	}
 
 	sc->sc_dmat = ga->ga_dmatag;
 	if (bus_dmamem_alloc(sc->sc_dmat, IEE_SHMEM_MAX, PAGE_SIZE, 0,
 	    &sc->sc_dma_segs, 1, &rsegs, BUS_DMA_NOWAIT) != 0) {
-		aprint_error(": iee_gsc_attach: can't allocate %d bytes of "
+		aprint_normal(": iee_gsc_attach: can't allocate %d bytes of "
 		    "DMA memory\n", (int)IEE_SHMEM_MAX);
 		return;
 	}
 	if (bus_dmamem_map(sc->sc_dmat, &sc->sc_dma_segs, rsegs, IEE_SHMEM_MAX, 
-	    (void **)&sc->sc_shmem_addr, BUS_DMA_NOWAIT) != 0) {
-		aprint_error(": iee_gsc_attach: can't map DMA memory\n");
+	    &sc->sc_shmem_addr, BUS_DMA_NOWAIT) != 0) {
+		aprint_normal(": iee_gsc_attach: can't map DMA memory\n");
 		bus_dmamem_free(sc->sc_dmat, &sc->sc_dma_segs, rsegs);
 		return;
 	}
 	if (bus_dmamap_create(sc->sc_dmat, IEE_SHMEM_MAX, rsegs, 
 	    IEE_SHMEM_MAX, 0, BUS_DMA_NOWAIT, &sc->sc_shmem_map) != 0) {
-		aprint_error(": iee_gsc_attach: can't create DMA map\n");
+		aprint_normal(": iee_gsc_attach: can't create DMA map\n");
 		bus_dmamem_unmap(sc->sc_dmat, sc->sc_shmem_addr, IEE_SHMEM_MAX);
 		bus_dmamem_free(sc->sc_dmat, &sc->sc_dma_segs, rsegs);
 		return;
 	}
 	if (bus_dmamap_load(sc->sc_dmat, sc->sc_shmem_map, sc->sc_shmem_addr,
 	    IEE_SHMEM_MAX, NULL, BUS_DMA_NOWAIT) != 0) {
-		aprint_error(": iee_gsc_attach: can't load DMA map\n");
+		aprint_normal(": iee_gsc_attach: can't load DMA map\n");
 		bus_dmamap_destroy(sc->sc_dmat, sc->sc_shmem_map);
 		bus_dmamem_unmap(sc->sc_dmat, sc->sc_shmem_addr, IEE_SHMEM_MAX);
 		bus_dmamem_free(sc->sc_dmat, &sc->sc_dma_segs, rsegs);
@@ -269,7 +281,7 @@ iee_gsc_attach(device_t parent, device_t self, void *aux)
 	SC_SCP->scp_sysbus = IEE_SYSBUS_BE | IEE_SYSBUS_INT | 
 	    IEE_SYSBUS_TRG | IEE_SYSBUS_LIEAR | IEE_SYSBUS_STD;
 
-	sc_gsc->sc_ih = hp700_intr_establish(self, IPL_NET,
+	sc_gsc->sc_ih = hp700_intr_establish(&sc->sc_dev, IPL_NET,
 	    iee_intr, sc, ga->ga_int_reg, ga->ga_irq);
 
 	sc->sc_iee_reset = iee_gsc_reset;
@@ -282,11 +294,13 @@ iee_gsc_attach(device_t parent, device_t self, void *aux)
 	iee_attach(sc, ga->ga_ether_address, media, 2, IFM_ETHER | IFM_AUTO);
 }
 
+
+
 int
-iee_gsc_detach(device_t self, int flags)
+iee_gsc_detach(struct device* self, int flags)
 {
-	struct iee_gsc_softc *sc_gsc = device_private(self);
-	struct iee_softc *sc = &sc_gsc->iee_sc;
+	struct iee_gsc_softc *sc_gsc = (struct iee_gsc_softc *) self;
+	struct iee_softc *sc = (struct iee_softc *) self;
 
 	iee_detach(sc, flags);
 	bus_space_unmap(sc_gsc->sc_iot, sc_gsc->sc_ioh, IEE_GSC_IO_SZ);
@@ -295,5 +309,6 @@ iee_gsc_detach(device_t self, int flags)
 	bus_dmamem_unmap(sc->sc_dmat, sc->sc_shmem_addr, IEE_SHMEM_MAX);
 	bus_dmamem_free(sc->sc_dmat, &sc->sc_dma_segs, 1);
 	/* There is no hp700_intr_disestablish()! */
-	return 0;
+	return(0);
 }
+

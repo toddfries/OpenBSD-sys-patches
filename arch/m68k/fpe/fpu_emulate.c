@@ -1,4 +1,4 @@
-/*	$NetBSD: fpu_emulate.c,v 1.28 2009/01/20 14:57:21 tsutsui Exp $	*/
+/*	$NetBSD: fpu_emulate.c,v 1.26 2005/12/11 12:17:52 christos Exp $	*/
 
 /*
  * Copyright (c) 1995 Gordon W. Ross
@@ -37,9 +37,8 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: fpu_emulate.c,v 1.28 2009/01/20 14:57:21 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: fpu_emulate.c,v 1.26 2005/12/11 12:17:52 christos Exp $");
 
-#include <sys/param.h>
 #include <sys/types.h>
 #include <sys/signal.h>
 #include <sys/systm.h>
@@ -753,8 +752,8 @@ fpu_emul_arith(fe, insn)
      * pointer to the result.
      
      */
-    res = NULL;
-    switch (word1 & 0x7f) {
+    res = 0;
+    switch (word1 & 0x3f) {
     case 0x00:			/* fmove */
 	res = &fe->fe_f2;
 	break;
@@ -910,7 +909,7 @@ fpu_emul_arith(fe, insn)
 	discard_result = 1;
 	break;
 
-    default:			/* possibly 040/060 instructions */
+    default:
 #ifdef DEBUG
 	printf("fpu_emul_arith: bad opcode=0x%x, word1=0x%x\n",
 	       insn->is_opcode, insn->is_word1);
@@ -918,22 +917,14 @@ fpu_emul_arith(fe, insn)
 	sig = SIGILL;
     } /* switch (word1 & 0x3f) */
 
-    /* for sanity */
-    if (res == NULL)
-	sig = SIGILL;
-
     if (!discard_result && sig == 0) {
 	fpu_implode(fe, res, FTYPE_EXT, &fpregs[regnum * 3]);
-
-	/* update fpsr according to the result of operation */
-	fpu_upd_fpsr(fe, res);
 #if DEBUG_FPE
 	printf("fpu_emul_arith: %08x,%08x,%08x stored in FP%d\n",
 	       fpregs[regnum*3], fpregs[regnum*3+1],
 	       fpregs[regnum*3+2], regnum);
     } else if (sig == 0) {
-	static const char *class_name[] =
-	    { "SNAN", "QNAN", "ZERO", "NUM", "INF" };
+	static char *class_name[] = { "SNAN", "QNAN", "ZERO", "NUM", "INF" };
 	printf("fpu_emul_arith: result(%s,%c,%d,%08x,%08x,%08x) discarded\n",
 	       class_name[res->fp_class + 2],
 	       res->fp_sign ? '-' : '+', res->fp_exp,
@@ -943,6 +934,9 @@ fpu_emul_arith(fe, insn)
 	printf("fpu_emul_arith: received signal %d\n", sig);
 #endif
     }
+
+    /* update fpsr according to the result of operation */
+    fpu_upd_fpsr(fe, res);
 
 #if DEBUG_FPE
     printf("fpu_emul_arith: FPSR = %08x, FPCR = %08x\n",

@@ -1,4 +1,4 @@
-/* $NetBSD: osf1_cvt.c,v 1.25 2007/12/08 18:36:20 dsl Exp $ */
+/* $NetBSD: osf1_cvt.c,v 1.20 2005/12/11 12:20:23 christos Exp $ */
 
 /*
  * Copyright (c) 1999 Christopher G. Demetriou.  All rights reserved.
@@ -58,7 +58,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: osf1_cvt.c,v 1.25 2007/12/08 18:36:20 dsl Exp $");
+__KERNEL_RCSID(0, "$NetBSD: osf1_cvt.c,v 1.20 2005/12/11 12:20:23 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -74,6 +74,7 @@ __KERNEL_RCSID(0, "$NetBSD: osf1_cvt.c,v 1.25 2007/12/08 18:36:20 dsl Exp $");
 #include <sys/signal.h>
 #include <sys/signalvar.h>
 #include <sys/reboot.h>
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 #include <sys/exec.h>
 #include <sys/vnode.h>
@@ -284,6 +285,26 @@ const struct emul_flags_xtab osf1_sigaction_flags_xtab[] = {
     {	0								},
 };
 
+const struct emul_flags_xtab osf1_sigaltstack_flags_rxtab[] = {
+    {	SS_ONSTACK,		SS_ONSTACK,		OSF1_SS_ONSTACK	},
+    {	SS_DISABLE,		SS_DISABLE,		OSF1_SS_DISABLE	},
+#if 0 /* XXX no equivalents */
+    {	???,			???,			OSF1_SS_NOMASK	},
+    {	???,			???,			OSF1_SS_UCONTEXT },
+#endif
+    {	0								},
+};
+
+const struct emul_flags_xtab osf1_sigaltstack_flags_xtab[] = {
+    {	OSF1_SS_ONSTACK,	OSF1_SS_ONSTACK,	SS_ONSTACK	},
+    {	OSF1_SS_DISABLE,	OSF1_SS_DISABLE,	SS_DISABLE	},
+#if 0 /* XXX no equivalents */
+    {	OSF1_SS_NOMASK,		OSF1_SS_NOMASK,		???		},
+    {	OSF1_SS_UCONTEXT,	OSF1_SS_UCONTEXT,	???		},
+#endif
+    {	0								},
+};
+
 const struct emul_flags_xtab osf1_wait_options_xtab[] = {
     {	OSF1_WNOHANG,		OSF1_WNOHANG,		WNOHANG		},
     {	OSF1_WUNTRACED,		OSF1_WUNTRACED,		WUNTRACED	},
@@ -291,7 +312,9 @@ const struct emul_flags_xtab osf1_wait_options_xtab[] = {
 };
 
 void
-osf1_cvt_flock_from_native(const struct flock *nf, struct osf1_flock *of)
+osf1_cvt_flock_from_native(nf, of)
+	const struct flock *nf;
+	struct osf1_flock *of;
 {
 
 	memset(of, 0, sizeof of);
@@ -330,7 +353,9 @@ osf1_cvt_flock_from_native(const struct flock *nf, struct osf1_flock *of)
 }
 
 int
-osf1_cvt_flock_to_native(const struct osf1_flock *of, struct flock *nf)
+osf1_cvt_flock_to_native(of, nf)
+	const struct osf1_flock *of;
+	struct flock *nf;
 {
 
 	memset(nf, 0, sizeof nf);
@@ -377,7 +402,9 @@ osf1_cvt_flock_to_native(const struct osf1_flock *of, struct flock *nf)
 }
 
 int
-osf1_cvt_msghdr_xopen_to_native(const struct osf1_msghdr_xopen *omh, struct msghdr *bmh)
+osf1_cvt_msghdr_xopen_to_native(omh, bmh)
+	const struct osf1_msghdr_xopen *omh;
+	struct msghdr *bmh;
 {
 	unsigned long leftovers;
 
@@ -462,7 +489,9 @@ osf1_cvt_pathconf_name_to_native(oname, bnamep)
  * Convert from as rusage structure to an osf1 rusage structure.
  */
 void
-osf1_cvt_rusage_from_native(const struct rusage *ru, struct osf1_rusage *oru)
+osf1_cvt_rusage_from_native(ru, oru)
+	const struct rusage *ru;
+	struct osf1_rusage *oru;
 {
 
 	oru->ru_utime.tv_sec = ru->ru_utime.tv_sec;
@@ -491,7 +520,9 @@ osf1_cvt_rusage_from_native(const struct rusage *ru, struct osf1_rusage *oru)
  * XXX: Only a subset of the flags is currently implemented.
  */
 void
-osf1_cvt_sigaction_from_native(const struct sigaction *bsa, struct osf1_sigaction *osa)
+osf1_cvt_sigaction_from_native(bsa, osa)
+	const struct sigaction *bsa;
+	struct osf1_sigaction *osa;
 {
 
 	osa->osf1_sa_handler = bsa->sa_handler;
@@ -503,7 +534,9 @@ osf1_cvt_sigaction_from_native(const struct sigaction *bsa, struct osf1_sigactio
 }
 
 int
-osf1_cvt_sigaction_to_native(const struct osf1_sigaction *osa, struct sigaction *bsa)
+osf1_cvt_sigaction_to_native(osa, bsa)
+	const struct osf1_sigaction *osa;
+	struct sigaction *bsa;
 {
 
 	bsa->sa_handler = osa->osf1_sa_handler;
@@ -518,7 +551,46 @@ osf1_cvt_sigaction_to_native(const struct osf1_sigaction *osa, struct sigaction 
 }
 
 void
-osf1_cvt_sigset_from_native(const sigset_t *bss, osf1_sigset_t *oss)
+osf1_cvt_sigaltstack_from_native(bss, oss)
+	const struct sigaltstack *bss;
+	struct osf1_sigaltstack *oss;
+{
+
+	oss->ss_sp = bss->ss_sp;
+	oss->ss_size = bss->ss_size;
+
+        /* translate flags */
+	oss->ss_flags = emul_flags_translate(osf1_sigaltstack_flags_rxtab,
+            bss->ss_flags, NULL);
+}
+
+int
+osf1_cvt_sigaltstack_to_native(oss, bss)
+	const struct osf1_sigaltstack *oss;
+	struct sigaltstack *bss;
+{
+	unsigned long leftovers;
+
+	bss->ss_sp = oss->ss_sp;
+	bss->ss_size = oss->ss_size;
+
+        /* translate flags */
+	bss->ss_flags = emul_flags_translate(osf1_sigaltstack_flags_xtab,
+            oss->ss_flags, &leftovers);
+
+	if (leftovers != 0) {
+		printf("osf1_cvt_sigaltstack_to_native: leftovers = 0x%lx\n",
+		    leftovers);
+		return (EINVAL);
+	}
+
+	return (0);
+}
+
+void
+osf1_cvt_sigset_from_native(bss, oss)
+	const sigset_t *bss;
+	osf1_sigset_t *oss;
 {
 	int i, newsig;
 
@@ -533,7 +605,9 @@ osf1_cvt_sigset_from_native(const sigset_t *bss, osf1_sigset_t *oss)
 }
 
 int
-osf1_cvt_sigset_to_native(const osf1_sigset_t *oss, sigset_t *bss)
+osf1_cvt_sigset_to_native(oss, bss)
+	const osf1_sigset_t *oss;
+	sigset_t *bss;
 {
 	int i, newsig;
 
@@ -552,7 +626,9 @@ osf1_cvt_sigset_to_native(const osf1_sigset_t *oss, sigset_t *bss)
  * Convert from a stat structure to an osf1 stat structure.
  */
 void
-osf1_cvt_stat_from_native(const struct stat *st, struct osf1_stat *ost)
+osf1_cvt_stat_from_native(st, ost)
+	const struct stat *st;
+	struct osf1_stat *ost;
 {
 
 	ost->st_dev = osf1_cvt_dev_from_native(st->st_dev);
@@ -579,7 +655,9 @@ osf1_cvt_stat_from_native(const struct stat *st, struct osf1_stat *ost)
  * Convert from a stat structure to an osf1 stat structure.
  */
 void
-osf1_cvt_stat2_from_native(const struct stat *st, struct osf1_stat2 *ost)
+osf1_cvt_stat2_from_native(st, ost)
+	const struct stat *st;
+	struct osf1_stat2 *ost;
 {
 
 	memset(ost, 0, sizeof *ost);
@@ -601,15 +679,17 @@ osf1_cvt_stat2_from_native(const struct stat *st, struct osf1_stat2 *ost)
 }
 
 void
-osf1_cvt_statfs_from_native(const struct statvfs *bsfs, struct osf1_statfs *osfs)
+osf1_cvt_statfs_from_native(bsfs, osfs)
+	const struct statvfs *bsfs;
+	struct osf1_statfs *osfs;
 {
 
 	memset(osfs, 0, sizeof (struct osf1_statfs));
-	if (!strncmp(MOUNT_FFS, bsfs->f_fstypename, sizeof(bsfs->f_fstypename)))
+	if (!strncmp(MOUNT_FFS, bsfs->f_fstypename, MFSNAMELEN))
 		osfs->f_type = OSF1_MOUNT_UFS;
-	else if (!strncmp(MOUNT_NFS, bsfs->f_fstypename, sizeof(bsfs->f_fstypename)))
+	else if (!strncmp(MOUNT_NFS, bsfs->f_fstypename, MFSNAMELEN))
 		osfs->f_type = OSF1_MOUNT_NFS;
-	else if (!strncmp(MOUNT_MFS, bsfs->f_fstypename, sizeof(bsfs->f_fstypename)))
+	else if (!strncmp(MOUNT_MFS, bsfs->f_fstypename, MFSNAMELEN))
 		osfs->f_type = OSF1_MOUNT_MFS;
 	else
 		/* uh oh...  XXX = PC, CDFS, PROCFS, etc. */

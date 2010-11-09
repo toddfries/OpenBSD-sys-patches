@@ -1,4 +1,4 @@
-/*	$NetBSD: aic_isa.c,v 1.21 2008/04/08 20:08:49 cegger Exp $	*/
+/*	$NetBSD: aic_isa.c,v 1.20 2007/10/19 12:00:14 ad Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995, 1996 Charles M. Hannum.  All rights reserved.
@@ -51,7 +51,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: aic_isa.c,v 1.21 2008/04/08 20:08:49 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: aic_isa.c,v 1.20 2007/10/19 12:00:14 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -154,21 +154,22 @@ aic_isa_attach(struct device *parent, struct device *self, void *aux)
 	printf("\n");
 
 	if (bus_space_map(iot, ia->ia_io[0].ir_addr, AIC_ISA_IOSIZE, 0, &ioh)) {
-		aprint_error_dev(&sc->sc_dev, "can't map i/o space\n");
+		printf("%s: can't map i/o space\n", sc->sc_dev.dv_xname);
 		return;
 	}
 
 	sc->sc_iot = iot;
 	sc->sc_ioh = ioh;
 	if (!aic_find(iot, ioh)) {
-		aprint_error_dev(&sc->sc_dev, "aic_find failed");
+		printf("%s: aic_find failed", sc->sc_dev.dv_xname);
 		return;
 	}
 
 	isc->sc_ih = isa_intr_establish(ic, ia->ia_irq[0].ir_irq, IST_EDGE,
 	    IPL_BIO, aicintr, sc);
 	if (isc->sc_ih == NULL) {
-		aprint_error_dev(&sc->sc_dev, "couldn't establish interrupt\n");
+		printf("%s: couldn't establish interrupt\n",
+		    sc->sc_dev.dv_xname);
 		return;
 	}
 

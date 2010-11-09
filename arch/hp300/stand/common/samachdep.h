@@ -1,4 +1,4 @@
-/*	$NetBSD: samachdep.h,v 1.16 2008/07/16 13:44:51 tsutsui Exp $	*/
+/*	$NetBSD: samachdep.h,v 1.14 2006/07/02 11:24:43 tsutsui Exp $	*/
 
 /*
  * Copyright (c) 1982, 1990, 1993
@@ -97,7 +97,7 @@ int tgetchar(void);
 extern	u_int bootdev;
 extern	int machineid, mmuid;
 extern	int howto;
-int badaddr(void *);
+int badaddr(caddr_t);
 void call_req_reboot(void);
 void romout(int, char *);
 void _transfer(char *, int, int, int, char *, char *);
@@ -132,4 +132,5 @@ extern	struct fs_ops file_system_rawfs[];
 extern	struct fs_ops file_system_ufs[];
 extern	struct fs_ops file_system_nfs[];
 
-extern	char bootprog_name[], bootprog_rev[], bootprog_kernrev[];
+extern	char bootprog_name[], bootprog_rev[], bootprog_date[],
+	    bootprog_maker[];

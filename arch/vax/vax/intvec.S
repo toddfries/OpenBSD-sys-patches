@@ -1,4 +1,4 @@
-/*	$NetBSD: intvec.S,v 1.17 2009/03/05 01:38:12 msaitoh Exp $   */
+/*	$NetBSD: intvec.S,v 1.10 2006/03/12 02:04:26 christos Exp $   */
 
 /*
  * Copyright (c) 1994, 1997 Ludd, University of Lule}, Sweden.
@@ -34,6 +34,8 @@
 #include "assym.h"
 #include <sys/cdefs.h>
 #include <net/netisr.h>
+
+#define	__HAVE_GENERIC_SOFT_INTERRUPTS	/* XXX - cannot include types.h! */
 
 #include "opt_ddb.h"
 #include "opt_cputype.h"
@@ -128,12 +130,12 @@ _C_LABEL(rpb):
 	NOVEC;				# Unused, 94
 	NOVEC;				# Unused, 98
 	NOVEC;				# Unused, 9C
-	INTVEC(softclock, KSTACK);	# Software clock interrupt, A0 (IPL 08)
+	INTVEC(softclock,ISTACK)	# Software clock interrupt (IPL 08)
 	NOVEC;				# Unused, A4 (IPL 09)
 	NOVEC;				# Unused, A8 (IPL 10)
-	INTVEC(softbio, KSTACK);	# Software bio interrupt, AC (IPL 11)
-	INTVEC(softnet, KSTACK);	# Software net interrupt, B0 (IPL 12)
-	INTVEC(softserial, KSTACK);	# Software serial interrupt, B4 (IPL 13)
+	NOVEC;				# Unused, AC (IPL 11)
+	INTVEC(softnet, ISTACK)		# Software network interrupt (IPL 12)
+	INTVEC(softserial, ISTACK)	# Software serial interrupt (IPL 13)
 	NOVEC;				# Unused, B8 (IPL 14)
 	INTVEC(ddbtrap, ISTACK) 	# Kernel debugger trap, BC (IPL 15)
 	INTVEC(hardclock,ISTACK)	# Interval Timer
@@ -266,7 +268,8 @@ SCBENTRY(syscall)			# Main system call
 	pushl	$T_SYSCALL
 	pushr	$0xfff
 	mfpr	$PR_USP, -(%sp)
-	mfpr    $PR_SSP, %r0		/* SSP contains curlwp */
+	mfpr    $PR_SSP, %r0
+	movl	CI_CURLWP(%r0), %r0
 	movl	L_PROC(%r0), %r0
 	pushl	%ap
 	pushl	%fp
@@ -293,6 +296,73 @@ SCBENTRY(sbiflt);
 	calls	$1, _C_LABEL(panic)
 
 TRAPCALL(astintr, T_ASTFLT)
+
+SCBENTRY(softclock)
+	PUSHR
+	movab	_C_LABEL(softclock_head),%r0
+	jsb	softintr_dispatch
+	incl	_C_LABEL(softclock_intrcnt)+EV_COUNT
+	adwc	$0,_C_LABEL(softclock_intrcnt)+EV_COUNT+4
+	incl	_C_LABEL(uvmexp)+UVME_SOFTS
+	POPR
+	rei
+
+SCBENTRY(softnet)
+	PUSHR
+
+#	tstl	_C_LABEL(netisr)			# any netisr's set
+#	beql	2f			# no, skip looking at them one by one
+#define DONETISR(bit, fn) \
+	bbcci	$bit,_C_LABEL(netisr),1f; \
+	calls	$0,_C_LABEL(fn); \
+	1:
+
+#include <net/netisr_dispatch.h>
+
+#undef DONETISR
+
+2:	movab	_C_LABEL(softnet_head),%r0
+	jsb	softintr_dispatch
+	incl	_C_LABEL(softnet_intrcnt)+EV_COUNT
+	adwc	$0,_C_LABEL(softnet_intrcnt)+EV_COUNT+4
+	incl	_C_LABEL(uvmexp)+UVME_SOFTS
+	POPR
+	rei
+
+SCBENTRY(softserial)
+	PUSHR
+	movab	_C_LABEL(softserial_head),%r0
+	jsb	softintr_dispatch
+	incl	_C_LABEL(softserial_intrcnt)+EV_COUNT
+	adwc	$0,_C_LABEL(softserial_intrcnt)+EV_COUNT+4
+	incl	_C_LABEL(uvmexp)+UVME_SOFTS
+	POPR
+	rei
+
+	.align	2
+softintr_dispatch:
+#if defined(MULTIPROCESSOR) || defined(LOCKDEBUG)
+	pushl	%r0
+	calls	$0,_C_LABEL(krnlock)
+	movl	(%sp)+,%r0
+#endif
+	movl	SHD_INTRS(%r0), %r0	# anything to do? (get first handler)
+	beql	3f			# nope return
+	pushl	%r7			# we need to use %r7 so save it
+	movl	%r0, %r7			# move first item to %r7
+1:	tstl	SH_PENDING(%r7)		# need call this one?
+	bneq	2f			# nope, go to next one
+	clrl	SH_PENDING(%r7)		# clear pending flag
+	pushl	SH_ARG(%r7)		# push function argument
+	calls	$1, *SH_FUNC(%r7)	# call function
+2:	movl	SH_NEXT(%r7), %r7		# get next handler
+	bneq	1b			# if not null, process it
+	movl	(%sp)+, %r7		# done, restore %r7
+3:
+#if defined(MULTIPROCESSOR) || defined(LOCKDEBUG)
+	calls	$0,_C_LABEL(krnunlock)
+#endif
+	rsb				# return to caller
 
 TRAPCALL(ddbtrap, T_KDBTRAP)
 

@@ -1,4 +1,4 @@
-/*	$NetBSD: acpi_madt.c,v 1.19 2008/01/07 06:04:07 tnn Exp $	*/
+/*	$NetBSD: acpi_madt.c,v 1.17 2006/11/16 01:32:47 christos Exp $	*/
 
 /*
  * Copyright (c) 2003 Wasabi Systems, Inc.
@@ -36,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: acpi_madt.c,v 1.19 2008/01/07 06:04:07 tnn Exp $");
+__KERNEL_RCSID(0, "$NetBSD: acpi_madt.c,v 1.17 2006/11/16 01:32:47 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/ioctl.h>
@@ -52,16 +52,16 @@ __KERNEL_RCSID(0, "$NetBSD: acpi_madt.c,v 1.19 2008/01/07 06:04:07 tnn Exp $");
 
 #ifdef ACPI_MADT_DEBUG
 static void acpi_madt_print(void);
-static ACPI_STATUS acpi_madt_print_entry(ACPI_SUBTABLE_HEADER *, void *);
-static void acpi_print_lapic(ACPI_MADT_LOCAL_APIC *);
-static void acpi_print_ioapic(ACPI_MADT_IO_APIC *);
-static void acpi_print_intsrc_ovr(ACPI_MADT_INTERRUPT_OVERRIDE *);
-static void acpi_print_intsrc_nmi(ACPI_MADT_NMI_SOURCE *);
-static void acpi_print_lapic_nmi(ACPI_MADT_LOCAL_APIC_NMI *);
-static void acpi_print_lapic_ovr(ACPI_MADT_LOCAL_APIC_OVERRIDE *);
-static void acpi_print_iosapic(ACPI_MADT_IO_SAPIC *);
-static void acpi_print_local_sapic(ACPI_MADT_LOCAL_SAPIC *);
-static void acpi_print_platint(ACPI_MADT_INTERRUPT_SOURCE *);
+static ACPI_STATUS acpi_madt_print_entry(APIC_HEADER *, void *);
+static void acpi_print_apic_proc(MADT_PROCESSOR_APIC *);
+static void acpi_print_ioapic(MADT_IO_APIC *);
+static void acpi_print_intsrc_ovr(MADT_INTERRUPT_OVERRIDE *);
+static void acpi_print_intsrc_nmi(MADT_NMI_SOURCE *);
+static void acpi_print_lapic_nmi(MADT_LOCAL_APIC_NMI *);
+static void acpi_print_lapic_addr_ovr(MADT_ADDRESS_OVERRIDE *);
+static void acpi_print_iosapic(MADT_IO_SAPIC *);
+static void acpi_print_local_sapic(MADT_LOCAL_SAPIC *);
+static void acpi_print_platint(MADT_INTERRUPT_SOURCE *);
 #endif
 
 static ACPI_TABLE_HEADER *madt_header;
@@ -74,7 +74,8 @@ acpi_madt_map(void)
 	if (madt_header != NULL)
 		return AE_ALREADY_EXISTS;
 
-	rv = AcpiGetTable(ACPI_SIG_MADT, 1, &madt_header);
+	rv = AcpiGetFirmwareTable(APIC_SIG, 1, ACPI_LOGICAL_ADDRESSING,
+	    &madt_header);
 
 	if (ACPI_FAILURE(rv))
 		return rv;
@@ -89,86 +90,86 @@ acpi_madt_map(void)
 void
 acpi_madt_unmap(void)
 {
+	AcpiOsUnmapMemory(madt_header, madt_header->Length);
 	madt_header = NULL;
 }
 
 #ifdef ACPI_MADT_DEBUG
 
 static void
-acpi_print_lapic(ACPI_MADT_LOCAL_APIC *p)
+acpi_print_apic_proc(MADT_PROCESSOR_APIC *p)
 {
-	printf("lapic: processor id %u apid %u enabled: %s\n",
-	    p->ProcessorId, p->Id,
-	    (p->LapicFlags & ACPI_MADT_ENABLED) ? "yes" : "no");
+	printf("processor: id %u apid %u enabled: %s\n",
+	    p->ProcessorId, p->LocalApicId,
+	    p->ProcessorEnabled ? "yes" : "no");
 }
 
 static void
-acpi_print_ioapic(ACPI_MADT_IO_APIC *p)
+acpi_print_ioapic(MADT_IO_APIC *p)
 {
-	printf("ioapic: apid %u address 0x%x vector base 0x%x\n",
-	    p->Id, p->Address, p->GlobalIrqBase);
+	printf("ioapic: apid %u address %x vector base %x\n",
+	    p->IoApicId, p->Address, p->Interrupt);
 }
 
 static void
-acpi_print_intsrc_ovr(ACPI_MADT_INTERRUPT_OVERRIDE *p)
+acpi_print_intsrc_ovr(MADT_INTERRUPT_OVERRIDE *p)
 {
-	printf("int override: bus %u src int %u global int %u\n",
-	    p->Bus, p->SourceIrq, p->GlobalIrq);
+	printf("int override: bus %u irq %u int %u\n",
+	    p->Bus, p->Source, p->Interrupt);
 }
 
 static void
-acpi_print_intsrc_nmi(ACPI_MADT_NMI_SOURCE *p)
+acpi_print_intsrc_nmi(MADT_NMI_SOURCE *p)
 {
-	printf("ioapic NMI: int %u\n", p->GlobalIrq);
+	printf("ioapic NMI: int %u\n", p->Interrupt);
 }
 
 static void
-acpi_print_lapic_nmi(ACPI_MADT_LOCAL_APIC_NMI *p)
+acpi_print_lapic_nmi(MADT_LOCAL_APIC_NMI *p)
 {
-	printf("lapic NMI: cpu id %u input %u\n", p->ProcessorId, p->Lint);
+	printf("lapic NMI: apid %u input %u\n", p->ProcessorId, p->Lint);
 }
 
 static void
-acpi_print_lapic_ovr(ACPI_MADT_LOCAL_APIC_OVERRIDE *p)
+acpi_print_lapic_addr_ovr(MADT_ADDRESS_OVERRIDE *p)
 {
-	printf("lapic addr override: 0x%llx\n", (unsigned long long)p->Address);
+	printf("lapic addr override: %llx\n", (unsigned long long)p->Address);
 }
 
 static void
-acpi_print_iosapic(ACPI_MADT_IO_SAPIC *p)
+acpi_print_iosapic(MADT_IO_SAPIC *p)
 {
-	printf("iosapic: sapid %u address 0x%llx int vector base 0x%x\n",
-	    p->Id, (unsigned long long)p->Address, p->GlobalIrqBase);
+	printf("iosapic: sapid %u address %llx vector base %x\n",
+	    p->IoSapicId, p->Address, p->InterruptBase);
 }
 
 static void
-acpi_print_local_sapic(ACPI_MADT_LOCAL_SAPIC *p)
+acpi_print_local_sapic(MADT_LOCAL_SAPIC *p)
 {
-	printf("local sapic: cpu id %u sapid %u sapeid %u enabled: %s\n",
-	    p->ProcessorId, p->Id, p->Eid,
-	    (p->LapicFlags & ACPI_MADT_ENABLED) ? "yes" : "no");
+	printf("local sapic: CPU %u sapid %u sapeid %u enabled: %s\n",
+	    p->ProcessorId, p->LocalSapicId, p->LocalSapicEid,
+	    p->ProcessorEnabled ? "yes" : "no");
 }
 
 static void
-acpi_print_platint(ACPI_MADT_INTERRUPT_SOURCE *p)
+acpi_print_platint(MADT_INTERRUPT_SOURCE *p)
 {
-	printf("platform int: type %u cpu id %u cpu eid %u vector %u int %u%s\n",
-	    p->Type, p->Id, p->Eid, p->IoSapicVector, p->GlobalIrq,
-	    (p->Flags & ACPI_MADT_CPEI_OVERRIDE) ? " CPEI" : "");
+	printf("platform int: type %u apid %u apeid %u\n",
+	    p->InterruptType, p->ProcessorId, p->ProcessorEid);
 }
 
 #endif
 
 void
-acpi_madt_walk(ACPI_STATUS (*func)(ACPI_SUBTABLE_HEADER *, void *), void *aux)
+acpi_madt_walk(ACPI_STATUS (*func)(APIC_HEADER *, void *), void *aux)
 {
 	char *madtend, *where;
-	ACPI_SUBTABLE_HEADER *hdrp;
+	APIC_HEADER *hdrp;
 
 	madtend = (char *)madt_header + madt_header->Length;
-	where = (char *)madt_header + sizeof (ACPI_TABLE_MADT);
+	where = (char *)madt_header + sizeof (MULTIPLE_APIC_TABLE);
 	while (where < madtend) {
-		hdrp = (ACPI_SUBTABLE_HEADER *)where;
+		hdrp = (APIC_HEADER *)where;
 		if (ACPI_FAILURE(func(hdrp, aux)))
 			break;
 		where += hdrp->Length;
@@ -179,47 +180,47 @@ acpi_madt_walk(ACPI_STATUS (*func)(ACPI_SUBTABLE_HEADER *, void *), void *aux)
 static void
 acpi_madt_print(void)
 {
-	ACPI_TABLE_MADT *ap;
+	MULTIPLE_APIC_TABLE *ap;
 
-	ap = (ACPI_TABLE_MADT *)madt_header;
+	ap = (MULTIPLE_APIC_TABLE *)madt_header;
 	printf("\n\nACPI MADT table:\n");
-	/* printf("default local APIC address: %x\n", ap->LocalApicAddress); */
+	printf("default local APIC address: %x\n", ap->LocalApicAddress);
 	printf("system dual 8259%s present\n",
-	    (ap->Flags & ACPI_MADT_PCAT_COMPAT) ? "" : " not");
+	    ap->PCATCompat ? "" : " not");
 	printf("entries:\n");
 
 	acpi_madt_walk(acpi_madt_print_entry, NULL);
 }
 
 static ACPI_STATUS
-acpi_madt_print_entry(ACPI_SUBTABLE_HEADER *hdrp, void *aux)
+acpi_madt_print_entry(APIC_HEADER *hdrp, void *aux)
 {
 	switch (hdrp->Type) {
-	case ACPI_MADT_TYPE_LOCAL_APIC:
-		acpi_print_lapic((void *)hdrp);
+	case APIC_PROCESSOR:
+		acpi_print_apic_proc((void *)hdrp);
 		break;
-	case ACPI_MADT_TYPE_IO_APIC:
+	case APIC_IO:
 		acpi_print_ioapic((void *)hdrp);
 		break;
-	case ACPI_MADT_TYPE_INTERRUPT_OVERRIDE:
+	case APIC_XRUPT_OVERRIDE:
 		acpi_print_intsrc_ovr((void *)hdrp);
 		break;
-	case ACPI_MADT_TYPE_NMI_SOURCE:
+	case APIC_NMI:
 		acpi_print_intsrc_nmi((void *)hdrp);
 		break;
-	case ACPI_MADT_TYPE_LOCAL_APIC_NMI:
+	case APIC_LOCAL_NMI:
 		acpi_print_lapic_nmi((void *)hdrp);
 		break;
-	case ACPI_MADT_TYPE_LOCAL_APIC_OVERRIDE:
-		acpi_print_lapic_ovr((void *)hdrp);
+	case APIC_ADDRESS_OVERRIDE:
+		acpi_print_lapic_addr_ovr((void *)hdrp);
 		break;
-	case ACPI_MADT_TYPE_IO_SAPIC:
+	case APIC_IO_SAPIC:
 		acpi_print_iosapic((void *)hdrp);
 		break;
-	case ACPI_MADT_TYPE_LOCAL_SAPIC:
+	case APIC_LOCAL_SAPIC:
 		acpi_print_local_sapic((void *)hdrp);
 		break;
-	case ACPI_MADT_TYPE_INTERRUPT_SOURCE:
+	case APIC_XRUPT_SOURCE:
 		acpi_print_platint((void *)hdrp);
 		break;
 	default:

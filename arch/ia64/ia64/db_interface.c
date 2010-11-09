@@ -1,4 +1,4 @@
-/* $NetBSD: db_interface.c,v 1.4 2007/10/17 19:54:59 garbled Exp $ */
+/* $NetBSD: db_interface.c,v 1.1 2006/04/07 14:21:18 cherry Exp $ */
 
 /*-
  * Copyright (c) 2003-2005 Marcel Moolenaar
@@ -80,7 +80,7 @@
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
 
-__KERNEL_RCSID(0, "$NetBSD: db_interface.c,v 1.4 2007/10/17 19:54:59 garbled Exp $");
+__KERNEL_RCSID(0, "$NetBSD: db_interface.c,v 1.1 2006/04/07 14:21:18 cherry Exp $");
 
 #include <sys/param.h>
 #include <sys/proc.h>
@@ -111,7 +111,7 @@ int	db_active = 0;
 db_regs_t *ddb_regp;
 
 const struct db_command db_machine_command_table[] = {
-	{  DDB_ADD_CMD(NULL,     NULL,           0,NULL,NULL,NULL) },
+	{ (char *)0, },
 };
 
 static int
@@ -431,7 +431,7 @@ db_pc_advance(db_regs_t *regs)
 }
 
 db_addr_t
-db_disasm(db_addr_t loc, bool altfmt)
+db_disasm(db_addr_t loc, boolean_t altfmt)
 {
 	char buf[32];
 	struct asm_bundle bundle;

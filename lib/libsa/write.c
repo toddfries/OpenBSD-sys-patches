@@ -1,4 +1,4 @@
-/*	$NetBSD: write.c,v 1.15 2007/12/02 04:59:26 tsutsui Exp $	*/
+/*	$NetBSD: write.c,v 1.13 2006/01/13 22:32:10 christos Exp $	*/
 
 /*-
  * Copyright (c) 1993
@@ -64,16 +64,19 @@
 #include "stand.h"
 
 ssize_t
-write(int fd, const void *destp, size_t bcount)
+write(fd, destp, bcount)
+	int fd;
+	const void *destp;
+	size_t bcount;
 {
 	struct open_file *f = &files[fd];
 	size_t resid;
 	void *dest = __UNCONST(destp);
 
 #if !defined(LIBSA_NO_FD_CHECKING)
-	if ((unsigned int)fd >= SOPEN_MAX || !(f->f_flags & F_WRITE)) {
+	if ((unsigned)fd >= SOPEN_MAX || !(f->f_flags & F_WRITE)) {
 		errno = EBADF;
-		return -1;
+		return (-1);
 	}
 #endif
 #if !defined(LIBSA_NO_RAW_ACCESS)
@@ -84,13 +87,13 @@ write(int fd, const void *destp, size_t bcount)
 		errno = DEV_STRATEGY(f->f_dev)(f->f_devdata, F_WRITE,
 			btodb(f->f_offset), bcount, dest, &resid);
 		if (errno)
-			return -1;
+			return (-1);
 		f->f_offset += resid;
-		return resid;
+		return (resid);
 	}
 #endif
 	resid = bcount;
 	if ((errno = FS_WRITE(f->f_ops)(f, dest, bcount, &resid)))
-		return -1;
-	return 0;
+		return (-1);
+	return (0);
 }

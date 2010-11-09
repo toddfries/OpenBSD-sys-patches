@@ -1,4 +1,4 @@
-/*	$NetBSD: hci_socket.c,v 1.17 2008/08/06 15:01:24 plunky Exp $	*/
+/*	$NetBSD: hci_socket.c,v 1.5 2007/01/04 19:07:03 elad Exp $	*/
 
 /*-
  * Copyright (c) 2005 Iain Hibbert.
@@ -31,11 +31,10 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: hci_socket.c,v 1.17 2008/08/06 15:01:24 plunky Exp $");
+__KERNEL_RCSID(0, "$NetBSD: hci_socket.c,v 1.5 2007/01/04 19:07:03 elad Exp $");
 
-/* load symbolic names */
+#include "opt_bluetooth.h"
 #ifdef BLUETOOTH_DEBUG
-#define PRUREQUESTS
 #define PRCOREQUESTS
 #endif
 
@@ -83,318 +82,79 @@ LIST_HEAD(hci_pcb_list, hci_pcb) hci_pcb = LIST_HEAD_INITIALIZER(hci_pcb);
 int hci_sendspace = HCI_CMD_PKT_SIZE;
 int hci_recvspace = 4096;
 
-/* supported commands opcode table */
-static const struct {
-	uint16_t	opcode;
-	uint8_t		offs;	/* 0 - 63 */
-	uint8_t		mask;	/* bit 0 - 7 */
-	int16_t		length;	/* -1 if privileged */
-} hci_cmds[] = {
-	{ HCI_CMD_INQUIRY,
-	  0,  0x01, sizeof(hci_inquiry_cp) },
-	{ HCI_CMD_INQUIRY_CANCEL,
-	  0,  0x02, -1 },
-	{ HCI_CMD_PERIODIC_INQUIRY,
-	  0,  0x04, -1 },
-	{ HCI_CMD_EXIT_PERIODIC_INQUIRY,
-	  0,  0x08, -1 },
-	{ HCI_CMD_CREATE_CON,
-	  0,  0x10, -1 },
-	{ HCI_CMD_DISCONNECT,
-	  0,  0x20, -1 },
-	{ HCI_CMD_ADD_SCO_CON,
-	  0,  0x40, -1 },
-	{ HCI_CMD_CREATE_CON_CANCEL,
-	  0,  0x80, -1 },
-	{ HCI_CMD_ACCEPT_CON,
-	  1,  0x01, -1 },
-	{ HCI_CMD_REJECT_CON,
-	  1,  0x02, -1 },
-	{ HCI_CMD_LINK_KEY_REP,
-	  1,  0x04, -1 },
-	{ HCI_CMD_LINK_KEY_NEG_REP,
-	  1,  0x08, -1 },
-	{ HCI_CMD_PIN_CODE_REP,
-	  1,  0x10, -1 },
-	{ HCI_CMD_PIN_CODE_NEG_REP,
-	  1,  0x20, -1 },
-	{ HCI_CMD_CHANGE_CON_PACKET_TYPE,
-	  1,  0x40, -1 },
-	{ HCI_CMD_AUTH_REQ,
-	  1,  0x80, -1 },
-	{ HCI_CMD_SET_CON_ENCRYPTION,
-	  2,  0x01, -1 },
-	{ HCI_CMD_CHANGE_CON_LINK_KEY,
-	  2,  0x02, -1 },
-	{ HCI_CMD_MASTER_LINK_KEY,
-	  2,  0x04, -1 },
-	{ HCI_CMD_REMOTE_NAME_REQ,
-	  2,  0x08, sizeof(hci_remote_name_req_cp) },
-	{ HCI_CMD_REMOTE_NAME_REQ_CANCEL,
-	  2,  0x10, -1 },
-	{ HCI_CMD_READ_REMOTE_FEATURES,
-	  2,  0x20, sizeof(hci_read_remote_features_cp) },
-	{ HCI_CMD_READ_REMOTE_EXTENDED_FEATURES,
-	  2,  0x40, sizeof(hci_read_remote_extended_features_cp) },
-	{ HCI_CMD_READ_REMOTE_VER_INFO,
-	  2,  0x80, sizeof(hci_read_remote_ver_info_cp) },
-	{ HCI_CMD_READ_CLOCK_OFFSET,
-	  3,  0x01, sizeof(hci_read_clock_offset_cp) },
-	{ HCI_CMD_READ_LMP_HANDLE,
-	  3,  0x02, sizeof(hci_read_lmp_handle_cp) },
-	{ HCI_CMD_HOLD_MODE,
-	  4,  0x02, -1 },
-	{ HCI_CMD_SNIFF_MODE,
-	  4,  0x04, -1 },
-	{ HCI_CMD_EXIT_SNIFF_MODE,
-	  4,  0x08, -1 },
-	{ HCI_CMD_PARK_MODE,
-	  4,  0x10, -1 },
-	{ HCI_CMD_EXIT_PARK_MODE,
-	  4,  0x20, -1 },
-	{ HCI_CMD_QOS_SETUP,
-	  4,  0x40, -1 },
-	{ HCI_CMD_ROLE_DISCOVERY,
-	  4,  0x80, sizeof(hci_role_discovery_cp) },
-	{ HCI_CMD_SWITCH_ROLE,
-	  5,  0x01, -1 },
-	{ HCI_CMD_READ_LINK_POLICY_SETTINGS,
-	  5,  0x02, sizeof(hci_read_link_policy_settings_cp) },
-	{ HCI_CMD_WRITE_LINK_POLICY_SETTINGS,
-	  5,  0x04, -1 },
-	{ HCI_CMD_READ_DEFAULT_LINK_POLICY_SETTINGS,
-	  5,  0x08, 0 },
-	{ HCI_CMD_WRITE_DEFAULT_LINK_POLICY_SETTINGS,
-	  5,  0x10, -1 },
-	{ HCI_CMD_FLOW_SPECIFICATION,
-	  5,  0x20, -1 },
-	{ HCI_CMD_SET_EVENT_MASK,
-	  5,  0x40, -1 },
-	{ HCI_CMD_RESET,
-	  5,  0x80, -1 },
-	{ HCI_CMD_SET_EVENT_FILTER,
-	  6,  0x01, -1 },
-	{ HCI_CMD_FLUSH,
-	  6,  0x02, -1 },
-	{ HCI_CMD_READ_PIN_TYPE,
-	  6,  0x04, 0 },
-	{ HCI_CMD_WRITE_PIN_TYPE,
-	  6,  0x08, -1 },
-	{ HCI_CMD_CREATE_NEW_UNIT_KEY,
-	  6,  0x10, -1 },
-	{ HCI_CMD_READ_STORED_LINK_KEY,
-	  6,  0x20, -1 },
-	{ HCI_CMD_WRITE_STORED_LINK_KEY,
-	  6,  0x40, -1 },
-	{ HCI_CMD_DELETE_STORED_LINK_KEY,
-	  6,  0x80, -1 },
-	{ HCI_CMD_WRITE_LOCAL_NAME,
-	  7,  0x01, -1 },
-	{ HCI_CMD_READ_LOCAL_NAME,
-	  7,  0x02, 0 },
-	{ HCI_CMD_READ_CON_ACCEPT_TIMEOUT,
-	  7,  0x04, 0 },
-	{ HCI_CMD_WRITE_CON_ACCEPT_TIMEOUT,
-	  7,  0x08, -1 },
-	{ HCI_CMD_READ_PAGE_TIMEOUT,
-	  7,  0x10, 0 },
-	{ HCI_CMD_WRITE_PAGE_TIMEOUT,
-	  7,  0x20, -1 },
-	{ HCI_CMD_READ_SCAN_ENABLE,
-	  7,  0x40, 0 },
-	{ HCI_CMD_WRITE_SCAN_ENABLE,
-	  7,  0x80, -1 },
-	{ HCI_CMD_READ_PAGE_SCAN_ACTIVITY,
-	  8,  0x01, 0 },
-	{ HCI_CMD_WRITE_PAGE_SCAN_ACTIVITY,
-	  8,  0x02, -1 },
-	{ HCI_CMD_READ_INQUIRY_SCAN_ACTIVITY,
-	  8,  0x04, 0 },
-	{ HCI_CMD_WRITE_INQUIRY_SCAN_ACTIVITY,
-	  8,  0x08, -1 },
-	{ HCI_CMD_READ_AUTH_ENABLE,
-	  8,  0x10, 0 },
-	{ HCI_CMD_WRITE_AUTH_ENABLE,
-	  8,  0x20, -1 },
-	{ HCI_CMD_READ_ENCRYPTION_MODE,
-	  8,  0x40, 0 },
-	{ HCI_CMD_WRITE_ENCRYPTION_MODE,
-	  8,  0x80, -1 },
-	{ HCI_CMD_READ_UNIT_CLASS,
-	  9,  0x01, 0 },
-	{ HCI_CMD_WRITE_UNIT_CLASS,
-	  9,  0x02, -1 },
-	{ HCI_CMD_READ_VOICE_SETTING,
-	  9,  0x04, 0 },
-	{ HCI_CMD_WRITE_VOICE_SETTING,
-	  9,  0x08, -1 },
-	{ HCI_CMD_READ_AUTO_FLUSH_TIMEOUT,
-	  9,  0x10, sizeof(hci_read_auto_flush_timeout_cp) },
-	{ HCI_CMD_WRITE_AUTO_FLUSH_TIMEOUT,
-	  9,  0x20, -1 },
-	{ HCI_CMD_READ_NUM_BROADCAST_RETRANS,
-	  9,  0x40, 0 },
-	{ HCI_CMD_WRITE_NUM_BROADCAST_RETRANS,
-	  9,  0x80, -1 },
-	{ HCI_CMD_READ_HOLD_MODE_ACTIVITY,
-	  10, 0x01, 0 },
-	{ HCI_CMD_WRITE_HOLD_MODE_ACTIVITY,
-	  10, 0x02, -1 },
-	{ HCI_CMD_READ_XMIT_LEVEL,
-	  10, 0x04, sizeof(hci_read_xmit_level_cp) },
-	{ HCI_CMD_READ_SCO_FLOW_CONTROL,
-	  10, 0x08, 0 },
-	{ HCI_CMD_WRITE_SCO_FLOW_CONTROL,
-	  10, 0x10, -1 },
-	{ HCI_CMD_HC2H_FLOW_CONTROL,
-	  10, 0x20, -1 },
-	{ HCI_CMD_HOST_BUFFER_SIZE,
-	  10, 0x40, -1 },
-	{ HCI_CMD_HOST_NUM_COMPL_PKTS,
-	  10, 0x80, -1 },
-	{ HCI_CMD_READ_LINK_SUPERVISION_TIMEOUT,
-	  11, 0x01, sizeof(hci_read_link_supervision_timeout_cp) },
-	{ HCI_CMD_WRITE_LINK_SUPERVISION_TIMEOUT,
-	  11, 0x02, -1 },
-	{ HCI_CMD_READ_NUM_SUPPORTED_IAC,
-	  11, 0x04, 0 },
-	{ HCI_CMD_READ_IAC_LAP,
-	  11, 0x08, 0 },
-	{ HCI_CMD_WRITE_IAC_LAP,
-	  11, 0x10, -1 },
-	{ HCI_CMD_READ_PAGE_SCAN_PERIOD,
-	  11, 0x20, 0 },
-	{ HCI_CMD_WRITE_PAGE_SCAN_PERIOD,
-	  11, 0x40, -1 },
-	{ HCI_CMD_READ_PAGE_SCAN,
-	  11, 0x80, 0 },
-	{ HCI_CMD_WRITE_PAGE_SCAN,
-	  12, 0x01, -1 },
-	{ HCI_CMD_SET_AFH_CLASSIFICATION,
-	  12, 0x02, -1 },
-	{ HCI_CMD_READ_INQUIRY_SCAN_TYPE,
-	  12, 0x10, 0 },
-	{ HCI_CMD_WRITE_INQUIRY_SCAN_TYPE,
-	  12, 0x20, -1 },
-	{ HCI_CMD_READ_INQUIRY_MODE,
-	  12, 0x40, 0 },
-	{ HCI_CMD_WRITE_INQUIRY_MODE,
-	  12, 0x80, -1 },
-	{ HCI_CMD_READ_PAGE_SCAN_TYPE,
-	  13, 0x01, 0 },
-	{ HCI_CMD_WRITE_PAGE_SCAN_TYPE,
-	  13, 0x02, -1 },
-	{ HCI_CMD_READ_AFH_ASSESSMENT,
-	  13, 0x04, 0 },
-	{ HCI_CMD_WRITE_AFH_ASSESSMENT,
-	  13, 0x08, -1 },
-	{ HCI_CMD_READ_LOCAL_VER,
-	  14, 0x08, 0 },
-	{ HCI_CMD_READ_LOCAL_COMMANDS,
-	  14, 0x10, 0 },
-	{ HCI_CMD_READ_LOCAL_FEATURES,
-	  14, 0x20, 0 },
-	{ HCI_CMD_READ_LOCAL_EXTENDED_FEATURES,
-	  14, 0x40, sizeof(hci_read_local_extended_features_cp) },
-	{ HCI_CMD_READ_BUFFER_SIZE,
-	  14, 0x80, 0 },
-	{ HCI_CMD_READ_COUNTRY_CODE,
-	  15, 0x01, 0 },
-	{ HCI_CMD_READ_BDADDR,
-	  15, 0x02, 0 },
-	{ HCI_CMD_READ_FAILED_CONTACT_CNTR,
-	  15, 0x04, sizeof(hci_read_failed_contact_cntr_cp) },
-	{ HCI_CMD_RESET_FAILED_CONTACT_CNTR,
-	  15, 0x08, -1 },
-	{ HCI_CMD_READ_LINK_QUALITY,
-	  15, 0x10, sizeof(hci_read_link_quality_cp) },
-	{ HCI_CMD_READ_RSSI,
-	  15, 0x20, sizeof(hci_read_rssi_cp) },
-	{ HCI_CMD_READ_AFH_CHANNEL_MAP,
-	  15, 0x40, sizeof(hci_read_afh_channel_map_cp) },
-	{ HCI_CMD_READ_CLOCK,
-	  15, 0x80, sizeof(hci_read_clock_cp) },
-	{ HCI_CMD_READ_LOOPBACK_MODE,
-	  16, 0x01, 0 },
-	{ HCI_CMD_WRITE_LOOPBACK_MODE,
-	  16, 0x02, -1 },
-	{ HCI_CMD_ENABLE_UNIT_UNDER_TEST,
-	  16, 0x04, -1 },
-	{ HCI_CMD_SETUP_SCO_CON,
-	  16, 0x08, -1 },
-	{ HCI_CMD_ACCEPT_SCO_CON_REQ,
-	  16, 0x10, -1 },
-	{ HCI_CMD_REJECT_SCO_CON_REQ,
-	  16, 0x20, -1 },
-	{ HCI_CMD_READ_EXTENDED_INQUIRY_RSP,
-	  17, 0x01, 0 },
-	{ HCI_CMD_WRITE_EXTENDED_INQUIRY_RSP,
-	  17, 0x02, -1 },
-	{ HCI_CMD_REFRESH_ENCRYPTION_KEY,
-	  17, 0x04, -1 },
-	{ HCI_CMD_SNIFF_SUBRATING,
-	  17, 0x10, -1 },
-	{ HCI_CMD_READ_SIMPLE_PAIRING_MODE,
-	  17, 0x20, 0 },
-	{ HCI_CMD_WRITE_SIMPLE_PAIRING_MODE,
-	  17, 0x40, -1 },
-	{ HCI_CMD_READ_LOCAL_OOB_DATA,
-	  17, 0x80, -1 },
-	{ HCI_CMD_READ_INQUIRY_RSP_XMIT_POWER,
-	  18, 0x01, 0 },
-	{ HCI_CMD_WRITE_INQUIRY_RSP_XMIT_POWER,
-	  18, 0x02, -1 },
-	{ HCI_CMD_READ_DEFAULT_ERRDATA_REPORTING,
-	  18, 0x04, 0 },
-	{ HCI_CMD_WRITE_DEFAULT_ERRDATA_REPORTING,
-	  18, 0x08, -1 },
-	{ HCI_CMD_IO_CAPABILITY_REP,
-	  18, 0x80, -1 },
-	{ HCI_CMD_USER_CONFIRM_REP,
-	  19, 0x01, -1 },
-	{ HCI_CMD_USER_CONFIRM_NEG_REP,
-	  19, 0x02, -1 },
-	{ HCI_CMD_USER_PASSKEY_REP,
-	  19, 0x04, -1 },
-	{ HCI_CMD_USER_PASSKEY_NEG_REP,
-	  19, 0x08, -1 },
-	{ HCI_CMD_OOB_DATA_REP,
-	  19, 0x10, -1 },
-	{ HCI_CMD_WRITE_SIMPLE_PAIRING_DEBUG_MODE,
-	  19, 0x20, -1 },
-	{ HCI_CMD_ENHANCED_FLUSH,
-	  19, 0x40, -1 },
-	{ HCI_CMD_OOB_DATA_NEG_REP,
-	  19, 0x80, -1 },
-	{ HCI_CMD_SEND_KEYPRESS_NOTIFICATION,
-	  20, 0x40, -1 },
-	{ HCI_CMD_IO_CAPABILITY_NEG_REP,
-	  20, 0x80, -1 },
-};
-
 /*
  * Security filter routines for unprivileged users.
  *	Allow all but a few critical events, and only permit read commands.
- *	If a unit is given, verify the command is supported.
  */
 
 static int
-hci_security_check_opcode(struct hci_unit *unit, uint16_t opcode)
+hci_security_check_opcode(uint16_t opcode)
 {
-	int i;
 
-	for (i = 0 ; i < __arraycount(hci_cmds) ; i++) {
-		if (opcode != hci_cmds[i].opcode)
-			continue;
+	switch (opcode) {
+	/* Link control */
+	case HCI_CMD_INQUIRY:
+	case HCI_CMD_REMOTE_NAME_REQ:
+	case HCI_CMD_READ_REMOTE_FEATURES:
+	case HCI_CMD_READ_REMOTE_EXTENDED_FEATURES:
+	case HCI_CMD_READ_REMOTE_VER_INFO:
+	case HCI_CMD_READ_CLOCK_OFFSET:
+	case HCI_CMD_READ_LMP_HANDLE:
 
-		if (unit == NULL
-		    || (unit->hci_cmds[hci_cmds[i].offs] & hci_cmds[i].mask))
-			return hci_cmds[i].length;
+	/* Link policy */
+	case HCI_CMD_ROLE_DISCOVERY:
+	case HCI_CMD_READ_LINK_POLICY_SETTINGS:
+	case HCI_CMD_READ_DEFAULT_LINK_POLICY_SETTINGS:
 
-		break;
+	/* Host controller and baseband */
+	case HCI_CMD_READ_PIN_TYPE:
+	case HCI_CMD_READ_LOCAL_NAME:
+	case HCI_CMD_READ_CON_ACCEPT_TIMEOUT:
+	case HCI_CMD_READ_PAGE_TIMEOUT:
+	case HCI_CMD_READ_SCAN_ENABLE:
+	case HCI_CMD_READ_PAGE_SCAN_ACTIVITY:
+	case HCI_CMD_READ_INQUIRY_SCAN_ACTIVITY:
+	case HCI_CMD_READ_AUTH_ENABLE:
+	case HCI_CMD_READ_ENCRYPTION_MODE:
+	case HCI_CMD_READ_UNIT_CLASS:
+	case HCI_CMD_READ_VOICE_SETTING:
+	case HCI_CMD_READ_AUTO_FLUSH_TIMEOUT:
+	case HCI_CMD_READ_NUM_BROADCAST_RETRANS:
+	case HCI_CMD_READ_HOLD_MODE_ACTIVITY:
+	case HCI_CMD_READ_XMIT_LEVEL:
+	case HCI_CMD_READ_SCO_FLOW_CONTROL:
+	case HCI_CMD_READ_LINK_SUPERVISION_TIMEOUT:
+	case HCI_CMD_READ_NUM_SUPPORTED_IAC:
+	case HCI_CMD_READ_IAC_LAP:
+	case HCI_CMD_READ_PAGE_SCAN_PERIOD:
+	case HCI_CMD_READ_PAGE_SCAN:
+	case HCI_CMD_READ_INQUIRY_SCAN_TYPE:
+	case HCI_CMD_READ_INQUIRY_MODE:
+	case HCI_CMD_READ_PAGE_SCAN_TYPE:
+	case HCI_CMD_READ_AFH_ASSESSMENT:
+
+	/* Informational */
+	case HCI_CMD_READ_LOCAL_VER:
+	case HCI_CMD_READ_LOCAL_COMMANDS:
+	case HCI_CMD_READ_LOCAL_FEATURES:
+	case HCI_CMD_READ_LOCAL_EXTENDED_FEATURES:
+	case HCI_CMD_READ_BUFFER_SIZE:
+	case HCI_CMD_READ_COUNTRY_CODE:
+	case HCI_CMD_READ_BDADDR:
+
+	/* Status */
+	case HCI_CMD_READ_FAILED_CONTACT_CNTR:
+	case HCI_CMD_READ_LINK_QUALITY:
+	case HCI_CMD_READ_RSSI:
+	case HCI_CMD_READ_AFH_CHANNEL_MAP:
+	case HCI_CMD_READ_CLOCK:
+
+	/* Testing */
+	case HCI_CMD_READ_LOOPBACK_MODE:
+		return 1;
 	}
 
-	return -1;
+	return 0;
 }
 
 static int
@@ -404,13 +164,11 @@ hci_security_check_event(uint8_t event)
 	switch (event) {
 	case HCI_EVENT_RETURN_LINK_KEYS:
 	case HCI_EVENT_LINK_KEY_NOTIFICATION:
-	case HCI_EVENT_USER_CONFIRM_REQ:
-	case HCI_EVENT_USER_PASSKEY_NOTIFICATION:
 	case HCI_EVENT_VENDOR:
-		return -1;	/* disallowed */
+		return 0;
 	}
 
-	return 0;	/* ok */
+	return 1;
 }
 
 /*
@@ -464,8 +222,8 @@ hci_send(struct hci_pcb *pcb, struct mbuf *m, bdaddr_t *addr)
 	hci_cmd_hdr_t hdr;
 	int err;
 
-	KASSERT(m != NULL);
-	KASSERT(addr != NULL);
+	KASSERT(m);
+	KASSERT(addr);
 
 	/* wants at least a header to start with */
 	if (m->m_pkthdr.len < sizeof(hdr)) {
@@ -473,7 +231,6 @@ hci_send(struct hci_pcb *pcb, struct mbuf *m, bdaddr_t *addr)
 		goto bad;
 	}
 	m_copydata(m, 0, sizeof(hdr), &hdr);
-	hdr.opcode = le16toh(hdr.opcode);
 
 	/* only allows CMD packets to be sent */
 	if (hdr.type != HCI_CMD_PKT) {
@@ -487,17 +244,17 @@ hci_send(struct hci_pcb *pcb, struct mbuf *m, bdaddr_t *addr)
 		goto bad;
 	}
 
+	/* security checks for unprivileged users */
+	if ((pcb->hp_flags & HCI_PRIVILEGED) == 0
+	    && (hci_security_check_opcode(le16toh(hdr.opcode)) == 0)) {
+		err = EPERM;
+		goto bad;
+	}
+
 	/* finds destination */
 	unit = hci_unit_lookup(addr);
 	if (unit == NULL) {
 		err = ENETDOWN;
-		goto bad;
-	}
-
-	/* security checks for unprivileged users */
-	if ((pcb->hp_flags & HCI_PRIVILEGED) == 0
-	    && hci_security_check_opcode(unit, hdr.opcode) != hdr.length) {
-		err = EPERM;
 		goto bad;
 	}
 
@@ -510,8 +267,8 @@ hci_send(struct hci_pcb *pcb, struct mbuf *m, bdaddr_t *addr)
 	sbappendrecord(&pcb->hp_socket->so_snd, m0);
 	M_SETCTX(m, pcb->hp_socket);	/* enable drop callback */
 
-	DPRINTFN(2, "(%s) opcode (%03x|%04x)\n", device_xname(unit->hci_dev),
-		HCI_OGF(hdr.opcode), HCI_OCF(hdr.opcode));
+	DPRINTFN(2, "(%s) opcode (%03x|%04x)\n", unit->hci_devname,
+		HCI_OGF(le16toh(hdr.opcode)), HCI_OCF(le16toh(hdr.opcode)));
 
 	/* Sendss it */
 	if (unit->hci_num_cmd_pkts == 0)
@@ -556,23 +313,15 @@ hci_usrreq(struct socket *up, int req, struct mbuf *m,
 
 	switch(req) {
 	case PRU_CONTROL:
-		mutex_enter(bt_lock);
-		err = hci_ioctl((unsigned long)m, (void *)nam, l);
-		mutex_exit(bt_lock);
-		return err;
+		return hci_ioctl((unsigned long)m, (void *)nam, l);
 
 	case PRU_PURGEIF:
 		return EOPNOTSUPP;
 
 	case PRU_ATTACH:
-		if (up->so_lock == NULL) {
-			mutex_obj_hold(bt_lock);
-			up->so_lock = bt_lock;
-			solock(up);
-		}
-		KASSERT(solocked(up));
 		if (pcb)
 			return EINVAL;
+
 		err = soreserve(up, hci_sendspace, hci_recvspace);
 		if (err)
 			return err;
@@ -633,7 +382,7 @@ hci_usrreq(struct socket *up, int req, struct mbuf *m,
 		return 0;
 
 	case PRU_BIND:
-		KASSERT(nam != NULL);
+		KASSERT(nam);
 		sa = mtod(nam, struct sockaddr_bt *);
 
 		if (sa->bt_len != sizeof(struct sockaddr_bt))
@@ -652,7 +401,7 @@ hci_usrreq(struct socket *up, int req, struct mbuf *m,
 		return 0;
 
 	case PRU_CONNECT:
-		KASSERT(nam != NULL);
+		KASSERT(nam);
 		sa = mtod(nam, struct sockaddr_bt *);
 
 		if (sa->bt_len != sizeof(struct sockaddr_bt))
@@ -669,7 +418,7 @@ hci_usrreq(struct socket *up, int req, struct mbuf *m,
 		return 0;
 
 	case PRU_PEERADDR:
-		KASSERT(nam != NULL);
+		KASSERT(nam);
 		sa = mtod(nam, struct sockaddr_bt *);
 
 		memset(sa, 0, sizeof(struct sockaddr_bt));
@@ -680,7 +429,7 @@ hci_usrreq(struct socket *up, int req, struct mbuf *m,
 		return 0;
 
 	case PRU_SOCKADDR:
-		KASSERT(nam != NULL);
+		KASSERT(nam);
 		sa = mtod(nam, struct sockaddr_bt *);
 
 		memset(sa, 0, sizeof(struct sockaddr_bt));
@@ -751,79 +500,81 @@ release:
  * get/set socket options
  */
 int
-hci_ctloutput(int req, struct socket *so, struct sockopt *sopt)
+hci_ctloutput(int req, struct socket *so, int level,
+		int optname, struct mbuf **opt)
 {
 	struct hci_pcb *pcb = (struct hci_pcb *)so->so_pcb;
-	int optval, err = 0;
+	struct mbuf *m;
+	int err = 0;
 
 	DPRINTFN(2, "req %s\n", prcorequests[req]);
 
 	if (pcb == NULL)
 		return EINVAL;
 
-	if (sopt->sopt_level != BTPROTO_HCI)
-		return ENOPROTOOPT;
+	if (level != BTPROTO_HCI)
+		return 0;
 
 	switch(req) {
 	case PRCO_GETOPT:
-		switch (sopt->sopt_name) {
+		m = m_get(M_WAIT, MT_SOOPTS);
+		switch (optname) {
 		case SO_HCI_EVT_FILTER:
-			err = sockopt_set(sopt, &pcb->hp_efilter,
-			    sizeof(struct hci_filter));
-
+			m->m_len = sizeof(struct hci_filter);
+			memcpy(mtod(m, void *), &pcb->hp_efilter, m->m_len);
 			break;
 
 		case SO_HCI_PKT_FILTER:
-			err = sockopt_set(sopt, &pcb->hp_pfilter,
-			    sizeof(struct hci_filter));
-
+			m->m_len = sizeof(struct hci_filter);
+			memcpy(mtod(m, void *), &pcb->hp_pfilter, m->m_len);
 			break;
 
 		case SO_HCI_DIRECTION:
-			err = sockopt_setint(sopt,
-			    (pcb->hp_flags & HCI_DIRECTION ? 1 : 0));
-
+			m->m_len = sizeof(int);
+			if (pcb->hp_flags & HCI_DIRECTION)
+				*mtod(m, int *) = 1;
+			else
+				*mtod(m, int *) = 0;
 			break;
 
 		default:
-			err = ENOPROTOOPT;
+			err = EINVAL;
+			m_freem(m);
+			m = NULL;
 			break;
 		}
+		*opt = m;
 		break;
 
 	case PRCO_SETOPT:
-		switch (sopt->sopt_name) {
+		m = *opt;
+		if (m) switch (optname) {
 		case SO_HCI_EVT_FILTER:	/* set event filter */
-			err = sockopt_get(sopt, &pcb->hp_efilter,
-			    sizeof(pcb->hp_efilter));
-
+			m->m_len = min(m->m_len, sizeof(struct hci_filter));
+			memcpy(&pcb->hp_efilter, mtod(m, void *), m->m_len);
 			break;
 
 		case SO_HCI_PKT_FILTER:	/* set packet filter */
-			err = sockopt_get(sopt, &pcb->hp_pfilter,
-			    sizeof(pcb->hp_pfilter));
-
+			m->m_len = min(m->m_len, sizeof(struct hci_filter));
+			memcpy(&pcb->hp_pfilter, mtod(m, void *), m->m_len);
 			break;
 
 		case SO_HCI_DIRECTION:	/* request direction ctl messages */
-			err = sockopt_getint(sopt, &optval);
-			if (err)
-				break;
-
-			if (optval)
+			if (*mtod(m, int *))
 				pcb->hp_flags |= HCI_DIRECTION;
 			else
 				pcb->hp_flags &= ~HCI_DIRECTION;
 			break;
 
 		default:
-			err = ENOPROTOOPT;
+			err = EINVAL;
 			break;
 		}
+		m_freem(m);
 		break;
 
 	default:
-		err = ENOPROTOOPT;
+		err = EINVAL;
 		break;
 	}
 
@@ -882,7 +633,7 @@ hci_mtap(struct mbuf *m, struct hci_unit *unit)
 				continue;
 
 			if ((pcb->hp_flags & HCI_PRIVILEGED) == 0
-			    && hci_security_check_event(event) == -1)
+			    && hci_security_check_event(event) == 0)
 				continue;
 			break;
 
@@ -892,7 +643,7 @@ hci_mtap(struct mbuf *m, struct hci_unit *unit)
 			opcode = le16toh(mtod(m, hci_cmd_hdr_t *)->opcode);
 
 			if ((pcb->hp_flags & HCI_PRIVILEGED) == 0
-			    && hci_security_check_opcode(NULL, opcode) == -1)
+			    && hci_security_check_opcode(opcode) == 0)
 				continue;
 			break;
 
@@ -913,7 +664,7 @@ hci_mtap(struct mbuf *m, struct hci_unit *unit)
 		if (pcb->hp_flags & HCI_DIRECTION) {
 			int dir = m->m_flags & M_LINK0 ? 1 : 0;
 
-			*ctl = sbcreatecontrol(&dir, sizeof(dir),
+			*ctl = sbcreatecontrol((caddr_t)&dir, sizeof(dir),
 			    SCM_HCI_DIRECTION, BTPROTO_HCI);
 
 			if (*ctl != NULL)

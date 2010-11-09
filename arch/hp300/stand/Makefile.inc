@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile.inc,v 1.15 2008/06/24 13:02:25 matt Exp $
+#	$NetBSD: Makefile.inc,v 1.14 2005/12/11 12:17:19 christos Exp $
 
 BINDIR=			/usr/mdec
 
@@ -18,5 +18,5 @@ machine-links:
 		ln -s $S/arch/m68k/include m68k
 CLEANFILES+=machine hp300 m68k
 
-realall: machine-links .WAIT ${PROG}
+realall: machine-links ${PROG}
 

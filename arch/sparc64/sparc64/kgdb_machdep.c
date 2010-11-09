@@ -1,4 +1,4 @@
-/*	$NetBSD: kgdb_machdep.c,v 1.12 2009/01/11 23:20:38 cegger Exp $ */
+/*	$NetBSD: kgdb_machdep.c,v 1.9 2006/10/07 18:14:42 rjs Exp $ */
 /*-
  * Copyright (c) 1997 The NetBSD Foundation, Inc.
  * All rights reserved.
@@ -14,6 +14,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -121,7 +128,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kgdb_machdep.c,v 1.12 2009/01/11 23:20:38 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kgdb_machdep.c,v 1.9 2006/10/07 18:14:42 rjs Exp $");
 
 #include "opt_kgdb.h"
 #include "opt_multiprocessor.h"
@@ -225,10 +232,11 @@ kgdb_suspend()
  * noting on the console why nothing else is going on.
  */
 void
-kgdb_connect(int verbose)
+kgdb_connect(verbose)
+	int verbose;
 {
 
-	if (kgdb_dev == NODEV)
+	if (kgdb_dev < 0)
 		return;
 #if NFB > 0
 	fb_unblank();
@@ -256,10 +264,10 @@ kgdb_connect(int verbose)
  * Decide what to do on panic.
  */
 void
-kgdb_panic(void)
+kgdb_panic()
 {
 
-	if (kgdb_dev != NODEV && kgdb_debug_panic)
+	if (kgdb_dev >= 0 && kgdb_debug_panic)
 		kgdb_connect(kgdb_active == 0);
 }
 
@@ -348,13 +356,13 @@ kgdb_getregs(regs, gdb_regs)
 
 	/* %g0..%g7 and %o0..%o7: from trapframe */
 	gdb_regs[0] = 0;
-	kgdb_copy((void *)&tf->tf_global[1], (void *)&gdb_regs[1], 15 * 8);
+	kgdb_copy((caddr_t)&tf->tf_global[1], (caddr_t)&gdb_regs[1], 15 * 8);
 
 	/* %l0..%l7 and %i0..%i7: from stack */
-	kgdb_copy((void *)(long)tf->tf_out[6], (void *)&gdb_regs[GDB_L0], 16 * 8);
+	kgdb_copy((caddr_t)(long)tf->tf_out[6], (caddr_t)&gdb_regs[GDB_L0], 16 * 8);
 
 	/* %f0..%f31 -- fake, kernel does not use FP */
-	kgdb_zero((void *)&gdb_regs[GDB_FP0], 32 * 8);
+	kgdb_zero((caddr_t)&gdb_regs[GDB_FP0], 32 * 8);
 
 	/* %y, %psr, %wim, %tbr, %pc, %npc, %fsr, %csr */
 	gdb_regs[GDB_PC] = tf->tf_pc;
@@ -371,8 +379,8 @@ kgdb_setregs(regs, gdb_regs)
 {
 	struct trapframe64 *tf = &regs->db_tf;
 
-	kgdb_copy((void *)&gdb_regs[1], (void *)&tf->tf_global[1], 15 * 8);
-	kgdb_copy((void *)&gdb_regs[GDB_L0], (void *)(long)tf->tf_out[6], 16 * 8);
+	kgdb_copy((caddr_t)&gdb_regs[1], (caddr_t)&tf->tf_global[1], 15 * 8);
+	kgdb_copy((caddr_t)&gdb_regs[GDB_L0], (caddr_t)(long)tf->tf_out[6], 16 * 8);
 	tf->tf_pc = gdb_regs[GDB_PC];
 	tf->tf_npc = gdb_regs[GDB_NPC];
 }

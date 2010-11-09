@@ -1,4 +1,4 @@
-/*	$NetBSD: iomod.h,v 1.4 2008/04/06 08:03:36 skrll Exp $	*/
+/*	$NetBSD: iomod.h,v 1.2 2002/08/25 20:20:01 fredette Exp $	*/
 
 /*	$OpenBSD: iomod.h,v 1.8 2000/05/15 15:16:41 mickey Exp $	*/
 
@@ -153,10 +153,10 @@
 struct pagezero {
 	/* [0x000] Initialize Vectors */
 	int	ivec_special;		/* must be zero */
-	int	(*ivec_mempf)(void);	/* powerfail recovery software */
-	int	(*ivec_toc)(void);	/* exec'd after Transfer Of Control */
+	int	(*ivec_mempf)__P((void)); /* powerfail recovery software */
+	int	(*ivec_toc)__P((void));	/* exec'd after Transfer Of Control */
 	u_int	ivec_toclen;		/* bytes of ivec_toc code */
-	int	(*ivec_rendz)(void);	/* exec'd after Rendezvous Signal */
+	int	(*ivec_rendz)__P((void)); /* exec'd after Rendezvous Signal */
 	u_int	ivec_mempflen;		/* bytes of ivec_mempf code */
 	u_int	ivec_resv[2];		/* (reserved) */
 	u_int	ivec_mbz;		/* must be zero */
@@ -214,7 +214,7 @@ struct pagezero {
 	struct boot_err mem_be[8];	/* boot errors (see above) */
 	u_int	mem_free;		/* first free phys. memory location */
 	u_int	mem_hpa;		/* HPA of CPU */
-	int	(*mem_pdc)(void);	/* PDC entry point */
+	int	(*mem_pdc)__P((void));	/* PDC entry point */
 	u_int	mem_10msec;		/* # of Interval Timer ticks in 10msec*/
 
 	/* [0x390] Initial Memory Module */
@@ -327,12 +327,12 @@ struct iomod {
 	u_int	io_eim;		/* (WO) External Interrupt Message address */
 	u_int	io_dc_rw;	/* write address of IODC to read IODC data */
 	u_int	io_ii_rw;	/* read/clear external intrpt msg (bit-26) */
-	void *	io_dma_link;	/* pointer to "next quad" in DMA chain */
+	caddr_t	io_dma_link;	/* pointer to "next quad" in DMA chain */
 	u_int	io_dma_command;	/* (RO) chain command to exec on "next quad" */
-	void *	io_dma_address;	/* (RO) start of DMA */
+	caddr_t	io_dma_address;	/* (RO) start of DMA */
 	u_int	io_dma_count;	/* (RO) number of bytes remaining to xfer */
-	void *	io_flex;	/* (WO) HPA flex addr, LSB: bus master flag */
-	void *	io_spa;		/* (WO) SPA space; 0-20:addr, 24-31:iodc_spa */
+	caddr_t	io_flex;	/* (WO) HPA flex addr, LSB: bus master flag */
+	caddr_t	io_spa;		/* (WO) SPA space; 0-20:addr, 24-31:iodc_spa */
 	u_int	resv1[2];	/* (reserved) */
 	u_int	io_command;	/* (WO) module commands (see below) */
 	u_int	io_status;	/* (RO) error returns (see below) */
@@ -340,13 +340,13 @@ struct iomod {
 	u_int	io_test;	/* (RO) self-test information */
 /* ARS (Auxiliary Register Set) */
 	u_int	io_err_sadd;	/* (RO) slave bus error or memory error addr */
-	void *	chain_addr;	/* start address of chain RAM */
+	caddr_t	chain_addr;	/* start address of chain RAM */
 	u_int	sub_mask_clr;	/* ignore intrpts on sub-channel (bitmask) */
 	u_int	sub_mask_set;	/* service intrpts on sub-channel (bitmask) */
 	u_int	diagnostic;	/* diagnostic use (reserved) */
 	u_int	resv2[2];	/* (reserved) */
-	void *	nmi_address;	/* address to send data to when NMI detected */
-	void *	nmi_data;	/* NMI data to be sent */
+	caddr_t	nmi_address;	/* address to send data to when NMI detected */
+	caddr_t	nmi_data;	/* NMI data to be sent */
 	u_int	resv3[3];	/* (reserved) */
 	u_int	io_mem_low;	/* bottom of memory address range */
 	u_int	io_mem_high;	/* top of memory address range */
@@ -369,7 +369,7 @@ struct iomod {
 
 /* io_spa */
 #define	IOSPA(spa,iodc_data)	\
-	((volatile void *)		\
+	((volatile caddr_t)		\
 	 (spa | iodc_data.iodc_spa_shift | iodc_data.iodc_spa_enb << 5 | \
 	  iodc_data.iodc_spa_pack << 6 | iodc_data.iodc_spa_io << 7))
 

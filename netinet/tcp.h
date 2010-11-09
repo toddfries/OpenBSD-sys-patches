@@ -1,4 +1,4 @@
-/*	$NetBSD: tcp.h,v 1.28 2007/12/25 18:33:47 perry Exp $	*/
+/*	$NetBSD: tcp.h,v 1.25 2006/10/09 16:27:07 rpaulo Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1993
@@ -71,7 +71,7 @@ struct tcphdr {
 	u_int16_t th_win;			/* window */
 	u_int16_t th_sum;			/* checksum */
 	u_int16_t th_urp;			/* urgent pointer */
-} __packed;
+} __attribute__((__packed__));
 
 #define	TCPOPT_EOL		0
 #define	TCPOPT_NOP		1
@@ -101,8 +101,6 @@ struct tcphdr {
  */
 #define	TCP_MSS		536
 
-#define	TCP_MINMSS	216
-
 #define	TCP_MAXWIN	65535	/* largest value for (unscaled) window */
 
 #define	TCP_MAX_WINSHIFT	14	/* maximum window shift */
@@ -114,19 +112,10 @@ struct tcphdr {
 /*
  * User-settable options (used with setsockopt).
  */
-#define	TCP_NODELAY	1	/* don't delay send to coalesce packets */
-#define	TCP_MAXSEG	2	/* set maximum segment size */
-#define	TCP_KEEPIDLE	3
-#ifdef notyet
-#define	TCP_NOPUSH	4	/* reserved for FreeBSD compat */
-#endif
-#define	TCP_KEEPINTVL	5
-#define	TCP_KEEPCNT	6
-#define	TCP_KEEPINIT	7
-#ifdef notyet
-#define	TCP_NOOPT	8	/* reserved for FreeBSD compat */
-#endif
-#define	TCP_MD5SIG	0x10	/* use MD5 digests (RFC2385) */
+#define	TCP_NODELAY	0x01	/* don't delay send to coalesce packets */
+#define	TCP_MAXSEG	0x02	/* set maximum segment size */
+/* Bits 0x04, 0x08 reserved for FreeBSD compatibility: TCP_NOPUSH, TCP_NOOPT */
+#define TCP_MD5SIG	0x10	/* use MD5 digests (RFC2385) */
 #define	TCP_CONGCTL	0x20	/* selected congestion control */
 
 #endif /* !_NETINET_TCP_H_ */

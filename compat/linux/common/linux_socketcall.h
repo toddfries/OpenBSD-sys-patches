@@ -1,4 +1,4 @@
-/*	$NetBSD: linux_socketcall.h,v 1.15 2008/04/28 20:23:44 martin Exp $	*/
+/*	$NetBSD: linux_socketcall.h,v 1.11 2006/02/09 19:18:56 manu Exp $	*/
 
 /*-
  * Copyright (c) 1995, 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -103,7 +110,7 @@
 /* !!!: This should be at least as large as any other struct here. */
 struct linux_socketcall_dummy_args {
 	int dummy_ints[4];		/* Max 4 ints */
-	void *dummy_ptrs[3];		/* Max 3 pointers */
+	void * dummy_ptrs[3];		/* Max 3 pointers */
 };
 
 struct linux_sys_socket_args {
@@ -223,23 +230,21 @@ struct linux_sys_shutdown_args {
 
 # ifdef _KERNEL
 __BEGIN_DECLS
-#define SYS_DEF(foo) int foo(struct lwp *, const struct foo##_args *, register_t *);
-SYS_DEF(linux_sys_socket)
-SYS_DEF(linux_sys_socketpair)
-SYS_DEF(linux_sys_sendto)
-SYS_DEF(linux_sys_recvfrom)
-SYS_DEF(linux_sys_setsockopt)
-SYS_DEF(linux_sys_getsockopt)
-SYS_DEF(linux_sys_connect)
-SYS_DEF(linux_sys_bind)
-SYS_DEF(linux_sys_getsockname)
-SYS_DEF(linux_sys_getpeername)
-SYS_DEF(linux_sys_sendmsg)
-SYS_DEF(linux_sys_recvmsg)
-SYS_DEF(linux_sys_recv)
-SYS_DEF(linux_sys_send)
-SYS_DEF(linux_sys_accept)
-#undef SYS_DEF
+int linux_sys_socket __P((struct lwp *, void *, register_t *));
+int linux_sys_socketpair __P((struct lwp *, void *, register_t *));
+int linux_sys_sendto __P((struct lwp *, void *, register_t *));
+int linux_sys_recvfrom __P((struct lwp *, void *, register_t *));
+int linux_sys_setsockopt __P((struct lwp *, void *, register_t *));
+int linux_sys_getsockopt __P((struct lwp *, void *, register_t *));
+int linux_sys_connect __P((struct lwp *, void *, register_t *));
+int linux_sys_bind __P((struct lwp *, void *, register_t *));
+int linux_sys_getsockname __P((struct lwp *, void *, register_t *));
+int linux_sys_getpeername __P((struct lwp *, void *, register_t *));
+int linux_sys_sendmsg __P((struct lwp *, void *, register_t *));
+int linux_sys_recvmsg __P((struct lwp *, void *, register_t *));
+int linux_sys_recv __P((struct lwp *, void *, register_t *));
+int linux_sys_send __P((struct lwp *, void *, register_t *));
+int linux_sys_accept __P((struct lwp *, void *, register_t *));
 __END_DECLS
 # endif /* !_KERNEL */
 

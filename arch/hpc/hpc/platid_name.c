@@ -1,4 +1,4 @@
-/*	$NetBSD: platid_name.c,v 1.23 2009/01/29 21:20:42 nonaka Exp $	*/
+/*	$NetBSD: platid_name.c,v 1.20 2006/03/04 13:48:52 peter Exp $	*/
 
 /*-
  * Copyright (c) 1999-2001
@@ -104,8 +104,6 @@ struct platid_name platid_name_table[] = {
 	 TEXT("ARM XSCALE") },
 	{ &platid_mask_CPU_ARM_XSCALE_PXA250,
 	 TEXT("ARM XSCALE PXA250") },
-	{ &platid_mask_CPU_ARM_XSCALE_PXA270,
-	 TEXT("ARM XSCALE PXA270") },
 #endif /* hpcarm */
 #ifdef hpcmips
 	{ &platid_mask_MACH_NEC,

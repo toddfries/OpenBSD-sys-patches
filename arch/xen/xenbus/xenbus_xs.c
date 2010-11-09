@@ -1,4 +1,4 @@
-/* $NetBSD: xenbus_xs.c,v 1.17 2008/10/29 13:53:15 cegger Exp $ */
+/* $NetBSD: xenbus_xs.c,v 1.6 2006/06/25 16:46:59 bouyer Exp $ */
 /******************************************************************************
  * xenbus_xs.c
  *
@@ -30,11 +30,11 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: xenbus_xs.c,v 1.17 2008/10/29 13:53:15 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: xenbus_xs.c,v 1.6 2006/06/25 16:46:59 bouyer Exp $");
 
 #if 0
 #define DPRINTK(fmt, args...) \
-    printf("xenbus_xs (%s:%d) " fmt ".\n", __func__, __LINE__, ##args)
+    printf("xenbus_xs (%s:%d) " fmt ".\n", __FUNCTION__, __LINE__, ##args)
 #else
 #define DPRINTK(fmt, args...) ((void)0)
 #endif 
@@ -46,14 +46,11 @@ __KERNEL_RCSID(0, "$NetBSD: xenbus_xs.c,v 1.17 2008/10/29 13:53:15 cegger Exp $"
 #include <sys/systm.h>
 #include <sys/param.h>
 #include <sys/proc.h>
-#include <sys/mutex.h>
 #include <sys/kthread.h>
-#include <sys/simplelock.h>
 
 #include <machine/stdarg.h>
 
-#include <xen/xen.h>	/* for xendomain_is_dom0() */
-#include <xen/xenbus.h>
+#include <machine/xenbus.h>
 #include "xenbus_comms.h"
 
 #define streq(a, b) (strcmp((a), (b)) == 0)
@@ -82,7 +79,7 @@ struct xs_handle {
 	/* A list of replies. Currently only one will ever be outstanding. */
 	SIMPLEQ_HEAD(, xs_stored_msg) reply_list;
 	struct simplelock reply_lock;
-	kmutex_t xs_lock; /* serialize access to xenstore */
+	struct lock xs_lock; /* serialize access to xenstore */
 	int suspend_spl;
 
 };
@@ -140,7 +137,7 @@ read_reply(enum xsd_sockmsg_type *type, unsigned int *len)
 	if (len)
 		*len = msg->hdr.len;
 	body = msg->u.reply.body;
-	DPRINTK("read_reply: type %d body %s",
+	DPRINTK("read_reply: type %d body %s\n",
 	    msg->hdr.type, body);
 
 	free(msg, M_DEVBUF);
@@ -171,7 +168,10 @@ xenbus_dev_request_and_reply(struct xsd_sockmsg *msg, void**reply)
 	int err = 0, s;
 
 	s = spltty();
-	mutex_enter(&xs_state.xs_lock);
+	err = lockmgr(&xs_state.xs_lock, LK_EXCLUSIVE, NULL);
+	if (err)
+		panic("can't get xs_state.xs_lock: %d", err);
+
 	err = xb_write(msg, sizeof(*msg) + msg->len);
 	if (err) {
 		msg->type = XS_ERROR;
@@ -179,7 +179,8 @@ xenbus_dev_request_and_reply(struct xsd_sockmsg *msg, void**reply)
 	} else {
 		*reply = read_reply(&msg->type, &msg->len);
 	}
-	mutex_exit(&xs_state.xs_lock);
+
+	lockmgr(&xs_state.xs_lock, LK_RELEASE, NULL);
 	splx(s);
 
 	return err;
@@ -207,23 +208,25 @@ xs_talkv(struct xenbus_transaction *t,
 		msg.len += iovec[i].iov_len;
 
 	s = spltty();
-	mutex_enter(&xs_state.xs_lock);
+	err = lockmgr(&xs_state.xs_lock, LK_EXCLUSIVE, NULL);
+	if (err)
+		panic("can't get xs_state.xs_lock: %d", err);
 
 	DPRINTK("write msg");
 	err = xb_write(&msg, sizeof(msg));
 	DPRINTK("write msg err %d", err);
 	if (err) {
-		mutex_exit(&xs_state.xs_lock);
+		lockmgr(&xs_state.xs_lock, LK_RELEASE, NULL);
 		splx(s);
 		return (err);
 	}
 
 	for (i = 0; i < num_vecs; i++) {
 		DPRINTK("write iovect");
-		err = xb_write(iovec[i].iov_base, iovec[i].iov_len);
+		err = xb_write(iovec[i].iov_base, iovec[i].iov_len);;
 		DPRINTK("write iovect err %d", err);
 		if (err) {
-			mutex_exit(&xs_state.xs_lock);
+			lockmgr(&xs_state.xs_lock, LK_RELEASE, NULL);
 			splx(s);
 			return (err);
 		}
@@ -233,7 +236,7 @@ xs_talkv(struct xenbus_transaction *t,
 	ret = read_reply(&msg.type, len);
 	DPRINTK("read done");
 
-	mutex_exit(&xs_state.xs_lock);
+	lockmgr(&xs_state.xs_lock, LK_RELEASE, NULL);
 	splx(s);
 
 	if (msg.type == XS_ERROR) {
@@ -397,27 +400,6 @@ xenbus_read_ul(struct xenbus_transaction *t,
 	if (err)
 		return err;
 	*val = strtoul(string, &ep, base);
-	if (*ep != '\0') {
-		free(string, M_DEVBUF);
-		return EFTYPE;
-	}
-	free(string, M_DEVBUF);
-	return 0;
-}
-
-/* Read a node and convert it to unsigned long long. */
-int
-xenbus_read_ull(struct xenbus_transaction *t,
-		  const char *dir, const char *node, unsigned long long *val,
-		  int base)
-{
-	char *string, *ep;
-	int err;
-
-	err = xenbus_read(t, dir, node, NULL, &string);
-	if (err)
-		return err;
-	*val = strtoull(string, &ep, base);
 	if (*ep != '\0') {
 		free(string, M_DEVBUF);
 		return EFTYPE;
@@ -747,7 +729,7 @@ xenwatch_thread(void *unused)
 			simple_lock(&watch_events_lock);
 			SIMPLEQ_REMOVE_HEAD(&watch_events, msg_next);
 			simple_unlock(&watch_events_lock);
-			DPRINTK("xenwatch_thread: got event");
+			DPRINTK("xenwatch_thread: got event\n");
 
 			msg->u.watch.handle->xbw_callback(
 				msg->u.watch.handle,
@@ -795,7 +777,7 @@ process_msg(void)
 	body[msg->hdr.len] = '\0';
 
 	if (msg->hdr.type == XS_WATCH_EVENT) {
-		DPRINTK("process_msg: XS_WATCH_EVENT");
+		DPRINTK("process_msg: XS_WATCH_EVENT\n");
 		msg->u.watch.vec = split(body, msg->hdr.len,
 					 &msg->u.watch.vec_size);
 		if (msg->u.watch.vec == NULL) {
@@ -819,7 +801,7 @@ process_msg(void)
 		splx(s);
 		simple_unlock(&watches_lock);
 	} else {
-		DPRINTK("process_msg: type %d body %s", msg->hdr.type, body);
+		DPRINTK("process_msg: type %d body %s\n", msg->hdr.type, body);
 		    
 		msg->u.reply.body = body;
 		simple_lock(&xs_state.reply_lock);
@@ -845,28 +827,39 @@ xenbus_thread(void *unused)
 	}
 }
 
-int
-xs_init(device_t dev)
+static void
+xenwatch_create_thread(void *unused)
 {
+	struct proc *p;
 	int err;
 
+	err = kthread_create1(xenwatch_thread, unused, &p, "xenwatch");
+	if (err)
+		printf("kthread_create1(xenwatch): %d\n", err);
+}
+
+static void
+xenbus_create_thread(void *unused)
+{
+	struct proc *p;
+	int err;
+
+	err = kthread_create1(xenbus_thread, unused, &p, "xenbus");
+	if (err)
+		printf("kthread_create1(xenbus): %d\n", err);
+}
+
+
+int
+xs_init(void)
+{
 	SIMPLEQ_INIT(&xs_state.reply_list);
 	simple_lock_init(&xs_state.reply_lock);
-	mutex_init(&xs_state.xs_lock, MUTEX_DEFAULT, IPL_NONE);
+	lockinit(&xs_state.xs_lock, IPL_TTY, "xenst", 0, 0);
 
-	err = kthread_create(PRI_NONE, 0, NULL, xenwatch_thread,
-	    NULL, NULL, "xenwatch");
-	if (err) {
-		aprint_error_dev(dev, "kthread_create(xenwatch): %d\n", err);
-		return err;
-	}
+	kthread_create(xenwatch_create_thread, NULL);
 
-	err = kthread_create(PRI_NONE, 0, NULL, xenbus_thread,
-	    NULL, NULL, "xenbus");
-	if (err) {
-		aprint_error_dev(dev, "kthread_create(xenbus): %d\n", err);
-		return err;
-	}
+	kthread_create(xenbus_create_thread, NULL);
 
 	return 0;
 }

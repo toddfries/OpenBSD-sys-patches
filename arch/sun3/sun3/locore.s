@@ -1,4 +1,4 @@
-/*	$NetBSD: locore.s,v 1.89 2007/10/17 19:57:46 garbled Exp $	*/
+/*	$NetBSD: locore.s,v 1.86 2005/12/11 12:19:27 christos Exp $	*/
 
 /*
  * Copyright (c) 1980, 1990, 1993
@@ -550,9 +550,8 @@ Lrei1:
 	clrl	%sp@-			| VA == none
 	clrl	%sp@-			| code == none
 	movl	#T_ASTFLT,%sp@-		| type == async system trap
-	pea	%sp@(12)		| fp == address of trap frame
 	jbsr	_C_LABEL(trap)		| go handle it
-	lea	%sp@(16),%sp		| pop value args
+	lea	%sp@(12),%sp		| pop value args
 	movl	%sp@(FR_SP),%a0		| restore user SP
 	movl	%a0,%usp		|   from save area
 	movw	%sp@(FR_ADJ),%d0	| need to adjust stack?
@@ -602,6 +601,13 @@ Ldorte:
  * Use common m68k support routines.
  */
 #include <m68k/m68k/support.s>
+
+BSS(want_resched,4)
+
+/*
+ * Use common m68k process manipulation routines.
+ */
+#include <m68k/m68k/proc_subr.s>
 
 /*
  * Use common m68k process/lwp switch and context save subroutines.

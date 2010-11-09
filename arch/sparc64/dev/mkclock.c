@@ -1,4 +1,4 @@
-/*	$NetBSD: mkclock.c,v 1.5 2008/03/29 05:47:53 tsutsui Exp $ */
+/*	$NetBSD: mkclock.c,v 1.1 2006/11/09 15:08:04 tsutsui Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -55,7 +55,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mkclock.c,v 1.5 2008/03/29 05:47:53 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mkclock.c,v 1.1 2006/11/09 15:08:04 tsutsui Exp $");
 
 /*    
  * Clock driver for 'mkclock' - Mostek MK48Txx TOD clock.
@@ -89,21 +89,21 @@ __KERNEL_RCSID(0, "$NetBSD: mkclock.c,v 1.5 2008/03/29 05:47:53 tsutsui Exp $");
 /*
  * clock (eeprom) attaches at the sbus or the ebus (PCI)
  */
-static int	mkclock_sbus_match(device_t, cfdata_t, void *);
-static void	mkclock_sbus_attach(device_t, device_t, void *);
+static int	mkclock_sbus_match(struct device *, struct cfdata *, void *);
+static void	mkclock_sbus_attach(struct device *, struct device *, void *);
 
-static int	mkclock_ebus_match(device_t, cfdata_t, void *);
-static void	mkclock_ebus_attach(device_t, device_t, void *);
+static int	mkclock_ebus_match(struct device *, struct cfdata *, void *);
+static void	mkclock_ebus_attach(struct device *, struct device *, void *);
 
 static void	mkclock_attach(struct mk48txx_softc *, int);
 
 static int	mkclock_wenable(struct todr_chip_handle *, int);
 
 
-CFATTACH_DECL_NEW(mkclock_sbus, sizeof(struct mk48txx_softc),
+CFATTACH_DECL(mkclock_sbus, sizeof(struct mk48txx_softc),
     mkclock_sbus_match, mkclock_sbus_attach, NULL, NULL);
 
-CFATTACH_DECL_NEW(mkclock_ebus, sizeof(struct mk48txx_softc),
+CFATTACH_DECL(mkclock_ebus, sizeof(struct mk48txx_softc),
     mkclock_ebus_match, mkclock_ebus_attach, NULL, NULL);
 
 /*
@@ -111,7 +111,7 @@ CFATTACH_DECL_NEW(mkclock_ebus, sizeof(struct mk48txx_softc),
  * own special match function to call it the "clock".
  */
 static int
-mkclock_sbus_match(device_t parent, cfdata_t cf, void *aux)
+mkclock_sbus_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct sbus_attach_args *sa = aux;
 
@@ -119,7 +119,7 @@ mkclock_sbus_match(device_t parent, cfdata_t cf, void *aux)
 }
 
 static int
-mkclock_ebus_match(device_t parent, cfdata_t cf, void *aux)
+mkclock_ebus_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct ebus_attach_args *ea = aux;
 
@@ -151,13 +151,12 @@ mkclock_ebus_match(device_t parent, cfdata_t cf, void *aux)
 
 /* ARGSUSED */
 static void
-mkclock_sbus_attach(device_t parent, device_t self, void *aux)
+mkclock_sbus_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct mk48txx_softc *sc = device_private(self);
+	struct mk48txx_softc *sc = (void *)self;
 	struct sbus_attach_args *sa = aux;
 	int sz;
 
-	sc->sc_dev = self;
 	sc->sc_bst = sa->sa_bustag;
 
 	/* use sa->sa_regs[0].size? */
@@ -169,7 +168,7 @@ mkclock_sbus_attach(device_t parent, device_t self, void *aux)
 			 sz,
 			 BUS_SPACE_MAP_LINEAR | BUS_SPACE_MAP_READONLY,
 			 &sc->sc_bsh) != 0) {
-		aprint_error(": can't map register\n");
+		printf("%s: can't map register\n", self->dv_xname);
 		return;
 	}
 	mkclock_attach(sc, sa->sa_node);
@@ -180,11 +179,10 @@ mkclock_sbus_attach(device_t parent, device_t self, void *aux)
 static void
 mkclock_ebus_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct mk48txx_softc *sc = device_private(self);
+	struct mk48txx_softc *sc = (void *)self;
 	struct ebus_attach_args *ea = aux;
 	int sz;
 
-	sc->sc_dev = self;
 	sc->sc_bst = ea->ea_bustag;
 
 	/* hard code to 8K? */
@@ -195,7 +193,7 @@ mkclock_ebus_attach(struct device *parent, struct device *self, void *aux)
 			 sz,
 			 BUS_SPACE_MAP_LINEAR,
 			 &sc->sc_bsh) != 0) {
-		aprint_error(": can't map register\n");
+		printf("%s: can't map register\n", self->dv_xname);
 		return;
 	}
 	mkclock_attach(sc, ea->ea_node);
@@ -215,13 +213,14 @@ mkclock_attach(struct mk48txx_softc *sc, int node)
 
 	/* Our TOD clock year 0 is 1968 */
 	sc->sc_year0 = 1968;
+	mk48txx_attach(sc);
+
+	printf("\n");
 
 	/* Save info for the clock wenable call. */
 	sc->sc_handle.todr_setwen = mkclock_wenable;
 
-	mk48txx_attach(sc);
-
-	aprint_normal("\n");
+	todr_attach(&sc->sc_handle);
 }
 
 /*

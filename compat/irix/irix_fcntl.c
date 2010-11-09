@@ -1,4 +1,4 @@
-/*	$NetBSD: irix_fcntl.c,v 1.25 2008/04/28 20:23:41 martin Exp $ */
+/*	$NetBSD: irix_fcntl.c,v 1.16 2006/07/23 22:06:08 ad Exp $ */
 
 /*-
  * Copyright (c) 2001-2002 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: irix_fcntl.c,v 1.25 2008/04/28 20:23:41 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: irix_fcntl.c,v 1.16 2006/07/23 22:06:08 ad Exp $");
 
 #include <sys/types.h>
 #include <sys/signal.h>
@@ -44,6 +51,7 @@ __KERNEL_RCSID(0, "$NetBSD: irix_fcntl.c,v 1.25 2008/04/28 20:23:41 martin Exp $
 #include <sys/filedesc.h>
 #include <sys/systm.h>
 #include <sys/fcntl.h>
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 
 #include <miscfs/specfs/specdev.h>
@@ -61,18 +69,21 @@ __KERNEL_RCSID(0, "$NetBSD: irix_fcntl.c,v 1.25 2008/04/28 20:23:41 martin Exp $
 #include <compat/svr4/svr4_fcntl.h>
 #include <compat/svr4/svr4_syscallargs.h>
 
-static int fd_truncate(struct lwp *, int, int, off_t, register_t *);
-static int bsd_to_irix_fcntl_flags(int);
-static int irix_to_bsd_fcntl_flags(int);
+static int fd_truncate __P((struct lwp *, int, int, off_t, register_t *));
+static int bsd_to_irix_fcntl_flags __P((int));
+static int irix_to_bsd_fcntl_flags __P((int));
 
 int
-irix_sys_lseek64(struct lwp *l, const struct irix_sys_lseek64_args *uap, register_t *retval)
+irix_sys_lseek64(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
 	/*
 	 * Note: we have an alignement problem here. If pad2, pad3 and pad4
 	 * are removed, lseek64 will break, because whence will be wrong.
 	 */
-	/* {
+	struct irix_sys_lseek64_args /* {
 		syscallarg(int) fd;
 		syscallarg(int) pad1;
 		syscallarg(irix_off64_t) offset;
@@ -80,8 +91,7 @@ irix_sys_lseek64(struct lwp *l, const struct irix_sys_lseek64_args *uap, registe
 		syscallarg(int) pad2;
 		syscallarg(int) pad3;
 		syscallarg(int) pad4;
-	} */
-
+	} */ *uap = v;
 	struct sys_lseek_args cup;
 
 #ifdef DEBUG_IRIX
@@ -100,15 +110,17 @@ irix_sys_lseek64(struct lwp *l, const struct irix_sys_lseek64_args *uap, registe
 }
 
 int
-irix_sys_fcntl(struct lwp *l, const struct irix_sys_fcntl_args *uap, register_t *retval)
+irix_sys_fcntl(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct irix_sys_fcntl_args /* {
 		syscallarg(int) fd;
 		syscallarg(int) cmd;
 		syscallarg(char *)arg;
-	} */
+	} */ *uap = v;
 	struct svr4_sys_fcntl_args cup;
-	struct sys_fcntl_args bsd_ua;
 	int cmd;
 	int error;
 
@@ -147,10 +159,10 @@ irix_sys_fcntl(struct lwp *l, const struct irix_sys_fcntl_args *uap, register_t 
 		break;
 
 	case IRIX_F_GETFL:
-		SCARG(&bsd_ua, fd) = SCARG(uap, fd);
-		SCARG(&bsd_ua, cmd) = F_GETFL;
-		SCARG(&bsd_ua, arg) = SCARG(uap, arg);
-		if ((error = sys_fcntl(l, &bsd_ua, retval)) != 0)
+		SCARG(&cup, fd) = SCARG(uap, fd);
+		SCARG(&cup, cmd) = F_GETFL;
+		SCARG(&cup, arg) = SCARG(uap, arg);
+		if ((error = sys_fcntl(l, &cup, retval)) != 0)
 			return error;
 		*retval = bsd_to_irix_fcntl_flags(*retval);
 		return 0;
@@ -164,11 +176,11 @@ irix_sys_fcntl(struct lwp *l, const struct irix_sys_fcntl_args *uap, register_t 
 		if ((int)SCARG(uap, arg) & IRIX_FDIRECT)
 			return EINVAL;
 
-		SCARG(&bsd_ua, fd) = SCARG(uap, fd);
-		SCARG(&bsd_ua, arg) =
+		SCARG(&cup, fd) = SCARG(uap, fd);
+		SCARG(&cup, arg) =
 		    (char *)irix_to_bsd_fcntl_flags((int)SCARG(uap, arg));
-		SCARG(&bsd_ua, cmd) = F_SETFL;
-		return sys_fcntl(l, &bsd_ua, retval);
+		SCARG(&cup, cmd) = F_SETFL;
+		return sys_fcntl(l, &cup, retval);
 		break;
 
 	case SVR4_F_DUPFD:
@@ -227,22 +239,26 @@ irix_sys_fcntl(struct lwp *l, const struct irix_sys_fcntl_args *uap, register_t 
 }
 
 static int
-fd_truncate(struct lwp *l, int fd, int whence, off_t start, register_t *retval)
+fd_truncate(l, fd, whence, start, retval)
+	struct lwp *l;
+	int fd;
+	int whence;
+	off_t start;
+	register_t *retval;
 {
-	file_t *fp;
+	struct filedesc *fdp = l->l_proc->p_fd;
+	struct file *fp;
 	struct vnode *vp;
 	struct vattr vattr;
 	struct sys_ftruncate_args ft;
 	int error;
 
-	if ((error = fd_getvnode(fd, &fp)) != 0)
+	if ((fp = fd_getfile(fdp, fd)) == NULL)
 		return EBADF;
 
-	vp = fp->f_data;
-	if (vp->v_type == VFIFO) {
-		fd_putfile(fd);
+	vp = (struct vnode *)fp->f_data;
+	if (fp->f_type != DTYPE_VNODE || vp->v_type == VFIFO)
 		return ESPIPE;
-	}
 
 	switch (whence) {
 	case SEEK_CUR:
@@ -250,7 +266,7 @@ fd_truncate(struct lwp *l, int fd, int whence, off_t start, register_t *retval)
 		break;
 
 	case SEEK_END:
-		if ((error = VOP_GETATTR(vp, &vattr, l->l_cred)) != 0)
+		if ((error = VOP_GETATTR(vp, &vattr, l->l_cred, l)) != 0)
 			return error;
 		SCARG(&ft, length) = vattr.va_size + start;
 		break;
@@ -263,35 +279,40 @@ fd_truncate(struct lwp *l, int fd, int whence, off_t start, register_t *retval)
 		return EINVAL;
 		break;
 	}
-	fd_putfile(fd);
 
 	SCARG(&ft, fd) = fd;
 	return sys_ftruncate(l, &ft, retval);
 }
 
 int
-irix_sys_open(struct lwp *l, const struct irix_sys_open_args *uap, register_t *retval)
+irix_sys_open(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct irix_sys_open_args /* {
 		syscallarg(char *) path;
 		syscallarg(int) flags;
 		syscallarg(mode_t) mode;
-	} */
+	} */ *uap = v;
 	extern const struct cdevsw irix_usema_cdevsw;
+	struct proc *p = l->l_proc;
 	int error;
 	int fd;
-	file_t *fp;
+	struct file *fp;
 	struct vnode *vp;
 	struct vnode *nvp;
 
-	if ((error = svr4_sys_open(l, (const void *)uap, retval)) != 0)
+	if ((error = svr4_sys_open(l, v, retval)) != 0)
 		return error;
 
 	fd = (int)*retval;
-	if ((fp = fd_getfile(fd)) == NULL)
+	if ((fp = fd_getfile(p->p_fd, fd)) == NULL)
 		return EBADF;
 
-	vp = fp->f_data;
+	FILE_USE(fp);
+
+	vp = (struct vnode *)fp->f_data;
 
 	/*
 	 * A special hook for the usemaclone driver: we need to clone
@@ -307,8 +328,10 @@ irix_sys_open(struct lwp *l, const struct irix_sys_open_args *uap, register_t *r
 		if ((error = getnewvnode(VCHR, vp->v_mount,
 		    irix_usema_vnodeop_p,
 		    (struct vnode **)&fp->f_data)) != 0) {
-			(void) vn_close(vp, fp->f_flag, fp->f_cred);
-			fd_close(fd);
+			(void) vn_close(vp, fp->f_flag, fp->f_cred, l);
+			FILE_UNUSE(fp, l);
+			ffree(fp);
+			fdremove(p->p_fd, fd);
 			return error;
 		}
 
@@ -318,19 +341,22 @@ irix_sys_open(struct lwp *l, const struct irix_sys_open_args *uap, register_t *r
 			nvp->v_writecount++;
 
 		nvp->v_type = VCHR;
+		nvp->v_specinfo = (void *)malloc(sizeof(struct specinfo),
+		    M_VNODE, M_WAITOK|M_ZERO);
 		nvp->v_rdev = vp->v_rdev;
 		nvp->v_specmountpoint = vp->v_specmountpoint;
 
 		nvp->v_data = (void *)vp;
 		vref(vp);
 	}
-	fd_putfile(fd);
+	FILE_UNUSE(fp, l);
 
 	return 0;
 }
 
 static int
-irix_to_bsd_fcntl_flags(int flags)
+irix_to_bsd_fcntl_flags(flags)
+	int flags;
 {
 	int ret = 0;
 
@@ -356,7 +382,8 @@ irix_to_bsd_fcntl_flags(int flags)
 }
 
 static int
-bsd_to_irix_fcntl_flags(int flags)
+bsd_to_irix_fcntl_flags(flags)
+	int flags;
 {
 	int ret = 0;
 

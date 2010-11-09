@@ -1,4 +1,4 @@
-/*	$NetBSD: harmonyvar.h,v 1.4 2008/04/25 08:17:52 mjf Exp $	*/
+/*	$NetBSD: harmonyvar.h,v 1.2 2005/12/11 12:17:24 christos Exp $	*/
 
 /*	$OpenBSD: harmonyvar.h,v 1.8 2003/08/15 13:25:53 mickey Exp $	*/
 
@@ -63,7 +63,7 @@ struct harmony_dma {
 	struct harmony_dma *d_next;
 	bus_dmamap_t d_map;
 	bus_dma_segment_t d_seg;
-	void *d_kva;
+	caddr_t d_kva;
 	size_t d_size;
 };
 
@@ -79,7 +79,7 @@ struct harmony_channel {
 };
 
 struct harmony_softc {
-	device_t sc_dv;
+	struct device sc_dv;
 	struct audio_device sc_audev;
 
 	bus_dma_tag_t sc_dmat;

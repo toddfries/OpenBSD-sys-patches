@@ -1,4 +1,4 @@
-/*	$Id: shutdown_xenbus.c,v 1.5 2008/10/24 18:02:58 jym Exp $	*/
+/*	$Id: shutdown_xenbus.c,v 1.3 2006/10/09 12:53:39 dsl Exp $	*/
 
 /*-
  * Copyright (c)2006 YAMAMOTO Takashi,
@@ -61,15 +61,15 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: shutdown_xenbus.c,v 1.5 2008/10/24 18:02:58 jym Exp $");
+__KERNEL_RCSID(0, "$NetBSD: shutdown_xenbus.c,v 1.3 2006/10/09 12:53:39 dsl Exp $");
 
 #include <sys/param.h>
 #include <sys/malloc.h>
 
 #include <dev/sysmon/sysmonvar.h>
 
-#include <xen/xenbus.h>
-#include <xen/shutdown_xenbus.h>
+#include <machine/xenbus.h>
+#include <machine/shutdown_xenbus.h>
 
 #define	SHUTDOWN_PATH	"control"
 #define	SHUTDOWN_NAME	"shutdown"
@@ -148,10 +148,10 @@ shutdown_xenbus_setup(void)
 
 	if (sysmon_pswitch_register(&xenbus_power) != 0 ||
 	    sysmon_pswitch_register(&xenbus_reset) != 0) {
-		aprint_error("%s: unable to register with sysmon\n", __func__);
+		printf("%s: unable to register with sysmon\n", __func__);
 		return;
 	}
 	if (register_xenbus_watch(&xenbus_shutdown_watch)) {
-		aprint_error("%s: unable to watch control/shutdown\n", __func__);
+		printf("%s: unable to watch control/shutdown\n", __func__);
 	}
 }

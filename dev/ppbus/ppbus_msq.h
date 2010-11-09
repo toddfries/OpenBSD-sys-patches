@@ -1,4 +1,4 @@
-/* $NetBSD: ppbus_msq.h,v 1.7 2008/04/15 15:02:29 cegger Exp $ */
+/* $NetBSD: ppbus_msq.h,v 1.6 2005/12/11 12:23:28 christos Exp $ */
 
 /*-
  * Copyright (c) 1998 Nicolas Souchu
@@ -193,8 +193,8 @@ struct ppbus_xfer {
 
 /* Function prototypes */
 int ppbus_MS_init(
-		device_t,		/* ppbus bus */
-		device_t,	/* ppbus device */
+		struct device *,		/* ppbus bus */
+		struct device *,	/* ppbus device */
 		struct ppbus_microseq *,	/* loop msq to assign */
 		int opcode			/* MS_OP_GET, MS_OP_PUT */
 		);
@@ -206,8 +206,8 @@ int ppbus_MS_init_msq(
 		);
 
 int ppbus_MS_exec(
-		device_t,		/* ppbus bus */
-		device_t,	/* ppbus device */
+		struct device *,		/* ppbus bus */
+		struct device *,	/* ppbus device */
 		int,				/* microseq opcode */
 		union ppbus_insarg,		/* param1 */
 		union ppbus_insarg,		/* param2 */
@@ -216,8 +216,8 @@ int ppbus_MS_exec(
 		);
 
 int ppbus_MS_loop(
-		device_t,		/* ppbus bus */
-		device_t,	/* ppbus device */
+		struct device *,		/* ppbus bus */
+		struct device *,	/* ppbus device */
 		struct ppbus_microseq *,	/* prologue msq of loop */
 		struct ppbus_microseq *,	/* body msq of loop */
 		struct ppbus_microseq *,	/* epilogue msq of loop */
@@ -226,8 +226,8 @@ int ppbus_MS_loop(
 		);
 
 int ppbus_MS_microseq(
-		device_t,		/* ppbus bus */
-		device_t,	/* ppbus device */
+		struct device *,		/* ppbus bus */
+		struct device *,	/* ppbus device */
 		struct ppbus_microseq *,	/* msq to execute */
 		int *				/* returned value */
 		);

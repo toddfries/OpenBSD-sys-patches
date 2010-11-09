@@ -1,4 +1,4 @@
-/*	$NetBSD: pci_map.c,v 1.24 2008/07/22 04:52:19 bjs Exp $	*/
+/*	$NetBSD: pci_map.c,v 1.22 2007/12/01 06:05:18 jmcneill Exp $	*/
 
 /*-
  * Copyright (c) 1998, 2000 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -34,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: pci_map.c,v 1.24 2008/07/22 04:52:19 bjs Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pci_map.c,v 1.22 2007/12/01 06:05:18 jmcneill Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -271,15 +278,6 @@ pci_mapreg_map(struct pci_attach_args *pa, int reg, pcireg_t type,
     int busflags, bus_space_tag_t *tagp, bus_space_handle_t *handlep,
     bus_addr_t *basep, bus_size_t *sizep)
 {
-	return pci_mapreg_submap(pa, reg, type, busflags, 0, 0, tagp, 
-	    handlep, basep, sizep);
-}
-
-int
-pci_mapreg_submap(struct pci_attach_args *pa, int reg, pcireg_t type,
-    int busflags, bus_size_t maxsize, bus_size_t offset, bus_space_tag_t *tagp,
-	bus_space_handle_t *handlep, bus_addr_t *basep, bus_size_t *sizep)
-{
 	bus_space_tag_t tag;
 	bus_space_handle_t handle;
 	bus_addr_t base;
@@ -313,17 +311,7 @@ pci_mapreg_submap(struct pci_attach_args *pa, int reg, pcireg_t type,
 		splx(s);
 	}
 
-	/* If we're called with maxsize/offset of 0, behave like 
-	 * pci_mapreg_map.
-	 */
-
-	maxsize = (maxsize && offset) ? maxsize : size;
-	base += offset;
-
-	if ((maxsize < size && offset + maxsize <= size) || offset != 0)
-		return (1);
-
-	if (bus_space_map(tag, base, maxsize, busflags | flags, &handle))
+	if (bus_space_map(tag, base, size, busflags | flags, &handle))
 		return (1);
 
 	if (tagp != 0)
@@ -333,7 +321,7 @@ pci_mapreg_submap(struct pci_attach_args *pa, int reg, pcireg_t type,
 	if (basep != 0)
 		*basep = base;
 	if (sizep != 0)
-		*sizep = maxsize;
+		*sizep = size;
 
 	return (0);
 }

@@ -1,4 +1,4 @@
-/*	$NetBSD: smbfs.h,v 1.17 2008/09/07 13:13:04 tron Exp $	*/
+/*	$NetBSD: smbfs.h,v 1.15 2006/11/02 17:34:21 jmmv Exp $	*/
 
 /*
  * Copyright (c) 2000-2001, Boris Popov
@@ -70,7 +70,6 @@ struct smb_share;
 struct u_cred;
 struct vop_ioctl_args;
 struct buf;
-struct pool;
 
 struct smbmount {
 	struct smbfs_args	sm_args;
@@ -80,9 +79,10 @@ struct smbmount {
 	int			sm_flags;
 	long			sm_nextino;
 	struct smb_share * 	sm_share;
+/*	struct simplelock	sm_npslock;*/
 	struct smbnode *	sm_npstack[SMBFS_MAXPATHCOMP];
 	int			sm_caseopt;
-	kmutex_t		sm_hashlock;
+	struct lock		sm_hashlock;
 	LIST_HEAD(smbnode_hashhead, smbnode) *sm_hash;
 	u_long			sm_hashlen;
 	int			sm_didrele;
@@ -96,9 +96,6 @@ struct smbmount {
 int smbfs_doio(struct buf *, kauth_cred_t, struct lwp *);
 int smbfs_vinvalbuf(struct vnode *, int, kauth_cred_t, struct lwp *, int);
 int smbfs_kqfilter(void *);
-
-extern struct pool smbfs_node_pool;
-
 #endif	/* KERNEL */
 
 #endif /* _FS_SMBFS_SMBFS_H_ */

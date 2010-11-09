@@ -1,4 +1,4 @@
-/*	$NetBSD: r128_cce.c,v 1.8 2008/07/08 06:50:23 mrg Exp $	*/
+/*	$NetBSD: r128_cce.c,v 1.5 2007/12/15 00:39:32 perry Exp $	*/
 
 /* r128_cce.c -- ATI Rage 128 driver -*- linux-c -*-
  * Created: Wed Apr  5 19:24:19 2000 by kevin@precisioninsight.com
@@ -32,15 +32,15 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: r128_cce.c,v 1.8 2008/07/08 06:50:23 mrg Exp $");
+__KERNEL_RCSID(0, "$NetBSD: r128_cce.c,v 1.5 2007/12/15 00:39:32 perry Exp $");
 /*
 __FBSDID("$FreeBSD: src/sys/dev/drm/r128_cce.c,v 1.14 2005/11/28 23:13:53 anholt Exp $");
 */
 
-#include "drmP.h"
-#include "drm.h"
-#include "r128_drm.h"
-#include "r128_drv.h"
+#include <dev/drm/drmP.h>
+#include <dev/drm/drm.h>
+#include <dev/pci/drm/r128_drm.h>
+#include <dev/pci/drm/r128_drv.h>
 
 #define R128_FIFO_DEBUG		0
 
@@ -570,7 +570,7 @@ static int r128_do_init_cce(drm_device_t * dev, drm_r128_init_t * init)
 		dev_priv->gart_info.gart_table_location = DRM_ATI_GART_MAIN;
 		dev_priv->gart_info.addr = NULL;
 		dev_priv->gart_info.bus_addr = 0;
-		dev_priv->gart_info.gart_reg_if = DRM_ATI_GART_PCI;
+		dev_priv->gart_info.is_pcie = 0;
 		if (!drm_ati_pcigart_init(dev, &dev_priv->gart_info)) {
 			DRM_ERROR("failed to init PCI GART!\n");
 			dev->dev_private = (void *)dev_priv;
@@ -662,7 +662,7 @@ int r128_cce_start(DRM_IOCTL_ARGS)
 	LOCK_TEST_WITH_RETURN(dev, filp);
 
 	if (dev_priv->cce_running || dev_priv->cce_mode == R128_PM4_NONPM4) {
-		DRM_DEBUG("%s while CCE running\n", __FUNCTION__);
+		DRM_DEBUG("%s while CCE running\n", __func__);
 		return 0;
 	}
 
@@ -726,7 +726,7 @@ int r128_cce_reset(DRM_IOCTL_ARGS)
 	LOCK_TEST_WITH_RETURN(dev, filp);
 
 	if (!dev_priv) {
-		DRM_DEBUG("%s called before init done\n", __FUNCTION__);
+		DRM_DEBUG("%s called before init done\n", __func__);
 		return DRM_ERR(EINVAL);
 	}
 

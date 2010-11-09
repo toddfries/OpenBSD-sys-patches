@@ -1,4 +1,4 @@
-/*	$NetBSD: cs4231.c,v 1.23 2008/04/28 20:23:49 martin Exp $	*/
+/*	$NetBSD: cs4231.c,v 1.19 2007/10/19 11:59:50 ad Exp $	*/
 
 /*-
  * Copyright (c) 1998, 1999 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: cs4231.c,v 1.23 2008/04/28 20:23:49 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cs4231.c,v 1.19 2007/10/19 11:59:50 ad Exp $");
 
 #include "audio.h"
 #if NAUDIO > 0
@@ -42,7 +49,6 @@ __KERNEL_RCSID(0, "$NetBSD: cs4231.c,v 1.23 2008/04/28 20:23:49 martin Exp $");
 #include <sys/malloc.h>
 
 #include <machine/autoconf.h>
-#include <machine/bus.h>
 #include <sys/cpu.h>
 
 #include <sys/audioio.h>
@@ -123,23 +129,23 @@ cs4231_common_attach(struct cs4231_softc *sc, bus_space_handle_t ioh)
 
 	evcnt_attach_dynamic(&sc->sc_intrcnt, EVCNT_TYPE_INTR,
 			     NULL,
-			     device_xname(&sc->sc_ad1848.sc_dev), "total");
+			     sc->sc_ad1848.sc_dev.dv_xname, "total");
 
 	evcnt_attach_dynamic(&sc->sc_playback.t_intrcnt, EVCNT_TYPE_INTR,
 			     &sc->sc_intrcnt,
-			     device_xname(&sc->sc_ad1848.sc_dev), "playback");
+			     sc->sc_ad1848.sc_dev.dv_xname, "playback");
 
 	evcnt_attach_dynamic(&sc->sc_playback.t_ierrcnt, EVCNT_TYPE_INTR,
 			     &sc->sc_intrcnt,
-			     device_xname(&sc->sc_ad1848.sc_dev), "perrors");
+			     sc->sc_ad1848.sc_dev.dv_xname, "perrors");
 
 	evcnt_attach_dynamic(&sc->sc_capture.t_intrcnt, EVCNT_TYPE_INTR,
 			     &sc->sc_intrcnt,
-			     device_xname(&sc->sc_ad1848.sc_dev), "capture");
+			     sc->sc_ad1848.sc_dev.dv_xname, "capture");
 
 	evcnt_attach_dynamic(&sc->sc_capture.t_ierrcnt, EVCNT_TYPE_INTR,
 			     &sc->sc_intrcnt,
-			     device_xname(&sc->sc_ad1848.sc_dev), "cerrors");
+			     sc->sc_ad1848.sc_dev.dv_xname, "cerrors");
 
 	/* put chip in native mode to access (extended) ID register */
 	reg = ad_read(&sc->sc_ad1848, SP_MISC_INFO);
@@ -156,9 +162,6 @@ cs4231_common_attach(struct cs4231_softc *sc, bus_space_handle_t ioh)
 		break;
 	case 0x82:
 		sc->sc_ad1848.chip_name = "CS4232";
-		break;
-	case 0xa2:
-		sc->sc_ad1848.chip_name = "CS4232C";
 		break;
 	default:
 		if ((buf = malloc(32, M_TEMP, M_NOWAIT)) != NULL) {
@@ -267,7 +270,7 @@ cs4231_transfer_init(
 
 	if (t->t_active) {
 		printf("%s: %s already running\n",
-		       device_xname(&sc->sc_ad1848.sc_dev), t->t_name);
+		       sc->sc_ad1848.sc_dev.dv_xname, t->t_name);
 		return EINVAL;
 	}
 
@@ -278,7 +281,7 @@ cs4231_transfer_init(
 		continue;
 	if (p == NULL) {
 		printf("%s: bad %s addr %p\n",
-		       device_xname(&sc->sc_ad1848.sc_dev), t->t_name, start);
+		       sc->sc_ad1848.sc_dev.dv_xname, t->t_name, start);
 		return EINVAL;
 	}
 
@@ -299,7 +302,7 @@ cs4231_transfer_init(
 
 	DPRINTF(("%s: init %s: [%p..%p] %lu bytes %lu blocks;"
 		 " DMA at 0x%lx count %lu\n",
-		 device_xname(&sc->sc_ad1848.sc_dev), t->t_name,
+		 sc->sc_ad1848.sc_dev.dv_xname, t->t_name,
 		 start, end, (u_long)t->t_segsz, (u_long)t->t_blksz,
 		 (u_long)*paddr, (u_long)*psize));
 
@@ -379,7 +382,7 @@ cs4231_getdev(void *addr, struct audio_device *retp)
 	return 0;
 }
 
-static const ad1848_devmap_t csmapping[] = {
+static ad1848_devmap_t csmapping[] = {
 	{ CSAUDIO_DAC_LVL, AD1848_KIND_LVL, AD1848_AUX1_CHANNEL },
 	{ CSAUDIO_LINE_IN_LVL, AD1848_KIND_LVL, AD1848_LINE_CHANNEL },
 	{ CSAUDIO_MONO_LVL, AD1848_KIND_LVL, AD1848_MONO_CHANNEL },

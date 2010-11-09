@@ -1,4 +1,4 @@
-/*	$NetBSD: isabus.c,v 1.44 2008/07/05 08:46:25 tsutsui Exp $	*/
+/*	$NetBSD: isabus.c,v 1.36 2006/07/02 04:22:38 tsutsui Exp $	*/
 /*	$OpenBSD: isabus.c,v 1.15 1998/03/16 09:38:46 pefo Exp $	*/
 /*	NetBSD: isa.c,v 1.33 1995/06/28 04:30:51 cgd Exp 	*/
 
@@ -120,7 +120,7 @@ WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: isabus.c,v 1.44 2008/07/05 08:46:25 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: isabus.c,v 1.36 2006/07/02 04:22:38 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/proc.h>
@@ -152,7 +152,7 @@ __KERNEL_RCSID(0, "$NetBSD: isabus.c,v 1.44 2008/07/05 08:46:25 tsutsui Exp $");
 #include <arc/arc/timervar.h>
 
 static int beeping;
-static callout_t sysbeep_ch;
+static struct callout sysbeep_ch = CALLOUT_INITIALIZER;
 
 static long isa_mem_ex_storage[EXTENT_FIXED_STORAGE_SIZE(16) / sizeof(long)];
 static long isa_io_ex_storage[EXTENT_FIXED_STORAGE_SIZE(16) / sizeof(long)];
@@ -160,19 +160,20 @@ static long isa_io_ex_storage[EXTENT_FIXED_STORAGE_SIZE(16) / sizeof(long)];
 #define	IRQ_SLAVE	2
 
 /* Definition of the driver for autoconfig. */
-static int isabrprint(void *, const char *);
+int	isabrprint(void *, const char *);
 
 extern struct arc_bus_space arc_bus_io, arc_bus_mem;
 
-static void isabr_attach_hook(device_t , device_t,
-    struct isabus_attach_args *);
-static const struct evcnt *isabr_intr_evcnt(isa_chipset_tag_t, int);
-static void *isabr_intr_establish(isa_chipset_tag_t, int, int, int,
-    int (*)(void *), void *);
-static void isabr_intr_disestablish(isa_chipset_tag_t, void*);
-static void isabr_initicu(void);
-static void intr_calculatemasks(void);
-static int fakeintr(void *a);
+void	isabr_attach_hook(struct device *, struct device *,
+			struct isabus_attach_args *);
+const struct evcnt *isabr_intr_evcnt(isa_chipset_tag_t, int);
+void	*isabr_intr_establish(isa_chipset_tag_t, int, int, int,
+			int (*)(void *), void *);
+void	isabr_intr_disestablish(isa_chipset_tag_t, void*);
+uint32_t isabr_iointr(uint32_t, struct clockframe *);
+void	isabr_initicu(void);
+void	intr_calculatemasks(void);
+int	fakeintr(void *a);
 
 struct isabr_config *isabr_conf = NULL;
 uint32_t imask[_IPL_N];	/* XXX */
@@ -182,12 +183,10 @@ isabrattach(struct isabr_softc *sc)
 {
 	struct isabus_attach_args iba;
 
-	callout_init(&sysbeep_ch, 0);
-
 	if (isabr_conf == NULL)
 		panic("isabr_conf isn't initialized");
 
-	aprint_normal("\n");
+	printf("\n");
 
 	/* Initialize interrupt controller */
 	isabr_initicu();
@@ -197,27 +196,27 @@ isabrattach(struct isabr_softc *sc)
 	sc->arc_isa_cs.ic_intr_establish = isabr_intr_establish;
 	sc->arc_isa_cs.ic_intr_disestablish = isabr_intr_disestablish;
 
-	arc_bus_space_init_extent(&arc_bus_mem, (void *)isa_mem_ex_storage,
+	arc_bus_space_init_extent(&arc_bus_mem, (caddr_t)isa_mem_ex_storage,
 	    sizeof(isa_mem_ex_storage));
-	arc_bus_space_init_extent(&arc_bus_io, (void *)isa_io_ex_storage,
+	arc_bus_space_init_extent(&arc_bus_io, (caddr_t)isa_io_ex_storage,
 	    sizeof(isa_io_ex_storage));
 
 	iba.iba_iot = &arc_bus_io;
 	iba.iba_memt = &arc_bus_mem;
 	iba.iba_dmat = &sc->sc_dmat;
 	iba.iba_ic = &sc->arc_isa_cs;
-	config_found_ia(sc->sc_dev, "isabus", &iba, isabrprint);
+	config_found_ia(&sc->sc_dev, "isabus", &iba, isabrprint);
 }
 
-static int
+int
 isabrprint(void *aux, const char *pnp)
 {
 
         if (pnp)
                 aprint_normal("isa at %s", pnp);
         aprint_verbose(" isa_io_base 0x%lx isa_mem_base 0x%lx",
-	    arc_bus_io.bs_vbase, arc_bus_mem.bs_vbase);
-        return UNCONF;
+		arc_bus_io.bs_vbase, arc_bus_mem.bs_vbase);
+        return (UNCONF);
 }
 
 
@@ -231,8 +230,7 @@ int	imen;
 int	intrtype[ICU_LEN], intrmask[ICU_LEN], intrlevel[ICU_LEN];
 struct isa_intrhand *isa_intrhand[ICU_LEN];
 
-static int
-fakeintr(void *a)
+int fakeintr(void *a)
 {
 
 	return 0;
@@ -244,7 +242,7 @@ fakeintr(void *a)
  * would be faster, but the code would be nastier, and we don't expect this to
  * happen very much anyway.
  */
-static void
+void
 intr_calculatemasks(void)
 {
 	int irq, level;
@@ -269,20 +267,30 @@ intr_calculatemasks(void)
 
 	imask[IPL_NONE] = 0;
 
-	imask[IPL_SOFTCLOCK] |= imask[IPL_NONE];
+	imask[IPL_SOFT] |= imask[IPL_NONE];
+	imask[IPL_SOFTCLOCK] |= imask[IPL_SOFT];
 	imask[IPL_SOFTNET] |= imask[IPL_SOFTCLOCK];
+	imask[IPL_SOFTSERIAL] |= imask[IPL_SOFTNET];
 
 	/*
 	 * Enforce a hierarchy that gives slow devices a better chance at not
 	 * dropping data.
 	 */
-	imask[IPL_VM] |= imask[IPL_SOFTNET];
+	imask[IPL_BIO] |= imask[IPL_SOFTSERIAL];
+	imask[IPL_NET] |= imask[IPL_BIO];
+	imask[IPL_TTY] |= imask[IPL_NET];
 
 	/*
 	 * Since run queues may be manipulated by both the statclock and tty,
 	 * network, and diskdrivers, clock > tty.
 	 */
-	imask[IPL_SCHED] |= imask[IPL_VM];
+	imask[IPL_CLOCK] |= imask[IPL_TTY];
+	imask[IPL_STATCLOCK] |= imask[IPL_CLOCK];
+
+	/*
+	 * IPL_HIGH must block everything that can manipulate a run queue.
+	 */
+	imask[IPL_HIGH] |= imask[IPL_STATCLOCK];
 
 	/* And eventually calculate the complete masks. */
 	for (irq = 0; irq < ICU_LEN; irq++) {
@@ -306,7 +314,7 @@ intr_calculatemasks(void)
 	}
 }
 
-static void
+void
 isabr_attach_hook(struct device *parent, struct device *self,
     struct isabus_attach_args *iba)
 {
@@ -314,7 +322,7 @@ isabr_attach_hook(struct device *parent, struct device *self,
 	/* Nothing to do. */
 }
 
-static const struct evcnt *
+const struct evcnt *
 isabr_intr_evcnt(isa_chipset_tag_t ic, int irq)
 {
 
@@ -325,7 +333,7 @@ isabr_intr_evcnt(isa_chipset_tag_t ic, int irq)
 /*
  *	Establish a ISA bus interrupt.
  */
-static void *
+void *
 isabr_intr_establish(isa_chipset_tag_t ic, int irq, int type, int level,
     int (*ih_fun)(void *), void *ih_arg)
 {
@@ -391,7 +399,7 @@ isabr_intr_establish(isa_chipset_tag_t ic, int irq, int type, int level,
 	return ih;
 }
 
-static void
+void
 isabr_intr_disestablish(isa_chipset_tag_t ic, void *arg)
 {
 
@@ -409,7 +417,7 @@ isabr_iointr(uint32_t mask, struct clockframe *cf)
 
 	isa_vector = (*isabr_conf->ic_intr_status)();
 	if (isa_vector < 0)
-		return 0;
+		return (~0);
 
 	o_imen = imen;
 	imen |= 1 << (isa_vector & (ICU_LEN - 1));
@@ -447,14 +455,14 @@ isabr_iointr(uint32_t mask, struct clockframe *cf)
 	isa_outb(IO_ICU1 + PIC_OCW1, imen);
 	isa_outb(IO_ICU2 + PIC_OCW1, imen >> 8);
 
-	return MIPS_INT_MASK_2;
+	return ~MIPS_INT_MASK_2;
 }
 
 
 /*
  * Initialize the Interrupt controller logic.
  */
-static void
+void
 isabr_initicu(void)
 {
 

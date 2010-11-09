@@ -1,4 +1,4 @@
-/* $NetBSD: g42xxeb_kmkbd.c,v 1.9 2008/05/10 15:31:04 martin Exp $ */
+/* $NetBSD: g42xxeb_kmkbd.c,v 1.4 2006/02/23 23:57:32 he Exp $ */
 
 /*-
  * Copyright (c) 2002, 2003, 2005 Genetec corp.
@@ -37,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: g42xxeb_kmkbd.c,v 1.9 2008/05/10 15:31:04 martin Exp $" );
+__KERNEL_RCSID(0, "$NetBSD: g42xxeb_kmkbd.c,v 1.4 2006/02/23 23:57:32 he Exp $" );
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -94,7 +94,7 @@ CFATTACH_DECL(kmkbd, sizeof(struct kmkbd_softc),
 
 static  int	kmkbd_enable(void *, int);
 static  void	kmkbd_set_leds(void *, int);
-static  int	kmkbd_ioctl(void *, u_long, void *, int, struct lwp *);
+static  int	kmkbd_ioctl(void *, u_long, caddr_t, int, struct lwp *);
 
 const struct wskbd_accessops kmkbd_accessops = {
 	kmkbd_enable,
@@ -210,7 +210,7 @@ kmkbd_attach(struct device *parent, struct device *self, void *aux)
 		state0 = ST_DISABLED;
 	}
 
-	callout_init(&sc->callout, 0);
+	callout_init(&sc->callout);
 
 	s = spltty();
 	sc->ih = obio_intr_establish(osc, G42XXEB_INT_KEY, IPL_TTY, 
@@ -263,7 +263,7 @@ kmkbd_set_leds(void *v, int leds)
 }
 
 static int
-kmkbd_ioctl(void *v, u_long cmd, void *data, int flag, struct lwp *l)
+kmkbd_ioctl(void *v, u_long cmd, caddr_t data, int flag, struct lwp *l)
 {
 	/*struct kmkbd_softc *sc = v;*/
 

@@ -8,11 +8,16 @@ D/amiga////
 D/amigappc////
 D/arc////
 D/arm////
+D/arm26////
+D/arm32////
 D/atari////
+D/ataristand////
 D/bebox////
 D/cats////
 D/cesfic////
 D/cobalt////
+D/da30////
+D/dnard////
 D/dreamcast////
 D/evbarm////
 D/evbmips////
@@ -33,6 +38,8 @@ D/iyonix////
 D/landisk////
 D/luna68k////
 D/m68k////
+D/m88k////
+D/mac////
 D/mac68k////
 D/macppc////
 D/mips////
@@ -41,12 +48,18 @@ D/mmeye////
 D/mvme68k////
 D/mvmeppc////
 D/netwinder////
+D/news////
 D/news68k////
 D/newsmips////
 D/next68k////
 D/ofppc////
+D/openblocks405////
+D/pc532////
+D/pdp10////
+D/pica////
 D/playstation2////
 D/pmax////
+D/pmppc////
 D/powerpc////
 D/prep////
 D/sandpoint////
@@ -59,13 +72,17 @@ D/sparc////
 D/sparc64////
 D/sun2////
 D/sun3////
+D/sun3x////
 D/sun68k////
 D/vax////
+D/walnut////
 D/x68k////
 D/x86////
+D/x86_64////
 D/xen////
 D/zaurus////
 D/rs6000////
 D/usermode////
-/README/1.51/Fri Nov 21 05:12:15 2008//
-/Makefile/1.38/Tue Mar 10 18:26:49 2009//
+D/xenamd64////
+/Makefile/1.40/Tue Nov  9 20:55:33 2010//
+/README/1.53/Tue Nov  9 20:55:34 2010//

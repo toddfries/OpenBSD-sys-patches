@@ -1,4 +1,4 @@
-/*	$NetBSD: nslm7x.c,v 1.49 2008/10/13 12:44:46 pgoyette Exp $ */
+/*	$NetBSD: nslm7x.c,v 1.43 2007/10/19 11:59:58 ad Exp $ */
 
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: nslm7x.c,v 1.49 2008/10/13 12:44:46 pgoyette Exp $");
+__KERNEL_RCSID(0, "$NetBSD: nslm7x.c,v 1.43 2007/10/19 11:59:58 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -516,7 +523,7 @@ static struct lm_sensor w83627dhg_sensors[] = {
 		.rfact = RFACT(34, 34) / 2
 	},
 	{
-		.desc = "-12V",
+		.desc = "VIN1",
 		.type = ENVSYS_SVOLTS_DC,
 		.bank = 0,
 		.reg = 0x24,
@@ -537,7 +544,7 @@ static struct lm_sensor w83627dhg_sensors[] = {
 		.bank = 0,
 		.reg = 0x26,
 		.refresh = lm_refresh_volt,
-		.rfact = RFACT_NONE
+		.rfact = RFACT_NONE / 2
 	},
 	{
 		.desc = "+3.3VSB",
@@ -553,7 +560,7 @@ static struct lm_sensor w83627dhg_sensors[] = {
 		.bank = 5,
 		.reg = 0x51,
 		.refresh = lm_refresh_volt,
-		.rfact = RFACT(34, 34) / 2
+		.rfact = RFACT_NONE / 2
 	},
 
 	/* Temperature */
@@ -1625,23 +1632,25 @@ lm_generic_banksel(struct lm_softc *lmsc, int bank)
 
 /*
  * bus independent probe
- *
- * prerequisites:  lmsc contains valid lm_{read,write}reg() routines
- * and associated bus access data is present in attachment's softc
  */
 int
-lm_probe(struct lm_softc *lmsc)
+lm_probe(bus_space_tag_t iot, bus_space_handle_t ioh)
 {
 	uint8_t cr;
 	int rv;
 
-	/* Perform LM78 reset */
-	/*(*lmsc->lm_writereg)(lmsc, LMD_CONFIG, 0x80); */
+	/* Check for some power-on defaults */
+	bus_space_write_1(iot, ioh, LMC_ADDR, LMD_CONFIG);
 
-	cr = (*lmsc->lm_readreg)(lmsc, LMD_CONFIG);
+	/* Perform LM78 reset */
+	/* bus_space_write_1(iot, ioh, LMC_DATA, 0x80); */
+
+	/* XXX - Why do I have to reselect the register? */
+	bus_space_write_1(iot, ioh, LMC_ADDR, LMD_CONFIG);
+	cr = bus_space_read_1(iot, ioh, LMC_DATA);
 
 	/* XXX - spec says *only* 0x08! */
-	if ((cr == 0x08) || (cr == 0x01) || (cr == 0x03) || (cr == 0x06))
+	if ((cr == 0x08) || (cr == 0x01) || (cr == 0x03))
 		rv = 1;
 	else
 		rv = 0;
@@ -1651,6 +1660,10 @@ lm_probe(struct lm_softc *lmsc)
 	return rv;
 }
 
+
+/*
+ * pre:  lmsc contains valid busspace tag and handle
+ */
 void
 lm_attach(struct lm_softc *lmsc)
 {
@@ -1663,14 +1676,10 @@ lm_attach(struct lm_softc *lmsc)
 	/* Start the monitoring loop */
 	(*lmsc->lm_writereg)(lmsc, LMD_CONFIG, 0x01);
 
-	lmsc->sc_sme = sysmon_envsys_create();
 	/* Initialize sensors */
 	for (i = 0; i < lmsc->numsensors; i++) {
-		if (sysmon_envsys_sensor_attach(lmsc->sc_sme,
-						&lmsc->sensors[i])) {
-			sysmon_envsys_destroy(lmsc->sc_sme);
-			return;
-		}
+		lmsc->sensors[i].sensor = i;
+		lmsc->sensors[i].state = ENVSYS_SVALID;
 	}
 
 	/*
@@ -1683,14 +1692,14 @@ lm_attach(struct lm_softc *lmsc)
 	/*
 	 * Hook into the System Monitor.
 	 */
-	lmsc->sc_sme->sme_name = device_xname(lmsc->sc_dev);
-	lmsc->sc_sme->sme_flags = SME_DISABLE_REFRESH;
+	lmsc->sc_sysmon.sme_sensor_data = lmsc->sensors;
+	lmsc->sc_sysmon.sme_name = lmsc->sc_dev.dv_xname;
+	lmsc->sc_sysmon.sme_nsensors = lmsc->numsensors;
+	lmsc->sc_sysmon.sme_flags |= SME_DISABLE_GTREDATA;
 
-	if (sysmon_envsys_register(lmsc->sc_sme)) {
-		aprint_error_dev(lmsc->sc_dev,
-		    "unable to register with sysmon\n");
-		sysmon_envsys_destroy(lmsc->sc_sme);
-	}
+	if (sysmon_envsys_register(&lmsc->sc_sysmon))
+		aprint_error("%s: unable to register with sysmon\n",
+		    lmsc->sc_dev.dv_xname);
 }
 
 /*
@@ -1702,13 +1711,16 @@ lm_detach(struct lm_softc *lmsc)
 {
 	callout_stop(&lmsc->sc_callout);
 	callout_destroy(&lmsc->sc_callout);
-	sysmon_envsys_unregister(lmsc->sc_sme);
+	sysmon_envsys_unregister(&lmsc->sc_sysmon);
 }
 
 static void
 lm_refresh(void *arg)
 {
 	struct lm_softc *lmsc = arg;
+
+	if (lmsc->numsensors != lmsc->sc_sysmon.sme_nsensors)
+		lmsc->numsensors = lmsc->sc_sysmon.sme_nsensors;
 
 	lmsc->refresh_sensor_data(lmsc);
 	callout_schedule(&lmsc->sc_callout, LM_REFRESH_TIMO);
@@ -1740,8 +1752,8 @@ lm_match(struct lm_softc *sc)
 	}
 
 	aprint_normal("\n");
-	aprint_normal_dev(sc->sc_dev,
-	    "National Semiconductor %s Hardware monitor\n", model);
+	aprint_normal("%s: National Semiconductor %s Hardware monitor\n",
+	    sc->sc_dev.dv_xname, model);
 
 	lm_setup_sensors(sc, lm78_sensors);
 	sc->refresh_sensor_data = lm_refresh_sensor_data;
@@ -1755,7 +1767,8 @@ def_match(struct lm_softc *sc)
 
 	chipid = (*sc->lm_readreg)(sc, LMD_CHIPID) & LM_ID_MASK;
 	aprint_normal("\n");
-	aprint_error_dev(sc->sc_dev, "Unknown chip (ID %d)\n", chipid);
+	aprint_error("%s: Unknown chip (ID %d)\n", sc->sc_dev.dv_xname,
+	    chipid);
 
 	lm_setup_sensors(sc, lm78_sensors);
 	sc->refresh_sensor_data = lm_refresh_sensor_data;
@@ -1853,15 +1866,16 @@ wb_match(struct lm_softc *sc)
 		}
 		break;
 	default:
-		aprint_normal_dev(sc->sc_dev,
-		    "unknown Winbond chip (ID 0x%x)\n", sc->chipid);
+		aprint_normal("%s: unknown Winbond chip (ID 0x%x)\n",
+		    sc->sc_dev.dv_xname, sc->chipid);
 		/* Handle as a standard LM78. */
 		lm_setup_sensors(sc, lm78_sensors);
 		sc->refresh_sensor_data = lm_refresh_sensor_data;
 		return 1;
 	}
 
-	aprint_normal_dev(sc->sc_dev, "Winbond %s Hardware monitor\n", model);
+	aprint_normal("%s: Winbond %s Hardware monitor\n",
+	    sc->sc_dev.dv_xname, model);
 
 	sc->refresh_sensor_data = wb_refresh_sensor_data;
 	return 1;
@@ -1896,22 +1910,22 @@ lm_refresh_volt(struct lm_softc *sc, int n)
 	int data;
 
 	data = (*sc->lm_readreg)(sc, sc->lm_sensors[n].reg);
-	if (data == 0xff) {
+	if (data == 0xff)
 		sc->sensors[n].state = ENVSYS_SINVALID;
+
+	sc->sensors[n].flags = ENVSYS_FCHANGERFACT;
+	sc->sensors[n].value_cur = (data << 4);
+
+	if (sc->sensors[n].rfact) {
+		sc->sensors[n].value_cur *= sc->sensors[n].rfact;
+		sc->sensors[n].value_cur /= 10;
 	} else {
-		sc->sensors[n].flags = ENVSYS_FCHANGERFACT;
-		sc->sensors[n].value_cur = (data << 4);
-		if (sc->sensors[n].rfact) {
-			sc->sensors[n].value_cur *= sc->sensors[n].rfact;
-			sc->sensors[n].value_cur /= 10;
-		} else {
-			sc->sensors[n].value_cur *= sc->lm_sensors[n].rfact;
-			sc->sensors[n].value_cur /= 10;
-			sc->sensors[n].rfact = sc->lm_sensors[n].rfact;
-		}
-		sc->sensors[n].state = ENVSYS_SVALID;
+		sc->sensors[n].value_cur *= sc->lm_sensors[n].rfact;
+		sc->sensors[n].value_cur /= 10;
+		sc->sensors[n].rfact = sc->lm_sensors[n].rfact;
 	}
 
+	sc->sensors[n].state = ENVSYS_SVALID;
 	DPRINTF(("%s: volt[%d] data=0x%x value_cur=%d\n",
 	    __func__, n, data, sc->sensors[n].value_cur));
 }

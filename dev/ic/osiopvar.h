@@ -1,6 +1,6 @@
-/*	$NetBSD: osiopvar.h,v 1.13 2008/05/14 13:29:28 tsutsui Exp $	*/
+/*	$NetBSD: osiopvar.h,v 1.10 2007/06/30 14:08:58 tsutsui Exp $	*/
 
-/*-
+/*
  * Copyright (c) 2001 Izumi Tsutsui.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -11,6 +11,8 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -110,7 +112,7 @@ struct osiop_ds {
 	uint8_t msgbuf[8];		/* 224: message in buf */
 	uint8_t stat[8];		/* 232: stat buf */
 	uint8_t pad2[16];		/* 240: padding to 256bytes */
-} __packed;
+} __attribute__((__packed__));
 
 /* status can hold the SCSI_* status values, and 2 additional values: */
 #define SCSI_OSIOP_NOCHECK	0xfe	/* don't check the scsi status */
@@ -188,7 +190,7 @@ struct osiop_tinfo {
 };
 
 struct osiop_softc {
-	device_t sc_dev;
+	struct device sc_dev;
 
 	bus_space_tag_t sc_bst;		/* bus space tag */
 	bus_space_handle_t sc_reg;	/* register I/O handle */

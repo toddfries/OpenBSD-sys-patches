@@ -1,4 +1,4 @@
-/*	$NetBSD: svr4_machdep.c,v 1.93 2008/11/19 18:35:59 ad Exp $	 */
+/*	$NetBSD: svr4_machdep.c,v 1.81 2006/11/16 01:32:38 christos Exp $	 */
 
 /*-
  * Copyright (c) 1994, 2000 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: svr4_machdep.c,v 1.93 2008/11/19 18:35:59 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: svr4_machdep.c,v 1.81 2006/11/16 01:32:38 christos Exp $");
 
 #if defined(_KERNEL_OPT)
 #include "opt_vm86.h"
@@ -50,6 +57,7 @@ __KERNEL_RCSID(0, "$NetBSD: svr4_machdep.c,v 1.93 2008/11/19 18:35:59 ad Exp $")
 #include <sys/signalvar.h>
 #include <sys/malloc.h>
 #include <sys/mount.h>
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 #include <sys/exec_elf.h>
 
@@ -70,8 +78,7 @@ __KERNEL_RCSID(0, "$NetBSD: svr4_machdep.c,v 1.93 2008/11/19 18:35:59 ad Exp $")
 #include <machine/vmparam.h>
 #include <machine/svr4_machdep.h>
 
-static void svr4_getsiginfo(union svr4_siginfo *, int, u_long, void *);
-extern void (*svr4_fasttrap_vec)(void);
+static void svr4_getsiginfo(union svr4_siginfo *, int, u_long, caddr_t);
 void svr4_fasttrap(struct trapframe);
 
 #ifdef DEBUG_SVR4
@@ -79,7 +86,9 @@ static void svr4_printmcontext(const char *, svr4_mcontext_t *);
 
 
 static void
-svr4_printmcontext(const char *fun, svr4_mcontext_t *mc)
+svr4_printmcontext(fun, mc)
+	const char *fun;
+	svr4_mcontext_t *mc;
 {
 	svr4_greg_t *r = mc->greg;
 
@@ -110,7 +119,10 @@ svr4_printmcontext(const char *fun, svr4_mcontext_t *mc)
 #endif
 
 void
-svr4_setregs(struct lwp *l, struct exec_package *epp, u_long stack)
+svr4_setregs(l, epp, stack)
+	struct lwp *l;
+	struct exec_package *epp;
+	u_long stack;
 {
 	struct pcb *pcb = &l->l_addr->u_pcb;
 	struct trapframe *tf = l->l_md.md_regs;
@@ -124,7 +136,10 @@ svr4_setregs(struct lwp *l, struct exec_package *epp, u_long stack)
 }
 
 void *
-svr4_getmcontext(struct lwp *l, svr4_mcontext_t *mc, u_long *flags)
+svr4_getmcontext(l, mc, flags)
+	struct lwp *l;
+	svr4_mcontext_t *mc;
+	u_long *flags;
 {
 	struct trapframe *tf = l->l_md.md_regs;
 	svr4_greg_t *r = mc->greg;
@@ -181,7 +196,10 @@ svr4_getmcontext(struct lwp *l, svr4_mcontext_t *mc, u_long *flags)
  * a machine fault.
  */
 int
-svr4_setmcontext(struct lwp *l, svr4_mcontext_t *mc, u_long flags)
+svr4_setmcontext(l, mc, flags)
+	struct lwp *l;
+	svr4_mcontext_t *mc;
+	u_long flags;
 {
 	struct trapframe *tf;
 	svr4_greg_t *r = mc->greg;
@@ -231,8 +249,7 @@ svr4_setmcontext(struct lwp *l, svr4_mcontext_t *mc, u_long flags)
 		if (tf->tf_eflags & PSL_VM)
 			(*p->p_emul->e_syscall_intern)(p);
 #endif
-		tf->tf_eflags &= ~PSL_USER;
-		tf->tf_eflags |= r[SVR4_X86_EFL] & PSL_USER;
+		tf->tf_eflags = r[SVR4_X86_EFL];
 	}
 	tf->tf_edi = r[SVR4_X86_EDI];
 	tf->tf_esi = r[SVR4_X86_ESI];
@@ -251,7 +268,11 @@ svr4_setmcontext(struct lwp *l, svr4_mcontext_t *mc, u_long flags)
 
 
 static void
-svr4_getsiginfo(union svr4_siginfo *si, int sig, u_long code, void * addr)
+svr4_getsiginfo(si, sig, code, addr)
+	union svr4_siginfo	*si;
+	int			 sig;
+	u_long			 code;
+	caddr_t			 addr;
 {
 	si->si_signo = native_to_svr4_signo[sig];
 	si->si_errno = 0;
@@ -356,10 +377,10 @@ svr4_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
 	int sig = ksi->ksi_signo;
 	struct lwp *l = curlwp;
 	struct proc *p = l->l_proc;
-	int onstack, error;
+	int onstack;
 	struct svr4_sigframe *fp = getframe(l, sig, &onstack), frame;
 	sig_t catcher = SIGACTION(p, sig).sa_handler;
-	struct sigaltstack *sas = &l->l_sigstk;
+	struct sigaltstack *sas = &p->p_sigctx.ps_sigstk;
 	struct trapframe *tf = l->l_md.md_regs;
 
 	fp--;
@@ -374,7 +395,7 @@ svr4_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
 	 *	  modify many kernel files to enable that]
 	 */
 	svr4_getcontext(l, &frame.sf_uc);
-	svr4_getsiginfo(&frame.sf_si, sig, code, (void *) tf->tf_eip);
+	svr4_getsiginfo(&frame.sf_si, sig, code, (caddr_t) tf->tf_eip);
 
 	/* Build stack frame for signal trampoline. */
 	frame.sf_signum = frame.sf_si.si_signo;
@@ -387,13 +408,7 @@ svr4_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
 	       frame.sf_signum, frame.sf_sip, frame.sf_ucp, frame.sf_handler);
 #endif
 
-	sendsig_reset(l, sig);
-
-	mutex_exit(p->p_lock);
-	error = copyout(&frame, fp, sizeof(frame));
-	mutex_enter(p->p_lock);
-
-	if (error != 0) {
+	if (copyout(&frame, fp, sizeof(frame)) != 0) {
 		/*
 		 * Process has trashed its stack; give it an illegal
 		 * instruction to halt it in its tracks.
@@ -413,8 +428,17 @@ svr4_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
  * sysi86
  */
 int
-svr4_sys_sysarch(struct lwp *l, const struct svr4_sys_sysarch_args *uap, register_t *retval)
+svr4_sys_sysarch(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
+	struct svr4_sys_sysarch_args *uap = v;
+#ifdef USER_LDT
+	struct proc *p = l->l_proc;
+	caddr_t sg = stackgap_init(p, 0);
+	int error;
+#endif
 	*retval = 0;	/* XXX: What to do */
 
 	switch (SCARG(uap, op)) {
@@ -424,21 +448,20 @@ svr4_sys_sysarch(struct lwp *l, const struct svr4_sys_sysarch_args *uap, registe
 	case SVR4_SYSARCH_DSCR:
 #ifdef USER_LDT
 		{
-			struct x86_set_ldt_args sa;
+			struct i386_set_ldt_args sa, *sap;
+			struct sys_sysarch_args ua;
+
 			struct svr4_ssd ssd;
 			union descriptor bsd;
-			int error;
 
 			if ((error = copyin(SCARG(uap, a1), &ssd,
 					    sizeof(ssd))) != 0) {
-#ifdef DEBUG
-				printf("svr4_sys_sysarch: Cannot copy arg1\n");
-#endif
+				printf("Cannot copy arg1\n");
 				return error;
 			}
 
 #ifdef DEBUG
-			printf("svr4_sys_sysarch: s=%x, b=%x, l=%x, a1=%x a2=%x\n",
+			printf("s=%x, b=%x, l=%x, a1=%x a2=%x\n",
 			       ssd.selector, ssd.base, ssd.limit,
 			       ssd.access1, ssd.access2);
 #endif
@@ -446,7 +469,7 @@ svr4_sys_sysarch(struct lwp *l, const struct svr4_sys_sysarch_args *uap, registe
 			/* We can only set ldt's for now. */
 			if (!ISLDT(ssd.selector)) {
 #ifdef DEBUG
-				printf("svr4_sys_sysarch: Not an ldt\n");
+				printf("Not an ldt\n");
 #endif
 				return EPERM;
 			}
@@ -470,10 +493,22 @@ svr4_sys_sysarch(struct lwp *l, const struct svr4_sys_sysarch_args *uap, registe
 			bsd.sd.sd_gran = (ssd.access2 >> 3)& 0x1;
 
 			sa.start = IDXSEL(ssd.selector);
-			sa.desc = NULL;
+			sa.desc = stackgap_alloc(p, &sg,
+			    sizeof(union descriptor));
 			sa.num = 1;
+			sap = stackgap_alloc(p, &sg,
+			     sizeof(struct i386_set_ldt_args));
 
-			return x86_set_ldt1(l, &sa, &bsd);
+			if ((error = copyout(&sa, sap, sizeof(sa))) != 0)
+				return error;
+
+			SCARG(&ua, op) = I386_SET_LDT;
+			SCARG(&ua, parms) = (char *) sap;
+
+			if ((error = copyout(&bsd, sa.desc, sizeof(bsd))) != 0)
+				return error;
+
+			return sys_sysarch(l, &ua, retval);
 		}
 #endif
 
@@ -486,23 +521,26 @@ svr4_sys_sysarch(struct lwp *l, const struct svr4_sys_sysarch_args *uap, registe
 
 /*
  * Fast syscall gate trap...
- *
- * NOTE: svr4_fasttrap_lock is held.
  */
 void
-svr4_fasttrap(struct trapframe frame)
+svr4_fasttrap(frame)
+	struct trapframe frame;
 {
 	struct lwp *l = curlwp;
 	struct proc *p = l->l_proc;
+	struct schedstate_percpu *spc;
 	struct timeval tv;
-	struct timeval rtime, stime;
 	struct timespec ts;
 	uint64_t tm;
 
 	l->l_md.md_regs = &frame;
 
 	if (p->p_emul != &emul_svr4) {
-		/* can't exit, because we need svr4_fasttrap_lock held. */
+		ksiginfo_t ksi;
+		memset(&ksi, 0, sizeof(ksi));
+		ksi.ksi_signo = SIGILL;
+		ksi.ksi_code = ILL_ILLTRP;
+		trapsignal(l, &ksi);
 		return;
 	}
 
@@ -524,19 +562,20 @@ svr4_fasttrap(struct trapframe frame)
 
 	case SVR4_TRAP_GETHRVTIME:
 		/*
-		 * This is like gethrvtime(3). returning the LWP's virtual
-		 * time expressed in nanoseconds. It is supposedly
-		 * guaranteed to be monotonically increasing, but for now
-		 * using the LWP's real time augmented with its current
-		 * runtime is the best we can do.
+		 * This is like gethrvtime(3). returning the LWP's (now:
+		 * proc's) virtual time expressed in nanoseconds. It is
+		 * supposedly guaranteed to be monotonically increasing, but
+		 * for now using the process's real time augmented with its
+		 * current runtime is the best we can do.
 		 */
-		microtime(&tv);
-		bintime2timeval(&l->l_rtime, &rtime);
-		bintime2timeval(&l->l_stime, &stime);
+		spc = &curcpu()->ci_schedstate;
 
-		tm = (rtime.tv_sec + tv.tv_sec - stime.tv_sec) * 1000000ull;
-		tm += rtime.tv_usec + tv.tv_usec;
-		tm -= stime.tv_usec;
+		microtime(&tv);
+
+		tm = (p->p_rtime.tv_sec + tv.tv_sec -
+		    spc->spc_runtime.tv_sec) * 1000000ull;
+		tm += p->p_rtime.tv_usec + tv.tv_usec;
+		tm -= spc->spc_runtime.tv_usec;
 		tm *= 1000u;
 		/* XXX: dsl - I would have expected the msb in %edx */
 		frame.tf_edx = tm & 0xffffffffu;
@@ -560,21 +599,4 @@ svr4_fasttrap(struct trapframe frame)
 		    frame.tf_eax);
 		break;
 	}
-}
-
-void
-svr4_md_init(void)
-{
-
-	svr4_fasttrap_vec = (void (*)(void))svr4_fasttrap;
-}
-
-void
-svr4_md_fini(void)
-{
-	extern krwlock_t svr4_fasttrap_lock;
-
-	rw_enter(&svr4_fasttrap_lock, RW_WRITER);
-	svr4_fasttrap_vec = (void (*)(void))nullop;
-	rw_exit(&svr4_fasttrap_lock);
 }

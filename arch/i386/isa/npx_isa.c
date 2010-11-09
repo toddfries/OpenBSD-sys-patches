@@ -1,4 +1,4 @@
-/*	$NetBSD: npx_isa.c,v 1.19 2008/04/11 20:42:34 cegger Exp $	*/
+/*	$NetBSD: npx_isa.c,v 1.15 2006/11/16 01:32:38 christos Exp $	*/
 
 /*-
  * Copyright (c) 1991 The Regents of the University of California.
@@ -67,7 +67,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: npx_isa.c,v 1.19 2008/04/11 20:42:34 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: npx_isa.c,v 1.15 2006/11/16 01:32:38 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -83,14 +83,15 @@ __KERNEL_RCSID(0, "$NetBSD: npx_isa.c,v 1.19 2008/04/11 20:42:34 cegger Exp $");
 
 #include <i386/isa/npxvar.h>
 
-int npx_isa_probe(device_t, struct cfdata *, void *);
-void npx_isa_attach(device_t, device_t, void *);
+int npx_isa_probe(struct device *, struct cfdata *, void *);
+void npx_isa_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(npx_isa, sizeof(struct npx_softc),
-    npx_isa_probe, npx_isa_attach, npxdetach, NULL);
+CFATTACH_DECL(npx_isa, sizeof(struct npx_softc),
+    npx_isa_probe, npx_isa_attach, NULL, NULL);
 
 int
-npx_isa_probe(device_t parent, struct cfdata *match, void *aux)
+npx_isa_probe(struct device *parent, struct cfdata *match,
+    void *aux)
 {
 	struct isa_attach_args *ia = aux;
 	bus_space_handle_t ioh;
@@ -136,22 +137,24 @@ npx_isa_probe(device_t parent, struct cfdata *match, void *aux)
 }
 
 void
-npx_isa_attach(device_t parent, device_t self, void *aux)
+npx_isa_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct npx_softc *sc = device_private(self);
+	struct npx_softc *sc = (void *)self;
 	struct isa_attach_args *ia = aux;
+
+	sc->sc_iot = ia->ia_iot;
 
 	aprint_naive("\n");
 	aprint_normal("\n");
 
-	sc->sc_dev = self;
+	if (bus_space_map(sc->sc_iot, 0xf0, 16, 0, &sc->sc_ioh)) {
+		panic("npxattach: unable to map I/O space");
+	}
+
 	sc->sc_type = (u_long) ia->ia_aux;
 
 	switch (sc->sc_type) {
 	case NPX_INTERRUPT:
-		sc->sc_iot = ia->ia_iot;
-		if (bus_space_map(sc->sc_iot, 0xf0, 16, 0, &sc->sc_ioh))
-			panic("%s: unable to map I/O space", __func__);
 		lcr0(rcr0() & ~CR0_NE);
 		sc->sc_ih = isa_intr_establish(ia->ia_ic, ia->ia_irq[0].ir_irq,
 		    IST_EDGE, IPL_NONE, (int (*)(void *))npxintr, 0);
@@ -159,13 +162,14 @@ npx_isa_attach(device_t parent, device_t self, void *aux)
 	case NPX_EXCEPTION:
 		/*FALLTHROUGH*/
 	case NPX_CPUID:
-		aprint_verbose_dev(sc->sc_dev, "%s using exception 16\n",
-		    sc->sc_type == NPX_CPUID ? "reported by CPUID;" : "");
+		aprint_verbose("%s:%s using exception 16\n",
+		    sc->sc_dev.dv_xname,
+		    sc->sc_type == NPX_CPUID ? " reported by CPUID;" : "");
 		sc->sc_type = NPX_EXCEPTION;
 		break;
 	case NPX_BROKEN:
-		aprint_error_dev(sc->sc_dev,
-		    "error reporting broken; not using\n");
+		aprint_error("%s: error reporting broken; not using\n",
+		    sc->sc_dev.dv_xname);
 		sc->sc_type = NPX_NONE;
 		return;
 	case NPX_NONE:
@@ -174,4 +178,3 @@ npx_isa_attach(device_t parent, device_t self, void *aux)
 
 	npxattach(sc);
 }
-

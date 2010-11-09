@@ -1,6 +1,6 @@
-#	$NetBSD: Makefile,v 1.21 2009/02/14 13:52:51 abs Exp $
+#	$NetBSD: Makefile,v 1.20 2005/12/11 12:19:08 christos Exp $
 
-.if ${MACHINE_ARCH} == sparc
+.if ${MACHINE} == sparc
 SUBDIR= boot bootxx bootblk ofwboot binstall
 .endif
 

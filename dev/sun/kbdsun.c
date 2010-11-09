@@ -1,4 +1,4 @@
-/*	$NetBSD: kbdsun.c,v 1.11 2008/03/29 19:15:36 tsutsui Exp $	*/
+/*	$NetBSD: kbdsun.c,v 1.10 2007/03/04 06:02:45 christos Exp $	*/
 /*	NetBSD: kbd.c,v 1.29 2001/11/13 06:54:32 lukem Exp	*/
 
 /*
@@ -47,7 +47,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kbdsun.c,v 1.11 2008/03/29 19:15:36 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kbdsun.c,v 1.10 2007/03/04 06:02:45 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -107,7 +107,8 @@ static void	kbd_sun_new_layout(struct kbd_sun_softc *);
  * Called with user context.
  */
 static int
-kbd_sun_open(struct kbd_softc *kbd)
+kbd_sun_open(kbd)
+	struct kbd_softc *kbd;
 {
 	struct kbd_sun_softc *k = (struct kbd_sun_softc *)kbd;
 	struct kbd_state *ks;
@@ -124,7 +125,7 @@ kbd_sun_open(struct kbd_softc *kbd)
 
 	/* open internal device */
 	if (k->k_deviopen)
-		(*k->k_deviopen)(k->k_kbd.k_dev, FREAD|FWRITE);
+		(*k->k_deviopen)((struct device *)k, FREAD|FWRITE);
 
 	s = spltty();
 
@@ -142,7 +143,7 @@ kbd_sun_open(struct kbd_softc *kbd)
 	}
 
 	if (error == EWOULDBLOCK || ks->kbd_id == 0) { /* no response */
-		log(LOG_ERR, "%s: reset failed\n", device_xname(kbd->k_dev));
+		log(LOG_ERR, "%s: reset failed\n", kbd->k_dev.dv_xname);
 
 		/*
 		 * Allow the open anyway (to keep getty happy)
@@ -171,7 +172,7 @@ kbd_sun_open(struct kbd_softc *kbd)
 		}
 		if (error == EWOULDBLOCK || ks->kbd_layout == 0xff) {
 			log(LOG_ERR, "%s: no response to get_layout\n",
-			    device_xname(kbd->k_dev));
+			    kbd->k_dev.dv_xname);
 			error = 0;
 			ks->kbd_layout = 0; /* US layout */
 		}
@@ -189,7 +190,8 @@ kbd_sun_open(struct kbd_softc *kbd)
 
 
 static int
-kbd_sun_close(struct kbd_softc *kbd)
+kbd_sun_close(kbd)
+	struct kbd_softc *kbd;
 {
 
 	return (0);		/* nothing to do so far */
@@ -202,7 +204,10 @@ kbd_sun_close(struct kbd_softc *kbd)
  * XXX: This is also exported to the fb driver (for bell).
  */
 static int
-kbd_sun_do_cmd(struct kbd_softc *kbd, int cmd, int isioctl)
+kbd_sun_do_cmd(kbd, cmd, isioctl)
+	struct kbd_softc *kbd;
+	int cmd;
+	int isioctl;
 {
 	struct kbd_sun_softc *k = (struct kbd_sun_softc *)kbd;
 	struct kbd_state *ks;
@@ -251,7 +256,10 @@ kbd_sun_do_cmd(struct kbd_softc *kbd, int cmd, int isioctl)
  * Take care about spl and call kbd_sun_set_leds.
  */
 static int
-kbd_sun_set_leds(struct kbd_softc *kbd, int leds, int isioctl)
+kbd_sun_set_leds(kbd, leds, isioctl)
+	struct kbd_softc *kbd;
+	int leds;
+	int isioctl;
 {
 	struct kbd_sun_softc *k = (struct kbd_sun_softc *)kbd;
 
@@ -277,7 +285,9 @@ kbd_sun_set_leds(struct kbd_softc *kbd, int leds, int isioctl)
  * by kbd_sun_iocsled and kbd_sun_input (via kbd_update_leds).
  */
 static void
-kbd_sun_set_leds1(struct kbd_softc *kbd, int new_leds)
+kbd_sun_set_leds1(kbd, new_leds)
+	struct kbd_softc *kbd;
+	int new_leds;
 {
 	struct kbd_sun_softc *k = (struct kbd_sun_softc *)kbd;
 	struct kbd_state *ks = &kbd->k_state;
@@ -308,18 +318,20 @@ kbd_sun_set_leds1(struct kbd_softc *kbd, int new_leds)
  * Called at spltty().
  */
 void
-kbd_sun_output(struct kbd_sun_softc *k, int c)
+kbd_sun_output(k, c)
+	struct kbd_sun_softc *k;
+	int c;	/* the data */
 {
 	int put;
 
 	put = k->k_tbput;
-	k->k_tbuf[put] = (uint8_t)c;
+	k->k_tbuf[put] = (u_char)c;
 	put = (put + 1) & KBD_TX_RING_MASK;
 
 	/* Would overrun if increment makes (put == get) */
 	if (put == k->k_tbget) {
 		log(LOG_WARNING, "%s: output overrun\n",
-		    device_xname(k->k_kbd.k_dev));
+		    k->k_kbd.k_dev.dv_xname);
 	} else {
 		/* OK, really increment. */
 		k->k_tbput = put;
@@ -332,7 +344,8 @@ kbd_sun_output(struct kbd_sun_softc *k, int c)
  * Wait for output to keyboard to finish.
  */
 static int
-kbd_sun_drain_tx(struct kbd_sun_softc *k)
+kbd_sun_drain_tx(k)
+	struct kbd_sun_softc *k;
 {
 	int error = 0, bail = 0;
 
@@ -341,8 +354,8 @@ kbd_sun_drain_tx(struct kbd_sun_softc *k)
 		error = tsleep(&k->k_txflags, PZERO | PCATCH, "kbdout", 1);
 		bail++;
 	}
-	if (bail == 1000)
-		error = EIO;
+	if (bail==1000)
+		error=EIO;
 	return (error);
 }
 
@@ -351,10 +364,11 @@ kbd_sun_drain_tx(struct kbd_sun_softc *k)
  * Called at spltty().
  */
 void
-kbd_sun_start_tx(struct kbd_sun_softc *k)
+kbd_sun_start_tx(k)
+	struct kbd_sun_softc *k;
 {
 	int get;
-	uint8_t c;
+	u_char c;
 
 	if (k->k_txflags & K_TXBUSY)
 		return;
@@ -387,7 +401,9 @@ kbd_sun_start_tx(struct kbd_sun_softc *k)
  * Called at spltty()
  */
 int
-kbd_sun_input(struct kbd_sun_softc *k, int code)
+kbd_sun_input(k, code)
+	struct kbd_sun_softc *k;
+	int code;
 {
 	struct kbd_softc *kbd = (struct kbd_softc *)k;
 
@@ -424,7 +440,7 @@ kbd_sun_input(struct kbd_sun_softc *k, int code)
 
 		case KBD_ERROR:
 			log(LOG_WARNING, "%s: received error indicator\n",
-			    device_xname(kbd->k_dev));
+			    kbd->k_dev.dv_xname);
 			return(-1);
 
 		case KBD_IDLE:
@@ -443,7 +459,8 @@ kbd_sun_input(struct kbd_sun_softc *k, int code)
  * Called at spltty().
  */
 static void
-kbd_sun_was_reset(struct kbd_sun_softc *k)
+kbd_sun_was_reset(k)
+	struct kbd_sun_softc *k;
 {
 	struct kbd_state *ks = &k->k_kbd.k_state;
 
@@ -479,7 +496,7 @@ kbd_sun_was_reset(struct kbd_sun_softc *k)
 		break;
 	default:
 		printf("%s: unknown keyboard type ID %u\n",
-		    device_xname(k->k_kbd.k_dev), (unsigned int)ks->kbd_id);
+			k->k_kbd.k_dev.dv_xname, (unsigned int)ks->kbd_id);
 	}
 
 	/* LEDs are off after reset. */
@@ -491,7 +508,8 @@ kbd_sun_was_reset(struct kbd_sun_softc *k)
  * Called at spltty().
  */
 static void
-kbd_sun_new_layout(struct kbd_sun_softc *k)
+kbd_sun_new_layout(k)
+	struct kbd_sun_softc *k;
 {
 	struct kbd_state *ks = &k->k_kbd.k_state;
 

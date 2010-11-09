@@ -1,4 +1,4 @@
-/*	$NetBSD: bootxx.c,v 1.5 2009/02/04 15:22:13 tsutsui Exp $	*/
+/*	$NetBSD: bootxx.c,v 1.2 2006/08/26 14:13:40 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 2004, 2005 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -82,8 +89,8 @@ const char *boottab[] = {
 	0		/* terminate */
 };
 
-int __dk_unit, __dk_type, __spb;
-bool (*fd_position)(uint32_t, uint32_t *, int *);
+int __dk_unit, __dk_type;
+boolean_t (*fd_position)(uint32_t, uint32_t *, int *);
 
 int
 main(void)
@@ -106,13 +113,9 @@ main(void)
 
 	if (__dk_type == NVSRAM_BOOTDEV_FLOPPYDISK) {
 		fd_position = blk_to_2d_position;
-		if (fd_format == FD_FORMAT_2D) {
-			fd_position = blk_to_2d_position;
-			__spb = 2;		/* 256bytes/sector */
-		} else {
+		if (fd_format == FD_FORMAT_2HD) {
 			fd_position = blk_to_2hd_position;
 			__dk_unit |= 0x1000000;		/* | 2HD flag */
-			__spb = 1;
 		}
 	}
 #else
@@ -243,7 +246,7 @@ int
 dk_read(int sector, int count, void *buf)
 {
 #ifdef _STANDALONE
-	int cnt;
+	int i, cnt;
 	uint32_t pos;
 	uint8_t *p = buf;
 
@@ -251,16 +254,10 @@ dk_read(int sector, int count, void *buf)
 		if ((ROM_DK_READ(__dk_unit, sector, count, p) & 0x7f) != 0)
 			return 1;
 	} else {	/* FD */
-		while (count > 0) {
-			fd_position(sector, &pos, &cnt);
-			if (cnt > count)
-				cnt = count;
-			if ((ROM_FD_READ(__dk_unit, pos, cnt * __spb, p)
-			    & 0x7f) != 0)
+		for (i = 0; i < count; i++, p += 512) {
+			fd_position(sector + i, &pos, &cnt);
+			if ((ROM_FD_READ(__dk_unit, pos, cnt, p) & 0x7f) != 0)
 				return 1;
-			count -= cnt;
-			sector += cnt;
-			p += 512 * cnt;
 		}
 	}
 #else

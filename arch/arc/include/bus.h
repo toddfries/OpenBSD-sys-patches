@@ -1,4 +1,4 @@
-/*	$NetBSD: bus.h,v 1.26 2008/04/28 20:23:13 martin Exp $	*/
+/*	$NetBSD: bus.h,v 1.23 2006/05/26 13:23:34 tsutsui Exp $	*/
 /*	NetBSD: bus.h,v 1.27 2000/03/15 16:44:50 drochner Exp 	*/
 /*	$OpenBSD: bus.h,v 1.15 1999/08/11 23:15:21 niklas Exp $	*/
 
@@ -18,6 +18,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -168,7 +175,7 @@ struct arc_bus_space {
 void	arc_bus_space_malloc_set_safe(void);
 void	arc_bus_space_init(bus_space_tag_t, const char *,
 	    paddr_t, vaddr_t, bus_addr_t, bus_size_t);
-void	arc_bus_space_init_extent(bus_space_tag_t, void *, size_t);
+void	arc_bus_space_init_extent(bus_space_tag_t, caddr_t, size_t);
 void	arc_bus_space_set_aligned_stride(bus_space_tag_t, unsigned int);
 void	arc_sparse_bus_space_init(bus_space_tag_t, const char *,
 	    paddr_t, bus_addr_t, bus_size_t);
@@ -759,8 +766,8 @@ struct arc_bus_dma_tag {
 		    bus_size_t, bus_dma_segment_t *, int, int *, int);
 	void	(*_dmamem_free)(bus_dma_tag_t, bus_dma_segment_t *, int);
 	int	(*_dmamem_map)(bus_dma_tag_t, bus_dma_segment_t *,
-		    int, size_t, void **, int);
-	void	(*_dmamem_unmap)(bus_dma_tag_t, void *, size_t);
+		    int, size_t, caddr_t *, int);
+	void	(*_dmamem_unmap)(bus_dma_tag_t, caddr_t, size_t);
 	paddr_t	(*_dmamem_mmap)(bus_dma_tag_t, bus_dma_segment_t *,
 		    int, off_t, int, int);
 };
@@ -791,9 +798,6 @@ struct arc_bus_dma_tag {
 	(*(t)->_dmamem_unmap)((t), (k), (s))
 #define bus_dmamem_mmap(t, sg, n, o, p, f)			\
 	(*(t)->_dmamem_mmap)((t), (sg), (n), (o), (p), (f))
-
-#define bus_dmatag_subregion(t, mna, mxa, nt, f) EOPNOTSUPP
-#define bus_dmatag_destroy(t)
 
 /*
  *	bus_dmamap_t
@@ -851,8 +855,8 @@ int	_bus_dmamem_alloc_range(bus_dma_tag_t tag, bus_size_t size,
 void	_bus_dmamem_free(bus_dma_tag_t tag, bus_dma_segment_t *segs,
 	    int nsegs);
 int	_bus_dmamem_map(bus_dma_tag_t tag, bus_dma_segment_t *segs,
-	    int nsegs, size_t size, void **kvap, int flags);
-void	_bus_dmamem_unmap(bus_dma_tag_t tag, void *kva,
+	    int nsegs, size_t size, caddr_t *kvap, int flags);
+void	_bus_dmamem_unmap(bus_dma_tag_t tag, caddr_t kva,
 	    size_t size);
 paddr_t	_bus_dmamem_mmap(bus_dma_tag_t tag, bus_dma_segment_t *segs,
 	    int nsegs, off_t off, int prot, int flags);

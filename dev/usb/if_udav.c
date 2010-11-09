@@ -1,4 +1,4 @@
-/*	$NetBSD: if_udav.c,v 1.24 2008/05/24 16:40:58 cube Exp $	*/
+/*	$NetBSD: if_udav.c,v 1.23 2008/04/05 16:35:35 cegger Exp $	*/
 /*	$nabe: if_udav.c,v 1.3 2003/08/21 16:57:19 nabe Exp $	*/
 /*
  * Copyright (c) 2003
@@ -44,7 +44,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_udav.c,v 1.24 2008/05/24 16:40:58 cube Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_udav.c,v 1.23 2008/04/05 16:35:35 cegger Exp $");
 
 #include "opt_inet.h"
 #include "bpfilter.h"
@@ -182,22 +182,21 @@ USB_ATTACH(udav)
 	usb_interface_descriptor_t *id;
 	usb_endpoint_descriptor_t *ed;
 	char *devinfop;
+	const char *devname = USBDEVNAME(sc->sc_dev);
 	struct ifnet *ifp;
 	struct mii_data *mii;
 	u_char eaddr[ETHER_ADDR_LEN];
 	int i, s;
 
-	sc->sc_dev = self;
-
 	devinfop = usbd_devinfo_alloc(dev, 0);
 	USB_ATTACH_SETUP;
-	aprint_normal_dev(self, "%s\n", devinfop);
+	printf("%s: %s\n", devname, devinfop);
 	usbd_devinfo_free(devinfop);
 
 	/* Move the device into the configured state. */
 	err = usbd_set_config_no(dev, UDAV_CONFIG_NO, 1); /* idx 0 */
 	if (err) {
-		aprint_error_dev(self, "setting config no failed\n");
+		printf("%s: setting config no failed\n", devname);
 		goto bad;
 	}
 
@@ -208,7 +207,7 @@ USB_ATTACH(udav)
 	/* get control interface */
 	err = usbd_device2interface_handle(dev, UDAV_IFACE_INDEX, &iface);
 	if (err) {
-		aprint_error_dev(self, "failed to get interface, err=%s\n",
+		printf("%s: failed to get interface, err=%s\n", devname,
 		       usbd_errstr(err));
 		goto bad;
 	}
@@ -225,7 +224,7 @@ USB_ATTACH(udav)
 	for (i = 0; i < id->bNumEndpoints; i++) {
 		ed = usbd_interface2endpoint_descriptor(sc->sc_ctl_iface, i);
 		if (ed == NULL) {
-			aprint_error_dev(self, "couldn't get endpoint %d\n", i);
+			printf("%s: couldn't get endpoint %d\n", devname, i);
 			goto bad;
 		}
 		if ((ed->bmAttributes & UE_XFERTYPE) == UE_BULK &&
@@ -241,7 +240,7 @@ USB_ATTACH(udav)
 
 	if (sc->sc_bulkin_no == -1 || sc->sc_bulkout_no == -1 ||
 	    sc->sc_intrin_no == -1) {
-		aprint_error_dev(self, "missing endpoint\n");
+		printf("%s: missing endpoint\n", devname);
 		goto bad;
 	}
 
@@ -253,19 +252,19 @@ USB_ATTACH(udav)
 	/* Get Ethernet Address */
 	err = udav_csr_read(sc, UDAV_PAR, (void *)eaddr, ETHER_ADDR_LEN);
 	if (err) {
-		aprint_error_dev(self, "read MAC address failed\n");
+		printf("%s: read MAC address failed\n", devname);
 		splx(s);
 		goto bad;
 	}
 
 	/* Print Ethernet Address */
-	aprint_normal_dev(self, "Ethernet address %s\n", ether_sprintf(eaddr));
+	printf("%s: Ethernet address %s\n", devname, ether_sprintf(eaddr));
 
 	/* initialize interface information */
 	ifp = GET_IFP(sc);
 	ifp->if_softc = sc;
 	ifp->if_mtu = ETHERMTU;
-	strncpy(ifp->if_xname, device_xname(self), IFNAMSIZ);
+	strncpy(ifp->if_xname, devname, IFNAMSIZ);
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
 	ifp->if_start = udav_start;
 	ifp->if_ioctl = udav_ioctl;
@@ -299,8 +298,7 @@ USB_ATTACH(udav)
 	Ether_ifattach(ifp, eaddr);
 
 #if NRND > 0
-	rnd_attach_source(&sc->rnd_source, device_xname(self),
-	    RND_TYPE_NET, 0);
+	rnd_attach_source(&sc->rnd_source, devname, RND_TYPE_NET, 0);
 #endif
 
 	usb_callout_init(sc->sc_stat_ch);
@@ -354,11 +352,14 @@ USB_DETACH(udav)
 
 #ifdef DIAGNOSTIC
 	if (sc->sc_pipe_tx != NULL)
-		aprint_debug_dev(self, "detach has active tx endpoint.\n");
+		printf("%s: detach has active tx endpoint.\n",
+		       USBDEVNAME(sc->sc_dev));
 	if (sc->sc_pipe_rx != NULL)
-		aprint_debug_dev(self, "detach has active rx endpoint.\n");
+		printf("%s: detach has active rx endpoint.\n",
+		       USBDEVNAME(sc->sc_dev));
 	if (sc->sc_pipe_intr != NULL)
-		aprint_debug_dev(self, "detach has active intr endpoint.\n");
+		printf("%s: detach has active intr endpoint.\n",
+		       USBDEVNAME(sc->sc_dev));
 #endif
 	sc->sc_attached = 0;
 
@@ -729,7 +730,7 @@ udav_reset(struct udav_softc *sc)
 int
 udav_activate(device_ptr_t self, enum devact act)
 {
-	struct udav_softc *sc = device_private(self);
+	struct udav_softc *sc = (struct udav_softc *)self;
 
 	DPRINTF(("%s: %s: enter, act=%d\n", USBDEVNAME(sc->sc_dev),
 		 __func__, act));

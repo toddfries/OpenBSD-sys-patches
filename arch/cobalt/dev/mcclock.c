@@ -1,4 +1,4 @@
-/*	$NetBSD: mcclock.c,v 1.4 2008/03/29 05:42:45 tsutsui Exp $	*/
+/*	$NetBSD: mcclock.c,v 1.1 2006/04/15 13:33:05 tsutsui Exp $	*/
 
 /*
  * Copyright (c) 1995, 1996 Carnegie-Mellon University.
@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mcclock.c,v 1.4 2008/03/29 05:42:45 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mcclock.c,v 1.1 2006/04/15 13:33:05 tsutsui Exp $");
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
 
@@ -46,10 +46,10 @@ __KERNEL_RCSID(0, "$NetBSD: mcclock.c,v 1.4 2008/03/29 05:42:45 tsutsui Exp $");
 
 #define	MCCLOCK_NPORTS	2
 
-static int mcclock_match(device_t, cfdata_t, void *);
-static void mcclock_attach(device_t, device_t, void *);
+static int mcclock_match(struct device *, struct cfdata *, void *);
+static void mcclock_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(mcclock, sizeof (struct mc146818_softc),
+CFATTACH_DECL(mcclock, sizeof (struct mc146818_softc),
     mcclock_match, mcclock_attach, NULL, NULL);
 
 static void mcclock_write(struct mc146818_softc *, u_int, u_int);
@@ -57,7 +57,7 @@ static u_int mcclock_read(struct mc146818_softc *, u_int);
 
 
 static int
-mcclock_match(device_t parent, cfdata_t cf, void *aux)
+mcclock_match(struct device *parent, struct cfdata *match, void *aux)
 {
 	static int mcclock_found;
 
@@ -70,12 +70,11 @@ mcclock_match(device_t parent, cfdata_t cf, void *aux)
 }
 
 static void
-mcclock_attach(device_t parent, device_t self, void *aux)
+mcclock_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct mc146818_softc *sc = device_private(self);
+	struct mc146818_softc *sc = (void *)self;
 	struct mainbus_attach_args *ma = aux;
 
-	sc->sc_dev = self;
 	sc->sc_bst = ma->ma_iot;
 	if (bus_space_map(sc->sc_bst, ma->ma_addr, MCCLOCK_NPORTS,
 	    0, &sc->sc_bsh)) {
@@ -89,9 +88,11 @@ mcclock_attach(device_t parent, device_t self, void *aux)
 	sc->sc_flag = MC146818_BCD;
 	mc146818_attach(sc);
 
-	aprint_normal("\n");
+	printf("\n");
 
 	(*sc->sc_mcwrite)(sc, MC_REGB, MC_REGB_24HR);
+
+	todr_attach(&sc->sc_handle);
 }
 
 static void

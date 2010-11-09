@@ -1,4 +1,4 @@
-/*	$NetBSD: if_le.c,v 1.12 2008/04/28 20:23:28 martin Exp $	*/
+/*	$NetBSD: if_le.c,v 1.9 2005/12/24 20:07:19 perry Exp $	*/
 
 /*-
  * Copyright (c) 1996, 2000 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_le.c,v 1.12 2008/04/28 20:23:28 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_le.c,v 1.9 2005/12/24 20:07:19 perry Exp $");
 
 #include "opt_inet.h"
 #include "bpfilter.h"
@@ -81,10 +88,10 @@ struct	le_softc {
 	struct evcnt		sc_intrcnt;	/* Interrupt event counter */
 };
 
-static int	le_match(device_t, cfdata_t, void *);
-static void	le_attach(device_t, device_t, void *);
+static int	le_match __P((struct device *, struct cfdata *, void *));
+static void	le_attach __P((struct device *, struct device *, void *));
 
-CFATTACH_DECL_NEW(le, sizeof(struct le_softc),
+CFATTACH_DECL(le, sizeof(struct le_softc),
     le_match, le_attach, NULL, NULL);
 
 static int le_attached;
@@ -101,13 +108,15 @@ static int le_attached;
 #define hide		static
 #endif
 
-int le_intr(void *);
+int le_intr  __P((void *));
 
-hide void lewrcsr(struct lance_softc *, uint16_t, uint16_t);
-hide uint16_t lerdcsr(struct lance_softc *, uint16_t);  
+hide void lewrcsr __P((struct lance_softc *, u_int16_t, u_int16_t));
+hide u_int16_t lerdcsr __P((struct lance_softc *, u_int16_t));  
 
 hide void
-lewrcsr(struct lance_softc *sc, uint16_t port, uint16_t val)
+lewrcsr(sc, port, val)
+	struct lance_softc *sc;
+	u_int16_t port, val;
 {
 	struct le_softc *lesc = (struct le_softc *)sc;
 
@@ -115,8 +124,10 @@ lewrcsr(struct lance_softc *sc, uint16_t port, uint16_t val)
 	bus_space_write_2(lesc->sc_bustag, lesc->sc_reg, LEREG1_RDP, val);
 }
 
-hide uint16_t
-lerdcsr(struct lance_softc *sc, uint16_t port)
+hide u_int16_t
+lerdcsr(sc, port)
+	struct lance_softc *sc;
+	u_int16_t port;
 {
 	struct le_softc *lesc = (struct le_softc *)sc;
 
@@ -125,7 +136,10 @@ lerdcsr(struct lance_softc *sc, uint16_t port)
 } 
 
 int
-le_match(device_t parent, cfdata_t cf, void *aux)
+le_match(parent, cf, aux)
+	struct device *parent;
+	struct cfdata *cf;
+	void *aux;
 {
 	struct confargs *ca = aux;
 	int addr;
@@ -146,21 +160,23 @@ le_match(device_t parent, cfdata_t cf, void *aux)
 #define	LE_MEMSIZE	(32*1024)
 
 void
-le_attach(device_t parent, device_t self, void *aux)
+le_attach(parent, self, aux)
+	struct device *parent, *self;
+	void *aux;
 {
-	struct le_softc *lesc = device_private(self);
+	struct le_softc *lesc = (struct le_softc *)self;
 	struct lance_softc *sc = &lesc->sc_am7990.lsc;
 	struct confargs *ca = aux;
 
 	bus_dma_tag_t dmat;
 	bus_dma_segment_t seg;
 	int rseg;
-	uint8_t *id;
-	int i;
-	void *kvaddr;
 
-	sc->sc_dev = self;
-	id = (uint8_t *)ETHER_ID;
+	u_char *id;
+	int i;
+	caddr_t kvaddr;
+
+	id = (u_char *)ETHER_ID;
 	lesc->sc_bustag = ca->ca_bustag;
 	dmat = lesc->sc_dmatag = ca->ca_dmatag;
 
@@ -168,7 +184,7 @@ le_attach(device_t parent, device_t self, void *aux)
 			  8,	/* size */
 			  BUS_SPACE_MAP_LINEAR,
 			  &lesc->sc_reg) != 0) {
-		aprint_error(": cannot map registers\n");
+		printf(": cannot map registers\n");
 		return;
 	}
 
@@ -177,37 +193,37 @@ le_attach(device_t parent, device_t self, void *aux)
 	 */
 	if (bus_dmamem_alloc(dmat, LE_MEMSIZE, 0, 0, &seg, 1,
 			     &rseg, BUS_DMA_NOWAIT)) {
-		aprint_error(": can't allocate DMA area\n");
+		printf(": can't allocate DMA area\n");
 		return;
 	}
 	/* Map pages into kernel memory */
 	if (bus_dmamem_map(dmat, &seg, rseg, LE_MEMSIZE,
 	    &kvaddr, BUS_DMA_NOWAIT|BUS_DMA_COHERENT)) {
-		aprint_error(": can't map DMA area\n");
+		printf(": can't map DMA area\n");
 		bus_dmamem_free(dmat, &seg, rseg);
 		return;
 	}
 	/* Build DMA map so we can get physical address */
 	if (bus_dmamap_create(dmat, LE_MEMSIZE, 1, LE_MEMSIZE,
 			      0, BUS_DMA_NOWAIT, &lesc->sc_dmamap)) {
-		aprint_error(": can't create DMA map\n");
+		printf(": can't create DMA map\n");
 		goto bad;
 	}
 	if (bus_dmamap_load(dmat, lesc->sc_dmamap, kvaddr, LE_MEMSIZE,
 			    NULL, BUS_DMA_NOWAIT)) {
-		aprint_error(": can't load DMA map\n");
+		printf(": can't load DMA map\n");
 		goto bad;
 	}
 
 	sc->sc_memsize = LE_MEMSIZE;	/* 16K Buffer space*/
-	sc->sc_mem  = (void *)MIPS_PHYS_TO_KSEG1(kvaddr);
+	sc->sc_mem  = (void *) MIPS_PHYS_TO_KSEG1(kvaddr);
 	sc->sc_addr = lesc->sc_dmamap->dm_segs[0].ds_addr;
 
 	sc->sc_conf3 = LE_C3_BSWP;
 
 	/* Copy Ethernet hardware address from NVRAM */
-	for (i = 0; i < ETHER_ADDR_LEN; i++)
-		sc->sc_enaddr[i] = id[i * 4 + 3];	/* XXX */
+	for (i=0; i < 6; i++)
+		sc->sc_enaddr[i] = id[i*4+3];	/* XXX */
 
 	sc->sc_copytodesc = lance_copytobuf_contig;
 	sc->sc_copyfromdesc = lance_copyfrombuf_contig;
@@ -220,7 +236,7 @@ le_attach(device_t parent, device_t self, void *aux)
 	sc->sc_hwinit = NULL;
 
 	evcnt_attach_dynamic(&lesc->sc_intrcnt, EVCNT_TYPE_INTR, NULL,
-			     device_xname(self), "intr");
+			     self->dv_xname, "intr");
 	bus_intr_establish(lesc->sc_bustag, SYS_INTR_ETHER, 0, 0,
 			   le_intr, lesc);
 
@@ -233,7 +249,8 @@ bad:
 }
 
 int
-le_intr(void *arg)
+le_intr(arg)
+	void *arg;
 {
 	struct le_softc *lesc = arg;
 

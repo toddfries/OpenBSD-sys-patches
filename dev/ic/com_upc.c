@@ -1,4 +1,4 @@
-/* $NetBSD: com_upc.c,v 1.11 2009/01/25 14:34:14 bjh21 Exp $ */
+/* $NetBSD: com_upc.c,v 1.9 2007/10/19 11:59:50 ad Exp $ */
 /*-
  * Copyright (c) 2000 Ben Harris
  * All rights reserved.
@@ -28,7 +28,7 @@
 /* This file is part of NetBSD/arm26 -- a port of NetBSD to ARM2/3 machines. */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: com_upc.c,v 1.11 2009/01/25 14:34:14 bjh21 Exp $");
+__KERNEL_RCSID(0, "$NetBSD: com_upc.c,v 1.9 2007/10/19 11:59:50 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/device.h>
@@ -41,27 +41,26 @@ __KERNEL_RCSID(0, "$NetBSD: com_upc.c,v 1.11 2009/01/25 14:34:14 bjh21 Exp $");
 #include <dev/ic/comvar.h>
 #include <dev/ic/upcvar.h>
 
-static int com_upc_match(device_t, cfdata_t , void *);
-static void com_upc_attach(device_t, device_t, void *);
+static int com_upc_match(struct device *, struct cfdata *, void *);
+static void com_upc_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(com_upc, sizeof(struct com_softc),
+CFATTACH_DECL(com_upc, sizeof(struct com_softc),
     com_upc_match, com_upc_attach, NULL, NULL);
 
 static int
-com_upc_match(device_t parent, cfdata_t cf, void *aux)
+com_upc_match(struct device *parent, struct cfdata *cf, void *aux)
 {
-	struct upc_attach_args *ua = aux;
 
-	return !strcmp(ua->ua_devtype, "com");
+	/* upc_submatch does it all anyway */
+	return 1;
 }
 
 static void
-com_upc_attach(device_t parent, device_t self, void *aux)
+com_upc_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct com_softc *sc = device_private(self);
+	struct com_softc *sc = (struct com_softc *)self;
 	struct upc_attach_args *ua = aux;
 
-	sc->sc_dev = self;
 	sc->sc_frequency = COM_FREQ;
 
 	COM_INIT_REGS(sc->sc_regs, ua->ua_iot, ua->ua_ioh, ua->ua_offset);

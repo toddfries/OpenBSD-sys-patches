@@ -1,7 +1,7 @@
 /******************************************************************************
  *
  * Name: acdebug.h - ACPI/AML debugger
- *       $Revision: 1.4 $
+ *       xRevision: 1.81 $
  *
  *****************************************************************************/
 
@@ -9,7 +9,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2008, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2006, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -323,12 +323,6 @@ AcpiDbCreateExecutionThreads (
     char                    *NumLoopsArg,
     char                    *MethodNameArg);
 
-#ifdef ACPI_DBG_TRACK_ALLOCATIONS
-UINT32
-AcpiDbGetCacheInfo (
-    ACPI_MEMORY_LIST        *Cache);
-#endif
-
 
 /*
  * dbfileio - Debugger file I/O commands
@@ -428,10 +422,5 @@ AcpiDbPrepNamestring (
 ACPI_NAMESPACE_NODE *
 AcpiDbLocalNsLookup (
     char                    *Name);
-
-void
-AcpiDbUInt32ToHexString (
-    UINT32                  Value,
-    char                    *Buffer);
 
 #endif  /* __ACDEBUG_H__ */

@@ -1,4 +1,4 @@
-/*	$NetBSD: pmap.h,v 1.76 2008/12/09 20:45:46 pooka Exp $	   */
+/*	$NetBSD: pmap.h,v 1.68 2006/07/08 00:26:21 matt Exp $	   */
 
 /* 
  * Copyright (c) 1991 Regents of the University of California.
@@ -81,8 +81,6 @@
 #ifndef PMAP_H
 #define PMAP_H
 
-#include <sys/simplelock.h>
-
 #include <machine/pte.h>
 #include <machine/mtpr.h>
 #include <machine/pcb.h>
@@ -94,21 +92,30 @@
 #define LTOHPN		(1 << LTOHPS)
 
 /*
+ * Link struct if more than one process share pmap (like vfork).
+ * This is rarely used.
+ */
+struct pm_share {
+	struct pm_share	*ps_next;
+	struct pcb	*ps_pcb;
+};
+
+/*
  * Pmap structure
  *  pm_stack holds lowest allocated memory for the process stack.
  */
 
-struct pmap {
+typedef struct pmap {
 	struct pte	*pm_p1ap;	/* Base of alloced p1 pte space */
 	int		 pm_count;	/* reference count */
-	struct pcb	*pm_pcbs;	/* PCBs using this pmap */
+	struct pm_share	*pm_share;	/* PCBs using this pmap */
 	struct pte	*pm_p0br;	/* page 0 base register */
 	long		 pm_p0lr;	/* page 0 length register */
 	struct pte	*pm_p1br;	/* page 1 base register */
 	long		 pm_p1lr;	/* page 1 length register */
 	struct simplelock pm_lock;	/* Lock entry in MP environment */
 	struct pmap_statistics	 pm_stats;	/* Some statistics */
-};
+} *pmap_t;
 
 /*
  * For each struct vm_page, there is a list of all currently valid virtual
@@ -133,12 +140,19 @@ extern	struct  pv_entry *pv_table;
 	ptr = avail_start + KERNBASE;	\
 	avail_start += (count) * VAX_NBPG;
 
+#ifdef	_KERNEL
+
+extern	struct pmap kernel_pmap_store;
+
+#define pmap_kernel()			(&kernel_pmap_store)
+
+#endif	/* _KERNEL */
+
 
 /*
  * Real nice (fast) routines to get the virtual address of a physical page
  * (and vice versa).
  */
-#define	PMAP_VTOPHYS(va)	((va) & ~KERNBASE)
 #define PMAP_MAP_POOLPAGE(pa)	((pa) | KERNBASE)
 #define PMAP_UNMAP_POOLPAGE(va) ((va) & ~KERNBASE)
 
@@ -147,25 +161,24 @@ extern	struct  pv_entry *pv_table;
 /*
  * This is the by far most used pmap routine. Make it inline.
  */
-__inline static bool
+__inline static boolean_t
 pmap_extract(pmap_t pmap, vaddr_t va, paddr_t *pap)
 {
+	paddr_t pa = 0;
 	int	*pte, sva;
 
 	if (va & KERNBASE) {
-		paddr_t pa;
-
 		pa = kvtophys(va); /* Is 0 if not mapped */
 		if (pap)
 			*pap = pa;
 		if (pa)
-			return (true);
-		return (false);
+			return (TRUE);
+		return (FALSE);
 	}
 
 	sva = PG_PFNUM(va);
 	if (va < 0x40000000) {
-		if (sva >= (pmap->pm_p0lr & ~AST_MASK))
+		if (sva > (pmap->pm_p0lr & ~AST_MASK))
 			goto fail;
 		pte = (int *)pmap->pm_p0br;
 	} else {
@@ -173,41 +186,37 @@ pmap_extract(pmap_t pmap, vaddr_t va, paddr_t *pap)
 			goto fail;
 		pte = (int *)pmap->pm_p1br;
 	}
-	/*
-	 * Since the PTE tables are sparsely allocated, make sure the page
-	 * table page actually exists before deferencing the pte itself.
-	 */
-	if (kvtopte(&pte[sva])->pg_v && (pte[sva] & PG_FRAME)) {
+	if (kvtopte(&pte[sva])->pg_pfn) {
 		if (pap)
 			*pap = (pte[sva] & PG_FRAME) << VAX_PGSHIFT;
-		return (true);
+		return (TRUE);
 	}
   fail:
 	if (pap)
 		*pap = 0;
-	return (false);
+	return (FALSE);
 }
 
-bool pmap_clear_modify_long(struct pv_entry *);
-bool pmap_clear_reference_long(struct pv_entry *);
-bool pmap_is_modified_long(struct pv_entry *);
+boolean_t pmap_clear_modify_long(struct pv_entry *);
+boolean_t pmap_clear_reference_long(struct pv_entry *);
+boolean_t pmap_is_modified_long(struct pv_entry *);
 void pmap_page_protect_long(struct pv_entry *, vm_prot_t);
 void pmap_protect_long(pmap_t, vaddr_t, vaddr_t, vm_prot_t);
 
-__inline static bool
+__inline static boolean_t
 pmap_is_referenced(struct vm_page *pg)
 {
 	struct pv_entry *pv = pv_table + (VM_PAGE_TO_PHYS(pg) >> PGSHIFT);
-	bool rv = (pv->pv_attr & PG_V) != 0;
+	boolean_t rv = (pv->pv_attr & PG_V) != 0;
 
 	return rv;
 }
 
-__inline static bool
+__inline static boolean_t
 pmap_clear_reference(struct vm_page *pg)
 {
 	struct pv_entry *pv = pv_table + (VM_PAGE_TO_PHYS(pg) >> PGSHIFT);
-	bool rv = (pv->pv_attr & PG_V) != 0;
+	boolean_t rv = (pv->pv_attr & PG_V) != 0;
 
 	pv->pv_attr &= ~PG_V;
 	if (pv->pv_pmap != NULL || pv->pv_next != NULL)
@@ -215,11 +224,11 @@ pmap_clear_reference(struct vm_page *pg)
 	return rv;
 }
 
-__inline static bool
+__inline static boolean_t
 pmap_clear_modify(struct vm_page *pg)
 {
 	struct  pv_entry *pv = pv_table + (VM_PAGE_TO_PHYS(pg) >> PGSHIFT);
-	bool rv = (pv->pv_attr & PG_M) != 0;
+	boolean_t rv = (pv->pv_attr & PG_M) != 0;
 
 	pv->pv_attr &= ~PG_M;
 	if (pv->pv_pmap != NULL || pv->pv_next != NULL)
@@ -227,7 +236,7 @@ pmap_clear_modify(struct vm_page *pg)
 	return rv;
 }
 
-__inline static bool
+__inline static boolean_t
 pmap_is_modified(struct vm_page *pg)
 {
 	struct pv_entry *pv = pv_table + (VM_PAGE_TO_PHYS(pg) >> PGSHIFT);
@@ -285,7 +294,7 @@ pmap_remove_all(struct pmap *pmap)
 	    : "r0","r1","r2","r3","r4","r5");
 
 /* Prototypes */
-void	pmap_bootstrap(void);
-vaddr_t pmap_map(vaddr_t, vaddr_t, vaddr_t, int);
+void	pmap_bootstrap __P((void));
+vaddr_t pmap_map __P((vaddr_t, vaddr_t, vaddr_t, int));
 
 #endif /* PMAP_H */

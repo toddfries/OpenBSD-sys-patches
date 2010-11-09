@@ -1,7 +1,7 @@
-/*	$NetBSD: ahareg.h,v 1.15 2008/05/10 11:52:20 martin Exp $	*/
+/*	$NetBSD: ahareg.h,v 1.12 2005/12/11 12:21:25 christos Exp $	*/
 
 /*-
- * Copyright (c) 1997-1999 The NetBSD Foundation, Inc.
+ * Copyright (c) 1997-99 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -76,7 +83,6 @@ typedef u_int8_t physlen[3];
 #define AHA_STAT_IDLE		0x10	/* Host Adapter Idle */
 #define AHA_STAT_CDF		0x08	/* cmd/data out port full */
 #define AHA_STAT_DF		0x04	/* Data in port full */
-#define AHA_STAT_RSVD		0x02	/* Unused */
 #define AHA_STAT_INVDCMD	0x01	/* Invalid command */
 
 /*
@@ -106,7 +112,6 @@ typedef u_int8_t physlen[3];
  * AHA_INTR bits
  */
 #define AHA_INTR_ANYINTR	0x80	/* Any interrupt */
-#define AHA_INTR_RSVD		0x70	/* unused bits */
 #define AHA_INTR_SCRD		0x08	/* SCSI reset detected */
 #define AHA_INTR_HACC		0x04	/* Command complete */
 #define AHA_INTR_MBOA		0x02	/* MBX out empty */

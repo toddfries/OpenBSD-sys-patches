@@ -1,4 +1,4 @@
-/*	$NetBSD: disksubr.c,v 1.33 2008/01/02 11:48:32 ad Exp $	*/
+/*	$NetBSD: disksubr.c,v 1.27 2006/11/25 11:59:58 scw Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1988 Regents of the University of California.
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: disksubr.c,v 1.33 2008/01/02 11:48:32 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: disksubr.c,v 1.27 2006/11/25 11:59:58 scw Exp $");
 
 #include "opt_compat_netbsd.h"
 
@@ -108,8 +108,7 @@ readdisklabel(dev_t dev, void (*strat)(struct buf *),
 		goto dodospart;
 	}
 	for (dlp = (struct disklabel *)bp->b_data;
-	     dlp <= (struct disklabel *)
-		((char *)bp->b_data + labelsz - sizeof(*dlp));
+	     dlp <= (struct disklabel *)(bp->b_data + labelsz - sizeof(*dlp));
 	     dlp = (struct disklabel *)((uint8_t *)dlp + sizeof(long))) {
 		if (dlp->d_magic != DISKMAGIC || dlp->d_magic2 != DISKMAGIC) {
 			if (msg == NULL)
@@ -138,7 +137,7 @@ dodospart:
 	labelsz = howmany(sizeof(struct cpu_disklabel),
 			  lp->d_secsize) * lp->d_secsize;
 	bp->b_bcount = labelsz;	/* to support < 512B/sector disks */
-	bp->b_oflags &= ~(BO_DONE);
+	bp->b_flags &= ~(B_DONE);
 	(*strat)(bp);
 
 	/* if successful, wander through Human68k partition table */
@@ -153,10 +152,10 @@ dodospart:
 
 	/* XXX how do we check veracity/bounds of this? */
 	if (dp)
-		memcpy(dp, (char *)bp->b_data + sizeof(*dp) /*DOSPARTOFF*/,
+		memcpy(dp, bp->b_data + sizeof(*dp) /*DOSPARTOFF*/,
 		    NDOSPART * sizeof(*dp));
 	else
-		dp = (void *)((char *)bp->b_data + sizeof(*dp) /*DOSPARTOFF*/);
+		dp = (void*) (bp->b_data + sizeof(*dp) /*DOSPARTOFF*/);
 
 	/* if BSD disklabel does not exist, fall back to Human68k partition */
 	if (msg != NULL) {
@@ -213,7 +212,7 @@ dobadsect:
 		i = 0;
 		do {
 			/* read a bad sector table */
-			bp->b_oflags &= ~(BO_DONE);
+			bp->b_flags &= ~(B_DONE);
 			bp->b_flags |= B_READ;
 			bp->b_blkno = lp->d_secperunit - lp->d_nsectors + i;
 			if (lp->d_secsize > DEF_BSIZE)
@@ -238,12 +237,12 @@ dobadsect:
 				} else
 					msg = "bad sector table corrupted";
 			}
-		} while (bp->b_error != 0 && (i += 2) < 10 &&
+		} while ((bp->b_flags & B_ERROR) && (i += 2) < 10 &&
 			i < lp->d_nsectors);
 	}
 
 done:
-	brelse(bp, 0);
+	brelse(bp);
 	return (msg);
 }
 
@@ -297,8 +296,8 @@ setdisklabel(struct disklabel *olp, struct disklabel *nlp, u_long openmask,
 			npp->p_cpg = opp->p_cpg;
 		}
 	}
-	nlp->d_checksum = 0;
-	nlp->d_checksum = dkcksum(nlp);
+ 	nlp->d_checksum = 0;
+ 	nlp->d_checksum = dkcksum(nlp);
 	*olp = *nlp;
 	return (0);
 }
@@ -343,14 +342,12 @@ writedisklabel(dev_t dev, void (*strat)(struct buf *),
 		goto dodospart;
 	error = ESRCH;
 	for (dlp = (struct disklabel *)bp->b_data;
-	     dlp <= (struct disklabel *)
-		((char *)bp->b_data + labelsz - sizeof(*dlp));
+	     dlp <= (struct disklabel *)(bp->b_data + labelsz - sizeof(*dlp));
 	     dlp = (struct disklabel *)((char *)dlp + sizeof(long))) {
 		if (dlp->d_magic == DISKMAGIC && dlp->d_magic2 == DISKMAGIC &&
 		    dkcksum(dlp) == 0) {
 			*dlp = *lp;
-			bp->b_oflags &= ~(BO_DONE);
-			bp->b_flags &= ~(B_READ);
+			bp->b_flags &= ~(B_READ|B_DONE);
 			bp->b_flags |= B_WRITE;
 			(*strat)(bp);
 			error = biowait(bp);
@@ -369,7 +366,7 @@ dodospart:
 		/* read the x68k disk magic */
 		bp->b_blkno = DOSBBSECTOR;
 		bp->b_bcount = lp->d_secsize;
-		bp->b_oflags &= ~(BO_DONE);
+		bp->b_flags &= ~(B_WRITE|B_DONE);
 		bp->b_flags |= B_READ;
 		bp->b_cylinder = DOSBBSECTOR / lp->d_secpercyl;
 		(*strat)(bp);
@@ -382,7 +379,7 @@ dodospart:
 		labelsz = howmany(sizeof(struct cpu_disklabel),
 				  lp->d_secsize) * lp->d_secsize;
 		bp->b_bcount = labelsz;
-		bp->b_oflags &= ~(BO_DONE);
+		bp->b_flags &= ~(B_WRITE|B_DONE);
 		bp->b_flags |= B_READ;
 		bp->b_cylinder = DOSPARTOFF / lp->d_secpercyl;
 		(*strat)(bp);
@@ -442,8 +439,7 @@ dodospart:
 				dp->dp_start = start;
 				dp->dp_size = size;
 			}
-			bp->b_oflags &= ~(BO_DONE);
-			bp->b_flags &= ~(B_READ);
+			bp->b_flags &= ~(B_READ|B_DONE);
 			bp->b_flags |= B_WRITE;
 			(*strat)(bp);
 			error = biowait(bp);
@@ -460,7 +456,7 @@ dodospart:
 #endif
 
 done:
-	brelse(bp, 0);
+	brelse(bp);
 	return (error);
 }
 

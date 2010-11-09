@@ -1,4 +1,4 @@
-/*	$NetBSD: clnp_er.c,v 1.24 2008/01/14 04:17:35 dyoung Exp $	*/
+/*	$NetBSD: clnp_er.c,v 1.20 2006/12/15 21:18:56 joerg Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993
@@ -59,7 +59,7 @@ SOFTWARE.
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: clnp_er.c,v 1.24 2008/01/14 04:17:35 dyoung Exp $");
+__KERNEL_RCSID(0, "$NetBSD: clnp_er.c,v 1.20 2006/12/15 21:18:56 joerg Exp $");
 
 #include <sys/param.h>
 #include <sys/mbuf.h>
@@ -246,12 +246,12 @@ clnp_emit_er(m, reason)
 {
 	struct clnp_fixed *clnp = mtod(m, struct clnp_fixed *);
 	struct clnp_fixed *er;
-	struct route route;
+	struct route_iso route;
 	struct ifnet   *ifp;
-	const struct sockaddr *first_hop;
+	struct sockaddr *first_hop;
 	struct iso_addr src, dst, *our_addr;
-	char *hoff, *hend;
-	int total_len;	/* total len of dg */
+	caddr_t         hoff, hend;
+	int             total_len;	/* total len of dg */
 	struct iso_ifaddr *ia = 0;
 
 #ifdef ARGO_DEBUG
@@ -261,7 +261,7 @@ clnp_emit_er(m, reason)
 	}
 #endif
 
-	memset(&route, 0, sizeof(route));
+	bzero((caddr_t) & route, sizeof(route));
 
 	/*
 	 * If header length is incorrect, or entire header is not contained
@@ -273,14 +273,14 @@ clnp_emit_er(m, reason)
 		goto bad;
 
 	/* extract src, dest address */
-	hend = (char *)clnp + clnp->cnf_hdr_len;
-	hoff = (char *)clnp + sizeof(struct clnp_fixed);
+	hend = (caddr_t) clnp + clnp->cnf_hdr_len;
+	hoff = (caddr_t) clnp + sizeof(struct clnp_fixed);
 	CLNP_EXTRACT_ADDR(dst, hoff, hend);
-	if (hoff == (void *) 0) {
+	if (hoff == (caddr_t) 0) {
 		goto bad;
 	}
 	CLNP_EXTRACT_ADDR(src, hoff, hend);
-	if (hoff == (void *) 0) {
+	if (hoff == (caddr_t) 0) {
 		goto bad;
 	}
 	/*
@@ -321,7 +321,7 @@ clnp_emit_er(m, reason)
 #ifdef ARGO_DEBUG
 	if (argo_debug[D_DISCARD]) {
 		printf("clnp_emit_er: packet routed to %s\n",
-		    clnp_iso_addrp(&satocsiso(first_hop)->siso_addr));
+		    clnp_iso_addrp(&satosiso(first_hop)->siso_addr));
 	}
 #endif
 
@@ -341,7 +341,7 @@ clnp_emit_er(m, reason)
 
 	/* setup src/dst on er pdu */
 	/* NOTE REVERSAL OF SRC/DST */
-	hoff = (char *)er + sizeof(struct clnp_fixed);
+	hoff = (caddr_t) er + sizeof(struct clnp_fixed);
 	CLNP_INSERT_ADDR(hoff, src);
 	CLNP_INSERT_ADDR(hoff, *our_addr);
 
@@ -357,7 +357,7 @@ clnp_emit_er(m, reason)
 	*hoff++ = 0;		/* error localization = not specified */
 
 	/* set length */
-	er->cnf_hdr_len = (u_char) (hoff - (char *)er);
+	er->cnf_hdr_len = (u_char) (hoff - (caddr_t) er);
 	total_len = m->m_pkthdr.len;
 	HTOC(er->cnf_seglen_msb, er->cnf_seglen_lsb, total_len);
 
@@ -370,7 +370,7 @@ clnp_emit_er(m, reason)
 
 	/* send packet */
 	INCSTAT(cns_er_outhist[clnp_er_index(reason)]);
-	(void) (*ifp->if_output) (ifp, m, first_hop, rtcache_validate(&route));
+	(void) (*ifp->if_output) (ifp, m, first_hop, route.ro_rt);
 	goto done;
 
 bad:
@@ -378,7 +378,7 @@ bad:
 
 done:
 	/* free route if it is a temp */
-	rtcache_free(&route);
+	rtcache_free((struct route *)&route);
 }
 
 int

@@ -1,4 +1,4 @@
-/*	$NetBSD: if_cs_isa.c,v 1.20 2008/04/08 20:08:49 cegger Exp $	*/
+/*	$NetBSD: if_cs_isa.c,v 1.19 2007/10/19 12:00:17 ad Exp $	*/
 
 /*
  * Copyright 1997
@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_cs_isa.c,v 1.20 2008/04/08 20:08:49 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_cs_isa.c,v 1.19 2007/10/19 12:00:17 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -238,7 +238,7 @@ cs_isa_attach(struct device *parent, struct device *self, void *aux)
 	 */
 	if (bus_space_map(sc->sc_iot, ia->ia_io[0].ir_addr, CS8900_IOSIZE,
 	    0, &sc->sc_ioh)) {
-		aprint_error_dev(&sc->sc_dev, "unable to map i/o space\n");
+		printf("%s: unable to map i/o space\n", sc->sc_dev.dv_xname);
 		return;
 	}
 
@@ -246,7 +246,7 @@ cs_isa_attach(struct device *parent, struct device *self, void *aux)
 	 * Validate IRQ.
 	 */
 	if (CS8900_IRQ_ISVALID(sc->sc_irq) == 0) {
-		aprint_error_dev(&sc->sc_dev, "invalid IRQ %d\n", sc->sc_irq);
+		printf("%s: invalid IRQ %d\n", sc->sc_dev.dv_xname, sc->sc_irq);
 		return;
 	}
 
@@ -260,7 +260,8 @@ cs_isa_attach(struct device *parent, struct device *self, void *aux)
 	    CS8900_MEMBASE_ISVALID(ia->ia_iomem[0].ir_addr)) {
 		if (bus_space_map(sc->sc_memt, ia->ia_iomem[0].ir_addr,
 		    CS8900_MEMSIZE, 0, &sc->sc_memh)) {
-			aprint_error_dev(&sc->sc_dev, "unable to map memory space\n");
+			printf("%s: unable to map memory space\n",
+			    sc->sc_dev.dv_xname);
 		} else {
 			sc->sc_cfgflags |= CFGFLG_MEM_MODE;
 			sc->sc_pktpgaddr = ia->ia_iomem[0].ir_addr;
@@ -270,7 +271,8 @@ cs_isa_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_ih = isa_intr_establish(ia->ia_ic, sc->sc_irq, IST_EDGE,
 	    IPL_NET, cs_intr, sc);
 	if (sc->sc_ih == NULL) {
-		aprint_error_dev(&sc->sc_dev, "unable to establish interrupt\n");
+		printf("%s: unable to establish interrupt\n",
+		    sc->sc_dev.dv_xname);
 		return;
 	}
 

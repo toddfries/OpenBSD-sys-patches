@@ -1,4 +1,4 @@
-/*	$NetBSD: xen_machdep.c,v 1.5 2009/02/13 21:04:00 bouyer Exp $	*/
+/*	$NetBSD: xen_machdep.c,v 1.2 2007/11/22 16:17:09 bouyer Exp $	*/
 
 /*
  * Copyright (c) 2006 Manuel Bouyer.
@@ -63,7 +63,7 @@
 
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: xen_machdep.c,v 1.5 2009/02/13 21:04:00 bouyer Exp $");
+__KERNEL_RCSID(0, "$NetBSD: xen_machdep.c,v 1.2 2007/11/22 16:17:09 bouyer Exp $");
 
 #include "opt_xen.h"
 
@@ -72,13 +72,7 @@ __KERNEL_RCSID(0, "$NetBSD: xen_machdep.c,v 1.5 2009/02/13 21:04:00 bouyer Exp $
 #include <sys/boot_flag.h>
 #include <sys/mount.h>
 #include <sys/reboot.h>
-#include <sys/timetc.h>
-
 #include <xen/hypervisor.h>
-
-u_int	tsc_get_timecount(struct timecounter *);
-
-uint64_t tsc_freq;	/* XXX */
 
 void
 xen_parse_cmdline(int what, union xen_cmdline_parseinfo *xcp)
@@ -196,21 +190,9 @@ xen_parse_cmdline(int what, union xen_cmdline_parseinfo *xcp)
 				}
 			}
 			break;
-		case XEN_PARSE_PCIBACK:
-			if (strncasecmp(opt, "pciback.hide=", 13) == 0)
-				strncpy(xcp->xcp_pcidevs, opt + 13,
-				    sizeof(xcp->xcp_pcidevs));
-			break;
 		}
 
 		if (cmd_line)
 			*cmd_line++ = ' ';
 	}
-}
-
-u_int
-tsc_get_timecount(struct timecounter *tc)
-{
-
-	panic("xen: tsc_get_timecount");
 }

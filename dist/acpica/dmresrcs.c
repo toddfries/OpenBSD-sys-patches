@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Module Name: dmresrcs.c - "Small" Resource Descriptor disassembly
- *              $Revision: 1.6 $
+ *              xRevision: 1.12 $
  *
  ******************************************************************************/
 
@@ -9,7 +9,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2008, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2006, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -115,6 +115,9 @@
  *****************************************************************************/
 
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: dmresrcs.c,v 1.3 2006/11/16 01:33:31 christos Exp $");
+
 #include "acpi.h"
 #include "acdisasm.h"
 
@@ -154,15 +157,11 @@ AcpiDmIrqDescriptor (
 
     if (Length & 1)
     {
-        AcpiOsPrintf ("%s, %s, %s, ",
-            AcpiGbl_HeDecode [Resource->Irq.Flags & 1],
-            AcpiGbl_LlDecode [(Resource->Irq.Flags >> 3) & 1],
-            AcpiGbl_ShrDecode [(Resource->Irq.Flags >> 4) & 1]);
+        AcpiOsPrintf ("%s, %s, %s",
+            AcpiGbl_HEDecode [Resource->Irq.Flags & 1],
+            AcpiGbl_LLDecode [(Resource->Irq.Flags >> 3) & 1],
+            AcpiGbl_SHRDecode [(Resource->Irq.Flags >> 4) & 1]);
     }
-
-    /* Insert a descriptor name */
-
-    AcpiDmDescriptorName ();
     AcpiOsPrintf (")\n");
 
     AcpiDmIndent (Level + 1);
@@ -192,15 +191,10 @@ AcpiDmDmaDescriptor (
 {
 
     AcpiDmIndent (Level);
-    AcpiOsPrintf ("DMA (%s, %s, %s, ",
-            AcpiGbl_TypDecode [(Resource->Dma.Flags >> 5) & 3],
-            AcpiGbl_BmDecode  [(Resource->Dma.Flags >> 2) & 1],
-            AcpiGbl_SizDecode [(Resource->Dma.Flags >> 0) & 3]);
-
-    /* Insert a descriptor name */
-
-    AcpiDmDescriptorName ();
-    AcpiOsPrintf (")\n");
+    AcpiOsPrintf ("DMA (%s, %s, %s)\n",
+            AcpiGbl_TYPDecode [(Resource->Dma.Flags >> 5) & 3],
+            AcpiGbl_BMDecode  [(Resource->Dma.Flags >> 2) & 1],
+            AcpiGbl_SIZDecode [(Resource->Dma.Flags >> 0) & 3]);
 
     AcpiDmIndent (Level + 1);
     AcpiDmBitList (Resource->Dma.DmaChannelMask);
@@ -233,21 +227,18 @@ AcpiDmIoDescriptor (
         AcpiGbl_IoDecode [(Resource->Io.Flags & 1)]);
 
     AcpiDmIndent (Level + 1);
-    AcpiDmDumpInteger16 (Resource->Io.Minimum, "Range Minimum");
+    AcpiDmDumpInteger16 (Resource->Io.Minimum, "Address Range Minimum");
 
     AcpiDmIndent (Level + 1);
-    AcpiDmDumpInteger16 (Resource->Io.Maximum, "Range Maximum");
+    AcpiDmDumpInteger16 (Resource->Io.Maximum, "Address Range Maximum");
 
     AcpiDmIndent (Level + 1);
-    AcpiDmDumpInteger8 (Resource->Io.Alignment, "Alignment");
+    AcpiDmDumpInteger8 (Resource->Io.Alignment, "Address Alignment");
 
     AcpiDmIndent (Level + 1);
-    AcpiDmDumpInteger8 (Resource->Io.AddressLength, "Length");
-
-    /* Insert a descriptor name */
+    AcpiDmDumpInteger8 (Resource->Io.AddressLength, "Address Length");
 
     AcpiDmIndent (Level + 1);
-    AcpiDmDescriptorName ();
     AcpiOsPrintf (")\n");
 }
 
@@ -277,15 +268,12 @@ AcpiDmFixedIoDescriptor (
     AcpiOsPrintf ("FixedIO (\n");
 
     AcpiDmIndent (Level + 1);
-    AcpiDmDumpInteger16 (Resource->FixedIo.Address, "Address");
+    AcpiDmDumpInteger16 (Resource->FixedIo.Address, "Address Base");
 
     AcpiDmIndent (Level + 1);
-    AcpiDmDumpInteger8 (Resource->FixedIo.AddressLength, "Length");
-
-    /* Insert a descriptor name */
+    AcpiDmDumpInteger8 (Resource->FixedIo.AddressLength, "Address Length");
 
     AcpiDmIndent (Level + 1);
-    AcpiDmDescriptorName ();
     AcpiOsPrintf (")\n");
 }
 
@@ -378,7 +366,7 @@ AcpiDmVendorSmallDescriptor (
     UINT32                  Level)
 {
 
-    AcpiDmVendorCommon ("Short",
+    AcpiDmVendorCommon ("Short ()",
         ACPI_ADD_PTR (UINT8, Resource, sizeof (AML_RESOURCE_SMALL_HEADER)),
         Length, Level);
 }

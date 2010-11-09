@@ -1,4 +1,4 @@
-/*	$NetBSD: radeon_cp.c,v 1.11 2008/11/09 02:35:42 christos Exp $	*/
+/*	$NetBSD: radeon_cp.c,v 1.7 2007/12/15 00:39:33 perry Exp $	*/
 
 /* radeon_cp.c -- CP support for Radeon -*- linux-c -*- */
 /*-
@@ -31,16 +31,16 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: radeon_cp.c,v 1.11 2008/11/09 02:35:42 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: radeon_cp.c,v 1.7 2007/12/15 00:39:33 perry Exp $");
 /*
 __FBSDID("$FreeBSD: src/sys/dev/drm/radeon_cp.c,v 1.19 2006/09/07 23:04:47 anholt Exp $");
 */
 
-#include "drmP.h"
-#include "drm.h"
-#include "radeon_drm.h"
-#include "radeon_drv.h"
-#include "r300_reg.h"
+#include <dev/drm/drmP.h>
+#include <dev/drm/drm.h>
+#include <dev/pci/drm/radeon_drm.h>
+#include <dev/pci/drm/radeon_drv.h>
+#include <dev/pci/drm/r300_reg.h>
 
 #define RADEON_FIFO_DEBUG	0
 
@@ -824,266 +824,6 @@ static const u32 R300_cp_microcode[][2] = {
 	{ 0000000000, 0000000000 },
 };
 
-static const u32 R500_cp_microcode[][2]={
-    { 0x4200e000, 0000000000 },
-    { 0x4000e000, 0000000000 },
-    { 0x00000099, 0x00000008 },
-    { 0x0000009d, 0x00000008 },
-    { 0x4a554b4a, 0000000000 },
-    { 0x4a4a4467, 0000000000 },
-    { 0x55526f75, 0000000000 },
-    { 0x4a7e7d65, 0000000000 },
-    { 0xe0dae6f6, 0000000000 },
-    { 0x4ac54a4a, 0000000000 },
-    { 0xc8828282, 0000000000 },
-    { 0xbf4acfc1, 0000000000 },
-    { 0x87b04ad5, 0000000000 },
-    { 0xb5838383, 0000000000 },
-    { 0x4a0f85ba, 0000000000 },
-    { 0x000ca000, 0x00000004 },
-    { 0x000d0012, 0x00000038 },
-    { 0x0000e8b4, 0x00000004 },
-    { 0x000d0014, 0x00000038 },
-    { 0x0000e8b6, 0x00000004 },
-    { 0x000d0016, 0x00000038 },
-    { 0x0000e854, 0x00000004 },
-    { 0x000d0018, 0x00000038 },
-    { 0x0000e855, 0x00000004 },
-    { 0x000d001a, 0x00000038 },
-    { 0x0000e856, 0x00000004 },
-    { 0x000d001c, 0x00000038 },
-    { 0x0000e857, 0x00000004 },
-    { 0x000d001e, 0x00000038 },
-    { 0x0000e824, 0x00000004 },
-    { 0x000d0020, 0x00000038 },
-    { 0x0000e825, 0x00000004 },
-    { 0x000d0022, 0x00000038 },
-    { 0x0000e830, 0x00000004 },
-    { 0x000d0024, 0x00000038 },
-    { 0x0000f0c0, 0x00000004 },
-    { 0x000d0026, 0x00000038 },
-    { 0x0000f0c1, 0x00000004 },
-    { 0x000d0028, 0x00000038 },
-    { 0x0000e000, 0x00000004 },
-    { 0x000d002a, 0x00000038 },
-    { 0x0000e000, 0x00000004 },
-    { 0x000d002c, 0x00000038 },
-    { 0x0000e000, 0x00000004 },
-    { 0x000d002e, 0x00000038 },
-    { 0x0000e000, 0x00000004 },
-    { 0x000d0030, 0x00000038 },
-    { 0x0000e000, 0x00000004 },
-    { 0x000d0032, 0x00000038 },
-    { 0x0000f180, 0x00000004 },
-    { 0x000d0034, 0x00000038 },
-    { 0x0000f393, 0x00000004 },
-    { 0x000d0036, 0x00000038 },
-    { 0x0000f38a, 0x00000004 },
-    { 0x000d0038, 0x00000038 },
-    { 0x0000f38e, 0x00000004 },
-    { 0x0000e821, 0x00000004 },
-    { 0x0140a000, 0x00000004 },
-    { 0x00000043, 0x00000018 },
-    { 0x00cce800, 0x00000004 },
-    { 0x001b0001, 0x00000004 },
-    { 0x08004800, 0x00000004 },
-    { 0x001b0001, 0x00000004 },
-    { 0x08004800, 0x00000004 },
-    { 0x001b0001, 0x00000004 },
-    { 0x08004800, 0x00000004 },
-    { 0x0000003a, 0x00000008 },
-    { 0x0000a000, 0000000000 },
-    { 0x2000451d, 0x00000004 },
-    { 0x0000e580, 0x00000004 },
-    { 0x000ce581, 0x00000004 },
-    { 0x08004580, 0x00000004 },
-    { 0x000ce581, 0x00000004 },
-    { 0x00000047, 0x00000008 },
-    { 0x0000a000, 0000000000 },
-    { 0x000c2000, 0x00000004 },
-    { 0x0000e50e, 0x00000004 },
-    { 0x00032000, 0x00000004 },
-    { 0x00022051, 0x00000028 },
-    { 0x00000051, 0x00000024 },
-    { 0x0800450f, 0x00000004 },
-    { 0x0000a04b, 0x00000008 },
-    { 0x0000e565, 0x00000004 },
-    { 0x0000e566, 0x00000004 },
-    { 0x00000052, 0x00000008 },
-    { 0x03cca5b4, 0x00000004 },
-    { 0x05432000, 0x00000004 },
-    { 0x00022000, 0x00000004 },
-    { 0x4ccce05e, 0x00000030 },
-    { 0x08274565, 0x00000004 },
-    { 0x0000005e, 0x00000030 },
-    { 0x08004564, 0x00000004 },
-    { 0x0000e566, 0x00000004 },
-    { 0x00000055, 0x00000008 },
-    { 0x00802061, 0x00000010 },
-    { 0x00202000, 0x00000004 },
-    { 0x001b00ff, 0x00000004 },
-    { 0x01000064, 0x00000010 },
-    { 0x001f2000, 0x00000004 },
-    { 0x001c00ff, 0x00000004 },
-    { 0000000000, 0x0000000c },
-    { 0x00000072, 0x00000030 },
-    { 0x00000055, 0x00000008 },
-    { 0x0000e576, 0x00000004 },
-    { 0x0000e577, 0x00000004 },
-    { 0x0000e50e, 0x00000004 },
-    { 0x0000e50f, 0x00000004 },
-    { 0x0140a000, 0x00000004 },
-    { 0x00000069, 0x00000018 },
-    { 0x00c0e5f9, 0x000000c2 },
-    { 0x00000069, 0x00000008 },
-    { 0x0014e50e, 0x00000004 },
-    { 0x0040e50f, 0x00000004 },
-    { 0x00c0006c, 0x00000008 },
-    { 0x0000e570, 0x00000004 },
-    { 0x0000e571, 0x00000004 },
-    { 0x0000e572, 0x0000000c },
-    { 0x0000a000, 0x00000004 },
-    { 0x0140a000, 0x00000004 },
-    { 0x0000e568, 0x00000004 },
-    { 0x000c2000, 0x00000004 },
-    { 0x00000076, 0x00000018 },
-    { 0x000b0000, 0x00000004 },
-    { 0x18c0e562, 0x00000004 },
-    { 0x00000078, 0x00000008 },
-    { 0x00c00077, 0x00000008 },
-    { 0x000700c7, 0x00000004 },
-    { 0x00000080, 0x00000038 },
-    { 0x0000e5bb, 0x00000004 },
-    { 0x0000e5bc, 0000000000 },
-    { 0x0000a000, 0x00000004 },
-    { 0x0000e821, 0x00000004 },
-    { 0x0000e800, 0000000000 },
-    { 0x0000e821, 0x00000004 },
-    { 0x0000e82e, 0000000000 },
-    { 0x02cca000, 0x00000004 },
-    { 0x00140000, 0x00000004 },
-    { 0x000ce1cc, 0x00000004 },
-    { 0x050de1cd, 0x00000004 },
-    { 0x00400000, 0x00000004 },
-    { 0x0000008f, 0x00000018 },
-    { 0x00c0a000, 0x00000004 },
-    { 0x0000008c, 0x00000008 },
-    { 0x00000091, 0x00000020 },
-    { 0x4200e000, 0000000000 },
-    { 0x00000098, 0x00000038 },
-    { 0x000ca000, 0x00000004 },
-    { 0x00140000, 0x00000004 },
-    { 0x000c2000, 0x00000004 },
-    { 0x00160000, 0x00000004 },
-    { 0x700ce000, 0x00000004 },
-    { 0x00140094, 0x00000008 },
-    { 0x4000e000, 0000000000 },
-    { 0x02400000, 0x00000004 },
-    { 0x400ee000, 0x00000004 },
-    { 0x02400000, 0x00000004 },
-    { 0x4000e000, 0000000000 },
-    { 0x000c2000, 0x00000004 },
-    { 0x0240e51b, 0x00000004 },
-    { 0x0080e50a, 0x00000005 },
-    { 0x0080e50b, 0x00000005 },
-    { 0x00220000, 0x00000004 },
-    { 0x000700c7, 0x00000004 },
-    { 0x000000a4, 0x00000038 },
-    { 0x0080e5bd, 0x00000005 },
-    { 0x0000e5bb, 0x00000005 },
-    { 0x0080e5bc, 0x00000005 },
-    { 0x00210000, 0x00000004 },
-    { 0x02800000, 0x00000004 },
-    { 0x00c000ab, 0x00000018 },
-    { 0x4180e000, 0x00000040 },
-    { 0x000000ad, 0x00000024 },
-    { 0x01000000, 0x0000000c },
-    { 0x0100e51d, 0x0000000c },
-    { 0x000045bb, 0x00000004 },
-    { 0x000080a7, 0x00000008 },
-    { 0x0000f3ce, 0x00000004 },
-    { 0x0140a000, 0x00000004 },
-    { 0x00cc2000, 0x00000004 },
-    { 0x08c053cf, 0x00000040 },
-    { 0x00008000, 0000000000 },
-    { 0x0000f3d2, 0x00000004 },
-    { 0x0140a000, 0x00000004 },
-    { 0x00cc2000, 0x00000004 },
-    { 0x08c053d3, 0x00000040 },
-    { 0x00008000, 0000000000 },
-    { 0x0000f39d, 0x00000004 },
-    { 0x0140a000, 0x00000004 },
-    { 0x00cc2000, 0x00000004 },
-    { 0x08c0539e, 0x00000040 },
-    { 0x00008000, 0000000000 },
-    { 0x03c00830, 0x00000004 },
-    { 0x4200e000, 0000000000 },
-    { 0x0000a000, 0x00000004 },
-    { 0x200045e0, 0x00000004 },
-    { 0x0000e5e1, 0000000000 },
-    { 0x00000001, 0000000000 },
-    { 0x000700c4, 0x00000004 },
-    { 0x0800e394, 0000000000 },
-    { 0000000000, 0000000000 },
-    { 0x0000e8c4, 0x00000004 },
-    { 0x0000e8c5, 0x00000004 },
-    { 0x0000e8c6, 0x00000004 },
-    { 0x0000e928, 0x00000004 },
-    { 0x0000e929, 0x00000004 },
-    { 0x0000e92a, 0x00000004 },
-    { 0x000000c8, 0x00000008 },
-    { 0x0000e928, 0x00000004 },
-    { 0x0000e929, 0x00000004 },
-    { 0x0000e92a, 0x00000004 },
-    { 0x000000cf, 0x00000008 },
-    { 0xdeadbeef, 0000000000 },
-    { 0x00000116, 0000000000 },
-    { 0x000700d3, 0x00000004 },
-    { 0x080050e7, 0x00000004 },
-    { 0x000700d4, 0x00000004 },
-    { 0x0800401c, 0x00000004 },
-    { 0x0000e01d, 0000000000 },
-    { 0x02c02000, 0x00000004 },
-    { 0x00060000, 0x00000004 },
-    { 0x000000de, 0x00000034 },
-    { 0x000000db, 0x00000008 },
-    { 0x00008000, 0x00000004 },
-    { 0xc000e000, 0000000000 },
-    { 0x0000e1cc, 0x00000004 },
-    { 0x0500e1cd, 0x00000004 },
-    { 0x000ca000, 0x00000004 },
-    { 0x000000e5, 0x00000034 },
-    { 0x000000e1, 0x00000008 },
-    { 0x0000a000, 0000000000 },
-    { 0x0019e1cc, 0x00000004 },
-    { 0x001b0001, 0x00000004 },
-    { 0x0500a000, 0x00000004 },
-    { 0x080041cd, 0x00000004 },
-    { 0x000ca000, 0x00000004 },
-    { 0x000000fb, 0x00000034 },
-    { 0x0000004a, 0x00000008 },
-    { 0000000000, 0000000000 },
-    { 0000000000, 0000000000 },
-    { 0000000000, 0000000000 },
-    { 0000000000, 0000000000 },
-    { 0000000000, 0000000000 },
-    { 0000000000, 0000000000 },
-    { 0000000000, 0000000000 },
-    { 0000000000, 0000000000 },
-    { 0000000000, 0000000000 },
-    { 0x000c2000, 0x00000004 },
-    { 0x001d0018, 0x00000004 },
-    { 0x001a0001, 0x00000004 },
-    { 0x000000fb, 0x00000034 },
-    { 0x0000004a, 0x00000008 },
-    { 0x0500a04a, 0x00000008 },
-    { 0000000000, 0000000000 },
-    { 0000000000, 0000000000 },
-    { 0000000000, 0000000000 },
-    { 0000000000, 0000000000 },
-};
-
-
 static int RADEON_READ_PLL(drm_device_t * dev, int addr)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
@@ -1092,25 +832,16 @@ static int RADEON_READ_PLL(drm_device_t * dev, int addr)
 	return RADEON_READ(RADEON_CLOCK_CNTL_DATA);
 }
 
-static u32 RADEON_READ_PCIE(drm_radeon_private_t *dev_priv, int addr)
+static int RADEON_READ_PCIE(drm_radeon_private_t *dev_priv, int addr)
 {
 	RADEON_WRITE8(RADEON_PCIE_INDEX, addr & 0xff);
 	return RADEON_READ(RADEON_PCIE_DATA);
 }
 
-static u32 RADEON_READ_IGPGART(drm_radeon_private_t *dev_priv, int addr)
-{
-	u32 ret;
-	RADEON_WRITE(RADEON_IGPGART_INDEX, addr & 0x7f);
-	ret = RADEON_READ(RADEON_IGPGART_DATA);
-	RADEON_WRITE(RADEON_IGPGART_INDEX, 0x7f);
-	return ret;
-}
-
 #if RADEON_FIFO_DEBUG
 static void radeon_status(drm_radeon_private_t * dev_priv)
 {
-	printf("%s:\n", __FUNCTION__);
+	printf("%s:\n", __func__);
 	printf("RBBM_STATUS = 0x%08x\n",
 	       (unsigned int)RADEON_READ(RADEON_RBBM_STATUS));
 	printf("CP_RB_RTPR = 0x%08x\n",
@@ -1236,14 +967,6 @@ static void radeon_cp_load_microcode(drm_radeon_private_t * dev_priv)
 				     R300_cp_microcode[i][1]);
 			RADEON_WRITE(RADEON_CP_ME_RAM_DATAL,
 				     R300_cp_microcode[i][0]);
-		}
-	} else if (dev_priv->microcode_version == UCODE_R500) {
-		DRM_INFO("Loading R500 Microcode\n");
-		for (i = 0; i < 256; i++) {
-			RADEON_WRITE(RADEON_CP_ME_RAM_DATAH,
-				R500_cp_microcode[i][1]);
-			RADEON_WRITE(RADEON_CP_ME_RAM_DATAL,
-				R500_cp_microcode[i][0]);
 		}
 	} else {
 		for (i = 0; i < 256; i++) {
@@ -1415,7 +1138,7 @@ static void radeon_cp_init_ring_buffer(drm_device_t * dev,
 			     | (dev_priv->fb_location >> 16));
 
 #if __OS_HAS_AGP
-	if (dev_priv->flags & RADEON_IS_AGP) {
+	if (dev_priv->flags & CHIP_IS_AGP) {
 		RADEON_WRITE(RADEON_AGP_BASE, (unsigned int)dev->agp->base);
 		RADEON_WRITE(RADEON_MC_AGP_LOCATION,
 			     (((dev_priv->gart_vm_start - 1 +
@@ -1443,7 +1166,7 @@ static void radeon_cp_init_ring_buffer(drm_device_t * dev,
 	dev_priv->ring.tail = cur_read_ptr;
 
 #if __OS_HAS_AGP
-	if (dev_priv->flags & RADEON_IS_AGP) {
+	if (dev_priv->flags & CHIP_IS_AGP) {
 		RADEON_WRITE(RADEON_CP_RB_RPTR_ADDR,
 			     dev_priv->ring_rptr->offset
 			     - dev->agp->base + dev_priv->gart_vm_start);
@@ -1551,45 +1274,7 @@ static void radeon_test_writeback(drm_radeon_private_t * dev_priv)
 	}
 }
 
-/* Enable or disable IGP GART on the chip */
-static void radeon_set_igpgart(drm_radeon_private_t * dev_priv, int on)
-{
-	u32 temp, tmp;
-
-	tmp = RADEON_READ(RADEON_AIC_CNTL);
-	DRM_DEBUG("setting igpgart AIC CNTL is %08X\n", tmp);
-	if (on) {
-		DRM_DEBUG("programming igpgart %08X %08lX %08X\n",
-			 dev_priv->gart_vm_start,
-			 (long)dev_priv->gart_info.bus_addr,
-			 dev_priv->gart_size);
-
-		RADEON_WRITE_IGPGART(RADEON_IGPGART_UNK_18, 0x1000);
-		RADEON_WRITE_IGPGART(RADEON_IGPGART_UNK_38, 0x1);
-		RADEON_WRITE_IGPGART(RADEON_IGPGART_CTRL, 0x42040800);
-		RADEON_WRITE_IGPGART(RADEON_IGPGART_BASE_ADDR,
-				     dev_priv->gart_info.bus_addr);
-
-		temp = RADEON_READ_IGPGART(dev_priv, RADEON_IGPGART_UNK_39);
-		RADEON_WRITE_IGPGART(RADEON_IGPGART_UNK_39, temp);
-
-		RADEON_WRITE(RADEON_AGP_BASE, (unsigned int)dev_priv->gart_vm_start);
-		dev_priv->gart_size = 32*1024*1024;
-		RADEON_WRITE(RADEON_MC_AGP_LOCATION,
-			     (((dev_priv->gart_vm_start - 1 +
-			       dev_priv->gart_size) & 0xffff0000) |
-			     (dev_priv->gart_vm_start >> 16)));
-
-		temp = RADEON_READ_IGPGART(dev_priv, RADEON_IGPGART_UNK_38);
-		RADEON_WRITE_IGPGART(RADEON_IGPGART_UNK_38, temp);
-
-		RADEON_READ_IGPGART(dev_priv, RADEON_IGPGART_UNK_2E);
-		RADEON_WRITE_IGPGART(RADEON_IGPGART_UNK_2E, 0x1);
-		RADEON_READ_IGPGART(dev_priv, RADEON_IGPGART_UNK_2E);
-		RADEON_WRITE_IGPGART(RADEON_IGPGART_UNK_2E, 0x0);
-       }
-}
-
+/* Enable or disable PCI-E GART on the chip */
 static void radeon_set_pciegart(drm_radeon_private_t * dev_priv, int on)
 {
 	u32 tmp = RADEON_READ_PCIE(dev_priv, RADEON_PCIE_TX_GART_CNTL);
@@ -1624,12 +1309,7 @@ static void radeon_set_pcigart(drm_radeon_private_t * dev_priv, int on)
 {
 	u32 tmp;
 
-	if (dev_priv->flags & RADEON_IS_IGPGART) {
-		radeon_set_igpgart(dev_priv, on);
-		return;
-	}
-
-	if (dev_priv->flags & RADEON_IS_PCIE) {
+	if (dev_priv->flags & CHIP_IS_PCIE) {
 		radeon_set_pciegart(dev_priv, on);
 		return;
 	}
@@ -1667,26 +1347,26 @@ static int radeon_do_init_cp(drm_device_t * dev, drm_radeon_init_t * init)
 	DRM_DEBUG("\n");
 
 	/* if we require new memory map but we don't have it fail */
-	if ((dev_priv->flags & RADEON_NEW_MEMMAP) && !dev_priv->new_memmap)
+	if ((dev_priv->flags & CHIP_NEW_MEMMAP) && !dev_priv->new_memmap)
 	{
 		DRM_ERROR("Cannot initialise DRM on this card\nThis card requires a new X.org DDX for 3D\n");
 		radeon_do_cleanup_cp(dev);
 		return DRM_ERR(EINVAL);
 	}
 
-	if (init->is_pci && (dev_priv->flags & RADEON_IS_AGP))
+	if (init->is_pci && (dev_priv->flags & CHIP_IS_AGP))
 	{
 		DRM_DEBUG("Forcing AGP card to PCI mode\n");
-		dev_priv->flags &= ~RADEON_IS_AGP;
+		dev_priv->flags &= ~CHIP_IS_AGP;
 	}
-	else if (!(dev_priv->flags & (RADEON_IS_AGP | RADEON_IS_PCI | RADEON_IS_PCIE))
+	else if (!(dev_priv->flags & (CHIP_IS_AGP | CHIP_IS_PCI | CHIP_IS_PCIE))
 		 && !init->is_pci)
 	{
 		DRM_DEBUG("Restoring AGP flag\n");
-		dev_priv->flags |= RADEON_IS_AGP;
+		dev_priv->flags |= CHIP_IS_AGP;
 	}
 
-	if ((!(dev_priv->flags & RADEON_IS_AGP)) && !dev->sg) {
+	if ((!(dev_priv->flags & CHIP_IS_AGP)) && !dev->sg) {
 		DRM_ERROR("PCI GART memory not allocated!\n");
 		radeon_do_cleanup_cp(dev);
 		return DRM_ERR(EINVAL);
@@ -1706,9 +1386,6 @@ static int radeon_do_init_cp(drm_device_t * dev, drm_radeon_init_t * init)
 		break;
 	case RADEON_INIT_R300_CP:
 		dev_priv->microcode_version = UCODE_R300;
-		break;
-	case RADEON_INIT_R500_CP:
-		dev_priv->microcode_version = UCODE_R500;
 		break;
 	default:
 		dev_priv->microcode_version = UCODE_R100;
@@ -1832,7 +1509,7 @@ static int radeon_do_init_cp(drm_device_t * dev, drm_radeon_init_t * init)
 				    init->sarea_priv_offset);
 
 #if __OS_HAS_AGP
-	if (dev_priv->flags & RADEON_IS_AGP) {
+	if (dev_priv->flags & CHIP_IS_AGP) {
 		drm_core_ioremap(dev_priv->cp_ring, dev);
 		drm_core_ioremap(dev_priv->ring_rptr, dev);
 		drm_core_ioremap(dev->agp_buffer_map, dev);
@@ -1891,7 +1568,7 @@ static int radeon_do_init_cp(drm_device_t * dev, drm_radeon_init_t * init)
 		 * align it down.
 		 */
 #if __OS_HAS_AGP
-		if (dev_priv->flags & RADEON_IS_AGP) {
+		if (dev_priv->flags & CHIP_IS_AGP) {
 			base = dev->agp->base;
 			/* Check if valid */
 		if ((base + dev_priv->gart_size - 1) >= dev_priv->fb_location &&
@@ -1922,7 +1599,7 @@ static int radeon_do_init_cp(drm_device_t * dev, drm_radeon_init_t * init)
 	}
 
 #if __OS_HAS_AGP
-	if (dev_priv->flags & RADEON_IS_AGP)
+	if (dev_priv->flags & CHIP_IS_AGP)
 		dev_priv->gart_buffers_offset = (dev->agp_buffer_map->offset
 						 - dev->agp->base
 						 + dev_priv->gart_vm_start);
@@ -1948,7 +1625,7 @@ static int radeon_do_init_cp(drm_device_t * dev, drm_radeon_init_t * init)
 	dev_priv->ring.high_mark = RADEON_RING_HIGH_MARK;
 
 #if __OS_HAS_AGP
-	if (dev_priv->flags & RADEON_IS_AGP) {
+	if (dev_priv->flags & CHIP_IS_AGP) {
 		/* Turn off PCI GART */
 		radeon_set_pcigart(dev_priv, 0);
 	} else
@@ -1967,10 +1644,8 @@ static int radeon_do_init_cp(drm_device_t * dev, drm_radeon_init_t * init)
 			dev_priv->gart_info.addr =
 			    dev_priv->gart_info.mapping.handle;
 
-			if (dev_priv->flags & RADEON_IS_PCIE)
-				dev_priv->gart_info.gart_reg_if = DRM_ATI_GART_PCIE;
-			else
-				dev_priv->gart_info.gart_reg_if = DRM_ATI_GART_PCI;
+			dev_priv->gart_info.is_pcie =
+			    !!(dev_priv->flags & CHIP_IS_PCIE);
 			dev_priv->gart_info.gart_table_location =
 			    DRM_ATI_GART_FB;
 
@@ -1978,15 +1653,11 @@ static int radeon_do_init_cp(drm_device_t * dev, drm_radeon_init_t * init)
 				  dev_priv->gart_info.addr,
 				  dev_priv->pcigart_offset);
 		} else {
-			if (dev_priv->flags & RADEON_IS_IGPGART)
-				dev_priv->gart_info.gart_reg_if = DRM_ATI_GART_IGP;
-			else
-				dev_priv->gart_info.gart_reg_if = DRM_ATI_GART_PCI;
 			dev_priv->gart_info.gart_table_location =
 			    DRM_ATI_GART_MAIN;
 			dev_priv->gart_info.addr = NULL;
 			dev_priv->gart_info.bus_addr = 0;
-			if (dev_priv->flags & RADEON_IS_PCIE) {
+			if (dev_priv->flags & CHIP_IS_PCIE) {
 				DRM_ERROR
 				    ("Cannot use PCI Express without GART in FB memory\n");
 				radeon_do_cleanup_cp(dev);
@@ -2028,7 +1699,7 @@ static int radeon_do_cleanup_cp(drm_device_t * dev)
 		drm_irq_uninstall(dev);
 
 #if __OS_HAS_AGP
-	if (dev_priv->flags & RADEON_IS_AGP) {
+	if (dev_priv->flags & CHIP_IS_AGP) {
 		if (dev_priv->cp_ring != NULL) {
 			drm_core_ioremapfree(dev_priv->cp_ring, dev);
 			dev_priv->cp_ring = NULL;
@@ -2083,7 +1754,7 @@ static int radeon_do_resume_cp(drm_device_t * dev)
 	DRM_DEBUG("Starting radeon_do_resume_cp()\n");
 
 #if __OS_HAS_AGP
-	if (dev_priv->flags & RADEON_IS_AGP) {
+	if (dev_priv->flags & CHIP_IS_AGP) {
 		/* Turn off PCI GART */
 		radeon_set_pcigart(dev_priv, 0);
 	} else
@@ -2120,7 +1791,6 @@ int radeon_cp_init(DRM_IOCTL_ARGS)
 	case RADEON_INIT_CP:
 	case RADEON_INIT_R200_CP:
 	case RADEON_INIT_R300_CP:
-	case RADEON_INIT_R500_CP:
 		return radeon_do_init_cp(dev, &init);
 	case RADEON_CLEANUP_CP:
 		return radeon_do_cleanup_cp(dev);
@@ -2138,12 +1808,12 @@ int radeon_cp_start(DRM_IOCTL_ARGS)
 	LOCK_TEST_WITH_RETURN(dev, filp);
 
 	if (dev_priv->cp_running) {
-		DRM_DEBUG("%s while CP running\n", __FUNCTION__);
+		DRM_DEBUG("%s while CP running\n", __func__);
 		return 0;
 	}
 	if (dev_priv->cp_mode == RADEON_CSQ_PRIDIS_INDDIS) {
 		DRM_DEBUG("%s called with bogus CP mode (%d)\n",
-			  __FUNCTION__, dev_priv->cp_mode);
+			  __func__, dev_priv->cp_mode);
 		return 0;
 	}
 
@@ -2259,7 +1929,7 @@ int radeon_cp_reset(DRM_IOCTL_ARGS)
 	LOCK_TEST_WITH_RETURN(dev, filp);
 
 	if (!dev_priv) {
-		DRM_DEBUG("%s called before init done\n", __FUNCTION__);
+		DRM_DEBUG("%s called before init done\n", __func__);
 		return DRM_ERR(EINVAL);
 	}
 
@@ -2534,7 +2204,7 @@ int radeon_driver_load(struct drm_device *dev, unsigned long flags)
 	dev->dev_private = (void *)dev_priv;
 	dev_priv->flags = flags;
 
-	switch (flags & RADEON_FAMILY_MASK) {
+	switch (flags & CHIP_FAMILY_MASK) {
 	case CHIP_R100:
 	case CHIP_RV200:
 	case CHIP_R200:
@@ -2542,7 +2212,7 @@ int radeon_driver_load(struct drm_device *dev, unsigned long flags)
 	case CHIP_R350:
 	case CHIP_R420:
 	case CHIP_RV410:
-		dev_priv->flags |= RADEON_HAS_HIERZ;
+		dev_priv->flags |= CHIP_HAS_HIERZ;
 		break;
 	default:
 		/* all other chips have no hierarchical z buffer */
@@ -2550,14 +2220,14 @@ int radeon_driver_load(struct drm_device *dev, unsigned long flags)
 	}
 
 	if (drm_device_is_agp(dev))
-		dev_priv->flags |= RADEON_IS_AGP;
+		dev_priv->flags |= CHIP_IS_AGP;
 	else if (drm_device_is_pcie(dev))
-		dev_priv->flags |= RADEON_IS_PCIE;
+		dev_priv->flags |= CHIP_IS_PCIE;
 	else
-		dev_priv->flags |= RADEON_IS_PCI;
+		dev_priv->flags |= CHIP_IS_PCI;
 
 	DRM_DEBUG("%s card detected\n",
-		  ((dev_priv->flags & RADEON_IS_AGP) ? "AGP" : (((dev_priv->flags & RADEON_IS_PCIE) ? "PCIE" : "PCI"))));
+		  ((dev_priv->flags & CHIP_IS_AGP) ? "AGP" : (((dev_priv->flags & CHIP_IS_PCIE) ? "PCIE" : "PCI"))));
 	return ret;
 }
 

@@ -1,4 +1,4 @@
-/*	$NetBSD: if_bug.c,v 1.3 2009/01/12 11:32:44 tsutsui Exp $	*/
+/*	$NetBSD: if_bug.c,v 1.1 2002/02/27 21:02:27 scw Exp $	*/
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -50,7 +57,7 @@
 static int	bug_match(struct netif *, void *);
 static int	bug_probe(struct netif *, void *);
 static void	bug_init(struct iodesc *, void *);
-static int	bug_get(struct iodesc *, void *, size_t, saseconds_t);
+static int	bug_get(struct iodesc *, void *, size_t, time_t);
 static int	bug_put(struct iodesc *, void *, size_t);
 static void	bug_end(struct netif *);
 
@@ -147,7 +154,7 @@ bug_get(desc, pkt, len, timeout)
 	struct	iodesc *desc;
 	void	*pkt;
 	size_t	len;
-	saseconds_t	timeout;
+	time_t	timeout;
 {
 	struct netif *nif = desc->io_netif;
 	struct bug_softc *sc = nif->nif_devdata;

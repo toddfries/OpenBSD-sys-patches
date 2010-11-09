@@ -1,4 +1,4 @@
-/*	$NetBSD: if_agrvar_impl.h,v 1.7 2007/05/20 07:57:04 yamt Exp $	*/
+/*	$NetBSD: if_agrvar_impl.h,v 1.4 2006/10/29 22:14:14 yamt Exp $	*/
 
 /*-
  * Copyright (c)2005 YAMAMOTO Takashi,
@@ -33,7 +33,7 @@
  * implementaion details for agr(4) driver.  (contrast to if_agrvar.h)
  */
 
-#include <sys/mutex.h>
+#include <sys/lock.h>
 #include <sys/queue.h>
 
 struct agr_port;
@@ -43,7 +43,7 @@ struct agr_port {
 	struct ifnet *port_agrifp;
 	struct ifnet *port_ifp;
 	TAILQ_ENTRY(agr_port) port_q;
-	int (*port_ioctl)(struct ifnet *, u_long, void *);
+	int (*port_ioctl)(struct ifnet *, u_long, caddr_t);
 	void *port_iftprivate;
 	int port_flags;
 	u_int port_media;
@@ -92,9 +92,9 @@ struct agr_iftype_ops {
 	uint32_t (*iftop_hashmbuf)(struct agr_softc *, struct mbuf *);
 
 	int (*iftop_configmulti_port)(struct agr_softc *, struct agr_port *,
-	    bool);
+	    boolean_t);
 	int (*iftop_configmulti_ifreq)(struct agr_softc *, struct ifreq *,
-	    bool);
+	    boolean_t);
 };
 
 struct agr_ifreq {
@@ -103,8 +103,8 @@ struct agr_ifreq {
 };
 
 struct agr_softc {
-	kmutex_t sc_ioctl_lock;
-	kmutex_t sc_lock;
+	struct lock sc_ioctl_lock;
+	struct simplelock sc_lock;
 	struct callout sc_callout;
 	int sc_nports;
 	TAILQ_HEAD(, agr_port) sc_ports;
@@ -118,16 +118,16 @@ struct agr_softc {
 	((struct agr_softc *)(port)->port_agrifp->if_softc)
 
 #define	AGR_LOCK(sc)		agr_lock(sc)
-#define	AGR_UNLOCK(sc)		agr_unlock(sc)
-#define	AGR_ASSERT_LOCKED(sc)	KASSERT(mutex_owned(&(sc)->sc_lock))
+#define	AGR_UNLOCK(sc, s)	agr_unlock((sc), (s))
+#define	AGR_ASSERT_LOCKED(sc)	LOCK_ASSERT(simple_lock_held(&(sc)->sc_lock))
 
-void agr_lock(struct agr_softc *);
-void agr_unlock(struct agr_softc *);
+int agr_lock(struct agr_softc *);
+void agr_unlock(struct agr_softc *, int);
 
 void agr_ioctl_lock(struct agr_softc *);
 void agr_ioctl_unlock(struct agr_softc *);
 
-int agrport_ioctl(struct agr_port *, u_long, void *);
+int agrport_ioctl(struct agr_port *, u_long, caddr_t);
 
 struct agr_softc *agr_alloc_softc(void);
 void agr_free_softc(struct agr_softc *);

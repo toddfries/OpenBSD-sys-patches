@@ -1,4 +1,4 @@
-/*	$NetBSD: svr4_exec.h,v 1.27 2008/11/19 18:36:05 ad Exp $	 */
+/*	$NetBSD: svr4_exec.h,v 1.24 2005/12/11 12:20:26 christos Exp $	 */
 
 /*-
  * Copyright (c) 1994 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -61,12 +68,12 @@
 #define SVR4_INTERP_ADDR	0x10000000
 #endif
 
-extern struct emul emul_svr4;
+extern const struct emul emul_svr4;
 
-void svr4_setregs(struct lwp *, struct exec_package *, u_long);
-int svr4_elf32_probe(struct lwp *, struct exec_package *, void *,
-    char *, vaddr_t *);
-int svr4_elf64_probe(struct lwp *, struct exec_package *, void *,
-    char *, vaddr_t *);
+void svr4_setregs __P((struct lwp *, struct exec_package *, u_long));
+int svr4_elf32_probe __P((struct lwp *, struct exec_package *, void *,
+    char *, vaddr_t *));
+int svr4_elf64_probe __P((struct lwp *, struct exec_package *, void *,
+    char *, vaddr_t *));
 
 #endif /* !_SVR4_EXEC_H_ */

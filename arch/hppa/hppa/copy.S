@@ -1,4 +1,4 @@
-/*	$NetBSD: copy.S,v 1.8 2008/08/11 10:36:41 skrll Exp $	*/
+/*	$NetBSD: copy.S,v 1.4 2005/12/11 12:17:37 christos Exp $	*/
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed by the NetBSD
+ *      Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -100,7 +107,7 @@
 	.align	NBPG	/* let's fit 'em on a single page */
 
 #define	FUSUX(name)				  \
-LEAF_ENTRY_NOPROFILE(name)			! \
+LEAF_ENTRY(name)				! \
 	ldil	L%VM_MAXUSER_ADDRESS, %t1	! \
 	comb,>>= %arg0, %t1, fusubadaddr	! \
 	ldil	L%curlwp, %t1			! \
@@ -127,7 +134,7 @@ EXIT(name)
 	stw	%r0, U_PCB+PCB_ONFAULT(%t1)	! \
 EXIT(name)
 
-LEAF_ENTRY_NOPROFILE(fusufault)
+LEAF_ENTRY(fusufault)
 	stw	%r0, U_PCB+PCB_ONFAULT(%t1)
 ALTENTRY(fusubadaddr)
 	bv	0(%rp)
@@ -145,7 +152,7 @@ SUX(suswintr, sth)
 
 	.align	64
 
-LEAF_ENTRY_NOPROFILE(_copy_on_fault)
+LEAF_ENTRY(_copy_on_fault)
 	/* reset fault handler */
 	stw	%r0, PCB_ONFAULT+U_PCB(%r31)
 ALTENTRY(copy_on_fault)
@@ -155,11 +162,8 @@ EXIT(_copy_on_fault)
 
 /*
  * int spstrcpy (pa_space_t ssp, const void *src, pa_space_t dsp, void *dst,
- *     size_t size, size_t *rsize)
- *
- * Do a space to space size bounded string copy and return actual copy size in
- * rsize. If the copy ran out of space before '\0' is seen return ENAMETOOLONG 
- * 
+ *		 size_t size, size_t *rsize)
+ * do a space to space strncpy, return actual copy size in the rsize;
  */
 LEAF_ENTRY(spstrcpy)
 	/* setup fault handler */
@@ -170,29 +174,28 @@ LEAF_ENTRY(spstrcpy)
 	ldo	R%_copy_on_fault(%t2), %t2
 	stw	%t2, PCB_ONFAULT+U_PCB(%r31)
 
-	ldw	HPPA_FRAME_ARG(4)(%sp), %ret1		/* size */
+	ldw	HPPA_FRAME_ARG(4)(%sp), %ret1
 	mfsp	%sr2, %ret0	/* XXX need this? */
 	mtsp	%arg0, %sr1
 	mtsp	%arg2, %sr2
-	copy	%arg1, %arg0	/* save src */
+	add	%ret1, %arg1, %ret1
+	copy	%arg1, %arg0
 
 $spstrcpy_loop:
-	comb,=,n %r0, %ret1, $spstrcpy_exit
 	ldbs,ma	1(%sr1, %arg1), %t1
+	comb,=	%ret1, %arg1, $spstrcpy_exit
 	stbs,ma	%t1, 1(%sr2, %arg3)
-	comb,<>	%r0, %t1, $spstrcpy_loop
-	ldo	-1(%ret1), %ret1
+	comb,<>,n %r0, %t1, $spstrcpy_loop
 
 $spstrcpy_exit:
 	/* reset fault handler */
 	stw	%r0, PCB_ONFAULT+U_PCB(%r31)
-	mtsp	%r0, %sr2	/* XXX need this? */
+	copy	%r0, %ret0
+	mtsp	%ret0, %sr2	/* XXX need this? */
 	sub	%arg1, %arg0, %arg1
-	ldw	HPPA_FRAME_ARG(5)(%sp), %arg0		/* rsize */
-	comiclr,= 0, %arg0, %r0
+	ldw	HPPA_FRAME_ARG(5)(%sp), %arg0
+	comb,=,n %r0, %arg0, 0
 	stw	%arg1, 0(%arg0)
-	comiclr,= 0, %t1, %ret0
-	ldi	ENAMETOOLONG,%ret0
 	bv,n	0(%rp)
 EXIT(spstrcpy)
 
@@ -233,8 +236,8 @@ ENTRY(name, HPPA_FRAME_SIZE * 2)		! \
 	bv,n	%r0(%rp)			! \
 EXIT(name)
 
-/* This loads curlwp's space into the given register. */
-#define SPACE_CURLWP(reg)			  \
+/* This loads curproc's space into the given register. */
+#define SPACE_CURPROC(reg)			  \
 	ldil	L%curlwp, reg			! \
 	ldw	R%curlwp(reg), reg		! \
 	ldw	L_ADDR(reg), reg		! \
@@ -276,14 +279,14 @@ _SPCOPY(copystr, CALL_SPSTRCPY,
  * int copyinstr(const void *src, void *dst, size_t size, size_t *lenp);
  */
 SPCOPY(copyin, copyinstr,
-	SPACE_CURLWP(%arg0) ! SPACE_KERNEL(%arg2))
+	SPACE_CURPROC(%arg0) ! SPACE_KERNEL(%arg2))
 
 /*
  * int copyout(const void *src, void *dst, size_t size);
  * int copyoutstr(const void *src, void *dst, size_t size, size_t *lenp);
  */
 SPCOPY(copyout, copyoutstr,
-	SPACE_KERNEL(%arg0) ! SPACE_CURLWP(%arg2))
+	SPACE_KERNEL(%arg0) ! SPACE_CURPROC(%arg2))
 
 /*
  * For lack of a better place to put them, these functions

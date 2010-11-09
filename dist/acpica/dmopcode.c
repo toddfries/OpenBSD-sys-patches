@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Module Name: dmopcode - AML disassembler, specific AML opcodes
- *              $Revision: 1.5 $
+ *              xRevision: 1.93 $
  *
  ******************************************************************************/
 
@@ -9,7 +9,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2008, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2006, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -114,6 +114,9 @@
  *
  *****************************************************************************/
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: dmopcode.c,v 1.1 2006/03/23 13:36:31 kochi Exp $");
+
 #include "acpi.h"
 #include "acparser.h"
 #include "amlcode.h"
@@ -202,6 +205,8 @@ AcpiDmFieldFlags (
     UINT32                  Flags;
 
 
+    /* The next peer Op (not child op) contains the flags */
+
     Op = Op->Common.Next;
     Flags = (UINT8) Op->Common.Value.Integer;
 
@@ -209,7 +214,7 @@ AcpiDmFieldFlags (
 
     Op->Common.DisasmFlags |= ACPI_PARSEOP_IGNORE;
 
-    AcpiOsPrintf ("%s, ", AcpiGbl_AccessTypes [Flags & 0x07]);
+    AcpiOsPrintf ("%s, ", AcpiGbl_AccessTypes [Flags & 0x0F]);
     AcpiOsPrintf ("%s, ", AcpiGbl_LockRule [(Flags & 0x10) >> 4]);
     AcpiOsPrintf ("%s)",  AcpiGbl_UpdateRules [(Flags & 0x60) >> 5]);
 }
@@ -338,7 +343,7 @@ AcpiDmMatchKeyword (
 {
 
 
-    if (((UINT32) Op->Common.Value.Integer) > ACPI_MAX_MATCH_OPCODE)
+    if (((UINT32) Op->Common.Value.Integer) >= ACPI_NUM_MATCH_OPS)
     {
         AcpiOsPrintf ("/* Unknown Match Keyword encoding */");
     }
@@ -373,8 +378,6 @@ AcpiDmDisassembleOneOp (
     const ACPI_OPCODE_INFO  *OpInfo = NULL;
     UINT32                  Offset;
     UINT32                  Length;
-    ACPI_PARSE_OBJECT       *Child;
-    ACPI_STATUS             Status;
 
 
     if (!Op)
@@ -390,54 +393,37 @@ AcpiDmDisassembleOneOp (
         AcpiDmMatchKeyword (Op);
         return;
 
-    case ACPI_DASM_LNOT_SUFFIX:
-        switch (Op->Common.AmlOpcode)
-        {
-        case AML_LEQUAL_OP:
-            AcpiOsPrintf ("LNotEqual");
-            break;
-
-        case AML_LGREATER_OP:
-            AcpiOsPrintf ("LLessEqual");
-            break;
-
-        case AML_LLESS_OP:
-            AcpiOsPrintf ("LGreaterEqual");
-            break;
-
-        default:
-            break;
-        }
-        Op->Common.DisasmOpcode = 0;
-        Op->Common.DisasmFlags |= ACPI_PARSEOP_IGNORE;
-        return;
-
     default:
         break;
     }
-
-
-    OpInfo = AcpiPsGetOpcodeInfo (Op->Common.AmlOpcode);
 
     /* The op and arguments */
 
     switch (Op->Common.AmlOpcode)
     {
-    case AML_LNOT_OP:
+    case AML_ZERO_OP:
 
-        Child = Op->Common.Value.Arg;
-        if ((Child->Common.AmlOpcode == AML_LEQUAL_OP) ||
-            (Child->Common.AmlOpcode == AML_LGREATER_OP) ||
-            (Child->Common.AmlOpcode == AML_LLESS_OP))
-        {
-            Child->Common.DisasmOpcode = ACPI_DASM_LNOT_SUFFIX;
-            Op->Common.DisasmOpcode = ACPI_DASM_LNOT_PREFIX;
-        }
-        else
-        {
-            AcpiOsPrintf ("%s", OpInfo->Name);
-        }
+        AcpiOsPrintf ("Zero");
         break;
+
+
+    case AML_ONE_OP:
+
+        AcpiOsPrintf ("One");
+        break;
+
+
+    case AML_ONES_OP:
+
+        AcpiOsPrintf ("Ones");
+        break;
+
+
+    case AML_REVISION_OP:
+
+        AcpiOsPrintf ("Revision");
+        break;
+
 
     case AML_BYTE_OP:
 
@@ -498,19 +484,12 @@ AcpiDmDisassembleOneOp (
          * types of buffers, we have to closely look at the data in the
          * buffer to determine the type.
          */
-        Status = AcpiDmIsResourceTemplate (Op);
-        if (ACPI_SUCCESS (Status))
+        if (AcpiDmIsResourceTemplate (Op))
         {
             Op->Common.DisasmOpcode = ACPI_DASM_RESOURCE;
             AcpiOsPrintf ("ResourceTemplate");
-            break;
         }
-        else if (Status == AE_AML_NO_RESOURCE_END_TAG)
-        {
-            AcpiOsPrintf ("/**** Is ResourceTemplate, but EndTag not at buffer end ****/ ");
-        }
-
-        if (AcpiDmIsUnicodeBuffer (Op))
+        else if (AcpiDmIsUnicodeBuffer (Op))
         {
             Op->Common.DisasmOpcode = ACPI_DASM_UNICODE;
             AcpiOsPrintf ("Unicode (");
@@ -567,7 +546,7 @@ AcpiDmDisassembleOneOp (
 
         if (Info->BitOffset % 8 == 0)
         {
-            AcpiOsPrintf ("        Offset (0x%.2X)", ACPI_DIV_8 (Info->BitOffset));
+            AcpiOsPrintf ("Offset (0x%.2X)", ACPI_DIV_8 (Info->BitOffset));
         }
         else
         {
@@ -580,8 +559,8 @@ AcpiDmDisassembleOneOp (
 
     case AML_INT_ACCESSFIELD_OP:
 
-        AcpiOsPrintf ("        AccessAs (%s, ",
-            AcpiGbl_AccessTypes [(UINT32) (Op->Common.Value.Integer >> 8) & 0x7]);
+        AcpiOsPrintf ("AccessAs (%s, ",
+            AcpiGbl_AccessTypes [(UINT32) Op->Common.Value.Integer >> 8]);
 
         AcpiDmDecodeAttribute ((UINT8) Op->Common.Value.Integer);
         AcpiOsPrintf (")");
@@ -597,6 +576,7 @@ AcpiDmDisassembleOneOp (
 
     case AML_INT_METHODCALL_OP:
 
+        OpInfo = AcpiPsGetOpcodeInfo (Op->Common.AmlOpcode);
         Op = AcpiPsGetDepthNext (NULL, Op);
         Op->Common.DisasmFlags |= ACPI_PARSEOP_IGNORE;
 
@@ -608,6 +588,7 @@ AcpiDmDisassembleOneOp (
 
         /* Just get the opcode name and print it */
 
+        OpInfo = AcpiPsGetOpcodeInfo (Op->Common.AmlOpcode);
         AcpiOsPrintf ("%s", OpInfo->Name);
 
 
@@ -616,15 +597,13 @@ AcpiDmDisassembleOneOp (
         if ((Op->Common.AmlOpcode == AML_INT_RETURN_VALUE_OP) &&
             (WalkState) &&
             (WalkState->Results) &&
-            (WalkState->ResultCount))
+            (WalkState->Results->Results.NumResults))
         {
             AcpiDmDecodeInternalObject (
                 WalkState->Results->Results.ObjDesc [
-                    (WalkState->ResultCount - 1) %
-                        ACPI_RESULTS_FRAME_OBJ_NUM]);
+                    WalkState->Results->Results.NumResults-1]);
         }
 #endif
-
         break;
     }
 }

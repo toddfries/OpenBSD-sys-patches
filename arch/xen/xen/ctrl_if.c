@@ -1,4 +1,4 @@
-/*	$NetBSD: ctrl_if.c,v 1.21 2009/01/16 20:16:47 jym Exp $	*/
+/*	$NetBSD: ctrl_if.c,v 1.13 2006/03/17 06:04:24 jld Exp $	*/
 
 /******************************************************************************
  * ctrl_if.c
@@ -9,18 +9,18 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ctrl_if.c,v 1.21 2009/01/16 20:16:47 jym Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ctrl_if.c,v 1.13 2006/03/17 06:04:24 jld Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/kthread.h>
-#include <sys/simplelock.h>
+#include <sys/malloc.h>
 
-#include <xen/xen.h>
-#include <xen/hypervisor.h>
-#include <xen/ctrl_if.h>
-#include <xen/evtchn.h>
+#include <machine/xen.h>
+#include <machine/hypervisor.h>
+#include <machine/ctrl_if.h>
+#include <machine/evtchn.h>
 
 #if 0
 #define DPRINTK(_f, _a...) printk("(file=%s, line=%d) " _f, \
@@ -60,6 +60,7 @@ static struct {
 
 /* For received messages that must be deferred to process context. */
 static void __ctrl_if_rxmsg_deferred(void *unused);
+static void ctrl_if_kthread_create(void *);
 
 static int ctrl_if_tx_wait;
 static void __ctrl_if_tx_tasklet(unsigned long data);
@@ -90,7 +91,7 @@ __ctrl_if_tx_tasklet(unsigned long data)
     CONTROL_RING_IDX rp;
 
     rp = ctrl_if->tx_resp_prod;
-    xen_rmb(); /* Ensure we see all requests up to 'rp'. */
+    x86_lfence(); /* Ensure we see all requests up to 'rp'. */
 
     while ( ctrl_if_tx_resp_cons != rp )
     {
@@ -135,7 +136,7 @@ __ctrl_if_rxmsg_deferred(void *unused)
 	while (1) {
 		s = splsoftnet();
 		dp = ctrl_if_rxmsg_deferred_prod;
-		xen_rmb(); /* Ensure we see all requests up to 'dp'. */
+		x86_lfence(); /* Ensure we see all requests up to 'dp'. */
 		if (ctrl_if_rxmsg_deferred_cons == dp) {
 			tsleep(&ctrl_if_rxmsg_deferred_cons, PRIBIO,
 			    "rxdef", 0);
@@ -163,7 +164,7 @@ __ctrl_if_rx_tasklet(unsigned long data)
 
     dp = ctrl_if_rxmsg_deferred_prod;
     rp = ctrl_if->rx_req_prod;
-    xen_rmb(); /* Ensure we see all requests up to 'rp'. */
+    x86_lfence(); /* Ensure we see all requests up to 'rp'. */
 
     while ( ctrl_if_rx_req_cons != rp )
     {
@@ -192,7 +193,7 @@ __ctrl_if_rx_tasklet(unsigned long data)
             (*ctrl_if_rxmsg_handler[msg.type])(&msg, 0);
 	/* update rp, in case the console polling code was used */
     	rp = ctrl_if->rx_req_prod;
-    	xen_rmb(); /* Ensure we see all requests up to 'rp'. */
+    	x86_lfence(); /* Ensure we see all requests up to 'rp'. */
     }
 
     if ( dp != ctrl_if_rxmsg_deferred_prod )
@@ -268,7 +269,7 @@ ctrl_if_send_message_noblock(
 
     memcpy(&ctrl_if->tx_ring[MASK_CONTROL_IDX(ctrl_if->tx_req_prod)], 
            msg, sizeof(*msg));
-    xen_rmb(); /* Write the message before letting the controller peek at it. */
+    x86_lfence(); /* Write the message before letting the controller peek at it. */
     ctrl_if->tx_req_prod++;
 
     simple_unlock(&ctrl_if_lock);
@@ -293,7 +294,7 @@ ctrl_if_send_message_block(
 #if 1
 		HYPERVISOR_yield();
 #else
-		rc = tsleep((void *) &ctrl_if_tx_wait, PUSER | PCATCH,
+		rc = tsleep((caddr_t) &ctrl_if_tx_wait, PUSER | PCATCH,
 		    "ctrl_if", 0);
 		if (rc)
 			break;
@@ -315,7 +316,7 @@ static void __ctrl_if_get_response(ctrl_msg_t *msg, unsigned long id)
     struct rsp_wait    *wait = (struct rsp_wait *)id;
 
     memcpy(wait->msg, msg, sizeof(*msg));
-    xen_rmb();
+    x86_lfence();
     wait->done = 1;
 
     wakeup(wait);
@@ -342,7 +343,7 @@ ctrl_if_send_message_and_get_response(
     {
 	    if ( wait.done )
 		    break;
-	    tsleep((void *)&wait, PUSER | PCATCH, "ctrl_if", 0);
+	    tsleep((caddr_t)&wait, PUSER | PCATCH, "ctrl_if", 0);
     }
 
     return 0;
@@ -366,7 +367,7 @@ ctrl_if_enqueue_space_callback(
      * the task is not executed despite the ring being non-full then we will
      * certainly return 'not full'.
      */
-    xen_rmb();
+    x86_lfence();
     return TX_FULL(ctrl_if);
 }
 #endif
@@ -394,7 +395,7 @@ ctrl_if_send_response(
     if ( dmsg != msg )
         memcpy(dmsg, msg, sizeof(*msg));
 
-    xen_rmb(); /* Write the message before letting the controller peek at it. */
+    x86_lfence(); /* Write the message before letting the controller peek at it. */
     ctrl_if->rx_resp_prod++;
 
     simple_unlock(&ctrl_if_lock);
@@ -477,8 +478,8 @@ void ctrl_if_resume(void)
 {
     control_if_t *ctrl_if = get_ctrl_if();
 
-    if (xendomain_is_dom0()) {
-
+    if ( xen_start_info.flags & SIF_INITDOMAIN )
+    {
         /*
          * The initial domain must create its own domain-controller link.
          * The controller is probably not running at this point, but will
@@ -519,7 +520,7 @@ void ctrl_if_early_init(void)
 
 void ctrl_if_init(void)
 {
-	int i, error;
+	int i;
 
 	for ( i = 0; i < 256; i++ )
 		ctrl_if_rxmsg_handler[i] = ctrl_if_rxmsg_default_handler;
@@ -527,15 +528,23 @@ void ctrl_if_init(void)
 	if (ctrl_if_evtchn == -1)
 		ctrl_if_early_init();
 
-	error = kthread_create(PRI_NONE, 0, NULL, __ctrl_if_rxmsg_deferred,
-	    NULL, NULL, "ctrlif");
-	if (error != 0) {
-		aprint_error("ctrlif: unable to create kernel thread: "
-		    "error %d\n", error);
-	}
+	kthread_create(ctrl_if_kthread_create, NULL);
 
 	ctrl_if_resume();
 }
+
+static void
+ctrl_if_kthread_create(void *arg)
+{
+	int error;
+	static struct proc *ctrl_if_proc;
+	if ((error = kthread_create1(__ctrl_if_rxmsg_deferred, NULL,
+	    &ctrl_if_proc, "ctrlif")) != 0) {
+		aprint_error("ctrlif: unable to create kernel thread: "
+		    "error %d\n", error);
+	}
+}
+
 
 /*
  * !! The following are DANGEROUS FUNCTIONS !!

@@ -1,4 +1,4 @@
-/*	$NetBSD: armfpe_init.c,v 1.13 2007/10/17 19:53:40 garbled Exp $	*/
+/*	$NetBSD: armfpe_init.c,v 1.10 2006/07/19 21:11:40 ad Exp $	*/
 
 /*
  * Copyright (C) 1996 Mark Brinicombe
@@ -43,7 +43,7 @@
 
 #include <sys/param.h>
 
-__KERNEL_RCSID(0, "$NetBSD: armfpe_init.c,v 1.13 2007/10/17 19:53:40 garbled Exp $");
+__KERNEL_RCSID(0, "$NetBSD: armfpe_init.c,v 1.10 2006/07/19 21:11:40 ad Exp $");
 
 #include <sys/systm.h>
 #include <sys/proc.h>
@@ -58,6 +58,7 @@ __KERNEL_RCSID(0, "$NetBSD: armfpe_init.c,v 1.13 2007/10/17 19:53:40 garbled Exp
 
 #include <arm/fpe-arm/armfpe.h>
 
+extern int want_resched;
 extern u_int fpe_nexthandler;
 
 extern u_int fpe_arm_start[];
@@ -189,11 +190,11 @@ arm_fpe_postproc(fpframe, frame)
 
 	p->p_priority = p->p_usrpri;
 
-	if (curcpu()->ci_want_resched) {
+	if (want_resched) {
 		/*
 		 * We are being preempted.
 		 */
-		preempt();
+		preempt(0);
 		while ((sig = (CURSIG(p))) != 0) {
 			postsig(sig);
 		}

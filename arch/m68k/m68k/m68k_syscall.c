@@ -1,4 +1,4 @@
-/*	$NetBSD: m68k_syscall.c,v 1.37 2009/01/11 20:40:31 martin Exp $	*/
+/*	$NetBSD: m68k_syscall.c,v 1.25 2006/07/22 06:58:17 tsutsui Exp $	*/
 
 /*-
  * Portions Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -110,12 +110,12 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: m68k_syscall.c,v 1.37 2009/01/11 20:40:31 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: m68k_syscall.c,v 1.25 2006/07/22 06:58:17 tsutsui Exp $");
 
 #include "opt_execfmt.h"
+#include "opt_ktrace.h"
 #include "opt_compat_netbsd.h"
 #include "opt_compat_aout_m68k.h"
-#include "opt_sa.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -123,13 +123,12 @@ __KERNEL_RCSID(0, "$NetBSD: m68k_syscall.c,v 1.37 2009/01/11 20:40:31 martin Exp
 #include <sys/pool.h>
 #include <sys/acct.h>
 #include <sys/kernel.h>
-#include <sys/sa.h>
-#include <sys/savar.h>
 #include <sys/syscall.h>
-#include <sys/syscallvar.h>
 #include <sys/syslog.h>
 #include <sys/user.h>
+#ifdef KTRACE
 #include <sys/ktrace.h>
+#endif
 
 #include <machine/psl.h>
 #include <machine/cpu.h>
@@ -172,12 +171,6 @@ syscall(register_t code, struct frame frame)
 	l->l_md.md_regs = frame.f_regs;
 	LWP_CACHE_CREDS(l, p);
 
-#ifdef KERN_SA
-	if (__predict_false((l->l_savp)
-            && (l->l_savp->savp_pflags & SAVP_FLAG_DELIVERING)))
-		l->l_savp->savp_pflags &= ~SAVP_FLAG_DELIVERING;
-#endif
-
 	(p->p_md.md_syscall)(code, l, &frame);
 
 	machine_userret(l, &frame, sticks);
@@ -211,7 +204,7 @@ aoutm68k_syscall_intern(struct proc *p)
 static void
 syscall_plain(register_t code, struct lwp *l, struct frame *frame)
 {
-	char *params;
+	caddr_t params;
 	const struct sysent *callp;
 	int error, nsys;
 	size_t argsize;
@@ -221,7 +214,7 @@ syscall_plain(register_t code, struct lwp *l, struct frame *frame)
 	nsys = p->p_emul->e_nsysent;
 	callp = p->p_emul->e_sysent;
 
-	params = (char *)frame->f_regs[SP] + sizeof(int);
+	params = (caddr_t)frame->f_regs[SP] + sizeof(int);
 
 	switch (code) {
 	case SYS_syscall:
@@ -267,14 +260,14 @@ syscall_plain(register_t code, struct lwp *l, struct frame *frame)
 
 	argsize = callp->sy_argsize;
 	if (argsize) {
-		error = copyin(params, (void *)args, argsize);
+		error = copyin(params, (caddr_t)args, argsize);
 		if (error)
 			goto bad;
 	}
 
 	rval[0] = 0;
 	rval[1] = frame->f_regs[D1];
-	error = sy_call(callp, l, args, rval);
+	error = (*callp->sy_call)(l, args, rval);
 
 	switch (error) {
 	case 0:
@@ -287,16 +280,6 @@ syscall_plain(register_t code, struct lwp *l, struct frame *frame)
 		frame->f_regs[D0] = rval[0];
 		frame->f_regs[D1] = rval[1];
 		frame->f_sr &= ~PSL_C;	/* carry bit */
-#ifdef COMPAT_50
-		/*
-		 * Starting with the 5.0 release all libc assembler
-		 * stubs properly handle returning pointers in %a0
-		 * themselves, so no need to copy the syscall return
-		 * value there. However, -current binaries post 4.0
-		 * but pre-5.0 might still require this copy, so we
-		 * select this behaviour based on COMPAT_50 as we have
-		 * no equivvalent for the exact in-between version.
-		 */
 #ifdef COMPAT_AOUT_M68K
 		{
 			extern struct emul emul_netbsd_aoutm68k;
@@ -308,9 +291,6 @@ syscall_plain(register_t code, struct lwp *l, struct frame *frame)
 			if (p->p_emul != &emul_netbsd_aoutm68k)
 				frame->f_regs[A0] = rval[0];
 		}
-#else
-		frame->f_regs[A0] = rval[0];
-#endif
 #endif
 		break;
 	case ERESTART:
@@ -326,7 +306,7 @@ syscall_plain(register_t code, struct lwp *l, struct frame *frame)
 	default:
 	bad:
 		/*
-		 * XXX: SVR4 uses this code-path, so we may have
+		 * XXX: HPUX and SVR4 use this code-path, so we may have
 		 * to translate errno.
 		 */
 		if (p->p_emul->e_errno)
@@ -340,7 +320,7 @@ syscall_plain(register_t code, struct lwp *l, struct frame *frame)
 static void
 syscall_fancy(register_t code, struct lwp *l, struct frame *frame)
 {
-	char *params;
+	caddr_t params;
 	const struct sysent *callp;
 	int error, nsys;
 	size_t argsize;
@@ -350,7 +330,7 @@ syscall_fancy(register_t code, struct lwp *l, struct frame *frame)
 	nsys = p->p_emul->e_nsysent;
 	callp = p->p_emul->e_sysent;
 
-	params = (char *)frame->f_regs[SP] + sizeof(int);
+	params = (caddr_t)frame->f_regs[SP] + sizeof(int);
 
 	switch (code) {
 	case SYS_syscall:
@@ -396,17 +376,17 @@ syscall_fancy(register_t code, struct lwp *l, struct frame *frame)
 
 	argsize = callp->sy_argsize;
 	if (argsize) {
-		error = copyin(params, (void *)args, argsize);
+		error = copyin(params, (caddr_t)args, argsize);
 		if (error)
 			goto bad;
 	}
 
-	if ((error = trace_enter(code, args, callp->sy_narg)) != 0)
+	if ((error = trace_enter(l, code, code, NULL, args)) != 0)
 		goto out;
 
 	rval[0] = 0;
 	rval[1] = frame->f_regs[D1];
-	error = sy_call(callp, l, args, rval);
+	error = (*callp->sy_call)(l, args, rval);
 out:
 	switch (error) {
 	case 0:
@@ -419,8 +399,6 @@ out:
 		frame->f_regs[D0] = rval[0];
 		frame->f_regs[D1] = rval[1];
 		frame->f_sr &= ~PSL_C;	/* carry bit */
-#ifdef COMPAT_50
-		/* see syscall_plain for a comment explaining this */
 #ifdef COMPAT_AOUT_M68K
 		{
 			extern struct emul emul_netbsd_aoutm68k;
@@ -432,9 +410,6 @@ out:
 			if (p->p_emul != &emul_netbsd_aoutm68k)
 				frame->f_regs[A0] = rval[0];
 		}
-#else
-		frame->f_regs[A0] = rval[0];
-#endif
 #endif
 		break;
 	case ERESTART:
@@ -450,7 +425,7 @@ out:
 	default:
 	bad:
 		/*
-		 * XXX: SVR4 uses this code-path, so we may have
+		 * XXX: HPUX and SVR4 use this code-path, so we may have
 		 * to translate errno.
 		 */
 		if (p->p_emul->e_errno)
@@ -460,7 +435,7 @@ out:
 		break;
 	}
 
-	trace_exit(code, rval, error);
+	trace_exit(l, code, args, rval, error);
 }
 
 void
@@ -475,7 +450,10 @@ child_return(void *arg)
 	f->f_format = FMT0;
 
 	machine_userret(l, f, 0);
-	ktrsysret(SYS_fork, 0, 0);
+#ifdef KTRACE
+	if (KTRPOINT(l->l_proc, KTR_SYSRET))
+		ktrsysret(l, SYS_fork, 0, 0);
+#endif
 }
 
 /*

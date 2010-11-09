@@ -1,4 +1,4 @@
-/*	$NetBSD: rd.c,v 1.22 2009/01/13 13:35:53 yamt Exp $ */
+/*	$NetBSD: rd.c,v 1.18 2007/10/08 16:41:11 ad Exp $ */
 
 /*-
  * Copyright (c) 1996-2003 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -111,7 +118,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: rd.c,v 1.22 2009/01/13 13:35:53 yamt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: rd.c,v 1.18 2007/10/08 16:41:11 ad Exp $");
 
 #include "rnd.h"
 
@@ -359,14 +366,13 @@ rdattach(parent, self, aux)
 		return;
 
 	if (cs80reset(parent, sc->sc_slave, sc->sc_punit)) {
-		aprint_normal("\n");
-		aprint_error_dev(&sc->sc_dev, "can't reset device\n");
+		printf("\n%s: can't reset device\n", sc->sc_dev.dv_xname);
 		return;
 	}
 
 	if (cs80describe(parent, sc->sc_slave, sc->sc_punit, &csd)) {
-		aprint_normal("\n");
-		aprint_error_dev(&sc->sc_dev, "didn't respond to describe command\n");
+		printf("\n%s: didn't respond to describe command\n",
+		    sc->sc_dev.dv_xname);
 		return;
 	}
 	memset(name, 0, sizeof(name));
@@ -378,7 +384,7 @@ rdattach(parent, self, aux)
 #ifdef DEBUG
 	if (rddebug & RDB_IDENT) {
 		printf("\n%s: name: ('%s')\n",
-		    device_xname(&sc->sc_dev), name);
+		    sc->sc_dev.dv_xname, name);
 		printf("  iuw %x, maxxfr %d, ctype %d\n",
 		    csd.d_iuw, csd.d_cmaxxfr, csd.d_ctype);
 		printf("  utype %d, bps %d, blkbuf %d, burst %d, blktime %d\n",
@@ -390,7 +396,7 @@ rdattach(parent, self, aux)
 		printf("  maxcyl/head/sect %d/%d/%d, maxvsect %d, inter %d\n",
 		    csd.d_maxcylhead >> 8, csd.d_maxcylhead & 0xff,
 		    csd.d_maxsect, csd.d_maxvsectl, csd.d_interleave);
-		printf("%s", device_xname(&sc->sc_dev));
+		printf("%s", sc->sc_dev.dv_xname);
 	}
 #endif
 
@@ -432,7 +438,7 @@ rdattach(parent, self, aux)
 	 */
 	printf(": %s\n", rdidentinfo[type].ri_desc);
 	printf("%s: %d cylinders, %d heads, %d blocks, %d bytes/block\n",
-	    device_xname(&sc->sc_dev), rdidentinfo[type].ri_ncyl,
+	    sc->sc_dev.dv_xname, rdidentinfo[type].ri_ncyl,
 	    rdidentinfo[type].ri_ntpc, rdidentinfo[type].ri_nblocks,
 	    DEV_BSIZE);
 
@@ -442,14 +448,14 @@ rdattach(parent, self, aux)
 	 * Initialize and attach the disk structure.
 	 */
 	memset(&sc->sc_dk, 0, sizeof(sc->sc_dk));
-	disk_init(&sc->sc_dk, device_xname(&sc->sc_dev), NULL);
+	disk_init(&sc->sc_dk, sc->sc_dev.dv_xname, NULL);
 	disk_attach(&sc->sc_dk);
 
 	callout_init(&sc->sc_restart_ch, 0);
 
 	if (gpibregister(sc->sc_ic, sc->sc_slave, rdcallback, sc,
 	    &sc->sc_hdl)) {
-		aprint_error_dev(&sc->sc_dev, "can't register callback\n");
+		printf("%s: can't register callback\n", sc->sc_dev.dv_xname);
 		return;
 	}
 
@@ -463,7 +469,7 @@ rdattach(parent, self, aux)
 	/*
 	 * attach the device into the random source list
 	 */
-	rnd_attach_source(&sc->rnd_source, device_xname(&sc->sc_dev),
+	rnd_attach_source(&sc->rnd_source, sc->sc_dev.dv_xname,
 			  RND_TYPE_DISK, 0);
 #endif
 }
@@ -492,7 +498,7 @@ rdgetinfo(sc)
 		return (0);
 
 	pi = lp->d_partitions;
-	printf("%s: WARNING: %s\n", device_xname(&sc->sc_dev), msg);
+	printf("%s: WARNING: %s\n", sc->sc_dev.dv_xname, msg);
 
 	pi[RAW_PART].p_size = rdidentinfo[sc->sc_type].ri_nblocks;
 	lp->d_npartitions = RAW_PART+1;
@@ -502,12 +508,15 @@ rdgetinfo(sc)
 }
 
 int
-rdopen(dev_t dev, int flags, int mode, struct lwp *l)
+rdopen(dev, flags, mode, l)
+	dev_t dev;
+	int flags, mode;
+	struct lwp *l;
 {
 	struct rd_softc *sc;
 	int error, mask, part;
 
-	sc = device_lookup_private(&rd_cd, RDUNIT(dev));
+	sc = device_lookup(&rd_cd, RDUNIT(dev));
 	if (sc == NULL || (sc->sc_flags & RDF_ALIVE) ==0)
 		return (ENXIO);
 
@@ -555,13 +564,16 @@ rdopen(dev_t dev, int flags, int mode, struct lwp *l)
 }
 
 int
-rdclose(dev_t dev, int flag, int mode, struct lwp *l)
+rdclose(dev, flag, mode, l)
+	dev_t dev;
+	int flag, mode;
+	struct lwp *l;
 {
 	struct rd_softc *sc;
 	struct disk *dk;
 	int mask, s;
 
-	sc = device_lookup_private(&rd_cd, RDUNIT(dev));
+	sc = device_lookup(&rd_cd, RDUNIT(dev));
 	if (sc == NULL)
 		return (ENXIO);
 
@@ -595,7 +607,8 @@ rdclose(dev_t dev, int flag, int mode, struct lwp *l)
 }
 
 void
-rdstrategy(struct buf *bp)
+rdstrategy(bp)
+	struct buf *bp;
 {
 	struct rd_softc *sc;
 	struct partition *pinfo;
@@ -603,7 +616,7 @@ rdstrategy(struct buf *bp)
 	int sz, s;
 	int offset;
 
-	sc = device_lookup_private(&rd_cd, RDUNIT(bp->b_dev));
+	sc = device_lookup(&rd_cd, RDUNIT(bp->b_dev));
 
 	DPRINTF(RDB_FOLLOW,
 	    ("rdstrategy(%p): dev %x, bn %" PRId64 ", bcount %ld, %c\n",
@@ -649,7 +662,7 @@ rdstrategy(struct buf *bp)
 	}
 	bp->b_rawblkno = bn + offset;
 	s = splbio();
-	bufq_put(sc->sc_tab, bp);
+	BUFQ_PUT(sc->sc_tab, bp);
 	if (sc->sc_active == 0) {
 		sc->sc_active = 1;
 		rdustart(sc);
@@ -683,7 +696,7 @@ rdustart(sc)
 {
 	struct buf *bp;
 
-	bp = bufq_peek(sc->sc_tab);
+	bp = BUFQ_PEEK(sc->sc_tab);
 	sc->sc_addr = bp->b_data;
 	sc->sc_resid = bp->b_bcount;
 	if (gpibrequest(sc->sc_ic, sc->sc_hdl))
@@ -697,11 +710,11 @@ rdfinish(sc, bp)
 {
 
 	sc->sc_errcnt = 0;
-	(void)bufq_get(sc->sc_tab);
+	(void)BUFQ_GET(sc->sc_tab);
 	bp->b_resid = 0;
 	biodone(bp);
 	gpibrelease(sc->sc_ic, sc->sc_hdl);
-	if ((bp = bufq_peek(sc->sc_tab)) != NULL)
+	if ((bp = BUFQ_PEEK(sc->sc_tab)) != NULL)
 		return (bp);
 	sc->sc_active = 0;
 	if (sc->sc_flags & RDF_WANTED) {
@@ -743,14 +756,14 @@ void
 rdstart(sc)
 	struct rd_softc *sc;
 {
-	struct buf *bp = bufq_peek(sc->sc_tab);
+	struct buf *bp = BUFQ_PEEK(sc->sc_tab);
 	int part, slave, punit;
 
 	slave = sc->sc_slave;
 	punit = sc->sc_punit;
 
 	DPRINTF(RDB_FOLLOW, ("rdstart(%s): bp %p, %c\n",
-	    device_xname(&sc->sc_dev), bp, (bp->b_flags & B_READ) ? 'R' : 'W'));
+	    sc->sc_dev.dv_xname, bp, (bp->b_flags & B_READ) ? 'R' : 'W'));
 
 again:
 
@@ -791,7 +804,7 @@ again:
 	if (sc->sc_errcnt++ < RDRETRY)
 		goto again;
 	printf("%s: rdstart err: cmd 0x%x sect %uld blk %" PRId64 " len %d\n",
-	       device_xname(&sc->sc_dev), sc->sc_ioc.c_cmd, sc->sc_ioc.c_addr,
+	       sc->sc_dev.dv_xname, sc->sc_ioc.c_cmd, sc->sc_ioc.c_addr,
 	       bp->b_blkno, sc->sc_resid);
 	bp->b_error = EIO;
 	bp = rdfinish(sc, bp);
@@ -812,10 +825,10 @@ rdintr(sc)
 	int rv, dir, restart, slave;
 
 	slave = sc->sc_slave;
-	bp = bufq_peek(sc->sc_tab);
+	bp = BUFQ_PEEK(sc->sc_tab);
 
 	DPRINTF(RDB_FOLLOW, ("rdintr(%s): bp %p, %c, flags %x\n",
-	    device_xname(&sc->sc_dev), bp, (bp->b_flags & B_READ) ? 'R' : 'W',
+	    sc->sc_dev.dv_xname, bp, (bp->b_flags & B_READ) ? 'R' : 'W',
 	    sc->sc_flags));
 
 	disk_unbusy(&sc->sc_dk, (bp->b_bcount - bp->b_resid),
@@ -913,7 +926,7 @@ rderror(sc)
 		int rdtimo = RDWAITC << sc->sc_errcnt;
 		DPRINTF(RDB_STATUS,
 		    ("%s: internal maintenance, %d-second timeout\n",
-		    device_xname(&sc->sc_dev), rdtimo));
+		    sc->sc_dev.dv_xname, rdtimo));
 		gpibrelease(sc->sc_ic, sc->sc_hdl);
 		callout_reset(&sc->sc_restart_ch, rdtimo * hz, rdrestart, sc);
 		return (0);
@@ -929,7 +942,7 @@ rderror(sc)
 	/*
 	 * First conjure up the block number at which the error occurred.
  	 */
-	bp = bufq_peek(sc->sc_tab);
+	bp = BUFQ_PEEK(sc->sc_tab);
 	pbn = sc->sc_dk.dk_label->d_partitions[RDPART(bp->b_dev)].p_offset;
 	if ((css.c_fef & FEF_CU) || (css.c_fef & FEF_DR) ||
 	    (css.c_ief & IEF_RRMASK)) {
@@ -976,12 +989,12 @@ rderror(sc)
 	 * of the transfer, not necessary where the error occurred.
 	 */
 	printf("%s%c: hard error, sector number %" PRId64 "\n",
-	    device_xname(&sc->sc_dev), 'a'+RDPART(bp->b_dev), pbn);
+	    sc->sc_dev.dv_xname, 'a'+RDPART(bp->b_dev), pbn);
 	/*
 	 * Now report the status as returned by the hardware with
 	 * attempt at interpretation.
 	 */
-	printf("%s %s error:", device_xname(&sc->sc_dev),
+	printf("%s %s error:", sc->sc_dev.dv_xname,
 	    (bp->b_flags & B_READ) ? "read" : "write");
 	printf(" unit %d, volume %d R0x%x F0x%x A0x%x I0x%x\n",
 	       css.c_vu&0xF, (css.c_vu>>4)&0xF,
@@ -1015,13 +1028,18 @@ rdwrite(dev, uio, flags)
 }
 
 int
-rdioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
+rdioctl(dev, cmd, data, flag, l)
+	dev_t dev;
+	u_long cmd;
+	void *data;
+	int flag;
+	struct lwp *l;
 {
 	struct rd_softc *sc;
 	struct disklabel *lp;
 	int error, flags;
 
-	sc = device_lookup_private(&rd_cd, RDUNIT(dev));
+	sc = device_lookup(&rd_cd, RDUNIT(dev));
 	if (sc == NULL)
 		return (ENXIO);
 	lp = sc->sc_dk.dk_label;
@@ -1112,12 +1130,13 @@ rdgetdefaultlabel(sc, lp)
 }
 
 int
-rdsize(dev_t dev)
+rdsize(dev)
+	dev_t dev;
 {
 	struct rd_softc *sc;
 	int psize, didopen = 0;
 
-	sc = device_lookup_private(&rd_cd, RDUNIT(dev));
+	sc = device_lookup(&rd_cd, RDUNIT(dev));
 	if (sc == NULL || (sc->sc_flags & RDF_ALIVE) == 0)
 		return (-1);
 
@@ -1145,7 +1164,11 @@ static int rddoingadump;	/* simple mutex */
  * Non-interrupt driven, non-dma dump routine.
  */
 int
-rddump(dev_t dev, daddr_t blkno, void *va, size_t size)
+rddump(dev, blkno, va, size)
+	dev_t dev;
+	daddr_t blkno;
+	void *va;
+	size_t size;
 {
 	struct rd_softc *sc;
 	int sectorsize;		/* size of a disk sector */
@@ -1162,7 +1185,7 @@ rddump(dev_t dev, daddr_t blkno, void *va, size_t size)
 		return (EFAULT);
 	rddoingadump = 1;
 
-	sc = device_lookup_private(&rd_cd, RDUNIT(dev));
+	sc = device_lookup(&rd_cd, RDUNIT(dev));
 	if (sc == NULL || (sc->sc_flags & RDF_ALIVE) == 0)
 		return (ENXIO);
 
@@ -1220,7 +1243,7 @@ rddump(dev_t dev, daddr_t blkno, void *va, size_t size)
 			return (EIO);
 #else /* RD_DUMP_NOT_TRUSTED */
 		/* Let's just talk about this first... */
-		printf("%s: dump addr %p, blk %d\n", device_xname(&sc->sc_dev),
+		printf("%s: dump addr %p, blk %d\n", sc->sc_dev.dv_xname,
 		    va, blkno);
 		delay(500 * 1000);	/* half a second */
 #endif /* RD_DUMP_NOT_TRUSTED */

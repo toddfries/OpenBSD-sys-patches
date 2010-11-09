@@ -1,4 +1,4 @@
-/*	$NetBSD: boot.c,v 1.14 2009/01/31 14:22:21 tsutsui Exp $	*/
+/*	$NetBSD: boot.c,v 1.10 2005/12/11 12:19:44 christos Exp $	*/
 
 /*
  * Copyright (c) 2001 Minoura Makoto
@@ -57,7 +57,7 @@ static void ls(char *);
 int bootmenu(void);
 void bootmain(int);
 extern int detectmpu(void);
-extern int badbaddr(void *);
+extern int badbaddr(caddr_t);
 
 /* from boot_ufs/bootmain.c */
 static int
@@ -104,17 +104,10 @@ doboot(const char *file, int flags)
 	int fd;
 	int dev, unit, part;
 	char *name;
-	short *p;
-	int loadflag;
 
 	printf("Starting %s, flags 0x%x\n", file, flags);
-
-	loadflag = LOAD_KERNEL;
-	if (file[0] == 'f')
-		loadflag &= ~LOAD_NOTE;
-		
 	marks[MARK_START] = 0x100000;
-	if ((fd = loadfile(file, marks, loadflag)) == -1) {
+	if ((fd = loadfile(file, marks, LOAD_KERNEL)) == -1) {
 		printf("loadfile failed\n");
 		return;
 	}
@@ -143,16 +136,18 @@ doboot(const char *file, int flags)
 	       B_X68K_SCSI_LUN(dev),
 	       B_X68K_SCSI_PART(dev) + 'a');
 
-	p = ((short*) marks[MARK_ENTRY]) - 1;
-	printf("Kernel Version: 0x%x\n", *p);
-	if (*p != 0x4e73 && *p != 0) {
-		/*
-		 * XXX temporary solution; compatibility loader
-		 * must be written.
-		 */
-		printf("This kernel is too new to be loaded by "
-		       "this version of /boot.\n");
-		return;
+	{
+		short *p = ((short*) marks[MARK_ENTRY]) - 1;
+		printf("Kernel Version: 0x%x\n", *p);
+		if (*p != 0x4e73 && *p != 0) {
+			/*
+			 * XXX temporary solution; compatibility loader
+			 * must be written.
+			 */
+			printf("This kernel is too new to be loaded by "
+			       "this version of /boot.\n");
+			return;
+		}
 	}
 
 	exec_image(marks[MARK_START], 0, marks[MARK_ENTRY]-marks[MARK_START],

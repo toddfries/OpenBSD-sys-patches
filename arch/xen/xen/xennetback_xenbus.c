@@ -1,4 +1,4 @@
-/*      $NetBSD: xennetback_xenbus.c,v 1.28 2009/02/12 20:57:45 bouyer Exp $      */
+/*      $NetBSD: xennetback_xenbus.c,v 1.12 2006/10/15 13:34:17 bouyer Exp $      */
 
 /*
  * Copyright (c) 2006 Manuel Bouyer.
@@ -44,7 +44,6 @@
 #include <sys/ioctl.h>
 #include <sys/errno.h>
 #include <sys/device.h>
-#include <sys/intr.h>
 
 #include <net/if.h>
 #include <net/if_types.h>
@@ -60,11 +59,11 @@
 #include <net/if_ether.h>
 
 
-#include <xen/xen.h>
-#include <xen/xen_shm.h>
-#include <xen/evtchn.h>
-#include <xen/xenbus.h>
-#include <xen/xennet_checksum.h>
+#include <machine/xen.h>
+#include <machine/xen_shm.h>
+#include <machine/evtchn.h>
+#include <machine/xenbus.h>
+#include <machine/xennet_checksum.h>
 
 #include <uvm/uvm.h>
 
@@ -74,7 +73,7 @@
 #define XENPRINTF(x)
 #endif
 
-#define NET_TX_RING_SIZE __RING_SIZE((netif_tx_sring_t *)0, PAGE_SIZE)
+#define NET_TX_RING_SIZE __RING_SIZE((netif_tx_sring_t *)0, PAGE_SIZE)  
 #define NET_RX_RING_SIZE __RING_SIZE((netif_rx_sring_t *)0, PAGE_SIZE)
 
 /* linux wants at last 16 bytes free in front of the packet */
@@ -104,7 +103,7 @@ typedef enum {CONNECTED, DISCONNECTING, DISCONNECTED} xnetback_state_t;
 
 /* we keep the xnetback instances in a linked list */
 struct xnetback_instance {
-	SLIST_ENTRY(xnetback_instance) next;
+	SLIST_ENTRY(xnetback_instance) next; 
 	struct xenbus_device *xni_xbusd; /* our xenstore entry */
 	domid_t xni_domid;		/* attached to this domain */
 	uint32_t xni_handle;	/* domain-specific handle */
@@ -114,7 +113,7 @@ struct xnetback_instance {
 	/* network interface stuff */
 	struct ethercom xni_ec;
 	struct callout xni_restart;
-	uint8_t xni_enaddr[ETHER_ADDR_LEN];
+	u_int8_t xni_enaddr[ETHER_ADDR_LEN];
 
 	/* remote domain communication stuff */
 	unsigned int xni_evtchn; /* our even channel */
@@ -129,7 +128,7 @@ struct xnetback_instance {
 #define xni_bpf   xni_if.if_bpf
 
        void xvifattach(int);
-static int  xennetback_ifioctl(struct ifnet *, u_long, void *);
+static int  xennetback_ifioctl(struct ifnet *, u_long, caddr_t);
 static void xennetback_ifstart(struct ifnet *);
 static void xennetback_ifsoftstart(void *);
 static void xennetback_ifwatchdog(struct ifnet *);
@@ -142,7 +141,7 @@ static void xennetback_frontend_changed(void *, XenbusState);
 
 static inline void xennetback_tx_response(struct xnetback_instance *,
     int, int);
-static void xennetback_tx_free(struct mbuf * , void *, size_t, void *);
+static void xennetback_tx_free(struct mbuf * , caddr_t, size_t, void *);
 
 SLIST_HEAD(, xnetback_instance) xnetback_instances;
 
@@ -160,8 +159,8 @@ static struct xenbus_backend_driver xvif_backend_driver = {
  */
 #define NB_XMIT_PAGES_BATCH 64
 /*
- * We will transfer a mapped page to the remote domain, and remap another
- * page in place immediately. For this we keep a list of pages available.
+ * We will transfers a mapped page to the remote domain, and remap another
+ * page in place immediatly. For this we keep a list of pages available.
  * When the list is empty, we ask the hypervisor to give us
  * NB_XMIT_PAGES_BATCH pages back.
  */
@@ -171,13 +170,14 @@ static int  xennetback_get_mcl_page(paddr_t *);
 static void xennetback_get_new_mcl_pages(void);
 /*
  * If we can't transfer the mbuf directly, we have to copy it to a page which
- * will be transferred to the remote domain. We use a pool_cache
+ * will be transfered to the remote domain. We use a pool + pool_cache
  * for this, or the mbuf cluster pool cache if MCLBYTES == PAGE_SIZE
  */
 #if MCLBYTES != PAGE_SIZE
-pool_cache_t xmit_pages_cache;
+struct pool xmit_pages_pool;
+struct pool_cache xmit_pages_pool_cache;
 #endif
-pool_cache_t xmit_pages_cachep;
+struct pool_cache *xmit_pages_pool_cachep;
 
 /* arrays used in xennetback_ifstart(), too large to allocate on stack */
 static mmu_update_t xstart_mmu[NB_XMIT_PAGES_BATCH];
@@ -207,14 +207,14 @@ xvifattach(int n)
 	XENPRINTF(("xennetback_init\n"));
 
 	/*
-	 * steal some non-managed pages to the VM system, to replace
-	 * mbuf cluster or xmit_pages_pool pages given to foreign domains.
+	 * steal some non-managed pages to the VM system, to remplace
+	 * mbuf cluster or xmit_pages_pool pages given to foreing domains.
 	 */
 	if (uvm_pglistalloc(PAGE_SIZE * NB_XMIT_PAGES_BATCH, 0, 0xffffffff,
 	    0, 0, &mlist, NB_XMIT_PAGES_BATCH, 0) != 0)
 		panic("xennetback_init: uvm_pglistalloc");
 	for (i = 0, pg = mlist.tqh_first; pg != NULL;
-	    pg = pg->pageq.queue.tqe_next, i++)
+	    pg = pg->pageq.tqe_next, i++)
 		mcl_pages[i] = xpmap_ptom(VM_PAGE_TO_PHYS(pg)) >> PAGE_SHIFT;
 	if (i != NB_XMIT_PAGES_BATCH)
 		panic("xennetback_init: %d mcl pages", i);
@@ -222,13 +222,14 @@ xvifattach(int n)
 
 	/* initialise pools */
 	pool_init(&xni_pkt_pool, sizeof(struct xni_pkt), 0, 0, 0,
-	    "xnbpkt", NULL, IPL_VM);
+	    "xnbpkt", NULL);
 #if MCLBYTES != PAGE_SIZE
-	xmit_pages_cache = pool_cache_init(PAGE_SIZE, 0, 0, 0, "xnbxm", NULL,
-	    IPL_VM, NULL, NULL, NULL);
-	xmit_pages_cachep = xmit_pages_cache;
+	pool_init(&xmit_pages_pool, PAGE_SIZE, 0, 0, 0, "xnbxm", NULL);
+	pool_cache_init(&xmit_pages_pool_cache, &xmit_pages_pool,
+	    NULL, NULL, NULL);
+	xmit_pages_pool_cachep = &xmit_pages_pool_cache;
 #else
-	xmit_pages_cachep = mcl_cache;
+	xmit_pages_pool_cachep = &mclpool_cache;
 #endif
 
 	SLIST_INIT(&xnetback_instances);
@@ -274,7 +275,7 @@ xennetback_xenbus_create(struct xenbus_device *xbusd)
 	xbusd->xbusd_u.b.b_detach = xennetback_xenbus_destroy;
 	xneti->xni_xbusd = xbusd;
 
-	xneti->xni_softintr = softint_establish(SOFTINT_NET,
+	xneti->xni_softintr = softintr_establish(IPL_SOFTNET,
 	    xennetback_ifsoftstart, xneti);
 	if (xneti->xni_softintr == NULL) {
 		err = ENOMEM;
@@ -307,7 +308,7 @@ xennetback_xenbus_create(struct xenbus_device *xbusd)
 	/* create pseudo-interface */
 	snprintf(xneti->xni_if.if_xname, IFNAMSIZ, "xvif%d.%d",
 	    (int)domid, (int)handle);
-	aprint_verbose_ifnet(ifp, "Ethernet address %s\n",
+	printf("%s: Ethernet address %s\n", ifp->if_xname,
 	    ether_sprintf(xneti->xni_enaddr));
 	ifp->if_flags =
 	    IFF_BROADCAST|IFF_SIMPLEX|IFF_NOTRAILERS|IFF_MULTICAST;
@@ -334,6 +335,11 @@ xennetback_xenbus_create(struct xenbus_device *xbusd)
 		    xbusd->xbusd_path, err);
 		goto fail;
 	}
+	if (err) {
+		printf("failed to write %s/hotplug-status: %d\n",
+		    xbusd->xbusd_path, err);
+		goto fail;
+	}
 	return 0;
 fail:
 	free(xneti, M_DEVBUF);
@@ -352,10 +358,10 @@ xennetback_xenbus_destroy(void *arg)
 		return EBUSY;
 	}
 #endif
-	aprint_verbose_ifnet(&xneti->xni_if, "disconnecting\n");
+	printf("%s: disconnecting\n", xneti->xni_if.if_xname);
 	hypervisor_mask_event(xneti->xni_evtchn);
 	event_remove_handler(xneti->xni_evtchn, xennetback_evthandler, xneti);
-	softint_disestablish(xneti->xni_softintr);
+	softintr_disestablish(xneti->xni_softintr);
 
 	SLIST_REMOVE(&xnetback_instances,
 	    xneti, xnetback_instance, next);
@@ -370,8 +376,8 @@ xennetback_xenbus_destroy(void *arg)
 		err = HYPERVISOR_grant_table_op(GNTTABOP_unmap_grant_ref,
 		    &op, 1);
 		if (err)
-			aprint_error_ifnet(&xneti->xni_if,
-					"unmap_grant_ref failed: %d\n", err);
+			printf("%s: unmap_grant_ref failed: %d\n",
+			    xneti->xni_if.if_xname, err);
 	}
 	if (xneti->xni_rxring.sring) {
 		op.host_addr = xneti->xni_rx_ring_va;
@@ -380,8 +386,8 @@ xennetback_xenbus_destroy(void *arg)
 		err = HYPERVISOR_grant_table_op(GNTTABOP_unmap_grant_ref,
 		    &op, 1);
 		if (err)
-			aprint_error_ifnet(&xneti->xni_if,
-					"unmap_grant_ref failed: %d\n", err);
+			printf("%s: unmap_grant_ref failed: %d\n",
+			    xneti->xni_if.if_xname, err);
 	}
 	uvm_km_free(kernel_map, xneti->xni_tx_ring_va,
 	    PAGE_SIZE, UVM_KMF_VAONLY);
@@ -485,10 +491,10 @@ xennetback_frontend_changed(void *arg, XenbusState new_state)
 			goto err2;
 		}
 		xneti->xni_evtchn = evop.u.bind_interdomain.local_port;
-		xen_wmb();
+		x86_sfence();
 		xneti->xni_status = CONNECTED;
 		xenbus_switch_state(xbusd, NULL, XenbusStateConnected);
-		xen_wmb();
+		x86_sfence();
 		event_set_handler(xneti->xni_evtchn, xennetback_evthandler,
 		    xneti, IPL_NET, xneti->xni_if.if_xname);
 		xennetback_ifinit(&xneti->xni_if);
@@ -506,7 +512,7 @@ xennetback_frontend_changed(void *arg, XenbusState new_state)
 	case XenbusStateClosed:
 		/* otherend_changed() should handle it for us */
 		panic("xennetback_frontend_changed: closed\n");
-	case XenbusStateUnknown:
+	case XenbusStateUnknown:      
 	case XenbusStateInitWait:
 	default:
 		aprint_error("%s: invalid frontend state %d\n",
@@ -561,7 +567,7 @@ xennetback_get_new_mcl_pages(void)
 	struct xen_memory_reservation res;
 
 	/* get some new pages. */
-	xenguest_handle(res.extent_start) = mcl_pages;
+	res.extent_start = mcl_pages;
 	res.nr_extents = NB_XMIT_PAGES_BATCH;
 	res.extent_order = 0;
 	res.address_bits = 0;
@@ -612,17 +618,17 @@ xennetback_evthandler(void *arg)
 
 	XENPRINTF(("xennetback_evthandler "));
 	req_cons = xneti->xni_txring.req_cons;
-	xen_rmb();
+	x86_lfence();
 	while (1) {
-		xen_rmb(); /* be sure to read the request before updating */
+		x86_lfence(); /* be sure to read the request before updating */
 		xneti->xni_txring.req_cons = req_cons;
-		xen_wmb();
+		x86_sfence();
 		RING_FINAL_CHECK_FOR_REQUESTS(&xneti->xni_txring,
 		    receive_pending);
 		if (receive_pending == 0)
 			break;
 		txreq = RING_GET_REQUEST(&xneti->xni_txring, req_cons);
-		xen_rmb();
+		x86_lfence();
 		XENPRINTF(("%s pkt size %d\n", xneti->xni_if.if_xname,
 		    txreq->size));
 		req_cons++;
@@ -671,7 +677,7 @@ xennetback_evthandler(void *arg)
 		XENPRINTF(("%s pkt offset %d size %d id %d req_cons %d\n",
 		    xneti->xni_if.if_xname, txreq->offset,
 		    txreq->size, txreq->id, MASK_NETIF_TX_IDX(req_cons)));
-		
+		    
 		pkt = pool_get(&xni_pkt_pool, PR_NOWAIT);
 		if (__predict_false(pkt == NULL)) {
 			static struct timeval lasttime;
@@ -710,7 +716,7 @@ xennetback_evthandler(void *arg)
 			struct ether_header *eh =
 			    (void*)(pkt_va + txreq->offset);
 			if (ETHER_IS_MULTICAST(eh->ether_dhost) == 0 &&
-			    memcmp(CLLADDR(ifp->if_sadl), eh->ether_dhost,
+			    memcmp(LLADDR(ifp->if_sadl), eh->ether_dhost,
 			    ETHER_ADDR_LEN) != 0) {
 				xni_pkt_unmap(pkt, pkt_va);
 				m_freem(m);
@@ -736,7 +742,7 @@ so always copy for now.
 			m->m_len = min(MHLEN, txreq->size);
 			m->m_pkthdr.len = 0;
 			m_copyback(m, 0, txreq->size,
-			    (void *)(pkt_va + txreq->offset));
+			    (caddr_t)(pkt_va + txreq->offset));
 			xni_pkt_unmap(pkt, pkt_va);
 			if (m->m_pkthdr.len < txreq->size) {
 				ifp->if_ierrors++;
@@ -773,17 +779,17 @@ so always copy for now.
 #endif
 		(*ifp->if_input)(ifp, m);
 	}
-	xen_rmb(); /* be sure to read the request before updating pointer */
+	x86_lfence(); /* be sure to read the request before updating pointer */
 	xneti->xni_txring.req_cons = req_cons;
-	xen_wmb();
+	x86_sfence();
 	/* check to see if we can transmit more packets */
-	softint_schedule(xneti->xni_softintr);
+	softintr_schedule(xneti->xni_softintr);
 
 	return 1;
 }
 
 static void
-xennetback_tx_free(struct mbuf *m, void *va, size_t size, void *arg)
+xennetback_tx_free(struct mbuf *m, caddr_t va, size_t size, void * arg)
 {
 	int s = splnet();
 	struct xni_pkt *pkt = arg;
@@ -796,12 +802,12 @@ xennetback_tx_free(struct mbuf *m, void *va, size_t size, void *arg)
 	xni_pkt_unmap(pkt, (vaddr_t)va & ~PAGE_MASK);
 
 	if (m)
-		pool_cache_put(mb_cache, m);
+		pool_cache_put(&mbpool_cache, m);
 	splx(s);
 }
 
 static int
-xennetback_ifioctl(struct ifnet *ifp, u_long cmd, void *data)
+xennetback_ifioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	//struct xnetback_instance *xneti = ifp->if_softc;
 	//struct ifreq *ifr = (struct ifreq *)data;
@@ -827,7 +833,7 @@ xennetback_ifstart(struct ifnet *ifp)
 	 * stack will enqueue all pending mbufs in the interface's send queue
 	 * before it is processed by xennet_softstart().
 	 */
-	softint_schedule(xneti->xni_softintr);
+	softintr_schedule(xneti->xni_softintr);
 }
 
 static void
@@ -861,7 +867,7 @@ xennetback_ifsoftstart(void *arg)
 		XENPRINTF(("pkt\n"));
 		req_prod = xneti->xni_rxring.sring->req_prod;
 		resp_prod = xneti->xni_rxring.rsp_prod_pvt;
-		xen_rmb();
+		x86_lfence();
 
 		mmup = xstart_mmu;
 		mclp = xstart_mcl;
@@ -901,7 +907,7 @@ xennetback_ifsoftstart(void *arg)
 			} else {
 				/* we have to copy the packet */
 				xmit_va = (vaddr_t)pool_cache_get_paddr(
-				    xmit_pages_cachep,
+				    xmit_pages_pool_cachep,
 				    PR_NOWAIT, &xmit_pa);
 				if (__predict_false(xmit_va == 0))
 					break; /* out of memory */
@@ -912,7 +918,7 @@ xennetback_ifsoftstart(void *arg)
 				    "0x%x ma 0x%x\n", (u_int)xmit_va,
 				    (u_int)xmit_ma));
 				m_copydata(m, 0, m->m_pkthdr.len,
-				    (char *)xmit_va + LINUX_REQUESTED_OFFSET);
+				    (caddr_t)xmit_va + LINUX_REQUESTED_OFFSET);
 				offset = LINUX_REQUESTED_OFFSET;
 				pages_pool_free[nppitems].va = xmit_va;
 				pages_pool_free[nppitems].pa = xmit_pa;
@@ -923,7 +929,7 @@ xennetback_ifsoftstart(void *arg)
 			    xneti->xni_rxring.req_cons)->gref;
 			id = RING_GET_REQUEST(&xneti->xni_rxring,
 			    xneti->xni_rxring.req_cons)->id;
-			xen_rmb();
+			x86_lfence();
 			xneti->xni_rxring.req_cons++;
 			rxresp = RING_GET_RESPONSE(&xneti->xni_rxring,
 			    resp_prod);
@@ -984,7 +990,7 @@ xennetback_ifsoftstart(void *arg)
 			mclp++;
 			/* update the MMU */
 			if (HYPERVISOR_multicall(xstart_mcl, i + 1) != 0) {
-				panic("%s: HYPERVISOR_multicall failed",
+				panic("%s: HYPERVISOR_multicall failed", 
 				    ifp->if_xname);
 			}
 			for (j = 0; j < i + 1; j++) {
@@ -1005,12 +1011,12 @@ xennetback_ifsoftstart(void *arg)
 			}
 			if (HYPERVISOR_grant_table_op(GNTTABOP_transfer,
 			    xstart_gop, i) != 0) {
-				panic("%s: GNTTABOP_transfer failed",
+				panic("%s: GNTTABOP_transfer failed", 
 				    ifp->if_xname);
 			}
 
 			for (j = 0; j < i; j++) {
-				if (xstart_gop[j].status != GNTST_okay) {
+				if (xstart_gop[j].status != 0) {
 					printf("%s GNTTABOP_transfer[%d] %d\n",
 					    ifp->if_xname,
 					    j, xstart_gop[j].status);
@@ -1043,14 +1049,14 @@ xennetback_ifsoftstart(void *arg)
 				m_freem(mbufs_sent[j]);
 			}
 			for (j = 0; j < nppitems; j++) {
-				pool_cache_put_paddr(xmit_pages_cachep,
+				pool_cache_put_paddr(xmit_pages_pool_cachep,
 				    (void *)pages_pool_free[j].va,
 				    pages_pool_free[j].pa);
 			}
 		}
 		/* send event */
 		if (do_event) {
-			xen_rmb();
+			x86_lfence();
 			XENPRINTF(("%s receive event\n",
 			    xneti->xni_if.if_xname));
 			hypervisor_notify_via_evtchn(xneti->xni_evtchn);
@@ -1061,7 +1067,7 @@ xennetback_ifsoftstart(void *arg)
 			xennetback_get_new_mcl_pages();
 			if (mcl_pages_alloc < 0) {
 				/*
-				 * setup the watchdog to try again, because
+				 * setup the watchdog to try again, because 
 				 * xennetback_ifstart() will never be called
 				 * again if queue is full.
 				 */
@@ -1089,7 +1095,7 @@ static void
 xennetback_ifwatchdog(struct ifnet * ifp)
 {
 	/*
-	 * We can get to the following condition:
+	 * We can get to the following condition: 
 	 * transmit stalls because the ring is full when the ifq is full too.
 	 * In this case (as, unfortunably, we don't get an interrupt from xen
 	 * on transmit) noting will ever call xennetback_ifstart() again.

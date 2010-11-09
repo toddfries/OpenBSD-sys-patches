@@ -1,4 +1,4 @@
-#	$NetBSD: files.hp700,v 1.20 2008/03/30 12:32:13 skrll Exp $
+#	$NetBSD: files.hp700,v 1.15 2005/12/11 12:17:24 christos Exp $
 #
 #	$OpenBSD: files.hp700,v 1.31 2001/06/26 02:41:25 mickey Exp $
 #
@@ -12,6 +12,12 @@ maxusers 2 8 64
 # Status LEDs
 defflag 			USELEDS
 defflag				POWER_SWITCH
+
+# 
+# "workstation console" routines
+#
+include "dev/wscons/files.wscons"
+include "dev/wsfont/files.wsfont"
 
 include "dev/pckbport/files.pckbport"
 
@@ -65,66 +71,65 @@ define	gscbus	{ }
 # Mainbus
 #
 
-define	gedoens {[irq = -1]}: sysmon_power, sysmon_taskq
-device	mainbus: gedoens
+device	mainbus {[irq = -1]}: sysmon_power, sysmon_taskq
 attach	mainbus at root
 file	arch/hp700/hp700/mainbus.c	mainbus
 
 device	pdc
-attach	pdc at gedoens
+attach	pdc at mainbus
 file	arch/hp700/dev/pdc.c		pdc
 
 device	mem
-attach	mem at gedoens
+attach	mem at mainbus
 file	arch/hp700/dev/mem.c		mem
 
 device	cpu
-attach	cpu at gedoens
+attach	cpu at mainbus
 file	arch/hp700/dev/cpu.c		cpu
 
 device	fpu
-attach	fpu at gedoens
+attach	fpu at mainbus
 file	arch/hp700/dev/fpu.c		fpu
 
 # Phantom PseudoBC GSC+ Port
-device	phantomas: gedoens
-attach	phantomas at gedoens
+device	phantomas {}
+attach	phantomas at mainbus
 file	arch/hp700/dev/phantomas.c	phantomas
 
 # 1FT1-0002, 1FU2-0002
 # as goes w/ 7100LC, 7300LC, 7200, 8000, 8200, 8500
 device	lasi: gscbus
-attach	lasi at gedoens
+attach	lasi at mainbus with lasi_mainbus
+attach	lasi at phantomas with lasi_phantomas
 file	arch/hp700/dev/lasi.c		lasi
 
 # all the older systems
 device	asp: gscbus
-attach	asp at gedoens
+attach	asp at mainbus
 file	arch/hp700/dev/asp.c		asp
 
 # 1FT4-0001, ASIC used on gecko cards
 device	wax: gscbus
-attach	wax at gedoens
+attach	wax at mainbus with wax_mainbus
+attach	wax at phantomas with wax_phantomas
 file	arch/hp700/dev/wax.c		wax
 
 device	mongoose: isabus, eisabus
-attach	mongoose at gedoens
+attach	mongoose at mainbus
 file	arch/hp700/dev/mongoose.c	mongoose
 
-# Dino, GSC-PCI bridge. Includes ps/2, serial, and flying toaster interfaces
+# Dino, GSC to PCI bridge. Includes ps/2, serial, and flying toaster interfaces
 # Cujo is a 64-bit data path Dino
 device	dino { }: pcibus
-attach	dino at gedoens
+attach	dino at phantomas
 file	arch/hp700/dev/dino.c		dino
 
 attach	com at dino with com_dino
 file	arch/hp700/dev/com_dino.c	com_dino
 
-attach	sti at gedoens with sti_gedoens
-file	arch/hp700/dev/sti_sgc.c	sti_gedoens
-
-attach	siop at gedoens with siop_gedoens
-file	arch/hp700/dev/siop_sgc.c	siop_gedoens
+attach	sti at mainbus with sti_sgc
+attach	sti at phantomas with sti_phantomas
+file	arch/hp700/dev/sti_sgc.c		sti_sgc | sti_phantomas
 
 ###
 
@@ -227,6 +232,7 @@ file	arch/hp700/hp700/conf.c
 file	arch/hp700/hp700/disksubr.c		disk
 file	arch/hp700/hp700/intr.c
 file	arch/hp700/hp700/machdep.c
+file	arch/hp700/hp700/softintr.c
 file	arch/hp700/hp700/sys_machdep.c
 file	arch/hp700/hp700/power.c		power_switch
 file	arch/hp700/dev/clock.c

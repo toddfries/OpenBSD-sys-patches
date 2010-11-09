@@ -1,4 +1,4 @@
-/*	$NetBSD: boot.c,v 1.17 2008/05/29 14:25:00 tsutsui Exp $	*/
+/*	$NetBSD: boot.c,v 1.5 2005/11/25 13:37:58 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 2003 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -63,19 +70,17 @@
  *	@(#)boot.c	8.1 (Berkeley) 6/10/93
  */
 
+#include <machine/cpu.h>
+#include <machine/leds.h>
+
 #include <lib/libsa/stand.h>
 #include <lib/libsa/loadfile.h>
-#include <lib/libsa/dev_net.h>
 #include <lib/libkern/libkern.h>
 
 #include <sys/param.h>
 #include <sys/boot_flag.h>
 #include <sys/exec.h>
 #include <sys/exec_elf.h>
-
-#include <machine/cpu.h>
-
-#include <cobalt/dev/gtreg.h>
 
 #include "boot.h"
 #include "cons.h"
@@ -98,58 +103,45 @@ char *kernelnames[] = {
 	NULL
 };
 
-u_int cobalt_id;
-static const char * const cobalt_model[] =
-{
-	[0]                  = "Unknown Cobalt",
-	[COBALT_ID_QUBE2700] = "Cobalt Qube 2700",
-	[COBALT_ID_RAQ]      = "Cobalt RaQ",
-	[COBALT_ID_QUBE2]    = "Cobalt Qube 2",
-	[COBALT_ID_RAQ2]     = "Cobalt RaQ 2"
-};
-#define COBALT_MODELS	__arraycount(cobalt_model)
-
 extern u_long end;		/* Boot loader code end address */
 void start(void);
 
 static char *bootstring;
 
-static int patch_bootstring(char *bootspec);
-static int get_bsdbootname(char **, char **, int *);
+static int patch_bootstring	(char *bootspec);
+static int get_bsdbootname(char **, char **);
 static int parse_bootname(char *, int, char **, char **);
-static void prominit(unsigned int memsize);
-static void print_banner(unsigned int memsize);
-static u_int read_board_id(void);
+static int prominit		(unsigned int memsize);
+static int print_banner		(unsigned int memsize);
 
-void cpu_reboot(void);
+int cpu_reboot(void);
 
 int main(unsigned int memsize);
 
 /*
  * Perform CPU reboot.
  */
-void
-cpu_reboot(void)
+int
+cpu_reboot()
 {
-
 	printf("rebooting...\n\n");
 
-	*(volatile uint8_t *)MIPS_PHYS_TO_KSEG1(LED_ADDR) = LED_RESET;
+	*(volatile char *)MIPS_PHYS_TO_KSEG1(LED_ADDR) = LED_RESET;
 	printf("WARNING: reboot failed!\n");
 
-	for (;;)
-		;
+	for (;;);
 }
 
 /*
  * Substitute root value with NetBSD root partition name.
  */
 int
-patch_bootstring(char *bootspec)
+patch_bootstring(bootspec)
+	char *bootspec;
 {
 	char *sp = bootstring;
-	uint8_t unit, part;
-	int dev;
+	u_int8_t unit, part;
+	int dev, error;
 	char *file;
 
 	DPRINTF(("patch_bootstring: %s\n", bootspec));
@@ -158,10 +150,10 @@ patch_bootstring(char *bootspec)
 	if (devparse(bootspec, &dev, &unit, &part, (const char **)&file) != 0)
 		unit = part = 0;
 
-	DPRINTF(("patch_bootstring: unit = %d, part = %d\n", unit, part));
+	DPRINTF(("patch_bootstring: %d, %d\n", unit, part));
 
 	/* take out the 'root=xxx' parameter */
-	if ((sp = strstr(bootstring, "root=")) != NULL) {
+	if ( (sp = strstr(bootstring, "root=")) != NULL) {
 		const char *end;
 		
 		end = strchr(sp, ' ');
@@ -179,27 +171,10 @@ patch_bootstring(char *bootspec)
 	DPRINTF(("patch_bootstring: [%s]\n", bootstring));
 
 #define DEVNAMESIZE	(MAXDEVNAME + sizeof(" root=/dev/hd") + sizeof("0a"))
-	if (strcmp(devsw[dev].dv_name, "wd") == 0 &&
-	    strlen(bootstring) <= (511 - DEVNAMESIZE)) {
+	/* bsd notation -> linux notation (wd0a -> hda1) */
+	if (strlen(bootstring) <= (511 - DEVNAMESIZE)) {
 		int len;
 
-		/* omit "nfsroot=" arg on wd boot */
-		if ((sp = strstr(bootstring, "nfsroot=")) != NULL) {
-			const char *end;
-
-			end = strchr(sp, ' ');
-
-			/* strip off leading spaces */
-			for (--sp; (sp > bootstring) && (*sp == ' '); --sp)
-				;
-
-			if (end != NULL)
-				strcpy(++sp, end);
-			else
-				*++sp = '\0';
-		}
-
-		/* bsd notation -> linux notation (wd0a -> hda1) */
 		strcat(bootstring, " root=/dev/hd");
 
 		len = strlen(bootstring);
@@ -209,52 +184,27 @@ patch_bootstring(char *bootspec)
 	}
 
 	DPRINTF(("patch_bootstring: -> %s\n", bootstring));
-	return 0;
+	return (0);
 }
 
 /*
  * Extract NetBSD boot specification
  */
 static int
-get_bsdbootname(char **dev, char **kname, int *howtop)
+get_bsdbootname(dev, kname)
+	char **dev;
+	char **kname;
 {
-	int len;
-	int bootunit, bootpart;
+	int len, error;
 	char *bootstr_dev, *bootstr_kname;
 	char *prompt_dev, *prompt_kname;
 	char *ptr, *spec;
 	char c, namebuf[PATH_MAX];
-	static char bootdev[] = "wd0a";
-	static char nfsbootdev[] = "nfs";
 
 	bootstr_dev = prompt_dev = NULL;
 	bootstr_kname = prompt_kname = NULL;
 
-	/* first, get root device specified by the firmware */
-	spec = bootstring;
-
-	/* assume the last one is valid */
-	while ((spec = strstr(spec, "root=")) != NULL) {
-		spec += 5;	/* skip 'root=' */
-		ptr = strchr(spec, ' ');
-		len = (ptr == NULL) ? strlen(spec) : ptr - spec;
-		/* decode unit and part from "/dev/hd[ab][1-4]" strings */
-		if (len == 9 && memcmp("/dev/hd", spec, 7) == 0) {
-			bootunit = spec[7] - 'a';
-			bootpart = spec[8] - '1';
-			if (bootunit >= 0 && bootunit < 2 &&
-			    bootpart >= 0 && bootpart < 4) {
-				bootdev[sizeof(bootdev) - 3] = '0' + bootunit;
-#if 0				/* bootpart is fdisk partition of Linux root */
-				bootdev[sizeof(bootdev) - 2] = 'a' + bootpart;
-#endif
-				bootstr_dev = bootdev;
-			}
-		}
-		spec += len;
-	}
-
-	/* second, get bootname from bootstrings */
+	/* first, get bootname from bootstrings */
 	if ((spec = strstr(bootstring, "nbsd=")) != NULL) {
 		ptr = strchr(spec, ' ');
 		spec += 5; 	/* skip 'nbsd=' */
@@ -264,11 +214,6 @@ get_bsdbootname(char **dev, char **kname, int *howtop)
 			    &bootstr_dev, &bootstr_kname))
 				return 1;
 		}
-	}
-
-	/* third, check if netboot */
-	if (strstr(bootstring, "nfsroot=") != NULL) {
-		bootstr_dev = nfsbootdev;
 	}
 
 	DPRINTF(("bootstr_dev = %s, bootstr_kname = %s\n",
@@ -294,7 +239,10 @@ get_bsdbootname(char **dev, char **kname, int *howtop)
 			break;
 		if (c == '-') {
 			while ((c = *++ptr) && c != ' ')
-				BOOT_FLAG(c, *howtop);
+				;
+#if notyet
+			BOOT_FLAG(c, boothowto);
+#endif
 		} else {
 			spec = ptr;
 			while ((c = *++ptr) && c != ' ')
@@ -332,7 +280,11 @@ get_bsdbootname(char **dev, char **kname, int *howtop)
 }
 
 static int
-parse_bootname(char *spec, int len, char **dev, char **kname)
+parse_bootname(spec, len, dev, kname)
+	char *spec;
+	int len;
+	char **dev;
+	char **kname;
 {
 	char *bootname, *ptr;
 
@@ -357,10 +309,10 @@ parse_bootname(char *spec, int len, char **dev, char **kname)
 /*
  * Get the bootstring from PROM.
  */
-void
-prominit(unsigned int memsize)
+int
+prominit(memsize)
+	unsigned int memsize;
 {
-
 	bootstring = (char *)(memsize - 512);
 	bootstring[511] = '\0';
 }
@@ -368,37 +320,16 @@ prominit(unsigned int memsize)
 /*
  * Print boot message.
  */
-void
-print_banner(unsigned int memsize)
+int
+print_banner(memsize)
+	unsigned int memsize;
 {
-
-	lcd_banner();
-
 	printf("\n");
 	printf(">> %s " NETBSD_VERS " Bootloader, Revision %s [@%p]\n",
 			bootprog_name, bootprog_rev, (void*)&start);
 	printf(">> (%s, %s)\n", bootprog_maker, bootprog_date);
-	printf(">> Model:\t\t%s\n", cobalt_model[cobalt_id]);
 	printf(">> Memory:\t\t%u k\n", (memsize - MIPS_KSEG0_START) / 1024);
 	printf(">> PROM boot string:\t%s\n", bootstring);
-}
-
-u_int
-read_board_id(void)
-{
-	uint32_t tag, reg;
-
-#define PCIB_PCI_BUS		0
-#define PCIB_PCI_DEV		9
-#define PCIB_PCI_FUNC		0
-#define PCIB_BOARD_ID_REG	0x94
-#define COBALT_BOARD_ID(reg)	((reg & 0x000000f0) >> 4)
-
-	tag = (PCIB_PCI_BUS << 16) | (PCIB_PCI_DEV << 11) |
-	    (PCIB_PCI_FUNC << 8);
-	reg = pcicfgread(tag, PCIB_BOARD_ID_REG);
-
-	return COBALT_BOARD_ID(reg);
 }
 
 /*
@@ -406,31 +337,25 @@ read_board_id(void)
  * Parse PROM boot string, load the kernel and jump into it
  */
 int
-main(unsigned int memsize)
+main(memsize)
+	unsigned int memsize;
 {
 	char **namep, *dev, *kernel, *bi_addr;
 	char bootpath[PATH_MAX];
 	int win;
 	u_long marks[MARK_MAX];
-	void (*entry)(unsigned int, u_int, char *);
+	void (*entry) __P((unsigned int, u_int, char*));
 
 	struct btinfo_flags bi_flags;
 	struct btinfo_symtab bi_syms;
 	struct btinfo_bootpath bi_bpath;
-	struct btinfo_howto bi_howto;
-	int addr, speed, howto;
 
-	try_bootp = 1;
+	int addr, speed;
 
 	/* Initialize boot info early */
-	dev = NULL;
-	kernel = NULL;
-	howto = 0x0;
 	bi_flags.bi_flags = 0x0;
 	bi_addr = bi_init();
 
-	lcd_init();
-	cobalt_id = read_board_id();
 	prominit(memsize);
 	if (cninit(&addr, &speed) != NULL)
 		bi_flags.bi_flags |= BI_SERIAL_CONSOLE;
@@ -438,7 +363,7 @@ main(unsigned int memsize)
 	print_banner(memsize);
 
 	memset(marks, 0, sizeof marks);
-	get_bsdbootname(&dev, &kernel, &howto);
+	get_bsdbootname(&dev, &kernel);
 
 	if (kernel != NULL) {
 		DPRINTF(("kernel: %s\n", kernel));
@@ -459,11 +384,7 @@ main(unsigned int memsize)
 		strcat(bootpath, ":");
 		strcat(bootpath, kernel);
 
-		lcd_loadfile(bootpath);
-		printf("Loading: %s", bootpath);
-		if (howto)
-			printf(" (howto 0x%x)", howto);
-		printf("\n");
+		printf("Loading: %s\n", bootpath);
 		patch_bootstring(bootpath);
 		win = (loadfile(bootpath, marks, LOAD_ALL) != -1);
 	}
@@ -472,7 +393,7 @@ main(unsigned int memsize)
 		strncpy(bi_bpath.bootpath, kernel, BTINFO_BOOTPATH_LEN);
 		bi_add(&bi_bpath, BTINFO_BOOTPATH, sizeof(bi_bpath));
 
-		entry = (void *)marks[MARK_ENTRY];
+		entry = (void *) marks[MARK_ENTRY];
 		bi_syms.nsym = marks[MARK_NSYM];
 		bi_syms.ssym = marks[MARK_SYM];
 		bi_syms.esym = marks[MARK_END];
@@ -480,18 +401,13 @@ main(unsigned int memsize)
 
 		bi_add(&bi_flags, BTINFO_FLAGS, sizeof(bi_flags));
 
-		bi_howto.bi_howto = howto;
-		bi_add(&bi_howto, BTINFO_HOWTO, sizeof(bi_howto));
-
-		entry = (void *)marks[MARK_ENTRY];
+		entry = (void *) marks[MARK_ENTRY];
 
 		DPRINTF(("Bootinfo @ 0x%x\n", bi_addr));
 		printf("Starting at 0x%x\n\n", (u_int)entry);
 		(*entry)(memsize, BOOTINFO_MAGIC, bi_addr);
 	}
 
-	delay(20000);
-	lcd_failed();
 	(void)printf("Boot failed! Rebooting...\n");
-	return 0;
+	return (0);
 }

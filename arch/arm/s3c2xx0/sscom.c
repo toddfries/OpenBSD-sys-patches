@@ -1,4 +1,4 @@
-/*	$NetBSD: sscom.c,v 1.29 2008/06/11 22:37:21 cegger Exp $ */
+/*	$NetBSD: sscom.c,v 1.21 2006/10/01 20:31:49 elad Exp $ */
 
 /*
  * Copyright (c) 2002, 2003 Fujitsu Component Limited
@@ -47,6 +47,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -98,7 +105,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sscom.c,v 1.29 2008/06/11 22:37:21 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sscom.c,v 1.21 2006/10/01 20:31:49 elad Exp $");
 
 #include "opt_sscom.h"
 #include "opt_ddb.h"
@@ -141,8 +148,9 @@ __KERNEL_RCSID(0, "$NetBSD: sscom.c,v 1.29 2008/06/11 22:37:21 cegger Exp $");
 #include <sys/timepps.h>
 #include <sys/vnode.h>
 #include <sys/kauth.h>
-#include <sys/intr.h>
-#include <sys/bus.h>
+
+#include <machine/intr.h>
+#include <machine/bus.h>
 
 #include <arm/s3c2xx0/s3c2xx0reg.h>
 #include <arm/s3c2xx0/s3c2xx0var.h>
@@ -401,7 +409,7 @@ sscom_attach_subr(struct sscom_softc *sc)
 	bus_space_handle_t ioh = sc->sc_ioh;
 	struct tty *tp;
 
-	callout_init(&sc->sc_diag_callout, 0);
+	callout_init(&sc->sc_diag_callout);
 #if (defined(MULTIPROCESSOR) || defined(LOCKDEBUG)) && defined(SSCOM_MPLOCK)
 	simple_lock_init(&sc->sc_lock);
 #endif
@@ -491,7 +499,7 @@ sscom_attach_subr(struct sscom_softc *sc)
 	}
 
 
-	sc->sc_si = softint_establish(SOFTINT_SERIAL, sscomsoft, sc);
+	sc->sc_si = softintr_establish(IPL_SOFTSERIAL, sscomsoft, sc);
 
 #if NRND > 0 && defined(RND_COM)
 	rnd_attach_source(&sc->rnd_source, sc->sc_dev.dv_xname,
@@ -604,7 +612,7 @@ sscomopen(dev_t dev, int flag, int mode, struct lwp *l)
 	int s, s2;
 	int error;
 
-	sc = device_lookup_private(&sscom_cd, SSCOMUNIT(dev));
+	sc = device_lookup(&sscom_cd, SSCOMUNIT(dev));
 	if (sc == NULL || !ISSET(sc->sc_hwflags, SSCOM_HW_DEV_OK) ||
 		sc->sc_rbuf == NULL)
 		return ENXIO;
@@ -733,7 +741,7 @@ bad:
 int
 sscomclose(dev_t dev, int flag, int mode, struct lwp *l)
 {
-	struct sscom_softc *sc = device_lookup_private(&sscom_cd, SSCOMUNIT(dev));
+	struct sscom_softc *sc = device_lookup(&sscom_cd, SSCOMUNIT(dev));
 	struct tty *tp = sc->sc_tty;
 
 	/* XXX This is for cons.c. */
@@ -761,7 +769,7 @@ sscomclose(dev_t dev, int flag, int mode, struct lwp *l)
 int
 sscomread(dev_t dev, struct uio *uio, int flag)
 {
-	struct sscom_softc *sc = device_lookup_private(&sscom_cd, SSCOMUNIT(dev));
+	struct sscom_softc *sc = device_lookup(&sscom_cd, SSCOMUNIT(dev));
 	struct tty *tp = sc->sc_tty;
 
 	if (SSCOM_ISALIVE(sc) == 0)
@@ -773,7 +781,7 @@ sscomread(dev_t dev, struct uio *uio, int flag)
 int
 sscomwrite(dev_t dev, struct uio *uio, int flag)
 {
-	struct sscom_softc *sc = device_lookup_private(&sscom_cd, SSCOMUNIT(dev));
+	struct sscom_softc *sc = device_lookup(&sscom_cd, SSCOMUNIT(dev));
 	struct tty *tp = sc->sc_tty;
 
 	if (SSCOM_ISALIVE(sc) == 0)
@@ -785,7 +793,7 @@ sscomwrite(dev_t dev, struct uio *uio, int flag)
 int
 sscompoll(dev_t dev, int events, struct lwp *l)
 {
-	struct sscom_softc *sc = device_lookup_private(&sscom_cd, SSCOMUNIT(dev));
+	struct sscom_softc *sc = device_lookup(&sscom_cd, SSCOMUNIT(dev));
 	struct tty *tp = sc->sc_tty;
 
 	if (SSCOM_ISALIVE(sc) == 0)
@@ -797,16 +805,16 @@ sscompoll(dev_t dev, int events, struct lwp *l)
 struct tty *
 sscomtty(dev_t dev)
 {
-	struct sscom_softc *sc = device_lookup_private(&sscom_cd, SSCOMUNIT(dev));
+	struct sscom_softc *sc = device_lookup(&sscom_cd, SSCOMUNIT(dev));
 	struct tty *tp = sc->sc_tty;
 
 	return tp;
 }
 
 int
-sscomioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
+sscomioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct lwp *l)
 {
-	struct sscom_softc *sc = device_lookup_private(&sscom_cd, SSCOMUNIT(dev));
+	struct sscom_softc *sc = device_lookup(&sscom_cd, SSCOMUNIT(dev));
 	struct tty *tp = sc->sc_tty;
 	int error;
 	int s;
@@ -887,7 +895,7 @@ sscom_schedrx(struct sscom_softc *sc)
 	sc->sc_rx_ready = 1;
 
 	/* Wake up the poller. */
-	softint_schedule(sc->sc_si);
+	softintr_schedule(sc->sc_si);
 }
 
 static void
@@ -1024,7 +1032,7 @@ cflag2lcr(tcflag_t cflag)
 int
 sscomparam(struct tty *tp, struct termios *t)
 {
-	struct sscom_softc *sc = device_lookup_private(&sscom_cd, SSCOMUNIT(tp->t_dev));
+	struct sscom_softc *sc = device_lookup(&sscom_cd, SSCOMUNIT(tp->t_dev));
 	int ospeed;
 	u_char lcr;
 	int s;
@@ -1215,7 +1223,7 @@ sscom_loadchannelregs(struct sscom_softc *sc)
 static int
 sscomhwiflow(struct tty *tp, int block)
 {
-	struct sscom_softc *sc = device_lookup_private(&sscom_cd, SSCOMUNIT(tp->t_dev));
+	struct sscom_softc *sc = device_lookup(&sscom_cd, SSCOMUNIT(tp->t_dev));
 	int s;
 
 	if (SSCOM_ISALIVE(sc) == 0)
@@ -1271,7 +1279,7 @@ sscom_hwiflow(struct sscom_softc *sc)
 void
 sscomstart(struct tty *tp)
 {
-	struct sscom_softc *sc = device_lookup_private(&sscom_cd, SSCOMUNIT(tp->t_dev));
+	struct sscom_softc *sc = device_lookup(&sscom_cd, SSCOMUNIT(tp->t_dev));
 	int s;
 
 	if (SSCOM_ISALIVE(sc) == 0)
@@ -1282,8 +1290,16 @@ sscomstart(struct tty *tp)
 		goto out;
 	if (sc->sc_tx_stopped)
 		goto out;
-	if (!ttypull(tp))
-		goto out;
+
+	if (tp->t_outq.c_cc <= tp->t_lowat) {
+		if (ISSET(tp->t_state, TS_ASLEEP)) {
+			CLR(tp->t_state, TS_ASLEEP);
+			wakeup(&tp->t_outq);
+		}
+		selwakeup(&tp->t_wsel);
+		if (tp->t_outq.c_cc == 0)
+			goto out;
+	}
 
 	/* Grab the first contiguous region of buffer space. */
 	{
@@ -1322,7 +1338,7 @@ out:
 void
 sscomstop(struct tty *tp, int flag)
 {
-	struct sscom_softc *sc = device_lookup_private(&sscom_cd, SSCOMUNIT(tp->t_dev));
+	struct sscom_softc *sc = device_lookup(&sscom_cd, SSCOMUNIT(tp->t_dev));
 	int s;
 
 	s = splserial();
@@ -1504,6 +1520,7 @@ sscom_stsoft(struct sscom_softc *sc, struct tty *tp)
 		sscomstatus(sc, "sscom_stsoft");
 }
 
+#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 void
 sscomsoft(void *arg)
 {
@@ -1532,6 +1549,9 @@ sscomsoft(void *arg)
 		}
 	}
 }
+#else
+#error sscom needs GENERIC_SOFT_INERRUPTS
+#endif
 
 
 int
@@ -1733,7 +1753,7 @@ sscomrxintr(void *arg)
 	SSCOM_UNLOCK(sc);
 
 	/* Wake up the poller. */
-	softint_schedule(sc->sc_si);
+	softintr_schedule(sc->sc_si);
 
 #if NRND > 0 && defined(RND_COM)
 	rnd_add_uint32(&sc->rnd_source, iir | rsr);
@@ -1798,7 +1818,7 @@ sscomtxintr(void *arg)
 	SSCOM_UNLOCK(sc);
 
 	/* Wake up the poller. */
-	softint_schedule(sc->sc_si);
+	softintr_schedule(sc->sc_si);
 
 #if NRND > 0 && defined(RND_COM)
 	rnd_add_uint32(&sc->rnd_source, iir | rsr);

@@ -1,4 +1,4 @@
-/*	$NetBSD: if_strip.c,v 1.90 2009/01/11 02:45:54 christos Exp $	*/
+/*	$NetBSD: if_strip.c,v 1.70 2007/01/04 19:07:03 elad Exp $	*/
 /*	from: NetBSD: if_sl.c,v 1.38 1996/02/13 22:00:23 christos Exp $	*/
 
 /*
@@ -87,7 +87,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_strip.c,v 1.90 2009/01/11 02:45:54 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_strip.c,v 1.70 2007/01/04 19:07:03 elad Exp $");
 
 #include "opt_inet.h"
 #include "bpfilter.h"
@@ -109,9 +109,9 @@ __KERNEL_RCSID(0, "$NetBSD: if_strip.c,v 1.90 2009/01/11 02:45:54 christos Exp $
 #include <sys/kauth.h>
 #endif
 #include <sys/syslog.h>
-#include <sys/cpu.h>
-#include <sys/intr.h>
-#include <sys/socketvar.h>
+
+#include <machine/cpu.h>
+#include <machine/intr.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
@@ -221,6 +221,9 @@ struct if_clone strip_cloner =
 
 #define STRIP_FRAME_END		0x0D		/* carriage return */
 
+#ifndef __HAVE_GENERIC_SOFT_INTERRUPTS
+void	stripnetisr(void);
+#endif
 static void	stripintr(void *);
 
 static int	stripinit(struct strip_softc *);
@@ -330,12 +333,12 @@ void	strip_timeout(void *x);
 
 static int	stripclose(struct tty *, int);
 static int	stripinput(int, struct tty *);
-static int	stripioctl(struct ifnet *, u_long, void *);
+static int	stripioctl(struct ifnet *, u_long, caddr_t);
 static int	stripopen(dev_t, struct tty *);
 static int	stripoutput(struct ifnet *,
-		    struct mbuf *, const struct sockaddr *, struct rtentry *);
+		    struct mbuf *, struct sockaddr *, struct rtentry *);
 static int	stripstart(struct tty *);
-static int	striptioctl(struct tty *, u_long, void *, int, struct lwp *);
+static int	striptioctl(struct tty *, u_long, caddr_t, int, struct lwp *);
 
 static struct linesw strip_disc = {
 	.l_name = "strip",
@@ -364,10 +367,11 @@ strip_clone_create(struct if_clone *ifc, int unit)
 {
 	struct strip_softc *sc;
 
-	sc = malloc(sizeof(*sc), M_DEVBUF, M_WAIT|M_ZERO);
+	MALLOC(sc, struct strip_softc *, sizeof(*sc), M_DEVBUF, M_WAIT|M_ZERO);
 	sc->sc_unit = unit;
-	if_initname(&sc->sc_if, ifc->ifc_name, unit);
-	callout_init(&sc->sc_timo_ch, 0);
+	(void)snprintf(sc->sc_if.if_xname, sizeof(sc->sc_if.if_xname),
+	    "%s%d", ifc->ifc_name, unit);
+	callout_init(&sc->sc_timo_ch);
 	sc->sc_if.if_softc = sc;
 	sc->sc_if.if_mtu = SLMTU;
 	sc->sc_if.if_flags = 0;
@@ -407,7 +411,7 @@ strip_clone_destroy(struct ifnet *ifp)
 #endif
 	if_detach(ifp);
 
-	free(sc, M_DEVBUF);
+	FREE(sc, M_DEVBUF);
 	return 0;
 }
 
@@ -474,6 +478,9 @@ stripopen(dev_t dev, struct tty *tp)
 	struct lwp *l = curlwp;		/* XXX */
 	struct strip_softc *sc;
 	int error;
+#ifdef __NetBSD__
+	int s;
+#endif
 
 	if ((error = kauth_authorize_generic(l->l_cred,
 	    KAUTH_GENERIC_ISSUSER, NULL)) != 0)
@@ -484,17 +491,21 @@ stripopen(dev_t dev, struct tty *tp)
 
 	LIST_FOREACH(sc, &strip_softc_list, sc_iflist) {
 		if (sc->sc_ttyp == NULL) {
-			sc->sc_si = softint_establish(SOFTINT_NET,
+#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
+			sc->sc_si = softintr_establish(IPL_SOFTNET,
 			    stripintr, sc);
+#endif
 			if (stripinit(sc) == 0) {
-				softint_disestablish(sc->sc_si);
+#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
+				softintr_disestablish(sc->sc_si);
+#endif
 				return (ENOBUFS);
 			}
-			mutex_spin_enter(&tty_lock);
-			tp->t_sc = (void *)sc;
+			tp->t_sc = (caddr_t)sc;
 			sc->sc_ttyp = tp;
 			sc->sc_if.if_baudrate = tp->t_ospeed;
 			ttyflush(tp, FREAD | FWRITE);
+#ifdef __NetBSD__
 			/*
 			 * Make sure tty output queue is large enough
 			 * to hold a full-sized packet (including frame
@@ -503,15 +514,18 @@ stripopen(dev_t dev, struct tty *tp)
 			 * of escapes and clever RLL bytestuffing),
 			 * plus frame header, and add two on for frame ends.
 			 */
+			s = spltty();
 			if (tp->t_outq.c_cn < STRIP_MTU_ONWIRE) {
 				sc->sc_oldbufsize = tp->t_outq.c_cn;
 				sc->sc_oldbufquot = tp->t_outq.c_cq != 0;
 
-				mutex_spin_exit(&tty_lock);
 				clfree(&tp->t_outq);
 				error = clalloc(&tp->t_outq, 3*SLMTU, 0);
 				if (error) {
-					softint_disestablish(sc->sc_si);
+					splx(s);
+#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
+					softintr_disestablish(sc->sc_si);
+#endif
 					/*
 					 * clalloc() might return -1 which
 					 * is no good, so we need to return
@@ -519,11 +533,13 @@ stripopen(dev_t dev, struct tty *tp)
 					 */
 					return (ENOMEM);
 				}
-				mutex_spin_enter(&tty_lock);
-			} else 
+			} else
 				sc->sc_oldbufsize = sc->sc_oldbufquot = 0;
+			splx(s);
+#endif /* __NetBSD__ */
+			s = spltty();
 			strip_resetradio(sc, tp);
-			mutex_spin_exit(&tty_lock);
+			splx(s);
 
 			/*
 			 * Start the watchdog timer to get the radio
@@ -551,7 +567,9 @@ stripclose(struct tty *tp, int flag)
 	sc = tp->t_sc;
 
 	if (sc != NULL) {
-		softint_disestablish(sc->sc_si);
+#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
+		softintr_disestablish(sc->sc_si);
+#endif
 		s = splnet();
 		/*
 		 * Cancel watchdog timer, which stops the "probe-for-death"/
@@ -576,11 +594,11 @@ stripclose(struct tty *tp, int flag)
 		IF_PURGE(&sc->sc_inq);
 
 		/* XXX */
-		free((void *)(sc->sc_rxbuf - SLBUFSIZE + SLMAX), M_DEVBUF);
+		free((caddr_t)(sc->sc_rxbuf - SLBUFSIZE + SLMAX), M_DEVBUF);
 		sc->sc_rxbuf = NULL;
 
 		/* XXX */
-		free((void *)(sc->sc_txbuf - SLBUFSIZE + SLMAX), M_DEVBUF);
+		free((caddr_t)(sc->sc_txbuf - SLBUFSIZE + SLMAX), M_DEVBUF);
 		sc->sc_txbuf = NULL;
 
 		if (sc->sc_flags & SC_TIMEOUT) {
@@ -609,7 +627,7 @@ stripclose(struct tty *tp, int flag)
  */
 /* ARGSUSED */
 int
-striptioctl(struct tty *tp, u_long cmd, void *data, int flag,
+striptioctl(struct tty *tp, u_long cmd, caddr_t data, int flag,
     struct lwp *l)
 {
 	struct strip_softc *sc = (struct strip_softc *)tp->t_sc;
@@ -724,7 +742,7 @@ strip_send(struct strip_softc *sc, struct mbuf *m0)
  * ordering gets trashed.  It can be done for all packets in stripintr().
  */
 int
-stripoutput(struct ifnet *ifp, struct mbuf *m, const struct sockaddr *dst,
+stripoutput(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
     struct rtentry *rt)
 {
 	struct strip_softc *sc = ifp->if_softc;
@@ -749,13 +767,15 @@ stripoutput(struct ifnet *ifp, struct mbuf *m, const struct sockaddr *dst,
 		return (EHOSTUNREACH);
 	}
 
+#define SDL(a)          ((struct sockaddr_dl *) (a))
+
 #ifdef DEBUG
 	if (rt) {
 	   	printf("stripout, rt: dst af%d gw af%d",
-		    rt_getkey(rt)->sa_family, rt->rt_gateway->sa_family);
-		if (rt_getkey(rt)->sa_family == AF_INET)
+		    rt_key(rt)->sa_family, rt->rt_gateway->sa_family);
+		if (rt_key(rt)->sa_family == AF_INET)
 		  printf(" dst %x",
-		      satocsin(rt_getkey(rt))->sin_addr.s_addr);
+		      ((struct sockaddr_in *)rt_key(rt))->sin_addr.s_addr);
 		printf("\n");
 	}
 #endif
@@ -766,17 +786,19 @@ stripoutput(struct ifnet *ifp, struct mbuf *m, const struct sockaddr *dst,
 
                 /* assume rt is never NULL */
                 if (rt == NULL || rt->rt_gateway->sa_family != AF_LINK
-                    || satocsdl(rt->rt_gateway)->sdl_alen != ifp->if_addrlen) {
+                    || SDL(rt->rt_gateway)->sdl_alen != ifp->if_addrlen) {
 		  	DPRINTF(("strip: could not arp starmode addr %x\n",
-			 satocsin(dst)->sin_addr.s_addr));
+			 ((struct sockaddr_in *)dst)->sin_addr.s_addr));
 			m_freem(m);
 			return (EHOSTUNREACH);
 		}
-                dldst = CLLADDR(satocsdl(rt->rt_gateway));
+		/*bcopy(LLADDR(SDL(rt->rt_gateway)), dldst, ifp->if_addrlen);*/
+                dldst = LLADDR(SDL(rt->rt_gateway));
                 break;
 
 	case AF_LINK:
-		dldst = CLLADDR(satocsdl(dst));
+		/*bcopy(LLADDR(SDL(rt->rt_gateway)), dldst, ifp->if_addrlen);*/
+		dldst = LLADDR(SDL(dst));
 		break;
 
 	default:
@@ -904,7 +926,15 @@ stripstart(struct tty *tp)
 	 */
 	if (sc == NULL)
 		return (0);
-	softint_schedule(sc->sc_si);
+#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
+	softintr_schedule(sc->sc_si);
+#else
+    {
+	int s = splhigh();
+	schednetisr(NETISR_STRIP);
+	splx(s);
+    }
+#endif
 	return (0);
 }
 
@@ -1035,7 +1065,15 @@ stripinput(int c, struct tty *tp)
 		goto error;
 
 	IF_ENQUEUE(&sc->sc_inq, m);
-	softint_schedule(sc->sc_si);
+#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
+	softintr_schedule(sc->sc_si);
+#else
+    {
+	int s = splhigh();
+	schednetisr(NETISR_STRIP);
+	splx(s);
+    }
+#endif
 	goto newpack;
 
 error:
@@ -1047,6 +1085,20 @@ newpack:
 
 	return (0);
 }
+
+#ifndef __HAVE_GENERIC_SOFT_INTERRUPTS
+void
+stripnetisr(void)
+{
+	struct strip_softc *sc;
+
+	LIST_FOREACH(sc, &strip_softc_list, sc_iflist) {
+		if (sc->sc_ttyp == NULL)
+			continue;
+		stripintr(sc);
+	}
+}
+#endif
 
 static void
 stripintr(void *arg)
@@ -1068,7 +1120,6 @@ stripintr(void *arg)
 	/*
 	 * Output processing loop.
 	 */
-	mutex_enter(softnet_lock);
 	for (;;) {
 #ifdef INET
 		struct ip *ip;
@@ -1216,9 +1267,9 @@ stripintr(void *arg)
 			}
 		}
 #endif
-		m->m_data = (void *) pktstart;
+		m->m_data = (caddr_t) pktstart;
 		m->m_pkthdr.len = m->m_len = len;
-#if NBPFILTER > 0
+#if NPBFILTER > 0
 		if (sc->sc_if.if_bpf) {
 			bpf_mtap_sl_in(sc->sc_if.if_bpf, chdr, &m);
 			if (m == NULL)
@@ -1237,7 +1288,7 @@ stripintr(void *arg)
 			MGETHDR(n, M_DONTWAIT, MT_DATA);
 			pktlen = m->m_pkthdr.len;
 			M_MOVE_PKTHDR(n, m);
-			memcpy(mtod(n, void *), mtod(m, void *), pktlen);
+			memcpy(mtod(n, caddr_t), mtod(m, caddr_t), pktlen);
 			n->m_len = m->m_len;
 			m_freem(m);
 			m = n;
@@ -1260,14 +1311,13 @@ stripintr(void *arg)
 		splx(s);
 #endif
 	}
-	mutex_exit(softnet_lock);
 }
 
 /*
  * Process an ioctl request.
  */
 int
-stripioctl(struct ifnet *ifp, u_long cmd, void *data)
+stripioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	struct ifaddr *ifa = (struct ifaddr *)data;
 	struct ifreq *ifr;
@@ -1277,7 +1327,7 @@ stripioctl(struct ifnet *ifp, u_long cmd, void *data)
 
 	switch (cmd) {
 
-	case SIOCINITIFADDR:
+	case SIOCSIFADDR:
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			ifp->if_flags |= IFF_UP;
 		else
@@ -1296,7 +1346,7 @@ stripioctl(struct ifnet *ifp, u_long cmd, void *data)
 			error = EAFNOSUPPORT;		/* XXX */
 			break;
 		}
-		switch (ifreq_getaddr(cmd, ifr)->sa_family) {
+		switch (ifr->ifr_addr.sa_family) {
 
 #ifdef INET
 		case AF_INET:
@@ -1310,7 +1360,7 @@ stripioctl(struct ifnet *ifp, u_long cmd, void *data)
 		break;
 
 	default:
-		error = ifioctl_common(ifp, cmd, data);
+		error = EINVAL;
 	}
 	splx(s);
 	return (error);
@@ -1460,11 +1510,11 @@ strip_watchdog(struct ifnet *ifp)
 
 #ifdef DEBUG
 	if (ifp->if_flags & IFF_DEBUG)
-		addlog("\n%s: in watchdog, state %s timeout %lld\n",
+		addlog("\n%s: in watchdog, state %s timeout %ld\n",
 		       ifp->if_xname,
  		       ((unsigned) sc->sc_state < 3) ?
 		       strip_statenames[sc->sc_state] : "<<illegal state>>",
-		       (long long)(sc->sc_statetimo - time_second));
+		       sc->sc_statetimo - time_second);
 #endif
 
 	/*
@@ -1609,7 +1659,7 @@ strip_newpacket(struct strip_softc *sc, u_char *ptr, u_char *end)
 	 * of the decoded packet.  Decode start of IP header, get the
 	 * IP header length and decode that many bytes in total.
 	 */
-	packetlen = ((uint16_t)sc->sc_rxbuf[2] << 8) | sc->sc_rxbuf[3];
+	packetlen = ((u_int16_t)sc->sc_rxbuf[2] << 8) | sc->sc_rxbuf[3];
 
 #ifdef DIAGNOSTIC
 #if 0

@@ -1,4 +1,4 @@
-/*	$NetBSD: db_sym.h,v 1.23 2007/02/22 04:38:06 matt Exp $	*/
+/*	$NetBSD: db_sym.h,v 1.21 2005/12/11 12:20:53 christos Exp $	*/
 
 /*
  * Mach Operating System
@@ -68,15 +68,15 @@ typedef void (db_forall_func_t)
  */
 typedef struct {
 	const char     *sym_format;
-	bool		(*sym_init)(int, void *, void *, const char *);
+	boolean_t	(*sym_init)(int, void *, void *, const char *);
 	db_sym_t	(*sym_lookup)(db_symtab_t *, const char *);
 	db_sym_t	(*sym_search)(db_symtab_t *, db_addr_t, db_strategy_t,
 			    db_expr_t *);
 	void		(*sym_value)(db_symtab_t *, db_sym_t, const char **,
 			    db_expr_t *);
-	bool		(*sym_line_at_pc)(db_symtab_t *, db_sym_t, char **,
+	boolean_t	(*sym_line_at_pc)(db_symtab_t *, db_sym_t, char **,
 			    int *, db_expr_t);
-	bool		(*sym_numargs)(db_symtab_t *, db_sym_t, int *, char **);
+	boolean_t	(*sym_numargs)(db_symtab_t *, db_sym_t, int *, char **);
 	void		(*sym_forall)(db_symtab_t *,
 			    db_forall_func_t *db_forall_func, void *);
 } db_symformat_t;
@@ -88,10 +88,10 @@ extern unsigned int db_maxoff;		/* like gdb's "max-symbolic-offset" */
 /*
  * Functions exported by the symtable module
  */
-bool		db_eqname(const char *, const char *, int);
+boolean_t	db_eqname(const char *, const char *, int);
 					/* strcmp, modulo leading char */
 
-bool		db_value_of_name(const char *, db_expr_t *);
+int		db_value_of_name(const char *, db_expr_t *);
 					/* find symbol value given name */
 
 void		db_sifting(char *, int);
@@ -115,4 +115,4 @@ void		db_symstr(char *, size_t, db_expr_t, db_strategy_t);
 void		db_printsym(db_expr_t, db_strategy_t,
 		    void(*)(const char *, ...));
 					/* print closest symbol to a value */
-bool		db_sym_numargs(db_sym_t, int *, char **);
+int		db_sym_numargs(db_sym_t, int *, char **);

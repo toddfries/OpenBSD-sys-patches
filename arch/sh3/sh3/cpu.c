@@ -1,4 +1,4 @@
-/*	$NetBSD: cpu.c,v 1.13 2008/04/28 20:23:35 martin Exp $	*/
+/*	$NetBSD: cpu.c,v 1.9 2006/10/11 01:08:48 uwe Exp $	*/
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -12,6 +12,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -27,12 +34,11 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: cpu.c,v 1.13 2008/04/28 20:23:35 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cpu.c,v 1.9 2006/10/11 01:08:48 uwe Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
-#include <sys/proc.h>
 
 #include <sh3/clock.h>
 #include <sh3/cache.h>
@@ -40,18 +46,18 @@ __KERNEL_RCSID(0, "$NetBSD: cpu.c,v 1.13 2008/04/28 20:23:35 martin Exp $");
 
 #include <machine/autoconf.h>
 
+
 extern struct cfdriver cpu_cd;
 
-static int cpu_match(device_t, struct cfdata *, void *);
-static void cpu_attach(device_t, device_t, void *);
+static int cpu_match(struct device *, struct cfdata *, void *);
+static void cpu_attach(struct device *, struct device *, void *);
 
-
-CFATTACH_DECL_NEW(cpu, 0,
+CFATTACH_DECL(cpu, sizeof (struct device),
     cpu_match, cpu_attach, NULL, NULL);
 
 
 static int
-cpu_match(device_t parent, struct cfdata *cf, void *aux)
+cpu_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct mainbus_attach_args *ma = aux;
 
@@ -62,13 +68,12 @@ cpu_match(device_t parent, struct cfdata *cf, void *aux)
 }
 
 static void
-cpu_attach(device_t parent, device_t self, void *aux)
+cpu_attach(struct device *parent, struct device *self, void *aux)
 {
 
 #define	MHZ(x) ((x) / 1000000), (((x) % 1000000) / 1000)
 
-	aprint_naive("\n");
-	aprint_normal(": SH%d %d.%02d MHz PCLOCK %d.%02d MHz\n",
+	printf(": HITACHI SH%d %d.%02d MHz PCLOCK %d.%02d MHz\n",
 	       CPU_IS_SH3 ? 3 : 4,
 	       MHZ(sh_clock_get_cpuclock()),
 	       MHZ(sh_clock_get_pclock()));

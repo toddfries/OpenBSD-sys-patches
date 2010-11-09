@@ -1,4 +1,4 @@
-/*	$NetBSD: autoconf.c,v 1.23 2008/02/14 00:04:51 joerg Exp $	*/
+/*	$NetBSD: autoconf.c,v 1.18 2005/12/11 12:18:29 christos Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1990, 1993
@@ -85,7 +85,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.23 2008/02/14 00:04:51 joerg Exp $");
+__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.18 2005/12/11 12:18:29 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -159,6 +159,8 @@ cpu_configure(void)
 
 	INTR_SETMASK(0);
 
+	init_sir();
+
 	if (config_rootfound("mainbus", NULL) == NULL)
 		panic("autoconfig failed, no root");
 
@@ -188,13 +190,29 @@ cpu_rootconf(void)
 static struct device *
 getdevunit(const char *name, int unit)
 {
+	struct device *dev = alldevs.tqh_first;
+	char num[10], fullname[16];
+	int lunit;
 	int i;
 
 	for (i = 0; i < ndevice_equivs; i++)
 		if (device_equiv->alias && strcmp (name, device_equiv->alias) == 0)
 			name = device_equiv->real;
 
-	return device_find_by_driver_unit(name, unit);
+	/* compute length of name and decimal expansion of unit number */
+	sprintf(num, "%d", unit);
+	lunit = strlen(num);
+	if (strlen(name) + lunit >= sizeof(fullname) - 1)
+		panic("config_attach: device name too long");
+
+	strcpy(fullname, name);
+	strcat(fullname, num);
+
+	while (strcmp(dev->dv_xname, fullname) != 0) {
+		if ((dev = dev->dv_list.tqe_next) == NULL)
+			return NULL;
+	}
+	return dev;
 }
 
 /*

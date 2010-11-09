@@ -1,30 +1,7 @@
-/*	$NetBSD: ms_kbc.c,v 1.12 2008/05/14 13:29:28 tsutsui Exp $	*/
+/*	$NetBSD: ms_kbc.c,v 1.7 2005/12/11 12:18:23 christos Exp $	*/
 
 /*-
  * Copyright (c) 2001 Izumi Tsutsui.  All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
-
-/*-
  * Copyright (c) 2000 Tsubai Masanari.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -51,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ms_kbc.c,v 1.12 2008/05/14 13:29:28 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ms_kbc.c,v 1.7 2005/12/11 12:18:23 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/device.h>
@@ -69,16 +46,16 @@ __KERNEL_RCSID(0, "$NetBSD: ms_kbc.c,v 1.12 2008/05/14 13:29:28 tsutsui Exp $");
 
 #include <news68k/news68k/isr.h>
 
-static int ms_kbc_match(device_t, cfdata_t, void *);
-static void ms_kbc_attach(device_t, device_t, void *);
+static int ms_kbc_match(struct device *, struct cfdata *, void *);
+static void ms_kbc_attach(struct device *, struct device *, void *);
 static void ms_kbc_init(struct ms_softc *);
 int ms_kbc_intr(void *);
 
 static int ms_kbc_enable(void *);
 static void ms_kbc_disable(void *);
-static int ms_kbc_ioctl(void *, u_long, void *, int, struct lwp *);
+static int ms_kbc_ioctl(void *, u_long, caddr_t, int, struct lwp *);
 
-CFATTACH_DECL_NEW(ms_kbc, sizeof(struct ms_softc),
+CFATTACH_DECL(ms_kbc, sizeof(struct ms_softc),
     ms_kbc_match, ms_kbc_attach, NULL, NULL);
 
 struct wsmouse_accessops ms_kbc_accessops = {
@@ -88,7 +65,7 @@ struct wsmouse_accessops ms_kbc_accessops = {
 };
 
 static int
-ms_kbc_match(device_t parent, cfdata_t cf, void *aux)
+ms_kbc_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct kbc_attach_args *ka = aux;
 
@@ -99,15 +76,14 @@ ms_kbc_match(device_t parent, cfdata_t cf, void *aux)
 }
 
 static void
-ms_kbc_attach(device_t parent, device_t self, void *aux)
+ms_kbc_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct ms_softc *sc = device_private(self);
+	struct ms_softc *sc = (void *)self;
 	struct kbc_attach_args *ka = aux;
 	struct wsmousedev_attach_args wsa;
 	int ipl;
 
-	sc->sc_dev = self;
-	aprint_normal("\n");
+	printf("\n");
 
 	sc->sc_bt = ka->ka_bt;
 	sc->sc_bh = ka->ka_bh;
@@ -116,7 +92,7 @@ ms_kbc_attach(device_t parent, device_t self, void *aux)
 
 	ms_kbc_init(sc);
 
-	isrlink_autovec(ms_kbc_intr, (void *)sc, ipl, IPL_TTY);
+	isrlink_autovec(ms_kbc_intr, (void *)sc, ipl, ISRPRI_TTY);
 
 	wsa.accessops = &ms_kbc_accessops;
 	wsa.accesscookie = sc;
@@ -174,7 +150,7 @@ ms_kbc_disable(void *v)
 }
 
 static int
-ms_kbc_ioctl(void *v, u_long cmd, void *data, int flag, struct lwp *l)
+ms_kbc_ioctl(void *v, u_long cmd, caddr_t data, int flag, struct lwp *l)
 {
 
 	return EPASSTHROUGH;

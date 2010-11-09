@@ -1,4 +1,4 @@
-/*	$NetBSD: ufs_inode.c,v 1.78 2009/02/22 20:28:07 ad Exp $	*/
+/*	$NetBSD: ufs_inode.c,v 1.62 2006/11/16 01:33:53 christos Exp $	*/
 
 /*
  * Copyright (c) 1991, 1993
@@ -37,12 +37,11 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ufs_inode.c,v 1.78 2009/02/22 20:28:07 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ufs_inode.c,v 1.62 2006/11/16 01:33:53 christos Exp $");
 
 #if defined(_KERNEL_OPT)
 #include "opt_ffs.h"
 #include "opt_quota.h"
-#include "opt_wapbl.h"
 #endif
 
 #include <sys/param.h>
@@ -53,14 +52,11 @@ __KERNEL_RCSID(0, "$NetBSD: ufs_inode.c,v 1.78 2009/02/22 20:28:07 ad Exp $");
 #include <sys/kernel.h>
 #include <sys/namei.h>
 #include <sys/kauth.h>
-#include <sys/wapbl.h>
-#include <sys/fstrans.h>
-#include <sys/kmem.h>
 
+#include <ufs/ufs/quota.h>
 #include <ufs/ufs/inode.h>
 #include <ufs/ufs/ufsmount.h>
 #include <ufs/ufs/ufs_extern.h>
-#include <ufs/ufs/ufs_wapbl.h>
 #ifdef UFS_DIRHASH
 #include <ufs/ufs/dirhash.h>
 #endif
@@ -80,96 +76,72 @@ ufs_inactive(void *v)
 {
 	struct vop_inactive_args /* {
 		struct vnode *a_vp;
-		struct bool *a_recycle;
+		struct lwp *a_l;
 	} */ *ap = v;
 	struct vnode *vp = ap->a_vp;
 	struct inode *ip = VTOI(vp);
-	struct mount *transmp;
+	struct mount *mp;
+	struct lwp *l = ap->a_l;
 	mode_t mode;
 	int error = 0;
-	int logged = 0;
 
-	UFS_WAPBL_JUNLOCK_ASSERT(vp->v_mount);
+	if (prtactive && vp->v_usecount != 0)
+		vprint("ufs_inactive: pushing active", vp);
 
-	transmp = vp->v_mount;
-	fstrans_start(transmp, FSTRANS_SHARED);
 	/*
 	 * Ignore inodes related to stale file handles.
 	 */
 	if (ip->i_mode == 0)
 		goto out;
+	if (ip->i_ffs_effnlink == 0 && DOINGSOFTDEP(vp))
+		softdep_releasefile(ip);
+
 	if (ip->i_nlink <= 0 && (vp->v_mount->mnt_flag & MNT_RDONLY) == 0) {
-		error = UFS_WAPBL_BEGIN(vp->v_mount);
-		if (error)
-			goto out;
-		logged = 1;
+		vn_start_write(vp, &mp, V_WAIT | V_LOWER);
 #ifdef QUOTA
-		(void)chkiq(ip, -1, NOCRED, 0);
+		if (!getinoquota(ip))
+			(void)chkiq(ip, -1, NOCRED, 0);
 #endif
 #ifdef UFS_EXTATTR
-		ufs_extattr_vnode_inactive(vp, curlwp);
+		ufs_extattr_vnode_inactive(vp, l);
 #endif
 		if (ip->i_size != 0) {
-			/*
-			 * When journaling, only truncate one indirect block
-			 * at a time
-			 */
-			if (vp->v_mount->mnt_wapbl) {
-				uint64_t incr = MNINDIR(ip->i_ump) <<
-				    vp->v_mount->mnt_fs_bshift; /* Power of 2 */
-				uint64_t base = NDADDR <<
-				    vp->v_mount->mnt_fs_bshift;
-				while (!error && ip->i_size > base + incr) {
-					/*
-					 * round down to next full indirect
-					 * block boundary.
-					 */
-					uint64_t nsize = base +
-					    ((ip->i_size - base - 1) &
-					    ~(incr - 1));
-					error = UFS_TRUNCATE(vp, nsize, 0,
-					    NOCRED);
-					if (error)
-						break;
-					UFS_WAPBL_END(vp->v_mount);
-					error = UFS_WAPBL_BEGIN(vp->v_mount);
-					if (error)
-						goto out;
-				}
-			}
-			if (!error)
-				error = UFS_TRUNCATE(vp, (off_t)0, 0, NOCRED);
+			error = UFS_TRUNCATE(vp, (off_t)0, 0, NOCRED, l);
 		}
+		/*
+		 * Setting the mode to zero needs to wait for the inode
+		 * to be written just as does a change to the link count.
+		 * So, rather than creating a new entry point to do the
+		 * same thing, we just use softdep_change_linkcnt().
+		 */
 		DIP_ASSIGN(ip, rdev, 0);
 		mode = ip->i_mode;
 		ip->i_mode = 0;
 		DIP_ASSIGN(ip, mode, 0);
 		ip->i_flag |= IN_CHANGE | IN_UPDATE;
-		mutex_enter(&vp->v_interlock);
-		vp->v_iflag |= VI_FREEING;
-		mutex_exit(&vp->v_interlock);
+		simple_lock(&vp->v_interlock);
+		vp->v_flag |= VFREEING;
+		simple_unlock(&vp->v_interlock);
+		if (DOINGSOFTDEP(vp))
+			softdep_change_linkcnt(ip);
 		UFS_VFREE(vp, ip->i_number, mode);
+		vn_finished_write(mp, V_LOWER);
 	}
 
 	if (ip->i_flag & (IN_CHANGE | IN_UPDATE | IN_MODIFIED)) {
-		if (!logged++) {
-			int err;
-			err = UFS_WAPBL_BEGIN(vp->v_mount);
-			if (err)
-				goto out;
-		}
+		vn_start_write(vp, &mp, V_WAIT | V_LOWER);
 		UFS_UPDATE(vp, NULL, NULL, 0);
+		vn_finished_write(mp, V_LOWER);
 	}
-	if (logged)
-		UFS_WAPBL_END(vp->v_mount);
 out:
+	VOP_UNLOCK(vp, 0);
 	/*
 	 * If we are done with the inode, reclaim it
 	 * so that it can be reused immediately.
 	 */
-	*ap->a_recycle = (ip->i_mode == 0);
-	VOP_UNLOCK(vp, 0);
-	fstrans_done(transmp);
+
+	if (ip->i_mode == 0)
+		vrecycle(vp, NULL, l);
 	return (error);
 }
 
@@ -177,18 +149,17 @@ out:
  * Reclaim an inode so that it can be used for other purposes.
  */
 int
-ufs_reclaim(struct vnode *vp)
+ufs_reclaim(struct vnode *vp, struct lwp *l)
 {
 	struct inode *ip = VTOI(vp);
+	struct mount *mp;
 
-	if (prtactive && vp->v_usecount > 1)
+	if (prtactive && vp->v_usecount != 0)
 		vprint("ufs_reclaim: pushing active", vp);
 
-	if (!UFS_WAPBL_BEGIN(vp->v_mount)) {
-		UFS_UPDATE(vp, NULL, NULL, UPDATE_CLOSE);
-		UFS_WAPBL_END(vp->v_mount);
-	}
+	vn_start_write(vp, &mp, V_WAIT | V_LOWER);
 	UFS_UPDATE(vp, NULL, NULL, UPDATE_CLOSE);
+	vn_finished_write(mp, V_LOWER);
 
 	/*
 	 * Remove the inode from its hash chain.
@@ -203,7 +174,15 @@ ufs_reclaim(struct vnode *vp)
 		ip->i_devvp = 0;
 	}
 #ifdef QUOTA
-	ufsquota_free(ip);
+	{
+		int i;
+		for (i = 0; i < MAXQUOTAS; i++) {
+			if (ip->i_dquot[i] != NODQUOT) {
+				dqrele(vp, ip->i_dquot[i]);
+				ip->i_dquot[i] = NODQUOT;
+			}
+		}
+	}
 #endif
 #ifdef UFS_DIRHASH
 	if (ip->i_dirhash != NULL)
@@ -232,8 +211,7 @@ ufs_balloc_range(struct vnode *vp, off_t off, off_t len, kauth_cred_t cred,
 	int bshift = vp->v_mount->mnt_fs_bshift;
 	int bsize = 1 << bshift;
 	int ppb = MAX(bsize >> PAGE_SHIFT, 1);
-	struct vm_page **pgs;
-	size_t pgssize;
+	struct vm_page *pgs[ppb];
 	UVMHIST_FUNC("ufs_balloc_range"); UVMHIST_CALLED(ubchist);
 	UVMHIST_LOG(ubchist, "vp %p off 0x%x len 0x%x u_size 0x%x",
 		    vp, off, len, vp->v_size);
@@ -243,6 +221,7 @@ ufs_balloc_range(struct vnode *vp, off_t off, off_t len, kauth_cred_t cred,
 
 	error = 0;
 	uobj = &vp->v_uobj;
+	pgs[0] = NULL;
 
 	/*
 	 * read or create pages covering the range of the allocation and
@@ -253,8 +232,24 @@ ufs_balloc_range(struct vnode *vp, off_t off, off_t len, kauth_cred_t cred,
 
 	pagestart = trunc_page(off) & ~(bsize - 1);
 	npages = MIN(ppb, (round_page(neweob) - pagestart) >> PAGE_SHIFT);
-	pgssize = npages * sizeof(struct vm_page *);
-	pgs = kmem_zalloc(pgssize, KM_SLEEP);
+	memset(pgs, 0, npages * sizeof(struct vm_page *));
+	simple_lock(&uobj->vmobjlock);
+	error = VOP_GETPAGES(vp, pagestart, pgs, &npages, 0,
+	    VM_PROT_WRITE, 0,
+	    PGO_SYNCIO|PGO_PASTEOF|PGO_NOBLOCKALLOC|PGO_NOTIMESTAMP);
+	if (error) {
+		return error;
+	}
+	simple_lock(&uobj->vmobjlock);
+	uvm_lock_pageq();
+	for (i = 0; i < npages; i++) {
+		UVMHIST_LOG(ubchist, "got pgs[%d] %p", i, pgs[i],0,0);
+		KASSERT((pgs[i]->flags & PG_RELEASED) == 0);
+		pgs[i]->flags &= ~PG_CLEAN;
+		uvm_pageactivate(pgs[i]);
+	}
+	uvm_unlock_pageq();
+	simple_unlock(&uobj->vmobjlock);
 
 	/*
 	 * adjust off to be block-aligned.
@@ -264,48 +259,11 @@ ufs_balloc_range(struct vnode *vp, off_t off, off_t len, kauth_cred_t cred,
 	off -= delta;
 	len += delta;
 
- retry:
-	mutex_enter(&uobj->vmobjlock);
-	error = VOP_GETPAGES(vp, pagestart, pgs, &npages, 0,
-	    VM_PROT_WRITE, 0,
-	    PGO_SYNCIO|PGO_PASTEOF|PGO_NOBLOCKALLOC|PGO_NOTIMESTAMP);
-	if (error) {
-		goto out;
-	}
-	mutex_enter(&uobj->vmobjlock);
-	mutex_enter(&uvm_pageqlock);
-	for (i = 0; i < npages; i++) {
-		UVMHIST_LOG(ubchist, "got pgs[%d] %p", i, pgs[i],0,0);
-		KASSERT((pgs[i]->flags & PG_RELEASED) == 0);
-		pgs[i]->flags &= ~PG_CLEAN;
-		uvm_pageactivate(pgs[i]);
-	}
-	mutex_exit(&uvm_pageqlock);
-	mutex_exit(&uobj->vmobjlock);
-
 	/*
 	 * now allocate the range.
 	 */
 
-	/*
-	 * XXX: Hack around deadlock with pagebusy and genfs node lock.
-	 *      This should be properly fixed.  PR kern/40389
-	 */
-	{
-	struct genfs_node *gp = VTOG(vp); /* XXX */
-
-	if (!rw_tryenter(&gp->g_glock, RW_WRITER)) {
-		mutex_enter(&uobj->vmobjlock);
-		for (i = 0; i < npages; i++)
-			pgs[i]->flags |= PG_RELEASED | PG_CLEAN;
-		mutex_enter(&uvm_pageqlock);
-		uvm_page_unbusy(pgs, npages);
-		mutex_exit(&uvm_pageqlock);
-		mutex_exit(&uobj->vmobjlock);
-		kpause("uballo", false, 1, NULL);
-		goto retry;
-	}}
-
+	genfs_node_wrlock(vp);
 	error = GOP_ALLOC(vp, off, len, flags, cred);
 	genfs_node_unlock(vp);
 
@@ -315,7 +273,7 @@ ufs_balloc_range(struct vnode *vp, off_t off, off_t len, kauth_cred_t cred,
 	 */
 
 	GOP_SIZE(vp, off + len, &eob, 0);
-	mutex_enter(&uobj->vmobjlock);
+	simple_lock(&uobj->vmobjlock);
 	for (i = 0; i < npages; i++) {
 		if (error) {
 			pgs[i]->flags |= PG_RELEASED;
@@ -325,15 +283,12 @@ ufs_balloc_range(struct vnode *vp, off_t off, off_t len, kauth_cred_t cred,
 		}
 	}
 	if (error) {
-		mutex_enter(&uvm_pageqlock);
+		uvm_lock_pageq();
 		uvm_page_unbusy(pgs, npages);
-		mutex_exit(&uvm_pageqlock);
+		uvm_unlock_pageq();
 	} else {
 		uvm_page_unbusy(pgs, npages);
 	}
-	mutex_exit(&uobj->vmobjlock);
-
- out:
- 	kmem_free(pgs, pgssize);
+	simple_unlock(&uobj->vmobjlock);
 	return error;
 }

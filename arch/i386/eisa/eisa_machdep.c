@@ -1,4 +1,4 @@
-/*	$NetBSD: eisa_machdep.c,v 1.32 2008/06/27 11:12:06 cegger Exp $	*/
+/*	$NetBSD: eisa_machdep.c,v 1.28 2006/11/16 01:32:38 christos Exp $	*/
 
 /*-
  * Copyright (c) 1997, 1998 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -65,7 +72,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: eisa_machdep.c,v 1.32 2008/06/27 11:12:06 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: eisa_machdep.c,v 1.28 2006/11/16 01:32:38 christos Exp $");
 
 #include "ioapic.h"
 
@@ -94,7 +101,6 @@ __KERNEL_RCSID(0, "$NetBSD: eisa_machdep.c,v 1.32 2008/06/27 11:12:06 cegger Exp
  * of these funcions.
  */
 struct x86_bus_dma_tag eisa_bus_dma_tag = {
-	0,			/* _tag_needs_free */
 	0,			/* _bounce_thresh */
 	0,			/* _bounce_alloc_lo */
 	0,			/* _bounce_alloc_hi */
@@ -112,12 +118,10 @@ struct x86_bus_dma_tag eisa_bus_dma_tag = {
 	_bus_dmamem_map,
 	_bus_dmamem_unmap,
 	_bus_dmamem_mmap,
-	_bus_dmatag_subregion,
-	_bus_dmatag_destroy,
 };
 
 void
-eisa_attach_hook(device_t parent, device_t self,
+eisa_attach_hook(struct device *parent, struct device *self,
     struct eisabus_attach_args *eba)
 {
 	extern int eisa_has_been_seen; 
@@ -226,7 +230,7 @@ eisa_intr_establish(eisa_chipset_tag_t ec, eisa_intr_handle_t ih,
 	}
 #endif
 
-	return intr_establish(irq, pic, pin, type, level, func, arg, false);
+	return intr_establish(irq, pic, pin, type, level, func, arg);
 }
 
 void

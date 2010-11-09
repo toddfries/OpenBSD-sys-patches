@@ -1,4 +1,4 @@
-/*	$NetBSD: ataconf.h,v 1.3 2009/02/13 22:41:04 apb Exp $	*/
+/*	$NetBSD: ataconf.h,v 1.1 2006/09/07 12:34:42 itohy Exp $	*/
 
 /*
  * Written in 2006 by ITOH Yasufumi.
@@ -8,13 +8,9 @@
 #ifndef _DEV_ATA_ATACONF_H_
 #define _DEV_ATA_ATACONF_H_
 
-#if defined(_KERNEL_OPT)
-#include "opt_modular.h"
-#endif /* defined(_KERNEL_OPT) */
+#if !defined(_KERNEL_OPT) || defined(LKM)
 
-#if !defined(_KERNEL_OPT) || defined(MODULAR)
-
-/* compile-in everything for module or module-enabled kernel */
+/* compile-in everything for LKM or LKM-enabled kernel */
 # define NATA_DMA	1
 # define NATA_UDMA	1
 # define NATA_PIOBM	1

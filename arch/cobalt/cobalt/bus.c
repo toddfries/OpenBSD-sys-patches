@@ -1,4 +1,4 @@
-/*	$NetBSD: bus.c,v 1.35 2008/06/04 12:41:40 ad Exp $	*/
+/*	$NetBSD: bus.c,v 1.31 2006/06/10 12:35:01 tsutsui Exp $	*/
 
 /*
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -31,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: bus.c,v 1.35 2008/06/04 12:41:40 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: bus.c,v 1.31 2006/06/10 12:35:01 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -367,7 +374,7 @@ _bus_dmamap_load_uio(bus_dma_tag_t t, bus_dmamap_t map, struct uio *uio,
 	int seg, i, error, first;
 	bus_size_t minlen, resid;
 	struct iovec *iov;
-	void *addr;
+	caddr_t addr;
 
 	/*
 	 * Make sure that on error condition we return "no valid mappings."
@@ -388,7 +395,7 @@ _bus_dmamap_load_uio(bus_dma_tag_t t, bus_dmamap_t map, struct uio *uio,
 		 * until we have exhausted the residual count.
 		 */
 		minlen = resid < iov[i].iov_len ? resid : iov[i].iov_len;
-		addr = (void *)iov[i].iov_base;
+		addr = (caddr_t)iov[i].iov_base;
 
 		error = _bus_dmamap_load_buffer(map, addr, minlen,
 		    uio->uio_vmspace, flags, &lastaddr, &seg, first);
@@ -621,9 +628,9 @@ _bus_dmamem_alloc(bus_dma_tag_t t, bus_size_t size, bus_size_t alignment,
 	curseg = 0;
 	lastaddr = segs[curseg].ds_addr = VM_PAGE_TO_PHYS(m);
 	segs[curseg].ds_len = PAGE_SIZE;
-	m = m->pageq.queue.tqe_next;
+	m = m->pageq.tqe_next;
 
-	for (; m != NULL; m = m->pageq.queue.tqe_next) {
+	for (; m != NULL; m = m->pageq.tqe_next) {
 		curaddr = VM_PAGE_TO_PHYS(m);
 #ifdef DIAGNOSTIC
 		if (curaddr < avail_start || curaddr >= high) {
@@ -668,7 +675,7 @@ _bus_dmamem_free(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs)
 		    addr < (segs[curseg].ds_addr + segs[curseg].ds_len);
 		    addr += PAGE_SIZE) {
 			m = PHYS_TO_VM_PAGE(addr);
-			TAILQ_INSERT_TAIL(&mlist, m, pageq.queue);
+			TAILQ_INSERT_TAIL(&mlist, m, pageq);
 		}
 	}
 
@@ -681,7 +688,7 @@ _bus_dmamem_free(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs)
  */
 int
 _bus_dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
-    size_t size, void **kvap, int flags)
+    size_t size, caddr_t *kvap, int flags)
 {
 	vaddr_t va;
 	bus_addr_t addr;
@@ -695,9 +702,9 @@ _bus_dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
 	 */
 	if (nsegs == 1) {
 		if (flags & BUS_DMA_COHERENT)
-			*kvap = (void *)MIPS_PHYS_TO_KSEG1(segs[0].ds_addr);
+			*kvap = (caddr_t)MIPS_PHYS_TO_KSEG1(segs[0].ds_addr);
 		else
-			*kvap = (void *)MIPS_PHYS_TO_KSEG0(segs[0].ds_addr);
+			*kvap = (caddr_t)MIPS_PHYS_TO_KSEG0(segs[0].ds_addr);
 		return 0;
 	}
 
@@ -708,7 +715,7 @@ _bus_dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
 	if (va == 0)
 		return (ENOMEM);
 
-	*kvap = (void *)va;
+	*kvap = (caddr_t)va;
 
 	for (curseg = 0; curseg < nsegs; curseg++) {
 		for (addr = segs[curseg].ds_addr;
@@ -733,7 +740,7 @@ _bus_dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
  * bus-specific DMA memory unmapping functions.
  */
 void
-_bus_dmamem_unmap(bus_dma_tag_t t, void *kva, size_t size)
+_bus_dmamem_unmap(bus_dma_tag_t t, caddr_t kva, size_t size)
 {
 
 #ifdef DIAGNOSTIC
@@ -745,8 +752,8 @@ _bus_dmamem_unmap(bus_dma_tag_t t, void *kva, size_t size)
 	 * Nothing to do if we mapped it with KSEG0 or KSEG1 (i.e.
 	 * not in KSEG2).
 	 */
-	if (kva >= (void *)MIPS_KSEG0_START &&
-	    kva < (void *)MIPS_KSEG2_START)
+	if (kva >= (caddr_t)MIPS_KSEG0_START &&
+	    kva < (caddr_t)MIPS_KSEG2_START)
 		return;
 
 	size = round_page(size);
@@ -780,7 +787,7 @@ _bus_dmamem_mmap(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
 			continue;
 		}
 
-		return mips_btop((char *)segs[i].ds_addr + off);
+		return mips_btop((caddr_t)segs[i].ds_addr + off);
 	}
 
 	/* Page not found. */

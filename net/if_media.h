@@ -1,4 +1,4 @@
-/*	$NetBSD: if_media.h,v 1.51 2008/09/09 20:12:18 mhitch Exp $	*/
+/*	$NetBSD: if_media.h,v 1.46 2006/06/03 12:43:28 ragge Exp $	*/
 
 /*-
  * Copyright (c) 1998, 2000, 2001 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -115,8 +122,6 @@ struct ifmedia {
 /* Initialize an interface's struct if_media field. */
 void	ifmedia_init(struct ifmedia *, int, ifm_change_cb_t, ifm_stat_cb_t);
 
-int ifmedia_change(struct ifmedia *, struct ifnet *);
-
 /* Add one supported medium to a struct ifmedia. */
 void	ifmedia_add(struct ifmedia *, int, int, void *);
 
@@ -138,9 +143,6 @@ void	ifmedia_delete_instance(struct ifmedia *, u_int);
 /* Compute baudrate for a given media. */
 u_quad_t	ifmedia_baudrate(int);
 
-/* Remove all media */
-void		ifmedia_removeall(struct ifmedia *);
-
 #endif /*_KERNEL */
 
 /*
@@ -159,7 +161,7 @@ void		ifmedia_removeall(struct ifmedia *);
 /*
  * Ethernet
  */
-#define	IFM_ETHER	0x00000020
+#define IFM_ETHER	0x00000020
 #define	IFM_10_T	3		/* 10BaseT - RJ45 */
 #define	IFM_10_2	4		/* 10Base2 - Thinnet */
 #define	IFM_10_5	5		/* 10Base5 - AUI */
@@ -178,7 +180,6 @@ void		ifmedia_removeall(struct ifmedia *);
 #define	IFM_10G_LR	18		/* 10GbaseLR - single-mode fiber */
 #define	IFM_10G_SR	19		/* 10GBase-SR 850nm Multi-mode */
 #define	IFM_10G_CX4	20		/* 10GBase CX4 copper */
-#define	IFM_2500_SX	21		/* 2500baseSX - multi-mode fiber */
 
 #define	IFM_ETH_MASTER	0x00000100	/* master mode (1000baseT) */
 #define	IFM_ETH_RXPAUSE	0x00000200	/* receive PAUSE frames */
@@ -202,8 +203,8 @@ void		ifmedia_removeall(struct ifmedia *);
 #define	IFM_FDDI	0x00000060
 #define	IFM_FDDI_SMF	3		/* Single-mode fiber */
 #define	IFM_FDDI_MMF	4		/* Multi-mode fiber */
-#define	IFM_FDDI_UTP	5		/* CDDI / UTP */
-#define	IFM_FDDI_DA	0x00000100	/* Dual attach / single attach */
+#define IFM_FDDI_UTP	5		/* CDDI / UTP */
+#define IFM_FDDI_DA	0x00000100	/* Dual attach / single attach */
 
 /*
  * IEEE 802.11 Wireless
@@ -225,32 +226,20 @@ void		ifmedia_removeall(struct ifmedia *);
 #define	IFM_IEEE80211_OFDM48	16	/* OFDM 48Mbps */
 #define	IFM_IEEE80211_OFDM54	17	/* OFDM 54Mbps */
 #define	IFM_IEEE80211_OFDM72	18	/* OFDM 72Mbps */
-#define	IFM_IEEE80211_DS354k	19	/* Direct Sequence 354Kbps */
-#define	IFM_IEEE80211_DS512k	20	/* Direct Sequence 512Kbps */
-#define	IFM_IEEE80211_OFDM3	21	/* OFDM 3Mbps */
-#define	IFM_IEEE80211_OFDM4	22	/* OFDM 4.5Mbps */
-#define	IFM_IEEE80211_OFDM27	23	/* OFDM 27Mbps */
-/* NB: not enough bits to express MCS fully */
-#define	IFM_IEEE80211_MCS	24	/* HT MCS rate */
 
-#define	IFM_IEEE80211_ADHOC	0x00000100	/* Operate in Adhoc mode */
-#define	IFM_IEEE80211_HOSTAP	0x00000200	/* Operate in Host AP mode */
-#define	IFM_IEEE80211_MONITOR	0x00000400	/* Operate in Monitor mode */
-#define	IFM_IEEE80211_TURBO	0x00000800	/* Operate in Turbo mode */
-#define	IFM_IEEE80211_IBSS	0x00001000	/* Operate in IBSS mode */
-#define	IFM_IEEE80211_WDS 	0x00002000	/* Operate as an WDS master */
+#define	IFM_IEEE80211_ADHOC	 0x00000100	/* Operate in Adhoc mode */
+#define	IFM_IEEE80211_HOSTAP	 0x00000200	/* Operate in Host AP mode */
+#define	IFM_IEEE80211_MONITOR	 0x00000400	/* Operate in Monitor mode */
+#define	IFM_IEEE80211_TURBO	 0x00000800	/* Operate in Turbo mode */
 
 /* operating mode for multi-mode devices */
 #define	IFM_IEEE80211_11A	0x00010000	/* 5 GHz, OFDM mode */
 #define	IFM_IEEE80211_11B	0x00020000	/* Direct Sequence mode */
 #define	IFM_IEEE80211_11G	0x00030000	/* 2 GHz, CCK mode */
 #define	IFM_IEEE80211_FH	0x00040000	/* 2 GHz, GFSK mode */
-#define	IFM_IEEE80211_11NA	0x00050000	/* 5Ghz, HT mode */
-#define	IFM_IEEE80211_11NG	0x00060000	/* 2Ghz, HT mode */
-
 
 /*
- * Common Address Redundancy Protocol
+ * Common Access Redundancy Protocol
  */
 #define	IFM_CARP		0x000000c0
 
@@ -264,12 +253,12 @@ void		ifmedia_removeall(struct ifmedia *);
 /*
  * Shared options
  */
-#define	IFM_FDX		0x00100000	/* Force full duplex */
+#define IFM_FDX		0x00100000	/* Force full duplex */
 #define	IFM_HDX		0x00200000	/* Force half duplex */
 #define	IFM_FLOW	0x00400000	/* enable hardware flow control */
-#define	IFM_FLAG0	0x01000000	/* Driver defined flag */
-#define	IFM_FLAG1	0x02000000	/* Driver defined flag */
-#define	IFM_FLAG2	0x04000000	/* Driver defined flag */
+#define IFM_FLAG0	0x01000000	/* Driver defined flag */
+#define IFM_FLAG1	0x02000000	/* Driver defined flag */
+#define IFM_FLAG2	0x04000000	/* Driver defined flag */
 #define	IFM_LOOP	0x08000000	/* Put hardware in loopback */
 
 /*
@@ -424,8 +413,6 @@ struct ifmedia_description {
 	{ IFM_ETHER | IFM_10G_CX4,	"10GbaseCX4" },			\
 	{ IFM_ETHER | IFM_10G_CX4,	"10GCX4" },			\
 	{ IFM_ETHER | IFM_10G_CX4,	"10GBASE-CX4" },		\
-	{ IFM_ETHER | IFM_2500_SX,	"2500baseSX" },			\
-	{ IFM_ETHER | IFM_2500_SX,	"2500SX" },			\
 									\
 	{ IFM_TOKEN | IFM_TOK_STP4,	"DB9/4Mbit" },			\
 	{ IFM_TOKEN | IFM_TOK_STP4,	"4STP" },			\
@@ -470,11 +457,6 @@ struct ifmedia_description {
 	{ IFM_IEEE80211 | IFM_IEEE80211_OFDM48,	"OFDM48" },		\
 	{ IFM_IEEE80211 | IFM_IEEE80211_OFDM54,	"OFDM54" },		\
 	{ IFM_IEEE80211 | IFM_IEEE80211_OFDM72,	"OFDM72" },		\
-	{ IFM_IEEE80211 | IFM_IEEE80211_DS354k, "DS/354Kbps" },         \
-	{ IFM_IEEE80211 | IFM_IEEE80211_DS512k, "DS/512Kbps" },         \
-	{ IFM_IEEE80211 | IFM_IEEE80211_OFDM3,  "OFDM/3Mbps" },         \
-	{ IFM_IEEE80211 | IFM_IEEE80211_OFDM4,  "OFDM/4.5Mbps" },       \
-	{ IFM_IEEE80211 | IFM_IEEE80211_OFDM27, "OFDM/27Mbps" },        \
 									\
 	{ 0, NULL },							\
 }
@@ -486,8 +468,6 @@ struct ifmedia_description {
 	{ IFM_IEEE80211 | IFM_IEEE80211_11B,	"11b" },		\
 	{ IFM_IEEE80211 | IFM_IEEE80211_11G,	"11g" },		\
 	{ IFM_IEEE80211 | IFM_IEEE80211_FH,	"fh" },			\
-	{ IFM_IEEE80211 | IFM_IEEE80211_11NA,	"11na" },		\
-	{ IFM_IEEE80211 | IFM_IEEE80211_11NG,	"11ng" },		\
 	{ 0, NULL },							\
 }
 
@@ -520,11 +500,10 @@ struct ifmedia_description {
 	{ IFM_FDDI | IFM_FDDI_DA,	"das" },			\
 									\
 	{ IFM_IEEE80211 | IFM_IEEE80211_ADHOC,	"adhoc" },		\
+	{ IFM_IEEE80211 | IFM_IEEE80211_ADHOC,	"ibss" },		\
 	{ IFM_IEEE80211 | IFM_IEEE80211_HOSTAP,	"hostap" },		\
 	{ IFM_IEEE80211 | IFM_IEEE80211_MONITOR,"monitor" },		\
 	{ IFM_IEEE80211 | IFM_IEEE80211_TURBO,	"turbo" },		\
-	{ IFM_IEEE80211 | IFM_IEEE80211_IBSS,	"ibss" },		\
-	{ IFM_IEEE80211 | IFM_IEEE80211_WDS, 	"wds" },		\
 									\
 	{ 0, NULL },							\
 }
@@ -556,7 +535,6 @@ struct ifmedia_baudrate {
 	{ IFM_ETHER | IFM_10G_LR,	IF_Gbps(10ULL) },		\
 	{ IFM_ETHER | IFM_10G_SR,	IF_Gbps(10ULL) },		\
 	{ IFM_ETHER | IFM_10G_CX4,	IF_Gbps(10ULL) },		\
-	{ IFM_ETHER | IFM_2500_SX,	IF_Mbps(2500ULL) },		\
 									\
 	{ IFM_TOKEN | IFM_TOK_STP4,	IF_Mbps(4) },			\
 	{ IFM_TOKEN | IFM_TOK_STP16,	IF_Mbps(16) },			\

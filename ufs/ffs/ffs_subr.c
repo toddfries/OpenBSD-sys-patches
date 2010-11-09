@@ -1,4 +1,4 @@
-/*	$NetBSD: ffs_subr.c,v 1.45 2008/06/03 09:47:49 hannken Exp $	*/
+/*	$NetBSD: ffs_subr.c,v 1.43 2006/11/16 01:33:53 christos Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1989, 1993
@@ -36,7 +36,7 @@
 #endif
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ffs_subr.c,v 1.45 2008/06/03 09:47:49 hannken Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ffs_subr.c,v 1.43 2006/11/16 01:33:53 christos Exp $");
 
 #include <sys/param.h>
 
@@ -44,12 +44,11 @@ __KERNEL_RCSID(0, "$NetBSD: ffs_subr.c,v 1.45 2008/06/03 09:47:49 hannken Exp $"
 extern const int inside[], around[];
 extern const u_char * const fragtbl[];
 
+#ifndef _KERNEL
+#include <ufs/ufs/dinode.h>
 #include <ufs/ffs/fs.h>
 #include <ufs/ffs/ffs_extern.h>
 #include <ufs/ufs/ufs_bswap.h>
-
-#ifndef _KERNEL
-#include <ufs/ufs/dinode.h>
 void    panic(const char *, ...)
     __attribute__((__noreturn__,__format__(__printf__,1,2)));
 
@@ -60,10 +59,12 @@ void    panic(const char *, ...)
 #include <sys/buf.h>
 #include <sys/inttypes.h>
 #include <sys/pool.h>
-#include <sys/fstrans.h>
 #include <ufs/ufs/inode.h>
 #include <ufs/ufs/ufsmount.h>
 #include <ufs/ufs/ufs_extern.h>
+#include <ufs/ffs/fs.h>
+#include <ufs/ffs/ffs_extern.h>
+#include <ufs/ufs/ufs_bswap.h>
 
 /*
  * Load up the contents of an inode and copy the appropriate pieces
@@ -108,25 +109,6 @@ ffs_load_inode(struct buf *bp, struct inode *ip, struct fs *fs, ino_t ino)
 		ip->i_uid = ip->i_ffs2_uid;
 		ip->i_gid = ip->i_ffs2_gid;
 	}
-}
-
-int
-ffs_getblk(struct vnode *vp, daddr_t lblkno, daddr_t blkno, int size,
-    bool clearbuf, buf_t **bpp)
-{
-	int error = 0;
-
-	KASSERT(blkno >= 0 || blkno == FFS_NOBLK);
-
-	if ((*bpp = getblk(vp, lblkno, size, 0, 0)) == NULL)
-		return ENOMEM;
-	if (blkno != FFS_NOBLK)
-		(*bpp)->b_blkno = blkno;
-	if (clearbuf)
-		clrbuf(*bpp);
-	if ((*bpp)->b_blkno >= 0 && (error = fscow_run(*bpp, false)) != 0)
-		brelse(*bpp, BC_INVAL);
-	return error;
 }
 
 #endif	/* _KERNEL */

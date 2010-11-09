@@ -1,4 +1,4 @@
-/*	$NetBSD: if_ie.c,v 1.52 2008/11/07 00:20:02 dyoung Exp $ */
+/*	$NetBSD: if_ie.c,v 1.44 2005/12/11 12:19:20 christos Exp $ */
 
 /*-
  * Copyright (c) 1993, 1994, 1995 Charles M. Hannum.
@@ -98,7 +98,7 @@
 */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_ie.c,v 1.52 2008/11/07 00:20:02 dyoung Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_ie.c,v 1.44 2005/12/11 12:19:20 christos Exp $");
 
 #include "opt_inet.h"
 #include "opt_ns.h"
@@ -148,7 +148,7 @@ __KERNEL_RCSID(0, "$NetBSD: if_ie.c,v 1.52 2008/11/07 00:20:02 dyoung Exp $");
  * ugly byte-order hack for SUNs
  */
 
-#define XSWAP(y)	( (((y) & 0xff00) >> 8) | (((y) & 0xff) << 8) )
+#define XSWAP(y)	( (((y)&0xff00) >> 8) | (((y)&0xff) << 8) )
 #define SWAP(x)		((u_short)(XSWAP((u_short)(x))))
 
 #include "i82586.h"
@@ -183,7 +183,7 @@ int 	ie_run_tdr = 0;
 
 static void iewatchdog(struct ifnet *);
 static int ieinit(struct ie_softc *);
-static int ieioctl(struct ifnet *, u_long, void *);
+static int ieioctl(struct ifnet *, u_long, caddr_t);
 static void iestart(struct ifnet *);
 static void iereset(struct ie_softc *);
 static int ie_setupram(struct ie_softc *);
@@ -204,13 +204,13 @@ static void mc_reset(struct ie_softc *);
 static void run_tdr(struct ie_softc *, struct ie_tdr_cmd *);
 static void iememinit(struct ie_softc *);
 
-static inline uint8_t *Align(char *);
+static inline char * Align(char *);
 static inline u_int Swap32(u_int);
 static inline u_int vtop24(struct ie_softc *, void *);
-static inline uint16_t vtop16sw(struct ie_softc *, void *);
+static inline u_short vtop16sw(struct ie_softc *, void *);
 
 static inline void ie_ack(struct ie_softc *, u_int);
-static inline u_short ether_cmp(u_char *, uint8_t *);
+static inline u_short ether_cmp(u_char *, u_char *);
 static inline int check_eh(struct ie_softc *, struct ether_header *, int *);
 static inline int ie_buflen(struct ie_softc *, int);
 static inline int ie_packet_len(struct ie_softc *);
@@ -229,12 +229,12 @@ vtop24(struct ie_softc *sc, void *ptr)
 {
 	u_int pa;
 
-	pa = (vaddr_t)ptr - (vaddr_t)sc->sc_iobase;
+	pa = ((caddr_t)ptr) - sc->sc_iobase;
 #ifdef	IEDEBUG
 	if (pa & ~0xffFFff)
 		panic("ie:vtop24");
 #endif
-	return pa;
+	return (pa);
 }
 
 /* KVA to 16 bit offset, swapped */
@@ -243,13 +243,13 @@ vtop16sw(struct ie_softc *sc, void *ptr)
 {
 	u_int pa;
 
-	pa = (vaddr_t)ptr - (vaddr_t)sc->sc_maddr;
+	pa = ((caddr_t)ptr) - sc->sc_maddr;
 #ifdef	IEDEBUG
 	if (pa & ~0xFFff)
 		panic("ie:vtop16");
 #endif
 
-	return SWAP(pa);
+	return (SWAP(pa));
 }
 
 static inline u_int 
@@ -265,16 +265,16 @@ Swap32(u_int x)
 	y <<= 8; x >>= 8;
 	y |= x & 0xFF;
 
-	return y;
+	return (y);
 }
 
-static inline uint8_t *
-Align(char *ptr)
+static inline char *
+Align(caddr_t ptr)
 {
 	u_long  l = (u_long)ptr;
 
 	l = (l + 3) & ~3L;
-	return (uint8_t *)l;
+	return ((char *)l);
 }
 
 
@@ -329,19 +329,19 @@ ie_attach(struct ie_softc *sc)
 		sc->nrxbuf = MXRXBUF;
 
 #ifdef	IEDEBUG
-	aprint_debug_dev(sc->sc_dev,
-	    "%dK memory, %d tx frames, %d rx frames, %d rx bufs\n",
-	    (sc->sc_msize >> 10), sc->ntxbuf, sc->nframes, sc->nrxbuf);
+	printf("%s: %dK memory, %d tx frames, %d rx frames, %d rx bufs\n",
+	    sc->sc_dev.dv_xname, (sc->sc_msize >> 10),
+	    sc->ntxbuf, sc->nframes, sc->nrxbuf);
 #endif
 
 	if ((sc->nframes <= 0) || (sc->nrxbuf <= 0))
-		panic("%s: weird memory size", __func__);
+		panic("ie_attach: weird memory size");
 
 	/*
 	 * Setup RAM for transmit/receive
 	 */
 	if (ie_setupram(sc) == 0) {
-		aprint_error(": RAM CONFIG FAILED!\n");
+		printf(": RAM CONFIG FAILED!\n");
 		/* XXX should reclaim resources? */
 		return;
 	}
@@ -349,7 +349,7 @@ ie_attach(struct ie_softc *sc)
 	/*
 	 * Initialize and attach S/W interface
 	 */
-	strcpy(ifp->if_xname, device_xname(sc->sc_dev));
+	strcpy(ifp->if_xname, sc->sc_dev.dv_xname);
 	ifp->if_softc = sc;
 	ifp->if_start = iestart;
 	ifp->if_ioctl = ieioctl;
@@ -386,13 +386,13 @@ ie_setupram(struct ie_softc *sc)
 
 	/* ISCP */
 	off -= sizeof(*iscp);
-	iscp = (volatile void *)(sc->buf_area + off);
+	iscp = (volatile void *) (sc->buf_area + off);
 	(sc->sc_memset)(__UNVOLATILE(iscp), 0, sizeof(*iscp));
 	sc->iscp = iscp;
 
 	/* SCB */
 	off -= sizeof(*scb);
-	scb  = (volatile void *)(sc->buf_area + off);
+	scb  = (volatile void *) (sc->buf_area + off);
 	(sc->sc_memset)(__UNVOLATILE(scb), 0, sizeof(*scb));
 	sc->scb = scb;
 
@@ -417,8 +417,8 @@ ie_setupram(struct ie_softc *sc)
 	scb->ie_recv_list    = SWAP(0xffff);
 
 	/* Other stuff is done in ieinit() */
-	(sc->reset_586)(sc);
-	(sc->chan_attn)(sc);
+	(sc->reset_586) (sc);
+	(sc->chan_attn) (sc);
 
 	delay(100);		/* wait a while... */
 
@@ -442,7 +442,7 @@ iewatchdog(struct ifnet *ifp)
 {
 	struct ie_softc *sc = ifp->if_softc;
 
-	log(LOG_ERR, "%s: device timeout\n", device_xname(sc->sc_dev));
+	log(LOG_ERR, "%s: device timeout\n", sc->sc_dev.dv_xname);
 	++ifp->if_oerrors;
 	iereset(sc);
 }
@@ -454,19 +454,17 @@ int
 ie_intr(void *arg)
 {
 	struct ie_softc *sc = arg;
-	uint16_t status;
+	u_short status;
 	int loopcnt;
 
 	/*
 	 * check for parity error
 	 */
 	if (sc->hard_type == IE_VME) {
-		volatile struct ievme *iev =
-		    (volatile struct ievme *)sc->sc_reg;
-
+		volatile struct ievme *iev = (volatile struct ievme *)sc->sc_reg;
 		if (iev->status & IEVME_PERR) {
 			printf("%s: parity error (ctrl 0x%x @ 0x%02x%04x)\n",
-			    device_xname(sc->sc_dev), iev->pectrl,
+			    sc->sc_dev.dv_xname, iev->pectrl,
 			    iev->pectrl & IEVME_HADDR, iev->peaddr);
 			iev->pectrl = iev->pectrl | IEVME_PARACK;
 		}
@@ -477,7 +475,7 @@ ie_intr(void *arg)
 		return 0;
 
 	loopcnt = sc->nframes;
- loop:
+loop:
 	/* Ack interrupts FIRST in case we receive more during the ISR. */
 	ie_ack(sc, IE_ST_WHENCE & status);
 
@@ -485,7 +483,7 @@ ie_intr(void *arg)
 #ifdef IEDEBUG
 		in_ierint++;
 		if (sc->sc_debug & IED_RINT)
-			printf("%s: rint\n", device_xname(sc->sc_dev));
+			printf("%s: rint\n", sc->sc_dev.dv_xname);
 #endif
 		ierint(sc);
 #ifdef IEDEBUG
@@ -497,7 +495,7 @@ ie_intr(void *arg)
 #ifdef IEDEBUG
 		in_ietint++;
 		if (sc->sc_debug & IED_TINT)
-			printf("%s: tint\n", device_xname(sc->sc_dev));
+			printf("%s: tint\n", sc->sc_dev.dv_xname);
 #endif
 		ietint(sc);
 #ifdef IEDEBUG
@@ -513,7 +511,7 @@ ie_intr(void *arg)
 	 */
 	if (status & IE_ST_RNR) {
 #ifdef IEDEBUG
-		printf("%s: receiver not ready\n", device_xname(sc->sc_dev));
+		printf("%s: receiver not ready\n", sc->sc_dev.dv_xname);
 #endif
 		sc->sc_if.if_ierrors++;
 		iereset(sc);
@@ -521,7 +519,7 @@ ie_intr(void *arg)
 
 #ifdef IEDEBUG
 	if ((status & IE_ST_ALLDONE) && (sc->sc_debug & IED_CNA))
-		printf("%s: cna\n", device_xname(sc->sc_dev));
+		printf("%s: cna\n", sc->sc_dev.dv_xname);
 #endif
 
 	status = sc->scb->ie_status;
@@ -531,7 +529,7 @@ ie_intr(void *arg)
 			goto loop;
 		/* ... but we've been here long enough. */
 		log(LOG_ERR, "%s: interrupt stuck?\n",
-		    device_xname(sc->sc_dev));
+			sc->sc_dev.dv_xname);
 		iereset(sc);
 	}
 	return 1;
@@ -599,7 +597,7 @@ ietint(struct ie_softc *sc)
 	status = sc->xmit_cmds[sc->xctail]->ie_xmit_status;
 
 	if (!(status & IE_STAT_COMPL) || (status & IE_STAT_BUSY))
-		printf("%s: command still busy!\n", __func__);
+		printf("ietint: command still busy!\n");
 
 	if (status & IE_STAT_OK) {
 		ifp->if_opackets++;
@@ -613,16 +611,15 @@ ietint(struct ie_softc *sc)
 		 * What if more than one bit is set?
 		 */
 		if (status & IE_STAT_ABORT)
-			printf("%s: send aborted\n", device_xname(sc->sc_dev));
+			printf("%s: send aborted\n", sc->sc_dev.dv_xname);
 		if (status & IE_XS_LATECOLL)
-			printf("%s: late collision\n",
-			    device_xname(sc->sc_dev));
+			printf("%s: late collision\n", sc->sc_dev.dv_xname);
 		if (status & IE_XS_NOCARRIER)
-			printf("%s: no carrier\n", device_xname(sc->sc_dev));
+			printf("%s: no carrier\n", sc->sc_dev.dv_xname);
 		if (status & IE_XS_LOSTCTS)
-			printf("%s: lost CTS\n", device_xname(sc->sc_dev));
+			printf("%s: lost CTS\n", sc->sc_dev.dv_xname);
 		if (status & IE_XS_UNDERRUN)
-			printf("%s: DMA underrun\n", device_xname(sc->sc_dev));
+			printf("%s: DMA underrun\n", sc->sc_dev.dv_xname);
 		if (status & IE_XS_EXCMAX) {
 			/* Do not print this one (too noisy). */
 			ifp->if_collisions += 16;
@@ -635,7 +632,7 @@ ietint(struct ie_softc *sc)
 	 * indicating that we should do it.
 	 */
 	if (sc->want_mcsetup) {
-		mc_setup(sc, (void *)sc->xmit_cbuffs[sc->xctail]);
+		mc_setup(sc, (caddr_t)sc->xmit_cbuffs[sc->xctail]);
 		sc->want_mcsetup = 0;
 	}
 
@@ -658,18 +655,18 @@ ietint(struct ie_softc *sc)
  * This expands to 10 short m68k instructions! -gwr
  * Note: use this like bcmp()
  */
-static inline uint16_t
-ether_cmp(uint8_t *one, uint8_t *two)
+static inline u_short
+ether_cmp(u_char *one, u_char *two)
 {
-	uint16_t *a = (uint16_t *)one;
-	uint16_t *b = (uint16_t *)two;
-	uint16_t diff;
+	u_short *a = (u_short *) one;
+	u_short *b = (u_short *) two;
+	u_short diff;
 
 	diff  = *a++ - *b++;
 	diff |= *a++ - *b++;
 	diff |= *a++ - *b++;
 
-	return diff;
+	return (diff);
 }
 #define	ether_equal !ether_cmp
 
@@ -713,7 +710,7 @@ ie_buflen(struct ie_softc *sc, int head)
 
 	len = SWAP(sc->rbuffs[head]->ie_rbd_actual);
 	len &= (IE_RBUF_SIZE | (IE_RBUF_SIZE - 1));
-	return len;
+	return (len);
 }
 
 static inline int 
@@ -724,14 +721,12 @@ ie_packet_len(struct ie_softc *sc)
 	int acc = 0;
 
 	do {
-		if ((sc->rbuffs[sc->rbhead]->ie_rbd_actual & IE_RBD_USED)
-		    == 0) {
+		if (!(sc->rbuffs[sc->rbhead]->ie_rbd_actual & IE_RBD_USED)) {
 #ifdef IEDEBUG
 			print_rbd(sc->rbuffs[sc->rbhead]);
 #endif
-			log(LOG_ERR,
-			    "%s: receive descriptors out of sync at %d\n",
-			    device_xname(sc->sc_dev), sc->rbhead);
+			log(LOG_ERR, "%s: receive descriptors out of sync at %d\n",
+			    sc->sc_dev.dv_xname, sc->rbhead);
 			iereset(sc);
 			return -1;
 		}
@@ -740,7 +735,7 @@ ie_packet_len(struct ie_softc *sc)
 
 		acc += ie_buflen(sc, head);
 		head = (head + 1) % sc->nrxbuf;
-	} while (i == 0);
+	} while (!i);
 
 	return acc;
 }
@@ -759,7 +754,7 @@ iexmit(struct ie_softc *sc)
 
 #ifdef IEDEBUG
 	if (sc->sc_debug & IED_XMIT)
-		printf("%s: xmit buffer %d\n", device_xname(sc->sc_dev),
+		printf("%s: xmit buffer %d\n", sc->sc_dev.dv_xname,
 		    sc->xctail);
 #endif
 
@@ -822,7 +817,7 @@ ieget(struct ie_softc *sc, int *to_bpf)
 	/*
 	 * Snarf the Ethernet header.
 	 */
-	(sc->sc_memcpy)((void *)&eh, (void *)sc->cbuffs[head],
+	(sc->sc_memcpy)((caddr_t)&eh, (caddr_t)sc->cbuffs[head],
 	    sizeof(struct ether_header));
 
 	/*
@@ -832,7 +827,7 @@ ieget(struct ie_softc *sc, int *to_bpf)
 	 * This is only a consideration when FILTER is defined; i.e., when
 	 * we are either running BPF or doing multicasting.
 	 */
-	if (check_eh(sc, &eh, to_bpf) == 0) {
+	if (!check_eh(sc, &eh, to_bpf)) {
 		/* just this case, it's not an error */
 		sc->sc_if.if_ierrors--;
 		return 0;
@@ -870,7 +865,7 @@ ieget(struct ie_softc *sc, int *to_bpf)
 		}
 
 		if (mp == &top) {
-			char *newdata = (char *)
+			caddr_t newdata = (caddr_t)
 			    ALIGN(m->m_data + sizeof(struct ether_header)) -
 			    sizeof(struct ether_header);
 			len -= newdata - m->m_data; 
@@ -890,7 +885,7 @@ ieget(struct ie_softc *sc, int *to_bpf)
 	/*
 	 * Copy the Ethernet header into the mbuf chain.
 	 */
-	memcpy(mtod(m, void *), &eh, sizeof(struct ether_header));
+	memcpy(mtod(m, caddr_t), &eh, sizeof(struct ether_header));
 	thismboff = sizeof(struct ether_header);
 	thisrboff = sizeof(struct ether_header);
 	resid -= sizeof(struct ether_header);
@@ -905,8 +900,8 @@ ieget(struct ie_softc *sc, int *to_bpf)
 		int thismblen = m->m_len - thismboff;
 
 		len = min(thisrblen, thismblen);
-		(sc->sc_memcpy)(mtod(m, char *) + thismboff,
-		    (void *)(sc->cbuffs[head] + thisrboff),
+		(sc->sc_memcpy)(mtod(m, caddr_t) + thismboff,
+		    (caddr_t)(sc->cbuffs[head] + thisrboff),
 		    (u_int)len);
 		resid -= len;
 
@@ -976,7 +971,7 @@ ie_readframe(struct ie_softc *sc, int num)
 		struct ether_header *eh = mtod(m, struct ether_header *);
 
 		printf("%s: frame from ether %s type 0x%x\n",
-		    device_xname(sc->sc_dev),
+			sc->sc_dev.dv_xname,
 		    ether_sprintf(eh->ether_shost), (u_int)eh->ether_type);
 	}
 #endif
@@ -1032,14 +1027,12 @@ ie_drop_packet_buffer(struct ie_softc *sc)
 		 * This means we are somehow out of sync.  So, we reset the
 		 * adapter.
 		 */
-		if ((sc->rbuffs[sc->rbhead]->ie_rbd_actual & IE_RBD_USED)
-		    == 0) {
+		if (!(sc->rbuffs[sc->rbhead]->ie_rbd_actual & IE_RBD_USED)) {
 #ifdef IEDEBUG
 			print_rbd(sc->rbuffs[sc->rbhead]);
 #endif
-			log(LOG_ERR,
-			    "%s: receive descriptors out of sync at %d\n",
-			    device_xname(sc->sc_dev), sc->rbhead);
+			log(LOG_ERR, "%s: receive descriptors out of sync at %d\n",
+			    sc->sc_dev.dv_xname, sc->rbhead);
 			iereset(sc);
 			return;
 		}
@@ -1051,7 +1044,7 @@ ie_drop_packet_buffer(struct ie_softc *sc)
 		sc->rbhead = (sc->rbhead + 1) % sc->nrxbuf;
 		sc->rbuffs[sc->rbtail]->ie_rbd_length &= ~IE_RBD_LAST;
 		sc->rbtail = (sc->rbtail + 1) % sc->nrxbuf;
-	} while (i == 0);
+	} while (!i);
 }
 
 /*
@@ -1062,8 +1055,8 @@ iestart(struct ifnet *ifp)
 {
 	struct ie_softc *sc = ifp->if_softc;
 	struct mbuf *m0, *m;
-	uint8_t *buffer;
-	uint16_t len;
+	u_char *buffer;
+	u_short len;
 
 	if ((ifp->if_flags & (IFF_RUNNING | IFF_OACTIVE)) != IFF_RUNNING)
 		return;
@@ -1080,7 +1073,7 @@ iestart(struct ifnet *ifp)
 
 		/* We need to use m->m_pkthdr.len, so require the header */
 		if ((m0->m_flags & M_PKTHDR) == 0)
-			panic("%s: no header mbuf", __func__);
+			panic("iestart: no header mbuf");
 
 #if NBPFILTER > 0
 		/* Tap off here if there is a BPF listener. */
@@ -1090,13 +1083,13 @@ iestart(struct ifnet *ifp)
 
 #ifdef IEDEBUG
 		if (sc->sc_debug & IED_ENQ)
-			printf("%s: fill buffer %d\n", device_xname(sc->sc_dev),
+			printf("%s: fill buffer %d\n", sc->sc_dev.dv_xname,
 			    sc->xchead);
 #endif
 
 		buffer = sc->xmit_cbuffs[sc->xchead];
 		for (m = m0; m != 0; m = m->m_next) {
-			(sc->sc_memcpy)(buffer, mtod(m, void *), m->m_len);
+			(sc->sc_memcpy)(buffer, mtod(m, caddr_t), m->m_len);
 			buffer += m->m_len;
 		}
 		if (m0->m_pkthdr.len < ETHER_MIN_LEN - ETHER_CRC_LEN) {
@@ -1132,12 +1125,10 @@ iereset(struct ie_softc *sc)
 	 * Stop i82586 dead in its tracks.
 	 */
 	if (cmd_and_wait(sc, IE_RU_ABORT | IE_CU_ABORT, 0, 0))
-		printf("%s: abort commands timed out\n",
-		    device_xname(sc->sc_dev));
+		printf("%s: abort commands timed out\n", sc->sc_dev.dv_xname);
 
 	if (cmd_and_wait(sc, IE_RU_DISABLE | IE_CU_STOP, 0, 0))
-		printf("%s: disable commands timed out\n",
-		    device_xname(sc->sc_dev));
+		printf("%s: disable commands timed out\n", sc->sc_dev.dv_xname);
 
 	ieinit(sc);
 
@@ -1160,7 +1151,7 @@ cmd_and_wait(struct ie_softc *sc, int cmd, void *pcmd, int mask)
 	volatile struct ie_sys_ctl_block *scb = sc->scb;
 	int tmo;
 
-	scb->ie_command = (uint16_t)cmd;
+	scb->ie_command = (u_short)cmd;
 	(sc->chan_attn)(sc);
 
 	/* Wait for the command to be accepted by the CU. */
@@ -1170,7 +1161,7 @@ cmd_and_wait(struct ie_softc *sc, int cmd, void *pcmd, int mask)
 	if (scb->ie_command) {
 #ifdef	IEDEBUG
 		printf("%s: cmd_and_wait, CU stuck (1)\n",
-		    device_xname(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 #endif
 		return -1;	/* timed out */
 	}
@@ -1199,7 +1190,7 @@ cmd_and_wait(struct ie_softc *sc, int cmd, void *pcmd, int mask)
 		if ((cc->ie_cmd_status & mask) == 0) {
 #ifdef	IEDEBUG
 			printf("%s: cmd_and_wait, CU stuck (2)\n",
-			    device_xname(sc->sc_dev));
+				   sc->sc_dev.dv_xname);
 #endif
 			return -1;	/* timed out */
 		}
@@ -1223,7 +1214,7 @@ run_tdr(struct ie_softc *sc, struct ie_tdr_cmd *cmd)
 	cmd->ie_tdr_time = SWAP(0);
 
 	if (cmd_and_wait(sc, IE_CU_START, cmd, IE_STAT_COMPL) ||
-	    (cmd->com.ie_cmd_status & IE_STAT_OK) == 0)
+	    !(cmd->com.ie_cmd_status & IE_STAT_OK))
 		result = 0x10000;	/* impossible value */
 	else
 		result = cmd->ie_tdr_time;
@@ -1234,18 +1225,18 @@ run_tdr(struct ie_softc *sc, struct ie_tdr_cmd *cmd)
 		return;
 
 	if (result & 0x10000) {
-		printf("%s: TDR command failed\n", device_xname(sc->sc_dev));
+		printf("%s: TDR command failed\n", sc->sc_dev.dv_xname);
 	} else if (result & IE_TDR_XCVR) {
-		printf("%s: transceiver problem\n", device_xname(sc->sc_dev));
+		printf("%s: transceiver problem\n", sc->sc_dev.dv_xname);
 	} else if (result & IE_TDR_OPEN) {
 		printf("%s: TDR detected an open %d clocks away\n",
-		    device_xname(sc->sc_dev), SWAP(result & IE_TDR_TIME));
+		    sc->sc_dev.dv_xname, SWAP(result & IE_TDR_TIME));
 	} else if (result & IE_TDR_SHORT) {
 		printf("%s: TDR detected a short %d clocks away\n",
-		    device_xname(sc->sc_dev), SWAP(result & IE_TDR_TIME));
+		    sc->sc_dev.dv_xname, SWAP(result & IE_TDR_TIME));
 	} else {
 		printf("%s: TDR returned unknown status 0x%x\n",
-		    device_xname(sc->sc_dev), result);
+		    sc->sc_dev.dv_xname, result);
 	}
 }
 
@@ -1269,9 +1260,9 @@ run_tdr(struct ie_softc *sc, struct ie_tdr_cmd *cmd)
 static void 
 iememinit(struct ie_softc *sc)
 {
-	uint8_t *ptr;
+	char *ptr;
 	int i;
-	uint16_t nxt;
+	u_short nxt;
 
 	/* First, zero all the memory. */
 	ptr = sc->buf_area;
@@ -1292,7 +1283,7 @@ iememinit(struct ie_softc *sc)
 
 	/* Allocate and fill in xmit buffer descriptors. */
 	for (i = 0; i < NTXBUF; i++) {
-		sc->xmit_buffs[i] = (volatile void *)ptr;
+		sc->xmit_buffs[i] = (volatile void *) ptr;
 		ptr = Align(ptr + sizeof(*sc->xmit_buffs[i]));
 		sc->xmit_buffs[i]->ie_xmit_buf =
 		    Swap32(vtop24(sc, sc->xmit_cbuffs[i]));
@@ -1301,10 +1292,10 @@ iememinit(struct ie_softc *sc)
 
 	/* Allocate and fill in recv buffer descriptors. */
 	for (i = 0; i < sc->nrxbuf; i++) {
-		sc->rbuffs[i] = (volatile void *)ptr;
+		sc->rbuffs[i] = (volatile void *) ptr;
 		ptr = Align(ptr + sizeof(*sc->rbuffs[i]));
 		sc->rbuffs[i]->ie_rbd_buffer = 
-		    Swap32(vtop24(sc, sc->cbuffs[i]));
+			Swap32(vtop24(sc, sc->cbuffs[i]));
 		sc->rbuffs[i]->ie_rbd_length = SWAP(IE_RBUF_SIZE);
 	}
 
@@ -1319,14 +1310,14 @@ iememinit(struct ie_softc *sc)
 
 	/* Allocate transmit commands. */
 	for (i = 0; i < NTXBUF; i++) {
-		sc->xmit_cmds[i] = (volatile void *)ptr;
+		sc->xmit_cmds[i] = (volatile void *) ptr;
 		ptr = Align(ptr + sizeof(*sc->xmit_cmds[i]));
 		sc->xmit_cmds[i]->com.ie_cmd_link = SWAP(0xffff);
 	}
 
 	/* Allocate receive frames. */
 	for (i = 0; i < sc->nframes; i++) {
-		sc->rframes[i] = (volatile void *)ptr;
+		sc->rframes[i] = (volatile void *) ptr;
 		ptr = Align(ptr + sizeof(*sc->rframes[i]));
 	}
 
@@ -1382,18 +1373,18 @@ mc_setup(struct ie_softc *sc, void *ptr)
 	cmd->com.ie_cmd_cmd = IE_CMD_MCAST | IE_CMD_LAST;
 	cmd->com.ie_cmd_link = SWAP(0xffff);
 
-	(sc->sc_memcpy)((void *)cmd->ie_mcast_addrs,
-	    (void *)sc->mcast_addrs,
+	(sc->sc_memcpy)((caddr_t)cmd->ie_mcast_addrs,
+	    (caddr_t)sc->mcast_addrs,
 	    sc->mcast_count * sizeof *sc->mcast_addrs);
 
 	cmd->ie_mcast_bytes =
-	    SWAP(sc->mcast_count * ETHER_ADDR_LEN);	/* grrr... */
+		SWAP(sc->mcast_count * ETHER_ADDR_LEN);	/* grrr... */
 
 	sc->scb->ie_command_list = vtop16sw(sc, cmd);
 	if (cmd_and_wait(sc, IE_CU_START, cmd, IE_STAT_COMPL) ||
-	    (cmd->com.ie_cmd_status & IE_STAT_OK) == 0) {
+	    !(cmd->com.ie_cmd_status & IE_STAT_OK)) {
 		printf("%s: multicast address setup command failed\n",
-		    device_xname(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		return 0;
 	}
 	return 1;
@@ -1451,9 +1442,9 @@ ieinit(struct ie_softc *sc)
 		ie_setup_config(cmd, (sc->promisc != 0), 0);
 
 		if (cmd_and_wait(sc, IE_CU_START, cmd, IE_STAT_COMPL) ||
-		    (cmd->com.ie_cmd_status & IE_STAT_OK) == 0) {
+		    !(cmd->com.ie_cmd_status & IE_STAT_OK)) {
 			printf("%s: configure command failed\n",
-			    device_xname(sc->sc_dev));
+			    sc->sc_dev.dv_xname);
 			return 0;
 		}
 	}
@@ -1469,13 +1460,13 @@ ieinit(struct ie_softc *sc)
 		cmd->com.ie_cmd_cmd = IE_CMD_IASETUP | IE_CMD_LAST;
 		cmd->com.ie_cmd_link = SWAP(0xffff);
 
-		(sc->sc_memcpy)((void *)&cmd->ie_address,
-		    CLLADDR(ifp->if_sadl), sizeof(cmd->ie_address));
+		(sc->sc_memcpy)((caddr_t)&cmd->ie_address,
+		    LLADDR(ifp->if_sadl), sizeof(cmd->ie_address));
 
 		if (cmd_and_wait(sc, IE_CU_START, cmd, IE_STAT_COMPL) ||
-		    (cmd->com.ie_cmd_status & IE_STAT_OK) == 0) {
+		    !(cmd->com.ie_cmd_status & IE_STAT_OK)) {
 			printf("%s: individual address setup command failed\n",
-			    device_xname(sc->sc_dev));
+			    sc->sc_dev.dv_xname);
 			return 0;
 		}
 	}
@@ -1520,17 +1511,18 @@ iestop(struct ie_softc *sc)
 }
 
 static int 
-ieioctl(struct ifnet *ifp, u_long cmd, void *data)
+ieioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	struct ie_softc *sc = ifp->if_softc;
 	struct ifaddr *ifa = (struct ifaddr *)data;
+	struct ifreq *ifr = (struct ifreq *)data;
 	int s, error = 0;
 
 	s = splnet();
 
 	switch (cmd) {
 
-	case SIOCINITIFADDR:
+	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 
 		switch (ifa->ifa_addr->sa_family) {
@@ -1564,34 +1556,30 @@ ieioctl(struct ifnet *ifp, u_long cmd, void *data)
 		break;
 
 	case SIOCSIFFLAGS:
-		if ((error = ifioctl_common(ifp, cmd, data)) != 0)
-			break;
 		sc->promisc = ifp->if_flags & (IFF_PROMISC | IFF_ALLMULTI);
 
-		switch (ifp->if_flags & (IFF_UP|IFF_RUNNING)) {
-		case IFF_RUNNING:
+		if ((ifp->if_flags & IFF_UP) == 0 &&
+		    (ifp->if_flags & IFF_RUNNING) != 0) {
 			/*
 			 * If interface is marked down and it is running, then
 			 * stop it.
 			 */
 			iestop(sc);
 			ifp->if_flags &= ~IFF_RUNNING;
-			break;
-		case IFF_UP:
+		} else if ((ifp->if_flags & IFF_UP) != 0 &&
+			(ifp->if_flags & IFF_RUNNING) == 0) {
 			/*
 			 * If interface is marked up and it is stopped, then
 			 * start it.
 			 */
 			ieinit(sc);
-			break;
-		default:
+		} else {
 			/*
 			 * Reset the interface to pick up changes in any other
 			 * flags that affect hardware registers.
 			 */
 			iestop(sc);
 			ieinit(sc);
-			break;
 		}
 #ifdef IEDEBUG
 		if (ifp->if_flags & IFF_DEBUG)
@@ -1603,7 +1591,11 @@ ieioctl(struct ifnet *ifp, u_long cmd, void *data)
 
 	case SIOCADDMULTI:
 	case SIOCDELMULTI:
-		if ((error = ether_ioctl(ifp, cmd, data)) == ENETRESET) {
+		error = (cmd == SIOCADDMULTI) ?
+		    ether_addmulti(ifr, &sc->sc_ethercom) :
+		    ether_delmulti(ifr, &sc->sc_ethercom);
+
+		if (error == ENETRESET) {
 			/*
 			 * Multicast list has changed; set the hardware filter
 			 * accordingly.
@@ -1615,8 +1607,7 @@ ieioctl(struct ifnet *ifp, u_long cmd, void *data)
 		break;
 
 	default:
-		error = ether_ioctl(ifp, cmd, data);
-		break;
+		error = EINVAL;
 	}
 	splx(s);
 	return error;
@@ -1640,7 +1631,7 @@ mc_reset(struct ie_softc *sc)
 		if (sc->mcast_count >= MAXMCAST ||
 		    ether_cmp(enm->enm_addrlo, enm->enm_addrhi) != 0) {
 			ifp->if_flags |= IFF_ALLMULTI;
-			ieioctl(ifp, SIOCSIFFLAGS, NULL);
+			ieioctl(ifp, SIOCSIFFLAGS, (void *)0);
 			goto setflag;
 		}
 		memcpy(&sc->mcast_addrs[sc->mcast_count], enm->enm_addrlo,

@@ -2,7 +2,7 @@
 /******************************************************************************
  *
  * Module Name: exstorob - AML Interpreter object store support, store to object
- *              $Revision: 1.4 $
+ *              xRevision: 1.59 $
  *
  *****************************************************************************/
 
@@ -10,7 +10,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2008, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2006, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -115,6 +115,9 @@
  *
  *****************************************************************************/
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: exstorob.c,v 1.1 2006/03/23 13:36:31 kochi Exp $");
+
 #define __EXSTOROB_C__
 
 #include "acpi.h"
@@ -147,7 +150,7 @@ AcpiExStoreBufferToBuffer (
     UINT8                   *Buffer;
 
 
-    ACPI_FUNCTION_TRACE_PTR (ExStoreBufferToBuffer, SourceDesc);
+    ACPI_FUNCTION_TRACE_PTR ("ExStoreBufferToBuffer", SourceDesc);
 
 
     /* We know that SourceDesc is a buffer by now */
@@ -162,7 +165,7 @@ AcpiExStoreBufferToBuffer (
     if ((TargetDesc->Buffer.Length == 0) ||
         (TargetDesc->Common.Flags & AOPOBJ_STATIC_POINTER))
     {
-        TargetDesc->Buffer.Pointer = ACPI_ALLOCATE (Length);
+        TargetDesc->Buffer.Pointer = ACPI_MEM_ALLOCATE (Length);
         if (!TargetDesc->Buffer.Pointer)
         {
             return_ACPI_STATUS (AE_NO_MEMORY);
@@ -245,7 +248,7 @@ AcpiExStoreStringToString (
     UINT8                   *Buffer;
 
 
-    ACPI_FUNCTION_TRACE_PTR (ExStoreStringToString, SourceDesc);
+    ACPI_FUNCTION_TRACE_PTR ("ExStoreStringToString", SourceDesc);
 
 
     /* We know that SourceDesc is a string by now */
@@ -279,10 +282,10 @@ AcpiExStoreStringToString (
         {
             /* Only free if not a pointer into the DSDT */
 
-            ACPI_FREE (TargetDesc->String.Pointer);
+            ACPI_MEM_FREE (TargetDesc->String.Pointer);
         }
 
-        TargetDesc->String.Pointer = ACPI_ALLOCATE_ZEROED (
+        TargetDesc->String.Pointer = ACPI_MEM_CALLOCATE (
                                         (ACPI_SIZE) Length + 1);
         if (!TargetDesc->String.Pointer)
         {

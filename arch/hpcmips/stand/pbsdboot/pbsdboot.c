@@ -1,4 +1,4 @@
-/*	$NetBSD: pbsdboot.c,v 1.6 2007/03/05 21:05:01 dogcow Exp $	*/
+/*	$NetBSD: pbsdboot.c,v 1.4 2000/06/04 04:30:49 takemura Exp $	*/
 
 /*-
  * Copyright (c) 1999 Shin Takemura.
@@ -43,8 +43,8 @@ int
 pbsdboot(TCHAR *wkernel_name, int argc, char *argv[], struct bootinfo* bi)
 {
 	int i;
-	void *start, end;
-	void *argbuf, *p;
+	caddr_t start, end;
+	caddr_t argbuf, p;
 	struct bootinfo *bibuf;
 	int fd = -1;
 

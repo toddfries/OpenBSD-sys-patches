@@ -1,4 +1,4 @@
-/*	$NetBSD: pxa2x0_i2s.c,v 1.7 2007/10/17 19:53:44 garbled Exp $	*/
+/*	$NetBSD: pxa2x0_i2s.c,v 1.1 2006/12/17 16:03:33 peter Exp $	*/
 /*	$OpenBSD: pxa2x0_i2s.c,v 1.7 2006/04/04 11:45:40 pascoe Exp $	*/
 
 /*
@@ -18,7 +18,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: pxa2x0_i2s.c,v 1.7 2007/10/17 19:53:44 garbled Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pxa2x0_i2s.c,v 1.1 2006/12/17 16:03:33 peter Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -35,7 +35,7 @@ __KERNEL_RCSID(0, "$NetBSD: pxa2x0_i2s.c,v 1.7 2007/10/17 19:53:44 garbled Exp $
 
 struct pxa2x0_i2s_dma {
 	struct pxa2x0_i2s_dma *next;
-	void *addr;
+	caddr_t addr;
 	size_t size;
 	bus_dmamap_t map;
 #define	I2S_N_SEGS	1
@@ -81,6 +81,12 @@ pxa2x0_i2s_attach_sub(struct pxa2x0_i2s_softc *sc)
 
 	bus_space_barrier(sc->sc_iot, sc->sc_ioh, 0, sc->sc_size,
 	    BUS_SPACE_BARRIER_READ|BUS_SPACE_BARRIER_WRITE);
+
+	pxa2x0_gpio_set_function(28, GPIO_ALT_FN_1_OUT);  /* I2S_BITCLK */
+	pxa2x0_gpio_set_function(113, GPIO_ALT_FN_1_OUT); /* I2S_SYSCLK */
+	pxa2x0_gpio_set_function(31, GPIO_ALT_FN_1_OUT);  /* I2S_SYNC */
+	pxa2x0_gpio_set_function(30, GPIO_ALT_FN_1_OUT);  /* I2S_SDATA_OUT */
+	pxa2x0_gpio_set_function(29, GPIO_ALT_FN_2_IN);   /* I2S_SDATA_IN */
 
 	pxa2x0_i2s_init(sc);
 
@@ -156,7 +162,7 @@ pxa2x0_i2s_setspeed(struct pxa2x0_i2s_softc *sc, u_int *argp)
 		{44100,	SADIV_2_836MHz},
 		{48000,	SADIV_3_058MHz},
 	};
-	const int n = (int)__arraycount(speed_table);
+	const const int n = (int)__arraycount(speed_table);
 	u_int arg = (u_int)*argp;
 	int selected = -1;
 	int i;
@@ -365,8 +371,8 @@ pxa2x0_i2s_start_output(void *hdl, void *block, int bsize,
 	sc->sc_txarg = tx_arg;
 
 	/* Find mapping which contains block completely */
-	for (p = sc->sc_dmas; p != NULL && (((char *)block < (char *)p->addr) ||
-	    ((char *)block + bsize > (char *)p->addr + p->size)); p = p->next)
+	for (p = sc->sc_dmas; p && (((caddr_t)block < p->addr) ||
+	    ((caddr_t)block + bsize > p->addr + p->size)); p = p->next)
 		continue;	/* Nothing */
 
 	if (p == NULL) {
@@ -377,7 +383,7 @@ pxa2x0_i2s_start_output(void *hdl, void *block, int bsize,
 	sc->sc_txdma = p;
 
 	p->segs[0].ds_addr = p->map->dm_segs[0].ds_addr
-	                         + ((char *)block - (char *)p->addr);
+	                         + ((caddr_t)block - p->addr);
 	p->segs[0].ds_len = bsize;
 
 	dx = p->dx;
@@ -385,10 +391,10 @@ pxa2x0_i2s_start_output(void *hdl, void *block, int bsize,
 	dx->dx_peripheral = DMAC_PERIPH_I2STX;
 	dx->dx_flow = DMAC_FLOW_CTRL_DEST;
 	dx->dx_loop_notify = DMAC_DONT_LOOP;
-	dx->dx_desc[DMAC_DESC_SRC].xd_addr_hold = false;
+	dx->dx_desc[DMAC_DESC_SRC].xd_addr_hold = FALSE;
 	dx->dx_desc[DMAC_DESC_SRC].xd_nsegs = p->nsegs;
 	dx->dx_desc[DMAC_DESC_SRC].xd_dma_segs = p->segs;
-	dx->dx_desc[DMAC_DESC_DST].xd_addr_hold = true;
+	dx->dx_desc[DMAC_DESC_DST].xd_addr_hold = TRUE;
 	dx->dx_desc[DMAC_DESC_DST].xd_nsegs = 1;
 	dx->dx_desc[DMAC_DESC_DST].xd_dma_segs = &sc->sc_dr;
 
@@ -414,8 +420,8 @@ pxa2x0_i2s_start_input(void *hdl, void *block, int bsize,
 	sc->sc_rxarg = rx_arg;
 
 	/* Find mapping which contains block completely */
-	for (p = sc->sc_dmas; p != NULL && (((char *)block < (char *)p->addr) ||
-	    ((char *)block + bsize > (char *)p->addr + p->size)); p = p->next)
+	for (p = sc->sc_dmas; p != NULL && (((caddr_t)block < p->addr) ||
+	    ((caddr_t)block + bsize > p->addr + p->size)); p = p->next)
 		continue;	/* Nothing */
 
 	if (p == NULL) {
@@ -426,7 +432,7 @@ pxa2x0_i2s_start_input(void *hdl, void *block, int bsize,
 
 	sc->sc_rxdma = p;
 	p->segs[0].ds_addr = p->map->dm_segs[0].ds_addr
-	                         + ((char *)block - (char *)p->addr);
+	                         + ((caddr_t)block - p->addr);
 	p->segs[0].ds_len = bsize;
 
 	dx = p->dx;
@@ -434,10 +440,10 @@ pxa2x0_i2s_start_input(void *hdl, void *block, int bsize,
 	dx->dx_peripheral = DMAC_PERIPH_I2SRX;
 	dx->dx_flow = DMAC_FLOW_CTRL_SRC;
 	dx->dx_loop_notify = DMAC_DONT_LOOP;
-	dx->dx_desc[DMAC_DESC_SRC].xd_addr_hold = true;
+	dx->dx_desc[DMAC_DESC_SRC].xd_addr_hold = TRUE;
 	dx->dx_desc[DMAC_DESC_SRC].xd_nsegs = 1;
 	dx->dx_desc[DMAC_DESC_SRC].xd_dma_segs = &sc->sc_dr;
-	dx->dx_desc[DMAC_DESC_DST].xd_addr_hold = false;
+	dx->dx_desc[DMAC_DESC_DST].xd_addr_hold = FALSE;
 	dx->dx_desc[DMAC_DESC_DST].xd_nsegs = p->nsegs;
 	dx->dx_desc[DMAC_DESC_DST].xd_dma_segs = p->segs;
 

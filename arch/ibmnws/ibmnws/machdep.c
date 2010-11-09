@@ -1,4 +1,4 @@
-/*	$NetBSD: machdep.c,v 1.13 2008/11/11 06:46:42 dyoung Exp $	*/
+/*	$NetBSD: machdep.c,v 1.7 2006/05/09 18:13:57 rjs Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996 Wolfgang Solfrank.
@@ -31,10 +31,8 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.13 2008/11/11 06:46:42 dyoung Exp $");
-
 #include "opt_compat_netbsd.h"
+#include "opt_ddb.h"
 
 #include <sys/param.h>
 #include <sys/buf.h>
@@ -49,10 +47,12 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.13 2008/11/11 06:46:42 dyoung Exp $");
 #include <sys/msgbuf.h>
 #include <sys/proc.h>
 #include <sys/reboot.h>
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 #include <sys/syslog.h>
 #include <sys/systm.h>
 #include <sys/user.h>
+#include <sys/ksyms.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -68,71 +68,60 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.13 2008/11/11 06:46:42 dyoung Exp $");
 #include <machine/trap.h>
 
 #include <powerpc/oea/bat.h>
-#include <arch/powerpc/pic/picvar.h>
-#include <arch/powerpc/include/pio.h>
-#include <dev/pci/pcivar.h>
-#include <dev/ic/ibm82660reg.h>
 
 #include <dev/cons.h>
 
+#ifdef DDB
+#include <machine/db_machdep.h>
+#include <ddb/db_extern.h>
+#endif
+
+#include "ksyms.h"
+
 void initppc(u_long, u_long, u_int, void *);
 void dumpsys(void);
+void strayintr(int);
+int lcsplx(int);
+void ibmnws_bus_space_init(void);
+
 vaddr_t prep_intr_reg;			/* PReP interrupt vector register */
 
 #define	OFMEMREGIONS	32
 struct mem_region physmemr[OFMEMREGIONS], availmemr[OFMEMREGIONS];
 
 paddr_t avail_end;			/* XXX temporary */
-struct pic_ops *isa_pic;
-int isa_pcmciamask = 0x8b28;
+
+#if NKSYMS || defined(DDB) || defined(LKM)
+extern void *endsym, *startsym;
+#endif
 
 void
 initppc(u_long startkernel, u_long endkernel, u_int args, void *btinfo)
 {
 
-	uint32_t sa, ea, banks;
-	u_long memsize = 0;
-	pcitag_t tag;
-
 	/*
-	 * Set memory region by reading the memory size from the PCI
-	 * host bridge.
+	 * Set memory region
 	 */
+	{
+		u_long memsize;
 
-	tag = genppc_pci_indirect_make_tag(NULL, 0, 0, 0);
+#if 0
+		/* Get the memory size from the PCI host bridge */
 
-	out32rb(PCI_MODE1_ADDRESS_REG, tag | IBM_82660_MEM_BANK0_START);
-	sa = in32rb(PCI_MODE1_DATA_REG);
+		pci_read_config_32(0, 0x90, &ea);
+		if(ea & 0xff00)
+		    memsize = (((ea >> 8) & 0xff) + 1) << 20;
+		else
+		    memsize = ((ea & 0xff) + 1) << 20;
+#else
+		memsize = 64 * 1024 * 1024;         /* 64MB hardcoded for now */
+#endif
 
-	out32rb(PCI_MODE1_ADDRESS_REG, tag | IBM_82660_MEM_BANK0_END);
-	ea = in32rb(PCI_MODE1_DATA_REG);
-
-	/* Which memory banks are enabled? */
-	out32rb(PCI_MODE1_ADDRESS_REG, tag | IBM_82660_MEM_BANK_ENABLE);
-	banks = in32rb(PCI_MODE1_DATA_REG) & 0xFF;
-
-	/* Reset the register for the next call. */
-	out32rb(PCI_MODE1_ADDRESS_REG, 0);
-
-	if (banks & IBM_82660_MEM_BANK0_ENABLED)
-		memsize += IBM_82660_BANK0_ADDR(ea) - IBM_82660_BANK0_ADDR(sa) + 1;
-
-	if (banks & IBM_82660_MEM_BANK1_ENABLED)
-		memsize += IBM_82660_BANK1_ADDR(ea) - IBM_82660_BANK1_ADDR(sa) + 1;
-
-	if (banks & IBM_82660_MEM_BANK2_ENABLED)
-		memsize += IBM_82660_BANK2_ADDR(ea) - IBM_82660_BANK2_ADDR(sa) + 1;
-
-	if (banks & IBM_82660_MEM_BANK3_ENABLED)
-		memsize += IBM_82660_BANK3_ADDR(ea) - IBM_82660_BANK3_ADDR(sa) + 1;
-
-	memsize <<= 20;
-
-	physmemr[0].start = 0;
-	physmemr[0].size = memsize & ~PGOFSET;
-	availmemr[0].start = (endkernel + PGOFSET) & ~PGOFSET;
-	availmemr[0].size = memsize - availmemr[0].start;
-
+		physmemr[0].start = 0;
+		physmemr[0].size = memsize & ~PGOFSET;
+		availmemr[0].start = (endkernel + PGOFSET) & ~PGOFSET;
+		availmemr[0].size = memsize - availmemr[0].start;
+	}
 	avail_end = physmemr[0].start + physmemr[0].size;    /* XXX temporary */
 
 	/*
@@ -145,12 +134,68 @@ initppc(u_long startkernel, u_long endkernel, u_int args, void *btinfo)
 		ns_per_tick = 1000000000 / ticks_per_sec;
 	}
 
+	/* Initialize the CPU type */
+	/* ident_platform(); */
+
 	/*
 	 * boothowto
 	 */
 	boothowto = 0;		/* XXX - should make this an option */
 
-	prep_initppc(startkernel, endkernel, args);
+	/*
+	 * Initialize bus_space.
+	 */
+	ibmnws_bus_space_init();
+
+	/*
+	 * Now setup fixed bat registers
+	 */
+	oea_batinit(
+	    PREP_BUS_SPACE_MEM, BAT_BL_256M,
+	    PREP_BUS_SPACE_IO,  BAT_BL_256M,
+	    0);
+
+	/*
+	 * i386 port says, that this shouldn't be here,
+	 * but I really think the console should be initialized
+	 * as early as possible.
+	 */
+	consinit();
+
+	oea_init(NULL);
+
+	/*
+	 * external interrupt handler install
+	 */
+
+	init_intr_ivr();
+
+        /*
+	 * Set the page size.
+	 */
+	uvm_setpagesize();
+
+	/*
+	 * Initialize pmap module.
+	 */
+	pmap_bootstrap(startkernel, endkernel);
+
+#if NKSYMS || defined(DDB) || defined(LKM)
+	ksyms_init((int)((u_long)endsym - (u_long)startsym), startsym, endsym);
+#endif
+
+#ifdef DDB
+	if (boothowto & RB_KDB)
+		Debugger();
+#endif
+}
+
+void
+mem_regions(struct mem_region **mem, struct mem_region **avail)
+{
+
+	*mem = physmemr;
+	*avail = availmemr;
 }
 
 /*
@@ -165,18 +210,16 @@ cpu_startup(void)
 	prep_intr_reg = (vaddr_t) mapiodev(PREP_INTR_REG, PAGE_SIZE);
 	if (!prep_intr_reg)
 		panic("startup: no room for interrupt register");
-	prep_intr_reg_off = INTR_VECTOR_REG;
 
 	/*
 	 * Do common startup.
 	 */
 	oea_startup("IBM NetworkStation 1000 (8362-XXX)");
 
-	pic_init();
-	isa_pic = setup_prepivr(PIC_IVR_IBM);
-
-        oea_install_extint(pic_ext_intr);
-
+	/*
+	 * Initialize soft interrupt framework.
+	 */
+	softintr__init();
 	/*
 	 * Now allow hardware interrupts.
 	 */
@@ -224,18 +267,16 @@ cpu_reboot(int howto, char *what)
 halt_sys:
 	doshutdownhooks();
 
-	pmf_system_shutdown(boothowto);
-
 	if (howto & RB_HALT) {
-                aprint_normal("\n");
-                aprint_normal("The operating system has halted.\n");
-                aprint_normal("Please press any key to reboot.\n\n");
+                printf("\n");
+                printf("The operating system has halted.\n");
+                printf("Please press any key to reboot.\n\n");
                 cnpollc(1);	/* for proper keyboard command handling */
                 cngetc();
                 cnpollc(0);
 	}
 
-	aprint_normal("rebooting...\n\n");
+	printf("rebooting...\n\n");
 
 
         {
@@ -262,4 +303,75 @@ halt_sys:
 	for (;;)
 		continue;
 	/* NOTREACHED */
+}
+
+/*
+ * lcsplx() is called from locore; it is an open-coded version of
+ * splx() differing in that it returns the previous priority level.
+ */
+int
+lcsplx(int ipl)
+{
+	int oldcpl;
+	struct cpu_info *ci = curcpu();
+
+	__asm volatile("sync; eieio\n");	/* reorder protect */
+	oldcpl = ci->ci_cpl;
+	ci->ci_cpl = ipl;
+	if (ci->ci_ipending & ~ipl)
+		do_pending_int();
+	__asm volatile("sync; eieio\n");	/* reorder protect */
+
+	return (oldcpl);
+}
+
+struct powerpc_bus_space io_bus_space_tag = {
+	_BUS_SPACE_LITTLE_ENDIAN|_BUS_SPACE_IO_TYPE,
+	0x80000000, 0x00000000, 0x3f800000,
+};
+struct powerpc_bus_space isa_io_bus_space_tag = {
+	_BUS_SPACE_LITTLE_ENDIAN|_BUS_SPACE_IO_TYPE,
+	0x80000000, 0x00000000, 0x00010000,
+};
+struct powerpc_bus_space mem_bus_space_tag = {
+	_BUS_SPACE_LITTLE_ENDIAN|_BUS_SPACE_MEM_TYPE,
+	0xC0000000, 0x00000000, 0x3f000000,
+};
+struct powerpc_bus_space isa_mem_bus_space_tag = {
+	_BUS_SPACE_LITTLE_ENDIAN|_BUS_SPACE_MEM_TYPE,
+	0xC0000000, 0x00000000, 0x01000000,
+};
+
+static char ex_storage[2][EXTENT_FIXED_STORAGE_SIZE(8)]
+    __attribute__((aligned(8)));
+
+void
+ibmnws_bus_space_init(void)
+{
+	int error;
+
+	error = bus_space_init(&io_bus_space_tag, "ioport",
+	    ex_storage[0], sizeof(ex_storage[0]));
+	if (error)
+		panic("prep_bus_space_init: can't init io tag");
+
+	error = extent_alloc_region(io_bus_space_tag.pbs_extent,
+	    0x10000, 0x7F0000, EX_NOWAIT);
+	if (error)
+		panic("prep_bus_space_init: can't block out reserved I/O"
+		    " space 0x10000-0x7fffff: error=%d", error);
+	error = bus_space_init(&mem_bus_space_tag, "iomem",
+	    ex_storage[1], sizeof(ex_storage[1]));
+	if (error)
+		panic("prep_bus_space_init: can't init mem tag");
+
+	isa_io_bus_space_tag.pbs_extent = io_bus_space_tag.pbs_extent;
+	error = bus_space_init(&isa_io_bus_space_tag, "isa-ioport", NULL, 0);
+	if (error)
+		panic("bus_space_init: can't init isa io tag");
+
+	isa_mem_bus_space_tag.pbs_extent = mem_bus_space_tag.pbs_extent;
+	error = bus_space_init(&isa_mem_bus_space_tag, "isa-iomem", NULL, 0);
+	if (error)
+		panic("bus_space_init: can't init isa mem tag");
 }

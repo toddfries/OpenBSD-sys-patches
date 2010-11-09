@@ -1,4 +1,4 @@
-/*	$NetBSD: bivideo.c,v 1.28 2008/04/06 20:28:36 cegger Exp $	*/
+/*	$NetBSD: bivideo.c,v 1.27 2007/10/19 11:59:42 ad Exp $	*/
 
 /*-
  * Copyright (c) 1999-2001
@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: bivideo.c,v 1.28 2008/04/06 20:28:36 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: bivideo.c,v 1.27 2007/10/19 11:59:42 ad Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_hpcfb.h"
@@ -174,14 +174,15 @@ bivideoattach(struct device *parent, struct device *self, void *aux)
 	}
 	printf("\n");
 	printf("%s: framebuffer address: 0x%08lx\n",
-		device_xname(&sc->sc_dev), (u_long)bootinfo->fb_addr);
+		sc->sc_dev.dv_xname, (u_long)bootinfo->fb_addr);
 
 	/* Add a suspend hook to power saving */
 	sc->sc_powerstate = 0;
-	sc->sc_powerhook = powerhook_establish(device_xname(&sc->sc_dev),
+	sc->sc_powerhook = powerhook_establish(sc->sc_dev.dv_xname,
 	    bivideo_power, sc);
 	if (sc->sc_powerhook == NULL)
-		aprint_error_dev(&sc->sc_dev, "WARNING: unable to establish power hook\n");
+		printf("%s: WARNING: unable to establish power hook\n",
+			sc->sc_dev.dv_xname);
 
 	/* initialize backlight brightness and lcd contrast */
 	sc->sc_lcd_inited = 0;

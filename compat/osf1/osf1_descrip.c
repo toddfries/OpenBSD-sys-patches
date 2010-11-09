@@ -1,4 +1,4 @@
-/* $NetBSD: osf1_descrip.c,v 1.27 2009/01/26 13:00:05 njoly Exp $ */
+/* $NetBSD: osf1_descrip.c,v 1.19 2005/12/11 12:20:23 christos Exp $ */
 
 /*
  * Copyright (c) 1999 Christopher G. Demetriou.  All rights reserved.
@@ -58,7 +58,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: osf1_descrip.c,v 1.27 2009/01/26 13:00:05 njoly Exp $");
+__KERNEL_RCSID(0, "$NetBSD: osf1_descrip.c,v 1.19 2005/12/11 12:20:23 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -74,6 +74,7 @@ __KERNEL_RCSID(0, "$NetBSD: osf1_descrip.c,v 1.27 2009/01/26 13:00:05 njoly Exp 
 #include <sys/signal.h>
 #include <sys/signalvar.h>
 #include <sys/reboot.h>
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 #include <sys/exec.h>
 #include <sys/vnode.h>
@@ -87,13 +88,21 @@ __KERNEL_RCSID(0, "$NetBSD: osf1_descrip.c,v 1.27 2009/01/26 13:00:05 njoly Exp 
 #include <compat/osf1/osf1_cvt.h>
 
 int
-osf1_sys_fcntl(struct lwp *l, const struct osf1_sys_fcntl_args *uap, register_t *retval)
+osf1_sys_fcntl(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
+	struct osf1_sys_fcntl_args *uap = v;
+	struct proc *p = l->l_proc;
 	struct sys_fcntl_args a;
 	struct osf1_flock oflock;
 	struct flock nflock;
 	unsigned long xfl, leftovers;
+	caddr_t sg;
 	int error;
+
+	sg = stackgap_init(p, 0);
 
 	SCARG(&a, fd) = SCARG(uap, fd);
 
@@ -144,18 +153,17 @@ osf1_sys_fcntl(struct lwp *l, const struct osf1_sys_fcntl_args *uap, register_t 
 			SCARG(&a, cmd) = F_SETLK;
 		else if (SCARG(uap, cmd) == OSF1_F_SETLKW)
 			SCARG(&a, cmd) = F_SETLKW;
+		SCARG(&a, arg) = stackgap_alloc(p, &sg, sizeof nflock);
 
 		error = copyin(SCARG(uap, arg), &oflock, sizeof oflock);
+		if (error == 0)
+			error = osf1_cvt_flock_to_native(&oflock, &nflock);
+		if (error == 0)
+			error = copyout(&nflock, SCARG(&a, arg),
+			    sizeof nflock);
 		if (error != 0)
-			return error;
-		error = osf1_cvt_flock_to_native(&oflock, &nflock);
-		if (error != 0)
-			return error;
-		error = do_fcntl_lock(SCARG(uap, fd), SCARG(&a, cmd), &nflock);
-		if (SCARG(&a, cmd) != F_GETLK || error != 0)
-			return error;
-		osf1_cvt_flock_from_native(&nflock, &oflock);
-		return copyout(&oflock, SCARG(uap, arg), sizeof oflock);
+			return (error);
+		break;
 
 	case OSF1_F_RGETLK:		/* [lock mgr op] XXX not supported */
 	case OSF1_F_RSETLK:		/* [lock mgr op] XXX not supported */
@@ -188,14 +196,27 @@ osf1_sys_fcntl(struct lwp *l, const struct osf1_sys_fcntl_args *uap, register_t 
 		    leftovers, NULL);
 		retval[0] = xfl;
 		break;
+
+	case OSF1_F_GETLK:
+		error = copyin(SCARG(&a, arg), &nflock, sizeof nflock);
+		if (error == 0) {
+			osf1_cvt_flock_from_native(&nflock, &oflock);
+			error = copyout(&oflock, SCARG(uap, arg),
+			    sizeof oflock);
+		}
+		break;
 	}
 
 	return error;
 }
 
 int
-osf1_sys_fpathconf(struct lwp *l, const struct osf1_sys_fpathconf_args *uap, register_t *retval)
+osf1_sys_fpathconf(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
+	struct osf1_sys_fpathconf_args *uap = v;
 	struct sys_fpathconf_args a;
 	int error;
 
@@ -214,16 +235,30 @@ osf1_sys_fpathconf(struct lwp *l, const struct osf1_sys_fpathconf_args *uap, reg
  * Return status information about a file descriptor.
  */
 int
-osf1_sys_fstat(struct lwp *l, const struct osf1_sys_fstat_args *uap, register_t *retval)
+osf1_sys_fstat(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
+	struct osf1_sys_fstat_args *uap = v;
+	struct proc *p = l->l_proc;
+	struct filedesc *fdp = p->p_fd;
+	struct file *fp;
 	struct stat ub;
 	struct osf1_stat oub;
 	int error;
 
-	error = do_sys_fstat(SCARG(uap, fd), &ub);
+	if ((fp = fd_getfile(fdp, SCARG(uap, fd))) == NULL)
+		return (EBADF);
+
+	FILE_USE(fp);
+	error = (*fp->f_ops->fo_stat)(fp, &ub, l);
+	FILE_UNUSE(fp, l);
+
 	osf1_cvt_stat_from_native(&ub, &oub);
 	if (error == 0)
-		error = copyout(&oub, SCARG(uap, sb), sizeof(oub));
+		error = copyout((caddr_t)&oub, (caddr_t)SCARG(uap, sb),
+		    sizeof (oub));
 
 	return (error);
 }
@@ -232,23 +267,41 @@ osf1_sys_fstat(struct lwp *l, const struct osf1_sys_fstat_args *uap, register_t 
  * Return status information about a file descriptor.
  */
 int
-osf1_sys_fstat2(struct lwp *l, const struct osf1_sys_fstat2_args *uap, register_t *retval)
+osf1_sys_fstat2(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
+	struct osf1_sys_fstat2_args *uap = v;
+	struct proc *p = l->l_proc;
+	struct filedesc *fdp = p->p_fd;
+	struct file *fp;
 	struct stat ub;
 	struct osf1_stat2 oub;
 	int error;
 
-	error = do_sys_fstat(SCARG(uap, fd), &ub);
+	if ((fp = fd_getfile(fdp, SCARG(uap, fd))) == NULL)
+		return (EBADF);
+
+	FILE_USE(fp);
+	error = (*fp->f_ops->fo_stat)(fp, &ub, l);
+	FILE_UNUSE(fp, l);
+
 	osf1_cvt_stat2_from_native(&ub, &oub);
 	if (error == 0)
-		error = copyout(&oub, SCARG(uap, sb), sizeof(oub));
+		error = copyout((caddr_t)&oub, (caddr_t)SCARG(uap, sb),
+		    sizeof (oub));
 
 	return (error);
 }
 
 int
-osf1_sys_ftruncate(struct lwp *l, const struct osf1_sys_ftruncate_args *uap, register_t *retval)
+osf1_sys_ftruncate(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
+	struct osf1_sys_ftruncate_args *uap = v;
 	struct sys_ftruncate_args a;
 
 	SCARG(&a, fd) = SCARG(uap, fd);
@@ -259,8 +312,12 @@ osf1_sys_ftruncate(struct lwp *l, const struct osf1_sys_ftruncate_args *uap, reg
 }
 
 int
-osf1_sys_lseek(struct lwp *l, const struct osf1_sys_lseek_args *uap, register_t *retval)
+osf1_sys_lseek(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
+	struct osf1_sys_lseek_args *uap = v;
 	struct sys_lseek_args a;
 
 	SCARG(&a, fd) = SCARG(uap, fd);

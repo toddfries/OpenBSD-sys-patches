@@ -1,4 +1,4 @@
-/* $NetBSD: if_an_pcmcia.c,v 1.36 2008/07/03 18:10:08 drochner Exp $ */
+/* $NetBSD: if_an_pcmcia.c,v 1.32 2007/10/19 12:01:04 ad Exp $ */
 
 /*-
  * Copyright (c) 2000, 2004 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_an_pcmcia.c,v 1.36 2008/07/03 18:10:08 drochner Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_an_pcmcia.c,v 1.32 2007/10/19 12:01:04 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -77,12 +84,13 @@ struct an_pcmcia_softc {
 	int sc_io_window;			/* our i/o window */
 	struct pcmcia_function *sc_pf;		/* our PCMCIA function */
 	void *sc_ih;				/* interrupt handle */
+	void *sc_powerhook;			/* power hook descriptor */
 
 	int sc_state;
 #define	AN_PCMCIA_ATTACHED	3
 };
 
-CFATTACH_DECL_NEW(an_pcmcia, sizeof(struct an_pcmcia_softc),
+CFATTACH_DECL(an_pcmcia, sizeof(struct an_pcmcia_softc),
     an_pcmcia_match, an_pcmcia_attach, an_pcmcia_detach, an_activate);
 
 static const struct pcmcia_product an_pcmcia_products[] = {
@@ -122,18 +130,17 @@ static void
 an_pcmcia_attach(struct device  *parent, struct device *self,
     void *aux)
 {
-	struct an_pcmcia_softc *psc = device_private(self);
+	struct an_pcmcia_softc *psc = (void *)self;
 	struct an_softc *sc = &psc->sc_an;
 	struct pcmcia_attach_args *pa = aux;
 	struct pcmcia_config_entry *cfe;
 	int error;
 
-	sc->sc_dev = self;
 	psc->sc_pf = pa->pf;
 
 	error = pcmcia_function_configure(pa->pf, an_pcmcia_validate_config);
 	if (error) {
-		aprint_error_dev(self, "configure failed, error=%d\n",
+		aprint_error("%s: configure failed, error=%d\n", self->dv_xname,
 		    error);
 		return;
 	}
@@ -152,14 +159,12 @@ an_pcmcia_attach(struct device  *parent, struct device *self,
 
 	error = an_attach(sc);
 	if (error) {
-		aprint_error_dev(self, "failed to attach controller\n");
+		aprint_error("%s: failed to attach controller\n",
+		    self->dv_xname);
 		goto fail2;
 	}
 
-	if (!pmf_device_register(self, NULL, NULL))
-		aprint_error_dev(self, "couldn't establish power handler\n");
-	else
-		pmf_class_network_register(self, &sc->sc_if);
+	psc->sc_powerhook = powerhook_establish(self->dv_xname, an_power, sc);
 
 	an_pcmcia_disable(sc);
 	sc->sc_enabled = 0;
@@ -177,13 +182,14 @@ fail:
 static int
 an_pcmcia_detach(struct device *self, int flags)
 {
-	struct an_pcmcia_softc *psc = device_private(self);
+	struct an_pcmcia_softc *psc = (void *)self;
 	int error;
 
 	if (psc->sc_state != AN_PCMCIA_ATTACHED)
 		return (0);
 
-	pmf_device_deregister(self);
+	if (psc->sc_powerhook)
+		powerhook_disestablish(psc->sc_powerhook);
 
 	error = an_detach(&psc->sc_an);
 	if (error)

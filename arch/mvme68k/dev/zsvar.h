@@ -1,4 +1,4 @@
-/*	$NetBSD: zsvar.h,v 1.12 2008/04/28 20:23:29 martin Exp $	*/
+/*	$NetBSD: zsvar.h,v 1.10 2000/11/20 19:35:29 scw Exp $	*/
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -77,10 +84,10 @@ struct zsdevice {
 extern	u_char zs_init_reg[];
 
 /* Functions exported to ASIC-specific drivers. */
-void	zs_config(struct zsc_softc *, struct zsdevice *, int, int);
-void	zs_cnconfig(int, int, struct zsdevice *, int);
+void	zs_config __P((struct zsc_softc *, struct zsdevice *, int, int));
+void	zs_cnconfig __P((int, int, struct zsdevice *, int));
 #ifdef MVME147
-int	zshard_shared(void *);
+int	zshard_shared __P((void *));
 #endif
 #if defined(MVME162) || defined(MVME172)
 int	zshard_unshared(void *);

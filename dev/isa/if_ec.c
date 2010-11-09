@@ -1,4 +1,4 @@
-/*	$NetBSD: if_ec.c,v 1.33 2008/04/28 20:23:52 martin Exp $	*/
+/*	$NetBSD: if_ec.c,v 1.31 2007/10/19 12:00:17 ad Exp $	*/
 
 /*-
  * Copyright (c) 1997, 1998 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -48,7 +55,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_ec.c,v 1.33 2008/04/28 20:23:52 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_ec.c,v 1.31 2007/10/19 12:00:17 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -86,10 +93,10 @@ struct ec_softc {
 	void *sc_ih;			/* interrupt handle */
 };
 
-int	ec_probe(device_t, cfdata_t, void *);
-void	ec_attach(device_t, device_t, void *);
+int	ec_probe(struct device *, struct cfdata *, void *);
+void	ec_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(ec, sizeof(struct ec_softc),
+CFATTACH_DECL(ec, sizeof(struct ec_softc),
     ec_probe, ec_attach, NULL, NULL);
 
 int	ec_set_media(struct ec_softc *, int);
@@ -120,7 +127,8 @@ static const int ec_membase[] = {
 #define	NEC_MEMBASE	(sizeof(ec_membase) / sizeof(ec_membase[0]))
 
 int
-ec_probe(device_t parent, cfdata_t match, void *aux)
+ec_probe(struct device *parent, struct cfdata *match,
+    void *aux)
 {
 	struct isa_attach_args *ia = aux;
 	bus_space_tag_t nict, asict, memt;
@@ -243,9 +251,9 @@ ec_probe(device_t parent, cfdata_t match, void *aux)
 }
 
 void
-ec_attach(device_t parent, device_t self, void *aux)
+ec_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct ec_softc *esc = device_private(self);
+	struct ec_softc *esc = (struct ec_softc *)self;
 	struct dp8390_softc *sc = &esc->sc_dp8390;
 	struct isa_attach_args *ia = aux;
 	bus_space_tag_t nict, asict, memt;
@@ -254,8 +262,7 @@ ec_attach(device_t parent, device_t self, void *aux)
 	u_int8_t tmp;
 	int i;
 
-	sc->sc_dev = self;
-	aprint_normal("\n");
+	printf("\n");
 
 	nict = asict = ia->ia_iot;
 	memt = ia->ia_memt;
@@ -269,20 +276,23 @@ ec_attach(device_t parent, device_t self, void *aux)
 	/* Map the NIC space. */
 	if (bus_space_map(nict, ia->ia_io[0].ir_addr + ELINK2_NIC_OFFSET,
 	    ELINK2_NIC_PORTS, 0, &nich)) {
-		aprint_error_dev(self, "can't map nic i/o space\n");
+		printf("%s: can't map nic i/o space\n",
+		    sc->sc_dev.dv_xname);
 		return;
 	}
 
 	/* Map the ASIC space. */
 	if (bus_space_map(asict, ia->ia_io[0].ir_addr + ELINK2_ASIC_OFFSET,
 	    ELINK2_ASIC_PORTS, 0, &asich)) {
-		aprint_error_dev(self, "can't map asic i/o space\n");
+		printf("%s: can't map asic i/o space\n",
+		    sc->sc_dev.dv_xname);
 		return;
 	}
 
 	/* Map the memory space. */
 	if (bus_space_map(memt, ia->ia_iomem[0].ir_addr, memsize, 0, &memh)) {
-		aprint_error_dev(self, "can't map shared memory\n");
+		printf("%s: can't map shared memory\n",
+		    sc->sc_dev.dv_xname);
 		return;
 	}
 
@@ -363,8 +373,8 @@ ec_attach(device_t parent, device_t self, void *aux)
 	else
 		esc->sc_16bitp = 0;
 
-	aprint_normal_dev(self, "3Com 3c503 Ethernet (%s-bit)\n",
-	    esc->sc_16bitp ? "16" : "8");
+	printf("%s: 3Com 3c503 Ethernet (%s-bit)\n",
+	    sc->sc_dev.dv_xname, esc->sc_16bitp ? "16" : "8");
 
 	/* Select page 0 registers. */
 	NIC_PUT(nict, nich, ED_P2_CR, ED_CR_RD2 | ED_CR_PAGE_0 | ED_CR_STP);
@@ -398,7 +408,7 @@ ec_attach(device_t parent, device_t self, void *aux)
 
 	/* Do generic parts of attach. */
 	if (dp8390_config(sc)) {
-		aprint_error_dev(self, " configuration failed\n");
+		printf("%s: configuration failed\n", sc->sc_dev.dv_xname);
 		return;
 	}
 
@@ -415,7 +425,7 @@ ec_attach(device_t parent, device_t self, void *aux)
 	 * we optimize for linear transfers of same-size packets.)
 	 */
 	if (esc->sc_16bitp) {
-		if (device_cfdata(sc->sc_dev)->cf_flags &
+		if (device_cfdata(&sc->sc_dev)->cf_flags &
 		    DP8390_NO_MULTI_BUFFERING)
 			sc->txb_cnt = 1;
 		else
@@ -454,12 +464,13 @@ ec_attach(device_t parent, device_t self, void *aux)
 		break;
 
 	case ISA_UNKNOWN_IRQ:
-		aprint_error_dev(self, "wildcarded IRQ is not allowed\n");
+		printf("%s: wildcarded IRQ is not allowed\n",
+		    sc->sc_dev.dv_xname);
 		return;
 
 	default:
-		aprint_error_dev(self, "invalid IRQ %d, must be 3, 4, 5, "
-		    "or 9\n", ia->ia_irq[0].ir_irq);
+		printf("%s: invalid IRQ %d, must be 3, 4, 5, or 9\n",
+		    sc->sc_dev.dv_xname, ia->ia_irq[0].ir_irq);
 		return;
 	}
 
@@ -486,7 +497,7 @@ ec_attach(device_t parent, device_t self, void *aux)
 	 * Now run the real memory test.
 	 */
 	if (ec_test_mem(sc)) {
-		aprint_error_dev(self, "memory test failed\n");
+		printf("%s: memory test failed\n", sc->sc_dev.dv_xname);
 		return;
 	}
 
@@ -494,7 +505,7 @@ ec_attach(device_t parent, device_t self, void *aux)
 	esc->sc_ih = isa_intr_establish(ia->ia_ic, ia->ia_irq[0].ir_irq,
 	    IST_EDGE, IPL_NET, dp8390_intr, sc);
 	if (esc->sc_ih == NULL)
-		aprint_error_dev(self, "can't establish interrupt\n");
+		printf("%s: can't establish interrupt\n", sc->sc_dev.dv_xname);
 }
 
 int
@@ -511,7 +522,8 @@ ec_fake_test_mem(struct dp8390_softc *sc)
 }
 
 int
-ec_test_mem(struct dp8390_softc *sc)
+ec_test_mem(sc)
+	struct dp8390_softc *sc;
 {
 	struct ec_softc *esc = (struct ec_softc *)sc;
 	bus_space_tag_t memt = sc->sc_buft;
@@ -539,8 +551,8 @@ ec_test_mem(struct dp8390_softc *sc)
 	return (0);
 
  fail:
-	aprint_error_dev(sc->sc_dev,
-	    "failed to clear shared memory at offset 0x%x\n", i);
+	printf("%s: failed to clear shared memory at offset 0x%x\n",
+	    sc->sc_dev.dv_xname, i);
 	return (1);
 }
 
@@ -550,7 +562,11 @@ ec_test_mem(struct dp8390_softc *sc)
  * up to a word - ok as long as mbufs are word-sized.
  */
 inline void
-ec_readmem(struct ec_softc *esc, int from, uint8_t *to, int len)
+ec_readmem(esc, from, to, len)
+	struct ec_softc *esc;
+	int from;
+	u_int8_t *to;
+	int len;
 {
 	bus_space_tag_t memt = esc->sc_dp8390.sc_buft;
 	bus_space_handle_t memh = esc->sc_dp8390.sc_bufh;
@@ -566,7 +582,10 @@ ec_readmem(struct ec_softc *esc, int from, uint8_t *to, int len)
 }
 
 int
-ec_write_mbuf(struct dp8390_softc *sc, struct mbuf *m, int buf)
+ec_write_mbuf(sc, m, buf)
+	struct dp8390_softc *sc;
+	struct mbuf *m;
+	int buf;
 {
 	struct ec_softc *esc = (struct ec_softc *)sc;
 	bus_space_tag_t asict = esc->sc_asict;
@@ -684,7 +703,11 @@ ec_write_mbuf(struct dp8390_softc *sc, struct mbuf *m, int buf)
 }
 
 int
-ec_ring_copy(struct dp8390_softc *sc, int src, void *dst, u_short amount)
+ec_ring_copy(sc, src, dst, amount)
+	struct dp8390_softc *sc;
+	int src;
+	void *dst;
+	u_short amount;
 {
 	struct ec_softc *esc = (struct ec_softc *)sc;
 	u_short tmp_amount;
@@ -707,8 +730,10 @@ ec_ring_copy(struct dp8390_softc *sc, int src, void *dst, u_short amount)
 }
 
 void
-ec_read_hdr(struct dp8390_softc *sc, int packet_ptr,
-    struct dp8390_ring *packet_hdrp)
+ec_read_hdr(sc, packet_ptr, packet_hdrp)
+	struct dp8390_softc *sc;
+	int packet_ptr;
+	struct dp8390_ring *packet_hdrp;
 {
 	struct ec_softc *esc = (struct ec_softc *)sc;
 
@@ -730,7 +755,8 @@ ec_media_init(struct dp8390_softc *sc)
 }
 
 int
-ec_mediachange(struct dp8390_softc *sc)
+ec_mediachange(sc)
+	struct dp8390_softc *sc;
 {
 	struct ec_softc *esc = (struct ec_softc *)sc;
 	struct ifmedia *ifm = &sc->sc_media;
@@ -739,7 +765,9 @@ ec_mediachange(struct dp8390_softc *sc)
 }
 
 void
-ec_mediastatus(struct dp8390_softc *sc, struct ifmediareq *ifmr)
+ec_mediastatus(sc, ifmr)
+	struct dp8390_softc *sc;
+	struct ifmediareq *ifmr;
 {
 	struct ifmedia *ifm = &sc->sc_media;
 
@@ -750,7 +778,8 @@ ec_mediastatus(struct dp8390_softc *sc, struct ifmediareq *ifmr)
 }
 
 void
-ec_init_card(struct dp8390_softc *sc)
+ec_init_card(sc)
+	struct dp8390_softc *sc;
 {
 	struct ec_softc *esc = (struct ec_softc *)sc;
 	struct ifmedia *ifm = &sc->sc_media;
@@ -759,7 +788,9 @@ ec_init_card(struct dp8390_softc *sc)
 }
 
 int
-ec_set_media(struct ec_softc *esc, int media)
+ec_set_media(esc, media)
+	struct ec_softc *esc;
+	int media;
 {
 	u_int8_t new;
 

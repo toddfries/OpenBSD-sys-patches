@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Module Name: dbdisply - debug display commands
- *              $Revision: 1.4 $
+ *              xRevision: 1.114 $
  *
  ******************************************************************************/
 
@@ -9,7 +9,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2008, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2006, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -115,6 +115,9 @@
  *****************************************************************************/
 
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: dbdisply.c,v 1.1 2006/03/23 13:36:31 kochi Exp $");
+
 #include "acpi.h"
 #include "amlcode.h"
 #include "acdispat.h"
@@ -160,7 +163,24 @@ AcpiDbGetPointer (
     void                    *ObjPtr;
 
 
+#if ACPI_MACHINE_WIDTH == 16
+#include <stdio.h>
+
+    /* Have to handle 16-bit pointers of the form segment:offset */
+
+    if (!sscanf (Target, "%p", &ObjPtr))
+    {
+        AcpiOsPrintf ("Invalid pointer: %s\n", Target);
+        return (NULL);
+    }
+
+#else
+
+    /* Simple flat pointer */
+
     ObjPtr = ACPI_TO_POINTER (ACPI_STRTOUL (Target, NULL, 16));
+#endif
+
     return (ObjPtr);
 }
 
@@ -418,6 +438,8 @@ AcpiDbDisplayMethodInfo (
     UINT32                  NumRemainingOps = 0;
     UINT32                  NumRemainingOperands = 0;
     UINT32                  NumRemainingOperators = 0;
+    UINT32                  NumArgs;
+    UINT32                  Concurrency;
     BOOLEAN                 CountRemaining = FALSE;
 
 
@@ -431,11 +453,13 @@ AcpiDbDisplayMethodInfo (
     ObjDesc = WalkState->MethodDesc;
     Node    = WalkState->MethodNode;
 
+    NumArgs     = ObjDesc->Method.ParamCount;
+    Concurrency = ObjDesc->Method.Concurrency;
+
     AcpiOsPrintf ("Currently executing control method is [%4.4s]\n",
             AcpiUtGetNodeName (Node));
-    AcpiOsPrintf ("%X Arguments, SyncLevel = %X\n",
-            (UINT32) ObjDesc->Method.ParamCount,
-            (UINT32) ObjDesc->Method.SyncLevel);
+    AcpiOsPrintf ("%X arguments, max concurrency = %X\n",
+            NumArgs, Concurrency);
 
 
     RootOp = StartOp;
@@ -580,10 +604,8 @@ AcpiDbDisplayResults (
     UINT32                  i;
     ACPI_WALK_STATE         *WalkState;
     ACPI_OPERAND_OBJECT     *ObjDesc;
-    UINT32                  ResultCount = 0;
+    UINT32                  NumResults = 0;
     ACPI_NAMESPACE_NODE     *Node;
-    ACPI_GENERIC_STATE      *Frame;
-    UINT32                  Index; /* Index onto current frame */
 
 
     WalkState = AcpiDsGetCurrentWalkState (AcpiGbl_CurrentWalkList);
@@ -598,28 +620,17 @@ AcpiDbDisplayResults (
 
     if (WalkState->Results)
     {
-        ResultCount = WalkState->ResultCount;
+        NumResults = WalkState->Results->Results.NumResults;
     }
 
     AcpiOsPrintf ("Method [%4.4s] has %X stacked result objects\n",
-            AcpiUtGetNodeName (Node), ResultCount);
+            AcpiUtGetNodeName (Node), NumResults);
 
-    /* From the top element of result stack */
-
-    Frame = WalkState->Results;
-    Index = (ResultCount - 1) % ACPI_RESULTS_FRAME_OBJ_NUM;
-
-    for (i = 0; i < ResultCount; i++)
+    for (i = 0; i < NumResults; i++)
     {
-        ObjDesc = Frame->Results.ObjDesc[Index];
+        ObjDesc = WalkState->Results->Results.ObjDesc[i];
         AcpiOsPrintf ("Result%d: ", i);
         AcpiDmDisplayInternalObject (ObjDesc, WalkState);
-        if (Index == 0)
-        {
-            Frame = Frame->Results.Next;
-            Index = ACPI_RESULTS_FRAME_OBJ_NUM;
-        }
-        Index--;
     }
 }
 
@@ -712,7 +723,7 @@ AcpiDbDisplayObjectType (
             }
         }
 
-        ACPI_FREE (Info);
+        ACPI_MEM_FREE (Info);
     }
     else
     {
@@ -849,8 +860,8 @@ AcpiDbDisplayGpes (
             AcpiOsPrintf (
                 "    RegisterInfo: %p  Status %8.8X%8.8X Enable %8.8X%8.8X\n",
                 GpeBlock->RegisterInfo,
-                ACPI_FORMAT_UINT64 (GpeBlock->RegisterInfo->StatusAddress.Address),
-                ACPI_FORMAT_UINT64 (GpeBlock->RegisterInfo->EnableAddress.Address));
+                ACPI_FORMAT_UINT64 (ACPI_GET_ADDRESS (GpeBlock->RegisterInfo->StatusAddress.Address)),
+                ACPI_FORMAT_UINT64 (ACPI_GET_ADDRESS (GpeBlock->RegisterInfo->EnableAddress.Address)));
 
             AcpiOsPrintf ("    EventInfo:    %p\n", GpeBlock->EventInfo);
 
@@ -864,8 +875,8 @@ AcpiDbDisplayGpes (
                     "    Reg %u:  WakeEnable %2.2X, RunEnable %2.2X  Status %8.8X%8.8X Enable %8.8X%8.8X\n",
                     i, GpeRegisterInfo->EnableForWake,
                     GpeRegisterInfo->EnableForRun,
-                    ACPI_FORMAT_UINT64 (GpeRegisterInfo->StatusAddress.Address),
-                    ACPI_FORMAT_UINT64 (GpeRegisterInfo->EnableAddress.Address));
+                    ACPI_FORMAT_UINT64 (ACPI_GET_ADDRESS (GpeRegisterInfo->StatusAddress.Address)),
+                    ACPI_FORMAT_UINT64 (ACPI_GET_ADDRESS (GpeRegisterInfo->EnableAddress.Address)));
 
                 /* Now look at the individual GPEs in this byte register */
 
@@ -882,9 +893,9 @@ AcpiDbDisplayGpes (
                     }
 
                     AcpiOsPrintf (
-                        "        GPE %.3X: %p Flags %2.2X: ",
+                        "        GPE %.3X: %p  Bit %2.2X  Flags %2.2X: ",
                         GpeBlock->BlockBaseNumber + GpeIndex,
-                        GpeEventInfo,
+                        GpeEventInfo, GpeEventInfo->RegisterBit,
                         GpeEventInfo->Flags);
 
                     if (GpeEventInfo->Flags & ACPI_GPE_LEVEL_TRIGGERED)

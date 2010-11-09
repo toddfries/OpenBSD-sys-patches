@@ -1,4 +1,4 @@
-/*	$NetBSD: sboot.h,v 1.6 2007/03/04 06:00:24 christos Exp $	*/
+/*	$NetBSD: sboot.h,v 1.5 2000/07/24 18:40:07 jdolecek Exp $	*/
 
 /*
  *
@@ -39,7 +39,7 @@
 #include <lib/libkern/libkern.h>
 #include <lib/libsa/stand.h>
 
-extern void *end;
+extern caddr_t end;
 
 
 /* console */

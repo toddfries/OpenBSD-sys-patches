@@ -1,4 +1,4 @@
-/*	$NetBSD: sbc.c,v 1.53 2008/04/04 16:00:57 tsutsui Exp $	*/
+/*	$NetBSD: sbc.c,v 1.51 2006/08/04 01:56:42 mhitch Exp $	*/
 
 /*
  * Copyright (C) 1996 Scott Reynolds.  All rights reserved.
@@ -45,7 +45,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sbc.c,v 1.53 2008/04/04 16:00:57 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sbc.c,v 1.51 2006/08/04 01:56:42 mhitch Exp $");
 
 #include "opt_ddb.h"
 
@@ -94,7 +94,7 @@ int	sbc_link_flags = 0 /* | SDEV_DB2 */;
 int	sbc_options = 0 /* | SBC_PDMA */;
 
 extern label_t	*nofault;
-extern void *	m68k_fault_addr;
+extern caddr_t	m68k_fault_addr;
 
 static	int	sbc_wait_busy(struct ncr5380_softc *);
 static	int	sbc_ready(struct ncr5380_softc *);
@@ -193,7 +193,7 @@ sbc_irq_intr(void *p)
 #ifdef SBC_DEBUG
 			else {
 				printf("%s: spurious intr\n",
-				    device_xname(ncr_sc->sc_dev));
+				    ncr_sc->sc_dev.dv_xname);
 				SBC_BREAK;
 			}
 #endif
@@ -211,27 +211,27 @@ decode_5380_intr(struct ncr5380_softc *ncr_sc)
 	if (((csr & ~(SCI_CSR_PHASE_MATCH | SCI_CSR_ATN)) == SCI_CSR_INT) &&
 	    ((bus_csr & ~(SCI_BUS_MSG | SCI_BUS_CD | SCI_BUS_IO | SCI_BUS_DBP)) == SCI_BUS_SEL)) {
 		if (csr & SCI_BUS_IO)
-			printf("%s: reselect\n", device_xname(ncr_sc->sc_dev));
+			printf("%s: reselect\n", ncr_sc->sc_dev.dv_xname);
 		else
-			printf("%s: select\n", device_xname(ncr_sc->sc_dev));
+			printf("%s: select\n", ncr_sc->sc_dev.dv_xname);
 	} else if (((csr & ~SCI_CSR_ACK) == (SCI_CSR_DONE | SCI_CSR_INT)) &&
 	    ((bus_csr & (SCI_BUS_RST | SCI_BUS_BSY | SCI_BUS_SEL)) == SCI_BUS_BSY))
-		printf("%s: DMA eop\n", device_xname(ncr_sc->sc_dev));
+		printf("%s: DMA eop\n", ncr_sc->sc_dev.dv_xname);
 	else if (((csr & ~SCI_CSR_PHASE_MATCH) == SCI_CSR_INT) &&
 	    ((bus_csr & ~SCI_BUS_RST) == 0))
-		printf("%s: bus reset\n", device_xname(ncr_sc->sc_dev));
+		printf("%s: bus reset\n", ncr_sc->sc_dev.dv_xname);
 	else if (((csr & ~(SCI_CSR_DREQ | SCI_CSR_ATN | SCI_CSR_ACK)) == (SCI_CSR_PERR | SCI_CSR_INT | SCI_CSR_PHASE_MATCH)) &&
 	    ((bus_csr & (SCI_BUS_RST | SCI_BUS_BSY | SCI_BUS_SEL)) == SCI_BUS_BSY))
-		printf("%s: parity error\n", device_xname(ncr_sc->sc_dev));
+		printf("%s: parity error\n", ncr_sc->sc_dev.dv_xname);
 	else if (((csr & ~SCI_CSR_ATN) == SCI_CSR_INT) &&
 	    ((bus_csr & (SCI_BUS_RST | SCI_BUS_BSY | SCI_BUS_REQ | SCI_BUS_SEL)) == (SCI_BUS_BSY | SCI_BUS_REQ)))
-		printf("%s: phase mismatch\n", device_xname(ncr_sc->sc_dev));
+		printf("%s: phase mismatch\n", ncr_sc->sc_dev.dv_xname);
 	else if (((csr & ~SCI_CSR_PHASE_MATCH) == (SCI_CSR_INT | SCI_CSR_DISC)) &&
 	    (bus_csr == 0))
-		printf("%s: disconnect\n", device_xname(ncr_sc->sc_dev));
+		printf("%s: disconnect\n", ncr_sc->sc_dev.dv_xname);
 	else
 		printf("%s: unknown intr: csr=%x, bus_csr=%x\n",
-		    device_xname(ncr_sc->sc_dev), csr, bus_csr);
+		    ncr_sc->sc_dev.dv_xname, csr, bus_csr);
 }
 #endif
 
@@ -377,7 +377,7 @@ sbc_pdma_out(struct ncr5380_softc *ncr_sc, int phase, int datalen, u_char *data)
 #undef  W4
 	if (sbc_wait_dreq(ncr_sc))
 		printf("%s: timeout waiting for DREQ.\n",
-		    device_xname(ncr_sc->sc_dev));
+		    ncr_sc->sc_dev.dv_xname);
 
 	*byte_data = 0;
 	goto done;
@@ -440,7 +440,7 @@ sbc_drq_intr(void *p)
 #ifdef SBC_DEBUG
 	if (sbc_debug & SBC_DB_INTR)
 		printf("%s: drq intr, dh_len=0x%x, dh_flags=0x%x\n",
-		    device_xname(ncr_sc->sc_dev), dh->dh_len, dh->dh_flags);
+		    ncr_sc->sc_dev.dv_xname, dh->dh_len, dh->dh_flags);
 #endif
 
 	/*
@@ -458,8 +458,7 @@ sbc_drq_intr(void *p)
 
 			if ((count < 0) || (count > dh->dh_len)) {
 				printf("%s: complete=0x%x (pending 0x%x)\n",
-				    device_xname(ncr_sc->sc_dev), count,
-				    dh->dh_len);
+				    ncr_sc->sc_dev.dv_xname, count, dh->dh_len);
 				panic("something is wrong");
 			}
 
@@ -471,7 +470,7 @@ sbc_drq_intr(void *p)
 #ifdef SBC_DEBUG
 		if (sbc_debug & SBC_DB_INTR)
 			printf("%s: drq /berr, complete=0x%x (pending 0x%x)\n",
-			   device_xname(ncr_sc->sc_dev), count, dh->dh_len);
+			   ncr_sc->sc_dev.dv_xname, count, dh->dh_len);
 #endif
 		m68k_fault_addr = 0;
 
@@ -598,7 +597,7 @@ sbc_drq_intr(void *p)
 #ifdef SBC_DEBUG
 	if (sbc_debug & (SBC_DB_REG | SBC_DB_INTR))
 		printf("%s: drq intr complete: csr=0x%x, bus_csr=0x%x\n",
-		    device_xname(ncr_sc->sc_dev), *ncr_sc->sci_csr,
+		    ncr_sc->sc_dev.dv_xname, *ncr_sc->sci_csr,
 		    *ncr_sc->sci_bus_csr);
 #endif
 }
@@ -685,8 +684,7 @@ sbc_dma_poll(struct ncr5380_softc *ncr_sc)
 	 */
 #ifdef SBC_DEBUG
 	if (sbc_debug & SBC_DB_DMA)
-		printf("%s: lost DRQ interrupt?\n",
-		    device_xname(ncr_sc->sc_dev));
+		printf("%s: lost DRQ interrupt?\n", ncr_sc->sc_dev.dv_xname);
 #endif
 	sr->sr_flags |= SR_OVERDUE;
 }
@@ -730,7 +728,7 @@ sbc_dma_start(struct ncr5380_softc *ncr_sc)
 #ifdef SBC_DEBUG
 	if (sbc_debug & SBC_DB_DMA)
 		printf("%s: PDMA started, va=%p, len=0x%x\n",
-		    device_xname(ncr_sc->sc_dev), dh->dh_addr, dh->dh_len);
+		    ncr_sc->sc_dev.dv_xname, dh->dh_addr, dh->dh_len);
 #endif
 }
 
@@ -752,7 +750,7 @@ sbc_dma_stop(struct ncr5380_softc *ncr_sc)
 #ifdef SBC_DEBUG
 		if (sbc_debug & SBC_DB_DMA)
 			printf("%s: dma_stop: DMA not running\n",
-			    device_xname(ncr_sc->sc_dev));
+			    ncr_sc->sc_dev.dv_xname);
 #endif
 		return;
 	}
@@ -764,7 +762,7 @@ sbc_dma_stop(struct ncr5380_softc *ncr_sc)
 #ifdef SBC_DEBUG
 		if (sbc_debug & SBC_DB_DMA)
 			printf("%s: dma_stop: ntrans=0x%x\n",
-			    device_xname(ncr_sc->sc_dev), ntrans);
+			    ncr_sc->sc_dev.dv_xname, ntrans);
 #endif
 
 		if (ntrans > ncr_sc->sc_datalen)
@@ -787,7 +785,7 @@ sbc_dma_stop(struct ncr5380_softc *ncr_sc)
 #ifdef SBC_DEBUG
 	if (sbc_debug & SBC_DB_REG)
 		printf("%s: dma_stop: csr=0x%x, bus_csr=0x%x\n",
-		    device_xname(ncr_sc->sc_dev), *ncr_sc->sci_csr,
+		    ncr_sc->sc_dev.dv_xname, *ncr_sc->sci_csr,
 		    *ncr_sc->sci_bus_csr);
 #endif
 }

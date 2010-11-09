@@ -1,4 +1,4 @@
-/*	$NetBSD: scsiconf.h,v 1.56 2008/07/16 18:50:58 drochner Exp $	*/
+/*	$NetBSD: scsiconf.h,v 1.54 2005/12/11 12:23:50 christos Exp $	*/
 
 /*-
  * Copyright (c) 1998, 1999, 2004 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -55,7 +62,7 @@
 int	scsiprint(void *, const char *);
 
 struct scsibus_softc {
-	device_t sc_dev;
+	struct device sc_dev;
 	struct scsipi_channel *sc_channel;	/* our scsipi_channel */
 	int	sc_flags;
 };

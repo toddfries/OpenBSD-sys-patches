@@ -1,4 +1,4 @@
-/* $NetBSD: vsbus_dma.c,v 1.15 2008/04/28 20:23:39 martin Exp $ */
+/* $NetBSD: vsbus_dma.c,v 1.11 2005/12/11 12:19:37 christos Exp $ */
 
 /*-
  * Copyright (c) 1997, 1998 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -31,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: vsbus_dma.c,v 1.15 2008/04/28 20:23:39 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: vsbus_dma.c,v 1.11 2005/12/11 12:19:37 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -47,67 +54,62 @@ __KERNEL_RCSID(0, "$NetBSD: vsbus_dma.c,v 1.15 2008/04/28 20:23:39 martin Exp $"
 #include <machine/sgmap.h>
 #include <machine/vsbus.h>
 
-static int sgmap_bus_dmamap_create_sgmap(bus_dma_tag_t, bus_size_t, int,
+static int vsbus_bus_dmamap_create_sgmap(bus_dma_tag_t, bus_size_t, int,
 	    bus_size_t, bus_size_t, int, bus_dmamap_t *);
 
-static void sgmap_bus_dmamap_destroy_sgmap(bus_dma_tag_t, bus_dmamap_t);
+static void vsbus_bus_dmamap_destroy_sgmap(bus_dma_tag_t, bus_dmamap_t);
 
-static int sgmap_bus_dmamap_load_sgmap(bus_dma_tag_t, bus_dmamap_t, void *,
+static int vsbus_bus_dmamap_load_sgmap(bus_dma_tag_t, bus_dmamap_t, void *,
 	    bus_size_t, struct proc *, int);
 
-static int sgmap_bus_dmamap_load_mbuf_sgmap(bus_dma_tag_t, bus_dmamap_t,
+static int vsbus_bus_dmamap_load_mbuf_sgmap(bus_dma_tag_t, bus_dmamap_t,
 	    struct mbuf *, int);
 
-static int sgmap_bus_dmamap_load_uio_sgmap(bus_dma_tag_t, bus_dmamap_t,
+static int vsbus_bus_dmamap_load_uio_sgmap(bus_dma_tag_t, bus_dmamap_t,
 	    struct uio *, int);
 
-static int sgmap_bus_dmamap_load_raw_sgmap(bus_dma_tag_t, bus_dmamap_t,
+static int vsbus_bus_dmamap_load_raw_sgmap(bus_dma_tag_t, bus_dmamap_t,
 	    bus_dma_segment_t *, int, bus_size_t, int);
 
-static void sgmap_bus_dmamap_unload_sgmap(bus_dma_tag_t, bus_dmamap_t);
+static void vsbus_bus_dmamap_unload_sgmap(bus_dma_tag_t, bus_dmamap_t);
 
-static void sgmap_bus_dmamap_sync(bus_dma_tag_t, bus_dmamap_t, bus_addr_t,
+static void vsbus_bus_dmamap_sync(bus_dma_tag_t, bus_dmamap_t, bus_addr_t,
 	    bus_size_t, int);
 
 void
-vax_sgmap_dmatag_init(bus_dma_tag_t t, void *cookie, size_t ptecnt)
+vsbus_dma_init(sc, ptecnt)
+	struct vsbus_softc *sc;
+	unsigned ptecnt;
 {
+	bus_dma_tag_t t;
+	bus_dma_segment_t segs[1];
+	struct pte *pte;
+	int nsegs, error;
+	unsigned mapsize = ptecnt * sizeof(struct pte);
+
 	/*
 	 * Initialize the DMA tag used for sgmap-mapped DMA.
 	 */
-	t->_cookie = cookie;
+	t = &sc->sc_dmatag;
+	t->_cookie = sc;
 	t->_wbase = 0;
 	t->_wsize = ptecnt * VAX_NBPG;
 	t->_boundary = 0;
-	t->_dmamap_create = sgmap_bus_dmamap_create_sgmap;
-	t->_dmamap_destroy = sgmap_bus_dmamap_destroy_sgmap;
-	t->_dmamap_load = sgmap_bus_dmamap_load_sgmap;
-	t->_dmamap_load_mbuf = sgmap_bus_dmamap_load_mbuf_sgmap;
-	t->_dmamap_load_uio = sgmap_bus_dmamap_load_uio_sgmap;
-	t->_dmamap_load_raw = sgmap_bus_dmamap_load_raw_sgmap;
-	t->_dmamap_unload = sgmap_bus_dmamap_unload_sgmap;
-	t->_dmamap_sync = sgmap_bus_dmamap_sync;
+	t->_sgmap = &sc->sc_sgmap;
+	t->_dmamap_create = vsbus_bus_dmamap_create_sgmap;
+	t->_dmamap_destroy = vsbus_bus_dmamap_destroy_sgmap;
+	t->_dmamap_load = vsbus_bus_dmamap_load_sgmap;
+	t->_dmamap_load_mbuf = vsbus_bus_dmamap_load_mbuf_sgmap;
+	t->_dmamap_load_uio = vsbus_bus_dmamap_load_uio_sgmap;
+	t->_dmamap_load_raw = vsbus_bus_dmamap_load_raw_sgmap;
+	t->_dmamap_unload = vsbus_bus_dmamap_unload_sgmap;
+	t->_dmamap_sync = vsbus_bus_dmamap_sync;
 
 	t->_dmamem_alloc = _bus_dmamem_alloc;
 	t->_dmamem_free = _bus_dmamem_free;
 	t->_dmamem_map = _bus_dmamem_map;
 	t->_dmamem_unmap = _bus_dmamem_unmap;
 	t->_dmamem_mmap = _bus_dmamem_mmap;
-}
-
-void
-vsbus_dma_init(struct vsbus_softc *sc, unsigned ptecnt)
-{
-	bus_dma_tag_t t = &sc->sc_dmatag;
-	bus_dma_segment_t segs[1];
-	struct pte *pte;
-	int nsegs;
-	int error;
-	size_t mapsize = ptecnt * sizeof(struct pte);
-
-	vax_sgmap_dmatag_init(t, sc, ptecnt);
-
-	t->_sgmap = &sc->sc_sgmap;
 
 	if (vax_boardtype == VAX_BTYP_46 || vax_boardtype == VAX_BTYP_48) {
 		/*
@@ -121,7 +123,7 @@ vsbus_dma_init(struct vsbus_softc *sc, unsigned ptecnt)
 		}
 
 		error = bus_dmamem_map(t, segs, nsegs, mapsize, 
-		   (void **)(void *) &pte, BUS_DMA_NOWAIT|BUS_DMA_COHERENT);
+		   (caddr_t *)(void *) &pte, BUS_DMA_NOWAIT|BUS_DMA_COHERENT);
 		if (error) {
 			panic("vsbus_dma_init: error mapping memory for "
 			    "hw sgmap: error=%d", error);
@@ -131,13 +133,12 @@ vsbus_dma_init(struct vsbus_softc *sc, unsigned ptecnt)
 	} else {
 		pte = (struct pte *) vax_map_physmem(KA49_SCSIMAP, mapsize / VAX_NBPG);
 		for (nsegs = ptecnt; nsegs > 0; ) {
-			((uint32_t *) pte)[--nsegs] = 0;
+			((u_int32_t *) pte)[--nsegs] = 0;
 		}
 		segs->ds_addr = KA49_SCSIMAP;
 	}
-	aprint_normal_dev(sc->sc_dev,
-	    "%uK entry DMA SGMAP at PA 0x%lx (VA %p)\n",
-	    ptecnt / 1024, segs->ds_addr, pte);
+	printf("%s: %uK entry DMA SGMAP at PA 0x%lx (VA %p)\n",
+		sc->sc_dev.dv_xname, ptecnt / 1024, segs->ds_addr, pte);
 
 	/*
 	 * Initialize the SGMAP.
@@ -150,9 +151,15 @@ vsbus_dma_init(struct vsbus_softc *sc, unsigned ptecnt)
  * Create a VSBUS SGMAP-mapped DMA map.
  */
 int
-sgmap_bus_dmamap_create_sgmap(bus_dma_tag_t t, bus_size_t size,  int nsegments,
-	bus_size_t maxsegsz, bus_size_t boundary, int flags,
-	bus_dmamap_t *dmamp)
+vsbus_bus_dmamap_create_sgmap(t, size, nsegments, maxsegsz, boundary,
+    flags, dmamp)
+	bus_dma_tag_t t;
+	bus_size_t size;  
+	int nsegments;
+	bus_size_t maxsegsz;
+	bus_size_t boundary;
+	int flags; 
+	bus_dmamap_t *dmamp;
 {
 	bus_dmamap_t map;
 	int error;
@@ -168,7 +175,7 @@ sgmap_bus_dmamap_create_sgmap(bus_dma_tag_t t, bus_size_t size,  int nsegments,
 		error = vax_sgmap_alloc(map, vax_round_page(size),
 		    t->_sgmap, flags);
 		if (error)
-			sgmap_bus_dmamap_destroy_sgmap(t, map);
+			vsbus_bus_dmamap_destroy_sgmap(t, map);
 	}
 
 	return (error);
@@ -178,7 +185,9 @@ sgmap_bus_dmamap_create_sgmap(bus_dma_tag_t t, bus_size_t size,  int nsegments,
  * Destroy a VSBUS SGMAP-mapped DMA map.
  */
 static void
-sgmap_bus_dmamap_destroy_sgmap(bus_dma_tag_t t, bus_dmamap_t map)
+vsbus_bus_dmamap_destroy_sgmap(t, map)
+	bus_dma_tag_t t;
+	bus_dmamap_t map;
 {
 
 	if (map->_dm_flags & DMAMAP_HAS_SGMAP)
@@ -191,8 +200,13 @@ sgmap_bus_dmamap_destroy_sgmap(bus_dma_tag_t t, bus_dmamap_t map)
  * Load a VSBUS SGMAP-mapped DMA map with a linear buffer.
  */
 static int
-sgmap_bus_dmamap_load_sgmap(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
-	bus_size_t buflen, struct proc *p, int flags)
+vsbus_bus_dmamap_load_sgmap(t, map, buf, buflen, p, flags)
+	bus_dma_tag_t t;
+	bus_dmamap_t map;
+	void *buf;
+	bus_size_t buflen;
+	struct proc *p;
+	int flags;
 {
 	return vax_sgmap_load(t, map, buf, buflen, p, flags, t->_sgmap);
 }
@@ -201,8 +215,11 @@ sgmap_bus_dmamap_load_sgmap(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
  * Load a VSBUS SGMAP-mapped DMA map with an mbuf chain.
  */
 static int
-sgmap_bus_dmamap_load_mbuf_sgmap(bus_dma_tag_t t, bus_dmamap_t map,
-	struct mbuf *m, int flags)
+vsbus_bus_dmamap_load_mbuf_sgmap(t, map, m, flags)
+	bus_dma_tag_t t;
+	bus_dmamap_t map;
+	struct mbuf *m;
+	int flags;
 {
 	return vax_sgmap_load_mbuf(t, map, m, flags, t->_sgmap);
 }
@@ -211,8 +228,11 @@ sgmap_bus_dmamap_load_mbuf_sgmap(bus_dma_tag_t t, bus_dmamap_t map,
  * Load a VSBUS SGMAP-mapped DMA map with a uio.
  */
 static int
-sgmap_bus_dmamap_load_uio_sgmap(bus_dma_tag_t t, bus_dmamap_t map,
-	struct uio *uio, int flags)
+vsbus_bus_dmamap_load_uio_sgmap(t, map, uio, flags)
+	bus_dma_tag_t t;
+	bus_dmamap_t map;
+	struct uio *uio;
+	int flags;
 {
 	return vax_sgmap_load_uio(t, map, uio, flags, t->_sgmap);
 }
@@ -221,8 +241,13 @@ sgmap_bus_dmamap_load_uio_sgmap(bus_dma_tag_t t, bus_dmamap_t map,
  * Load a VSBUS SGMAP-mapped DMA map with raw memory.
  */
 static int
-sgmap_bus_dmamap_load_raw_sgmap(bus_dma_tag_t t, bus_dmamap_t map,
-	bus_dma_segment_t *segs, int nsegs, bus_size_t size, int flags)
+vsbus_bus_dmamap_load_raw_sgmap(t, map, segs, nsegs, size, flags)
+	bus_dma_tag_t t;
+	bus_dmamap_t map;
+	bus_dma_segment_t *segs;
+	int nsegs;
+	bus_size_t size;
+	int flags;
 {
 	return vax_sgmap_load_raw(t, map, segs, nsegs, size, flags, t->_sgmap);
 }
@@ -231,7 +256,9 @@ sgmap_bus_dmamap_load_raw_sgmap(bus_dma_tag_t t, bus_dmamap_t map,
  * Unload a VSBUS DMA map.
  */
 static void
-sgmap_bus_dmamap_unload_sgmap(bus_dma_tag_t t, bus_dmamap_t map)
+vsbus_bus_dmamap_unload_sgmap(t, map)
+	bus_dma_tag_t t;
+	bus_dmamap_t map;
 {
 	/*
 	 * Invalidate any SGMAP page table entries used by this
@@ -249,8 +276,12 @@ sgmap_bus_dmamap_unload_sgmap(bus_dma_tag_t t, bus_dmamap_t map)
  * Sync the bus map.
  */
 static void
-sgmap_bus_dmamap_sync(bus_dma_tag_t tag, bus_dmamap_t dmam, bus_addr_t offset,
-	bus_size_t len, int ops)
+vsbus_bus_dmamap_sync(tag, dmam, offset, len, ops)
+	bus_dma_tag_t tag;
+	bus_dmamap_t dmam;
+	bus_addr_t offset;
+	bus_size_t len;
+	int ops;
 {
 	/* not needed */
 }

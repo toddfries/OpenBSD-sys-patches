@@ -1,10 +1,10 @@
-#	$NetBSD: Makefile,v 1.118 2008/11/24 16:05:21 joerg Exp $
+#	$NetBSD: Makefile,v 1.102 2007/11/12 23:12:00 ad Exp $
 
 .include <bsd.sys.mk>
 
 INCSDIR= /usr/include/sys
 
-INCS=	acct.h agpio.h aio.h ansi.h ataio.h atomic.h audioio.h \
+INCS=	acct.h agpio.h aio.h ansi.h ataio.h audioio.h \
 	bitops.h bootblock.h bswap.h buf.h \
 	callback.h callout.h cdefs.h cdefs_aout.h \
 	cdefs_elf.h cdio.h chio.h clockctl.h condvar.h conf.h core.h \
@@ -18,27 +18,25 @@ INCS=	acct.h agpio.h aio.h ansi.h ataio.h atomic.h audioio.h \
 	ieee754.h inttypes.h ioccom.h ioctl.h ioctl_compat.h iostat.h ipc.h \
 	joystick.h \
 	kcore.h kgdb.h kmem.h ksem.h ksyms.h ktrace.h \
-	localedef.h lock.h lockf.h lwp.h lwpctl.h \
-	malloc.h mallocvar.h mbuf.h md4.h md5.h midiio.h \
-	mman.h module.h mount.h mqueue.h msg.h msgbuf.h mtio.h mutex.h \
+	lkm.h localedef.h lock.h lockf.h lwp.h lwpctl.h \
+	malloc.h mallocvar.h mbuf.h md4.h \
+	md5.h midiio.h mman.h mount.h mqueue.h msg.h msgbuf.h mtio.h mutex.h \
 	namei.h null.h \
 	param.h pipe.h pmc.h poll.h pool.h power.h proc.h \
-	protosw.h pset.h ptrace.h ptree.h \
-	queue.h \
-	ras.h rb.h reboot.h radioio.h resource.h resourcevar.h rmd160.h \
-	rnd.h rwlock.h sa.h satypes.h \
+	protosw.h ptrace.h queue.h \
+	ras.h reboot.h radioio.h resource.h resourcevar.h rmd160.h rnd.h rwlock.h \
 	scanio.h sched.h scsiio.h select.h selinfo.h sem.h sha1.h sha2.h \
 	shm.h siginfo.h signal.h signalvar.h sigtypes.h simplelock.h \
 	sleepq.h socket.h \
 	socketvar.h sockio.h specificdata.h stat.h statvfs.h \
-	syscall.h syscallargs.h sysctl.h stdint.h swap.h \
+	syscall.h syscallargs.h sysctl.h systrace.h stdint.h swap.h \
 	syncobj.h syslimits.h syslog.h \
 	tape.h termios.h time.h timeb.h timepps.h times.h \
 	timex.h trace.h tree.h tty.h ttychars.h ttycom.h \
 	ttydefaults.h ttydev.h types.h \
 	ucontext.h ucred.h uio.h un.h unistd.h unpcb.h user.h utsname.h uuid.h \
-	vadvise.h verified_exec.h videoio.h vmmeter.h vnode.h vnode_if.h \
-	wait.h wapbl.h wapbl_replay.h wdog.h
+	vadvise.h verified_exec.h vmmeter.h vnode.h vnode_if.h \
+	wait.h wdog.h
 
 INCSYMLINKS=\
 	sys/exec_elf.h /usr/include/elf.h \
@@ -56,6 +54,6 @@ INCSYMLINKS=\
 INCSYMLINKS+=	../soundcard.h ${INCSDIR}/soundcard.h
 
 namei: namei.src gennameih.awk
-	${TOOL_AWK} -f gennameih.awk < namei.src
+	${AWK} -f gennameih.awk < namei.src > namei.h
 
 .include <bsd.kinc.mk>

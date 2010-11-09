@@ -1,4 +1,4 @@
-/*	$NetBSD: darwin_route.c,v 1.15 2009/01/11 02:45:47 christos Exp $ */
+/*	$NetBSD: darwin_route.c,v 1.11 2005/12/11 12:19:56 christos Exp $ */
 
 /*-
  * Copyright (c) 2004 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: darwin_route.c,v 1.15 2009/01/11 02:45:47 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: darwin_route.c,v 1.11 2005/12/11 12:19:56 christos Exp $");
 
 #include <sys/errno.h>
 #include <sys/systm.h>
@@ -38,15 +45,17 @@ __KERNEL_RCSID(0, "$NetBSD: darwin_route.c,v 1.15 2009/01/11 02:45:47 christos E
 
 #include <net/if.h>
 
-#include <compat/darwin/darwin_types.h>
 #include <compat/darwin/darwin_socket.h>
 #include <compat/darwin/darwin_route.h>
 
-static int darwin_copyout_sockaddr(struct sockaddr *, char **, size_t *, size_t);
+inline int copyout_sockaddr(struct sockaddr *, char **, size_t *, size_t);
 
 #define ALIGN(a)	(((a) + 3) & ~0x3UL)
 int
-darwin_ifaddrs(int af, char *dst, size_t *sizep)
+darwin_ifaddrs(af, dst, sizep)
+	int af;
+	char *dst;
+	size_t *sizep;
 {
 	struct darwin_if_msghdr dim;
 	struct ifnet *ifp;
@@ -54,13 +63,13 @@ darwin_ifaddrs(int af, char *dst, size_t *sizep)
 	int index = 1;
 	size_t size = 0;
 	size_t maxsize = *sizep;
-	uint8_t family;
 
 	af = darwin_to_native_af[af];
 
 	IFNET_FOREACH(ifp) {
 		struct ifaddr *ifa;
-		struct sockaddr *laddr = NULL;
+		struct sockaddr_dl *laddr = NULL;
+		struct sockaddr_storage dladdr;
 
 		/*
 		 * Find the link layer info as it is needed
@@ -69,7 +78,7 @@ darwin_ifaddrs(int af, char *dst, size_t *sizep)
 		IFADDR_FOREACH(ifa, ifp) {
 			if ((ifa->ifa_addr) &&
 			    (ifa->ifa_addr->sa_family == AF_LINK)) {
-				laddr = (struct sockaddr *)ifa->ifa_addr;
+				laddr = (struct sockaddr_dl *)ifa->ifa_addr;
 				break;
 			}
 		}
@@ -80,8 +89,12 @@ darwin_ifaddrs(int af, char *dst, size_t *sizep)
 #endif
 			continue;
 		}
+		error = native_to_darwin_sockaddr((struct sockaddr *)laddr,
+					       &dladdr);
+		if (error)
+			return error;
 
-		dim.dim_len = sizeof(dim) + ALIGN(laddr->sa_len);
+		dim.dim_len = sizeof(dim) + ALIGN(dladdr.ss_len);
 		dim.dim_vers = DARWIN_RTM_VERSION;
 		dim.dim_type = DARWIN_RTM_IFINFO;
 		dim.dim_addrs = DARWIN_RTA_IFP;
@@ -112,7 +125,7 @@ darwin_ifaddrs(int af, char *dst, size_t *sizep)
 		dim.dim_data.did_lastchange.tv_sec =
 		    ifp->if_data.ifi_lastchange.tv_sec;
 		dim.dim_data.did_lastchange.tv_usec =
-		    ifp->if_data.ifi_lastchange.tv_nsec * 1000;
+		    ifp->if_data.ifi_lastchange.tv_usec;
 		dim.dim_data.did_default_proto = 0; /* XXX */
 		dim.dim_data.did_hwassist = 0; /* XXX */
 
@@ -124,16 +137,11 @@ darwin_ifaddrs(int af, char *dst, size_t *sizep)
 		}
 
 		/* Copy the link sockaddr. */
-		size += ALIGN(laddr->sa_len);
+		size += ALIGN(dladdr.ss_len);
 		if (dst && (size <= maxsize)) {
-			if ((error = copyout(laddr, dst, laddr->sa_len)) != 0)
+			if ((error = copyout(&dladdr, dst, dladdr.ss_len)) != 0)
 				return error;
-			family = native_to_darwin_af[laddr->sa_family];
-			error = copyout(&family,
-			    &((struct sockaddr *)dst)->sa_family, 1);
-			if (error != 0)
-				return error;
-			dst += ALIGN(laddr->sa_len);
+			dst += ALIGN(dladdr.ss_len);
 		}
 
 		IFADDR_FOREACH(ifa, ifp) {
@@ -216,7 +224,7 @@ darwin_ifaddrs(int af, char *dst, size_t *sizep)
 					ss.ss_family =
 					    ifa->ifa_addr->sa_family;
 
-				if ((error = darwin_copyout_sockaddr(
+				if ((error = copyout_sockaddr(
 				    (struct sockaddr *)&ss, &dst,
 				    &size, maxsize)) != 0)
 					return error;
@@ -224,20 +232,20 @@ darwin_ifaddrs(int af, char *dst, size_t *sizep)
 
 			/* Interface address */
 			if (diam.diam_addrs & DARWIN_RTA_IFA)
-				if ((error = darwin_copyout_sockaddr(ifa->ifa_addr,
+				if ((error = copyout_sockaddr(ifa->ifa_addr,
 				    &dst, &size, maxsize)) != 0)
 					return error;
 
 			/* Interface remote address */
 			if (diam.diam_addrs & DARWIN_RTA_DST)
-				if ((error = darwin_copyout_sockaddr(ifa->ifa_dstaddr,
+				if ((error = copyout_sockaddr(ifa->ifa_dstaddr,
 				    &dst, &size, maxsize)) != 0)
 					return error;
 
 			/* Interface broadcast address */
 			if (diam.diam_addrs & DARWIN_RTA_BRD)
 				if ((error =
-				    darwin_copyout_sockaddr(ifa->ifa_broadaddr,
+				    copyout_sockaddr(ifa->ifa_broadaddr,
 				    &dst, &size, maxsize)) != 0)
 					return error;
 		}
@@ -252,23 +260,25 @@ darwin_ifaddrs(int af, char *dst, size_t *sizep)
 }
 
 
-static int
-darwin_copyout_sockaddr(struct sockaddr *sap, char **dstp, size_t *sizep, size_t maxsize)
+inline int
+copyout_sockaddr(sap, dstp, sizep, maxsize)
+	struct sockaddr *sap;
+	char **dstp;
+	size_t *sizep;
+	size_t maxsize;
 {
+	struct sockaddr_storage ss;
 	size_t len;
 	int error;
-	uint8_t family;
 
-	len = sap->sa_len;
+	error = native_to_darwin_sockaddr(sap, &ss);
+	if (error)
+		return error;
+	len = ss.ss_len;
 
 	*sizep += ALIGN(len);
 	if (*dstp && (*sizep <= maxsize)) {
-		if ((error = copyout(sap, *dstp, len)) != 0)
-			return error;
-		family = native_to_darwin_af[sap->sa_family];
-		error = copyout(&family,
-		    &((struct sockaddr *)*dstp)->sa_family, 1);
-		if (error != 0)
+		if ((error = copyout(&ss, *dstp, len)) != 0)
 			return error;
 		*dstp += ALIGN(len);
 	}

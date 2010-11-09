@@ -1,4 +1,4 @@
-/*	$NetBSD: netbsd32_compat_43.c,v 1.51 2009/01/30 13:01:36 njoly Exp $	*/
+/*	$NetBSD: netbsd32_compat_43.c,v 1.34 2005/12/11 12:20:22 christos Exp $	*/
 
 /*
  * Copyright (c) 1998, 2001 Matthew R. Green
@@ -12,6 +12,8 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -27,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: netbsd32_compat_43.c,v 1.51 2009/01/30 13:01:36 njoly Exp $");
+__KERNEL_RCSID(0, "$NetBSD: netbsd32_compat_43.c,v 1.34 2005/12/11 12:20:22 christos Exp $");
 
 #if defined(_KERNEL_OPT)
 #include "opt_compat_43.h"
@@ -36,20 +38,15 @@ __KERNEL_RCSID(0, "$NetBSD: netbsd32_compat_43.c,v 1.51 2009/01/30 13:01:36 njol
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/fcntl.h>
-#include <sys/filedesc.h>
 #include <sys/malloc.h>
-#include <sys/mbuf.h>
 #include <sys/mount.h>
-#include <sys/namei.h>
 #include <sys/socket.h>
 #include <sys/proc.h>
-#include <sys/socket.h>
-#include <sys/socketvar.h>
 #include <sys/stat.h>
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 #include <sys/time.h>
 #include <sys/ucred.h>
-#include <sys/vfs_syscalls.h>
 #include <uvm/uvm_extern.h>
 #include <sys/sysctl.h>
 #include <sys/swap.h>
@@ -62,152 +59,214 @@ __KERNEL_RCSID(0, "$NetBSD: netbsd32_compat_43.c,v 1.51 2009/01/30 13:01:36 njol
 #include <compat/sys/signalvar.h>
 #include <compat/sys/socket.h>
 
-#define SYS_DEF(foo) struct foo##_args; \
-    int foo(struct lwp *, const struct foo##_args *, register_t *)
+int compat_43_netbsd32_sethostid __P((struct lwp *, void *, register_t *));
+int compat_43_netbsd32_killpg __P((struct lwp *, void *, register_t *retval));
+int compat_43_netbsd32_sigblock __P((struct lwp *, void *, register_t *retval));
+int compat_43_netbsd32_sigblock __P((struct lwp *, void *, register_t *retval));
+int compat_43_netbsd32_sigsetmask __P((struct lwp *, void *, register_t *retval));
 
-SYS_DEF(compat_43_netbsd32_sethostid);
-SYS_DEF(compat_43_netbsd32_killpg);
-SYS_DEF(compat_43_netbsd32_sigblock);
-SYS_DEF(compat_43_netbsd32_sigblock);
-SYS_DEF(compat_43_netbsd32_sigsetmask);
-#undef SYS_DEF
-
-static void
-netbsd32_from_stat(const struct stat *sb, struct netbsd32_stat43 *sp32)
+void
+netbsd32_from_stat43(sp43, sp32)
+	struct stat43 *sp43;
+	struct netbsd32_stat43 *sp32;
 {
 
-	sp32->st_dev = sb->st_dev;
-	sp32->st_ino = sb->st_ino;
-	sp32->st_mode = sb->st_mode;
-	sp32->st_nlink = sb->st_nlink;
-	sp32->st_uid = sb->st_uid;
-	sp32->st_gid = sb->st_gid;
-	sp32->st_rdev = sb->st_rdev;
-	sp32->st_size = sb->st_size < (quad_t)1 << 32 ? sb->st_size : -2;
-	sp32->st_atimespec.tv_sec = sb->st_atimespec.tv_sec;
-	sp32->st_atimespec.tv_nsec = sb->st_atimespec.tv_nsec;
-	sp32->st_mtimespec.tv_sec = sb->st_mtimespec.tv_sec;
-	sp32->st_mtimespec.tv_nsec = sb->st_mtimespec.tv_nsec;
-	sp32->st_ctimespec.tv_sec = sb->st_ctimespec.tv_sec;
-	sp32->st_ctimespec.tv_nsec = sb->st_ctimespec.tv_nsec;
-	sp32->st_blksize = sb->st_blksize;
-	sp32->st_blocks = sb->st_blocks;
-	sp32->st_flags = sb->st_flags;
-	sp32->st_gen = sb->st_gen;
+	sp32->st_dev = sp43->st_dev;
+	sp32->st_ino = sp43->st_ino;
+	sp32->st_mode = sp43->st_mode;
+	sp32->st_nlink = sp43->st_nlink;
+	sp32->st_uid = sp43->st_uid;
+	sp32->st_gid = sp43->st_gid;
+	sp32->st_rdev = sp43->st_rdev;
+	sp32->st_size = sp43->st_size;
+	sp32->st_atimespec.tv_sec = sp43->st_atimespec.tv_sec;
+	sp32->st_atimespec.tv_nsec = sp43->st_atimespec.tv_nsec;
+	sp32->st_mtimespec.tv_sec = sp43->st_mtimespec.tv_sec;
+	sp32->st_mtimespec.tv_nsec = sp43->st_mtimespec.tv_nsec;
+	sp32->st_ctimespec.tv_sec = sp43->st_ctimespec.tv_sec;
+	sp32->st_ctimespec.tv_nsec = sp43->st_ctimespec.tv_nsec;
+	sp32->st_blksize = sp43->st_blksize;
+	sp32->st_blocks = sp43->st_blocks;
+	sp32->st_flags = sp43->st_flags;
+	sp32->st_gen = sp43->st_gen;
 }
 
 /* file system syscalls */
 int
-compat_43_netbsd32_ocreat(struct lwp *l, const struct compat_43_netbsd32_ocreat_args *uap, register_t *retval)
+compat_43_netbsd32_ocreat(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct proc *p = l->l_proc;
+	struct compat_43_netbsd32_ocreat_args /* {
 		syscallarg(const netbsd32_charp) path;
 		syscallarg(mode_t) mode;
-	} */
+	} */ *uap = v;
 	struct sys_open_args  ua;
+	caddr_t sg;
 
 	NETBSD32TOP_UAP(path, const char);
 	NETBSD32TO64_UAP(mode);
 	SCARG(&ua, flags) = O_WRONLY | O_CREAT | O_TRUNC;
+	sg = stackgap_init(p, 0);
+	CHECK_ALT_EXIST(l, &sg, SCARG(&ua, path));
 
 	return (sys_open(l, &ua, retval));
 }
 
 int
-compat_43_netbsd32_olseek(struct lwp *l, const struct compat_43_netbsd32_olseek_args *uap, register_t *retval)
+compat_43_netbsd32_olseek(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct compat_43_netbsd32_olseek_args /* {
 		syscallarg(int) fd;
 		syscallarg(netbsd32_long) offset;
 		syscallarg(int) whence;
-	} */
+	} */ *uap = v;
 	struct sys_lseek_args ua;
+	int rv;
+	off_t rt;
 
 	SCARG(&ua, fd) = SCARG(uap, fd);
 	NETBSD32TOX_UAP(offset, long);
 	NETBSD32TO64_UAP(whence);
-	/* Maybe offsets > 2^32 should generate an error ? */
-	return sys_lseek(l, &ua, retval);
+	rv = sys_lseek(l, &ua, (register_t *)&rt);
+	*retval = rt;
+
+	return (rv);
 }
 
 int
-compat_43_netbsd32_stat43(struct lwp *l, const struct compat_43_netbsd32_stat43_args *uap, register_t *retval)
+compat_43_netbsd32_stat43(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct proc *p = l->l_proc;
+	struct compat_43_netbsd32_stat43_args /* {
 		syscallarg(const netbsd32_charp) path;
 		syscallarg(netbsd32_stat43p_t) ub;
-	} */
-	struct stat sb;
+	} */ *uap = v;
+	struct stat43 sb43, *sgsbp;
 	struct netbsd32_stat43 sb32;
-	int error;
+	struct compat_43_sys_stat_args ua;
+	caddr_t sg = stackgap_init(p, 0);
+	int rv, error;
 
-	error = do_sys_stat(SCARG_P32(uap, path), FOLLOW, &sb);
-	if (error == 0) {
-		netbsd32_from_stat(&sb, &sb32);
-		error = copyout(&sb32, SCARG_P32(uap, ub), sizeof(sb32));
-	}
-	return error;
+	NETBSD32TOP_UAP(path, const char);
+	SCARG(&ua, ub) = sgsbp = stackgap_alloc(p, &sg, sizeof(sb43));
+	CHECK_ALT_EXIST(l, &sg, SCARG(&ua, path));
+	rv = compat_43_sys_stat(l, &ua, retval);
+
+	error = copyin(sgsbp, &sb43, sizeof(sb43));
+	if (error)
+		return error;
+	netbsd32_from_stat43(&sb43, &sb32);
+	error = copyout(&sb32, (char *)NETBSD32PTR64(SCARG(uap, ub)),
+	    sizeof(sb32));
+	if (error)
+		return error;
+
+	return (rv);
 }
 
 int
-compat_43_netbsd32_lstat43(struct lwp *l, const struct compat_43_netbsd32_lstat43_args *uap, register_t *retval)
+compat_43_netbsd32_lstat43(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct proc *p = l->l_proc;
+	struct compat_43_netbsd32_lstat43_args /* {
 		syscallarg(const netbsd32_charp) path;
 		syscallarg(netbsd32_stat43p_t) ub;
-	} */
-	struct stat sb;
+	} */ *uap = v;
+	struct stat43 sb43, *sgsbp;
 	struct netbsd32_stat43 sb32;
-	int error;
+	struct compat_43_sys_lstat_args ua;
+	caddr_t sg = stackgap_init(p, 0);
+	int rv, error;
 
-	error = do_sys_stat(SCARG_P32(uap, path), NOFOLLOW, &sb);
-	if (error == 0) {
-		netbsd32_from_stat(&sb, &sb32);
-		error = copyout(&sb32, SCARG_P32(uap, ub), sizeof(sb32));
-	}
-	return error;
+	NETBSD32TOP_UAP(path, const char);
+	SCARG(&ua, ub) = sgsbp = stackgap_alloc(p, &sg, sizeof(sb43));
+	CHECK_ALT_EXIST(l, &sg, SCARG(&ua, path));
+	rv = compat_43_sys_stat(l, &ua, retval);
+
+	error = copyin(sgsbp, &sb43, sizeof(sb43));
+	if (error)
+		return error;
+	netbsd32_from_stat43(&sb43, &sb32);
+	error = copyout(&sb32, (char *)NETBSD32PTR64(SCARG(uap, ub)),
+	    sizeof(sb32));
+	if (error)
+		return error;
+
+	return (rv);
 }
 
 int
-compat_43_netbsd32_fstat43(struct lwp *l, const struct compat_43_netbsd32_fstat43_args *uap, register_t *retval)
+compat_43_netbsd32_fstat43(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct proc *p = l->l_proc;
+	struct compat_43_netbsd32_fstat43_args /* {
 		syscallarg(int) fd;
 		syscallarg(netbsd32_stat43p_t) sb;
-	} */
-	struct stat sb;
+	} */ *uap = v;
+	struct stat43 sb43, *sgsbp;
 	struct netbsd32_stat43 sb32;
-	int error;
+	struct compat_43_sys_fstat_args ua;
+	caddr_t sg = stackgap_init(p, 0);
+	int rv, error;
 
-	error = do_sys_fstat(SCARG(uap, fd), &sb);
-	if (error == 0) {
-		netbsd32_from_stat(&sb, &sb32);
-		error = copyout(&sb32, SCARG_P32(uap, sb), sizeof(sb32));
-	}
-	return error;
+	NETBSD32TO64_UAP(fd);
+	SCARG(&ua, sb) = sgsbp = stackgap_alloc(p, &sg, sizeof(sb43));
+	rv = compat_43_sys_fstat(l, &ua, retval);
+
+	error = copyin(sgsbp, &sb43, sizeof(sb43));
+	if (error)
+		return error;
+	netbsd32_from_stat43(&sb43, &sb32);
+	error = copyout(&sb32, (char *)NETBSD32PTR64(SCARG(uap, sb)),
+	    sizeof(sb32));
+	if (error)
+		return error;
+
+	return (rv);
 }
 
 int
-compat_43_netbsd32_otruncate(struct lwp *l, const struct compat_43_netbsd32_otruncate_args *uap, register_t *retval)
+compat_43_netbsd32_otruncate(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct compat_43_netbsd32_otruncate_args /* {
 		syscallarg(const netbsd32_charp) path;
 		syscallarg(netbsd32_long) length;
-	} */
+	} */ *uap = v;
 	struct sys_truncate_args ua;
 
 	NETBSD32TOP_UAP(path, const char);
 	NETBSD32TO64_UAP(length);
-	return (sys_truncate(l, &ua, retval));
+	return (sys_ftruncate(l, &ua, retval));
 }
 
 int
-compat_43_netbsd32_oftruncate(struct lwp *l, const struct compat_43_netbsd32_oftruncate_args *uap, register_t *retval)
+compat_43_netbsd32_oftruncate(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct compat_43_netbsd32_oftruncate_args /* {
 		syscallarg(int) fd;
 		syscallarg(netbsd32_long) length;
-	} */
+	} */ *uap = v;
 	struct sys_ftruncate_args ua;
 
 	NETBSD32TO64_UAP(fd);
@@ -216,14 +275,17 @@ compat_43_netbsd32_oftruncate(struct lwp *l, const struct compat_43_netbsd32_oft
 }
 
 int
-compat_43_netbsd32_ogetdirentries(struct lwp *l, const struct compat_43_netbsd32_ogetdirentries_args *uap, register_t *retval)
+compat_43_netbsd32_ogetdirentries(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct compat_43_netbsd32_ogetdirentries_args /* {
 		syscallarg(int) fd;
 		syscallarg(netbsd32_charp) buf;
 		syscallarg(u_int) count;
 		syscallarg(netbsd32_longp) basep;
-	} */
+	} */ *uap = v;
 	struct compat_43_sys_getdirentries_args ua;
 
 	NETBSD32TO64_UAP(fd);
@@ -235,14 +297,17 @@ compat_43_netbsd32_ogetdirentries(struct lwp *l, const struct compat_43_netbsd32
 
 /* kernel syscalls */
 int
-compat_43_netbsd32_ogetkerninfo(struct lwp *l, const struct compat_43_netbsd32_ogetkerninfo_args *uap, register_t *retval)
+compat_43_netbsd32_ogetkerninfo(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct compat_43_netbsd32_ogetkerninfo_args /* {
 		syscallarg(int) op;
 		syscallarg(netbsd32_charp) where;
 		syscallarg(netbsd32_intp) size;
 		syscallarg(int) arg;
-	} */
+	} */ *uap = v;
 	struct compat_43_sys_getkerninfo_args ua;
 
 	NETBSD32TO64_UAP(op);
@@ -253,12 +318,15 @@ compat_43_netbsd32_ogetkerninfo(struct lwp *l, const struct compat_43_netbsd32_o
 }
 
 int
-compat_43_netbsd32_ogethostname(struct lwp *l, const struct compat_43_netbsd32_ogethostname_args *uap, register_t *retval)
+compat_43_netbsd32_ogethostname(l, v, retval)
+	struct lwp* l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct compat_43_netbsd32_ogethostname_args /* {
 		syscallarg(netbsd32_charp) hostname;
 		syscallarg(u_int) len;
-	} */
+	} */ *uap = v;
 	int name[2];
 	size_t sz;
 
@@ -266,30 +334,36 @@ compat_43_netbsd32_ogethostname(struct lwp *l, const struct compat_43_netbsd32_o
 	name[1] = KERN_HOSTNAME;
 	sz = SCARG(uap, len);
 	return (old_sysctl(&name[0], 2,
-	    SCARG_P32(uap, hostname), &sz, 0, 0, l));
+	    (char *)NETBSD32PTR64(SCARG(uap, hostname)), &sz, 0, 0, l));
 }
 
 int
-compat_43_netbsd32_osethostname(struct lwp *l, const struct compat_43_netbsd32_osethostname_args *uap, register_t *retval)
+compat_43_netbsd32_osethostname(l, v, retval)
+	struct lwp* l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct compat_43_netbsd32_osethostname_args /* {
 		syscallarg(netbsd32_charp) hostname;
 		syscallarg(u_int) len;
-	} */
+	} */ *uap = v;
 	int name[2];
 
 	name[0] = CTL_KERN;
 	name[1] = KERN_HOSTNAME;
-	return old_sysctl(&name[0], 2, 0, 0, (char *)SCARG_P32(uap,
-	    hostname), SCARG(uap, len), l);
+	return (old_sysctl(&name[0], 2, 0, 0, (char *)NETBSD32PTR64(SCARG(uap,
+	    hostname)), SCARG(uap, len), l));
 }
 
 int
-compat_43_netbsd32_sethostid(struct lwp *l, const struct compat_43_netbsd32_sethostid_args *uap, register_t *retval)
+compat_43_netbsd32_sethostid(l, v, retval)
+	struct lwp* l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct compat_43_netbsd32_sethostid_args /* {
 		syscallarg(int32_t) hostid;
-	} */
+	} */ *uap = v;
 	struct compat_43_sys_sethostid_args ua;
 
 	NETBSD32TO64_UAP(hostid);
@@ -297,12 +371,15 @@ compat_43_netbsd32_sethostid(struct lwp *l, const struct compat_43_netbsd32_seth
 }
 
 int
-compat_43_netbsd32_ogetrlimit(struct lwp *l, const struct compat_43_netbsd32_ogetrlimit_args *uap, register_t *retval)
+compat_43_netbsd32_ogetrlimit(l, v, retval)
+	struct lwp* l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct compat_43_netbsd32_ogetrlimit_args /* {
 		syscallarg(int) which;
 		syscallarg(netbsd32_orlimitp_t) rlp;
-	} */
+	} */ *uap = v;
 	struct compat_43_sys_getrlimit_args ua;
 
 	NETBSD32TO64_UAP(which);
@@ -311,12 +388,15 @@ compat_43_netbsd32_ogetrlimit(struct lwp *l, const struct compat_43_netbsd32_oge
 }
 
 int
-compat_43_netbsd32_osetrlimit(struct lwp *l, const struct compat_43_netbsd32_osetrlimit_args *uap, register_t *retval)
+compat_43_netbsd32_osetrlimit(l, v, retval)
+	struct lwp* l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct compat_43_netbsd32_osetrlimit_args /* {
 		syscallarg(int) which;
 		syscallarg(netbsd32_orlimitp_t) rlp;
-	} */
+	} */ *uap = v;
 	struct compat_43_sys_setrlimit_args ua;
 
 	NETBSD32TO64_UAP(which);
@@ -325,12 +405,15 @@ compat_43_netbsd32_osetrlimit(struct lwp *l, const struct compat_43_netbsd32_ose
 }
 
 int
-compat_43_netbsd32_killpg(struct lwp *l, const struct compat_43_netbsd32_killpg_args *uap, register_t *retval)
+compat_43_netbsd32_killpg(l, v, retval)
+	struct lwp* l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct compat_43_netbsd32_killpg_args /* {
 		syscallarg(int) pgid;
 		syscallarg(int) signum;
-	} */
+	} */ *uap = v;
 	struct compat_43_sys_killpg_args ua;
 
 	NETBSD32TO64_UAP(pgid);
@@ -340,19 +423,22 @@ compat_43_netbsd32_killpg(struct lwp *l, const struct compat_43_netbsd32_killpg_
 
 /* virtual memory syscalls */
 int
-compat_43_netbsd32_ommap(struct lwp *l, const struct compat_43_netbsd32_ommap_args *uap, register_t *retval)
+compat_43_netbsd32_ommap(l, v, retval)
+	struct lwp* l;
+	void *v;
+	register_t *retval;
 {
-	/* {
-		syscallarg(netbsd32_voidp) addr;
+	struct compat_43_netbsd32_ommap_args /* {
+		syscallarg(netbsd32_caddr_t) addr;
 		syscallarg(netbsd32_size_t) len;
 		syscallarg(int) prot;
 		syscallarg(int) flags;
 		syscallarg(int) fd;
 		syscallarg(netbsd32_long) pos;
-	} */
+	} */ *uap = v;
 	struct compat_43_sys_mmap_args ua;
 
-	NETBSD32TOP_UAP(addr, void *);
+	NETBSD32TOX64_UAP(addr, caddr_t);
 	NETBSD32TOX_UAP(len, size_t);
 	NETBSD32TO64_UAP(prot);
 	NETBSD32TO64_UAP(flags);
@@ -363,298 +449,396 @@ compat_43_netbsd32_ommap(struct lwp *l, const struct compat_43_netbsd32_ommap_ar
 
 /* network syscalls */
 int
-compat_43_netbsd32_oaccept(struct lwp *l, const struct compat_43_netbsd32_oaccept_args *uap, register_t *retval)
+compat_43_netbsd32_oaccept(l, v, retval)
+	struct lwp* l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct compat_43_netbsd32_oaccept_args /* {
 		syscallarg(int) s;
-		syscallarg(netbsd32_voidp) name;
+		syscallarg(netbsd32_caddr_t) name;
 		syscallarg(netbsd32_intp) anamelen;
-	} */
+	} */ *uap = v;
 	struct compat_43_sys_accept_args ua;
 
 	NETBSD32TOX_UAP(s, int);
-	NETBSD32TOP_UAP(name, void *);
+	NETBSD32TOX64_UAP(name, caddr_t);
 	NETBSD32TOP_UAP(anamelen, int);
 	return (compat_43_sys_accept(l, &ua, retval));
 }
 
 int
-compat_43_netbsd32_osend(struct lwp *l, const struct compat_43_netbsd32_osend_args *uap, register_t *retval)
+compat_43_netbsd32_osend(l, v, retval)
+	struct lwp* l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct compat_43_netbsd32_osend_args /* {
 		syscallarg(int) s;
-		syscallarg(netbsd32_voidp) buf;
+		syscallarg(netbsd32_caddr_t) buf;
 		syscallarg(int) len;
 		syscallarg(int) flags;
-	} */
+	} */ *uap = v;
 	struct compat_43_sys_send_args ua;
 
 	NETBSD32TO64_UAP(s);
-	NETBSD32TOP_UAP(buf, void *);
+	NETBSD32TOX64_UAP(buf, caddr_t);
 	NETBSD32TO64_UAP(len);
 	NETBSD32TO64_UAP(flags);
 	return (compat_43_sys_send(l, &ua, retval));
 }
 
 int
-compat_43_netbsd32_orecv(struct lwp *l, const struct compat_43_netbsd32_orecv_args *uap, register_t *retval)
+compat_43_netbsd32_orecv(l, v, retval)
+	struct lwp* l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct compat_43_netbsd32_orecv_args /* {
 		syscallarg(int) s;
-		syscallarg(netbsd32_voidp) buf;
+		syscallarg(netbsd32_caddr_t) buf;
 		syscallarg(int) len;
 		syscallarg(int) flags;
-	} */
+	} */ *uap = v;
 	struct compat_43_sys_recv_args ua;
 
 	NETBSD32TO64_UAP(s);
-	NETBSD32TOP_UAP(buf, void *);
+	NETBSD32TOX64_UAP(buf, caddr_t);
 	NETBSD32TO64_UAP(len);
 	NETBSD32TO64_UAP(flags);
 	return (compat_43_sys_recv(l, &ua, retval));
 }
 
 /*
- * This is a brutal clone of compat_43_sys_recvmsg().
+ * XXX convert these to use a common iovec code to the native
+ * netbsd call.
  */
 int
-compat_43_netbsd32_orecvmsg(struct lwp *l, const struct compat_43_netbsd32_orecvmsg_args *uap, register_t *retval)
+compat_43_netbsd32_orecvmsg(l, v, retval)
+	struct lwp* l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct proc *p = l->l_proc;
+	struct compat_43_netbsd32_orecvmsg_args /* {
 		syscallarg(int) s;
 		syscallarg(netbsd32_omsghdrp_t) msg;
 		syscallarg(int) flags;
-	} */
-	struct netbsd32_omsghdr omsg;
-	struct msghdr msg;
-	struct mbuf *from, *control;
-	struct iovec *iov, aiov[UIO_SMALLIOV];
-	int error;
+	} */ *uap = v;
+	struct compat_43_sys_recvmsg_args ua;
+	struct omsghdr omh, *sgsbp;
+	struct netbsd32_omsghdr omh32;
+	struct iovec iov, *sgsbp2;
+	struct netbsd32_iovec iov32, *iovec32p;
+	caddr_t sg = stackgap_init(p, 0);
+	int i, error, rv;
 
-	error = copyin(SCARG_P32(uap, msg), &omsg, sizeof (struct omsghdr));
+	NETBSD32TO64_UAP(s);
+	NETBSD32TO64_UAP(flags);
+
+	/*
+	 * this is annoying:
+	 *	- copyin the msghdr32 struct
+	 *	- stackgap_alloc a msghdr struct
+	 *	- convert msghdr32 to msghdr:
+	 *		- stackgap_alloc enough space for iovec's
+	 *		- copy in each iov32, and convert to iov
+	 *		- copyout converted iov
+	 *	- copyout converted msghdr
+	 *	- do real syscall
+	 *	- copyin the msghdr struct
+	 *	- convert msghdr to msghdr32
+	 *		- copyin each iov and convert to iov32
+	 *		- copyout converted iov32
+	 *	- copyout converted msghdr32
+	 */
+	error = copyin((caddr_t)NETBSD32PTR64(SCARG(uap, msg)), &omh32,
+	    sizeof(omh32));
 	if (error)
 		return (error);
 
-	if (NETBSD32PTR64(omsg.msg_accrights) == NULL)
-		omsg.msg_accrightslen = 0;
-	/* it was this way in 4.4BSD */
-	if (omsg.msg_accrightslen > MLEN)
-		return EINVAL;
-
-	iov = netbsd32_get_iov(NETBSD32PTR64(omsg.msg_iov), omsg.msg_iovlen,
-	    aiov, __arraycount(aiov));
-	if (iov == NULL)
-		return EFAULT;
-
-	msg.msg_name	= NETBSD32PTR64(omsg.msg_name);
-	msg.msg_namelen = omsg.msg_namelen;
-	msg.msg_iovlen	= omsg.msg_iovlen;
-	msg.msg_iov	= iov;
-	msg.msg_flags	= SCARG(uap, flags) & MSG_USERFLAGS;
-
-	error = do_sys_recvmsg(l, SCARG(uap, s), &msg, &from,
-	    NETBSD32PTR64(omsg.msg_accrights) != NULL ? &control : NULL,
-	    retval);
-	if (error != 0)
-		return error;
-
-	/*
-	 * If there is any control information and it's SCM_RIGHTS,
-	 * pass it back to the program.
-	 * XXX: maybe there can be more than one chunk of control data?
-	 */
-	if (NETBSD32PTR64(omsg.msg_accrights) != NULL && control != NULL) {
-		struct cmsghdr *cmsg = mtod(control, void *);
-
-		if (cmsg->cmsg_level == SOL_SOCKET
-		    && cmsg->cmsg_type == SCM_RIGHTS
-		    && cmsg->cmsg_len < omsg.msg_accrightslen
-		    && copyout(CMSG_DATA(cmsg),
-			    NETBSD32PTR64(omsg.msg_accrights),
-			    cmsg->cmsg_len) == 0) {
-			omsg.msg_accrightslen = cmsg->cmsg_len;
-			free_control_mbuf(l, control, control->m_next);
-		} else {
-			omsg.msg_accrightslen = 0;
-			free_control_mbuf(l, control, control);
-		}
-	} else
-		omsg.msg_accrightslen = 0;
-
-	if (from != NULL)
-		/* convert from sockaddr sa_family to osockaddr one here */
-		mtod(from, struct osockaddr *)->sa_family =
-				    mtod(from, struct sockaddr *)->sa_family;
-
-	error = copyout_sockname(NETBSD32PTR64(omsg.msg_name),
-	    &omsg.msg_namelen, 0, from);
-	if (from != NULL)
-		m_free(from);
-
-	if (error != 0)
-		 error = copyout(&omsg, SCARG_P32(uap, msg), sizeof(omsg));
-
-	return error;
-}
-
-int
-compat_43_netbsd32_osendmsg(struct lwp *l, const struct compat_43_netbsd32_osendmsg_args *uap, register_t *retval)
-{
-	/* {
-		syscallarg(int) s;
-		syscallarg(netbsd32_voidp) msg;
-		syscallarg(int) flags;
-	} */
-	struct iovec *iov, aiov[UIO_SMALLIOV];
-	struct netbsd32_omsghdr omsg;
-	struct msghdr msg;
-	int error;
-	struct mbuf *nam;
-	struct osockaddr *osa;
-	struct sockaddr *sa;
-
-	error = copyin(SCARG_P32(uap, msg), &omsg, sizeof (struct omsghdr));
-	if (error != 0)
+	SCARG(&ua, msg) = sgsbp = stackgap_alloc(p, &sg, sizeof(omh));
+	omh.msg_name = (caddr_t)NETBSD32PTR64(omh32.msg_name);
+	omh.msg_namelen = omh32.msg_namelen;
+	omh.msg_iovlen = (size_t)omh32.msg_iovlen;
+	omh.msg_iov = sgsbp2 = stackgap_alloc(p, &sg, sizeof(struct iovec) * omh.msg_iovlen);
+	iovec32p = (struct netbsd32_iovec *)NETBSD32PTR64(omh32.msg_iov);
+	for (i = 0; i < omh.msg_iovlen; i++, sgsbp2++, iovec32p++) {
+		error = copyin(iovec32p, &iov32, sizeof(iov32));
+		if (error)
+			return (error);
+		iov.iov_base =
+		    (struct iovec *)NETBSD32PTR64(iovec32p->iov_base);
+		iov.iov_len = (size_t)iovec32p->iov_len;
+		error = copyout(&iov, sgsbp2, sizeof(iov));
+		if (error)
+			return (error);
+	}
+	omh.msg_accrights = (caddr_t)NETBSD32PTR64(omh32.msg_accrights);
+	omh.msg_accrightslen = omh32.msg_accrightslen;
+	error = copyout(&omh, sgsbp, sizeof(omh));
+	if (error)
 		return (error);
 
-	iov = netbsd32_get_iov(NETBSD32PTR64(omsg.msg_iov), omsg.msg_iovlen,
-	    aiov, __arraycount(aiov));
-	if (iov == NULL)
-		return EFAULT;
+	rv = compat_43_sys_recvmsg(l, &ua, retval);
 
-	msg.msg_iovlen = omsg.msg_iovlen;
-	msg.msg_iov = iov;
-	msg.msg_flags = MSG_NAMEMBUF;
-
-	error = sockargs(&nam, NETBSD32PTR64(omsg.msg_name), omsg.msg_namelen,
-	    MT_SONAME);
-	if (error != 0)
-		goto out;
-
-	sa = mtod(nam, void *);
-	osa = mtod(nam, void *);
-	sa->sa_family = osa->sa_family;
-	sa->sa_len = omsg.msg_namelen;
-
-	msg.msg_name = nam;
-	msg.msg_namelen = omsg.msg_namelen;
-	error = compat43_set_accrights(&msg, NETBSD32PTR64(omsg.msg_accrights),
-	    omsg.msg_accrightslen);
-	if (error != 0) {
-		m_free(nam);
-		goto out;
+	error = copyin(sgsbp, &omh, sizeof(omh));
+	if (error)
+		return error;
+	omh32.msg_name = (netbsd32_caddr_t)(u_long)omh.msg_name;
+	omh32.msg_namelen = omh.msg_namelen;
+	omh32.msg_iovlen = (netbsd32_size_t)omh.msg_iovlen;
+	iovec32p = (struct netbsd32_iovec *)NETBSD32PTR64(omh32.msg_iov);
+	sgsbp2 = omh.msg_iov;
+	for (i = 0; i < omh.msg_iovlen; i++, sgsbp2++, iovec32p++) {
+		error = copyin(sgsbp2, &iov, sizeof(iov));
+		if (error)
+			return (error);
+		iov32.iov_base = (netbsd32_iovecp_t)(u_long)iov.iov_base;
+		iov32.iov_len = (netbsd32_size_t)iov.iov_len;
+		error = copyout(&iov32, iovec32p, sizeof(iov32));
+		if (error)
+			return (error);
 	}
+	omh32.msg_accrights = (netbsd32_caddr_t)(u_long)omh.msg_accrights;
+	omh32.msg_accrightslen = omh.msg_accrightslen;
 
-	error = do_sys_sendmsg(l, SCARG(uap, s), &msg, SCARG(uap, flags), retval);
+	error = copyout(&omh32, (char *)NETBSD32PTR64(SCARG(uap, msg)),
+	    sizeof(omh32));
+	if (error)
+		return error;
 
-    out:
-	if (iov != aiov)
-		free(iov, M_TEMP);
-	return (error);
+	return (rv);
 }
 
 int
-compat_43_netbsd32_orecvfrom(struct lwp *l, const struct compat_43_netbsd32_orecvfrom_args *uap, register_t *retval)
+compat_43_netbsd32_osendmsg(l, v, retval)
+	struct lwp* l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct proc *p = l->l_proc;
+	struct compat_43_netbsd32_osendmsg_args /* {
 		syscallarg(int) s;
-		syscallarg(netbsd32_voidp) buf;
+		syscallarg(netbsd32_caddr_t) msg;
+		syscallarg(int) flags;
+	} */ *uap = v;
+	struct compat_43_sys_recvmsg_args ua;
+	struct omsghdr omh, *sgsbp;
+	struct netbsd32_omsghdr omh32;
+	struct iovec iov, *sgsbp2;
+	struct netbsd32_iovec iov32, *iovec32p;
+	caddr_t sg = stackgap_init(p, 0);
+	int i, error, rv;
+
+	NETBSD32TO64_UAP(s);
+	NETBSD32TO64_UAP(flags);
+
+	/*
+	 * this is annoying:
+	 *	- copyin the msghdr32 struct
+	 *	- stackgap_alloc a msghdr struct
+	 *	- convert msghdr32 to msghdr:
+	 *		- stackgap_alloc enough space for iovec's
+	 *		- copy in each iov32, and convert to iov
+	 *		- copyout converted iov
+	 *	- copyout converted msghdr
+	 *	- do real syscall
+	 *	- copyin the msghdr struct
+	 *	- convert msghdr to msghdr32
+	 *		- copyin each iov and convert to iov32
+	 *		- copyout converted iov32
+	 *	- copyout converted msghdr32
+	 */
+	error = copyin((caddr_t)NETBSD32PTR64(SCARG(uap, msg)), &omh32,
+	    sizeof(omh32));
+	if (error)
+		return (error);
+
+	SCARG(&ua, msg) = sgsbp = stackgap_alloc(p, &sg, sizeof(omh));
+	omh.msg_name = (caddr_t)NETBSD32PTR64(omh32.msg_name);
+	omh.msg_namelen = omh32.msg_namelen;
+	omh.msg_iovlen = (size_t)omh32.msg_iovlen;
+	omh.msg_iov = sgsbp2 = stackgap_alloc(p, &sg, sizeof(struct iovec) * omh.msg_iovlen);
+	iovec32p = (struct netbsd32_iovec *)NETBSD32PTR64(omh32.msg_iov);
+	for (i = 0; i < omh.msg_iovlen; i++, sgsbp2++, iovec32p++) {
+		error = copyin(iovec32p, &iov32, sizeof(iov32));
+		if (error)
+			return (error);
+		iov.iov_base =
+		    (struct iovec *)NETBSD32PTR64(iovec32p->iov_base);
+		iov.iov_len = (size_t)iovec32p->iov_len;
+		error = copyout(&iov, sgsbp2, sizeof(iov));
+		if (error)
+			return (error);
+	}
+	omh.msg_accrights = (caddr_t)NETBSD32PTR64(omh32.msg_accrights);
+	omh.msg_accrightslen = omh32.msg_accrightslen;
+	error = copyout(&omh, sgsbp, sizeof(omh));
+	if (error)
+		return (error);
+
+	rv = compat_43_sys_sendmsg(l, &ua, retval);
+
+	error = copyin(sgsbp, &omh, sizeof(omh));
+	if (error)
+		return error;
+	omh32.msg_name = (netbsd32_caddr_t)(u_long)omh.msg_name;
+	omh32.msg_namelen = omh.msg_namelen;
+	omh32.msg_iovlen = (netbsd32_size_t)omh.msg_iovlen;
+	iovec32p = (struct netbsd32_iovec *)NETBSD32PTR64(omh32.msg_iov);
+	sgsbp2 = omh.msg_iov;
+	for (i = 0; i < omh.msg_iovlen; i++, sgsbp2++, iovec32p++) {
+		error = copyin(sgsbp2, &iov, sizeof(iov));
+		if (error)
+			return (error);
+		iov32.iov_base = (netbsd32_iovecp_t)(u_long)iov.iov_base;
+		iov32.iov_len = (netbsd32_size_t)iov.iov_len;
+		error = copyout(&iov32, iovec32p, sizeof(iov32));
+		if (error)
+			return (error);
+	}
+	omh32.msg_accrights = (netbsd32_caddr_t)(u_long)omh.msg_accrights;
+	omh32.msg_accrightslen = omh.msg_accrightslen;
+
+	error = copyout(&omh32, (char *)NETBSD32PTR64(SCARG(uap, msg)),
+	    sizeof(omh32));
+	if (error)
+		return error;
+
+	return (rv);
+}
+
+int
+compat_43_netbsd32_orecvfrom(l, v, retval)
+	struct lwp* l;
+	void *v;
+	register_t *retval;
+{
+	struct compat_43_netbsd32_orecvfrom_args /* {
+		syscallarg(int) s;
+		syscallarg(netbsd32_caddr_t) buf;
 		syscallarg(netbsd32_size_t) len;
 		syscallarg(int) flags;
-		syscallarg(netbsd32_voidp) from;
+		syscallarg(netbsd32_caddr_t) from;
 		syscallarg(netbsd32_intp) fromlenaddr;
-	} */
+	} */ *uap = v;
 	struct compat_43_sys_recvfrom_args ua;
 
 	NETBSD32TO64_UAP(s);
-	NETBSD32TOP_UAP(buf, void *);
+	NETBSD32TOX64_UAP(buf, caddr_t);
 	NETBSD32TOX_UAP(len, size_t);
 	NETBSD32TO64_UAP(flags);
-	NETBSD32TOP_UAP(from, void *);
+	NETBSD32TOX64_UAP(from, caddr_t);
 	NETBSD32TOP_UAP(fromlenaddr, int);
 	return (compat_43_sys_recvfrom(l, &ua, retval));
 }
 
 int
-compat_43_netbsd32_ogetsockname(struct lwp *l, const struct compat_43_netbsd32_ogetsockname_args *uap, register_t *retval)
+compat_43_netbsd32_ogetsockname(l, v, retval)
+	struct lwp* l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct compat_43_netbsd32_ogetsockname_args /* {
 		syscallarg(int) fdec;
-		syscallarg(netbsd32_voidp) asa;
+		syscallarg(netbsd32_caddr_t) asa;
 		syscallarg(netbsd32_intp) alen;
-	} */
+	} */ *uap = v;
 	struct compat_43_sys_getsockname_args ua;
 
 	NETBSD32TO64_UAP(fdec);
-	NETBSD32TOP_UAP(asa, void *);
-	NETBSD32TOP_UAP(alen, int *);
+	NETBSD32TOX64_UAP(asa, caddr_t);
+	NETBSD32TOP_UAP(alen, int);
 	return (compat_43_sys_getsockname(l, &ua, retval));
 }
 
 int
-compat_43_netbsd32_ogetpeername(struct lwp *l, const struct compat_43_netbsd32_ogetpeername_args *uap, register_t *retval)
+compat_43_netbsd32_ogetpeername(l, v, retval)
+	struct lwp* l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct compat_43_netbsd32_ogetpeername_args /* {
 		syscallarg(int) fdes;
-		syscallarg(netbsd32_voidp) asa;
+		syscallarg(netbsd32_caddr_t) asa;
 		syscallarg(netbsd32_intp) alen;
-	} */
+	} */ *uap = v;
 	struct compat_43_sys_getpeername_args ua;
 
 	NETBSD32TO64_UAP(fdes);
-	NETBSD32TOP_UAP(asa, void *);
-	NETBSD32TOP_UAP(alen, int *);
+	NETBSD32TOX64_UAP(asa, caddr_t);
+	NETBSD32TOP_UAP(alen, int);
 	return (compat_43_sys_getpeername(l, &ua, retval));
 }
 
 /* signal syscalls */
 int
-compat_43_netbsd32_osigvec(struct lwp *l, const struct compat_43_netbsd32_osigvec_args *uap, register_t *retval)
+compat_43_netbsd32_osigvec(l, v, retval)
+	struct lwp* l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct proc *p = l->l_proc;
+	struct compat_43_netbsd32_osigvec_args /* {
 		syscallarg(int) signum;
 		syscallarg(netbsd32_sigvecp_t) nsv;
 		syscallarg(netbsd32_sigvecp_t) osv;
-	} */
+	} */ *uap = v;
+	struct compat_43_sys_sigvec_args ua;
 	struct netbsd32_sigvec sv32;
-	struct sigaction nsa, osa;
-	int error;
+	struct sigvec sv;
+	caddr_t sg = stackgap_init(p, 0);
+	int rv, error;
 
-	if (SCARG(uap, signum) >= 32)
-		return EINVAL;
-
-	if (SCARG_P32(uap, nsv)) {
-		error = copyin(SCARG_P32(uap, nsv), &sv32, sizeof(sv32));
+	NETBSD32TO64_UAP(signum);
+	if (SCARG(uap, osv))
+		SCARG(&ua, osv) = stackgap_alloc(p, &sg, sizeof(sv));
+	else
+		SCARG(&ua, osv) = NULL;
+	if (SCARG(uap, nsv)) {
+		SCARG(&ua, nsv) = stackgap_alloc(p, &sg, sizeof(sv));
+		error = copyin((caddr_t)NETBSD32PTR64(SCARG(uap, nsv)), &sv32,
+		    sizeof(sv32));
 		if (error)
-			return error;
-		nsa.sa_handler = NETBSD32PTR64(sv32.sv_handler);
-		nsa.sa_mask.__bits[0] = sv32.sv_mask;
-		nsa.sa_mask.__bits[1] = 0;
-		nsa.sa_mask.__bits[2] = 0;
-		nsa.sa_mask.__bits[3] = 0;
-		nsa.sa_flags = sv32.sv_flags ^ SA_RESTART;
-		error = sigaction1(l, SCARG(uap, signum), &nsa, &osa, NULL, 0);
+			return (error);
+		sv.sv_handler = (void *)NETBSD32PTR64(sv32.sv_handler);
+		sv.sv_mask = sv32.sv_mask;
+		sv.sv_flags = sv32.sv_flags;
+		error = copyout(&sv, SCARG(&ua, nsv), sizeof(sv));
+		if (error)
+			return (error);
 	} else
-		error = sigaction1(l, SCARG(uap, signum), NULL, &osa, NULL, 0);
-	if (error)
-		return error;
+		SCARG(&ua, nsv) = NULL;
+	rv = compat_43_sys_sigvec(l, &ua, retval);
+	if (rv)
+		return (rv);
 
-	if (SCARG_P32(uap, osv)) {
-		NETBSD32PTR32(sv32.sv_handler, osa.sa_handler);
-		sv32.sv_mask = osa.sa_mask.__bits[0];
-		sv32.sv_flags = osa.sa_flags ^ SA_RESTART;
-		error = copyout(&sv32, SCARG_P32(uap, osv), sizeof(sv32));
+	if (SCARG(uap, osv)) {
+		error = copyin(SCARG(&ua, osv), &sv, sizeof(sv));
+		if (error)
+			return (error);
+		sv32.sv_handler = (netbsd32_sigvecp_t)(u_long)sv.sv_handler;
+		sv32.sv_mask = sv.sv_mask;
+		sv32.sv_flags = sv.sv_flags;
+		error = copyout(&sv32, (caddr_t)NETBSD32PTR64(SCARG(uap, osv)),
+		    sizeof(sv32));
+		if (error)
+			return (error);
 	}
 
-	return error;
+	return (0);
 }
 
 int
-compat_43_netbsd32_sigblock(struct lwp *l, const struct compat_43_netbsd32_sigblock_args *uap, register_t *retval)
+compat_43_netbsd32_sigblock(l, v, retval)
+	struct lwp* l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct compat_43_netbsd32_sigblock_args /* {
 		syscallarg(int) mask;
-	} */
+	} */ *uap = v;
 	struct compat_43_sys_sigblock_args ua;
 
 	NETBSD32TO64_UAP(mask);
@@ -662,11 +846,14 @@ compat_43_netbsd32_sigblock(struct lwp *l, const struct compat_43_netbsd32_sigbl
 }
 
 int
-compat_43_netbsd32_sigsetmask(struct lwp *l, const struct compat_43_netbsd32_sigsetmask_args *uap, register_t *retval)
+compat_43_netbsd32_sigsetmask(l, v, retval)
+	struct lwp* l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct compat_43_netbsd32_sigsetmask_args /* {
 		syscallarg(int) mask;
-	} */
+	} */ *uap = v;
 	struct compat_43_sys_sigsetmask_args ua;
 
 	NETBSD32TO64_UAP(mask);
@@ -674,34 +861,55 @@ compat_43_netbsd32_sigsetmask(struct lwp *l, const struct compat_43_netbsd32_sig
 }
 
 int
-compat_43_netbsd32_osigstack(struct lwp *l, const struct compat_43_netbsd32_osigstack_args *uap, register_t *retval)
+compat_43_netbsd32_osigstack(l, v, retval)
+	struct lwp* l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct proc *p = l->l_proc;
+	struct compat_43_netbsd32_osigstack_args /* {
 		syscallarg(netbsd32_sigstackp_t) nss;
 		syscallarg(netbsd32_sigstackp_t) oss;
-	} */
+	} */ *uap = v;
+	struct compat_43_sys_sigstack_args ua;
 	struct netbsd32_sigstack ss32;
-	struct sigaltstack nsa, osa;
-	int error;
+	struct sigstack ss;
+	caddr_t sg = stackgap_init(p, 0);
+	int error, rv;
 
-	if (SCARG_P32(uap, nss)) {
-		error = copyin(SCARG_P32(uap, nss), &ss32, sizeof(ss32));
+	if (SCARG(uap, oss))
+		SCARG(&ua, oss) = stackgap_alloc(p, &sg, sizeof(ss));
+	else
+		SCARG(&ua, oss) = NULL;
+	if (SCARG(uap, nss)) {
+		SCARG(&ua, nss) = stackgap_alloc(p, &sg, sizeof(ss));
+		error = copyin((caddr_t)NETBSD32PTR64(SCARG(uap, nss)), &ss32,
+		    sizeof(ss32));
 		if (error)
-			return error;
-		nsa.ss_sp = NETBSD32PTR64(ss32.ss_sp);
-		nsa.ss_size = SIGSTKSZ; /* Use the recommended size */
-		nsa.ss_flags = ss32.ss_onstack ? SS_ONSTACK : 0;
-		error = sigaltstack1(l, &nsa, &osa);
+			return (error);
+		ss.ss_sp = (void *)NETBSD32PTR64(ss32.ss_sp);
+		ss.ss_onstack = ss32.ss_onstack;
+		error = copyout(&ss, SCARG(&ua, nss), sizeof(ss));
+		if (error)
+			return (error);
 	} else
-		error = sigaltstack1(l, NULL, &osa);
-	if (error)
-		return error;
+		SCARG(&ua, nss) = NULL;
 
-	if (SCARG_P32(uap, oss)) {
-		NETBSD32PTR32(ss32.ss_sp, osa.ss_sp);
-		ss32.ss_onstack = (osa.ss_flags & SS_ONSTACK) != 0;
-		error = copyout(&ss32, SCARG_P32(uap, oss), sizeof(ss32));
+	rv = compat_43_sys_sigstack(l, &ua, retval);
+	if (rv)
+		return (rv);
+
+	if (SCARG(uap, oss)) {
+		error = copyin(SCARG(&ua, oss), &ss, sizeof(ss));
+		if (error)
+			return (error);
+		ss32.ss_sp = (netbsd32_sigstackp_t)(u_long)ss.ss_sp;
+		ss32.ss_onstack = ss.ss_onstack;
+		error = copyout(&ss32, (caddr_t)NETBSD32PTR64(SCARG(uap, oss)),
+		    sizeof(ss32));
+		if (error)
+			return (error);
 	}
 
-	return error;
+	return (0);
 }

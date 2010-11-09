@@ -1,4 +1,4 @@
-/*	$NetBSD: if_ne_mca.c,v 1.15 2008/04/28 20:23:53 martin Exp $	*/
+/*	$NetBSD: if_ne_mca.c,v 1.13 2007/10/19 12:00:35 ad Exp $	*/
 
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -38,7 +45,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_ne_mca.c,v 1.15 2008/04/28 20:23:53 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_ne_mca.c,v 1.13 2007/10/19 12:00:35 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -76,10 +83,10 @@ struct ne_mca_softc {
 	void		*sc_ih;		/* interrupt handle */
 };
 
-int	ne_mca_match(device_t, cfdata_t , void *);
-void	ne_mca_attach(device_t, device_t, void *);
+int	ne_mca_match(struct device *, struct cfdata *, void *);
+void	ne_mca_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(ne_mca, sizeof(struct ne_mca_softc),
+CFATTACH_DECL(ne_mca, sizeof(struct ne_mca_softc),
     ne_mca_match, ne_mca_attach, NULL, NULL);
 
 static const struct ne_mca_products {
@@ -107,7 +114,8 @@ ne_mca_lookup(int id)
 }
 
 int
-ne_mca_match(device_t parent, cfdata_t cf, void *aux)
+ne_mca_match(struct device *parent, struct cfdata *cf,
+    void *aux)
 {
 	struct mca_attach_args *ma = aux;
 
@@ -126,7 +134,7 @@ static const int ne_mca_iobase[] = {
 };
 
 void
-ne_mca_attach(device_t parent, device_t self, void *aux)
+ne_mca_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct ne_mca_softc *psc = device_private(self);
 	struct ne2000_softc *nsc = &psc->sc_ne2000;
@@ -138,8 +146,6 @@ ne_mca_attach(device_t parent, device_t self, void *aux)
 	bus_space_handle_t asich;
 	int pos2, iobase, irq;
 	const struct ne_mca_products *np;
-
-	dsc->sc_dev = self;
 
 	pos2 = mca_conf_read(ma->ma_mc, ma->ma_slot, 2);
 
@@ -161,21 +167,20 @@ ne_mca_attach(device_t parent, device_t self, void *aux)
 	iobase = ne_mca_iobase[(pos2 & 0x0e) >> 1];
 	irq = ne_mca_irq[(pos2 & 0x60) >> 5];
 
-	aprint_normal(" slot %d irq %d: %s\n", ma->ma_slot + 1, irq,
-	    np->ne_name);
+	printf(" slot %d irq %d: %s\n", ma->ma_slot + 1, irq, np->ne_name);
 
 	nict = ma->ma_iot;
 
 	/* Map the device. */
 	if (bus_space_map(nict, iobase, NE2_NPORTS, 0, &nich)) {
-		aprint_error_dev(self, "can't map i/o space\n");
+		printf("%s: can't map i/o space\n", dsc->sc_dev.dv_xname);
 		return;
 	}
 
 	asict = nict;
 	if (bus_space_subregion(nict, nich, NE2000_ASIC_OFFSET,
 	    NE2000_ASIC_NPORTS, &asich)) {
-		aprint_error_dev(self, "can't subregion i/o space\n");
+		printf("%s: can't subregion i/o space\n", dsc->sc_dev.dv_xname);
 		return;
 	}
 
@@ -210,8 +215,8 @@ ne_mca_attach(device_t parent, device_t self, void *aux)
 	psc->sc_ih = mca_intr_establish(ma->ma_mc, irq, IPL_NET, dp8390_intr,
 			dsc);
 	if (psc->sc_ih == NULL) {
-		aprint_error_dev(self,
-		    "couldn't establish interrupt handler\n");
+		printf("%s: couldn't establish interrupt handler\n",
+		       dsc->sc_dev.dv_xname);
 		return;
 	}
 }

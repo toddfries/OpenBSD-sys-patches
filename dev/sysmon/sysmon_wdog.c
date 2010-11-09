@@ -1,4 +1,4 @@
-/*	$NetBSD: sysmon_wdog.c,v 1.24 2007/12/16 21:07:45 dyoung Exp $	*/
+/*	$NetBSD: sysmon_wdog.c,v 1.21 2007/09/02 00:44:07 xtraeme Exp $	*/
 
 /*-
  * Copyright (c) 2000 Zembu Labs, Inc.
@@ -41,13 +41,12 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sysmon_wdog.c,v 1.24 2007/12/16 21:07:45 dyoung Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sysmon_wdog.c,v 1.21 2007/09/02 00:44:07 xtraeme Exp $");
 
 #include <sys/param.h>
 #include <sys/conf.h>
 #include <sys/errno.h>
 #include <sys/fcntl.h>
-#include <sys/condvar.h>
 #include <sys/mutex.h>
 #include <sys/callout.h>
 #include <sys/kernel.h>
@@ -60,7 +59,6 @@ static LIST_HEAD(, sysmon_wdog) sysmon_wdog_list =
     LIST_HEAD_INITIALIZER(&sysmon_wdog_list);
 static int sysmon_wdog_count;
 static kmutex_t sysmon_wdog_list_mtx, sysmon_wdog_mtx;
-static kcondvar_t sysmon_wdog_cv;
 static struct sysmon_wdog *sysmon_armed_wdog;
 static callout_t sysmon_wdog_callout;
 static void *sysmon_wdog_sdhook;
@@ -70,14 +68,12 @@ void	sysmon_wdog_release(struct sysmon_wdog *);
 int	sysmon_wdog_setmode(struct sysmon_wdog *, int, u_int);
 void	sysmon_wdog_ktickle(void *);
 void	sysmon_wdog_shutdown(void *);
-void	sysmon_wdog_ref(struct sysmon_wdog *);
 
 void
 sysmon_wdog_init(void)
 {
 	mutex_init(&sysmon_wdog_list_mtx, MUTEX_DEFAULT, IPL_NONE);
-	mutex_init(&sysmon_wdog_mtx, MUTEX_DEFAULT, IPL_SOFTCLOCK);
-	cv_init(&sysmon_wdog_cv, "wdogref");
+	mutex_init(&sysmon_wdog_mtx, MUTEX_SPIN, IPL_SOFTCLOCK);
 }
 
 /*
@@ -280,7 +276,8 @@ sysmon_wdog_register(struct sysmon_wdog *smw)
 
 	mutex_enter(&sysmon_wdog_list_mtx);
 
-	LIST_FOREACH(lsmw, &sysmon_wdog_list, smw_list) {
+	for (lsmw = LIST_FIRST(&sysmon_wdog_list); lsmw != NULL;
+	     lsmw = LIST_NEXT(lsmw, smw_list)) {
 		if (strcmp(lsmw->smw_name, smw->smw_name) == 0) {
 			error = EEXIST;
 			goto out;
@@ -303,23 +300,14 @@ sysmon_wdog_register(struct sysmon_wdog *smw)
  *
  *	Unregister a watchdog device.
  */
-int
+void
 sysmon_wdog_unregister(struct sysmon_wdog *smw)
 {
-	int rc = 0;
 
 	mutex_enter(&sysmon_wdog_list_mtx);
-	while (smw->smw_refcnt > 0 && rc == 0) {
-		aprint_debug("%s: %d users remain\n", smw->smw_name,
-		    smw->smw_refcnt);
-		rc = cv_wait_sig(&sysmon_wdog_cv, &sysmon_wdog_list_mtx);
-	}
-	if (rc == 0) {
-		sysmon_wdog_count--;
-		LIST_REMOVE(smw, smw_list);
-	}
+	sysmon_wdog_count--;
+	LIST_REMOVE(smw, smw_list);
 	mutex_exit(&sysmon_wdog_list_mtx);
-	return rc;
 }
 
 /*
@@ -335,7 +323,8 @@ sysmon_wdog_find(const char *name)
 
 	mutex_enter(&sysmon_wdog_list_mtx);
 
-	LIST_FOREACH(smw, &sysmon_wdog_list, smw_list) {
+	for (smw = LIST_FIRST(&sysmon_wdog_list); smw != NULL;
+	     smw = LIST_NEXT(smw, smw_list)) {
 		if (strcmp(smw->smw_name, name) == 0)
 			break;
 	}
@@ -359,15 +348,6 @@ sysmon_wdog_release(struct sysmon_wdog *smw)
 	mutex_enter(&sysmon_wdog_list_mtx);
 	KASSERT(smw->smw_refcnt != 0);
 	smw->smw_refcnt--;
-	cv_signal(&sysmon_wdog_cv);
-	mutex_exit(&sysmon_wdog_list_mtx);
-}
-
-void
-sysmon_wdog_ref(struct sysmon_wdog *smw)
-{
-	mutex_enter(&sysmon_wdog_list_mtx);
-	smw->smw_refcnt++;
 	mutex_exit(&sysmon_wdog_list_mtx);
 }
 
@@ -418,12 +398,12 @@ sysmon_wdog_setmode(struct sysmon_wdog *smw, int mode, u_int period)
 		if ((mode & WDOG_MODE_MASK) == WDOG_MODE_DISARMED) {
 			sysmon_armed_wdog = NULL;
 			smw->smw_tickler = (pid_t) -1;
-			sysmon_wdog_release(smw);
+			smw->smw_refcnt--;
 			if ((omode & WDOG_MODE_MASK) == WDOG_MODE_KTICKLE)
 				callout_stop(&sysmon_wdog_callout);
 		} else {
 			sysmon_armed_wdog = smw;
-			sysmon_wdog_ref(smw);
+			smw->smw_refcnt++;
 			if ((mode & WDOG_MODE_MASK) == WDOG_MODE_KTICKLE) {
 				callout_reset(&sysmon_wdog_callout,
 				    WDOG_PERIOD_TO_TICKS(smw->smw_period) / 2,

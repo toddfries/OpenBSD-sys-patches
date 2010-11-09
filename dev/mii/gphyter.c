@@ -1,4 +1,4 @@
-/*	$NetBSD: gphyter.c,v 1.26 2008/11/17 03:04:27 dyoung Exp $	*/
+/*	$NetBSD: gphyter.c,v 1.19 2006/11/16 21:24:07 christos Exp $	*/
 
 /*-
  * Copyright (c) 1998, 1999, 2000, 2001 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -68,7 +75,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: gphyter.c,v 1.26 2008/11/17 03:04:27 dyoung Exp $");
+__KERNEL_RCSID(0, "$NetBSD: gphyter.c,v 1.19 2006/11/16 21:24:07 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -86,18 +93,17 @@ __KERNEL_RCSID(0, "$NetBSD: gphyter.c,v 1.26 2008/11/17 03:04:27 dyoung Exp $");
 
 #include <dev/mii/gphyterreg.h>
 
-static int	gphytermatch(device_t, cfdata_t, void *);
-static void	gphyterattach(device_t, device_t, void *);
+static int	gphytermatch(struct device *, struct cfdata *, void *);
+static void	gphyterattach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(gphyter, sizeof(struct mii_softc),
+CFATTACH_DECL(gphyter, sizeof(struct mii_softc),
     gphytermatch, gphyterattach, mii_phy_detach, mii_phy_activate);
 
 static int	gphyter_service(struct mii_softc *, struct mii_data *, int);
 static void	gphyter_status(struct mii_softc *);
-static void	gphyter_reset(struct mii_softc *);
 
 static const struct mii_phy_funcs gphyter_funcs = {
-	gphyter_service, gphyter_status, gphyter_reset,
+	gphyter_service, gphyter_status, mii_phy_reset,
 };
 
 static const struct mii_phydesc gphyters[] = {
@@ -112,7 +118,8 @@ static const struct mii_phydesc gphyters[] = {
 };
 
 static int
-gphytermatch(device_t parent, cfdata_t match, void *aux)
+gphytermatch(struct device *parent, struct cfdata *match,
+    void *aux)
 {
 	struct mii_attach_args *ma = aux;
 
@@ -123,9 +130,9 @@ gphytermatch(device_t parent, cfdata_t match, void *aux)
 }
 
 static void
-gphyterattach(device_t parent, device_t self, void *aux)
+gphyterattach(struct device *parent, struct device *self, void *aux)
 {
-	struct mii_softc *sc = device_private(self);
+	struct mii_softc *sc = (struct mii_softc *)self;
 	struct mii_attach_args *ma = aux;
 	struct mii_data *mii = ma->mii_data;
 	const struct mii_phydesc *mpd;
@@ -135,7 +142,6 @@ gphyterattach(device_t parent, device_t self, void *aux)
 	aprint_naive(": Media interface\n");
 	aprint_normal(": %s, rev. %d\n", mpd->mpd_name, MII_REV(ma->mii_id2));
 
-	sc->mii_dev = self;
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
 	sc->mii_funcs = &gphyter_funcs;
@@ -163,7 +169,7 @@ gphyterattach(device_t parent, device_t self, void *aux)
 	if (anar & ANAR_10_FD)
 		sc->mii_capabilities |= (BMSR_10TFDX & ma->mii_capmask);
 
-	aprint_normal_dev(self, "");
+	aprint_normal("%s: ", sc->mii_dev.dv_xname);
 	if ((sc->mii_capabilities & BMSR_MEDIAMASK) == 0 &&
 	    (sc->mii_extcapabilities & EXTSR_MEDIAMASK) == 0)
 		aprint_error("no media present");
@@ -172,7 +178,7 @@ gphyterattach(device_t parent, device_t self, void *aux)
 	aprint_normal("\n");
 
 	strap = PHY_READ(sc, MII_GPHYTER_STRAP);
-	aprint_normal_dev(self, "strapped to %s mode",
+	aprint_normal("%s: strapped to %s mode", sc->mii_dev.dv_xname,
 	    (strap & STRAP_MS_VAL) ? "master" : "slave");
 	if (strap & STRAP_NC_MODE)
 		aprint_normal(", pre-C5 BCM5400 compat enabled");
@@ -301,37 +307,4 @@ gphyter_status(struct mii_softc *sc)
 			    IFM_FDX | mii_phy_flowstatus(sc);
 	} else
 		mii->mii_media_active = ife->ifm_media;
-}
-
-void
-gphyter_reset(struct mii_softc *sc)
-{
-	int reg, i;
-
-	if (sc->mii_flags & MIIF_NOISOLATE)
-		reg = BMCR_RESET;
-	else
-		reg = BMCR_RESET | BMCR_ISO;
-	PHY_WRITE(sc, MII_BMCR, reg);
-
-	/*
-	 * It is best to allow a little time for the reset to settle
-	 * in before we start polling the BMCR again.  Notably, the
-	 * DP83840A manual states that there should be a 500us delay
-	 * between asserting software reset and attempting MII serial
-	 * operations.  Also, a DP83815 can get into a bad state on
-	 * cable removal and reinsertion if we do not delay here.
-	 */
-	delay(500);
-
-	/* Wait another 100ms for it to complete. */
-	for (i = 0; i < 100; i++) {
-		reg = PHY_READ(sc, MII_BMCR);
-		if ((reg & BMCR_RESET) == 0)
-			break;
-		delay(1000);
-	}
-
-	if (sc->mii_inst != 0 && ((sc->mii_flags & MIIF_NOISOLATE) == 0))
-		PHY_WRITE(sc, MII_BMCR, reg | BMCR_ISO);
 }

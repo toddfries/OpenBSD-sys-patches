@@ -1,4 +1,4 @@
-/*	$NetBSD: genprom.c,v 1.8 2007/12/26 10:19:41 dogcow Exp $	 */
+/*	$NetBSD: genprom.c,v 1.6 2006/07/12 13:50:23 yamt Exp $	 */
 
 /*
  * mainly from netbsd:sys/arch/i386/netboot/genprom.c
@@ -20,7 +20,8 @@
 
 static char *progname;
 
-static void bail(const char *);
+static void bail(const char *)
+    __attribute__((__noreturn__));
 int main(int, char **);
 
 static void

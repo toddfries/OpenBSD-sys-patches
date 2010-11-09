@@ -1,6 +1,6 @@
-/*	$NetBSD: osiop_sbdio.c,v 1.4 2008/05/14 13:29:28 tsutsui Exp $	*/
+/*	$NetBSD: osiop_sbdio.c,v 1.1 2005/12/29 15:20:09 tsutsui Exp $	*/
 
-/*-
+/*
  * Copyright (c) 2001, 2005 Izumi Tsutsui.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -11,6 +11,8 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -25,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: osiop_sbdio.c,v 1.4 2008/05/14 13:29:28 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: osiop_sbdio.c,v 1.1 2005/12/29 15:20:09 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -41,15 +43,15 @@ __KERNEL_RCSID(0, "$NetBSD: osiop_sbdio.c,v 1.4 2008/05/14 13:29:28 tsutsui Exp 
 #include <dev/ic/osiopreg.h>
 #include <dev/ic/osiopvar.h>
 
-int osiop_sbdio_match(device_t, cfdata_t, void *);
-void osiop_sbdio_attach(device_t, device_t, void *);
+int osiop_sbdio_match(struct device *, struct cfdata *, void *);
+void osiop_sbdio_attach(struct device *, struct device *, void *);
 int osiop_sbdio_intr(void *);
 
-CFATTACH_DECL_NEW(osiop_sbdio, sizeof(struct osiop_softc),
+CFATTACH_DECL(osiop_sbdio, sizeof(struct osiop_softc),
     osiop_sbdio_match, osiop_sbdio_attach, NULL, NULL);
 
 int
-osiop_sbdio_match(device_t parent, cfdata_t cf, void *aux)
+osiop_sbdio_match(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct sbdio_attach_args *sa = aux;
 
@@ -57,20 +59,21 @@ osiop_sbdio_match(device_t parent, cfdata_t cf, void *aux)
 }
 
 void
-osiop_sbdio_attach(device_t parent, device_t self, void *aux)
+osiop_sbdio_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct osiop_softc *sc = device_private(self);
 	struct sbdio_attach_args *sa = aux;
+	struct osiop_softc *sc = (void *)self;
 	int error, scid;
 
-	sc->sc_dev = self;
+	printf(" at %p irq %d ", (void *)sa->sa_addr1, sa->sa_irq);
+
 	sc->sc_dmat = sa->sa_dmat;
 	sc->sc_bst  = sa->sa_bust;
 
 	error = bus_space_map(sc->sc_bst, sa->sa_addr1, OSIOP_NREGS, 0,
 	    &sc->sc_reg);
 	if (error != 0) {
-		aprint_error(": can't map registers, error = %d\n", error);
+		printf(": can't map registers, error = %d\n", error);
 		return;
 	}
 
@@ -87,7 +90,7 @@ osiop_sbdio_attach(device_t parent, device_t self, void *aux)
 		scid--;
 	sc->sc_id = scid;
 
-	intr_establish(sa->sa_irq, osiop_sbdio_intr, sc);
+	intr_establish(sa->sa_irq, osiop_sbdio_intr, self);
 
 	osiop_attach(sc);
 }

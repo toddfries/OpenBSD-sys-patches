@@ -1,4 +1,4 @@
-/*	$NetBSD: gtsc.c,v 1.38 2008/06/13 08:13:37 cegger Exp $ */
+/*	$NetBSD: gtsc.c,v 1.36 2006/03/08 23:46:22 lukem Exp $ */
 
 /*
  * Copyright (c) 1982, 1990 The Regents of the University of California.
@@ -66,13 +66,12 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: gtsc.c,v 1.38 2008/06/13 08:13:37 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: gtsc.c,v 1.36 2006/03/08 23:46:22 lukem Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
-#include <sys/intr.h>
 #include <dev/scsipi/scsi_all.h>
 #include <dev/scsipi/scsipi_all.h>
 #include <dev/scsipi/scsiconf.h>
@@ -380,13 +379,10 @@ void
 gtsc_dump(void)
 {
 	extern struct cfdriver gtsc_cd;
-	struct sbic_softc *sc;
 	int i;
 
-	for (i = 0; i < gtsc_cd.cd_ndevs; ++i) {
-		sc = device_lookup_private(&gtsc_cd, i);
-		if (sc != NULL)
-			sbic_dump(sc);
-	}
+	for (i = 0; i < gtsc_cd.cd_ndevs; ++i)
+		if (gtsc_cd.cd_devs[i])
+			sbic_dump(gtsc_cd.cd_devs[i]);
 }
 #endif

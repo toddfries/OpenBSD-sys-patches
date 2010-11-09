@@ -1,4 +1,4 @@
-/*	$NetBSD: vga.c,v 1.8 2008/05/26 16:28:39 kiyohara Exp $	*/
+/*	$NetBSD: vga.c,v 1.7 2005/12/11 12:17:04 christos Exp $	*/
 
 /*-
  * Copyright (C) 1995-1997 Gary Thomas (gdt@linuxppc.org)
@@ -44,12 +44,13 @@
 #define CGA_BASE	0x3D4
 #define CGA_BUF		0xB8000
 
-static u_char background = 0;  /* Black */
-static u_char foreground = 7;  /* White */
+u_char background = 0;  /* Black */
+u_char foreground = 7;  /* White */
 
 u_int addr_6845;
 u_short *Crtat;
 int lastpos;
+int scroll;
 
 /*
  * The current state of virtual displays
@@ -84,12 +85,6 @@ struct screen {
 
 u_short	pccolor;		/* color/attributes for tty output */
 u_short	pccolor_so;		/* color/attributes, standout mode */
-
-static void cursor(void);
-static void initscreen(void);
-void fillw(u_short, u_short *, int);
-void video_on(void);
-void video_off(void);
 
 /*
  * cursor() sets an offset (0-1999) into the 80x25 text area
@@ -129,7 +124,10 @@ initscreen()
 }
 
 void
-fillw(u_short val, u_short *buf, int num)
+fillw(val, buf, num)
+	u_short val;
+	u_short *buf;
+	int num;
 {
 	/* Need to byte swap value */
 	u_short tmp;

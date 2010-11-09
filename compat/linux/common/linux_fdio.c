@@ -1,4 +1,4 @@
-/*	$NetBSD: linux_fdio.c,v 1.13 2008/03/21 21:54:58 ad Exp $	*/
+/*	$NetBSD: linux_fdio.c,v 1.8 2005/12/11 12:20:19 christos Exp $	*/
 
 /*
  * Copyright (c) 2000 Wasabi Systems, Inc.
@@ -36,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: linux_fdio.c,v 1.13 2008/03/21 21:54:58 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: linux_fdio.c,v 1.8 2005/12/11 12:20:19 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -49,6 +49,7 @@ __KERNEL_RCSID(0, "$NetBSD: linux_fdio.c,v 1.13 2008/03/21 21:54:58 ad Exp $");
 
 #include <sys/fdio.h>
 
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 
 #include <dev/isa/fdreg.h>
@@ -58,18 +59,17 @@ __KERNEL_RCSID(0, "$NetBSD: linux_fdio.c,v 1.13 2008/03/21 21:54:58 ad Exp $");
 #include <compat/linux/common/linux_signal.h>
 #include <compat/linux/common/linux_util.h>
 #include <compat/linux/common/linux_fdio.h>
-#include <compat/linux/common/linux_ipc.h>
-#include <compat/linux/common/linux_sem.h>
 
 #include <compat/linux/linux_syscallargs.h>
 
 int
-linux_ioctl_fdio(struct lwp *l, const struct linux_sys_ioctl_args *uap,
+linux_ioctl_fdio(struct lwp *l, struct linux_sys_ioctl_args *uap,
 		 register_t *retval)
 {
-	file_t *fp;
+	struct filedesc *fdp;
+	struct file *fp;
 	int error;
-	int (*ioctlf)(file_t *, u_long, void *);
+	int (*ioctlf)(struct file *, u_long, void *, struct lwp *);
 	u_long com;
 	struct fdformat_parms fparams;
 	struct linux_floppy_struct lflop;
@@ -77,8 +77,11 @@ linux_ioctl_fdio(struct lwp *l, const struct linux_sys_ioctl_args *uap,
 
 	com = (u_long)SCARG(uap, data);
 
-	if ((fp = fd_getfile(SCARG(uap, fd))) == NULL)
+	fdp = l->l_proc->p_fd;
+	if ((fp = fd_getfile(fdp, SCARG(uap, fd))) == NULL)
 		return (EBADF);
+
+	FILE_USE(fp);
 
 	com = SCARG(uap, com);
 	ioctlf = fp->f_ops->fo_ioctl;
@@ -104,7 +107,7 @@ linux_ioctl_fdio(struct lwp *l, const struct linux_sys_ioctl_args *uap,
 		error = copyout(&ldrive, SCARG(uap, data), sizeof ldrive);
 		break;
 	case LINUX_FDGETPRM:
-		error = ioctlf(fp, FDIOCGETFORMAT, &fparams);
+		error = ioctlf(fp, FDIOCGETFORMAT, (caddr_t)&fparams, l);
 		if (error != 0)
 			break;
 		lflop.size = fparams.ncyl * fparams.nspt * fparams.ntrk;
@@ -165,7 +168,7 @@ linux_ioctl_fdio(struct lwp *l, const struct linux_sys_ioctl_args *uap,
 		error = EINVAL;
 	}
 
-	fd_putfile(SCARG(uap, fd));
+	FILE_UNUSE(fp, l);
 
 	return 0;
 }

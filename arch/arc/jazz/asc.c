@@ -1,7 +1,8 @@
-/*	$NetBSD: asc.c,v 1.23 2008/05/14 13:29:27 tsutsui Exp $	*/
+/*	$NetBSD: asc.c,v 1.18 2006/04/15 12:41:45 tsutsui Exp $	*/
 
-/*-
- * Copyright (c) 2003 Izumi Tsutsui.  All rights reserved.
+/*
+ * Copyright (c) 2003 Izumi Tsutsui.
+ * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -11,6 +12,8 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -25,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: asc.c,v 1.23 2008/05/14 13:29:27 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: asc.c,v 1.18 2006/04/15 12:41:45 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -65,17 +68,17 @@ struct asc_softc {
 	int     sc_active;              /* DMA state */
 	int     sc_datain;              /* DMA Data Direction */
 	size_t  sc_dmasize;             /* DMA size */
-	uint8_t **sc_dmaaddr;           /* DMA address */
+	char    **sc_dmaaddr;           /* DMA address */
 	size_t  *sc_dmalen;             /* DMA length */
 };
 
 /*
  * Autoconfiguration data for config.
  */
-int asc_match(device_t, cfdata_t, void *);
-void asc_attach(device_t, device_t, void *);
+int asc_match(struct device *, struct cfdata *, void *);
+void asc_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(asc, sizeof(struct asc_softc),
+CFATTACH_DECL(asc, sizeof(struct asc_softc),
     asc_match, asc_attach, NULL, NULL);
 
 static void asc_minphys(struct buf *);
@@ -83,12 +86,12 @@ static void asc_minphys(struct buf *);
 /*
  *  Functions and the switch for the MI code.
  */
-uint8_t asc_read_reg(struct ncr53c9x_softc *, int);
-void asc_write_reg(struct ncr53c9x_softc *, int, uint8_t);
+u_char asc_read_reg(struct ncr53c9x_softc *, int);
+void asc_write_reg(struct ncr53c9x_softc *, int, u_char);
 int asc_dma_isintr(struct ncr53c9x_softc *);
 void asc_dma_reset(struct ncr53c9x_softc *);
 int asc_dma_intr(struct ncr53c9x_softc *);
-int asc_dma_setup(struct ncr53c9x_softc *, uint8_t **, size_t *, int, size_t *);
+int asc_dma_setup(struct ncr53c9x_softc *, caddr_t *, size_t *, int, size_t *);
 void asc_dma_go(struct ncr53c9x_softc *);
 void asc_dma_stop(struct ncr53c9x_softc *);
 int asc_dma_isactive(struct ncr53c9x_softc *);
@@ -110,7 +113,7 @@ struct ncr53c9x_glue asc_glue = {
  * Match driver based on name
  */
 int
-asc_match(device_t parent, cfdata_t cf, void *aux)
+asc_match(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct jazzio_attach_args *ja = aux;
 
@@ -120,11 +123,11 @@ asc_match(device_t parent, cfdata_t cf, void *aux)
 }
 
 void
-asc_attach(device_t parent, device_t self, void *aux)
+asc_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct asc_softc *asc = device_private(self);
-	struct ncr53c9x_softc *sc = &asc->sc_ncr53c9x;
 	struct jazzio_attach_args *ja = aux;
+	struct asc_softc *asc = (void *)self;
+	struct ncr53c9x_softc *sc = &asc->sc_ncr53c9x;
 	bus_space_tag_t iot;
 	uint8_t asc_id;
 
@@ -134,26 +137,25 @@ asc_attach(device_t parent, device_t self, void *aux)
 		panic("asc_conf isn't initialized");
 #endif
 
-	sc->sc_dev = self;
 	sc->sc_glue = &asc_glue;
 
 	asc->sc_iot = iot = ja->ja_bust;
 	asc->sc_dmat = ja->ja_dmat;
 
 	if (bus_space_map(iot, ja->ja_addr, ASC_NPORTS, 0, &asc->sc_ioh)) {
-		aprint_error(": unable to map I/O space\n");
+		printf(": unable to map I/O space\n");
 		return;
 	}
 
 	if (bus_space_map(iot, R4030_SYS_DMA0_REGS, R4030_DMA_RANGE,
 	    0, &asc->sc_dmaioh)) {
-		aprint_error(": unable to map DMA I/O space\n");
+		printf(": unable to map DMA I/O space\n");
 		goto out1;
 	}
 
 	if (bus_dmamap_create(asc->sc_dmat, MAXPHYS, 1, MAXPHYS, 0,
-	    BUS_DMA_ALLOCNOW | BUS_DMA_NOWAIT, &asc->sc_dmamap)) {
-		aprint_error(": unable to create DMA map\n");
+	    BUS_DMA_ALLOCNOW|BUS_DMA_NOWAIT, &asc->sc_dmamap)) {
+		printf(": unable to create DMA map\n");
 		goto out2;
 	}
 
@@ -247,7 +249,7 @@ asc_minphys(struct buf *bp)
  * Glue functions.
  */
 
-uint8_t
+u_char
 asc_read_reg(struct ncr53c9x_softc *sc, int reg)
 {
 	struct asc_softc *asc = (struct asc_softc *)sc;
@@ -256,7 +258,7 @@ asc_read_reg(struct ncr53c9x_softc *sc, int reg)
 }
 
 void
-asc_write_reg(struct ncr53c9x_softc *sc, int reg, uint8_t val)
+asc_write_reg(struct ncr53c9x_softc *sc, int reg, u_char val)
 {
 	struct asc_softc *asc = (struct asc_softc *)sc;
 
@@ -291,7 +293,7 @@ asc_dma_intr(struct ncr53c9x_softc *sc)
 #ifdef DIAGNOSTIC
 	/* This is an "assertion" :) */
 	if (asc->sc_active == 0)
-		panic("%s: DMA wasn't active", __func__);
+		panic("asc_dma_intr: DMA wasn't active");
 #endif
 
 	/* DMA has stopped */
@@ -375,7 +377,7 @@ asc_dma_intr(struct ncr53c9x_softc *sc)
 }
 
 int
-asc_dma_setup(struct ncr53c9x_softc *sc, uint8_t **addr, size_t *len,
+asc_dma_setup(struct ncr53c9x_softc *sc, caddr_t *addr, size_t *len,
     int datain, size_t *dmasize)
 {
 	struct asc_softc *asc = (struct asc_softc *)sc;

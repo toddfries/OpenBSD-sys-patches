@@ -1,4 +1,4 @@
-/*	$NetBSD: at24cxx.c,v 1.12 2008/06/08 03:49:26 tsutsui Exp $	*/
+/*	$NetBSD: at24cxx.c,v 1.8 2007/10/19 11:59:43 ad Exp $	*/
 
 /*
  * Copyright (c) 2003 Wasabi Systems, Inc.
@@ -35,9 +35,6 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: at24cxx.c,v 1.12 2008/06/08 03:49:26 tsutsui Exp $");
-
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
@@ -73,7 +70,7 @@ __KERNEL_RCSID(0, "$NetBSD: at24cxx.c,v 1.12 2008/06/08 03:49:26 tsutsui Exp $")
 #if NSEEPROM > 0
 
 struct seeprom_softc {
-	device_t sc_dev;
+	struct device sc_dev;
 	i2c_tag_t sc_tag;
 	int sc_address;
 	int sc_size;
@@ -81,10 +78,10 @@ struct seeprom_softc {
 	int sc_open;
 };
 
-static int  seeprom_match(device_t, cfdata_t, void *);
-static void seeprom_attach(device_t, device_t, void *);
+static int  seeprom_match(struct device *, struct cfdata *, void *);
+static void seeprom_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(seeprom, sizeof(struct seeprom_softc),
+CFATTACH_DECL(seeprom, sizeof(struct seeprom_softc),
 	seeprom_match, seeprom_attach, NULL, NULL);
 extern struct cfdriver seeprom_cd;
 
@@ -102,7 +99,7 @@ static int seeprom_wait_idle(struct seeprom_softc *);
 
 
 static int
-seeprom_match(device_t parent, cfdata_t cf, void *aux)
+seeprom_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct i2c_attach_args *ia = aux;
 
@@ -113,14 +110,13 @@ seeprom_match(device_t parent, cfdata_t cf, void *aux)
 }
 
 static void
-seeprom_attach(device_t parent, device_t self, void *aux)
+seeprom_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct seeprom_softc *sc = device_private(self);
 	struct i2c_attach_args *ia = aux;
 
 	sc->sc_tag = ia->ia_tag;
 	sc->sc_address = ia->ia_addr;
-	sc->sc_dev = self;
 
 	aprint_naive(": EEPROM\n");
 	aprint_normal(": AT24Cxx EEPROM\n");
@@ -168,8 +164,8 @@ seeprom_attach(device_t parent, device_t self, void *aux)
 		 * Obviously this will not work for 4KB or 8KB
 		 * EEPROMs, but them's the breaks.
 		 */
-		aprint_error_dev(self, "invalid size specified; "
-		    "assuming 2KB (16Kb)\n");
+		aprint_error("%s: invalid size specified; "
+		    "assuming 2KB (16Kb)\n", sc->sc_dev.dv_xname);
 		sc->sc_size = 2048;
 		sc->sc_cmdlen = 1;
 	}
@@ -183,7 +179,7 @@ seeprom_open(dev_t dev, int flag, int fmt, struct lwp *l)
 {
 	struct seeprom_softc *sc;
 
-	if ((sc = device_lookup_private(&seeprom_cd, minor(dev))) == NULL)
+	if ((sc = device_lookup(&seeprom_cd, minor(dev))) == NULL)
 		return (ENXIO);
 
 	/* XXX: Locking */
@@ -201,7 +197,7 @@ seeprom_close(dev_t dev, int flag, int fmt, struct lwp *l)
 {
 	struct seeprom_softc *sc;
 
-	if ((sc = device_lookup_private(&seeprom_cd, minor(dev))) == NULL)
+	if ((sc = device_lookup(&seeprom_cd, minor(dev))) == NULL)
 		return (ENXIO);
 
 	sc->sc_open = 0;
@@ -217,7 +213,7 @@ seeprom_read(dev_t dev, struct uio *uio, int flags)
 	u_int8_t ch, cmdbuf[2];
 	int a, error;
 
-	if ((sc = device_lookup_private(&seeprom_cd, minor(dev))) == NULL)
+	if ((sc = device_lookup(&seeprom_cd, minor(dev))) == NULL)
 		return (ENXIO);
 
 	if (uio->uio_offset >= sc->sc_size)
@@ -247,8 +243,8 @@ seeprom_read(dev_t dev, struct uio *uio, int flags)
 				      addr, cmdbuf, sc->sc_cmdlen,
 				      &ch, 1, 0)) != 0) {
 			iic_release_bus(sc->sc_tag, 0);
-			aprint_error_dev(sc->sc_dev,
-			    "seeprom_read: byte read failed at 0x%x\n", a);
+			printf("%s: seeprom_read: byte read failed at 0x%x\n",
+			    sc->sc_dev.dv_xname, a);
 			return (error);
 		}
 		if ((error = uiomove(&ch, 1, uio)) != 0) {
@@ -271,7 +267,7 @@ seeprom_write(dev_t dev, struct uio *uio, int flags)
 	u_int8_t ch, cmdbuf[2];
 	int a, error;
 
-	if ((sc = device_lookup_private(&seeprom_cd, minor(dev))) == NULL)
+	if ((sc = device_lookup(&seeprom_cd, minor(dev))) == NULL)
 		return (ENXIO);
 
 	if (uio->uio_offset >= sc->sc_size)
@@ -303,8 +299,8 @@ seeprom_write(dev_t dev, struct uio *uio, int flags)
 				      addr, cmdbuf, sc->sc_cmdlen,
 				      &ch, 1, 0)) != 0) {
 			iic_release_bus(sc->sc_tag, 0);
-			aprint_error_dev(sc->sc_dev,
-			    "seeprom_write: byte write failed at 0x%x\n", a);
+			printf("%s: seeprom_write: byte write failed at 0x%x\n",
+			    sc->sc_dev.dv_xname, a);
 			return (error);
 		}
 

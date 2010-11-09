@@ -1,4 +1,4 @@
-/*	$NetBSD: iyonix_machdep.c,v 1.11 2008/11/30 18:21:34 martin Exp $	*/
+/*	$NetBSD: iyonix_machdep.c,v 1.6 2006/06/27 23:02:04 he Exp $	*/
 
 /*
  * Copyright (c) 2001, 2002, 2003 Wasabi Systems, Inc.
@@ -73,7 +73,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: iyonix_machdep.c,v 1.11 2008/11/30 18:21:34 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: iyonix_machdep.c,v 1.6 2006/06/27 23:02:04 he Exp $");
 
 #include "opt_ddb.h"
 #include "opt_kgdb.h"
@@ -118,6 +118,7 @@ __KERNEL_RCSID(0, "$NetBSD: iyonix_machdep.c,v 1.11 2008/11/30 18:21:34 martin E
 #include <dev/pci/ppbreg.h>
 #include <dev/ic/i8259reg.h>
 
+#include "opt_ipkdb.h"
 #include "ksyms.h"
 
 #define	KERNEL_TEXT_BASE	KERNEL_BASE
@@ -143,7 +144,11 @@ u_int cpu_reset_address = 0x00000000;
 /* Define various stack sizes in pages */
 #define IRQ_STACK_SIZE	1
 #define ABT_STACK_SIZE	1
+#ifdef IPKDB
+#define UND_STACK_SIZE	2
+#else
 #define UND_STACK_SIZE	1
+#endif
 
 struct bootconfig bootconfig;		/* Boot config storage */
 char *boot_args = NULL;
@@ -163,6 +168,7 @@ int max_processes = 64;			/* Default number */
 #endif	/* !PMAP_STATIC_L1S */
 
 /* Physical and virtual addresses for some global pages */
+pv_addr_t systempage;
 pv_addr_t irqstack;
 pv_addr_t undstack;
 pv_addr_t abtstack;
@@ -269,7 +275,6 @@ cpu_reboot(int howto, char *bootstr)
 	 */
 	if (cold) {
 		doshutdownhooks();
-		pmf_system_shutdown(boothowto);
 		printf("The operating system has halted.\n");
 		printf("Please press any key to reboot.\n\n");
 		cngetc();
@@ -298,8 +303,6 @@ cpu_reboot(int howto, char *bootstr)
 	
 	/* Run any shutdown hooks */
 	doshutdownhooks();
-
-	pmf_system_shutdown(boothowto);
 
 	/* Make sure IRQ's are disabled */
 	IRQdisable;
@@ -450,6 +453,7 @@ initarm(void *arg)
 	int loop;
 	int loop1;
 	u_int l1pagetable;
+	pv_addr_t kernel_l1pt;
 	paddr_t memstart;
 	psize_t memsize;
 
@@ -796,7 +800,8 @@ initarm(void *arg)
 #ifdef VERBOSE_INIT_ARM
 	printf("pmap ");
 #endif
-	pmap_bootstrap(KERNEL_VM_BASE, KERNEL_VM_BASE + KERNEL_VM_SIZE);
+	pmap_bootstrap((pd_entry_t *)kernel_l1pt.pv_va, KERNEL_VM_BASE,
+	    KERNEL_VM_BASE + KERNEL_VM_SIZE);
 
 	/* Setup the IRQ system */
 #ifdef VERBOSE_INIT_ARM
@@ -810,6 +815,18 @@ initarm(void *arg)
 
 #ifdef BOOTHOWTO
 	boothowto = BOOTHOWTO;
+#endif
+
+#ifdef IPKDB
+	/* Initialise ipkdb */
+	ipkdb_init();
+	if (boothowto & RB_KDB)
+		ipkdb_connect(0);
+#endif
+
+#if NKSYMS || defined(DDB) || defined(LKM)
+	/* Firmware doesn't load symbols. */
+	ksyms_init(0, NULL, NULL);
 #endif
 
 #ifdef DDB

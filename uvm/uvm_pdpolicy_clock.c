@@ -1,4 +1,4 @@
-/*	$NetBSD: uvm_pdpolicy_clock.c,v 1.12 2008/06/04 12:41:40 ad Exp $	*/
+/*	$NetBSD: uvm_pdpolicy_clock.c,v 1.8 2007/02/22 06:05:01 thorpej Exp $	*/
 /*	NetBSD: uvm_pdaemon.c,v 1.72 2006/01/05 10:47:33 yamt Exp $	*/
 
 /*
@@ -74,7 +74,7 @@
 #else /* defined(PDSIM) */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: uvm_pdpolicy_clock.c,v 1.12 2008/06/04 12:41:40 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: uvm_pdpolicy_clock.c,v 1.8 2007/02/22 06:05:01 thorpej Exp $");
 
 #include <sys/param.h>
 #include <sys/proc.h>
@@ -175,7 +175,7 @@ uvmpdpol_selectvictim(void)
 	struct uvmpdpol_scanstate *ss = &pdpol_scanstate;
 	struct vm_page *pg;
 
-	KASSERT(mutex_owned(&uvm_pageqlock));
+	UVM_LOCK_ASSERT_PAGEQ();
 
 	while (/* CONSTCOND */ 1) {
 		struct vm_anon *anon;
@@ -193,7 +193,7 @@ uvmpdpol_selectvictim(void)
 		if (pg == NULL) {
 			break;
 		}
-		ss->ss_nextpg = TAILQ_NEXT(pg, pageq.queue);
+		ss->ss_nextpg = TAILQ_NEXT(pg, pageq);
 
 		uvmexp.pdscans++;
 
@@ -257,7 +257,7 @@ uvmpdpol_balancequeue(int swap_shortage)
 	for (p = TAILQ_FIRST(&pdpol_state.s_activeq);
 	     p != NULL && (inactive_shortage > 0 || swap_shortage > 0);
 	     p = nextpg) {
-		nextpg = TAILQ_NEXT(p, pageq.queue);
+		nextpg = TAILQ_NEXT(p, pageq);
 
 		/*
 		 * if there's a shortage of swap slots, try to free it.
@@ -275,6 +275,7 @@ uvmpdpol_balancequeue(int swap_shortage)
 
 		if (inactive_shortage > 0) {
 			/* no need to check wire_count as pg is "active" */
+			pmap_clear_reference(p);
 			uvmpdpol_pagedeactivate(p);
 			uvmexp.pddeact++;
 			inactive_shortage--;
@@ -286,17 +287,16 @@ void
 uvmpdpol_pagedeactivate(struct vm_page *pg)
 {
 
-	KASSERT(mutex_owned(&uvm_pageqlock));
+	UVM_LOCK_ASSERT_PAGEQ();
 	if (pg->pqflags & PQ_ACTIVE) {
-		TAILQ_REMOVE(&pdpol_state.s_activeq, pg, pageq.queue);
+		TAILQ_REMOVE(&pdpol_state.s_activeq, pg, pageq);
 		pg->pqflags &= ~PQ_ACTIVE;
 		KASSERT(pdpol_state.s_active > 0);
 		pdpol_state.s_active--;
 	}
 	if ((pg->pqflags & PQ_INACTIVE) == 0) {
 		KASSERT(pg->wire_count == 0);
-		pmap_clear_reference(pg);
-		TAILQ_INSERT_TAIL(&pdpol_state.s_inactiveq, pg, pageq.queue);
+		TAILQ_INSERT_TAIL(&pdpol_state.s_inactiveq, pg, pageq);
 		pg->pqflags |= PQ_INACTIVE;
 		pdpol_state.s_inactive++;
 	}
@@ -307,7 +307,7 @@ uvmpdpol_pageactivate(struct vm_page *pg)
 {
 
 	uvmpdpol_pagedequeue(pg);
-	TAILQ_INSERT_TAIL(&pdpol_state.s_activeq, pg, pageq.queue);
+	TAILQ_INSERT_TAIL(&pdpol_state.s_activeq, pg, pageq);
 	pg->pqflags |= PQ_ACTIVE;
 	pdpol_state.s_active++;
 }
@@ -317,14 +317,14 @@ uvmpdpol_pagedequeue(struct vm_page *pg)
 {
 
 	if (pg->pqflags & PQ_ACTIVE) {
-		KASSERT(mutex_owned(&uvm_pageqlock));
-		TAILQ_REMOVE(&pdpol_state.s_activeq, pg, pageq.queue);
+		UVM_LOCK_ASSERT_PAGEQ();
+		TAILQ_REMOVE(&pdpol_state.s_activeq, pg, pageq);
 		pg->pqflags &= ~PQ_ACTIVE;
 		KASSERT(pdpol_state.s_active > 0);
 		pdpol_state.s_active--;
 	} else if (pg->pqflags & PQ_INACTIVE) {
-		KASSERT(mutex_owned(&uvm_pageqlock));
-		TAILQ_REMOVE(&pdpol_state.s_inactiveq, pg, pageq.queue);
+		UVM_LOCK_ASSERT_PAGEQ();
+		TAILQ_REMOVE(&pdpol_state.s_inactiveq, pg, pageq);
 		pg->pqflags &= ~PQ_INACTIVE;
 		KASSERT(pdpol_state.s_inactive > 0);
 		pdpol_state.s_inactive--;
@@ -434,10 +434,10 @@ uvmpdpol_sysctlsetup(void)
 	    "for anonymous application data"));
 	uvm_pctparam_createsysctlnode(&s->s_filemin, "filemin",
 	    SYSCTL_DESCR("Percentage of physical memory reserved "
-	    "for cached file data"));
+	    "for cached executable data"));
 	uvm_pctparam_createsysctlnode(&s->s_execmin, "execmin",
 	    SYSCTL_DESCR("Percentage of physical memory reserved "
-	    "for cached executable data"));
+	    "for cached file data"));
 
 	uvm_pctparam_createsysctlnode(&s->s_anonmax, "anonmax",
 	    SYSCTL_DESCR("Percentage of physical memory which will "

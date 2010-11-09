@@ -1,4 +1,4 @@
-/*	$NetBSD: machdep.c,v 1.12 2009/02/13 22:41:02 apb Exp $	*/
+/*	$NetBSD: machdep.c,v 1.2 2006/10/14 23:51:17 uwe Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997, 1998 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -65,14 +72,13 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.12 2009/02/13 22:41:02 apb Exp $");
+__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.2 2006/10/14 23:51:17 uwe Exp $");
 
 #include "opt_ddb.h"
 #include "opt_kgdb.h"
 #include "opt_kloader.h"
 #include "opt_kloader_kernel_path.h"
 #include "opt_memsize.h"
-#include "opt_modular.h"
 #include "fs_mfs.h"
 
 #include "ksyms.h"
@@ -86,8 +92,6 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.12 2009/02/13 22:41:02 apb Exp $");
 #include <sys/reboot.h>
 #include <sys/sysctl.h>
 #include <sys/ksyms.h>
-#include <sys/device.h>
-#include <sys/module.h>
 
 #include <uvm/uvm_extern.h>
 #include <ufs/mfs/mfs_extern.h>		/* mfs_initminiroot() */
@@ -116,8 +120,12 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.12 2009/02/13 22:41:02 apb Exp $");
 #include <sys/kgdb.h>
 #include <sh3/dev/scifvar.h>
 #endif
+#ifdef DDB
+#include <machine/db_machdep.h>
+#include <ddb/db_extern.h>
+#endif
 
-#if NKSYMS || defined(MODULAR) || defined(DDB)
+#if NKSYMS || defined(LKM) || defined(DDB)
 #include <machine/db_machdep.h>
 #include <ddb/db_sym.h>
 #include <ddb/db_extern.h>
@@ -158,18 +166,16 @@ landisk_startup(int howto, void *bi)
 	extern char edata[], end[];
 	vaddr_t kernend;
 	size_t symbolsize;
+	int i;
 
 	/* Clear bss */
 	memset(edata, 0, end - edata);
 
 	/* Symbol table size */
 	symbolsize = 0;
-#if NKSYMS || defined(MODULAR) || defined(DDB)
 	if (memcmp(&end, ELFMAG, SELFMAG) == 0) {
 		Elf_Ehdr *eh = (void *)end;
 		Elf_Shdr *sh = (void *)(end + eh->e_shoff);
-		int i;
-
 		for (i = 0; i < eh->e_shnum; i++, sh++) {
 			if (sh->sh_offset > 0 &&
 			    (sh->sh_offset + sh->sh_size) > symbolsize) {
@@ -177,7 +183,6 @@ landisk_startup(int howto, void *bi)
 			}
 		}
 	}
-#endif
 
 	/* Start to determine heap area */
 	kernend = (vaddr_t)sh3_round_page(end + symbolsize);
@@ -206,7 +211,7 @@ landisk_startup(int howto, void *bi)
 	        size_t fssz;
 		fssz = sh3_round_page(mfs_initminiroot((void *)kernend));
 #ifdef MEMORY_DISK_DYNAMIC
-		md_root_setconf((void *)kernend, fssz);
+		md_root_setconf((caddr_t)kernend, fssz);
 #endif
 		kernend += fssz;
 	}
@@ -214,7 +219,7 @@ landisk_startup(int howto, void *bi)
 
 #ifdef KLOADER
 	/* copy boot parameter for kloader */
-	kloader_bootinfo_set(&kbootinfo, 0, NULL, NULL, true);
+	kloader_bootinfo_set(&kbootinfo, 0, NULL, NULL, TRUE);
 #endif
 
 	/* Load memory to UVM */
@@ -232,9 +237,9 @@ landisk_startup(int howto, void *bi)
 	pmap_bootstrap();
 
 	/* Debugger. */
-#if NKSYMS || defined(MODULAR) || defined(DDB)
+#if NKSYMS || defined(DDB) || defined(LKM)
 	if (symbolsize != 0) {
-		ksyms_addsyms_elf(symbolsize, &end, end + symbolsize);
+		ksyms_init(symbolsize, &end, end + symbolsize);
 	}
 #endif
 #if defined(DDB)
@@ -341,8 +346,6 @@ cpu_reboot(int howto, char *bootstr)
 
 haltsys:
 	doshutdownhooks();
-
-	pmf_system_shutdown(boothowto);
 
 	if ((howto & RB_POWERDOWN) == RB_POWERDOWN) {
 		_reg_write_1(LANDISK_PWRMNG, PWRMNG_POWEROFF);
@@ -510,14 +513,3 @@ InitializeBsc(void)
 	_reg_write_2(SH4_FRQCR, FRQCR_VAL);
 }
 #endif /* !DONT_INIT_BSC */
-
-
-#ifdef MODULAR
-/*
- * Push any modules loaded by the boot loader.
- */
-void
-module_init_md(void)
-{
-}
-#endif /* MODULAR */

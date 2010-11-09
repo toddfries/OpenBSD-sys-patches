@@ -1,4 +1,4 @@
-/*	$NetBSD: ext2fs_dinode.h,v 1.19 2009/03/02 09:54:49 tsutsui Exp $	*/
+/*	$NetBSD: ext2fs_dinode.h,v 1.14 2005/12/11 12:25:25 christos Exp $	*/
 
 /*
  * Copyright (c) 1982, 1989, 1993
@@ -80,9 +80,8 @@
  * the root inode is 2.
  * Inode 3 to 10 are reserved in ext2fs.
  */
-#define	EXT2_ROOTINO	((ino_t)2)
-#define	EXT2_RESIZEINO	((ino_t)7)
-#define	EXT2_FIRSTINO	((ino_t)11)
+#define	EXT2_ROOTINO ((ino_t)2)
+#define EXT2_FIRSTINO ((ino_t)11)
 
 /*
  * A dinode contains all the meta-data associated with a UFS file.
@@ -117,9 +116,7 @@ struct ext2fs_dinode {
 	u_int8_t	e2di_nfrag;	/* 116: fragment number */
 	u_int8_t	e2di_fsize;	/* 117: fragment size */
 	u_int16_t	e2di_linux_reserved2; /* 118 */
-	u_int16_t	e2di_uid_high;	/* 120: Owner UID top 16 bits */
-	u_int16_t	e2di_gid_high;	/* 122: Owner GID top 16 bits */
-	u_int32_t	e2di_linux_reserved3; /* 124 */
+	u_int32_t	e2di_linux_reserved3[2]; /* 120 */
 };
 
 
@@ -149,15 +146,12 @@ struct ext2fs_dinode {
 #define EXT2_UNRM		0x00000002	/* Undelete */
 #define EXT2_COMPR		0x00000004	/* Compress file */
 #define EXT2_SYNC		0x00000008	/* Synchronous updates */
-#define EXT2_IMMUTABLE		0x00000010	/* Immutable file */
-#define EXT2_APPEND		0x00000020 /* writes to file may only append */
+#define EXT2_IMMUTABLE	0x00000010	/* Immutable file */
+#define EXT2_APPEND		0x00000020	/* writes to file may only append */
 #define EXT2_NODUMP		0x00000040	/* do not dump file */
 
 /* Size of on-disk inode. */
-#define EXT2_REV0_DINODE_SIZE	sizeof(struct ext2fs_dinode)
-#define EXT2_DINODE_SIZE(fs)	((fs)->e2fs.e2fs_rev > E2FS_REV0 ?	\
-				    (fs)->e2fs.e2fs_inode_size :	\
-				    EXT2_REV0_DINODE_SIZE)
+#define	EXT2_DINODE_SIZE	(sizeof(struct ext2fs_dinode))	/* 128 */
 
 /*
  * The e2di_blocks fields may be overlaid with other information for
@@ -168,14 +162,12 @@ struct ext2fs_dinode {
  */
 
 #define e2di_rdev		e2di_blocks[0]
-#define e2di_shortlink		e2di_blocks
+#define e2di_shortlink	e2di_blocks
 
 /* e2fs needs byte swapping on big-endian systems */
 #if BYTE_ORDER == LITTLE_ENDIAN
-#	define e2fs_iload(old, new)	\
-		memcpy((new),(old),sizeof(struct ext2fs_dinode))
-#	define e2fs_isave(old, new)	\
-		memcpy((new),(old),sizeof(struct ext2fs_dinode))
+#	define e2fs_iload(old, new) memcpy((new),(old),sizeof(struct ext2fs_dinode))
+#	define e2fs_isave(old, new) memcpy((new),(old),sizeof(struct ext2fs_dinode))
 #else
 void e2fs_i_bswap(struct ext2fs_dinode *, struct ext2fs_dinode *);
 #	define e2fs_iload(old, new) e2fs_i_bswap((old), (new))

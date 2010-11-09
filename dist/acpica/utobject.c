@@ -1,7 +1,7 @@
 /******************************************************************************
  *
  * Module Name: utobject - ACPI object create/delete/size/cache routines
- *              $Revision: 1.6 $
+ *              xRevision: 1.101 $
  *
  *****************************************************************************/
 
@@ -9,7 +9,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2008, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2006, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -114,6 +114,9 @@
  *
  *****************************************************************************/
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: utobject.c,v 1.3 2006/11/16 01:33:32 christos Exp $");
+
 #define __UTOBJECT_C__
 
 #include "acpi.h"
@@ -176,7 +179,7 @@ AcpiUtCreateInternalObjectDbg (
     ACPI_OPERAND_OBJECT     *SecondObject;
 
 
-    ACPI_FUNCTION_TRACE_STR (UtCreateInternalObjectDbg,
+    ACPI_FUNCTION_TRACE_STR ("UtCreateInternalObjectDbg",
         AcpiUtGetTypeName (Type));
 
 
@@ -192,7 +195,6 @@ AcpiUtCreateInternalObjectDbg (
     {
     case ACPI_TYPE_REGION:
     case ACPI_TYPE_BUFFER_FIELD:
-    case ACPI_TYPE_LOCAL_BANK_FIELD:
 
         /* These types require a secondary object */
 
@@ -233,55 +235,6 @@ AcpiUtCreateInternalObjectDbg (
 
 /*******************************************************************************
  *
- * FUNCTION:    AcpiUtCreatePackageObject
- *
- * PARAMETERS:  Count               - Number of package elements
- *
- * RETURN:      Pointer to a new Package object, null on failure
- *
- * DESCRIPTION: Create a fully initialized package object
- *
- ******************************************************************************/
-
-ACPI_OPERAND_OBJECT *
-AcpiUtCreatePackageObject (
-    UINT32                  Count)
-{
-    ACPI_OPERAND_OBJECT     *PackageDesc;
-    ACPI_OPERAND_OBJECT     **PackageElements;
-
-
-    ACPI_FUNCTION_TRACE_U32 (UtCreatePackageObject, Count);
-
-
-    /* Create a new Package object */
-
-    PackageDesc = AcpiUtCreateInternalObject (ACPI_TYPE_PACKAGE);
-    if (!PackageDesc)
-    {
-        return_PTR (NULL);
-    }
-
-    /*
-     * Create the element array. Count+1 allows the array to be null
-     * terminated.
-     */
-    PackageElements = ACPI_ALLOCATE_ZEROED ((ACPI_SIZE)
-                        (Count + 1) * sizeof (void *));
-    if (!PackageElements)
-    {
-        ACPI_FREE (PackageDesc);
-        return_PTR (NULL);
-    }
-
-    PackageDesc->Package.Count = Count;
-    PackageDesc->Package.Elements = PackageElements;
-    return_PTR (PackageDesc);
-}
-
-
-/*******************************************************************************
- *
  * FUNCTION:    AcpiUtCreateBufferObject
  *
  * PARAMETERS:  BufferSize             - Size of buffer to be created
@@ -300,7 +253,7 @@ AcpiUtCreateBufferObject (
     UINT8                   *Buffer = NULL;
 
 
-    ACPI_FUNCTION_TRACE_U32 (UtCreateBufferObject, BufferSize);
+    ACPI_FUNCTION_TRACE_U32 ("UtCreateBufferObject", BufferSize);
 
 
     /* Create a new Buffer object */
@@ -317,7 +270,7 @@ AcpiUtCreateBufferObject (
     {
         /* Allocate the actual buffer */
 
-        Buffer = ACPI_ALLOCATE_ZEROED (BufferSize);
+        Buffer = ACPI_MEM_CALLOCATE (BufferSize);
         if (!Buffer)
         {
             ACPI_ERROR ((AE_INFO, "Could not allocate size %X",
@@ -361,7 +314,7 @@ AcpiUtCreateStringObject (
     char                    *String;
 
 
-    ACPI_FUNCTION_TRACE_U32 (UtCreateStringObject, StringSize);
+    ACPI_FUNCTION_TRACE_U32 ("UtCreateStringObject", StringSize);
 
 
     /* Create a new String object */
@@ -376,7 +329,7 @@ AcpiUtCreateStringObject (
      * Allocate the actual string buffer -- (Size + 1) for NULL terminator.
      * NOTE: Zero-length strings are NULL terminated
      */
-    String = ACPI_ALLOCATE_ZEROED (StringSize + 1);
+    String = ACPI_MEM_CALLOCATE (StringSize + 1);
     if (!String)
     {
         ACPI_ERROR ((AE_INFO, "Could not allocate size %X",
@@ -413,7 +366,7 @@ AcpiUtValidInternalObject (
     void                    *Object)
 {
 
-    ACPI_FUNCTION_NAME (UtValidInternalObject);
+    ACPI_FUNCTION_NAME ("UtValidInternalObject");
 
 
     /* Check for a null pointer */
@@ -469,7 +422,7 @@ AcpiUtAllocateObjectDescDbg (
     ACPI_OPERAND_OBJECT     *Object;
 
 
-    ACPI_FUNCTION_TRACE (UtAllocateObjectDescDbg);
+    ACPI_FUNCTION_TRACE ("UtAllocateObjectDescDbg");
 
 
     Object = AcpiOsAcquireObject (AcpiGbl_OperandCache);
@@ -508,7 +461,7 @@ void
 AcpiUtDeleteObjectDesc (
     ACPI_OPERAND_OBJECT     *Object)
 {
-    ACPI_FUNCTION_TRACE_PTR (UtDeleteObjectDesc, Object);
+    ACPI_FUNCTION_TRACE_PTR ("UtDeleteObjectDesc", Object);
 
 
     /* Object must be an ACPI_OPERAND_OBJECT  */
@@ -552,32 +505,29 @@ AcpiUtGetSimpleObjectSize (
     ACPI_STATUS             Status = AE_OK;
 
 
-    ACPI_FUNCTION_TRACE_PTR (UtGetSimpleObjectSize, InternalObject);
+    ACPI_FUNCTION_TRACE_PTR ("UtGetSimpleObjectSize", InternalObject);
 
 
-    /* Start with the length of the (external) Acpi object */
-
-    Length = sizeof (ACPI_OBJECT);
-
-    /* A NULL object is allowed, can be a legal uninitialized package element */
-
+    /*
+     * Handle a null object (Could be a uninitialized package
+     * element -- which is legal)
+     */
     if (!InternalObject)
     {
-        /*
-         * Object is NULL, just return the length of ACPI_OBJECT
-         * (A NULL ACPI_OBJECT is an object of all zeroes.)
-         */
-        *ObjLength = ACPI_ROUND_UP_TO_NATIVE_WORD (Length);
+        *ObjLength = 0;
         return_ACPI_STATUS (AE_OK);
     }
 
-    /* A Namespace Node should never appear here */
+    /* Start with the length of the Acpi object */
+
+    Length = sizeof (ACPI_OBJECT);
 
     if (ACPI_GET_DESCRIPTOR_TYPE (InternalObject) == ACPI_DESC_TYPE_NAMED)
     {
-        /* A namespace node should never get here */
+        /* Object is a named object (reference), just return the length */
 
-        return_ACPI_STATUS (AE_AML_INTERNAL);
+        *ObjLength = ACPI_ROUND_UP_TO_NATIVE_WORD (Length);
+        return_ACPI_STATUS (Status);
     }
 
     /*
@@ -604,8 +554,9 @@ AcpiUtGetSimpleObjectSize (
     case ACPI_TYPE_PROCESSOR:
     case ACPI_TYPE_POWER:
 
-        /* No extra data for these types */
-
+        /*
+         * No extra data for these types
+         */
         break;
 
 
@@ -746,7 +697,7 @@ AcpiUtGetPackageObjectSize (
     ACPI_PKG_INFO           Info;
 
 
-    ACPI_FUNCTION_TRACE_PTR (UtGetPackageObjectSize, InternalObject);
+    ACPI_FUNCTION_TRACE_PTR ("UtGetPackageObjectSize", InternalObject);
 
 
     Info.Length      = 0;

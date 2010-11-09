@@ -1,7 +1,7 @@
-/*	$NetBSD: irix_syssgi.c,v 1.49 2009/01/11 20:00:06 rumble Exp $ */
+/*	$NetBSD: irix_syssgi.c,v 1.42 2005/12/11 12:20:12 christos Exp $ */
 
 /*-
- * Copyright (c) 2001, 2002, 2008 The NetBSD Foundation, Inc.
+ * Copyright (c) 2001-2002 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: irix_syssgi.c,v 1.49 2009/01/11 20:00:06 rumble Exp $");
+__KERNEL_RCSID(0, "$NetBSD: irix_syssgi.c,v 1.42 2005/12/11 12:20:12 christos Exp $");
 
 #if defined(_KERNEL_OPT)
 #include "opt_ddb.h"
@@ -58,6 +65,7 @@ __KERNEL_RCSID(0, "$NetBSD: irix_syssgi.c,v 1.49 2009/01/11 20:00:06 rumble Exp 
 #include <sys/exec.h>
 #include <sys/exec_elf.h>
 #include <sys/mount.h>
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 
 #include <uvm/uvm_extern.h>
@@ -78,22 +86,25 @@ __KERNEL_RCSID(0, "$NetBSD: irix_syssgi.c,v 1.49 2009/01/11 20:00:06 rumble Exp 
 void	ELFNAME(load_psection)(struct exec_vmcmd_set *, struct vnode *,
 	    const Elf_Phdr *, Elf_Addr *, u_long *, int *, int);
 
-static int irix_syssgi_mapelf(int, Elf_Phdr *, int,
-    struct lwp *, register_t *);
-static int irix_syssgi_sysconf(int name, struct lwp *, register_t *);
-static int irix_syssgi_pathconf(char *, int, struct lwp *, register_t *);
+static int irix_syssgi_mapelf __P((int, Elf_Phdr *, int,
+    struct lwp *, register_t *));
+static int irix_syssgi_sysconf __P((int name, struct lwp *, register_t *));
+static int irix_syssgi_pathconf __P((char *, int, struct lwp *, register_t *));
 
 int
-irix_sys_syssgi(struct lwp *l, const struct irix_sys_syssgi_args *uap, register_t *retval)
+irix_sys_syssgi(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct irix_sys_syssgi_args /* {
 		syscallarg(int) request;
 		syscallarg(void *) arg1;
 		syscallarg(void *) arg2;
 		syscallarg(void *) arg3;
 		syscallarg(void *) arg4;
 		syscallarg(void *) arg5;
-	} */
+	} */ *uap = v;
 	struct proc *p = l->l_proc;
 	int request = SCARG(uap, request);
 	void *arg1, *arg2, *arg3;
@@ -159,11 +170,11 @@ irix_sys_syssgi(struct lwp *l, const struct irix_sys_syssgi_args *uap, register_
 		break;
 
 	case IRIX_SGI_RUSAGE: {	/* BSD getrusage(2) */
-		struct compat_50_sys_getrusage_args cup;
+		struct sys_getrusage_args cup;
 
 		SCARG(&cup, who) = (int)SCARG(uap, arg1);
-		SCARG(&cup, rusage) = (struct rusage50 *)SCARG(uap, arg2);
-		return compat_50_sys_getrusage(l, &cup, retval);
+		SCARG(&cup, rusage) = (struct rusage *)SCARG(uap, arg2);
+		return sys_getrusage(l, &cup, retval);
 		break;
 	}
 
@@ -275,7 +286,12 @@ irix_sys_syssgi(struct lwp *l, const struct irix_sys_syssgi_args *uap, register_
 }
 
 static int
-irix_syssgi_mapelf(int fd, Elf_Phdr *ph, int count, struct lwp *l, register_t *retval)
+irix_syssgi_mapelf(fd, ph, count, l, retval)
+	int fd;
+	Elf_Phdr *ph;
+	int count;
+	struct lwp *l;
+	register_t *retval;
 {
 	Elf_Phdr *kph;
 	Elf_Phdr *pht;
@@ -286,7 +302,8 @@ irix_syssgi_mapelf(int fd, Elf_Phdr *ph, int count, struct lwp *l, register_t *r
 	u_long size;
 	Elf_Addr uaddr;
 	Elf_Addr reloc_offset;
-	file_t *fp;
+	struct file *fp;
+	struct filedesc *fdp;
 	struct exec_vmcmd_set vcset;
 	struct exec_vmcmd *base_vcp = NULL;
 	struct vnode *vp;
@@ -376,12 +393,14 @@ irix_syssgi_mapelf(int fd, Elf_Phdr *ph, int count, struct lwp *l, register_t *r
 	}
 
 	/* Find the file's vnode */
-	fp = fd_getfile(fd);
+	fdp = l->l_proc->p_fd;
+	fp = fd_getfile(fdp, fd);
 	if (fp == NULL) {
 		error = EBADF;
 		goto bad;
 	}
-	vp = fp->f_data;
+	FILE_USE(fp);
+	vp = (struct vnode *)fp->f_data;
 
         error = vn_marktext(vp);
         if (error)
@@ -425,7 +444,7 @@ irix_syssgi_mapelf(int fd, Elf_Phdr *ph, int count, struct lwp *l, register_t *r
 	*retval = (register_t)kph->p_vaddr;
 
 bad_unuse:
-	fd_putfile(fd);
+	FILE_UNUSE(fp, l);
 bad:
 	free(kph, M_TEMP);
 	return error;
@@ -434,7 +453,10 @@ bad:
 
 
 static int
-irix_syssgi_sysconf(int name, struct lwp *l, register_t *retval)
+irix_syssgi_sysconf(name, l, retval)
+	int name;
+	struct lwp *l;
+	register_t *retval;
 {
 	struct proc *p = l->l_proc;
 	int error = 0;
@@ -505,7 +527,11 @@ irix_syssgi_sysconf(int name, struct lwp *l, register_t *retval)
 }
 
 static int
-irix_syssgi_pathconf(char *path, int name, struct lwp *l, register_t *retval)
+irix_syssgi_pathconf(path, name, l, retval)
+	char *path;
+	int name;
+	struct lwp *l;
+	register_t *retval;
 {
 	struct sys_pathconf_args cup;
 	int bname;

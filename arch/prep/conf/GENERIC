@@ -1,4 +1,4 @@
-# $NetBSD: GENERIC,v 1.148 2009/01/24 05:06:07 mrg Exp $
+# $NetBSD: GENERIC,v 1.131 2006/11/11 18:47:11 jmmv Exp $
 #
 # GENERIC machine description file
 # 
@@ -22,15 +22,13 @@ include 	"arch/prep/conf/std.prep"
 
 options 	INCLUDE_CONFIG_FILE	# embed config file in kernel binary
 
-#ident		"GENERIC-$Revision: 1.148 $"
+#ident		"GENERIC-$Revision: 1.131 $"
 
 maxusers	32
 
 # Platform support
 
-options 	PIC_OPENPIC	# OpenPIC support (7043-140)
-options 	PIC_PREPIVR
-options 	PIC_I8259
+options 	OPENPIC				# OpenPIC support (7043-140)
 
 # Standard system options
 
@@ -38,15 +36,22 @@ options 	RTC_OFFSET=0	# hardware clock is this many mins. west of GMT
 options 	NTP		# NTP phase/frequency locked loop
 
 options 	KTRACE		# system call tracing via ktrace(1)
+#options 	SYSTRACE	# system call vetting via systrace(1)
 
 options 	SYSVMSG		# System V-like message queues
 options 	SYSVSEM		# System V-like semaphores
+#options 	SEMMNI=10	# number of semaphore identifiers
+#options 	SEMMNS=60	# number of semaphores in system
+#options 	SEMUME=10	# max number of undo entries per process
+#options 	SEMMNU=30	# number of undo structures in system
 options 	SYSVSHM		# System V-like memory sharing
+#options 	SHMMAXPGS=1024	# 1024 pages is the default
 options 	P1003_1B_SEMAPHORE # p1003.1b semaphore support
 
+options 	LKM		# loadable kernel modules
 
 options 	USERCONF	# userconf(4) support
-#options 	PIPE_SOCKETPAIR	# smaller, but slower pipe(2)
+#options	PIPE_SOCKETPAIR	# smaller, but slower pipe(2)
 options 	SYSCTL_INCLUDE_DESCR	# Include sysctl descriptions in kernel
 
 # Enable experimental buffer queue strategy for better responsiveness under 
@@ -68,13 +73,11 @@ options 	COMPAT_14	# NetBSD 1.4,
 options 	COMPAT_15	# NetBSD 1.5,
 options 	COMPAT_16	# NetBSD 1.6,
 options 	COMPAT_20	# NetBSD 2.0,
-options 	COMPAT_30	# NetBSD 3.0,
-options 	COMPAT_40	# NetBSD 4.0 compatibility.
-options 	COMPAT_50	# NetBSD 5.0 compatibility.
+options 	COMPAT_30	# NetBSD 3.0 compatibility.
 options 	COMPAT_43	# and 4.3BSD
 #options 	COMPAT_LINUX	# Linux binary compatibility
 #options 	TCP_COMPAT_42	# 4.2BSD TCP/IP bug compat. Not recommended.
-options 	COMPAT_BSDPTY	# /dev/[pt]ty?? ptys.
+options		COMPAT_BSDPTY	# /dev/[pt]ty?? ptys.
 
 # File systems
 file-system 	FFS		# UFS
@@ -101,8 +104,8 @@ file-system	PTYFS		# /dev/pts/N support
 # File system options
 options 	QUOTA		# UFS quotas
 #options 	FFS_EI		# FFS Endian Independant support
-options 	WAPBL		# File system journaling support - Experimental
-#options 	UFS_DIRHASH	# UFS Large Directory Hashing - Experimental
+options 	SOFTDEP		# FFS soft updates support.
+#options	UFS_DIRHASH	# UFS Large Directory Hashing - Experimental
 options 	NFSSERVER	# Network File System server
 #options 	FFS_NO_SNAPSHOT	# No FFS snapshot support
 #options 	EXT2FS_SYSTEM_FLAGS # makes ext2fs file flags (append and
@@ -150,7 +153,7 @@ options 	PCIVERBOSE	# verbose PCI device autoconfig messages
 options 	SCSIVERBOSE	# human readable SCSI error messages
 #options 	USBVERBOSE	# verbose USB device autoconfig messages
 #options 	RESIDUAL_DATA_DUMP	# verbosely dump residual data
-#options 	NVRAM_DUMP	# verbosely dump contents of nvram.
+#options		NVRAM_DUMP	# verbosely dump contents of nvram.
 				# Warning: output may not be ascii!
 
 #options 	NFS_BOOT_BOOTP
@@ -219,7 +222,7 @@ pcic0	at isa? port 0x3e0 iomem 0xd0000 iosiz 0x10000
 # ISA Plug-and-Play bus support
 #isapnp0	at isa?
 
-# PnPbus bus support (required)
+# on-board I/O for IBM Personal Power Series 830 IDE controller
 pnpbus0	at mainbus0
 
 # Console Devices
@@ -309,10 +312,9 @@ wdc*	at pnpbus?
 # PCI IDE controllers
 pciide*		at pci? dev ? function ? flags 0x0000
 hptide*		at pci? dev ? function ?
-slide*		at pci? dev ? function ?
 
-fdc0 at pnpbus?	# standard ISA floppy controller
-fd0 at fdc0 drive ?
+#fdc0 at pnpbus?	# standard ISA floppy controller
+#fd0 at fdc0 drive ?
 
 # ISA Plug-and-Play IDE controllers
 #wdc*	at isapnp?
@@ -346,6 +348,10 @@ sd*	at atapibus? drive ? flags 0x0000	# ATAPI disk drives
 uk*	at atapibus? drive ? flags 0x0000	# ATAPI unknown
 
 # Miscellaneous mass storage devices
+
+# ISA Floppy
+#fdc0 at isa? port 0x3f0 irq 6 drq 2	# standard ISA floppy controller
+#fd0 at fdc0 drive ?
 
 # Network Interfaces
 
@@ -400,17 +406,13 @@ ukphy*	at mii? phy ?			# generic unknown PHYs
 #uhci*	at pci? dev ? function ?	# Universal Host Controller (Intel)
 #ohci*	at pci? dev ? function ?	# Open Host Controller
 
-# PCMCIA USB controllers
-#slhci*	at pcmcia? function ?		# ScanLogic SL811HS
-
 # USB bus support
 #usb*	at uhci?
 #usb*	at ohci?
-#usb*	at slhci?
 
 # USB Hubs
 #uhub*	at usb?
-#uhub*	at uhub? port ?
+#uhub*	at uhub? port ? configuration ? interface ?
 
 # USB HID device
 #uhidev*	at uhub? port ? configuration ? interface ?
@@ -493,11 +495,10 @@ ukphy*	at mii? phy ?			# generic unknown PHYs
 
 # ISA Plug-and-Play audio devices
 #wss*	at isapnp?			# CS4232
-#wss0    at isa? port 0x530 irq 5 drq 1 drq2 0
 
 # Audio support
 #audio*	at uaudio?
-#audio*	at audiocs?
+#audio*	at wss?
 
 # MIDI support
 #midi*	at pcppi?		# MIDI interface to the PC speaker
@@ -515,7 +516,7 @@ ukphy*	at mii? phy ?			# generic unknown PHYs
 #joy0	at isa? port 0x201
 
 # Pull in optional local configuration
-cinclude "arch/prep/conf/GENERIC.local"
+include "arch/prep/conf/GENERIC.local"
 
 # Pseudo-Devices
 
@@ -528,13 +529,13 @@ pseudo-device	ccd		4	# concatenated/striped disk devices
 pseudo-device	raid		8	# RAIDframe disk driver
 options 	RAID_AUTOCONFIG		# auto-configuration of RAID components
 # Options to enable various other RAIDframe RAID types.
-#options 	RF_INCLUDE_EVENODD=1
-#options 	RF_INCLUDE_RAID5_RS=1
-#options 	RF_INCLUDE_PARITYLOGGING=1
-#options 	RF_INCLUDE_CHAINDECLUSTER=1
-#options 	RF_INCLUDE_INTERDECLUSTER=1
-#options 	RF_INCLUDE_PARITY_DECLUSTERING=1
-#options 	RF_INCLUDE_PARITY_DECLUSTERING_DS=1
+# options	RF_INCLUDE_EVENODD=1
+# options	RF_INCLUDE_RAID5_RS=1
+# options	RF_INCLUDE_PARITYLOGGING=1
+# options	RF_INCLUDE_CHAINDECLUSTER=1
+# options	RF_INCLUDE_INTERDECLUSTER=1
+# options 	RF_INCLUDE_PARITY_DECLUSTERING=1
+# options	RF_INCLUDE_PARITY_DECLUSTERING_DS=1
 pseudo-device	fss		4	# file system snapshot device
 pseudo-device	md		1	# memory disk device (ramdisk)
 pseudo-device	vnd			# disk-like interface to files
@@ -557,13 +558,7 @@ pseudo-device	gif			# IPv[46] over IPv[46] tunnel (RFC1933)
 pseudo-device	stf			# 6to4 IPv6 over IPv4 encapsulation
 pseudo-device	vlan			# IEEE 802.1q encapsulation
 pseudo-device	bridge			# simple inter-network bridging
-#options 	BRIDGE_IPF		# bridge uses IP/IPv6 pfil hooks too
-pseudo-device	agr			# IEEE 802.3ad link aggregation
-
-#
-# accept filters
-pseudo-device   accf_data		# "dataready" accept filter
-pseudo-device   accf_http		# "httpready" accept filter
+#options	BRIDGE_IPF		# bridge uses IP/IPv6 pfil hooks too
 
 # miscellaneous pseudo-devices
 pseudo-device	pty			# pseudo-terminals
@@ -582,7 +577,7 @@ pseudo-device	ksyms			# /dev/ksyms
 pseudo-device	wsmux			# mouse & keyboard multiplexor
 pseudo-device	wsfont
 
-options 	FILEASSOC		# fileassoc(9) - required for Veriexec
+options	FILEASSOC			# fileassoc(9) - required for Veriexec
 
 # Veriexec
 #

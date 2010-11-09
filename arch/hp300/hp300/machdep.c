@@ -1,4 +1,4 @@
-/*	$NetBSD: machdep.c,v 1.206 2009/02/13 22:41:01 apb Exp $	*/
+/*	$NetBSD: machdep.c,v 1.189 2006/10/21 05:54:31 mrg Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1990, 1993
@@ -77,11 +77,11 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.206 2009/02/13 22:41:01 apb Exp $");
+__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.189 2006/10/21 05:54:31 mrg Exp $");
 
 #include "opt_ddb.h"
+#include "opt_compat_hpux.h"
 #include "opt_compat_netbsd.h"
-#include "opt_modular.h"
 #include "opt_panicbutton.h"
 #include "hil.h"
 
@@ -102,9 +102,11 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.206 2009/02/13 22:41:01 apb Exp $");
 #include <sys/proc.h>
 #include <sys/reboot.h>
 #include <sys/signalvar.h>
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 #include <sys/tty.h>
 #include <sys/user.h>
+#include <sys/exec.h>
 #include <sys/core.h>
 #include <sys/kcore.h>
 #include <sys/vnode.h>
@@ -154,6 +156,7 @@ char	machine[] = MACHINE;	/* from <machine/param.h> */
 /* Our exported CPU info; we can have only one. */
 struct cpu_info cpu_info_store;
 
+struct vm_map *exec_map = NULL;
 struct vm_map *mb_map = NULL;
 struct vm_map *phys_map = NULL;
 
@@ -168,6 +171,7 @@ extern paddr_t avail_end;
 paddr_t	bootinfo_pa;
 vaddr_t	bootinfo_va;
 
+caddr_t	msgbufaddr;
 int	maxmem;			/* max memory per process */
 int	physmem = MAXMEM;	/* max supported memory, changes to actual */
 /*
@@ -179,6 +183,10 @@ int	safepri = PSL_LOWIPL;
 extern	u_int lowram;
 extern	short exframesize[];
 
+#ifdef COMPAT_HPUX
+extern struct emul emul_hpux;
+#endif
+
 /* prototypes for local functions */
 static void	parityenable(void);
 static int	parityerror(struct frame *);
@@ -187,7 +195,7 @@ static void	identifycpu(void);
 static void	initcpu(void);
 
 static int	cpu_dumpsize(void);
-static int	cpu_dump(int (*)(dev_t, daddr_t, void *, size_t), daddr_t *);
+static int	cpu_dump(int (*)(dev_t, daddr_t, caddr_t, size_t), daddr_t *);
 static void	cpu_init_kcore_hdr(void);
 
 /* functions called from locore.s */
@@ -290,12 +298,12 @@ consinit(void)
 	if (bootinfo_va == 0)
 		printf("WARNING: boot loader did not provide bootinfo\n");
 
-#if NKSYMS || defined(DDB) || defined(MODULAR)
+#if NKSYMS || defined(DDB) || defined(LKM)
 	{
 		extern int end;
 		extern int *esym;
 
-		ksyms_addsyms_elf((int)esym - (int)&end - sizeof(Elf32_Ehdr),
+		ksyms_init((int)esym - (int)&end - sizeof(Elf32_Ehdr),
 		    (void *)&end, esym);
 	}
 #endif
@@ -338,19 +346,25 @@ cpu_startup(void)
 	printf("total memory = %s\n", pbuf);
 
 	minaddr = 0;
+	/*
+	 * Allocate a submap for exec arguments.  This map effectively
+	 * limits the number of processes exec'ing at any time.
+	 */
+	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
+				   16*NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
 
 	/*
 	 * Allocate a submap for physio
 	 */
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-				   VM_PHYS_SIZE, 0, false, NULL);
+				   VM_PHYS_SIZE, 0, FALSE, NULL);
 
 	/*
 	 * Finally, allocate mbuf cluster submap.
 	 */
 	mb_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 				 nmbclusters * mclbytes, VM_MAP_INTRSAFE,
-				 false, NULL);
+				 FALSE, NULL);
 
 #ifdef DEBUG
 	pmapdebug = opmapdebug;
@@ -634,8 +648,11 @@ void
 cpu_reboot(int howto, char *bootstr)
 {
 
+#if __GNUC__	/* XXX work around lame compiler problem (gcc 2.7.2) */
+	(void)&howto;
+#endif
 	/* take a snap shot before clobbering any registers */
-	if (curlwp->l_addr)
+	if (curlwp && curlwp->l_addr)
 		savectx(&curlwp->l_addr->u_pcb);
 
 	/* If system is cold, just halt. */
@@ -665,8 +682,6 @@ cpu_reboot(int howto, char *bootstr)
  haltsys:
 	/* Run any shutdown hooks. */
 	doshutdownhooks();
-
-	pmf_system_shutdown(boothowto);
 
 #if defined(PANICWAIT) && !defined(DDB)
 	if ((howto & RB_HALT) == 0 && panicstr) {
@@ -768,7 +783,7 @@ cpu_dumpsize(void)
  * Called by dumpsys() to dump the machine-dependent header.
  */
 static int
-cpu_dump(int (*dump)(dev_t, daddr_t, void *, size_t), daddr_t *blknop)
+cpu_dump(int (*dump)(dev_t, daddr_t, caddr_t, size_t), daddr_t *blknop)
 {
 	int buf[MDHDRSIZE / sizeof(int)];
 	cpu_kcore_hdr_t *chdr;
@@ -784,7 +799,7 @@ cpu_dump(int (*dump)(dev_t, daddr_t, void *, size_t), daddr_t *blknop)
 	kseg->c_size = MDHDRSIZE - ALIGN(sizeof(kcore_seg_t));
 
 	memcpy(chdr, &cpu_kcore_hdr, sizeof(cpu_kcore_hdr_t));
-	error = (*dump)(dumpdev, *blknop, (void *)buf, sizeof(buf));
+	error = (*dump)(dumpdev, *blknop, (caddr_t)buf, sizeof(buf));
 	*blknop += btodb(sizeof(buf));
 	return error;
 }
@@ -849,7 +864,7 @@ dumpsys(void)
 	const struct bdevsw *bdev;
 	daddr_t blkno;		/* current block to write */
 				/* dump routine */
-	int (*dump)(dev_t, daddr_t, void *, size_t);
+	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
 	int pg;			/* page being dumped */
 	paddr_t maddr;		/* PA being dumped */
 	int error;		/* error code from (*dump)() */
@@ -870,15 +885,15 @@ dumpsys(void)
 			return;
 	}
 	if (dumplo <= 0) {
-		printf("\ndump to dev %u,%u not possible\n",
-		    major(dumpdev), minor(dumpdev));
+		printf("\ndump to dev %u,%u not possible\n", major(dumpdev),
+		    minor(dumpdev));
 		return;
 	}
 	dump = bdev->d_dump;
 	blkno = dumplo;
 
-	printf("\ndumping to dev %u,%u offset %ld\n",
-	    major(dumpdev), minor(dumpdev), dumplo);
+	printf("\ndumping to dev %u,%u offset %ld\n", major(dumpdev),
+	    minor(dumpdev), dumplo);
 
 	printf("dump ");
 
@@ -966,7 +981,7 @@ straytrap(int pc, u_short evec)
 int	*nofault;
 
 int
-badaddr(void *addr)
+badaddr(caddr_t addr)
 {
 	int i;
 	label_t	faultbuf;
@@ -982,7 +997,7 @@ badaddr(void *addr)
 }
 
 int
-badbaddr(void *addr)
+badbaddr(caddr_t addr)
 {
 	int i;
 	label_t	faultbuf;
@@ -1034,7 +1049,7 @@ static void	candbtimer(void *);
 
 int crashandburn;
 
-callout_t candbtimer_ch;
+struct callout candbtimer_ch = CALLOUT_INITIALIZER;
 
 void
 candbtimer(void *arg)
@@ -1078,8 +1093,6 @@ nmihand(struct frame frame)
 #else
 #ifdef PANICBUTTON
 		if (panicbutton) {
-			/* XXX */
-			callout_init(&candbtimer_ch, 0);
 			if (crashandburn) {
 				crashandburn = 0;
 				printf(": CRASH AND BURN!\n");

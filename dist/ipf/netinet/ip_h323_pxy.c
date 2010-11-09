@@ -1,4 +1,4 @@
-/*	$NetBSD: ip_h323_pxy.c,v 1.10 2008/05/20 07:08:07 darrenr Exp $	*/
+/*	$NetBSD: ip_h323_pxy.c,v 1.4 2006/04/04 16:17:19 martti Exp $	*/
 
 /*
  * Copyright 2001, QNX Software Systems Ltd. All Rights Reserved
@@ -34,8 +34,7 @@
 #include "opt_ipfilter.h"
 #endif
 
-#include <sys/cdefs.h>
-__KERNEL_RCSID(1, "$NetBSD: ip_h323_pxy.c,v 1.10 2008/05/20 07:08:07 darrenr Exp $");
+__KERNEL_RCSID(1, "$NetBSD: ip_h323_pxy.c,v 1.4 2006/04/04 16:17:19 martti Exp $");
 
 #define IPF_H323_PROXY
 
@@ -54,12 +53,12 @@ static	frentry_t	h323_fr;
 
 int	h323_proxy_init = 0;
 
-static int find_port __P((int, void *, int datlen, int *, u_short *));
+static int find_port __P((int, caddr_t, int datlen, int *, u_short *));
 
 
 static int find_port(ipaddr, data, datlen, off, port)
 int ipaddr;
-void *data;
+caddr_t data;
 int datlen, *off;
 unsigned short *port;
 {
@@ -69,7 +68,7 @@ unsigned short *port;
 
 	if (datlen < 6)
 		return -1;
-
+	
 	*port = 0;
 	offset = *off;
 	dp = (u_char *)data;
@@ -131,7 +130,7 @@ ap_session_t *aps;
 {
 	int i;
 	ipnat_t *ipn;
-
+	
 	if (aps->aps_data) {
 		for (i = 0, ipn = aps->aps_data;
 		     i < (aps->aps_psiz / sizeof(ipnat_t));
@@ -144,7 +143,7 @@ ap_session_t *aps;
 			 * called with ipf_nat locked.
 			 */
 			if (fr_nat_ioctl((caddr_t)ipn, SIOCRMNAT, NAT_SYSSPACE|
-				         NAT_LOCKHELD|FWRITE, 0, NULL) == -1) {
+				         NAT_LOCKHELD|FWRITE) == -1) {
 				/*EMPTY*/;
 				/* log the error */
 			}
@@ -165,15 +164,15 @@ nat_t *nat;
 {
 	int ipaddr, off, datlen;
 	unsigned short port;
+	caddr_t data;
 	tcphdr_t *tcp;
-	void *data;
 	ip_t *ip;
 
 	ip = fin->fin_ip;
 	tcp = (tcphdr_t *)fin->fin_dp;
 	ipaddr = ip->ip_src.s_addr;
-
-	data = (char *)tcp + (TCP_OFF(tcp) << 2);
+	
+	data = (caddr_t)tcp + (TCP_OFF(tcp) << 2);
 	datlen = fin->fin_dlen - (TCP_OFF(tcp) << 2);
 	if (find_port(ipaddr, data, datlen, &off, &port) == 0) {
 		ipnat_t *ipn;
@@ -188,9 +187,9 @@ nat_t *nat;
 			return -1;
 		}
 		ipn = (ipnat_t *)&newarray[aps->aps_psiz];
-		bcopy((void *)nat->nat_ptr, (void *)ipn, sizeof(ipnat_t));
+		bcopy((caddr_t)nat->nat_ptr, (caddr_t)ipn, sizeof(ipnat_t));
 		(void) strncpy(ipn->in_plabel, "h245", APR_LABELLEN);
-
+		
 		ipn->in_inip = nat->nat_inip.s_addr;
 		ipn->in_inmsk = 0xffffffff;
 		ipn->in_dport = htons(port);
@@ -208,7 +207,7 @@ nat_t *nat;
 		 */
 		RWLOCK_EXIT(&ipf_nat);
 		if (fr_nat_ioctl((caddr_t)ipn, SIOCADNAT,
-				 NAT_SYSSPACE|FWRITE, 0, NULL) == -1) {
+				 NAT_SYSSPACE|FWRITE) == -1) {
 			READ_ENTER(&ipf_nat);
 			return -1;
 		}
@@ -245,8 +244,8 @@ nat_t *nat;
 {
 	int ipaddr, off, datlen;
 	tcphdr_t *tcp;
+	caddr_t data;
 	u_short port;
-	void *data;
 	ip_t *ip;
 
 	aps = aps;	/* LINT */
@@ -254,30 +253,28 @@ nat_t *nat;
 	ip = fin->fin_ip;
 	tcp = (tcphdr_t *)fin->fin_dp;
 	ipaddr = nat->nat_inip.s_addr;
-	data = (char *)tcp + (TCP_OFF(tcp) << 2);
+	data = (caddr_t)tcp + (TCP_OFF(tcp) << 2);
 	datlen = fin->fin_dlen - (TCP_OFF(tcp) << 2);
 	if (find_port(ipaddr, data, datlen, &off, &port) == 0) {
 		fr_info_t fi;
 		nat_t     *nat2;
 
 /*		port = htons(port); */
-		nat2 = nat_outlookup(fin, IPN_UDP, IPPROTO_UDP,
+		nat2 = nat_outlookup(fin->fin_ifp, IPN_UDP, IPPROTO_UDP,
 				    ip->ip_src, ip->ip_dst);
 		if (nat2 == NULL) {
 			struct ip newip;
 			struct udphdr udp;
-
-			bcopy((void *)ip, (void *)&newip, sizeof(newip));
+			
+			bcopy((caddr_t)ip, (caddr_t)&newip, sizeof(newip));
 			newip.ip_len = fin->fin_hlen + sizeof(udp);
 			newip.ip_p = IPPROTO_UDP;
 			newip.ip_src = nat->nat_inip;
-
+			
 			bzero((char *)&udp, sizeof(udp));
 			udp.uh_sport = port;
-
-			memcpy(&fi, fin, sizeof(fi));
-			fi.fin_state = NULL;
-			fi.fin_nat = NULL;
+			
+			bcopy((caddr_t)fin, (caddr_t)&fi, sizeof(fi));
 			fi.fin_fi.fi_p = IPPROTO_UDP;
 			fi.fin_data[0] = port;
 			fi.fin_data[1] = 0;
@@ -294,8 +291,10 @@ nat_t *nat;
 #ifdef	IPFILTER_LOG
 				nat_log(nat2, (u_int)(nat->nat_ptr->in_redir));
 #endif
-				memcpy((char *)data + off, &ip->ip_src.s_addr, 4);
-				memcpy((char *)data + off + 4, &nat2->nat_outport, 2);
+				bcopy((caddr_t)&ip->ip_src.s_addr,
+				      data + off, 4);
+				bcopy((caddr_t)&nat2->nat_outport,
+				      data + off + 4, 2);
 			}
 		}
 	}

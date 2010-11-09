@@ -1,4 +1,4 @@
-/*	$NetBSD: bootblock.h,v 1.45 2008/04/28 20:24:10 martin Exp $	*/
+/*	$NetBSD: bootblock.h,v 1.42 2007/06/29 23:30:31 rumble Exp $	*/
 
 /*-
  * Copyright (c) 2002-2004 The NetBSD Foundation, Inc.
@@ -12,6 +12,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -600,7 +607,6 @@ static const struct mbr_ptype {
 #define	MBR_BS_EXTINT13	0x02	/* Set by fdisk if LBA needed (deprecated) */
 #define	MBR_BS_READ_LBA	0x04	/* Force LBA reads (deprecated) */
 #define	MBR_BS_EXTLBA	0x08	/* Extended ptn capable (LBA reads) */
-#define	MBR_BS_ASCII	0x10	/* Bootselect code needs ascii key code */
 /* This is always set, the bootsel is located using the magic number...  */
 #define	MBR_BS_NEWMBR	0x80	/* New bootsel at offset 440 */
 
@@ -689,7 +695,7 @@ struct mbr_bootsel {
 	uint8_t		mbrbs_defkey;
 	uint8_t		mbrbs_flags;
 	uint16_t	mbrbs_timeo;
-	char		mbrbs_nametab[MBR_PART_COUNT][MBR_BS_PARTNAMESIZE + 1];
+	uint8_t		mbrbs_nametab[MBR_PART_COUNT][MBR_BS_PARTNAMESIZE + 1];
 } __packed;
 
 /*

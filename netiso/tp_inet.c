@@ -1,4 +1,4 @@
-/*	$NetBSD: tp_inet.c,v 1.36 2007/12/20 19:53:35 dyoung Exp $	*/
+/*	$NetBSD: tp_inet.c,v 1.32 2006/12/03 21:56:30 dyoung Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993
@@ -73,7 +73,7 @@ SOFTWARE.
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: tp_inet.c,v 1.36 2007/12/20 19:53:35 dyoung Exp $");
+__KERNEL_RCSID(0, "$NetBSD: tp_inet.c,v 1.32 2006/12/03 21:56:30 dyoung Exp $");
 
 #include "opt_inet.h"
 #include "opt_iso.h"
@@ -96,6 +96,7 @@ __KERNEL_RCSID(0, "$NetBSD: tp_inet.c,v 1.36 2007/12/20 19:53:35 dyoung Exp $");
 #include <netiso/tp_ip.h>
 #include <netiso/tp_pcb.h>
 #include <netiso/tp_trace.h>
+#include <netiso/tp_stat.h>
 #include <netiso/tp_tpdu.h>
 #include <netiso/tp_var.h>
 #include <netinet/in_var.h>
@@ -124,7 +125,7 @@ __KERNEL_RCSID(0, "$NetBSD: tp_inet.c,v 1.36 2007/12/20 19:53:35 dyoung Exp $");
  * NOTES:
  */
 void
-in_getsufx(void	*v, u_short *lenp, void *data_out, int which)
+in_getsufx(void	*v, u_short *lenp, caddr_t data_out, int which)
 {
 	struct inpcb   *inp = v;
 	*lenp = sizeof(u_short);
@@ -157,11 +158,11 @@ in_getsufx(void	*v, u_short *lenp, void *data_out, int which)
  */
 /* ARGSUSED */
 void
-in_putsufx(void *v, void *sufxloc, int sufxlen, int which)
+in_putsufx(void *v, caddr_t sufxloc, int sufxlen, int which)
 {
 	struct inpcb   *inp = v;
 	if (which == TP_FOREIGN) {
-		bcopy(sufxloc, (void *) & inp->inp_fport, sizeof(inp->inp_fport));
+		bcopy(sufxloc, (caddr_t) & inp->inp_fport, sizeof(inp->inp_fport));
 	}
 }
 
@@ -215,15 +216,15 @@ in_putnetaddr(void *v, struct sockaddr *nm, int which)
 	struct sockaddr_in *name = (struct sockaddr_in *) nm;
 	switch (which) {
 	case TP_LOCAL:
-		bcopy((void *) & name->sin_addr,
-		      (void *) & inp->inp_laddr, sizeof(struct in_addr));
+		bcopy((caddr_t) & name->sin_addr,
+		      (caddr_t) & inp->inp_laddr, sizeof(struct in_addr));
 		/* won't work if the dst address (name) is INADDR_ANY */
 
 		break;
 	case TP_FOREIGN:
 		if (name != (struct sockaddr_in *) 0) {
-			bcopy((void *) & name->sin_addr,
-			(void *) & inp->inp_faddr, sizeof(struct in_addr));
+			bcopy((caddr_t) & name->sin_addr,
+			(caddr_t) & inp->inp_faddr, sizeof(struct in_addr));
 		}
 	}
 }
@@ -283,7 +284,7 @@ in_getnetaddr(void *v, struct mbuf *name, int which)
 {
 	struct inpcb   *inp = v;
 	struct sockaddr_in *sin = mtod(name, struct sockaddr_in *);
-	bzero((void *) sin, sizeof(*sin));
+	bzero((caddr_t) sin, sizeof(*sin));
 	switch (which) {
 	case TP_LOCAL:
 		sin->sin_addr = inp->inp_laddr;
@@ -314,7 +315,7 @@ in_getnetaddr(void *v, struct mbuf *name, int which)
  * suffices.
  *
  * SIDE EFFECTS:
- * Sets tp_route in pcb.
+ * Sets tp_routep pointer in pcb.
  *
  * NOTES:
  */
@@ -330,7 +331,7 @@ tpip_mtu(void *v)
 		printf("tpip_mtu routing to addr 0x%x\n", inp->inp_faddr.s_addr);
 	}
 #endif
-	tpcb->tp_routep = &inp->inp_route;
+	tpcb->tp_routep = &inp->inp_route.ro_rt;
 	return sizeof(struct ip);
 
 }
@@ -428,7 +429,7 @@ tpip_output_dg(struct mbuf *m0, ...)
 	m->m_len = sizeof(struct ip);
 
 	ip = mtod(m, struct ip *);
-	bzero((void *) ip, sizeof *ip);
+	bzero((caddr_t) ip, sizeof *ip);
 
 	ip->ip_p = IPPROTO_TP;
 	if (sizeof(struct ip) + datalen > IP_MAXPACKET) {
@@ -624,7 +625,7 @@ tpin_quench(struct inpcb *inp, int dummy)
  * NOTES:
  */
 void *
-tpip_ctlinput(int cmd, const struct sockaddr *sa, void *dummy)
+tpip_ctlinput(int cmd, struct sockaddr *sa, void *dummy)
 {
 	void            (*notify)(struct inpcb *, int);
 	int             errno;
@@ -665,7 +666,7 @@ tpip_ctlinput(int cmd, const struct sockaddr *sa, void *dummy)
 		notify = tpin_abort;
 		break;
 	}
-	in_pcbnotifyall(&tp_inpcb, satocsin(sa)->sin_addr, errno, notify);
+	in_pcbnotifyall(&tp_inpcb, satosin(sa)->sin_addr, errno, notify);
 	return NULL;
 }
 

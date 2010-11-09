@@ -1,4 +1,4 @@
-/*	$NetBSD: ss_mustek.c,v 1.38 2009/01/13 13:35:54 yamt Exp $	*/
+/*	$NetBSD: ss_mustek.c,v 1.36 2007/03/04 06:02:44 christos Exp $	*/
 
 /*
  * Copyright (c) 1995 Joachim Koenig-Baltes.  All rights reserved.
@@ -46,7 +46,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ss_mustek.c,v 1.38 2009/01/13 13:35:54 yamt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ss_mustek.c,v 1.36 2007/03/04 06:02:44 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -111,7 +111,7 @@ mustek_attach(struct ss_softc *ss, struct scsipibus_attach_args *sa)
 	SC_DEBUG(periph, SCSIPI_DB1, ("mustek_attach: start\n"));
 	ss->sio.scan_scanner_type = 0;
 
-	printf("\n%s: ", device_xname(&ss->sc_dev));
+	printf("\n%s: ", ss->sc_dev.dv_xname);
 
 	/* first, check the model which determines resolutions */
 	if (!memcmp(sa->sa_inqbuf.product, "MFS-06000CX", 11)) {
@@ -496,10 +496,10 @@ mustek_read(struct ss_softc *ss, struct buf *bp)
 		return(0);
 	}
 #ifdef DIAGNOSTIC
-	if (bufq_get(ss->buf_queue) != bp)
+	if (BUFQ_GET(ss->buf_queue) != bp)
 		panic("ssstart(): dequeued wrong buf");
 #else
-	bufq_get(ss->buf_queue);
+	BUFQ_GET(ss->buf_queue);
 #endif
 	error = scsipi_execute_xs(xs);
 	/* with a scsipi_xfer preallocated, scsipi_command can't fail */

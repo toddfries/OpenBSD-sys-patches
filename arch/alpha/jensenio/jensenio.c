@@ -1,4 +1,4 @@
-/* $NetBSD: jensenio.c,v 1.17 2008/07/09 21:19:23 joerg Exp $ */
+/* $NetBSD: jensenio.c,v 1.13 2005/12/11 12:16:17 christos Exp $ */
 
 /*-
  * Copyright (c) 1999, 2000 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -43,7 +50,7 @@
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
 
-__KERNEL_RCSID(0, "$NetBSD: jensenio.c,v 1.17 2008/07/09 21:19:23 joerg Exp $");
+__KERNEL_RCSID(0, "$NetBSD: jensenio.c,v 1.13 2005/12/11 12:16:17 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -66,7 +73,7 @@ __KERNEL_RCSID(0, "$NetBSD: jensenio.c,v 1.17 2008/07/09 21:19:23 joerg Exp $");
 /*
  * The devices built-in to the VLSI VL82C106 junk I/O chip.
  */
-static const struct jensenio_dev {
+const struct jensenio_dev {
 	const char *jd_name;		/* device name */
 	bus_addr_t jd_ioaddr;		/* I/O space address */
 	int jd_irq[2];			/* Jensen IRQs */
@@ -79,22 +86,23 @@ static const struct jensenio_dev {
 	{ NULL,		0,		{ -1, -1 } },
 };
 
-static int	jensenio_match(device_t, cfdata_t, void *);
-static void	jensenio_attach(device_t, device_t, void *);
+int	jensenio_match(struct device *, struct cfdata *, void *);
+void	jensenio_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(jensenio, 0, jensenio_match, jensenio_attach, NULL, NULL);
+CFATTACH_DECL(jensenio, sizeof(struct device),
+    jensenio_match, jensenio_attach, NULL, NULL);
 
-static int	jensenio_print(void *, const char *);
+int	jensenio_print(void *, const char *);
 
-static int	jensenio_attached;
+int	jensenio_attached;
 
 struct jensenio_config jensenio_configuration;
 
-static void	jensenio_eisa_attach_hook(device_t, device_t,
+void	jensenio_eisa_attach_hook(struct device *, struct device *,
 	    struct eisabus_attach_args *);
-static int	jensenio_eisa_maxslots(void *);
+int	jensenio_eisa_maxslots(void *);
 
-static void	jensenio_isa_attach_hook(device_t, device_t,
+void	jensenio_isa_attach_hook(struct device *, struct device *,
 	    struct isabus_attach_args *);
 
 /*
@@ -127,8 +135,8 @@ jensenio_init(struct jensenio_config *jcp, int mallocsafe)
 	jcp->jc_mallocsafe = mallocsafe;
 }
 
-static int
-jensenio_match(device_t parent, cfdata_t cf, void *aux)
+int
+jensenio_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct mainbus_attach_args *ma = aux;
 
@@ -142,8 +150,8 @@ jensenio_match(device_t parent, cfdata_t cf, void *aux)
 	return (1);
 }
 
-static void
-jensenio_attach(device_t parent, device_t self, void *aux)
+void
+jensenio_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct jensenio_attach_args ja;
 	struct jensenio_config *jcp = &jensenio_configuration;
@@ -211,7 +219,7 @@ jensenio_attach(device_t parent, device_t self, void *aux)
 	(void) config_found_ia(self, "isabus", &ja.ja_isa, isabusprint);
 }
 
-static int
+int
 jensenio_print(void *aux, const char *pnp)
 {
 	struct jensenio_attach_args *ja = aux;
@@ -224,8 +232,8 @@ jensenio_print(void *aux, const char *pnp)
 	return (UNCONF);
 }
 
-static void
-jensenio_eisa_attach_hook(device_t parent, device_t self,
+void
+jensenio_eisa_attach_hook(struct device *parent, struct device *self,
     struct eisabus_attach_args *eba)
 {
 
@@ -236,19 +244,19 @@ jensenio_eisa_attach_hook(device_t parent, device_t self,
 	 */
 	eisa_config_stride = 0x200;
 	eisa_config_addr = JENSEN_FEPROM1;
-	eisa_init(eba->eba_ec);
+	eisa_init();
 #endif
 }
 
-static int
+int
 jensenio_eisa_maxslots(void *v)
 {
 
-	return (8);	/* jensen seems to have only 8 valid slots */
+	return (16);	/* as good a number as any.  only 8, maybe? */
 }
 
-static void
-jensenio_isa_attach_hook(device_t parent, device_t self,
+void
+jensenio_isa_attach_hook(struct device *parent, struct device *self,
     struct isabus_attach_args *iba)
 {
 

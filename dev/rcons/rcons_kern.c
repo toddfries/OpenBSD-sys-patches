@@ -1,4 +1,4 @@
-/*	$NetBSD: rcons_kern.c,v 1.21 2007/11/19 18:51:50 ad Exp $ */
+/*	$NetBSD: rcons_kern.c,v 1.20 2007/10/18 18:55:00 joerg Exp $ */
 
 /*
  * Copyright (c) 1991, 1993
@@ -41,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: rcons_kern.c,v 1.21 2007/11/19 18:51:50 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: rcons_kern.c,v 1.20 2007/10/18 18:55:00 joerg Exp $");
 
 #include <sys/param.h>
 #include <sys/device.h>
@@ -101,9 +101,16 @@ rcons_output(tp)
 	s = spltty();
 	tp->t_state &= ~TS_BUSY;
 	/* Come back if there's more to do */
-	if (ttypull(tp)) {
+	if (tp->t_outq.c_cc) {
 		tp->t_state |= TS_TIMEOUT;
 		callout_schedule(&tp->t_rstrt_ch, 1);
+	}
+	if (tp->t_outq.c_cc <= tp->t_lowat) {
+		if (tp->t_state&TS_ASLEEP) {
+			tp->t_state &= ~TS_ASLEEP;
+			wakeup((void *)&tp->t_outq);
+		}
+		selwakeup(&tp->t_wsel);
 	}
 	splx(s);
 }

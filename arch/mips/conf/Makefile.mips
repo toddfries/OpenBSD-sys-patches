@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile.mips,v 1.54 2009/02/15 01:58:01 cube Exp $
+#	$NetBSD: Makefile.mips,v 1.44 2006/08/27 21:44:15 matt Exp $
 
 # Makefile for NetBSD
 #
@@ -41,12 +41,10 @@ GENASSYM_CONF=	${MIPS}/mips/genassym.cf
 ##
 ## (2) compile settings
 ##
-## Note: -ffixed-?? must be kept in sync with cpu.h.
-##
 CPPFLAGS+=	-D${MACHINE}
 DEFGP?=		-G 0
 GP?=		${DEFGP}
-CFLAGS+=	${GP} -mno-abicalls -msoft-float -ffixed-23
+CFLAGS+=	${GP} -mno-abicalls -msoft-float
 .if ${MACHINE_ARCH} == "mips64eb" || ${MACHINE_ARCH} == "mips64el"
 CFLAGS+=	-msym32
 .endif
@@ -55,8 +53,7 @@ AFLAGS+=	-mno-abicalls -x assembler-with-cpp -traditional-cpp ${AOPTS}
 ##
 ## (3) libkern and compat
 ##
-OPT_MODULAR=	%MODULAR%
-.if !empty(OPT_MODULAR)
+.if !empty(IDENT:M-DLKM)
 KERN_AS=	obj
 .endif
 
@@ -85,8 +82,8 @@ KERNLDSCRIPT?=		${MIPS}/conf/kern.ldscript
 # some mips ports specify a "magic" format
 LINKFORMAT+=		-T ${KERNLDSCRIPT}
 EXTRA_LINKFLAGS=	${GP} ${LDOPTS}
-LINKFLAGS_NORMAL=	-X
-STRIPFLAGS=		-g -X
+LINKFLAGS_NORMAL=	-x
+STRIPFLAGS=		-g -X -x
 
 ##
 ## (6) port specific target dependencies
@@ -99,9 +96,8 @@ machdep.o mainbus.o trap.o: Makefile
 mips_machdep.o pmap.o: Makefile
 
 # various assembly files that depend on assym.h
-copy.o fp.o locore.o locore_mips1.o locore_mips3.o: assym.h
-lock_stubs.o mips32_subr.o mips3_subr.o mips5900_subr.o: assym.h
-mips64_subr.o mipsX_subr.o sigcode.o: assym.h
+copy.o fp.o locore.o locore_mips1.o locore_mips3.o sigcode.o: assym.h
+mips32_subr.o mips3_subr.o mips5900_subr.o mips64_subr.o mipsX_subr.o: assym.h
 
 
 ##
@@ -122,6 +118,9 @@ mips64_subr.o mipsX_subr.o sigcode.o: assym.h
 %LOAD
 
 %RULES
+
+## Include rules for Atheros WLAN
+.include "$S/contrib/dev/ath/netbsd/Makefile.ath.inc"
 
 ##
 ## (9) port independent kernel machinery

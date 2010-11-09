@@ -1,4 +1,4 @@
-/*	$NetBSD: nfs_bootstatic.c,v 1.7 2008/11/19 18:36:09 ad Exp $	*/
+/*	$NetBSD: nfs_bootstatic.c,v 1.3 2005/12/11 12:25:16 christos Exp $	*/
 
 /*
  *
@@ -33,11 +33,10 @@
 
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: nfs_bootstatic.c,v 1.7 2008/11/19 18:36:09 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: nfs_bootstatic.c,v 1.3 2005/12/11 12:25:16 christos Exp $");
 
-#ifdef _KERNEL_OPT
 #include "opt_nfs_boot.h"
-#endif
+#include "opt_inet.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -68,7 +67,7 @@ __KERNEL_RCSID(0, "$NetBSD: nfs_bootstatic.c,v 1.7 2008/11/19 18:36:09 ad Exp $"
 int (*nfs_bootstatic_callback)(struct nfs_diskless *) = NULL;
 
 int
-nfs_bootstatic(struct nfs_diskless *nd, struct lwp *lwp, int *_flags)
+nfs_bootstatic(struct nfs_diskless *nd, struct lwp *lwp)
 {
 	struct ifnet *ifp = nd->nd_ifp;
 	struct sockaddr_in *sin;
@@ -79,87 +78,52 @@ nfs_bootstatic(struct nfs_diskless *nd, struct lwp *lwp, int *_flags)
 	else
 		flags = 0;
 
-	if (flags & NFS_BOOT_NOSTATIC)
-		return EOPNOTSUPP;
-
 	if (flags == 0) {
 #ifdef NFS_BOOTSTATIC_MYIP
-		if (!(*_flags & NFS_BOOT_HAS_MYIP)) {
-			nd->nd_myip.s_addr = inet_addr(NFS_BOOTSTATIC_MYIP);
-			flags |= NFS_BOOT_HAS_MYIP;
-		}
+		nd->nd_myip.s_addr = inet_addr(NFS_BOOTSTATIC_MYIP);
+		flags |= NFS_BOOTSTATIC_HAS_MYIP;
 #endif
 #ifdef NFS_BOOTSTATIC_GWIP
-		if (!(*_flags & NFS_BOOT_HAS_GWIP)) {
-			nd->nd_gwip.s_addr = inet_addr(NFS_BOOTSTATIC_GWIP);
-			flags |= NFS_BOOT_HAS_GWIP;
-		}
+		nd->nd_gwip.s_addr = inet_addr(NFS_BOOTSTATIC_GWIP);
+		flags |= NFS_BOOTSTATIC_HAS_GWIP;
 #endif
 #ifdef NFS_BOOTSTATIC_MASK
-		if (!(*_flags & NFS_BOOT_HAS_MASK)) {
-			nd->nd_mask.s_addr = inet_addr(NFS_BOOTSTATIC_MASK);
-			flags |= NFS_BOOT_HAS_MASK;
-		}
+		nd->nd_mask.s_addr = inet_addr(NFS_BOOTSTATIC_MASK);
+		flags |= NFS_BOOTSTATIC_HAS_MASK;
 #endif
 #ifdef NFS_BOOTSTATIC_SERVADDR
-		if (!(*_flags & NFS_BOOT_HAS_SERVADDR)) {
-			sin = (struct sockaddr_in *) &nd->nd_root.ndm_saddr;
-			memset((void *)sin, 0, sizeof(*sin));
-			sin->sin_len = sizeof(*sin);
-			sin->sin_family = AF_INET;
-			sin->sin_addr.s_addr = inet_addr(NFS_BOOTSTATIC_SERVADDR);
-			flags |= NFS_BOOT_HAS_SERVADDR;
-		}
-#endif
-#ifdef NFS_BOOTSTATIC_SERVER
-		if (!(*_flags & NFS_BOOT_HAS_SERVER)) {
-			strncpy(nd->nd_root.ndm_host, NFS_BOOTSTATIC_SERVER,
-				MNAMELEN);
-			flags |= NFS_BOOT_HAS_SERVER;
-			if (strchr(nd->nd_root.ndm_host, ':') != NULL)
-				flags |= NFS_BOOT_HAS_ROOTPATH;
-		}
-#endif
-	}
-
-	*_flags |= flags;
-
-	if (!(*_flags & NFS_BOOT_HAS_SERVADDR) && (*_flags & NFS_BOOT_HAS_SERVER)) {
-		char rootserver[MNAMELEN];
-		char *sep;
-
-		sep = strchr(nd->nd_root.ndm_host, ':');
-		strlcpy(rootserver, nd->nd_root.ndm_host,
-			sep - nd->nd_root.ndm_host+1);
-
 		sin = (struct sockaddr_in *) &nd->nd_root.ndm_saddr;
-		memset((void *)sin, 0, sizeof(*sin));
+		memset((caddr_t)sin, 0, sizeof(*sin));
 		sin->sin_len = sizeof(*sin);
 		sin->sin_family = AF_INET;
-		sin->sin_addr.s_addr = inet_addr(rootserver);
-		flags |= NFS_BOOT_HAS_SERVADDR;
-		*_flags |= NFS_BOOT_HAS_SERVADDR;
+		sin->sin_addr.s_addr = inet_addr(NFS_BOOTSTATIC_SERVADDR);
+		flags |= NFS_BOOTSTATIC_HAS_SERVADDR;
+#endif
+#ifdef NFS_BOOTSTATIC_SERVER
+		strncpy(nd->nd_root.ndm_host, NFS_BOOTSTATIC_SERVER, MNAMELEN);
+		flags |= NFS_BOOTSTATIC_HAS_SERVER;
+#endif
 	}
 
-	if (flags & NFS_BOOT_HAS_MYIP)
+	if (flags & NFS_BOOTSTATIC_HAS_MYIP)
 		aprint_normal("nfs_boot: client_addr=%s\n",
 		    inet_ntoa(nd->nd_myip));
 
-	if (flags & NFS_BOOT_HAS_GWIP)
+	if (flags & NFS_BOOTSTATIC_HAS_GWIP)
 		aprint_normal("nfs_boot: gateway=%s\n",
 		    inet_ntoa(nd->nd_gwip));
 
-	if (flags & NFS_BOOT_HAS_MASK)
+	if (flags & NFS_BOOTSTATIC_HAS_MASK)
 		aprint_normal("nfs_boot: netmask=%s\n",
 		    inet_ntoa(nd->nd_mask));
 
-	if (flags & NFS_BOOT_HAS_SERVADDR) {
+	if (flags & NFS_BOOTSTATIC_HAS_SERVADDR) {
 		sin = (struct sockaddr_in *) &nd->nd_root.ndm_saddr;
 		aprint_normal("nfs_boot: server=%s\n",
 		    inet_ntoa(sin->sin_addr));
 	}
 
-	if (flags & NFS_BOOT_HAS_SERVER)
+	if (flags & NFS_BOOTSTATIC_HAS_SERVER)
 		aprint_normal("nfs_boot: root=%.*s\n", MNAMELEN,
 		    nd->nd_root.ndm_host);
 
@@ -168,16 +132,13 @@ nfs_bootstatic(struct nfs_diskless *nd, struct lwp *lwp, int *_flags)
 	 * can talk to the servers.
 	 */
 	error = nfs_boot_setaddress(ifp, lwp,
-	    *_flags & NFS_BOOT_HAS_MYIP ? nd->nd_myip.s_addr : INADDR_ANY,
-	    *_flags & NFS_BOOT_HAS_MASK ? nd->nd_mask.s_addr : INADDR_ANY,
+	    flags & NFS_BOOTSTATIC_HAS_MYIP ? nd->nd_myip.s_addr : INADDR_ANY,
+	    flags & NFS_BOOTSTATIC_HAS_MASK ? nd->nd_mask.s_addr : INADDR_ANY,
 	    INADDR_ANY);
 	if (error) {
 		aprint_error("nfs_boot: set ifaddr, error=%d\n", error);
 		goto out;
 	}
-
-	if ((*_flags & NFS_BOOT_ALLINFO) != NFS_BOOT_ALLINFO)
-		return EADDRNOTAVAIL;
 
 	error = 0;
 

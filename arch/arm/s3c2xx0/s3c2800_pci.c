@@ -1,4 +1,4 @@
-/*	$NetBSD: s3c2800_pci.c,v 1.13 2008/01/06 01:37:56 matt Exp $	*/
+/*	$NetBSD: s3c2800_pci.c,v 1.11 2005/11/24 13:08:32 yamt Exp $	*/
 
 /*
  * Copyright (c) 2002 Fujitsu Component Limited
@@ -100,7 +100,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: s3c2800_pci.c,v 1.13 2008/01/06 01:37:56 matt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: s3c2800_pci.c,v 1.11 2005/11/24 13:08:32 yamt Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -147,7 +147,7 @@ void	s3c2800_pci_conf_write(void *, pcitag_t, int, pcireg_t);
 int	s3c2800_pci_intr_map(struct pci_attach_args *, pci_intr_handle_t *);
 const char *s3c2800_pci_intr_string(void *, pci_intr_handle_t);
 const struct evcnt *s3c2800_pci_intr_evcnt(void *, pci_intr_handle_t);
-void *s3c2800_pci_intr_establish(void *, pci_intr_handle_t, int,
+void * s3c2800_pci_intr_establish(void *, pci_intr_handle_t, int,
 				  int (*) (void *), void *);
 void	s3c2800_pci_intr_disestablish(void *, void *);
 
@@ -258,10 +258,10 @@ sspci_attach(struct device *parent, struct device *self, void *aux)
 		sspci_intr, sc))
 		FAIL("intr_establish");
 
-	sc->sc_softinterrupt = softint_establish(SOFTINT_SERIAL,
+	sc->sc_softinterrupt = softintr_establish(IPL_SOFT,
 	    sspci_softintr, sc);
 	if (sc->sc_softinterrupt == NULL)
-		FAIL("softint_establish");
+		FAIL("softintr_establish");
 
 #if defined(PCI_NETBSD_CONFIGURE)
 	if (sspci_init_controller(sc)) {
@@ -686,7 +686,7 @@ sspci_intr(void *arg)
 
 	if (interrupts & PCIINT_INA) {
 		s = splhigh();
-		softint_schedule(sc->sc_softinterrupt);
+		softintr_schedule(sc->sc_softinterrupt);
 
 		/* mask INTA itnerrupt until softinterrupt is handled */
 		sc->sc_pciinten &= ~PCIINT_INA;

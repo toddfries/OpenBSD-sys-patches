@@ -1,4 +1,4 @@
-/* $NetBSD: radio_if.h,v 1.5 2008/07/09 13:12:54 joerg Exp $ */
+/* $NetBSD: radio_if.h,v 1.4 2005/12/11 12:20:53 christos Exp $ */
 /* $OpenBSD: radio_if.h,v 1.2 2001/12/05 10:27:06 mickey Exp $ */
 /* $RuOBSD: radio_if.h,v 1.6 2001/10/18 16:51:36 pva Exp $ */
 
@@ -53,6 +53,7 @@ struct radio_attach_args {
 	void    *hdl;
 };
 
-device_t radio_attach_mi(const struct radio_hw_if *, void *, device_t);
+struct device  *radio_attach_mi(const struct radio_hw_if *, void *,
+    struct device *);
 
 #endif /* _SYS_DEV_RADIO_IF_H */

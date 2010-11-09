@@ -1,4 +1,4 @@
-/*	$NetBSD: vaxfp.h,v 1.8 2008/08/05 16:47:42 matt Exp $	*/
+/*	$NetBSD: vaxfp.h,v 1.5 2005/12/11 12:19:34 christos Exp $	*/
 
 /*-
  * Copyright (c) 2003 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,44 +44,25 @@
 #ifndef _VAX_VAXFP_H_
 #define	_VAX_VAXFP_H_
 
-#include <sys/featuretest.h>
+#define	FFLT_EXPBITS		8
+#define	FFLT_FRACBITS		23
 
-#if defined(_NETBSD_SOURCE) || defined(_ISOC99_SOURCE)
-
-typedef int fenv_t;
-typedef int fexcept_t;
-
-#define	FE_UNDERFLOW	0x01	/* underflow exception */
-
-#define	FE_ALL_EXCEPT	0x01
-
-#if !defined(_ISOC99_SOURCE)
-
-#define	FFLT_EXPBITS	8
-#define	FFLT_FRACHBITS	7
-#define	FFLT_FRACLBITS	16
-#define	FFLT_FRACBITS	(FFLT_FRACLBITS + FFLT_FRACHBITS)
+#define	DFLT_EXPBITS		8
+#define	DFLT_FRACBITS		55
 
 struct vax_f_floating {
-	unsigned int	fflt_frach:FFLT_FRACHBITS;
-	unsigned int	fflt_exp:FFLT_EXPBITS;
+	unsigned int	fflt_frach:7;
+	unsigned int	fflt_exp:8;
 	unsigned int	fflt_sign:1;
-	unsigned int	fflt_fracl:FFLT_FRACLBITS;
+	unsigned int	fflt_fracl:16;
 };
 
-#define	DFLT_EXPBITS	8
-#define	DFLT_FRACHBITS	7
-#define	DFLT_FRACMBITS	16
-#define	DFLT_FRACLBITS	32
-#define	DFLT_FRACBITS	(DFLT_FRACLBITS + DFLT_FRACMBITS + DFLT_FRACHBITS)
-
 struct vax_d_floating {
-
-	unsigned int	dflt_frach:DFLT_FRACHBITS;
-	unsigned int	dflt_exp:DFLT_EXPBITS;
+	unsigned int	dflt_frach:7;
+	unsigned int	dflt_exp:8;
 	unsigned int	dflt_sign:1;
-	unsigned int	dflt_fracm:DFLT_FRACMBITS;
-	unsigned int	dflt_fracl:DFLT_FRACLBITS;
+	unsigned int	dflt_fracm:16;
+	unsigned int	dflt_fracl;
 };
 
 /*
@@ -95,9 +83,5 @@ union vax_dfloating_u {
 	double			dfltu_d;
 	struct vax_d_floating	dfltu_dflt;
 };
-
-#endif /* !_ISOC99_SOURCE */
-
-#endif /* _NETBSD_SOURCE || _ISOC99_SOURCE */
 
 #endif /* _VAX_VAXFP_H_ */

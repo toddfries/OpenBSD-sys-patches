@@ -1,4 +1,4 @@
-/*	$NetBSD: cmi.c,v 1.11 2008/03/11 05:34:03 matt Exp $ */
+/*	$NetBSD: cmi.c,v 1.9 2005/12/11 12:19:36 christos Exp $ */
 /*
  * Copyright (c) 1999 Ludd, University of Lule}, Sweden.
  * All rights reserved.
@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: cmi.c,v 1.11 2008/03/11 05:34:03 matt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cmi.c,v 1.9 2005/12/11 12:19:36 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/device.h>
@@ -42,19 +42,18 @@ __KERNEL_RCSID(0, "$NetBSD: cmi.c,v 1.11 2008/03/11 05:34:03 matt Exp $");
 #include <machine/cpu.h>
 #include <machine/sid.h>
 #include <machine/ka750.h>
-#include <machine/mainbus.h>
 
 static	int cmi_print(void *, const char *);
-static	int cmi_match(device_t, cfdata_t, void *);
-static	void cmi_attach(device_t, device_t, void*);
+static	int cmi_match(struct device *, struct cfdata *, void *);
+static	void cmi_attach(struct device *, struct device *, void*);
 
-CFATTACH_DECL_NEW(cmi, 0,
+CFATTACH_DECL(cmi, sizeof(struct device),
     cmi_match, cmi_attach, NULL, NULL);
 
 int
 cmi_print(void *aux, const char *name)
 {
-	struct sbi_attach_args * const sa = aux;
+	struct sbi_attach_args *sa = (struct sbi_attach_args *)aux;
 
 	if (name)
 		aprint_normal("unknown device 0x%x at %s", sa->sa_type, name);
@@ -65,19 +64,19 @@ cmi_print(void *aux, const char *name)
 
 
 int
-cmi_match(device_t parent, cfdata_t cf, void *aux)
+cmi_match(struct device *parent, struct cfdata *cf, void *aux)
 {
-	struct mainbus_attach_args * const ma = aux;
-
-	return !strcmp("cmi", ma->ma_type);
+	if (vax_bustype == VAX_CMIBUS)
+		return 1;
+	return 0;
 }
 
 void
-cmi_attach(device_t parent, device_t self, void *aux)
+cmi_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct sbi_attach_args sa;
+	struct	sbi_attach_args sa;
 
-	aprint_normal("\n");
+	printf("\n");
 	/*
 	 * Probe for memory, can be in the first 4 slots.
 	 */
@@ -85,7 +84,7 @@ cmi_attach(device_t parent, device_t self, void *aux)
 	for (sa.sa_nexnum = 0; sa.sa_nexnum < 4; sa.sa_nexnum++) {
 		sa.sa_ioh = vax_map_physmem(NEX750 +
 		    sizeof(struct nexus) * sa.sa_nexnum, NEXPAGES);
-		if (badaddr((void *)sa.sa_ioh, 4)) {
+		if (badaddr((caddr_t)sa.sa_ioh, 4)) {
 			vax_unmap_physmem((vaddr_t)sa.sa_ioh, NEXPAGES);
 		} else {
 			sa.sa_type = NEX_MEM16;
@@ -99,7 +98,7 @@ cmi_attach(device_t parent, device_t self, void *aux)
 	for (sa.sa_nexnum = 4; sa.sa_nexnum < 7; sa.sa_nexnum++) {
 		sa.sa_ioh = vax_map_physmem(NEX750 +
 		    sizeof(struct nexus) * sa.sa_nexnum, NEXPAGES);
-		if (badaddr((void *)sa.sa_ioh, 4)) {
+		if (badaddr((caddr_t)sa.sa_ioh, 4)) {
 			vax_unmap_physmem((vaddr_t)sa.sa_ioh, NEXPAGES);
 		} else {
 			sa.sa_type = NEX_MBA;
@@ -120,7 +119,7 @@ cmi_attach(device_t parent, device_t self, void *aux)
 	sa.sa_ioh = vax_map_physmem(NEX750 +
 	    sizeof(struct nexus) * sa.sa_nexnum, NEXPAGES);
 	sa.sa_type = NEX_UBA1;
-	if (badaddr((void *)sa.sa_ioh, 4))
+	if (badaddr((caddr_t)sa.sa_ioh, 4))
 		vax_unmap_physmem((vaddr_t)sa.sa_ioh, NEXPAGES);
 	else
 		config_found(self, (void*)&sa, cmi_print);

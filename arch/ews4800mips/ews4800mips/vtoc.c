@@ -1,4 +1,4 @@
-/*	$NetBSD: vtoc.c,v 1.4 2008/04/28 20:23:18 martin Exp $	*/
+/*	$NetBSD: vtoc.c,v 1.1 2005/12/29 15:20:08 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 2004 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: vtoc.c,v 1.4 2008/04/28 20:23:18 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: vtoc.c,v 1.1 2005/12/29 15:20:08 tsutsui Exp $");
 
 #include <sys/types.h>
 #include <sys/systm.h>
@@ -53,17 +60,17 @@ __KERNEL_RCSID(0, "$NetBSD: vtoc.c,v 1.4 2008/04/28 20:23:18 martin Exp $");
 void vtoc_print_partition_table(const struct ux_partition *);
 #endif /* VTOC_DEBUG */
 
-bool
+boolean_t
 vtoc_sector(void *rwops, struct vtoc_sector *vtoc, int start)
 {
 
 	if (!sector_read(rwops, (void *)vtoc, start + VTOC_SECTOR))
-		return false;
+		return FALSE;
 
 	if (!vtoc_sanity(vtoc))
-		return false;
+		return FALSE;
 
-	return true;
+	return TRUE;
 }
 
 const struct ux_partition *
@@ -88,20 +95,20 @@ vtoc_find_bfs(const struct vtoc_sector *vtoc)
 	return &vtoc->partition[i];
 }
 
-bool
+boolean_t
 vtoc_valid(const struct vtoc_sector *vtoc)
 {
 
 	return (vtoc->magic == VTOC_MAGIC) && (vtoc->version == VTOC_VERSION);
 }
 
-bool
+boolean_t
 vtoc_sanity(const struct vtoc_sector *vtoc)
 {
 
 	if (!vtoc_valid(vtoc)) {
 		DPRINTF("Invalid VTOC.\n");
-		return false;
+		return FALSE;
 	}
 
 	DPRINTF("[VTOC] (%d byte)\n", sizeof *vtoc);
@@ -115,7 +122,7 @@ vtoc_sanity(const struct vtoc_sector *vtoc)
 #ifdef VTOC_DEBUG
 	vtoc_print_partition_table(vtoc->partition);
 #endif
-	return true;
+	return TRUE;
 }
 
 #ifdef VTOC_DEBUG

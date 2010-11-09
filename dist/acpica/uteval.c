@@ -1,7 +1,7 @@
 /******************************************************************************
  *
  * Module Name: uteval - Object evaluation
- *              $Revision: 1.5 $
+ *              xRevision: 1.64 $
  *
  *****************************************************************************/
 
@@ -9,7 +9,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2008, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2006, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -114,6 +114,9 @@
  *
  *****************************************************************************/
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: uteval.c,v 1.1 2006/03/23 13:36:32 kochi Exp $");
+
 #define __UTEVAL_C__
 
 #include "acpi.h"
@@ -138,34 +141,6 @@ AcpiUtTranslateOneCid (
     ACPI_COMPATIBLE_ID      *OneCid);
 
 
-/*
- * Strings supported by the _OSI predefined (internal) method.
- */
-static const char               *AcpiInterfacesSupported[] =
-{
-    /* Operating System Vendor Strings */
-
-    "Linux",
-    "Windows 2000",         /* Windows 2000 */
-    "Windows 2001",         /* Windows XP */
-    "Windows 2001 SP1",     /* Windows XP SP1 */
-    "Windows 2001 SP2",     /* Windows XP SP2 */
-    "Windows 2001.1",       /* Windows Server 2003 */
-    "Windows 2001.1 SP1",   /* Windows Server 2003 SP1 - Added 03/2006 */
-    "Windows 2006",         /* Windows Vista - Added 03/2006 */
-
-    /* Feature Group Strings */
-
-    "Extended Address Space Descriptor"
-
-    /*
-     * All "optional" feature group strings (features that are implemented
-     * by the host) should be implemented in the host version of
-     * AcpiOsValidateInterface and should not be added here.
-     */
-};
-
-
 /*******************************************************************************
  *
  * FUNCTION:    AcpiUtOsiImplementation
@@ -174,7 +149,8 @@ static const char               *AcpiInterfacesSupported[] =
  *
  * RETURN:      Status
  *
- * DESCRIPTION: Implementation of the _OSI predefined control method
+ * DESCRIPTION: Implementation of _OSI predefined control method
+ *              Supported = _OSI (String)
  *
  ******************************************************************************/
 
@@ -182,13 +158,12 @@ ACPI_STATUS
 AcpiUtOsiImplementation (
     ACPI_WALK_STATE         *WalkState)
 {
-    ACPI_STATUS             Status;
     ACPI_OPERAND_OBJECT     *StringDesc;
     ACPI_OPERAND_OBJECT     *ReturnDesc;
     ACPI_NATIVE_UINT        i;
 
 
-    ACPI_FUNCTION_TRACE (UtOsiImplementation);
+    ACPI_FUNCTION_TRACE ("UtOsiImplementation");
 
 
     /* Validate the string input argument */
@@ -199,7 +174,7 @@ AcpiUtOsiImplementation (
         return_ACPI_STATUS (AE_TYPE);
     }
 
-    /* Create a return object */
+    /* Create a return object (Default value = 0) */
 
     ReturnDesc = AcpiUtCreateInternalObject (ACPI_TYPE_INTEGER);
     if (!ReturnDesc)
@@ -207,39 +182,21 @@ AcpiUtOsiImplementation (
         return_ACPI_STATUS (AE_NO_MEMORY);
     }
 
-    /* Default return value is SUPPORTED */
+    /* Compare input string to table of supported strings */
 
-    ReturnDesc->Integer.Value = ACPI_UINT32_MAX;
-    WalkState->ReturnDesc = ReturnDesc;
-
-    /* Compare input string to static table of supported interfaces */
-
-    for (i = 0; i < ACPI_ARRAY_LENGTH (AcpiInterfacesSupported); i++)
+    for (i = 0; i < ACPI_NUM_OSI_STRINGS; i++)
     {
-        if (!ACPI_STRCMP (StringDesc->String.Pointer, AcpiInterfacesSupported[i]))
+        if (!ACPI_STRCMP (StringDesc->String.Pointer,
+                ACPI_CAST_CONST_PTR (char, AcpiGbl_ValidOsiStrings[i])))
         {
-            /* The interface is supported */
+            /* This string is supported */
 
-            return_ACPI_STATUS (AE_CTRL_TERMINATE);
+            ReturnDesc->Integer.Value = 0xFFFFFFFF;
+            break;
         }
     }
 
-    /*
-     * Did not match the string in the static table, call the host OSL to
-     * check for a match with one of the optional strings (such as
-     * "Module Device", "3.0 Thermal Model", etc.)
-     */
-    Status = AcpiOsValidateInterface (StringDesc->String.Pointer);
-    if (ACPI_SUCCESS (Status))
-    {
-        /* The interface is supported */
-
-        return_ACPI_STATUS (AE_CTRL_TERMINATE);
-    }
-
-    /* The interface is not supported */
-
-    ReturnDesc->Integer.Value = 0;
+    WalkState->ReturnDesc = ReturnDesc;
     return_ACPI_STATUS (AE_CTRL_TERMINATE);
 }
 
@@ -270,29 +227,21 @@ AcpiUtEvaluateObject (
     UINT32                  ExpectedReturnBtypes,
     ACPI_OPERAND_OBJECT     **ReturnDesc)
 {
-    ACPI_EVALUATE_INFO      *Info;
+    ACPI_PARAMETER_INFO     Info;
     ACPI_STATUS             Status;
     UINT32                  ReturnBtype;
 
 
-    ACPI_FUNCTION_TRACE (UtEvaluateObject);
+    ACPI_FUNCTION_TRACE ("UtEvaluateObject");
 
 
-    /* Allocate the evaluation information block */
-
-    Info = ACPI_ALLOCATE_ZEROED (sizeof (ACPI_EVALUATE_INFO));
-    if (!Info)
-    {
-        return_ACPI_STATUS (AE_NO_MEMORY);
-    }
-
-    Info->PrefixNode = PrefixNode;
-    Info->Pathname = Path;
-    Info->ParameterType = ACPI_PARAM_ARGS;
+    Info.Node = PrefixNode;
+    Info.Parameters = NULL;
+    Info.ParameterType = ACPI_PARAM_ARGS;
 
     /* Evaluate the object/method */
 
-    Status = AcpiNsEvaluate (Info);
+    Status = AcpiNsEvaluateRelative (Path, &Info);
     if (ACPI_FAILURE (Status))
     {
         if (Status == AE_NOT_FOUND)
@@ -306,27 +255,27 @@ AcpiUtEvaluateObject (
                 PrefixNode, Path, Status);
         }
 
-        goto Cleanup;
+        return_ACPI_STATUS (Status);
     }
 
     /* Did we get a return object? */
 
-    if (!Info->ReturnObject)
+    if (!Info.ReturnObject)
     {
         if (ExpectedReturnBtypes)
         {
             ACPI_ERROR_METHOD ("No object was returned from",
                 PrefixNode, Path, AE_NOT_EXIST);
 
-            Status = AE_NOT_EXIST;
+            return_ACPI_STATUS (AE_NOT_EXIST);
         }
 
-        goto Cleanup;
+        return_ACPI_STATUS (AE_OK);
     }
 
     /* Map the return object type to the bitmapped type */
 
-    switch (ACPI_GET_OBJECT_TYPE (Info->ReturnObject))
+    switch (ACPI_GET_OBJECT_TYPE (Info.ReturnObject))
     {
     case ACPI_TYPE_INTEGER:
         ReturnBtype = ACPI_BTYPE_INTEGER;
@@ -357,8 +306,8 @@ AcpiUtEvaluateObject (
          * happen frequently if the "implicit return" feature is enabled.
          * Just delete the return object and return AE_OK.
          */
-        AcpiUtRemoveReference (Info->ReturnObject);
-        goto Cleanup;
+        AcpiUtRemoveReference (Info.ReturnObject);
+        return_ACPI_STATUS (AE_OK);
     }
 
     /* Is the return object one of the expected types? */
@@ -370,23 +319,19 @@ AcpiUtEvaluateObject (
 
         ACPI_ERROR ((AE_INFO,
             "Type returned from %s was incorrect: %s, expected Btypes: %X",
-            Path, AcpiUtGetObjectTypeName (Info->ReturnObject),
+            Path, AcpiUtGetObjectTypeName (Info.ReturnObject),
             ExpectedReturnBtypes));
 
         /* On error exit, we must delete the return object */
 
-        AcpiUtRemoveReference (Info->ReturnObject);
-        Status = AE_TYPE;
-        goto Cleanup;
+        AcpiUtRemoveReference (Info.ReturnObject);
+        return_ACPI_STATUS (AE_TYPE);
     }
 
     /* Object type is OK, return it */
 
-    *ReturnDesc = Info->ReturnObject;
-
-Cleanup:
-    ACPI_FREE (Info);
-    return_ACPI_STATUS (Status);
+    *ReturnDesc = Info.ReturnObject;
+    return_ACPI_STATUS (AE_OK);
 }
 
 
@@ -417,7 +362,7 @@ AcpiUtEvaluateNumericObject (
     ACPI_STATUS             Status;
 
 
-    ACPI_FUNCTION_TRACE (UtEvaluateNumericObject);
+    ACPI_FUNCTION_TRACE ("UtEvaluateNumericObject");
 
 
     Status = AcpiUtEvaluateObject (DeviceNode, ObjectName,
@@ -503,7 +448,7 @@ AcpiUtExecute_HID (
     ACPI_STATUS             Status;
 
 
-    ACPI_FUNCTION_TRACE (UtExecute_HID);
+    ACPI_FUNCTION_TRACE ("UtExecute_HID");
 
 
     Status = AcpiUtEvaluateObject (DeviceNode, METHOD_NAME__HID,
@@ -616,7 +561,7 @@ AcpiUtExecute_CID (
     ACPI_NATIVE_UINT        i;
 
 
-    ACPI_FUNCTION_TRACE (UtExecute_CID);
+    ACPI_FUNCTION_TRACE ("UtExecute_CID");
 
 
     /* Evaluate the _CID method for this device */
@@ -642,7 +587,7 @@ AcpiUtExecute_CID (
     Size = (((Count - 1) * sizeof (ACPI_COMPATIBLE_ID)) +
                            sizeof (ACPI_COMPATIBLE_ID_LIST));
 
-    CidList = ACPI_ALLOCATE_ZEROED ((ACPI_SIZE) Size);
+    CidList = ACPI_MEM_CALLOCATE ((ACPI_SIZE) Size);
     if (!CidList)
     {
         return_ACPI_STATUS (AE_NO_MEMORY);
@@ -687,7 +632,7 @@ AcpiUtExecute_CID (
 
     if (ACPI_FAILURE (Status))
     {
-        ACPI_FREE (CidList);
+        ACPI_MEM_FREE (CidList);
     }
     else
     {
@@ -726,7 +671,7 @@ AcpiUtExecute_UID (
     ACPI_STATUS             Status;
 
 
-    ACPI_FUNCTION_TRACE (UtExecute_UID);
+    ACPI_FUNCTION_TRACE ("UtExecute_UID");
 
 
     Status = AcpiUtEvaluateObject (DeviceNode, METHOD_NAME__UID,
@@ -782,7 +727,7 @@ AcpiUtExecute_STA (
     ACPI_STATUS             Status;
 
 
-    ACPI_FUNCTION_TRACE (UtExecute_STA);
+    ACPI_FUNCTION_TRACE ("UtExecute_STA");
 
 
     Status = AcpiUtEvaluateObject (DeviceNode, METHOD_NAME__STA,
@@ -839,7 +784,7 @@ AcpiUtExecute_Sxds (
     UINT32                  i;
 
 
-    ACPI_FUNCTION_TRACE (UtExecute_Sxds);
+    ACPI_FUNCTION_TRACE ("UtExecute_Sxds");
 
 
     for (i = 0; i < 4; i++)

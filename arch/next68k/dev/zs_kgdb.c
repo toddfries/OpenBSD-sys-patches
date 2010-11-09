@@ -1,4 +1,4 @@
-/*	$NetBSD: zs_kgdb.c,v 1.12 2008/04/28 20:23:30 martin Exp $	*/
+/*	$NetBSD: zs_kgdb.c,v 1.8 2005/12/11 12:18:25 christos Exp $	*/
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -41,7 +48,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: zs_kgdb.c,v 1.12 2008/04/28 20:23:30 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: zs_kgdb.c,v 1.8 2005/12/11 12:18:25 christos Exp $");
 
 #include "opt_kgdb.h"
 
@@ -68,16 +75,16 @@ __KERNEL_RCSID(0, "$NetBSD: zs_kgdb.c,v 1.12 2008/04/28 20:23:30 martin Exp $");
 
 /* The layout of this is hardware-dependent (padding, order). */
 struct zschan {
-	volatile uint8_t zc_csr;	/* ctrl,status, and indirect access */
-	uint8_t		zc_xxx0;
-	volatile uint8_t zc_data;	/* data */
-	uint8_t		zc_xxx1;
+	volatile u_char	zc_csr;		/* ctrl,status, and indirect access */
+	u_char		zc_xxx0;
+	volatile u_char	zc_data;	/* data */
+	u_char		zc_xxx1;
 };
 
 static void zs_setparam(struct zs_chanstate *, int, int);
 struct zsops zsops_kgdb;
 
-static uint8_t zs_kgdb_regs[16] = {
+static u_char zs_kgdb_regs[16] = {
 	0,	/* 0: CMD (reset, etc.) */
 	0,	/* 1: No interrupts yet. */
 	0x18 + NEXT_I_IPL(NEXT_I_SCC), /* 2: IVECT */
@@ -162,7 +169,7 @@ zs_kgdb_init(void)
 	zs_setparam(&cs, 0, kgdb_rate);
 
 	/* Store the getc/putc functions and arg. */
-	kgdb_attach(zs_getc, zs_putc, __UNVOLATILE(zc));
+	kgdb_attach(zs_getc, zs_putc, (void *)zc);
 }
 
 /*
@@ -220,7 +227,7 @@ int kgdb_input_lost;
 static void
 zs_kgdb_rxint(struct zs_chanstate *cs)
 {
-	uint8_t c, rr1;
+	u_char c, rr1;
 
 	/*
 	 * First read the status, because reading the received char

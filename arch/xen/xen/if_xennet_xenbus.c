@@ -1,4 +1,4 @@
-/*      $NetBSD: if_xennet_xenbus.c,v 1.34 2009/03/03 19:04:41 bouyer Exp $      */
+/*      $NetBSD: if_xennet_xenbus.c,v 1.14 2006/11/03 03:03:32 jld Exp $      */
 
 /*
  * Copyright (c) 2006 Manuel Bouyer.
@@ -60,42 +60,8 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-/*
- * This file contains the xennet frontend code required for the network
- * communication between two Xen domains.
- * It ressembles xbd, but is a little more complex as it must deal with two
- * rings:
- * - the TX ring, to transmit packets to backend (inside => outside)
- * - the RX ring, to receive packets from backend (outside => inside)
- *
- * Principles are following.
- *
- * For TX:
- * Purpose is to transmit packets to the outside. The start of day is in
- * xennet_start() (default output routine of xennet) that schedules a softint,
- * xennet_softstart(). xennet_softstart() generates the requests associated
- * to the TX mbufs queued (see altq(9)).
- * The backend's responses are processed by xennet_tx_complete(), called either
- * from:
- * - xennet_start()
- * - xennet_handler(), during an asynchronous event notification from backend
- *   (similar to an IRQ).
- *
- * for RX:
- * Purpose is to process the packets received from the outside. RX buffers
- * are pre-allocated through xennet_alloc_rx_buffer(), during xennet autoconf
- * attach. During pre-allocation, frontend pushes requests in the I/O ring, in
- * preparation for incoming packets from backend.
- * When RX packets need to be processed, backend takes the requests previously
- * offered by frontend and pushes the associated responses inside the I/O ring.
- * When done, it notifies frontend through an event notification, which will
- * asynchronously call xennet_handler() in frontend.
- * xennet_handler() processes the responses, generates the associated mbuf, and
- * passes it to the MI layer for further processing.
- */
-
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_xennet_xenbus.c,v 1.34 2009/03/03 19:04:41 bouyer Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_xennet_xenbus.c,v 1.14 2006/11/03 03:03:32 jld Exp $");
 
 #include "opt_xen.h"
 #include "opt_nfs_boot.h"
@@ -106,9 +72,7 @@ __KERNEL_RCSID(0, "$NetBSD: if_xennet_xenbus.c,v 1.34 2009/03/03 19:04:41 bouyer
 #include <sys/device.h>
 #include <sys/conf.h>
 #include <sys/kernel.h>
-#include <sys/proc.h>
 #include <sys/systm.h>
-#include <sys/intr.h>
 #if NRND > 0
 #include <sys/rnd.h>
 #endif
@@ -131,20 +95,17 @@ __KERNEL_RCSID(0, "$NetBSD: if_xennet_xenbus.c,v 1.34 2009/03/03 19:04:41 bouyer
 #include <nfs/nfs.h>
 #include <nfs/nfsmount.h>
 #include <nfs/nfsdiskless.h>
-#include <xen/if_xennetvar.h>
+#include <machine/if_xennetvar.h>
 #endif /* defined(NFS_BOOT_BOOTSTATIC) */
 
-#include <xen/xennet_checksum.h>
+#include <machine/xennet_checksum.h>
 
 #include <uvm/uvm.h>
 
-#include <xen/hypervisor.h>
-#include <xen/evtchn.h>
-#include <xen/granttables.h>
-#include <xen/xen3-public/io/netif.h>
-#include <xen/xenpmap.h>
+#include <machine/xen3-public/io/ring.h>
 
-#include <xen/xenbus.h>
+#include <machine/granttables.h>
+#include <machine/xenbus.h>
 #include "locators.h"
 
 #undef XENNET_DEBUG_DUMP
@@ -171,14 +132,14 @@ int xennet_debug = 0xff;
 
 struct xennet_txreq {
 	SLIST_ENTRY(xennet_txreq) txreq_next;
-	uint16_t txreq_id; /* ID passed to backend */
+	uint16_t txreq_id; /* ID passed to backed */
 	grant_ref_t txreq_gntref; /* grant ref of this request */
 	struct mbuf *txreq_m; /* mbuf being transmitted */
 };
 
 struct xennet_rxreq {
 	SLIST_ENTRY(xennet_rxreq) rxreq_next;
-	uint16_t rxreq_id; /* ID passed to backend */
+	uint16_t rxreq_id; /* ID passed to backed */
 	grant_ref_t rxreq_gntref; /* grant ref of this request */
 /* va/pa for this receive buf. ma will be provided by backend */
 	paddr_t rxreq_pa;
@@ -187,7 +148,7 @@ struct xennet_rxreq {
 };
 
 struct xennet_xenbus_softc {
-	device_t sc_dev;
+	struct device sc_dev;
 	struct ethercom sc_ethercom;
 	uint8_t sc_enaddr[6];
 	struct xenbus_device *sc_xbusd;
@@ -211,7 +172,6 @@ struct xennet_xenbus_softc {
 #define BEST_CLOSED		0
 #define BEST_DISCONNECTED	1
 #define BEST_CONNECTED		2
-#define BEST_SUSPENDED		3
 #if NRND > 0
 	rndsource_element_t     sc_rnd_source;
 #endif
@@ -221,18 +181,18 @@ struct xennet_xenbus_softc {
 
 /* too big to be on stack */
 static multicall_entry_t rx_mcl[NET_RX_RING_SIZE+1];
-static u_long xennet_pages[NET_RX_RING_SIZE];
+static paddr_t xennet_pages[NET_RX_RING_SIZE];
 
-static int  xennet_xenbus_match(device_t, cfdata_t, void *);
-static void xennet_xenbus_attach(device_t, device_t, void *);
-static int  xennet_xenbus_detach(device_t, int);
+static int  xennet_xenbus_match(struct device *, struct cfdata *, void *);
+static void xennet_xenbus_attach(struct device *, struct device *, void *);
+static int  xennet_xenbus_detach(struct device *, int);
 static void xennet_backend_changed(void *, XenbusState);
 
 static int  xennet_xenbus_resume(void *);
 static void xennet_alloc_rx_buffer(struct xennet_xenbus_softc *);
 static void xennet_free_rx_buffer(struct xennet_xenbus_softc *);
 static void xennet_tx_complete(struct xennet_xenbus_softc *);
-static void xennet_rx_mbuf_free(struct mbuf *, void *, size_t, void *);
+static void xennet_rx_mbuf_free(struct mbuf *, caddr_t, size_t, void *);
 static int  xennet_handler(void *);
 #ifdef XENNET_DEBUG_DUMP
 static void xennet_hex_dump(const unsigned char *, size_t, const char *, int);
@@ -243,14 +203,14 @@ static void xennet_stop(struct ifnet *, int);
 static void xennet_reset(struct xennet_xenbus_softc *);
 static void xennet_softstart(void *);
 static void xennet_start(struct ifnet *);
-static int  xennet_ioctl(struct ifnet *, u_long, void *);
+static int  xennet_ioctl(struct ifnet *, u_long, caddr_t);
 static void xennet_watchdog(struct ifnet *);
 
-CFATTACH_DECL_NEW(xennet_xenbus, sizeof(struct xennet_xenbus_softc),
+CFATTACH_DECL(xennet_xenbus, sizeof(struct xennet_xenbus_softc),
    xennet_xenbus_match, xennet_xenbus_attach, xennet_xenbus_detach, NULL);
 
 static int
-xennet_xenbus_match(device_t parent, cfdata_t match, void *aux)
+xennet_xenbus_match(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct xenbusdev_attach_args *xa = aux;
 
@@ -265,9 +225,9 @@ xennet_xenbus_match(device_t parent, cfdata_t match, void *aux)
 }
 
 static void
-xennet_xenbus_attach(device_t parent, device_t self, void *aux)
+xennet_xenbus_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct xennet_xenbus_softc *sc = device_private(self);
+	struct xennet_xenbus_softc *sc = (void *)self;
 	struct xenbusdev_attach_args *xa = aux;
 	struct ifnet *ifp = &sc->sc_ethercom.ec_if;
 	int err;
@@ -282,23 +242,22 @@ xennet_xenbus_attach(device_t parent, device_t self, void *aux)
 #endif
 
 	aprint_normal(": Xen Virtual Network Interface\n");
-	sc->sc_dev = self;
-
 #ifdef XENNET_DEBUG
 	printf("path: %s\n", xa->xa_xbusd->xbusd_path);
 	snprintf(id_str, sizeof(id_str), "%d", xa->xa_id);
 	err = xenbus_directory(NULL, "device/vif", id_str, &dir_n, &dir);
 	if (err) {
-		aprint_error_dev(self, "xenbus_directory err %d\n", err);
+		printf("%s: xenbus_directory err %d\n",
+		    sc->sc_dev.dv_xname, err);
 	} else {
 		printf("%s/\n", xa->xa_xbusd->xbusd_path);
 		for (i = 0; i < dir_n; i++) {
 			printf("\t/%s", dir[i]);
-			err = xenbus_read(NULL, xa->xa_xbusd->xbusd_path,
-				          dir[i], NULL, &val);
+			err = xenbus_read(NULL, xa->xa_xbusd->xbusd_path, dir[i],
+			    NULL, &val);
 			if (err) {
-				aprint_error_dev(self, "xenbus_read err %d\n",
-					         err);
+				printf("%s: xenbus_read err %d\n",
+		    		sc->sc_dev.dv_xname, err);
 			} else {
 				printf(" = %s\n", val);
 				free(val, M_DEVBUF);
@@ -328,38 +287,41 @@ xennet_xenbus_attach(device_t parent, device_t self, void *aux)
 			break;
 		if (!pmap_extract(pmap_kernel(), rxreq->rxreq_va,
 		    &rxreq->rxreq_pa))
-			panic("%s: no pa for mapped va ?", device_xname(self));
+			panic("xennet: no pa for mapped va ?");
 		rxreq->rxreq_gntref = GRANT_INVALID_REF;
 		SLIST_INSERT_HEAD(&sc->sc_rxreq_head, rxreq, rxreq_next);
 	}
 	splx(s);
 	sc->sc_free_rxreql = i;
 	if (sc->sc_free_rxreql == 0) {
-		aprint_error_dev(self, "failed to allocate rx memory\n");
+		aprint_error("%s: failed to allocate rx memory\n",
+		    sc->sc_dev.dv_xname);
 		return;
 	}
 
 	/* read mac address */
 	err = xenbus_read(NULL, xa->xa_xbusd->xbusd_path, "mac", NULL, &val);
 	if (err) {
-		aprint_error_dev(self, "can't read mac address, err %d\n", err);
+		aprint_error("%s: can't read mac address, err %d\n",
+		    sc->sc_dev.dv_xname, err);
 		return;
 	}
+	/* read mac address */
 	for (i = 0, p = val; i < 6; i++) {
 		sc->sc_enaddr[i] = strtoul(p, &e, 16);
 		if ((e[0] == '\0' && i != 5) && e[0] != ':') {
-			aprint_error_dev(self,
-			    "%s is not a valid mac address\n", val);
+			aprint_error("%s: %s is not a valid mac address\n",
+			    sc->sc_dev.dv_xname, val);
 			free(val, M_DEVBUF);
 			return;
 		}
 		p = &e[1];
 	}
 	free(val, M_DEVBUF);
-	aprint_normal_dev(self, "MAC address %s\n",
+	aprint_normal("%s: MAC address %s\n", sc->sc_dev.dv_xname,
 	    ether_sprintf(sc->sc_enaddr));
 	/* Initialize ifnet structure and attach interface */
-	strlcpy(ifp->if_xname, device_xname(self), IFNAMSIZ);
+	memcpy(ifp->if_xname, sc->sc_dev.dv_xname, IFNAMSIZ);
 	ifp->if_softc = sc;
 	ifp->if_start = xennet_start;
 	ifp->if_ioctl = xennet_ioctl;
@@ -373,29 +335,23 @@ xennet_xenbus_attach(device_t parent, device_t self, void *aux)
 	IFQ_SET_READY(&ifp->if_snd);
 	if_attach(ifp);
 	ether_ifattach(ifp, sc->sc_enaddr);
-	sc->sc_softintr = softint_establish(SOFTINT_NET, xennet_softstart, sc);
+	sc->sc_softintr = softintr_establish(IPL_SOFTNET, xennet_softstart, sc);
 	if (sc->sc_softintr == NULL)
-		panic("%s: can't establish soft interrupt",
-			device_xname(self));
-
-#if NRND > 0
-	rnd_attach_source(&sc->sc_rnd_source, device_xname(sc->sc_dev),
-	    RND_TYPE_NET, 0);
-#endif
+		panic(" xennet: can't establish soft interrupt");
 
 	/* initialise shared structures and tell backend that we are ready */
 	xennet_xenbus_resume(sc);
 }
 
 static int
-xennet_xenbus_detach(device_t self, int flags)
+xennet_xenbus_detach(struct device *self, int flags)
 {
-	struct xennet_xenbus_softc *sc = device_private(self);
+	struct xennet_xenbus_softc *sc = (void *)self;
 	struct ifnet *ifp = &sc->sc_ethercom.ec_if;
 	int s0, s1;
 	RING_IDX i;
 
-	DPRINTF(("%s: xennet_xenbus_detach\n", device_xname(self)));
+	DPRINTF(("%s: xennet_xenbus_detach\n", sc->sc_dev.dv_xname));
 	s0 = splnet();
 	xennet_stop(ifp, 1);
 	/* wait for pending TX to complete, and collect pending RX packets */
@@ -428,10 +384,10 @@ xennet_xenbus_detach(device_t self, int flags)
 	xengnt_revoke_access(sc->sc_rx_ring_gntref);
 	uvm_km_free(kernel_map, (vaddr_t)sc->sc_rx_ring.sring, PAGE_SIZE,
 	    UVM_KMF_WIRED);
-	softint_disestablish(sc->sc_softintr);
+	softintr_disestablish(sc->sc_softintr);
 	event_remove_handler(sc->sc_evtchn, &xennet_handler, sc);
 	splx(s0);
-	DPRINTF(("%s: xennet_xenbus_detach done\n", device_xname(self)));
+	DPRINTF(("%s: xennet_xenbus_detach done\n", sc->sc_dev.dv_xname));
 	return 0;
 }
 
@@ -474,10 +430,10 @@ xennet_xenbus_resume(void *p)
 	error = xenbus_alloc_evtchn(sc->sc_xbusd, &sc->sc_evtchn);
 	if (error)
 		return error;
-	aprint_verbose_dev(sc->sc_dev, "using event channel %d\n",
-	    sc->sc_evtchn);
+	aprint_verbose("%s: using event channel %d\n",
+	    sc->sc_dev.dv_xname, sc->sc_evtchn);
 	event_set_handler(sc->sc_evtchn, &xennet_handler, sc,
-	    IPL_NET, device_xname(sc->sc_dev));
+	    IPL_NET, sc->sc_dev.dv_xname);
 
 again:
 	xbt = xenbus_transaction_start();
@@ -526,9 +482,8 @@ abort_transaction:
 
 static void xennet_backend_changed(void *arg, XenbusState new_state)
 {
-	struct xennet_xenbus_softc *sc = device_private((device_t)arg);
-	DPRINTF(("%s: new backend state %d\n",
-	    device_xname(sc->sc_dev), new_state));
+	struct xennet_xenbus_softc *sc = arg;
+	DPRINTF(("%s: new backend state %d\n", sc->sc_dev.dv_xname, new_state));
 
 	switch (new_state) {
 	case XenbusStateInitialising:
@@ -546,12 +501,6 @@ static void xennet_backend_changed(void *arg, XenbusState new_state)
 		panic("bad backend state %d", new_state);
 	}
 }
-
-/*
- * Allocate RX buffers and put the associated request structures
- * in the ring. This allows the backend to use them to communicate with
- * frontend when some data is destined to frontend
- */
 
 static void
 xennet_alloc_rx_buffer(struct xennet_xenbus_softc *sc)
@@ -605,7 +554,7 @@ xennet_alloc_rx_buffer(struct xennet_xenbus_softc *sc)
 	xpq_flush_queue();
 	splx(s2);
 	/* now decrease reservation */
-	xenguest_handle(reservation.extent_start) = xennet_pages;
+	reservation.extent_start = xennet_pages;
 	reservation.nr_extents = i;
 	reservation.extent_order = 0;
 	reservation.address_bits = 0;
@@ -624,9 +573,6 @@ xennet_alloc_rx_buffer(struct xennet_xenbus_softc *sc)
 	return;
 }
 
-/*
- * Reclaim all RX buffers used by the I/O ring between frontend and backend
- */
 static void
 xennet_free_rx_buffer(struct xennet_xenbus_softc *sc)
 {
@@ -638,7 +584,7 @@ xennet_free_rx_buffer(struct xennet_xenbus_softc *sc)
 
 	int s = splbio();
 	
-	DPRINTF(("%s: xennet_free_rx_buffer\n", device_xname(sc->sc_dev)));
+	DPRINTF(("%s: xennet_free_rx_buffer\n", sc->sc_dev.dv_xname));
 	/* get back memory from RX ring */
 	for (i = 0; i < NET_RX_RING_SIZE; i++) {
 		struct xennet_rxreq *rxreq = &sc->sc_rxreqs[i];
@@ -662,13 +608,12 @@ xennet_free_rx_buffer(struct xennet_xenbus_softc *sc)
 			ma = xengnt_revoke_transfer(rxreq->rxreq_gntref);
 			rxreq->rxreq_gntref = GRANT_INVALID_REF;
 			if (ma == 0) {
-				u_long pfn;
 				struct xen_memory_reservation xenres;
 				/*
 				 * transfer not complete, we lost the page.
 				 * Get one from hypervisor
 				 */
-				xenguest_handle(xenres.extent_start) = &pfn;
+				xenres.extent_start = &ma;
 				xenres.nr_extents = 1;
 				xenres.extent_order = 0;
 				xenres.address_bits = 31;
@@ -678,7 +623,6 @@ xennet_free_rx_buffer(struct xennet_xenbus_softc *sc)
 					panic("xennet_free_rx_buffer: "
 					    "can't get memory back");
 				}
-				ma = pfn;
 				KASSERT(ma != 0);
 			}
 			pa = rxreq->rxreq_pa;
@@ -701,28 +645,20 @@ xennet_free_rx_buffer(struct xennet_xenbus_softc *sc)
 
 	}
 	splx(s);
-	DPRINTF(("%s: xennet_free_rx_buffer done\n", device_xname(sc->sc_dev)));
+	DPRINTF(("%s: xennet_free_rx_buffer done\n", sc->sc_dev.dv_xname));
 }
 
-/*
- * Clears a used RX request when its associated mbuf has been processed
- */
 static void
-xennet_rx_mbuf_free(struct mbuf *m, void *buf, size_t size, void *arg)
+xennet_rx_mbuf_free(struct mbuf *m, caddr_t buf, size_t size, void *arg)
 {
 	struct xennet_rxreq *req = arg;
 	struct xennet_xenbus_softc *sc = req->rxreq_sc;
 
 	int s = splnet();
 
-	/* puts back the RX request in the list of free RX requests */
 	SLIST_INSERT_HEAD(&sc->sc_rxreq_head, req, rxreq_next);
 	sc->sc_free_rxreql++;
 
-	/*
-	 * ring needs more requests to be pushed in, allocate some
-	 * RX buffers to catch-up with backend's consumption
-	 */
 	req->rxreq_gntref = GRANT_INVALID_REF;
 	if (sc->sc_free_rxreql >= SC_NLIVEREQ(sc) &&
 	    __predict_true(sc->sc_backend_status == BEST_CONNECTED)) {
@@ -730,15 +666,11 @@ xennet_rx_mbuf_free(struct mbuf *m, void *buf, size_t size, void *arg)
 	}
 
 	if (m)
-		pool_cache_put(mb_cache, m);
+		pool_cache_put(&mbpool_cache, m);
 	splx(s);
 }
 
-/*
- * Process responses associated to the TX mbufs sent previously through
- * xennet_softstart()
- * Called at splnet.
- */
+
 static void
 xennet_tx_complete(struct xennet_xenbus_softc *sc)
 {
@@ -751,14 +683,14 @@ xennet_tx_complete(struct xennet_xenbus_softc *sc)
 
 again:
 	resp_prod = sc->sc_tx_ring.sring->rsp_prod;
-	xen_rmb();
+	x86_lfence();
 	for (i = sc->sc_tx_ring.rsp_cons; i != resp_prod; i++) {
 		req = &sc->sc_txreqs[RING_GET_RESPONSE(&sc->sc_tx_ring, i)->id];
 		KASSERT(req->txreq_id ==
 		    RING_GET_RESPONSE(&sc->sc_tx_ring, i)->id);
 		if (__predict_false(xengnt_status(req->txreq_gntref))) {
-			aprint_verbose_dev(sc->sc_dev,
-					   "grant still used by backend\n");
+			printf("%s: grant still used by backend\n",
+			    sc->sc_dev.dv_xname);
 			sc->sc_tx_ring.rsp_cons = i;
 			goto end;
 		}
@@ -773,11 +705,11 @@ again:
 		SLIST_INSERT_HEAD(&sc->sc_txreq_head, req, txreq_next);
 	}
 	sc->sc_tx_ring.rsp_cons = resp_prod;
-	/* set new event and check for race with rsp_cons update */
+	/* set new event and check fopr race with rsp_cons update */
 	sc->sc_tx_ring.sring->rsp_event = 
 	    resp_prod + ((sc->sc_tx_ring.sring->req_prod - resp_prod) >> 1) + 1;
 	ifp->if_timer = 0;
-	xen_wmb();
+	x86_sfence();
 	if (resp_prod != sc->sc_tx_ring.sring->rsp_prod)
 		goto again;
 end:
@@ -787,12 +719,6 @@ end:
 	}
 }
 
-/*
- * Xennet event handler.
- * Get outstanding responses of TX packets, then collect all responses of
- * pending RX packets
- * Called at splnet.
- */
 static int
 xennet_handler(void *arg)
 {
@@ -813,15 +739,12 @@ xennet_handler(void *arg)
 
 	xennet_tx_complete(sc);
 
-#if NRND > 0
-	rnd_add_uint32(&sc->sc_rnd_source, sc->sc_tx_ring.req_prod_pvt);
-#endif
 again:
 	DPRINTFN(XEDB_EVENT, ("xennet_handler prod %d cons %d\n",
 	    sc->sc_rx_ring.sring->rsp_prod, sc->sc_rx_ring.rsp_cons));
 
 	resp_prod = sc->sc_rx_ring.sring->rsp_prod;
-	xen_rmb(); /* ensure we see replies up to resp_prod */
+	x86_lfence(); /* ensure we see replies up to resp_prod */
 	for (i = sc->sc_rx_ring.rsp_cons; i != resp_prod; i++) {
 		netif_rx_response_t *rx = RING_GET_RESPONSE(&sc->sc_rx_ring, i);
 		req = &sc->sc_rxreqs[rx->id];
@@ -869,7 +792,7 @@ again:
 		if ((ifp->if_flags & IFF_PROMISC) == 0) {
 			struct ether_header *eh = pktp;
 			if (ETHER_IS_MULTICAST(eh->ether_dhost) == 0 &&
-			    memcmp(CLLADDR(ifp->if_sadl), eh->ether_dhost,
+			    memcmp(LLADDR(ifp->if_sadl), eh->ether_dhost,
 			    ETHER_ADDR_LEN) != 0) {
 				DPRINTFN(XEDB_EVENT,
 				    ("xennet_handler bad dest\n"));
@@ -933,7 +856,7 @@ again:
 		/* Pass the packet up. */
 		(*ifp->if_input)(ifp, m);
 	}
-	xen_rmb();
+	x86_lfence();
 	sc->sc_rx_ring.rsp_cons = i;
 	RING_FINAL_CHECK_FOR_RESPONSES(&sc->sc_rx_ring, more_to_do);
 	if (more_to_do)
@@ -942,7 +865,6 @@ again:
 }
 
 /* 
- * The output routine of a xennet interface
  * Called at splnet.
  */
 void
@@ -950,7 +872,7 @@ xennet_start(struct ifnet *ifp)
 {
 	struct xennet_xenbus_softc *sc = ifp->if_softc;
 
-	DPRINTFN(XEDB_FOLLOW, ("%s: xennet_start()\n", device_xname(sc->sc_dev)));
+	DPRINTFN(XEDB_FOLLOW, ("%s: xennet_start()\n", sc->sc_dev.dv_xname));
 
 #if NRND > 0
 	rnd_add_uint32(&sc->sc_rnd_source, sc->sc_tx_ring.req_prod_pvt);
@@ -969,13 +891,12 @@ xennet_start(struct ifnet *ifp)
 	 * stack will enqueue all pending mbufs in the interface's send queue
 	 * before it is processed by xennet_softstart().
 	 */
-	softint_schedule(sc->sc_softintr);
+	softintr_schedule(sc->sc_softintr);
 	return;
 }
 
 /*
- * Prepares mbufs for TX, and notify backend when finished
- * Called at splsoftnet
+ * called at splsoftnet
  */
 void
 xennet_softstart(void *arg)
@@ -1043,22 +964,20 @@ xennet_softstart(void *arg)
 
 			MGETHDR(new_m, M_DONTWAIT, MT_DATA);
 			if (__predict_false(new_m == NULL)) {
-				printf("%s: cannot allocate new mbuf\n",
-				       device_xname(sc->sc_dev));
+				printf("xennet: no mbuf\n");
 				break;
 			}
 			if (m->m_pkthdr.len > MHLEN) {
 				MCLGET(new_m, M_DONTWAIT);
 				if (__predict_false(
 				    (new_m->m_flags & M_EXT) == 0)) {
-					DPRINTF(("%s: no mbuf cluster\n",
-					    device_xname(sc->sc_dev)));
+					DPRINTF(("xennet: no mbuf cluster\n"));
 					m_freem(new_m);
 					break;
 				}
 			}
 
-			m_copydata(m, 0, m->m_pkthdr.len, mtod(new_m, void *));
+			m_copydata(m, 0, m->m_pkthdr.len, mtod(new_m, caddr_t));
 			new_m->m_len = new_m->m_pkthdr.len = m->m_pkthdr.len;
 
 			if ((new_m->m_flags & M_EXT) != 0) {
@@ -1109,8 +1028,7 @@ xennet_softstart(void *arg)
 		DPRINTFN(XEDB_MBUF, ("xennet_start pa %p ma %p/%p\n",
 		    (void *)pa, (void *)xpmap_ptom_masked(pa), (void *)pa2));
 #ifdef XENNET_DEBUG_DUMP
-		xennet_hex_dump(mtod(m, u_char *), m->m_pkthdr.len, "s",
-			       	req->txreq_id);
+		xennet_hex_dump(mtod(m, u_char *), m->m_pkthdr.len, "s", req->txreq_id);
 #endif
 
 		txreq = RING_GET_REQUEST(&sc->sc_tx_ring, req_prod);
@@ -1148,6 +1066,7 @@ xennet_softstart(void *arg)
 #endif
 	}
 
+	x86_lfence();
 	if (do_notify) {
 		hypervisor_notify_via_evtchn(sc->sc_evtchn);
 		ifp->if_timer = 5;
@@ -1155,11 +1074,11 @@ xennet_softstart(void *arg)
 	splx(s);
 
 	DPRINTFN(XEDB_FOLLOW, ("%s: xennet_start() done\n",
-	    device_xname(sc->sc_dev)));
+	    sc->sc_dev.dv_xname));
 }
 
 int
-xennet_ioctl(struct ifnet *ifp, u_long cmd, void *data)
+xennet_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 #ifdef XENNET_DEBUG
 	struct xennet_xenbus_softc *sc = ifp->if_softc;
@@ -1168,15 +1087,14 @@ xennet_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 
 	s = splnet();
 
-	DPRINTFN(XEDB_FOLLOW, ("%s: xennet_ioctl()\n",
-	    device_xname(sc->sc_dev)));
+	DPRINTFN(XEDB_FOLLOW, ("%s: xennet_ioctl()\n", sc->sc_dev.dv_xname));
 	error = ether_ioctl(ifp, cmd, data);
 	if (error == ENETRESET)
 		error = 0;
 	splx(s);
 
 	DPRINTFN(XEDB_FOLLOW, ("%s: xennet_ioctl() returning %d\n",
-	    device_xname(sc->sc_dev), error));
+	    sc->sc_dev.dv_xname, error));
 
 	return error;
 }
@@ -1184,7 +1102,9 @@ xennet_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 void
 xennet_watchdog(struct ifnet *ifp)
 {
-	aprint_verbose_ifnet(ifp, "xennet_watchdog\n");
+	struct xennet_xenbus_softc *sc = ifp->if_softc;
+
+	printf("%s: xennet_watchdog\n", sc->sc_dev.dv_xname);
 }
 
 int
@@ -1193,8 +1113,7 @@ xennet_init(struct ifnet *ifp)
 	struct xennet_xenbus_softc *sc = ifp->if_softc;
 	int s = splnet();
 
-	DPRINTFN(XEDB_FOLLOW, ("%s: xennet_init()\n",
-	    device_xname(sc->sc_dev)));
+	DPRINTFN(XEDB_FOLLOW, ("%s: xennet_init()\n", sc->sc_dev.dv_xname));
 
 	if ((ifp->if_flags & IFF_RUNNING) == 0) {
 		sc->sc_rx_ring.sring->rsp_event =
@@ -1226,8 +1145,7 @@ void
 xennet_reset(struct xennet_xenbus_softc *sc)
 {
 
-	DPRINTFN(XEDB_FOLLOW, ("%s: xennet_reset()\n",
-	    device_xname(sc->sc_dev)));
+	DPRINTFN(XEDB_FOLLOW, ("%s: xennet_reset()\n", sc->sc_dev.dv_xname));
 }
 
 #if defined(NFS_BOOT_BOOTSTATIC)
@@ -1239,7 +1157,6 @@ xennet_bootstatic_callback(struct nfs_diskless *nd)
 	struct xennet_xenbus_softc *sc =
 	    (struct xennet_xenbus_softc *)ifp->if_softc;
 #endif
-	int flags = 0;
 	union xen_cmdline_parseinfo xcp;
 	struct sockaddr_in *sin;
 
@@ -1248,32 +1165,19 @@ xennet_bootstatic_callback(struct nfs_diskless *nd)
 	xcp.xcp_netinfo.xi_root = nd->nd_root.ndm_host;
 	xen_parse_cmdline(XEN_PARSE_NETINFO, &xcp);
 
-	if (xcp.xcp_netinfo.xi_root[0] != '\0') {
-		flags |= NFS_BOOT_HAS_SERVER;
-		if (strchr(xcp.xcp_netinfo.xi_root, ':') != NULL)
-			flags |= NFS_BOOT_HAS_ROOTPATH;
-	}
-
 	nd->nd_myip.s_addr = ntohl(xcp.xcp_netinfo.xi_ip[0]);
 	nd->nd_gwip.s_addr = ntohl(xcp.xcp_netinfo.xi_ip[2]);
 	nd->nd_mask.s_addr = ntohl(xcp.xcp_netinfo.xi_ip[3]);
 
 	sin = (struct sockaddr_in *) &nd->nd_root.ndm_saddr;
-	memset((void *)sin, 0, sizeof(*sin));
+	memset((caddr_t)sin, 0, sizeof(*sin));
 	sin->sin_len = sizeof(*sin);
 	sin->sin_family = AF_INET;
 	sin->sin_addr.s_addr = ntohl(xcp.xcp_netinfo.xi_ip[1]);
 
-	if (nd->nd_myip.s_addr)
-		flags |= NFS_BOOT_HAS_MYIP;
-	if (nd->nd_gwip.s_addr)
-		flags |= NFS_BOOT_HAS_GWIP;
-	if (nd->nd_mask.s_addr)
-		flags |= NFS_BOOT_HAS_MASK;
-	if (sin->sin_addr.s_addr)
-		flags |= NFS_BOOT_HAS_SERVADDR;
-
-	return flags;
+	return (NFS_BOOTSTATIC_HAS_MYIP|NFS_BOOTSTATIC_HAS_GWIP|
+	    NFS_BOOTSTATIC_HAS_MASK|NFS_BOOTSTATIC_HAS_SERVADDR|
+	    NFS_BOOTSTATIC_HAS_SERVER);
 }
 #endif /* defined(NFS_BOOT_BOOTSTATIC) */
 

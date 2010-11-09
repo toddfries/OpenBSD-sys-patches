@@ -1,4 +1,4 @@
-/*	$NetBSD: rf.c,v 1.24 2009/01/22 17:34:22 cegger Exp $	*/
+/*	$NetBSD: rf.c,v 1.17 2007/10/19 12:01:09 ad Exp $	*/
 /*
  * Copyright (c) 2002 Jochen Kunz.
  * All rights reserved.
@@ -36,7 +36,7 @@ TODO:
 */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: rf.c,v 1.24 2009/01/22 17:34:22 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: rf.c,v 1.17 2007/10/19 12:01:09 ad Exp $");
 
 /* autoconfig stuff */
 #include <sys/param.h>
@@ -98,10 +98,10 @@ __KERNEL_RCSID(0, "$NetBSD: rf.c,v 1.24 2009/01/22 17:34:22 cegger Exp $");
 
 
 /* autoconfig stuff */
-static int rfc_match(device_t, cfdata_t, void *);
-static void rfc_attach(device_t, device_t, void *);
-static int rf_match(device_t, cfdata_t, void *);
-static void rf_attach(device_t, device_t, void *);
+static int rfc_match(struct device *, struct cfdata *, void *);
+static void rfc_attach(struct device *, struct device *, void *);
+static int rf_match(struct device *, struct cfdata *, void *);
+static void rf_attach(struct device *, struct device *, void *);
 static int rf_print(void *, const char *);
 
 /* device interface functions / interface to disk(9) */
@@ -143,8 +143,8 @@ const struct cdevsw rf_cdevsw = {
 
 
 struct rfc_softc {
-	device_t sc_dev;		/* common device data */
-	device_t sc_childs[2];		/* child devices */
+	struct device sc_dev;		/* common device data */
+	struct device *sc_childs[2];	/* child devices */
 	struct evcnt sc_intr_count;	/* Interrupt counter for statistics */
 	struct buf *sc_curbuf;		/* buf that is currently in work */
 	bus_space_tag_t sc_iot;		/* bus_space I/O tag */
@@ -159,7 +159,7 @@ struct rfc_softc {
 
 
 
-CFATTACH_DECL_NEW(
+CFATTACH_DECL(
 	rfc,
 	sizeof(struct rfc_softc),
 	rfc_match,
@@ -171,9 +171,8 @@ CFATTACH_DECL_NEW(
 
 
 struct rf_softc {
-	device_t sc_dev;		/* common device data */
+	struct device sc_dev;		/* common device data */
 	struct disk sc_disk;		/* common disk device data */
-	struct rfc_softc *sc_rfc;	/* our parent */
 	struct bufq_state *sc_bufq;	/* queue of pending transfers */
 	int sc_state;			/* state of drive */
 	u_int8_t sc_dnum;		/* drive number, 0 or 1 */
@@ -181,7 +180,7 @@ struct rf_softc {
 
 
 
-CFATTACH_DECL_NEW(
+CFATTACH_DECL(
 	rf,
 	sizeof(struct rf_softc),
 	rf_match,
@@ -199,7 +198,7 @@ struct rfc_attach_args {
 
 
 
-const struct dkdriver rfdkdriver = {
+struct dkdriver rfdkdriver = {
 	rfstrategy
 };
 
@@ -219,7 +218,7 @@ static void rfc_intr(void *);
  * RX2ES has to be set, all other bits must be 0
  */
 int
-rfc_match(device_t parent, cfdata_t match, void *aux)
+rfc_match(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct uba_attach_args *ua = aux;
 	int i;
@@ -293,7 +292,7 @@ rfcprobedens(struct rfc_softc *rfc_sc, int dnum)
 		if ((bus_space_read_2(rfc_sc->sc_iot, rfc_sc->sc_ioh, RX2CS)
 		    & RX2CS_TR) == 0) {
 			printf("%s: did not respond to Read Sector CMD(1)\n",
-			    device_xname(rfc_sc->sc_dev));
+			    rfc_sc->sc_dev.dv_xname);
 			return(-1);
 		}
 		bus_space_write_2(rfc_sc->sc_iot, rfc_sc->sc_ioh, RX2SA, 1);
@@ -302,7 +301,7 @@ rfcprobedens(struct rfc_softc *rfc_sc, int dnum)
 		if ((bus_space_read_2(rfc_sc->sc_iot, rfc_sc->sc_ioh, RX2CS)
 		    & RX2CS_TR) == 0) {
 			printf("%s: did not respond to Read Sector CMD(2)\n",
-			    device_xname(rfc_sc->sc_dev));
+			    rfc_sc->sc_dev.dv_xname);
 			return(-1);
 		}
 		bus_space_write_2(rfc_sc->sc_iot, rfc_sc->sc_ioh, RX2TA, 1);
@@ -315,7 +314,7 @@ rfcprobedens(struct rfc_softc *rfc_sc, int dnum)
 		}
 		if (i >= 200) {
 			printf("%s: did not respond to Read Sector CMD(3)\n",
-			    device_xname(rfc_sc->sc_dev));
+			    rfc_sc->sc_dev.dv_xname);
 			return(-1);
 		}
 		if ((bus_space_read_2(rfc_sc->sc_iot, rfc_sc->sc_ioh, RX2CS)
@@ -329,14 +328,13 @@ rfcprobedens(struct rfc_softc *rfc_sc, int dnum)
 
 
 void
-rfc_attach(device_t parent, device_t self, void *aux)
+rfc_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct rfc_softc *rfc_sc = device_private(self);
 	struct uba_attach_args *ua = aux;
 	struct rfc_attach_args rfc_aa;
 	int i;
 
-	rfc_sc->sc_dev = self;
 	rfc_sc->sc_iot = ua->ua_iot;
 	rfc_sc->sc_ioh = ua->ua_ioh;
 	rfc_sc->sc_dmat = ua->ua_dmat;
@@ -346,7 +344,7 @@ rfc_attach(device_t parent, device_t self, void *aux)
 	    &rfc_sc->sc_intr_count);
 	/* Attach to the interrupt counter, see evcnt(9) */
 	evcnt_attach_dynamic(&rfc_sc->sc_intr_count, EVCNT_TYPE_INTR,
-	    ua->ua_evcnt, device_xname(rfc_sc->sc_dev), "intr");
+	    ua->ua_evcnt, rfc_sc->sc_dev.dv_xname, "intr");
 	/* get a bus_dma(9) handle */
 	i = bus_dmamap_create(rfc_sc->sc_dmat, RX2_BYTE_DD, 1, RX2_BYTE_DD, 0,
 	    BUS_DMA_ALLOCNOW, &rfc_sc->sc_dmam);
@@ -395,9 +393,9 @@ rfc_attach(device_t parent, device_t self, void *aux)
 	 * So attach them.
 	 */
 	rfc_aa.dnum = 0;
-	rfc_sc->sc_childs[0] = config_found(rfc_sc->sc_dev, &rfc_aa, rf_print);
+	rfc_sc->sc_childs[0] = config_found(&rfc_sc->sc_dev, &rfc_aa,rf_print);
 	rfc_aa.dnum = 1;
-	rfc_sc->sc_childs[1] = config_found(rfc_sc->sc_dev, &rfc_aa, rf_print);
+	rfc_sc->sc_childs[1] = config_found(&rfc_sc->sc_dev, &rfc_aa,rf_print);
 #else /* RX02_PROBE */
 	/*
 	 * There are clones of the DEC RX system with standard shugart
@@ -427,7 +425,7 @@ rfc_attach(device_t parent, device_t self, void *aux)
 
 
 int
-rf_match(device_t parent, cfdata_t match, void *aux)
+rf_match(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct rfc_attach_args *rfc_aa = aux;
 
@@ -444,18 +442,17 @@ rf_match(device_t parent, cfdata_t match, void *aux)
 
 
 void
-rf_attach(device_t parent, device_t self, void *aux)
+rf_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct rf_softc *rf_sc = device_private(self);
-	struct rfc_softc *rfc_sc = device_private(parent);
 	struct rfc_attach_args *rfc_aa = (struct rfc_attach_args *)aux;
+	struct rfc_softc *rfc_sc;
 	struct disklabel *dl;
 
-	rf_sc->sc_dev = self;
-	rf_sc->sc_rfc = rfc_sc;
+	rfc_sc = (struct rfc_softc *)device_parent(&rf_sc->sc_dev);
 	rf_sc->sc_dnum = rfc_aa->dnum;
 	rf_sc->sc_state = 0;
-	disk_init(&rf_sc->sc_disk, device_xname(rf_sc->sc_dev), &rfdkdriver);
+	disk_init(&rf_sc->sc_disk, rf_sc->sc_dev.dv_xname, &rfdkdriver);
 	disk_attach(&rf_sc->sc_disk);
 	dl = rf_sc->sc_disk.dk_label;
 	dl->d_type = DTYPE_FLOPPY;		/* drive type */
@@ -533,7 +530,7 @@ rfc_sendcmd(struct rfc_softc *rfc_sc, int cmd, int data1, int data2)
 		if ((bus_space_read_2(rfc_sc->sc_iot, rfc_sc->sc_ioh, RX2CS)
 		    & RX2CS_TR) == 0) {
 			printf("%s: did not respond to CMD %x (1)\n",
-			    device_xname(rfc_sc->sc_dev), cmd);
+			    rfc_sc->sc_dev.dv_xname, cmd);
 			return(-1);
 		}
 		bus_space_write_2(rfc_sc->sc_iot, rfc_sc->sc_ioh, RX2DB,
@@ -547,7 +544,7 @@ rfc_sendcmd(struct rfc_softc *rfc_sc, int cmd, int data1, int data2)
 		if ((bus_space_read_2(rfc_sc->sc_iot, rfc_sc->sc_ioh, RX2CS)
 		    & RX2CS_TR) == 0) {
 			printf("%s: did not respond to CMD %x (2)\n",
-			    device_xname(rfc_sc->sc_dev), cmd);
+			    rfc_sc->sc_dev.dv_xname, cmd);
 			return(-1);
 		}
 		bus_space_write_2(rfc_sc->sc_iot, rfc_sc->sc_ioh, RX2DB,
@@ -563,26 +560,27 @@ rfstrategy(struct buf *buf)
 {
 	struct rf_softc *rf_sc;
 	struct rfc_softc *rfc_sc;
-	int s;
+	int i;
 
-	if ((rf_sc = device_lookup_private(&rf_cd, DISKUNIT(buf->b_dev))) == NULL) {
+	i = DISKUNIT(buf->b_dev);
+	if (i >= rf_cd.cd_ndevs || (rf_sc = rf_cd.cd_devs[i]) == NULL) {
 		buf->b_error = ENXIO;
 		biodone(buf);
 		return;
 	}
-	rfc_sc = rf_sc->sc_rfc;
+	rfc_sc = (struct rfc_softc *)device_parent(&rf_sc->sc_dev);
 	/* We are going to operate on a non-open dev? PANIC! */
-	if ((rf_sc->sc_state & (1 << (DISKPART(buf->b_dev) + RFS_OPEN_SHIFT)))
+	if ((rf_sc->sc_state & 1 << (DISKPART(buf->b_dev) + RFS_OPEN_SHIFT))
 	    == 0)
 		panic("rfstrategy: can not operate on non-open drive %s "
-		    "partition %"PRIu32, device_xname(rf_sc->sc_dev),
+		    "partition %d", rf_sc->sc_dev.dv_xname,
 		    DISKPART(buf->b_dev));
 	if (buf->b_bcount == 0) {
 		biodone(buf);
 		return;
 	}
 	/*
-	 * bufq_put() operates on b_rawblkno. rfstrategy() gets
+	 * BUFQ_PUT() operates on b_rawblkno. rfstrategy() gets
 	 * only b_blkno that is partition relative. As a floppy does not
 	 * have partitions b_rawblkno == b_blkno.
 	 */
@@ -592,20 +590,23 @@ rfstrategy(struct buf *buf)
 	 * Seek sort for disks.  We depend on the driver which calls us using
 	 * b_resid as the current cylinder number.
 	 */
-	s = splbio();
+	i = splbio();
 	if (rfc_sc->sc_curbuf == NULL) {
 		rfc_sc->sc_curchild = rf_sc->sc_dnum;
 		rfc_sc->sc_curbuf = buf;
-		rfc_sc->sc_bufidx = buf->b_data;
+		rfc_sc->sc_bufidx = buf->b_un.b_addr;
 		rfc_sc->sc_bytesleft = buf->b_bcount;
 		rfc_intr(rfc_sc);
 	} else {
 		buf->b_resid = buf->b_blkno / RX2_SECTORS;
-		bufq_put(rf_sc->sc_bufq, buf);
+		BUFQ_PUT(rf_sc->sc_bufq, buf);
 		buf->b_resid = 0;
 	}
-	splx(s);
+	splx(i);
+	return;
 }
+
+
 
 /*
  * Look if there is another buffer in the bufferqueue of this drive
@@ -622,21 +623,21 @@ get_new_buf( struct rfc_softc *rfc_sc)
 	struct rf_softc *rf_sc;
 	struct rf_softc *other_drive;
 
-	rf_sc = device_private(rfc_sc->sc_childs[rfc_sc->sc_curchild]);
-	rfc_sc->sc_curbuf = bufq_get(rf_sc->sc_bufq);
+	rf_sc = (struct rf_softc *)rfc_sc->sc_childs[rfc_sc->sc_curchild];
+	rfc_sc->sc_curbuf = BUFQ_GET(rf_sc->sc_bufq);
 	if (rfc_sc->sc_curbuf != NULL) {
-		rfc_sc->sc_bufidx = rfc_sc->sc_curbuf->b_data;
+		rfc_sc->sc_bufidx = rfc_sc->sc_curbuf->b_un.b_addr;
 		rfc_sc->sc_bytesleft = rfc_sc->sc_curbuf->b_bcount;
 	} else {
 		RFS_SETCMD(rf_sc->sc_state, RFS_IDLE);
-		other_drive = device_private(
-		    rfc_sc->sc_childs[ rfc_sc->sc_curchild == 0 ? 1 : 0]);
+		other_drive = (struct rf_softc *)
+		    rfc_sc->sc_childs[ rfc_sc->sc_curchild == 0 ? 1 : 0];
 		if (other_drive != NULL
-		    && bufq_peek(other_drive->sc_bufq) != NULL) {
+		    && BUFQ_PEEK(other_drive->sc_bufq) != NULL) {
 			rfc_sc->sc_curchild = rfc_sc->sc_curchild == 0 ? 1 : 0;
 			rf_sc = other_drive;
-			rfc_sc->sc_curbuf = bufq_get(rf_sc->sc_bufq);
-			rfc_sc->sc_bufidx = rfc_sc->sc_curbuf->b_data;
+			rfc_sc->sc_curbuf = BUFQ_GET(rf_sc->sc_bufq);
+			rfc_sc->sc_bufidx = rfc_sc->sc_curbuf->b_un.b_addr;
 			rfc_sc->sc_bytesleft = rfc_sc->sc_curbuf->b_bcount;
 		} else
 			return(NULL);
@@ -653,8 +654,8 @@ rfc_intr(void *intarg)
 	struct rf_softc *rf_sc;
 	int i;
 
-	rf_sc = device_private(rfc_sc->sc_childs[rfc_sc->sc_curchild]);
-	for (;;) {
+	rf_sc = (struct rf_softc *)rfc_sc->sc_childs[rfc_sc->sc_curchild];
+	do {
 		/*
 		 * First clean up from previous command...
 		 */
@@ -684,7 +685,7 @@ rfc_intr(void *intarg)
 					}
 				} else {
 					printf("%s: density error.\n",
-					    device_xname(rf_sc->sc_dev));
+					    rf_sc->sc_dev.dv_xname);
 					RFS_SETCMD(rf_sc->sc_state,RFS_NOTINIT);
 					wakeup(rf_sc);
 				}
@@ -793,8 +794,7 @@ rfc_intr(void *intarg)
 		case RFS_WDDS:	/* Write Deleted Data Sector */
 		case RFS_REC:	/* Read Error Code */
 		default:
-			panic("Impossible state in rfc_intr(1): 0x%x\n",
-			    rf_sc->sc_state & RFS_CMDS);
+			panic("Impossible state in rfc_intr(1).\n");
 		}
 
 		if (rfc_sc->sc_curbuf->b_error != 0) {
@@ -912,8 +912,7 @@ rfc_intr(void *intarg)
 		case RFS_WDDS:	/* Write Deleted Data Sector */
 		case RFS_REC:	/* Read Error Code */
 		default:
-			panic("Impossible state in rfc_intr(2): 0x%x\n",
-			    rf_sc->sc_state & RFS_CMDS);
+			panic("Impossible state in rfc_intr(2).\n");
 		}
 
 		if (rfc_sc->sc_curbuf->b_error != 0) {
@@ -932,8 +931,7 @@ rfc_intr(void *intarg)
 				return;
 			continue;
 		}
-		break;
-	}
+	} while ( 1 == 0 /* CONSTCOND */ );
 	return;
 }
 
@@ -964,11 +962,13 @@ rfopen(dev_t dev, int oflags, int devtype, struct lwp *l)
 	struct rf_softc *rf_sc;
 	struct rfc_softc *rfc_sc;
 	struct disklabel *dl;
+	int unit;
 
-	if ((rf_sc = device_lookup_private(&rf_cd, DISKUNIT(dev))) == NULL)
-		return ENXIO;
-
-	rfc_sc = rf_sc->sc_rfc;
+	unit = DISKUNIT(dev);
+	if (unit >= rf_cd.cd_ndevs || (rf_sc = rf_cd.cd_devs[unit]) == NULL) {
+		return(ENXIO);
+	}
+	rfc_sc = (struct rfc_softc *)device_parent(&rf_sc->sc_dev);
 	dl = rf_sc->sc_disk.dk_label;
 	switch (DISKPART(dev)) {
 		case 0:			/* Part. a is single density. */
@@ -1052,11 +1052,16 @@ rfopen(dev_t dev, int oflags, int devtype, struct lwp *l)
 int
 rfclose(dev_t dev, int fflag, int devtype, struct lwp *l)
 {
-	struct rf_softc *rf_sc = device_lookup_private(&rf_cd, DISKUNIT(dev));
+	struct rf_softc *rf_sc;
+	int unit;
 
+	unit = DISKUNIT(dev);
+	if (unit >= rf_cd.cd_ndevs || (rf_sc = rf_cd.cd_devs[unit]) == NULL) {
+		return(ENXIO);
+	}
 	if ((rf_sc->sc_state & 1 << (DISKPART(dev) + RFS_OPEN_SHIFT)) == 0)
 		panic("rfclose: can not close non-open drive %s "
-		    "partition %"PRIu32, device_xname(rf_sc->sc_dev), DISKPART(dev));
+		    "partition %d", rf_sc->sc_dev.dv_xname, DISKPART(dev));
 	else
 		rf_sc->sc_state &= ~(1 << (DISKPART(dev) + RFS_OPEN_SHIFT));
 	if ((rf_sc->sc_state & RFS_OPEN_MASK) == 0)
@@ -1087,12 +1092,17 @@ rfwrite(dev_t dev, struct uio *uio, int ioflag)
 int
 rfioctl(dev_t dev, u_long cmd, void *data, int fflag, struct lwp *l)
 {
-	struct rf_softc *rf_sc = device_lookup_private(&rf_cd, DISKUNIT(dev));
+	struct rf_softc *rf_sc;
+	int unit;
 
+	unit = DISKUNIT(dev);
+	if (unit >= rf_cd.cd_ndevs || (rf_sc = rf_cd.cd_devs[unit]) == NULL) {
+		return(ENXIO);
+	}
 	/* We are going to operate on a non-open dev? PANIC! */
 	if ((rf_sc->sc_state & 1 << (DISKPART(dev) + RFS_OPEN_SHIFT)) == 0)
 		panic("rfioctl: can not operate on non-open drive %s "
-		    "partition %"PRIu32, device_xname(rf_sc->sc_dev), DISKPART(dev));
+		    "partition %d", rf_sc->sc_dev.dv_xname, DISKPART(dev));
 	switch (cmd) {
 	/* get and set disklabel; DIOCGPART used internally */
 	case DIOCGDINFO: /* get */

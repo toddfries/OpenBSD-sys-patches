@@ -1,4 +1,4 @@
-/*	$NetBSD: machdep.c,v 1.80 2009/02/13 22:41:02 apb Exp $	*/
+/*	$NetBSD: machdep.c,v 1.63 2006/10/21 05:54:32 mrg Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1990, 1993
@@ -77,11 +77,10 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.80 2009/02/13 22:41:02 apb Exp $");
+__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.63 2006/10/21 05:54:32 mrg Exp $");
 
 #include "opt_ddb.h"
 #include "opt_compat_netbsd.h"
-#include "opt_modular.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -115,7 +114,6 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.80 2009/02/13 22:41:02 apb Exp $");
 #include <machine/cpu.h>
 #include <machine/reg.h>
 #include <machine/pte.h>
-#include <machine/intr.h>
 
 #include <machine/kcore.h>	/* XXX should be pulled in by sys/kcore.h */
 
@@ -142,9 +140,11 @@ char	machine[] = MACHINE;	/* from <machine/param.h> */
 /* Our exported CPU info; we can have only one. */
 struct cpu_info cpu_info_store;
 
+struct vm_map *exec_map = NULL;
 struct vm_map *mb_map = NULL;
 struct vm_map *phys_map = NULL;
 
+caddr_t	msgbufaddr;
 int	maxmem;			/* max memory per process */
 int	physmem = MAXMEM;	/* max supported memory, changes to actual */
 /*
@@ -162,7 +162,7 @@ extern u_int ctrl_led_phys;
 static void identifycpu(void);
 static void initcpu(void);
 static int cpu_dumpsize(void);
-static int cpu_dump(int (*)(dev_t, daddr_t, void *, size_t), daddr_t *);
+static int cpu_dump(int (*)(dev_t, daddr_t, caddr_t, size_t), daddr_t *);
 static void cpu_init_kcore_hdr(void);
 
 #ifdef news1700
@@ -269,18 +269,24 @@ cpu_startup(void)
 	printf("total memory = %s\n", pbuf);
 
 	minaddr = 0;
+	/*
+	 * Allocate a submap for exec arguments.  This map effectively
+	 * limits the number of processes exec'ing at any time.
+	 */
+	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
+	    16 * NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
 
 	/*
 	 * Allocate a submap for physio
 	 */
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-	    VM_PHYS_SIZE, 0, false, NULL);
+	    VM_PHYS_SIZE, 0, FALSE, NULL);
 
 	/*
 	 * Finally, allocate mbuf cluster submap.
 	 */
 	mb_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-	    nmbclusters * mclbytes, VM_MAP_INTRSAFE, false, NULL);
+	    nmbclusters * mclbytes, VM_MAP_INTRSAFE, FALSE, NULL);
 
 #ifdef DEBUG
 	pmapdebug = opmapdebug;
@@ -369,8 +375,12 @@ void
 cpu_reboot(int howto, char *bootstr)
 {
 
+#if __GNUC__    /* XXX work around lame compiler problem (gcc 2.7.2) */
+	(void)&howto;
+#endif
+
 	/* take a snap shot before clobbering any registers */
-	if (curlwp->l_addr)
+	if (curlwp && curlwp->l_addr)
 		savectx(&curlwp->l_addr->u_pcb);
 
 	/* If system is cold, just halt. */
@@ -400,8 +410,6 @@ cpu_reboot(int howto, char *bootstr)
  haltsys:
 	/* Run any shutdown hooks. */
 	doshutdownhooks();
-
-	pmf_system_shutdown(boothowto);
 
 #if defined(PANICWAIT) && !defined(DDB)
 	if ((howto & RB_HALT) == 0 && panicstr) {
@@ -509,7 +517,7 @@ cpu_dumpsize(void)
  * Called by dumpsys() to dump the machine-dependent header.
  */
 static int
-cpu_dump(int (*dump)(dev_t, daddr_t, void *, size_t), daddr_t *blknop)
+cpu_dump(int (*dump)(dev_t, daddr_t, caddr_t, size_t), daddr_t *blknop)
 {
 	int buf[MDHDRSIZE / sizeof(int)];
 	cpu_kcore_hdr_t *chdr;
@@ -525,7 +533,7 @@ cpu_dump(int (*dump)(dev_t, daddr_t, void *, size_t), daddr_t *blknop)
 	kseg->c_size = MDHDRSIZE - ALIGN(sizeof(kcore_seg_t));
 
 	memcpy(chdr, &cpu_kcore_hdr, sizeof(cpu_kcore_hdr_t));
-	error = (*dump)(dumpdev, *blknop, (void *)buf, sizeof(buf));
+	error = (*dump)(dumpdev, *blknop, (caddr_t)buf, sizeof(buf));
 	*blknop += btodb(sizeof(buf));
 	return error;
 }
@@ -590,7 +598,7 @@ dumpsys(void)
 	const struct bdevsw *bdev;
 	daddr_t blkno;		/* current block to write */
 				/* dump routine */
-	int (*dump)(dev_t, daddr_t, void *, size_t);
+	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
 	int pg;			/* page being dumped */
 	paddr_t maddr;		/* PA being dumped */
 	int error;		/* error code from (*dump)() */
@@ -611,15 +619,15 @@ dumpsys(void)
 			return;
 	}
 	if (dumplo <= 0) {
-		printf("\ndump to dev %u,%u not possible\n",
-		    major(dumpdev), minor(dumpdev));
+		printf("\ndump to dev %u,%u not possible\n", major(dumpdev),
+		    minor(dumpdev));
 		return;
 	}
 	dump = bdev->d_dump;
 	blkno = dumplo;
 
-	printf("\ndumping to dev %u,%u offset %ld\n",
-	    major(dumpdev), minor(dumpdev), dumplo);
+	printf("\ndumping to dev %u,%u offset %ld\n", major(dumpdev),
+	    minor(dumpdev), dumplo);
 
 	printf("dump ");
 
@@ -632,7 +640,7 @@ dumpsys(void)
 #define NPGMB	(1024*1024/PAGE_SIZE)
 		/* print out how many MBs we have dumped */
 		if (pg && (pg % NPGMB) == 0)
-			printf_nolog("%d ", pg / NPGMB);
+			printf("%d ", pg / NPGMB);
 #undef NPGMB
 		pmap_enter(pmap_kernel(), (vaddr_t)vmmap, maddr,
 		    VM_PROT_READ, VM_PROT_READ|PMAP_WIRED);
@@ -648,7 +656,7 @@ dumpsys(void)
 
 		case ENXIO:
 			printf("device bad\n");
-				return;
+			return;
 
 		case EFAULT:
 			printf("device not ready\n");
@@ -704,7 +712,7 @@ straytrap(int pc, u_short evec)
 int	*nofault;
 
 int
-badaddr(void *addr, int nbytes)
+badaddr(caddr_t addr, int nbytes)
 {
 	int i;
 	label_t	faultbuf;
@@ -739,7 +747,7 @@ badaddr(void *addr, int nbytes)
 }
 
 int
-badbaddr(void *addr)
+badbaddr(caddr_t addr)
 {
 	int i;
 	label_t	faultbuf;
@@ -991,8 +999,65 @@ news1200_init(void)
  * XXX should do better handling XXX
  */
 
+void intrhand_lev2(void);
 void intrhand_lev3(void);
 void intrhand_lev4(void);
+
+void (*sir_routines[NSIR])(void *);
+void *sir_args[NSIR];
+u_char ssir;
+u_int next_sir;
+
+void
+intrhand_lev2(void)
+{
+	int s;
+	u_int bit;
+	u_char sintr;
+
+	/* disable level 2 interrupt */
+	*ctrl_int2 = 0;
+
+	s = splhigh();
+	sintr = ssir;
+	ssir = 0;
+	splx(s);
+
+	intrcnt[2]++;
+	uvmexp.intrs++;
+
+	for (bit = 0; bit < next_sir; bit++) {
+		if (sintr & (1 << bit)) {
+			uvmexp.softs++;
+			if (sir_routines[bit])
+				sir_routines[bit](sir_args[bit]);
+		}
+	}
+}
+/*
+ * Allocation routines for software interrupts.
+ */
+u_char
+allocate_sir(void (*proc)(void *), void *arg)
+{
+	int bit;
+
+	if (next_sir >= NSIR)
+		panic("allocate_sir: none left");
+	bit = next_sir++;
+	sir_routines[bit] = proc;
+	sir_args[bit] = arg;
+	return 1 << bit;
+}
+
+void
+init_sir(void)
+{
+
+	sir_routines[SIR_NET]   = (void (*)(void *))netintr;
+	sir_routines[SIR_CLOCK] = softclock;
+	next_sir = NEXT_SIR;
+}
 
 void
 intrhand_lev3(void)
@@ -1007,13 +1072,16 @@ intrhand_lev3(void)
 #endif
 }
 
-extern int leintr(int);
-extern int si_intr(int);
-
 void
 intrhand_lev4(void)
 {
 	int stat;
+#if NLE > 0
+	extern int leintr(int);
+#endif
+#if NSI > 0
+	extern int si_intr(int);
+#endif
 
 #define INTST_LANCE	0x04
 #define INTST_SCSI	0x80
@@ -1077,8 +1145,8 @@ consinit(void)
 		(*cn_tab->cn_init)(cn_tab);
 		break;
 	}
-#if NKSYMS || defined(DDB) || defined(MODULAR)
-	ksyms_addsyms_elf((int)esym - (int)&end - sizeof(Elf32_Ehdr),
+#if NKSYMS || defined(DDB) || defined(LKM)
+	ksyms_init((int)esym - (int)&end - sizeof(Elf32_Ehdr),
 		    (void *)&end, esym);
 #endif
 #ifdef DDB

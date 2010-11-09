@@ -1,4 +1,4 @@
-/*	$NetBSD: checkpasswd.c,v 1.8 2007/11/24 13:20:54 isaki Exp $	*/
+/*	$NetBSD: checkpasswd.c,v 1.7 2005/12/11 12:24:46 christos Exp $	*/
 
 /*-
  * Copyright (c) 1993
@@ -37,7 +37,8 @@
 #include "stand.h"
 
 char *
-getpass(const char *prompt)
+getpass(prompt)
+	const char *prompt;
 {
 	int c;
 	char *lp;
@@ -45,13 +46,13 @@ getpass(const char *prompt)
 
 	printf(prompt);
 
-	for (lp = buf;;) {
+	for (lp = buf;;)
 		switch (c = getchar() & 0177) {
 		case '\n':
 		case '\r':
 			*lp = '\0';
 			putchar('\n');
-			return buf;
+			return (buf);
 		case '\b':
 		case '\177':
 			if (lp > buf) {
@@ -86,9 +87,7 @@ getpass(const char *prompt)
 		default:
 			*lp++ = c;
 			putchar('*');
-			break;
 		}
-	}
 	/*NOTREACHED*/
 }
 
@@ -99,7 +98,6 @@ char bootpasswd[16] = {'\0'}; /* into data segment! */
 int
 checkpasswd(void)
 {
-
 	return check_password(bootpasswd);
 }
 
@@ -115,7 +113,7 @@ check_password(const char *password)
 		if (password[i])
 			break;
 	if (i == 16)
-		return 1; /* no password set */
+		return (1); /* no password set */
 
 	for (i = 0; i < 3; i++) {
 		passwd = getpass("Password: ");
@@ -123,9 +121,10 @@ check_password(const char *password)
 		MD5Update(&md5ctx, passwd, strlen(passwd));
 		MD5Final(pwdigest, &md5ctx);
 		if (memcmp(pwdigest, password, 16) == 0)
-			return 1;
+			return (1);
 	}
 
 	/* failed */
-	return 0;
+	return (0);
 }
+

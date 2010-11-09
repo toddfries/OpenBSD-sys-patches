@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile,v 1.2 2008/10/25 22:27:37 apb Exp $
+#	$NetBSD: Makefile,v 1.1 2006/09/01 21:26:18 uwe Exp $
 
 # Makefile for landisk tags file and boot blocks
 
@@ -14,8 +14,7 @@ DLANDISK=	landisk include
 tags:
 	-ctags -wdtf ${TLANDISK} ${SLANDISK} ${COMM}
 	egrep "^ENTRY(.*)|^ALTENTRY(.*)" ${ALANDISK} | \
-	    ${TOOL_SED} -e \
-		"s;\([^:]*\):\([^(]*\)(\([^, )]*\)\(.*\);\3 \1 /^\2(\3\4$$/;" \
+	    sed "s;\([^:]*\):\([^(]*\)(\([^, )]*\)\(.*\);\3 \1 /^\2(\3\4$$/;" \
 		>> ${TLANDISK}
 	sort -o ${TLANDISK} ${TLANDISK}
 

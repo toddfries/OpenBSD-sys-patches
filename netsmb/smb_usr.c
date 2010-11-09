@@ -1,4 +1,4 @@
-/*	$NetBSD: smb_usr.c,v 1.15 2008/06/24 10:37:19 gmcgarry Exp $	*/
+/*	$NetBSD: smb_usr.c,v 1.13 2006/11/16 01:33:51 christos Exp $	*/
 
 /*
  * Copyright (c) 2000-2001 Boris Popov
@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: smb_usr.c,v 1.15 2008/06/24 10:37:19 gmcgarry Exp $");
+__KERNEL_RCSID(0, "$NetBSD: smb_usr.c,v 1.13 2006/11/16 01:33:51 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/malloc.h>
@@ -72,7 +72,7 @@ smb_usr_vc2spec(struct smbioc_ossn *dp, struct smb_vcspec *spec)
 	if (dp->ioc_server == NULL)
 		return EINVAL;
 	if (dp->ioc_localcs[0] == 0) {
-		SMBERROR(("no local charset ?\n"));
+		SMBERROR("no local charset ?\n");
 		return EINVAL;
 	}
 
@@ -278,7 +278,7 @@ bad:
 }
 
 static int
-smb_cpdatain(struct mbchain *mbp, int len, void *data)
+smb_cpdatain(struct mbchain *mbp, int len, caddr_t data)
 {
 	int error;
 

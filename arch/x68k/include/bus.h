@@ -1,4 +1,4 @@
-/*	$NetBSD: bus.h,v 1.18 2008/04/28 20:23:40 martin Exp $	*/
+/*	$NetBSD: bus.h,v 1.15 2006/02/16 20:17:15 perry Exp $	*/
 
 /*-
  * Copyright (c) 1998, 2001 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -800,8 +807,8 @@ struct x68k_bus_dma {
 	void	(*x68k_dmamem_free)(bus_dma_tag_t,
 		    bus_dma_segment_t *, int);
 	int	(*x68k_dmamem_map)(bus_dma_tag_t, bus_dma_segment_t *,
-		    int, size_t, void **, int);
-	void	(*x68k_dmamem_unmap)(bus_dma_tag_t, void *, size_t);
+		    int, size_t, caddr_t *, int);
+	void	(*x68k_dmamem_unmap)(bus_dma_tag_t, caddr_t, size_t);
 	paddr_t	(*x68k_dmamem_mmap)(bus_dma_tag_t, bus_dma_segment_t *,
 		    int, off_t, int, int);
 };
@@ -854,8 +861,8 @@ int	x68k_bus_dmamem_alloc(bus_dma_tag_t tag, bus_size_t size,
 void	x68k_bus_dmamem_free(bus_dma_tag_t tag, bus_dma_segment_t *segs,
 	    int nsegs);
 int	x68k_bus_dmamem_map(bus_dma_tag_t tag, bus_dma_segment_t *segs,
-	    int nsegs, size_t size, void **kvap, int flags);
-void	x68k_bus_dmamem_unmap(bus_dma_tag_t tag, void *kva,
+	    int nsegs, size_t size, caddr_t *kvap, int flags);
+void	x68k_bus_dmamem_unmap(bus_dma_tag_t tag, caddr_t kva,
 	    size_t size);
 paddr_t	x68k_bus_dmamem_mmap(bus_dma_tag_t tag, bus_dma_segment_t *segs,
 	    int nsegs, off_t off, int prot, int flags);
@@ -894,9 +901,6 @@ int	x68k_bus_dmamem_alloc_range(bus_dma_tag_t tag, bus_size_t size,
 	((*((t)->x68k_dmamem_unmap)) ((t),(k),(s)))
 #define	bus_dmamem_mmap(t,sg,n,o,p,f) \
 	((*((t)->x68k_dmamem_mmap)) ((t),(sg),(n),(o),(p),(f)))
-
-#define bus_dmatag_subregion(t, mna, mxa, nt, f) EOPNOTSUPP
-#define bus_dmatag_destroy(t)
 
 /*
  * Flags used in various bus DMA methods.

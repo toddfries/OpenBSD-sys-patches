@@ -1,4 +1,4 @@
-/*	$NetBSD: ad1848.c,v 1.29 2008/04/28 20:23:48 martin Exp $	*/
+/*	$NetBSD: ad1848.c,v 1.26 2007/10/19 11:59:44 ad Exp $	*/
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -95,7 +102,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ad1848.c,v 1.29 2008/04/28 20:23:48 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ad1848.c,v 1.26 2007/10/19 11:59:44 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -134,7 +141,6 @@ __KERNEL_RCSID(0, "$NetBSD: ad1848.c,v 1.29 2008/04/28 20:23:48 martin Exp $");
 #ifdef AUDIO_DEBUG
 #define DPRINTF(x)	if (ad1848debug) printf x
 int	ad1848debug = 0;
-void ad1848_dump_regs(struct ad1848_softc *);
 #else
 #define DPRINTF(x)
 #endif
@@ -622,8 +628,8 @@ ad1848_get_mic_gain(struct ad1848_softc *sc, struct ad1848_volume *gp)
 	return 0;
 }
 
-static const ad1848_devmap_t *
-ad1848_mixer_find_dev(const ad1848_devmap_t *map, int cnt, mixer_ctrl_t *cp)
+static ad1848_devmap_t *
+ad1848_mixer_find_dev(ad1848_devmap_t *map, int cnt, mixer_ctrl_t *cp)
 {
 	int i;
 
@@ -636,10 +642,10 @@ ad1848_mixer_find_dev(const ad1848_devmap_t *map, int cnt, mixer_ctrl_t *cp)
 }
 
 int
-ad1848_mixer_get_port(struct ad1848_softc *ac, const struct ad1848_devmap *map,
+ad1848_mixer_get_port(struct ad1848_softc *ac, struct ad1848_devmap *map,
     int cnt, mixer_ctrl_t *cp)
 {
-	const ad1848_devmap_t *entry;
+	ad1848_devmap_t *entry;
 	struct ad1848_volume vol;
 	int error;
 	int dev;
@@ -709,10 +715,10 @@ ad1848_mixer_get_port(struct ad1848_softc *ac, const struct ad1848_devmap *map,
 }
 
 int
-ad1848_mixer_set_port(struct ad1848_softc *ac, const struct ad1848_devmap *map,
+ad1848_mixer_set_port(struct ad1848_softc *ac, struct ad1848_devmap *map,
     int cnt, mixer_ctrl_t *cp)
 {
-	const ad1848_devmap_t *entry;
+	ad1848_devmap_t *entry;
 	struct ad1848_volume vol;
 	int error;
 	int dev;

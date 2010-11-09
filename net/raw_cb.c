@@ -1,4 +1,4 @@
-/*	$NetBSD: raw_cb.c,v 1.20 2008/08/04 06:19:35 matt Exp $	*/
+/*	$NetBSD: raw_cb.c,v 1.17 2005/12/11 23:05:25 thorpej Exp $	*/
 
 /*
  * Copyright (c) 1980, 1986, 1993
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: raw_cb.c,v 1.20 2008/08/04 06:19:35 matt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: raw_cb.c,v 1.17 2005/12/11 23:05:25 thorpej Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -97,18 +97,15 @@ raw_detach(struct rawcb *rp)
 {
 	struct socket *so = rp->rcb_socket;
 
-	so->so_pcb = NULL;
-	KASSERT(so->so_lock == softnet_lock);	/* XXX */
-	LIST_REMOVE(rp, rcb_list);		/* remove last reference */
-	/* sofree drops the socket's lock. */
+	so->so_pcb = 0;
 	sofree(so);
+	LIST_REMOVE(rp, rcb_list);
 #ifdef notdef
 	if (rp->rcb_laddr)
 		m_freem(dtom(rp->rcb_laddr));
 	rp->rcb_laddr = 0;
 #endif
-	free((void *)rp, M_PCB);
-	mutex_enter(softnet_lock);
+	free((caddr_t)rp, M_PCB);
 }
 
 /*

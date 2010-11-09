@@ -1,4 +1,4 @@
-/*	$NetBSD: cpu.h,v 1.92 2008/02/27 18:26:16 xtraeme Exp $	*/
+/*	$NetBSD: cpu.h,v 1.79 2005/12/11 12:18:03 christos Exp $	*/
 
 /*
  * Copyright (c) 1982, 1990 The Regents of the University of California.
@@ -118,10 +118,6 @@
 #include <sys/cpu_data.h>
 struct cpu_info {
 	struct cpu_data ci_data;	/* MI per-cpu data */
-	cpuid_t	ci_cpuid;
-	int	ci_mtx_oldspl;
-	int	ci_mtx_count;
-	int	ci_want_resched;
 };
 
 extern struct cpu_info cpu_info_store;
@@ -151,6 +147,7 @@ struct clockframe {
 } __attribute__((packed));
 
 #define	CLKF_USERMODE(framep)	(((framep)->sr & PSL_S) == 0)
+#define	CLKF_BASEPRI(framep)	(((framep)->sr & PSL_IPL) == 0)
 #define	CLKF_PC(framep)		((framep)->pc)
 #define	CLKF_INTR(framep)	(0) /* XXX should use PSL_M (see hp300) */
 
@@ -158,20 +155,21 @@ struct clockframe {
  * Preempt the current process if in interrupt from user mode,
  * or after the current trap/syscall if in system mode.
  */
-#define	cpu_need_resched(ci, v)	{ ci->ci_want_resched++; aston(); }
+extern int want_resched;	/* resched() was called */
+#define	need_resched(ci)	{ want_resched++; aston(); }
 
 /*
  * Give a profiling tick to the current process from the softclock
  * interrupt.  Request an ast to send us through trap(),
  * marking the proc as needing a profiling tick.
  */
-#define	cpu_need_proftick(l)	( (l)->l_pflag |= LP_OWEUPC, aston() )
+#define	need_proftick(p)	( (p)->p_flag |= P_OWEUPC, aston() )
 
 /*
  * Notify the current process (p) that it has a signal pending,
  * process as soon as possible.
  */
-#define	cpu_signotify(l)	aston()
+#define	signotify(p)	aston()
 
 extern int astpending;		/* need to trap before returning to user mode */
 #define aston() (astpending++)
@@ -180,6 +178,11 @@ extern int astpending;		/* need to trap before returning to user mode */
 
 #define CPU_CONSDEV	1
 #define CPU_MAXID	2
+
+#define CTL_MACHDEP_NAMES { \
+	{ 0, 0 }, \
+	{ "console_device", CTLTYPE_STRUCT }, \
+}
 
 /* values for machineid --
  * 	These are equivalent to the MacOS Gestalt values. */
@@ -341,7 +344,9 @@ extern	unsigned long		load_addr;
 
 #ifdef _KERNEL
 
+struct frame;
 struct fpframe;
+struct pcb;
 
 /* machdep.c */
 void	mac68k_set_bell_callback(int (*)(void *, int, int, int), void *);
@@ -351,11 +356,20 @@ u_int	get_mapping(void);
 /* locore.s functions */
 void	m68881_save(struct fpframe *);
 void	m68881_restore(struct fpframe *);
-int	suline(void *, void *);
+int	suline(caddr_t, caddr_t);
+void	savectx(struct pcb *);
+void	switch_exit(struct lwp *);
+void	switch_lwp_exit(struct lwp *);
+void	proc_trampoline(void);
 void	loadustp(int);
 
-/* fpu.c */
-void	initfpu(void);
+/* sys_machdep.c */
+int	cachectl1(unsigned long, vaddr_t, size_t, struct proc *);
+
+/* vm_machdep.c */
+void	physaccess(caddr_t, caddr_t, int, int);
+void	physunaccess(caddr_t, int);
+int	kvtop(caddr_t);
 
 #endif
 

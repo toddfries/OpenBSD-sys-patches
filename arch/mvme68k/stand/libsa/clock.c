@@ -1,10 +1,9 @@
-/*	$NetBSD: clock.c,v 1.9 2009/01/12 11:32:44 tsutsui Exp $ */
+/*	$NetBSD: clock.c,v 1.7 2005/12/11 12:18:19 christos Exp $ */
 
 #include <sys/types.h>
 #include <machine/prom.h>
 
 #include <lib/libsa/stand.h>
-#include <lib/libsa/net.h>
 #include "libsa.h"
 
 /*
@@ -25,7 +24,7 @@
  * Will Unix still be here then??
  */
 const short dayyr[12] =
-    {0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334};
+{0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334};
 
 u_long
 chiptotime(int sec, int min, int hour, int day, int mon, int year)
@@ -51,15 +50,15 @@ chiptotime(int sec, int min, int hour, int day, int mon, int year)
 	if (LEAPYEAR(yr) && mon > 2)
 		days++;
 	/* now have days since Jan 1, 1970; the rest is easy... */
-	return days * SECDAY + hour * 3600 + min * 60 + sec;
+	return (days * SECDAY + hour * 3600 + min * 60 + sec);
 }
 
-satime_t
+time_t
 getsecs(void)
 {
 	struct mvmeprom_time m;
 
 	mvmeprom_rtc_rd(&m);
 	return chiptotime(m.sec_BCD, m.min_BCD, m.hour_BCD, m.day_BCD,
-	    m.month_BCD, m.year_BCD);
+			  m.month_BCD, m.year_BCD);
 }

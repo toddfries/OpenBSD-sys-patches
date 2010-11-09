@@ -1,4 +1,4 @@
-/*	$NetBSD: ieee80211_ioctl.c,v 1.51 2008/12/17 20:51:37 cegger Exp $	*/
+/*	$NetBSD: ieee80211_ioctl.c,v 1.43 2006/11/16 01:33:40 christos Exp $	*/
 /*-
  * Copyright (c) 2001 Atsushi Onoe
  * Copyright (c) 2002-2005 Sam Leffler, Errno Consulting
@@ -36,7 +36,7 @@
 __FBSDID("$FreeBSD: src/sys/net80211/ieee80211_ioctl.c,v 1.35 2005/08/30 14:27:47 avatar Exp $");
 #endif
 #ifdef __NetBSD__
-__KERNEL_RCSID(0, "$NetBSD: ieee80211_ioctl.c,v 1.51 2008/12/17 20:51:37 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ieee80211_ioctl.c,v 1.43 2006/11/16 01:33:40 christos Exp $");
 #endif
 
 /*
@@ -44,7 +44,6 @@ __KERNEL_RCSID(0, "$NetBSD: ieee80211_ioctl.c,v 1.51 2008/12/17 20:51:37 cegger 
  */
 
 #include "opt_inet.h"
-#include "opt_compat_netbsd.h"
 
 #include <sys/endian.h>
 #include <sys/param.h>
@@ -70,13 +69,6 @@ __KERNEL_RCSID(0, "$NetBSD: ieee80211_ioctl.c,v 1.51 2008/12/17 20:51:37 cegger 
 
 #include <dev/ic/wi_ieee.h>
 
-#if defined(COMPAT_09) || defined(COMPAT_10) || defined(COMPAT_11) || \
-    defined(COMPAT_12) || defined(COMPAT_13) || defined(COMPAT_14) || \
-    defined(COMPAT_15) || defined(COMPAT_16) || defined(COMPAT_20) || \
-    defined(COMPAT_30) || defined(COMPAT_40)
-#include <compat/sys/sockio.h>
-#endif
-
 #ifdef __FreeBSD__
 #define	IS_UP(_ic) \
 	(((_ic)->ic_ifp->if_flags & IFF_UP) &&			\
@@ -99,7 +91,7 @@ __KERNEL_RCSID(0, "$NetBSD: ieee80211_ioctl.c,v 1.51 2008/12/17 20:51:37 cegger 
 struct wi_read_ap_args {
 	int	i;		/* result count */
 	struct wi_apinfo *ap;	/* current entry in result buffer */
-	void *	max;		/* result buffer bound */
+	caddr_t	max;		/* result buffer bound */
 };
 
 static void
@@ -111,7 +103,7 @@ wi_read_ap_result(void *arg, struct ieee80211_node *ni)
 	struct ieee80211_rateset *rs;
 	int j;
 
-	if ((void *)(ap + 1) > sa->max)
+	if ((caddr_t)(ap + 1) > sa->max)
 		return;
 	memset(ap, 0, sizeof(struct wi_apinfo));
 	if (ic->ic_opmode == IEEE80211_M_HOSTAP) {
@@ -145,7 +137,7 @@ wi_read_ap_result(void *arg, struct ieee80211_node *ni)
 struct wi_read_prism2_args {
 	int	i;		/* result count */
 	struct wi_scan_res *res;/* current entry in result buffer */
-	void *	max;		/* result buffer bound */
+	caddr_t	max;		/* result buffer bound */
 };
 
 #if 0
@@ -156,7 +148,7 @@ wi_read_prism2_result(void *arg, struct ieee80211_node *ni)
 	struct wi_read_prism2_args *sa = arg;
 	struct wi_scan_res *res = sa->res;
 
-	if ((void *)(res + 1) > sa->max)
+	if ((caddr_t)(res + 1) > sa->max)
 		return;
 	res->wi_chan = ieee80211_chan2ieee(ic, ni->ni_chan);
 	res->wi_noise = 0;
@@ -181,7 +173,7 @@ wi_read_prism2_result(void *arg, struct ieee80211_node *ni)
 struct wi_read_sigcache_args {
 	int	i;		/* result count */
 	struct wi_sigcache *wsc;/* current entry in result buffer */
-	void *	max;		/* result buffer bound */
+	caddr_t	max;		/* result buffer bound */
 };
 
 static void
@@ -191,7 +183,7 @@ wi_read_sigcache(void *arg, struct ieee80211_node *ni)
 	struct wi_read_sigcache_args *sa = arg;
 	struct wi_sigcache *wsc = sa->wsc;
 
-	if ((void *)(wsc + 1) > sa->max)
+	if ((caddr_t)(wsc + 1) > sa->max)
 		return;
 	memset(wsc, 0, sizeof(struct wi_sigcache));
 	IEEE80211_ADDR_COPY(wsc->macsrc, ni->ni_macaddr);
@@ -203,7 +195,7 @@ wi_read_sigcache(void *arg, struct ieee80211_node *ni)
 #endif
 
 int
-ieee80211_cfgget(struct ieee80211com *ic, u_long cmd, void *data)
+ieee80211_cfgget(struct ieee80211com *ic, u_long cmd, caddr_t data)
 {
 	struct ifnet *ifp = ic->ic_ifp;
 	int i, j, error;
@@ -502,7 +494,7 @@ ieee80211_setupscan(struct ieee80211com *ic, const u_int8_t chanlist[])
 }
 
 int
-ieee80211_cfgset(struct ieee80211com *ic, u_long cmd, void *data)
+ieee80211_cfgset(struct ieee80211com *ic, u_long cmd, caddr_t data)
 {
 	struct ifnet *ifp = ic->ic_ifp;
 	int i, j, len, error, rate;
@@ -1237,7 +1229,7 @@ ieee80211_ioctl_getstainfo(struct ieee80211com *ic, struct ieee80211req *ireq)
 		ieee80211_iterate_nodes(&ic->ic_sta, get_sta_info, &req);
 		ireq->i_len = space - req.space;
 		error = copyout(p, ireq->i_data, ireq->i_len);
-		free(p, M_TEMP);
+		FREE(p, M_TEMP);
 	} else
 		ireq->i_len = 0;
 
@@ -1315,19 +1307,40 @@ ieee80211_ioctl_getmaccmd(struct ieee80211com *ic, struct ieee80211req *ireq)
 	return (acl == NULL ? EINVAL : acl->iac_getioctl(ic, ireq));
 }
 
-#if defined(COMPAT_FREEBSD_NET80211)
+/*
+ * When building the kernel with -O2 on the i386 architecture, gcc
+ * seems to want to inline this function into ieee80211_ioctl()
+ * (which is the only routine that calls it). When this happens,
+ * ieee80211_ioctl() ends up consuming an additional 2K of stack
+ * space. (Exactly why it needs so much is unclear.) The problem
+ * is that it's possible for ieee80211_ioctl() to invoke other
+ * routines (including driver init functions) which could then find
+ * themselves perilously close to exhausting the stack.
+ *
+ * To avoid this, we deliberately prevent gcc from inlining this
+ * routine. Another way to avoid this is to use less agressive
+ * optimization when compiling this file (i.e. -O instead of -O2)
+ * but special-casing the compilation of this one module in the
+ * build system would be awkward.
+ */
+#ifdef __GNUC__
+__attribute__ ((__noinline__))
+#endif
 static int
-ieee80211_ioctl_get80211_fbsd(struct ieee80211com *ic, u_long cmd,
+ieee80211_ioctl_get80211(struct ieee80211com *ic, u_long cmd,
     struct ieee80211req *ireq)
 {
+	const struct ieee80211_rsnparms *rsn = &ic->ic_bss->ni_rsn;
+	int error = 0;
+#if defined(__FreeBSD__) || defined(COMPAT_FREEBSD_NET80211)
 	u_int kid, len;
 	u_int8_t tmpkey[IEEE80211_KEYBUF_SIZE];
 	char tmpssid[IEEE80211_NWID_LEN];
-	struct ifnet *ifp = ic->ic_ifp;
-
-	int error = 0;
+#endif /* __FreeBSD__ || COMPAT_FREEBSD_NET80211 */
+	u_int m;
 
 	switch (ireq->i_type) {
+#if defined(__FreeBSD__) || defined(COMPAT_FREEBSD_NET80211)
 	case IEEE80211_IOC_SSID:
 		switch (ic->ic_state) {
 		case IEEE80211_S_INIT:
@@ -1377,6 +1390,14 @@ ieee80211_ioctl_get80211_fbsd(struct ieee80211com *ic, u_long cmd,
 	case IEEE80211_IOC_WEPTXKEY:
 		ireq->i_val = ic->ic_def_txkey;
 		break;
+#endif /* __FreeBSD__ || COMPAT_FREEBSD_NET80211 */
+	case IEEE80211_IOC_AUTHMODE:
+		if (ic->ic_flags & IEEE80211_F_WPA)
+			ireq->i_val = IEEE80211_AUTH_WPA;
+		else
+			ireq->i_val = ic->ic_bss->ni_authmode;
+		break;
+#if defined(__FreeBSD__) || defined(COMPAT_FREEBSD_NET80211)
 	case IEEE80211_IOC_CHANNEL:
 		ireq->i_val = ieee80211_chan2ieee(ic, ic->ic_curchan);
 		break;
@@ -1389,56 +1410,7 @@ ieee80211_ioctl_get80211_fbsd(struct ieee80211com *ic, u_long cmd,
 	case IEEE80211_IOC_POWERSAVESLEEP:
 		ireq->i_val = ic->ic_lintval;
 		break;
-	case IEEE80211_IOC_BSSID:
-		if (ireq->i_len != IEEE80211_ADDR_LEN)
-			return EINVAL;
-		error = copyout(ic->ic_state == IEEE80211_S_RUN ?
-					ic->ic_bss->ni_bssid :
-					ic->ic_des_bssid,
-				ireq->i_data, ireq->i_len);
-		break;
-	default:
-		error = EINVAL;
-		break;
-	}
-	return error;
-}
-#endif /* COMPAT_FREEBSD_NET80211 */
-
-/*
- * When building the kernel with -O2 on the i386 architecture, gcc
- * seems to want to inline this function into ieee80211_ioctl()
- * (which is the only routine that calls it). When this happens,
- * ieee80211_ioctl() ends up consuming an additional 2K of stack
- * space. (Exactly why it needs so much is unclear.) The problem
- * is that it's possible for ieee80211_ioctl() to invoke other
- * routines (including driver init functions) which could then find
- * themselves perilously close to exhausting the stack.
- *
- * To avoid this, we deliberately prevent gcc from inlining this
- * routine. Another way to avoid this is to use less agressive
- * optimization when compiling this file (i.e. -O instead of -O2)
- * but special-casing the compilation of this one module in the
- * build system would be awkward.
- */
-#ifdef __GNUC__
-__attribute__ ((__noinline__))
-#endif
-static int
-ieee80211_ioctl_get80211(struct ieee80211com *ic, u_long cmd,
-    struct ieee80211req *ireq)
-{
-	const struct ieee80211_rsnparms *rsn = &ic->ic_bss->ni_rsn;
-	int error = 0;
-	u_int m;
-
-	switch (ireq->i_type) {
-	case IEEE80211_IOC_AUTHMODE:
-		if (ic->ic_flags & IEEE80211_F_WPA)
-			ireq->i_val = IEEE80211_AUTH_WPA;
-		else
-			ireq->i_val = ic->ic_bss->ni_authmode;
-		break;
+#endif /* __FreeBSD__ || COMPAT_FREEBSD_NET80211 */
 	case IEEE80211_IOC_RTSTHRESHOLD:
 		ireq->i_val = ic->ic_rtsthreshold;
 		break;
@@ -1532,6 +1504,16 @@ ieee80211_ioctl_get80211(struct ieee80211com *ic, u_long cmd,
 	case IEEE80211_IOC_CHANINFO:
 		error = ieee80211_ioctl_getchaninfo(ic, ireq);
 		break;
+#if defined(__FreeBSD__) || defined(COMPAT_FREEBSD_NET80211)
+	case IEEE80211_IOC_BSSID:
+		if (ireq->i_len != IEEE80211_ADDR_LEN)
+			return EINVAL;
+		error = copyout(ic->ic_state == IEEE80211_S_RUN ?
+					ic->ic_bss->ni_bssid :
+					ic->ic_des_bssid,
+				ireq->i_data, ireq->i_len);
+		break;
+#endif /* __FreeBSD__ || COMPAT_FREEBSD_NET80211 */
 	case IEEE80211_IOC_WPAIE:
 		error = ieee80211_ioctl_getwpaie(ic, ireq);
 		break;
@@ -1578,11 +1560,7 @@ ieee80211_ioctl_get80211(struct ieee80211com *ic, u_long cmd,
 		error = ieee80211_ioctl_getmaccmd(ic, ireq);
 		break;
 	default:
-#if defined(COMPAT_FREEBSD_NET80211)
-		error = ieee80211_ioctl_get80211_fbsd(ic, cmd, ireq);
-#else
 		error = EINVAL;
-#endif /* COMPAT_FREEBSD_NET80211 */
 		break;
 	}
 	return error;
@@ -1611,7 +1589,7 @@ ieee80211_ioctl_setoptie(struct ieee80211com *ic, struct ieee80211req *ireq)
 	error = copyin(ireq->i_data, ie, ireq->i_len);
 	/* XXX sanity check data? */
 	if (ic->ic_opt_ie != NULL)
-		free(ic->ic_opt_ie, M_DEVBUF);
+		FREE(ic->ic_opt_ie, M_DEVBUF);
 	ic->ic_opt_ie = ie;
 	ic->ic_opt_ie_len = ireq->i_len;
 	return 0;
@@ -2504,7 +2482,7 @@ ieee80211_ioctl_set80211(struct ieee80211com *ic, u_long cmd,
 
 #ifdef __FreeBSD__
 int
-ieee80211_ioctl(struct ieee80211com *ic, u_long cmd, void *data)
+ieee80211_ioctl(struct ieee80211com *ic, u_long cmd, caddr_t data)
 {
 	struct ifnet *ifp = ic->ic_ifp;
 	int error = 0;
@@ -2548,6 +2526,51 @@ ieee80211_ioctl(struct ieee80211com *ic, u_long cmd, void *data)
 		else
 			ifp->if_mtu = ifr->ifr_mtu;
 		break;
+	case SIOCSIFADDR:
+		/*
+		 * XXX Handle this directly so we can supress if_init calls.
+		 * XXX This should be done in ether_ioctl but for the moment
+		 * XXX there are too many other parts of the system that
+		 * XXX set IFF_UP and so supress if_init being called when
+		 * XXX it should be.
+		 */
+		ifa = (struct ifaddr *) data;
+		switch (ifa->ifa_addr->sa_family) {
+#ifdef INET
+		case AF_INET:
+			if ((ifp->if_flags & IFF_UP) == 0) {
+				ifp->if_flags |= IFF_UP;
+				ifp->if_init(ifp->if_softc);
+			}
+			arp_ifinit(ifp, ifa);
+			break;
+#endif
+#ifdef IPX
+		/*
+		 * XXX - This code is probably wrong,
+		 *	 but has been copied many times.
+		 */
+		case AF_IPX: {
+			struct ipx_addr *ina = &(IA_SIPX(ifa)->sipx_addr);
+
+			if (ipx_nullhost(*ina))
+				ina->x_host = *(union ipx_host *)
+				    IFP2ENADDR(ifp);
+			else
+				bcopy((caddr_t) ina->x_host.c_host,
+				      (caddr_t) IFP2ENADDR(ifp),
+				      ETHER_ADDR_LEN);
+			/* fall thru... */
+		}
+#endif
+		default:
+			if ((ifp->if_flags & IFF_UP) == 0) {
+				ifp->if_flags |= IFF_UP;
+				ifp->if_init(ifp->if_softc);
+			}
+			break;
+		}
+		break;
 	default:
 		error = ether_ioctl(ifp, cmd, data);
 		break;
@@ -2580,7 +2603,7 @@ ieee80211_get_ostats(struct ieee80211_ostats *ostats,
 
 #ifdef __NetBSD__
 int
-ieee80211_ioctl(struct ieee80211com *ic, u_long cmd, void *data)
+ieee80211_ioctl(struct ieee80211com *ic, u_long cmd, caddr_t data)
 {
 	struct ifnet *ifp = ic->ic_ifp;
 	struct ifreq *ifr = (struct ifreq *)data;
@@ -2600,9 +2623,6 @@ ieee80211_ioctl(struct ieee80211com *ic, u_long cmd, void *data)
 	u_int8_t tmpkey[IEEE80211_WEP_NKID][IEEE80211_KEYBUF_SIZE];
 
 	switch (cmd) {
-#ifdef OSIOCSIFMEDIA
-	case OSIOCSIFMEDIA:
-#endif
 	case SIOCSIFMEDIA:
 	case SIOCGIFMEDIA:
 		error = ifmedia_ioctl(ifp, ifr, &ic->ic_media, cmd);
@@ -2898,8 +2918,8 @@ ieee80211_ioctl(struct ieee80211com *ic, u_long cmd, void *data)
 		if (!(IEEE80211_MTU_MIN <= ifr->ifr_mtu &&
 		    ifr->ifr_mtu <= IEEE80211_MTU_MAX))
 			error = EINVAL;
-		else if ((error = ifioctl_common(ifp, cmd, data)) == ENETRESET)
-			error = 0;
+		else
+			ifp->if_mtu = ifr->ifr_mtu;
 		break;
 	default:
 		error = ether_ioctl(ifp, cmd, data);

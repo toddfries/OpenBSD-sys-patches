@@ -1,4 +1,4 @@
-/*	$NetBSD: emul.c,v 1.79 2009/02/27 15:15:19 pooka Exp $	*/
+/*	$NetBSD: emul.c,v 1.146 2010/10/15 15:55:53 tsutsui Exp $	*/
 
 /*
  * Copyright (c) 2007 Antti Kantee.  All Rights Reserved.
@@ -28,10 +28,9 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: emul.c,v 1.79 2009/02/27 15:15:19 pooka Exp $");
+__KERNEL_RCSID(0, "$NetBSD: emul.c,v 1.146 2010/10/15 15:55:53 tsutsui Exp $");
 
 #include <sys/param.h>
-#include <sys/malloc.h>
 #include <sys/null.h>
 #include <sys/vnode.h>
 #include <sys/stat.h>
@@ -43,8 +42,6 @@ __KERNEL_RCSID(0, "$NetBSD: emul.c,v 1.79 2009/02/27 15:15:19 pooka Exp $");
 #include <sys/device.h>
 #include <sys/queue.h>
 #include <sys/file.h>
-#include <sys/filedesc.h>
-#include <sys/kthread.h>
 #include <sys/cpu.h>
 #include <sys/kmem.h>
 #include <sys/poll.h>
@@ -53,10 +50,10 @@ __KERNEL_RCSID(0, "$NetBSD: emul.c,v 1.79 2009/02/27 15:15:19 pooka Exp $");
 #include <sys/module.h>
 #include <sys/tty.h>
 #include <sys/reboot.h>
+#include <sys/syscallvar.h>
+#include <sys/xcall.h>
 
 #include <dev/cons.h>
-
-#include <machine/stdarg.h>
 
 #include <rump/rumpuser.h>
 
@@ -64,448 +61,71 @@ __KERNEL_RCSID(0, "$NetBSD: emul.c,v 1.79 2009/02/27 15:15:19 pooka Exp $");
 
 #include "rump_private.h"
 
-time_t time_second = 1;
-
-kmutex_t *proc_lock;
 struct lwp lwp0;
 struct vnode *rootvp;
-struct device *root_device;
-dev_t rootdev;
+dev_t rootdev = NODEV;
 int physmem = 256*256; /* 256 * 1024*1024 / 4k, PAGE_SIZE not always set */
-int doing_shutdown;
-int ncpu = 1;
+int nkmempages = 256*256/2; /* from le chapeau */
 const int schedppq = 1;
 int hardclock_ticks;
 bool mp_online = false;
-struct vm_map *mb_map;
 struct timeval boottime;
-struct emul emul_netbsd;
 int cold = 1;
-int boothowto;
+int boothowto = AB_SILENT;
 struct tty *constty;
 
-char hostname[MAXHOSTNAMELEN];
-size_t hostnamelen;
-
-u_long	bufmem_valimit;
-u_long	bufmem_hiwater;
-u_long	bufmem_lowater;
-u_long	bufmem;
-u_int	nbuf;
-
-const char *panicstr;
-const char ostype[] = "NetBSD";
-const char osrelease[] = "999"; /* paradroid 4evah */
-const char kernel_ident[] = "RUMP-ROAST";
-const char *domainname;
-int domainnamelen;
-
-const struct filterops seltrue_filtops;
-
-#define DEVSW_SIZE 255
-const struct bdevsw *bdevsw0[DEVSW_SIZE]; /* XXX storage size */
+const struct bdevsw *bdevsw0[255];
 const struct bdevsw **bdevsw = bdevsw0;
-const int sys_cdevsws = DEVSW_SIZE;
-int max_cdevsws = DEVSW_SIZE;
+const int sys_cdevsws = 255;
+int max_cdevsws = 255;
 
-const struct cdevsw *cdevsw0[DEVSW_SIZE]; /* XXX storage size */
+const struct cdevsw *cdevsw0[255];
 const struct cdevsw **cdevsw = cdevsw0;
-const int sys_bdevsws = DEVSW_SIZE;
-int max_bdevsws = DEVSW_SIZE;
+const int sys_bdevsws = 255;
+int max_bdevsws = 255;
 
-struct devsw_conv devsw_conv0;
-struct devsw_conv *devsw_conv = &devsw_conv0;
-int max_devsw_convs = 0;
 int mem_no = 2;
 
+struct device *booted_device;
+struct device *booted_wedge;
+int booted_partition;
+
+/* XXX: unused */
 kmutex_t tty_lock;
+krwlock_t exec_lock;
 
-int
-copyin(const void *uaddr, void *kaddr, size_t len)
-{
+struct lwplist alllwp = LIST_HEAD_INITIALIZER(alllwp);
 
-	memcpy(kaddr, uaddr, len);
-	return 0;
-}
+/* sparc doesn't sport constant page size, pretend we have 4k pages */
+#ifdef __sparc__
+int nbpg = 4096;
+int pgofset = 4096-1;
+int pgshift = 12;
+#endif
 
-int
-copyout(const void *kaddr, void *uaddr, size_t len)
-{
+/* on sun3 VM_MAX_ADDRESS is a const variable */
+/* XXX: should be moved into rump.c and initialize for sun3 and sun3x? */
+#ifdef sun3
+const vaddr_t kernbase = KERNBASE3;
+#endif
 
-	memcpy(uaddr, kaddr, len);
-	return 0;
-}
-
-int
-copystr(const void *kfaddr, void *kdaddr, size_t len, size_t *done)
-{
-
-	return copyinstr(kfaddr, kdaddr, len, done);
-}
-
-int
-copyinstr(const void *uaddr, void *kaddr, size_t len, size_t *done)
-{
-
-	strlcpy(kaddr, uaddr, len);
-	if (done)
-		*done = strlen(kaddr)+1; /* includes termination */
-	return 0;
-}
-
-int
-copyin_vmspace(struct vmspace *vm, const void *uaddr, void *kaddr, size_t len)
-{
-
-	return copyin(uaddr, kaddr, len);
-}
-
-int
-copyout_vmspace(struct vmspace *vm, const void *kaddr, void *uaddr, size_t len)
-{
-
-	return copyout(kaddr, uaddr, len);
-}
-
-int
-kcopy(const void *src, void *dst, size_t len)
-{
-
-	memcpy(dst, src, len);
-	return 0;
-}
-
-int
-uiomove(void *buf, size_t n, struct uio *uio)
-{
-	struct iovec *iov;
-	uint8_t *b = buf;
-	size_t cnt;
-
-	if (uio->uio_vmspace != UIO_VMSPACE_SYS)
-		panic("%s: vmspace != UIO_VMSPACE_SYS", __func__);
-
-	while (n && uio->uio_resid) {
-		iov = uio->uio_iov;
-		cnt = iov->iov_len;
-		if (cnt == 0) {
-			uio->uio_iov++;
-			uio->uio_iovcnt--;
-			continue;
-		}
-		if (cnt > n)
-			cnt = n;
-
-		if (uio->uio_rw == UIO_READ)
-			memcpy(iov->iov_base, b, cnt);
-		else
-			memcpy(b, iov->iov_base, cnt);
-
-		iov->iov_base = (uint8_t *)iov->iov_base + cnt;
-		iov->iov_len -= cnt;
-		b += cnt;
-		uio->uio_resid -= cnt;
-		uio->uio_offset += cnt;
-		n -= cnt;
-	}
-
-	return 0;
-}
-
-void
-uio_setup_sysspace(struct uio *uio)
-{
-
-	uio->uio_vmspace = UIO_VMSPACE_SYS;
-}
-
-devclass_t
-device_class(device_t dev)
-{
-
-	if (dev != root_device)
-		panic("%s: dev != root_device not supported", __func__);
-
-	return DV_DISK;
-}
-
-void
-getmicrouptime(struct timeval *tvp)
-{
-	uint64_t sec, nsec;
-	int error;
-
-	/* XXX: this is wrong, does not report *uptime* */
-	rumpuser_gettime(&sec, &nsec, &error);
-	tvp->tv_sec = sec;
-	tvp->tv_usec = nsec / 1000;
-}
-
-void
-malloc_type_attach(struct malloc_type *type)
-{
-
-	return;
-}
-
-void
-malloc_type_detach(struct malloc_type *type)
-{
-
-	return;
-}
-
-void *
-kern_malloc(unsigned long size, struct malloc_type *type, int flags)
-{
-	void *rv;
-
-	rv = rumpuser_malloc(size, (flags & (M_CANFAIL | M_NOWAIT)) != 0);
-	if (rv && flags & M_ZERO)
-		memset(rv, 0, size);
-
-	return rv;
-}
-
-void *
-kern_realloc(void *ptr, unsigned long size, struct malloc_type *type, int flags)
-{
-
-	return rumpuser_malloc(size, (flags & (M_CANFAIL | M_NOWAIT)) != 0);
-}
-
-void
-kern_free(void *ptr, struct malloc_type *type)
-{
-
-	rumpuser_free(ptr);
-}
-
-static void
-gettime(struct timespec *ts)
-{
-	uint64_t sec, nsec;
-	int error;
-
-	rumpuser_gettime(&sec, &nsec, &error);
-	ts->tv_sec = sec;
-	ts->tv_nsec = nsec;
-}
-
-void
-nanotime(struct timespec *ts)
-{
-
-	if (rump_threads) {
-		rump_gettime(ts);
-	} else {
-		gettime(ts);
-	}
-}
-
-/* hooray for mick, so what if I do */
-void
-getnanotime(struct timespec *ts)
-{
-
-	nanotime(ts);
-}
-
-void
-microtime(struct timeval *tv)
-{
-	struct timespec ts;
-
-	if (rump_threads) {
-		rump_gettime(&ts);
-		TIMESPEC_TO_TIMEVAL(tv, &ts);
-	} else {
-		gettime(&ts);
-		TIMESPEC_TO_TIMEVAL(tv, &ts);
-	}
-}
-
-void
-getmicrotime(struct timeval *tv)
-{
-
-	microtime(tv);
-}
-
-struct kthdesc {
-	void (*f)(void *);
-	void *arg;
-	struct lwp *mylwp;
+struct loadavg averunnable = {
+	{ 0 * FSCALE,
+	  1 * FSCALE,
+	  11 * FSCALE, },
+	FSCALE,
 };
 
-static void *
-threadbouncer(void *arg)
-{
-	struct kthdesc *k = arg;
-	void (*f)(void *);
-	void *thrarg;
+struct emul emul_netbsd = {
+	.e_name = "netbsd-rump",
+	.e_sysent = rump_sysent,
+	.e_vm_default_addr = uvm_default_mapaddr,
+#ifdef __HAVE_SYSCALL_INTERN
+	.e_syscall_intern = syscall_intern,
+#endif
+};
 
-	f = k->f;
-	thrarg = k->arg;
-	rumpuser_set_curlwp(k->mylwp);
-	kmem_free(k, sizeof(struct kthdesc));
-
-	if ((curlwp->l_pflag & LP_MPSAFE) == 0)
-		KERNEL_LOCK(1, NULL);
-	f(thrarg);
-	panic("unreachable, should kthread_exit()");
-}
-
-int
-kthread_create(pri_t pri, int flags, struct cpu_info *ci,
-	void (*func)(void *), void *arg, lwp_t **newlp, const char *fmt, ...)
-{
-	char thrstore[MAXCOMLEN];
-	const char *thrname = NULL;
-	va_list ap;
-	struct kthdesc *k;
-	struct lwp *l;
-	int rv;
-
-	thrstore[0] = '\0';
-	if (fmt) {
-		va_start(ap, fmt);
-		vsnprintf(thrstore, sizeof(thrstore), fmt, ap);
-		va_end(ap);
-		thrname = thrstore;
-	}
-
-	/*
-	 * We don't want a module unload thread.
-	 * (XXX: yes, this is a kludge too, and the kernel should
-	 * have a more flexible method for configuring which threads
-	 * we want).
-	 */
-	if (strcmp(thrstore, "modunload") == 0) {
-		return 0;
-	}
-
-	if (!rump_threads) {
-		/* fake them */
-		if (strcmp(thrstore, "vrele") == 0) {
-			printf("rump warning: threads not enabled, not starting"
-			   " vrele thread\n");
-			return 0;
-		} else if (strcmp(thrstore, "cachegc") == 0) {
-			printf("rump warning: threads not enabled, not starting"
-			   " namecache g/c thread\n");
-			return 0;
-		} else if (strcmp(thrstore, "nfssilly") == 0) {
-			printf("rump warning: threads not enabled, not enabling"
-			   " nfs silly rename\n");
-			return 0;
-		} else
-			panic("threads not available, setenv RUMP_THREADS 1");
-	}
-
-	KASSERT(fmt != NULL);
-	if (ci != NULL)
-		panic("%s: bounded threads not supported", __func__);
-
-	k = kmem_alloc(sizeof(struct kthdesc), KM_SLEEP);
-	k->f = func;
-	k->arg = arg;
-	k->mylwp = l = rump_setup_curlwp(0, rump_nextlid(), 0);
-	if (flags & KTHREAD_MPSAFE)
-		l->l_pflag |= LP_MPSAFE;
-	rv = rumpuser_thread_create(threadbouncer, k, thrname);
-	if (rv)
-		return rv;
-
-	if (newlp)
-		*newlp = l;
-	return 0;
-}
-
-void
-kthread_exit(int ecode)
-{
-
-	if ((curlwp->l_pflag & LP_MPSAFE) == 0)
-		KERNEL_UNLOCK_ONE(NULL);
-	rump_clear_curlwp();
-	rumpuser_thread_exit();
-}
-
-struct proc *
-p_find(pid_t pid, uint flags)
-{
-
-	panic("%s: not implemented", __func__);
-}
-
-struct pgrp *
-pg_find(pid_t pid, uint flags)
-{
-
-	panic("%s: not implemented", __func__);
-}
-
-void
-psignal(struct proc *p, int signo)
-{
-
-	switch (signo) {
-	case SIGSYS:
-		break;
-	default:
-		panic("unhandled signal %d", signo);
-	}
-}
-
-void
-kpsignal(struct proc *p, ksiginfo_t *ksi, void *data)
-{
-
-	panic("%s: not implemented", __func__);
-}
-
-void
-kpgsignal(struct pgrp *pgrp, ksiginfo_t *ksi, void *data, int checkctty)
-{
-
-	panic("%s: not implemented", __func__);
-}
-
-int
-pgid_in_session(struct proc *p, pid_t pg_id)
-{
-
-	panic("%s: not implemented", __func__);
-}
-
-int
-sigispending(struct lwp *l, int signo)
-{
-
-	return 0;
-}
-
-void
-sigpending1(struct lwp *l, sigset_t *ss)
-{
-
-	panic("%s: not implemented", __func__);
-}
-
-void
-knote_fdclose(int fd)
-{
-
-	/* since we don't add knotes, we don't have to remove them */
-}
-
-int
-seltrue_kqfilter(dev_t dev, struct knote *kn)
-{
-
-	panic("%s: not implemented", __func__);
-}
+u_int nprocs = 1;
 
 int
 kpause(const char *wmesg, bool intr, int timeo, kmutex_t *mtx)
@@ -513,7 +133,7 @@ kpause(const char *wmesg, bool intr, int timeo, kmutex_t *mtx)
 	extern int hz;
 	int rv, error;
 	uint64_t sec, nsec;
-	
+
 	if (mtx)
 		mutex_exit(mtx);
 
@@ -531,19 +151,31 @@ kpause(const char *wmesg, bool intr, int timeo, kmutex_t *mtx)
 }
 
 void
-suspendsched()
-{
-
-	panic("%s: not implemented", __func__);
-}
-
-u_int
 lwp_unsleep(lwp_t *l, bool cleanup)
 {
 
 	KASSERT(mutex_owned(l->l_mutex));
 
-	return (*l->l_syncobj->sobj_unsleep)(l, cleanup);
+	(*l->l_syncobj->sobj_unsleep)(l, cleanup);
+}
+
+void
+lwp_update_creds(struct lwp *l)
+{
+	struct proc *p;
+	kauth_cred_t oldcred;
+
+	p = l->l_proc;
+	oldcred = l->l_cred;
+	l->l_prflag &= ~LPR_CRMOD;
+
+	mutex_enter(p->p_lock);
+	kauth_cred_hold(p->p_cred);
+	l->l_cred = p->p_cred;
+	mutex_exit(p->p_lock);
+
+	if (oldcred != NULL)
+		kauth_cred_free(oldcred);
 }
 
 vaddr_t
@@ -558,38 +190,6 @@ calc_cache_size(struct vm_map *map, int pct, int va_pct)
 	return t;
 }
 
-int
-seltrue(dev_t dev, int events, struct lwp *l)
-{
-        return (events & (POLLIN | POLLOUT | POLLRDNORM | POLLWRNORM));
-}
-
-void
-selrecord(lwp_t *selector, struct selinfo *sip)
-{
-}
-
-void
-selinit(struct selinfo *sip)
-{
-}
-
-void
-selnotify(struct selinfo *sip, int events, long knhint)
-{
-}
-
-void
-seldestroy(struct selinfo *sip)
-{
-}
-
-const char *
-device_xname(device_t dv)
-{
-	return "bogus0";
-}
-
 void
 assert_sleepable(void)
 {
@@ -598,28 +198,7 @@ assert_sleepable(void)
 }
 
 void
-tc_setclock(const struct timespec *ts)
-{
-
-	panic("%s: not implemented", __func__);
-}
-
-void
-proc_crmod_enter()
-{
-
-	panic("%s: not implemented", __func__);
-}
-
-void
-proc_crmod_leave(kauth_cred_t c1, kauth_cred_t c2, bool sugid)
-{
-
-	panic("%s: not implemented", __func__);
-}
-
-void
-module_init_md()
+module_init_md(void)
 {
 
 	/*
@@ -645,35 +224,29 @@ rump_delay(unsigned int us)
 }
 void (*delay_func)(unsigned int) = rump_delay;
 
-void
-kpreempt_disable()
-{
+/*
+ * Provide weak aliases for tty routines used by printf.
+ * They will be used unless the rumpkern_tty component is present.
+ */
 
-	/* XXX: see below */
-	KPREEMPT_DISABLE(curlwp);
-}
-
-void
-kpreempt_enable()
-{
-
-	/* try to make sure kpreempt_disable() is only used from panic() */
-	panic("kpreempt not supported");
-}
-
-void
-sessdelete(struct session *ss)
-{
-
-	panic("sessdelete() impossible, session %p", ss);
-}
-
+int rump_ttycheckoutq(struct tty *, int);
 int
-ttycheckoutq(struct tty *tp, int wait)
+rump_ttycheckoutq(struct tty *tp, int wait)
 {
 
 	return 1;
 }
+__weak_alias(ttycheckoutq,rump_ttycheckoutq);
+
+int rump_tputchar(int, int, struct tty *);
+int
+rump_tputchar(int c, int flags, struct tty *tp)
+{
+
+	cnputc(c);
+	return 0;
+}
+__weak_alias(tputchar,rump_tputchar);
 
 void
 cnputc(int c)
@@ -684,29 +257,35 @@ cnputc(int c)
 }
 
 void
-cnflush()
+cnflush(void)
 {
 
 	/* done */
-}
-
-int
-tputchar(int c, int flags, struct tty *tp)
-{
-
-	cnputc(c);
-	return 0;
 }
 
 void
 cpu_reboot(int howto, char *bootstr)
 {
 
-	rumpuser_panic();
+	rump_reboot(howto);
+
+	/* this function is __dead, we must exit */
+	rumpuser_exit(0);
 }
 
-/* XXX: static, but not used except to make spcopy.S link */
-#ifdef __hppa__
-#undef curlwp
-struct lwp *curlwp = &lwp0;
+#ifdef __HAVE_SYSCALL_INTERN
+void
+syscall_intern(struct proc *p)
+{
+
+	/* no you don't */
+}
 #endif
+
+void
+xc_send_ipi(struct cpu_info *ci)
+{
+
+	/* I'll think about the implementation if this is ever used */
+	panic("not implemented");
+}

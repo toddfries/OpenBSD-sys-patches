@@ -1,4 +1,4 @@
-/*	$NetBSD: ibcs2_socksys.c,v 1.19 2009/01/11 02:45:47 christos Exp $	*/
+/*	$NetBSD: ibcs2_socksys.c,v 1.13 2006/06/26 21:23:57 mrg Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995 Scott Bartram
@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ibcs2_socksys.c,v 1.19 2009/01/11 02:45:47 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ibcs2_socksys.c,v 1.13 2006/06/26 21:23:57 mrg Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -37,10 +37,12 @@ __KERNEL_RCSID(0, "$NetBSD: ibcs2_socksys.c,v 1.19 2009/01/11 02:45:47 christos 
 #include <sys/termios.h>
 #include <sys/tty.h>
 #include <sys/socket.h>
+#include <sys/ioctl.h>
 #include <sys/mount.h>
 #include <net/if.h>
 
 
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 
 #include <compat/ibcs2/ibcs2_socksys.h>
@@ -50,9 +52,19 @@ __KERNEL_RCSID(0, "$NetBSD: ibcs2_socksys.c,v 1.19 2009/01/11 02:45:47 christos 
  * iBCS2 socksys calls.
  */
 
+struct ibcs2_socksys_args {
+	int     fd;
+	int     magic;
+	caddr_t argsp;
+};
+
 int
-ibcs2_socksys(struct lwp *l, const struct ibcs2_socksys_args *uap, register_t *retval)
+ibcs2_socksys(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
+	struct ibcs2_socksys_args *uap = v;
 	int error;
 	int realargs[7]; /* 1 for command, 6 for recvfrom */
 
@@ -62,7 +74,7 @@ ibcs2_socksys(struct lwp *l, const struct ibcs2_socksys_args *uap, register_t *r
 	 * The others are (and should be) only legal on sockets.
 	 */
 
-	error = copyin(uap->argsp, (void *)realargs, sizeof(realargs));
+	error = copyin(uap->argsp, (caddr_t)realargs, sizeof(realargs));
 	if (error)
 		return error;
 	DPRINTF(("ibcs2_socksys: %08x %08x %08x %08x %08x %08x %08x\n",
@@ -70,55 +82,55 @@ ibcs2_socksys(struct lwp *l, const struct ibcs2_socksys_args *uap, register_t *r
 	       realargs[4], realargs[5], realargs[6]));
 	switch (realargs[0]) {
 	case SOCKSYS_ACCEPT:
-		return sys_accept(l, (const void *)(realargs + 1), retval);
+		return sys_accept(l, realargs + 1, retval);
 	case SOCKSYS_BIND:
-		return sys_bind(l, (const void *)(realargs + 1), retval);
+		return sys_bind(l, realargs + 1, retval);
 	case SOCKSYS_CONNECT:
-		return sys_connect(l, (const void *)(realargs + 1), retval);
+		return sys_connect(l, realargs + 1, retval);
 	case SOCKSYS_GETPEERNAME:
-		return sys_getpeername(l, (const void *)(realargs + 1), retval);
+		return sys_getpeername(l, realargs + 1, retval);
 	case SOCKSYS_GETSOCKNAME:
-		return sys_getsockname(l, (const void *)(realargs + 1), retval);
+		return sys_getsockname(l, realargs + 1, retval);
 	case SOCKSYS_GETSOCKOPT:
-		return sys_getsockopt(l, (const void *)(realargs + 1), retval);
+		return sys_getsockopt(l, realargs + 1, retval);
 	case SOCKSYS_LISTEN:
-		return sys_listen(l, (const void *)(realargs + 1), retval);
+		return sys_listen(l, realargs + 1, retval);
 	case SOCKSYS_RECV:
 		realargs[5] = realargs[6] = 0;
 		/* FALLTHROUGH */
 	case SOCKSYS_RECVFROM:
-		return sys_recvfrom(l, (const void *)(realargs + 1), retval);
+		return sys_recvfrom(l, realargs + 1, retval);
 	case SOCKSYS_SEND:
 		realargs[5] = realargs[6] = 0;
 		/* FALLTHROUGH */
 	case SOCKSYS_SENDTO:
-		return sys_sendto(l, (const void *)(realargs + 1), retval);
+		return sys_sendto(l, realargs + 1, retval);
 	case SOCKSYS_SETSOCKOPT:
-		return sys_setsockopt(l, (const void *)(realargs + 1), retval);
+		return sys_setsockopt(l, realargs + 1, retval);
 	case SOCKSYS_SHUTDOWN:
-		return sys_shutdown(l, (const void *)(realargs + 1), retval);
+		return sys_shutdown(l, realargs + 1, retval);
 	case SOCKSYS_SOCKET:
-		return compat_30_sys_socket(l, (const void *)(realargs + 1), retval);
+		return compat_30_sys_socket(l, realargs + 1, retval);
 	case SOCKSYS_SELECT:
-		return compat_50_sys_select(l, (const void *)(realargs + 1), retval);
+		return sys_select(l, realargs + 1, retval);
 	case SOCKSYS_GETIPDOMAIN:
-		return compat_09_sys_getdomainname(l, (const void *)(realargs + 1), retval);
+		return compat_09_sys_getdomainname(l, realargs + 1, retval);
 	case SOCKSYS_SETIPDOMAIN:
-		return compat_09_sys_setdomainname(l, (const void *)(realargs + 1), retval);
+		return compat_09_sys_setdomainname(l, realargs + 1, retval);
 	case SOCKSYS_ADJTIME:
-		return compat_50_sys_adjtime(l, (const void *)(realargs + 1), retval);
+		return sys_adjtime(l, realargs + 1, retval);
 	case SOCKSYS_SETREUID:
-		return sys_setreuid(l, (const void *)(realargs + 1), retval);
+		return sys_setreuid(l, realargs + 1, retval);
 	case SOCKSYS_SETREGID:
-		return sys_setregid(l, (const void *)(realargs + 1), retval);
+		return sys_setregid(l, realargs + 1, retval);
 	case SOCKSYS_GETTIME:
-		return compat_50_sys_gettimeofday(l, (const void *)(realargs + 1), retval);
+		return sys_gettimeofday(l, realargs + 1, retval);
 	case SOCKSYS_SETTIME:
-		return compat_50_sys_settimeofday(l, (const void *)(realargs + 1), retval);
+		return sys_settimeofday(l, realargs + 1, retval);
 	case SOCKSYS_GETITIMER:
-		return compat_50_sys_getitimer(l, (const void *)(realargs + 1), retval);
+		return sys_getitimer(l, realargs + 1, retval);
 	case SOCKSYS_SETITIMER:
-		return compat_50_sys_setitimer(l, (const void *)(realargs + 1), retval);
+		return sys_setitimer(l, realargs + 1, retval);
 
 	default:
 		printf("socksys unknown %08x %08x %08x %08x %08x %08x %08x\n",

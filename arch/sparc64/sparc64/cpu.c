@@ -1,4 +1,4 @@
-/*	$NetBSD: cpu.c,v 1.80 2009/01/25 10:37:15 martin Exp $ */
+/*	$NetBSD: cpu.c,v 1.56 2006/10/21 23:49:29 mrg Exp $ */
 
 /*
  * Copyright (c) 1996
@@ -52,15 +52,12 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: cpu.c,v 1.80 2009/01/25 10:37:15 martin Exp $");
-
-#include "opt_multiprocessor.h"
+__KERNEL_RCSID(0, "$NetBSD: cpu.c,v 1.56 2006/10/21 23:49:29 mrg Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/kernel.h>
-#include <sys/reboot.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -79,10 +76,10 @@ int ecache_min_line_size;
 /* Linked list of all CPUs in system. */
 int sparc_ncpus = 0;
 struct cpu_info *cpus = NULL;
+static int cpu_instance;
 
-volatile sparc64_cpuset_t cpus_active;/* set of active cpus */
+volatile cpuset_t cpus_active;/* set of active cpus */
 struct cpu_bootargs *cpu_args;	/* allocated very early in pmap_bootstrap. */
-struct pool_cache *fpstate_cache;
 
 static struct cpu_info *alloc_cpuinfo(u_int);
 
@@ -91,10 +88,6 @@ char	machine[] = MACHINE;		/* from <machine/param.h> */
 char	machine_arch[] = MACHINE_ARCH;	/* from <machine/param.h> */
 char	cpu_model[100];			/* machine model (primary CPU) */
 extern char machine_model[];
-
-#ifdef MULTIPROCESSOR
-static const char *ipi_evcnt_names[IPI_EVCNT_NUM] = IPI_EVCNT_NAMES;
-#endif
 
 static void cpu_reset_fpustate(void);
 
@@ -110,7 +103,7 @@ alloc_cpuinfo(u_int cpu_node)
 {
 	paddr_t pa0, pa;
 	vaddr_t va, va0;
-	vsize_t sz = 8 * PAGE_SIZE;
+	vsize_t sz = 16 * PAGE_SIZE;
 	int portid;
 	struct cpu_info *cpi, *ci;
 	extern paddr_t cpu0paddr;
@@ -118,12 +111,11 @@ alloc_cpuinfo(u_int cpu_node)
 	/*
 	 * Check for UPAID in the cpus list.
 	 */
-	if (OF_getprop(cpu_node, "upa-portid", &portid, sizeof(portid)) <= 0 &&
-	    OF_getprop(cpu_node, "portid", &portid, sizeof(portid)) <= 0)
+	if (OF_getprop(cpu_node, "upa-portid", &portid, sizeof(portid)) <= 0)
 		panic("alloc_cpuinfo: upa-portid");
 
 	for (cpi = cpus; cpi != NULL; cpi = cpi->ci_next)
-		if (cpi->ci_cpuid == portid)
+		if (cpi->ci_upaid == portid)
 			return cpi;
 
 	/* Allocate the aligned VA and determine the size. */
@@ -152,23 +144,24 @@ alloc_cpuinfo(u_int cpu_node)
 	 */
 	cpi->ci_next = NULL;
 	cpi->ci_curlwp = NULL;
+	cpi->ci_number = ++cpu_instance;
 	cpi->ci_cpuid = portid;
+	cpi->ci_upaid = portid;
 	cpi->ci_fplwp = NULL;
-	cpi->ci_spinup = NULL;
+	cpi->ci_spinup = NULL;						/* XXX */
+	cpi->ci_idle_u = (struct pcb *)IDLE_U_VA;
+	cpi->ci_cpcb = cpi->ci_idle_u;
+	cpi->ci_initstack = (void *)INITSTACK_VA;
 	cpi->ci_paddr = pa0;
 	cpi->ci_self = cpi;
 	cpi->ci_node = cpu_node;
-	cpi->ci_idepth = -1;
-	memset(cpi->ci_intrpending, -1, sizeof(cpi->ci_intrpending));
 
 	/*
 	 * Finally, add itself to the list of active cpus.
 	 */
 	for (ci = cpus; ci->ci_next != NULL; ci = ci->ci_next)
 		;
-#ifdef MULTIPROCESSOR
 	ci->ci_next = cpi;
-#endif
 	return (cpi);
 }
 
@@ -186,7 +179,7 @@ cpu_reset_fpustate(void)
 	struct fpstate64 *fpstate;
 	struct fpstate64 fps[2];
 
-	/* This needs to be 64-byte aligned */
+	/* This needs to be 64-bit aligned */
 	fpstate = ALIGNFPSTATE(&fps[1]);
 
 	/*
@@ -217,7 +210,6 @@ cpu_attach(struct device *parent, struct device *dev, void *aux)
 	char buf[100];
 	int 	totalsize = 0;
 	int 	linesize;
-	static bool passed = false;
 
 	/* tell them what we have */
 	node = ma->ma_node;
@@ -231,27 +223,9 @@ cpu_attach(struct device *parent, struct device *dev, void *aux)
 	 * Only do this on the boot cpu.  Other cpu's call
 	 * cpu_reset_fpustate() from cpu_hatch() before they
 	 * call into the idle loop.
-	 * For other cpus, we need to call mi_cpu_attach()
-	 * and complete setting up cpcb.
 	 */
-	if (!passed) {
-		passed = true;
-		fpstate_cache = pool_cache_init(sizeof(struct fpstate64),
-					BLOCK_SIZE, 0, 0, "fpstate", NULL,
-					IPL_NONE, NULL, NULL, NULL);
+	if (ci->ci_number == 0)
 		cpu_reset_fpustate();
-	}
-#ifdef MULTIPROCESSOR
-	else {
-		mi_cpu_attach(ci);
-		ci->ci_cpcb = (struct pcb *)ci->ci_data.cpu_idlelwp->l_addr;
-	}
-	for (i = 0; i < IPI_EVCNT_NUM; ++i)
-		evcnt_attach_dynamic(&ci->ci_ipi_evcnt[i], EVCNT_TYPE_MISC,
-				     NULL, device_xname(dev), ipi_evcnt_names[i]);
-#endif
-	evcnt_attach_dynamic(&ci->ci_tick_evcnt, EVCNT_TYPE_MISC, NULL,
-			     device_xname(dev), "timer");
 
 	clk = prom_getpropint(node, "clock-frequency", 0);
 	if (clk == 0) {
@@ -261,17 +235,16 @@ cpu_attach(struct device *parent, struct device *dev, void *aux)
 		clk = prom_getpropint(findroot(), "clock-frequency", 0);
 	}
 	if (clk) {
-		/* Tell OS what frequency we run on */
-		ci->ci_cpu_clockrate[0] = clk;
-		ci->ci_cpu_clockrate[1] = clk / 1000000;
+		cpu_clockrate[0] = clk; /* Tell OS what frequency we run on */
+		cpu_clockrate[1] = clk / 1000000;
 	}
 
 	snprintf(buf, sizeof buf, "%s @ %s MHz",
 		prom_getpropstring(node, "name"), clockfreq(clk));
 	snprintf(cpu_model, sizeof cpu_model, "%s (%s)", machine_model, buf);
 
-	printf(": %s, UPA id %d\n", buf, ci->ci_cpuid);
-	printf("%s:", device_xname(dev));
+	printf(": %s, UPA id %d\n", buf, ci->ci_upaid);
+	printf("%s:", dev->dv_xname);
 
 	bigcache = 0;
 
@@ -379,20 +352,27 @@ cpu_boot_secondary_processors()
 
 	sparc64_ipi_init();
 
-	if (boothowto & RB_MD1) {
-		cpus[0].ci_next = NULL;
-		sparc_ncpus = ncpu = ncpuonline = 1;
-		return;
-	}
+	printf("cpu0: booting secondary processors:\n");
+#ifdef DEBUG
+	printf("mp_tramp: %p\n", (void*)cpu_spinup_trampoline);
+#endif
 
 	for (ci = cpus; ci != NULL; ci = ci->ci_next) {
-		if (ci->ci_cpuid == CPU_UPAID)
+		if (ci->ci_upaid == CPU_UPAID)
 			continue;
 
-		cpu_pmap_prepare(ci, false);
 		cpu_args->cb_node = ci->ci_node;
 		cpu_args->cb_cpuinfo = ci->ci_paddr;
+		cpu_args->cb_initstack = ci->ci_initstack;
 		membar_sync();
+
+#ifdef DEBUG
+		printf("cpu%d bootargs: node %x, cpuinfo %llx, initstack %p\n",
+		       ci->ci_number,
+		       cpu_args->cb_node,
+		       (unsigned long long)cpu_args->cb_cpuinfo,
+		       cpu_args->cb_initstack);
+#endif
 
 		/* Disable interrupts and start another CPU. */
 		pstate = getpstate();
@@ -402,15 +382,20 @@ cpu_boot_secondary_processors()
 
 		for (i = 0; i < 2000; i++) {
 			membar_sync();
-			if (CPUSET_HAS(cpus_active, ci->ci_index))
+			if (CPUSET_HAS(cpus_active, ci->ci_number))
 				break;
 			delay(10000);
 		}
 		setpstate(pstate);
 
-		if (!CPUSET_HAS(cpus_active, ci->ci_index))
-			printf("cpu%d: startup failed\n", ci->ci_cpuid);
+		if (!CPUSET_HAS(cpus_active, ci->ci_number))
+			printf("cpu%d: startup failed\n", ci->ci_upaid);
+		else
+			printf("cpu%d now spinning idle (waited %d iterations)\n",
+			       ci->ci_number, i);
 	}
+
+	printf("\n");
 }
 
 void
@@ -422,12 +407,13 @@ cpu_hatch()
 	for (i = 0; i < 4*PAGE_SIZE; i += sizeof(long))
 		flush(v + i);
 
-	cpu_pmap_init(curcpu());
+	printf("cpu%d fired up.\n", cpu_number());
 	CPUSET_ADD(cpus_active, cpu_number());
+	for (i = 0; i < 5000000; i++)
+		;
 	cpu_reset_fpustate();
-	curlwp = curcpu()->ci_data.cpu_idlelwp;
+	printf("cpu%d enters idle loop.\n", cpu_number());
 	membar_sync();
-	tickintr_establish(PIL_CLOCK, tickintr);
 	spl0();
 }
 #endif /* MULTIPROCESSOR */

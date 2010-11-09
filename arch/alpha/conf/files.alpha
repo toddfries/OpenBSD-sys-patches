@@ -1,4 +1,4 @@
-# $NetBSD: files.alpha,v 1.180 2008/11/19 18:35:57 ad Exp $
+# $NetBSD: files.alpha,v 1.182 2010/01/18 17:53:35 pooka Exp $
 #
 # alpha-specific configuration info
 
@@ -355,13 +355,6 @@ file	arch/alpha/pci/sio.c		sio | pceb	needs-flag
 file	arch/alpha/pci/sio_pic.c	sio | pceb
 
 #
-# A12 if_de hack
-#
-device	ade: ether, ifnet, arp
-attach	ade at pci
-file	arch/alpha/a12/if_ade.c		ade
-
-#
 # alpha/a12 platform-specific drivers
 #
 
@@ -421,6 +414,8 @@ file	arch/alpha/common/bus_dma.c
 file	arch/alpha/common/comlogout.c
 file	dev/cons.c
 file	kern/kern_cctr.c
+
+file	common/bus_dma/bus_dmamem_common.c
 
 # PROM console support (for ports that don't have native console support)
 file	arch/alpha/alpha/promcons.c

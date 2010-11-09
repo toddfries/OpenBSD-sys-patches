@@ -1,7 +1,7 @@
-/* $NetBSD: pmap.h,v 1.73 2008/12/09 23:05:25 pooka Exp $ */
+/* $NetBSD: pmap.h,v 1.67 2006/04/02 03:41:32 thorpej Exp $ */
 
 /*-
- * Copyright (c) 1998, 1999, 2000, 2001, 2007 The NetBSD Foundation, Inc.
+ * Copyright (c) 1998, 1999, 2000, 2001 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -110,7 +117,7 @@
 #include "opt_multiprocessor.h"
 #endif
 
-#include <sys/mutex.h>
+#include <sys/lock.h>
 #include <sys/queue.h>
 
 #include <machine/pte.h>
@@ -137,13 +144,14 @@ struct pmap {
 	TAILQ_ENTRY(pmap)	pm_list;	/* list of all pmaps */
 	pt_entry_t		*pm_lev1map;	/* level 1 map */
 	int			pm_count;	/* pmap reference count */
-	kmutex_t		pm_lock;	/* lock on pmap */
+	struct simplelock	pm_slock;	/* lock on pmap */
 	struct pmap_statistics	pm_stats;	/* pmap statistics */
 	unsigned long		pm_cpus;	/* mask of CPUs using pmap */
 	unsigned long		pm_needisync;	/* mask of CPUs needing isync */
 	struct pmap_asn_info	pm_asni[1];	/* ASN information */
 			/*	variable length		*/
 };
+typedef struct pmap	*pmap_t;
 
 /*
  * Compute the sizeof of a pmap structure.  Subtract one because one
@@ -154,6 +162,8 @@ struct pmap {
 	       (sizeof(struct pmap_asn_info) * ((x) - 1))))
 
 #define	PMAP_ASN_RESERVED	0	/* reserved for Lev1map users */
+
+extern struct pmap	kernel_pmap_store[];
 
 /*
  * For each struct vm_page, there is a list of all currently valid virtual
@@ -179,18 +189,13 @@ typedef struct pv_entry {
 
 #ifdef _KERNEL
 
-#include <sys/atomic.h>
-
-#ifdef _KERNEL_OPT
+#ifndef _LKM
 #include "opt_dec_kn8ae.h"			/* XXX */
+
 #if defined(DEC_KN8AE)
 #define	_PMAP_MAY_USE_PROM_CONSOLE
 #endif
-#else
-#define	_PMAP_MAY_USE_PROM_CONSOLE
-#endif
 
-#ifndef _LKM
 #if defined(MULTIPROCESSOR)
 struct cpu_info;
 struct trapframe;
@@ -212,6 +217,8 @@ void	pmap_do_tlb_shootdown(struct cpu_info *, struct trapframe *);
 #endif /* MULTIPROCESSOR */
 #endif /* _LKM */
 
+#define pmap_kernel()			(kernel_pmap_store)
+ 
 #define	pmap_resident_count(pmap)	((pmap)->pm_stats.resident_count)
 #define	pmap_wired_count(pmap)		((pmap)->pm_stats.wired_count)
 
@@ -243,7 +250,7 @@ pmap_remove_all(struct pmap *pmap)
  */
 #define	POOL_VTOPHYS(va)		ALPHA_K0SEG_TO_PHYS((vaddr_t) (va))
 
-bool	pmap_pageidlezero(paddr_t);
+boolean_t			pmap_pageidlezero(paddr_t);
 #define	PMAP_PAGEIDLEZERO(pa)	pmap_pageidlezero((pa))
 
 paddr_t vtophys(vaddr_t);
@@ -336,8 +343,8 @@ pmap_l3pte(pmap, v, l2pte)
  * operations, locking the kernel pmap is not necessary.  Therefore,
  * it is not necessary to block interrupts when locking pmap strucutres.
  */
-#define	PMAP_LOCK(pmap)		mutex_enter(&(pmap)->pm_lock)
-#define	PMAP_UNLOCK(pmap)	mutex_exit(&(pmap)->pm_lock)
+#define	PMAP_LOCK(pmap)		simple_lock(&(pmap)->pm_slock)
+#define	PMAP_UNLOCK(pmap)	simple_unlock(&(pmap)->pm_slock)
 
 /*
  * Macro for processing deferred I-stream synchronization.
@@ -352,7 +359,8 @@ do {									\
 	u_long cpu_mask = (1UL << cpu_number());			\
 									\
 	if ((pmap)->pm_needisync & cpu_mask) {				\
-		atomic_and_ulong(&(pmap)->pm_needisync,	~cpu_mask);	\
+		atomic_clearbits_ulong(&(pmap)->pm_needisync,		\
+		    cpu_mask);						\
 		alpha_pal_imb();					\
 	}								\
 } while (0)

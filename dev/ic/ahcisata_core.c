@@ -1,4 +1,4 @@
-/*	$NetBSD: ahcisata_core.c,v 1.19 2009/02/12 11:44:11 bouyer Exp $	*/
+/*	$NetBSD$	*/
 
 /*
  * Copyright (c) 2006 Manuel Bouyer.
@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ahcisata_core.c,v 1.19 2009/02/12 11:44:11 bouyer Exp $");
+__KERNEL_RCSID(0, "$NetBSD$");
 
 #include <sys/types.h>
 #include <sys/malloc.h>
@@ -49,8 +49,6 @@ __KERNEL_RCSID(0, "$NetBSD: ahcisata_core.c,v 1.19 2009/02/12 11:44:11 bouyer Ex
 #include <dev/ata/satavar.h>
 #include <dev/ata/satareg.h>
 #include <dev/ic/ahcisatavar.h>
-
-#include <dev/scsipi/scsi_all.h> /* for SCSI status */
 
 #include "atapibus.h"
 
@@ -236,9 +234,6 @@ ahci_attach(struct ahci_softc *sc)
 	case AHCI_VS_11:
 		aprint_normal("1.1");
 		break;
-	case AHCI_VS_12:
-		aprint_normal("1.2");
-		break;
 	default:
 		aprint_normal("0x%x", ahci_rev);
 		break;
@@ -248,7 +243,6 @@ ahci_attach(struct ahci_softc *sc)
 	    sc->sc_atac.atac_nchannels, sc->sc_ncmds,
 	    ahci_cap & ~(AHCI_CAP_NPMASK|AHCI_CAP_NCS));
 	sc->sc_atac.atac_cap = ATAC_CAP_DATA16 | ATAC_CAP_DMA | ATAC_CAP_UDMA;
-	sc->sc_atac.atac_cap |= sc->sc_atac_capflags;
 	sc->sc_atac.atac_pio_cap = 4;
 	sc->sc_atac.atac_dma_cap = 2;
 	sc->sc_atac.atac_udma_cap = 6;
@@ -498,7 +492,6 @@ ahci_reset_channel(struct ata_channel *chp, int flags)
 {
 	struct ahci_softc *sc = (struct ahci_softc *)chp->ch_atac;
 	struct ahci_channel *achp = (struct ahci_channel *)chp;
-	int i, tfd;
 
 	ahci_channel_stop(sc, chp, flags);
 	if (sata_reset_interface(chp, sc->sc_ahcit, achp->ahcic_scontrol,
@@ -506,24 +499,26 @@ ahci_reset_channel(struct ata_channel *chp, int flags)
 		printf("%s: port reset failed\n", AHCINAME(sc));
 		/* XXX and then ? */
 	}
+	AHCI_WRITE(sc, AHCI_P_SERR(chp->ch_channel),
+	    AHCI_READ(sc, AHCI_P_SERR(chp->ch_channel)));
 	if (chp->ch_queue->active_xfer) {
 		chp->ch_queue->active_xfer->c_kill_xfer(chp,
 		    chp->ch_queue->active_xfer, KILL_RESET);
 	}
 	ahci_channel_start(sc, chp);
-	/* wait 31s for BSY to clear */
-	for (i = 0; i <3100; i++) {
-		tfd = AHCI_READ(sc, AHCI_P_TFD(chp->ch_channel));
-		if ((((tfd & AHCI_P_TFD_ST) >> AHCI_P_TFD_ST_SHIFT)
-		    & WDCS_BSY) == 0)
+#if 0
+	/* Wait 15s for device to host FIS to arrive. */
+	for (i = 0; i <1500; i++) {
+		if (AHCI_READ(sc, AHCI_P_IS(chp->ch_channel)) & AHCI_P_IX_DHRS)
 			break;
-		tsleep(&sc, PRIBIO, "ahcid2h", mstohz(10));
+		if (flags & AT_WAIT)
+			tsleep(&sc, PRIBIO, "ahcid2h", mstohz(10));
+		else
+			delay (10000);
 	}
 	if (i == 1500)
-		aprint_error("%s: BSY never cleared, TD 0x%x\n",
-		    AHCINAME(sc), tfd);
-	AHCIDEBUG_PRINT(("%s: BSY took %d ms\n", AHCINAME(sc), i * 10),
-	    DEBUG_PROBE);
+		aprint_error("%s port %d: D2H FIS never arrived\n", AHCINAME(sc));
+#endif
 	/* clear port interrupt register */
 	AHCI_WRITE(sc, AHCI_P_IS(chp->ch_channel), 0xffffffff);
 
@@ -562,29 +557,28 @@ ahci_probe_drive(struct ata_channel *chp)
 		chp->ch_drive[i].drive = i;
 	}
 
-	/* bring interface up, accept FISs, power up and spin up device */
+	/* bring interface up, power up and spin up device */
 	AHCI_WRITE(sc, AHCI_P_CMD(chp->ch_channel),
-	    AHCI_P_CMD_ICC_AC | AHCI_P_CMD_FRE |
-	    AHCI_P_CMD_POD | AHCI_P_CMD_SUD);
+	    AHCI_P_CMD_ICC_AC | AHCI_P_CMD_POD | AHCI_P_CMD_SUD);
 	/* reset the PHY and bring online */
 	switch (sata_reset_interface(chp, sc->sc_ahcit, achp->ahcic_scontrol,
 	    achp->ahcic_sstatus)) {
 	case SStatus_DET_DEV:
-		/* clear SErrors and start operations */
-		ahci_channel_start(sc, chp);
-		/* wait 31s for BSY to clear */
-		for (i = 0; i <3100; i++) {
-			sig = AHCI_READ(sc, AHCI_P_TFD(chp->ch_channel));
-			if ((((sig & AHCI_P_TFD_ST) >> AHCI_P_TFD_ST_SHIFT)
-			    & WDCS_BSY) == 0)
+		AHCI_WRITE(sc, AHCI_P_SERR(chp->ch_channel),
+		    AHCI_READ(sc, AHCI_P_SERR(chp->ch_channel)));
+#if 0
+		/* wait 15s for d2h FIS */
+		for (i = 0; i <1500; i++) {
+			if (AHCI_READ(sc, AHCI_P_IS(chp->ch_channel))
+			    & AHCI_P_IX_DHRS)
 				break;
 			tsleep(&sc, PRIBIO, "ahcid2h", mstohz(10));
 		}
 		if (i == 1500)
-			aprint_error("%s: BSY never cleared, TD 0x%x\n",
-			    AHCINAME(sc), sig);
-		AHCIDEBUG_PRINT(("%s: BSY took %d ms\n", AHCINAME(sc), i * 10),
-		    DEBUG_PROBE);
+			aprint_error("%s: D2H FIS never arrived\n",
+			    AHCINAME(sc));
+#endif
+
 		sig = AHCI_READ(sc, AHCI_P_SIG(chp->ch_channel));
 		AHCIDEBUG_PRINT(("%s: port %d: sig=0x%x CMD=0x%x\n",
 		    AHCINAME(sc), chp->ch_channel, sig,
@@ -604,8 +598,8 @@ ahci_probe_drive(struct ata_channel *chp)
 		    AHCI_P_IX_TFES | AHCI_P_IX_HBFS | AHCI_P_IX_IFS |
 		    AHCI_P_IX_OFS | AHCI_P_IX_DPS | AHCI_P_IX_UFS |
 		    AHCI_P_IX_DHRS);
-		/* wait 500ms before actually starting operations */
-		tsleep(&sc, PRIBIO, "ahciprb", mstohz(500));
+		/* and start operations */
+		ahci_channel_start(sc, chp);
 		break;
 
 	default:
@@ -1065,7 +1059,7 @@ ahci_bio_complete(struct ata_channel *chp, struct ata_xfer *xfer, int is)
 		ata_bio->error = TIMEOUT;
 	} else {
 		callout_stop(&chp->ch_callout);
-		ata_bio->error = NOERROR;
+		ata_bio->error = 0;
 	}
 
 	chp->ch_queue->active_xfer = NULL;
@@ -1095,14 +1089,7 @@ ahci_bio_complete(struct ata_channel *chp, struct ata_xfer *xfer, int is)
 	    BUS_DMASYNC_POSTREAD | BUS_DMASYNC_POSTWRITE);
 	AHCIDEBUG_PRINT(("ahci_bio_complete bcount %ld",
 	    ata_bio->bcount), DEBUG_XFERS);
-	/* 
-	 * if it was a write, complete data buffer may have been transfered
-	 * before error detection; in this case don't use cmdh_prdbc
-	 * as it won't reflect what was written to media. Assume nothing
-	 * was transfered and leave bcount as-is.
-	 */
-	if ((ata_bio->flags & ATA_READ) || ata_bio->error == NOERROR)
-		ata_bio->bcount -= le32toh(achp->ahcic_cmdh[slot].cmdh_prdbc);
+	ata_bio->bcount -= le32toh(achp->ahcic_cmdh[slot].cmdh_prdbc);
 	AHCIDEBUG_PRINT((" now %ld\n", ata_bio->bcount), DEBUG_XFERS);
 	(*chp->ch_drive[drive].drv_done)(chp->ch_drive[drive].drv_softc);
 	atastart(chp);
@@ -1137,8 +1124,7 @@ void
 ahci_channel_start(struct ahci_softc *sc, struct ata_channel *chp)
 {
 	/* clear error */
-	AHCI_WRITE(sc, AHCI_P_SERR(chp->ch_channel),
-	    AHCI_READ(sc, AHCI_P_SERR(chp->ch_channel)));
+	AHCI_WRITE(sc, AHCI_P_SERR(chp->ch_channel), 0);
 
 	/* and start controller */
 	AHCI_WRITE(sc, AHCI_P_CMD(chp->ch_channel),
@@ -1214,7 +1200,7 @@ ahci_atapibus_attach(struct atabus_softc * ata_sc)
 	/*
 	 * Fill in the scsipi_adapter.
 	 */
-	adapt->adapt_dev = atac->atac_dev;
+	adapt->adapt_dev = &atac->atac_dev;
 	adapt->adapt_nchannels = atac->atac_nchannels;
 	adapt->adapt_request = ahci_atapi_scsipi_request;
 	adapt->adapt_minphys = ahci_atapi_minphys;
@@ -1232,7 +1218,7 @@ ahci_atapibus_attach(struct atabus_softc * ata_sc)
 	chan->chan_max_periph = 1;
 	chan->chan_ntargets = 1;
 	chan->chan_nluns = 1;
-	chp->atapibus = config_found_ia(ata_sc->sc_dev, "atapi", chan,
+	chp->atapibus = config_found_ia(&ata_sc->sc_dev, "atapi", chan,
 		atapiprint);
 }
 
@@ -1253,7 +1239,7 @@ void
 ahci_atapi_kill_pending(struct scsipi_periph *periph)
 {
 	struct atac_softc *atac =
-	    device_private(periph->periph_channel->chan_adapter->adapt_dev);
+	    (void *)periph->periph_channel->chan_adapter->adapt_dev;
 	struct ata_channel *chp =
 	    atac->atac_channels[periph->periph_channel->chan_channel];
 
@@ -1267,7 +1253,7 @@ ahci_atapi_scsipi_request(struct scsipi_channel *chan,
 	struct scsipi_adapter *adapt = chan->chan_adapter;
 	struct scsipi_periph *periph;
 	struct scsipi_xfer *sc_xfer;
-	struct ahci_softc *sc = device_private(adapt->adapt_dev);
+	struct ahci_softc *sc = (void *)adapt->adapt_dev;
 	struct atac_softc *atac = &sc->sc_atac;
 	struct ata_xfer *xfer;
 	int channel = chan->chan_channel;
@@ -1278,7 +1264,7 @@ ahci_atapi_scsipi_request(struct scsipi_channel *chan,
 		sc_xfer = arg;
 		periph = sc_xfer->xs_periph;
 		drive = periph->periph_target;
-		if (!device_is_active(atac->atac_dev)) {
+		if (!device_is_active(&atac->atac_dev)) {
 			sc_xfer->error = XS_DRIVER_STUFFUP;
 			scsipi_done(sc_xfer);
 			return;
@@ -1456,24 +1442,17 @@ ahci_atapi_complete(struct ata_channel *chp, struct ata_xfer *xfer, int irq)
 	}
 	ata_free_xfer(chp, xfer);
 
+	if (chp->ch_status & WDCS_ERR) {
+		sc_xfer->error = XS_SHORTSENSE;
+		sc_xfer->sense.atapi_sense = chp->ch_error;
+	} 
+
 	AHCI_CMDH_SYNC(sc, achp, slot,
 	    BUS_DMASYNC_POSTREAD | BUS_DMASYNC_POSTWRITE);
 	sc_xfer->resid = sc_xfer->datalen;
 	sc_xfer->resid -= le32toh(achp->ahcic_cmdh[slot].cmdh_prdbc);
 	AHCIDEBUG_PRINT(("ahci_atapi_complete datalen %d resid %d\n",
 	    sc_xfer->datalen, sc_xfer->resid), DEBUG_XFERS);
-	if (chp->ch_status & WDCS_ERR && 
-	    ((sc_xfer->xs_control & XS_CTL_REQSENSE) == 0 ||
-	    sc_xfer->resid == sc_xfer->datalen)) {
-		sc_xfer->error = XS_SHORTSENSE;
-		sc_xfer->sense.atapi_sense = chp->ch_error;
-		if ((sc_xfer->xs_periph->periph_quirks &
-		    PQUIRK_NOSENSE) == 0) {
-			/* ask scsipi to send a REQUEST_SENSE */
-			sc_xfer->error = XS_BUSY;
-			sc_xfer->status = SCSI_CHECK;
-		}
-	} 
 	scsipi_done(sc_xfer);
 	atastart(chp);
 	return 0;
@@ -1511,8 +1490,7 @@ ahci_atapi_probe_device(struct atapibus_softc *sc, int target)
 	struct scsipi_periph *periph;
 	struct ataparams ids;
 	struct ataparams *id = &ids;
-	struct ahci_softc *ahcic =
-	    device_private(chan->chan_adapter->adapt_dev);
+	struct ahci_softc *ahcic = (void *)chan->chan_adapter->adapt_dev;
 	struct atac_softc *atac = &ahcic->sc_atac;
 	struct ata_channel *chp = atac->atac_channels[chan->chan_channel];
 	struct ata_drive_datas *drvp = &chp->ch_drive[target];
@@ -1536,15 +1514,14 @@ ahci_atapi_probe_device(struct atapibus_softc *sc, int target)
 	if (ata_get_params(drvp,  AT_WAIT, id) == 0) {
 #ifdef ATAPI_DEBUG_PROBE
 		printf("%s drive %d: cmdsz 0x%x drqtype 0x%x\n",
-		    AHCINAME(ahcic), target,
+		    AHCINAME(sc), target,
 		    id->atap_config & ATAPI_CFG_CMD_MASK,
 		    id->atap_config & ATAPI_CFG_DRQ_MASK);
 #endif
 		periph = scsipi_alloc_periph(M_NOWAIT);
 		if (periph == NULL) {
-			aprint_error_dev(sc->sc_dev,
-			    "unable to allocate periph for drive %d\n",
-			    target);
+			printf("%s: unable to allocate periph for drive %d\n",
+			    sc->sc_dev.dv_xname, target);
 			return;
 		}
 		periph->periph_dev = NULL;

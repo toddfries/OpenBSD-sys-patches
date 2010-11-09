@@ -1,4 +1,4 @@
-/*	$NetBSD: ulpt.c,v 1.82 2009/02/13 23:31:23 bouyer Exp $	*/
+/*	$NetBSD: ulpt.c,v 1.80 2008/04/28 20:24:00 martin Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/ulpt.c,v 1.24 1999/11/17 22:33:44 n_hibma Exp $	*/
 
 /*
@@ -36,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ulpt.c,v 1.82 2009/02/13 23:31:23 bouyer Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ulpt.c,v 1.80 2008/04/28 20:24:00 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -227,11 +227,9 @@ USB_ATTACH(ulpt)
 	int i, altno;
 	usbd_desc_iter_t iter;
 
-	sc->sc_dev = self;
-
 	devinfop = usbd_devinfo_alloc(dev, 0);
 	USB_ATTACH_SETUP;
-	aprint_normal_dev(self, "%s, iclass %d/%d\n",
+	printf("%s: %s, iclass %d/%d\n", USBDEVNAME(sc->sc_dev),
 	       devinfop, ifcd->bInterfaceClass, ifcd->bInterfaceSubClass);
 	usbd_devinfo_free(devinfop);
 
@@ -258,8 +256,8 @@ USB_ATTACH(ulpt)
 		DPRINTFN(1, ("ulpt_attach: set altno = %d\n", altno));
 		err = usbd_set_interface(iface, altno);
 		if (err) {
-			aprint_error_dev(self,
-			    "setting alternate interface failed\n");
+			printf("%s: setting alternate interface failed\n",
+			       USBDEVNAME(sc->sc_dev));
 			sc->sc_dying = 1;
 			USB_ATTACH_ERROR_RETURN;
 		}
@@ -273,7 +271,8 @@ USB_ATTACH(ulpt)
 	for (i = 0; i < epcount; i++) {
 		ed = usbd_interface2endpoint_descriptor(iface, i);
 		if (ed == NULL) {
-			aprint_error_dev(self, "couldn't get ep %d\n", i);
+			printf("%s: couldn't get ep %d\n",
+			    USBDEVNAME(sc->sc_dev), i);
 			USB_ATTACH_ERROR_RETURN;
 		}
 		if (UE_GET_DIR(ed->bEndpointAddress) == UE_DIR_IN &&
@@ -285,7 +284,8 @@ USB_ATTACH(ulpt)
 		}
 	}
 	if (sc->sc_out == -1) {
-		aprint_error_dev(self, "could not find bulk out endpoint\n");
+		printf("%s: could not find bulk out endpoint\n",
+		    USBDEVNAME(sc->sc_dev));
 		sc->sc_dying = 1;
 		USB_ATTACH_ERROR_RETURN;
 	}
@@ -295,7 +295,7 @@ USB_ATTACH(ulpt)
 		sc->sc_in = -1;
 	}
 
-	aprint_normal_dev(self, "using %s-directional mode\n",
+	printf("%s: using %s-directional mode\n", USBDEVNAME(sc->sc_dev),
 	       sc->sc_in >= 0 ? "bi" : "uni");
 
 	sc->sc_iface = iface;
@@ -359,7 +359,7 @@ USB_ATTACH(ulpt)
 int
 ulpt_activate(device_ptr_t self, enum devact act)
 {
-	struct ulpt_softc *sc = device_private(self);
+	struct ulpt_softc *sc = (struct ulpt_softc *)self;
 
 	switch (act) {
 	case DVACT_ACTIVATE:
@@ -760,8 +760,8 @@ ulpt_do_read(struct ulpt_softc *sc, struct uio *uio, int flags)
 	else
 		timeout = USBD_NO_TIMEOUT;
 
-	DPRINTFN(3, ("ulptread nonblocking=%d uio_reside=%ld timeout=%d\n",
-		     nonblocking, (u_long)uio->uio_resid, timeout));
+	DPRINTFN(3, ("ulptread nonblocking=%d uio_reside=%d timeout=%d\n",
+		     nonblocking, uio->uio_resid, timeout));
 
 	xfer = sc->sc_in_xfer;
 	bufp = sc->sc_in_buf;

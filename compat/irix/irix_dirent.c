@@ -1,7 +1,7 @@
-/*	$NetBSD: irix_dirent.c,v 1.23 2008/04/28 20:23:41 martin Exp $ */
+/*	$NetBSD: irix_dirent.c,v 1.16 2006/03/01 12:38:12 yamt Exp $ */
 
 /*-
- * Copyright (c) 1994, 2001, 2008 The NetBSD Foundation, Inc.
+ * Copyright (c) 1994, 2001 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: irix_dirent.c,v 1.23 2008/04/28 20:23:41 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: irix_dirent.c,v 1.16 2006/03/01 12:38:12 yamt Exp $");
 
 #include <sys/types.h>
 #include <sys/signal.h>
@@ -64,19 +71,23 @@ __KERNEL_RCSID(0, "$NetBSD: irix_dirent.c,v 1.23 2008/04/28 20:23:41 martin Exp 
 #define SVR4_NAMEOFF(dp)       ((char *)&(dp)->d_name - (char *)dp)
 
 int
-irix_sys_ngetdents(struct lwp *l, const struct irix_sys_ngetdents_args *uap, register_t *retval)
+irix_sys_ngetdents(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct irix_sys_ngetdents_args /* {
 		syscallarg(int) fildes;
 		syscallarg(irix_dirent_t *) buf;
 		syscallarg(unsigned short) nbyte;
 		syscallarg(int *) eof;
-	} */
+	} */ *uap = v;
+	struct proc *p = l->l_proc;
 	struct dirent *bdp;
 	struct vnode *vp;
-	char *inp, *buf;	/* BSD-format */
+	caddr_t inp, buf;	/* BSD-format */
 	int len, reclen;	/* BSD-format */
-	char *outp;		/* SVR4-format */
+	caddr_t outp;		/* SVR4-format */
 	int resid, svr4_reclen;	/* SVR4-format */
 	struct file *fp;
 	struct uio auio;
@@ -85,10 +96,10 @@ irix_sys_ngetdents(struct lwp *l, const struct irix_sys_ngetdents_args *uap, reg
 	off_t off;		/* true file offset */
 	int buflen, error, eofflag;
 	off_t *cookiebuf = NULL, *cookie;
-	int ncookies, fd;
+	int ncookies;
 
-	fd = SCARG(uap, fildes);
-	if ((error = fd_getvnode(fd, &fp)) != 0)
+	/* getvnode() will use the descriptor for us */
+	if ((error = getvnode(p->p_fd, SCARG(uap, fildes), &fp)) != 0)
 		return (error);
 
 	if ((fp->f_flag & FREAD) == 0) {
@@ -163,7 +174,7 @@ again:
 		idb.d_off = (irix_off_t)off;
 		idb.d_reclen = (u_short)svr4_reclen;
 		strlcpy(idb.d_name, bdp->d_name, sizeof(idb.d_name));
-		if ((error = copyout((void *)&idb, outp, svr4_reclen)))
+		if ((error = copyout((caddr_t)&idb, outp, svr4_reclen)))
 			goto out;
 		/* advance past this real entry */
 		inp += reclen;
@@ -185,26 +196,29 @@ out:
 		free(cookiebuf, M_TEMP);
 	free(buf, M_TEMP);
 out1:
-	fd_putfile(fd);
+	FILE_UNUSE(fp, l);
 	if (SCARG(uap, eof) != NULL)
 		error = copyout(&eofflag, SCARG(uap, eof), sizeof(int));
 	return error;
 }
 
 int
-irix_sys_getdents(struct lwp *l, const struct irix_sys_getdents_args *uap, register_t *retval)
+irix_sys_getdents(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct irix_sys_ngetdents_args /* {
 		syscallarg(int) fildes;
 		syscallarg(irix_dirent_t *) buf;
 		syscallarg(unsigned short) nbyte;
 		syscallarg(int *) eof;
-	} */
+	} */ *uap = v;
 	struct irix_sys_ngetdents_args cup;
 
 	SCARG(&cup, fildes) = SCARG(uap, fildes);
 	SCARG(&cup, buf) = SCARG(uap, buf);
-	SCARG(&cup, nbyte) = SCARG(uap, nbytes);
+	SCARG(&cup, nbyte) = SCARG(uap, nbyte);
 	SCARG(&cup, eof) = NULL;
 
 	return irix_sys_ngetdents(l, (void *)&cup, retval);
@@ -216,31 +230,35 @@ irix_sys_getdents(struct lwp *l, const struct irix_sys_getdents_args *uap, regis
  * 32 bit versions (only 3 lines of diff)
  */
 int
-irix_sys_ngetdents64(struct lwp *l, const struct irix_sys_ngetdents64_args *uap, register_t *retval)
+irix_sys_ngetdents64(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct irix_sys_ngetdents64_args /* {
 		syscallarg(int) fildes;
 		syscallarg(irix_dirent64_t *) buf;
 		syscallarg(unsigned short) nbyte;
 		syscallarg(int *) eof;
-	} */
+	} */ *uap = v;
 	struct dirent *bdp;
+	struct proc *p = l->l_proc;
 	struct vnode *vp;
-	char *inp, *buf;	/* BSD-format */
+	caddr_t inp, buf;	/* BSD-format */
 	int len, reclen;	/* BSD-format */
-	char *outp;		/* SVR4-format */
+	caddr_t outp;		/* SVR4-format */
 	int resid, svr4_reclen;	/* SVR4-format */
-	file_t *fp;
+	struct file *fp;
 	struct uio auio;
 	struct iovec aiov;
 	struct irix_dirent64 idb;
 	off_t off;		/* true file offset */
 	int buflen, error, eofflag;
 	off_t *cookiebuf = NULL, *cookie;
-	int ncookies, fd;
+	int ncookies;
 
-	fd = SCARG(uap, fildes);
-	if ((error = fd_getvnode(fd, &fp)) != 0)
+	/* getvnode() will use the descriptor for us */
+	if ((error = getvnode(p->p_fd, SCARG(uap, fildes), &fp)) != 0)
 		return (error);
 
 	if ((fp->f_flag & FREAD) == 0) {
@@ -248,7 +266,7 @@ irix_sys_ngetdents64(struct lwp *l, const struct irix_sys_ngetdents64_args *uap,
 		goto out1;
 	}
 
-	vp = fp->f_data;
+	vp = (struct vnode *)fp->f_data;
 	if (vp->v_type != VDIR) {
 		error = EINVAL;
 		goto out1;
@@ -314,7 +332,7 @@ again:
 		idb.d_off = (irix_off64_t)off;
 		idb.d_reclen = (u_short)svr4_reclen;
 		strlcpy(idb.d_name, bdp->d_name, sizeof(idb.d_name));
-		if ((error = copyout((void *)&idb, outp, svr4_reclen)))
+		if ((error = copyout((caddr_t)&idb, outp, svr4_reclen)))
 			goto out;
 		/* advance past this real entry */
 		inp += reclen;
@@ -336,26 +354,29 @@ out:
 		free(cookiebuf, M_TEMP);
 	free(buf, M_TEMP);
 out1:
-	fd_putfile(fd);
+	FILE_UNUSE(fp, l);
 	if (SCARG(uap, eof) != NULL)
 		error = copyout(&eofflag, SCARG(uap, eof), sizeof(int));
 	return error;
 }
 
 int
-irix_sys_getdents64(struct lwp *l, const struct irix_sys_getdents64_args *uap, register_t *retval)
+irix_sys_getdents64(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct irix_sys_ngetdents64_args /* {
 		syscallarg(int) fildes;
 		syscallarg(irix_dirent64_t *) buf;
 		syscallarg(unsigned short) nbyte;
 		syscallarg(int *) eof;
-	} */
+	} */ *uap = v;
 	struct irix_sys_ngetdents64_args cup;
 
 	SCARG(&cup, fildes) = SCARG(uap, fildes);
 	SCARG(&cup, buf) = SCARG(uap, buf);
-	SCARG(&cup, nbyte) = SCARG(uap, nbytes);
+	SCARG(&cup, nbyte) = SCARG(uap, nbyte);
 	SCARG(&cup, eof) = NULL;
 
 	return irix_sys_ngetdents64(l, (void *)&cup, retval);

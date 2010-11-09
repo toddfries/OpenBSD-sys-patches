@@ -1,4 +1,4 @@
-/*	$NetBSD: layer_subr.c,v 1.25 2008/01/24 17:32:55 ad Exp $	*/
+/*	$NetBSD: layer_subr.c,v 1.21 2006/12/09 16:11:52 chs Exp $	*/
 
 /*
  * Copyright (c) 1999 National Aeronautics & Space Administration
@@ -68,7 +68,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: layer_subr.c,v 1.25 2008/01/24 17:32:55 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: layer_subr.c,v 1.21 2006/12/09 16:11:52 chs Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -77,9 +77,7 @@ __KERNEL_RCSID(0, "$NetBSD: layer_subr.c,v 1.25 2008/01/24 17:32:55 ad Exp $");
 #include <sys/vnode.h>
 #include <sys/mount.h>
 #include <sys/namei.h>
-#include <sys/kmem.h>
 #include <sys/malloc.h>
-
 #include <miscfs/specfs/specdev.h>
 #include <miscfs/genfs/layer.h>
 #include <miscfs/genfs/layer_extern.h>
@@ -150,37 +148,19 @@ loop:
 	LIST_FOREACH(a, hd, layer_hash) {
 		if (a->layer_lowervp == lowervp && LAYERTOV(a)->v_mount == mp) {
 			vp = LAYERTOV(a);
-			mutex_enter(&vp->v_interlock);
+
 			/*
-			 * If we find a node being cleaned out, then
-			 * ignore it and continue.  A thread trying to
-			 * clean out the extant layer vnode needs to
-			 * acquire the shared lock (i.e. the lower
-			 * vnode's lock), which our caller already holds.
-			 * To allow the cleaning to succeed the current
-			 * thread must make progress.  So, for a brief
-			 * time more than one vnode in a layered file
-			 * system may refer to a single vnode in the
-			 * lower file system.
+			 * We must not let vget() try to lock the layer vp,
+			 * since the lower vp is already locked and locking the
+			 * layer vp will involve locking the lower vp (whether
+			 * or not they actually share a lock).  Instead, take
+			 * the layer vp's lock separately afterward, but only
+			 * if it does not share the lower vp's lock.
 			 */
-			if ((vp->v_iflag & VI_XLOCK) != 0) {
-				mutex_exit(&vp->v_interlock);
-				continue;
-			}
-			mutex_exit(&lmp->layerm_hashlock);
-			/*
-			 * We must not let vget() try to lock the layer
-			 * vp, since the lower vp is already locked and
-			 * locking the layer vp will involve locking
-			 * the lower vp (whether or not they actually
-			 * share a lock).  Instead, take the layer vp's
-			 * lock separately afterward, but only if it
-			 * does not share the lower vp's lock.
-			 */
-			error = vget(vp, LK_INTERLOCK | LK_NOWAIT);
+			simple_unlock(&lmp->layerm_hashlock);
+			error = vget(vp, 0);
 			if (error) {
-				kpause("layerfs", false, 1, NULL);
-				mutex_enter(&lmp->layerm_hashlock);
+				simple_lock(&lmp->layerm_hashlock);
 				goto loop;
 			}
 			LAYERFS_UPPERLOCK(vp, LK_EXCLUSIVE, error);
@@ -209,26 +189,21 @@ layer_node_alloc(mp, lowervp, vpp)
 	int error;
 	extern int (**dead_vnodeop_p)(void *);
 
-	error = getnewvnode(lmp->layerm_tag, mp, lmp->layerm_vnodeop_p, &vp);
-	if (error != 0)
+	if ((error = getnewvnode(lmp->layerm_tag, mp, lmp->layerm_vnodeop_p,
+			&vp)) != 0)
 		return (error);
 	vp->v_type = lowervp->v_type;
-	mutex_enter(&vp->v_interlock);
-	vp->v_iflag |= VI_LAYER;
-	mutex_exit(&vp->v_interlock);
+	vp->v_flag |= VLAYER;
 
-	xp = kmem_alloc(lmp->layerm_size, KM_SLEEP);
-	if (xp == NULL) {
-		ungetnewvnode(vp);
-		return ENOMEM;
-	}
+	xp = malloc(lmp->layerm_size, M_TEMP, M_WAITOK);
 	if (vp->v_type == VBLK || vp->v_type == VCHR) {
-		spec_node_init(vp, lowervp->v_rdev);
+		MALLOC(vp->v_specinfo, struct specinfo *,
+		    sizeof(struct specinfo), M_VNODE, M_WAITOK);
+		vp->v_hashchain = NULL;
+		vp->v_rdev = lowervp->v_rdev;
 	}
 
 	vp->v_data = xp;
-	vp->v_vflag = (vp->v_vflag & ~VV_MPSAFE) |
-	    (lowervp->v_vflag & VV_MPSAFE);
 	xp->layer_vnode = vp;
 	xp->layer_lowervp = lowervp;
 	xp->layer_flags = 0;
@@ -238,14 +213,14 @@ layer_node_alloc(mp, lowervp, vpp)
 	 * check to see if someone else has beaten us to it.
 	 * (We could have slept in MALLOC.)
 	 */
-	mutex_enter(&lmp->layerm_hashlock);
+	simple_lock(&lmp->layerm_hashlock);
 	if ((nvp = layer_node_find(mp, lowervp)) != NULL) {
 		*vpp = nvp;
 
 		/* free the substructures we've allocated. */
-		kmem_free(xp, lmp->layerm_size);
+		FREE(xp, M_TEMP);
 		if (vp->v_type == VBLK || vp->v_type == VCHR)
-			spec_node_destroy(vp);
+			FREE(vp->v_specinfo, M_VNODE);
 
 		vp->v_type = VBAD;		/* node is discarded */
 		vp->v_op = dead_vnodeop_p;	/* so ops will still work */
@@ -278,7 +253,7 @@ layer_node_alloc(mp, lowervp, vpp)
 	hd = LAYER_NHASH(lmp, lowervp);
 	LIST_INSERT_HEAD(hd, xp, layer_hash);
 	uvm_vnp_setsize(vp, 0);
-	mutex_exit(&lmp->layerm_hashlock);
+	simple_unlock(&lmp->layerm_hashlock);
 	return (0);
 }
 
@@ -300,7 +275,7 @@ layer_node_create(mp, lowervp, newvpp)
 	struct vnode *aliasvp;
 	struct layer_mount *lmp = MOUNTTOLAYERMOUNT(mp);
 
-	mutex_enter(&lmp->layerm_hashlock);
+	simple_lock(&lmp->layerm_hashlock);
 	aliasvp = layer_node_find(mp, lowervp);
 	if (aliasvp != NULL) {
 		/*
@@ -315,7 +290,7 @@ layer_node_create(mp, lowervp, newvpp)
 	} else {
 		int error;
 
-		mutex_exit(&lmp->layerm_hashlock);
+		simple_unlock(&lmp->layerm_hashlock);
 
 		/*
 		 * Get new vnode.

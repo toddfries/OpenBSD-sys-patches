@@ -1,4 +1,4 @@
-/*	$NetBSD: ibm4xx_machdep.c,v 1.8 2008/07/02 17:28:56 ad Exp $	*/
+/*	$NetBSD: ibm4xx_machdep.c,v 1.5 2005/12/24 22:45:36 perry Exp $	*/
 /*	Original: ibm40x_machdep.c,v 1.3 2005/01/17 17:19:36 shige Exp $ */
 
 /*
@@ -68,7 +68,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ibm4xx_machdep.c,v 1.8 2008/07/02 17:28:56 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ibm4xx_machdep.c,v 1.5 2005/12/24 22:45:36 perry Exp $");
 
 #include "opt_compat_netbsd.h"
 #include "opt_ddb.h"
@@ -290,9 +290,9 @@ ibm4xx_cpu_startup(const char *model)
 	for (i = 0; i < btoc(MSGBUFSIZE); i++)
 		pmap_kenter_pa(msgbuf_vaddr + i * PAGE_SIZE,
 		    msgbuf_paddr + i * PAGE_SIZE, VM_PROT_READ|VM_PROT_WRITE);
-	initmsgbuf((void *)msgbuf_vaddr, round_page(MSGBUFSIZE));
+	initmsgbuf((caddr_t)msgbuf_vaddr, round_page(MSGBUFSIZE));
 #else
-	initmsgbuf((void *)msgbuf, round_page(MSGBUFSIZE));
+	initmsgbuf((caddr_t)msgbuf, round_page(MSGBUFSIZE));
 #endif
 
 	printf("%s%s", copyright, version);
@@ -304,10 +304,17 @@ ibm4xx_cpu_startup(const char *model)
 
 	minaddr = 0;
 	/*
+	 * Allocate a submap for exec arguments.  This map effectively
+	 * limits the number of processes exec'ing at any time.
+	 */
+	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
+				 16*NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
+
+	/*
 	 * Allocate a submap for physio
 	 */
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-				 VM_PHYS_SIZE, 0, false, NULL);
+				 VM_PHYS_SIZE, 0, FALSE, NULL);
 
 	/*
 	 * No need to allocate an mbuf cluster submap.  Mbuf clusters

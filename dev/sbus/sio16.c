@@ -1,4 +1,4 @@
-/*	$NetBSD: sio16.c,v 1.17 2008/05/29 14:51:27 mrg Exp $	*/
+/*	$NetBSD: sio16.c,v 1.15 2005/12/11 12:23:44 christos Exp $	*/
 
 /*
  * Copyright (c) 1998, 2001 Matthew R. Green
@@ -12,6 +12,8 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -36,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sio16.c,v 1.17 2008/05/29 14:51:27 mrg Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sio16.c,v 1.15 2005/12/11 12:23:44 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/conf.h>
@@ -154,7 +156,7 @@ sio16_attach(parent, self, aux)
 			 sa->sa_reg[0].oa_size,
 			 0, &h) != 0) {
 		printf("%s at sbus: can not map registers 0\n",
-		    device_xname(self));
+		    self->dv_xname);
 		return;
 	}
 	sc->sc_configreg = h;
@@ -164,7 +166,7 @@ sio16_attach(parent, self, aux)
 			 sa->sa_reg[1].sbr_size,
 			 0, &h) != 0) {
 		printf("%s at sbus: can not map registers 1\n",
-		    device_xname(self));
+		    self->dv_xname);
 		return;
 	}
 	sc->sc_reg[0] = h;
@@ -174,7 +176,7 @@ sio16_attach(parent, self, aux)
 			 sa->sa_reg[2].sbr_size,
 			 0, &h) != 0) {
 		printf("%s at sbus: can not map registers 2\n",
-		    device_xname(self));
+		    self->dv_xname);
 		return;
 	}
 	sc->sc_reg[1] = h;
@@ -184,7 +186,7 @@ sio16_attach(parent, self, aux)
 			 sa->sa_reg[3].sbr_size,
 			 0, &h) != 0) {
 		printf("%s at sbus: can not map registers 3\n",
-		    device_xname(self));
+		    self->dv_xname);
 		return;
 	}
 	sc->sc_ack = h;
@@ -266,7 +268,7 @@ sio16_ackfunc(v, who)
 		break;
 	default:
 		panic("%s: sio16_ackfunc: unknown ackfunc %d",
-		    device_xname(&sc->sc_dev), who);
+		    sc->sc_dev.dv_xname, who);
 	}
 	return (bus_space_read_1(sc->sc_tag, sc->sc_ack, addr));
 }

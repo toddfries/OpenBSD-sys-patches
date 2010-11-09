@@ -1,4 +1,4 @@
-/*	$NetBSD: ite_et.c,v 1.12 2007/03/05 20:29:07 he Exp $ */
+/*	$NetBSD: ite_et.c,v 1.11 2006/06/07 10:07:03 he Exp $ */
 
 /*
  * Copyright (c) 1995 Ezra Story
@@ -36,7 +36,7 @@
 #include "opt_amigacons.h"
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ite_et.c,v 1.12 2007/03/05 20:29:07 he Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ite_et.c,v 1.11 2006/06/07 10:07:03 he Exp $");
 
 #include "grfet.h"
 #if NGRFET > 0
@@ -68,7 +68,7 @@ void et_deinit(struct ite_softc *ip);
 void et_putc(struct ite_softc *ip, int c, int dy, int dx, int mode);
 void et_clear(struct ite_softc *ip, int sy, int sx, int h, int w);
 void et_scroll(struct ite_softc *ip, int sy, int sx, int count, int dir);
-static void etbcopy(const volatile void *src, volatile void *dst, size_t len);
+static void etbcopy(const void *src, void *dst, size_t len);
 
 
 /*
@@ -155,7 +155,7 @@ void
 et_putc(struct ite_softc *ip, int c, int dy, int dx, int mode)
 {
 	volatile unsigned char *ba = ip->grf->g_regkva;
-	volatile unsigned char *fb = ip->grf->g_fbkva;
+	unsigned char *fb = ip->grf->g_fbkva;
 	unsigned char attr;
 	volatile unsigned char *cp;
 
@@ -182,14 +182,14 @@ et_clear(struct ite_softc *ip, int sy, int sx, int h, int w)
 	 * which describe continuous regions.  For a VT200 terminal,
 	 * this is safe behavior.
 	 */
-	volatile unsigned char *src, *dst;
+	unsigned char *src, *dst;
 	volatile unsigned char *ba = ip->grf->g_regkva;
 	int len;
 
 	if (ip->flags & ITE_INGRF)
 		return;
 
-	dst = (volatile unsigned char*)ip->grf->g_fbkva + (sy * ip->cols) + sx;
+	dst = ip->grf->g_fbkva + (sy * ip->cols) + sx;
 	src = dst + (ip->rows*ip->cols);
 	len = w*h;
 
@@ -203,13 +203,13 @@ et_clear(struct ite_softc *ip, int sy, int sx, int h, int w)
 void
 et_scroll(struct ite_softc *ip, int sy, int sx, int count, int dir)
 {
-	volatile unsigned char *fb;
+	unsigned char *fb;
 	volatile unsigned char *ba = ip->grf->g_regkva;
 
 	if (ip->flags & ITE_INGRF)
 		return;
 
-	fb = (volatile unsigned char*)ip->grf->g_fbkva + sy * ip->cols;
+	fb = ip->grf->g_fbkva + sy * ip->cols;
 	SetTextPlane(ba, 0x00);
 
 	switch (dir) {
@@ -250,14 +250,14 @@ et_scroll(struct ite_softc *ip, int sy, int sx, int count, int dir)
 }
 
 
-static void etbcopy(const volatile void *src, volatile void *dst, size_t len)
+static void etbcopy(const void *src, void *dst, size_t len)
 {
 	int i;
-	volatile char *cdst;
-	volatile const char *csrc;
+	char *cdst;
+	const char *csrc;
 
-	cdst = (volatile char*)dst;
-	csrc = (volatile const char*)src;
+	cdst = (char*)dst;
+	csrc = (const char*)src;
 
 	if (csrc == cdst)
 		return;

@@ -1,4 +1,4 @@
-/*	$NetBSD: db_access.c,v 1.19 2009/03/07 22:02:17 ad Exp $	*/
+/*	$NetBSD: db_access.c,v 1.17 2002/02/15 07:33:49 simonb Exp $	*/
 
 /*
  * Mach Operating System
@@ -30,13 +30,15 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: db_access.c,v 1.19 2009/03/07 22:02:17 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: db_access.c,v 1.17 2002/02/15 07:33:49 simonb Exp $");
 
 #include <sys/param.h>
 #include <sys/proc.h>
-#include <sys/endian.h>
 
-#include <ddb/ddb.h>
+#include <machine/db_machdep.h>		/* type definitions */
+#include <machine/endian.h>
+
+#include <ddb/db_access.h>
 
 /*
  * Access unaligned data items on aligned (longword)
@@ -51,7 +53,7 @@ const int db_extend[] = {	/* table for sign-extending */
 };
 
 db_expr_t
-db_get_value(db_addr_t addr, size_t size, bool is_signed)
+db_get_value(db_addr_t addr, size_t size, boolean_t is_signed)
 {
 	char data[sizeof(db_expr_t)];
 	db_expr_t value;
@@ -89,34 +91,4 @@ db_put_value(db_addr_t addr, size_t size, db_expr_t value)
 	}
 
 	db_write_bytes(addr, size, data);
-}
-
-void *
-db_read_ptr(const char *name)
-{
-	db_expr_t val;
-	void *p;
-
-	if (!db_value_of_name(name, &val)) {
-		db_printf("db_read_ptr: cannot find `%s'\n", name);
-		db_error(NULL);
-		/* NOTREACHED */
-	}
-	db_read_bytes((db_addr_t)val, sizeof(p), (char *)&p);
-	return p;
-}
-
-int
-db_read_int(const char *name)
-{
-	db_expr_t val;
-	int p;
-
-	if (!db_value_of_name(name, &val)) {
-		db_printf("db_read_int: cannot find `%s'\n", name);
-		db_error(NULL);
-		/* NOTREACHED */
-	}
-	db_read_bytes((db_addr_t)val, sizeof(p), (char *)&p);
-	return p;
 }

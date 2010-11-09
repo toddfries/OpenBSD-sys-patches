@@ -1,4 +1,4 @@
-/*	$NetBSD: mbavar.h,v 1.13 2008/10/16 12:47:22 hans Exp $ */
+/*	$NetBSD: mbavar.h,v 1.11 2005/12/11 12:19:35 christos Exp $ */
 /*
  * Copyright (c) 1994 Ludd, University of Lule}, Sweden
  * All rights reserved.
@@ -52,7 +52,6 @@
  * Devices that have different device drivers.
  */
 enum	mb_devices {
-	MB_UK,	/* unknown */
 	MB_RP,	/* RM/RP disk */
 	MB_TU,	/* TM03 based tape, ex. TU45 or TU77 */
 	MB_MT	/* TU78 tape */
@@ -92,26 +91,26 @@ struct	mba_attach_args {
  * and the unit device driver.
  */
 struct	mba_device {
-	STAILQ_ENTRY(mba_device) md_link; /* linked list of runnable devices */
-	void (*md_start)(struct mba_device *);
-				/* Start routine to be called by mbastart. */
-	int (*md_attn)(struct mba_device *);
-				/* Routine to be called after attn intr */
-	enum xfer_action (*md_finish)(struct mba_device *, int, int *);
-				/* Call after xfer finish */
-	void *md_softc;		/* Backpointer to this units softc. */
-	struct mba_softc *md_mba;
-	struct bufq_state *md_q;	/* queue of I/O requests */
+	struct	mba_device *md_back;	/* linked list of runnable devices */
+	    /* Start routine to be called by mbastart. */
+	void	(*md_start)(struct mba_device *);
+	    /* Routine to be called after attn intr */
+	int	(*md_attn)(struct mba_device *);
+	    /* Call after xfer finish */
+	enum	xfer_action (*md_finish)(struct mba_device *, int, int *);
+	void	*md_softc;	/* Backpointer to this units softc. */
+	struct	mba_softc *md_mba;
+	struct	bufq_state *md_q;	/* queue of I/O requests */
 };
 
 struct	mba_softc {
-	device_t sc_dev;
+	struct  device sc_dev;
 	bus_space_tag_t sc_iot;
 	bus_space_handle_t sc_ioh;
-	STAILQ_HEAD(,mba_device) sc_xfers;
-	struct evcnt sc_intrcnt;
-	enum sc_state sc_state;
-	struct mba_device *sc_md[MAXMBADEV];
+	struct	evcnt sc_intrcnt;
+	struct	mba_device *sc_first, *sc_last;
+	enum    sc_state sc_state;
+	struct	mba_device *sc_md[MAXMBADEV];
 };
 
 struct  mbaunit {

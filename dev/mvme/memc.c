@@ -1,4 +1,4 @@
-/*	$NetBSD: memc.c,v 1.9 2008/04/28 20:23:54 martin Exp $	*/
+/*	$NetBSD: memc.c,v 1.7 2007/10/19 12:00:37 ad Exp $	*/
 
 /*-
  * Copyright (c) 2000, 2002 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -35,7 +42,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: memc.c,v 1.9 2008/04/28 20:23:54 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: memc.c,v 1.7 2007/10/19 12:00:37 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -365,7 +372,7 @@ memc_init(sc)
 	    (chipid == MEMC_CHIP_ID_MEMC040) ? "Parity" : "ECC",
 	    memc_reg_read(sc, MEMC_REG_CHIP_REVISION));
 
-	printf("%s: Base Address: 0x%x, ", device_xname(&sc->sc_dev),
+	printf("%s: Base Address: 0x%x, ", sc->sc_dev.dv_xname,
 	    MEMC_BASE_ADDRESS(memc_reg_read(sc, MEMC_REG_BASE_ADDRESS_HI),
 			      memc_reg_read(sc, MEMC_REG_BASE_ADDRESS_LO)));
 
@@ -468,7 +475,7 @@ memecc_attach(struct memc_softc *sc)
 	    memc_reg_read(sc, MEMECC_REG_SCRUB_CONTROL) |
 	    MEMECC_SCRUB_CONTROL_SCRBEN | MEMECC_SCRUB_CONTROL_SBEIEN);
 
-	printf("%s: Logging ECC errors at ipl %d\n", device_xname(&sc->sc_dev),
+	printf("%s: Logging ECC errors at ipl %d\n", sc->sc_dev.dv_xname,
 	    MEMC_IRQ_LEVEL);
 }
 
@@ -594,10 +601,10 @@ memecc_log_error(struct memc_softc *sc, u_int8_t errlog, int off, int mbepanic)
 		etype = "Spurious";
 
 	printf("%s: %s error on %s%s access to 0x%08x.\n",
-	    device_xname(&sc->sc_dev), etype, bm, rdwr, addr);
+	    sc->sc_dev.dv_xname, etype, bm, rdwr, addr);
 
 	if ((errlog & MEMECC_ERROR_LOGGER_SBE) != 0)
-		printf("%s: ECC Syndrome 0x%02x (%s)\n", device_xname(&sc->sc_dev),
+		printf("%s: ECC Syndrome 0x%02x (%s)\n", sc->sc_dev.dv_xname,
 		    syndrome, syntext);
 
 	/*
@@ -632,6 +639,6 @@ memecc_log_error(struct memc_softc *sc, u_int8_t errlog, int off, int mbepanic)
 		memc_reg_write(sc, MEMECC_REG_SCRUB_CONTROL + off, rv);
 
 		panic("%s: Halting system to preserve data integrity.",
-		    device_xname(&sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 	}
 }

@@ -1,4 +1,4 @@
-#	$NetBSD: GENERIC32_IP3x,v 1.80 2009/01/24 05:06:07 mrg Exp $
+#	$NetBSD: GENERIC32_IP3x,v 1.59 2006/11/11 18:47:11 jmmv Exp $
 #
 # GENERIC32_IP3x machine description file
 # 
@@ -28,27 +28,33 @@ makeoptions	TEXTADDR="0x80069000"	# entry point
 
 options 	INCLUDE_CONFIG_FILE	# embed config file in kernel binary
 
-#ident		"GENERIC32_IP3x-$Revision: 1.80 $"
+#ident		"GENERIC32_IP3x-$Revision: 1.59 $"
 
 maxusers	32
 
 # CPU related options
 options 	MIPS3		# MIPS3 support
-options 	ENABLE_MIPS4_CACHE_R10K # enable R10000 cache ops
-#options 	BLINK		# blinkenlitzen
-makeoptions	CPUFLAGS="-march=mips3 -mabi=32 -mtune=vr5000"
+options		ENABLE_MIPS4_CACHE_R10K # enable R10000 cache ops
+#options	BLINK		# blinkenlitzen
 
 # Standard system options
 #options 	INSECURE	# disable kernel security levels
 
 #options 	NTP		# NTP phase/frequence locked loop
 options 	KTRACE		# system call tracing via ktrace(1)
+#options 	SYSTRACE	# system call vetting via systrace(1)
 
 options 	SYSVMSG		# System V message queues
 options 	SYSVSEM		# System V semaphores
+#options 	SEMMNI=10	# number of semaphore identifiers
+#options 	SEMMNS=60	# number of semaphores in system
+#options 	SEMUME=10	# max number of undo entries per process
+#options 	SEMMNU=30	# number of undo structures in system
 options 	SYSVSHM		# System V shared memory
+#options 	SHMMAXPGS=1024	# 1024 pages is the default
 options 	P1003_1B_SEMAPHORE # p1003.1b semaphore support
 
+#options 	LKM		# loadable kernel modules (XXX: working?)
 
 options 	USERCONF	# userconf(4) support
 #options 	PIPE_SOCKETPAIR	# smaller, but slower pipe(2)
@@ -72,17 +78,15 @@ options 	DDB_HISTORY_SIZE=512	# enable history editing in DDB
 
 # Compatibility options
 options 	COMPAT_15	# NetBSD 1.5
-options 	COMPAT_16	# NetBSD 1.6
-options 	COMPAT_20	# NetBSD 2.0
-options 	COMPAT_30	# NetBSD 3.0
-options 	COMPAT_40	# NetBSD 4.0 compatibility.
-options 	COMPAT_50	# NetBSD 5.0 compatibility.
+options		COMPAT_16	# NetBSD 1.6
+options		COMPAT_20	# NetBSD 2.0
+options 	COMPAT_30	# NetBSD 3.0 compatibility.
 #options 	TCP_COMPAT_42	# 4.2BSD TCP/IP bug compat. Not recommended.
 
 options 	COMPAT_IRIX	# binary compatibility with IRIX
-#options 	COMPAT_LINUX	# binary compatibility with Linux
-#options 	COMPAT_ULTRIX	# binary compatibility with Ultrix 
-options 	COMPAT_BSDPTY	# /dev/[pt]ty?? ptys.
+#options	COMPAT_LINUX	# binary compatibility with Linux
+#options	COMPAT_ULTRIX	# binary compatibility with Ultrix 
+options		COMPAT_BSDPTY	# /dev/[pt]ty?? ptys.
 
 # File systems
 file-system 	FFS		# UFS
@@ -103,15 +107,14 @@ file-system 	UMAPFS		# NULLFS + uid and gid remapping
 file-system 	UNION		# union file system
 file-system	CODA		# Coda File System; also needs vcoda (below)
 file-system	PTYFS		# /dev/pts/N support
-file-system	TMPFS		# Efficient memory file-system
+#file-system	TMPFS		# Efficient memory file-system
 #file-system	UDF		# experimental - OSTA UDF CD/DVD file-system
-file-system	EFS		# Silicon Graphics Extent File System
 
 # File system options
 options 	QUOTA		# UFS quotas
 #options 	FFS_EI		# FFS Endian Independent support
-options 	WAPBL		# File system journaling support - Experimental
-#options 	UFS_DIRHASH	# UFS Large Directory Hashing - Experimental
+options 	SOFTDEP		# FFS soft updates support.
+#options	UFS_DIRHASH	# UFS Large Directory Hashing - Experimental
 options 	NFSSERVER	# Network File System server
 #options 	FFS_NO_SNAPSHOT	# No FFS snapshot support
 #options 	EXT2FS_SYSTEM_FLAGS # makes ext2fs file flags (append and
@@ -127,7 +130,7 @@ options 	INET6		# IPV6
 #options 	IPSEC_DEBUG	# debug for IP security
 #options 	MROUTING	# IP multicast routing
 #options 	PIM		# Protocol Independent Multicast
-#options 	ISO,TPIP	# OSI
+options 	ISO,TPIP	# OSI
 #options 	EON		# OSI tunneling over IP
 options 	NETATALK	# AppleTalk networking protocols
 options 	PPP_BSDCOMP	# BSD-Compress compression support for PPP
@@ -177,24 +180,15 @@ cpu0 		at mainbus?
 
 # O2 busses
 crime0 		at mainbus0 addr 0x14000000
-crmfb0		at mainbus0 addr 0x16000000
-wsdisplay* 	at crmfb? console ?
 mace0 		at mainbus0 addr 0x1f000000
-#options 	MACE_NEEDS_DELAYS
 macepci0 	at mace0 offset 0x080000 intr 7
 pci0 		at macepci0 bus 0
 pci*		at ppb? bus ?
 options 	PCI_NETBSD_CONFIGURE
 
-options 	WSEMUL_VT100
-options 	WS_KERNEL_FG=WSCOL_GREEN
-options 	WS_KERNEL_BG=WSCOL_BLACK
-options 	WS_DEFAULT_BG=WSCOL_BLACK
-
 # MACE devices
 mec0 		at mace0 offset 0x280000 intr 3
-mavb0		at mace0 offset 0x300000 intr 6
-macekbc0	at mace0 offset 0x320000 intr 5
+pckbc0		at mace0 offset 0x320000 intr 5
 lpt0 		at mace0 offset 0x380000 intr 4 intrmask 0x000f0000
 com0 		at mace0 offset 0x390000 intr 4 intrmask 0x03f00000
 com1 		at mace0 offset 0x398000 intr 4 intrmask 0xfc000000
@@ -283,8 +277,8 @@ ss*     at scsibus? target ? lun ?	# SCSI scanners
 ses*    at scsibus? target ? lun ?	# SCSI SES/SAF-TE devices
 uk*     at scsibus? target ? lun ?	# unknown SCSI
 
-pckbd*		at macekbc?
-pms*		at macekbc?
+pckbd*		at pckbc?
+pms*		at pckbc?
 wskbd*		at pckbd? console ?
 wsmouse* 	at pms? mux 0
 #wsdisplay* 	at foofb? console ?
@@ -303,7 +297,7 @@ usb*    at uhci?
 
 # USB Hubs
 uhub*   at usb?
-uhub*   at uhub? port ?
+uhub*   at uhub? port ? configuration ? interface ?
 
 # USB HID device
 uhidev* at uhub? port ? configuration ? interface ?
@@ -403,11 +397,11 @@ radio*  at udsbr?
 ugen*   at uhub? port ?
 
 # PCI IEEE1394 controllers
-fwohci* at pci? dev ? function ?	# IEEE1394 Open Host Controller
+#fwohci* at pci? dev ? function ?	# IEEE1394 Open Host Controller
 
-ieee1394if* at fwohci?
-fwip*	at ieee1394if?			# IP over IEEE1394
-sbp*	at ieee1394if? euihi ? euilo ?
+#ieee1394if* at fwohci?
+#fwip*	at ieee1394if?			# IP over IEEE1394
+#sbp*	at ieee1394if? euihi ? euilo ?
 
 # Audio support
 audio*  at audiobus?
@@ -446,12 +440,9 @@ pseudo-device	gif			# IPv[46] over IPv[46] tunnel (RFC1933)
 pseudo-device	stf			# 6to4 IPv6 over IPv4 encapsulation
 pseudo-device	vlan			# IEEE 802.1q encapsulation
 pseudo-device	bridge			# simple inter-network bridging
-#options 	BRIDGE_IPF		# bridge uses IP/IPv6 pfil hooks too
-pseudo-device	agr			# IEEE 802.3ad link aggregation
+#options	BRIDGE_IPF		# bridge uses IP/IPv6 pfil hooks too
 #pseudo-device	pf			# PF packet filter
 #pseudo-device	pflog			# PF log if
-pseudo-device   accf_data		# "dataready" accept filter
-pseudo-device   accf_http		# "httpready" accept filter
 
 # miscellaneous pseudo-devices
 pseudo-device	pty			# pseudo-terminals
@@ -459,13 +450,7 @@ pseudo-device	sequencer	1	# MIDI sequencer
 pseudo-device	rnd			# /dev/random and in-kernel generator
 pseudo-device	clockctl		# user control of clock subsystem
 pseudo-device	ksyms			# /dev/ksyms
-
-# wscons pseudo-devices
-pseudo-device	wsmux			# mouse & keyboard multiplexor
-pseudo-device	wsfont
-
-# userland interface to drivers, including autoconf and properties retrieval
-pseudo-device	drvctl
+#pseudo-device	wsfont
 
 # a pseudo device needed for Coda	# also needs CODA (above)
 pseudo-device	vcoda		4	# coda minicache <-> venus comm.

@@ -1,4 +1,4 @@
-/*	$NetBSD: types.h,v 1.50 2008/01/20 18:09:09 joerg Exp $ */
+/*	$NetBSD: types.h,v 1.45 2006/09/03 22:27:45 gdamore Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -91,20 +91,24 @@ typedef unsigned long int	paddr_t;
 typedef paddr_t			psize_t;
 #endif
 
-typedef	volatile unsigned char		__cpu_simple_lock_t;
+/*
+ * The value for __SIMPLELOCK_LOCKED is what ldstub() naturally stores
+ * `lock_data' given its address (and the fact that SPARC is big-endian).
+ */
 
-/* __cpu_simple_lock_t used to be a full word. */
-#define	__CPU_SIMPLE_LOCK_PAD
+typedef	volatile int		__cpu_simple_lock_t;
 
-#define	__SIMPLELOCK_LOCKED	0xff
+#define	__SIMPLELOCK_LOCKED	0xff000000
 #define	__SIMPLELOCK_UNLOCKED	0
 
 #define	__HAVE_DEVICE_REGISTER
+#define	__HAVE_GENERIC_SOFT_INTERRUPTS
 #define	__HAVE_SYSCALL_INTERN
 #define	__GENERIC_SOFT_INTERRUPTS_ALL_LEVELS
+#define	__HAVE_TIMECOUNTER
+#define __HAVE_GENERIC_TODR
 
 #ifdef SUN4U
-#define	__HAVE_ATOMIC64_OPS
 #define __HAVE_CPU_COUNTER	/* sparc v9 CPUs have %tick */
 #if defined(_KERNEL)
 #define __HAVE_RAS

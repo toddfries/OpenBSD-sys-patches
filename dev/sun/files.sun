@@ -1,4 +1,4 @@
-# $NetBSD: files.sun,v 1.16 2008/12/05 11:52:42 jdc Exp $
+# $NetBSD: files.sun,v 1.13 2007/05/25 02:01:41 macallan Exp $
 #
 # Configuration file for devices found on Sun machines.
 #
@@ -57,6 +57,9 @@ file	dev/sun/ms.c			ms needs-flag
 # Framebuffer drivers
 #
 
+# Raster operations for RASTERCONSOLE (this is here so dependencies work).
+include	"dev/rasops/files.rasops"
+
 # Brooktree DAC attribute
 define	bt_dac
 file	dev/sun/bt_subr.c		bt_dac
@@ -69,10 +72,10 @@ file	dev/sun/fb.c			fb needs-flag
 define	pfour
 file	dev/sun/pfour_subr.c		pfour needs-flag
 
-device bwtwo: fb, rasops1, pfour, wsemuldisplaydev, vcons
+device bwtwo: fb, rasops1, pfour
 file	dev/sun/bwtwo.c			bwtwo needs-flag
 
-device cgthree: bt_dac, fb, rasops8, wsemuldisplaydev, vcons
+device cgthree: bt_dac, fb, rasops8
 file	dev/sun/cgthree.c		cgthree needs-flag
 
 device cgsix: bt_dac, fb, rasops8, pfour, wsemuldisplaydev, vcons

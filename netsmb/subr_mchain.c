@@ -1,4 +1,4 @@
-/*	$NetBSD: subr_mchain.c,v 1.15 2008/06/24 10:37:19 gmcgarry Exp $	*/
+/*	$NetBSD: subr_mchain.c,v 1.13 2006/03/01 12:38:32 yamt Exp $	*/
 
 /*
  * Copyright (c) 2000, 2001 Boris Popov
@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: subr_mchain.c,v 1.15 2008/06/24 10:37:19 gmcgarry Exp $");
+__KERNEL_RCSID(0, "$NetBSD: subr_mchain.c,v 1.13 2006/03/01 12:38:32 yamt Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -47,8 +47,11 @@ __KERNEL_RCSID(0, "$NetBSD: subr_mchain.c,v 1.15 2008/06/24 10:37:19 gmcgarry Ex
 
 #include <netsmb/mchain.h>
 
-#define MBERROR(x)	aprint_error x
-#define MBPANIC(x)	aprint_error x
+#define MBERROR(format, args...) printf("%s(%d): "format, __func__ , \
+				    __LINE__ ,## args)
+
+#define MBPANIC(format, args...) printf("%s(%d): "format, __func__ , \
+				    __LINE__ ,## args)
 
 #ifdef __NetBSD__
 static struct mbuf *
@@ -174,11 +177,11 @@ mb_fixhdr(struct mbchain *mbp)
  * Return pointer to the object placeholder or NULL if any error occurred.
  * Note: size should be <= MLEN
  */
-void *
+caddr_t
 mb_reserve(struct mbchain *mbp, int size)
 {
 	struct mbuf *m, *mn;
-	void *bpos;
+	caddr_t bpos;
 
 	if (size > MLEN)
 		panic("mb_reserve: size = %d", size);
@@ -194,7 +197,7 @@ mb_reserve(struct mbchain *mbp, int size)
 	}
 	mbp->mb_mleft -= size;
 	mbp->mb_count += size;
-	bpos = mtod(m, char *) + m->m_len;
+	bpos = mtod(m, caddr_t) + m->m_len;
 	m->m_len += size;
 	return bpos;
 }
@@ -202,49 +205,49 @@ mb_reserve(struct mbchain *mbp, int size)
 int
 mb_put_uint8(struct mbchain *mbp, u_int8_t x)
 {
-	return mb_put_mem(mbp, (void *)&x, sizeof(x), MB_MSYSTEM);
+	return mb_put_mem(mbp, (caddr_t)&x, sizeof(x), MB_MSYSTEM);
 }
 
 int
 mb_put_uint16be(struct mbchain *mbp, u_int16_t x)
 {
 	x = htobe16(x);
-	return mb_put_mem(mbp, (void *)&x, sizeof(x), MB_MSYSTEM);
+	return mb_put_mem(mbp, (caddr_t)&x, sizeof(x), MB_MSYSTEM);
 }
 
 int
 mb_put_uint16le(struct mbchain *mbp, u_int16_t x)
 {
 	x = htole16(x);
-	return mb_put_mem(mbp, (void *)&x, sizeof(x), MB_MSYSTEM);
+	return mb_put_mem(mbp, (caddr_t)&x, sizeof(x), MB_MSYSTEM);
 }
 
 int
 mb_put_uint32be(struct mbchain *mbp, u_int32_t x)
 {
 	x = htobe32(x);
-	return mb_put_mem(mbp, (void *)&x, sizeof(x), MB_MSYSTEM);
+	return mb_put_mem(mbp, (caddr_t)&x, sizeof(x), MB_MSYSTEM);
 }
 
 int
 mb_put_uint32le(struct mbchain *mbp, u_int32_t x)
 {
 	x = htole32(x);
-	return mb_put_mem(mbp, (void *)&x, sizeof(x), MB_MSYSTEM);
+	return mb_put_mem(mbp, (caddr_t)&x, sizeof(x), MB_MSYSTEM);
 }
 
 int
 mb_put_int64be(struct mbchain *mbp, int64_t x)
 {
 	x = htobe64(x);
-	return mb_put_mem(mbp, (void *)&x, sizeof(x), MB_MSYSTEM);
+	return mb_put_mem(mbp, (caddr_t)&x, sizeof(x), MB_MSYSTEM);
 }
 
 int
 mb_put_int64le(struct mbchain *mbp, int64_t x)
 {
 	x = htole64(x);
-	return mb_put_mem(mbp, (void *)&x, sizeof(x), MB_MSYSTEM);
+	return mb_put_mem(mbp, (caddr_t)&x, sizeof(x), MB_MSYSTEM);
 }
 
 int
@@ -270,7 +273,7 @@ mb_put_mem(struct mbchain *mbp, const char *source, int size, int type)
 			continue;
 		}
 		cplen = mleft > size ? size : mleft;
-		dst = mtod(m, char *) + m->m_len;
+		dst = mtod(m, caddr_t) + m->m_len;
 		switch (type) {
 		    case MB_MCUSTOM:
 			error = mbp->mb_copy(mbp, source, dst, cplen);
@@ -435,7 +438,7 @@ md_get_uint8(struct mdchain *mdp, u_int8_t *x)
 int
 md_get_uint16(struct mdchain *mdp, u_int16_t *x)
 {
-	return md_get_mem(mdp, (void *)x, 2, MB_MINLINE);
+	return md_get_mem(mdp, (caddr_t)x, 2, MB_MINLINE);
 }
 
 int
@@ -460,7 +463,7 @@ md_get_uint16be(struct mdchain *mdp, u_int16_t *x) {
 int
 md_get_uint32(struct mdchain *mdp, u_int32_t *x)
 {
-	return md_get_mem(mdp, (void *)x, 4, MB_MINLINE);
+	return md_get_mem(mdp, (caddr_t)x, 4, MB_MINLINE);
 }
 
 int
@@ -488,7 +491,7 @@ md_get_uint32le(struct mdchain *mdp, u_int32_t *x)
 int
 md_get_int64(struct mdchain *mdp, int64_t *x)
 {
-	return md_get_mem(mdp, (void *)x, 8, MB_MINLINE);
+	return md_get_mem(mdp, (caddr_t)x, 8, MB_MINLINE);
 }
 
 int
@@ -514,9 +517,8 @@ md_get_int64le(struct mdchain *mdp, int64_t *x)
 }
 
 int
-md_get_mem(struct mdchain *mdp, void *targetv, int size, int type)
+md_get_mem(struct mdchain *mdp, caddr_t target, int size, int type)
 {
-	char *target = targetv;
 	struct mbuf *m = mdp->md_cur;
 	int error;
 	u_int count;
@@ -525,7 +527,7 @@ md_get_mem(struct mdchain *mdp, void *targetv, int size, int type)
 	while (size > 0) {
 		if (m == NULL) {
 #ifdef MCHAIN_DEBUG
-			MBERROR(("incomplete copy\n"));
+			MBERROR("incomplete copy\n");
 #endif
 			return EBADRPC;
 		}
@@ -534,7 +536,7 @@ md_get_mem(struct mdchain *mdp, void *targetv, int size, int type)
 		if (count == 0) {
 			mdp->md_cur = m = m->m_next;
 			if (m)
-				s = mdp->md_pos = mtod(m, void *);
+				s = mdp->md_pos = mtod(m, caddr_t);
 			continue;
 		}
 		if (count > size)

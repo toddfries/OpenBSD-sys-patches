@@ -1,4 +1,4 @@
-/*	$NetBSD: pte.h,v 1.19 2008/04/28 20:23:28 martin Exp $	*/
+/*	$NetBSD: pte.h,v 1.16 2006/02/16 20:17:14 perry Exp $	*/
 
 /*-
  * Copyright (c) 1997 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -80,9 +87,7 @@ int pmap_is_page_ro(pmap_t, vaddr_t, int);
 #define	mips_pg_ro_bit()	(MIPS1_PG_RO)
 #define	mips_pg_ropage_bit()	(MIPS1_PG_RO)	/* XXX not MIPS1_PG_ROPAGE? */
 #define	mips_pg_rwpage_bit()	(MIPS1_PG_RWPAGE)
-#define	mips_pg_rwncpage_bit()	(MIPS1_PG_RWNCPAGE)
 #define	mips_pg_cwpage_bit()	(MIPS1_PG_CWPAGE)
-#define	mips_pg_cwncpage_bit()	(MIPS1_PG_CWNCPAGE)
 #define	mips_pg_global_bit()	(MIPS1_PG_G)
 #define	mips_pg_wired_bit()	(MIPS1_PG_WIRED)
 
@@ -104,9 +109,7 @@ int pmap_is_page_ro(pmap_t, vaddr_t, int);
 #define	mips_pg_ro_bit()	(MIPS3_PG_RO)
 #define	mips_pg_ropage_bit()	(MIPS3_PG_ROPAGE)
 #define	mips_pg_rwpage_bit()	(MIPS3_PG_RWPAGE)
-#define	mips_pg_rwncpage_bit()	(MIPS3_PG_RWNCPAGE)
 #define	mips_pg_cwpage_bit()	(MIPS3_PG_CWPAGE)
-#define	mips_pg_cwncpage_bit()	(MIPS3_PG_CWNCPAGE)
 #define	mips_pg_global_bit()	(MIPS3_PG_G)
 #define	mips_pg_wired_bit()	(MIPS3_PG_WIRED)
 

@@ -1,4 +1,4 @@
-/*	$NetBSD: sa11x0_ost.c,v 1.25 2008/05/10 15:31:04 martin Exp $	*/
+/*	$NetBSD: sa11x0_ost.c,v 1.20 2006/09/24 15:40:14 peter Exp $	*/
 
 /*
  * Copyright (c) 1997 Mark Brinicombe.
@@ -38,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sa11x0_ost.c,v 1.25 2008/05/10 15:31:04 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sa11x0_ost.c,v 1.20 2006/09/24 15:40:14 peter Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -60,7 +60,9 @@ __KERNEL_RCSID(0, "$NetBSD: sa11x0_ost.c,v 1.25 2008/05/10 15:31:04 martin Exp $
 static int	saost_match(struct device *, struct cfdata *, void *);
 static void	saost_attach(struct device *, struct device *, void *);
 
+#ifdef __HAVE_TIMECOUNTER
 static void	saost_tc_init(void);
+#endif /* __HAVE_TIMECOUNTER */
 
 static uint32_t	gettick(void);
 static int	clockintr(void *);
@@ -79,13 +81,7 @@ struct saost_softc {
 
 static struct saost_softc *saost_sc = NULL;
 
-#if defined(CPU_XSCALE_PXA270) && defined(CPU_XSCALE_PXA250)
-#error ost needs to dynamically configure the frequency
-#elif defined(CPU_XSCALE_PXA270)
-#define TIMER_FREQUENCY         3250000         /* PXA270 uses 3.25MHz */
-#else
 #define TIMER_FREQUENCY         3686400         /* 3.6864MHz */
-#endif
 
 #ifndef STATHZ
 #define STATHZ	64
@@ -243,9 +239,12 @@ cpu_initclocks(void)
 	/* Zero the counter value */
 	bus_space_write_4(sc->sc_iot, sc->sc_ioh, SAOST_CR, 0);
 
+#ifdef __HAVE_TIMECOUNTER
 	saost_tc_init();
+#endif /* __HAVE_TIMECOUNTER */
 }
 
+#ifdef __HAVE_TIMECOUNTER
 static u_int
 saost_tc_get_timecount(struct timecounter *tc)
 {
@@ -265,6 +264,7 @@ saost_tc_init(void)
 
 	tc_init(&saost_tc);
 }
+#endif /* __HAVE_TIMECOUNTER */
 
 static uint32_t
 gettick(void)
@@ -280,11 +280,49 @@ gettick(void)
 	return counter;
 }
 
+#ifndef __HAVE_TIMECOUNTER
+void
+microtime(struct timeval *tvp)
+{
+	struct saost_softc *sc = saost_sc;
+	int s, tm, deltatm;
+	static struct timeval lasttime;
+
+	if (sc == NULL) {
+		tvp->tv_sec = 0;
+		tvp->tv_usec = 0;
+		return;
+	}
+
+	s = splhigh();
+	tm = bus_space_read_4(sc->sc_iot, sc->sc_ioh, SAOST_CR);
+
+	deltatm = sc->sc_clock_count - tm;
+
+	*tvp = time;
+	tvp->tv_usec++;		/* XXX */
+	while (tvp->tv_usec >= 1000000) {
+		tvp->tv_sec++;
+		tvp->tv_usec -= 1000000;
+	}
+
+	if (tvp->tv_sec == lasttime.tv_sec &&
+		tvp->tv_usec <= lasttime.tv_usec &&
+		(tvp->tv_usec = lasttime.tv_usec + 1) >= 1000000)
+	{
+		tvp->tv_sec++;
+		tvp->tv_usec -= 1000000;
+	}
+	lasttime = *tvp;
+	splx(s);
+}
+#endif /* !__HAVE_TIMECOUNTER */
+
 void
 delay(u_int usecs)
 {
 	uint32_t xtick, otick, delta;
-	int csec, usec;
+	int j, csec, usec;
 
 	csec = usecs / 10000;
 	usec = usecs % 10000;
@@ -293,11 +331,9 @@ delay(u_int usecs)
 	    + (TIMER_FREQUENCY / 100) * usec / 10000;
 
 	if (saost_sc == NULL) {
-		volatile int k;
-		int j;
 		/* clock isn't initialized yet */
 		for (; usecs > 0; usecs--)
-			for (j = 100; j > 0; j--, k--)
+			for (j = 100; j > 0; j--)
 				continue;
 		return;
 	}
@@ -305,6 +341,8 @@ delay(u_int usecs)
 	otick = gettick();
 
 	while (1) {
+		for (j = 100; j > 0; j--)
+			continue;
 		xtick = gettick();
 		delta = xtick - otick;
 		if (delta > usecs)
@@ -313,3 +351,17 @@ delay(u_int usecs)
 		otick = xtick;
 	}
 }
+
+#ifndef __HAVE_GENERIC_TODR
+void
+resettodr(void)
+{
+}
+
+void
+inittodr(time_t base)
+{
+	time.tv_sec = base;
+	time.tv_usec = 0;
+}
+#endif /* !__HAVE_GENERIC_TODR */

@@ -1,4 +1,4 @@
-/*	$NetBSD: machdep.c,v 1.67 2009/02/13 22:41:02 apb Exp $	*/
+/*	$NetBSD: machdep.c,v 1.53 2006/04/09 01:18:14 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 2001, 2002, 2004 The NetBSD Foundation, Inc.
@@ -12,6 +12,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -27,30 +34,22 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.67 2009/02/13 22:41:02 apb Exp $");
+__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.53 2006/04/09 01:18:14 tsutsui Exp $");
 
 #include "opt_md.h"
 #include "opt_ddb.h"
 #include "opt_kgdb.h"
-#include "opt_modular.h"
 #include "fs_mfs.h"
 #include "fs_nfs.h"
 #include "biconsdev.h"
+#include "opt_kloader_kernel_path.h"
 #include "debug_hpc.h"
 #include "hd64465if.h"
-
-#include "opt_kloader.h"
-#ifdef KLOADER
-#if !defined(KLOADER_KERNEL_PATH)
-#define KLOADER_KERNEL_PATH	"/netbsd"
-#endif
-#endif
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/user.h>
-#include <sys/device.h>
 
 #include <sys/reboot.h>
 #include <sys/mount.h>
@@ -58,7 +57,6 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.67 2009/02/13 22:41:02 apb Exp $");
 #include <sys/kcore.h>
 #include <sys/boot_flag.h>
 #include <sys/ksyms.h>
-#include <sys/module.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -76,7 +74,7 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.67 2009/02/13 22:41:02 apb Exp $");
 
 #include "ksyms.h"
 
-#if NKSYMS || defined(MODULAR) || defined(DDB) || defined(KGDB)
+#if NKSYMS || defined(LKM) || defined(DDB) || defined(KGDB)
 #include <machine/db_machdep.h>
 #include <ddb/db_sym.h>
 #include <ddb/db_extern.h>
@@ -93,10 +91,8 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.67 2009/02/13 22:41:02 apb Exp $");
 #include <machine/bootinfo.h>
 #include <machine/platid.h>
 #include <machine/platid_mask.h>
-#ifdef KLOADER
-#include <machine/kloader.h>
-#endif
 #include <machine/autoconf.h>		/* makebootdev() */
+#include <machine/kloader.h>
 #include <machine/intr.h>
 
 #ifdef NFS
@@ -151,6 +147,7 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.67 2009/02/13 22:41:02 apb Exp $");
 /* Machine */
 char machine[]		= MACHINE;
 char machine_arch[]	= MACHINE_ARCH;
+struct bootinfo *bootinfo;
 
 /* Physical memory */
 static int	mem_cluster_init(paddr_t);
@@ -162,18 +159,11 @@ static int	__check_dram(paddr_t, paddr_t);
 int		mem_cluster_cnt;
 phys_ram_seg_t	mem_clusters[VM_PHYSSEG_MAX];
 
-/* bootinfo */
-static struct bootinfo bootinfo_storage;
-struct bootinfo *bootinfo = &bootinfo_storage;
-
-/* hpcapm: machine_sleep() */
-void (*__sleep_func)(void *);	/* model dependent sleep function holder */
-void *__sleep_ctx;
-
-extern void main(void) __attribute__((__noreturn__));
+void main(void) __attribute__((__noreturn__));
 void machine_startup(int, char *[], struct bootinfo *)
 	__attribute__((__noreturn__));
-
+void (*__sleep_func)(void *);	/* model dependent sleep function holder */
+void *__sleep_ctx;
 
 void
 machine_startup(int argc, char *argv[], struct bootinfo *bi)
@@ -183,15 +173,12 @@ machine_startup(int argc, char *argv[], struct bootinfo *bi)
 	size_t symbolsize;
 	int i;
 	char *p;
-
-#ifdef KLOADER
 	/*
 	 * this routines stack is never polluted since stack pointer
 	 * is lower than kernel text segment, and at exiting, stack pointer
 	 * is changed to proc0.
 	 */
 	struct kloader_bootinfo kbi;
-#endif
 
 	/* Symbol table size */
 	symbolsize = 0;
@@ -208,7 +195,8 @@ machine_startup(int argc, char *argv[], struct bootinfo *bi)
 	memset(edata, 0, end - edata);
 
 	/* Setup bootinfo */
-	memcpy(&bootinfo_storage, bi, sizeof(struct bootinfo));
+	bootinfo = &kbi.bootinfo;
+	memcpy(bootinfo, bi, sizeof(struct bootinfo));
 	if (bootinfo->magic == BOOTINFO_MAGIC) {
 		platid.dw.dw0 = bootinfo->platid_cpu;
 		platid.dw.dw1 = bootinfo->platid_machine;
@@ -244,7 +232,7 @@ machine_startup(int argc, char *argv[], struct bootinfo *bi)
 			p = cp + 2;
 #ifdef NFS
 			if (strcmp(p, "nfs") == 0)
-				rootfstype = MOUNT_NFS;
+				mountroot = nfs_mountroot;
 			else
 				makebootdev(p);
 #else /* NFS */
@@ -266,7 +254,7 @@ machine_startup(int argc, char *argv[], struct bootinfo *bi)
 		size_t fssz;
 		fssz = sh3_round_page(mfs_initminiroot((void *)kernend));
 #ifdef MEMORY_DISK_DYNAMIC
-		md_root_setconf((void *)kernend, fssz);
+		md_root_setconf((caddr_t)kernend, fssz);
 #endif
 		kernend += fssz;
 	}
@@ -277,11 +265,8 @@ machine_startup(int argc, char *argv[], struct bootinfo *bi)
 #ifdef HPC_DEBUG_LCD
 	dbg_lcd_test();
 #endif
-
-#ifdef KLOADER
 	/* copy boot parameter for kloader */
-	kloader_bootinfo_set(&kbi, argc, argv, bootinfo, true);
-#endif
+	kloader_bootinfo_set(&kbi, argc, argv, bi, TRUE);
 
 	/* Find memory cluster. and load to UVM */
 	physmem = mem_cluster_init(SH3_P1SEG_TO_PHYS(kernend));
@@ -294,9 +279,9 @@ machine_startup(int argc, char *argv[], struct bootinfo *bi)
 	/* Initialize pmap and start to address translation */
 	pmap_bootstrap();
 
-#if NKSYMS || defined(DDB) || defined(MODULAR)
+#if NKSYMS || defined(DDB) || defined(LKM)
 	if (symbolsize) {
-		ksyms_addsyms_elf(symbolsize, &end, end + symbolsize);
+		ksyms_init(symbolsize, &end, end + symbolsize);
 		_DPRINTF("symbol size = %d byte\n", symbolsize);
 	}
 #endif
@@ -352,7 +337,6 @@ SYSCTL_SETUP(sysctl_machdep_setup, "sysctl machdep subtree setup")
 		       CTL_MACHDEP, CPU_CONSDEV, CTL_EOL);
 }
 
-/* hpcapm */
 void
 machine_sleep(void)
 {
@@ -361,11 +345,10 @@ machine_sleep(void)
 		__sleep_func(__sleep_ctx);
 }
 
-/* hpcapm */
 void
 machine_standby(void)
 {
-	/* notyet */
+	// notyet
 }
 
 void
@@ -387,7 +370,7 @@ cpu_reboot(int howto, char *bootstr)
 		howto |= RB_HALT;
 	}
 
-#ifdef KLOADER
+#ifdef KLOADER_KERNEL_PATH
 	if ((howto & RB_HALT) == 0)
 		kloader_reboot_setup(KLOADER_KERNEL_PATH);
 #endif
@@ -419,17 +402,15 @@ cpu_reboot(int howto, char *bootstr)
 	/* run any shutdown hooks */
 	doshutdownhooks();
 
-	pmf_system_shutdown(boothowto);
-
 	/* Finally, halt/reboot the system. */
-#ifdef KLOADER
-	if ((howto & RB_HALT) == 0) {
+	if (howto & RB_HALT) {
+		printf("halted.\n");
+	} else {
+#ifdef KLOADER_KERNEL_PATH
 		kloader_reboot();
 		/* NOTREACHED */
-	}
 #endif
-
-	printf("halted.\n");
+	}
 
 #if NHD64465IF > 0
 	hd64465_shutdown();
@@ -443,7 +424,7 @@ cpu_reboot(int howto, char *bootstr)
 }
 
 /* return # of physical pages. */
-static int
+int
 mem_cluster_init(paddr_t addr)
 {
 	phys_ram_seg_t *seg;
@@ -492,7 +473,7 @@ mem_cluster_init(paddr_t addr)
 	return (npages);
 }
 
-static void
+void
 mem_cluster_load(void)
 {
 	paddr_t start, end;
@@ -514,7 +495,7 @@ mem_cluster_load(void)
 	sh_dcache_wbinv_all();
 }
 
-static void
+void
 __find_dram_shadow(paddr_t start, paddr_t end)
 {
 	vaddr_t page, startaddr, endaddr;
@@ -563,7 +544,7 @@ __find_dram_shadow(paddr_t start, paddr_t end)
 }
 
 #ifdef NARLY_MEMORY_PROBE
-static int
+int
 __check_dram(paddr_t start, paddr_t end)
 {
 	uint8_t *page;
@@ -640,14 +621,3 @@ intc_intr(int ssr, int spc, int ssp)
 		__dbg_heart_beat(HEART_BEAT_BLUE);
 	}
 }
-
-
-#ifdef MODULAR
-/*
- * Push any modules loaded by the boot loader.
- */
-void
-module_init_md(void)
-{
-}
-#endif /* MODULAR */

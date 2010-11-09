@@ -1,4 +1,4 @@
-/*	$NetBSD: interrupt.c,v 1.11 2008/04/28 20:23:17 martin Exp $	*/
+/*	$NetBSD: interrupt.c,v 1.9 2006/09/10 14:27:38 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,16 +37,15 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: interrupt.c,v 1.11 2008/04/28 20:23:17 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: interrupt.c,v 1.9 2006/09/10 14:27:38 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/device.h>
-#include <sys/cpu.h>
-#include <sys/intr.h>
 
 #include <uvm/uvm_extern.h>
 
 #include <mips/mips3_clock.h>
+#include <machine/intr.h>
 #include <machine/locore.h>
 
 void
@@ -47,16 +53,15 @@ intr_init(void)
 {
 
 	evbmips_intr_init();	/* board specific stuff */
+
+	softintr_init();
 }
 
 void
 cpu_intr(u_int32_t status, u_int32_t cause, u_int32_t pc, u_int32_t ipending)
 {
 	struct clockframe cf;
-	struct cpu_info *ci;
 
-	ci = curcpu();
-	ci->ci_idepth++;
 	uvmexp.intrs++;
 
 	if (ipending & MIPS_INT_MASK_5) {
@@ -76,13 +81,12 @@ cpu_intr(u_int32_t status, u_int32_t cause, u_int32_t pc, u_int32_t ipending)
 		/* Process I/O and error interrupts. */
 		evbmips_iointr(status, cause, pc, ipending);
 	}
-	ci->ci_idepth--;
 
-#ifdef __HAVE_FAST_SOFTINTS
 	ipending &= (MIPS_SOFT_INT_MASK_1|MIPS_SOFT_INT_MASK_0);
 	if (ipending == 0)
 		return;
+
 	_clrsoftintr(ipending);
+
 	softintr_dispatch(ipending);
-#endif
 }

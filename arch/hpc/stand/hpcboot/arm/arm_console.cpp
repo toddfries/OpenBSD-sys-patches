@@ -1,4 +1,4 @@
-/* -*-C++-*-	$NetBSD: arm_console.cpp,v 1.7 2009/01/29 21:23:38 nonaka Exp $	*/
+/* -*-C++-*-	$NetBSD: arm_console.cpp,v 1.4 2005/12/11 12:17:28 christos Exp $	*/
 
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,31 +37,15 @@
  */
 
 #include <arm/arm_console.h>
-#include <arm/arm_pxa2x0_console.h>
-#include <arm/arm_sa1100_console.h>
 
-ARMConsole *ARMConsole::_instance = NULL;
+ARMConsole *ARMConsole::_instance = 0;
 
 ARMConsole *
-ARMConsole::Instance(MemoryManager *&mem, ArchitectureOps arch)
+ARMConsole::Instance(MemoryManager *&mem)
 {
 
-	if (!_instance) {
-		switch (arch) {
-		    default:
-			_instance = NULL;
-			break;
-
-		    case ARCHITECTURE_ARM_SA1100:
-			_instance = new SA1100Console(mem);
-			break;
-
-		    case ARCHITECTURE_ARM_PXA250:
-		    case ARCHITECTURE_ARM_PXA270:
-			_instance = new PXA2x0Console(mem);
-			break;
-		}
-	}
+	if (!_instance)
+		_instance = new ARMConsole(mem);
 
 	return _instance;
 }
@@ -63,10 +54,24 @@ void
 ARMConsole::Destroy(void)
 {
 
-	if (_instance) {
+	if (_instance)
 		delete _instance;
-		_instance = NULL;
-	}
+}
+
+BOOL
+ARMConsole::init(void)
+{
+
+	if (!super::init())
+		return FALSE;
+
+	_uart_base = _mem->mapPhysicalPage(0x80050000, 0x100, PAGE_READWRITE);
+	if (_uart_base == ~0)
+		return FALSE;
+	_uart_busy = _uart_base + 0x20;
+	_uart_transmit = _uart_base + 0x14;
+
+	return TRUE;
 }
 
 void

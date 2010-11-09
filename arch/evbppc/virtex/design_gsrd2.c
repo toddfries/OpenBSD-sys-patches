@@ -1,4 +1,4 @@
-/* 	$NetBSD: design_gsrd2.c,v 1.3 2007/10/17 19:54:20 garbled Exp $ */
+/* 	$NetBSD: design_gsrd2.c,v 1.1 2006/12/02 22:18:47 freza Exp $ */
 
 /*
  * Copyright (c) 2006 Jachym Holecek
@@ -32,7 +32,7 @@
 #include "opt_virtex.h"
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: design_gsrd2.c,v 1.3 2007/10/17 19:54:20 garbled Exp $");
+__KERNEL_RCSID(0, "$NetBSD: design_gsrd2.c,v 1.1 2006/12/02 22:18:47 freza Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -442,7 +442,7 @@ ll_dmac_intr_disestablish(int chan, void *handle)
 }
 
 int
-virtex_bus_space_tag(const char *xname, bus_space_tag_t *bst)
+virtex_console_tag(const char *xname, bus_space_tag_t *bst)
 {
 	if (strncmp(xname, "xlcom", 5) == 0) {
 		*bst = &opb_bst;
@@ -492,7 +492,7 @@ device_register(struct device *dev, void *aux)
 			return ;
 		}
 		if (prop_dictionary_set(device_properties(dev),
-		    "virtex-tft-pa", pn) != true)
+		    "virtex-tft-pa", pn) != TRUE)
 			printf("WARNING: could not set virtex-tft-pa\n");
 		prop_object_release(pn);
 
@@ -502,7 +502,7 @@ device_register(struct device *dev, void *aux)
 			return ;
 		}
 		if (prop_dictionary_set(device_properties(dev),
-		    "virtex-tft-va", pn) != true)
+		    "virtex-tft-va", pn) != TRUE)
 			printf("WARNING: could not set virtex-tft-va\n");
 		prop_object_release(pn);
 	}

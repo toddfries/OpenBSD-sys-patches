@@ -1,4 +1,4 @@
-/*	$NetBSD: if_dl.h,v 1.23 2008/02/20 17:18:11 matt Exp $	*/
+/*	$NetBSD: if_dl.h,v 1.18 2005/12/11 23:05:24 thorpej Exp $	*/
 
 /*
  * Copyright (c) 1990, 1993
@@ -63,35 +63,22 @@ typedef __sa_family_t	sa_family_t;
  * Structure of a Link-Level sockaddr:
  */
 struct sockaddr_dl {
-	uint8_t	    sdl_len;	/* Total length of sockaddr */
+	u_char	    sdl_len;	/* Total length of sockaddr */
 	sa_family_t sdl_family;	/* AF_LINK */
-	uint16_t   sdl_index;	/* if != 0, system given index for interface */
-	uint8_t	    sdl_type;	/* interface type */
-	uint8_t	    sdl_nlen;	/* interface name length, no trailing 0 reqd. */
-	uint8_t	    sdl_alen;	/* link level address length */
-	uint8_t	    sdl_slen;	/* link layer selector length */
-	/* minimum work area, can be larger; contains both if name
-	 * and ll address
-	 */
-	char	    sdl_data[12];
+	u_int16_t   sdl_index;	/* if != 0, system given index for interface */
+	u_char	    sdl_type;	/* interface type */
+	u_char	    sdl_nlen;	/* interface name length, no trailing 0 reqd. */
+	u_char	    sdl_alen;	/* link level address length */
+	u_char	    sdl_slen;	/* link layer selector length */
+	char	    sdl_data[12]; /* minimum work area, can be larger;
+				     contains both if name and ll address */
 };
-
-#define	satosdl(__sa)	((struct sockaddr_dl *)(__sa))
-#define	satocsdl(__sa)	((const struct sockaddr_dl *)(__sa))
 
 /* We do arithmetic directly with these, so keep them char instead of void */
 #define LLADDR(s) ((char *)((s)->sdl_data + (s)->sdl_nlen))
 #define CLLADDR(s) ((const char *)((s)->sdl_data + (s)->sdl_nlen))
 
-#ifdef _KERNEL
-uint8_t sockaddr_dl_measure(uint8_t, uint8_t);
-struct sockaddr *sockaddr_dl_alloc(uint16_t, uint8_t,
-    const void *, uint8_t, const void *, uint8_t, int);
-struct sockaddr_dl *sockaddr_dl_init(struct sockaddr_dl *, socklen_t, uint16_t,
-    uint8_t, const void *, uint8_t, const void *, uint8_t);
-struct sockaddr_dl *sockaddr_dl_setaddr(struct sockaddr_dl *, socklen_t,
-    const void *, uint8_t);
-#else
+#ifndef _KERNEL
 
 #include <sys/cdefs.h>
 

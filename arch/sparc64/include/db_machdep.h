@@ -1,4 +1,4 @@
-/*	$NetBSD: db_machdep.h,v 1.26 2008/11/25 15:41:11 nakayama Exp $ */
+/*	$NetBSD: db_machdep.h,v 1.21 2006/10/07 18:14:42 rjs Exp $ */
 
 /*
  * Mach Operating System
@@ -41,9 +41,8 @@
 #include <machine/reg.h>
 
 
-/* use 64-bit types explicitly for 32-bit kernels */
 typedef	vaddr_t		db_addr_t;	/* address - unsigned */
-typedef	int64_t		db_expr_t;	/* expression - signed */
+typedef	long		db_expr_t;	/* expression - signed */
 
 struct trapstate {
 	int64_t tstate;
@@ -57,20 +56,22 @@ typedef struct {
 	struct frame64		db_fr;
 	struct trapstate	db_ts[5];
 	int			db_tl;
-	struct fpstate64	db_fpstate __aligned(BLOCK_SIZE);
+	struct fpstate64	db_fpstate;
 } db_regs_t;
 
 /* Current CPU register state */
-#define	DDB_REGS	((db_regs_t*)__UNVOLATILE(curcpu()->ci_ddb_regs))
-#define	DDB_TF		(&DDB_REGS->db_tf)
-#define	DDB_FP		(&DDB_REGS->db_fpstate)
+extern struct cpu_info	*ddb_cpuinfo;
+extern db_regs_t	*ddb_regp;
+#define	DDB_REGS	ddb_regp
+#define	DDB_TF		(&ddb_regp->db_tf)
+#define	DDB_FP		(&ddb_regp->db_fpstate)
 
 /* DDB commands not in db_interface.c */
-void	db_dump_ts(db_expr_t, bool, db_expr_t, const char *);
-void	db_dump_trap(db_expr_t, bool, db_expr_t, const char *);
-void	db_dump_fpstate(db_expr_t, bool, db_expr_t, const char *);
-void	db_dump_window(db_expr_t, bool, db_expr_t, const char *);
-void	db_dump_stack(db_expr_t, bool, db_expr_t, const char *);
+void	db_dump_ts(db_expr_t, int, db_expr_t, const char *);
+void	db_dump_trap(db_expr_t, int, db_expr_t, const char *);
+void	db_dump_fpstate(db_expr_t, int, db_expr_t, const char *);
+void	db_dump_window(db_expr_t, int, db_expr_t, const char *);
+void	db_dump_stack(db_expr_t, int, db_expr_t, const char *);
 
 #define	PC_REGS(regs)	((regs)->db_tf.tf_pc)
 #define	PC_ADVANCE(regs) do {				\
@@ -94,13 +95,13 @@ void	db_dump_stack(db_expr_t, bool, db_expr_t, const char *);
  */
 #define SOFTWARE_SSTEP
 
-bool		db_inst_trap_return(int inst);
-bool		db_inst_return(int inst);
-bool		db_inst_call(int inst);
-bool		db_inst_branch(int inst);
+boolean_t	db_inst_trap_return(int inst);
+boolean_t	db_inst_return(int inst);
+boolean_t	db_inst_call(int inst);
+boolean_t	db_inst_branch(int inst);
 int		db_inst_load(int inst);
 int		db_inst_store(int inst);
-bool		db_inst_unconditional_flow_transfer(int inst);
+boolean_t	db_inst_unconditional_flow_transfer(int inst);
 db_addr_t	db_branch_taken(int inst, db_addr_t pc, db_regs_t *regs);
 
 #define inst_trap_return(ins)	db_inst_trap_return(ins)
@@ -116,7 +117,7 @@ db_addr_t	db_branch_taken(int inst, db_addr_t pc, db_regs_t *regs);
 
 /* see note in db_interface.c about reversed breakpoint addrs */
 #define next_instr_address(pc, bd) \
-	((bd) ? (pc) : DDB_REGS->db_tf.tf_npc)
+	((bd) ? (pc) : ddb_regp->db_tf.tf_npc)
 
 #define DB_MACHINE_COMMANDS
 

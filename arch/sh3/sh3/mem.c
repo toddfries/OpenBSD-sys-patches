@@ -1,4 +1,4 @@
-/*	$NetBSD: mem.c,v 1.26 2007/03/04 06:00:41 christos Exp $	*/
+/*	$NetBSD: mem.c,v 1.23 2006/12/26 10:43:44 elad Exp $	*/
 
 /*
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -80,7 +80,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mem.c,v 1.26 2007/03/04 06:00:41 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mem.c,v 1.23 2006/12/26 10:43:44 elad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -92,8 +92,8 @@ __KERNEL_RCSID(0, "$NetBSD: mem.c,v 1.26 2007/03/04 06:00:41 christos Exp $");
 #include <sys/kauth.h>
 #include <uvm/uvm_extern.h>
 
-void *zeropage;
-bool __mm_mem_addr(paddr_t);
+caddr_t zeropage;
+boolean_t __mm_mem_addr(paddr_t);
 
 dev_type_read(mmrw);
 dev_type_ioctl(mmioctl);
@@ -132,7 +132,7 @@ mmrw(dev_t dev, struct uio *uio, int flags)
 			if (__mm_mem_addr(v)) {
 				o = v & PGOFSET;
 				c = min(uio->uio_resid, (int)(PAGE_SIZE - o));
-				error = uiomove((void *)SH3_PHYS_TO_P1SEG(v),
+				error = uiomove((caddr_t)SH3_PHYS_TO_P1SEG(v),
 				    c, uio);
 			} else {
 				return (EFAULT);
@@ -156,7 +156,7 @@ mmrw(dev_t dev, struct uio *uio, int flags)
 			if (!uvm_kernacc((void *)v, c,
 			    uio->uio_rw == UIO_READ ? B_READ : B_WRITE))
 				return (EFAULT);
-			error = uiomove((void *)v, c, uio);
+			error = uiomove((caddr_t)v, c, uio);
 			break;
 
 		case DEV_NULL:
@@ -200,13 +200,13 @@ mmmmap(dev_t dev, off_t off, int prot)
 }
 
 /*
- * bool __mm_mem_addr(paddr_t pa):
+ * boolean_t __mm_mem_addr(paddr_t pa):
  *	Check specified physical address is memory device.
  */
-bool
+boolean_t
 __mm_mem_addr(paddr_t pa)
 {
 
 	return ((atop(pa) < vm_physmem[0].start || PHYS_TO_VM_PAGE(pa) != NULL)
-	    ? true : false);
+	    ? TRUE : FALSE);
 }

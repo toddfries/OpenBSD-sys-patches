@@ -1,4 +1,4 @@
-/* $NetBSD: mcclock_isa.c,v 1.19 2008/03/29 05:42:45 tsutsui Exp $ */
+/* $NetBSD: mcclock_isa.c,v 1.15 2005/12/11 12:16:16 christos Exp $ */
 
 /*
  * Copyright (c) 1995, 1996 Carnegie-Mellon University.
@@ -29,7 +29,7 @@
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
 
-__KERNEL_RCSID(0, "$NetBSD: mcclock_isa.c,v 1.19 2008/03/29 05:42:45 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mcclock_isa.c,v 1.15 2005/12/11 12:16:16 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -38,25 +38,36 @@ __KERNEL_RCSID(0, "$NetBSD: mcclock_isa.c,v 1.19 2008/03/29 05:42:45 tsutsui Exp
 
 #include <machine/bus.h>
 
-#include <dev/clock_subr.h>
-
+#include <dev/dec/clockvar.h>
+#include <dev/dec/mcclockvar.h>
 #include <dev/ic/mc146818reg.h>
-#include <dev/ic/mc146818var.h>
 #include <dev/isa/isavar.h>
 
-#include <alpha/alpha/mcclockvar.h>
+struct mcclock_isa_softc {
+	struct mcclock_softc	sc_mcclock;
 
-int	mcclock_isa_match(device_t, cfdata_t, void *);
-void	mcclock_isa_attach(device_t, device_t, void *);
+	bus_space_tag_t		sc_iot;
+	bus_space_handle_t	sc_ioh;
+};
 
-CFATTACH_DECL_NEW(mcclock_isa, sizeof(struct mc146818_softc),
+int	mcclock_isa_match __P((struct device *, struct cfdata *, void *));
+void	mcclock_isa_attach __P((struct device *, struct device *, void *));
+
+CFATTACH_DECL(mcclock_isa, sizeof (struct mcclock_isa_softc),
     mcclock_isa_match, mcclock_isa_attach, NULL, NULL);
 
-void	mcclock_isa_write(struct mc146818_softc *, u_int, u_int);
-u_int	mcclock_isa_read(struct mc146818_softc *, u_int);
+void	mcclock_isa_write __P((struct mcclock_softc *, u_int, u_int));
+u_int	mcclock_isa_read __P((struct mcclock_softc *, u_int));
+
+const struct mcclock_busfns mcclock_isa_busfns = {
+	mcclock_isa_write, mcclock_isa_read,
+};
 
 int
-mcclock_isa_match(device_t parent, cfdata_t cf, void *aux)
+mcclock_isa_match(parent, match, aux)
+	struct device *parent;
+	struct cfdata *match;
+	void *aux;
 {
 	struct isa_attach_args *ia = aux;
 	bus_space_handle_t ioh;
@@ -95,38 +106,42 @@ mcclock_isa_match(device_t parent, cfdata_t cf, void *aux)
 }
 
 void
-mcclock_isa_attach(device_t parent, device_t self, void *aux)
+mcclock_isa_attach(parent, self, aux)
+	struct device *parent, *self;
+	void *aux;
 {
-	struct mc146818_softc *sc = device_private(self);
 	struct isa_attach_args *ia = aux;
+	struct mcclock_isa_softc *sc = (struct mcclock_isa_softc *)self;
 
-	sc->sc_dev = self;
-	sc->sc_bst = ia->ia_iot;
-	if (bus_space_map(sc->sc_bst, ia->ia_io[0].ir_addr,
-	    ia->ia_io[0].ir_size, 0, &sc->sc_bsh))
+	sc->sc_iot = ia->ia_iot;
+	if (bus_space_map(sc->sc_iot, ia->ia_io[0].ir_addr,
+	    ia->ia_io[0].ir_size, 0, &sc->sc_ioh))
 		panic("mcclock_isa_attach: couldn't map clock I/O space");
 
-	sc->sc_mcread  = mcclock_isa_read;
-	sc->sc_mcwrite = mcclock_isa_write;
-
-	mcclock_attach(sc);
+	mcclock_attach(&sc->sc_mcclock, &mcclock_isa_busfns);
 }
 
 void
-mcclock_isa_write(struct mc146818_softc *sc, u_int reg, u_int datum)
+mcclock_isa_write(mcsc, reg, datum)
+	struct mcclock_softc *mcsc;
+	u_int reg, datum;
 {
-	bus_space_tag_t iot = sc->sc_bst;
-	bus_space_handle_t ioh = sc->sc_bsh;
+	struct mcclock_isa_softc *sc = (struct mcclock_isa_softc *)mcsc;
+	bus_space_tag_t iot = sc->sc_iot;
+	bus_space_handle_t ioh = sc->sc_ioh;
 
 	bus_space_write_1(iot, ioh, 0, reg);
 	bus_space_write_1(iot, ioh, 1, datum);
 }
 
 u_int
-mcclock_isa_read(struct mc146818_softc *sc, u_int reg)
+mcclock_isa_read(mcsc, reg)
+	struct mcclock_softc *mcsc;
+	u_int reg;
 {
-	bus_space_tag_t iot = sc->sc_bst;
-	bus_space_handle_t ioh = sc->sc_bsh;
+	struct mcclock_isa_softc *sc = (struct mcclock_isa_softc *)mcsc;
+	bus_space_tag_t iot = sc->sc_iot;
+	bus_space_handle_t ioh = sc->sc_ioh;
 
 	bus_space_write_1(iot, ioh, 0, reg);
 	return bus_space_read_1(iot, ioh, 1);

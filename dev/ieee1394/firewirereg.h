@@ -1,4 +1,4 @@
-/*	$NetBSD: firewirereg.h,v 1.8 2008/03/29 16:22:53 kiyohara Exp $	*/
+/*	$NetBSD: firewirereg.h,v 1.7 2007/11/05 19:08:56 kiyohara Exp $	*/
 /*-
  * Copyright (c) 2003 Hidetoshi Shimokawa
  * Copyright (c) 1998-2002 Katsushi Kobayashi and Hidetoshi Shimokawa
@@ -67,7 +67,8 @@ struct firewire_softc {
 	fw_dev_t dev;
 	device_t sbp_dev;
 #elif defined(__NetBSD__)
-	device_t dev;
+	struct device _dev;
+	struct device *dev;
 	SLIST_HEAD(, firewire_dev_list) devlist;
 	void *si_drv1;
 	int si_iosize_max;
@@ -77,7 +78,7 @@ struct firewire_softc {
 #if defined(__NetBSD__)
 struct firewire_dev_list {
 	SLIST_ENTRY(firewire_dev_list) link;
-	device_t dev;
+	struct device *dev;
 	struct fw_device *fwdev;
 };
 #endif
@@ -87,6 +88,9 @@ struct firewire_dev_list {
 #define FW_XFERTIMEOUT 1
 
 struct firewire_dev_comm {
+#if defined(__NetBSD__)
+	struct device _dev;
+#endif
 	device_t dev;
 	struct firewire_comm *fc;
 	void (*post_busreset) (void *);
@@ -105,6 +109,9 @@ struct tcode_info {
 };
 
 struct firewire_comm{
+#if defined(__NetBSD__)
+	struct device _dev;
+#endif
 	device_t dev;
 	device_t bdev;
 	uint16_t busid:10,

@@ -1,4 +1,4 @@
-/*	$NetBSD: subr_specificdata.c,v 1.13 2008/04/28 20:24:04 martin Exp $	*/
+/*	$NetBSD: subr_specificdata.c,v 1.11 2007/11/07 00:23:23 ad Exp $	*/
 
 /*-
  * Copyright (c) 2006, 2007 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -56,10 +63,11 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: subr_specificdata.c,v 1.13 2008/04/28 20:24:04 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: subr_specificdata.c,v 1.11 2007/11/07 00:23:23 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/kmem.h>
+#include <sys/proc.h>
 #include <sys/specificdata.h>
 #include <sys/queue.h>
 #include <sys/mutex.h>
@@ -185,7 +193,7 @@ specificdata_key_create(specificdata_domain_t sd, specificdata_key_t *keyp,
 	specificdata_key_t key = 0;
 	size_t nsz;
 
-	ASSERT_SLEEPABLE();
+	ASSERT_SLEEPABLE(NULL, __func__);
 
 	if (dtor == NULL)
 		dtor = specificdata_noop_dtor;
@@ -281,7 +289,7 @@ specificdata_fini(specificdata_domain_t sd, specificdata_reference *ref)
 	specificdata_container_t sc;
 	specificdata_key_t key;
 
-	ASSERT_SLEEPABLE();
+	ASSERT_SLEEPABLE(NULL, __func__);
 
 	mutex_destroy(&ref->specdataref_lock);
 
@@ -359,7 +367,7 @@ specificdata_setspecific(specificdata_domain_t sd,
 	specificdata_container_t sc, newsc;
 	size_t newnkey, sz;
 
-	ASSERT_SLEEPABLE();
+	ASSERT_SLEEPABLE(NULL, __func__);
 
 	mutex_enter(&ref->specdataref_lock);
 

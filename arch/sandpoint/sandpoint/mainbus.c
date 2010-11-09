@@ -1,4 +1,4 @@
-/*	$NetBSD: mainbus.c,v 1.19 2007/10/17 19:57:00 garbled Exp $	*/
+/*	$NetBSD: mainbus.c,v 1.18 2005/12/11 12:18:51 christos Exp $	*/
 
 /*
  * Copyright (c) 1996 Christopher G. Demetriou.  All rights reserved.
@@ -31,10 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mainbus.c,v 1.19 2007/10/17 19:57:00 garbled Exp $");
-
-#include "opt_pci.h"
-#include "pci.h"
+__KERNEL_RCSID(0, "$NetBSD: mainbus.c,v 1.18 2005/12/11 12:18:51 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/extent.h>
@@ -43,23 +40,24 @@ __KERNEL_RCSID(0, "$NetBSD: mainbus.c,v 1.19 2007/10/17 19:57:00 garbled Exp $")
 #include <sys/systm.h>
 
 #include <machine/bus.h>
-#include <machine/isa_machdep.h>
 
+#include "mainbus.h"
+#include "pci.h"
+#include "opt_pci.h"
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pciconf.h>
 
-struct conf_args {
-	const char *ca_name;
-};
+#if NCPU == 0
+#error	A cpu device is now required
+#endif
 
-int	mainbus_match(struct device *, struct cfdata *, void *);
-void	mainbus_attach(struct device *, struct device *, void *);
-int	mainbus_print(void *, const char *);
+int	mainbus_match __P((struct device *, struct cfdata *, void *));
+void	mainbus_attach __P((struct device *, struct device *, void *));
 
 CFATTACH_DECL(mainbus, sizeof(struct device),
     mainbus_match, mainbus_attach, NULL, NULL);
 
-struct powerpc_isa_chipset genppc_ict;
+int	mainbus_print __P((void *, const char *));
 
 /*
  * Probe for the mainbus; always succeeds.
@@ -82,7 +80,6 @@ mainbus_attach(parent, self, aux)
 	struct device *parent, *self;
 	void *aux;
 {
-	struct conf_args ca;
 	struct pcibus_attach_args pba;
 #if defined(PCI_NETBSD_CONFIGURE)
 	struct extent *ioext, *memext;
@@ -90,10 +87,10 @@ mainbus_attach(parent, self, aux)
 
 	printf("\n");
 
-	ca.ca_name = "cpu";
-	config_found_ia(self, "mainbus", &ca, mainbus_print);
-	ca.ca_name = "eumb";
-	config_found_ia(self, "mainbus", &ca, mainbus_print);
+	/*
+	 * Always find the CPU
+	 */
+	config_found_ia(self, "mainbus", NULL, mainbus_print);
 
 	/*
 	 * XXX Note also that the presence of a PCI bus should
@@ -102,8 +99,10 @@ mainbus_attach(parent, self, aux)
 	 * XXX that's not currently possible.
 	 */
 #if NPCI > 0
-#if defined(PCI_NETBSD_CONFIGURE)
-	ioext  = extent_create("pciio",  0x00001000, 0x0000ffff, M_DEVBUF,
+#if !defined(PCI_NETBSD_CONFIGURE)
+/* #error Sandpoint needs PCI_NETBSD_CONFIGURE if PCI busses are defined. */
+#else
+	ioext  = extent_create("pciio",  0x00000600, 0x0000ffff, M_DEVBUF,
 	    NULL, 0, EX_NOWAIT);
 	memext = extent_create("pcimem", 0x80000000, 0x8fffffff, M_DEVBUF,
 	    NULL, 0, EX_NOWAIT);
@@ -114,8 +113,8 @@ mainbus_attach(parent, self, aux)
 	extent_destroy(memext);
 #endif
 
-	pba.pba_iot = &sandpoint_io_space_tag;
-	pba.pba_memt = &sandpoint_mem_space_tag;
+	pba.pba_iot = &sandpoint_io_bs_tag;
+	pba.pba_memt = &sandpoint_mem_bs_tag;
 	pba.pba_dmat = &pci_bus_dma_tag;
 	pba.pba_dmat64 = NULL;
 	pba.pba_bus = 0;
@@ -138,10 +137,7 @@ extern struct cfdriver cpu_cd;
 int
 cpu_match(struct device *parent, struct cfdata *cf, void *aux)
 {
-	struct conf_args *ca = aux;
 
-	if (strcmp(ca->ca_name, cpu_cd.cd_name) != 0)
-		return 0;
 	if (cpu_info[0].ci_dev != NULL)
 		return 0;
 
@@ -160,9 +156,8 @@ mainbus_print(aux, pnp)
 	void *aux;
 	const char *pnp;
 {
-	struct conf_args *ca = aux;
 
 	if (pnp)
-		aprint_normal("%s at %s", ca->ca_name, pnp);
+		aprint_normal("cpu at %s", pnp);
 	return (UNCONF);
 }

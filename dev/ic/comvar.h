@@ -1,4 +1,4 @@
-/*	comvar.h,v 1.55.8.3 2008/01/09 01:52:50 matt Exp	*/
+/*	$NetBSD: comvar.h,v 1.57 2007/10/17 17:44:19 ad Exp $	*/
 
 /*
  * Copyright (c) 1996 Christopher G. Demetriou.  All rights reserved.
@@ -80,11 +80,8 @@ int com_is_console(bus_space_tag_t, bus_addr_t, bus_space_handle_t *);
 #define	COM_REG_IER		4
 #define	COM_REG_IIR		5
 #define	COM_REG_FIFO		6
-#define	COM_REG_TCR		6
 #define	COM_REG_EFR		7
-#define	COM_REG_TLR		7
 #define	COM_REG_LCR		8
-#define	COM_REG_MDR1		8
 #define	COM_REG_MCR		9
 #define	COM_REG_LSR		10
 #define	COM_REG_MSR		11
@@ -121,9 +118,6 @@ extern const bus_size_t com_std_map[16];
 #define	COM_REG_MCR		com_mcr
 #define	COM_REG_LSR		com_lsr
 #define	COM_REG_MSR		com_msr
-#define	COM_REG_TCR		com_msr
-#define	COM_REG_TLR		com_scratch
-#define	COM_REG_MDR1		8
 
 struct com_regs {
 	bus_space_tag_t		cr_iot;
@@ -143,7 +137,7 @@ struct com_regs {
 #endif
 
 struct com_softc {
-	device_t sc_dev;
+	struct device sc_dev;
 	void *sc_si;
 	struct tty *sc_tty;
 
@@ -206,19 +200,27 @@ struct com_softc {
 #define	COM_TYPE_HAYESP		1	/* Hayes ESP modem */
 #define	COM_TYPE_PXA2x0		2	/* Intel PXA2x0 processor built-in */
 #define	COM_TYPE_AU1x00		3	/* AMD/Alchemy Au1x000 proc. built-in */
-#define	COM_TYPE_OMAP		4	/* TI OMAP processor built-in */
-#define	COM_TYPE_16550_NOERS	5	/* like a 16550, no ERS */
 
 	/* power management hooks */
 	int (*enable)(struct com_softc *);
 	void (*disable)(struct com_softc *);
 	int enabled;
 
+#ifdef __HAVE_TIMECOUNTER
 	struct pps_state sc_pps_state;	/* pps state */
+#else /* !__HAVE_TIMECOUNTER */
+	/* PPS signal on DCD, with or without inkernel clock disciplining */
+	u_char	sc_ppsmask;			/* pps signal mask */
+	u_char	sc_ppsassert;			/* pps leading edge */
+	u_char	sc_ppsclear;			/* pps trailing edge */
+	pps_info_t ppsinfo;
+	pps_params_t ppsparam;
+#endif /* !__HAVE_TIMECOUNTER */
 
 #if NRND > 0 && defined(RND_COM)
 	rndsource_element_t  rnd_source;
 #endif
+	void			*sc_powerhook;	/* power management hook */
 	kmutex_t		sc_lock;
 };
 
@@ -227,10 +229,8 @@ int comintr(void *);
 void com_attach_subr(struct com_softc *);
 int com_probe_subr(struct com_regs *);
 int com_detach(struct device *, int);
-bool com_resume(device_t PMF_FN_PROTO);
 int com_activate(struct device *, enum devact);
-bool com_cleanup(device_t, int);
-bool com_suspend(device_t PMF_FN_PROTO);
+void com_cleanup(void *);
 
 #ifndef IPL_SERIAL
 #define	IPL_SERIAL	IPL_TTY

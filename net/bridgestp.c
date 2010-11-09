@@ -1,4 +1,4 @@
-/*	$NetBSD: bridgestp.c,v 1.14 2009/01/18 10:28:55 mrg Exp $	*/
+/*	$NetBSD: bridgestp.c,v 1.10 2006/11/16 01:33:40 christos Exp $	*/
 
 /*
  * Copyright (c) 2000 Jason L. Wright (jason@thought.net)
@@ -40,7 +40,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: bridgestp.c,v 1.14 2009/01/18 10:28:55 mrg Exp $");
+__KERNEL_RCSID(0, "$NetBSD: bridgestp.c,v 1.10 2006/11/16 01:33:40 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -101,7 +101,7 @@ struct bstp_cbpdu {
 	uint16_t	cbu_maxage;		/* maximum age */
 	uint16_t	cbu_hellotime;		/* hello time */
 	uint16_t	cbu_forwarddelay;	/* forwarding delay */
-} __packed;
+} __attribute__((__packed__));
 
 /* topology change notification bridge protocol data unit */
 struct bstp_tbpdu {
@@ -111,7 +111,7 @@ struct bstp_tbpdu {
 	uint16_t	tbu_protoid;		/* protocol id */
 	uint8_t		tbu_protover;		/* protocol version */
 	uint8_t		tbu_bpdutype;		/* message type */
-} __packed;
+} __attribute__((__packed__));
 
 const uint8_t bstp_etheraddr[] = { 0x01, 0x80, 0xc2, 0x00, 0x00, 0x00 };
 
@@ -265,11 +265,11 @@ bstp_send_config_bpdu(struct bridge_softc *sc, struct bridge_iflist *bif,
 	bpdu.cbu_hellotime = htons(cu->cu_hello_time);
 	bpdu.cbu_forwarddelay = htons(cu->cu_forward_delay);
 
-	memcpy(eh->ether_shost, CLLADDR(ifp->if_sadl), ETHER_ADDR_LEN);
+	memcpy(eh->ether_shost, LLADDR(ifp->if_sadl), ETHER_ADDR_LEN);
 	memcpy(eh->ether_dhost, bstp_etheraddr, ETHER_ADDR_LEN);
 	eh->ether_type = htons(sizeof(bpdu));
 
-	memcpy(mtod(m, char *) + sizeof(*eh), &bpdu, sizeof(bpdu));
+	memcpy(mtod(m, caddr_t) + sizeof(*eh), &bpdu, sizeof(bpdu));
 
 	s = splnet();
 	bridge_enqueue(sc, ifp, m, 0);
@@ -375,7 +375,7 @@ bstp_transmit_tcn(struct bridge_softc *sc)
 
 	eh = mtod(m, struct ether_header *);
 
-	memcpy(eh->ether_shost, CLLADDR(ifp->if_sadl), ETHER_ADDR_LEN);
+	memcpy(eh->ether_shost, LLADDR(ifp->if_sadl), ETHER_ADDR_LEN);
 	memcpy(eh->ether_dhost, bstp_etheraddr, ETHER_ADDR_LEN);
 	eh->ether_type = htons(sizeof(bpdu));
 
@@ -385,7 +385,7 @@ bstp_transmit_tcn(struct bridge_softc *sc)
 	bpdu.tbu_protover = 0;
 	bpdu.tbu_bpdutype = BSTP_MSGTYPE_TCN;
 
-	memcpy(mtod(m, char *) + sizeof(*eh), &bpdu, sizeof(bpdu));
+	memcpy(mtod(m, caddr_t) + sizeof(*eh), &bpdu, sizeof(bpdu));
 
 	s = splnet();
 	bridge_enqueue(sc, ifp, m, 0);
@@ -580,8 +580,10 @@ bstp_acknowledge_topology_change(struct bridge_softc *sc,
 }
 
 struct mbuf *
-bstp_input(struct bridge_softc *sc, struct bridge_iflist *bif, struct mbuf *m)
+bstp_input(struct ifnet *ifp, struct mbuf *m)
 {
+	struct bridge_softc *sc = ifp->if_bridge;
+	struct bridge_iflist *bif = NULL;
 	struct ether_header *eh;
 	struct bstp_tbpdu tpdu;
 	struct bstp_cbpdu cpdu;
@@ -591,8 +593,14 @@ bstp_input(struct bridge_softc *sc, struct bridge_iflist *bif, struct mbuf *m)
 
 	eh = mtod(m, struct ether_header *);
 
-	if ((bif->bif_flags & IFBIF_STP) == 0)
-		return (m);
+	LIST_FOREACH(bif, &sc->sc_iflist, bif_next) {
+		if ((bif->bif_flags & IFBIF_STP) == 0)
+			continue;
+		if (bif->bif_ifp == ifp)
+			break;
+	}
+	if (bif == NULL)
+		goto out;
 
 	len = ntohs(eh->ether_type);
 	if (len < sizeof(tpdu))
@@ -606,7 +614,7 @@ bstp_input(struct bridge_softc *sc, struct bridge_iflist *bif, struct mbuf *m)
 	    (m = m_pullup(m, sizeof(tpdu))) == NULL)
 		goto out;
 
-	memcpy(&tpdu, mtod(m, void *), sizeof(tpdu));
+	memcpy(&tpdu, mtod(m, caddr_t), sizeof(tpdu));
 
 	if (tpdu.tbu_dsap != LLC_8021D_LSAP ||
 	    tpdu.tbu_ssap != LLC_8021D_LSAP ||
@@ -624,7 +632,7 @@ bstp_input(struct bridge_softc *sc, struct bridge_iflist *bif, struct mbuf *m)
 		if (m->m_len < sizeof(cpdu) &&
 		    (m = m_pullup(m, sizeof(cpdu))) == NULL)
 			goto out;
-		memcpy(&cpdu, mtod(m, void *), sizeof(cpdu));
+		memcpy(&cpdu, mtod(m, caddr_t), sizeof(cpdu));
 
 		cu.cu_rootid =
 		    (((uint64_t)ntohs(cpdu.cbu_rootpri)) << 48) |
@@ -814,8 +822,8 @@ bstp_initialization(struct bridge_softc *sc)
 			mif = bif;
 			continue;
 		}
-		if (memcmp(CLLADDR(bif->bif_ifp->if_sadl),
-		    CLLADDR(mif->bif_ifp->if_sadl), ETHER_ADDR_LEN) < 0) {
+		if (memcmp(LLADDR(bif->bif_ifp->if_sadl),
+		    LLADDR(mif->bif_ifp->if_sadl), ETHER_ADDR_LEN) < 0) {
 			mif = bif;
 			continue;
 		}
@@ -827,12 +835,12 @@ bstp_initialization(struct bridge_softc *sc)
 
 	sc->sc_bridge_id =
 	    (((uint64_t)sc->sc_bridge_priority) << 48) |
-	    (((uint64_t)(uint8_t)CLLADDR(mif->bif_ifp->if_sadl)[0]) << 40) |
-	    (((uint64_t)(uint8_t)CLLADDR(mif->bif_ifp->if_sadl)[1]) << 32) |
-	    (((uint64_t)(uint8_t)CLLADDR(mif->bif_ifp->if_sadl)[2]) << 24) |
-	    (((uint64_t)(uint8_t)CLLADDR(mif->bif_ifp->if_sadl)[3]) << 16) |
-	    (((uint64_t)(uint8_t)CLLADDR(mif->bif_ifp->if_sadl)[4]) << 8) |
-	    (((uint64_t)(uint8_t)CLLADDR(mif->bif_ifp->if_sadl)[5]) << 0);
+	    (((uint64_t)LLADDR(mif->bif_ifp->if_sadl)[0]) << 40) |
+	    (((uint64_t)LLADDR(mif->bif_ifp->if_sadl)[1]) << 32) |
+	    (LLADDR(mif->bif_ifp->if_sadl)[2] << 24) |
+	    (LLADDR(mif->bif_ifp->if_sadl)[3] << 16) |
+	    (LLADDR(mif->bif_ifp->if_sadl)[4] << 8) |
+	    (LLADDR(mif->bif_ifp->if_sadl)[5]);
 
 	sc->sc_designated_root = sc->sc_bridge_id;
 	sc->sc_root_path_cost = 0;

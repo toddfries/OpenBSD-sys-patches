@@ -1,4 +1,4 @@
-/*	$NetBSD: start.S,v 1.7 2008/04/28 20:23:16 martin Exp $	*/
+/*	$NetBSD: start.S,v 1.3 2005/12/11 12:17:06 christos Exp $	*/
 
 /*
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,11 +37,9 @@
  */
 
 #include <mips/asm.h>
-#include <mips/cache_r4k.h>
 
 LEAF(start)
 	.set	noreorder
-	.set	mips3
 #ifdef __GP_SUPPORT__
 	la      gp, _C_LABEL (_gp)
 #endif
@@ -43,9 +48,6 @@ LEAF(start)
 	sw	zero, CALLFRAME_SP(sp)		# clear fp for debugger
 	move	s0, a0				# save argc
 	move	s1, a1				# save argv
-
-	jal	_C_LABEL(flushcache)
-	 nop
 
 	la	a0, _C_LABEL (edata)		# clear BSS
 	move	a1, zero
@@ -57,40 +59,7 @@ LEAF(start)
 	jal	_C_LABEL(main)			# main(unsigned int)
 	move	a1, s1				# restore argv
 
-XLEAF(_rtt)
+XLEAF(_xtt)
 	jal	_C_LABEL(cpu_reboot)		# failed, reboot
 	nop
 END(start)
-
-LEAF(flushcache)
-	li	t0, 0x80000000
-	addu	t1, t0, 32*1024		/* flush 32KB */
-	subu	t1, t1, 0x100		/* per 256 bytes */
-
-1:
-	/* flush I-cache */
-	cache	CACHE_R4K_I | CACHEOP_R4K_INDEX_INV, 0x000(t0)
-	cache	CACHE_R4K_I | CACHEOP_R4K_INDEX_INV, 0x020(t0)
-	cache	CACHE_R4K_I | CACHEOP_R4K_INDEX_INV, 0x040(t0)
-	cache	CACHE_R4K_I | CACHEOP_R4K_INDEX_INV, 0x060(t0)
-	cache	CACHE_R4K_I | CACHEOP_R4K_INDEX_INV, 0x080(t0)
-	cache	CACHE_R4K_I | CACHEOP_R4K_INDEX_INV, 0x0a0(t0)
-	cache	CACHE_R4K_I | CACHEOP_R4K_INDEX_INV, 0x0c0(t0)
-	cache	CACHE_R4K_I | CACHEOP_R4K_INDEX_INV, 0x0e0(t0)
-
-	/* flush D-cache */
-	cache	CACHE_R4K_D | CACHEOP_R4K_INDEX_WB_INV, 0x000(t0)
-	cache	CACHE_R4K_D | CACHEOP_R4K_INDEX_WB_INV, 0x020(t0)
-	cache	CACHE_R4K_D | CACHEOP_R4K_INDEX_WB_INV, 0x040(t0)
-	cache	CACHE_R4K_D | CACHEOP_R4K_INDEX_WB_INV, 0x060(t0)
-	cache	CACHE_R4K_D | CACHEOP_R4K_INDEX_WB_INV, 0x080(t0)
-	cache	CACHE_R4K_D | CACHEOP_R4K_INDEX_WB_INV, 0x0a0(t0)
-	cache	CACHE_R4K_D | CACHEOP_R4K_INDEX_WB_INV, 0x0c0(t0)
-	cache	CACHE_R4K_D | CACHEOP_R4K_INDEX_WB_INV, 0x0e0(t0)
-
-	bne	t0, t1, 1b
-	 addu	t0, t0, 0x100
-
-	j	ra
-	 nop
-END(flushcache)

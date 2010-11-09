@@ -1,6 +1,6 @@
-/*	$NetBSD: mc146818.c,v 1.18 2008/12/13 17:32:53 tsutsui Exp $	*/
+/*	$NetBSD: mc146818.c,v 1.13 2007/10/19 11:59:56 ad Exp $	*/
 
-/*-
+/*
  * Copyright (c) 2003 Izumi Tsutsui.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -11,6 +11,8 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -29,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mc146818.c,v 1.18 2008/12/13 17:32:53 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mc146818.c,v 1.13 2007/10/19 11:59:56 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -54,10 +56,10 @@ mc146818_attach(struct mc146818_softc *sc)
 #ifdef DIAGNOSTIC
 	if (sc->sc_mcread == NULL ||
 	    sc->sc_mcwrite == NULL)
-		panic("%s: invalid read/write functions", __func__);
+		panic("mc146818_attach: invalid read/write functions");
 #endif
 
-	aprint_normal(": mc146818 compatible time-of-day clock");
+	printf(": mc146818 compatible time-of-day clock");
 
 	handle = &sc->sc_handle;
 	handle->cookie = sc;
@@ -66,8 +68,6 @@ mc146818_attach(struct mc146818_softc *sc)
 	handle->todr_gettime_ymdhms = mc146818_gettime_ymdhms;
 	handle->todr_settime_ymdhms = mc146818_settime_ymdhms;
 	handle->todr_setwen  = NULL;
-
-	todr_attach(handle);
 }
 
 /*
@@ -89,10 +89,10 @@ mc146818_gettime_ymdhms(todr_chip_handle_t handle, struct clock_ymdhms *dt)
 
 	timeout = 1000000;	/* XXX how long should we wait? */
 	for (;;) {
-		if (((*sc->sc_mcread)(sc, MC_REGA) & MC_REGA_UIP) == 0)
+		if ((*sc->sc_mcread)(sc, MC_REGA) & MC_REGA_UIP)
 			break;
 		if (--timeout < 0) {
-			printf("%s: timeout\n", __func__);
+			printf("mc146818_gettime: timeout\n");
 			return EBUSY;
 		}
 	}
@@ -135,7 +135,7 @@ int
 mc146818_settime_ymdhms(todr_chip_handle_t handle, struct clock_ymdhms *dt)
 {
 	struct mc146818_softc *sc;
-	int s, cent, year;
+	int s, timeout, cent, year;
 
 	sc = handle->cookie;
 
@@ -143,12 +143,15 @@ mc146818_settime_ymdhms(todr_chip_handle_t handle, struct clock_ymdhms *dt)
 
 	todr_wenable(handle, 1);
 
-	/*
-	 * Disable RTC updates during clock updates
-	 */
-
-	(*sc->sc_mcwrite)(sc, MC_REGB,
-	    (*sc->sc_mcread)(sc, MC_REGB) | MC_REGB_SET);
+	timeout = 1000000;	/* XXX how long should we wait? */
+	for (;;) {
+		if ((*sc->sc_mcread)(sc, MC_REGA) & MC_REGA_UIP)
+			break;
+		if (--timeout < 0) {
+			printf("mc146818_settime: timeout\n");
+			return EBUSY;
+		}
+	}
 
 #define	TOREG(x)	((sc->sc_flag & MC146818_BCD) ? TOBCD(x) : (x))
 
@@ -171,13 +174,6 @@ mc146818_settime_ymdhms(todr_chip_handle_t handle, struct clock_ymdhms *dt)
 	(*sc->sc_mcwrite)(sc, MC_YEAR, TOREG(year));
 
 #undef TOREG
-
-	/*
-	 * Re-enable RTC updates
-	 */
-
-	(*sc->sc_mcwrite)(sc, MC_REGB,
-	    (*sc->sc_mcread)(sc, MC_REGB) & ~MC_REGB_SET);
 
 	todr_wenable(handle, 0);
 

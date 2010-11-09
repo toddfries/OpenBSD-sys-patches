@@ -1,4 +1,4 @@
-#	$NetBSD: vnode_if.src,v 1.58 2008/11/15 19:08:12 pooka Exp $
+#	$NetBSD: vnode_if.src,v 1.54 2007/07/27 08:26:38 pooka Exp $
 #
 # Copyright (c) 1992, 1993
 #	The Regents of the University of California.  All rights reserved.
@@ -82,7 +82,7 @@
 #
 vop_lookup {
 	IN struct vnode *dvp;
-	OUT WILLMAKE struct vnode **vpp;
+	INOUT WILLMAKE struct vnode **vpp;
 	IN struct componentname *cnp;
 };
 
@@ -119,6 +119,7 @@ vop_open {
 	IN LOCKED=YES struct vnode *vp;
 	IN int mode;
 	IN kauth_cred_t cred;
+	IN struct lwp *l;
 };
 
 #
@@ -128,6 +129,7 @@ vop_close {
 	IN LOCKED=YES struct vnode *vp;
 	IN int fflag;
 	IN kauth_cred_t cred;
+	IN struct lwp *l;
 };
 
 #
@@ -137,6 +139,7 @@ vop_access {
 	IN LOCKED=YES struct vnode *vp;
 	IN int mode;
 	IN kauth_cred_t cred;
+	IN struct lwp *l;
 };
 
 #
@@ -146,6 +149,7 @@ vop_getattr {
 	IN struct vnode *vp;
 	IN struct vattr *vap;
 	IN kauth_cred_t cred;
+	IN struct lwp *l;
 };
 
 #
@@ -155,6 +159,7 @@ vop_setattr {
 	IN LOCKED=YES struct vnode *vp;
 	IN struct vattr *vap;
 	IN kauth_cred_t cred;
+	IN struct lwp *l;
 };
 
 #
@@ -186,6 +191,7 @@ vop_ioctl {
 	IN void *data;
 	IN int fflag;
 	IN kauth_cred_t cred;
+	IN struct lwp *l;
 };
 
 #
@@ -197,6 +203,7 @@ vop_fcntl {
 	IN void *data;
 	IN int fflag;
 	IN kauth_cred_t cred;
+	IN struct lwp *l;
 };
 
 #
@@ -205,6 +212,7 @@ vop_fcntl {
 vop_poll {
 	IN LOCKED=NO struct vnode *vp;
 	IN int events;
+	IN struct lwp *l;
 };
 
 #
@@ -230,6 +238,7 @@ vop_mmap {
 	IN struct vnode *vp;
 	IN vm_prot_t prot;
 	IN kauth_cred_t cred;
+	IN struct lwp *l;
 };
 
 #
@@ -241,6 +250,7 @@ vop_fsync {
 	IN int flags;
 	IN off_t offlo;
 	IN off_t offhi;
+	IN struct lwp *l;
 };
 
 #
@@ -373,7 +383,7 @@ vop_abortop {
 #
 vop_inactive {
 	IN LOCKED=YES WILLUNLOCK struct vnode *vp;
-	INOUT bool *recycle;
+	IN struct lwp *l;
 };
 
 #
@@ -381,6 +391,7 @@ vop_inactive {
 #
 vop_reclaim {
 	IN LOCKED=NO struct vnode *vp;
+	IN struct lwp *l;
 };
 
 #
@@ -453,6 +464,16 @@ vop_advlock {
 	IN int flags;
 };
 
+# 
+#% lease      vp      = = =
+# 
+vop_lease {
+	IN struct vnode *vp;
+	IN struct lwp *l;
+	IN kauth_cred_t cred;
+	IN int flag;
+};
+
 #
 #% whiteout   dvp     L L L
 #% whiteout   cnp     - - -
@@ -504,6 +525,7 @@ vop_closeextattr {
 	IN LOCKED=YES struct vnode *vp;
 	IN int commit;
 	IN kauth_cred_t cred;
+	IN struct lwp *l;
 };
 
 #
@@ -516,6 +538,7 @@ vop_getextattr {
 	INOUT struct uio *uio;
 	OUT size_t *size;
 	IN kauth_cred_t cred;
+	IN struct lwp *l;
 };
 
 #
@@ -527,6 +550,7 @@ vop_listextattr {
 	INOUT struct uio *uio;
 	OUT size_t *size;
 	IN kauth_cred_t cred;
+	IN struct lwp *l;
 };
 
 #
@@ -535,6 +559,7 @@ vop_listextattr {
 vop_openextattr {
 	IN LOCKED=YES struct vnode *vp;
 	IN kauth_cred_t cred;
+	IN struct lwp *l;
 };
 
 #
@@ -545,6 +570,7 @@ vop_deleteextattr {
 	IN int attrnamespace;
 	IN const char *name;
 	IN kauth_cred_t cred;
+	IN struct lwp *l;
 };
 
 #
@@ -556,4 +582,5 @@ vop_setextattr {
 	IN const char *name;
 	INOUT struct uio *uio;
 	IN kauth_cred_t cred;
+	IN struct lwp *l;
 };

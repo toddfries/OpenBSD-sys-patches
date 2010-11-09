@@ -1,4 +1,4 @@
-/*	$NetBSD: param.h,v 1.12 2008/08/29 19:08:29 matt Exp $	*/
+/*	$NetBSD: param.h,v 1.11 2006/08/28 13:43:35 yamt Exp $	*/
 
 /*
  * Copyright (c) 1994,1995 Mark Brinicombe.
@@ -61,7 +61,7 @@
 #define	MACHINE_ARCH	"armeb"
 #endif /* __ARMEB__ */
 #endif /* MACHINE_ARCH */
-#else
+#elif defined(__ELF__)
 #undef _MACHINE
 #undef MACHINE
 #undef _MACHINE_ARCH
@@ -75,7 +75,7 @@
 #define	_MACHINE_ARCH	armeb
 #define	MACHINE_ARCH	"armeb"
 #endif /* __ARMEB__ */
-#endif /* !_KERNEL */
+#endif /* __ELF__ */
 
 #define	MID_MACHINE	MID_ARM6
 

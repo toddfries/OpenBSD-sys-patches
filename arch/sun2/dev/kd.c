@@ -1,4 +1,4 @@
-/*	$NetBSD: kd.c,v 1.21 2008/04/28 20:23:37 martin Exp $	*/
+/*	$NetBSD: kd.c,v 1.14 2006/10/01 18:56:22 elad Exp $	*/
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -39,7 +46,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kd.c,v 1.21 2008/04/28 20:23:37 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kd.c,v 1.14 2006/10/01 18:56:22 elad Exp $");
 
 #include <sys/param.h>
 #include <sys/proc.h>
@@ -95,7 +102,6 @@ static void kdstart(struct tty *);
 static void kd_init(struct kd_softc *);
 static void kd_cons_input(int);
 static int  kdcngetc(dev_t);
-static void kd_later(void*);
 
 dev_type_open(kdopen);
 dev_type_close(kdclose);
@@ -129,7 +135,6 @@ kd_init(struct kd_softc *kd)
 	kd = &kd_softc; 	/* XXX */
 
 	tp = ttymalloc();
-	callout_setfunc(&tp->t_rstrt_ch, kd_later, tp);
 	tp->t_oproc = kdstart;
 	tp->t_param = kdparam;
 	tp->t_dev = makedev(cdevsw_lookup_major(&kd_cdevsw), 0);
@@ -312,7 +317,7 @@ kdpoll(dev_t dev, int events, struct lwp *l)
 }
 
 int 
-kdioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
+kdioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct lwp *l)
 {
 	struct kd_softc *kd;
 	struct tty *tp;
@@ -347,32 +352,33 @@ kdparam(struct tty *tp, struct termios *t)
 }
 
 
+static void kd_later(void*);
 static void kd_putfb(struct tty *);
 
 static void 
 kdstart(struct tty *tp)
 {
 	struct clist *cl;
-	int s1, s2;
+	int s;
 
-	s1 = splsoftclock();
-	s2 = spltty();
+	s = spltty();
 	if (tp->t_state & (TS_BUSY|TS_TTSTOP|TS_TIMEOUT))
 		goto out;
 
 	cl = &tp->t_outq;
-	if (ttypull(tp)) {
+	if (cl->c_cc) {
 		if (kd_is_console) {
 			tp->t_state |= TS_BUSY;
-			if (is_spl0(s1)) {
+			if (is_spl0(s)) {
 				/* called at level zero - update screen now. */
-				splx(s2);
+				(void) spllowersoftclock();
 				kd_putfb(tp);
-				s2 = spltty();
+				(void) spltty();
 				tp->t_state &= ~TS_BUSY;
 			} else {
 				/* called at interrupt level - do it later */
-				callout_schedule(&tp->t_rstrt_ch, 0);
+				callout_reset(&tp->t_rstrt_ch, 0,
+				    kd_later, tp);
 			}
 		} else {
 			/*
@@ -384,9 +390,15 @@ kdstart(struct tty *tp)
 			ndflush(cl, cl->c_cc);
 		}
 	}
+	if (cl->c_cc <= tp->t_lowat) {
+		if (tp->t_state & TS_ASLEEP) {
+			tp->t_state &= ~TS_ASLEEP;
+			wakeup((caddr_t)cl);
+		}
+		selwakeup(&tp->t_wsel);
+	}
 out:
-	splx(s2);
-	splx(s1);
+	splx(s);
 }
 
 /*
@@ -500,7 +512,7 @@ void
 cons_attach_input(struct cons_channel *cc, struct consdev *cn)
 {
 	struct kd_softc *kd = &kd_softc;
-	struct kbd_softc *kds = cc->cc_private;
+	struct kbd_softc *kds = cc->cc_dev;
 	struct kbd_state *ks;
 
 	/* Share the keyboard state */
@@ -523,7 +535,7 @@ cons_attach_input(struct cons_channel *cc, struct consdev *cn)
 	cn_tab->cn_pri = CN_INTERNAL;
 
 	/* Set up initial PROM input channel for /dev/console */
-	prom_cons_channel.cc_private = NULL;
+	prom_cons_channel.cc_dev = NULL;
 	prom_cons_channel.cc_iopen = kd_rom_iopen;
 	prom_cons_channel.cc_iclose = kd_rom_iclose;
 
@@ -563,7 +575,7 @@ kdcninit(struct consdev *cn)
 	kbd_xlate_init(ks);
 
 	/* Set up initial PROM input channel for /dev/console */
-	prom_cons_channel.cc_private = NULL;
+	prom_cons_channel.cc_dev = NULL;
 	prom_cons_channel.cc_iopen = kd_rom_iopen;
 	prom_cons_channel.cc_iclose = kd_rom_iclose;
 	cons_attach_input(&prom_cons_channel);

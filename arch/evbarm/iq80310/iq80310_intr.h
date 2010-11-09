@@ -1,4 +1,4 @@
-/*	$NetBSD: iq80310_intr.h,v 1.8 2009/02/14 12:44:20 he Exp $	*/
+/*	$NetBSD: iq80310_intr.h,v 1.5 2005/12/24 20:06:59 perry Exp $	*/
 
 /*
  * Copyright (c) 2001, 2002 Wasabi Systems, Inc.
@@ -40,7 +40,6 @@
 
 #include "opt_iop310.h"
 
-#include <arm/cpu.h>
 #include <arm/armreg.h>
 #include <arm/cpufunc.h>
 
@@ -67,18 +66,17 @@
 #define	IRQ_READ_XINT0		1	/* XXX only if board rev >= F */
 #endif /* list of IQ80310-based designs */
 
-#ifdef __HAVE_FAST_SOFTINTS
 void	iq80310_do_soft(void);
-#endif
 
 static inline int __attribute__((__unused__))
 iq80310_splraise(int ipl)
 {
+	extern volatile int current_spl_level;
 	extern int iq80310_imask[];
 	int old;
 
-	old = curcpl();
-	set_curcpl(old | iq80310_imask[ipl]);
+	old = current_spl_level;
+	current_spl_level |= iq80310_imask[ipl];
 
 	/* Don't let the compiler re-order this code with subsequent code */
 	__insn_barrier();
@@ -90,19 +88,18 @@ static inline void __attribute__((__unused__))
 iq80310_splx(int new)
 {
 	extern volatile int iq80310_ipending;
+	extern volatile int current_spl_level;
 	int old;
 
 	/* Don't let the compiler re-order this code with preceding code */
 	__insn_barrier();
 
-	old = curcpl();
-	set_curcpl(new);
+	old = current_spl_level;
+	current_spl_level = new;
 
-#ifdef __HAVE_FAST_SOFTINTS
 	/* If there are software interrupts to process, do it. */
 	if ((iq80310_ipending & ~IRQ_BITS) & ~new)
 		iq80310_do_soft();
-#endif
 
 	/*
 	 * If there are pending hardware interrupts (i.e. the
@@ -121,8 +118,9 @@ iq80310_splx(int new)
 static inline int __attribute__((__unused__))
 iq80310_spllower(int ipl)
 {
+	extern volatile int current_spl_level;
 	extern int iq80310_imask[];
-	const int old = curcpl();
+	int old = current_spl_level;
 
 	iq80310_splx(iq80310_imask[ipl]);
 	return (old);
@@ -133,18 +131,14 @@ iq80310_spllower(int ipl)
 #define _splraise(ipl)		iq80310_splraise(ipl)
 #define	_spllower(ipl)		iq80310_spllower(ipl)
 #define	splx(spl)		iq80310_splx(spl)
-#ifdef __HAVE_FAST_SOFTINTS
 void	_setsoftintr(int);
-#endif
 
 #else
 
 int	_splraise(int);
 int	_spllower(int);
 void	splx(int);
-#ifdef __HAVE_FAST_SOFTINTS
 void	_setsoftintr(int);
-#endif
 
 #endif /* ! EVBARM_SPL_NOINLINE */
 

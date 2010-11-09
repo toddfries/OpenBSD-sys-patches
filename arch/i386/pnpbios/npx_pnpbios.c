@@ -1,4 +1,4 @@
-/*	$NetBSD: npx_pnpbios.c,v 1.12 2008/04/28 20:23:25 martin Exp $	*/
+/*	$NetBSD: npx_pnpbios.c,v 1.10 2006/11/16 01:32:39 christos Exp $	*/
 
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: npx_pnpbios.c,v 1.12 2008/04/28 20:23:25 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: npx_pnpbios.c,v 1.10 2006/11/16 01:32:39 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -48,14 +55,15 @@ __KERNEL_RCSID(0, "$NetBSD: npx_pnpbios.c,v 1.12 2008/04/28 20:23:25 martin Exp 
 
 #include <i386/isa/npxvar.h> 
 
-int	npx_pnpbios_match(device_t, cfdata_t, void *);
-void	npx_pnpbios_attach(device_t, device_t, void *);
+int	npx_pnpbios_match(struct device *, struct cfdata *, void *);
+void	npx_pnpbios_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(npx_pnpbios, sizeof(struct npx_softc),
+CFATTACH_DECL(npx_pnpbios, sizeof(struct npx_softc),
     npx_pnpbios_match, npx_pnpbios_attach, NULL, NULL);
 
 int
-npx_pnpbios_match(device_t parent, cfdata_t match, void *aux)
+npx_pnpbios_match(struct device *parent, struct cfdata *match,
+    void *aux)
 {
 	struct pnpbiosdev_attach_args *aa = aux;
 
@@ -66,15 +74,14 @@ npx_pnpbios_match(device_t parent, cfdata_t match, void *aux)
 }
 
 void
-npx_pnpbios_attach(device_t parent, device_t self, void *aux)
+npx_pnpbios_attach(struct device *parent, struct device *self,
+    void *aux)
 {
-	struct npx_softc *sc = device_private(self);
+	struct npx_softc *sc = (void *)self;
 	struct pnpbiosdev_attach_args *aa = aux;
 	int irq, ist;
 
-	sc->sc_dev = self;
-
-	if (pnpbios_io_map(aa->pbt, aa->resc, 0, &sc->sc_iot, &sc->sc_ioh)) {
+	if (pnpbios_io_map(aa->pbt, aa->resc, 0, &sc->sc_iot, &sc->sc_ioh)) { 	
 		aprint_error(": can't map i/o space\n");
 		return;
 	}
@@ -84,7 +91,8 @@ npx_pnpbios_attach(device_t parent, device_t self, void *aux)
 	pnpbios_print_devres(self, aa);
 
 	if (pnpbios_getirqnum(aa->pbt, aa->resc, 0, &irq, &ist) != 0) {
-		aprint_error_dev(self, "unable to get IRQ number or type\n");
+		aprint_error("%s: unable to get IRQ number or type\n",
+		    sc->sc_dev.dv_xname);
 		return;
 	}
 
@@ -92,7 +100,8 @@ npx_pnpbios_attach(device_t parent, device_t self, void *aux)
 
 	switch (sc->sc_type) {
 	case NPX_INTERRUPT:
-		aprint_normal_dev(self, "interrupting at irq %d\n", irq);
+		aprint_normal("%s: interrupting at irq %d\n",
+		    sc->sc_dev.dv_xname, irq);
 		lcr0(rcr0() & ~CR0_NE);
 		sc->sc_ih = isa_intr_establish(0/*XXX*/, irq, ist, IPL_NONE,
 		     (int (*)(void *))npxintr, NULL);
@@ -100,12 +109,14 @@ npx_pnpbios_attach(device_t parent, device_t self, void *aux)
 	case NPX_EXCEPTION:
 		/*FALLTHROUGH*/
 	case NPX_CPUID:
-		aprint_verbose_dev(self, "%susing exception 16\n",
-		    sc->sc_type == NPX_CPUID ? "reported by CPUID; " : "");
+		aprint_verbose("%s:%s using exception 16\n",
+		    sc->sc_dev.dv_xname,
+		    sc->sc_type == NPX_CPUID ? " reported by CPUID;" : "");
 		sc->sc_type = NPX_EXCEPTION;
 		break;
 	case NPX_BROKEN:
-		aprint_error_dev(self, "error reporting broken; not using\n");
+		aprint_error("%s: error reporting broken; not using\n",
+		    sc->sc_dev.dv_xname);
 		sc->sc_type = NPX_NONE;
 		return;
 	case NPX_NONE:

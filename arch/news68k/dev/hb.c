@@ -1,7 +1,7 @@
-/*	$NetBSD: hb.c,v 1.19 2008/05/14 13:29:28 tsutsui Exp $	*/
+/*	$NetBSD: hb.c,v 1.17 2005/12/11 12:18:23 christos Exp $	*/
 
 /*-
- * Copyright (c) 1999 Izumi Tsutsui.  All rights reserved.
+ * Copyright (C) 1999 Izumi Tsutsui.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -11,6 +11,8 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -20,12 +22,12 @@
  * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
  * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: hb.c,v 1.19 2008/05/14 13:29:28 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: hb.c,v 1.17 2005/12/11 12:18:23 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -40,16 +42,17 @@ __KERNEL_RCSID(0, "$NetBSD: hb.c,v 1.19 2008/05/14 13:29:28 tsutsui Exp $");
 
 #include "ioconf.h"
 
-static int  hb_match(device_t, cfdata_t, void *);
-static void hb_attach(device_t, device_t, void *);
-static int  hb_search(device_t, cfdata_t, const int *, void *);
+static int  hb_match(struct device *, struct cfdata *, void *);
+static void hb_attach(struct device *, struct device *, void *);
+static int  hb_search(struct device *, struct cfdata *,
+		      const int *, void *);
 static int  hb_print(void *, const char *);
 
-CFATTACH_DECL_NEW(hb, 0,
+CFATTACH_DECL(hb, sizeof(struct device),
     hb_match, hb_attach, NULL, NULL);
 
 static int
-hb_match(device_t parent, cfdata_t cf, void *aux)
+hb_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct mainbus_attach_args *ma = aux;
 
@@ -63,18 +66,19 @@ hb_match(device_t parent, cfdata_t cf, void *aux)
 }
 
 static void
-hb_attach(device_t parent, device_t self, void *aux)
+hb_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct hb_attach_args ha;
 
-	aprint_normal("\n");
+	printf("\n");
 	memset(&ha, 0, sizeof(ha));
 
 	config_search_ia(hb_search, self, "hb", &ha);
 }
 
 static int
-hb_search(device_t parent, cfdata_t cf, const int *ldesc, void *aux)
+hb_search(struct device *parent, struct cfdata *cf,
+	  const int *ldesc, void *aux)
 {
 	struct hb_attach_args *ha = aux;
 
@@ -105,11 +109,11 @@ hb_print(void *args, const char *name)
 #if 0
 	if (ha->ha_addr > 0)
 #endif
-		aprint_normal(" addr 0x%08lx", ha->ha_address);
+		aprint_normal (" addr 0x%08lx", ha->ha_address);
 	if (ha->ha_ipl > 0)
-		aprint_normal(" ipl %d", ha->ha_ipl);
+		aprint_normal (" ipl %d", ha->ha_ipl);
 	if (ha->ha_vect > 0) {
-		aprint_normal(" vect %d", ha->ha_vect);
+		aprint_normal (" vect %d", ha->ha_vect);
 	}
 
 	return QUIET;

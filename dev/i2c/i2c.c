@@ -1,4 +1,4 @@
-/*	$NetBSD: i2c.c,v 1.23 2009/02/03 16:41:31 pgoyette Exp $	*/
+/*	$NetBSD: i2c.c,v 1.16 2007/11/12 19:42:44 joerg Exp $	*/
 
 /*
  * Copyright (c) 2003 Wasabi Systems, Inc.
@@ -35,9 +35,6 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: i2c.c,v 1.23 2009/02/03 16:41:31 pgoyette Exp $");
-
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
@@ -51,9 +48,9 @@ __KERNEL_RCSID(0, "$NetBSD: i2c.c,v 1.23 2009/02/03 16:41:31 pgoyette Exp $");
 #include <dev/i2c/i2cvar.h>
 
 #include "locators.h"
-#include <opt_i2cbus.h>
 
 struct iic_softc {
+	struct device sc_dev;
 	i2c_tag_t sc_tag;
 	int sc_type;
 };
@@ -82,9 +79,10 @@ iic_print(void *aux, const char *pnp)
 }
 
 static int
-iic_search(device_t parent, cfdata_t cf, const int *ldesc, void *aux)
+iic_search(struct device *parent, struct cfdata *cf,
+    const int *ldesc, void *aux)
 {
-	struct iic_softc *sc = device_private(parent);
+	struct iic_softc *sc = (void *) parent;
 	struct i2c_attach_args ia;
 
 	ia.ia_tag = sc->sc_tag;
@@ -99,14 +97,15 @@ iic_search(device_t parent, cfdata_t cf, const int *ldesc, void *aux)
 }
 
 static int
-iic_match(device_t parent, cfdata_t cf, void *aux)
+iic_match(struct device *parent, struct cfdata *cf,
+    void *aux)
 {
 
 	return (1);
 }
 
 static void
-iic_attach(device_t parent, device_t self, void *aux)
+iic_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct iic_softc *sc = device_private(self);
 	struct i2cbus_attach_args *iba = aux;
@@ -119,7 +118,7 @@ iic_attach(device_t parent, device_t self, void *aux)
 	sc->sc_tag = iba->iba_tag;
 	sc->sc_type = iba->iba_type;
 	ic = sc->sc_tag;
-	ic->ic_devname = device_xname(self);
+	ic->ic_devname = self->dv_xname;
 
 	LIST_INIT(&(sc->sc_tag->ic_list));
 	LIST_INIT(&(sc->sc_tag->ic_proc_list));
@@ -127,58 +126,18 @@ iic_attach(device_t parent, device_t self, void *aux)
 	rv = kthread_create(PRI_NONE, 0, NULL, iic_smbus_intr_thread,
 	    ic, &ic->ic_intr_thread, "%s", ic->ic_devname);
 	if (rv)
-		aprint_error_dev(self, "unable to create intr thread\n");
+		printf("%s: unable to create intr thread\n", ic->ic_devname);
 
-#if I2C_SCAN
+#if notyet
 	if (sc->sc_type == I2C_TYPE_SMBUS) {
-		int err;
 		int found = 0;
 		i2c_addr_t addr;
-		uint8_t val;
+		uint8_t cmd = 0, val;
 
-		for (addr = 0x09; addr < 0x78; addr++) {
-			/*
-			 * Skip certain i2c addresses:
-			 *	0x00		General Call / START
-			 *	0x01		CBUS Address
-			 *	0x02		Different Bus format
-			 *	0x03 - 0x07	Reserved
-			 *	0x08		Host Address
-			 *	0x0c		Alert Response Address
-			 *	0x28		ACCESS.Bus host
-			 *	0x37		ACCESS.Bus default address
-			 *	0x48 - 0x4b	Prototypes
-			 *	0x61		Device Default Address
-			 *	0x78 - 0x7b	10-bit addresses
-			 *	0x7c - 0x7f	Reserved
-			 *
-			 * Some of these are skipped by judicious selection
-			 * of the range of the above for (;;) statement.
-			 *
-			 * if (addr <= 0x08 || addr >= 0x78)
-			 *	continue;
-			 */
-			if (addr == 0x0c || addr == 0x28 || addr == 0x37 ||
-			    addr == 0x61 || (addr & 0x7c) == 0x48)
-				continue;
-
+		for (addr = 0x0; addr < 0x80; addr++) {
 			iic_acquire_bus(ic, 0);
-			/*
-			 * Use SMBus quick_write command to detect most
-			 * addresses;  should avoid hanging the bus on
-			 * some write-only devices (like clocks that show
-			 * up at address 0x69)
-			 *
-			 * XXX The quick_write() is allegedly known to
-			 * XXX corrupt the Atmel AT24RF08 EEPROM found
-			 * XXX on some IBM Thinkpads!
-			 */
-			if ((addr & 0xf8) == 0x30 ||
-			    (addr & 0xf0) == 0x50)
-				err = iic_smbus_receive_byte(ic, addr, &val, 0);
-			else
-				err = iic_smbus_quick_write(ic, addr, 0);
-			if (err == 0) {
+			if (iic_exec(ic, I2C_OP_READ_WITH_STOP, addr,
+			    &cmd, 1, &val, 1, 0) == 0) {
 				if (found == 0)
 					aprint_normal("%s: devices at",
 							ic->ic_devname);
@@ -192,9 +151,6 @@ iic_attach(device_t parent, device_t self, void *aux)
 		aprint_normal("\n");
 	}
 #endif
-
-	if (!pmf_device_register(self, NULL, NULL))
-		aprint_error_dev(self, "couldn't establish power handler\n");
 
 	/*
 	 * Attach all i2c devices described in the kernel
@@ -303,5 +259,5 @@ iic_smbus_intr(i2c_tag_t ic)
 	return 1;
 }
 
-CFATTACH_DECL_NEW(iic, sizeof(struct iic_softc),
+CFATTACH_DECL(iic, sizeof(struct iic_softc),
     iic_match, iic_attach, NULL, NULL);

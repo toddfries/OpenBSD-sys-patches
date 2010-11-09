@@ -1,4 +1,4 @@
-/*	$NetBSD: compat_13_machdep.c,v 1.13 2008/04/24 18:39:20 ad Exp $	*/
+/*	$NetBSD: compat_13_machdep.c,v 1.10 2006/07/22 06:32:17 tsutsui Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1990, 1993
@@ -75,7 +75,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: compat_13_machdep.c,v 1.13 2008/04/24 18:39:20 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: compat_13_machdep.c,v 1.10 2006/07/22 06:32:17 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -86,6 +86,7 @@ __KERNEL_RCSID(0, "$NetBSD: compat_13_machdep.c,v 1.13 2008/04/24 18:39:20 ad Ex
 #include <sys/signalvar.h>
 
 #include <sys/mount.h>
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 
 #include <compat/sys/signal.h>
@@ -105,11 +106,11 @@ __KERNEL_RCSID(0, "$NetBSD: compat_13_machdep.c,v 1.13 2008/04/24 18:39:20 ad Ex
  * a machine fault.
  */
 int
-compat_13_sys_sigreturn(struct lwp *l, const struct compat_13_sys_sigreturn_args *uap, register_t *retval)
+compat_13_sys_sigreturn(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct compat_13_sys_sigreturn_args /* {
 		syscallarg(struct sigcontext13 *) sigcntxp;
-	} */
+	} */ *uap = v;
 	struct proc *p = l->l_proc;
 	struct sigcontext13 *scp;
 	struct frame *frame;
@@ -156,19 +157,15 @@ compat_13_sys_sigreturn(struct lwp *l, const struct compat_13_sys_sigreturn_args
 	frame->f_pc = scp->sc_pc;
 	frame->f_sr = scp->sc_ps;
 
-	mutex_enter(p->p_lock);
-
 	/* Restore signal stack. */
 	if (scp->sc_onstack & SS_ONSTACK)
-		l->l_sigstk.ss_flags |= SS_ONSTACK;
+		p->p_sigctx.ps_sigstk.ss_flags |= SS_ONSTACK;
 	else
-		l->l_sigstk.ss_flags &= ~SS_ONSTACK;
+		p->p_sigctx.ps_sigstk.ss_flags &= ~SS_ONSTACK;
 
 	/* Restore signal mask. */
 	native_sigset13_to_sigset(&scp->sc_mask, &mask);
-	(void)sigprocmask1(l, SIG_SETMASK, &mask, 0);
-
-	mutex_exit(p->p_lock);
+	(void)sigprocmask1(p, SIG_SETMASK, &mask, 0);
 
 	return EJUSTRETURN;
 }

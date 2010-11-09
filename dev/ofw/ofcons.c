@@ -1,4 +1,4 @@
-/*	$NetBSD: ofcons.c,v 1.35 2009/01/03 03:43:22 yamt Exp $	*/
+/*	$NetBSD: ofcons.c,v 1.32 2007/10/18 18:55:00 joerg Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996 Wolfgang Solfrank.
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ofcons.c,v 1.35 2009/01/03 03:43:22 yamt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ofcons.c,v 1.32 2007/10/18 18:55:00 joerg Exp $");
 
 #include <sys/param.h>
 #include <sys/conf.h>
@@ -118,12 +118,18 @@ static int ofcons_param(struct tty *, struct termios *);
 static void ofcons_pollin(void *);
 
 int
-ofcons_open(dev_t dev, int flag, int mode, struct lwp *l)
+ofcons_open(dev, flag, mode, l)
+	dev_t dev;
+	int flag, mode;
+	struct lwp *l;
 {
 	struct ofcons_softc *sc;
+	int unit = minor(dev);
 	struct tty *tp;
 
-	sc = device_lookup_private(&ofcons_cd, minor(dev));
+	if (unit >= ofcons_cd.cd_ndevs)
+		return ENXIO;
+	sc = ofcons_cd.cd_devs[unit];
 	if (!sc)
 		return ENXIO;
 	if (!(tp = sc->of_tty))
@@ -154,9 +160,12 @@ ofcons_open(dev_t dev, int flag, int mode, struct lwp *l)
 }
 
 int
-ofcons_close(dev_t dev, int flag, int mode, struct lwp *l)
+ofcons_close(dev, flag, mode, l)
+	dev_t dev;
+	int flag, mode;
+	struct lwp *l;
 {
-	struct ofcons_softc *sc = device_lookup_private(&ofcons_cd, minor(dev));
+	struct ofcons_softc *sc = ofcons_cd.cd_devs[minor(dev)];
 	struct tty *tp = sc->of_tty;
 
 	callout_stop(&sc->sc_poll_ch);
@@ -167,35 +176,49 @@ ofcons_close(dev_t dev, int flag, int mode, struct lwp *l)
 }
 
 int
-ofcons_read(dev_t dev, struct uio *uio, int flag)
+ofcons_read(dev, uio, flag)
+	dev_t dev;
+	struct uio *uio;
+	int flag;
 {
-	struct ofcons_softc *sc = device_lookup_private(&ofcons_cd, minor(dev));
+	struct ofcons_softc *sc = ofcons_cd.cd_devs[minor(dev)];
 	struct tty *tp = sc->of_tty;
 
 	return (*tp->t_linesw->l_read)(tp, uio, flag);
 }
 
 int
-ofcons_write(dev_t dev, struct uio *uio, int flag)
+ofcons_write(dev, uio, flag)
+	dev_t dev;
+	struct uio *uio;
+	int flag;
 {
-	struct ofcons_softc *sc = device_lookup_private(&ofcons_cd, minor(dev));
+	struct ofcons_softc *sc = ofcons_cd.cd_devs[minor(dev)];
 	struct tty *tp = sc->of_tty;
 
 	return (*tp->t_linesw->l_write)(tp, uio, flag);
 }
 
 int
-ofcons_poll(dev_t dev, int events, struct lwp *l)
+ofcons_poll(dev, events, l)
+	dev_t dev;
+	int events;
+	struct lwp *l;
 {
-	struct ofcons_softc *sc = device_lookup_private(&ofcons_cd, minor(dev));
+	struct ofcons_softc *sc = ofcons_cd.cd_devs[minor(dev)];
 	struct tty *tp = sc->of_tty;
 
 	return ((*tp->t_linesw->l_poll)(tp, events, l));
 }
 int
-ofcons_ioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
+ofcons_ioctl(dev, cmd, data, flag, l)
+	dev_t dev;
+	u_long cmd;
+	void *data;
+	int flag;
+	struct lwp *l;
 {
-	struct ofcons_softc *sc = device_lookup_private(&ofcons_cd, minor(dev));
+	struct ofcons_softc *sc = ofcons_cd.cd_devs[minor(dev)];
 	struct tty *tp = sc->of_tty;
 	int error;
 
@@ -205,9 +228,10 @@ ofcons_ioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 }
 
 struct tty *
-ofcons_tty(dev_t dev)
+ofcons_tty(dev)
+	dev_t dev;
 {
-	struct ofcons_softc *sc = device_lookup_private(&ofcons_cd, minor(dev));
+	struct ofcons_softc *sc = ofcons_cd.cd_devs[minor(dev)];
 
 	return sc->of_tty;
 }
@@ -216,6 +240,7 @@ static void
 ofcons_start(tp)
 	struct tty *tp;
 {
+	struct clist *cl;
 	int s, len;
 	u_char buf[OFBURSTLEN];
 
@@ -226,13 +251,21 @@ ofcons_start(tp)
 	}
 	tp->t_state |= TS_BUSY;
 	splx(s);
+	cl = &tp->t_outq;
 	len = q_to_b(cl, buf, OFBURSTLEN);
 	OF_write(stdout, buf, len);
 	s = spltty();
 	tp->t_state &= ~TS_BUSY;
-	if (ttypull(tp)) {
+	if (cl->c_cc) {
 		tp->t_state |= TS_TIMEOUT;
 		callout_schedule(&tp->t_rstrt_ch, 1);
+	}
+	if (cl->c_cc <= tp->t_lowat) {
+		if (tp->t_state & TS_ASLEEP) {
+			tp->t_state &= ~TS_ASLEEP;
+			wakeup(cl);
+		}
+		selwakeup(&tp->t_wsel);
 	}
 	splx(s);
 }
@@ -330,9 +363,11 @@ ofcons_cnputc(dev, c)
 }
 
 void
-ofcons_cnpollc(dev_t dev, int on)
+ofcons_cnpollc(dev, on)
+	dev_t dev;
+	int on;
 {
-	struct ofcons_softc *sc = device_lookup_private(&ofcons_cd, minor(dev));
+	struct ofcons_softc *sc = ofcons_cd.cd_devs[minor(dev)];
 
 	if (!sc)
 		return;

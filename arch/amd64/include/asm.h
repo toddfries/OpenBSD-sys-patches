@@ -1,4 +1,4 @@
-/*	$NetBSD: asm.h,v 1.13 2008/10/26 00:08:15 mrg Exp $	*/
+/*	$NetBSD: asm.h,v 1.6 2006/09/05 19:00:42 ad Exp $	*/
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -37,8 +37,6 @@
 #ifndef _AMD64_ASM_H_
 #define _AMD64_ASM_H_
 
-#ifdef __x86_64__
-
 #ifdef PIC
 #define PIC_PLT(x)	x@PLT
 #define PIC_GOT(x)	x@GOTPCREL(%rip)
@@ -62,17 +60,11 @@
 
 /* let kernels and others override entrypoint alignment */
 #ifndef _ALIGN_TEXT
-# ifdef _STANDALONE
-#  define _ALIGN_TEXT .align 4
-# else
-#  define _ALIGN_TEXT .align 16
-# endif
+#define _ALIGN_TEXT .align 4
 #endif
 
 #define _ENTRY(x) \
 	.text; _ALIGN_TEXT; .globl x; .type x,@function; x:
-#define _LABEL(x) \
-	.globl x; x:
 
 #ifdef _KERNEL
 /* XXX Can't use __CONCAT() here, as it would be evaluated incorrectly. */
@@ -102,11 +94,10 @@
 #define	ENTRY(y)	_ENTRY(_C_LABEL(y)); _PROF_PROLOGUE
 #define	NENTRY(y)	_ENTRY(_C_LABEL(y))
 #define	ASENTRY(y)	_ENTRY(_ASM_LABEL(y)); _PROF_PROLOGUE
-#define	LABEL(y)	_LABEL(_C_LABEL(y))
 
 #define	ASMSTR		.asciz
 
-#define RCSID(x)	.pushsection ".ident"; .asciz x; .popsection
+#define RCSID(x)	.text; .asciz x
 
 #define	WEAK_ALIAS(alias,sym)						\
 	.weak alias;							\
@@ -130,10 +121,26 @@
 	.stabs __STRING(sym),1,0,0,0
 #endif /* __STDC__ */
 
-#else	/*	__x86_64__	*/
-
-#include <i386/asm.h>
-
-#endif	/*	__x86_64__	*/
+/*
+ * Assembley equivalent of spllower().  Label contains the label to jump to
+ * if we need to fire off pending interrupts (e.g. _C_LABEL(Xspllower)).
+ *
+ * On entry %rcx = new SPL.
+ */
+#define	SPLLOWER(label)						\
+	movq		CPUVAR(SELF), %r9 ;			\
+	cmpl		CPU_INFO_ILEVEL(%r9), %ecx ;		\
+	jae		99f ;					\
+	movl		CPU_INFO_IUNMASK(%r9,%rcx,4), %edi ;	\
+	pushfq		;					\
+	popq		%rax ;					\
+	cli		;					\
+	testl		CPU_INFO_IPENDING(%r9), %edi ;		\
+	movq		%rcx, %rdi ;				\
+	jnz		label ;					\
+	movl		%ecx, CPU_INFO_ILEVEL(%r9) ;		\
+	pushq		%rax ;					\
+	popfq		;					\
+99:
 
 #endif /* !_AMD64_ASM_H_ */

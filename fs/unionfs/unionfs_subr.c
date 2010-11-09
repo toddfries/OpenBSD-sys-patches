@@ -110,15 +110,11 @@ unionfs_nodeget(struct mount *mp, struct vnode *uppervp,
 	unp->un_uppervp = uppervp;
 	unp->un_lowervp = lowervp;
 	unp->un_dvp = dvp;
-	if (uppervp != NULLVP)
-		vp->v_vnlock = uppervp->v_vnlock;
-	else
-		vp->v_vnlock = lowervp->v_vnlock;
 
 	if (path != NULL) {
 		unp->un_path = (char *)
 		    malloc(cnp->cn_namelen +1, M_UNIONFSPATH, M_WAITOK|M_ZERO);
-		bcopy(cnp->cn_nameptr, unp->un_path, cnp->cn_namelen);
+		memcpy(unp->un_path, cnp->cn_nameptr, cnp->cn_namelen);
 		unp->un_path[cnp->cn_namelen] = '\0';
 	}
 	vp->v_type = (uppervp != NULLVP ? uppervp->v_type : lowervp->v_type);
@@ -156,7 +152,6 @@ unionfs_noderem(struct vnode *vp)
 	lvp = unp->un_lowervp;
 	uvp = unp->un_uppervp;
 	unp->un_lowervp = unp->un_uppervp = NULLVP;
-	vp->v_vnlock = &(vp->v_lock);
 	vp->v_data = NULL;
 	
 	if (lvp != NULLVP)
@@ -239,7 +234,7 @@ unionfs_create_uppervattr_core(struct unionfs_mount *ump,
 			       struct vattr *lva,
 			       struct vattr *uva)
 {
-	VATTR_NULL(uva);
+	vattr_null(uva);
 	uva->va_type = lva->va_type;
 	uva->va_atime = lva->va_atime;
 	uva->va_mtime = lva->va_mtime;
@@ -309,7 +304,7 @@ unionfs_relookup(struct vnode *dvp, struct vnode **vpp,
 
 	cn->cn_namelen = pathlen;
 	cn->cn_pnbuf = PNBUF_GET();
-	bcopy(path, cn->cn_pnbuf, pathlen);
+	memcpy(cn->cn_pnbuf, path, pathlen);
 	cn->cn_pnbuf[pathlen] = '\0';
 
 	cn->cn_nameiop = nameiop;
@@ -325,7 +320,7 @@ unionfs_relookup(struct vnode *dvp, struct vnode **vpp,
 		cn->cn_flags |= (cnp->cn_flags & SAVESTART);
 
 	vref(dvp);
-	VOP_UNLOCK(dvp, 0);
+	VOP_UNLOCK(dvp);
 
 	if ((error = relookup(dvp, vpp, cn))) {
 		PNBUF_PUT(cn->cn_pnbuf);
@@ -478,7 +473,6 @@ unionfs_relookup_for_rename(struct vnode *dvp, struct componentname *cnp)
 static void
 unionfs_node_update(struct unionfs_node *unp, struct vnode *uvp)
 {
-	int		count, lockcnt;
 	struct vnode   *vp;
 	struct vnode   *lvp;
 
@@ -490,14 +484,8 @@ unionfs_node_update(struct unionfs_node *unp, struct vnode *uvp)
 	 */
 	mutex_enter(&vp->v_interlock);
 	unp->un_uppervp = uvp;
-	vp->v_vnlock = uvp->v_vnlock;
-	lockcnt = lvp->v_vnlock->vl_recursecnt +
-	    rw_write_held(&lvp->v_vnlock->vl_lock);
-	if (lockcnt <= 0)
-		panic("unionfs: no exclusive lock");
+	KASSERT(VOP_ISLOCKED(lvp) == LK_EXCLUSIVE);
 	mutex_exit(&vp->v_interlock);
-	for (count = 1; count < lockcnt; count++)
-		vn_lock(uvp, LK_EXCLUSIVE | LK_CANRECURSE | LK_RETRY);
 }
 
 /*
@@ -643,7 +631,7 @@ unionfs_vn_create_on_upper(struct vnode **vpp, struct vnode *udvp,
 
 	cn.cn_namelen = strlen(unp->un_path);
 	cn.cn_pnbuf = PNBUF_GET();
-	bcopy(unp->un_path, cn.cn_pnbuf, cn.cn_namelen + 1);
+	memcpy(cn.cn_pnbuf, unp->un_path, cn.cn_namelen + 1);
 	cn.cn_nameiop = CREATE;
 	cn.cn_flags = (LOCKPARENT | LOCKLEAF | HASBUF | SAVENAME | ISLASTCN);
 	cn.cn_cred = cred;
@@ -675,7 +663,7 @@ unionfs_vn_create_on_upper(struct vnode **vpp, struct vnode *udvp,
 	*vpp = vp;
 
 unionfs_vn_create_on_upper_free_out1:
-	VOP_UNLOCK(udvp, 0);
+	VOP_UNLOCK(udvp);
 
 unionfs_vn_create_on_upper_free_out2:
 	if (cn.cn_flags & HASBUF) {
@@ -877,7 +865,7 @@ unionfs_check_rmdir(struct vnode *vp, kauth_cred_t cred)
 		     dp = (struct dirent*)((char *)dp + dp->d_reclen)) {
 			if (dp->d_type == DT_WHT ||
 			    (dp->d_namlen == 1 && dp->d_name[0] == '.') ||
-			    (dp->d_namlen == 2 && !bcmp(dp->d_name, "..", 2)))
+			    (dp->d_namlen == 2 && !memcmp(dp->d_name, "..", 2)))
 				continue;
 
 			cn.cn_namelen = dp->d_namlen;

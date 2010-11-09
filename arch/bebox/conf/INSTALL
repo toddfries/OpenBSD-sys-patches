@@ -1,4 +1,4 @@
-#	$NetBSD: INSTALL,v 1.46 2009/02/06 18:50:26 jym Exp $
+#	$NetBSD: INSTALL,v 1.41 2006/12/29 21:49:03 yamt Exp $
 #
 # First try for BEBOX config file
 #
@@ -12,11 +12,10 @@ maxusers	32
 makeoptions	COPTS="-Os"		# Optimise for space. Implies -O2
 
 # Enable the hooks used for initializing the root memory-disk.
-options 	MEMORY_DISK_HOOKS
-options 	MEMORY_DISK_IS_ROOT	# force root on memory disk
-options 	MEMORY_DISK_SERVER=0	# no userspace memory disk support
-options 	MEMORY_DISK_ROOT_SIZE=3074	# size of memory disk, in blocks
-options 	MEMORY_DISK_RBFLAGS=RB_SINGLE	# boot in single-user mode
+options 		MEMORY_DISK_HOOKS
+options 		MEMORY_DISK_IS_ROOT	# force root on memory disk
+options 		MEMORY_DISK_SERVER=0	# no userspace memory disk support
+options 		MEMORY_DISK_ROOT_SIZE=3074	# size of memory disk, in blocks
 
 #options 	IPKDBUSERHACK	# Allow access to mapped memory via kgdb
 #options 	DEBUG_BY_TOOLS	# Allow debugging from toolsnet
@@ -46,7 +45,6 @@ options 	COMPAT_15
 options 	COMPAT_16
 options 	COMPAT_20
 options 	COMPAT_30	# NetBSD 3.0 compatibility.
-options 	COMPAT_40	# NetBSD 4.0 compatibility.
 options 	COMPAT_386BSD_MBRPART	# recognize old partition ID
 options		COMPAT_BSDPTY	# /dev/[pt]ty?? ptys.
 
@@ -69,7 +67,6 @@ file-system	PTYFS		# /dev/pts/N support
 # Filesystem options
 #options 	NFS_V2_ONLY	# Exclude NFS3 code to save space
 options 	FFS_NO_SNAPSHOT	# No FFS snapshot support
-options 	WAPBL		# File system journaling support - Experimental
 
 #options 	NFSSERVER
 
@@ -107,6 +104,8 @@ pchb*	at pci? dev ? function ?	# PCI-Host bridges
 pcib*	at pci? dev ? function ?	# PCI-ISA bridges
 
 isa*	at pcib?			# ISA on PCI-ISA bridge
+
+pc0	at isa? port 0x60 irq 1		# generic PC console device
 
 mcclock0 at isa? port 0x70		# generic time-of-day clock
 

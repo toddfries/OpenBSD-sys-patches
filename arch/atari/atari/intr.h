@@ -1,4 +1,4 @@
-/*	$NetBSD: intr.h,v 1.5 2009/03/05 13:21:44 tsutsui Exp $	*/
+/*	$NetBSD: intr.h,v 1.3 1997/10/09 07:37:52 jtc Exp $	*/
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -44,7 +51,7 @@
  * the list.  The handler is called with its (single) argument or with a
  * 'standard' clockframe. This depends on 'ih_type'.
  */
-typedef int	(*hw_ifun_t)(void *, int);
+typedef int	(*hw_ifun_t) __P((void *, int));
 
 struct intrhand {
 	LIST_ENTRY(intrhand)	ih_link;
@@ -56,11 +63,11 @@ struct intrhand {
 	u_long			*ih_intrcnt;
 };
 
-void		intr_init(void);
-struct intrhand *intr_establish(int, int, int, hw_ifun_t, void *);
-int		intr_disestablish(struct intrhand *);
-void		intr_dispatch(struct clockframe);
-void		intr_glue(void);
+void		intr_init __P((void));
+struct intrhand *intr_establish __P((int, int, int, hw_ifun_t, void *));
+int		intr_disestablish __P((struct intrhand *));
+void		intr_dispatch __P((struct clockframe));
+void		intr_glue __P((void));
 
 /*
  * Exported by intrcnt.h

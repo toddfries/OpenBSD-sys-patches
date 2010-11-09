@@ -1,4 +1,4 @@
-/*	$NetBSD: cpu.h,v 1.59 2008/02/27 18:26:15 xtraeme Exp $	*/
+/*	$NetBSD: cpu.h,v 1.47 2005/12/11 12:17:19 christos Exp $	*/
 
 /*
  * Copyright (c) 1982, 1990, 1993
@@ -103,10 +103,6 @@
 #include <sys/cpu_data.h>
 struct cpu_info {
 	struct cpu_data ci_data;	/* MI per-cpu data */
-	cpuid_t	ci_cpuid;
-	int	ci_mtx_count;
-	int	ci_mtx_oldspl;
-	int	ci_want_resched;
 };
 
 extern struct cpu_info cpu_info_store;
@@ -135,14 +131,14 @@ struct clockframe {
 };
 
 #define	CLKF_USERMODE(framep)	(((framep)->sr & PSL_S) == 0)
+#define	CLKF_BASEPRI(framep)	(((framep)->sr & PSL_IPL) == 0)
 #define	CLKF_PC(framep)		((framep)->pc)
 #if 0
 /* We would like to do it this way... */
 #define	CLKF_INTR(framep)	(((framep)->sr & PSL_M) == 0)
 #else
 /* but until we start using PSL_M, we have to do this instead */
-#include <machine/intr.h>
-#define	CLKF_INTR(framep)	(idepth > 1)	/* XXX */
+#define	CLKF_INTR(framep)	(0)	/* XXX */
 #endif
 
 
@@ -150,22 +146,21 @@ struct clockframe {
  * Preempt the current process if in interrupt from user mode,
  * or after the current trap/syscall if in system mode.
  */
-#define	cpu_need_resched(ci, flags)	\
-	do { ci->ci_want_resched = 1; aston(); } while (/* CONSTCOND */0)
+extern int want_resched;	/* resched() was called */
+#define	need_resched(ci)	{ want_resched++; aston(); }
 
 /*
  * Give a profiling tick to the current process when the user profiling
  * buffer pages are invalid.  On the hp300, request an ast to send us
  * through trap, marking the proc as needing a profiling tick.
  */
-#define	cpu_need_proftick(l)	\
-	do { (l)->l_flag |= LP_OWEUPC; aston(); } while (/* CONSTCOND */0)
+#define	need_proftick(p)	{ (p)->p_flag |= P_OWEUPC; aston(); }
 
 /*
  * Notify the current process (p) that it has a signal pending,
  * process as soon as possible.
  */
-#define	cpu_signotify(l)	aston()
+#define	signotify(p)	aston()
 
 extern int astpending;		/* need to trap before returning to user mode */
 #define aston() (astpending++)
@@ -178,21 +173,32 @@ extern int astpending;		/* need to trap before returning to user mode */
 #define	CPU_CONSDEV		1	/* dev_t: console terminal device */
 #define	CPU_MAXID		2	/* number of valid machdep ids */
 
+#define CTL_MACHDEP_NAMES { \
+	{ 0, 0 }, \
+	{ "console_device", CTLTYPE_STRUCT }, \
+}
+
 /*
  * The rest of this should probably be moved to <machine/hp300spu.h>,
  * although some of it could probably be put into generic 68k headers.
  */
 
 #ifdef _KERNEL
-extern	uint8_t *intiobase, *intiolimit, *extiobase;
+extern	char *intiobase, *intiolimit;
 extern	void (*vectab[])(void);
 
+struct frame;
 struct fpframe;
+struct pcb;
 
 /* locore.s functions */
 void	m68881_save(struct fpframe *);
 void	m68881_restore(struct fpframe *);
-int	suline(void *, void *);
+int	suline(caddr_t, caddr_t);
+void	savectx(struct pcb *);
+void	switch_exit(struct lwp *);
+void	switch_lwp_exit(struct lwp *);
+void	proc_trampoline(void);
 void	loadustp(int);
 
 void	doboot(void) __attribute__((__noreturn__));
@@ -203,8 +209,16 @@ void	ecacheoff(void);
 void	hp300_calibrate_delay(void);
 
 /* machdep.c functions */
-int	badaddr(void *);
-int	badbaddr(void *);
+int	badaddr(caddr_t);
+int	badbaddr(caddr_t);
+
+/* sys_machdep.c functions */
+int	cachectl1(unsigned long, vaddr_t, size_t, struct proc *);
+
+/* vm_machdep.c functions */
+void	physaccess(caddr_t, caddr_t, int, int);
+void	physunaccess(caddr_t, int);
+int	kvtop(caddr_t);
 
 /* what is this supposed to do? i.e. how is it different than startrtclock? */
 #define	enablertclock()
@@ -229,10 +243,10 @@ int	badbaddr(void *);
  * conversion between physical and kernel virtual addresses is easy.
  */
 #define	ISIIOVA(va) \
-	((uint8_t *)(va) >= intiobase && (uint8_t *)(va) < intiolimit)
-#define	IIOV(pa)	((paddr_t)(pa)-INTIOBASE+(vaddr_t)intiobase)
-#define	IIOP(va)	((vaddr_t)(va)-(vaddr_t)intiobase+INTIOBASE)
-#define	IIOPOFF(pa)	((paddr_t)(pa)-INTIOBASE)
+	((char *)(va) >= intiobase && (char *)(va) < intiolimit)
+#define	IIOV(pa)	((int)(pa)-INTIOBASE+(int)intiobase)
+#define	IIOP(va)	((int)(va)-(int)intiobase+INTIOBASE)
+#define	IIOPOFF(pa)	((int)(pa)-INTIOBASE)
 #define	IIOMAPSIZE	btoc(INTIOTOP-INTIOBASE)	/* 2mb */
 
 /*

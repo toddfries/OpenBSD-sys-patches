@@ -1,4 +1,4 @@
-/*	$NetBSD: virtex_start.S,v 1.3 2009/02/13 22:41:01 apb Exp $ */
+/*	$NetBSD: virtex_start.S,v 1.1 2006/12/02 22:18:47 freza Exp $ */
 
 /*
  * Copyright (c) 2006 Jachym Holecek
@@ -38,7 +38,6 @@
 #include "opt_ddb.h"
 #include "opt_ipkdb.h"
 #include "opt_lockdebug.h"
-#include "opt_modular.h"
 #include "opt_multiprocessor.h"
 #include "opt_ppcarch.h"
 #include "opt_ppcparam.h"
@@ -164,7 +163,7 @@ __start:
 	cmpw    %r7,%r4
 	bne+    2b
 
-#if NKSYMS || defined(DDB) || defined(MODULAR)
+#if NKSYMS || defined(DDB) || defined(LKM)
 	/* We don't have a symbol table, so set startsym = endsym = end */
 	lis	%r7,_C_LABEL(startsym)@ha
 	ori 	%r7,%r7,_C_LABEL(startsym)@l

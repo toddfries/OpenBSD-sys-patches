@@ -1,4 +1,4 @@
-/* $NetBSD: mcclock_ioasic.c,v 1.15 2008/03/29 05:42:45 tsutsui Exp $ */
+/* $NetBSD: mcclock_ioasic.c,v 1.11 2002/10/02 04:06:40 thorpej Exp $ */
 
 /*
  * Copyright (c) 1994, 1995, 1996 Carnegie-Mellon University.
@@ -29,23 +29,18 @@
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
 
-__KERNEL_RCSID(0, "$NetBSD: mcclock_ioasic.c,v 1.15 2008/03/29 05:42:45 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mcclock_ioasic.c,v 1.11 2002/10/02 04:06:40 thorpej Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 
-#include <machine/bus.h>
-
-#include <dev/clock_subr.h>
-
+#include <dev/dec/clockvar.h>
+#include <dev/dec/mcclockvar.h>
 #include <dev/ic/mc146818reg.h>
-#include <dev/ic/mc146818var.h>
 #include <dev/tc/tcvar.h> 
 #include <dev/tc/ioasicvar.h>                   /* XXX */
-
-#include <alpha/alpha/mcclockvar.h>
 
 struct mcclock_ioasic_clockdatum {
 	u_char	datum;
@@ -53,22 +48,29 @@ struct mcclock_ioasic_clockdatum {
 };
 
 struct mcclock_ioasic_softc {
-	struct mc146818_softc	sc_mc146818;
+	struct mcclock_softc	sc_mcclock;
 
 	struct mcclock_ioasic_clockdatum *sc_dp;
 };
 
-int	mcclock_ioasic_match(device_t, cfdata_t, void *);
-void	mcclock_ioasic_attach(device_t, device_t, void *);
+int	mcclock_ioasic_match __P((struct device *, struct cfdata *, void *));
+void	mcclock_ioasic_attach __P((struct device *, struct device *, void *));
 
-CFATTACH_DECL_NEW(mcclock_ioasic, sizeof(struct mcclock_ioasic_softc),
+CFATTACH_DECL(mcclock_ioasic, sizeof (struct mcclock_ioasic_softc),
     mcclock_ioasic_match, mcclock_ioasic_attach, NULL, NULL);
 
-void	mcclock_ioasic_write(struct mc146818_softc *, u_int, u_int);
-u_int	mcclock_ioasic_read(struct mc146818_softc *, u_int);
+void	mcclock_ioasic_write __P((struct mcclock_softc *, u_int, u_int));
+u_int	mcclock_ioasic_read __P((struct mcclock_softc *, u_int));
+
+const struct mcclock_busfns mcclock_ioasic_busfns = {
+	mcclock_ioasic_write, mcclock_ioasic_read,
+};
 
 int
-mcclock_ioasic_match(device_t parent, cfdata_t cf, void *aux)
+mcclock_ioasic_match(parent, match, aux)
+	struct device *parent;
+	struct cfdata *match;
+	void *aux;
 {
 	struct ioasicdev_attach_args *d = aux;
 
@@ -79,35 +81,34 @@ mcclock_ioasic_match(device_t parent, cfdata_t cf, void *aux)
 }
 
 void
-mcclock_ioasic_attach(device_t parent, device_t self, void *aux)
+mcclock_ioasic_attach(parent, self, aux)
+	struct device *parent, *self;
+	void *aux;
 {
-	struct mcclock_ioasic_softc *isc = device_private(self);
 	struct ioasicdev_attach_args *ioasicdev = aux;
-	struct mc146818_softc *sc = &isc->sc_mc146818;
+	struct mcclock_ioasic_softc *sc = (struct mcclock_ioasic_softc *)self;
 
-	/* XXX no bus_space(9) for TURBOchannel yet */
-	isc->sc_dp = (void *)ioasicdev->iada_addr;
+	sc->sc_dp = (struct mcclock_ioasic_clockdatum *)ioasicdev->iada_addr;
 
-	sc->sc_dev = self;
-	sc->sc_mcread = mcclock_ioasic_read;
-	sc->sc_mcwrite = mcclock_ioasic_write;
-
-	/* call alpha common mcclock attachment */
-	mcclock_attach(sc);
+	mcclock_attach(&sc->sc_mcclock, &mcclock_ioasic_busfns);
 }
 
 void
-mcclock_ioasic_write(struct mc146818_softc *sc, u_int reg, u_int datum)
+mcclock_ioasic_write(dev, reg, datum)
+	struct mcclock_softc *dev;
+	u_int reg, datum;
 {
-	struct mcclock_ioasic_softc *isc = (void *)sc;
+	struct mcclock_ioasic_softc *sc = (struct mcclock_ioasic_softc *)dev;
 
-	isc->sc_dp[reg].datum = datum;
+	sc->sc_dp[reg].datum = datum;
 }
 
 u_int
-mcclock_ioasic_read(struct mc146818_softc *sc, u_int reg)
+mcclock_ioasic_read(dev, reg)
+	struct mcclock_softc *dev;
+	u_int reg;
 {
-	struct mcclock_ioasic_softc *isc = (void *)sc;
+	struct mcclock_ioasic_softc *sc = (struct mcclock_ioasic_softc *)dev;
 
-	return isc->sc_dp[reg].datum;
+	return (sc->sc_dp[reg].datum);
 }

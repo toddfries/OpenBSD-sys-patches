@@ -1,4 +1,4 @@
-/*	$NetBSD: procfs_vfsops.c,v 1.81 2008/06/28 01:34:06 rumble Exp $	*/
+/*	$NetBSD: procfs_vfsops.c,v 1.68 2006/12/09 16:11:52 chs Exp $	*/
 
 /*
  * Copyright (c) 1993
@@ -76,7 +76,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: procfs_vfsops.c,v 1.81 2008/06/28 01:34:06 rumble Exp $");
+__KERNEL_RCSID(0, "$NetBSD: procfs_vfsops.c,v 1.68 2006/12/09 16:11:52 chs Exp $");
 
 #if defined(_KERNEL_OPT)
 #include "opt_compat_netbsd.h"
@@ -96,19 +96,23 @@ __KERNEL_RCSID(0, "$NetBSD: procfs_vfsops.c,v 1.81 2008/06/28 01:34:06 rumble Ex
 #include <sys/vnode.h>
 #include <sys/malloc.h>
 #include <sys/kauth.h>
-#include <sys/module.h>
-
-#include <miscfs/genfs/genfs.h>
 
 #include <miscfs/procfs/procfs.h>
 
 #include <uvm/uvm_extern.h>			/* for PAGE_SIZE */
 
-MODULE(MODULE_CLASS_VFS, procfs, NULL);
-
-VFS_PROTOS(procfs);
-
-static struct sysctllog *procfs_sysctl_log;
+void	procfs_init(void);
+void	procfs_reinit(void);
+void	procfs_done(void);
+int	procfs_mount(struct mount *, const char *, void *,
+			  struct nameidata *, struct lwp *);
+int	procfs_start(struct mount *, int, struct lwp *);
+int	procfs_unmount(struct mount *, int, struct lwp *);
+int	procfs_quotactl(struct mount *, int, uid_t, void *,
+			     struct lwp *);
+int	procfs_statvfs(struct mount *, struct statvfs *, struct lwp *);
+int	procfs_sync(struct mount *, int, kauth_cred_t, struct lwp *);
+int	procfs_vget(struct mount *, ino_t, struct vnode **);
 
 /*
  * VFS Operations.
@@ -121,11 +125,12 @@ procfs_mount(
     struct mount *mp,
     const char *path,
     void *data,
-    size_t *data_len)
+    struct nameidata *ndp,
+    struct lwp *l
+)
 {
-	struct lwp *l = curlwp;
 	struct procfsmount *pmnt;
-	struct procfs_args *args = data;
+	struct procfs_args args;
 	int error;
 
 	if (UIO_MX & (UIO_MX-1)) {
@@ -134,23 +139,26 @@ procfs_mount(
 	}
 
 	if (mp->mnt_flag & MNT_GETARGS) {
-		if (*data_len < sizeof *args)
-			return EINVAL;
-
 		pmnt = VFSTOPROC(mp);
 		if (pmnt == NULL)
 			return EIO;
-		args->version = PROCFS_ARGSVERSION;
-		args->flags = pmnt->pmnt_flags;
-		*data_len = sizeof *args;
-		return 0;
+		args.version = PROCFS_ARGSVERSION;
+		args.flags = pmnt->pmnt_flags;
+		return copyout(&args, data, sizeof(args));
 	}
 
 	if (mp->mnt_flag & MNT_UPDATE)
 		return (EOPNOTSUPP);
 
-	if (*data_len >= sizeof *args && args->version != PROCFS_ARGSVERSION)
-		return EINVAL;
+	if (data != NULL) {
+		error = copyin(data, &args, sizeof args);
+		if (error != 0)
+			return error;
+
+		if (args.version != PROCFS_ARGSVERSION)
+			return EINVAL;
+	} else
+		args.flags = 0;
 
 	pmnt = (struct procfsmount *) malloc(sizeof(struct procfsmount),
 	    M_UFSMNT, M_WAITOK);   /* XXX need new malloc type */
@@ -161,14 +169,10 @@ procfs_mount(
 	vfs_getnewfsid(mp);
 
 	error = set_statvfs_info(path, UIO_USERSPACE, "procfs", UIO_SYSSPACE,
-	    mp->mnt_op->vfs_name, mp, l);
+	    mp, l);
 	pmnt->pmnt_exechook = exechook_establish(procfs_revoke_vnodes, mp);
-	if (*data_len >= sizeof *args)
-		pmnt->pmnt_flags = args->flags;
-	else
-		pmnt->pmnt_flags = 0;
+	pmnt->pmnt_flags = args.flags;
 
-	mp->mnt_iflag |= IMNT_MPSAFE;
 	return error;
 }
 
@@ -176,7 +180,7 @@ procfs_mount(
  * unmount system call
  */
 int
-procfs_unmount(struct mount *mp, int mntflags)
+procfs_unmount(struct mount *mp, int mntflags, struct lwp *l)
 {
 	int error;
 	int flags = 0;
@@ -190,7 +194,7 @@ procfs_unmount(struct mount *mp, int mntflags)
 	exechook_disestablish(VFSTOPROC(mp)->pmnt_exechook);
 
 	free(mp->mnt_data, M_UFSMNT);
-	mp->mnt_data = NULL;
+	mp->mnt_data = 0;
 
 	return (0);
 }
@@ -201,12 +205,13 @@ procfs_root(mp, vpp)
 	struct vnode **vpp;
 {
 
-	return (procfs_allocvp(mp, vpp, 0, PFSroot, -1, NULL));
+	return (procfs_allocvp(mp, vpp, 0, PFSroot, -1));
 }
 
 /* ARGSUSED */
 int
-procfs_start(struct mount *mp, int flags)
+procfs_start(struct mount *mp, int flags,
+    struct lwp *l)
 {
 
 	return (0);
@@ -216,7 +221,7 @@ procfs_start(struct mount *mp, int flags)
  * Get file system statistics.
  */
 int
-procfs_statvfs(struct mount *mp, struct statvfs *sbp)
+procfs_statvfs(struct mount *mp, struct statvfs *sbp, struct lwp *l)
 {
 
 	sbp->f_bsize = PAGE_SIZE;
@@ -236,10 +241,26 @@ procfs_statvfs(struct mount *mp, struct statvfs *sbp)
 
 /*ARGSUSED*/
 int
+procfs_quotactl(
+    struct mount *mp,
+    int cmds,
+    uid_t uid,
+    void *arg,
+    struct lwp *l
+)
+{
+
+	return (EOPNOTSUPP);
+}
+
+/*ARGSUSED*/
+int
 procfs_sync(
     struct mount *mp,
     int waitfor,
-    kauth_cred_t uc)
+    kauth_cred_t uc,
+    struct lwp *l
+)
 {
 
 	return (0);
@@ -271,6 +292,27 @@ procfs_done()
 	procfs_hashdone();
 }
 
+SYSCTL_SETUP(sysctl_vfs_procfs_setup, "sysctl vfs.procfs subtree setup")
+{
+
+	sysctl_createv(clog, 0, NULL, NULL,
+		       CTLFLAG_PERMANENT,
+		       CTLTYPE_NODE, "vfs", NULL,
+		       NULL, 0, NULL, 0,
+		       CTL_VFS, CTL_EOL);
+	sysctl_createv(clog, 0, NULL, NULL,
+		       CTLFLAG_PERMANENT,
+		       CTLTYPE_NODE, "procfs",
+		       SYSCTL_DESCR("Process file system"),
+		       NULL, 0, NULL, 0,
+		       CTL_VFS, 12, CTL_EOL);
+	/*
+	 * XXX the "12" above could be dynamic, thereby eliminating
+	 * one more instance of the "number to vfs" mapping problem,
+	 * but "12" is the order as taken from sys/mount.h
+	 */
+}
+
 extern const struct vnodeopv_desc procfs_vnodeop_opv_desc;
 
 const struct vnodeopv_desc * const procfs_vnodeopv_descs[] = {
@@ -280,12 +322,11 @@ const struct vnodeopv_desc * const procfs_vnodeopv_descs[] = {
 
 struct vfsops procfs_vfsops = {
 	MOUNT_PROCFS,
-	sizeof (struct procfs_args),
 	procfs_mount,
 	procfs_start,
 	procfs_unmount,
 	procfs_root,
-	(void *)eopnotsupp,		/* vfs_quotactl */
+	procfs_quotactl,
 	procfs_statvfs,
 	procfs_sync,
 	procfs_vget,
@@ -297,52 +338,8 @@ struct vfsops procfs_vfsops = {
 	NULL,				/* vfs_mountroot */
 	(int (*)(struct mount *, struct vnode *, struct timespec *)) eopnotsupp,
 	vfs_stdextattrctl,
-	(void *)eopnotsupp,		/* vfs_suspendctl */
-	genfs_renamelock_enter,
-	genfs_renamelock_exit,
-	(void *)eopnotsupp,
 	procfs_vnodeopv_descs,
 	0,
 	{ NULL, NULL },
 };
-
-static int
-procfs_modcmd(modcmd_t cmd, void *arg)
-{
-	int error;
-
-	switch (cmd) {
-	case MODULE_CMD_INIT:
-		error = vfs_attach(&procfs_vfsops);
-		if (error != 0)
-			break;
-		sysctl_createv(&procfs_sysctl_log, 0, NULL, NULL,
-			       CTLFLAG_PERMANENT,
-			       CTLTYPE_NODE, "vfs", NULL,
-			       NULL, 0, NULL, 0,
-			       CTL_VFS, CTL_EOL);
-		sysctl_createv(&procfs_sysctl_log, 0, NULL, NULL,
-			       CTLFLAG_PERMANENT,
-			       CTLTYPE_NODE, "procfs",
-			       SYSCTL_DESCR("Process file system"),
-			       NULL, 0, NULL, 0,
-			       CTL_VFS, 12, CTL_EOL);
-		/*
-		 * XXX the "12" above could be dynamic, thereby eliminating
-		 * one more instance of the "number to vfs" mapping problem,
-		 * but "12" is the order as taken from sys/mount.h
-		 */
-		break;
-	case MODULE_CMD_FINI:
-		error = vfs_detach(&procfs_vfsops);
-		if (error != 0)
-			break;
-		sysctl_teardown(&procfs_sysctl_log);
-		break;
-	default:
-		error = ENOTTY;
-		break;
-	}
-
-	return (error);
-}
+VFS_ATTACH(procfs_vfsops);

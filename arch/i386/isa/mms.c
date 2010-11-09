@@ -1,4 +1,4 @@
-/*	$NetBSD: mms.c,v 1.51 2008/07/09 20:54:13 joerg Exp $	*/
+/*	$NetBSD: mms.c,v 1.48 2006/11/16 01:32:38 christos Exp $	*/
 
 /*-
  * Copyright (c) 1993, 1994 Charles M. Hannum.
@@ -24,7 +24,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mms.c,v 1.51 2008/07/09 20:54:13 joerg Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mms.c,v 1.48 2006/11/16 01:32:38 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -45,6 +45,7 @@ __KERNEL_RCSID(0, "$NetBSD: mms.c,v 1.51 2008/07/09 20:54:13 joerg Exp $");
 #define	MMS_NPORTS	4
 
 struct mms_softc {		/* driver status information */
+	struct device sc_dev;
 	void *sc_ih;
 
 	bus_space_tag_t sc_iot;
@@ -55,25 +56,26 @@ struct mms_softc {		/* driver status information */
 	struct device *sc_wsmousedev;
 };
 
-static int mmsprobe(device_t, cfdata_t, void *);
-static void mmsattach(device_t, device_t, void *);
-static int mmsintr(void *);
+int mmsprobe(struct device *, struct cfdata *, void *);
+void mmsattach(struct device *, struct device *, void *);
+int mmsintr(void *);
 
-CFATTACH_DECL_NEW(mms, sizeof(struct mms_softc),
+CFATTACH_DECL(mms, sizeof(struct mms_softc),
     mmsprobe, mmsattach, NULL, NULL);
 
-static int	mms_enable(void *);
-static int	mms_ioctl(void *, u_long, void *, int, struct lwp *);
-static void	mms_disable(void *);
+int	mms_enable(void *);
+int	mms_ioctl(void *, u_long, caddr_t, int, struct lwp *);
+void	mms_disable(void *);
 
-static const struct wsmouse_accessops mms_accessops = {
+const struct wsmouse_accessops mms_accessops = {
 	mms_enable,
 	mms_ioctl,
 	mms_disable,
 };
 
-static int
-mmsprobe(device_t parent, cfdata_t match, void *aux)
+int
+mmsprobe(struct device *parent, struct cfdata *match,
+    void *aux)
 {
 	struct isa_attach_args *ia = aux;
 	bus_space_tag_t iot = ia->ia_iot;
@@ -123,10 +125,10 @@ out:
 	return rv;
 }
 
-static void
-mmsattach(device_t parent, device_t self, void *aux)
+void
+mmsattach(struct device *parent, struct device *self, void *aux)
 {
-	struct mms_softc *sc = device_private(self);
+	struct mms_softc *sc = (void *)self;
 	struct isa_attach_args *ia = aux;
 	bus_space_tag_t iot = ia->ia_iot;
 	bus_space_handle_t ioh;
@@ -136,7 +138,7 @@ mmsattach(device_t parent, device_t self, void *aux)
 	aprint_normal(": Microsoft Mouse\n");
 
 	if (bus_space_map(iot, ia->ia_io[0].ir_addr, MMS_NPORTS, 0, &ioh)) {
-		aprint_error_dev(self, "can't map i/o space\n");
+		aprint_error("%s: can't map i/o space\n", sc->sc_dev.dv_xname);
 		return;
 	}
 
@@ -160,7 +162,7 @@ mmsattach(device_t parent, device_t self, void *aux)
 	sc->sc_wsmousedev = config_found(self, &a, wsmousedevprint);
 }
 
-static int
+int
 mms_enable(void *v)
 {
 	struct mms_softc *sc = v;
@@ -177,7 +179,7 @@ mms_enable(void *v)
 	return 0;
 }
 
-static void
+void
 mms_disable(void *v)
 {
 	struct mms_softc *sc = v;
@@ -188,8 +190,9 @@ mms_disable(void *v)
 	sc->sc_enabled = 0;
 }
 
-static int
-mms_ioctl(void *v, u_long cmd, void *data, int flag, struct lwp *l)
+int
+mms_ioctl(void *v, u_long cmd, caddr_t data, int flag,
+    struct lwp *l)
 {
 #if 0
 	struct mms_softc *sc = v;
@@ -203,7 +206,7 @@ mms_ioctl(void *v, u_long cmd, void *data, int flag, struct lwp *l)
 	return (EPASSTHROUGH);
 }
 
-static int
+int
 mmsintr(void *arg)
 {
 	struct mms_softc *sc = arg;

@@ -1,4 +1,4 @@
-/*	$NetBSD: i82801lpcreg.h,v 1.8 2008/04/28 20:23:50 martin Exp $	*/
+/*	$NetBSD: i82801lpcreg.h,v 1.6 2007/08/26 18:39:43 xtraeme Exp $	*/
 
 /*-
  * Copyright (c) 2004 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -71,16 +78,6 @@
 #define LPCIB_PCI_MON7_TRP_RNG	0xc7
 #define LPCIB_PCI_MON_TRP_MSK	oxcc
 #define LPCIB_PCI_GEN_CNTL	0xd0
-#define	LPCIB_ICH5_HPTC_EN		0x00020000
-#define	LPCIB_ICH5_HPTC_WIN_MASK	0x0000c000
-#define	LPCIB_ICH5_HPTC_0000		0x00000000
-#define	LPCIB_ICH5_HPTC_0000_BASE	0xfed00000
-#define	LPCIB_ICH5_HPTC_1000		0x00008000
-#define	LPCIB_ICH5_HPTC_1000_BASE	0xfed01000
-#define	LPCIB_ICH5_HPTC_2000		0x00010000
-#define	LPCIB_ICH5_HPTC_2000_BASE	0xfed02000
-#define	LPCIB_ICH5_HPTC_3000		0x00018000
-#define	LPCIB_ICH5_HPTC_3000_BASE	0xfed03000
 #define LPCIB_PCI_GEN_STA	0xd4
 # define LPCIB_PCI_GEN_STA_SAFE_MODE	(1 << 2)
 # define LPCIB_PCI_GEN_STA_NO_REBOOT	(1 << 1)
@@ -212,21 +209,9 @@
 
 /* ICH Chipset Configuration Registers (ICH6 and newer) */
 #define LPCIB_RCBA		0xf0
-#define LPCIB_RCBA_EN		0x00000001
-#define	LPCIB_RCBA_SIZE		0x00004000
-#define LPCIB_GCS_OFFSET		0x3410
-#define LPCIB_GCS_NO_REBOOT		0x20
-#define	LPCIB_RCBA_HPTC			0x00003404
-#define	LPCIB_RCBA_HPTC_EN		0x00000080
-#define	LPCIB_RCBA_HPTC_WIN_MASK	0x00000003
-#define	LPCIB_RCBA_HPTC_0000		0x00000000
-#define	LPCIB_RCBA_HPTC_0000_BASE	0xfed00000
-#define	LPCIB_RCBA_HPTC_1000		0x00000001
-#define	LPCIB_RCBA_HPTC_1000_BASE	0xfed01000
-#define	LPCIB_RCBA_HPTC_2000		0x00000002
-#define	LPCIB_RCBA_HPTC_2000_BASE	0xfed02000
-#define	LPCIB_RCBA_HPTC_3000		0x00000003
-#define	LPCIB_RCBA_HPTC_3000_BASE	0xfed03000
+#define LPCIB_GCS_OFFSET	0x3410
+#define LPCIB_GCS_SIZE		4
+#define LPCIB_GCS_NO_REBOOT	0x20
 
 /*
  * System management TCO registers

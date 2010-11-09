@@ -1,4 +1,4 @@
-/*	$NetBSD: net.h,v 1.25 2009/01/18 02:59:02 tsutsui Exp $	*/
+/*	$NetBSD: net.h,v 1.19 2006/01/24 17:07:19 christos Exp $	*/
 
 /*
  * Copyright (c) 1993 Adam Glass
@@ -38,9 +38,6 @@
  * SUCH DAMAGE.
  */
 
-#include <netinet/in.h>
-#include <netinet/in_systm.h>
-
 #ifndef _KERNEL	/* XXX - see <netinet/in.h> */
 #undef __IPADDR
 #define __IPADDR(x)	htonl((u_int32_t)(x))
@@ -57,7 +54,7 @@
 /* Returns true if n_long's on the same net */
 #define	SAMENET(a1, a2, m) ((a1.s_addr & m) == (a2.s_addr & m))
 
-#define MACPY(s, d) memcpy(d, s, 6)
+#define MACPY(s, d) bcopy((char *)s, (char *)d, 6)
 
 #define MAXTMO 20	/* seconds */
 #define MINTMO 2	/* seconds */
@@ -90,25 +87,27 @@ extern	n_long netmask;
 extern	int debug;			/* defined in the machdep sources */
 
 /* ARP/RevARP functions: */
-u_char	*arpwhohas(struct iodesc *, struct in_addr);
-void	arp_reply(struct iodesc *, void *);
-int	rarp_getipaddress(int);
+u_char	*arpwhohas __P((struct iodesc *, struct in_addr));
+void	arp_reply __P((struct iodesc *, void *));
+int	rarp_getipaddress __P((int));
 
 /* Link functions: */
-ssize_t sendether(struct iodesc *, void *, size_t, u_char *, int);
-ssize_t readether(struct iodesc *, void *, size_t, saseconds_t, u_int16_t *);
+ssize_t sendether __P((struct iodesc *d, void *pkt, size_t len,
+			u_char *dea, int etype));
+ssize_t readether __P((struct iodesc *d, void *pkt, size_t len,
+			time_t tleft, u_int16_t *etype));
 
-ssize_t	sendudp(struct iodesc *, void *, size_t);
-ssize_t	readudp(struct iodesc *, void *, size_t, saseconds_t);
-ssize_t	sendrecv(struct iodesc *, ssize_t (*)(struct iodesc *, void *, size_t),
-    void *, size_t, ssize_t (*)(struct iodesc *, void *, size_t, saseconds_t),
-    void *, size_t);
+ssize_t	sendudp __P((struct iodesc *, void *, size_t));
+ssize_t	readudp __P((struct iodesc *, void *, size_t, time_t));
+ssize_t	sendrecv __P((struct iodesc *,
+		      ssize_t (*)(struct iodesc *, void *, size_t),
+			void *, size_t,
+		        ssize_t (*)(struct iodesc *, void *, size_t, time_t),
+			void *, size_t));
 
 /* Utilities: */
-char	*ether_sprintf(const u_char *);
-int	ip_cksum(const void *, size_t);
+char	*ether_sprintf __P((const u_char *));
+int	ip_cksum __P((const void *, size_t));
 
 /* Machine-dependent functions: */
-#ifdef _STANDALONE	/* XXX for mount_nfs(8) SMALLPROG hack */
-satime_t	getsecs(void);
-#endif
+time_t	getsecs __P((void));

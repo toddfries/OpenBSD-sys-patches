@@ -1,4 +1,4 @@
-/*	$NetBSD: zssc.c,v 1.41 2008/06/13 08:13:37 cegger Exp $ */
+/*	$NetBSD: zssc.c,v 1.38 2006/03/08 23:46:22 lukem Exp $ */
 
 /*
  * Copyright (c) 1982, 1990 The Regents of the University of California.
@@ -58,7 +58,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: zssc.c,v 1.41 2008/06/13 08:13:37 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: zssc.c,v 1.38 2006/03/08 23:46:22 lukem Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -114,7 +114,7 @@ zsscattach(struct device *pdp, struct device *dp, void *auxp)
 	zap = auxp;
 
 	sc = (struct siop_softc *)dp;
-	sc->sc_siopp = rp = (siop_regmap_p)((char *)zap->va + 0x4000);
+	sc->sc_siopp = rp = (siop_regmap_p)((caddr_t)zap->va + 0x4000);
 
 	/*
 	 * CTEST7 = 00
@@ -197,12 +197,10 @@ void
 zssc_dump(void)
 {
 	extern struct cfdriver zssc_cd;
-	struct siop_softc *sc;
 	int i;
 
 	for (i = 0; i < zssc_cd.cd_ndevs; ++i)
-		sc = device_lookup_softc(&zssc_cd, i);
-		if (sc != NULL)
-			siop_dump(sc);
+		if (zssc_cd.cd_devs[i])
+			siop_dump(zssc_cd.cd_devs[i]);
 }
 #endif

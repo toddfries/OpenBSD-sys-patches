@@ -1,4 +1,4 @@
-/*	$NetBSD: ip.h,v 1.31 2007/12/25 18:33:46 perry Exp $	*/
+/*	$NetBSD: ip.h,v 1.29 2006/12/17 20:07:36 christos Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1993
@@ -65,10 +65,9 @@ struct ip {
 	u_int8_t  ip_p;			/* protocol */
 	u_int16_t ip_sum;		/* checksum */
 	struct	  in_addr ip_src, ip_dst; /* source and dest address */
-} __packed;
+} __attribute__((__packed__));
 
 #define	IP_MAXPACKET	65535		/* maximum packet size */
-#define	IP_MINFRAGSIZE	69		/* minumum size that can be fraged */
 
 /*
  * Definitions for IP type of service (ip_tos)
@@ -150,9 +149,9 @@ struct	ip_timestamp {
 		 struct	ipt_ta {
 			struct in_addr ipt_addr;
 			n_time ipt_time;
-		 } ipt_ta[1] __packed;
-	} ipt_timestamp __packed;
-} __packed;
+		 } ipt_ta[1] __attribute__((__packed__));
+	} ipt_timestamp __attribute__((__packed__));
+} __attribute__((__packed__));
 
 /* flag bits for ipt_flg */
 #define	IPOPT_TS_TSONLY		0		/* timestamps only */

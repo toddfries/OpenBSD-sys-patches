@@ -1,4 +1,4 @@
-/*	$NetBSD: grf_tc.c,v 1.42 2008/04/28 20:23:19 martin Exp $	*/
+/*	$NetBSD: grf_tc.c,v 1.37 2006/07/21 18:40:58 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -110,7 +117,9 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: grf_tc.c,v 1.42 2008/04/28 20:23:19 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: grf_tc.c,v 1.37 2006/07/21 18:40:58 tsutsui Exp $");
+
+#include "opt_compat_hpux.h"
 
 #include <sys/param.h>
 #include <sys/conf.h>
@@ -143,23 +152,23 @@ __KERNEL_RCSID(0, "$NetBSD: grf_tc.c,v 1.42 2008/04/28 20:23:19 martin Exp $");
 
 #include "ite.h"
 
-static int	tc_init(struct grf_data *, int, uint8_t *);
-static int	tc_mode(struct grf_data *, int, void *);
+static int	tc_init(struct grf_data *, int, caddr_t);
+static int	tc_mode(struct grf_data *, int, caddr_t);
 
-static void	topcat_common_attach(struct grfdev_softc *, void *, uint8_t);
+static void	topcat_common_attach(struct grfdev_softc *, caddr_t, uint8_t);
 
-static int	topcat_intio_match(device_t, cfdata_t, void *);
-static void	topcat_intio_attach(device_t, device_t, void *);
+static int	topcat_intio_match(struct device *, struct cfdata *, void *);
+static void	topcat_intio_attach(struct device *, struct device *, void *);
 
-static int	topcat_dio_match(device_t, cfdata_t, void *);
-static void	topcat_dio_attach(device_t, device_t, void *);
+static int	topcat_dio_match(struct device *, struct cfdata *, void *);
+static void	topcat_dio_attach(struct device *, struct device *, void *);
 
 int	topcatcnattach(bus_space_tag_t, bus_addr_t, int);
 
-CFATTACH_DECL_NEW(topcat_intio, sizeof(struct grfdev_softc),
+CFATTACH_DECL(topcat_intio, sizeof(struct grfdev_softc),
     topcat_intio_match, topcat_intio_attach, NULL, NULL);
 
-CFATTACH_DECL_NEW(topcat_dio, sizeof(struct grfdev_softc),
+CFATTACH_DECL(topcat_dio, sizeof(struct grfdev_softc),
     topcat_dio_match, topcat_dio_attach, NULL, NULL);
 
 /* Topcat (bobcat) grf switch */
@@ -183,7 +192,7 @@ static struct grfsw hrmcatseye_grfsw = {
 };
 
 static int tcconscode;
-static void *tcconaddr;
+static caddr_t tcconaddr;
 
 #if NITE > 0
 static void	topcat_init(struct ite_data *);
@@ -203,7 +212,7 @@ static struct itesw topcat_itesw = {
 #endif /* NITE > 0 */
 
 static int
-topcat_intio_match(device_t parent, cfdata_t cf, void *aux)
+topcat_intio_match(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct intio_attach_args *ia = aux;
 	struct grfreg *grf;
@@ -211,7 +220,7 @@ topcat_intio_match(device_t parent, cfdata_t cf, void *aux)
 	if (strcmp("fb",ia->ia_modname) != 0)
 		return 0;
 
-	if (badaddr((void *)ia->ia_addr))
+	if (badaddr((caddr_t)ia->ia_addr))
 		return 0;
 
 	grf = (struct grfreg *)ia->ia_addr;
@@ -233,23 +242,21 @@ topcat_intio_match(device_t parent, cfdata_t cf, void *aux)
 }
 
 static void
-topcat_intio_attach(device_t parent, device_t self, void *aux)
+topcat_intio_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct grfdev_softc *sc = device_private(self);
 	struct intio_attach_args *ia = aux;
+	struct grfdev_softc *sc = (struct grfdev_softc *)self;
 	struct grfreg *grf;
-
-	sc->sc_dev = self;
 
 	grf = (struct grfreg *)ia->ia_addr;
 	sc->sc_scode = -1;	/* XXX internal i/o */
 
 
-	topcat_common_attach(sc, (void *)grf, grf->gr_id2);
+	topcat_common_attach(sc, (caddr_t)grf, grf->gr_id2);
 }
 
 static int
-topcat_dio_match(device_t parent, cfdata_t cf, void *aux)
+topcat_dio_match(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct dio_attach_args *da = aux;
 
@@ -270,21 +277,21 @@ topcat_dio_match(device_t parent, cfdata_t cf, void *aux)
 }
 
 static void
-topcat_dio_attach(device_t parent, device_t self, void *aux)
+topcat_dio_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct grfdev_softc *sc = device_private(self);
+	struct grfdev_softc *sc = (struct grfdev_softc *)self;
 	struct dio_attach_args *da = aux;
-	void *grf;
+	caddr_t grf;
 	bus_space_handle_t bsh;
 
-	sc->sc_dev = self;
 	sc->sc_scode = da->da_scode;
 	if (sc->sc_scode == tcconscode)
 		grf = tcconaddr;
 	else {
 		if (bus_space_map(da->da_bst, da->da_addr, da->da_size, 0,
 		    &bsh)) {
-			aprint_error(": can't map framebuffer\n");
+			printf("%s: can't map framebuffer\n",
+			    sc->sc_dev.dv_xname);
 			return;
 		}
 		grf = bus_space_vaddr(da->da_bst, bsh);
@@ -294,7 +301,7 @@ topcat_dio_attach(device_t parent, device_t self, void *aux)
 }
 
 static void
-topcat_common_attach(struct grfdev_softc *sc, void *grf, uint8_t secid)
+topcat_common_attach(struct grfdev_softc *sc, caddr_t grf, uint8_t secid)
 {
 	struct grfsw *sw;
 
@@ -320,8 +327,9 @@ topcat_common_attach(struct grfdev_softc *sc, void *grf, uint8_t secid)
 		break;
 #endif
 	default:
-		aprint_error(": unknown device 0x%x\n", secid);
-		panic("%s: unknown topcat", __func__);
+		printf("%s: unknown device 0x%x\n",
+		    sc->sc_dev.dv_xname, secid);
+		panic("topcat_common_attach");
 	}
 
 	sc->sc_isconsole = (sc->sc_scode == tcconscode);
@@ -334,12 +342,12 @@ topcat_common_attach(struct grfdev_softc *sc, void *grf, uint8_t secid)
  * Returns 0 if hardware not present, non-zero ow.
  */
 static int
-tc_init(struct grf_data *gp, int scode, uint8_t *addr)
+tc_init(struct grf_data *gp, int scode, caddr_t addr)
 {
-	struct tcboxfb *tp = (struct tcboxfb *)addr;
+	struct tcboxfb *tp = (struct tcboxfb *) addr;
 	struct grfinfo *gi = &gp->g_display;
-	volatile uint8_t *fbp;
-	uint8_t save;
+	volatile u_char *fbp;
+	u_char save;
 	int fboff;
 
 	/*
@@ -348,7 +356,7 @@ tc_init(struct grf_data *gp, int scode, uint8_t *addr)
 	 */
 	if (scode != tcconscode) {
 		if (ISIIOVA(addr))
-			gi->gd_regaddr = (void *)IIOP(addr);
+			gi->gd_regaddr = (caddr_t) IIOP(addr);
 		else
 			gi->gd_regaddr = dio_scodetopa(scode);
 		gi->gd_regsize = 0x10000;
@@ -356,16 +364,16 @@ tc_init(struct grf_data *gp, int scode, uint8_t *addr)
 		gi->gd_fbheight = (tp->fbhmsb << 8) | tp->fbhlsb;
 		gi->gd_fbsize = gi->gd_fbwidth * gi->gd_fbheight;
 		fboff = (tp->fbomsb << 8) | tp->fbolsb;
-		gi->gd_fbaddr = (void *)(*(addr + fboff) << 16);
-		if ((vaddr_t)gi->gd_regaddr >= DIOIIBASE) {
+		gi->gd_fbaddr = (caddr_t) (*((u_char *)addr + fboff) << 16);
+		if (gi->gd_regaddr >= (caddr_t)DIOIIBASE) {
 			/*
 			 * For DIO II space the fbaddr just computed is the
 			 * offset from the select code base (regaddr) of the
 			 * framebuffer.  Hence it is also implicitly the
 			 * size of the set.
 			 */
-			gi->gd_regsize = (int)gi->gd_fbaddr;
-			gi->gd_fbaddr += (int)gi->gd_regaddr;
+			gi->gd_regsize = (int) gi->gd_fbaddr;
+			gi->gd_fbaddr += (int) gi->gd_regaddr;
 			gp->g_regkva = addr;
 			gp->g_fbkva = addr + gi->gd_regsize;
 		} else {
@@ -381,7 +389,7 @@ tc_init(struct grf_data *gp, int scode, uint8_t *addr)
 		gi->gd_planes = tp->num_planes;
 		gi->gd_colors = 1 << gi->gd_planes;
 		if (gi->gd_colors == 1) {
-			fbp = gp->g_fbkva;
+			fbp = (u_char *) gp->g_fbkva;
 			tp->wen = ~0;
 			tp->prr = 0x3;
 			tp->fben = ~0;
@@ -402,7 +410,7 @@ tc_init(struct grf_data *gp, int scode, uint8_t *addr)
  */
 /*ARGSUSED*/
 static int
-tc_mode(struct grf_data *gp, int cmd, void *data)
+tc_mode(struct grf_data *gp, int cmd, caddr_t data)
 {
 	int error = 0;
 
@@ -422,6 +430,67 @@ tc_mode(struct grf_data *gp, int cmd, void *data)
 	case GM_UNMAP:
 		gp->g_data = 0;
 		break;
+
+#ifdef COMPAT_HPUX
+	case GM_DESCRIBE:
+	{
+		struct grf_fbinfo *fi = (struct grf_fbinfo *)data;
+		struct grfinfo *gi = &gp->g_display;
+		int i;
+
+		/* feed it what HP-UX expects */
+		fi->id = gi->gd_id;
+		fi->mapsize = gi->gd_fbsize;
+		fi->dwidth = gi->gd_dwidth;
+		fi->dlength = gi->gd_dheight;
+		fi->width = gi->gd_fbwidth;
+		fi->length = gi->gd_fbheight;
+		fi->bpp = NBBY;
+		fi->xlen = (fi->width * fi->bpp) / NBBY;
+		fi->npl = gi->gd_planes;
+		fi->bppu = fi->npl;
+		fi->nplbytes = fi->xlen * ((fi->length * fi->bpp) / NBBY);
+		/* XXX */
+		switch (gp->g_sw->gd_hwid) {
+		case GID_HRCCATSEYE:
+			memcpy(fi->name, "HP98550", 8);
+			break;
+		case GID_LRCATSEYE:
+			memcpy(fi->name, "HP98549", 8);
+			break;
+		case GID_HRMCATSEYE:
+			memcpy(fi->name, "HP98548", 8);
+			break;
+		case GID_TOPCAT:
+			switch (gi->gd_colors) {
+			case 64:
+				memcpy(fi->name, "HP98547", 8);
+				break;
+			case 16:
+				memcpy(fi->name, "HP98545", 8);
+				break;
+			case 2:
+				memcpy(fi->name, "HP98544", 8);
+				break;
+			}
+			break;
+		}
+		fi->attr = 2;	/* HW block mover */
+		/*
+		 * If mapped, return the UVA where mapped.
+		 */
+		if (gp->g_data) {
+			fi->regbase = gp->g_data;
+			fi->fbbase = fi->regbase + gp->g_display.gd_regsize;
+		} else {
+			fi->fbbase = 0;
+			fi->regbase = 0;
+		}
+		for (i = 0; i < 6; i++)
+			fi->regions[i] = 0;
+		break;
+	}
+#endif
 
 	default:
 		error = EINVAL;
@@ -648,7 +717,7 @@ int
 topcatcnattach(bus_space_tag_t bst, bus_addr_t addr, int scode)
 {
 	bus_space_handle_t bsh;
-	void *va;
+	caddr_t va;
 	struct grfreg *grf;
 	struct grf_data *gp = &grf_cn;
 	int size;

@@ -1,4 +1,4 @@
-/*	$NetBSD: ms.c,v 1.30 2009/01/17 03:26:31 isaki Exp $ */
+/*	$NetBSD: ms.c,v 1.23 2006/09/18 22:10:49 gdamore Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -45,7 +45,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ms.c,v 1.30 2009/01/17 03:26:31 isaki Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ms.c,v 1.23 2006/09/18 22:10:49 gdamore Exp $");
 
 #include <sys/param.h>
 #include <sys/conf.h>
@@ -65,7 +65,6 @@ __KERNEL_RCSID(0, "$NetBSD: ms.c,v 1.30 2009/01/17 03:26:31 isaki Exp $");
 #include <machine/vuid_event.h>
 #include <arch/x68k/dev/mfp.h>
 
-#include "ioconf.h"
 #include "locators.h"
 
 /*
@@ -98,7 +97,7 @@ __KERNEL_RCSID(0, "$NetBSD: ms.c,v 1.30 2009/01/17 03:26:31 isaki Exp $");
  * mouse begins the sequence.  RTS assertion has no effect.
  */
 struct ms_softc {
-	device_t ms_dev;		/* required first: base device */
+	struct	device ms_dev;		/* required first: base device */
 	struct	zs_chanstate *ms_cs;
 
 	struct callout ms_modem_ch;
@@ -134,26 +133,16 @@ struct ms_softc {
 	struct	evvar ms_events;	/* event queue state */
 } ms_softc;
 
-static int ms_match(device_t, cfdata_t, void *);
-static void ms_attach(device_t, device_t, void *);
+static int ms_match(struct device *, struct cfdata *, void *);
+static void ms_attach(struct device *, struct device *, void *);
 static void ms_trigger(struct zs_chanstate *, int);
 void ms_modem(void *);
 
-CFATTACH_DECL_NEW(ms, sizeof(struct ms_softc),
+CFATTACH_DECL(ms, sizeof(struct ms_softc),
     ms_match, ms_attach, NULL, NULL);
 
-static void ms_rxint(struct zs_chanstate *);
-static void ms_stint(struct zs_chanstate *, int);
-static void ms_txint(struct zs_chanstate *);
-static void ms_softint(struct zs_chanstate *);
-static void ms_input(struct ms_softc *, int);
-
-struct zsops zsops_ms = {
-	ms_rxint,	/* receive char available */
-	ms_stint,	/* external/status */
-	ms_txint,	/* xmit buffer empty */
-	ms_softint,	/* process software interrupt */
-};
+extern struct zsops zsops_ms;
+extern struct cfdriver ms_cd;
 
 dev_type_open(msopen);
 dev_type_close(msclose);
@@ -170,36 +159,35 @@ const struct cdevsw ms_cdevsw ={
 /*
  * ms_match: how is this zs channel configured?
  */
-int
-ms_match(device_t parent, cfdata_t cf, void *aux)
+int 
+ms_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct zsc_attach_args *args = aux;
-	struct zsc_softc *zsc = device_private(parent);
+	struct zsc_softc *zsc = (void*) parent;
 
 	/* Exact match required for the mouse. */
 	if (cf->cf_loc[ZSCCF_CHANNEL] != args->channel)
 		return 0;
 	if (args->channel != 1)
 		return 0;
-	if (&zsc->zsc_addr->zs_chan_b != (struct zschan *)ZSMS_PHYSADDR)
+	if (&zsc->zsc_addr->zs_chan_b != (struct zschan *) ZSMS_PHYSADDR)
 		return 0;
 
 	return 2;
 }
 
-void
-ms_attach(device_t parent, device_t self, void *aux)
+void 
+ms_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct ms_softc *ms = device_private(self);
-	struct zsc_softc *zsc = device_private(parent);
+	struct zsc_softc *zsc = (void *) parent;
+	struct ms_softc *ms = (void *) self;
 	struct zs_chanstate *cs;
-	cfdata_t cf;
+	struct cfdata *cf;
 	int reset, s;
 
-	ms->ms_dev = self;
-	callout_init(&ms->ms_modem_ch, 0);
+	callout_init(&ms->ms_modem_ch);
 
-	cf = device_cfdata(self);
+	cf = device_cfdata(&ms->ms_dev);
 	cs = zsc->zsc_cs[1];
 	cs->cs_private = ms;
 	cs->cs_ops = &zsops_ms;
@@ -213,14 +201,14 @@ ms_attach(device_t parent, device_t self, void *aux)
 	/* We don't care about status or tx interrupts. */
 	cs->cs_preg[1] = ZSWR1_RIE;
 	cs->cs_preg[4] = ZSWR4_CLK_X16 | ZSWR4_TWOSB;
-	(void)zs_set_speed(cs, MS_BPS);
+	(void) zs_set_speed(cs, MS_BPS);
 	zs_loadchannelregs(cs);
 	splx(s);
 
 	/* Initialize translator. */
 	ms->ms_ready = 0;
 
-	aprint_normal("\n");
+	printf ("\n");
 }
 
 /****************************************************************
@@ -228,18 +216,22 @@ ms_attach(device_t parent, device_t self, void *aux)
  *  (open,close,read,write,...)
  ****************************************************************/
 
-int
+int 
 msopen(dev_t dev, int flags, int mode, struct lwp *l)
 {
 	struct ms_softc *ms;
+	int unit;
 
-	ms = device_lookup_private(&ms_cd, minor(dev));
+	unit = minor(dev);
+	if (unit >= ms_cd.cd_ndevs)
+		return (ENXIO);
+	ms = ms_cd.cd_devs[unit];
 	if (ms == NULL)
-		return ENXIO;
+		return (ENXIO);
 
 	/* This is an exclusive open device. */
 	if (ms->ms_events.ev_io)
-		return EBUSY;
+		return (EBUSY);
 	ms->ms_events.ev_io = l->l_proc;
 	ev_init(&ms->ms_events);	/* may cause sleep */
 
@@ -251,79 +243,79 @@ msopen(dev_t dev, int flags, int mode, struct lwp *l)
 	/* start sequencer */
 	ms_modem(ms);
 
-	return 0;
+	return (0);
 }
 
-int
+int 
 msclose(dev_t dev, int flags, int mode, struct lwp *l)
 {
 	struct ms_softc *ms;
 
-	ms = device_lookup_private(&ms_cd, minor(dev));
+	ms = ms_cd.cd_devs[minor(dev)];
 	ms->ms_ready = 0;		/* stop accepting events */
 	callout_stop(&ms->ms_modem_ch);
 	ev_fini(&ms->ms_events);
 
 	ms->ms_events.ev_io = NULL;
-	return 0;
+	return (0);
 }
 
-int
+int 
 msread(dev_t dev, struct uio *uio, int flags)
 {
 	struct ms_softc *ms;
 
-	ms = device_lookup_private(&ms_cd, minor(dev));
-	return ev_read(&ms->ms_events, uio, flags);
+	ms = ms_cd.cd_devs[minor(dev)];
+	return (ev_read(&ms->ms_events, uio, flags));
 }
 
-int
-msioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
+int 
+msioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct lwp *l)
 {
 	struct ms_softc *ms;
 
-	ms = device_lookup_private(&ms_cd, minor(dev));
+	ms = ms_cd.cd_devs[minor(dev)];
 
 	switch (cmd) {
 
 	case FIONBIO:		/* we will remove this someday (soon???) */
-		return 0;
+		return (0);
 
 	case FIOASYNC:
 		ms->ms_events.ev_async = *(int *)data != 0;
-		return 0;
+		return (0);
 
 	case FIOSETOWN:
 		if (-*(int *)data != ms->ms_events.ev_io->p_pgid
 		    && *(int *)data != ms->ms_events.ev_io->p_pid)
-			return EPERM;
-		return 0;
+			return (EPERM);
+		return(0);
 
 	case TIOCSPGRP:
 		if (*(int *)data != ms->ms_events.ev_io->p_pgid)
-			return EPERM;
-		return 0;
+			return (EPERM);
+		return (0);
 
 	case VUIDGFORMAT:
 		/* we only do firm_events */
 		*(int *)data = VUID_FIRM_EVENT;
-		return 0;
+		return (0);
 
 	case VUIDSFORMAT:
 		if (*(int *)data != VUID_FIRM_EVENT)
-			return EINVAL;
-		return 0;
+			return (EINVAL);
+		return (0);
 	}
-	return ENOTTY;
+	return (ENOTTY);
 }
 
-int
+int 
 mspoll(dev_t dev, int events, struct lwp *l)
 {
 	struct ms_softc *ms;
 
-	ms = device_lookup_private(&ms_cd, minor(dev));
-	return ev_poll(&ms->ms_events, events, l);
+	ms = ms_cd.cd_devs[minor(dev)];
+	return (ev_poll(&ms->ms_events, events, l));
 }
 
 int
@@ -331,18 +323,21 @@ mskqfilter(dev_t dev, struct knote *kn)
 {
 	struct ms_softc *ms;
 
-	ms = device_lookup_private(&ms_cd, minor(dev));
-	return ev_kqfilter(&ms->ms_events, kn);
+	ms = ms_cd.cd_devs[minor(dev)];
+	return (ev_kqfilter(&ms->ms_events, kn));
 }
 
 /****************************************************************
  * Middle layer (translator)
  ****************************************************************/
 
+static void ms_input(struct ms_softc *, int);
+
+
 /*
  * Called by our ms_softint() routine on input.
  */
-static void
+static void 
 ms_input(struct ms_softc *ms, int c)
 {
 	struct firm_event *fe;
@@ -428,7 +423,7 @@ ms_input(struct ms_softc *ms, int c)
 		d = to_one[d - 1];		/* from 1..7 to {1,2,4} */
 		fe->id = to_id[d - 1];		/* from {1,2,4} to ID */
 		fe->value = mb & d ? VKEY_DOWN : VKEY_UP;
-		firm_gettime(fe);
+		getmicrotime(&fe->time);
 		ADVANCE;
 		ub ^= d;
 		any++;
@@ -437,7 +432,7 @@ ms_input(struct ms_softc *ms, int c)
 		NEXT;
 		fe->id = LOC_X_DELTA;
 		fe->value = ms->ms_dx;
-		firm_gettime(fe);
+		getmicrotime(&fe->time);
 		ADVANCE;
 		ms->ms_dx = 0;
 		any++;
@@ -446,7 +441,7 @@ ms_input(struct ms_softc *ms, int c)
 		NEXT;
 		fe->id = LOC_Y_DELTA;
 		fe->value = -ms->ms_dy;	/* XXX? */
-		firm_gettime(fe);
+		getmicrotime(&fe->time);
 		ADVANCE;
 		ms->ms_dy = 0;
 		any++;
@@ -463,7 +458,12 @@ out:
  * Interface to the lower layer (zscc)
  ****************************************************************/
 
-static void
+static void ms_rxint(struct zs_chanstate *);
+static void ms_stint(struct zs_chanstate *, int);
+static void ms_txint(struct zs_chanstate *);
+static void ms_softint(struct zs_chanstate *);
+
+static void 
 ms_rxint(struct zs_chanstate *cs)
 {
 	struct ms_softc *ms;
@@ -504,7 +504,7 @@ ms_rxint(struct zs_chanstate *cs)
 }
 
 
-static void
+static void 
 ms_txint(struct zs_chanstate *cs)
 {
 	struct ms_softc *ms;
@@ -517,7 +517,7 @@ ms_txint(struct zs_chanstate *cs)
 }
 
 
-static void
+static void 
 ms_stint(struct zs_chanstate *cs, int force)
 {
 	struct ms_softc *ms;
@@ -544,7 +544,7 @@ ms_stint(struct zs_chanstate *cs, int force)
 }
 
 
-static void
+static void 
 ms_softint(struct zs_chanstate *cs)
 {
 	struct ms_softc *ms;
@@ -577,7 +577,7 @@ ms_softint(struct zs_chanstate *cs)
 			intr_flags |= INTR_RX_OVERRUN;
 		if (ring_data & (ZSRR1_FE | ZSRR1_PE)) {
 			log(LOG_ERR, "%s: input error (0x%x)\n",
-			    device_xname(ms->ms_dev), ring_data);
+				ms->ms_dev.dv_xname, ring_data);
 			c = -1;	/* signal input error */
 		}
 
@@ -586,7 +586,7 @@ ms_softint(struct zs_chanstate *cs)
 	}
 	if (intr_flags & INTR_RX_OVERRUN) {
 		log(LOG_ERR, "%s: input overrun\n",
-		    device_xname(ms->ms_dev));
+		    ms->ms_dev.dv_xname);
 	}
 	ms->ms_rbget = get;
 
@@ -595,7 +595,7 @@ ms_softint(struct zs_chanstate *cs)
 		 * Transmit done.  (Not expected.)
 		 */
 		log(LOG_ERR, "%s: transmit interrupt?\n",
-		    device_xname(ms->ms_dev));
+		    ms->ms_dev.dv_xname);
 	}
 
 	if (intr_flags & INTR_ST_CHECK) {
@@ -603,15 +603,22 @@ ms_softint(struct zs_chanstate *cs)
 		 * Status line change.  (Not expected.)
 		 */
 		log(LOG_ERR, "%s: status interrupt?\n",
-		    device_xname(ms->ms_dev));
+		    ms->ms_dev.dv_xname);
 		cs->cs_rr0_delta = 0;
 	}
 
 	splx(s);
 }
 
+struct zsops zsops_ms = {
+	ms_rxint,	/* receive char available */
+	ms_stint,	/* external/status */
+	ms_txint,	/* xmit buffer empty */
+	ms_softint,	/* process software interrupt */
+};
 
-static void
+
+static void 
 ms_trigger(struct zs_chanstate *cs, int onoff)
 {
 	/* for front connected one */
@@ -623,14 +630,14 @@ ms_trigger(struct zs_chanstate *cs, int onoff)
 	zs_write_reg(cs, 5, cs->cs_preg[5]);
 
 	/* for keyborad connected one */
-	mfp_send_usart(onoff | 0x40);
+	mfp_send_usart (onoff | 0x40);
 }
 
 /*
  * mouse timer interrupt.
  * called after system tick interrupt is done.
  */
-void
+void 
 ms_modem(void *arg)
 {
 	struct ms_softc *ms = arg;
@@ -643,7 +650,7 @@ ms_modem(void *arg)
 
 	if (ms->ms_nodata++ > 250) { /* XXX */
 		log(LOG_ERR, "%s: no data for 5 secs. resetting.\n",
-		    device_xname(ms->ms_dev));
+		    ms->ms_dev.dv_xname);
 		ms->ms_byteno = -1;
 		ms->ms_nodata = 0;
 		ms->ms_rts = 0;

@@ -1,4 +1,4 @@
-/* $NetBSD: lunaws.c,v 1.15 2008/06/13 09:58:06 cegger Exp $ */
+/* $NetBSD: lunaws.c,v 1.12 2006/11/12 19:00:42 plunky Exp $ */
 
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -31,7 +38,7 @@
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
 
-__KERNEL_RCSID(0, "$NetBSD: lunaws.c,v 1.15 2008/06/13 09:58:06 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: lunaws.c,v 1.12 2006/11/12 19:00:42 plunky Exp $");
 
 #include "wsmouse.h"
 
@@ -74,7 +81,7 @@ static void omkbd_input __P((void *, int));
 static int  omkbd_decode __P((void *, int, u_int *, int *));
 static int  omkbd_enable __P((void *, int));
 static void omkbd_set_leds __P((void *, int));
-static int  omkbd_ioctl __P((void *, u_long, void *, int, struct lwp *));
+static int  omkbd_ioctl __P((void *, u_long, caddr_t, int, struct lwp *));
 
 struct wscons_keydesc omkbd_keydesctab[];
 
@@ -98,7 +105,7 @@ static const struct wskbd_consops ws_consops = {
 
 #if NWSMOUSE > 0
 static int  omms_enable __P((void *));
-static int  omms_ioctl __P((void *, u_long, void *, int, struct lwp *));
+static int  omms_ioctl __P((void *, u_long, caddr_t, int, struct lwp *));
 static void omms_disable __P((void *));
 
 static const struct wsmouse_accessops omms_accessops = {
@@ -180,9 +187,10 @@ wsattach(parent, self, aux)
 
 /*ARGSUSED*/
 static void
-wsintr(int chan)
+wsintr(chan)
+	int chan;
 {
-	struct ws_softc *sc = device_lookup_private(&ws_cd, 0);
+	struct ws_softc *sc = ws_cd.cd_devs[0];
 	struct sioreg *sio = sc->sc_ctl;
 	u_int code;
 	int rr;
@@ -436,7 +444,7 @@ static int
 omkbd_ioctl(v, cmd, data, flag, l)
 	void *v;
 	u_long cmd;
-	void *data;
+	caddr_t data;
 	int flag;
 	struct lwp *l;
 {
@@ -470,7 +478,7 @@ static int
 omms_ioctl(v, cmd, data, flag, l)
 	void *v;
 	u_long cmd;
-	void *data;
+	caddr_t data;
 	int flag;
 	struct lwp *l;
 {

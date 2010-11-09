@@ -1,4 +1,4 @@
-/*	$NetBSD: if_le.c,v 1.7 2008/04/04 12:25:06 tsutsui Exp $	*/
+/*	$NetBSD: if_le.c,v 1.6 2005/12/11 12:17:05 christos Exp $	*/
 
 /*
  * Copyright (c) 1997, 1999
@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_le.c,v 1.7 2008/04/04 12:25:06 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_le.c,v 1.6 2005/12/11 12:17:05 christos Exp $");
 
 #include "opt_inet.h"
 
@@ -57,31 +57,34 @@ __KERNEL_RCSID(0, "$NetBSD: if_le.c,v 1.7 2008/04/04 12:25:06 tsutsui Exp $");
 
 #include <cesfic/cesfic/isr.h>
 
-int lematch(device_t, cfdata_t, void *);
-void leattach(device_t, device_t, void *);
+int lematch __P((struct device *, struct cfdata *, void *));
+void leattach __P((struct device *, struct device *, void *));
 
-CFATTACH_DECL_NEW(le, sizeof(struct am79900_softc),
+CFATTACH_DECL(le, sizeof(struct am79900_softc),
     lematch, leattach, NULL, NULL);
 
-int	leintr(void *);
+int	leintr __P((void *));
 
-void lewrcsr(struct lance_softc *, uint16_t, uint16_t);
-uint16_t lerdcsr(struct lance_softc *, uint16_t);  
+void lewrcsr __P((struct lance_softc *, u_int16_t, u_int16_t));
+u_int16_t lerdcsr __P((struct lance_softc *, u_int16_t));  
 
 static char *lebase, *lemembase;
 
 void
-lewrcsr(struct lance_softc *sc, uint16_t port, uint16_t val)
+lewrcsr(sc, port, val)
+	struct lance_softc *sc;
+	u_int16_t port, val;
 {
-
 	*(volatile int *)(lebase + 4) = port;
 	*(volatile int *)(lebase + 0) = val;
 }
 
-uint16_t
-lerdcsr(struct lance_softc *sc, uint16_t port)
+u_int16_t
+lerdcsr(sc, port)
+	struct lance_softc *sc;
+	u_int16_t port;
 {
-	uint16_t val;
+	u_int16_t val;
 
 	*(volatile int *)(lebase + 4) = port;
 	val = *(volatile int *)(lebase + 0);
@@ -89,9 +92,11 @@ lerdcsr(struct lance_softc *sc, uint16_t port)
 }
 
 int
-lematch(device_t parent, cfdata_t cf, void *aux)
+lematch(parent, match, aux)
+	struct device *parent;
+	struct cfdata *match;
+	void *aux;
 {
-
 	return (1);
 }
 
@@ -100,18 +105,19 @@ lematch(device_t parent, cfdata_t cf, void *aux)
  * record.  System will initialize the interface when it is ready
  * to accept packets.
  */
-extern void sic_enable_int(int, int, int, int, int);
+extern void sic_enable_int __P((int, int, int, int, int));
 static char hwa[6] = {0x00,0x80,0xa2,0x00,0x30,0x23};
 void
-leattach(device_t parent, device_t self, void *aux)
+leattach(parent, self, aux)
+	struct device *parent, *self;
+	void *aux;
 {
-	struct lance_softc *sc = device_private(self);
 	int i;
+	struct lance_softc *sc = (struct lance_softc *)self;
 
 	mainbus_map(0x4c000000, 0x10000, 0, (void *)&lemembase);
 	mainbus_map(0x48000000, 0x1000, 0, (void *)&lebase);
 
-	sc->sc_dev = self;
 	sc->sc_mem = lemembase;
 	sc->sc_conf3 = LE_C3_BSWP;
 	sc->sc_addr = 0x4c000000;
@@ -143,10 +149,11 @@ leattach(device_t parent, device_t self, void *aux)
 }
 
 int
-leintr(void *arg)
+leintr(arg)
+	void *arg;
 {
 	struct lance_softc *sc = arg;
-	uint16_t isr4;
+	u_int16_t isr4;
 
 	isr4 = lerdcsr(sc, 4);
 	if (isr4 & 0x08) {

@@ -1,4 +1,4 @@
-/*	$NetBSD: ofrom.c,v 1.17 2008/11/08 10:18:10 he Exp $	*/
+/*	$NetBSD: ofrom.c,v 1.13 2005/12/11 12:19:05 christos Exp $	*/
 
 /*
  * Copyright 1998
@@ -38,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ofrom.c,v 1.17 2008/11/08 10:18:10 he Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ofrom.c,v 1.13 2005/12/11 12:19:05 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/device.h>
@@ -114,11 +114,17 @@ ofromattach(parent, self, aux)
 }
 
 int
-ofromopen(dev_t dev, int oflags, int devtype, struct lwp *l)
+ofromopen(dev, oflags, devtype, l)
+	dev_t dev;
+	int oflags, devtype;
+	struct lwp *l;
 {
 	struct ofrom_softc *sc;
+	int unit = minor(dev);
 
-	sc = device_lookup_private(&ofrom_cd, minor(dev));
+	if (unit >= ofrom_cd.cd_ndevs)
+		return (ENXIO);
+	sc = ofrom_cd.cd_devs[unit];
 	if (!sc || !sc->enabled)
 		return (ENXIO);
 
@@ -129,22 +135,34 @@ ofromopen(dev_t dev, int oflags, int devtype, struct lwp *l)
 }
 
 int
-ofromrw(dev_t dev, struct uio *uio, int flags)
+ofromrw(dev, uio, flags)
+	dev_t dev;
+	struct uio *uio;
+	int flags;
 {
 	struct ofrom_softc *sc;
-	int c, error = 0;
+	int c, error = 0, unit = minor(dev);
 	struct iovec *iov;
 	paddr_t v;
 	psize_t o;
-	extern kmutex_t memlock;
+	extern int physlock;
 	extern char *memhook;
 
-	sc = device_lookup_private(&ofrom_cd, minor(dev));
+	if (unit >= ofrom_cd.cd_ndevs)
+		return (ENXIO);			/* XXX PANIC */
+	sc = ofrom_cd.cd_devs[unit];
 	if (!sc || !sc->enabled)
 		return (ENXIO);			/* XXX PANIC */
 
 	/* lock against other uses of shared vmmap */
-	mutex_enter(&memlock);
+	while (physlock > 0) {
+		physlock++;
+		error = tsleep((caddr_t)&physlock, PZERO | PCATCH, "ofromrw",
+		    0);
+		if (error)
+			return (error);
+	}
+	physlock = 1;
 
 	while (uio->uio_resid > 0 && error == 0) {
 		iov = uio->uio_iov;
@@ -171,23 +189,31 @@ ofromrw(dev_t dev, struct uio *uio, int flags)
 		pmap_update(pmap_kernel());
 		o = uio->uio_offset & PGOFSET;
 		c = min(uio->uio_resid, (int)(PAGE_SIZE - o));
-		error = uiomove((char *)memhook + o, c, uio);
+		error = uiomove((caddr_t)memhook + o, c, uio);
 		pmap_remove(pmap_kernel(), (vaddr_t)memhook,
 		    (vaddr_t)memhook + PAGE_SIZE);
 		pmap_update(pmap_kernel());
 	}
 
-	mutex_exit(&memlock);
+	if (physlock > 1)
+		wakeup((caddr_t)&physlock);
+	physlock = 0;
 
 	return (error);
 }
 
 paddr_t
-ofrommmap(dev_t dev, off_t off, int prot)
+ofrommmap(dev, off, prot)
+	dev_t dev;
+	off_t off;
+	int prot;
 {
 	struct ofrom_softc *sc;
+	int unit = minor(dev);
 
-	sc = device_lookup_private(&ofrom_cd, minor(dev));
+	if (unit >= ofrom_cd.cd_ndevs)
+		return (-1);			/* XXX PANIC */
+	sc = ofrom_cd.cd_devs[unit];
 	if (!sc || !sc->enabled)
 		return (-1);			/* XXX PANIC */
 

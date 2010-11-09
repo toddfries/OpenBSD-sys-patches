@@ -1,4 +1,4 @@
-/*	$NetBSD: au_icu.c,v 1.23 2008/04/28 20:23:27 martin Exp $	*/
+/*	$NetBSD: au_icu.c,v 1.21 2006/12/21 15:55:23 yamt Exp $	*/
 
 /*-
  * Copyright (c) 2006 Itronix Inc.
@@ -46,6 +46,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -68,7 +75,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: au_icu.c,v 1.23 2008/04/28 20:23:27 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: au_icu.c,v 1.21 2006/12/21 15:55:23 yamt Exp $");
 
 #include "opt_ddb.h"
 
@@ -95,11 +102,27 @@ __KERNEL_RCSID(0, "$NetBSD: au_icu.c,v 1.23 2008/04/28 20:23:27 martin Exp $");
 
 const uint32_t ipl_sr_bits[_IPL_N] = {
 	0,					/*  0: IPL_NONE */
-	MIPS_SOFT_INT_MASK_0,			/*  1: IPL_SOFTCLOCK */
-	MIPS_SOFT_INT_MASK_0,			/*  2: IPL_SOFTNET */
+
+	MIPS_SOFT_INT_MASK_0,			/*  1: IPL_SOFT */
+
+	MIPS_SOFT_INT_MASK_0,			/*  2: IPL_SOFTCLOCK */
+
+	MIPS_SOFT_INT_MASK_0,			/*  3: IPL_SOFTNET */
+
+	MIPS_SOFT_INT_MASK_0,			/*  4: IPL_SOFTSERIAL */
+
 	MIPS_SOFT_INT_MASK_0|
 		MIPS_SOFT_INT_MASK_1|
-		MIPS_INT_MASK_0,		/*  3: IPL_VM */
+		MIPS_INT_MASK_0,		/*  5: IPL_BIO */
+
+	MIPS_SOFT_INT_MASK_0|
+		MIPS_SOFT_INT_MASK_1|
+		MIPS_INT_MASK_0,		/*  6: IPL_NET */
+
+	MIPS_SOFT_INT_MASK_0|
+		MIPS_SOFT_INT_MASK_1|
+		MIPS_INT_MASK_0,		/*  7: IPL_{SERIAL,TTY} */
+
 	MIPS_SOFT_INT_MASK_0|
 		MIPS_SOFT_INT_MASK_1|
 		MIPS_INT_MASK_0|
@@ -107,7 +130,19 @@ const uint32_t ipl_sr_bits[_IPL_N] = {
 		MIPS_INT_MASK_2|
 		MIPS_INT_MASK_3|
 		MIPS_INT_MASK_4|
-		MIPS_INT_MASK_5,		/*  4: IPL_{SCHED,HIGH} */
+		MIPS_INT_MASK_5,		/*  8: IPL_{CLOCK,HIGH} */
+};
+
+/*
+ * This is a mask of bits to clear in the SR when we go to a
+ * given software interrupt priority level.
+ * Hardware ipls are port/board specific.
+ */
+const uint32_t mips_ipl_si_to_sr[SI_NQUEUES] = {
+	[SI_SOFT] = MIPS_SOFT_INT_MASK_0,
+	[SI_SOFTCLOCK] = MIPS_SOFT_INT_MASK_0,
+	[SI_SOFTNET] = MIPS_SOFT_INT_MASK_0,
+	[SI_SOFTSERIAL] = MIPS_SOFT_INT_MASK_0,
 };
 
 #define	NIRQS		64

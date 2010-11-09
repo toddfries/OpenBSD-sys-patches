@@ -1,4 +1,4 @@
-/*	$NetBSD: ext2fs_extern.h,v 1.39 2008/06/28 01:34:05 rumble Exp $	*/
+/*	$NetBSD: ext2fs_extern.h,v 1.34 2006/07/13 12:00:26 martin Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993, 1994
@@ -116,7 +116,7 @@ u_int64_t ext2fs_size(struct inode *);
 int ext2fs_setsize(struct inode *, u_int64_t);
 int ext2fs_update(struct vnode *, const struct timespec *,
     const struct timespec *, int);
-int ext2fs_truncate(struct vnode *, off_t, int, kauth_cred_t);
+int ext2fs_truncate(struct vnode *, off_t, int, kauth_cred_t, struct proc *);
 int ext2fs_inactive(void *);
 
 /* ext2fs_lookup.c */
@@ -137,10 +137,21 @@ void ext2fs_itimes(struct inode *, const struct timespec *,
     const struct timespec *, const struct timespec *);
 
 /* ext2fs_vfsops.c */
-VFS_PROTOS(ext2fs);
-int ext2fs_reload(struct mount *, kauth_cred_t);
-int ext2fs_mountfs(struct vnode *, struct mount *);
-int ext2fs_flushfiles(struct mount *, int);
+void ext2fs_init(void);
+void ext2fs_reinit(void);
+void ext2fs_done(void);
+int ext2fs_mountroot(void);
+int ext2fs_mount(struct mount *, const char *, void *, struct nameidata *,
+		   struct lwp *);
+int ext2fs_reload(struct mount *, kauth_cred_t, struct lwp *);
+int ext2fs_mountfs(struct vnode *, struct mount *, struct lwp *);
+int ext2fs_unmount(struct mount *, int, struct lwp *);
+int ext2fs_flushfiles(struct mount *, int, struct lwp *);
+int ext2fs_statvfs(struct mount *, struct statvfs *, struct lwp *);
+int ext2fs_sync(struct mount *, int, kauth_cred_t, struct lwp *);
+int ext2fs_vget(struct mount *, ino_t, struct vnode **);
+int ext2fs_fhtovp(struct mount *, struct fid *, struct vnode **);
+int ext2fs_vptofh(struct vnode *, struct fid *, size_t *);
 int ext2fs_sbupdate(struct ufsmount *, int);
 int ext2fs_cgupdate(struct ufsmount *, int);
 
@@ -170,6 +181,9 @@ int ext2fs_makeinode(int, struct vnode *, struct vnode **,
 			  struct componentname *cnp);
 int ext2fs_reclaim(void *);
 
+#ifdef SYSCTL_SETUP_PROTO
+SYSCTL_SETUP_PROTO(sysctl_vfs_ext2fs_setup);
+#endif /* SYSCTL_SETUP_PROTO */
 __END_DECLS
 
 #define IS_EXT2_VNODE(vp)   (vp->v_tag == VT_EXT2FS)

@@ -1,4 +1,4 @@
-/*	$NetBSD: filecore_node.c,v 1.17 2008/05/05 17:11:16 ad Exp $	*/
+/*	$NetBSD: filecore_node.c,v 1.7 2005/12/11 12:24:25 christos Exp $	*/
 
 /*-
  * Copyright (c) 1982, 1986, 1989, 1994
@@ -67,7 +67,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: filecore_node.c,v 1.17 2008/05/05 17:11:16 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: filecore_node.c,v 1.7 2005/12/11 12:24:25 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -81,7 +81,6 @@ __KERNEL_RCSID(0, "$NetBSD: filecore_node.c,v 1.17 2008/05/05 17:11:16 ad Exp $"
 #include <sys/malloc.h>
 #include <sys/pool.h>
 #include <sys/stat.h>
-#include <sys/simplelock.h>
 
 #include <fs/filecorefs/filecore.h>
 #include <fs/filecorefs/filecore_extern.h>
@@ -96,7 +95,8 @@ u_long filecorehash;
 #define	INOHASH(device, inum)	(((device) + ((inum)>>12)) & filecorehash)
 struct simplelock filecore_ihash_slock;
 
-struct pool filecore_node_pool;
+POOL_INIT(filecore_node_pool, sizeof(struct filecore_node), 0, 0, 0,
+    "filecrnopl", &pool_allocator_nointr);
 
 extern int prtactive;	/* 1 => print out reclaim of active vnodes */
 
@@ -106,13 +106,13 @@ extern int prtactive;	/* 1 => print out reclaim of active vnodes */
 void
 filecore_init()
 {
-
+#ifdef _LKM
 	malloc_type_attach(M_FILECOREMNT);
-	malloc_type_attach(M_FILECORETMP);
 	pool_init(&filecore_node_pool, sizeof(struct filecore_node), 0, 0, 0,
-	    "filecrnopl", &pool_allocator_nointr, IPL_NONE);
-	filecorehashtbl = hashinit(desiredvnodes, HASH_LIST, true,
-	    &filecorehash);
+	    "filecrnopl", &pool_allocator_nointr);
+#endif
+	filecorehashtbl = hashinit(desiredvnodes, HASH_LIST, M_FILECOREMNT,
+	    M_WAITOK, &filecorehash);
 	simple_lock_init(&filecore_ihash_slock);
 }
 
@@ -127,7 +127,8 @@ filecore_reinit()
 	u_long oldmask, mask, val;
 	int i;
 
-	hash = hashinit(desiredvnodes, HASH_LIST, true, &mask);
+	hash = hashinit(desiredvnodes, HASH_LIST, M_FILECOREMNT, M_WAITOK,
+	    &mask);
 
 	simple_lock(&filecore_ihash_slock);
 	oldhash = filecorehashtbl;
@@ -142,7 +143,7 @@ filecore_reinit()
 		}
 	}
 	simple_unlock(&filecore_ihash_slock);
-	hashdone(oldhash, HASH_LIST, oldmask);
+	hashdone(oldhash, M_FILECOREMNT);
 }
 
 /*
@@ -151,10 +152,11 @@ filecore_reinit()
 void
 filecore_done()
 {
-	hashdone(filecorehashtbl, HASH_LIST, filecorehash);
+	hashdone(filecorehashtbl, M_FILECOREMNT);
+#ifdef _LKM
 	pool_destroy(&filecore_node_pool);
-	malloc_type_detach(M_FILECORETMP);
 	malloc_type_detach(M_FILECOREMNT);
+#endif
 }
 
 /*
@@ -174,7 +176,7 @@ loop:
 	LIST_FOREACH(ip, &filecorehashtbl[INOHASH(dev, inum)], i_hash) {
 		if (inum == ip->i_number && dev == ip->i_dev) {
 			vp = ITOV(ip);
-			mutex_enter(&vp->v_interlock);
+			simple_lock(&vp->v_interlock);
 			simple_unlock(&filecore_ihash_slock);
 			if (vget(vp, LK_EXCLUSIVE | LK_INTERLOCK))
 				goto loop;
@@ -201,7 +203,7 @@ filecore_ihashins(ip)
 	simple_unlock(&filecore_ihash_slock);
 
 	vp = ip->i_vnode;
-	vlockmgr(&vp->v_lock, LK_EXCLUSIVE);
+	lockmgr(&vp->v_lock, LK_EXCLUSIVE, &vp->v_interlock);
 }
 
 /*
@@ -226,19 +228,24 @@ filecore_inactive(v)
 {
 	struct vop_inactive_args /* {
 		struct vnode *a_vp;
-		bool *a_recycle;
+		struct lwp *a_l;
 	} */ *ap = v;
 	struct vnode *vp = ap->a_vp;
+	struct lwp *l = ap->a_l;
 	struct filecore_node *ip = VTOI(vp);
 	int error = 0;
 
+	if (prtactive && vp->v_usecount != 0)
+		vprint("filecore_inactive: pushing active", vp);
+
+	ip->i_flag = 0;
+	VOP_UNLOCK(vp, 0);
 	/*
 	 * If we are done with the inode, reclaim it
 	 * so that it can be reused immediately.
 	 */
-	ip->i_flag = 0;
-	*ap->a_recycle = (filecore_staleinode(ip) != 0);
-	VOP_UNLOCK(vp, 0);
+	if (filecore_staleinode(ip))
+		vrecycle(vp, (struct simplelock *)0, l);
 	return error;
 }
 
@@ -256,7 +263,7 @@ filecore_reclaim(v)
 	struct vnode *vp = ap->a_vp;
 	struct filecore_node *ip = VTOI(vp);
 
-	if (prtactive && vp->v_usecount > 1)
+	if (prtactive && vp->v_usecount != 0)
 		vprint("filecore_reclaim: pushing active", vp);
 	/*
 	 * Remove the inode from its hash chain.
@@ -270,7 +277,6 @@ filecore_reclaim(v)
 		vrele(ip->i_devvp);
 		ip->i_devvp = 0;
 	}
-	genfs_node_destroy(vp);
 	pool_put(&filecore_node_pool, vp->v_data);
 	vp->v_data = NULL;
 	return (0);

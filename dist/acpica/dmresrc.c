@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Module Name: dmresrc.c - Resource Descriptor disassembly
- *              $Revision: 1.5 $
+ *              xRevision: 1.29 $
  *
  ******************************************************************************/
 
@@ -9,7 +9,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2008, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2006, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -115,6 +115,9 @@
  *****************************************************************************/
 
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: dmresrc.c,v 1.1 2006/03/23 13:36:31 kochi Exp $");
+
 #include "acpi.h"
 #include "amlcode.h"
 #include "acdisasm.h"
@@ -171,41 +174,6 @@ static ACPI_RESOURCE_HANDLER    AcpiGbl_DumpResourceDispatch [] =
 };
 
 
-/* Only used for single-threaded applications */
-/* TBD: remove when name is passed as parameter to the dump functions */
-
-static UINT32               ResourceName;
-
-
-/*******************************************************************************
- *
- * FUNCTION:    AcpiDmDescriptorName
- *
- * PARAMETERS:  None
- *
- * RETURN:      None
- *
- * DESCRIPTION: Emit a name for the descriptor if one is present (indicated
- *              by the name being changed from the default name.) A name is only
- *              emitted if a reference to the descriptor has been made somewhere
- *              in the original ASL code.
- *
- ******************************************************************************/
-
-void
-AcpiDmDescriptorName (
-    void)
-{
-
-    if (ResourceName == ACPI_DEFAULT_RESNAME)
-    {
-        return;
-    }
-
-    AcpiOsPrintf ("%4.4s", (char *) &ResourceName);
-}
-
-
 /*******************************************************************************
  *
  * FUNCTION:    AcpiDmDumpInteger*
@@ -248,7 +216,8 @@ AcpiDmDumpInteger64 (
     UINT64                  Value,
     const char              *Name)
 {
-    AcpiOsPrintf ("0x%8.8X%8.8X, // %s\n", ACPI_FORMAT_UINT64 (Value), Name);
+    AcpiOsPrintf ("0x%8.8X%8.8X, // %s\n",
+        ACPI_FORMAT_UINT64 (ACPI_GET_ADDRESS (Value)), Name);
 }
 
 
@@ -320,7 +289,6 @@ AcpiDmBitList (
 void
 AcpiDmResourceTemplate (
     ACPI_OP_WALK_INFO       *Info,
-    ACPI_PARSE_OBJECT       *Op,
     UINT8                   *ByteData,
     UINT32                  ByteCount)
 {
@@ -332,16 +300,9 @@ AcpiDmResourceTemplate (
     UINT32                  Level;
     BOOLEAN                 DependentFns = FALSE;
     UINT8                   ResourceIndex;
-    ACPI_NAMESPACE_NODE     *Node;
 
 
     Level = Info->Level;
-    ResourceName = ACPI_DEFAULT_RESNAME;
-    Node = Op->Common.Node;
-    if (Node)
-    {
-        Node = Node->Child;
-    }
 
     for (CurrentByteOffset = 0; CurrentByteOffset < ByteCount; )
     {
@@ -417,12 +378,6 @@ AcpiDmResourceTemplate (
 
         /* Disassemble the resource structure */
 
-        if (Node)
-        {
-            ResourceName = Node->Name.Integer;
-            Node = Node->Peer;
-        }
-
         AcpiGbl_DumpResourceDispatch [ResourceIndex] (
             Aml, ResourceLength, Level);
 
@@ -443,18 +398,18 @@ AcpiDmResourceTemplate (
  *
  * PARAMETERS:  Op          - Buffer Op to be examined
  *
- * RETURN:      Status. AE_OK if valid template
+ * RETURN:      TRUE if this Buffer Op contains a valid resource
+ *              descriptor.
  *
  * DESCRIPTION: Walk a byte list to determine if it consists of a valid set
  *              of resource descriptors.  Nothing is output.
  *
  ******************************************************************************/
 
-ACPI_STATUS
+BOOLEAN
 AcpiDmIsResourceTemplate (
     ACPI_PARSE_OBJECT       *Op)
 {
-    ACPI_STATUS             Status;
     ACPI_PARSE_OBJECT       *NextOp;
     UINT8                   *Aml;
     UINT8                   *EndAml;
@@ -465,45 +420,77 @@ AcpiDmIsResourceTemplate (
 
     if (Op->Common.AmlOpcode != AML_BUFFER_OP)
     {
-        return (AE_TYPE);
+        return FALSE;
     }
 
-    /* Get the ByteData list and length */
+    /* Get to the ByteData list */
 
     NextOp = Op->Common.Value.Arg;
     NextOp = NextOp->Common.Next;
     if (!NextOp)
     {
-        return (AE_TYPE);
+        return (FALSE);
     }
+
+    /* Extract the data length and data pointer */
 
     Aml = NextOp->Named.Data;
     Length = (ACPI_SIZE) NextOp->Common.Value.Integer;
 
+    /* Point to where the EndTag descriptor should be */
+
+    EndAml = Aml + Length - sizeof (AML_RESOURCE_END_TAG);
+
+    /*
+     * The absolute minimum resource template is an EndTag (2 bytes),
+     * and the list must be terminated by a valid 2-byte EndTag (length 1)
+     */
+    if ((Length < sizeof (AML_RESOURCE_END_TAG))  ||
+
+        (*EndAml != (ACPI_RESOURCE_NAME_END_TAG | 1)))
+    {
+        return (FALSE);
+    }
+
     /* Walk the byte list, abort on any invalid descriptor type or length */
 
-    Status = AcpiUtWalkAmlResources (Aml, Length, NULL, &EndAml);
-    if (ACPI_FAILURE (Status))
+    while (Aml <= EndAml)
     {
-        return (AE_TYPE);
+        /* Validate the Resource Type and Resource Length */
+
+        if (ACPI_FAILURE (AcpiUtValidateResource (Aml, NULL)))
+        {
+            return (FALSE);
+        }
+
+        /* An EndTag descriptor terminates this resource template */
+
+        if (AcpiUtGetResourceType (Aml) == ACPI_RESOURCE_NAME_END_TAG)
+        {
+            /*
+             * For the resource template to be valid, one EndTag must appear
+             * at the very end of the ByteList, not before
+             */
+            if (Aml != EndAml)
+            {
+                return (FALSE);
+            }
+
+            /*
+             * All resource descriptors are valid, therefore this list appears
+             * to be a valid resource template
+             */
+            return (TRUE);
+        }
+
+        /* This descriptor is valid, point to the next descriptor */
+
+        Aml += AcpiUtGetDescriptorLength (Aml);
     }
 
-    /*
-     * For the resource template to be valid, one EndTag must appear
-     * at the very end of the ByteList, not before. (For proper disassembly
-     * of a ResourceTemplate, the buffer must not have any extra data after
-     * the EndTag.)
-     */
-    if ((Aml + Length - sizeof (AML_RESOURCE_END_TAG)) != EndAml)
-    {
-        return (AE_AML_NO_RESOURCE_END_TAG);
-    }
+    /* Did not find an EndTag, not a valid resource template */
 
-    /*
-     * All resource descriptors are valid, therefore this list appears
-     * to be a valid resource template
-     */
-    return (AE_OK);
+    return (FALSE);
 }
 
 #endif

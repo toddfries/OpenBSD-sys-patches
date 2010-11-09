@@ -1,4 +1,4 @@
-/*	$NetBSD: ppi.c,v 1.13 2008/06/12 21:45:39 cegger Exp $	*/
+/*	$NetBSD: ppi.c,v 1.10 2007/07/09 21:00:32 ad Exp $	*/
 
 /*-
  * Copyright (c) 1996-2003 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -65,7 +72,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ppi.c,v 1.13 2008/06/12 21:45:39 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ppi.c,v 1.10 2007/07/09 21:00:32 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -170,7 +177,7 @@ ppiattach(parent, self, aux)
 
 	if (gpibregister(sc->sc_ic, sc->sc_address, ppicallback, sc,
 	    &sc->sc_hdl)) {
-		aprint_error_dev(&sc->sc_dev, "can't register callback\n");
+		printf("%s: can't register callback\n", sc->sc_dev.dv_xname);
 		return;
 	}
 
@@ -178,15 +185,17 @@ ppiattach(parent, self, aux)
 }
 
 int
-ppiopen(dev_t dev, int flags, int fmt, struct lwp *l)
+ppiopen(dev, flags, fmt, l)
+	dev_t dev;
+	int flags, fmt;
+	struct lwp *l;
 {
+	int unit = UNIT(dev);
 	struct ppi_softc *sc;
 
-	sc = device_lookup_private(&ppi_cd, UNIT(dev));
-	if (sc == NULL)
-		return (ENXIO);
-
-	if (sc->sc_flags & PPIF_ALIVE) == 0)
+	if (unit >= ppi_cd.cd_ndevs ||
+	    (sc = ppi_cd.cd_devs[unit]) == NULL ||
+	    (sc->sc_flags & PPIF_ALIVE) == 0)
 		return (ENXIO);
 
 	DPRINTF(PDB_FOLLOW, ("ppiopen(%x, %x): flags %x\n",
@@ -203,11 +212,13 @@ ppiopen(dev_t dev, int flags, int fmt, struct lwp *l)
 }
 
 int
-ppiclose(dev_t dev, int flags, int fmt, struct lwp *l)
+ppiclose(dev, flags, fmt, l)
+	dev_t dev;
+	int flags, fmt;
+	struct lwp *l;
 {
-	struct ppi_softc *sc;
-
-	sc = device_lookup_private(&ppi_cd, UNIT(dev));
+	int unit = UNIT(dev);
+	struct ppi_softc *sc = ppi_cd.cd_devs[unit];
 
 	DPRINTF(PDB_FOLLOW, ("ppiclose(%x, %x): flags %x\n",
 		       dev, flags, sc->sc_flags));
@@ -241,7 +252,8 @@ ppicallback(v, action)
 }
 
 void
-ppistart(void *v)
+ppistart(v)
+	void *v;
 {
 	struct ppi_softc *sc = v;
 
@@ -252,7 +264,8 @@ ppistart(void *v)
 }
 
 void
-ppitimo(void *arg)
+ppitimo(arg)
+	void *arg;
 {
 	struct ppi_softc *sc = arg;
 
@@ -263,7 +276,10 @@ ppitimo(void *arg)
 }
 
 int
-ppiread(dev_t dev, struct uio *uio, int flags)
+ppiread(dev, uio, flags)
+	dev_t dev;
+	struct uio *uio;
+	int flags;
 {
 
 	DPRINTF(PDB_FOLLOW, ("ppiread(%x, %p)\n", dev, uio));
@@ -272,7 +288,10 @@ ppiread(dev_t dev, struct uio *uio, int flags)
 }
 
 int
-ppiwrite(dev_t dev, struct uio *uio, int flags)
+ppiwrite(dev, uio, flags)
+	dev_t dev;
+	struct uio *uio;
+	int flags;
 {
 
 	DPRINTF(PDB_FOLLOW, ("ppiwrite(%x, %p)\n", dev, uio));
@@ -281,9 +300,12 @@ ppiwrite(dev_t dev, struct uio *uio, int flags)
 }
 
 int
-ppirw(dev_t dev, struct uio *uio)
+ppirw(dev, uio)
+	dev_t dev;
+	struct uio *uio;
 {
-	struct ppi_softc *sc = device_lookup_private(&ppi_cd, UNIT(dev));
+	int unit = UNIT(dev);
+	struct ppi_softc *sc = ppi_cd.cd_devs[unit];
 	int s1, s2, len, cnt;
 	char *cp;
 	int error = 0, gotdata = 0;
@@ -427,9 +449,14 @@ again:
 }
 
 int
-ppiioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
+ppiioctl(dev, cmd, data, flag, l)
+	dev_t dev;
+	u_long cmd;
+	void *data;
+	int flag;
+	struct lwp *l;
 {
-	struct ppi_softc *sc = device_lookup_private(&ppi_cd, UNIT(dev));
+	struct ppi_softc *sc = ppi_cd.cd_devs[UNIT(dev)];
 	struct ppiparam *pp, *upp;
 	int error = 0;
 
@@ -461,7 +488,8 @@ ppiioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 }
 
 int
-ppihztoms(int h)
+ppihztoms(h)
+	int h;
 {
 	extern int hz;
 	int m = h;
@@ -472,7 +500,8 @@ ppihztoms(int h)
 }
 
 int
-ppimstohz(int m)
+ppimstohz(m)
+	int m;
 {
 	extern int hz;
 	int h = m;

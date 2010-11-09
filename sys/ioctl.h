@@ -1,4 +1,4 @@
-/*	$NetBSD: ioctl.h,v 1.36 2009/02/13 22:41:04 apb Exp $	*/
+/*	$NetBSD: ioctl.h,v 1.34 2005/12/11 12:25:20 christos Exp $	*/
 
 /*-
  * Copyright (c) 1982, 1986, 1990, 1993, 1994
@@ -63,7 +63,7 @@ struct ttysize {
 
 /*
  * Passthrough ioctl commands. These are passed through to devices
- * as they are, it is expected that the device (a module, for example),
+ * as they are, it is expected that the device (an LKM, for example),
  * will know how to deal with them. One for each emulation, so that
  * no namespace clashes will occur between them, for devices that
  * may be dealing with specific ioctls for multiple emulations.
@@ -108,11 +108,10 @@ __END_DECLS
 #include "opt_compat_43.h"
 #include "opt_compat_osf1.h"
 #include "opt_compat_ibcs2.h"
-#include "opt_modular.h"
 #endif
 
 #if defined(USE_OLD_TTY) || defined(COMPAT_43) || defined(COMPAT_SUNOS) || \
     defined(COMPAT_SVR4) || defined(COMPAT_FREEBSD) || defined(COMPAT_OSF1) || \
-    defined(COMPAT_IBCS2) || defined(MODULAR)
+    defined(COMPAT_IBCS2) || defined(LKM)
 #include <sys/ioctl_compat.h>
 #endif

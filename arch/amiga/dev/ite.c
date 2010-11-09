@@ -1,4 +1,4 @@
-/*	$NetBSD: ite.c,v 1.84 2008/06/11 12:59:10 tsutsui Exp $ */
+/*	$NetBSD: ite.c,v 1.75 2006/10/01 18:56:21 elad Exp $ */
 
 /*
  * Copyright (c) 1990 The Regents of the University of California.
@@ -83,7 +83,7 @@
 #include "opt_ddb.h"
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ite.c,v 1.84 2008/06/11 12:59:10 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ite.c,v 1.75 2006/10/01 18:56:21 elad Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -102,7 +102,9 @@ __KERNEL_RCSID(0, "$NetBSD: ite.c,v 1.84 2008/06/11 12:59:10 tsutsui Exp $");
 #include <amiga/amiga/color.h>	/* DEBUG */
 #include <amiga/amiga/custom.h>	/* DEBUG */
 #include <amiga/amiga/device.h>
+#if defined(__m68k__)
 #include <amiga/amiga/isr.h>
+#endif
 #include <amiga/dev/iteioctl.h>
 #include <amiga/dev/itevar.h>
 #include <amiga/dev/kbdmap.h>
@@ -150,8 +152,6 @@ static char sample[20] = {
 	0,39,75,103,121,127,121,103,75,39,0,
 	-39,-75,-103,-121,-127,-121,-103,-75,-39
 };
-
-static callout_t repeat_ch;
 
 void iteputchar(int c, struct ite_softc *ip);
 void ite_putstr(const char * s, int len, dev_t dev);
@@ -273,7 +273,7 @@ struct ite_softc *
 getitesp(dev_t dev)
 {
 	if (amiga_realconfig && con_itesoftc.grf == NULL)
-		return(device_lookup_private(&ite_cd, ITEUNIT(dev)));
+		return(ite_cd.cd_devs[ITEUNIT(dev)]);
 
 	if (con_itesoftc.grf == NULL)
 		panic("no ite_softc for console");
@@ -431,8 +431,6 @@ iteinit(dev_t dev)
 		kbdmap_loaded = 1;
 	}
 
-	callout_init(&repeat_ch, 0);
-
 	ip->cursorx = 0;
 	ip->cursory = 0;
 	SUBR_INIT(ip);
@@ -559,7 +557,7 @@ itetty(dev_t dev)
 }
 
 int
-iteioctl(dev_t dev, u_long cmd, void *addr, int flag, struct lwp *l)
+iteioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct lwp *l)
 {
 	struct iterepeat *irp;
 	struct ite_softc *ip;
@@ -658,9 +656,17 @@ itestart(struct tty *tp)
 	s = spltty(); {
 		tp->t_state &= ~TS_BUSY;
 		/* we have characters remaining. */
-		if (ttypull(tp)) {
+		if (rbp->c_cc) {
 			tp->t_state |= TS_TIMEOUT;
-			callout_schedule(&tp->t_rstrt_ch, 1);
+			callout_reset(&tp->t_rstrt_ch, 1, ttrstrt, tp);
+		}
+		/* wakeup we are below */
+		if (rbp->c_cc <= tp->t_lowat) {
+			if (tp->t_state & TS_ASLEEP) {
+				tp->t_state &= ~TS_ASLEEP;
+				wakeup((caddr_t) rbp);
+			}
+			selwakeup(&tp->t_wsel);
 		}
 	}
  out:
@@ -852,6 +858,8 @@ ite_cnfilter(u_char c, enum caller caller)
 /* these are used to implement repeating keys.. */
 static u_char last_char;
 static u_char tout_pending;
+
+static struct callout repeat_ch = CALLOUT_INITIALIZER;
 
 /*ARGSUSED*/
 static void

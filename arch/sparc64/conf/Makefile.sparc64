@@ -1,4 +1,4 @@
-# 	$NetBSD: Makefile.sparc64,v 1.68 2008/12/11 05:27:42 alc Exp $
+# 	$NetBSD: Makefile.sparc64,v 1.62 2006/04/04 03:13:12 gdamore Exp $
 
 #=========================================================================
 #
@@ -92,11 +92,14 @@ MD_SFILES=	${SPARC64}/sparc64/locore.s
 locore.o: ${SPARC64}/sparc64/locore.s assym.h
 	${NORMAL_S}
 
+in_cksum.o: assym.h
+
 ##
 ## (5) link settings
 ##
 TEXTADDR?=	01000000
-LINKFORMAT=	-T ${SPARC64}/conf/${KERN_LDSCRIPT}
+DATAADDR?=	01800000
+LINKFORMAT=	-n -T ${SPARC64}/conf/${KERN_LDSCRIPT}
 .if ${LP64} == "yes"
 KERN_LDSCRIPT?= kern.ldscript
 .else
@@ -111,8 +114,6 @@ KERN_LDSCRIPT?= kern32.ldscript
 bwtwo.o cgsix.o cgthree.o cgtwo.o cons.o dma.o esp.o fb.o if_ie.o: Makefile
 ms.c obio.o zs.c autoconf.o clock.o cpu.o disksubr.o locore.o: Makefile
 machdep.o mem.o openprom.o pmap.o vm_machdep.o: Makefile
-
-cpu_in_cksum.o lock_stubs.o: assym.h
 
 ##
 ## (7) misc settings
@@ -142,6 +143,9 @@ cpu_in_cksum.o lock_stubs.o: assym.h
 %LOAD
 
 %RULES
+
+## Include rules for Atheros WLAN
+.include "$S/contrib/dev/ath/netbsd/Makefile.ath.inc"
 
 ##
 ## (9) port independent kernel machinery

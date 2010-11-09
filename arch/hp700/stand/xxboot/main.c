@@ -1,4 +1,4 @@
-/*	$NetBSD: main.c,v 1.6 2008/04/09 19:18:25 skrll Exp $	*/
+/*	$NetBSD: main.c,v 1.4 2005/12/24 20:07:04 perry Exp $	*/
 
 /*
  * Copyright (c) 2003 ITOH Yasufumi.
@@ -39,12 +39,13 @@
 #define DEV_CL_MASK	0xf
 #define DEV_CL_SEQU	0x2	/* sequential record access media */
 
-static char *hexstr(char *, unsigned);
-void ipl_main(unsigned /*interactive*/, unsigned /*sptop*/, unsigned /*psw*/);
-void load_file(const char *, unsigned /*loadadr*/, unsigned /*interactive*/,
-    int /*part*/);
-void load_file_ino(ino32_t, const char *, unsigned /*loadadr*/,
-    unsigned /*interactive*/, int /*part*/);
+static char *hexstr __P((char *, unsigned));
+void ipl_main __P((unsigned /*interactive*/,
+    unsigned /*sptop*/, unsigned /*psw*/));
+void load_file __P((const char *, unsigned /*loadadr*/,
+    unsigned /*interactive*/, int /*part*/));
+void load_file_ino __P((ino32_t, const char *, unsigned /*loadadr*/,
+    unsigned /*interactive*/, int /*part*/));
 
 struct loadinfo {
 	void *sec_image;
@@ -54,18 +55,17 @@ struct loadinfo {
 #endif
 	unsigned entry_offset;
 };
-static inline void xi_elf32(struct loadinfo *, Elf32_Ehdr *);
-static inline void xi_elf64(struct loadinfo *, Elf64_Ehdr *);
-int xi_load(struct loadinfo *, void *);
+static inline void xi_elf32 __P((struct loadinfo *, Elf32_Ehdr *));
+static inline void xi_elf64 __P((struct loadinfo *, Elf64_Ehdr *));
+int xi_load __P((struct loadinfo *, void *));
 
-void reboot(void);
-void halt(void);
-void dispatch(unsigned /*interactive*/, unsigned /*top*/,
-    unsigned /*end*/, int /*part*/, unsigned /*entry*/);
-void print(const char *);
-void putch(int);
-int getch(void);
-int boot_input(void *, int /*len*/, int /*pos*/);
+void reboot __P((void)), halt __P((void));
+void dispatch __P((unsigned /*interactive*/, unsigned /*top*/,
+    unsigned /*end*/, int /*part*/, unsigned /*entry*/));
+void print __P((const char *));
+void putch __P((int));
+int getch __P((void));
+int boot_input __P((void *, int /*len*/, int /*pos*/));
 
 /* to make generated code relocatable, do NOT mark them as const */
 extern char str_seekseq[], str_bit_firmware[];
@@ -81,9 +81,9 @@ extern char str_ukfmt[];
 #ifdef __GNUC__
 #define memcpy(d, s, n)	__builtin_memcpy(d, s, n)
 #else
-void *memcpy(void *, const void *, size_t);
+void *memcpy __P((void *, const void *, size_t));
 #endif
-void *memmove(void *, const void *, size_t);
+void *memmove __P((void *, const void *, size_t));
 
 /* disklabel */
 union {
@@ -265,7 +265,8 @@ ipl_main(interactive, sptop, psw)
 		}
 
 		/* boot partition must be below 2GB */
-		if (partoff + partsz > ((unsigned)2*1024*1024*1024) / secsz) {
+		if (partoff + partsz >=
+		    (unsigned)((unsigned)2*1024*1024*1024 -1 + secsz) / secsz) {
 			/* "boot partition exceeds 2GB boundary\r\n" */
 			print(str_warn_2GB);
 			goto select_partition;

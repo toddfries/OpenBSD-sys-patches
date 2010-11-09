@@ -1,4 +1,4 @@
-/*	$NetBSD: irix_sysmp.c,v 1.21 2008/04/28 20:23:42 martin Exp $ */
+/*	$NetBSD: irix_sysmp.c,v 1.15 2006/09/15 15:51:12 yamt Exp $ */
 
 /*-
  * Copyright (c) 2001-2002 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: irix_sysmp.c,v 1.21 2008/04/28 20:23:42 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: irix_sysmp.c,v 1.15 2006/09/15 15:51:12 yamt Exp $");
 
 #include <sys/errno.h>
 #include <sys/param.h>
@@ -55,23 +62,27 @@ __KERNEL_RCSID(0, "$NetBSD: irix_sysmp.c,v 1.21 2008/04/28 20:23:42 martin Exp $
 #include <compat/irix/irix_syscallargs.h>
 
 /* IRIX /dev/kmem diggers emulation */
-static int irix_sysmp_kernaddr(int, register_t *);
-static int irix_sysmp_sasz(int, register_t *);
-static int irix_sysmp_saget(int, char *, size_t);
+static int irix_sysmp_kernaddr __P((int, register_t *));
+static int irix_sysmp_sasz __P((int, register_t *));
+static int irix_sysmp_saget __P((int, char *, size_t));
 extern struct loadavg averunnable;
 extern long irix_kernel_var[32];
 
 int
-irix_sys_sysmp(struct lwp *l, const struct irix_sys_sysmp_args *uap, register_t *retval)
+irix_sys_sysmp(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct irix_sys_sysmp_args /* {
 		syscallarg(int) cmd;
 		syscallarg(void *) arg1;
 		syscallarg(void *) arg2;
 		syscallarg(void *) arg3;
 		syscallarg(void *) arg4;
-	} */
+	} */ *uap = v;
 	int cmd = SCARG(uap, cmd);
+	int error = 0;
 
 #ifdef DEBUG_IRIX
 	printf("irix_sys_sysmp(): cmd = %d\n", cmd);
@@ -80,8 +91,22 @@ irix_sys_sysmp(struct lwp *l, const struct irix_sys_sysmp_args *uap, register_t 
 	switch(cmd) {
 	case IRIX_MP_NPROCS:	/* Number of processors in complex */
 	case IRIX_MP_NAPROCS: {	/* Number of active processors in complex */
-		*retval = ncpu;
-		return 0;
+		int ncpu, name[2];
+		size_t sz;
+
+		name[0] = CTL_HW;
+		name[1] = HW_NCPU;
+		sz = sizeof(ncpu);
+		/*
+		 * by passing a NULL lwp pointer, we indicate that oldp
+		 * (and newp) are kernel addresses, not userspace
+		 * addresses, making this whole thing simpler
+		 */
+		error = old_sysctl(&name[0], 2, &ncpu, &sz, NULL, 0, NULL);
+		if (!error)
+			*retval = ncpu;
+
+		return error;
 		break;
 	}
 	case IRIX_MP_PGSIZE:	/* Page size */
@@ -112,7 +137,9 @@ irix_sys_sysmp(struct lwp *l, const struct irix_sys_sysmp_args *uap, register_t 
 }
 
 static int
-irix_sysmp_kernaddr(int kernaddr, register_t *retval)
+irix_sysmp_kernaddr(kernaddr, retval)
+	int kernaddr;
+	register_t *retval;
 {
 	switch (kernaddr) {
 	case IRIX_MPKA_AVENRUN:
@@ -134,7 +161,9 @@ irix_sysmp_kernaddr(int kernaddr, register_t *retval)
 }
 
 static int
-irix_sysmp_sasz(int cmd, register_t *retval)
+irix_sysmp_sasz(cmd, retval)
+	int cmd;
+	register_t *retval;
 {
 	switch (cmd) {
 	case IRIX_MPSA_RMINFO:
@@ -150,7 +179,10 @@ irix_sysmp_sasz(int cmd, register_t *retval)
 }
 
 static int
-irix_sysmp_saget(int cmd, char *buf, size_t len)
+irix_sysmp_saget(cmd, buf, len)
+	int cmd;
+	char *buf;
+	size_t len;
 {
 	extern u_int bufpages;
 	void *kbuf;

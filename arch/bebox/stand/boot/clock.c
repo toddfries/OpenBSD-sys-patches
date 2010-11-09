@@ -1,4 +1,4 @@
-/*	$NetBSD: clock.c,v 1.11 2008/05/26 16:28:39 kiyohara Exp $	*/
+/*	$NetBSD: clock.c,v 1.10 2005/12/24 22:50:07 perry Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996 Wolfgang Solfrank.
@@ -37,8 +37,6 @@
 #include <dev/ic/i8253reg.h>
 #include "boot.h"
 
-static inline u_quad_t mftb(void);
-
 static inline u_quad_t
 mftb()
 {
@@ -54,7 +52,8 @@ mftb()
  * Wait for about n microseconds (at least!).
  */
 void
-delay(u_int n)
+delay(n)
+	u_int n;
 {
 	u_quad_t tb;
 	u_long tbh, tbl, scratch;

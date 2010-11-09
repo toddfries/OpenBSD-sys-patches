@@ -1,4 +1,4 @@
-/*	$NetBSD: ofwgencfg_clock.c,v 1.8 2008/01/20 16:28:23 joerg Exp $	*/
+/*	$NetBSD: ofwgencfg_clock.c,v 1.6 2005/12/11 12:16:51 christos Exp $	*/
 
 /*
  * Copyright 1997
@@ -36,7 +36,7 @@
 /* Include header files */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ofwgencfg_clock.c,v 1.8 2008/01/20 16:28:23 joerg Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ofwgencfg_clock.c,v 1.6 2005/12/11 12:16:51 christos Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -45,7 +45,6 @@ __KERNEL_RCSID(0, "$NetBSD: ofwgencfg_clock.c,v 1.8 2008/01/20 16:28:23 joerg Ex
 #include <sys/time.h>
 
 #include <machine/intr.h>
-#include <machine/irqhandler.h>
 #include <arm/cpufunc.h>
 #include <machine/cpu.h>
 #include <machine/ofw.h>
@@ -95,8 +94,10 @@ statclockhandler(frame)
  */
 
 void
-setstatclockrate(int arg)
+setstatclockrate(hz)
+	int hz;
 {
+
 #ifdef	OFWGENCFG
 	printf("Not setting statclock: OFW generic has only one clock.\n");
 #endif
@@ -122,8 +123,8 @@ cpu_initclocks()
 
 	printf("clock: hz=%d stathz = %d profhz = %d\n", hz, stathz, profhz);
 
-        clockirq = intr_claim(IRQ_TIMER0, IPL_CLOCK,
-            (int (*)(void *))clockhandler, 0, "clock", "hard intr");
+        clockirq = intr_claim(IRQ_TIMER0, IPL_CLOCK, "tmr0 hard clk",
+            (int (*)(void *))clockhandler, 0);
         if (clockirq == NULL)
                 panic("Cannot installer timer 0 IRQ handler");
 
@@ -133,6 +134,50 @@ cpu_initclocks()
 	if (stathz) {
 	    printf("Not installing statclock: OFW generic has only one clock.\n");
 	}
+}
+
+
+/*
+ * void microtime(struct timeval *tvp)
+ *
+ * Fill in the specified timeval struct with the current time
+ * accurate to the microsecond.
+ */
+
+void
+microtime(tvp)
+	struct timeval *tvp;
+{
+	int s;
+	static struct timeval oldtv;
+
+	s = splhigh();
+
+	/* Fill in the timeval struct */
+
+	*tvp = time;    
+
+	/* Make sure the micro seconds don't overflow. */
+
+	while (tvp->tv_usec >= 1000000) {
+		tvp->tv_usec -= 1000000;
+		++tvp->tv_sec;
+	}
+
+	/* Make sure the time has advanced. */
+
+	if (tvp->tv_sec == oldtv.tv_sec &&
+	    tvp->tv_usec <= oldtv.tv_usec) {
+		tvp->tv_usec = oldtv.tv_usec + 1;
+		if (tvp->tv_usec >= 1000000) {
+			tvp->tv_usec -= 1000000;
+			++tvp->tv_sec;
+		}
+	}
+	    
+
+	oldtv = *tvp;
+	(void)splx(s);		
 }
 
 /*

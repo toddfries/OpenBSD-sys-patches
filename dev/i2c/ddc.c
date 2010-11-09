@@ -1,4 +1,4 @@
-/* $NetBSD: ddc.c,v 1.3 2008/05/04 15:26:29 xtraeme Exp $ */
+/* $NetBSD: ddc.c,v 1.2 2007/10/19 11:59:43 ad Exp $ */
 
 /*-
  * Copyright (c) 2006 Itronix Inc.
@@ -32,7 +32,7 @@
  */ 
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ddc.c,v 1.3 2008/05/04 15:26:29 xtraeme Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ddc.c,v 1.2 2007/10/19 11:59:43 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -54,18 +54,19 @@ __KERNEL_RCSID(0, "$NetBSD: ddc.c,v 1.3 2008/05/04 15:26:29 xtraeme Exp $");
  */
 
 struct ddc_softc {
+	struct device	sc_dev;
 	i2c_tag_t	sc_tag;
 	int		sc_address;
 };
 
-static int ddc_match(device_t, cfdata_t, void *);
-static void ddc_attach(device_t, device_t, void *);
+static int ddc_match(struct device *, struct cfdata *, void *);
+static void ddc_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(ddc, sizeof (struct ddc_softc),
+CFATTACH_DECL(ddc, sizeof (struct ddc_softc),
     ddc_match, ddc_attach, NULL, NULL);
 
 static int
-ddc_match(device_t parent, cfdata_t cf, void *aux)
+ddc_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct i2c_attach_args *ia = aux;
 
@@ -75,7 +76,7 @@ ddc_match(device_t parent, cfdata_t cf, void *aux)
 }
 
 static void
-ddc_attach(device_t parent, device_t self, void *aux)
+ddc_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct ddc_softc *sc = device_private(self);
 	struct i2c_attach_args *ia = aux;

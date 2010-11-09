@@ -1,4 +1,4 @@
-/*	$NetBSD: file.h,v 1.65 2008/06/24 10:26:27 gmcgarry Exp $	*/
+/*	$NetBSD: file.h,v 1.60 2007/10/08 23:20:38 ad Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1989, 1993
@@ -43,6 +43,9 @@
 #include <sys/mutex.h>
 #include <sys/condvar.h>
 
+MALLOC_DECLARE(M_FILE);
+MALLOC_DECLARE(M_IOCTLOPS);
+
 struct proc;
 struct lwp;
 struct uio;
@@ -51,29 +54,14 @@ struct stat;
 struct knote;
 
 /*
- * Kernel file descriptor.  One entry for each open kernel vnode and
- * socket.
+ * Kernel descriptor table.
+ * One entry for each open kernel vnode and socket.
  */
 struct file {
-	off_t		f_offset;	/* first, is 64-bit */
-	kauth_cred_t 	f_cred;		/* creds associated with descriptor */
-	const struct fileops {
-		int	(*fo_read)	(struct file *, off_t *, struct uio *,
-					    kauth_cred_t, int);
-		int	(*fo_write)	(struct file *, off_t *, struct uio *,
-					    kauth_cred_t, int);
-		int	(*fo_ioctl)	(struct file *, u_long, void *);
-		int	(*fo_fcntl)	(struct file *, u_int, void *);
-		int	(*fo_poll)	(struct file *, int);
-		int	(*fo_stat)	(struct file *, struct stat *);
-		int	(*fo_close)	(struct file *);
-		int	(*fo_kqfilter)	(struct file *, struct knote *);
-	} *f_ops;
-	void		*f_data;	/* descriptor data, e.g. vnode/socket */
 	LIST_ENTRY(file) f_list;	/* list of active files */
-	kmutex_t	f_lock;		/* lock on structure */
 	int		f_flag;		/* see fcntl.h */
-	u_int		f_iflags;	/* internal flags; FIF_* */
+	int		f_iflags;	/* internal flags; FIF_* */
+	int		f_advice;	/* access pattern hint; UVM_ADV_* */
 #define	DTYPE_VNODE	1		/* file */
 #define	DTYPE_SOCKET	2		/* communications endpoint */
 #define	DTYPE_PIPE	3		/* pipe */
@@ -83,14 +71,82 @@ struct file {
 #define	DTYPE_MQUEUE	7		/* message queue */
 #define DTYPE_NAMES \
     "0", "file", "socket", "pipe", "kqueue", "misc", "crypto", "mqueue"
-	u_int		f_type;		/* descriptor type */
-	u_int		f_advice;	/* access pattern hint; UVM_ADV_* */
+	int		f_type;		/* descriptor type */
 	u_int		f_count;	/* reference count */
 	u_int		f_msgcount;	/* references from message queue */
+	int		f_usecount;	/* number active users */
+	kauth_cred_t 	f_cred;		/* creds associated with descriptor */
+	const struct fileops {
+		int	(*fo_read)	(struct file *, off_t *, struct uio *,
+					    kauth_cred_t, int);
+		int	(*fo_write)	(struct file *, off_t *, struct uio *,
+					    kauth_cred_t, int);
+		int	(*fo_ioctl)	(struct file *, u_long, void *,
+					    struct lwp *);
+		int	(*fo_fcntl)	(struct file *, u_int, void *,
+					    struct lwp *);
+		int	(*fo_poll)	(struct file *, int, struct lwp *);
+		int	(*fo_stat)	(struct file *, struct stat *,
+					    struct lwp *);
+		int	(*fo_close)	(struct file *, struct lwp *);
+		int	(*fo_kqfilter)	(struct file *, struct knote *);
+	} *f_ops;
+	off_t		f_offset;
+	void		*f_data;	/* descriptor data, e.g. vnode/socket */
+	kmutex_t	f_lock;		/* lock on structure */
+	kcondvar_t	f_cv;		/* used when closing */
 };
 
-#define FILE_LOCK(fp)	mutex_enter(&(fp)->f_lock)
-#define FILE_UNLOCK(fp)	mutex_exit(&(fp)->f_lock)
+#define	FIF_WANTCLOSE		0x01	/* a close is waiting for usecount */
+#define	FIF_LARVAL		0x02	/* not fully constructed; don't use */
+
+#define	FILE_IS_USABLE(fp)	(((fp)->f_iflags &			\
+				  (FIF_WANTCLOSE|FIF_LARVAL)) == 0)
+
+#define	FILE_SET_MATURE(fp)						\
+do {									\
+	(fp)->f_iflags &= ~FIF_LARVAL;					\
+} while (/*CONSTCOND*/0)
+
+#ifdef DIAGNOSTIC
+#define	FILE_USE_CHECK(fp, str)						\
+do {									\
+	if ((fp)->f_usecount < 0)					\
+		panic(str);						\
+} while (/* CONSTCOND */ 0)
+#else
+#define	FILE_USE_CHECK(fp, str)		/* nothing */
+#endif
+
+/*
+ * FILE_USE() must be called with the file lock held.
+ * (Typical usage is: `fp = fd_getfile(..); FILE_USE(fp);'
+ * and fd_getfile() returns the file locked)
+ */
+#define	FILE_USE(fp)							\
+do {									\
+	(fp)->f_usecount++;						\
+	FILE_USE_CHECK((fp), "f_usecount overflow");			\
+	mutex_exit(&(fp)->f_lock);					\
+} while (/* CONSTCOND */ 0)
+
+#define	FILE_UNUSE_WLOCK(fp, l, havelock)				\
+do {									\
+	if (!(havelock))						\
+		mutex_enter(&(fp)->f_lock);				\
+	if ((fp)->f_iflags & FIF_WANTCLOSE) {				\
+		mutex_exit(&(fp)->f_lock);				\
+		/* Will drop usecount */				\
+		(void) closef((fp), (l));				\
+		break;							\
+	} else {							\
+		(fp)->f_usecount--;					\
+		FILE_USE_CHECK((fp), "f_usecount underflow");		\
+	}								\
+	mutex_exit(&(fp)->f_lock);					\
+} while (/* CONSTCOND */ 0)
+#define	FILE_UNUSE(fp, l)		FILE_UNUSE_WLOCK(fp, l, 0)
+#define	FILE_UNUSE_HAVELOCK(fp, l)	FILE_UNUSE_WLOCK(fp, l, 1)
 
 /*
  * Flags for fo_read and fo_write and do_fileread/write/v
@@ -100,8 +156,8 @@ struct file {
 
 LIST_HEAD(filelist, file);
 extern struct filelist	filehead;	/* head of list of open files */
-extern u_int		maxfiles;	/* kernel limit on # of open files */
-extern u_int		nfiles;		/* actual number of open files */
+extern int		maxfiles;	/* kernel limit on # of open files */
+extern int		nfiles;		/* actual number of open files */
 
 extern const struct fileops vnops;	/* vnode operations for files */
 
@@ -115,19 +171,22 @@ int	do_filereadv(int, const struct iovec *, int, off_t *,
 int	do_filewritev(int, const struct iovec *, int, off_t *,
 	    int, register_t *);
 
-int	fsetown(pid_t *, u_long, const void *);
-int	fgetown(pid_t, u_long, void *);
+int	fsetown(struct proc *, pid_t *, int, const void *);
+int	fgetown(struct proc *, pid_t, int, void *);
 void	fownsignal(pid_t, int, int, int, void *);
 
+int	fdclone(struct lwp *, struct file *, int, int, const struct fileops *,
+    void *);
+
 /* Commonly used fileops */
-int	fnullop_fcntl(struct file *, u_int, void *);
-int	fnullop_poll(struct file *, int);
+int	fnullop_fcntl(struct file *, u_int, void *, struct lwp *);
+int	fnullop_poll(struct file *, int, struct lwp *);
 int	fnullop_kqfilter(struct file *, struct knote *);
 int	fbadop_read(struct file *, off_t *, struct uio *, kauth_cred_t, int);
 int	fbadop_write(struct file *, off_t *, struct uio *, kauth_cred_t, int);
-int	fbadop_ioctl(struct file *, u_long, void *);
-int	fbadop_close(struct file *);
-int	fbadop_stat(struct file *, struct stat *);
+int	fbadop_ioctl(struct file *, u_long, void *, struct lwp *);
+int	fbadop_close(struct file *, struct lwp *);
+int	fbadop_stat(struct file *, struct stat *, struct lwp *);
 
 #endif /* _KERNEL */
 

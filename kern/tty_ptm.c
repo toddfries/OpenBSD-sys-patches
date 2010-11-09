@@ -1,4 +1,4 @@
-/*	$NetBSD: tty_ptm.c,v 1.26 2009/01/22 14:38:35 yamt Exp $	*/
+/*	$NetBSD: tty_ptm.c,v 1.20 2007/10/10 20:42:26 ad Exp $	*/
 
 /*-
  * Copyright (c) 2004 The NetBSD Foundation, Inc.
@@ -12,6 +12,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -27,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: tty_ptm.c,v 1.26 2009/01/22 14:38:35 yamt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: tty_ptm.c,v 1.20 2007/10/10 20:42:26 ad Exp $");
 
 #include "opt_ptm.h"
 
@@ -48,10 +55,9 @@ __KERNEL_RCSID(0, "$NetBSD: tty_ptm.c,v 1.26 2009/01/22 14:38:35 yamt Exp $");
 #include <sys/filedesc.h>
 #include <sys/conf.h>
 #include <sys/poll.h>
+#include <sys/malloc.h>
 #include <sys/pty.h>
 #include <sys/kauth.h>
-
-#include <miscfs/specfs/specdev.h>
 
 #ifdef DEBUG_PTM
 #define DPRINTF(a)	printf a
@@ -113,7 +119,7 @@ pty_vn_open(struct vnode *vp, struct lwp *l)
 		return EINVAL;
 	}
 
-	error = VOP_OPEN(vp, FREAD|FWRITE, lwp0.l_cred);
+	error = VOP_OPEN(vp, FREAD|FWRITE, lwp0.l_cred, l);
 
 	if (error) {
 		vput(vp);
@@ -133,8 +139,8 @@ pty_alloc_master(struct lwp *l, int *fd, dev_t *dev)
 	struct vnode *vp;
 	int md;
 
-	if ((error = fd_allocfile(&fp, fd)) != 0) {
-		DPRINTF(("fd_allocfile %d\n", error));
+	if ((error = falloc(l, &fp, fd)) != 0) {
+		DPRINTF(("falloc %d\n", error));
 		return error;
 	}
 retry:
@@ -175,10 +181,13 @@ retry:
 	fp->f_ops = &vnops;
 	fp->f_data = vp;
 	VOP_UNLOCK(vp, 0);
-	fd_affix(curproc, fp, *fd);
+	FILE_SET_MATURE(fp);
+	FILE_UNUSE(fp, l);
 	return 0;
 bad:
-	fd_abort(curproc, fp, *fd);
+	FILE_UNUSE(fp, l);
+	fdremove(l->l_proc->p_fd, *fd);
+	ffree(fp);
 	return error;
 }
 
@@ -186,6 +195,7 @@ int
 pty_grant_slave(struct lwp *l, dev_t dev)
 {
 	int error;
+	bool revoke;
 	struct vnode *vp;
 
 	/*
@@ -206,7 +216,7 @@ pty_grant_slave(struct lwp *l, dev_t dev)
 		struct vattr vattr;
 		(*ptm->getvattr)(ptm, l, &vattr);
 		/* Do the VOP_SETATTR() as root. */
-		error = VOP_SETATTR(vp, &vattr, lwp0.l_cred);
+		error = VOP_SETATTR(vp, &vattr, lwp0.l_cred, l);
 		if (error) {
 			DPRINTF(("setattr %d\n", error));
 			VOP_UNLOCK(vp, 0);
@@ -214,8 +224,13 @@ pty_grant_slave(struct lwp *l, dev_t dev)
 			return error;
 		}
 	}
+	simple_lock(&vp->v_interlock);
+	revoke = (vp->v_usecount > 1 || (vp->v_iflag & VI_ALIASED) ||
+	    (vp->v_iflag & VI_LAYER));
+	simple_unlock(&vp->v_interlock);
 	VOP_UNLOCK(vp, 0);
-	VOP_REVOKE(vp, REVOKEALL);
+	if (revoke)
+		VOP_REVOKE(vp, REVOKEALL);
 
 	/*
 	 * The vnode is useless after the revoke, we need to get it again.
@@ -232,8 +247,8 @@ pty_alloc_slave(struct lwp *l, int *fd, dev_t dev)
 	struct vnode *vp;
 
 	/* Grab a filedescriptor for the slave */
-	if ((error = fd_allocfile(&fp, fd)) != 0) {
-		DPRINTF(("fd_allocfile %d\n", error));
+	if ((error = falloc(l, &fp, fd)) != 0) {
+		DPRINTF(("falloc %d\n", error));
 		return error;
 	}
 
@@ -252,10 +267,13 @@ pty_alloc_slave(struct lwp *l, int *fd, dev_t dev)
 	fp->f_ops = &vnops;
 	fp->f_data = vp;
 	VOP_UNLOCK(vp, 0);
-	fd_affix(curproc, fp, *fd);
+	FILE_SET_MATURE(fp);
+	FILE_UNUSE(fp, l);
 	return 0;
 bad:
-	fd_abort(curproc, fp, *fd);
+	FILE_UNUSE(fp, l);
+	fdremove(l->l_proc->p_fd, *fd);
+	ffree(fp);
 	return error;
 }
 
@@ -321,9 +339,12 @@ ptmopen(dev_t dev, int flag, int mode, struct lwp *l)
 			 * a new linux module.
 			 */
 			if ((error = pty_grant_slave(l, ttydev)) != 0) {
-				file_t *fp = fd_getfile(fd);
+				struct file *fp =
+				    fd_getfile(l->l_proc->p_fd, fd);
 				if (fp != NULL) {
-					fd_close(fd);
+					FILE_UNUSE(fp, l);
+					fdremove(l->l_proc->p_fd, fd);
+					ffree(fp);
 				}
 				return error;
 			}
@@ -352,7 +373,8 @@ ptmioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 	int error;
 	dev_t newdev;
 	int cfd, sfd;
-	file_t *fp;
+	struct file *fp;
+	struct proc *p = l->l_proc;
 
 	error = 0;
 	switch (cmd) {
@@ -372,10 +394,12 @@ ptmioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 		DPRINTF(("ptmioctl EINVAL\n"));
 		return EINVAL;
 	}
- bad:
-	fp = fd_getfile(cfd);
+bad:
+	fp = fd_getfile(p->p_fd, cfd);
 	if (fp != NULL) {
-		fd_close(cfd);
+		FILE_UNUSE(fp, l);
+		fdremove(p->p_fd, cfd);
+		ffree(fp);
 	}
 	return error;
 }

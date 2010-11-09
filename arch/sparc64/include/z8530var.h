@@ -1,4 +1,4 @@
-/*	$NetBSD: z8530var.h,v 1.12 2008/03/29 19:15:35 tsutsui Exp $	*/
+/*	$NetBSD: z8530var.h,v 1.10 2006/02/13 21:47:12 cdi Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -58,7 +58,7 @@ extern struct consdev *cn_tab;
 #endif
 
 struct zsc_softc {
-	device_t		zsc_dev;	/* base device */
+	struct device		zsc_dev;	/* base device */
 	bus_space_tag_t		zsc_bustag;	/* bus space/DMA tags */
 	bus_dma_tag_t		zsc_dmatag;
 	struct zs_chanstate	*zsc_cs[2];	/* channel A and B soft state */
@@ -85,13 +85,13 @@ struct zsc_softc {
  * about the function call overhead where ZS_DELAY does nothing.
  */
 
-uint8_t zs_read_reg(struct zs_chanstate *cs, uint8_t reg);
-uint8_t zs_read_csr(struct zs_chanstate *cs);
-uint8_t zs_read_data(struct zs_chanstate *cs);
+u_char zs_read_reg(struct zs_chanstate *cs, u_char reg);
+u_char zs_read_csr(struct zs_chanstate *cs);
+u_char zs_read_data(struct zs_chanstate *cs);
 
-void  zs_write_reg(struct zs_chanstate *cs, uint8_t reg, uint8_t val);
-void  zs_write_csr(struct zs_chanstate *cs, uint8_t val);
-void  zs_write_data(struct zs_chanstate *cs, uint8_t val);
+void  zs_write_reg(struct zs_chanstate *cs, u_char reg, u_char val);
+void  zs_write_csr(struct zs_chanstate *cs, u_char val);
+void  zs_write_data(struct zs_chanstate *cs, u_char val);
 
 /* The sparc has splzs() in psl.h */
 
@@ -103,5 +103,3 @@ void  zs_write_data(struct zs_chanstate *cs, uint8_t val);
 
 #undef cn_trap
 #define cn_trap() zs_abort(NULL)
-
-#define	IPL_ZS	IPL_SERIAL

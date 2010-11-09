@@ -1,4 +1,4 @@
-/*	$NetBSD: in6_offload.c,v 1.4 2007/05/02 20:40:26 dyoung Exp $	*/
+/*	$NetBSD: in6_offload.c,v 1.1 2006/11/25 18:41:36 yamt Exp $	*/
 
 /*-
  * Copyright (c)2006 YAMAMOTO Takashi,
@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: in6_offload.c,v 1.4 2007/05/02 20:40:26 dyoung Exp $");
+__KERNEL_RCSID(0, "$NetBSD: in6_offload.c,v 1.1 2006/11/25 18:41:36 yamt Exp $");
 
 #include <sys/param.h>
 #include <sys/mbuf.h>
@@ -45,7 +45,7 @@ __KERNEL_RCSID(0, "$NetBSD: in6_offload.c,v 1.4 2007/05/02 20:40:26 dyoung Exp $
 struct ip6_tso_output_args {
 	struct ifnet *ifp;
 	struct ifnet *origifp;
-	const struct sockaddr_in6 *dst;
+	struct sockaddr_in6 *dst;
 	struct rtentry *rt;
 };
 
@@ -61,7 +61,7 @@ ip6_tso_output_callback(void *vp, struct mbuf *m)
 
 int
 ip6_tso_output(struct ifnet *ifp, struct ifnet *origifp, struct mbuf *m,
-    const struct sockaddr_in6 *dst, struct rtentry *rt)
+    struct sockaddr_in6 *dst, struct rtentry *rt)
 {
 	struct ip6_tso_output_args args;
 

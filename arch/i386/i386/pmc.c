@@ -1,4 +1,4 @@
-/*	$NetBSD: pmc.c,v 1.17 2008/05/11 14:44:54 ad Exp $	*/
+/*	$NetBSD: pmc.c,v 1.11 2006/11/16 01:32:38 christos Exp $	*/
 
 /*-
  * Copyright (c) 2000 Zembu Labs, Inc.
@@ -38,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: pmc.c,v 1.17 2008/05/11 14:44:54 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pmc.c,v 1.11 2006/11/16 01:32:38 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -48,8 +48,6 @@ __KERNEL_RCSID(0, "$NetBSD: pmc.c,v 1.17 2008/05/11 14:44:54 ad Exp $");
 #include <machine/specialreg.h>
 #include <machine/sysarch.h>
 #include <machine/pmc.h>
-#include <machine/cpu_counter.h>
-#include <machine/cputypes.h>
 
 static int pmc_initialized;
 static int pmc_ncounters;
@@ -68,7 +66,7 @@ static int pmc_running;
 static void
 pmc_init(void)
 {
-	const char *cpu_vendorstr;
+	const char *cpu_vendor;
 	struct cpu_info *ci;
 
 	if (pmc_initialized)
@@ -83,11 +81,11 @@ pmc_init(void)
 #endif
 
 	ci = curcpu();
-	cpu_vendorstr = (char *)ci->ci_vendor;
+	cpu_vendor = (char *)ci->ci_vendor;
 
 	switch (cpu_class) {
 	case CPUCLASS_586:
-		if (strncmp(cpu_vendorstr, "GenuineIntel", 12) == 0) {
+		if (strncmp(cpu_vendor, "GenuineIntel", 12) == 0) {
 			pmc_type = PMC_TYPE_I586;
 			pmc_ncounters = 2;
 			pmc_state[0].pmcs_ctrmsr = MSR_CTR0;
@@ -96,13 +94,13 @@ pmc_init(void)
 		}
 
 	case CPUCLASS_686:
-		if (strncmp(cpu_vendorstr, "GenuineIntel", 12) == 0) {
+		if (strncmp(cpu_vendor, "GenuineIntel", 12) == 0) {
 
 			/*
 			 * Figure out what we support; right now
 			 * we're missing Pentium 4 support.
 			 */
-			if (cpuid_level == -1 ||
+			if (ci->ci_cpuid_level == -1 ||
 			    CPUID2FAMILY(ci->ci_signature) == CPU_FAMILY_P4)
 				break;
 
@@ -110,7 +108,7 @@ pmc_init(void)
 			pmc_ncounters = 2;
 			pmc_state[0].pmcs_ctrmsr = MSR_PERFCTR0;
 			pmc_state[1].pmcs_ctrmsr = MSR_PERFCTR1;
-		} else if (strncmp(cpu_vendorstr, "AuthenticAMD",
+		} else if (strncmp(cpu_vendor, "AuthenticAMD",
 			   12) == 0) {
 			pmc_type = PMC_TYPE_K7;
 			pmc_ncounters = 4;
@@ -132,10 +130,10 @@ done:
 }
 
 int
-pmc_info(struct lwp *l, struct x86_pmc_info_args *uargs,
+pmc_info(struct lwp *l, struct i386_pmc_info_args *uargs,
     register_t *retval)
 {
-	struct x86_pmc_info_args rv;
+	struct i386_pmc_info_args rv;
 
 	memset(&rv, 0, sizeof(rv));
 
@@ -149,10 +147,10 @@ pmc_info(struct lwp *l, struct x86_pmc_info_args *uargs,
 }
 
 int
-pmc_startstop(struct lwp *l, struct x86_pmc_startstop_args *uargs,
+pmc_startstop(struct lwp *l, struct i386_pmc_startstop_args *uargs,
     register_t *retval)
 {
-	struct x86_pmc_startstop_args args;
+	struct i386_pmc_startstop_args args;
 	int error, mask, start;
 
 	if (pmc_initialized == 0)
@@ -175,7 +173,6 @@ pmc_startstop(struct lwp *l, struct x86_pmc_startstop_args *uargs,
 	else if ((pmc_running & mask) == 0 && start == 0)
 		return (0);
 
-	x86_disable_intr();
 	if (start) {
 		pmc_running |= mask;
 		pmc_state[args.counter].pmcs_val = args.val;
@@ -218,8 +215,10 @@ pmc_startstop(struct lwp *l, struct x86_pmc_startstop_args *uargs,
 			    (args.compare << PMC6_EVTSEL_COUNTER_MASK_SHIFT);
 			break;
 		}
+		disable_intr();
 		wrmsr(pmc_state[args.counter].pmcs_ctrmsr,
 		    pmc_state[args.counter].pmcs_val);
+		enable_intr();
 	} else {
 		pmc_running &= ~mask;
 		pmc_state[args.counter].pmcs_control = 0;
@@ -227,34 +226,39 @@ pmc_startstop(struct lwp *l, struct x86_pmc_startstop_args *uargs,
 
 	switch (pmc_type) {
 	case PMC_TYPE_I586:
+		disable_intr();
 		wrmsr(MSR_CESR, pmc_state[0].pmcs_control |
 		    (pmc_state[1].pmcs_control << 16));
+		enable_intr();
 		break;
 
 	case PMC_TYPE_I686:
+		disable_intr();
 		if (args.counter == 1)
 			wrmsr(MSR_EVNTSEL1, pmc_state[1].pmcs_control);
 		wrmsr(MSR_EVNTSEL0, pmc_state[0].pmcs_control |
 		    (pmc_running ? PMC6_EVTSEL_EN : 0));
+		enable_intr();
 		break;
 
 	case PMC_TYPE_K7:
+		disable_intr();
 		if (args.counter == 1)
 			wrmsr(MSR_K7_EVNTSEL1, pmc_state[1].pmcs_control);
 		wrmsr(MSR_K7_EVNTSEL0, pmc_state[0].pmcs_control |
 		    (pmc_running ? K7_EVTSEL_EN : 0));
+		enable_intr();
 		break;
 	}
-	x86_enable_intr();
 
 	return (0);
 }
 
 int
-pmc_read(struct lwp *l, struct x86_pmc_read_args *uargs,
+pmc_read(struct lwp *l, struct i386_pmc_read_args *uargs,
     register_t *retval)
 {
-	struct x86_pmc_read_args args;
+	struct i386_pmc_read_args args;
 	int error;
 
 	if (pmc_initialized == 0)
@@ -274,7 +278,7 @@ pmc_read(struct lwp *l, struct x86_pmc_read_args *uargs,
 		    rdmsr(pmc_state[args.counter].pmcs_ctrmsr) &
 		    0xffffffffffULL;
 		if (pmc_flags & PMC_INFO_HASTSC)
-			pmc_state[args.counter].pmcs_tsc = cpu_counter();
+			pmc_state[args.counter].pmcs_tsc = rdtsc();
 	}
 
 	args.val = pmc_state[args.counter].pmcs_val;

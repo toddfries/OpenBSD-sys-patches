@@ -1,4 +1,4 @@
-/*	$NetBSD: wdc_amiga.c,v 1.31 2008/04/28 20:23:12 martin Exp $ */
+/*	$NetBSD: wdc_amiga.c,v 1.29 2006/03/27 19:35:33 aymeric Exp $ */
 
 /*-
  * Copyright (c) 2000, 2003 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: wdc_amiga.c,v 1.31 2008/04/28 20:23:12 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: wdc_amiga.c,v 1.29 2006/03/27 19:35:33 aymeric Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -65,15 +72,15 @@ struct wdc_amiga_softc {
 	char	sc_a1200;
 };
 
-int	wdc_amiga_probe(device_t, cfdata_t, void *);
-void	wdc_amiga_attach(device_t, device_t, void *);
+int	wdc_amiga_probe(struct device *, struct cfdata *, void *);
+void	wdc_amiga_attach(struct device *, struct device *, void *);
 int	wdc_amiga_intr(void *);
 
-CFATTACH_DECL_NEW(wdc_amiga, sizeof(struct wdc_amiga_softc),
+CFATTACH_DECL(wdc_amiga, sizeof(struct wdc_amiga_softc),
     wdc_amiga_probe, wdc_amiga_attach, NULL, NULL);
 
 int
-wdc_amiga_probe(device_t parent, cfdata_t cfp, void *aux)
+wdc_amiga_probe(struct device *parent, struct cfdata *cfp, void *aux)
 {
 	if ((!is_a4000() && !is_a1200()) || !matchname(aux, "wdc"))
 		return(0);
@@ -81,15 +88,14 @@ wdc_amiga_probe(device_t parent, cfdata_t cfp, void *aux)
 }
 
 void
-wdc_amiga_attach(device_t parent, device_t self, void *aux)
+wdc_amiga_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct wdc_amiga_softc *sc = device_private(self);
+	struct wdc_amiga_softc *sc = (void *)self;
 	struct wdc_regs *wdr;
 	int i;
 
-	aprint_normal("\n");
+	printf("\n");
 
-	sc->sc_wdcdev.sc_atac.atac_dev = self;
 	sc->sc_wdcdev.regs = wdr = &sc->sc_wdc_regs;
 
 	if (is_a4000()) {
@@ -108,7 +114,8 @@ wdc_amiga_attach(device_t parent, device_t self, void *aux)
 
 	if (bus_space_map(wdr->cmd_iot, 0, 0x40, 0,
 			  &wdr->cmd_baseioh)) {
-		aprint_error_dev(self, "couldn't map registers\n");
+		printf("%s: couldn't map registers\n",
+		    sc->sc_wdcdev.sc_atac.atac_dev.dv_xname);
 		return;
 	}
 
@@ -119,7 +126,8 @@ wdc_amiga_attach(device_t parent, device_t self, void *aux)
 
 			bus_space_unmap(wdr->cmd_iot,
 			    wdr->cmd_baseioh, 0x40);
-			aprint_error_dev(self, "couldn't map registers\n");
+			printf("%s: couldn't map registers\n",
+			    sc->sc_wdcdev.sc_atac.atac_dev.dv_xname);
 			return;
 		}
 	}

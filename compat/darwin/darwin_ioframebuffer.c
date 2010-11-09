@@ -1,4 +1,4 @@
-/*	$NetBSD: darwin_ioframebuffer.c,v 1.41 2008/04/28 20:23:41 martin Exp $ */
+/*	$NetBSD: darwin_ioframebuffer.c,v 1.36 2006/03/29 04:19:48 thorpej Exp $ */
 
 /*-
  * Copyright (c) 2003 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: darwin_ioframebuffer.c,v 1.41 2008/04/28 20:23:41 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: darwin_ioframebuffer.c,v 1.36 2006/03/29 04:19:48 thorpej Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -116,7 +123,8 @@ struct mach_iokit_devclass darwin_ioframebuffer_devclass = {
 };
 
 int
-darwin_ioframebuffer_connect_method_scalari_scalaro(struct mach_trap_args *args)
+darwin_ioframebuffer_connect_method_scalari_scalaro(args)
+	struct mach_trap_args *args;
 {
 	mach_io_connect_method_scalari_scalaro_request_t *req = args->smsg;
 	mach_io_connect_method_scalari_scalaro_reply_t *rep = args->rmsg;
@@ -293,7 +301,8 @@ darwin_ioframebuffer_connect_method_scalari_scalaro(struct mach_trap_args *args)
 }
 
 int
-darwin_ioframebuffer_connect_method_scalari_structo(struct mach_trap_args *args)
+darwin_ioframebuffer_connect_method_scalari_structo(args)
+	struct mach_trap_args *args;
 {
 	mach_io_connect_method_scalari_structo_request_t *req = args->smsg;
 	mach_io_connect_method_scalari_structo_reply_t *rep = args->rmsg;
@@ -410,7 +419,8 @@ darwin_ioframebuffer_connect_method_scalari_structo(struct mach_trap_args *args)
 }
 
 int
-darwin_ioframebuffer_connect_method_structi_structo(struct mach_trap_args *args)
+darwin_ioframebuffer_connect_method_structi_structo(args)
+	struct mach_trap_args *args;
 {
 	mach_io_connect_method_structi_structo_request_t *req = args->smsg;
 	mach_io_connect_method_structi_structo_reply_t *rep = args->rmsg;
@@ -455,7 +465,8 @@ darwin_ioframebuffer_connect_method_structi_structo(struct mach_trap_args *args)
 }
 
 int
-darwin_ioframebuffer_connect_map_memory(struct mach_trap_args *args)
+darwin_ioframebuffer_connect_map_memory(args)
+	struct mach_trap_args *args;
 {
 	mach_io_connect_map_memory_request_t *req = args->smsg;
 	mach_io_connect_map_memory_reply_t *rep = args->rmsg;
@@ -516,7 +527,7 @@ darwin_ioframebuffer_connect_map_memory(struct mach_trap_args *args)
 
 		/* Find the framebuffer's size */
 		if ((error = (wsdisplay->d_ioctl)(device,
-		    WSDISPLAYIO_GINFO, (void *)&fbi, 0, l)) != 0) {
+		    WSDISPLAYIO_GINFO, (caddr_t)&fbi, 0, l)) != 0) {
 #ifdef DEBUG_DARWIN
 			printf("*** Cannot get screen params ***\n");
 #endif
@@ -538,7 +549,7 @@ darwin_ioframebuffer_connect_map_memory(struct mach_trap_args *args)
 		 */
 		ded = (struct darwin_emuldata *)p->p_emuldata;
 		if ((error = (wsdisplay->d_ioctl)(device,
-		    WSDISPLAYIO_GMODE, (void *)&mode, 0, l)) != 0) {
+		    WSDISPLAYIO_GMODE, (caddr_t)&mode, 0, l)) != 0) {
 #ifdef DEBUG_DARWIN
 			printf("*** Cannot get console state ***\n");
 #endif
@@ -550,7 +561,7 @@ darwin_ioframebuffer_connect_map_memory(struct mach_trap_args *args)
 		/* Switch to graphic mode */
 		mode = WSDISPLAYIO_MODE_MAPPED;
 		if ((error = (wsdisplay->d_ioctl)(device,
-		    WSDISPLAYIO_SMODE, (void *)&mode, 0, l)) != 0) {
+		    WSDISPLAYIO_SMODE, (caddr_t)&mode, 0, l)) != 0) {
 #ifdef DEBUG_DARWIN
 			printf("*** Cannot switch to graphic mode ***\n");
 #endif
@@ -614,7 +625,8 @@ darwin_ioframebuffer_connect_map_memory(struct mach_trap_args *args)
 }
 
 void
-darwin_ioframebuffer_shmeminit(vaddr_t kvaddr)
+darwin_ioframebuffer_shmeminit(kvaddr)
+	vaddr_t kvaddr;
 {
 	struct darwin_ioframebuffer_shmem *shmem;
 
@@ -624,11 +636,14 @@ darwin_ioframebuffer_shmeminit(vaddr_t kvaddr)
 }
 
 int
-darwin_ioframebuffer_connect_method_scalari_structi(struct mach_trap_args *args)
+darwin_ioframebuffer_connect_method_scalari_structi(args)
+	struct mach_trap_args *args;
 {
 	mach_io_connect_method_scalari_structi_request_t *req = args->smsg;
 	mach_io_connect_method_scalari_structi_reply_t *rep = args->rmsg;
 	size_t *msglen = args->rsize;
+	struct lwp *l = args->l;
+	struct proc *p = args->l->l_proc;
 	int scalar_len;
 	int struct_len;
 	char *struct_data;
@@ -678,17 +693,14 @@ darwin_ioframebuffer_connect_method_scalari_structi(struct mach_trap_args *args)
 		break;
 	}
 
-#if 0	/* comment out stackgap using code - needs to be done another way */
 	case DARWIN_IOFBSETCLUTWITHENTRIES: {
-		struct lwp *l = args->l;
-		struct proc *p = args->l->l_proc;
 		int index;
 		int option;
 		struct darwin_iocolorentry *clut;
 		size_t clutlen;
 		size_t tablen;
 		size_t kcolorsz;
-		void *sg = stackgap_init(p, 0);
+		caddr_t sg = stackgap_init(p, 0);
 		int error;
 		struct wsdisplay_cmap cmap;
 		u_char *red;
@@ -767,7 +779,7 @@ darwin_ioframebuffer_connect_method_scalari_structi(struct mach_trap_args *args)
 				return mach_msg_error(args, error);
 
 			if ((error = (wsdisplay->d_ioctl)(dev,
-			    WSDISPLAYIO_PUTCMAP, (void *)&cmap, 0, l)) != 0)
+			    WSDISPLAYIO_PUTCMAP, (caddr_t)&cmap, 0, l)) != 0)
 				return mach_msg_error(args, error);
 
 			index += tablen;
@@ -778,7 +790,6 @@ darwin_ioframebuffer_connect_method_scalari_structi(struct mach_trap_args *args)
 
 		break;
 	}
-#endif
 
 	default:
 #ifdef DEBUG_DARWIN
@@ -810,10 +821,14 @@ darwin_findscreen(dev, unit, screen)
 	int major, minor;
 
 	/* Find a wsdisplay */
-	if ((dv = device_find_by_driver_unit("wsdisplay", unit)) == NULL)
+	TAILQ_FOREACH(dv, &alldevs, dv_list)
+		if (device_is_a(dv, "wsdisplay") &&
+		    device_unit(dv) == unit)
+			break;
+	if (dv == NULL)
 		return ENODEV;
 
-	sc = device_private(dv);
+	sc = (struct wsdisplay_softc *)dv;
 
 	/* Derive the device number */
 	major = cdevsw_lookup_major(&wsdisplay_cdevsw);

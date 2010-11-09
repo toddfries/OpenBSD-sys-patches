@@ -1,4 +1,4 @@
-/*	$NetBSD: intr.c,v 1.28 2008/06/19 13:56:22 tsutsui Exp $	*/
+/*	$NetBSD: intr.c,v 1.23 2005/11/27 14:01:45 yamt Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -34,16 +41,19 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: intr.c,v 1.28 2008/06/19 13:56:22 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: intr.c,v 1.23 2005/11/27 14:01:45 yamt Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/malloc.h>
 #include <sys/vmmeter.h>
-#include <sys/cpu.h>
-#include <sys/intr.h>
 
 #include <uvm/uvm_extern.h>
+
+#include <net/netisr.h>
+
+#include <machine/cpu.h>
+#include <machine/intr.h>
 
 #include <machine/psc.h>
 #include <machine/viareg.h>
@@ -52,6 +62,7 @@ __KERNEL_RCSID(0, "$NetBSD: intr.c,v 1.28 2008/06/19 13:56:22 tsutsui Exp $");
 #define	ISRLOC	0x18
 
 static int intr_noint(void *);
+void netintr(void);
 
 static int ((*intr_func[NISR])(void *)) = {
 	intr_noint,
@@ -83,9 +94,7 @@ int	intr_debug = 0;
  * IIfx/Q700/900/950/etc. where the interrupt controller may be reprogrammed
  * to interrupt on different levels as listed in locore.s
  */
-uint16_t ipl2psl_table[NIPL];
-int idepth;
-volatile int ssir;
+u_short mac68k_ipls[MAC68K_NIPLS];
 
 extern	int intrcnt[];		/* from locore.s */
 
@@ -106,31 +115,48 @@ intr_init(void)
 	const char	*inames;
 	char		*g_inames;
 
-	ipl2psl_table[IPL_NONE]       = 0;
-	ipl2psl_table[IPL_SOFTCLOCK]  = PSL_S|PSL_IPL1;
-	ipl2psl_table[IPL_SOFTNET]    = PSL_S|PSL_IPL1;
-	ipl2psl_table[IPL_SOFTSERIAL] = PSL_S|PSL_IPL1;
-	ipl2psl_table[IPL_SOFTBIO]    = PSL_S|PSL_IPL1;
-	ipl2psl_table[IPL_HIGH]       = PSL_S|PSL_IPL7;
+	mac68k_ipls[MAC68K_IPL_NONE] = 0;
+	mac68k_ipls[MAC68K_IPL_SOFT] = PSL_S|PSL_IPL1;
+	mac68k_ipls[MAC68K_IPL_SERIAL] = PSL_S|PSL_IPL4;
+	mac68k_ipls[MAC68K_IPL_HIGH] = PSL_S|PSL_IPL7;
 
 	g_inames = (char *) &intrnames;
 	if (mac68k_machine.aux_interrupts) {
 		inames = AUX_INAMES;
 
 		/* Standard spl(9) interrupt priorities */
-		ipl2psl_table[IPL_VM]        = (PSL_S | PSL_IPL6);
-		ipl2psl_table[IPL_SCHED]     = (PSL_S | PSL_IPL6);
+		mac68k_ipls[MAC68K_IPL_BIO] = (PSL_S | PSL_IPL2);
+		mac68k_ipls[MAC68K_IPL_NET] = (PSL_S | PSL_IPL3);
+		mac68k_ipls[MAC68K_IPL_TTY] = (PSL_S | PSL_IPL1);
+		mac68k_ipls[MAC68K_IPL_IMP] = (PSL_S | PSL_IPL6);
+		mac68k_ipls[MAC68K_IPL_STATCLOCK] = (PSL_S | PSL_IPL6);
+		mac68k_ipls[MAC68K_IPL_CLOCK] = (PSL_S | PSL_IPL6);
+		mac68k_ipls[MAC68K_IPL_SCHED] = (PSL_S | PSL_IPL6);
+
+		/* Non-standard interrupt priorities */
+		mac68k_ipls[MAC68K_IPL_ADB] = (PSL_S | PSL_IPL6);
+		mac68k_ipls[MAC68K_IPL_AUDIO] = (PSL_S | PSL_IPL5);
+
 	} else {
 		inames = STD_INAMES;
 
 		/* Standard spl(9) interrupt priorities */
-		ipl2psl_table[IPL_VM]        = (PSL_S | PSL_IPL2);
-		ipl2psl_table[IPL_SCHED]     = (PSL_S | PSL_IPL3);
+		mac68k_ipls[MAC68K_IPL_BIO] = (PSL_S | PSL_IPL2);
+		mac68k_ipls[MAC68K_IPL_NET] = (PSL_S | PSL_IPL2);
+		mac68k_ipls[MAC68K_IPL_TTY] = (PSL_S | PSL_IPL1);
+		mac68k_ipls[MAC68K_IPL_IMP] = (PSL_S | PSL_IPL2);
+		mac68k_ipls[MAC68K_IPL_STATCLOCK] = (PSL_S | PSL_IPL2);
+		mac68k_ipls[MAC68K_IPL_CLOCK] = (PSL_S | PSL_IPL2);
+		mac68k_ipls[MAC68K_IPL_SCHED] = (PSL_S | PSL_IPL3);
+
+		/* Non-standard interrupt priorities */
+		mac68k_ipls[MAC68K_IPL_ADB] = (PSL_S | PSL_IPL1);
+		mac68k_ipls[MAC68K_IPL_AUDIO] = (PSL_S | PSL_IPL2);
 
 		if (current_mac_model->class == MACH_CLASSAV) {
 			inames = AV_INAMES;
-			ipl2psl_table[IPL_VM]    = (PSL_S | PSL_IPL4);
-			ipl2psl_table[IPL_SCHED] = (PSL_S | PSL_IPL4);
+			mac68k_ipls[MAC68K_IPL_BIO] =
+			    mac68k_ipls[MAC68K_IPL_NET] = (PSL_S | PSL_IPL4);
 		}
 	}
 
@@ -155,13 +181,29 @@ intr_computeipl(void)
 {
 	/*
 	 * Enforce the following relationship, as defined in spl(9):
-	 * `bio <= net <= tty <= vm <= statclock <= clock <= sched <= serial'
+	 * `bio <= net <= tty <= imp <= statclock <= clock <= sched <= serial'
 	 */
-	if (ipl2psl_table[IPL_VM] > ipl2psl_table[IPL_SCHED])
-		ipl2psl_table[IPL_SCHED] = ipl2psl_table[IPL_VM];
+	if (mac68k_ipls[MAC68K_IPL_BIO] > mac68k_ipls[MAC68K_IPL_NET])
+		mac68k_ipls[MAC68K_IPL_NET] = mac68k_ipls[MAC68K_IPL_BIO];
 
-	if (ipl2psl_table[IPL_SCHED] > ipl2psl_table[IPL_HIGH])
-		ipl2psl_table[IPL_HIGH] = ipl2psl_table[IPL_SCHED];
+	if (mac68k_ipls[MAC68K_IPL_NET] > mac68k_ipls[MAC68K_IPL_TTY])
+		mac68k_ipls[MAC68K_IPL_TTY] = mac68k_ipls[MAC68K_IPL_NET];
+
+	if (mac68k_ipls[MAC68K_IPL_TTY] > mac68k_ipls[MAC68K_IPL_IMP])
+		mac68k_ipls[MAC68K_IPL_IMP] = mac68k_ipls[MAC68K_IPL_TTY];
+
+	if (mac68k_ipls[MAC68K_IPL_IMP] > mac68k_ipls[MAC68K_IPL_STATCLOCK])
+		mac68k_ipls[MAC68K_IPL_STATCLOCK] = mac68k_ipls[MAC68K_IPL_IMP];
+
+	if (mac68k_ipls[MAC68K_IPL_STATCLOCK] > mac68k_ipls[MAC68K_IPL_CLOCK])
+		mac68k_ipls[MAC68K_IPL_CLOCK] =
+		    mac68k_ipls[MAC68K_IPL_STATCLOCK];
+
+	if (mac68k_ipls[MAC68K_IPL_CLOCK] > mac68k_ipls[MAC68K_IPL_SCHED])
+		mac68k_ipls[MAC68K_IPL_SCHED] = mac68k_ipls[MAC68K_IPL_CLOCK];
+
+	if (mac68k_ipls[MAC68K_IPL_SCHED] > mac68k_ipls[MAC68K_IPL_SERIAL])
+		mac68k_ipls[MAC68K_IPL_SERIAL] = mac68k_ipls[MAC68K_IPL_SCHED];
 }
 
 /*
@@ -212,7 +254,6 @@ intr_dispatch(int evec)		/* format | vector offset */
 {
 	int ipl, vec;
 
-	idepth++;
 	vec = (evec & 0xfff) >> 2;
 #ifdef DIAGNOSTIC
 	if ((vec < ISRLOC) || (vec >= (ISRLOC + NISR)))
@@ -224,7 +265,6 @@ intr_dispatch(int evec)		/* format | vector offset */
 	uvmexp.intrs++;
 
 	(void)(*intr_func[ipl])(intr_arg[ipl]);
-	idepth--;
 }
 
 /*
@@ -234,17 +274,33 @@ static int
 intr_noint(void *arg)
 {
 #ifdef DEBUG
-	idepth++;
 	if (intr_debug)
 		printf("intr_noint: ipl %d\n", (int)arg);
-	idepth--;
 #endif
 	return 0;
 }
 
-bool
-cpu_intr_p(void)
+void
+netintr(void)
 {
+	int s, isr;
 
-	return idepth != 0;
+	for (;;) {
+		s = splhigh();
+		isr = netisr;
+		netisr = 0;
+		splx(s);
+
+		if (isr == 0)
+			return;
+
+#define DONETISR(bit, fn) do {		\
+	if (isr & (1 << bit))		\
+		fn();			\
+} while (0)
+
+#include <net/netisr_dispatch.h>
+
+#undef DONETISR
+	}
 }

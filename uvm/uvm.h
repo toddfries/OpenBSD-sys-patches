@@ -1,4 +1,4 @@
-/*	$NetBSD: uvm.h,v 1.55 2008/06/04 15:06:04 ad Exp $	*/
+/*	$NetBSD: uvm.h,v 1.52 2007/07/21 19:21:53 ad Exp $	*/
 
 /*
  *
@@ -74,19 +74,6 @@
 struct workqueue;
 
 /*
- * per-cpu data
- */
-
-struct uvm_cpu {
-	struct pgfreelist page_free[VM_NFREELIST]; /* unallocated pages */
-	int page_free_nextcolor;	/* next color to allocate from */
-	int page_idlezero_next;		/* which color to zero next */
-	bool page_idle_zero;		/* TRUE if we should try to zero
-					   pages in the idle loop */
-	int pages[PGFL_NQUEUES];	/* total of pages in page_free */
-};
-
-/*
  * uvm structure (vm global state: collected in one structure for ease
  * of reference...)
  */
@@ -96,7 +83,11 @@ struct uvm {
 
 		/* vm_page queues */
 	struct pgfreelist page_free[VM_NFREELIST]; /* unallocated pages */
+	int page_free_nextcolor;	/* next color to allocate from */
+	struct simplelock pageqlock;	/* lock for active/inactive page q */
 	bool page_init_done;		/* TRUE if uvm_page_init() finished */
+	bool page_idle_zero;		/* TRUE if we should try to zero
+					   pages in the idle loop */
 
 		/* page daemon trigger */
 	int pagedaemon;			/* daemon sleeps on this */
@@ -104,6 +95,11 @@ struct uvm {
 
 		/* aiodone daemon */
 	struct workqueue *aiodone_queue;
+
+		/* page hash */
+	struct pglist *page_hash;	/* page hash table (vp/off->page) */
+	int page_nhash;			/* number of buckets */
+	int page_hashmask;		/* hash mask */
 
 	/* aio_done is locked by uvm.pagedaemon_lock and splbio! */
 	TAILQ_HEAD(, buf) aio_done;		/* done async i/o reqs */
@@ -113,9 +109,6 @@ struct uvm {
 	kcondvar_t scheduler_cv;
 	bool scheduler_kicked;
 	int swapout_enabled;
-
-	/* per-cpu data */
-	struct uvm_cpu cpus[MAXCPUS];
 };
 
 /*
@@ -127,8 +120,8 @@ extern struct uvm_object *uvm_kernel_object;
  * locks (made globals for lockstat).
  */
 
-extern kmutex_t uvm_pageqlock;		/* lock for active/inactive page q */
 extern kmutex_t uvm_fpageqlock;		/* lock for free page q */
+extern kmutex_t uvm_pagedaemon_lock;
 extern kmutex_t uvm_kentry_lock;
 extern kmutex_t uvm_swap_data_lock;
 extern kmutex_t uvm_scheduler_mutex;
@@ -178,7 +171,7 @@ extern struct evcnt uvm_ra_miss;
 
 #define	UVM_UNLOCK_AND_WAIT(event, slock, intr, msg, timo)		\
 do {									\
-	(void) mtsleep(event, PVM | PNORELOCK | (intr ? PCATCH : 0),	\
+	(void) ltsleep(event, PVM | PNORELOCK | (intr ? PCATCH : 0),	\
 	    msg, timo, slock);						\
 } while (/*CONSTCOND*/ 0)
 

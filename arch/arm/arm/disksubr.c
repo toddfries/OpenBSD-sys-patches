@@ -1,4 +1,4 @@
-/*	$NetBSD: disksubr.c,v 1.20 2008/01/02 11:48:23 ad Exp $	*/
+/*	$NetBSD: disksubr.c,v 1.15 2006/11/25 11:59:56 scw Exp $	*/
 
 /*
  * Copyright (c) 1998 Christopher G. Demetriou.  All rights reserved.
@@ -97,7 +97,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: disksubr.c,v 1.20 2008/01/02 11:48:23 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: disksubr.c,v 1.15 2006/11/25 11:59:56 scw Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -198,7 +198,7 @@ readdisklabel(dev, strat, lp, osdep)
 		goto done;
 	}
 	for (dlp = (struct disklabel *)bp->b_data;
-	    dlp <= (struct disklabel *)((char *)bp->b_data + lp->d_secsize - sizeof(*dlp));
+	    dlp <= (struct disklabel *)(bp->b_data + lp->d_secsize - sizeof(*dlp));
 	    dlp = (struct disklabel *)((char *)dlp + sizeof(long))) {
 		if (dlp->d_magic != DISKMAGIC || dlp->d_magic2 != DISKMAGIC) {
 			continue;
@@ -224,7 +224,7 @@ readdisklabel(dev, strat, lp, osdep)
 		i = 0;
 		do {
 			/* read a bad sector table */
-			bp->b_oflags &= ~(BO_DONE);
+			bp->b_flags &= ~(B_DONE);
 			bp->b_flags |= B_READ;
 			bp->b_blkno = lp->d_secperunit - lp->d_nsectors + i;
 			if (lp->d_secsize > DEV_BSIZE)
@@ -249,12 +249,12 @@ readdisklabel(dev, strat, lp, osdep)
 				} else
 					msg = "bad sector table corrupted";
 			}
-		} while (bp->b_error != 0 && (i += 2) < 10 &&
+		} while ((bp->b_flags & B_ERROR) && (i += 2) < 10 &&
 			i < lp->d_nsectors);
 	}
 
 done:
-	brelse(bp, 0);
+	brelse(bp);
 	return (msg);
 }
 
@@ -376,7 +376,7 @@ writedisklabel(dev, strat, lp, osdep)
 	bp->b_blkno = netbsdpartoff + LABELSECTOR;
 	bp->b_cylinder = cyl;
 	bp->b_bcount = lp->d_secsize;
-	bp->b_oflags &= ~(BO_DONE);
+	bp->b_flags &= ~(B_DONE);
 	bp->b_flags |= B_READ;
 	(*strat)(bp);
 
@@ -385,13 +385,12 @@ writedisklabel(dev, strat, lp, osdep)
 	if ((error = biowait(bp)))
 		goto done;
 	for (dlp = (struct disklabel *)bp->b_data;
-	    dlp <= (struct disklabel *)((char *)bp->b_data + lp->d_secsize - sizeof(*dlp));
+	    dlp <= (struct disklabel *)(bp->b_data + lp->d_secsize - sizeof(*dlp));
 	    dlp = (struct disklabel *)((char *)dlp + sizeof(long))) {
 		if (dlp->d_magic == DISKMAGIC && dlp->d_magic2 == DISKMAGIC &&
 		    dkcksum(dlp) == 0) {
 			*dlp = *lp;
-			bp->b_flags &= ~(B_READ);
-			bp->b_oflags &= ~(BO_DONE);
+			bp->b_flags &= ~(B_READ|B_DONE);
 			bp->b_flags |= B_WRITE;
 			(*strat)(bp);
 			error = biowait(bp);
@@ -402,7 +401,7 @@ writedisklabel(dev, strat, lp, osdep)
 	error = ESRCH;
 
 done:
-	brelse(bp, 0);
+	brelse(bp);
 	return (error);
 }
 

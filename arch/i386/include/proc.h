@@ -1,4 +1,4 @@
-/*	$NetBSD: proc.h,v 1.37 2008/12/20 13:09:44 ad Exp $	*/
+/*	$NetBSD: proc.h,v 1.29 2006/09/23 20:51:45 yamt Exp $	*/
 
 /*
  * Copyright (c) 1991 Regents of the University of California.
@@ -34,31 +34,30 @@
 #ifndef _I386_PROC_H_
 #define _I386_PROC_H_
 
+#ifdef _KERNEL_OPT
+#include "opt_noredzone.h"
+#endif
+
 #include <sys/user.h> /* for sizeof(struct user) */
 #include <machine/frame.h>
 
 /*
- * Machine-dependent part of the lwp structure for i386.
+ * Machine-dependent part of the proc structure for i386.
  */
-struct pmap;
-struct vm_page;
-
 struct mdlwp {
 	struct	trapframe *md_regs;	/* registers on current frame */
 	int	md_flags;		/* machine-dependent flags */
-	volatile int md_astpending;	/* AST pending for this process */
-	struct pmap *md_gc_pmap;	/* pmap being garbage collected */
-	struct vm_page *md_gc_ptp;	/* pages from pmap g/c */
+	int	md_tss_sel;		/* TSS selector */
 };
 
 /* md_flags */
 #define	MDL_USEDFPU	0x0001	/* has used the FPU */
-#define	MDL_IOPL	0x0002	/* XEN: i/o privilege */
 
 struct mdproc {
 	int	md_flags;
 	void	(*md_syscall)(struct trapframe *);
 					/* Syscall handling function */
+	volatile int md_astpending;	/* AST pending for this process */
 };
 
 /* md_flags */
@@ -66,7 +65,7 @@ struct mdproc {
 
 /* kernel stack params */
 #define	UAREA_USER_OFFSET	(USPACE - ALIGN(sizeof(struct user)))
-#define	KSTACK_LOWEST_ADDR(l)	((void *)USER_TO_UAREA((l)->l_addr))
+#define	KSTACK_LOWEST_ADDR(l)	((caddr_t)USER_TO_UAREA((l)->l_addr))
 #define	KSTACK_SIZE		UAREA_USER_OFFSET
 
 #endif /* _I386_PROC_H_ */

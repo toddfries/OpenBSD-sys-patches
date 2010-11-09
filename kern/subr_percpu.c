@@ -1,4 +1,4 @@
-/*	$NetBSD: subr_percpu.c,v 1.9 2008/12/15 11:59:22 ad Exp $	*/
+/*	$NetBSD: subr_percpu.c,v 1.4 2008/04/09 05:11:20 thorpej Exp $	*/
 
 /*-
  * Copyright (c)2007,2008 YAMAMOTO Takashi,
@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: subr_percpu.c,v 1.9 2008/12/15 11:59:22 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: subr_percpu.c,v 1.4 2008/04/09 05:11:20 thorpej Exp $");
 
 #include <sys/param.h>
 #include <sys/cpu.h>
@@ -45,23 +45,14 @@ __KERNEL_RCSID(0, "$NetBSD: subr_percpu.c,v 1.9 2008/12/15 11:59:22 ad Exp $");
 
 #include <uvm/uvm_extern.h>
 
-#define	PERCPU_QUANTUM_SIZE	(ALIGNBYTES + 1)
-#define	PERCPU_QCACHE_MAX	0
-#define	PERCPU_IMPORT_SIZE	2048
-
-#if defined(DIAGNOSTIC)
-#define	MAGIC	0x50435055	/* "PCPU" */
-#define	percpu_encrypt(pc)	((pc) ^ MAGIC)
-#define	percpu_decrypt(pc)	((pc) ^ MAGIC)
-#else /* defined(DIAGNOSTIC) */
-#define	percpu_encrypt(pc)	(pc)
-#define	percpu_decrypt(pc)	(pc)
-#endif /* defined(DIAGNOSTIC) */
-
 static krwlock_t percpu_swap_lock;
 static kmutex_t percpu_allocation_lock;
 static vmem_t *percpu_offset_arena;
-static unsigned int percpu_nextoff = PERCPU_QUANTUM_SIZE;
+static unsigned int percpu_nextoff;
+
+#define	PERCPU_QUANTUM_SIZE	(ALIGNBYTES + 1)
+#define	PERCPU_QCACHE_MAX	0
+#define	PERCPU_IMPORT_SIZE	2048
 
 static percpu_cpu_t *
 cpu_percpu(struct cpu_info *ci)
@@ -73,10 +64,8 @@ cpu_percpu(struct cpu_info *ci)
 static unsigned int
 percpu_offset(percpu_t *pc)
 {
-	const unsigned int off = percpu_decrypt((uintptr_t)pc);
 
-	KASSERT(off < percpu_nextoff);
-	return off;
+	return (uintptr_t)pc;
 }
 
 /*
@@ -259,13 +248,13 @@ percpu_alloc(size_t size)
 
 	ASSERT_SLEEPABLE();
 	offset = vmem_alloc(percpu_offset_arena, size, VM_SLEEP | VM_BESTFIT);
-	pc = (percpu_t *)percpu_encrypt((uintptr_t)offset);
+	pc = (percpu_t *)(uintptr_t)offset;
 	percpu_zero(pc, size);
 	return pc;
 }
 
 /*
- * percpu_free: free percpu storage
+ * percpu_alloc: free percpu storage
  *
  * => called in thread context.
  * => considered as an expensive and rare operation.
@@ -290,7 +279,7 @@ void *
 percpu_getref(percpu_t *pc)
 {
 
-	KPREEMPT_DISABLE(curlwp);
+	crit_enter();
 	return percpu_getptr_remote(pc, curcpu());
 }
 
@@ -305,7 +294,7 @@ void
 percpu_putref(percpu_t *pc)
 {
 
-	KPREEMPT_ENABLE(curlwp);
+	crit_exit();
 }
 
 /*

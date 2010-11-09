@@ -1,59 +1,49 @@
-/* $NetBSD: stubs.c,v 1.8 2009/01/18 16:42:09 bjh21 Exp $ */
+/* $NetBSD: stubs.c,v 1.10 2009/11/21 20:32:17 rmind Exp $ */
 /*
  * stubs.c -- functions I haven't written yet
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: stubs.c,v 1.8 2009/01/18 16:42:09 bjh21 Exp $");
+__KERNEL_RCSID(0, "$NetBSD: stubs.c,v 1.10 2009/11/21 20:32:17 rmind Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
 #include <sys/systm.h>
-#include <sys/user.h>
 
 #include <uvm/uvm_extern.h>
 
 int
-suibyte(base, c)
-	void *base;
-	int c;
+suibyte(void *base, int c)
 {
 	panic("suibyte not implemented");
 }
 
 int
-suisword(base, c)
-	void *base;
-	short c;
+suisword(void *base, short c)
 {
 	panic("suisword not implemented");
 }
 
 int
-suiword(base, c)
-	void *base;
-	long c;
+suiword(void *base, long c)
 {
 	panic("suiword not implemented");
 }
 
 int
-fuibyte(base)
-	const void *base;
+fuibyte(const void *base)
 {
 	panic("fuibyte not implemented");
 }
 
 int
-fuisword(base)
-	const void *base;
+fuisword(const void *base)
 {
 	panic("fuisword not implemented");
 }
 
 long
-fuiword(base)
-	const void *base;
+fuiword(const void *base)
 {
 	panic("fuiword not implemented");
 }

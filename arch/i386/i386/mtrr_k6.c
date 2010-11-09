@@ -1,4 +1,4 @@
-/*	$NetBSD: mtrr_k6.c,v 1.13 2008/04/04 22:07:22 cegger Exp $	*/
+/*	$NetBSD: mtrr_k6.c,v 1.10 2006/11/16 01:32:38 christos Exp $	*/
 
 /*
  * Copyright 2001 Wasabi Systems, Inc.
@@ -40,7 +40,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mtrr_k6.c,v 1.13 2008/04/04 22:07:22 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mtrr_k6.c,v 1.10 2006/11/16 01:32:38 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -105,7 +105,7 @@ k6_mtrr_reload(void)
 	uint32_t origcr0, cr0;
 	int i;
 
-	x86_disable_intr();
+	disable_intr();
 
 	origcr0 = cr0 = rcr0();
 	cr0 |= CR0_CD;
@@ -122,7 +122,7 @@ k6_mtrr_reload(void)
 
 	lcr0(origcr0);
 
-	x86_enable_intr();
+	enable_intr();
 }
 
 static void
@@ -216,7 +216,7 @@ k6_mtrr_init_cpu(struct cpu_info *ci)
 
 	k6_mtrr_reload();
 #if 0
-	mtrr_dump(device_xname(ci->ci_dev));
+	mtrr_dump(ci->ci_dev->dv_xname);
 #endif
 }
 

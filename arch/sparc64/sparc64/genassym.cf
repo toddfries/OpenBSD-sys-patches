@@ -1,4 +1,4 @@
-#	$NetBSD: genassym.cf,v 1.60 2008/09/20 18:29:05 tsutsui Exp $
+#	$NetBSD: genassym.cf,v 1.41 2006/09/13 11:35:53 mrg Exp $
 
 #
 # Copyright (c) 1997 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
 # 2. Redistributions in binary form must reproduce the above copyright
 #    notice, this list of conditions and the following disclaimer in the
 #    documentation and/or other materials provided with the distribution.
+# 3. All advertising materials mentioning features or use of this software
+#    must display the following acknowledgement:
+#        This product includes software developed by the NetBSD
+#        Foundation, Inc. and its contributors.
+# 4. Neither the name of The NetBSD Foundation nor the names of its
+#    contributors may be used to endorse or promote products derived
+#    from this software without specific prior written permission.
 #
 # THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
 # ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -48,7 +55,11 @@
 # 2. Redistributions in binary form must reproduce the above copyright
 #    notice, this list of conditions and the following disclaimer in the
 #    documentation and/or other materials provided with the distribution.
-# 3. Neither the name of the University nor the names of its contributors
+# 3. All advertising materials mentioning features or use of this software
+#    must display the following acknowledgement:
+#	This product includes software developed by the University of
+#	California, Berkeley and its contributors.
+# 4. Neither the name of the University nor the names of its contributors
 #    may be used to endorse or promote products derived from this software
 #    without specific prior written permission.
 #
@@ -66,10 +77,6 @@
 #
 #	@(#)genassym.c	8.1 (Berkeley) 6/11/93
 #
-
-if defined(_KERNEL_OPT)
-include "opt_multiprocessor.h"
-endif
 
 include <sys/param.h>
 include <sys/buf.h>
@@ -112,8 +119,14 @@ define	USRSTACK	USRSTACK
 define	PAGE_SIZE	PAGE_SIZE
 
 # Important offsets into the lwp and proc structs & associated constants
+define	L_FORW			offsetof(struct lwp, l_forw)
+define	L_BACK			offsetof(struct lwp, l_back)
 define	L_ADDR			offsetof(struct lwp, l_addr)
+define	L_STAT			offsetof(struct lwp, l_stat)
+define	L_WCHAN			offsetof(struct lwp, l_wchan)
+define	L_CPU			offsetof(struct lwp, l_cpu)
 define	L_PROC			offsetof(struct lwp, l_proc)
+define	L_PRIORITY		offsetof(struct lwp, l_priority)
 define	L_TF			offsetof(struct lwp, l_md.md_tf)
 define	L_FPSTATE		offsetof(struct lwp, l_md.md_fpstate)
 
@@ -133,7 +146,12 @@ define	USIZ		sizeof(struct user)
 # VM structure fields
 define	VM_PMAP		offsetof(struct vmspace, vm_map.pmap)
 
+# UVM structure fields
+define	UVM_PAGE_IDLE_ZERO	offsetof(struct uvm, page_idle_zero)
+
 # pmap structure fields
+define	PM_CTX		offsetof(struct pmap, pm_ctx)
+define	PM_SEGS		offsetof(struct pmap, pm_segs)
 define	PM_PHYS		offsetof(struct pmap, pm_physaddr)
 define	PM_RESIDENT	offsetof(struct pmap, pm_stats.resident_count)
 define	PM_WIRED	offsetof(struct pmap, pm_stats.wired_count)
@@ -142,6 +160,7 @@ define	PM_WIRED	offsetof(struct pmap, pm_stats.wired_count)
 define	A_TLB_TSB_LOCK	TLB_TSB_LOCK
 
 # interrupt/fault metering
+define	V_SWTCH		offsetof(struct uvmexp, swtch)
 define	V_INTR		offsetof(struct uvmexp, intrs)
 define	V_FAULTS	offsetof(struct uvmexp, faults)
 
@@ -150,28 +169,20 @@ define	CI_SELF		offsetof(struct cpu_info, ci_self)
 define	CI_CURLWP	offsetof(struct cpu_info, ci_curlwp)
 define	CI_CPCB		offsetof(struct cpu_info, ci_cpcb)
 define	CI_NEXT		offsetof(struct cpu_info, ci_next)
-define	CI_NUMBER	offsetof(struct cpu_info, ci_data.cpu_index)
 define	CI_FPLWP	offsetof(struct cpu_info, ci_fplwp)
-define	CI_UPAID	offsetof(struct cpu_info, ci_cpuid)
+define	CI_NUMBER	offsetof(struct cpu_info, ci_number)
+define	CI_UPAID	offsetof(struct cpu_info, ci_upaid)
 define	CI_SPINUP	offsetof(struct cpu_info, ci_spinup)
+define	CI_INITSTACK	offsetof(struct cpu_info, ci_initstack)
 define	CI_PADDR	offsetof(struct cpu_info, ci_paddr)
 define	CI_WANT_AST	offsetof(struct cpu_info, ci_want_ast)
 define	CI_WANT_RESCHED	offsetof(struct cpu_info, ci_want_resched)
+define	CI_IDLE_U	offsetof(struct cpu_info, ci_idle_u)
 define	CI_EINTRSTACK	offsetof(struct cpu_info, ci_eintstack)
-define	CI_IDLELWP	offsetof(struct cpu_info, ci_data.cpu_idlelwp)
-define	CI_CLOCKRATE	offsetof(struct cpu_info, ci_cpu_clockrate)
-define	CI_IDEPTH	offsetof(struct cpu_info, ci_idepth)
-define	CI_INTRPENDING	offsetof(struct cpu_info, ci_intrpending)
-define	CI_TICK_IH	offsetof(struct cpu_info, ci_tick_ih)
-define	CI_CTXBUSY	offsetof(struct cpu_info, ci_ctxbusy)
-define	CI_TSB_DMMU	offsetof(struct cpu_info, ci_tsb_dmmu)
-define	CI_TSB_IMMU	offsetof(struct cpu_info, ci_tsb_immu)
-ifdef MULTIPROCESSOR
-define	CI_IPIEVC	offsetof(struct cpu_info, ci_ipi_evcnt[0].ev_count)
-endif
 
 # CPU boot arguments structure
 define	CBA_NODE	offsetof(struct cpu_bootargs, cb_node)
+define	CBA_INITSTACK	offsetof(struct cpu_bootargs, cb_initstack)
 define	CBA_KTEXT	offsetof(struct cpu_bootargs, cb_ktext)
 define	CBA_KTEXTP	offsetof(struct cpu_bootargs, cb_ktextp)
 define	CBA_EKTEXT	offsetof(struct cpu_bootargs, cb_ektext)
@@ -211,6 +222,7 @@ define	PCB_SP		offsetof(struct pcb, pcb_sp)
 define	PCB_PC		offsetof(struct pcb, pcb_pc)
 define  PCB_LASTCALL	offsetof(struct pcb, lastcall)
 define	PCB_SIZE	sizeof(struct pcb)
+
 
 # trapframe64 fields
 define	TF_TSTATE	offsetof(struct trapframe64, tf_tstate)
@@ -286,6 +298,10 @@ define	DBR_OUT		offsetof(struct db_regs, dbr_out)
 define	DBR_LOCAL	offsetof(struct db_regs, dbr_local)
 define	DBR_IN		offsetof(struct db_regs, dbr_in)
 endif
+
+# TLB IPI handler arguments.
+define	ITA_VADDR	offsetof(struct ipi_tlb_args, ita_vaddr)
+define	ITA_CTX		offsetof(struct ipi_tlb_args, ita_ctx)
 
 # pte_t structure.
 define	TTE_VPN		offsetof(pte_t, tag)

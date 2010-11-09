@@ -1,4 +1,4 @@
-/*	$NetBSD: walnut_start.S,v 1.16 2009/02/13 22:41:01 apb Exp $	*/
+/*	$NetBSD: walnut_start.S,v 1.14 2006/10/16 18:14:35 kiyohara Exp $	*/
 /*	$OpenBSD: locore.S,v 1.4 1997/01/26 09:06:38 rahnds Exp $	*/
 
 /*
@@ -73,7 +73,6 @@
 #include "opt_ddb.h"
 #include "opt_ipkdb.h"
 #include "opt_lockdebug.h"
-#include "opt_modular.h"
 #include "opt_multiprocessor.h"
 #include "opt_ppcarch.h"
 #include "opt_ppcparam.h"
@@ -183,7 +182,7 @@ __start_cpu0:
 	cmpw	%r3,%r8
 	bne+	2b
 
-#if NKSYMS || defined(DDB) || defined(MODULAR)
+#if NKSYMS || defined(DDB) || defined(LKM)
 	/* If we had symbol table location we'd store it here and would've adjusted r8 here */
 	lis	%r7,_C_LABEL(startsym)@ha
 	addi	%r7,%r7,_C_LABEL(startsym)@l

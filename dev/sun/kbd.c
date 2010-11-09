@@ -1,4 +1,4 @@
-/*	$NetBSD: kbd.c,v 1.62 2009/01/11 23:36:39 christos Exp $	*/
+/*	$NetBSD: kbd.c,v 1.59 2007/07/09 21:01:23 ad Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -47,7 +47,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kbd.c,v 1.62 2009/01/11 23:36:39 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kbd.c,v 1.59 2007/07/09 21:01:23 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -74,8 +74,9 @@ __KERNEL_RCSID(0, "$NetBSD: kbd.c,v 1.62 2009/01/11 23:36:39 christos Exp $");
 #include <dev/sun/kbd_xlate.h>
 #include <dev/sun/kbdvar.h>
 
-#include "ioconf.h"
 #include "locators.h"
+
+extern struct cfdriver kbd_cd;
 
 dev_type_open(kbdopen);
 dev_type_close(kbdclose);
@@ -166,12 +167,15 @@ int
 kbdopen(dev_t dev, int flags, int mode, struct lwp *l)
 {
 	struct kbd_softc *k;
-	int error;
+	int error, unit;
 
 	/* locate device */
-	k = device_lookup_private(&kbd_cd, minor(dev));
+	unit = minor(dev);
+	if (unit >= kbd_cd.cd_ndevs)
+		return (ENXIO);
+	k = kbd_cd.cd_devs[unit];
 	if (k == NULL)
-		return ENXIO;
+		return (ENXIO);
 
 #if NWSKBD > 0
 	/*
@@ -186,7 +190,7 @@ kbdopen(dev_t dev, int flags, int mode, struct lwp *l)
 
 	/* exclusive open required for /dev/kbd */
 	if (k->k_events.ev_io)
-		return EBUSY;
+		return (EBUSY);
 	k->k_events.ev_io = l->l_proc;
 
 	/* stop pending autorepeat of console input */
@@ -199,13 +203,13 @@ kbdopen(dev_t dev, int flags, int mode, struct lwp *l)
 	if (k->k_ops != NULL && k->k_ops->open != NULL)
 		if ((error = (*k->k_ops->open)(k)) != 0) {
 			k->k_events.ev_io = NULL;
-			return error;
+			return (error);
 		}
 
 	ev_init(&k->k_events);
 	k->k_evmode = 0;	/* XXX: OK? */
 
-	return 0;
+	return (0);
 }
 
 
@@ -219,7 +223,7 @@ kbdclose(dev_t dev, int flags, int mode, struct lwp *l)
 {
 	struct kbd_softc *k;
 
-	k = device_lookup_private(&kbd_cd, minor(dev));
+	k = kbd_cd.cd_devs[minor(dev)];
 	k->k_evmode = 0;
 	ev_fini(&k->k_events);
 	k->k_events.ev_io = NULL;
@@ -227,9 +231,9 @@ kbdclose(dev_t dev, int flags, int mode, struct lwp *l)
 	if (k->k_ops != NULL && k->k_ops->close != NULL) {
 		int error;
 		if ((error = (*k->k_ops->close)(k)) != 0)
-			return error;
+			return (error);
 	}
-	return 0;
+	return (0);
 }
 
 
@@ -238,8 +242,8 @@ kbdread(dev_t dev, struct uio *uio, int flags)
 {
 	struct kbd_softc *k;
 
-	k = device_lookup_private(&kbd_cd, minor(dev));
-	return ev_read(&k->k_events, uio, flags);
+	k = kbd_cd.cd_devs[minor(dev)];
+	return (ev_read(&k->k_events, uio, flags));
 }
 
 
@@ -248,8 +252,8 @@ kbdpoll(dev_t dev, int events, struct lwp *l)
 {
 	struct kbd_softc *k;
 
-	k = device_lookup_private(&kbd_cd, minor(dev));
-	return ev_poll(&k->k_events, events, l);
+	k = kbd_cd.cd_devs[minor(dev)];
+	return (ev_poll(&k->k_events, events, l));
 }
 
 int
@@ -257,8 +261,8 @@ kbdkqfilter(dev_t dev, struct knote *kn)
 {
 	struct kbd_softc *k;
 
-	k = device_lookup_private(&kbd_cd, minor(dev));
-	return ev_kqfilter(&k->k_events, kn);
+	k = kbd_cd.cd_devs[minor(dev)];
+	return (ev_kqfilter(&k->k_events, kn));
 }
 
 int
@@ -268,7 +272,7 @@ kbdioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 	struct kbd_state *ks;
 	int error = 0;
 
-	k = device_lookup_private(&kbd_cd, minor(dev));
+	k = kbd_cd.cd_devs[minor(dev)];
 	ks = &k->k_state;
 
 	switch (cmd) {
@@ -347,7 +351,7 @@ kbdioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 		break;
 	}
 
-	return error;
+	return (error);
 }
 
 
@@ -379,13 +383,13 @@ kbd_iockeymap(struct kbd_state *ks, u_long cmd, struct kiockeymap *kio)
 		break;
 	default:
 		/* Silently ignore unsupported masks */
-		return 0;
+		return (0);
 	}
 
 	/* Range-check the table position. */
 	station = kio->kio_station;
 	if (station >= KEYMAP_SIZE)
-		return EINVAL;
+		return (EINVAL);
 
 	switch (cmd) {
 
@@ -398,9 +402,9 @@ kbd_iockeymap(struct kbd_state *ks, u_long cmd, struct kiockeymap *kio)
 		break;
 
 	default:
-		return ENOTTY;
+		return(ENOTTY);
 	}
-	return 0;
+	return (0);
 }
 
 
@@ -434,7 +438,7 @@ kbd_oldkeymap(struct kbd_state *ks, u_long cmd, struct okiockey *kio)
 		break;
 	}
 
-	return error;
+	return (error);
 }
 #endif /* KIOCGETKEY */
 
@@ -498,10 +502,10 @@ kbd_cc_alloc(struct kbd_softc *k)
 	struct cons_channel *cc;
 
 	if ((cc = malloc(sizeof *cc, M_DEVBUF, M_NOWAIT)) == NULL)
-		return NULL;
+		return (NULL);
 
 	/* our callbacks for the console driver */
-	cc->cc_private = k;
+	cc->cc_dev = k;
 	cc->cc_iopen = kbd_cc_open;
 	cc->cc_iclose = kbd_cc_close;
 
@@ -514,7 +518,7 @@ kbd_cc_alloc(struct kbd_softc *k)
 	 */
 
 	k->k_cc = cc;
-	return cc;
+	return (cc);
 }
 
 
@@ -525,11 +529,11 @@ kbd_cc_open(struct cons_channel *cc)
 	int ret;
 
 	if (cc == NULL)
-		return 0;
+		return (0);
 
-	k = cc->cc_private;
+	k = (struct kbd_softc *)cc->cc_dev;
 	if (k == NULL)
-		return 0;
+		return (0);
 
 	if (k->k_ops != NULL && k->k_ops->open != NULL)
 		ret = (*k->k_ops->open)(k);
@@ -541,7 +545,7 @@ kbd_cc_open(struct cons_channel *cc)
 	k->k_repeat_step = hz/20;
 	callout_init(&k->k_repeat_ch, 0);
 
-	return ret;
+	return (ret);
 }
 
 
@@ -552,11 +556,11 @@ kbd_cc_close(struct cons_channel *cc)
 	int ret;
 
 	if (cc == NULL)
-		return 0;
+		return (0);
 
-	k = cc->cc_private;
+	k = (struct kbd_softc *)cc->cc_dev;
 	if (k == NULL)
-		return 0;
+		return (0);
 
 	if (k->k_ops != NULL && k->k_ops->close != NULL)
 		ret = (*k->k_ops->close)(k);
@@ -569,7 +573,7 @@ kbd_cc_close(struct cons_channel *cc)
 		callout_stop(&k->k_repeat_ch);
 	}
 
-	return ret;
+	return (ret);
 }
 
 
@@ -596,7 +600,7 @@ kbd_input_console(struct kbd_softc *k, int code)
 	if (kbd_input_keysym(k, keysym)) {
 		log(LOG_WARNING, "%s: code=0x%x with mod=0x%x"
 		    " produced unexpected keysym 0x%x\n",
-		    device_xname(k->k_dev),
+		    k->k_dev.dv_xname,
 		    code, ks->kbd_modbits, keysym);
 		return;		/* no point in auto-repeat here */
 	}
@@ -619,7 +623,7 @@ kbd_input_console(struct kbd_softc *k, int code)
 static void
 kbd_repeat(void *arg)
 {
-	struct kbd_softc *k = arg;
+	struct kbd_softc *k = (struct kbd_softc *)arg;
 	int s;
 
 	s = spltty();
@@ -650,7 +654,7 @@ kbd_input_keysym(struct kbd_softc *k, int keysym)
 	int data;
 	/* Check if a recipient has been configured */
 	if (k->k_cc == NULL || k->k_cc->cc_upstream == NULL)
-		return 0;
+		return (0);
 
 	switch (KEYSYM_CLASS(keysym)) {
 
@@ -696,10 +700,10 @@ kbd_input_keysym(struct kbd_softc *k, int keysym)
 		/* FALLTHROUGH */
 	default:
 		/* We could not handle it. */
-		return keysym;
+		return (keysym);
 	}
 
-	return 0;
+	return (0);
 }
 
 
@@ -775,7 +779,7 @@ kbd_input_event(struct kbd_softc *k, int code)
 #ifdef DIAGNOSTIC
 	if (!k->k_evmode) {
 		printf("%s: kbd_input_event called when not in event mode\n",
-		    device_xname(k->k_dev));
+		       k->k_dev.dv_xname);
 		return;
 	}
 #endif
@@ -784,13 +788,13 @@ kbd_input_event(struct kbd_softc *k, int code)
 	put = (put + 1) % EV_QSIZE;
 	if (put == k->k_events.ev_get) {
 		log(LOG_WARNING, "%s: event queue overflow\n",
-		    device_xname(k->k_dev));
+		    k->k_dev.dv_xname);
 		return;
 	}
 
 	fe->id = KEY_CODE(code);
 	fe->value = KEY_UP(code) ? VKEY_UP : VKEY_DOWN;
-	firm_gettime(fe);
+	getmicrotime(&fe->time);
 	k->k_events.ev_put = put;
 	EV_WAKEUP(&k->k_events);
 }
@@ -849,7 +853,7 @@ kbd_code_to_keysym(struct kbd_state *ks, int c)
 		 * Do not know how to translate yet.
 		 * We will find out when a RESET comes along.
 		 */
-		return KEYSYM_NOP;
+		return (KEYSYM_NOP);
 	}
 	keysym = km[KEY_CODE(c)];
 
@@ -874,7 +878,7 @@ kbd_code_to_keysym(struct kbd_state *ks, int c)
 		keysym = kbd_numlock_map[keysym & 0x3F];
 	}
 
-	return keysym;
+	return (keysym);
 }
 
 
@@ -884,9 +888,7 @@ kbd_code_to_keysym(struct kbd_state *ks, int c)
 void
 kbd_bell(int on)
 {
-	struct kbd_softc *k;
-
-	k = device_lookup_private(&kbd_cd, 0); /* XXX: hardcoded minor */
+	struct kbd_softc *k = kbd_cd.cd_devs[0]; /* XXX: hardcoded minor */
 
 	if (k == NULL || k->k_ops == NULL || k->k_ops->docmd == NULL)
 		return;
@@ -965,17 +967,17 @@ wssunkbd_ioctl(void *v, u_long cmd, void *data, int flag, struct lwp *l)
 			/* we can't tell  4 from  5 or 6 */
 			*(int *)data = k->k_state.kbd_id < KB_SUN4 ?
 			    WSKBD_TYPE_SUN : WSKBD_TYPE_SUN5;
-			return 0;
+			return (0);
 		case WSKBDIO_SETLEDS:
 			wssunkbd_set_leds(v, *(int *)data);
-			return 0;
+			return (0);
 		case WSKBDIO_GETLEDS:
 			*(int *)data = k->k_leds;
-			return 0;
+			return (0);
 #ifdef WSDISPLAY_COMPAT_RAWKBD
 		case WSKBDIO_SETMODE:
 			k->k_wsraw = *(int *)data == WSKBD_RAW;
-			return 0;
+			return (0);
 #endif
 	}
 	return EPASSTHROUGH;
@@ -987,7 +989,6 @@ static void
 sunkbd_wskbd_cngetc(void *v, u_int *type, int *data)
 {
 	/* struct kbd_sun_softc *k = v; */
-
 	*data = prom_cngetc(0);
 	*type = WSCONS_EVENT_ASCII;
 }
@@ -1001,7 +1002,6 @@ static void
 sunkbd_bell_off(void *v)
 {
 	struct kbd_softc *k = v;
-
 	k->k_ops->docmd(k, KBD_CMD_NOBELL, 0);
 }
 
@@ -1010,14 +1010,14 @@ sunkbd_wskbd_cnbell(void *v, u_int pitch, u_int period, u_int volume)
 {
 	struct kbd_softc *k = v;
 
-	callout_reset(&k->k_wsbell, period * 1000 / hz, sunkbd_bell_off, v);
+	callout_reset(&k->k_wsbell, period*1000/hz, sunkbd_bell_off, v);
 	k->k_ops->docmd(k, KBD_CMD_BELL, 0);
 }
 
 void
 kbd_enable(struct device *dev)
 {
-	struct kbd_softc *k = device_private(dev);
+	struct kbd_softc *k = (struct kbd_softc *)(void *)dev;
 	struct wskbddev_attach_args a;
 
 	if (k->k_isconsole)
@@ -1033,7 +1033,7 @@ kbd_enable(struct device *dev)
 	k->k_wsenabled = 0;
 
 	/* Attach the wskbd */
-	k->k_wskbd = config_found(k->k_dev, &a, wskbddevprint);
+	k->k_wskbd = config_found(&k->k_dev, &a, wskbddevprint);
 
 	callout_init(&k->k_wsbell, 0);
 
@@ -1049,6 +1049,6 @@ kbd_wskbd_attach(struct kbd_softc *k, int isconsole)
 {
 	k->k_isconsole = isconsole;
 	
-	config_interrupts(k->k_dev, kbd_enable);
+	config_interrupts(&k->k_dev, kbd_enable);
 }
 #endif

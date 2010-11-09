@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Module Name: utmath - Integer math support routines
- *              $Revision: 1.4 $
+ *              xRevision: 1.20 $
  *
  ******************************************************************************/
 
@@ -9,7 +9,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2008, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2006, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -115,6 +115,9 @@
  *****************************************************************************/
 
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: utmath.c,v 1.1 2006/03/23 13:36:32 kochi Exp $");
+
 #define __UTMATH_C__
 
 #include "acpi.h"
@@ -159,7 +162,7 @@ AcpiUtShortDivide (
     UINT32                  Remainder32;
 
 
-    ACPI_FUNCTION_TRACE (UtShortDivide);
+    ACPI_FUNCTION_TRACE ("UtShortDivide");
 
 
     /* Always check for a zero divisor */
@@ -229,7 +232,7 @@ AcpiUtDivide (
     UINT64_OVERLAY          Partial3;
 
 
-    ACPI_FUNCTION_TRACE (UtDivide);
+    ACPI_FUNCTION_TRACE ("UtDivide");
 
 
     /* Always check for a zero divisor */
@@ -368,7 +371,7 @@ AcpiUtShortDivide (
     UINT32                  *OutRemainder)
 {
 
-    ACPI_FUNCTION_TRACE (UtShortDivide);
+    ACPI_FUNCTION_TRACE ("UtShortDivide");
 
 
     /* Always check for a zero divisor */
@@ -387,7 +390,7 @@ AcpiUtShortDivide (
     }
     if (OutRemainder)
     {
-        *OutRemainder = (UINT32) (InDividend % Divisor);
+        *OutRemainder = (UINT32) InDividend % Divisor;
     }
 
     return_ACPI_STATUS (AE_OK);
@@ -400,7 +403,7 @@ AcpiUtDivide (
     ACPI_INTEGER            *OutQuotient,
     ACPI_INTEGER            *OutRemainder)
 {
-    ACPI_FUNCTION_TRACE (UtDivide);
+    ACPI_FUNCTION_TRACE ("UtDivide");
 
 
     /* Always check for a zero divisor */

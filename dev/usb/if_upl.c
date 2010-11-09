@@ -1,4 +1,4 @@
-/*	$NetBSD: if_upl.c,v 1.33 2008/11/07 00:20:13 dyoung Exp $	*/
+/*	$NetBSD: if_upl.c,v 1.31 2008/04/28 20:23:59 martin Exp $	*/
 /*
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
  * All rights reserved.
@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_upl.c,v 1.33 2008/11/07 00:20:13 dyoung Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_upl.c,v 1.31 2008/04/28 20:23:59 martin Exp $");
 
 #include "opt_inet.h"
 #include "bpfilter.h"
@@ -230,16 +230,15 @@ USB_ATTACH(upl)
 
 	DPRINTFN(5,(" : upl_attach: sc=%p, dev=%p", sc, dev));
 
-	sc->sc_dev = self;
-
 	devinfop = usbd_devinfo_alloc(dev, 0);
 	USB_ATTACH_SETUP;
-	aprint_normal_dev(self, "%s\n", devinfop);
+	printf("%s: %s\n", USBDEVNAME(sc->sc_dev), devinfop);
 	usbd_devinfo_free(devinfop);
 
 	err = usbd_set_config_no(dev, UPL_CONFIG_NO, 1);
 	if (err) {
-		aprint_error_dev(self, "setting config no failed\n");
+		printf("%s: setting config no failed\n",
+		    USBDEVNAME(sc->sc_dev));
 		USB_ATTACH_ERROR_RETURN;
 	}
 
@@ -249,7 +248,8 @@ USB_ATTACH(upl)
 
 	err = usbd_device2interface_handle(dev, UPL_IFACE_IDX, &iface);
 	if (err) {
-		aprint_error_dev(self, "getting interface handle failed\n");
+		printf("%s: getting interface handle failed\n",
+		    USBDEVNAME(sc->sc_dev));
 		USB_ATTACH_ERROR_RETURN;
 	}
 
@@ -260,7 +260,8 @@ USB_ATTACH(upl)
 	for (i = 0; i < id->bNumEndpoints; i++) {
 		ed = usbd_interface2endpoint_descriptor(iface, i);
 		if (ed == NULL) {
-			aprint_error_dev(self, "couldn't get ep %d\n", i);
+			printf("%s: couldn't get ep %d\n",
+			    USBDEVNAME(sc->sc_dev), i);
 			USB_ATTACH_ERROR_RETURN;
 		}
 		if (UE_GET_DIR(ed->bEndpointAddress) == UE_DIR_IN &&
@@ -277,7 +278,7 @@ USB_ATTACH(upl)
 
 	if (sc->sc_ed[UPL_ENDPT_RX] == 0 || sc->sc_ed[UPL_ENDPT_TX] == 0 ||
 	    sc->sc_ed[UPL_ENDPT_INTR] == 0) {
-		aprint_error_dev(self, "missing endpoint\n");
+		printf("%s: missing endpoint\n", USBDEVNAME(sc->sc_dev));
 		USB_ATTACH_ERROR_RETURN;
 	}
 
@@ -355,7 +356,8 @@ USB_DETACH(upl)
 	if (sc->sc_ep[UPL_ENDPT_TX] != NULL ||
 	    sc->sc_ep[UPL_ENDPT_RX] != NULL ||
 	    sc->sc_ep[UPL_ENDPT_INTR] != NULL)
-		aprint_debug_dev(self, "detach has active endpoints\n");
+		printf("%s: detach has active endpoints\n",
+		       USBDEVNAME(sc->sc_dev));
 #endif
 
 	sc->sc_attached = 0;
@@ -370,7 +372,7 @@ USB_DETACH(upl)
 int
 upl_activate(device_ptr_t self, enum devact act)
 {
-	struct upl_softc *sc = device_private(self);
+	struct upl_softc *sc = (struct upl_softc *)self;
 
 	DPRINTFN(2,("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
 
@@ -856,7 +858,7 @@ upl_ioctl(struct ifnet *ifp, u_long command, void *data)
 	s = splnet();
 
 	switch(command) {
-	case SIOCINITIFADDR:
+	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 		upl_init(sc);
 
@@ -876,22 +878,17 @@ upl_ioctl(struct ifnet *ifp, u_long command, void *data)
 		break;
 
 	case SIOCSIFFLAGS:
-		if ((error = ifioctl_common(ifp, command, data)) != 0)
-			break;
-		/* XXX re-use ether_ioctl() */
-		switch (ifp->if_flags & (IFF_UP|IFF_RUNNING)) {
-		case IFF_UP:
-			upl_init(sc);
-			break;
-		case IFF_RUNNING:
-			upl_stop(sc);
-			break;
-		default:
-			break;
+		if (ifp->if_flags & IFF_UP) {
+			if (!(ifp->if_flags & IFF_RUNNING))
+				upl_init(sc);
+		} else {
+			if (ifp->if_flags & IFF_RUNNING)
+				upl_stop(sc);
 		}
+		error = 0;
 		break;
 	default:
-		error = ifioctl_common(ifp, command, data);
+		error = EINVAL;
 		break;
 	}
 

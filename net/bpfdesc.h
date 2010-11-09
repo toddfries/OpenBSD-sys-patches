@@ -1,4 +1,4 @@
-/*	$NetBSD: bpfdesc.h,v 1.28 2008/04/24 15:35:30 ad Exp $	*/
+/*	$NetBSD: bpfdesc.h,v 1.24 2005/12/10 23:21:38 elad Exp $	*/
 
 /*
  * Copyright (c) 1990, 1991, 1993
@@ -59,9 +59,9 @@ struct bpf_d {
 	 *   fbuf (free) - When read is done, put cluster here.
 	 * On receiving, if sbuf is full and fbuf is 0, packet is dropped.
 	 */
-	void *		bd_sbuf;	/* store slot */
-	void *		bd_hbuf;	/* hold slot */
-	void *		bd_fbuf;	/* free slot */
+	caddr_t		bd_sbuf;	/* store slot */
+	caddr_t		bd_hbuf;	/* hold slot */
+	caddr_t		bd_fbuf;	/* free slot */
 	int 		bd_slen;	/* current length of store buffer */
 	int 		bd_hlen;	/* current length of hold buffer */
 
@@ -89,10 +89,9 @@ struct bpf_d {
 	u_char		bd_pad;		/* explicit alignment */
 	struct selinfo	bd_sel;		/* bsd select info */
 #endif
-	callout_t	bd_callout;	/* for BPF timeouts with select */
+	struct callout	bd_callout;	/* for BPF timeouts with select */
 	pid_t		bd_pid;		/* corresponding PID */
 	LIST_ENTRY(bpf_d) bd_list;	/* list of all BPF's */
-	void		*bd_sih;	/* soft interrupt handle */
 };
 
 
@@ -107,15 +106,15 @@ struct bpf_d {
  */
 struct bpf_d_ext {
 	int32_t		bde_bufsize;
-	uint8_t		bde_promisc;
-	uint8_t		bde_state;
-	uint8_t		bde_immediate;
+	u_int8_t	bde_promisc;
+	u_int8_t	bde_state;
+	u_int8_t	bde_immediate;
 	int32_t		bde_hdrcmplt;
 	int32_t		bde_seesent;
 	pid_t		bde_pid;
-	uint64_t	bde_rcount;		/* number of packets received */
-	uint64_t	bde_dcount;		/* number of packets dropped */
-	uint64_t	bde_ccount;		/* number of packets captured */
+	u_int64_t	bde_rcount;		/* number of packets received */
+	u_int64_t	bde_dcount;		/* number of packets dropped */
+	u_int64_t	bde_ccount;		/* number of packets captured */
 	char		bde_ifname[IFNAMSIZ];
 };
 

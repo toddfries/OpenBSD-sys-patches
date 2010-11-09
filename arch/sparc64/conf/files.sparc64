@@ -1,4 +1,4 @@
-#	$NetBSD: files.sparc64,v 1.120 2008/12/10 05:56:22 mrg Exp $
+#	$NetBSD: files.sparc64,v 1.107 2006/11/09 15:08:04 tsutsui Exp $
 
 # @(#)files.sparc64	8.1 (Berkeley) 7/19/93
 # sparc64-specific configuration info
@@ -27,15 +27,12 @@ file	arch/sparc64/dev/sbus.c			sbus
 
 device	psycho: pcibus, sysmon_power, sysmon_taskq
 attach	psycho at mainbus
-device	schizo: pcibus, sysmon_power, sysmon_taskq
-attach	schizo at mainbus
 include "dev/pci/files.pci"
 file	arch/sparc64/dev/psycho.c		psycho
-file	arch/sparc64/dev/schizo.c		schizo
-file	arch/sparc64/dev/pci_machdep.c		psycho | schizo
+file	arch/sparc64/dev/pci_machdep.c		psycho
 
 # IOMMU is for both
-file	arch/sparc64/dev/iommu.c		sbus | psycho | schizo
+file	arch/sparc64/dev/iommu.c		sbus | psycho
 
 include "dev/ata/files.ata"
 
@@ -62,10 +59,6 @@ attach timer at mainbus, sbus
 device power
 attach power at sbus, ebus
 file	arch/sparc64/dev/power.c		power
-
-device envctrl: sysmon_envsys, pcf8584, i2cbus
-attach envctrl at ebus
-file	arch/sparc64/dev/envctrl.c	envctrl
 
 device cpu
 attach cpu at mainbus
@@ -165,8 +158,6 @@ file	dev/cons.c
 file	arch/sparc64/dev/consinit.c
 file	dev/sun/disksubr.c 
 
-file	arch/sparc64/sparc64/cpu_in_cksum.S	(inet | inet6) & cpu_in_cksum
-
 file	arch/sparc/fpu/fpu.c
 file	arch/sparc/fpu/fpu_add.c
 file	arch/sparc/fpu/fpu_compare.c
@@ -180,11 +171,11 @@ file	arch/sparc/fpu/fpu_subr.c
 file	arch/sparc/sparc/promlib.c
 file	arch/sparc64/sparc64/autoconf.c
 file	arch/sparc64/sparc64/clock.c
-file	arch/sparc64/sparc64/core_machdep.c	coredump
 file	arch/sparc64/sparc64/emul.c
+file	arch/sparc64/sparc64/in_cksum.S
+file	arch/sparc64/sparc64/in4_cksum.c	inet
 file	arch/sparc64/sparc64/intr.c
 file	arch/sparc64/sparc64/kgdb_machdep.c	kgdb
-file	arch/sparc64/sparc64/kobj_machdep.c	modular
 # sparc/sparc/locore.s is handled specially in the makefile,
 # because it must come first in the "ld" command line.
 file	arch/sparc64/sparc64/machdep.c
@@ -200,11 +191,16 @@ file	arch/sparc64/sparc64/syscall.c
 file	arch/sparc64/sparc64/trap.c
 file	arch/sparc64/sparc64/vm_machdep.c
 file	arch/sparc64/sparc64/ipifuncs.c		multiprocessor
-file	arch/sparc64/sparc64/lock_stubs.s
 
 file	arch/sparc64/sparc64/db_interface.c	ddb | kgdb
 file	arch/sparc64/sparc64/db_trace.c	ddb
 file	arch/sparc64/sparc64/db_disasm.c	ddb
+
+#
+# Raster Console support
+#
+include "dev/wscons/files.wscons"
+include "dev/wsfont/files.wsfont"
 
 # USB Support
 include "dev/usb/files.usb"
@@ -247,12 +243,11 @@ include "compat/sunos32/files.sunos32"
 file	arch/sparc64/sparc64/sunos32_machdep.c	compat_sunos & compat_netbsd32
 
 # Miscellaneous
+file	netns/ns_cksum.c		ns
+
 file	dev/md_root.c			memory_disk_hooks
 
 include "arch/sparc64/conf/majors.sparc64"
 
 # special compiler settings (no optimization if 32bit kernel)
 file	uvm/uvm_bio.c compile-with "${CC_NOOPT}"
-
-# OpenFirmware convenience stuff
-file  dev/ofw/ofw_subr.c

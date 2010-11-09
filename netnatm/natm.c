@@ -1,4 +1,4 @@
-/*	$NetBSD: natm.c,v 1.18 2008/12/17 20:51:38 cegger Exp $	*/
+/*	$NetBSD: natm.c,v 1.12 2005/12/11 12:25:16 christos Exp $	*/
 
 /*
  *
@@ -37,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: natm.c,v 1.18 2008/12/17 20:51:38 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: natm.c,v 1.12 2005/12/11 12:25:16 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -96,6 +96,9 @@ struct proc *p;
   struct atm_rawioctl ario;
   struct ifnet *ifp;
   int proto = so->so_proto->pr_protocol;
+#if defined(__NetBSD__)
+  struct proc *p = l ? l->l_proc : NULL;
+#endif
 
   s = SPLSOFTNET();
 
@@ -124,7 +127,7 @@ struct proc *p;
           break;
       }
 
-      so->so_pcb = (void *) (npcb = npcb_alloc(M_WAITOK));
+      so->so_pcb = (caddr_t) (npcb = npcb_alloc(M_WAITOK));
       npcb->npcb_socket = so;
 
       break;
@@ -137,9 +140,7 @@ struct proc *p;
 
       npcb_free(npcb, NPCB_DESTROY);	/* drain */
       so->so_pcb = NULL;
-      /* sofree drops the lock */
       sofree(so);
-      mutex_enter(softnet_lock);
 
       break;
 
@@ -200,7 +201,8 @@ struct proc *p;
       ATM_PH_SETVCI(&api.aph, npcb->npcb_vci);
       api.rxhand = npcb;
       s2 = splnet();
-      if (ifp->if_ioctl(ifp, SIOCATMENA, &api) != 0) {
+      if (ifp->if_ioctl == NULL ||
+	  ifp->if_ioctl(ifp, SIOCATMENA, (caddr_t) &api) != 0) {
 	splx(s2);
 	npcb_free(npcb, NPCB_REMOVE);
         error = EIO;
@@ -230,7 +232,8 @@ struct proc *p;
       ATM_PH_SETVCI(&api.aph, npcb->npcb_vci);
       api.rxhand = npcb;
       s2 = splnet();
-      ifp->if_ioctl(ifp, SIOCATMDIS, &api);
+      if (ifp->if_ioctl != NULL)
+	  ifp->if_ioctl(ifp, SIOCATMDIS, (caddr_t) &api);
       splx(s);
 
       npcb_free(npcb, NPCB_REMOVE);
@@ -299,7 +302,8 @@ struct proc *p;
         }
         ario.npcb = npcb;
         ario.rawvalue = *((int *)nam);
-        error = npcb->npcb_ifp->if_ioctl(npcb->npcb_ifp, SIOCXRAWATM, &ario);
+        error = npcb->npcb_ifp->if_ioctl(npcb->npcb_ifp,
+				SIOCXRAWATM, (caddr_t) &ario);
 	if (!error) {
           if (ario.rawvalue)
 	    npcb->npcb_flags |= NPCB_RAW;
@@ -358,15 +362,12 @@ natmintr()
   struct socket *so;
   struct natmpcb *npcb;
 
-  mutex_enter(softnet_lock);
 next:
   s = splnet();
   IF_DEQUEUE(&natmintrq, m);
   splx(s);
-  if (m == NULL) {
-    mutex_exit(softnet_lock);
+  if (m == NULL)
     return;
-  }
 
 #ifdef DIAGNOSTIC
   if ((m->m_flags & M_PKTHDR) == 0)
@@ -383,7 +384,7 @@ next:
   if (npcb->npcb_flags & NPCB_DRAIN) {
     m_freem(m);
     if (npcb->npcb_inq == 0)
-      free(npcb, M_PCB);			/* done! */
+      FREE(npcb, M_PCB);			/* done! */
     goto next;
   }
 
@@ -424,7 +425,6 @@ NETISR_SET(NETISR_NATM, natmintr);
 #endif
 
 
-#ifdef notyet
 /*
  * natm0_sysctl: not used, but here in case we want to add something
  * later...
@@ -466,4 +466,3 @@ size_t newlen;
     return (ENOTDIR);
   return (ENOPROTOOPT);
 }
-#endif

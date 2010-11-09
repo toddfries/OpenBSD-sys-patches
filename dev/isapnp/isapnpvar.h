@@ -1,4 +1,4 @@
-/*	$NetBSD: isapnpvar.h,v 1.27 2008/04/28 20:23:53 martin Exp $	*/
+/*	$NetBSD: isapnpvar.h,v 1.25 2006/07/16 06:01:03 rillig Exp $	*/
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -81,7 +88,7 @@ struct isapnp_softc;
 #endif
 
 struct isapnp_softc {
-	device_t		sc_dev;
+	struct device		sc_dev;
 	int			sc_read_port;
 	bus_space_tag_t		sc_iot;
 	bus_space_tag_t		sc_memt;

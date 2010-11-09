@@ -1,4 +1,4 @@
-#	$NetBSD: files.ufs,v 1.19 2009/02/22 20:28:06 ad Exp $
+#	$NetBSD: files.ufs,v 1.16 2006/11/13 16:12:54 jmmv Exp $
 
 deffs	fs_ffs.h			FFS
 deffs					EXT2FS
@@ -8,8 +8,6 @@ deffs	fs_lfs.h			LFS		# XXX
 defflag	opt_ffs.h			FFS_EI FFS_NO_SNAPSHOT APPLE_UFS
 					UFS_DIRHASH
 					UFS_EXTATTR UFS_EXTATTR_AUTOSTART
-
-defflag	opt_lfs.h			LFS_KERNEL_RFW
 
 file	ufs/ext2fs/ext2fs_alloc.c	ext2fs
 file	ufs/ext2fs/ext2fs_balloc.c	ext2fs
@@ -27,11 +25,13 @@ file	ufs/ffs/ffs_balloc.c		ffs | mfs | ext2fs
 file	ufs/ffs/ffs_bswap.c		(ffs | mfs) & ffs_ei
 file	ufs/ffs/ffs_inode.c		ffs | mfs | ext2fs
 file	ufs/ffs/ffs_snapshot.c		ffs | mfs | ext2fs
+file	ufs/ffs/ffs_softdep.c		ffs & softdep
+file	ufs/ffs/ffs_softdep.stub.c	(ffs & !softdep) |
+					    (!ffs & (lfs | mfs | ext2fs))
 file	ufs/ffs/ffs_subr.c		ffs | mfs | ext2fs
 file	ufs/ffs/ffs_tables.c		ffs | mfs | ext2fs
 file	ufs/ffs/ffs_vfsops.c		ffs | mfs | ext2fs
 file	ufs/ffs/ffs_vnops.c		ffs | mfs | ext2fs
-file	ufs/ffs/ffs_wapbl.c		ffs & wapbl
 file	ufs/ffs/ffs_appleufs.c		ffs & apple_ufs
 
 file	ufs/lfs/lfs_alloc.c		lfs
@@ -41,7 +41,7 @@ file	ufs/lfs/lfs_cksum.c		lfs
 file	ufs/lfs/lfs_debug.c		lfs
 file	ufs/lfs/lfs_inode.c		lfs
 file	ufs/lfs/lfs_itimes.c		lfs
-file	ufs/lfs/lfs_rfw.c		lfs & lfs_kernel_rfw
+file	ufs/lfs/lfs_rfw.c		lfs
 file	ufs/lfs/lfs_segment.c		lfs
 file	ufs/lfs/lfs_subr.c		lfs
 file	ufs/lfs/lfs_syscalls.c		lfs
@@ -60,4 +60,3 @@ file	ufs/ufs/ufs_lookup.c		ffs | lfs | mfs | ext2fs
 file	ufs/ufs/ufs_quota.c		quota & (ffs | lfs | mfs | ext2fs)
 file	ufs/ufs/ufs_vfsops.c		ffs | lfs | mfs | ext2fs
 file	ufs/ufs/ufs_vnops.c		ffs | lfs | mfs | ext2fs
-file	ufs/ufs/ufs_wapbl.c		ffs & wapbl

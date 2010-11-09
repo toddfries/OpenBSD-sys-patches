@@ -1,4 +1,4 @@
-/*	$NetBSD: mem.c,v 1.34 2007/03/04 07:54:07 christos Exp $ */
+/*	$NetBSD: mem.c,v 1.32 2006/10/15 20:59:53 martin Exp $ */
 
 /*
  * Copyright (c) 1982, 1986, 1990, 1993
@@ -77,7 +77,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mem.c,v 1.34 2007/03/04 07:54:07 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mem.c,v 1.32 2006/10/15 20:59:53 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/buf.h>
@@ -95,7 +95,7 @@ __KERNEL_RCSID(0, "$NetBSD: mem.c,v 1.34 2007/03/04 07:54:07 christos Exp $");
 
 vaddr_t prom_vstart = 0xf000000;
 vaddr_t prom_vend = 0xf0100000;
-void *zeropage;
+caddr_t zeropage;
 
 dev_type_read(mmrw);
 dev_type_ioctl(mmioctl);
@@ -118,14 +118,14 @@ mmrw(dev, uio, flags)
 	int error = 0;
 	static int physlock;
 	vm_prot_t prot;
-	extern void *vmmap;
+	extern caddr_t vmmap;
 	vsize_t msgbufsz;
 
 	if (minor(dev) == DEV_MEM) {
 		/* lock against other uses of shared vmmap */
 		while (physlock > 0) {
 			physlock++;
-			error = tsleep((void *)&physlock, PZERO | PCATCH,
+			error = tsleep((caddr_t)&physlock, PZERO | PCATCH,
 			    "mmrw", 0);
 			if (error)
 				return (error);
@@ -162,7 +162,7 @@ mmrw(dev, uio, flags)
 			pmap_update(pmap_kernel());
 			o = uio->uio_offset & PGOFSET;
 			c = min(uio->uio_resid, (int)(PAGE_SIZE - o));
-			error = uiomove((char *)vmmap + o, c, uio);
+			error = uiomove((caddr_t)vmmap + o, c, uio);
 			pmap_remove(pmap_kernel(), (vaddr_t)vmmap,
 			    (vaddr_t)vmmap + PAGE_SIZE);
 			pmap_update(pmap_kernel());
@@ -221,7 +221,7 @@ mmrw(dev, uio, flags)
 							stba(v++, ASI_PHYS_CACHED, lduba(d++, ASI_P));
 					break;
 				}
-				iov->iov_base =  (void *)iov->iov_base + cnt;
+				iov->iov_base =  (caddr_t)iov->iov_base + cnt;
 				iov->iov_len -= cnt;
 				uio->uio_resid -= cnt;
 				uio->uio_offset += cnt;
@@ -245,11 +245,11 @@ mmrw(dev, uio, flags)
 #endif
 			} else {
 				c = min(iov->iov_len, MAXPHYS);
-				if (!uvm_kernacc((void *)v, c,
+				if (!uvm_kernacc((caddr_t)v, c,
 				    uio->uio_rw == UIO_READ ? B_READ : B_WRITE))
 					return (EFAULT);
 			}
-			error = uiomove((void *)v, c, uio);
+			error = uiomove((caddr_t)v, c, uio);
 			break;
 
 		case DEV_NULL:
@@ -265,7 +265,7 @@ mmrw(dev, uio, flags)
 				return(0);
 			}
 			if (zeropage == NULL) {
-				zeropage = (void *)
+				zeropage = (caddr_t)
 				    malloc(PAGE_SIZE, M_TEMP, M_WAITOK);
 				memset(zeropage, 0, PAGE_SIZE);
 			}
@@ -284,7 +284,7 @@ mmrw(dev, uio, flags)
 	if (minor(dev) == 0) {
 unlock:
 		if (physlock > 1)
-			wakeup((void *)&physlock);
+			wakeup((caddr_t)&physlock);
 		physlock = 0;
 	}
 	return (error);

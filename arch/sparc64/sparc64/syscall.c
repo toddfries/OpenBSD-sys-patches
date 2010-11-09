@@ -1,4 +1,4 @@
-/*	$NetBSD: syscall.c,v 1.35 2008/10/21 12:16:59 ad Exp $ */
+/*	$NetBSD: syscall.c,v 1.18 2006/10/16 20:23:24 martin Exp $ */
 
 /*-
  * Copyright (c) 2005 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -79,20 +86,23 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: syscall.c,v 1.35 2008/10/21 12:16:59 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: syscall.c,v 1.18 2006/10/16 20:23:24 martin Exp $");
 
-#include "opt_sa.h"
+#define NEW_FPSTATE
+
+#include "opt_ktrace.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/sa.h>
 #include <sys/savar.h>
+#include <sys/user.h>
 #include <sys/signal.h>
+#ifdef KTRACE
 #include <sys/ktrace.h>
+#endif
 #include <sys/syscall.h>
-#include <sys/syscallvar.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -103,6 +113,9 @@ __KERNEL_RCSID(0, "$NetBSD: syscall.c,v 1.35 2008/10/21 12:16:59 ad Exp $");
 #include <machine/pmap.h>
 #include <machine/frame.h>
 #include <machine/userret.h>
+
+#include <sparc/fpu/fpu_extern.h>
+#include <sparc64/sparc64/cache.h>
 
 #ifndef offsetof
 #define	offsetof(s, f) ((size_t)&((s *)0)->f)
@@ -186,7 +199,7 @@ getargs(struct proc *p, struct trapframe64 *tf, register_t *code,
 		register64_t *argp;
 #ifdef DEBUG
 #ifdef __arch64__
-		if ((p->p_flag & PK_32) != 0) {
+		if ((p->p_flag & P_32) != 0) {
 			printf("syscall(): 64-bit stack but P_32 set\n");
 #ifdef DDB
 			Debugger();
@@ -203,7 +216,9 @@ getargs(struct proc *p, struct trapframe64 *tf, register_t *code,
 		if (__predict_false(i > nap)) {	/* usually false */
 			void *pos = (char *)(u_long)tf->tf_out[6] + BIAS +
 			   offsetof(struct frame64, fr_argx);
+#ifdef DIAGNOSTIC
 			KASSERT(i <= MAXARGS);
+#endif
 			/* Read the whole block in */
 			error = copyin(pos, &args->l[nap],
 			    (i - nap) * sizeof(*argp));
@@ -220,7 +235,9 @@ getargs(struct proc *p, struct trapframe64 *tf, register_t *code,
 		if (__predict_false(i > nap)) {	/* usually false */
 			void *pos = (char *)(u_long)tf->tf_out[6] +
 			    offsetof(struct frame32, fr_argx);
+#ifdef DIAGNOSTIC
 			KASSERT(i <= MAXARGS);
+#endif
 			/* Read the whole block in */
 			error = copyin(pos, &args->i[nap],
 			    (i - nap) * sizeof(*argp));
@@ -288,7 +305,7 @@ syscall_plain(struct trapframe64 *tf, register_t code, register_t pc)
 	int s64;
 
 	LWP_CACHE_CREDS(l, p);
-	curcpu()->ci_data.cpu_nsyscall++;
+	uvmexp.syscalls++;
 	sticks = p->p_sticks;
 	l->l_md.md_tf = tf;
 
@@ -306,16 +323,17 @@ syscall_plain(struct trapframe64 *tf, register_t code, register_t pc)
 	if ((error = getargs(p, tf, &code, &callp, &args, &s64)) != 0)
 		goto bad;
 
-#ifdef KERN_SA
-	if (__predict_false((l->l_savp)
-            && (l->l_savp->savp_pflags & SAVP_FLAG_DELIVERING)))
-		l->l_savp->savp_pflags &= ~SAVP_FLAG_DELIVERING;
-#endif
-
 	rval[0] = 0;
 	rval[1] = tf->tf_out[1];
 
-	error = sy_call(callp, l, &args, rval);
+        /* Lock the kernel if the syscall isn't MP-safe. */
+	if (callp->sy_flags & SYCALL_MPSAFE) {
+		error = (*callp->sy_call)(l, &args, rval);
+	} else {
+		KERNEL_PROC_LOCK(l);
+		error = (*callp->sy_call)(l, &args, rval);
+		KERNEL_PROC_UNLOCK(l);
+	}
 
 	switch (error) {
 	case 0:
@@ -371,7 +389,7 @@ syscall_fancy(struct trapframe64 *tf, register_t code, register_t pc)
 	int s64;
 
 	LWP_CACHE_CREDS(l, p);
-	curcpu()->ci_data.cpu_nsyscall++;
+	uvmexp.syscalls++;
 	sticks = p->p_sticks;
 	l->l_md.md_tf = tf;
 
@@ -400,13 +418,9 @@ syscall_fancy(struct trapframe64 *tf, register_t code, register_t pc)
 #else
 	ap = &args;
 #endif
-#ifdef KERN_SA
-	if (__predict_false((l->l_savp)
-            && (l->l_savp->savp_pflags & SAVP_FLAG_DELIVERING)))
-		l->l_savp->savp_pflags &= ~SAVP_FLAG_DELIVERING;
-#endif
-
-	if ((error = trace_enter(code, ap->r, callp->sy_narg)) != 0) {
+	KERNEL_PROC_LOCK(l);
+	if ((error = trace_enter(l, code, code, NULL, ap->r)) != 0) {
+		KERNEL_PROC_UNLOCK(l);
 		goto out;
 	}
 #ifdef __arch64__
@@ -418,7 +432,13 @@ syscall_fancy(struct trapframe64 *tf, register_t code, register_t pc)
 	rval[0] = 0;
 	rval[1] = tf->tf_out[1];
 
-	error = sy_call(callp, l, &args, rval);
+	if (callp->sy_flags & SYCALL_MPSAFE) {
+		KERNEL_PROC_UNLOCK(l);
+		error = (*callp->sy_call)(l, &args, rval);
+	} else {
+		error = (*callp->sy_call)(l, &args, rval);
+		KERNEL_PROC_UNLOCK(l);
+	}
 out:
 	switch (error) {
 	case 0:
@@ -453,7 +473,7 @@ out:
 	}
 
 	if (ap)
-		trace_exit(code, rval, error);
+		trace_exit(l, code, ap->r, rval, error);
 
 	userret(l, pc, sticks);
 	share_fpu(l, tf);
@@ -463,15 +483,24 @@ out:
  * Process the tail end of a fork() for the child.
  */
 void
-child_return(void *arg)
+child_return(arg)
+	void *arg;
 {
 	struct lwp *l = arg;
+#ifdef KTRACE
+	struct proc *p = l->l_proc;
+#endif
 
 	/*
 	 * Return values in the frame set by cpu_lwp_fork().
 	 */
+	KERNEL_PROC_UNLOCK(l);
 	userret(l, l->l_md.md_tf->tf_pc, 0);
-	ktrsysret((l->l_proc->p_lflag & PL_PPWAIT) ? SYS_vfork : SYS_fork, 0, 0);
+#ifdef KTRACE
+	if (KTRPOINT(p, KTR_SYSRET))
+		ktrsysret(l,
+			  (p->p_flag & P_PPWAIT) ? SYS_vfork : SYS_fork, 0, 0);
+#endif
 }
 
 
@@ -480,7 +509,8 @@ child_return(void *arg)
  * Start a new LWP
  */
 void
-startlwp(void *arg)
+startlwp(arg)
+	void *arg;
 {
 	int err;
 	ucontext_t *uc = arg;
@@ -494,6 +524,7 @@ startlwp(void *arg)
 #endif
 	pool_put(&lwp_uc_pool, uc);
 
+	KERNEL_PROC_UNLOCK(l);
 	userret(l, 0, 0);
 }
 
@@ -501,6 +532,6 @@ void
 upcallret(struct lwp *l)
 {
 
-	KERNEL_UNLOCK_LAST(l);
+	KERNEL_PROC_UNLOCK(l);
 	userret(l, 0, 0);
 }

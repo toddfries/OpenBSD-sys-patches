@@ -1,4 +1,4 @@
-/*	$NetBSD: cpu.c,v 1.16 2008/07/05 08:46:25 tsutsui Exp $	*/
+/*	$NetBSD: cpu.c,v 1.15 2006/04/15 08:49:47 tsutsui Exp $	*/
 /*	$OpenBSD: cpu.c,v 1.8 1997/04/19 17:19:41 pefo Exp $ */
 
 /*
@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: cpu.c,v 1.16 2008/07/05 08:46:25 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cpu.c,v 1.15 2006/04/15 08:49:47 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -50,14 +50,14 @@ __KERNEL_RCSID(0, "$NetBSD: cpu.c,v 1.16 2008/07/05 08:46:25 tsutsui Exp $");
 #include "ioconf.h"
 
 /* Definition of the driver for autoconfig. */
-static int	cpumatch(device_t, cfdata_t, void *);
-static void	cpuattach(device_t, device_t, void *);
+static int	cpumatch(struct device *, struct cfdata *, void *);
+static void	cpuattach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(cpu, 0,
+CFATTACH_DECL(cpu, sizeof(struct device),
     cpumatch, cpuattach, NULL, NULL);
 
 static int
-cpumatch(device_t parent, cfdata_t cf, void *aux)
+cpumatch(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct confargs *ca = aux;
 
@@ -69,10 +69,10 @@ cpumatch(device_t parent, cfdata_t cf, void *aux)
 }
 
 static void
-cpuattach(device_t parent, device_t self, void *aux)
+cpuattach(struct device *parent, struct device *dev, void *aux)
 {
 
-	aprint_normal(": ");
+	printf(": ");
 
 #if 1
 	cpu_identify();

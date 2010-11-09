@@ -1,4 +1,4 @@
-/*	$NetBSD: ichlpcib.c,v 1.15 2009/03/03 06:05:28 mrg Exp $	*/
+/*	$NetBSD: ichlpcib.c,v 1.10 2008/04/16 16:06:51 cegger Exp $	*/
 
 /*-
  * Copyright (c) 2004 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -39,7 +46,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ichlpcib.c,v 1.15 2009/03/03 06:05:28 mrg Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ichlpcib.c,v 1.10 2008/04/16 16:06:51 cegger Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -61,11 +68,10 @@ __KERNEL_RCSID(0, "$NetBSD: ichlpcib.c,v 1.15 2009/03/03 06:05:28 mrg Exp $");
 #include <dev/ic/hpetvar.h>
 
 #include "hpet.h"
-#include "pcibvar.h"
 
 struct lpcib_softc {
-	/* we call pcibattach() which assumes this starts like this: */
-	struct pcib_softc	sc_pcib;
+	pci_chipset_tag_t	sc_pc;
+	pcitag_t		sc_pcitag;
 
 	struct pci_attach_args	sc_pa;
 	int			sc_has_rcba;
@@ -116,6 +122,9 @@ static void lpcib_hpet_configure(device_t);
 
 struct lpcib_softc *speedstep_cookie;	/* XXX */
 
+/* Defined in arch/.../pci/pcib.c. */
+extern void pcibattach(device_t, device_t, void *);
+
 CFATTACH_DECL_NEW(ichlpcib, sizeof(struct lpcib_softc),
     lpcibmatch, lpcibattach, NULL, NULL);
 
@@ -146,8 +155,6 @@ static struct lpcib_device {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801IO_LPC, 1, 0 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801IR_LPC, 1, 0 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801IB_LPC, 1, 0 },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_63XXESB_LPC, 1, 0 }, 
-
 	{ 0, 0, 0, 0 },
 };
 
@@ -181,6 +188,8 @@ lpcibattach(device_t parent, device_t self, void *aux)
 	struct lpcib_softc *sc = device_private(self);
 	struct lpcib_device *lpcib_dev;
 
+	sc->sc_pc = pa->pa_pc;
+	sc->sc_pcitag = pa->pa_tag;
 	sc->sc_pa = *pa;
 
 	for (lpcib_dev = lpcib_devices; lpcib_dev->vendor; ++lpcib_dev) {
@@ -211,8 +220,7 @@ lpcibattach(device_t parent, device_t self, void *aux)
 
 		sc->sc_rcbat = sc->sc_pa.pa_memt;
 
-		rcba = pci_conf_read(sc->sc_pcib.sc_pc, sc->sc_pcib.sc_tag,
-		     LPCIB_RCBA);
+		rcba = pci_conf_read(sc->sc_pc, sc->sc_pcitag, LPCIB_RCBA);
 		if ((rcba & LPCIB_RCBA_EN) == 0) {
 			aprint_error_dev(self, "RCBA is not enabled");
 			return;
@@ -249,8 +257,8 @@ static bool
 lpcib_suspend(device_t dv PMF_FN_ARGS)
 {
 	struct lpcib_softc *sc = device_private(dv);
-	pci_chipset_tag_t pc = sc->sc_pcib.sc_pc;
-	pcitag_t tag = sc->sc_pcib.sc_tag;
+	pci_chipset_tag_t pc = sc->sc_pc;
+	pcitag_t tag = sc->sc_pcitag;
 
 	/* capture PIRQ routing control registers */
 	sc->sc_pirq[0] = pci_conf_read(pc, tag, LPCIB_PCI_PIRQA_ROUT);
@@ -278,8 +286,8 @@ static bool
 lpcib_resume(device_t dv PMF_FN_ARGS)
 {
 	struct lpcib_softc *sc = device_private(dv);
-	pci_chipset_tag_t pc = sc->sc_pcib.sc_pc;
-	pcitag_t tag = sc->sc_pcib.sc_tag;
+	pci_chipset_tag_t pc = sc->sc_pc;
+	pcitag_t tag = sc->sc_pcitag;
 
 	/* restore PIRQ routing control registers */
 	pci_conf_write(pc, tag, LPCIB_PCI_PIRQA_ROUT, sc->sc_pirq[0]);
@@ -316,12 +324,11 @@ pmtimer_configure(device_t self)
 	 * Check if power management I/O space is enabled and enable the ACPI_EN
 	 * bit if it's disabled.
 	 */
-	control = pci_conf_read(sc->sc_pcib.sc_pc, sc->sc_pcib.sc_tag,
-	    LPCIB_PCI_ACPI_CNTL);
+	control = pci_conf_read(sc->sc_pc, sc->sc_pcitag, LPCIB_PCI_ACPI_CNTL);
 	if ((control & LPCIB_PCI_ACPI_CNTL_EN) == 0) {
 		control |= LPCIB_PCI_ACPI_CNTL_EN;
-		pci_conf_write(sc->sc_pcib.sc_pc, sc->sc_pcib.sc_tag,
-		    LPCIB_PCI_ACPI_CNTL, control);
+		pci_conf_write(sc->sc_pc, sc->sc_pcitag, LPCIB_PCI_ACPI_CNTL,
+		    control);
 	}
 
 	/* Attach our PM timer with the generic acpipmtimer function */
@@ -339,29 +346,21 @@ tcotimer_configure(device_t self)
 	uint32_t ioreg;
 	unsigned int period;
 
-	/* Explicitly stop the TCO timer. */
-	tcotimer_stop(sc);
-
-	/*
-	 * Enable TCO timeout SMI only if the hardware reset does not
-	 * work. We don't know what the SMBIOS does.
-	 */
-	ioreg = bus_space_read_4(sc->sc_iot, sc->sc_ioh, LPCIB_SMI_EN);
-	ioreg &= ~LPCIB_SMI_EN_TCO_EN;
-
 	/* 
 	 * Clear the No Reboot (NR) bit. If this fails, enabling the TCO_EN bit
 	 * in the SMI_EN register is the last chance.
 	 */
 	if (tcotimer_disable_noreboot(self)) {
+		ioreg = bus_space_read_4(sc->sc_iot, sc->sc_ioh, LPCIB_SMI_EN);
 		ioreg |= LPCIB_SMI_EN_TCO_EN;
-	}
-	if ((ioreg & LPCIB_SMI_EN_GBL_SMI_EN) != 0) {
 		bus_space_write_4(sc->sc_iot, sc->sc_ioh, LPCIB_SMI_EN, ioreg);
 	}
 
 	/* Reset the watchdog status registers. */
 	tcotimer_status_reset(sc);
+
+	/* Explicitly stop the TCO timer. */
+	tcotimer_stop(sc);
 
 	/* 
 	 * Register the driver with the sysmon watchdog framework.
@@ -511,12 +510,12 @@ tcotimer_disable_noreboot(device_t self)
 	} else {
 		pcireg_t pcireg;
 
-		pcireg = pci_conf_read(sc->sc_pcib.sc_pc, sc->sc_pcib.sc_tag, 
+		pcireg = pci_conf_read(sc->sc_pc, sc->sc_pcitag, 
 				       LPCIB_PCI_GEN_STA);
 		if (pcireg & LPCIB_PCI_GEN_STA_NO_REBOOT) {
 			/* TCO timeout reset is disabled; try to enable it */
 			pcireg &= ~LPCIB_PCI_GEN_STA_NO_REBOOT;
-			pci_conf_write(sc->sc_pcib.sc_pc, sc->sc_pcib.sc_tag,
+			pci_conf_write(sc->sc_pc, sc->sc_pcitag,
 				       LPCIB_PCI_GEN_STA, pcireg);
 			if (pcireg & LPCIB_PCI_GEN_STA_NO_REBOOT)
 				goto error;
@@ -542,8 +541,6 @@ error:
 /*
  * Linux driver says that SpeedStep on older chipsets cause
  * lockups on Dell Inspiron 8000 and 8100.
- * It should also not be enabled on systems with the 82855GM
- * Hub, which typically have an EST-enabled CPU.
  */
 static int
 speedstep_bad_hb_check(struct pci_attach_args *pa)
@@ -551,9 +548,6 @@ speedstep_bad_hb_check(struct pci_attach_args *pa)
 
 	if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_INTEL_82815_FULL_HUB &&
 	    PCI_REVISION(pa->pa_class) < 5)
-		return 1;
-
-	if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_INTEL_82855GM_MCH)
 		return 1;
 
 	return 0;
@@ -574,10 +568,10 @@ speedstep_configure(device_t self)
 		uint8_t pmcon;
 
 		/* Enable SpeedStep if it isn't already enabled. */
-		pmcon = pci_conf_read(sc->sc_pcib.sc_pc, sc->sc_pcib.sc_tag,
+		pmcon = pci_conf_read(sc->sc_pc, sc->sc_pcitag,
 				      LPCIB_PCI_GEN_PMCON_1);
 		if ((pmcon & LPCIB_PCI_GEN_PMCON_1_SS_EN) == 0)
-			pci_conf_write(sc->sc_pcib.sc_pc, sc->sc_pcib.sc_tag,
+			pci_conf_write(sc->sc_pc, sc->sc_pcitag,
 				       LPCIB_PCI_GEN_PMCON_1,
 				       pmcon | LPCIB_PCI_GEN_PMCON_1_SS_EN);
 
@@ -726,7 +720,7 @@ lpcib_hpet_configure(device_t self)
 	uint32_t hpet_reg, val;
 
 	if (sc->sc_has_ich5_hpet) {
-		val = pci_conf_read(sc->sc_pcib.sc_pc, sc->sc_pcib.sc_tag,
+		val = pci_conf_read(sc->sc_pc, sc->sc_pcitag,
 		    LPCIB_PCI_GEN_CNTL);
 		switch (val & LPCIB_ICH5_HPTC_WIN_MASK) {
 		case LPCIB_ICH5_HPTC_0000:
@@ -745,7 +739,7 @@ lpcib_hpet_configure(device_t self)
 			return;
 		}
 		val |= sc->sc_hpet_reg | LPCIB_ICH5_HPTC_EN;
-		pci_conf_write(sc->sc_pcib.sc_pc, sc->sc_pcib.sc_tag,
+		pci_conf_write(sc->sc_pc, sc->sc_pcitag,
 		    LPCIB_PCI_GEN_CNTL, val);
 	} else if (sc->sc_has_rcba) {
 		val = bus_space_read_4(sc->sc_rcbat, sc->sc_rcbah,

@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile,v 1.16 2009/02/14 13:52:51 abs Exp $
+#	$NetBSD: Makefile,v 1.13 2006/10/04 22:27:21 salo Exp $
 
 S=	${.CURDIR}/../../../../
 
@@ -19,13 +19,9 @@ SRCS= main.c dev_net.c devopen.c conf.c exec.c pxe.c pxe_call.S
 .PATH: ${.CURDIR}/../libsa
 SRCS+= nfs.c
 
-PIE_CFLAGS=
-PIE_AFLAGS=
-PIE_LDFLAGS=
-
 .include <bsd.own.mk>
 
-.if ${MACHINE_ARCH} == "x86_64"
+.if ${MACHINE} == "amd64"
 LDFLAGS+=	-Wl,-m,elf_i386
 AFLAGS+=	-m32
 LIBKERN_ARCH=	i386
@@ -80,7 +76,3 @@ VERSIONFILE= ${.CURDIR}/../pxeboot/version
 .endif
 
 .include "../Makefile.booters"
-
-release: check_RELEASEDIR
-	${HOST_INSTALL_FILE} -m ${BINMODE} ${PROG} \
-		${RELEASEDIR}/${MACHINE}/installation/misc

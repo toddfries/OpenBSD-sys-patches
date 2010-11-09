@@ -1,4 +1,4 @@
-/* $NetBSD: z8530var.h,v 1.9 2008/03/29 19:15:34 tsutsui Exp $ */
+/* $NetBSD: z8530var.h,v 1.7 2005/12/11 12:16:16 christos Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -90,7 +90,7 @@
 #include <dev/ic/z8530sc.h>
 
 struct zsc_softc {
-	device_t zsc_dev;		/* required first: base device */
+	struct	device zsc_dev;		/* required first: base device */
 	struct	zs_chanstate *zsc_cs[2];	/* channel A and B soft state */
 	/* Machine-dependent part follows... */
 	int zsc_addroffset;	/* used as "cookie" to identify scc */
@@ -115,4 +115,3 @@ void  zs_write_data(struct zs_chanstate *cs, u_int val);
 
 /* Interrupt priority for the SCC chip; needs to match ZSHARD_PRI. */
 #define splzs()		spltty()
-#define	IPL_ZS		IPL_TTY

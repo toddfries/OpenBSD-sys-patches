@@ -1,4 +1,4 @@
-/* $NetBSD: drvctlio.h,v 1.7 2008/05/31 13:24:57 freza Exp $ */
+/* $NetBSD: drvctlio.h,v 1.3 2006/09/22 04:37:37 thorpej Exp $ */
 
 /*-
  * Copyright (c) 2006 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -43,21 +50,6 @@ struct devdetachargs {
 	char devname[16];
 };
 
-struct devlistargs {
-	char l_devname[16];
-	char (*l_childname)[16];
-	size_t l_children;
-};
-
-enum devpmflags {
-	DEVPM_F_SUBTREE = 0x1
-};
-
-struct devpmargs {
-	char devname[16];
-	uint32_t flags;
-};
-
 struct devrescanargs {
 	char busname[16];
 	char ifattr[16];
@@ -67,16 +59,8 @@ struct devrescanargs {
 
 #define DRVDETACHDEV _IOW('D', 123, struct devdetachargs)
 #define DRVRESCANBUS _IOW('D', 124, struct devrescanargs)
-#define	DRVCTLCOMMAND _IOWR('D', 125, struct plistref)
-#define DRVRESUMEDEV _IOW('D', 126, struct devpmargs)
-#define DRVLISTDEV _IOWR('D', 127, struct devlistargs)
-#define DRVGETEVENT _IOR('D', 128, struct plistref)
-#define DRVSUSPENDDEV _IOW('D', 129, struct devpmargs)
 
 /*
- * DRVCTLCOMMAND documentation
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *
  * Generic ioctl that takes a dictionary as an argument (specifies the
  * command and arguments) and returns a dictionary with the results.
  *
@@ -107,11 +91,14 @@ struct devrescanargs {
  *		<!-- results vary with command -->
  *	</dict>
  * </dict>
- *
- *
+ */
+#define	DRVCTLCOMMAND _IOWR('D', 125, struct plistref)
+
+/*****************************************************************************
  * Commands recognized by DRVCTLCOMMAND
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *
+ *****************************************************************************/
+
+/*
  * get-properties
  *
  * Arguments:

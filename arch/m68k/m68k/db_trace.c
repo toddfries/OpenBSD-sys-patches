@@ -1,4 +1,4 @@
-/*	$NetBSD: db_trace.c,v 1.53 2008/07/02 19:49:58 rmind Exp $	*/
+/*	$NetBSD: db_trace.c,v 1.45 2006/09/06 23:58:20 ad Exp $	*/
 
 /* 
  * Mach Operating System
@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: db_trace.c,v 1.53 2008/07/02 19:49:58 rmind Exp $");
+__KERNEL_RCSID(0, "$NetBSD: db_trace.c,v 1.45 2006/09/06 23:58:20 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/proc.h>
@@ -92,9 +92,9 @@ extern struct pcb *curpcb;
 				 ((u_int)(va) < ((u_int)(pcb) + USPACE)))
 
 #define	get(addr, space) \
-		(db_get_value((db_addr_t)(addr), sizeof(int), false))
+		(db_get_value((db_addr_t)(addr), sizeof(int), FALSE))
 #define	get16(addr, space) \
-		(db_get_value((db_addr_t)(addr), sizeof(u_short), false))
+		(db_get_value((db_addr_t)(addr), sizeof(u_short), FALSE))
 
 #define	NREGISTERS	16
 
@@ -397,7 +397,7 @@ findregs(struct stackpos *sp, db_addr_t addr)
  *	Frame tracing.
  */
 void
-db_stack_trace_print(db_expr_t addr, bool have_addr, db_expr_t count,
+db_stack_trace_print(db_expr_t addr, int have_addr, db_expr_t count,
     const char *modif, void (*pr)(const char *, ...))
 {
 	int i, nargs;
@@ -406,9 +406,8 @@ db_stack_trace_print(db_expr_t addr, bool have_addr, db_expr_t count,
 	const char *	name;
 	struct stackpos pos;
 	struct pcb	*pcb = curpcb;
-	bool		kernel_only = true;
-	bool		trace_thread = false;
-	bool		lwpaddr = false;
+	boolean_t	kernel_only = TRUE;
+	boolean_t	trace_thread = FALSE;
 	int		fault_pc = 0;
 
 	{
@@ -416,13 +415,11 @@ db_stack_trace_print(db_expr_t addr, bool have_addr, db_expr_t count,
 		char c;
 
 		while ((c = *cp++) != 0)
-			if (c == 'a') {
-				lwpaddr = true;
-				trace_thread = true;
-			} else if (c == 't')
-				trace_thread = true;
-			else if (c == 'u')
-				kernel_only = false;
+			if (c == 't')
+				trace_thread = TRUE;
+			else
+			if (c == 'u')
+				kernel_only = FALSE;
 	}
 
 	if (!have_addr)
@@ -432,22 +429,15 @@ db_stack_trace_print(db_expr_t addr, bool have_addr, db_expr_t count,
 			struct proc *p;
 			struct user *u;
 			struct lwp *l;
-			if (lwpaddr) {
-				l = (struct lwp *)addr;
-				p = l->l_proc;
-				(*pr)("trace: pid %d ", p->p_pid);
-			} else {
-				(*pr)("trace: pid %d ", (int)addr);
-				p = p_find(addr, PFIND_LOCKED);
-				if (p == NULL) {
-					(*pr)("not found\n");
-					return;
-				}
-				l = LIST_FIRST(&p->p_lwps);
-				KASSERT(l != NULL);
+			(*pr)("trace: pid %d ", (int)addr);
+			p = p_find(addr, PFIND_LOCKED);
+			if (p == NULL) {
+				(*pr)("not found\n");
+				return;
 			}
-			(*pr)("lid %d ", l->l_lid);
-			if (!(l->l_flag & LW_INMEM)) {
+			/* XXX: Have to pick on some thread... */
+			l = LIST_FIRST(&p->p_lwps);
+			if (!(l->l_flag & L_INMEM)) {
 				(*pr)("swapped out\n");
 				return;
 			}
@@ -495,9 +485,9 @@ db_stack_trace_print(db_expr_t addr, bool have_addr, db_expr_t count,
 		/*
 		 * Since faultstkadj doesn't set up a valid stack frame,
 		 * we would assume it was the source of the fault. To
-		 * get around this we peek just past the fourth argument of
+		 * get around this we peek at the fourth argument of
 		 * "trap()" (the stack frame at the time of the fault)
-		 * to determine the _real_ value of PC when things went
+		 * to determine the _real_ value of PC when things wen
 		 * wrong.
 		 *
 		 * NOTE: If the argument list for 'trap()' ever changes,
@@ -506,8 +496,8 @@ db_stack_trace_print(db_expr_t addr, bool have_addr, db_expr_t count,
 		if (strcmp(___STRING(_C_LABEL(trap)), name) == 0) {
 			int tfp;
 
-			/* Point to frame structure just past 'trap()'s 4th argument */
-			tfp = pos.k_fp + FR_SAVFP + 4 + (5 * 4);
+			/* Point to 'trap()'s 4th argument (frame structure) */
+			tfp = pos.k_fp + FR_SAVFP + 4 + (4 * 4);
 
 			/* Determine if fault was from kernel or user mode */
 			regp = tfp + offsetof(struct frame, f_sr);

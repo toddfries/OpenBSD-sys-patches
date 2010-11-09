@@ -1,4 +1,4 @@
-/*	$NetBSD: cpc700.c,v 1.14 2008/04/28 20:23:49 martin Exp $	*/
+/*	$NetBSD: cpc700.c,v 1.12 2007/10/19 11:59:50 ad Exp $	*/
 
 /*
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -50,7 +57,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: cpc700.c,v 1.14 2008/04/28 20:23:49 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cpc700.c,v 1.12 2007/10/19 11:59:50 ad Exp $");
 
 #include "pci.h"
 #include "opt_pci.h"
@@ -154,7 +161,7 @@ cpc_attach(struct device *self, pci_chipset_tag_t pc, bus_space_tag_t mem,
 	the_cpc_tag = mem;
 	if (bus_space_map(mem, CPC_UIC_BASE, CPC_UIC_SIZE, 0,
 			  &the_cpc_handle)) {
-		aprint_error_dev(self, "can't map i/o space\n");
+		printf("%s: can't map i/o space\n", self->dv_xname);
 		return;
 	}
 

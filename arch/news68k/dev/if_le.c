@@ -1,4 +1,4 @@
-/*	$NetBSD: if_le.c,v 1.17 2008/04/28 20:23:30 martin Exp $	*/
+/*	$NetBSD: if_le.c,v 1.15 2005/12/24 20:07:20 perry Exp $	*/
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -34,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_le.c,v 1.17 2008/04/28 20:23:30 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_le.c,v 1.15 2005/12/24 20:07:20 perry Exp $");
 
 #include "opt_inet.h"
 #include "bpfilter.h"
@@ -84,10 +91,10 @@ struct	le_softc {
 	struct	lereg1 *sc_r1;		/* LANCE registers */
 };
 
-static int  le_match(device_t, cfdata_t, void *);
-static void le_attach(device_t, device_t, void *);
+static int  le_match(struct device *, struct cfdata *, void *);
+static void le_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(le, sizeof(struct le_softc),
+CFATTACH_DECL(le, sizeof(struct le_softc),
     le_match, le_attach, NULL, NULL);
 
 extern const uint8_t *idrom_addr;
@@ -130,7 +137,7 @@ lerdcsr(struct lance_softc *sc, uint16_t port)
 }
 
 int
-le_match(device_t parent, cfdata_t cf, void *aux)
+le_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct hb_attach_args *ha = aux;
 	int addr;
@@ -147,14 +154,13 @@ le_match(device_t parent, cfdata_t cf, void *aux)
 }
 
 void
-le_attach(device_t parent, device_t self, void *aux)
+le_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct le_softc *lesc = device_private(self);
+	struct le_softc *lesc = (struct le_softc *)self;
 	struct lance_softc *sc = &lesc->sc_am7990.lsc;
 	struct hb_attach_args *ha = aux;
 	const uint8_t *p;
 
-	sc->sc_dev = self;
 	lesc->sc_r1 = (void *)IIOV(ha->ha_address);
 
 	if (ISIIOPA(ha->ha_address)) {
@@ -200,9 +206,9 @@ leintr(int unit)
 {
 	struct am7990_softc *sc;
 
-	if (unit >= le_cd.cd_ndevs)	/* XXX */
+	if (unit >= le_cd.cd_ndevs)
 		return 0;
 
-	sc = device_lookup_private(&le_cd, unit);
+	sc = le_cd.cd_devs[unit];
 	return am7990_intr(sc);
 }

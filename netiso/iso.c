@@ -1,30 +1,4 @@
-/*	$NetBSD: iso.c,v 1.52 2008/12/17 20:51:38 cegger Exp $	*/
-
-/*-
- * Copyright (c) 2001 The NetBSD Foundation, Inc.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
- * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
- * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
- * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
- */
+/*	$NetBSD: iso.c,v 1.39 2006/10/25 23:40:57 elad Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993
@@ -88,7 +62,7 @@ SOFTWARE.
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: iso.c,v 1.52 2008/12/17 20:51:38 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: iso.c,v 1.39 2006/10/25 23:40:57 elad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -256,9 +230,8 @@ iso_netmatch(const struct sockaddr_iso *sisoa,
  *			quantities.
  */
 u_long
-iso_hashchar(void *bufv, int len)
+iso_hashchar(caddr_t buf, int len)
 {
-	char *buf = bufv;
 	u_long h = 0;
 	int    i;
 
@@ -319,7 +292,7 @@ iso_hash(
 	bzero(buf, sizeof(buf));
 
 	bufsize = iso_netof(&siso->siso_addr, buf);
-	hp->afh_nethash = iso_hashchar((void *) buf, bufsize);
+	hp->afh_nethash = iso_hashchar((caddr_t) buf, bufsize);
 
 #ifdef ARGO_DEBUG
 	if (argo_debug[D_ROUTE]) {
@@ -327,7 +300,7 @@ iso_hash(
 	}
 #endif
 
-	hp->afh_hosthash = iso_hashchar((void *) & siso->siso_addr,
+	hp->afh_hosthash = iso_hashchar((caddr_t) & siso->siso_addr,
 					siso->siso_addr.isoa_len);
 
 #ifdef ARGO_DEBUG
@@ -361,7 +334,7 @@ iso_hash(
 u_int
 iso_netof(
 	struct iso_addr *isoa,	/* address */
-	void *        buf)	/* RESULT: network portion of address here */
+	caddr_t         buf)	/* RESULT: network portion of address here */
 {
 	u_int           len = 1;/* length of afi */
 
@@ -450,7 +423,7 @@ iso_netof(
 		len = 0;
 	}
 
-	bcopy((void *) isoa, buf, len);
+	bcopy((caddr_t) isoa, buf, len);
 #ifdef ARGO_DEBUG
 	if (argo_debug[D_ROUTE]) {
 		printf("iso_netof: isoa ");
@@ -468,7 +441,7 @@ iso_netof(
  */
 /* ARGSUSED */
 int
-iso_control(struct socket *so, u_long cmd, void *data, struct ifnet *ifp,
+iso_control(struct socket *so, u_long cmd, caddr_t data, struct ifnet *ifp,
 	struct lwp *l)
 {
 	struct iso_ifreq *ifr = (struct iso_ifreq *) data;
@@ -480,7 +453,7 @@ iso_control(struct socket *so, u_long cmd, void *data, struct ifnet *ifp,
 	 * Find address for this interface, if it exists.
 	 */
 	if (ifp)
-		TAILQ_FOREACH(ia, &iso_ifaddr, ia_list)
+		for (ia = iso_ifaddr.tqh_first; ia != 0; ia = ia->ia_list.tqe_next)
 			if (ia->ia_ifp == ifp)
 				break;
 
@@ -511,13 +484,15 @@ iso_control(struct socket *so, u_long cmd, void *data, struct ifnet *ifp,
 		if (ifp == 0)
 			panic("iso_control");
 		if (ia == 0) {
-			ia = malloc(sizeof(*ia),
+			MALLOC(ia, struct iso_ifaddr *, sizeof(*ia),
 			       M_IFADDR, M_WAITOK|M_ZERO);
 			if (ia == 0)
 				return (ENOBUFS);
 			TAILQ_INSERT_TAIL(&iso_ifaddr, ia, ia_list);
-			IFAREF(&ia->ia_ifa);
-			ifa_insert(ifp, &ia->ia_ifa);
+			IFAREF((struct ifaddr *)ia);
+			TAILQ_INSERT_TAIL(&ifp->if_addrlist, (struct ifaddr *)ia,
+			    ifa_list);
+			IFAREF((struct ifaddr *)ia);
 			ia->ia_ifa.ifa_addr = sisotosa(&ia->ia_addr);
 			ia->ia_ifa.ifa_dstaddr = sisotosa(&ia->ia_dstaddr);
 			ia->ia_ifa.ifa_netmask = sisotosa(&ia->ia_sockmask);
@@ -580,34 +555,43 @@ iso_control(struct socket *so, u_long cmd, void *data, struct ifnet *ifp,
 		return (error);
 
 	case SIOCDIFADDR_ISO:
-		iso_purgeaddr(&ia->ia_ifa);
+		iso_purgeaddr(&ia->ia_ifa, ifp);
 		break;
 
 #define cmdbyte(x)	(((x) >> 8) & 0xff)
 	default:
 		if (cmdbyte(cmd) == 'a')
 			return (snpac_ioctl(so, cmd, data, l));
-		return ENOTTY;
+		if (ifp == 0 || ifp->if_ioctl == 0)
+			return (EOPNOTSUPP);
+		return ((*ifp->if_ioctl)(ifp, cmd, data));
 	}
 	return (0);
 }
 
 void
-iso_purgeaddr(struct ifaddr *ifa)
+iso_purgeaddr(struct ifaddr *ifa, struct ifnet *ifp)
 {
-	struct ifnet *ifp = ifa->ifa_ifp;
 	struct iso_ifaddr *ia = (void *) ifa;
 
 	iso_ifscrub(ifp, ia);
-	ifa_remove(ifp, &ia->ia_ifa);
-	TAILQ_REMOVE(&iso_ifaddr, ia, ia_list);
+	TAILQ_REMOVE(&ifp->if_addrlist, (struct ifaddr *)ia, ifa_list);
 	IFAFREE(&ia->ia_ifa);
+	TAILQ_REMOVE(&iso_ifaddr, ia, ia_list);
+	IFAFREE((&ia->ia_ifa));
 }
 
 void
 iso_purgeif(struct ifnet *ifp)
 {
-	if_purgeaddrs(ifp, AF_ISO, iso_purgeaddr);
+	struct ifaddr *ifa, *nifa;
+
+	for (ifa = TAILQ_FIRST(&ifp->if_addrlist); ifa != NULL; ifa = nifa) {
+		nifa = TAILQ_NEXT(ifa, ifa_list);
+		if (ifa->ifa_addr->sa_family != AF_ISO)
+			continue;
+		iso_purgeaddr(ifa, ifp);
+	}
 }
 
 /*
@@ -649,7 +633,8 @@ iso_ifinit(struct ifnet *ifp, struct iso_ifaddr *ia, struct sockaddr_iso *siso,
 	 * if this is its first address,
 	 * and to validate the address if necessary.
 	 */
-	if ((error = (*ifp->if_ioctl)(ifp, SIOCINITIFADDR, ia)) != 0) {
+	if (ifp->if_ioctl &&
+	    (error = (*ifp->if_ioctl) (ifp, SIOCSIFADDR, (caddr_t) ia))) {
 		splx(s);
 		ia->ia_addr = oldaddr;
 		return (error);
@@ -662,10 +647,6 @@ iso_ifinit(struct ifnet *ifp, struct iso_ifaddr *ia, struct sockaddr_iso *siso,
 	/*
 	 * XXX -- The following is here temporarily out of laziness in not
 	 * changing every ethernet driver's if_ioctl routine
-	 *
-	 * XXX extract llc_ifinit() and call from ether_ioctl(),
-	 * XXX fddi_ioctl().  --dyoung
-	 *
 	 */
 	if (ifp->if_type == IFT_ETHER || ifp->if_type == IFT_FDDI) {
 		ia->ia_ifa.ifa_rtrequest = llc_rtrequest;
@@ -712,13 +693,14 @@ iso_ifwithidi(struct sockaddr *addr)
 		printf("\n");
 	}
 #endif
-	TAILQ_FOREACH(ifp, &ifnet, if_list) {
+	for (ifp = ifnet.tqh_first; ifp != 0; ifp = ifp->if_list.tqe_next) {
 #ifdef ARGO_DEBUG
 		if (argo_debug[D_ROUTE]) {
 			printf("iso_ifwithidi ifnet %s\n", ifp->if_name);
 		}
 #endif
-		IFADDR_FOREACH(ifa, ifp) {
+		for (ifa = ifp->if_addrlist.tqh_first; ifa != 0;
+		     ifa = ifa->ifa_list.tqe_next) {
 #ifdef ARGO_DEBUG
 			if (argo_debug[D_ROUTE]) {
 				printf("iso_ifwithidi address ");
@@ -820,17 +802,17 @@ iso_eqtype(
  * NOTES:
  */
 struct iso_ifaddr *
-iso_localifa(const struct sockaddr_iso *siso)
+iso_localifa(struct sockaddr_iso *siso)
 {
 	struct iso_ifaddr *ia;
-	const char *cp1, *cp2, *cp3;
+	char  *cp1, *cp2, *cp3;
 	struct ifnet *ifp;
 	struct iso_ifaddr *ia_maybe = 0;
 	/*
 	 * We make one pass looking for both net matches and an exact
 	 * dst addr.
 	 */
-	TAILQ_FOREACH(ia, &iso_ifaddr, ia_list) {
+	for (ia = iso_ifaddr.tqh_first; ia != 0; ia = ia->ia_list.tqe_next) {
 		if ((ifp = ia->ia_ifp) == 0 || ((ifp->if_flags & IFF_UP) == 0))
 			continue;
 		if (ifp->if_flags & IFF_POINTOPOINT) {
@@ -859,6 +841,9 @@ next:		;
 	return ia_maybe;
 }
 
+#ifdef	TPCONS
+#include <netiso/cons.h>
+#endif	/* TPCONS */
 /*
  * FUNCTION:		iso_nlctloutput
  *
@@ -875,11 +860,14 @@ int
 iso_nlctloutput(
 	int             cmd,		/* command:set or get */
 	int             optname,	/* option of interest */
-	void *        pcb,		/* nl pcb */
+	caddr_t         pcb,		/* nl pcb */
 	struct mbuf    *m)		/* data for set, buffer for get */
 {
+#ifdef TPCONS
+	struct isopcb  *isop = (struct isopcb *) pcb;
+#endif
 	int             error = 0;	/* return value */
-	void *        data;	/* data for option */
+	caddr_t         data;	/* data for option */
 	int             data_len;	/* data's length */
 
 #ifdef ARGO_DEBUG
@@ -892,7 +880,7 @@ iso_nlctloutput(
 	if ((cmd != PRCO_GETOPT) && (cmd != PRCO_SETOPT))
 		return (EOPNOTSUPP);
 
-	data = mtod(m, void *);
+	data = mtod(m, caddr_t);
 	data_len = (m)->m_len;
 
 #ifdef ARGO_DEBUG
@@ -903,6 +891,28 @@ iso_nlctloutput(
 #endif
 
 	switch (optname) {
+
+#ifdef	TPCONS
+	case CONSOPT_X25CRUD:
+		if (cmd == PRCO_GETOPT) {
+			error = EOPNOTSUPP;
+			break;
+		}
+		if (data_len > MAXX25CRUDLEN) {
+			error = EINVAL;
+			break;
+		}
+#ifdef ARGO_DEBUG
+		if (argo_debug[D_ISO]) {
+			printf("iso_nlctloutput: setting x25 crud\n");
+		}
+#endif
+
+		bcopy(data, (caddr_t) isop->isop_x25crud, (unsigned) data_len);
+		isop->isop_x25crud_len = data_len;
+		break;
+#endif				/* TPCONS */
+
 	default:
 		error = EOPNOTSUPP;
 	}
@@ -923,14 +933,14 @@ iso_nlctloutput(
  *
  */
 void
-dump_isoaddr(const struct sockaddr_iso *s)
+dump_isoaddr(struct sockaddr_iso *s)
 {
 	if (s->siso_family == AF_ISO) {
 		printf("ISO address: suffixlen %d, %s\n",
 		       s->siso_tlen, clnp_saddr_isop(s));
 	} else if (s->siso_family == AF_INET) {
 		/* hack */
-		const struct sockaddr_in *sin = satocsin(s);
+		struct sockaddr_in *sin = satosin(s);
 
 		printf("%d.%d.%d.%d: %d",
 		       (sin->sin_addr.s_addr >> 24) & 0xff,
@@ -942,47 +952,3 @@ dump_isoaddr(const struct sockaddr_iso *s)
 }
 
 #endif /* ARGO_DEBUG */
-
-struct queue {
-	struct queue *q_next, *q_prev;
-};
-
-/*
- * FUNCTION:		iso_insque
- *
- * PURPOSE:		insert an element into a queue
- *
- * RETURNS:
- */
-void
-iso_insque(void *v1, void *v2)
-{
-	struct queue *elem = v1, *head = v2;
-	struct queue *next;
-
-	next = head->q_next;
-	elem->q_next = next;
-	head->q_next = elem;
-	elem->q_prev = head;
-	next->q_prev = elem;
-}
-
-/*
- * FUNCTION:		iso_remque
- *
- * PURPOSE:		remove an element from a queue
- *
- * RETURNS:
- */
-void
-iso_remque(void *v)
-{
-	struct queue *elem = v;
-	struct queue *next, *prev;
-
-	next = elem->q_next;
-	prev = elem->q_prev;
-	next->q_prev = prev;
-	prev->q_next = next;
-	elem->q_prev = NULL;
-}

@@ -1,4 +1,4 @@
-/*	$NetBSD: iwm_fdvar.h,v 1.14 2008/05/26 17:58:37 hauke Exp $	*/
+/*	$NetBSD: iwm_fdvar.h,v 1.11 2005/12/11 12:18:03 christos Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998 Hauke Fath.  All rights reserved.
@@ -11,6 +11,8 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -160,7 +162,7 @@ struct fd_softc {
 	daddr_t	startBlk;		/* Starting block # */
 	int	bytesLeft;		/* Bytes left to transfer */
 	int	bytesDone;		/* Bytes transferred */
-	char *current_buffer; 	/* target of current data transfer */
+	caddr_t current_buffer; 	/* target of current data transfer */
 	unsigned char *cbuf;		/* ptr to cylinder cache */
 	int	cachedSide;		/* Which head is cached? */
 	cylCacheSlot_t r_slots[IWM_MAX_GCR_SECTORS];
@@ -208,7 +210,7 @@ int	iwmSelectSide(int32_t);
 int	iwmTrack00(void);
 int	iwmSeek(int32_t);
 
-int     iwmReadSector(sectorHdr_t *, cylCacheSlot_t *, void *);
+int     iwmReadSector(sectorHdr_t *, cylCacheSlot_t *, caddr_t);
 int	iwmWriteSector(sectorHdr_t *, cylCacheSlot_t *);
 
 int	iwmDiskEject(int32_t);		/* drive = [0..1] */
@@ -223,9 +225,9 @@ int	iwmQueryDrvFlag(int32_t, int32_t); /* reg = [0..15] */
 int	iwmReadSectHdr(sectorHdr_t *);
 
 #if 0 /* XXX not yet */
-int	iwmReadRawSector(int32_t, void *);
-int	iwmWriteRawSector(int32_t, void *);
-int	iwmReadRawTrack(int32_t, void *);
+int	iwmReadRawSector(int32_t, caddr_t);
+int	iwmWriteRawSector(int32_t, caddr_t);
+int	iwmReadRawTrack(int32_t, caddr_t);
 #endif
 
 #endif /* _MAC68K_FDVAR_H */

@@ -1,4 +1,4 @@
-/*	$NetBSD: audiovar.h,v 1.45 2008/04/28 20:23:46 martin Exp $	*/
+/*	$NetBSD: audiovar.h,v 1.39 2007/02/21 22:59:58 thorpej Exp $	*/
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -119,10 +126,10 @@ struct au_mixer_ports {
  * Software state, per audio device.
  */
 struct audio_softc {
-	device_t	dev;
+	struct device	dev;
 	void		*hw_hdl;	/* Hardware driver handle */
 	const struct audio_hw_if *hw_if; /* Hardware interface */
-	device_t	sc_dev;		/* Hardware device struct */
+	struct	device	*sc_dev;	/* Hardware device struct */
 	u_char		sc_open;	/* single use device */
 #define AUOPEN_READ	0x01
 #define AUOPEN_WRITE	0x02
@@ -218,12 +225,7 @@ struct audio_softc {
 	long	sc_rblktime;	/* nominal time between interrupts */
 #endif
 
-	u_int	sc_lastgain;
-	struct audio_info sc_lastinfo;
-	bool	sc_lastinfovalid;
-
-	mixer_ctrl_t	*sc_mixer_state;
-	int		sc_nmixer_states;
+	void		*sc_powerhook;
 };
 
 #endif /* _SYS_DEV_AUDIOVAR_H_ */

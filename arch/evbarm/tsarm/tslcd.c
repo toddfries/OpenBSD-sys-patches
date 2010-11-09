@@ -1,4 +1,4 @@
-/* $NetBSD: tslcd.c,v 1.11 2008/06/11 23:24:43 cegger Exp $ */
+/* $NetBSD: tslcd.c,v 1.7 2006/08/31 17:53:19 matt Exp $ */
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -29,7 +36,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: tslcd.c,v 1.11 2008/06/11 23:24:43 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: tslcd.c,v 1.7 2006/08/31 17:53:19 matt Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -42,6 +49,7 @@ __KERNEL_RCSID(0, "$NetBSD: tslcd.c,v 1.11 2008/06/11 23:24:43 cegger Exp $");
 #include <sys/device.h>
 #include <sys/callout.h>
 #include <sys/select.h>
+#include <sys/conf.h>
 
 #include <machine/bus.h>
 #include <machine/autoconf.h>
@@ -257,9 +265,12 @@ tslcd_readreg(hd, en, rs)
 }
 
 int
-tslcdopen(dev_t dev, int flag, int mode, struct lwp *l)
+tslcdopen(dev, flag, mode, l)
+	dev_t dev;
+	int flag, mode;
+	struct lwp *l;
 {
-	struct tslcd_softc *sc = device_lookup_private(&tslcd_cd, minor(dev));
+	struct tslcd_softc *sc = device_lookup(&tslcd_cd, minor(dev));
 
 	if (sc->sc_hlcd.sc_dev_ok == 0)
 		return hd44780_init(&sc->sc_hlcd);
@@ -268,23 +279,32 @@ tslcdopen(dev_t dev, int flag, int mode, struct lwp *l)
 }
 
 int
-tslcdclose(dev_t dev, int flag, int mode, struct lwp *l)
+tslcdclose(dev, flag, mode, l)
+	dev_t dev;
+	int flag, mode;
+	struct lwp *l;
 {
 	return 0;
 }
 
 int
-tslcdread(dev_t dev, struct uio *uio, int flag)
+tslcdread(dev, uio, flag)
+	dev_t dev;
+	struct uio *uio;
+	int flag;
 {
 	return EIO;
 }
 
 int
-tslcdwrite(dev_t dev, struct uio *uio, int flag)
+tslcdwrite(dev, uio, flag)
+	dev_t dev;
+	struct uio *uio;
+	int flag;
 {
 	int error;
 	struct hd44780_io io;
-	struct tslcd_softc *sc = device_lookup_private(&tslcd_cd, minor(dev));
+	struct tslcd_softc *sc = device_lookup(&tslcd_cd, minor(dev));
 
 	if (sc->sc_hlcd.sc_dev_ok == 0)
 		return EIO;
@@ -302,14 +322,22 @@ tslcdwrite(dev_t dev, struct uio *uio, int flag)
 }
 
 int
-tslcdioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
+tslcdioctl(dev, cmd, data, flag, l)
+	dev_t dev;
+	u_long cmd;
+	caddr_t data;
+	int flag;
+	struct lwp *l;
 {
-	struct tslcd_softc *sc = device_lookup_private(&tslcd_cd, minor(dev));
+	struct tslcd_softc *sc = device_lookup(&tslcd_cd, minor(dev));
 	return hd44780_ioctl_subr(&sc->sc_hlcd, cmd, data);
 }
 
 int
-tslcdpoll(dev_t dev, int events, struct lwp *l)
+tslcdpoll(dev, events, l)
+	dev_t dev;
+	int events;
+	struct lwp *l;
 {
 	return 0;
 }

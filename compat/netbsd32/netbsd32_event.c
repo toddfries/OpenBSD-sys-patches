@@ -1,8 +1,11 @@
-/*	$NetBSD: netbsd32_event.c,v 1.7 2009/01/11 02:45:49 christos Exp $	*/
+/*	$NetBSD: netbsd32_event.c,v 1.2 2005/12/11 12:20:22 christos Exp $	*/
 
 /*
  *  Copyright (c) 2005 The NetBSD Foundation.
  *  All rights reserved.
+ *
+ *  This code is derived from software contributed to the NetBSD Foundation
+ *   by Quentin Garnier.
  *
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions
@@ -12,6 +15,13 @@
  *  2. Redistributions in binary form must reproduce the above copyright
  *     notice, this list of conditions and the following disclaimer in the
  *     documentation and/or other materials provided with the distribution.
+ *  3. All advertising materials mentioning features or use of this software
+ *     must display the following acknowledgement:
+ *         This product includes software developed by the NetBSD
+ *         Foundation, Inc. and its contributors.
+ *  4. Neither the name of The NetBSD Foundation nor the names of its
+ *     contributors may be used to endorse or promote products derived
+ *     from this software without specific prior written permission.
  *
  *  THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  *  ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -27,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: netbsd32_event.c,v 1.7 2009/01/11 02:45:49 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: netbsd32_event.c,v 1.2 2005/12/11 12:20:22 christos Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -92,17 +102,16 @@ netbsd32_kevent_put_events(void *private, struct kevent *events,
 }
 
 int
-netbsd32___kevent50(struct lwp *l,
-    const struct netbsd32___kevent50_args *uap, register_t *retval)
+netbsd32_kevent(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct netbsd32_kevent_args /* {
 		syscallarg(int) fd;
 		syscallarg(netbsd32_keventp_t) changelist;
 		syscallarg(netbsd32_size_t) nchanges;
 		syscallarg(netbsd32_keventp_t) eventlist;
 		syscallarg(netbsd32_size_t) nevents;
 		syscallarg(netbsd32_timespecp_t) timeout;
-	} */
+	} */ *uap = v;
 	int error;
 	size_t maxalloc, nchanges, nevents;
 	struct kevent_ops netbsd32_kevent_ops = {
@@ -118,7 +127,7 @@ netbsd32___kevent50(struct lwp *l,
 	    malloc(maxalloc * sizeof(struct netbsd32_kevent), M_TEMP,
 	    M_WAITOK);
 
-	error = kevent1(retval, SCARG(uap, fd),
+	error = kevent1(l, retval, SCARG(uap, fd),
 	    NETBSD32PTR64(SCARG(uap, changelist)), nchanges,
 	    NETBSD32PTR64(SCARG(uap, eventlist)), nevents,
 	    NETBSD32PTR64(SCARG(uap, timeout)), &netbsd32_kevent_ops);

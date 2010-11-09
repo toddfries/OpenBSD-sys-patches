@@ -1,4 +1,4 @@
-/*	$NetBSD: if_xennetvar.h,v 1.13 2008/04/16 18:41:48 cegger Exp $	*/
+/*	$NetBSD: if_xennetvar.h,v 1.11 2006/01/08 14:45:41 bouyer Exp $	*/
 
 /*
  *
@@ -35,7 +35,7 @@
 #ifndef _XEN_IF_XENNETVAR_H_
 #define _XEN_IF_XENNETVAR_H_
 
-#include <xen/xen.h>
+#include <machine/xen.h>
 
 struct xennet_attach_args {
 	const char 		*xa_device;
@@ -44,7 +44,7 @@ struct xennet_attach_args {
 
 struct nfs_diskless;
 
-int xennet_scan(device_t, struct xennet_attach_args *, cfprint_t);
+int xennet_scan(struct device *, struct xennet_attach_args *, cfprint_t);
 int xennet_bootstatic_callback(struct nfs_diskless *);
 
 #endif /* _XEN_IF_XENNETVAR_H_ */

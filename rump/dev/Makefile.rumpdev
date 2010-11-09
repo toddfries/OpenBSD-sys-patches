@@ -1,0 +1,10 @@
+#	$NetBSD: Makefile.rumpdev,v 1.16 2010/08/24 11:23:35 pooka Exp $
+#
+
+RUMPDEVLIST=	audio bpf cgd disk dm fss netsmb pad putter raidframe	\
+		rnd scsipi scsitest sysmon ubt ucom ugenhc ulpt umass usb wscons
+
+.for var in ${RUMPDEVLIST}
+RUMPDEVLIBS+=lib${var}
+RUMPDEVLDADD+=-lrumpdev_${var}
+.endfor

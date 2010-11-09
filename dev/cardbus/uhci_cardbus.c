@@ -1,4 +1,4 @@
-/*	$NetBSD: uhci_cardbus.c,v 1.12 2008/07/11 21:02:53 dyoung Exp $	*/
+/*	$NetBSD: uhci_cardbus.c,v 1.6 2007/10/19 11:59:40 ad Exp $	*/
 
 /*
  * Copyright (c) 1998-2005 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -31,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: uhci_cardbus.c,v 1.12 2008/07/11 21:02:53 dyoung Exp $");
+__KERNEL_RCSID(0, "$NetBSD: uhci_cardbus.c,v 1.6 2007/10/19 11:59:40 ad Exp $");
 
 #include "ehci_cardbus.h"
 
@@ -67,11 +74,11 @@ struct uhci_cardbus_softc {
 	void 			*sc_ih;		/* interrupt vectoring */
 };
 
-static int	uhci_cardbus_match(device_t, struct cfdata *, void *);
-static void	uhci_cardbus_attach(device_t, device_t, void *);
-static int	uhci_cardbus_detach(device_t, int);
+static int	uhci_cardbus_match(struct device *, struct cfdata *, void *);
+static void	uhci_cardbus_attach(struct device *, struct device *, void *);
+static int	uhci_cardbus_detach(device_ptr_t, int);
 
-CFATTACH_DECL_NEW(uhci_cardbus, sizeof(struct uhci_cardbus_softc),
+CFATTACH_DECL(uhci_cardbus, sizeof(struct uhci_cardbus_softc),
     uhci_cardbus_match, uhci_cardbus_attach, uhci_cardbus_detach, uhci_activate);
 
 #define CARDBUS_INTERFACE_UHCI	PCI_INTERFACE_UHCI
@@ -80,7 +87,8 @@ CFATTACH_DECL_NEW(uhci_cardbus, sizeof(struct uhci_cardbus_softc),
 #define cardbus_devinfo		pci_devinfo
 
 static int
-uhci_cardbus_match(device_t parent, struct cfdata *match, void *aux)
+uhci_cardbus_match(struct device *parent,
+    struct cfdata *match, void *aux)
 {
 	struct cardbus_attach_args *ca = (struct cardbus_attach_args *)aux;
 
@@ -93,7 +101,7 @@ uhci_cardbus_match(device_t parent, struct cfdata *match, void *aux)
 }
 
 static void
-uhci_cardbus_attach(device_t parent, device_t self,
+uhci_cardbus_attach(struct device *parent, struct device *self,
     void *aux)
 {
 	struct uhci_cardbus_softc *sc = device_private(self);
@@ -104,12 +112,9 @@ uhci_cardbus_attach(device_t parent, device_t self,
 	cardbustag_t tag = ca->ca_tag;
 	cardbusreg_t csr;
 	const char *vendor;
-	const char *devname = device_xname(self);
+	const char *devname = sc->sc.sc_bus.bdev.dv_xname;
 	char devinfo[256];
 	usbd_status r;
-
-	sc->sc.sc_dev = self;
-	sc->sc.sc_bus.hci_private = sc;
 
 	cardbus_devinfo(ca->ca_id, ca->ca_class, 0, devinfo, sizeof(devinfo));
 	printf(": %s (rev. 0x%02x)\n", devinfo, CARDBUS_REVISION(ca->ca_class));
@@ -120,6 +125,9 @@ uhci_cardbus_attach(device_t parent, device_t self,
 		printf("%s: can't map i/o space\n", devname);
 		return;
 	}
+
+	/* Disable interrupts, so we don't get any spurious ones. */
+	bus_space_write_2(sc->sc.iot, sc->sc.ioh, UHCI_INTR, 0);
 
 	sc->sc_cc = cc;
 	sc->sc_cf = cf;
@@ -140,9 +148,6 @@ XXX	(ct->ct_cf->cardbus_io_open)(cc, 0, iob, iob + 0x40);
 		       csr | CARDBUS_COMMAND_MASTER_ENABLE
 			   | CARDBUS_COMMAND_IO_ENABLE);
 
-	/* Disable interrupts, so we don't get any spurious ones. */
-	bus_space_write_2(sc->sc.iot, sc->sc.ioh, UHCI_INTR, 0);
-
 	/* Map and establish the interrupt. */
 	sc->sc_ih = cardbus_intr_establish(cc, cf, ca->ca_intrline,
 					   IPL_USB, uhci_intr, sc);
@@ -150,6 +155,7 @@ XXX	(ct->ct_cf->cardbus_io_open)(cc, 0, iob, iob + 0x40);
 		printf("%s: couldn't establish interrupt\n", devname);
 		return;
 	}
+	printf("%s: interrupting at %d\n", devname, ca->ca_intrline);
 
 	/* Set LEGSUP register to its default value. */
 	cardbus_conf_write(cc, cf, tag, PCI_LEGSUP, PCI_LEGSUP_USBPIRQDEN);
@@ -190,15 +196,16 @@ XXX	(ct->ct_cf->cardbus_io_open)(cc, 0, iob, iob + 0x40);
 	}
 
 #if NEHCI_CARDBUS > 0
-	usb_cardbus_add(&sc->sc_cardbus, ca, self);
+	usb_cardbus_add(&sc->sc_cardbus, ca, &sc->sc.sc_bus);
 #endif
 
 	/* Attach usb device. */
-	sc->sc.sc_child = config_found(self, &sc->sc.sc_bus, usbctlprint);
+	sc->sc.sc_child = config_found((void *)sc, &sc->sc.sc_bus,
+				       usbctlprint);
 }
 
 static int
-uhci_cardbus_detach(device_t self, int flags)
+uhci_cardbus_detach(device_ptr_t self, int flags)
 {
 	struct uhci_cardbus_softc *sc = device_private(self);
 	struct cardbus_devfunc *ct = sc->sc_ct;

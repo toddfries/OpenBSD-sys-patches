@@ -1,26 +1,18 @@
-#	$NetBSD: Makefile,v 1.28 2009/01/06 13:35:30 tsutsui Exp $
+#	$NetBSD: Makefile,v 1.27 2005/12/30 00:24:48 he Exp $
 
 LIB=	sa
 
-NOPIC=		# defined
-NOPROFILE=	# defined
-NOLINT=		# defnied
+NOPIC=# defined
+NOPROFILE=# defined
+OBJMACHINE=
 
+CPPFLAGS+=	${DEFS} ${INCL}
+CFLAGS+=	-ffreestanding
+CFLAGS+=	-fomit-frame-pointer -Wall -fno-function-cse -fstrength-reduce
 NO_NET=
 
-# Logically src/sys
-S=${.CURDIR}/../../../..
-S_SA=${S}/lib/libsa
-S_KERN=${S}/lib/libkern
-S_MACHSA=${S}/arch/atari/stand/libsa
-
-.include "${S}/../common/lib/libc/Makefile.inc"
-
-.include "../Makefile.booters"
-
-CPPFLAGS+=	-I. -I${S_MACHSA} -I${S_KERN} -I${S_SA} -I${S}
-
-.PATH:  ${S_SA} ${S_KERN}
+DEFS=	-D_STANDALONE -DHEAP_VARIABLE
+INCL=	-I${S_MACHSA} -I${S_KERN} -I${S_SA} -I${S}
 
 #
 # NetBSD/atari specific replacements: dev.c
@@ -51,6 +43,24 @@ SRCS+=	bootp.c rarp.c bootparam.c
 
 # boot filesystems
 SRCS+=	ufs.c nfs.c
+
+# Logically src/sys
+S=${.CURDIR}/../../../..
+S_SA=${S}/lib/libsa
+S_KERN=${S}/lib/libkern
+S_MACHSA=${S}/arch/atari/stand/libsa
+
+.include "${S}/../common/lib/libc/Makefile.inc"
+
+.PATH:  ${S_SA} ${S_KERN}
+
+.if !make(obj) && !make(clean) && !make(cleandir)
+.BEGIN:
+	@([ -h machine ] || ln -s ${S}/arch/${MACHINE}/include machine)
+	@([ -h ${MACHINE_ARCH} ] || ln -s ${S}/arch/${MACHINE_ARCH}/include ${MACHINE_ARCH})
+.NOPATH: machine m68k
+.endif
+CLEANFILES+= machine m68k
 
 # only needed during build
 libinstall::

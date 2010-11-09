@@ -1,4 +1,4 @@
-/*	$NetBSD: mlcd.c,v 1.11 2008/06/11 14:55:30 tsutsui Exp $	*/
+/*	$NetBSD: mlcd.c,v 1.7 2006/03/28 17:38:24 thorpej Exp $	*/
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mlcd.c,v 1.11 2008/06/11 14:55:30 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mlcd.c,v 1.7 2006/03/28 17:38:24 thorpej Exp $");
 
 #include <sys/param.h>
 #include <sys/device.h>
@@ -464,7 +471,7 @@ mlcdopen(dev_t dev, int flags, int devtype, struct lwp *l)
 
 	unit = MLCD_UNIT(dev);
 	part = MLCD_PART(dev);
-	if ((sc = device_lookup_private(&mlcd_cd, unit)) == NULL
+	if ((sc = device_lookup(&mlcd_cd, unit)) == NULL
 	    || sc->sc_stat == MLCD_INIT
 	    || sc->sc_stat == MLCD_INIT2
 	    || part >= sc->sc_npt || (pt = &sc->sc_pt[part])->pt_flags == 0)
@@ -488,7 +495,7 @@ mlcdclose(dev_t dev, int flags, int devtype, struct lwp *l)
 
 	unit = MLCD_UNIT(dev);
 	part = MLCD_PART(dev);
-	sc = device_lookup_private(&mlcd_cd, unit);
+	sc = mlcd_cd.cd_devs[unit];
 	pt = &sc->sc_pt[part];
 
 	pt->pt_flags &= ~MLCD_PT_OPEN;
@@ -592,7 +599,7 @@ mlcd_buf_alloc(int dev, int flags)
 
 	unit = MLCD_UNIT(dev);
 	part = MLCD_PART(dev);
-	sc = device_lookup_private(&mlcd_cd, unit);
+	sc = mlcd_cd.cd_devs[unit];
 	KASSERT(sc);
 	pt = &sc->sc_pt[part];
 	KASSERT(pt);
@@ -604,7 +611,7 @@ mlcd_buf_alloc(int dev, int flags)
 	 * malloc() may sleep, and the device may be detached during sleep.
 	 * XXX this check is not complete.
 	 */
-	if (sc != device_lookup_private(&mlcd_cd, unit)
+	if (sc != device_lookup(&mlcd_cd, unit)
 	    || sc->sc_stat == MLCD_INIT
 	    || sc->sc_stat == MLCD_INIT2
 	    || part >= sc->sc_npt || pt != &sc->sc_pt[part]
@@ -665,7 +672,7 @@ mlcdwrite(dev_t dev, struct uio *uio, int flags)
 	int error = 0;
 
 	part = MLCD_PART(dev);
-	sc = device_lookup_private(&mlcd_cd, MLCD_UNIT(dev));
+	sc = mlcd_cd.cd_devs[MLCD_UNIT(dev)];
 	pt = &sc->sc_pt[part];
 
 #if 0
@@ -717,7 +724,7 @@ mlcdwrite(dev_t dev, struct uio *uio, int flags)
 }
 
 int
-mlcdioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
+mlcdioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct lwp *l)
 {
 	int unit, part;
 	struct mlcd_softc *sc;
@@ -725,7 +732,7 @@ mlcdioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 
 	unit = MLCD_UNIT(dev);
 	part = MLCD_PART(dev);
-	sc = device_lookup_private(&mlcd_cd, unit);
+	sc = mlcd_cd.cd_devs[unit];
 	pt = &sc->sc_pt[part];
 
 	switch (cmd) {

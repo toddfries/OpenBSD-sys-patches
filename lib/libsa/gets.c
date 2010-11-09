@@ -1,4 +1,4 @@
-/*	$NetBSD: gets.c,v 1.10 2007/11/24 13:20:55 isaki Exp $	*/
+/*	$NetBSD: gets.c,v 1.9 2005/12/11 12:24:46 christos Exp $	*/
 
 /*-
  * Copyright (c) 1993
@@ -34,12 +34,13 @@
 #include "stand.h"
 
 void
-gets(char *buf)
+gets(buf)
+	char *buf;
 {
 	int c;
 	char *lp;
 
-	for (lp = buf;;) {
+	for (lp = buf;;)
 		switch (c = getchar() & 0177) {
 		case '\n':
 		case '\r':
@@ -61,7 +62,7 @@ gets(char *buf)
 				--lp;
 			break;
 #endif
-		case 'r' & 037: {
+		case 'r'&037: {
 			char *p;
 
 			putchar('\n');
@@ -72,16 +73,14 @@ gets(char *buf)
 #if AT_ERASE
 		case '@':
 #endif
-		case 'u' & 037:
-		case 'w' & 037:
+		case 'u'&037:
+		case 'w'&037:
 			lp = buf;
 			putchar('\n');
 			break;
 		default:
 			*lp++ = c;
 			putchar(c);
-			break;
 		}
-	}
 	/*NOTREACHED*/
 }

@@ -1,4 +1,4 @@
-/*	$NetBSD: zlcd.c,v 1.9 2009/01/29 16:00:33 nonaka Exp $	*/
+/*	$NetBSD: zlcd.c,v 1.3 2006/12/18 15:30:56 nonaka Exp $	*/
 /*	$OpenBSD: zaurus_lcd.c,v 1.20 2006/06/02 20:50:14 miod Exp $	*/
 /* NetBSD: lubbock_lcd.c,v 1.1 2003/08/09 19:38:53 bsh Exp */
 
@@ -43,7 +43,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: zlcd.c,v 1.9 2009/01/29 16:00:33 nonaka Exp $");
+__KERNEL_RCSID(0, "$NetBSD: zlcd.c,v 1.3 2006/12/18 15:30:56 nonaka Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -55,8 +55,6 @@ __KERNEL_RCSID(0, "$NetBSD: zlcd.c,v 1.9 2009/01/29 16:00:33 nonaka Exp $");
 #include <dev/wscons/wsconsio.h>
 #include <dev/wscons/wsdisplayvar.h>
 #include <dev/wscons/wscons_callbacks.h>
-
-#include <dev/hpc/hpcfbio.h>
 
 #include <machine/bus.h>
 #include <arm/xscale/pxa2x0var.h>
@@ -79,7 +77,7 @@ static struct pxa2x0_wsscreen_descr lcd_std_screen = {
 		.capabilities = WSSCREEN_WSCOLORS,
 	},
 	.depth = 16,			/* bits per pixel */
-	.flags = RI_ROTATE_CW,		/* quarter clockwise rotation */
+	.flags = 0/*RI_ROTATE_CW*/,	/* quarter clockwise rotation */
 };
 
 static const struct wsscreen_descr *lcd_scr_descr[] = {
@@ -91,7 +89,7 @@ static const struct wsscreen_list lcd_screen_list = {
 	.screens = lcd_scr_descr,
 };
 
-static int	lcd_ioctl(void *, void *, u_long, void *, int, struct lwp *);
+static int	lcd_ioctl(void *, void *, u_long, caddr_t, int, struct lwp *);
 static int	lcd_param(struct pxa2x0_lcd_softc *, u_long,
 		    struct wsdisplay_param *);
 static int	lcd_show_screen(void *, void *, int,
@@ -148,14 +146,11 @@ const struct sharp_lcd_backlight sharp_zaurus_C3000_bl[] = {
 	{  -1, -1, -1 },	/* 7: Invalid */
 };
 
-static int	lcd_match(device_t, cfdata_t, void *);
-static void	lcd_attach(device_t, device_t, void *);
+static int	lcd_match(struct device *, struct cfdata *, void *);
+static void	lcd_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(zlcd, sizeof(struct pxa2x0_lcd_softc),
+CFATTACH_DECL(zlcd, sizeof(struct pxa2x0_lcd_softc),
 	lcd_match, lcd_attach, NULL, NULL);
-
-static bool	lcd_suspend(device_t dv PMF_FN_ARGS);
-static bool	lcd_resume(device_t dv PMF_FN_ARGS);
 
 void	lcd_cnattach(void);
 int	lcd_max_brightness(void);
@@ -165,21 +160,20 @@ void	lcd_set_brightness_internal(int);
 int	lcd_get_backlight(void);
 void	lcd_set_backlight(int);
 void	lcd_blank(int);
+void	lcd_power(int, void *);
 
 static int
-lcd_match(device_t parent, cfdata_t cf, void *aux)
+lcd_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 
 	return 1;
 }
 
 static void
-lcd_attach(device_t parent, device_t self, void *aux)
+lcd_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct pxa2x0_lcd_softc *sc = device_private(self);
+	struct pxa2x0_lcd_softc *sc = (struct pxa2x0_lcd_softc *)self;
 	struct wsemuldisplaydev_attach_args aa;
-
-	sc->dev = self;
 
 	pxa2x0_lcd_attach_sub(sc, aux, CURRENT_DISPLAY);
 
@@ -193,8 +187,7 @@ lcd_attach(device_t parent, device_t self, void *aux)
 	/* Start with approximately 40% of full brightness. */
 	lcd_set_brightness(3);
 
-	if (!pmf_device_register(sc->dev, lcd_suspend, lcd_resume))
-		aprint_error_dev(sc->dev, "couldn't establish power handler\n");
+	(void) powerhook_establish(sc->dev.dv_xname, lcd_power, sc);
 }
 
 void
@@ -205,152 +198,18 @@ lcd_cnattach(void)
 }
 
 /*
- * power management
- */
-static bool
-lcd_suspend(device_t dv PMF_FN_ARGS)
-{
-	struct pxa2x0_lcd_softc *sc = device_private(dv);
-
-	lcd_set_brightness(0);
-	pxa2x0_lcd_suspend(sc);
-
-	return true;
-}
-
-static bool
-lcd_resume(device_t dv PMF_FN_ARGS)
-{
-	struct pxa2x0_lcd_softc *sc = device_private(dv);
-
-	pxa2x0_lcd_resume(sc);
-	lcd_set_brightness(lcd_get_brightness());
-
-	return true;
-}
-
-/*
  * wsdisplay accessops overrides
  */
 static int
-lcd_ioctl(void *v, void *vs, u_long cmd, void *data, int flag, struct lwp *l)
+lcd_ioctl(void *v, void *vs, u_long cmd, caddr_t data, int flag, struct lwp *l)
 {
 	struct pxa2x0_lcd_softc *sc = (struct pxa2x0_lcd_softc *)v;
-	struct hpcfb_fbconf *fbconf;
-	struct hpcfb_dspconf *dspconf;
 	int res = EINVAL;
 
 	switch (cmd) {
 	case WSDISPLAYIO_GETPARAM:
 	case WSDISPLAYIO_SETPARAM:
 		res = lcd_param(sc, cmd, (struct wsdisplay_param *)data);
-		break;
-
-	case HPCFBIO_GCONF:
-		fbconf = (struct hpcfb_fbconf *)data;
-		if (fbconf->hf_conf_index != 0 &&
-		    fbconf->hf_conf_index != HPCFB_CURRENT_CONFIG) {
-			break;
-		}
-
-		fbconf->hf_conf_index = 0;
-		fbconf->hf_nconfs = 1;
-		fbconf->hf_class = HPCFB_CLASS_RGBCOLOR;
-		strlcpy(fbconf->hf_name, "Sharp Zaurus frame buffer",
-		    sizeof(fbconf->hf_name));
-		strlcpy(fbconf->hf_conf_name, "default",
-		    sizeof(fbconf->hf_conf_name));
-		fbconf->hf_width = sc->geometry->panel_width;
-		fbconf->hf_height = sc->geometry->panel_height;
-		fbconf->hf_baseaddr = (u_long)sc->active->buf_va;
-		fbconf->hf_offset = 0;
-		fbconf->hf_bytes_per_line = sc->geometry->panel_width *
-		    sc->active->depth / 8;
-		fbconf->hf_nplanes = 1;
-		fbconf->hf_bytes_per_plane = sc->geometry->panel_width *
-		    sc->geometry->panel_height * sc->active->depth / 8;
-		fbconf->hf_pack_width = sc->active->depth;
-		fbconf->hf_pixels_per_pack = 1;
-		fbconf->hf_pixel_width = sc->active->depth;
-		fbconf->hf_access_flags = (0
-					   | HPCFB_ACCESS_BYTE
-					   | HPCFB_ACCESS_WORD
-					   | HPCFB_ACCESS_DWORD);
-		fbconf->hf_order_flags = 0;
-		fbconf->hf_reg_offset = 0;
-
-		fbconf->hf_class_data_length = sizeof(struct hf_rgb_tag);
-		fbconf->hf_u.hf_rgb.hf_flags = 0;
-		fbconf->hf_u.hf_rgb.hf_red_width = 5;
-		fbconf->hf_u.hf_rgb.hf_red_shift = 11;
-		fbconf->hf_u.hf_rgb.hf_green_width = 6;
-		fbconf->hf_u.hf_rgb.hf_green_shift = 5;
-		fbconf->hf_u.hf_rgb.hf_blue_width = 5;
-		fbconf->hf_u.hf_rgb.hf_blue_shift = 0;
-		fbconf->hf_u.hf_rgb.hf_alpha_width = 0;
-		fbconf->hf_u.hf_rgb.hf_alpha_shift = 0;
-
-		fbconf->hf_ext_size = 0;
-		fbconf->hf_ext_data = NULL;
-
-		res = 0;
-		break;
-
-	case HPCFBIO_SCONF:
-		fbconf = (struct hpcfb_fbconf *)data;
-		if (fbconf->hf_conf_index != 0 &&
-		    fbconf->hf_conf_index != HPCFB_CURRENT_CONFIG) {
-			break;
-		}
-		/* nothing to do because we have only one configuration */
-		res = 0;
-		break;
-
-	case HPCFBIO_GDSPCONF:
-		dspconf = (struct hpcfb_dspconf *)data;
-		if ((dspconf->hd_unit_index != 0 &&
-		     dspconf->hd_unit_index != HPCFB_CURRENT_UNIT) ||
-		    (dspconf->hd_conf_index != 0 &&
-		     dspconf->hd_conf_index != HPCFB_CURRENT_CONFIG)) {
-			break;
-		}
-
-		dspconf->hd_unit_index = 0;
-		dspconf->hd_nunits = 1;
-		dspconf->hd_class = HPCFB_DSP_CLASS_COLORLCD;
-		strlcpy(dspconf->hd_name, "Sharp Zaurus LCD",
-		    sizeof(dspconf->hd_name));
-		dspconf->hd_op_flags = 0;
-		dspconf->hd_conf_index = 0;
-		dspconf->hd_nconfs = 1;
-		strlcpy(dspconf->hd_conf_name, "default",
-		    sizeof(dspconf->hd_conf_name));
-		dspconf->hd_width = sc->geometry->panel_width;
-		dspconf->hd_height = sc->geometry->panel_height;
-		dspconf->hd_xdpi = HPCFB_DSP_DPI_UNKNOWN;
-		dspconf->hd_ydpi = HPCFB_DSP_DPI_UNKNOWN;
-
-		res = 0;
-		break;
-
-	case HPCFBIO_SDSPCONF:
-		dspconf = (struct hpcfb_dspconf *)data;
-		if ((dspconf->hd_unit_index != 0 &&
-		     dspconf->hd_unit_index != HPCFB_CURRENT_UNIT) ||
-		    (dspconf->hd_conf_index != 0 &&
-		     dspconf->hd_conf_index != HPCFB_CURRENT_CONFIG)) {
-			break;
-		}
-		/*
-		 * nothing to do
-		 * because we have only one unit and one configuration
-		 */
-		res = 0;
-		break;
-
-	case HPCFBIO_GOP:
-	case HPCFBIO_SOP:
-		/* curently not implemented...  */
 		break;
 	}
 
@@ -379,7 +238,8 @@ lcd_show_screen(void *v, void *cookie, int waitok,
  * wsdisplay I/O controls
  */
 static int
-lcd_param(struct pxa2x0_lcd_softc *sc, u_long cmd, struct wsdisplay_param *dp)
+lcd_param(struct pxa2x0_lcd_softc *sc, u_long cmd,
+    struct wsdisplay_param *dp)
 {
 	int res = EINVAL;
 
@@ -519,5 +379,23 @@ lcd_blank(int blank)
 	} else {
 		lcdisblank = 0;
 		lcd_set_brightness(lcd_get_brightness());
+	}
+}
+
+void
+lcd_power(int why, void *v)
+{
+
+	switch (why) {
+	case PWR_SUSPEND:
+	case PWR_STANDBY:
+		lcd_set_brightness(0);
+		pxa2x0_lcd_power(why, v);
+		break;
+
+	case PWR_RESUME:
+		pxa2x0_lcd_power(why, v);
+		lcd_set_brightness(lcd_get_brightness());
+		break;
 	}
 }

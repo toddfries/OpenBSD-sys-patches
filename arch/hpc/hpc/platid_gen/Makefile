@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile,v 1.4 2008/10/19 22:05:21 apb Exp $
+#	$NetBSD: Makefile,v 1.3 2001/03/03 12:51:44 takemura Exp $
 
 S=	../../../..
 
@@ -25,20 +25,16 @@ DEFFILE		=	$S/arch/hpc/conf/platid.def
 PLATIDGEN	=	$S/arch/hpc/hpc/platid_gen/${PROG}
 
 ${GENHDR}: ${DEFFILE} ${PROG}
-	${TOOL_AWK} -f ../platid_copyright.awk ${DEFFILE} > ${.TARGET} \
-		|| rm ${.TARGET}
+	awk -f ../platid_copyright.awk ${DEFFILE} > ${.TARGET} || rm ${.TARGET}
 	${PLATIDGEN} -header < ${DEFFILE} >> ${GENHDR} || rm ${.TARGET}
 ${MASK_H}: ${DEFFILE} ${PROG}
-	${TOOL_AWK} -f ../platid_copyright.awk ${DEFFILE} > ${.TARGET} \
-		|| rm ${.TARGET}
+	awk -f ../platid_copyright.awk ${DEFFILE} > ${.TARGET} || rm ${.TARGET}
 	${PLATIDGEN} -mask_h < ${DEFFILE} >> ${MASK_H} || rm ${.TARGET}
 ${MASK_C}: ${DEFFILE} ${PROG}
-	${TOOL_AWK} -f ../platid_copyright.awk ${DEFFILE} > ${.TARGET} \
-		|| rm ${.TARGET}
+	awk -f ../platid_copyright.awk ${DEFFILE} > ${.TARGET} || rm ${.TARGET}
 	${PLATIDGEN} -mask_c < ${DEFFILE} >> ${MASK_C} || rm ${.TARGET}
 ${NAME_C}: ${DEFFILE} ${PROG}
-	${TOOL_AWK} -f ../platid_copyright.awk ${DEFFILE} > ${.TARGET} \
-		|| rm ${.TARGET}
+	awk -f ../platid_copyright.awk ${DEFFILE} > ${.TARGET} || rm ${.TARGET}
 	${PLATIDGEN} -name_c < ${DEFFILE} >> ${NAME_C} || rm ${.TARGET}
 
 .include <bsd.prog.mk>

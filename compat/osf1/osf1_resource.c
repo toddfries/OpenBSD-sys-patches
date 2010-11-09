@@ -1,4 +1,4 @@
-/* $NetBSD: osf1_resource.c,v 1.13 2008/04/24 18:39:23 ad Exp $ */
+/* $NetBSD: osf1_resource.c,v 1.5 2003/01/18 08:32:04 thorpej Exp $ */
 
 /*
  * Copyright (c) 1999 Christopher G. Demetriou.  All rights reserved.
@@ -31,12 +31,13 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: osf1_resource.c,v 1.13 2008/04/24 18:39:23 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: osf1_resource.c,v 1.5 2003/01/18 08:32:04 thorpej Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/mount.h>
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 #include <sys/resource.h>
 #include <sys/resourcevar.h>
@@ -46,8 +47,12 @@ __KERNEL_RCSID(0, "$NetBSD: osf1_resource.c,v 1.13 2008/04/24 18:39:23 ad Exp $"
 #include <compat/osf1/osf1_cvt.h>
 
 int
-osf1_sys_getrlimit(struct lwp *l, const struct osf1_sys_getrlimit_args *uap, register_t *retval)
+osf1_sys_getrlimit(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
+	struct osf1_sys_getrlimit_args *uap = v;
 	struct sys_getrlimit_args a;
 
 	switch (SCARG(uap, which)) {
@@ -84,24 +89,26 @@ osf1_sys_getrlimit(struct lwp *l, const struct osf1_sys_getrlimit_args *uap, reg
 }
 
 int
-osf1_sys_getrusage(struct lwp *l, const struct osf1_sys_getrusage_args *uap, register_t *retval)
+osf1_sys_getrusage(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	struct osf1_rusage osf1_rusage;
-	struct rusage ru;
+	struct osf1_sys_getrusage_args *uap = v;
 	struct proc *p = l->l_proc;
-
+	struct sys_getrusage_args a;
+	struct osf1_rusage osf1_rusage;
+	struct rusage netbsd_rusage;
+	caddr_t sg;
+	int error;
 
 	switch (SCARG(uap, who)) {
 	case OSF1_RUSAGE_SELF:
-		mutex_enter(p->p_lock);
-		ru = p->p_stats->p_ru;
-		calcru(p, &ru.ru_utime, &ru.ru_stime, NULL, NULL);
-		rulwps(p, &ru);
-		mutex_exit(p->p_lock);
+		SCARG(&a, who) = RUSAGE_SELF;
 		break;
 
 	case OSF1_RUSAGE_CHILDREN:
-		ru = p->p_stats->p_cru;
+		SCARG(&a, who) = RUSAGE_CHILDREN;
 		break;
 
 	case OSF1_RUSAGE_THREAD:		/* XXX not supported */
@@ -109,14 +116,29 @@ osf1_sys_getrusage(struct lwp *l, const struct osf1_sys_getrusage_args *uap, reg
 		return (EINVAL);
 	}
 
-	osf1_cvt_rusage_from_native(&ru, &osf1_rusage);
+	sg = stackgap_init(p, 0);
+	SCARG(&a, rusage) = stackgap_alloc(p, &sg, sizeof netbsd_rusage);
 
-	return copyout(&osf1_rusage, SCARG(uap, rusage), sizeof osf1_rusage);
+	error = sys_getrusage(l, &a, retval);
+	if (error == 0)
+                error = copyin((caddr_t)SCARG(&a, rusage),
+		    (caddr_t)&netbsd_rusage, sizeof netbsd_rusage);
+	if (error == 0) {
+		osf1_cvt_rusage_from_native(&netbsd_rusage, &osf1_rusage);
+                error = copyout((caddr_t)&osf1_rusage,
+		    (caddr_t)SCARG(uap, rusage), sizeof osf1_rusage);
+	}
+
+	return (error);
 }
 
 int
-osf1_sys_setrlimit(struct lwp *l, const struct osf1_sys_setrlimit_args *uap, register_t *retval)
+osf1_sys_setrlimit(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
+	struct osf1_sys_setrlimit_args *uap = v;
 	struct sys_setrlimit_args a;
 
 	switch (SCARG(uap, which)) {

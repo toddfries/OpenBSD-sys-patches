@@ -1,4 +1,4 @@
-/* $NetBSD: machdep.c,v 1.174 2009/02/13 22:41:03 apb Exp $	 */
+/* $NetBSD: machdep.c,v 1.153 2006/10/25 07:04:13 he Exp $	 */
 
 /*
  * Copyright (c) 1982, 1986, 1990 The Regents of the University of California.
@@ -83,12 +83,11 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.174 2009/02/13 22:41:03 apb Exp $");
+__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.153 2006/10/25 07:04:13 he Exp $");
 
 #include "opt_ddb.h"
 #include "opt_compat_netbsd.h"
 #include "opt_compat_ultrix.h"
-#include "opt_modular.h"
 #include "opt_multiprocessor.h"
 #include "opt_lockdebug.h"
 #include "opt_compat_ibcs2.h"
@@ -109,15 +108,16 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.174 2009/02/13 22:41:03 apb Exp $");
 #include <sys/device.h>
 #include <sys/exec.h>
 #include <sys/mount.h>
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 #include <sys/ptrace.h>
+#include <sys/savar.h>
 #include <sys/ksyms.h>
 
 #include <dev/cons.h>
 
 #include <uvm/uvm_extern.h>
 #include <sys/sysctl.h>
-#include <sys/savar.h>	/* for cpu_upcall */
 
 #include <machine/sid.h>
 #include <machine/pte.h>
@@ -147,7 +147,7 @@ extern vaddr_t virtual_avail, virtual_end;
 char		machine[] = MACHINE;		/* from <machine/param.h> */
 char		machine_arch[] = MACHINE_ARCH;	/* from <machine/param.h> */
 char		cpu_model[100];
-void *		msgbufaddr;
+caddr_t		msgbufaddr;
 int		physmem;
 int		*symtab_start;
 int		*symtab_end;
@@ -164,6 +164,7 @@ static long iomap_ex_storage[EXTENT_FIXED_STORAGE_SIZE(32) / sizeof(long)];
 static struct extent *iomap_ex;
 static int iomap_ex_malloc_safe;
 
+struct vm_map *exec_map = NULL;
 struct vm_map *mb_map = NULL;
 struct vm_map *phys_map = NULL;
 
@@ -171,12 +172,14 @@ struct vm_map *phys_map = NULL;
 int iospace_inited = 0;
 #endif
 
+struct softintr_head softclock_head = { IPL_SOFTCLOCK };
+struct softintr_head softnet_head = { IPL_SOFTNET };
+struct softintr_head softserial_head = { IPL_SOFTSERIAL };
+
 void
-cpu_startup(void)
+cpu_startup()
 {
-#if VAX46 || VAX48 || VAX49 || VAX53 || VAXANY
 	vaddr_t		minaddr, maxaddr;
-#endif
 	extern paddr_t avail_end;
 	char pbuf[9];
 
@@ -200,15 +203,22 @@ cpu_startup(void)
 	mtpr(AST_NO, PR_ASTLVL);
 	spl0();
 
-#if VAX46 || VAX48 || VAX49 || VAX53 || VAXANY
 	minaddr = 0;
+	/*
+	 * Allocate a submap for exec arguments.  This map effectively limits
+	 * the number of processes exec'ing at any time.
+	 * At most one process with the full length is allowed.
+	 */
+	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
+				 NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
 
+#if VAX46 || VAX48 || VAX49 || VAX53 || VAXANY
 	/*
 	 * Allocate a submap for physio.  This map effectively limits the
 	 * number of processes doing physio at any one time.
 	 */
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-				   VM_PHYS_SIZE, 0, false, NULL);
+				   VM_PHYS_SIZE, 0, FALSE, NULL);
 #endif
 
 	format_bytes(pbuf, sizeof(pbuf), ptoa(uvmexp.free));
@@ -222,12 +232,12 @@ cpu_startup(void)
 	iomap_ex_malloc_safe = 1;
 }
 
-uint32_t dumpmag = 0x8fca0101;
+u_int32_t dumpmag = 0x8fca0101;
 int	dumpsize = 0;
 long	dumplo = 0;
 
 void
-cpu_dumpconf(void)
+cpu_dumpconf()
 {
 	const struct bdevsw *bdev;
 	int		nblks;
@@ -263,8 +273,8 @@ sysctl_machdep_booted_device(SYSCTLFN_ARGS)
 
 	if (booted_device == NULL)
 		return (EOPNOTSUPP);
-	node.sysctl_data = __UNCONST(device_xname(booted_device));
-	node.sysctl_size = strlen(device_xname(booted_device)) + 1;
+	node.sysctl_data = booted_device->dv_xname;
+	node.sysctl_size = strlen(booted_device->dv_xname) + 1;
 	return (sysctl_lookup(SYSCTLFN_CALL(&node)));
 }
 
@@ -298,12 +308,13 @@ SYSCTL_SETUP(sysctl_machdep_setup, "sysctl machdep subtree setup")
 }
 
 void
-setstatclockrate(int hzrate)
+setstatclockrate(hzrate)
+	int hzrate;
 {
 }
 
 void
-consinit(void)
+consinit()
 {
 	extern vaddr_t iospace;
 
@@ -317,15 +328,15 @@ consinit(void)
 	KASSERT(iospace != 0);
 	iomap_ex = extent_create("iomap", iospace + VAX_NBPG,
 	    iospace + ((IOSPSZ * VAX_NBPG) - 1), M_DEVBUF,
-	    (void *) iomap_ex_storage, sizeof(iomap_ex_storage),
+	    (caddr_t) iomap_ex_storage, sizeof(iomap_ex_storage),
 	    EX_NOCOALESCE|EX_NOWAIT);
 #ifdef DEBUG
 	iospace_inited = 1;
 #endif
 	cninit();
-#if NKSYMS || defined(DDB) || defined(MODULAR)
+#if NKSYMS || defined(DDB) || defined(LKM)
 	if (symtab_start != NULL && symtab_nsyms != 0 && symtab_end != NULL) {
-		ksyms_addsyms_elf(symtab_nsyms, symtab_start, symtab_end);
+		ksyms_init(symtab_nsyms, symtab_start, symtab_end);
 	}
 #endif
 #ifdef DEBUG
@@ -338,7 +349,9 @@ int	waittime = -1;
 static	volatile int showto; /* Must be volatile to survive MM on -> MM off */
 
 void
-cpu_reboot(int howto, char *b)
+cpu_reboot(howto, b)
+	register int howto;
+	char *b;
 {
 	if ((howto & RB_NOSYNC) == 0 && waittime < 0) {
 		waittime = 0;
@@ -352,7 +365,6 @@ cpu_reboot(int howto, char *b)
 	splhigh();		/* extreme priority */
 	if (howto & RB_HALT) {
 		doshutdownhooks();
-		pmf_system_shutdown(boothowto);
 		if (dep_call->cpu_halt)
 			(*dep_call->cpu_halt) ();
 		printf("halting (in tight loop); hit\n\t^P\n\tHALT\n\n");
@@ -412,7 +424,7 @@ cpu_reboot(int howto, char *b)
 }
 
 void
-dumpsys(void)
+dumpsys()
 {
 	const struct bdevsw *bdev;
 
@@ -428,12 +440,12 @@ dumpsys(void)
 	if (dumpsize == 0)
 		cpu_dumpconf();
 	if (dumplo <= 0) {
-		printf("\ndump to dev %u,%u not possible\n",
-		    major(dumpdev), minor(dumpdev));
+		printf("\ndump to dev %u,%u not possible\n", major(dumpdev),
+		    minor(dumpdev));
 		return;
 	}
-	printf("\ndumping to dev %u,%u offset %ld\n",
-	    major(dumpdev), minor(dumpdev), dumplo);
+	printf("\ndumping to dev %u,%u offset %ld\n", major(dumpdev),
+	    minor(dumpdev), dumplo);
 	printf("dump ");
 	switch ((*bdev->d_dump) (dumpdev, 0, 0, 0)) {
 
@@ -460,7 +472,9 @@ dumpsys(void)
 }
 
 int
-process_read_regs(struct lwp *l, struct reg *regs)
+process_read_regs(l, regs)
+	struct lwp    *l;
+	struct reg     *regs;
 {
 	struct trapframe *tf = l->l_addr->u_pcb.framep;
 
@@ -474,7 +488,9 @@ process_read_regs(struct lwp *l, struct reg *regs)
 }
 
 int
-process_write_regs(struct lwp *l, const struct reg *regs)
+process_write_regs(l, regs)
+	struct lwp    *l;
+	const struct reg     *regs;
 {
 	struct trapframe *tf = l->l_addr->u_pcb.framep;
 
@@ -489,12 +505,14 @@ process_write_regs(struct lwp *l, const struct reg *regs)
 }
 
 int
-process_set_pc(struct lwp *l, void *addr)
+process_set_pc(l, addr)
+	struct	lwp *l;
+	caddr_t addr;
 {
 	struct	trapframe *tf;
 	void	*ptr;
 
-	if ((l->l_flag & LW_INMEM) == 0)
+	if ((l->l_flag & L_INMEM) == 0)
 		return (EIO);
 
 	ptr = (char *) l->l_addr->u_pcb.framep;
@@ -506,12 +524,13 @@ process_set_pc(struct lwp *l, void *addr)
 }
 
 int
-process_sstep(struct lwp *l, int sstep)
+process_sstep(l, sstep)
+	struct lwp    *l;
 {
 	void	       *ptr;
 	struct trapframe *tf;
 
-	if ((l->l_flag & LW_INMEM) == 0)
+	if ((l->l_flag & L_INMEM) == 0)
 		return (EIO);
 
 	ptr = l->l_addr->u_pcb.framep;
@@ -540,7 +559,9 @@ process_sstep(struct lwp *l, int sstep)
  * be use by console device drivers (before the map system is inited).
  */
 vaddr_t
-vax_map_physmem(paddr_t phys, size_t size)
+vax_map_physmem(phys, size)
+	paddr_t phys;
+	int size;
 {
 	vaddr_t addr;
 	int error;
@@ -577,10 +598,12 @@ vax_map_physmem(paddr_t phys, size_t size)
  * Unmaps the previous mapped (addr, size) pair.
  */
 void
-vax_unmap_physmem(vaddr_t addr, size_t size)
+vax_unmap_physmem(addr, size)
+	vaddr_t addr;
+	int size;
 {
 #ifdef PHYSMEMDEBUG
-	printf("vax_unmap_physmem: unmapping %zu pages at addr %lx\n", 
+	printf("vax_unmap_physmem: unmapping %d pages at addr %lx\n", 
 	    size, addr);
 #endif
 	addr &= ~VAX_PGOFSET;
@@ -590,22 +613,42 @@ vax_unmap_physmem(vaddr_t addr, size_t size)
 	else if (extent_free(iomap_ex, addr, size * VAX_NBPG,
 			     EX_NOWAIT |
 			     (iomap_ex_malloc_safe ? EX_MALLOCOK : 0)))
-		printf("vax_unmap_physmem: addr 0x%lx size %zu vpg: "
+		printf("vax_unmap_physmem: addr 0x%lx size %dvpg: "
 		    "can't free region\n", addr, size);
 }
 
-#define	SOFTINT_IPLS	((IPL_SOFTCLOCK << (SOFTINT_CLOCK * 5))		\
-			 | (IPL_SOFTBIO << (SOFTINT_BIO * 5))		\
-			 | (IPL_SOFTNET << (SOFTINT_NET * 5))		\
-			 | (IPL_SOFTSERIAL << (SOFTINT_SERIAL * 5)))
+void *
+softintr_establish(int ipl, void (*func)(void *), void *arg)
+{
+	struct softintr_handler *sh;
+	struct softintr_head *shd;
+
+	switch (ipl) {
+	case IPL_SOFTCLOCK: shd = &softclock_head; break;
+	case IPL_SOFTNET: shd = &softnet_head; break;
+	case IPL_SOFTSERIAL: shd = &softserial_head; break;
+	default: panic("softintr_establish: unsupported soft IPL");
+	}
+
+	sh = malloc(sizeof(*sh), M_SOFTINTR, M_NOWAIT);
+	if (sh == NULL)
+		return NULL;
+
+	LIST_INSERT_HEAD(&shd->shd_intrs, sh, sh_link);
+	sh->sh_head = shd;
+	sh->sh_pending = 0;
+	sh->sh_func = func;
+	sh->sh_arg = arg;
+
+	return sh;
+}
 
 void
-softint_init_md(lwp_t *l, u_int level, uintptr_t *machdep)
+softintr_disestablish(void *arg)
 {
-	const int ipl = (SOFTINT_IPLS >> (5 * level)) & 0x1F;
-	l->l_cpu->ci_softlwps[level] = l;
-
-	*machdep = ipl;
+	struct softintr_handler *sh = arg;
+	LIST_REMOVE(sh, sh_link);
+	free(sh, M_SOFTINTR);
 }
 
 #include <dev/bi/bivar.h>
@@ -627,15 +670,15 @@ void	krnlock(void);
 void	krnunlock(void);
 
 void
-krnlock(void)
+krnlock()
 {
-	KERNEL_LOCK(1, NULL);
+	KERNEL_LOCK(LK_CANRECURSE|LK_EXCLUSIVE);
 }
 
 void
-krnunlock(void)
+krnunlock()
 {
-	KERNEL_UNLOCK_ONE(NULL);
+	KERNEL_UNLOCK();
 }
 #endif
 
@@ -749,7 +792,7 @@ cpu_setmcontext(struct lwp *l, const mcontext_t *mcp, unsigned int flags)
  * Generic routines for machines with "console program mailbox".
  */
 void
-generic_halt(void)
+generic_halt()
 {
 	if (cpmbx == NULL)  /* Too late to complain here, but avoid panic */
 		__asm("halt");

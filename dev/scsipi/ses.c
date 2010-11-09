@@ -1,4 +1,4 @@
-/*	$NetBSD: ses.c,v 1.40 2008/06/08 18:18:34 tsutsui Exp $ */
+/*	$NetBSD: ses.c,v 1.38 2007/03/04 06:02:44 christos Exp $ */
 /*
  * Copyright (C) 2000 National Aeronautics & Space Administration
  * All rights reserved.
@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ses.c,v 1.40 2008/06/08 18:18:34 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ses.c,v 1.38 2007/03/04 06:02:44 christos Exp $");
 
 #include "opt_scsi.h"
 
@@ -274,7 +274,7 @@ ses_attach(struct device *parent, struct device *self, void *aux)
 		tname = "SAF-TE Compliant Device";
 		break;
 	}
-	printf("\n%s: %s\n", device_xname(&softc->sc_device), tname);
+	printf("\n%s: %s\n", softc->sc_device.dv_xname, tname);
 }
 
 
@@ -296,7 +296,9 @@ sesopen(dev_t dev, int flags, int fmt, struct lwp *l)
 	int error, unit;
 
 	unit = SESUNIT(dev);
-	softc = device_lookup_private(&ses_cd, unit);
+	if (unit >= ses_cd.cd_ndevs)
+		return (ENXIO);
+	softc = ses_cd.cd_devs[unit];
 	if (softc == NULL)
 		return (ENXIO);
 
@@ -339,7 +341,9 @@ sesclose(dev_t dev, int flags, int fmt,
 	int unit;
 
 	unit = SESUNIT(dev);
-	softc = device_lookup_private(&ses_cd, unit);
+	if (unit >= ses_cd.cd_ndevs)
+		return (ENXIO);
+	softc = ses_cd.cd_devs[unit];
 	if (softc == NULL)
 		return (ENXIO);
 
@@ -355,7 +359,7 @@ sesioctl(dev_t dev, u_long cmd, void *arg_addr, int flag, struct lwp *l)
 	ses_encstat tmp;
 	ses_objstat objs;
 	ses_object obj, *uobj;
-	struct ses_softc *ssc = device_lookup_private(&ses_cd, SESUNIT(dev));
+	struct ses_softc *ssc = ses_cd.cd_devs[SESUNIT(dev)];
 	void *addr;
 	int error, i;
 
@@ -525,7 +529,7 @@ ses_log(struct ses_softc *ssc, const char *fmt, ...)
 {
 	va_list ap;
 
-	printf("%s: ", device_xname(&ssc->sc_device));
+	printf("%s: ", ssc->sc_device.dv_xname);
 	va_start(ap, fmt);
 	vprintf(fmt, ap);
 	va_end(ap);

@@ -1,4 +1,4 @@
-/* $NetBSD: putstr.c,v 1.2 2009/01/12 07:00:59 tsutsui Exp $ */
+/* $NetBSD: putstr.c,v 1.1 2002/05/15 04:07:43 lukem Exp $ */
 
 /*
  * Copyright (c) 1999 Christopher G. Demetriou.  All rights reserved.
@@ -31,7 +31,6 @@
  */
 
 #include <lib/libsa/stand.h>
-#include "libsa.h"
 
 void
 putstr(const char *s)

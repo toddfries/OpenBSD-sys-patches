@@ -1,4 +1,4 @@
-# $NetBSD: Makefile.hp700,v 1.14 2009/02/15 10:21:10 skrll Exp $
+# $NetBSD: Makefile.hp700,v 1.9 2005/12/11 12:17:24 christos Exp $
 
 # Makefile for NetBSD
 #
@@ -32,23 +32,31 @@ GENASSYM_CONF=	${HP700}/hp700/genassym.cf
 ## (2) compile settings
 ##
 CPPFLAGS+=	-Dhppa -Dhp700
-CFLAGS+=	-mpa-risc-1-1 -msoft-float -mdisable-fpregs
-
+.if ${IDENT:M-DDDB} != ""
+COPTS+=		-fno-omit-frame-pointer
+.endif
+.if ${IDENT:M-DHP7000_CPU} != ""
+COPTS+=		-mpa-risc-1-0 -mschedule=700
+.elif ${IDENT:M-DHP8*_CPU} != ""
+COPTS+=		-mpa-risc-2-0
+.else
+COPTS+=		-mpa-risc-1-1
+.endif
+.if ${IDENT:M-DHP*_CPU} == ${IDENT:M-DHP7100LC_CPU}
+# XXX they said gcc has bugs in 7100lc scheduling
+#COPTS+=	-mschedule=7100LC
+.endif
+.if ${IDENT:M-DFPEMUL} != ""
+COPTS+=	-msoft-float -mdisable-fpregs
 .include "${HPPA}/spmath/Makefile.inc"
-
 .ifndef PROF
 LIBSPMATH=	${SPMATH}
 .else
 LIBSPMATH=	${SPMATH_PROF}
 .endif
-
-CFLAGS+=	-mno-space-regs -mfast-indirect-calls -mportable-runtime
-APPFLAGS=	-x assembler-with-cpp -P -traditional ${CPPFLAGS} -D_LOCORE
-
-OPT_DDB=	%DDB%
-.if !empty(OPT_DDB)
-CFLAGS+=	-fno-omit-frame-pointer
 .endif
+COPTS+=		-mno-space-regs -mfast-indirect-calls -mportable-runtime
+APPFLAGS=	-x assembler-with-cpp -P -traditional ${CPPFLAGS} -D_LOCORE
 
 # Do NOT assume the compiler does "-x funny_format" (gcc-specific)
 # This needs an intermediate file.  The original file is always
@@ -90,10 +98,11 @@ EXTRA_LINKFLAGS= -Map $@.map
 locore.o:   assym.h hppa/asm.h hppa/trap.h hppa/frame.h hppa/reg.h
 locore.o:   ${HPPA}/hppa/trap.S
 locore.o:   ${HPPA}/hppa/copy.S
+locore.o:   ${HPPA}/hppa/proc_subr.S
 locore.o:   ${HPPA}/hppa/support.S
 locore.o:   ${HPPA}/hppa/sigcode.S
 copy.o:     assym.h hppa/asm.h $S/sys/errno.h
-bcopy.o spcopy.o:    assym.h hppa/asm.h
+bcopy.o:    assym.h hppa/asm.h
 copypage.o: assym.h hppa/asm.h
 
 # depend on CPU configuration

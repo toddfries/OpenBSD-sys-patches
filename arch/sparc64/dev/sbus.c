@@ -1,4 +1,4 @@
-/*	$NetBSD: sbus.c,v 1.83 2008/10/18 03:31:10 nakayama Exp $ */
+/*	$NetBSD: sbus.c,v 1.77 2006/02/23 05:37:48 thorpej Exp $ */
 
 /*
  * Copyright (c) 1999-2002 Eduardo Horvath
@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sbus.c,v 1.83 2008/10/18 03:31:10 nakayama Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sbus.c,v 1.77 2006/02/23 05:37:48 thorpej Exp $");
 
 #include "opt_ddb.h"
 
@@ -48,6 +48,7 @@ __KERNEL_RCSID(0, "$NetBSD: sbus.c,v 1.83 2008/10/18 03:31:10 nakayama Exp $");
 #include <machine/bus.h>
 #include <machine/openfirm.h>
 
+#include <sparc64/sparc64/cache.h>
 #include <sparc64/dev/iommureg.h>
 #include <sparc64/dev/iommuvar.h>
 #include <sparc64/dev/sbusreg.h>
@@ -103,8 +104,20 @@ extern struct cfdriver sbus_cd;
 /*
  * DVMA routines
  */
-static int sbus_dmamap_create(bus_dma_tag_t, bus_size_t, int, bus_size_t,
-	bus_size_t, int, bus_dmamap_t *);
+int	sbus_dmamap_load(bus_dma_tag_t, bus_dmamap_t, void *, bus_size_t,
+		struct proc *, int);
+void	sbus_dmamap_unload(bus_dma_tag_t, bus_dmamap_t);
+int	sbus_dmamap_load_raw(bus_dma_tag_t, bus_dmamap_t, bus_dma_segment_t *,
+		int, bus_size_t, int);
+void	sbus_dmamap_sync(bus_dma_tag_t, bus_dmamap_t, bus_addr_t, bus_size_t,
+		int);
+int	sbus_dmamem_alloc(bus_dma_tag_t tag, bus_size_t size,
+		bus_size_t alignment, bus_size_t boundary,
+		bus_dma_segment_t *segs, int nsegs, int *rsegs, int flags);
+void	sbus_dmamem_free(bus_dma_tag_t tag, bus_dma_segment_t *segs, int nsegs);
+int	sbus_dmamem_map(bus_dma_tag_t tag, bus_dma_segment_t *segs, int nsegs,
+		size_t size, caddr_t *kvap, int flags);
+void	sbus_dmamem_unmap(bus_dma_tag_t tag, caddr_t kva, size_t size);
 
 /*
  * Child devices receive the Sbus interrupt level in their attach
@@ -165,7 +178,7 @@ sbus_match(struct device *parent, struct cfdata *cf, void *aux)
 void
 sbus_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct sbus_softc *sc = device_private(self);
+	struct sbus_softc *sc = (struct sbus_softc *)self;
 	struct mainbus_attach_args *ma = aux;
 	struct intrhand *ih;
 	int ipl;
@@ -194,7 +207,7 @@ sbus_attach(struct device *parent, struct device *self, void *aux)
 	 */
 	if (bus_space_map(sc->sc_bustag, ma->ma_reg[0].ur_paddr, 
 		ma->ma_reg[0].ur_len, 0, &sc->sc_bh) != 0) {
-		aprint_error_dev(self, "cannot map registers\n");
+		printf("%s: cannot map registers\n", self->dv_xname);
 		return;
 	}
 #endif
@@ -225,7 +238,7 @@ sbus_attach(struct device *parent, struct device *self, void *aux)
 	error = prom_getprop(node, "ranges", sizeof(struct openprom_range),
 			 &sbt->nranges, &sbt->ranges);
 	if (error)
-		panic("%s: error getting ranges property", device_xname(&sc->sc_dev));
+		panic("%s: error getting ranges property", sc->sc_dev.dv_xname);
 
 	/* initialize the IOMMU */
 
@@ -248,7 +261,7 @@ sbus_attach(struct device *parent, struct device *self, void *aux)
 	name = (char *)malloc(32, M_DEVBUF, M_NOWAIT);
 	if (name == 0)
 		panic("couldn't malloc iommu name");
-	snprintf(name, 32, "%s dvma", device_xname(&sc->sc_dev));
+	snprintf(name, 32, "%s dvma", sc->sc_dev.dv_xname);
 
 	iommu_init(name, &sc->sc_is, 0, -1);
 
@@ -261,7 +274,7 @@ sbus_attach(struct device *parent, struct device *self, void *aux)
 	ipl = 1;
 	ih->ih_pil = (1<<ipl);
 	ih->ih_number = INTVEC(*(ih->ih_map));
-	intr_establish(ipl, true, ih);
+	intr_establish(ipl, ih);
 	*(ih->ih_map) |= INTMAP_V|(CPU_UPAID << INTMAP_TID_SHIFT);
 	
 	/*
@@ -423,13 +436,13 @@ sbus_establish(register struct sbusdev *sd, register struct device *dev)
 	 * sbus, since we might (in the future) support multiple sbus's.
 	 */
 	for (curdev = device_parent(dev); ; curdev = device_parent(curdev)) {
-		if (!curdev || !device_xname(curdev))
+		if (!curdev || !curdev->dv_xname)
 			panic("sbus_establish: can't find sbus parent for %s",
-			      device_xname(sd->sd_dev)
-					? device_xname(sd->sd_dev)
+			      sd->sd_dev->dv_xname
+					? sd->sd_dev->dv_xname
 					: "<unknown>" );
 
-		if (strncmp(device_xname(curdev), "sbus", 4) == 0)
+		if (strncmp(curdev->dv_xname, "sbus", 4) == 0)
 			break;
 	}
 	sc = (struct sbus_softc *) curdev;
@@ -446,15 +459,15 @@ void
 sbusreset(int sbus)
 {
 	register struct sbusdev *sd;
-	struct sbus_softc *sc = device_lookup_private(&sbus_cd, sbus);
+	struct sbus_softc *sc = sbus_cd.cd_devs[sbus];
 	struct device *dev;
 
-	printf("reset %s:", device_xname(&sc->sc_dev));
+	printf("reset %s:", sc->sc_dev.dv_xname);
 	for (sd = sc->sc_sbdev; sd != NULL; sd = sd->sd_bchain) {
 		if (sd->sd_reset) {
 			dev = sd->sd_dev;
 			(*sd->sd_reset)(dev);
-			printf(" %s", device_xname(dev));
+			printf(" %s", dev->dv_xname);
 		}
 	}
 	/* Reload iommu regs */
@@ -633,7 +646,7 @@ sbus_intr_establish(bus_space_tag_t t, int pri, int level,
 	ih->ih_arg = arg;
 	ih->ih_number = vec;
 	ih->ih_pil = (1<<ipl);
-	intr_establish(ipl, level != IPL_VM, ih);
+	intr_establish(ipl, ih);
 	return (ih);
 }
 
@@ -651,35 +664,100 @@ sbus_alloc_dmatag(struct sbus_softc *sc)
 	sdt->_cookie = sc;
 	sdt->_parent = psdt;
 #define PCOPY(x)	sdt->x = psdt->x
-	sdt->_dmamap_create = sbus_dmamap_create;
+	PCOPY(_dmamap_create);
 	PCOPY(_dmamap_destroy);
-	sdt->_dmamap_load = iommu_dvmamap_load;
+	sdt->_dmamap_load = sbus_dmamap_load;
 	PCOPY(_dmamap_load_mbuf);
 	PCOPY(_dmamap_load_uio);
-	sdt->_dmamap_load_raw = iommu_dvmamap_load_raw;
-	sdt->_dmamap_unload = iommu_dvmamap_unload;
-	sdt->_dmamap_sync = iommu_dvmamap_sync;
-	sdt->_dmamem_alloc = iommu_dvmamem_alloc;
-	sdt->_dmamem_free = iommu_dvmamem_free;
-	sdt->_dmamem_map = iommu_dvmamem_map;
-	sdt->_dmamem_unmap = iommu_dvmamem_unmap;
+	sdt->_dmamap_load_raw = sbus_dmamap_load_raw;
+	sdt->_dmamap_unload = sbus_dmamap_unload;
+	sdt->_dmamap_sync = sbus_dmamap_sync;
+	sdt->_dmamem_alloc = sbus_dmamem_alloc;
+	sdt->_dmamem_free = sbus_dmamem_free;
+	sdt->_dmamem_map = sbus_dmamem_map;
+	sdt->_dmamem_unmap = sbus_dmamem_unmap;
 	PCOPY(_dmamem_mmap);
 #undef	PCOPY
 	sc->sc_dmatag = sdt;
 	return (sdt);
 }
 
-static int
-sbus_dmamap_create(bus_dma_tag_t t, bus_size_t size, int nsegments,
-	bus_size_t maxsegsz, bus_size_t boundary, int flags,
-	bus_dmamap_t *dmamp)
+int
+sbus_dmamap_load(bus_dma_tag_t tag, bus_dmamap_t map, void *buf,
+	bus_size_t buflen, struct proc *p, int flags)
 {
-	struct sbus_softc *sc = (struct sbus_softc *)t->_cookie;
-	int error;
+	struct sbus_softc *sc = (struct sbus_softc *)tag->_cookie;
 
-	error = bus_dmamap_create(t->_parent, size, nsegments, maxsegsz,
-				  boundary, flags, dmamp);
-	if (error == 0)
-		(*dmamp)->_dm_cookie = &sc->sc_sb;
-	return error;
+	return (iommu_dvmamap_load(tag, &sc->sc_sb, map, buf, buflen, p, flags));
+}
+
+int
+sbus_dmamap_load_raw(bus_dma_tag_t tag, bus_dmamap_t map,
+	bus_dma_segment_t *segs, int nsegs, bus_size_t size, int flags)
+{
+	struct sbus_softc *sc = (struct sbus_softc *)tag->_cookie;
+
+	return (iommu_dvmamap_load_raw(tag, &sc->sc_sb, map, segs, nsegs, flags, size));
+}
+
+void
+sbus_dmamap_unload(bus_dma_tag_t tag, bus_dmamap_t map)
+{
+	struct sbus_softc *sc = (struct sbus_softc *)tag->_cookie;
+
+	iommu_dvmamap_unload(tag, &sc->sc_sb, map);
+}
+
+void
+sbus_dmamap_sync(bus_dma_tag_t tag, bus_dmamap_t map, bus_addr_t offset,
+	bus_size_t len, int ops)
+{
+	struct sbus_softc *sc = (struct sbus_softc *)tag->_cookie;
+
+	if (ops & (BUS_DMASYNC_PREREAD|BUS_DMASYNC_PREWRITE)) {
+		/* Flush the CPU then the IOMMU */
+		bus_dmamap_sync(tag->_parent, map, offset, len, ops);
+		iommu_dvmamap_sync(tag, &sc->sc_sb, map, offset, len, ops);
+	}
+	if (ops & (BUS_DMASYNC_POSTREAD|BUS_DMASYNC_POSTWRITE)) {
+		/* Flush the IOMMU then the CPU */
+		iommu_dvmamap_sync(tag, &sc->sc_sb, map, offset, len, ops);
+		bus_dmamap_sync(tag->_parent, map, offset, len, ops);
+	}
+}
+
+int
+sbus_dmamem_alloc(bus_dma_tag_t tag, bus_size_t size, bus_size_t alignment,
+	bus_size_t boundary, bus_dma_segment_t *segs, int nsegs, int *rsegs,
+	int flags)
+{
+	struct sbus_softc *sc = (struct sbus_softc *)tag->_cookie;
+
+	return (iommu_dvmamem_alloc(tag, &sc->sc_sb, size, alignment, boundary,
+	    segs, nsegs, rsegs, flags));
+}
+
+void
+sbus_dmamem_free(bus_dma_tag_t tag, bus_dma_segment_t *segs, int nsegs)
+{
+	struct sbus_softc *sc = (struct sbus_softc *)tag->_cookie;
+
+	iommu_dvmamem_free(tag, &sc->sc_sb, segs, nsegs);
+}
+
+int
+sbus_dmamem_map(bus_dma_tag_t tag, bus_dma_segment_t *segs, int nsegs,
+	size_t size, caddr_t *kvap, int flags)
+{
+	struct sbus_softc *sc = (struct sbus_softc *)tag->_cookie;
+
+	return (iommu_dvmamem_map(tag, &sc->sc_sb, segs, nsegs, size, kvap, flags));
+}
+
+void
+sbus_dmamem_unmap(bus_dma_tag_t tag, caddr_t kva, size_t size)
+{
+	struct sbus_softc *sc = (struct sbus_softc *)tag->_cookie;
+
+	iommu_dvmamem_unmap(tag, &sc->sc_sb, kva, size);
 }

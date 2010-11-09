@@ -1,4 +1,4 @@
-/*	$NetBSD: ct.c,v 1.17 2009/01/13 13:35:53 yamt Exp $ */
+/*	$NetBSD: ct.c,v 1.12 2007/10/08 20:12:06 ad Exp $ */
 
 /*-
  * Copyright (c) 1996-2003 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -121,7 +128,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ct.c,v 1.17 2009/01/13 13:35:53 yamt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ct.c,v 1.12 2007/10/08 20:12:06 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -298,14 +305,13 @@ ctattach(parent, self, aux)
 		return;
 
 	if (cs80reset(parent, sc->sc_slave, sc->sc_punit)) {
-		aprint_normal("\n");
-		aprint_error_dev(&sc->sc_dev, "can't reset device\n");
+		printf("\n%s: can't reset device\n", sc->sc_dev.dv_xname);
 		return;
 	}
 
 	if (cs80describe(parent, sc->sc_slave, sc->sc_punit, &csd)) {
-		aprint_normal("\n");
-		aprint_error_dev(&sc->sc_dev, "didn't respond to describe command\n");
+		printf("\n%s: didn't respond to describe command\n",
+		    sc->sc_dev.dv_xname);
 		return;
 	}
 	memset(name, 0, sizeof(name));
@@ -317,7 +323,7 @@ ctattach(parent, self, aux)
 #ifdef DEBUG
 	if (ctdebug & CDB_IDENT) {
 		printf("\n%s: name: ('%s')\n",
-		    device_xname(&sc->sc_dev),name);
+		    sc->sc_dev.dv_xname,name);
 		printf("  iuw %x, maxxfr %d, ctype %d\n",
 		    csd.d_iuw, csd.d_cmaxxfr, csd.d_ctype);
 		printf("  utype %d, bps %d, blkbuf %d, burst %d, blktime %d\n",
@@ -329,7 +335,7 @@ ctattach(parent, self, aux)
 		printf("  maxcyl/head/sect %d/%d/%d, maxvsect %d, inter %d\n",
 		    csd.d_maxcylhead >> 8 , csd.d_maxcylhead & 0xff,
 		    csd.d_maxsect, csd.d_maxvsectl, csd.d_interleave);
-		printf("%s", device_xname(&sc->sc_dev));
+		printf("%s", sc->sc_dev.dv_xname);
 	}
 #endif
 
@@ -363,7 +369,7 @@ ctattach(parent, self, aux)
 
 	if (gpibregister(sc->sc_ic, sc->sc_slave, ctcallback, sc,
 	    &sc->sc_hdl)) {
-		aprint_error_dev(&sc->sc_dev, "can't register callback\n");
+		printf("%s: can't register callback\n", sc->sc_dev.dv_xname);
 		return;
 	}
 
@@ -372,12 +378,15 @@ ctattach(parent, self, aux)
 
 /*ARGSUSED*/
 int
-ctopen(dev_t dev, int flag, int type, struct lwp *l)
+ctopen(dev, flag, type, l)
+	dev_t dev;
+	int flag, type;
+	struct lwp *l;
 {
 	struct ct_softc *sc;
 	u_int8_t opt;
 
-	sc = device_lookup_private(&ct_cd, CTUNIT(dev));
+	sc = device_lookup(&ct_cd, CTUNIT(dev));
 	if (sc == NULL || (sc->sc_flags & CTF_ALIVE) == 0)
 		return (ENXIO);
 
@@ -401,11 +410,14 @@ ctopen(dev_t dev, int flag, int type, struct lwp *l)
 
 /*ARGSUSED*/
 int
-ctclose(dev_t dev, int flag, int fmt, struct lwp *l)
+ctclose(dev, flag, fmt, l)
+	dev_t dev;
+	int flag, fmt;
+	struct lwp *l;
 {
 	struct ct_softc *sc;
 
-	sc = device_lookup_private(&ct_cd, CTUNIT(dev));
+	sc = device_lookup(&ct_cd, CTUNIT(dev));
 	if (sc == NULL)
 		return (ENXIO);
 
@@ -418,7 +430,7 @@ ctclose(dev_t dev, int flag, int fmt, struct lwp *l)
 		else
 			sc->sc_eofp--;
 		DPRINTF(CDB_BSF, ("%s: ctclose backup eofs prt %d blk %d\n",
-		    device_xname(&sc->sc_dev), sc->sc_eofp,
+		    sc->sc_dev.dv_xname, sc->sc_eofp,
 		    sc->sc_eofs[sc->sc_eofp]));
 	}
 
@@ -432,13 +444,16 @@ ctclose(dev_t dev, int flag, int fmt, struct lwp *l)
 }
 
 void
-ctcommand(dev_t dev, int cmd, int cnt)
+ctcommand(dev, cmd, cnt)
+	dev_t dev;
+	int cmd;
+	int cnt;
 {
 	struct ct_softc *sc;
 	struct buf *bp;
 	struct buf *nbp = 0;
 
-	sc = device_lookup_private(&ct_cd, CTUNIT(dev));
+	sc = device_lookup(&ct_cd, CTUNIT(dev));
 	bp = &sc->sc_bufstore;
 
 	DPRINTF(CDB_FOLLOW, ("ctcommand: called\n"));
@@ -460,7 +475,6 @@ ctcommand(dev_t dev, int cmd, int cnt)
 	sc->sc_bp = bp;
 	sc->sc_cmd = cmd;
 	bp->b_dev = dev;
-	bp->b_objlock = &buffer_lock;
 	if (cmd == MTFSF) {
 		nbp = (struct buf *)geteblk(MAXBSIZE);
 		bp->b_data = nbp->b_data;
@@ -468,14 +482,12 @@ ctcommand(dev_t dev, int cmd, int cnt)
 	}
 
 	while (cnt-- > 0) {
-		bp->b_flags = 0;
-		bp->b_cflags = BC_BUSY;
-		bp->b_oflags = 0;
+		bp->b_flags = B_BUSY;
 		if (cmd == MTBSF) {
 			sc->sc_blkno = sc->sc_eofs[sc->sc_eofp];
 			sc->sc_eofp--;
 			DPRINTF(CDB_BSF, ("%s: backup eof pos %d blk %d\n",
-			    device_xname(&sc->sc_dev), sc->sc_eofp,
+			    sc->sc_dev.dv_xname, sc->sc_eofp,
 			    sc->sc_eofs[sc->sc_eofp]));
 		}
 		ctstrategy(bp);
@@ -488,7 +500,8 @@ ctcommand(dev_t dev, int cmd, int cnt)
 }
 
 void
-ctstrategy(struct buf *bp)
+ctstrategy(bp)
+	struct buf *bp;
 {
 	struct ct_softc *sc;
 	int s;
@@ -497,10 +510,10 @@ ctstrategy(struct buf *bp)
 	    bp, bp->b_dev, bp->b_blkno, bp->b_bcount,
 	    (bp->b_flags & B_READ) ? 'R' : 'W'));
 
-	sc = device_lookup_private(&ct_cd, CTUNIT(bp->b_dev));
+	sc = device_lookup(&ct_cd, CTUNIT(bp->b_dev));
 
 	s = splbio();
-	bufq_put(sc->sc_tab, bp);
+	BUFQ_PUT(sc->sc_tab, bp);
 	if (sc->sc_active == 0) {
 		sc->sc_active = 1;
 		ctustart(sc);
@@ -514,7 +527,7 @@ ctustart(sc)
 {
 	struct buf *bp;
 
-	bp = bufq_peek(sc->sc_tab);
+	bp = BUFQ_PEEK(sc->sc_tab);
 	sc->sc_addr = bp->b_data;
 	sc->sc_resid = bp->b_bcount;
 	if (gpibrequest(sc->sc_ic, sc->sc_hdl))
@@ -533,7 +546,7 @@ ctstart(sc)
 	slave = sc->sc_slave;
 	punit = sc->sc_punit;
 
-	bp = bufq_peek(sc->sc_tab);
+	bp = BUFQ_PEEK(sc->sc_tab);
 	if ((sc->sc_flags & CTF_CMD) && sc->sc_bp == bp) {
 		switch(sc->sc_cmd) {
 		case MTFSF:
@@ -572,7 +585,7 @@ ctstart(sc)
 		case MTREW:
 			sc->sc_blkno = 0;
 			DPRINTF(CDB_BSF, ("%s: clearing eofs\n",
-			    device_xname(&sc->sc_dev)));
+			    sc->sc_dev.dv_xname));
 			for (i=0; i<EOFS; i++)
 				sc->sc_eofs[i] = 0;
 			sc->sc_eofp = 0;
@@ -735,9 +748,9 @@ ctintr(sc)
 	slave = sc->sc_slave;
 	punit = sc->sc_punit;
 
-	bp = bufq_peek(sc->sc_tab);
+	bp = BUFQ_PEEK(sc->sc_tab);
 	if (bp == NULL) {
-		aprint_error_dev(&sc->sc_dev, "bp == NULL\n");
+		printf("%s: bp == NULL\n", sc->sc_dev.dv_xname);
 		return;
 	}
 	if (sc->sc_flags & CTF_IO) {
@@ -787,18 +800,18 @@ ctintr(sc)
 				if (sc->sc_stat.c_aef & 0x4000)
 					tprintf(sc->sc_tpr,
 					    "%s: uninitialized media\n",
-					    device_xname(&sc->sc_dev));
+					    sc->sc_dev.dv_xname);
 				if (sc->sc_stat.c_aef & 0x1000)
 					tprintf(sc->sc_tpr,
 					    "%s: not ready\n",
-					    device_xname(&sc->sc_dev));
+					    sc->sc_dev.dv_xname);
 				if (sc->sc_stat.c_aef & 0x0800)
 					tprintf(sc->sc_tpr,
 					    "%s: write protect\n",
-					    device_xname(&sc->sc_dev));
+					    sc->sc_dev.dv_xname);
 			} else {
 				printf("%s err: v%d u%d ru%d bn%d, ",
-				    device_xname(&sc->sc_dev),
+				    sc->sc_dev.dv_xname,
 				    (sc->sc_stat.c_vu>>4)&0xF,
 				    sc->sc_stat.c_vu&0xF,
 				    sc->sc_stat.c_pend,
@@ -810,7 +823,8 @@ ctintr(sc)
 				    sc->sc_stat.c_ief);
 			}
 		} else
-			aprint_error_dev(&sc->sc_dev, "request status failed\n");
+			printf("%s: request status failed\n",
+			    sc->sc_dev.dv_xname);
 		bp->b_error = EIO;
 		goto done;
 	} else
@@ -863,10 +877,10 @@ ctdone(sc, bp)
 	struct buf *bp;
 {
 
-	(void)bufq_get(sc->sc_tab);
+	(void)BUFQ_GET(sc->sc_tab);
 	biodone(bp);
 	gpibrelease(sc->sc_ic, sc->sc_hdl);
-	if (bufq_peek(sc->sc_tab) == NULL) {
+	if (BUFQ_PEEK(sc->sc_tab) == NULL) {
 		sc->sc_active = 0;
 		return;
 	}
@@ -954,6 +968,6 @@ ctaddeof(sc)
 			sc->sc_eofs[sc->sc_eofp] = sc->sc_blkno - 1;
 	}
 	DPRINTF(CDB_BSF, ("%s: add eof pos %d blk %d\n",
-		       device_xname(&sc->sc_dev), sc->sc_eofp,
+		       sc->sc_dev.dv_xname, sc->sc_eofp,
 		       sc->sc_eofs[sc->sc_eofp]));
 }

@@ -1,4 +1,4 @@
-/*	$NetBSD: int_limits.h,v 1.8 2008/04/28 20:23:28 martin Exp $	*/
+/*	$NetBSD: int_limits.h,v 1.5 2005/12/11 12:18:09 christos Exp $	*/
 
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -59,8 +66,8 @@
 #endif
 
 /* maximum values of exact-width unsigned integer types */
-#define	UINT8_MAX	0xff				/* uint8_t	  */
-#define	UINT16_MAX	0xffff				/* uint16_t	  */
+#define	UINT8_MAX	0xffU				/* uint8_t	  */
+#define	UINT16_MAX	0xffffU				/* uint16_t	  */
 #define	UINT32_MAX	0xffffffffU			/* uint32_t	  */
 #ifdef _LP64
 #define	UINT64_MAX	0xffffffffffffffffUL		/* uint64_t	  */
@@ -91,8 +98,8 @@
 #endif
 
 /* maximum values of minimum-width unsigned integer types */
-#define	UINT_LEAST8_MAX	 0xff				/* uint_least8_t  */
-#define	UINT_LEAST16_MAX 0xffff				/* uint_least16_t */
+#define	UINT_LEAST8_MAX	 0xffU				/* uint_least8_t  */
+#define	UINT_LEAST16_MAX 0xffffU			/* uint_least16_t */
 #define	UINT_LEAST32_MAX 0xffffffffU			/* uint_least32_t */
 #ifdef _LP64
 #define	UINT_LEAST64_MAX 0xffffffffffffffffUL		/* uint_least64_t */

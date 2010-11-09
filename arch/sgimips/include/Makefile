@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile,v 1.19 2008/11/25 09:47:40 he Exp $
+#	$NetBSD: Makefile,v 1.16 2006/07/26 19:54:58 drochner Exp $
 
 INCSDIR= /usr/include/sgimips
 
@@ -13,14 +13,14 @@ INCS=	asm.h ansi.h aout_machdep.h autoconf.h \
 	intr.h \
 	kcore.h kdbparam.h \
 	limits.h lock.h locore.h \
-	math.h mcontext.h mips_opcode.h mutex.h \
+	math.h mcontext.h mips_opcode.h \
 	param.h pci_machdep.h pcb.h pmap.h pmc.h proc.h profile.h psl.h pte.h \
 	ptrace.h \
-	reg.h regdef.h regnum.h reloc.h rwlock.h \
+	reg.h regdef.h regnum.h reloc.h \
 	setjmp.h signal.h stdarg.h \
 	trap.h types.h \
 	varargs.h vmparam.h \
 	wchar_limits.h \
-	z8530var.h \
+	z8530var.h
 
 .include <bsd.kinc.mk>

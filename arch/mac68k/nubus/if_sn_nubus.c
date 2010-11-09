@@ -1,4 +1,4 @@
-/*	$NetBSD: if_sn_nubus.c,v 1.29 2008/04/23 13:29:45 tsutsui Exp $	*/
+/*	$NetBSD: if_sn_nubus.c,v 1.26 2005/12/11 12:18:03 christos Exp $	*/
 
 /*
  * Copyright (C) 1997 Allen Briggs
@@ -31,44 +31,54 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_sn_nubus.c,v 1.29 2008/04/23 13:29:45 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_sn_nubus.c,v 1.26 2005/12/11 12:18:03 christos Exp $");
+
+#include "opt_inet.h"
 
 #include <sys/param.h>
-#include <sys/systm.h>
 #include <sys/device.h>
+#include <sys/errno.h>
 #include <sys/ioctl.h>
+#include <sys/socket.h>
+#include <sys/syslog.h>
+#include <sys/systm.h>
 
 #include <net/if.h>
 #include <net/if_ether.h>
 
+#if 0 /* XXX this shouldn't be necessary; else reinsert */
+#ifdef INET
+#include <netinet/in.h>
+#include <netinet/if_inarp.h>
+#endif
+#endif
+
 #include <machine/bus.h>
 #include <machine/viareg.h>
 
-#include <dev/ic/dp83932reg.h>
-#include <dev/ic/dp83932var.h>
-
 #include <mac68k/nubus/nubus.h>
+#include <mac68k/dev/if_snreg.h>
 #include <mac68k/dev/if_snvar.h>
 
-static int	sn_nubus_match(device_t, cfdata_t, void *);
-static void	sn_nubus_attach(device_t, device_t, void *);
+static int	sn_nubus_match(struct device *, struct cfdata *, void *);
+static void	sn_nubus_attach(struct device *, struct device *, void *);
 static int	sn_nb_card_vendor(bus_space_tag_t, bus_space_handle_t,
 		    struct nubus_attach_args *);
 
-CFATTACH_DECL_NEW(sn_nubus, sizeof(struct sonic_softc),
+CFATTACH_DECL(sn_nubus, sizeof(struct sn_softc),
     sn_nubus_match, sn_nubus_attach, NULL, NULL);
 
 
 static int
-sn_nubus_match(device_t parent, cfdata_t cf, void *aux)
+sn_nubus_match(struct device *parent, struct cfdata *cf, void *aux)
 {
-	struct nubus_attach_args *na = aux;
+	struct nubus_attach_args *na = (struct nubus_attach_args *) aux;
 	bus_space_handle_t bsh;
 	int rv;
 
 	if (bus_space_map(na->na_tag,
 	    NUBUS_SLOT2PA(na->slot), NBMEMSIZE, 0, &bsh))
-		return 0;
+		return (0);
 
 	rv = 0;
 
@@ -96,46 +106,48 @@ sn_nubus_match(device_t parent, cfdata_t cf, void *aux)
  * Install interface into kernel networking data structures
  */
 static void
-sn_nubus_attach(device_t parent, device_t self, void *aux)
+sn_nubus_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct sonic_softc *sc = device_private(self);
-	struct nubus_attach_args *na = aux;
+	struct sn_softc *sc = (void *)self;
+	struct nubus_attach_args *na = (struct nubus_attach_args *)aux;
 	int i, success, offset;
 	bus_space_tag_t	bst;
 	bus_space_handle_t bsh, tmp_bsh;
-	uint8_t myaddr[ETHER_ADDR_LEN];
+	u_int8_t myaddr[ETHER_ADDR_LEN];
 	const char *cardtype;
+
+	(void)(&offset);	/* Work around lame gcc initialization bug */
 
 	bst = na->na_tag;
 	if (bus_space_map(bst, NUBUS_SLOT2PA(na->slot), NBMEMSIZE, 0, &bsh)) {
-		aprint_error(": failed to map memory space.\n");
+		printf(": failed to map memory space.\n");
 		return;
 	}
 
-	sc->sc_dev = self;
-	sc->sc_st = bst;
-	sc->sc_dmat = na->na_dmat;
+	sc->sc_regt = bst;
 
 	cardtype = nubus_get_card_name(bst, bsh, na->fmt);
 
 	success = 0;
-	offset = 0;
+
+	sc->slotno = na->slot;
 
 	switch (sn_nb_card_vendor(bst, bsh, na)) {
 	case SN_VENDOR_DAYNA:
-		sc->sc_dcr = DCR_BMS | DCR_RFT1 | DCR_TFT0;
-		sc->sc_dcr2 = 0;
-		sc->sc_32bit = 1;	/* 32 bit card */
+		sc->snr_dcr = DCR_ASYNC | DCR_WAIT0 |
+		    DCR_DMABLOCK | DCR_RFT16 | DCR_TFT16;
+		sc->snr_dcr2 = 0;
+		sc->bitmode = 1;	/* 32 bit card */
 
 		if (bus_space_subregion(bst, bsh,
-		    0x00180000, SONIC_NREGS * 4, &sc->sc_sh)) {
-			aprint_error(": failed to map register space.\n");
+		    0x00180000, SN_REGSIZE, &sc->sc_regh)) {
+			printf(": failed to map register space.\n");
 			break;
 		}
 
 		if (bus_space_subregion(bst, bsh,
 		    0x00ffe004, ETHER_ADDR_LEN, &tmp_bsh)) {
-			aprint_error(": failed to map ROM space.\n");
+			printf(": failed to map ROM space.\n");
 			break;
 		}
 
@@ -146,19 +158,20 @@ sn_nubus_attach(device_t parent, device_t self, void *aux)
 		break;
 
 	case SN_VENDOR_APPLE:
-		sc->sc_dcr = DCR_BMS | DCR_RFT1 | DCR_TFT0;
-		sc->sc_dcr2 = 0;
-		sc->sc_32bit = 1; /* 32 bit card */
+		sc->snr_dcr = DCR_ASYNC | DCR_WAIT0 |
+		    DCR_DMABLOCK | DCR_RFT16 | DCR_TFT16;
+		sc->snr_dcr2 = 0;
+		sc->bitmode = 1; /* 32 bit card */
 
 		if (bus_space_subregion(bst, bsh,
-		    0x0, SONIC_NREGS * 4, &sc->sc_sh)) {
-			aprint_error(": failed to map register space.\n");
+		    0x0, SN_REGSIZE, &sc->sc_regh)) {
+			printf(": failed to map register space.\n");
 			break;
 		}
 
 		if (bus_space_subregion(bst, bsh,
 		    0x40000, ETHER_ADDR_LEN, &tmp_bsh)) {
-			aprint_error(": failed to map ROM space.\n");
+			printf(": failed to map ROM space.\n");
 			break;
 		}
 
@@ -169,20 +182,20 @@ sn_nubus_attach(device_t parent, device_t self, void *aux)
 		break;
 	
 	case SN_VENDOR_APPLE16:
-		sc->sc_dcr = DCR_EXBUS | DCR_BMS | DCR_PO1 |
-		    DCR_RFT1 | DCR_TFT0;
-		sc->sc_dcr2 = 0;
-		sc->sc_32bit = 0; /* 16 bit card */
+		sc->snr_dcr = DCR_ASYNC | DCR_WAIT0 | DCR_EXBUS | 
+		    DCR_DMABLOCK | DCR_PO1 | DCR_RFT16 | DCR_TFT16;
+		sc->snr_dcr2 = 0;
+		sc->bitmode = 0; /* 16 bit card */
 
 		if (bus_space_subregion(bst, bsh,
-		    0x0, SONIC_NREGS * 4, &sc->sc_sh)) {
-			aprint_error(": failed to map register space.\n");
+		    0x0, SN_REGSIZE, &sc->sc_regh)) {
+			printf(": failed to map register space.\n");
 			break;
 		}
 
 		if (bus_space_subregion(bst, bsh,
 		    0x40000, ETHER_ADDR_LEN, &tmp_bsh)) {
-			aprint_error(": failed to map ROM space.\n");
+			printf(": failed to map ROM space.\n");
 			break;
 		}
 
@@ -193,19 +206,20 @@ sn_nubus_attach(device_t parent, device_t self, void *aux)
 		break;
 
 	case SN_VENDOR_ASANTELC: /* Macintosh LC Ethernet Adapter */
-		sc->sc_dcr = DCR_BMS | DCR_PO1 | DCR_RFT1 | DCR_TFT0;
-		sc->sc_dcr2 = 0;
-		sc->sc_32bit = 0; /* 16 bit card */
+		sc->snr_dcr = DCR_ASYNC | DCR_WAIT0 |
+		    DCR_DMABLOCK | DCR_PO1 | DCR_RFT16 | DCR_TFT16;
+		sc->snr_dcr2 = 0;
+		sc->bitmode = 0; /* 16 bit card */
 
 		if (bus_space_subregion(bst, bsh,
-		    0x0, SONIC_NREGS * 4, &sc->sc_sh)) {
-			aprint_error(": failed to map register space.\n");
+		    0x0, SN_REGSIZE, &sc->sc_regh)) {
+			printf(": failed to map register space.\n");
 			break;
 		}
 
 		if (bus_space_subregion(bst, bsh,
 		    0x400000, ETHER_ADDR_LEN, &tmp_bsh)) {
-			aprint_error(": failed to map ROM space.\n");
+			printf(": failed to map ROM space.\n");
 			break;
 		}
 
@@ -222,11 +236,11 @@ sn_nubus_attach(device_t parent, device_t self, void *aux)
 		 * for a new card, the following defaults are a
 		 * good starting point.
 		 */
-		sc->sc_dcr = DCR_SBUS | DCR_BMS | DCR_RFT1 | DCR_TFT0;
-		sc->sc_dcr2 = 0;
-		sc->sc_32bit = 1;
+		sc->snr_dcr = DCR_SYNC | DCR_WAIT0 | DCR_DW32 |
+		    DCR_DMABLOCK | DCR_RFT16 | DCR_TFT16;
+		sc->snr_dcr2 = 0;
 		success = 0;
-		aprint_error(": unknown card: attachment incomplete.\n");
+		printf(": unknown card: attachment incomplete.\n");
 	}
 
 	if (!success) {
@@ -235,17 +249,19 @@ sn_nubus_attach(device_t parent, device_t self, void *aux)
 	}
 
 	/* Regs are addressed as words, big endian. */
-	for (i = 0; i < SONIC_NREGS; i++) {
-		sc->sc_regmap[i] = (bus_size_t)((i * 4) + offset);
+	for (i = 0; i < SN_NREGS; i++) {
+		sc->sc_reg_map[i] = (bus_size_t)((i * 4) + offset);
 	}
 
-	sc->sc_bigendian = 1;
+	printf(": %s\n", cardtype);
 
-	aprint_error(": %s\n", cardtype);
+	/* snsetup returns 1 if something fails */
+	if (snsetup(sc, myaddr)) {
+		bus_space_unmap(bst, bsh, NBMEMSIZE);
+		return;
+	}
 
-	add_nubus_intr(na->slot, (void (*)(void *))sonic_intr, (void *)sc);
-
-	sonic_attach(sc, myaddr);
+	add_nubus_intr(sc->slotno, snintr, (void *)sc);
 
 	return;
 }

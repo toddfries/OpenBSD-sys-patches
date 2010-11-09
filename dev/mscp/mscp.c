@@ -1,4 +1,4 @@
-/*	$NetBSD: mscp.c,v 1.30 2009/01/19 19:15:07 mjf Exp $	*/
+/*	$NetBSD: mscp.c,v 1.27 2007/10/19 12:00:36 ad Exp $	*/
 
 /*
  * Copyright (c) 1988 Regents of the University of California.
@@ -76,7 +76,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mscp.c,v 1.30 2009/01/19 19:15:07 mjf Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mscp.c,v 1.27 2007/10/19 12:00:36 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/buf.h>
@@ -205,7 +205,7 @@ loop:
 			mi->mi_flags |= MSC_READY;
 		} else {
 			printf("%s: SETCTLRC failed: %d ",
-			    device_xname(&mi->mi_dev), mp->mscp_status);
+			    mi->mi_dev.dv_xname, mp->mscp_status);
 			mscp_printevent(mp);
 		}
 		goto done;
@@ -245,7 +245,7 @@ loop:
 	case MSCPT_MAINTENANCE:
 	default:
 		printf("%s: unit %d: unknown message type 0x%x ignored\n",
-			device_xname(&mi->mi_dev), mp->mscp_unit,
+			mi->mi_dev.dv_xname, mp->mscp_unit,
 			MSCP_MSGTYPE(mp->mscp_msgtc));
 		goto done;
 	}
@@ -266,7 +266,7 @@ loop:
 		 * invalid commands), but that is the way of it.
 		 */
 		if (st == M_ST_INVALCMD && mp->mscp_cmdref != 0) {
-			printf("%s: bad lbn (%d)?\n", device_xname(drive),
+			printf("%s: bad lbn (%d)?\n", drive->dv_xname,
 				(int)mp->mscp_seq.seq_lbn);
 			error = EIO;
 			goto rwend;
@@ -297,24 +297,11 @@ loop:
 			break;
 
 		if (drive == 0) {
-			struct mscp_work *mw;
+			struct	drive_attach_args da;
 
-			mutex_spin_enter(&mi->mi_mtx);
-
-			mw = SLIST_FIRST(&mi->mi_freelist);
-			if (mw == NULL) {
-				aprint_error_dev(&mi->mi_dev,
-				    "couldn't attach drive (no free items)\n");
-				mutex_spin_exit(&mi->mi_mtx);
-			} else {
-				SLIST_REMOVE_HEAD(&mi->mi_freelist, mw_list);
-				mutex_spin_exit(&mi->mi_mtx);
-
-				mw->mw_mi = mi;
-				mw->mw_mp = *mp;
-				workqueue_enqueue(mi->mi_wq,
-				    (struct work *)mw, NULL);
-			}
+			da.da_mp = (struct mscp *)mp;
+			da.da_typ = mi->mi_type;
+			config_found(&mi->mi_dev, (void *)&da, mscp_print);
 		} else
 			/* Hack to avoid complaints */
 			if (!(((mp->mscp_event & M_ST_MASK) == M_ST_AVAILABLE)
@@ -363,7 +350,7 @@ rwend:
 			 * No buffer means there is a bug somewhere!
 			 */
 			printf("%s: io done, but bad xfer number?\n",
-			    device_xname(drive));
+			    drive->dv_xname);
 			mscp_hexdump(mp);
 			break;
 		}
@@ -387,6 +374,16 @@ rwend:
 #ifdef notyet
 			(*md->md_offline)(ui, mp);
 #endif
+		}
+
+		/*
+		 * If the transfer has something to do with bad
+		 * block forwarding, let the driver handle the
+		 * rest.
+		 */
+		if ((bp->b_flags & B_BAD) != 0 && me->me_bb != NULL) {
+			(*me->me_bb)(drive, mp, bp);
+			goto out;
 		}
 
 		/*
@@ -430,7 +427,7 @@ out:
 		 * handle it (if it does replaces).
 		 */
 		if (me->me_replace == NULL)
-			printf("%s: bogus REPLACE end\n", device_xname(drive));
+			printf("%s: bogus REPLACE end\n", drive->dv_xname);
 		else
 			(*me->me_replace)(drive, mp);
 		break;
@@ -442,7 +439,7 @@ out:
 		 */
 unknown:
 		printf("%s: unknown opcode 0x%x status 0x%x ignored\n",
-			device_xname(drive), mp->mscp_opcode, mp->mscp_status);
+			drive->dv_xname, mp->mscp_opcode, mp->mscp_status);
 #ifdef DIAGNOSTIC
 		mscp_hexdump(mp);
 #endif
@@ -482,22 +479,3 @@ mscp_requeue(mi)
 	panic("mscp_requeue");
 }
 
-void
-mscp_worker(struct work *wk, void *dummy)
-{
-	struct mscp_softc *mi;
-	struct mscp_work *mw;
-	struct	drive_attach_args da;
-
-	mw = (struct mscp_work *)wk;
-	mi = mw->mw_mi;
-
-	da.da_mp = &mw->mw_mp;
-	da.da_typ = mi->mi_type;
-
-	config_found(&mi->mi_dev, (void *)&da, mscp_print);
-
-	mutex_spin_enter(&mi->mi_mtx);
-	SLIST_INSERT_HEAD(&mw->mw_mi->mi_freelist, mw, mw_list);
-	mutex_spin_exit(&mi->mi_mtx);
-}

@@ -1,9 +1,9 @@
-/*	$NetBSD: gayle_pcmcia.c,v 1.23 2007/10/17 19:53:15 garbled Exp $ */
+/*	$NetBSD: gayle_pcmcia.c,v 1.20 2006/03/30 04:06:42 chs Exp $ */
 
 /* public domain */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: gayle_pcmcia.c,v 1.23 2007/10/17 19:53:15 garbled Exp $");
+__KERNEL_RCSID(0, "$NetBSD: gayle_pcmcia.c,v 1.20 2006/03/30 04:06:42 chs Exp $");
 
 /* PCMCIA front-end driver for A1200's and A600's. */
 
@@ -51,6 +51,7 @@ static void	pccard_attach(struct device *, struct device *, void *);
 static void	pccard_attach_slot(struct pccard_slot *);
 static int	pccard_intr6(void *);
 static int	pccard_intr2(void *);
+static void	pccard_create_kthread(void *);
 static void	pccard_kthread(void *);
 
 static int pcf_mem_alloc(pcmcia_chipset_handle_t, bus_size_t,
@@ -128,7 +129,7 @@ pccard_attach(struct device *parent, struct device *myself, void *aux)
 	for (i = GAYLE_PCMCIA_START; i < GAYLE_PCMCIA_END; i += PAGE_SIZE)
 		pmap_enter(vm_map_pmap(kernel_map),
 		    i - GAYLE_PCMCIA_START + pcmcia_base, i,
-		    VM_PROT_READ | VM_PROT_WRITE, true);
+		    VM_PROT_READ | VM_PROT_WRITE, TRUE);
 	pmap_update(vm_map_pmap(kernel_map));
 
 	/* override the one-byte access methods for I/O space */
@@ -198,12 +199,7 @@ pccard_attach(struct device *parent, struct device *myself, void *aux)
 	self->intr2.isr_ipl = 2;
 	add_isr(&self->intr2);
 
-	if (kthread_create(PRI_NONE, 0, NULL, pccard_kthread, self,
-	    NULL, "pccard")) {
-		printf("%s: can't create kernel thread\n",
-			self->sc_dev.dv_xname);
-		panic("pccard kthread_create() failed");
-	}
+	kthread_create(pccard_create_kthread, self);
 
 	gayle.intena |= GAYLE_INT_DETECT | GAYLE_INT_IREQ;
 
@@ -217,6 +213,19 @@ pccard_attach(struct device *parent, struct device *myself, void *aux)
 	}
 
 	pccard_attach_slot(&self->devs[0]);
+}
+
+/* This is called as soon as it is possible to create a kernel thread */
+static void
+pccard_create_kthread(void *arg)
+{
+	struct pccard_softc *self = arg;
+
+	if (kthread_create1(pccard_kthread, self, NULL, "pccard thread")) {
+		printf("%s: can't create kernel thread\n",
+			self->sc_dev.dv_xname);
+		panic("pccard kthread_create() failed");
+	}
 }
 
 static int

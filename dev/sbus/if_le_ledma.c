@@ -1,4 +1,4 @@
-/*	$NetBSD: if_le_ledma.c,v 1.30 2008/04/28 20:23:57 martin Exp $	*/
+/*	$NetBSD: if_le_ledma.c,v 1.28 2007/10/19 12:01:11 ad Exp $	*/
 
 /*-
  * Copyright (c) 1997, 1998 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -31,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_le_ledma.c,v 1.30 2008/04/28 20:23:57 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_le_ledma.c,v 1.28 2007/10/19 12:01:11 ad Exp $");
 
 #include "opt_inet.h"
 #include "bpfilter.h"
@@ -67,8 +74,6 @@ __KERNEL_RCSID(0, "$NetBSD: if_le_ledma.c,v 1.30 2008/04/28 20:23:57 martin Exp 
 #include <dev/ic/am7990reg.h>
 #include <dev/ic/am7990var.h>
 
-#include "ioconf.h"
-
 /*
  * LANCE registers.
  */
@@ -88,8 +93,8 @@ struct	le_softc {
 #define MEMSIZE		(16*1024)	/* LANCE memory size */
 #define LEDMA_BOUNDARY	(16*1024*1024)	/* must not cross 16MB boundary */
 
-int	lematch_ledma(device_t, cfdata_t, void *);
-void	leattach_ledma(device_t, device_t, void *);
+int	lematch_ledma(struct device *, struct cfdata *, void *);
+void	leattach_ledma(struct device *, struct device *, void *);
 
 /*
  * Media types supported by the Sun4m.
@@ -99,7 +104,7 @@ static int lemedia[] = {
 	IFM_ETHER|IFM_10_5,
 	IFM_ETHER|IFM_AUTO,
 };
-#define NLEMEDIA	__arraycount(lemedia)
+#define NLEMEDIA	(sizeof(lemedia) / sizeof(lemedia[0]))
 
 void	lesetutp(struct lance_softc *);
 void	lesetaui(struct lance_softc *);
@@ -107,21 +112,25 @@ void	lesetaui(struct lance_softc *);
 int	lemediachange(struct lance_softc *);
 void	lemediastatus(struct lance_softc *, struct ifmediareq *);
 
-CFATTACH_DECL_NEW(le_ledma, sizeof(struct le_softc),
+CFATTACH_DECL(le_ledma, sizeof(struct le_softc),
     lematch_ledma, leattach_ledma, NULL, NULL);
+
+extern struct cfdriver le_cd;
 
 #if defined(_KERNEL_OPT)
 #include "opt_ddb.h"
 #endif
 
-static void lewrcsr(struct lance_softc *, uint16_t, uint16_t);
-static uint16_t lerdcsr(struct lance_softc *, uint16_t);
+static void lewrcsr(struct lance_softc *, u_int16_t, u_int16_t);
+static u_int16_t lerdcsr(struct lance_softc *, u_int16_t);
 static void lehwreset(struct lance_softc *);
 static void lehwinit(struct lance_softc *);
 static void lenocarrier(struct lance_softc *);
 
 static void
-lewrcsr(struct lance_softc *sc, uint16_t port, uint16_t val)
+lewrcsr(sc, port, val)
+	struct lance_softc *sc;
+	u_int16_t port, val;
 {
 	struct le_softc *lesc = (struct le_softc *)sc;
 	bus_space_tag_t t = lesc->sc_bustag;
@@ -140,8 +149,10 @@ lewrcsr(struct lance_softc *sc, uint16_t port, uint16_t val)
 #endif
 }
 
-static uint16_t
-lerdcsr(struct lance_softc *sc, uint16_t port)
+static u_int16_t
+lerdcsr(sc, port)
+	struct lance_softc *sc;
+	u_int16_t port;
 {
 	struct le_softc *lesc = (struct le_softc *)sc;
 	bus_space_tag_t t = lesc->sc_bustag;
@@ -152,10 +163,11 @@ lerdcsr(struct lance_softc *sc, uint16_t port)
 }
 
 void
-lesetutp(struct lance_softc *sc)
+lesetutp(sc)
+	struct lance_softc *sc;
 {
 	struct lsi64854_softc *dma = ((struct le_softc *)sc)->sc_dma;
-	uint32_t csr;
+	u_int32_t csr;
 
 	csr = L64854_GCSR(dma);
 	csr |= E_TP_AUI;
@@ -164,10 +176,11 @@ lesetutp(struct lance_softc *sc)
 }
 
 void
-lesetaui(struct lance_softc *sc)
+lesetaui(sc)
+	struct lance_softc *sc;
 {
 	struct lsi64854_softc *dma = ((struct le_softc *)sc)->sc_dma;
-	uint32_t csr;
+	u_int32_t csr;
 
 	csr = L64854_GCSR(dma);
 	csr &= ~E_TP_AUI;
@@ -176,7 +189,8 @@ lesetaui(struct lance_softc *sc)
 }
 
 int
-lemediachange(struct lance_softc *sc)
+lemediachange(sc)
+	struct lance_softc *sc;
 {
 	struct ifmedia *ifm = &sc->sc_media;
 
@@ -209,7 +223,9 @@ lemediachange(struct lance_softc *sc)
 }
 
 void
-lemediastatus(struct lance_softc *sc, struct ifmediareq *ifmr)
+lemediastatus(sc, ifmr)
+	struct lance_softc *sc;
+	struct ifmediareq *ifmr;
 {
 	struct lsi64854_softc *dma = ((struct le_softc *)sc)->sc_dma;
 
@@ -223,11 +239,12 @@ lemediastatus(struct lance_softc *sc, struct ifmediareq *ifmr)
 }
 
 static void
-lehwreset(struct lance_softc *sc)
+lehwreset(sc)
+	struct lance_softc *sc;
 {
 	struct le_softc *lesc = (struct le_softc *)sc;
 	struct lsi64854_softc *dma = lesc->sc_dma;
-	uint32_t csr;
+	u_int32_t csr;
 	u_int aui_bit;
 
 	/*
@@ -254,7 +271,8 @@ lehwreset(struct lance_softc *sc)
 }
 
 static void
-lehwinit(struct lance_softc *sc)
+lehwinit(sc)
+	struct lance_softc *sc;
 {
 
 	/*
@@ -273,7 +291,8 @@ lehwinit(struct lance_softc *sc)
 }
 
 static void
-lenocarrier(struct lance_softc *sc)
+lenocarrier(sc)
+	struct lance_softc *sc;
 {
 	struct le_softc *lesc = (struct le_softc *)sc;
 
@@ -281,7 +300,7 @@ lenocarrier(struct lance_softc *sc)
 	 * Check if the user has requested a certain cable type, and
 	 * if so, honor that request.
 	 */
-	printf("%s: lost carrier on ", device_xname(sc->sc_dev));
+	printf("%s: lost carrier on ", sc->sc_dev.dv_xname);
 
 	if (L64854_GCSR(lesc->sc_dma) & E_TP_AUI) {
 		printf("UTP port");
@@ -304,7 +323,10 @@ lenocarrier(struct lance_softc *sc)
 }
 
 int
-lematch_ledma(device_t parent, cfdata_t cf, void *aux)
+lematch_ledma(parent, cf, aux)
+	struct device *parent;
+	struct cfdata *cf;
+	void *aux;
 {
 	struct sbus_attach_args *sa = aux;
 
@@ -313,17 +335,18 @@ lematch_ledma(device_t parent, cfdata_t cf, void *aux)
 
 
 void
-leattach_ledma(device_t parent, device_t self, void *aux)
+leattach_ledma(parent, self, aux)
+	struct device *parent, *self;
+	void *aux;
 {
-	struct le_softc *lesc = device_private(self);
-	struct lance_softc *sc = &lesc->sc_am7990.lsc;
-	struct lsi64854_softc *lsi = device_private(parent);
 	struct sbus_attach_args *sa = aux;
+	struct le_softc *lesc = (struct le_softc *)self;
+	struct lsi64854_softc *lsi = (struct lsi64854_softc *)parent;
+	struct lance_softc *sc = &lesc->sc_am7990.lsc;
 	bus_dma_tag_t dmatag = sa->sa_dmatag;
 	bus_dma_segment_t seg;
 	int rseg, error;
 
-	sc->sc_dev = self;
 	lesc->sc_bustag = sa->sa_bustag;
 
 	/* Establish link to `ledma' device */
@@ -336,7 +359,7 @@ leattach_ledma(device_t parent, device_t self, void *aux)
 			 sa->sa_offset,
 			 sa->sa_size,
 			 0, &lesc->sc_reg) != 0) {
-		aprint_error(": cannot map registers\n");
+		printf("%s @ ledma: cannot map registers\n", self->dv_xname);
 		return;
 	}
 
@@ -347,14 +370,15 @@ leattach_ledma(device_t parent, device_t self, void *aux)
 	if ((error = bus_dmamap_create(dmatag, MEMSIZE, 1, MEMSIZE,
 					LEDMA_BOUNDARY, BUS_DMA_NOWAIT,
 					&lesc->sc_dmamap)) != 0) {
-		aprint_error(": DMA map create error %d\n", error);
+		printf("%s: DMA map create error %d\n", self->dv_xname, error);
 		return;
 	}
 
 	/* Allocate DMA buffer */
 	if ((error = bus_dmamem_alloc(dmatag, MEMSIZE, 0, LEDMA_BOUNDARY,
 				 &seg, 1, &rseg, BUS_DMA_NOWAIT)) != 0) {
-		aprint_error(": DMA buffer alloc error %d\n",error);
+		printf("%s @ ledma: DMA buffer alloc error %d\n",
+			self->dv_xname, error);
 		return;
 	}
 
@@ -362,7 +386,8 @@ leattach_ledma(device_t parent, device_t self, void *aux)
 	if ((error = bus_dmamem_map(dmatag, &seg, rseg, MEMSIZE,
 			       (void **)&sc->sc_mem,
 			       BUS_DMA_NOWAIT|BUS_DMA_COHERENT)) != 0) {
-		aprint_error(": DMA buffer map error %d\n", error);
+		printf("%s @ ledma: DMA buffer map error %d\n",
+			self->dv_xname, error);
 		bus_dmamem_free(dmatag, &seg, rseg);
 		return;
 	}
@@ -370,7 +395,8 @@ leattach_ledma(device_t parent, device_t self, void *aux)
 	/* Load DMA buffer */
 	if ((error = bus_dmamap_load(dmatag, lesc->sc_dmamap, sc->sc_mem,
 			MEMSIZE, NULL, BUS_DMA_NOWAIT|BUS_DMA_COHERENT)) != 0) {
-		aprint_error(": DMA buffer map load error %d\n", error);
+		printf("%s: DMA buffer map load error %d\n",
+			self->dv_xname, error);
 		bus_dmamem_free(dmatag, &seg, rseg);
 		bus_dmamem_unmap(dmatag, sc->sc_mem, MEMSIZE);
 		return;

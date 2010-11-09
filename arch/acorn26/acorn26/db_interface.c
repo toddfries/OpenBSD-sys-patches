@@ -1,4 +1,4 @@
-/*	$NetBSD: db_interface.c,v 1.16 2007/10/17 19:52:51 garbled Exp $	*/
+/*	$NetBSD: db_interface.c,v 1.18 2010/06/09 02:48:52 mrg Exp $	*/
 
 /* 
  * Copyright (c) 1996 Scott K. Stevens
@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: db_interface.c,v 1.16 2007/10/17 19:52:51 garbled Exp $");
+__KERNEL_RCSID(0, "$NetBSD: db_interface.c,v 1.18 2010/06/09 02:48:52 mrg Exp $");
 
 #include "opt_ddb.h"
 
@@ -241,10 +241,22 @@ db_write_bytes(vm_offset_t addr, size_t size, const char *data)
 }
 
 const struct db_command db_machine_command_table[] = {
-	{ DDB_ADD_CMD("bsw",	db_bus_write_cmd,	CS_MORE, NULL,NULL,NULL) },
-	{ DDB_ADD_CMD("frame",	db_show_frame_cmd,	0, NULL, NULL,NULL) },
-	{ DDB_ADD_CMD("irqstat",db_irqstat_cmd,		0, NULL, NULL,NULL) },
-	{ DDB_ADD_CMD("panic",	db_show_panic_cmd,	0, NULL, NULL,NULL) },
+	{ DDB_ADD_CMD("bsw", db_bus_write_cmd,		CS_MORE,
+			"Writes a one or two bytes to the IObus",
+			"[/bh] [addr]",
+			"   addr:\tIO address to write\n"
+			"   /b:\twrite a single byte\n"
+			"   /h:\twrite two bytes") },
+	{ DDB_ADD_CMD("frame", db_show_frame_cmd,	0,
+			"Displays the contents of a trapframe",
+			"[address]",
+			"   address:\taddress of trapfame to display")},
+	{ DDB_ADD_CMD("irqstat", db_irqstat_cmd,		0,
+			"Displays the IRQ statistics",
+		     	NULL,NULL) },
+	{ DDB_ADD_CMD("panic", db_show_panic_cmd,	0,
+			"Displays the last panic string",
+		     	NULL,NULL) },
 	{ DDB_ADD_CMD( NULL,     NULL,              0, NULL, NULL,NULL) }
 };
 
@@ -268,7 +280,7 @@ extern u_int end;
 static struct undefined_handler db_uh;
 
 void
-db_machine_init()
+db_machine_init(void)
 {
 
 	/*

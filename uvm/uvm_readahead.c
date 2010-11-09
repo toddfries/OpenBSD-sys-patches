@@ -1,4 +1,4 @@
-/*	$NetBSD: uvm_readahead.c,v 1.5 2008/01/02 11:49:20 ad Exp $	*/
+/*	$NetBSD: uvm_readahead.c,v 1.4 2007/05/11 12:11:09 tsutsui Exp $	*/
 
 /*-
  * Copyright (c)2003, 2005 YAMAMOTO Takashi,
@@ -40,7 +40,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: uvm_readahead.c,v 1.5 2008/01/02 11:49:20 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: uvm_readahead.c,v 1.4 2007/05/11 12:11:09 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/pool.h>
@@ -83,32 +83,21 @@ static off_t ra_startio(struct uvm_object *, off_t, size_t);
 static struct uvm_ractx *ra_allocctx(void);
 static void ra_freectx(struct uvm_ractx *);
 
-static struct pool_cache ractx_cache;
-
-/*
- * uvm_ra_init: initialize readahead module.
- */
-
-void
-uvm_ra_init(void)
-{
-
-	pool_cache_bootstrap(&ractx_cache, sizeof(struct uvm_ractx), 0, 0, 0,
-	    "ractx", NULL, IPL_NONE, NULL, NULL, NULL);
-}
+static POOL_INIT(ractx_pool, sizeof(struct uvm_ractx), 0, 0, 0, "ractx",
+    &pool_allocator_nointr, IPL_NONE);
 
 static struct uvm_ractx *
 ra_allocctx(void)
 {
 
-	return pool_cache_get(&ractx_cache, PR_NOWAIT);
+	return pool_get(&ractx_pool, PR_NOWAIT);
 }
 
 static void
 ra_freectx(struct uvm_ractx *ra)
 {
 
-	pool_cache_put(&ractx_cache, ra);
+	pool_put(&ractx_pool, ra);
 }
 
 /*
@@ -145,11 +134,11 @@ ra_startio(struct uvm_object *uobj, off_t off, size_t sz)
 		 * use UVM_ADV_RANDOM to avoid recursion.
 		 */
 
+		simple_lock(&uobj->vmobjlock);
 		error = (*uobj->pgops->pgo_get)(uobj, off, NULL,
 		    &npages, 0, VM_PROT_READ, UVM_ADV_RANDOM, 0);
 		DPRINTF(("%s:  off=%" PRIu64 ", bytelen=%zu -> %d\n",
 		    __func__, off, bytelen, error));
-		mutex_enter(&uobj->vmobjlock);
 		if (error != 0 && error != EBUSY) {
 			if (error != EINVAL) { /* maybe past EOF */
 				DPRINTF(("%s: error=%d\n", __func__, error));
@@ -199,7 +188,6 @@ uvm_ra_freectx(struct uvm_ractx *ra)
  * uvm_ra_request: update a read-ahead context and start i/o if appropriate.
  *
  * => called when [reqoff, reqoff+reqsize) is requested.
- * => object must be locked by caller, will return locked.
  */
 
 void
@@ -207,11 +195,14 @@ uvm_ra_request(struct uvm_ractx *ra, int advice, struct uvm_object *uobj,
     off_t reqoff, size_t reqsize)
 {
 
-	KASSERT(mutex_owned(&uobj->vmobjlock));
-
 	if (ra == NULL || advice == UVM_ADV_RANDOM) {
 		return;
 	}
+
+	/*
+	 * XXX needs locking?  maybe.
+	 * but the worst effect is merely a bad read-ahead.
+	 */
 
 	if (advice == UVM_ADV_SEQUENTIAL) {
 
@@ -302,6 +293,12 @@ do_readahead:
 
 #if defined(DIAGNOSTIC)
 		if (rasize > RA_WINSIZE_MAX) {
+
+			/*
+			 * shouldn't happen as far as we're protected by
+			 * kernel_lock.
+			 */
+
 			printf("%s: corrupted context", __func__);
 			rasize = RA_WINSIZE_MAX;
 		}

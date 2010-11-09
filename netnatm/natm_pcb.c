@@ -1,4 +1,4 @@
-/*	$NetBSD: natm_pcb.c,v 1.10 2008/12/17 20:51:38 cegger Exp $	*/
+/*	$NetBSD: natm_pcb.c,v 1.9 2005/12/11 12:25:16 christos Exp $	*/
 
 /*
  *
@@ -38,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: natm_pcb.c,v 1.10 2008/12/17 20:51:38 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: natm_pcb.c,v 1.9 2005/12/11 12:25:16 christos Exp $");
 
 #include "opt_ddb.h"
 
@@ -70,7 +70,7 @@ int wait;
 {
   struct natmpcb *npcb;
 
-  npcb = malloc(sizeof(*npcb), M_PCB, wait);
+  MALLOC(npcb, struct natmpcb *, sizeof(*npcb), M_PCB, wait);
 
 #ifdef DIAGNOSTIC
   if (wait == M_WAITOK && npcb == NULL) panic("npcb_alloc: malloc didn't wait");
@@ -104,7 +104,7 @@ int op;
     if (npcb->npcb_inq) {
       npcb->npcb_flags = NPCB_DRAIN;	/* flag for distruction */
     } else {
-      free(npcb, M_PCB);		/* kill it! */
+      FREE(npcb, M_PCB);		/* kill it! */
     }
   }
 

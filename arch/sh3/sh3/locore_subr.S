@@ -1,4 +1,4 @@
-/*	$NetBSD: locore_subr.S,v 1.50 2009/02/13 22:41:03 apb Exp $	*/
+/*	$NetBSD: locore_subr.S,v 1.30 2006/11/16 23:12:23 uwe Exp $	*/
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -12,6 +12,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,6 @@
 #include "opt_cputype.h"
 #include "opt_ddb.h"
 #include "opt_kgdb.h"
-#include "opt_modular.h"
 #include "assym.h"
 
 #include <sys/syscall.h>	/* SYS___sigreturn14, SYS_exit */
@@ -40,7 +46,7 @@
 #include <sh3/mmu_sh3.h>
 #include <sh3/mmu_sh4.h>
 
-__KERNEL_RCSID(0, "$NetBSD: locore_subr.S,v 1.50 2009/02/13 22:41:03 apb Exp $")
+__KERNEL_RCSID(0, "$NetBSD: locore_subr.S,v 1.30 2006/11/16 23:12:23 uwe Exp $")
 
 
 /*
@@ -49,129 +55,215 @@ __KERNEL_RCSID(0, "$NetBSD: locore_subr.S,v 1.50 2009/02/13 22:41:03 apb Exp $")
  * LINTSTUB: include <sh3/locore.h>
  */
 
-
-/*
- * Save processor state to pcb->pcb_sf switchframe.
- * Note that offsetof(struct pcb, pcb_sf) is zero.
- */
-#define SAVEPCB_AND_JUMP(pcb, jump)			  \
-	add	#SF_SIZE, pcb				; \
-	stc.l	r7_bank, @-pcb				; \
-	stc.l	r6_bank, @-pcb				; \
-	mov.l	r15, @-pcb				; \
-	mov.l	r14, @-pcb				; \
-	mov.l	r13, @-pcb				; \
-	mov.l	r12, @-pcb				; \
-	mov.l	r11, @-pcb				; \
-	mov.l	r10, @-pcb				; \
-	mov.l	r9, @-pcb				; \
-	mov.l	r8, @-pcb				; \
-	sts.l	pr, @-pcb				; \
-	stc.l	sr, @-pcb				; \
-	jump						; \
-	 stc.l	gbr, @-pcb
-
-/* Hide ugly empty argument if we don't need the jump */
-#define SAVEPCB(pcb) \
-	SAVEPCB_AND_JUMP(pcb, /* no jump */)
-
-
 	.text
 	.align 5	/* align cache line size (32B) */
 /*
- * LINTSTUB: Func: lwp_t *cpu_switchto(lwp_t *olwp, lwp_t *nlwp, bool returning)
- *	Switch from olwp to nlwp.
- *	If returning is true, we do the fast softint dance
- *	 and can skip user-space related activities (pmap, ras, etc...)
- *	Return olwp (in the nlwp context).
+ * LINTSTUB: Func: int cpu_switch(struct lwp *l, struct lwp *XXX_IGNORED)
+ *	Find a runnable lwp and switch to it.  Wait if necessary.
+ */
+ENTRY(cpu_switch)
+	/* Save current lwp's context to switchframe */
+	mov.l	.L_SF,	r0
+	mov.l	@(r0, r4), r1
+	add	#SF_SIZE, r1
+	stc.l	r7_bank,@-r1
+	stc.l	sr,	@-r1
+	stc.l	r6_bank,@-r1
+	sts.l	pr,	@-r1
+	mov.l	r8,	@-r1
+	mov.l	r9,	@-r1
+	mov.l	r10,	@-r1
+	mov.l	r11,	@-r1
+	mov.l	r12,	@-r1
+	mov.l	r13,	@-r1
+	mov.l	r14,	@-r1
+	mov.l	r15,	@-r1
+
+.L_find_and_switch:
+	/* Search next lwp. cpu_switch_search may or may not sleep. */
+	mov.l	.L_cpu_switch_search, r0
+	jsr	@r0
+	 mov	r4,	r8	/* save old lwp */
+
+	/* Skip context switch if same lwp. */
+	cmp/eq	r8,	r0
+	bt/s	1f
+	 mov	r0,	r4	/* new lwp */
+
+.L_doswitch:
+	/* Setup kernel stack */
+	mov.l	.L_SF,	r0
+	mov.l	@(r0, r4), r1		/* switch frame */
+	mov.l	@(SF_R7_BANK, r1), r0	/* stack top */
+	mov.l	@(SF_R6_BANK, r1), r2	/* current frame */
+	mov.l	@(SF_R15, r1), r3	/* current stack */
+	/* During kernel stack switching, all interrupts are disabled. */
+	__EXCEPTION_BLOCK(r1, r5)
+	/* switch to new kernel stack */
+	ldc	r0,	r7_bank
+	ldc	r2,	r6_bank
+	mov	r3,	r15
+
+	/* Wire u-area */
+	MOV	(switch_resume, r0)
+	jsr	@r0
+	 mov	r4,	r8	/* save new lwp */
+	mov	r8,	r4
+	__EXCEPTION_UNBLOCK(r0, r1)
+	/* Now OK to use kernel stack. */
+
+	/* Return 1 indicating "we switched". */
+	bra	2f
+	 mov	#1, r2
+
+1:	/* Return 0 indicating "didn't switch". */
+	mov	#0, r2
+
+	/* Restore new lwp's context from switchframe */
+	/* NOTE: r2 has return value! */
+2:	mov.l	.L_SF,	r0
+	mov.l	@(r0, r4), r1
+	add	#4,	r1		/* r15 already restored */
+	mov.l	@r1+,	r14
+	mov.l	@r1+,	r13
+	mov.l	@r1+,	r12
+	mov.l	@r1+,	r11
+	mov.l	@r1+,	r10
+	mov.l	@r1+,	r9
+	mov.l	@r1+,	r8
+	lds.l	@r1+,	pr
+	add	#4,	r1		/* r6_bank already restored */
+	ldc.l	@r1+,	sr
+
+	/* r2 has the return value; stuff it into r0 now. */
+	rts
+	 mov	r2, r0
+	.align	2
+.L_SF:			.long	(L_MD_PCB)
+.L_cpu_switch_search:	.long	_C_LABEL(cpu_switch_search)
+FUNC_SYMBOL(switch_resume)
+
+
+
+/*
+ * LINTSTUB: Func: void cpu_switchto(struct lwp *current, struct lwp *next)
+ *	Switch to the specified next LWP.
  */
 ENTRY(cpu_switchto)
-	tst	r4, r4			! olwp can be NULL
-	bt	.L_saved
+	/* Save current lwp's context to switchframe. */
+	mov.l	.L_SFp,	r0
+	mov.l	@(r0, r4), r1
+	add	#SF_SIZE, r1
+	stc.l	r7_bank,@-r1
+	stc.l	sr,	@-r1
+	stc.l	r6_bank,@-r1
+	sts.l	pr,	@-r1
+	mov.l	r8,	@-r1
+	mov.l	r9,	@-r1
+	mov.l	r10,	@-r1
+	mov.l	r11,	@-r1
+	mov.l	r12,	@-r1
+	mov.l	r13,	@-r1
+	mov.l	r14,	@-r1
+	mov.l	r15,	@-r1
 
-	!! save old lwp's context to switchframe
-	mov.l	@(L_MD_PCB, r4), r1	! olwp->l_md.md_pcb
-	SAVEPCB(r1)
-.L_saved:
-	!! free to use callee-save registers now
+	/*
+	 * curlwp = NULL;
+	 * XXX Is this necessary?  We know we won't go idle.
+	 */
+	mov.l	.L_curlwp, r0
+	mov	#0, r1
+	mov.l	r1, @r0
 
-	mov.l	.L_curlwp, r2
-	mov.l	.L_curpcb, r3
-	mov.l	@(L_MD_PCB, r5), r10	! nlwp->l_md.md_pcb
-	!tst	r6, r6			! "full" switch?
-	mov.l	r5, @r2			! curlwp = nlwp;
-	!bt/s	.L_prepare_switch
-	 mov.l	r10, @r3		! curpcb = nlwp->l_md.md_pcb;
-
-	!mov	r5, r8		! preserve nlwp
-	!bra	.L_restore_nlwp
-	! mov	r4, r9		! preserve olwp
-
-.L_prepare_switch:
-	!! arguments to cpu_switch_prepare are already in the right registers
+	/* old and new lwps are already in r4, r5 */
 	mov.l	.L_cpu_switch_prepare, r0
-	mov	r5, r8		! preserve nlwp
 	jsr	@r0
-	 mov	r4, r9		! preserve olwp
+	 nop
 
-.L_restore_nlwp:
-	!! restore new lwp's context from switchframe
-	!! r10 is nlwp->l_md.md_pcb == &nlwp->l_md.md_pcb->pcb_sf
+	/*
+	 * Put the incoming LWP in r4 and jump into the middle
+	 * of cpu_switch(), and let it do the work to restore the
+	 * incoming LWP's context.
+	 */
+	bra	.L_doswitch
+	 mov	r0, r4
 
-	!! setup nlwp's kernel stack first
-	mov.l	@(SF_R7_BANK, r10), r0	! kernel stack bottom
-	mov.l	@(SF_R6_BANK, r10), r2	! current trapframe
-	mov.l	@(SF_R15, r10), r3	! current kernel sp
+	.align	2
+.L_SFp:			.long	(L_MD_PCB)
+.L_curlwp:		.long	_C_LABEL(curlwp)
+.L_cpu_switch_prepare:	.long	_C_LABEL(cpu_switch_prepare)
 
-	!! while switching kernel stack, all exceptions must be disabled
-	__EXCEPTION_BLOCK(r1, r11)	! saves SR in r11
+
+/*
+ * LINTSTUB: Func: void cpu_exit(struct lwp *l)
+ *	Just fall-through to the switch_exit below.
+ */
+ENTRY(cpu_exit)
+	mov.l	.L_switch_exit_lwp_exit2, r5	/* exit_func to call */
+	/* FALLTHROUGH */
+
+/*
+ * LINTSTUB: Func: void switch_exit(struct lwp *l, void (*exit_func)(struct lwp *))
+ *	Called only from cpu_exit(l).  Before we call exit_func to
+ *	free lwp's resources (including kernel stack) we need to
+ *	switch to the lwp0's kernel stack.  Then we jump into the
+ *	middle of cpu_switch to find and switch to a new lwp.
+ */
+ALTENTRY(switch_exit)
+	mov.l	.L_switch_exit_lwp0_pcb, r1
+	mov.l	.L_switch_exit_curpcb, r0
+	mov.l	@r1, r1
+	mov.l	r1, @r0			/* curpcb = lwp0.l_md.md_pcb */
+
+	mov.l	@(SF_R7_BANK, r1), r0	/* stack top */
+	mov.l	@(SF_R6_BANK, r1), r2	/* current frame */
+	mov.l	@(SF_R15, r1), r3	/* current stack */
+
+	/* switch to lwp0's kernel stack */
+	__EXCEPTION_BLOCK(r1, r6)
 	ldc	r0, r7_bank
 	ldc	r2, r6_bank
 	mov	r3, r15
+	__EXCEPTION_UNBLOCK(r0, r1)
 
-#if !defined(P1_STACK) && defined(SH4)
-	!! wire u-area in TLB
-	MOV	(switch_resume, r0)
-	jsr	@r0
-	 mov	r8, r4		! nlwp
-#endif
-	!! safe to use nlwp's kernel stack now
-	ldc	r11, sr		! __EXCEPTION_UNBLOCK
+	/* safe to call (*exit_func)(l); now */
+	jsr	@r5
+	 nop			/* lwp is already in r4 */
 
-	!! finish restoring new lwp's context from switchframe
-	!! sf_r15, sf_r6_bank, sf_r7_bank are already restored
-	mov	r10, r1		! &nlwp->l_md.md_pcb->pcb_sf
-	mov	r9, r0		! return olwp (we are about to clobber r9)
-	ldc.l	@r1+, gbr
-	ldc.l	@r1+, sr
-	lds.l	@r1+, pr
-	mov.l	@r1+, r8
-	mov.l	@r1+, r9
-	mov.l	@r1+, r10
-	mov.l	@r1+, r11
-	mov.l	@r1+, r12
-	mov.l	@r1+, r13
-	rts
-	 mov.l	@r1+, r14
+	/* proceed to cpu_switch */
+	bra	.L_find_and_switch
+	 mov	#0, r4		/* no "previous" lwp */
 
-	.align	2
-.L_curlwp:		.long	_C_LABEL(curlwp)
-.L_curpcb:		.long	_C_LABEL(curpcb)
-.L_cpu_switch_prepare:	.long	_C_LABEL(cpu_switch_prepare)
-#ifdef SH4
-FUNC_SYMBOL(switch_resume)
-#endif
-	SET_ENTRY_SIZE(cpu_switchto)
+	.align 2
+.L_switch_exit_lwp_exit2:
+	.long	_C_LABEL(lwp_exit2)
+.L_switch_exit_lwp0_pcb:
+	.long	_C_LABEL(lwp0) + L_MD_PCB
+.L_switch_exit_curpcb:
+	.long	_C_LABEL(curpcb)
 
 
 #ifdef SH3
 /*
  * LINTSTUB: Func: void sh3_switch_resume(struct lwp *l)
- *     We only need this dummy sh3 version if both SH3 and SH4 are defined.
+ *	Set current u-area PTE array to curupte.
+ *	No need to flush any entries. it is depended on u-area mapping is
+ *	wired, and its mapping never cause modified/reference fault.
+ *	u-area TLB fault is only covered by TLB miss exception.
+ *	When the situation that "VPN match but not Valid" occur, SH3 jump to
+ *	"generic exception" handler instead of TLB miss exception.
+ *	But NetBSD/sh3 code doesn't handle it. As the result, it causes
+ *	hard reset. (never can access kernel stack).
  */
 NENTRY(sh3_switch_resume)
+	mov.l	.L_UPTE, r0
+	mov.l	.L_curupte, r1
+	add	r4,	r0	/* l->l_md.md_upte */
 	rts
-	 nop
+	 mov.l	r0,	@r1
+	.align	2
+.L_UPTE:		.long	L_MD_UPTE
+.L_curupte:		.long	_C_LABEL(curupte)
 	SET_ENTRY_SIZE(sh3_switch_resume)
 #endif /* SH3 */
 
@@ -183,56 +275,64 @@ NENTRY(sh3_switch_resume)
  *	TLB multiple hit.
  */
 NENTRY(sh4_switch_resume)
-	add	#L_MD_UPTE, r4	! l->l_md.md_upte
-	mov	#UPAGES, r3
-	mov.l	@r4, r0		! if (l->l_md.md_upte[0].addr == 0) return;
-	tst	r0, r0
+	mov.l	.L_UPTE__sh4, r0
+	add	r0,	r4	/* l->l_md.md_upte */
+	mov	#UPAGES,r3
+	mov	#1,	r2
+	mov.l	@r4,	r0	/* if (l->l_md.md_upte[0].addr == 0) return; */
+	tst	r0,	r0
 	bt	2f
 
 	/* Save old ASID and set ASID to zero */
-	mov	#0, r0
-	mov.l	.L_4_PTEH, r2
-	mov.l	@r2, r7
-	mov.l	r0, @r2
+	xor	r0,	r0
+	mov.l	.L_4_PTEH, r1
+	mov.l	@r1,	r7
+	mov.l	r0,	@r1
 
 	mov.l	.L_VPN_MASK, r6
 	mov.l	.L_4_UTLB_AA_A, r5
 
 	/* TLB address array must be accessed via P2. Setup jump address. */
-	mova	1f, r0
+	mova	1f,	r0
 	mov.l	.L_P2BASE, r1
-	or	r1, r0
-	jmp	@r0		! run on P2
+	or	r1,	r0
+	jmp	@r0		/* run P2 */
 	 nop
 
 	/* Probe VPN match TLB entry and invalidate it. */
-	.align	2		! mova target must be 4byte aligned
+	.align	2		/* mova target must be 4byte alignment */
 1:	mov.l	@(4, r4), r0
-	and	r6, r0
-	mov.l	r0, @r5		! clear D, V
+	and	r6,	r0
+	mov.l	r0,	@r5	/* clear D, V */
 
 	/* Wire u-area TLB entry */
 	/* Address array */
-	mov.l	@r4+, r0	! addr
-	mov.l	@r4+, r1	! data
-	mov.l	r1, @r0		! *addr = data
+	mov.l	@r4+,	r0	/* addr */
+	mov.l	@r4+,	r1	/* data */
+	mov.l	r1,	@r0	/* *addr = data */
 
 	/* Data array */
-	mov.l	@r4+, r0	! addr
-	mov.l	@r4+, r1	! data
-	mov.l	r1, @r0		! *addr = data
-	dt	r3
-	bf	1b
+	mov.l	@r4+,	r0	/* addr */
+	mov.l	@r4+,	r1	/* data */
+	mov.l	r1,	@r0	/* *addr = data */
+	cmp/eq	r2,	r3
+	bf/s	1b
+	 add	#1,	r2
 
 	/* restore ASID */
-	mov.l	r7, @r2
-
-2:	rts			! to the caller in P1
+	mov.l	.L_4_PTEH, r0
+	mov.l	r7,	@r0
+	mova	2f,	r0
+	jmp	@r0		/* run P1 */
 	 nop
-
 	.align	2
+2:	rts			/* mova target must be 4byte alignment */
+	 nop
+	.align	2
+.L_UPTE__sh4:		.long	L_MD_UPTE
 .L_4_PTEH:		.long	SH4_PTEH
 .L_4_UTLB_AA_A:		.long	(SH4_UTLB_AA | SH4_UTLB_A)
+.L_4_ITLB_AA:		.long	SH4_ITLB_AA
 .L_VPN_MASK:		.long	0xfffff000
 .L_P2BASE:		.long	0xa0000000
 	SET_ENTRY_SIZE(sh4_switch_resume)
@@ -366,41 +466,19 @@ NENTRY(_cpu_spin)
 
 
 /*
- * lwp_trampoline:
- *
- * cpu_lwp_fork() arranges for lwp_trampoline() to run when that
- * nascent lwp is selected by cpu_switchto().
- *
- * The switch frame will contain pointer to struct lwp of this lwp in
- * r10, a pointer to the function to call in r12, and an argument to
- * pass to it in r11 (we abuse the callee-saved registers).
- *
- * We enter lwp_trampoline as if we are "returning" from
- * cpu_switchto(), so r0 contains previous lwp (the one we are
- * switching from) that we pass to lwp_startup().
- *
- * After that the trampoline should call the function that is indended
- * to do some additional setup.  When the function returns, the
- * trampoline returns to the user mode.
+ * proc_trapmpoline:
+ *	Call the service funciton with one argument specified by the r12 and r11
+ *	respectively. setted by cpu_fork().
  */
-NENTRY(lwp_trampoline)
-	mov.l	.L_lwp_startup, r1
-	mov	r0, r4		/* previous lwp returned by cpu_switchto */
-	jsr	@r1
-	 mov	r10, r5		/* my struct lwp */
-ALTENTRY(lwp_setfunc_trampoline)
+NENTRY(proc_trampoline)
 	jsr	@r12
-	 mov	r11, r4
+	 mov	r11,	r4
 	__EXCEPTION_RETURN
 	/* NOTREACHED */
-
-	.align	2
-.L_lwp_startup:		.long	_C_LABEL(lwp_startup)
-
-	SET_ENTRY_SIZE(lwp_trampoline)
+	SET_ENTRY_SIZE(proc_trampoline)
 
 
-#if defined(COMPAT_16) || defined(MODULAR)
+#ifdef COMPAT_16
 /*
  * LINTSTUB: Var: char sigcode[1]
  *	Signal trampoline. copied to top of user stack.
@@ -428,15 +506,27 @@ NENTRY(sigcode)
 .globl	_C_LABEL(esigcode)
 _C_LABEL(esigcode):
 	SET_ENTRY_SIZE(sigcode)
-#endif /* COMPAT_16 || MODULAR */
-
+#endif /* COMPAT_16 */
 
 /*
  * LINTSTUB: Func: void savectx(struct pcb *pcb)
- *	Save CPU state in pcb->pcb_sf
+ *	save struct switchframe.
  */
 ENTRY(savectx)
-	SAVEPCB_AND_JUMP(r4, rts)
+	add	#SF_SIZE, r4
+	stc.l	r7_bank,@-r4
+	stc.l	sr,	@-r4
+	stc.l	r6_bank,@-r4
+	sts.l	pr,	@-r4
+	mov.l	r8,	@-r4
+	mov.l	r9,	@-r4
+	mov.l	r10,	@-r4
+	mov.l	r11,	@-r4
+	mov.l	r12,	@-r4
+	mov.l	r13,	@-r4
+	mov.l	r14,	@-r4
+	rts
+	 mov.l	r15,	@-r4
 	SET_ENTRY_SIZE(savectx)
 
 

@@ -1,4 +1,4 @@
-/* $NetBSD: power.c,v 1.8 2007/12/30 08:32:14 skrll Exp $ */
+/* $NetBSD: power.c,v 1.5 2005/12/11 12:17:24 christos Exp $ */
 /*
  * Copyright (c) 2004 Jochen Kunz.
  * All rights reserved.
@@ -34,7 +34,7 @@
 
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: power.c,v 1.8 2007/12/30 08:32:14 skrll Exp $");
+__KERNEL_RCSID(0, "$NetBSD: power.c,v 1.5 2005/12/11 12:17:24 christos Exp $");
 
 
 /*
@@ -113,7 +113,7 @@ void
 pwr_sw_init(bus_space_tag_t bst)
 {
 	struct pdc_power_info pdc_power_info PDC_ALIGNMENT;
-	struct sysctllog *sysctl_log = NULL;
+	struct sysctllog *sysctl_log;
 	const struct sysctlnode *pwr_sw_node;
 	int error, stage;
 
@@ -193,7 +193,7 @@ pwr_sw_init(bus_space_tag_t bst)
 		else
 			/* Power Reg. is hardware dampened, poll at 1 Hz. */
 			pwr_sw_poll_interval = hz;
-		callout_init(&pwr_sw_callout, 0);
+		callout_init(&pwr_sw_callout);
 		callout_reset(&pwr_sw_callout, pwr_sw_poll_interval, 
 		    pwr_sw_poll, NULL);
 		return;

@@ -1,4 +1,4 @@
-/* $NetBSD: machdep.c,v 1.42 2009/02/13 22:41:03 apb Exp $ */
+/* $NetBSD: machdep.c,v 1.30 2006/08/26 20:19:19 matt Exp $ */
 
 /*
  * Copyright 2000, 2001
@@ -58,11 +58,10 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.42 2009/02/13 22:41:03 apb Exp $");
+__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.30 2006/08/26 20:19:19 matt Exp $");
 
 #include "opt_ddb.h"
 #include "opt_execfmt.h"
-#include "opt_modular.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -79,6 +78,7 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.42 2009/02/13 22:41:03 apb Exp $");
 #include <sys/user.h>
 #include <sys/exec.h>
 #include <sys/mount.h>
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 #include <sys/kcore.h>
 #include <sys/ksyms.h>
@@ -103,7 +103,7 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.42 2009/02/13 22:41:03 apb Exp $");
 
 #include "ksyms.h"
 
-#if NKSYMS || defined(DDB) || defined(MODULAR)
+#if NKSYMS || defined(DDB) || defined(LKM)
 #include <machine/db_machdep.h>
 #include <ddb/db_access.h>
 #include <ddb/db_sym.h>
@@ -117,7 +117,7 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.42 2009/02/13 22:41:03 apb Exp $");
 
 #include <dev/cons.h>
 
-#if NKSYMS || defined(DDB) || defined(MODULAR)
+#if NKSYMS || defined(DDB) || defined(LKM)
 /* start and end of kernel symbol table */
 void	*ksym_start, *ksym_end;
 #endif
@@ -126,6 +126,7 @@ void	*ksym_start, *ksym_end;
 struct cpu_info cpu_info_store;
 
 /* Maps for VM objects. */
+struct vm_map *exec_map = NULL;
 struct vm_map *mb_map = NULL;
 struct vm_map *phys_map = NULL;
 
@@ -149,7 +150,7 @@ void	mach_init(long, long, long, long);
  */
 int	safepri = MIPS_INT_MASK | MIPS_SR_INT_IE;
 
-extern void *esym;
+extern caddr_t esym;
 extern struct user *proc0paddr;
 
 /*
@@ -158,7 +159,7 @@ extern struct user *proc0paddr;
 void
 mach_init(long fwhandle, long magic, long bootdata, long reserved)
 {
-	void *kernend, *p0;
+	caddr_t kernend, p0;
 	u_long first, last;
 	extern char edata[], end[];
 	int i;
@@ -192,12 +193,12 @@ mach_init(long fwhandle, long magic, long bootdata, long reserved)
 		bootinfo.esym = (vaddr_t)end;
 	}
 
-	kernend = (void *)mips_round_page(end);
-#if NKSYMS || defined(DDB) || defined(MODULAR)
+	kernend = (caddr_t)mips_round_page(end);
+#if NKSYMS || defined(DDB) || defined(LKM)
 	if (magic == BOOTINFO_MAGIC) {
 		ksym_start = (void *)bootinfo.ssym;
 		ksym_end   = (void *)bootinfo.esym;
-		kernend = (void *)mips_round_page((vaddr_t)ksym_end);
+		kernend = (caddr_t)mips_round_page((vaddr_t)ksym_end);
 	}
 #endif
 
@@ -320,19 +321,19 @@ mach_init(long fwhandle, long magic, long bootdata, long reserved)
 	/*
 	 * Allocate space for proc0's USPACE
 	 */
-	p0 = (void *)pmap_steal_memory(USPACE, NULL, NULL);
+	p0 = (caddr_t)pmap_steal_memory(USPACE, NULL, NULL);
 	lwp0.l_addr = proc0paddr = (struct user *)p0;
-	lwp0.l_md.md_regs = (struct frame *)((char *)p0 + USPACE) - 1;
-	proc0paddr->u_pcb.pcb_context[11] =
-	    MIPS_INT_MASK | MIPS_SR_INT_IE; /* SR */
+	lwp0.l_md.md_regs = (struct frame *)(p0 + USPACE) - 1;
+	curpcb = &lwp0.l_addr->u_pcb;
+	curpcb->pcb_context[11] = MIPS_INT_MASK | MIPS_SR_INT_IE; /* SR */
 
 	pmap_bootstrap();
 
 	/*
 	 * Initialize debuggers, and break into them, if appropriate.
 	 */
-#if NKSYMS || defined(DDB) || defined(MODULAR)
-	ksyms_addsyms_elf(((uintptr_t)ksym_end - (uintptr_t)ksym_start),
+#if NKSYMS || defined(DDB) || defined(LKM)
+	ksyms_init(((uintptr_t)ksym_end - (uintptr_t)ksym_start),
 	    ksym_start, ksym_end);
 #endif
 
@@ -361,10 +362,16 @@ cpu_startup(void)
 
 	minaddr = 0;
 	/*
+	 * Allocate a submap for exec arguments.  This map effectively
+	 * limits the number of processes exec'ing at any time.
+	 */
+	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr, 16 * NCARGS,
+	    VM_MAP_PAGEABLE, FALSE, NULL);
+	/*
 	 * Allocate a submap for physio.
 	 */
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr, VM_PHYS_SIZE,
-	    0, false, NULL);
+	    0, FALSE, NULL);
 
 
 	/*
@@ -415,8 +422,6 @@ cpu_reboot(int howto, char *bootstr)
 
 haltsys:
 	doshutdownhooks();
-
-	pmf_system_shutdown(boothowto);
 
 	if (howto & RB_HALT) {
 		printf("\n");

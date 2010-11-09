@@ -1,4 +1,4 @@
-/*	$NetBSD: cnv_float.h,v 1.3 2008/04/06 08:03:36 skrll Exp $	*/
+/*	$NetBSD: cnv_float.h,v 1.1 2002/06/05 01:04:24 fredette Exp $	*/
 
 /*	$OpenBSD: cnv_float.h,v 1.5 2001/03/29 03:58:17 mickey Exp $	*/
 
@@ -73,7 +73,7 @@
 
 #define Sgl_isinexact_to_fix(sgl_value,exponent)	\
     ((exponent < (SGL_P - 1)) ?				\
-     (Sall(sgl_value) << (SGL_EXP_LENGTH + 1 + exponent)) : false)
+     (Sall(sgl_value) << (SGL_EXP_LENGTH + 1 + exponent)) : FALSE)
 
 #define Int_isinexact_to_sgl(int_value)	(int_value << (33 - SGL_EXP_LENGTH))
 
@@ -103,7 +103,7 @@
 
 #define Sgl_isone_stickybit(sgl_value,exponent)		\
     (exponent < (SGL_P - 2) ?				\
-     Sall(sgl_value) << (SGL_EXP_LENGTH + 2 + exponent) : false)
+     Sall(sgl_value) << (SGL_EXP_LENGTH + 2 + exponent) : FALSE)
 
 
 /*
@@ -122,7 +122,7 @@
 
 #define Dbl_to_sgl_denormalized(srcA,srcB,exp,dest,inexact,guard,sticky,odd,tiny) \
     Deposit_dexponent(srcA,1);						\
-    tiny = true;							\
+    tiny = TRUE;							\
     if (exp >= -2) {							\
 	if (exp == 0) {							\
 	    inexact = Dallp2(srcB) << 3;				\
@@ -136,7 +136,7 @@
 			if (Dbl_iszero_sign(srcA)) {			\
 			    dest++;					\
 			    if (Sgl_isone_hidden(dest))	\
-				tiny = false;				\
+				tiny = FALSE;				\
 			    dest--;					\
 			}						\
 			break;						\
@@ -144,7 +144,7 @@
 			if (Dbl_isone_sign(srcA)) {			\
 			    dest++;					\
 			    if (Sgl_isone_hidden(dest))	\
-				tiny = false;				\
+				tiny = FALSE;				\
 			    dest--;					\
 			}						\
 			break;						\
@@ -152,7 +152,7 @@
 			if (guard && (sticky || odd)) {			\
 			    dest++;					\
 			    if (Sgl_isone_hidden(dest))	\
-				tiny = false;				\
+				tiny = FALSE;				\
 			    dest--;					\
 			}						\
 			break;						\
@@ -207,7 +207,7 @@
     (exponent < (DBL_P-33) ?						\
      Dallp2(dbl_valueB) || Dallp1(dbl_valueA) << (DBL_EXP_LENGTH+1+exponent) : \
      (exponent < (DBL_P-1) ? Dallp2(dbl_valueB) << (exponent + (33-DBL_P)) :   \
-      false))
+      FALSE))
 
 #define Dbl_isoverflow_to_int(exponent,dbl_valueA,dbl_valueB)		\
     ((exponent > SGL_FX_MAX_EXP + 1) || Dsign(dbl_valueA)==0 ||		\
@@ -222,7 +222,7 @@
     (exponent < (DBL_P-34) ?						\
      (Dallp2(dbl_valueB) || Dallp1(dbl_valueA)<<(DBL_EXP_LENGTH+2+exponent)) : \
      (exponent<(DBL_P-2) ? (Dallp2(dbl_valueB) << (exponent + (34-DBL_P))) : \
-      false))
+      FALSE))
 
 
 /* Int macros */
@@ -416,20 +416,20 @@
 	return(NOEXCEPTION);			\
     }
 
-int sgl_to_sgl_fcnvfx(sgl_floating_point *, sgl_floating_point *, unsigned int *);
-int sgl_to_dbl_fcnvfx(sgl_floating_point *, dbl_integer *, unsigned int *);
-int dbl_to_sgl_fcnvfx(dbl_floating_point *, int *, unsigned int *);
-int dbl_to_dbl_fcnvfx(dbl_floating_point *, dbl_integer *, unsigned int *);
+int sgl_to_sgl_fcnvfx __P((sgl_floating_point *, sgl_floating_point *, unsigned int *));
+int sgl_to_dbl_fcnvfx __P((sgl_floating_point *, dbl_integer *, unsigned int *));
+int dbl_to_sgl_fcnvfx __P((dbl_floating_point *, int *, unsigned int *));
+int dbl_to_dbl_fcnvfx __P((dbl_floating_point *, dbl_integer *, unsigned int *));
 
-int sgl_to_sgl_fcnvfxt(sgl_floating_point *, int *, unsigned int *);
-int sgl_to_dbl_fcnvfxt(sgl_floating_point *, dbl_integer *, unsigned int *);
-int dbl_to_sgl_fcnvfxt(dbl_floating_point *, int *, unsigned int *);
-int dbl_to_dbl_fcnvfxt(dbl_floating_point *, dbl_integer *, unsigned int *);
+int sgl_to_sgl_fcnvfxt __P((sgl_floating_point *, int *, unsigned int *));
+int sgl_to_dbl_fcnvfxt __P((sgl_floating_point *, dbl_integer *, unsigned int *));
+int dbl_to_sgl_fcnvfxt __P((dbl_floating_point *, int *, unsigned int *));
+int dbl_to_dbl_fcnvfxt __P((dbl_floating_point *, dbl_integer *, unsigned int *));
 
-int sgl_to_sgl_fcnvxf(int *, sgl_floating_point *, unsigned int *);
-int sgl_to_dbl_fcnvxf(int *, dbl_floating_point *, unsigned int *);
-int dbl_to_sgl_fcnvxf(dbl_integer *, sgl_floating_point *, unsigned int *);
-int dbl_to_dbl_fcnvxf(dbl_integer *, dbl_floating_point *, unsigned int *);
+int sgl_to_sgl_fcnvxf __P((int *, sgl_floating_point *, unsigned int *));
+int sgl_to_dbl_fcnvxf __P((int *, dbl_floating_point *, unsigned int *));
+int dbl_to_sgl_fcnvxf __P((dbl_integer *, sgl_floating_point *, unsigned int *));
+int dbl_to_dbl_fcnvxf __P((dbl_integer *, dbl_floating_point *, unsigned int *));
 
 
 

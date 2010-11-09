@@ -1,4 +1,4 @@
-/*	$NetBSD: sunos_machdep.c,v 1.36 2008/04/24 18:39:20 ad Exp $	*/
+/*	$NetBSD: sunos_machdep.c,v 1.32 2006/07/22 06:58:17 tsutsui Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1990 The Regents of the University of California.
@@ -77,7 +77,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sunos_machdep.c,v 1.36 2008/04/24 18:39:20 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sunos_machdep.c,v 1.32 2006/07/22 06:58:17 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -93,6 +93,7 @@ __KERNEL_RCSID(0, "$NetBSD: sunos_machdep.c,v 1.36 2008/04/24 18:39:20 ad Exp $"
 #include <sys/malloc.h>
 #include <sys/buf.h>
 
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 #include <compat/sunos/sunos.h>
 #include <compat/sunos/sunos_syscallargs.h>
@@ -140,7 +141,7 @@ sunos_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
 	struct lwp *l = curlwp;
 	struct proc *p = l->l_proc;
 	struct frame *frame = (struct frame *)l->l_md.md_regs;
-	int onstack, error;
+	int onstack;
 	struct sunos_sigframe *fp = getframe(l, sig, &onstack), kf;
 	sig_t catcher = SIGACTION(p, sig).sa_handler;
 	short ft = frame->f_format;
@@ -154,10 +155,8 @@ sunos_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
 		SIGACTION(p, sig).sa_handler = SIG_DFL;
 		sigdelset(&p->p_sigctx.ps_sigignore, sig);
 		sigdelset(&p->p_sigctx.ps_sigcatch, sig);
-		sigdelset(&l->l_sigmask, sig);
-		mutex_exit(p->p_lock);
+		sigdelset(&p->p_sigctx.ps_sigmask, sig);
 		psignal(p, sig);
-		mutex_enter(p->p_lock);
 		return;
 	}
 
@@ -181,17 +180,12 @@ sunos_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
 	kf.sf_sc.sc_ps = frame->f_sr;
 
 	/* Save signal stack. */
-	kf.sf_sc.sc_onstack = l->l_sigstk.ss_flags & SS_ONSTACK;
+	kf.sf_sc.sc_onstack = p->p_sigctx.ps_sigstk.ss_flags & SS_ONSTACK;
 
 	/* Save signal mask. */
 	native_sigset_to_sigset13(mask, &kf.sf_sc.sc_mask);
 
-	sendsig_reset(l, sig);
-	mutex_exit(p->p_lock);
-	error = copyout(&kf, fp, sizeof(kf));
-	mutex_enter(p->p_lock);
-
-	if (error != 0) {
+	if (copyout(&kf, fp, sizeof(kf)) != 0) {
 #ifdef DEBUG
 		if ((sigdebug & SDB_KSTACK) && p->p_pid == sigpid)
 			printf("sendsig(%d): copyout failed on sig %d\n",
@@ -214,7 +208,7 @@ sunos_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
 
 	/* Remember that we're now on the signal stack. */
 	if (onstack)
-		l->l_sigstk.ss_flags |= SS_ONSTACK;
+		p->p_sigctx.ps_sigstk.ss_flags |= SS_ONSTACK;
 
 #ifdef DEBUG
 	if ((sigdebug & SDB_KSTACK) && p->p_pid == sigpid)
@@ -235,9 +229,10 @@ sunos_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
  * a machine fault.
  */
 int
-sunos_sys_sigreturn(struct lwp *l, const struct sunos_sys_sigreturn_args *uap, register_t *retval)
+sunos_sys_sigreturn(struct lwp *l, void *v, register_t *retval)
 {
 	struct proc *p = l->l_proc;
+	struct sunos_sys_sigreturn_args *uap = v;
 	struct sunos_sigcontext *scp;
 	struct frame *frame;
 	struct sunos_sigcontext tsigc;
@@ -250,7 +245,7 @@ sunos_sys_sigreturn(struct lwp *l, const struct sunos_sys_sigreturn_args *uap, r
 #endif
 	if ((int)scp & 1)
 		return EINVAL;
-	if (copyin((void *)scp, (void *)&tsigc, sizeof(tsigc)) != 0)
+	if (copyin((caddr_t)scp, (caddr_t)&tsigc, sizeof(tsigc)) != 0)
 		return EFAULT;
 	scp = &tsigc;
 
@@ -267,19 +262,15 @@ sunos_sys_sigreturn(struct lwp *l, const struct sunos_sys_sigreturn_args *uap, r
 	frame->f_pc = scp->sc_pc;
 	frame->f_sr = scp->sc_ps;
 
-	mutex_enter(p->p_lock);
-
 	/* Restore signal stack. */
 	if (scp->sc_onstack & SS_ONSTACK)
-		l->l_sigstk.ss_flags |= SS_ONSTACK;
+		p->p_sigctx.ps_sigstk.ss_flags |= SS_ONSTACK;
 	else
-		l->l_sigstk.ss_flags &= ~SS_ONSTACK;
+		p->p_sigctx.ps_sigstk.ss_flags &= ~SS_ONSTACK;
 
 	/* Restore signal mask. */
 	native_sigset13_to_sigset(&scp->sc_mask, &mask);
-	(void)sigprocmask1(l, SIG_SETMASK, &mask, 0);
-
-	mutex_exit(p->p_lock);
+	(void)sigprocmask1(p, SIG_SETMASK, &mask, 0);
 
 	return EJUSTRETURN;
 }

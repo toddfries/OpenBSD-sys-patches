@@ -1,4 +1,4 @@
-/*	$NetBSD: gtmpsc.c,v 1.31 2008/09/08 23:36:54 gmcgarry Exp $	*/
+/*	$NetBSD: gtmpsc.c,v 1.26 2007/10/19 12:00:33 ad Exp $	*/
 
 /*
  * Copyright (c) 2002 Allegro Networks, Inc., Wasabi Systems, Inc.
@@ -45,7 +45,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: gtmpsc.c,v 1.31 2008/09/08 23:36:54 gmcgarry Exp $");
+__KERNEL_RCSID(0, "$NetBSD: gtmpsc.c,v 1.26 2007/10/19 12:00:33 ad Exp $");
 
 #include "opt_kgdb.h"
 
@@ -220,9 +220,9 @@ STATIC void     gtmpsc_kgdb_putc(void *, int);
 STATIC unsigned int gtmpsccninit_done = 0;
 STATIC gtmpsc_softc_t gtmpsc_fake_softc;
 STATIC unsigned char gtmpsc_earlybuf[PAGE_SIZE]
-    __aligned(PAGE_SIZE);
+    __attribute__ ((aligned(PAGE_SIZE)));
 STATIC unsigned char gtmpsc_fake_dmapage[PAGE_SIZE]
-    __aligned(PAGE_SIZE);
+    __attribute__ ((aligned(PAGE_SIZE)));
 
 
 #define GTMPSC_PRINT_BUF_SIZE	4096
@@ -536,7 +536,7 @@ gtmpscattach(struct device *parent, struct device *self, void *aux)
 	    (gt_reva_gtmpsc_bug) ? " [Rev A. bug]" : "");
 
 	if (is_console)
-		aprint_normal_dev(&sc->gtmpsc_dev, "console\n");
+		aprint_normal("%s: console\n", sc->gtmpsc_dev.dv_xname);
 
 #ifdef DDB
 	if (is_console == 0)
@@ -551,12 +551,13 @@ gtmpscattach(struct device *parent, struct device *self, void *aux)
 	 */
 	if (sc->gtmpsc_unit == comkgdbport) {
 		if (comkgdbport == 0) { /* FIXME */
-			aprint_error_dev(&sc->gtmpsc_dev, "(kgdb): cannot share with console\n");
+			printf("%s(kgdb): cannot share with console\n",
+				sc->gtmpsc_dev.dv_xname);
 			return;
 		}
 
 		sc->gtmpsc_flags |= GTMPSCF_KGDB;
-		printf("%s: kgdb\n", device_xname(&sc->gtmpsc_dev));
+		printf("%s: kgdb\n", sc->gtmpsc_dev.dv_xname);
 		gtmpsc_txflush(gtmpsc_scp[0]);
 		kgdb_attach(gtmpsc_kgdb_getc, gtmpsc_kgdb_putc, NULL);
 		kgdb_dev = 123; /* unneeded, only to satisfy some tests */
@@ -595,7 +596,9 @@ gtmpscopen(dev_t dev, int flag, int mode, struct lwp *l)
 	int s2;
 	int error;
 
-	sc = device_lookup_private(&gtmpsc_cd, unit);
+	if (unit >= gtmpsc_cd.cd_ndevs)
+		return ENXIO;
+	sc = gtmpsc_cd.cd_devs[unit];
 	if (!sc)
 		return ENXIO;
 #ifdef KGDB
@@ -668,7 +671,7 @@ int
 gtmpscclose(dev_t dev, int flag, int mode, struct lwp *l)
 {
 	int unit = GTMPSCUNIT(dev);
-	struct gtmpsc_softc *sc = device_lookup_private(&gtmpsc_cd, unit);
+	struct gtmpsc_softc *sc = gtmpsc_cd.cd_devs[unit];
 	struct tty *tp = sc->gtmpsc_tty;
 	int s;
 
@@ -696,7 +699,7 @@ gtmpscclose(dev_t dev, int flag, int mode, struct lwp *l)
 int
 gtmpscread(dev_t dev, struct uio *uio, int flag)
 {
-	struct gtmpsc_softc *sc = device_lookup_private(&gtmpsc_cd, GTMPSCUNIT(dev));
+	struct gtmpsc_softc *sc = gtmpsc_cd.cd_devs[GTMPSCUNIT(dev)];
 	struct tty *tp = sc->gtmpsc_tty;
 
 	return (*tp->t_linesw->l_read)(tp, uio, flag);
@@ -705,7 +708,7 @@ gtmpscread(dev_t dev, struct uio *uio, int flag)
 int
 gtmpscwrite(dev_t dev, struct uio *uio, int flag)
 {
-	struct gtmpsc_softc *sc = device_lookup_private(&gtmpsc_cd, GTMPSCUNIT(dev));
+	struct gtmpsc_softc *sc = gtmpsc_cd.cd_devs[GTMPSCUNIT(dev)];
 	struct tty *tp = sc->gtmpsc_tty;
 
 	return (*tp->t_linesw->l_write)(tp, uio, flag);
@@ -714,7 +717,7 @@ gtmpscwrite(dev_t dev, struct uio *uio, int flag)
 int
 gtmpscpoll(dev_t dev, int events, struct lwp *l)
 {
-	struct gtmpsc_softc *sc = device_lookup_private(&gtmpsc_cd, GTMPSCUNIT(dev));
+	struct gtmpsc_softc *sc = gtmpsc_cd.cd_devs[GTMPSCUNIT(dev)];
 	struct tty *tp = sc->gtmpsc_tty;
 
 	return ((*tp->t_linesw->l_poll)(tp, events, l));
@@ -723,7 +726,7 @@ gtmpscpoll(dev_t dev, int events, struct lwp *l)
 int
 gtmpscioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 {
-	struct gtmpsc_softc *sc = device_lookup_private(&gtmpsc_cd, GTMPSCUNIT(dev));
+	struct gtmpsc_softc *sc = gtmpsc_cd.cd_devs[GTMPSCUNIT(dev)];
 	struct tty *tp = sc->gtmpsc_tty;
 	int error;
 
@@ -737,7 +740,7 @@ gtmpscioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 struct tty *
 gtmpsctty(dev_t dev)
 {
-	struct gtmpsc_softc *sc = device_lookup_private(&gtmpsc_cd, GTMPSCUNIT(dev));
+	struct gtmpsc_softc *sc = gtmpsc_cd.cd_devs[GTMPSCUNIT(dev)];
 
 	return sc->gtmpsc_tty;
 }
@@ -756,7 +759,7 @@ gtmpscstart(struct tty *tp)
 	int s, s2, tbc;
 
 	unit = GTMPSCUNIT(tp->t_dev);
-	sc = device_lookup_private(&gtmpsc_cd, unit);
+	sc = gtmpsc_cd.cd_devs[unit];
 	if (sc == NULL)
 		return;
 
@@ -765,8 +768,15 @@ gtmpscstart(struct tty *tp)
 		goto out;
 	if (sc->sc_tx_stopped)
 		goto out;
-	if (!ttypull(tp))
-		goto out;
+	if (tp->t_outq.c_cc <= tp->t_lowat) {
+		if ((tp->t_state & TS_ASLEEP) != 0) {
+			tp->t_state &= ~TS_ASLEEP;
+			wakeup(&tp->t_outq);
+		}
+		selwakeup(&tp->t_wsel);
+		if (tp->t_outq.c_cc == 0)
+			goto out;
+	}
 
 	/* Grab the first contiguous region of buffer space. */
 	tba = tp->t_outq.c_cf;
@@ -790,7 +800,7 @@ out:
 STATIC int
 gtmpscparam(struct tty *tp, struct termios *t)
 {
-	struct gtmpsc_softc *sc = device_lookup_private(&gtmpsc_cd, GTMPSCUNIT(tp->t_dev));
+	struct gtmpsc_softc *sc = gtmpsc_cd.cd_devs[GTMPSCUNIT(tp->t_dev)];
 	int ospeed = compute_cdv(t->c_ospeed);
 	int s;
 
@@ -862,7 +872,7 @@ gtmpsc_get_causes(void)
 	desc_addr[1] = 0;
 	desc_addr[2] = 0;
 	desc_addr[3] = 0;
-	sc = device_lookup_private(&gtmpsc_cd, 0);
+	sc = gtmpsc_cd.cd_devs[0];
 	if (sc != 0) {
 	    if (sdma_imask & SDMA_INTR_RXBUF(0)) {
 		desc_addr[0] =
@@ -877,7 +887,7 @@ gtmpsc_get_causes(void)
 		    __asm volatile ("dcbt 0,%0" :: "r"(desc_addr[1]));
 	    }
 	}
-	sc = device_lookup_private(&gtmpsc_cd, 1);
+	sc = gtmpsc_cd.cd_devs[1];
 	if (sc != 0) {
 	    if (sdma_imask & SDMA_INTR_RXBUF(1)) {
 		desc_addr[2] =
@@ -919,7 +929,7 @@ gtmpsc_intr(void *arg)
 #ifdef KGDB
 	if (kgdb_break_immediate) {
 		unit = comkgdbport;
-		sc = device_lookup_private(&gtmpsc_cd, unit);
+		sc = gtmpsc_cd.cd_devs[unit];
 		if (sc == 0 || (sc->gtmpsc_flags & GTMPSCF_KGDB) == 0)
 			goto skip_kgdb;
 		if (gt_reva_gtmpsc_bug)
@@ -938,8 +948,8 @@ gtmpsc_intr(void *arg)
 skip_kgdb:
 #endif
 	for (unit = 0; unit < GTMPSC_NCHAN; ++unit) {
-		sc = device_lookup_private(&gtmpsc_cd, unit);
-		if (sc == NULL)
+		sc = gtmpsc_cd.cd_devs[unit];
+		if (sc == 0)
 			continue;
 		if (gt_reva_gtmpsc_bug)
 			r = cause & sdma_imask;
@@ -1111,7 +1121,7 @@ gtmpsc_iflush(gtmpsc_softc_t *sc)
 		if (gtmpsc_common_pollc(sc->gtmpsc_unit, &c, &stat) == 0)
 			return;
 #ifdef DIAGNOSTIC
-	printf("%s: gtmpsc_iflush timeout %02x\n", device_xname(&sc->gtmpsc_dev), c);
+	printf("%s: gtmpsc_iflush timeout %02x\n", sc->gtmpsc_dev.dv_xname, c);
 #endif
 }
 
@@ -1337,7 +1347,7 @@ gtmpsccngetc(dev_t dev)
 
 	unit = GTMPSCUNIT(dev);
 	if (major(dev) != 0) {
-		struct gtmpsc_softc *sc = device_lookup_private(&gtmpsc_cd, unit);
+		struct gtmpsc_softc *sc = device_lookup(&gtmpsc_cd, unit);
 		if (sc == NULL)
 			return 0;
 		unit = sc->gtmpsc_unit;
@@ -1364,7 +1374,7 @@ gtmpsccnputc(dev_t dev, int c)
 
 	unit = GTMPSCUNIT(dev);
 	if (major(dev) != 0) {
-		struct gtmpsc_softc *sc = device_lookup_private(&gtmpsc_cd, unit);
+		struct gtmpsc_softc *sc = device_lookup(&gtmpsc_cd, unit);
 		if (sc == NULL)
 			return;
 		unit = sc->gtmpsc_unit;

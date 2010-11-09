@@ -1,4 +1,4 @@
-/*	$NetBSD: shark_machdep.c,v 1.35 2009/02/13 22:41:03 apb Exp $	*/
+/*	$NetBSD: shark_machdep.c,v 1.26 2006/10/26 22:49:36 bjh21 Exp $	*/
 
 /*
  * Copyright 1997
@@ -38,10 +38,9 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: shark_machdep.c,v 1.35 2009/02/13 22:41:03 apb Exp $");
+__KERNEL_RCSID(0, "$NetBSD: shark_machdep.c,v 1.26 2006/10/26 22:49:36 bjh21 Exp $");
 
 #include "opt_ddb.h"
-#include "opt_modular.h"
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -71,14 +70,14 @@ __KERNEL_RCSID(0, "$NetBSD: shark_machdep.c,v 1.35 2009/02/13 22:41:03 apb Exp $
 #include <arm/arm32/machdep.h>
 #include <arm/undefined.h>
 
+#include "opt_ipkdb.h"
+
 #include <dev/ofw/openfirm.h>
 #include <machine/ofw.h>
 #include <machine/isa_machdep.h>
 #include <dev/isa/isavar.h>
 #include <dev/ofisa/ofisavar.h>
 #include <shark/shark/sequoia.h>
-
-#include "isadma.h"
 
 #include "wd.h"
 #include "cd.h"
@@ -116,8 +115,6 @@ extern void consinit		__P((void));
 int	ofbus_match __P((struct device *, struct cfdata *, void *));
 void	ofbus_attach __P((struct device *, struct device *, void *));
 
-
-paddr_t isa_io_physaddr, isa_mem_physaddr;
 
 /*
  *  Exported variables
@@ -207,6 +204,7 @@ initarm(void *arg)
 {
 	ofw_handle_t ofw_handle = arg;
 	paddr_t  pclean;
+	paddr_t  isa_io_physaddr, isa_mem_physaddr;
 	vaddr_t  isa_io_virtaddr, isa_mem_virtaddr;
 	paddr_t  isadmaphysbufs;
 	extern char shark_fiq[], shark_fiq_end[];
@@ -243,9 +241,7 @@ initarm(void *arg)
 	process_kernel_args();
 
 	ofw_configisadma(&isadmaphysbufs);
-#if (NISADMA > 0)
 	isa_dma_init();
-#endif
 
 	/* allocate a cache clean space */
 	if ((pclean = ofw_getcleaninfo()) != -1) {
@@ -300,17 +296,19 @@ initarm(void *arg)
 	if (fiq_claim(&shark_fiqhandler))
 		panic("Cannot claim FIQ vector.");
 
-#if NKSYMS || defined(DDB) || defined(MODULAR)
-#ifndef __ELF__
+#if NKSYMS || defined(DDB) || defined(LKM)
+#ifdef __ELF__
+	ksyms_init(0, NULL, NULL);	/* XXX */
+#else
 	{
 		struct exec *kernexec = (struct exec *)KERNEL_TEXT_BASE;
 		extern int end;
 		extern char *esym;
 
-		ksyms_addsyms_elf(kernexec->a_syms, &end, esym);
+		ksyms_init(kernexec->a_syms, &end, esym);
 	}
 #endif /* __ELF__ */
-#endif /* NKSYMS || defined(DDB) || defined(MODULAR) */
+#endif /* NKSYMS || defined(DDB) || defined(LKM) */
 
 #ifdef DDB
 	db_machine_init();

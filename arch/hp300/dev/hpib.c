@@ -1,4 +1,4 @@
-/*	$NetBSD: hpib.c,v 1.38 2008/06/13 09:41:15 cegger Exp $	*/
+/*	$NetBSD: hpib.c,v 1.34 2006/07/21 10:01:39 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -65,7 +72,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: hpib.c,v 1.38 2008/06/13 09:41:15 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: hpib.c,v 1.34 2006/07/21 10:01:39 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -82,14 +89,15 @@ __KERNEL_RCSID(0, "$NetBSD: hpib.c,v 1.38 2008/06/13 09:41:15 cegger Exp $");
 
 #include "ioconf.h"
 
-static int	hpibbusmatch(device_t, cfdata_t, void *);
-static void	hpibbusattach(device_t, device_t, void *);
+static int	hpibbusmatch(struct device *, struct cfdata *, void *);
+static void	hpibbusattach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(hpibbus, sizeof(struct hpibbus_softc),
+CFATTACH_DECL(hpibbus, sizeof(struct hpibbus_softc),
     hpibbusmatch, hpibbusattach, NULL, NULL);
 
 static void	hpibbus_attach_children(struct hpibbus_softc *);
-static int	hpibbussearch(device_t, cfdata_t, const int *, void *);
+static int	hpibbussearch(struct device *, struct cfdata *,
+			      const int *, void *);
 static int	hpibbusprint(void *, const char *);
 
 static int	hpibbus_alloc(struct hpibbus_softc *, int, int);
@@ -135,20 +143,19 @@ int	hpibdmathresh = 3;	/* byte count beyond which to attempt dma */
  */
 
 static int
-hpibbusmatch(device_t parent, cfdata_t cf, void *aux)
+hpibbusmatch(struct device *parent, struct cfdata *match, void *aux)
 {
 
 	return 1;
 }
 
 static void
-hpibbusattach(device_t parent, device_t self, void *aux)
+hpibbusattach(struct device *parent, struct device *self, void *aux)
 {
-	struct hpibbus_softc *sc = device_private(self);
+	struct hpibbus_softc *sc = (struct hpibbus_softc *)self;
 	struct hpibdev_attach_args *ha = aux;
 
-	sc->sc_dev = self;
-	aprint_normal("\n");
+	printf("\n");
 
 	/* Get the operations vector for the controller. */
 	sc->sc_ops = ha->ha_ops;
@@ -163,7 +170,7 @@ hpibbusattach(device_t parent, device_t self, void *aux)
 	 */
 	sc->sc_dq = malloc(sizeof(struct dmaqueue), M_DEVBUF, M_NOWAIT);
 	if (sc->sc_dq == NULL) {
-		aprint_error_dev(self, "can't allocate DMA queue entry\n");
+		printf("%s: can't allocate DMA queue entry\n", self->dv_xname);
 		return;
 	}
 	sc->sc_dq->dq_softc = sc;
@@ -189,7 +196,7 @@ hpibbus_attach_children(struct hpibbus_softc *sc)
 		 * Plotters won't identify themselves, and
 		 * get the same value as non-existent devices.
 		 */
-		ha.ha_id = hpibid(device_unit(sc->sc_dev), slave);
+		ha.ha_id = hpibid(device_unit(&sc->sc_dev), slave);
 
 		ha.ha_slave = slave;	/* not to be modified by children */
 		ha.ha_punit = 0;	/* children modify this */
@@ -197,14 +204,15 @@ hpibbus_attach_children(struct hpibbus_softc *sc)
 		/*
 		 * Search though all configured children for this bus.
 		 */
-		config_search_ia(hpibbussearch, sc->sc_dev, "hpibbus", &ha);
+		config_search_ia(hpibbussearch, &sc->sc_dev, "hpibbus", &ha);
 	}
 }
 
 static int
-hpibbussearch(device_t parent, cfdata_t cf, const int *ldesc, void *aux)
+hpibbussearch(struct device *parent, struct cfdata *cf,
+	      const int *ldesc, void *aux)
 {
-	struct hpibbus_softc *sc = device_private(parent);
+	struct hpibbus_softc *sc = (struct hpibbus_softc *)parent;
 	struct hpibbus_attach_args *ha = aux;
 
 	/* Make sure this is in a consistent state. */
@@ -261,7 +269,7 @@ hpibdevprint(void *aux, const char *pnp)
 void
 hpibreset(int unit)
 {
-	struct hpibbus_softc *sc = device_lookup_private(&hpibbus_cd,unit);
+	struct hpibbus_softc *sc = hpibbus_cd.cd_devs[unit];
 
 	(*sc->sc_ops->hpib_reset)(sc);
 }
@@ -269,14 +277,14 @@ hpibreset(int unit)
 int
 hpibreq(struct device *pdev, struct hpibqueue *hq)
 {
-	struct hpibbus_softc *sc = device_private(pdev);
+	struct hpibbus_softc *sc = (struct hpibbus_softc *)pdev;
 	int s;
 
 	s = splhigh();	/* XXXthorpej */
 	TAILQ_INSERT_TAIL(&sc->sc_queue, hq, hq_list);
 	splx(s);
 
-	if (TAILQ_FIRST(&sc->sc_queue) == hq)
+	if (sc->sc_queue.tqh_first == hq)
 		return 1;
 
 	return 0;
@@ -285,14 +293,14 @@ hpibreq(struct device *pdev, struct hpibqueue *hq)
 void
 hpibfree(struct device *pdev, struct hpibqueue *hq)
 {
-	struct hpibbus_softc *sc = device_private(pdev);
+	struct hpibbus_softc *sc = (struct hpibbus_softc *)pdev;
 	int s;
 
 	s = splhigh();	/* XXXthorpej */
 	TAILQ_REMOVE(&sc->sc_queue, hq, hq_list);
 	splx(s);
 
-	if ((hq = TAILQ_FIRST(&sc->sc_queue)) != NULL)
+	if ((hq = sc->sc_queue.tqh_first) != NULL)
 		(*hq->hq_start)(hq->hq_softc);
 }
 
@@ -317,7 +325,7 @@ hpibid(int unit, int slave)
 int
 hpibsend(int unit, int slave, int sec, void *addr, int cnt)
 {
-	struct hpibbus_softc *sc = device_lookup_private(&hpibbus_cd,unit);
+	struct hpibbus_softc *sc = hpibbus_cd.cd_devs[unit];
 
 	return (*sc->sc_ops->hpib_send)(sc, slave, sec, addr, cnt);
 }
@@ -325,7 +333,7 @@ hpibsend(int unit, int slave, int sec, void *addr, int cnt)
 int
 hpibrecv(int unit, int slave, int sec, void *addr, int cnt)
 {
-	struct hpibbus_softc *sc = device_lookup_private(&hpibbus_cd,unit);
+	struct hpibbus_softc *sc = hpibbus_cd.cd_devs[unit];
 
 	return (*sc->sc_ops->hpib_recv)(sc, slave, sec, addr, cnt);
 }
@@ -333,7 +341,7 @@ hpibrecv(int unit, int slave, int sec, void *addr, int cnt)
 int
 hpibpptest(int unit, int slave)
 {
-	struct hpibbus_softc *sc = device_lookup_private(&hpibbus_cd,unit);
+	struct hpibbus_softc *sc = hpibbus_cd.cd_devs[unit];
 
 	return (*sc->sc_ops->hpib_ppoll)(sc) & (0x80 >> slave);
 }
@@ -341,7 +349,7 @@ hpibpptest(int unit, int slave)
 void
 hpibppclear(int unit)
 {
-	struct hpibbus_softc *sc = device_lookup_private(&hpibbus_cd,unit);
+	struct hpibbus_softc *sc = hpibbus_cd.cd_devs[unit];
 
 	sc->sc_flags &= ~HPIBF_PPOLL;
 }
@@ -349,7 +357,7 @@ hpibppclear(int unit)
 void
 hpibawait(int unit)
 {
-	struct hpibbus_softc *sc = device_lookup_private(&hpibbus_cd, unit);
+	struct hpibbus_softc *sc = hpibbus_cd.cd_devs[unit];
 
 	sc->sc_flags |= HPIBF_PPOLL;
 	(*sc->sc_ops->hpib_ppwatch)(sc);
@@ -358,7 +366,7 @@ hpibawait(int unit)
 int
 hpibswait(int unit, int slave)
 {
-	struct hpibbus_softc *sc = device_lookup_private(&hpibbus_cd, unit);
+	struct hpibbus_softc *sc = hpibbus_cd.cd_devs[unit];
 	int timo = hpibtimeout;
 	int mask, (*ppoll)(struct hpibbus_softc *);
 
@@ -366,7 +374,7 @@ hpibswait(int unit, int slave)
 	mask = 0x80 >> slave;
 	while (((*ppoll)(sc) & mask) == 0) {
 		if (--timo == 0) {
-			printf("%s: swait timeout\n", device_xname(sc->sc_dev));
+			printf("%s: swait timeout\n", sc->sc_dev.dv_xname);
 			return -1;
 		}
 	}
@@ -376,7 +384,7 @@ hpibswait(int unit, int slave)
 int
 hpibustart(int unit)
 {
-	struct hpibbus_softc *sc = device_lookup_private(&hpibbus_cd,unit);
+	struct hpibbus_softc *sc = hpibbus_cd.cd_devs[unit];
 
 	if (sc->sc_type == HPIBA)
 		sc->sc_dq->dq_chan = DMA0;
@@ -393,14 +401,14 @@ hpibstart(void *arg)
 	struct hpibbus_softc *sc = arg;
 	struct hpibqueue *hq;
 
-	hq = TAILQ_FIRST(&sc->sc_queue);
+	hq = sc->sc_queue.tqh_first;
 	(*hq->hq_go)(hq->hq_softc);
 }
 
 void
 hpibgo(int unit, int slave, int sec, void *vbuf, int count, int rw, int timo)
 {
-	struct hpibbus_softc *sc = device_lookup_private(&hpibbus_cd,unit);
+	struct hpibbus_softc *sc = hpibbus_cd.cd_devs[unit];
 
 	(*sc->sc_ops->hpib_go)(sc, slave, sec, vbuf, count, rw, timo);
 }

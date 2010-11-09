@@ -1,4 +1,4 @@
-/*	$Id: njata_cardbus.c,v 1.7 2008/06/24 19:44:52 drochner Exp $	*/
+/*	$Id: njata_cardbus.c,v 1.5 2007/10/19 11:59:39 ad Exp $	*/
 
 /*
  * Copyright (c) 2006 ITOH Yasufumi <itohy@NetBSD.org>.
@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: njata_cardbus.c,v 1.7 2008/06/24 19:44:52 drochner Exp $");
+__KERNEL_RCSID(0, "$NetBSD: njata_cardbus.c,v 1.5 2007/10/19 11:59:39 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -55,7 +55,7 @@ struct njata32_cardbus_softc {
 
 	/* CardBus-specific goo */
 	cardbus_devfunc_t	sc_ct;		/* our CardBus devfuncs */
-	cardbus_intr_line_t	sc_intrline;	/* our interrupt line */
+	int			sc_intrline;	/* our interrupt line */
 	cardbustag_t		sc_tag;
 
 	bus_space_handle_t	sc_regmaph;
@@ -64,11 +64,13 @@ struct njata32_cardbus_softc {
 
 static const struct njata32_cardbus_product *njata_cardbus_lookup
 		    (const struct cardbus_attach_args *);
-static int	njata_cardbus_match(device_t, cfdata_t, void *);
-static void	njata_cardbus_attach(device_t, device_t, void *);
+static int	njata_cardbus_match(struct device *, struct cfdata *,
+		    void *);
+static void	njata_cardbus_attach(struct device *, struct device *,
+		    void *);
 static int	njata_cardbus_detach(struct device *, int);
 
-CFATTACH_DECL_NEW(njata_cardbus, sizeof(struct njata32_cardbus_softc),
+CFATTACH_DECL(njata_cardbus, sizeof(struct njata32_cardbus_softc),
     njata_cardbus_match, njata_cardbus_attach, njata_cardbus_detach, NULL);
 
 static const struct njata32_cardbus_product {
@@ -95,7 +97,8 @@ static const struct njata32_cardbus_product {
 };
 
 static const struct njata32_cardbus_product *
-njata_cardbus_lookup(const struct cardbus_attach_args *ca)
+njata_cardbus_lookup(ca)
+	const struct cardbus_attach_args *ca;
 {
 	const struct njata32_cardbus_product *p;
 
@@ -110,7 +113,8 @@ njata_cardbus_lookup(const struct cardbus_attach_args *ca)
 }
 
 static int
-njata_cardbus_match(device_t parent, cfdata_t match, void *aux)
+njata_cardbus_match(struct device *parent,
+    struct cfdata *match, void *aux)
 {
 	struct cardbus_attach_args *ca = aux;
 
@@ -121,10 +125,11 @@ njata_cardbus_match(device_t parent, cfdata_t match, void *aux)
 }
 
 static void
-njata_cardbus_attach(device_t parent, device_t self, void *aux)
+njata_cardbus_attach(struct device *parent, struct device *self,
+    void *aux)
 {
 	struct cardbus_attach_args *ca = aux;
-	struct njata32_cardbus_softc *csc = device_private(self);
+	struct njata32_cardbus_softc *csc = (void *)self;
 	struct njata32_softc *sc = &csc->sc_njata32;
 	const struct njata32_cardbus_product *prod;
 	cardbus_devfunc_t ct = ca->ca_ct;
@@ -134,11 +139,10 @@ njata_cardbus_attach(device_t parent, device_t self, void *aux)
 	int csr;
 	uint8_t latency = 0x20;
 
-	sc->sc_wdcdev.sc_atac.atac_dev = self;
 	if ((prod = njata_cardbus_lookup(ca)) == NULL)
 		panic("njata_cardbus_attach");
 
-	aprint_normal(": Workbit NinjaATA-32 IDE controller\n");
+	printf(": Workbit NinjaATA-32 IDE controller\n");
 
 	csc->sc_ct = ct;
 	csc->sc_tag = ca->ca_tag;
@@ -168,7 +172,7 @@ njata_cardbus_attach(device_t parent, device_t self, void *aux)
 			goto try_io;
 		}
 #ifdef NJATA32_DEBUG
-		aprint_normal("%s: memory space mapped, size %u\n",
+		printf("%s: memory space mapped, size %u\n",
 		    NJATA32NAME(sc), (unsigned)csc->sc_regmap_size);
 #endif
 		csr |= PCI_COMMAND_MEM_ENABLE;
@@ -180,14 +184,14 @@ njata_cardbus_attach(device_t parent, device_t self, void *aux)
 		    PCI_MAPREG_TYPE_IO, 0, &NJATA32_REGT(sc),
 		    &NJATA32_REGH(sc), NULL, &csc->sc_regmap_size) == 0) {
 #ifdef NJATA32_DEBUG
-			aprint_normal("%s: io space mapped, size %u\n",
+			printf("%s: io space mapped, size %u\n",
 			    NJATA32NAME(sc), (unsigned)csc->sc_regmap_size);
 #endif
 			csr |= PCI_COMMAND_IO_ENABLE;
 			sc->sc_flags = NJATA32_IO_MAPPED;
 			(*ct->ct_cf->cardbus_ctrl)(cc, CARDBUS_IO_ENABLE);
 		} else {
-			aprint_error("%s: unable to map device registers\n",
+			printf("%s: unable to map device registers\n",
 			    NJATA32NAME(sc));
 			return;
 		}
@@ -221,19 +225,22 @@ njata_cardbus_attach(device_t parent, device_t self, void *aux)
 	sc->sc_ih = cardbus_intr_establish(cc, cf, ca->ca_intrline, IPL_BIO,
 	    njata32_intr, sc);
 	if (sc->sc_ih == NULL) {
-		aprint_error("%s: unable to establish interrupt\n",
-		    NJATA32NAME(sc));
+		printf("%s: unable to establish interrupt at %d\n",
+		    NJATA32NAME(sc), ca->ca_intrline);
 		return;
 	}
+	printf("%s: interrupting at %d\n", NJATA32NAME(sc), ca->ca_intrline);
 
 	/* attach */
 	njata32_attach(sc);
 }
 
 static int
-njata_cardbus_detach(device_t self, int flags)
+njata_cardbus_detach(self, flags)
+	struct device *self;
+	int flags;
 {
-	struct njata32_cardbus_softc *csc = device_private(self);
+	struct njata32_cardbus_softc *csc = (void *) self;
 	struct njata32_softc *sc = &csc->sc_njata32;
 	int rv;
 

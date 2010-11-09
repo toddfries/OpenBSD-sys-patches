@@ -1,4 +1,4 @@
-/*	$NetBSD: syscall.c,v 1.37 2008/10/25 10:41:05 tsutsui Exp $	*/
+/*	$NetBSD: syscall.c,v 1.30 2006/11/01 22:37:35 martin Exp $	*/
 
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -107,11 +114,7 @@
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
 
-__KERNEL_RCSID(0, "$NetBSD: syscall.c,v 1.37 2008/10/25 10:41:05 tsutsui Exp $");
-
-#if defined(_KERNEL_OPT)
-#include "opt_sa.h"
-#endif
+__KERNEL_RCSID(0, "$NetBSD: syscall.c,v 1.30 2006/11/01 22:37:35 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -119,7 +122,6 @@ __KERNEL_RCSID(0, "$NetBSD: syscall.c,v 1.37 2008/10/25 10:41:05 tsutsui Exp $")
 #include <sys/user.h>
 #include <sys/signal.h>
 #include <sys/syscall.h>
-#include <sys/syscallvar.h>
 #include <sys/sa.h>
 #include <sys/savar.h>
 
@@ -196,12 +198,6 @@ EMULNAME(syscall_plain)(struct lwp *l, u_int status, u_int cause, u_int opc)
 	callp = p->p_emul->e_sysent;
 	ov0 = code = frame->f_regs[_R_V0] - SYSCALL_SHIFT;
 
-#ifdef KERN_SA
-	if (__predict_false((l->l_savp)
-            && (l->l_savp->savp_pflags & SAVP_FLAG_DELIVERING)))
-		l->l_savp->savp_pflags &= ~SAVP_FLAG_DELIVERING;
-#endif
-
 	switch (code) {
 	case SYS_syscall:
 	case SYS___syscall:
@@ -288,7 +284,7 @@ EMULNAME(syscall_plain)(struct lwp *l, u_int status, u_int cause, u_int opc)
 	rval[1] = frame->f_regs[_R_V1];
 #endif
 
-	error = sy_call(callp, l, args, rval);
+	error = (*callp->sy_call)(l, args, rval);
 
 	switch (error) {
 	case 0:
@@ -344,12 +340,6 @@ EMULNAME(syscall_fancy)(struct lwp *l, u_int status, u_int cause, u_int opc)
 	callp = p->p_emul->e_sysent;
 	ov0 = code = frame->f_regs[_R_V0] - SYSCALL_SHIFT;
 
-#ifdef KERN_SA
-	if (__predict_false((l->l_savp)
-            && (l->l_savp->savp_pflags & SAVP_FLAG_DELIVERING)))
-		l->l_savp->savp_pflags &= ~SAVP_FLAG_DELIVERING;
-#endif
-
 	switch (code) {
 	case SYS_syscall:
 	case SYS___syscall:
@@ -426,7 +416,7 @@ EMULNAME(syscall_fancy)(struct lwp *l, u_int status, u_int cause, u_int opc)
 		break;
 	}
 
-	if ((error = trace_enter(code, args, callp->sy_narg)) != 0)
+	if ((error = trace_enter(l, code, code, NULL, args)) != 0)
 		goto out;
 
 #if !defined(_MIPS_BSD_API) || _MIPS_BSD_API == _MIPS_BSD_API_LP32
@@ -439,7 +429,7 @@ EMULNAME(syscall_fancy)(struct lwp *l, u_int status, u_int cause, u_int opc)
 	rval[1] = frame->f_regs[_R_V1];
 #endif
 
-	error = sy_call(callp, l, args, rval);
+	error = (*callp->sy_call)(l, args, rval);
 out:
 	switch (error) {
 	case 0:
@@ -464,7 +454,7 @@ out:
 		break;
 	}
 
-	trace_exit(code, rval, error);
+	trace_exit(l, code, args, rval, error);
 
 	userret(l);
 }

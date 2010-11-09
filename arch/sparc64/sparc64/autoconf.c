@@ -1,4 +1,4 @@
-/*	$NetBSD: autoconf.c,v 1.161 2009/02/13 22:41:03 apb Exp $ */
+/*	$NetBSD: autoconf.c,v 1.135 2006/11/16 01:32:39 christos Exp $ */
 
 /*
  * Copyright (c) 1996
@@ -48,12 +48,10 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.161 2009/02/13 22:41:03 apb Exp $");
+__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.135 2006/11/16 01:32:39 christos Exp $");
 
 #include "opt_ddb.h"
 #include "opt_kgdb.h"
-#include "opt_modular.h"
-#include "opt_multiprocessor.h"
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -100,12 +98,13 @@ __KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.161 2009/02/13 22:41:03 apb Exp $");
 #include <ddb/db_sym.h>
 #include <ddb/db_extern.h>
 #endif
+#ifdef KGDB
+#include <machine/cpu.h>
+#endif
 
 #ifdef RASTERCONSOLE
 #error options RASTERCONSOLE is obsolete for sparc64 - remove it from your config file
 #endif
-
-#include <dev/wsfb/genfbvar.h>
 
 #include "ksyms.h"
 
@@ -137,7 +136,6 @@ int kgdb_break_at_attach;
 #define	OFPATHLEN	128
 #define	OFNODEKEY	"OFpnode"
 
-char	machine_banner[100];
 char	machine_model[100];
 char	ofbootpath[OFPATHLEN], *ofboottarget, *ofbootpartition;
 int	ofbootpackage;
@@ -174,17 +172,11 @@ struct intrmap intrmap[] = {
 #ifdef DEBUG
 #define ACDB_BOOTDEV	0x1
 #define	ACDB_PROBE	0x2
-#define ACDB_BOOTARGS	0x4
 int autoconf_debug = 0x0;
 #define DPRINTF(l, s)   do { if (autoconf_debug & l) printf s; } while (0)
 #else
 #define DPRINTF(l, s)
 #endif
-
-int console_node, console_instance;
-struct genfb_colormap_callback gfb_cb;
-static void of_set_palette(void *, int, int, int, int);
-static void copyprops(struct device *busdev, int, prop_dictionary_t);
 
 static void
 get_ncpus(void)
@@ -252,9 +244,7 @@ bootstrap(void *o0, void *bootargs, void *bootsize, void *o3, void *ofw)
 	void *bi;
 	long bmagic;
 
-#if NKSYMS || defined(DDB) || defined(MODULAR)
 	struct btinfo_symtab *bi_sym;
-#endif
 	struct btinfo_count *bi_count;
 	struct btinfo_kernend *bi_kend;
 	struct btinfo_tlb *bi_tlb;
@@ -269,15 +259,12 @@ bootstrap(void *o0, void *bootargs, void *bootsize, void *o3, void *ofw)
 	romtba = get_romtba();
 
 	prom_init();
-	console_instance = promops.po_stdout;
-	console_node = OF_instance_to_package(promops.po_stdout);
 
 	/* Initialize the PROM console so printf will not panic */
 	(*cn_tab->cn_init)(cn_tab);
 
-	DPRINTF(ACDB_BOOTARGS,
-		("sparc64_init(%p, %p, %p, %p, %p)\n", o0, bootargs, bootsize,
-			o3, ofw));
+	printf("sparc64_init(%p, %p, %p, %p, %p)\n", o0, bootargs, bootsize,
+			o3, ofw);
 
 	/* Extract bootinfo pointer */
 	if ((long)bootsize >= (4 * sizeof(uint64_t))) {
@@ -289,20 +276,18 @@ bootstrap(void *o0, void *bootargs, void *bootsize, void *o3, void *ofw)
 		bi = (void*)(u_long)(((uint32_t*)bootargs)[3]);
 		bmagic = (long)(((uint32_t*)bootargs)[0]);
 	} else {
-		printf("Bad bootinfo size.\n");
-die_old_boot_loader:
-		printf("This kernel requires NetBSD boot loader version 1.9 "
-		       "or newer\n");
+		printf("Bad bootinfo size.\n"
+				"This kernel requires NetBSD boot loader.\n");
 		panic("sparc64_init.");
 	}
 
-	DPRINTF(ACDB_BOOTARGS,
-		("sparc64_init: bmagic=%lx, bi=%p\n", bmagic, bi));
+	printf("sparc64_init: bmagic=%lx, bi=%p\n", bmagic, bi);
 
 	/* Read in the information provided by NetBSD boot loader */
 	if (SPARC_MACHINE_OPENFIRMWARE != bmagic) {
-		printf("No bootinfo information.\n");
-		goto die_old_boot_loader;
+		printf("No bootinfo information.\n"
+				"This kernel requires NetBSD boot loader.\n");
+		panic("sparc64_init.");
 	}
 
 	bootinfo = (void*)(u_long)((uint64_t*)bi)[1];
@@ -312,9 +297,9 @@ die_old_boot_loader:
 		panic("Kernel end address is not found in bootinfo.\n");
 	}
 
-#if NKSYMS || defined(DDB) || defined(MODULAR)
+#if NKSYMS || defined(DDB) || defined(LKM)
 	LOOKUP_BOOTINFO(bi_sym, BTINFO_SYMTAB);
-	ksyms_addsyms_elf(bi_sym->nsym, (int *)(u_long)bi_sym->ssym,
+	ksyms_init(bi_sym->nsym, (int *)(u_long)bi_sym->ssym,
 			(int *)(u_long)bi_sym->esym);
 #ifdef DDB
 #ifdef __arch64__
@@ -354,7 +339,7 @@ get_bootpath_from_prom(void)
 		return;
 
 	strcpy(ofbootpath, sbuf);
-	DPRINTF(ACDB_BOOTDEV, ("bootpath: %s\n", ofbootpath));
+	printf("bootpath: %s\n", ofbootpath);
 	ofbootpackage = prom_finddevice(ofbootpath);
 
 	/*
@@ -366,14 +351,8 @@ get_bootpath_from_prom(void)
 		ofbootpartition = cp+1;
 	}
 	cp = strrchr(ofbootpath, '@');
-	if (cp) {
-		for (; cp != ofbootpath; cp--) {
-			if (*cp == '/') {
-				ofboottarget = cp+1;
-				break;
-			}
-		}
-	}
+	if (cp)
+		ofboottarget = cp;
 
 	DPRINTF(ACDB_BOOTDEV, ("bootpath phandle: 0x%x\n", ofbootpackage));
 	DPRINTF(ACDB_BOOTDEV, ("boot target: %s\n",
@@ -454,9 +433,58 @@ cpu_configure(void)
 	(void)spl0();
 }
 
+static struct vnode *
+opendisk(struct device *dv)
+{
+	int bmajor, bminor;
+	struct vnode *tmpvn;
+	int error;
+	dev_t dev;
+	
+	/*
+	 * Lookup major number for disk block device.
+	 */
+	bmajor = devsw_name2blk(device_xname(dv), NULL, 0);
+	if (bmajor == -1)
+		return NULL;
+	
+	bminor = minor(device_unit(dv));
+	/*
+	 * Fake a temporary vnode for the disk, open it, and read
+	 * and hash the sectors.
+	 */
+	dev = device_is_a(dv, "dk") ? makedev(bmajor, bminor) :
+	    MAKEDISKDEV(bmajor, bminor, RAW_PART);
+	if (bdevvp(dev, &tmpvn))
+		panic("%s: can't alloc vnode for %s", __func__,
+		    device_xname(dv));
+	error = VOP_OPEN(tmpvn, FREAD, NOCRED, 0);
+	if (error) {
+#ifndef DEBUG
+		/*
+		 * Ignore errors caused by missing device, partition,
+		 * or medium.
+		 */
+		if (error != ENXIO && error != ENODEV)
+#endif
+			printf("%s: can't open dev %s (%d)\n",
+			    __func__, device_xname(dv), error);
+		vput(tmpvn);
+		return NULL;
+	}
+
+	return tmpvn;
+}
+
 void
 cpu_rootconf(void)
 {
+	struct dkwedge_list wl;
+	struct dkwedge_info *wi;
+	struct vnode *vn;
+	char diskname[16];
+	int i, error;
+
 	if (booted_device == NULL) {
 		printf("FATAL: boot device not found, check your firmware "
 		    "settings!\n");
@@ -464,10 +492,37 @@ cpu_rootconf(void)
 		return;
 	}
 
-	if (config_handle_wedges(booted_device, booted_partition) == 0)
-		setroot(booted_wedge, 0);
-	else
-		setroot(booted_device, booted_partition);
+	if ((vn = opendisk(booted_device)) == NULL)
+		goto nowedge;
+
+	wl.dkwl_bufsize = sizeof(*wi) * 16;
+	wl.dkwl_buf = wi = malloc(wl.dkwl_bufsize, M_TEMP, M_WAITOK);
+	error = VOP_IOCTL(vn, DIOCLWEDGES, &wl, FREAD, NOCRED, 0);
+	VOP_CLOSE(vn, FREAD, NOCRED, 0);
+	vput(vn);
+	if (error)
+		goto nowedge2;
+
+	snprintf(diskname, sizeof(diskname), "%s%c",
+	    device_xname(booted_device),
+	    booted_partition + 'a');
+
+	for (i = 0; i < wl.dkwl_ncopied; i++) {
+		if (strcmp(wi[i].dkw_wname, diskname) == 0)
+			break;
+	}
+	if (i == wl.dkwl_ncopied)
+		goto nowedge2;
+
+	dkwedge_set_bootwedge(booted_device, wi[i].dkw_offset, wi[i].dkw_size);
+	free(wi, M_TEMP);
+	setroot(booted_wedge, 0);
+	return;
+
+nowedge2:
+	free(wi, M_TEMP);
+nowedge:
+	setroot(booted_device, booted_partition);
 }
 
 char *
@@ -505,7 +560,7 @@ mbprint(void *aux, const char *name)
 
 int
 mainbus_match(struct device * parent, struct cfdata * cf,
-	void *aux)
+	void * aux)
 {
 
 	return (1);
@@ -520,7 +575,7 @@ mainbus_match(struct device * parent, struct cfdata * cf,
  */
 static void
 mainbus_attach(struct device * parent, struct device *dev,
-	void *aux)
+	void * aux)
 {
 extern struct sparc_bus_dma_tag mainbus_dma_tag;
 extern struct sparc_bus_space_tag mainbus_space_tag;
@@ -528,7 +583,6 @@ extern struct sparc_bus_space_tag mainbus_space_tag;
 	struct mainbus_attach_args ma;
 	char sbuf[32];
 	const char *const *ssp, *sp = NULL;
-	char *c;
 	int node0, node, rv, i;
 
 	static const char *const openboot_special[] = {
@@ -547,26 +601,9 @@ extern struct sparc_bus_space_tag mainbus_space_tag;
 		NULL
 	};
 
-	if (OF_getprop(findroot(), "banner-name", machine_banner,
-	    sizeof machine_banner) < 0)
-		i = 0;
-	else {
-		i = 1;
-		if (((c = strchr(machine_banner, '(')) != NULL) &&
-		    c != &machine_banner[0]) {
-				while (*c == '(' || *c == ' ') {
-					*c = '\0';
-					c--;
-				}
-			}
-	}
 	OF_getprop(findroot(), "name", machine_model, sizeof machine_model);
 	prom_getidprom();
-	if (i)
-		printf(": %s (%s): hostid %lx\n", machine_model,
-		    machine_banner, hostid);
-	else
-		printf(": %s: hostid %lx\n", machine_model, hostid);
+	printf(": %s: hostid %lx\n", machine_model, hostid);
 
 	/*
 	 * Locate and configure the ``early'' devices.  These must be
@@ -630,9 +667,7 @@ extern struct sparc_bus_space_tag mainbus_space_tag;
 		ma.ma_name = sbuf;
 		ma.ma_node = node;
 		if (OF_getprop(node, "upa-portid", &portid, sizeof(portid)) !=
-		    sizeof(portid) && 
-		    OF_getprop(node, "portid", &portid, sizeof(portid)) !=
-		    sizeof(portid))
+		    sizeof(portid)) 
 			portid = -1;
 		ma.ma_upaid = portid;
 
@@ -718,6 +753,32 @@ romgetcursoraddr(int **rowp, int **colp)
 }
 
 /*
+ * find a device matching "name" and unit number
+ */
+struct device *
+getdevunit(const char *name, int unit)
+{
+	struct device *dev = alldevs.tqh_first;
+	char num[10], fullname[16];
+	int lunit;
+
+	/* compute length of name and decimal expansion of unit number */
+	sprintf(num, "%d", unit);
+	lunit = strlen(num);
+	if (strlen(name) + lunit >= sizeof(fullname) - 1)
+		panic("config_attach: device name too long");
+
+	strcpy(fullname, name);
+	strcat(fullname, num);
+
+	while (strcmp(device_xname(dev), fullname) != 0) {
+		if ((dev = dev->dv_list.tqe_next) == NULL)
+			return NULL;
+	}
+	return dev;
+}
+
+/*
  * Match a struct device against the bootpath, by
  * comparing it's firmware package handle. If they match
  * exactly, we found the boot device.
@@ -736,7 +797,7 @@ dev_path_exact_match(struct device *dev, int ofnode)
 /*
  * Match a struct device against the bootpath, by
  * comparing it's firmware package handle and calculating
- * the target/lun suffix and comparing that against
+ * the target/lun suffix and compmaring that against
  * the bootpath remainder.
  */
 static void
@@ -760,14 +821,8 @@ dev_path_drive_match(struct device *dev, int ctrlnode, int target, int lun)
 	if (child == ofbootpackage) {
 		/* boot device is on this controller */
 		DPRINTF(ACDB_BOOTDEV, ("found controller of bootdevice\n"));
-		/*
-		 * Note: "child" here is == ofbootpackage (s.a.), which
-		 * may be completely wrong for the device we are checking,
-		 * what we realy do here is to match "target" and "lun".
-		 */
-		sprintf(buf, "%s@%d,%d", prom_getpropstring(child, "name"),
-		    target, lun);
-		if (ofboottarget && strcmp(buf, ofboottarget) == 0) {
+		sprintf(buf, "@%d,%d", target, lun);
+		if (strcmp(buf, ofboottarget) == 0) {
 			booted_device = dev;
 			if (ofbootpartition)
 				booted_partition = *ofbootpartition - 'a';
@@ -856,8 +911,7 @@ device_register(struct device *dev, void *aux)
 		ofnode = PCITAG_NODE(pa->pa_tag);
 		device_setofnode(dev, ofnode);
 		dev_path_exact_match(dev, ofnode);
-	} else if (device_is_a(busdev, "sbus") || device_is_a(busdev, "dma")
-	    || device_is_a(busdev, "ledma")) {
+	} else if (device_is_a(busdev, "sbus") || device_is_a(busdev, "dma")) {
 		struct sbus_attach_args *sa = aux;
 
 		ofnode = sa->sa_node;
@@ -866,28 +920,9 @@ device_register(struct device *dev, void *aux)
 	} else if (device_is_a(dev, "sd") || device_is_a(dev, "cd")) {
 		struct scsipibus_attach_args *sa = aux;
 		struct scsipi_periph *periph = sa->sa_periph;
-		int off = 0;
 
-		/*
-		 * There are two "cd" attachments:
-		 *   atapibus -> atabus -> controller
-		 *   scsibus -> controller
-		 * We want the node of the controller.
-		 */
-		if (device_is_a(busdev, "atapibus")) {
-			busdev = device_parent(busdev);
-			/*
-			 * if the atapibus is connected to the secondary
-			 * channel of the atabus, we need an offset of 2
-			 * to match OF's idea of the target number.
-			 * (i.e. on U5/U10 "cdrom" and "disk2" have the
-			 * same target encoding, though different names)
-			 */
-			if (periph->periph_channel->chan_channel == 1)
-				off = 2;
-		}
 		ofnode = device_ofnode(device_parent(busdev));
-		dev_path_drive_match(dev, ofnode, periph->periph_target + off,
+		dev_path_drive_match(dev, ofnode, periph->periph_target,
 		    periph->periph_lun);
 	} else if (device_is_a(dev, "wd")) {
 		struct ata_device *adev = aux;
@@ -896,149 +931,4 @@ device_register(struct device *dev, void *aux)
 		dev_path_drive_match(dev, ofnode, adev->adev_channel*2+
 		    adev->adev_drv_data->drive, 0);
 	}
-
-	/* set properties for PCI framebuffers */
-	if (busdev == NULL)
-		return;
-
-	if (device_is_a(busdev, "pci")) {
-		/* see if this is going to be console */
-		struct pci_attach_args *pa = aux;
-		prop_dictionary_t dict;
-		int node, sub;
-		int console = 0;
-
-		dict = device_properties(dev);
-		node = PCITAG_NODE(pa->pa_tag);
-		device_setofnode(dev, node);
-
-		/* we only care about display devices from here on */
-		if (PCI_CLASS(pa->pa_class) != PCI_CLASS_DISPLAY)
-			return;
-
-		console = (node == console_node);
-
-		if (!console) {
-			/*
-			 * see if any child matches since OF attaches
-			 * nodes for each head and /chosen/stdout
-			 * points to the head rather than the device
-			 * itself in this case
-			 */
-			sub = OF_child(node);
-			while ((sub != 0) && (sub != console_node)) {
-				sub = OF_peer(sub);
-			}
-			if (sub == console_node) {
-				console = true;
-			}
-		}
-		
-		if (console) {
-			uint64_t cmap_cb;
-			prop_dictionary_set_uint32(dict,
-			    "instance_handle", console_instance);
-			copyprops(busdev, console_node, dict);
-
-			gfb_cb.gcc_cookie = 
-			    (void *)(intptr_t)console_instance;
-			gfb_cb.gcc_set_mapreg = of_set_palette;
-			cmap_cb = (uint64_t)&gfb_cb;
-			prop_dictionary_set_uint64(dict,
-			    "cmap_callback", cmap_cb);
-		}
-	}
-}
-
-static void
-copyprops(struct device *busdev, int node, prop_dictionary_t dict)
-{
-	struct device *cntrlr;
-	prop_dictionary_t psycho;
-	paddr_t fbpa, mem_base = 0;
-	uint32_t temp, fboffset;
-	uint32_t fbaddr = 0;
-	int options;
-	char output_device[256];
-	char *pos;
-
-	cntrlr = device_parent(busdev);
-	if (cntrlr != NULL) {
-		psycho = device_properties(cntrlr);
-		prop_dictionary_get_uint64(psycho, "mem_base", &mem_base);
-	}
-
-	prop_dictionary_set_bool(dict, "is_console", 1);
-	if (!of_to_uint32_prop(dict, node, "width", "width")) {
-
-		OF_interpret("screen-width", 0, 1, &temp);
-		prop_dictionary_set_uint32(dict, "width", temp);
-	}
-	if (!of_to_uint32_prop(dict, console_node, "height", "height")) {
-
-		OF_interpret("screen-height", 0, 1, &temp);
-		prop_dictionary_set_uint32(dict, "height", temp);
-	}
-	of_to_uint32_prop(dict, console_node, "linebytes", "linebytes");
-	if (!of_to_uint32_prop(dict, console_node, "depth", "depth") &&
-	    /* Some cards have an extra space in the property name */
-	    !of_to_uint32_prop(dict, console_node, "depth ", "depth")) {
-		/*
-		 * XXX we should check linebytes vs. width but those
-		 * FBs that don't have a depth property ( /chaos/control... )
-		 * won't have linebytes either
-		 */
-		prop_dictionary_set_uint32(dict, "depth", 8);
-	}
-	OF_getprop(console_node, "address", &fbaddr, sizeof(fbaddr));
-	if (fbaddr == 0)
-		OF_interpret("frame-buffer-adr", 0, 1, &fbaddr);
-	if (fbaddr != 0) {
-	
-		pmap_extract(pmap_kernel(), fbaddr, &fbpa);
-#ifdef DEBUG
-		printf("membase: %lx fbpa: %lx\n", (unsigned long)mem_base,
-		    (unsigned long)fbpa);
-#endif
-		if (mem_base == 0) {
-			/* XXX this is guesswork */
-			fboffset = (uint32_t)(fbpa & 0xffffffff);
-		}
-			fboffset = (uint32_t)(fbpa - mem_base);
-		prop_dictionary_set_uint32(dict, "address", fboffset);
-	}
-	of_to_dataprop(dict, console_node, "EDID", "EDID");
-
-	temp = 0;
-	if (OF_getprop(console_node, "ATY,RefCLK", &temp, sizeof(temp)) != 4) {
-
-		OF_getprop(OF_parent(console_node), "ATY,RefCLK", &temp,
-		    sizeof(temp));
-	}
-	if (temp != 0)
-		prop_dictionary_set_uint32(dict, "refclk", temp / 10);
-	/*
-	 * finally, let's see if there's a video mode specified in
-	 * output-device and pass it on so drivers like radeonfb
-	 * can do their thing
-	 */
-	options = OF_finddevice("/options");
-	if ((options == 0) || (options == -1))
-		return;
-	if (OF_getprop(options, "output-device", output_device, 256) == 0)
-		return;
-	printf("output-device: %s\n", output_device);
-	/* find the mode string if there is one */
-	pos = strstr(output_device, ":r");
-	if (pos == NULL)
-		return;
-	prop_dictionary_set_cstring(dict, "videomode", pos + 2);
-}
-
-static void
-of_set_palette(void *cookie, int index, int r, int g, int b)
-{
-	int ih = (int)((intptr_t)cookie);
-
-	OF_call_method_1("color!", ih, 4, r, g, b, index);
 }

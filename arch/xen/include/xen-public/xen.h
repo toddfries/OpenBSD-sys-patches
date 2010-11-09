@@ -1,4 +1,4 @@
-/* $NetBSD: xen.h,v 1.8 2009/01/16 20:16:47 jym Exp $ */
+/* $NetBSD: xen.h,v 1.4 2006/01/15 22:09:52 bouyer Exp $ */
 
 /*
  * Copyright (c) 2004, K A Fraser
@@ -41,12 +41,6 @@
 #include "arch-x86_64.h"
 #else
 #error "Unsupported architecture"
-#endif
-
-#if defined(__NetBSD__)
-#define xen_mb()  x86_mfence()
-#define xen_rmb() x86_lfence()
-#define xen_wmb() x86_sfence()
 #endif
 
 /*
@@ -292,7 +286,7 @@ typedef struct shared_info_st
      * Per-VCPU information goes here. This will be cleaned up more when Xen 
      * actually supports multi-VCPU guests.
      */
-    volatile struct vcpu_info {
+    volatile struct {
         /*
          * 'evtchn_upcall_pending' is written non-zero by Xen to indicate
          * a pending notification for a particular VCPU. It is then cleared 
@@ -321,7 +315,7 @@ typedef struct shared_info_st
         u8 evtchn_upcall_pending;
         u8 evtchn_upcall_mask;
         u8 pad0, pad1;
-    } PACKED vcpu_info[MAX_VIRT_CPUS];  /*   0 */
+    } PACKED vcpu_data[MAX_VIRT_CPUS];  /*   0 */
 
     /*
      * A domain can have up to 1024 "event channels" on which it can send

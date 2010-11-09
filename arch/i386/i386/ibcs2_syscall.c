@@ -1,4 +1,4 @@
-/*	$NetBSD: ibcs2_syscall.c,v 1.44 2008/10/21 12:16:59 ad Exp $	*/
+/*	$NetBSD: ibcs2_syscall.c,v 1.34 2006/07/19 21:11:41 ad Exp $	*/
 
 /*-
  * Copyright (c) 1998, 2000 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ibcs2_syscall.c,v 1.44 2008/10/21 12:16:59 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ibcs2_syscall.c,v 1.34 2006/07/19 21:11:41 ad Exp $");
 
 #if defined(_KERNEL_OPT)
 #include "opt_vm86.h"
@@ -39,10 +46,10 @@ __KERNEL_RCSID(0, "$NetBSD: ibcs2_syscall.c,v 1.44 2008/10/21 12:16:59 ad Exp $"
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
+#include <sys/savar.h>
 #include <sys/user.h>
 #include <sys/signal.h>
 #include <sys/syscall.h>
-#include <sys/syscallvar.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -78,13 +85,14 @@ void
 ibcs2_syscall_plain(frame)
 	struct trapframe *frame;
 {
-	char *params;
-	const struct sysent *callp;
+	register caddr_t params;
+	register const struct sysent *callp;
 	struct lwp *l;
 	int error;
 	size_t argsize;
 	register_t code, args[8], rval[2];
 
+	uvmexp.syscalls++;
 	l = curlwp;
 	LWP_CACHE_CREDS(l, l->l_proc);
 
@@ -92,7 +100,7 @@ ibcs2_syscall_plain(frame)
 	if (IBCS2_HIGH_SYSCALL(code))
 		code = IBCS2_CVT_HIGH_SYSCALL(code);
 	callp = ibcs2_sysent;
-	params = (char *)frame->tf_esp + sizeof(int);
+	params = (caddr_t)frame->tf_esp + sizeof(int);
 
 	switch (code) {
 	case SYS_syscall:
@@ -110,7 +118,7 @@ ibcs2_syscall_plain(frame)
 	callp += code;
 	argsize = callp->sy_argsize;
 	if (argsize) {
-		error = copyin(params, (void *)args, argsize);
+		error = copyin(params, (caddr_t)args, argsize);
 		if (error)
 			goto bad;
 	}
@@ -118,7 +126,9 @@ ibcs2_syscall_plain(frame)
 	rval[0] = 0;
 	rval[1] = 0;
 
-	error = sy_call(callp, l, args, rval);
+	KERNEL_PROC_LOCK(l);
+	error = (*callp->sy_call)(l, args, rval);
+	KERNEL_PROC_UNLOCK(l);	
 
 	switch (error) {
 	case 0:
@@ -157,13 +167,14 @@ void
 ibcs2_syscall_fancy(frame)
 	struct trapframe *frame;
 {
-	char * params;
-	const struct sysent *callp;
+	register caddr_t params;
+	register const struct sysent *callp;
 	struct lwp *l;
 	int error;
 	size_t argsize;
 	register_t code, args[8], rval[2];
 
+	uvmexp.syscalls++;
 	l = curlwp;
 	LWP_CACHE_CREDS(l, l->l_proc);
 
@@ -171,7 +182,7 @@ ibcs2_syscall_fancy(frame)
 	if (IBCS2_HIGH_SYSCALL(code))
 		code = IBCS2_CVT_HIGH_SYSCALL(code);
 	callp = ibcs2_sysent;
-	params = (char *)frame->tf_esp + sizeof(int);
+	params = (caddr_t)frame->tf_esp + sizeof(int);
 
 	switch (code) {
 	case SYS_syscall:
@@ -189,17 +200,20 @@ ibcs2_syscall_fancy(frame)
 	callp += code;
 	argsize = callp->sy_argsize;
 	if (argsize) {
-		error = copyin(params, (void *)args, argsize);
+		error = copyin(params, (caddr_t)args, argsize);
 		if (error)
 			goto bad;
 	}
 
-	if ((error = trace_enter(code, args, callp->sy_narg)) == 0) {
-		rval[0] = 0;
-		rval[1] = 0;
-		error = sy_call(callp, l, args, rval);
-	}
+	KERNEL_PROC_LOCK(l);
+	if ((error = trace_enter(l, code, code, NULL, args)) != 0)
+		goto out;
 
+	rval[0] = 0;
+	rval[1] = 0;
+	error = (*callp->sy_call)(l, args, rval);
+out:
+	KERNEL_PROC_UNLOCK(l);
 	switch (error) {
 	case 0:
 		frame->tf_eax = rval[0];
@@ -225,7 +239,7 @@ ibcs2_syscall_fancy(frame)
 		break;
 	}
 
-	trace_exit(code, rval, error);
+	trace_exit(l, code, args, rval, error);
 
 	userret(l);
 }

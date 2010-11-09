@@ -1,4 +1,4 @@
-/*	$NetBSD: grf_subr.c,v 1.17 2008/04/28 20:23:19 martin Exp $	*/
+/*	$NetBSD: grf_subr.c,v 1.13 2006/03/19 06:13:43 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -34,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: grf_subr.c,v 1.17 2008/04/28 20:23:19 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: grf_subr.c,v 1.13 2006/03/19 06:13:43 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -51,8 +58,8 @@ static int	grfdevprint(void *, const char *);
 
 void
 grfdev_attach(struct grfdev_softc *sc,
-    int (*init)(struct grf_data *, int, uint8_t *),
-    void *regs, struct grfsw *sw)
+    int (*init)(struct grf_data *, int, caddr_t),
+    caddr_t regs, struct grfsw *sw)
 {
 	struct grfdev_attach_args ga;
 	struct grf_data *gp;
@@ -63,13 +70,15 @@ grfdev_attach(struct grfdev_softc *sc,
 		sc->sc_data = malloc(sizeof(struct grf_data),
 		    M_DEVBUF, M_NOWAIT | M_ZERO);
 		if (sc->sc_data == NULL) {
-			aprint_error(": can't allocate grf data\n");
+			printf("\n%s: can't allocate grf data\n",
+			    sc->sc_dev.dv_xname);
 			return;
 		}
 
 		/* Initialize the framebuffer hardware. */
 		if ((*init)(sc->sc_data, sc->sc_scode, regs) == 0) {
-			aprint_error(": init failed\n");
+			printf("\n%s: init failed\n",
+			    sc->sc_dev.dv_xname);
 			free(sc->sc_data, M_DEVBUF);
 			return;
 		}
@@ -93,7 +102,7 @@ grfdev_attach(struct grfdev_softc *sc,
 	ga.ga_scode = sc->sc_scode;	/* XXX */
 	ga.ga_isconsole = sc->sc_isconsole;
 	ga.ga_data = (void *)sc->sc_data;
-	(void)config_found(sc->sc_dev, &ga, grfdevprint);
+	(void)config_found(&sc->sc_dev, &ga, grfdevprint);
 }
 
 static int

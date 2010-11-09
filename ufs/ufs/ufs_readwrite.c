@@ -1,4 +1,4 @@
-/*	$NetBSD: ufs_readwrite.c,v 1.94 2009/02/22 20:28:07 ad Exp $	*/
+/*	$NetBSD: ufs_readwrite.c,v 1.72 2007/01/04 16:55:30 elad Exp $	*/
 
 /*-
  * Copyright (c) 1993
@@ -32,9 +32,10 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(1, "$NetBSD: ufs_readwrite.c,v 1.94 2009/02/22 20:28:07 ad Exp $");
+__KERNEL_RCSID(1, "$NetBSD: ufs_readwrite.c,v 1.72 2007/01/04 16:55:30 elad Exp $");
 
 #ifdef LFS_READWRITE
+#define	BLKSIZE(a, b, c)	blksize(a, b, c)
 #define	FS			struct lfs
 #define	I_FS			i_lfs
 #define	READ			lfs_read
@@ -43,10 +44,8 @@ __KERNEL_RCSID(1, "$NetBSD: ufs_readwrite.c,v 1.94 2009/02/22 20:28:07 ad Exp $"
 #define	WRITE_S			"lfs_write"
 #define	fs_bsize		lfs_bsize
 #define	fs_bmask		lfs_bmask
-#define	UFS_WAPBL_BEGIN(mp)	0
-#define	UFS_WAPBL_END(mp)	do { } while (0)
-#define	UFS_WAPBL_UPDATE(vp, access, modify, flags)	do { } while (0)
 #else
+#define	BLKSIZE(a, b, c)	blksize(a, b, c)
 #define	FS			struct fs
 #define	I_FS			i_fs
 #define	READ			ffs_read
@@ -74,12 +73,13 @@ READ(void *v)
 	struct ufsmount *ump;
 	struct buf *bp;
 	FS *fs;
+	void *win;
 	vsize_t bytelen;
 	daddr_t lbn, nextlbn;
 	off_t bytesinfile;
 	long size, xfersize, blkoffset;
-	int error, ioflag;
-	bool usepc = false;
+	int error, flags, ioflag;
+	boolean_t usepc = FALSE;
 
 	vp = ap->a_vp;
 	ip = VTOI(vp);
@@ -104,14 +104,6 @@ READ(void *v)
 		return (EFBIG);
 	if (uio->uio_resid == 0)
 		return (0);
-
-#ifndef LFS_READWRITE
-	if ((ip->i_flags & SF_SNAPSHOT))
-		return ffs_snapshot_read(vp, uio, ioflag);
-#endif /* !LFS_READWRITE */
-
-	fstrans_start(vp->v_mount, FSTRANS_SHARED);
-
 	if (uio->uio_offset >= ip->i_size)
 		goto out;
 
@@ -131,9 +123,12 @@ READ(void *v)
 			    uio->uio_resid);
 			if (bytelen == 0)
 				break;
-			error = ubc_uiomove(&vp->v_uobj, uio, bytelen, advice,
-			    UBC_READ | UBC_PARTIALOK |
-			    (UBC_WANT_UNMAP(vp) ? UBC_UNMAP : 0));
+
+			win = ubc_alloc(&vp->v_uobj, uio->uio_offset,
+			    &bytelen, advice, UBC_READ);
+			error = uiomove(win, bytelen, uio);
+			flags = UBC_WANT_UNMAP(vp) ? UBC_UNMAP : 0;
+			ubc_release(win, flags);
 			if (error)
 				break;
 		}
@@ -146,17 +141,17 @@ READ(void *v)
 			break;
 		lbn = lblkno(fs, uio->uio_offset);
 		nextlbn = lbn + 1;
-		size = blksize(fs, ip, lbn);
+		size = BLKSIZE(fs, ip, lbn);
 		blkoffset = blkoff(fs, uio->uio_offset);
 		xfersize = MIN(MIN(fs->fs_bsize - blkoffset, uio->uio_resid),
 		    bytesinfile);
 
 		if (lblktosize(fs, nextlbn) >= ip->i_size)
-			error = bread(vp, lbn, size, NOCRED, 0, &bp);
+			error = bread(vp, lbn, size, NOCRED, &bp);
 		else {
-			int nextsize = blksize(fs, ip, nextlbn);
+			int nextsize = BLKSIZE(fs, ip, nextlbn);
 			error = breadn(vp, lbn,
-			    size, &nextlbn, &nextsize, 1, NOCRED, 0, &bp);
+			    size, &nextlbn, &nextsize, 1, NOCRED, &bp);
 		}
 		if (error)
 			break;
@@ -177,26 +172,17 @@ READ(void *v)
 		error = uiomove((char *)bp->b_data + blkoffset, xfersize, uio);
 		if (error)
 			break;
-		brelse(bp, 0);
+		brelse(bp);
 	}
 	if (bp != NULL)
-		brelse(bp, 0);
+		brelse(bp);
 
  out:
 	if (!(vp->v_mount->mnt_flag & MNT_NOATIME)) {
 		ip->i_flag |= IN_ACCESS;
-		if ((ap->a_ioflag & IO_SYNC) == IO_SYNC) {
-			error = UFS_WAPBL_BEGIN(vp->v_mount);
-			if (error) {
-				fstrans_done(vp->v_mount);
-				return error;
-			}
+		if ((ap->a_ioflag & IO_SYNC) == IO_SYNC)
 			error = UFS_UPDATE(vp, NULL, NULL, UPDATE_WAIT);
-			UFS_WAPBL_END(vp->v_mount);
-		}
 	}
-
-	fstrans_done(vp->v_mount);
 	return (error);
 }
 
@@ -223,12 +209,14 @@ WRITE(void *v)
 	off_t osize, origoff, oldoff, preallocoff, endallocoff, nsize;
 	int blkoffset, error, flags, ioflag, resid, size, xfersize;
 	int aflag;
+	int ubc_alloc_flags, ubc_release_flags;
 	int extended=0;
+	void *win;
 	vsize_t bytelen;
-	bool async;
-	bool usepc = false;
+	boolean_t async;
+	boolean_t usepc = FALSE;
 #ifdef LFS_READWRITE
-	bool need_unreserve = false;
+	boolean_t need_unreserve = FALSE;
 #endif
 	struct ufsmount *ump;
 
@@ -280,15 +268,11 @@ WRITE(void *v)
 	if (vp->v_type == VREG && l &&
 	    uio->uio_offset + uio->uio_resid >
 	    l->l_proc->p_rlimit[RLIMIT_FSIZE].rlim_cur) {
-		mutex_enter(proc_lock);
 		psignal(l->l_proc, SIGXFSZ);
-		mutex_exit(proc_lock);
 		return (EFBIG);
 	}
 	if (uio->uio_resid == 0)
 		return (0);
-
-	fstrans_start(vp->v_mount, FSTRANS_SHARED);
 
 	flags = ioflag & IO_SYNC ? B_SYNC : 0;
 	async = vp->v_mount->mnt_flag & MNT_ASYNC;
@@ -298,17 +282,8 @@ WRITE(void *v)
 	error = 0;
 
 	usepc = vp->v_type == VREG;
-
-	if ((ioflag & IO_JOURNALLOCKED) == 0) {
-		error = UFS_WAPBL_BEGIN(vp->v_mount);
-		if (error) {
-			fstrans_done(vp->v_mount);
-			return error;
-		}
-	}
-
 #ifdef LFS_READWRITE
-	async = true;
+	async = TRUE;
 	lfs_check(vp, LFS_UNUSED_LBN, 0);
 #endif /* !LFS_READWRITE */
 	if (!usepc)
@@ -330,25 +305,24 @@ WRITE(void *v)
 		off_t eob;
 
 		eob = blkroundup(fs, osize);
-		uvm_vnp_setwritesize(vp, eob);
 		error = ufs_balloc_range(vp, osize, eob - osize, cred, aflag);
 		if (error)
 			goto out;
 		if (flags & B_SYNC) {
-			mutex_enter(&vp->v_interlock);
+			vp->v_size = eob;
+			simple_lock(&vp->v_interlock);
 			VOP_PUTPAGES(vp, trunc_page(osize & fs->fs_bmask),
-			    round_page(eob),
-			    PGO_CLEANIT | PGO_SYNCIO | PGO_JOURNALLOCKED);
+			    round_page(eob), PGO_CLEANIT | PGO_SYNCIO);
 		}
 	}
 
+	ubc_alloc_flags = UBC_WRITE;
 	while (uio->uio_resid > 0) {
-		int ubc_flags = UBC_WRITE;
-		bool overwrite; /* if we're overwrite a whole block */
+		boolean_t extending; /* if we're extending a whole block */
 		off_t newoff;
 
 		if (ioflag & IO_DIRECT) {
-			genfs_directio(vp, uio, ioflag | IO_JOURNALLOCKED);
+			genfs_directio(vp, uio, ioflag);
 		}
 
 		oldoff = uio->uio_offset;
@@ -365,31 +339,15 @@ WRITE(void *v)
 		 * since the new blocks will be inaccessible until the write
 		 * is complete.
 		 */
-		overwrite = uio->uio_offset >= preallocoff &&
+		extending = uio->uio_offset >= preallocoff &&
 		    uio->uio_offset < endallocoff;
-		if (!overwrite && (vp->v_vflag & VV_MAPPED) == 0 &&
-		    blkoff(fs, uio->uio_offset) == 0 &&
-		    (uio->uio_offset & PAGE_MASK) == 0) {
-			vsize_t len;
 
-			len = trunc_page(bytelen);
-			len -= blkoff(fs, len);
-			if (len > 0) {
-				overwrite = true;
-				bytelen = len;
-			}
-		}
-
-		newoff = oldoff + bytelen;
-		if (vp->v_size < newoff) {
-			uvm_vnp_setwritesize(vp, newoff);
-		}
-
-		if (!overwrite) {
+		if (!extending) {
 			error = ufs_balloc_range(vp, uio->uio_offset, bytelen,
 			    cred, aflag);
 			if (error)
 				break;
+			ubc_alloc_flags &= ~UBC_FAULTBUSY;
 		} else {
 			genfs_node_wrlock(vp);
 			error = GOP_ALLOC(vp, uio->uio_offset, bytelen,
@@ -397,24 +355,36 @@ WRITE(void *v)
 			genfs_node_unlock(vp);
 			if (error)
 				break;
-			ubc_flags |= UBC_FAULTBUSY;
+			ubc_alloc_flags |= UBC_FAULTBUSY;
 		}
 
 		/*
 		 * copy the data.
 		 */
 
-		ubc_flags |= UBC_WANT_UNMAP(vp) ? UBC_UNMAP : 0;
-		error = ubc_uiomove(&vp->v_uobj, uio, bytelen,
-		    IO_ADV_DECODE(ioflag), ubc_flags);
+		win = ubc_alloc(&vp->v_uobj, uio->uio_offset, &bytelen,
+		    UVM_ADV_NORMAL, ubc_alloc_flags);
+		error = uiomove(win, bytelen, uio);
+		if (error && extending) {
+			/*
+			 * if we haven't initialized the pages yet,
+			 * do it now.  it's safe to use memset here
+			 * because we just mapped the pages above.
+			 */
+			memset(win, 0, bytelen);
+		}
+		ubc_release_flags = UBC_WANT_UNMAP(vp) ? UBC_UNMAP : 0;
+		ubc_release(win, ubc_release_flags);
 
 		/*
 		 * update UVM's notion of the size now that we've
 		 * copied the data into the vnode's pages.
 		 *
 		 * we should update the size even when uiomove failed.
+		 * otherwise ffs_truncate can't flush soft update states.
 		 */
 
+		newoff = oldoff + bytelen;
 		if (vp->v_size < newoff) {
 			uvm_vnp_setsize(vp, newoff);
 			extended = 1;
@@ -430,27 +400,26 @@ WRITE(void *v)
 
 #ifndef LFS_READWRITE
 		if (!async && oldoff >> 16 != uio->uio_offset >> 16) {
-			mutex_enter(&vp->v_interlock);
+			simple_lock(&vp->v_interlock);
 			error = VOP_PUTPAGES(vp, (oldoff >> 16) << 16,
-			    (uio->uio_offset >> 16) << 16,
-			    PGO_CLEANIT | PGO_JOURNALLOCKED);
+			    (uio->uio_offset >> 16) << 16, PGO_CLEANIT);
 			if (error)
 				break;
 		}
 #endif
 	}
 	if (error == 0 && ioflag & IO_SYNC) {
-		mutex_enter(&vp->v_interlock);
+		simple_lock(&vp->v_interlock);
 		error = VOP_PUTPAGES(vp, trunc_page(origoff & fs->fs_bmask),
 		    round_page(blkroundup(fs, uio->uio_offset)),
-		    PGO_CLEANIT | PGO_SYNCIO | PGO_JOURNALLOCKED);
+		    PGO_CLEANIT | PGO_SYNCIO);
 	}
 	goto out;
 
  bcache:
-	mutex_enter(&vp->v_interlock);
+	simple_lock(&vp->v_interlock);
 	VOP_PUTPAGES(vp, trunc_page(origoff), round_page(origoff + resid),
-	    PGO_CLEANIT | PGO_FREE | PGO_SYNCIO | PGO_JOURNALLOCKED);
+	    PGO_CLEANIT | PGO_FREE | PGO_SYNCIO);
 	while (uio->uio_resid > 0) {
 		lbn = lblkno(fs, uio->uio_offset);
 		blkoffset = blkoff(fs, uio->uio_offset);
@@ -465,7 +434,7 @@ WRITE(void *v)
 		    btofsb(fs, (NIADDR + 1) << fs->lfs_bshift));
 		if (error)
 			break;
-		need_unreserve = true;
+		need_unreserve = TRUE;
 #endif
 		error = UFS_BALLOC(vp, uio->uio_offset, xfersize,
 		    ap->a_cred, flags, &bp);
@@ -478,7 +447,7 @@ WRITE(void *v)
 			uvm_vnp_setsize(vp, ip->i_size);
 			extended = 1;
 		}
-		size = blksize(fs, ip, lbn) - bp->b_resid;
+		size = BLKSIZE(fs, ip, lbn) - bp->b_resid;
 		if (xfersize > size)
 			xfersize = size;
 
@@ -490,14 +459,15 @@ WRITE(void *v)
 		 * so we need to invalidate it.
 		 */
 		if (error && (flags & B_CLRBUF) == 0) {
-			brelse(bp, BC_INVAL);
+			bp->b_flags |= B_INVAL;
+			brelse(bp);
 			break;
 		}
 #ifdef LFS_READWRITE
 		(void)VOP_BWRITE(bp);
 		lfs_reserve(fs, vp, NULL,
 		    -btofsb(fs, (NIADDR + 1) << fs->lfs_bshift));
-		need_unreserve = false;
+		need_unreserve = FALSE;
 #else
 		if (ioflag & IO_SYNC)
 			(void)bwrite(bp);
@@ -531,17 +501,12 @@ out:
 	if (resid > uio->uio_resid)
 		VN_KNOTE(vp, NOTE_WRITE | (extended ? NOTE_EXTEND : 0));
 	if (error) {
-		(void) UFS_TRUNCATE(vp, osize, ioflag & IO_SYNC, ap->a_cred);
+		(void) UFS_TRUNCATE(vp, osize, ioflag & IO_SYNC, ap->a_cred,
+		    curlwp);
 		uio->uio_offset -= resid - uio->uio_resid;
 		uio->uio_resid = resid;
 	} else if (resid > uio->uio_resid && (ioflag & IO_SYNC) == IO_SYNC)
 		error = UFS_UPDATE(vp, NULL, NULL, UPDATE_WAIT);
-	else
-		UFS_WAPBL_UPDATE(vp, NULL, NULL, 0);
 	KASSERT(vp->v_size == ip->i_size);
-	if ((ioflag & IO_JOURNALLOCKED) == 0)
-		UFS_WAPBL_END(vp->v_mount);
-	fstrans_done(vp->v_mount);
-
 	return (error);
 }

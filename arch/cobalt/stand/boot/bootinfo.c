@@ -1,4 +1,4 @@
-/*	$NetBSD: bootinfo.c,v 1.6 2008/04/28 20:23:16 martin Exp $	*/
+/*	$NetBSD: bootinfo.c,v 1.2 2005/12/11 12:17:06 christos Exp $	*/
 
 /*-
  * Copyright (c) 1999, 2000 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -40,13 +47,12 @@ static char *bootinfo = NULL;
 static char *bi_next;
 static int bi_size;
 
-char *
-bi_init(void)
+char* bi_init(void)
 {
 	struct btinfo_common *bi;
 	struct btinfo_magic bi_magic;
 
-	if ((bootinfo = (char *)alloc(BOOTINFO_SIZE)) != NULL) {
+	if ( (bootinfo = (char*)alloc(BOOTINFO_SIZE)) != NULL) {
 		bi = (struct btinfo_common *)bootinfo;
 		bi->next = bi->type = 0;
 		bi_next = bootinfo;
@@ -56,10 +62,12 @@ bi_init(void)
 		bi_add(&bi_magic, BTINFO_MAGIC, sizeof(bi_magic));
 	}
 
-	return bootinfo;
+	return (bootinfo);
 }
 
-void bi_add(void *new, int type, int size)
+void bi_add(new, type, size)
+	void *new;
+	int type, size;
 {
 	struct btinfo_common *bi;
 
@@ -78,7 +86,5 @@ void bi_add(void *new, int type, int size)
 
 		bi = (struct btinfo_common *)bi_next;
 		bi->next = bi->type = 0;
-
-		bi_size += size;
 	}
 }

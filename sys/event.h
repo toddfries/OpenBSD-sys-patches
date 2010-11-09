@@ -1,5 +1,4 @@
-/*	$NetBSD: event.h,v 1.21 2009/01/11 02:45:55 christos Exp $	*/
-
+/*	$NetBSD: event.h,v 1.18 2007/07/21 19:20:40 ad Exp $	*/
 /*-
  * Copyright (c) 1999,2000,2001 Jonathan Lemon <jlemon@FreeBSD.org>
  * All rights reserved.
@@ -169,40 +168,34 @@ struct filterops {
 					/* called when event is triggered */
 };
 
-/*
- * Field locking:
- *
- * f	kn_kq->kq_fdp->fd_lock
- * q	kn_kq->kq_lock
- * o	object mutex (e.g. device driver or vnode interlock)
- */
-struct kfilter;
-
 struct knote {
-	SLIST_ENTRY(knote)	kn_link;	/* f: for fd */
-	SLIST_ENTRY(knote)	kn_selnext;	/* o: for struct selinfo */
-	TAILQ_ENTRY(knote)	kn_tqe;		/* q: for struct kqueue */
-	struct kqueue		*kn_kq;		/* q: which queue we are on */
+	SLIST_ENTRY(knote)	kn_link;	/* for fd */
+	SLIST_ENTRY(knote)	kn_selnext;	/* for struct selinfo */
+	TAILQ_ENTRY(knote)	kn_tqe;
+	struct kqueue		*kn_kq;		/* which queue we are on */
 	struct kevent		kn_kevent;
 	uint32_t		kn_status;
-	uint32_t		kn_sfflags;	/*   saved filter flags */
-	uintptr_t		kn_sdata;	/*   saved data field */
-	void			*kn_obj;	/*   pointer to monitored obj */
+	uint32_t		kn_sfflags;	/* saved filter flags */
+	uintptr_t		kn_sdata;	/* saved data field */
+	union {
+		struct file	*p_fp;		/* file data pointer */
+		struct proc	*p_proc;	/* proc pointer */
+		void		*p_opaque;	/* opaque/misc pointer */
+	} kn_ptr;
 	const struct filterops	*kn_fop;
-	struct kfilter		*kn_kfilter;
 	void 			*kn_hook;
 
 #define	KN_ACTIVE	0x01			/* event has been triggered */
 #define	KN_QUEUED	0x02			/* event is on queue */
 #define	KN_DISABLED	0x04			/* event is disabled */
 #define	KN_DETACHED	0x08			/* knote is detached */
-#define	KN_MARKER	0x10			/* is a marker */
 
 #define	kn_id		kn_kevent.ident
 #define	kn_filter	kn_kevent.filter
 #define	kn_flags	kn_kevent.flags
 #define	kn_fflags	kn_kevent.fflags
 #define	kn_data		kn_kevent.data
+#define	kn_fp		kn_ptr.p_fp
 };
 
 #include <sys/systm.h> /* for copyin_t */
@@ -210,9 +203,10 @@ struct knote {
 struct lwp;
 struct timespec;
 
-void	kqueue_init(void);
 void	knote(struct klist *, long);
-void	knote_fdclose(int);
+void	knote_remove(struct lwp *, struct klist *);
+void	knote_fdclose(struct lwp *, int);
+int 	kqueue_register(struct kqueue *, struct kevent *, struct lwp *);
 
 typedef	int (*kevent_fetch_changes_t)(void *, const struct kevent *,
     struct kevent *, size_t, int);
@@ -226,12 +220,7 @@ struct kevent_ops {
 	kevent_put_events_t keo_put_events;
 };
 
-
-int	kevent_fetch_changes(void *, const struct kevent *, struct kevent *,
-    size_t, int);
-int 	kevent_put_events(void *, struct kevent *, struct kevent *, size_t,
-    int);
-int	kevent1(register_t *, int, const struct kevent *,
+int	kevent1(struct lwp *, register_t *, int, const struct kevent *,
     size_t, struct kevent *, size_t, const struct timespec *,
     const struct kevent_ops *);
 
@@ -239,7 +228,6 @@ int	kfilter_register(const char *, const struct filterops *, int *);
 int	kfilter_unregister(const char *);
 
 int	filt_seltrue(struct knote *, long);
-extern const struct filterops seltrue_filtops;
 
 #else 	/* !_KERNEL */
 
@@ -249,10 +237,8 @@ struct timespec;
 __BEGIN_DECLS
 #if defined(_NETBSD_SOURCE)
 int	kqueue(void);
-#ifndef __LIBC12_SOURCE__
 int	kevent(int, const struct kevent *, size_t, struct kevent *, size_t,
-		    const struct timespec *) __RENAME(__kevent50);
-#endif
+		    const struct timespec *);
 #endif /* !_POSIX_C_SOURCE */
 __END_DECLS
 

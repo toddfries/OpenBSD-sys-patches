@@ -1,4 +1,4 @@
-/*	$NetBSD: bt_proto.c,v 1.10 2008/04/24 11:38:37 ad Exp $	*/
+/*	$NetBSD: bt_proto.c,v 1.6 2006/12/09 05:33:07 dyoung Exp $	*/
 
 /*-
  * Copyright (c) 2005 Iain Hibbert.
@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: bt_proto.c,v 1.10 2008/04/24 11:38:37 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: bt_proto.c,v 1.6 2006/12/09 05:33:07 dyoung Exp $");
 
 #include <sys/param.h>
 #include <sys/domain.h>
@@ -50,76 +50,70 @@ __KERNEL_RCSID(0, "$NetBSD: bt_proto.c,v 1.10 2008/04/24 11:38:37 ad Exp $");
 
 DOMAIN_DEFINE(btdomain);	/* forward declare and add to link set */
 
-static void	bt_init(void);
-
-PR_WRAP_CTLOUTPUT(hci_ctloutput)
-PR_WRAP_CTLOUTPUT(sco_ctloutput)
-PR_WRAP_CTLOUTPUT(l2cap_ctloutput)
-PR_WRAP_CTLOUTPUT(rfcomm_ctloutput)
-
-#define	hci_ctloutput		hci_ctloutput_wrapper
-#define	sco_ctloutput		sco_ctloutput_wrapper
-#define	l2cap_ctloutput		l2cap_ctloutput_wrapper
-#define	rfcomm_ctloutput	rfcomm_ctloutput_wrapper
-
-PR_WRAP_USRREQ(hci_usrreq)
-PR_WRAP_USRREQ(sco_usrreq)
-PR_WRAP_USRREQ(l2cap_usrreq)
-PR_WRAP_USRREQ(rfcomm_usrreq)
-
-#define	hci_usrreq		hci_usrreq_wrapper
-#define	sco_usrreq		sco_usrreq_wrapper
-#define	l2cap_usrreq		l2cap_usrreq_wrapper
-#define	rfcomm_usrreq		rfcomm_usrreq_wrapper
-
 const struct protosw btsw[] = {
-	{ /* raw HCI commands */
-		.pr_type = SOCK_RAW,
-		.pr_domain = &btdomain,
-		.pr_protocol = BTPROTO_HCI,
-		.pr_flags = (PR_ADDR | PR_ATOMIC),
-		.pr_ctloutput = hci_ctloutput,
-		.pr_usrreq = hci_usrreq,
-	},
-	{ /* HCI SCO data (audio) */
-		.pr_type = SOCK_SEQPACKET,
-		.pr_domain = &btdomain,
-		.pr_protocol = BTPROTO_SCO,
-		.pr_flags = (PR_CONNREQUIRED | PR_ATOMIC | PR_LISTEN),
-		.pr_ctloutput = sco_ctloutput,
-		.pr_usrreq = sco_usrreq,
-	},
-	{ /* L2CAP Connection Oriented */
-		.pr_type = SOCK_SEQPACKET,
-		.pr_domain = &btdomain,
-		.pr_protocol = BTPROTO_L2CAP,
-		.pr_flags = (PR_CONNREQUIRED | PR_ATOMIC | PR_LISTEN),
-		.pr_ctloutput = l2cap_ctloutput,
-		.pr_usrreq = l2cap_usrreq,
-	},
-	{ /* RFCOMM */
-		.pr_type = SOCK_STREAM,
-		.pr_domain = &btdomain,
-		.pr_protocol = BTPROTO_RFCOMM,
-		.pr_flags = (PR_CONNREQUIRED | PR_LISTEN | PR_WANTRCVD),
-		.pr_ctloutput = rfcomm_ctloutput,
-		.pr_usrreq = rfcomm_usrreq,
-	},
+    {	/* raw HCI commands */
+	SOCK_RAW,	&btdomain,
+	BTPROTO_HCI,	PR_ADDR | PR_ATOMIC,
+	NULL,		NULL,		NULL,		hci_ctloutput,
+	hci_usrreq,	NULL,		NULL,		NULL,
+	NULL,
+    },
+    {	/* HCI SCO data (audio) */
+	SOCK_SEQPACKET,	&btdomain,
+	BTPROTO_SCO,	PR_CONNREQUIRED | PR_ATOMIC | PR_LISTEN,
+	NULL,		NULL,		NULL,		sco_ctloutput,
+	sco_usrreq,	NULL,		NULL,		NULL,
+	NULL,
+    },
+    {	/* L2CAP Connection Oriented */
+	SOCK_SEQPACKET,	&btdomain,
+	BTPROTO_L2CAP,	PR_CONNREQUIRED | PR_ATOMIC | PR_LISTEN,
+	NULL,		NULL,		NULL,		l2cap_ctloutput,
+	l2cap_usrreq,	NULL,		NULL,		NULL,
+	NULL,
+    },
+#if 0
+    {	/* L2CAP Ping Requests */
+	SOCK_RAW,	&btdomain,
+	BTPROTO_L2CAP,	PR_ADDR | PR_ATOMIC,
+	NULL,		NULL,		NULL,		NULL,
+	NULL,		NULL,		NULL,		NULL,
+	NULL,
+    },
+    {	/* L2CAP Connectionless */
+	SOCK_DGRAM,	&btdomain,
+	BTPROTO_L2CAP,	PR_ADDR | PR_ATOMIC,
+	NULL,		NULL,		NULL,		NULL,
+	NULL,		NULL,		NULL,		NULL,
+	NULL,
+    },
+#endif
+    {	/* RFCOMM */
+	SOCK_STREAM,	&btdomain,
+	BTPROTO_RFCOMM,	PR_CONNREQUIRED | PR_LISTEN | PR_WANTRCVD,
+	NULL,		NULL,		NULL,		rfcomm_ctloutput,
+	rfcomm_usrreq,	NULL,		NULL,		NULL,
+	NULL,
+    }
 };
 
 struct domain btdomain = {
 	.dom_family = AF_BLUETOOTH,
 	.dom_name = "bluetooth",
-	.dom_init = bt_init,
+	.dom_init = NULL,
+	.dom_externalize = NULL,
+	.dom_dispose = NULL,
 	.dom_protosw = btsw,
-	.dom_protoswNPROTOSW = &btsw[__arraycount(btsw)],
+	.dom_protoswNPROTOSW = &btsw[sizeof(btsw)/sizeof(btsw[0])],
+	.dom_rtattach = NULL,
+	.dom_rtoffset = 32,
+	.dom_maxrtkey = sizeof(struct sockaddr_bt),
+	.dom_ifattach = NULL,
+	.dom_ifdetach = NULL,
+	.dom_ifqueues = { NULL, NULL },
+	.dom_link = { NULL },
+	.dom_mowner = MOWNER_INIT("",""),
+	.dom_rtcache = NULL,
+	.dom_rtflush = NULL,
+	.dom_rtflushall = NULL
 };
-
-kmutex_t *bt_lock;
-
-static void
-bt_init(void)
-{
-
-	bt_lock = mutex_obj_alloc(MUTEX_DEFAULT, IPL_NONE);
-}

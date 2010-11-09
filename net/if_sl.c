@@ -1,4 +1,4 @@
-/*	$NetBSD: if_sl.c,v 1.114 2008/12/17 20:51:36 cegger Exp $	*/
+/*	$NetBSD: if_sl.c,v 1.103 2007/01/04 19:07:03 elad Exp $	*/
 
 /*
  * Copyright (c) 1987, 1989, 1992, 1993
@@ -60,7 +60,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_sl.c,v 1.114 2008/12/17 20:51:36 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_sl.c,v 1.103 2007/01/04 19:07:03 elad Exp $");
 
 #include "opt_inet.h"
 #include "bpfilter.h"
@@ -77,13 +77,13 @@ __KERNEL_RCSID(0, "$NetBSD: if_sl.c,v 1.114 2008/12/17 20:51:36 cegger Exp $");
 #include <sys/conf.h>
 #include <sys/tty.h>
 #include <sys/kernel.h>
-#include <sys/socketvar.h>
 #if __NetBSD__
 #include <sys/systm.h>
 #include <sys/kauth.h>
 #endif
-#include <sys/cpu.h>
-#include <sys/intr.h>
+
+#include <machine/cpu.h>
+#include <machine/intr.h>
 
 #include <net/if.h>
 #include <net/if_types.h>
@@ -187,6 +187,9 @@ struct if_clone sl_cloner =
 #define TRANS_FRAME_END		0xdc		/* transposed frame end */
 #define TRANS_FRAME_ESCAPE	0xdd		/* transposed frame esc */
 
+#ifndef __HAVE_GENERIC_SOFT_INTERRUPTS
+void	slnetisr(void);
+#endif
 static void	slintr(void *);
 
 static int	slinit(struct sl_softc *);
@@ -194,12 +197,12 @@ static struct mbuf *sl_btom(struct sl_softc *, int);
 
 static int	slclose(struct tty *, int);
 static int	slinput(int, struct tty *);
-static int	slioctl(struct ifnet *, u_long, void *);
+static int	slioctl(struct ifnet *, u_long, caddr_t);
 static int	slopen(dev_t, struct tty *);
-static int	sloutput(struct ifnet *, struct mbuf *, const struct sockaddr *,
+static int	sloutput(struct ifnet *, struct mbuf *, struct sockaddr *,
 			 struct rtentry *);
 static int	slstart(struct tty *);
-static int	sltioctl(struct tty *, u_long, void *, int, struct lwp *);
+static int	sltioctl(struct tty *, u_long, caddr_t, int, struct lwp *);
 
 static struct linesw slip_disc = {
 	.l_name = "slip",
@@ -231,9 +234,10 @@ sl_clone_create(struct if_clone *ifc, int unit)
 {
 	struct sl_softc *sc;
 
-	sc = malloc(sizeof(*sc), M_DEVBUF, M_WAIT|M_ZERO);
+	MALLOC(sc, struct sl_softc *, sizeof(*sc), M_DEVBUF, M_WAIT|M_ZERO);
 	sc->sc_unit = unit;
-	if_initname(&sc->sc_if, ifc->ifc_name, unit);
+	(void)snprintf(sc->sc_if.if_xname, sizeof(sc->sc_if.if_xname),
+	    "%s%d", ifc->ifc_name, unit);
 	sc->sc_if.if_softc = sc;
 	sc->sc_if.if_mtu = SLMTU;
 	sc->sc_if.if_flags = IFF_POINTOPOINT | SC_AUTOCOMP | IFF_MULTICAST;
@@ -267,7 +271,7 @@ sl_clone_destroy(struct ifnet *ifp)
 #endif
 	if_detach(ifp);
 
-	free(sc, M_DEVBUF);
+	FREE(sc, M_DEVBUF);
 	return 0;
 }
 
@@ -302,6 +306,7 @@ slopen(dev_t dev, struct tty *tp)
 	struct lwp *l = curlwp;		/* XXX */
 	struct sl_softc *sc;
 	int error;
+	int s;
 
 	if ((error = kauth_authorize_generic(l->l_cred, KAUTH_GENERIC_ISSUSER,
 	    NULL)) != 0)
@@ -312,20 +317,26 @@ slopen(dev_t dev, struct tty *tp)
 
 	LIST_FOREACH(sc, &sl_softc_list, sc_iflist)
 		if (sc->sc_ttyp == NULL) {
-			sc->sc_si = softint_establish(SOFTINT_NET,
+#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
+			sc->sc_si = softintr_establish(IPL_SOFTNET,
 			    slintr, sc);
 			if (sc->sc_si == NULL)
 				return ENOMEM;
+#endif
 			if (slinit(sc) == 0) {
-				softint_disestablish(sc->sc_si);
+#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
+				softintr_disestablish(sc->sc_si);
+#endif
 				return ENOBUFS;
 			}
-			tp->t_sc = (void *)sc;
+			tp->t_sc = (caddr_t)sc;
 			sc->sc_ttyp = tp;
 			sc->sc_if.if_baudrate = tp->t_ospeed;
-			mutex_spin_enter(&tty_lock);
+			s = spltty();
 			tp->t_state |= TS_ISOPEN | TS_XCLUDE;
+			splx(s);
 			ttyflush(tp, FREAD | FWRITE);
+#ifdef __NetBSD__
 			/*
 			 * make sure tty output queue is large enough
 			 * to hold a full-sized packet (including frame
@@ -334,15 +345,18 @@ slopen(dev_t dev, struct tty *tp)
 			 * of possible escapes), and add two on for frame
 			 * ends.
 			 */
+			s = spltty();
 			if (tp->t_outq.c_cn < 2 * SLMAX + 2) {
 				sc->sc_oldbufsize = tp->t_outq.c_cn;
 				sc->sc_oldbufquot = tp->t_outq.c_cq != 0;
 
 				clfree(&tp->t_outq);
-				mutex_spin_exit(&tty_lock);
 				error = clalloc(&tp->t_outq, 2 * SLMAX + 2, 0);
 				if (error) {
-					softint_disestablish(sc->sc_si);
+					splx(s);
+#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
+					softintr_disestablish(sc->sc_si);
+#endif
 					/*
 					 * clalloc() might return -1 which
 					 * is no good, so we need to return
@@ -350,10 +364,10 @@ slopen(dev_t dev, struct tty *tp)
 					 */
 					return ENOMEM; /* XXX ?! */
 				}
-			} else {
+			} else
 				sc->sc_oldbufsize = sc->sc_oldbufquot = 0;
-				mutex_spin_exit(&tty_lock);
-			}
+			splx(s);
+#endif /* __NetBSD__ */
 			return 0;
 		}
 	return ENXIO;
@@ -373,7 +387,9 @@ slclose(struct tty *tp, int flag)
 	sc = tp->t_sc;
 
 	if (sc != NULL) {
-		softint_disestablish(sc->sc_si);
+#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
+		softintr_disestablish(sc->sc_si);
+#endif
 		s = splnet();
 		if_down(&sc->sc_if);
 		IF_PURGE(&sc->sc_fastq);
@@ -413,7 +429,7 @@ slclose(struct tty *tp, int flag)
  */
 /* ARGSUSED */
 static int
-sltioctl(struct tty *tp, u_long cmd, void *data, int flag,
+sltioctl(struct tty *tp, u_long cmd, caddr_t data, int flag,
     struct lwp *l)
 {
 	struct sl_softc *sc = (struct sl_softc *)tp->t_sc;
@@ -436,7 +452,7 @@ sltioctl(struct tty *tp, u_long cmd, void *data, int flag,
  * ordering gets trashed.  It can be done for all packets in slintr().
  */
 static int
-sloutput(struct ifnet *ifp, struct mbuf *m, const struct sockaddr *dst,
+sloutput(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
     struct rtentry *rtp)
 {
 	struct sl_softc *sc = ifp->if_softc;
@@ -538,7 +554,15 @@ slstart(struct tty *tp)
 	 */
 	if (sc == NULL)
 		return 0;
-	softint_schedule(sc->sc_si);
+#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
+	softintr_schedule(sc->sc_si);
+#else
+    {
+	int s = splhigh();
+	schednetisr(NETISR_SLIP);
+	splx(s);
+    }
+#endif
 	return 0;
 }
 
@@ -655,7 +679,15 @@ slinput(int c, struct tty *tp)
 			goto error;
 
 		IF_ENQUEUE(&sc->sc_inq, m);
-		softint_schedule(sc->sc_si);
+#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
+		softintr_schedule(sc->sc_si);
+#else
+	    {
+		int s = splhigh();
+		schednetisr(NETISR_SLIP);
+		splx(s);
+	    }
+#endif
 		goto newpack;
 	}
 	if (sc->sc_mp < sc->sc_ep) {
@@ -677,6 +709,20 @@ newpack:
 	return 0;
 }
 
+#ifndef __HAVE_GENERIC_SOFT_INTERRUPTS
+void
+slnetisr(void)
+{
+	struct sl_softc *sc;
+
+	LIST_FOREACH(sc, &sl_softc_list, sc_iflist) {
+		if (sc->sc_ttyp == NULL)
+			continue;
+		slintr(sc);
+	}
+}
+#endif
+
 static void
 slintr(void *arg)
 {
@@ -697,7 +743,6 @@ slintr(void *arg)
 	/*
 	 * Output processing loop.
 	 */
-	mutex_enter(softnet_lock);
 	for (;;) {
 #ifdef INET
 		struct ip *ip;
@@ -922,7 +967,7 @@ slintr(void *arg)
 			}
 		}
 #endif
-		m->m_data = (void *) pktstart;
+		m->m_data = (caddr_t) pktstart;
 		m->m_pkthdr.len = m->m_len = len;
 #if NBPFILTER > 0
 		if (sc->sc_if.if_bpf) {
@@ -943,7 +988,7 @@ slintr(void *arg)
 			MGETHDR(n, M_DONTWAIT, MT_DATA);
 			pktlen = m->m_pkthdr.len;
 			M_MOVE_PKTHDR(n, m);
-			memcpy(mtod(n, void *), mtod(m, void *), pktlen);
+			memcpy(mtod(n, caddr_t), mtod(m, caddr_t), pktlen);
 			n->m_len = m->m_len;
 			m_freem(m);
 			m = n;
@@ -966,14 +1011,13 @@ slintr(void *arg)
 		splx(s);
 #endif
 	}
-	mutex_exit(softnet_lock);
 }
 
 /*
  * Process an ioctl request.
  */
 static int
-slioctl(struct ifnet *ifp, u_long cmd, void *data)
+slioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	struct ifaddr *ifa = (struct ifaddr *)data;
 	struct ifreq *ifr = (struct ifreq *)data;
@@ -984,7 +1028,7 @@ slioctl(struct ifnet *ifp, u_long cmd, void *data)
 
 	switch (cmd) {
 
-	case SIOCINITIFADDR:
+	case SIOCSIFADDR:
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			ifp->if_flags |= IFF_UP;
 		else
@@ -1001,10 +1045,11 @@ slioctl(struct ifnet *ifp, u_long cmd, void *data)
 		    error = EINVAL;
 		    break;
 		}
-		/*FALLTHROUGH*/
+		sc->sc_if.if_mtu = ifr->ifr_mtu;
+		break;
+
 	case SIOCGIFMTU:
-		if ((error = ifioctl_common(&sc->sc_if, cmd, data)) == ENETRESET)
-			error = 0;
+		ifr->ifr_mtu = sc->sc_if.if_mtu;
 		break;
 
 	case SIOCADDMULTI:
@@ -1013,7 +1058,7 @@ slioctl(struct ifnet *ifp, u_long cmd, void *data)
 			error = EAFNOSUPPORT;		/* XXX */
 			break;
 		}
-		switch (ifreq_getaddr(cmd, ifr)->sa_family) {
+		switch (ifr->ifr_addr.sa_family) {
 
 #ifdef INET
 		case AF_INET:
@@ -1053,8 +1098,7 @@ slioctl(struct ifnet *ifp, u_long cmd, void *data)
 		break;
 
 	default:
-		error = ifioctl_common(ifp, cmd, data);
-		break;
+		error = EINVAL;
 	}
 	splx(s);
 	return error;

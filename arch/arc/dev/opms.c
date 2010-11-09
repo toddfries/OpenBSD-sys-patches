@@ -1,4 +1,4 @@
-/*	$NetBSD: opms.c,v 1.18 2008/06/13 08:27:38 cegger Exp $	*/
+/*	$NetBSD: opms.c,v 1.15 2006/04/15 08:49:47 tsutsui Exp $	*/
 /*	$OpenBSD: pccons.c,v 1.22 1999/01/30 22:39:37 imp Exp $	*/
 /*	NetBSD: pms.c,v 1.21 1995/04/18 02:25:18 mycroft Exp	*/
 
@@ -80,7 +80,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: opms.c,v 1.18 2008/06/13 08:27:38 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: opms.c,v 1.15 2006/04/15 08:49:47 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -198,7 +198,6 @@ opms_common_attach(struct opms_softc *sc, bus_space_tag_t opms_iot,
 {
 
 	kbd_context_init(opms_iot, config);
-	selinit(&sc->sc_rsel);
 
 	/* Other initialization was done by opmsprobe. */
 	sc->sc_state = 0;
@@ -207,9 +206,12 @@ opms_common_attach(struct opms_softc *sc, bus_space_tag_t opms_iot,
 int
 opmsopen(dev_t dev, int flag, int mode, struct lwp *l)
 {
+	int unit = PMSUNIT(dev);
 	struct opms_softc *sc;
 
-	sc = device_lookup_private(&opms_cd, PMSUNIT(dev));
+	if (unit >= opms_cd.cd_ndevs)
+		return ENXIO;
+	sc = opms_cd.cd_devs[unit];
 	if (!sc)
 		return ENXIO;
 
@@ -242,7 +244,7 @@ opmsopen(dev_t dev, int flag, int mode, struct lwp *l)
 int
 opmsclose(dev_t dev, int flag, int mode, struct lwp *l)
 {
-	struct opms_softc *sc = device_lookup_private(&opms_cd, PMSUNIT(dev));
+	struct opms_softc *sc = opms_cd.cd_devs[PMSUNIT(dev)];
 
 	/* Disable interrupts. */
 	pms_dev_cmd(PMS_DEV_DISABLE);
@@ -259,7 +261,7 @@ opmsclose(dev_t dev, int flag, int mode, struct lwp *l)
 int
 opmsread(dev_t dev, struct uio *uio, int flag)
 {
-	struct opms_softc *sc = device_lookup_private(&opms_cd, PMSUNIT(dev));
+	struct opms_softc *sc = opms_cd.cd_devs[PMSUNIT(dev)];
 	int s;
 	int error = 0;
 	size_t length;
@@ -274,7 +276,7 @@ opmsread(dev_t dev, struct uio *uio, int flag)
 			return EWOULDBLOCK;
 		}
 		sc->sc_state |= PMS_ASLP;
-		error = tsleep((void *)sc, PZERO | PCATCH, "pmsrea", 0);
+		error = tsleep((caddr_t)sc, PZERO | PCATCH, "pmsrea", 0);
 		if (error) {
 			sc->sc_state &= ~PMS_ASLP;
 			splx(s);
@@ -303,9 +305,9 @@ opmsread(dev_t dev, struct uio *uio, int flag)
 }
 
 int
-opmsioctl(dev_t dev, u_long cmd, void *addr, int flag, struct lwp *l)
+opmsioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct lwp *l)
 {
-	struct opms_softc *sc = device_lookup_private(&opms_cd, PMSUNIT(dev));
+	struct opms_softc *sc = opms_cd.cd_devs[PMSUNIT(dev)];
 	struct mouseinfo info;
 	int s;
 	int error;
@@ -414,9 +416,9 @@ opmsintr(void *arg)
 
 			if (sc->sc_state & PMS_ASLP) {
 				sc->sc_state &= ~PMS_ASLP;
-				wakeup((void *)sc);
+				wakeup((caddr_t)sc);
 			}
-			selnotify(&sc->sc_rsel, 0, 0);
+			selnotify(&sc->sc_rsel, 0);
 		}
 
 		break;
@@ -427,7 +429,7 @@ opmsintr(void *arg)
 int
 opmspoll(dev_t dev, int events, struct lwp *l)
 {
-	struct opms_softc *sc = device_lookup_private(&opms_cd, PMSUNIT(dev));
+	struct opms_softc *sc = opms_cd.cd_devs[PMSUNIT(dev)];
 	int revents = 0;
 	int s = spltty();
 
@@ -468,7 +470,7 @@ static const struct filterops opmsread_filtops =
 int
 opmskqfilter(dev_t dev, struct knote *kn)
 {
-	struct opms_softc *sc = device_lookup_private(&opms_cd, PMSUNIT(dev));
+	struct opms_softc *sc = opms_cd.cd_devs[PMSUNIT(dev)];
 	struct klist *klist;
 	int s;
 

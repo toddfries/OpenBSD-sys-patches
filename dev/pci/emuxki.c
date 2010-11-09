@@ -1,4 +1,4 @@
-/*	$NetBSD: emuxki.c,v 1.54 2008/09/06 03:00:32 gmcgarry Exp $	*/
+/*	$NetBSD: emuxki.c,v 1.51 2008/04/10 19:13:36 cegger Exp $	*/
 
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -49,7 +56,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: emuxki.c,v 1.54 2008/09/06 03:00:32 gmcgarry Exp $");
+__KERNEL_RCSID(0, "$NetBSD: emuxki.c,v 1.51 2008/04/10 19:13:36 cegger Exp $");
 
 #include <sys/param.h>
 #include <sys/device.h>
@@ -1724,12 +1731,11 @@ static uint32_t
 emuxki_voice_curaddr(struct emuxki_voice *voice)
 {
 	int idxreg;
-	int rv;
 
 	/* XXX different semantics in these cases */
 	if (voice->use & EMU_VOICE_USE_PLAY) {
 		/* returns number of samples (an l/r pair counts 1) */
-		rv = emuxki_read(voice->sc,
+		return emuxki_read(voice->sc,
 		    voice->dataloc.chan[0]->num, EMU_CHAN_CCCA_CURRADDR) -
 		    voice->dataloc.chan[0]->loop.start;
 	} else {
@@ -1753,10 +1759,10 @@ emuxki_voice_curaddr(struct emuxki_voice *voice)
 #endif
 				break;
 		}
-		rv = emuxki_read(voice->sc, 0, EMU_RECIDX(idxreg)
+		return emuxki_read(voice->sc, 0, EMU_RECIDX(idxreg)
 				& EMU_RECIDX_MASK);
 	}
-	return rv;
+	return 0;
 }
 
 static void

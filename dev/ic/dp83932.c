@@ -1,4 +1,4 @@
-/*	$NetBSD: dp83932.c,v 1.27 2008/08/23 15:46:47 tsutsui Exp $	*/
+/*	$NetBSD: dp83932.c,v 1.19 2007/10/19 11:59:50 ad Exp $	*/
 
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -35,7 +42,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: dp83932.c,v 1.27 2008/08/23 15:46:47 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: dp83932.c,v 1.19 2007/10/19 11:59:50 ad Exp $");
 
 #include "bpfilter.h"
 
@@ -97,7 +104,7 @@ sonic_attach(struct sonic_softc *sc, const uint8_t *enaddr)
 	int i, rseg, error;
 	bus_dma_segment_t seg;
 	size_t cdatasize;
-	uint8_t *nullbuf;
+	char *nullbuf;
 
 	/*
 	 * Allocate the control data structures, and create and load the
@@ -111,34 +118,33 @@ sonic_attach(struct sonic_softc *sc, const uint8_t *enaddr)
 	if ((error = bus_dmamem_alloc(sc->sc_dmat, cdatasize + ETHER_PAD_LEN,
 	     PAGE_SIZE, (64 * 1024), &seg, 1, &rseg,
 	     BUS_DMA_NOWAIT)) != 0) {
-		aprint_error_dev(sc->sc_dev,
-		    "unable to allocate control data, error = %d\n", error);
+		printf("%s: unable to allocate control data, error = %d\n",
+		    sc->sc_dev.dv_xname, error);
 		goto fail_0;
 	}
 
 	if ((error = bus_dmamem_map(sc->sc_dmat, &seg, rseg,
 	    cdatasize + ETHER_PAD_LEN, (void **) &sc->sc_cdata16,
 	    BUS_DMA_NOWAIT|BUS_DMA_COHERENT)) != 0) {
-		aprint_error_dev(sc->sc_dev,
-		    "unable to map control data, error = %d\n", error);
+		printf("%s: unable to map control data, error = %d\n",
+		    sc->sc_dev.dv_xname, error);
 		goto fail_1;
 	}
-	nullbuf = (uint8_t *)sc->sc_cdata16 + cdatasize;
+	nullbuf = (char *)sc->sc_cdata16 + cdatasize;
 	memset(nullbuf, 0, ETHER_PAD_LEN);
 
 	if ((error = bus_dmamap_create(sc->sc_dmat,
 	     cdatasize, 1, cdatasize, 0, BUS_DMA_NOWAIT,
 	     &sc->sc_cddmamap)) != 0) {
-		aprint_error_dev(sc->sc_dev,
-		    "unable to create control data DMA map, error = %d\n",
-		    error);
+		printf("%s: unable to create control data DMA map, "
+		    "error = %d\n", sc->sc_dev.dv_xname, error);
 		goto fail_2;
 	}
 
 	if ((error = bus_dmamap_load(sc->sc_dmat, sc->sc_cddmamap,
 	     sc->sc_cdata16, cdatasize, NULL, BUS_DMA_NOWAIT)) != 0) {
-		aprint_error_dev(sc->sc_dev,
-		    "unable to load control data DMA map, error = %d\n", error);
+		printf("%s: unable to load control data DMA map, error = %d\n",
+		    sc->sc_dev.dv_xname, error);
 		goto fail_3;
 	}
 
@@ -149,9 +155,8 @@ sonic_attach(struct sonic_softc *sc, const uint8_t *enaddr)
 		if ((error = bus_dmamap_create(sc->sc_dmat, MCLBYTES,
 		     SONIC_NTXFRAGS, MCLBYTES, 0, BUS_DMA_NOWAIT,
 		     &sc->sc_txsoft[i].ds_dmamap)) != 0) {
-			aprint_error_dev(sc->sc_dev,
-			    "unable to create tx DMA map %d, error = %d\n",
-			    i, error);
+			printf("%s: unable to create tx DMA map %d, "
+			    "error = %d\n", sc->sc_dev.dv_xname, i, error);
 			goto fail_4;
 		}
 	}
@@ -163,9 +168,8 @@ sonic_attach(struct sonic_softc *sc, const uint8_t *enaddr)
 		if ((error = bus_dmamap_create(sc->sc_dmat, MCLBYTES, 1,
 		     MCLBYTES, 0, BUS_DMA_NOWAIT,
 		     &sc->sc_rxsoft[i].ds_dmamap)) != 0) {
-			aprint_error_dev(sc->sc_dev,
-			    "unable to create rx DMA map %d, error = %d\n",
-			    i, error);
+			printf("%s: unable to create rx DMA map %d, "
+			    "error = %d\n", sc->sc_dev.dv_xname, i, error);
 			goto fail_5;
 		}
 		sc->sc_rxsoft[i].ds_mbuf = NULL;
@@ -176,15 +180,15 @@ sonic_attach(struct sonic_softc *sc, const uint8_t *enaddr)
 	 */
 	if ((error = bus_dmamap_create(sc->sc_dmat, ETHER_PAD_LEN, 1,
 	    ETHER_PAD_LEN, 0, BUS_DMA_NOWAIT, &sc->sc_nulldmamap)) != 0) {
-		aprint_error_dev(sc->sc_dev,
-		    "unable to create pad buffer DMA map, error = %d\n", error);
+		printf("%s: unable to create pad buffer DMA map, "
+		    "error = %d\n", sc->sc_dev.dv_xname, error);
 		goto fail_5;
 	}
 
 	if ((error = bus_dmamap_load(sc->sc_dmat, sc->sc_nulldmamap,
 	    nullbuf, ETHER_PAD_LEN, NULL, BUS_DMA_NOWAIT)) != 0) {
-		aprint_error_dev(sc->sc_dev,
-		    "unable to load pad buffer DMA map, error = %d\n", error);
+		printf("%s: unable to load pad buffer DMA map, "
+		    "error = %d\n", sc->sc_dev.dv_xname, error);
 		goto fail_6;
 	}
 	bus_dmamap_sync(sc->sc_dmat, sc->sc_nulldmamap, 0, ETHER_PAD_LEN,
@@ -195,10 +199,10 @@ sonic_attach(struct sonic_softc *sc, const uint8_t *enaddr)
 	 */
 	sonic_reset(sc);
 
-	aprint_normal_dev(sc->sc_dev, "Ethernet address %s\n",
+	printf("%s: Ethernet address %s\n", sc->sc_dev.dv_xname,
 	    ether_sprintf(enaddr));
 
-	strlcpy(ifp->if_xname, device_xname(sc->sc_dev), IFNAMSIZ);
+	strcpy(ifp->if_xname, sc->sc_dev.dv_xname);
 	ifp->if_softc = sc;
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
 	ifp->if_ioctl = sonic_ioctl;
@@ -207,11 +211,6 @@ sonic_attach(struct sonic_softc *sc, const uint8_t *enaddr)
 	ifp->if_init = sonic_init;
 	ifp->if_stop = sonic_stop;
 	IFQ_SET_READY(&ifp->if_snd);
-
-	/*
-	 * We can support 802.1Q VLAN-sized frames.
-	 */
-	sc->sc_ethercom.ec_capabilities |= ETHERCAP_VLAN_MTU;
 
 	/*
 	 * Attach the interface.
@@ -224,8 +223,8 @@ sonic_attach(struct sonic_softc *sc, const uint8_t *enaddr)
 	 */
 	sc->sc_sdhook = shutdownhook_establish(sonic_shutdown, sc);
 	if (sc->sc_sdhook == NULL)
-		aprint_error_dev(sc->sc_dev,
-		    "WARNING: unable to establish shutdown hook\n");
+		printf("%s: WARNING: unable to establish shutdown hook\n",
+		    sc->sc_dev.dv_xname);
 	return;
 
 	/*
@@ -250,7 +249,7 @@ sonic_attach(struct sonic_softc *sc, const uint8_t *enaddr)
  fail_3:
 	bus_dmamap_destroy(sc->sc_dmat, sc->sc_cddmamap);
  fail_2:
-	bus_dmamem_unmap(sc->sc_dmat, (void *)sc->sc_cdata16, cdatasize);
+	bus_dmamem_unmap(sc->sc_dmat, (void *) sc->sc_cdata16, cdatasize);
  fail_1:
 	bus_dmamem_free(sc->sc_dmat, &seg, rseg);
  fail_0:
@@ -333,15 +332,14 @@ sonic_start(struct ifnet *ifp)
 			MGETHDR(m, M_DONTWAIT, MT_DATA);
 			if (m == NULL) {
 				printf("%s: unable to allocate Tx mbuf\n",
-				    device_xname(sc->sc_dev));
+				    sc->sc_dev.dv_xname);
 				break;
 			}
 			if (m0->m_pkthdr.len > MHLEN) {
 				MCLGET(m, M_DONTWAIT);
 				if ((m->m_flags & M_EXT) == 0) {
 					printf("%s: unable to allocate Tx "
-					    "cluster\n",
-					    device_xname(sc->sc_dev));
+					    "cluster\n", sc->sc_dev.dv_xname);
 					m_freem(m);
 					break;
 				}
@@ -352,8 +350,7 @@ sonic_start(struct ifnet *ifp)
 			    m, BUS_DMA_WRITE|BUS_DMA_NOWAIT);
 			if (error) {
 				printf("%s: unable to load Tx buffer, "
-				    "error = %d\n", device_xname(sc->sc_dev),
-				    error);
+				    "error = %d\n", sc->sc_dev.dv_xname, error);
 				m_freem(m);
 				break;
 			}
@@ -536,10 +533,10 @@ sonic_watchdog(struct ifnet *ifp)
 {
 	struct sonic_softc *sc = ifp->if_softc;
 
-	printf("%s: device timeout\n", device_xname(sc->sc_dev));
+	printf("%s: device timeout\n", sc->sc_dev.dv_xname);
 	ifp->if_oerrors++;
 
-	(void)sonic_init(ifp);
+	(void) sonic_init(ifp);
 }
 
 /*
@@ -554,19 +551,23 @@ sonic_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 
 	s = splnet();
 
-	error = ether_ioctl(ifp, cmd, data);
-	if (error == ENETRESET) {
-		/*
-		 * Multicast list has changed; set the hardware
-		 * filter accordingly.
-		 */
-		if (ifp->if_flags & IFF_RUNNING)
-			(void)sonic_init(ifp);
-		error = 0;
+	switch (cmd) {
+	default:
+		error = ether_ioctl(ifp, cmd, data);
+		if (error == ENETRESET) {
+			/*
+			 * Multicast list has changed; set the hardware
+			 * filter accordingly.
+			 */
+			if (ifp->if_flags & IFF_RUNNING)
+				(void) sonic_init(ifp);
+			error = 0;
+		}
+		break;
 	}
 
 	splx(s);
-	return error;
+	return (error);
 }
 
 /*
@@ -596,7 +597,7 @@ sonic_intr(void *arg)
 		if (isr & (IMR_PTX|IMR_TXER)) {
 			if (sonic_txintr(sc) & TCR_FU) {
 				printf("%s: transmit FIFO underrun\n",
-				    device_xname(sc->sc_dev));
+				    sc->sc_dev.dv_xname);
 				wantinit = 1;
 			}
 		}
@@ -604,7 +605,7 @@ sonic_intr(void *arg)
 		if (isr & (IMR_RFO|IMR_RBA|IMR_RBE|IMR_RDE)) {
 #define	PRINTERR(bit, str)						\
 			if (isr & (bit))				\
-				printf("%s: %s\n",device_xname(sc->sc_dev), str)
+				printf("%s: %s\n", sc->sc_dev.dv_xname, str)
 			PRINTERR(IMR_RFO, "receive FIFO overrun");
 			PRINTERR(IMR_RBA, "receive buffer exceeded");
 			PRINTERR(IMR_RBE, "receive buffers exhausted");
@@ -615,11 +616,11 @@ sonic_intr(void *arg)
 
 	if (handled) {
 		if (wantinit)
-			(void)sonic_init(ifp);
+			(void) sonic_init(ifp);
 		sonic_start(ifp);
 	}
 
-	return handled;
+	return (handled);
 }
 
 /*
@@ -688,7 +689,7 @@ sonic_txintr(struct sonic_softc *sc)
 	if (sc->sc_txpending == 0)
 		ifp->if_timer = 0;
 
-	return totstat;
+	return (totstat);
 }
 
 /*
@@ -754,10 +755,10 @@ sonic_rxintr(struct sonic_softc *sc)
 		if ((status & RCR_PRX) == 0) {
 			if (status & RCR_FAER)
 				printf("%s: Rx frame alignment error\n",
-				    device_xname(sc->sc_dev));
+				    sc->sc_dev.dv_xname);
 			else if (status & RCR_CRCR)
 				printf("%s: Rx CRC error\n",
-				    device_xname(sc->sc_dev));
+				    sc->sc_dev.dv_xname);
 			ifp->if_ierrors++;
 			SONIC_INIT_RXDESC(sc, i);
 			continue;
@@ -948,7 +949,7 @@ sonic_init(struct ifnet *ifp)
 			if ((error = sonic_add_rxbuf(sc, i)) != 0) {
 				printf("%s: unable to allocate or map Rx "
 				    "buffer %d, error = %d\n",
-				    device_xname(sc->sc_dev), i, error);
+				    sc->sc_dev.dv_xname, i, error);
 				/*
 				 * XXX Should attempt to run with fewer receive
 				 * XXX buffers instead of just failing.
@@ -1027,8 +1028,8 @@ sonic_init(struct ifnet *ifp)
 
  out:
 	if (error)
-		printf("%s: interface not running\n", device_xname(sc->sc_dev));
-	return error;
+		printf("%s: interface not running\n", sc->sc_dev.dv_xname);
+	return (error);
 }
 
 /*
@@ -1079,7 +1080,7 @@ sonic_stop(struct ifnet *ifp, int disable)
 		delay(2);
 	}
 	if ((CSR_READ(sc, SONIC_CR) & (CR_TXP|CR_RXEN|CR_ST)) != 0)
-		printf("%s: SONIC failed to stop\n", device_xname(sc->sc_dev));
+		printf("%s: SONIC failed to stop\n", sc->sc_dev.dv_xname);
 
 	/*
 	 * Release any queued transmit buffers.
@@ -1093,14 +1094,14 @@ sonic_stop(struct ifnet *ifp, int disable)
 		}
 	}
 
+	if (disable)
+		sonic_rxdrain(sc);
+
 	/*
 	 * Mark the interface down and cancel the watchdog timer.
 	 */
 	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 	ifp->if_timer = 0;
-
-	if (disable)
-		sonic_rxdrain(sc);
 }
 
 /*
@@ -1117,12 +1118,12 @@ sonic_add_rxbuf(struct sonic_softc *sc, int idx)
 
 	MGETHDR(m, M_DONTWAIT, MT_DATA);
 	if (m == NULL)
-		return ENOBUFS;
+		return (ENOBUFS);
 
 	MCLGET(m, M_DONTWAIT);
 	if ((m->m_flags & M_EXT) == 0) {
 		m_freem(m);
-		return ENOBUFS;
+		return (ENOBUFS);
 	}
 
 	if (ds->ds_mbuf != NULL)
@@ -1135,7 +1136,7 @@ sonic_add_rxbuf(struct sonic_softc *sc, int idx)
 	    BUS_DMA_READ|BUS_DMA_NOWAIT);
 	if (error) {
 		printf("%s: can't load rx DMA map %d, error = %d\n",
-		    device_xname(sc->sc_dev), idx, error);
+		    sc->sc_dev.dv_xname, idx, error);
 		panic("sonic_add_rxbuf");	/* XXX */
 	}
 
@@ -1144,7 +1145,7 @@ sonic_add_rxbuf(struct sonic_softc *sc, int idx)
 
 	SONIC_INIT_RXDESC(sc, idx);
 
-	return 0;
+	return (0);
 }
 
 static void
@@ -1209,7 +1210,7 @@ sonic_set_filter(struct sonic_softc *sc)
 			goto allmulti;
 		}
 
-		if (entry == SONIC_NCAMENT) {
+		if (entry == 16) {
 			/*
 			 * Out of CAM slots.  Have to enable reception
 			 * of all multicast addresses.
@@ -1234,21 +1235,6 @@ sonic_set_filter(struct sonic_softc *sc)
 	rcr |= RCR_AMC;
 
  setit:
-	/* set mask for the CAM Enable register */
-	if (sc->sc_32bit) {
-		if (entry == SONIC_NCAMENT)
-			sc->sc_cdaenable32 = htosonic32(sc, camvalid);
-		else
-			sc->sc_cda32[entry].cda_entry =
-			    htosonic32(sc, camvalid);
-	} else {
-		if (entry == SONIC_NCAMENT)
-			sc->sc_cdaenable16 = htosonic16(sc, camvalid);
-		else
-			sc->sc_cda16[entry].cda_entry =
-			    htosonic16(sc, camvalid);
-	}
-
 	/* Load the CAM. */
 	SONIC_CDCAMSYNC(sc, BUS_DMASYNC_PREWRITE);
 	CSR_WRITE(sc, SONIC_CDP, SONIC_CDCAMADDR(sc) & 0xffff);
@@ -1260,8 +1246,11 @@ sonic_set_filter(struct sonic_softc *sc)
 		delay(2);
 	}
 	if (CSR_READ(sc, SONIC_CR) & CR_LCAM)
-		printf("%s: CAM load failed\n", device_xname(sc->sc_dev));
+		printf("%s: CAM load failed\n", sc->sc_dev.dv_xname);
 	SONIC_CDCAMSYNC(sc, BUS_DMASYNC_POSTWRITE);
+
+	/* Set the CAM enable resgiter. */
+	CSR_WRITE(sc, SONIC_CER, camvalid);
 
 	/* Set the receive control register. */
 	CSR_WRITE(sc, SONIC_RCR, rcr);

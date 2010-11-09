@@ -1,9 +1,7 @@
-/*	$NetBSD: bugcrt.c,v 1.5 2008/01/12 09:54:30 tsutsui Exp $	*/
+/*	$NetBSD: bugcrt.c,v 1.4 2002/05/04 22:05:30 scw Exp $	*/
 
 #include <sys/types.h>
 #include <machine/prom.h>
-
-#include <lib/libsa/stand.h>
 
 #include "libbug.h"
 
@@ -16,12 +14,12 @@ _bugstart(void)
 	/*
 	 * Be sure not to de-reference NULL
 	 */
-	if (bugargs.arg_end != NULL)
+	if ( bugargs.arg_end )
 		*bugargs.arg_end = 0;
 
 	id = mvmeprom_getbrdid();
 	bugargs.cputyp = id->model;
-	(void)main();
+	(void) main();
 	_rtt();
 	/* NOTREACHED */
 }

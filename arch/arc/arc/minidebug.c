@@ -1,4 +1,4 @@
-/*	$NetBSD: minidebug.c,v 1.18 2007/02/22 05:09:01 thorpej Exp $	*/
+/*	$NetBSD: minidebug.c,v 1.17 2005/12/11 12:16:37 christos Exp $	*/
 /*	$OpenBSD: minidebug.c,v 1.2 1998/03/16 09:03:36 pefo Exp $	*/
 
 /*-
@@ -40,7 +40,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: minidebug.c,v 1.18 2007/02/22 05:09:01 thorpej Exp $");
+__KERNEL_RCSID(0, "$NetBSD: minidebug.c,v 1.17 2005/12/11 12:16:37 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -57,6 +57,12 @@ __KERNEL_RCSID(0, "$NetBSD: minidebug.c,v 1.18 2007/02/22 05:09:01 thorpej Exp $
 #include <machine/intr.h>
 #include <machine/trap.h>
 #include <machine/mips_opcode.h>
+
+#ifndef TRUE
+#define TRUE 1
+#define FALSE 0
+#endif
+
 
 static char *op_name[64] = {
 /* 0 */	"spec",	"bcond","j",	"jal",	"beq",	"bne",	"blez",	"bgtz",
@@ -369,7 +375,7 @@ static int ssandrun;	/* Single step and run flag (when cont at brk) */
 			if (ssandrun) { /* Step over bp before free run */
 				ssandrun = 0;
 				break_insert();
-				return true;
+				return TRUE;
 			}
 			printf("\r    %08x\t",newaddr);
 			if(mdbprintins(*(int *)newaddr, newaddr)) {
@@ -444,17 +450,17 @@ static int ssandrun;	/* Single step and run flag (when cont at brk) */
 			else {
 				break_insert();
 			}
-			return true;
+			return TRUE;
 		case 'S':
 			printf("Stack traceback:\n");
 			stacktrace();
-			return true;
+			return TRUE;
 		case 's':
 			set_break(mdbpcb.pcb_regs[PC] + 8);
-			return true;
+			return TRUE;
 		case ' ':
 			mdbsetsstep();
-			return true;
+			return TRUE;
 
 		case 'd':
 			printf("dump ");
@@ -646,12 +652,12 @@ mdbclrsstep(int cr)
 	/* check to be sure its the one we are expecting */
 	va = mdb_ss_addr;
 	if (!va || va != pc)
-		return false;
+		return FALSE;
 
 	/* read break instruction */
 	instr = mdbpeek(va);
 	if (instr != MIPS_BREAK_SSTEP)
-		return false;
+		return FALSE;
 
 	if ((int)va < 0) {
 		/* kernel address */
@@ -659,12 +665,12 @@ mdbclrsstep(int cr)
 		mips3_FlushDCache(va,4);
 		mips3_FlushICache(va,4);
 		mdb_ss_addr = 0;
-		return true;
+		return TRUE;
 	}
 
 	printf("can't clear break at %x\n", va);
 	mdb_ss_addr = 0;
-	return false;
+	return FALSE;
 }
 
 

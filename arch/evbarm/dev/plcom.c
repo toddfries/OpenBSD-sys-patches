@@ -1,4 +1,4 @@
-/*	$NetBSD: plcom.c,v 1.28 2008/06/11 23:24:43 cegger Exp $	*/
+/*	$NetBSD: plcom.c,v 1.19 2006/10/01 20:31:50 elad Exp $	*/
 
 /*-
  * Copyright (c) 2001 ARM Ltd
@@ -42,6 +42,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -94,7 +101,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: plcom.c,v 1.28 2008/06/11 23:24:43 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: plcom.c,v 1.19 2006/10/01 20:31:50 elad Exp $");
 
 #include "opt_plcom.h"
 #include "opt_ddb.h"
@@ -137,8 +144,9 @@ __KERNEL_RCSID(0, "$NetBSD: plcom.c,v 1.28 2008/06/11 23:24:43 cegger Exp $");
 #include <sys/timepps.h>
 #include <sys/vnode.h>
 #include <sys/kauth.h>
-#include <sys/intr.h>
-#include <sys/bus.h>
+
+#include <machine/intr.h>
+#include <machine/bus.h>
 
 #include <evbarm/dev/plcomreg.h>
 #include <evbarm/dev/plcomvar.h>
@@ -183,7 +191,16 @@ void	plcomcnputc	(dev_t, int);
 void	plcomcnpollc	(dev_t, int);
 
 #define	integrate	static inline
+#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 void 	plcomsoft	(void *);
+#else
+#ifndef __NO_SOFT_SERIAL_INTERRUPT
+void 	plcomsoft	(void);
+#else
+void 	plcomsoft	(void *);
+struct callout plcomsoft_callout = CALLOUT_INITIALIZER;
+#endif
+#endif
 integrate void plcom_rxsoft	(struct plcom_softc *, struct tty *);
 integrate void plcom_txsoft	(struct plcom_softc *, struct tty *);
 integrate void plcom_stsoft	(struct plcom_softc *, struct tty *);
@@ -223,6 +240,12 @@ static int ppscap =
 	PPS_HARDPPSONASSERT | PPS_HARDPPSONCLEAR |
 #endif	/* PPS_SYNC */
 	PPS_OFFSETASSERT | PPS_OFFSETCLEAR;
+
+#ifndef __HAVE_GENERIC_SOFT_INTERRUPTS
+#ifdef __NO_SOFT_SERIAL_INTERRUPT
+volatile int	plcom_softintr_scheduled;
+#endif
+#endif
 
 #ifdef KGDB
 #include <sys/kgdb.h>
@@ -357,7 +380,7 @@ plcom_attach_subr(struct plcom_softc *sc)
 	bus_space_handle_t ioh = sc->sc_ioh;
 	struct tty *tp;
 
-	callout_init(&sc->sc_diag_callout, 0);
+	callout_init(&sc->sc_diag_callout);
 	simple_lock_init(&sc->sc_lock);
 
 	/* Disable interrupts before configuring the device. */
@@ -435,7 +458,9 @@ plcom_attach_subr(struct plcom_softc *sc)
 	}
 #endif
 
-	sc->sc_si = softint_establish(SOFTINT_SERIAL, plcomsoft, sc);
+#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
+	sc->sc_si = softintr_establish(IPL_SOFTSERIAL, plcomsoft, sc);
+#endif
 
 #if NRND > 0 && defined(RND_COM)
 	rnd_attach_source(&sc->rnd_source, sc->sc_dev.dv_xname,
@@ -491,8 +516,10 @@ plcom_detach(self, flags)
 	tty_detach(sc->sc_tty);
 	ttyfree(sc->sc_tty);
 
+#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 	/* Unhook the soft interrupt handler. */
-	softint_disestablish(sc->sc_si);
+	softintr_disestablish(sc->sc_si);
+#endif
 
 #if NRND > 0 && defined(RND_COM)
 	/* Unhook the entropy source. */
@@ -550,10 +577,8 @@ plcom_shutdown(struct plcom_softc *sc)
 	plcom_break(sc, 0);
 
 	/* Turn off PPS capture on last close. */
-	mutex_spin_enter(&timecounter_lock);
 	sc->sc_ppsmask = 0;
 	sc->ppsparam.mode = 0;
-	mutex_spin_exit(&timecounter_lock);
 
 	/*
 	 * Hang up if necessary.  Wait a bit, so the other side has time to
@@ -598,7 +623,7 @@ plcomopen(dev_t dev, int flag, int mode, struct lwp *l)
 	int s, s2;
 	int error;
 
-	sc = device_lookup_private(&plcom_cd, PLCOMUNIT(dev));
+	sc = device_lookup(&plcom_cd, PLCOMUNIT(dev));
 	if (sc == NULL || !ISSET(sc->sc_hwflags, PLCOM_HW_DEV_OK) ||
 		sc->sc_rbuf == NULL)
 		return ENXIO;
@@ -654,11 +679,8 @@ plcomopen(dev_t dev, int flag, int mode, struct lwp *l)
 		sc->sc_msr = bus_space_read_1(sc->sc_iot, sc->sc_ioh, plcom_fr);
 
 		/* Clear PPS capture state on first open. */
-
-		mutex_spin_enter(&timecounter_lock);
 		sc->sc_ppsmask = 0;
 		sc->ppsparam.mode = 0;
-		mutex_spin_exit(&timecounter_lock);
 
 		PLCOM_UNLOCK(sc);
 		splx(s2);
@@ -745,8 +767,7 @@ bad:
 int
 plcomclose(dev_t dev, int flag, int mode, struct lwp *l)
 {
-	struct plcom_softc *sc =
-		device_lookup_private(&plcom_cd, PLCOMUNIT(dev));
+	struct plcom_softc *sc = device_lookup(&plcom_cd, PLCOMUNIT(dev));
 	struct tty *tp = sc->sc_tty;
 
 	/* XXX This is for cons.c. */
@@ -774,8 +795,7 @@ plcomclose(dev_t dev, int flag, int mode, struct lwp *l)
 int
 plcomread(dev_t dev, struct uio *uio, int flag)
 {
-	struct plcom_softc *sc =
-		device_lookup_private(&plcom_cd, PLCOMUNIT(dev));
+	struct plcom_softc *sc = device_lookup(&plcom_cd, PLCOMUNIT(dev));
 	struct tty *tp = sc->sc_tty;
 
 	if (PLCOM_ISALIVE(sc) == 0)
@@ -787,8 +807,7 @@ plcomread(dev_t dev, struct uio *uio, int flag)
 int
 plcomwrite(dev_t dev, struct uio *uio, int flag)
 {
-	struct plcom_softc *sc =
-		device_lookup_private(&plcom_cd, PLCOMUNIT(dev));
+	struct plcom_softc *sc = device_lookup(&plcom_cd, PLCOMUNIT(dev));
 	struct tty *tp = sc->sc_tty;
 
 	if (PLCOM_ISALIVE(sc) == 0)
@@ -800,8 +819,7 @@ plcomwrite(dev_t dev, struct uio *uio, int flag)
 int
 plcompoll(dev_t dev, int events, struct lwp *l)
 {
-	struct plcom_softc *sc =
-		device_lookup_private(&plcom_cd, PLCOMUNIT(dev));
+	struct plcom_softc *sc = device_lookup(&plcom_cd, PLCOMUNIT(dev));
 	struct tty *tp = sc->sc_tty;
 
 	if (PLCOM_ISALIVE(sc) == 0)
@@ -813,18 +831,16 @@ plcompoll(dev_t dev, int events, struct lwp *l)
 struct tty *
 plcomtty(dev_t dev)
 {
-	struct plcom_softc *sc =
-		device_lookup_private(&plcom_cd, PLCOMUNIT(dev));
+	struct plcom_softc *sc = device_lookup(&plcom_cd, PLCOMUNIT(dev));
 	struct tty *tp = sc->sc_tty;
 
 	return tp;
 }
 
 int
-plcomioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
+plcomioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct lwp *l)
 {
-	struct plcom_softc *sc =
-		device_lookup_private(&plcom_cd, PLCOMUNIT(dev));
+	struct plcom_softc *sc = device_lookup(&plcom_cd, PLCOMUNIT(dev));
 	struct tty *tp = sc->sc_tty;
 	int error;
 	int s;
@@ -893,9 +909,7 @@ plcomioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 	case PPS_IOC_GETPARAMS: {
 		pps_params_t *pp;
 		pp = (pps_params_t *)data;
-		mutex_spin_enter(&timecounter_lock);
 		*pp = sc->ppsparam;
-		mutex_spin_exit(&timecounter_lock);
 		break;
 	}
 
@@ -903,10 +917,8 @@ plcomioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 	  	pps_params_t *pp;
 		int mode;
 		pp = (pps_params_t *)data;
-		mutex_spin_enter(&timecounter_lock);
 		if (pp->mode & ~ppscap) {
 			error = EINVAL;
-			mutex_spin_exit(&timecounter_lock);
 			break;
 		}
 		sc->ppsparam = *pp;
@@ -951,7 +963,6 @@ plcomioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 			error = EINVAL;
 			break;
 		}
-		mutex_spin_exit(&timecounter_lock);
 		break;
 	}
 
@@ -962,9 +973,7 @@ plcomioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 	case PPS_IOC_FETCH: {
 		pps_info_t *pi;
 		pi = (pps_info_t *)data;
-		mutex_spin_enter(&timecounter_lock);
 		*pi = sc->ppsinfo;
-		mutex_spin_exit(&timecounter_lock);
 		break;
 	}
 
@@ -974,7 +983,6 @@ plcomioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 		 * rising edge as the on-the-second signal. 
 		 * The old API has no way to specify PPS polarity.
 		 */
-		mutex_spin_enter(&timecounter_lock);
 		sc->sc_ppsmask = MSR_DCD;
 #ifndef PPS_TRAILING_EDGE
 		sc->sc_ppsassert = MSR_DCD;
@@ -987,7 +995,6 @@ plcomioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 		TIMESPEC_TO_TIMEVAL((struct timeval *)data, 
 		    &sc->ppsinfo.clear_timestamp);
 #endif
-		mutex_spin_exit(&timecounter_lock);
 		break;
 
 	default:
@@ -1013,7 +1020,18 @@ plcom_schedrx(struct plcom_softc *sc)
 	sc->sc_rx_ready = 1;
 
 	/* Wake up the poller. */
-	softint_schedule(sc->sc_si);
+#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
+	softintr_schedule(sc->sc_si);
+#else
+#ifndef __NO_SOFT_SERIAL_INTERRUPT
+	setsoftserial();
+#else
+	if (!plcom_softintr_scheduled) {
+		plcom_softintr_scheduled = 1;
+		callout_reset(&plcomsoft_callout, 1, plcomsoft, NULL);
+	}
+#endif
+#endif
 }
 
 void
@@ -1152,8 +1170,7 @@ cflag2lcr(tcflag_t cflag)
 int
 plcomparam(struct tty *tp, struct termios *t)
 {
-	struct plcom_softc *sc =
-		device_lookup_private(&plcom_cd, PLCOMUNIT(tp->t_dev));
+	struct plcom_softc *sc = device_lookup(&plcom_cd, PLCOMUNIT(tp->t_dev));
 	int ospeed;
 	u_char lcr;
 	int s;
@@ -1366,8 +1383,7 @@ plcom_loadchannelregs(struct plcom_softc *sc)
 int
 plcomhwiflow(struct tty *tp, int block)
 {
-	struct plcom_softc *sc =
-		device_lookup_private(&plcom_cd, PLCOMUNIT(tp->t_dev));
+	struct plcom_softc *sc = device_lookup(&plcom_cd, PLCOMUNIT(tp->t_dev));
 	int s;
 
 	if (PLCOM_ISALIVE(sc) == 0)
@@ -1425,8 +1441,7 @@ plcom_hwiflow(struct plcom_softc *sc)
 void
 plcomstart(struct tty *tp)
 {
-	struct plcom_softc *sc =
-		device_lookup_private(&plcom_cd, PLCOMUNIT(tp->t_dev));
+	struct plcom_softc *sc = device_lookup(&plcom_cd, PLCOMUNIT(tp->t_dev));
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
 	int s;
@@ -1440,8 +1455,15 @@ plcomstart(struct tty *tp)
 	if (sc->sc_tx_stopped)
 		goto out;
 
-	if (!ttypull(tp))
-		goto out;
+	if (tp->t_outq.c_cc <= tp->t_lowat) {
+		if (ISSET(tp->t_state, TS_ASLEEP)) {
+			CLR(tp->t_state, TS_ASLEEP);
+			wakeup(&tp->t_outq);
+		}
+		selwakeup(&tp->t_wsel);
+		if (tp->t_outq.c_cc == 0)
+			goto out;
+	}
 
 	/* Grab the first contiguous region of buffer space. */
 	{
@@ -1490,8 +1512,7 @@ out:
 void
 plcomstop(struct tty *tp, int flag)
 {
-	struct plcom_softc *sc =
-		device_lookup_private(&plcom_cd, PLCOMUNIT(tp->t_dev));
+	struct plcom_softc *sc = device_lookup(&plcom_cd, PLCOMUNIT(tp->t_dev));
 	int s;
 
 	s = splserial();
@@ -1672,6 +1693,7 @@ plcom_stsoft(struct plcom_softc *sc, struct tty *tp)
 #endif
 }
 
+#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 void
 plcomsoft(void *arg)
 {
@@ -1681,23 +1703,68 @@ plcomsoft(void *arg)
 	if (PLCOM_ISALIVE(sc) == 0)
 		return;
 
-	tp = sc->sc_tty;
+	{
+#else
+void
+#ifndef __NO_SOFT_SERIAL_INTERRUPT
+plcomsoft(void)
+#else
+plcomsoft(void *arg)
+#endif
+{
+	struct plcom_softc	*sc;
+	struct tty	*tp;
+	int	unit;
+#ifdef __NO_SOFT_SERIAL_INTERRUPT
+	int s;
+
+	s = splsoftserial();
+	plcom_softintr_scheduled = 0;
+#endif
+
+	for (unit = 0; unit < plcom_cd.cd_ndevs; unit++) {
+		sc = device_lookup(&plcom_cd, unit);
+		if (sc == NULL || !ISSET(sc->sc_hwflags, PLCOM_HW_DEV_OK))
+			continue;
+
+		if (PLCOM_ISALIVE(sc) == 0)
+			continue;
+
+		tp = sc->sc_tty;
+		if (tp == NULL)
+			continue;
+		if (!ISSET(tp->t_state, TS_ISOPEN) && tp->t_wopen == 0)
+			continue;
+#endif
+		tp = sc->sc_tty;
 		
-	if (sc->sc_rx_ready) {
-		sc->sc_rx_ready = 0;
-		plcom_rxsoft(sc, tp);
+		if (sc->sc_rx_ready) {
+			sc->sc_rx_ready = 0;
+			plcom_rxsoft(sc, tp);
+		}
+
+		if (sc->sc_st_check) {
+			sc->sc_st_check = 0;
+			plcom_stsoft(sc, tp);
+		}
+
+		if (sc->sc_tx_done) {
+			sc->sc_tx_done = 0;
+			plcom_txsoft(sc, tp);
+		}
 	}
 
-	if (sc->sc_st_check) {
-		sc->sc_st_check = 0;
-		plcom_stsoft(sc, tp);
-	}
-
-	if (sc->sc_tx_done) {
-		sc->sc_tx_done = 0;
-		plcom_txsoft(sc, tp);
-	}
+#ifndef __HAVE_GENERIC_SOFT_INTERRUPTS
+#ifdef __NO_SOFT_SERIAL_INTERRUPT
+	splx(s);
+#endif
+#endif
 }
+
+#ifdef __ALIGN_BRACKET_LEVEL_FOR_CTAGS
+	/* there has got to be a better way to do plcomsoft() */
+}}
+#endif
 
 int
 plcomintr(void *arg)
@@ -1830,7 +1897,6 @@ plcomintr(void *arg)
 		 */
 		if (delta & sc->sc_ppsmask) {
 			struct timeval tv;
-			mutex_spin_enter(&timecounter_lock);
 		    	if ((msr & sc->sc_ppsmask) == sc->sc_ppsassert) {
 				/* XXX nanotime() */
 				microtime(&tv);
@@ -1867,7 +1933,6 @@ plcomintr(void *arg)
 				sc->ppsinfo.clear_sequence++;
 				sc->ppsinfo.current_mode = sc->ppsparam.mode;
 			}
-			mutex_spin_exit(&timecounter_lock);
 		}
 
 		/*
@@ -1945,7 +2010,18 @@ plcomintr(void *arg)
 	PLCOM_UNLOCK(sc);
 
 	/* Wake up the poller. */
-	softint_schedule(sc->sc_si);
+#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
+	softintr_schedule(sc->sc_si);
+#else
+#ifndef __NO_SOFT_SERIAL_INTERRUPT
+	setsoftserial();
+#else
+	if (!plcom_softintr_scheduled) {
+		plcom_softintr_scheduled = 1;
+		callout_reset(&plcomsoft_callout, 1, plcomsoft, NULL);
+	}
+#endif
+#endif
 
 #if NRND > 0 && defined(RND_COM)
 	rnd_add_uint32(&sc->rnd_source, iir | rsr);

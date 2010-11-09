@@ -1,4 +1,4 @@
-/*	$NetBSD: cpu.h,v 1.48 2009/01/17 09:20:46 isaki Exp $	*/
+/*	$NetBSD: cpu.h,v 1.35 2005/12/11 12:19:44 christos Exp $	*/
 
 /*
  * Copyright (c) 1982, 1990, 1993
@@ -104,10 +104,6 @@
 #include <sys/cpu_data.h>
 struct cpu_info {
 	struct cpu_data ci_data;	/* MI per-cpu data */
-	cpuid_t	ci_cpuid;
-	int	ci_mtx_count;
-	int	ci_mtx_oldspl;
-	int	ci_want_resched;
 };
 
 extern struct cpu_info cpu_info_store;
@@ -136,6 +132,7 @@ struct clockframe {
 };
 
 #define	CLKF_USERMODE(framep)	(((framep)->sr & PSL_S) == 0)
+#define	CLKF_BASEPRI(framep)	(((framep)->sr & PSL_IPL) == 0)
 #define	CLKF_PC(framep)		((framep)->pc)
 #if 0
 /* We would like to do it this way... */
@@ -150,22 +147,21 @@ struct clockframe {
  * Preempt the current process if in interrupt from user mode,
  * or after the current trap/syscall if in system mode.
  */
-#define	cpu_need_resched(ci, flags)	\
-	do { (ci)->ci_want_resched = 1; aston(); } while (/* CONSTCOND */ 0)
+extern int want_resched;	/* resched() was called */
+#define	need_resched(ci)	{ want_resched++; aston(); }
 
 /*
  * Give a profiling tick to the current process when the user profiling
  * buffer pages are invalid.  On the x68k, request an ast to send us
  * through trap, marking the proc as needing a profiling tick.
  */
-#define	cpu_need_proftick(l)	\
-	do { (l)->l_pflag |= LP_OWEUPC; aston(); } while (/* CONSTCOND */ 0)
+#define	need_proftick(p)	{ (p)->p_flag |= P_OWEUPC; aston(); }
 
 /*
  * Notify the current process (p) that it has a signal pending,
  * process as soon as possible.
  */
-#define	cpu_signotify(l)	aston()
+#define	signotify(p)	aston()
 
 extern int astpending;		/* need to trap before returning to user mode */
 #define aston() (astpending++)
@@ -178,6 +174,11 @@ extern int astpending;		/* need to trap before returning to user mode */
 #define	CPU_CONSDEV		1	/* dev_t: console terminal device */
 #define	CPU_MAXID		2	/* number of valid machdep ids */
 
+#define CTL_MACHDEP_NAMES { \
+	{ 0, 0 }, \
+	{ "console_device", CTLTYPE_STRUCT }, \
+}
+
 /*
  * The rest of this should probably be moved to <machine/x68kcpu.h>
  * although some of it could probably be put into generic 68k headers.
@@ -185,18 +186,26 @@ extern int astpending;		/* need to trap before returning to user mode */
 
 #ifdef _KERNEL
 extern int machineid;
-extern char *intiobase;
 extern char *intiolimit;
+
+/* autoconf.c functions */
+void	config_console(void);
 
 /* fpu.c functions */
 int	fpu_probe(void);
 
 /* machdep.c functions */
+void	dumpconf(void);
 void	dumpsys(void);
 
 /* locore.s functions */
+struct pcb;
 struct fpframe;
-int	suline(void *, void *);
+int	suline(caddr_t, caddr_t);
+void	savectx(struct pcb *);
+void	switch_exit(struct lwp *);
+void	switch_lwp_exit(struct lwp *);
+void	proc_trampoline(void);
 void	loadustp(int);
 void	m68881_save(struct fpframe *);
 void	m68881_restore(struct fpframe *);
@@ -204,6 +213,15 @@ void	m68881_restore(struct fpframe *);
 /* machdep.c functions */
 int	badaddr(volatile void*);
 int	badbaddr(volatile void*);
+
+/* sys_machdep.c functions */
+int	cachectl1(unsigned long, vaddr_t, size_t, struct proc *);
+int	dma_cachectl(caddr_t, int);
+
+/* vm_machdep.c functions */
+void	physaccess(caddr_t, caddr_t, int, int);
+void	physunaccess(caddr_t, int);
+int	kvtop(caddr_t);
 
 #endif
 
@@ -220,8 +238,6 @@ int	badbaddr(volatile void*);
  * ``intiolimit'' (defined in locore.s).  Since it is always mapped,
  * conversion between physical and kernel virtual addresses is easy.
  */
-#define	IIOV(pa)	((u_int)(pa) - INTIOBASE + (u_int)intiobase)
-#define	IIOP(va)	((u_int)(va) - (u_int)intiobase + INTIOBASE)
 #define	IIOPOFF(pa)	((int)(pa)-INTIOBASE)
 #define	IIOMAPSIZE	btoc(INTIOTOP-INTIOBASE)	/* 4mb */
 

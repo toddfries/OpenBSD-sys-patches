@@ -1,4 +1,4 @@
-/*	$NetBSD: ka750.c,v 1.43 2008/03/15 00:23:17 matt Exp $ */
+/*	$NetBSD: ka750.c,v 1.40 2006/09/05 19:32:57 matt Exp $ */
 /*
  * Copyright (c) 1982, 1986, 1988 The Regents of the University of California.
  * All rights reserved.
@@ -68,7 +68,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ka750.c,v 1.43 2008/03/15 00:23:17 matt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ka750.c,v 1.40 2006/09/05 19:32:57 matt Exp $");
 
 #include <sys/param.h>
 #include <sys/device.h>
@@ -89,29 +89,36 @@ void	ctuattach(void);
 static	void ka750_clrf(void);
 static	void ka750_conf(void);
 static	void ka750_memerr(void);
-static	int ka750_mchk(void *);
-static	void ka750_attach_cpu(device_t);
+static	int ka750_mchk(caddr_t);
 
-static const char * const ka750_devs[] = { "cpu", "cmi", NULL };
 
-const struct cpu_dep ka750_calls = {
-	.cpu_mchk	= ka750_mchk,
-	.cpu_memerr	= ka750_memerr,
-	.cpu_conf	= ka750_conf,
-	.cpu_gettime	= generic_gettime,
-	.cpu_settime	= generic_settime,
-	.cpu_vups	= 1,	/* ~VUPS */
-	.cpu_scbsz	= 4,	/* SCB pages */
-	.cpu_clrf	= ka750_clrf,
-	.cpu_devs	= ka750_devs,
-	.cpu_attach_cpu	= ka750_attach_cpu,
+struct	cpu_dep ka750_calls = {
+	0,
+	ka750_mchk,
+	ka750_memerr,
+	ka750_conf,
+	generic_gettime,
+	generic_settime,
+	1,	/* ~VUPS */
+	4,	/* SCB pages */
+	0,	/* halt call */
+	0,	/* Reboot call */
+	ka750_clrf,
 };
 
-static	void *mcraddr[4];	/* XXX */
+static	caddr_t mcraddr[4];	/* XXX */
 
 void
-ka750_conf(void)
+ka750_conf()
 {
+	printf("cpu0: KA750, hardware rev %d, ucode rev %d, ",
+	    V750HARDW(vax_cpudata), V750UCODE(vax_cpudata));
+	if (mfpr(PR_ACCS) & 255) {
+		printf("FPA present, enabling.\n");
+		mtpr(0x8000, PR_ACCS);
+	} else
+		printf("no FPA\n");
+
 	if (mfpr(PR_TODR) == 0) { /* Check for failing battery */
 		mtpr(1, PR_TODR);
 		printf("WARNING: TODR battery broken\n");
@@ -121,29 +128,16 @@ ka750_conf(void)
 	ctuattach();
 }
 
-void
-ka750_attach_cpu(device_t self)
-{
-	aprint_normal("KA750, 4KB L1 cache, hardware/ucode rev %d/%d, ",
-	    V750HARDW(vax_cpudata), V750UCODE(vax_cpudata));
-	if (mfpr(PR_ACCS) & 255) {
-		aprint_normal("FPA present\n");
-		mtpr(0x8000, PR_ACCS);
-	} else {
-		aprint_normal("no FPA\n");
-	}
-}
+static int ka750_memmatch(struct device  *, struct cfdata *, void *);
+static void ka750_memenable(struct device *, struct device *, void *);
 
-static int ka750_memmatch(device_t, cfdata_t, void *);
-static void ka750_memenable(device_t, device_t, void *);
-
-CFATTACH_DECL_NEW(mem_cmi, 0,
+CFATTACH_DECL(mem_cmi, sizeof(struct device),
     ka750_memmatch, ka750_memenable, NULL, NULL);
 
 int
-ka750_memmatch(device_t parent, cfdata_t cf, void *aux)
+ka750_memmatch(struct device *parent, struct cfdata *cf, void *aux)
 {
-	struct sbi_attach_args * const sa = aux;
+	struct	sbi_attach_args *sa = (struct sbi_attach_args *)aux;
 
 	if (cf->cf_loc[CMICF_TR] != sa->sa_nexnum &&
 	    cf->cf_loc[CMICF_TR] > CMICF_TR_DEFAULT)
@@ -175,13 +169,13 @@ struct	mcr750 {
 
 /* enable crd interrupts */
 void
-ka750_memenable(device_t parent, device_t self, void *aux)
+ka750_memenable(struct device *parent, struct device *self, void *aux)
 {
-	struct sbi_attach_args * const sa = aux;
-	struct mcr750 * const mcr = (struct mcr750 *)sa->sa_ioh;
+	struct	sbi_attach_args *sa = (struct sbi_attach_args *)aux;
+	struct mcr750 *mcr = (struct mcr750 *)sa->sa_ioh;
 	int k, l, m, cardinfo;
 	
-	mcraddr[device_unit(self)] = (void *)sa->sa_ioh;
+	mcraddr[device_unit(self)] = (caddr_t)sa->sa_ioh;
 
 	/* We will use this info for error reporting - later! */
 	cardinfo = mcr->mc_inf;
@@ -226,10 +220,10 @@ ka750_memenable(device_t parent, device_t self, void *aux)
 
 /* log crd errors */
 void
-ka750_memerr(void)
+ka750_memerr()
 {
-	struct mcr750 * const mcr = (struct mcr750 *)mcraddr[0];
-	int err;
+	register struct mcr750 *mcr = (struct mcr750 *)mcraddr[0];
+	register int err;
 
 	if (M750_ERR(mcr)) {
 		err = mcr->mc_err;	/* careful with i/o space refs */
@@ -240,9 +234,8 @@ ka750_memerr(void)
 	}
 }
 
-const char mc750[][3] = {
-	"0","1","2","3","4","5","6","7","8","9","10","11","12","13","14","15"
-};
+const char *mc750[]={"0","1","2","3","4","5","6","7","8","9","10","11","12","13",
+	"14","15"};
 
 struct mc750frame {
 	int	mc5_bcnt;		/* byte count == 0x28 */
@@ -264,7 +257,7 @@ struct mc750frame {
 #define MC750_TBPAR	4		/* tbuf par bit in mcesr */
 
 int
-ka750_mchk(void *cmcf)
+ka750_mchk(caddr_t cmcf)
 {
 	register struct mc750frame *mcf = (struct mc750frame *)cmcf;
 	register int type = mcf->mc5_summary;
@@ -289,7 +282,7 @@ ka750_mchk(void *cmcf)
 }
 
 void
-ka750_clrf(void)
+ka750_clrf()
 {
 	int s = splhigh();
 

@@ -1,4 +1,4 @@
-/*	$NetBSD: cuda.c,v 1.13 2009/02/04 16:11:12 pgoyette Exp $ */
+/*	$NetBSD: cuda.c,v 1.8 2008/05/16 02:45:16 macallan Exp $ */
 
 /*-
  * Copyright (c) 2006 Michael Lorenz
@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: cuda.c,v 1.13 2009/02/04 16:11:12 pgoyette Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cuda.c,v 1.8 2008/05/16 02:45:16 macallan Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -184,7 +184,7 @@ cuda_attach(device_t parent, device_t dev, void *aux)
 	if (node)
 		OF_getprop(node, "interrupts", &irq, 4);
 
-	printf(" irq %d", irq);
+	printf(" irq %d: ", irq);
 
 	sc->sc_node = ca->ca_node;
 	sc->sc_memt = ca->ca_tag;
@@ -200,7 +200,7 @@ cuda_attach(device_t parent, device_t dev, void *aux)
 	if (bus_space_map(sc->sc_memt, ca->ca_reg[0] + ca->ca_baseaddr,
 	    ca->ca_reg[1], 0, &sc->sc_memh) != 0) {
 
-		printf(": unable to map registers\n");
+		printf("%s: unable to map registers\n", dev->dv_xname);
 		return;
 	}
 	sc->sc_ih = intr_establish(irq, IST_EDGE, IPL_TTY, cuda_intr, sc);
@@ -767,7 +767,7 @@ cuda_todr_get(todr_chip_handle_t tch, volatile struct timeval *tvp)
 		return EIO;
 
 	tvp->tv_sec = sc->sc_tod - DIFF19041970;
-	DPRINTF("tod: %" PRIo64 "\n", tvp->tv_sec);
+	DPRINTF("tod: %ld\n", tvp->tv_sec);
 	tvp->tv_usec = 0;
 	return 0;
 }
@@ -925,19 +925,7 @@ cuda_i2c_exec(void *cookie, i2c_op_t op, i2c_addr_t addr, const void *_send,
 	DPRINTF("cuda_i2c_exec(%02x)\n", addr);
 	command[2] = addr;
 
-	/* Copy command and output data bytes, if any, to buffer */
-	if (send_len > 0)
-		memcpy(&command[3], send, min((int)send_len, 12));
-	else if (I2C_OP_READ_P(op) && (recv_len == 0)) {
-		/*
-		 * If no data bytes in either direction, it's a "quick"
-		 * i2c operation.  We don't know how to do a quick_read
-		 * since that requires us to set the low bit of the
-		 * address byte after it has been left-shifted.
-		 */
-		sc->sc_error = 0;
-		return -1;
-	}
+	memcpy(&command[3], send, min((int)send_len, 12));
 
 	sc->sc_iic_done = 0;
 	cuda_send(sc, sc->sc_polling, send_len + 3, command);

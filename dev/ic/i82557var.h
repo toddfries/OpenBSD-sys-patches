@@ -1,4 +1,4 @@
-/*	$NetBSD: i82557var.h,v 1.44 2009/03/07 15:03:25 tsutsui Exp $	*/
+/*	$NetBSD: i82557var.h,v 1.35 2005/12/11 12:21:26 christos Exp $	*/
 
 /*-
  * Copyright (c) 1997, 1998, 1999, 2001 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -132,11 +139,6 @@ struct fxp_control_data {
 	 * The NIC statistics.
 	 */
 	struct fxp_stats fcd_stats;
-
-	/*
-	 * TX pad buffer for ip4csum-tx bug workaround.
-	 */
-	uint8_t fcd_txpad[FXP_IP4CSUMTX_PADLEN];
 };
 
 #define	txd_tbd	txd_u.txdu_tbd
@@ -149,7 +151,6 @@ struct fxp_control_data {
 #define	FXP_CDMCSOFF	FXP_CDOFF(fcd_mcscb)
 #define	FXP_CDUCODEOFF	FXP_CDOFF(fcd_ucode)
 #define	FXP_CDSTATSOFF	FXP_CDOFF(fcd_stats)
-#define	FXP_CDTXPADOFF	FXP_CDOFF(fcd_txpad)
 
 /*
  * Software state for transmit descriptors.
@@ -163,12 +164,14 @@ struct fxp_txsoft {
  * Software state per device.
  */
 struct fxp_softc {
-	device_t sc_dev;
+	struct device sc_dev;		/* generic device structures */
 	bus_space_tag_t sc_st;		/* bus space tag */
 	bus_space_handle_t sc_sh;	/* bus space handle */
 	bus_dma_tag_t sc_dmat;		/* bus dma tag */
 	struct ethercom sc_ethercom;	/* ethernet common part */
+	void *sc_sdhook;		/* shutdown hook */
 	void *sc_ih;			/* interrupt handler cookie */
+	void *sc_powerhook;		/* power hook */
 
 	struct mii_data sc_mii;		/* MII/media information */
 	struct callout sc_callout;	/* MII callout */
@@ -222,9 +225,8 @@ struct fxp_softc {
 #define	FXPF_EXT_TXCB		0x0080	/* enable extended TxCB */
 #define	FXPF_UCODE_LOADED	0x0100	/* microcode is loaded */
 #define	FXPF_EXT_RFA		0x0200	/* enable extended RFD */
+#define	FXPF_IPCB		0x0400	/* use IPCB */
 #define	FXPF_RECV_WORKAROUND	0x0800	/* receiver lock-up workaround */
-#define	FXPF_FC			0x1000	/* has flow control */
-#define	FXPF_82559_RXCSUM	0x2000	/* enable 82559 compat RX checksum */
 
 	int	sc_int_delay;		/* interrupt delay */
 	int	sc_bundle_max;		/* max packet bundle */
@@ -257,7 +259,6 @@ struct fxp_softc {
 
 #define	FXP_CDTXADDR(sc, x)	((sc)->sc_cddma + FXP_CDTXOFF((x)))
 #define	FXP_CDTBDADDR(sc, x)	((sc)->sc_cddma + FXP_CDTBDOFF((x)))
-#define	FXP_CDTXPADADDR(sc)	((sc)->sc_cddma + FXP_CDTXPADOFF)
 
 #define	FXP_CDTX(sc, x)		(&(sc)->sc_control_data->fcd_txdescs[(x)])
 
@@ -317,8 +318,7 @@ do {									\
 	__rfa->size = htole16(FXP_RXBUFSIZE((sc), (m)));		\
 	/* BIG_ENDIAN: no need to swap to store 0 */			\
 	__rfa->rfa_status = 0;						\
-	__rfa->rfa_control =						\
-	    htole16(FXP_RFA_CONTROL_EL | FXP_RFA_CONTROL_S);		\
+	__rfa->rfa_control = htole16(FXP_RFA_CONTROL_EL);		\
 	/* BIG_ENDIAN: no need to swap to store 0 */			\
 	__rfa->actual_size = 0;						\
 									\
@@ -341,8 +341,7 @@ do {									\
 		    BUS_DMASYNC_POSTREAD|BUS_DMASYNC_POSTWRITE);	\
 		memcpy((void *)&__p_rfa->link_addr, &__v,		\
 		    sizeof(__v));					\
-		__p_rfa->rfa_control &= htole16(~(FXP_RFA_CONTROL_EL|	\
-		    FXP_RFA_CONTROL_S));				\
+		__p_rfa->rfa_control &= htole16(~FXP_RFA_CONTROL_EL);	\
 		FXP_RFASYNC((sc), __p_m,				\
 		    BUS_DMASYNC_PREREAD|BUS_DMASYNC_PREWRITE);		\
 	}								\

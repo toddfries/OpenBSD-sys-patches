@@ -1,4 +1,4 @@
-/*	$NetBSD: nfs.h,v 1.70 2008/10/22 11:36:06 matt Exp $	*/
+/*	$NetBSD: nfs.h,v 1.62 2006/12/28 00:39:03 yamt Exp $	*/
 /*
  * Copyright (c) 1989, 1993, 1995
  *	The Regents of the University of California.  All rights reserved.
@@ -35,13 +35,6 @@
 
 #ifndef _NFS_NFS_H_
 #define _NFS_NFS_H_
-
-#ifdef _KERNEL
-#include <sys/condvar.h>
-#include <sys/fstypes.h>
-#include <sys/mbuf.h>
-#include <sys/mutex.h>
-#endif
 
 /*
  * Tunable constants for nfs
@@ -140,7 +133,7 @@ extern int nfs_niothreads;              /* Number of async_daemons desired */
  * Oddballs
  */
 #define NFS_CMPFH(n, f, s) \
-	((n)->n_fhsize == (s) && !memcmp((void *)(n)->n_fhp,  (void *)(f),  (s)))
+	((n)->n_fhsize == (s) && !memcmp((caddr_t)(n)->n_fhp,  (caddr_t)(f),  (s)))
 #ifdef NFS_V2_ONLY
 #define NFS_ISV3(v)	(0)
 #else
@@ -163,6 +156,16 @@ extern int nfs_niothreads;              /* Number of async_daemons desired */
 #ifndef IO_METASYNC
 #define IO_METASYNC	0
 #endif
+
+/*
+ * Set the attribute timeout based on how recently the file has been modified.
+ */
+#define	NFS_ATTRTIMEO(nmp, np) \
+    ((nmp->nm_flag & NFSMNT_NOAC) ? 0 : \
+	((((np)->n_flag & NMODIFIED) || \
+	 (time_second - (np)->n_mtime.tv_sec) / 10 < NFS_MINATTRTIMO) ? NFS_MINATTRTIMO : \
+	 ((time_second - (np)->n_mtime.tv_sec) / 10 > NFS_MAXATTRTIMO ? NFS_MAXATTRTIMO : \
+	  (time_second - (np)->n_mtime.tv_sec) / 10)))
 
 /*
  * Export arguments for local filesystem mount calls.
@@ -189,7 +192,7 @@ struct export_args {
  */
 struct nfsd_args {
 	int	sock;		/* Socket to serve */
-	void *	name;		/* Client addr for connection based sockets */
+	caddr_t	name;		/* Client addr for connection based sockets */
 	int	namelen;	/* Length of name */
 };
 
@@ -323,7 +326,7 @@ struct nfsreq {
 	struct mbuf	*r_mreq;
 	struct mbuf	*r_mrep;
 	struct mbuf	*r_md;
-	void *		r_dpos;
+	caddr_t		r_dpos;
 	struct nfsmount *r_nmp;
 	u_int32_t	r_xid;
 	int		r_flags;	/* flags on request, see below */
@@ -348,6 +351,7 @@ extern TAILQ_HEAD(nfsreqhead, nfsreq) nfs_reqq;
 #define	R_SOCKERR	0x10		/* Fatal error on socket */
 #define	R_TPRINTFMSG	0x20		/* Did a tprintf msg. */
 #define	R_MUSTRESEND	0x40		/* Must resend request */
+#define	R_GETONEREP	0x80		/* Probe for one reply only */
 #define	R_REXMITTED	0x100		/* retransmitted after reconnect */
 
 /*
@@ -369,6 +373,7 @@ extern TAILQ_HEAD(nfsreqhead, nfsreq) nfs_reqq;
 #endif
 #define	NMUIDHASH(nmp, uid) \
 	(&(nmp)->nm_uidhashtbl[(uid) % NFS_MUIDHASHSIZ])
+#define	NFSNOHASH(fhsum) ((fhsum) & nfsnodehash)
 
 #ifndef NFS_DIRHASHSIZ
 #define NFS_DIRHASHSIZ 64
@@ -380,14 +385,14 @@ extern TAILQ_HEAD(nfsreqhead, nfsreq) nfs_reqq;
  * Macros for storing/retrieving cookies into directory buffers.
  */
 #define NFS_STASHCOOKIE(dp,off) \
-	*((off_t *)((char *)(dp) + (dp)->d_reclen - sizeof (off_t))) = off
+	*((off_t *)((caddr_t)(dp) + (dp)->d_reclen - sizeof (off_t))) = off
 #define NFS_GETCOOKIE(dp) \
-	(*((off_t *)((char *)(dp) + (dp)->d_reclen - sizeof (off_t))))
+	(*((off_t *)((caddr_t)(dp) + (dp)->d_reclen - sizeof (off_t))))
 #define NFS_STASHCOOKIE32(dp, val) \
-	*((u_int32_t *)((char *)(dp) + (dp)->d_reclen - sizeof (off_t) - \
+	*((u_int32_t *)((caddr_t)(dp) + (dp)->d_reclen - sizeof (off_t) - \
 	    sizeof (int))) = val
 #define NFS_GETCOOKIE32(dp) \
-	(*((u_int32_t *)((char *)(dp) + (dp)->d_reclen - sizeof (off_t) - \
+	(*((u_int32_t *)((caddr_t)(dp) + (dp)->d_reclen - sizeof (off_t) - \
 	    sizeof (int))))
 
 /*
@@ -428,61 +433,46 @@ struct nfsuid {
 #define NU_NETFAM(u)	(((u)->nu_flag & NU_INETADDR) ? AF_INET : AF_ISO)
 #endif
 
-/*
- * b: protected by SLP_BUSY
- * g: protected by nfsd_lock
- * s: protected by ns_lock
- * a: protected by ns_alock
- */
-
 struct nfssvc_sock {
-	kmutex_t ns_lock;
-	kmutex_t ns_alock;
-	kcondvar_t ns_cv;			/* s: */
-	TAILQ_ENTRY(nfssvc_sock) ns_chain;	/* g: List of all nfssvc_sock */
-	TAILQ_ENTRY(nfssvc_sock) ns_pending;	/* g: List of pending sockets */
+	struct simplelock ns_lock;
+	TAILQ_ENTRY(nfssvc_sock) ns_chain;	/* List of all nfssvc_sock's */
+	TAILQ_ENTRY(nfssvc_sock) ns_pending;	/* List of pending sockets */
 	TAILQ_HEAD(, nfsuid) ns_uidlruhead;
 	struct file	*ns_fp;
 	struct socket	*ns_so;
 	struct mbuf	*ns_nam;
-	struct mbuf	*ns_raw;		/* b: */
-	struct mbuf	*ns_rawend;		/* b: */
-	struct mbuf	*ns_rec;		/* b: */
-	struct mbuf	*ns_recend;		/* b: */
-	struct mbuf	*ns_frag;		/* b: */
-	int		ns_flags;		/* s: */
-	int		ns_aflags;		/* a: */
-	int		ns_gflags;		/* g: */
-	int		ns_sflags;		/* b: */
-	int		ns_cc;			/* b: */
-	int		ns_reclen;		/* b: */
+	struct mbuf	*ns_raw;
+	struct mbuf	*ns_rawend;
+	struct mbuf	*ns_rec;
+	struct mbuf	*ns_recend;
+	struct mbuf	*ns_frag;
+	int		ns_flag;
+	int		ns_solock;
+	int		ns_cc;
+	int		ns_reclen;
 	int		ns_numuids;
-	u_int32_t	ns_sref;		/* g: */
-	SIMPLEQ_HEAD(, nfsrv_descript) ns_sendq; /* s: send reply list */
-	LIST_HEAD(, nfsrv_descript) ns_tq;	/* g: Write gather lists */
+	u_int32_t	ns_sref;
+	SIMPLEQ_HEAD(, nfsrv_descript) ns_sendq; /* send reply list */
+	LIST_HEAD(, nfsrv_descript) ns_tq;	/* Write gather lists */
 	LIST_HEAD(, nfsuid) ns_uidhashtbl[NFS_UIDHASHSIZ];
-	LIST_HEAD(nfsrvw_delayhash, nfsrv_descript) ns_wdelayhashtbl[NFS_WDELAYHASHSIZ]; /* g: */
+	LIST_HEAD(nfsrvw_delayhash, nfsrv_descript) ns_wdelayhashtbl[NFS_WDELAYHASHSIZ];
 };
 
-/* Bits for "ns_flags" */
+/* Bits for "ns_flag" */
 #define	SLP_VALID	0x01
+#define	SLP_DOREC	0x02	/* on nfssvc_sockpending queue */
+#define	SLP_NEEDQ	0x04
+#define	SLP_DISCONN	0x08
 #define	SLP_BUSY	0x10
+#define	SLP_WANT	0x20
+#define	SLP_LASTFRAG	0x40
 #define	SLP_SENDING	0x80
-
-/* Bits for "ns_aflags" */
-#define	SLP_A_NEEDQ	0x01
-#define	SLP_A_DISCONN	0x04
-
-/* Bits for "ns_gflags" */
-#define	SLP_G_DOREC	0x02	/* on nfssvc_sockpending queue */
-
-/* Bits for "ns_sflags" */
-#define	SLP_S_LASTFRAG	0x40
 
 extern TAILQ_HEAD(nfssvc_sockhead, nfssvc_sock) nfssvc_sockhead;
 extern struct nfssvc_sockhead nfssvc_sockpending;
 extern int nfssvc_sockhead_flag;
 #define	SLP_INIT	0x01
+#define	SLP_WANTINIT	0x02
 
 /*
  * One of these structures is allocated for each nfsd.
@@ -490,7 +480,6 @@ extern int nfssvc_sockhead_flag;
 struct nfsd {
 	TAILQ_ENTRY(nfsd) nfsd_chain;	/* List of all nfsd's */
 	SLIST_ENTRY(nfsd) nfsd_idle;	/* List of idle nfsd's */
-	kcondvar_t	nfsd_cv;
 	int		nfsd_flag;	/* NFSD_ flags */
 	struct nfssvc_sock *nfsd_slp;	/* Current socket */
 	int		nfsd_authlen;	/* Authenticator len */
@@ -534,7 +523,7 @@ struct nfsrv_descript {
 	struct mbuf		*nd_mreq;	/* Reply mbuf list */
 	struct mbuf		*nd_nam;	/* and socket addr */
 	struct mbuf		*nd_nam2;	/* return socket addr */
-	void *			nd_dpos;	/* Current dissect pos */
+	caddr_t			nd_dpos;	/* Current dissect pos */
 	u_int32_t		nd_procnum;	/* RPC # */
 	int			nd_stable;	/* storage type */
 	int			nd_flag;	/* nd_flag */
@@ -557,8 +546,7 @@ struct nfsrv_descript {
 #define ND_KERBFULL	0x40
 #define ND_KERBAUTH	(ND_KERBNICK | ND_KERBFULL)
 
-extern kmutex_t nfsd_lock;
-extern kcondvar_t nfsd_initcv;
+extern struct simplelock nfsd_slock;
 extern TAILQ_HEAD(nfsdhead, nfsd) nfsd_head;
 extern SLIST_HEAD(nfsdidlehead, nfsd) nfsd_idle_head;
 extern int nfsd_head_flag;
@@ -573,7 +561,7 @@ extern int nfs_numasync;
  */
 #define NFSW_CONTIG(o, n) \
 		((o)->nd_eoff >= (n)->nd_off && \
-		 !memcmp((void *)&(o)->nd_fh, (void *)&(n)->nd_fh, NFSX_V3FH))
+		 !memcmp((caddr_t)&(o)->nd_fh, (caddr_t)&(n)->nd_fh, NFSX_V3FH))
 
 /*
  * Defines for WebNFS

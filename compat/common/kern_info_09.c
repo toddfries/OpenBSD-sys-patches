@@ -1,4 +1,4 @@
-/*	$NetBSD: kern_info_09.c,v 1.20 2007/12/20 23:02:44 dsl Exp $	*/
+/*	$NetBSD: kern_info_09.c,v 1.17 2006/11/16 01:32:41 christos Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1991, 1993
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kern_info_09.c,v 1.20 2007/12/20 23:02:44 dsl Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kern_info_09.c,v 1.17 2006/11/16 01:32:41 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -45,16 +45,17 @@ __KERNEL_RCSID(0, "$NetBSD: kern_info_09.c,v 1.20 2007/12/20 23:02:44 dsl Exp $"
 #include <sys/sysctl.h>
 
 #include <sys/mount.h>
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 
 /* ARGSUSED */
 int
-compat_09_sys_getdomainname(struct lwp *l, const struct compat_09_sys_getdomainname_args *uap, register_t *retval)
+compat_09_sys_getdomainname(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct compat_09_sys_getdomainname_args /* {
 		syscallarg(char *) domainname;
 		syscallarg(int) len;
-	} */
+	} */ *uap = v;
 	int name[2];
 	size_t sz;
 
@@ -67,12 +68,12 @@ compat_09_sys_getdomainname(struct lwp *l, const struct compat_09_sys_getdomainn
 
 /* ARGSUSED */
 int
-compat_09_sys_setdomainname(struct lwp *l, const struct compat_09_sys_setdomainname_args *uap, register_t *retval)
+compat_09_sys_setdomainname(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct compat_09_sys_setdomainname_args /* {
 		syscallarg(char *) domainname;
 		syscallarg(int) len;
-	} */
+	} */ *uap = v;
 	int name[2];
 
 	name[0] = CTL_KERN;
@@ -91,11 +92,12 @@ struct outsname {
 
 /* ARGSUSED */
 int
-compat_09_sys_uname(struct lwp *l, const struct compat_09_sys_uname_args *uap, register_t *retval)
+compat_09_sys_uname(struct lwp *l, void *v,
+    register_t *retval)
 {
-	/* {
+	struct compat_09_sys_uname_args /* {
 		syscallarg(struct outsname *) name;
-	} */
+	} */ *uap = v;
 	struct outsname outsname;
 	const char *cp;
 	char *dp, *ep;
@@ -115,6 +117,6 @@ compat_09_sys_uname(struct lwp *l, const struct compat_09_sys_uname_args *uap, r
 		*dp++ = *cp;
 	*dp = '\0';
 	strncpy(outsname.machine, MACHINE, sizeof(outsname.machine));
-	return (copyout((void *)&outsname, (void *)SCARG(uap, name),
+	return (copyout((caddr_t)&outsname, (caddr_t)SCARG(uap, name),
 			sizeof(struct outsname)));
 }

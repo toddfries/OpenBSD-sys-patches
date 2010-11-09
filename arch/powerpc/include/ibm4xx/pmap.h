@@ -1,4 +1,4 @@
-/*	$NetBSD: pmap.h,v 1.14 2008/12/09 20:45:45 pooka Exp $	*/
+/*	$NetBSD: pmap.h,v 1.12 2005/12/24 20:07:28 perry Exp $	*/
 
 /*
  * Copyright 2001 Wasabi Systems, Inc.
@@ -144,8 +144,12 @@ struct pmap {
 	volatile u_int *pm_ptbl[STSZ];	/* Array of 64 pointers to page tables. */
 };
 
+typedef	struct pmap *pmap_t;
+
 #ifdef	_KERNEL
 #define	PMAP_GROWKERNEL
+extern struct pmap kernel_pmap_;
+#define	pmap_kernel()	(&kernel_pmap_)
 
 #define	PMAP_ATTR_REF		0x1
 #define	PMAP_ATTR_CHG		0x2
@@ -162,8 +166,8 @@ struct pmap {
 
 void pmap_unwire(struct pmap *pm, vaddr_t va);
 void pmap_bootstrap(u_int kernelstart, u_int kernelend);
-bool pmap_extract(struct pmap *, vaddr_t, paddr_t *);
-bool pmap_check_attr(struct vm_page *, u_int, int);
+boolean_t pmap_extract(struct pmap *, vaddr_t, paddr_t *);
+boolean_t pmap_check_attr(struct vm_page *, u_int, int);
 void pmap_real_memory(paddr_t *, psize_t *);
 int pmap_tlbmiss(vaddr_t va, int ctx);
 

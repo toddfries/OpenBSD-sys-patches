@@ -1,4 +1,4 @@
-/*	$NetBSD: ms.c,v 1.38 2009/01/11 23:36:39 christos Exp $	*/
+/*	$NetBSD: ms.c,v 1.35 2007/03/04 06:02:45 christos Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -52,7 +52,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ms.c,v 1.38 2009/01/11 23:36:39 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ms.c,v 1.35 2007/03/04 06:02:45 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -78,9 +78,10 @@ __KERNEL_RCSID(0, "$NetBSD: ms.c,v 1.38 2009/01/11 23:36:39 christos Exp $");
 #include <dev/wscons/wsconsio.h>
 #include <dev/wscons/wsmousevar.h>
 
-#include "ioconf.h"
 #include "locators.h"
 #include "wsmouse.h"
+
+extern struct cfdriver ms_cd;
 
 dev_type_open(msopen);
 dev_type_close(msclose);
@@ -100,115 +101,138 @@ const struct cdevsw ms_cdevsw = {
  ****************************************************************/
 
 int
-msopen(dev_t dev, int flags, int mode, struct lwp *l)
+msopen(dev, flags, mode, l)
+	dev_t dev;
+	int flags, mode;
+	struct lwp *l;
 {
 	struct ms_softc *ms;
+	int unit;
 
-	ms = device_lookup_private(&ms_cd, minor(dev));
+	unit = minor(dev);
+	if (unit >= ms_cd.cd_ndevs)
+		return (ENXIO);
+	ms = ms_cd.cd_devs[unit];
 	if (ms == NULL)
-		return ENXIO;
+		return (ENXIO);
 
 	/* This is an exclusive open device. */
 	if (ms->ms_events.ev_io)
-		return EBUSY;
+		return (EBUSY);
 
 	if (ms->ms_deviopen) {
 		int err;
-		err = (*ms->ms_deviopen)(ms->ms_dev, flags);
+		err = (*ms->ms_deviopen)((struct device *)ms, flags);
 		if (err)
-			return err;
+			return (err);
 	}
 	ms->ms_events.ev_io = l->l_proc;
 	ev_init(&ms->ms_events);	/* may cause sleep */
 
 	ms->ms_ready = 1;		/* start accepting events */
-	return 0;
+	return (0);
 }
 
 int
-msclose(dev_t dev, int flags, int mode, struct lwp *l)
+msclose(dev, flags, mode, l)
+	dev_t dev;
+	int flags, mode;
+	struct lwp *l;
 {
 	struct ms_softc *ms;
 
-	ms = device_lookup_private(&ms_cd, minor(dev));
+	ms = ms_cd.cd_devs[minor(dev)];
 	ms->ms_ready = 0;		/* stop accepting events */
 	ev_fini(&ms->ms_events);
 
 	ms->ms_events.ev_io = NULL;
 	if (ms->ms_deviclose) {
 		int err;
-		err = (*ms->ms_deviclose)(ms->ms_dev, flags);
+		err = (*ms->ms_deviclose)((struct device *)ms, flags);
 		if (err)
-			return err;
+			return (err);
 	}
-	return 0;
+	return (0);
 }
 
 int
-msread(dev_t dev, struct uio *uio, int flags)
+msread(dev, uio, flags)
+	dev_t dev;
+	struct uio *uio;
+	int flags;
 {
 	struct ms_softc *ms;
 
-	ms = device_lookup_private(&ms_cd, minor(dev));
-	return ev_read(&ms->ms_events, uio, flags);
+	ms = ms_cd.cd_devs[minor(dev)];
+	return (ev_read(&ms->ms_events, uio, flags));
 }
 
 int
-msioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
+msioctl(dev, cmd, data, flag, l)
+	dev_t dev;
+	u_long cmd;
+	void *data;
+	int flag;
+	struct lwp *l;
 {
 	struct ms_softc *ms;
 
-	ms = device_lookup_private(&ms_cd, minor(dev));
+	ms = ms_cd.cd_devs[minor(dev)];
 
 	switch (cmd) {
 
 	case FIONBIO:		/* we will remove this someday (soon???) */
-		return 0;
+		return (0);
 
 	case FIOASYNC:
 		ms->ms_events.ev_async = *(int *)data != 0;
-		return 0;
+		return (0);
 
 	case FIOSETOWN:
 		if (-*(int *)data != ms->ms_events.ev_io->p_pgid
 		    && *(int *)data != ms->ms_events.ev_io->p_pid)
-			return EPERM;
-		return 0;
+			return (EPERM);
+		return (0);
 
 	case TIOCSPGRP:
 		if (*(int *)data != ms->ms_events.ev_io->p_pgid)
-			return EPERM;
-		return 0;
+			return (EPERM);
+		return (0);
 
 	case VUIDGFORMAT:
 		/* we only do firm_events */
 		*(int *)data = VUID_FIRM_EVENT;
-		return 0;
+		return (0);
 
 	case VUIDSFORMAT:
 		if (*(int *)data != VUID_FIRM_EVENT)
-			return EINVAL;
-		return 0;
+			return (EINVAL);
+		return (0);
 	}
-	return ENOTTY;
+	return (ENOTTY);
 }
 
 int
-mspoll(dev_t dev, int events, struct lwp *l)
+mspoll(dev, events, l)
+	dev_t dev;
+	int events;
+	struct lwp *l;
 {
 	struct ms_softc *ms;
 
-	ms = device_lookup_private(&ms_cd, minor(dev));
-	return ev_poll(&ms->ms_events, events, l);
+	ms = ms_cd.cd_devs[minor(dev)];
+	return (ev_poll(&ms->ms_events, events, l));
 }
 
 int
-mskqfilter(dev_t dev, struct knote *kn)
+mskqfilter(dev, kn)
+	dev_t dev;
+	struct knote *kn;
 {
 	struct ms_softc *ms;
 
-	ms = device_lookup_private(&ms_cd, minor(dev));
-	return ev_kqfilter(&ms->ms_events, kn);
+	ms = ms_cd.cd_devs[minor(dev)];
+	return (ev_kqfilter(&ms->ms_events, kn));
 }
 
 /****************************************************************
@@ -219,7 +243,9 @@ mskqfilter(dev_t dev, struct knote *kn)
  * Called by our ms_softint() routine on input.
  */
 void
-ms_input(struct ms_softc *ms, int c)
+ms_input(ms, c)
+	struct ms_softc *ms;
+	int c;
 {
 	struct firm_event *fe;
 	int mb, ub, d, get, put, any;
@@ -347,7 +373,7 @@ ms_input(struct ms_softc *ms, int c)
 		d = to_one[d - 1];		/* from 1..7 to {1,2,4} */
 		fe->id = to_id[d - 1];		/* from {1,2,4} to ID */
 		fe->value = mb & d ? VKEY_DOWN : VKEY_UP;
-		firm_gettime(fe);
+		getmicrotime(&fe->time);
 		ADVANCE;
 		ub ^= d;
 	}
@@ -355,7 +381,7 @@ ms_input(struct ms_softc *ms, int c)
 		NEXT;
 		fe->id = LOC_X_DELTA;
 		fe->value = ms->ms_dx;
-		firm_gettime(fe);
+		getmicrotime(&fe->time);
 		ADVANCE;
 		ms->ms_dx = 0;
 	}
@@ -363,7 +389,7 @@ ms_input(struct ms_softc *ms, int c)
 		NEXT;
 		fe->id = LOC_Y_DELTA;
 		fe->value = ms->ms_dy;
-		firm_gettime(fe);
+		getmicrotime(&fe->time);
 		ADVANCE;
 		ms->ms_dy = 0;
 	}

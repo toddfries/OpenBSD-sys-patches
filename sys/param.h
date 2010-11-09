@@ -1,4 +1,4 @@
-/*	$NetBSD: param.h,v 1.340 2009/01/12 02:51:30 pooka Exp $	*/
+/*	$NetBSD: param.h,v 1.285 2007/11/12 23:13:30 ad Exp $	*/
 
 /*-
  * Copyright (c) 1982, 1986, 1989, 1993
@@ -63,7 +63,7 @@
  *	2.99.9		(299000900)
  */
 
-#define	__NetBSD_Version__	599000700	/* NetBSD 5.99.7 */
+#define	__NetBSD_Version__	499003600	/* NetBSD 4.99.36 */
 
 #define __NetBSD_Prereq__(M,m,p) (((((M) * 100000000) + \
     (m) * 1000000) + (p) * 100) <= __NetBSD_Version__)
@@ -82,30 +82,18 @@
 
 #define	NetBSD	199905		/* NetBSD version (year & month). */
 
-/*
- * There macros determine if we are running in protected mode or not.
- *   _HARDKERNEL: code uses kernel namespace and runs in hw priviledged mode
- *   _SOFTKERNEL: code uses kernel namespace but runs without hw priviledges
- */
-#if defined(_KERNEL) && !defined(_RUMPKERNEL)
-#define _HARDKERNEL
-#endif
-#if defined(_KERNEL) && defined(_RUMPKERNEL)
-#define _SOFTKERNEL
-#endif
-
 #include <sys/null.h>
 
-#ifndef __ASSEMBLER__
+#ifndef _LOCORE
 #include <sys/inttypes.h>
 #include <sys/types.h>
+#endif
 
 /*
  * Machine-independent constants (some used in following include files).
  * Redefined constants are from POSIX 1003.1 limits file.
  *
  * MAXCOMLEN should be >= sizeof(ac_comm) (see <acct.h>)
- * MAXHOSTNAMELEN should be >= (_POSIX_HOST_NAME_MAX + 1) (see <limits.h>)
  * MAXLOGNAME should be >= UT_NAMESIZE (see <utmp.h>)
  */
 #include <sys/syslimits.h>
@@ -148,13 +136,6 @@
 #define	NVNODE	(NPROC + NTEXT + 100)
 #define	NVNODE_IMPLICIT
 #endif
-#ifndef VNODE_VA_MAXPCT
-#define	VNODE_VA_MAXPCT	20
-#endif
-#ifndef BUFCACHE_VA_MAXPCT
-#define	BUFCACHE_VA_MAXPCT	20
-#endif
-#define	VNODE_COST	2048			/* assumed space in bytes */
 #endif /* _KERNEL */
 
 /* Signals. */
@@ -176,9 +157,6 @@
 #define	dbtob(x)	((x) << DEV_BSHIFT)
 #define	btodb(x)	((x) >> DEV_BSHIFT)
 
-#ifndef COHERENCY_UNIT
-#define	COHERENCY_UNIT		64
-#endif
 #ifndef CACHE_LINE_SIZE
 #define	CACHE_LINE_SIZE		64
 #endif
@@ -266,10 +244,6 @@
 #define	NPRI_USER		64
 #define	MAXPRI_USER		(PRI_USER + NPRI_USER - 1)
 
-/* Priority range used by POSIX real-time features */
-#define	SCHED_PRI_MIN		0
-#define	SCHED_PRI_MAX		63
-
 /*
  * Kernel thread priorities.
  */
@@ -322,8 +296,6 @@
  * maximum number of symbolic links that may be expanded in a path name.
  * It should be set high enough to allow all legitimate uses, but halt
  * infinite loops reasonably quickly.
- *
- * MAXSYMLINKS should be >= _POSIX_SYMLOOP_MAX (see <limits.h>)
  */
 #define	MAXPATHLEN	PATH_MAX
 #define	MAXSYMLINKS	32
@@ -425,10 +397,6 @@
 	    ((t +0u) / hz) * 1000u : \
 	    ((t +0u) * 1000u) / hz)
 #endif
-
-extern const int schedppq;
-extern size_t coherency_unit;
-
 #endif /* _KERNEL */
 
 /*
@@ -439,6 +407,5 @@ extern size_t coherency_unit;
 #ifndef MIN_LWP_ALIGNMENT
 #define	MIN_LWP_ALIGNMENT	32
 #endif
-#endif /* !__ASSEMBLER__ */
 
 #endif /* !_SYS_PARAM_H_ */

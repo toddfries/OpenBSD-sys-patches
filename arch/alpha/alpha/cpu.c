@@ -1,4 +1,4 @@
-/* $NetBSD: cpu.c,v 1.83 2008/12/16 22:35:22 christos Exp $ */
+/* $NetBSD: cpu.c,v 1.88 2009/11/26 00:19:11 matt Exp $ */
 
 /*-
  * Copyright (c) 1998, 1999, 2000, 2001 The NetBSD Foundation, Inc.
@@ -59,7 +59,7 @@
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
 
-__KERNEL_RCSID(0, "$NetBSD: cpu.c,v 1.83 2008/12/16 22:35:22 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cpu.c,v 1.88 2009/11/26 00:19:11 matt Exp $");
 
 #include "opt_ddb.h"
 #include "opt_multiprocessor.h"
@@ -69,7 +69,6 @@ __KERNEL_RCSID(0, "$NetBSD: cpu.c,v 1.83 2008/12/16 22:35:22 christos Exp $");
 #include <sys/device.h>
 #include <sys/malloc.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/atomic.h>
 #include <sys/cpu.h>
 
@@ -98,7 +97,7 @@ volatile u_long cpus_booted;
 volatile u_long cpus_running;
 volatile u_long cpus_paused;
 
-void	cpu_boot_secondary __P((struct cpu_info *));
+void	cpu_boot_secondary(struct cpu_info *);
 #endif /* MULTIPROCESSOR */
 
 /*
@@ -156,10 +155,10 @@ struct cputable_struct {
  *
  * As we find processors during the autoconfiguration sequence, all
  * processors have idle stacks and PCBs created for them, including
- * the primary (although the primary idles on proc0's PCB until its
+ * the primary (although the primary idles on lwp0's PCB until its
  * idle PCB is created).
  *
- * Right before calling uvm_scheduler(), main() calls, on proc0's
+ * Right before calling uvm_scheduler(), main() calls, on lwp0's
  * context, cpu_boot_secondary_processors().  This is our key to
  * actually spin up the additional processor's we've found.  We
  * run through our cpu_info[] array looking for secondary processors
@@ -177,10 +176,7 @@ struct cputable_struct {
  */
 
 static int
-cpumatch(parent, cfdata, aux)
-	struct device *parent;
-	struct cfdata *cfdata;
-	void *aux;
+cpumatch(struct device *parent, struct cfdata *cfdata, void *aux)
 {
 	struct mainbus_attach_args *ma = aux;
 
@@ -195,10 +191,7 @@ cpumatch(parent, cfdata, aux)
 }
 
 static void
-cpuattach(parent, self, aux)
-	struct device *parent;
-	struct device *self;
-	void *aux;
+cpuattach(struct device *parent, struct device *self, void *aux)
 {
 	struct cpu_softc *sc = (void *) self;
 	struct mainbus_attach_args *ma = aux;
@@ -337,6 +330,12 @@ recognized:
 		 * on its merry way.
 		 */
 		cpu_boot_secondary(ci);
+
+		/*
+		 * Link the processor into the list.
+		 */
+		ci->ci_next = cpu_info_list->ci_next;
+		cpu_info_list->ci_next = ci;
 #else /* ! MULTIPROCESSOR */
 		printf("%s: processor off-line; multiprocessor support "
 		    "not present in kernel\n", sc->sc_dev.dv_xname);
@@ -410,10 +409,8 @@ cpu_boot_secondary_processors(void)
 		}
 
 		/*
-		 * Link the processor into the list, and launch it.
+		 * Launch the processor.
 		 */
-		ci->ci_next = cpu_info_list->ci_next;
-		cpu_info_list->ci_next = ci;
 		atomic_or_ulong(&ci->ci_flags, CPUF_RUNNING);
 		atomic_or_ulong(&cpus_running, (1U << i));
 	}
@@ -427,7 +424,7 @@ cpu_boot_secondary(struct cpu_info *ci)
 	struct pcb *pcb;
 	u_long cpumask;
 
-	pcb = &ci->ci_data.cpu_idlelwp->l_addr->u_pcb;
+	pcb = lwp_getpcb(ci->ci_data.cpu_idlelwp);
 	primary_pcsp = LOCATE_PCS(hwrpb, hwrpb->rpb_primary_cpu_id);
 	pcsp = LOCATE_PCS(hwrpb, ci->ci_cpuid);
 	cpumask = (1UL << ci->ci_cpuid);

@@ -1,4 +1,4 @@
-/*	$NetBSD: irq_dispatch.S,v 1.10 2008/04/27 18:58:44 matt Exp $	*/
+/*	$NetBSD: irq_dispatch.S,v 1.7 2005/12/11 12:16:41 christos Exp $	*/
 
 /*
  * Copyright (c) 2002 Fujitsu Component Limited
@@ -92,9 +92,7 @@
 	.text
 	.align	0
 .Lcurrent_intr_depth:
-	.word	_C_LABEL(cpu_info_store) + CI_INTR_DEPTH
-
-LOCK_CAS_CHECK_LOCALS
+	.word	_C_LABEL(current_intr_depth)
 
 AST_ALIGNMENT_FAULT_LOCALS
 
@@ -102,7 +100,7 @@ ASENTRY_NP(irq_entry)
 	sub	lr, lr, #0x00000004	/* Adjust the lr */
 
 	PUSHFRAMEINSVC			/* Push an interrupt frame */
-	ENABLE_ALIGNMENT_FAULTS		/* finishes with curcpu() in r4 */
+	ENABLE_ALIGNMENT_FAULTS
 
 	/*
 	 * Increment the interrupt nesting depth and call the interrupt
@@ -110,13 +108,14 @@ ASENTRY_NP(irq_entry)
 	 * callee-saved regs here.  We use the following registers, which
 	 * we expect to presist:
 	 *
-	 *	r4	address of current cpu_info
-	 *	r6	old value of `ci_intr_depth'
+	 *	r5	address of `current_intr_depth' variable
+	 *	r6	old value of `current_intr_depth'
 	 */
+	ldr	r5, .Lcurrent_intr_depth
 	mov	r0, sp			/* arg for dispatcher */
-	ldr	r6, [r4, #CI_INTR_DEPTH]
+	ldr	r6, [r5]
 	add	r1, r6, #1
-	str	r1, [r4, #CI_INTR_DEPTH]
+	str	r1, [r5]
 
 	bl	ARM_IRQ_HANDLER
 
@@ -124,10 +123,19 @@ ASENTRY_NP(irq_entry)
 	 * Restore the old interrupt depth value (which should be the
 	 * same as decrementing it at this point).
 	 */
-	str	r6, [r4, #CI_INTR_DEPTH]
-
-	LOCK_CAS_CHECK
+	str	r6, [r5]
 
 	DO_AST_AND_RESTORE_ALIGNMENT_FAULTS
 	PULLFRAMEFROMSVCANDEXIT
 	movs	pc, lr			/* Exit */
+
+	.bss
+	.align	0
+
+	.global _C_LABEL(astpending)
+_C_LABEL(astpending):
+	.word	0
+
+	.global _C_LABEL(current_intr_depth)
+_C_LABEL(current_intr_depth):
+	.word	0

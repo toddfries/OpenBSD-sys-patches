@@ -1,4 +1,4 @@
-/*	$NetBSD: if_fta.c,v 1.25 2008/04/05 16:44:41 cegger Exp $	*/
+/*	$NetBSD: if_fta.c,v 1.24 2007/03/04 06:02:46 christos Exp $	*/
 
 /*-
  * Copyright (c) 1996 Matt Thomas <matt@3am-software.com>
@@ -36,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_fta.c,v 1.25 2008/04/05 16:44:41 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_fta.c,v 1.24 2007/03/04 06:02:46 christos Exp $");
 
 #include "opt_inet.h"
 
@@ -92,14 +92,13 @@ pdq_tc_attach(
      */
     sc->sc_dmatag = ta->ta_dmat;
     sc->sc_csrtag = ta->ta_memt;
-    memcpy(sc->sc_if.if_xname, device_xname(&sc->sc_dev), IFNAMSIZ);
+    bcopy(sc->sc_dev.dv_xname, sc->sc_if.if_xname, IFNAMSIZ);
     sc->sc_if.if_flags = 0;
     sc->sc_if.if_softc = sc;
 
     if (bus_space_map(sc->sc_csrtag, ta->ta_addr + PDQ_TC_CSR_OFFSET,
 		      PDQ_TC_CSR_SPACE, 0, &sc->sc_membase)) {
-	aprint_normal("\n");
-	aprint_error_dev(&sc->sc_dev, "can't map card memory!\n");
+	printf("\n%s: can't map card memory!\n", sc->sc_dev.dv_xname);
 	return;
     }
 
@@ -107,7 +106,7 @@ pdq_tc_attach(
 				sc->sc_if.if_xname, 0,
 				(void *) sc, PDQ_DEFTA);
     if (sc->sc_pdq == NULL) {
-	aprint_error_dev(&sc->sc_dev, "initialization failed\n");
+	printf("%s: initialization failed\n", sc->sc_dev.dv_xname);
 	return;
     }
 
@@ -118,7 +117,7 @@ pdq_tc_attach(
 
     sc->sc_ats = shutdownhook_establish((void (*)(void *)) pdq_hwreset, sc->sc_pdq);
     if (sc->sc_ats == NULL)
-	aprint_error_dev(self, "warning: couldn't establish shutdown hook\n");
+	printf("%s: warning: couldn't establish shutdown hook\n", self->dv_xname);
 }
 
 CFATTACH_DECL(fta, sizeof(pdq_softc_t),

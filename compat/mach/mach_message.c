@@ -1,4 +1,4 @@
-/*	$NetBSD: mach_message.c,v 1.57 2008/07/02 19:49:58 rmind Exp $ */
+/*	$NetBSD: mach_message.c,v 1.49 2006/09/23 03:34:19 jmcneill Exp $ */
 
 /*-
  * Copyright (c) 2002-2003 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,8 +37,9 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mach_message.c,v 1.57 2008/07/02 19:49:58 rmind Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mach_message.c,v 1.49 2006/09/23 03:34:19 jmcneill Exp $");
 
+#include "opt_ktrace.h"
 #include "opt_compat_mach.h" /* For COMPAT_MACH in <sys/ktrace.h> */
 #include "opt_compat_darwin.h"
 
@@ -44,7 +52,9 @@ __KERNEL_RCSID(0, "$NetBSD: mach_message.c,v 1.57 2008/07/02 19:49:58 rmind Exp 
 #include <sys/queue.h>
 #include <sys/malloc.h>
 #include <sys/pool.h>
+#ifdef KTRACE
 #include <sys/ktrace.h>
+#endif
 
 #include <uvm/uvm_extern.h>
 #include <uvm/uvm_map.h>
@@ -76,9 +86,12 @@ static inline
     int mach_trade_rights_complex(struct lwp *, struct mach_message *);
 
 int
-mach_sys_msg_overwrite_trap(struct lwp *l, const struct mach_sys_msg_overwrite_trap_args *uap, register_t *retval)
+mach_sys_msg_overwrite_trap(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct mach_sys_msg_overwrite_trap_args /* {
 		syscallarg(mach_msg_header_t *) msg;
 		syscallarg(mach_msg_option_t) option;
 		syscallarg(mach_msg_size_t) send_size;
@@ -88,7 +101,7 @@ mach_sys_msg_overwrite_trap(struct lwp *l, const struct mach_sys_msg_overwrite_t
 		syscallarg(mach_port_name_t) notify;
 		syscallarg(mach_msg_header_t *) rcv_msg;
 		syscallarg(mach_msg_size_t) scatter_list_size;
-	} */
+	} */ *uap = v;
 	size_t send_size, recv_size;
 	mach_msg_header_t *msg;
 	int opt;
@@ -141,7 +154,11 @@ mach_sys_msg_overwrite_trap(struct lwp *l, const struct mach_sys_msg_overwrite_t
  * Send a Mach message. This returns a Mach message error code.
  */
 static inline int
-mach_msg_send(struct lwp *l, mach_msg_header_t *msg, int *option, size_t send_size)
+mach_msg_send(l, msg, option, send_size)
+	struct lwp *l;
+	mach_msg_header_t *msg;
+	int *option;
+	size_t send_size;
 {
 	struct mach_emuldata *med;
 	struct mach_port *mp;
@@ -171,9 +188,11 @@ mach_msg_send(struct lwp *l, mach_msg_header_t *msg, int *option, size_t send_si
 		goto out1;
 	}
 
+#ifdef KTRACE
 	/* Dump the Mach message */
-	ktrmmsg((char *)sm, send_size);
-
+	if (KTRPOINT(p, KTR_MMSG))
+		ktrmmsg(l, (char *)sm, send_size);
+#endif
 	/*
 	 * Handle rights in the message
 	 */
@@ -398,7 +417,13 @@ out1:
  * Receive a Mach message. This returns a Mach message error code.
  */
 static inline int
-mach_msg_recv(struct lwp *l, mach_msg_header_t *urm, int option, size_t recv_size, unsigned int timeout, mach_port_t mn)
+mach_msg_recv(l, urm, option, recv_size, timeout, mn)
+	struct lwp *l;
+	mach_msg_header_t *urm;
+	int option;
+	size_t recv_size;
+    	unsigned int timeout;
+	mach_port_t mn;
 {
 	struct mach_port *mp;
 #if defined(DEBUG_MACH_MSG) || defined(KTRACE)
@@ -536,7 +561,7 @@ mach_msg_recv(struct lwp *l, mach_msg_header_t *urm, int option, size_t recv_siz
 	 * only one reader process, so mm will not disapear
 	 * except if there is a port refcount error in our code.
 	 */
-	rw_enter(&mp->mp_msglock, RW_READER);
+	lockmgr(&mp->mp_msglock, LK_SHARED, NULL);
 	mm = TAILQ_FIRST(&mp->mp_msglist);
 #ifdef DEBUG_MACH_MSG
 	printf("pid %d: dequeue message on port %p (id %d)\n",
@@ -570,9 +595,11 @@ mach_msg_recv(struct lwp *l, mach_msg_header_t *urm, int option, size_t recv_siz
 			ret = MACH_RCV_INVALID_DATA;
 			goto unlock;
 		}
-
+#ifdef KTRACE
 		/* Dump the Mach message */
-		ktrmmsg((char *)&sr, sizeof(sr));
+		if (KTRPOINT(p, KTR_MMSG))
+			ktrmmsg(l, (char *)&sr, sizeof(sr));
+#endif
 		goto unlock;
 	}
 
@@ -627,23 +654,28 @@ mach_msg_recv(struct lwp *l, mach_msg_header_t *urm, int option, size_t recv_siz
 		ret = MACH_RCV_INVALID_DATA;
 		goto unlock;
 	}
-
+#ifdef KTRACE
 	/* Dump the Mach message */
-	ktrmmsg((char *)mm->mm_msg, mm->mm_size);
+	if (KTRPOINT(p, KTR_MMSG))
+		ktrmmsg(l, (char *)mm->mm_msg, mm->mm_size);
+#endif
 
 	free(mm->mm_msg, M_EMULDATA);
 	mach_message_put_shlocked(mm); /* decrease mp_count */
 unlock:
-	rw_exit(&mp->mp_msglock);
+	lockmgr(&mp->mp_msglock, LK_RELEASE, NULL);
 
 	return ret;
 }
 
 
 int
-mach_sys_msg_trap(struct lwp *l, const struct mach_sys_msg_trap_args *uap, register_t *retval)
+mach_sys_msg_trap(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct mach_sys_msg_trap_args /* {
 		syscallarg(mach_msg_header_t *) msg;
 		syscallarg(mach_msg_option_t) option;
 		syscallarg(mach_msg_size_t) send_size;
@@ -651,7 +683,7 @@ mach_sys_msg_trap(struct lwp *l, const struct mach_sys_msg_trap_args *uap, regis
 		syscallarg(mach_port_name_t) rcv_name;
 		syscallarg(mach_msg_timeout_t) timeout;
 		syscallarg(mach_port_name_t) notify;
-	} */
+	} */ *uap = v;
 	struct mach_sys_msg_overwrite_trap_args cup;
 
 	SCARG(&cup, msg) = SCARG(uap, msg);
@@ -668,7 +700,9 @@ mach_sys_msg_trap(struct lwp *l, const struct mach_sys_msg_trap_args *uap, regis
 }
 
 static inline  struct lwp *
-mach_get_target_task(struct lwp *l, struct mach_port *mp)
+mach_get_target_task(l, mp)
+	struct lwp *l;
+	struct mach_port *mp;
 {
 	struct proc *tp;
 	struct lwp *tl;
@@ -676,8 +710,7 @@ mach_get_target_task(struct lwp *l, struct mach_port *mp)
 	switch (mp->mp_datatype) {
 	case MACH_MP_PROC:
 		tp = (struct proc *)mp->mp_data;
-		tl = LIST_FIRST(&tp->p_lwps);
-		KASSERT(tl != NULL);
+		tl = proc_representative_lwp(tp);
 		break;
 
 	case MACH_MP_LWP:
@@ -693,7 +726,9 @@ mach_get_target_task(struct lwp *l, struct mach_port *mp)
 }
 
 static inline void
-mach_drop_rights(struct mach_right *mr, int bits)
+mach_drop_rights(mr, bits)
+	struct mach_right *mr;
+	int bits;
 {
 	int rights;
 
@@ -794,7 +829,9 @@ mach_trade_rights(ll, rl, mnp, bits)
  * is not done yet.
  */
 static inline int
-mach_trade_rights_complex(struct lwp *l, struct mach_message *mm)
+mach_trade_rights_complex(l, mm)
+	struct lwp *l;
+	struct mach_message *mm;
 {
 	struct mach_complex_msg *mcm;
 	unsigned int i, count;
@@ -915,7 +952,12 @@ mach_trade_rights_complex(struct lwp *l, struct mach_message *mm)
 }
 
 inline int
-mach_ool_copyin(struct lwp *l, const void *uaddr, void **kaddr, size_t size, int flags)
+mach_ool_copyin(l, uaddr, kaddr, size, flags)
+	struct lwp *l;
+	const void *uaddr;
+	void **kaddr;
+	size_t size;
+	int flags;
 {
 	int error;
 	void *kbuf;
@@ -942,17 +984,24 @@ mach_ool_copyin(struct lwp *l, const void *uaddr, void **kaddr, size_t size, int
 		return error;
 	}
 
+#ifdef KTRACE
 	if (size > PAGE_SIZE)
 		size = PAGE_SIZE;
-	if ((flags & MACH_OOL_TRACE))
-		ktrmool(kaddr, size, uaddr);
+	if ((flags & MACH_OOL_TRACE) && KTRPOINT(p, KTR_MOOL))
+		ktrmool(l, kaddr, size, uaddr);
+#endif
 
 	*kaddr = kbuf;
 	return 0;
 }
 
 inline int
-mach_ool_copyout(struct lwp *l, const void *kaddr, void **uaddr, size_t size, int flags)
+mach_ool_copyout(l, kaddr, uaddr, size, flags)
+	struct lwp *l;
+	const void *kaddr;
+	void **uaddr;
+	size_t size;
+	int flags;
 {
 	vaddr_t ubuf;
 	int error = 0;
@@ -988,10 +1037,12 @@ mach_ool_copyout(struct lwp *l, const void *kaddr, void **uaddr, size_t size, in
 	if ((error = copyout_proc(p, kaddr, (void *)ubuf, size)) != 0)
 		goto out;
 
+#ifdef KTRACE
 	if (size > PAGE_SIZE)
 		size = PAGE_SIZE;
-	if ((flags & MACH_OOL_TRACE))
-		ktrmool(kaddr, size, (void *)ubuf);
+	if ((flags & MACH_OOL_TRACE) && KTRPOINT(p, KTR_MOOL))
+		ktrmool(l, kaddr, size, (void *)ubuf);
+#endif
 
 out:
 	if (flags & MACH_OOL_FREE)
@@ -1004,7 +1055,9 @@ out:
 
 
 inline void
-mach_set_trailer(void *msgh, size_t size)
+mach_set_trailer(msgh, size)
+	void *msgh;
+	size_t size;
 {
 	mach_msg_trailer_t *trailer;
 	char *msg = (char *)msgh;
@@ -1017,7 +1070,10 @@ mach_set_trailer(void *msgh, size_t size)
 }
 
 inline void
-mach_set_header(void *rep, void *req, size_t size)
+mach_set_header(rep, req, size)
+	void *rep;
+	void *req;
+	size_t size;
 {
 	mach_msg_header_t *rephdr = rep;
 	mach_msg_header_t *reqhdr = req;
@@ -1033,7 +1089,9 @@ mach_set_header(void *rep, void *req, size_t size)
 }
 
 inline void
-mach_add_port_desc(void *msg, mach_port_name_t name)
+mach_add_port_desc(msg, name)
+	void *msg;
+	mach_port_name_t name;
 {
 	struct mach_complex_msg *mcm = msg;
 	int i;
@@ -1054,7 +1112,10 @@ mach_add_port_desc(void *msg, mach_port_name_t name)
 }
 
 inline void
-mach_add_ool_ports_desc(void *msg, void *addr, int count)
+mach_add_ool_ports_desc(msg, addr, count)
+	void *msg;
+	void *addr;
+	int count;
 {
 	struct mach_complex_msg *mcm = msg;
 	int i;
@@ -1105,12 +1166,16 @@ void
 mach_message_init(void)
 {
 	pool_init(&mach_message_pool, sizeof (struct mach_message),
-	    0, 0, 0, "mach_message_pool", NULL, IPL_NONE);
+	    0, 0, 0, "mach_message_pool", NULL);
 	return;
 }
 
 struct mach_message *
-mach_message_get(mach_msg_header_t *msgh, size_t size, struct mach_port *mp, struct lwp *l)
+mach_message_get(msgh, size, mp, l)
+	mach_msg_header_t *msgh;
+	size_t size;
+	struct mach_port *mp;
+	struct lwp *l;
 {
 	struct mach_message *mm;
 
@@ -1121,48 +1186,47 @@ mach_message_get(mach_msg_header_t *msgh, size_t size, struct mach_port *mp, str
 	mm->mm_port = mp;
 	mm->mm_l = l;
 
-	rw_enter(&mp->mp_msglock, RW_WRITER);
+	lockmgr(&mp->mp_msglock, LK_EXCLUSIVE, NULL);
 	TAILQ_INSERT_TAIL(&mp->mp_msglist, mm, mm_list);
 	mp->mp_count++;
-	rw_exit(&mp->mp_msglock);
+	lockmgr(&mp->mp_msglock, LK_RELEASE, NULL);
 
 	return mm;
 }
 
 void
-mach_message_put(struct mach_message *mm)
+mach_message_put(mm)
+	struct mach_message *mm;
 {
 	struct mach_port *mp;
 
 	mp = mm->mm_port;
 
-	rw_enter(&mp->mp_msglock, RW_WRITER);
+	lockmgr(&mp->mp_msglock, LK_EXCLUSIVE, NULL);
 	mach_message_put_exclocked(mm);
-	rw_exit(&mp->mp_msglock);
+	lockmgr(&mp->mp_msglock, LK_RELEASE, NULL);
 
 	return;
 }
 
 void
-mach_message_put_shlocked(struct mach_message *mm)
+mach_message_put_shlocked(mm)
+	struct mach_message *mm;
 {
 	struct mach_port *mp;
 
 	mp = mm->mm_port;
 
-	if (!rw_tryupgrade(&mp->mp_msglock)) {
-		/* XXX  */
-		rw_exit(&mp->mp_msglock);
-		rw_enter(&mp->mp_msglock, RW_WRITER);
-	}
+	lockmgr(&mp->mp_msglock, LK_UPGRADE, NULL);
 	mach_message_put_exclocked(mm);
-	rw_downgrade(&mp->mp_msglock);
+	lockmgr(&mp->mp_msglock, LK_DOWNGRADE, NULL);
 
 	return;
 }
 
 void
-mach_message_put_exclocked(struct mach_message *mm)
+mach_message_put_exclocked(mm)
+	struct mach_message *mm;
 {
 	struct mach_port *mp;
 

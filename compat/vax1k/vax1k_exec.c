@@ -1,4 +1,4 @@
-/*	$NetBSD: vax1k_exec.c,v 1.16 2008/11/19 18:36:06 ad Exp $	*/
+/*	$NetBSD: vax1k_exec.c,v 1.12 2005/12/11 12:20:30 christos Exp $	*/
 
 /*
  * Copyright (c) 1993, 1994 Christopher G. Demetriou
@@ -40,7 +40,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: vax1k_exec.c,v 1.16 2008/11/19 18:36:06 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: vax1k_exec.c,v 1.12 2005/12/11 12:20:30 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -49,57 +49,17 @@ __KERNEL_RCSID(0, "$NetBSD: vax1k_exec.c,v 1.16 2008/11/19 18:36:06 ad Exp $");
 #include <sys/vnode.h>
 #include <sys/exec.h>
 #include <sys/resourcevar.h>
-#include <sys/module.h>
 
 #include <compat/vax1k/vax1k_exec.h>
 
 #if defined(_KERNEL_OPT)
 #include "opt_compat_43.h"
-#include "opt_coredump.h"
 #else
 #define COMPAT_43	/* enable 4.3BSD binaries for lkm */
 #endif
 
-#ifdef COREDUMP
-MODULE(MODULE_CLASS_MISC, exec_vax1k, "coredump");
-#else
-MODULE(MODULE_CLASS_MISC, exec_vax1k, NULL);
-#endif
-
-int	exec_vax1k_prep_anymagic(struct lwp *, struct exec_package *,
-	    size_t, bool);
-
-static struct execsw exec_vax1k_execsw[] = {
-	/* NetBSD vax1k a.out */
-	{ sizeof(struct exec),
-	  exec_vax1k_makecmds,
-	  { NULL },
-	  &emul_netbsd,
-	  EXECSW_PRIO_ANY,
-	  0,
-	  copyargs,
-	  NULL,
-	  coredump_netbsd,
-	  exec_setup_stack },
-};
-
-static int
-exec_vax1k_modcmd(modcmd_t cmd, void *arg)
-{
-
-	switch (cmd) {
-	case MODULE_CMD_INIT:
-		return exec_add(exec_vax1k_execsw,
-		    __arraycount(exec_vax1k_execsw));
-
-	case MODULE_CMD_FINI:
-		return exec_remove(exec_vax1k_execsw,
-		    __arraycount(exec_vax1k_execsw));
-
-	default:
-		return ENOTTY;
-        }
-}
+int	exec_vax1k_prep_anymagic __P((struct lwp *l, struct exec_package *epp,
+				      int, int));
 
 /*
  * exec_vax1k_makecmds(): Check if it's an a.out-format executable
@@ -115,7 +75,9 @@ exec_vax1k_modcmd(modcmd_t cmd, void *arg)
  */
 
 int
-exec_vax1k_makecmds(struct lwp *l, struct exec_package *epp)
+exec_vax1k_makecmds(l, epp)
+	struct lwp *l;
+	struct exec_package *epp;
 {
 	u_long midmag, magic;
 	u_short mid;
@@ -133,17 +95,17 @@ exec_vax1k_makecmds(struct lwp *l, struct exec_package *epp)
 
 	switch (midmag) {
 	case (MID_VAX1K << 16) | ZMAGIC:
-		error = exec_vax1k_prep_anymagic(l, epp, 0, false);
+		error = exec_vax1k_prep_anymagic(l, epp, 0, 0);
 		goto done;
 
 	case (MID_VAX1K << 16) | NMAGIC:
 		error = exec_vax1k_prep_anymagic(l, epp,
-						 sizeof(struct exec), true);
+						 sizeof(struct exec), 1);
 		goto done;
 
 	case (MID_VAX1K << 16) | OMAGIC:
 		error = exec_vax1k_prep_anymagic(l, epp,
-						 sizeof(struct exec), false);
+						 sizeof(struct exec), 0);
 		goto done;
 	}
 
@@ -154,17 +116,17 @@ exec_vax1k_makecmds(struct lwp *l, struct exec_package *epp)
 	 */
 	switch (execp->a_midmag) {
 	case ZMAGIC:
-		error = exec_vax1k_prep_anymagic(l, epp, VAX1K_LDPGSZ, false);
+		error = exec_vax1k_prep_anymagic(l, epp, VAX1K_LDPGSZ, 0);
 		goto done;
 
 	case NMAGIC:
 		error = exec_vax1k_prep_anymagic(l, epp,
-					 	sizeof(struct exec), true);
+					 	sizeof(struct exec), 1);
 		goto done;
 
 	case OMAGIC:
 		error = exec_vax1k_prep_anymagic(l, epp,
-					 	sizeof(struct exec), false);
+					 	sizeof(struct exec), 0);
 		goto done;
 	}
 #endif
@@ -188,8 +150,10 @@ done:
  *
  */
 int
-exec_vax1k_prep_anymagic(struct lwp *l, struct exec_package *epp,
-	size_t text_foffset, bool textpad)
+exec_vax1k_prep_anymagic(l, epp, text_foffset, textpad)
+	struct lwp *l;
+	struct exec_package *epp;
+	int text_foffset, textpad;
 {
         struct exec *execp = epp->ep_hdr;
 

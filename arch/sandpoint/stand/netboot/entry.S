@@ -1,18 +1,69 @@
-/* $NetBSD: entry.S,v 1.3 2007/11/05 13:41:48 nisimura Exp $ */
+/* $NetBSD: entry.S,v 1.7 2010/05/19 15:05:58 phx Exp $ */
 
+#include <powerpc/psl.h>
 #include <powerpc/spr.h>
+#include <powerpc/oea/spr.h>
+#include <powerpc/oea/bat.h>
 #include <powerpc/oea/hid.h>
 
 	.text
 	.globl _start
 _start:
+	mr	30,3
+	mr	31,4
 	mfspr	11,SPR_HID0
 	andi.	0,11,HID0_DCE
-	ori	11,11,HID0_ICE|HID0_DCE
+	ori	11,11,HID0_ICE
 	ori	8,11,HID0_ICFI
 	bne	1f			/* don't invalidate the D-cache */
 	ori	8,8,HID0_DCFI		/* unless it wasn't enabled */
 1:
+	mfmsr	0
+	andi.	0,0,PSL_DR
+	beq	2f
+	lis	5, 0xfec00000@ha	/* CONFIG_ADDR of PCI */
+	lis	6, 0xfee00000@ha	/* CONFIG_DATA of PCI */
+	mfspr	3,SPR_DBAT0U
+	mfspr	4,SPR_DBAT0L
+	bl	dbat_sanity_check
+	beq	3f
+	mfspr	3,SPR_DBAT1U
+	mfspr	4,SPR_DBAT1L
+	bl	dbat_sanity_check
+	beq	3f
+	mfspr	3,SPR_DBAT2U
+	mfspr	4,SPR_DBAT2L
+	bl	dbat_sanity_check
+	beq	3f
+	mfspr	3,SPR_DBAT3U
+	mfspr	4,SPR_DBAT3L
+	bl	dbat_sanity_check
+	beq	3f
+
+2:	/* Disable D-cache */
+	li	0,HID0_DCE
+	andc	11,11,0
+	b	4f
+
+3:	/* Enable D-cache */
+	ori	11,11,HID0_DCE
+
+4:
+	lis	1,BAT123@ha
+	addi	1,1,BAT123@l
+	lwz	3,0(1)
+	lwz	4,4(1)
+	mtdbatl	1,3
+	mtdbatu	1,4
+	lwz	3,8(1)
+	lwz	4,12(1)
+	mtdbatl	2,3
+	mtdbatu	2,4
+	lwz	3,16(1)
+	lwz	4,20(1)
+	mtdbatl	3,3
+	mtdbatu	3,4
+
 	sync
 	mtspr	SPR_HID0,8		/* enable and invalidate caches */
 	sync
@@ -40,10 +91,39 @@ _start:
 	addi	1,1,-4
 
 	bl	brdsetup
+	mr	3,30
+	mr	4,31
 	bl	main
 
 hang:	b	hang
 	/* NOTREACHED */
+
+dbat_sanity_check:
+	andi.	0,3,BAT_Vs
+	beq	2f
+	andi.	0,4,BAT_I|BAT_PP_RW
+	cmpwi	0,0,BAT_I|BAT_PP_RW
+	bnelr
+	rlwinm	0,3,15,4,14
+	andis.	3,3,0xfffe0000@ha	/* BAT_EPI */
+	andis.	4,4,BAT_RPN@ha
+	cmplw	0,3,4
+	bnelr
+	add	4,4,0
+	oris	4,4,0x0001ffff@ha
+	ori	4,4,0x0001ffff@l
+	cmplw	0,3,5
+	bgt	1f
+	cmplw	0,5,4
+	bgt	1f
+	li	5,0
+1:	cmplw	0,3,6
+	bgt	2f
+	cmplw	0,6,4
+	bgt	2f
+	li	6,0
+2:	cmplw	0,5,6
+	blr
 
 /*
  * run(startsym, endsym, howto, bootinfo, entry)
@@ -87,3 +167,16 @@ iole32toh:
 	lwbrx	3,0,3
 	eieio
 	blr
+
+	.data
+#define	xBATL(pa, wimg, pp)						\
+	((pa) | (wimg) | (pp))
+#define	xBATU(va, len, v)						\
+	((va) | ((len) & BAT_BL) | ((v) & BAT_V))
+BAT123:
+	.long xBATL(0x80000000, BAT_I|BAT_G, BAT_PP_RW)
+	.long xBATU(0x80000000, BAT_BL_256M, BAT_Vs)
+	.long xBATL(0xfc000000, BAT_I|BAT_G, BAT_PP_RW)
+	.long xBATU(0xfc000000, BAT_BL_64M, BAT_Vs)
+	.long 0
+	.long 0

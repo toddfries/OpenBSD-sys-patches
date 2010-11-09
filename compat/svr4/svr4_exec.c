@@ -1,4 +1,4 @@
-/*	$NetBSD: svr4_exec.c,v 1.64 2008/11/19 18:36:05 ad Exp $	 */
+/*	$NetBSD: svr4_exec.c,v 1.58 2006/09/03 06:28:16 christos Exp $	 */
 
 /*-
  * Copyright (c) 1994, 2000 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: svr4_exec.c,v 1.64 2008/11/19 18:36:05 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: svr4_exec.c,v 1.58 2006/09/03 06:28:16 christos Exp $");
 
 #if defined(_KERNEL_OPT)
 #include "opt_syscall_debug.h"
@@ -54,12 +61,12 @@ extern char svr4_sigcode[], svr4_esigcode[];
 extern struct sysent svr4_sysent[];
 extern const char * const svr4_syscallnames[];
 #ifndef __HAVE_SYSCALL_INTERN
-void syscall(void);
+void syscall __P((void));
 #endif
 
 struct uvm_object *emul_svr4_object;
 
-struct emul emul_svr4 = {
+const struct emul emul_svr4 = {
 	"svr4",
 	"/emul/svr4",
 #ifndef __HAVE_MINIMAL_EMUL
@@ -97,6 +104,4 @@ struct emul emul_svr4 = {
 	uvm_default_mapaddr,
 	NULL,	/* e_usertrap */
 	NULL,	/* e_sa */
-	0,	/* e_ucsize */
-	NULL,	/* e_startlwp */
 };

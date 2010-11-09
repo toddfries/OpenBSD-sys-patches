@@ -1,4 +1,4 @@
-/*	$NetBSD: if_ni.c,v 1.5 2009/01/12 11:32:45 tsutsui Exp $ */
+/*	$NetBSD: if_ni.c,v 1.3 2006/07/01 05:55:34 mrg Exp $ */
 /*
  * Copyright (c) 2000 Ludd, University of Lule}, Sweden.
  * All rights reserved.
@@ -84,7 +84,7 @@
 #define SPTSIZ	16384	/* 8MB */
 #define roundpg(x)	(((int)x + VAX_PGOFSET) & ~VAX_PGOFSET)
 #define ALLOC(x) \
-	allocbase;xbzero((void *)allocbase,x);allocbase+=roundpg(x);
+	allocbase;xbzero((caddr_t)allocbase,x);allocbase+=roundpg(x);
 #define nipqb	(&gvppqb->nc_pqb)
 #define gvp	gvppqb
 #define NI_WREG(csr, val) *(volatile long *)(niaddr + (csr)) = (val)
@@ -92,7 +92,7 @@
 #define DELAY(x)	{volatile int i = x * 3;while (--i);}
 #define WAITREG(csr,val) while (NI_RREG(csr) & val);
 
-static int ni_get(struct iodesc *, void *, size_t, saseconds_t);
+static int ni_get(struct iodesc *, void *, size_t, time_t);
 static int ni_put(struct iodesc *, void *, size_t);
 
 static int *syspte, allocbase, niaddr;
@@ -449,19 +449,17 @@ niopen(struct open_file *f, int adapt, int ctlr, int unit, int part)
 }
 
 int
-ni_get(struct iodesc *desc, void *pkt, size_t maxlen, saseconds_t timeout)
+ni_get(struct iodesc *desc, void *pkt, size_t maxlen, time_t timeout)
 {
 	struct ni_dg *data;
 	struct ni_bbd *bd;
-	satime_t nsec = getsecs();
+	int nsec = getsecs() + timeout;
 	int len, idx;
 
-loop:
-	while ((data = REMQHI(&gvp->nc_forwr)) == 0 &&
-	    ((getsecs() - nsec) < timeout))
+loop:	while ((data = REMQHI(&gvp->nc_forwr)) == 0 && (nsec > getsecs()))
 		;
 
-	if ((getsecs() - nsec) >= timeout)
+	if (nsec <= getsecs())
 		return 0;
 
 	switch (data->nd_opcode) {
@@ -471,7 +469,7 @@ loop:
 		len = data->bufs[0]._len;
 		if (len > maxlen)
 			len = maxlen;
-		bcopy((void *)data->nd_cmdref, pkt, len);
+		bcopy((caddr_t)data->nd_cmdref, pkt, len);
 		bd->nb_pte = (int)&syspte[data->nd_cmdref>>9];
 		data->bufs[0]._len = bd->nb_len = 2048;
 		data->bufs[0]._offset = 0;
@@ -512,7 +510,7 @@ ni_put(struct iodesc *desc, void *pkt, size_t len)
 	bdp = &bbd[(data->bufs[0]._index & 0x7fff)];
 	bdp->nb_status = NIBD_VALID;
 	bdp->nb_len = (len < 64 ? 64 : len);
-	bcopy(pkt, (void *)data->nd_cmdref, len);
+	bcopy(pkt, (caddr_t)data->nd_cmdref, len);
 	data->bufs[0]._offset = 0;
 	data->bufs[0]._len = bdp->nb_len;
 	data->nd_opcode = BVP_DGRAM;

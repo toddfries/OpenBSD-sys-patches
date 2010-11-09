@@ -1,4 +1,4 @@
-/*	$NetBSD: mpu.c,v 1.17 2008/04/28 20:23:50 martin Exp $	*/
+/*	$NetBSD: mpu.c,v 1.15 2007/10/19 11:59:57 ad Exp $	*/
 
 /*
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mpu.c,v 1.17 2008/04/28 20:23:50 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mpu.c,v 1.15 2007/10/19 11:59:57 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -71,16 +78,16 @@ int	mpudebug = 0;
 
 #define MPU_GETSTATUS(iot, ioh) (bus_space_read_1(iot, ioh, MPU_STATUS))
 
-static int 		mpu_reset(struct mpu_softc *);
+int	mpu_reset(struct mpu_softc *);
 static	inline int mpu_waitready(struct mpu_softc *);
-static void		mpu_readinput(struct mpu_softc *);
+void	mpu_readinput(struct mpu_softc *);
 
-static int	mpu_open(void *, int,
+int	mpu_open(void *, int,
 			 void (*iintr)(void *, int),
 			 void (*ointr)(void *), void *arg);
-static void	mpu_close(void *);
-static int	mpu_output(void *, int);
-static void	mpu_getinfo(void *, struct midi_info *);
+void	mpu_close(void *);
+int	mpu_output(void *, int);
+void	mpu_getinfo(void *, struct midi_info *);
 
 const struct midi_hw_if mpu_midi_hw_if = {
 	mpu_open,
@@ -91,10 +98,11 @@ const struct midi_hw_if mpu_midi_hw_if = {
 };
 
 int
-mpu_find(struct mpu_softc *sc)
+mpu_find(sc)
+	struct mpu_softc *sc;
 {
 	if (MPU_GETSTATUS(sc->iot, sc->ioh) == 0xff) {
-		DPRINTF(("%s: No status\n", __func__));
+		DPRINTF(("mpu_find: No status\n"));
 		goto bad;
 	}
 	sc->open = 0;
@@ -106,13 +114,15 @@ bad:
 }
 
 void
-mpu_attach(struct mpu_softc *sc)
+mpu_attach(sc)
+	struct mpu_softc *sc;
 {
-	midi_attach_mi(&mpu_midi_hw_if, sc, sc->sc_dev);
+	midi_attach_mi(&mpu_midi_hw_if, sc, &sc->sc_dev);
 }
 
 static inline int
-mpu_waitready(struct mpu_softc *sc)
+mpu_waitready(sc)
+	struct mpu_softc *sc;
 {
 	int i;
 
@@ -124,8 +134,9 @@ mpu_waitready(struct mpu_softc *sc)
 	return 1;
 }
 
-static int
-mpu_reset(struct mpu_softc *sc)
+int
+mpu_reset(sc)
+	struct mpu_softc *sc;
 {
 	bus_space_tag_t iot = sc->iot;
 	bus_space_handle_t ioh = sc->ioh;
@@ -133,7 +144,7 @@ mpu_reset(struct mpu_softc *sc)
 	int s;
 
 	if (mpu_waitready(sc)) {
-		DPRINTF(("%s: not ready\n", __func__));
+		DPRINTF(("mpu_reset: not ready\n"));
 		return EIO;
 	}
 	s = splaudio();		/* Don't let the interrupt get our ACK. */
@@ -146,17 +157,17 @@ mpu_reset(struct mpu_softc *sc)
 		}
 	}
 	splx(s);
-	DPRINTF(("%s: No ACK\n", __func__));
+	DPRINTF(("mpu_reset: No ACK\n"));
 	return EIO;
 }
 
-static int
+int
 mpu_open(void *addr, int flags, void (*iintr)(void *, int),
     void (*ointr)(void *), void *arg)
 {
 	struct mpu_softc *sc = addr;
 
-        DPRINTF(("%s: sc=%p\n", __func__, sc));
+        DPRINTF(("mpu_open: sc=%p\n", sc));
 
 	if (sc->open)
 		return EBUSY;
@@ -179,12 +190,13 @@ mpu_open(void *addr, int flags, void (*iintr)(void *, int),
 	return 0;
 }
 
-static void
-mpu_close(void *addr)
+void
+mpu_close(addr)
+	void *addr;
 {
 	struct mpu_softc *sc = addr;
 
-        DPRINTF(("%s: sc=%p\n", __func__, sc));
+        DPRINTF(("mpu_close: sc=%p\n", sc));
 
 	sc->open = 0;
 	sc->intr = 0;
@@ -196,8 +208,9 @@ mpu_close(void *addr)
 #endif
 }
 
-static void
-mpu_readinput(struct mpu_softc *sc)
+void
+mpu_readinput(sc)
+	struct mpu_softc *sc;
 {
 	bus_space_tag_t iot = sc->iot;
 	bus_space_handle_t ioh = sc->ioh;
@@ -205,34 +218,38 @@ mpu_readinput(struct mpu_softc *sc)
 
 	while(!(MPU_GETSTATUS(iot, ioh) & MPU_INPUT_EMPTY)) {
 		data = bus_space_read_1(iot, ioh, MPU_DATA);
-		DPRINTFN(3, ("%s: sc=%p 0x%02x\n", __func__, sc, data));
+		DPRINTFN(3, ("mpu_rea: sc=%p 0x%02x\n", sc, data));
 		if (sc->intr)
 			sc->intr(sc->arg, data);
 	}
 }
 
-static int
-mpu_output(void *addr, int d)
+int
+mpu_output(addr, d)
+	void *addr;
+	int d;
 {
 	struct mpu_softc *sc = addr;
 	int s;
 
-	DPRINTFN(3, ("%s: sc=%p 0x%02x\n", __func__, sc, d));
+	DPRINTFN(3, ("mpu_output: sc=%p 0x%02x\n", sc, d));
 	if (!(MPU_GETSTATUS(sc->iot, sc->ioh) & MPU_INPUT_EMPTY)) {
 		s = splaudio();
 		mpu_readinput(sc);
 		splx(s);
 	}
 	if (mpu_waitready(sc)) {
-		DPRINTF(("%s:: not ready\n", __func__));
+		DPRINTF(("mpu_output: not ready\n"));
 		return EIO;
 	}
 	bus_space_write_1(sc->iot, sc->ioh, MPU_DATA, d);
 	return 0;
 }
 
-static void
-mpu_getinfo(void *addr, struct midi_info *mi)
+void
+mpu_getinfo(addr, mi)
+	void *addr;
+	struct midi_info *mi;
 {
 	struct mpu_softc *sc = addr;
 
@@ -241,15 +258,16 @@ mpu_getinfo(void *addr, struct midi_info *mi)
 }
 
 int
-mpu_intr(void *addr)
+mpu_intr(addr)
+	void *addr;
 {
 	struct mpu_softc *sc = addr;
 
 	if (MPU_GETSTATUS(sc->iot, sc->ioh) & MPU_INPUT_EMPTY) {
-		DPRINTF(("%s: no data\n", __func__));
-		return 0;
+		DPRINTF(("mpu_intr: no data\n"));
+		return (0);
 	} else {
 		mpu_readinput(sc);
-		return 1;
+		return (1);
 	}
 }

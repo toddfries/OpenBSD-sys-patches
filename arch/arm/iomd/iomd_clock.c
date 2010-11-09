@@ -1,4 +1,4 @@
-/*	$NetBSD: iomd_clock.c,v 1.25 2009/01/17 17:06:18 mjf Exp $	*/
+/*	$NetBSD: iomd_clock.c,v 1.21 2006/09/03 12:46:57 bjh21 Exp $	*/
 
 /*
  * Copyright (c) 1994-1997 Mark Brinicombe.
@@ -47,17 +47,18 @@
 
 #include <sys/param.h>
 
-__KERNEL_RCSID(0, "$NetBSD: iomd_clock.c,v 1.25 2009/01/17 17:06:18 mjf Exp $");
+__KERNEL_RCSID(0, "$NetBSD: iomd_clock.c,v 1.21 2006/09/03 12:46:57 bjh21 Exp $");
 
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/time.h>
 #include <sys/timetc.h>
 #include <sys/device.h>
-#include <sys/simplelock.h>
-#include <sys/intr.h>
+#include <sys/lock.h>
 
 #include <dev/clock_subr.h>
+
+#include <machine/intr.h>
 
 #include <arm/cpufunc.h>
 
@@ -247,7 +248,7 @@ checkdelay(void)
 		return;
 	if (diff.tv_usec > 10000)
 		return;
-	printf("WARNING: delay(10000) took %d us\n", diff.tv_usec);
+	printf("WARNING: delay(10000) took %ld us\n", diff.tv_usec);
 }
 #endif
 
@@ -329,7 +330,7 @@ static u_int iomd_timecounter0_get(struct timecounter *tc)
 	
 
 	if (timer0_count &&
-	    (tm < timer0_lastcount || (!timer0_ticked && false/* XXX: clkintr_pending */))) {
+	    (tm < timer0_lastcount || (!timer0_ticked && FALSE/* XXX: clkintr_pending */))) {
 		timer0_ticked = 1;
 		timer0_offset += timer0_count;
 	}

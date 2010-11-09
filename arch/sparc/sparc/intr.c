@@ -1,4 +1,4 @@
-/*	$NetBSD: intr.c,v 1.101 2008/12/16 22:35:26 christos Exp $ */
+/*	$NetBSD: intr.c,v 1.95 2006/06/07 22:38:49 kardel Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -41,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: intr.c,v 1.101 2008/12/16 22:35:26 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: intr.c,v 1.95 2006/06/07 22:38:49 kardel Exp $");
 
 #include "opt_multiprocessor.h"
 #include "opt_sparc_arch.h"
@@ -50,16 +50,17 @@ __KERNEL_RCSID(0, "$NetBSD: intr.c,v 1.101 2008/12/16 22:35:26 christos Exp $");
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
-#include <sys/cpu.h>
-#include <sys/intr.h>
-#include <sys/simplelock.h>
 
 #include <uvm/uvm_extern.h>
 
 #include <dev/cons.h>
 
+#include <net/netisr.h>
+
+#include <machine/cpu.h>
 #include <machine/ctlreg.h>
 #include <machine/instr.h>
+#include <machine/intr.h>
 #include <machine/trap.h>
 #include <machine/promlib.h>
 
@@ -70,6 +71,7 @@ __KERNEL_RCSID(0, "$NetBSD: intr.c,v 1.101 2008/12/16 22:35:26 christos Exp $");
 #include <machine/db_machdep.h>
 #endif
 
+void *softnet_cookie;
 #if defined(MULTIPROCESSOR)
 void *xcall_cookie;
 
@@ -85,6 +87,7 @@ void	strayintr(struct clockframe *);
 #ifdef DIAGNOSTIC
 void	bogusintr(struct clockframe *);
 #endif
+void	softnet(void *);
 
 /*
  * Stray interrupt handler.  Clear it if possible.
@@ -98,9 +101,9 @@ strayintr(struct clockframe *fp)
 	char bits[64];
 	int timesince;
 
-	snprintb(bits, sizeof(bits), PSR_BITS, fp->psr);
 	printf("stray interrupt ipl 0x%x pc=0x%x npc=0x%x psr=%s\n",
-	    fp->ipl, fp->pc, fp->npc, bits);
+		fp->ipl, fp->pc, fp->npc, bitmask_snprintf(fp->psr,
+		       PSR_BITS, bits, sizeof(bits)));
 
 	timesince = time_uptime - straytime;
 	if (timesince <= 10) {
@@ -123,9 +126,10 @@ bogusintr(struct clockframe *fp)
 {
 	char bits[64];
 
-	snprintb(bits, sizeof(bits), PSR_BITS, fp->psr);
 	printf("cpu%d: bogus interrupt ipl 0x%x pc=0x%x npc=0x%x psr=%s\n",
-	    cpu_number(), fp->ipl, fp->pc, fp->npc, bits);
+		cpu_number(),
+		fp->ipl, fp->pc, fp->npc, bitmask_snprintf(fp->psr,
+		       PSR_BITS, bits, sizeof(bits)));
 }
 #endif /* DIAGNOSTIC */
 
@@ -169,6 +173,32 @@ setitr(u_int mid)
 #endif
 }
 
+/*
+ * Process software network interrupts.
+ */
+void
+softnet(void *fp)
+{
+	int n, s;
+
+	s = splhigh();
+	n = netisr;
+	netisr = 0;
+	splx(s);
+
+	if (n == 0)
+		return;
+
+#define DONETISR(bit, fn) do {		\
+	if (n & (1 << bit))		\
+		fn();			\
+	} while (0)
+
+#include <net/netisr_dispatch.h>
+
+#undef DONETISR
+}
+
 #if (defined(SUN4M) && !defined(MSIIEP)) || defined(SUN4D)
 void	nmi_hard(void);
 void	nmi_soft(struct trapframe *);
@@ -197,9 +227,9 @@ nmi_hard(void)
 
 	afsr = afva = 0;
 	if ((*cpuinfo.get_asyncflt)(&afsr, &afva) == 0) {
-		snprintb(bits, sizeof(bits), AFSR_BITS, afsr);
 		printf("Async registers (mid %d): afsr=%s; afva=0x%x%x\n",
-			cpuinfo.mid, bits,
+			cpuinfo.mid,
+			bitmask_snprintf(afsr, AFSR_BITS, bits, sizeof(bits)),
 			(afsr & AFSR_AFA) >> AFSR_AFA_RSHIFT, afva);
 	}
 
@@ -234,9 +264,8 @@ nmi_hard(void)
 	 * Examine pending system interrupts.
 	 */
 	si = *((uint32_t *)ICR_SI_PEND);
-	snprintb(bits, sizeof(bits), SINTR_BITS, si);
-	printf("cpu%d: NMI: system interrupts: %s\n", cpu_number(), bits);
-		
+	printf("cpu%d: NMI: system interrupts: %s\n", cpu_number(),
+		bitmask_snprintf(si, SINTR_BITS, bits, sizeof(bits)));
 
 	if ((si & SINTR_M) != 0) {
 		/* ECC memory error */
@@ -374,9 +403,8 @@ nmi_hard_msiiep(void)
 	int fatal = 0;
 
 	si = mspcic_read_4(pcic_sys_ipr);
-	snprintb(bits, sizeof(bits), MSIIEP_SYS_IPR_BITS, si);
-	printf("NMI: system interrupts: %s\n", bits);
-	       
+	printf("NMI: system interrupts: %s\n",
+	       bitmask_snprintf(si, MSIIEP_SYS_IPR_BITS, bits, sizeof(bits)));
 
 	if (si & MSIIEP_SYS_IPR_MEM_FAULT) {
 		uint32_t afsr, afar, mfsr, mfar;
@@ -387,15 +415,17 @@ nmi_hard_msiiep(void)
 		mfar = *(volatile uint32_t *)MSIIEP_MFAR;
 		mfsr = *(volatile uint32_t *)MSIIEP_MFSR;
 
-		if (afsr & MSIIEP_AFSR_ERR) {
-			snprintb(bits, sizeof(bits), MSIIEP_AFSR_BITS, afsr);
-			printf("async fault: afsr=%s; afar=%08x\n", bits, afsr);
-		}
+		if (afsr & MSIIEP_AFSR_ERR)
+			printf("async fault: afsr=%s; afar=%08x\n",
+			       bitmask_snprintf(afsr, MSIIEP_AFSR_BITS,
+						bits, sizeof(bits)),
+			       afar);
 
-		if (mfsr & MSIIEP_MFSR_ERR) {
-			snprintb(bits, sizeof(bits), MSIIEP_MFSR_BITS, mfsr);
-			printf("mem fault: mfsr=%s; mfar=%08x\n", bits, mfsr);
-		}
+		if (mfsr & MSIIEP_MFSR_ERR)
+			printf("mem fault: mfsr=%s; mfar=%08x\n",
+			       bitmask_snprintf(mfsr, MSIIEP_MFSR_BITS,
+						bits, sizeof(bits)),
+			       mfar);
 
 		fatal = 0;
 	}
@@ -603,12 +633,8 @@ intr_establish(int level, int classipl,
 	int s = splhigh();
 
 #ifdef DIAGNOSTIC
-	if (CPU_ISSUN4C) {
-		/*
-		 * Check reserved softintr slots on SUN4C only.
-		 * No check for SUN4, as 4/300's have
-		 * esp0 at level 4 and le0 at level 6.
-		 */
+	if (CPU_ISSUN4 || CPU_ISSUN4C) {
+		/* Check reserved softintr slots */
 		if (level == 1 || level == 4 || level == 6)
 			panic("intr_establish: reserved softintr level");
 	}
@@ -667,12 +693,13 @@ struct softintr_cookie {
  * softintr_init(): initialise the MI softintr system.
  */
 void
-sparc_softintr_init(void)
+softintr_init(void)
 {
 
+	softnet_cookie = softintr_establish(IPL_SOFTNET, softnet, NULL);
 #if defined(MULTIPROCESSOR) && (defined(SUN4M) || defined(SUN4D))
 	/* Establish a standard soft interrupt handler for cross calls */
-	xcall_cookie = sparc_softintr_establish(13, xcallintr, NULL);
+	xcall_cookie = softintr_establish(13, xcallintr, NULL);
 #endif
 }
 
@@ -681,7 +708,7 @@ sparc_softintr_init(void)
  * software interrupt.
  */
 void *
-sparc_softintr_establish(int level, void (*fun)(void *), void *arg)
+softintr_establish(int level, void (*fun)(void *), void *arg)
 {
 	struct softintr_cookie *sic;
 	struct intrhand *ih;
@@ -741,7 +768,7 @@ sparc_softintr_establish(int level, void (*fun)(void *), void *arg)
  * software interrupt.
  */
 void
-sparc_softintr_disestablish(void *cookie)
+softintr_disestablish(void *cookie)
 {
 	struct softintr_cookie *sic = cookie;
 
@@ -751,7 +778,7 @@ sparc_softintr_disestablish(void *cookie)
 
 #if 0
 void
-sparc_softintr_schedule(void *cookie)
+softintr_schedule(void *cookie)
 {
 	struct softintr_cookie *sic = cookie;
 	if (CPU_ISSUN4M || CPU_ISSUN4D) {
@@ -775,20 +802,13 @@ void
 intr_lock_kernel(void)
 {
 
-	KERNEL_LOCK(1, NULL);
+	KERNEL_LOCK(LK_CANRECURSE|LK_EXCLUSIVE);
 }
 
 void
 intr_unlock_kernel(void)
 {
 
-	KERNEL_UNLOCK_ONE(NULL);
+	KERNEL_UNLOCK();
 }
 #endif
-
-bool
-cpu_intr_p(void)
-{
-
-	return curcpu()->ci_idepth != 0;
-}

@@ -1,4 +1,4 @@
-/*	$NetBSD: db_trap.c,v 1.24 2007/02/21 22:59:57 thorpej Exp $	*/
+/*	$NetBSD: db_trap.c,v 1.23 2005/12/11 12:20:53 christos Exp $	*/
 
 /*
  * Mach Operating System
@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: db_trap.c,v 1.24 2007/02/21 22:59:57 thorpej Exp $");
+__KERNEL_RCSID(0, "$NetBSD: db_trap.c,v 1.23 2005/12/11 12:20:53 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/proc.h>
@@ -59,8 +59,8 @@ int db_trap_type;
 void
 db_trap(int type, int code)
 {
-	bool	bkpt;
-	bool	watchpt;
+	boolean_t	bkpt;
+	boolean_t	watchpt;
 
 	db_trap_type = type;
 

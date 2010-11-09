@@ -1,4 +1,4 @@
-/*	$NetBSD: consinit.c,v 1.18 2009/02/19 01:14:43 jmcneill Exp $	*/
+/*	$NetBSD: consinit.c,v 1.14 2007/01/05 04:13:09 jmcneill Exp $	*/
 
 /*
  * Copyright (c) 1998
@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: consinit.c,v 1.18 2009/02/19 01:14:43 jmcneill Exp $");
+__KERNEL_RCSID(0, "$NetBSD: consinit.c,v 1.14 2007/01/05 04:13:09 jmcneill Exp $");
 
 #include "opt_kgdb.h"
 
@@ -36,9 +36,7 @@ __KERNEL_RCSID(0, "$NetBSD: consinit.c,v 1.18 2009/02/19 01:14:43 jmcneill Exp $
 #include <sys/device.h>
 #include <machine/bus.h>
 #include <machine/bootinfo.h>
-#include <arch/x86/include/genfb_machdep.h>
 
-#include "genfb.h"
 #include "vga.h"
 #include "ega.h"
 #include "pcdisplay.h"
@@ -66,8 +64,18 @@ __KERNEL_RCSID(0, "$NetBSD: consinit.c,v 1.18 2009/02/19 01:14:43 jmcneill Exp $
 #endif
 #include "pckbd.h" /* for pckbc_machdep_cnattach */
 
-#if (NGENFB > 0)
-#include <dev/wsfb/genfbvar.h>
+#ifndef __x86_64__
+#include "pc.h"
+#endif
+#if (NPC > 0)
+#include <machine/pccons.h>
+#endif
+
+#ifdef __i386__
+#include "vesafb.h"
+#if (NVESAFB > 0)
+#include <arch/i386/bios/vesafbvar.h>
+#endif
 #endif
 
 #ifdef __i386__
@@ -149,7 +157,6 @@ void
 consinit()
 {
 	const struct btinfo_console *consinfo;
-	const struct btinfo_framebuffer *fbinfo;
 	static int initted;
 
 	if (initted)
@@ -162,20 +169,12 @@ consinit()
 #endif
 		consinfo = &default_consinfo;
 
-	fbinfo = lookup_bootinfo(BTINFO_FRAMEBUFFER);
-
+#if (NPC > 0) || (NVGA > 0) || (NEGA > 0) || (NPCDISPLAY > 0) || (NVESAFB > 0) || (NXBOXFB > 0)
 	if (!strcmp(consinfo->devname, "pc")) {
 		int error;
-#if (NGENFB > 0)
-		if (fbinfo && fbinfo->physaddr > 0) {
-			if (x86_genfb_cnattach() == -1) {
-				initted = 0;	/* defer */
-				return;
-			}
-			genfb_cnattach();
+#if (NVESAFB > 0)
+		if (!vesafb_cnattach())
 			goto dokbd;
-		}
-		genfb_disable();
 #endif
 #if (NXBOXFB > 0)
 		switch (xboxfb_cnattach()) {
@@ -202,6 +201,9 @@ consinit()
 		if (!pcdisplay_cnattach(X86_BUS_SPACE_IO, X86_BUS_SPACE_MEM))
 			goto dokbd;
 #endif
+#if (NPC > 0)
+		pccnattach();
+#endif
 		if (0) goto dokbd; /* XXX stupid gcc */
 dokbd:
 		error = ENODEV;
@@ -218,6 +220,7 @@ dokbd:
 			       error);
 		return;
 	}
+#endif /* PC | VT | VGA | PCDISPLAY | VESAFB | XBOXFB */
 #if (NCOM > 0)
 	if (!strcmp(consinfo->devname, "com")) {
 		bus_space_tag_t tag = X86_BUS_SPACE_IO;
@@ -238,6 +241,24 @@ dokbd:
 #endif
 	panic("invalid console device %s", consinfo->devname);
 }
+
+#if (NPCKBC > 0) && (NPCKBD == 0)
+/*
+ * glue code to support old console code with the
+ * mi keyboard controller driver
+ */
+int
+pckbport_machdep_cnattach(kbctag, kbcslot)
+	pckbport_tag_t kbctag;
+	pckbport_slot_t kbcslot;
+{
+#if (NPC > 0) && (NPCCONSKBD > 0)
+	return (pcconskbd_cnattach(kbctag, kbcslot));
+#else
+	return (ENXIO);
+#endif
+}
+#endif
 
 #ifdef KGDB
 void

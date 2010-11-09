@@ -1,4 +1,4 @@
-/*	$NetBSD: if_iwi.c,v 1.79 2009/02/13 21:11:47 bouyer Exp $  */
+/*	$NetBSD: if_iwi.c,v 1.72 2008/03/21 07:47:43 dyoung Exp $  */
 
 /*-
  * Copyright (c) 2004, 2005
@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_iwi.c,v 1.79 2009/02/13 21:11:47 bouyer Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_iwi.c,v 1.72 2008/03/21 07:47:43 dyoung Exp $");
 
 /*-
  * Intel(R) PRO/Wireless 2200BG/2225BG/2915ABG driver
@@ -90,9 +90,6 @@ int iwi_debug = 4;
 #define DPRINTFN(n, x)
 #endif
 
-/* Permit loading the Intel firmware */
-static int iwi_accept_eula;
-
 static int	iwi_match(device_t, struct cfdata *, void *);
 static void	iwi_attach(device_t, device_t, void *);
 static int	iwi_detach(device_t, int);
@@ -102,7 +99,7 @@ static int	iwi_alloc_cmd_ring(struct iwi_softc *, struct iwi_cmd_ring *,
 static void	iwi_reset_cmd_ring(struct iwi_softc *, struct iwi_cmd_ring *);
 static void	iwi_free_cmd_ring(struct iwi_softc *, struct iwi_cmd_ring *);
 static int	iwi_alloc_tx_ring(struct iwi_softc *, struct iwi_tx_ring *,
-    int, bus_size_t, bus_size_t);
+    int, bus_addr_t, bus_size_t);
 static void	iwi_reset_tx_ring(struct iwi_softc *, struct iwi_tx_ring *);
 static void	iwi_free_tx_ring(struct iwi_softc *, struct iwi_tx_ring *);
 static struct mbuf *
@@ -329,7 +326,7 @@ iwi_attach(device_t parent, device_t self, void *aux)
 	ic->ic_opmode = IEEE80211_M_STA; /* default to BSS mode */
 	ic->ic_state = IEEE80211_S_INIT;
 
-	sc->sc_fwname = "ipw2200-bss.fw";
+	sc->sc_fwname = "iwi-bss.fw";
 
 	/* set device capabilities */
 	ic->ic_caps =
@@ -1824,8 +1821,6 @@ iwi_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 
 	switch (cmd) {
 	case SIOCSIFFLAGS:
-		if ((error = ifioctl_common(ifp, cmd, data)) != 0)
-			break;
 		if (ifp->if_flags & IFF_UP) {
 			if (!(ifp->if_flags & IFF_RUNNING))
 				iwi_init(ifp);
@@ -1855,11 +1850,11 @@ iwi_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 
 	case SIOCSIFMEDIA:
 		if (ifr->ifr_media & IFM_IEEE80211_ADHOC) {
-			sc->sc_fwname = "ipw2200-ibss.fw";
+			sc->sc_fwname = "iwi-ibss.fw";
 		} else if (ifr->ifr_media & IFM_IEEE80211_MONITOR) {
-			sc->sc_fwname = "ipw2200-sniffer.fw";
+			sc->sc_fwname = "iwi-sniffer.fw";
 		} else {
-			sc->sc_fwname = "ipw2200-bss.fw";
+			sc->sc_fwname = "iwi-bss.fw";
 		}
 		error = iwi_cache_firmware(sc);
 		if (error)
@@ -2020,7 +2015,7 @@ iwi_load_firmware(struct iwi_softc *sc, void *fw, int size)
 	int ntries, nsegs, error;
 	int sn;
 
-	nsegs = atop((vaddr_t)fw+size-1) - atop((vaddr_t)fw) + 1;
+	nsegs = (size + PAGE_SIZE - 1) / PAGE_SIZE;
 
 	/* Create a DMA map for the firmware image */
 	error = bus_dmamap_create(sc->sc_dmat, size, nsegs, size, 0,
@@ -2156,12 +2151,6 @@ iwi_cache_firmware(struct iwi_softc *sc)
 	off_t size;	
 	char *fw;
 	int error;
-
-	if (iwi_accept_eula == 0) {
-		aprint_error_dev(sc->sc_dev,
-		    "EULA not accepted; please see the iwi(4) man page.\n");
-		return EPERM;
-	}
 
 	iwi_free_firmware(sc);
 	error = firmware_open("if_iwi", sc->sc_fwname, &fwh);
@@ -2914,34 +2903,4 @@ iwi_led_set(struct iwi_softc *sc, uint32_t state, int toggle)
 	MEM_WRITE_4(sc, IWI_MEM_EVENT_CTL, val);
 
 	return;
-}
-
-SYSCTL_SETUP(sysctl_hw_iwi_accept_eula_setup, "sysctl hw.iwi.accept_eula")
-{
-	const struct sysctlnode *rnode;
-	const struct sysctlnode *cnode;
-
-	sysctl_createv(NULL, 0, NULL, &rnode,
-		CTLFLAG_PERMANENT,
-		CTLTYPE_NODE, "hw",
-		NULL,
-		NULL, 0,
-		NULL, 0,
-		CTL_HW, CTL_EOL);
-
-	sysctl_createv(NULL, 0, &rnode, &rnode,
-		CTLFLAG_PERMANENT,
-		CTLTYPE_NODE, "iwi",
-		NULL,
-		NULL, 0,
-		NULL, 0,
-		CTL_CREATE, CTL_EOL);
-
-	sysctl_createv(NULL, 0, &rnode, &cnode,
-		CTLFLAG_PERMANENT | CTLFLAG_READWRITE,
-		CTLTYPE_INT, "accept_eula",
-		SYSCTL_DESCR("Accept Intel EULA and permit use of iwi(4) firmware"),
-		NULL, 0,
-		&iwi_accept_eula, sizeof(iwi_accept_eula),
-		CTL_CREATE, CTL_EOL);
 }

@@ -1,4 +1,4 @@
-/*	$NetBSD: types.h,v 1.86 2009/03/07 21:59:25 ad Exp $	*/
+/*	$NetBSD: types.h,v 1.77 2007/09/07 18:56:13 rmind Exp $	*/
 
 /*-
  * Copyright (c) 1982, 1986, 1991, 1993, 1994
@@ -107,6 +107,8 @@ typedef unsigned char	unchar;		/* Sys V compatibility */
 typedef	unsigned short	ushort;		/* Sys V compatibility */
 typedef	unsigned int	uint;		/* Sys V compatibility */
 typedef unsigned long	ulong;		/* Sys V compatibility */
+
+typedef	u_long		cpuid_t;
 #endif
 
 typedef	uint64_t	u_quad_t;	/* quads */
@@ -154,7 +156,7 @@ typedef	__daddr_t	daddr_t;	/* disk address */
 typedef	int64_t		daddr_t;	/* disk address */
 #endif
 
-typedef	uint64_t	dev_t;		/* device number */
+typedef	uint32_t	dev_t;		/* device number */
 typedef	uint32_t	fixpt_t;	/* fixed point number */
 
 #ifndef	gid_t
@@ -162,7 +164,6 @@ typedef	__gid_t		gid_t;		/* group id */
 #define	gid_t		__gid_t
 #endif
 
-typedef	int		idtype_t;	/* type of the id */
 typedef	uint32_t	id_t;		/* group id, process id or user id */
 typedef	uint64_t	ino_t;		/* inode number */
 typedef	long		key_t;		/* IPC key (for Sys V IPC) */
@@ -184,7 +185,7 @@ typedef	__pid_t		pid_t;		/* process id */
 #define	pid_t		__pid_t
 #endif
 typedef int32_t		lwpid_t;	/* LWP id */
-typedef uint64_t	rlim_t;		/* resource limit */
+typedef quad_t		rlim_t;		/* resource limit */
 typedef	int32_t		segsz_t;	/* segment size */
 typedef	int32_t		swblk_t;	/* swap offset */
 
@@ -193,11 +194,9 @@ typedef	__uid_t		uid_t;		/* user id */
 #define	uid_t		__uid_t
 #endif
 
+typedef	int32_t		dtime_t;	/* on-disk time_t */
+
 typedef int		mqd_t;
-
-typedef	unsigned long	cpuid_t;
-
-typedef	int		psetid_t;
 
 #if defined(_KERNEL) || defined(_STANDALONE)
 /*
@@ -232,7 +231,9 @@ union __semun {
 	struct semid_ds	*buf;		/* buffer for IPC_STAT & IPC_SET */
 	unsigned short	*array;		/* array for GETALL & SETALL */
 };
+/* For the same reason as above */
 #include <sys/stdint.h>
+typedef intptr_t semid_t;
 #endif /* _KERNEL || _LIBC */
 
 /*
@@ -256,13 +257,9 @@ __END_DECLS
 
 #if defined(_NETBSD_SOURCE)
 /* Major, minor numbers, dev_t's. */
-typedef int32_t __devmajor_t, __devminor_t;
-#define devmajor_t __devmajor_t
-#define devminor_t __devminor_t
-#define NODEVMAJOR (-1)
-#define	major(x)	((devmajor_t)(((uint32_t)(x) & 0x000fff00) >>  8))
-#define	minor(x)	((devminor_t)((((uint32_t)(x) & 0xfff00000) >> 12) | \
-				   (((uint32_t)(x) & 0x000000ff) >>  0)))
+#define	major(x)	((int32_t)((((x) & 0x000fff00) >>  8)))
+#define	minor(x)	((int32_t)((((x) & 0xfff00000) >> 12) | \
+				   (((x) & 0x000000ff) >>  0)))
 #define	makedev(x,y)	((dev_t)((((x) <<  8) & 0x000fff00) | \
 				 (((y) << 12) & 0xfff00000) | \
 				 (((y) <<  0) & 0x000000ff)))
@@ -319,7 +316,7 @@ typedef int pri_t;
 
 #endif
 
-#if defined(__STDC__) && (defined(_KERNEL) || defined(_KMEMUSER))
+#if defined(__STDC__) && defined(_KERNEL)
 /*
  * Forward structure declarations for function prototypes.  We include the
  * common structures that cross subsystem boundaries here; others are mostly

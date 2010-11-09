@@ -1,4 +1,4 @@
-/*	$NetBSD: machdep.c,v 1.13 2009/03/02 09:33:02 nonaka Exp $	*/
+/*	$NetBSD: machdep.c,v 1.3 2006/12/18 15:30:56 nonaka Exp $	*/
 /*	$OpenBSD: zaurus_machdep.c,v 1.25 2006/06/20 18:24:04 todd Exp $	*/
 
 /*
@@ -107,11 +107,11 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.13 2009/03/02 09:33:02 nonaka Exp $");
+__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.3 2006/12/18 15:30:56 nonaka Exp $");
 
 #include "opt_ddb.h"
 #include "opt_kgdb.h"
-#include "opt_modular.h"
+#include "opt_ipkdb.h"
 #include "opt_pmap_debug.h"
 #include "opt_md.h"
 #include "opt_com.h"
@@ -133,6 +133,7 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.13 2009/03/02 09:33:02 nonaka Exp $");
 #include <dev/cons.h>
 #include <sys/conf.h>
 #include <sys/queue.h>
+#include <sys/device.h>
 
 #include <machine/db_machdep.h>
 #include <ddb/db_sym.h>
@@ -189,7 +190,11 @@ u_int cpu_reset_address = 0;
 /* Define various stack sizes in pages */
 #define IRQ_STACK_SIZE	1
 #define ABT_STACK_SIZE	1
+#ifdef IPKDB
+#define UND_STACK_SIZE	2
+#else
 #define UND_STACK_SIZE	1
+#endif
 
 int zaurusmod;			/* Zaurus model */
 
@@ -209,6 +214,7 @@ int max_processes = 64;			/* Default number */
 #endif	/* !PMAP_STATIC_L1S */
 
 /* Physical and virtual addresses for some global pages */
+pv_addr_t systempage;
 pv_addr_t irqstack;
 pv_addr_t undstack;
 pv_addr_t abtstack;
@@ -240,74 +246,12 @@ struct user *proc0paddr;
 const char *console = "glass";
 int glass_console = 0;
 
-struct bootinfo _bootinfo;
-struct bootinfo *bootinfo;
-struct btinfo_howto *bi_howto;
+char	bootargs[MAX_BOOT_STRING];
+void	process_kernel_args(char *);
 
-/* Prototypes */
 void	consinit(void);
-void	dumpsys(void);
-#ifdef KGDB
 void	kgdb_port_init(void);
-#endif
-
-#if defined(CPU_XSCALE_PXA250)
-static struct pxa2x0_gpioconf pxa25x_boarddep_gpioconf[] = {
-	{  34, GPIO_ALT_FN_1_IN },	/* FFRXD */
-	{  35, GPIO_ALT_FN_1_IN },	/* FFCTS */
-	{  39, GPIO_ALT_FN_2_OUT },	/* FFTXD */
-	{  40, GPIO_ALT_FN_2_OUT },	/* FFDTR */
-	{  41, GPIO_ALT_FN_2_OUT },	/* FFRTS */
-
-	{  44, GPIO_ALT_FN_1_IN },	/* BTCST */
-	{  45, GPIO_ALT_FN_2_OUT },	/* BTRST */
-
-	{ -1 }
-};
-static struct pxa2x0_gpioconf *pxa25x_zaurus_gpioconf[] = {
-	pxa25x_com_btuart_gpioconf,
-	pxa25x_com_ffuart_gpioconf,
-	pxa25x_com_stuart_gpioconf,
-	pxa25x_boarddep_gpioconf,
-	NULL
-};
-#else
-static struct pxa2x0_gpioconf *pxa25x_zaurus_gpioconf[] = {
-	NULL
-};
-#endif
-#if defined(CPU_XSCALE_PXA270)
-static struct pxa2x0_gpioconf pxa27x_boarddep_gpioconf[] = {
-	{  34, GPIO_ALT_FN_1_IN },	/* FFRXD */
-	{  35, GPIO_ALT_FN_1_IN },	/* FFCTS */
-	{  39, GPIO_ALT_FN_2_OUT },	/* FFTXD */
-	{  40, GPIO_ALT_FN_2_OUT },	/* FFDTR */
-	{  41, GPIO_ALT_FN_2_OUT },	/* FFRTS */
-
-	{  44, GPIO_ALT_FN_1_IN },	/* BTCST */
-	{  45, GPIO_ALT_FN_2_OUT },	/* BTRST */
-
-	{ 109, GPIO_ALT_FN_1_IN },	/* MMDAT<1> */
-	{ 110, GPIO_ALT_FN_1_IN },	/* MMDAT<2>/MMCCS<0> */
-	{ 111, GPIO_ALT_FN_1_IN },	/* MMDAT<3>/MMCCS<1> */
-
-	{ -1 }
-};
-static struct pxa2x0_gpioconf *pxa27x_zaurus_gpioconf[] = {
-	pxa27x_com_btuart_gpioconf,
-	pxa27x_com_ffuart_gpioconf,
-	pxa27x_com_stuart_gpioconf,
-	pxa27x_i2c_gpioconf,
-	pxa27x_i2s_gpioconf,
-	pxa27x_pxamci_gpioconf,
-	pxa27x_boarddep_gpioconf,
-	NULL
-};
-#else
-static struct pxa2x0_gpioconf *pxa27x_zaurus_gpioconf[] = {
-	NULL
-};
-#endif
+void	dumpsys(void);
 
 /*
  * void cpu_reboot(int howto, char *bootstr)
@@ -325,11 +269,19 @@ cpu_reboot(int howto, char *bootstr)
 	 * and crash to earth fast
 	 */
 	if (cold) {
-		howto |= RB_HALT;
-		goto haltsys;
-	}
+		doshutdownhooks();
+		printf("The operating system has halted.\n");
+		printf("Please press any key to reboot.\n\n");
+		cngetc();
 
-	boothowto = howto;
+		printf("rebooting...\n");
+		delay(6 * 1000 * 1000);	/* wait 6s */
+		zaurus_restart();
+		printf("REBOOT FAILED: spinning\n");
+		for (;;)
+			continue;
+		/*NOTREACHED*/
+	}
 
 	/*
 	 * If RB_NOSYNC was not specified sync the discs.
@@ -338,17 +290,8 @@ cpu_reboot(int howto, char *bootstr)
 	 * that it cannot page part of the binary in as the filesystem has
 	 * been unmounted.
 	 */
-	if (!(howto & RB_NOSYNC)) {
+	if (!(howto & RB_NOSYNC))
 		bootsync();
-		/*
-		 * If we've been adjusting the clock, the todr
-		 * will be out of synch; adjust it now.
-		 */
-		resettodr();
-	}
-
-	/* Wait 3s */
-	delay(3 * 1000 * 1000);
 
 	/* Say NO to interrupts */
 	splhigh();
@@ -356,12 +299,9 @@ cpu_reboot(int howto, char *bootstr)
 	/* Do a dump if requested. */
 	if ((howto & (RB_DUMP | RB_HALT)) == RB_DUMP)
 		dumpsys();
-
-haltsys:
+	
 	/* Run any shutdown hooks */
 	doshutdownhooks();
-
-	pmf_system_shutdown(boothowto);
 
 	/* Make sure IRQ's are disabled */
 	IRQdisable;
@@ -370,6 +310,7 @@ haltsys:
 #if NAPM > 0
 		if (howto & RB_POWERDOWN) {
 			printf("\nAttempting to power down...\n");
+			delay(1 * 1000 * 1000);
 			zapm_poweroff();
 		}
 #endif
@@ -381,7 +322,6 @@ haltsys:
 	printf("rebooting...\n");
 	delay(1 * 1000 * 1000);
 	zaurus_restart();
-
 	printf("REBOOT FAILED!!!\n");
 	for (;;)
 		continue;
@@ -408,7 +348,7 @@ zaurus_restart(void)
 	delay(1 * 1000* 1000);	/* wait 1s */
 }
 
-static inline pd_entry_t *
+static __inline pd_entry_t *
 read_ttb(void)
 {
 	u_long ttb;
@@ -554,10 +494,9 @@ initarm(void *arg)
 	int loop;
 	int loop1;
 	u_int l1pagetable;
+	pv_addr_t kernel_l1pt;
 	paddr_t memstart;
 	psize_t memsize;
-	struct pxa2x0_gpioconf **zaurus_gpioconf;
-	u_int *magicaddr;
 
 	/* Get ready for zaurus_restart() */
 	pxa2x0_memctl_bootstrap(PXA2X0_MEMCTL_BASE);
@@ -586,41 +525,24 @@ initarm(void *arg)
 	 * Examine the boot args string for options we need to know about
 	 * now.
 	 */
-	magicaddr = (void *)(0xa0200000 - BOOTARGS_BUFSIZ);
-	if (*magicaddr == BOOTARGS_MAGIC) {
-		bootinfo = &_bootinfo;
-		memcpy(bootinfo,
-		  (char *)0xa0200000 - BOOTINFO_MAXSIZE, BOOTINFO_MAXSIZE);
-		bi_howto = lookup_bootinfo(BTINFO_HOWTO);
-		if (bi_howto)
-			boothowto = bi_howto->howto;
-	} else {
-		boothowto = RB_AUTOBOOT;
-	}
-	*magicaddr = 0xdeadbeef;
+	/* XXX should really be done after setting up the console, but we
+	 * XXX need to parse the console selection flags right now. */
+	process_kernel_args((char *)0xa0200000 - MAX_BOOT_STRING - 1);
 #ifdef RAMDISK_HOOKS
         boothowto |= RB_DFLTROOT;
 #endif /* RAMDISK_HOOKS */
-	if (boothowto & RB_MD1) {
-		/* serial console */
-		console = "ffuart";
-	}
 
 	/*
 	 * This test will work for now but has to be revised when support
 	 * for other models is added.
 	 */
-	if ((cputype & ~CPU_ID_XSCALE_COREREV_MASK) == CPU_ID_PXA27X) {
+	if ((cputype & ~CPU_ID_XSCALE_COREREV_MASK) == CPU_ID_PXA27X)
 		zaurusmod = ZAURUS_C3000;
-		zaurus_gpioconf = pxa27x_zaurus_gpioconf;
-	} else {
+	else
 		zaurusmod = ZAURUS_C860;
-		zaurus_gpioconf = pxa25x_zaurus_gpioconf;
-	}
 
 	/* setup a serial console for very early boot */
 	pxa2x0_gpio_bootstrap(ZAURUS_GPIO_VBASE);
-	pxa2x0_gpio_config(zaurus_gpioconf);
 	pxa2x0_clkman_bootstrap(ZAURUS_CLKMAN_VBASE);
 	if (strcmp(console, "glass") != 0)
 		consinit();
@@ -628,10 +550,8 @@ initarm(void *arg)
 	kgdb_port_init();
 #endif
 
-#ifdef VERBOSE_INIT_ARM
 	/* Talk to the user */
 	printf("\nNetBSD/zaurus booting ...\n");
-#endif
 
 	{
 		/* XXX - all Zaurus have this for now, fix memory sizing */
@@ -718,6 +638,8 @@ initarm(void *arg)
 	memset((char *)(var), 0, ((np) * PAGE_SIZE));
 
 	loop1 = 0;
+	kernel_l1pt.pv_pa = 0;
+	kernel_l1pt.pv_va = 0;
 	for (loop = 0; loop <= NUM_KERNEL_PTS; ++loop) {
 		/* Are we 16KB aligned for an L1 ? */
 		if (((physical_freeend - L1_TABLE_SIZE) & (L1_TABLE_SIZE - 1)) == 0
@@ -976,10 +898,18 @@ initarm(void *arg)
 #ifdef VERBOSE_INIT_ARM
 	printf("pmap ");
 #endif
-	pmap_bootstrap(KERNEL_VM_BASE, KERNEL_VM_BASE + KERNEL_VM_SIZE);
+	pmap_bootstrap((pd_entry_t *)kernel_l1pt.pv_va, KERNEL_VM_BASE,
+	    KERNEL_VM_BASE + KERNEL_VM_SIZE);
 
 #ifdef __HAVE_MEMORY_DISK__
 	md_root_setconf(memory_disk, sizeof memory_disk);
+#endif
+
+#ifdef IPKDB
+	/* Initialise ipkdb */
+	ipkdb_init();
+	if (boothowto & RB_KDB)
+		ipkdb_connect(0);
 #endif
 
 #ifdef KGDB
@@ -989,13 +919,12 @@ initarm(void *arg)
 	}
 #endif
 
-#if NKSYMS || defined(DDB) || defined(MODULAR)
-	/* Firmware doesn't load symbols. */
-	ddb_init(0, NULL, NULL);
-#endif
-
 #ifdef DDB
 	db_machine_init();
+
+	/* Firmware doesn't load symbols. */
+	ddb_init(0, NULL, NULL);
+
 	if (boothowto & RB_KDB)
 		Debugger();
 #endif
@@ -1004,23 +933,86 @@ initarm(void *arg)
 	return (kernelstack.pv_va + USPACE_SVC_STACK_TOP);
 }
 
-void *
-lookup_bootinfo(int type)
+void
+process_kernel_args(char *args)
 {
-	struct btinfo_common *help;
-	int n;
+	char *cp = args;
 
-	if (bootinfo == NULL)
-		return (NULL);
-
-	n = bootinfo->nentries;
-	help = (struct btinfo_common *)(bootinfo->info);
-	while (n--) {
-		if (help->type == type)
-			return (help);
-		help = (struct btinfo_common *)((char *)help + help->len);
+	if (cp == NULL || *(u_int *)cp != BOOTARGS_MAGIC) {
+		boothowto = RB_AUTOBOOT;
+		return;
 	}
-	return (NULL);
+
+	/* Eat the cookie */
+	*(u_int *)cp = 0;
+	cp += sizeof(u_int);
+
+	boothowto = 0;
+
+	/* Make a local copy of the bootargs */
+	strncpy(bootargs, cp, MAX_BOOT_STRING - sizeof(u_int));
+
+	cp = bootargs;
+	boot_file = bootargs;
+
+	for (;;) {
+		/* Skip white-space */
+		while (*cp == ' ')
+			++cp;
+
+		if (*cp == '\0')
+			break;
+
+		if (*cp != '-') {
+			/* kernel image filename */
+			if (boot_file == NULL)
+				boot_file = cp;
+
+			/* Skip the kernel image filename */
+			while (*cp != ' ' && *cp != '\0')
+				++cp;
+			if (*cp == '\0')
+				break;
+
+			*cp++ = '\0';
+			continue;
+		}
+
+		/* options */
+		if (*++cp != '\0') {
+			int fl = 0;
+
+			switch (*cp) {
+			case 'a':
+				fl |= RB_ASKNAME;
+				break;
+			case 'c':
+				fl |= RB_USERCONF;
+				break;
+			case 'd':
+				fl |= RB_KDB;
+				break;
+			case 's':
+				fl |= RB_SINGLE;
+				break;
+			/* XXX undocumented console switching flags */
+			case '0':
+				console = "ffuart";
+				break;
+			case '1':
+				console = "btuart";
+				break;
+			case '2':
+				console = "stuart";
+				break;
+			default:
+				printf("unknown option `%c'\n", *cp);
+				break;
+			}
+			boothowto |= fl;
+		}
+		++cp;
+	}
 }
 
 /*
@@ -1028,6 +1020,7 @@ lookup_bootinfo(int type)
  */
 #include "com.h"
 #if (NCOM > 0)
+#include <dev/ic/comreg.h>
 #include <dev/ic/comvar.h>
 #endif
 
@@ -1080,12 +1073,23 @@ consinit(void)
 	if (strcmp(console, "ffuart") == 0) {
 		paddr = PXA2X0_FFUART_BASE;
 		cken = CKEN_FFUART;
+		pxa2x0_gpio_set_function(34, GPIO_ALT_FN_1_IN);
+		pxa2x0_gpio_set_function(39, GPIO_ALT_FN_2_OUT);
+		pxa2x0_gpio_set_function(35, GPIO_ALT_FN_1_IN);
+		pxa2x0_gpio_set_function(40, GPIO_ALT_FN_2_OUT);
+		pxa2x0_gpio_set_function(41, GPIO_ALT_FN_2_OUT);
 	} else if (strcmp(console, "btuart") == 0) {
 		paddr = PXA2X0_BTUART_BASE;
 		cken = CKEN_BTUART;
+		pxa2x0_gpio_set_function(42, GPIO_ALT_FN_1_IN);
+		pxa2x0_gpio_set_function(43, GPIO_ALT_FN_2_OUT);
+		pxa2x0_gpio_set_function(44, GPIO_ALT_FN_1_IN);
+		pxa2x0_gpio_set_function(45, GPIO_ALT_FN_2_OUT);
 	} else if (strcmp(console, "stuart") == 0) {
 		paddr = PXA2X0_STUART_BASE;
 		cken = CKEN_STUART;
+		pxa2x0_gpio_set_function(46, GPIO_ALT_FN_2_IN);
+		pxa2x0_gpio_set_function(47, GPIO_ALT_FN_1_OUT);
 		irda_on(0);
 	} else
 #endif
@@ -1117,17 +1121,28 @@ kgdb_port_init(void)
 	if (strcmp(kgdb_devname, "ffuart") == 0) {
 		paddr = PXA2X0_FFUART_BASE;
 		cken = CKEN_FFUART;
+		pxa2x0_gpio_set_function(34, GPIO_ALT_FN_1_IN);
+		pxa2x0_gpio_set_function(39, GPIO_ALT_FN_2_OUT);
+		pxa2x0_gpio_set_function(35, GPIO_ALT_FN_1_IN);
+		pxa2x0_gpio_set_function(40, GPIO_ALT_FN_2_OUT);
+		pxa2x0_gpio_set_function(41, GPIO_ALT_FN_2_OUT);
 	} else if (strcmp(kgdb_devname, "btuart") == 0) {
 		paddr = PXA2X0_BTUART_BASE;
 		cken = CKEN_BTUART;
+		pxa2x0_gpio_set_function(42, GPIO_ALT_FN_1_IN);
+		pxa2x0_gpio_set_function(43, GPIO_ALT_FN_2_OUT);
+		pxa2x0_gpio_set_function(44, GPIO_ALT_FN_1_IN);
+		pxa2x0_gpio_set_function(45, GPIO_ALT_FN_2_OUT);
 	} else if (strcmp(kgdb_devname, "stuart") == 0) {
 		paddr = PXA2X0_STUART_BASE;
 		cken = CKEN_STUART;
+		pxa2x0_gpio_set_function(46, GPIO_ALT_FN_2_IN);
+		pxa2x0_gpio_set_function(47, GPIO_ALT_FN_1_OUT);
 		irda_on(0);
 	} else
 		return;
 
-	if (com_kgdb_attach(&pxa2x0_a4x_bs_tag, paddr,
+	if (com_kgdb_attach_pxa2x0(&pxa2x0_a4x_bs_tag, paddr,
 	    kgdb_rate, PXA2X0_COM_FREQ, COM_TYPE_PXA2x0, comkgdbmode) == 0) {
 		pxa2x0_clkman_config(cken, 1);
 	}

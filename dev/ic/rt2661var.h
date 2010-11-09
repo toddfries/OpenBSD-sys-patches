@@ -1,4 +1,4 @@
-/*	$NetBSD: rt2661var.h,v 1.8 2008/04/29 22:21:45 scw Exp $	*/
+/*	$NetBSD: rt2661var.h,v 1.6 2007/03/04 06:02:00 christos Exp $	*/
 /*	$OpenBSD: rt2661var.h,v 1.4 2006/02/25 12:56:47 damien Exp $	*/
 
 /*-
@@ -52,6 +52,7 @@ struct rt2661_tx_data {
 	bus_dmamap_t			map;
 	struct mbuf			*m;
 	struct ieee80211_node		*ni;
+	struct ieee80211_rssdesc	id;
 };
 
 struct rt2661_tx_ring {
@@ -85,7 +86,7 @@ struct rt2661_rx_ring {
 
 struct rt2661_node {
 	struct ieee80211_node		ni;
-	struct ieee80211_amrr_node	amn;
+	struct ieee80211_rssadapt	rssadapt;
 };
 
 struct rt2661_softc {
@@ -97,6 +98,7 @@ struct rt2661_softc {
 
 	int				(*sc_enable)(struct rt2661_softc *);
 	void				(*sc_disable)(struct rt2661_softc *);
+	void				(*sc_power)(struct rt2661_softc *, int);
 
 	bus_dma_tag_t			sc_dmat;
 	bus_space_tag_t			sc_st;
@@ -105,19 +107,16 @@ struct rt2661_softc {
 	struct ethercom			sc_ec;
 
 	struct callout			scan_ch;
-	struct callout			amrr_ch;
+	struct callout			rssadapt_ch;
 
 	int				sc_id;
 	int				sc_flags;
-#define RT2661_ENABLED		(1 << 0)
-#define RT2661_FWLOADED		(1 << 1)
-#define RT2661_UPDATE_SLOT	(1 << 2)
-#define RT2661_SET_SLOTTIME	(1 << 3)
+#define RT2661_ENABLED	(1 << 0)
+#define RT2661_FWLOADED	(1 << 1)
 
 	int				sc_tx_timer;
 
 	struct ieee80211_channel	*sc_curchan;
-	struct ieee80211_amrr		amrr;
 
 	uint8_t				rf_rev;
 
@@ -144,12 +143,6 @@ struct rt2661_softc {
 	int				ext_5ghz_lna;
 	int				rssi_2ghz_corr;
 	int				rssi_5ghz_corr;
-
-	int				ncalls;
-	int				avg_rssi;
-	int				sifs;
-
-	uint32_t			erp_csr;
 
 	uint8_t				bbp18;
 	uint8_t				bbp21;

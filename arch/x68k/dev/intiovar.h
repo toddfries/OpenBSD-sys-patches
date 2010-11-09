@@ -1,4 +1,4 @@
-/*	$NetBSD: intiovar.h,v 1.13 2008/12/18 05:56:42 isaki Exp $	*/
+/*	$NetBSD: intiovar.h,v 1.7 2005/12/11 12:19:37 christos Exp $	*/
 
 /*
  *
@@ -64,31 +64,36 @@ struct intio_attach_args {
 };
 
 struct intio_softc {
+	struct device	sc_dev;
 	bus_space_tag_t	sc_bst;
 	bus_dma_tag_t	sc_dmat;
 	struct extent	*sc_map;
-	device_t	sc_dmac;
+	struct device	*sc_dmac;
 };
 
 enum intio_map_flag {
 	INTIO_MAP_ALLOCATE = 0,
 	INTIO_MAP_TESTONLY = 1
 };
-int intio_map_allocate_region(device_t, struct intio_attach_args *,
+int intio_map_allocate_region(struct device *, struct intio_attach_args *,
 	enum intio_map_flag);
-int intio_map_free_region(device_t, struct intio_attach_args *);
+int intio_map_free_region(struct device *, struct intio_attach_args *);
 
 typedef int (*intio_intr_handler_t)(void *);
 
 int intio_intr_establish(int, const char *, intio_intr_handler_t, void *);
-int intio_intr_establish_ext(int, const char *, const char *,
-	intio_intr_handler_t, void *);
 int intio_intr_disestablish(int, void *);
 int intio_intr(struct frame *);
 
 
+#define PHYS_INTIODEV 0x00c00000
+  
+extern u_int8_t *intiobase;
+
+#define INTIO_ADDR(a)	((volatile u_int8_t *) (((u_int32_t) (a)) - (PHYS_INTIODEV) + intiobase))
+
 #define INTIO_SYSPORT		(0x00e8e000)
-#define intio_sysport		((volatile uint8_t *)IIOV(INTIO_SYSPORT))
+#define intio_sysport		INTIO_ADDR(INTIO_SYSPORT)
 #define sysport_contrast	1
 #define sysport_tvctrl		3
 #define sysport_imageunit	5
@@ -131,7 +136,7 @@ int intio_intr(struct frame *);
 
 /* I/O controller (sicilian/pluto) */
 #define INTIO_SICILIAN		(0x00e9c000)
-#define intio_sicilian		((volatile uint8_t *)IIOV(INTIO_SICILIAN))
+#define intio_sicilian		INTIO_ADDR(INTIO_SICILIAN)
 #define sicilian_intr		1
 #define sicilian_ivec		3
 

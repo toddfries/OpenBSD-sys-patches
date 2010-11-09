@@ -1,4 +1,4 @@
-/*	$NetBSD: genfbvar.h,v 1.10 2009/02/17 02:19:33 jmcneill Exp $ */
+/*	$NetBSD: genfbvar.h,v 1.5 2007/10/19 12:01:24 ad Exp $ */
 
 /*-
  * Copyright (c) 2007 Michael Lorenz
@@ -12,6 +12,9 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -27,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: genfbvar.h,v 1.10 2009/02/17 02:19:33 jmcneill Exp $");
+__KERNEL_RCSID(0, "$NetBSD: genfbvar.h,v 1.5 2007/10/19 12:01:24 ad Exp $");
 
 #ifndef GENFBVAR_H
 #define GENFBVAR_H
@@ -48,7 +51,6 @@ __KERNEL_RCSID(0, "$NetBSD: genfbvar.h,v 1.10 2009/02/17 02:19:33 jmcneill Exp $
 struct genfb_ops {
 	int (*genfb_ioctl)(void *, void *, u_long, void *, int, struct lwp *);
 	paddr_t	(*genfb_mmap)(void *, void *, off_t, int);
-	int (*genfb_borrow)(void *, bus_addr_t, bus_space_handle_t *);
 };
 
 struct genfb_colormap_callback {
@@ -74,15 +76,9 @@ struct genfb_softc {
 	u_char sc_cmap_red[256];
 	u_char sc_cmap_green[256];
 	u_char sc_cmap_blue[256];
-	bool sc_want_clear;
 };
 
-void	genfb_cnattach(void);
-void	genfb_disable(void);
-int	genfb_is_console(void);
-int	genfb_is_enabled(void);
 void	genfb_init(struct genfb_softc *);
 int	genfb_attach(struct genfb_softc *, struct genfb_ops *);
-int	genfb_borrow(bus_addr_t, bus_space_handle_t *);
 
 #endif /* GENFBVAR_H */

@@ -1,4 +1,4 @@
-/* $NetBSD: if_le.c,v 1.5 2008/04/04 12:25:06 tsutsui Exp $ */
+/* $NetBSD: if_le.c,v 1.4 2005/12/11 12:17:52 christos Exp $ */
 
 /*-
  * Copyright (c) 1992, 1993
@@ -73,7 +73,7 @@
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
 
-__KERNEL_RCSID(0, "$NetBSD: if_le.c,v 1.5 2008/04/04 12:25:06 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_le.c,v 1.4 2005/12/11 12:17:52 christos Exp $");
 
 #include "opt_inet.h"
 #include "bpfilter.h"
@@ -103,14 +103,12 @@ __KERNEL_RCSID(0, "$NetBSD: if_le.c,v 1.5 2008/04/04 12:25:06 tsutsui Exp $");
 #include <dev/ic/am7990reg.h>
 #include <dev/ic/am7990var.h>
 
-#include "ioconf.h"
-
 /*
  * LANCE registers.
  */
 struct lereg1 {
-	volatile uint16_t	ler1_rdp;	/* data port */
-	volatile uint16_t	ler1_rap;	/* register select port */
+	volatile u_int16_t	ler1_rdp;	/* data port */
+	volatile u_int16_t	ler1_rap;	/* register select port */
 };
 
 /*
@@ -126,18 +124,21 @@ struct	le_softc {
 	struct	lereg1 *sc_r1;		/* LANCE registers */
 };
 
-static int  le_match(device_t, cfdata_t, void *);
-static void le_attach(device_t, device_t, void *);
+static int  le_match __P((struct device *, struct cfdata  *, void *));
+static void le_attach __P((struct device *, struct device *, void *));
 
-CFATTACH_DECL_NEW(le, sizeof(struct le_softc),
+CFATTACH_DECL(le, sizeof(struct le_softc),
     le_match, le_attach, NULL, NULL);
+extern struct cfdriver le_cd;
 
-static void lesrcsr(struct lance_softc *, uint16_t, uint16_t);
-static uint16_t lerdcsr(struct lance_softc *, uint16_t);
-static void myetheraddr(uint8_t *);
+static void lesrcsr __P((struct lance_softc *, u_int16_t, u_int16_t));
+static u_int16_t lerdcsr __P((struct lance_softc *, u_int16_t));
+static void myetheraddr __P((u_int8_t *));
 
 static void
-lesrcsr(struct lance_softc *sc, uint16_t port, uint16_t val)
+lesrcsr(sc, port, val)
+	struct lance_softc *sc;
+	u_int16_t port, val;
 {
 	struct lereg1 *ler1 = ((struct le_softc *)sc)->sc_r1;
 
@@ -145,11 +146,13 @@ lesrcsr(struct lance_softc *sc, uint16_t port, uint16_t val)
 	ler1->ler1_rdp = val;
 }
 
-static uint16_t
-lerdcsr(struct lance_softc *sc, uint16_t port)
+static u_int16_t
+lerdcsr(sc, port)
+	struct lance_softc *sc;
+	u_int16_t port;
 {
 	struct lereg1 *ler1 = ((struct le_softc *)sc)->sc_r1;
-	uint16_t val;
+	u_int16_t val;
 
 	ler1->ler1_rap = port;
 	val = ler1->ler1_rdp;
@@ -157,7 +160,10 @@ lerdcsr(struct lance_softc *sc, uint16_t port)
 }
 
 static int
-le_match(device_t parent, cfdata_t cf, void *aux)
+le_match(parent, cf, aux)
+	struct device *parent;
+	struct cfdata *cf;
+	void *aux;
 {
 	struct mainbus_attach_args *ma = aux;
 
@@ -168,13 +174,13 @@ le_match(device_t parent, cfdata_t cf, void *aux)
 }
 
 void
-le_attach(device_t parent, device_t self, void *aux)
+le_attach(parent, self, aux)
+	struct device *parent, *self;
+	void *aux;
 {
-	struct le_softc *lesc = device_private(self);
+	struct le_softc *lesc = (void *)self;
 	struct lance_softc *sc = &lesc->sc_am7990.lsc;
 	struct mainbus_attach_args *ma = aux;
-
-	sc->sc_dev = self;
 
 	/* Map control registers. */
 	lesc->sc_r1 = (struct lereg1 *)ma->ma_addr;	/* LANCE */
@@ -210,16 +216,17 @@ le_attach(device_t parent, device_t self, void *aux)
  * mapped at 0xF1000004.
  */
 void
-myetheraddr(uint8_t *ether)
+myetheraddr(ether)
+	u_int8_t *ether;
 {
-	unsigned int i, loc;
-	uint8_t *ea;
-	volatile struct { uint32_t ctl; } *ds1220;
+	unsigned i, loc;
+	u_int8_t *ea;
+	volatile struct { u_int32_t ctl; } *ds1220;
 
 	switch (machtype) {
 	case LUNA_I:
-		ea = (uint8_t *)0x4101FFE0;
-		for (i = 0; i < ETHER_ADDR_LEN; i++) {
+		ea = (u_int8_t *)0x4101FFE0;
+		for (i = 0; i < 6; i++) {
 			int u, l;
 
 			u = ea[0];
@@ -234,8 +241,8 @@ myetheraddr(uint8_t *ether)
 	case LUNA_II:
 		ds1220 = (void *)0xF1000004;
 		loc = 12;
-		for (i = 0; i < ETHER_ADDR_LEN; i++) {
-			unsigned int u, l, hex;
+		for (i = 0; i < 6; i++) {
+			unsigned u, l, hex;
 
 			ds1220->ctl = (loc) << 16;
 			u = 0xf0 & (ds1220->ctl >> 12);

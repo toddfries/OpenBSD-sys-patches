@@ -1,4 +1,4 @@
-/* $NetBSD: midictl.c,v 1.6 2008/06/24 10:55:48 gmcgarry Exp $ */
+/* $NetBSD: midictl.c,v 1.4 2006/11/16 01:32:45 christos Exp $ */
 
 /*-
  * Copyright (c) 2006 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -29,7 +36,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: midictl.c,v 1.6 2008/06/24 10:55:48 gmcgarry Exp $");
+__KERNEL_RCSID(0, "$NetBSD: midictl.c,v 1.4 2006/11/16 01:32:45 christos Exp $");
 
 /*
  * See midictl.h for an overview of the purpose and use of this module.
@@ -532,7 +539,7 @@ struct midictl_store {
 };
 
 static uint32_t store_idx(uint32_t lgcapacity,
-			  uint64_t *table,
+			  uint64_t table[static 1<<lgcapacity],
                           uint64_t key, uint64_t mask);
 static void store_rehash(midictl_store *s);
 
@@ -637,7 +644,7 @@ store_update(midictl_store *s, class c, uint_fast8_t chan,
 }
 
 static uint32_t
-store_idx(uint32_t lgcapacity, uint64_t *table,
+store_idx(uint32_t lgcapacity, uint64_t table[static 1<<lgcapacity],
           uint64_t key, uint64_t mask)
 {
 	uint32_t val;

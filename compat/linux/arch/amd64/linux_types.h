@@ -1,4 +1,4 @@
-/*	$NetBSD: linux_types.h,v 1.6 2009/01/11 02:45:48 christos Exp $ */
+/*	$NetBSD: linux_types.h,v 1.2 2005/12/11 12:20:14 christos Exp $ */
 
 /*-
  * Copyright (c) 2005 Emmanuel Dreyfus, all rights reserved.
@@ -37,7 +37,6 @@
 typedef long linux_off_t;
 typedef long linux_clock_t;
 typedef long linux_time_t;
-typedef long linux_suseconds_t;
 typedef unsigned int linux_uid_t;
 typedef unsigned int linux_gid_t;
 typedef int linux_pid_t;
@@ -47,12 +46,6 @@ typedef unsigned long linux_dev_t;
 typedef unsigned long linux_ino_t;
 typedef int linux_timer_t;
 
-/* From linux_termios.h */
-typedef unsigned char linux_cc_t;
-typedef unsigned int linux_speed_t;
-typedef unsigned int linux_tcflag_t;
-
-#define LINUX_STAT64_HAS_NSEC	1
 struct linux_stat64 {
 	linux_dev_t	lst_dev;
 	linux_ino_t	lst_ino;
@@ -94,6 +87,6 @@ struct linux_stat {
 	unsigned 	lst_ctime;
 	unsigned	lst_ctime_nsec;
 	unsigned long long lst_ino;
-} __packed;
+} __attribute__((packed));
 
 #endif /* !_AMD64_LINUX_TYPES_H */

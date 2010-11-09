@@ -1,4 +1,4 @@
-/*	$NetBSD: pxa2x0_pcic.h,v 1.4 2009/01/29 12:28:15 nonaka Exp $	*/
+/*	$NetBSD: pxa2x0_pcic.h,v 1.1 2006/12/17 16:03:33 peter Exp $	*/
 /*	$OpenBSD: pxapcicvar.h,v 1.7 2005/12/14 15:08:51 uwe Exp $ */
 
 /*
@@ -24,7 +24,7 @@ struct pxapcic_socket {
 	struct pxapcic_softc *sc;
 	int socket;		/* socket number */
 	struct device *pcmcia;
-	struct lwp *event_thread;
+	struct proc *event_thread;
 
 	int flags;
 	int power_capability;	/* PXAPCIC_POWER_3V | PXAPCIC_POWER_5V */
@@ -68,7 +68,7 @@ struct pxapcic_tag {
 #define PXAPCIC_NSLOT	2
 
 struct pxapcic_softc {
-	device_t sc_dev;
+	struct device sc_dev;
 	struct pxapcic_socket sc_socket[PXAPCIC_NSLOT];
 
 	bus_space_tag_t sc_iot;

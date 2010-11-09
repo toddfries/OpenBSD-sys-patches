@@ -1,4 +1,4 @@
-/*	$NetBSD: db_memrw.c,v 1.24 2008/04/28 20:23:24 martin Exp $	*/
+/*	$NetBSD: db_memrw.c,v 1.19 2005/12/11 12:17:41 christos Exp $	*/
 
 /*-
  * Copyright (c) 1996, 2000 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -49,9 +56,9 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: db_memrw.c,v 1.24 2008/04/28 20:23:24 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: db_memrw.c,v 1.19 2005/12/11 12:17:41 christos Exp $");
 
-#include "opt_xen.h"
+#include "opt_largepages.h"
 
 #include <sys/param.h>
 #include <sys/proc.h>
@@ -61,7 +68,7 @@ __KERNEL_RCSID(0, "$NetBSD: db_memrw.c,v 1.24 2008/04/28 20:23:24 martin Exp $")
 
 #include <machine/db_machdep.h>
 #if defined(XEN)
-#include <xen/xenpmap.h>
+#include <machine/xenpmap.h>
 #endif
 
 #include <ddb/db_access.h>
@@ -112,7 +119,11 @@ db_write_text(vaddr_t addr, size_t size, const char *data)
 		 * Get the PTE for the page.
 		 */
 		pte = kvtopte(addr);
+#if defined(XEN)
+		oldpte = PTE_GET_MA(pte);
+#else
 		oldpte = *pte;
+#endif
 
 		if ((oldpte & PG_V) == 0) {
 			printf(" address %p not a valid page\n", dst);
@@ -122,9 +133,11 @@ db_write_text(vaddr_t addr, size_t size, const char *data)
 		/*
 		 * Get the VA for the page.
 		 */
+#ifdef LARGEPAGES
 		if (oldpte & PG_PS)
 			pgva = (vaddr_t)dst & PG_LGFRAME;
 		else
+#endif
 			pgva = x86_trunc_page(dst);
 
 		/*
@@ -132,17 +145,22 @@ db_write_text(vaddr_t addr, size_t size, const char *data)
 		 * with this mapping and subtract it from the
 		 * total size.
 		 */
+#ifdef LARGEPAGES
 		if (oldpte & PG_PS)
-			limit = NBPD_L2 - ((vaddr_t)dst & (NBPD_L2 - 1));
+			limit = NBPD - ((vaddr_t)dst & (NBPD - 1));
 		else
+#endif
 			limit = PAGE_SIZE - ((vaddr_t)dst & PGOFSET);
 		if (limit > size)
 			limit = size;
 		size -= limit;
 
 		tmppte = (oldpte & ~PG_KR) | PG_KW;
-		pmap_pte_set(pte, tmppte);
-		pmap_pte_flush();
+#if defined(XEN)
+		PTE_SET_MA(pte, (pt_entry_t *)vtomach((vaddr_t)pte), tmppte);
+#else
+		*pte = tmppte;
+#endif
 		pmap_update_pg(pgva);
 		/*
 		 * MULTIPROCESSOR: no shootdown required as the PTE continues to
@@ -159,8 +177,12 @@ db_write_text(vaddr_t addr, size_t size, const char *data)
 		/*
 		 * Restore the old PTE.
 		 */
-		pmap_pte_set(pte, oldpte);
-		pmap_pte_flush();
+#if defined(XEN)
+		PTE_SET_MA(pte, (pt_entry_t *)vtomach((vaddr_t)pte), oldpte);
+#else
+		*pte = oldpte;
+#endif
+
 #if 0 
 		/*
 		 * XXXSMP Not clear if this is needed for 100% correctness.
@@ -170,8 +192,8 @@ db_write_text(vaddr_t addr, size_t size, const char *data)
 			/*
 			 * shoot down in case other CPU mistakenly caches page.
 			 */
-			pmap_tlb_shootdown(pmap_kernel(), pgva, 0, PG_G);
-			pmap_tlb_shootwait();
+			pmap_tlb_shootdown(pmap_kernel(), pgva, oldpte, &cpumask);
+			pmap_tlb_shootnow(cpumask);
 		}
 #else
 		pmap_update_pg(pgva);
@@ -186,13 +208,13 @@ db_write_text(vaddr_t addr, size_t size, const char *data)
 void
 db_write_bytes(vaddr_t addr, size_t size, const char *data)
 {
-	extern char __data_start;
+	extern char etext;
 	char *dst;
 
 	dst = (char *)addr;
 
 	/* If any part is in kernel text, use db_write_text() */
-	if (addr >= KERNBASE && addr < (vaddr_t)&__data_start) {
+	if (addr >= KERNBASE && addr < (vaddr_t)&etext) {
 		db_write_text(addr, size, data);
 		return;
 	}

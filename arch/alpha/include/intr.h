@@ -1,4 +1,4 @@
-/* $NetBSD: intr.h,v 1.66 2008/04/28 20:23:11 martin Exp $ */
+/* $NetBSD: intr.h,v 1.68 2010/06/22 18:29:02 rmind Exp $ */
 
 /*-
  * Copyright (c) 2000, 2001, 2002 The NetBSD Foundation, Inc.
@@ -165,7 +165,7 @@ _splraise(int s)
 #define	ALPHA_IPI_SYNCH_FPU		(1UL << 5)
 #define	ALPHA_IPI_DISCARD_FPU		(1UL << 6)
 #define	ALPHA_IPI_PAUSE			(1UL << 7)
-#define	ALPHA_IPI_PMAP_REACTIVATE	(1UL << 8)
+#define	ALPHA_IPI_XCALL			(1UL << 8)
 
 #define	ALPHA_NIPIS		9	/* must not exceed 64 */
 

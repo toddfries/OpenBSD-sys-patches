@@ -1,4 +1,4 @@
-/*	$NetBSD: uvm_map.h,v 1.62 2008/07/29 00:03:06 matt Exp $	*/
+/*	$NetBSD: uvm_map.h,v 1.58 2007/07/22 21:07:47 he Exp $	*/
 
 /*
  * Copyright (c) 1997 Charles D. Cranor and Washington University.
@@ -110,7 +110,7 @@
 
 #endif /* _KERNEL */
 
-#include <sys/rb.h>
+#include <sys/tree.h>
 #include <sys/pool.h>
 #include <sys/rwlock.h>
 #include <sys/mutex.h>
@@ -125,9 +125,9 @@
  * Also included is control information for virtual copy operations.
  */
 struct vm_map_entry {
-	struct rb_node		rb_node;	/* tree information */
-	vsize_t			gap;		/* free space after */
-	vsize_t			maxgap;		/* space in subtree */
+	RB_ENTRY(vm_map_entry)	rb_entry;	/* tree information */
+	vaddr_t			ownspace;	/* free space after */
+	vaddr_t			space;		/* space in subtree */
 	struct vm_map_entry	*prev;		/* previous entry */
 	struct vm_map_entry	*next;		/* next entry */
 	vaddr_t			start;		/* start address */
@@ -214,9 +214,10 @@ struct vm_map {
 	struct lwp *		busy;		/* LWP holding map busy */
 	kmutex_t		mutex;		/* INTRSAFE lock */
 	kmutex_t		misc_lock;	/* Lock for ref_count, cv */
+	kmutex_t		hint_lock;	/* lock for hint storage */
 	kcondvar_t		cv;		/* For signalling */
 	int			flags;		/* flags */
-	struct rb_tree		rb_tree;	/* Tree for entries */
+	RB_HEAD(uvm_tree, vm_map_entry) rbhead;	/* Tree for entries */
 	struct vm_map_entry	header;		/* List of entries */
 	int			nentries;	/* Number of entries */
 	vsize_t			size;		/* virtual size */
@@ -316,7 +317,7 @@ bool		uvm_map_lookup_entry(struct vm_map *, vaddr_t,
 		    struct vm_map_entry **);
 void		uvm_map_reference(struct vm_map *);
 int		uvm_map_replace(struct vm_map *, vaddr_t, vaddr_t,
-		    struct vm_map_entry *, int, struct vm_map_entry **);
+		    struct vm_map_entry *, int);
 int		uvm_map_reserve(struct vm_map *, vsize_t, vaddr_t, vsize_t,
 		    vaddr_t *, uvm_flag_t);
 void		uvm_map_setup(struct vm_map *, vaddr_t, vaddr_t, int);
@@ -359,11 +360,60 @@ bool		vm_map_starved_p(struct vm_map *);
 bool		vm_map_lock_try(struct vm_map *);
 void		vm_map_lock(struct vm_map *);
 void		vm_map_unlock(struct vm_map *);
+void		vm_map_upgrade(struct vm_map *);
 void		vm_map_unbusy(struct vm_map *);
-void		vm_map_lock_read(struct vm_map *);
-void		vm_map_unlock_read(struct vm_map *);
-void		vm_map_busy(struct vm_map *);
-bool		vm_map_locked_p(struct vm_map *);
+
+/*
+ * vm_map_lock_read: acquire a shared (read) lock on a map.
+ */
+
+static inline void
+vm_map_lock_read(struct vm_map *map)
+{
+
+	KASSERT((map->flags & VM_MAP_INTRSAFE) == 0);
+
+	rw_enter(&map->lock, RW_READER);
+}
+
+/*
+ * vm_map_unlock_read: release a shared lock on a map.
+ */
+ 
+static inline void
+vm_map_unlock_read(struct vm_map *map)
+{
+
+	KASSERT((map->flags & VM_MAP_INTRSAFE) == 0);
+
+	rw_exit(&map->lock);
+}
+/*
+ * vm_map_downgrade: downgrade an exclusive lock to a shared lock.
+ */
+
+static inline void
+vm_map_downgrade(struct vm_map *map)
+{
+
+	rw_downgrade(&map->lock);
+}
+
+/*
+ * vm_map_busy: mark a map as busy.
+ *
+ * => the caller must hold the map write locked
+ */
+
+static inline void
+vm_map_busy(struct vm_map *map)
+{
+
+	KASSERT(rw_write_held(&map->lock));
+	KASSERT(map->busy == NULL);
+
+	map->busy = curlwp;
+}
 
 #endif /* _KERNEL */
 

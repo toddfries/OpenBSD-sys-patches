@@ -1,10 +1,12 @@
-/*	$NetBSD: omap_rtc.c,v 1.4 2008/12/12 17:36:14 matt Exp $	*/
+/*	$NetBSD: omap_rtc.c,v 1.1 2007/01/06 00:59:45 christos Exp $	*/
 
 /*
  * OMAP RTC driver, based on i80321_timer.c.
  *
- * Copyright (c) 2007 Microsoft
+ * Copyright (c) 2001, 2002 Wasabi Systems, Inc.
  * All rights reserved.
+ *
+ * Written by Jason R. Thorpe for Wasabi Systems, Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -16,23 +18,27 @@
  *    documentation and/or other materials provided with the distribution.
  * 3. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgement:
- *	This product includes software developed by Microsoft
+ *	This product includes software developed for the NetBSD Project by
+ *	Wasabi Systems, Inc.
+ * 4. The name of Wasabi Systems, Inc. may not be used to endorse
+ *    or promote products derived from this software without specific prior
+ *    written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED
- * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTERS BE LIABLE FOR ANY DIRECT,
- * INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
- * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY WASABI SYSTEMS, INC. ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL WASABI SYSTEMS, INC
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: omap_rtc.c,v 1.4 2008/12/12 17:36:14 matt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: omap_rtc.c,v 1.1 2007/01/06 00:59:45 christos Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -78,11 +84,11 @@ __KERNEL_RCSID(0, "$NetBSD: omap_rtc.c,v 1.4 2008/12/12 17:36:14 matt Exp $");
 #define RTC_INTERRUPTS_REG	0x48
 #define IT_ALARM		3
 
-static int	omaprtc_match(device_t, cfdata_t, void *);
-static void	omaprtc_attach(device_t, device_t, void *);
+static int	omaprtc_match(struct device *, struct cfdata *, void *);
+static void	omaprtc_attach(struct device *, struct device *, void *);
 
 struct omaprtc_softc {
-	device_t		sc_dev;
+	struct device		sc_dev;
 	bus_space_tag_t		sc_iot;
 	bus_space_handle_t	sc_ioh;
 	int			sc_intr;
@@ -90,7 +96,7 @@ struct omaprtc_softc {
 	struct todr_chip_handle	sc_todr;
 };
 
-CFATTACH_DECL_NEW(omaprtc, sizeof(struct omaprtc_softc),
+CFATTACH_DECL(omaprtc, sizeof(struct omaprtc_softc),
     omaprtc_match, omaprtc_attach, NULL, NULL);
 
 static int omaprtc_gettime(todr_chip_handle_t, struct clock_ymdhms *);
@@ -195,7 +201,7 @@ omaprtc_settime(todr_chip_handle_t tch, struct clock_ymdhms *dt)
 }
 
 static int
-omaprtc_match(device_t parent, cfdata_t match, void *aux)
+omaprtc_match(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct tipb_attach_args *tipb = aux;
 
@@ -210,9 +216,9 @@ omaprtc_match(device_t parent, cfdata_t match, void *aux)
 }
 
 void
-omaprtc_attach(device_t parent, device_t self, void *aux)
+omaprtc_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct omaprtc_softc *sc = device_private(self);
+	struct omaprtc_softc *sc = (struct omaprtc_softc*)self;
 	struct tipb_attach_args *tipb = aux;
 
 	sc->sc_iot = tipb->tipb_iot;
@@ -220,7 +226,7 @@ omaprtc_attach(device_t parent, device_t self, void *aux)
 
 	if (bus_space_map(tipb->tipb_iot, tipb->tipb_addr, tipb->tipb_size, 0,
 			 &sc->sc_ioh))
-		panic("%s: Cannot map registers", device_xname(self));
+		panic("%s: Cannot map registers", self->dv_xname);
 
 	aprint_normal(": OMAP RTC\n");
 	aprint_naive("\n");
@@ -239,3 +245,4 @@ omaprtc_attach(device_t parent, device_t self, void *aux)
 	sc->sc_todr.todr_settime_ymdhms = omaprtc_settime;
 	todr_attach(&sc->sc_todr);
 }
+

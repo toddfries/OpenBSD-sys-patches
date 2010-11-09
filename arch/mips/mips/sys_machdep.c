@@ -1,4 +1,4 @@
-/*	$NetBSD: sys_machdep.c,v 1.33 2007/12/20 23:02:41 dsl Exp $	*/
+/*	$NetBSD: sys_machdep.c,v 1.30 2005/12/11 12:18:09 christos Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sys_machdep.c,v 1.33 2007/12/20 23:02:41 dsl Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sys_machdep.c,v 1.30 2005/12/11 12:18:09 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -47,6 +47,7 @@ __KERNEL_RCSID(0, "$NetBSD: sys_machdep.c,v 1.33 2007/12/20 23:02:41 dsl Exp $")
 #include <sys/kernel.h>
 #include <sys/buf.h>
 #include <sys/mount.h>
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 
 #include <mips/cache.h>
@@ -57,12 +58,15 @@ __KERNEL_RCSID(0, "$NetBSD: sys_machdep.c,v 1.33 2007/12/20 23:02:41 dsl Exp $")
 #include <uvm/uvm_extern.h>
 
 int
-sys_sysarch(struct lwp *l, const struct sys_sysarch_args *uap, register_t *retval)
+sys_sysarch(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct sys_sysarch_args /* {
 		syscallarg(int) op;
 		syscallarg(void *) parms;
-	} */
+	} */ *uap = v;
 	struct proc *p = l->l_proc;
 	int error = 0;
 
@@ -99,7 +103,11 @@ sys_sysarch(struct lwp *l, const struct sys_sysarch_args *uap, register_t *retva
  * range from the i-cache, d-cache, or both.
  */
 int
-mips_user_cacheflush(struct proc *p, vaddr_t va, size_t nbytes, int whichcache)
+mips_user_cacheflush(p, va, nbytes, whichcache)
+	struct proc *p;
+	vaddr_t va;
+	size_t nbytes;
+	int whichcache;
 {
 
 	/* validate the cache we're going to flush. */
@@ -119,7 +127,7 @@ mips_user_cacheflush(struct proc *p, vaddr_t va, size_t nbytes, int whichcache)
 	return (0);
 
 #else
-	void *uncached_physaddr;
+	void * uncached_physaddr;
 	size_t len;
 
 	/*
@@ -149,7 +157,11 @@ mips_user_cacheflush(struct proc *p, vaddr_t va, size_t nbytes, int whichcache)
  * non-cacheable.
  */
 int
-mips_user_cachectl(struct proc *p, vaddr_t va, size_t nbytes, int cachectlval)
+mips_user_cachectl(p, va, nbytes, cachectlval)
+	struct proc *p;
+	vaddr_t va;
+	size_t nbytes;
+	int cachectlval;
 {
 	/* validate the cache we're going to flush. */
 	switch (cachectlval) {

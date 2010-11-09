@@ -1,7 +1,7 @@
-/*	$NetBSD: mach_task.c,v 1.71 2008/04/28 20:23:44 martin Exp $ */
+/*	$NetBSD: mach_task.c,v 1.62 2007/01/04 18:27:36 elad Exp $ */
 
 /*-
- * Copyright (c) 2002-2003, 2008 The NetBSD Foundation, Inc.
+ * Copyright (c) 2002-2003 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -32,7 +39,7 @@
 #include "opt_compat_darwin.h"
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mach_task.c,v 1.71 2008/04/28 20:23:44 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mach_task.c,v 1.62 2007/01/04 18:27:36 elad Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -42,7 +49,9 @@ __KERNEL_RCSID(0, "$NetBSD: mach_task.c,v 1.71 2008/04/28 20:23:44 martin Exp $"
 #include <sys/ktrace.h>
 #include <sys/resourcevar.h>
 #include <sys/malloc.h>
+#include <sys/sa.h>
 #include <sys/mount.h>
+#include <sys/ktrace.h>
 #include <sys/syscallargs.h>
 #include <sys/kauth.h>
 
@@ -69,7 +78,8 @@ static void
 update_exception_port(struct mach_emuldata *, int exc, struct mach_port *);
 
 int
-mach_task_get_special_port(struct mach_trap_args *args)
+mach_task_get_special_port(args)
+	struct mach_trap_args *args;
 {
 	mach_task_get_special_port_request_t *req = args->smsg;
 	mach_task_get_special_port_reply_t *rep = args->rmsg;
@@ -113,7 +123,8 @@ mach_task_get_special_port(struct mach_trap_args *args)
 }
 
 int
-mach_ports_lookup(struct mach_trap_args *args)
+mach_ports_lookup(args)
+	struct mach_trap_args *args;
 {
 	mach_ports_lookup_request_t *req = args->smsg;
 	mach_ports_lookup_reply_t *rep = args->rmsg;
@@ -168,7 +179,8 @@ mach_ports_lookup(struct mach_trap_args *args)
 }
 
 int
-mach_task_set_special_port(struct mach_trap_args *args)
+mach_task_set_special_port(args)
+	struct mach_trap_args *args;
 {
 	mach_task_set_special_port_request_t *req = args->smsg;
 	mach_task_set_special_port_reply_t *rep = args->rmsg;
@@ -256,7 +268,8 @@ mach_task_set_special_port(struct mach_trap_args *args)
 }
 
 int
-mach_task_threads(struct mach_trap_args *args)
+mach_task_threads(args)
+	struct mach_trap_args *args;
 {
 	mach_task_threads_request_t *req = args->smsg;
 	mach_task_threads_reply_t *rep = args->rmsg;
@@ -302,7 +315,8 @@ mach_task_threads(struct mach_trap_args *args)
 }
 
 int
-mach_task_get_exception_ports(struct mach_trap_args *args)
+mach_task_get_exception_ports(args)
+	struct mach_trap_args *args;
 {
 	mach_task_get_exception_ports_request_t *req = args->smsg;
 	mach_task_get_exception_ports_reply_t *rep = args->rmsg;
@@ -354,7 +368,10 @@ mach_task_get_exception_ports(struct mach_trap_args *args)
 }
 
 static void
-update_exception_port(struct mach_emuldata *med, int exc, struct mach_port *mp)
+update_exception_port(med, exc, mp)
+	struct mach_emuldata *med;
+	int exc;
+	struct mach_port *mp;
 {
 	if (med->med_exc[exc] != NULL)
 		MACH_PORT_UNREF(med->med_exc[exc]);
@@ -365,7 +382,8 @@ update_exception_port(struct mach_emuldata *med, int exc, struct mach_port *mp)
 }
 
 int
-mach_task_set_exception_ports(struct mach_trap_args *args)
+mach_task_set_exception_ports(args)
+	struct mach_trap_args *args;
 {
 	mach_task_set_exception_ports_request_t *req = args->smsg;
 	mach_task_set_exception_ports_reply_t *rep = args->rmsg;
@@ -435,7 +453,8 @@ mach_task_set_exception_ports(struct mach_trap_args *args)
 }
 
 int
-mach_task_info(struct mach_trap_args *args)
+mach_task_info(args)
+	struct mach_trap_args *args;
 {
 	mach_task_info_request_t *req = args->smsg;
 	mach_task_info_reply_t *rep = args->rmsg;
@@ -447,25 +466,22 @@ mach_task_info(struct mach_trap_args *args)
 	switch(req->req_flavor) {
 	case MACH_TASK_BASIC_INFO: {
 		struct mach_task_basic_info *mtbi;
-		struct rusage ru;
+		struct rusage *ru;
 
 		count = sizeof(*mtbi) / sizeof(rep->rep_info[0]);
 		if (req->req_count < count)
 			return mach_msg_error(args, ENOBUFS);
 
-		ru = tp->p_stats->p_ru;
+		ru = &tp->p_stats->p_ru;
 		mtbi = (struct mach_task_basic_info *)&rep->rep_info[0];
-		mutex_enter(tp->p_lock);
-		rulwps(tp, &ru);
-		mutex_exit(tp->p_lock);
 
-		mtbi->mtbi_suspend_count = ru.ru_nvcsw + ru.ru_nivcsw;
-		mtbi->mtbi_virtual_size = ru.ru_ixrss;
-		mtbi->mtbi_resident_size = ru.ru_maxrss;
-		mtbi->mtbi_user_time.seconds = ru.ru_utime.tv_sec;
-		mtbi->mtbi_user_time.microseconds = ru.ru_utime.tv_usec;
-		mtbi->mtbi_system_time.seconds = ru.ru_stime.tv_sec;
-		mtbi->mtbi_system_time.microseconds = ru.ru_stime.tv_usec;
+		mtbi->mtbi_suspend_count = ru->ru_nvcsw + ru->ru_nivcsw;
+		mtbi->mtbi_virtual_size = ru->ru_ixrss;
+		mtbi->mtbi_resident_size = ru->ru_maxrss;
+		mtbi->mtbi_user_time.seconds = ru->ru_utime.tv_sec;
+		mtbi->mtbi_user_time.microseconds = ru->ru_utime.tv_usec;
+		mtbi->mtbi_system_time.seconds = ru->ru_stime.tv_sec;
+		mtbi->mtbi_system_time.microseconds = ru->ru_stime.tv_usec;
 		mtbi->mtbi_policy = 0;
 
 		*msglen = sizeof(*rep) - sizeof(rep->rep_info) + sizeof(*mtbi);
@@ -475,19 +491,19 @@ mach_task_info(struct mach_trap_args *args)
 	/* XXX this is supposed to be about threads, not processes... */
 	case MACH_TASK_THREAD_TIMES_INFO: {
 		struct mach_task_thread_times_info *mttti;
-		struct rusage ru;
+		struct rusage *ru;
 
 		count = sizeof(*mttti) / sizeof(rep->rep_info[0]);
 		if (req->req_count < count)
 			return mach_msg_error(args, ENOBUFS);
 
-		ru = tp->p_stats->p_ru;
+		ru = &tp->p_stats->p_ru;
 		mttti = (struct mach_task_thread_times_info *)&rep->rep_info[0];
 
-		mttti->mttti_user_time.seconds = ru.ru_utime.tv_sec;
-		mttti->mttti_user_time.microseconds = ru.ru_utime.tv_usec;
-		mttti->mttti_system_time.seconds = ru.ru_stime.tv_sec;
-		mttti->mttti_system_time.microseconds = ru.ru_stime.tv_usec;
+		mttti->mttti_user_time.seconds = ru->ru_utime.tv_sec;
+		mttti->mttti_user_time.microseconds = ru->ru_utime.tv_usec;
+		mttti->mttti_system_time.seconds = ru->ru_stime.tv_sec;
+		mttti->mttti_system_time.microseconds = ru->ru_stime.tv_usec;
 
 		*msglen = sizeof(*rep) - sizeof(rep->rep_info) + sizeof(*mttti);
 		break;
@@ -496,23 +512,20 @@ mach_task_info(struct mach_trap_args *args)
 	/* XXX a few statistics missing here */
 	case MACH_TASK_EVENTS_INFO: {
 		struct mach_task_events_info *mtei;
-		struct rusage ru;
+		struct rusage *ru;
 
 		count = sizeof(*mtei) / sizeof(rep->rep_info[0]);
 		if (req->req_count < count)
 			return mach_msg_error(args, ENOBUFS);
 
 		mtei = (struct mach_task_events_info *)&rep->rep_info[0];
-		ru = tp->p_stats->p_ru;
-		mutex_enter(tp->p_lock);
-		rulwps(tp, &ru);
-		mutex_exit(tp->p_lock);
+		ru = &tp->p_stats->p_ru;
 
-		mtei->mtei_faults = ru.ru_majflt;
-		mtei->mtei_pageins = ru.ru_minflt;
+		mtei->mtei_faults = ru->ru_majflt;
+		mtei->mtei_pageins = ru->ru_minflt;
 		mtei->mtei_cow_faults = 0; /* XXX */
-		mtei->mtei_message_sent = ru.ru_msgsnd;
-		mtei->mtei_message_received = ru.ru_msgrcv;
+		mtei->mtei_message_sent = ru->ru_msgsnd;
+		mtei->mtei_message_received = ru->ru_msgrcv;
 		mtei->mtei_syscalls_mach = 0; /* XXX */
 		mtei->mtei_syscalls_unix = 0; /* XXX */
 		mtei->mtei_csw = 0; /* XXX */
@@ -537,7 +550,8 @@ mach_task_info(struct mach_trap_args *args)
 }
 
 int
-mach_task_suspend(struct mach_trap_args *args)
+mach_task_suspend(args)
+	struct mach_trap_args *args;
 {
 	mach_task_suspend_request_t *req = args->smsg;
 	mach_task_suspend_reply_t *rep = args->rmsg;
@@ -557,17 +571,14 @@ mach_task_suspend(struct mach_trap_args *args)
 		case LSSLEEP:
 		case LSSUSPENDED:
 		case LSZOMB:
+		case LSDEAD:
 			break;
 		default:
 			return mach_msg_error(args, 0);
 			break;
 		}
 	}
-	mutex_enter(proc_lock);
-	mutex_enter(tp->p_lock);
-	proc_stop(tp, 0, SIGSTOP);
-	mutex_enter(tp->p_lock);
-	mutex_enter(proc_lock);
+	proc_stop(tp, 0);
 
 	*msglen = sizeof(*rep);
 	mach_set_header(rep, req, *msglen);
@@ -580,7 +591,8 @@ mach_task_suspend(struct mach_trap_args *args)
 }
 
 int
-mach_task_resume(struct mach_trap_args *args)
+mach_task_resume(args)
+	struct mach_trap_args *args;
 {
 	mach_task_resume_request_t *req = args->smsg;
 	mach_task_resume_reply_t *rep = args->rmsg;
@@ -600,11 +612,7 @@ mach_task_resume(struct mach_trap_args *args)
 #ifdef DEBUG_MACH
 	printf("resuming pid %d\n", tp->p_pid);
 #endif
-	mutex_enter(proc_lock);
-	mutex_enter(tp->p_lock);
 	(void)proc_unstop(tp);
-	mutex_enter(tp->p_lock);
-	mutex_enter(proc_lock);
 
 	*msglen = sizeof(*rep);
 	mach_set_header(rep, req, *msglen);
@@ -617,7 +625,8 @@ mach_task_resume(struct mach_trap_args *args)
 }
 
 int
-mach_task_terminate(struct mach_trap_args *args)
+mach_task_terminate(args)
+	struct mach_trap_args *args;
 {
 	mach_task_resume_request_t *req = args->smsg;
 	mach_task_resume_reply_t *rep = args->rmsg;
@@ -642,13 +651,13 @@ mach_task_terminate(struct mach_trap_args *args)
 }
 
 int
-mach_sys_task_for_pid(struct lwp *l, const struct mach_sys_task_for_pid_args *uap, register_t *retval)
+mach_sys_task_for_pid(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct mach_sys_task_for_pid_args /* {
 		syscallarg(mach_port_t) target_tport;
 		syscallarg(int) pid;
 		syscallarg(mach_port_t) *t;
-	} */
+	} */ *uap = v;
 	struct mach_right *mr;
 	struct mach_emuldata *med;
 	struct proc *t;
@@ -670,7 +679,7 @@ mach_sys_task_for_pid(struct lwp *l, const struct mach_sys_task_for_pid_args *ua
 
 	/* Allowed only if the UID match, if setuid, or if superuser */
 	if ((kauth_cred_getuid(t->p_cred) != kauth_cred_getuid(l->l_cred) ||
-	    ISSET(t->p_flag, PK_SUGID)) && (error = kauth_authorize_generic(l->l_cred,
+	    ISSET(t->p_flag, P_SUGID)) && (error = kauth_authorize_generic(l->l_cred,
 	    KAUTH_GENERIC_ISSUSER, NULL)) != 0)
 			    return (error);
 

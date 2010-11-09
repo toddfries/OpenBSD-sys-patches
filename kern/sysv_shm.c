@@ -1,4 +1,4 @@
-/*	$NetBSD: sysv_shm.c,v 1.116 2009/03/06 20:31:54 joerg Exp $	*/
+/*	$NetBSD: sysv_shm.c,v 1.100 2007/04/29 20:23:36 msaitoh Exp $	*/
 
 /*-
  * Copyright (c) 1999, 2007 The NetBSD Foundation, Inc.
@@ -6,7 +6,7 @@
  *
  * This code is derived from software contributed to The NetBSD Foundation
  * by Jason R. Thorpe of the Numerical Aerospace Simulation Facility,
- * NASA Ames Research Center, and by Mindaugas Rasiukevicius.
+ * NASA Ames Research Center.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -61,15 +68,15 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sysv_shm.c,v 1.116 2009/03/06 20:31:54 joerg Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sysv_shm.c,v 1.100 2007/04/29 20:23:36 msaitoh Exp $");
 
 #define SYSVSHM
 
 #include <sys/param.h>
 #include <sys/kernel.h>
-#include <sys/kmem.h>
 #include <sys/shm.h>
 #include <sys/mutex.h>
+#include <sys/malloc.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/sysctl.h>
@@ -82,6 +89,20 @@ __KERNEL_RCSID(0, "$NetBSD: sysv_shm.c,v 1.116 2009/03/06 20:31:54 joerg Exp $")
 #include <uvm/uvm_extern.h>
 #include <uvm/uvm_object.h>
 
+static MALLOC_DEFINE(M_SHM, "shm", "SVID compatible shared memory segments");
+
+/*
+ * Provides the following externally accessible functions:
+ *
+ * shminit(void);		                 initialization
+ * shmexit(struct vmspace *)                     cleanup
+ * shmfork(struct vmspace *, struct vmspace *)   fork handling
+ *
+ * Structures:
+ * shmsegs (an array of 'struct shmid_ds')
+ * per proc array of 'struct shmmap_state'
+ */
+
 int shm_nused;
 struct	shmid_ds *shmsegs;
 
@@ -91,15 +112,11 @@ struct shmmap_entry {
 	int shmid;
 };
 
-static kmutex_t		shm_lock;
-static kcondvar_t *	shm_cv;
-static struct pool	shmmap_entry_pool;
-static int		shm_last_free, shm_use_phys;
-static size_t		shm_committed;
+static kmutex_t	shm_lock;
+static int	shm_last_free, shm_committed, shm_use_phys;
 
-static kcondvar_t	shm_realloc_cv;
-static bool		shm_realloc_state;
-static u_int		shm_realloc_disable;
+static POOL_INIT(shmmap_entry_pool, sizeof(struct shmmap_entry), 0, 0, 0,
+    "shmmp", &pool_allocator_nointr, IPL_NONE);
 
 struct shmmap_state {
 	unsigned int nitems;
@@ -107,25 +124,35 @@ struct shmmap_state {
 	SLIST_HEAD(, shmmap_entry) entries;
 };
 
-#ifdef SHMDEBUG
-#define SHMPRINTF(a) printf a
-#else
-#define SHMPRINTF(a)
-#endif
-
+static int shm_find_segment_by_key(key_t);
+static void shm_deallocate_segment(struct shmid_ds *);
+static void shm_delete_mapping(struct vmspace *, struct shmmap_state *,
+			       struct shmmap_entry *);
+static int shmget_existing(struct lwp *, struct sys_shmget_args *,
+			   int, int, register_t *);
+static int shmget_allocate_segment(struct lwp *, struct sys_shmget_args *,
+				   int, register_t *);
+static struct shmmap_state *shmmap_getprivate(struct proc *);
+static struct shmmap_entry *shm_find_mapping(struct shmmap_state *, vaddr_t);
 static int shmrealloc(int);
 
-/*
- * Find the shared memory segment by the identifier.
- *  => must be called with shm_lock held;
- */
+static int
+shm_find_segment_by_key(key_t key)
+{
+	int i;
+
+	for (i = 0; i < shminfo.shmmni; i++)
+		if ((shmsegs[i].shm_perm.mode & SHMSEG_ALLOCATED) &&
+		    shmsegs[i].shm_perm._key == key)
+			return i;
+	return -1;
+}
+
 static struct shmid_ds *
 shm_find_segment_by_shmid(int shmid)
 {
 	int segnum;
 	struct shmid_ds *shmseg;
-
-	KASSERT(mutex_owned(&shm_lock));
 
 	segnum = IPCID_TO_IX(shmid);
 	if (segnum < 0 || segnum >= shminfo.shmmni)
@@ -133,75 +160,66 @@ shm_find_segment_by_shmid(int shmid)
 	shmseg = &shmsegs[segnum];
 	if ((shmseg->shm_perm.mode & SHMSEG_ALLOCATED) == 0)
 		return NULL;
-	if ((shmseg->shm_perm.mode &
-	    (SHMSEG_REMOVED|SHMSEG_RMLINGER)) == SHMSEG_REMOVED)
+	if ((shmseg->shm_perm.mode & (SHMSEG_REMOVED|SHMSEG_RMLINGER)) == SHMSEG_REMOVED)
 		return NULL;
 	if (shmseg->shm_perm._seq != IPCID_TO_SEQ(shmid))
 		return NULL;
-
 	return shmseg;
 }
 
-/*
- * Free memory segment.
- *  => must be called with shm_lock held;
- */
 static void
-shm_free_segment(int segnum)
+shm_deallocate_segment(struct shmid_ds *shmseg)
 {
-	struct shmid_ds *shmseg;
-	size_t size;
-	bool wanted;
+	struct uvm_object *uobj = shmseg->_shm_internal;
+	size_t size = (shmseg->shm_segsz + PGOFSET) & ~PGOFSET;
 
-	KASSERT(mutex_owned(&shm_lock));
+#ifdef SHMDEBUG
+	printf("shm freeing key 0x%lx seq 0x%x\n",
+	       shmseg->shm_perm._key, shmseg->shm_perm._seq);
+#endif
 
-	shmseg = &shmsegs[segnum];
-	SHMPRINTF(("shm freeing key 0x%lx seq 0x%x\n",
-	    shmseg->shm_perm._key, shmseg->shm_perm._seq));
-
-	size = (shmseg->shm_segsz + PGOFSET) & ~PGOFSET;
-	wanted = (shmseg->shm_perm.mode & SHMSEG_WANTED);
-
+	(*uobj->pgops->pgo_detach)(uobj);
 	shmseg->_shm_internal = NULL;
 	shm_committed -= btoc(size);
-	shm_nused--;
 	shmseg->shm_perm.mode = SHMSEG_FREE;
-	shm_last_free = segnum;
-	if (wanted == true)
-		cv_broadcast(&shm_cv[segnum]);
+	shm_nused--;
 }
 
-/*
- * Delete entry from the shm map.
- *  => must be called with shm_lock held;
- */
-static struct uvm_object *
-shm_delete_mapping(struct shmmap_state *shmmap_s,
+static void
+shm_delete_mapping(struct vmspace *vm, struct shmmap_state *shmmap_s,
     struct shmmap_entry *shmmap_se)
 {
-	struct uvm_object *uobj = NULL;
 	struct shmid_ds *shmseg;
 	int segnum;
-
-	KASSERT(mutex_owned(&shm_lock));
+	size_t size;
 
 	segnum = IPCID_TO_IX(shmmap_se->shmid);
+#ifdef DEBUG
+	if (segnum < 0 || segnum >= shminfo.shmmni)
+		panic("shm_delete_mapping: vmspace %p state %p entry %p - "
+		    "entry segment ID bad (%d)",
+		    vm, shmmap_s, shmmap_se, segnum);
+#endif
 	shmseg = &shmsegs[segnum];
+	size = (shmseg->shm_segsz + PGOFSET) & ~PGOFSET;
+	uvm_deallocate(&vm->vm_map, shmmap_se->va, size);
 	SLIST_REMOVE(&shmmap_s->entries, shmmap_se, shmmap_entry, next);
 	shmmap_s->nitems--;
+	pool_put(&shmmap_entry_pool, shmmap_se);
 	shmseg->shm_dtime = time_second;
 	if ((--shmseg->shm_nattch <= 0) &&
 	    (shmseg->shm_perm.mode & SHMSEG_REMOVED)) {
-		uobj = shmseg->_shm_internal;
-		shm_free_segment(segnum);
+		shm_deallocate_segment(shmseg);
+		shm_last_free = segnum;
 	}
-
-	return uobj;
 }
 
 /*
- * Get a non-shared shm map for that vmspace.  Note, that memory
- * allocation might be performed with lock held.
+ * Get a non-shared shm map for that vmspace.
+ * 3 cases:
+ *   - no shm map present: create a fresh one
+ *   - a shm map with refcount=1, just used by ourselves: fine
+ *   - a shared shm map: copy to a fresh one and adjust refcounts
  */
 static struct shmmap_state *
 shmmap_getprivate(struct proc *p)
@@ -209,26 +227,23 @@ shmmap_getprivate(struct proc *p)
 	struct shmmap_state *oshmmap_s, *shmmap_s;
 	struct shmmap_entry *oshmmap_se, *shmmap_se;
 
-	KASSERT(mutex_owned(&shm_lock));
-
-	/* 1. A shm map with refcnt = 1, used by ourselves, thus return */
 	oshmmap_s = (struct shmmap_state *)p->p_vmspace->vm_shm;
 	if (oshmmap_s && oshmmap_s->nrefs == 1)
-		return oshmmap_s;
+		return (oshmmap_s);
 
-	/* 2. No shm map preset - create a fresh one */
-	shmmap_s = kmem_zalloc(sizeof(struct shmmap_state), KM_SLEEP);
+	shmmap_s = malloc(sizeof(struct shmmap_state), M_SHM, M_WAITOK);
+	memset(shmmap_s, 0, sizeof(struct shmmap_state));
 	shmmap_s->nrefs = 1;
 	SLIST_INIT(&shmmap_s->entries);
 	p->p_vmspace->vm_shm = (void *)shmmap_s;
 
-	if (oshmmap_s == NULL)
-		return shmmap_s;
+	if (!oshmmap_s)
+		return (shmmap_s);
 
-	SHMPRINTF(("shmmap_getprivate: vm %p split (%d entries), was used by %d\n",
-	    p->p_vmspace, oshmmap_s->nitems, oshmmap_s->nrefs));
-
-	/* 3. A shared shm map, copy to a fresh one and adjust refcounts */
+#ifdef SHMDEBUG
+	printf("shmmap_getprivate: vm %p split (%d entries), was used by %d\n",
+	       p->p_vmspace, oshmmap_s->nitems, oshmmap_s->nrefs);
+#endif
 	SLIST_FOREACH(oshmmap_se, &oshmmap_s->entries, next) {
 		shmmap_se = pool_get(&shmmap_entry_pool, PR_WAITOK);
 		shmmap_se->va = oshmmap_se->va;
@@ -237,178 +252,84 @@ shmmap_getprivate(struct proc *p)
 	}
 	shmmap_s->nitems = oshmmap_s->nitems;
 	oshmmap_s->nrefs--;
-
-	return shmmap_s;
+	return (shmmap_s);
 }
 
-/*
- * Lock/unlock the memory.
- *  => must be called with shm_lock held;
- *  => called from one place, thus, inline;
- */
-static inline int
-shm_memlock(struct lwp *l, struct shmid_ds *shmseg, int shmid, int cmd)
+static struct shmmap_entry *
+shm_find_mapping(struct shmmap_state *map, vaddr_t va)
 {
-	struct proc *p = l->l_proc;
 	struct shmmap_entry *shmmap_se;
-	struct shmmap_state *shmmap_s;
-	size_t size;
-	int error;
 
-	KASSERT(mutex_owned(&shm_lock));
-	shmmap_s = shmmap_getprivate(p);
-
-	/* Find our shared memory address by shmid */
-	SLIST_FOREACH(shmmap_se, &shmmap_s->entries, next) {
-		if (shmmap_se->shmid != shmid)
-			continue;
-
-		size = (shmseg->shm_segsz + PGOFSET) & ~PGOFSET;
-
-		if (cmd == SHM_LOCK &&
-		    (shmseg->shm_perm.mode & SHMSEG_WIRED) == 0) {
-			/* Wire the object and map, then tag it */
-			error = uobj_wirepages(shmseg->_shm_internal, 0, size);
-			if (error)
-				return EIO;
-			error = uvm_map_pageable(&p->p_vmspace->vm_map,
-			    shmmap_se->va, shmmap_se->va + size, false, 0);
-			if (error) {
-				uobj_unwirepages(shmseg->_shm_internal, 0, size);
-				if (error == EFAULT)
-					error = ENOMEM;
-				return error;
-			}
-			shmseg->shm_perm.mode |= SHMSEG_WIRED;
-
-		} else if (cmd == SHM_UNLOCK &&
-		    (shmseg->shm_perm.mode & SHMSEG_WIRED) != 0) {
-			/* Unwire the object and map, then untag it */
-			uobj_unwirepages(shmseg->_shm_internal, 0, size);
-			error = uvm_map_pageable(&p->p_vmspace->vm_map,
-			    shmmap_se->va, shmmap_se->va + size, true, 0);
-			if (error)
-				return EIO;
-			shmseg->shm_perm.mode &= ~SHMSEG_WIRED;
-		}
+	SLIST_FOREACH(shmmap_se, &map->entries, next) {
+		if (shmmap_se->va == va)
+			return shmmap_se;
 	}
-
 	return 0;
 }
 
-/*
- * Unmap shared memory.
- */
 int
-sys_shmdt(struct lwp *l, const struct sys_shmdt_args *uap, register_t *retval)
+sys_shmdt(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct sys_shmdt_args /* {
 		syscallarg(const void *) shmaddr;
-	} */
+	} */ *uap = v;
 	struct proc *p = l->l_proc;
-	struct shmmap_state *shmmap_s1, *shmmap_s;
+	struct shmmap_state *shmmap_s, *shmmap_s1;
 	struct shmmap_entry *shmmap_se;
-	struct uvm_object *uobj;
-	struct shmid_ds *shmseg;
-	size_t size;
 
-	mutex_enter(&shm_lock);
-	/* In case of reallocation, we will wait for completion */
-	while (__predict_false(shm_realloc_state))
-		cv_wait(&shm_realloc_cv, &shm_lock);
-
-	shmmap_s1 = (struct shmmap_state *)p->p_vmspace->vm_shm;
-	if (shmmap_s1 == NULL) {
-		mutex_exit(&shm_lock);
+	shmmap_s = (struct shmmap_state *)p->p_vmspace->vm_shm;
+	if (shmmap_s == NULL)
 		return EINVAL;
-	}
 
-	/* Find the map entry */
-	SLIST_FOREACH(shmmap_se, &shmmap_s1->entries, next)
-		if (shmmap_se->va == (vaddr_t)SCARG(uap, shmaddr))
-			break;
-	if (shmmap_se == NULL) {
-		mutex_exit(&shm_lock);
+	shmmap_se = shm_find_mapping(shmmap_s, (vaddr_t)SCARG(uap, shmaddr));
+	if (!shmmap_se)
 		return EINVAL;
+
+	shmmap_s1 = shmmap_getprivate(p);
+	if (shmmap_s1 != shmmap_s) {
+		/* map has been copied, lookup entry in new map */
+		shmmap_se = shm_find_mapping(shmmap_s1,
+					     (vaddr_t)SCARG(uap, shmaddr));
+		KASSERT(shmmap_se != NULL);
 	}
-
-	shmmap_s = shmmap_getprivate(p);
-	if (shmmap_s != shmmap_s1) {
-		/* Map has been copied, lookup entry in new map */
-		SLIST_FOREACH(shmmap_se, &shmmap_s->entries, next)
-			if (shmmap_se->va == (vaddr_t)SCARG(uap, shmaddr))
-				break;
-		if (shmmap_se == NULL) {
-			mutex_exit(&shm_lock);
-			return EINVAL;
-		}
-	}
-
-	SHMPRINTF(("shmdt: vm %p: remove %d @%lx\n",
-	    p->p_vmspace, shmmap_se->shmid, shmmap_se->va));
-
-	/* Delete the entry from shm map */
-	uobj = shm_delete_mapping(shmmap_s, shmmap_se);
-	shmseg = &shmsegs[IPCID_TO_IX(shmmap_se->shmid)];
-	size = (shmseg->shm_segsz + PGOFSET) & ~PGOFSET;
-	mutex_exit(&shm_lock);
-
-	uvm_deallocate(&p->p_vmspace->vm_map, shmmap_se->va, size);
-	if (uobj != NULL)
-		uao_detach(uobj);
-	pool_put(&shmmap_entry_pool, shmmap_se);
-
+#ifdef SHMDEBUG
+	printf("shmdt: vm %p: remove %d @%lx\n",
+	       p->p_vmspace, shmmap_se->shmid, shmmap_se->va);
+#endif
+	shm_delete_mapping(p->p_vmspace, shmmap_s1, shmmap_se);
 	return 0;
 }
 
-/*
- * Map shared memory.
- */
 int
-sys_shmat(struct lwp *l, const struct sys_shmat_args *uap, register_t *retval)
+sys_shmat(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct sys_shmat_args /* {
 		syscallarg(int) shmid;
 		syscallarg(const void *) shmaddr;
 		syscallarg(int) shmflg;
-	} */
+	} */ *uap = v;
 	int error, flags = 0;
 	struct proc *p = l->l_proc;
 	kauth_cred_t cred = l->l_cred;
 	struct shmid_ds *shmseg;
 	struct shmmap_state *shmmap_s;
-	struct shmmap_entry *shmmap_se;
 	struct uvm_object *uobj;
-	struct vmspace *vm;
 	vaddr_t attach_va;
 	vm_prot_t prot;
 	vsize_t size;
-
-	/* Allocate a new map entry and set it */
-	shmmap_se = pool_get(&shmmap_entry_pool, PR_WAITOK);
-	shmmap_se->shmid = SCARG(uap, shmid);
-
-	mutex_enter(&shm_lock);
-	/* In case of reallocation, we will wait for completion */
-	while (__predict_false(shm_realloc_state))
-		cv_wait(&shm_realloc_cv, &shm_lock);
+	struct shmmap_entry *shmmap_se;
 
 	shmseg = shm_find_segment_by_shmid(SCARG(uap, shmid));
-	if (shmseg == NULL) {
-		error = EINVAL;
-		goto err;
-	}
+	if (shmseg == NULL)
+		return EINVAL;
 	error = ipcperm(cred, &shmseg->shm_perm,
-	    (SCARG(uap, shmflg) & SHM_RDONLY) ? IPC_R : IPC_R|IPC_W);
+		    (SCARG(uap, shmflg) & SHM_RDONLY) ? IPC_R : IPC_R|IPC_W);
 	if (error)
-		goto err;
+		return error;
 
-	vm = p->p_vmspace;
-	shmmap_s = (struct shmmap_state *)vm->vm_shm;
-	if (shmmap_s && shmmap_s->nitems >= shminfo.shmseg) {
-		error = EMFILE;
-		goto err;
-	}
+	shmmap_s = (struct shmmap_state *)p->p_vmspace->vm_shm;
+	if (shmmap_s && shmmap_s->nitems >= shminfo.shmseg)
+		return EMFILE;
 
 	size = (shmseg->shm_segsz + PGOFSET) & ~PGOFSET;
 	prot = VM_PROT_READ;
@@ -421,97 +342,69 @@ sys_shmat(struct lwp *l, const struct sys_shmat_args *uap, register_t *retval)
 			    (vaddr_t)SCARG(uap, shmaddr) & ~(SHMLBA-1);
 		else if (((vaddr_t)SCARG(uap, shmaddr) & (SHMLBA-1)) == 0)
 			attach_va = (vaddr_t)SCARG(uap, shmaddr);
-		else {
-			error = EINVAL;
-			goto err;
-		}
+		else
+			return EINVAL;
 	} else {
-		/* This is just a hint to uvm_map() about where to put it. */
+		/* This is just a hint to uvm_mmap() about where to put it. */
 		attach_va = p->p_emul->e_vm_default_addr(p,
-		    (vaddr_t)vm->vm_daddr, size);
+		    (vaddr_t)p->p_vmspace->vm_daddr, size);
 	}
-
-	/*
-	 * Create a map entry, add it to the list and increase the counters.
-	 * The lock will be dropped before the mapping, disable reallocation.
-	 */
-	shmmap_s = shmmap_getprivate(p);
-	SLIST_INSERT_HEAD(&shmmap_s->entries, shmmap_se, next);
-	shmmap_s->nitems++;
-	shmseg->shm_lpid = p->p_pid;
-	shmseg->shm_nattch++;
-	shm_realloc_disable++;
-	mutex_exit(&shm_lock);
-
-	/*
-	 * Add a reference to the memory object, map it to the
-	 * address space, and lock the memory, if needed.
-	 */
 	uobj = shmseg->_shm_internal;
-	uao_reference(uobj);
-	error = uvm_map(&vm->vm_map, &attach_va, size, uobj, 0, 0,
+	(*uobj->pgops->pgo_reference)(uobj);
+	error = uvm_map(&p->p_vmspace->vm_map, &attach_va, size,
+	    uobj, 0, 0,
 	    UVM_MAPFLAG(prot, prot, UVM_INH_SHARE, UVM_ADV_RANDOM, flags));
 	if (error)
-		goto err_detach;
+		goto out;
+	/* Lock the memory */
 	if (shm_use_phys || (shmseg->shm_perm.mode & SHMSEG_WIRED)) {
-		error = uvm_map_pageable(&vm->vm_map, attach_va,
+		/* Wire the map */
+		error = uvm_map_pageable(&p->p_vmspace->vm_map, attach_va,
 		    attach_va + size, false, 0);
 		if (error) {
 			if (error == EFAULT)
 				error = ENOMEM;
-			uvm_deallocate(&vm->vm_map, attach_va, size);
-			goto err_detach;
+			goto out;
 		}
 	}
 
-	/* Set the new address, and update the time */
-	mutex_enter(&shm_lock);
+	shmmap_se = pool_get(&shmmap_entry_pool, PR_WAITOK);
 	shmmap_se->va = attach_va;
+	shmmap_se->shmid = SCARG(uap, shmid);
+	shmmap_s = shmmap_getprivate(p);
+#ifdef SHMDEBUG
+	printf("shmat: vm %p: add %d @%lx\n", p->p_vmspace, shmmap_se->shmid, attach_va);
+#endif
+	SLIST_INSERT_HEAD(&shmmap_s->entries, shmmap_se, next);
+	shmmap_s->nitems++;
+	shmseg->shm_lpid = p->p_pid;
 	shmseg->shm_atime = time_second;
-	shm_realloc_disable--;
-	retval[0] = attach_va;
-	SHMPRINTF(("shmat: vm %p: add %d @%lx\n",
-	    p->p_vmspace, shmmap_se->shmid, attach_va));
-err:
-	cv_broadcast(&shm_realloc_cv);
-	mutex_exit(&shm_lock);
-	if (error && shmmap_se)
-		pool_put(&shmmap_entry_pool, shmmap_se);
-	return error;
+	shmseg->shm_nattch++;
 
-err_detach:
-	uao_detach(uobj);
-	mutex_enter(&shm_lock);
-	uobj = shm_delete_mapping(shmmap_s, shmmap_se);
-	shm_realloc_disable--;
-	cv_broadcast(&shm_realloc_cv);
-	mutex_exit(&shm_lock);
-	if (uobj != NULL)
-		uao_detach(uobj);
-	pool_put(&shmmap_entry_pool, shmmap_se);
+	retval[0] = attach_va;
+	return 0;
+out:
+	(*uobj->pgops->pgo_detach)(uobj);
 	return error;
 }
 
-/*
- * Shared memory control operations.
- */
 int
-sys___shmctl50(struct lwp *l, const struct sys___shmctl50_args *uap,
-    register_t *retval)
+sys___shmctl13(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct sys___shmctl13_args /* {
 		syscallarg(int) shmid;
 		syscallarg(int) cmd;
 		syscallarg(struct shmid_ds *) buf;
-	} */
+	} */ *uap = v;
 	struct shmid_ds shmbuf;
 	int cmd, error;
 
 	cmd = SCARG(uap, cmd);
+
 	if (cmd == IPC_SET) {
 		error = copyin(SCARG(uap, buf), &shmbuf, sizeof(shmbuf));
 		if (error)
-			return error;
+			return (error);
 	}
 
 	error = shmctl1(l, SCARG(uap, shmid), cmd,
@@ -520,37 +413,33 @@ sys___shmctl50(struct lwp *l, const struct sys___shmctl50_args *uap,
 	if (error == 0 && cmd == IPC_STAT)
 		error = copyout(&shmbuf, SCARG(uap, buf), sizeof(shmbuf));
 
-	return error;
+	return (error);
 }
 
 int
 shmctl1(struct lwp *l, int shmid, int cmd, struct shmid_ds *shmbuf)
 {
-	struct uvm_object *uobj = NULL;
 	kauth_cred_t cred = l->l_cred;
+ 	struct proc *p = l->l_proc;
 	struct shmid_ds *shmseg;
+	struct shmmap_entry *shmmap_se;
+	struct shmmap_state *shmmap_s;
 	int error = 0;
-
-	mutex_enter(&shm_lock);
-	/* In case of reallocation, we will wait for completion */
-	while (__predict_false(shm_realloc_state))
-		cv_wait(&shm_realloc_cv, &shm_lock);
+	size_t size;
 
 	shmseg = shm_find_segment_by_shmid(shmid);
-	if (shmseg == NULL) {
-		mutex_exit(&shm_lock);
+	if (shmseg == NULL)
 		return EINVAL;
-	}
 
 	switch (cmd) {
 	case IPC_STAT:
 		if ((error = ipcperm(cred, &shmseg->shm_perm, IPC_R)) != 0)
-			break;
+			return error;
 		memcpy(shmbuf, shmseg, sizeof(struct shmid_ds));
 		break;
 	case IPC_SET:
 		if ((error = ipcperm(cred, &shmseg->shm_perm, IPC_M)) != 0)
-			break;
+			return error;
 		shmseg->shm_perm.uid = shmbuf->shm_perm.uid;
 		shmseg->shm_perm.gid = shmbuf->shm_perm.gid;
 		shmseg->shm_perm.mode =
@@ -560,55 +449,82 @@ shmctl1(struct lwp *l, int shmid, int cmd, struct shmid_ds *shmbuf)
 		break;
 	case IPC_RMID:
 		if ((error = ipcperm(cred, &shmseg->shm_perm, IPC_M)) != 0)
-			break;
+			return error;
 		shmseg->shm_perm._key = IPC_PRIVATE;
 		shmseg->shm_perm.mode |= SHMSEG_REMOVED;
 		if (shmseg->shm_nattch <= 0) {
-			uobj = shmseg->_shm_internal;
-			shm_free_segment(IPCID_TO_IX(shmid));
+			shm_deallocate_segment(shmseg);
+			shm_last_free = IPCID_TO_IX(shmid);
 		}
 		break;
 	case SHM_LOCK:
 	case SHM_UNLOCK:
 		if ((error = kauth_authorize_generic(cred,
 		    KAUTH_GENERIC_ISSUSER, NULL)) != 0)
-			break;
-		error = shm_memlock(l, shmseg, shmid, cmd);
+			return error;
+		shmmap_s = shmmap_getprivate(p);
+		/* Find our shared memory address by shmid */
+		SLIST_FOREACH(shmmap_se, &shmmap_s->entries, next) {
+			if (shmmap_se->shmid != shmid)
+				continue;
+
+			size = (shmseg->shm_segsz + PGOFSET) & ~PGOFSET;
+
+			if (cmd == SHM_LOCK &&
+			    !(shmseg->shm_perm.mode & SHMSEG_WIRED)) {
+				/* Wire the entire object */
+				error = uobj_wirepages(shmseg->_shm_internal, 0,
+					round_page(shmseg->shm_segsz));
+				if (error)
+					return EIO;
+				/* Wire the map */
+				error = uvm_map_pageable(&p->p_vmspace->vm_map,
+				    shmmap_se->va, shmmap_se->va + size, false,
+				    0);
+				if (error) {
+					uobj_unwirepages(shmseg->_shm_internal,
+					    0, round_page(shmseg->shm_segsz));
+					if (error == EFAULT)
+						error = ENOMEM;
+					return error;
+				}
+				/* Tag as wired */
+				shmseg->shm_perm.mode |= SHMSEG_WIRED;
+
+			} else if (cmd == SHM_UNLOCK &&
+			    (shmseg->shm_perm.mode & SHMSEG_WIRED)) {
+				/* Unwire the object */
+				uobj_unwirepages(shmseg->_shm_internal, 0,
+				    round_page(shmseg->shm_segsz));
+				error = uvm_map_pageable(&p->p_vmspace->vm_map,
+				    shmmap_se->va, shmmap_se->va + size, true,
+				    0);
+				if (error) {
+					/*
+					 * In fact, uvm_map_pageable could fail
+					 * only if arguments are invalid,
+					 * otherwise it should always return 0.
+					 */
+					return EIO;
+				}
+				/* Tag as unwired */
+				shmseg->shm_perm.mode &= ~SHMSEG_WIRED;
+			}
+		}
 		break;
 	default:
-		error = EINVAL;
+		return EINVAL;
 	}
-
-	mutex_exit(&shm_lock);
-	if (uobj != NULL)
-		uao_detach(uobj);
-	return error;
+	return 0;
 }
 
-/*
- * Try to take an already existing segment.
- *  => must be called with shm_lock held;
- *  => called from one place, thus, inline;
- */
-static inline int
-shmget_existing(struct lwp *l, const struct sys_shmget_args *uap, int mode,
-    register_t *retval)
+static int
+shmget_existing(struct lwp *l, struct sys_shmget_args *uap, int mode,
+    int segnum, register_t *retval)
 {
 	struct shmid_ds *shmseg;
 	kauth_cred_t cred = l->l_cred;
-	int segnum, error;
-again:
-	KASSERT(mutex_owned(&shm_lock));
-
-	/* Find segment by key */
-	for (segnum = 0; segnum < shminfo.shmmni; segnum++)
-		if ((shmsegs[segnum].shm_perm.mode & SHMSEG_ALLOCATED) &&
-		    shmsegs[segnum].shm_perm._key == SCARG(uap, key))
-			break;
-	if (segnum == shminfo.shmmni) {
-		/* Not found */
-		return -1;
-	}
+	int error;
 
 	shmseg = &shmsegs[segnum];
 	if (shmseg->shm_perm.mode & SHMSEG_REMOVED) {
@@ -618,163 +534,132 @@ again:
 		 * allocation failed or it was freed).
 		 */
 		shmseg->shm_perm.mode |= SHMSEG_WANTED;
-		error = cv_wait_sig(&shm_cv[segnum], &shm_lock);
+		error = tsleep((void *)shmseg, PLOCK | PCATCH, "shmget", 0);
 		if (error)
 			return error;
-		goto again;
+		return EAGAIN;
 	}
-
-	/*
-	 * First check the flags, to generate a useful error when a
-	 * segment already exists.
-	 */
-	if ((SCARG(uap, shmflg) & (IPC_CREAT | IPC_EXCL)) ==
-	    (IPC_CREAT | IPC_EXCL))
-		return EEXIST;
-
-	/* Check the permission and segment size. */
-	error = ipcperm(cred, &shmseg->shm_perm, mode);
-	if (error)
+	if ((error = ipcperm(cred, &shmseg->shm_perm, mode)) != 0)
 		return error;
 	if (SCARG(uap, size) && SCARG(uap, size) > shmseg->shm_segsz)
 		return EINVAL;
-
+	if ((SCARG(uap, shmflg) & (IPC_CREAT | IPC_EXCL)) ==
+	    (IPC_CREAT | IPC_EXCL))
+		return EEXIST;
 	*retval = IXSEQ_TO_IPCID(segnum, shmseg->shm_perm);
 	return 0;
 }
 
-int
-sys_shmget(struct lwp *l, const struct sys_shmget_args *uap, register_t *retval)
+static int
+shmget_allocate_segment(struct lwp *l, struct sys_shmget_args *uap, int mode,
+    register_t *retval)
 {
-	/* {
-		syscallarg(key_t) key;
-		syscallarg(size_t) size;
-		syscallarg(int) shmflg;
-	} */
-	struct shmid_ds *shmseg;
+	int i, segnum, shmid, size;
 	kauth_cred_t cred = l->l_cred;
-	key_t key = SCARG(uap, key);
-	size_t size;
-	int error, mode, segnum;
-	bool lockmem;
+	struct shmid_ds *shmseg;
+	int error = 0;
 
-	mode = SCARG(uap, shmflg) & ACCESSPERMS;
-	if (SCARG(uap, shmflg) & _SHM_RMLINGER)
-		mode |= SHMSEG_RMLINGER;
-
-	SHMPRINTF(("shmget: key 0x%lx size 0x%x shmflg 0x%x mode 0x%x\n",
-	    SCARG(uap, key), SCARG(uap, size), SCARG(uap, shmflg), mode));
-
-	mutex_enter(&shm_lock);
-	/* In case of reallocation, we will wait for completion */
-	while (__predict_false(shm_realloc_state))
-		cv_wait(&shm_realloc_cv, &shm_lock);
-
-	if (key != IPC_PRIVATE) {
-		error = shmget_existing(l, uap, mode, retval);
-		if (error != -1) {
-			mutex_exit(&shm_lock);
-			return error;
-		}
-		if ((SCARG(uap, shmflg) & IPC_CREAT) == 0) {
-			mutex_exit(&shm_lock);
-			return ENOENT;
-		}
-	}
-	error = 0;
-
-	/*
-	 * Check the for the limits.
-	 */
-	size = SCARG(uap, size);
-	if (size < shminfo.shmmin || size > shminfo.shmmax) {
-		mutex_exit(&shm_lock);
+	if (SCARG(uap, size) < shminfo.shmmin ||
+	    SCARG(uap, size) > shminfo.shmmax)
 		return EINVAL;
-	}
-	if (shm_nused >= shminfo.shmmni) {
-		mutex_exit(&shm_lock);
+	if (shm_nused >= shminfo.shmmni) /* any shmids left? */
 		return ENOSPC;
-	}
-	size = (size + PGOFSET) & ~PGOFSET;
-	if (shm_committed + btoc(size) > shminfo.shmall) {
-		mutex_exit(&shm_lock);
+	size = (SCARG(uap, size) + PGOFSET) & ~PGOFSET;
+	if (shm_committed + btoc(size) > shminfo.shmall)
 		return ENOMEM;
-	}
-
-	/* Find the first available segment */
 	if (shm_last_free < 0) {
-		for (segnum = 0; segnum < shminfo.shmmni; segnum++)
-			if (shmsegs[segnum].shm_perm.mode & SHMSEG_FREE)
+		for (i = 0; i < shminfo.shmmni; i++)
+			if (shmsegs[i].shm_perm.mode & SHMSEG_FREE)
 				break;
-		KASSERT(segnum < shminfo.shmmni);
-	} else {
+		if (i == shminfo.shmmni)
+			panic("shmseg free count inconsistent");
+		segnum = i;
+	} else  {
 		segnum = shm_last_free;
 		shm_last_free = -1;
 	}
-
-	/*
-	 * Initialize the segment.
-	 * We will drop the lock while allocating the memory, thus mark the
-	 * segment present, but removed, that no other thread could take it.
-	 * Also, disable reallocation, while lock is dropped.
-	 */
 	shmseg = &shmsegs[segnum];
-	shmseg->shm_perm.mode = SHMSEG_ALLOCATED | SHMSEG_REMOVED;
-	shm_committed += btoc(size);
-	shm_nused++;
-	lockmem = shm_use_phys;
-	shm_realloc_disable++;
-	mutex_exit(&shm_lock);
-
-	/* Allocate the memory object and lock it if needed */
-	shmseg->_shm_internal = uao_create(size, 0);
-	if (lockmem) {
-		/* Wire the pages and tag it */
-		error = uobj_wirepages(shmseg->_shm_internal, 0, size);
-		if (error) {
-			uao_detach(shmseg->_shm_internal);
-			mutex_enter(&shm_lock);
-			shm_free_segment(segnum);
-			shm_realloc_disable--;
-			mutex_exit(&shm_lock);
-			return error;
-		}
-	}
-
 	/*
-	 * Please note, while segment is marked, there are no need to hold the
-	 * lock, while setting it (except shm_perm.mode).
+	 * In case we sleep in malloc(), mark the segment present but deleted
+	 * so that noone else tries to create the same key.
 	 */
+	shmseg->shm_perm.mode = SHMSEG_ALLOCATED | SHMSEG_REMOVED;
 	shmseg->shm_perm._key = SCARG(uap, key);
 	shmseg->shm_perm._seq = (shmseg->shm_perm._seq + 1) & 0x7fff;
-	*retval = IXSEQ_TO_IPCID(segnum, shmseg->shm_perm);
+	shmid = IXSEQ_TO_IPCID(segnum, shmseg->shm_perm);
+
+	shmseg->_shm_internal = uao_create(size, 0);
 
 	shmseg->shm_perm.cuid = shmseg->shm_perm.uid = kauth_cred_geteuid(cred);
 	shmseg->shm_perm.cgid = shmseg->shm_perm.gid = kauth_cred_getegid(cred);
+	shmseg->shm_perm.mode = (shmseg->shm_perm.mode & SHMSEG_WANTED) |
+	    (mode & (ACCESSPERMS|SHMSEG_RMLINGER)) | SHMSEG_ALLOCATED;
 	shmseg->shm_segsz = SCARG(uap, size);
 	shmseg->shm_cpid = l->l_proc->p_pid;
 	shmseg->shm_lpid = shmseg->shm_nattch = 0;
 	shmseg->shm_atime = shmseg->shm_dtime = 0;
 	shmseg->shm_ctime = time_second;
+	shm_committed += btoc(size);
+	shm_nused++;
 
-	/*
-	 * Segment is initialized.
-	 * Enter the lock, mark as allocated, and notify waiters (if any).
-	 * Also, unmark the state of reallocation.
-	 */
-	mutex_enter(&shm_lock);
-	shmseg->shm_perm.mode = (shmseg->shm_perm.mode & SHMSEG_WANTED) |
-	    (mode & (ACCESSPERMS | SHMSEG_RMLINGER)) |
-	    SHMSEG_ALLOCATED | (lockmem ? SHMSEG_WIRED : 0);
+	*retval = shmid;
 	if (shmseg->shm_perm.mode & SHMSEG_WANTED) {
+		/*
+		 * Somebody else wanted this key while we were asleep.  Wake
+		 * them up now.
+		 */
 		shmseg->shm_perm.mode &= ~SHMSEG_WANTED;
-		cv_broadcast(&shm_cv[segnum]);
+		wakeup((void *)shmseg);
 	}
-	shm_realloc_disable--;
-	cv_broadcast(&shm_realloc_cv);
-	mutex_exit(&shm_lock);
+
+	/* Lock the memory */
+	if (shm_use_phys) {
+		/* Wire the entire object */
+		error = uobj_wirepages(shmseg->_shm_internal, 0,
+		    round_page(shmseg->shm_segsz));
+		if (error) {
+			shm_deallocate_segment(shmseg);
+		} else {
+			/* Tag as wired */
+			shmseg->shm_perm.mode |= SHMSEG_WIRED;
+		}
+	}
 
 	return error;
+}
+
+int
+sys_shmget(struct lwp *l, void *v, register_t *retval)
+{
+	struct sys_shmget_args /* {
+		syscallarg(key_t) key;
+		syscallarg(int) size;
+		syscallarg(int) shmflg;
+	} */ *uap = v;
+	int segnum, mode, error;
+
+	mode = SCARG(uap, shmflg) & ACCESSPERMS;
+	if (SCARG(uap, shmflg) & _SHM_RMLINGER)
+		mode |= SHMSEG_RMLINGER;
+
+#ifdef SHMDEBUG
+	printf("shmget: key 0x%lx size 0x%x shmflg 0x%x mode 0x%x\n",
+        	SCARG(uap, key), SCARG(uap, size), SCARG(uap, shmflg), mode);
+#endif
+
+	if (SCARG(uap, key) != IPC_PRIVATE) {
+again:
+		segnum = shm_find_segment_by_key(SCARG(uap, key));
+		if (segnum >= 0) {
+			error = shmget_existing(l, uap, mode, segnum, retval);
+			if (error == EAGAIN)
+				goto again;
+			return error;
+		}
+		if ((SCARG(uap, shmflg) & IPC_CREAT) == 0)
+			return ENOENT;
+	}
+	return shmget_allocate_segment(l, uap, mode, retval);
 }
 
 void
@@ -783,16 +668,20 @@ shmfork(struct vmspace *vm1, struct vmspace *vm2)
 	struct shmmap_state *shmmap_s;
 	struct shmmap_entry *shmmap_se;
 
-	SHMPRINTF(("shmfork %p->%p\n", vm1, vm2));
-	mutex_enter(&shm_lock);
 	vm2->vm_shm = vm1->vm_shm;
-	if (vm1->vm_shm) {
-		shmmap_s = (struct shmmap_state *)vm1->vm_shm;
-		SLIST_FOREACH(shmmap_se, &shmmap_s->entries, next)
-			shmsegs[IPCID_TO_IX(shmmap_se->shmid)].shm_nattch++;
-		shmmap_s->nrefs++;
-	}
-	mutex_exit(&shm_lock);
+
+	if (vm1->vm_shm == NULL)
+		return;
+
+#ifdef SHMDEBUG
+	printf("shmfork %p->%p\n", vm1, vm2);
+#endif
+
+	shmmap_s = (struct shmmap_state *)vm1->vm_shm;
+
+	SLIST_FOREACH(shmmap_se, &shmmap_s->entries, next)
+		shmsegs[IPCID_TO_IX(shmmap_se->shmid)].shm_nattch++;
+	shmmap_s->nrefs++;
 }
 
 void
@@ -800,119 +689,56 @@ shmexit(struct vmspace *vm)
 {
 	struct shmmap_state *shmmap_s;
 	struct shmmap_entry *shmmap_se;
-	struct uvm_object **uobj;
-	size_t *size;
-	u_int i, n;
 
-	SLIST_HEAD(, shmmap_entry) tmp_entries;
-
-	mutex_enter(&shm_lock);
 	shmmap_s = (struct shmmap_state *)vm->vm_shm;
-	if (shmmap_s == NULL) {
-		mutex_exit(&shm_lock);
+	if (shmmap_s == NULL)
 		return;
-	}
 
 	vm->vm_shm = NULL;
 
 	if (--shmmap_s->nrefs > 0) {
-		SHMPRINTF(("shmexit: vm %p drop ref (%d entries), refs = %d\n",
-		    vm, shmmap_s->nitems, shmmap_s->nrefs));
+#ifdef SHMDEBUG
+		printf("shmexit: vm %p drop ref (%d entries), now used by %d\n",
+		       vm, shmmap_s->nitems, shmmap_s->nrefs);
+#endif
 		SLIST_FOREACH(shmmap_se, &shmmap_s->entries, next)
 			shmsegs[IPCID_TO_IX(shmmap_se->shmid)].shm_nattch--;
-		mutex_exit(&shm_lock);
 		return;
 	}
 
-	KASSERT(shmmap_s->nrefs == 0);
-	n = shmmap_s->nitems;
-	SHMPRINTF(("shmexit: vm %p cleanup (%d entries)\n", vm, n));
-	mutex_exit(&shm_lock);
-	if (n == 0) {
-		kmem_free(shmmap_s, sizeof(struct shmmap_state));
-		return;
-	}
-
-	/* Allocate the arrays */
-	SLIST_INIT(&tmp_entries);
-	uobj = kmem_zalloc(n * sizeof(void *), KM_SLEEP);
-	size = kmem_zalloc(n * sizeof(size_t), KM_SLEEP);
-
-	/* Delete the entry from shm map */
-	i = 0;
-	mutex_enter(&shm_lock);
+#ifdef SHMDEBUG
+	printf("shmexit: vm %p cleanup (%d entries)\n", vm, shmmap_s->nitems);
+#endif
 	while (!SLIST_EMPTY(&shmmap_s->entries)) {
-		struct shmid_ds *shmseg;
-
 		shmmap_se = SLIST_FIRST(&shmmap_s->entries);
-		shmseg = &shmsegs[IPCID_TO_IX(shmmap_se->shmid)];
-		size[i] = (shmseg->shm_segsz + PGOFSET) & ~PGOFSET;
-		uobj[i] = shm_delete_mapping(shmmap_s, shmmap_se);
-		SLIST_INSERT_HEAD(&tmp_entries, shmmap_se, next);
-		i++;
+		shm_delete_mapping(vm, shmmap_s, shmmap_se);
 	}
-	mutex_exit(&shm_lock);
-
-	/* Unmap all segments, free the entries */
-	i = 0;
-	while (!SLIST_EMPTY(&tmp_entries)) {
-		KASSERT(i < n);
-		shmmap_se = SLIST_FIRST(&tmp_entries);
-		SLIST_REMOVE(&tmp_entries, shmmap_se, shmmap_entry, next);
-		uvm_deallocate(&vm->vm_map, shmmap_se->va, size[i]);
-		if (uobj[i] != NULL)
-			uao_detach(uobj[i]);
-		pool_put(&shmmap_entry_pool, shmmap_se);
-		i++;
-	}
-
-	kmem_free(uobj, n * sizeof(void *));
-	kmem_free(size, n * sizeof(size_t));
-	kmem_free(shmmap_s, sizeof(struct shmmap_state));
+	KASSERT(shmmap_s->nitems == 0);
+	free(shmmap_s, M_SHM);
 }
 
 static int
 shmrealloc(int newshmni)
 {
+	int i, sz;
 	vaddr_t v;
-	struct shmid_ds *oldshmsegs, *newshmsegs;
-	kcondvar_t *newshm_cv, *oldshm_cv;
-	size_t sz;
-	int i, lsegid, oldshmni;
+	struct shmid_ds *newshmsegs;
 
+	/* XXX: Would be good to have a upper limit */
 	if (newshmni < 1)
 		return EINVAL;
 
+	/* We can't reallocate less memory than we use */
+	if (shm_nused > newshmni)
+		return EPERM;
+
 	/* Allocate new memory area */
-	sz = ALIGN(newshmni * sizeof(struct shmid_ds)) +
-	    ALIGN(newshmni * sizeof(kcondvar_t));
-	v = uvm_km_alloc(kernel_map, round_page(sz), 0,
-	    UVM_KMF_WIRED|UVM_KMF_ZERO);
+	sz = newshmni * sizeof(struct shmid_ds);
+	v = uvm_km_alloc(kernel_map, round_page(sz), 0, UVM_KMF_WIRED);
 	if (v == 0)
 		return ENOMEM;
 
-	mutex_enter(&shm_lock);
-	while (shm_realloc_state || shm_realloc_disable)
-		cv_wait(&shm_realloc_cv, &shm_lock);
-
-	/*
-	 * Get the number of last segment.  Fail we are trying to
-	 * reallocate less memory than we use.
-	 */
-	lsegid = 0;
-	for (i = 0; i < shminfo.shmmni; i++)
-		if ((shmsegs[i].shm_perm.mode & SHMSEG_FREE) == 0)
-			lsegid = i;
-	if (lsegid >= newshmni) {
-		mutex_exit(&shm_lock);
-		uvm_km_free(kernel_map, v, sz, UVM_KMF_WIRED);
-		return EBUSY;
-	}
-	shm_realloc_state = true;
-
 	newshmsegs = (void *)v;
-	newshm_cv = (void *)((uintptr_t)newshmsegs +
-	    ALIGN(newshmni * sizeof(struct shmid_ds)));
 
 	/* Copy all memory to the new area */
 	for (i = 0; i < shm_nused; i++)
@@ -921,31 +747,13 @@ shmrealloc(int newshmni)
 
 	/* Mark as free all new segments, if there is any */
 	for (; i < newshmni; i++) {
-		cv_init(&newshm_cv[i], "shmwait");
 		newshmsegs[i].shm_perm.mode = SHMSEG_FREE;
 		newshmsegs[i].shm_perm._seq = 0;
 	}
 
-	oldshmsegs = shmsegs;
-	oldshmni = shminfo.shmmni;
-	shminfo.shmmni = newshmni;
+	sz = shminfo.shmmni * sizeof(struct shmid_ds);
+	uvm_km_free(kernel_map, (vaddr_t)shmsegs, sz, UVM_KMF_WIRED);
 	shmsegs = newshmsegs;
-	shm_cv = newshm_cv;
-
-	/* Reallocation completed - notify all waiters, if any */
-	shm_realloc_state = false;
-	cv_broadcast(&shm_realloc_cv);
-	mutex_exit(&shm_lock);
-
-	/* Release now unused resources. */
-	oldshm_cv = (void *)((uintptr_t)oldshmsegs +
-	    ALIGN(oldshmni * sizeof(struct shmid_ds)));
-	for (i = 0; i < oldshmni; i++)
-		cv_destroy(&oldshm_cv[i]);
-
-	sz = ALIGN(oldshmni * sizeof(struct shmid_ds)) +
-	    ALIGN(oldshmni * sizeof(kcondvar_t));
-	uvm_km_free(kernel_map, (vaddr_t)oldshmsegs, sz, UVM_KMF_WIRED);
 
 	return 0;
 }
@@ -953,42 +761,27 @@ shmrealloc(int newshmni)
 void
 shminit(void)
 {
+	int i, sz;
 	vaddr_t v;
-	size_t sz;
-	int i;
 
 	mutex_init(&shm_lock, MUTEX_DEFAULT, IPL_NONE);
-	pool_init(&shmmap_entry_pool, sizeof(struct shmmap_entry), 0, 0, 0,
-	    "shmmp", &pool_allocator_nointr, IPL_NONE);
-	cv_init(&shm_realloc_cv, "shmrealc");
 
-	/* Allocate the wired memory for our structures */
-	sz = ALIGN(shminfo.shmmni * sizeof(struct shmid_ds)) +
-	    ALIGN(shminfo.shmmni * sizeof(kcondvar_t));
-	v = uvm_km_alloc(kernel_map, round_page(sz), 0,
-	    UVM_KMF_WIRED|UVM_KMF_ZERO);
+	/* Allocate pageable memory for our structures */
+	sz = shminfo.shmmni * sizeof(struct shmid_ds);
+	v = uvm_km_alloc(kernel_map, round_page(sz), 0, UVM_KMF_WIRED);
 	if (v == 0)
 		panic("sysv_shm: cannot allocate memory");
 	shmsegs = (void *)v;
-	shm_cv = (void *)((uintptr_t)shmsegs +
-	    ALIGN(shminfo.shmmni * sizeof(struct shmid_ds)));
 
-	if (shminfo.shmmax == 0)
-		shminfo.shmmax = max(physmem / 4, 1024) * PAGE_SIZE;
-	else
-		shminfo.shmmax *= PAGE_SIZE;
-	shminfo.shmall = shminfo.shmmax / PAGE_SIZE;
+	shminfo.shmmax *= PAGE_SIZE;
 
 	for (i = 0; i < shminfo.shmmni; i++) {
-		cv_init(&shm_cv[i], "shmwait");
 		shmsegs[i].shm_perm.mode = SHMSEG_FREE;
 		shmsegs[i].shm_perm._seq = 0;
 	}
 	shm_last_free = 0;
 	shm_nused = 0;
 	shm_committed = 0;
-	shm_realloc_disable = 0;
-	shm_realloc_state = false;
 }
 
 static int
@@ -1004,96 +797,80 @@ sysctl_ipc_shmmni(SYSCTLFN_ARGS)
 	if (error || newp == NULL)
 		return error;
 
-	sysctl_unlock();
+	mutex_enter(&shm_lock);
 	error = shmrealloc(newsize);
-	sysctl_relock();
+	if (error == 0)
+		shminfo.shmmni = newsize;
+	mutex_exit(&shm_lock);
+
 	return error;
 }
 
 static int
 sysctl_ipc_shmmaxpgs(SYSCTLFN_ARGS)
 {
-	uint32_t newsize;
-	int error;
+	int newsize, error;
 	struct sysctlnode node;
 	node = *rnode;
 	node.sysctl_data = &newsize;
-
 	newsize = shminfo.shmall;
 	error = sysctl_lookup(SYSCTLFN_CALL(&node));
 	if (error || newp == NULL)
 		return error;
 
+	/* XXX: Would be good to have a upper limit */
 	if (newsize < 1)
 		return EINVAL;
 
 	shminfo.shmall = newsize;
-	shminfo.shmmax = (uint64_t)shminfo.shmall * PAGE_SIZE;
-
-	return 0;
-}
-
-static int
-sysctl_ipc_shmmax(SYSCTLFN_ARGS)
-{
-	uint64_t newsize;
-	int error;
-	struct sysctlnode node;
-	node = *rnode;
-	node.sysctl_data = &newsize;
-
-	newsize = shminfo.shmmax;
-	error = sysctl_lookup(SYSCTLFN_CALL(&node));
-	if (error || newp == NULL)
-		return error;
-
-	if (newsize < PAGE_SIZE)
-		return EINVAL;
-
-	shminfo.shmmax = round_page(newsize);
-	shminfo.shmall = shminfo.shmmax >> PAGE_SHIFT;
+	shminfo.shmmax = shminfo.shmall * PAGE_SIZE;
 
 	return 0;
 }
 
 SYSCTL_SETUP(sysctl_ipc_shm_setup, "sysctl kern.ipc subtree setup")
 {
-
 	sysctl_createv(clog, 0, NULL, NULL,
 		CTLFLAG_PERMANENT,
 		CTLTYPE_NODE, "kern", NULL,
 		NULL, 0, NULL, 0,
 		CTL_KERN, CTL_EOL);
+
 	sysctl_createv(clog, 0, NULL, NULL,
 		CTLFLAG_PERMANENT,
 		CTLTYPE_NODE, "ipc",
 		SYSCTL_DESCR("SysV IPC options"),
 		NULL, 0, NULL, 0,
 		CTL_KERN, KERN_SYSVIPC, CTL_EOL);
+
 	sysctl_createv(clog, 0, NULL, NULL,
-		CTLFLAG_PERMANENT | CTLFLAG_READWRITE,
-		CTLTYPE_QUAD, "shmmax",
+		CTLFLAG_PERMANENT | CTLFLAG_READONLY,
+		CTLTYPE_INT, "shmmax",
 		SYSCTL_DESCR("Max shared memory segment size in bytes"),
-		sysctl_ipc_shmmax, 0, &shminfo.shmmax, 0,
+		NULL, 0, &shminfo.shmmax, 0,
 		CTL_KERN, KERN_SYSVIPC, KERN_SYSVIPC_SHMMAX, CTL_EOL);
+
 	sysctl_createv(clog, 0, NULL, NULL,
 		CTLFLAG_PERMANENT | CTLFLAG_READWRITE,
 		CTLTYPE_INT, "shmmni",
 		SYSCTL_DESCR("Max number of shared memory identifiers"),
 		sysctl_ipc_shmmni, 0, &shminfo.shmmni, 0,
 		CTL_KERN, KERN_SYSVIPC, KERN_SYSVIPC_SHMMNI, CTL_EOL);
+
 	sysctl_createv(clog, 0, NULL, NULL,
 		CTLFLAG_PERMANENT | CTLFLAG_READWRITE,
 		CTLTYPE_INT, "shmseg",
 		SYSCTL_DESCR("Max shared memory segments per process"),
 		NULL, 0, &shminfo.shmseg, 0,
 		CTL_KERN, KERN_SYSVIPC, KERN_SYSVIPC_SHMSEG, CTL_EOL);
+
 	sysctl_createv(clog, 0, NULL, NULL,
 		CTLFLAG_PERMANENT | CTLFLAG_READWRITE,
 		CTLTYPE_INT, "shmmaxpgs",
 		SYSCTL_DESCR("Max amount of shared memory in pages"),
 		sysctl_ipc_shmmaxpgs, 0, &shminfo.shmall, 0,
 		CTL_KERN, KERN_SYSVIPC, KERN_SYSVIPC_SHMMAXPGS, CTL_EOL);
+
 	sysctl_createv(clog, 0, NULL, NULL,
 		CTLFLAG_PERMANENT | CTLFLAG_READWRITE,
 		CTLTYPE_INT, "shm_use_phys",

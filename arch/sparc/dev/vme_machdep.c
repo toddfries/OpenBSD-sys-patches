@@ -1,4 +1,4 @@
-/*	$NetBSD: vme_machdep.c,v 1.59 2008/12/19 18:49:38 cegger Exp $	*/
+/*	$NetBSD: vme_machdep.c,v 1.53 2005/11/16 00:49:03 uwe Exp $	*/
 
 /*-
  * Copyright (c) 1997, 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: vme_machdep.c,v 1.59 2008/12/19 18:49:38 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: vme_machdep.c,v 1.53 2005/11/16 00:49:03 uwe Exp $");
 
 #include <sys/param.h>
 #include <sys/extent.h>
@@ -149,12 +156,12 @@ static void	sparc_vme_iommu_dmamap_sync(bus_dma_tag_t, bus_dmamap_t,
 
 #if defined(SUN4) || defined(SUN4M)
 static int	sparc_vme_dmamem_map(bus_dma_tag_t, bus_dma_segment_t *,
-		    int, size_t, void **, int);
+		    int, size_t, caddr_t *, int);
 #endif
 
 #if 0
 static void	sparc_vme_dmamap_destroy(bus_dma_tag_t, bus_dmamap_t);
-static void	sparc_vme_dmamem_unmap(bus_dma_tag_t, void *, size_t);
+static void	sparc_vme_dmamem_unmap(bus_dma_tag_t, caddr_t, size_t);
 static paddr_t	sparc_vme_dmamem_mmap(bus_dma_tag_t,
 		    bus_dma_segment_t *, int, off_t, int, int);
 #endif
@@ -448,8 +455,8 @@ sparc_vme_error(void)
 
 	afsr = sc->sc_reg->vmebus_afsr;
 	afpa = sc->sc_reg->vmebus_afar;
-	snprintb(bits, sizeof(bits), VMEBUS_AFSR_BITS, afsr);
-	printf("VME error:\n\tAFSR %s\n", bits);
+	printf("VME error:\n\tAFSR %s\n",
+		bitmask_snprintf(afsr, VMEBUS_AFSR_BITS, bits, sizeof(bits)));
 	printf("\taddress: 0x%x%x\n", afsr, afpa);
 	return (0);
 }
@@ -620,7 +627,7 @@ vmeintr4(void *arg)
 
 	level = (ihp->pri << 1) | 1;
 
-	vec = ldcontrolb((void *)(AC_VMEINTVEC | level));
+	vec = ldcontrolb((caddr_t)(AC_VMEINTVEC | level));
 
 	if (vec == -1) {
 #ifdef DEBUG
@@ -672,6 +679,7 @@ vmeintr4m(void *arg)
 #else
 	/* so, arrange to catch the fault... */
 	{
+	extern struct user *proc0paddr;
 	extern int fkbyte(volatile char *, struct pcb *);
 	volatile char *addr = &ihp->sc->sc_vec->vmebusvec[level];
 	struct pcb *xpcb;
@@ -679,11 +687,14 @@ vmeintr4m(void *arg)
 	int s;
 
 	s = splhigh();
+	if (curlwp == NULL)
+		xpcb = (struct pcb *)proc0paddr;
+	else
+		xpcb = &curlwp->l_addr->u_pcb;
 
-	xpcb = &curlwp->l_addr->u_pcb;
 	saveonfault = (u_long)xpcb->pcb_onfault;
 	vec = fkbyte(addr, xpcb);
-	xpcb->pcb_onfault = (void *)saveonfault;
+	xpcb->pcb_onfault = (caddr_t)saveonfault;
 
 	splx(s);
 	}
@@ -766,9 +777,11 @@ sparc_vme_intr_establish(void *cookie, vme_intr_handle_t vih, int level,
 			break;
 
 	if (ih == NULL) {
-		ih = malloc(sizeof(struct intrhand), M_DEVBUF, M_NOWAIT|M_ZERO);
+		ih = (struct intrhand *)
+			malloc(sizeof(struct intrhand), M_DEVBUF, M_NOWAIT);
 		if (ih == NULL)
 			panic("vme_addirq");
+		bzero(ih, sizeof *ih);
 		ih->ih_fun = sc->sc_vmeintr;
 		ih->ih_arg = vih;
 		intr_establish(pil, 0, ih, NULL);
@@ -1066,7 +1079,7 @@ sparc_vme_iommu_dmamap_sync(bus_dma_tag_t t, bus_dmamap_t map,
 #if defined(SUN4) || defined(SUN4M)
 static int
 sparc_vme_dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
-		     size_t size, void **kvap, int flags)
+		     size_t size, caddr_t *kvap, int flags)
 {
 	struct sparcvme_softc	*sc = (struct sparcvme_softc *)t->_cookie;
 

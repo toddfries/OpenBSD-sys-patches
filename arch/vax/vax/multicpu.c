@@ -1,4 +1,4 @@
-/*	$NetBSD: multicpu.c,v 1.25 2008/03/11 05:34:03 matt Exp $	*/
+/*	$NetBSD: multicpu.c,v 1.18 2006/03/28 17:38:28 thorpej Exp $	*/
 
 /*
  * Copyright (c) 2000 Ludd, University of Lule}, Sweden. All rights reserved.
@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: multicpu.c,v 1.25 2008/03/11 05:34:03 matt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: multicpu.c,v 1.18 2006/03/28 17:38:28 thorpej Exp $");
 
 #include "opt_multiprocessor.h"
 
@@ -53,7 +53,9 @@ __KERNEL_RCSID(0, "$NetBSD: multicpu.c,v 1.25 2008/03/11 05:34:03 matt Exp $");
 
 #include "ioconf.h"
 
-const struct cpu_mp_dep *mp_dep_call;
+struct cpu_mp_dep *mp_dep_call;
+
+static	void slaverun(void);
 
 struct cpuq {
 	SIMPLEQ_ENTRY(cpuq) cq_q;
@@ -67,61 +69,94 @@ extern long avail_start, avail_end, proc0paddr;
 struct cpu_info_qh cpus = SIMPLEQ_HEAD_INITIALIZER(cpus);
 
 void
-cpu_boot_secondary_processors(void)
+cpu_boot_secondary_processors()
 {
 	struct cpuq *q;
 
 	while ((q = SIMPLEQ_FIRST(&cpuq))) {
 		SIMPLEQ_REMOVE_HEAD(&cpuq, cq_q);
-		(*mp_dep_call->cpu_startslave)(q->cq_ci);
+		(*mp_dep_call->cpu_startslave)(q->cq_dev, q->cq_ci);
 		free(q, M_TEMP);
 	}
 }
 
 /*
- * Allocate a cpu_info struct and fill it in then prepare for getting
- * started by cpu_boot_secondary_processors().
+ * Allocate an UAREA for this CPU, create an idle PCB, get a cpu_info 
+ * struct and fill it in and prepare for getting started by 
+ * cpu_boot_secondary_processors().
  */
 void
-cpu_slavesetup(device_t self, int slotid)
+cpu_slavesetup(struct device *dev)
 {
-	struct cpu_info *ci;
+	struct cpu_mp_softc *sc = (struct cpu_mp_softc *)dev;
 	struct cpuq *cq;
+	struct cpu_info *ci;
+	struct pglist mlist;
 	struct vm_page *pg;
-	vaddr_t istackbase;
+	struct pcb *pcb;
+	vaddr_t istackbase, scratch;
+	int error;
 
-	KASSERT(device_private(self) == NULL);
+	/* Get an UAREA */
+	error = uvm_pglistalloc(USPACE, avail_start, avail_end, 0, 0,
+	    &mlist, 1, 1);
+	if (error)
+		panic("cpu_slavesetup: error %d", error);
+	pcb = (struct pcb *)(VM_PAGE_TO_PHYS(TAILQ_FIRST(&mlist)) | KERNBASE);
 
-	ci = malloc(sizeof(*ci), M_DEVBUF, M_ZERO|M_NOWAIT);
-	if (ci == NULL)
-		panic("cpu_slavesetup1");
-
-	self->dv_private = ci;
-	ci->ci_dev = self;
-	ci->ci_slotid = slotid;
-	ci->ci_cpuid = device_unit(self);
+	/* Copy our own idle PCB */
+	memcpy(pcb, (void *)proc0paddr, sizeof(struct user));
+	kvtopte((u_int)pcb + REDZONEADDR)->pg_v = 0;
 
 	/* Allocate an interrupt stack */
 	pg = uvm_pagealloc(NULL, 0, NULL, 0);
 	if (pg == NULL)
 		panic("cpu_slavesetup2");
-
 	istackbase = VM_PAGE_TO_PHYS(pg) | KERNBASE;
 	kvtopte(istackbase)->pg_v = 0; /* istack safety belt */
 
+	/* Get scratch pages for different use, see pmap.c for comment */
+	pg = uvm_pagealloc(NULL, 0, NULL, 0);
+	if (pg == NULL)
+		panic("cpu_slavesetup3");
+	scratch = VM_PAGE_TO_PHYS(pg) | KERNBASE;
+
 	/* Populate the PCB and the cpu_info struct */
+	ci = &sc->sc_ci;
+	ci->ci_dev = dev;
+	ci->ci_exit = scratch;
+	ci->ci_pcb = (void *)((intptr_t)pcb & ~KERNBASE);
 	ci->ci_istack = istackbase + PAGE_SIZE;
 	SIMPLEQ_INSERT_TAIL(&cpus, ci, ci_next);
+	pcb->KSP = (uintptr_t)pcb + USPACE; /* Idle kernel stack */
+	pcb->SSP = (uintptr_t)ci;
+	pcb->PC = (uintptr_t)slaverun + 2;
+	pcb->PSL = 0;
 
-	cq = malloc(sizeof(*cq), M_TEMP, M_NOWAIT|M_ZERO);
+	cq = malloc(sizeof(*cq), M_TEMP, M_NOWAIT);
 	if (cq == NULL)
-		panic("cpu_slavesetup3");
-
+		panic("cpu_slavesetup4");
+	memset(cq, 0, sizeof(*cq));
 	cq->cq_ci = ci;
-	cq->cq_dev = ci->ci_dev;
+	cq->cq_dev = dev;
 	SIMPLEQ_INSERT_TAIL(&cpuq, cq, cq_q);
+}
 
-	mi_cpu_attach(ci);	/* let the MI parts know about the new cpu */
+volatile int sta;
+
+void
+slaverun()
+{
+	struct cpu_info *ci = curcpu();
+
+	((volatile struct cpu_info *)ci)->ci_flags |= CI_RUNNING;
+	cpu_send_ipi(IPI_DEST_MASTER, IPI_RUNNING);
+	printf("%s: running\n", ci->ci_dev->dv_xname);
+	while (sta != device_unit(ci->ci_dev))
+		;
+	splsched();
+	sched_lock_idle();
+	cpu_switch(NULL,NULL);
 }
 
 /*
@@ -130,45 +165,42 @@ cpu_slavesetup(device_t self, int slotid)
 void
 cpu_send_ipi(int cpu, int type)
 {
-	struct cpu_info *ci;
+	struct cpu_mp_softc *sc;
 	int i;
 
 	if (cpu >= 0) {
-		ci = device_lookup_private(&cpu_cd, cpu);
-		bbssi(type, &ci->ci_ipimsgs);
-		(*mp_dep_call->cpu_send_ipi)(ci);
+		sc = cpu_cd.cd_devs[cpu];
+		bbssi(type, &sc->sc_ci.ci_ipimsgs);
+		(*mp_dep_call->cpu_send_ipi)(&sc->sc_dev);
 		return;
 	}
 
 	for (i = 0; i < cpu_cd.cd_ndevs; i++) {
-		ci = device_lookup_private(&cpu_cd, i);
-		if (ci == NULL)
+		sc = cpu_cd.cd_devs[i];
+		if (sc == NULL)
 			continue;
 		switch (cpu) {
 		case IPI_DEST_MASTER:
-			if (ci->ci_flags & CI_MASTERCPU) {
-				bbssi(type, &ci->ci_ipimsgs);
-				(*mp_dep_call->cpu_send_ipi)(ci);
+			if (sc->sc_ci.ci_flags & CI_MASTERCPU) {
+				bbssi(type, &sc->sc_ci.ci_ipimsgs);
+				(*mp_dep_call->cpu_send_ipi)(&sc->sc_dev);
 			}
 			break;
 		case IPI_DEST_ALL:
 			if (i == cpu_number())
 				continue;	/* No IPI to myself */
-			bbssi(type, &ci->ci_ipimsgs);
-			(*mp_dep_call->cpu_send_ipi)(ci);
+			bbssi(type, &sc->sc_ci.ci_ipimsgs);
+			(*mp_dep_call->cpu_send_ipi)(&sc->sc_dev);
 			break;
 		}
 	}
 }
 
 void
-cpu_handle_ipi(void)
+cpu_handle_ipi()
 {
-	struct cpu_info * const ci = curcpu();
+	struct cpu_info *ci = curcpu();
 	int bitno;
-	int s;
-
-	s = splhigh();
 
 	while ((bitno = ffs(ci->ci_ipimsgs))) {
 		bitno -= 1; /* ffs() starts from 1 */
@@ -200,5 +232,4 @@ cpu_handle_ipi(void)
 			panic("cpu_handle_ipi: bad bit %x", bitno);
 		}
 	}
-	splx(s);
 }

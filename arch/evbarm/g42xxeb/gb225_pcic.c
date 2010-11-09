@@ -198,7 +198,7 @@ opcic_attach(struct device *parent, struct device *self, void *aux)
 #endif
 
 		/* schedule kthread creation */
-		sapcic_kthread_create(&sc->sc_socket[i].ss);
+		kthread_create(sapcic_kthread_create, &sc->sc_socket[i].ss);
 	}
 
 }
@@ -274,7 +274,7 @@ opcic_read(struct sapcic_socket *__so, int which)
 		return 1;
 
 	default:
-		panic("%s: bogus register", __func__);
+		panic("%s: bogus register", __FUNCTION__);
 	}
 }
 
@@ -307,7 +307,7 @@ opcic_write(struct sapcic_socket *__so, int which, int arg)
 		break;
 
 	default:
-		panic("%s: bogus register", __func__);
+		panic("%s: bogus register", __FUNCTION__);
 	}
 }
 

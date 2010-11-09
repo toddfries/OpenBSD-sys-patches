@@ -1,4 +1,4 @@
-/*	$NetBSD: grf_machdep.c,v 1.29 2009/01/17 10:02:23 isaki Exp $	*/
+/*	$NetBSD: grf_machdep.c,v 1.26 2006/03/29 04:16:48 thorpej Exp $	*/
 
 /*
  * Copyright (c) 1990, 1993
@@ -82,7 +82,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: grf_machdep.c,v 1.29 2009/01/17 10:02:23 isaki Exp $");
+__KERNEL_RCSID(0, "$NetBSD: grf_machdep.c,v 1.26 2006/03/29 04:16:48 thorpej Exp $");
 
 #include "locators.h"
 
@@ -90,51 +90,79 @@ __KERNEL_RCSID(0, "$NetBSD: grf_machdep.c,v 1.29 2009/01/17 10:02:23 isaki Exp $
 #include <sys/systm.h>
 #include <sys/device.h>
 
-#include <machine/autoconf.h>
 #include <machine/grfioctl.h>
 #include <x68k/dev/grfvar.h>
 #include <x68k/x68k/iodevice.h>
 
+/*
+ * false when initing for the console.
+ */
+extern int x68k_realconfig;
+extern int x68k_config_found(struct cfdata *, struct device *,
+			     void *, cfprint_t);
+
 /* grfbus: is this necessary? */
 int grfbusprint(void *auxp, const char *);
-int grfbusmatch(device_t, cfdata_t, void *);
-void grfbusattach(device_t, device_t, void *);
-int grfbussearch(device_t, cfdata_t, const int *, void *);
+int grfbusmatch(struct device *, struct cfdata *, void *);
+void grfbusattach(struct device *, struct device *, void *);
+int grfbussearch(struct device *, struct cfdata *, const int *, void *);
 
 /* grf itself */
-int grfmatch(device_t, cfdata_t, void *);
-void grfattach(device_t, device_t, void *);
+void grfattach(struct device *, struct device *, void *);
+int grfmatch(struct device *, struct cfdata *, void *);
 int grfprint(void *, const char *);
 
-static int grfinit(struct grf_softc *, int);
+static int grfinit(void *, int);
 
-CFATTACH_DECL_NEW(grfbus, 0,
+CFATTACH_DECL(grfbus, sizeof(struct device),
     grfbusmatch, grfbusattach, NULL, NULL);
 
-CFATTACH_DECL_NEW(grf, sizeof(struct grf_softc),
+CFATTACH_DECL(grf, sizeof(struct grf_softc),
     grfmatch, grfattach, NULL, NULL);
+
+/*
+ * only used in console init.
+ */
+static struct cfdata *cfdata_gbus;
+static struct cfdata *cfdata_grf;
 
 extern struct cfdriver grfbus_cd;
 
 int
-grfbusmatch(device_t pdp, cfdata_t cfp, void *auxp)
+grfbusmatch(struct device *pdp, struct cfdata *cfp, void *auxp)
 {
 	if (strcmp(auxp, grfbus_cd.cd_name))
 		return (0);
 
+	if ((x68k_realconfig == 0) || (cfdata_gbus == NULL)) {
+
+		/*
+		 * Probe layers we depend on
+		 */
+		if (x68k_realconfig == 0) {
+			cfdata_gbus = cfp;
+		}
+	}
 	return (1);
 }
 
 void
-grfbusattach(device_t pdp, device_t dp, void *auxp)
+grfbusattach(struct device *pdp, struct device *dp, void *auxp)
 {
+	int i;
 
-	aprint_normal("\n");
-	config_search_ia(grfbussearch, dp, "grfb", NULL);
+	if (dp == NULL) {
+		i = 0;
+		x68k_config_found(cfdata_gbus, NULL, &i, grfbusprint);
+	} else {
+		printf("\n");
+		config_search_ia(grfbussearch, dp, "grfb", NULL);
+	}
 }
 
 int
-grfbussearch(device_t dp, cfdata_t match, const int *ldesc, void *aux)
+grfbussearch(struct device *dp, struct cfdata *match,
+	     const int *ldesc, void *aux)
 {
 
 	config_found(dp, &match->cf_loc[GRFBCF_ADDR], grfbusprint);
@@ -154,41 +182,54 @@ grfbusprint(void *auxp, const char *name)
  * Normal init routine called by configure() code
  */
 int
-grfmatch(device_t parent, cfdata_t cfp, void *aux)
+grfmatch(struct device *parent, struct cfdata *cfp, void *aux)
 {
 	int addr;
 
 	addr = cfp->cf_loc[GRFBCF_ADDR];
+	if (x68k_realconfig == 0) {
+		if (addr != 0)
+			return 0;
+		cfdata_grf = cfp;
+	}
+
 	if (addr < 0 || addr > ngrfsw)
 		return 0;
 
 	return 1;
 }
 
-struct grf_softc congrf;
+static struct grf_softc	congrf;
 
 void
-grfattach(device_t parent, device_t dp, void *aux)
+grfattach(struct device *parent, struct device *dp, void *aux)
 {
 	struct grf_softc *gp;
 	struct cfdata *cf;
 	int addr;
 
+	/*
+	 * Handle exeption case: early console init
+	 */
+	if (dp == NULL) {
+		/* Attach console ite */
+		grfinit(&congrf, 0);
+		x68k_config_found(cfdata_grf, NULL, &congrf, grfprint);
+		return;
+	}
+
 	cf = device_cfdata(dp);
 	addr = cf->cf_loc[GRFBCF_ADDR];
+	grfinit(dp, addr);
 
-	gp = device_private(dp);
-	gp->g_device = dp;
+	gp = (struct grf_softc *)dp;
 	gp->g_cfaddr = addr;
-	grfinit(gp, addr);
-
-	aprint_normal(": %d x %d ",
-		gp->g_display.gd_dwidth, gp->g_display.gd_dheight);
+	printf(": %d x %d ", gp->g_display.gd_dwidth, gp->g_display.gd_dheight);
 	if (gp->g_display.gd_colors == 2)
-		aprint_normal("monochrome");
+		printf("monochrome");
 	else
-		aprint_normal("%d colors", gp->g_display.gd_colors);
-	aprint_normal(" %s display\n", gp->g_sw->gd_desc);
+		printf("%d colors", gp->g_display.gd_colors);
+	printf(" %s display\n", gp->g_sw->gd_desc);
 
 	/*
 	 * try and attach an ite
@@ -206,15 +247,16 @@ grfprint(void *auxp, const char *pnp)
 }
 
 int
-grfinit(struct grf_softc *gp, int cfaddr)
+grfinit(void *dp, int cfaddr)
 {
+	struct grf_softc *gp = dp;
 	struct grfsw *gsw;
-	void *addr;
+	caddr_t addr;
 
 	if (cfaddr == 0)
-		addr = (void *)__UNVOLATILE(IODEVbase->tvram);
+		addr = (caddr_t)__UNVOLATILE(IODEVbase->tvram);
 	else
-		addr = (void *)__UNVOLATILE(IODEVbase->gvram);
+		addr = (caddr_t)__UNVOLATILE(IODEVbase->gvram);
 
 	gsw = &grfsw[cfaddr];
 	if (gsw < &grfsw[ngrfsw] && (*gsw->gd_init)(gp, addr)) {
@@ -225,10 +267,4 @@ grfinit(struct grf_softc *gp, int cfaddr)
 	}
 
 	return 0;
-}
-
-void
-grf_config_console(void)
-{
-	grfinit(&congrf, 0);
 }

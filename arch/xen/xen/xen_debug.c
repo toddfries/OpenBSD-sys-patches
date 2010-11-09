@@ -1,4 +1,4 @@
-/*	$NetBSD: xen_debug.c,v 1.5 2007/11/22 16:17:09 bouyer Exp $	*/
+/*	$NetBSD: xen_debug.c,v 1.4 2005/12/11 12:19:50 christos Exp $	*/
 
 /*
  *
@@ -56,7 +56,7 @@
 
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: xen_debug.c,v 1.5 2007/11/22 16:17:09 bouyer Exp $");
+__KERNEL_RCSID(0, "$NetBSD: xen_debug.c,v 1.4 2005/12/11 12:19:50 christos Exp $");
 
 #define XENDEBUG
 
@@ -64,8 +64,8 @@ __KERNEL_RCSID(0, "$NetBSD: xen_debug.c,v 1.5 2007/11/22 16:17:09 bouyer Exp $")
 #include <sys/systm.h>
 
 #include <machine/stdarg.h>
-#include <xen/xen.h>
-#include <xen/hypervisor.h>
+#include <machine/xen.h>
+#include <machine/hypervisor.h>
 
 #ifdef XENDEBUG
 

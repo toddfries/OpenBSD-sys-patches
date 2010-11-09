@@ -1,4 +1,4 @@
-/*	$NetBSD: dev.c,v 1.8 2007/11/24 13:20:54 isaki Exp $	*/
+/*	$NetBSD: dev.c,v 1.7 2005/12/11 12:24:46 christos Exp $	*/
 
 /*-
  * Copyright (c) 1993
@@ -37,21 +37,22 @@
 #include "stand.h"
 
 int
-nodev(void)
+nodev()
 {
-
-	return ENXIO;
+	return (ENXIO);
 }
 
 void
-nullsys(void)
+nullsys()
 {
 }
 
 /* ARGSUSED */
 int
-noioctl(struct open_file *f, u_long cmd, void *data)
+noioctl(f, cmd, data)
+	struct open_file *f;
+	u_long cmd;
+	void *data;
 {
-
-	return EINVAL;
+	return (EINVAL);
 }

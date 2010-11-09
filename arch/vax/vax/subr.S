@@ -1,4 +1,4 @@
-/*	$NetBSD: subr.S,v 1.25 2008/08/29 18:25:02 matt Exp $	   */
+/*	$NetBSD: subr.S,v 1.13 2005/12/11 12:19:36 christos Exp $	   */
 
 /*
  * Copyright (c) 1994 Ludd, University of Lule}, Sweden.
@@ -47,11 +47,6 @@
 #endif
 
 #define JSBENTRY(x)	.globl x ; .align 2 ; x :
-#define SCBENTRY(name) \
-	.text			; \
-	.align 2		; \
-	.globl __CONCAT(X,name)	; \
-__CONCAT(X,name):
 
 		.text
 
@@ -128,9 +123,8 @@ to:	movw	$0xfff,_C_LABEL(panic)		# Save all regs in panic
 	addl3	$USPACE,_C_LABEL(proc0paddr),%r0	# Get kernel stack top
 	mtpr	%r0,$PR_KSP			# put in IPR KSP
 	movl	%r0,_C_LABEL(Sysmap)		# SPT start addr after KSP
-	movl	_C_LABEL(proc0paddr),%r0	# get PCB virtual address
-	mfpr	$PR_PCBB,PCB_PADDR(%r0)		# save PCB physical address
-	movab	IFTRAP(%r0),ESP(%r0)		# Save trap address in ESP
+	movl	_C_LABEL(proc0paddr),%r0		# get PCB virtual address
+	movab	IFTRAP(%r0),4(%r0)		# Save trap address in ESP
 	mtpr	4(%r0),$PR_ESP			# Put it in ESP also
 
 # Set some registers in known state
@@ -212,8 +206,7 @@ _C_LABEL(ultrix_esigcode):
 
 	.align	2
 	.globl	_C_LABEL(idsptch), _C_LABEL(eidsptch)
-_C_LABEL(idsptch):
-	pushr	$0x3f
+_C_LABEL(idsptch):	pushr	$0x3f
 	.word	0x9f16		# jsb to absolute address
 	.long	_C_LABEL(cmn_idsptch)	# the absolute address
 	.long	0		# the callback interrupt routine
@@ -222,33 +215,16 @@ _C_LABEL(idsptch):
 _C_LABEL(eidsptch):
 
 _C_LABEL(cmn_idsptch):
-#if defined(MULTIPROCESSOR) || defined(LOCKDEBUG)
-	calls	$0,_C_LABEL(krnlock)
-#endif
 	movl	(%sp)+,%r0	# get pointer to idspvec
-	mtpr	$IPL_VM,$PR_IPL	# Make sure we are at IPL_VM
 	movl	8(%r0),%r1	# get evcnt pointer
 	beql	1f		# no ptr, skip increment
 	incl	EV_COUNT(%r1)	# increment low longword
 	adwc	$0,EV_COUNT+4(%r1) # add any carry to hi longword
 1:	incl	_C_LABEL(uvmexp)+UVME_INTRS	# increment uvmexp.intrs
-#if 0
-	pushl	%r0
-	movq	(%r0),-(%sp)
-	pushab	2f
-	calls	$3,_C_LABEL(printf)
-	movl	(%sp)+,%r0
-#endif
 	pushl	4(%r0)		# push argument
 	calls	$1,*(%r0)	# call interrupt routine
-#if defined(MULTIPROCESSOR) || defined(LOCKDEBUG)
-	calls	$0,_C_LABEL(krnunlock)
-#endif
 	popr	$0x3f		# pop registers
 	rei			# return from interrut
-#if 0
-2:	.asciz	"intr %p(%p)\n"
-#endif
 
 ENTRY(badaddr,0)			# Called with addr,b/w/l
 	mfpr	$PR_IPL,%r0	# splhigh()
@@ -302,6 +278,129 @@ _C_LABEL(longjmp):.word	0
 	jmp	*8(%r1)
 #endif
 
+#
+# setrunqueue/remrunqueue fast variants.
+#
+
+JSBENTRY(Setrq)
+#ifdef DIAGNOSTIC
+	tstl	4(%r0)	# Check that process actually are off the queue
+	beql	1f
+	pushab	setrq
+	calls	$1,_C_LABEL(panic)
+setrq:	.asciz	"setrunqueue"
+#endif
+1:	extzv	$2,$6,L_PRIORITY(%r0),%r1		# get priority
+	movaq	_C_LABEL(sched_qs)[%r1],%r2	# get address of queue
+	insque	(%r0),*PH_RLINK(%r2)		# put proc last in queue
+	bbss	%r1,_C_LABEL(sched_whichqs),1f	# set queue bit.
+1:	rsb
+
+JSBENTRY(Remrq)
+	extzv	$2,$6,L_PRIORITY(%r0),%r1
+#ifdef DIAGNOSTIC
+	bbs	%r1,_C_LABEL(sched_whichqs),1f
+	pushab	remrq
+	calls	$1,_C_LABEL(panic)
+remrq:	.asciz	"remrunqueue"
+#endif
+1:	remque	(%r0),%r2
+	bneq	2f			# Not last process on queue
+	bbsc	%r1,_C_LABEL(sched_whichqs),2f
+2:	clrl	L_BACK(%r0)		# saftey belt
+	rsb
+
+#
+# Idle loop. Here we could do something fun, maybe, like calculating
+# pi or something.
+#
+idle:
+#if defined(LOCKDEBUG)
+	calls	$0,_C_LABEL(sched_unlock_idle)
+#elif defined(MULTIPROCESSOR)
+	clrl	_C_LABEL(sched_lock)	# release sched lock
+#endif
+	mtpr	$1,$PR_IPL 		# IPL cannot be 0 because we are
+					# running on the interrupt stack
+					# and may get interrupts
+
+1:	tstl	_C_LABEL(sched_whichqs)	# Anything ready to run?
+	beql	1b			# no, run the idle loop again.
+/* Now try the test the long way */
+	mtpr	$IPL_HIGH,$PR_IPL	# block all types of interrupts
+#if defined(LOCKDEBUG)
+	calls	$0,_C_LABEL(sched_lock_idle)
+#elif defined(MULTIPROCESSOR)
+3:	bbssi	$0,_C_LABEL(sched_lock),3b	# acquire sched lock
+#endif
+	brb	lp			# check sched_whichqs again
+
+#
+# cpu_switch, cpu_preempt, cpu_exit and the idle loop implemented in
+# assembler for efficiency.  This is called at IPL_HIGH.
+#
+
+JSBENTRY(Swtch)
+	mfpr	$PR_SSP,%r1		# Get ptr to this cpu_info struct
+	clrl	CI_CURLWP(%r1)		# Stop process accounting
+	svpctx				# Save context if another CPU
+					# get control first (must be on
+					# the interrupt stack when idling)
+
+
+lp:	ffs	$0,$32,_C_LABEL(sched_whichqs),%r3 # Search for bit set
+	beql	idle			# no bit set, go to idle loop
+
+	movaq	_C_LABEL(sched_qs)[%r3],%r1	# get address of queue head
+	remque	*(%r1),%r2		# remove lwp pointed to by queue head
+					# lwp ptr is now in %r2
+#ifdef DIAGNOSTIC
+	bvc	1f			# check if something on queue
+	pushab	noque
+	calls	$1,_C_LABEL(panic)
+#endif
+
+1:	bneq	2f			# more processes on queue?
+	bbsc	%r3,_C_LABEL(sched_whichqs),2f	# no, clear bit in whichqs
+2:	clrl	L_BACK(%r2)		# clear proc backpointer
+	mfpr	$PR_SSP,%r1		# Get ptr to this cpu_info struct
+	/* p->p_cpu initialized in fork1() for single-processor */
+#if defined(MULTIPROCESSOR)
+	movl	%r1,L_CPU(%r2)		# l->l_cpu = curcpu();
+#endif
+	movb	$LSONPROC,L_STAT(%r2)	# l->l_stat = LSONPROC;
+	movl	%r2,CI_CURLWP(%r1)	# set new process running
+	clrl	CI_WANT_RESCHED(%r1)	# we are now changing process
+	movl	L_ADDR(%r2),%r0		# Get pointer to new pcb.
+	addl3	%r0,$IFTRAP,%r1		# Save for copy* functions.
+	mtpr	%r1,$PR_ESP		# Use ESP as CPU-specific pointer
+	movl	%r1,ESP(%r0)		# Must save in PCB also.
+	mfpr	$PR_SSP,%r1		# New process must inherit cpu_info
+	movl	%r1,SSP(%r0)		# Put it in new PCB
+
+#
+# Nice routine to get physical from virtual addresses.
+#
+	extzv	$9,$21,%r0,%r1		# extract offset
+	ashl	$9,*_C_LABEL(Sysmap)[%r1],%r3
+
+	clrl	PCB_R0(%r0)		# Assume switch to same lwp
+	mfpr	$PR_PCBB,%r1		# Get old PCB address
+	cmpl	%r1,%r3			# The same lwp?
+	beql	1f			# Branch if it is
+	movl	$1,PCB_R0(%r0)		# Otherwise, return 1.
+
+1:	mtpr	%r3,$PR_PCBB
+	ldpctx
+#if defined(LOCKDEBUG)
+	pushl	%r0
+	calls	$0,_C_LABEL(sched_unlock_idle)
+	movl	(%sp)+,%r0
+#elif defined(MULTIPROCESSOR)
+	clrl	_C_LABEL(sched_lock)	# clear sched lock
+#endif
+	rei
+
 #if defined(MULTIPROCESSOR)
 	.align 2
 	.globl	_C_LABEL(vax_mp_tramp)	# used to kick off multiprocessor systems.
@@ -310,130 +409,62 @@ _C_LABEL(vax_mp_tramp):
 	rei
 #endif
 
-	.globl	softint_cleanup,softint_exit,softint_process
-	.type	softint_cleanup@function
-	.type	softint_exit@function
-	.type	softint_process@function
-softint_cleanup:
-	movl    L_CPU(%r0),%r1		/* get cpu_info */
-	incl    CI_MTX_COUNT(%r1)	/* increment mutex count */
-	clrl    L_CTXSWTCH(%r0)		/* clear l_ctxswtch of old lwp */
-	movl	L_ADDR(%r0),%r1		/* get PCB of softint LWP */
-softint_exit:
-	popr	$0x3			/* restore r0 and r1 */
-	rei				/* return from interrupt */
-
-softint_process:
-	/*
-	 * R6 contains pinned LWP
-	 * R7 contains ipl to dispatch with
-	 */
-	movq	%r6,-(%sp)		/* push old lwp and ipl onto stack */
-	calls	$2,_C_LABEL(softint_dispatch) /* dispatch it */
-
-	/* We can use any register because ldpctx will overwrite them */
-	movl	L_ADDR(%r6),%r3		/* get pcb */
-	movab	softint_exit,PCB_PC(%r3)/* do a quick exit */
-#ifdef MULTIPROCESSOR
-	movl	L_CPU(%r6),%r8
-	movl	%r6,CI_CURLWP(%r8)
-#endif
-
-	mtpr	PCB_PADDR(%r3),$PR_PCBB	/* restore PA of interrupted pcb */
-	ldpctx				/* implictily updates curlwp */
-	rei
-
-
-softint_common:
-	mfpr	$PR_IPL,%r1
-	mtpr	$IPL_HIGH,$PR_IPL	/* we need to be at IPL_HIGH */
-	movpsl	-(%sp)			/* add cleanup hook */
-	pushab	softint_cleanup
-	svpctx
-
-	/* We can use any register because ldpctx will overwrite them */
-	mfpr	$PR_SSP,%r6		/* Get curlwp */
-	movl	L_CPU(%r6),%r8		/* get cpu_info */
-	movl	CI_SOFTLWPS(%r8)[%r0],%r2 /* get softlwp to switch to */
-	movl	L_ADDR(%r2),%r3		/* Get pointer to its pcb. */
-	movl	%r6,PCB_R6(%r3)		/* move old lwp into new pcb */
-	movl	%r1,PCB_R7(%r3)		/* move IPL into new pcb */
-#ifdef MULTIPROCESSOR
-	movl	%r2,CI_CURLWP(%r8)	/* update ci_curlwp */
-#endif
-
-	/*
-	 * Now reset the PCB since we no idea what state it was last in
-	 */
-	movab	(USPACE-TRAPFRAMELEN-CALLSFRAMELEN)(%r3),%r0
-					/* calculate where KSP should be */
-	movl	%r0,KSP(%r3)		/* save it as SP */
-	movl	%r0,PCB_FP(%r3)		/* and as the FP too */
-	movab	CA_ARGNO(%r0),PCB_AP(%r3) /* update the AP as well */
-	movab	softint_process,PCB_PC(%r3) /* and where we will start */
-
-	mtpr	PCB_PADDR(%r3),$PR_PCBB	/* set PA of new pcb */
-	ldpctx				/* load it */
-	rei				/* get off interrupt stack */
-
-SCBENTRY(softclock)
-	pushr	$0x3			/* save r0 and r1 */
-	movl	$SOFTINT_CLOCK,%r0
-	brb	softint_common
-
-SCBENTRY(softbio)
-	pushr	$0x3			/* save r0 and r1 */
-	movl	$SOFTINT_BIO,%r0
-	brb	softint_common
-
-SCBENTRY(softnet)
-	pushr	$0x3			/* save r0 and r1 */
-	movl	$SOFTINT_NET,%r0
-	brb	softint_common
-
-SCBENTRY(softserial)
-	pushr	$0x3			/* save r0 and r1 */
-	movl	$SOFTINT_SERIAL,%r0
-	brb	softint_common
-
-/*
- * Helper routine for cpu_lwp_fork.  It get invoked by Swtchto.
- * It let's the kernel know the lwp is alive and then calls func(arg)
- * and possibly returns to sret.
- */
-ENTRY(cpu_lwp_bootstrap, 0)
-	movq	%r2,-(%sp)			/* save func & arg */
-	movq	%r0,-(%sp)			/* push oldl/newl */
-	calls	$2,_C_LABEL(lwp_startup)	/* startup the lwp */
-	movl	(%sp)+,%r0			/* grab func */
-	calls	$1,(%r0)			/* call it with arg */
-	ret
-
-/*
- * r1 = newlwp
- * r0 = oldlwp
- */
 JSBENTRY(Swtchto)
-	/* this pops the pc and psw from the stack and puts them in the pcb. */
+	mfpr	$PR_SSP,%r1		# Get ptr to this cpu_info struct
+	clrl	CI_CURLWP(%r1)		# Stop process accounting
 	svpctx				# Now on interrupt stack
 
-	/* We can know use any register because ldpctx will overwrite them */
-	/* New LWP already in %r1 */
-	movl	L_ADDR(%r1),%r3		# Get pointer to new pcb.
-	movl	%r0,PCB_R0(%r3)		# move r0 into new pcb (return value)
-#ifdef MULTIPROCESSOR
-	movl	L_CPU(%r0), %r8		/* get cpu_info of old lwp */
-	movl	%r8, L_CPU(%r1)		/* update cpu_info of new lwp */
-	movl	%r1,CI_CURLWP(%r8)	/* update ci_curlwp */
+	# New LWP already in %r2
+	mfpr	$PR_SSP,%r1		# Get ptr to this cpu_info struct
+#if defined(MULTIPROCESSOR)
+	movl	%r1,L_CPU(%r2)		# l->l_cpu = curcpu();
 #endif
+	movb	$LSONPROC,L_STAT(%r2)	# l->l_stat = LSONPROC;
+	movl	%r2,CI_CURLWP(%r1)	# set new process running
+	movl	L_ADDR(%r2),%r0		# Get pointer to new pcb.
+	addl3	%r0,$IFTRAP,%r3		# Save for copy* functions.
+	mtpr	%r3,$PR_ESP		# Use ESP as CPU-specific pointer
+	movl	%r3,ESP(%r0)		# Must save in PCB also.
+	movl	%r1,SSP(%r0)		# Put it in new PCB
 
-	mtpr	PCB_PADDR(%r3),$PR_PCBB	# set PA of new pcb
-	mtpr	$IPL_HIGH,$PR_IPL	/* we need to be at IPL_HIGH */
-	ldpctx				# load it
-	/* r0 already has previous lwp */
-	/* r1 already has this lwp */
-	/* r2/r3 and r4/r5 restored */
-	rei				/* get off interrupt stack */
+	extzv	$9,$21,%r0,%r1		# extract offset
+	ashl	$9,*_C_LABEL(Sysmap)[%r1],%r3
+
+	mtpr	%r3,$PR_PCBB
+	ldpctx
+#if defined(LOCKDEBUG)
+	pushl	%r0
+	calls	$0,_C_LABEL(sched_unlock_idle)
+	movl	(%sp)+,%r0
+#elif defined(MULTIPROCESSOR)
+	clrl	_C_LABEL(sched_lock)	# clear sched lock
+#endif
+	rei	
+
+#
+# the last routine called by a process.
+#
+
+ENTRY(cpu_exit,0)
+	movl	4(%ap),%r6	# Process pointer in %r6
+
+	mtpr	$IPL_CLOCK,$PR_IPL # Block almost everything
+	mfpr	$PR_SSP,%r7	# get cpu_info ptr
+	movl	CI_EXIT(%r7),%r8	# scratch page address
+	movab	512(%r8),%sp	# change stack
+	bicl2	$0xc0000000,%r8	# get physical address
+	mtpr	%r8,$PR_PCBB	# new PCB
+	mtpr	%r7,$PR_SSP	# In case...
+	pushl	%r6
+	calls	$1,_C_LABEL(lwp_exit2)	# release last resources.
+	mtpr	$IPL_HIGH,$PR_IPL	# block all types of interrupts
+#if defined(LOCKDEBUG)
+	calls	$0,_C_LABEL(sched_lock_idle)
+#elif defined(MULTIPROCESSOR)
+1:	bbssi	$0,_C_LABEL(sched_lock),1b	# acquire sched lock
+#endif
+	clrl	%r6
+	brw	Swtch
 
 #
 # copy/fetch/store routines. 
@@ -570,6 +601,8 @@ ENTRY(fuswintr,0)
 	movl	%r1,%r0
 	ret
 
+#if defined(MULTIPROCESSOR)
+
 JSBENTRY(Slock)
 1:	bbssi	$0,(%r1),1b
 	rsb
@@ -584,6 +617,8 @@ JSBENTRY(Sunlock)
 	bbcci	$0,(%r1),1f
 1:	rsb
 
+#endif
+
 #
 # data department
 #
@@ -592,3 +627,8 @@ JSBENTRY(Sunlock)
 	.globl _C_LABEL(memtest)
 _C_LABEL(memtest):		# memory test in progress
 	.long 0
+
+#ifdef __ELF__
+	.section	.rodata
+#endif
+noque:	.asciz	"swtch"

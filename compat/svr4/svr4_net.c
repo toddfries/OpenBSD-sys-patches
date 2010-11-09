@@ -1,7 +1,7 @@
-/*	$NetBSD: svr4_net.c,v 1.55 2009/01/22 16:10:19 cegger Exp $	*/
+/*	$NetBSD: svr4_net.c,v 1.45 2006/11/16 01:32:44 christos Exp $	*/
 
 /*-
- * Copyright (c) 1994, 2008 The NetBSD Foundation, Inc.
+ * Copyright (c) 1994 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -34,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: svr4_net.c,v 1.55 2009/01/22 16:10:19 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: svr4_net.c,v 1.45 2006/11/16 01:32:44 christos Exp $");
 
 #define COMPAT_SVR4 1
 
@@ -61,6 +68,7 @@ __KERNEL_RCSID(0, "$NetBSD: svr4_net.c,v 1.55 2009/01/22 16:10:19 cegger Exp $")
 #include <sys/conf.h>
 #include <sys/mount.h>
 
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 
 #include <compat/svr4/svr4_types.h>
@@ -84,6 +92,7 @@ const struct cdevsw svr4_net_cdevsw = {
  * Device minor numbers
  */
 enum {
+	dev_ptm			= 10,
 	dev_arp			= 26,
 	dev_icmp		= 27,
 	dev_ip			= 28,
@@ -95,9 +104,10 @@ enum {
 	dev_unix_ord_stream	= 40
 };
 
-int svr4_netattach(int);
+int svr4_netattach __P((int));
 
-int svr4_soo_close(file_t *);
+int svr4_soo_close __P((struct file *, struct lwp *));
+int svr4_ptm_alloc __P((struct proc *));
 
 static const struct fileops svr4_netops = {
 	soo_read, soo_write, soo_ioctl, soo_fcntl, soo_poll,
@@ -118,9 +128,10 @@ svr4_netattach(int n)
 int
 svr4_netopen(dev_t dev, int flag, int mode, struct lwp *l)
 {
+	struct proc *p = l->l_proc;
 	int type, protocol;
 	int fd;
-	file_t *fp;
+	struct file *fp;
 	struct socket *so;
 	int error;
 	int family;
@@ -175,21 +186,28 @@ svr4_netopen(dev_t dev, int flag, int mode, struct lwp *l)
 		DPRINTF(("unix-stream, "));
 		break;
 
+	case dev_ptm:
+		DPRINTF(("ptm);\n"));
+		return svr4_ptm_alloc(p);
+
 	default:
-		DPRINTF(("%"PRId32");\n", minor(dev)));
+		DPRINTF(("%d);\n", minor(dev)));
 		return EOPNOTSUPP;
 	}
 
-	if ((error = fd_allocfile(&fp, &fd)) != 0)
+	/* falloc() will use the descriptor for us */
+	if ((error = falloc(l, &fp, &fd)) != 0)
 		return error;
 
-	if ((error = socreate(family, &so, type, protocol, l, NULL)) != 0) {
+	if ((error = socreate(family, &so, type, protocol, l)) != 0) {
 		DPRINTF(("socreate error %d\n", error));
-		fd_abort(curproc, fp, fd);
+		fdremove(p->p_fd, fd);
+		FILE_UNUSE(fp, NULL);
+		ffree(fp);
 		return error;
 	}
 
-	error = fd_clone(fp, fd, flag, &svr4_netops, so);
+	error = fdclone(l, fp, fd, flag, &svr4_netops, so);
 	fp->f_type = DTYPE_SOCKET;
 	(void)svr4_stream_get(fp);
 
@@ -199,18 +217,77 @@ svr4_netopen(dev_t dev, int flag, int mode, struct lwp *l)
 
 
 int
-svr4_soo_close(file_t *fp)
+svr4_soo_close(fp, l)
+	struct file *fp;
+	struct lwp *l;
 {
-	struct socket *so = fp->f_data;
+	struct socket *so = (struct socket *) fp->f_data;
 
-	svr4_delete_socket(curproc, fp);
+	svr4_delete_socket(l->l_proc, fp);
 	free(so->so_internal, M_NETADDR);
-	return soo_close(fp);
+	return soo_close(fp, l);
+}
+
+
+int
+svr4_ptm_alloc(p)
+	struct proc *p;
+{
+	/*
+	 * XXX this is very, very ugly.  But I can't find a better
+	 * way that won't duplicate a big amount of code from
+	 * sys_open().  Ho hum...
+	 *
+	 * Fortunately for us, Solaris (at least 2.5.1) makes the
+	 * /dev/ptmx open automatically just open a pty, that (after
+	 * STREAMS I_PUSHes), is just a plain pty.  fstat() is used
+	 * to get the minor device number to map to a tty.
+	 *
+	 * Cycle through the names. If sys_open() returns ENOENT (or
+	 * ENXIO), short circuit the cycle and exit.
+	 */
+	char ptyname[] = "/dev/ptyXX";
+	static const char ttyletters[] = "pqrstuvwxyzPQRST";
+	caddr_t sg = stackgap_init(p, 0);
+	char *path = stackgap_alloc(p, &sg, sizeof(ptyname));
+	struct sys_open_args oa;
+	int l = 0, n = 0;
+	register_t fd = -1;
+	int error;
+
+	SCARG(&oa, path) = path;
+	SCARG(&oa, flags) = O_RDWR;
+	SCARG(&oa, mode) = 0;
+
+	while (fd == -1) {
+		ptyname[8] = ttyletters[l];
+		ptyname[9] = hexdigits[n];
+
+		if ((error = copyout(ptyname, path, sizeof(ptyname))) != 0)
+			return error;
+
+		switch (error = sys_open(curlwp, &oa, &fd)) { /* XXX NJWLWP */
+		case ENOENT:
+		case ENXIO:
+			return error;
+		case 0:
+			curlwp->l_dupfd = fd;
+			return EMOVEFD;
+		default:
+			if (hexdigits[++n] == '\0') {
+				if (ttyletters[++l] == '\0')
+					break;
+				n = 0;
+			}
+		}
+	}
+	return ENOENT;
 }
 
 
 struct svr4_strm *
-svr4_stream_get(file_t *fp)
+svr4_stream_get(fp)
+	struct file *fp;
 {
 	struct socket *so;
 	struct svr4_strm *st;
@@ -218,7 +295,7 @@ svr4_stream_get(file_t *fp)
 	if (fp == NULL || fp->f_type != DTYPE_SOCKET)
 		return NULL;
 
-	so = fp->f_data;
+	so = (struct socket *) fp->f_data;
 
 	if (so->so_internal)
 		return so->so_internal;

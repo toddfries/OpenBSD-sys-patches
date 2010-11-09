@@ -28,6 +28,9 @@ History
 #include <stdio.h>
 #include <stdlib.h>
 
+#define FALSE	0
+#define TRUE	(!FALSE)
+
 #define SECTORSIZE	512
 
 #define	RESET	0
@@ -44,7 +47,7 @@ int	done;
 */
 int	handler(void)
 {
-  done = true;
+  done = TRUE;
   return(0);
 }
 void msg(char (*s))
@@ -145,7 +148,7 @@ void main(void)
   while (bioskey(1) == 0) ;				/* Wait...	*/
   if ((bioskey(0) & 0x7F) == 3) exit(1);		/* Check for ^C	*/
   putchar('\n');
-  done = false;
+  done = FALSE;
 /*
  * Determine number of sectors per track and allocate buffers.
  */

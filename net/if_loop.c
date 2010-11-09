@@ -1,4 +1,4 @@
-/*	$NetBSD: if_loop.c,v 1.70 2008/11/07 00:20:13 dyoung Exp $	*/
+/*	$NetBSD: if_loop.c,v 1.62 2006/11/16 01:33:40 christos Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -65,7 +65,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_loop.c,v 1.70 2008/11/07 00:20:13 dyoung Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_loop.c,v 1.62 2006/11/16 01:33:40 christos Exp $");
 
 #include "opt_inet.h"
 #include "opt_atalk.h"
@@ -84,7 +84,7 @@ __KERNEL_RCSID(0, "$NetBSD: if_loop.c,v 1.70 2008/11/07 00:20:13 dyoung Exp $");
 #include <sys/ioctl.h>
 #include <sys/time.h>
 
-#include <sys/cpu.h>
+#include <machine/cpu.h>
 
 #include <net/if.h>
 #include <net/if_types.h>
@@ -157,9 +157,10 @@ loop_clone_create(struct if_clone *ifc, int unit)
 {
 	struct ifnet *ifp;
 
-	ifp = if_alloc(IFT_LOOP);
+	ifp = malloc(sizeof(*ifp), M_DEVBUF, M_WAITOK | M_ZERO);
 
-	if_initname(ifp, ifc->ifc_name, unit);
+	snprintf(ifp->if_xname, sizeof(ifp->if_xname), "%s%d",
+	    ifc->ifc_name, unit);
 
 	ifp->if_mtu = LOMTU;
 	ifp->if_flags = IFF_LOOPBACK | IFF_MULTICAST | IFF_RUNNING;
@@ -214,7 +215,7 @@ loop_clone_destroy(struct ifnet *ifp)
 }
 
 int
-looutput(struct ifnet *ifp, struct mbuf *m, const struct sockaddr *dst,
+looutput(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
     struct rtentry *rt)
 {
 	int s, isr;
@@ -397,7 +398,7 @@ lostart(struct ifnet *ifp)
 /* ARGSUSED */
 void
 lortrequest(int cmd, struct rtentry *rt,
-    const struct rt_addrinfo *info)
+    struct rt_addrinfo *info)
 {
 
 	if (rt)
@@ -409,15 +410,15 @@ lortrequest(int cmd, struct rtentry *rt,
  */
 /* ARGSUSED */
 int
-loioctl(struct ifnet *ifp, u_long cmd, void *data)
+loioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	struct ifaddr *ifa;
-	struct ifreq *ifr = data;
+	struct ifreq *ifr;
 	int error = 0;
 
 	switch (cmd) {
 
-	case SIOCINITIFADDR:
+	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 		ifa = (struct ifaddr *)data;
 		if (ifa != NULL /*&& ifa->ifa_addr->sa_family == AF_ISO*/)
@@ -428,21 +429,23 @@ loioctl(struct ifnet *ifp, u_long cmd, void *data)
 		break;
 
 	case SIOCSIFMTU:
+		ifr = (struct ifreq *)data;
 		if ((unsigned)ifr->ifr_mtu > LOMTU_MAX)
 			error = EINVAL;
-		else if ((error = ifioctl_common(ifp, cmd, data)) == ENETRESET){
+		else {
 			/* XXX update rt mtu for AF_ISO? */
-			error = 0;
+			ifp->if_mtu = ifr->ifr_mtu;
 		}
 		break;
 
 	case SIOCADDMULTI:
 	case SIOCDELMULTI:
+		ifr = (struct ifreq *)data;
 		if (ifr == NULL) {
 			error = EAFNOSUPPORT;		/* XXX */
 			break;
 		}
-		switch (ifreq_getaddr(cmd, ifr)->sa_family) {
+		switch (ifr->ifr_addr.sa_family) {
 
 #ifdef INET
 		case AF_INET:
@@ -460,7 +463,7 @@ loioctl(struct ifnet *ifp, u_long cmd, void *data)
 		break;
 
 	default:
-		error = ifioctl_common(ifp, cmd, data);
+		error = EINVAL;
 	}
 	return (error);
 }

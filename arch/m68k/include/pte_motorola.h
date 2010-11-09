@@ -1,4 +1,4 @@
-/*	$NetBSD: pte_motorola.h,v 1.6 2009/01/17 01:38:10 tsutsui Exp $	*/
+/*	$NetBSD: pte_motorola.h,v 1.3 2005/12/11 12:17:53 christos Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1990, 1993
@@ -83,8 +83,8 @@
  * m68k motorola MMU segment/page table entries
  */
 
-typedef u_int	st_entry_t;	/* segment table entry */
-typedef u_int	pt_entry_t;	/* page table entry */
+typedef int	st_entry_t;	/* segment table entry */
+typedef int	pt_entry_t;	/* page table entry */
 
 #define	PT_ENTRY_NULL	NULL
 #define	ST_ENTRY_NULL	NULL
@@ -142,8 +142,8 @@ typedef u_int	pt_entry_t;	/* page table entry */
 
 #define M68K_STSIZE	(MAXUL2SIZE * SG4_LEV2SIZE * sizeof(st_entry_t))
 					/* user process segment table size */
-#define M68K_MAX_PTSIZE	(1 << (32 - PG_SHIFT + 2))	/* max size of UPT */
-#define M68K_MAX_KPTSIZE	(M68K_MAX_PTSIZE >> 2)	/* max memory to allocate to KPT */
+#define M68K_MAX_PTSIZE	0x400000	/* max size of UPT */
+#define M68K_MAX_KPTSIZE 0x100000	/* max memory to allocate to KPT */
 #define M68K_PTBASE	0x10000000	/* UPT map base address */
 #define M68K_PTMAXSIZE	0x70000000	/* UPT map maximum size */
 

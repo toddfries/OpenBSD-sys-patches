@@ -1,4 +1,4 @@
-/* $NetBSD: opms_isa.c,v 1.10 2008/09/13 16:15:38 tsutsui Exp $ */
+/* $NetBSD: opms_isa.c,v 1.8 2005/12/11 12:16:39 christos Exp $ */
 
 /*
  * Copyright (c) 1995, 1996 Carnegie-Mellon University.
@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: opms_isa.c,v 1.10 2008/09/13 16:15:38 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: opms_isa.c,v 1.8 2005/12/11 12:16:39 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -43,16 +43,16 @@ __KERNEL_RCSID(0, "$NetBSD: opms_isa.c,v 1.10 2008/09/13 16:15:38 tsutsui Exp $"
 #include <arc/dev/pcconsvar.h>
 #include <arc/dev/opmsvar.h>
 
-static int	opms_isa_match(device_t, cfdata_t, void *);
-static void	opms_isa_attach(device_t, device_t, void *);
+int	opms_isa_match(struct device *, struct cfdata *, void *);
+void	opms_isa_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(opms_isa, sizeof(struct opms_softc),
+CFATTACH_DECL(opms_isa, sizeof(struct opms_softc),
     opms_isa_match, opms_isa_attach, NULL, NULL);
 
 struct pccons_config *pccons_isa_conf;	/* share stroage with pccons_isa.c */
 
-static int
-opms_isa_match(device_t parent, cfdata_t cf, void *aux)
+int
+opms_isa_match(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct isa_attach_args *ia = aux;
 	bus_addr_t iobase = IO_KBD;
@@ -97,17 +97,15 @@ opms_isa_match(device_t parent, cfdata_t cf, void *aux)
 	return 1;
 }
 
-static void
-opms_isa_attach(device_t parent, device_t self, void *aux)
+void
+opms_isa_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct opms_softc *sc = device_private(self);
+	struct opms_softc *sc = (struct opms_softc *)self;
 	struct isa_attach_args *ia = aux;
 
-	sc->sc_dev = self;
-
-	aprint_normal("\n");
+	printf("\n");
 
 	isa_intr_establish(ia->ia_ic, ia->ia_irq[0].ir_irq, IST_EDGE, IPL_TTY,
-	    pcintr, sc);
+	    pcintr, self);
 	opms_common_attach(sc, ia->ia_iot, pccons_isa_conf);
 }

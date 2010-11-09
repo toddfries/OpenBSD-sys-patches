@@ -1,4 +1,4 @@
-/*	$NetBSD: copy.s,v 1.41 2008/04/28 20:23:27 martin Exp $	*/
+/*	$NetBSD: copy.s,v 1.39 2005/12/11 12:17:59 christos Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -97,7 +104,7 @@ Lbadfc:
 #endif	/* DIAGNOSTIC */
 
 /*
- * copyin(void *from, void *to, size_t len);
+ * copyin(caddr_t from, caddr_t to, size_t len);
  * Copy len bytes from the user's address space.
  *
  * This is probably not the best we can do, but it is still 2-10 times
@@ -163,7 +170,7 @@ Lcifault:
 	bra	Lcidone
 
 /*
- * copyout(void *from, void *to, size_t len);
+ * copyout(caddr_t from, caddr_t to, size_t len);
  * Copy len bytes into the user's address space.
  *
  * This is probably not the best we can do, but it is still 2-10 times
@@ -229,7 +236,7 @@ Lcofault:
 	bra	Lcodone
 
 /*
- * copystr(void *from, void *to, size_t maxlen, size_t *lencopied);
+ * copystr(caddr_t from, caddr_t to, size_t maxlen, size_t *lencopied);
  * Copy a NUL-terminated string, at most maxlen characters long.  Return the
  * number of characters copied (including the NUL) in *lencopied.  If the
  * string is too long, return ENAMETOOLONG; else return 0.
@@ -259,7 +266,7 @@ Lcsret:
 	rts
 
 /*
- * copyinstr(void *from, void *to, size_t maxlen, size_t *lencopied);
+ * copyinstr(caddr_t from, caddr_t to, size_t maxlen, size_t *lencopied);
  * Copy a NUL-terminated string, at most maxlen characters long, from the
  * user's address space.  Return the number of characters copied (including
  * the NUL) in *lencopied.  If the string is too long, return ENAMETOOLONG;
@@ -299,7 +306,7 @@ Lcisfault:
 	bra	Lcisdone
 
 /*
- * copyoutstr(void *from, void *to, size_t maxlen, size_t *lencopied);
+ * copyoutstr(caddr_t from, caddr_t to, size_t maxlen, size_t *lencopied);
  * Copy a NUL-terminated string, at most maxlen characters long, into the
  * user's address space.  Return the number of characters copied (including
  * the NUL) in *lencopied.  If the string is too long, return ENAMETOOLONG;
@@ -370,7 +377,7 @@ Lkcfault:
 	bra	Lkcdone
 
 /*
- * fuword(void *uaddr);
+ * fuword(caddr_t uaddr);
  * Fetch an int from the user's address space.
  */
 ENTRY(fuword)
@@ -382,7 +389,7 @@ ENTRY(fuword)
 	bra	Lfdone
 
 /*
- * fusword(void *uaddr);
+ * fusword(caddr_t uaddr);
  * Fetch a short from the user's address space.
  */
 ENTRY(fusword)
@@ -395,7 +402,7 @@ ENTRY(fusword)
 	bra	Lfdone
 
 /*
- * fuswintr(void *uaddr);
+ * fuswintr(caddr_t uaddr);
  * Fetch a short from the user's address space.
  * Can be called during an interrupt.
  */
@@ -409,7 +416,7 @@ ENTRY(fuswintr)
 	bra	Lfdone
 
 /*
- * fubyte(void *uaddr);
+ * fubyte(caddr_t uaddr);
  * Fetch a byte from the user's address space.
  */
 ENTRY(fubyte)
@@ -437,7 +444,7 @@ Lfdone:
 	rts
 
 /*
- * suword(void *uaddr, int x);
+ * suword(caddr_t uaddr, int x);
  * Store an int in the user's address space.
  */
 ENTRY(suword)
@@ -451,7 +458,7 @@ ENTRY(suword)
 	bra	Lsdone
 
 /*
- * susword(void *uaddr, short x);
+ * susword(caddr_t uaddr, short x);
  * Store a short in the user's address space.
  */
 ENTRY(susword)
@@ -465,7 +472,7 @@ ENTRY(susword)
 	bra	Lsdone
 
 /*
- * suswintr(void *uaddr, short x);
+ * suswintr(caddr_t uaddr, short x);
  * Store a short in the user's address space.
  * Can be called during an interrupt.
  */
@@ -480,7 +487,7 @@ ENTRY(suswintr)
 	bra	Lsdone
 
 /*
- * subyte(void *uaddr, char x);
+ * subyte(caddr_t uaddr, char x);
  * Store a byte in the user's address space.
  */
 ENTRY(subyte)

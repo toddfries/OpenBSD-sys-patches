@@ -1,4 +1,4 @@
-/*	$NetBSD: hd64461pcmcia.c,v 1.43 2008/04/28 20:23:22 martin Exp $	*/
+/*	$NetBSD: hd64461pcmcia.c,v 1.35 2006/01/03 01:07:54 uwe Exp $	*/
 
 /*-
  * Copyright (c) 2001, 2002, 2004 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: hd64461pcmcia.c,v 1.43 2008/04/28 20:23:22 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: hd64461pcmcia.c,v 1.35 2006/01/03 01:07:54 uwe Exp $");
 
 #include "opt_hd64461pcmcia.h"
 
@@ -109,7 +116,7 @@ struct hd64461pcmcia_window_cookie {
 
 struct hd64461pcmcia_channel {
 	struct hd64461pcmcia_softc *ch_parent;
-	device_t ch_pcmcia;
+	struct device *ch_pcmcia;
 	enum controller_channel ch_channel;
 
 	/* memory space */
@@ -139,13 +146,12 @@ struct hd64461pcmcia_event {
 };
 
 struct hd64461pcmcia_softc {
-	device_t sc_dev;
-
+	struct device sc_dev;
 	enum hd64461_module_id sc_module_id;
 	int sc_shutdown;
 
 	/* CSC event */
-	lwp_t *sc_event_thread;
+	struct proc *sc_event_thread;
 	struct hd64461pcmcia_event sc_event_pool[EVENT_QUEUE_MAX];
 	SIMPLEQ_HEAD (, hd64461pcmcia_event) sc_event_head;
 
@@ -190,17 +196,19 @@ STATIC struct pcmcia_chip_functions hd64461pcmcia_functions = {
 	hd64461pcmcia_chip_socket_settype,
 };
 
-STATIC int hd64461pcmcia_match(device_t, cfdata_t, void *);
-STATIC void hd64461pcmcia_attach(device_t, device_t, void *);
+STATIC int hd64461pcmcia_match(struct device *, struct cfdata *, void *);
+STATIC void hd64461pcmcia_attach(struct device *, struct device *, void *);
 STATIC int hd64461pcmcia_print(void *, const char *);
-STATIC int hd64461pcmcia_submatch(device_t, cfdata_t, const int *, void *);
+STATIC int hd64461pcmcia_submatch(struct device *, struct cfdata *,
+				  const int *, void *);
 
-CFATTACH_DECL_NEW(hd64461pcmcia, sizeof(struct hd64461pcmcia_softc),
+CFATTACH_DECL(hd64461pcmcia, sizeof(struct hd64461pcmcia_softc),
     hd64461pcmcia_match, hd64461pcmcia_attach, NULL, NULL);
 
 STATIC void hd64461pcmcia_attach_channel(struct hd64461pcmcia_softc *,
     enum controller_channel);
 /* hot plug */
+STATIC void hd64461pcmcia_create_event_thread(void *);
 STATIC void hd64461pcmcia_event_thread(void *);
 STATIC void queue_event(struct hd64461pcmcia_channel *,
     enum hd64461pcmcia_event_type);
@@ -237,7 +245,7 @@ _BUS_SPACE_SET_MULTI(_sh3_pcmcia_bug, 1, 8)
 #define	DELAY_MS(x)	delay((x) * 1000)
 
 STATIC int
-hd64461pcmcia_match(device_t parent, cfdata_t cf, void *aux)
+hd64461pcmcia_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct hd64461_attach_args *ha = aux;
 
@@ -245,30 +253,21 @@ hd64461pcmcia_match(device_t parent, cfdata_t cf, void *aux)
 }
 
 STATIC void
-hd64461pcmcia_attach(device_t parent, device_t self, void *aux)
+hd64461pcmcia_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct hd64461_attach_args *ha = aux;
-	struct hd64461pcmcia_softc *sc;
-	int error;
-
-	sc = device_private(self);
-	sc->sc_dev = self;
+	struct hd64461pcmcia_softc *sc = (struct hd64461pcmcia_softc *)self;
 
 	sc->sc_module_id = ha->ha_module_id;
 
-	aprint_naive("\n");
-	aprint_normal("\n");
+	printf("\n");
 
 #ifdef HD64461PCMCIA_DEBUG
 	hd64461pcmcia_info(sc);
 #endif
 	/* Channel 0/1 common CSC event queue */
 	SIMPLEQ_INIT (&sc->sc_event_head);
-	error = kthread_create(PRI_NONE, 0, NULL,
-			       hd64461pcmcia_event_thread, sc,
-			       &sc->sc_event_thread,
-			       "%s", device_xname(self));
-	KASSERT(error == 0);
+	kthread_create(hd64461pcmcia_create_event_thread, sc);
 
 #if !defined(HD64461PCMCIA_REORDER_ATTACH)
 	hd64461pcmcia_attach_channel(sc, CHANNEL_0);
@@ -277,6 +276,18 @@ hd64461pcmcia_attach(device_t parent, device_t self, void *aux)
 	hd64461pcmcia_attach_channel(sc, CHANNEL_1);
 	hd64461pcmcia_attach_channel(sc, CHANNEL_0);
 #endif
+}
+
+STATIC void
+hd64461pcmcia_create_event_thread(void *arg)
+{
+	struct hd64461pcmcia_softc *sc = arg;
+	int error;
+
+	error = kthread_create1(hd64461pcmcia_event_thread, sc,
+	    &sc->sc_event_thread, "%s",
+	    sc->sc_dev.dv_xname);
+	KASSERT(error == 0);
 }
 
 STATIC void
@@ -293,7 +304,7 @@ hd64461pcmcia_event_thread(void *arg)
 			splx(s);
 			switch (pe->pe_type) {
 			default:
-				printf("%s: unknown event.\n", __func__);
+				printf("%s: unknown event.\n", __FUNCTION__);
 				break;
 			case EVENT_INSERT:
 				DPRINTF("insert event.\n");
@@ -325,7 +336,7 @@ hd64461pcmcia_print(void *arg, const char *pnp)
 }
 
 STATIC int
-hd64461pcmcia_submatch(device_t parent, cfdata_t cf,
+hd64461pcmcia_submatch(struct device *parent, struct cfdata *cf,
 		       const int *ldesc, void *aux)
 {
 	struct pcmciabus_attach_args *paa = aux;
@@ -352,7 +363,7 @@ STATIC void
 hd64461pcmcia_attach_channel(struct hd64461pcmcia_softc *sc,
     enum controller_channel channel)
 {
-	device_t parent = sc->sc_dev;
+	struct device *parent = (struct device *)sc;
 	struct hd64461pcmcia_channel *ch = &sc->sc_ch[channel];
 	struct pcmciabus_attach_args paa;
 	bus_addr_t membase;
@@ -487,7 +498,7 @@ queue_event(struct hd64461pcmcia_channel *ch,
 	}
 
 	if (pe == 0) {
-		printf("%s: event FIFO overflow (max %d).\n", __func__,
+		printf("%s: event FIFO overflow (max %d).\n", __FUNCTION__,
 		    EVENT_QUEUE_MAX);
 		goto out;
 	}
@@ -1049,25 +1060,17 @@ memory_window_32(enum controller_channel channel, enum memory_window_32 window)
 STATIC void
 hd64461_set_bus_width(enum controller_channel channel, int width)
 {
-	unsigned int area, buswidth;
-	uint16_t bcr2;
+	uint16_t r16;
 
-	if (channel == CHANNEL_0)
-		area = BCR2_AREA6_SHIFT;
-	else
-		area = BCR2_AREA5_SHIFT;
-
-	if (width == PCMCIA_WIDTH_IO8)
-		buswidth = BCR2_AREA_WIDTH_8;
-	else
-		buswidth = BCR2_AREA_WIDTH_16;
-
-	bcr2 = _reg_read_2(SH3_BCR2);
-
-	bcr2 &= ~(BCR2_AREA_WIDTH_MASK << area);
-	bcr2 |= buswidth << area;
-
-	_reg_write_2(SH3_BCR2, bcr2);
+	r16 = _reg_read_2(SH3_BCR2);
+	if (channel == CHANNEL_0) {
+		r16 &= ~((1 << 13)|(1 << 12));
+		r16 |= 1 << (width == PCMCIA_WIDTH_IO8 ? 12 : 13);
+	} else {
+		r16 &= ~((1 << 11)|(1 << 10));
+		r16 |= 1 << (width == PCMCIA_WIDTH_IO8 ? 10 : 11);
+	}
+	_reg_write_2(SH3_BCR2, r16);
 }
 
 STATIC void

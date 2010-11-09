@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile,v 1.3 2008/10/25 22:27:37 apb Exp $
+#	$NetBSD: Makefile,v 1.2 2005/12/11 12:17:51 christos Exp $
 
 # Makefile for iyonix tags file and boot blocks
 
@@ -15,8 +15,7 @@ DIYONIX=	include
 tags:
 	-ctags -wdtf ${TIYONIX} ${SIYONIX} ${COMM}
 #	egrep "^ENTRY(.*)|^ALTENTRY(.*)" ${AIYONIX} | \
-#	    ${TOOL_SED} -e \
-#		"s;\([^:]*\):\([^(]*\)(\([^, )]*\)\(.*\);\3 \1 /^\2(\3\4$$/;" \
+#	    sed "s;\([^:]*\):\([^(]*\)(\([^, )]*\)\(.*\);\3 \1 /^\2(\3\4$$/;" \
 #	    >> ${TIYONIX}
 	sort -o ${TIYONIX} ${TIYONIX}
 

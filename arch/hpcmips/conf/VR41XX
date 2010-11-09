@@ -1,4 +1,4 @@
-# $NetBSD: VR41XX,v 1.46 2008/11/24 11:41:11 ad Exp $
+# $NetBSD: VR41XX,v 1.41 2006/08/26 20:26:45 christos Exp $
 #
 # GENERIC machine description file
 # 
@@ -20,7 +20,7 @@
 
 include		"arch/hpcmips/conf/std.hpcmips"
 include		"arch/hpcmips/conf/std.hpcmips.vr41"
-#ident 		"GENERIC-$Revision: 1.46 $"
+#ident 		"GENERIC-$Revision: 1.41 $"
 
 #options 	INCLUDE_CONFIG_FILE	# embed config file in kernel binary
 
@@ -86,7 +86,7 @@ file-system 	UNION
 file-system	PTYFS		# /dev/pts/N support
 
 #options 	NFSSERVER	# Sun NFS-compatible filesystem (server)
-options 	WAPBL		# File system journaling support - Experimental
+options 	SOFTDEP		# FFS soft updates support.
 #options 	QUOTA		# UFS quotas
 options 	FFS_NO_SNAPSHOT	# No FFS snapshot support
 
@@ -106,10 +106,6 @@ options 	INET6		# IPV6
 
 # NetBSD backwards compatibility
 options 	COMPAT_43
-options 	COMPAT_16
-options 	COMPAT_20
-options 	COMPAT_30	# NetBSD 3.0 compatibility.
-options 	COMPAT_40	# NetBSD 4.0 compatibility.
 options		COMPAT_BSDPTY	# /dev/[pt]ty?? ptys.
 
 options 	NFS_BOOT_DHCP
@@ -421,7 +417,7 @@ cd*	at scsibus? target ? lun ?	# SCSI CD-ROM drives
 # USB Hubs
 usb*	at ohci?
 uhub*	at usb?
-uhub*	at uhub? port ?
+uhub*	at uhub? port ? configuration ? interface ?
 
 # USB HID device
 uhidev*	at uhub? port ? configuration ? interface ?

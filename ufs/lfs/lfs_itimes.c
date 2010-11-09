@@ -1,4 +1,4 @@
-/*	$NetBSD: lfs_itimes.c,v 1.12 2008/04/28 20:24:11 martin Exp $	*/
+/*	$NetBSD: lfs_itimes.c,v 1.10 2006/06/23 14:13:02 yamt Exp $	*/
 
 /*-
  * Copyright (c) 1999, 2000, 2001, 2002, 2003 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -29,7 +36,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: lfs_itimes.c,v 1.12 2008/04/28 20:24:11 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: lfs_itimes.c,v 1.10 2006/06/23 14:13:02 yamt Exp $");
 
 #include <sys/param.h>
 #include <sys/time.h>
@@ -80,13 +87,11 @@ lfs_itimes(struct inode *ip, const struct timespec *acc,
 			ifp->if_atime_sec = acc->tv_sec;
 			ifp->if_atime_nsec = acc->tv_nsec;
 			LFS_BWRITE_LOG(ibp);
-			mutex_enter(&lfs_lock);
+			simple_lock(&fs->lfs_interlock);
 			fs->lfs_flags |= LFS_IFDIRTY;
-			mutex_exit(&lfs_lock);
+			simple_unlock(&fs->lfs_interlock);
 		} else {
-			mutex_enter(&lfs_lock);
 			LFS_SET_UINO(ip, IN_ACCESSED);
-			mutex_exit(&lfs_lock);
 		}
 	}
 	if (ip->i_flag & (IN_CHANGE | IN_UPDATE | IN_MODIFY)) {
@@ -107,12 +112,10 @@ lfs_itimes(struct inode *ip, const struct timespec *acc,
 			ip->i_ffs1_ctime = cre->tv_sec;
 			ip->i_ffs1_ctimensec = cre->tv_nsec;
 		}
-		mutex_enter(&lfs_lock);
 		if (ip->i_flag & (IN_CHANGE | IN_UPDATE))
 			LFS_SET_UINO(ip, IN_MODIFIED);
 		if (ip->i_flag & IN_MODIFY)
 			LFS_SET_UINO(ip, IN_ACCESSED);
-		mutex_exit(&lfs_lock);
 	}
 	ip->i_flag &= ~(IN_ACCESS | IN_CHANGE | IN_UPDATE | IN_MODIFY);
 }

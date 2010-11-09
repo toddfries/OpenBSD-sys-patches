@@ -1,4 +1,4 @@
-/*	$NetBSD: auconv.c,v 1.22 2009/01/03 03:43:21 yamt Exp $	*/
+/*	$NetBSD: auconv.c,v 1.20 2007/03/01 17:31:35 thorpej Exp $	*/
 
 /*
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -35,11 +35,10 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: auconv.c,v 1.22 2009/01/03 03:43:21 yamt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: auconv.c,v 1.20 2007/03/01 17:31:35 thorpej Exp $");
 
 #include <sys/types.h>
 #include <sys/audioio.h>
-#include <sys/device.h>
 #include <sys/errno.h>
 #include <sys/malloc.h>
 #include <sys/null.h>
@@ -663,7 +662,7 @@ auconv_rateconv_check_rates(const struct audio_format *formats, int nformats,
 			    audio_params_t *hw_param, stream_filter_list_t *list)
 {
 	int ind, i, j, enc, f_enc;
-	u_int rate, minrate, maxrate, orig_rate;
+	u_int rate, minrate, maxrate, orig_rate;;
 
 	/* exact match */
 	ind = auconv_exact_match(formats, nformats, mode, hw_param);

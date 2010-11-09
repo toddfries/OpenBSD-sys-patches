@@ -1,4 +1,4 @@
-/* $NetBSD: pci.c,v 1.7 2008/04/28 20:23:34 martin Exp $ */
+/* $NetBSD: pci.c,v 1.14 2010/06/26 21:45:49 phx Exp $ */
 
 /*-
  * Copyright (c) 2007 The NetBSD Foundation, Inc.
@@ -33,18 +33,6 @@
 
 #include <lib/libsa/stand.h>
 
-/*
- * "Map B" layout
- *
- * practice direct mode configuration scheme with CONFIG_ADDR
- * (0xfec0'0000) and CONFIG_DATA (0xfee0'0000).
- */
-#define PCI_MEMBASE	0x80000000
-#define PCI_MEMLIMIT	0xfbffffff	/* EUMB is next to this */
-#define PCI_IOBASE	0x00001000	/* reserves room for via 686B */
-#define PCI_IOLIMIT	0x000fffff
-#define CONFIG_ADDR	0xfec00000
-#define CONFIG_DATA	0xfee00000
 
 #define MAXNDEVS 32
 
@@ -67,7 +55,7 @@ unsigned iostart, iolimit;
 unsigned maxbus;
 
 void
-pcisetup()
+pcisetup(void)
 {
 
 	memstart = PCI_MEMBASE;
@@ -80,9 +68,7 @@ pcisetup()
 }
 
 int
-pcifinddev(vend, prod, tag)
-	unsigned vend, prod;
-	unsigned *tag;
+pcifinddev(unsigned vend, unsigned prod, unsigned *tag)
 {
 	unsigned pciid, target[1][2];
 
@@ -93,7 +79,7 @@ pcifinddev(vend, prod, tag)
 	}
 	*tag = ~0;
 	return -1;
-} 
+}
 
 int
 pcilookup(type, list, max)
@@ -106,17 +92,14 @@ pcilookup(type, list, max)
 }
 
 unsigned
-pcimaketag(b, d, f)
-	int b, d, f;
+pcimaketag(int b, int d, int f)
 {
 
 	return (1U << 31) | (b << 16) | (d << 11) | (f << 8);
 }
 
 void
-pcidecomposetag(tag, b, d, f)
-	unsigned tag;
-	int *b, *d, *f;
+pcidecomposetag(unsigned tag, int *b, int *d, int *f)
 {
 
 	if (b != NULL)
@@ -129,9 +112,7 @@ pcidecomposetag(tag, b, d, f)
 }
 
 unsigned
-pcicfgread(tag, off)
-	unsigned tag;
-	int off;
+pcicfgread(unsigned tag, int off)
 {
 	unsigned cfg;
 	
@@ -141,10 +122,7 @@ pcicfgread(tag, off)
 }
 
 void
-pcicfgwrite(tag, off, val)
-	unsigned tag;
-	int off;
-	unsigned val;
+pcicfgwrite(unsigned tag, int off, unsigned val)
 {
 	unsigned cfg;
 
@@ -154,8 +132,7 @@ pcicfgwrite(tag, off, val)
 }
 
 static unsigned
-cfgread(b, d, f, off)
-	int b, d, f, off;
+cfgread(int b, int d, int f, int off)
 {
 	unsigned cfg;
 	
@@ -166,9 +143,7 @@ cfgread(b, d, f, off)
 }
 
 static void
-cfgwrite(b, d, f, off, val)
-	int b, d, f, off;
-	unsigned val;
+cfgwrite(int b, int d, int f, int off, unsigned val)
 {
 	unsigned cfg;
 
@@ -179,10 +154,7 @@ cfgwrite(b, d, f, off, val)
 }
 
 static void
-_buswalk(bus, proc, data)
-	int bus;
-	int (*proc)(int, int, int, unsigned long);
-	unsigned long data;
+_buswalk(int bus, int (*proc)(int, int, int, unsigned long), unsigned long data)
 {
 	int device, function, nfunctions;
 	unsigned pciid, bhlcr;
@@ -210,9 +182,7 @@ _buswalk(bus, proc, data)
 }
 
 static int
-deviceinit(bus, dev, func, data)
-	int bus, dev, func;
-	unsigned long data;
+deviceinit(int bus, int dev, int func, unsigned long data)
 {
 	unsigned val;
 
@@ -237,12 +207,11 @@ deviceinit(bus, dev, func, data)
 	val = 0x80 << 8 | 0x08 /* 32B cache line */;
 	cfgwrite(bus, dev, func, 0x0c, val);
 
-#if 1
-/* skip IDE controller BAR assignment */
-val = cfgread(bus, dev, func, PCI_CLASS_REG);
-if ((val >> 16) == PCI_CLASS_IDE)
-	return 0;
-#endif
+	/* skip legacy mode IDE controller BAR assignment */
+	val = cfgread(bus, dev, func, PCI_CLASS_REG);
+	if ((val >> 16) == PCI_CLASS_IDE && ((val >> 8) & 0x05) == 0)
+		return 0;
+
 	memassign(bus, dev, func);
 
 	/* descending toward PCI-PCI bridge */
@@ -284,8 +253,7 @@ if ((val >> 16) == PCI_CLASS_IDE)
 }
 
 static void
-memassign(bus, dev, func)
-	int bus, dev, func;
+memassign(int bus, int dev, int func)
 {
 	unsigned val, maxbar, mapr, req, mapbase, size;
 
@@ -345,9 +313,7 @@ printf("%s base %x size %x\n", (val & 01) ? "i/o" : "mem", mapbase, size);
 }
 
 static int
-devmatch(bus, dev, func, data)
-	int bus, dev, func;
-	unsigned long data;
+devmatch(int bus, int dev, int func, unsigned long data)
 {
 	unsigned pciid;
 
@@ -356,9 +322,7 @@ devmatch(bus, dev, func, data)
 }
 
 static int
-clsmatch(bus, dev, func, data)
-	int bus, dev, func;
-	unsigned long data;
+clsmatch(int bus, int dev, int func, unsigned long data)
 {
 	unsigned class;
 
@@ -367,12 +331,7 @@ clsmatch(bus, dev, func, data)
 }
 
 static int
-_pcilookup(bus, match, data, list, index, limit)
-	int bus;
-	int (*match)(int, int, int, unsigned long);
-	unsigned long data;
-	unsigned list[][2];
-	int index, limit;
+_pcilookup(int bus, int (*match)(int, int, int, unsigned long), unsigned long data, unsigned list[][2], int index, int limit)
 {
 	int device, function, nfuncs;
 	unsigned pciid, bhlcr, class;
@@ -402,7 +361,7 @@ _pcilookup(bus, match, data, list, index, limit)
 				continue;
 			if ((*match)(bus, device, function, data)) {
 				list[index][0] = pciid;
-				list[index][1] = 
+				list[index][1] =
 				     pcimaketag(bus, device, function);
 				index += 1;
 				if (index >= limit)

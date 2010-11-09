@@ -1,4 +1,4 @@
-/*    $NetBSD: compat_16_machdep.c,v 1.13 2008/11/25 14:02:16 tsutsui Exp $   */
+/*    $NetBSD: compat_16_machdep.c,v 1.8 2006/07/22 06:58:17 tsutsui Exp $   */
 
 /*
  * Copyright (c) 1982, 1986, 1990, 1993
@@ -75,11 +75,9 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: compat_16_machdep.c,v 1.13 2008/11/25 14:02:16 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: compat_16_machdep.c,v 1.8 2006/07/22 06:58:17 tsutsui Exp $");
 
-#ifdef _KERNEL_OPT
 #include "opt_compat_netbsd.h"
-#endif
 
 #define __M68K_SIGNAL_PRIVATE
 
@@ -89,6 +87,8 @@ __KERNEL_RCSID(0, "$NetBSD: compat_16_machdep.c,v 1.13 2008/11/25 14:02:16 tsuts
 #include <sys/proc.h>
 #include <sys/user.h>
 #include <sys/ras.h>
+#include <sys/sa.h>
+#include <sys/savar.h>
 #include <sys/signal.h>
 #include <sys/signalvar.h>
 #include <sys/ucontext.h>
@@ -106,6 +106,7 @@ __KERNEL_RCSID(0, "$NetBSD: compat_16_machdep.c,v 1.13 2008/11/25 14:02:16 tsuts
 #include <machine/frame.h>
 
 extern  short exframesize[];
+int	compat_16_sys___sigreturn14(struct lwp *, void *, register_t *);
 void	m68881_save(struct fpframe *);
 void	m68881_restore(struct fpframe *);
 
@@ -128,7 +129,7 @@ sendsig_sigcontext(const ksiginfo_t *ksi, const sigset_t *mask)
 	struct proc *p = l->l_proc;
 	struct sigacts *ps = p->p_sigacts;
 	struct frame *frame = (struct frame *)l->l_md.md_regs;
-	int onstack, error;
+	int onstack;
 	int sig = ksi->ksi_signo;
 	u_long code = KSI_TRAPCODE(ksi);
 	struct sigframe_sigcontext *fp = getframe(l, sig, &onstack), kf;
@@ -219,7 +220,7 @@ sendsig_sigcontext(const ksiginfo_t *ksi, const sigset_t *mask)
 	kf.sf_sc.sc_ps = frame->f_sr;
 
 	/* Save signal stack. */
-	kf.sf_sc.sc_onstack = l->l_sigstk.ss_flags & SS_ONSTACK;
+	kf.sf_sc.sc_onstack = p->p_sigctx.ps_sigstk.ss_flags & SS_ONSTACK;
 
 	/* Save signal mask. */
 	kf.sf_sc.sc_mask = *mask;
@@ -233,12 +234,8 @@ sendsig_sigcontext(const ksiginfo_t *ksi, const sigset_t *mask)
 	 */
 	native_sigset_to_sigset13(mask, &kf.sf_sc.__sc_mask13);
 #endif
-	sendsig_reset(l, sig);
-	mutex_exit(p->p_lock);
-	error = copyout(&kf, fp, sizeof(kf));
-	mutex_enter(p->p_lock);
 
-	if (error != 0) {
+	if (copyout(&kf, fp, sizeof(kf)) != 0) {
 #ifdef DEBUG
 		if ((sigdebug & SDB_KSTACK) && p->p_pid == sigpid)
 			printf("sendsig(%d): copyout failed on sig %d\n",
@@ -262,7 +259,7 @@ sendsig_sigcontext(const ksiginfo_t *ksi, const sigset_t *mask)
 
 	/* Remember that we're now on the signal stack. */
 	if (onstack)
-		l->l_sigstk.ss_flags |= SS_ONSTACK;
+		p->p_sigctx.ps_sigstk.ss_flags |= SS_ONSTACK;
 
 #ifdef DEBUG
 	if ((sigdebug & SDB_KSTACK) && p->p_pid == sigpid)
@@ -284,11 +281,11 @@ sendsig_sigcontext(const ksiginfo_t *ksi, const sigset_t *mask)
  * a machine fault.
  */
 int
-compat_16_sys___sigreturn14(struct lwp *l, const struct compat_16_sys___sigreturn14_args *uap, register_t *retval)
+compat_16_sys___sigreturn14(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct compat_16_sys___sigreturn14_args /* {
 		syscallarg(struct sigcontext *) sigcntxp;
-	} */
+	} */ *uap = v;
 	struct proc *p = l->l_proc;
 	struct sigcontext *scp;
 	struct frame *frame;
@@ -331,7 +328,7 @@ compat_16_sys___sigreturn14(struct lwp *l, const struct compat_16_sys___sigretur
 	 * See if there is anything to do before we go to the
 	 * expense of copying in close to 1/2K of data
 	 */
-	flags = fuword((void *)rf);
+	flags = fuword((caddr_t)rf);
 #ifdef DEBUG
 	if (sigdebug & SDB_FOLLOW)
 		printf("sigreturn(%d): sc_ap %x flags %x\n",
@@ -341,7 +338,7 @@ compat_16_sys___sigreturn14(struct lwp *l, const struct compat_16_sys___sigretur
 	if (flags == -1)
 		return EINVAL;
 
-	if (flags == 0 || copyin((void *)rf, &tstate, sizeof(tstate)) != 0)
+	if (flags == 0 || copyin((caddr_t)rf, &tstate, sizeof(tstate)) != 0)
 		goto restore;
 #ifdef DEBUG
 	if ((sigdebug & SDB_KSTACK) && p->p_pid == sigpid)
@@ -400,18 +397,14 @@ compat_16_sys___sigreturn14(struct lwp *l, const struct compat_16_sys___sigretur
 	frame->f_pc = scp->sc_pc;
 	frame->f_sr = scp->sc_ps;
 
-	mutex_enter(p->p_lock);
-
 	/* Restore signal stack. */
 	if (scp->sc_onstack & SS_ONSTACK)
-		l->l_sigstk.ss_flags |= SS_ONSTACK;
+		p->p_sigctx.ps_sigstk.ss_flags |= SS_ONSTACK;
 	else
-		l->l_sigstk.ss_flags &= ~SS_ONSTACK;
+		p->p_sigctx.ps_sigstk.ss_flags &= ~SS_ONSTACK;
 
 	/* Restore signal mask. */
-	(void) sigprocmask1(l, SIG_SETMASK, &scp->sc_mask, 0);
-
-	mutex_exit(p->p_lock);
+	(void) sigprocmask1(p, SIG_SETMASK, &scp->sc_mask, 0);
 
 #ifdef DEBUG
 	if ((sigdebug & SDB_FPSTATE) && *(char *)&tstate.ss_fpstate)

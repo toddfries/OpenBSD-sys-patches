@@ -1,4 +1,4 @@
-/*	$NetBSD: kern_exit_43.c,v 1.21 2007/12/20 23:02:44 dsl Exp $	*/
+/*	$NetBSD: kern_exit_43.c,v 1.15 2006/11/16 01:32:41 christos Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1989, 1991, 1993
@@ -37,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kern_exit_43.c,v 1.21 2007/12/20 23:02:44 dsl Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kern_exit_43.c,v 1.15 2006/11/16 01:32:41 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -47,6 +47,7 @@ __KERNEL_RCSID(0, "$NetBSD: kern_exit_43.c,v 1.21 2007/12/20 23:02:44 dsl Exp $"
 #include <sys/time.h>
 #include <sys/resource.h>
 #include <sys/kernel.h>
+#include <sys/proc.h>
 #include <sys/buf.h>
 #include <sys/wait.h>
 #include <sys/file.h>
@@ -57,9 +58,10 @@ __KERNEL_RCSID(0, "$NetBSD: kern_exit_43.c,v 1.21 2007/12/20 23:02:44 dsl Exp $"
 #include <sys/acct.h>
 
 #include <sys/mount.h>
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 
-#include <sys/cpu.h>
+#include <machine/cpu.h>
 #include <machine/reg.h>
 #include <compat/common/compat_util.h>
 
@@ -72,28 +74,34 @@ __KERNEL_RCSID(0, "$NetBSD: kern_exit_43.c,v 1.21 2007/12/20 23:02:44 dsl Exp $"
 #endif
 
 int
-compat_43_sys_wait(struct lwp *l, const void *v, register_t *retval)
+compat_43_sys_wait(struct lwp *l, void *v, register_t *retval)
 {
-	int error, status, was_zombie;
-	int child_pid = WAIT_ANY;
+	struct proc *p = l->l_proc;
+	caddr_t sg = stackgap_init(p, 0);
+	int error;
 
-
-#ifdef PSL_ALLCC
-#else
-#endif
+	struct sys_wait4_args /* {
+		syscallarg(int) pid;
+		syscallarg(int *) status;
+		syscallarg(int) options;
+		syscallarg(struct rusage *) rusage;
+	} */ a;
 
 #ifdef PSL_ALLCC
 	if ((GETPS(l->l_md.md_regs) & PSL_ALLCC) != PSL_ALLCC) {
-		error = do_sys_wait(l, &child_pid, &status, 0, NULL, &was_zombie);
+		SCARG(&a, options) = 0;
+		SCARG(&a, rusage) = NULL;
 	} else {
-		error = do_sys_wait(l, &child_pid, &status,
-		    l->l_md.md_regs[R0], (struct rusage *)l->l_md.md_regs[R1],
-		    &was_zombie);
+		SCARG(&a, options) = l->l_md.md_regs[R0];
+		SCARG(&a, rusage) = (struct rusage *)l->l_md.md_regs[R1];
 	}
 #else
-	error = do_sys_wait(l, &child_pid, &status, 0, NULL, &was_zombie);
+	SCARG(&a, options) = 0;
+	SCARG(&a, rusage) = NULL;
 #endif
-	retval[0] = child_pid;
-	retval[1] = status;
-	return error;
+	SCARG(&a, pid) = WAIT_ANY;
+	SCARG(&a, status) = stackgap_alloc(p, &sg, sizeof(SCARG(&a, status)));
+	if ((error = sys_wait4(l, &a, retval)) != 0)
+		return error;
+	return copyin(SCARG(&a, status), &retval[1], sizeof(retval[1]));
 }

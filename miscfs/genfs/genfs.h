@@ -1,4 +1,4 @@
-/*	$NetBSD: genfs.h,v 1.23 2008/01/28 14:31:18 dholland Exp $	*/
+/*	$NetBSD: genfs.h,v 1.20 2005/12/11 12:24:50 christos Exp $	*/
 
 int	genfs_badop(void *);
 int	genfs_nullop(void *);
@@ -17,6 +17,7 @@ int	genfs_fcntl(void *);
 int	genfs_seek(void *);
 int	genfs_abortop(void *);
 int	genfs_revoke(void *);
+int	genfs_lease_check(void *);
 int	genfs_lock(void *);
 int	genfs_islocked(void *);
 int	genfs_unlock(void *);
@@ -25,8 +26,3 @@ int	genfs_getpages(void *);
 int	genfs_putpages(void *);
 int	genfs_null_putpages(void *);
 int	genfs_compat_getpages(void *);
-
-int	genfs_do_putpages(struct vnode *, off_t, off_t, int, struct vm_page **);
-
-int	genfs_renamelock_enter(struct mount *);
-void	genfs_renamelock_exit(struct mount *);

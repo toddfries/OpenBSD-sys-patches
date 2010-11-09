@@ -1,4 +1,4 @@
-/*	$NetBSD: exec_mvme.c,v 1.15 2008/01/12 09:54:32 tsutsui Exp $ */
+/*	$NetBSD: exec_mvme.c,v 1.14 2005/12/11 12:18:19 christos Exp $ */
 
 /*-
  * Copyright (c) 1982, 1986, 1990, 1993
@@ -47,7 +47,10 @@ typedef void (*kentry_t)(int, u_int, u_int, u_int, int, u_long);
 
 /*ARGSUSED*/
 void
-exec_mvme(char *file, int flag, int part)
+exec_mvme(file, flag, part)
+	char	*file;
+	int	flag;
+	int	part;
 {
 	kentry_t	entry;
 	u_long		marks[MARK_MAX];
@@ -70,10 +73,11 @@ exec_mvme(char *file, int flag, int part)
 	    marks[MARK_ENTRY], marks[MARK_NSYM],
 	    marks[MARK_SYM], marks[MARK_END]);
 
-	entry = (kentry_t)marks[MARK_ENTRY];
+	entry = (kentry_t) marks[MARK_ENTRY];
 
 	(*entry)(flag, bugargs.ctrl_addr, bugargs.ctrl_lun, bugargs.dev_lun,
 	    part, marks[MARK_END]);
 
 	printf("exec: kernel returned!\n");
+	return;
 }

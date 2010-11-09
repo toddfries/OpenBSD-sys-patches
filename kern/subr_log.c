@@ -1,7 +1,7 @@
-/*	$NetBSD: subr_log.c,v 1.50 2008/04/28 20:24:04 martin Exp $	*/
+/*	$NetBSD: subr_log.c,v 1.42 2007/11/07 00:19:08 ad Exp $	*/
 
 /*-
- * Copyright (c) 2007, 2008 The NetBSD Foundation, Inc.
+ * Copyright (c) 2007 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -65,7 +72,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: subr_log.c,v 1.50 2008/04/28 20:24:04 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: subr_log.c,v 1.42 2007/11/07 00:19:08 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -87,9 +94,9 @@ static bool	log_async;
 static struct selinfo log_selp;		/* process waiting on select call */
 static pid_t	log_pgid;		/* process/group for async I/O */
 static kcondvar_t log_cv;
+static kmutex_t log_lock;
 static void	*log_sih;
 
-kmutex_t log_lock;
 int	log_open;			/* also used in log() */
 int	msgbufmapped;			/* is the message buffer mapped */
 int	msgbufenabled;			/* is logging to the buffer enabled */
@@ -130,7 +137,7 @@ void
 loginit(void)
 {
 
-	mutex_init(&log_lock, MUTEX_DEFAULT, IPL_VM);
+	mutex_init(&log_lock, MUTEX_SPIN, IPL_VM);
 	selinit(&log_selp);
 	cv_init(&log_cv, "klog");
 	log_sih = softint_establish(SOFTINT_CLOCK | SOFTINT_MPSAFE,
@@ -287,7 +294,7 @@ logkqfilter(dev_t dev, struct knote *kn)
 		break;
 
 	default:
-		return (EINVAL);
+		return (1);
 	}
 
 	mutex_spin_enter(&log_lock);
@@ -304,7 +311,7 @@ logwakeup(void)
 
 	if (!cold && log_open) {
 		mutex_spin_enter(&log_lock);
-		selnotify(&log_selp, 0, NOTE_SUBMIT);
+		selnotify(&log_selp, NOTE_SUBMIT);
 		if (log_async)
 			softint_schedule(log_sih);
 		cv_broadcast(&log_cv);
@@ -325,6 +332,7 @@ logsoftintr(void *cookie)
 static int
 logioctl(dev_t dev, u_long com, void *data, int flag, struct lwp *lwp)
 {
+	struct proc *p = lwp->l_proc;
 	long l;
 
 	switch (com) {
@@ -349,11 +357,11 @@ logioctl(dev_t dev, u_long com, void *data, int flag, struct lwp *lwp)
 
 	case TIOCSPGRP:
 	case FIOSETOWN:
-		return fsetown(&log_pgid, com, data);
+		return fsetown(p, &log_pgid, com, data);
 
 	case TIOCGPGRP:
 	case FIOGETOWN:
-		return fgetown(log_pgid, com, data);
+		return fgetown(p, log_pgid, com, data);
 
 	default:
 		return (EPASSTHROUGH);

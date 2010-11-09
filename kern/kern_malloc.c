@@ -1,4 +1,4 @@
-/*	$NetBSD: kern_malloc.c,v 1.126 2009/01/07 21:06:31 pooka Exp $	*/
+/*	$NetBSD: kern_malloc.c,v 1.114 2007/11/11 23:22:23 matt Exp $	*/
 
 /*
  * Copyright (c) 1987, 1991, 1993
@@ -66,7 +66,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kern_malloc.c,v 1.126 2009/01/07 21:06:31 pooka Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kern_malloc.c,v 1.114 2007/11/11 23:22:23 matt Exp $");
 
 #include <sys/param.h>
 #include <sys/proc.h>
@@ -192,13 +192,6 @@ struct malloclog {
 
 long	malloclogptr;
 
-/*
- * Fuzz factor for neighbour address match this must be a mask of the lower
- * bits we wish to ignore when comparing addresses
- */
-__uintptr_t malloclog_fuzz = 0x7FL;
-
-
 static void
 domlog(void *a, long size, struct malloc_type *type, int action,
     const char *file, long line)
@@ -234,41 +227,11 @@ hitmlog(void *a)
 	} \
 } while (/* CONSTCOND */0)
 
-/*
- * Print fuzzy matched "neighbour" - look for the memory block that has
- * been allocated below the address we are interested in.  We look for a
- * base address + size that is within malloclog_fuzz of our target
- * address. If the base address and target address are the same then it is
- * likely we have found a free (size is 0 in this case) so we won't report
- * those, they will get reported by PRT anyway.
- */
-#define	NPRT do { \
-	__uintptr_t fuzz_mask = ~(malloclog_fuzz); \
-	lp = &malloclog[l]; \
-	if ((__uintptr_t)lp->addr != (__uintptr_t)a && \
-	    (((__uintptr_t)lp->addr + lp->size + malloclog_fuzz) & fuzz_mask) \
-	    == ((__uintptr_t)a & fuzz_mask) && lp->action) {		\
-		printf("neighbour malloc log entry %ld:\n", l); \
-		printf("\taddr = %p\n", lp->addr); \
-		printf("\tsize = %ld\n", lp->size); \
-		printf("\ttype = %s\n", lp->type->ks_shortdesc); \
-		printf("\taction = %s\n", lp->action == 1 ? "alloc" : "free"); \
-		printf("\tfile = %s\n", lp->file); \
-		printf("\tline = %ld\n", lp->line); \
-	} \
-} while (/* CONSTCOND */0)
-
-	for (l = malloclogptr; l < MALLOCLOGSIZE; l++) {
+	for (l = malloclogptr; l < MALLOCLOGSIZE; l++)
 		PRT;
-		NPRT;
-	}
 
-
-	for (l = 0; l < malloclogptr; l++) {
+	for (l = 0; l < malloclogptr; l++)
 		PRT;
-		NPRT;
-	}
-
 #undef PRT
 }
 #endif /* MALLOCLOG */
@@ -317,6 +280,28 @@ struct freelist {
 };
 #endif /* DIAGNOSTIC */
 
+/*
+ * The following are standard, built-in malloc types and are not
+ * specific to any subsystem.
+ */
+MALLOC_DEFINE(M_DEVBUF, "devbuf", "device driver memory");
+MALLOC_DEFINE(M_DMAMAP, "DMA map", "bus_dma(9) structures");
+MALLOC_DEFINE(M_FREE, "free", "should be on free list");
+MALLOC_DEFINE(M_PCB, "pcb", "protocol control block");
+MALLOC_DEFINE(M_SOFTINTR, "softintr", "Softinterrupt structures");
+MALLOC_DEFINE(M_TEMP, "temp", "misc. temporary data buffers");
+
+/* XXX These should all be elsewhere. */
+MALLOC_DEFINE(M_RTABLE, "routetbl", "routing tables");
+MALLOC_DEFINE(M_FTABLE, "fragtbl", "fragment reassembly header");
+MALLOC_DEFINE(M_UFSMNT, "UFS mount", "UFS mount structure");
+MALLOC_DEFINE(M_NETADDR, "Export Host", "Export host address structure");
+MALLOC_DEFINE(M_IPMOPTS, "ip_moptions", "internet multicast options");
+MALLOC_DEFINE(M_IPMADDR, "in_multi", "internet multicast address");
+MALLOC_DEFINE(M_MRTABLE, "mrt", "multicast routing tables");
+MALLOC_DEFINE(M_BWMETER, "bwmeter", "multicast upcall bw meters");
+MALLOC_DEFINE(M_1394DATA, "1394data", "IEEE 1394 data buffers");
+
 kmutex_t malloc_lock;
 
 /*
@@ -324,11 +309,11 @@ kmutex_t malloc_lock;
  */
 #ifdef MALLOCLOG
 void *
-_kern_malloc(unsigned long size, struct malloc_type *ksp, int flags,
+_malloc(unsigned long size, struct malloc_type *ksp, int flags,
     const char *file, long line)
 #else
 void *
-kern_malloc(unsigned long size, struct malloc_type *ksp, int flags)
+malloc(unsigned long size, struct malloc_type *ksp, int flags)
 #endif /* MALLOCLOG */
 {
 	struct kmembuckets *kbp;
@@ -342,15 +327,13 @@ kern_malloc(unsigned long size, struct malloc_type *ksp, int flags)
 #endif
 
 #ifdef LOCKDEBUG
-	if ((flags & M_NOWAIT) == 0) {
-		ASSERT_SLEEPABLE();
-	}
+	if ((flags & M_NOWAIT) == 0)
+		ASSERT_SLEEPABLE(NULL, "malloc");
 #endif
 #ifdef MALLOC_DEBUG
 	if (debug_malloc(size, ksp, flags, (void *) &va)) {
-		if (va != 0) {
+		if (va != 0)
 			FREECHECK_OUT(&malloc_freecheck, (void *)va);
-		}
 		return ((void *) va);
 	}
 #endif
@@ -446,7 +429,7 @@ kern_malloc(unsigned long size, struct malloc_type *ksp, int flags)
 			freep->next = cp;
 		}
 		freep->next = savedlist;
-		if (savedlist == NULL)
+		if (kbp->kb_last == NULL)
 			kbp->kb_last = (void *)freep;
 	}
 	va = kbp->kb_next;
@@ -539,10 +522,10 @@ out:
  */
 #ifdef MALLOCLOG
 void
-_kern_free(void *addr, struct malloc_type *ksp, const char *file, long line)
+_free(void *addr, struct malloc_type *ksp, const char *file, long line)
 #else
 void
-kern_free(void *addr, struct malloc_type *ksp)
+free(void *addr, struct malloc_type *ksp)
 #endif /* MALLOCLOG */
 {
 	struct kmembuckets *kbp;
@@ -576,8 +559,7 @@ kern_free(void *addr, struct malloc_type *ksp)
 	size = 1 << kup->ku_indx;
 	kbp = &kmembuckets[kup->ku_indx];
 
-	LOCKDEBUG_MEM_CHECK(addr,
-	    size <= MAXALLOCSAVE ? size : ctob(kup->ku_pagecnt));
+	LOCKDEBUG_MEM_CHECK(addr, size);
 
 	mutex_spin_enter(&malloc_lock);
 #ifdef MALLOCLOG
@@ -680,7 +662,7 @@ kern_free(void *addr, struct malloc_type *ksp)
  * Change the size of a block of memory.
  */
 void *
-kern_realloc(void *curaddr, unsigned long newsize, struct malloc_type *ksp,
+realloc(void *curaddr, unsigned long newsize, struct malloc_type *ksp,
     int flags)
 {
 	struct kmemusage *kup;
@@ -705,9 +687,8 @@ kern_realloc(void *curaddr, unsigned long newsize, struct malloc_type *ksp,
 	}
 
 #ifdef LOCKDEBUG
-	if ((flags & M_NOWAIT) == 0) {
-		ASSERT_SLEEPABLE();
-	}
+	if ((flags & M_NOWAIT) == 0)
+		ASSERT_SLEEPABLE(NULL, "realloc");
 #endif
 
 	/*
@@ -909,7 +890,7 @@ kmeminit(void)
 	if (sizeof(struct freelist) > (1 << MINBUCKET))
 		panic("minbucket too small/struct freelist too big");
 
-	mutex_init(&malloc_lock, MUTEX_DEFAULT, IPL_VM);
+	mutex_init(&malloc_lock, MUTEX_DRIVER, IPL_VM);
 
 	/*
 	 * Compute the number of kmem_map pages, if we have not

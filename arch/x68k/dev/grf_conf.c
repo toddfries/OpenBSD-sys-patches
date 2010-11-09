@@ -1,4 +1,4 @@
-/*	$NetBSD: grf_conf.c,v 1.10 2009/01/18 02:40:05 isaki Exp $	*/
+/*	$NetBSD: grf_conf.c,v 1.8 2005/12/11 12:19:37 christos Exp $	*/
 
 /*
  * Copyright (c) 1990, 1993
@@ -81,18 +81,20 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: grf_conf.c,v 1.10 2009/01/18 02:40:05 isaki Exp $");
+__KERNEL_RCSID(0, "$NetBSD: grf_conf.c,v 1.8 2005/12/11 12:19:37 christos Exp $");
 
 #include <sys/types.h>
 #include <sys/device.h>
 
 #include <machine/grfioctl.h>
-#include <x68k/dev/grfvar.h>
 
-int cc_init(struct grf_softc *, void *);
-int cc_mode(struct grf_softc *, u_long, void *);
-int gv_init(struct grf_softc *, void *);
-int gv_mode(struct grf_softc *, u_long, void *);
+#include <x68k/dev/grfvar.h>
+#include <x68k/x68k/iodevice.h>
+
+int cc_init(struct grf_softc *, caddr_t);
+int cc_mode(struct grf_softc *, u_long, caddr_t);
+int gv_init(struct grf_softc *, caddr_t);
+int gv_mode(struct grf_softc *, u_long, caddr_t);
 
 struct grfsw grfsw[] = {
 	{0 /* unused */, GRFBUILTIN,	"builtin",	  cc_init, cc_mode},

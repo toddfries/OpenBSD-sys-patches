@@ -1,4 +1,4 @@
-/*	$NetBSD: machdep.c,v 1.39 2008/11/30 18:21:32 martin Exp $	*/
+/*	$NetBSD: machdep.c,v 1.32 2005/12/24 23:24:00 perry Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997, 1998, 2002 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -65,7 +72,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.39 2008/11/30 18:21:32 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.32 2005/12/24 23:24:00 perry Exp $");
 
 #include "opt_ddb.h"
 #include "opt_kgdb.h"
@@ -81,7 +88,6 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.39 2008/11/30 18:21:32 martin Exp $");
 #include <sys/reboot.h>
 #include <sys/sysctl.h>
 #include <sys/ksyms.h>
-#include <sys/device.h>
 
 #ifdef KGDB
 #include <sys/kgdb.h>
@@ -139,6 +145,9 @@ dreamcast_startup(void)
 	pmap_bootstrap();
 
 	/* Debugger. */
+#if NKSYMS || defined(DDB) || defined(LKM)
+	ksyms_init(0, NULL, NULL);
+#endif
 #if defined(KGDB) && (NSCIF > 0)
 	if (scif_kgdb_init() == 0) {
 		kgdb_debug_init = 1;
@@ -208,7 +217,7 @@ cpu_reboot(int howto, char *bootstr)
 
 #ifdef KLOADER
 	/* No bootinfo is required. */
-	kloader_bootinfo_set(&kbi, 0, NULL, NULL, true);
+	kloader_bootinfo_set(&kbi, 0, NULL, NULL, TRUE);
 	if ((howto & RB_HALT) == 0) {
 		if ((howto & RB_STRING) && bootstr != NULL) {
 			printf("loading a new kernel: %s\n", bootstr);
@@ -239,8 +248,6 @@ cpu_reboot(int howto, char *bootstr)
 
  haltsys:
 	doshutdownhooks();
-
-	pmf_system_shutdown(boothowto);
 
 	if (howto & RB_HALT) {
 		printf("\n");

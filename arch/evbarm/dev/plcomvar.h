@@ -1,4 +1,4 @@
-/*	$NetBSD: plcomvar.h,v 1.6 2008/01/05 12:40:34 ad Exp $	*/
+/*	$NetBSD: plcomvar.h,v 1.3 2006/03/07 23:32:53 he Exp $	*/
 
 /*
  * Copyright (c) 1996 Christopher G. Demetriou.  All rights reserved.
@@ -42,7 +42,7 @@
 
 #include <sys/callout.h>
 #include <sys/timepps.h>
-#include <sys/simplelock.h>
+#include <sys/lock.h>
 
 int  plcomcnattach	(bus_space_tag_t, bus_addr_t, int, int, tcflag_t, int);
 void plcomcndetach	(void);
@@ -145,3 +145,11 @@ void plcom_attach_subr	(struct plcom_softc *);
 int  plcom_detach	(struct device *, int);
 int  plcom_activate	(struct device *, enum devact);
 
+#ifndef __HAVE_GENERIC_SOFT_INTERRUPTS
+#ifdef __NO_SOFT_SERIAL_INTERRUPT
+#define	IPL_SERIAL	IPL_TTY
+#define	splserial()	spltty()
+#define	IPL_SOFTSERIAL	IPL_TTY
+#define	splsoftserial()	spltty()
+#endif
+#endif

@@ -1,4 +1,4 @@
-/*	$NetBSD: procfs_status.c,v 1.35 2009/01/11 02:45:53 christos Exp $	*/
+/*	$NetBSD: procfs_status.c,v 1.29 2006/11/16 01:33:38 christos Exp $	*/
 
 /*
  * Copyright (c) 1993
@@ -72,7 +72,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: procfs_status.c,v 1.35 2009/01/11 02:45:53 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: procfs_status.c,v 1.29 2006/11/16 01:33:38 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -110,9 +110,6 @@ procfs_dostatus(
 	if (uio->uio_rw != UIO_READ)
 		return (EOPNOTSUPP);
 
-	mutex_enter(proc_lock);
-	mutex_enter(p->p_lock);
-
 	pid = p->p_pid;
 	ppid = p->p_pptr ? p->p_pptr->p_pid : 0,
 	pgid = p->p_pgrp->pg_id;
@@ -128,10 +125,9 @@ procfs_dostatus(
 	ps += snprintf(ps, sizeof(psbuf) - (ps - psbuf), " %d %d %d %d ",
 	    pid, ppid, pgid, sid);
 
-	if ((p->p_lflag & PL_CONTROLT) && (tp = sess->s_ttyp))
-		ps += snprintf(ps, sizeof(psbuf) - (ps - psbuf), "%llu,%llu ",
-		    (unsigned long long)major(tp->t_dev),
-		    (unsigned long long)minor(tp->t_dev));
+	if ((p->p_flag&P_CONTROLT) && (tp = sess->s_ttyp))
+		ps += snprintf(ps, sizeof(psbuf) - (ps - psbuf), "%d,%d ",
+		    major(tp->t_dev), minor(tp->t_dev));
 	else
 		ps += snprintf(ps, sizeof(psbuf) - (ps - psbuf), "%d,%d ",
 		    -1, -1);
@@ -148,26 +144,23 @@ procfs_dostatus(
 	if (*sep != ',')
 		ps += snprintf(ps, sizeof(psbuf) - (ps - psbuf), "noflags");
 
-	if (l->l_flag & LW_INMEM)
-		ps += snprintf(ps, sizeof(psbuf) - (ps - psbuf), " %lld,%ld",
-		    (long long)p->p_stats->p_start.tv_sec,
-		    (long)p->p_stats->p_start.tv_usec);
+	if (l->l_flag & L_INMEM)
+		ps += snprintf(ps, sizeof(psbuf) - (ps - psbuf), " %ld,%ld",
+		    p->p_stats->p_start.tv_sec, p->p_stats->p_start.tv_usec);
 	else
 		ps += snprintf(ps, sizeof(psbuf) - (ps - psbuf), " -1,-1");
 
 	{
 		struct timeval ut, st;
 
-		calcru(p, &ut, &st, (void *) 0, NULL);
+		calcru(p, &ut, &st, (void *) 0);
 		ps += snprintf(ps, sizeof(psbuf) - (ps - psbuf),
-		    " %lld,%ld %lld,%ld", (long long)ut.tv_sec,
-		    (long)ut.tv_usec, (long long)st.tv_sec, (long)st.tv_usec);
+		    " %ld,%ld %ld,%ld", ut.tv_sec, ut.tv_usec, st.tv_sec,
+		    st.tv_usec);
 	}
 
-	lwp_lock(l);
 	ps += snprintf(ps, sizeof(psbuf) - (ps - psbuf), " %s",
 	    (l->l_wchan && l->l_wmesg) ? l->l_wmesg : "nochan");
-	lwp_unlock(l);
 
 	cr = p->p_cred;
 
@@ -180,9 +173,6 @@ procfs_dostatus(
 		ps += snprintf(ps, sizeof(psbuf) - (ps - psbuf), ",%d",
 		    kauth_cred_group(cr, i));
 	ps += snprintf(ps, sizeof(psbuf) - (ps - psbuf), "\n");
-
-	mutex_exit(p->p_lock);
-	mutex_exit(proc_lock);
 
 	return (uiomove_frombuf(psbuf, ps - psbuf, uio));
 }

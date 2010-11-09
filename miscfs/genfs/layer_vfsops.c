@@ -1,4 +1,4 @@
-/*	$NetBSD: layer_vfsops.c,v 1.30 2008/12/05 13:05:37 ad Exp $	*/
+/*	$NetBSD: layer_vfsops.c,v 1.26 2006/11/16 01:33:38 christos Exp $	*/
 
 /*
  * Copyright (c) 1999 National Aeronautics & Space Administration
@@ -73,7 +73,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: layer_vfsops.c,v 1.30 2008/12/05 13:05:37 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: layer_vfsops.c,v 1.26 2006/11/16 01:33:38 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/sysctl.h>
@@ -85,28 +85,9 @@ __KERNEL_RCSID(0, "$NetBSD: layer_vfsops.c,v 1.30 2008/12/05 13:05:37 ad Exp $")
 #include <sys/namei.h>
 #include <sys/malloc.h>
 #include <sys/kauth.h>
-#include <sys/module.h>
 
 #include <miscfs/genfs/layer.h>
 #include <miscfs/genfs/layer_extern.h>
-
-MODULE(MODULE_CLASS_MISC, layerfs, NULL);
-
-static int
-layerfs_modcmd(modcmd_t cmd, void *arg)
-{
-
-	switch (cmd) {
-	case MODULE_CMD_INIT:
-		return 0;
-	case MODULE_CMD_FINI:
-		return 0;
-	default:
-		return ENOTTY;
-	}
-
-	return 0;
-}
 
 /*
  * VFS start.  Nothing needed here - the start routine
@@ -114,11 +95,12 @@ layerfs_modcmd(modcmd_t cmd, void *arg)
  * when that filesystem was mounted.
  */
 int
-layerfs_start(struct mount *mp, int flags)
+layerfs_start(struct mount *mp, int flags,
+    struct lwp *l)
 {
 
 #ifdef notyet
-	return VFS_START(MOUNTTOLAYERMOUNT(mp)->layerm_vfs, flags);
+	return VFS_START(MOUNTTOLAYERMOUNT(mp)->layerm_vfs, flags, l);
 #else
 	return 0;
 #endif
@@ -153,27 +135,26 @@ layerfs_root(mp, vpp)
 }
 
 int
-layerfs_quotactl(mp, cmd, uid, arg)
+layerfs_quotactl(mp, cmd, uid, arg, l)
 	struct mount *mp;
 	int cmd;
 	uid_t uid;
 	void *arg;
+	struct lwp *l;
 {
 
-	return VFS_QUOTACTL(MOUNTTOLAYERMOUNT(mp)->layerm_vfs, cmd, uid, arg);
+	return VFS_QUOTACTL(MOUNTTOLAYERMOUNT(mp)->layerm_vfs,
+				cmd, uid, arg, l);
 }
 
 int
-layerfs_statvfs(mp, sbp)
+layerfs_statvfs(mp, sbp, l)
 	struct mount *mp;
 	struct statvfs *sbp;
+	struct lwp *l;
 {
 	int error;
-	struct statvfs *sbuf;
-
-	sbuf = kmem_alloc(sizeof(*sbuf), KM_SLEEP);
-	if (sbuf == NULL)
-		return ENOMEM;
+	struct statvfs *sbuf = malloc(sizeof(*sbuf), M_TEMP, M_WAITOK);
 
 #ifdef LAYERFS_DIAGNOSTIC
 	if (layerfs_debug)
@@ -184,7 +165,7 @@ layerfs_statvfs(mp, sbp)
 
 	(void)memset(sbuf, 0, sizeof(*sbuf));
 
-	error = VFS_STATVFS(MOUNTTOLAYERMOUNT(mp)->layerm_vfs, sbuf);
+	error = VFS_STATVFS(MOUNTTOLAYERMOUNT(mp)->layerm_vfs, sbuf, l);
  	if (error)
 		goto done;
 
@@ -204,13 +185,13 @@ layerfs_statvfs(mp, sbp)
 	sbp->f_namemax = sbuf->f_namemax;
 	copy_statvfs_info(sbp, mp);
 done:
-	kmem_free(sbuf, sizeof(*sbuf));
+	free(sbuf, M_TEMP);
 	return error;
 }
 
 int
 layerfs_sync(struct mount *mp, int waitfor,
-    kauth_cred_t cred)
+    kauth_cred_t cred, struct lwp *l)
 {
 
 	/*
@@ -325,16 +306,4 @@ SYSCTL_SETUP(sysctl_vfs_layerfs_setup, "sysctl vfs.layerfs subtree setup")
 	 * they can't tell if layerfs has been instantiated yet, they
 	 * can't do that...not easily.  not yet.  :-)
 	 */
-}
-
-int
-layerfs_renamelock_enter(struct mount *mp)
-{
-	return VFS_RENAMELOCK_ENTER(MOUNTTOLAYERMOUNT(mp)->layerm_vfs);
-}
-
-void
-layerfs_renamelock_exit(struct mount *mp)
-{
-	VFS_RENAMELOCK_EXIT(MOUNTTOLAYERMOUNT(mp)->layerm_vfs);
 }

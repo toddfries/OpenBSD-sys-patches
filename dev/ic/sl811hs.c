@@ -1,4 +1,4 @@
-/*	$NetBSD: sl811hs.c,v 1.21 2008/03/28 17:14:45 drochner Exp $	*/
+/*	$NetBSD: sl811hs.c,v 1.16 2007/11/06 21:51:07 ad Exp $	*/
 
 /*
  * Not (c) 2007 Matthew Orgass
@@ -86,7 +86,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sl811hs.c,v 1.21 2008/03/28 17:14:45 drochner Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sl811hs.c,v 1.16 2007/11/06 21:51:07 ad Exp $");
 
 #include <sys/cdefs.h>
 #include <sys/param.h>
@@ -97,7 +97,7 @@ __KERNEL_RCSID(0, "$NetBSD: sl811hs.c,v 1.21 2008/03/28 17:14:45 drochner Exp $"
 #include <sys/malloc.h>
 #include <sys/queue.h>
 #include <sys/gcq.h>
-#include <sys/simplelock.h>
+#include <sys/lock.h>
 #include <sys/intr.h>
 #include <sys/cpu.h>
 #include <sys/bus.h>
@@ -107,7 +107,6 @@ __KERNEL_RCSID(0, "$NetBSD: sl811hs.c,v 1.21 2008/03/28 17:14:45 drochner Exp $"
 #include <dev/usb/usbdivar.h>
 #include <dev/usb/usb_mem.h>
 #include <dev/usb/usbdevs.h>
-#include <dev/usb/usbroothub_subr.h>
 
 #include <dev/ic/sl811hsreg.h>
 #include <dev/ic/sl811hsvar.h>
@@ -520,6 +519,7 @@ static int slhci_reserve_bustime(struct slhci_softc *, struct slhci_pipe *,
     int);
 static void slhci_insert(struct slhci_softc *);
 
+static int slhci_str(usb_string_descriptor_t *, unsigned int, const char *);
 static usbd_status slhci_clear_feature(struct slhci_softc *, unsigned int);
 static usbd_status slhci_set_feature(struct slhci_softc *, unsigned int);
 static void slhci_get_status(struct slhci_softc *, usb_port_status_t *);
@@ -650,8 +650,17 @@ DDOLOGBUF(uint8_t *buf, unsigned int length)
 #define DLOGBUF(x, b, l) ((void)0)
 #endif /* SLHCI_DEBUG */
 
+#ifdef LOCKDEBUG
+#define SLHCI_MAINLOCKASSERT(sc) 					 \
+    simple_lock_assert_locked(&(sc)->sc_lock, "slhci")
+#define SLHCI_LOCKASSERT(sc, main, wait) do {				 \
+	simple_lock_assert_ ## main (&(sc)->sc_lock, "slhci");	    	 \
+	simple_lock_assert_ ## wait (&(sc)->sc_wait_lock, "slhci wait"); \
+} while (/*CONSTCOND*/0)
+#else
 #define SLHCI_MAINLOCKASSERT(sc) ((void)0)
 #define SLHCI_LOCKASSERT(sc, main, wait) ((void)0)
+#endif
 
 #ifdef DIAGNOSTIC
 #define LK_SLASSERT(exp, sc, spipe, xfer, ext) do {			\
@@ -837,7 +846,7 @@ slhci_freex(struct usbd_bus *bus, struct usbd_xfer *xfer)
 #endif
 #ifdef DIAGNOSTIC
 	if (xfer->busy_free != XFER_BUSY) {
-		struct slhci_softc *sc = bus->hci_private;
+		struct slhci_softc *sc = (struct slhci_softc *)bus;
 		printf("%s: slhci_freex: xfer=%p not busy, %#08x halted\n", 
 		    SC_NAME(sc), xfer, xfer->busy_free);
 		DDOLOG("%s: slhci_freex: xfer=%p not busy, %#08x halted\n", 
@@ -895,7 +904,7 @@ slhci_start(struct usbd_xfer *xfer)
 	unsigned int max_packet;
 
 	pipe = xfer->pipe;
-	sc = pipe->device->bus->hci_private;
+	sc = (struct slhci_softc *)pipe->device->bus;
 	spipe = (struct slhci_pipe *)xfer->pipe;
 	t = &sc->sc_transfers;
 	ed = pipe->endpoint->edesc;
@@ -1019,7 +1028,7 @@ slhci_root_start(struct usbd_xfer *xfer)
 	struct slhci_pipe *spipe;
 
 	spipe = (struct slhci_pipe *)xfer->pipe;
-	sc = xfer->pipe->device->bus->hci_private;
+	sc = (struct slhci_softc *)xfer->pipe->device->bus;
 
 	return slhci_lock_call(sc, &slhci_root, spipe, xfer);
 }
@@ -1035,7 +1044,7 @@ slhci_open(struct usbd_pipe *pipe)
 	unsigned int max_packet, pmaxpkt;
 
 	dev = pipe->device;
-	sc = dev->bus->hci_private;
+	sc = (struct slhci_softc *)dev->bus;
 	spipe = (struct slhci_pipe *)pipe;
 	ed = pipe->endpoint->edesc;
 	t = &sc->sc_transfers;
@@ -1233,7 +1242,7 @@ slhci_activate(struct device *self, enum devact act)
 {
 	struct slhci_softc *sc;
 
-	sc = device_private(self);
+	sc = (void *)self;
 
 	if (act != DVACT_DEACTIVATE)
 		return EOPNOTSUPP;
@@ -1257,7 +1266,7 @@ slhci_abort(struct usbd_xfer *xfer)
 	if (spipe == NULL)
 		goto callback;
 
-	sc = spipe->pipe.device->bus->hci_private;
+	sc = (struct slhci_softc *)spipe->pipe.device->bus;
 
 	DLOG(D_TRACE, "%s abort xfer %p spipe %p spipe->xfer %p", 
 	    pnames(spipe->ptype), xfer, spipe, spipe->xfer);
@@ -1277,7 +1286,7 @@ slhci_close(struct usbd_pipe *pipe)
 	struct slhci_pipe *spipe;
 	struct slhci_transfers *t;
 
-	sc = pipe->device->bus->hci_private;
+	sc = (struct slhci_softc *)pipe->device->bus;
 	spipe = (struct slhci_pipe *)pipe;
 	t = &sc->sc_transfers;
 
@@ -1318,7 +1327,7 @@ slhci_poll(struct usbd_bus *bus) /* XXX necessary? */
 {
 	struct slhci_softc *sc;
 
-	sc = bus->hci_private;
+	sc = (struct slhci_softc *)bus;
 
 	DLOG(D_TRACE, "slhci_poll", 0,0,0,0);
 
@@ -1340,7 +1349,7 @@ slhci_void(void *v) {}
 void
 slhci_mem_use(struct usbd_bus *bus, int val)
 {
-	struct slhci_softc *sc = bus->hci_private;
+	struct slhci_softc *sc = (struct slhci_softc *)bus;
 	int s;
 
 	s = splhardusb();
@@ -3067,6 +3076,23 @@ static const usb_hub_descriptor_t slhci_hubd = {
 	{ 0x00 }		/* port power control mask */
 };
 
+static int
+slhci_str(usb_string_descriptor_t *p, unsigned int l, const char *s)
+{
+	int i;
+
+	if (l == 0)
+		return 0;
+	p->bLength = 2 * strlen(s) + 2;
+	if (l == 1) 
+		return 1;
+	p->bDescriptorType = UDESC_STRING;
+	l -= 2;
+	for (i = 0; s[i] && l > 1; i++, l -= 2)
+		USETW2(p->bString[i], 0, s[i]);
+	return 2 * i + 2;
+}
+
 static usbd_status
 slhci_clear_feature(struct slhci_softc *sc, unsigned int what)
 {
@@ -3403,12 +3429,12 @@ slhci_root(struct slhci_softc *sc, struct slhci_pipe *spipe, struct usbd_xfer
 				/* language table XXX */
 			} else if (value == ((UDESC_STRING<<8)|1)) {
 				/* Vendor */
-				actlen = usb_makestrdesc((usb_string_descriptor_t *)
+				actlen = slhci_str((usb_string_descriptor_t *)
 				    buf, len, "ScanLogic/Cypress");
 				error = USBD_NORMAL_COMPLETION;
 			} else if (value == ((UDESC_STRING<<8)|2)) {
 				/* Product */
-				actlen = usb_makestrdesc((usb_string_descriptor_t *)
+				actlen = slhci_str((usb_string_descriptor_t *)
 				    buf, len, "SL811HS/T root hub");
 				error = USBD_NORMAL_COMPLETION;
 			} else

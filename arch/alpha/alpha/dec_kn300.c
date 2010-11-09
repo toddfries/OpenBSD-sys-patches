@@ -1,4 +1,4 @@
-/* $NetBSD: dec_kn300.c,v 1.34 2007/03/04 15:18:10 yamt Exp $ */
+/* $NetBSD: dec_kn300.c,v 1.37 2009/09/14 02:46:29 mhitch Exp $ */
 
 /*
  * Copyright (c) 1998 by Matthew Jacob
@@ -34,7 +34,7 @@
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
 
-__KERNEL_RCSID(0, "$NetBSD: dec_kn300.c,v 1.34 2007/03/04 15:18:10 yamt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: dec_kn300.c,v 1.37 2009/09/14 02:46:29 mhitch Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -72,6 +72,9 @@ __KERNEL_RCSID(0, "$NetBSD: dec_kn300.c,v 1.34 2007/03/04 15:18:10 yamt Exp $");
 #include <dev/scsipi/scsipi_all.h>
 #include <dev/scsipi/scsiconf.h>
 
+#include <dev/ic/mlxio.h>
+#include <dev/ic/mlxvar.h>
+
 
 #include "pckbd.h"
 
@@ -80,11 +83,11 @@ __KERNEL_RCSID(0, "$NetBSD: dec_kn300.c,v 1.34 2007/03/04 15:18:10 yamt Exp $");
 #endif
 static int comcnrate = CONSPEED;
 
-void dec_kn300_init __P((void));
-void dec_kn300_cons_init __P((void));
-static void dec_kn300_device_register __P((struct device *, void *));
+void dec_kn300_init(void);
+void dec_kn300_cons_init(void);
+static void dec_kn300_device_register(struct device *, void *);
 static void dec_kn300_mcheck_handler
-	__P((unsigned long, struct trapframe *, unsigned long, unsigned long));
+(unsigned long, struct trapframe *, unsigned long, unsigned long);
 
 #ifdef KGDB
 #include <machine/db_machdep.h>
@@ -218,9 +221,7 @@ dec_kn300_cons_init()
 
 /* #define	BDEBUG	1 */
 static void
-dec_kn300_device_register(dev, aux)
-	struct device *dev;
-	void *aux;
+dec_kn300_device_register(struct device *dev, void *aux)
 {
 	static int found, initted, diskboot, netboot;
 	static struct device *primarydev, *pcidev, *ctrlrdev;
@@ -231,7 +232,8 @@ dec_kn300_device_register(dev, aux)
 		return;
 
 	if (!initted) {
-		diskboot = (strcasecmp(b->protocol, "SCSI") == 0);
+		diskboot = (strcasecmp(b->protocol, "SCSI") == 0) ||
+		    (strcasecmp(b->protocol, "RAID") == 0);
 		netboot = (strcasecmp(b->protocol, "BOOTP") == 0) ||
 		    (strcasecmp(b->protocol, "MOP") == 0);
 #ifdef BDEBUG
@@ -347,17 +349,38 @@ dec_kn300_device_register(dev, aux)
 #endif
 		found = 1;
 	}
+
+	if (device_is_a(dev, "ld") && device_is_a(parent, "mlx")) {
+		/*
+		 * Argh!  The attach arguments for ld devices is not
+		 * consistent, so each supported raid controller requires
+		 * different checks.
+		 */
+		struct mlx_attach_args *mlxa = aux;
+
+		if (parent != ctrlrdev)
+			return;
+
+		if (b->unit != mlxa->mlxa_unit)
+			return;
+		/* we've found it! */
+		booted_device = dev;
+#if 0
+		printf("\nbooted_device = %s\n", dev->dv_xname);
+#endif
+		found = 1;
+	}
 }
 
 
 /*
  * KN300 Machine Check Handlers.
  */
-static void kn300_softerr __P((unsigned long, unsigned long,
-    unsigned long, struct trapframe *));
+static void kn300_softerr(unsigned long, unsigned long,
+    unsigned long, struct trapframe *);
 
-static void kn300_mcheck __P((unsigned long, unsigned long,
-    unsigned long, struct trapframe *));
+static void kn300_mcheck(unsigned long, unsigned long,
+    unsigned long, struct trapframe *);
 
 /*
  * "soft" error structure in system area for KN300 processor.
@@ -393,11 +416,7 @@ typedef struct {
 #define	CAP_ERR_CRDX	204
 
 static void
-kn300_softerr(mces, type, logout, framep)
-	unsigned long mces;
-	unsigned long type;
-	unsigned long logout;
-	struct trapframe *framep;
+kn300_softerr(unsigned long mces, unsigned long type, unsigned long logout, struct trapframe *framep)
 {
 	static const char *sys = "system";
 	static const char *proc = "processor";
@@ -458,11 +477,7 @@ kn300_softerr(mces, type, logout, framep)
  */
 
 static void
-kn300_mcheck(mces, type, logout, framep)
-	unsigned long mces;
-	unsigned long type;
-	unsigned long logout;
-	struct trapframe *framep;
+kn300_mcheck(unsigned long mces, unsigned long type, unsigned long logout, struct trapframe *framep)
 {
 	struct mchkinfo *mcp;
 	static const char *fmt1 = "        %-25s = 0x%l016x\n";
@@ -525,11 +540,7 @@ kn300_mcheck(mces, type, logout, framep)
 }
 
 static void
-dec_kn300_mcheck_handler(mces, framep, vector, param)
-	unsigned long mces;
-	struct trapframe *framep;
-	unsigned long vector;
-	unsigned long param;
+dec_kn300_mcheck_handler(unsigned long mces, struct trapframe *framep, unsigned long vector, unsigned long param)
 {
 	switch (vector) {
 	case ALPHA_SYS_ERROR:

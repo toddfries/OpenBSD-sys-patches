@@ -1,4 +1,4 @@
-/*	$NetBSD: ehcivar.h,v 1.33 2008/10/14 18:12:38 jmcneill Exp $ */
+/*	$NetBSD: ehcivar.h,v 1.30 2008/04/28 20:23:58 martin Exp $ */
 
 /*
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -33,8 +33,6 @@ typedef struct ehci_soft_qtd {
 	ehci_qtd_t qtd;
 	struct ehci_soft_qtd *nextqtd; /* mirrors nextqtd in TD */
 	ehci_physaddr_t physaddr;
-	usb_dma_t dma;                  /* qTD's DMA infos */
-	int offs;                       /* qTD's offset in usb_dma_t */
 	usbd_xfer_handle xfer;
 	LIST_ENTRY(ehci_soft_qtd) hnext;
 	u_int16_t len;
@@ -47,43 +45,17 @@ typedef struct ehci_soft_qh {
 	struct ehci_soft_qh *next;
 	struct ehci_soft_qtd *sqtd;
 	ehci_physaddr_t physaddr;
-	usb_dma_t dma;                  /* QH's DMA infos */
-	int offs;                       /* QH's offset in usb_dma_t */
 	int islot;
 } ehci_soft_qh_t;
 #define EHCI_SQH_SIZE ((sizeof (struct ehci_soft_qh) + EHCI_QH_ALIGN - 1) / EHCI_QH_ALIGN * EHCI_QH_ALIGN)
 #define EHCI_SQH_CHUNK (EHCI_PAGE_SIZE / EHCI_SQH_SIZE)
 
-typedef struct ehci_soft_itd {
-	ehci_itd_t itd;
-	union {
-		struct {
-			/* soft_itds links in a periodic frame*/
-			struct ehci_soft_itd *next;
-			struct ehci_soft_itd *prev;
-		} frame_list;
-		/* circular list of free itds */
-		LIST_ENTRY(ehci_soft_itd) free_list;
-	} u;
-	struct ehci_soft_itd *xfer_next; /* Next soft_itd in xfer */
-	ehci_physaddr_t physaddr;
-	usb_dma_t dma;
-	int offs;
-	int slot;
-	struct timeval t; /* store free time */
-} ehci_soft_itd_t;
-#define EHCI_ITD_SIZE ((sizeof(struct ehci_soft_itd) + EHCI_QH_ALIGN - 1) / EHCI_ITD_ALIGN * EHCI_ITD_ALIGN)
-#define EHCI_ITD_CHUNK (EHCI_PAGE_SIZE / EHCI_ITD_SIZE)
-
 struct ehci_xfer {
 	struct usbd_xfer xfer;
 	struct usb_task	abort_task;
-	TAILQ_ENTRY(ehci_xfer) inext; /* list of active xfers */
+	LIST_ENTRY(ehci_xfer) inext; /* list of active xfers */
 	ehci_soft_qtd_t *sqtdstart;
 	ehci_soft_qtd_t *sqtdend;
-	ehci_soft_itd_t *itdstart;
-	ehci_soft_itd_t *itdend;
-	u_int isoc_len;
 	int isdone;	/* used only when DIAGNOSTIC is defined */
 };
 #define EXFER(xfer) ((struct ehci_xfer *)(xfer))
@@ -104,8 +76,6 @@ struct ehci_soft_islot {
 
 #define EHCI_HASH_SIZE 128
 #define EHCI_COMPANION_MAX 8
-
-#define EHCI_FREE_LIST_INTERVAL 100
 
 typedef struct ehci_softc {
 	device_t sc_dev;
@@ -133,17 +103,10 @@ typedef struct ehci_softc {
 
 	struct ehci_soft_islot sc_islots[EHCI_INTRQHS];
 
-	/* jcmm - an array matching sc_flist, but with software pointers,
-	 * not hardware address pointers
-	 */
-	struct ehci_soft_itd **sc_softitds;
-
-	TAILQ_HEAD(, ehci_xfer) sc_intrhead;
-	kmutex_t sc_intrhead_lock;
+	LIST_HEAD(, ehci_xfer) sc_intrhead;
 
 	ehci_soft_qh_t *sc_freeqhs;
 	ehci_soft_qtd_t *sc_freeqtds;
-	LIST_HEAD(sc_freeitds, ehci_soft_itd) sc_freeitds;
 
 	int sc_noport;
 	u_int8_t sc_hasppc;		/* has Port Power Control */

@@ -1,4 +1,4 @@
-/*	$NetBSD: sbdio.c,v 1.3 2008/04/28 20:23:18 martin Exp $	*/
+/*	$NetBSD: sbdio.c,v 1.1 2005/12/29 15:20:09 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 2004, 2005 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sbdio.c,v 1.3 2008/04/28 20:23:18 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sbdio.c,v 1.1 2005/12/29 15:20:09 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -45,22 +52,22 @@ __KERNEL_RCSID(0, "$NetBSD: sbdio.c,v 1.3 2008/04/28 20:23:18 martin Exp $");
 #include "ioconf.h"
 
 struct sbdio_softc {
-	device_t sc_dev;
+	struct device sc_dev;
 	struct ews4800mips_bus_space sc_bus_tag;
 	struct ews4800mips_bus_dma_tag sc_dma_tag;
 };
 
-static int sbdio_match(device_t, cfdata_t, void *);
-static void sbdio_attach(device_t, device_t, void *);
-static int sbdio_print(void *, const char *);
+int sbdio_match(struct device *, struct cfdata *, void *);
+void sbdio_attach(struct device *, struct device *, void *);
+int sbdio_print(void *, const char *);
 
-CFATTACH_DECL_NEW(sbdio, sizeof(struct sbdio_softc),
+CFATTACH_DECL(sbdio, sizeof(struct sbdio_softc),
     sbdio_match, sbdio_attach, NULL, NULL);
 
 static int sbdio_found;
 
 int
-sbdio_match(device_t parent, cfdata_t cf, void *aux)
+sbdio_match(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct mainbus_attach_args *ma = aux;
 
@@ -77,21 +84,20 @@ sbdio_match(device_t parent, cfdata_t cf, void *aux)
 }
 
 void
-sbdio_attach(device_t parent, device_t self, void *aux)
+sbdio_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct sbdio_softc *sc = device_private(self);
+	struct sbdio_softc *sc = (void *)self;
 	struct sbdio_attach_args sa;
 	const struct sbdiodevdesc *sd;
 
 	sbdio_found = 1;
 
-	sc->sc_dev = self;
-	aprint_normal("\n");
+	printf("\n");
 
 	/* structure assignment */
 	sc->sc_dma_tag = ews4800mips_default_bus_dma_tag;
 
-	bus_space_create(&sc->sc_bus_tag, device_xname(sc->sc_dev),
+	bus_space_create(&sc->sc_bus_tag, sc->sc_dev.dv_xname,
 	    MIPS_KSEG1_START, MIPS_KSEG2_START - MIPS_KSEG1_START); /* XXX */
 
 	for (sd = platform.sbdiodevs; sd->sd_name != NULL; sd++) {
@@ -109,15 +115,6 @@ sbdio_attach(device_t parent, device_t self, void *aux)
 int
 sbdio_print(void *aux, const char *pnp)
 {
-	struct sbdio_attach_args *sa = aux;
-
-	if (sa->sa_addr1 != (paddr_t)-1) {
-		aprint_normal(" at 0x%lx", sa->sa_addr1);
-		if (sa->sa_addr2 != (paddr_t)-1)
-			aprint_normal(", 0x%lx", sa->sa_addr2);
-	}
-	if (sa->sa_irq != -1)
-		aprint_normal(" irq %d", sa->sa_irq);
 
 	return pnp ? QUIET : UNCONF;
 }

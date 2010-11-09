@@ -1,4 +1,4 @@
-/*	$NetBSD: main.c,v 1.13 2008/12/13 23:30:54 christos Exp $	 */
+/*	$NetBSD: main.c,v 1.10 2001/07/05 00:58:45 itojun Exp $	 */
 
 /*
  * Copyright (c) 1996
@@ -45,7 +45,8 @@
 
 int errno;
 
-extern char	bootprog_name[], bootprog_rev[], bootprog_kernrev[];
+extern char	bootprog_name[], bootprog_rev[], bootprog_date[],
+		bootprog_maker[];
 
 #define TIMEOUT 5
 
@@ -66,7 +67,7 @@ bootit(filename, howto)
 	const char     *filename;
 	int             howto;
 {
-	if (exec_netbsd(filename, 0, howto, 0) < 0)
+	if (exec_netbsd(filename, 0, howto) < 0)
 		printf("boot: %s\n", strerror(errno));
 	else
 		printf("boot returned\n");
@@ -76,14 +77,15 @@ bootit(filename, howto)
 static void
 print_banner(void)
 {
-	clear_pc_screen();
 
 	printf("\n"
-	       ">> %s, Revision %s (from NetBSD %s)\n"
+	       ">> %s, Revision %s\n"
+	       ">> (%s, %s)\n"
 	       ">> Memory: %d/%d k\n"
 	       "Press return to boot now, any other key for boot menu\n"
 	       "starting in ",
-	       bootprog_name, bootprog_rev, bootprog_kernrev,
+	       bootprog_name, bootprog_rev,
+	       bootprog_maker, bootprog_date,
 	       getbasemem(), getextmem());
 }
 

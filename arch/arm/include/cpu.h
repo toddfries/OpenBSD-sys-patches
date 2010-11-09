@@ -1,4 +1,4 @@
-/*	cpu.h,v 1.45.4.7 2008/01/28 18:20:39 matt Exp	*/
+/*	$NetBSD: cpu.h,v 1.40 2006/08/05 22:54:28 bjh21 Exp $	*/
 
 /*
  * Copyright (c) 1994-1996 Mark Brinicombe.
@@ -60,6 +60,15 @@
 #define	CPU_POWERSAVE		5	/* int: use CPU powersave mode */
 #define	CPU_MAXID		6	/* number of valid machdep ids */
 
+#define	CTL_MACHDEP_NAMES { \
+	{ 0, 0 }, \
+	{ "debug", CTLTYPE_INT }, \
+	{ "booted_device", CTLTYPE_STRING }, \
+	{ "booted_kernel", CTLTYPE_STRING }, \
+	{ "console_device", CTLTYPE_STRUCT }, \
+	{ "powersave", CTLTYPE_INT }, \
+}    
+
 #ifdef _KERNEL
 
 /*
@@ -68,36 +77,27 @@
 
 #ifndef _LKM
 #include "opt_multiprocessor.h"
-#include "opt_cpuoptions.h"
 #include "opt_lockdebug.h"
-#include "opt_cputypes.h"
 #endif /* !_LKM */
 
 #include <arm/cpuconf.h>
 
+#include <machine/intr.h>
 #ifndef _LOCORE
 #include <sys/user.h>
 #include <machine/frame.h>
 #include <machine/pcb.h>
-#ifdef FPU_VFP
-#include <arm/vfpvar.h>
-#endif
 #endif	/* !_LOCORE */
 
 #include <arm/armreg.h>
-
 
 #ifndef _LOCORE
 /* 1 == use cpu_sleep(), 0 == don't */
 extern int cpu_do_powersave;
 #endif
 
+#ifdef __PROG32
 #ifdef _LOCORE
-
-#if defined(_ARM_ARCH_6)
-#define IRQdisable	cprid	i
-#define IRQenable	cpsie	i
-#elif defined(__PROG32)
 #define IRQdisable \
 	stmfd	sp!, {r0} ; \
 	mrs	r0, cpsr ; \
@@ -111,35 +111,12 @@ extern int cpu_do_powersave;
 	bic	r0, r0, #(I32_bit) ; \
 	msr	cpsr_c, r0 ; \
 	ldmfd	sp!, {r0}		
+
 #else
-/* Not yet used in 26-bit code */
-#endif
-
-#if defined (PROCESS_ID_IS_CURCPU)
-#define GET_CURCPU(rX)		mrc	p15, 0, rX, c13, c0, 4
-#define GET_CURLWP(rX)		GET_CURCPU(rX); ldr rX, [rX, #CI_CURLWP]
-#define GET_CURPCB(rX)		GET_CURCPU(rX); ldr rX, [rX, #CI_CURPCB]
-#elif defined (PROCESS_ID_IS_CURLWP)
-#define GET_CURLWP(rX)		mrc	p15, 0, rX, c13, c0, 4
-#define GET_CURCPU(rX)		GET_CURLWP(rX); ldr rX, [rX, #L_CPU]
-#define GET_CURPCB(rX)		GET_CURLWP(rX); ldr rX, [rX, #L_ADDR]
-#elif !defined(MULTIPROCESSOR)
-#define GET_CURCPU(rX)		ldr rX, =_C_LABEL(cpu_info_store)
-#define GET_CURLWP(rX)		GET_CURCPU(rX); ldr rX, [rX, #CI_CURLWP]
-#define GET_CURPCB(rX)		GET_CURCPU(rX); ldr rX, [rX, #CI_CURPCB]
-#endif
-
-#else /* !_LOCORE */
-
-#ifdef __PROG32
 #define IRQdisable __set_cpsr_c(I32_bit, I32_bit);
 #define IRQenable __set_cpsr_c(I32_bit, 0);
-#else
-#define IRQdisable set_r15(R15_IRQ_DISABLE, R15_IRQ_DISABLE);
-#define IRQenable set_r15(R15_IRQ_DISABLE, 0);
+#endif	/* _LOCORE */
 #endif
-
-#endif /* !_LOCORE */
 
 #ifndef _LOCORE
 
@@ -156,16 +133,26 @@ extern int cpu_do_powersave;
 #endif
 
 /*
+ * CLKF_BASEPRI: True if we were at spl0 before the interrupt.
+ *
+ * This is hard-wired to 0 on the ARM, since spllowersoftclock() might
+ * not actually be able to unblock the interrupt, which would cause us
+ * to run the softclock interrupts with hardclock blocked.
+ */
+#define CLKF_BASEPRI(frame)	0
+
+/*
  * CLKF_INTR: True if we took the interrupt from inside another
  * interrupt handler.
  */
+extern int current_intr_depth;
 #ifdef __PROG32
 /* Hack to treat FPE time as interrupt time so we can measure it */
 #define CLKF_INTR(frame)						\
-	((curcpu()->ci_intr_depth > 1) ||				\
+	((current_intr_depth > 1) ||					\
 	    (frame->cf_if.if_spsr & PSR_MODE) == PSR_UND32_MODE)
 #else
-#define CLKF_INTR(frame)	(curcpu()->ci_intr_depth > 1) 
+#define CLKF_INTR(frame)	(current_intr_depth > 1) 
 #endif
 
 /*
@@ -224,113 +211,26 @@ void	arm32_vector_init(vaddr_t, int);
 /*
  * Per-CPU information.  For now we assume one CPU.
  */
-static inline int curcpl(void);
-static inline void set_curcpl(int);
-#ifdef __HAVE_FAST_SOFTINTS
-static inline void cpu_dosoftints(void);
-#endif
 
 #include <sys/device.h>
 #include <sys/cpu_data.h>
 struct cpu_info {
 	struct cpu_data ci_data;	/* MI per-cpu data */
 	struct device *ci_dev;		/* Device corresponding to this CPU */
-	cpuid_t ci_cpuid;
 	u_int32_t ci_arm_cpuid;		/* aggregate CPU id */
 	u_int32_t ci_arm_cputype;	/* CPU type */
 	u_int32_t ci_arm_cpurev;	/* CPU revision */
 	u_int32_t ci_ctrl;		/* The CPU control register */
-	int ci_cpl;			/* current processor level (spl) */
-	int ci_astpending;		/* */
-	int ci_want_resched;		/* resched() was called */
-	int ci_intr_depth;		/* */
-	struct pcb *ci_curpcb;		/* current pcb */
-#ifdef __HAVE_FAST_SOFTINTS
-	lwp_t *ci_softlwps[SOFTINT_COUNT];
-	uint32_t ci_softints;
-#endif
-#if !defined(PROCESS_ID_IS_CURLWP)
-	lwp_t *ci_curlwp;		/* current lwp */
-#endif
-#ifdef _ARM_ARCH_6
-	uint32_t ci_ccnt_freq;		/* cycle count frequency */
-#endif
 	struct evcnt ci_arm700bugcount;
-	int32_t ci_mtx_count;
-	int ci_mtx_oldspl;
 #ifdef MULTIPROCESSOR
 	MP_CPU_INFO_MEMBERS
-#endif
-#ifdef FPU_VFP
-	struct vfp_info ci_vfp;
 #endif
 };
 
 #ifndef MULTIPROCESSOR
 extern struct cpu_info cpu_info_store;
-#if defined(PROCESS_ID_IS_CURLWP)
-static inline struct lwp *
-_curlwp(void)
-{
-	struct lwp *l;
-	__asm("mrc\tp15, 0, %0, c13, c0, 4" : "=r"(l));
-	return l;
-}
-
-static inline void
-_curlwp_set(struct lwp *l)
-{
-	__asm("mcr\tp15, 0, %0, c13, c0, 4" : "=r"(l));
-}
-
-#define	curlwp		(_curlwp())
-static inline struct cpu_info *
-curcpu(void)
-{
-	return curlwp->l_cpu;
-}
-#elif defined(PROCESS_ID_IS_CURCPU)
-static inline struct cpu_info *
-curcpu(void)
-{
-	struct cpu_info *ci;
-	__asm("mrc\tp15, 0, %0, c13, c0, 4" : "=r"(ci));
-	return ci;
-}
-#else
 #define	curcpu()	(&cpu_info_store)
-#endif /* !PROCESS_ID_IS_CURCPU && !PROCESS_ID_IS_CURLWP */
-#ifndef curpcb
-#define	curpcb		(curcpu()->ci_curpcb)
-#endif
-#ifndef curlwp
-#define	curlwp		(curcpu()->ci_curlwp)
-#endif
 #define cpu_number()	0
-#define	LWP0_CPU_INFO	(&cpu_info_store)
-#endif /* !MULTIPROCESSOR */
-
-static inline int
-curcpl(void)
-{
-	return curcpu()->ci_cpl;
-}
-
-static inline void
-set_curcpl(int pri)
-{
-	curcpu()->ci_cpl = pri;
-}
-
-#ifdef __HAVE_FAST_SOFTINTS
-void	dosoftints(void);
-static inline void
-cpu_dosoftints(void)
-{
-	struct cpu_info * const ci = curcpu();
-	if (ci->ci_intr_depth == 0 && (ci->ci_softints >> ci->ci_cpl) > 0)
-		dosoftints();
-}
 #endif
 
 #ifdef __PROG32
@@ -343,21 +243,29 @@ void	cpu_proc_fork(struct proc *, struct proc *);
  * Scheduling glue
  */
 
-#define setsoftast() (curcpu()->ci_astpending = 1)
+extern int astpending;
+#define setsoftast() (astpending = 1)
 
 /*
  * Notify the current process (p) that it has a signal pending,
  * process as soon as possible.
  */
 
-#define cpu_signotify(l)            setsoftast()
+#define signotify(p)            setsoftast()
+
+/*
+ * Preempt the current process if in interrupt from user mode,
+ * or after the current trap/syscall if in system mode.
+ */
+extern int want_resched;	/* resched() was called */
+#define	need_resched(ci)	(want_resched = 1, setsoftast())
 
 /*
  * Give a profiling tick to the current process when the user profiling
  * buffer pages are invalid.  On the i386, request an ast to send us
  * through trap(), marking the proc as needing a profiling tick.
  */
-#define	cpu_need_proftick(l)	((l)->l_pflag |= LP_OWEUPC, setsoftast())
+#define	need_proftick(p)	((p)->p_flag |= P_OWEUPC, setsoftast())
 
 #ifndef acorn26
 /*
@@ -365,8 +273,10 @@ void	cpu_proc_fork(struct proc *, struct proc *);
  */
 
 struct device;
-void	cpu_attach(struct device *);
+void	cpu_attach	__P((struct device *));
+int	cpu_alloc_idlepcb	__P((struct cpu_info *));
 #endif
+
 
 /*
  * Random cruft
@@ -375,27 +285,29 @@ void	cpu_attach(struct device *);
 struct lwp;
 
 /* locore.S */
-void atomic_set_bit(u_int *, u_int);
-void atomic_clear_bit(u_int *, u_int);
+void atomic_set_bit	__P((u_int *address, u_int setmask));
+void atomic_clear_bit	__P((u_int *address, u_int clearmask));
 
 /* cpuswitch.S */
 struct pcb;
-void	savectx(struct pcb *);
+void	savectx		__P((struct pcb *pcb));
 
 /* ast.c */
-void userret(register struct lwp *);
+void userret		__P((register struct lwp *p));
 
 /* machdep.h */
-void bootsync(void);
+void bootsync		__P((void));
 
 /* fault.c */
-int badaddr_read(void *, size_t, void *);
+int badaddr_read	__P((void *, size_t, void *));
 
 /* syscall.c */
-void swi_handler(trapframe_t *);
+void swi_handler	__P((trapframe_t *));
 
 #endif	/* !_LOCORE */
 
 #endif /* _KERNEL */
 
 #endif /* !_ARM_CPU_H_ */
+
+/* End of cpu.h */

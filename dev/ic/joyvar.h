@@ -1,4 +1,4 @@
-/*	$NetBSD: joyvar.h,v 1.6 2008/03/26 18:27:07 xtraeme Exp $	*/
+/*	$NetBSD: joyvar.h,v 1.5 2005/12/11 12:21:27 christos Exp $	*/
 
 /*-
  * Copyright (c) 1995 Jean-Marc Zucconi
@@ -39,7 +39,7 @@
  */
 
 struct joy_softc {
-	device_t sc_dev;
+	struct	device sc_dev;
 	bus_space_tag_t sc_iot;
 	bus_space_handle_t sc_ioh;
 	int	x_off[2], y_off[2];

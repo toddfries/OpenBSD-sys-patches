@@ -1,4 +1,4 @@
-/*	$NetBSD: locore.S,v 1.15 2009/02/13 22:41:03 apb Exp $	*/
+/*	$NetBSD: locore.S,v 1.10 2005/12/11 12:18:51 christos Exp $	*/
 /*	$OpenBSD: locore.S,v 1.4 1997/01/26 09:06:38 rahnds Exp $	*/
 
 /*
@@ -35,7 +35,6 @@
 #include "opt_ddb.h"
 #include "fs_kernfs.h"
 #include "opt_ipkdb.h"
-#include "opt_modular.h"
 #include "opt_multiprocessor.h"
 #include "opt_openpic.h"
 #include "opt_ppcparam.h"
@@ -70,8 +69,33 @@ GLOBAL(endsym)
 	.long	0			/* end symbol table */
 GLOBAL(proc0paddr)
 	.long	0			/* proc0 p_addr */
-GLOBAL(oeacpufeat)
-	.long	0			/* cpu features */
+
+GLOBAL(intrnames)
+#if defined(OPENPIC_SERIAL_MODE)
+	.asciz	"sioint", "unknown", "pci0", "pci1"
+	.asciz	"pci2", "pci3", "winbondA", "winbondB"
+	.asciz	"winbondC", "winbondD", "rsvd10", "rsvd11"
+	.asciz	"rsvd12", "rsvd13", "rsvd14", "rsvd15"
+	.asciz	"sercon", "i2c", "dma0", "dma1"
+	.asciz	"i2o", "timer0", "timer1", "timer2"
+	.asciz	"timer3"
+#else
+	.asciz	"pci0", "pci1", "pci2", "pci3"
+	.asciz	"sercon", "i2c", "dma0", "dma1"
+	.asciz	"i2o", "timer0", "timer1", "timer2"
+	.asciz	"timer3", "unused0", "unused1", "unused2"
+	.asciz	"unused3", "unused4", "unused5", "unused6"
+	.asciz	"unused7", "unused8", "unused9", "unused10"
+	.asciz	"unused11"
+#endif
+
+GLOBAL(eintrnames)
+	.align	4
+GLOBAL(intrcnt)
+	.long	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	.long	0,0,0,0,0,0,0,0,0
+GLOBAL(eintrcnt)
+
 /*
  * This symbol is here for the benefit of kvm_mkdb, and is supposed to
  * mark the start of kernel text.
@@ -97,7 +121,7 @@ __start:
 	mtspr	1008,8
 
 /* compute end of kernel memory */
-#if NKSYMS || defined(DDB) || defined(MODULAR) || defined(KERNFS)
+#if NKSYMS || defined(DDB) || defined(LKM) || defined(KERNFS)
 	lis	7,_C_LABEL(startsym)@ha
 	addi	7,7,_C_LABEL(startsym)@l
 	stw	3,0(7)
@@ -109,30 +133,17 @@ __start:
 	addi	4,4,_C_LABEL(end)@l
 #endif
 
-       	/* Make sure that .bss is zeroed. */
-	li	0,0
-	lis	8,edata@ha
-	addi	8,8,edata@l
-	lis	9,end@ha
-	addi	9,9,end@l
-5:	cmpw	0,8,9			/* edata & end are >= word aligned */
-	bge	6f
-	stw	0,0(8)
-	addi	8,8,4
-	b	5b
-6:
-
 	INIT_CPUINFO(4,1,9,0)
 	
 	lis	3,__start@ha
 	addi	3,3,__start@l
 
-	/* 3 and 4 were updated here, 5 and 6 are passed intact */
-
+	xor	5,5,5
+	xor	6,6,6
 	bl	_C_LABEL(initppc)
 	bl	_C_LABEL(main)
 
-loop:	b	loop			/* not reached */
+loop:	b	loop			/* XXX not reached */
 
 	.globl	_C_LABEL(enable_intr)
 _C_LABEL(enable_intr):
@@ -148,8 +159,8 @@ _C_LABEL(disable_intr):
 	mtmsr	3
 	blr
 
-	.globl	_C_LABEL(jump_to_ppc_reset_entry)
-_C_LABEL(jump_to_ppc_reset_entry):
+	.globl	_C_LABEL(sandpoint_reboot)
+_C_LABEL(sandpoint_reboot):
 	mfmsr	3
 	ori	3,3,PSL_IP@l
 	mtmsr	3

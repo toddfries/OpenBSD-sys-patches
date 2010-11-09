@@ -1,4 +1,4 @@
-/*	$NetBSD: boot.c,v 1.17 2009/01/20 13:12:26 tsutsui Exp $	*/
+/*	$NetBSD: boot.c,v 1.16 2005/12/11 12:18:25 christos Exp $	*/
 
 /*-
  * Copyright (C) 1999 Tsubai Masanari.  All rights reserved.
@@ -73,7 +73,6 @@ boot(uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4,
 	struct btinfo_bootarg bi_arg;
 	struct btinfo_bootpath bi_bpath;
 	struct btinfo_systype bi_sys;
-	int loadflag;
 
 	/* Clear BSS. */
 	memset(_edata, 0, _end - _edata);
@@ -161,17 +160,12 @@ boot(uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4,
 		kernels[1] = NULL;
 	}
 
-	/* disable LOAD_NOTE on floppy to avoid backward seek across volumes */
-	loadflag = LOAD_KERNEL;
-	if (devname[0] == 'f')	/* XXX */
-		loadflag &= ~LOAD_NOTE;
-
 	marks[MARK_START] = 0;
 
 	for (i = 0; kernels[i]; i++) {
 		sprintf(file, "%s%s", devname, kernels[i]);
 		DPRINTF("trying %s...\n", file);
-		fd = loadfile(file, marks, loadflag);
+		fd = loadfile(file, marks, LOAD_KERNEL);
 		if (fd != -1)
 			break;
 	}

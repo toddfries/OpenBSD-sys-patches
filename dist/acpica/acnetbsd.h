@@ -1,7 +1,7 @@
 /******************************************************************************
  *
  * Name: acnetbsd.h - OS specific defines, etc.
- *       $Revision: 1.6 $
+ *       xRevision: 1.8 $
  *
  *****************************************************************************/
 
@@ -9,7 +9,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2008, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2006, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -121,32 +121,29 @@
 
 #include "acgcc.h"
 
-#define ACPI_THREAD_ID		uintptr_t
-#define ACPI_UINTPTR_T		uintptr_t
-#define ACPI_USE_LOCAL_CACHE
-
 #ifdef _LP64
-#define ACPI_MACHINE_WIDTH      64
+#define ACPI_MACHINE_WIDTH	64
 #else
-#define ACPI_MACHINE_WIDTH      32
+#define ACPI_MACHINE_WIDTH	32
 #endif
 
 #define COMPILER_DEPENDENT_INT64  int64_t
 #define COMPILER_DEPENDENT_UINT64 uint64_t
 
-#if defined(_KERNEL) || defined(_STANDALONE)
 #ifdef _KERNEL
+#ifdef _KERNEL_OPT
 #include "opt_acpi.h"           /* collect build-time options here */
-#endif /* _KERNEL */
+#endif
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <machine/stdarg.h>
-#include <dev/acpi/acpica/acpi_func.h>
+#include <machine/acpi_func.h>
 
 #define asm         __asm
 
 #define ACPI_USE_NATIVE_DIVIDE
+#define ACPI_USE_LOCAL_CACHE
 
 #define ACPI_ASM_MACROS         /* tell acenv.h */
 
@@ -162,7 +159,9 @@
 #undef DEBUGGER_THREADING
 #endif /* DEBUGGER_THREADING */
 #define DEBUGGER_THREADING 0    /* integrated with DDB */
+#ifdef _KERNEL_OPT
 #include "opt_ddb.h"
+#endif
 #ifdef DDB
 #define ACPI_DISASSEMBLER
 #define ACPI_DEBUGGER
@@ -172,10 +171,10 @@
 static __inline int
 isprint(int ch)
 {
-        return(isspace(ch) || isascii(ch));
+	return(isspace(ch) || isascii(ch));
 }
 
-#else /* defined(_KERNEL) || defined(_STANDALONE) */
+#else /* _KERNEL */
 
 #include <ctype.h>
 
@@ -188,10 +187,9 @@ isprint(int ch)
 /* XXX */
 #define __inline inline
 
-#endif /* defined(_KERNEL) || defined(_STANDALONE) */
+#endif /* _KERNEL */
 
 /* Always use NetBSD code over our local versions */
 #define ACPI_USE_SYSTEM_CLIBRARY
 #define ACPI_USE_NATIVE_DIVIDE
-
 #endif /* __ACNETBSD_H__ */

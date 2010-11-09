@@ -1,7 +1,7 @@
-/*	$NetBSD: isapnp.c,v 1.58 2008/04/28 20:23:53 martin Exp $	*/
+/*	$NetBSD: isapnp.c,v 1.53 2007/10/19 12:00:31 ad Exp $	*/
 
 /*-
- * Copyright (c) 1996, 2008 The NetBSD Foundation, Inc.
+ * Copyright (c) 1996 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -34,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: isapnp.c,v 1.58 2008/04/28 20:23:53 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: isapnp.c,v 1.53 2007/10/19 12:00:31 ad Exp $");
 
 #include "isadma.h"
 
@@ -74,14 +81,15 @@ static void isapnp_configure(struct isapnp_softc *,
 static void isapnp_print_pin(const char *, struct isapnp_pin *, size_t);
 static int isapnp_print(void *, const char *);
 #ifdef _KERNEL
-static int isapnp_submatch(device_t, cfdata_t, const int *, void *);
+static int isapnp_submatch(struct device *, struct cfdata *,
+				const int *, void *);
 #endif
 static int isapnp_find(struct isapnp_softc *, int);
-static int isapnp_match(device_t, cfdata_t, void *);
-static void isapnp_attach(device_t, device_t, void *);
-static void isapnp_callback(device_t);
+static int isapnp_match(struct device *, struct cfdata *, void *);
+static void isapnp_attach(struct device *, struct device *, void *);
+static void isapnp_callback(struct device *);
 
-CFATTACH_DECL_NEW(isapnp, sizeof(struct isapnp_softc),
+CFATTACH_DECL(isapnp, sizeof(struct isapnp_softc),
     isapnp_match, isapnp_attach, NULL, NULL);
 
 /*
@@ -89,7 +97,7 @@ CFATTACH_DECL_NEW(isapnp, sizeof(struct isapnp_softc),
  */
 struct isapnp_probe_cookie {
 	LIST_ENTRY(isapnp_probe_cookie)	ipc_link;
-	device_t ipc_parent;
+	struct device *ipc_parent;
 };
 LIST_HEAD(, isapnp_probe_cookie) isapnp_probes =
     LIST_HEAD_INITIALIZER(isapnp_probes);
@@ -98,7 +106,8 @@ LIST_HEAD(, isapnp_probe_cookie) isapnp_probes =
  *	Write the PNP initiation key to wake up the cards...
  */
 static void
-isapnp_init(struct isapnp_softc *sc)
+isapnp_init(sc)
+	struct isapnp_softc *sc;
 {
 	int i;
 	u_char v = ISAPNP_LFSR_INIT;
@@ -119,7 +128,8 @@ isapnp_init(struct isapnp_softc *sc)
  *	Read a bit at a time from the config card.
  */
 static inline u_char
-isapnp_shift_bit(struct isapnp_softc *sc)
+isapnp_shift_bit(sc)
+	struct isapnp_softc *sc;
 {
 	u_char c1, c2;
 
@@ -141,13 +151,14 @@ isapnp_shift_bit(struct isapnp_softc *sc)
  *	next card number to it and return 1
  */
 static int
-isapnp_findcard(struct isapnp_softc *sc)
+isapnp_findcard(sc)
+	struct isapnp_softc *sc;
 {
 	u_char v = ISAPNP_LFSR_INIT, csum, w;
 	int i, b;
 
 	if (sc->sc_ncards == ISAPNP_MAX_CARDS) {
-		aprint_error_dev(sc->sc_dev, "Too many pnp cards\n");
+		printf("%s: Too many pnp cards\n", sc->sc_dev.dv_xname);
 		return 0;
 	}
 
@@ -195,7 +206,9 @@ isapnp_findcard(struct isapnp_softc *sc)
  *	Free a region
  */
 static void
-isapnp_free_region(bus_space_tag_t t, struct isapnp_region *r)
+isapnp_free_region(t, r)
+	bus_space_tag_t t;
+	struct isapnp_region *r;
 {
 	if (r->length == 0)
 		return;
@@ -210,7 +223,9 @@ isapnp_free_region(bus_space_tag_t t, struct isapnp_region *r)
  *	Allocate a single region if possible
  */
 static int
-isapnp_alloc_region(bus_space_tag_t t, struct isapnp_region *r)
+isapnp_alloc_region(t, r)
+	bus_space_tag_t t;
+	struct isapnp_region *r;
 {
 	int error = 0;
 
@@ -237,7 +252,9 @@ isapnp_alloc_region(bus_space_tag_t t, struct isapnp_region *r)
  *	Allocate an irq
  */
 static int
-isapnp_alloc_irq(isa_chipset_tag_t ic, struct isapnp_pin *i)
+isapnp_alloc_irq(ic, i)
+	isa_chipset_tag_t ic;
+	struct isapnp_pin *i;
 {
 	int irq;
 #define LEVEL_IRQ (ISAPNP_IRQTYPE_LEVEL_PLUS|ISAPNP_IRQTYPE_LEVEL_MINUS)
@@ -261,7 +278,9 @@ isapnp_alloc_irq(isa_chipset_tag_t ic, struct isapnp_pin *i)
  *	Allocate a drq
  */
 static int
-isapnp_alloc_drq(isa_chipset_tag_t ic, struct isapnp_pin *i)
+isapnp_alloc_drq(ic, i)
+	isa_chipset_tag_t ic;
+	struct isapnp_pin *i;
 {
 #if NISADMA > 0
 	int b;
@@ -285,8 +304,10 @@ isapnp_alloc_drq(isa_chipset_tag_t ic, struct isapnp_pin *i)
  *	Test/Allocate the regions used
  */
 static int
-isapnp_testconfig(bus_space_tag_t iot, bus_space_tag_t memt,
-    struct isapnp_attach_args *ipa, int alloc)
+isapnp_testconfig(iot, memt, ipa, alloc)
+	bus_space_tag_t iot, memt;
+	struct isapnp_attach_args *ipa;
+	int alloc;
 {
 	int nio = 0, nmem = 0, nmem32 = 0, nirq = 0, ndrq = 0;
 	int error = 0;
@@ -354,8 +375,9 @@ bad:
  *	Test/Allocate the regions used
  */
 int
-isapnp_config(bus_space_tag_t iot, bus_space_tag_t memt,
-    struct isapnp_attach_args *ipa)
+isapnp_config(iot, memt, ipa)
+	bus_space_tag_t iot, memt;
+	struct isapnp_attach_args *ipa;
 {
 	return isapnp_testconfig(iot, memt, ipa, 1);
 }
@@ -365,8 +387,9 @@ isapnp_config(bus_space_tag_t iot, bus_space_tag_t memt,
  *	Free the regions used
  */
 void
-isapnp_unconfig(bus_space_tag_t iot, bus_space_tag_t memt,
-    struct isapnp_attach_args *ipa)
+isapnp_unconfig(iot, memt, ipa)
+	bus_space_tag_t iot, memt;
+	struct isapnp_attach_args *ipa;
 {
 	int i;
 
@@ -394,7 +417,9 @@ isapnp_unconfig(bus_space_tag_t iot, bus_space_tag_t memt,
  *	free all other configurations.
  */
 static struct isapnp_attach_args *
-isapnp_bestconfig(struct isapnp_softc *sc, struct isapnp_attach_args **ipa)
+isapnp_bestconfig(sc, ipa)
+	struct isapnp_softc *sc;
+	struct isapnp_attach_args **ipa;
 {
 	struct isapnp_attach_args *c, *best, *f = *ipa;
 	int error;
@@ -479,7 +504,9 @@ isapnp_bestconfig(struct isapnp_softc *sc, struct isapnp_attach_args **ipa)
  *	Convert a pnp ``compressed ascii'' vendor id to a string
  */
 char *
-isapnp_id_to_vendor(char *v, const u_char *id)
+isapnp_id_to_vendor(v, id)
+	char   *v;
+	const u_char *id;
 {
 	char *p = v;
 
@@ -500,7 +527,10 @@ isapnp_id_to_vendor(char *v, const u_char *id)
  *	Print a region allocation
  */
 static void
-isapnp_print_region(const char *str, struct isapnp_region *r, size_t n)
+isapnp_print_region(str, r, n)
+	const char *str;
+	struct isapnp_region *r;
+	size_t n;
 {
 	size_t i;
 
@@ -522,7 +552,10 @@ isapnp_print_region(const char *str, struct isapnp_region *r, size_t n)
  *	Print an irq/drq assignment
  */
 static void
-isapnp_print_pin(const char *str, struct isapnp_pin *p, size_t n)
+isapnp_print_pin(str, p, n)
+	const char *str;
+	struct isapnp_pin *p;
+	size_t n;
 {
 	size_t i;
 
@@ -542,7 +575,9 @@ isapnp_print_pin(const char *str, struct isapnp_pin *p, size_t n)
  *	Print the configuration line for an ISA PnP card.
  */
 static int
-isapnp_print(void *aux, const char *str)
+isapnp_print(aux, str)
+	void *aux;
+	const char *str;
 {
 	struct isapnp_attach_args *ipa = aux;
 
@@ -566,7 +601,8 @@ isapnp_print(void *aux, const char *str)
  *	Probe the logical device...
  */
 static int
-isapnp_submatch(device_t parent, cfdata_t match, const int *ldesc, void *aux)
+isapnp_submatch(struct device *parent, struct cfdata *match,
+    const int *ldesc, void *aux)
 {
 
 	return (config_match(parent, match, aux));
@@ -577,8 +613,10 @@ isapnp_submatch(device_t parent, cfdata_t match, const int *ldesc, void *aux)
  *	Match a probed device with the information from the driver
  */
 int
-isapnp_devmatch(const struct isapnp_attach_args *ipa,
-    const struct isapnp_devinfo *dinfo, int *variant)
+isapnp_devmatch(ipa, dinfo, variant)
+	const struct isapnp_attach_args *ipa;
+	const struct isapnp_devinfo *dinfo;
+	int *variant;
 {
 	const struct isapnp_matchinfo *match;
 	int n;
@@ -608,7 +646,8 @@ isapnp_devmatch(const struct isapnp_attach_args *ipa,
  *	from there. Unfortunately it is not as easy as it sounds.
  */
 void
-isapnp_isa_attach_hook(struct isa_softc *isa_sc)
+isapnp_isa_attach_hook(isa_sc)
+	struct isa_softc *isa_sc;
 {
 	struct isapnp_softc sc;
 
@@ -664,7 +703,9 @@ isapnp_isa_attach_hook(struct isa_softc *isa_sc)
  *	Probe and add cards
  */
 static int
-isapnp_find(struct isapnp_softc *sc, int all)
+isapnp_find(sc, all)
+	struct isapnp_softc *sc;
+	int all;
 {
 	int p;
 
@@ -680,7 +721,7 @@ isapnp_find(struct isapnp_softc *sc, int all)
 		sc->sc_read_port = p;
 		if (isapnp_map_readport(sc))
 			continue;
-		DPRINTF(("%s: Trying port %x\r", device_xname(sc->sc_dev), p));
+		DPRINTF(("%s: Trying port %x\r", sc->sc_dev.dv_xname, p));
 		if (isapnp_findcard(sc))
 			break;
 		isapnp_unmap_readport(sc);
@@ -705,7 +746,9 @@ isapnp_find(struct isapnp_softc *sc, int all)
  *	     range/length bit an do appropriate sets.
  */
 static void
-isapnp_configure(struct isapnp_softc *sc, const struct isapnp_attach_args *ipa)
+isapnp_configure(sc, ipa)
+	struct isapnp_softc *sc;
+	const struct isapnp_attach_args *ipa;
 {
 	int i;
 	static u_char isapnp_mem_range[] = ISAPNP_MEM_DESC;
@@ -840,18 +883,11 @@ isapnp_configure(struct isapnp_softc *sc, const struct isapnp_attach_args *ipa)
  *	Probe routine
  */
 static int
-isapnp_match(device_t parent, cfdata_t match, void *aux)
+isapnp_match(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct isapnp_softc sc;
 	struct isa_attach_args *ia = aux;
 	struct isapnp_probe_cookie *ipc;
-
-	/*
-	 * If the system has no ISA expansion slots, skip the probe
-	 * because it's very slow.
-	 */
-	if (isa_get_slotcount() == 0)
-		return (0);
 
 	/*
 	 * Ensure we only probe ISA PnP once; we don't actually consume
@@ -870,6 +906,7 @@ isapnp_match(device_t parent, cfdata_t match, void *aux)
 	LIST_INSERT_HEAD(&isapnp_probes, ipc, ipc_link);
 
 	sc.sc_iot = ia->ia_iot;
+	(void) strcpy(sc.sc_dev.dv_xname, "(isapnp probe)");
 
 	if (isapnp_map(&sc))
 		return 0;
@@ -895,22 +932,22 @@ isapnp_match(device_t parent, cfdata_t match, void *aux)
  *	Attach the PnP `bus'.
  */
 static void
-isapnp_attach(device_t parent, device_t self, void *aux)
+isapnp_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct isapnp_softc *sc = device_private(self);
 	struct isa_attach_args *ia = aux;
 
-	sc->sc_dev = self;
 	sc->sc_iot = ia->ia_iot;
 	sc->sc_memt = ia->ia_memt;
 	sc->sc_ic = ia->ia_ic;
 	sc->sc_dmat = ia->ia_dmat;
 	sc->sc_ncards = 0;
 
-	aprint_normal(": ISA Plug 'n Play device support\n");
+	printf(": ISA Plug 'n Play device support\n");
 
 	if (isapnp_map(sc)) {
-		aprint_error_dev(self, "unable to map PnP register\n");
+		printf("%s: unable to map PnP register\n",
+		    sc->sc_dev.dv_xname);
 		return;
 	}
 
@@ -923,16 +960,14 @@ isapnp_attach(device_t parent, device_t self, void *aux)
 #else
 	isapnp_callback(self);
 #endif
-
-	if (!pmf_device_register(self, NULL, NULL))
-		aprint_error_dev(self, "couldn't establish power handler\n");
 }
 
 /* isapnp_callback
  *	Find and attach PnP cards.
  */
 void
-isapnp_callback(device_t self)
+isapnp_callback(self)
+	struct device *self;
 {
 	struct isapnp_softc *sc = device_private(self);
 	struct isapnp_attach_args *ipa, *lpa;
@@ -942,12 +977,12 @@ isapnp_callback(device_t self)
 	 * Look for cards.  If none are found, we say so and just return.
 	 */
 	if (isapnp_find(sc, 1) == 0) {
-		aprint_verbose_dev(sc->sc_dev,
-		    "no ISA Plug 'n Play devices found\n");
+		printf("%s: no ISA Plug 'n Play devices found\n",
+		    sc->sc_dev.dv_xname);
 		return;
 	}
 
-	aprint_verbose_dev(sc->sc_dev, "read port 0x%x\n", sc->sc_read_port);
+	printf("%s: read port 0x%x\n", sc->sc_dev.dv_xname, sc->sc_read_port);
 
 	/*
 	 * Now configure all of the cards.
@@ -974,12 +1009,12 @@ isapnp_callback(device_t self)
 #endif
 
 			DPRINTF(("%s: configuring <%s, %s, %s, %s>\n",
-			    device_xname(sc->sc_dev),
+			    sc->sc_dev.dv_xname,
 			    lpa->ipa_devident, lpa->ipa_devlogic,
 			    lpa->ipa_devcompat, lpa->ipa_devclass));
 			if (lpa->ipa_pref == ISAPNP_DEP_CONFLICTING) {
-				aprint_verbose_dev(sc->sc_dev,
-				    "<%s, %s, %s, %s> ignored; %s\n",
+				printf("%s: <%s, %s, %s, %s> ignored; %s\n",
+				    sc->sc_dev.dv_xname,
 				    lpa->ipa_devident, lpa->ipa_devlogic,
 				    lpa->ipa_devcompat, lpa->ipa_devclass,
 				    "resource conflict");
@@ -999,7 +1034,7 @@ isapnp_callback(device_t self)
 				isapnp_write_reg(sc, ISAPNP_ACTIVATE, 0);
 #else
 			isapnp_print(lpa, NULL);
-			aprint_verbose("\n");
+			printf("\n");
 #endif
 			ISAPNP_FREE(lpa);
 		}

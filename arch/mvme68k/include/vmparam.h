@@ -1,4 +1,4 @@
-/*	$NetBSD: vmparam.h,v 1.29 2009/03/06 20:31:50 joerg Exp $	*/
+/*	$NetBSD: vmparam.h,v 1.27 2005/12/11 12:18:17 christos Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1990, 1993
@@ -92,6 +92,16 @@
 #define	PAGE_MASK	(PAGE_SIZE - 1)
 
 /*
+ * Need a small pager map for the benefit of low-memory models.
+ * To avoid using a needlessly small value on larger memory models,
+ * this is calculated at runtime.
+ */
+#ifndef PAGER_MAP_SIZE
+extern int mvme68k_pager_map_size;
+#define PAGER_MAP_SIZE	((vsize_t) mvme68k_pager_map_size)
+#endif
+
+/*
  * USRSTACK is the top (end) of the user stack.
  *
  * NOTE: the ONLY reason that HIGHPAGES is 0x100 instead of UPAGES (3)
@@ -136,6 +146,14 @@
  */
 #ifndef USRIOSIZE
 #define USRIOSIZE	(1 * NPTEPG)	/* 4mb */
+#endif
+
+/*
+ * PTEs for system V style shared memory.
+ * This is basically slop for kmempt which we actually allocate (malloc) from.
+ */
+#ifndef SHMMAXPGS
+#define SHMMAXPGS	1024		/* 4mb */
 #endif
 
 /*

@@ -1,4 +1,4 @@
-/*	$NetBSD: linux_machdep.c,v 1.34 2008/10/26 20:25:49 christos Exp $ */
+/*	$NetBSD: linux_machdep.c,v 1.15 2006/09/20 09:54:55 manu Exp $ */
 
 /*-
  * Copyright (c) 2005 Emmanuel Dreyfus, all rights reserved.
@@ -33,7 +33,7 @@
 
 #include <sys/cdefs.h>
 
-__KERNEL_RCSID(0, "$NetBSD: linux_machdep.c,v 1.34 2008/10/26 20:25:49 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: linux_machdep.c,v 1.15 2006/09/20 09:54:55 manu Exp $");
 
 #include <sys/param.h>
 #include <sys/types.h>
@@ -45,7 +45,6 @@ __KERNEL_RCSID(0, "$NetBSD: linux_machdep.c,v 1.34 2008/10/26 20:25:49 christos 
 #include <sys/user.h>
 #include <sys/wait.h>
 #include <sys/ucontext.h>
-#include <sys/conf.h>
 
 #include <machine/reg.h>
 #include <machine/pcb.h>
@@ -53,19 +52,6 @@ __KERNEL_RCSID(0, "$NetBSD: linux_machdep.c,v 1.34 2008/10/26 20:25:49 christos 
 #include <machine/mcontext.h>
 #include <machine/specialreg.h>
 #include <machine/vmparam.h>
-#include <machine/cpufunc.h>
-
-/* 
- * To see whether wscons is configured (for virtual console ioctl calls).
- */
-#if defined(_KERNEL_OPT)
-#include "wsdisplay.h"
-#endif
-#if (NWSDISPLAY > 0)
-#include <dev/wscons/wsconsio.h>
-#include <dev/wscons/wsdisplay_usl_io.h>
-#endif
-
 
 #include <compat/linux/common/linux_signal.h>
 #include <compat/linux/common/linux_errno.h>
@@ -73,15 +59,16 @@ __KERNEL_RCSID(0, "$NetBSD: linux_machdep.c,v 1.34 2008/10/26 20:25:49 christos 
 #include <compat/linux/common/linux_ioctl.h>
 #include <compat/linux/common/linux_prctl.h>
 #include <compat/linux/common/linux_machdep.h>
-#include <compat/linux/common/linux_ipc.h>
-#include <compat/linux/common/linux_sem.h>
 #include <compat/linux/linux_syscall.h>
 #include <compat/linux/linux_syscallargs.h>
 
 static void linux_buildcontext(struct lwp *, void *, void *);
 
 void
-linux_setregs(struct lwp *l, struct exec_package *epp, u_long stack)
+linux_setregs(l, epp, stack) 
+        struct lwp *l;
+	struct exec_package *epp;
+	u_long stack; 
 {
 	struct pcb *pcb = &l->l_addr->u_pcb;
 	struct trapframe *tf;
@@ -98,7 +85,7 @@ linux_setregs(struct lwp *l, struct exec_package *epp, u_long stack)
 	pcb->pcb_fs = 0;
 	pcb->pcb_gs = 0;
 
-	l->l_proc->p_flag &= ~PK_32;
+	l->l_proc->p_flag &= ~P_32;
 
 	tf = l->l_md.md_regs;
 	tf->tf_rax = 0;
@@ -129,13 +116,15 @@ linux_setregs(struct lwp *l, struct exec_package *epp, u_long stack)
 	return;
 }
 
-void
-linux_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
+void    
+linux_sendsig(ksi, mask)
+	const ksiginfo_t *ksi;
+	const sigset_t *mask;
 {
 	struct lwp *l = curlwp;
 	struct proc *p = l->l_proc;
 	struct sigacts *ps = p->p_sigacts;
-	int onstack, error;
+	int onstack;
 	int sig = ksi->ksi_signo;
 	struct linux_rt_sigframe *sfp, sigframe;
 	struct linux__fpstate *fpsp, fpstate;
@@ -144,18 +133,20 @@ linux_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
 	sig_t catcher = SIGACTION(p, sig).sa_handler;
 	linux_sigset_t lmask;
 	char *sp;
+	int error;
 
 	/* Do we need to jump onto the signal stack? */
 	onstack =
-	    (l->l_sigstk.ss_flags & (SS_DISABLE | SS_ONSTACK)) == 0 &&
+	    (p->p_sigctx.ps_sigstk.ss_flags & (SS_DISABLE | SS_ONSTACK)) == 0 &&
 	    (SIGACTION(p, sig).sa_flags & SA_ONSTACK) != 0;
 	
 	/* Allocate space for the signal handler context. */
 	if (onstack)
-		sp = ((char *)l->l_sigstk.ss_sp +
-		    l->l_sigstk.ss_size);
+		sp = ((caddr_t)p->p_sigctx.ps_sigstk.ss_sp +
+		    p->p_sigctx.ps_sigstk.ss_size);
 	else
-		sp = (char *)tf->tf_rsp - 128;
+		sp = (caddr_t)tf->tf_rsp - 128;
+
 
 	/* 
 	 * Save FPU state, if any 
@@ -164,8 +155,30 @@ linux_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
 		sp = (char *)
 		    (((long)sp - sizeof(struct linux__fpstate)) & ~0xfUL);
 		fpsp = (struct linux__fpstate *)sp;
-	} else
+
+		(void)process_read_fpregs(l, &fpregs);
+		bzero(&fpstate, sizeof(fpstate));
+
+		fpstate.cwd = fpregs.fp_fcw;
+		fpstate.swd = fpregs.fp_fsw;
+		fpstate.twd = fpregs.fp_ftw;
+		fpstate.fop = fpregs.fp_fop;
+		fpstate.rip = fpregs.fp_rip;
+		fpstate.rdp = fpregs.fp_rdp;
+		fpstate.mxcsr = fpregs.fp_mxcsr;
+		fpstate.mxcsr_mask = fpregs.fp_mxcsr_mask;
+		memcpy(&fpstate.st_space, &fpregs.fp_st, 
+		    sizeof(fpstate.st_space));
+		memcpy(&fpstate.xmm_space, &fpregs.fp_xmm, 
+		    sizeof(fpstate.xmm_space));
+
+		if ((error = copyout(&fpstate, fpsp, sizeof(fpstate))) != 0) {
+			sigexit(l, SIGILL);
+			return;
+		}	
+	} else {
 		fpsp = NULL;
+	}
 
 	/* 
 	 * Populate the rt_sigframe 
@@ -188,12 +201,12 @@ linux_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
 	sigframe.uc.luc_link = NULL;
 
 	/* This is used regardless of SA_ONSTACK in Linux */
-	sigframe.uc.luc_stack.ss_sp = l->l_sigstk.ss_sp;
-	sigframe.uc.luc_stack.ss_size = l->l_sigstk.ss_size;
+	sigframe.uc.luc_stack.ss_sp = p->p_sigctx.ps_sigstk.ss_sp;
+	sigframe.uc.luc_stack.ss_size = p->p_sigctx.ps_sigstk.ss_size;
 	sigframe.uc.luc_stack.ss_flags = 0;
-	if (l->l_sigstk.ss_flags & SS_ONSTACK)
+	if (p->p_sigctx.ps_sigstk.ss_flags & SS_ONSTACK)
 		sigframe.uc.luc_stack.ss_flags |= LINUX_SS_ONSTACK;
-	if (l->l_sigstk.ss_flags & SS_DISABLE)
+	if (p->p_sigctx.ps_sigstk.ss_flags & SS_DISABLE)
 		sigframe.uc.luc_stack.ss_flags |= LINUX_SS_DISABLE;
 
 	sigframe.uc.luc_mcontext.r8 = tf->tf_r8;
@@ -209,7 +222,6 @@ linux_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
 	sigframe.uc.luc_mcontext.rbp = tf->tf_rbp;
 	sigframe.uc.luc_mcontext.rbx = tf->tf_rbx;
 	sigframe.uc.luc_mcontext.rdx = tf->tf_rdx;
-	sigframe.uc.luc_mcontext.rax = tf->tf_rax;
 	sigframe.uc.luc_mcontext.rcx = tf->tf_rcx;
 	sigframe.uc.luc_mcontext.rsp = tf->tf_rsp;
 	sigframe.uc.luc_mcontext.rip = tf->tf_rip;
@@ -230,7 +242,7 @@ linux_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
 	 */
 	sigframe.info.lsi_signo = native_to_linux_signo[sig];
 	sigframe.info.lsi_errno = native_to_linux_errno[ksi->ksi_errno];
-	sigframe.info.lsi_code = native_to_linux_si_code(ksi->ksi_code);
+	sigframe.info.lsi_code = ksi->ksi_code;
 
 	/* XXX This is a rought conversion, taken from i386 code */
 	switch (sigframe.info.lsi_signo) {
@@ -271,41 +283,11 @@ linux_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
 		if ((sigframe.info.lsi_signo == LINUX_SIGALRM) ||
 		    (sigframe.info.lsi_signo >= LINUX_SIGRTMIN))
 			sigframe.info._sifields._timer._sigval.sival_ptr =
-			     ksi->ksi_value.sival_ptr;
+			     ksi->ksi_sigval.sival_ptr;
 		break;
 	}
 
-	sendsig_reset(l, sig);
-	mutex_exit(p->p_lock);
-	error = 0;
-
-	/* 
-	 * Save FPU state, if any 
-	 */
-	if (fpsp != NULL) {
-		(void)process_read_fpregs(l, &fpregs);
-		bzero(&fpstate, sizeof(fpstate));
-		fpstate.cwd = fpregs.fp_fcw;
-		fpstate.swd = fpregs.fp_fsw;
-		fpstate.twd = fpregs.fp_ftw;
-		fpstate.fop = fpregs.fp_fop;
-		fpstate.rip = fpregs.fp_rip;
-		fpstate.rdp = fpregs.fp_rdp;
-		fpstate.mxcsr = fpregs.fp_mxcsr;
-		fpstate.mxcsr_mask = fpregs.fp_mxcsr_mask;
-		memcpy(&fpstate.st_space, &fpregs.fp_st, 
-		    sizeof(fpstate.st_space));
-		memcpy(&fpstate.xmm_space, &fpregs.fp_xmm, 
-		    sizeof(fpstate.xmm_space));
-		error = copyout(&fpstate, fpsp, sizeof(fpstate));
-	}
-
-	if (error == 0)
-		error = copyout(&sigframe, sp, sizeof(sigframe));
-
-	mutex_enter(p->p_lock);
-
-	if (error != 0) {
+	if ((error = copyout(&sigframe, sp, sizeof(sigframe))) != 0) {
 		sigexit(l, SIGILL);
 		return;
 	}	
@@ -320,63 +302,63 @@ linux_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
 	 * Remember we use signal stack
 	 */
 	if (onstack)
-		l->l_sigstk.ss_flags |= SS_ONSTACK;
+		p->p_sigctx.ps_sigstk.ss_flags |= SS_ONSTACK;
 	return;
 }
 
-int
-linux_sys_modify_ldt(struct lwp *l, const struct linux_sys_modify_ldt_args *v, register_t *retval)
-{
+int     
+linux_sys_modify_ldt(l, v, retval)
+        struct lwp *l;
+        void *v;
+        register_t *retval;
+{ 
 	printf("linux_sys_modify_ldt\n");
 	return 0;
 }
 
-int
-linux_sys_iopl(struct lwp *l, const struct linux_sys_iopl_args *v, register_t *retval)
-{
+int     
+linux_sys_iopl(l, v, retval)
+        struct lwp *l;
+        void *v;
+        register_t *retval;
+{  
 	return 0;
 }
 
-int
-linux_sys_ioperm(struct lwp *l, const struct linux_sys_ioperm_args *v, register_t *retval)
-{
+int     
+linux_sys_ioperm(l, v, retval)
+        struct lwp *l;
+        void *v;
+        register_t *retval;
+{    
 	return 0;
 }
 
 dev_t
-linux_fakedev(dev_t dev, int raw)
+linux_fakedev(dev, raw)
+        dev_t dev;
+	int raw;
 {
-
-       extern const struct cdevsw ptc_cdevsw, pts_cdevsw;
-       const struct cdevsw *cd = cdevsw_lookup(dev);
-
-       if (raw) {
-#if (NWSDISPLAY > 0)
-	       extern const struct cdevsw wsdisplay_cdevsw;
-	       if (cd == &wsdisplay_cdevsw)
-		       return makedev(LINUX_CONS_MAJOR, (minor(dev) + 1));
-#endif
-       }
-
-       if (cd == &ptc_cdevsw)
-	       return makedev(LINUX_PTC_MAJOR, minor(dev));
-       if (cd == &pts_cdevsw)
-	       return makedev(LINUX_PTS_MAJOR, minor(dev));
-
 	return ((minor(dev) & 0xff) | ((major(dev) & 0xfff) << 8)
 	    | (((unsigned long long int) (minor(dev) & ~0xff)) << 12)
 	    | (((unsigned long long int) (major(dev) & ~0xfff)) << 32));
 }
 
-int
-linux_machdepioctl(struct lwp *l, const struct linux_sys_ioctl_args *v, register_t *retval)
-{
+int  
+linux_machdepioctl(l, v, retval)
+        struct lwp *l;
+        void *v;
+        register_t *retval;
+{  
 	return 0;
 }
 
 int
-linux_sys_rt_sigreturn(struct lwp *l, const void *v, register_t *retval)
-{
+linux_sys_rt_sigreturn(l, v, retval)
+        struct lwp *l;
+        void *v;
+        register_t *retval;
+{  
 	struct linux_ucontext *luctx;
 	struct trapframe *tf = l->l_md.md_regs;
 	struct linux_sigcontext *lsigctx;
@@ -384,12 +366,11 @@ linux_sys_rt_sigreturn(struct lwp *l, const void *v, register_t *retval)
 	struct linux_rt_sigframe frame, *fp;
 	ucontext_t uctx;
 	mcontext_t *mctx;
-	struct fxsave64 *fxarea;
+	struct fxsave64 *fxsave;
 	int error;
 
 	fp = (struct linux_rt_sigframe *)(tf->tf_rsp - 8);
 	if ((error = copyin(fp, &frame, sizeof(frame))) != 0) {
-		mutex_enter(l->l_proc->p_lock);
 		sigexit(l, SIGILL);
 		return error;
 	}
@@ -398,7 +379,7 @@ linux_sys_rt_sigreturn(struct lwp *l, const void *v, register_t *retval)
 
 	bzero(&uctx, sizeof(uctx));
 	mctx = (mcontext_t *)&uctx.uc_mcontext;
-	fxarea = (struct fxsave64 *)&mctx->__fpregs;
+	fxsave = (struct fxsave64 *)&mctx->__fpregs;
 
 	/* 
 	 * Set the flags. Linux always have CPU, stack and signal state,
@@ -429,11 +410,11 @@ linux_sys_rt_sigreturn(struct lwp *l, const void *v, register_t *retval)
 	mctx->__gregs[_REG_RSI] = lsigctx->rsi;
 	mctx->__gregs[_REG_RBP] = lsigctx->rbp;
 	mctx->__gregs[_REG_RBX] = lsigctx->rbx;
-	mctx->__gregs[_REG_RAX] = lsigctx->rax;
+	mctx->__gregs[_REG_RAX] = tf->tf_rax;
 	mctx->__gregs[_REG_RDX] = lsigctx->rdx;
 	mctx->__gregs[_REG_RCX] = lsigctx->rcx;
 	mctx->__gregs[_REG_RIP] = lsigctx->rip;
-	mctx->__gregs[_REG_RFLAGS] = lsigctx->eflags;
+	mctx->__gregs[_REG_RFL] = lsigctx->eflags;
 	mctx->__gregs[_REG_CS] = lsigctx->cs;
 	mctx->__gregs[_REG_GS] = lsigctx->gs;
 	mctx->__gregs[_REG_FS] = lsigctx->fs;
@@ -441,7 +422,7 @@ linux_sys_rt_sigreturn(struct lwp *l, const void *v, register_t *retval)
 	mctx->__gregs[_REG_TRAPNO] = lsigctx->trapno;
 	mctx->__gregs[_REG_ES] = tf->tf_es;
 	mctx->__gregs[_REG_DS] = tf->tf_ds;
-	mctx->__gregs[_REG_RSP] = lsigctx->rsp; /* XXX */
+	mctx->__gregs[_REG_URSP] = lsigctx->rsp; /* XXX */
 	mctx->__gregs[_REG_SS] = tf->tf_ss;
 
 	/*
@@ -450,34 +431,33 @@ linux_sys_rt_sigreturn(struct lwp *l, const void *v, register_t *retval)
 	if (lsigctx->fpstate != NULL) {
 		error = copyin(lsigctx->fpstate, &fpstate, sizeof(fpstate));
 		if (error != 0) {
-			mutex_enter(l->l_proc->p_lock);
 			sigexit(l, SIGILL);
 			return error;
 		}
 
-		fxarea->fx_fcw = fpstate.cwd;
-		fxarea->fx_fsw = fpstate.swd;
-		fxarea->fx_ftw = fpstate.twd;
-		fxarea->fx_fop = fpstate.fop;
-		fxarea->fx_rip = fpstate.rip;
-		fxarea->fx_rdp = fpstate.rdp;
-		fxarea->fx_mxcsr = fpstate.mxcsr;
-		fxarea->fx_mxcsr_mask = fpstate.mxcsr_mask;
-		memcpy(&fxarea->fx_st, &fpstate.st_space, 
-		    sizeof(fxarea->fx_st));
-		memcpy(&fxarea->fx_xmm, &fpstate.xmm_space, 
-		    sizeof(fxarea->fx_xmm));
+		fxsave->fx_fcw = fpstate.cwd;
+		fxsave->fx_fsw = fpstate.swd;
+		fxsave->fx_ftw = fpstate.twd;
+		fxsave->fx_fop = fpstate.fop;
+		fxsave->fx_rip = fpstate.rip;
+		fxsave->fx_rdp = fpstate.rdp;
+		fxsave->fx_mxcsr = fpstate.mxcsr;
+		fxsave->fx_mxcsr_mask = fpstate.mxcsr_mask;
+		memcpy(&fxsave->fx_st, &fpstate.st_space, 
+		    sizeof(fxsave->fx_st));
+		memcpy(&fxsave->fx_xmm, &fpstate.xmm_space, 
+		    sizeof(fxsave->fx_xmm));
 	}
 
 	/*
 	 * And the stack
 	 */
 	uctx.uc_stack.ss_flags = 0;
-	if (luctx->luc_stack.ss_flags & LINUX_SS_ONSTACK)
-		uctx.uc_stack.ss_flags |= SS_ONSTACK;
+	if (luctx->luc_stack.ss_flags & LINUX_SS_ONSTACK);
+		uctx.uc_stack.ss_flags = SS_ONSTACK;
 
-	if (luctx->luc_stack.ss_flags & LINUX_SS_DISABLE)
-		uctx.uc_stack.ss_flags |= SS_DISABLE;
+	if (luctx->luc_stack.ss_flags & LINUX_SS_DISABLE);
+		uctx.uc_stack.ss_flags = SS_DISABLE;
 
 	uctx.uc_stack.ss_sp = luctx->luc_stack.ss_sp;
 	uctx.uc_stack.ss_size = luctx->luc_stack.ss_size;
@@ -485,22 +465,19 @@ linux_sys_rt_sigreturn(struct lwp *l, const void *v, register_t *retval)
 	/*
 	 * And let setucontext deal with that.
 	 */
-	mutex_enter(l->l_proc->p_lock);
-	error = setucontext(l, &uctx);
-	mutex_exit(l->l_proc->p_lock);
-	if (error)
-		return error;
-
-	return EJUSTRETURN;
+	return setucontext(l, &uctx);
 }
 
 int
-linux_sys_arch_prctl(struct lwp *l, const struct linux_sys_arch_prctl_args *uap, register_t *retval)
+linux_sys_arch_prctl(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct linux_sys_arch_prctl_args /* {
 		syscallarg(int) code;
 		syscallarg(unsigned long) addr;
-	} */
+	} */ *uap = v;
 	struct pcb *pcb = &l->l_addr->u_pcb;
 	struct trapframe *tf = l->l_md.md_regs;
 	int error;
@@ -567,8 +544,8 @@ linux_sys_arch_prctl(struct lwp *l, const struct linux_sys_arch_prctl_args *uap,
 const int linux_vsyscall_to_syscall[] = {
 	LINUX_SYS_gettimeofday,
 	LINUX_SYS_time,
-	LINUX_SYS_nosys,	/* nosys */
-	LINUX_SYS_nosys,	/* nosys */
+	LINUX_SYS_nosys,
+	LINUX_SYS_nosys,
 };
 
 int
@@ -629,13 +606,14 @@ linux_buildcontext(struct lwp *l, void *catcher, void *f)
 	tf->tf_ds = GSEL(GUDATA_SEL, SEL_UPL);
 	tf->tf_rip = (u_int64_t)catcher;
 	tf->tf_cs = GSEL(GUCODE_SEL, SEL_UPL);
-	tf->tf_rflags &= ~PSL_CLEARSIG;
+	tf->tf_rflags &= ~(PSL_T|PSL_VM|PSL_AC);
 	tf->tf_rsp = (u_int64_t)f;
 	tf->tf_ss = GSEL(GUDATA_SEL, SEL_UPL);
 }
 
 void *
-linux_get_newtls(struct lwp *l)
+linux_get_newtls(l)
+	struct lwp *l;
 {
 	struct trapframe *tf = l->l_md.md_regs;
 
@@ -643,7 +621,9 @@ linux_get_newtls(struct lwp *l)
 }
 
 int
-linux_set_newtls(struct lwp *l, void *tls)
+linux_set_newtls(l, tls)
+	struct lwp *l;
+	void *tls;
 {
 	struct linux_sys_arch_prctl_args cup;
 	register_t retval;

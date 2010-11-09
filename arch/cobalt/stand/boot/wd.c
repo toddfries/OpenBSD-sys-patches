@@ -1,4 +1,4 @@
-/*	$NetBSD: wd.c,v 1.10 2008/04/28 20:23:16 martin Exp $	*/
+/*	$NetBSD: wd.c,v 1.5 2005/12/11 12:17:06 christos Exp $	*/
 
 /*-
  * Copyright (c) 2003 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -33,11 +40,9 @@
 #include <sys/stdint.h>
 
 #include <lib/libsa/stand.h>
-#include <lib/libkern/libkern.h>
 
 #include <machine/param.h>
 #include <machine/stdarg.h>
-#include <dev/raidframe/raidframevar.h>		/* For RF_PROTECTED_SECTORS */
 
 #include "boot.h"
 #include "wdvar.h"
@@ -50,13 +55,14 @@ static void wdgetdefaultlabel(struct wd_softc *wd, struct disklabel *lp);
  * Get drive parameters through 'device identify' command.
  */
 int
-wd_get_params(struct wd_softc *wd)
+wd_get_params(wd)
+	struct wd_softc *wd;
 {
 	int error;
-	uint8_t buf[DEV_BSIZE];
+	unsigned char buf[DEV_BSIZE];
 
-	if ((error = wdc_exec_identify(wd, buf)) != 0)
-		return error;
+	if ( (error = wdc_exec_identify(wd, buf)) != 0)
+		return (error);
 
 	wd->sc_params = *(struct ataparams *)buf;
 
@@ -74,16 +80,17 @@ wd_get_params(struct wd_softc *wd)
 		wd->sc_flags |= WDF_LBA;
 	}
 
-	return 0;
+	return (0);
 }
 
 /*
  * Initialize disk label to the default value.
  */
 void
-wdgetdefaultlabel(struct wd_softc *wd, struct disklabel *lp)
+wdgetdefaultlabel(wd, lp)
+	struct wd_softc *wd;
+	struct disklabel *lp;
 {
-
 	memset(lp, 0, sizeof(struct disklabel));
 
 	lp->d_secsize = DEV_BSIZE;
@@ -122,13 +129,14 @@ wdgetdefaultlabel(struct wd_softc *wd, struct disklabel *lp)
  * Read disk label from the device.
  */
 int
-wdgetdisklabel(struct wd_softc *wd)
+wdgetdisklabel(wd)
+	struct wd_softc *wd;
 {
 	char *msg;
 	int sector;
 	size_t rsize;
 	struct disklabel *lp;
-	uint8_t buf[DEV_BSIZE];
+	unsigned char buf[DEV_BSIZE];
 
 	wdgetdefaultlabel(wd, &wd->sc_label);
 
@@ -139,7 +147,7 @@ wdgetdisklabel(struct wd_softc *wd)
 	if (wdstrategy(wd, F_READ, MBR_BBSECTOR, DEV_BSIZE, buf, &rsize))
 		return EOFFSET;
 
-	if (*(uint16_t *)&buf[MBR_MAGIC_OFFSET] == MBR_MAGIC) {
+	if (*(u_int16_t *)&buf[MBR_MAGIC_OFFSET] == MBR_MAGIC) {
 		int i;
 		struct mbr_partition *mp;
 
@@ -157,30 +165,30 @@ wdgetdisklabel(struct wd_softc *wd)
 	}
 
 	if (wdstrategy(wd, F_READ, sector + LABELSECTOR, DEV_BSIZE,
-	    buf, &rsize))
+				buf, &rsize))
 		return EOFFSET;
 
-	if ((msg = getdisklabel(buf + LABELOFFSET, &wd->sc_label)))
+	if ( (msg = getdisklabel(buf + LABELOFFSET, &wd->sc_label)))
 		printf("wd%d: getdisklabel: %s\n", wd->sc_unit, msg);
 
 	lp = &wd->sc_label;
 
 	/* check partition */
 	if ((wd->sc_part >= lp->d_npartitions) ||
-	    (lp->d_partitions[wd->sc_part].p_fstype == FS_UNUSED)) {
+			(lp->d_partitions[wd->sc_part].p_fstype == FS_UNUSED)) {
 		DPRINTF(("illegal partition\n"));
-		return EPART;
+		return (EPART);
 	}
 
 	DPRINTF(("label info: d_secsize %d, d_nsectors %d, d_ncylinders %d,"
-	    "d_ntracks %d, d_secpercyl %d\n",
-	    wd->sc_label.d_secsize,
-	    wd->sc_label.d_nsectors,
-	    wd->sc_label.d_ncylinders,
-	    wd->sc_label.d_ntracks,
-	    wd->sc_label.d_secpercyl));
+				"d_ntracks %d, d_secpercyl %d\n",
+				wd->sc_label.d_secsize,
+				wd->sc_label.d_nsectors,
+				wd->sc_label.d_ncylinders,
+				wd->sc_label.d_ntracks,
+				wd->sc_label.d_secpercyl));
 
-	return 0;
+	return (0);
 }
 
 /*
@@ -213,14 +221,14 @@ wdopen(struct open_file *f, ...)
 	wd->sc_part = part;
 	wd->sc_unit = unit;
 
-	if ((error = wd_get_params(wd)) != 0)
-		return error;
+	if ( (error = wd_get_params(wd)) != 0)
+		return (error);
 
-	if ((error = wdgetdisklabel(wd)) != 0)
+	if ( (error = wdgetdisklabel(wd)) != 0)
 		return error;
 
 	f->f_devdata = wd;
-	return 0;
+	return (0);
 }
 
 /*
@@ -229,7 +237,6 @@ wdopen(struct open_file *f, ...)
 int
 wdclose(struct open_file *f)
 {
-
 	return 0;
 }
 
@@ -237,38 +244,36 @@ wdclose(struct open_file *f)
  * Read some data.
  */
 int
-wdstrategy(void *f, int rw, daddr_t dblk, size_t size, void *p, size_t *rsize)
+wdstrategy(f, rw, dblk, size, buf, rsize)
+	void *f;
+	int rw;
+	daddr_t dblk;
+	size_t size;
+	void *buf;
+	size_t *rsize;
 {
 	int i, nsect;
 	daddr_t blkno;
-	struct wd_softc *wd;
-	struct partition *pp;
-	uint8_t *buf;
+	struct wd_softc *wd = f;
 
 	if (size == 0)
-		return 0;
+		return (0);
     
 	if (rw != F_READ)
 		return EOPNOTSUPP;
 
-	buf = p;
-	wd = f;
-	pp = &wd->sc_label.d_partitions[wd->sc_part];
-
 	nsect = howmany(size, wd->sc_label.d_secsize);
-	blkno = dblk + pp->p_offset;
-	if (pp->p_fstype == FS_RAID)
-		blkno += RF_PROTECTED_SECTORS;
+	blkno = dblk + wd->sc_label.d_partitions[wd->sc_part].p_offset;
 
 	for (i = 0; i < nsect; i++, blkno++) {
 		int error;
 
-		if ((error = wdc_exec_read(wd, WDCC_READ, blkno, buf)) != 0)
-			return error;
+		if ( (error = wdc_exec_read(wd, WDCC_READ, blkno, buf)) != 0)
+			return (error);
 
 		buf += wd->sc_label.d_secsize;
 	}
 
 	*rsize = size;
-	return 0;
+	return (0);
 }

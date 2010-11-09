@@ -1,4 +1,4 @@
-/*	$NetBSD: boot.h,v 1.12 2008/05/29 14:25:01 tsutsui Exp $	*/
+/*	$NetBSD: boot.h,v 1.3 2005/12/11 12:17:06 christos Exp $	*/
 
 /*-
  * Copyright (c) 2003 The NetBSD Foundation, Inc.
@@ -12,6 +12,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -41,15 +48,15 @@ extern char *kernelnames[];
 /*
  * com
  */
-int comspeed(long);
+int comspeed	__P((long));
 
 /*
  * console
  */
-char *cninit(int *, int *);
-int   cngetc(void);
-void  cnputc(int);
-int   cnscan(void);
+char* cninit	__P((int *, int *));
+int   cngetc	__P((void));
+void  cnputc	__P((int));
+int   cnscan	__P((void));
 
 /*
  * clock
@@ -59,47 +66,14 @@ void delay(int);
 /*
  * wd
  */
-int wdstrategy(void *, int, daddr_t, size_t, void *, size_t *);
-int wdopen(struct open_file *, ...);
-int wdclose(struct open_file *);
-
-/*
- * tlp
- */
-void *tlp_init(void *); 
-int tlp_send(void *, char *, u_int);
-int tlp_recv(void *, char *, u_int, u_int);
-
-extern struct netif_driver ether_tlp_driver;
+int wdstrategy	__P((void *, int, daddr_t, size_t, void *, size_t *));
+int wdopen	__P((struct open_file *, ...));
+int wdclose	__P((struct open_file *));
 
 /*
  * devopen
  */
-int devparse(const char *, int *, uint8_t *, uint8_t *, const char **);
+int devparse (const char *fname, int *dev, u_int8_t *unit,
+			u_int8_t *part, const char **file);
 
-/*
- * tgetc
- */
 int tgets(char *);
-
-/*
- * cache
- */
-#define CACHELINESIZE	32
-
-void pdcache_wb(uint32_t, u_int);
-void pdcache_inv(uint32_t, u_int);
-void pdcache_wbinv(uint32_t, u_int);
-
-/*
- * pci
- */
-uint32_t pcicfgread(uint32_t, uint32_t);
-
-/*
- * lcd
- */
-void lcd_init(void);
-void lcd_banner(void);
-void lcd_loadfile(const char *);
-void lcd_failed(void);

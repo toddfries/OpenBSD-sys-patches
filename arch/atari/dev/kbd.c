@@ -1,4 +1,4 @@
-/*	$NetBSD: kbd.c,v 1.32 2009/01/17 05:23:28 tsutsui Exp $	*/
+/*	$NetBSD: kbd.c,v 1.29 2005/12/11 12:16:54 christos Exp $	*/
 
 /*
  * Copyright (c) 1995 Leo Weppelman
@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kbd.c,v 1.32 2009/01/17 05:23:28 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kbd.c,v 1.29 2005/12/11 12:16:54 christos Exp $");
 
 #include "mouse.h"
 #include "ite.h"
@@ -138,7 +138,7 @@ const struct cdevsw kbd_cdevsw = {
 /* accessops */
 static int	kbd_enable(void *, int);
 static void	kbd_set_leds(void *, int);
-static int	kbd_ioctl(void *, u_long, void *, int, struct lwp *);
+static int	kbd_ioctl(void *, u_long, caddr_t, int, struct lwp *);
 
 /* console ops */
 static void	kbd_getc(void *, u_int *, int *);
@@ -299,7 +299,7 @@ kbdread(dev_t dev, struct uio *uio, int flags)
 }
 
 int
-kbdioctl(dev_t dev,u_long cmd,register void *data,int flag,struct lwp *l)
+kbdioctl(dev_t dev,u_long cmd,register caddr_t data,int flag,struct lwp *l)
 {
 	register struct kbd_softc *k = &kbd_softc;
 	struct kbdbell	*kb;
@@ -406,7 +406,7 @@ int sr;	/* sr at time of interrupt	*/
 			KBD->ac_cs = (kbd_softc.k_soft_cs &= ~A_TXINT);
 			kbd_softc.k_sendp    = NULL;
 			kbd_softc.k_send_cnt = 0;
-			wakeup((void *)&kbd_softc.k_send_cnt);
+			wakeup((caddr_t)&kbd_softc.k_send_cnt);
 		}
 	}
 
@@ -535,7 +535,7 @@ void	*junk1, *junk2;
 			}
 			fe->id    = KBD_SCANCODE(code);
 			fe->value = KBD_RELEASED(code) ? VKEY_UP : VKEY_DOWN;
-			firm_gettime(fe);
+			fe->time  = time;
 			k->k_events.ev_put = put;
 			EV_WAKEUP(&k->k_events);
 			splx(s);
@@ -689,7 +689,7 @@ int	len;
 	 * Make sure any privious write has ended...
 	 */
 	while (k->k_sendp != NULL)
-		tsleep((void *)&k->k_sendp, TTOPRI, "kbd_write1", 0);
+		tsleep((caddr_t)&k->k_sendp, TTOPRI, "kbd_write1", 0);
 
 	/*
 	 * If the KBD-acia is not currently busy, send the first
@@ -707,14 +707,14 @@ int	len;
 	if (len > 0) {
 		k->k_sendp    = cmd;
 		k->k_send_cnt = len;
-		tsleep((void *)&k->k_send_cnt, TTOPRI, "kbd_write2", 0);
+		tsleep((caddr_t)&k->k_send_cnt, TTOPRI, "kbd_write2", 0);
 	}
 	splx(sps);
 
 	/*
 	 * Wakeup all procs waiting for us.
 	 */
-	wakeup((void *)&k->k_sendp);
+	wakeup((caddr_t)&k->k_sendp);
 }
 
 /*
@@ -825,7 +825,7 @@ kbd_set_leds(void *c, int leds)
 }
 
 static int
-kbd_ioctl(void *c, u_long cmd, void *data, int flag, struct proc *p)
+kbd_ioctl(void *c, u_long cmd, caddr_t data, int flag, struct proc *p)
 {
 	struct wskbd_bell_data *kd;
 

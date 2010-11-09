@@ -1,4 +1,4 @@
-/*	$NetBSD: ahc_eisa.c,v 1.36 2008/04/06 08:54:43 cegger Exp $	*/
+/*	$NetBSD: ahc_eisa.c,v 1.34 2007/10/19 11:59:41 ad Exp $	*/
 
 /*
  * Product specific probe and attach routines for:
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ahc_eisa.c,v 1.36 2008/04/06 08:54:43 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ahc_eisa.c,v 1.34 2007/10/19 11:59:41 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -114,11 +114,11 @@ ahc_eisa_attach(struct device *parent, struct device *self, void *aux)
 
 	if (bus_space_map(iot, EISA_SLOT_ADDR(ea->ea_slot) +
 	    AHC_EISA_SLOT_OFFSET, AHC_EISA_IOSIZE, 0, &ioh)) {
-		aprint_error_dev(&ahc->sc_dev, "could not map I/O addresses");
+		printf("%s: could not map I/O addresses", ahc->sc_dev.dv_xname);
 		return;
 	}
 	if ((irq = ahc_aic77xx_irq(iot, ioh)) < 0) {
-		aprint_error_dev(&ahc->sc_dev, "ahc_aic77xx_irq failed!");
+		printf("%s: ahc_aic77xx_irq failed!", ahc->sc_dev.dv_xname);
 		goto free_io;
 	}
 
@@ -131,7 +131,7 @@ ahc_eisa_attach(struct device *parent, struct device *self, void *aux)
 		goto free_io;
 	}
 
-	ahc_set_name(ahc, device_xname(&ahc->sc_dev));
+	ahc_set_name(ahc, ahc->sc_dev.dv_xname);
 	ahc->parent_dmat = ea->ea_dmat;
 	ahc->chip = AHC_AIC7770|AHC_EISA;
 	ahc->features = AHC_AIC7770_FE;
@@ -150,8 +150,8 @@ ahc_eisa_attach(struct device *parent, struct device *self, void *aux)
 		goto free_io;
 
 	if (eisa_intr_map(ec, irq, &ih)) {
-		aprint_error_dev(&ahc->sc_dev, "couldn't map interrupt (%d)\n",
-		    irq);
+		printf("%s: couldn't map interrupt (%d)\n",
+		    ahc->sc_dev.dv_xname, irq);
 		goto free_io;
 	}
 
@@ -168,15 +168,15 @@ ahc_eisa_attach(struct device *parent, struct device *self, void *aux)
 	ahc->ih = eisa_intr_establish(ec, ih,
 	    intrtype, IPL_BIO, ahc_intr, ahc);
 	if (ahc->ih == NULL) {
-		aprint_error_dev(&ahc->sc_dev, "couldn't establish %s interrupt",
-		    intrtypestr);
+		printf("%s: couldn't establish %s interrupt",
+		    ahc->sc_dev.dv_xname, intrtypestr);
 		if (intrstr != NULL)
 			printf(" at %s", intrstr);
 		printf("\n");
 		goto free_io;
 	}
 	if (intrstr != NULL)
-		printf("%s: %s interrupting at %s\n", device_xname(&ahc->sc_dev),
+		printf("%s: %s interrupting at %s\n", ahc->sc_dev.dv_xname,
 		       intrtypestr, intrstr);
 
 	/*

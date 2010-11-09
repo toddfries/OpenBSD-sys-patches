@@ -1,4 +1,4 @@
-#	$NetBSD: MMTAROMNEW,v 1.41 2009/03/06 20:31:50 joerg Exp $
+#	$NetBSD: MMTAROMNEW,v 1.37 2006/09/22 09:32:26 uwe Exp $
 #
 #	GENERIC -- everything that's currently supported
 #
@@ -41,6 +41,9 @@ options 	HZ=10		# clock interrupt generates every 1/10 sec
 #options 	SYSVMSG		# System V-like message queues
 #options 	SYSVSEM		# System V-like semaphores
 #options 	SYSVSHM		# System V-like memory sharing
+#options 	SHMMAXPGS=1024	# 1024 pages is the default
+
+#options 	LKM		# loadable kernel modules
 
 options 	USERCONF	# userconf(4) support
 #options	PIPE_SOCKETPAIR	# smaller, but slower pipe(2)
@@ -64,6 +67,7 @@ options 	COMPAT_MMEYE_OLDLABEL	# old mmeye's disklabel support
 options		COMPAT_BSDPTY	# /dev/[pt]ty?? ptys.
 
 # Executable format options
+#options 	EXEC_ELF32	# 32-bit ELF executables (SVR4, Linux)
 options 	EXEC_COFF	# 32-bit COFF executables (sh-compiler)
 
 # File systems
@@ -196,7 +200,7 @@ ukphy*	at mii? phy ?			# generic unknown PHYs
 
 
 # Pull in optional local configuration
-cinclude "arch/mmeye/conf/GENERIC.local"
+include	"arch/mmeye/conf/GENERIC.local"
 
 
 # Pseudo-Devices

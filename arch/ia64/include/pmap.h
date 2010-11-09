@@ -14,6 +14,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -85,13 +92,15 @@ struct pmap {
 	TAILQ_ENTRY(pmap)	pm_list;	/* list of all pmaps */
 	TAILQ_HEAD(,pv_entry)	pm_pvlist;	/* list of mappings in pmap */
 	int			pm_count;	/* pmap reference count */
-	kmutex_t		pm_slock;	/* lock on pmap */
+	struct simplelock	pm_slock;	/* lock on pmap */
 	u_int32_t		pm_rid[5];	/* base RID for pmap */
 	int			pm_active;	/* active flag */
 	struct pmap_statistics	pm_stats;	/* pmap statistics */
 	unsigned long		pm_cpus;	/* mask of CPUs using pmap */
 
 };
+
+typedef struct pmap	*pmap_t;
 
 /*
  * For each vm_page_t, there is a list of all currently valid virtual
@@ -108,6 +117,10 @@ typedef struct pv_entry {
 #define	PGA_MODIFIED		0x01		/* modified */
 #define	PGA_REFERENCED		0x02		/* referenced */
 
+
+extern struct pmap	kernel_pmap_store;
+
+#define pmap_kernel()			(&kernel_pmap_store)
 
 #define	pmap_resident_count(pmap)	((pmap)->pm_stats.resident_count)
 #define	pmap_wired_count(pmap)		((pmap)->pm_stats.wired_count)
@@ -139,8 +152,8 @@ void pmap_bootstrap(void);
  * operations, locking the kernel pmap is not necessary.  Therefore,
  * it is not necessary to block interrupts when locking pmap strucutres.
  */
-#define	PMAP_LOCK(pmap)		mutex_enter(&(pmap)->pm_slock)
-#define	PMAP_UNLOCK(pmap)	mutex_exit(&(pmap)->pm_slock)
+#define	PMAP_LOCK(pmap)		simple_lock(&(pmap)->pm_slock)
+#define	PMAP_UNLOCK(pmap)	simple_unlock(&(pmap)->pm_slock)
 
 
 #define PMAP_VHPT_LOG2SIZE 16 

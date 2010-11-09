@@ -1,4 +1,4 @@
-/*	$NetBSD: pcb.h,v 1.15 2008/10/26 00:08:15 mrg Exp $	*/
+/*	$NetBSD: pcb.h,v 1.4 2005/12/11 12:16:25 christos Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -70,8 +77,6 @@
 #ifndef _AMD64_PCB_H_
 #define _AMD64_PCB_H_
 
-#ifdef __x86_64__
-
 #include <sys/signal.h>
 
 #include <machine/segments.h>
@@ -86,24 +91,32 @@
  * on a 16-byte boundary.
  */
 struct pcb {
-	int	  pcb_flags;
+	/*
+	 * XXXfvdl
+	 * It's overkill to have a TSS here, as it's only needed
+	 * for compatibility processes who use an I/O permission map.
+	 * The pcb fields below are not in the TSS anymore (and there's
+	 * not enough room in the TSS to store them all)
+	 * Should just make this a pointer and allocate.
+	 */
+	struct	x86_64_tss pcb_tss;
+	u_int64_t pcb_cr3;
+	u_int64_t pcb_rsp;
+	u_int64_t pcb_rbp;
+	u_int64_t pcb_usersp;
+	u_int64_t pcb_ldt_sel;
+	struct	savefpu pcb_savefpu;	/* floating point state */
+	int	pcb_cr0;		/* saved image of CR0 */
+	int	pcb_flags;
 #define	PCB_USER_LDT	0x01		/* has user-set LDT */
 #define PCB_GS64	0x02
 #define PCB_FS64	0x04
-	u_int	  pcb_cr0;		/* saved image of CR0 */
-	uint64_t pcb_rsp0;
-	uint64_t pcb_cr2;		/* page fault address (CR2) */
-	uint64_t pcb_cr3;
-	uint64_t pcb_rsp;
-	uint64_t pcb_rbp;
-	uint64_t pcb_usersp;
-	uint64_t pcb_ldt_sel;
-	struct	savefpu pcb_savefpu __aligned(16); /* floating point state */
-	void     *pcb_onfault;		/* copyin/out fault recovery */
+	caddr_t	pcb_onfault;		/* copyin/out fault recovery */
 	struct cpu_info *pcb_fpcpu;	/* cpu holding our fp state. */
-	uint64_t  pcb_gs;
-	uint64_t  pcb_fs;
-	int pcb_iopl;
+	unsigned pcb_iomap[NIOPORTS/32];	/* I/O bitmap */
+	struct pmap *pcb_pmap;		/* back pointer to our pmap */
+	uint64_t pcb_gs;
+	uint64_t pcb_fs;
 };
 
 /*    
@@ -113,11 +126,5 @@ struct pcb {
 struct md_coredump {
 	long	md_pad[8];
 };    
-
-#else	/*	__x86_64__	*/
-
-#include <i386/pcb.h>
-
-#endif	/*	__x86_64__	*/
 
 #endif /* _AMD64_PCB_H_ */

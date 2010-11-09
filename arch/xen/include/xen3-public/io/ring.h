@@ -1,48 +1,14 @@
-/* $NetBSD: ring.h,v 1.11 2008/08/22 15:28:11 cegger Exp $ */
+/* $NetBSD: ring.h,v 1.6 2006/10/15 13:35:15 bouyer Exp $ */
 /******************************************************************************
  * ring.h
  * 
  * Shared producer-consumer ring macros.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to
- * deal in the Software without restriction, including without limitation the
- * rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
- * sell copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
  *
  * Tim Deegan and Andrew Warfield November 2004.
  */
 
 #ifndef __XEN_PUBLIC_IO_RING_H__
 #define __XEN_PUBLIC_IO_RING_H__
-
-#include "../xen-compat.h"
-
-#if __XEN_INTERFACE_VERSION__ < 0x00030208
-#if defined(__Linux__)
-#define xen_mb()  mb()
-#define xen_rmb() rmb()
-#define xen_wmb() wmb()
-#endif
-#endif
-
-#if defined(__NetBSD__)
-#define xen_mb()  x86_mfence()
-#define xen_rmb() x86_lfence()
-#define xen_wmb() x86_sfence()
-#endif
 
 typedef unsigned int RING_IDX;
 
@@ -60,7 +26,7 @@ typedef unsigned int RING_IDX;
  * power of two (so we can mask with (size-1) to loop around).
  */
 #define __RING_SIZE(_s, _sz) \
-    (__RD32(((_sz) - (long)(_s)->ring + (long)(_s)) / sizeof((_s)->ring[0])))
+    (__RD32(((_sz) - (long)&(_s)->ring + (long)(_s)) / sizeof((_s)->ring[0])))
 
 /*
  * Macros to make the correct C datatypes for a new kind of ring.
@@ -150,7 +116,7 @@ typedef struct __name##_back_ring __name##_back_ring_t
 #define SHARED_RING_INIT(_s) do {                                       \
     (_s)->req_prod  = (_s)->rsp_prod  = 0;                              \
     (_s)->req_event = (_s)->rsp_event = 1;                              \
-    (void)memset((_s)->pad, 0, sizeof((_s)->pad));                      \
+    memset((_s)->pad, 0, sizeof((_s)->pad));                            \
 } while(0)
 
 #define FRONT_RING_INIT(_r, _s, __size) do {                            \
@@ -186,35 +152,19 @@ typedef struct __name##_back_ring __name##_back_ring_t
 #define RING_SIZE(_r)                                                   \
     ((_r)->nr_ents)
 
-/* Number of free requests (for use on front side only). */
-#define RING_FREE_REQUESTS(_r)                                          \
-    (RING_SIZE(_r) - ((_r)->req_prod_pvt - (_r)->rsp_cons))
-
 /* Test if there is an empty slot available on the front ring.
  * (This is only meaningful from the front. )
  */
 #define RING_FULL(_r)                                                   \
-    (RING_FREE_REQUESTS(_r) == 0)
+    (((_r)->req_prod_pvt - (_r)->rsp_cons) == RING_SIZE(_r))
 
 /* Test if there are outstanding messages to be processed on a ring. */
 #define RING_HAS_UNCONSUMED_RESPONSES(_r)                               \
-    ((_r)->sring->rsp_prod - (_r)->rsp_cons)
+    ((_r)->rsp_cons != (_r)->sring->rsp_prod)
 
-#ifdef __GNUC__
-#define RING_HAS_UNCONSUMED_REQUESTS(_r) ({                             \
-    unsigned int req = (_r)->sring->req_prod - (_r)->req_cons;          \
-    unsigned int rsp = RING_SIZE(_r) -                                  \
-        ((_r)->req_cons - (_r)->rsp_prod_pvt);                          \
-    req < rsp ? req : rsp;                                              \
-})
-#else
-/* Same as above, but without the nice GCC ({ ... }) syntax. */
 #define RING_HAS_UNCONSUMED_REQUESTS(_r)                                \
-    ((((_r)->sring->req_prod - (_r)->req_cons) <                        \
-      (RING_SIZE(_r) - ((_r)->req_cons - (_r)->rsp_prod_pvt))) ?        \
-     ((_r)->sring->req_prod - (_r)->req_cons) :                         \
-     (RING_SIZE(_r) - ((_r)->req_cons - (_r)->rsp_prod_pvt)))
-#endif
+    (((_r)->req_cons != (_r)->sring->req_prod) &&                       \
+     (((_r)->req_cons - (_r)->rsp_prod_pvt) != RING_SIZE(_r)))
 
 /* Direct access to individual ring elements, by index. */
 #define RING_GET_REQUEST(_r, _idx)                                      \
@@ -228,12 +178,12 @@ typedef struct __name##_back_ring __name##_back_ring_t
     (((_cons) - (_r)->rsp_prod_pvt) >= RING_SIZE(_r))
 
 #define RING_PUSH_REQUESTS(_r) do {                                     \
-    xen_wmb(); /* back sees requests /before/ updated producer index */ \
+    x86_sfence(); /* back sees requests /before/ updated producer index */ \
     (_r)->sring->req_prod = (_r)->req_prod_pvt;                         \
 } while (0)
 
 #define RING_PUSH_RESPONSES(_r) do {                                    \
-    xen_wmb(); /* front sees resps /before/ updated producer index */   \
+    x86_sfence(); /* front sees responses /before/ updated producer index */ \
     (_r)->sring->rsp_prod = (_r)->rsp_prod_pvt;                         \
 } while (0)
 
@@ -270,9 +220,9 @@ typedef struct __name##_back_ring __name##_back_ring_t
 #define RING_PUSH_REQUESTS_AND_CHECK_NOTIFY(_r, _notify) do {           \
     RING_IDX __old = (_r)->sring->req_prod;                             \
     RING_IDX __new = (_r)->req_prod_pvt;                                \
-    xen_wmb(); /* back sees requests /before/ updated producer index */ \
+    x86_sfence(); /* back sees requests /before/ updated producer index */ \
     (_r)->sring->req_prod = __new;                                      \
-    xen_mb(); /* back sees new requests /before/ we check req_event */  \
+    x86_mfence(); /* back sees new requests /before/ we check req_event */ \
     (_notify) = ((RING_IDX)(__new - (_r)->sring->req_event) <           \
                  (RING_IDX)(__new - __old));                            \
 } while (0)
@@ -280,9 +230,9 @@ typedef struct __name##_back_ring __name##_back_ring_t
 #define RING_PUSH_RESPONSES_AND_CHECK_NOTIFY(_r, _notify) do {          \
     RING_IDX __old = (_r)->sring->rsp_prod;                             \
     RING_IDX __new = (_r)->rsp_prod_pvt;                                \
-    xen_wmb(); /* front sees resps /before/ updated producer index */   \
+    x86_sfence(); /* front sees responses /before/ updated producer index */ \
     (_r)->sring->rsp_prod = __new;                                      \
-    xen_mb(); /* front sees new resps /before/ we check rsp_event */    \
+    x86_mfence(); /* front sees new responses /before/ we check rsp_event */ \
     (_notify) = ((RING_IDX)(__new - (_r)->sring->rsp_event) <           \
                  (RING_IDX)(__new - __old));                            \
 } while (0)
@@ -291,7 +241,7 @@ typedef struct __name##_back_ring __name##_back_ring_t
     (_work_to_do) = RING_HAS_UNCONSUMED_REQUESTS(_r);                   \
     if (_work_to_do) break;                                             \
     (_r)->sring->req_event = (_r)->req_cons + 1;                        \
-    xen_mb();                                                           \
+    x86_mfence();                                                       \
     (_work_to_do) = RING_HAS_UNCONSUMED_REQUESTS(_r);                   \
 } while (0)
 
@@ -299,7 +249,7 @@ typedef struct __name##_back_ring __name##_back_ring_t
     (_work_to_do) = RING_HAS_UNCONSUMED_RESPONSES(_r);                  \
     if (_work_to_do) break;                                             \
     (_r)->sring->rsp_event = (_r)->rsp_cons + 1;                        \
-    xen_mb();                                                           \
+    x86_mfence();                                                       \
     (_work_to_do) = RING_HAS_UNCONSUMED_RESPONSES(_r);                  \
 } while (0)
 

@@ -1,4 +1,4 @@
-/*	$NetBSD: arm_sa1100.h,v 1.5 2008/04/28 20:23:20 martin Exp $	*/
+/*	$NetBSD: arm_sa1100.h,v 1.3 2005/12/11 12:17:28 christos Exp $	*/
 
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -32,19 +39,23 @@
 #ifndef _HPCBOOT_ARM_SA1100_H_
 #define	_HPCBOOT_ARM_SA1100_H_
 
-class SA1100Architecture : public ARMArchitecture {
-private:
-	// test routine for SA-1100 peripherals.
-	virtual void testFramebuffer(void);
-	virtual void testUART(void);
+/*
+ * HP-820 JORNADA Strong-ARM SA-1100
+ */
 
-public:
-	SA1100Architecture(Console *&, MemoryManager *&);
-	virtual ~SA1100Architecture(void);
+#define	PAGE_SIZE		0x1000
+#define	DRAM_BANK_NUM		4		/* total 512MByte */
+#define	DRAM_BANK_SIZE		0x08000000	/* 128Mbyte */
 
-	virtual BOOL init(void);
-	virtual BOOL setupLoader(void);
-	virtual void jump(paddr_t info, paddr_t pvec);
-};
+#define	DRAM_BANK0_START	0xc0000000
+#define	DRAM_BANK0_SIZE		DRAM_BANK_SIZE
+#define	DRAM_BANK1_START	0xc8000000
+#define	DRAM_BANK1_SIZE		DRAM_BANK_SIZE
+#define	DRAM_BANK2_START	0xd0000000
+#define	DRAM_BANK2_SIZE		DRAM_BANK_SIZE
+#define	DRAM_BANK3_START	0xd8000000
+#define	DRAM_BANK3_SIZE		DRAM_BANK_SIZE
+#define	ZERO_BANK_START		0xe0000000
+#define	ZERO_BANK_SIZE		DRAM_BANK_SIZE
 
 #endif // _HPCBOOT_ARM_SA1100_H_

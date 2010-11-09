@@ -1,4 +1,4 @@
-/*	$NetBSD: autoconf.c,v 1.7 2008/04/28 20:23:18 martin Exp $	*/
+/*	$NetBSD: autoconf.c,v 1.1 2005/12/29 15:20:08 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 2001, 2004 The NetBSD Foundation, Inc.
@@ -12,6 +12,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -27,14 +34,13 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.7 2008/04/28 20:23:18 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.1 2005/12/29 15:20:08 tsutsui Exp $");
 
 #include "opt_sbd.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/conf.h>
-#include <sys/device.h>
 
 #include <machine/sbdvar.h>
 #include <machine/disklabel.h>
@@ -50,13 +56,13 @@ cpu_configure(void)
 	splhigh();
 	if (config_rootfound("mainbus", NULL) == NULL)
 		panic("no mainbus found");
-	_splnone();
+	spl0();
 }
 
 void
 cpu_rootconf(void)
 {
-	device_t dv;
+	struct device *dv;
 	char *p;
 	const char *bootdev_name, *netdev_name;
 	int unit, partition;
@@ -109,9 +115,15 @@ cpu_rootconf(void)
 			bootdev_name = 0;
 	}
 
-	if (bootdev_name &&
-	    (dv = device_find_by_xname(bootdev_name)) != NULL) {
-		setroot(dv, partition);
-	} else
+	dv = 0;
+	if (bootdev_name) {
+		for (dv = alldevs.tqh_first; dv; dv = dv->dv_list.tqe_next) {
+			if (strcmp(dv->dv_xname, bootdev_name) == 0) {
+				setroot(dv, partition);
+				break;
+			}
+		}
+	}
+	if (dv == 0)
 		setroot(0, 0);
 }

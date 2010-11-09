@@ -1,4 +1,4 @@
-/*	$NetBSD: intreg.c,v 1.29 2008/06/28 12:13:38 tsutsui Exp $	*/
+/*	$NetBSD: intreg.c,v 1.26 2006/10/10 17:45:43 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -35,7 +42,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: intreg.c,v 1.29 2008/06/28 12:13:38 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: intreg.c,v 1.26 2006/10/10 17:45:43 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -54,18 +61,18 @@ __KERNEL_RCSID(0, "$NetBSD: intreg.c,v 1.29 2008/06/28 12:13:38 tsutsui Exp $");
 #include <sun3/sun3/machdep.h>
 
 struct intreg_softc {
-	device_t sc_dev;
-	volatile uint8_t *sc_reg;
+	struct device sc_dev;
+	volatile u_char *sc_reg;
 };
 
-static int  intreg_match(device_t, cfdata_t, void *);
-static void intreg_attach(device_t, device_t, void *);
+static int  intreg_match(struct device *, struct cfdata *, void *);
+static void intreg_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(intreg, sizeof(struct intreg_softc),
+CFATTACH_DECL(intreg, sizeof(struct intreg_softc),
     intreg_match, intreg_attach, NULL, NULL);
 
-volatile uint8_t *interrupt_reg;
-static int intreg_attached;
+volatile u_char *interrupt_reg;
+int intreg_attached;
 
 /* called early (by internal_configure) */
 void 
@@ -85,29 +92,28 @@ intreg_init(void)
 
 
 static int 
-intreg_match(device_t parent, cfdata_t cf, void *args)
+intreg_match(struct device *parent, struct cfdata *cf, void *args)
 {
 	struct confargs *ca = args;
 
 	/* This driver only supports one instance. */
 	if (intreg_attached)
-		return 0;
+		return (0);
 
 	/* Validate the given address. */
 	if (ca->ca_paddr != IREG_ADDR)
-		return 0;
+		return (0);
 
-	return 1;
+	return (1);
 }
 
 
 static void 
-intreg_attach(device_t parent, device_t self, void *args)
+intreg_attach(struct device *parent, struct device *self, void *args)
 {
-	struct intreg_softc *sc = device_private(self);
+	struct intreg_softc *sc = (void *)self;
 
-	sc->sc_dev = self;
-	aprint_normal("\n");
+	printf("\n");
 
 	sc->sc_reg = interrupt_reg;
 
@@ -115,11 +121,10 @@ intreg_attach(device_t parent, device_t self, void *args)
 }
 
 
-#if 0
 void 
 isr_soft_request(int level)
 {
-	uint8_t bit;
+	u_char bit;
 
 	if ((level < _IPL_SOFT_LEVEL_MIN) || (level > _IPL_SOFT_LEVEL_MAX))
 		return;
@@ -131,7 +136,7 @@ isr_soft_request(int level)
 void 
 isr_soft_clear(int level)
 {
-	uint8_t bit;
+	u_char bit;
 
 	if ((level < _IPL_SOFT_LEVEL_MIN) || (level > _IPL_SOFT_LEVEL_MAX))
 		return;
@@ -139,4 +144,4 @@ isr_soft_clear(int level)
 	bit = 1 << level;
 	single_inst_bclr_b(*interrupt_reg, bit);
 }
-#endif
+

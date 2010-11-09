@@ -1,4 +1,4 @@
-/*	$NetBSD: zkbd.c,v 1.9 2009/01/29 16:00:33 nonaka Exp $	*/
+/*	$NetBSD: zkbd.c,v 1.2 2006/12/17 16:07:11 peter Exp $	*/
 /* $OpenBSD: zaurus_kbd.c,v 1.28 2005/12/21 20:36:03 deraadt Exp $ */
 
 /*
@@ -18,7 +18,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: zkbd.c,v 1.9 2009/01/29 16:00:33 nonaka Exp $");
+__KERNEL_RCSID(0, "$NetBSD: zkbd.c,v 1.2 2006/12/17 16:07:11 peter Exp $");
 
 #include "opt_wsdisplay_compat.h"
 #include "lcd.h"
@@ -83,7 +83,7 @@ static const int stuck_keys[] = {
 #define REP_DELAYN 100
 
 struct zkbd_softc {
-	device_t sc_dev;
+	struct device sc_dev;
 
 	const int *sc_sense_array;
 	const int *sc_strobe_array;
@@ -116,14 +116,15 @@ struct zkbd_softc {
 	char sc_rep[MAXKEYS];
 	int sc_nrep;
 #endif
+	void *sc_powerhook;
 };
 
 static struct zkbd_softc *zkbd_sc;
 
-static int	zkbd_match(device_t, cfdata_t, void *);
-static void	zkbd_attach(device_t, device_t, void *);
+static int	zkbd_match(struct device *, struct cfdata *, void *);
+static void	zkbd_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(zkbd, sizeof(struct zkbd_softc),
+CFATTACH_DECL(zkbd, sizeof(struct zkbd_softc),
 	zkbd_match, zkbd_attach, NULL, NULL);
 
 static int	zkbd_irq(void *v);
@@ -131,13 +132,13 @@ static void	zkbd_poll(void *v);
 static int	zkbd_on(void *v);
 static int	zkbd_sync(void *v);
 static int	zkbd_hinge(void *v);
-static bool	zkbd_resume(device_t dv PMF_FN_ARGS);
+static void	zkbd_power(int why, void *arg);
 
 int zkbd_modstate;
 
 static int	zkbd_enable(void *, int);
 static void	zkbd_set_leds(void *, int);
-static int	zkbd_ioctl(void *, u_long, void *, int, struct lwp *);
+static int	zkbd_ioctl(void *, u_long, caddr_t, int, struct lwp *);
 #ifdef WSDISPLAY_COMPAT_RAWKBD
 static void	zkbd_rawrepeat(void *v);
 #endif
@@ -162,41 +163,34 @@ static struct wskbd_mapdata zkbd_keymapdata = {
 };
 
 static int
-zkbd_match(device_t parent, cfdata_t cf, void *aux)
+zkbd_match(struct device *parent, struct cfdata *cf, void *aux)
 {
-
-	if (zkbd_sc)
-		return 0;
 
 	return 1;
 }
 
 static void
-zkbd_attach(device_t parent, device_t self, void *aux)
+zkbd_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct zkbd_softc *sc = device_private(self);
+	struct zkbd_softc *sc = (struct zkbd_softc *)self;
 	struct wskbddev_attach_args a;
 	int pin, i;
 
-	sc->sc_dev = self;
 	zkbd_sc = sc;
-
-	aprint_normal("\n");
-	aprint_naive("\n");
-
 	sc->sc_polling = 0;
 #ifdef WSDISPLAY_COMPAT_RAWKBD
 	sc->sc_rawkbd = 0;
 #endif
+	/* Determine which system we are - XXX */
 
-	callout_init(&sc->sc_roll_to, 0);
-	callout_setfunc(&sc->sc_roll_to, zkbd_poll, sc);
-#ifdef WSDISPLAY_COMPAT_RAWKBD
-	callout_init(&sc->sc_rawrepeat_ch, 0);
-	callout_setfunc(&sc->sc_rawrepeat_ch, zkbd_rawrepeat, sc);
-#endif
+	sc->sc_powerhook = powerhook_establish(sc->sc_dev.dv_xname,
+	    zkbd_power, sc);
+	if (sc->sc_powerhook == NULL) {
+		printf(": unable to establish powerhook\n");
+		return;
+	}
 
-	if (ZAURUS_ISC3000) {
+	if (1 /* C3000 */) {
 		sc->sc_sense_array = gpio_sense_pins_c3000;
 		sc->sc_strobe_array = gpio_strobe_pins_c3000;
 		sc->sc_nsense = __arraycount(gpio_sense_pins_c3000);
@@ -209,14 +203,7 @@ zkbd_attach(device_t parent, device_t self, void *aux)
 #ifdef WSDISPLAY_COMPAT_RAWKBD
 		sc->sc_xt_keymap = xt_keymap;
 #endif
-	} else {
-		/* XXX */
-		return;
-	}
-
-	if (!pmf_device_register(sc->sc_dev, NULL, zkbd_resume))
-		aprint_error_dev(sc->sc_dev,
-		    "couldn't establish power handler\n");
+	} /* XXX */
 
 	sc->sc_okeystate = malloc(sc->sc_nsense * sc->sc_nstrobe,
 	    M_DEVBUF, M_NOWAIT);
@@ -229,16 +216,18 @@ zkbd_attach(device_t parent, device_t self, void *aux)
 	/* set all the strobe bits */
 	for (i = 0; i < sc->sc_nstrobe; i++) {
 		pin = sc->sc_strobe_array[i];
-		if (pin == -1)
+		if (pin == -1) {
 			continue;
+		}
 		pxa2x0_gpio_set_function(pin, GPIO_SET|GPIO_OUT);
 	}
 
 	/* set all the sense bits */
 	for (i = 0; i < sc->sc_nsense; i++) {
 		pin = sc->sc_sense_array[i];
-		if (pin == -1)
+		if (pin == -1) {
 			continue;
+		}
 		pxa2x0_gpio_set_function(pin, GPIO_IN);
 		pxa2x0_gpio_intr_establish(pin, IST_EDGE_BOTH, IPL_TTY,
 		    zkbd_irq, sc);
@@ -263,9 +252,17 @@ zkbd_attach(device_t parent, device_t self, void *aux)
 	a.accessops = &zkbd_accessops;
 	a.accesscookie = sc;
 
+	printf("\n");
+
 	zkbd_hinge(sc);		/* to initialize sc_hinge */
 
 	sc->sc_wskbddev = config_found(self, &a, wskbddevprint);
+
+	callout_init(&sc->sc_roll_to);
+	callout_setfunc(&sc->sc_roll_to, zkbd_poll, sc);
+#ifdef WSDISPLAY_COMPAT_RAWKBD
+	callout_setfunc(&sc->sc_rawrepeat_ch, zkbd_rawrepeat, sc);
+#endif
 }
 
 #ifdef WSDISPLAY_COMPAT_RAWKBD
@@ -312,10 +309,10 @@ zkbd_poll(void *v)
 	/* discharge all */
 	for (i = 0; i < sc->sc_nstrobe; i++) {
 		pin = sc->sc_strobe_array[i];
-		if (pin == -1)
-			continue;
-		pxa2x0_gpio_clear_bit(pin);
-		pxa2x0_gpio_set_dir(pin, GPIO_IN);
+		if (pin != -1) {
+			pxa2x0_gpio_clear_bit(pin);
+			pxa2x0_gpio_set_dir(pin, GPIO_IN);
+		}
 	}
 
 	delay(10);
@@ -335,8 +332,9 @@ zkbd_poll(void *v)
 		for (i = 0; i < sc->sc_nsense; i++) {
 			int bit;
 
-			if (sc->sc_sense_array[i] == -1)
+			if (sc->sc_sense_array[i] == -1) 
 				continue;
+
 			bit = pxa2x0_gpio_get_bit(sc->sc_sense_array[i]);
 			if (bit && sc->sc_hinge && col < sc->sc_maxkbdcol)
 				continue;
@@ -353,18 +351,17 @@ zkbd_poll(void *v)
 	/* charge all */
 	for (i = 0; i < sc->sc_nstrobe; i++) {
 		pin = sc->sc_strobe_array[i];
-		if (pin == -1)
-			continue;
-		pxa2x0_gpio_set_bit(pin);
-		pxa2x0_gpio_set_dir(pin, GPIO_OUT);
+		if (pin != -1) {
+			pxa2x0_gpio_set_bit(pin);
+			pxa2x0_gpio_set_dir(pin, GPIO_OUT);
+		}
 	}
 
 	/* force the irqs to clear as we have just played with them. */
 	for (i = 0; i < sc->sc_nsense; i++) {
-		pin = sc->sc_sense_array[i];
-		if (pin == -1)
-			continue;
-		pxa2x0_gpio_clear_intr(pin);
+		if (sc->sc_sense_array[i] != -1) {
+			pxa2x0_gpio_clear_intr(sc->sc_sense_array[i]);
+		}
 	}
 
 	/* process after resetting interrupt */
@@ -541,7 +538,7 @@ zkbd_set_leds(void *v, int on)
 }
 
 static int
-zkbd_ioctl(void *v, u_long cmd, void *data, int flag, struct lwp *l)
+zkbd_ioctl(void *v, u_long cmd, caddr_t data, int flag, struct lwp *l)
 {
 #ifdef WSDISPLAY_COMPAT_RAWKBD
 	struct zkbd_softc *sc = (struct zkbd_softc *)v;
@@ -593,12 +590,9 @@ zkbd_cnpollc(void *v, int on)
 {
 }
 
-static bool
-zkbd_resume(device_t dv PMF_FN_ARGS)
+static void
+zkbd_power(int why, void *arg)
 {
-	struct zkbd_softc *sc = device_private(dv);
 
-	zkbd_hinge(sc);
-
-	return true;
+	zkbd_hinge(arg);
 }

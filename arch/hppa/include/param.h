@@ -1,4 +1,4 @@
-/*	$NetBSD: param.h,v 1.12 2008/01/10 21:08:41 skrll Exp $	*/
+/*	$NetBSD: param.h,v 1.8 2006/08/28 13:43:35 yamt Exp $	*/
 
 /*	$OpenBSD: param.h,v 1.12 2001/07/06 02:07:41 provos Exp $	*/
 
@@ -25,6 +25,9 @@
  * 	Utah $Hdr: param.h 1.18 94/12/16$
  */
 
+#ifdef _KERNEL_OPT
+#include "opt_compat_hpux.h"
+#endif
 #include <sys/featuretest.h>
 
 #if defined(_NETBSD_SOURCE)
@@ -37,7 +40,7 @@
 
 #define	_MACHINE_ARCH	hppa
 #define	MACHINE_ARCH	"hppa"
-#define	MID_MACHINE	MID_HPPA
+#define	MID_MACHINE	MID_HPUX800
 
 /*
  * Round p (pointer or byte index) up to a correctly-aligned value for all
@@ -99,6 +102,21 @@
 /*
  * Mach derived conversion macros
  */
+#define hppa_round_page(x)	((((unsigned long)(x)) + NBPG - 1) & ~(NBPG-1))
+#define hppa_trunc_page(x)	((unsigned long)(x) & ~(NBPG-1))
 
 #define btop(x)		((unsigned long)(x) >> PGSHIFT)
 #define ptob(x)		((unsigned long)(x) << PGSHIFT)
+
+#ifdef _KERNEL
+#ifdef COMPAT_HPUX
+/*
+ * Constants/macros for HPUX multiple mapping of user address space.
+ * Pages in the first 256Mb are mapped in at every 256Mb segment.
+ */
+#define HPMMMASK	0xF0000000
+#define ISHPMMADDR(v)	0		/* XXX ...jef */
+#define HPMMBASEADDR(v)	((unsigned)(v) & ~HPMMMASK)
+#endif
+
+#endif

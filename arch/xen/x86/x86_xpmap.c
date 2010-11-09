@@ -1,4 +1,4 @@
-/*	$NetBSD: x86_xpmap.c,v 1.12 2008/11/13 18:44:51 cegger Exp $	*/
+/*	$NetBSD: x86_xpmap.c,v 1.8 2008/04/14 13:38:03 cegger Exp $	*/
 
 /*
  * Copyright (c) 2006 Mathieu Ropert <mro@adviseo.fr>
@@ -79,7 +79,7 @@
 
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: x86_xpmap.c,v 1.12 2008/11/13 18:44:51 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: x86_xpmap.c,v 1.8 2008/04/14 13:38:03 cegger Exp $");
 
 #include "opt_xen.h"
 #include "opt_ddb.h"
@@ -123,8 +123,7 @@ static char XBUF[256];
 #endif
 
 volatile shared_info_t *HYPERVISOR_shared_info;
-/* Xen requires the start_info struct to be page aligned */
-union start_info_union start_info_union __aligned(PAGE_SIZE);
+union start_info_union start_info_union;
 unsigned long *xpmap_phys_to_machine_mapping;
 
 void xen_failsafe_handler(void);
@@ -554,7 +553,7 @@ xen_pmap_bootstrap(void)
 	mapsize += NBPG;
 
 #ifdef DOM0OPS
-	if (xendomain_is_dom0()) {
+	if (xen_start_info.flags & SIF_INITDOMAIN) {
 		/* space for ISA I/O mem */
 		mapsize += IOM_SIZE;
 	}
@@ -669,7 +668,7 @@ xen_bootstrap_tables (vaddr_t old_pgd, vaddr_t new_pgd,
 	if (final)
 		atdevbase = map_end;
 #ifdef DOM0OPS
-	if (final && xendomain_is_dom0()) {
+	if (final && (xen_start_info.flags & SIF_INITDOMAIN)) {
 		/* ISA I/O mem */
 		map_end += IOM_SIZE;
 	}
@@ -677,7 +676,7 @@ xen_bootstrap_tables (vaddr_t old_pgd, vaddr_t new_pgd,
 
 	__PRINTK(("xen_bootstrap_tables text_end 0x%lx map_end 0x%lx\n",
 	    text_end, map_end));
-	__PRINTK(("console 0x%lx ", xen_start_info.console.domU.mfn));
+	__PRINTK(("console 0x%lx ", xen_start_info.console_mfn));
 	__PRINTK(("xenstore 0x%lx\n", xen_start_info.store_mfn));
 
 	/* 
@@ -778,9 +777,9 @@ xen_bootstrap_tables (vaddr_t old_pgd, vaddr_t new_pgd,
 			}
 #ifdef XEN3
 			if ((xpmap_ptom_masked(page - KERNBASE) >> PAGE_SHIFT)
-			    == xen_start_info.console.domU.mfn) {
+			    == xen_start_info.console_mfn) {
 				xencons_interface = (void *)page;
-				pte[pl1_pi(page)] = xen_start_info.console.domU.mfn;
+				pte[pl1_pi(page)] = xen_start_info.console_mfn;
 				pte[pl1_pi(page)] <<= PAGE_SHIFT;
 				__PRINTK(("xencons_interface "
 				    "va 0x%lx pte 0x%" PRIx64 "\n",
@@ -820,13 +819,11 @@ xen_bootstrap_tables (vaddr_t old_pgd, vaddr_t new_pgd,
 				pte[pl1_pi(page)] |= PG_RW;
 			}
 				
-			if ((page  >= old_pgd && page < old_pgd + (old_count * PAGE_SIZE))
-			    || page >= new_pgd) {
+			if ((page  >= old_pgd && page < old_pgd + (old_count * PAGE_SIZE)) || page >= new_pgd)
 				__PRINTK(("va 0x%lx pa 0x%lx "
 				    "entry 0x%" PRIx64 " -> L1[0x%x]\n",
 				    page, page - KERNBASE,
 				    (int64_t)pte[pl1_pi(page)], pl1_pi(page)));
-			}
 			page += PAGE_SIZE;
 		}
 

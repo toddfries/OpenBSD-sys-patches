@@ -1,11 +1,11 @@
-/*	$NetBSD: sc_wrap.c,v 1.31 2008/04/09 15:40:30 tsutsui Exp $	*/
+/*	$NetBSD: sc_wrap.c,v 1.28 2005/12/11 12:18:24 christos Exp $	*/
 
 /*
  * This driver is slow!  Need to rewrite.
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sc_wrap.c,v 1.31 2008/04/09 15:40:30 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sc_wrap.c,v 1.28 2005/12/11 12:18:24 christos Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -34,10 +34,10 @@ __KERNEL_RCSID(0, "$NetBSD: sc_wrap.c,v 1.31 2008/04/09 15:40:30 tsutsui Exp $")
 
 #include <mips/cache.h>
 
-static int cxd1185_match(device_t, cfdata_t, void *);
-static void cxd1185_attach(device_t, device_t, void *);
+static int cxd1185_match(struct device *, struct cfdata *, void *);
+static void cxd1185_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(sc, sizeof(struct sc_softc),
+CFATTACH_DECL(sc, sizeof(struct sc_softc),
     cxd1185_match, cxd1185_attach, NULL, NULL);
 
 void cxd1185_init(struct sc_softc *);
@@ -60,7 +60,7 @@ extern paddr_t kvtophys(vaddr_t);
 static int sc_disconnect = IDT_DISCON;
 
 int
-cxd1185_match(device_t parent, cfdata_t cf, void *aux)
+cxd1185_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct hb_attach_args *ha = aux;
 
@@ -71,33 +71,31 @@ cxd1185_match(device_t parent, cfdata_t cf, void *aux)
 }
 
 void
-cxd1185_attach(device_t parent, device_t self, void *aux)
+cxd1185_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct sc_softc *sc = device_private(self);
+	struct sc_softc *sc = (void *)self;
 	struct hb_attach_args *ha = aux;
 	struct sc_scb *scb;
 	int i, intlevel;
 
-	sc->sc_dev = self;
-
 	intlevel = ha->ha_level;
 	if (intlevel == -1) {
 #if 0
-		aprint_error(": interrupt level not configured\n");
+		printf(": interrupt level not configured\n");
 		return;
 #else
-		aprint_normal(": interrupt level not configured; using");
+		printf(": interrupt level not configured; using");
 		intlevel = 0;
 #endif
 	}
-	aprint_normal(" level %d\n", intlevel);
+	printf(" level %d\n", intlevel);
 
 	if (sc_idenr & 0x08)
 		sc->scsi_1185AQ = 1;
 	else
 		sc->scsi_1185AQ = 0;
 
-	sc->sc_adapter.adapt_dev = self;
+	sc->sc_adapter.adapt_dev = &sc->sc_dev;
 	sc->sc_adapter.adapt_nchannels = 1;
 	sc->sc_adapter.adapt_openings = 7;
 	sc->sc_adapter.adapt_max_periph = 1;
@@ -127,7 +125,7 @@ cxd1185_attach(device_t parent, device_t self, void *aux)
 
 	hb_intr_establish(intlevel, INTEN1_DMA, IPL_BIO, sc_intr, sc);
 
-	config_found(self, &sc->sc_channel, scsiprint);
+	config_found(&sc->sc_dev, &sc->sc_channel, scsiprint);
 }
 
 void
@@ -185,7 +183,7 @@ sc_scsipi_request(struct scsipi_channel *chan, scsipi_adapter_req_t req,
 {
 	struct scsipi_xfer *xs;
 	struct scsipi_periph *periph;
-	struct sc_softc *sc = device_private(chan->chan_adapter->adapt_dev);
+	struct sc_softc *sc = (void *)chan->chan_adapter->adapt_dev;
 	struct sc_scb *scb;
 	int flags, s;
 	int target;
@@ -197,7 +195,7 @@ sc_scsipi_request(struct scsipi_channel *chan, scsipi_adapter_req_t req,
 
 		flags = xs->xs_control;
 		if ((scb = get_scb(sc, flags)) == NULL)
-			panic("%s: no scb", __func__);
+			panic("sc_scsipi_request: no scb");
 
 		scb->xs = xs;
 		scb->flags = 0;
@@ -241,8 +239,8 @@ sc_scsipi_request(struct scsipi_channel *chan, scsipi_adapter_req_t req,
 int
 sc_poll(struct sc_softc *sc, int chan, int count)
 {
-	volatile uint8_t *int_stat = (void *)INTST1;
-	volatile uint8_t *int_clear = (void *)INTCLR1;
+	volatile u_char *int_stat = (void *)INTST1;
+	volatile u_char *int_clear = (void *)INTCLR1;
 
 	while (sc_busy(sc, chan)) {
 		if (*int_stat & INTST1_DMA) {
@@ -301,8 +299,8 @@ start:
 
 	/* make va->pa mapping table for DMA */
 	if (xs->datalen > 0) {
-		uint32_t pn, pages, offset;
-		int i;
+		int pages, offset;
+		int i, pn;
 		vaddr_t va;
 
 #if 0
@@ -354,9 +352,9 @@ sc_done(struct sc_scb *scb)
 {
 	struct scsipi_xfer *xs = scb->xs;
 	struct scsipi_periph *periph = xs->xs_periph;
-	struct sc_softc *sc;
+	struct sc_softc *sc =
+	    (void *)periph->periph_channel->chan_adapter->adapt_dev;
 
-	sc = device_private(periph->periph_channel->chan_adapter->adapt_dev);
 	xs->resid = 0;
 	xs->status = 0;
 
@@ -379,7 +377,6 @@ sc_done(struct sc_scb *scb)
 		xs->status = SCSI_CHECK;
 		if (xs->error == 0)
 			xs->error = XS_BUSY;
-		break;
 
 	default:
 		printf("SC(t): [istatus=0x%x, tstatus=0x%x]\n",
@@ -397,7 +394,7 @@ int
 sc_intr(void *v)
 {
 	/* struct sc_softc *sc = v; */
-	volatile uint8_t *gsp = (uint8_t *)DMAC_GSTAT;
+	volatile u_char *gsp = (u_char *)DMAC_GSTAT;
 	u_int gstat = *gsp;
 	int mrqb, i;
 
@@ -416,7 +413,7 @@ sc_intr(void *v)
 		for (i = 0; i < 50; i++)
 			;
 		if (*gsp & mrqb)
-			printf("%s: MRQ\n", __func__);
+			printf("sc_intr: MRQ\n");
 	}
 	scintr();
 
@@ -430,14 +427,14 @@ sc_intr(void *v)
  */
 void
 scop_rsense(int intr, struct scsi *sc_param, int lun, int ie, int count,
-    void *param)
+    caddr_t param)
 {
 
 	memset(sc_param, 0, sizeof(struct scsi));
 	sc_param->identify = MSG_IDENT | sc_disconnect | (lun & IDT_DRMASK);
 	sc_param->sc_lun = lun;
 
-	sc_param->sc_cpoint = (uint8_t *)param;
+	sc_param->sc_cpoint = (u_char *)param;
 	sc_param->sc_ctrnscnt = count;
 
 	/* sc_cdb */

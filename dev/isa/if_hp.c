@@ -1,4 +1,4 @@
-/*	$NetBSD: if_hp.c,v 1.45 2008/11/07 00:20:07 dyoung Exp $	*/
+/*	$NetBSD: if_hp.c,v 1.42 2007/10/19 12:00:17 ad Exp $	*/
 
 /* XXX THIS DRIVER IS BROKEN.  IT WILL NOT EVEN COMPILE. */
 
@@ -80,7 +80,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_hp.c,v 1.45 2008/11/07 00:20:07 dyoung Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_hp.c,v 1.42 2007/10/19 12:00:17 ad Exp $");
 
 #include "hp.h"
 #if NHP > 0
@@ -456,7 +456,7 @@ hpattach(dvp)
 #endif
 
 #if NRND > 0
-	rnd_attach_source(&ns->rnd_source, device_xname(&ns->sc_dev),
+	rnd_attach_source(&ns->rnd_source, ns->sc_dev.dv_xname,
 			  RND_TYPE_NET, 0);
 #endif
 
@@ -475,7 +475,7 @@ hpinit(unit)
 	char   *cp;
 	int hpc = ns->ns_port;
 
-	if (IFADDR_EMPTY(ifp))
+	if (ifp->if_addrlist == (struct ifaddr *) 0)
 		return;
 	if (ifp->if_flags & IFF_RUNNING)
 		return;
@@ -963,7 +963,10 @@ hpget(buf, totlen, off0, ifp)
 /*
  * Process an ioctl request.
  */
-hpioctl(struct ifnet *ifp, u_long cmd, void *data)
+hpioctl(ifp, cmd, data)
+	struct ifnet *ifp;
+	u_long	cmd;
+	void *data;
 {
 	struct ifaddr *ifa = (struct ifaddr *) data;
 	struct hp_softc *ns = &hp_softc[ifp->if_unit];
@@ -973,43 +976,38 @@ hpioctl(struct ifnet *ifp, u_long cmd, void *data)
 
 	switch (cmd) {
 
-	case SIOCINITIFADDR:
+	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 
-		hpinit(ifp->if_unit);
 		switch (ifa->ifa_addr->sa_family) {
 #ifdef INET
 		case AF_INET:
+			hpinit(ifp->if_unit);	/* before arpwhohas */
 			((struct arpcom *) ifp)->ac_ipaddr =
 			    IA_SIN(ifa)->sin_addr;
 			arpwhohas((struct arpcom *) ifp, &IA_SIN(ifa)->sin_addr);
 			break;
 #endif
 		default:
+			hpinit(ifp->if_unit);
 			break;
 		}
 		break;
 
 	case SIOCSIFFLAGS:
-		if ((error = ifioctl_common(ifp, cmd, data)) != 0)
-			break;
 #ifdef HP_DEBUG
 		printf("hp: setting flags, up: %s, running: %s\n",
 		    ifp->if_flags & IFF_UP ? "yes" : "no",
 		    ifp->if_flags & IFF_RUNNING ? "yes" : "no");
 #endif
-		/* XXX re-use ether_ioctl() */
-		switch (ifp->if_flags & (IFF_UP|IFF_RUNNING)) {
-		case IFF_RUNNING:
+		if ((ifp->if_flags & IFF_UP) == 0 &&
+		    ifp->if_flags & IFF_RUNNING) {
 			ifp->if_flags &= ~IFF_RUNNING;
 			outb(ns->ns_port + ds_cmd, DSCM_STOP | DSCM_NODMA);
-			break;
-		case IFF_UP:
-			hpinit(ifp->if_unit);
-			break;
-		default:
-			break;
-		}
+		} else
+			if (ifp->if_flags & IFF_UP &&
+			    (ifp->if_flags & IFF_RUNNING) == 0)
+				hpinit(ifp->if_unit);
 		break;
 
 #ifdef notdef
@@ -1020,7 +1018,7 @@ hpioctl(struct ifnet *ifp, u_long cmd, void *data)
 #endif
 
 	default:
-		error = ether_ioctl(ifp, cmd, data);
+		error = EINVAL;
 	}
 	splx(s);
 	return (error);

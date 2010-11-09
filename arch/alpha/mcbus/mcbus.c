@@ -1,4 +1,4 @@
-/* $NetBSD: mcbus.c,v 1.20 2008/07/09 21:25:59 joerg Exp $ */
+/* $NetBSD: mcbus.c,v 1.18 2005/12/11 12:16:17 christos Exp $ */
 
 /*
  * Copyright (c) 1998 by Matthew Jacob
@@ -37,7 +37,7 @@
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
 
-__KERNEL_RCSID(0, "$NetBSD: mcbus.c,v 1.20 2008/07/09 21:25:59 joerg Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mcbus.c,v 1.18 2005/12/11 12:16:17 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -55,7 +55,7 @@ __KERNEL_RCSID(0, "$NetBSD: mcbus.c,v 1.20 2008/07/09 21:25:59 joerg Exp $");
 
 #include "locators.h"
 
-#define KV(_addr)	((void *)ALPHA_PHYS_TO_K0SEG((_addr)))
+#define KV(_addr)	((caddr_t)ALPHA_PHYS_TO_K0SEG((_addr)))
 #define	MCPCIA_EXISTS(mid, gid)	\
 	(!badaddr((void *)KV(MCPCIA_BRIDGE_ADDR(gid, mid)), sizeof (u_int32_t)))
 
@@ -63,16 +63,17 @@ extern struct cfdriver mcbus_cd;
 
 struct mcbus_cpu_busdep mcbus_primary;
 
-static int	mcbusmatch(device_t, cfdata_t, void *);
-static void	mcbusattach(device_t, device_t, void *);
-static int	mcbusprint(void *, const char *);
-static const char *mcbus_node_type_str(u_int8_t);
+static int	mcbusmatch __P((struct device *, struct cfdata *, void *));
+static void	mcbusattach __P((struct device *, struct device *, void *));
+static int	mcbusprint __P((void *, const char *));
+static const char *mcbus_node_type_str __P((u_int8_t));
 
 typedef struct {
+	struct device	mcbus_dev;
 	u_int8_t	mcbus_types[MCBUS_MID_MAX];
 } mcbus_softc_t;
 
-CFATTACH_DECL_NEW(mcbus, sizeof (mcbus_softc_t),
+CFATTACH_DECL(mcbus, sizeof (mcbus_softc_t),
     mcbusmatch, mcbusattach, NULL, NULL);
 
 /*
@@ -86,10 +87,12 @@ CFATTACH_DECL_NEW(mcbus, sizeof (mcbus_softc_t),
  */
 const int mcbus_mcpcia_probe_order[] = { 5, 4, 7, 6 };
 
-extern void mcpcia_config_cleanup(void);
+extern void mcpcia_config_cleanup __P((void));
 
 static int
-mcbusprint(void *aux, const char *cp)
+mcbusprint(aux, cp)
+	void *aux;
+	const char *cp;
 {
 	struct mcbus_dev_attach_args *tap = aux;
 	aprint_normal(" mid %d: %s", tap->ma_mid,
@@ -98,7 +101,10 @@ mcbusprint(void *aux, const char *cp)
 }
 
 static int
-mcbusmatch(device_t parent, cfdata_t cf, void *aux)
+mcbusmatch(parent, cf, aux)
+	struct device *parent;
+	struct cfdata *cf;
+	void *aux;
 {
 	struct mainbus_attach_args *ma = aux;
 
@@ -115,13 +121,16 @@ mcbusmatch(device_t parent, cfdata_t cf, void *aux)
 }
 
 static void
-mcbusattach(device_t parent, device_t self, void *aux)
+mcbusattach(parent, self, aux)
+	struct device *parent;
+	struct device *self;
+	void *aux;
 {
 	static const char * const bcs[CPU_BCacheMask + 1] = {
 		"No", "1MB", "2MB", "4MB",
 	};
 	struct mcbus_dev_attach_args ta;
-	mcbus_softc_t *mbp = device_private(self);
+	mcbus_softc_t *mbp = (mcbus_softc_t *)self;
 	int i, mid;
 	int locs[MCBUSCF_NLOCS];
 
@@ -180,7 +189,7 @@ mcbusattach(device_t parent, device_t self, void *aux)
 
 	if (mcbus_primary.mcbus_valid) {
 		mid = mcbus_primary.mcbus_cpu_mid;
-		printf("%s mid %d: %s %s\n", device_xname(self),
+		printf("%s mid %d: %s %s\n", self->dv_xname,
 		    mid, mcbus_node_type_str(MCBUS_TYPE_CPU),
 		    bcs[mcbus_primary.mcbus_bcache & 0x7]);
 		/*
@@ -211,7 +220,8 @@ mcbusattach(device_t parent, device_t self, void *aux)
 }
 
 static const char *
-mcbus_node_type_str(u_int8_t type)
+mcbus_node_type_str(type)
+	u_int8_t type;
 {
 	switch (type) {
 	case MCBUS_TYPE_RES:

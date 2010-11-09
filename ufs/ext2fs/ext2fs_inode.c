@@ -1,4 +1,4 @@
-/*	$NetBSD: ext2fs_inode.c,v 1.68 2009/03/01 15:59:57 christos Exp $	*/
+/*	$NetBSD: ext2fs_inode.c,v 1.56 2006/12/09 22:07:48 chs Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1989, 1993
@@ -65,7 +65,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ext2fs_inode.c,v 1.68 2009/03/01 15:59:57 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ext2fs_inode.c,v 1.56 2006/12/09 22:07:48 chs Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -141,10 +141,12 @@ ext2fs_inactive(void *v)
 {
 	struct vop_inactive_args /* {
 		struct vnode *a_vp;
-		bool *a_recycle;
+		struct lwp *a_l;
 	} */ *ap = v;
 	struct vnode *vp = ap->a_vp;
 	struct inode *ip = VTOI(vp);
+	struct mount *mp;
+	struct lwp *l = ap->a_l;
 	int error = 0;
 
 	if (prtactive && vp->v_usecount != 0)
@@ -155,27 +157,28 @@ ext2fs_inactive(void *v)
 
 	error = 0;
 	if (ip->i_e2fs_nlink == 0 && (vp->v_mount->mnt_flag & MNT_RDONLY) == 0) {
-		/* Defer final inode free and update to reclaim.*/
+		vn_start_write(vp, &mp, V_WAIT | V_LOWER);
 		if (ext2fs_size(ip) != 0) {
-			error = ext2fs_truncate(vp, (off_t)0, 0, NOCRED);
+			error = ext2fs_truncate(vp, (off_t)0, 0, NOCRED, NULL);
 		}
 		ip->i_e2fs_dtime = time_second;
 		ip->i_flag |= IN_CHANGE | IN_UPDATE;
-		mutex_enter(&vp->v_interlock);
-		vp->v_iflag |= VI_FREEING;
-		mutex_exit(&vp->v_interlock);
 		ext2fs_vfree(vp, ip->i_number, ip->i_e2fs_mode);
+		vn_finished_write(mp, V_LOWER);
 	}
 	if (ip->i_flag & (IN_CHANGE | IN_UPDATE | IN_MODIFIED)) {
+		vn_start_write(vp, &mp, V_WAIT | V_LOWER);
 		ext2fs_update(vp, NULL, NULL, 0);
+		vn_finished_write(mp, V_LOWER);
 	}
 out:
+	VOP_UNLOCK(vp, 0);
 	/*
 	 * If we are done with the inode, reclaim it
 	 * so that it can be reused immediately.
 	 */
-	*ap->a_recycle = (ip->i_e2fs_dtime != 0);
-	VOP_UNLOCK(vp, 0);
+	if (ip->i_e2fs_dtime != 0)
+		vrecycle(vp, NULL, l);
 	return (error);
 }
 
@@ -197,7 +200,7 @@ ext2fs_update(struct vnode *vp, const struct timespec *acc,
 	struct buf *bp;
 	struct inode *ip;
 	int error;
-	void *cp;
+	caddr_t cp;
 	int flags;
 
 	if (vp->v_mount->mnt_flag & MNT_RDONLY)
@@ -214,14 +217,14 @@ ext2fs_update(struct vnode *vp, const struct timespec *acc,
 
 	error = bread(ip->i_devvp,
 			  fsbtodb(fs, ino_to_fsba(fs, ip->i_number)),
-			  (int)fs->e2fs_bsize, NOCRED, B_MODIFY, &bp);
+			  (int)fs->e2fs_bsize, NOCRED, &bp);
 	if (error) {
-		brelse(bp, 0);
+		brelse(bp);
 		return (error);
 	}
 	ip->i_flag &= ~(IN_MODIFIED | IN_ACCESSED);
-	cp = (char *)bp->b_data +
-	    (ino_to_fsbo(fs, ip->i_number) * EXT2_DINODE_SIZE(fs));
+	cp = (caddr_t)bp->b_data +
+	    (ino_to_fsbo(fs, ip->i_number) * EXT2_DINODE_SIZE);
 	e2fs_isave(ip->i_din.e2fs_din, (struct ext2fs_dinode *)cp);
 	if ((updflags & (UPDATE_WAIT|UPDATE_DIROP)) != 0 &&
 	    (flags & IN_MODIFIED) != 0 &&
@@ -242,7 +245,7 @@ ext2fs_update(struct vnode *vp, const struct timespec *acc,
  */
 int
 ext2fs_truncate(struct vnode *ovp, off_t length, int ioflag,
-    kauth_cred_t cred)
+    kauth_cred_t cred, struct proc *p)
 {
 	daddr_t lastblock;
 	struct inode *oip = VTOI(ovp);
@@ -292,12 +295,11 @@ ext2fs_truncate(struct vnode *ovp, off_t length, int ioflag,
 	 * value of osize is 0, length will be at least 1.
 	 */
 	if (osize < length) {
-		uvm_vnp_setwritesize(ovp, length);
 		error = ufs_balloc_range(ovp, length - 1, 1, cred,
 		    ioflag & IO_SYNC ? B_SYNC : 0);
 		if (error) {
 			(void) ext2fs_truncate(ovp, osize, ioflag & IO_SYNC,
-			    cred);
+			    cred, p);
 			return (error);
 		}
 		uvm_vnp_setsize(ovp, length);
@@ -338,7 +340,7 @@ ext2fs_truncate(struct vnode *ovp, off_t length, int ioflag,
 	 * will be returned to the free list.  lastiblock values are also
 	 * normalized to -1 for calls to ext2fs_indirtrunc below.
 	 */
-	memcpy((void *)oldblks, (void *)&oip->i_e2fs_blocks[0], sizeof oldblks);
+	memcpy((caddr_t)oldblks, (caddr_t)&oip->i_e2fs_blocks[0], sizeof oldblks);
 	sync = 0;
 	for (level = TRIPLE; level >= SINGLE; level--) {
 		if (lastiblock[level] < 0 && oldblks[NDADDR + level] != 0) {
@@ -366,8 +368,8 @@ ext2fs_truncate(struct vnode *ovp, off_t length, int ioflag,
 	 * Note that we save the new block configuration so we can check it
 	 * when we are done.
 	 */
-	memcpy((void *)newblks, (void *)&oip->i_e2fs_blocks[0], sizeof newblks);
-	memcpy((void *)&oip->i_e2fs_blocks[0], (void *)oldblks, sizeof oldblks);
+	memcpy((caddr_t)newblks, (caddr_t)&oip->i_e2fs_blocks[0], sizeof newblks);
+	memcpy((caddr_t)&oip->i_e2fs_blocks[0], (caddr_t)oldblks, sizeof oldblks);
 
 	(void)ext2fs_setsize(oip, osize);
 	error = vtruncbuf(ovp, lastblock + 1, 0, 0);
@@ -482,12 +484,12 @@ ext2fs_indirtrunc(struct inode *ip, daddr_t lbn, daddr_t dbn, daddr_t lastbn,
 	 */
 	vp = ITOV(ip);
 	bp = getblk(vp, lbn, (int)fs->e2fs_bsize, 0, 0);
-	if (bp->b_oflags & (BO_DONE | BO_DELWRI)) {
+	if (bp->b_flags & (B_DONE | B_DELWRI)) {
 		/* Braces must be here in case trace evaluates to nothing. */
 		trace(TR_BREADHIT, pack(vp, fs->e2fs_bsize), lbn);
 	} else {
 		trace(TR_BREADMISS, pack(vp, fs->e2fs_bsize), lbn);
-		curlwp->l_ru.ru_inblock++;	/* pay for read */
+		curproc->p_stats->p_ru.ru_inblock++;	/* pay for read */
 		bp->b_flags |= B_READ;
 		if (bp->b_bcount > bp->b_bufsize)
 			panic("ext2fs_indirtrunc: bad buffer size");
@@ -496,7 +498,7 @@ ext2fs_indirtrunc(struct inode *ip, daddr_t lbn, daddr_t dbn, daddr_t lastbn,
 		error = biowait(bp);
 	}
 	if (error) {
-		brelse(bp, 0);
+		brelse(bp);
 		*countp = 0;
 		return (error);
 	}
@@ -505,8 +507,8 @@ ext2fs_indirtrunc(struct inode *ip, daddr_t lbn, daddr_t dbn, daddr_t lastbn,
 	if (lastbn >= 0) {
 		/* XXX ondisk32 */
 		copy = malloc(fs->e2fs_bsize, M_TEMP, M_WAITOK);
-		memcpy((void *)copy, (void *)bap, (u_int)fs->e2fs_bsize);
-		memset((void *)&bap[last + 1], 0,
+		memcpy((caddr_t)copy, (caddr_t)bap, (u_int)fs->e2fs_bsize);
+		memset((caddr_t)&bap[last + 1], 0,
 			(u_int)(NINDIR(fs) - (last + 1)) * sizeof (u_int32_t));
 		error = bwrite(bp);
 		if (error)
@@ -553,9 +555,10 @@ ext2fs_indirtrunc(struct inode *ip, daddr_t lbn, daddr_t dbn, daddr_t lastbn,
 	}
 
 	if (copy != NULL) {
-		free(copy, M_TEMP);
+		FREE(copy, M_TEMP);
 	} else {
-		brelse(bp, BC_INVAL);
+		bp->b_flags |= B_INVAL;
+		brelse(bp);
 	}
 
 	*countp = blocksreleased;

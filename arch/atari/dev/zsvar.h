@@ -1,4 +1,4 @@
-/*	$NetBSD: zsvar.h,v 1.13 2009/01/28 19:57:37 tjam Exp $	*/
+/*	$NetBSD: zsvar.h,v 1.9 2005/12/11 12:16:54 christos Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -55,6 +55,9 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -105,8 +108,8 @@ struct zsdevice {
  * When the value is a character + RR1 status, the character is in the
  * upper 8 bits of the RR1 status.
  */
-#define ZLRB_RING_SIZE		8192		/* ZS line ring buffer size */
-#define	ZLRB_RING_MASK		8191		/* mask for same */
+#define ZLRB_RING_SIZE		4096		/* ZS line ring buffer size */
+#define	ZLRB_RING_MASK		4095		/* mask for same */
 
 /* 0 is reserved (means "no interrupt") */
 #define	ZRING_RINT		1		/* receive data interrupt */
@@ -152,7 +155,7 @@ struct zs_chanstate {
 	 * also be stopped for ^S; this sets TS_TTSTOP in tp->t_state.
 	 */
 	int	cs_tbc;			/* transmit byte count */
-	uint8_t *cs_tba;		/* transmit buffer address */
+	caddr_t	cs_tba;			/* transmit buffer address */
 	int	cs_heldtbc;		/* held tbc while xmission stopped */
 
 	/*

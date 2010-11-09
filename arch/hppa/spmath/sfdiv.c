@@ -1,4 +1,4 @@
-/*	$NetBSD: sfdiv.c,v 1.4 2007/02/22 05:46:30 thorpej Exp $	*/
+/*	$NetBSD: sfdiv.c,v 1.3 2005/12/11 12:17:40 christos Exp $	*/
 
 /*	$OpenBSD: sfdiv.c,v 1.4 2001/03/29 03:58:19 mickey Exp $	*/
 
@@ -42,7 +42,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sfdiv.c,v 1.4 2007/02/22 05:46:30 thorpej Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sfdiv.c,v 1.3 2005/12/11 12:17:40 christos Exp $");
 
 #include "../spmath/float.h"
 #include "../spmath/sgl_float.h"
@@ -58,7 +58,7 @@ unsigned int *status;
 {
 	register unsigned int opnd1, opnd2, opnd3, result;
 	register int dest_exponent, count;
-	register int inexact = false, guardbit = false, stickybit = false;
+	register int inexact = FALSE, guardbit = FALSE, stickybit = FALSE;
 	int is_tiny;
 
 	opnd1 = *srcptr1;
@@ -256,7 +256,7 @@ unsigned int *status;
 			else Sgl_addition(opnd1,opnd2,opnd1);
 			dest_exponent--;
 		}
-		if (Sgl_iszero_sign(opnd1)) guardbit = true;
+		if (Sgl_iszero_sign(opnd1)) guardbit = TRUE;
 		stickybit = Sgl_all(opnd1);
 	}
 	inexact = guardbit | stickybit;
@@ -305,7 +305,7 @@ unsigned int *status;
 		Set_overflowflag();
 		/* set result to infinity or largest number */
 		Sgl_setoverflow(result);
-		inexact = true;
+		inexact = TRUE;
 	}
 	/*
 	 * Test for underflow
@@ -327,14 +327,14 @@ unsigned int *status;
 		}
 
 		/* Determine if should set underflow flag */
-		is_tiny = true;
+		is_tiny = TRUE;
 		if (dest_exponent == 0 && inexact) {
 			switch (Rounding_mode()) {
 			case ROUNDPLUS:
 				if (Sgl_iszero_sign(result)) {
 					Sgl_increment(opnd3);
 					if (Sgl_isone_hiddenoverflow(opnd3))
-						is_tiny = false;
+						is_tiny = FALSE;
 					Sgl_decrement(opnd3);
 				}
 				break;
@@ -342,7 +342,7 @@ unsigned int *status;
 				if (Sgl_isone_sign(result)) {
 					Sgl_increment(opnd3);
 					if (Sgl_isone_hiddenoverflow(opnd3))
-						is_tiny = false;
+						is_tiny = FALSE;
 					Sgl_decrement(opnd3);
 				}
 				break;
@@ -351,7 +351,7 @@ unsigned int *status;
 				    Sgl_isone_lowmantissa(opnd3))) {
 					Sgl_increment(opnd3);
 					if (Sgl_isone_hiddenoverflow(opnd3))
-						is_tiny = false;
+						is_tiny = FALSE;
 					Sgl_decrement(opnd3);
 				}
 				break;

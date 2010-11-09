@@ -1,4 +1,4 @@
-/*	$NetBSD: darwin_proc.h,v 1.8 2009/01/11 02:45:47 christos Exp $ */
+/*	$NetBSD: darwin_proc.h,v 1.5 2005/12/11 12:19:56 christos Exp $ */
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -68,15 +75,15 @@ struct darwin_pcred {
 
 struct darwin_vmspace {
 	int     vm_refcnt;
-	void *vm_shm;
+	caddr_t vm_shm;
 	segsz_t vm_rssize;
 	segsz_t vm_swrss;
 	segsz_t vm_tsize;
 	segsz_t vm_dsize;
 	segsz_t vm_ssize;
-	void *vm_taddr;
-	void *vm_daddr;
-	void *vm_maxsaddr;
+	caddr_t vm_taddr;
+	caddr_t vm_daddr;
+	caddr_t vm_maxsaddr;
 };
 
 struct darwin_extern_proc {
@@ -85,7 +92,7 @@ struct darwin_extern_proc {
 			struct darwin_proc *__p_forw;
 			struct darwin_proc *__p_back;
 		} p_st1;
-		struct darwin_timeval __p_starttime;
+		struct timeval __p_starttime;
 	} p_un;
 	struct darwin_vmspace *p_vmspace;
 	struct darwin_sigacts *p_sigacts;
@@ -94,7 +101,7 @@ struct darwin_extern_proc {
 	pid_t	p_pid;
 	pid_t	p_oppid;
 	int	p_dupfd;
-	void *user_stack;
+	caddr_t user_stack;
 	void	*exit_thread;
 	int	p_debugger;
 	mach_boolean_t	sigwait;
@@ -106,7 +113,7 @@ struct darwin_extern_proc {
 	u_int	p_swtime;
 	u_int	p_slptime;
 	struct	itimerval p_realtimer;
-	struct	darwin_timeval p_rtime;
+	struct	timeval p_rtime;
 	u_quad_t p_uticks;
 	u_quad_t p_sticks;
 	u_quad_t p_iticks;
@@ -146,7 +153,7 @@ struct darwin_kinfo_proc {
 		pid_t	e_ppid;
 		pid_t	e_pgid;
 		short	e_jobc;
-		darwin_dev_t	e_tdev;
+		dev_t	e_tdev;
 		pid_t	e_tpgid;
 		struct	darwin_session *e_tsess;
 #define DARWIN_WMESGLEN 7

@@ -1,4 +1,4 @@
-/*	$NetBSD: inkernel.c,v 1.8 2008/05/26 16:28:39 kiyohara Exp $	*/
+/*	$NetBSD: inkernel.c,v 1.6 2005/12/11 12:17:04 christos Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -36,26 +43,22 @@
 
 #define	KERNENTRY	(RELOC - 0x200000)
 
-int inopen(struct open_file *);
-int inclose(struct open_file *);
-int instrategy(void *, int, daddr_t, size_t, void *, size_t *);
-
 void
 init_in()
 {
 	int p;
 
 	for (p = endaddr(); p < KERNENTRY; p += sizeof (int)) {
-		if (*(int *)p != BEBOX_ENTRY ||
+		if (*(int *)p != ENTRY ||
 		    *(int *)(p + sizeof (int)) != 0 ||
 		    *(int *)(p + sizeof (int) * 2) != 0)
 			continue;
 
 		p += sizeof (int) * 3;
-		if (memcmp((char *)p, bebox_magic, BEBOX_MAGICSIZE) == 0) {
-			kern_len = *(int *)(p + BEBOX_MAGICSIZE);
+		if (memcmp((char *)p, magic, MAGICSIZE) == 0) {
+			kern_len = *(int *)(p + MAGICSIZE);
 			memcpy((char *)KERNENTRY,
-				(char *)(p + BEBOX_MAGICSIZE + KERNLENSIZE),
+				(char *)(p + MAGICSIZE + KERNLENSIZE),
 				kern_len);
 			break;
 		}
@@ -63,24 +66,29 @@ init_in()
 }
 
 int
-inopen(struct open_file *p)
+inopen(p)
+	struct open_file *p;
 {
-
 	if (kern_len)
 		return (0);
 	return (EINVAL);
 }
 
 int
-inclose(struct open_file *p)
+inclose(p)
+	struct open_file *p;
 {
-
 	return (0);
 }
 
 int
-instrategy(void *devdata, int func, daddr_t blk, size_t size, void *buf,
-	   size_t *rsize)
+instrategy(devdata, func, blk, size, buf, rsize)
+	void *devdata;	/* device uniq data */
+	int func;	/* function (read or write) */
+	daddr_t blk;	/* block number */
+	size_t size;	/* request size in bytes */
+	void *buf;	/* buffer */
+	size_t *rsize;	/* bytes transferred */
 {
 
 	memcpy(buf, (char *)KERNENTRY + blk * DEV_BSIZE, size);

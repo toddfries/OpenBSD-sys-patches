@@ -1,4 +1,4 @@
-/*	$NetBSD: siopvar_common.h,v 1.36 2008/06/11 02:09:16 kiyohara Exp $	*/
+/*	$NetBSD: siopvar_common.h,v 1.34 2007/03/04 06:02:01 christos Exp $	*/
 
 /*
  * Copyright (c) 2000 Manuel Bouyer.
@@ -176,8 +176,6 @@ struct siop_common_softc {
 #define SF_CHIP_DT	0x00040000 /* DT clocking */
 #define SF_CHIP_GEBUG	0x00080000 /* SCSI gross error bug */
 #define SF_CHIP_AAIP	0x00100000 /* Always generate AIP regardless of SNCTL4*/
-#define SF_CHIP_BE	0x00200000 /* big-endian */
-#define SF_CHIP_USEPCIC	0x00400000 /* use PCI clock */
 
 #define SF_PCI_RL	0x01000000 /* PCI read line */
 #define SF_PCI_RM	0x02000000 /* PCI read multiple */
@@ -211,9 +209,3 @@ void 	siop_sdp(struct siop_common_cmd *, int);
 void 	siop_update_resid(struct siop_common_cmd *, int);
 void	siop_clearfifo(struct siop_common_softc *);
 void	siop_resetbus(struct siop_common_softc *);
-
-#define siop_htoc32(sc, x) \
-  (((sc)->features & SF_CHIP_BE) ? htobe32((x)) : htole32((x)))
-
-#define siop_ctoh32(sc, x) \
-  (((sc)->features & SF_CHIP_BE) ? be32toh((x)) : le32toh((x)))

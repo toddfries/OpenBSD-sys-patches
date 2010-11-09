@@ -1,4 +1,4 @@
-/*	$NetBSD: autoconf.c,v 1.56 2009/03/08 05:25:30 tsutsui Exp $	*/
+/*	$NetBSD: autoconf.c,v 1.52 2005/12/11 12:16:54 christos Exp $	*/
 
 /*
  * Copyright (c) 1995 Leo Weppelman
@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.56 2009/03/08 05:25:30 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.52 2005/12/11 12:16:54 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -45,10 +45,10 @@ __KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.56 2009/03/08 05:25:30 tsutsui Exp $"
 #include <machine/cpu.h>
 #include <atari/atari/device.h>
 
-static void findroot(void);
-void mbattach(struct device *, struct device *, void *);
-int mbprint(void *, const char *);
-int mbmatch(struct device *, struct cfdata *, void *);
+static void findroot __P((void));
+void mbattach __P((struct device *, struct device *, void *));
+int mbprint __P((void *, const char *));
+int mbmatch __P((struct device *, struct cfdata *, void *));
 
 int atari_realconfig;
 #include <sys/kernel.h>
@@ -57,32 +57,30 @@ int atari_realconfig;
  * called at boot time, configure all devices on system
  */
 void
-cpu_configure(void)
+cpu_configure()
 {
 	extern int atari_realconfig;
 	
 	atari_realconfig = 1;
-
-	init_sicallback();
 
 	if (config_rootfound("mainbus", __UNCONST("mainbus")) == NULL)
 		panic("no mainbus found");
 }
 
 void
-cpu_rootconf(void)
+cpu_rootconf()
 {
-
 	findroot();
 	setroot(booted_device, booted_partition);
 }
 
 /*ARGSUSED*/
 int
-simple_devprint(void *auxp, const char *pnp)
+simple_devprint(auxp, pnp)
+	void *auxp;
+	const char *pnp;
 {
-
-	return QUIET;
+	return(QUIET);
 }
 
 /*
@@ -92,8 +90,11 @@ simple_devprint(void *auxp, const char *pnp)
  * by checking for NULL.
  */
 int
-atari_config_found(struct cfdata *pcfp, struct device *pdp, void *auxp,
-    cfprint_t pfn)
+atari_config_found(pcfp, pdp, auxp, pfn)
+	struct cfdata *pcfp;
+	struct device *pdp;
+	void *auxp;
+	cfprint_t pfn;
 {
 	struct device temp;
 	struct cfdata *cf;
@@ -101,7 +102,7 @@ atari_config_found(struct cfdata *pcfp, struct device *pdp, void *auxp,
 	extern int	atari_realconfig;
 
 	if (atari_realconfig)
-		return config_found(pdp, auxp, pfn) != NULL;
+		return(config_found(pdp, auxp, pfn) != NULL);
 
 	memset(&temp, 0, sizeof(temp));
 	if (pdp == NULL)
@@ -116,11 +117,11 @@ atari_config_found(struct cfdata *pcfp, struct device *pdp, void *auxp,
 		if (ca != NULL) {
 			(*ca->ca_attach)(pdp, NULL, auxp);
 			pdp->dv_cfdata = NULL;
-			return 1;
+			return(1);
 		}
 	}
 	pdp->dv_cfdata = NULL;
-	return 0;
+	return(0);
 }
 
 /*
@@ -129,7 +130,7 @@ atari_config_found(struct cfdata *pcfp, struct device *pdp, void *auxp,
  * the console. Kinda hacky but it works.
  */
 void
-config_console(void)
+config_console()
 {	
 	struct cfdata *cf;
 
@@ -165,7 +166,19 @@ config_console(void)
 #include "sd.h"
 #include "cd.h"
 #include "wd.h"
-#include "ioconf.h"
+
+#if NWD > 0
+extern	struct cfdriver wd_cd;
+#endif
+#if NSD > 0
+extern	struct cfdriver sd_cd;  
+#endif
+#if NCD > 0
+extern	struct cfdriver cd_cd;
+#endif
+#if NFD > 0
+extern	struct cfdriver fd_cd;
+#endif
 
 struct cfdriver *genericconf[] = {
 #if NWD > 0
@@ -249,22 +262,26 @@ CFATTACH_DECL(mainbus, sizeof(struct device),
 static int mb_attached;
 
 int
-mbmatch(struct device *pdp, struct cfdata *cfp, void *auxp)
+mbmatch(pdp, cfp, auxp)
+	struct device	*pdp;
+	struct cfdata	*cfp;
+	void		*auxp;
 {
-
 	if (mb_attached)
-		return 0;
+		return(0);
 	/*
 	 * We are always here
 	 */
-	return 1;
+	return(1);
 }
 
 /*
  * "find" all the things that should be there.
  */
 void
-mbattach(struct device *pdp, struct device *dp, void *auxp)
+mbattach(pdp, dp, auxp)
+	struct device *pdp, *dp;
+	void *auxp;
 {
 
 	mb_attached = 1;
@@ -286,10 +303,11 @@ mbattach(struct device *pdp, struct device *dp, void *auxp)
 }
 
 int
-mbprint(void *auxp, const char *pnp)
+mbprint(auxp, pnp)
+	void *auxp;
+	const char *pnp;
 {
-
 	if (pnp)
 		aprint_normal("%s at %s", (char *)auxp, pnp);
-	return UNCONF;
+	return(UNCONF);
 }

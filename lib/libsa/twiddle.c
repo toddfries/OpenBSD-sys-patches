@@ -1,4 +1,4 @@
-/*	$NetBSD: twiddle.c,v 1.8 2008/04/30 16:18:09 ad Exp $	*/
+/*	$NetBSD: twiddle.c,v 1.6 2005/12/11 12:24:46 christos Exp $	*/
 
 /*-
  * Copyright (c) 1993
@@ -38,15 +38,11 @@
 
 #define TWIDDLE_CHARS	"|/-\\"
 
-char	twiddle_toggle;
-
 void
-twiddle(void)
+twiddle()
 {
 	static int pos;
 
-	if (!twiddle_toggle) {
-		putchar(TWIDDLE_CHARS[pos++ & 3]);
-		putchar('\b');
-	}
+	putchar(TWIDDLE_CHARS[pos++ & 3]);
+	putchar('\b');
 }

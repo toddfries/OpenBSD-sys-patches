@@ -1,4 +1,4 @@
-/*	$NetBSD: bztzsc.c,v 1.31 2008/04/13 04:55:52 tsutsui Exp $ */
+/*	$NetBSD: bztzsc.c,v 1.25 2006/03/29 04:16:45 thorpej Exp $ */
 
 /*
  * Copyright (c) 1997 Michael L. Hitch
@@ -42,7 +42,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: bztzsc.c,v 1.31 2008/04/13 04:55:52 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: bztzsc.c,v 1.25 2006/03/29 04:16:45 thorpej Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -73,26 +73,22 @@ __KERNEL_RCSID(0, "$NetBSD: bztzsc.c,v 1.31 2008/04/13 04:55:52 tsutsui Exp $");
 #include <amiga/dev/bztzscvar.h>
 #include <amiga/dev/zbusvar.h>
 
-#ifdef __powerpc__
-#define badaddr(a)      badaddr_read(a, 2, NULL)
-#endif
-
-int	bztzscmatch(device_t, cfdata_t, void *);
-void	bztzscattach(device_t, device_t, void *);
+void	bztzscattach(struct device *, struct device *, void *);
+int	bztzscmatch(struct device *, struct cfdata *, void *);
 
 /* Linkup to the rest of the kernel */
-CFATTACH_DECL_NEW(bztzsc, sizeof(struct bztzsc_softc),
+CFATTACH_DECL(bztzsc, sizeof(struct bztzsc_softc),
     bztzscmatch, bztzscattach, NULL, NULL);
 
 /*
  * Functions and the switch for the MI code.
  */
-uint8_t	bztzsc_read_reg(struct ncr53c9x_softc *, int);
-void	bztzsc_write_reg(struct ncr53c9x_softc *, int, uint8_t);
+u_char	bztzsc_read_reg(struct ncr53c9x_softc *, int);
+void	bztzsc_write_reg(struct ncr53c9x_softc *, int, u_char);
 int	bztzsc_dma_isintr(struct ncr53c9x_softc *);
 void	bztzsc_dma_reset(struct ncr53c9x_softc *);
 int	bztzsc_dma_intr(struct ncr53c9x_softc *);
-int	bztzsc_dma_setup(struct ncr53c9x_softc *, uint8_t **,
+int	bztzsc_dma_setup(struct ncr53c9x_softc *, caddr_t *,
 	    size_t *, int, size_t *);
 void	bztzsc_dma_go(struct ncr53c9x_softc *);
 void	bztzsc_dma_stop(struct ncr53c9x_softc *);
@@ -108,7 +104,7 @@ struct ncr53c9x_glue bztzsc_glue = {
 	bztzsc_dma_go,
 	bztzsc_dma_stop,
 	bztzsc_dma_isactive,
-	NULL,
+	0,
 };
 
 /* Maximum DMA transfer length to reduce impact on high-speed serial input */
@@ -122,10 +118,10 @@ u_long bztzsc_cnt_dma3 = 0;	/* number of pages combined */
 
 #ifdef DEBUG
 struct {
-	uint8_t hardbits;
-	uint8_t status;
-	uint8_t xx;
-	uint8_t yy;
+	u_char hardbits;
+	u_char status;
+	u_char xx;
+	u_char yy;
 } bztzsc_trace[128];
 int bztzsc_trace_ptr = 0;
 int bztzsc_trace_enable = 1;
@@ -136,32 +132,32 @@ void bztzsc_dump(void);
  * if we are a Phase5 Blizzard 2060 SCSI
  */
 int
-bztzscmatch(device_t parent, cfdata_t cf, void *aux)
+bztzscmatch(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct zbus_args *zap;
-	volatile uint8_t *regs;
+	volatile u_char *regs;
 
 	zap = aux;
 	if (zap->manid != 0x2140 || zap->prodid != 24)
-		return 0;
-	regs = &((volatile uint8_t *)zap->va)[0x1ff00];
-	if (badaddr((void *)__UNVOLATILE(regs)))
-		return 0;
+		return(0);
+	regs = &((volatile u_char *)zap->va)[0x1ff00];
+	if (badaddr((caddr_t)__UNVOLATILE(regs)))
+		return(0);
 	regs[NCR_CFG1 * 4] = 0;
 	regs[NCR_CFG1 * 4] = NCRCFG1_PARENB | 7;
 	delay(5);
 	if (regs[NCR_CFG1 * 4] != (NCRCFG1_PARENB | 7))
-		return 0;
-	return 1;
+		return(0);
+	return(1);
 }
 
 /*
  * Attach this instance, and then all the sub-devices
  */
 void
-bztzscattach(device_t parent, device_t self, void *aux)
+bztzscattach(struct device *parent, struct device *self, void *aux)
 {
-	struct bztzsc_softc *bsc = device_private(self);
+	struct bztzsc_softc *bsc = (void *)self;
 	struct ncr53c9x_softc *sc = &bsc->sc_ncr53c9x;
 	struct zbus_args  *zap;
 	extern u_long scsi_nosync;
@@ -171,19 +167,18 @@ bztzscattach(device_t parent, device_t self, void *aux)
 	/*
 	 * Set up the glue for MI code early; we use some of it here.
 	 */
-	sc->sc_dev = self;
 	sc->sc_glue = &bztzsc_glue;
 
 	/*
 	 * Save the regs
 	 */
 	zap = aux;
-	bsc->sc_reg = &((volatile uint8_t *)zap->va)[0x1ff00];
+	bsc->sc_reg = &((volatile u_char *)zap->va)[0x1ff00];
 	bsc->sc_dmabase = &bsc->sc_reg[0xf0];
 
 	sc->sc_freq = 40;		/* Clocked at 40 MHz */
 
-	aprint_normal(": address %p", bsc->sc_reg);
+	printf(": address %p", bsc->sc_reg);
 
 	sc->sc_id = 7;
 
@@ -213,7 +208,7 @@ bztzscattach(device_t parent, device_t self, void *aux)
 	 * NOTE: low 8 bits are to disable disconnect, and the next
 	 *       8 bits are to disable sync.
 	 */
-	device_cfdata(self)->cf_flags |= (scsi_nosync >> shift_nosync)
+	device_cfdata(&sc->sc_dev)->cf_flags |= (scsi_nosync >> shift_nosync)
 	    & 0xffff;
 	shift_nosync += 16;
 
@@ -251,7 +246,7 @@ bztzscattach(device_t parent, device_t self, void *aux)
  * Glue functions.
  */
 
-uint8_t
+u_char
 bztzsc_read_reg(struct ncr53c9x_softc *sc, int reg)
 {
 	struct bztzsc_softc *bsc = (struct bztzsc_softc *)sc;
@@ -260,10 +255,10 @@ bztzsc_read_reg(struct ncr53c9x_softc *sc, int reg)
 }
 
 void
-bztzsc_write_reg(struct ncr53c9x_softc *sc, int reg, uint8_t val)
+bztzsc_write_reg(struct ncr53c9x_softc *sc, int reg, u_char val)
 {
 	struct bztzsc_softc *bsc = (struct bztzsc_softc *)sc;
-	uint8_t v = val;
+	u_char v = val;
 
 	bsc->sc_reg[reg * 4] = v;
 #ifdef DEBUG
@@ -332,7 +327,7 @@ bztzsc_dma_intr(struct ncr53c9x_softc *sc)
 	cnt = bsc->sc_dmasize - cnt;	/* number of bytes transferred */
 	NCR_DMA(("DMA xferred %d\n", cnt));
 	if (bsc->sc_xfr_align) {
-		memcpy(*bsc->sc_dmaaddr, bsc->sc_alignbuf, cnt);
+		bcopy(bsc->sc_alignbuf, *bsc->sc_dmaaddr, cnt);
 		bsc->sc_xfr_align = 0;
 	}
 	*bsc->sc_dmaaddr += cnt;
@@ -342,12 +337,12 @@ bztzsc_dma_intr(struct ncr53c9x_softc *sc)
 }
 
 int
-bztzsc_dma_setup(struct ncr53c9x_softc *sc, uint8_t **addr, size_t *len,
+bztzsc_dma_setup(struct ncr53c9x_softc *sc, caddr_t *addr, size_t *len,
                  int datain, size_t *dmasize)
 {
 	struct bztzsc_softc *bsc = (struct bztzsc_softc *)sc;
 	paddr_t pa;
-	uint8_t *ptr;
+	u_char *ptr;
 	size_t xfer;
 
 	bsc->sc_dmaaddr = addr;
@@ -381,8 +376,8 @@ bztzsc_dma_setup(struct ncr53c9x_softc *sc, uint8_t **addr, size_t *len,
 	 * If unaligned address, read unaligned bytes into alignment buffer
 	 */
 	else if ((int)ptr & 1) {
-		pa = kvtop((void *)&bsc->sc_alignbuf);
-		xfer = bsc->sc_dmasize = min(xfer, sizeof(bsc->sc_alignbuf));
+		pa = kvtop((caddr_t)&bsc->sc_alignbuf);
+		xfer = bsc->sc_dmasize = min(xfer, sizeof (bsc->sc_alignbuf));
 		NCR_DMA(("bztzsc_dma_setup: align read by %d bytes\n", xfer));
 		bsc->sc_xfr_align = 1;
 	}
@@ -417,10 +412,10 @@ if (xfer != *len)
 	pa >>= 1;
 	if (!bsc->sc_datain)
 		pa |= 0x80000000;
-	bsc->sc_dmabase[12] = (uint8_t)(pa);
-	bsc->sc_dmabase[8] = (uint8_t)(pa >> 8);
-	bsc->sc_dmabase[4] = (uint8_t)(pa >> 16);
-	bsc->sc_dmabase[0] = (uint8_t)(pa >> 24);
+	bsc->sc_dmabase[12] = (u_int8_t)(pa);
+	bsc->sc_dmabase[8] = (u_int8_t)(pa >> 8);
+	bsc->sc_dmabase[4] = (u_int8_t)(pa >> 16);
+	bsc->sc_dmabase[0] = (u_int8_t)(pa >> 24);
 	bsc->sc_active = 1;
 	return 0;
 }

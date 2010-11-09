@@ -1,4 +1,4 @@
-#	$NetBSD: genassym.cf,v 1.56 2008/09/20 18:29:05 tsutsui Exp $
+#	$NetBSD: genassym.cf,v 1.48 2005/12/11 12:19:08 christos Exp $
 
 #
 # Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
 # 2. Redistributions in binary form must reproduce the above copyright
 #    notice, this list of conditions and the following disclaimer in the
 #    documentation and/or other materials provided with the distribution.
+# 3. All advertising materials mentioning features or use of this software
+#    must display the following acknowledgement:
+#        This product includes software developed by the NetBSD
+#        Foundation, Inc. and its contributors.
+# 4. Neither the name of The NetBSD Foundation nor the names of its
+#    contributors may be used to endorse or promote products derived
+#    from this software without specific prior written permission.
 #
 # THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
 # ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -48,7 +55,11 @@
 # 2. Redistributions in binary form must reproduce the above copyright
 #    notice, this list of conditions and the following disclaimer in the
 #    documentation and/or other materials provided with the distribution.
-# 3. Neither the name of the University nor the names of its contributors
+# 3. All advertising materials mentioning features or use of this software
+#    must display the following acknowledgement:
+#	This product includes software developed by the University of
+#	California, Berkeley and its contributors.
+# 4. Neither the name of the University nor the names of its contributors
 #    may be used to endorse or promote products derived from this software
 #    without specific prior written permission.
 #
@@ -67,8 +78,6 @@
 #	@(#)genassym.c	8.1 (Berkeley) 6/11/93
 #
 
-quote	#define	__MUTEX_PRIVATE
-
 include <sys/param.h>
 include <sys/buf.h>
 include <sys/proc.h>
@@ -79,7 +88,6 @@ include <sys/user.h>
 include <sys/device.h>
 include <sys/disklabel.h>
 include <sys/disk.h>
-include <sys/mutex.h>
 
 include <uvm/uvm.h>
 
@@ -124,6 +132,8 @@ define	PMAP_CTX	offsetof(struct pmap, pm_ctx)
 define	PMAP_CTXNUM	offsetof(struct pmap, pm_ctxnum)
 define	PMAP_CPUSET	offsetof(struct pmap, pm_cpuset)
 
+define	UVM_PAGE_IDLE_ZERO	offsetof(struct uvm, page_idle_zero)
+
 # interrupt/fault metering
 define	V_INTR		offsetof(struct uvmexp, intrs)
 define	V_SOFT		offsetof(struct uvmexp, softs)
@@ -142,11 +152,13 @@ define	CPUINFO_EINTSTACK	offsetof(struct cpu_info, eintstack)
 define	INT_STACK_SIZE		INT_STACK_SIZE
 define	CPUINFO_REDZONE		offsetof(struct cpu_info, redzone)
 define	REDSIZE			REDSIZE
+define	CPUINFO_IDLE_U		offsetof(struct cpu_info, idle_u)
 define	CPUINFO_CURPCB		offsetof(struct cpu_info, curpcb)
 define	CPUINFO_CURLWP		offsetof(struct cpu_info, ci_curlwp)
 define	CPUINFO_SELF		offsetof(struct cpu_info, ci_self)
 define	CPUINFO_FLAGS		offsetof(struct cpu_info, flags)
-define	CPUINFO_WANT_AST	offsetof(struct cpu_info, ci_want_ast)
+define	CPUINFO_WANT_AST	offsetof(struct cpu_info, want_ast)
+define	CPUINFO_WANT_RESCHED	offsetof(struct cpu_info, want_resched)
 define	CPUINFO_TT		offsetof(struct cpu_info, ci_tt)
 define	CPUINFO_CACHE_LINESZ	offsetof(struct cpu_info, cacheinfo.c_linesize)
 define	CPUINFO_CACHE_NLINES	offsetof(struct cpu_info, cacheinfo.c_nlines)
@@ -157,9 +169,6 @@ define	CPUINFO_XMSG_ARG1	offsetof(struct cpu_info, msg.u.xpmsg_func.arg1)
 define	CPUINFO_XMSG_ARG2	offsetof(struct cpu_info, msg.u.xpmsg_func.arg2)
 define	CPUINFO_XMSG_CMPLT	offsetof(struct cpu_info, msg.complete)
 define	CPUINFO_IDLESPIN	offsetof(struct cpu_info, idlespin)
-define	CPUINFO_MTX_COUNT	offsetof(struct cpu_info, ci_mtx_count)
-define	CPUINFO_MTX_OLDSPL	offsetof(struct cpu_info, ci_mtx_oldspl)
-define	CPUINFO_IDEPTH		offsetof(struct cpu_info, ci_idepth)
 
 # PTE bits and related information
 define	PG_W		PG_W
@@ -256,10 +265,3 @@ define	FDC_NSTAT	offsetof(struct fdcio, fdcio_nstat)
 define	FDC_DATA	offsetof(struct fdcio, fdcio_data)
 define	FDC_TC		offsetof(struct fdcio, fdcio_tc)
 define	FDC_EVCNT	offsetof(struct fdcio, fdcio_intrcnt.ev_count)
-
-# locking
-define	MTX_LOCK	offsetof(struct kmutex, mtx_lock)
-define	MTX_IPL		offsetof(struct kmutex, u.s.mtxs_ipl)
-
-define	__SIMPLELOCK_LOCKED	__SIMPLELOCK_LOCKED
-define	__SIMPLELOCK_UNLOCKED	__SIMPLELOCK_UNLOCKED

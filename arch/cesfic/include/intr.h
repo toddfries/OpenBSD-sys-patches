@@ -1,4 +1,4 @@
-/*	$NetBSD: intr.h,v 1.10 2008/06/22 16:34:15 tsutsui Exp $	*/
+/*	$NetBSD: intr.h,v 1.5 2006/12/21 15:55:22 yamt Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1990, 1993
@@ -95,13 +95,19 @@
 #define spl7()  _spl(PSL_S|PSL_IPL7)
 
 /* These spl calls are used by machine-independent code. */
-#define splsoftclock()	splraise1()
-#define splsoftbio()	splraise1()
-#define splsoftnet()	splraise1()
-#define splsoftserial()	splraise1()
-#define splvm()		splraise4()
-#define splsched()	spl6()
+#define	spllowersoftclock() spl1()
+#define	splsoft()	splraise1()
+#define splsoftclock()	splsoft()
+#define splsoftnet()	splsoft()
+#define splbio()	_splraise(ipl2spl_table[IPL_BIO])
+#define splnet()	_splraise(ipl2spl_table[IPL_NET])
+#define spltty()	_splraise(ipl2spl_table[IPL_TTY])
+#define splvm()		_splraise(ipl2spl_table[IPL_VM])
+#define splclock()	spl6()
+#define splstatclock()	spl6()
 #define splhigh()	spl7()
+#define splsched()	spl7()
+#define spllock()	spl7()
 
 /* watch out for side effects */
 #define splx(s)         (s & PSL_IPL ? _spl(s) : spl0())
@@ -110,37 +116,38 @@ int	spl0 __P((void));
 
 #define	IPL_NONE	0
 #define	IPL_SOFTCLOCK	1
-#define	IPL_SOFTBIO	1
-#define	IPL_SOFTNET	3
-#define	IPL_SOFTSERIAL	4
-#define	IPL_VM		5
-#define	IPL_SCHED	6
-#define	IPL_HIGH	7
-#define	NIPL		8
+#define	IPL_SOFTNET	2
+#define	IPL_BIO		3
+#define	IPL_NET		4
+#define	IPL_TTY		5
+#define	IPL_VM		6
+#define	IPL_CLOCK	7
+#define	IPL_STATCLOCK	8
+#define	IPL_SCHED	9
+#define	IPL_HIGH	10
+#define	IPL_LOCK	11
+#define	NIPLS		12
 
-extern const uint16_t ipl2psl_table[NIPL];
+extern int ipl2spl_table[NIPLS];
 
 typedef int ipl_t;
 typedef struct {
-	uint16_t _psl;
+	int _ipl;
 } ipl_cookie_t;
 
 static inline ipl_cookie_t
 makeiplcookie(ipl_t ipl)
 {
 
-	return (ipl_cookie_t){._psl = ipl2psl_table[ipl]};
+	return (ipl_cookie_t){._ipl = ipl};
 }
 
 static inline int
 splraiseipl(ipl_cookie_t icookie)
 {
 
-	return _splraise(icookie._psl);
+	return _splraise(ipl2spl_table[icookie._ipl]);
 }
-
-#include <m68k/softintr.h>
-
 #endif /* _KERNEL && !_LOCORE */
 
 #endif /* !_CESFIC_INTR_H_ */

@@ -1,4 +1,4 @@
-/*	$NetBSD: scoop.c,v 1.6 2009/01/29 12:28:15 nonaka Exp $	*/
+/*	$NetBSD: scoop.c,v 1.2 2006/12/17 16:07:11 peter Exp $	*/
 /*	$OpenBSD: zaurus_scoop.c,v 1.12 2005/11/17 05:26:31 uwe Exp $	*/
 
 /*
@@ -18,7 +18,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: scoop.c,v 1.6 2009/01/29 12:28:15 nonaka Exp $");
+__KERNEL_RCSID(0, "$NetBSD: scoop.c,v 1.2 2006/12/17 16:07:11 peter Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -39,7 +39,7 @@ __KERNEL_RCSID(0, "$NetBSD: scoop.c,v 1.6 2009/01/29 12:28:15 nonaka Exp $");
 #include "ioconf.h"
 
 struct scoop_softc {
-	device_t		sc_dev;
+	struct device		sc_dev;
 
 	bus_space_tag_t		sc_iot;
 	bus_space_handle_t	sc_ioh;
@@ -47,27 +47,20 @@ struct scoop_softc {
 	uint16_t		sc_gpwr;	/* GPIO state before suspend */
 };
 
-static int	scoopmatch(device_t, cfdata_t, void *);
-static void	scoopattach(device_t, device_t, void *);
+static int	scoopmatch(struct device *, struct cfdata *, void *);
+static void	scoopattach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(scoop, sizeof(struct scoop_softc),
-    scoopmatch, scoopattach, NULL, NULL);
+CFATTACH_DECL(scoop, sizeof(struct scoop_softc),
+	scoopmatch, scoopattach, NULL, NULL);
 
 #if 0
-static int	scoop_gpio_pin_read(struct scoop_softc *, int);
+static int	scoop_gpio_pin_read(struct scoop_softc *sc, int);
 #endif
-static void	scoop_gpio_pin_write(struct scoop_softc *, int, int);
-static void	scoop_gpio_pin_ctl(struct scoop_softc *, int, int);
-
-enum scoop_card {
-	SD_CARD,
-	CF_CARD		/* socket 0 (external) */
-};
-
-static void	scoop0_set_card_power(enum scoop_card card, int new_cpr);
+static void	scoop_gpio_pin_write(struct scoop_softc *sc, int, int);
+static void	scoop_gpio_pin_ctl(struct scoop_softc *sc, int, int);
 
 static int
-scoopmatch(device_t parent, cfdata_t cf, void *aux)
+scoopmatch(struct device *parent, struct cfdata *cf, void *aux)
 {
 
 	/*
@@ -79,22 +72,18 @@ scoopmatch(device_t parent, cfdata_t cf, void *aux)
 }
 
 static void
-scoopattach(device_t parent, device_t self, void *aux)
+scoopattach(struct device *parent, struct device *self, void *aux)
 {
-	struct scoop_softc *sc = device_private(self);
 	struct pxaip_attach_args *pxa = (struct pxaip_attach_args *)aux;
+	struct scoop_softc *sc = (struct scoop_softc *)self;
 	bus_addr_t addr;
 	bus_size_t size;
 
-	sc->sc_dev = self;
 	sc->sc_iot = pxa->pxa_iot;
-
-	aprint_normal(": PCMCIA/GPIO controller\n");
-	aprint_naive("\n");
 
 	if (pxa->pxa_addr != -1)
 		addr = pxa->pxa_addr;
-	else if (sc->sc_dev->dv_unit == 0)
+	else if (sc->sc_dev.dv_unit == 0)
 		addr = C3000_SCOOP0_BASE;
 	else
 		addr = C3000_SCOOP1_BASE;
@@ -102,11 +91,11 @@ scoopattach(device_t parent, device_t self, void *aux)
 	size = pxa->pxa_size < SCOOP_SIZE ? SCOOP_SIZE : pxa->pxa_size;
 
 	if (bus_space_map(sc->sc_iot, addr, size, 0, &sc->sc_ioh) != 0) {
-		aprint_error_dev(sc->sc_dev, "couldn't map registers\n");
+		printf(": failed to map %s\n", sc->sc_dev.dv_xname);
 		return;
 	}
 
-	if (ZAURUS_ISC3000 && sc->sc_dev->dv_unit == 1) {
+	if (ZAURUS_ISC3000 && sc->sc_dev.dv_unit == 1) {
 		scoop_gpio_pin_ctl(sc, SCOOP1_AKIN_PULLUP, GPIO_PIN_OUTPUT);
 		scoop_gpio_pin_write(sc, SCOOP1_AKIN_PULLUP, GPIO_PIN_LOW);
 	} else if (!ZAURUS_ISC3000) {
@@ -114,6 +103,7 @@ scoopattach(device_t parent, device_t self, void *aux)
 		scoop_gpio_pin_write(sc, SCOOP0_AKIN_PULLUP, GPIO_PIN_LOW);
 	}
 
+	printf(": PCMCIA/GPIO controller\n");
 }
 
 #if 0
@@ -163,24 +153,17 @@ scoop_gpio_pin_ctl(struct scoop_softc *sc, int pin, int flags)
 void
 scoop_set_backlight(int on, int cont)
 {
-	struct scoop_softc *sc;
-#if 0
-	struct scoop_softc *sc0;
 
-	sc0 = device_lookup_private(&scoop_cd, 0);
-#endif
-
-	sc = device_lookup_private(&scoop_cd, 1);
-	if (sc != NULL) {
+	if (scoop_cd.cd_ndevs > 1 && scoop_cd.cd_devs[1] != NULL) {
 		/* C3000 */
-		scoop_gpio_pin_write(sc,
+		scoop_gpio_pin_write(scoop_cd.cd_devs[1],
 		    SCOOP1_BACKLIGHT_CONT, !cont);
-		scoop_gpio_pin_write(sc,
+		scoop_gpio_pin_write(scoop_cd.cd_devs[1],
 		    SCOOP1_BACKLIGHT_ON, on);
 	}
 #if 0
-	else if (sc0 != NULL) {
-		scoop_gpio_pin_write(sc0,
+	else if (scoop_cd.cd_ndevs > 0 && scoop_cd.cd_devs[0] != NULL) {
+		scoop_gpio_pin_write(scoop_cd.cd_devs[0],
 		    SCOOP0_BACKLIGHT_CONT, cont);
 	}
 #endif
@@ -192,12 +175,10 @@ scoop_set_backlight(int on, int cont)
 void
 scoop_set_irled(int on)
 {
-	struct scoop_softc *sc;
 
-	sc = device_lookup_private(&scoop_cd, 1);
-	if (sc != NULL) {
+	if (scoop_cd.cd_ndevs > 1 && scoop_cd.cd_devs[1] != NULL) {
 		/* IR_ON is inverted */
-		scoop_gpio_pin_write(sc,
+		scoop_gpio_pin_write(scoop_cd.cd_devs[1],
 		    SCOOP1_IR_ON, !on);
 	}
 }
@@ -210,16 +191,14 @@ scoop_set_irled(int on)
 void
 scoop_led_set(int led, int on)
 {
-	struct scoop_softc *sc;
 
-	sc = device_lookup_private(&scoop_cd, 0);
-	if (sc != NULL) {
+	if (scoop_cd.cd_ndevs > 0 && scoop_cd.cd_devs[0] != NULL) {
 		if ((led & SCOOP_LED_GREEN) != 0) {
-			scoop_gpio_pin_write(sc,
+			scoop_gpio_pin_write(scoop_cd.cd_devs[0],
 			    SCOOP0_LED_GREEN, on);
 		}
 		if (scoop_cd.cd_ndevs > 1 && (led & SCOOP_LED_ORANGE) != 0) {
-			scoop_gpio_pin_write(sc,
+			scoop_gpio_pin_write(scoop_cd.cd_devs[0],
 			    SCOOP0_LED_ORANGE_C3000, on);
 		}
 	}
@@ -231,26 +210,24 @@ scoop_led_set(int led, int on)
 void
 scoop_set_headphone(int on)
 {
-	struct scoop_softc *sc;
 
-	sc = device_lookup_private(&scoop_cd, 0);
-	if (sc == NULL)
+	if (scoop_cd.cd_ndevs < 1 || scoop_cd.cd_devs[0] == NULL)
 		return;
 
-	scoop_gpio_pin_ctl(sc, SCOOP0_MUTE_L,
+	scoop_gpio_pin_ctl(scoop_cd.cd_devs[0], SCOOP0_MUTE_L,
 	    GPIO_PIN_OUTPUT);
-	scoop_gpio_pin_ctl(sc, SCOOP0_MUTE_R,
+	scoop_gpio_pin_ctl(scoop_cd.cd_devs[0], SCOOP0_MUTE_R,
 	    GPIO_PIN_OUTPUT);
 
 	if (on) {
-		scoop_gpio_pin_write(sc, SCOOP0_MUTE_L,
+		scoop_gpio_pin_write(scoop_cd.cd_devs[0], SCOOP0_MUTE_L,
 		    GPIO_PIN_HIGH);
-		scoop_gpio_pin_write(sc, SCOOP0_MUTE_R,
+		scoop_gpio_pin_write(scoop_cd.cd_devs[0], SCOOP0_MUTE_R,
 		    GPIO_PIN_HIGH);
 	} else {
-		scoop_gpio_pin_write(sc, SCOOP0_MUTE_L,
+		scoop_gpio_pin_write(scoop_cd.cd_devs[0], SCOOP0_MUTE_L,
 		    GPIO_PIN_LOW);
-		scoop_gpio_pin_write(sc, SCOOP0_MUTE_R,
+		scoop_gpio_pin_write(scoop_cd.cd_devs[0], SCOOP0_MUTE_R,
 		    GPIO_PIN_LOW);
 	}
 }
@@ -261,17 +238,12 @@ scoop_set_headphone(int on)
 void
 scoop_akin_pullup(int enable)
 {
-	struct scoop_softc *sc0;
-	struct scoop_softc *sc1;
 
-	sc0 = device_lookup_private(&scoop_cd, 0);
-	sc1 = device_lookup_private(&scoop_cd, 1);
-
-	if (sc1 != NULL) {
-		scoop_gpio_pin_write(sc1,
+	if (scoop_cd.cd_ndevs > 1 && scoop_cd.cd_devs[1] != NULL) {
+		scoop_gpio_pin_write(scoop_cd.cd_devs[1],
 		    SCOOP1_AKIN_PULLUP, enable);
-	} else if (sc0 != NULL) {
-		scoop_gpio_pin_write(sc0,
+	} else {
+		scoop_gpio_pin_write(scoop_cd.cd_devs[0],
 		    SCOOP0_AKIN_PULLUP, enable);
 	}
 }
@@ -279,12 +251,9 @@ scoop_akin_pullup(int enable)
 void
 scoop_battery_temp_adc(int enable)
 {
-	struct scoop_softc *sc;
 
-	sc = device_lookup_private(&scoop_cd, 0);
-
-	if (sc != NULL) {
-		scoop_gpio_pin_write(sc,
+	if (scoop_cd.cd_ndevs > 0 && scoop_cd.cd_devs[0] != NULL) {
+		scoop_gpio_pin_write(scoop_cd.cd_devs[0],
 		    SCOOP0_ADC_TEMP_ON_C3000, enable);
 	}
 }
@@ -292,14 +261,11 @@ scoop_battery_temp_adc(int enable)
 void
 scoop_charge_battery(int enable, int voltage_high)
 {
-	struct scoop_softc *sc;
 
-	sc = device_lookup_private(&scoop_cd, 0);
-
-	if (sc != NULL) {
-		scoop_gpio_pin_write(sc,
+	if (scoop_cd.cd_ndevs > 0 && scoop_cd.cd_devs[0] != NULL) {
+		scoop_gpio_pin_write(scoop_cd.cd_devs[0],
 		    SCOOP0_JK_B_C3000, voltage_high);
-		scoop_gpio_pin_write(sc,
+		scoop_gpio_pin_write(scoop_cd.cd_devs[0],
 		    SCOOP0_CHARGE_OFF_C3000, !enable);
 	}
 }
@@ -307,90 +273,63 @@ scoop_charge_battery(int enable, int voltage_high)
 void
 scoop_discharge_battery(int enable)
 {
-	struct scoop_softc *sc;
 
-	sc = device_lookup_private(&scoop_cd, 0);
-
-	if (sc != NULL) {
-		scoop_gpio_pin_write(sc,
+	if (scoop_cd.cd_ndevs > 0 && scoop_cd.cd_devs[0] != NULL) {
+		scoop_gpio_pin_write(scoop_cd.cd_devs[0],
 		    SCOOP0_JK_A_C3000, enable);
 	}
 }
 
-/*
- * Enable or disable 3.3V power to the SD/MMC card slot.
- */
 void
-scoop_set_sdmmc_power(int on)
-{
-
-	scoop0_set_card_power(SD_CARD, on ? SCP_CPR_SD_3V : SCP_CPR_OFF);
-}
-
-/*
- * The Card Power Register of the first SCOOP unit controls the power
- * for the first CompactFlash slot and the SD/MMC card slot as well.
- */
-void
-scoop0_set_card_power(enum scoop_card card, int new_cpr)
+scoop_set_sd_power(int enable)
 {
 	struct scoop_softc *sc;
 	bus_space_tag_t iot;
 	bus_space_handle_t ioh;
-	uint16_t cpr;
+	uint16_t v;
 
-	sc = device_lookup_private(&scoop_cd, 0);
-	if (sc == NULL)
-		return;
+	if (scoop_cd.cd_ndevs > 1 && scoop_cd.cd_devs[1] != NULL) {
+		sc = scoop_cd.cd_devs[0];
+		iot = sc->sc_iot;
+		ioh = sc->sc_ioh;
 
-	iot = sc->sc_iot;
-	ioh = sc->sc_ioh;
+		if (enable) {
+			v = bus_space_read_2(iot, ioh, SCOOP_GPWR);
+			v |= (1 << SCOOP0_CF_POWER_C3000);
+			bus_space_write_2(iot, ioh, SCOOP_GPWR, v);
 
-	cpr = bus_space_read_2(iot, ioh, SCOOP_CPR);
-	if (new_cpr & SCP_CPR_VOLTAGE_MSK) {
-		if (card == CF_CARD)
-			cpr |= SCP_CPR_5V;
-		else if (card == SD_CARD)
-			cpr |= SCP_CPR_SD_3V;
-
-		scoop_gpio_pin_write(sc, SCOOP0_CF_POWER_C3000, 1);
-		if (!ISSET(cpr, SCP_CPR_5V) && !ISSET(cpr, SCP_CPR_SD_3V))
-			delay(5000);
-		bus_space_write_2(iot, ioh, SCOOP_CPR, cpr | new_cpr);
-	} else {
-		if (card == CF_CARD)
-			cpr &= ~SCP_CPR_5V;
-		else if (card == SD_CARD)
-			cpr &= ~SCP_CPR_SD_3V;
-
-		if (!ISSET(cpr, SCP_CPR_5V) && !ISSET(cpr, SCP_CPR_SD_3V)) {
-			bus_space_write_2(iot, ioh, SCOOP_CPR, SCP_CPR_OFF);
-			delay(1000);
-			scoop_gpio_pin_write(sc, SCOOP0_CF_POWER_C3000, 0);
-		} else
-			bus_space_write_2(iot, ioh, SCOOP_CPR, cpr | new_cpr);
+			v = bus_space_read_2(iot, ioh, SCOOP_CPR);
+			v |= (1 << SCP_CPR_SD);
+			bus_space_write_2(iot, ioh, SCOOP_CPR, v);
+		} else {
+			v = bus_space_read_2(iot, ioh, SCOOP_CPR);
+			v &= ~(1 << SCP_CPR_SD);
+			bus_space_write_2(iot, ioh, SCOOP_CPR, v);
+#if 0	/* XXX */
+			v = bus_space_read_2(iot, ioh, SCOOP_GPWR);
+			v &= ~(1 << SCOOP0_CF_POWER_C3000);
+			bus_space_write_2(iot, ioh, SCOOP_GPWR, v);
+#endif	/* XXX */
+		}
 	}
 }
 
 void
 scoop_check_mcr(void)
 {
-	struct scoop_softc *sc0, *sc1, *sc;
+	struct scoop_softc *sc;
 	uint16_t v;
 
-	sc0 = device_lookup_private(&scoop_cd, 0);
-	sc1 = device_lookup_private(&scoop_cd, 1);
-
 	/* C3000 */
-	if (sc1 != NULL) {
-		sc = sc0;
+	if (scoop_cd.cd_ndevs > 1 && scoop_cd.cd_devs[1] != NULL) {
+		sc = scoop_cd.cd_devs[0];
 		v = bus_space_read_2(sc->sc_iot, sc->sc_ioh, SCOOP_MCR);
 		if ((v & 0x100) == 0) {
 			bus_space_write_2(sc->sc_iot, sc->sc_ioh, SCOOP_MCR,
 			    0x0101);
 		}
 
-		sc = sc1;
+		sc = scoop_cd.cd_devs[1];
 		v = bus_space_read_2(sc->sc_iot, sc->sc_ioh, SCOOP_MCR);
 		if ((v & 0x100) == 0) {
 			bus_space_write_2(sc->sc_iot, sc->sc_ioh, SCOOP_MCR,
@@ -402,14 +341,11 @@ scoop_check_mcr(void)
 void
 scoop_suspend(void)
 {
-	struct scoop_softc *sc, *sc0, *sc1;
+	struct scoop_softc *sc;
 	uint32_t rv;
 
-	sc0 = device_lookup_private(&scoop_cd, 0);
-	sc1 = device_lookup_private(&scoop_cd, 1);
-
-	if (sc0 != NULL) {
-		sc = sc0;
+	if (scoop_cd.cd_ndevs > 0 && scoop_cd.cd_devs[0] != NULL) {
+		sc = scoop_cd.cd_devs[0];
 		sc->sc_gpwr = bus_space_read_2(sc->sc_iot, sc->sc_ioh,
 		    SCOOP_GPWR);
 		/* C3000 */
@@ -420,8 +356,8 @@ scoop_suspend(void)
 	}
 
 	/* C3000 */
-	if (sc1 != NULL) {
-		sc = sc1;
+	if (scoop_cd.cd_ndevs > 1 && scoop_cd.cd_devs[1] != NULL) {
+		sc = scoop_cd.cd_devs[1];
 		sc->sc_gpwr = bus_space_read_2(sc->sc_iot, sc->sc_ioh,
 		    SCOOP_GPWR);
 		bus_space_write_2(sc->sc_iot, sc->sc_ioh, SCOOP_GPWR,
@@ -438,19 +374,16 @@ scoop_suspend(void)
 void
 scoop_resume(void)
 {
-	struct scoop_softc *sc, *sc0, *sc1;
+	struct scoop_softc *sc;
 
-	sc0 = device_lookup_private(&scoop_cd, 0);
-	sc1 = device_lookup_private(&scoop_cd, 1);
-
-	if (sc0 != NULL) {
-		sc = sc0;
+	if (scoop_cd.cd_ndevs > 0 && scoop_cd.cd_devs[0] != NULL) {
+		sc = scoop_cd.cd_devs[0];
 		bus_space_write_2(sc->sc_iot, sc->sc_ioh, SCOOP_GPWR,
 		    sc->sc_gpwr);
 	}
 
-	if (sc1 != NULL) {
-		sc = sc1;
+	if (scoop_cd.cd_ndevs > 1 && scoop_cd.cd_devs[1] != NULL) {
+		sc = scoop_cd.cd_devs[1];
 		bus_space_write_2(sc->sc_iot, sc->sc_ioh, SCOOP_GPWR,
 		    sc->sc_gpwr);
 	}

@@ -1,4 +1,4 @@
-/*	$NetBSD: ne2000.c,v 1.59 2008/04/28 20:23:50 martin Exp $	*/
+/*	$NetBSD: ne2000.c,v 1.55 2007/10/19 11:59:57 ad Exp $	*/
 
 /*-
  * Copyright (c) 1997, 1998 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -48,7 +55,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ne2000.c,v 1.59 2008/04/28 20:23:50 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ne2000.c,v 1.55 2007/10/19 11:59:57 ad Exp $");
 
 #include "opt_ipkdb.h"
 
@@ -129,7 +136,7 @@ ne2000_attach(nsc, myea)
 	switch (nsc->sc_type) {
 	case NE2000_TYPE_UNKNOWN:
 	default:
-		aprint_error_dev(dsc->sc_dev, "where did the card go?\n");
+		printf("%s: where did the card go?\n", dsc->sc_dev.dv_xname);
 		return (1);
 	case NE2000_TYPE_NE1000:
 		memsize = 8192;
@@ -217,7 +224,8 @@ ne2000_attach(nsc, myea)
 		}
 
 		if (mstart == 0) {
-			aprint_error_dev(&dsc->sc_dev, "cannot find start of RAM\n");
+			printf("%s: cannot find start of RAM\n",
+			    dsc->sc_dev.dv_xname);
 			return (1);
 		}
 
@@ -245,7 +253,7 @@ ne2000_attach(nsc, myea)
 		}
 
 		printf("%s: RAM start 0x%x, size %d\n",
-		    device_xname(&dsc->sc_dev), mstart, memsize);
+		    dsc->sc_dev.dv_xname, mstart, memsize);
 
 		dsc->mem_start = mstart;
 	}
@@ -287,7 +295,7 @@ ne2000_attach(nsc, myea)
 		dsc->sc_media_init = dp8390_media_init;
 
 	if (dp8390_config(dsc)) {
-		aprint_error_dev(dsc->sc_dev, "setup failed\n");
+		printf("%s: setup failed\n", dsc->sc_dev.dv_xname);
 		return (1);
 	}
 
@@ -313,7 +321,7 @@ ne2000_detect(nict, nich, asict, asich)
 {
 	static u_int8_t test_pattern[32] = "THIS is A memory TEST pattern";
 	u_int8_t test_buffer[32], tmp;
-	int i, rv = NE2000_TYPE_UNKNOWN;
+	int i, rv = 0;
 
 	/* Reset the board. */
 #ifdef GWETHER
@@ -634,7 +642,7 @@ ne2000_write_mbuf(sc, m, buf)
 	if (maxwait == 0) {
 		log(LOG_WARNING,
 		    "%s: remote transmit DMA failed to complete\n",
-		    device_xname(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		dp8390_reset(sc);
 	}
 

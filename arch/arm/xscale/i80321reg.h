@@ -1,4 +1,4 @@
-/*	$NetBSD: i80321reg.h,v 1.17 2007/10/17 19:53:43 garbled Exp $	*/
+/*	$NetBSD: i80321reg.h,v 1.15 2005/12/11 12:16:51 christos Exp $	*/
 
 /*
  * Copyright (c) 2002 Wasabi Systems, Inc.
@@ -55,7 +55,6 @@
 
 #define	VERDE_OUT_DIRECT_WIN_BASE	0x00000000UL
 #define	VERDE_OUT_DIRECT_WIN_SIZE	0x80000000UL
-#define VERDE_OUT_DIRECT_WIN_SKIP	0x10000000UL
 
 #define	VERDE_OUT_XLATE_MEM_WIN_SIZE	0x04000000UL
 #define	VERDE_OUT_XLATE_IO_WIN_SIZE	0x00010000UL

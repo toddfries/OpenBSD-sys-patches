@@ -1,4 +1,4 @@
-# $NetBSD: GENERIC,v 1.107 2009/01/24 05:06:06 mrg Exp $
+# $NetBSD: GENERIC,v 1.97 2006/11/11 18:47:11 jmmv Exp $
 #
 # GENERIC machine description file
 # 
@@ -22,7 +22,7 @@ include		"arch/newsmips/conf/std.newsmips"
 
 options 	INCLUDE_CONFIG_FILE	# embed config file in kernel binary
 
-#ident 		"GENERIC-$Revision: 1.107 $"
+#ident 		"GENERIC-$Revision: 1.97 $"
 
 maxusers	16
 
@@ -34,10 +34,17 @@ options 	CPU_SINGLE		# no I/O processor
 
 # Standard system options
 options 	KTRACE			# system call tracing support
+#options 	SYSTRACE		# system call vetting via systrace(1)
 options 	SYSVMSG			# System V message queues
 options 	SYSVSEM			# System V semaphores
+#options 	SEMMNI=10		# number of semaphore identifiers
+#options 	SEMMNS=60		# number of semaphores in system
+#options 	SEMUME=10		# max number of undo entries per process
+#options 	SEMMNU=30		# number of undo structures in system
 options 	SYSVSHM			# System V shared memory
+#options 	SHMMAXPGS=1024		# 1024 pages is the default
 options 	P1003_1B_SEMAPHORE # p1003.1b semaphore support
+options 	LKM			# loadable kernel modules
 options 	NTP			# network time protocol
 options 	USERCONF		# userconf(4) support
 #options 	PIPE_SOCKETPAIR		# smaller, but slower pipe(2)
@@ -65,9 +72,7 @@ options 	COMPAT_14	# NetBSD 1.4 binary compatibility
 options 	COMPAT_15	# NetBSD 1.5 binary compatibility
 options 	COMPAT_16	# NetBSD 1.6 binary compatibility
 options 	COMPAT_20	# NetBSD 2.0 binary compatibility
-options 	COMPAT_30	# NetBSD 3.0 binary compatibility
-options 	COMPAT_40	# NetBSD 4.0 binary compatibility
-options 	COMPAT_50	# NetBSD 5.0 compatibility.
+options 	COMPAT_30	# NetBSD 3.0 compatibility.
 #options 	TCP_COMPAT_42	# 4.2BSD TCP/IP bug compat. Not recommended.
 #options 	EXEC_AOUT	# exec a.out binaries
 #options 	EXEC_ECOFF	# exec ecoff binaries
@@ -95,7 +100,7 @@ file-system	PTYFS		# /dev/pts/N support
 options 	NFSSERVER	# Sun NFS-compatible filesystem server
 options 	QUOTA		# FFS quotas
 #options 	FFS_EI		# FFS Endian Independant support
-options 	WAPBL		# File system journaling support - Experimental
+options 	SOFTDEP		# FFS soft updates support.
 #options	UFS_DIRHASH	# UFS Large Directory Hashing - Experimental
 #options 	FFS_NO_SNAPSHOT	# No FFS snapshot support
 
@@ -195,11 +200,6 @@ st*	at scsibus? target ? lun ?	# SCSI tapes
 cd*	at scsibus? target ? lun ?	# SCSI CD-ROMs
 ch*	at scsibus? target ? lun ?	# SCSI changer devices
 
-#
-# accept filters
-pseudo-device   accf_data		# "dataready" accept filter
-pseudo-device   accf_http		# "httpready" accept filter
-
 pseudo-device	loop			# loopback interface; required
 pseudo-device	pty			# pseudo-terminals
 pseudo-device	sl			# SLIP interfaces
@@ -216,7 +216,6 @@ pseudo-device	stf			# 6to4 IPv6 over IPv4 encapsulation
 pseudo-device	vlan			# IEEE 802.1q encapsulation
 pseudo-device	bridge			# simple inter-network bridging
 #options	BRIDGE_IPF		# bridge uses IP/IPv6 pfil hooks too
-pseudo-device	agr			# IEEE 802.3ad link aggregation
 pseudo-device	vnd			# disk-like interface to files
 #options 	VND_COMPRESSION		# compressed vnd(4)
 pseudo-device	ccd		4	# concatenated and striped disks

@@ -1,7 +1,7 @@
 /******************************************************************************
  *
  * Name: acresrc.h - Resource Manager function prototypes
- *       $Revision: 1.4 $
+ *       xRevision: 1.56 $
  *
  *****************************************************************************/
 
@@ -9,7 +9,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2008, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2006, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -125,13 +125,9 @@
 
 /*
  * If possible, pack the following structures to byte alignment, since we
- * don't care about performance for debug output. Two cases where we cannot
- * pack the structures:
- *
- * 1) Hardware does not support misaligned memory transfers
- * 2) Compiler does not support pointers within packed structures
+ * don't care about performance for debug output
  */
-#if (!defined(ACPI_MISALIGNMENT_NOT_SUPPORTED) && !defined(ACPI_PACKED_POINTERS_NOT_SUPPORTED))
+#ifndef ACPI_MISALIGNMENT_NOT_SUPPORTED
 #pragma pack(1)
 #endif
 
@@ -170,7 +166,6 @@ typedef const struct acpi_rsconvert_info
 #define ACPI_RSC_BITMASK16              18
 #define ACPI_RSC_EXIT_NE                19
 #define ACPI_RSC_EXIT_LE                20
-#define ACPI_RSC_EXIT_EQ                21
 
 /* Resource Conversion sub-opcodes */
 
@@ -188,7 +183,7 @@ typedef const struct acpi_rsdump_info
     UINT8                   Opcode;
     UINT8                   Offset;
     const char              *Name;
-    const char * const      *Pointer;
+    const char              **Pointer;
 
 } ACPI_RSDUMP_INFO;
 
@@ -258,17 +253,17 @@ AcpiRsCreatePciRoutingTable (
  */
 ACPI_STATUS
 AcpiRsGetPrtMethodData (
-    ACPI_NAMESPACE_NODE     *Node,
+    ACPI_HANDLE             Handle,
     ACPI_BUFFER             *RetBuffer);
 
 ACPI_STATUS
 AcpiRsGetCrsMethodData (
-    ACPI_NAMESPACE_NODE     *Node,
+    ACPI_HANDLE             Handle,
     ACPI_BUFFER             *RetBuffer);
 
 ACPI_STATUS
 AcpiRsGetPrsMethodData (
-    ACPI_NAMESPACE_NODE     *Node,
+    ACPI_HANDLE             Handle,
     ACPI_BUFFER             *RetBuffer);
 
 ACPI_STATUS
@@ -279,7 +274,7 @@ AcpiRsGetMethodData (
 
 ACPI_STATUS
 AcpiRsSetSrsMethodData (
-    ACPI_NAMESPACE_NODE     *Node,
+    ACPI_HANDLE             Handle,
     ACPI_BUFFER             *RetBuffer);
 
 
@@ -304,11 +299,9 @@ AcpiRsGetPciRoutingTableLength (
 
 ACPI_STATUS
 AcpiRsConvertAmlToResources (
-    UINT8                   *Aml,
-    UINT32                  Length,
-    UINT32                  Offset,
-    UINT8                   ResourceIndex,
-    void                    *Context);
+    UINT8                   *AmlBuffer,
+    UINT32                  AmlBufferLength,
+    UINT8                   *OutputBuffer);
 
 ACPI_STATUS
 AcpiRsConvertResourcesToAml (

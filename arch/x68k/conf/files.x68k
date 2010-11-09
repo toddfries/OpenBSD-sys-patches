@@ -1,4 +1,4 @@
-#	$NetBSD: files.x68k,v 1.69 2008/12/21 09:20:40 isaki Exp $
+#	$NetBSD: files.x68k,v 1.61 2005/12/11 12:19:37 christos Exp $
 #
 # new style config file for x68k architecture
 #
@@ -21,7 +21,6 @@ attach	mainbus at root
 
 device	cpu
 attach	cpu at mainbus
-file	arch/x68k/x68k/mainbus.c
 
 define	event {}
 file	arch/x68k/dev/event.c		event
@@ -98,10 +97,6 @@ device kbd: event
 attach	kbd at mfp
 file	arch/x68k/dev/kbd.c		kbd needs-flag
 
-device pow: sysmon_power, sysmon_taskq
-attach	pow at mfp
-file	arch/x68k/dev/pow.c		pow
-
 device rtc
 attach	rtc at intio
 file	arch/x68k/dev/rtclock.c		rtc
@@ -167,12 +162,13 @@ device	mha: scsi
 attach	mha at scsirom
 file	arch/x68k/dev/mha.c		mha needs-flag
 
-device	sram
-attach	sram at intio
-file	arch/x68k/dev/sram.c		sram
-
 defpseudo bell
 file	arch/x68k/dev/opmbell.c		bell needs-flag
+
+defpseudo sram
+file	arch/x68k/dev/sram.c		sram needs-flag
+defpseudo pow
+file	arch/x68k/dev/pow.c		pow needs-count
 
 # Nereid Ethernet
 attach	ne at intio with ne_intio: rtl80x9
@@ -197,6 +193,10 @@ include "compat/aoutm68k/files.aoutm68k"
 include	"compat/sunos/files.sunos"
 file	arch/m68k/m68k/sunos_machdep.c	compat_sunos
 
+# HP-UX Binary Compatibility (COMPAT_HPUX)
+include	"compat/hpux/files.hpux"
+file	arch/m68k/m68k/hpux_machdep.c	compat_hpux
+
 # SVR4 Binary Compatibility (COMPAT_SVR4)
 include "compat/svr4/files.svr4"
 
@@ -209,6 +209,7 @@ file arch/m68k/m68k/linux_trap.c	compat_linux
 include "compat/ossaudio/files.ossaudio"
 
 # USB support
+include "dev/wscons/files.wscons"
 include "dev/usb/files.usb"
 
 include "arch/x68k/conf/majors.x68k"

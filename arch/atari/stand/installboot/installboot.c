@@ -1,4 +1,4 @@
-/*	$NetBSD: installboot.c,v 1.22 2009/01/06 13:35:30 tsutsui Exp $	*/
+/*	$NetBSD: installboot.c,v 1.20 2005/12/11 12:17:00 christos Exp $	*/
 
 /*
  * Copyright (c) 1995 Waldi Ravens
@@ -59,7 +59,7 @@ static u_int	abcksum __P((void *));
 static void	setNVpref __P((void));
 static void	setIDEpar __P((u_int8_t *, size_t));
 static void	mkahdiboot __P((struct ahdi_root *, char *,
-						char *, u_int32_t));
+						char *, daddr_t));
 static void	mkbootblock __P((struct bootblock *, char *,
 				char *, struct disklabel *, u_int));
 static void	install_fd __P((char *, struct disklabel *));
@@ -98,7 +98,6 @@ main (argc, argv)
 {
 	struct disklabel dl;
 	char		 *dn;
-	char		 *devchr;
 	int		 fd, c;
 
 	/* check OS bootversion */
@@ -151,27 +150,23 @@ main (argc, argv)
 	if (close(fd))
 		err(EXIT_FAILURE, "%s", dn);
 
-	/* Eg: in /dev/fd0c, set devchr to point to the 'f' */
-	devchr = strrchr(dn, '/') + 1;
-	if (*devchr == 'r')
-		++devchr;
-
-	switch (*devchr) {
-		case 'f': /* fd */
+	switch (dl.d_type) {
+		case DTYPE_FLOPPY:
 			install_fd(dn, &dl);
 			break;
-		case 'w': /* wd */
+		case DTYPE_ST506:
+		case DTYPE_ESDI:
 			install_wd(dn, &dl);
 			setNVpref();
 			break;
-		case 's': /* sd */
+		case DTYPE_SCSI:
 			install_sd(dn, &dl);
 			setNVpref();
 			break;
 		default:
 			errx(EXIT_FAILURE,
-			     "%s: '%c': Device type not supported.",
-			     dn, *devchr);
+			     "%s: %s: Device type not supported.",
+			     dn, dktypenames[dl.d_type]);
 	}
 
 	return(EXIT_SUCCESS);
@@ -272,7 +267,7 @@ install_sd (devnm, label)
 	const char	 *machpath;
 	char		 *xxb00t, *xxboot, *bootxx;
 	struct disklabel rawlabel;
-	u_int32_t	 bbsec;
+	daddr_t		 bbsec;
 	u_int		 magic;
 
 	if (label->d_partitions[0].p_size == 0)
@@ -312,7 +307,7 @@ install_sd (devnm, label)
 	mkbootblock(&bootarea, xxboot, bootxx, label, magic);
 
 	if (!nowrite) {
-		off_t	bbo = (off_t)bbsec * AHDI_BSIZE;
+		off_t	bbo = bbsec * AHDI_BSIZE;
 		int	fd;
 
 		if ((fd = open(devnm, O_WRONLY)) < 0)
@@ -346,7 +341,7 @@ install_wd (devnm, label)
 	const char	 *machpath;
 	char		 *xxb00t, *xxboot, *bootxx;
 	struct disklabel rawlabel;
-	u_int32_t	 bbsec;
+	daddr_t		 bbsec;
 	u_int		 magic;
 
 	if (label->d_partitions[0].p_size == 0)
@@ -388,7 +383,7 @@ install_wd (devnm, label)
 		int	fd;
 		off_t	bbo;
 
-		bbo = (off_t)bbsec * AHDI_BSIZE;
+		bbo = bbsec * AHDI_BSIZE;
 		if ((fd = open(devnm, O_WRONLY)) < 0)
 			err(EXIT_FAILURE, "%s", devnm);
 		if (lseek(fd, bbo, SEEK_SET) != bbo)
@@ -418,7 +413,7 @@ mkahdiboot (newroot, xxb00t, devnm, bbsec)
 	struct ahdi_root *newroot;
 	char		 *xxb00t,
 			 *devnm;
-	u_int32_t	 bbsec;
+	daddr_t		 bbsec;
 {
 	struct ahdi_root tmproot;
 	struct ahdi_part *pd;

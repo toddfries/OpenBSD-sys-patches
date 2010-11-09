@@ -1,4 +1,4 @@
-/*	$NetBSD: pcibios.c,v 1.36 2008/04/28 20:23:25 martin Exp $	*/
+/*	$NetBSD: pcibios.c,v 1.32 2006/02/19 14:59:23 thorpej Exp $	*/
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -60,7 +67,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: pcibios.c,v 1.36 2008/04/28 20:23:25 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pcibios.c,v 1.32 2006/02/19 14:59:23 thorpej Exp $");
 
 #include "opt_pcibios.h"
 #include "opt_pcifixup.h"
@@ -224,14 +231,14 @@ pcibios_pir_init(void)
 {
 	char *devinfo;
 	paddr_t pa;
-	char *p;
+	caddr_t p;
 	unsigned char cksum;
 	uint16_t tablesize;
 	uint8_t rev_maj, rev_min;
 	int i;
 
 	for (pa = PCI_IRQ_TABLE_START; pa < PCI_IRQ_TABLE_END; pa += 16) {
-		p = (void *)ISA_HOLE_VADDR(pa);
+		p = (caddr_t)ISA_HOLE_VADDR(pa);
 		if (*(int *)p != BIOS32_MAKESIG('$', 'P', 'I', 'R')) {
 			/*
 			 * XXX: Some laptops (Toshiba/Libretto L series)
@@ -396,12 +403,12 @@ pcibios_get_intr_routing(struct pcibios_intr_routing *table,
 	int rv;
 	struct {
 		uint16_t size;
-		void *offset;
+		caddr_t offset;
 		uint16_t segment;
-	} __packed args;
+	} __attribute__((__packed__)) args;
 
 	args.size = *nentries * sizeof(*table);
-	args.offset = (void *)table;
+	args.offset = (caddr_t)table;
 	args.segment = GSEL(GDATA_SEL, SEL_KPL);
 
 	memset(table, 0, args.size);
@@ -663,8 +670,7 @@ pcibios_mm20_fixup(void)
 	tag = pci_make_tag(pc, MM20_PCI_BUS, MM20_PCI_EHCI_DEV,
 			   MM20_PCI_EHCI_FUNC);
 	/* Set interrupt register in EHCI controller */
-	pci_conf_write(pc, tag, PCI_INTERRUPT_REG,
-	    0x50000400 + MM20_PCI_EHCI_INTR);
+	pci_conf_write(pc, tag, 0x3c, 0x50000400 + MM20_PCI_EHCI_INTR);
 	tag = pci_make_tag(pc, MM20_PCI_BUS, MM20_PCI_ISA_DEV,
 			   MM20_PCI_ISA_FUNC);
 	/* Set some unknown registers in the ISA bridge. */

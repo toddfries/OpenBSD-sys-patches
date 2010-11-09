@@ -1,4 +1,4 @@
-/*	$NetBSD: mcclock_pad32.c,v 1.14 2008/01/03 23:02:25 joerg Exp $	*/
+/*	$NetBSD: mcclock_pad32.c,v 1.13 2005/12/11 12:21:20 christos Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995, 1996 Carnegie-Mellon University.
@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mcclock_pad32.c,v 1.14 2008/01/03 23:02:25 joerg Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mcclock_pad32.c,v 1.13 2005/12/11 12:21:20 christos Exp $");
 
 
 /*
@@ -49,7 +49,6 @@ __KERNEL_RCSID(0, "$NetBSD: mcclock_pad32.c,v 1.14 2008/01/03 23:02:25 joerg Exp
 #include <sys/kernel.h>
 #include <sys/systm.h>
 #include <sys/device.h>
-#include <dev/clock_subr.h>
 
 #include <machine/autoconf.h>
 #include <dev/dec/clockvar.h>

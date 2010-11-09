@@ -1,4 +1,4 @@
-/*	$NetBSD: irix_mount.c,v 1.22 2008/04/28 20:23:41 martin Exp $ */
+/*	$NetBSD: irix_mount.c,v 1.14 2006/07/23 22:06:08 ad Exp $ */
 
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: irix_mount.c,v 1.22 2008/04/28 20:23:41 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: irix_mount.c,v 1.14 2006/07/23 22:06:08 ad Exp $");
 
 #include <sys/types.h>
 #include <sys/signal.h>
@@ -51,12 +58,16 @@ __KERNEL_RCSID(0, "$NetBSD: irix_mount.c,v 1.22 2008/04/28 20:23:41 martin Exp $
 #include <compat/irix/irix_syscallargs.h>
 
 int
-irix_sys_getmountid(struct lwp *l, const struct irix_sys_getmountid_args *uap, register_t *retval)
+irix_sys_getmountid(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct irix_sys_getmountid_args /* {
 		syscallarg(const char *) path;
 		syscallarg(irix_mountid_t *) buf;
-	} */
+	} */ *uap = v;
+	caddr_t sg = stackgap_init(l->l_proc, 0);
 	kauth_cred_t cred;
 	struct vnode *vp;
 	int error = 0;
@@ -64,20 +75,22 @@ irix_sys_getmountid(struct lwp *l, const struct irix_sys_getmountid_args *uap, r
 	irix_mountid_t mountid;
 	void *addr;
 
+	CHECK_ALT_EXIST(l, &sg, SCARG(uap, path));
+
 	cred = kauth_cred_dup(l->l_cred);
 	kauth_cred_seteuid(cred, kauth_cred_getuid(l->l_cred));
 	kauth_cred_setegid(cred, kauth_cred_getgid(l->l_cred));
 
 	/* Get the vnode for the requested path */
-	NDINIT(&nd, LOOKUP, FOLLOW | LOCKLEAF | TRYEMULROOT, UIO_USERSPACE,
-	    SCARG(uap, path));
+	NDINIT(&nd, LOOKUP, FOLLOW | LOCKLEAF, UIO_USERSPACE,
+	    SCARG(uap, path), l);
 	nd.ni_cnd.cn_cred = cred;
 	if ((error = namei(&nd)) != 0)
 		goto out;
 	vp = nd.ni_vp;
 
 	/* Check for accessibility */
-	if ((error = VOP_ACCESS(vp, VREAD | VEXEC, cred)) != 0)
+	if ((error = VOP_ACCESS(vp, VREAD | VEXEC, cred, l)) != 0)
 		goto bad;
 
 	/*

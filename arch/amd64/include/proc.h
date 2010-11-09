@@ -1,4 +1,4 @@
-/*	$NetBSD: proc.h,v 1.11 2008/10/26 00:08:15 mrg Exp $	*/
+/*	$NetBSD: proc.h,v 1.5 2005/12/24 20:06:47 perry Exp $	*/
 
 /*
  * Copyright (c) 1991 Regents of the University of California.
@@ -34,29 +34,22 @@
 #ifndef _AMD64_PROC_H
 #define _AMD64_PROC_H
 
-#ifdef __x86_64__
-
-#include <sys/user.h> /* for sizeof(struct user) */
 #include <machine/frame.h>
 
 /*
- * Machine-dependent part of the lwp structure for amd64.
+ * Machine-dependent part of the proc structure for amd64.
  */
-struct pmap;
-struct vm_page;
-
 struct mdlwp {
 	struct	trapframe *md_regs;	/* registers on current frame */
-	struct pmap *md_gc_pmap;	/* pmap being garbage collected */
-	struct vm_page *md_gc_ptp;	/* pages from pmap g/c */
 	int	md_flags;		/* machine-dependent flags */
-	volatile int md_astpending;
+	int	md_tss_sel;		/* TSS selector */
 };
 
 struct mdproc {
 	int	md_flags;
 					/* Syscall handling function */
 	void	(*md_syscall) __P((struct trapframe *));
+	volatile int md_astpending;
 };
 
 /* md_flags */
@@ -65,15 +58,5 @@ struct mdproc {
 #define MDP_SYSCALL	0x0004	/* entered kernel via syscall ins */
 #define MDP_USEDMTRR	0x0008	/* has set volatile MTRRs */
 #define MDP_IRET	0x0010	/* return via iret, not sysret */
-
-#define	UAREA_USER_OFFSET	(USPACE - ALIGN(sizeof(struct user)))
-#define	KSTACK_LOWEST_ADDR(l)	((void *)USER_TO_UAREA((l)->l_addr))
-#define	KSTACK_SIZE		UAREA_USER_OFFSET
-
-#else	/*	__x86_64__	*/
-
-#include <i386/proc.h>
-
-#endif	/*	__x86_64__	*/
 
 #endif /* _AMD64_PROC_H */

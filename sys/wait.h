@@ -1,4 +1,4 @@
-/*	$NetBSD: wait.h,v 1.26 2009/01/11 02:45:56 christos Exp $	*/
+/*	$NetBSD: wait.h,v 1.25 2007/05/07 16:53:17 dsl Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1989, 1993, 1994
@@ -175,10 +175,8 @@ struct rusage;	/* forward declaration */
 pid_t	wait(int *);
 pid_t	waitpid(pid_t, int *, int);
 #if defined(_XOPEN_SOURCE) || defined(_NETBSD_SOURCE)
-#ifndef __LIBC12_SOURCE__
-pid_t	wait3(int *, int, struct rusage *) __RENAME(__wait350);
-pid_t	wait4(pid_t, int *, int, struct rusage *) __RENAME(__wait450);
-#endif
+pid_t	wait3(int *, int, struct rusage *);
+pid_t	wait4(pid_t, int *, int, struct rusage *);
 #endif
 __END_DECLS
 #endif

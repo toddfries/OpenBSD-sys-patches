@@ -4,15 +4,20 @@ D/netbt////
 D/conf////
 D/dev////
 D/coda////
+D/codeset////
 D/compat////
+D/contrib////
 D/crypto////
 D/ddb////
 D/dist////
 D/fs////
 D/gdbscripts////
 D/ipkdb////
+D/isofs////
 D/kern////
 D/lib////
+D/libkern////
+D/lkm////
 D/miscfs////
 D/net////
 D/net80211////
@@ -34,5 +39,4 @@ D/ufs////
 D/uvm////
 D/modules////
 D/rump////
-D/external////
-/Makefile/1.75/Wed Dec 31 23:23:20 2008//
+/Makefile/1.76/Tue Nov  9 20:55:29 2010//

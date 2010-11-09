@@ -1,4 +1,4 @@
-/*	$NetBSD: evtchn.h,v 1.17 2008/10/24 21:09:24 jym Exp $	*/
+/*	$NetBSD: evtchn.h,v 1.13 2006/12/08 15:05:18 yamt Exp $	*/
 
 /*
  *
@@ -39,23 +39,16 @@
 extern struct evtsource *evtsource[];
 
 void events_default_setup(void);
-void events_init(void);
+void init_events(void);
 unsigned int evtchn_do_event(int, struct intrframe *);
 void call_evtchn_do_event(int, struct intrframe *);
-void call_xenevt_event(int);
 int event_set_handler(int, int (*func)(void *), void *, int, const char *);
 int event_remove_handler(int, int (*func)(void *), void *);
 
-struct intrhand;
-void event_set_iplhandler(struct intrhand *, int);
-
-extern int debug_port;
-extern int xen_debug_handler(void *);
-
 int bind_virq_to_evtch(int);
 int bind_pirq_to_evtch(int);
-int unbind_pirq_from_evtch(int);
-int unbind_virq_from_evtch(int);
+void unbind_pirq_from_evtch(int);
+void unbind_virq_from_evtch(int);
 
 struct pintrhand {
 	int pirq;

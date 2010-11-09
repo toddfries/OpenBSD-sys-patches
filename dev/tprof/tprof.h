@@ -1,4 +1,4 @@
-/*	$NetBSD: tprof.h,v 1.2 2009/03/10 14:45:02 yamt Exp $	*/
+/*	$NetBSD: tprof.h,v 1.4 2009/11/18 12:24:05 yamt Exp $	*/
 
 /*-
  * Copyright (c)2008,2009 YAMAMOTO Takashi,
@@ -32,16 +32,19 @@
 typedef struct tprof_backend_cookie tprof_backend_cookie_t;
 
 typedef struct tprof_backend_ops {
-	uint64_t (*tbo_estimate_freq)(void);
+	uint64_t (*tbo_estimate_freq)(void);	/* samples per second */
 	int (*tbo_start)(tprof_backend_cookie_t *);
 	void (*tbo_stop)(tprof_backend_cookie_t *);
 } tprof_backend_ops_t;
 
-#define	TPROF_BACKEND_VERSION	1
+#define	TPROF_BACKEND_VERSION	2
 int tprof_backend_register(const char *, const tprof_backend_ops_t *, int);
 int tprof_backend_unregister(const char *);
 
-struct trapframe;
-void tprof_sample(tprof_backend_cookie_t *, const struct trapframe *);
+typedef struct {
+	uintptr_t tfi_pc;
+} tprof_frame_info_t;
+
+void tprof_sample(tprof_backend_cookie_t *, const tprof_frame_info_t *);
 
 #endif /* _DEV_TPROF_TPROF_H_ */

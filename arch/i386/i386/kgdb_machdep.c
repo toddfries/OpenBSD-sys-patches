@@ -1,4 +1,4 @@
-/*	$NetBSD: kgdb_machdep.c,v 1.19 2009/01/11 10:20:54 cegger Exp $	*/
+/*	$NetBSD: kgdb_machdep.c,v 1.15 2005/12/24 20:07:10 perry Exp $	*/
 
 /*-
  * Copyright (c) 1997 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -61,9 +68,10 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kgdb_machdep.c,v 1.19 2009/01/11 10:20:54 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kgdb_machdep.c,v 1.15 2005/12/24 20:07:10 perry Exp $");
 
 #include "opt_ddb.h"
+#include "opt_largepages.h"
 
 /*
  * Machine-dependent functions for remote KGDB.  Originally written
@@ -103,9 +111,11 @@ kgdb_acc(va, len)
 			pte = kvtopte(va);
 		if ((*pte & PG_V) == 0)
 			return (0);
+#ifdef LARGEPAGES
 		if (*pte & PG_PS)
-			va = (va & PG_LGFRAME) + NBPD_L2;
+			va = (va & PG_LGFRAME) + NBPD;
 		else
+#endif
 			va += PAGE_SIZE;
 	} while (va < last_va);
 
@@ -189,7 +199,7 @@ kgdb_getregs(regs, gdb_regs)
 		 */
 		gdb_regs[ 4] = (kgdb_reg_t)&regs->tf_esp; /* kernel stack
 							     pointer */
-		gdb_regs[11] = x86_getss();
+		__asm volatile("movw %%ss,%w0" : "=r" (gdb_regs[11]));
 	}
 }
 
@@ -229,9 +239,11 @@ kgdb_setregs(regs, gdb_regs)
  * noting on the console why nothing else is going on.
  */
 void
-kgdb_connect(int verbose)
+kgdb_connect(verbose)
+	int verbose;
 {
-	if (kgdb_dev == NODEV)
+
+	if (kgdb_dev < 0)
 		return;
 
 	if (verbose)
@@ -250,9 +262,9 @@ kgdb_connect(int verbose)
  * (This is called by panic, like Debugger())
  */
 void
-kgdb_panic(void)
+kgdb_panic()
 {
-	if (kgdb_dev != NODEV && kgdb_debug_panic) {
+	if (kgdb_dev >= 0 && kgdb_debug_panic) {
 		printf("entering kgdb\n");
 		kgdb_connect(kgdb_active == 0);
 	}

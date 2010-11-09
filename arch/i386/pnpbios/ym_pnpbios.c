@@ -1,4 +1,4 @@
-/* $NetBSD: ym_pnpbios.c,v 1.14 2008/04/04 22:18:05 cegger Exp $ */
+/* $NetBSD: ym_pnpbios.c,v 1.13 2006/11/16 01:32:39 christos Exp $ */
 /*
  * Copyright (c) 1999
  *	Matthias Drochner.  All rights reserved.
@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ym_pnpbios.c,v 1.14 2008/04/04 22:18:05 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ym_pnpbios.c,v 1.13 2006/11/16 01:32:39 christos Exp $");
 
 #include "mpu_ym.h"
 
@@ -132,12 +132,12 @@ ym_pnpbios_attach(struct device *parent, struct device *self,
 	printf("\n");
 	pnpbios_print_devres(self, aa);
 
-	printf("%s", device_xname(self));
+	printf("%s", self->dv_xname);
 
 	ac->sc_iot = sc->sc_iot;
 	if (bus_space_subregion(sc->sc_iot, sc->sc_ioh, WSS_CODEC, AD1848_NPORT,
 	    &ac->sc_ioh)) {
-		aprint_error_dev(self, "bus_space_subregion failed\n");
+		printf("%s: bus_space_subregion failed\n", self->dv_xname);
 		return;
 	}
 	ac->mode = 2;

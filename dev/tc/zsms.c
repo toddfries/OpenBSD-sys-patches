@@ -1,4 +1,4 @@
-/*	$NetBSD: zsms.c,v 1.17 2008/03/29 19:15:36 tsutsui Exp $	*/
+/*	$NetBSD: zsms.c,v 1.16 2007/03/04 06:02:47 christos Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -45,7 +45,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: zsms.c,v 1.17 2008/03/29 19:15:36 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: zsms.c,v 1.16 2007/03/04 06:02:47 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -82,7 +82,7 @@ __KERNEL_RCSID(0, "$NetBSD: zsms.c,v 1.17 2008/03/29 19:15:36 tsutsui Exp $");
 #define ZSMS_BPS 4800
 
 struct zsms_softc {		/* driver status information */
-	device_t zsms_dev;	/* required first: base device */
+	struct	device zsms_dev;	/* required first: base device */
 	struct	zs_chanstate *zsms_cs;
 
 	/* Flags to communicate with zsms_softintr() */
@@ -110,11 +110,11 @@ struct zsms_softc {		/* driver status information */
 
 static struct zsops zsops_zsms;
 
-static int  zsms_match(device_t, cfdata_t, void *);
-static void zsms_attach(device_t, device_t, void *);
+static int  zsms_match(struct device *, struct cfdata *, void *);
+static void zsms_attach(struct device *, struct device *, void *);
 static void zsms_input(void *, int);
 
-CFATTACH_DECL_NEW(zsms, sizeof(struct zsms_softc),
+CFATTACH_DECL(zsms, sizeof(struct zsms_softc),
     zsms_match, zsms_attach, NULL, NULL);
 
 static int  zsms_enable(void *);
@@ -128,7 +128,7 @@ static const struct wsmouse_accessops zsms_accessops = {
 };
 
 static int
-zsms_match(device_t parent, cfdata_t cf, void *aux)
+zsms_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct zsc_attach_args *args = aux;
 
@@ -144,7 +144,7 @@ zsms_match(device_t parent, cfdata_t cf, void *aux)
 }
 
 static void
-zsms_attach(device_t parent, device_t self, void *aux)
+zsms_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct zsc_softc *zsc = device_private(parent);
 	struct zsms_softc *zsms = device_private(self);
@@ -153,13 +153,12 @@ zsms_attach(device_t parent, device_t self, void *aux)
 	struct wsmousedev_attach_args a;
 	int s;
 
-	zsms->zsms_dev = self;
 	cs = zsc->zsc_cs[args->channel];
 	cs->cs_private = zsms;
 	cs->cs_ops = &zsops_zsms;
 	zsms->zsms_cs = cs;
 
-	aprint_normal("\n");
+	printf("\n");
 
 	/* Initialize the speed, etc. */
 	s = splzs();
@@ -288,7 +287,7 @@ zsms_rxint(struct zs_chanstate *cs)
 {
 	struct zsms_softc *zsms;
 	int put, put_next;
-	uint8_t c, rr1;
+	u_char c, rr1;
 
 	zsms = cs->cs_private;
 	put = zsms->zsms_rbput;
@@ -396,7 +395,7 @@ zsms_softint(struct zs_chanstate *cs)
 			intr_flags |= INTR_RX_OVERRUN;
 		if (ring_data & (ZSRR1_FE | ZSRR1_PE)) {
 			log(LOG_ERR, "%s: input error (0x%x)\n",
-			    device_xname(zsms->zsms_dev), ring_data);
+				zsms->zsms_dev.dv_xname, ring_data);
 			c = -1;	/* signal input error */
 		}
 
@@ -405,7 +404,7 @@ zsms_softint(struct zs_chanstate *cs)
 	}
 	if (intr_flags & INTR_RX_OVERRUN) {
 		log(LOG_ERR, "%s: input overrun\n",
-		    device_xname(zsms->zsms_dev));
+		    zsms->zsms_dev.dv_xname);
 	}
 	zsms->zsms_rbget = get;
 
@@ -414,7 +413,7 @@ zsms_softint(struct zs_chanstate *cs)
 		 * Transmit done.  (Not expected.)
 		 */
 		log(LOG_ERR, "%s: transmit interrupt?\n",
-		    device_xname(zsms->zsms_dev));
+		    zsms->zsms_dev.dv_xname);
 	}
 
 	if (intr_flags & INTR_ST_CHECK) {
@@ -422,7 +421,7 @@ zsms_softint(struct zs_chanstate *cs)
 		 * Status line change.  (Not expected.)
 		 */
 		log(LOG_ERR, "%s: status interrupt?\n",
-		    device_xname(zsms->zsms_dev));
+		    zsms->zsms_dev.dv_xname);
 		cs->cs_rr0_delta = 0;
 	}
 

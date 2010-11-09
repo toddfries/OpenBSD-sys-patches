@@ -1,4 +1,4 @@
-/*	$NetBSD: lockstat.c,v 1.15 2008/04/28 20:23:46 martin Exp $	*/
+/*	$NetBSD: lockstat.c,v 1.11 2007/11/06 18:02:43 ad Exp $	*/
 
 /*-
  * Copyright (c) 2006, 2007 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -40,10 +47,11 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: lockstat.c,v 1.15 2008/04/28 20:23:46 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: lockstat.c,v 1.11 2007/11/06 18:02:43 ad Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
+#include <sys/lock.h>
 #include <sys/proc.h> 
 #include <sys/resourcevar.h>
 #include <sys/systm.h>
@@ -51,11 +59,8 @@ __KERNEL_RCSID(0, "$NetBSD: lockstat.c,v 1.15 2008/04/28 20:23:46 martin Exp $")
 #include <sys/kmem.h>
 #include <sys/conf.h>
 #include <sys/syslog.h>
-#include <sys/atomic.h>
 
 #include <dev/lockstat.h>
-
-#include <machine/lock.h>
 
 #ifndef __HAVE_CPU_COUNTER
 #error CPU counters not available
@@ -204,10 +209,10 @@ lockstat_start(lsenable_t *le)
 	lockstat_lockstart = le->le_lockstart;
 	lockstat_lockstart = le->le_lockstart;
 	lockstat_lockend = le->le_lockend;
-	membar_sync();
+	mb_memory();
 	getnanotime(&lockstat_stime);
 	lockstat_enabled = le->le_mask;
-	membar_producer();
+	mb_write();
 }
 
 /*
@@ -221,7 +226,6 @@ lockstat_stop(lsdisable_t *ld)
 	u_int cpuno, overflow;
 	struct timespec ts;
 	int error;
-	lwp_t *l;
 
 	KASSERT(lockstat_enabled);
 
@@ -230,7 +234,7 @@ lockstat_stop(lsdisable_t *ld)
 	 * to exit lockstat_event().
 	 */
 	lockstat_enabled = 0;
-	membar_producer();
+	mb_write();
 	getnanotime(&ts);
 	tsleep(&lockstat_stop, PPAUSE, "lockstat", mstohz(10));
 
@@ -249,15 +253,6 @@ lockstat_stop(lsdisable_t *ld)
 		error = 0;
 
 	lockstat_init_tables(NULL);
-
-	/* Run through all LWPs and clear the slate for the next run. */
-	mutex_enter(proc_lock);
-	LIST_FOREACH(l, &alllwp, l_list) {
-		l->l_pfailaddr = 0;
-		l->l_pfailtime = 0;
-		l->l_pfaillock = 0;
-	}
-	mutex_exit(proc_lock);
 
 	if (ld == NULL)
 		return error;

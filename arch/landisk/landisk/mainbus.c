@@ -1,4 +1,4 @@
-/*	$NetBSD: mainbus.c,v 1.3 2008/04/28 20:23:26 martin Exp $	*/
+/*	$NetBSD: mainbus.c,v 1.1 2006/09/01 21:26:18 uwe Exp $	*/
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -12,6 +12,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -27,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mainbus.c,v 1.3 2008/04/28 20:23:26 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mainbus.c,v 1.1 2006/09/01 21:26:18 uwe Exp $");
 
 #include "obio.h"
 #include "pci.h"
@@ -41,19 +48,19 @@ __KERNEL_RCSID(0, "$NetBSD: mainbus.c,v 1.3 2008/04/28 20:23:26 martin Exp $");
 
 #include <landisk/dev/obiovar.h>
 
-static int mainbus_match(device_t, cfdata_t, void *);
-static void mainbus_attach(device_t, device_t, void *);
+static int mainbus_match(struct device *, struct cfdata *, void *);
+static void mainbus_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(mainbus, 0,
+CFATTACH_DECL(mainbus, sizeof(struct device),
     mainbus_match, mainbus_attach, NULL, NULL);
 
 static int mainbus_print(void *, const char *);
 
 /* There can be only one. */
-static int mainbus_found = 0;
+int mainbus_found = 0;
 
 static int
-mainbus_match(device_t parent, cfdata_t cf, void *aux)
+mainbus_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 
 	if (mainbus_found)
@@ -63,7 +70,7 @@ mainbus_match(device_t parent, cfdata_t cf, void *aux)
 }
 
 static void
-mainbus_attach(device_t parent, device_t self, void *aux)
+mainbus_attach(struct device *parent, struct device *self, void *aux)
 {
 	union {
 		struct mainbus_attach_args mba_mba;
@@ -73,8 +80,7 @@ mainbus_attach(device_t parent, device_t self, void *aux)
 
 	mainbus_found = 1;
 
-	aprint_naive("\n");
-	aprint_normal("\n");
+	printf("\n");
 
 	/* CPU */
 	memset(&mba, 0, sizeof(mba));

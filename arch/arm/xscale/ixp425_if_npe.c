@@ -1,4 +1,4 @@
-/*	$NetBSD: ixp425_if_npe.c,v 1.11 2009/03/10 17:09:48 msaitoh Exp $ */
+/*	$NetBSD: ixp425_if_npe.c,v 1.2 2006/12/10 10:30:55 scw Exp $	*/
 
 /*-
  * Copyright (c) 2006 Sam Leffler.  All rights reserved.
@@ -28,7 +28,7 @@
 #if 0
 __FBSDID("$FreeBSD: src/sys/arm/xscale/ixp425/if_npe.c,v 1.1 2006/11/19 23:55:23 sam Exp $");
 #endif
-__KERNEL_RCSID(0, "$NetBSD: ixp425_if_npe.c,v 1.11 2009/03/10 17:09:48 msaitoh Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ixp425_if_npe.c,v 1.2 2006/12/10 10:30:55 scw Exp $");
 
 /*
  * Intel XScale NPE Ethernet driver.
@@ -59,7 +59,6 @@ __KERNEL_RCSID(0, "$NetBSD: ixp425_if_npe.c,v 1.11 2009/03/10 17:09:48 msaitoh E
 #include <sys/socket.h>
 #include <sys/endian.h>
 #include <sys/ioctl.h>
-#include <sys/syslog.h>
 
 #include <machine/bus.h>
 
@@ -103,7 +102,6 @@ struct npedma {
 struct npe_softc {
 	struct device	sc_dev;
 	struct ethercom	sc_ethercom;
-	uint8_t		sc_enaddr[ETHER_ADDR_LEN];
 	struct mii_data	sc_mii;
 	bus_space_tag_t	sc_iot;		
 	bus_dma_tag_t	sc_dt;
@@ -194,8 +192,8 @@ static void	npe_deactivate(struct npe_softc *);
 #endif
 static int	npe_ifmedia_change(struct ifnet *ifp);
 static void	npe_ifmedia_status(struct ifnet *ifp, struct ifmediareq *ifmr);
-static void	npe_setmac(struct npe_softc *sc, const u_char *eaddr);
-static void	npe_getmac(struct npe_softc *sc);
+static void	npe_setmac(struct npe_softc *sc, u_char *eaddr);
+static void	npe_getmac(struct npe_softc *sc, u_char *eaddr);
 static void	npe_txdone(int qid, void *arg);
 static int	npe_rxbuf_init(struct npe_softc *, struct npebuf *,
 			struct mbuf *);
@@ -204,7 +202,7 @@ static int	npeinit(struct ifnet *);
 static void	npestart(struct ifnet *);
 static void	npestop(struct ifnet *, int);
 static void	npewatchdog(struct ifnet *);
-static int	npeioctl(struct ifnet * ifp, u_long, void *);
+static int	npeioctl(struct ifnet * ifp, u_long, caddr_t);
 
 static int	npe_setrxqosentry(struct npe_softc *, int classix,
 			int trafclass, int qid);
@@ -234,17 +232,8 @@ static int	npe_debug;
 #define	ETHER_ALIGN	2	/* XXX: Ditch this */
 #endif
 
-#define MAC2UINT64(addr)	(((uint64_t)addr[0] << 40)	\
-				    + ((uint64_t)addr[1] << 32)	\
-				    + ((uint64_t)addr[2] << 24)	\
-				    + ((uint64_t)addr[3] << 16)	\
-				    + ((uint64_t)addr[4] << 8)	\
-				    + (uint64_t)addr[5])
-
 /* NB: all tx done processing goes through one queue */
 static int tx_doneqid = -1;
-
-void (*npe_getmac_md)(int, uint8_t *);
 
 static int npe_match(struct device *, struct cfdata *, void *);
 static void npe_attach(struct device *, struct device *, void *);
@@ -266,6 +255,7 @@ npe_attach(struct device *parent, struct device *self, void *arg)
 	struct npe_softc *sc = (void *)self;
 	struct ixpnpe_attach_args *na = arg;
 	struct ifnet *ifp;
+	u_char eaddr[6];
 
 	aprint_naive("\n");
 	aprint_normal(": Ethernet co-processor\n");
@@ -279,7 +269,7 @@ npe_attach(struct device *parent, struct device *self, void *arg)
 	memset(&sc->sc_ethercom, 0, sizeof(sc->sc_ethercom));
 	memset(&sc->sc_mii, 0, sizeof(sc->sc_mii));
 
-	callout_init(&sc->sc_tick_ch, 0);
+	callout_init(&sc->sc_tick_ch);
 
 	if (npe_activate(sc)) {
 		aprint_error("%s: Failed to activate NPE (missing "
@@ -292,10 +282,10 @@ npe_attach(struct device *parent, struct device *self, void *arg)
 	 * XXXSCW: Ethernet yet. We must check for a property set by
 	 * XXXSCW: board-specific code.
 	 */
-	npe_getmac(sc);
+	npe_getmac(sc, eaddr);
 
 	aprint_normal("%s: Ethernet address %s\n", sc->sc_dev.dv_xname,
-	    ether_sprintf(sc->sc_enaddr));
+	    ether_sprintf(eaddr));
 
 	ifp = &sc->sc_ethercom.ec_if;
 	ifmedia_init(&sc->sc_mii.mii_media, 0, npe_ifmedia_change,
@@ -306,7 +296,6 @@ npe_attach(struct device *parent, struct device *self, void *arg)
 		sc->sc_mii.mii_readreg = npe_miibus_readreg;
 		sc->sc_mii.mii_writereg = npe_miibus_writereg;
 		sc->sc_mii.mii_statchg = npe_miibus_statchg;
-		sc->sc_ethercom.ec_mii = &sc->sc_mii;
 
 		mii_attach(&sc->sc_dev, &sc->sc_mii, 0xffffffff,
 		    (sc->sc_phy > IXPNPECF_PHY_DEFAULT) ?
@@ -329,11 +318,8 @@ npe_attach(struct device *parent, struct device *self, void *arg)
 	ifp->if_stop = npestop;
 	IFQ_SET_READY(&ifp->if_snd);
 
-	/* VLAN capable */
-	sc->sc_ethercom.ec_capabilities |= ETHERCAP_VLAN_MTU;
-
 	if_attach(ifp);
-	ether_ifattach(ifp, sc->sc_enaddr);
+	ether_ifattach(ifp, eaddr);
 }
 
 /*
@@ -344,12 +330,7 @@ npe_setmcast(struct npe_softc *sc)
 {
 	struct ifnet *ifp = &sc->sc_ethercom.ec_if;
 	uint8_t mask[ETHER_ADDR_LEN], addr[ETHER_ADDR_LEN];
-	uint32_t reg;
 	int i;
-
-	/* Always use filter. Is here a correct position? */
-	reg = RD4(sc, NPE_MAC_RX_CNTRL1);
-	WR4(sc, NPE_MAC_RX_CNTRL1, reg | NPE_RX_CNTRL1_ADDR_FLTR_EN);
 
 	if (ifp->if_flags & IFF_PROMISC) {
 		memset(mask, 0, ETHER_ADDR_LEN);
@@ -404,10 +385,10 @@ npe_dma_setup(struct npe_softc *sc, struct npedma *dma,
 {
 	bus_dma_segment_t seg;
 	int rseg, error, i;
-	void *hwbuf;
+	caddr_t hwbuf;
 	size_t size;
 
-	memset(dma, 0, sizeof(*dma));
+	memset(dma, 0, sizeof(dma));
 
 	dma->name = name;
 	dma->nbuf = nbuf;
@@ -473,7 +454,7 @@ npe_dma_setup(struct npe_softc *sc, struct npedma *dma,
 		npe->ix_neaddr = dma->buf_phys +
 			((uintptr_t)hw - (uintptr_t)dma->hwbuf);
 		KASSERT((npe->ix_neaddr & 0x1f) == 0);
-		error = bus_dmamap_create(sc->sc_dt, MCLBYTES, maxseg,
+		error = bus_dmamap_create(sc->sc_dt, MCLBYTES, 1,
 		    MCLBYTES, 0, 0, &npe->ix_map);
 		if (error != 0) {
 			printf("%s: unable to create dmamap for %s buffer %u, "
@@ -503,7 +484,7 @@ npe_dma_destroy(struct npe_softc *sc, struct npedma *dma)
 			bus_dmamap_destroy(sc->sc_dt, npe->ix_map);
 		}
 		bus_dmamap_unload(sc->sc_dt, dma->buf_map);
-		bus_dmamem_free(sc->sc_dt, (void *)dma->hwbuf, dma->buf_map);
+		bus_dmamem_free(sc->sc_dt, (caddr_t)dma->hwbuf, dma->buf_map);
 		bus_dmamap_destroy(sc->sc_dt, dma->buf_map);
 	}
 	if (dma->buf != NULL)
@@ -518,7 +499,7 @@ npe_activate(struct npe_softc *sc)
 	bus_dma_segment_t seg;
 	int unit = sc->sc_unit;
 	int error, i, rseg;
-	void *statbuf;
+	caddr_t statbuf;
 
 	/* load NPE firmware and start it running */
 	error = ixpnpe_init(sc->sc_npe, "npe_fw", npeconfig[unit].imageid);
@@ -679,9 +660,9 @@ npe_ifmedia_change(struct ifnet *ifp)
 {
 	struct npe_softc *sc = ifp->if_softc;
 
-	if (sc->sc_phy > IXPNPECF_PHY_DEFAULT)
-		return ether_mediachange(ifp);
-	return 0;
+	if (sc->sc_phy > IXPNPECF_PHY_DEFAULT && ifp->if_flags & IFF_UP)
+		mii_mediachg(&sc->sc_mii);
+	return (0);
 }
 
 /*
@@ -751,36 +732,27 @@ npe_tick(void *xsc)
 }
 
 static void
-npe_setmac(struct npe_softc *sc, const u_char *eaddr)
+npe_setmac(struct npe_softc *sc, u_char *eaddr)
 {
-
 	WR4(sc, NPE_MAC_UNI_ADDR_1, eaddr[0]);
 	WR4(sc, NPE_MAC_UNI_ADDR_2, eaddr[1]);
 	WR4(sc, NPE_MAC_UNI_ADDR_3, eaddr[2]);
 	WR4(sc, NPE_MAC_UNI_ADDR_4, eaddr[3]);
 	WR4(sc, NPE_MAC_UNI_ADDR_5, eaddr[4]);
 	WR4(sc, NPE_MAC_UNI_ADDR_6, eaddr[5]);
+
 }
 
 static void
-npe_getmac(struct npe_softc *sc)
+npe_getmac(struct npe_softc *sc, u_char *eaddr)
 {
-	uint8_t *eaddr = sc->sc_enaddr;
-
-	if (npe_getmac_md != NULL) {
-		(*npe_getmac_md)(sc->sc_dev.dv_unit, eaddr);
-	} else {
-		/*
-		 * Some system's unicast address appears to be loaded from
-		 * EEPROM on reset
-		 */
-		eaddr[0] = RD4(sc, NPE_MAC_UNI_ADDR_1) & 0xff;
-		eaddr[1] = RD4(sc, NPE_MAC_UNI_ADDR_2) & 0xff;
-		eaddr[2] = RD4(sc, NPE_MAC_UNI_ADDR_3) & 0xff;
-		eaddr[3] = RD4(sc, NPE_MAC_UNI_ADDR_4) & 0xff;
-		eaddr[4] = RD4(sc, NPE_MAC_UNI_ADDR_5) & 0xff;
-		eaddr[5] = RD4(sc, NPE_MAC_UNI_ADDR_6) & 0xff;
-	}
+	/* NB: the unicast address appears to be loaded from EEPROM on reset */
+	eaddr[0] = RD4(sc, NPE_MAC_UNI_ADDR_1) & 0xff;
+	eaddr[1] = RD4(sc, NPE_MAC_UNI_ADDR_2) & 0xff;
+	eaddr[2] = RD4(sc, NPE_MAC_UNI_ADDR_3) & 0xff;
+	eaddr[3] = RD4(sc, NPE_MAC_UNI_ADDR_4) & 0xff;
+	eaddr[4] = RD4(sc, NPE_MAC_UNI_ADDR_5) & 0xff;
+	eaddr[5] = RD4(sc, NPE_MAC_UNI_ADDR_6) & 0xff;
 }
 
 struct txdone {
@@ -877,11 +849,10 @@ npe_rxbuf_init(struct npe_softc *sc, struct npebuf *npe, struct mbuf *m)
 		if (m == NULL)
 			return ENOBUFS;
 	}
-	KASSERT(m->m_ext.ext_size >= (NPE_FRAME_SIZE_DEFAULT + ETHER_ALIGN));
-	m->m_pkthdr.len = m->m_len = NPE_FRAME_SIZE_DEFAULT;
+	KASSERT(m->m_ext.ext_size >= (1536 + ETHER_ALIGN));
+	m->m_pkthdr.len = m->m_len = 1536;
 	/* backload payload and align ip hdr */
-	m->m_data = m->m_ext.ext_buf + (m->m_ext.ext_size
-	    - (NPE_FRAME_SIZE_DEFAULT + ETHER_ALIGN));
+	m->m_data = m->m_ext.ext_buf + (m->m_ext.ext_size - (1536+ETHER_ALIGN));
 	error = bus_dmamap_load_mbuf(sc->sc_dt, npe->ix_map, m,
 	    BUS_DMA_READ|BUS_DMA_NOWAIT);
 	if (error != 0) {
@@ -944,113 +915,11 @@ npe_rxdone(int qid, void *arg)
 			mrx->m_len = be32toh(hw->ix_ne[0].len) & 0xffff;
 			mrx->m_pkthdr.len = mrx->m_len;
 			mrx->m_pkthdr.rcvif = ifp;
-			/* Don't add M_HASFCS. See below */
-
-#if 1
-			if (mrx->m_pkthdr.len < sizeof(struct ether_header)) {
-				log(LOG_INFO, "%s: too short frame (len=%d)\n",
-				    sc->sc_dev.dv_xname, mrx->m_pkthdr.len);
-				/* Back out "newly allocated" mbuf. */
-				m_freem(m);
-				ifp->if_ierrors++;
-				goto fail;
-			}
-			if ((ifp->if_flags & IFF_PROMISC) == 0) {
-				struct ether_header *eh;
-
-				/*
-				 * Workaround for "Non-Intel XScale Technology
-				 * Eratta" No. 29. AA:BB:CC:DD:EE:xF's packet
-				 * matches the filter (both unicast and
-				 * multicast).
-				 */
-				eh = mtod(mrx, struct ether_header *);
-				if (ETHER_IS_MULTICAST(eh->ether_dhost) == 0) {
-					/* unicast */
-
-					if (sc->sc_enaddr[5] != eh->ether_dhost[5]) {
-						/* discard it */
-#if 0
-						printf("discard it\n");
-#endif
-						/*
-						 * Back out "newly allocated"
-						 * mbuf.
-						 */
-						m_freem(m);
-						goto fail;
-					}
-				} else if (memcmp(eh->ether_dhost,
-					etherbroadcastaddr, 6) == 0) {
-					/* Always accept broadcast packet*/
-				} else {
-					struct ethercom *ec = &sc->sc_ethercom;
-					struct ether_multi *enm;
-					struct ether_multistep step;
-					int match = 0;
-
-					/* multicast */
-
-					ETHER_FIRST_MULTI(step, ec, enm);
-					while (enm != NULL) {
-						uint64_t lowint, highint, dest;
-
-						lowint = MAC2UINT64(enm->enm_addrlo);
-						highint = MAC2UINT64(enm->enm_addrhi);
-						dest = MAC2UINT64(eh->ether_dhost);
-#if 0
-						printf("%llx\n", lowint);
-						printf("%llx\n", dest);
-						printf("%llx\n", highint);
-#endif
-						if ((lowint <= dest) && (dest <= highint)) {
-							match = 1;
-							break;
-						}
-						ETHER_NEXT_MULTI(step, enm);
-					}
-					if (match == 0) {
-						/* discard it */
-#if 0
-						printf("discard it(M)\n");
-#endif
-						/*
-						 * Back out "newly allocated"
-						 * mbuf.
-						 */
-						m_freem(m);
-						goto fail;
-					}
-				}
-			}
-			if (mrx->m_pkthdr.len > NPE_FRAME_SIZE_DEFAULT) {
-				log(LOG_INFO, "%s: oversized frame (len=%d)\n",
-				    sc->sc_dev.dv_xname, mrx->m_pkthdr.len);
-				/* Back out "newly allocated" mbuf. */
-				m_freem(m);
-				ifp->if_ierrors++;
-				goto fail;
-			}
-#endif
-
-			/*
-			 * Trim FCS!
-			 * NPE always adds the FCS by this driver's setting,
-			 * so we always trim it here and not add M_HASFCS.
-			 */
-			m_adj(mrx, -ETHER_CRC_LEN);
+			mrx->m_flags |= M_HASFCS;
 
 			ifp->if_ipackets++;
-#if NBPFILTER > 0
-			/*
-			 * Tap off here if there is a bpf listener.
-			 */
-			if (__predict_false(ifp->if_bpf))
-				bpf_mtap(ifp->if_bpf, mrx);
-#endif
 			ifp->if_input(ifp, mrx);
 		} else {
-fail:
 			/* discard frame and re-use mbuf */
 			m = npe->ix_m;
 		}
@@ -1152,7 +1021,7 @@ if (ifp->if_flags & IFF_RUNNING) return;/*XXX*/
 		| NPE_RX_CNTRL1_PAUSE_EN);	/* ena pause frame handling */
 	WR4(sc, NPE_MAC_RX_CNTRL2, 0);
 
-	npe_setmac(sc, CLLADDR(ifp->if_sadl));
+	npe_setmac(sc, LLADDR(ifp->if_sadl));
 	npe_setmcast(sc);
 
 	npe_startxmit(sc);
@@ -1209,7 +1078,7 @@ npe_defrag(struct mbuf *m0)
 		}
 	}
 
-	m_copydata(m0, 0, m0->m_pkthdr.len, mtod(m, void *));
+	m_copydata(m0, 0, m0->m_pkthdr.len, mtod(m, caddr_t));
 	m_freem(m0);
 
 	return (m);
@@ -1389,24 +1258,34 @@ npewatchdog(struct ifnet *ifp)
 }
 
 static int
-npeioctl(struct ifnet *ifp, u_long cmd, void *data)
+npeioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	struct npe_softc *sc = ifp->if_softc;
+ 	struct ifreq *ifr = (struct ifreq *)data;	
 	int s, error = 0;
 
 	s = splnet();
 
-	error = ether_ioctl(ifp, cmd, data);
-	if (error == ENETRESET) {
-		if ((ifp->if_flags & IFF_UP) == 0 &&
-		    ifp->if_flags & IFF_RUNNING) {
-			ifp->if_flags &= ~IFF_RUNNING;
-			npestop(&sc->sc_ethercom.ec_if, 0);
-		} else {
-			/* reinitialize card on any parameter change */
-			npeinit_locked(sc);
+	switch (cmd) {
+  	case SIOCSIFMEDIA:
+  	case SIOCGIFMEDIA:
+ 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media, cmd);
+  		break;
+
+	default:
+		error = ether_ioctl(ifp, cmd, data);
+		if (error == ENETRESET) {
+			if ((ifp->if_flags & IFF_UP) == 0 &&
+			    ifp->if_flags & IFF_RUNNING) {
+				ifp->if_flags &= ~IFF_RUNNING;
+				npestop(&sc->sc_ethercom.ec_if, 0);
+			} else {
+				/* reinitialize card on any parameter change */
+				npeinit_locked(sc);
+			}
+			error = 0;
 		}
-		error = 0;
+		break;
 	}
 
 	npestart(ifp);

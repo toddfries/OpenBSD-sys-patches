@@ -1,4 +1,4 @@
-/*	$NetBSD: subr_extent.c,v 1.72 2008/04/28 20:24:04 martin Exp $	*/
+/*	$NetBSD: subr_extent.c,v 1.68 2007/07/10 22:58:54 ad Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1998, 2007 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -34,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: subr_extent.c,v 1.72 2008/04/28 20:24:04 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: subr_extent.c,v 1.68 2007/07/10 22:58:54 ad Exp $");
 
 #ifdef _KERNEL
 #include "opt_lockdebug.h"
@@ -90,7 +97,7 @@ panic(a)			printf(a)
 #define	cv_destroy(a)
 #define	KMEM_IS_RUNNING			(1)
 #define	IPL_VM				(0)
-#define	MUTEX_DEFAULT			(0)
+#define	MUTEX_DRIVER			(0)
 #endif
 
 static struct pool expool;
@@ -298,7 +305,7 @@ extent_create(const char *name, u_long start, u_long end,
 	}
 
 	/* Fill in the extent descriptor and return it to the caller. */
-	mutex_init(&ex->ex_lock, MUTEX_DEFAULT, IPL_VM);
+	mutex_init(&ex->ex_lock, MUTEX_DRIVER, IPL_VM);
 	cv_init(&ex->ex_cv, "extent");
 	LIST_INIT(&ex->ex_regions);
 	ex->ex_name = name;
@@ -481,9 +488,8 @@ extent_alloc_region(struct extent *ex, u_long start, u_long size, int flags)
 	}
 #endif
 #ifdef LOCKDEBUG
-	if (flags & EX_WAITSPACE) {
-		ASSERT_SLEEPABLE();
-	}
+	if (flags & EX_WAITSPACE)
+		ASSERT_SLEEPABLE(NULL, "extent_alloc_region(EX_WAITSPACE)");
 #endif
 
 	/*
@@ -654,9 +660,8 @@ extent_alloc_subregion1(struct extent *ex, u_long substart, u_long subend,
 	}
 #endif
 #ifdef LOCKDEBUG
-	if (flags & EX_WAITSPACE) {
-		ASSERT_SLEEPABLE();
-	}
+	if (flags & EX_WAITSPACE)
+		ASSERT_SLEEPABLE(NULL, "extent_alloc_subregion1(EX_WAITSPACE)");
 #endif
 
 	/*

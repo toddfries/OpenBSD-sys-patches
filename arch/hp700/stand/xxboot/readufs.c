@@ -1,4 +1,4 @@
-/*	$NetBSD: readufs.c,v 1.5 2008/04/09 19:18:25 skrll Exp $	*/
+/*	$NetBSD: readufs.c,v 1.3 2005/12/11 12:17:25 christos Exp $	*/
 /*	from Id: readufs.c,v 1.9 2003/12/16 13:54:11 itohy Exp	*/
 
 /*
@@ -15,13 +15,13 @@
 
 #define fs	ufs_info
 
-static void raw_read_queue(void *buf, daddr_t blkpos, size_t bytelen);
-static int ufs_read_indirect(daddr_t blk, int level, void **buf,
-		unsigned *poff, size_t count);
+static void raw_read_queue __P((void *buf, daddr_t blkpos, size_t bytelen));
+static int ufs_read_indirect __P((daddr_t blk, int level, caddr_t *buf,
+		unsigned *poff, size_t count));
 
 #ifdef DEBUG_WITH_STDIO
-void ufs_list_dir(ino32_t dirino);
-int main((int argc, char *argv[]);
+void ufs_list_dir __P((ino32_t dirino));
+int main __P((int argc, char *argv[]));
 #endif
 
 #ifdef DEBUG_WITH_STDIO
@@ -92,7 +92,7 @@ ufs_read(di, buf, off, count)
 {
 	struct ufs_info *ufsinfo = &fs;
 	size_t bsize = ufsinfo->bsize;
-	void *b = buf;
+	caddr_t b = buf;
 	int i;
 	size_t disize, nread;
 	daddr_t pos;
@@ -157,7 +157,7 @@ static int
 ufs_read_indirect(blk, level, buf, poff, count)
 	daddr_t blk;
 	int level;
-	void **buf;
+	caddr_t *buf;
 	unsigned *poff;	/* position in block */
 	size_t count;
 {

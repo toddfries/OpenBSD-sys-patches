@@ -1,4 +1,4 @@
-/* $NetBSD: xbox.h,v 1.3 2007/01/07 01:04:26 jmcneill Exp $ */
+/* $NetBSD: xbox.h,v 1.1 2007/01/04 18:16:44 jmcneill Exp $ */
 
 /*-
  * Copyright (c) 2005 Rink Springer
@@ -79,10 +79,10 @@
 extern int arch_i386_is_xbox;
 extern uint32_t arch_i386_xbox_memsize; /* Megabytes */
 
-void xbox_setled(uint8_t);
-void xbox_reboot(void);
-void xbox_poweroff(void);
-void xbox_startup(void);
+void pic16l_setbyte(int addr, int reg, int data);
+void pic16l_setled(int val);
+void pic16l_reboot(void);
+void pic16l_poweroff(void);
 
 void xbox_lcd_init(void);
 void xbox_lcd_output(unsigned char data, unsigned char command);

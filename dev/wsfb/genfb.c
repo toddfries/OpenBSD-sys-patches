@@ -1,4 +1,4 @@
-/*	$NetBSD: genfb.c,v 1.26 2009/02/21 17:24:47 christos Exp $ */
+/*	$NetBSD: genfb.c,v 1.11 2007/11/05 16:57:46 macallan Exp $ */
 
 /*-
  * Copyright (c) 2007 Michael Lorenz
@@ -12,6 +12,9 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -27,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: genfb.c,v 1.26 2009/02/21 17:24:47 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: genfb.c,v 1.11 2007/11/05 16:57:46 macallan Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -38,7 +41,7 @@ __KERNEL_RCSID(0, "$NetBSD: genfb.c,v 1.26 2009/02/21 17:24:47 christos Exp $");
 #include <sys/ioctl.h>
 #include <sys/kernel.h>
 #include <sys/systm.h>
-#include <sys/kmem.h>
+#include <sys/malloc.h>
 
 #include <dev/wscons/wsconsio.h>
 #include <dev/wscons/wsdisplayvar.h>
@@ -70,9 +73,6 @@ static int 	genfb_putpalreg(struct genfb_softc *, uint8_t, uint8_t,
 
 extern const u_char rasops_cmap[768];
 
-static int genfb_cnattach_called = 0;
-static int genfb_enabled = 1;
-
 struct wsdisplay_accessops genfb_accessops = {
 	genfb_ioctl,
 	genfb_mmap,
@@ -83,8 +83,6 @@ struct wsdisplay_accessops genfb_accessops = {
 	NULL,	/* pollc */
 	NULL	/* scroll */
 };
-
-static struct genfb_softc *genfb_softc = NULL;
 
 void
 genfb_init(struct genfb_softc *sc)
@@ -98,21 +96,21 @@ genfb_init(struct genfb_softc *sc)
 	printf(prop_dictionary_externalize(dict));
 #endif
 	if (!prop_dictionary_get_uint32(dict, "width", &sc->sc_width)) {
-		GPRINTF("no width property\n");
+		GPRINTF("no width property");
 		return;
 	}
 	if (!prop_dictionary_get_uint32(dict, "height", &sc->sc_height)) {
-		GPRINTF("no height property\n");
+		GPRINTF("no height property");
 		return;
 	}
 	if (!prop_dictionary_get_uint32(dict, "depth", &sc->sc_depth)) {
-		GPRINTF("no depth property\n");
+		GPRINTF("no depth property");
 		return;
 	}
 
 	/* XXX should be a 64bit value */
 	if (!prop_dictionary_get_uint32(dict, "address", &fboffset)) {
-		GPRINTF("no address property\n");
+		GPRINTF("no address property");
 		return;
 	}
 
@@ -120,14 +118,6 @@ genfb_init(struct genfb_softc *sc)
 
 	if (!prop_dictionary_get_uint32(dict, "linebytes", &sc->sc_stride))
 		sc->sc_stride = (sc->sc_width * sc->sc_depth) >> 3;
-
-	/*
-	 * deal with a bug in the Raptor firmware which always sets
-	 * stride = width even when depth != 8
-	 */
-	if (sc->sc_stride < sc->sc_width * (sc->sc_depth >> 3))
-		sc->sc_stride = sc->sc_width * (sc->sc_depth >> 3);
-
 	sc->sc_fbsize = sc->sc_height * sc->sc_stride;
 
 	/* optional colour map callback */
@@ -144,29 +134,12 @@ genfb_attach(struct genfb_softc *sc, struct genfb_ops *ops)
 	struct wsemuldisplaydev_attach_args aa;
 	prop_dictionary_t dict;
 	struct rasops_info *ri;
-	uint16_t crow;
 	long defattr;
 	int i, j;
 	bool console;
 
-	dict = device_properties(&sc->sc_dev);
-	prop_dictionary_get_bool(dict, "is_console", &console);
-
-	if (prop_dictionary_get_uint16(dict, "cursor-row", &crow) == false)
-		crow = 0;
-	if (prop_dictionary_get_bool(dict, "clear-screen", &sc->sc_want_clear)
-	    == false)
-		sc->sc_want_clear = true;
-
-	/* do not attach when we're not console */
-	if (!console) {
-		aprint_normal_dev(&sc->sc_dev, "no console, unable to continue\n");
-		return -1;
-	}
-
-	aprint_verbose_dev(&sc->sc_dev, "framebuffer at %p, size %dx%d, depth %d, "
-	    "stride %d\n",
-	    sc->sc_fboffset ? (void *)(intptr_t)sc->sc_fboffset : sc->sc_fbaddr,
+	aprint_verbose("%s: framebuffer at %p, size %dx%d, depth %d, "
+	    "stride %d\n", sc->sc_dev.dv_xname, sc->sc_fbaddr,
 	    sc->sc_width, sc->sc_height, sc->sc_depth, sc->sc_stride);
 
 	sc->sc_defaultscreen_descr = (struct wsscreen_descr){
@@ -182,9 +155,11 @@ genfb_attach(struct genfb_softc *sc, struct genfb_ops *ops)
 	memcpy(&sc->sc_ops, ops, sizeof(struct genfb_ops));
 	sc->sc_mode = WSDISPLAYIO_MODE_EMUL;
 
-	sc->sc_shadowfb = kmem_alloc(sc->sc_fbsize, KM_SLEEP);
-	if (sc->sc_want_clear == false && sc->sc_shadowfb != NULL)
-		memcpy(sc->sc_shadowfb, sc->sc_fbaddr, sc->sc_fbsize);
+	sc->sc_shadowfb = malloc(sc->sc_fbsize, M_DEVBUF, M_WAITOK);
+
+	dict = device_properties(&sc->sc_dev);
+
+	prop_dictionary_get_bool(dict, "is_console", &console);
 
 	vcons_init(&sc->vd, sc, &sc->sc_defaultscreen_descr,
 	    &genfb_accessops);
@@ -195,20 +170,27 @@ genfb_attach(struct genfb_softc *sc, struct genfb_ops *ops)
 
 	ri = &sc->sc_console_screen.scr_ri;
 
-	vcons_init_screen(&sc->vd, &sc->sc_console_screen, 1,
-	    &defattr);
-	sc->sc_console_screen.scr_flags |= VCONS_SCREEN_IS_STATIC;
+	if (console) {
+		vcons_init_screen(&sc->vd, &sc->sc_console_screen, 1,
+		    &defattr);
+		sc->sc_console_screen.scr_flags |= VCONS_SCREEN_IS_STATIC;
 
-	sc->sc_defaultscreen_descr.textops = &ri->ri_ops;
-	sc->sc_defaultscreen_descr.capabilities = ri->ri_caps;
-	sc->sc_defaultscreen_descr.nrows = ri->ri_rows;
-	sc->sc_defaultscreen_descr.ncols = ri->ri_cols;
-	wsdisplay_cnattach(&sc->sc_defaultscreen_descr, ri, 0, crow,
-	    defattr);
+		sc->sc_defaultscreen_descr.textops = &ri->ri_ops;
+		sc->sc_defaultscreen_descr.capabilities = ri->ri_caps;
+		sc->sc_defaultscreen_descr.nrows = ri->ri_rows;
+		sc->sc_defaultscreen_descr.ncols = ri->ri_cols;
+		wsdisplay_cnattach(&sc->sc_defaultscreen_descr, ri, 0, 0,
+		    defattr);
+	} else {
+		/*
+		 * since we're not the console we can postpone the rest
+		 * until someone actually allocates a screen for us
+		 */
+		(*ri->ri_ops.allocattr)(ri, 0, 0, 0, &defattr);
+	}
 
 	/* Clear the whole screen to bring it to a known state. */
-	if (sc->sc_want_clear)
-		(*ri->ri_ops.eraserows)(ri, 0, ri->ri_rows, defattr);
+	(*ri->ri_ops.eraserows)(ri, 0, ri->ri_rows, defattr);
 
 	j = 0;
 	for (i = 0; i < (1 << sc->sc_depth); i++) {
@@ -220,9 +202,6 @@ genfb_attach(struct genfb_softc *sc, struct genfb_ops *ops)
 		    rasops_cmap[j + 2]);
 		j += 3;
 	}
-
-	if (genfb_softc == NULL)
-		genfb_softc = sc;
 
 	aa.console = console;
 	aa.scrdata = &sc->sc_screenlist;
@@ -242,9 +221,9 @@ genfb_ioctl(void *v, void *vs, u_long cmd, void *data, int flag,
 	struct genfb_softc *sc = vd->cookie;
 	struct wsdisplay_fbinfo *wdf;
 	struct vcons_screen *ms = vd->active;
-	int new_mode, error;
 
 	switch (cmd) {
+
 		case WSDISPLAYIO_GINFO:
 			if (ms == NULL)
 				return ENODEV;
@@ -268,21 +247,20 @@ genfb_ioctl(void *v, void *vs, u_long cmd, void *data, int flag,
 			return 0;
 
 		case WSDISPLAYIO_SMODE:
-			new_mode = *(int *)data;
+			{
+				int new_mode = *(int*)data;
 
-			/* notify the bus backend */
-			error = 0;
-			if (sc->sc_ops.genfb_ioctl)
-				error = sc->sc_ops.genfb_ioctl(sc, vs,
+				/* notify the bus backend */
+				if (sc->sc_ops.genfb_ioctl)
+					return sc->sc_ops.genfb_ioctl(sc, vs,
 					    cmd, data, flag, l);
-			if (error)
-				return error;
 
-			if (new_mode != sc->sc_mode) {
-				sc->sc_mode = new_mode;
-				if (new_mode == WSDISPLAYIO_MODE_EMUL) {
-					genfb_restore_palette(sc);
-					vcons_redraw_screen(ms);
+				if (new_mode != sc->sc_mode) {
+					sc->sc_mode = new_mode;
+					if(new_mode == WSDISPLAYIO_MODE_EMUL) {
+						genfb_restore_palette(sc);
+						vcons_redraw_screen(ms);
+					}
 				}
 			}
 			return 0;
@@ -317,9 +295,7 @@ genfb_init_screen(void *cookie, struct vcons_screen *scr,
 	ri->ri_width = sc->sc_width;
 	ri->ri_height = sc->sc_height;
 	ri->ri_stride = sc->sc_stride;
-	ri->ri_flg = RI_CENTER;
-	if (sc->sc_want_clear)
-		ri->ri_flg |= RI_FULLCLEAR;
+	ri->ri_flg = RI_CENTER | RI_FULLCLEAR;
 
 	if (sc->sc_shadowfb != NULL) {
 
@@ -328,7 +304,7 @@ genfb_init_screen(void *cookie, struct vcons_screen *scr,
 	} else
 		ri->ri_bits = (char *)sc->sc_fbaddr;
 
-	if (existing && sc->sc_want_clear) {
+	if (existing) {
 		ri->ri_flg |= RI_CLEAR;
 	}
 
@@ -429,36 +405,3 @@ genfb_putpalreg(struct genfb_softc *sc, uint8_t idx, uint8_t r, uint8_t g,
 	return 0;
 }
 
-void
-genfb_cnattach(void)
-{
-	genfb_cnattach_called = 1;
-}
-
-void
-genfb_disable(void)
-{
-	genfb_enabled = 0;
-}
-
-int
-genfb_is_console(void)
-{
-	return genfb_cnattach_called;
-}
-
-int
-genfb_is_enabled(void)
-{
-	return genfb_enabled;
-}
-
-int
-genfb_borrow(bus_addr_t addr, bus_space_handle_t *hdlp)
-{
-	struct genfb_softc *sc = genfb_softc;
-
-	if (sc && sc->sc_ops.genfb_borrow)
-		return sc->sc_ops.genfb_borrow(sc, addr, hdlp);
-	return 0;
-}

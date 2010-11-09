@@ -1,4 +1,4 @@
-/*	$NetBSD: prompt.c,v 1.4 2008/04/28 20:23:19 martin Exp $	*/
+/*	$NetBSD: prompt.c,v 1.1 2005/12/29 15:20:09 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 2004 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -161,21 +168,21 @@ prompt_reset(void)
 	printf(PROMPT);
 }
 
-bool
+boolean_t
 prompt_yesno(int interactive)
 {
 	int i;
 
 	if (!interactive)
-		return true;
+		return TRUE;
 	/* block until user input */
 	while (/*CONSTCOND*/1) {
 		if ((i = getchar()) == 0)
 			continue;
 		if (i == 'N' || i == 'n')
-			return false;
+			return FALSE;
 		if (i == 'Y' || i == 'y')
-			return true;
+			return TRUE;
 	}
 }
 

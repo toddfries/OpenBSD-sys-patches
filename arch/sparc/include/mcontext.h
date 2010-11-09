@@ -1,4 +1,4 @@
-/*	$NetBSD: mcontext.h,v 1.10 2008/10/26 06:58:02 mrg Exp $	*/
+/*	$NetBSD: mcontext.h,v 1.8 2006/03/29 23:07:49 cube Exp $	*/
 
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -49,8 +56,11 @@ typedef	long int	__greg_t;
 typedef	__greg_t	__gregset_t[_NGREG];
 
 /* Offsets into gregset_t, for convenience. */
-#define	_REG_CCR	0	/* 64 bit only */
-#define	_REG_PSR	0	/* 32 bit only */
+#ifdef __arch64__
+#define	_REG_CCR	0
+#else
+#define	_REG_PSR	0
+#endif
 #define	_REG_PC		1
 #define	_REG_nPC	2
 #define	_REG_Y		3
@@ -69,8 +79,10 @@ typedef	__greg_t	__gregset_t[_NGREG];
 #define	_REG_O5		16
 #define	_REG_O6		17
 #define	_REG_O7		18
-#define	_REG_ASI	19	/* 64 bit only */
-#define	_REG_FPRS	20	/* 64 bit only */
+#ifdef __arch64__
+#define	_REG_ASI	19
+#define	_REG_FPRS	20
+#endif
 
 
 #define	_SPARC_MAXREGWINDOW	31

@@ -1,12 +1,12 @@
-/*	$NetBSD: bus_dma.c,v 1.48 2009/02/20 05:54:40 cegger Exp $	*/
+/*	$NetBSD: bus_dma.c,v 1.32 2006/11/16 01:32:39 christos Exp $	*/
 
 /*-
- * Copyright (c) 1996, 1997, 1998, 2007 The NetBSD Foundation, Inc.
+ * Copyright (c) 1996, 1997, 1998 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
  * by Charles M. Hannum and by Jason R. Thorpe of the Numerical Aerospace
- * Simulation Facility NASA Ames Research Center, and by Andrew Doran.
+ * Simulation Facility, NASA Ames Research Center.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -31,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: bus_dma.c,v 1.48 2009/02/20 05:54:40 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: bus_dma.c,v 1.32 2006/11/16 01:32:39 christos Exp $");
 
 /*
  * The following is included because _bus_dma_uiomove is derived from
@@ -84,8 +91,6 @@ __KERNEL_RCSID(0, "$NetBSD: bus_dma.c,v 1.48 2009/02/20 05:54:40 cegger Exp $");
  * SUCH DAMAGE.
  */
 
-#include "ioapic.h"
-
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -95,13 +100,18 @@ __KERNEL_RCSID(0, "$NetBSD: bus_dma.c,v 1.48 2009/02/20 05:54:40 cegger Exp $");
 
 #include <machine/bus.h>
 #include <machine/bus_private.h>
-#include <machine/i82093var.h>
-#include <machine/mpbiosvar.h>
 
 #include <dev/isa/isareg.h>
 #include <dev/isa/isavar.h>
 
 #include <uvm/uvm_extern.h>
+
+#include "ioapic.h"
+
+#if NIOAPIC > 0
+#include <machine/i82093var.h>
+#include <machine/mpbiosvar.h>
+#endif
 
 extern	paddr_t avail_end;
 
@@ -171,13 +181,13 @@ _bus_dmamem_alloc_range(bus_dma_tag_t t, bus_size_t size,
 	 * Compute the location, size, and number of segments actually
 	 * returned by the VM code.
 	 */
-	m = TAILQ_FIRST(&mlist);
+	m = mlist.tqh_first;
 	curseg = 0;
 	lastaddr = segs[curseg].ds_addr = VM_PAGE_TO_PHYS(m);
 	segs[curseg].ds_len = PAGE_SIZE;
-	m = m->pageq.queue.tqe_next;
+	m = m->pageq.tqe_next;
 
-	for (; m != NULL; m = m->pageq.queue.tqe_next) {
+	for (; m != NULL; m = m->pageq.tqe_next) {
 		curaddr = VM_PAGE_TO_PHYS(m);
 #ifdef DIAGNOSTIC
 		if (curaddr < low || curaddr >= high) {
@@ -589,7 +599,7 @@ _bus_dmamap_load_uio(bus_dma_tag_t t, bus_dmamap_t map, struct uio *uio,
 	bus_size_t minlen, resid;
 	struct vmspace *vm;
 	struct iovec *iov;
-	void *addr;
+	caddr_t addr;
 	struct x86_bus_dma_cookie *cookie = map->_dm_cookie;
 
 	/*
@@ -611,7 +621,7 @@ _bus_dmamap_load_uio(bus_dma_tag_t t, bus_dmamap_t map, struct uio *uio,
 		 * until we have exhausted the residual count.
 		 */
 		minlen = resid < iov[i].iov_len ? resid : iov[i].iov_len;
-		addr = (void *)iov[i].iov_base;
+		addr = (caddr_t)iov[i].iov_base;
 
 		error = _bus_dmamap_load_buffer(t, map, addr, minlen,
 		    vm, flags);
@@ -722,7 +732,7 @@ _bus_dmamap_sync(bus_dma_tag_t t, bus_dmamap_t map, bus_addr_t offset,
 	 */
 	if (len == 0 || cookie == NULL ||
 	    (cookie->id_flags & X86_DMA_IS_BOUNCING) == 0)
-		goto end;
+		return;
 
 	switch (cookie->id_buftype) {
 	case X86_DMA_BUFTYPE_LINEAR:
@@ -788,7 +798,7 @@ _bus_dmamap_sync(bus_dma_tag_t t, bus_dmamap_t map, bus_addr_t offset,
 				minlen = len < m->m_len - moff ?
 				    len : m->m_len - moff;
 
-				memcpy(mtod(m, char *) + moff,
+				memcpy(mtod(m, caddr_t) + moff,
 				    (char *)cookie->id_bouncebuf + offset,
 				    minlen);
 
@@ -844,21 +854,6 @@ _bus_dmamap_sync(bus_dma_tag_t t, bus_dmamap_t map, bus_addr_t offset,
 		printf("unknown buffer type %d\n", cookie->id_buftype);
 		panic("_bus_dmamap_sync");
 	}
-end:
-	if (ops & (BUS_DMASYNC_PREWRITE|BUS_DMASYNC_POSTWRITE)) {
-		/*
-		 * from the memory POV a load can be reordered before a store
-		 * (a load can fetch data from the write buffers, before
-		 * data hits the cache or memory), a mfence avoids it.
-		 */
-		x86_mfence();
-	} else if (ops & (BUS_DMASYNC_PREREAD|BUS_DMASYNC_POSTREAD)) {
-		/*
-		 * all past reads should have completed at before this point,
-		 * and future reads should not have started yet.
-		 */
-		x86_lfence();
-	}
 }
 
 /*
@@ -900,7 +895,7 @@ _bus_dma_alloc_bouncebuf(bus_dma_tag_t t, bus_dmamap_t map,
 		goto out;
 	error = _bus_dmamem_map(t, cookie->id_bouncesegs,
 	    cookie->id_nbouncesegs, cookie->id_bouncebuflen,
-	    (void **)&cookie->id_bouncebuf, flags);
+	    (caddr_t *)&cookie->id_bouncebuf, flags);
 
  out:
 	if (error) {
@@ -965,7 +960,7 @@ _bus_dma_uiomove(void *buf, struct uio *uio, size_t n, int direction)
 		if (!VMSPACE_IS_KERNEL_P(vm) &&
 		    (curlwp->l_cpu->ci_schedstate.spc_flags & SPCF_SHOULDYIELD)
 		    != 0) {
-			preempt();
+			preempt(1);
 		}
 		if (direction == UIO_READ) {
 			error = copyout_vmspace(vm, cp, iov->iov_base, cnt);
@@ -1001,7 +996,7 @@ _bus_dmamem_free(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs)
 		    addr < (segs[curseg].ds_addr + segs[curseg].ds_len);
 		    addr += PAGE_SIZE) {
 			m = _BUS_BUS_TO_VM_PAGE(addr);
-			TAILQ_INSERT_TAIL(&mlist, m, pageq.queue);
+			TAILQ_INSERT_TAIL(&mlist, m, pageq);
 		}
 	}
 
@@ -1015,28 +1010,29 @@ _bus_dmamem_free(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs)
  */
 int
 _bus_dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
-    size_t size, void **kvap, int flags)
+    size_t size, caddr_t *kvap, int flags)
 {
-	vaddr_t sva, va, eva;
+	vaddr_t va;
 	bus_addr_t addr;
 	int curseg;
+	int32_t cpumask;
 	int nocache;
-	pt_entry_t *pte, opte, xpte;
+	int marked;
+	pt_entry_t *pte;
 	const uvm_flag_t kmflags =
 	    (flags & BUS_DMA_NOWAIT) != 0 ? UVM_KMF_NOWAIT : 0;
 
 	size = round_page(size);
-	nocache = (flags & BUS_DMA_NOCACHE) != 0;
+	cpumask = 0;
+	nocache = (flags & BUS_DMA_NOCACHE) != 0 && pmap_cpu_has_pg_n();
+	marked = 0;
 
 	va = uvm_km_alloc(kernel_map, size, 0, UVM_KMF_VAONLY | kmflags);
 
 	if (va == 0)
 		return (ENOMEM);
 
-	*kvap = (void *)va;
-	sva = va;
-	eva = sva + size;
-	xpte = 0;
+	*kvap = (caddr_t)va;
 
 	for (curseg = 0; curseg < nsegs; curseg++) {
 		for (addr = segs[curseg].ds_addr;
@@ -1052,22 +1048,18 @@ _bus_dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
 			 */
 			if (nocache) {
 				pte = kvtopte(va);
-				opte = *pte;
-				if ((opte & PG_N) == 0) {
-					pmap_pte_setbits(pte, PG_N);
-					xpte |= opte;
+				if ((*pte & PG_N) == 0) {
+					*pte |= PG_N;
+					pmap_tlb_shootdown(pmap_kernel(), va,
+					    *pte, &cpumask);
+					marked = 1;
 				}
 			}
 		}
 	}
-#ifndef XEN	/* XXX */
-	if ((xpte & (PG_V | PG_U)) == (PG_V | PG_U)) {
-		kpreempt_disable();
-		pmap_tlb_shootdown(pmap_kernel(), sva, eva, xpte);
-		kpreempt_enable();
-	}
+	if (marked)
+		pmap_tlb_shootnow(cpumask);
 	pmap_update(pmap_kernel());
-#endif
 
 	return (0);
 }
@@ -1078,36 +1070,43 @@ _bus_dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
  */
 
 void
-_bus_dmamem_unmap(bus_dma_tag_t t, void *kva, size_t size)
+_bus_dmamem_unmap(bus_dma_tag_t t, caddr_t kva, size_t size)
 {
-	pt_entry_t *pte, opte;
-	vaddr_t va, sva, eva;
+	pt_entry_t *pte;
+	vaddr_t va, endva;
+	int cpumask;
+	int marked;
 
+	cpumask = 0;
+	marked = 0;
 #ifdef DIAGNOSTIC
 	if ((u_long)kva & PGOFSET)
 		panic("_bus_dmamem_unmap");
 #endif
 
 	size = round_page(size);
-	sva = (vaddr_t)kva;
-	eva = sva + size;
-
 	/*
          * mark pages cacheable again.
          */
-	for (va = sva; va < eva; va += PAGE_SIZE) {
+	for (va = (vaddr_t)kva, endva = (vaddr_t)kva + size;
+	     va < endva; va += PAGE_SIZE) {
 		pte = kvtopte(va);
-		opte = *pte;
-		if ((opte & PG_N) != 0)
-			pmap_pte_clearbits(pte, PG_N);
+		if ((*pte & PG_N) != 0) {
+			*pte &= ~PG_N;
+			pmap_tlb_shootdown(pmap_kernel(), va, *pte, &cpumask);
+			marked = 1;
+		}
 	}
+	if (marked)
+		pmap_tlb_shootnow(cpumask);
+
 	pmap_remove(pmap_kernel(), (vaddr_t)kva, (vaddr_t)kva + size);
 	pmap_update(pmap_kernel());
 	uvm_km_free(kernel_map, (vaddr_t)kva, size, UVM_KMF_VAONLY);
 }
 
 /*
- * Common function for mmap(2)'ing DMA-safe memory.  May be called by
+ * Common functin for mmap(2)'ing DMA-safe memory.  May be called by
  * bus-specific DMA mmap(2)'ing functions.
  */
 paddr_t
@@ -1193,175 +1192,3 @@ _bus_dmamap_load_buffer(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
 	return (0);
 }
 
-int
-_bus_dmatag_subregion(bus_dma_tag_t tag, bus_addr_t min_addr,
-		      bus_addr_t max_addr, bus_dma_tag_t *newtag, int flags)
-{
-
-	if ((tag->_bounce_thresh != 0   && max_addr >= tag->_bounce_thresh) &&
-	    (tag->_bounce_alloc_hi != 0 && max_addr >= tag->_bounce_alloc_hi) &&
-	    (min_addr <= tag->_bounce_alloc_lo)) {
-		*newtag = tag;
-		/* if the tag must be freed, add a reference */
-		if (tag->_tag_needs_free)
-			(tag->_tag_needs_free)++;
-		return 0;
-	}
-
-	if ((*newtag = malloc(sizeof(struct x86_bus_dma_tag), M_DMAMAP,
-	    (flags & BUS_DMA_NOWAIT) ? M_NOWAIT : M_WAITOK)) == NULL)
-		return ENOMEM;
-
-	**newtag = *tag;
-	(*newtag)->_tag_needs_free = 1;
-
-	if (tag->_bounce_thresh == 0 || max_addr < tag->_bounce_thresh)
-		(*newtag)->_bounce_thresh = max_addr;
-	if (tag->_bounce_alloc_hi == 0 || max_addr < tag->_bounce_alloc_hi)
-		(*newtag)->_bounce_alloc_hi = max_addr;
-	if (min_addr > tag->_bounce_alloc_lo)
-		(*newtag)->_bounce_alloc_lo = min_addr;
-
-	return 0;
-}
-
-void
-_bus_dmatag_destroy(bus_dma_tag_t tag)
-{
-
-	switch (tag->_tag_needs_free) {
-	case 0:
-		break;				/* not allocated with malloc */
-	case 1:
-		free(tag, M_DMAMAP);		/* last reference to tag */
-		break;
-	default:
-		(tag->_tag_needs_free)--;	/* one less reference */
-	}
-}
-
-
-void
-bus_dmamap_sync(bus_dma_tag_t t, bus_dmamap_t p, bus_addr_t o, bus_size_t l,
-		int ops)
-{
-
-	if (ops & BUS_DMASYNC_POSTREAD)
-		x86_lfence();
-	if (t->_dmamap_sync)
-		(*t->_dmamap_sync)(t, p, o, l, ops);
-}
-
-int
-bus_dmamap_create(bus_dma_tag_t tag, bus_size_t size, int nsegments,
-		  bus_size_t maxsegsz, bus_size_t boundary, int flags,
-		  bus_dmamap_t *dmamp)
-{
-
-	return (*tag->_dmamap_create)(tag, size, nsegments, maxsegsz,
-	    boundary, flags, dmamp);
-}
-
-void
-bus_dmamap_destroy(bus_dma_tag_t tag, bus_dmamap_t dmam)
-{
-
-	(*tag->_dmamap_destroy)(tag, dmam);
-}
-
-int
-bus_dmamap_load(bus_dma_tag_t tag, bus_dmamap_t dmam, void *buf,
-		bus_size_t buflen, struct proc *p, int flags)
-{
-
-	return (*tag->_dmamap_load)(tag, dmam, buf, buflen, p, flags);
-}
-
-int
-bus_dmamap_load_mbuf(bus_dma_tag_t tag, bus_dmamap_t dmam,
-		     struct mbuf *chain, int flags)
-{
-
-	return (*tag->_dmamap_load_mbuf)(tag, dmam, chain, flags);
-}
-
-int
-bus_dmamap_load_uio(bus_dma_tag_t tag, bus_dmamap_t dmam,
-		    struct uio *uio, int flags)
-{
-
-	return (*tag->_dmamap_load_uio)(tag, dmam, uio, flags);
-}
-
-int
-bus_dmamap_load_raw(bus_dma_tag_t tag, bus_dmamap_t dmam,
-		    bus_dma_segment_t *segs, int nsegs,
-		    bus_size_t size, int flags)
-{
-
-	return (*tag->_dmamap_load_raw)(tag, dmam, segs, nsegs,
-	    size, flags);
-}
-
-void
-bus_dmamap_unload(bus_dma_tag_t tag, bus_dmamap_t dmam)
-{
-
-	(*tag->_dmamap_unload)(tag, dmam);
-}
-
-int
-bus_dmamem_alloc(bus_dma_tag_t tag, bus_size_t size, bus_size_t alignment,
-		 bus_size_t boundary, bus_dma_segment_t *segs, int nsegs,
-		 int *rsegs, int flags)
-{
-
-	return (*tag->_dmamem_alloc)(tag, size, alignment, boundary, segs,
-	    nsegs, rsegs, flags);
-}
-
-void
-bus_dmamem_free(bus_dma_tag_t tag, bus_dma_segment_t *segs, int nsegs)
-{
-
-	(*tag->_dmamem_free)(tag, segs, nsegs);
-}
-
-int
-bus_dmamem_map(bus_dma_tag_t tag, bus_dma_segment_t *segs, int nsegs,
-	       size_t size, void **kvap, int flags)
-{
-
-	return (*tag->_dmamem_map)(tag, segs, nsegs, size, kvap, flags);
-}
-
-void
-bus_dmamem_unmap(bus_dma_tag_t tag, void *kva, size_t size)
-{
-
-	(*tag->_dmamem_unmap)(tag, kva, size);
-}
-
-paddr_t
-bus_dmamem_mmap(bus_dma_tag_t tag, bus_dma_segment_t *segs, int nsegs,
-		off_t off, int prot, int flags)
-{
-
-	return (*tag->_dmamem_mmap)(tag, segs, nsegs, off, prot, flags);
-}
-
-int
-bus_dmatag_subregion(bus_dma_tag_t tag, bus_addr_t min_addr,
-		     bus_addr_t max_addr, bus_dma_tag_t *newtag, int flags)
-{
-
-	return (*tag->_dmatag_subregion)(tag, min_addr, max_addr, newtag,
-	    flags);
-}
-
-void
-bus_dmatag_destroy(bus_dma_tag_t tag)
-{
-
-	(*tag->_dmatag_destroy)(tag);
-}

@@ -1,4 +1,4 @@
-/*	$NetBSD: libsa.h,v 1.7 2009/01/22 07:57:17 skrll Exp $	*/
+/*	$NetBSD: libsa.h,v 1.5 2005/12/11 12:17:25 christos Exp $	*/
 
 /*	$OpenBSD: libsa.h,v 1.7 1999/12/23 04:07:47 mickey Exp $	*/
 
@@ -42,9 +42,7 @@
 
 #define	NENTS(a)	(sizeof(a) / sizeof(a[0]))
 
-typedef unsigned int btdev_t;
-
-extern	btdev_t bootdev;
+extern dev_t bootdev;
 
 extern	struct consdev constab[];
 extern	struct consdev *cn_tab;
@@ -52,6 +50,7 @@ int	cngetc(void);
 int	tcngetc(void);
 void	cnputc(int);
 void	cninit(void);
+time_t	getsecs(void);
 int	tgetchar(void);
 
 void pdc_init(void);
@@ -77,7 +76,7 @@ void ite_putc(dev_t, int);
 void ite_pollc(dev_t, int);
 
 void machdep(void);
-void devboot(btdev_t, char *);
+void devboot(dev_t, char *);
 void fcacheall(void);
 
 int     lif_open(const char *, struct open_file *);

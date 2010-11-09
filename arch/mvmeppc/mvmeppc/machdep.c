@@ -1,4 +1,4 @@
-/*	$NetBSD: machdep.c,v 1.24 2008/11/11 06:46:43 dyoung Exp $	*/
+/*	$NetBSD: machdep.c,v 1.21 2005/12/24 20:07:20 perry Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996 Wolfgang Solfrank.
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.24 2008/11/11 06:46:43 dyoung Exp $");
+__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.21 2005/12/24 20:07:20 perry Exp $");
 
 #include "opt_compat_netbsd.h"
 #include "opt_mvmetype.h"
@@ -51,10 +51,12 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.24 2008/11/11 06:46:43 dyoung Exp $");
 #include <sys/msgbuf.h>
 #include <sys/proc.h>
 #include <sys/reboot.h>
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 #include <sys/syslog.h>
 #include <sys/systm.h>
 #include <sys/user.h>
+#include <sys/ksyms.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -97,23 +99,42 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.24 2008/11/11 06:46:43 dyoung Exp $");
 #include <sys/termios.h>
 #include <dev/ic/comreg.h>
 #include <dev/ic/comvar.h>
+void comsoft(void);
 #endif
 
+#ifdef DDB
+#include <machine/db_machdep.h>
+#include <ddb/db_extern.h>
+#endif
+
+#include "ksyms.h"
+
 void initppc(u_long, u_long, void *);
+void strayintr(int);
+int lcsplx(int);
+void mvmeppc_bus_space_init(void);
+
 
 /*
  * Global variables used here and there
  */
 struct mvmeppc_bootinfo bootinfo;
-vaddr_t prep_intr_reg;	/* PReP-compatible  interrupt vector register */
-uint32_t prep_intr_reg_off = INTR_VECTOR_REG;
+
+vaddr_t mvmeppc_intr_reg;	/* PReP-compatible  interrupt vector register */
+
 struct mem_region physmemr[2], availmemr[2];
+
 paddr_t avail_end;			/* XXX temporary */
-struct pic_ops *isa_pic;
 
 void
-initppc(u_long startkernel, u_long endkernel, void *btinfo)
+initppc(startkernel, endkernel, btinfo)
+	u_long startkernel, endkernel;
+	void *btinfo;
 {
+#if NKSYMS || defined(DDB) || defined(LKM)
+	extern void *startsym, *endsym;
+#endif
+
 	/*
 	 * Copy bootinfo.
 	 */
@@ -153,9 +174,58 @@ initppc(u_long startkernel, u_long endkernel, void *btinfo)
 		ns_per_tick = 1000000000 / ticks_per_sec;
 	}
 
-	prep_initppc(startkernel, endkernel, boothowto);
+	/*
+	 * Setup fixed BAT registers.
+	 */
+	oea_batinit(
+	    MVMEPPC_PHYS_BASE_IO,  BAT_BL_256M,
+	    MVMEPPC_PHYS_BASE_MEM, BAT_BL_256M,
+	    0);
 
-	(*platform->pic_setup)();
+	/*
+	 * Install vectors and interrupt handler.
+	 */
+	oea_init(platform->ext_intr);
+
+	/*
+	 * Init bus_space so consinit can work.
+	 */
+	mvmeppc_bus_space_init();
+
+#ifdef DEBUG
+	/*
+	 * The console should be initialized as early as possible.
+	 */
+	consinit();
+#endif
+
+        /*
+	 * Set the page size.
+	 */
+	uvm_setpagesize();
+
+	/*
+	 * Initialize pmap module.
+	 */
+	pmap_bootstrap(startkernel, endkernel);
+
+#if NKSYMS || defined(DDB) || defined(LKM)
+	ksyms_init((int)((u_long)endsym - (u_long)startsym), startsym, endsym);
+#endif
+
+#ifdef DDB
+	if (boothowto & RB_KDB)
+		Debugger();
+#endif
+}
+
+void
+mem_regions(mem, avail)
+	struct mem_region **mem, **avail;
+{
+
+	*mem = physmemr;
+	*avail = availmemr;
 }
 
 /*
@@ -169,8 +239,8 @@ cpu_startup()
 	/*
 	 * Mapping PReP-compatible interrput vector register.
 	 */
-	prep_intr_reg = (vaddr_t) mapiodev(MVMEPPC_INTR_REG, PAGE_SIZE);
-	if (!prep_intr_reg)
+	mvmeppc_intr_reg = (vaddr_t) mapiodev(MVMEPPC_INTR_REG, PAGE_SIZE);
+	if (!mvmeppc_intr_reg)
 		panic("startup: no room for interrupt register");
 
 	sprintf(modelbuf, "%s\nCore Speed: %dMHz, Bus Speed: %dMHz\n",
@@ -243,7 +313,7 @@ dokbd:
 
 #if (NCOM > 0)
 	if (!strcmp(bootinfo.bi_consoledev, "PC16550")) {
-		bus_space_tag_t tag = &genppc_isa_io_space_tag;
+		bus_space_tag_t tag = &mvmeppc_isa_io_bs_tag;
 		static const bus_addr_t caddr[2] = {0x3f8, 0x2f8};
 		int rv;
 		rv = comcnattach(tag, caddr[bootinfo.bi_consolechan],
@@ -259,10 +329,35 @@ dokbd:
 }
 
 /*
+ * Soft tty interrupts.
+ */
+void
+softserial()
+{
+
+#if (NCOM > 0)
+	comsoft();
+#endif
+}
+
+/*
+ * Stray interrupts.
+ */
+void
+strayintr(irq)
+	int irq;
+{
+
+	log(LOG_ERR, "stray interrupt %d\n", irq);
+}
+
+/*
  * Halt or reboot the machine after syncing/dumping according to howto.
  */
 void
-cpu_reboot(int howto, char *what)
+cpu_reboot(howto, what)
+	int howto;
+	char *what;
 {
 	static int syncing;
 
@@ -288,8 +383,6 @@ cpu_reboot(int howto, char *what)
 halt_sys:
 	doshutdownhooks();
 
-	pmf_system_shutdown(boothowto);
-
 	if (howto & RB_HALT) {
                 printf("\n");
                 printf("The operating system has halted.\n");
@@ -308,4 +401,82 @@ halt_sys:
 	for (;;)
 		continue;
 	/* NOTREACHED */
+}
+
+/*
+ * lcsplx() is called from locore; it is an open-coded version of
+ * splx() differing in that it returns the previous priority level.
+ */
+int
+lcsplx(ipl)
+	int ipl;
+{
+	int oldcpl;
+
+	__asm volatile("sync; eieio\n");	/* reorder protect */
+	oldcpl = cpl;
+	cpl = ipl;
+	if (ipending & ~ipl)
+		do_pending_int();
+	__asm volatile("sync; eieio\n");	/* reorder protect */
+
+	return (oldcpl);
+}
+
+
+struct powerpc_bus_space mvmeppc_isa_io_bs_tag = {
+	_BUS_SPACE_LITTLE_ENDIAN|_BUS_SPACE_IO_TYPE,
+	MVMEPPC_PHYS_BASE_IO,	/* 60x-bus address of ISA I/O Space */
+	0x00000000,		/* Corresponds to ISA-bus I/O address 0x0 */
+	0x00010000,		/* End of ISA-bus I/O address space, +1 */
+};
+
+struct powerpc_bus_space mvmeppc_pci_io_bs_tag = {
+	_BUS_SPACE_LITTLE_ENDIAN|_BUS_SPACE_IO_TYPE,
+	MVMEPPC_PHYS_BASE_IO,	/* 60x-bus address of PCI I/O Space */
+	0x00000000,		/* Corresponds to PCI-bus I/O address 0x0 */
+	MVMEPPC_PHYS_SIZE_IO,	/* End of PCI-bus I/O address space, +1 */
+};
+
+struct powerpc_bus_space mvmeppc_isa_mem_bs_tag = {
+	_BUS_SPACE_LITTLE_ENDIAN|_BUS_SPACE_MEM_TYPE,
+	MVMEPPC_PHYS_BASE_MEM,	/* 60x-bus address of ISA Memory Space */
+	0x00000000,		/* Corresponds to ISA-bus Memory addr 0x0 */
+	0x01000000,		/* End of ISA-bus Memory addr space, +1 */
+};
+
+struct powerpc_bus_space mvmeppc_pci_mem_bs_tag = {
+	_BUS_SPACE_LITTLE_ENDIAN|_BUS_SPACE_MEM_TYPE,
+	MVMEPPC_PHYS_BASE_MEM,	/* 60x-bus address of PCI Memory Space */
+	0x00000000,		/* Corresponds to PCI-bus Memory addr 0x0 */
+	MVMEPPC_PHYS_SIZE_MEM,	/* End of PCI-bus Memory addr space, +1 */
+};
+static char ex_storage[MVMEPPC_BUS_SPACE_NUM_REGIONS][EXTENT_FIXED_STORAGE_SIZE(8)]
+    __attribute__((aligned(8)));
+
+
+void
+mvmeppc_bus_space_init(void)
+{
+
+	int error;
+
+	error = bus_space_init(&mvmeppc_pci_io_bs_tag, "pci_io",
+	    ex_storage[MVMEPPC_BUS_SPACE_IO],
+	    sizeof(ex_storage[MVMEPPC_BUS_SPACE_IO]));
+
+	if (extent_alloc_region(mvmeppc_pci_io_bs_tag.pbs_extent,
+	    MVMEPPC_PHYS_RESVD_START_IO, MVMEPPC_PHYS_RESVD_SIZE_IO,
+	    EX_NOWAIT) != 0)
+		panic("mvmeppc_bus_space_init: reserving I/O hole");
+
+	mvmeppc_isa_io_bs_tag.pbs_extent = mvmeppc_pci_io_bs_tag.pbs_extent;
+	error = bus_space_init(&mvmeppc_isa_io_bs_tag, "isa_io", NULL, 0);
+
+	error = bus_space_init(&mvmeppc_pci_mem_bs_tag, "pci_mem",
+	    ex_storage[MVMEPPC_BUS_SPACE_MEM],
+	    sizeof(ex_storage[MVMEPPC_BUS_SPACE_MEM]));
+
+	mvmeppc_isa_mem_bs_tag.pbs_extent = mvmeppc_pci_mem_bs_tag.pbs_extent;
+	error = bus_space_init(&mvmeppc_isa_mem_bs_tag, "isa_mem", NULL, 0);
 }

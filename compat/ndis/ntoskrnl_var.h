@@ -461,7 +461,7 @@ struct npaged_lookaside_list {
 typedef struct npaged_lookaside_list npaged_lookaside_list;
 typedef struct npaged_lookaside_list paged_lookaside_list;
 
-typedef void *(*lookaside_alloc_func)(uint32_t, size_t, uint32_t);
+typedef void * (*lookaside_alloc_func)(uint32_t, size_t, uint32_t);
 typedef void (*lookaside_free_func)(void *);
 
 struct irp;
@@ -850,7 +850,7 @@ struct io_stack_location {
 
 	/*
 	 * There's a big-ass union here in the actual Windows
-	 * definition of the structure, but it contains stuff
+	 * definition of the stucture, but it contains stuff
 	 * that doesn't really apply to BSD, and defining it
 	 * all properly would require duplicating over a dozen
 	 * other structures that we'll never use. Since the
@@ -881,7 +881,7 @@ struct io_stack_location {
 			void			*isl_arg3;
 			void			*isl_arg4;
 		} isl_others;
-	} isl_parameters __packed;
+	} isl_parameters __attribute__((packed));
 
 	void			*isl_devobj;
 	void			*isl_fileobj;

@@ -1,4 +1,4 @@
-/* $NetBSD: start.c,v 1.12 2009/02/13 22:41:00 apb Exp $ */
+/* $NetBSD: start.c,v 1.17 2009/11/27 03:23:03 rmind Exp $ */
 /*-
  * Copyright (c) 1998, 2000 Ben Harris
  * All rights reserved.
@@ -31,12 +31,11 @@
 
 #include <sys/param.h>
 
-__KERNEL_RCSID(0, "$NetBSD: start.c,v 1.12 2009/02/13 22:41:00 apb Exp $");
+__KERNEL_RCSID(0, "$NetBSD: start.c,v 1.17 2009/11/27 03:23:03 rmind Exp $");
 
 #include "opt_modular.h"
 
 #include <sys/msgbuf.h>
-#include <sys/user.h>
 #include <sys/syslog.h>
 #include <sys/systm.h>
 
@@ -65,8 +64,6 @@ extern void main(void); /* XXX Should be in a header file */
 
 struct bootconfig bootconfig;
 
-struct user *proc0paddr;
-
 /* in machdep.h */
 extern i2c_tag_t acorn26_i2c_tag;
 
@@ -92,10 +89,10 @@ extern char __bss_start__[], __bss_end__[];
  * assembler to get things going.
  */
 void
-start(initbootconfig)
-	struct bootconfig *initbootconfig;
+start(struct bootconfig *initbootconfig)
 {
 	int onstack;
+	vaddr_t v;
 
 	/*
 	 * State of the world as of BBBB 0.02:
@@ -115,7 +112,7 @@ start(initbootconfig)
 #define MSGBUF_PHYSADDR	((paddr_t)0x00090000)
 
 	/* We can't trust the BSS (at least not with my linker) */
-	bzero(__bss_start__, __bss_end__ - __bss_start__);
+	memset(__bss_start__, 0, __bss_end__ - __bss_start__);
 
 	/* Save boot configuration somewhere */
 	memcpy(&bootconfig, initbootconfig, sizeof(struct bootconfig));
@@ -189,11 +186,12 @@ start(initbootconfig)
 	fiq_off();
 
 	/*
-	 * Locate process 0's user structure, in the bottom of its kernel
-	 * stack page.  That's our current stack page too.
+	 * Locate lwp0's uarea, in the bottom of its kernel stack page.
+	 * That is our current stack page too.
 	 */
-	proc0paddr = (struct user *)(round_page((vaddr_t)&onstack) - USPACE);
-	bzero(proc0paddr, sizeof(*proc0paddr));
+	v = round_page((vaddr_t)&onstack) - USPACE;
+	uvm_lwp_setuarea(&lwp0, v);
+	memset((void *)v, 0, sizeof(struct pcb));
 
 	/* TODO: anything else? */
 	

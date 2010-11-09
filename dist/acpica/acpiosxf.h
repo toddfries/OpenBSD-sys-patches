@@ -12,7 +12,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2008, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2006, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -125,18 +125,12 @@
 #include "actypes.h"
 
 
-/* Types for AcpiOsExecute */
+/* Priorities for AcpiOsQueueForExecution */
 
-typedef enum
-{
-    OSL_GLOBAL_LOCK_HANDLER,
-    OSL_NOTIFY_HANDLER,
-    OSL_GPE_HANDLER,
-    OSL_DEBUGGER_THREAD,
-    OSL_EC_POLL_HANDLER,
-    OSL_EC_BURST_HANDLER
-
-} ACPI_EXECUTE_TYPE;
+#define OSD_PRIORITY_GPE            1
+#define OSD_PRIORITY_HIGH           2
+#define OSD_PRIORITY_MED            3
+#define OSD_PRIORITY_LO             4
 
 #define ACPI_NO_UNIT_LIMIT          ((UINT32) -1)
 #define ACPI_MUTEX_SEM              1
@@ -171,9 +165,10 @@ AcpiOsTerminate (
 /*
  * ACPI Table interfaces
  */
-ACPI_PHYSICAL_ADDRESS
+ACPI_STATUS
 AcpiOsGetRootPointer (
-    void);
+    UINT32                  Flags,
+    ACPI_POINTER            *Address);
 
 ACPI_STATUS
 AcpiOsPredefinedOverride (
@@ -187,77 +182,45 @@ AcpiOsTableOverride (
 
 
 /*
- * Spinlock primitives
- */
-ACPI_STATUS
-AcpiOsCreateLock (
-    ACPI_SPINLOCK           *OutHandle);
-
-void
-AcpiOsDeleteLock (
-    ACPI_SPINLOCK           Handle);
-
-ACPI_CPU_FLAGS
-AcpiOsAcquireLock (
-    ACPI_SPINLOCK           Handle);
-
-void
-AcpiOsReleaseLock (
-    ACPI_SPINLOCK           Handle,
-    ACPI_CPU_FLAGS          Flags);
-
-
-/*
- * Semaphore primitives
+ * Synchronization primitives
  */
 ACPI_STATUS
 AcpiOsCreateSemaphore (
     UINT32                  MaxUnits,
     UINT32                  InitialUnits,
-    ACPI_SEMAPHORE          *OutHandle);
+    ACPI_HANDLE             *OutHandle);
 
 ACPI_STATUS
 AcpiOsDeleteSemaphore (
-    ACPI_SEMAPHORE          Handle);
+    ACPI_HANDLE             Handle);
 
 ACPI_STATUS
 AcpiOsWaitSemaphore (
-    ACPI_SEMAPHORE          Handle,
+    ACPI_HANDLE             Handle,
     UINT32                  Units,
     UINT16                  Timeout);
 
 ACPI_STATUS
 AcpiOsSignalSemaphore (
-    ACPI_SEMAPHORE          Handle,
+    ACPI_HANDLE             Handle,
     UINT32                  Units);
 
-
-/*
- * Mutex primitives
- */
 ACPI_STATUS
-AcpiOsCreateMutex (
-    ACPI_MUTEX              *OutHandle);
+AcpiOsCreateLock (
+    ACPI_HANDLE             *OutHandle);
 
 void
-AcpiOsDeleteMutex (
-    ACPI_MUTEX              Handle);
+AcpiOsDeleteLock (
+    ACPI_HANDLE             Handle);
 
-ACPI_STATUS
-AcpiOsAcquireMutex (
-    ACPI_MUTEX              Handle,
-    UINT16                  Timeout);
+ACPI_CPU_FLAGS
+AcpiOsAcquireLock (
+    ACPI_HANDLE             Handle);
 
 void
-AcpiOsReleaseMutex (
-    ACPI_MUTEX              Handle);
-
-/* Temporary macros for Mutex* interfaces, map to existing semaphore xfaces */
-
-#define AcpiOsCreateMutex(OutHandle)        AcpiOsCreateSemaphore (1, 1, OutHandle)
-#define AcpiOsDeleteMutex(Handle)           (void) AcpiOsDeleteSemaphore (Handle)
-#define AcpiOsAcquireMutex(Handle,Time)     AcpiOsWaitSemaphore (Handle, 1, Time)
-#define AcpiOsReleaseMutex(Handle)          (void) AcpiOsSignalSemaphore (Handle, 1)
+AcpiOsReleaseLock (
+    ACPI_HANDLE             Handle,
+    ACPI_CPU_FLAGS          Flags);
 
 
 /*
@@ -271,10 +234,11 @@ void
 AcpiOsFree (
     void *                  Memory);
 
-void *
+ACPI_STATUS
 AcpiOsMapMemory (
-    ACPI_PHYSICAL_ADDRESS   Where,
-    ACPI_NATIVE_UINT        Length);
+    ACPI_PHYSICAL_ADDRESS   PhysicalAddress,
+    ACPI_SIZE               Size,
+    void                    **LogicalAddress);
 
 void
 AcpiOsUnmapMemory (
@@ -333,13 +297,13 @@ AcpiOsRemoveInterruptHandler (
 /*
  * Threads and Scheduling
  */
-ACPI_THREAD_ID
+UINT32
 AcpiOsGetThreadId (
     void);
 
 ACPI_STATUS
-AcpiOsExecute (
-    ACPI_EXECUTE_TYPE       Type,
+AcpiOsQueueForExecution (
+    UINT32                  Priority,
     ACPI_OSD_EXEC_CALLBACK  Function,
     void                    *Context);
 
@@ -407,7 +371,6 @@ AcpiOsWritePciConfiguration (
     ACPI_INTEGER            Value,
     UINT32                  Width);
 
-
 /*
  * Interim function needed for PCI IRQ routing
  */
@@ -417,20 +380,9 @@ AcpiOsDerivePciId(
     ACPI_HANDLE             Chandle,
     ACPI_PCI_ID             **PciId);
 
-
 /*
  * Miscellaneous
  */
-ACPI_STATUS
-AcpiOsValidateInterface (
-    char                    *Interface);
-
-ACPI_STATUS
-AcpiOsValidateAddress (
-    UINT8                   SpaceId,
-    ACPI_PHYSICAL_ADDRESS   Address,
-    ACPI_SIZE               Length);
-
 BOOLEAN
 AcpiOsReadable (
     void                    *Pointer,
@@ -449,7 +401,6 @@ ACPI_STATUS
 AcpiOsSignal (
     UINT32                  Function,
     const void              *Info);
-
 
 /*
  * Debug print routines
@@ -500,5 +451,14 @@ void
 AcpiOsCloseDirectory (
     void                    *DirHandle);
 
+/*
+ * Debug
+ */
+void
+AcpiOsDbgAssert(
+    void                    *FailedAssertion,
+    void                    *FileName,
+    UINT32                  LineNumber,
+    char                    *Message);
 
 #endif /* __ACPIOSXF_H__ */

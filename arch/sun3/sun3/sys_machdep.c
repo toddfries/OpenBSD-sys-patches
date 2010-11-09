@@ -1,4 +1,4 @@
-/*	$NetBSD: sys_machdep.c,v 1.21 2007/12/20 23:02:43 dsl Exp $	*/
+/*	$NetBSD: sys_machdep.c,v 1.19 2005/12/11 12:19:27 christos Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1993
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sys_machdep.c,v 1.21 2007/12/20 23:02:43 dsl Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sys_machdep.c,v 1.19 2005/12/11 12:19:27 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -44,6 +44,7 @@ __KERNEL_RCSID(0, "$NetBSD: sys_machdep.c,v 1.21 2007/12/20 23:02:43 dsl Exp $")
 #include <sys/kernel.h>
 #include <sys/buf.h>
 #include <sys/mount.h>
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 
 #include <uvm/uvm_extern.h>
@@ -87,12 +88,12 @@ cachectl1(unsigned long req, vaddr_t addr, size_t len, struct proc *p)
 }
 
 int 
-sys_sysarch(struct lwp *l, const struct sys_sysarch_args *uap, register_t *retval)
+sys_sysarch(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct sys_sysarch_args /* {
 		syscallarg(int) op;
 		syscallarg(void *) parms;
-	} */
+	} */ *uap = v;
 
 	(void)uap->op;	/* kill warning */
 	return (ENOSYS);

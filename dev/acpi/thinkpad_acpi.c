@@ -1,4 +1,4 @@
-/* $NetBSD: thinkpad_acpi.c,v 1.18 2009/02/17 12:30:31 jmcneill Exp $ */
+/* $NetBSD: thinkpad_acpi.c,v 1.12 2008/02/29 06:35:40 dyoung Exp $ */
 
 /*-
  * Copyright (c) 2007 Jared D. McNeill <jmcneill@invisible.ca>
@@ -12,6 +12,12 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by Jared D. McNeill.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -27,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: thinkpad_acpi.c,v 1.18 2009/02/17 12:30:31 jmcneill Exp $");
+__KERNEL_RCSID(0, "$NetBSD: thinkpad_acpi.c,v 1.12 2008/02/29 06:35:40 dyoung Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -44,13 +50,10 @@ __KERNEL_RCSID(0, "$NetBSD: thinkpad_acpi.c,v 1.18 2009/02/17 12:30:31 jmcneill 
 #include <dev/acpi/acpi_ecvar.h>
 
 #if defined(__i386__) || defined(__amd64__)
-#include <dev/isa/isareg.h>
 #include <machine/pio.h>
 #endif
 
-#define	THINKPAD_NTEMPSENSORS	8
-#define	THINKPAD_NFANSENSORS	1
-#define	THINKPAD_NSENSORS	(THINKPAD_NTEMPSENSORS + THINKPAD_NFANSENSORS)
+#define THINKPAD_NSENSORS	8
 
 typedef struct thinkpad_softc {
 	device_t		sc_dev;
@@ -59,7 +62,7 @@ typedef struct thinkpad_softc {
 	ACPI_HANDLE		sc_cmoshdl;
 	bool			sc_cmoshdl_valid;
 
-#define	TP_PSW_SLEEP		0
+#define TP_PSW_SLEEP		0
 #define	TP_PSW_HIBERNATE	1
 #define	TP_PSW_DISPLAY_CYCLE	2
 #define	TP_PSW_LOCK_SCREEN	3
@@ -99,7 +102,7 @@ typedef struct thinkpad_softc {
 #define	THINKPAD_CMOS_BRIGHTNESS_UP	0x04
 #define	THINKPAD_CMOS_BRIGHTNESS_DOWN	0x05
 
-#define	THINKPAD_HKEY_VERSION		0x0100
+#define THINKPAD_HKEY_VERSION		0x0100
 
 #define	THINKPAD_DISPLAY_LCD		0x01
 #define	THINKPAD_DISPLAY_CRT		0x02
@@ -114,10 +117,8 @@ static ACPI_STATUS thinkpad_mask_init(thinkpad_softc_t *, uint32_t);
 static void	thinkpad_notify_handler(ACPI_HANDLE, UINT32, void *);
 static void	thinkpad_get_hotkeys(void *);
 
-static void	thinkpad_sensors_init(thinkpad_softc_t *);
-static void	thinkpad_sensors_refresh(struct sysmon_envsys *, envsys_data_t *);
+static void	thinkpad_temp_init(thinkpad_softc_t *);
 static void	thinkpad_temp_refresh(struct sysmon_envsys *, envsys_data_t *);
-static void	thinkpad_fan_refresh(struct sysmon_envsys *, envsys_data_t *);
 
 static void	thinkpad_wireless_toggle(thinkpad_softc_t *);
 
@@ -139,12 +140,17 @@ static int
 thinkpad_match(device_t parent, struct cfdata *match, void *opaque)
 {
 	struct acpi_attach_args *aa = (struct acpi_attach_args *)opaque;
+	ACPI_HANDLE hdl;
 	ACPI_INTEGER ver;
 
 	if (aa->aa_node->ad_type != ACPI_TYPE_DEVICE)
 		return 0;
 
 	if (!acpi_match_hid(aa->aa_node->ad_devinfo, thinkpad_ids))
+		return 0;
+
+	/* No point in attaching if we can't find the CMOS method */
+	if (ACPI_FAILURE(AcpiGetHandle(NULL, "\\UCMS", &hdl)))
 		return 0;
 
 	/* We only support hotkey version 0x0100 */
@@ -182,7 +188,7 @@ thinkpad_attach(device_t parent, device_t self, void *opaque)
 	if (ACPI_FAILURE(rv))
 		sc->sc_cmoshdl_valid = false;
 	else {
-		aprint_debug_dev(self, "using CMOS at \\UCMS\n");
+		aprint_verbose_dev(self, "using CMOS at \\UCMS\n");
 		sc->sc_cmoshdl_valid = true;
 	}
 
@@ -194,7 +200,7 @@ thinkpad_attach(device_t parent, device_t self, void *opaque)
 			break;
 		}
 	if (sc->sc_ecdev)
-		aprint_debug_dev(self, "using EC at %s\n",
+		aprint_verbose_dev(self, "using EC at %s\n",
 		    device_xname(sc->sc_ecdev));
 
 	/* Get the supported event mask */
@@ -251,8 +257,8 @@ thinkpad_attach(device_t parent, device_t self, void *opaque)
 		}
 	}
 
-	/* Register temperature and fan sensors with envsys */
-	thinkpad_sensors_init(sc);
+	/* Register temperature sensors with envsys */
+	thinkpad_temp_init(sc);
 
 fail:
 	if (!pmf_device_register(self, NULL, thinkpad_resume))
@@ -432,17 +438,16 @@ thinkpad_mask_init(thinkpad_softc_t *sc, uint32_t mask)
 }
 
 static void
-thinkpad_sensors_init(thinkpad_softc_t *sc)
+thinkpad_temp_init(thinkpad_softc_t *sc)
 {
 	char sname[5] = "TMP?";
-	char fname[5] = "FAN?";
-	int i, j, err;
+	int i, err;
 
 	if (sc->sc_ecdev == NULL)
 		return;	/* no chance of this working */
 
 	sc->sc_sme = sysmon_envsys_create();
-	for (i = 0; i < THINKPAD_NTEMPSENSORS; i++) {
+	for (i = 0; i < THINKPAD_NSENSORS; i++) {
 		sname[3] = '0' + i;
 		strcpy(sc->sc_sensor[i].desc, sname);
 		sc->sc_sensor[i].units = ENVSYS_STEMP;
@@ -451,41 +456,16 @@ thinkpad_sensors_init(thinkpad_softc_t *sc)
 			aprint_error_dev(sc->sc_dev,
 			    "couldn't attach sensor %s\n", sname);
 	}
-	j = i; /* THINKPAD_NTEMPSENSORS */
-	for (; i < (j + THINKPAD_NFANSENSORS); i++) {
-		fname[3] = '0' + (i - j);
-		strcpy(sc->sc_sensor[i].desc, fname);
-		sc->sc_sensor[i].units = ENVSYS_SFANRPM;
-
-		if (sysmon_envsys_sensor_attach(sc->sc_sme, &sc->sc_sensor[i]))
-			aprint_error_dev(sc->sc_dev,
-			    "couldn't attach sensor %s\n", fname);
-	}
 
 	sc->sc_sme->sme_name = device_xname(sc->sc_dev);
 	sc->sc_sme->sme_cookie = sc;
-	sc->sc_sme->sme_refresh = thinkpad_sensors_refresh;
+	sc->sc_sme->sme_refresh = thinkpad_temp_refresh;
 
 	err = sysmon_envsys_register(sc->sc_sme);
 	if (err) {
 		aprint_error_dev(sc->sc_dev,
 		    "couldn't register with sysmon: %d\n", err);
 		sysmon_envsys_destroy(sc->sc_sme);
-	}
-}
-
-static void
-thinkpad_sensors_refresh(struct sysmon_envsys *sme, envsys_data_t *edata)
-{
-	switch (edata->units) {
-	case ENVSYS_STEMP:
-		thinkpad_temp_refresh(sme, edata);
-		break;
-	case ENVSYS_SFANRPM:
-		thinkpad_fan_refresh(sme, edata);
-		break;
-	default:
-		break;
 	}
 }
 
@@ -515,42 +495,6 @@ thinkpad_temp_refresh(struct sysmon_envsys *sme, envsys_data_t *edata)
 }
 
 static void
-thinkpad_fan_refresh(struct sysmon_envsys *sme, envsys_data_t *edata)
-{
-	thinkpad_softc_t *sc = sme->sme_cookie;
-	ACPI_INTEGER lo;
-	ACPI_INTEGER hi;
-	ACPI_STATUS rv;
-	int rpm;
-
-	/*
-	 * Read the low byte first to avoid a firmware bug.
-	 */
-	rv = acpiec_bus_read(sc->sc_ecdev, 0x84, &lo, 1);
-	if (ACPI_FAILURE(rv)) {
-		edata->state = ENVSYS_SINVALID;
-		return;
-	}
-	rv = acpiec_bus_read(sc->sc_ecdev, 0x85, &hi, 1);
-	if (ACPI_FAILURE(rv)) {
-		edata->state = ENVSYS_SINVALID;
-		return;
-	}
-	rpm = ((((int)hi) << 8) | ((int)lo));
-	if (rpm < 0) {
-		edata->state = ENVSYS_SINVALID;
-		return;
-	}
-
-	edata->value_cur = rpm;
-	if (rpm < edata->value_min || edata->value_min == -1)
-		edata->value_min = rpm;
-	if (rpm > edata->value_max || edata->value_max == -1)
-		edata->value_max = rpm;
-	edata->state = ENVSYS_SVALID;
-}
-
-static void
 thinkpad_wireless_toggle(thinkpad_softc_t *sc)
 {
 	/* Ignore return value, as the hardware may not support bluetooth */
@@ -567,8 +511,8 @@ thinkpad_brightness_read(thinkpad_softc_t *sc)
 	 * with the EC, and Thinkpads are x86-only, this will have to do
 	 * for now.
 	 */
-	outb(IO_RTC, 0x6c);
-	return inb(IO_RTC+1) & 7;
+	outb(0x70, 0x6c);
+	return inb(0x71) & 7;
 #else
 	return 0;
 #endif

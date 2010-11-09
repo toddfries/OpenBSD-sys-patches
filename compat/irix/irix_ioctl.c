@@ -1,7 +1,7 @@
-/*	$NetBSD: irix_ioctl.c,v 1.20 2008/04/28 20:23:41 martin Exp $ */
+/*	$NetBSD: irix_ioctl.c,v 1.11 2006/07/31 20:52:13 bjh21 Exp $ */
 
 /*-
- * Copyright (c) 2002, 2008 The NetBSD Foundation, Inc.
+ * Copyright (c) 2002 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: irix_ioctl.c,v 1.20 2008/04/28 20:23:41 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: irix_ioctl.c,v 1.11 2006/07/31 20:52:13 bjh21 Exp $");
 
 #include <sys/param.h>
 #include <sys/proc.h>
@@ -42,6 +49,7 @@ __KERNEL_RCSID(0, "$NetBSD: irix_ioctl.c,v 1.20 2008/04/28 20:23:41 martin Exp $
 #include <sys/ioctl.h>
 #include <sys/vnode.h>
 #include <sys/types.h>
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 #include <sys/conf.h>
 
@@ -64,57 +72,61 @@ __KERNEL_RCSID(0, "$NetBSD: irix_ioctl.c,v 1.20 2008/04/28 20:23:41 martin Exp $
 #include <compat/irix/irix_syscallargs.h>
 
 int
-irix_sys_ioctl(struct lwp *l, const struct irix_sys_ioctl_args *uap, register_t *retval)
+irix_sys_ioctl(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct irix_sys_ioctl_args /* {
 		syscallarg(int) fd;
 		syscallarg(u_long) com;
-		syscallarg(void *) data;
-	} */
+		syscallarg(caddr_t) data;
+	} */ *uap = v;
 	extern const struct cdevsw irix_usema_cdevsw;
+	struct proc *p = l->l_proc;
 	u_long	cmd;
-	void *data;
-	file_t *fp;
+	caddr_t data;
+	struct file *fp;
+	struct filedesc *fdp;
 	struct vnode *vp;
 	struct vattr vattr;
 	struct irix_ioctl_usrdata iiu;
-	int error, val, fd;
+	struct irix_ioctl_usrdata *iiup;
+	caddr_t sg = stackgap_init(p, 0);
+	int error, val;
 
 	/*
 	 * This duplicates 6 lines from svr4_sys_ioctl()
 	 * It would be nice to merge it.
 	 */
-	fd = SCARG(uap, fd);
+	fdp = p->p_fd;
 	cmd = SCARG(uap, com);
 	data = SCARG(uap, data);
 
-	if ((fp = fd_getfile(fd)) == NULL)
+	if ((fp = fd_getfile(fdp, SCARG(uap, fd))) == NULL)
 		return EBADF;
 
-	if ((fp->f_flag & (FREAD | FWRITE)) == 0) {
-		fd_putfile(fd);
+	if ((fp->f_flag & (FREAD | FWRITE)) == 0)
 		return EBADF;
-	}
 
 	/*
 	 * A special hook for /dev/usemaclone ioctls. Some of the ioctl
 	 * commands need to set the return value, which is normally
 	 * impossible in the file methods and lower. We do the job by
 	 * copying the retval address and the data argument to a
-	 * struct irix_ioctl_usrdata. The data argument
+	 * struct irix_ioctl_usrdata in the stackgap. The data argument
 	 * is set to the address of the structure, and the underlying
 	 * code will be able to retreive both data and the retval address
-	 * from the struct irix_ioctl_usrdata.
+	 * by fetching the struct irix_ioctl_usrdata.
 	 *
 	 * We also bypass the checks in sys_ioctl() because theses ioctl
 	 * are defined _IO but really are _IOR. XXX need security review.
 	 */
 	if ((cmd & IRIX_UIOC_MASK) == IRIX_UIOC) {
-		if (fp->f_type != DTYPE_VNODE) {
-			fd_putfile(fd);
+		if (fp->f_type != DTYPE_VNODE)
 			return ENOTTY;
-		}
-		vp = fp->f_data;
+		FILE_USE(fp);
+		vp = (struct vnode*)fp->f_data;
 		if (vp->v_type != VCHR ||
 		    cdevsw_lookup(vp->v_rdev) != &irix_usema_cdevsw ||
 		    minor(vp->v_rdev) != IRIX_USEMACLNDEV_MINOR) {
@@ -122,29 +134,31 @@ irix_sys_ioctl(struct lwp *l, const struct irix_sys_ioctl_args *uap, register_t 
 			goto out;
 		}
 
+		iiup = stackgap_alloc(p, &sg, sizeof(iiu));
 		iiu.iiu_data = data;
 		iiu.iiu_retval = retval;
+		data = (caddr_t)iiup;
+		if ((error = copyout(&iiu, iiup, sizeof(iiu))) != 0)
+			goto out;
 
-		error = (*fp->f_ops->fo_ioctl)(fp, cmd, &iiu);
+		error = (*fp->f_ops->fo_ioctl)(fp, cmd, data, l);
 out:
-		fd_putfile(fd);
+		FILE_UNUSE(fp, l);
 		return error;
 	}
 
 	switch (cmd) {
 	case IRIX_SIOCNREAD: /* number of bytes to read */
-		error = (*(fp->f_ops->fo_ioctl))(fp, FIONREAD,
-		    SCARG(uap, data));
-		fd_putfile(fd);
-		return error;
+		return (*(fp->f_ops->fo_ioctl))(fp, FIONREAD,
+		    SCARG(uap, data), l);
+		break;
 
 	case IRIX_MTIOCGETBLKSIZE: /* get tape block size in 512B units */
-		if (fp->f_type != DTYPE_VNODE) {
-			fd_putfile(fd);
+		if (fp->f_type != DTYPE_VNODE)
 			return ENOSYS;
-		}
 
-		vp = fp->f_data;
+		FILE_USE(fp);
+		vp = (struct vnode*)fp->f_data;
 
 		switch (vp->v_type) {
 		case VREG:
@@ -157,7 +171,7 @@ out:
 			error = EINVAL;
 			break;
 		case VBLK:
-			error = VOP_GETATTR(vp, &vattr, l->l_cred);
+			error = VOP_GETATTR(vp, &vattr, l->l_cred, l);
 			if (error == 0) {
 				val = vattr.va_blocksize / 512;
 				error = copyout(&val, data, sizeof(int));
@@ -168,11 +182,14 @@ out:
 			break;
 		}
 
-		fd_putfile(fd);
+		FILE_UNUSE(fp, l);
 		return error;
+		break;
 
 	default: /* Fallback to the standard SVR4 ioctl's */
-		fd_putfile(fd);
-		return svr4_sys_ioctl(l, (const void *)uap, retval);
+		error = svr4_sys_ioctl(l, v, retval);
+		break;
 	}
+
+	return error;
 }

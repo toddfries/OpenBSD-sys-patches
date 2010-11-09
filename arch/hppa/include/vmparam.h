@@ -1,4 +1,4 @@
-/*	$NetBSD: vmparam.h,v 1.13 2009/03/06 20:31:49 joerg Exp $	*/
+/*	$NetBSD: vmparam.h,v 1.8 2006/10/14 09:07:01 skrll Exp $	*/
 
 /*	$OpenBSD: vmparam.h,v 1.17 2001/09/22 18:00:09 miod Exp $	*/
 
@@ -41,10 +41,13 @@
 #define	PAGE_MASK	(PAGE_SIZE - 1)
 
 /*
- * USRSTACK is the bottom (start) of the user stack.
+ * USRSTACK is the top (end) of the user stack.
  */
 #define	USRSTACK	0x70000000		/* Start of user stack */
 #define	SYSCALLGATE	0xC0000000		/* syscall gateway page */
+
+/* Alignment requirement for a uspace. */
+#define	USPACE_ALIGN	PAGE_SIZE
 
 /*
  * Virtual memory related constants, all in bytes
@@ -59,14 +62,22 @@
 #define	MAXDSIZ		(USRSTACK-MAXTSIZ)	/* max data size */
 #endif
 #ifndef	DFLSSIZ
-#define	DFLSSIZ		(2*1024*1024)		/* initial stack size limit */
+#define	DFLSSIZ		(512*1024)		/* initial stack size limit */
 #endif
 #ifndef	MAXSSIZ
-#define	MAXSSIZ		(256*1024*1024)		/* max stack size */
+#define	MAXSSIZ		(256*1024*1024)	/* max stack size */
 #endif
 
 #ifndef USRIOSIZE
 #define	USRIOSIZE	((2*HPPA_PGALIAS)/PAGE_SIZE)	/* 2mb */
+#endif
+
+/*
+ * PTEs for system V style shared memory.
+ * This is basically slop for kmempt which we actually allocate (malloc) from.
+ */
+#ifndef SHMMAXPGS
+#define SHMMAXPGS	((1024*1024*10)/PAGE_SIZE)	/* 10mb */
 #endif
 
 /*

@@ -1,4 +1,4 @@
-/*	$NetBSD: pmap_bootstrap.c,v 1.41 2009/01/17 07:17:36 tsutsui Exp $	*/
+/*	$NetBSD: pmap_bootstrap.c,v 1.29 2005/12/11 12:19:45 christos Exp $	*/
 
 /* 
  * Copyright (c) 1991, 1993
@@ -36,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: pmap_bootstrap.c,v 1.41 2009/01/17 07:17:36 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pmap_bootstrap.c,v 1.29 2005/12/11 12:19:45 christos Exp $");
 
 #include "opt_m680x0.h"
 
@@ -48,14 +48,21 @@ __KERNEL_RCSID(0, "$NetBSD: pmap_bootstrap.c,v 1.41 2009/01/17 07:17:36 tsutsui 
 #include <arch/x68k/x68k/iodevice.h>
 
 
-#define RELOC(v, t)	*((t*)((uintptr_t)&(v) + firstpa))
-#define RELOCPTR(v, t)	((t)((uintptr_t)RELOC((v), t) + firstpa))
+#define RELOC(v, t)	*((t*)((caddr_t)&(v) + firstpa))
 
 extern char *etext;
+extern int Sysptsize;
 extern char *proc0paddr;
+extern st_entry_t *Sysseg;
+extern pt_entry_t *Sysptmap, *Sysmap;
 
 extern int maxmem, physmem;
 extern paddr_t avail_start, avail_end;
+extern vaddr_t virtual_avail, virtual_end;
+extern psize_t mem_size;
+extern int protection_codes[];
+
+u_int8_t *intiobase = (u_int8_t *) PHYS_IODEV;
 
 void	pmap_bootstrap(paddr_t, paddr_t);
 
@@ -67,9 +74,8 @@ void	pmap_bootstrap(paddr_t, paddr_t);
  *	vmmap:		/dev/mem, crash dumps, parity error checking
  *	msgbufaddr:	kernel message buffer
  */
-void *CADDR1, *CADDR2;
-char *vmmap;
-void *msgbufaddr;
+caddr_t		CADDR1, CADDR2, vmmap;
+extern caddr_t	msgbufaddr;
 
 /*
  * Bootstrap the VM system.
@@ -255,9 +261,9 @@ pmap_bootstrap(paddr_t nextpa, paddr_t firstpa)
 			*ste++ = SG_NV;
 			*pte++ = PG_NV;
 		}
-		/*
+ 		/*
 		 * Initialize the last one to point to Sysptmap.
-		 */
+ 		 */
 		*ste = kptmpa | SG_RW | SG_V;
 		*pte = kptmpa | PG_RW | PG_CI | PG_V;
 	}
@@ -298,7 +304,7 @@ pmap_bootstrap(paddr_t nextpa, paddr_t firstpa)
 		protopte += PAGE_SIZE;
 	}
 	/*
-	 * map the kernel segment table cache invalidated for
+	 * map the kernel segment table cache invalidated for 
 	 * these machines (for the 68040 not strictly necessary, but
 	 * recommended by Motorola; for the 68060 mandatory)
 	 * XXX this includes p0upa.  why?
@@ -322,8 +328,8 @@ pmap_bootstrap(paddr_t nextpa, paddr_t firstpa)
 
 	protopte = INTIOBASE | PG_RW | PG_CI | PG_V;
 	epte = &pte[IIOMAPSIZE];
-	RELOC(intiobase, u_int8_t *) = (char *)PTE2VA(pte);
-	RELOC(IODEVbase, u_int8_t *) = RELOC(intiobase, u_int8_t *); /* XXX */
+	RELOC(IODEVbase, char *) = (char *)PTE2VA(pte);
+	RELOC(intiobase, u_int8_t *) = RELOC(IODEVbase, u_int8_t *); /* XXX */
 	RELOC(intiolimit, char *) = (char *)PTE2VA(epte);
 	while (pte < epte) {
 		*pte++ = protopte;
@@ -346,7 +352,7 @@ pmap_bootstrap(paddr_t nextpa, paddr_t firstpa)
 		(pt_entry_t *)(kptmpa - firstpa);
 	/*
 	 * Sysmap: kernel page table (as mapped through Sysptmap)
-	 * Allocated at the end of KVA space.
+	 * Immediately follows `nptpages' of static kernel page table.
 	 */
 	RELOC(Sysmap, pt_entry_t *) =
 	    (pt_entry_t *)m68k_ptob((NPTEPG - 1) * NPTEPG);
@@ -386,9 +392,9 @@ pmap_bootstrap(paddr_t nextpa, paddr_t firstpa)
 	 * absolute "jmp" table.
 	 */
 	{
-		u_int *kp;
+		int *kp;
 
-		kp = &RELOC(protection_codes, u_int);
+		kp = &RELOC(protection_codes, int);
 		kp[VM_PROT_NONE|VM_PROT_NONE|VM_PROT_NONE] = 0;
 		kp[VM_PROT_READ|VM_PROT_NONE|VM_PROT_NONE] = PG_RO;
 		kp[VM_PROT_READ|VM_PROT_NONE|VM_PROT_EXECUTE] = PG_RO;
@@ -404,9 +410,7 @@ pmap_bootstrap(paddr_t nextpa, paddr_t firstpa)
 	 * just initialize pointers.
 	 */
 	{
-		struct pmap *kpm;
-
-		kpm = RELOCPTR(kernel_pmap_ptr, struct pmap *);
+		struct pmap *kpm = &RELOC(kernel_pmap_store, struct pmap);
 
 		kpm->pm_stab = RELOC(Sysseg, st_entry_t *);
 		kpm->pm_ptab = RELOC(Sysmap, pt_entry_t *);
@@ -444,13 +448,13 @@ pmap_bootstrap(paddr_t nextpa, paddr_t firstpa)
 	{
 		vaddr_t va = RELOC(virtual_avail, vaddr_t);
 
-		RELOC(CADDR1, void *) = (void *)va;
+		RELOC(CADDR1, caddr_t) = (caddr_t)va;
 		va += PAGE_SIZE;
-		RELOC(CADDR2, void *) = (void *)va;
+		RELOC(CADDR2, caddr_t) = (caddr_t)va;
 		va += PAGE_SIZE;
-		RELOC(vmmap, void *) = (void *)va;
+		RELOC(vmmap, caddr_t) = (caddr_t)va;
 		va += PAGE_SIZE;
-		RELOC(msgbufaddr, void *) = (void *)va;
+		RELOC(msgbufaddr, caddr_t) = (caddr_t)va;
 		va += m68k_round_page(MSGBUFSIZE);
 		RELOC(virtual_avail, vaddr_t) = va;
 	}

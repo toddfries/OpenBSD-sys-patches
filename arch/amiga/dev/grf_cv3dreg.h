@@ -1,4 +1,4 @@
-/*	$NetBSD: grf_cv3dreg.h,v 1.9 2007/03/05 19:48:19 he Exp $	*/
+/*	$NetBSD: grf_cv3dreg.h,v 1.7 2005/12/24 20:06:47 perry Exp $	*/
 
 /*
  * Copyright (c) 1995 Michael Teske
@@ -60,67 +60,64 @@ struct grfcv3dtext_mode {
 #define MAXCOLS 200
 
 /* read VGA register */
-#define vgar(ba, reg) \
-	*(((volatile char *)ba)+(reg ^ 3))
+#define vgar(ba, reg) (*((volatile caddr_t)(((caddr_t)ba)+(reg ^ 3))))
 
 /* write VGA register */
 #define vgaw(ba, reg, val) \
-	*(((volatile char *)ba)+(reg ^ 3)) = ((val) & 0xff)
+	*((volatile caddr_t)(((caddr_t)ba)+(reg ^ 3))) = ((val) & 0xff)
 
 /* MMIO access */
 #define ByteAccessIO(x)	( ((x) & 0x3ffc) | (((x) & 3)^3) | (((x) & 3) <<14) )
 
 #define vgario(ba, reg) \
-	*(((volatile char *)ba) + ( ByteAccessIO(reg) ))
+	(*((volatile caddr_t)(((caddr_t)ba) + ( ByteAccessIO(reg) ))))
 
 #define vgawio(ba, reg, val) \
 	do { \
 		if (!cv3d_zorroIII) { \
-		        *(((volatile char *)cv3d_vcode_switch_base) + \
-			    0x04) = (0x01 & 0xffff); \
+		        *((volatile caddr_t)(((caddr_t)cv3d_vcode_switch_base) + \
+			    0x04)) = (0x01 & 0xffff); \
 			__asm volatile ("nop"); \
 		} \
-		*(((volatile char *)cv3d_special_register_base) + \
-		    ( ByteAccessIO(reg) & 0xffff )) = ((val) & 0xff); \
+		*((volatile caddr_t)(((caddr_t)cv3d_special_register_base) + \
+		    ( ByteAccessIO(reg) & 0xffff ))) = ((val) & 0xff); \
 		if (!cv3d_zorroIII) { \
-		        *(((volatile char *)cv3d_vcode_switch_base) + \
-			    0x04) = (0x02 & 0xffff); \
+		        *((volatile caddr_t)(((caddr_t)cv3d_vcode_switch_base) + \
+			    0x04)) = (0x02 & 0xffff); \
 			__asm volatile ("nop"); \
 		} \
 	} while (0)
 
 /* read 32 Bit VGA register */
-#define vgar32(ba, reg) \
-	*((volatile unsigned long *) (((volatile char *)ba)+reg))
+#define vgar32(ba, reg) ( *((unsigned long *) (((volatile caddr_t)ba)+reg)) )
 
 /* write 32 Bit VGA register */
 #define vgaw32(ba, reg, val) \
-	*((volatile unsigned long *) (((volatile char *)ba)+reg)) = val
+	*((unsigned long *) (((volatile caddr_t)ba)+reg)) = val
 
 /* read 16 Bit VGA register */
-#define vgar16(ba, reg) \
-	*((volatile unsigned short *) (((volatile char *)ba)+reg))
+#define vgar16(ba, reg) ( *((unsigned short *) (((volatile caddr_t)ba)+reg)) )
 
 /* write 16 Bit VGA register */
 #define vgaw16(ba, reg, val) \
-	*((volatile unsigned short *) (((volatile char *)ba)+reg)) = val
+	*((unsigned short *) (((volatile caddr_t)ba)+reg)) = val
 
 /* XXX This is totaly untested */
 #define	Select_Zorro2_FrameBuffer(flag) \
 	do { \
-		*(((volatile char *)cv3d_vcode_switch_base) + \
-		    0x08) = ((flag * 0x40) & 0xffff); \
+		*((volatile caddr_t)(((caddr_t)cv3d_vcode_switch_base) + \
+		    0x08)) = ((flag * 0x40) & 0xffff); \
 		__asm volatile ("nop"); \
 } while (0)
 
 int grfcv3d_cnprobe(void);
 void grfcv3d_iteinit(struct grf_softc *);
-static inline void GfxBusyWait(volatile void *);
-static inline void GfxFifoWait(volatile void *);
-static inline unsigned char RAttr(volatile void *, short);
-static inline unsigned char RSeq(volatile void *, short);
-static inline unsigned char RCrt(volatile void *, short);
-static inline unsigned char RGfx(volatile void *, short);
+static inline void GfxBusyWait(volatile caddr_t);
+static inline void GfxFifoWait(volatile caddr_t);
+static inline unsigned char RAttr(volatile caddr_t, short);
+static inline unsigned char RSeq(volatile caddr_t, short);
+static inline unsigned char RCrt(volatile caddr_t, short);
+static inline unsigned char RGfx(volatile caddr_t, short);
 
 
 /*
@@ -564,7 +561,7 @@ static inline unsigned char RGfx(volatile void *, short);
 
 static inline void
 GfxBusyWait (ba)
-	volatile void *ba;
+	volatile caddr_t ba;
 {
 	int test;
 
@@ -577,7 +574,7 @@ GfxBusyWait (ba)
 
 static inline void
 GfxFifoWait(ba)
-	volatile void *ba;
+	volatile caddr_t ba;
 {
 #if 0	/* XXX */
 	int test;
@@ -598,7 +595,7 @@ GfxFifoWait(ba)
 
 static inline unsigned char
 RAttr(ba, idx)
-	volatile void *ba;
+	volatile caddr_t ba;
 	short idx;
 {
 
@@ -609,7 +606,7 @@ RAttr(ba, idx)
 
 static inline unsigned char
 RSeq(ba, idx)
-	volatile void *ba;
+	volatile caddr_t ba;
 	short idx;
 {
 	vgaw(ba, SEQ_ADDRESS, idx);
@@ -618,7 +615,7 @@ RSeq(ba, idx)
 
 static inline unsigned char
 RCrt(ba, idx)
-	volatile void *ba;
+	volatile caddr_t ba;
 	short idx;
 {
 	vgaw(ba, CRT_ADDRESS, idx);
@@ -627,7 +624,7 @@ RCrt(ba, idx)
 
 static inline unsigned char
 RGfx(ba, idx)
-	volatile void *ba;
+	volatile caddr_t ba;
 	short idx;
 {
 	vgaw(ba, GCT_ADDRESS, idx);

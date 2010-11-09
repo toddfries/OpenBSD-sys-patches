@@ -1,4 +1,4 @@
-/*	$NetBSD: isv.c,v 1.3 2009/02/27 23:13:32 dyoung Exp $ */
+/*	$NetBSD: isv.c,v 1.1 2008/04/02 01:34:36 dyoung Exp $ */
 
 /*-
  * Copyright (c) 2008 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: isv.c,v 1.3 2009/02/27 23:13:32 dyoung Exp $");
+__KERNEL_RCSID(0, "$NetBSD: isv.c,v 1.1 2008/04/02 01:34:36 dyoung Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -343,7 +350,7 @@ isv_capture(struct isv_softc *sc)
 
 	timersub(&stop, &start, &diff);
 
-	aprint_debug_dev(sc->sc_dev, "%ssync in %" PRId64 ".%06d seconds\n",
+	aprint_debug_dev(sc->sc_dev, "%ssync in %ld.%06ld seconds\n",
 	    (speed < 1) ? "" : ((speed < 2) ? "faster " : "fastest "),
 	    diff.tv_sec, diff.tv_usec);
 
@@ -374,7 +381,7 @@ isv_capture(struct isv_softc *sc)
 
 	timersub(&stop, &start, &diff);
 
-	aprint_debug_dev(sc->sc_dev, "read in %" PRId64 ".%06d seconds\n",
+	aprint_debug_dev(sc->sc_dev, "read in %ld.%06ld seconds\n",
 		diff.tv_sec, diff.tv_usec);
 
 	state = 0;

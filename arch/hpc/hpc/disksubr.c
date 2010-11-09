@@ -1,4 +1,4 @@
-/*	$NetBSD: disksubr.c,v 1.20 2008/01/02 11:48:25 ad Exp $	*/
+/*	$NetBSD: disksubr.c,v 1.15 2006/11/25 11:59:56 scw Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1988 Regents of the University of California.
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: disksubr.c,v 1.20 2008/01/02 11:48:25 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: disksubr.c,v 1.15 2006/11/25 11:59:56 scw Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -67,13 +67,12 @@ mbr_findslice(struct mbr_partition *dp, struct buf *bp)
 	int i;
 
 	/* Note: Magic number is little-endian. */
-	mbrmagicp = (uint16_t *)((char*)bp->b_data + MBR_MAGIC_OFFSET);
+	mbrmagicp = (uint16_t *)(bp->b_data + MBR_MAGIC_OFFSET);
 	if (*mbrmagicp != MBR_MAGIC)
 		return (NO_MBR_SIGNATURE);
 
 	/* XXX how do we check veracity/bounds of this? */
-	memcpy(dp, (char*)bp->b_data + MBR_PART_OFFSET,
-		MBR_PART_COUNT * sizeof(*dp));
+	memcpy(dp, bp->b_data + MBR_PART_OFFSET, MBR_PART_COUNT * sizeof(*dp));
 
 	/* look for NetBSD partition */
 	for (i = 0; i < MBR_PART_COUNT; i++) {
@@ -239,7 +238,7 @@ nombrpart:
 	bp->b_blkno = dospartoff + LABELSECTOR;
 	bp->b_cylinder = cyl;
 	bp->b_bcount = lp->d_secsize;
-	bp->b_oflags &= ~(BO_DONE);
+	bp->b_flags &= ~(B_DONE);
 	bp->b_flags |= B_READ;
 	(*strat)(bp);
 
@@ -249,8 +248,7 @@ nombrpart:
 		goto done;
 	}
 	for (dlp = (struct disklabel *)bp->b_data;
-	    dlp <= (struct disklabel *)((char*)bp->b_data +
-		lp->d_secsize - sizeof(*dlp));
+	    dlp <= (struct disklabel *)(bp->b_data + lp->d_secsize - sizeof(*dlp));
 	    dlp = (struct disklabel *)((char *)dlp + sizeof(long))) {
 		if (dlp->d_magic != DISKMAGIC || dlp->d_magic2 != DISKMAGIC) {
 			if (msg == NULL)
@@ -276,7 +274,7 @@ nombrpart:
 		i = 0;
 		do {
 			/* read a bad sector table */
-			bp->b_oflags &= ~(BO_DONE);
+			bp->b_flags &= ~(B_DONE);
 			bp->b_flags |= B_READ;
 			bp->b_blkno = lp->d_secperunit - lp->d_nsectors + i;
 			if (lp->d_secsize > DEV_BSIZE)
@@ -301,12 +299,12 @@ nombrpart:
 				} else
 					msg = "bad sector table corrupted";
 			}
-		} while (bp->b_error != 0 && (i += 2) < 10 &&
+		} while ((bp->b_flags & B_ERROR) && (i += 2) < 10 &&
 			i < lp->d_nsectors);
 	}
 
 done:
-	brelse(bp, 0);
+	brelse(bp);
 	return (msg);
 }
 
@@ -424,7 +422,7 @@ nombrpart:
 	bp->b_blkno = dospartoff + LABELSECTOR;
 	bp->b_cylinder = cyl;
 	bp->b_bcount = lp->d_secsize;
-	bp->b_oflags &= ~(BO_DONE);
+	bp->b_flags &= ~(B_DONE);
 	bp->b_flags |= B_READ;
 	(*strat)(bp);
 
@@ -432,14 +430,12 @@ nombrpart:
 	if ((error = biowait(bp)) != 0)
 		goto done;
 	for (dlp = (struct disklabel *)bp->b_data;
-	    dlp <= (struct disklabel *)((char *)bp->b_data +
-		lp->d_secsize - sizeof(*dlp));
+	    dlp <= (struct disklabel *)(bp->b_data + lp->d_secsize - sizeof(*dlp));
 	    dlp = (struct disklabel *)((char *)dlp + sizeof(long))) {
 		if (dlp->d_magic == DISKMAGIC && dlp->d_magic2 == DISKMAGIC &&
 		    dkcksum(dlp) == 0) {
 			*dlp = *lp;
-			bp->b_oflags &= ~(BO_DONE);
-			bp->b_flags &= ~(B_READ);
+			bp->b_flags &= ~(B_READ|B_DONE);
 			bp->b_flags |= B_WRITE;
 			(*strat)(bp);
 			error = biowait(bp);
@@ -449,6 +445,6 @@ nombrpart:
 	error = ESRCH;
 
 done:
-	brelse(bp, 0);
+	brelse(bp);
 	return (error);
 }

@@ -1,4 +1,4 @@
-/*	$NetBSD: esp_core.c,v 1.40 2007/05/23 17:15:00 christos Exp $	*/
+/*	$NetBSD: esp_core.c,v 1.38 2006/11/16 01:33:45 christos Exp $	*/
 /*	$KAME: esp_core.c,v 1.53 2001/11/27 09:47:30 sakane Exp $	*/
 
 /*
@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: esp_core.c,v 1.40 2007/05/23 17:15:00 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: esp_core.c,v 1.38 2006/11/16 01:33:45 christos Exp $");
 
 #include "opt_inet.h"
 
@@ -150,7 +150,8 @@ static const struct esp_algorithm esp_algorithms[] = {
 };
 
 const struct esp_algorithm *
-esp_algorithm_lookup(int idx)
+esp_algorithm_lookup(idx)
+	int idx;
 {
 
 	switch (idx) {
@@ -208,7 +209,9 @@ esp_max_ivlen()
 }
 
 int
-esp_schedule(const struct esp_algorithm *algo, struct secasvar *sav)
+esp_schedule(algo, sav)
+	const struct esp_algorithm *algo;
+	struct secasvar *sav;
 {
 	int error;
 
@@ -284,7 +287,8 @@ esp_null_encrypt(
 }
 
 static int
-esp_descbc_mature(struct secasvar *sav)
+esp_descbc_mature(sav)
+	struct secasvar *sav;
 {
 	const struct esp_algorithm *algo;
 
@@ -382,7 +386,8 @@ esp_des_blockencrypt(const struct esp_algorithm *algo,
 }
 
 static int
-esp_cbc_mature(struct secasvar *sav)
+esp_cbc_mature(sav)
+	struct secasvar *sav;
 {
 	int keylen;
 	const struct esp_algorithm *algo;
@@ -581,8 +586,12 @@ esp_common_ivlen(const struct esp_algorithm *algo,
 }
 
 static int
-esp_cbc_decrypt(struct mbuf *m, size_t off, struct secasvar *sav, 
-	const struct esp_algorithm *algo, int ivlen)
+esp_cbc_decrypt(m, off, sav, algo, ivlen)
+	struct mbuf *m;
+	size_t off;
+	struct secasvar *sav;
+	const struct esp_algorithm *algo;
+	int ivlen;
 {
 	struct mbuf *s;
 	struct mbuf *d, *d0, *dp;
@@ -637,7 +646,7 @@ esp_cbc_decrypt(struct mbuf *m, size_t off, struct secasvar *sav,
 	}
 
 	/* grab iv */
-	m_copydata(m, ivoff, ivlen, (void *)iv);
+	m_copydata(m, ivoff, ivlen, (caddr_t)iv);
 
 	/* extend iv */
 	if (ivlen == blocklen)
@@ -699,7 +708,7 @@ esp_cbc_decrypt(struct mbuf *m, size_t off, struct secasvar *sav,
 			sp = mtod(s, u_int8_t *) + sn;
 		} else {
 			/* body is non-continuous */
-			m_copydata(s, sn, blocklen, (void *)sbuf);
+			m_copydata(s, sn, blocklen, (caddr_t)sbuf);
 			sp = sbuf;
 		}
 
@@ -843,11 +852,11 @@ esp_cbc_encrypt(
 
 	/* put iv into the packet.  if we are in derived mode, use seqno. */
 	if (derived)
-		m_copydata(m, ivoff, ivlen, (void *)iv);
+		m_copydata(m, ivoff, ivlen, (caddr_t)iv);
 	else {
 		bcopy(sav->iv, iv, ivlen);
 		/* maybe it is better to overwrite dest, not source */
-		m_copyback(m, ivoff, ivlen, (void *)iv);
+		m_copyback(m, ivoff, ivlen, (caddr_t)iv);
 	}
 
 	/* extend iv */
@@ -910,7 +919,7 @@ esp_cbc_encrypt(
 			sp = mtod(s, u_int8_t *) + sn;
 		} else {
 			/* body is non-continuous */
-			m_copydata(s, sn, blocklen, (void *)sbuf);
+			m_copydata(s, sn, blocklen, (caddr_t)sbuf);
 			sp = sbuf;
 		}
 
@@ -986,14 +995,14 @@ esp_cbc_encrypt(
 
 /*------------------------------------------------------------*/
 
-/* does not free m0 on error 
- *
- * skip - offset to ESP header
- * length - payloadd length
- */
+/* does not free m0 on error */
 int
-esp_auth(struct mbuf *m0, size_t skip, size_t length, 
-	struct secasvar *sav, u_char *sum)
+esp_auth(m0, skip, length, sav, sum)
+	struct mbuf *m0;
+	size_t skip;	/* offset to ESP header */
+	size_t length;	/* payload length */
+	struct secasvar *sav;
+	u_char *sum;
 {
 	struct mbuf *m;
 	size_t off;

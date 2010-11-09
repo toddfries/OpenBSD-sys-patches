@@ -1,4 +1,4 @@
-/*	$NetBSD: irix_misc.c,v 1.12 2008/04/28 20:23:41 martin Exp $ */
+/*	$NetBSD: irix_misc.c,v 1.7 2005/12/11 12:20:12 christos Exp $ */
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: irix_misc.c,v 1.12 2008/04/28 20:23:41 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: irix_misc.c,v 1.7 2005/12/11 12:20:12 christos Exp $");
 
 #include <sys/types.h>
 #include <sys/signal.h>
@@ -39,6 +46,7 @@ __KERNEL_RCSID(0, "$NetBSD: irix_misc.c,v 1.12 2008/04/28 20:23:41 martin Exp $"
 #include <sys/kernel.h>
 #include <sys/proc.h>
 #include <sys/mount.h>
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 
 #include <compat/svr4/svr4_types.h>
@@ -59,12 +67,15 @@ __KERNEL_RCSID(0, "$NetBSD: irix_misc.c,v 1.12 2008/04/28 20:23:41 martin Exp $"
  * Maybe consider moving this to sys/compat/common/compat_util.c?
  */
 int
-irix_sys_setpgrp(struct lwp *l, const struct irix_sys_setpgrp_args *uap, register_t *retval)
+irix_sys_setpgrp(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct irix_sys_setpgrp_args /* {
 		syscallarg(int) pid;
 		syscallarg(int) pgid;
-	} */
+	} */ *uap = v;
 	struct proc *p = l->l_proc;
 
 	/*
@@ -77,17 +88,20 @@ irix_sys_setpgrp(struct lwp *l, const struct irix_sys_setpgrp_args *uap, registe
 	    (!SCARG(uap, pid) || SCARG(uap, pid) == p->p_pid))
 		return sys_setsid(l, uap, retval);
 	else
-		return sys_setpgid(l, (const void *)uap, retval);
+		return sys_setpgid(l, uap, retval);
 }
 
 #define BUF_SIZE 16
 
 int
-irix_sys_uname(struct lwp *l, const struct irix_sys_uname_args *uap, register_t *retval)
+irix_sys_uname(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct irix_sys_uname_args /* {
 		syscallarg(struct irix_utsname *) name;
-	} */
+	} */ *uap = v;
 	struct irix_utsname sut;
 	char irix_release[BUF_SIZE + 1];
 
@@ -110,19 +124,22 @@ irix_sys_uname(struct lwp *l, const struct irix_sys_uname_args *uap, register_t 
 	strncpy(sut.machine, irix_si_hw_name, sizeof(sut.machine));
 	sut.machine[sizeof(sut.machine) - 1] = '\0';
 
-	return copyout((void *) &sut, (void *) SCARG(uap, name),
+	return copyout((caddr_t) &sut, (caddr_t) SCARG(uap, name),
 	    sizeof(struct irix_utsname));
 }
 
 int
-irix_sys_utssys(struct lwp *l, const struct irix_sys_utssys_args *uap, register_t *retval)
+irix_sys_utssys(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct irix_sys_utssys_args /* {
 		syscallarg(void *) a1;
 		syscallarg(void *) a2;
 		syscallarg(int) sel;
 		syscallarg(void) a3;
-	} */
+	} */ *uap = v;
 
 	switch (SCARG(uap, sel)) {
 	case 0: {	/* uname(2)  */
@@ -133,7 +150,7 @@ irix_sys_utssys(struct lwp *l, const struct irix_sys_utssys_args *uap, register_
 	break;
 
 	default:
-		return(svr4_sys_utssys(l, (const void *)uap, retval));
+		return(svr4_sys_utssys(l, v, retval));
 	break;
 	}
 

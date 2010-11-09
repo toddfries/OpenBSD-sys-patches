@@ -1,4 +1,4 @@
-/*	$NetBSD: vme_two_68k.c,v 1.9 2008/04/28 20:23:29 martin Exp $	*/
+/*	$NetBSD: vme_two_68k.c,v 1.7 2005/12/11 12:18:17 christos Exp $	*/
 
 /*-
  * Copyright (c) 1999, 2002 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -34,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: vme_two_68k.c,v 1.9 2008/04/28 20:23:29 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: vme_two_68k.c,v 1.7 2005/12/11 12:18:17 christos Exp $");
 
 #include "vmetwo.h"
 
@@ -56,7 +63,6 @@ __KERNEL_RCSID(0, "$NetBSD: vme_two_68k.c,v 1.9 2008/04/28 20:23:29 martin Exp $
 #include <dev/mvme/vme_tworeg.h>
 #include <dev/mvme/vme_twovar.h>
 
-#include "ioconf.h"
 
 static void vmetwoisrlink(void *, int (*)(void *), void *,
 	int, int, struct evcnt *);
@@ -65,16 +71,20 @@ static struct evcnt *vmetwoisrevcnt(void *, int);
 
 #if NVMETWO > 0
 
-int vmetwo_match(struct device *, struct cfdata *, void *);
-void vmetwo_attach(struct device *, struct device *, void *);
+int vmetwo_match __P((struct device *, struct cfdata *, void *));
+void vmetwo_attach __P((struct device *, struct device *, void *));
 
 CFATTACH_DECL(vmetwo, sizeof(struct vmetwo_softc),
     vmetwo_match, vmetwo_attach, NULL, NULL);
+extern struct cfdriver vmetwo_cd;
 
 
 /* ARGSUSED */
 int
-vmetwo_match(struct device *parent, struct cfdata *cf, void *aux)
+vmetwo_match(parent, cf, aux)
+	struct device *parent;
+	struct cfdata *cf;
+	void *aux;
 {
 	struct mainbus_attach_args *ma;
 	static int matched = 0;
@@ -82,21 +92,24 @@ vmetwo_match(struct device *parent, struct cfdata *cf, void *aux)
 	ma = aux;
 
 	if (strcmp(ma->ma_name, vmetwo_cd.cd_name))
-		return 0;
+		return (0);
 
 	/* Only one VMEchip2, please. */
 	if (matched++)
-		return 0;
+		return (0);
 
 	/*
 	 * Some mvme1[67]2 boards have a `no VMEchip2' build option...
 	 */
-	return vmetwo_probe(ma->ma_bust, ma->ma_offset) ? 1 : 0;
+	return (vmetwo_probe(ma->ma_bust, ma->ma_offset) ? 1 : 0);
 }
 
 /* ARGSUSED */
 void
-vmetwo_attach(struct device *parent, struct device *self, void *aux)
+vmetwo_attach(parent, self, aux)
+	struct device *parent;
+	struct device *self;
+	void *aux;
 {
 	struct mainbus_attach_args *ma;
 	struct vmetwo_softc *sc;
@@ -128,7 +141,8 @@ vmetwo_attach(struct device *parent, struct device *self, void *aux)
 #endif	/* NVMETWO > 0 */
 
 void
-vmetwo_md_intr_init(struct vmetwo_softc *sc)
+vmetwo_md_intr_init(sc)
+	struct vmetwo_softc *sc;
 {
 
 	sc->sc_isrlink = vmetwoisrlink;
@@ -138,8 +152,12 @@ vmetwo_md_intr_init(struct vmetwo_softc *sc)
 
 /* ARGSUSED */
 static void
-vmetwoisrlink(void *cookie, int (*fn)(void *), void *arg, int ipl, int vec,
-    struct evcnt *evcnt)
+vmetwoisrlink(cookie, fn, arg, ipl, vec, evcnt)
+	void *cookie;
+	int (*fn)(void *);
+	void *arg;
+	int ipl, vec;
+	struct evcnt *evcnt;
 {
 
 	isrlink_vectored(fn, arg, ipl, vec, evcnt);
@@ -147,7 +165,9 @@ vmetwoisrlink(void *cookie, int (*fn)(void *), void *arg, int ipl, int vec,
 
 /* ARGSUSED */
 static void
-vmetwoisrunlink(void *cookie, int vec)
+vmetwoisrunlink(cookie, vec)
+	void *cookie;
+	int vec;
 {
 
 	isrunlink_vectored(vec);
@@ -155,8 +175,10 @@ vmetwoisrunlink(void *cookie, int vec)
 
 /* ARGSUSED */
 static struct evcnt *
-vmetwoisrevcnt(void *cookie, int ipl)
+vmetwoisrevcnt(cookie, ipl)
+	void *cookie;
+	int ipl;
 {
 
-	return isrlink_evcnt(ipl);
+	return (isrlink_evcnt(ipl));
 }

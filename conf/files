@@ -1,7 +1,8 @@
-#	$NetBSD: files,v 1.943 2009/02/22 20:28:05 ad Exp $
+#	$NetBSD: files,v 1.821 2006/12/17 22:57:15 bouyer Exp $
+
 #	@(#)files.newconf	7.5 (Berkeley) 5/10/93
 
-version 	20090214
+version 	20060830
 
 #
 # device classes
@@ -10,20 +11,18 @@ devclass disk
 devclass tape
 devclass ifnet
 devclass tty
-devclass audiodev
-devclass displaydev
-devclass bus
 
 # options understood by the machine-independent part of the kernel
 # (note, these are case-sensitive)
 #
 defflag				INSECURE
+defflag				KCONT
 defflag				KMEMSTATS
 defflag				KTRACE
 defflag				MBUFTRACE
 defflag				PTRACE
+defflag				SYSTRACE
 defflag				COREDUMP
-defflag				MODULAR
 
 defparam			DEFCORENAME
 defparam			HZ
@@ -31,22 +30,15 @@ defparam			MAXUPRC
 defparam			RTC_OFFSET
 defflag	opt_pipe.h		PIPE_SOCKETPAIR PIPE_NODIRECT
 
-defflag				AIO
-defflag				MQUEUE
-
 defflag				BUFQ_DISKSORT
 defflag				BUFQ_FCFS
 defflag				BUFQ_PRIOCSCAN
 defflag				BUFQ_READPRIO
 defflag				NEW_BUFQ_STRATEGY	# same as BUFQ_READPRIO
 
-defflag	opt_sched.h		SCHED_4BSD
-defflag	opt_sched.h		SCHED_M2
-
 defparam			SOMAXKVA
 defflag	opt_sock_counters.h	SOSEND_COUNTERS
 defflag	opt_sosend_loan.h	SOSEND_NO_LOAN
-defflag	opt_route.h		RTCACHE_DEBUG RTFLUSH_DEBUG
 
 defflag				MULTIPROCESSOR
 
@@ -55,8 +47,6 @@ defflag	opt_config.h		INCLUDE_CONFIG_FILE INCLUDE_JUST_CONFIG
 defparam opt_dump.h		DUMP_ON_PANIC
 
 defflag	opt_callout.h		CALLWHEEL_STATS
-
-defflag				CPU_IN_CKSUM
 
 defflag opt_posix.h		P1003_1B_SEMAPHORE
 defflag	opt_sysv.h		SYSVMSG SYSVSEM	SYSVSHM
@@ -101,49 +91,36 @@ file kern/subr_syscall_stats.c	syscall_stats
 
 defparam opt_pax.h		PAX_MPROTECT
 				PAX_SEGVGUARD
- 				PAX_ASLR
- 				PAX_ASLR_DELTA_MMAP_LSB
- 				PAX_ASLR_DELTA_MMAP_LEN
- 				PAX_ASLR_DELTA_STACK_LSB
- 				PAX_ASLR_DELTA_STACK_LEN
- 				PAX_ASLR_DELTA_PROG_LEN
 
 defflag	opt_fileassoc.h		FILEASSOC
 
 defflag	opt_gre.h		GRE_DEBUG
 
-# Write Ahead Physical Block Logging
-defflag opt_wapbl.h		WAPBL WAPBL_DEBUG
-defparam opt_wapbl.h		WAPBL_DEBUG_PRINT
-
 # compatibility options
 #
-defflag	opt_sa.h		KERN_SA
-defflag opt_compat_netbsd.h	COMPAT_NETBSD
-defflag	opt_compat_netbsd.h	COMPAT_50: COMPAT_NETBSD
-defflag	opt_compat_netbsd.h	COMPAT_40: COMPAT_50, KERN_SA, COMPAT_NETBSD
-defflag	opt_compat_netbsd.h	COMPAT_30: COMPAT_40, COMPAT_NETBSD
-defflag	opt_compat_netbsd.h	COMPAT_20: COMPAT_30, COMPAT_NETBSD
-defflag	opt_compat_netbsd.h	COMPAT_16: COMPAT_20, COMPAT_NETBSD
-defflag	opt_compat_netbsd.h	COMPAT_15: COMPAT_16, COMPAT_NETBSD
-defflag	opt_compat_netbsd.h	COMPAT_14: COMPAT_15, COMPAT_NETBSD
-defflag	opt_compat_netbsd.h	COMPAT_13: COMPAT_14, COMPAT_NETBSD
-defflag	opt_compat_netbsd.h	COMPAT_12: COMPAT_13, COMPAT_NETBSD
-defflag	opt_compat_netbsd.h	COMPAT_11: COMPAT_12, COMPAT_NETBSD
-defflag	opt_compat_netbsd.h	COMPAT_10: COMPAT_11, COMPAT_NETBSD
-defflag	opt_compat_netbsd.h	COMPAT_09: COMPAT_10, COMPAT_NETBSD
+defflag	opt_compat_netbsd.h	COMPAT_30
+defflag	opt_compat_netbsd.h	COMPAT_20: COMPAT_30
+defflag	opt_compat_netbsd.h	COMPAT_16: COMPAT_20
+defflag	opt_compat_netbsd.h	COMPAT_15: COMPAT_16
+defflag	opt_compat_netbsd.h	COMPAT_14: COMPAT_15
+defflag	opt_compat_netbsd.h	COMPAT_13: COMPAT_14
+defflag	opt_compat_netbsd.h	COMPAT_12: COMPAT_13
+defflag	opt_compat_netbsd.h	COMPAT_11: COMPAT_12
+defflag	opt_compat_netbsd.h	COMPAT_10: COMPAT_11
+defflag	opt_compat_netbsd.h	COMPAT_09: COMPAT_10
 defflag				COMPAT_OSSAUDIO
 defflag				COMPAT_FREEBSD: COMPAT_30
+defflag				COMPAT_HPUX
 defflag				COMPAT_IBCS2
 defflag				COMPAT_IRIX
-defflag				COMPAT_LINUX: COMPAT_16
+defflag				COMPAT_LINUX
 defflag				COMPAT_LINUX32
 defflag				COMPAT_OSF1
 defflag				COMPAT_SUNOS: COMPAT_30
 defflag	opt_compat_svr4.h	COMPAT_SVR4 COMPAT_SVR4_32 SVR4_COMPAT_SOLARIS2
-defflag				COMPAT_ULTRIX: COMPAT_50
+defflag				COMPAT_ULTRIX
 defflag				COMPAT_NETBSD32
-defflag				COMPAT_AOUT_M68K: COMPAT_40
+defflag				COMPAT_AOUT_M68K
 defflag				COMPAT_M68K4K
 defflag				COMPAT_MACH
 defflag				COMPAT_DARWIN
@@ -193,10 +170,6 @@ obsolete defflag		HDLC		# obsolete
 obsolete defflag		LLC		# obsolete
 obsolete defflag opt_ns.h	NS NSIP		# obsolete
 obsolete defflag		IPX		# obsolete
-obsolete defflag opt_iso.h	TPCONS
-obsolete defparam opt_md.h	MEMORY_RBFLAGS	# superseded by
-						# MEMORY_DISK_RBFLAGS
-
 defflag				PFIL_HOOKS	# pfil(9)
 defflag	opt_bridge_ipf.h	BRIDGE_IPF	# bridge(4) use inet_pfil_hooks
 defflag	opt_ppp.h		PPP_DEFLATE PPP_BSDCOMP PPP_FILTER
@@ -213,6 +186,7 @@ defparam			SB_MAX
 
 # file system options
 #
+defflag				SOFTDEP			# XXX files.ufs?
 defflag				QUOTA			# XXX files.ufs?
 defflag				VNODE_LOCKDEBUG
 defflag				MAGICLINKS
@@ -255,16 +229,12 @@ defflag	opt_kstack.h		KSTACK_CHECK_MAGIC
 #
 defflag	opt_md.h		MEMORY_DISK_HOOKS MEMORY_DISK_IS_ROOT
 				MEMORY_DISK_DYNAMIC
-defparam opt_md.h		MEMORY_DISK_SERVER=1 MEMORY_DISK_ROOT_SIZE
-				MEMORY_DISK_RBFLAGS
-
-defflag opt_tftproot.h		TFTPROOT TFTPROOT_DEBUG
+defparam opt_md.h		MEMORY_DISK_SERVER MEMORY_DISK_ROOT_SIZE
+				MEMORY_RBFLAGS
 
 # Support for hardware performance monitoring counters
 #
 defflag	opt_perfctrs.h		PERFCTRS
-
-defflag	opt_wlan.h		WLAN
 
 # Machine-independent device majors assignements
 include "conf/majors"
@@ -274,7 +244,6 @@ include "conf/majors"
 define	audiobus	{ }
 define	midibus		{ }
 define	midisyn
-define	videobus	{ }
 define	ata	        {[channel = -1]}
 define	sata
 define	scsi_core
@@ -297,7 +266,7 @@ define	aurateconv
 
 # audio and midi devices, attaches to audio hardware driver
 #
-device	audio: audiodev
+device	audio
 attach	audio at audiobus
 device	midi
 attach	midi at midibus
@@ -305,18 +274,6 @@ attach	midi at midibus
 # console bell via audio device
 #
 define	audiobell
-
-# video devices, attaches to video hardware driver
-#
-device	video
-attach	video at videobus
-
-# National Semiconductor LM7[89]
-#
-# (included here so files.i2c can define an attachment)
-
-device	lm: sysmon_envsys
-file	dev/ic/nslm7x.c			lm			needs-flag
 
 # I2C device support
 include "dev/i2c/files.i2c"
@@ -340,7 +297,6 @@ define	rasops15
 define	rasops16
 define	rasops24
 define	rasops32
-define	rasops_rotation
 
 # splash screen support
 include "dev/splash/files.splash"
@@ -351,7 +307,7 @@ include "dev/videomode/files.videomode"
 # net device attributes - we have generic code for arc(net), ether(net),
 # fddi, token ring, atm and eco(net).
 #
-define	arcnet
+define	arc
 define	atm
 define	eco
 define	ether
@@ -514,18 +470,14 @@ defflag	opt_isp.h		ISP_DISABLE_1020_SUPPORT
 				ISP_DISABLE_1080_SUPPORT
 				ISP_DISABLE_2100_SUPPORT
 				ISP_DISABLE_2200_SUPPORT
-				ISP_DISABLE_2300_SUPPORT
-				ISP_DISABLE_2322_SUPPORT
-				ISP_DISABLE_2400_SUPPORT
-				ISP_DISABLE_FW
-				ISP_TARGET_MODE
+				ISP_DISABLE_FW ISP_TARGET_MODE
+				ISP_FW_CRASH_DUMP
 defparam opt_isp.h		ISP_LOGDEFAULT
-				ISP_VPORTS
 device	isp: scsi
 file	dev/ic/isp.c			isp
-file	dev/ic/isp_library.c		isp
 file	dev/ic/isp_netbsd.c		isp
 file	dev/ic/isp_target.c		isp & isp_target_mode
+
 # LSILogic MegaRAID SAS
 #
 device	mfi: scsi
@@ -559,7 +511,7 @@ file	dev/ic/siop_common.c		siop_common
 # Symbios/NCR 53c720/53c8xx SCSI controllers
 #
 device	siop: scsi,siop_common
-file	dev/ic/siop.c			siop & (siop_pci | siop_gedoens)
+file	dev/ic/siop.c			siop
 defflag	opt_siop.h			SIOP_SYMLED
 
 device	esiop: scsi,siop_common
@@ -569,10 +521,6 @@ file	dev/ic/esiop.c			esiop
 #
 device	uha: scsi
 file	dev/ic/uha.c			uha
-
-# 3Com common probe code
-define  elink
-file    dev/isa/elink.c                 elink
 
 # Aironet PC4500/PC4800
 #
@@ -590,16 +538,15 @@ file	dev/ic/am79c930.c		awi
 device	wi: arp, wlan, ifnet
 file	dev/ic/wi.c			wi
 
-# Atheros HAL
-#
-include "external/isc/atheros_hal/conf/files.ath_hal"
-
 # Atheros 5210/5211/5212 multi-mode 802.11
 #
+defflag	opt_athhal.h	ATHHAL_ASSERT ATHHAL_DEBUG ATHHAL_DEBUG_ALQ
 device	ath: arp, wlan, ifnet
 file	dev/ic/ath.c					ath
 file	dev/ic/ath_netbsd.c				ath
 file	dev/ic/athrate-sample.c				ath
+file	contrib/dev/ath/netbsd/ah_osdep.c		ath
+object	/athhal.o					ath
 
 # ADMtek ADM8211 802.11
 #
@@ -828,10 +775,10 @@ file	dev/ic/attimer.c		attimer			needs-flag
 device	clmpcc: tty
 file	dev/ic/clmpcc.c			clmpcc			needs-flag
 
-# Abit uGuru
+# National Semiconductor LM7[89]
 #
-device	ug: sysmon_envsys
-file	dev/ic/ug.c			ug			needs-flag
+device	lm: sysmon_envsys
+file	dev/ic/nslm7x.c			lm			needs-flag
 
 # Essential Communications Corp. HIPPI Interface
 #
@@ -840,7 +787,7 @@ file	dev/ic/rrunner.c		esh			needs-flag
 
 # SMC 90c26, SMC 90C56 (and 90C66 if in compat mode) chip driver
 #
-device	bah: ifnet, arcnet, arp
+device	bah: ifnet, arc, arp
 file	dev/ic/smc90cx6.c		bah
 
 # OPL2/OPL3 FM synth driver
@@ -912,8 +859,6 @@ define	ata_udma
 define	ata_piobm
 device	wdc: ata, wdc_common
 
-defflag	opt_ata.h	ATADEBUG
-
 device	atabus: atapi,ata_hl
 attach	atabus at ata
 # The strange expression is to dump ata_* definitions to ata_dma.h.
@@ -934,10 +879,11 @@ file	dev/ic/wdc_upc.c		wdc_upc
 file	dev/ic/com_upc.c		com_upc
 file	dev/ic/lpt_upc.c		lpt_upc
 
-# AHCI-compatible SATA controllers
-define ahcisata_core
-file dev/ic/ahcisata_core.c ahcisata_core
-device ahcisata: ata, ata_dma, ata_udma, sata, ahcisata_core
+# Common code for ISA/PCMCIA (non 802.11) WaveLAN adapters
+#
+define	wavelan
+device	wl: ether, ifnet, arp
+file	dev/ic/wavelan.c		wavelan
 
 # DECchip 21x4x Ethernet controller family, and assorted clones.
 #
@@ -1011,21 +957,10 @@ file	dev/ic/tea5757.c		tea5757
 define	lm700x
 file	dev/ic/lm700x.c			lm700x
 
-# Philips PCF8584 i2c controller
-define	pcf8584
-file	dev/ic/pcf8584.c		pcf8584
-
 # ACPI power management timer (hardware access, independent of ACPI)
 #
 define acpipmtimer
 file	dev/ic/acpipmtimer.c	acpipmtimer
-
-device 	hpet
-file 	dev/ic/hpet.c		hpet			needs-flag
-
-# DRM - Direct Rendering Infrastructure: dev/drm
-define drm {}
-include	dev/drm/files.drm
 
 # Definitions for wscons
 # device attributes: display, display with emulator, keyboard, and mouse
@@ -1054,7 +989,7 @@ defparam opt_vga.h		VGA_CONSOLE_SCREENTYPE
 defflag opt_vga.h 		VGA_CONSOLE_ATI_BROKEN_FONTSEL
 defflag opt_vga.h		VGA_RASTERCONSOLE
 defflag opt_vga.h		VGA_RESET
-device	vga: displaydev, wsemuldisplaydev, pcdisplayops, drm
+device	vga: wsemuldisplaydev, pcdisplayops
 file	dev/ic/vga.c		vga & !vga_rasterconsole	needs-flag
 file	dev/ic/vga_raster.c	vga_rasterconsole		needs-flag
 file	dev/ic/vga_subr.c	vga | vga_rasterconsole
@@ -1067,12 +1002,7 @@ file	dev/ic/igsfb_subr.c		igsfb
 
 # STI (hp graphics)
 device	sti: wsemuldisplaydev
-file	dev/ic/sti.c		sti & (sti_pci | sti_gedoens)
-
-include "dev/wscons/files.wscons"
-include "dev/rasops/files.rasops"
-include "dev/wsfont/files.wsfont"
-include "dev/wsfb/files.wsfb"
+file	dev/ic/sti.c		sti & (sti_pci | sti_sgc | sti_phantom)
 
 # Attributes which machine-independent bus support can be attached to.
 # These should be defined here, because some of these busses can have
@@ -1089,8 +1019,8 @@ define	fwbus	{ }			# IEEE 1394 attachment
 define	vmebus	{ }			# VME bus attachment
 define	acpibus	{ }			# ACPI "bus" attachment
 define	pcmciabus { [controller = -1], [socket = -1]}	# PCMCIA bus attachment
-define	cbbus	{ }			# CardBus attachment
-define	pcmciaslot { }			# PCMCIA slot itself
+define	cbbus	{[slot = -1]}		# CardBus attachment
+define	pcmciaslot {[slot = -1]}	# PCMCIA slot itself
 
 # We need the USB bus controllers here so different busses can
 # use them in an 'attach-with'.
@@ -1099,30 +1029,23 @@ define	pcmciaslot { }			# PCMCIA slot itself
 
 defparam USB_MEM_RESERVE
 
-define	usbroothub
-file	dev/usb/usbroothub_subr.c	usbroothub
-
-device	uhci: usbus, usbroothub
+device	uhci: usbus
 file	dev/usb/uhci.c			uhci			needs-flag
 
 # OHCI USB controller
 #
-device	ohci: usbus, usbroothub
+device	ohci: usbus
 file	dev/usb/ohci.c			ohci			needs-flag
 
 # EHCI USB controller
 #
-device	ehci: usbus, usbroothub
+device	ehci: usbus
 file	dev/usb/ehci.c			ehci			needs-flag
 
 # SL811HS/T USB controller
-defflag	opt_slhci.h	SLHCI_DEBUG SLHCI_TRY_LSVH SLHCI_PROFILE_TRANSFER
-device	slhci: usbus, usbroothub
+defflag	opt_slhci.h	SLHCI_DEBUG
+device	slhci: usbus
 file	dev/ic/sl811hs.c		slhci			needs-flag
-
-# USB HID processing (as used by bluetooth and usb code)
-define	hid
-file	dev/usb/hid.c			hid
 
 # Myson MTD803 3-in-1 Fast Ethernet Controller
 device	mtd: arp, ether, ifnet, mii
@@ -1190,33 +1113,28 @@ file	dev/ic/isic_bchan.c		isic
 
 # (old) Diehl active ISDN cards
 #
-#device	daic: isdndev
-#file	dev/ic/daic.c			daic
+device	daic: isdndev
+file	dev/ic/daic.c			daic
 
 # AWM B1/T1
 # XXX: passive_isdn
 device	iavc: isdndev, isdncapi, passive_isdn
 file	dev/ic/iavc.c			iavc
 
-# Broadcom AirForce / Apple Airport Extreme
-device	bwi: arp, ifnet, firmload, wlan
-file	dev/ic/bwi.c			bwi
-
 # legitimate pseudo-devices
 #
-defpseudodev vnd:	disk
+defpseudo vnd { }:	disk
 defflag opt_vnd.h	VND_COMPRESSION
 defpseudo ccd:		disk
 defpseudo cgd:		disk, des, blowfish, cast128, rijndael
-defpseudodev md:	disk
-defpseudodev fss:	disk
+defpseudo md { }:	disk
+defpseudo fss:		disk
 
 defpseudo pty:		tty
 defpseudo rnd
 defpseudo ksyms
 defpseudo nullcons
 defpseudo lockstat
-defpseudo bio:		sysmon_envsys
 
 defpseudo loop:		ifnet
 defpseudo sl:		ifnet
@@ -1231,22 +1149,15 @@ defpseudo strip:	ifnet
 defpseudo gre:		ifnet
 defpseudo gif:		ifnet
 defpseudo faith:	ifnet
-defpseudo srt:		ifnet
 defpseudo stf:		ifnet
-defpseudodev tap:	ifnet, ether, arp, bpf_filter
+defpseudo tap { }:	ifnet, ether, arp, bpf_filter
 defpseudo carp:		ifnet, ether, arp, bpf_filter
-defpseudodev etherip:	ifnet, ether, arp, bpf_filter
+defpseudo etherip { }:	ifnet, ether, arp, bpf_filter
 
 defpseudo sequencer
 defpseudo clockctl
 defpseudo irix_kmem
 defpseudo irix_usema
-
-#
-# Accept filters.  XXX should use another registration/initialization method.
-#
-defpseudo accf_data
-defpseudo accf_http
 
 # ISDN userland pseudo devices
 #
@@ -1275,22 +1186,7 @@ defpseudo fwiso:	ieee1394
 
 # driver attach / detach user interface
 defpseudo drvctl
-file	kern/kern_drvctl.c		drvctl		needs-flag
-
-# cpu control
-defpseudo cpuctl
-
-# pass-to-userspace transporter
-defpseudo putter
-file	dev/putter/putter.c		putter
-
-# userspace block/char device drivers
-defpseudo pud
-file	dev/pud/pud.c			pud
-file	dev/pud/pud_dev.c		pud
-
-# device-mapper driver for LVM
-include "dev/dm/files.dm"
+file	kern/kern_drvctl.c		drvctl
 
 #
 # File systems
@@ -1298,9 +1194,7 @@ include "dev/dm/files.dm"
 include "coda/files.coda"
 include "fs/adosfs/files.adosfs"
 include "fs/cd9660/files.cd9660"
-include "fs/efs/files.efs"
 include "fs/filecorefs/files.filecorefs"
-include "fs/hfs/files.hfs"
 include "fs/msdosfs/files.msdosfs"
 include "fs/ntfs/files.ntfs"
 include "fs/ptyfs/files.ptyfs"
@@ -1333,14 +1227,10 @@ include "secmodel/files.secmodel"
 #
 # kernel sources
 #
-file	compat/common/compat_mod.c	compat_netbsd
-file	compat/sa/compat_sa.c
-file	conf/debugsyms.c
 file	dev/auconv.c			auconv | mulaw
 file	dev/audio.c			audio | midi | midibus	needs-flag
 file	dev/audiobell.c			audiobell
 file	dev/aurateconv.c		aurateconv		needs-flag
-file	dev/bio.c			bio			needs-flag
 file	dev/ccd.c			ccd			needs-flag
 file	dev/cgd.c			cgd			needs-flag
 file	dev/cgd_crypto.c		cgd
@@ -1365,18 +1255,18 @@ file	dev/radio.c			radio			needs-flag
 file	dev/rnd.c			rnd			needs-flag
 file	dev/rndpool.c			rnd			needs-flag
 file	dev/sequencer.c			sequencer		needs-flag
-file	dev/video.c			video			needs-flag
 file	dev/vnd.c			vnd			needs-flag
 file	kern/bufq_disksort.c		bufq_disksort
 file	kern/bufq_fcfs.c		bufq_fcfs
 file	kern/bufq_priocscan.c		bufq_priocscan
 file	kern/bufq_readprio.c		bufq_readprio | new_bufq_strategy
-file	kern/core_elf32.c		exec_elf32
-file	kern/core_elf64.c		exec_elf64
-file	kern/core_netbsd.c		exec_aout | exec_coff |
-					exec_ecoff | exec_macho
+file	kern/core_elf32.c		coredump & exec_elf32
+file	kern/core_elf64.c		coredump & exec_elf64
+file	kern/core_netbsd.c		coredump & (exec_aout | exec_coff |
+					     exec_ecoff | exec_macho | lkm)
 file	kern/cnmagic.c
 file	kern/exec_aout.c		exec_aout
+file	kern/exec_conf.c
 file	kern/exec_ecoff.c		exec_ecoff
 file	kern/exec_elf32.c		exec_elf32
 file	kern/exec_elf64.c		exec_elf64
@@ -1389,98 +1279,66 @@ file	kern/init_sysent.c
 file	kern/kern_acct.c
 file	kern/kern_auth.c
 file	kern/kern_clock.c
-file	kern/kern_condvar.c
-file	kern/kern_core.c		coredump
-file	kern/kern_cpu.c
 file	kern/kern_descrip.c
 file	kern/kern_event.c
 file	kern/kern_exec.c
 file	kern/kern_exit.c
 file	kern/kern_fork.c
-file	kern/kern_idle.c
+file	kern/kern_kcont.c		kcont
 file	kern/kern_kthread.c
-file	kern/kern_ktrace.c		ktrace
-file	kern/kern_ksyms.c		ksyms | ddb | modular needs-flag
+file	kern/kern_ktrace.c
+file	kern/kern_ksyms.c		ksyms | ddb | lkm needs-flag
+file	kern/kern_lkm.c			lkm
 file	kern/kern_lock.c
 file	kern/kern_lwp.c
 file	kern/kern_malloc.c
-file	kern/kern_malloc_stdtype.c
 file	kern/kern_malloc_debug.c	malloc_debug
-file	kern/kern_module.c
-file	kern/kern_mutex.c
 file	kern/kern_fileassoc.c		fileassoc
 file	kern/kern_ntptime.c
 file	kern/kern_pax.c			pax_mprotect | pax_segvguard
 file	kern/kern_physio.c
-file	kern/kern_pmf.c
 file	kern/kern_proc.c
 file	kern/kern_prot.c
 file	kern/kern_ras.c
-file	kern/kern_rate.c
 file	kern/kern_resource.c
-file	kern/kern_runq.c
-file	kern/kern_rwlock.c
+file	kern/kern_sa.c
 file	kern/kern_sig.c
-file	kern/kern_sleepq.c
-file	kern/kern_softint.c
-file	kern/kern_ssp.c
-file	kern/kern_stub.c
+file	kern/kern_systrace.c		systrace
 file	kern/kern_subr.c
 file	kern/kern_synch.c
 file	kern/kern_sysctl.c
 file	kern/kern_tc.c
 file	kern/kern_time.c
 file	kern/kern_timeout.c
-file	kern/kern_turnstile.c
 file	kern/kern_todr.c
-file	kern/kern_uidinfo.c
 file	kern/kern_uuid.c
 file	kern/kern_xxx.c
 file	kern/kgdb_stub.c		kgdb
-file	kern/sched_4bsd.c		sched_4bsd
-file	kern/sched_m2.c			sched_m2
 file	kern/subr_autoconf.c
 file	kern/subr_blist.c		vmswap
 file	kern/subr_bufq.c
 file	kern/subr_callback.c
-file	kern/subr_debug.c		debug
 file	kern/subr_devsw.c
 file	kern/subr_disk.c
 file	kern/subr_iostat.c
 file	kern/subr_evcnt.c
-file	kern/subr_exec_fd.c
 file	kern/subr_extent.c
-file	kern/subr_hash.c
 file	kern/subr_kmem.c
-file	kern/subr_kobj.c
-file	kern/subr_lockdebug.c
 file	kern/subr_log.c
-file	kern/subr_percpu.c
 file	kern/subr_pool.c
 file	kern/subr_prf.c
 file	kern/subr_prof.c
 file	kern/subr_once.c
 file	kern/subr_optstr.c
 file	kern/subr_specificdata.c
-file	kern/subr_tftproot.c		tftproot
-file	kern/subr_time.c
 file	kern/subr_userconf.c		userconf
 file	kern/subr_vmem.c
 file	kern/subr_workqueue.c
-file	kern/subr_xcall.c
-file	kern/sys_aio.c			aio
-file	kern/sys_descrip.c
+file	kern/subr_xxx.c
 file	kern/sys_generic.c
-file	kern/sys_module.c
-file	kern/sys_mqueue.c		mqueue
-file	kern/sys_lwp.c
 file	kern/sys_pipe.c			!pipe_socketpair
 file	kern/sys_pmc.c
 file	kern/sys_process.c		ptrace | ktrace
-file	kern/sys_pset.c
-file	kern/sys_select.c
-file	kern/sys_sig.c
-file	kern/sys_sched.c
 file	kern/sys_socket.c
 file	kern/syscalls.c			syscall_debug
 file	kern/sysv_ipc.c			sysvshm | sysvsem | sysvmsg
@@ -1494,11 +1352,9 @@ file	kern/tty_pty.c			pty 			needs-flag
 file	kern/tty_ptm.c			pty
 file	kern/tty_subr.c
 file	kern/tty_tty.c
-file	kern/uipc_accf.c
 file	kern/uipc_domain.c
 file	kern/uipc_mbuf.c
 file	kern/uipc_mbuf2.c
-file	net/link_proto.c
 file	kern/uipc_proto.c
 file	kern/uipc_sem.c			p1003_1b_semaphore
 file	kern/uipc_socket.c
@@ -1507,8 +1363,6 @@ file	kern/uipc_syscalls.c
 file	kern/uipc_usrreq.c
 file	kern/vfs_bio.c
 file	kern/vfs_cache.c
-file	kern/vfs_cwd.c
-file	kern/vfs_dirhash.c
 file	kern/vfs_getcwd.c
 file	kern/vfs_hooks.c
 file	kern/vfs_init.c
@@ -1516,19 +1370,15 @@ file	kern/vfs_lockf.c
 file	kern/vfs_lookup.c
 file	kern/vfs_subr.c
 file	kern/vfs_syscalls.c
-file	kern/vfs_trans.c
 file	kern/vfs_vnops.c
-file	kern/vfs_wapbl.c		wapbl
 file	kern/vfs_xattr.c
 file	kern/vnode_if.c
 file	miscfs/deadfs/dead_vnops.c
 file	miscfs/fifofs/fifo_vnops.c
-file	miscfs/genfs/genfs_io.c
-file	miscfs/genfs/genfs_vfsops.c
 file	miscfs/genfs/genfs_vnops.c
-file	miscfs/genfs/layer_subr.c	nullfs | overlay | umapfs
-file	miscfs/genfs/layer_vfsops.c	nullfs | overlay | umapfs
-file	miscfs/genfs/layer_vnops.c	nullfs | overlay | umapfs
+file	miscfs/genfs/layer_subr.c	nullfs | overlay | umapfs | lkm
+file	miscfs/genfs/layer_vfsops.c	nullfs | overlay | umapfs | lkm
+file	miscfs/genfs/layer_vnops.c	nullfs | overlay | umapfs | lkm
 file	miscfs/specfs/spec_vnops.c
 file	miscfs/syncfs/sync_subr.c
 file	miscfs/syncfs/sync_vnops.c
@@ -1536,7 +1386,7 @@ file	net/bpf.c			bpfilter		needs-flag
 file	net/bpf_filter.c		bpf_filter
 file	net/bsd-comp.c			ppp & ppp_bsdcomp
 file	net/if.c
-file	net/if_arcsubr.c		arcnet			needs-flag
+file	net/if_arcsubr.c		arc			needs-flag
 file	net/if_atmsubr.c		atm
 file	net/if_bridge.c			bridge			needs-flag
 file	net/bridgestp.c			bridge
@@ -1553,7 +1403,6 @@ file	net/if_ieee1394subr.c		ieee1394
 file	net/if_loop.c			loop			needs-flag
 file	net/if_media.c
 file	net/if_ppp.c			ppp			needs-flag
-file	net/if_srt.c			srt
 file	net/if_stf.c			stf & inet & inet6	needs-flag
 file	net/if_sl.c			sl			needs-flag
 file	net/if_spppsubr.c		sppp
@@ -1566,7 +1415,6 @@ file	net/if_pppoe.c			pppoe			needs-flag
 file	net/pfil.c			pfil_hooks | ipfilter | pf
 file	net/ppp-deflate.c		ppp & ppp_deflate
 file	net/ppp_tty.c			ppp
-file	net/net_stats.c
 file	net/radix.c
 file	net/raw_cb.c
 file	net/raw_usrreq.c
@@ -1574,18 +1422,14 @@ file	net/route.c
 file	net/rtsock.c
 file	net/slcompress.c		sl | ppp | strip | (irip & irip_vj)
 file	net/zlib.c			(ppp & ppp_deflate) | ipsec | opencrypto | vnd_compression
-file	netinet/accf_data.c		accf_data
-file	netinet/accf_http.c		accf_http
-file	netinet/cpu_in_cksum.c		(inet | inet6) & !cpu_in_cksum
 file	netinet/if_arp.c		arp | netatalk		needs-flag
 file	netinet/if_atm.c		atm
-file	netinet/in4_cksum.c		inet
-file	netinet/in_cksum.c		inet
 file	netinet/in_gif.c		gif & inet
 file	netinet/ip_carp.c		carp & (inet | inet6)	needs-flag
 file	netinet/ip_ecn.c		ipsec | fast_ipsec | gif | stf
 file	netinet/ip_encap.c		inet | inet6
 file	netinet/ip_etherip.c		etherip & inet
+file	netinet/ip_gre.c		inet & gre
 file	netinet6/ip6_etherip.c		etherip & inet6
 file	netinet6/in6_gif.c		gif & inet6
 
@@ -1636,18 +1480,3 @@ define	onewire_bitbang
 include	"dev/gpio/files.gpio"
 
 include "dev/onewire/files.onewire"
-
-#
-# Pseudo audio device
-#
-include "dev/pad/files.pad"
-
-#
-# Intel 386 Real Mode emulator
-#
-include "lib/libx86emu/files.x86emu"
-
-#
-# "tprof" profiler.
-#
-include	"dev/tprof/files.tprof"

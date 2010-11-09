@@ -1,4 +1,4 @@
-/*	$NetBSD: omap5912_intr.c,v 1.2 2008/11/21 17:13:07 matt Exp $	*/
+/*	$NetBSD: omap5912_intr.c,v 1.1 2007/01/06 00:53:11 christos Exp $	*/
 
 /*
  * IRQ data specific to the Texas Instruments OMAP5912 processor.
@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: omap5912_intr.c,v 1.2 2008/11/21 17:13:07 matt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: omap5912_intr.c,v 1.1 2007/01/06 00:53:11 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -43,7 +43,7 @@ __KERNEL_RCSID(0, "$NetBSD: omap5912_intr.c,v 1.2 2008/11/21 17:13:07 matt Exp $
 /*
  * INTC autoconf glue
  */
-CFATTACH_DECL_NEW(omap5912intc, 0,
+CFATTACH_DECL(omap5912intc, sizeof(struct device),
     omapintc_match, omapintc_attach, NULL, NULL);
 
 #define IRQ_TO_BANK_BASE(irq)						\

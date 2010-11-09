@@ -1,4 +1,4 @@
-/* $NetBSD: pci_machdep.h,v 1.11 2009/02/13 21:03:59 bouyer Exp $ */
+/* $NetBSD: pci_machdep.h,v 1.7 2006/09/28 18:53:15 bouyer Exp $ */
 
 /*
  * Copyright (c) 2006 Manuel Bouyer.
@@ -64,8 +64,6 @@
 
 #include "opt_xen.h"
 
-struct pci_attach_args;
-
 extern struct x86_bus_dma_tag pci_bus_dma_tag;
 #ifdef _LP64
 extern struct x86_bus_dma_tag pci_bus_dma64_tag;
@@ -77,34 +75,28 @@ extern struct x86_bus_dma_tag pci_bus_dma64_tag;
 
 #ifdef XEN3
 union x86_pci_tag_u {
-	uint32_t mode1;
+	u_int32_t mode1;
 	struct {
-		uint16_t port;
-		uint8_t enable;
-		uint8_t forward;
+		u_int16_t port;
+		u_int8_t enable;
+		u_int8_t forward;
 	} mode2;
 };
 
 typedef union x86_pci_tag_u pcitag_t;
 
-#ifndef DOM0OPS
-int		xpci_enumerate_bus(struct pci_softc *, const int *,
-		   int (*)(struct pci_attach_args *), struct pci_attach_args *);
-#define PCI_MACHDEP_ENUMERATE_BUS xpci_enumerate_bus
-#endif
-
 #else /* XEN3 */
 
-extern uint32_t pci_bus_attached[];
+extern u_int32_t pci_bus_attached[];
 
 #define PCI_MACHDEP_ENUMERATE_BUS xen_pci_enumerate_bus
 
 /* types provided to MI PCI */
 struct xen_pci_tag {
-	uint8_t bus;
-	uint8_t device;
-	uint8_t function;
-	uint8_t _pad; /* pad to 32bits */
+	u_int8_t bus;
+	u_int8_t device;
+	u_int8_t function;
+	u_int8_t _pad; /* pad to 32bits */
 };
 
 typedef struct xen_pci_tag pcitag_t;
@@ -117,7 +109,7 @@ typedef struct xen_intr_handle pci_intr_handle_t;
 /* functions provided to MI PCI */
 struct pci_attach_args;
 
-void		pci_attach_hook(device_t, device_t,
+void		pci_attach_hook(struct device *, struct device *,
 		    struct pcibus_attach_args *);
 int		pci_bus_maxdevs(pci_chipset_tag_t, int);
 pcitag_t	pci_make_tag(pci_chipset_tag_t, int, int, int);
@@ -134,9 +126,6 @@ void		*pci_intr_establish(pci_chipset_tag_t, pci_intr_handle_t,
 void		pci_intr_disestablish(pci_chipset_tag_t, void *);
 int		xen_pci_enumerate_bus(struct pci_softc *, const int *,
 		   int (*)(struct pci_attach_args *), struct pci_attach_args *);
-
-/* Extract Bus Number for a host bridge or -1 if unknown. */
-int             pchb_get_bus_number(pci_chipset_tag_t, pcitag_t);
 
 /*
  * Section 6.2.4, `Miscellaneous Functions' of the PCI Specification,

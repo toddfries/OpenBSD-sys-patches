@@ -1,4 +1,4 @@
-/*	$NetBSD: if_bridgevar.h,v 1.13 2009/01/18 10:28:55 mrg Exp $	*/
+/*	$NetBSD: if_bridgevar.h,v 1.8 2005/12/10 23:21:38 elad Exp $	*/
 
 /*
  * Copyright 2001 Wasabi Systems, Inc.
@@ -149,7 +149,7 @@ struct ifbreq {
 struct ifbifconf {
 	uint32_t	ifbic_len;	/* buffer size */
 	union {
-		void *	ifbicu_buf;
+		caddr_t	ifbicu_buf;
 		struct ifbreq *ifbicu_req;
 	} ifbic_ifbicu;
 #define	ifbic_buf	ifbic_ifbicu.ifbicu_buf
@@ -161,7 +161,6 @@ struct ifbifconf {
  */
 struct ifbareq {
 	char		ifba_ifsname[IFNAMSIZ];	/* member if name */
-	/*XXX: time_t */
 	unsigned long	ifba_expire;		/* address expire time */
 	uint8_t		ifba_flags;		/* address flags */
 	uint8_t		ifba_dst[ETHER_ADDR_LEN];/* destination address */
@@ -179,7 +178,7 @@ struct ifbareq {
 struct ifbaconf {
 	uint32_t	ifbac_len;	/* buffer size */
 	union {
-		void *ifbacu_buf;
+		caddr_t ifbacu_buf;
 		struct ifbareq *ifbacu_req;
 	} ifbac_ifbacu;
 #define	ifbac_buf	ifbac_ifbacu.ifbacu_buf
@@ -262,7 +261,7 @@ struct bridge_rtnode {
 	LIST_ENTRY(bridge_rtnode) brt_hash;	/* hash table linkage */
 	LIST_ENTRY(bridge_rtnode) brt_list;	/* list linkage */
 	struct ifnet		*brt_ifp;	/* destination if */
-	time_t			brt_expire;	/* expiration time */
+	unsigned long		brt_expire;	/* expiration time */
 	uint8_t			brt_flags;	/* address flags */
 	uint8_t			brt_addr[ETHER_ADDR_LEN];
 };
@@ -294,8 +293,8 @@ struct bridge_softc {
 	uint32_t		sc_brtmax;	/* max # of addresses */
 	uint32_t		sc_brtcnt;	/* cur. # of addresses */
 	uint32_t		sc_brttimeout;	/* rt timeout in seconds */
-	callout_t		sc_brcallout;	/* bridge callout */
-	callout_t		sc_bstpcallout;	/* STP callout */
+	struct callout		sc_brcallout;	/* bridge callout */
+	struct callout		sc_bstpcallout;	/* STP callout */
 	LIST_HEAD(, bridge_iflist) sc_iflist;	/* member interface list */
 	LIST_HEAD(, bridge_rtnode) *sc_rthash;	/* our forwarding table */
 	LIST_HEAD(, bridge_rtnode) sc_rtlist;	/* list version of above */
@@ -307,13 +306,13 @@ extern const uint8_t bstp_etheraddr[];
 
 void	bridge_ifdetach(struct ifnet *);
 
-int	bridge_output(struct ifnet *, struct mbuf *, const struct sockaddr *,
+int	bridge_output(struct ifnet *, struct mbuf *, struct sockaddr *,
 	    struct rtentry *);
 struct mbuf *bridge_input(struct ifnet *, struct mbuf *);
 
 void	bstp_initialization(struct bridge_softc *);
 void	bstp_stop(struct bridge_softc *);
-struct mbuf *bstp_input(struct bridge_softc *, struct bridge_iflist *, struct mbuf *);
+struct mbuf *bstp_input(struct ifnet *, struct mbuf *);
 
 void	bridge_enqueue(struct bridge_softc *, struct ifnet *, struct mbuf *,
 	    int);

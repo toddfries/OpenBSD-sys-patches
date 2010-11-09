@@ -1,4 +1,4 @@
-/*	$NetBSD: itevar.h,v 1.27 2008/03/29 06:47:08 tsutsui Exp $	*/
+/*	$NetBSD: itevar.h,v 1.24 2006/06/25 14:14:18 tsutsui Exp $	*/
 
 /*
  * Copyright (c) 1990, 1993
@@ -93,7 +93,7 @@ struct ite_data {
 	struct	tty *tty;
 	struct  itesw *isw;
 	struct  grf_data *grf;
-	uint8_t	*regbase, *fbbase;
+	caddr_t regbase, fbbase;
 	short	curx, cury;
 	short   cursorx, cursory;
 	short   cblankx, cblanky;
@@ -108,7 +108,7 @@ struct ite_data {
 	short	planemask;
 	short	pos;
 	char	imode, escape, fpd, hold;
-	void *	devdata;			/* display dependent data */
+	caddr_t	devdata;			/* display dependent data */
 };
 
 struct itesw {
@@ -123,7 +123,7 @@ struct itesw {
 };
 
 struct ite_softc {
-	device_t sc_dev;		/* generic device info */
+	struct	device sc_dev;		/* generic device info */
 	struct	ite_data *sc_data;	/* terminal state info */
 	struct	grf_softc *sc_grf;	/* pointer to framebuffer */
 };

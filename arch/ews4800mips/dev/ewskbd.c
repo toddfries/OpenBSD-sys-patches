@@ -1,30 +1,7 @@
-/*	$NetBSD: ewskbd.c,v 1.9 2008/05/14 13:29:28 tsutsui Exp $	*/
-
-/*-
- * Copyright (c) 2005 Izumi Tsutsui.  All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
+/*	$NetBSD: ewskbd.c,v 1.1 2005/12/29 15:20:08 tsutsui Exp $	*/
 
 /*
+ * Copyright (c) 2005 Izumi Tsutsui
  * Copyright (c) 2004 Steve Rumble
  * All rights reserved.
  *
@@ -59,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ewskbd.c,v 1.9 2008/05/14 13:29:28 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ewskbd.c,v 1.1 2005/12/29 15:20:08 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/malloc.h>
@@ -98,7 +75,7 @@ int ewskbd_debug = 0;
 #endif
 
 struct ewskbd_softc {
-	device_t sc_dev;
+	struct device sc_dev;
 	struct ewskbd_devconfig *sc_dc;
 };
 
@@ -128,8 +105,8 @@ struct ewskbd_devconfig {
 	int enabled;
 };
 
-static int  ewskbd_zsc_match(device_t, cfdata_t, void *);
-static void ewskbd_zsc_attach(device_t, device_t, void *);
+static int  ewskbd_zsc_match(struct device *, struct cfdata *, void *);
+static void ewskbd_zsc_attach(struct device *, struct device *, void *);
 static int  ewskbd_zsc_init(struct zs_chanstate *);
 static void ewskbd_zsc_rxint(struct zs_chanstate *);
 static void ewskbd_zsc_stint(struct zs_chanstate *, int);
@@ -141,14 +118,14 @@ static void ewskbd_wskbd_input(struct zs_chanstate *, u_char);
 static int  ewskbd_wskbd_enable(void *, int);
 static void ewskbd_wskbd_set_leds(void *, int);
 static int  ewskbd_wskbd_get_leds(void *);
-static int  ewskbd_wskbd_ioctl(void *, u_long, void *, int, struct lwp *);
+static int  ewskbd_wskbd_ioctl(void *, u_long, caddr_t, int, struct lwp *);
 
 void ewskbd_zsc_cnattach(uint32_t, uint32_t, int);
 static void ewskbd_zsc_wskbd_getc(void *, u_int *, int *);
 static void ewskbd_wskbd_pollc(void *, int);
 static void ewskbd_wskbd_bell(void *, u_int, u_int, u_int);
 
-CFATTACH_DECL_NEW(ewskbd_zsc, sizeof(struct ewskbd_softc),
+CFATTACH_DECL(ewskbd_zsc, sizeof(struct ewskbd_softc),
     ewskbd_zsc_match, ewskbd_zsc_attach, NULL, NULL);
 
 static struct zsops ewskbd_zsops = {
@@ -180,10 +157,10 @@ static struct zs_chanstate conschan;
 static int ewskbd_is_console;
 
 static int
-ewskbd_zsc_match(device_t parent, cfdata_t cf, void *aux)
+ewskbd_zsc_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct zsc_attach_args *zsc_args = aux;
-	struct zsc_softc *zsc = device_private(parent);
+	struct zsc_softc *zsc = (void *)parent;
 
 	/* keyboard is on channel B */
 	if ((zsc->zsc_flags & 0x0001 /* kbms port */) != 0 &&
@@ -198,15 +175,14 @@ static void
 ewskbd_zsc_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct ewskbd_softc *sc;
-	struct zsc_softc *zsc;
 	struct zs_chanstate *cs;
+	struct zsc_softc *zsc;
 	struct zsc_attach_args *zsc_args;
 	struct wskbddev_attach_args wskaa;
 	int channel;
 
-	sc = device_private(self);
-	zsc = device_private(parent);
-	sc->sc_dev = self;
+	zsc = (void *)parent;
+	sc = (void *)self;
 	zsc_args = aux;
 
 	/* Establish ourself with the MD z8530 driver */
@@ -483,7 +459,7 @@ ewskbd_wskbd_get_leds(void *cookie)
 }
 
 static int
-ewskbd_wskbd_ioctl(void *cookie, u_long cmd, void *data, int flag,
+ewskbd_wskbd_ioctl(void *cookie, u_long cmd, caddr_t data, int flag,
     struct lwp *l)
 {
 
@@ -573,16 +549,15 @@ static void
 ewskbd_wskbd_pollc(void *cookie, int on)
 {
 
-	static bool __polling = false;
+	static boolean_t __polling = FALSE;
 	static int s;
 
 	if (on && !__polling) {
 		/* disable interrupt driven I/O */
 		s = splhigh();
-		__polling = true;
 	} else if (!on && __polling) {
 		/* enable interrupt driven I/O */
-		__polling = false;
+		__polling = FALSE;
 		splx(s);
 	}
 }

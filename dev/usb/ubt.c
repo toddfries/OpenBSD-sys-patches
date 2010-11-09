@@ -1,4 +1,4 @@
-/*	$NetBSD: ubt.c,v 1.35 2008/07/28 14:19:26 drochner Exp $	*/
+/*	$NetBSD: ubt.c,v 1.31 2008/04/28 20:23:59 martin Exp $	*/
 
 /*-
  * Copyright (c) 2006 Itronix Inc.
@@ -67,7 +67,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ubt.c,v 1.35 2008/07/28 14:19:26 drochner Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ubt.c,v 1.31 2008/04/28 20:23:59 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/device.h>
@@ -84,8 +84,8 @@ __KERNEL_RCSID(0, "$NetBSD: ubt.c,v 1.35 2008/07/28 14:19:26 drochner Exp $");
 #include <dev/usb/usbdi_util.h>
 #include <dev/usb/usbdevs.h>
 
-#include <netbt/bluetooth.h>
-#include <netbt/hci.h>
+#include <netnbt/bluetooth.h>
+#include <netnbt/hci.h>
 
 /*******************************************************************************
  *
@@ -305,6 +305,7 @@ static void ubt_abortdealloc(struct ubt_softc *);
  */
 static const struct usb_devno ubt_ignore[] = {
 	{ USB_VENDOR_BROADCOM, USB_PRODUCT_BROADCOM_BCM2033NF },
+	{ 0, 0 }	/* end of list */
 };
 
 USB_MATCH(ubt)
@@ -336,7 +337,6 @@ USB_ATTACH(ubt)
 
 	DPRINTFN(50, "ubt_attach: sc=%p\n", sc);
 
-	sc->sc_dev = self;
 	sc->sc_udev = uaa->device;
 
 	MBUFQ_INIT(&sc->sc_cmd_queue);
@@ -345,7 +345,7 @@ USB_ATTACH(ubt)
 
 	devinfop = usbd_devinfo_alloc(sc->sc_udev, 0);
 	USB_ATTACH_SETUP;
-	aprint_normal_dev(self, "%s\n", devinfop);
+	aprint_normal("%s: %s\n", USBDEVNAME(sc->sc_dev), devinfop);
 	usbd_devinfo_free(devinfop);
 
 	/*
@@ -353,8 +353,8 @@ USB_ATTACH(ubt)
 	 */
 	err = usbd_set_config_index(sc->sc_udev, 0, 1);
 	if (err) {
-		aprint_error_dev(self, "failed to set configuration idx 0: %s\n",
-		    usbd_errstr(err));
+		aprint_error("%s: failed to set configuration idx 0: %s\n",
+		    USBDEVNAME(sc->sc_dev), usbd_errstr(err));
 
 		USB_ATTACH_ERROR_RETURN;
 	}
@@ -367,8 +367,8 @@ USB_ATTACH(ubt)
 	 */
 	err = usbd_device2interface_handle(sc->sc_udev, 0, &sc->sc_iface0);
 	if (err) {
-		aprint_error_dev(self, "Could not get interface 0 handle %s (%d)\n",
-				usbd_errstr(err), err);
+		aprint_error("%s: Could not get interface 0 handle %s (%d)\n",
+				USBDEVNAME(sc->sc_dev), usbd_errstr(err), err);
 
 		USB_ATTACH_ERROR_RETURN;
 	}
@@ -385,8 +385,8 @@ USB_ATTACH(ubt)
 
 		ed = usbd_interface2endpoint_descriptor(sc->sc_iface0, i);
 		if (ed == NULL) {
-			aprint_error_dev(self,
-			    "could not read endpoint descriptor %d\n", i);
+			aprint_error("%s: could not read endpoint descriptor %d\n",
+			    USBDEVNAME(sc->sc_dev), i);
 
 			USB_ATTACH_ERROR_RETURN;
 		}
@@ -403,20 +403,20 @@ USB_ATTACH(ubt)
 	}
 
 	if (sc->sc_evt_addr == -1) {
-		aprint_error_dev(self,
-		    "missing INTERRUPT endpoint on interface 0\n");
+		aprint_error("%s: missing INTERRUPT endpoint on interface 0\n",
+				USBDEVNAME(sc->sc_dev));
 
 		USB_ATTACH_ERROR_RETURN;
 	}
 	if (sc->sc_aclrd_addr == -1) {
-		aprint_error_dev(self,
-		    "missing BULK IN endpoint on interface 0\n");
+		aprint_error("%s: missing BULK IN endpoint on interface 0\n",
+				USBDEVNAME(sc->sc_dev));
 
 		USB_ATTACH_ERROR_RETURN;
 	}
 	if (sc->sc_aclwr_addr == -1) {
-		aprint_error_dev(self,
-		    "missing BULK OUT endpoint on interface 0\n");
+		aprint_error("%s: missing BULK OUT endpoint on interface 0\n",
+				USBDEVNAME(sc->sc_dev));
 
 		USB_ATTACH_ERROR_RETURN;
 	}
@@ -432,16 +432,16 @@ USB_ATTACH(ubt)
 	 */
 	err = usbd_device2interface_handle(sc->sc_udev, 1, &sc->sc_iface1);
 	if (err) {
-		aprint_error_dev(self,
-		    "Could not get interface 1 handle %s (%d)\n",
-		    usbd_errstr(err), err);
+		aprint_error("%s: Could not get interface 1 handle %s (%d)\n",
+				USBDEVNAME(sc->sc_dev), usbd_errstr(err), err);
 
 		USB_ATTACH_ERROR_RETURN;
 	}
 
 	cd = usbd_get_config_descriptor(sc->sc_udev);
 	if (cd == NULL) {
-		aprint_error_dev(self, "could not get config descriptor\n");
+		aprint_error("%s: could not get config descriptor\n",
+			USBDEVNAME(sc->sc_dev));
 
 		USB_ATTACH_ERROR_RETURN;
 	}
@@ -451,7 +451,8 @@ USB_ATTACH(ubt)
 	/* set initial config */
 	err = ubt_set_isoc_config(sc);
 	if (err) {
-		aprint_error_dev(self, "ISOC config failed\n");
+		aprint_error("%s: ISOC config failed\n",
+			USBDEVNAME(sc->sc_dev));
 
 		USB_ATTACH_ERROR_RETURN;
 	}
@@ -519,8 +520,10 @@ USB_ATTACH(ubt)
 	}
 
 	sc->sc_ok = 1;
-	if (!pmf_device_register(self, NULL, NULL))
-		aprint_error_dev(self, "couldn't establish power handler\n");
+        if (!device_pmf_is_registered(self))
+		if (!pmf_device_register(self, NULL, NULL))
+			aprint_error_dev(self,
+			    "couldn't establish power handler\n"); 
 	USB_ATTACH_SUCCESS_RETURN;
 }
 
@@ -531,8 +534,7 @@ USB_DETACH(ubt)
 
 	DPRINTF("sc=%p flags=%d\n", sc, flags);
 
-	if (device_pmf_is_registered(self))
-		pmf_device_deregister(self);
+	pmf_device_deregister(self);
 
 	sc->sc_dying = 1;
 
@@ -607,9 +609,9 @@ ubt_set_isoc_config(struct ubt_softc *sc)
 
 	err = usbd_set_interface(sc->sc_iface1, sc->sc_config);
 	if (err != USBD_NORMAL_COMPLETION) {
-		aprint_error_dev(sc->sc_dev, 
-		    "Could not set config %d on ISOC interface. %s (%d)\n",
-		    sc->sc_config, usbd_errstr(err), err);
+		aprint_error(
+		    "%s: Could not set config %d on ISOC interface. %s (%d)\n",
+		    USBDEVNAME(sc->sc_dev), sc->sc_config, usbd_errstr(err), err);
 
 		return err == USBD_IN_USE ? EBUSY : EIO;
 	}
@@ -633,8 +635,8 @@ ubt_set_isoc_config(struct ubt_softc *sc)
 	for (i = 0 ; i < count ; i++) {
 		ed = usbd_interface2endpoint_descriptor(sc->sc_iface1, i);
 		if (ed == NULL) {
-			aprint_error_dev(sc->sc_dev,
-			    "could not read endpoint descriptor %d\n", i);
+			aprint_error("%s: could not read endpoint descriptor %d\n",
+			    USBDEVNAME(sc->sc_dev), i);
 
 			return EIO;
 		}
@@ -659,31 +661,31 @@ ubt_set_isoc_config(struct ubt_softc *sc)
 	}
 
 	if (rd_addr == -1) {
-		aprint_error_dev(sc->sc_dev,
-		    "missing ISOC IN endpoint on interface config %d\n",
-		    sc->sc_config);
+		aprint_error(
+		    "%s: missing ISOC IN endpoint on interface config %d\n",
+		    USBDEVNAME(sc->sc_dev), sc->sc_config);
 
 		return ENOENT;
 	}
 	if (wr_addr == -1) {
-		aprint_error_dev(sc->sc_dev,
-		    "missing ISOC OUT endpoint on interface config %d\n",
-		    sc->sc_config);
+		aprint_error(
+		    "%s: missing ISOC OUT endpoint on interface config %d\n",
+		    USBDEVNAME(sc->sc_dev), sc->sc_config);
 
 		return ENOENT;
 	}
 
 #ifdef DIAGNOSTIC
 	if (rd_size > MLEN) {
-		aprint_error_dev(sc->sc_dev, "rd_size=%d exceeds MLEN\n",
-		    rd_size);
+		aprint_error("%s: rd_size=%d exceeds MLEN\n",
+		    USBDEVNAME(sc->sc_dev), rd_size);
 
 		return EOVERFLOW;
 	}
 
 	if (wr_size > MLEN) {
-		aprint_error_dev(sc->sc_dev, "wr_size=%d exceeds MLEN\n",
-		    wr_size);
+		aprint_error("%s: wr_size=%d exceeds MLEN\n",
+		    USBDEVNAME(sc->sc_dev), wr_size);
 
 		return EOVERFLOW;
 	}
@@ -824,6 +826,7 @@ ubt_abortdealloc(struct ubt_softc *sc)
  *
  * Bluetooth Unit/USB callbacks
  *
+ * All of this will be called at the IPL_ we specified above
  */
 static int
 ubt_enable(device_ptr_t self)
@@ -1645,8 +1648,8 @@ ubt_recv_sco_complete(usbd_xfer_handle xfer,
 			if (m == NULL) {
 				MGETHDR(m, M_DONTWAIT, MT_DATA);
 				if (m == NULL) {
-					aprint_error_dev(sc->sc_dev,
-					    "out of memory (xfer halted)\n");
+					aprint_error("%s: out of memory (xfer halted)\n",
+						USBDEVNAME(sc->sc_dev));
 
 					sc->sc_stats.err_rx++;
 					return;		/* lost sync */

@@ -1,4 +1,4 @@
-/*	$NetBSD: com_gsc.c,v 1.12 2008/03/14 15:09:10 cube Exp $	*/
+/*	$NetBSD: com_gsc.c,v 1.11 2006/07/13 22:56:01 gdamore Exp $	*/
 
 /*	$OpenBSD: com_gsc.c,v 1.8 2000/03/13 14:39:59 mickey Exp $	*/
 
@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: com_gsc.c,v 1.12 2008/03/14 15:09:10 cube Exp $");
+__KERNEL_RCSID(0, "$NetBSD: com_gsc.c,v 1.11 2006/07/13 22:56:01 gdamore Exp $");
 
 #include "opt_kgdb.h"
 
@@ -72,14 +72,14 @@ struct com_gsc_softc {
 	void	*sc_ih;			/* interrupt handler */
 };
 
-int	com_gsc_probe(device_t, cfdata_t , void *);
-void	com_gsc_attach(device_t, device_t, void *);
+int	com_gsc_probe(struct device *, struct cfdata *, void *);
+void	com_gsc_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(com_gsc, sizeof(struct com_gsc_softc),
+CFATTACH_DECL(com_gsc, sizeof(struct com_gsc_softc),
     com_gsc_probe, com_gsc_attach, NULL, NULL);
 
 int
-com_gsc_probe(device_t parent, cfdata_t match, void *aux)
+com_gsc_probe(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct gsc_attach_args *ga = aux;
 
@@ -92,9 +92,9 @@ com_gsc_probe(device_t parent, cfdata_t match, void *aux)
 }
 
 void
-com_gsc_attach(device_t parent, device_t self, void *aux)
+com_gsc_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct com_gsc_softc *gsc = device_private(self);
+	struct com_gsc_softc *gsc = (void *)self;
 	struct com_softc *sc = &gsc->sc_com;
 	struct gsc_attach_args *ga = aux;
 	int pagezero_cookie;
@@ -102,7 +102,6 @@ com_gsc_attach(device_t parent, device_t self, void *aux)
 	bus_space_handle_t ioh;
 	bus_addr_t iobase;
 
-	sc->sc_dev = self;
 	sc->sc_hwflags = 0;
 	sc->sc_swflags = 0;
 	iot = ga->ga_iot;
@@ -122,7 +121,7 @@ com_gsc_attach(device_t parent, device_t self, void *aux)
 		if (comcnattach(iot, iobase, B9600,
 			sc->sc_frequency, COM_TYPE_NORMAL,
 			(TTYDEF_CFLAG & ~(CSIZE | PARENB)) | CS8) != 0) {
-			aprint_error(": can't comcnattach\n");
+			printf(": can't comcnattach\n");
 			hp700_pagezero_unmap(pagezero_cookie);
 			return;
 		}
@@ -136,13 +135,13 @@ com_gsc_attach(device_t parent, device_t self, void *aux)
 
 	if (!com_is_console(iot, iobase, &ioh) &&
 	    bus_space_map(iot, iobase, COM_NPORTS, 0, &ioh) != 0) {
-		aprint_error(": can't map I/O space\n");
+		printf(": can't map I/O space\n");
 		return;
 	}
 	COM_INIT_REGS(sc->sc_regs, iot, ioh, iobase);
 
 	com_attach_subr(sc);
-	gsc->sc_ih = hp700_intr_establish(sc->sc_dev, IPL_TTY,
+	gsc->sc_ih = hp700_intr_establish(&sc->sc_dev, IPL_TTY,
 	    comintr, sc, ga->ga_int_reg, ga->ga_irq);
 }
 

@@ -1,4 +1,4 @@
-/*	$NetBSD: sysv_ipc.c,v 1.22 2009/01/19 19:39:41 christos Exp $	*/
+/*	$NetBSD: sysv_ipc.c,v 1.20 2007/02/09 21:55:31 ad Exp $	*/
 
 /*-
  * Copyright (c) 1998, 2007 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,10 +37,10 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sysv_ipc.c,v 1.22 2009/01/19 19:39:41 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sysv_ipc.c,v 1.20 2007/02/09 21:55:31 ad Exp $");
 
 #include "opt_sysv.h"
-#include "opt_compat_netbsd.h"
+
 #include <sys/param.h>
 #include <sys/kernel.h>
 #include <sys/proc.h>
@@ -54,10 +61,6 @@ __KERNEL_RCSID(0, "$NetBSD: sysv_ipc.c,v 1.22 2009/01/19 19:39:41 christos Exp $
 #include <sys/stat.h>
 #include <sys/sysctl.h>
 #include <sys/kauth.h>
-
-#ifdef COMPAT_50
-#include <compat/sys/ipc.h>
-#endif
 
 /*
  * Check for ipc permission
@@ -108,6 +111,50 @@ ipcperm(kauth_cred_t cred, struct ipc_perm *perm, int mode)
 	return ((perm->mode & mask) == mask ? 0 : EACCES);
 }
 
+/*
+ * sysctl helper routine for kern.ipc.sysvipc_info subtree.
+ */
+
+#define FILL_PERM(src, dst) do { \
+	(dst)._key = (src)._key; \
+	(dst).uid = (src).uid; \
+	(dst).gid = (src).gid; \
+	(dst).cuid = (src).cuid; \
+	(dst).cgid = (src).cgid; \
+	(dst).mode = (src).mode; \
+	(dst)._seq = (src)._seq; \
+} while (/*CONSTCOND*/ 0);
+
+#define FILL_MSG(src, dst) do { \
+	FILL_PERM((src).msg_perm, (dst).msg_perm); \
+	(dst).msg_qnum = (src).msg_qnum; \
+	(dst).msg_qbytes = (src).msg_qbytes; \
+	(dst)._msg_cbytes = (src)._msg_cbytes; \
+	(dst).msg_lspid = (src).msg_lspid; \
+	(dst).msg_lrpid = (src).msg_lrpid; \
+	(dst).msg_stime = (src).msg_stime; \
+	(dst).msg_rtime = (src).msg_rtime; \
+	(dst).msg_ctime = (src).msg_ctime; \
+} while (/*CONSTCOND*/ 0)
+
+#define FILL_SEM(src, dst) do { \
+	FILL_PERM((src).sem_perm, (dst).sem_perm); \
+	(dst).sem_nsems = (src).sem_nsems; \
+	(dst).sem_otime = (src).sem_otime; \
+	(dst).sem_ctime = (src).sem_ctime; \
+} while (/*CONSTCOND*/ 0)
+
+#define FILL_SHM(src, dst) do { \
+	FILL_PERM((src).shm_perm, (dst).shm_perm); \
+	(dst).shm_segsz = (src).shm_segsz; \
+	(dst).shm_lpid = (src).shm_lpid; \
+	(dst).shm_cpid = (src).shm_cpid; \
+	(dst).shm_atime = (src).shm_atime; \
+	(dst).shm_dtime = (src).shm_dtime; \
+	(dst).shm_ctime = (src).shm_ctime; \
+	(dst).shm_nattch = (src).shm_nattch; \
+} while (/*CONSTCOND*/ 0)
+
 static int
 sysctl_kern_sysvipc(SYSCTLFN_ARGS)
 {
@@ -128,16 +175,6 @@ sysctl_kern_sysvipc(SYSCTLFN_ARGS)
 	int32_t nds;
 	int i, error, ret;
 
-#ifdef COMPAT_50
-	switch ((error = sysctl_kern_sysvipc50(SYSCTLFN_CALL(rnode)))) {
-	case 0:
-		return 0;
-	case EPASSTHROUGH:
-		break;
-	default:
-		return error;
-	}
-#endif
 	if (namelen != 1)
 		return EINVAL;
 
@@ -230,18 +267,18 @@ sysctl_kern_sysvipc(SYSCTLFN_ARGS)
 #ifdef SYSVMSG
 			case KERN_SYSVIPC_MSG_INFO:
 				mutex_enter(&msgmutex);
-				SYSCTL_FILL_MSG(msqs[i].msq_u, msgsi->msgids[i]);
+				FILL_MSG(msqs[i].msq_u, msgsi->msgids[i]);
 				mutex_exit(&msgmutex);
 				break;
 #endif
 #ifdef SYSVSEM
 			case KERN_SYSVIPC_SEM_INFO:
-				SYSCTL_FILL_SEM(sema[i], semsi->semids[i]);
+				FILL_SEM(sema[i], semsi->semids[i]);
 				break;
 #endif
 #ifdef SYSVSHM
 			case KERN_SYSVIPC_SHM_INFO:
-				SYSCTL_FILL_SHM(shmsegs[i], shmsi->shmids[i]);
+				FILL_SHM(shmsegs[i], shmsi->shmids[i]);
 				break;
 #endif
 			}
@@ -257,6 +294,11 @@ sysctl_kern_sysvipc(SYSCTLFN_ARGS)
 		free(bf, M_TEMP);
 	return error;
 }
+
+#undef FILL_PERM
+#undef FILL_MSG
+#undef FILL_SEM
+#undef FILL_SHM
 
 SYSCTL_SETUP(sysctl_ipc_setup, "sysctl kern.ipc subtree setup")
 {

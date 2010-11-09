@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Module Name: dbinput - user front-end to the AML debugger
- *              $Revision: 1.6 $
+ *              xRevision: 1.113 $
  *
  ******************************************************************************/
 
@@ -9,7 +9,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2008, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2006, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -114,6 +114,9 @@
  *
  *****************************************************************************/
 
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: dbinput.c,v 1.3 2006/11/16 01:33:31 christos Exp $");
 
 #include "acpi.h"
 #include "acdebug.h"
@@ -866,7 +869,7 @@ AcpiDbCommandDispatch (
         break;
 
     case CMD_TRACE:
-        (void) AcpiDebugTrace (AcpiGbl_DbArgs[1],0,0,1);
+        AcpiDebugTrace (AcpiGbl_DbArgs[1],0,0,1);
         break;
 
     case CMD_TREE:

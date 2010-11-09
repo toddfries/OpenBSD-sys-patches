@@ -1,4 +1,4 @@
-/*	$NetBSD: if_gem_sbus.c,v 1.8 2008/11/20 20:56:56 jdc Exp $	*/
+/*	$NetBSD: if_gem_sbus.c,v 1.2 2007/10/19 12:01:11 ad Exp $	*/
 
 /*-
  * Copyright (c) 2006 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -34,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_gem_sbus.c,v 1.8 2008/11/20 20:56:56 jdc Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_gem_sbus.c,v 1.2 2007/10/19 12:01:11 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -93,9 +100,12 @@ gemattach_sbus(struct device *parent, struct device *self, void *aux)
 	sc->sc_bustag = sa->sa_bustag;
 	sc->sc_dmatag = sa->sa_dmatag;
 
+	printf(": GEM Ethernet controller (%s), version %s\n",
+	    sa->sa_name, prom_getpropstring(sa->sa_node, "version"));
+
 	if (sa->sa_nreg < 2) {
 		printf("%s: only %d register sets\n",
-			device_xname(self), sa->sa_nreg);
+			self->dv_xname, sa->sa_nreg);
 		return;
 	}
 
@@ -111,7 +121,7 @@ gemattach_sbus(struct device *parent, struct device *self, void *aux)
 			 sa->sa_reg[0].oa_base,
 			 (bus_size_t)sa->sa_reg[0].oa_size,
 			 0, &sc->sc_h2) != 0) {
-		aprint_error_dev(self, "cannot map registers\n");
+		printf("%s: cannot map registers\n", self->dv_xname);
 		return;
 	}
 	if (sbus_bus_map(sa->sa_bustag,
@@ -119,30 +129,17 @@ gemattach_sbus(struct device *parent, struct device *self, void *aux)
 			 sa->sa_reg[1].oa_base,
 			 (bus_size_t)sa->sa_reg[1].oa_size,
 			 0, &sc->sc_h1) != 0) {
-		aprint_error_dev(self, "cannot map registers\n");
+		printf("%s: cannot map registers\n", self->dv_xname);
 		return;
 	}
 	sbus_establish(&gsc->gsc_sd, self);
 	prom_getether(sa->sa_node, enaddr);
 
-	if (!strcmp("serdes", prom_getpropstring(sa->sa_node, "shared-pins")))
-		sc->sc_flags |= GEM_SERDES;
-	sc->sc_variant = GEM_SUN_GEM;
-	sc->sc_flags &= ~GEM_PCI;
-
 	/*
 	 * SBUS config
 	 */
-	(void) bus_space_read_4(sa->sa_bustag, sc->sc_h2, GEM_SBUS_RESET);
-	delay(100);
 	bus_space_write_4(sa->sa_bustag, sc->sc_h2, GEM_SBUS_CONFIG,
-	    GEM_SBUS_CFG_BSIZE128|GEM_SBUS_CFG_PARITY|GEM_SBUS_CFG_BMODE64);
-	sc->sc_chiprev = bus_space_read_4(sa->sa_bustag, sc->sc_h2,
-	    GEM_SBUS_REVISION);
-
-	printf(": GEM Ethernet controller (%s), version %s (rev 0x%02x)\n",
-	    sa->sa_name, prom_getpropstring(sa->sa_node, "version"),
-	    sc->sc_chiprev);
+	    GEM_SBUS_CFG_PARITY|GEM_SBUS_CFG_BMODE64);
 
 	gem_attach(sc, enaddr);
 

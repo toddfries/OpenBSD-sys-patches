@@ -1,4 +1,4 @@
-/*	$NetBSD: grf_cl.c,v 1.41 2007/10/17 19:53:15 garbled Exp $ */
+/*	$NetBSD: grf_cl.c,v 1.37 2006/11/24 22:04:21 wiz Exp $ */
 
 /*
  * Copyright (c) 1997 Klaus Burkert
@@ -36,7 +36,7 @@
 #include "opt_amigacons.h"
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: grf_cl.c,v 1.41 2007/10/17 19:53:15 garbled Exp $");
+__KERNEL_RCSID(0, "$NetBSD: grf_cl.c,v 1.37 2006/11/24 22:04:21 wiz Exp $");
 
 #include "grfcl.h"
 #if NGRFCL > 0
@@ -108,11 +108,11 @@ static int cl_getspritemax(struct grf_softc *, struct grf_position *);
 int	cl_blank(struct grf_softc *, int *);
 int	cl_setmonitor(struct grf_softc *, struct grfvideo_mode *);
 void	cl_writesprpos(volatile char *, short, short);
-void	writeshifted(volatile char *, signed char, signed char);
+void	writeshifted(volatile char *, char, char);
 
-static void	RegWakeup(volatile void *);
-static void	RegOnpass(volatile void *);
-static void	RegOffpass(volatile void *);
+static void	RegWakeup(volatile caddr_t);
+static void	RegOnpass(volatile caddr_t);
+static void	RegOffpass(volatile caddr_t);
 
 void	grfclattach(struct device *, struct device *, void *);
 int	grfclprint(void *, const char *);
@@ -366,8 +366,8 @@ grfclattach(pdp, dp, auxp)
 		bcopy(&congrf.g_display, &gp->g_display,
 		    (char *) &gp[1] - (char *) &gp->g_display);
 	} else {
-		gp->g_regkva = (volatile void *) cl_regaddr;
-		gp->g_fbkva = (volatile void *) cl_fbaddr;
+		gp->g_regkva = (volatile caddr_t) cl_regaddr;
+		gp->g_fbkva = (volatile caddr_t) cl_fbaddr;
 
 		gp->g_unit = GRF_CL5426_UNIT;
 		gp->g_mode = cl_mode;
@@ -462,7 +462,7 @@ void
 cl_boardinit(gp)
 	struct grf_softc *gp;
 {
-	volatile unsigned char *ba = gp->g_regkva;
+	unsigned char *ba = gp->g_regkva;
 	int     x;
 
 	if ((cltype == PICASSO) && (cl_64bit == 1)) { /* PicassoIV */
@@ -812,8 +812,8 @@ cl_writesprpos(ba, x, y)
 void
 writeshifted(to, shiftx, shifty)
 	volatile char *to;
-	signed char shiftx;
-	signed char shifty;
+	char    shiftx;
+	char    shifty;
 {
 	int y;
 	unsigned long long *tptr, *iptr, *mptr, line;
@@ -1211,7 +1211,7 @@ cl_toggle(gp, wopp)
 	struct grf_softc *gp;
 	unsigned short wopp;	/* don't need that one yet, ill */
 {
-	volatile void *ba;
+	volatile caddr_t ba;
 
 	ba = gp->g_regkva;
 
@@ -1376,7 +1376,7 @@ cl_load_mon(gp, md)
 {
 	struct grfvideo_mode *gv;
 	struct grfinfo *gi;
-	volatile void *ba, *fb;
+	volatile caddr_t ba, fb;
 	unsigned char num0, denom0, clkdoub;
 	unsigned short HT, HDE, HBS, HBE, HSS, HSE, VDE, VBS, VBE, VSS,
 	        VSE, VT;
@@ -1399,11 +1399,11 @@ cl_load_mon(gp, md)
 	fb = gp->g_fbkva;
 
 	/* provide all needed information in grf device-independent locations */
-	gp->g_data = (void *) gv;
+	gp->g_data = (caddr_t) gv;
 	gi = &gp->g_display;
-	gi->gd_regaddr = (void *) kvtop(__UNVOLATILE(ba));
+	gi->gd_regaddr = (caddr_t) kvtop(ba);
 	gi->gd_regsize = 64 * 1024;
-	gi->gd_fbaddr = (void *) kvtop(__UNVOLATILE(fb));
+	gi->gd_fbaddr = (caddr_t) kvtop(fb);
 	gi->gd_fbsize = cl_fbsize;
 	gi->gd_colors = 1 << gv->depth;
 	gi->gd_planes = gv->depth;
@@ -1690,7 +1690,7 @@ cl_inittextmode(gp)
 {
 	struct grfcltext_mode *tm = (struct grfcltext_mode *) gp->g_data;
 	volatile unsigned char *ba = gp->g_regkva;
-	unsigned char *fb = __UNVOLATILE(gp->g_fbkva);
+	unsigned char *fb = gp->g_fbkva;
 	unsigned char *c, *f, y;
 	unsigned short z;
 
@@ -1761,7 +1761,7 @@ cl_memset(d, c, l)
  */
 static void
 RegWakeup(ba)
-	volatile void *ba;
+	volatile caddr_t ba;
 {
 
 	switch (cltype) {
@@ -1783,7 +1783,7 @@ RegWakeup(ba)
 
 static void
 RegOnpass(ba)
-	volatile void *ba;
+	volatile caddr_t ba;
 {
 
 	switch (cltype) {
@@ -1807,7 +1807,7 @@ RegOnpass(ba)
 
 static void
 RegOffpass(ba)
-	volatile void *ba;
+	volatile caddr_t ba;
 {
 
 	switch (cltype) {

@@ -1,4 +1,4 @@
-/*	$NetBSD: vmparam.h,v 1.13 2009/03/06 20:31:53 joerg Exp $	*/
+/*	$NetBSD: vmparam.h,v 1.10 2003/04/02 07:53:57 thorpej Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -12,6 +12,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -48,7 +55,8 @@
 /*
  * We definitely need a small pager map.
  */
-#define	PAGER_MAP_DEFAULT_SIZE (1 * 1024 * 1024)
+#undef	PAGER_MAP_SIZE
+#define	PAGER_MAP_SIZE (1 * 1024 * 1024)
 
 /*
  * USRSTACK is the top (end) of the user stack.
@@ -84,6 +92,14 @@
  */
 #ifndef USRIOSIZE
 #define USRIOSIZE	128		/* 256K */
+#endif
+
+/*
+ * PTEs for system V style shared memory.
+ * This is basically slop for kmempt which we actually allocate (malloc) from.
+ */
+#ifndef SHMMAXPGS
+#define SHMMAXPGS	512 	/* 4 MB */
 #endif
 
 /*

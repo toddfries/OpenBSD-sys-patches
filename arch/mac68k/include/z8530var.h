@@ -1,4 +1,4 @@
-/*	$NetBSD: z8530var.h,v 1.13 2008/03/29 19:15:34 tsutsui Exp $	*/
+/*	$NetBSD: z8530var.h,v 1.9 2005/12/11 12:18:03 christos Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -132,11 +132,10 @@ struct xzs_chanstate {
 };
 
 struct zsc_softc {
-	device_t zsc_dev;		/* required first: base device */
+	struct	device zsc_dev;		/* required first: base device */
 	struct	zs_chanstate *zsc_cs[2];	/* channel A and B soft state */
 	/* Machine-dependent part follows... */
 	struct xzs_chanstate xzsc_xcs_store[2];
-	void *zsc_softintr_cookie;
 };
 
 /*
@@ -151,19 +150,18 @@ struct zsc_softc {
  * XXX - no one seems to want to try and check this -wrs
  */
 
-uint8_t zs_read_reg(struct zs_chanstate *, uint8_t);
-uint8_t zs_read_csr(struct zs_chanstate *);
-uint8_t zs_read_data(struct zs_chanstate *);
+u_char zs_read_reg(struct zs_chanstate *, u_char);
+u_char zs_read_csr(struct zs_chanstate *);
+u_char zs_read_data(struct zs_chanstate *);
 
-void  zs_write_reg(struct zs_chanstate *, uint8_t, uint8_t);
-void  zs_write_csr(struct zs_chanstate *, uint8_t);
-void  zs_write_data(struct zs_chanstate *, uint8_t);
+void  zs_write_reg(struct zs_chanstate *, u_char, u_char);
+void  zs_write_csr(struct zs_chanstate *, u_char);
+void  zs_write_data(struct zs_chanstate *, u_char);
 
 /* XXX - Could define splzs() here instead of in psl.h */
-#define IPL_ZS IPL_SERIAL
 
 /* Hook for MD ioctl support */
-int	zsmdioctl(struct zs_chanstate *, u_long, void *);
+int	zsmdioctl(struct zs_chanstate *, u_long, caddr_t);
 /* XXX - This is a bit gross... */
 #define ZS_MD_IOCTL(cs, cmd, data) zsmdioctl(cs, cmd, data)
 

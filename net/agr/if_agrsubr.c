@@ -1,4 +1,4 @@
-/*	$NetBSD: if_agrsubr.c,v 1.8 2007/09/01 03:07:24 dyoung Exp $	*/
+/*	$NetBSD: if_agrsubr.c,v 1.3 2005/12/11 12:24:54 christos Exp $	*/
 
 /*-
  * Copyright (c)2005 YAMAMOTO Takashi,
@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_agrsubr.c,v 1.8 2007/09/01 03:07:24 dyoung Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_agrsubr.c,v 1.3 2005/12/11 12:24:54 christos Exp $");
 
 #include "bpfilter.h"
 #include "opt_inet.h"
@@ -52,14 +52,14 @@ struct agr_mc_entry {
 };
 
 static struct agr_mc_entry *agr_mc_lookup(struct agr_multiaddrs *,
-    const struct sockaddr *);
+    const struct ifreq *);
 static int agrport_mc_add_callback(struct agr_port *, void *);
 static int agrport_mc_del_callback(struct agr_port *, void *);
 static int agrmc_mc_add_callback(struct agr_mc_entry *, void *);
 static int agrmc_mc_del_callback(struct agr_mc_entry *, void *);
 
-static int agr_mc_add(struct agr_multiaddrs *, const struct sockaddr *);
-static int agr_mc_del(struct agr_multiaddrs *, const struct sockaddr *);
+static int agr_mc_add(struct agr_multiaddrs *, const struct ifreq *);
+static int agr_mc_del(struct agr_multiaddrs *, const struct ifreq *);
 
 int
 agr_mc_purgeall(struct agr_softc *sc, struct agr_multiaddrs *ama)
@@ -74,7 +74,7 @@ agr_mc_purgeall(struct agr_softc *sc, struct agr_multiaddrs *ama)
 			/* XXX XXX */
 			printf("%s: error %d\n", __func__, error);
 		}
-		TAILQ_REMOVE(&ama->ama_addrs, ame, ame_q);
+		
 		free(ame, M_DEVBUF);
 	}
 
@@ -93,9 +93,11 @@ agr_mc_init(struct agr_softc *sc, struct agr_multiaddrs *ama)
 /* ==================== */
 
 static struct agr_mc_entry *
-agr_mc_lookup(struct agr_multiaddrs *ama, const struct sockaddr *sa)
+agr_mc_lookup(struct agr_multiaddrs *ama, const struct ifreq *ifr)
 {
 	struct agr_mc_entry *ame;
+	const struct sockaddr *sa;
+	sa = &ifr->ifr_addr;
 
 	TAILQ_FOREACH(ame, &ama->ama_addrs, ame_q) {
 		if (!memcmp(&ame->ame_ifr.ifr_ss, sa, sa->sa_len))
@@ -127,11 +129,12 @@ agr_mc_foreach(struct agr_multiaddrs *ama,
 }
 
 static int
-agr_mc_add(struct agr_multiaddrs *ama, const struct sockaddr *sa)
+agr_mc_add(struct agr_multiaddrs *ama, const struct ifreq *ifr)
 {
 	struct agr_mc_entry *ame;
+	const struct sockaddr *sa;
 
-	ame = agr_mc_lookup(ama, sa);
+	ame = agr_mc_lookup(ama, ifr);
 	if (ame) {
 		ame->ame_refcnt++;
 		return 0;
@@ -141,19 +144,19 @@ agr_mc_add(struct agr_multiaddrs *ama, const struct sockaddr *sa)
 	if (ame == NULL)
 		return ENOMEM;
 
+	sa = &ifr->ifr_addr;
 	memcpy(&ame->ame_ifr.ifr_ss, sa, sa->sa_len);
 	ame->ame_refcnt = 1;
-	TAILQ_INSERT_TAIL(&ama->ama_addrs, ame, ame_q);
 
 	return ENETRESET;
 }
 
 static int
-agr_mc_del(struct agr_multiaddrs *ama, const struct sockaddr *sa)
+agr_mc_del(struct agr_multiaddrs *ama, const struct ifreq *ifr)
 {
 	struct agr_mc_entry *ame;
 
-	ame = agr_mc_lookup(ama, sa);
+	ame = agr_mc_lookup(ama, ifr);
 	if (ame == NULL)
 		return ENOENT;
 
@@ -161,7 +164,6 @@ agr_mc_del(struct agr_multiaddrs *ama, const struct sockaddr *sa)
 	if (ame->ame_refcnt > 0)
 		return 0;
 
-	TAILQ_REMOVE(&ama->ama_addrs, ame, ame_q);
 	free(ame, M_DEVBUF);
 
 	return ENETRESET;
@@ -211,7 +213,7 @@ agrmc_mc_del_callback(struct agr_mc_entry *ame, void *arg)
 
 int
 agr_configmulti_port(struct agr_multiaddrs *ama, struct agr_port *port,
-    bool add)
+    boolean_t add)
 {
 
 	return agr_mc_foreach(ama,
@@ -231,19 +233,19 @@ static int
 agrport_mc_del_callback(struct agr_port *port, void *arg)
 {
 
-	return agrport_ioctl(port, SIOCDELMULTI, arg);
+	return agrport_ioctl(port, SIOCADDMULTI, arg);
 }
 
 int
 agr_configmulti_ifreq(struct agr_softc *sc, struct agr_multiaddrs *ama,
-    struct ifreq *ifr, bool add)
+    struct ifreq *ifr, boolean_t add)
 {
 	int error;
 
 	if (add)
-		error = agr_mc_add(ama, ifreq_getaddr(SIOCADDMULTI, ifr));
+		error = agr_mc_add(ama, ifr);
 	else
-		error = agr_mc_del(ama, ifreq_getaddr(SIOCDELMULTI, ifr));
+		error = agr_mc_del(ama, ifr);
 
 	if (error != ENETRESET)
 		return error;
@@ -262,7 +264,7 @@ agr_port_getmedia(struct agr_port *port, u_int *media, u_int *status)
 
 	memset(&ifmr, 0, sizeof(ifmr));
 	ifmr.ifm_count = 0;
-	error = agrport_ioctl(port, SIOCGIFMEDIA, (void *)&ifmr);
+	error = agrport_ioctl(port, SIOCGIFMEDIA, (caddr_t)&ifmr);
 
 	if (error == 0) {
 		*media = ifmr.ifm_active;

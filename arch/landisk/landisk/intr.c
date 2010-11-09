@@ -1,4 +1,4 @@
-/*	$NetBSD: intr.c,v 1.3 2008/05/16 16:24:17 tsutsui Exp $	*/
+/*	$NetBSD: intr.c,v 1.1 2006/09/01 21:26:18 uwe Exp $	*/
 
 /*-
  * Copyright (c) 2005 NONAKA Kimihiro
@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: intr.c,v 1.3 2008/05/16 16:24:17 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: intr.c,v 1.1 2006/09/01 21:26:18 uwe Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -154,7 +154,9 @@ extintr_establish(int irq, int level, int (*ih_fun)(void *), void *ih_arg)
 		panic("extintr_establish: unknown level %d", level);
 		/*NOTREACHED*/
 #endif
-	case IPL_VM:
+	case IPL_BIO:
+	case IPL_NET:
+	case IPL_TTY:
 		break;
 	}
 
@@ -191,7 +193,15 @@ extintr_establish(int irq, int level, int (*ih_fun)(void *), void *ih_arg)
 	ih->ih_enable = 1;
 	ih->ih_level = level;
 	ih->ih_irq = irq - 5;
-	name = extintr_names[irq - 5];
+	if (irq != 5) {
+		name = extintr_names[irq - 5];
+	} else if (level == IPL_BIO) {
+		name = "ehci";
+	} else if (level == IPL_NET) {
+		name = "rtk";
+	} else {
+		name = "unknown";
+	}
 	evcnt_attach_dynamic(&ih->ih_evcnt, EVCNT_TYPE_INTR,
 	    NULL, "ext", name);
 	*p = ih;

@@ -1,4 +1,4 @@
-/* $NetBSD: machdep.c,v 1.33 2008/07/02 17:28:54 ad Exp $ */
+/* $NetBSD: machdep.c,v 1.30 2005/12/24 23:23:59 perry Exp $ */
 
 /*
  * Copyright (C) 1995, 1996 Wolfgang Solfrank.
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.33 2008/07/02 17:28:54 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.30 2005/12/24 23:23:59 perry Exp $");
 
 #include "opt_ddb.h"
 #include "opt_ipkdb.h"
@@ -84,6 +84,7 @@ int imask[NIPL];
 /* Our exported CPU info; we can have only one. */
 struct cpu_info cpu_info_store;
 
+struct vm_map *exec_map = NULL;
 struct vm_map *mb_map = NULL;
 struct vm_map *phys_map = NULL;
 
@@ -701,14 +702,14 @@ identifycpu()
 void
 cpu_startup()
 {
-	void *	v;
+	caddr_t	v;
 	vaddr_t minaddr, maxaddr;
 	char pbuf[9];
 
-	initmsgbuf((void *)msgbuf_paddr, round_page(MSGBUFSIZE));
+	initmsgbuf((caddr_t)msgbuf_paddr, round_page(MSGBUFSIZE));
 
 	proc0.p_addr = proc0paddr;
-	v = (void *)proc0paddr + USPACE;
+	v = (caddr_t)proc0paddr + USPACE;
 
 	printf("%s%s", copyright, version);
 	identifycpu();
@@ -719,10 +720,17 @@ cpu_startup()
 	minaddr = 0;
 
 	/*
+	 * Allocate a submap for exec arguments.  This map effectively
+	 * limits the number of processes exec'ing at any time
+	 */
+	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
+				16*NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
+
+	/*
 	 * Allocate a submap for physio
 	 */
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-				VM_PHYS_SIZE, 0, false, NULL);
+				VM_PHYS_SIZE, 0, FALSE, NULL);
 
 	/*
 	 * No need to allocate an mbuf cluster submap.  Mbuf clusters
@@ -774,7 +782,7 @@ lcsplx(ipl)
  */
 int
 kvtop(addr)
-	void *addr;
+	caddr_t addr;
 {
 	vaddr_t va;
 	paddr_t pa;
@@ -787,7 +795,7 @@ kvtop(addr)
 	va = trunc_page((vaddr_t)addr);
 	off = (int)addr - va;
 
-	if (pmap_extract(pmap_kernel(), va, &pa) == false) {
+	if (pmap_extract(pmap_kernel(), va, &pa) == FALSE) {
 		/*printf("kvtop: zero page frame (va=0x%x)\n", addr);*/
 		return (int)addr;
 	}

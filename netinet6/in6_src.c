@@ -65,7 +65,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: in6_src.c,v 1.45 2009/01/11 02:45:54 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: in6_src.c,v 1.34 2007/01/04 19:07:04 elad Exp $");
 
 #include "opt_inet.h"
 
@@ -105,7 +105,6 @@ __KERNEL_RCSID(0, "$NetBSD: in6_src.c,v 1.45 2009/01/11 02:45:54 christos Exp $"
 #include <netinet6/in6_pcb.h>
 #endif
 #include <netinet6/ip6_var.h>
-#include <netinet6/ip6_private.h>
 #include <netinet6/nd6.h>
 #include <netinet6/scope6_var.h>
 
@@ -134,21 +133,21 @@ struct in6_addrpolicy defaultaddrpolicy;
 int ip6_prefer_tempaddr = 0;
 #endif
 
-static int selectroute(struct sockaddr_in6 *, struct ip6_pktopts *,
-	struct ip6_moptions *, struct route *, struct ifnet **,
-	struct rtentry **, int, int);
-static int in6_selectif(struct sockaddr_in6 *, struct ip6_pktopts *,
-	struct ip6_moptions *, struct route *, struct ifnet **);
+static int selectroute __P((struct sockaddr_in6 *, struct ip6_pktopts *,
+	struct ip6_moptions *, struct route_in6 *, struct ifnet **,
+	struct rtentry **, int, int));
+static int in6_selectif __P((struct sockaddr_in6 *, struct ip6_pktopts *,
+	struct ip6_moptions *, struct route_in6 *, struct ifnet **));
 
-static struct in6_addrpolicy *lookup_addrsel_policy(struct sockaddr_in6 *);
+static struct in6_addrpolicy *lookup_addrsel_policy __P((struct sockaddr_in6 *));
 
-static void init_policy_queue(void);
-static int add_addrsel_policyent(struct in6_addrpolicy *);
-static int delete_addrsel_policyent(struct in6_addrpolicy *);
-static int walk_addrsel_policy(int (*)(struct in6_addrpolicy *, void *),
-				    void *);
-static int dump_addrsel_policyent(struct in6_addrpolicy *, void *);
-static struct in6_addrpolicy *match_addrsel_policy(struct sockaddr_in6 *);
+static void init_policy_queue __P((void));
+static int add_addrsel_policyent __P((struct in6_addrpolicy *));
+static int delete_addrsel_policyent __P((struct in6_addrpolicy *));
+static int walk_addrsel_policy __P((int (*)(struct in6_addrpolicy *, void *),
+				    void *));
+static int dump_addrsel_policyent __P((struct in6_addrpolicy *, void *));
+static struct in6_addrpolicy *match_addrsel_policy __P((struct sockaddr_in6 *));
 
 /*
  * Return an IPv6 address, which is the most appropriate for a given
@@ -184,9 +183,14 @@ static struct in6_addrpolicy *match_addrsel_policy(struct sockaddr_in6 *);
 #endif
 
 struct in6_addr *
-in6_selectsrc(struct sockaddr_in6 *dstsock, struct ip6_pktopts *opts, 
-	struct ip6_moptions *mopts, struct route *ro, struct in6_addr *laddr, 
-	struct ifnet **ifpp, int *errorp)
+in6_selectsrc(dstsock, opts, mopts, ro, laddr, ifpp, errorp)
+	struct sockaddr_in6 *dstsock;
+	struct ip6_pktopts *opts;
+	struct ip6_moptions *mopts;
+	struct route_in6 *ro;
+	struct in6_addr *laddr;
+	struct ifnet **ifpp;
+	int *errorp;
 {
 	struct in6_addr dst;
 	struct ifnet *ifp = NULL;
@@ -574,9 +578,19 @@ in6_selectsrc(struct sockaddr_in6 *dstsock, struct ip6_pktopts *opts,
 #undef NEXT
 
 static int
-selectroute(struct sockaddr_in6 *dstsock, struct ip6_pktopts *opts, 
-	struct ip6_moptions *mopts, struct route *ro, struct ifnet **retifp, 
-	struct rtentry **retrt, int clone, int norouteok)
+selectroute(dstsock, opts, mopts, ro, retifp, retrt, clone, norouteok)
+	struct sockaddr_in6 *dstsock;
+	struct ip6_pktopts *opts;
+	struct ip6_moptions *mopts;
+#ifdef NEW_STRUCT_ROUTE
+	struct route *ro;
+#else
+	struct route_in6 *ro;
+#endif
+	struct ifnet **retifp;
+	struct rtentry **retrt;
+	int clone;
+	int norouteok;
 {
 	int error = 0;
 	struct ifnet *ifp = NULL;
@@ -635,7 +649,7 @@ selectroute(struct sockaddr_in6 *dstsock, struct ip6_pktopts *opts,
 	 * use it as the gateway.
 	 */
 	if (opts && opts->ip6po_nexthop) {
-		struct route *ron;
+		struct route_in6 *ron;
 
 		sin6_next = satosin6(opts->ip6po_nexthop);
 
@@ -650,13 +664,23 @@ selectroute(struct sockaddr_in6 *dstsock, struct ip6_pktopts *opts,
 		 * by that address must be a neighbor of the sending host.
 		 */
 		ron = &opts->ip6po_nextroute;
-		if ((rt = rtcache_lookup(ron, sin6tosa(sin6_next))) == NULL ||
-		    (rt->rt_flags & RTF_GATEWAY) != 0 ||
-		    !nd6_is_addr_neighbor(sin6_next, rt->rt_ifp)) {
-			rtcache_free(ron);
+		if (!IN6_ARE_ADDR_EQUAL(&satosin6(&ron->ro_dst)->sin6_addr,
+		    &sin6_next->sin6_addr))
+			rtcache_free((struct route *)ron);
+		else
+			rtcache_check((struct route *)ron);
+		if (ron->ro_rt == NULL) {
+			*satosin6(&ron->ro_dst) = *sin6_next;
+			rtcache_init((struct route *)ron);
+		}
+		if (ron->ro_rt == NULL ||
+		    (ron->ro_rt->rt_flags & RTF_GATEWAY) != 0 ||
+		    !nd6_is_addr_neighbor(sin6_next, ron->ro_rt->rt_ifp)) {
+			rtcache_free((struct route *)ron);
 			error = EHOSTUNREACH;
 			goto done;
 		}
+		rt = ron->ro_rt;
 		ifp = rt->rt_ifp;
 
 		/*
@@ -674,15 +698,24 @@ selectroute(struct sockaddr_in6 *dstsock, struct ip6_pktopts *opts,
 	 * cached destination, in case of sharing the cache with IPv4.
 	 */
 	if (ro != NULL) {
-		union {
-			struct sockaddr		dst;
-			struct sockaddr_in6	dst6;
-		} u;
+		if (((struct sockaddr *)(&ro->ro_dst))->sa_family != AF_INET6 ||
+		    !IN6_ARE_ADDR_EQUAL(&satosin6(&ro->ro_dst)->sin6_addr, dst))
+			rtcache_free((struct route *)ro);
+		else
+			rtcache_check((struct route *)ro);
+		if (ro->ro_rt == NULL) {
+			struct sockaddr_in6 *sa6;
 
-		/* No route yet, so try to acquire one */
-		u.dst6 = *dstsock;
-		u.dst6.sin6_scope_id = 0;
-		rt = rtcache_lookup1(ro, &u.dst, clone);
+			/* No route yet, so try to acquire one */
+			bzero(&ro->ro_dst, sizeof(struct sockaddr_in6));
+			sa6 = (struct sockaddr_in6 *)&ro->ro_dst;
+			*sa6 = *dstsock;
+			sa6->sin6_scope_id = 0;
+			if (clone)
+				rtcache_init((struct route *)ro);
+			else
+				rtcache_init_noclone((struct route *)ro);
+		}
 
 		/*
 		 * do not care about the result if we have the nexthop
@@ -691,10 +724,11 @@ selectroute(struct sockaddr_in6 *dstsock, struct ip6_pktopts *opts,
 		if (opts && opts->ip6po_nexthop)
 			goto done;
 
-		if (rt == NULL)
+		if (ro->ro_rt == NULL)
 			error = EHOSTUNREACH;
 		else
-			ifp = rt->rt_ifp;
+			ifp = ro->ro_rt->rt_ifp;
+		rt = ro->ro_rt;
 
 		/*
 		 * Check if the outgoing interface conflicts with
@@ -723,7 +757,7 @@ selectroute(struct sockaddr_in6 *dstsock, struct ip6_pktopts *opts,
 		error = EHOSTUNREACH;
 	}
 	if (error == EHOSTUNREACH)
-		IP6_STATINC(IP6_STAT_NOROUTE);
+		ip6stat.ip6s_noroute++;
 
 	if (retifp != NULL)
 		*retifp = ifp;
@@ -734,8 +768,12 @@ selectroute(struct sockaddr_in6 *dstsock, struct ip6_pktopts *opts,
 }
 
 static int
-in6_selectif(struct sockaddr_in6 *dstsock, struct ip6_pktopts *opts, 
-	struct ip6_moptions *mopts, struct route *ro, struct ifnet **retifp)
+in6_selectif(dstsock, opts, mopts, ro, retifp)
+	struct sockaddr_in6 *dstsock;
+	struct ip6_pktopts *opts;
+	struct ip6_moptions *mopts;
+	struct route_in6 *ro;
+	struct ifnet **retifp;
 {
 	int error, clone;
 	struct rtentry *rt = NULL;
@@ -779,17 +817,18 @@ in6_selectif(struct sockaddr_in6 *dstsock, struct ip6_pktopts *opts,
 	return (0);
 }
 
-/*
- * close - meaningful only for bsdi and freebsd.
- */
-
 int
-in6_selectroute(struct sockaddr_in6 *dstsock, struct ip6_pktopts *opts, 
-	struct ip6_moptions *mopts, struct route *ro, struct ifnet **retifp, 
-	struct rtentry **retrt, int clone)
+in6_selectroute(dstsock, opts, mopts, ro, retifp, retrt, clone)
+	struct sockaddr_in6 *dstsock;
+	struct ip6_pktopts *opts;
+	struct ip6_moptions *mopts;
+	struct route_in6 *ro;
+	struct ifnet **retifp;
+	struct rtentry **retrt;
+	int clone;		/* meaningful only for bsdi and freebsd. */
 {
-	return selectroute(dstsock, opts, mopts, ro, retifp,
-	    retrt, clone, 0);
+	return (selectroute(dstsock, opts, mopts, ro, retifp,
+	    retrt, clone, 0));
 }
 
 /*
@@ -800,7 +839,9 @@ in6_selectroute(struct sockaddr_in6 *dstsock, struct ip6_pktopts *opts,
  * 3. The system default hoplimit.
 */
 int
-in6_selecthlim(struct in6pcb *in6p, struct ifnet *ifp)
+in6_selecthlim(in6p, ifp)
+	struct in6pcb *in6p;
+	struct ifnet *ifp;
 {
 	if (in6p && in6p->in6p_hops >= 0)
 		return (in6p->in6p_hops);
@@ -814,7 +855,10 @@ in6_selecthlim(struct in6pcb *in6p, struct ifnet *ifp)
  * Find an empty port and set it to the specified PCB.
  */
 int
-in6_pcbsetport(struct in6_addr *laddr, struct in6pcb *in6p, struct lwp *l)
+in6_pcbsetport(laddr, in6p, l)
+	struct in6_addr *laddr;
+	struct in6pcb *in6p;
+	struct lwp *l;
 {
 	struct socket *so = in6p->in6p_socket;
 	struct inpcbtable *table = in6p->in6p_table;
@@ -861,12 +905,11 @@ in6_pcbsetport(struct in6_addr *laddr, struct in6pcb *in6p, struct lwp *l)
 		if (IN6_IS_ADDR_V4MAPPED(laddr)) {
 			t = in_pcblookup_port(table,
 			    *(struct in_addr *)&laddr->s6_addr32[3],
-			    htons(lport), wild);
+			    lport, wild);
 		} else
 #endif
 		{
-			t = in6_pcblookup_port(table, laddr, htons(lport),
-			    wild);
+			t = in6_pcblookup_port(table, laddr, lport, wild);
 		}
 		if (t == 0)
 			goto found;
@@ -883,7 +926,7 @@ found:
 }
 
 void
-addrsel_policy_init(void)
+addrsel_policy_init()
 {
 	init_policy_queue();
 
@@ -893,7 +936,8 @@ addrsel_policy_init(void)
 }
 
 static struct in6_addrpolicy *
-lookup_addrsel_policy(struct sockaddr_in6 *key)
+lookup_addrsel_policy(key)
+	struct sockaddr_in6 *key;
 {
 	struct in6_addrpolicy *match = NULL;
 
@@ -910,11 +954,11 @@ lookup_addrsel_policy(struct sockaddr_in6 *key)
 /*
  * Subroutines to manage the address selection policy table via sysctl.
  */
-struct sel_walkarg {
+struct walkarg {
 	size_t	w_total;
 	size_t	w_given;
-	void *	w_where;
-	void *w_limit;
+	caddr_t	w_where;
+	caddr_t w_limit;
 };
 
 int
@@ -934,14 +978,14 @@ in6_src_sysctl(void *oldp, size_t *oldlenp, void *newp, size_t newlen)
 		goto end;
 	}
 	if (oldp || oldlenp) {
-		struct sel_walkarg w;
+		struct walkarg w;
 		size_t oldlen = *oldlenp;
 
-		memset(&w, 0, sizeof(w));
+		bzero(&w, sizeof(w));
 		w.w_given = oldlen;
 		w.w_where = oldp;
 		if (oldp)
-			w.w_limit = (char *)oldp + oldlen;
+			w.w_limit = (caddr_t)oldp + oldlen;
 
 		error = walk_addrsel_policy(dump_addrsel_policyent, &w);
 
@@ -957,7 +1001,9 @@ in6_src_sysctl(void *oldp, size_t *oldlenp, void *newp, size_t newlen)
 }
 
 int
-in6_src_ioctl(u_long cmd, void *data)
+in6_src_ioctl(cmd, data)
+	u_long cmd;
+	caddr_t data;
 {
 	int i;
 	struct in6_addrpolicy ent0;
@@ -1005,13 +1051,14 @@ TAILQ_HEAD(addrsel_policyhead, addrsel_policyent);
 struct addrsel_policyhead addrsel_policytab;
 
 static void
-init_policy_queue(void)
+init_policy_queue()
 {
 	TAILQ_INIT(&addrsel_policytab);
 }
 
 static int
-add_addrsel_policyent(struct in6_addrpolicy *newpolicy)
+add_addrsel_policyent(newpolicy)
+	struct in6_addrpolicy *newpolicy;
 {
 	struct addrsel_policyent *new, *pol;
 
@@ -1026,7 +1073,9 @@ add_addrsel_policyent(struct in6_addrpolicy *newpolicy)
 		}
 	}
 
-	new = malloc(sizeof(*new), M_IFADDR, M_WAITOK|M_ZERO);
+	MALLOC(new, struct addrsel_policyent *, sizeof(*new), M_IFADDR,
+	       M_WAITOK);
+	bzero(new, sizeof(*new));
 
 	/* XXX: should validate entry */
 	new->ape_policy = *newpolicy;
@@ -1037,7 +1086,8 @@ add_addrsel_policyent(struct in6_addrpolicy *newpolicy)
 }
 
 static int
-delete_addrsel_policyent(struct in6_addrpolicy *key)
+delete_addrsel_policyent(key)
+	struct in6_addrpolicy *key;
 {
 	struct addrsel_policyent *pol;
 
@@ -1061,37 +1111,44 @@ delete_addrsel_policyent(struct in6_addrpolicy *key)
 }
 
 static int
-walk_addrsel_policy(int (*callback)(struct in6_addrpolicy *, void *), void *w)
+walk_addrsel_policy(callback, w)
+	int (*callback) __P((struct in6_addrpolicy *, void *));
+	void *w;
 {
 	struct addrsel_policyent *pol;
 	int error = 0;
 
-	TAILQ_FOREACH(pol, &addrsel_policytab, ape_entry) {
-		if ((error = (*callback)(&pol->ape_policy, w)) != 0)
-			return error;
+	for (pol = TAILQ_FIRST(&addrsel_policytab); pol;
+	     pol = TAILQ_NEXT(pol, ape_entry)) {
+		if ((error = (*callback)(&pol->ape_policy, w)) != 0) {
+			return (error);
+		}
 	}
 
-	return error;
+	return (error);
 }
 
 static int
-dump_addrsel_policyent(struct in6_addrpolicy *pol, void *arg)
+dump_addrsel_policyent(pol, arg)
+	struct in6_addrpolicy *pol;
+	void *arg;
 {
 	int error = 0;
-	struct sel_walkarg *w = arg;
+	struct walkarg *w = arg;
 
-	if (w->w_where && (char *)w->w_where + sizeof(*pol) <= (char *)w->w_limit) {
+	if (w->w_where && w->w_where + sizeof(*pol) <= w->w_limit) {
 		if ((error = copyout(pol, w->w_where, sizeof(*pol))) != 0)
-			return error;
-		w->w_where = (char *)w->w_where + sizeof(*pol);
+			return (error);
+		w->w_where += sizeof(*pol);
 	}
 	w->w_total += sizeof(*pol);
 
-	return error;
+	return (error);
 }
 
 static struct in6_addrpolicy *
-match_addrsel_policy(struct sockaddr_in6 *key)
+match_addrsel_policy(key)
+	struct sockaddr_in6 *key;
 {
 	struct addrsel_policyent *pent;
 	struct in6_addrpolicy *bestpol = NULL, *pol;

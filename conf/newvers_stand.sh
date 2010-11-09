@@ -1,6 +1,6 @@
 #!/bin/sh -
 #
-# $NetBSD: newvers_stand.sh,v 1.7 2009/02/20 13:41:27 yamt Exp $
+# $NetBSD: newvers_stand.sh,v 1.4 2000/08/23 07:15:20 mrg Exp $
 #
 # Copyright (c) 2000 The NetBSD Foundation, Inc.
 # All rights reserved.
@@ -16,6 +16,13 @@
 # 2. Redistributions in binary form must reproduce the above copyright
 #    notice, this list of conditions and the following disclaimer in the
 #    documentation and/or other materials provided with the distribution.
+# 3. All advertising materials mentioning features or use of this software
+#    must display the following acknowledgement:
+#	This product includes software developed by the NetBSD
+#	Foundation, Inc. and its contributors.
+# 4. Neither the name of The NetBSD Foundation nor the names of its
+#    contributors may be used to endorse or promote products derived
+#    from this software without specific prior written permission.
 #
 # THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
 # ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -35,21 +42,17 @@
 # Called as:
 #	sh ${S}/conf/newvers_stand.sh [-NDM] VERSION_FILE ARCH [EXTRA_MSG]
 
-cwd=$(dirname $0)
-
 add_name=yes
 add_date=yes
 add_maker=yes
-add_kernrev=yes
 
 # parse command args
-while getopts "NDMK?" OPT; do
+while getopts "NDM?" OPT; do
 	case $OPT in
 	N)	add_name=no;;
 	D)	add_date=no;;
 	M)	add_maker=no;;
-	K)	add_kernrev=no;;
-	?)	echo "Syntax: newvers_stand.sh [-NDMK] VERSION_TEMPLATE ARCH EXTRA_COMMENT" >&2
+	?)	echo "Syntax: newvers_stand.sh [-NDM] VERSION_TEMPLATE ARCH EXTRA_COMMENT" >&2
 		exit 1;;
 	esac
 done
@@ -69,16 +72,11 @@ if [ $add_name = yes ]; then
 fi
 
 if [ $add_date = yes ]; then
-	t=`LC_ALL=C date`
+	t=`date`
 	echo "const char bootprog_date[] = \"${t}\";" >> vers.c
 fi
 
 if [ $add_maker = yes ]; then
 	u=${USER-root} h=`hostname`
 	echo "const char bootprog_maker[] = \"${u}@${h}\";" >> vers.c
-fi
-
-if [ $add_kernrev = yes ]; then
-	osr=$(sh ${cwd}/osrelease.sh)
-	echo "const char bootprog_kernrev[] = \"${osr}\";" >> vers.c
 fi

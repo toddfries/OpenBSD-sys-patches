@@ -1,4 +1,4 @@
-/*	$NetBSD: ufs_bmap.c,v 1.48 2008/03/27 19:06:52 ad Exp $	*/
+/*	$NetBSD: ufs_bmap.c,v 1.40 2006/04/04 17:12:57 pavel Exp $	*/
 
 /*
  * Copyright (c) 1989, 1991, 1993
@@ -37,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ufs_bmap.c,v 1.48 2008/03/27 19:06:52 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ufs_bmap.c,v 1.40 2006/04/04 17:12:57 pavel Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -47,7 +47,6 @@ __KERNEL_RCSID(0, "$NetBSD: ufs_bmap.c,v 1.48 2008/03/27 19:06:52 ad Exp $");
 #include <sys/mount.h>
 #include <sys/resourcevar.h>
 #include <sys/trace.h>
-#include <sys/fstrans.h>
 
 #include <miscfs/specfs/specdev.h>
 
@@ -56,13 +55,13 @@ __KERNEL_RCSID(0, "$NetBSD: ufs_bmap.c,v 1.48 2008/03/27 19:06:52 ad Exp $");
 #include <ufs/ufs/ufs_extern.h>
 #include <ufs/ufs/ufs_bswap.h>
 
-static bool
+static boolean_t
 ufs_issequential(const struct ufsmount *ump, daddr_t daddr0, daddr_t daddr1)
 {
 
 	/* for ufs, blocks in a hole is not 'contiguous'. */
 	if (daddr0 == 0)
-		return false;
+		return FALSE;
 
 	return (daddr0 + ump->um_seqinc == daddr1);
 }
@@ -82,8 +81,6 @@ ufs_bmap(void *v)
 		daddr_t *a_bnp;
 		int *a_runp;
 	} */ *ap = v;
-	int error;
-
 	/*
 	 * Check for underlying vnode requests and ensure that logical
 	 * to physical mapping is requested.
@@ -93,11 +90,8 @@ ufs_bmap(void *v)
 	if (ap->a_bnp == NULL)
 		return (0);
 
-	fstrans_start(ap->a_vp->v_mount, FSTRANS_SHARED);
-	error = ufs_bmaparray(ap->a_vp, ap->a_bn, ap->a_bnp, NULL, NULL,
-	    ap->a_runp, ufs_issequential);
-	fstrans_done(ap->a_vp->v_mount);
-	return error;
+	return (ufs_bmaparray(ap->a_vp, ap->a_bn, ap->a_bnp, NULL, NULL,
+	    ap->a_runp, ufs_issequential));
 }
 
 /*
@@ -119,7 +113,7 @@ ufs_bmaparray(struct vnode *vp, daddr_t bn, daddr_t *bnp, struct indir *ap,
     int *nump, int *runp, ufs_issequential_callback_t is_sequential)
 {
 	struct inode *ip;
-	struct buf *bp, *cbp;
+	struct buf *bp;
 	struct ufsmount *ump;
 	struct mount *mp;
 	struct indir a[NIADDR + 1], *xap;
@@ -219,22 +213,14 @@ ufs_bmaparray(struct vnode *vp, daddr_t bn, daddr_t *bnp, struct indir *ap,
 		 */
 
 		metalbn = xap->in_lbn;
-		if (metalbn == bn)
+		if ((daddr == 0 && !incore(vp, metalbn)) || metalbn == bn)
 			break;
-		if (daddr == 0) {
-			mutex_enter(&bufcache_lock);
-			cbp = incore(vp, metalbn);
-			mutex_exit(&bufcache_lock);
-			if (cbp == NULL)
-				break;
-		}
-
 		/*
 		 * If we get here, we've either got the block in the cache
 		 * or we have a disk address for it, go fetch it.
 		 */
 		if (bp)
-			brelse(bp, 0);
+			brelse(bp);
 
 		xap->in_exists = 1;
 		bp = getblk(vp, metalbn, mp->mnt_stat.f_iosize, 0, 0);
@@ -248,7 +234,7 @@ ufs_bmaparray(struct vnode *vp, daddr_t bn, daddr_t *bnp, struct indir *ap,
 
 			return (ENOMEM);
 		}
-		if (bp->b_oflags & (BO_DONE | BO_DELWRI)) {
+		if (bp->b_flags & (B_DONE | B_DELWRI)) {
 			trace(TR_BREADHIT, pack(vp, size), metalbn);
 		}
 #ifdef DIAGNOSTIC
@@ -261,9 +247,9 @@ ufs_bmaparray(struct vnode *vp, daddr_t bn, daddr_t *bnp, struct indir *ap,
 			bp->b_flags |= B_READ;
 			BIO_SETPRIO(bp, BPRIO_TIMECRITICAL);
 			VOP_STRATEGY(vp, bp);
-			curlwp->l_ru.ru_inblock++;	/* XXX */
+			curproc->p_stats->p_ru.ru_inblock++;	/* XXX */
 			if ((error = biowait(bp)) != 0) {
-				brelse(bp, 0);
+				brelse(bp);
 				return (error);
 			}
 		}
@@ -296,7 +282,7 @@ ufs_bmaparray(struct vnode *vp, daddr_t bn, daddr_t *bnp, struct indir *ap,
 		}
 	}
 	if (bp)
-		brelse(bp, 0);
+		brelse(bp);
 
 	/*
 	 * Since this is FFS independent code, we are out of scope for the

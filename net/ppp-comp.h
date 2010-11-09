@@ -1,4 +1,4 @@
-/*	$NetBSD: ppp-comp.h,v 1.16 2008/11/29 23:15:20 cube Exp $	*/
+/*	$NetBSD: ppp-comp.h,v 1.13 2005/12/11 23:05:25 thorpej Exp $	*/
 
 /*
  * ppp-comp.h - Definitions for doing PPP packet compression.
@@ -62,8 +62,6 @@
  * Structure giving methods for compression/decompression.
  */
 #ifdef PACKETPTR
-#include <sys/queue.h>
-
 struct compressor {
 	int	compress_proto;	/* CCP compression protocol number */
 
@@ -94,9 +92,6 @@ struct compressor {
 	void	(*incomp)(void *, PACKETPTR);
 	/* Return decompression statistics */
 	void	(*decomp_stat)(void *, struct compstat *);
-
-	LIST_ENTRY(compressor)	comp_list;
-	unsigned int		comp_refcnt;
 };
 #endif /* PACKETPTR */
 
@@ -196,7 +191,7 @@ struct compressor {
 /*
  * This is not nice ... the alternative is a bitfield struct though.
  * And unfortunately, we cannot share the same bits for the option
- * names above since C and H are the same bit.  We could do a uint32_t
+ * names above since C and H are the same bit.  We could do a u_int32
  * but then we have to do a htonl() all the time and/or we still need
  * to know which octet is which.
  */

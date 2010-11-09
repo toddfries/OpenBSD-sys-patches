@@ -1,7 +1,7 @@
-/*	$NetBSD: subr_xcall.c,v 1.10 2009/03/05 13:18:51 uebayasi Exp $	*/
+/*	$NetBSD: subr_xcall.c,v 1.5 2007/11/06 00:42:44 ad Exp $	*/
 
 /*-
- * Copyright (c) 2007, 2008 The NetBSD Foundation, Inc.
+ * Copyright (c) 2007 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -74,7 +81,7 @@
  */
  
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: subr_xcall.c,v 1.10 2009/03/05 13:18:51 uebayasi Exp $");
+__KERNEL_RCSID(0, "$NetBSD: subr_xcall.c,v 1.5 2007/11/06 00:42:44 ad Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -124,13 +131,13 @@ xc_init_cpu(struct cpu_info *ci)
 
 	cv_init(&ci->ci_data.cpu_xcall, "xcall");
 	error = kthread_create(PRI_XCALL, KTHREAD_MPSAFE, ci, xc_thread,
-	    NULL, NULL, "xcall/%u", ci->ci_index);
+	    NULL, NULL, "xcall/%d", (int)ci->ci_cpuid);
 	if (error != 0)
 		panic("xc_init_cpu: error %d", error);
 }
 
 /*
- * xc_broadcast:
+ * xc_unicast:
  *
  *	Trigger a call on all CPUs in the system.
  */
@@ -139,7 +146,7 @@ xc_broadcast(u_int flags, xcfunc_t func, void *arg1, void *arg2)
 {
 
 	if ((flags & XC_HIGHPRI) != 0) {
-		panic("xc_broadcast: no high priority crosscalls yet");
+		panic("xc_unicast: no high priority crosscalls yet");
 	} else {
 		return xc_lowpri(flags, func, arg1, arg2, NULL);
 	}
@@ -173,7 +180,7 @@ xc_lowpri(u_int flags, xcfunc_t func, void *arg1, void *arg2,
 	  struct cpu_info *ci)
 {
 	CPU_INFO_ITERATOR cii;
-	uint64_t where;
+	u_int where;
 
 	mutex_enter(&xc_lock);
 	while (xc_headp != xc_tailp)
@@ -184,8 +191,6 @@ xc_lowpri(u_int flags, xcfunc_t func, void *arg1, void *arg2,
 	if (ci == NULL) {
 		xc_broadcast_ev.ev_count++;
 		for (CPU_INFO_FOREACH(cii, ci)) {
-			if ((ci->ci_schedstate.spc_flags & SPCF_RUNNING) == 0)
-				continue;
 			xc_headp += 1;
 			ci->ci_data.cpu_xcall_pending = true;
 			cv_signal(&ci->ci_data.cpu_xcall);

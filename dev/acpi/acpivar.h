@@ -1,4 +1,4 @@
-/*	$NetBSD: acpivar.h,v 1.34 2008/11/17 23:29:49 joerg Exp $	*/
+/*	$NetBSD: acpivar.h,v 1.30 2007/10/19 11:59:35 ad Exp $	*/
 
 /*
  * Copyright 2001 Wasabi Systems, Inc.
@@ -106,7 +106,7 @@ struct acpi_scope {
  *	Software state of the ACPI subsystem.
  */
 struct acpi_softc {
-	device_t sc_dev;		/* base device info */
+	struct device sc_dev;		/* base device info */
 	bus_space_tag_t sc_iot;		/* PCI I/O space tag */
 	bus_space_tag_t sc_memt;	/* PCI MEM space tag */
 	pci_chipset_tag_t sc_pc;	/* PCI chipset tag */
@@ -260,10 +260,9 @@ extern const struct acpi_resource_parse_ops acpi_resource_parse_ops_default;
 
 int		acpi_check(device_t, const char *);
 int		acpi_probe(void);
-ACPI_PHYSICAL_ADDRESS	acpi_OsGetRootPointer(void);
+ACPI_STATUS	acpi_OsGetRootPointer(UINT32, ACPI_POINTER *);
 int		acpi_match_hid(ACPI_DEVICE_INFO *, const char * const *);
 void		acpi_set_wake_gpe(ACPI_HANDLE);
-void		acpi_clear_wake_gpe(ACPI_HANDLE);
 
 ACPI_STATUS	acpi_eval_integer(ACPI_HANDLE, const char *, ACPI_INTEGER *);
 ACPI_STATUS	acpi_eval_string(ACPI_HANDLE, const char *, char **);
@@ -289,7 +288,19 @@ int		acpi_pci_link_route_interrupt(void *, int, int *, int *, int *);
 char *		acpi_pci_link_name(void *);
 ACPI_HANDLE	acpi_pci_link_handle(void *);
 void		acpi_pci_link_state(void);
-void		acpi_pci_link_resume(void);
+
+
+
+
+#if defined(_KERNEL_OPT)
+#include "acpiec.h"
+
+#if NACPIEC > 0
+void		acpiec_early_attach(struct device *);
+#endif
+#else
+#define	NACPIEC	0
+#endif
 
 struct acpi_io		*acpi_res_io(struct acpi_resources *, int);
 struct acpi_iorange	*acpi_res_iorange(struct acpi_resources *, int);
@@ -307,7 +318,7 @@ ACPI_STATUS	acpi_enter_sleep_state(struct acpi_softc *, int);
  * quirk handling
  */
 struct acpi_quirk {
-	const char *aq_tabletype; /* what type of table (FADT, DSDT, etc) */
+	uint32_t aq_tabletype;	/* what type of table (FADT, DSDT, etc) */
 	const char *aq_oemid;	/* compared against the table OemId */
 	int aq_oemrev;		/* compared against the table OemRev */
 	int aq_cmpop;		/* how to compare the oemrev number */

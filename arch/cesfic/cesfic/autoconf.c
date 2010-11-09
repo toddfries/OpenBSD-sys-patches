@@ -1,4 +1,4 @@
-/*	$NetBSD: autoconf.c,v 1.19 2008/06/22 16:34:15 tsutsui Exp $	*/
+/*	$NetBSD: autoconf.c,v 1.15 2005/12/11 12:17:04 christos Exp $	*/
 
 /*
  * Copyright (c) 1997, 1999
@@ -27,12 +27,13 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.19 2008/06/22 16:34:15 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.15 2005/12/11 12:17:04 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/buf.h>
 #include <sys/conf.h>
+#include <sys/device.h>
 #include <sys/device.h>
 #include <sys/disklabel.h>
 #include <sys/malloc.h>
@@ -160,6 +161,8 @@ cpu_configure()
 
 	(void)spl0();
 	cold = 0;
+
+	isrprintlevels();
 }
 
 void

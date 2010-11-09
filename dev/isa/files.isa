@@ -1,4 +1,4 @@
-#	$NetBSD: files.isa,v 1.157 2008/04/03 22:46:22 xtraeme Exp $
+#	$NetBSD: files.isa,v 1.152 2007/09/12 11:45:39 xtraeme Exp $
 #
 # Config file and device description for machine-independent ISA code.
 # Included by ports that need it.  Requires that the SCSI files be
@@ -171,6 +171,10 @@ file	dev/isa/cec.c			cec
 # device declaration in sys/conf/files
 attach	we at isa with we_isa
 file	dev/isa/if_we_isa.c		we_isa
+
+# 3Com common probe code
+define	elink
+file	dev/isa/elink.c			elink
 
 # 3Com 3C503
 device	ec: ether, ifnet, arp, dp8390nic
@@ -396,11 +400,6 @@ device	ega: wsemuldisplaydev, pcdisplayops
 attach	ega at isa
 file	dev/isa/ega.c			ega			needs-flag
 
-# IDEC Supervision/16 image capture board
-device	isv
-attach	isv at isa with isv_isa
-file	dev/isa/isv.c			isv
-
 # generic PC graphics adapter (MGA, CGA, ...)
 device	pcdisplay: wsemuldisplaydev, pcdisplayops
 attach	pcdisplay at isa
@@ -452,7 +451,7 @@ file	dev/isa/attimer_isa.c		attimer_isa
 # Environmental monitors
 #
 
-# SMSC LPC47B397 Super I/O with hardware monitor
+# SMSC LPC47B397 temp/fanspeed monitor
 device	smsc: sysmon_envsys
 attach	smsc at isa with smsc
 file	dev/isa/smsc.c			smsc			needs-flag
@@ -461,15 +460,10 @@ file	dev/isa/smsc.c			smsc			needs-flag
 attach	lm at isa with lm_isa
 file	dev/isa/lm_isa.c		lm_isa
 
-# iTE Super I/O with hardware monitor
-device	itesio: sysmon_envsys, sysmon_wdog
-attach	itesio at isa with itesio
-file	dev/isa/itesio_isa.c		itesio
-
-# Fintek Super I/O with hardware monitor
-device	finsio: sysmon_envsys
-attach	finsio at isa with finsio
-file	dev/isa/finsio_isa.c 		finsio
+# IT8705F/8712F SIS950 hardware monitor
+device	it: sysmon_envsys
+attach	it at isa with it_isa
+file	dev/isa/it.c			it_isa
 
 # Abit uGuru hardware monitor
 attach	ug at isa with ug_isa

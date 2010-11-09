@@ -1,4 +1,4 @@
-/*	$NetBSD: wesc.c,v 1.38 2008/06/13 08:13:37 cegger Exp $ */
+/*	$NetBSD: wesc.c,v 1.35 2006/03/08 23:46:22 lukem Exp $ */
 
 /*
  * Copyright (c) 1982, 1990 The Regents of the University of California.
@@ -58,7 +58,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: wesc.c,v 1.38 2008/06/13 08:13:37 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: wesc.c,v 1.35 2006/03/08 23:46:22 lukem Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -120,7 +120,7 @@ wescattach(struct device *pdp, struct device *dp, void *auxp)
 
 	zap = auxp;
 
-	sc->sc_siopp = rp = (siop_regmap_p)((char *)zap->va + 0x40000);
+	sc->sc_siopp = rp = (siop_regmap_p)((caddr_t)zap->va + 0x40000);
 
 	/*
 	 * CTEST7 = SC0, TT1
@@ -193,13 +193,10 @@ void
 wesc_dump(void)
 {
 	extern struct cfdriver wesc_cd;
-	struct siop_softc *sc;
 	int i;
 
-	for (i = 0; i < wesc_cd.cd_ndevs; ++i) {
-		sc = device_lookup_private(&wesc_cd, i);
-		if (sc != NULL)
-			siop_dump(sc);
-	}
+	for (i = 0; i < wesc_cd.cd_ndevs; ++i)
+		if (wesc_cd.cd_devs[i])
+			siop_dump(wesc_cd.cd_devs[i]);
 }
 #endif

@@ -1,7 +1,7 @@
-/*	$NetBSD: nfs_export.c,v 1.44 2008/12/17 20:51:38 cegger Exp $	*/
+/*	$NetBSD: nfs_export.c,v 1.24 2007/01/04 20:24:08 elad Exp $	*/
 
 /*-
- * Copyright (c) 1997, 1998, 2004, 2005, 2008 The NetBSD Foundation, Inc.
+ * Copyright (c) 1997, 1998, 2004, 2005 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -20,6 +20,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -75,7 +82,10 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: nfs_export.c,v 1.44 2008/12/17 20:51:38 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: nfs_export.c,v 1.24 2007/01/04 20:24:08 elad Exp $");
+
+#include "opt_compat_netbsd.h"
+#include "opt_inet.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -123,6 +133,9 @@ struct netexport {
 CIRCLEQ_HEAD(, netexport) netexport_list =
     CIRCLEQ_HEAD_INITIALIZER(netexport_list);
 
+/* Malloc type used by the mount<->netexport map. */
+MALLOC_DEFINE(M_NFS_EXPORT, "nfs_export", "NFS export data");
+
 /* Publicly exported file system. */
 struct nfs_public nfs_pub;
 
@@ -145,8 +158,6 @@ static void netexport_insert(struct netexport *);
 static void netexport_remove(struct netexport *);
 static void netexport_wrlock(void);
 static void netexport_wrunlock(void);
-static int nfs_export_update_30(struct mount *mp, const char *path, void *);
-
 
 /*
  * PUBLIC INTERFACE
@@ -158,10 +169,9 @@ static int nfs_export_update_30(struct mount *mp, const char *path, void *);
 static void nfs_export_unmount(struct mount *);
 
 struct vfs_hooks nfs_export_hooks = {
-	{ NULL, NULL },
-	.vh_unmount = nfs_export_unmount,
-	.vh_reexport = nfs_export_update_30,
+	nfs_export_unmount
 };
+VFS_HOOKS_ATTACH(nfs_export_hooks);
 
 /*
  * VFS unmount hook for NFS exports.
@@ -186,7 +196,7 @@ nfs_export_unmount(struct mount *mp)
 	netexport_clear(ne);
 	netexport_remove(ne);
 	netexport_wrunlock();
-	kmem_free(ne, sizeof(*ne));
+	free(ne, M_NFS_EXPORT);
 }
 
 /*
@@ -210,44 +220,45 @@ mountd_set_exports_list(const struct mountd_exports_list *mel, struct lwp *l)
 	struct netexport *ne;
 	struct nameidata nd;
 	struct vnode *vp;
+	struct fid *fid;
 	size_t fid_size;
 
-	if (kauth_authorize_network(l->l_cred, KAUTH_NETWORK_NFS,
-	    KAUTH_REQ_NETWORK_NFS_EXPORT, NULL, NULL, NULL) != 0)
+	if (kauth_authorize_generic(l->l_cred, KAUTH_GENERIC_ISSUSER,
+	    NULL) != 0)
 		return EPERM;
 
 	/* Lookup the file system path. */
-	NDINIT(&nd, LOOKUP, FOLLOW | LOCKLEAF, UIO_USERSPACE, mel->mel_path);
+	NDINIT(&nd, LOOKUP, FOLLOW | LOCKLEAF, UIO_USERSPACE, mel->mel_path, l);
 	error = namei(&nd);
 	if (error != 0)
 		return error;
 	vp = nd.ni_vp;
 	mp = vp->v_mount;
 
-	/*
-	 * Make sure the file system can do vptofh.  If the file system
-	 * knows the handle's size, just trust it's able to do the
-	 * actual translation also (otherwise we should check fhtovp
-	 * also, and that's getting a wee bit ridiculous).
-	 */
 	fid_size = 0;
-	if ((error = VFS_VPTOFH(vp, NULL, &fid_size)) != E2BIG) {
-		vput(vp);
-		return EOPNOTSUPP;
+	if ((error = VFS_VPTOFH(vp, NULL, &fid_size)) == E2BIG) {
+		fid = malloc(fid_size, M_TEMP, M_NOWAIT);
+		if (fid != NULL) {
+			error = VFS_VPTOFH(vp, fid, &fid_size);
+			free(fid, M_TEMP);
+		}
+	}
+	if (error != 0) {
+		error = EOPNOTSUPP;
+		goto out_locked;
 	}
 
 	/* Mark the file system busy. */
-	error = vfs_busy(mp, NULL);
-	vput(vp);
+	error = vfs_busy(mp, LK_NOWAIT, NULL);
 	if (error != 0)
-		return error;
+		goto out_locked;
 
 	netexport_wrlock();
 	ne = netexport_lookup(mp);
 	if (ne == NULL) {
 		error = init_exports(mp, &ne);
 		if (error != 0) {
-			goto out;
+			goto out_locked2;
 		}
 	}
 
@@ -280,9 +291,12 @@ mountd_set_exports_list(const struct mountd_exports_list *mel, struct lwp *l)
 	}
 #endif
 
-out:
+out_locked2:
 	netexport_wrunlock();
-	vfs_unbusy(mp, false, NULL);
+	vfs_unbusy(mp);
+
+out_locked:
+	vput(vp);
 	return error;
 }
 
@@ -369,6 +383,7 @@ netexport_check(const fsid_t *fsid, struct mbuf *mb, struct mount **mpp,
 	return 0;
 }
 
+#ifdef COMPAT_30
 /*
  * Handles legacy export requests.  In this case, the export information
  * is hardcoded in a specific place of the mount arguments structure (given
@@ -378,43 +393,57 @@ netexport_check(const fsid_t *fsid, struct mbuf *mb, struct mount **mpp,
  * Returns EJUSTRETURN if the given command was not a export request.
  * Otherwise, returns 0 on success or an appropriate error code otherwise.
  */
-static int
-nfs_export_update_30(struct mount *mp, const char *path, void *data)
+int
+nfs_update_exports_30(struct mount *mp, const char *path, void *data,
+    struct lwp *l)
 {
+	int error;
+	struct {
+		const char *fspec;
+		struct export_args30 eargs;
+	} args;
 	struct mountd_exports_list mel;
-	struct mnt_export_args30 *args;
 
-	args = data;
 	mel.mel_path = path;
 
-	if (args->fspec != NULL)
+	error = copyin(data, &args, sizeof(args));
+	if (error != 0)
 		return EJUSTRETURN;
 
-	if (args->eargs.ex_flags & 0x00020000) {
+	if (args.fspec != NULL)
+		return EJUSTRETURN;
+
+	if (args.eargs.ex_flags & 0x00020000) {
 		/* Request to delete exports.  The mask above holds the
 		 * value that used to be in MNT_DELEXPORT. */
 		mel.mel_nexports = 0;
 	} else {
+		struct export_args eargs;
+
 		/* The following assumes export_args has not changed since
-		 * export_args30 - typedef checks sizes. */
-		typedef char x[sizeof args->eargs == sizeof *mel.mel_exports ? 1 : -1];
+		 * export_args30. */
+		memcpy(&eargs, &args.eargs, sizeof(struct export_args));
 
 		mel.mel_nexports = 1;
-		mel.mel_exports = (void *)&args->eargs;
+		mel.mel_exports = &eargs;
 	}
 
-	return mountd_set_exports_list(&mel, curlwp);
+	return mountd_set_exports_list(&mel, l);
 }
+#endif
 
 /*
  * INTERNAL FUNCTIONS
  */
 
 /*
- * Initializes NFS exports for the mountpoint given in 'mp'.
- * If successful, returns 0 and sets *nep to the address of the new
- * netexport item; otherwise returns an appropriate error code
- * and *nep remains unmodified.
+ * Initializes NFS exports for the file system given in 'mp' if it supports
+ * file handles; this is determined by checking whether mp's vfs_vptofh and
+ * vfs_fhtovp operations are NULL or not.
+ *
+ * If successful, returns 0 and sets *mnpp to the address of the new
+ * mount_netexport_pair item; otherwise returns an appropriate error code
+ * and *mnpp remains unmodified.
  */
 static int
 init_exports(struct mount *mp, struct netexport **nep)
@@ -428,7 +457,7 @@ init_exports(struct mount *mp, struct netexport **nep)
 	/* Ensure that we do not already have this mount point. */
 	KASSERT(netexport_lookup(mp) == NULL);
 
-	ne = kmem_zalloc(sizeof(*ne), KM_SLEEP);
+	ne = malloc(sizeof(*ne), M_NFS_EXPORT, M_WAITOK | M_ZERO);
 	ne->ne_mount = mp;
 
 	/* Set the default export entry.  Handled internally by export upon
@@ -439,7 +468,7 @@ init_exports(struct mount *mp, struct netexport **nep)
 		ea.ex_flags |= MNT_EXRDONLY;
 	error = export(ne, &ea);
 	if (error != 0) {
-		kmem_free(ne, sizeof(*ne));
+		free(ne, M_NFS_EXPORT);
 	} else {
 		netexport_insert(ne);
 		*nep = ne;
@@ -492,7 +521,7 @@ hang_addrlist(struct mount *mp, struct netexport *nep,
 	if (sacheck(saddr) == -1)
 		return EINVAL;
 	if (argp->ex_masklen) {
-		smask = (struct sockaddr *)((char *)saddr + argp->ex_addrlen);
+		smask = (struct sockaddr *)((caddr_t)saddr + argp->ex_addrlen);
 		error = copyin(argp->ex_mask, smask, argp->ex_masklen);
 		if (error)
 			goto out;
@@ -564,6 +593,7 @@ sacheck(struct sockaddr *sa)
 {
 
 	switch (sa->sa_family) {
+#ifdef INET
 	case AF_INET: {
 		struct sockaddr_in *sin = (struct sockaddr_in *)sa;
 		char *p = (char *)sin->sin_zero;
@@ -578,6 +608,8 @@ sacheck(struct sockaddr *sa)
 				return -1;
 		return 0;
 	}
+#endif
+#ifdef INET6
 	case AF_INET6: {
 		struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)sa;
 
@@ -587,6 +619,7 @@ sacheck(struct sockaddr *sa)
 			return -1;
 		return 0;
 	}
+#endif
 	default:
 		return -1;
 	}
@@ -628,7 +661,7 @@ netexport_clear(struct netexport *ne)
 
 	for (i = 0; i <= AF_MAX; i++) {
 		if ((rnh = ne->ne_rtable[i]) != NULL) {
-			rn_walktree(rnh, free_netcred, rnh);
+			(*rnh->rnh_walktree)(rnh, free_netcred, rnh);
 			free(rnh, M_RTABLE);
 			ne->ne_rtable[i] = NULL;
 		}
@@ -696,7 +729,7 @@ setpublicfs(struct mount *mp, struct netexport *nep,
 				nfs_pub.np_handle = NULL;
 			}
 			if (nfs_pub.np_index != NULL) {
-				free(nfs_pub.np_index, M_TEMP);
+				FREE(nfs_pub.np_index, M_TEMP);
 				nfs_pub.np_index = NULL;
 			}
 		}
@@ -733,7 +766,8 @@ setpublicfs(struct mount *mp, struct netexport *nep,
 	 * If an indexfile was specified, pull it in.
 	 */
 	if (argp->ex_indexfile != NULL) {
-		nfs_pub.np_index = malloc(MAXNAMLEN + 1, M_TEMP, M_WAITOK);
+		MALLOC(nfs_pub.np_index, char *, MAXNAMLEN + 1, M_TEMP,
+		    M_WAITOK);
 		error = copyinstr(argp->ex_indexfile, nfs_pub.np_index,
 		    MAXNAMLEN, (size_t *)0);
 		if (!error) {
@@ -748,7 +782,7 @@ setpublicfs(struct mount *mp, struct netexport *nep,
 			}
 		}
 		if (error) {
-			free(nfs_pub.np_index, M_TEMP);
+			FREE(nfs_pub.np_index, M_TEMP);
 			return error;
 		}
 	}
@@ -783,7 +817,7 @@ netcred_lookup(struct netexport *ne, struct mbuf *nam)
 		rnh = ne->ne_rtable[saddr->sa_family];
 		if (rnh != NULL) {
 			np = (struct netcred *)
-				(*rnh->rnh_matchaddr)((void *)saddr,
+				(*rnh->rnh_matchaddr)((caddr_t)saddr,
 						      rnh);
 			if (np && np->netc_rnodes->rn_flags & RNF_ROOT)
 				np = NULL;
@@ -798,32 +832,32 @@ netcred_lookup(struct netexport *ne, struct mbuf *nam)
 	return np;
 }
 
-krwlock_t netexport_lock;
+static struct lock netexport_lock = LOCK_INITIALIZER(PVFS, "netexp", 0, 0);
 
 void
 netexport_rdlock(void)
 {
 
-	rw_enter(&netexport_lock, RW_READER);
+	lockmgr(&netexport_lock, LK_SHARED, NULL);
 }
 
 void
 netexport_rdunlock(void)
 {
 
-	rw_exit(&netexport_lock);
+	lockmgr(&netexport_lock, LK_RELEASE, NULL);
 }
 
 static void
 netexport_wrlock(void)
 {
 
-	rw_enter(&netexport_lock, RW_WRITER);
+	lockmgr(&netexport_lock, LK_EXCLUSIVE, NULL);
 }
 
 static void
 netexport_wrunlock(void)
 {
 
-	rw_exit(&netexport_lock);
+	lockmgr(&netexport_lock, LK_RELEASE, NULL);
 }

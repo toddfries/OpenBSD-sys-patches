@@ -1,4 +1,4 @@
-/*	$NetBSD: ansi.h,v 1.23 2009/01/11 02:45:45 christos Exp $	*/
+/*	$NetBSD: ansi.h,v 1.19 2006/10/04 13:52:00 tnozaki Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993
@@ -31,8 +31,8 @@
  *	@(#)ansi.h	8.2 (Berkeley) 1/4/94
  */
 
-#ifndef	_I386_ANSI_H_
-#define	_I386_ANSI_H_
+#ifndef	_ANSI_H_
+#define	_ANSI_H_
 
 #include <sys/cdefs.h>
 
@@ -51,7 +51,7 @@
 #define	_BSD_PTRDIFF_T_		int		/* ptr1 - ptr2 */
 #define	_BSD_SIZE_T_		unsigned int	/* sizeof() */
 #define	_BSD_SSIZE_T_		int		/* byte count or error */
-#define	_BSD_TIME_T_		__int64_t	/* time() */
+#define	_BSD_TIME_T_		long		/* time() */
 #if __GNUC_PREREQ__(2, 96)
 #define	_BSD_VA_LIST_		__builtin_va_list /* GCC built-in type */
 #else
@@ -61,8 +61,27 @@
 #define	_BSD_TIMER_T_		int		/* timer_t */
 #define	_BSD_SUSECONDS_T_	int		/* suseconds_t */
 #define	_BSD_USECONDS_T_	unsigned int	/* useconds_t */
+
+/*
+ * NOTE: rune_t is not covered by ANSI nor other standards, and should not
+ * be instantiated outside of lib/libc/locale.  use wchar_t.
+ *
+ * Runes (wchar_t) is declared to be an ``int'' instead of the more natural
+ * ``unsigned long'' or ``long''.  Two things are happening here.  It is not
+ * unsigned so that EOF (-1) can be naturally assigned to it and used.  Also,
+ * it looks like 10646 will be a 31 bit standard.  This means that if your
+ * ints cannot hold 32 bits, you will be in trouble.  The reason an int was
+ * chosen over a long is that the is*() and to*() routines take ints (says
+ * ANSI C), but they use _RUNE_T_ instead of int.  By changing it here, you
+ * lose a bit of ANSI conformance, but your programs will still work.
+ *    
+ * Note that _WCHAR_T_ and _RUNE_T_ must be of the same type.  When wchar_t
+ * and rune_t are typedef'd, _WCHAR_T_ will be undef'd, but _RUNE_T remains
+ * defined for ctype.h.
+ */
 #define	_BSD_WCHAR_T_		int		/* wchar_t */
 #define	_BSD_WINT_T_		int		/* wint_t */
+#define	_BSD_RUNE_T_		int		/* rune_t */
 #define _BSD_WCTRANS_T_		void *		/* wctrans_t */
 #define _BSD_WCTYPE_T_		void *		/* wctype_t */
 
@@ -76,4 +95,4 @@ typedef union {
 } __mbstate_t;
 #define	_BSD_MBSTATE_T_		__mbstate_t	/* mbstate_t */
 
-#endif	/* _I386_ANSI_H_ */
+#endif	/* _ANSI_H_ */

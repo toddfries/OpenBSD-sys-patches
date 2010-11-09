@@ -1,4 +1,4 @@
-/*	$NetBSD: gio.c,v 1.30 2009/02/10 06:11:49 rumble Exp $	*/
+/*	$NetBSD: gio.c,v 1.26 2006/12/29 05:26:30 rumble Exp $	*/
 
 /*
  * Copyright (c) 2000 Soren S. Jorvang
@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: gio.c,v 1.30 2009/02/10 06:11:49 rumble Exp $");
+__KERNEL_RCSID(0, "$NetBSD: gio.c,v 1.26 2006/12/29 05:26:30 rumble Exp $");
 
 #include "opt_ddb.h"
 
@@ -176,11 +176,8 @@ static const struct gio_probe gfx_bases[] = {
 static int
 gio_match(struct device *parent, struct cfdata *match, void *aux)
 {
-	if (mach_type == MACH_SGI_IP12 || mach_type == MACH_SGI_IP20 ||
-	    mach_type == MACH_SGI_IP22)
-		return 1;
-	
-	return 0;
+
+	return 1;
 }
 
 static void
@@ -237,7 +234,7 @@ gio_attach(struct device *parent, struct device *self, void *aux)
 	 * already been attached.
 	 */
 	for (i = 0; slot_bases[i].base != 0; i++) {
-		bool skip = false;
+		boolean_t skip = FALSE;
 
 		/* skip slots that don't apply to us */
 		if (slot_bases[i].mach_type != mach_type)
@@ -249,7 +246,7 @@ gio_attach(struct device *parent, struct device *self, void *aux)
 
 		for (j = 0; j < ngfx; j++) {
 			if (slot_bases[i].base == gfx[j]) {
-				skip = true;
+				skip = TRUE;
 				break;
 			}
 		}
@@ -415,15 +412,12 @@ gio_arb_config(int slot, uint32_t flags)
 		return (EINVAL);
 
 	if (flags & ~(GIO_ARB_RT | GIO_ARB_LB | GIO_ARB_MST | GIO_ARB_SLV |
-	    GIO_ARB_PIPE | GIO_ARB_NOPIPE | GIO_ARB_32BIT | GIO_ARB_64BIT |
-	    GIO_ARB_HPC2_32BIT | GIO_ARB_HPC2_64BIT))
+	    GIO_ARB_PIPE | GIO_ARB_NOPIPE))
 		return (EINVAL);
 
 	if (((flags & GIO_ARB_RT)   && (flags & GIO_ARB_LB))  ||
 	    ((flags & GIO_ARB_MST)  && (flags & GIO_ARB_SLV)) ||
-	    ((flags & GIO_ARB_PIPE) && (flags & GIO_ARB_NOPIPE)) ||
-	    ((flags & GIO_ARB_32BIT) && (flags & GIO_ARB_64BIT)) ||
-	    ((flags & GIO_ARB_HPC2_32BIT) && (flags & GIO_ARB_HPC2_64BIT)))
+	    ((flags & GIO_ARB_PIPE) && (flags & GIO_ARB_NOPIPE)))
 		return (EINVAL);
 
 #if (NPIC > 0)

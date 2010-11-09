@@ -1,4 +1,4 @@
-/* $NetBSD: gpio.c,v 1.17 2008/05/01 22:00:44 cegger Exp $ */
+/* $NetBSD: gpio.c,v 1.12 2007/03/04 06:01:46 christos Exp $ */
 /*	$OpenBSD: gpio.c,v 1.6 2006/01/14 12:33:49 grange Exp $	*/
 
 /*
@@ -18,7 +18,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: gpio.c,v 1.17 2008/05/01 22:00:44 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: gpio.c,v 1.12 2007/03/04 06:01:46 christos Exp $");
 
 /*
  * General Purpose Input/Output framework.
@@ -37,7 +37,7 @@ __KERNEL_RCSID(0, "$NetBSD: gpio.c,v 1.17 2008/05/01 22:00:44 cegger Exp $");
 #include "locators.h"
 
 struct gpio_softc {
-	device_t sc_dev;
+	struct device sc_dev;
 
 	gpio_chipset_tag_t sc_gc;	/* our GPIO controller */
 	gpio_pin_t *sc_pins;		/* pins array */
@@ -47,15 +47,14 @@ struct gpio_softc {
 	int sc_dying;
 };
 
-int	gpio_match(device_t, cfdata_t, void *);
-void	gpio_attach(device_t, device_t, void *);
-bool	gpio_resume(device_t PMF_FN_PROTO);
-int	gpio_detach(device_t, int);
-int	gpio_activate(device_t, enum devact);
-int	gpio_search(device_t, cfdata_t, const int *, void *);
+int	gpio_match(struct device *, struct cfdata *, void *);
+void	gpio_attach(struct device *, struct device *, void *);
+int	gpio_detach(struct device *, int);
+int	gpio_activate(struct device *, enum devact);
+int	gpio_search(struct device *, struct cfdata *, const int *, void *);
 int	gpio_print(void *, const char *);
 
-CFATTACH_DECL_NEW(gpio, sizeof(struct gpio_softc),
+CFATTACH_DECL(gpio, sizeof(struct gpio_softc),
     gpio_match, gpio_attach, gpio_detach, gpio_activate);
 
 dev_type_open(gpioopen);
@@ -70,40 +69,24 @@ const struct cdevsw gpio_cdevsw = {
 extern struct cfdriver gpio_cd;
 
 int
-gpio_match(device_t parent, cfdata_t cf, void *aux)
+gpio_match(struct device *parent, struct cfdata *cf,
+    void *aux)
 {
 
 	return (1);
 }
 
-bool
-gpio_resume(device_t self PMF_FN_ARGS)
-{
-	struct gpio_softc *sc = device_private(self);
-	int pin;
-
-	for (pin = 0; pin < sc->sc_npins; pin++) {
-		gpiobus_pin_ctl(sc->sc_gc, pin, sc->sc_pins[pin].pin_flags);
-		gpiobus_pin_write(sc->sc_gc, pin, sc->sc_pins[pin].pin_state);
-	}
-	return true;
-}
-
 void
-gpio_attach(device_t parent, device_t self, void *aux)
+gpio_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct gpio_softc *sc = device_private(self);
 	struct gpiobus_attach_args *gba = aux;
 
-	sc->sc_dev = self;
 	sc->sc_gc = gba->gba_gc;
 	sc->sc_pins = gba->gba_pins;
 	sc->sc_npins = gba->gba_npins;
 
 	printf(": %d pins\n", sc->sc_npins);
-
-	if (!pmf_device_register(self, NULL, gpio_resume))
-		aprint_error_dev(self, "couldn't establish power handler\n");
 
 	/*
 	 * Attach all devices that can be connected to the GPIO pins
@@ -113,7 +96,7 @@ gpio_attach(device_t parent, device_t self, void *aux)
 }
 
 int
-gpio_detach(device_t self, int flags)
+gpio_detach(struct device *self, int flags)
 {
 #if 0
 	int maj, mn;
@@ -132,7 +115,7 @@ gpio_detach(device_t self, int flags)
 }
 
 int
-gpio_activate(device_t self, enum devact act)
+gpio_activate(struct device *self, enum devact act)
 {
 	struct gpio_softc *sc = device_private(self);
 
@@ -148,7 +131,7 @@ gpio_activate(device_t self, enum devact act)
 }
 
 int
-gpio_search(device_t parent, cfdata_t cf,
+gpio_search(struct device *parent, struct cfdata *cf,
     const int *ldesc, void *aux)
 {
 	struct gpio_attach_args ga;
@@ -239,8 +222,7 @@ gpio_pin_write(void *gpio, struct gpio_pinmap *map, int pin, int value)
 {
 	struct gpio_softc *sc = gpio;
 
-	gpiobus_pin_write(sc->sc_gc, map->pm_map[pin], value);
-	sc->sc_pins[map->pm_map[pin]].pin_state = value;
+	return (gpiobus_pin_write(sc->sc_gc, map->pm_map[pin], value));
 }
 
 void
@@ -276,18 +258,13 @@ gpioopen(dev_t dev, int flag, int mode,
     struct lwp *l)
 {
 	struct gpio_softc *sc;
-	int ret;
 
-	sc = device_lookup_private(&gpio_cd, minor(dev));
+	sc = (struct gpio_softc *)device_lookup(&gpio_cd, minor(dev));
 	if (sc == NULL)
 		return (ENXIO);
 
 	if (sc->sc_opened)
 		return (EBUSY);
-
-	if ((ret = gpiobus_open(sc->sc_gc, sc->sc_dev)))
-		return ret;
-
 	sc->sc_opened = 1;
 
 	return (0);
@@ -299,8 +276,7 @@ gpioclose(dev_t dev, int flag, int mode,
 {
 	struct gpio_softc *sc;
 
-	sc = device_lookup_private(&gpio_cd, minor(dev));
-	gpiobus_close(sc->sc_gc, sc->sc_dev);
+	sc = (struct gpio_softc *)device_lookup(&gpio_cd, minor(dev));
 	sc->sc_opened = 0;
 
 	return (0);
@@ -317,11 +293,8 @@ gpioioctl(dev_t dev, u_long cmd, void *data, int flag,
 	struct gpio_pin_ctl *ctl;
 	int pin, value, flags;
 
-	sc = device_lookup_private(&gpio_cd, minor(dev));
+	sc = (struct gpio_softc *)device_lookup(&gpio_cd, minor(dev));
 	gc = sc->sc_gc;
-
-	if (cmd != GPIOINFO && !device_is_active(sc->sc_dev))
-		return EBUSY;
 
 	switch (cmd) {
 	case GPIOINFO:

@@ -1,4 +1,4 @@
-/*	$NetBSD: sb_isapnp.c,v 1.52 2008/03/15 21:09:02 cube Exp $	*/
+/*	$NetBSD: sb_isapnp.c,v 1.51 2007/10/19 12:00:33 ad Exp $	*/
 
 /*
  * Copyright (c) 1991-1993 Regents of the University of California.
@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sb_isapnp.c,v 1.52 2008/03/15 21:09:02 cube Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sb_isapnp.c,v 1.51 2007/10/19 12:00:33 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -63,10 +63,10 @@ __KERNEL_RCSID(0, "$NetBSD: sb_isapnp.c,v 1.52 2008/03/15 21:09:02 cube Exp $");
 #include <dev/isa/sbvar.h>
 #include <dev/isa/sbdspvar.h>
 
-int	sb_isapnp_match(device_t, cfdata_t, void *);
-void	sb_isapnp_attach(device_t, device_t, void *);
+int	sb_isapnp_match(struct device *, struct cfdata *, void *);
+void	sb_isapnp_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(sb_isapnp, sizeof(struct sbdsp_softc),
+CFATTACH_DECL(sb_isapnp, sizeof(struct sbdsp_softc),
     sb_isapnp_match, sb_isapnp_attach, NULL, NULL);
 
 /*
@@ -77,7 +77,8 @@ CFATTACH_DECL_NEW(sb_isapnp, sizeof(struct sbdsp_softc),
  * Probe for the soundblaster hardware.
  */
 int
-sb_isapnp_match(device_t parent, cfdata_t match, void *aux)
+sb_isapnp_match(struct device *parent, struct cfdata *match,
+    void *aux)
 {
 	int pri, variant;
 
@@ -92,15 +93,14 @@ sb_isapnp_match(device_t parent, cfdata_t match, void *aux)
  * pseudo-device driver.
  */
 void
-sb_isapnp_attach(device_t parent, device_t self, void *aux)
+sb_isapnp_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct sbdsp_softc *sc;
 	struct isapnp_attach_args *ipa;
 
 	sc = device_private(self);
-	sc->sc_dev = self;
 	ipa = aux;
-	aprint_normal("\n");
+	printf("\n");
 
 	/*
 	 * Avance logic ALS100+ does not like being frobbed
@@ -110,7 +110,8 @@ sb_isapnp_attach(device_t parent, device_t self, void *aux)
 		sc->sc_quirks = SB_QUIRK_NO_INIT_DRQ;
 
 	if (isapnp_config(ipa->ipa_iot, ipa->ipa_memt, ipa)) {
-		aprint_error_dev(self, "error in region allocation\n");
+		printf("%s: error in region allocation\n",
+		       sc->sc_dev.dv_xname);
 		return;
 	}
 
@@ -154,15 +155,16 @@ sb_isapnp_attach(device_t parent, device_t self, void *aux)
 	}
 #endif
 
-	if (!sbmatch(sc, 0, device_cfdata(self))) {
-		aprint_error_dev(self, "sbmatch failed\n");
+	if (!sbmatch(sc)) {
+		printf("%s: sbmatch failed\n", sc->sc_dev.dv_xname);
 		return;
 	}
 
 	sc->sc_ih = isa_intr_establish(ipa->ipa_ic, ipa->ipa_irq[0].num,
 	    ipa->ipa_irq[0].type, IPL_AUDIO, sbdsp_intr, sc);
 
-	aprint_normal_dev(self, "%s %s", ipa->ipa_devident, ipa->ipa_devclass);
+	printf("%s: %s %s", sc->sc_dev.dv_xname, ipa->ipa_devident,
+	       ipa->ipa_devclass);
 
 	sbattach(sc);
 }

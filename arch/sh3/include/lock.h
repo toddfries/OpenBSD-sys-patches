@@ -1,4 +1,4 @@
-/*	$NetBSD: lock.h,v 1.15 2008/04/28 20:23:35 martin Exp $	*/
+/*	$NetBSD: lock.h,v 1.10 2006/01/03 01:29:46 uwe Exp $	*/
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -45,30 +52,6 @@ static __inline int __cpu_simple_lock_try(__cpu_simple_lock_t *)
 static __inline void __cpu_simple_unlock(__cpu_simple_lock_t *)
 	__attribute__((__unused__));
 
-static __inline int
-__SIMPLELOCK_LOCKED_P(__cpu_simple_lock_t *__ptr)
-{
-	return *__ptr == __SIMPLELOCK_LOCKED;
-}
-
-static __inline int
-__SIMPLELOCK_UNLOCKED_P(__cpu_simple_lock_t *__ptr)
-{
-	return *__ptr == __SIMPLELOCK_UNLOCKED;
-}
-
-static __inline void
-__cpu_simple_lock_clear(__cpu_simple_lock_t *__ptr)
-{
-	*__ptr = __SIMPLELOCK_UNLOCKED;
-}
-
-static __inline void
-__cpu_simple_lock_set(__cpu_simple_lock_t *__ptr)
-{
-	*__ptr = __SIMPLELOCK_LOCKED;
-}
-
 static __inline void
 __cpu_simple_lock_init(__cpu_simple_lock_t *alp)
 {
@@ -83,9 +66,7 @@ __cpu_simple_lock(__cpu_simple_lock_t *alp)
 	 __asm volatile(
 		"1:	tas.b	%0	\n"
 		"	bf	1b	\n"
-		: "=m" (*alp)
-		: /* no inputs */
-		: "cc");
+		: "=m" (*alp));
 }
 
 static __inline int
@@ -95,10 +76,9 @@ __cpu_simple_lock_try(__cpu_simple_lock_t *alp)
 
 	__asm volatile(
 		"	tas.b	%0	\n"
-		"	movt	%1	\n"
-		: "=m" (*alp), "=r" (__rv)
-		: /* no inputs */
-		: "cc");
+		"	mov	#0, %1	\n"
+		"	rotcl	%1	\n"
+		: "=m" (*alp), "=r" (__rv));
 
 	return (__rv);
 }
@@ -108,24 +88,6 @@ __cpu_simple_unlock(__cpu_simple_lock_t *alp)
 {
 
 	*alp = __SIMPLELOCK_UNLOCKED;
-}
-
-static __inline void
-mb_read(void)
-{
-	__asm volatile("" : : : "memory");
-}
-
-static __inline void
-mb_write(void)
-{
-	__asm volatile("" : : : "memory");
-}
-
-static __inline void
-mb_memory(void)
-{
-	__asm volatile("" : : : "memory");
 }
 
 #endif /* !_SH3_LOCK_H_ */

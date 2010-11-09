@@ -1,4 +1,4 @@
-#	$NetBSD: files.hpcarm,v 1.64 2008/04/27 18:58:47 matt Exp $
+#	$NetBSD: files.hpcarm,v 1.60 2006/10/07 14:27:54 peter Exp $
 #
 # hpcarm specific configuration info
 #
@@ -19,10 +19,9 @@ file	dev/md_root.c				memory_disk_hooks
 
 # Generic MD files
 file	arch/hpcarm/hpcarm/autoconf.c
-#file	arch/hpcarm/hpcarm/intr.c
+file	arch/hpcarm/hpcarm/intr.c
+file	arch/hpcarm/hpcarm/softintr.c
 file	arch/hpcarm/hpcarm/spl.S
-file	arch/arm/arm32/intr.c
-file	arch/arm/arm32/spl.S
 
 # HPCARM specific files
 file	arch/hpcarm/hpcarm/hpc_machdep.c
@@ -45,12 +44,6 @@ file	arch/hpcarm/dev/ipaq_saip.c		ipaqbus
 device	ipaqpcic: pcmciabus
 attach	ipaqpcic at ipaqbus
 file	arch/hpcarm/dev/ipaq_pcic.c		ipaqpcic needs-flag
-
-# PCMCIA
-include "dev/pcmcia/files.pcmcia"
-
-# XXX this is a hack to use dev/pcmcia without fdc.c
-device fdc
 
 #
 # H/PC Platform common files.
@@ -122,11 +115,5 @@ include "dev/ata/files.ata"
 
 # Machine-independent SCSI/ATAPI drivers
 include "dev/scsipi/files.scsipi"
-
-# USB
-include "dev/usb/files.usb"
-
-# Bluetooth
-include "dev/bluetooth/files.bluetooth"
 
 include "arch/hpcarm/conf/majors.hpcarm"

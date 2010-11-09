@@ -1,4 +1,4 @@
-/*	$NetBSD: disklabel.h,v 1.8 2008/10/28 02:19:27 mrg Exp $	*/
+/*	$NetBSD: disklabel.h,v 1.6 2005/12/11 12:16:25 christos Exp $	*/
 
 /*
  * Copyright (c) 1994 Christopher G. Demetriou
@@ -30,10 +30,8 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _X86_64_DISKLABEL_H_
-#define _X86_64_DISKLABEL_H_
-
-#if defined(__x86_64__) || defined(HAVE_NBTOOL_CONFIG_H)
+#ifndef _MACHINE_DISKLABEL_H_
+#define _MACHINE_DISKLABEL_H_
 
 #define	LABELSECTOR		1	/* sector containing label */
 #define	LABELOFFSET		0	/* offset of label in sector */
@@ -63,10 +61,4 @@ struct cpu_disklabel {
 };
 #endif
 
-#else	/*	__x86_64__	*/
-
-#include <i386/disklabel.h>
-
-#endif	/*	__x86_64__	*/
-
-#endif /* _X86_64_DISKLABEL_H_ */
+#endif /* _MACHINE_DISKLABEL_H_ */

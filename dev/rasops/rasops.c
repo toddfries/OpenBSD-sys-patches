@@ -1,4 +1,4 @@
-/*	 $NetBSD: rasops.c,v 1.58 2008/04/28 20:23:56 martin Exp $	*/
+/*	 $NetBSD: rasops.c,v 1.56 2007/07/28 20:28:57 mjf Exp $	*/
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: rasops.c,v 1.58 2008/04/28 20:23:56 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: rasops.c,v 1.56 2007/07/28 20:28:57 mjf Exp $");
 
 #include "opt_rasops.h"
 #include "rasops_glue.h"
@@ -938,10 +945,8 @@ rasops_do_cursor(ri)
 				*(int32_t *)dp ^= ~0;
 				dp += 4;
 				if (ri->ri_hwbits) {
-					dp -= 4;
-					*(int32_t *)hp = *(int32_t *)dp;
+					*(int32_t *)hp ^= ~0;
 					hp += 4;
-					dp += 4;
 				}
 			}
 		}
@@ -957,19 +962,16 @@ rasops_do_cursor(ri)
 
 			if (slop1 & 1) {
 				*dp++ ^= ~0;
-				if (ri->ri_hwbits) {
-					*hp++ = *(dp - 1);
-				}
+				if (ri->ri_hwbits)
+					*hp++ ^= ~0;
 			}
 
 			if (slop1 & 2) {
 				*(int16_t *)dp ^= ~0;
 				dp += 2;
 				if (ri->ri_hwbits) {
-					dp -= 2;
-					*(int16_t *)hp = *(int16_t *)dp;
+					*(int16_t *)hp ^= ~0;
 					hp += 2;
-					dp += 2;
 				}
 			}
 
@@ -977,23 +979,21 @@ rasops_do_cursor(ri)
 				*(int32_t *)dp ^= ~0;
 				dp += 4;
 				if (ri->ri_hwbits) {
-					dp -= 4;
-					*(int32_t *)hp = *(int32_t *)dp;
+					*(int32_t *)hp ^= ~0;
 					hp += 4;
-					dp += 4;
 				}
 			}
 
 			if (slop2 & 1) {
 				*dp++ ^= ~0;
 				if (ri->ri_hwbits)
-					*hp++ = *(dp - 1);
+					*hp++ ^= ~0;
 			}
 
 			if (slop2 & 2) {
 				*(int16_t *)dp ^= ~0;
 				if (ri->ri_hwbits)
-					*(int16_t *)hp = *(int16_t *)(dp - 2);
+					*(int16_t *)hp ^= ~0;
 			}
 		}
 	}

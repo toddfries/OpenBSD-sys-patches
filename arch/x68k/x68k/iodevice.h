@@ -1,4 +1,4 @@
-/*	$NetBSD: iodevice.h,v 1.17 2009/01/17 09:20:46 isaki Exp $	*/
+/*	$NetBSD: iodevice.h,v 1.9 2005/12/11 12:19:45 christos Exp $	*/
 
 /*
  * Copyright (c) 1993, 1994, 1995 Masaru Oki
@@ -59,7 +59,7 @@ struct dmac {
 			unsigned char csr;
 			unsigned char cer;
 	char pad0[2];	unsigned char dcr;
-			unsigned char ocr;
+  			unsigned char ocr;
 			unsigned char scr;
 			unsigned char ccr;
 	char pad1[2];	unsigned short mtc;
@@ -298,6 +298,8 @@ struct midi {
 	char pad7; unsigned char rn7;
 };
 
+#define PHYS_IODEV 0x00C00000
+
 struct IODEVICE
 {
 	unsigned short gvram[0x100000]; /* 0x00c00000 */
@@ -354,6 +356,26 @@ struct IODEVICE
 	char inscsirom[0x2000];		/* 0x00fc0000 */
 };
 
-#if defined(_KERNEL) && !defined(LOCORE)
+#ifdef _KERNEL
+#ifndef LOCORE
 extern volatile struct IODEVICE *IODEVbase;
+#endif
+
+#define mfp     (IODEVbase->io_mfp)
+#define	printer	(IODEVbase->io_printer)
+#define sysport (IODEVbase->io_sysport)
+#define OPM     (IODEVbase->io_opm)
+#define adpcm   (IODEVbase->io_adpcm)
+#define PPI	(IODEVbase->io_joyport)
+#define	ioctlr	(IODEVbase->io_ctlr)
+#endif
+
+#if 0
+/* 
+ * devices that need to configure before console use this
+ * *and know it* (i.e. everything is really tight certain params won't be 
+ * passed in some cases and the devices will deal with it)
+ */
+#include <sys/device.h>
+int x68k_config_found(struct cfdata *, struct device *, void *, cfprint_t);
 #endif

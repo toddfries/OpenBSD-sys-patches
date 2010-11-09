@@ -1,4 +1,4 @@
-/*	$NetBSD: xen_intr.c,v 1.9 2009/01/16 20:16:47 jym Exp $	*/
+/*	$NetBSD: xen_intr.c,v 1.4 2008/04/21 15:15:34 cegger Exp $	*/
 
 /*-
  * Copyright (c) 1998, 2001 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: xen_intr.c,v 1.9 2009/01/16 20:16:47 jym Exp $");
+__KERNEL_RCSID(0, "$NetBSD: xen_intr.c,v 1.4 2008/04/21 15:15:34 cegger Exp $");
 
 #include <sys/param.h>
 
@@ -64,16 +71,12 @@ spllower(int nlevel)
 	uint32_t imask;
 	u_long psl;
 
-	if (ci->ci_ilevel <= nlevel)
-		return;
-
 	__insn_barrier();
 
 	imask = IUNMASK(ci, nlevel);
 	psl = x86_read_psl();
 	x86_disable_intr();
 	if (ci->ci_ipending & imask) {
-		KASSERT(psl == 0);
 		Xspllower(nlevel);
 		/* Xspllower does enable_intr() */
 	} else {
@@ -81,6 +84,24 @@ spllower(int nlevel)
 		x86_write_psl(psl);
 	}
 }
+
+#ifndef __x86_64__
+
+/*
+ * Software interrupt registration
+ *
+ * We hand-code this to ensure that it's atomic.
+ *
+ * XXX always scheduled on the current CPU.
+ */
+void
+softintr(int sir)
+{
+	struct cpu_info *ci = curcpu();
+
+	__asm volatile("orl %1, %0" : "=m"(ci->ci_ipending) : "ir" (1 << sir));
+}
+#endif
 
 void
 x86_disable_intr(void)
@@ -107,7 +128,7 @@ x86_write_psl(u_long psl)
 	struct cpu_info *ci = curcpu();
 
 	ci->ci_vcpu->evtchn_upcall_mask = psl;
-	xen_rmb();
+	x86_lfence();
 	if (ci->ci_vcpu->evtchn_upcall_pending && psl == 0) {
 	    	hypervisor_force_callback();
 	}

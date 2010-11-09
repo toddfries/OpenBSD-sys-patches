@@ -1,4 +1,4 @@
-/*	$NetBSD: dev_hppa.c,v 1.9 2009/01/22 07:57:17 skrll Exp $	*/
+/*	$NetBSD: dev_hppa.c,v 1.7 2006/01/25 18:28:26 christos Exp $	*/
 
 /*	$OpenBSD: dev_hppa.c,v 1.5 1999/04/20 20:01:01 mickey Exp $	*/
 
@@ -56,8 +56,8 @@ const struct pdc_devs {
 	char	name[3];
 	int	dev_type;
 } pdc_devs[] = {
-	{ "dk",  0 },
-	{ "ct",  1 },
+	{ "ct",  0 },
+	{ "dk",  1 },
 	{ "lf",  2 },
 	{ "",   -1 },
 	{ "rd", -1 },
@@ -139,7 +139,7 @@ devopen(struct open_file *f, const char *fname, char **file)
 }
 
 void
-devboot(btdev_t dev, char *p)
+devboot(dev_t dev, char *p)
 {
 	const char *q;
 	if (!dev) {
@@ -147,11 +147,11 @@ devboot(btdev_t dev, char *p)
 
 		switch (PAGE0->mem_boot.pz_class) {
 		case PCL_RANDOM:
-			type = 0;
+			type = 1;
 			unit = PAGE0->mem_boot.pz_layers[0];
 			break;
 		case PCL_SEQU:
-			type = 1;
+			type = 0;
 			unit = PAGE0->mem_boot.pz_layers[0];
 			break;
 		case PCL_NET_MASK|PCL_SEQU:

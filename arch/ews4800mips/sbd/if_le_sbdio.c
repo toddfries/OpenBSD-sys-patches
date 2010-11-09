@@ -1,4 +1,4 @@
-/*	$NetBSD: if_le_sbdio.c,v 1.5 2008/04/28 20:23:18 martin Exp $	*/
+/*	$NetBSD: if_le_sbdio.c,v 1.1 2005/12/29 15:20:09 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 1996, 2005 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_le_sbdio.c,v 1.5 2008/04/28 20:23:18 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_le_sbdio.c,v 1.1 2005/12/29 15:20:09 tsutsui Exp $");
 
 #include "opt_inet.h"
 #include "bpfilter.h"
@@ -74,16 +81,16 @@ struct le_sbdio_softc {
 	bus_dmamap_t sc_dmamap;
 };
 
-int le_sbdio_match(device_t, struct cfdata *, void *);
-void le_sbdio_attach(device_t, struct device *, void *);
+int le_sbdio_match(struct device *, struct cfdata *, void *);
+void le_sbdio_attach(struct device *, struct device *, void *);
 static void le_sbdio_wrcsr(struct lance_softc *, uint16_t, uint16_t);
 static uint16_t le_sbdio_rdcsr(struct lance_softc *, uint16_t);
 
-CFATTACH_DECL_NEW(le_sbdio, sizeof(struct le_sbdio_softc),
+CFATTACH_DECL(le_sbdio, sizeof(struct le_sbdio_softc),
     le_sbdio_match, le_sbdio_attach, NULL, NULL);
 
 int
-le_sbdio_match(device_t parent, cfdata_t cf, void *aux)
+le_sbdio_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct sbdio_attach_args *sa = aux;
 
@@ -91,43 +98,42 @@ le_sbdio_match(device_t parent, cfdata_t cf, void *aux)
 }
 
 void
-le_sbdio_attach(device_t parent, device_t self, void *aux)
+le_sbdio_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct le_sbdio_softc *lesc = device_private(self);
 	struct sbdio_attach_args *sa = aux;
+	struct le_sbdio_softc *lesc = (void *)self;
 	struct lance_softc *sc = &lesc->sc_am7990.lsc;
 	bus_dma_segment_t seg;
 	int rseg;
 
-	sc->sc_dev = self;
 	lesc->sc_dmat = sa->sa_dmat;
 	lesc->sc_bst  = sa->sa_bust;
 
 	if (bus_space_map(lesc->sc_bst, sa->sa_addr1, 8 /* XXX */,
 	    BUS_SPACE_MAP_LINEAR, &lesc->sc_bsh) != 0) {
-		aprint_error(": cannot map registers\n");
+		printf(": cannot map registers\n");
 		return;
 	}
 
 	/* Allocate DMA memory for the chip. */
 	if (bus_dmamem_alloc(lesc->sc_dmat, LE_MEMSIZE, 0, 0, &seg, 1, &rseg,
 	    BUS_DMA_NOWAIT) != 0) {
-		aprint_error(": can't allocate DMA memory\n");
+		printf(": can't allocate DMA memory\n");
 		return;
 	}
 	if (bus_dmamem_map(lesc->sc_dmat, &seg, rseg, LE_MEMSIZE,
-	    (void **)&sc->sc_mem, BUS_DMA_NOWAIT|BUS_DMA_COHERENT) != 0) {
-		aprint_error(": can't map DMA memory\n");
+	    (caddr_t *)&sc->sc_mem, BUS_DMA_NOWAIT|BUS_DMA_COHERENT) != 0) {
+		printf(": can't map DMA memory\n");
 		return;
 	}
 	if (bus_dmamap_create(lesc->sc_dmat, LE_MEMSIZE, 1, LE_MEMSIZE,
 	    0, BUS_DMA_NOWAIT, &lesc->sc_dmamap) != 0) {
-		aprint_error(": can't create DMA map\n");
+		printf(": can't create DMA map\n");
 		return;
 	}
 	if (bus_dmamap_load(lesc->sc_dmat, lesc->sc_dmamap, sc->sc_mem,
 	    LE_MEMSIZE, NULL, BUS_DMA_NOWAIT) != 0) {
-		aprint_error(": can't load DMA map\n");
+		printf(": can't load DMA map\n");
 		return;
 	}
 
@@ -147,14 +153,16 @@ le_sbdio_attach(device_t parent, device_t self, void *aux)
 	sc->sc_rdcsr = le_sbdio_rdcsr;
 	sc->sc_wrcsr = le_sbdio_wrcsr;
 
+	printf(" at %p irq %d", (void *)sa->sa_addr1, sa->sa_irq);
+
 	am7990_config(&lesc->sc_am7990);
-	intr_establish(sa->sa_irq, am7990_intr, sc);
+	intr_establish(sa->sa_irq, am7990_intr, self);
 }
 
 static void
 le_sbdio_wrcsr(struct lance_softc *sc, uint16_t port, uint16_t val)
 {
-	struct le_sbdio_softc *lesc = (struct le_sbdio_softc *)sc;
+	struct le_sbdio_softc *lesc = (void *)sc;
 
 	bus_space_write_2(lesc->sc_bst, lesc->sc_bsh, LEREG1_RAP, port);
 	bus_space_write_2(lesc->sc_bst, lesc->sc_bsh, LEREG1_RDP, val);
@@ -163,7 +171,7 @@ le_sbdio_wrcsr(struct lance_softc *sc, uint16_t port, uint16_t val)
 static uint16_t
 le_sbdio_rdcsr(struct lance_softc *sc, uint16_t port)
 {
-	struct le_sbdio_softc *lesc = (struct le_sbdio_softc *)sc;
+	struct le_sbdio_softc *lesc = (void *)sc;
 
 	bus_space_write_2(lesc->sc_bst, lesc->sc_bsh, LEREG1_RAP, port);
 	return bus_space_read_2(lesc->sc_bst, lesc->sc_bsh, LEREG1_RDP);

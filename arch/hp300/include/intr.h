@@ -1,4 +1,4 @@
-/*	$NetBSD: intr.h,v 1.32 2008/12/21 17:42:05 tsutsui Exp $	*/
+/*	$NetBSD: intr.h,v 1.16 2006/12/21 15:55:22 yamt Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997, 1999 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -47,13 +54,33 @@
  */
 #define	IPL_NONE	0
 #define	IPL_SOFTCLOCK	1
-#define	IPL_SOFTBIO	2
-#define	IPL_SOFTNET	3
-#define	IPL_SOFTSERIAL	4
-#define	IPL_VM		5
-#define	IPL_SCHED	6
-#define	IPL_HIGH	7
-#define	NIPL		8
+#define	IPL_SOFTNET	2
+#define	IPL_SOFTSERIAL	3
+#define	IPL_SOFT	4	/* disable all software interrupts */
+#define	IPL_BIO		5
+#define	IPL_NET		6
+#define	IPL_TTY		7
+#define	IPL_TTYNOBUF	8	/* IPL_TTY + higher ISR priority */
+#define	IPL_VM		9
+#define	IPL_CLOCK	10
+#define	IPL_STATCLOCK	IPL_CLOCK
+#define	IPL_HIGH	11
+#define	IPL_SCHED	IPL_HIGH
+#define	IPL_LOCK	IPL_HIGH
+#define	NIPL		12
+
+#define	_IPL_SOFTSERIAL	0	/* serial software interrupts */
+#define	_IPL_SOFTNET	1	/* network software interrupts */
+#define	_IPL_SOFTCLOCK	2	/* clock software interrupts */
+#define	_IPL_SOFT	3	/* other software interrupts */
+#define	IPL_NSOFT	4
+
+#define	IPL_SOFTNAMES {							\
+	"serial",							\
+	"net",								\
+	"clock",							\
+	"misc",								\
+}
 
 /*
  * Convert PSL values to m68k CPU IPLs and vice-versa.
@@ -62,27 +89,20 @@
 #define	PSLTOIPL(x)	(((x) >> 8) & 0xf)
 #define	IPLTOPSL(x)	((((x) & 0xf) << 8) | PSL_S)
 
-extern int idepth;
+#ifdef _KERNEL
 
-static inline bool
-cpu_intr_p(void) 
-{
- 
-	return idepth != 0;
-}
-
-extern const uint16_t ipl2psl_table[NIPL];
+extern u_short hp300_ipl2psl[];
 
 typedef int ipl_t;
 typedef struct {
-	uint16_t _psl;
+	int _psl;
 } ipl_cookie_t;
 
 static inline ipl_cookie_t
 makeiplcookie(ipl_t ipl)
 {
 
-	return (ipl_cookie_t){._psl = ipl2psl_table[ipl]};
+	return (ipl_cookie_t){._psl = hp300_ipl2psl[ipl]};
 }
 
 static inline int
@@ -92,27 +112,30 @@ splraiseipl(ipl_cookie_t icookie)
 	return _splraise(icookie._psl);
 }
 
-static inline void
-splx(int sr)
-{
-
-	__asm volatile("movew %0,%%sr" : : "di" (sr));
-}
-
 /* These spl calls are _not_ to be used by machine-independent code. */
 #define	splhil()	splraise1()
 #define	splkbd()	splhil()
 
 /* These spl calls are used by machine-independent code. */
-#define	spl0()		_spl0()
-
-#define	splsoftbio()	splraise1()
-#define	splsoftclock()	splraise1()
-#define	splsoftnet()	splraise1()
-#define	splsoftserial()	splraise1()
-#define	splvm()		splraise5()
-#define	splsched()	spl6()
+/* spl0 requires checking for software interrupts */
+#define	spllowersoftclock() spl1()
+#define	splsoft()	splraise1()
+#define	splsoftclock()	splsoft()
+#define	splsoftnet()	splsoft()
+#define	splsoftserial()	splsoft()
+#define	splbio()	_splraise(hp300_ipl2psl[IPL_BIO])
+#define	splnet()	_splraise(hp300_ipl2psl[IPL_NET])
+#define	spltty()	_splraise(hp300_ipl2psl[IPL_TTY])
+#define	splserial()	_splraise(hp300_ipl2psl[IPL_TTY])
+#define	splvm()		_splraise(hp300_ipl2psl[IPL_VM])
+#define	splclock()	spl6()
+#define	splstatclock()	splclock()
 #define	splhigh()	spl7()
+#define	splsched()	spl7()
+#define	spllock()	spl7()
+
+/* watch out for side effects */
+#define	splx(s)		((s) & PSL_IPL ? _spl((s)) : spl0())
 
 struct hp300_intrhand {
 	LIST_ENTRY(hp300_intrhand) ih_q;
@@ -127,10 +150,54 @@ struct hp300_intr {
 	struct evcnt hi_evcnt;
 };
 
+/*
+ * Software Interrupts.
+ */
+
+struct hp300_soft_intrhand {
+	LIST_ENTRY(hp300_soft_intrhand) sih_q;
+	struct hp300_soft_intr *sih_intrhead;
+	void (*sih_fn)(void *);
+	void *sih_arg;
+	volatile int sih_pending;
+};
+
+struct hp300_soft_intr {
+	LIST_HEAD(, hp300_soft_intrhand) hsi_q;
+	struct evcnt hsi_evcnt;
+	uint8_t hsi_ipl;
+};
+
+void	*softintr_establish(int, void (*)(void *), void *);
+void	softintr_disestablish(void *);
+void	softintr_init(void);
+void	softintr_dispatch(void);
+
+extern volatile uint8_t ssir;
+#define setsoft(x)	ssir |= (1<<(x))
+
+#define softintr_schedule(arg)				\
+do {							\
+	struct hp300_soft_intrhand *__sih = (arg);	\
+	__sih->sih_pending = 1;				\
+	setsoft(__sih->sih_intrhead->hsi_ipl);		\
+} while (0)
+
+/* XXX For legacy software interrupts */
+extern struct hp300_soft_intrhand *softnet_intrhand;
+#define setsoftnet()	softintr_schedule(softnet_intrhand)
+
+/* locore.s */
+int	spl0(void);
+
 /* intr.c */
 void	intr_init(void);
 void	*intr_establish(int (*)(void *), void *, int, int);
 void	intr_disestablish(void *);
 void	intr_dispatch(int);
+void	intr_printlevels(void);
+void	netintr(void);
+
+#endif /* _KERNEL */
 
 #endif /* _HP300_INTR_H_ */

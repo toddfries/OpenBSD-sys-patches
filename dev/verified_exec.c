@@ -1,4 +1,4 @@
-/*	$NetBSD: verified_exec.c,v 1.64 2008/12/14 23:20:23 elad Exp $	*/
+/*	$NetBSD: verified_exec.c,v 1.61 2007/07/09 21:00:29 ad Exp $	*/
 
 /*-
  * Copyright (c) 2005, 2006 Elad Efrat <elad@NetBSD.org>
@@ -29,7 +29,11 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: verified_exec.c,v 1.64 2008/12/14 23:20:23 elad Exp $");
+#if defined(__NetBSD__)
+__KERNEL_RCSID(0, "$NetBSD: verified_exec.c,v 1.61 2007/07/09 21:00:29 ad Exp $");
+#else
+__RCSID("$Id: verified_exec.c,v 1.61 2007/07/09 21:00:29 ad Exp $\n$NetBSD: verified_exec.c,v 1.61 2007/07/09 21:00:29 ad Exp $");
+#endif
 
 #include <sys/param.h>
 #include <sys/errno.h>
@@ -128,13 +132,10 @@ static int
 veriexec_delete(prop_dictionary_t dict, struct lwp *l)
 {
 	struct nameidata nid;
-	const char *file;
 	int error;
 
-	if (!prop_dictionary_get_cstring_nocopy(dict, "file", &file))
-		return (EINVAL);
-
-	NDINIT(&nid, LOOKUP, FOLLOW, UIO_SYSSPACE, file);
+	NDINIT(&nid, LOOKUP, FOLLOW, UIO_SYSSPACE,
+	    prop_string_cstring_nocopy(prop_dictionary_get(dict, "file")), l);
 	error = namei(&nid);
 	if (error)
 		return (error);
@@ -154,13 +155,10 @@ static int
 veriexec_query(prop_dictionary_t dict, prop_dictionary_t rdict, struct lwp *l)
 {
 	struct nameidata nid;
-	const char *file;
 	int error;
 
-	if (!prop_dictionary_get_cstring_nocopy(dict, "file", &file))
-		return (EINVAL);
-
-	NDINIT(&nid, LOOKUP, FOLLOW, UIO_SYSSPACE, file);
+	NDINIT(&nid, LOOKUP, FOLLOW, UIO_SYSSPACE,
+	    prop_string_cstring_nocopy(prop_dictionary_get(dict, "file")), l);
 	error = namei(&nid);
 	if (error)
 		return (error);
@@ -186,9 +184,6 @@ veriexecioctl(dev_t dev, u_long cmd, void *data, int flags, struct lwp *l)
 	case VERIEXEC_LOAD:
 	case VERIEXEC_DELETE:
 	case VERIEXEC_FLUSH:
-		if (!(flags & FWRITE))
-			return (EPERM);
-
 		if (veriexec_strict > VERIEXEC_LEARNING) {
 			log(LOG_WARNING, "Veriexec: Strict mode, modifying "
 			    "tables not permitted.\n");
@@ -200,9 +195,6 @@ veriexecioctl(dev_t dev, u_long cmd, void *data, int flags, struct lwp *l)
 
 	case VERIEXEC_QUERY:
 	case VERIEXEC_DUMP:
-		if (!(flags & FREAD))
-			return (EPERM);
-
 		break;
 
 	default:

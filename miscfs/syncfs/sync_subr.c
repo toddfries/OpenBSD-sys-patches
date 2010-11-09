@@ -1,33 +1,4 @@
-/*	$NetBSD: sync_subr.c,v 1.38 2009/02/22 22:26:53 rmind Exp $	*/
-
-/*-
- * Copyright (c) 2009 The NetBSD Foundation, Inc.
- * All rights reserved.
- *
- * This code is derived from software contributed to The NetBSD Foundation
- * by Andrew Doran.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
- * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
- * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
- * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
- */
+/*	$NetBSD: sync_subr.c,v 1.27 2006/11/16 01:33:38 christos Exp $	*/
 
 /*
  * Copyright 1997 Marshall Kirk McKusick. All Rights Reserved.
@@ -61,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sync_subr.c,v 1.38 2009/02/22 22:26:53 rmind Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sync_subr.c,v 1.27 2006/11/16 01:33:38 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -73,12 +44,10 @@ __KERNEL_RCSID(0, "$NetBSD: sync_subr.c,v 1.38 2009/02/22 22:26:53 rmind Exp $")
 #include <sys/vnode.h>
 #include <sys/buf.h>
 #include <sys/errno.h>
-#include <sys/kmem.h>
+#include <sys/malloc.h>
 
 #include <miscfs/genfs/genfs.h>
 #include <miscfs/syncfs/syncfs.h>
-
-static void	vn_syncer_add1(struct vnode *, int);
 
 /*
  * Defines and variables for the syncer process.
@@ -88,13 +57,10 @@ time_t syncdelay = 30;			/* max time to delay syncing data */
 time_t filedelay = 30;			/* time to delay syncing files */
 time_t dirdelay  = 15;			/* time to delay syncing directories */
 time_t metadelay = 10;			/* time to delay syncing metadata */
-time_t lockdelay = 1;			/* time to delay if locking fails */
 
-kmutex_t syncer_mutex;			/* used to freeze syncer, long term */
-static kmutex_t syncer_data_lock;	/* short term lock on data structures */
+struct lock syncer_lock;		/* used to freeze syncer */
 
 static int rushjob;			/* number of slots to run ASAP */
-static kcondvar_t syncer_cv;		/* cv for rushjob */
 static int stat_rush_requests;		/* number of times I/O speeded up */
 
 static int syncer_delayno = 0;
@@ -109,15 +75,13 @@ vn_initialize_syncerd()
 
 	syncer_last = SYNCER_MAXDELAY + 2;
 
-	syncer_workitem_pending =
-	    kmem_alloc(syncer_last * sizeof (struct synclist), KM_SLEEP);
+	syncer_workitem_pending = malloc(syncer_last * sizeof (struct synclist),
+	    M_VNODE, M_WAITOK);
 
 	for (i = 0; i < syncer_last; i++)
 		TAILQ_INIT(&syncer_workitem_pending[i]);
 
-	mutex_init(&syncer_mutex, MUTEX_DEFAULT, IPL_NONE);
-	mutex_init(&syncer_data_lock, MUTEX_DEFAULT, IPL_NONE);
-	cv_init(&syncer_cv, "syncer");
+	lockinit(&syncer_lock, PVFS, "synclk", 0, 0);
 }
 
 /*
@@ -149,29 +113,19 @@ vn_initialize_syncerd()
 /*
  * Add an item to the syncer work queue.
  */
-static void
-vn_syncer_add1(vp, delayx)
+void
+vn_syncer_add_to_worklist(vp, delayx)
 	struct vnode *vp;
 	int delayx;
 {
 	struct synclist *slp;
+	int s;
 
-	KASSERT(mutex_owned(&syncer_data_lock));
+	s = splbio();
 
-	if (vp->v_iflag & VI_ONWORKLST) {
+	if (vp->v_flag & VONWORKLST) {
 		slp = &syncer_workitem_pending[vp->v_synclist_slot];
 		TAILQ_REMOVE(slp, vp, v_synclist);
-	} else {
-		/*
-		 * We must not modify v_iflag if the vnode
-		 * is already on a synclist: sched_sync()
-		 * calls this routine while holding only
-		 * syncer_data_lock in order to adjust the
-		 * position of the vnode.  syncer_data_lock
-		 * does not protect v_iflag.
-		 */
-		KASSERT(mutex_owned(&vp->v_interlock));
-		vp->v_iflag |= VI_ONWORKLST;
 	}
 
 	if (delayx > syncer_maxdelay - 2)
@@ -180,19 +134,8 @@ vn_syncer_add1(vp, delayx)
 
 	slp = &syncer_workitem_pending[vp->v_synclist_slot];
 	TAILQ_INSERT_TAIL(slp, vp, v_synclist);
-}
-
-void
-vn_syncer_add_to_worklist(vp, delayx)
-	struct vnode *vp;
-	int delayx;
-{
-
-	KASSERT(mutex_owned(&vp->v_interlock));
-
-	mutex_enter(&syncer_data_lock);
-	vn_syncer_add1(vp, delayx);
-	mutex_exit(&syncer_data_lock);
+	vp->v_flag |= VONWORKLST;
+	splx(s);
 }
 
 /*
@@ -203,18 +146,17 @@ vn_syncer_remove_from_worklist(vp)
 	struct vnode *vp;
 {
 	struct synclist *slp;
+	int s;
 
-	KASSERT(mutex_owned(&vp->v_interlock));
+	s = splbio();
 
-	mutex_enter(&syncer_data_lock);
-
-	if (vp->v_iflag & VI_ONWORKLST) {
-		vp->v_iflag &= ~VI_ONWORKLST;
+	if (vp->v_flag & VONWORKLST) {
+		vp->v_flag &= ~VONWORKLST;
 		slp = &syncer_workitem_pending[vp->v_synclist_slot];
 		TAILQ_REMOVE(slp, vp, v_synclist);
 	}
 
-	mutex_exit(&syncer_data_lock);
+	splx(s);
 }
 
 /*
@@ -225,105 +167,86 @@ sched_sync(void *v)
 {
 	struct synclist *slp;
 	struct vnode *vp;
+	struct mount *mp;
 	long starttime;
-	bool synced;
+	int s;
 
 	updateproc = curlwp;
 
 	for (;;) {
-		mutex_enter(&syncer_mutex);
-		mutex_enter(&syncer_data_lock);
-
 		starttime = time_second;
 
 		/*
-		 * Push files whose dirty time has expired.
+		 * Push files whose dirty time has expired. Be careful
+		 * of interrupt race on slp queue.
 		 */
+		s = splbio();
 		slp = &syncer_workitem_pending[syncer_delayno];
 		syncer_delayno += 1;
 		if (syncer_delayno >= syncer_last)
 			syncer_delayno = 0;
+		splx(s);
+
+		lockmgr(&syncer_lock, LK_EXCLUSIVE, NULL);
 
 		while ((vp = TAILQ_FIRST(slp)) != NULL) {
-			/* We are locking in the wrong direction. */
-			synced = false;
-			if (mutex_tryenter(&vp->v_interlock)) {
-				mutex_exit(&syncer_data_lock);
-				if (vget(vp, LK_EXCLUSIVE | LK_NOWAIT |
-				    LK_INTERLOCK) == 0) {
-					synced = true;
+			if (vn_start_write(vp, &mp, V_NOWAIT) == 0) {
+				if (vn_lock(vp, LK_EXCLUSIVE | LK_NOWAIT)
+				    == 0) {
 					(void) VOP_FSYNC(vp, curlwp->l_cred,
-					    FSYNC_LAZY, 0, 0);
-					vput(vp);
+					    FSYNC_LAZY, 0, 0, curlwp);
+					VOP_UNLOCK(vp, 0);
 				}
-				mutex_enter(&syncer_data_lock);
+				vn_finished_write(mp, 0);
 			}
-
-			/*
-			 * XXX The vnode may have been recycled, in which
-			 * case it may have a new identity.
-			 */
+			s = splbio();
 			if (TAILQ_FIRST(slp) == vp) {
+
 				/*
 				 * Put us back on the worklist.  The worklist
 				 * routine will remove us from our current
 				 * position and then add us back in at a later
 				 * position.
-				 *
-				 * Try again sooner rather than later if
-				 * we were unable to lock the vnode.  Lock
-				 * failure should not prevent us from doing
-				 * the sync "soon".
-				 *
-				 * If we locked it yet arrive here, it's
-				 * likely that lazy sync is in progress and
-				 * so the vnode still has dirty metadata. 
-				 * syncdelay is mainly to get this vnode out
-				 * of the way so we do not consider it again
-				 * "soon" in this loop, so the delay time is
-				 * not critical as long as it is not "soon". 
-				 * While write-back strategy is the file
-				 * system's domain, we expect write-back to
-				 * occur no later than syncdelay seconds
-				 * into the future.
 				 */
-				vn_syncer_add1(vp,
-				    synced ? syncdelay : lockdelay);
+
+				vn_syncer_add_to_worklist(vp, syncdelay);
 			}
+			splx(s);
 		}
-		mutex_exit(&syncer_mutex);
 
 		/*
-		 * Wait until there are more workitems to process.
+		 * Do soft update processing.
+		 */
+		if (bioops.io_sync)
+			(*bioops.io_sync)(NULL);
+
+		lockmgr(&syncer_lock, LK_RELEASE, NULL);
+
+		/*
+		 * The variable rushjob allows the kernel to speed up the
+		 * processing of the filesystem syncer process. A rushjob
+		 * value of N tells the filesystem syncer to process the next
+		 * N seconds worth of work on its queue ASAP. Currently rushjob
+		 * is used by the soft update code to speed up the filesystem
+		 * syncer process when the incore state is getting so far
+		 * ahead of the disk that the kernel memory pool is being
+		 * threatened with exhaustion.
 		 */
 		if (rushjob > 0) {
-			/*
-			 * The variable rushjob allows the kernel to speed
-			 * up the processing of the filesystem syncer
-			 * process. A rushjob value of N tells the
-			 * filesystem syncer to process the next N seconds
-			 * worth of work on its queue ASAP. Currently
-			 * rushjob is used by the soft update code to
-			 * speed up the filesystem syncer process when the
-			 * incore state is getting so far ahead of the
-			 * disk that the kernel memory pool is being
-			 * threatened with exhaustion.
-			 */
 			rushjob--;
-		} else {
-			/*
-			 * If it has taken us less than a second to
-			 * process the current work, then wait. Otherwise
-			 * start right over again. We can still lose time
-			 * if any single round takes more than two
-			 * seconds, but it does not really matter as we
-			 * are just trying to generally pace the
-			 * filesystem activity.
-			 */
-			if (time_second == starttime)
-				cv_timedwait(&syncer_cv, &syncer_data_lock, hz);
+			continue;
 		}
-		mutex_exit(&syncer_data_lock);
+
+		/*
+		 * If it has taken us less than a second to process the
+		 * current work, then wait. Otherwise start right over
+		 * again. We can still lose time if any single round
+		 * takes more than two seconds, but it does not really
+		 * matter as we are just trying to generally pace the
+		 * filesystem activity.
+		 */
+		if (time_second == starttime)
+			tsleep(&rushjob, PPAUSE, "syncer", hz);
 	}
 }
 
@@ -335,17 +258,13 @@ sched_sync(void *v)
 int
 speedup_syncer()
 {
-
-	mutex_enter(&syncer_data_lock);
 	if (rushjob >= syncdelay / 2) {
-		mutex_exit(&syncer_data_lock);
 		return (0);
 	}
-	rushjob++;
-	cv_signal(&syncer_cv);
-	stat_rush_requests += 1;
-	mutex_exit(&syncer_data_lock);
 
+	rushjob++;
+	wakeup(&rushjob);
+	stat_rush_requests += 1;
 	return (1);
 }
 

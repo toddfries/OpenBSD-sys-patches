@@ -1,4 +1,4 @@
-/*	$NetBSD: ip_mroute.h,v 1.31 2008/08/07 06:20:14 cegger Exp $	*/
+/*	$NetBSD: ip_mroute.h,v 1.26 2005/12/10 23:36:23 elad Exp $	*/
 
 #ifndef _NETINET_IP_MROUTE_H_
 #define _NETINET_IP_MROUTE_H_
@@ -20,10 +20,6 @@
 
 #include <sys/queue.h>
 #include <sys/callout.h>
-
-#ifdef _KERNEL
-struct sockopt; /* from <sys/socketvar.h> */
-#endif
 
 /*
  * Multicast Routing set/getsockopt commands.
@@ -241,7 +237,7 @@ struct vif {
 	u_long	  v_bytes_in;		/* # bytes in on interface */
 	u_long	  v_bytes_out;		/* # bytes out on interface */
 	struct	  route v_route;	/* cached route if this is a tunnel */
-	callout_t v_repq_ch;		/* for tbf_reprocess_q() */
+	struct	  callout v_repq_ch;	/* for tbf_reprocess_q() */
 #ifdef RSVP_ISI
 	int	  v_rsvp_on;		/* # RSVP listening on this vif */
 	struct	  socket *v_rsvpd;	/* # RSVPD daemon */
@@ -287,7 +283,7 @@ struct igmpmsg {
 	u_int8_t  im_vif;		/* vif rec'd on */
 	u_int8_t  unused3;
 	struct	  in_addr im_src, im_dst;
-} __packed;
+} __attribute__((__packed__));
 
 /*
  * Argument structure used for pkt info. while upcall is made.
@@ -336,9 +332,9 @@ struct bw_meter {
 	struct timeval	bm_start_time;		/* abs. time		     */
 };
 
-int	ip_mrouter_set(struct socket *, struct sockopt *);
-int	ip_mrouter_get(struct socket *, struct sockopt *);
-int	mrt_ioctl(struct socket *, u_long, void *);
+int	ip_mrouter_set(struct socket *, int, struct mbuf **);
+int	ip_mrouter_get(struct socket *, int, struct mbuf **);
+int	mrt_ioctl(struct socket *, u_long, caddr_t);
 int	ip_mrouter_done(void);
 void	ip_mrouter_detach(struct ifnet *);
 void	reset_vif(struct vif *);

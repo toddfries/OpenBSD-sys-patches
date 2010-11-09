@@ -1,4 +1,4 @@
-/*	$NetBSD: linux_siginfo.h,v 1.4 2008/11/23 23:48:48 njoly Exp $ */
+/*	$NetBSD: linux_siginfo.h,v 1.2 2005/12/11 12:20:14 christos Exp $ */
 
 /*-
  * Copyright (c) 2005 Emmanuel Dreyfus, all rights reserved.

@@ -1,11 +1,11 @@
-/*	$NetBSD: lock.h,v 1.31 2008/04/28 20:23:36 martin Exp $ */
+/*	$NetBSD: lock.h,v 1.23 2006/03/04 03:39:02 uwe Exp $ */
 
 /*-
- * Copyright (c) 1998, 1999, 2006 The NetBSD Foundation, Inc.
+ * Copyright (c) 1998, 1999 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
- * by Paul Kranenburg and Andrew Doran.
+ * by Paul Kranenburg.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -71,30 +78,6 @@ static __inline void __cpu_simple_lock(__cpu_simple_lock_t *)
 extern void __cpu_simple_lock(__cpu_simple_lock_t *);
 #endif
 
-static __inline int
-__SIMPLELOCK_LOCKED_P(__cpu_simple_lock_t *__ptr)
-{
-	return *__ptr == __SIMPLELOCK_LOCKED;
-}
-
-static __inline int
-__SIMPLELOCK_UNLOCKED_P(__cpu_simple_lock_t *__ptr)
-{
-	return *__ptr == __SIMPLELOCK_UNLOCKED;
-}
-
-static __inline void
-__cpu_simple_lock_clear(__cpu_simple_lock_t *__ptr)
-{
-	*__ptr = __SIMPLELOCK_UNLOCKED;
-}
-
-static __inline void
-__cpu_simple_lock_set(__cpu_simple_lock_t *__ptr)
-{
-	*__ptr = __SIMPLELOCK_LOCKED;
-}
-
 static __inline void
 __cpu_simple_lock_init(__cpu_simple_lock_t *alp)
 {
@@ -139,47 +122,5 @@ __cpu_simple_unlock(__cpu_simple_lock_t *alp)
 	__insn_barrier();
 	*alp = __SIMPLELOCK_UNLOCKED;
 }
-
-#if defined(__sparc_v9__)
-static __inline void
-mb_read(void)
-{
-	__asm __volatile("membar #LoadLoad" : : : "memory");
-}
-
-static __inline void
-mb_write(void)
-{
-	__asm __volatile("" : : : "memory");
-}
-
-static __inline void
-mb_memory(void)
-{
-	__asm __volatile("membar #MemIssue" : : : "memory");
-}
-#else	/* __sparc_v9__ */
-static __inline void
-mb_read(void)
-{
-	static volatile int junk;
-	__asm volatile("st %%g0,[%0]"
-	    :
-	    : "r" (&junk)
-	    : "memory");
-}
-
-static __inline void
-mb_write(void)
-{
-	__insn_barrier();
-}
-
-static __inline void
-mb_memory(void)
-{
-	mb_read();
-}
-#endif	/* __sparc_v9__ */
 
 #endif /* _MACHINE_LOCK_H */

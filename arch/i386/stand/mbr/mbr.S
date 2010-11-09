@@ -1,4 +1,4 @@
-/*	$NetBSD: mbr.S,v 1.20 2008/11/28 18:18:16 dsl Exp $	*/
+/*	$NetBSD: mbr.S,v 1.13 2005/12/11 12:17:49 christos Exp $	*/
 
 /*
  * Copyright (c) 1999-2004 The NetBSD Foundation, Inc. 
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,32 +44,15 @@
 /* Compile options:
  * BOOTSEL	- bootselector code
  * BOOT_EXTENDED - scan extended partition list (LBA reads)
- * COM_PORT	- do serial io to specified port number
- *		  0..3 => bios port, otherwise actual io_addr
- * COM_BAUD	- initialise serial port baud rate
- *
  * TERSE_ERROR	- terse error messages
  * NO_CHS	- all reads are LBA
  * NO_LBA_CHECK	- no check if bios supports LBA reads
- * NO_BANNER    - do not output title line 'banner'
+ * NO_BANNER    - do not output 'banner'
  */
 
 #ifdef BOOT_EXTENDED
 #define NO_CHS	1
 #define BOOTSEL	1
-#endif
-
-#ifdef COM_PORT
-#if COM_PORT < 4
-/* The first 4 items in the 40:xx segment are the serial port base addresses */
-#define COM_PORT_VAL (0x400 + (COM_PORT * 2))
-#else
-#define COM_PORT_VAL $COM_PORT
-#endif
-
-#if !defined(COM_FREQ)
-#define COM_FREQ 1843200
-#endif
 #endif
 
 #ifdef BOOTSEL
@@ -78,21 +68,10 @@
 #define TABENTRYSIZE	(MBR_BS_PARTNAMESIZE + 1)
 #define NAMETABSIZE	(MBR_PART_COUNT * TABENTRYSIZE)
 
-#ifdef COM_PORT
-/* ASCII values for the keys */
-#define	KEY_ACTIVE	'\r'
-#define	KEY_DISK1	'a'
-#define	KEY_PTN1	'1'
-#else
 /* Scan values for the various keys we use, as returned by the BIOS */
 #define	SCAN_ENTER	0x1c
 #define	SCAN_F1		0x3b
 #define	SCAN_1		0x2
-
-#define	KEY_ACTIVE	SCAN_ENTER
-#define	KEY_DISK1	SCAN_F1
-#define	KEY_PTN1	SCAN_1
-#endif
 
 /*
  * Minimum and maximum drive number that is considered to be valid.
@@ -129,17 +108,15 @@ ENTRY(start)
 	movw	$BOOTADDR, %sp
 	mov	%ax, %es
 	mov	%ax, %ds
-	movw	$mbr, %di
-	mov     $mbr - LOADADDR + BOOTADDR, %si
-	push	%ax			/* zero for %cs of lret */
-	push	%di
-	movw	$(bss_start - mbr), %cx
+	mov	%sp, %si
+	movw	$start, %di
+	movw	$(bss_start - start)/2, %cx
 	rep
-	movsb				/* relocate code */
-	mov	$(bss_end - bss_start + 511)/512, %ch
+	movsw				/* relocate code */
+	mov	$(bss_end - bss_start + 1)/2, %cx
 	rep
 	stosw				/* zero bss */
-	lret				/* Ensures %cs == 0 */
+	ljmp	$0, $mbr		/* leap into copy of code */
 
 /*
  * Sanity check the drive number passed by the BIOS. Some BIOSs may not
@@ -153,16 +130,6 @@ mbr:
 	push	%dx			/* save drive number */
 	push	%dx			/* twice - for err_msg loop */
 
-#if defined(COM_PORT) && defined(COM_BAUD)
-	mov	$com_args, %si
-	mov	$num_com_args, %cl	/* %ch is zero from above */
-	mov	COM_PORT_VAL, %dx
-1:	lodsw
-	add	%ah, %dl
-	outb	%dx
-	loop	1b
-#endif
-
 #ifndef NO_BANNER
 	mov	$banner, %si
 	call	message_crlf
@@ -170,15 +137,6 @@ mbr:
 
 /*
  * Walk through the selector (name) table printing used entries.
- *
- * Register use:
- * %ax			temp
- * %bx	nametab[]	boot seletor menu
- * %ecx			base of 'extended' partition
- * %edx			next extended partition
- * %si			message ptr (etc)
- * %edi			sector number of this partition
- * %bp	parttab[]	mbr partition table
  */
 bootsel_menu:
 	movw	$nametab, %bx
@@ -209,13 +167,13 @@ next_ptn:
 	je	4f
 	cmpb	$0x80, (%bp)		/* check for active partition */
 	jne	3f			/* jump if not... */
-#define	ACTIVE	(4 * ((KEY_ACTIVE - KEY_DISK1) & 0xff))
+#define	ENTER	(4 * ((SCAN_ENTER - SCAN_F1) & 0xff))
 #ifdef NO_CHS
-	movl	%edi, ptn_list + ACTIVE	/* save location of active ptn */
+	movl	%edi, ptn_list + ENTER	/* save location of active ptn */
 #else
-	mov	%bp, ptn_list + ACTIVE
+	mov	%bp, ptn_list + ENTER
 #endif
-#undef ACTIVE
+#undef ENTER
 3:
 #ifdef BOOTSEL
 	cmpb	$0, (%bx)		/* check for prompt */
@@ -226,7 +184,7 @@ next_ptn:
 	call	message			/* menu number */
 	mov	(%si), %si		/* ':' << 8 | '1' + count */
 	shl	$2, %si			/* const + count * 4 */
-#define	CONST	(4 * ((':' << 8) + '1' - ((KEY_PTN1 - KEY_DISK1) & 0xff)))
+#define	CONST	(4 * ((':' << 8) + '1' - ((SCAN_1 - SCAN_F1) & 0xff)))
 #ifdef NO_CHS
 	movl	%edi, ptn_list - CONST(%si)	/* sector to read */
 #else
@@ -258,8 +216,10 @@ next_ptn:
 	pop	%dx			/* recover drive # */
 	push	%dx			/* save drive */
 	int	$0x13
+	jc	wait_key		/* abort menu on read fail */
+	cmpw	$MBR_MAGIC, LOADADDR + MBR_MAGIC_OFFSET
 	movw	$nametab - LOADADDR + BOOTADDR, %bx
-	jnc	next_extended		/* abort menu on read fail */
+	je	next_extended
 #endif
 
 /*
@@ -268,7 +228,7 @@ next_ptn:
  */
 
 #ifndef BOOTSEL
-	mov	$(KEY_ACTIVE - KEY_DISK1) & 0xff, %ax
+	mov	$(SCAN_ENTER - SCAN_F1) & 0xff, %ax
 #else
 /*
  * Get the initial time value for the timeout comparison. It is returned
@@ -284,34 +244,21 @@ wait_key:
 	int	$0x1a
 	mov	%dx, %di		/* start time to di */
 3:
-#ifdef COM_PORT
-	mov	COM_PORT_VAL, %dx
-	push	%dx
-	add	$5, %dx
-	inb	%dx
-	pop	%dx
-	test	$1, %al
-	jz	1f
-	inb	%dx
-	jmp	check_key
-#else
 	movb	$1, %ah			/* looks to see if a */
 	int	$0x16			/* key has been pressed */
-	jz	1f
-get_key:
+	jnz	get_key
 	xorb	%ah, %ah
-	int	$0x16			/* 'read key', code ah, ascii al */
-	shr	$8, %ax			/* code in %al, %ah zero */
-	jmp	check_key
-#endif
-
-1:	xorb	%ah, %ah
 	int	$0x1a			/* current time to cx:dx */
 	sub	%di, %dx
 	cmpw	timeout, %dx		/* always wait for 1 tick... */
 	jbe	3b			/* 0xffff means never timeout */
 def_key:
-	mov	defkey, %al		/* timedout - we need %ah to still be zero! */
+	mov	defkey - 1, %ax		/* timedout - get default key to %ah */
+	jmp	4f
+get_key:
+	xorb	%ah, %ah
+	int	$0x16			/* 'read key', code ah, ascii al */
+4:	shr	$8, %ax			/* code in %al, %ah zero */
 
 /*
  * We have a keycode, see what it means.
@@ -325,7 +272,7 @@ check_key:
  * If we trust loc 475, we needn't check the upper bound on the keystroke
  * This is always sector 0, so always read using chs.
  */
-	subb	$KEY_DISK1, %al
+	subb	$SCAN_F1, %al
 	cmpb	0x0475, %al
 	jae	boot_ptn
 	addb	$0x80, %al
@@ -378,10 +325,9 @@ err_msg:
 	movw	$errtxt, %si
 	call	message
 #else
-	push	%ax
 	movw	$errtxt, %si
 	call	message
-	pop	%si
+	mov	%ax, %si
 	call	message_crlf
 #endif
 	pop	%dx			/* drive we errored on */
@@ -391,11 +337,7 @@ err_msg:
 	pop	%dx			/* original drive number */
 	push	%dx
 	push	%dx
-#ifdef COM_PORT
-	jmp	wait_key		/* Read with timeout (again) */
-#else
-	jmp	get_key			/* Blocking read */
-#endif
+	jmp	get_key
 #else
 	int	$0x18			/* BIOS might ask for a key */
 					/* press and retry boot seq. */
@@ -552,11 +494,7 @@ crlf:	.asciz	"\r\n"
 
 #ifndef NO_BANNER
 #ifdef BOOTSEL
-#ifdef COM_PORT
-banner:	.asciz	"a: disk"
-#else
 banner:	.asciz	"Fn: diskn"
-#endif
 #else
 banner:	.asciz	"NetBSD MBR boot"
 #endif
@@ -578,20 +516,6 @@ ERR_KEY:	.asciz	"bad key"
 #endif
 #endif
 
-#if defined(COM_PORT) && defined(COM_BAUD)
-#define COM_DIVISOR (((COM_FREQ / COM_BAUD) + 8) / 16)
-com_args:
-	.byte	0x80			/* divisor latch enable */
-	.byte	+3			/* io_port + 3 */
-	.byte	COM_DIVISOR & 0xff
-	.byte	-3			/* io_port */
-	.byte	COM_DIVISOR >> 8	/* high baud */
-	.byte	+1			/* io_port + 1 */
-	.byte	0x03			/* 8 bit no parity */
-	.byte	+2			/* io_port + 3 */
-num_com_args = (. - com_args)/2
-#endif
-
 /*
  * I hate #including source files, but the stuff below has to be at
  * the correct absolute address.
@@ -601,26 +525,7 @@ num_com_args = (. - com_args)/2
 message_crlf:
 	call	message
 	movw	$crlf, %si
-#ifdef COM_PORT
-message:
-	pusha
-message_1:
-	lodsb
-	test	%al, %al
-	jz	3f
-	mov	COM_PORT_VAL, %dx
-	outb	%al, %dx
-	add	$5, %dl
-2:	inb	%dx
-	test	$0x40, %al
-	jz	2b
-	jmp	message_1
-3:	popa
-	ret
-#else
 #include <message.S>
-#endif
-
 #if 0
 #include <dump_eax.S>
 #endif
@@ -637,7 +542,7 @@ mbr_space	= defkey - .
  * Default action, as a keyvalue we'd normally read from the BIOS.
  */
 defkey:
-	.byte	KEY_ACTIVE		/* ps/2 code */
+	.byte	SCAN_ENTER		/* ps/2 code */
 #ifndef BOOTSEL_FLAGS
 #define	BOOTSEL_FLAGS	0
 #endif
@@ -677,5 +582,4 @@ bss_off = 0
 bss_start = .
 #define BSS(name, size) name = bss_start + bss_off; bss_off = bss_off + size
 	BSS(ptn_list, 256 * 4)		/* long[]: boot sector numbers */
-	BSS(dump_eax_buff, 16)
 	BSS(bss_end, 0)

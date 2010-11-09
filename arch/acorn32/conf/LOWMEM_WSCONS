@@ -1,4 +1,4 @@
-#	$NetBSD: LOWMEM_WSCONS,v 1.51 2009/03/06 20:31:46 joerg Exp $
+#	$NetBSD: LOWMEM_WSCONS,v 1.54 2010/04/16 13:48:28 pooka Exp $
 #
 #	LOWMEM_WSCONS -- RiscPC config with wscons for SMALL machines
 #
@@ -47,7 +47,6 @@ file-system	NFS		# Network file system
 file-system	FILECORE	# Acorn filecore file system
 file-system	KERNFS		# /kern
 #file-system	NULLFS		# loopback file system
-#file-system	PORTAL		# portal filesystem (still experimental)
 #file-system	PROCFS		# /proc
 #file-system	UMAPFS		# NULLFS + uid and gid remapping
 #file-system	UNION		# union file system
@@ -272,17 +271,17 @@ audio*		at vidcaudio0
 #eb0	at podulebus?			# EtherB network slot cards
 #ne*	at podulebus?			# NE2000 clone cards
 
-pseudo-device	loop	1		# network loopback
+pseudo-device	loop			# network loopback
 #pseudo-device	bpfilter		# packet filter
 #pseudo-device	sl			# CSLIP
 pseudo-device	ppp			# PPP
 #pseudo-device	tun			# network tunneling over tty
-#pseudo-device	ipfilter 1		# ip filter
+#pseudo-device	ipfilter		# ip filter
 #pseudo-device	strip			# STRIP
 pseudo-device	pty			# pseudo-terminals
 pseudo-device	vnd			# disk-like interface to files
 #pseudo-device	ccd	2		# concatenated disk devices
-#pseudo-device	fss	4		# file system snapshot device
+#pseudo-device	fss			# file system snapshot device
 pseudo-device	md	1		# Ramdisk driver
 pseudo-device	rnd			# /dev/random and /dev/urandom
 pseudo-device	clockctl		# user control of clock subsystem

@@ -1,4 +1,4 @@
-/*	$NetBSD: attimer_isa.c,v 1.11 2008/04/29 06:53:03 martin Exp $	*/
+/*	$NetBSD: attimer_isa.c,v 1.7 2007/10/19 12:00:15 ad Exp $	*/
 
 /*
  *  Copyright (c) 2005 The NetBSD Foundation.
@@ -12,6 +12,9 @@
  *  2. Redistributions in binary form must reproduce the above copyright
  *     notice, this list of conditions and the following disclaimer in the
  *     documentation and/or other materials provided with the distribution.
+ *  3. Neither the name of The NetBSD Foundation nor the names of its
+ *     contributors may be used to endorse or promote products derived
+ *     from this software without specific prior written permission.
  *
  *  THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  *  ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -58,7 +61,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: attimer_isa.c,v 1.11 2008/04/29 06:53:03 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: attimer_isa.c,v 1.7 2007/10/19 12:00:15 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -74,14 +77,15 @@ __KERNEL_RCSID(0, "$NetBSD: attimer_isa.c,v 1.11 2008/04/29 06:53:03 martin Exp 
 #include <dev/isa/isareg.h>
 #include <dev/isa/isavar.h>
 
-static int	attimer_isa_match(device_t, struct cfdata *, void *);
-static void	attimer_isa_attach(device_t, device_t, void *);
+static int	attimer_isa_match(struct device *, struct cfdata *, void *);
+static void	attimer_isa_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(attimer_isa, sizeof(struct attimer_softc),
-    attimer_isa_match, attimer_isa_attach, attimer_detach, NULL);
+CFATTACH_DECL(attimer_isa, sizeof(struct attimer_softc),
+    attimer_isa_match, attimer_isa_attach, NULL, NULL);
 
 static int
-attimer_isa_match(device_t parent, cfdata_t match, void *aux)
+attimer_isa_match(struct device *parent, struct cfdata *match,
+    void *aux)
 {
 	struct isa_attach_args *ia = aux;
 	bus_space_handle_t att_ioh;
@@ -123,21 +127,20 @@ attimer_isa_match(device_t parent, cfdata_t match, void *aux)
 }
 
 static void
-attimer_isa_attach(device_t parent, device_t self, void *aux)
+attimer_isa_attach(struct device *parent, struct device *self,
+    void *aux)
 {
-	struct attimer_softc *sc = device_private(self);
+	struct attimer_softc *sc = (struct attimer_softc *)self;
 	struct isa_attach_args *ia = aux;
 
-	sc->sc_dev = self;
 	sc->sc_iot = ia->ia_iot;
 
 	aprint_naive(": AT Timer\n");
 	aprint_normal(": AT Timer\n");
 
-	sc->sc_size = 4;
-	if (bus_space_map(sc->sc_iot, IO_TIMER1, sc->sc_size, 0,
-	                  &sc->sc_ioh) != 0)
-		aprint_error_dev(self, "could not map registers\n");
+	if (bus_space_map(sc->sc_iot, IO_TIMER1, 4, 0, &sc->sc_ioh) != 0)
+		aprint_error("%s: could not map registers\n",
+		    sc->sc_dev.dv_xname);
 	else
 		attimer_attach(sc);
 }

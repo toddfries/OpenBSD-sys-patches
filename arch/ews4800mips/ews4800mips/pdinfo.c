@@ -1,4 +1,4 @@
-/*	$NetBSD: pdinfo.c,v 1.4 2008/04/28 20:23:18 martin Exp $	*/
+/*	$NetBSD: pdinfo.c,v 1.1 2005/12/29 15:20:08 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 2004 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: pdinfo.c,v 1.4 2008/04/28 20:23:18 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pdinfo.c,v 1.1 2005/12/29 15:20:08 tsutsui Exp $");
 
 #include <sys/types.h>
 #include <sys/systm.h>
@@ -48,27 +55,27 @@ __KERNEL_RCSID(0, "$NetBSD: pdinfo.c,v 1.4 2008/04/28 20:23:18 martin Exp $");
 #include <machine/sector.h>
 #include <machine/pdinfo.h>
 
-bool
+boolean_t
 pdinfo_sector(void *rwops, struct pdinfo_sector *pdinfo)
 {
 
 	if (!sector_read(rwops, (void *)pdinfo, PDINFO_SECTOR))
-		return false;
+		return FALSE;
 
 	if (!pdinfo_sanity(pdinfo))
-		return false;
+		return FALSE;
 
-	return true;
+	return TRUE;
 }
 
-bool
+boolean_t
 pdinfo_valid(const struct pdinfo_sector *disk)
 {
 
 	return disk->magic == PDINFO_MAGIC;
 }
 
-bool
+boolean_t
 pdinfo_sanity(const struct pdinfo_sector *disk)
 {
 	const struct disk_geometory *geom;
@@ -76,7 +83,7 @@ pdinfo_sanity(const struct pdinfo_sector *disk)
 
 	if (!pdinfo_valid(disk)) {
 		DPRINTF("no physical disk info.\n");
-		return false;
+		return FALSE;
 	}
 
 	geom = &disk->geometory;
@@ -122,5 +129,5 @@ pdinfo_sanity(const struct pdinfo_sector *disk)
 		}
 	}
 
-	return true;
+	return TRUE;
 }

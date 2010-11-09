@@ -1,30 +1,7 @@
-/*	$NetBSD: kb.c,v 1.9 2008/05/14 13:29:28 tsutsui Exp $	*/
-
-/*-
- * Copyright (c) 2001 Izumi Tsutsui.  All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
+/*	$NetBSD: kb.c,v 1.7 2005/12/11 12:18:23 christos Exp $	*/
 
 /*
+ * Copyright (c) 2001 Izumi Tsutsui.
  * Copyright (c) 2000 Tsubai Masanari.
  * All rights reserved.
  *
@@ -52,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kb.c,v 1.9 2008/05/14 13:29:28 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kb.c,v 1.7 2005/12/11 12:18:23 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -73,7 +50,7 @@ void	kb_cngetc(void *, u_int *, int *);
 void	kb_cnpollc(void *, int);
 int	kb_enable(void *, int);
 void	kb_set_leds(void *, int);
-int	kb_ioctl(void *, u_long, void *, int, struct lwp *);
+int	kb_ioctl(void *, u_long, caddr_t, int, struct lwp *);
 
 extern struct wscons_keydesc newskb_keydesctab[];
 
@@ -167,7 +144,7 @@ kb_set_leds(void *v, int on)
 }
 
 int
-kb_ioctl(void *v, u_long cmd, void *data, int flag, struct lwp *l)
+kb_ioctl(void *v, u_long cmd, caddr_t data, int flag, struct lwp *l)
 {
 #if 0
 	struct console_softc *cs = v;

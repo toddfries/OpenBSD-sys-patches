@@ -1,4 +1,4 @@
-/*      $NetBSD: sa11x1_pcic.c,v 1.19 2008/06/03 13:45:22 rafal Exp $        */
+/*      $NetBSD: sa11x1_pcic.c,v 1.13 2006/06/27 13:58:08 peter Exp $        */
 
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sa11x1_pcic.c,v 1.19 2008/06/03 13:45:22 rafal Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sa11x1_pcic.c,v 1.13 2006/06/27 13:58:08 peter Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -58,23 +65,6 @@ __KERNEL_RCSID(0, "$NetBSD: sa11x1_pcic.c,v 1.19 2008/06/03 13:45:22 rafal Exp $
 
 static int	sacpcic_print(void *, const char *);
 
-static void
-sacpcic_config_deferred(struct device *dev)
-{
-	struct sacpcic_softc *sc = (struct sacpcic_softc *)dev;
-	struct sapcic_socket *so;
-	int i;
-
-	for (i = 0; i < 2; i++) {
-		so = &sc->sc_socket[i];
-		sapcic_kthread_create(so);
-
-		sacc_intr_establish((sacc_chipset_tag_t)so->pcictag_cookie,
-		    i ? IRQ_S1_CDVALID : IRQ_S0_CDVALID,
-		    IST_EDGE_RAISE, IPL_BIO, sapcic_intr, so);
-	}
-}
-
 void
 sacpcic_attach_common(struct sacc_softc *psc, struct sacpcic_softc *sc,
     void *aux, void (* socket_setup_hook)(struct sapcic_socket *))
@@ -86,8 +76,6 @@ sacpcic_attach_common(struct sacc_softc *psc, struct sacpcic_softc *sc,
 
 	sc->sc_pc.sc_iot = psc->sc_iot;
 	sc->sc_ioh = psc->sc_ioh;
-
-	mutex_init(&sc->sc_pc.sc_lock, MUTEX_DEFAULT, IPL_NONE);
 
 	for (i = 0; i < 2; i++) {
 		sc->sc_socket[i].sc = (struct sapcic_softc *)sc;
@@ -110,9 +98,20 @@ sacpcic_attach_common(struct sacc_softc *psc, struct sacpcic_softc *sc,
 		sc->sc_socket[i].pcmcia =
 		    config_found_ia(&sc->sc_pc.sc_dev, "pcmciabus", &paa,
 				    sacpcic_print);
-	}
 
-	config_interrupts(&sc->sc_pc.sc_dev, sacpcic_config_deferred);
+		sacc_intr_establish((sacc_chipset_tag_t)psc,
+				    i ? IRQ_S1_CDVALID : IRQ_S0_CDVALID,
+				    IST_EDGE_RAISE, IPL_BIO, sapcic_intr,
+				    &sc->sc_socket[i]);
+
+		/* schedule kthread creation */
+		kthread_create(sapcic_kthread_create, &sc->sc_socket[i]);
+
+#if 0 /* XXX */
+		/* establish_intr should be after creating the kthread */
+		config_interrupt(&sc->sc_socket[i], sacpcic_config_intr);
+#endif
+	}
 }
 
 int

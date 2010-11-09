@@ -1,4 +1,4 @@
-/*	$NetBSD: disksubr.c,v 1.24 2008/03/03 15:22:01 tsutsui Exp $	*/
+/*	$NetBSD: disksubr.c,v 1.18 2006/11/25 11:59:56 scw Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1988 Regents of the University of California.
@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: disksubr.c,v 1.24 2008/03/03 15:22:01 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: disksubr.c,v 1.18 2006/11/25 11:59:56 scw Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -57,13 +57,12 @@ mbr_findslice(struct mbr_partition *dp, struct buf *bp)
 	int i;
 
 	/* Note: Magic number is little-endian. */
-	mbrmagicp = (uint16_t *)((char *)bp->b_data + MBR_MAGIC_OFFSET);
+	mbrmagicp = (uint16_t *)(bp->b_data + MBR_MAGIC_OFFSET);
 	if (*mbrmagicp != MBR_MAGIC)
 		return NO_MBR_SIGNATURE;
 
 	/* XXX how do we check veracity/bounds of this? */
-	memcpy(dp, (char *)bp->b_data + MBR_PART_OFFSET,
-		MBR_PART_COUNT * sizeof(*dp));
+	memcpy(dp, bp->b_data + MBR_PART_OFFSET, MBR_PART_COUNT * sizeof(*dp));
 
 	/* look for NetBSD partition */
 	for (i = 0; i < MBR_PART_COUNT; i++) {
@@ -162,7 +161,11 @@ readdisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp,
 			pp = &lp->d_partitions[RAW_PART + 1 + i];
 			pp->p_offset = dp->mbrp_start;
 			pp->p_size = dp->mbrp_size;
-			pp->p_fstype = xlat_mbr_fstype(dp->mbrp_type);
+			if (dp->mbrp_type == MBR_PTYPE_LNXEXT2)
+				pp->p_fstype = FS_EX2FS;
+
+			if (dp->mbrp_type == MBR_PTYPE_LNXSWAP)
+				pp->p_fstype = FS_SWAP;
 
 			/* is this ours? */
 			if (dp == ourdp) {
@@ -186,7 +189,7 @@ readdisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp,
 	bp->b_blkno = dospartoff + LABELSECTOR;
 	bp->b_cylinder = cyl;
 	bp->b_bcount = lp->d_secsize;
-	bp->b_oflags &= ~(BO_DONE);
+	bp->b_flags &= ~(B_DONE);
 	bp->b_flags |= B_READ;
 	(*strat)(bp);
 
@@ -196,8 +199,8 @@ readdisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp,
 		goto done;
 	}
 	for (dlp = (struct disklabel *)bp->b_data;
-	    dlp <= (struct disklabel *)((char *)bp->b_data + lp->d_secsize -
-		    sizeof(*dlp));
+	    dlp <= (struct disklabel *)(bp->b_data + lp->d_secsize -
+	    sizeof(*dlp));
 	    dlp = (struct disklabel *)((char *)dlp + sizeof(long))) {
 		if (dlp->d_magic != DISKMAGIC || dlp->d_magic2 != DISKMAGIC) {
 			if (msg == NULL)
@@ -223,7 +226,7 @@ readdisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp,
 		i = 0;
 		do {
 			/* read a bad sector table */
-			bp->b_oflags &= ~(BO_DONE);
+			bp->b_flags &= ~(B_DONE);
 			bp->b_flags |= B_READ;
 			bp->b_blkno = lp->d_secperunit - lp->d_nsectors + i;
 			if (lp->d_secsize > DEV_BSIZE)
@@ -248,12 +251,12 @@ readdisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp,
 				} else
 					msg = "bad sector table corrupted";
 			}
-		} while (bp->b_error != 0 && (i += 2) < 10 &&
+		} while ((bp->b_flags & B_ERROR) && (i += 2) < 10 &&
 		    i < lp->d_nsectors);
 	}
 
 done:
-	brelse(bp, 0);
+	brelse(bp);
 	return msg;
 }
 
@@ -362,7 +365,7 @@ writedisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp,
 	bp->b_blkno = dospartoff + LABELSECTOR;
 	bp->b_cylinder = cyl;
 	bp->b_bcount = lp->d_secsize;
-	bp->b_oflags &= ~(BO_DONE);
+	bp->b_flags &= ~(B_DONE);
 	bp->b_flags |= B_READ;
 	(*strat)(bp);
 
@@ -370,14 +373,13 @@ writedisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp,
 	if ((error = biowait(bp)) != 0)
 		goto done;
 	for (dlp = (struct disklabel *)bp->b_data;
-	    dlp <= (struct disklabel *)((char *)bp->b_data + lp->d_secsize -
-		    sizeof(*dlp));
+	    dlp <= (struct disklabel *)(bp->b_data + lp->d_secsize -
+	    sizeof(*dlp));
 	    dlp = (struct disklabel *)((char *)dlp + sizeof(long))) {
 		if (dlp->d_magic == DISKMAGIC && dlp->d_magic2 == DISKMAGIC &&
 		    dkcksum(dlp) == 0) {
 			*dlp = *lp;
-			bp->b_oflags &= ~(BO_DONE);
-			bp->b_flags &= ~(B_READ);
+			bp->b_flags &= ~(B_READ|B_DONE);
 			bp->b_flags |= B_WRITE;
 			(*strat)(bp);
 			error = biowait(bp);
@@ -387,6 +389,6 @@ writedisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp,
 	error = ESRCH;
 
  done:
-	brelse(bp, 0);
+	brelse(bp);
 	return error;
 }

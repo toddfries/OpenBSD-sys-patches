@@ -1,4 +1,4 @@
-/*	$NetBSD: fmv.c,v 1.10 2008/04/12 06:27:01 tsutsui Exp $	*/
+/*	$NetBSD: fmv.c,v 1.8 2007/10/19 11:59:51 ad Exp $	*/
 
 /*
  * All Rights Reserved, Copyright (C) Fujitsu Limited 1995
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: fmv.c,v 1.10 2008/04/12 06:27:01 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: fmv.c,v 1.8 2007/10/19 11:59:51 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -49,12 +49,6 @@ __KERNEL_RCSID(0, "$NetBSD: fmv.c,v 1.10 2008/04/12 06:27:01 tsutsui Exp $");
 #include <dev/ic/fmvreg.h>
 #include <dev/ic/fmvvar.h>
 
-#ifdef FMV_DEBUG
-#define DPRINTF	printf
-#else
-#define DPRINTF	while (/* CONSTCOND */0) printf
-#endif
-
 /*
  * Determine type and ethernet address.
  */
@@ -69,8 +63,10 @@ fmv_detect(bus_space_tag_t iot, bus_space_handle_t ioh, uint8_t *enaddr)
 	/* Make sure we got a valid station address. */
 	if ((enaddr[0] & 0x03) != 0x00 ||
 	    (enaddr[0] == 0x00 && enaddr[1] == 0x00 && enaddr[2] == 0x00)) {
-		DPRINTF("%s: invalid ethernet address\n", __func__);
-		return 0;
+#ifdef FMV_DEBUG
+		printf("fmv_detect: invalid ethernet address\n");
+#endif
+		return (0);
 	}
 
 	/* Determine the card type. */
@@ -95,11 +91,13 @@ fmv_detect(bus_space_tag_t iot, bus_space_handle_t ioh, uint8_t *enaddr)
 		break;
 	default:
 		type = 0;
-		DPRINTF("%s: unknown card\n", __func__);
+#ifdef FMV_DEBUG
+		printf("fmv_detect: unknown card\n");
+#endif
 		break;
 	}
 
-	return type;
+	return (type);
 }
 
 void
@@ -137,11 +135,10 @@ fmv_attach(struct mb86960_softc *sc)
 		break;
 	default:
 	  	/* Unknown card type: maybe a new model, but... */
-		aprint_normal("\n");
-		panic("%s: unknown FMV-18x card", device_xname(sc->sc_dev));
+		panic("\n%s: unknown FMV-18x card", sc->sc_dev.dv_xname);
 	}
 
-	aprint_normal(": %s Ethernet\n", typestr);
+	printf(": %s Ethernet\n", typestr);
 
 	/* This interface is always enabled. */
 	sc->sc_stat |= FE_STAT_ENABLED;

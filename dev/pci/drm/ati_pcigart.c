@@ -1,4 +1,4 @@
-/*	$NetBSD: ati_pcigart.c,v 1.6 2008/11/09 14:26:14 bjs Exp $	*/
+/*	$NetBSD: ati_pcigart.c,v 1.3 2007/12/11 11:48:40 lukem Exp $	*/
 
 /* ati_pcigart.h -- ATI PCI GART support -*- linux-c -*-
  * Created: Wed Dec 13 21:52:19 2000 by gareth@valinux.com
@@ -32,16 +32,18 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ati_pcigart.c,v 1.6 2008/11/09 14:26:14 bjs Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ati_pcigart.c,v 1.3 2007/12/11 11:48:40 lukem Exp $");
 /*
 __FBSDID("$FreeBSD: src/sys/dev/drm/ati_pcigart.c,v 1.3 2005/11/28 23:13:52 anholt Exp $");
 */
 
-#include "drmP.h"
+#include <dev/drm/drmP.h>
 
 #define ATI_PCIGART_PAGE_SIZE		4096	/* PCI GART page size */
+#define ATI_MAX_PCIGART_PAGES		8192	/* 32 MB aperture, 4K pages */
+#define ATI_PCIGART_TABLE_SIZE		32768
 
-int drm_ati_pcigart_init(drm_device_t *dev, struct drm_ati_pcigart_info *gart_info)
+int drm_ati_pcigart_init(drm_device_t *dev, drm_ati_pcigart_info *gart_info)
 {
 	unsigned long pages;
 	u32 *pci_gart = NULL, page_base;
@@ -54,7 +56,7 @@ int drm_ati_pcigart_init(drm_device_t *dev, struct drm_ati_pcigart_info *gart_in
 
 	if (gart_info->gart_table_location == DRM_ATI_GART_MAIN) {
 		/* GART table in system memory */
-		dev->sg->dmah = drm_pci_alloc(dev, gart_info->table_size, 0,
+		dev->sg->dmah = drm_pci_alloc(dev, ATI_PCIGART_TABLE_SIZE, 0,
 		    0xfffffffful);
 		if (dev->sg->dmah == NULL) {
 			DRM_ERROR("cannot allocate PCI GART table!\n");
@@ -69,9 +71,9 @@ int drm_ati_pcigart_init(drm_device_t *dev, struct drm_ati_pcigart_info *gart_in
 		pci_gart = gart_info->addr;
 	}
 	
-	pages = DRM_MIN(dev->sg->pages, gart_info->table_size / sizeof(u32));
+	pages = DRM_MIN(dev->sg->pages, ATI_MAX_PCIGART_PAGES);
 
-	bzero(pci_gart, gart_info->table_size);
+	bzero(pci_gart, ATI_PCIGART_TABLE_SIZE);
 
 #ifdef __FreeBSD__
 	KASSERT(PAGE_SIZE >= ATI_PCIGART_PAGE_SIZE, ("page size too small"));
@@ -83,28 +85,21 @@ int drm_ati_pcigart_init(drm_device_t *dev, struct drm_ati_pcigart_info *gart_in
 		page_base = (u32) dev->sg->busaddr[i];
 
 		for (j = 0; j < (PAGE_SIZE / ATI_PCIGART_PAGE_SIZE); j++) {
-			switch(gart_info->gart_reg_if) {
-			case DRM_ATI_GART_IGP:
-				*pci_gart = cpu_to_le32(page_base | 0xc);
-				break;
-			case DRM_ATI_GART_PCIE:
-				*pci_gart = cpu_to_le32((page_base >> 8) | 0xc);
-				break;
-			default:
+			if (gart_info->is_pcie)
+				*pci_gart = (cpu_to_le32(page_base) >> 8) | 0xc;
+			else
 				*pci_gart = cpu_to_le32(page_base);
-				break;
-			}
 			pci_gart++;
 			page_base += ATI_PCIGART_PAGE_SIZE;
 		}
 	}
 
-	agp_flush_cache();
+	DRM_MEMORYBARRIER();
 
 	return 1;
 }
 
-int drm_ati_pcigart_cleanup(drm_device_t *dev, struct drm_ati_pcigart_info *gart_info)
+int drm_ati_pcigart_cleanup(drm_device_t *dev, drm_ati_pcigart_info *gart_info)
 {
 	if (dev->sg == NULL) {
 		DRM_ERROR( "no scatter/gather memory!\n" );

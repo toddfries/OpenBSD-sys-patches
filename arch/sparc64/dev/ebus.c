@@ -1,4 +1,4 @@
-/*	$NetBSD: ebus.c,v 1.53 2008/10/13 12:25:22 nakayama Exp $	*/
+/*	$NetBSD: ebus.c,v 1.50 2006/02/13 21:47:11 cdi Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000, 2001 Matthew R. Green
@@ -12,6 +12,8 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -27,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ebus.c,v 1.53 2008/10/13 12:25:22 nakayama Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ebus.c,v 1.50 2006/02/13 21:47:11 cdi Exp $");
 
 #include "opt_ddb.h"
 
@@ -76,6 +78,7 @@ int ebus_debug = 0;
 #include <sparc64/dev/psychovar.h>
 #include <dev/ebus/ebusreg.h>
 #include <dev/ebus/ebusvar.h>
+#include <sparc64/sparc64/cache.h>
 
 struct ebus_softc {
 	struct device			sc_dev;
@@ -171,7 +174,7 @@ ebus_attach(struct device *parent, struct device *self, void *aux)
 	printf("\n");
 
 	pci_devinfo(pa->pa_id, pa->pa_class, 0, devinfo, sizeof(devinfo));
-	printf("%s: %s, revision 0x%02x\n", device_xname(self), devinfo,
+	printf("%s: %s, revision 0x%02x\n", self->dv_xname, devinfo,
 	    PCI_REVISION(pa->pa_class));
 
 	sc->sc_memtag = pa->pa_memt;

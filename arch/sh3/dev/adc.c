@@ -1,4 +1,4 @@
-/*	$NetBSD: adc.c,v 1.10 2008/12/16 22:35:25 christos Exp $ */
+/*	$NetBSD: adc.c,v 1.7 2006/10/27 00:08:32 uwe Exp $ */
 
 /*
  * Copyright (c) 2003 Valeriy E. Ushakov
@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: adc.c,v 1.10 2008/12/16 22:35:25 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: adc.c,v 1.7 2006/10/27 00:08:32 uwe Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -42,18 +42,23 @@ __KERNEL_RCSID(0, "$NetBSD: adc.c,v 1.10 2008/12/16 22:35:25 christos Exp $");
 #define ADC_(x)    (*((volatile uint8_t *)SH7709_AD ## x))
 
 
-static int	adc_match(device_t, cfdata_t, void *);
-static void	adc_attach(device_t, device_t, void *);
+struct adc_softc {
+	struct device sc_dev;
+};
 
-CFATTACH_DECL_NEW(adc, 0,
+static int	adc_match(struct device *, struct cfdata *, void *);
+static void	adc_attach(struct device *, struct device *, void *);
+
+CFATTACH_DECL(adc, sizeof(struct adc_softc),
     adc_match, adc_attach, NULL, NULL);
 
-static int	adc_search(device_t, cfdata_t, const int *, void *);
+static int	adc_search(struct device *, struct cfdata *,
+			   const int *, void *);
 static int	adc_print(void *, const char *);
 
 
 static int
-adc_match(device_t parent, cfdata_t cf, void *aux)
+adc_match(struct device *parent, struct cfdata *cfp, void *aux)
 {
 
 	/* REMINDER: also in 7727 and 7729 */
@@ -61,7 +66,7 @@ adc_match(device_t parent, cfdata_t cf, void *aux)
 	    && (cpu_product != CPU_PRODUCT_7709A))
 		return (0);
 
-	if (strcmp(cf->cf_name, "adc") != 0)
+	if (strcmp(cfp->cf_name, "adc") != 0)
 		return (0);
 
 	return (1);
@@ -69,21 +74,21 @@ adc_match(device_t parent, cfdata_t cf, void *aux)
 
 
 static void
-adc_attach(device_t parent, device_t self, void *aux)
+adc_attach(struct device *parent, struct device *self, void *aux)
 {
+	/* struct adc_softc *sc = (struct adc_softc *)self; */
 
 	ADC_(CSR) = 0;
 	ADC_(CR) = 0;
 
-	aprint_naive("\n");
-	aprint_normal("\n");
-
+	printf("\n");
 	config_search_ia(adc_search, self, "adc", NULL);
 }
 
 
 static int
-adc_search(device_t parent, cfdata_t cf, const int *ldesc, void *aux)
+adc_search(struct device *parent, struct cfdata *cf,
+	   const int *ldesc, void *aux)
 {
 
 	if (config_match(parent, cf, NULL) > 0)
@@ -131,12 +136,14 @@ adc_sample_channel(int chan)
 	csr = ADC_(CSR);
 	if ((csr & SH7709_ADCSR_ADST) != 0) {
 		/* another conversion is in progress?! */
-	        snprintb(bits, sizeof(buts), SH7709_ADCSR_BITS, csr);
-		printf("adc_sample_channel(%d): CSR=%s", chan, bits);
+		printf("adc_sample_channel(%d): CSR=%s", chan,
+		       bitmask_snprintf(csr, SH7709_ADCSR_BITS,
+					bits, sizeof(bits)));
 		cr = ADC_(CR);
 		cr &= ~0x07;	/* three lower bits always read as 1s */
-	        snprintb(bits, sizeof(buts), SH7709_ADCR_BITS, cr);
-		printf(", CR=%s\n", bits);
+		printf(", CR=%s\n",
+		       bitmask_snprintf(cr, SH7709_ADCR_BITS,
+					bits, sizeof(bits)));
 		return (-1);
 	}
 #endif

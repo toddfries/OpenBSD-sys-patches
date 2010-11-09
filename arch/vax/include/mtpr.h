@@ -1,4 +1,4 @@
-/*      $NetBSD: mtpr.h,v 1.20 2007/02/16 01:34:03 matt Exp $     */
+/*      $NetBSD: mtpr.h,v 1.19 2005/12/24 23:24:07 perry Exp $     */
 
 /*
  * Copyright (c) 1994 Ludd, University of Lule}, Sweden.
@@ -166,25 +166,21 @@
 
 #ifndef	_LOCORE
 
-static inline void
-mtpr(register_t val, int reg)
-{
-	__asm volatile (
-		"mtpr %0,%1"
-	    : /* No output */
-	    : "g" (val), "g" (reg));
+#define mtpr(val,reg)						\
+{								\
+	__asm volatile ("mtpr %0,%1"			\
+			: /* No output */			\
+			: "g" ((long)(val)), "g" (reg));        \
 }
 
-static inline register_t
-mfpr(int reg)
-{
-	register_t __val;
-	__asm volatile (
-		"mfpr %1,%0"
-	    : "=g" (__val)
-	    : "g" (reg));
-	return __val;
-}
+#define mfpr(reg)					\
+({							\
+	register int __val;				\
+	__asm volatile ("mfpr %1,%0"		\
+			: "=g" (__val)			\
+			: "g" (reg));			\
+	__val;						\
+})
 #endif	/* _LOCORE */
 
 #endif /* _VAX_MTPR_H_ */

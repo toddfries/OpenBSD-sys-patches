@@ -1,4 +1,4 @@
-/*	$NetBSD: linux_ipc.c,v 1.52 2009/02/18 14:30:43 njoly Exp $	*/
+/*	$NetBSD: linux_ipc.c,v 1.37 2006/09/13 19:55:49 manu Exp $	*/
 
 /*-
  * Copyright (c) 1995, 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: linux_ipc.c,v 1.52 2009/02/18 14:30:43 njoly Exp $");
+__KERNEL_RCSID(0, "$NetBSD: linux_ipc.c,v 1.37 2006/09/13 19:55:49 manu Exp $");
 
 #if defined(_KERNEL_OPT)
 #include "opt_sysv.h"
@@ -42,9 +49,9 @@ __KERNEL_RCSID(0, "$NetBSD: linux_ipc.c,v 1.52 2009/02/18 14:30:43 njoly Exp $")
 #include <sys/msg.h>
 #include <sys/proc.h>
 #include <sys/systm.h>
-#include <sys/vnode.h>
 
 #include <sys/mount.h>
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 
 #include <compat/linux/common/linux_types.h>
@@ -59,7 +66,6 @@ __KERNEL_RCSID(0, "$NetBSD: linux_ipc.c,v 1.52 2009/02/18 14:30:43 njoly Exp $")
 #include <compat/linux/linux_syscall.h>
 
 #include <compat/linux/common/linux_ipccall.h>
-#include <compat/linux/common/linux_machdep.h>
 
 /*
  * Note: Not all linux architechtures have explicit versions
@@ -89,7 +95,9 @@ __KERNEL_RCSID(0, "$NetBSD: linux_ipc.c,v 1.52 2009/02/18 14:30:43 njoly Exp $")
  * order of the fields is different.
  */
 void
-linux_to_bsd_ipc_perm(struct linux_ipc_perm *lpp, struct ipc_perm *bpp)
+linux_to_bsd_ipc_perm(lpp, bpp)
+	struct linux_ipc_perm *lpp;
+	struct ipc_perm *bpp;
 {
 
 	bpp->_key = lpp->l_key;
@@ -102,7 +110,9 @@ linux_to_bsd_ipc_perm(struct linux_ipc_perm *lpp, struct ipc_perm *bpp)
 }
 
 void
-linux_to_bsd_ipc64_perm(struct linux_ipc64_perm *lpp, struct ipc_perm *bpp)
+linux_to_bsd_ipc64_perm(lpp, bpp)
+	struct linux_ipc64_perm *lpp;
+	struct ipc_perm *bpp;
 {
 	bpp->_key = lpp->l_key;
 	bpp->uid = lpp->l_uid;
@@ -114,7 +124,9 @@ linux_to_bsd_ipc64_perm(struct linux_ipc64_perm *lpp, struct ipc_perm *bpp)
 }
 
 void
-bsd_to_linux_ipc_perm(struct ipc_perm *bpp, struct linux_ipc_perm *lpp)
+bsd_to_linux_ipc_perm(bpp, lpp)
+	struct ipc_perm *bpp;
+	struct linux_ipc_perm *lpp;
 {
 
 	lpp->l_key = bpp->_key;
@@ -127,7 +139,9 @@ bsd_to_linux_ipc_perm(struct ipc_perm *bpp, struct linux_ipc_perm *lpp)
 }
 
 void
-bsd_to_linux_ipc64_perm(struct ipc_perm *bpp, struct linux_ipc64_perm *lpp)
+bsd_to_linux_ipc64_perm(bpp, lpp)
+	struct ipc_perm *bpp;
+	struct linux_ipc64_perm *lpp;
 {
 	lpp->l_key = bpp->_key;
 	lpp->l_uid = bpp->uid;
@@ -150,8 +164,11 @@ bsd_to_linux_ipc64_perm(struct ipc_perm *bpp, struct linux_ipc64_perm *lpp)
  * Convert between Linux and NetBSD semid_ds structures.
  */
 void
-bsd_to_linux_semid_ds(struct semid_ds *bs, struct linux_semid_ds *ls)
+bsd_to_linux_semid_ds(bs, ls)
+	struct semid_ds *bs;
+	struct linux_semid_ds *ls;
 {
+
 	bsd_to_linux_ipc_perm(&bs->sem_perm, &ls->l_sem_perm);
 	ls->l_sem_otime = bs->sem_otime;
 	ls->l_sem_ctime = bs->sem_ctime;
@@ -160,17 +177,11 @@ bsd_to_linux_semid_ds(struct semid_ds *bs, struct linux_semid_ds *ls)
 }
 
 void
-bsd_to_linux_semid64_ds(struct semid_ds *bs, struct linux_semid64_ds *ls)
+linux_to_bsd_semid_ds(ls, bs)
+	struct linux_semid_ds *ls;
+	struct semid_ds *bs;
 {
-	bsd_to_linux_ipc64_perm(&bs->sem_perm, &ls->l_sem_perm);
-	ls->l_sem_otime = bs->sem_otime;
-	ls->l_sem_ctime = bs->sem_ctime;
-	ls->l_sem_nsems = bs->sem_nsems;
-}
 
-void
-linux_to_bsd_semid_ds(struct linux_semid_ds *ls, struct semid_ds *bs)
-{
 	linux_to_bsd_ipc_perm(&ls->l_sem_perm, &bs->sem_perm);
 	bs->sem_otime = ls->l_sem_otime;
 	bs->sem_ctime = ls->l_sem_ctime;
@@ -178,64 +189,37 @@ linux_to_bsd_semid_ds(struct linux_semid_ds *ls, struct semid_ds *bs)
 	bs->_sem_base = ls->l_sem_base;
 }
 
-void
-linux_to_bsd_semid64_ds(struct linux_semid64_ds *ls, struct semid_ds *bs)
-{
-	linux_to_bsd_ipc64_perm(&ls->l_sem_perm, &bs->sem_perm);
-	bs->sem_otime = ls->l_sem_otime;
-	bs->sem_ctime = ls->l_sem_ctime;
-	bs->sem_nsems = ls->l_sem_nsems;
-}
-
 /*
  * Most of this can be handled by directly passing the arguments on; we
  * just need to frob the `cmd' and convert the semid_ds and semun.
  */
 int
-linux_sys_semctl(struct lwp *l, const struct linux_sys_semctl_args *uap, register_t *retval)
+linux_sys_semctl(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct linux_sys_semctl_args /* {
 		syscallarg(int) semid;
 		syscallarg(int) semnum;
 		syscallarg(int) cmd;
 		syscallarg(union linux_semun) arg;
-	} */
+	} */ *uap = v;
 	struct semid_ds sembuf;
 	struct linux_semid_ds lsembuf;
-	struct linux_semid64_ds lsembuf64;
 	union __semun semun;
-	int cmd, lcmd, error;
+	int cmd, error;
 	void *pass_arg = NULL;
 
-	lcmd = SCARG(uap, cmd);
-#ifdef LINUX_IPC_FORCE64
-	if (lcmd == LINUX_IPC_STAT || lcmd == LINUX_IPC_SET)
-		lcmd |= LINUX_IPC_64;
-#endif
+	cmd = SCARG(uap, cmd);
 
-	switch (lcmd) {
+	switch (cmd) {
 	case LINUX_IPC_SET:
-		error = copyin(SCARG(uap, arg).l_buf, &lsembuf,
-		    sizeof(lsembuf));
-		if (error)
-			return (error);
-		linux_to_bsd_semid_ds(&lsembuf, &sembuf);
-		pass_arg = &sembuf;
-		cmd = IPC_SET;
-		break;
-
-	case LINUX_IPC_SET | LINUX_IPC_64:
-		error = copyin(SCARG(uap, arg).l_buf, &lsembuf64,
-		    sizeof(lsembuf64));
-		if (error)
-			return (error);
-		linux_to_bsd_semid64_ds(&lsembuf64, &sembuf);
 		pass_arg = &sembuf;
 		cmd = IPC_SET;
 		break;
 
 	case LINUX_IPC_STAT:
-	case LINUX_IPC_STAT | LINUX_IPC_64:
 		pass_arg = &sembuf;
 		cmd = IPC_STAT;
 		break;
@@ -282,24 +266,21 @@ linux_sys_semctl(struct lwp *l, const struct linux_sys_semctl_args *uap, registe
 		return (EINVAL);
 	}
 
+	if (cmd == IPC_SET) {
+		error = copyin(SCARG(uap, arg).l_buf, &lsembuf,
+		    sizeof(lsembuf));
+		if (error)
+			return (error);
+		linux_to_bsd_semid_ds(&lsembuf, &sembuf);
+	}
+
 	error = semctl1(l, SCARG(uap, semid), SCARG(uap, semnum), cmd,
 	    pass_arg, retval);
-	if (error)
-		return error;
 
-	switch (lcmd) {
-	case LINUX_IPC_STAT:
+	if (error == 0 && cmd == IPC_STAT) {
 		bsd_to_linux_semid_ds(&sembuf, &lsembuf);
 		error = copyout(&lsembuf, SCARG(uap, arg).l_buf,
 		    sizeof(lsembuf));
-		break;
-	case LINUX_IPC_STAT | LINUX_IPC_64:
-		bsd_to_linux_semid64_ds(&sembuf, &lsembuf64);
-		error = copyout(&lsembuf64, SCARG(uap, arg).l_buf,
-		    sizeof(lsembuf64));
-		break;
-	default:
-		break;
 	}
 
 	return (error);
@@ -309,7 +290,9 @@ linux_sys_semctl(struct lwp *l, const struct linux_sys_semctl_args *uap, registe
 #ifdef SYSVMSG
 
 void
-linux_to_bsd_msqid_ds(struct linux_msqid_ds *lmp, struct msqid_ds *bmp)
+linux_to_bsd_msqid_ds(lmp, bmp)
+	struct linux_msqid_ds *lmp;
+	struct msqid_ds *bmp;
 {
 
 	linux_to_bsd_ipc_perm(&lmp->l_msg_perm, &bmp->msg_perm);
@@ -326,21 +309,9 @@ linux_to_bsd_msqid_ds(struct linux_msqid_ds *lmp, struct msqid_ds *bmp)
 }
 
 void
-linux_to_bsd_msqid64_ds(struct linux_msqid64_ds *lmp, struct msqid_ds *bmp)
-{
-	linux_to_bsd_ipc64_perm(&lmp->l_msg_perm, &bmp->msg_perm);
-	bmp->msg_stime = lmp->l_msg_stime;
-	bmp->msg_rtime = lmp->l_msg_rtime;
-	bmp->msg_ctime = lmp->l_msg_ctime;
-	bmp->_msg_cbytes = lmp->l_msg_cbytes;
-	bmp->msg_qnum = lmp->l_msg_qnum;
-	bmp->msg_qbytes = lmp->l_msg_qbytes;
-	bmp->msg_lspid = lmp->l_msg_lspid;
-	bmp->msg_lrpid = lmp->l_msg_lrpid;
-}
-
-void
-bsd_to_linux_msqid_ds(struct msqid_ds *bmp, struct linux_msqid_ds *lmp)
+bsd_to_linux_msqid_ds(bmp, lmp)
+	struct msqid_ds *bmp;
+	struct linux_msqid_ds *lmp;
 {
 
 	bsd_to_linux_ipc_perm(&bmp->msg_perm, &lmp->l_msg_perm);
@@ -356,83 +327,56 @@ bsd_to_linux_msqid_ds(struct msqid_ds *bmp, struct linux_msqid_ds *lmp)
 	lmp->l_msg_ctime = bmp->msg_ctime;
 }
 
-void
-bsd_to_linux_msqid64_ds(struct msqid_ds *bmp, struct linux_msqid64_ds *lmp)
-{
-	bsd_to_linux_ipc64_perm(&bmp->msg_perm, &lmp->l_msg_perm);
-	lmp->l_msg_stime = bmp->msg_stime;
-	lmp->l_msg_rtime = bmp->msg_rtime;
-	lmp->l_msg_ctime = bmp->msg_ctime;
-	lmp->l_msg_cbytes = bmp->_msg_cbytes;
-	lmp->l_msg_qnum = bmp->msg_qnum;
-	lmp->l_msg_qbytes = bmp->msg_qbytes;
-	lmp->l_msg_lspid = bmp->msg_lspid;
-	lmp->l_msg_lrpid = bmp->msg_lrpid;
-}
-
 int
-linux_sys_msgctl(struct lwp *l, const struct linux_sys_msgctl_args *uap, register_t *retval)
+linux_sys_msgctl(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct linux_sys_msgctl_args /* {
 		syscallarg(int) msqid;
 		syscallarg(int) cmd;
 		syscallarg(struct linux_msqid_ds *) buf;
-	} */
-	struct msqid_ds bm, *bmp = NULL;
+	} */ *uap = v;
+	struct proc *p = l->l_proc;
+	caddr_t sg;
+	struct sys___msgctl13_args nua;
+	struct msqid_ds *bmp, bm;
 	struct linux_msqid_ds lm;
-	struct linux_msqid64_ds lm64;
-	int cmd, lcmd, error;
+	int error;
 
-	lcmd = SCARG(uap, cmd);
-#ifdef LINUX_IPC_FORCE64
-	if (lcmd == LINUX_IPC_STAT || lcmd == LINUX_IPC_SET)
-		lcmd |= LINUX_IPC_64;
-#endif
-
-	switch (lcmd) {
+	SCARG(&nua, msqid) = SCARG(uap, msqid);
+	switch (SCARG(uap, cmd)) {
 	case LINUX_IPC_STAT:
-	case LINUX_IPC_STAT|LINUX_IPC_64:
-		cmd = IPC_STAT;
-		bmp = &bm;
-		break;
+		sg = stackgap_init(p, 0);
+		bmp = stackgap_alloc(p, &sg, sizeof (struct msqid_ds));
+		SCARG(&nua, cmd) = IPC_STAT;
+		SCARG(&nua, buf) = bmp;
+		if ((error = sys___msgctl13(l, &nua, retval)))
+			return error;
+		if ((error = copyin(bmp, &bm, sizeof bm)))
+			return error;
+		bsd_to_linux_msqid_ds(&bm, &lm);
+		return copyout(&lm, SCARG(uap, buf), sizeof lm);
 	case LINUX_IPC_SET:
 		if ((error = copyin(SCARG(uap, buf), &lm, sizeof lm)))
 			return error;
 		linux_to_bsd_msqid_ds(&lm, &bm);
-		cmd = IPC_SET;
-		bmp = &bm;
-		break;
-	case LINUX_IPC_SET|LINUX_IPC_64:
-		if ((error = copyin(SCARG(uap, buf), &lm64, sizeof lm64)))
+		sg = stackgap_init(p, 0);
+		bmp = stackgap_alloc(p, &sg, sizeof bm);
+		if ((error = copyout(&bm, bmp, sizeof bm)))
 			return error;
-		linux_to_bsd_msqid64_ds(&lm64, &bm);
-		cmd = IPC_SET;
-		bmp = &bm;
+		SCARG(&nua, cmd) = IPC_SET;
+		SCARG(&nua, buf) = bmp;
 		break;
 	case LINUX_IPC_RMID:
-		cmd = IPC_RMID;
+		SCARG(&nua, cmd) = IPC_RMID;
+		SCARG(&nua, buf) = NULL;
 		break;
 	default:
 		return EINVAL;
 	}
-
-	if ((error = msgctl1(l, SCARG(uap, msqid), cmd, bmp)))
-		return error;
-
-	switch (lcmd) {
-	case LINUX_IPC_STAT:
-		bsd_to_linux_msqid_ds(&bm, &lm);
-		error = copyout(&lm, SCARG(uap, buf), sizeof lm);
-		break;
-	case LINUX_IPC_STAT|LINUX_IPC_64:
-		bsd_to_linux_msqid64_ds(&bm, &lm64);
-		error = copyout(&lm64, SCARG(uap, buf), sizeof lm64);
-		break;
-	default:
-		break;
-	}
-
-	return error;
+	return sys___msgctl13(l, &nua, retval);
 }
 #endif /* SYSVMSG */
 
@@ -443,20 +387,19 @@ linux_sys_msgctl(struct lwp *l, const struct linux_sys_msgctl_args *uap, registe
  * the segment would be removed.
  */
 int
-linux_sys_shmget(struct lwp *l, const struct linux_sys_shmget_args *uap, register_t *retval)
+linux_sys_shmget(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct sys_shmget_args /* {
 		syscallarg(key_t) key;
 		syscallarg(size_t) size;
 		syscallarg(int) shmflg;
-	} */
-	struct sys_shmget_args bsd_ua;
+	} */ *uap = v;
 
-	SCARG(&bsd_ua, key) = SCARG(uap, key);
-	SCARG(&bsd_ua, size) = SCARG(uap, size);
-	SCARG(&bsd_ua, shmflg) = SCARG(uap, shmflg) | _SHM_RMLINGER;
-
-	return sys_shmget(l, &bsd_ua, retval);
+	SCARG(uap, shmflg) |= _SHM_RMLINGER;
+	return sys_shmget(l, uap, retval);
 }
 
 /*
@@ -466,23 +409,29 @@ linux_sys_shmget(struct lwp *l, const struct linux_sys_shmget_args *uap, registe
  */
 #ifndef __amd64__
 int
-linux_sys_shmat(struct lwp *l, const struct linux_sys_shmat_args *uap, register_t *retval)
+linux_sys_shmat(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct linux_sys_shmat_args /* {
 		syscallarg(int) shmid;
 		syscallarg(void *) shmaddr;
 		syscallarg(int) shmflg;
 		syscallarg(u_long *) raddr;
-	} */
+	} */ *uap = v;
 	int error;
 
-	if ((error = sys_shmat(l, (const void *)uap, retval)))
+	if ((error = sys_shmat(l, uap, retval)))
 		return error;
 
-	if ((error = copyout(&retval[0], SCARG(uap, raddr), sizeof retval[0])))
+#ifndef __amd64__
+	if ((error = copyout(&retval[0], (caddr_t) SCARG(uap, raddr),
+	     sizeof retval[0])))
 		return error;
 
 	retval[0] = 0;
+#endif
 	return 0;
 }
 #endif /* __amd64__ */
@@ -496,7 +445,9 @@ linux_sys_shmat(struct lwp *l, const struct linux_sys_shmat_args *uap, register_
  * We abuse a Linux internal field for that.
  */
 void
-linux_to_bsd_shmid_ds(struct linux_shmid_ds *lsp, struct shmid_ds *bsp)
+linux_to_bsd_shmid_ds(lsp, bsp)
+	struct linux_shmid_ds *lsp;
+	struct shmid_ds *bsp;
 {
 
 	linux_to_bsd_ipc_perm(&lsp->l_shm_perm, &bsp->shm_perm);
@@ -511,7 +462,9 @@ linux_to_bsd_shmid_ds(struct linux_shmid_ds *lsp, struct shmid_ds *bsp)
 }
 
 void
-linux_to_bsd_shmid64_ds(struct linux_shmid64_ds *lsp, struct shmid_ds *bsp)
+linux_to_bsd_shmid64_ds(lsp, bsp)
+	struct linux_shmid64_ds *lsp;
+	struct shmid_ds *bsp;
 {
 
 	linux_to_bsd_ipc64_perm(&lsp->l_shm_perm, &bsp->shm_perm);
@@ -526,7 +479,9 @@ linux_to_bsd_shmid64_ds(struct linux_shmid64_ds *lsp, struct shmid_ds *bsp)
 }
 
 void
-bsd_to_linux_shmid_ds(struct shmid_ds *bsp, struct linux_shmid_ds *lsp)
+bsd_to_linux_shmid_ds(bsp, lsp)
+	struct shmid_ds *bsp;
+	struct linux_shmid_ds *lsp;
 {
 
 	bsd_to_linux_ipc_perm(&bsp->shm_perm, &lsp->l_shm_perm);
@@ -541,7 +496,9 @@ bsd_to_linux_shmid_ds(struct shmid_ds *bsp, struct linux_shmid_ds *lsp)
 }
 
 void
-bsd_to_linux_shmid64_ds(struct shmid_ds *bsp, struct linux_shmid64_ds *lsp)
+bsd_to_linux_shmid64_ds(bsp, lsp)
+	struct shmid_ds *bsp;
+	struct linux_shmid64_ds *lsp;
 {
 	bsd_to_linux_ipc64_perm(&bsp->shm_perm, &lsp->l_shm_perm);
 	lsp->l_shm_segsz = bsp->shm_segsz;
@@ -555,70 +512,94 @@ bsd_to_linux_shmid64_ds(struct shmid_ds *bsp, struct linux_shmid64_ds *lsp)
 }
 
 /*
- * shmctl.
+ * shmctl.SHM_LOCK and SHM_UNLOCK are passed on, but currently not implemented
+ * by NetBSD itself.
  *
  * The usual structure conversion and massaging is done.
  */
 int
-linux_sys_shmctl(struct lwp *l, const struct linux_sys_shmctl_args *uap, register_t *retval)
+linux_sys_shmctl(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct linux_sys_shmctl_args /* {
 		syscallarg(int) shmid;
 		syscallarg(int) cmd;
 		syscallarg(struct linux_shmid_ds *) buf;
-	} */
-	struct shmid_ds bs;
+	} */ *uap = v;
+	struct proc *p = l->l_proc;
+	caddr_t sg;
+	struct sys___shmctl13_args nua;
+	struct shmid_ds *bsp, bs;
 	struct linux_shmid_ds ls;
 	struct linux_shmid64_ds ls64;
 	struct linux_shminfo64 lsi64;
 	struct linux_shm_info lsi;
-	int error, i, cmd, shmid;
+	int error, i, cmd;
 
-	shmid = SCARG(uap, shmid);
+	SCARG(&nua, shmid) = SCARG(uap, shmid);
 	cmd = SCARG(uap, cmd);
-#ifdef LINUX_IPC_FORCE64
-	cmd |= LINUX_IPC_64;
-#endif
-
-	switch (cmd & ~LINUX_IPC_64) {
-	case LINUX_SHM_STAT:
-		shmid = IXSEQ_TO_IPCID(shmid, shmsegs[shmid].shm_perm);
-		retval[0] = shmid;
-		/*FALLTHROUGH*/
-
+	switch (cmd) {
 	case LINUX_IPC_STAT:
-		error = shmctl1(l, shmid, IPC_STAT, &bs);
-		if (error != 0)
+	case LINUX_SHM_STAT:
+		sg = stackgap_init(p, 0);
+		bsp = stackgap_alloc(p, &sg, sizeof(struct shmid_ds));
+		SCARG(&nua, cmd) = IPC_STAT;
+		SCARG(&nua, buf) = bsp;
+		if ((error = sys___shmctl13(l, &nua, retval)))
 			return error;
-		if (cmd & LINUX_IPC_64) {
-			bsd_to_linux_shmid64_ds(&bs, &ls64);
-			error = copyout(&ls64, SCARG(uap, buf), sizeof ls64);
-		} else {
-			bsd_to_linux_shmid_ds(&bs, &ls);
-			error = copyout(&ls, SCARG(uap, buf), sizeof ls);
+		if ((error = copyin(SCARG(&nua, buf), &bs, sizeof bs)))
+			return error;
+		bsd_to_linux_shmid_ds(&bs, &ls);
+		if (cmd == LINUX_SHM_STAT)
+			retval[0] = IXSEQ_TO_IPCID(bs.shm_perm._key,
+			    bs.shm_perm);
+		return copyout(&ls, SCARG(uap, buf), sizeof ls);
+
+	case LINUX_IPC_STAT|LINUX_IPC_64:
+	case LINUX_SHM_STAT|LINUX_IPC_64:
+		sg = stackgap_init(p,0);
+		bsp = stackgap_alloc(p, &sg, sizeof(struct linux_shmid64_ds));
+		SCARG(&nua, cmd) = IPC_STAT;
+		SCARG(&nua, buf) = bsp;
+		if ((error = sys___shmctl13(l, &nua, retval)))
+			return error;
+		if ((error = copyin(SCARG(&nua, buf), &bs, sizeof bs)))
+			return error;
+		bsd_to_linux_shmid64_ds(&bs, &ls64);
+		if (cmd == (LINUX_SHM_STAT|LINUX_IPC_64)) {
+			retval[0] = IXSEQ_TO_IPCID(bs.shm_perm._key,
+						   bs.shm_perm);
 		}
-		return error;
+		return copyout(&ls64, SCARG(uap, buf), sizeof ls64);
 
 	case LINUX_IPC_SET:
-		if (cmd & LINUX_IPC_64) {
-			error = copyin(SCARG(uap, buf), &ls64, sizeof ls64);
-			linux_to_bsd_shmid64_ds(&ls64, &bs);
-		} else {
-			error = copyin(SCARG(uap, buf), &ls, sizeof ls);
-			linux_to_bsd_shmid_ds(&ls, &bs);
-		}
-		if (error != 0)
+		if ((error = copyin(SCARG(uap, buf), &ls, sizeof ls)))
 			return error;
-		return shmctl1(l, shmid, IPC_SET, &bs);
+		linux_to_bsd_shmid_ds(&ls, &bs);
+		sg = stackgap_init(p, 0);
+		bsp = stackgap_alloc(p, &sg, sizeof bs);
+		if ((error = copyout(&bs, bsp, sizeof bs)))
+			return error;
+		SCARG(&nua, cmd) = IPC_SET;
+		SCARG(&nua, buf) = bsp;
+		break;
 
 	case LINUX_IPC_RMID:
-		return shmctl1(l, shmid, IPC_RMID, NULL);
+		SCARG(&nua, cmd) = IPC_RMID;
+		SCARG(&nua, buf) = NULL;
+		break;
 
 	case LINUX_SHM_LOCK:
-		return shmctl1(l, shmid, SHM_LOCK, NULL);
+		SCARG(&nua, cmd) = SHM_LOCK;
+		SCARG(&nua, buf) = NULL;
+		break;
 
 	case LINUX_SHM_UNLOCK:
-		return shmctl1(l, shmid, SHM_UNLOCK, NULL);
+		SCARG(&nua, cmd) = SHM_UNLOCK;
+		SCARG(&nua, buf) = NULL;
+		break;
 
 	case LINUX_IPC_INFO:
 		memset(&lsi64, 0, sizeof lsi64);
@@ -627,10 +608,6 @@ linux_sys_shmctl(struct lwp *l, const struct linux_sys_shmctl_args *uap, registe
 		lsi64.l_shmmni = shminfo.shmmni;
 		lsi64.l_shmseg = shminfo.shmseg;
 		lsi64.l_shmall = shminfo.shmall;
-		for (i = shminfo.shmmni - 1; i > 0; i--)
-			if (shmsegs[i].shm_perm.mode & SHMSEG_ALLOCATED)
-				break;
-		retval[0] = i;
 		return copyout(&lsi64, SCARG(uap, buf), sizeof lsi64);
 
 	case LINUX_SHM_INFO:
@@ -638,17 +615,11 @@ linux_sys_shmctl(struct lwp *l, const struct linux_sys_shmctl_args *uap, registe
 		lsi.l_used_ids = shm_nused;
 		for (i = 0; i < shminfo.shmmni; i++)
 			if (shmsegs[i].shm_perm.mode & SHMSEG_ALLOCATED)
-				lsi.l_shm_tot +=
-				    round_page(shmsegs[i].shm_segsz) /
-				    uvmexp.pagesize;
+				lsi.l_shm_tot += shmsegs[i].shm_segsz;
 		lsi.l_shm_rss = 0;
 		lsi.l_shm_swp = 0;
 		lsi.l_swap_attempts = 0;
 		lsi.l_swap_successes = 0;
-		for (i = shminfo.shmmni - 1; i > 0; i--)
-			if (shmsegs[i].shm_perm.mode & SHMSEG_ALLOCATED)
-				break;
-		retval[0] = i;
 		return copyout(&lsi, SCARG(uap, buf), sizeof lsi);
 
 	default:
@@ -657,5 +628,6 @@ linux_sys_shmctl(struct lwp *l, const struct linux_sys_shmctl_args *uap, registe
 #endif
 		return EINVAL;
 	}
+	return sys___shmctl13(l, &nua, retval);
 }
 #endif /* SYSVSHM */

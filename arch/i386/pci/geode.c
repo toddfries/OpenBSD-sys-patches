@@ -1,4 +1,4 @@
-/*	$NetBSD: geode.c,v 1.13 2008/05/10 13:38:34 jmcneill Exp $	*/
+/*	$NetBSD: geode.c,v 1.8 2006/11/16 01:32:38 christos Exp $	*/
 
 /*-
  * Copyright (c) 2005 David Young.  All rights reserved.
@@ -49,6 +49,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -70,7 +77,7 @@
 
 #include <sys/cdefs.h>
 
-__KERNEL_RCSID(0, "$NetBSD: geode.c,v 1.13 2008/05/10 13:38:34 jmcneill Exp $");
+__KERNEL_RCSID(0, "$NetBSD: geode.c,v 1.8 2006/11/16 01:32:38 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -91,7 +98,8 @@ __KERNEL_RCSID(0, "$NetBSD: geode.c,v 1.13 2008/05/10 13:38:34 jmcneill Exp $");
 #endif
 
 static int
-geode_gcb_match(device_t parent, cfdata_t match, void *aux)
+geode_gcb_match(struct device *parent, struct cfdata *match,
+    void *aux)
 {
 	struct pci_attach_args *pa = aux;
 
@@ -103,9 +111,9 @@ geode_gcb_match(device_t parent, cfdata_t match, void *aux)
 }
 
 static void
-geode_gcb_attach(device_t parent, device_t self, void *aux)
+geode_gcb_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct geode_gcb_softc *sc = device_private(self);
+	struct geode_gcb_softc *sc = (void *) self;
 	struct pci_attach_args *pa = aux;
 	uint32_t cba;
 	u_int rev;
@@ -114,42 +122,21 @@ geode_gcb_attach(device_t parent, device_t self, void *aux)
 	sc->sc_iot = pa->pa_iot;
 	if (bus_space_map(sc->sc_iot, (bus_addr_t)cba, SC1100_GCB_SIZE, 0,
 	    &sc->sc_ioh) != 0) {
-		aprint_error(": unable to map registers\n");
+		aprint_error("%s: unable to map registers\n",
+		    sc->sc_dev.dv_xname);
 		return;
 	}
 
 	GEODE_DPRINTF(("%s: mapped %u bytes at %#08" PRIx32 "\n",
-	    device_xname(self), SC1100_GCB_SIZE, cba));
+	    sc->sc_dev.dv_xname, SC1100_GCB_SIZE, cba));
 
 	rev = bus_space_read_1(sc->sc_iot, sc->sc_ioh, SC1100_GCB_REV_B);
 
-	aprint_naive("\n");
 	aprint_normal(": AMD Geode GCB (rev. 0x%02x)\n", rev);
 
 	while (config_found(self, NULL, NULL) != NULL)
 		/* empty */;
 }
-static int
-geode_gcb_detach(device_t self, int flags)
-{
-	int rc;
-	struct geode_gcb_softc *sc = device_private(self);
 
-	if ((rc = config_detach_children(self, flags)) != 0)
-		return rc;
-
-	bus_space_unmap(sc->sc_iot, sc->sc_ioh, SC1100_GCB_SIZE);
-	return 0;
-}
-
-static void
-geode_gcb_childdetached(device_t parent, device_t child)
-{
-	/* We hold no references to child devices, so there is nothing
-	 * to do.
-	 */
-}
-
-CFATTACH_DECL2_NEW(geodegcb, sizeof(struct geode_gcb_softc),
-    geode_gcb_match, geode_gcb_attach, geode_gcb_detach, NULL, NULL,
-    geode_gcb_childdetached);
+CFATTACH_DECL(geodegcb, sizeof(struct geode_gcb_softc),
+    geode_gcb_match, geode_gcb_attach, NULL, NULL);

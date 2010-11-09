@@ -1,4 +1,4 @@
-/*	$NetBSD: if_ural.c,v 1.31 2008/11/07 00:20:13 dyoung Exp $ */
+/*	$NetBSD: if_ural.c,v 1.29 2008/04/27 09:32:08 nakayama Exp $ */
 /*	$FreeBSD: /repoman/r/ncvs/src/sys/dev/usb/if_ural.c,v 1.40 2006/06/02 23:14:40 sam Exp $	*/
 
 /*-
@@ -24,7 +24,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_ural.c,v 1.31 2008/11/07 00:20:13 dyoung Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_ural.c,v 1.29 2008/04/27 09:32:08 nakayama Exp $");
 
 #include "bpfilter.h"
 
@@ -374,16 +374,16 @@ USB_ATTACH(ural)
 	char *devinfop;
 	int i;
 
-	sc->sc_dev = self;
 	sc->sc_udev = uaa->device;
 
 	devinfop = usbd_devinfo_alloc(sc->sc_udev, 0);
 	USB_ATTACH_SETUP;
-	aprint_normal_dev(self, "%s\n", devinfop);
+	printf("%s: %s\n", USBDEVNAME(sc->sc_dev), devinfop);
 	usbd_devinfo_free(devinfop);
 
 	if (usbd_set_config_no(sc->sc_udev, RAL_CONFIG_NO, 0) != 0) {
-		aprint_error_dev(self, "could not set configuration no\n");
+		printf("%s: could not set configuration no\n",
+		    USBDEVNAME(sc->sc_dev));
 		USB_ATTACH_ERROR_RETURN;
 	}
 
@@ -391,7 +391,8 @@ USB_ATTACH(ural)
 	error = usbd_device2interface_handle(sc->sc_udev, RAL_IFACE_INDEX,
 	    &sc->sc_iface);
 	if (error != 0) {
-		aprint_error_dev(self, "could not get interface handle\n");
+		printf("%s: could not get interface handle\n",
+		    USBDEVNAME(sc->sc_dev));
 		USB_ATTACH_ERROR_RETURN;
 	}
 
@@ -404,8 +405,8 @@ USB_ATTACH(ural)
 	for (i = 0; i < id->bNumEndpoints; i++) {
 		ed = usbd_interface2endpoint_descriptor(sc->sc_iface, i);
 		if (ed == NULL) {
-			aprint_error_dev(self,
-			    "no endpoint descriptor for %d\n", i);
+			printf("%s: no endpoint descriptor for %d\n",
+			    USBDEVNAME(sc->sc_dev), i);
 			USB_ATTACH_ERROR_RETURN;
 		}
 
@@ -417,7 +418,7 @@ USB_ATTACH(ural)
 			sc->sc_tx_no = ed->bEndpointAddress;
 	}
 	if (sc->sc_rx_no == -1 || sc->sc_tx_no == -1) {
-		aprint_error_dev(self, "missing endpoint\n");
+		printf("%s: missing endpoint\n", USBDEVNAME(sc->sc_dev));
 		USB_ATTACH_ERROR_RETURN;
 	}
 
@@ -433,8 +434,8 @@ USB_ATTACH(ural)
 	/* retrieve MAC address and various other things from EEPROM */
 	ural_read_eeprom(sc);
 
-	aprint_normal_dev(self, "MAC/BBP RT2570 (rev 0x%02x), RF %s\n",
-	    sc->asic_rev, ural_get_rf(sc->rf_rev));
+	printf("%s: MAC/BBP RT2570 (rev 0x%02x), RF %s\n",
+	    USBDEVNAME(sc->sc_dev), sc->asic_rev, ural_get_rf(sc->rf_rev));
 
 	ifp->if_softc = sc;
 	memcpy(ifp->if_xname, USBDEVNAME(sc->sc_dev), IFNAMSIZ);
@@ -1505,21 +1506,14 @@ ural_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 
 	switch (cmd) {
 	case SIOCSIFFLAGS:
-		if ((error = ifioctl_common(ifp, cmd, data)) != 0)
-			break;
-		/* XXX re-use ether_ioctl() */
-		switch (ifp->if_flags & (IFF_UP|IFF_RUNNING)) {
-		case IFF_UP|IFF_RUNNING:
-			ural_update_promisc(sc);
-			break;
-		case IFF_UP:
-			ural_init(ifp);
-			break;
-		case IFF_RUNNING:
-			ural_stop(ifp, 1);
-			break;
-		case 0:
-			break;
+		if (ifp->if_flags & IFF_UP) {
+			if (ifp->if_flags & IFF_RUNNING)
+				ural_update_promisc(sc);
+			else
+				ural_init(ifp);
+		} else {
+			if (ifp->if_flags & IFF_RUNNING)
+				ural_stop(ifp, 1);
 		}
 		break;
 
@@ -2301,7 +2295,7 @@ ural_stop(struct ifnet *ifp, int disable)
 int
 ural_activate(device_ptr_t self, enum devact act)
 {
-	struct ural_softc *sc = device_private(self);
+	struct ural_softc *sc = (struct ural_softc *)self;
 
 	switch (act) {
 	case DVACT_ACTIVATE:

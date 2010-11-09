@@ -1,7 +1,7 @@
 /******************************************************************************
  *
  * Name: acoutput.h -- debug output
- *       $Revision: 1.3 $
+ *       xRevision: 1.99 $
  *
  *****************************************************************************/
 
@@ -9,7 +9,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2008, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2006, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -220,7 +220,7 @@
 
 /*
  * These two levels are essentially obsolete, all instances in the
- * ACPICA core code have been replaced by ACPI_ERROR and ACPI_WARNING
+ * ACPICA core code have been replaced by REPORT_ERROR and REPORT_WARNING
  * (Kept here because some drivers may still use them)
  */
 #define ACPI_DB_ERROR               ACPI_DEBUG_LEVEL (ACPI_LV_ERROR)

@@ -1,4 +1,4 @@
-/*	$NetBSD: radeonfb.c,v 1.29 2008/06/01 16:43:53 macallan Exp $ */
+/* $NetBSD: radeonfb.c,v 1.27 2008/04/10 19:13:37 cegger Exp $ */
 
 /*-
  * Copyright (c) 2006 Itronix Inc.
@@ -70,7 +70,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: radeonfb.c,v 1.29 2008/06/01 16:43:53 macallan Exp $");
+__KERNEL_RCSID(0, "$NetBSD: radeonfb.c,v 1.27 2008/04/10 19:13:37 cegger Exp $");
 
 #define RADEONFB_DEFAULT_DEPTH 32
 
@@ -911,8 +911,8 @@ static int
 radeonfb_drm_print(void *aux, const char *pnp)
 {
 	if (pnp)
-		aprint_normal("drm at %s", pnp);
-	return (UNCONF);
+		aprint_normal("direct rendering for %s", pnp);
+	return (UNSUPP);
 }
 
 int
@@ -1594,6 +1594,7 @@ nobios:
 			if (edid_parse(edid, eip) == 0) {
 
 				sc->sc_ports[i].rp_edid_valid = 1;
+				edid_print(eip);
 			}
 		}
 		/* if we didn't find any we'll try to talk to the monitor */
@@ -3331,38 +3332,21 @@ radeonfb_pickres(struct radeonfb_display *dp, uint16_t *x, uint16_t *y,
 				continue;
 
 			if (!valid) {
-				/*
-				 * Pick the preferred mode for this port
-				 * if available.
-				 */
-				if (ep->edid_preferred_mode) {
-					struct videomode *vmp = 
-						ep->edid_preferred_mode;
+				/* initialize starting list */
+				for (j = 0; j < ep->edid_nmodes; j++) {
+					/*
+					 * ignore resolutions that are
+					 * too big for the radeon
+					 */
+					if (ep->edid_modes[j].hdisplay >
+					    dp->rd_softc->sc_maxx)
+						continue;
+					if (ep->edid_modes[j].vdisplay >
+					    dp->rd_softc->sc_maxy)
+						continue;
 
-					if ((vmp->hdisplay <= 
-					     dp->rd_softc->sc_maxx) && 
-					    (vmp->vdisplay <= 
-					     dp->rd_softc->sc_maxy))
-						modes[nmodes++] = *vmp;
-				} else {
-
-					/* initialize starting list */
-					for (j = 0; j < ep->edid_nmodes; j++) {
-						/*
-						 * ignore resolutions that are
-						 * too big for the radeon
-						 */
-						if (ep->edid_modes[j].hdisplay >
-						    dp->rd_softc->sc_maxx)
-							continue;
-						if (ep->edid_modes[j].vdisplay >
-						    dp->rd_softc->sc_maxy)
-							continue;
-
-						modes[nmodes] = 
-							ep->edid_modes[j];
-						nmodes++;
-					}
+					modes[nmodes] = ep->edid_modes[j];
+					nmodes++;
 				}
 				valid = 1;
 			} else {

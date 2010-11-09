@@ -1,4 +1,4 @@
-/*	$NetBSD: ext2fs_balloc.c,v 1.33 2008/05/16 09:22:00 hannken Exp $	*/
+/*	$NetBSD: ext2fs_balloc.c,v 1.31 2006/11/16 01:33:51 christos Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1989, 1993
@@ -65,7 +65,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ext2fs_balloc.c,v 1.33 2008/05/16 09:22:00 hannken Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ext2fs_balloc.c,v 1.31 2006/11/16 01:33:51 christos Exp $");
 
 #if defined(_KERNEL_OPT)
 #include "opt_uvmhist.h"
@@ -135,9 +135,9 @@ ext2fs_balloc(struct inode *ip, daddr_t bn, int size,
 
 			if (bpp != NULL) {
 				error = bread(vp, bn, fs->e2fs_bsize, NOCRED,
-					      B_MODIFY, &bp);
+					      &bp);
 				if (error) {
-					brelse(bp, 0);
+					brelse(bp);
 					return (error);
 				}
 				*bpp = bp;
@@ -214,9 +214,9 @@ ext2fs_balloc(struct inode *ip, daddr_t bn, int size,
 	 */
 	for (i = 1;;) {
 		error = bread(vp,
-		    indirs[i].in_lbn, (int)fs->e2fs_bsize, NOCRED, 0, &bp);
+		    indirs[i].in_lbn, (int)fs->e2fs_bsize, NOCRED, &bp);
 		if (error) {
-			brelse(bp, 0);
+			brelse(bp);
 			goto fail;
 		}
 		bap = (int32_t *)bp->b_data;	/* XXX ondisk32 */
@@ -225,13 +225,13 @@ ext2fs_balloc(struct inode *ip, daddr_t bn, int size,
 			break;
 		i++;
 		if (nb != 0) {
-			brelse(bp, 0);
+			brelse(bp);
 			continue;
 		}
 		pref = ext2fs_blkpref(ip, lbn, 0, (int32_t *)0);
 		error = ext2fs_alloc(ip, lbn, pref, cred, &newb);
 		if (error) {
-			brelse(bp, 0);
+			brelse(bp);
 			goto fail;
 		}
 		nb = newb;
@@ -245,7 +245,7 @@ ext2fs_balloc(struct inode *ip, daddr_t bn, int size,
 		 * never point at garbage.
 		 */
 		if ((error = bwrite(nbp)) != 0) {
-			brelse(bp, 0);
+			brelse(bp);
 			goto fail;
 		}
 		if (unwindidx < 0)
@@ -269,7 +269,7 @@ ext2fs_balloc(struct inode *ip, daddr_t bn, int size,
 		pref = ext2fs_blkpref(ip, lbn, indirs[num].in_off, &bap[0]);
 		error = ext2fs_alloc(ip, lbn, pref, cred, &newb);
 		if (error) {
-			brelse(bp, 0);
+			brelse(bp);
 			goto fail;
 		}
 		nb = newb;
@@ -296,13 +296,13 @@ ext2fs_balloc(struct inode *ip, daddr_t bn, int size,
 		}
 		return (0);
 	}
-	brelse(bp, 0);
+	brelse(bp);
 	if (bpp != NULL) {
 		if (flags & B_CLRBUF) {
 			error = bread(vp, lbn, (int)fs->e2fs_bsize, NOCRED,
-				      B_MODIFY, &nbp);
+				      &nbp);
 			if (error) {
-				brelse(nbp, 0);
+				brelse(nbp);
 				goto fail;
 			}
 		} else {
@@ -328,10 +328,10 @@ fail:
 			int r;
 
 			r = bread(vp, indirs[unwindidx].in_lbn,
-			    (int)fs->e2fs_bsize, NOCRED, B_MODIFY, &bp);
+			    (int)fs->e2fs_bsize, NOCRED, &bp);
 			if (r) {
 				panic("Could not unwind indirect block, error %d", r);
-				brelse(bp, 0);
+				brelse(bp);
 			} else {
 				bap = (int32_t *)bp->b_data; /* XXX ondisk32 */
 				bap[indirs[unwindidx].in_off] = 0;
@@ -344,7 +344,8 @@ fail:
 		for (i = unwindidx + 1; i <= num; i++) {
 			bp = getblk(vp, indirs[i].in_lbn, (int)fs->e2fs_bsize,
 			    0, 0);
-			brelse(bp, BC_INVAL);
+			bp->b_flags |= B_INVAL;
+			brelse(bp);
 		}
 	}
 	if (deallocated) {

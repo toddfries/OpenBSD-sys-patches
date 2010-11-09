@@ -1,4 +1,4 @@
-/* $NetBSD: xbd.c,v 1.52 2009/01/21 20:40:40 bouyer Exp $ */
+/* $NetBSD: xbd.c,v 1.36 2006/05/05 19:25:26 jld Exp $ */
 
 /*
  *
@@ -33,7 +33,7 @@
 
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: xbd.c,v 1.52 2009/01/21 20:40:40 bouyer Exp $");
+__KERNEL_RCSID(0, "$NetBSD: xbd.c,v 1.36 2006/05/05 19:25:26 jld Exp $");
 
 #include "xbd_hypervisor.h"
 #include "rnd.h"
@@ -53,7 +53,7 @@ __KERNEL_RCSID(0, "$NetBSD: xbd.c,v 1.52 2009/01/21 20:40:40 bouyer Exp $");
 #include <sys/disklabel.h>
 #include <sys/fcntl.h>
 #include <sys/vnode.h>
-#include <sys/simplelock.h>
+#include <sys/lock.h>
 #include <sys/conf.h>
 #include <sys/queue.h>
 #include <sys/stat.h>
@@ -66,47 +66,47 @@ __KERNEL_RCSID(0, "$NetBSD: xbd.c,v 1.52 2009/01/21 20:40:40 bouyer Exp $");
 #endif
 
 #include <dev/dkvar.h>
-#include <xen/xbdvar.h>
+#include <machine/xbdvar.h>
 
-#include <xen/xen.h>
-#include <xen/hypervisor.h>
-#include <xen/evtchn.h>
-#include <xen/ctrl_if.h>
+#include <machine/xen.h>
+#include <machine/hypervisor.h>
+#include <machine/evtchn.h>
+#include <machine/ctrl_if.h>
 
 
 static void	control_send(blkif_request_t *, blkif_response_t *);
 static void	send_interface_connect(void);
 
-static void xbd_attach(device_t, device_t, void *);
-static int xbd_detach(device_t, int);
+static void xbd_attach(struct device *, struct device *, void *);
+static int xbd_detach(struct device *, int);
 
 #if NXBD_HYPERVISOR > 0
-int xbd_match(device_t, cfdata_t, void *);
-CFATTACH_DECL_NEW(xbd_hypervisor, sizeof(struct xbd_softc),
+int xbd_match(struct device *, struct cfdata *, void *);
+CFATTACH_DECL(xbd_hypervisor, sizeof(struct xbd_softc),
     xbd_match, xbd_attach, xbd_detach, NULL);
 
 extern struct cfdriver xbd_cd;
 #endif
 
 #if NWD > 0
-int xbd_wd_match(device_t, cfdata_t, void *);
-CFATTACH_DECL_NEW(wd_xen, sizeof(struct xbd_softc),
+int xbd_wd_match(struct device *, struct cfdata *, void *);
+CFATTACH_DECL(wd_xen, sizeof(struct xbd_softc),
     xbd_wd_match, xbd_attach, xbd_detach, NULL);
 
 extern struct cfdriver wd_cd;
 #endif
 
 #if NSD > 0
-int xbd_sd_match(device_t, cfdata_t, void *);
-CFATTACH_DECL_NEW(sd_xen, sizeof(struct xbd_softc),
+int xbd_sd_match(struct device *, struct cfdata *, void *);
+CFATTACH_DECL(sd_xen, sizeof(struct xbd_softc),
     xbd_sd_match, xbd_attach, xbd_detach, NULL);
 
 extern struct cfdriver sd_cd;
 #endif
 
 #if NCD > 0
-int xbd_cd_match(device_t, cfdata_t, void *);
-CFATTACH_DECL_NEW(cd_xen, sizeof(struct xbd_softc),
+int xbd_cd_match(struct device *, struct cfdata *, void *);
+CFATTACH_DECL(cd_xen, sizeof(struct xbd_softc),
     xbd_cd_match, xbd_attach, xbd_detach, NULL);
 
 extern struct cfdriver cd_cd;
@@ -399,7 +399,7 @@ static blkif_response_t blkif_control_rsp;
 struct xbd_ctrl {
 
 	cfprint_t xc_cfprint;
-	device_t xc_parent;
+	struct device *xc_parent;
 };
 
 static struct xbd_ctrl blkctrl;
@@ -499,23 +499,23 @@ getxbd_softc(dev_t dev)
 {
 	int	unit = XBDUNIT(dev);
 
-	DPRINTF_FOLLOW(("getxbd_softc(0x%" PRIu64 "): major = %" PRIu32
-	    "unit = %d\n", dev, major(dev), unit));
+	DPRINTF_FOLLOW(("getxbd_softc(0x%x): major = %d unit = %d\n", dev,
+	    major(dev), unit));
 #if NXBD_HYPERVISOR > 0
 	if (major(dev) == xbd_major)
-		return device_lookup_private(&xbd_cd, unit);
+		return device_lookup(&xbd_cd, unit);
 #endif
 #if NWD > 0
 	if (major(dev) == xbd_wd_major || major(dev) == xbd_wd_cdev_major)
-		return device_lookup_private(&wd_cd, unit);
+		return device_lookup(&wd_cd, unit);
 #endif
 #if NSD > 0
 	if (major(dev) == xbd_sd_major || major(dev) == xbd_sd_cdev_major)
-		return device_lookup_private(&sd_cd, unit);
+		return device_lookup(&sd_cd, unit);
 #endif
 #if NCD > 0
 	if (major(dev) == xbd_cd_major || major(dev) == xbd_cd_cdev_major)
-		return device_lookup_private(&cd_cd, unit);
+		return device_lookup(&cd_cd, unit);
 #endif
 	return NULL;
 }
@@ -661,7 +661,7 @@ recover_interface(void)
 			++req_prod;
 		}
 	recovery = 0;
-	xen_wmb();
+	x86_sfence();
 	signal_requests_to_xen();
 }
 
@@ -691,7 +691,7 @@ connect_interface(blkif_fe_interface_status_t *status)
 
 		/* Probe for discs attached to the interface. */
 		// xlvbd_init();
-		vbd_info = malloc(MAX_VBDS * sizeof(vdisk_t),
+		MALLOC(vbd_info, vdisk_t *, MAX_VBDS * sizeof(vdisk_t),
 		    M_DEVBUF, M_WAITOK | M_ZERO);
 		nr_vbds  = get_vbd_info(vbd_info);
 		if (nr_vbds <= 0)
@@ -722,7 +722,7 @@ connect_interface(blkif_fe_interface_status_t *status)
 	return;
 
  out:
-	free(vbd_info, M_DEVBUF);
+	FREE(vbd_info, M_DEVBUF);
 	vbd_info = NULL;
 	if (in_autoconf) {
 		in_autoconf = 0;
@@ -731,16 +731,16 @@ connect_interface(blkif_fe_interface_status_t *status)
 	return;
 }
 
-static device_t
+static struct device *
 find_device(vdisk_t *xd)
 {
-	device_t dv;
+	struct device *dv;
 	struct xbd_softc *xs = NULL;
 
-	TAILQ_FOREACH(dv, &alldevs, dv_list) {
+	for (dv = alldevs.tqh_first; dv != NULL; dv = dv->dv_list.tqe_next) {
 		if (!device_is_a(dv, "xbd"))
 			continue;
-		xs = device_private(dv);
+		xs = (struct xbd_softc *)dv;
 		if (xd == NULL || xs->sc_xd_device == xd->device)
 			break;
 	}
@@ -751,20 +751,20 @@ static void
 vbd_update(void)
 {
 	struct xbd_attach_args *xbda;
-	device_t dev;
+	struct device *dev;
 	vdisk_t *xd;
 	vdisk_t *vbd_info_update, *vbd_info_old;
 	int i, j, new_nr_vbds;
 	extern int hypervisor_print(void *, const char *);
 
-	vbd_info_update = malloc(MAX_VBDS *
+	MALLOC(vbd_info_update, vdisk_t *, MAX_VBDS *
 	    sizeof(vdisk_t), M_DEVBUF, M_WAITOK | M_ZERO);
 
 	new_nr_vbds  = get_vbd_info(vbd_info_update);
 
 	if (memcmp(vbd_info, vbd_info_update, MAX_VBDS *
 	    sizeof(vdisk_t)) == 0) {
-		free(vbd_info_update, M_DEVBUF);
+		FREE(vbd_info_update, M_DEVBUF);
 		return;
 	}
 
@@ -829,7 +829,7 @@ vbd_update(void)
 
 	vbd_info_old = vbd_info;
 	vbd_info = vbd_info_update;
-	free(vbd_info_old, M_DEVBUF);
+	FREE(vbd_info_old, M_DEVBUF);
 }
 
 static void
@@ -936,7 +936,7 @@ xbd_ctrlif_rx(ctrl_msg_t *msg, unsigned long id)
 
 #if 0
 static void
-enable_update_events(device_t self)
+enable_update_events(struct device *self)
 {
 
 	kthread_create(xbd_update_create_kthread, self);
@@ -969,7 +969,7 @@ control_send(blkif_request_t *req, blkif_response_t *rsp)
  retry:
 	while ((req_prod - resp_cons) == BLKIF_RING_SIZE) {
 		/* XXX where is the wakeup ? */
-		tsleep((void *) &req_prod, PUSER | PCATCH,
+		tsleep((caddr_t) &req_prod, PUSER | PCATCH,
 		    "blkfront", 0);
 	}
 
@@ -995,7 +995,7 @@ control_send(blkif_request_t *req, blkif_response_t *rsp)
 	restore_flags(flags);
 
 	while (!blkif_control_rsp_valid) {
-		tsleep((void *)&blkif_control_rsp_valid, PUSER | PCATCH,
+		tsleep((caddr_t)&blkif_control_rsp_valid, PUSER | PCATCH,
 		    "blkfront", 0);
 	}
 
@@ -1042,7 +1042,7 @@ send_interface_connect(void)
 
 
 int
-xbd_scan(device_t self, struct xbd_attach_args *mainbus_xbda,
+xbd_scan(struct device *self, struct xbd_attach_args *mainbus_xbda,
     cfprint_t print)
 {
 	struct xbdreq *xr;
@@ -1071,7 +1071,7 @@ xbd_scan(device_t self, struct xbd_attach_args *mainbus_xbda,
 	xbd_cd_cdev_major = major(devsw_blk2chr(makedev(xbd_cd_major, 0)));
 #endif
 
-	xr = malloc(BLKIF_RING_SIZE * sizeof(struct xbdreq),
+	MALLOC(xr, struct xbdreq *, BLKIF_RING_SIZE * sizeof(struct xbdreq),
 	    M_DEVBUF, M_WAITOK | M_ZERO);
 #ifdef DEBUG
 	xbd_allxr = xr;
@@ -1092,7 +1092,7 @@ xbd_scan(device_t self, struct xbd_attach_args *mainbus_xbda,
 
 #if NXBD_HYPERVISOR > 0
 int
-xbd_match(device_t parent, cfdata_t match, void *aux)
+xbd_match(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct xbd_attach_args *xa = (struct xbd_attach_args *)aux;
 
@@ -1104,7 +1104,7 @@ xbd_match(device_t parent, cfdata_t match, void *aux)
 
 #if NWD > 0
 int
-xbd_wd_match(device_t parent, cfdata_t match, void *aux)
+xbd_wd_match(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct xbd_attach_args *xa = (struct xbd_attach_args *)aux;
 
@@ -1116,7 +1116,7 @@ xbd_wd_match(device_t parent, cfdata_t match, void *aux)
 
 #if NSD > 0
 int
-xbd_sd_match(device_t parent, cfdata_t match, void *aux)
+xbd_sd_match(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct xbd_attach_args *xa = (struct xbd_attach_args *)aux;
 
@@ -1128,7 +1128,7 @@ xbd_sd_match(device_t parent, cfdata_t match, void *aux)
 
 #if NCD > 0
 int
-xbd_cd_match(device_t parent, cfdata_t match, void *aux)
+xbd_cd_match(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct xbd_attach_args *xa = (struct xbd_attach_args *)aux;
 
@@ -1139,30 +1139,28 @@ xbd_cd_match(device_t parent, cfdata_t match, void *aux)
 #endif
 
 static void
-xbd_attach(device_t parent, device_t self, void *aux)
+xbd_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct xbd_attach_args *xbda = (struct xbd_attach_args *)aux;
-	struct xbd_softc *xs = device_private(self);
+	struct xbd_softc *xs = (struct xbd_softc *)self;
 
 	aprint_normal(": Xen Virtual Block Device");
 
-	xs->sc_dev = self;
-
 	simple_lock_init(&xs->sc_slock);
-	dk_sc_init(&xs->sc_dksc, xs, device_xname(self));
-	disk_init(&xs->sc_dksc.sc_dkdev, device_xname(self), &xbddkdriver);
+	dk_sc_init(&xs->sc_dksc, xs, xs->sc_dev.dv_xname);
+	xs->sc_dksc.sc_dkdev.dk_driver = &xbddkdriver;
 	xbdinit(xs, xbda->xa_xd, xbda->xa_dkintf);
 
 #if NRND > 0
-	rnd_attach_source(&xs->sc_rnd_source, device_xname(self),
+	rnd_attach_source(&xs->sc_rnd_source, xs->sc_dev.dv_xname,
 	    RND_TYPE_DISK, 0);
 #endif
 }
 
 static int
-xbd_detach(device_t dv, int flags)
+xbd_detach(struct device *dv, int flags)
 {
-	struct	xbd_softc *xs = device_private(dv);
+	struct	xbd_softc *xs = (struct	xbd_softc *)dv;
 	int bmaj, cmaj, mn, i;
 
 	/* 
@@ -1199,7 +1197,6 @@ xbd_detach(device_t dv, int flags)
 
 	/* Detach the disk. */
 	disk_detach(&xs->sc_dksc.sc_dkdev);
-	disk_destroy(&xs->sc_dksc.sc_dkdev);
 
 #if NRND > 0
 	/* Unhook the entropy source. */
@@ -1213,7 +1210,7 @@ xbdopen(dev_t dev, int flags, int fmt, struct lwp *l)
 {
 	struct	xbd_softc *xs;
 
-	DPRINTF_FOLLOW(("xbdopen(%" PRIu64 ", %d)\n", dev, flags));
+	DPRINTF_FOLLOW(("xbdopen(0x%04x, %d)\n", dev, flags));
 	switch (fmt) {
 	case S_IFCHR:
 		GETXBD_SOFTC_CDEV(xs, dev);
@@ -1232,7 +1229,7 @@ xbdclose(dev_t dev, int flags, int fmt, struct lwp *l)
 {
 	struct	xbd_softc *xs;
 
-	DPRINTF_FOLLOW(("xbdclose(%" PRIu64 ", %d)\n", dev, flags));
+	DPRINTF_FOLLOW(("xbdclose(%d, %d)\n", dev, flags));
 	switch (fmt) {
 	case S_IFCHR:
 		GETXBD_SOFTC_CDEV(xs, dev);
@@ -1255,6 +1252,7 @@ xbdstrategy(struct buf *bp)
 	    (long)bp->b_bcount));
 
 	if (xs == NULL || xs->sc_shutdown) {
+		bp->b_flags |= B_ERROR;
 		bp->b_error = EIO;
 		biodone(bp);
 		return;
@@ -1269,7 +1267,7 @@ xbdsize(dev_t dev)
 {
 	struct xbd_softc *xs = getxbd_softc(dev);
 
-	DPRINTF_FOLLOW(("xbdsize(%" PRIu64 ")\n", dev));
+	DPRINTF_FOLLOW(("xbdsize(%d)\n", dev));
 	if (xs == NULL || xs->sc_shutdown)
 		return -1;
 	return dk_size(xs->sc_di, &xs->sc_dksc, dev);
@@ -1396,9 +1394,11 @@ xbdresume(void)
 		    pxr, pxr->xr_bp));
 		bp = pxr->xr_bp;
 		xs = getxbd_softc(bp->b_dev);
-		if (xs == NULL || xs->sc_shutdown)
+		if (xs == NULL || xs->sc_shutdown) {
+			bp->b_flags |= B_ERROR;
 			bp->b_error = EIO;
-		if (bp->b_error != 0) {
+		}
+		if (bp->b_flags & B_ERROR) {
 			pxr->xr_bdone -= pxr->xr_bqueue;
 			pxr->xr_bqueue = 0;
 			if (pxr->xr_bdone == 0) {
@@ -1450,6 +1450,7 @@ xbdstart(struct dk_softc *dksc, struct buf *bp)
 
 	xs = getxbd_softc(bp->b_dev);
 	if (xs == NULL || xs->sc_shutdown) {
+		bp->b_flags |= B_ERROR;
 		bp->b_error = EIO;
 		biodone(bp);
 		return 0;
@@ -1499,7 +1500,7 @@ xbdstart(struct dk_softc *dksc, struct buf *bp)
 		    xr_suspended);
 		DPRINTF(XBDB_IO, ("xbdstart: suspended xbdreq %p "
 		    "for bp %p\n", pxr, bp));
-	} else if (CANGET_XBDREQ() && bufq_peek(bufq) != NULL) {
+	} else if (CANGET_XBDREQ() && BUFQ_PEEK(bufq) != NULL) {
 		/* 
 		 * We have enough resources to start another bp and
 		 * there are additional bps on the queue, dk_start
@@ -1531,7 +1532,7 @@ xbd_response_handler(void *arg)
 	}
 
 	rp = blk_ring->resp_prod;
-	xen_rmb(); /* Ensure we see queued responses up to 'rp'. */
+	x86_lfence(); /* Ensure we see queued responses up to 'rp'. */
 
 	for (i = resp_cons; i != rp; i++) {
 		ring_resp = &blk_ring->ring[MASK_BLKIF_IDX(i)].resp;
@@ -1549,8 +1550,10 @@ xbd_response_handler(void *arg)
 			DIAGCONDPANIC(pxr->xr_bdone < 0,
 			    ("xbd_response_handler: pxr->xr_bdone < 0"));
 
-			if (__predict_false(ring_resp->status))
+			if (__predict_false(ring_resp->status)) {
+				pxr->xr_bp->b_flags |= B_ERROR;
 				pxr->xr_bp->b_error = EIO;
+			}
 
 			if (xr != pxr) {
 				PUT_XBDREQ(xr);
@@ -1562,11 +1565,12 @@ xbd_response_handler(void *arg)
 				bp = pxr->xr_bp;
 				xs = getxbd_softc(bp->b_dev);
 				if (xs == NULL) { /* don't fail bp if we're shutdown */
+					bp->b_flags |= B_ERROR;
 					bp->b_error = EIO;
 				}
 				DPRINTF(XBDB_IO, ("xbd_response_handler(%d): "
 					    "completed bp %p\n", i, bp));
-				if (bp->b_error != 0)
+				if (bp->b_flags & B_ERROR)
 					bp->b_resid = bp->b_bcount;
 				else
 					bp->b_resid = 0;
@@ -1600,7 +1604,7 @@ xbd_response_handler(void *arg)
 			memcpy(&blkif_control_rsp, ring_resp,
 			    sizeof(*ring_resp));
 			blkif_control_rsp_valid = 1;
-			wakeup((void *)&blkif_control_rsp_valid);
+			wakeup((caddr_t)&blkif_control_rsp_valid);
 			break;
 		default:
 			panic("unknown response");
@@ -1620,7 +1624,7 @@ xbdread(dev_t dev, struct uio *uio, int flags)
 	struct	xbd_softc *xs;
 	struct	dk_softc *dksc;
 
-	DPRINTF_FOLLOW(("xbdread(%" PRIu64 ", %p, %d)\n", dev, uio, flags));
+	DPRINTF_FOLLOW(("xbdread(%d, %p, %d)\n", dev, uio, flags));
 	GETXBD_SOFTC_CDEV(xs, dev);
 	dksc = &xs->sc_dksc;
 	if ((dksc->sc_flags & DKF_INITED) == 0)
@@ -1636,7 +1640,7 @@ xbdwrite(dev_t dev, struct uio *uio, int flags)
 	struct	xbd_softc *xs;
 	struct	dk_softc *dksc;
 
-	DPRINTF_FOLLOW(("xbdwrite(%" PRIu64 ", %p, %d)\n", dev, uio, flags));
+	DPRINTF_FOLLOW(("xbdwrite(%d, %p, %d)\n", dev, uio, flags));
 	GETXBD_SOFTC_CDEV(xs, dev);
 	dksc = &xs->sc_dksc;
 	if ((dksc->sc_flags & DKF_INITED) == 0)
@@ -1646,14 +1650,14 @@ xbdwrite(dev_t dev, struct uio *uio, int flags)
 }
 
 int
-xbdioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
+xbdioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct lwp *l)
 {
 	struct	xbd_softc *xs;
 	struct	dk_softc *dksc;
 	int	error;
 	struct	disk *dk;
 
-	DPRINTF_FOLLOW(("xbdioctl(%" PRIu64 ", %08lx, %p, %d, %p)\n",
+	DPRINTF_FOLLOW(("xbdioctl(%d, %08lx, %p, %d, %p)\n",
 	    dev, cmd, data, flag, l));
 	GETXBD_SOFTC(xs, dev);
 	dksc = &xs->sc_dksc;
@@ -1674,7 +1678,7 @@ xbdioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 }
 
 int
-xbdioctl_cdev(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
+xbdioctl_cdev(dev_t dev, u_long cmd, caddr_t data, int flag, struct lwp *l)
 {
 	dev_t bdev;
 
@@ -1685,12 +1689,12 @@ xbdioctl_cdev(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 }
 
 int
-xbddump(dev_t dev, daddr_t blkno, void *va, size_t size)
+xbddump(dev_t dev, daddr_t blkno, caddr_t va, size_t size)
 {
 	struct	xbd_softc *xs;
 
-	DPRINTF_FOLLOW(("xbddump(%" PRIu64 ", %" PRId64 ", %p, %lu)\n", dev,
-	    blkno, va, (unsigned long)size));
+	DPRINTF_FOLLOW(("xbddump(%d, %" PRId64 ", %p, %lu)\n", dev, blkno, va,
+	    (unsigned long)size));
 	GETXBD_SOFTC(xs, dev);
 	return dk_dump(xs->sc_di, &xs->sc_dksc, dev, blkno, va, size);
 }

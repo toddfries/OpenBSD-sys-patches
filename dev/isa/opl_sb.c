@@ -1,4 +1,4 @@
-/*	$NetBSD: opl_sb.c,v 1.18 2008/04/28 20:23:52 martin Exp $	*/
+/*	$NetBSD: opl_sb.c,v 1.15 2007/10/19 12:00:21 ad Exp $	*/
 
 /*
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: opl_sb.c,v 1.18 2008/04/28 20:23:52 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: opl_sb.c,v 1.15 2007/10/19 12:00:21 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -54,17 +61,17 @@ __KERNEL_RCSID(0, "$NetBSD: opl_sb.c,v 1.18 2008/04/28 20:23:52 martin Exp $");
 #include <dev/isa/isavar.h>
 #include <dev/isa/sbdspvar.h>
 
-int	opl_sb_match(device_t, cfdata_t, void *);
-void	opl_sb_attach(device_t, device_t, void *);
+int	opl_sb_match(struct device *, struct cfdata *, void *);
+void	opl_sb_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(opl_sb, sizeof(struct opl_softc),
+CFATTACH_DECL(opl_sb, sizeof(struct opl_softc),
     opl_sb_match, opl_sb_attach, NULL, NULL);
 
 int
-opl_sb_match(device_t parent, cfdata_t match, void *aux)
+opl_sb_match(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct audio_attach_args *aa = (struct audio_attach_args *)aux;
-	struct sbdsp_softc *ssc = device_private(parent);
+	struct sbdsp_softc *ssc = (struct sbdsp_softc *)parent;
 
 	if (aa->type != AUDIODEV_TYPE_OPL)
 		return (0);
@@ -72,12 +79,11 @@ opl_sb_match(device_t parent, cfdata_t match, void *aux)
 }
 
 void
-opl_sb_attach(device_t parent, device_t self, void *aux)
+opl_sb_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct  sbdsp_softc *ssc = device_private(parent);
-	struct opl_softc *sc = device_private(self);
+	struct  sbdsp_softc *ssc = (struct sbdsp_softc *)parent;
+	struct opl_softc *sc = (struct opl_softc *)self;
 
-	sc->mididev.dev = self;
 	sc->ioh = ssc->sc_ioh;
 	sc->iot = ssc->sc_iot;
 	sc->offs = 0;

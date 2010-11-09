@@ -1,4 +1,4 @@
-/*	$NetBSD: uvm_pglist.c,v 1.45 2009/03/10 03:27:24 nonaka Exp $	*/
+/*	$NetBSD: uvm_pglist.c,v 1.38 2007/07/21 19:21:55 ad Exp $	*/
 
 /*-
  * Copyright (c) 1997 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed by the NetBSD
+ *      Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -35,7 +42,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: uvm_pglist.c,v 1.45 2009/03/10 03:27:24 nonaka Exp $");
+__KERNEL_RCSID(0, "$NetBSD: uvm_pglist.c,v 1.38 2007/07/21 19:21:55 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -86,8 +93,6 @@ uvm_pglist_add(struct vm_page *pg, struct pglist *rlist)
 	struct vm_page *tp;
 #endif
 
-	KASSERT(mutex_owned(&uvm_fpageqlock));
-
 #if PGFL_NQUEUES != 2
 #error uvm_pglistalloc needs to be updated
 #endif
@@ -96,27 +101,26 @@ uvm_pglist_add(struct vm_page *pg, struct pglist *rlist)
 	color = VM_PGCOLOR_BUCKET(pg);
 	pgflidx = (pg->flags & PG_ZERO) ? PGFL_ZEROS : PGFL_UNKNOWN;
 #ifdef DEBUG
-	for (tp = LIST_FIRST(&uvm.page_free[
+	for (tp = TAILQ_FIRST(&uvm.page_free[
 		free_list].pgfl_buckets[color].pgfl_queues[pgflidx]);
 	     tp != NULL;
-	     tp = LIST_NEXT(tp, pageq.list)) {
+	     tp = TAILQ_NEXT(tp, pageq)) {
 		if (tp == pg)
 			break;
 	}
 	if (tp == NULL)
 		panic("uvm_pglistalloc: page not on freelist");
 #endif
-	LIST_REMOVE(pg, pageq.list);	/* global */
-	LIST_REMOVE(pg, listq.list);	/* cpu */
+	TAILQ_REMOVE(&uvm.page_free[free_list].pgfl_buckets[
+			color].pgfl_queues[pgflidx], pg, pageq);
 	uvmexp.free--;
 	if (pg->flags & PG_ZERO)
 		uvmexp.zeropages--;
-	VM_FREE_PAGE_TO_CPU(pg)->pages[pgflidx]--;
 	pg->flags = PG_CLEAN;
 	pg->pqflags = 0;
 	pg->uobject = NULL;
 	pg->uanon = NULL;
-	TAILQ_INSERT_TAIL(rlist, pg, pageq.queue);
+	TAILQ_INSERT_TAIL(rlist, pg, pageq);
 	STAT_INCR(uvm_pglistalloc_npages);
 }
 
@@ -135,8 +139,6 @@ uvm_pglistalloc_c_ps(struct vm_physseg *ps, int num, paddr_t low, paddr_t high,
 	printf("pgalloc: contig %d pgs from psi %ld\n", num,
 	(long)(ps - vm_physmem));
 #endif
-
-	KASSERT(mutex_owned(&uvm_fpageqlock));
 
 	try = roundup(max(atop(low), ps->avail_start), atop(alignment));
 	limit = min(atop(high), ps->avail_end);
@@ -260,9 +262,9 @@ uvm_pglistalloc_contig(int num, paddr_t low, paddr_t high, paddr_t alignment,
 						    alignment, boundary, rlist);
 			if (num == 0) {
 #ifdef PGALLOC_VERBOSE
-				printf("pgalloc: %"PRIxMAX"-%"PRIxMAX"\n",
-				       (uintmax_t) VM_PAGE_TO_PHYS(TAILQ_FIRST(rlist)),
-				       (uintmax_t) VM_PAGE_TO_PHYS(TAILQ_LAST(rlist, pglist)));
+				printf("pgalloc: %lx-%lx\n",
+				       VM_PAGE_TO_PHYS(TAILQ_FIRST(rlist)),
+				       VM_PAGE_TO_PHYS(TAILQ_LAST(rlist)));
 #endif
 				error = 0;
 				goto out;
@@ -294,8 +296,6 @@ uvm_pglistalloc_s_ps(struct vm_physseg *ps, int num, paddr_t low, paddr_t high,
 	printf("pgalloc: simple %d pgs from psi %ld\n", num,
 	    (long)(ps - vm_physmem));
 #endif
-
-	KASSERT(mutex_owned(&uvm_fpageqlock));
 
 	todo = num;
 	limit = min(atop(high), ps->avail_end);
@@ -386,9 +386,9 @@ out:
 	}
 #ifdef PGALLOC_VERBOSE
 	if (!error)
-		printf("pgalloc: %"PRIxMAX"..%"PRIxMAX"\n",
-		       (uintmax_t) VM_PAGE_TO_PHYS(TAILQ_FIRST(rlist)),
-		       (uintmax_t) VM_PAGE_TO_PHYS(TAILQ_LAST(rlist, pglist)));
+		printf("pgalloc: %lx..%lx\n",
+		       VM_PAGE_TO_PHYS(TAILQ_FIRST(rlist)),
+		       VM_PAGE_TO_PHYS(TAILQ_LAST(rlist, pglist)));
 #endif
 	return (error);
 }
@@ -434,45 +434,38 @@ uvm_pglistalloc(psize_t size, paddr_t low, paddr_t high, paddr_t alignment,
 void
 uvm_pglistfree(struct pglist *list)
 {
-	struct uvm_cpu *ucpu;
 	struct vm_page *pg;
-	int index, color, queue;
-	bool iszero;
 
 	/*
 	 * Lock the free list and free each page.
 	 */
 
 	mutex_spin_enter(&uvm_fpageqlock);
-	ucpu = curcpu()->ci_data.cpu_uvm;
 	while ((pg = TAILQ_FIRST(list)) != NULL) {
+		bool iszero;
+
 		KASSERT(!uvmpdpol_pageisqueued_p(pg));
-		TAILQ_REMOVE(list, pg, pageq.queue);
+		TAILQ_REMOVE(list, pg, pageq);
 		iszero = (pg->flags & PG_ZERO);
 		pg->pqflags = PQ_FREE;
 #ifdef DEBUG
 		pg->uobject = (void *)0xdeadbeef;
+		pg->offset = 0xdeadbeef;
 		pg->uanon = (void *)0xdeadbeef;
 #endif /* DEBUG */
 #ifdef DEBUG
 		if (iszero)
 			uvm_pagezerocheck(pg);
 #endif /* DEBUG */
-		index = uvm_page_lookup_freelist(pg);
-		color = VM_PGCOLOR_BUCKET(pg);
-		queue = iszero ? PGFL_ZEROS : PGFL_UNKNOWN;
-		pg->offset = (uintptr_t)ucpu;
-		LIST_INSERT_HEAD(&uvm.page_free[index].pgfl_buckets[color].
-		    pgfl_queues[queue], pg, pageq.list);
-		LIST_INSERT_HEAD(&ucpu->page_free[index].pgfl_buckets[color].
-		    pgfl_queues[queue], pg, listq.list);
+		TAILQ_INSERT_HEAD(&uvm.page_free[uvm_page_lookup_freelist(pg)].
+		    pgfl_buckets[VM_PGCOLOR_BUCKET(pg)].
+		    pgfl_queues[iszero ? PGFL_ZEROS : PGFL_UNKNOWN], pg, pageq);
 		uvmexp.free++;
 		if (iszero)
 			uvmexp.zeropages++;
-		ucpu->pages[queue]++;
+		if (uvmexp.zeropages < UVM_PAGEZERO_TARGET)
+			uvm.page_idle_zero = vm_page_zero_enable;
 		STAT_DECR(uvm_pglistalloc_npages);
 	}
-	if (ucpu->pages[PGFL_ZEROS] < ucpu->pages[PGFL_UNKNOWN])
-		ucpu->page_idle_zero = vm_page_zero_enable;
 	mutex_spin_exit(&uvm_fpageqlock);
 }

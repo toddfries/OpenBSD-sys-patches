@@ -512,8 +512,7 @@ typedef struct drm_radeon_init {
 		RADEON_INIT_CP = 0x01,
 		RADEON_CLEANUP_CP = 0x02,
 		RADEON_INIT_R200_CP = 0x03,
-		RADEON_INIT_R300_CP = 0x04,
-		RADEON_INIT_R500_CP = 0x05,
+		RADEON_INIT_R300_CP = 0x04
 	} func;
 	unsigned long sarea_priv_offset;
 	int is_pci; /* for overriding only */
@@ -714,7 +713,6 @@ typedef struct drm_radeon_setparam {
 #define RADEON_SETPARAM_PCIGART_LOCATION 3	/* PCI Gart Location */
 
 #define RADEON_SETPARAM_NEW_MEMMAP 4		/* Use new memory map */
-#define RADEON_SETPARAM_PCIGART_TABLE_SIZE 5    /* PCI GART Table Size */
 
 /* 1.14: Clients can allocate/free a surface
  */

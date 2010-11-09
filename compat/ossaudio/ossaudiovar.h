@@ -1,4 +1,4 @@
-/*	$NetBSD: ossaudiovar.h,v 1.15 2008/04/28 20:23:45 martin Exp $	*/
+/*	$NetBSD: ossaudiovar.h,v 1.11 2005/12/11 12:20:23 christos Exp $	*/
 
 /*-
  * Copyright (c) 1997 The NetBSD Foundation, Inc.
@@ -12,6 +12,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -29,7 +36,7 @@
 struct oss_sys_ioctl_args {
 	syscallarg(int) fd;
 	syscallarg(u_long) com;
-	syscallarg(void *) data;
+	syscallarg(caddr_t) data;
 };
 
 #define OSS_IOCPARM_MASK    0xfff           /* parameters must be < 4096 bytes */
@@ -37,7 +44,7 @@ struct oss_sys_ioctl_args {
 #define OSS_IOC_IN          0x40000000      /* copy in parameters */
 #define OSS_IOC_OUT         0x80000000      /* copy out parameters */
 #define OSS_IOC_INOUT       (OSS_IOC_IN | OSS_IOC_OUT)
-#define	_OSS_IOCTL(w,x,y,z) ((uint)((w)|(((z)&OSS_IOCPARM_MASK)<<16)|((x)<<8)|(y)))
+#define	_OSS_IOCTL(w,x,y,z) ((int)((w)|(((z)&OSS_IOCPARM_MASK)<<16)|((x)<<8)|(y)))
 #define _OSS_IO(x,y)        _OSS_IOCTL(OSS_IOC_VOID, x, y, 0)
 #define _OSS_IOR(x,y,t)     _OSS_IOCTL(OSS_IOC_OUT, x, y, sizeof(t))
 #define _OSS_IOW(x,y,t)     _OSS_IOCTL(OSS_IOC_IN, x, y, sizeof(t))
@@ -82,7 +89,6 @@ struct oss_sys_ioctl_args {
 #define OSS_SNDCTL_DSP_MAPOUTBUF	_OSS_IOR ('P', 20, struct oss_buffmem_desc)
 #define OSS_SNDCTL_DSP_SETSYNCRO	_OSS_IO  ('P', 21)
 #define OSS_SNDCTL_DSP_SETDUPLEX	_OSS_IO  ('P', 22)
-#define OSS_SNDCTL_DSP_GETODELAY	_OSS_IOR ('P', 23, int)
 #define OSS_SNDCTL_DSP_PROFILE		_OSS_IOW ('P', 23, int)
 #define	  OSS_APF_NORMAL		0	/* Normal applications */
 #define	  OSS_APF_NETWORK		1	/* "external" delays */

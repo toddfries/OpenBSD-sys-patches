@@ -1,4 +1,4 @@
-/*	$NetBSD: db_input.c,v 1.23 2009/03/07 22:02:17 ad Exp $	*/
+/*	$NetBSD: db_input.c,v 1.21 2005/12/11 12:20:53 christos Exp $	*/
 
 /*
  * Mach Operating System
@@ -30,17 +30,19 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: db_input.c,v 1.23 2009/03/07 22:02:17 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: db_input.c,v 1.21 2005/12/11 12:20:53 christos Exp $");
 
-#ifdef _KERNEL_OPT
 #include "opt_ddbparam.h"
-#endif
 
 #include <sys/param.h>
 #include <sys/proc.h>
-#include <sys/cpu.h>
 
-#include <ddb/ddb.h>
+#include <machine/db_machdep.h>
+
+#include <ddb/db_output.h>
+#include <ddb/db_command.h>
+#include <ddb/db_sym.h>
+#include <ddb/db_extern.h>
 
 #include <dev/cons.h>
 
@@ -146,7 +148,7 @@ db_delete_line(void)
 	} while (/*CONSTCOND*/ 0)
 #endif
 
-/* returns true at end-of-line */
+/* returns TRUE at end-of-line */
 static int
 db_inputchar(int c)
 {
@@ -302,7 +304,7 @@ db_inputchar(int c)
 				/* Repeted previous line, not saved */
 				db_history_curr = db_history_last;
 				*db_le++ = c;
-				return (true);
+				return (TRUE);
 			}
 		}
 		if (db_le != db_lbuf_start) {
@@ -344,12 +346,6 @@ db_inputchar(int c)
 int
 db_readline(char *lstart, int lsize)
 {
-
-# ifdef MULTIPROCESSOR
-	db_printf("db{%ld}> ", (long)cpu_number());
-# else
-	db_printf("db> ");
-# endif
 	db_force_whitespace();	/* synch output position */
 
 	db_lbuf_start = lstart;

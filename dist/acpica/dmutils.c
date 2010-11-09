@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Module Name: dmutils - AML disassembler utilities
- *              $Revision: 1.4 $
+ *              xRevision: 1.21 $
  *
  ******************************************************************************/
 
@@ -9,7 +9,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2008, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2006, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -115,6 +115,9 @@
  *****************************************************************************/
 
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: dmutils.c,v 1.1 2006/03/23 13:36:31 kochi Exp $");
+
 #include "acpi.h"
 #include "amlcode.h"
 #include "acdisasm.h"
@@ -134,7 +137,7 @@ ACPI_EXTERNAL_LIST              *AcpiGbl_ExternalList = NULL;
 
 /* Data used in keeping track of fields */
 #if 0
-const char                      *AcpiGbl_FENames[] =
+const char                      *AcpiGbl_FENames[ACPI_NUM_FIELD_NAMES] =
 {
     "skip",
     "?access?"
@@ -143,7 +146,7 @@ const char                      *AcpiGbl_FENames[] =
 
 /* Operators for Match() */
 
-const char                      *AcpiGbl_MatchOps[] =
+const char                      *AcpiGbl_MatchOps[ACPI_NUM_MATCH_OPS] =
 {
     "MTR",
     "MEQ",
@@ -155,7 +158,7 @@ const char                      *AcpiGbl_MatchOps[] =
 
 /* Access type decoding */
 
-const char                      *AcpiGbl_AccessTypes[] =
+const char                      *AcpiGbl_AccessTypes[ACPI_NUM_ACCESS_TYPES] =
 {
     "AnyAcc",
     "ByteAcc",
@@ -163,13 +166,11 @@ const char                      *AcpiGbl_AccessTypes[] =
     "DWordAcc",
     "QWordAcc",
     "BufferAcc",
-    "InvalidAccType",
-    "InvalidAccType"
 };
 
 /* Lock rule decoding */
 
-const char                      *AcpiGbl_LockRule[] =
+const char                      *AcpiGbl_LockRule[ACPI_NUM_LOCK_RULES] =
 {
     "NoLock",
     "Lock"
@@ -177,25 +178,24 @@ const char                      *AcpiGbl_LockRule[] =
 
 /* Update rule decoding */
 
-const char                      *AcpiGbl_UpdateRules[] =
+const char                      *AcpiGbl_UpdateRules[ACPI_NUM_UPDATE_RULES] =
 {
     "Preserve",
     "WriteAsOnes",
-    "WriteAsZeros",
-    "InvalidUpdateRule"
+    "WriteAsZeros"
 };
 
 /* Strings used to decode resource descriptors */
 
-const char                      *AcpiGbl_WordDecode[] =
+const char                      *AcpiGbl_WordDecode[4] =
 {
     "Memory",
     "IO",
     "BusNumber",
-    "UnknownResourceType"
+    "Unknown-resource-type"
 };
 
-const char                      *AcpiGbl_IrqDecode[] =
+const char                      *AcpiGbl_IrqDecode[2] =
 {
     "IRQNoFlags",
     "IRQ"
@@ -219,14 +219,10 @@ const char                      *AcpiGbl_IrqDecode[] =
 
 void
 AcpiDmAddToExternalList (
-    char                    *Path,
-    UINT8                   Type,
-    UINT32                  Value)
+    char                    *Path)
 {
     char                    *ExternalPath;
     ACPI_EXTERNAL_LIST      *NewExternal;
-    ACPI_EXTERNAL_LIST      *NextExternal;
-    ACPI_EXTERNAL_LIST      *PrevExternal = NULL;
     ACPI_STATUS             Status;
 
 
@@ -239,83 +235,23 @@ AcpiDmAddToExternalList (
 
     Status = AcpiNsExternalizeName (ACPI_UINT32_MAX, Path,
                     NULL, &ExternalPath);
-    if (ACPI_FAILURE (Status))
+    if (ACPI_SUCCESS (Status))
     {
-        return;
-    }
+        /* Allocate and init a new External() descriptor */
 
-    /* Ensure that we don't have duplicate externals */
+        NewExternal = ACPI_MEM_CALLOCATE (sizeof (ACPI_EXTERNAL_LIST));
+        NewExternal->Path = ExternalPath;
 
-    NextExternal = AcpiGbl_ExternalList;
-    while (NextExternal)
-    {
-        /* Allow upgrade of type from ANY */
+        /* Link the new descriptor into the global list */
 
-        if (!ACPI_STRCMP (ExternalPath, NextExternal->Path))
+        if (AcpiGbl_ExternalList)
         {
-            /* Duplicate method, check that the Value (ArgCount) is the same */
-
-            if ((NextExternal->Type == ACPI_TYPE_METHOD) &&
-                (NextExternal->Value != Value))
-            {
-                ACPI_ERROR ((AE_INFO, "Argument count mismatch for method %s %d %d",
-                    NextExternal->Path, NextExternal->Value, Value));
-            }
-            if (NextExternal->Type == ACPI_TYPE_ANY)
-            {
-                NextExternal->Type = Type;
-                NextExternal->Value = Value;
-            }
-            ACPI_FREE (ExternalPath);
-            return;
+            NewExternal->Next = AcpiGbl_ExternalList;
         }
-        NextExternal = NextExternal->Next;
-    }
-
-    /* Allocate and init a new External() descriptor */
-
-    NewExternal = ACPI_ALLOCATE_ZEROED (sizeof (ACPI_EXTERNAL_LIST));
-    NewExternal->InternalPath = Path;
-    NewExternal->Path = ExternalPath;
-    NewExternal->Type = Type;
-    NewExternal->Value = Value;
-    NewExternal->Length = (UINT16) ACPI_STRLEN (ExternalPath);
-
-    /* Link the new descriptor into the global list, ordered by string length */
-
-    NextExternal = AcpiGbl_ExternalList;
-    while (NextExternal)
-    {
-        if (NewExternal->Length <= NextExternal->Length)
-        {
-            if (PrevExternal)
-            {
-                PrevExternal->Next = NewExternal;
-            }
-            else
-            {
-                AcpiGbl_ExternalList = NewExternal;
-            }
-
-            NewExternal->Next = NextExternal;
-            return;
-        }
-
-        PrevExternal = NextExternal;
-        NextExternal = NextExternal->Next;
-    }
-
-    if (PrevExternal)
-    {
-        PrevExternal->Next = NewExternal;
-    }
-    else
-    {
         AcpiGbl_ExternalList = NewExternal;
     }
 }
 #endif
-
 
 /*******************************************************************************
  *

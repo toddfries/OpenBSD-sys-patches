@@ -3,7 +3,7 @@
  *
  * Module Name: hwregs - Read/write access functions for the various ACPI
  *                       control and status registers.
- *              $Revision: 1.4 $
+ *              xRevision: 1.176 $
  *
  ******************************************************************************/
 
@@ -11,7 +11,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2008, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2006, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -116,6 +116,9 @@
  *
  *****************************************************************************/
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: hwregs.c,v 1.1 2006/03/23 13:36:31 kochi Exp $");
+
 #define __HWREGS_C__
 
 #include "acpi.h"
@@ -130,9 +133,9 @@
  *
  * FUNCTION:    AcpiHwClearAcpiStatus
  *
- * PARAMETERS:  None
+ * PARAMETERS:  Flags           - Lock the hardware or not
  *
- * RETURN:      None
+ * RETURN:      none
  *
  * DESCRIPTION: Clears all fixed and general purpose status bits
  *              THIS FUNCTION MUST BE CALLED WITH INTERRUPTS DISABLED
@@ -141,20 +144,26 @@
 
 ACPI_STATUS
 AcpiHwClearAcpiStatus (
-    void)
+    UINT32                  Flags)
 {
     ACPI_STATUS             Status;
-    ACPI_CPU_FLAGS          LockFlags = 0;
 
 
-    ACPI_FUNCTION_TRACE (HwClearAcpiStatus);
+    ACPI_FUNCTION_TRACE ("HwClearAcpiStatus");
 
 
     ACPI_DEBUG_PRINT ((ACPI_DB_IO, "About to write %04X to %04X\n",
         ACPI_BITMASK_ALL_FIXED_STATUS,
-        (UINT16) AcpiGbl_FADT.XPm1aEventBlock.Address));
+        (UINT16) ACPI_GET_ADDRESS (AcpiGbl_FADT->XPm1aEvtBlk.Address)));
 
-    LockFlags = AcpiOsAcquireLock (AcpiGbl_HardwareLock);
+    if (Flags & ACPI_MTX_LOCK)
+    {
+        Status = AcpiUtAcquireMutex (ACPI_MTX_HARDWARE);
+        if (ACPI_FAILURE (Status))
+        {
+            return_ACPI_STATUS (Status);
+        }
+    }
 
     Status = AcpiHwRegisterWrite (ACPI_MTX_DO_NOT_LOCK,
                 ACPI_REGISTER_PM1_STATUS,
@@ -166,10 +175,10 @@ AcpiHwClearAcpiStatus (
 
     /* Clear the fixed events */
 
-    if (AcpiGbl_FADT.XPm1bEventBlock.Address)
+    if (ACPI_VALID_ADDRESS (AcpiGbl_FADT->XPm1bEvtBlk.Address))
     {
         Status = AcpiHwLowLevelWrite (16, ACPI_BITMASK_ALL_FIXED_STATUS,
-                    &AcpiGbl_FADT.XPm1bEventBlock);
+                    &AcpiGbl_FADT->XPm1bEvtBlk);
         if (ACPI_FAILURE (Status))
         {
             goto UnlockAndExit;
@@ -181,7 +190,10 @@ AcpiHwClearAcpiStatus (
     Status = AcpiEvWalkGpeList (AcpiHwClearGpeBlock);
 
 UnlockAndExit:
-    AcpiOsReleaseLock (AcpiGbl_HardwareLock, LockFlags);
+    if (Flags & ACPI_MTX_LOCK)
+    {
+        (void) AcpiUtReleaseMutex (ACPI_MTX_HARDWARE);
+    }
     return_ACPI_STATUS (Status);
 }
 
@@ -208,10 +220,11 @@ AcpiGetSleepTypeData (
     UINT8                   *SleepTypeB)
 {
     ACPI_STATUS             Status = AE_OK;
-    ACPI_EVALUATE_INFO      *Info;
+    ACPI_PARAMETER_INFO     Info;
+    const char              *SleepStateName;
 
 
-    ACPI_FUNCTION_TRACE (AcpiGetSleepTypeData);
+    ACPI_FUNCTION_TRACE ("AcpiGetSleepTypeData");
 
 
     /* Validate parameters */
@@ -222,53 +235,47 @@ AcpiGetSleepTypeData (
         return_ACPI_STATUS (AE_BAD_PARAMETER);
     }
 
-    /* Allocate the evaluation information block */
-
-    Info = ACPI_ALLOCATE_ZEROED (sizeof (ACPI_EVALUATE_INFO));
-    if (!Info)
-    {
-        return_ACPI_STATUS (AE_NO_MEMORY);
-    }
-
-    Info->Pathname = ACPI_CAST_CONST_PTR (char, AcpiGbl_SleepStateNames[SleepState]);
-
     /* Evaluate the namespace object containing the values for this state */
 
-    Status = AcpiNsEvaluate (Info);
+    Info.Parameters = NULL;
+    Info.ReturnObject = NULL;
+    SleepStateName = ACPI_CAST_CONST_PTR (char, AcpiGbl_SleepStateNames[SleepState]);
+
+    Status = AcpiNsEvaluateByName (SleepStateName, &Info);
     if (ACPI_FAILURE (Status))
     {
         ACPI_DEBUG_PRINT ((ACPI_DB_EXEC,
             "%s while evaluating SleepState [%s]\n",
-            AcpiFormatException (Status), Info->Pathname));
+            AcpiFormatException (Status), SleepStateName));
 
-        goto Cleanup;
+        return_ACPI_STATUS (Status);
     }
 
     /* Must have a return object */
 
-    if (!Info->ReturnObject)
+    if (!Info.ReturnObject)
     {
         ACPI_ERROR ((AE_INFO, "No Sleep State object returned from [%s]",
-            Info->Pathname));
+            SleepStateName));
         Status = AE_NOT_EXIST;
     }
 
     /* It must be of type Package */
 
-    else if (ACPI_GET_OBJECT_TYPE (Info->ReturnObject) != ACPI_TYPE_PACKAGE)
+    else if (ACPI_GET_OBJECT_TYPE (Info.ReturnObject) != ACPI_TYPE_PACKAGE)
     {
         ACPI_ERROR ((AE_INFO, "Sleep State return object is not a Package"));
         Status = AE_AML_OPERAND_TYPE;
     }
 
     /*
-     * The package must have at least two elements. NOTE (March 2005): This
+     * The package must have at least two elements.  NOTE (March 2005): This
      * goes against the current ACPI spec which defines this object as a
-     * package with one encoded DWORD element. However, existing practice
+     * package with one encoded DWORD element.  However, existing practice
      * by BIOS vendors seems to be to have 2 or more elements, at least
      * one per sleep type (A/B).
      */
-    else if (Info->ReturnObject->Package.Count < 2)
+    else if (Info.ReturnObject->Package.Count < 2)
     {
         ACPI_ERROR ((AE_INFO,
             "Sleep State return package does not have at least two elements"));
@@ -277,15 +284,15 @@ AcpiGetSleepTypeData (
 
     /* The first two elements must both be of type Integer */
 
-    else if ((ACPI_GET_OBJECT_TYPE (Info->ReturnObject->Package.Elements[0])
+    else if ((ACPI_GET_OBJECT_TYPE (Info.ReturnObject->Package.Elements[0])
                 != ACPI_TYPE_INTEGER) ||
-             (ACPI_GET_OBJECT_TYPE (Info->ReturnObject->Package.Elements[1])
+             (ACPI_GET_OBJECT_TYPE (Info.ReturnObject->Package.Elements[1])
                 != ACPI_TYPE_INTEGER))
     {
         ACPI_ERROR ((AE_INFO,
             "Sleep State return package elements are not both Integers (%s, %s)",
-            AcpiUtGetObjectTypeName (Info->ReturnObject->Package.Elements[0]),
-            AcpiUtGetObjectTypeName (Info->ReturnObject->Package.Elements[1])));
+            AcpiUtGetObjectTypeName (Info.ReturnObject->Package.Elements[0]),
+            AcpiUtGetObjectTypeName (Info.ReturnObject->Package.Elements[1])));
         Status = AE_AML_OPERAND_TYPE;
     }
     else
@@ -293,27 +300,22 @@ AcpiGetSleepTypeData (
         /* Valid _Sx_ package size, type, and value */
 
         *SleepTypeA = (UINT8)
-            (Info->ReturnObject->Package.Elements[0])->Integer.Value;
+            (Info.ReturnObject->Package.Elements[0])->Integer.Value;
         *SleepTypeB = (UINT8)
-            (Info->ReturnObject->Package.Elements[1])->Integer.Value;
+            (Info.ReturnObject->Package.Elements[1])->Integer.Value;
     }
 
     if (ACPI_FAILURE (Status))
     {
         ACPI_EXCEPTION ((AE_INFO, Status,
             "While evaluating SleepState [%s], bad Sleep object %p type %s",
-            Info->Pathname, Info->ReturnObject,
-            AcpiUtGetObjectTypeName (Info->ReturnObject)));
+            SleepStateName, Info.ReturnObject,
+            AcpiUtGetObjectTypeName (Info.ReturnObject)));
     }
 
-    AcpiUtRemoveReference (Info->ReturnObject);
-
-Cleanup:
-    ACPI_FREE (Info);
+    AcpiUtRemoveReference (Info.ReturnObject);
     return_ACPI_STATUS (Status);
 }
-
-ACPI_EXPORT_SYMBOL (AcpiGetSleepTypeData)
 
 
 /*******************************************************************************
@@ -351,8 +353,9 @@ AcpiHwGetBitRegisterInfo (
  *
  * PARAMETERS:  RegisterId      - ID of ACPI BitRegister to access
  *              ReturnValue     - Value that was read from the register
+ *              Flags           - Lock the hardware or not
  *
- * RETURN:      Status and the value read from specified Register. Value
+ * RETURN:      Status and the value read from specified Register.  Value
  *              returned is normalized to bit0 (is shifted all the way right)
  *
  * DESCRIPTION: ACPI BitRegister read function.
@@ -362,14 +365,15 @@ AcpiHwGetBitRegisterInfo (
 ACPI_STATUS
 AcpiGetRegister (
     UINT32                  RegisterId,
-    UINT32                  *ReturnValue)
+    UINT32                  *ReturnValue,
+    UINT32                  Flags)
 {
     UINT32                  RegisterValue = 0;
     ACPI_BIT_REGISTER_INFO  *BitRegInfo;
     ACPI_STATUS             Status;
 
 
-    ACPI_FUNCTION_TRACE (AcpiGetRegister);
+    ACPI_FUNCTION_TRACE ("AcpiGetRegister");
 
 
     /* Get the info structure corresponding to the requested ACPI Register */
@@ -380,10 +384,24 @@ AcpiGetRegister (
         return_ACPI_STATUS (AE_BAD_PARAMETER);
     }
 
+    if (Flags & ACPI_MTX_LOCK)
+    {
+        Status = AcpiUtAcquireMutex (ACPI_MTX_HARDWARE);
+        if (ACPI_FAILURE (Status))
+        {
+            return_ACPI_STATUS (Status);
+        }
+    }
+
     /* Read from the register */
 
-    Status = AcpiHwRegisterRead (ACPI_MTX_LOCK,
-                BitRegInfo->ParentRegister, &RegisterValue);
+    Status = AcpiHwRegisterRead (ACPI_MTX_DO_NOT_LOCK,
+                    BitRegInfo->ParentRegister, &RegisterValue);
+
+    if (Flags & ACPI_MTX_LOCK)
+    {
+        (void) AcpiUtReleaseMutex (ACPI_MTX_HARDWARE);
+    }
 
     if (ACPI_SUCCESS (Status))
     {
@@ -395,13 +413,11 @@ AcpiGetRegister (
         *ReturnValue = RegisterValue;
 
         ACPI_DEBUG_PRINT ((ACPI_DB_IO, "Read value %8.8X register %X\n",
-            RegisterValue, BitRegInfo->ParentRegister));
+                RegisterValue, BitRegInfo->ParentRegister));
     }
 
     return_ACPI_STATUS (Status);
 }
-
-ACPI_EXPORT_SYMBOL (AcpiGetRegister)
 
 
 /*******************************************************************************
@@ -411,6 +427,7 @@ ACPI_EXPORT_SYMBOL (AcpiGetRegister)
  * PARAMETERS:  RegisterId      - ID of ACPI BitRegister to access
  *              Value           - (only used on write) value to write to the
  *                                Register, NOT pre-normalized to the bit pos
+ *              Flags           - Lock the hardware or not
  *
  * RETURN:      Status
  *
@@ -421,15 +438,15 @@ ACPI_EXPORT_SYMBOL (AcpiGetRegister)
 ACPI_STATUS
 AcpiSetRegister (
     UINT32                  RegisterId,
-    UINT32                  Value)
+    UINT32                  Value,
+    UINT32                  Flags)
 {
     UINT32                  RegisterValue = 0;
     ACPI_BIT_REGISTER_INFO  *BitRegInfo;
     ACPI_STATUS             Status;
-    ACPI_CPU_FLAGS          LockFlags;
 
 
-    ACPI_FUNCTION_TRACE_U32 (AcpiSetRegister, RegisterId);
+    ACPI_FUNCTION_TRACE_U32 ("AcpiSetRegister", RegisterId);
 
 
     /* Get the info structure corresponding to the requested ACPI Register */
@@ -441,7 +458,14 @@ AcpiSetRegister (
         return_ACPI_STATUS (AE_BAD_PARAMETER);
     }
 
-    LockFlags = AcpiOsAcquireLock (AcpiGbl_HardwareLock);
+    if (Flags & ACPI_MTX_LOCK)
+    {
+        Status = AcpiUtAcquireMutex (ACPI_MTX_HARDWARE);
+        if (ACPI_FAILURE (Status))
+        {
+            return_ACPI_STATUS (Status);
+        }
+    }
 
     /* Always do a register read first so we can insert the new bits  */
 
@@ -464,8 +488,8 @@ AcpiSetRegister (
     case ACPI_REGISTER_PM1_STATUS:
 
         /*
-         * Status Registers are different from the rest. Clear by
-         * writing 1, and writing 0 has no effect. So, the only relevant
+         * Status Registers are different from the rest.  Clear by
+         * writing 1, and writing 0 has no effect.  So, the only relevant
          * information is the single bit we're interested in, all others should
          * be written as 0 so they will be left unchanged.
          */
@@ -483,7 +507,7 @@ AcpiSetRegister (
     case ACPI_REGISTER_PM1_ENABLE:
 
         ACPI_REGISTER_INSERT_VALUE (RegisterValue, BitRegInfo->BitPosition,
-            BitRegInfo->AccessBitMask, Value);
+                BitRegInfo->AccessBitMask, Value);
 
         Status = AcpiHwRegisterWrite (ACPI_MTX_DO_NOT_LOCK,
                     ACPI_REGISTER_PM1_ENABLE, (UINT16) RegisterValue);
@@ -497,11 +521,10 @@ AcpiSetRegister (
          * Note that at this level, the fact that there are actually TWO
          * registers (A and B - and B may not exist) is abstracted.
          */
-        ACPI_DEBUG_PRINT ((ACPI_DB_IO, "PM1 control: Read %X\n",
-            RegisterValue));
+        ACPI_DEBUG_PRINT ((ACPI_DB_IO, "PM1 control: Read %X\n", RegisterValue));
 
         ACPI_REGISTER_INSERT_VALUE (RegisterValue, BitRegInfo->BitPosition,
-            BitRegInfo->AccessBitMask, Value);
+                BitRegInfo->AccessBitMask, Value);
 
         Status = AcpiHwRegisterWrite (ACPI_MTX_DO_NOT_LOCK,
                     ACPI_REGISTER_PM1_CONTROL, (UINT16) RegisterValue);
@@ -519,14 +542,16 @@ AcpiSetRegister (
 
         ACPI_DEBUG_PRINT ((ACPI_DB_IO, "PM2 control: Read %X from %8.8X%8.8X\n",
             RegisterValue,
-            ACPI_FORMAT_UINT64 (AcpiGbl_FADT.XPm2ControlBlock.Address)));
+            ACPI_FORMAT_UINT64 (ACPI_GET_ADDRESS (
+                AcpiGbl_FADT->XPm2CntBlk.Address))));
 
         ACPI_REGISTER_INSERT_VALUE (RegisterValue, BitRegInfo->BitPosition,
                 BitRegInfo->AccessBitMask, Value);
 
         ACPI_DEBUG_PRINT ((ACPI_DB_IO, "About to write %4.4X to %8.8X%8.8X\n",
             RegisterValue,
-            ACPI_FORMAT_UINT64 (AcpiGbl_FADT.XPm2ControlBlock.Address)));
+            ACPI_FORMAT_UINT64 (ACPI_GET_ADDRESS (
+                AcpiGbl_FADT->XPm2CntBlk.Address))));
 
         Status = AcpiHwRegisterWrite (ACPI_MTX_DO_NOT_LOCK,
                     ACPI_REGISTER_PM2_CONTROL, (UINT8) (RegisterValue));
@@ -540,7 +565,10 @@ AcpiSetRegister (
 
 UnlockAndExit:
 
-    AcpiOsReleaseLock (AcpiGbl_HardwareLock, LockFlags);
+    if (Flags & ACPI_MTX_LOCK)
+    {
+        (void) AcpiUtReleaseMutex (ACPI_MTX_HARDWARE);
+    }
 
     /* Normalize the value that was read */
 
@@ -549,24 +577,23 @@ UnlockAndExit:
             BitRegInfo->BitPosition));
 
     ACPI_DEBUG_PRINT ((ACPI_DB_IO, "Set bits: %8.8X actual %8.8X register %X\n",
-        Value, RegisterValue, BitRegInfo->ParentRegister));
+            Value, RegisterValue, BitRegInfo->ParentRegister));
     return_ACPI_STATUS (Status);
 }
-
-ACPI_EXPORT_SYMBOL (AcpiSetRegister)
 
 
 /******************************************************************************
  *
  * FUNCTION:    AcpiHwRegisterRead
  *
- * PARAMETERS:  UseLock             - Lock hardware? True/False
- *              RegisterId          - ACPI Register ID
+ * PARAMETERS:  UseLock             - Mutex hw access
+ *              RegisterId          - RegisterID + Offset
  *              ReturnValue         - Where the register value is returned
  *
  * RETURN:      Status and the value read.
  *
- * DESCRIPTION: Read from the specified ACPI register
+ * DESCRIPTION: Acpi register read function.  Registers are read at the
+ *              given offset.
  *
  ******************************************************************************/
 
@@ -579,22 +606,25 @@ AcpiHwRegisterRead (
     UINT32                  Value1 = 0;
     UINT32                  Value2 = 0;
     ACPI_STATUS             Status;
-    ACPI_CPU_FLAGS          LockFlags = 0;
 
 
-    ACPI_FUNCTION_TRACE (HwRegisterRead);
+    ACPI_FUNCTION_TRACE ("HwRegisterRead");
 
 
     if (ACPI_MTX_LOCK == UseLock)
     {
-        LockFlags = AcpiOsAcquireLock (AcpiGbl_HardwareLock);
+        Status = AcpiUtAcquireMutex (ACPI_MTX_HARDWARE);
+        if (ACPI_FAILURE (Status))
+        {
+            return_ACPI_STATUS (Status);
+        }
     }
 
     switch (RegisterId)
     {
     case ACPI_REGISTER_PM1_STATUS:           /* 16-bit access */
 
-        Status = AcpiHwLowLevelRead (16, &Value1, &AcpiGbl_FADT.XPm1aEventBlock);
+        Status = AcpiHwLowLevelRead (16, &Value1, &AcpiGbl_FADT->XPm1aEvtBlk);
         if (ACPI_FAILURE (Status))
         {
             goto UnlockAndExit;
@@ -602,7 +632,7 @@ AcpiHwRegisterRead (
 
         /* PM1B is optional */
 
-        Status = AcpiHwLowLevelRead (16, &Value2, &AcpiGbl_FADT.XPm1bEventBlock);
+        Status = AcpiHwLowLevelRead (16, &Value2, &AcpiGbl_FADT->XPm1bEvtBlk);
         Value1 |= Value2;
         break;
 
@@ -624,31 +654,31 @@ AcpiHwRegisterRead (
 
     case ACPI_REGISTER_PM1_CONTROL:          /* 16-bit access */
 
-        Status = AcpiHwLowLevelRead (16, &Value1, &AcpiGbl_FADT.XPm1aControlBlock);
+        Status = AcpiHwLowLevelRead (16, &Value1, &AcpiGbl_FADT->XPm1aCntBlk);
         if (ACPI_FAILURE (Status))
         {
             goto UnlockAndExit;
         }
 
-        Status = AcpiHwLowLevelRead (16, &Value2, &AcpiGbl_FADT.XPm1bControlBlock);
+        Status = AcpiHwLowLevelRead (16, &Value2, &AcpiGbl_FADT->XPm1bCntBlk);
         Value1 |= Value2;
         break;
 
 
     case ACPI_REGISTER_PM2_CONTROL:          /* 8-bit access */
 
-        Status = AcpiHwLowLevelRead (8, &Value1, &AcpiGbl_FADT.XPm2ControlBlock);
+        Status = AcpiHwLowLevelRead (8, &Value1, &AcpiGbl_FADT->XPm2CntBlk);
         break;
 
 
     case ACPI_REGISTER_PM_TIMER:             /* 32-bit access */
 
-        Status = AcpiHwLowLevelRead (32, &Value1, &AcpiGbl_FADT.XPmTimerBlock);
+        Status = AcpiHwLowLevelRead (32, &Value1, &AcpiGbl_FADT->XPmTmrBlk);
         break;
 
     case ACPI_REGISTER_SMI_COMMAND_BLOCK:    /* 8-bit access */
 
-        Status = AcpiOsReadPort (AcpiGbl_FADT.SmiCommand, &Value1, 8);
+        Status = AcpiOsReadPort (AcpiGbl_FADT->SmiCmd, &Value1, 8);
         break;
 
     default:
@@ -661,7 +691,7 @@ AcpiHwRegisterRead (
 UnlockAndExit:
     if (ACPI_MTX_LOCK == UseLock)
     {
-        AcpiOsReleaseLock (AcpiGbl_HardwareLock, LockFlags);
+        (void) AcpiUtReleaseMutex (ACPI_MTX_HARDWARE);
     }
 
     if (ACPI_SUCCESS (Status))
@@ -677,26 +707,14 @@ UnlockAndExit:
  *
  * FUNCTION:    AcpiHwRegisterWrite
  *
- * PARAMETERS:  UseLock             - Lock hardware? True/False
- *              RegisterId          - ACPI Register ID
+ * PARAMETERS:  UseLock             - Mutex hw access
+ *              RegisterId          - RegisterID + Offset
  *              Value               - The value to write
  *
  * RETURN:      Status
  *
- * DESCRIPTION: Write to the specified ACPI register
- *
- * NOTE: In accordance with the ACPI specification, this function automatically
- * preserves the value of the following bits, meaning that these bits cannot be
- * changed via this interface:
- *
- * PM1_CONTROL[0] = SCI_EN
- * PM1_CONTROL[9]
- * PM1_STATUS[11]
- *
- * ACPI References:
- * 1) Hardware Ignored Bits: When software writes to a register with ignored
- *      bit fields, it preserves the ignored bit fields
- * 2) SCI_EN: OSPM always preserves this bit position
+ * DESCRIPTION: Acpi register Write function.  Registers are written at the
+ *              given offset.
  *
  ******************************************************************************/
 
@@ -707,38 +725,25 @@ AcpiHwRegisterWrite (
     UINT32                  Value)
 {
     ACPI_STATUS             Status;
-    ACPI_CPU_FLAGS          LockFlags = 0;
-    UINT32                  ReadValue;
 
 
-    ACPI_FUNCTION_TRACE (HwRegisterWrite);
+    ACPI_FUNCTION_TRACE ("HwRegisterWrite");
 
 
     if (ACPI_MTX_LOCK == UseLock)
     {
-        LockFlags = AcpiOsAcquireLock (AcpiGbl_HardwareLock);
+        Status = AcpiUtAcquireMutex (ACPI_MTX_HARDWARE);
+        if (ACPI_FAILURE (Status))
+        {
+            return_ACPI_STATUS (Status);
+        }
     }
 
     switch (RegisterId)
     {
     case ACPI_REGISTER_PM1_STATUS:           /* 16-bit access */
 
-        /* Perform a read first to preserve certain bits (per ACPI spec) */
-
-        Status = AcpiHwRegisterRead (ACPI_MTX_DO_NOT_LOCK,
-                    ACPI_REGISTER_PM1_STATUS, &ReadValue);
-        if (ACPI_FAILURE (Status))
-        {
-            goto UnlockAndExit;
-        }
-
-        /* Insert the bits to be preserved */
-
-        ACPI_INSERT_BITS (Value, ACPI_PM1_STATUS_PRESERVED_BITS, ReadValue);
-
-        /* Now we can write the data */
-
-        Status = AcpiHwLowLevelWrite (16, Value, &AcpiGbl_FADT.XPm1aEventBlock);
+        Status = AcpiHwLowLevelWrite (16, Value, &AcpiGbl_FADT->XPm1aEvtBlk);
         if (ACPI_FAILURE (Status))
         {
             goto UnlockAndExit;
@@ -746,11 +751,11 @@ AcpiHwRegisterWrite (
 
         /* PM1B is optional */
 
-        Status = AcpiHwLowLevelWrite (16, Value, &AcpiGbl_FADT.XPm1bEventBlock);
+        Status = AcpiHwLowLevelWrite (16, Value, &AcpiGbl_FADT->XPm1bEvtBlk);
         break;
 
 
-    case ACPI_REGISTER_PM1_ENABLE:           /* 16-bit access */
+    case ACPI_REGISTER_PM1_ENABLE:           /* 16-bit access*/
 
         Status = AcpiHwLowLevelWrite (16, Value, &AcpiGbl_XPm1aEnable);
         if (ACPI_FAILURE (Status))
@@ -766,55 +771,37 @@ AcpiHwRegisterWrite (
 
     case ACPI_REGISTER_PM1_CONTROL:          /* 16-bit access */
 
-        /*
-         * Perform a read first to preserve certain bits (per ACPI spec)
-         *
-         * Note: This includes SCI_EN, we never want to change this bit
-         */
-        Status = AcpiHwRegisterRead (ACPI_MTX_DO_NOT_LOCK,
-                    ACPI_REGISTER_PM1_CONTROL, &ReadValue);
+        Status = AcpiHwLowLevelWrite (16, Value, &AcpiGbl_FADT->XPm1aCntBlk);
         if (ACPI_FAILURE (Status))
         {
             goto UnlockAndExit;
         }
 
-        /* Insert the bits to be preserved */
-
-        ACPI_INSERT_BITS (Value, ACPI_PM1_CONTROL_PRESERVED_BITS, ReadValue);
-
-        /* Now we can write the data */
-
-        Status = AcpiHwLowLevelWrite (16, Value, &AcpiGbl_FADT.XPm1aControlBlock);
-        if (ACPI_FAILURE (Status))
-        {
-            goto UnlockAndExit;
-        }
-
-        Status = AcpiHwLowLevelWrite (16, Value, &AcpiGbl_FADT.XPm1bControlBlock);
+        Status = AcpiHwLowLevelWrite (16, Value, &AcpiGbl_FADT->XPm1bCntBlk);
         break;
 
 
     case ACPI_REGISTER_PM1A_CONTROL:         /* 16-bit access */
 
-        Status = AcpiHwLowLevelWrite (16, Value, &AcpiGbl_FADT.XPm1aControlBlock);
+        Status = AcpiHwLowLevelWrite (16, Value, &AcpiGbl_FADT->XPm1aCntBlk);
         break;
 
 
     case ACPI_REGISTER_PM1B_CONTROL:         /* 16-bit access */
 
-        Status = AcpiHwLowLevelWrite (16, Value, &AcpiGbl_FADT.XPm1bControlBlock);
+        Status = AcpiHwLowLevelWrite (16, Value, &AcpiGbl_FADT->XPm1bCntBlk);
         break;
 
 
     case ACPI_REGISTER_PM2_CONTROL:          /* 8-bit access */
 
-        Status = AcpiHwLowLevelWrite (8, Value, &AcpiGbl_FADT.XPm2ControlBlock);
+        Status = AcpiHwLowLevelWrite (8, Value, &AcpiGbl_FADT->XPm2CntBlk);
         break;
 
 
     case ACPI_REGISTER_PM_TIMER:             /* 32-bit access */
 
-        Status = AcpiHwLowLevelWrite (32, Value, &AcpiGbl_FADT.XPmTimerBlock);
+        Status = AcpiHwLowLevelWrite (32, Value, &AcpiGbl_FADT->XPmTmrBlk);
         break;
 
 
@@ -822,7 +809,7 @@ AcpiHwRegisterWrite (
 
         /* SMI_CMD is currently always in IO space */
 
-        Status = AcpiOsWritePort (AcpiGbl_FADT.SmiCommand, Value, 8);
+        Status = AcpiOsWritePort (AcpiGbl_FADT->SmiCmd, Value, 8);
         break;
 
 
@@ -834,7 +821,7 @@ AcpiHwRegisterWrite (
 UnlockAndExit:
     if (ACPI_MTX_LOCK == UseLock)
     {
-        AcpiOsReleaseLock (AcpiGbl_HardwareLock, LockFlags);
+        (void) AcpiUtReleaseMutex (ACPI_MTX_HARDWARE);
     }
 
     return_ACPI_STATUS (Status);
@@ -865,7 +852,7 @@ AcpiHwLowLevelRead (
     ACPI_STATUS             Status;
 
 
-    ACPI_FUNCTION_NAME (HwLowLevelRead);
+    ACPI_FUNCTION_NAME ("HwLowLevelRead");
 
 
     /*
@@ -878,10 +865,10 @@ AcpiHwLowLevelRead (
         return (AE_OK);
     }
 
-    /* Get a local copy of the address. Handles possible alignment issues */
+    /* Get a local copy of the address.  Handles possible alignment issues */
 
     ACPI_MOVE_64_TO_64 (&Address, &Reg->Address);
-    if (!Address)
+    if (!ACPI_VALID_ADDRESS (Address))
     {
         return (AE_OK);
     }
@@ -891,31 +878,34 @@ AcpiHwLowLevelRead (
      * Two address spaces supported: Memory or IO.
      * PCI_Config is not supported here because the GAS struct is insufficient
      */
-    switch (Reg->SpaceId)
+    switch (Reg->AddressSpaceId)
     {
     case ACPI_ADR_SPACE_SYSTEM_MEMORY:
 
         Status = AcpiOsReadMemory (
-                    (ACPI_PHYSICAL_ADDRESS) Address, Value, Width);
+                    (ACPI_PHYSICAL_ADDRESS) ACPI_GET_ADDRESS (Address),
+                    Value, Width);
         break;
 
 
     case ACPI_ADR_SPACE_SYSTEM_IO:
 
-        Status = AcpiOsReadPort ((ACPI_IO_ADDRESS) Address, Value, Width);
+        Status = AcpiOsReadPort ((ACPI_IO_ADDRESS) ACPI_GET_ADDRESS (Address),
+                    Value, Width);
         break;
 
 
     default:
         ACPI_ERROR ((AE_INFO,
-            "Unsupported address space: %X", Reg->SpaceId));
+            "Unsupported address space: %X", Reg->AddressSpaceId));
         return (AE_BAD_PARAMETER);
     }
 
     ACPI_DEBUG_PRINT ((ACPI_DB_IO,
         "Read:  %8.8X width %2d from %8.8X%8.8X (%s)\n",
-        *Value, Width, ACPI_FORMAT_UINT64 (Address),
-        AcpiUtGetRegionName (Reg->SpaceId)));
+        *Value, Width,
+        ACPI_FORMAT_UINT64 (ACPI_GET_ADDRESS (Address)),
+        AcpiUtGetRegionName (Reg->AddressSpaceId)));
 
     return (Status);
 }
@@ -945,7 +935,7 @@ AcpiHwLowLevelWrite (
     ACPI_STATUS             Status;
 
 
-    ACPI_FUNCTION_NAME (HwLowLevelWrite);
+    ACPI_FUNCTION_NAME ("HwLowLevelWrite");
 
 
     /*
@@ -958,10 +948,10 @@ AcpiHwLowLevelWrite (
         return (AE_OK);
     }
 
-    /* Get a local copy of the address. Handles possible alignment issues */
+    /* Get a local copy of the address.  Handles possible alignment issues */
 
     ACPI_MOVE_64_TO_64 (&Address, &Reg->Address);
-    if (!Address)
+    if (!ACPI_VALID_ADDRESS (Address))
     {
         return (AE_OK);
     }
@@ -970,32 +960,34 @@ AcpiHwLowLevelWrite (
      * Two address spaces supported: Memory or IO.
      * PCI_Config is not supported here because the GAS struct is insufficient
      */
-    switch (Reg->SpaceId)
+    switch (Reg->AddressSpaceId)
     {
     case ACPI_ADR_SPACE_SYSTEM_MEMORY:
 
         Status = AcpiOsWriteMemory (
-                    (ACPI_PHYSICAL_ADDRESS) Address, Value, Width);
+                    (ACPI_PHYSICAL_ADDRESS) ACPI_GET_ADDRESS (Address),
+                    Value, Width);
         break;
 
 
     case ACPI_ADR_SPACE_SYSTEM_IO:
 
-        Status = AcpiOsWritePort (
-                    (ACPI_IO_ADDRESS) Address, Value, Width);
+        Status = AcpiOsWritePort ((ACPI_IO_ADDRESS) ACPI_GET_ADDRESS (Address),
+                    Value, Width);
         break;
 
 
     default:
         ACPI_ERROR ((AE_INFO,
-            "Unsupported address space: %X", Reg->SpaceId));
+            "Unsupported address space: %X", Reg->AddressSpaceId));
         return (AE_BAD_PARAMETER);
     }
 
     ACPI_DEBUG_PRINT ((ACPI_DB_IO,
         "Wrote: %8.8X width %2d   to %8.8X%8.8X (%s)\n",
-        Value, Width, ACPI_FORMAT_UINT64 (Address),
-        AcpiUtGetRegionName (Reg->SpaceId)));
+        Value, Width,
+        ACPI_FORMAT_UINT64 (ACPI_GET_ADDRESS (Address)),
+        AcpiUtGetRegionName (Reg->AddressSpaceId)));
 
     return (Status);
 }

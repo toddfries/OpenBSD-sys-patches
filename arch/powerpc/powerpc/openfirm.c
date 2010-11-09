@@ -1,4 +1,4 @@
-/*	$NetBSD: openfirm.c,v 1.20 2008/04/08 02:33:03 garbled Exp $	*/
+/*	$NetBSD: openfirm.c,v 1.17 2006/01/22 22:53:56 ross Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996 Wolfgang Solfrank.
@@ -31,10 +31,8 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "opt_multiprocessor.h"
-
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: openfirm.c,v 1.20 2008/04/08 02:33:03 garbled Exp $");
+__KERNEL_RCSID(0, "$NetBSD: openfirm.c,v 1.17 2006/01/22 22:53:56 ross Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -50,9 +48,6 @@ char *OF_buf;
 
 void ofw_stack(void);
 void ofbcopy(const void *, void *, size_t);
-#ifdef MULTIPROCESSOR
-void OF_start_cpu(int, u_int, int);
-#endif
 
 int
 OF_peer(int phandle)
@@ -197,38 +192,6 @@ OF_getprop(int handle, const char *prop, void *buf, int buflen)
 		args.size = buflen;
 	if (args.size > 0)
 		ofbcopy(OF_buf, buf, args.size);
-	return args.size;
-}
-
-int
-OF_setprop(int handle, const char *prop, const void *buf, int buflen)
-{
-	struct {
-		const char *name;
-		int nargs;
-		int nreturns;
-		int phandle;
-		const char *prop;
-		const void *buf;
-		int buflen;
-		int size;
-	} args = {
-		"setprop", 
-		4,
-		1
-	};
-	ofw_stack();
-
-	if (buflen > NBPG)
-		return -1;
-
-	ofbcopy(buf, OF_buf, buflen);
-	args.phandle = handle;
-	args.prop = prop;
-	args.buf = OF_buf;
-	args.buflen = buflen;
-	if (openfirmware(&args) == -1)
-		return -1;
 	return args.size;
 }
 
@@ -571,31 +534,6 @@ OF_seek(int handle, u_quad_t pos)
 	return args.status;
 }
 
-#ifdef MULTIPROCESSOR
-void
-OF_start_cpu(int phandle, u_int pc, int arg)
-{
-	static struct {
-		const char *name;
-		int nargs;
-		int nreturns;
-		int phandle;
-		u_int pc;
-		int arg;
-	} args = {
-		"start-cpu",
-		3,
-		0,
-	};
-	ofw_stack();
-	args.phandle = phandle;
-	args.pc = pc;
-	args.arg = arg;
-	if (openfirmware(&args) == -1)
-		panic("WTF?");
-}
-#endif
-
 void
 OF_boot(const char *bootspec)
 {
@@ -675,52 +613,6 @@ void
 	if (openfirmware(&args) == -1)
 		return 0;
 	return args.oldfunc;
-}
-
-int
-OF_interpret(const char *cmd, int nargs, int nreturns, ...)
-{
-	va_list ap;
-	int i, len, status;
-	static struct {
-		const char *name;
-		uint32_t nargs;
-		uint32_t nreturns;
-		uint32_t slots[16];
-	} args = {
-		"interpret",
-		1,
-		2,
-	};
-
-	ofw_stack();
-	if (nreturns > 8)
-		return -1;
-	if ((len = strlen(cmd)) >= PAGE_SIZE)
-		return -1;
-	ofbcopy(cmd, OF_buf, len + 1);
-	i = 0;
-	args.slots[i] = (uint32_t)OF_buf;
-	args.nargs = nargs + 1;
-	args.nreturns = nreturns + 1;
-	va_start(ap, nreturns);
-	i++;
-	while (i < args.nargs) {
-		args.slots[i] = (uint32_t)va_arg(ap, uint32_t *);
-		i++;
-	}
-
-	if (openfirmware(&args) == -1)
-		return -1;
-	status = args.slots[i];
-	i++;
-
-	while (i < args.nargs + args.nreturns) {
-		*va_arg(ap, uint32_t *) = args.slots[i];
-		i++;
-	}
-	va_end(ap);
-	return status;
 }
 
 /*

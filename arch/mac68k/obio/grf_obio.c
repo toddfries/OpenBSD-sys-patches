@@ -1,4 +1,4 @@
-/*	$NetBSD: grf_obio.c,v 1.57 2007/10/17 19:55:16 garbled Exp $	*/
+/*	$NetBSD: grf_obio.c,v 1.52 2005/12/11 12:18:03 christos Exp $	*/
 
 /*
  * Copyright (C) 1998 Scott Reynolds
@@ -60,7 +60,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: grf_obio.c,v 1.57 2007/10/17 19:55:16 garbled Exp $");
+__KERNEL_RCSID(0, "$NetBSD: grf_obio.c,v 1.52 2005/12/11 12:18:03 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/device.h>
@@ -76,11 +76,17 @@ __KERNEL_RCSID(0, "$NetBSD: grf_obio.c,v 1.57 2007/10/17 19:55:16 garbled Exp $"
 #include <machine/cpu.h>
 #include <machine/grfioctl.h>
 #include <machine/viareg.h>
-#include <machine/video.h>
 
 #include <mac68k/nubus/nubus.h>
 #include <mac68k/obio/obiovar.h>
 #include <mac68k/dev/grfvar.h>
+
+extern u_int32_t	mac68k_vidphys;
+extern u_int32_t	mac68k_vidlen;
+extern long		videoaddr;
+extern long		videorowbytes;
+extern long		videobitdepth;
+extern u_long		videosize;
 
 static int	grfiv_mode(struct grf_softc *, int, void *);
 static int	grfiv_match(struct device *, struct cfdata *, void *);
@@ -178,12 +184,12 @@ grfiv_match(struct device *parent, struct cfdata *cf, void *aux)
 		break;
 	case MACH_CLASSIIci:
 	case MACH_CLASSIIsi:
-		if (mac68k_video.mv_len == 0 ||
+		if (mac68k_vidlen == 0 ||
 		    (via2_reg(rMonitor) & RBVMonitorMask) == RBVMonIDNone)
 			found = 0;
 		break;
 	default:
-		if (mac68k_video.mv_len == 0)
+		if (mac68k_vidlen == 0)
 			found = 0;
 		break;
 	}
@@ -210,16 +216,13 @@ grfiv_attach(struct device *parent, struct device *self, void *aux)
 			sc->sc_basepa = VALKYRIE_BASE;
 			length = 0x00100000;		/* 1MB */
 
-			if (sc->sc_basepa <= mac68k_video.mv_phys &&
-			    mac68k_video.mv_phys < (sc->sc_basepa + length)) {
-				sc->sc_fbofs =
-				    mac68k_video.mv_phys - sc->sc_basepa;
+			if (sc->sc_basepa <= mac68k_vidphys &&
+			    mac68k_vidphys < (sc->sc_basepa + length)) {
+				sc->sc_fbofs = mac68k_vidphys - sc->sc_basepa;
 			} else {
-				sc->sc_basepa =
-				    m68k_trunc_page(mac68k_video.mv_phys);
-				sc->sc_fbofs =
-				    m68k_page_offset(mac68k_video.mv_phys);
-				length = mac68k_video.mv_len + sc->sc_fbofs;
+				sc->sc_basepa = m68k_trunc_page(mac68k_vidphys);
+				sc->sc_fbofs = m68k_page_offset(mac68k_vidphys);
+				length = mac68k_vidlen + sc->sc_fbofs;
 			}
 
 			printf(" @ %lx: Valkyrie video subsystem\n",
@@ -272,13 +275,13 @@ grfiv_attach(struct device *parent, struct device *self, void *aux)
 	case MACH_CLASSAV:
 		sc->sc_basepa = CIVIC_BASE;
 		length = 0x00200000;		/* 2MB */
-		if (mac68k_video.mv_phys >= sc->sc_basepa &&
-		    mac68k_video.mv_phys < (sc->sc_basepa + length)) {
-			sc->sc_fbofs = mac68k_video.mv_phys - sc->sc_basepa;
+		if (mac68k_vidphys >= sc->sc_basepa &&
+		    mac68k_vidphys < (sc->sc_basepa + length)) {
+			sc->sc_fbofs = mac68k_vidphys - sc->sc_basepa;
 		} else {
-			sc->sc_basepa = m68k_trunc_page(mac68k_video.mv_phys);
-			sc->sc_fbofs = m68k_page_offset(mac68k_video.mv_phys);
-			length = mac68k_video.mv_len + sc->sc_fbofs;
+			sc->sc_basepa = m68k_trunc_page(mac68k_vidphys);
+			sc->sc_fbofs = m68k_page_offset(mac68k_vidphys);
+			length = mac68k_vidlen + sc->sc_fbofs;
 		}
 
 		printf(" @ %lx: CIVIC video subsystem\n",
@@ -286,9 +289,9 @@ grfiv_attach(struct device *parent, struct device *self, void *aux)
 		break;
 	case MACH_CLASSIIci:
 	case MACH_CLASSIIsi:
-		sc->sc_basepa = m68k_trunc_page(mac68k_video.mv_phys);
-		sc->sc_fbofs = m68k_page_offset(mac68k_video.mv_phys);
-		length = mac68k_video.mv_len + sc->sc_fbofs;
+		sc->sc_basepa = m68k_trunc_page(mac68k_vidphys);
+		sc->sc_fbofs = m68k_page_offset(mac68k_vidphys);
+		length = mac68k_vidlen + sc->sc_fbofs;
 
 		printf(" @ %lx: RBV video subsystem, ",
 		    sc->sc_basepa + sc->sc_fbofs);
@@ -313,9 +316,9 @@ grfiv_attach(struct device *parent, struct device *self, void *aux)
 
 		break;
 	default:
-		sc->sc_basepa = m68k_trunc_page(mac68k_video.mv_phys);
-		sc->sc_fbofs = m68k_page_offset(mac68k_video.mv_phys);
-		length = mac68k_video.mv_len + sc->sc_fbofs;
+		sc->sc_basepa = m68k_trunc_page(mac68k_vidphys);
+		sc->sc_fbofs = m68k_page_offset(mac68k_vidphys);
+		length = mac68k_vidlen + sc->sc_fbofs;
 
 		printf(" @ %lx: On-board video\n",
 		    sc->sc_basepa + sc->sc_fbofs);
@@ -328,23 +331,21 @@ grfiv_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
-	if (sc->sc_basepa <= mac68k_video.mv_phys &&
-	    mac68k_video.mv_phys < (sc->sc_basepa + length)) {
-		/* XXX Hack */
-		mac68k_video.mv_kvaddr = sc->sc_handle.base + sc->sc_fbofs;
-	}
+	if (sc->sc_basepa <= mac68k_vidphys &&
+	    mac68k_vidphys < (sc->sc_basepa + length))
+		videoaddr = sc->sc_handle.base + sc->sc_fbofs; /* XXX hack */
 
 	gm = &(sc->curr_mode);
 	gm->mode_id = 0;
-	gm->psize = mac68k_video.mv_depth;
+	gm->psize = videobitdepth;
 	gm->ptype = 0;
-	gm->width = mac68k_video.mv_width;
-	gm->height = mac68k_video.mv_height;
-	gm->rowbytes = mac68k_video.mv_stride;
+	gm->width = videosize & 0xffff;
+	gm->height = (videosize >> 16) & 0xffff;
+	gm->rowbytes = videorowbytes;
 	gm->hres = 80;				/* XXX hack */
 	gm->vres = 80;				/* XXX hack */
 	gm->fbsize = gm->height * gm->rowbytes;
-	gm->fbbase = (void *)sc->sc_handle.base; /* XXX yet another hack */
+	gm->fbbase = (caddr_t)sc->sc_handle.base; /* XXX yet another hack */
 	gm->fboff = sc->sc_fbofs;
 
 	/* Perform common video attachment. */

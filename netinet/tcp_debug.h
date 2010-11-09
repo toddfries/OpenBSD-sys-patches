@@ -1,4 +1,4 @@
-/*	$NetBSD: tcp_debug.h,v 1.17 2007/03/04 06:03:22 christos Exp $	*/
+/*	$NetBSD: tcp_debug.h,v 1.16 2005/12/10 23:36:23 elad Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1993
@@ -42,7 +42,7 @@ struct	tcp_debug {
 	n_time	td_time;
 	short	td_act;
 	short	td_ostate;
-	void *	td_tcb;
+	caddr_t	td_tcb;
 	int	td_family;
 	struct	tcpiphdr td_ti;
 	struct {

@@ -1,4 +1,4 @@
-/*	$NetBSD: cons.c,v 1.9 2008/04/29 15:24:50 tsutsui Exp $	*/
+/*	$NetBSD: cons.c,v 1.3 2005/12/11 12:17:06 christos Exp $	*/
 
 /*
  * Copyright (c) 1990, 1993
@@ -78,17 +78,15 @@
 
 #include <lib/libsa/stand.h>
 
-#include <machine/cpu.h>
-
 #include "boot.h"
 #include "cons.h"
 
 #ifdef CONS_SERIAL
-void comcnprobe(struct consdev *);
-void comcninit(struct consdev *);
-void comcnputchar(void *, int);
-int comcngetchar(void *);
-int comcnscan(void *);
+void siocnprobe __P((struct consdev *));
+void siocninit __P((struct consdev *));
+void siocnputchar __P((void *, int));
+int siocngetchar __P((void *));
+int siocnscan __P((void *));
 # include "ns16550.h"
 # ifndef COMPORT
 #  define COMPORT COM1
@@ -98,29 +96,10 @@ int comcnscan(void *);
 # endif
 #endif
 
-#ifdef CONS_ZS
-void zscnprobe(struct consdev *);
-void zscninit(struct consdev *);
-void zscnputchar(void *, int);
-int zscngetchar(void *);
-int zscnscan(void *);
-#include "zs.h"
-#ifndef ZSCHAN
-#define ZSCHAN ZS_CHAN_A
-#endif
-#ifndef ZSSPEED
-#define ZSSPEED 115200
-#endif
-#endif
-
 struct consdev constab[] = {
 #ifdef CONS_SERIAL
 	{ "com", COMPORT, COMSPEED,
-	    comcnprobe, comcninit, comcngetchar, comcnputchar, comcnscan },
-#endif
-#ifdef CONS_ZS
-	{ "zs", ZSCHAN, ZSSPEED,
-	    zscnprobe, zscninit, zscngetchar, zscnputchar, zscnscan },
+	    siocnprobe, siocninit, siocngetchar, siocnputchar, siocnscan },
 #endif
 	{ 0 }
 };
@@ -128,7 +107,9 @@ struct consdev constab[] = {
 struct consdev *cn_tab;
 
 char *
-cninit(int *addr, int *speed)
+cninit(addr, speed)
+	int *addr;
+	int *speed;
 {
 	register struct consdev *cp;
 
@@ -143,23 +124,24 @@ cninit(int *addr, int *speed)
 		(*cn_tab->cn_init)(cn_tab);
 		*addr = cn_tab->address;
 		*speed = cn_tab->speed;
-		return cn_tab->cn_name;
+		return (cn_tab->cn_name);
 	}
 
-	return NULL;
+	return (NULL);
 }
 
 int
-cngetc(void)
+cngetc()
 {
 
 	if (cn_tab)
-		return (*cn_tab->cn_getc)(cn_tab->cn_dev);
-	return 0;
+		return ((*cn_tab->cn_getc)(cn_tab->cn_dev));
+	return (0);
 }
 
 void
-cnputc(int c)
+cnputc(c)
+	int c;
 {
 
 	if (cn_tab)
@@ -167,98 +149,152 @@ cnputc(int c)
 }
 
 int
-cnscan(void)
+cnscan()
 {
 
 	if (cn_tab)
-		return (*cn_tab->cn_scan)(cn_tab->cn_dev);
-	return -1;
+		return ((*cn_tab->cn_scan)(cn_tab->cn_dev));
+	return (0);
 }
+
+#ifdef CONS_FB
+/*
+ * frame buffer console
+ */
+void
+fbcnprobe(cp)
+	struct consdev *cp;
+{
+
+	cp->cn_pri = CN_INTERNAL;
+}
+
+void
+fbcninit(cp)
+	struct consdev *cp;
+{
+
+	video_init((u_char *)cp->address);
+	kbdreset();
+}
+
+int
+fbcngetchar(dev)
+	void *dev;
+{
+
+	return (kbd_getc());
+}
+
+void
+fbcnputchar(dev, c)
+	void *dev;
+	register int c;
+{
+
+	video_putc(c);
+}
+
+int
+fbcnscan(dev)
+	void *dev;
+{
+
+	return (kbd(1));
+}
+#endif /* CONS_FB */
+
+#ifdef CONS_VGA
+/*
+ * VGA console
+ */
+void
+vgacnprobe(cp)
+	struct consdev *cp;
+{
+	cp->cn_pri = CN_NORMAL;
+}
+
+void
+vgacninit(cp)
+	struct consdev *cp;
+{
+
+	vga_reset((u_char *)cp->address);
+	vga_init((u_char *)cp->address);
+	kbdreset();
+}
+
+int
+vgacngetchar(dev)
+	void *dev;
+{
+
+	return (kbd_getc());
+}
+
+void
+vgacnputchar(dev, c)
+	void *dev;
+	register int c;
+{
+
+	vga_putc(c);
+}
+
+int
+vgacnscan(dev)
+	void *dev;
+{
+
+	return (kbd(1));
+}
+#endif /* CONS_VGA */
 
 #ifdef CONS_SERIAL
 /*
  * serial console
  */
 void
-comcnprobe(struct consdev *cp)
+siocnprobe(cp)
+	struct consdev *cp;
 {
-
-	if (*((uint32_t *)COMPROBE) != 0 &&
-	    cobalt_id != COBALT_ID_QUBE2700)
+	if (*((unsigned long *)COMPROBE) != 0)
 		cp->cn_pri = CN_REMOTE;
 }
 
 void
-comcninit(struct consdev *cp)
+siocninit(cp)
+	struct consdev *cp;
 {
 
-	cp->cn_dev = com_init(cp->address, cp->speed);
+	cp->cn_dev = (void *)NS16550_init(cp->address, cp->speed);
 }
 
 int
-comcngetchar(void *dev)
+siocngetchar(dev)
+	void *dev;
 {
 
-	return com_getc(dev);
+	return (NS16550_getc((struct NS16550 *)dev));
 }
 
 void
-comcnputchar(void *dev, int c)
+siocnputchar(dev, c)
+	void *dev;
+	register int c;
 {
 
 	if (c == '\n')
-		com_putc(dev, '\r');
-	com_putc(dev, c);
+		NS16550_putc((struct NS16550 *)dev, '\r');
+	NS16550_putc((struct NS16550 *)dev, c);
 }
 
 int
-comcnscan(void *dev)
+siocnscan(dev)
+	void *dev;
 {
 
-	return com_scankbd(dev);
+	return (NS16550_scankbd((struct NS16550 *)dev));
 }
 #endif /* CONS_SERIAL */
-
-#ifdef CONS_ZS
-/*
- * optional z85c30 serial console on Qube2700
- */
-void
-zscnprobe(struct consdev *cp)
-{
-
-	if (*((uint32_t *)ZSPROBE) != 0 &&
-	    cobalt_id == COBALT_ID_QUBE2700)
-		cp->cn_pri = CN_REMOTE;
-}
-
-void
-zscninit(struct consdev *cp)
-{
-
-	cp->cn_dev = zs_init(cp->address, cp->speed);
-}
-
-int
-zscngetchar(void *dev)
-{
-
-	return zs_getc(dev);
-}
-
-void
-zscnputchar(void *dev, int c)
-{
-
-	if (c == '\n')
-		zs_putc(dev, '\r');
-	zs_putc(dev, c);
-}
-
-int
-zscnscan(void *dev)
-{
-
-	return zs_scan(dev);
-}
-#endif	/* CONS_ZS */

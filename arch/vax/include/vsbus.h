@@ -1,4 +1,4 @@
-/*	$NetBSD: vsbus.h,v 1.18 2008/03/11 05:34:02 matt Exp $ */
+/*	$NetBSD: vsbus.h,v 1.15 2005/12/11 12:19:35 christos Exp $ */
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.
  * All rights reserved.
@@ -51,7 +51,7 @@ struct	vsbus_attach_args {
 	u_char	va_maskno;		/* Interrupt vector in mask */
 	vaddr_t	va_dmaaddr;		/* DMA area address */
 	vsize_t	va_dmasize;		/* DMA area size */
-	bus_space_tag_t va_memt;
+	bus_space_tag_t va_iot;
 	bus_dma_tag_t va_dmat;
 };
 
@@ -75,7 +75,7 @@ struct	vsbus_attach_args {
 #define	SMSIZE		0x20000		/* Actually 256k, only 128k used */
 
 struct	vsbus_softc {
-	device_t sc_dev;
+	struct	device sc_dev;
 	u_char	*sc_intmsk;	/* Mask register */
 	u_char	*sc_intclr;	/* Clear interrupt register */
 	u_char	*sc_intreq;	/* Interrupt request register */
@@ -84,7 +84,6 @@ struct	vsbus_softc {
 	vaddr_t sc_dmaaddr;	/* Mass storage virtual DMA area */
 	vsize_t sc_dmasize;	/* Size of the DMA area */
 
-	bus_space_tag_t sc_iot;
 	struct vax_bus_dma_tag sc_dmatag;
 	struct vax_sgmap sc_sgmap;
 };
@@ -99,8 +98,8 @@ struct vsbus_dma {
 void	vsbus_dma_init(struct vsbus_softc *, unsigned ptecnt);
 u_char	vsbus_setmask(int);
 void	vsbus_clrintr(int);
-void	vsbus_copytoproc(struct proc *, void *, void *, int);
-void	vsbus_copyfromproc(struct proc *, void *, void *, int);
+void	vsbus_copytoproc(struct proc *, caddr_t, caddr_t, int);
+void	vsbus_copyfromproc(struct proc *, caddr_t, caddr_t, int);
 void	vsbus_dma_start(struct vsbus_dma *);
 void	vsbus_dma_intr(void);
 #endif

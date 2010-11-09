@@ -1,4 +1,4 @@
-/*	$NetBSD: frame.h,v 1.29 2008/04/05 22:47:52 tsutsui Exp $	*/
+/*	$NetBSD: frame.h,v 1.26 2005/12/11 12:17:53 christos Exp $	*/
 
 /*
  * Copyright (c) 1982, 1990, 1993
@@ -255,27 +255,6 @@ void	buildcontext(struct lwp *, void *, void *);
 #ifdef COMPAT_16
 void	sendsig_sigcontext(const ksiginfo_t *, const sigset_t *);
 #endif
-
-#if defined(__mc68010__)
-/*
- * Restartable atomic sequence-cased compare-and-swap for atomic_cas ops
- * and locking primitives.  We defined this here because it manipulates a
- * "clockframe" as prepared by interrupt handlers.
- */
-extern char	_atomic_cas_ras_start;
-extern char	_atomic_cas_ras_end;
-
-#define ATOMIC_CAS_CHECK(cfp)						\
-do {									\
-	if (! CLKF_USERMODE(cfp) &&					\
-	    (CLKF_PC(cfp) < (u_long)&_atomic_cas_ras_end &&		\
-	     CLKF_PC(cfp) > (u_long)&_atomic_cas_ras_start)) {		\
-	    	(cfp)->cf_pc = (u_long)&_atomic_cas_ras_start;		\
-	}								\
-} while (/*CONSTCOND*/0)
-#else
-#define	ATOMIC_CAS_CHECK(cfp)	/* nothing */
-#endif /* __mc68010__ */
 
 #endif	/* _KERNEL */
 

@@ -1,7 +1,7 @@
 #
 # deafult config file.
 #
-# 	$NetBSD: config.playstation2,v 1.22 2008/11/24 11:41:13 ad Exp $
+# 	$NetBSD: config.playstation2,v 1.19 2006/03/28 20:58:40 pavel Exp $
 #
 
 maxusers	16
@@ -18,7 +18,7 @@ file-system 	KERNFS		# /kern
 file-system 	PROCFS		# /proc
 file-system	PTYFS		# /dev/pts/N support
 
-options 	WAPBL		# File system journaling support - Experimental
+options 	SOFTDEP		# FFS soft updates support.
 options 	FFS_NO_SNAPSHOT	# No FFS snapshot support
 
 # Networking options
@@ -56,7 +56,7 @@ usb*	at ohci?
 
 # USB Hubs
 uhub*	at usb?
-uhub*	at uhub? port ?
+uhub*	at uhub? port ? configuration ? interface ?
 
 # USB HID device
 uhidev*	at uhub? port ? configuration ? interface ?

@@ -1,7 +1,7 @@
 /******************************************************************************
  *
  * Module Name: nsparse - namespace interface to AML parser
- *              $Revision: 1.7 $
+ *              xRevision: 1.11 $
  *
  *****************************************************************************/
 
@@ -9,7 +9,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2008, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2006, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -114,13 +114,15 @@
  *
  *****************************************************************************/
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: nsparse.c,v 1.3 2006/11/16 01:33:31 christos Exp $");
+
 #define __NSPARSE_C__
 
 #include "acpi.h"
 #include "acnamesp.h"
 #include "acparser.h"
 #include "acdispat.h"
-#include "actables.h"
 
 
 #define _COMPONENT          ACPI_NAMESPACE
@@ -142,27 +144,16 @@
 
 ACPI_STATUS
 AcpiNsOneCompleteParse (
-    ACPI_NATIVE_UINT        PassNumber,
-    ACPI_NATIVE_UINT        TableIndex,
-    ACPI_NAMESPACE_NODE     *StartNode)
+    UINT8                   PassNumber,
+    ACPI_TABLE_DESC         *TableDesc)
 {
     ACPI_PARSE_OBJECT       *ParseRoot;
     ACPI_STATUS             Status;
-    ACPI_NATIVE_UINT        AmlLength;
-    UINT8                   *AmlStart;
     ACPI_WALK_STATE         *WalkState;
-    ACPI_TABLE_HEADER       *Table;
-    ACPI_OWNER_ID           OwnerId;
 
 
-    ACPI_FUNCTION_TRACE (NsOneCompleteParse);
+    ACPI_FUNCTION_TRACE ("NsOneCompleteParse");
 
-
-    Status = AcpiTbGetOwnerId (TableIndex, &OwnerId);
-    if (ACPI_FAILURE (Status))
-    {
-        return_ACPI_STATUS (Status);
-    }
 
     /* Create and init a Root Node */
 
@@ -174,59 +165,28 @@ AcpiNsOneCompleteParse (
 
     /* Create and initialize a new walk state */
 
-    WalkState = AcpiDsCreateWalkState (OwnerId, NULL, NULL, NULL);
+    WalkState = AcpiDsCreateWalkState (TableDesc->OwnerId,
+                                    NULL, NULL, NULL);
     if (!WalkState)
     {
         AcpiPsFreeOp (ParseRoot);
         return_ACPI_STATUS (AE_NO_MEMORY);
     }
 
-    Status = AcpiGetTableByIndex (TableIndex, &Table);
+    Status = AcpiDsInitAmlWalk (WalkState, ParseRoot, NULL,
+                    TableDesc->AmlStart, TableDesc->AmlLength,
+                    NULL, PassNumber);
     if (ACPI_FAILURE (Status))
     {
         AcpiDsDeleteWalkState (WalkState);
-        AcpiPsFreeOp (ParseRoot);
         return_ACPI_STATUS (Status);
-    }
-
-    /* Table must consist of at least a complete header */
-
-    if (Table->Length < sizeof (ACPI_TABLE_HEADER))
-    {
-        Status = AE_BAD_HEADER;
-    }
-    else
-    {
-        AmlStart = (UINT8 *) Table + sizeof (ACPI_TABLE_HEADER);
-        AmlLength = Table->Length - sizeof (ACPI_TABLE_HEADER);
-        Status = AcpiDsInitAmlWalk (WalkState, ParseRoot, NULL,
-                    AmlStart, (UINT32) AmlLength, NULL, (UINT8) PassNumber);
-    }
-
-    if (ACPI_FAILURE (Status))
-    {
-        AcpiDsDeleteWalkState (WalkState);
-        goto Cleanup;
-    }
-
-    /* StartNode is the default location to load the table  */
-
-    if (StartNode && StartNode != AcpiGbl_RootNode)
-    {
-        Status = AcpiDsScopeStackPush (StartNode, ACPI_TYPE_METHOD, WalkState);
-        if (ACPI_FAILURE (Status))
-        {
-            AcpiDsDeleteWalkState (WalkState);
-            goto Cleanup;
-        }
     }
 
     /* Parse the AML */
 
-    ACPI_DEBUG_PRINT ((ACPI_DB_PARSE, "*PARSE* pass %d parse\n", (UINT32) PassNumber));
+    ACPI_DEBUG_PRINT ((ACPI_DB_PARSE, "*PARSE* pass %d parse\n", PassNumber));
     Status = AcpiPsParseAml (WalkState);
 
-Cleanup:
     AcpiPsDeleteParseTree (ParseRoot);
     return_ACPI_STATUS (Status);
 }
@@ -247,13 +207,13 @@ Cleanup:
 
 ACPI_STATUS
 AcpiNsParseTable (
-    ACPI_NATIVE_UINT        TableIndex,
+    ACPI_TABLE_DESC         *TableDesc,
     ACPI_NAMESPACE_NODE     *StartNode)
 {
     ACPI_STATUS             Status;
 
 
-    ACPI_FUNCTION_TRACE (NsParseTable);
+    ACPI_FUNCTION_TRACE ("NsParseTable");
 
 
     /*
@@ -264,10 +224,10 @@ AcpiNsParseTable (
      * each Parser Op subtree is deleted when it is finished.  This saves
      * a great deal of memory, and allows a small cache of parse objects
      * to service the entire parse.  The second pass of the parse then
-     * performs another complete parse of the AML.
+     * performs another complete parse of the AML..
      */
     ACPI_DEBUG_PRINT ((ACPI_DB_PARSE, "**** Start pass 1\n"));
-    Status = AcpiNsOneCompleteParse (ACPI_IMODE_LOAD_PASS1, TableIndex, StartNode);
+    Status = AcpiNsOneCompleteParse (1, TableDesc);
     if (ACPI_FAILURE (Status))
     {
         return_ACPI_STATUS (Status);
@@ -283,7 +243,7 @@ AcpiNsParseTable (
      * parse objects are all cached.
      */
     ACPI_DEBUG_PRINT ((ACPI_DB_PARSE, "**** Start pass 2\n"));
-    Status = AcpiNsOneCompleteParse (ACPI_IMODE_LOAD_PASS2, TableIndex, StartNode);
+    Status = AcpiNsOneCompleteParse (2, TableDesc);
     if (ACPI_FAILURE (Status))
     {
         return_ACPI_STATUS (Status);

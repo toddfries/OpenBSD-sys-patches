@@ -1,4 +1,4 @@
-/*	$NetBSD: layer_vnops.c,v 1.37 2009/02/14 16:57:05 plunky Exp $	*/
+/*	$NetBSD: layer_vnops.c,v 1.29 2006/12/09 16:11:52 chs Exp $	*/
 
 /*
  * Copyright (c) 1999 National Aeronautics & Space Administration
@@ -67,7 +67,8 @@
  *
  * Ancestors:
  *	@(#)lofs_vnops.c	1.2 (Berkeley) 6/18/92
- *	Id: lofs_vnops.c,v 1.11 1992/05/30 10:05:43 jsp Exp jsp
+ *	$Id: layer_vnops.c,v 1.29 2006/12/09 16:11:52 chs Exp $
+ *	$Id: layer_vnops.c,v 1.29 2006/12/09 16:11:52 chs Exp $
  *	...and...
  *	@(#)null_vnodeops.c 1.20 92/07/07 UCLA Ficus project
  */
@@ -232,7 +233,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: layer_vnops.c,v 1.37 2009/02/14 16:57:05 plunky Exp $");
+__KERNEL_RCSID(0, "$NetBSD: layer_vnops.c,v 1.29 2006/12/09 16:11:52 chs Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -241,7 +242,7 @@ __KERNEL_RCSID(0, "$NetBSD: layer_vnops.c,v 1.37 2009/02/14 16:57:05 plunky Exp 
 #include <sys/vnode.h>
 #include <sys/mount.h>
 #include <sys/namei.h>
-#include <sys/kmem.h>
+#include <sys/malloc.h>
 #include <sys/buf.h>
 #include <sys/kauth.h>
 
@@ -261,6 +262,7 @@ __KERNEL_RCSID(0, "$NetBSD: layer_vnops.c,v 1.37 2009/02/14 16:57:05 plunky Exp 
  *    The 10-Apr-92 version was optimized for speed, throwing away some
  * safety checks.  It should still always work, but it's not as
  * robust to programmer errors.
+ *    Define SAFETY to include some error checking code.
  *
  * In general, we map all vnodes going down and unmap them on the way back.
  *
@@ -295,11 +297,10 @@ layer_bypass(v)
 	struct vnode *old_vps[VDESC_MAX_VPS], *vp0;
 	struct vnode **vps_p[VDESC_MAX_VPS];
 	struct vnode ***vppp;
-	struct mount *mp;
 	struct vnodeop_desc *descp = ap->a_desc;
 	int reles, i, flags;
 
-#ifdef DIAGNOSTIC
+#ifdef SAFETY
 	/*
 	 * We require at least one vp.
 	 */
@@ -311,8 +312,7 @@ layer_bypass(v)
 	vps_p[0] =
 	    VOPARG_OFFSETTO(struct vnode**, descp->vdesc_vp_offsets[0], ap);
 	vp0 = *vps_p[0];
-	mp = vp0->v_mount;
-	flags = MOUNTTOLAYERMOUNT(mp)->layerm_flags;
+	flags = MOUNTTOLAYERMOUNT(vp0->v_mount)->layerm_flags;
 	our_vnodeop_p = vp0->v_op;
 
 	if (flags & LAYERFS_MBYPASSDEBUG)
@@ -402,7 +402,7 @@ layer_bypass(v)
 		 * as a lookup on "." would generate a locking error.
 		 * So all the calls which get us here have a locked vpp. :-)
 		 */
-		error = layer_node_create(mp, **vppp, *vppp);
+		error = layer_node_create(old_vps[0]->v_mount, **vppp, *vppp);
 		if (error) {
 			vput(**vppp);
 			**vppp = NULL;
@@ -457,9 +457,8 @@ layer_lookup(v)
 	if (ldvp == lvp) {
 
 		/*
-		 * Got the same object back, because we looked up ".",
-		 * or ".." in the root node of a mount point.
-		 * So we make another reference to dvp and return it.
+		 * Did lookup on "." or ".." in the root node of a mount point.
+		 * So we return dvp after a VREF.
 		 */
 		VREF(dvp);
 		*ap->a_vpp = dvp;
@@ -610,11 +609,6 @@ layer_lock(v)
 	struct vnode *vp = ap->a_vp, *lowervp;
 	int	flags = ap->a_flags, error;
 
-	if (flags & LK_INTERLOCK) {
-		mutex_exit(&vp->v_interlock);
-		flags &= ~LK_INTERLOCK;
-	}
-
 	if (vp->v_vnlock != NULL) {
 		/*
 		 * The lower level has exported a struct lock to us. Use
@@ -624,7 +618,12 @@ layer_lock(v)
 		 * going away doesn't mean the struct lock below us is.
 		 * LK_EXCLUSIVE is fine.
 		 */
-		return (vlockmgr(vp->v_vnlock, flags));
+		if ((flags & LK_TYPE_MASK) == LK_DRAIN) {
+			return(lockmgr(vp->v_vnlock,
+				(flags & ~LK_TYPE_MASK) | LK_EXCLUSIVE,
+				&vp->v_interlock));
+		} else
+			return(lockmgr(vp->v_vnlock, flags, &vp->v_interlock));
 	} else {
 		/*
 		 * Ahh well. It would be nice if the fs we're over would
@@ -634,13 +633,22 @@ layer_lock(v)
 		 * on "..", we have to lock the lower node, then lock our
 		 * node. Most of the time it won't matter that we lock our
 		 * node (as any locking would need the lower one locked
-		 * first).
+		 * first). But we can LK_DRAIN the upper lock as a step
+		 * towards decomissioning it.
 		 */
 		lowervp = LAYERVPTOLOWERVP(vp);
-		error = VOP_LOCK(lowervp, flags);
+		if (flags & LK_INTERLOCK) {
+			simple_unlock(&vp->v_interlock);
+			flags &= ~LK_INTERLOCK;
+		}
+		if ((flags & LK_TYPE_MASK) == LK_DRAIN) {
+			error = VOP_LOCK(lowervp,
+				(flags & ~LK_TYPE_MASK) | LK_EXCLUSIVE);
+		} else
+			error = VOP_LOCK(lowervp, flags);
 		if (error)
 			return (error);
-		if ((error = vlockmgr(&vp->v_lock, flags))) {
+		if ((error = lockmgr(&vp->v_lock, flags, &vp->v_interlock))) {
 			VOP_UNLOCK(lowervp, 0);
 		}
 		return (error);
@@ -661,16 +669,17 @@ layer_unlock(v)
 	struct vnode *vp = ap->a_vp;
 	int	flags = ap->a_flags;
 
-	if (flags & LK_INTERLOCK) {
-		mutex_exit(&vp->v_interlock);
-		flags &= ~LK_INTERLOCK;
-	}
-
 	if (vp->v_vnlock != NULL) {
-		return (vlockmgr(vp->v_vnlock, ap->a_flags | LK_RELEASE));
+		return (lockmgr(vp->v_vnlock, ap->a_flags | LK_RELEASE,
+			&vp->v_interlock));
 	} else {
+		if (flags & LK_INTERLOCK) {
+			simple_unlock(&vp->v_interlock);
+			flags &= ~LK_INTERLOCK;
+		}
 		VOP_UNLOCK(LAYERVPTOLOWERVP(vp), flags);
-		return (vlockmgr(&vp->v_lock, flags | LK_RELEASE));
+		return (lockmgr(&vp->v_lock, flags | LK_RELEASE,
+			&vp->v_interlock));
 	}
 }
 
@@ -685,13 +694,13 @@ layer_islocked(v)
 	int lkstatus;
 
 	if (vp->v_vnlock != NULL)
-		return vlockstatus(vp->v_vnlock);
+		return lockstatus(vp->v_vnlock);
 
 	lkstatus = VOP_ISLOCKED(LAYERVPTOLOWERVP(vp));
 	if (lkstatus)
 		return lkstatus;
 
-	return vlockstatus(&vp->v_lock);
+	return lockstatus(&vp->v_lock);
 }
 
 /*
@@ -730,16 +739,9 @@ layer_inactive(v)
 {
 	struct vop_inactive_args /* {
 		struct vnode *a_vp;
-		bool *a_recycle;
+		struct lwp *a_l;
 	} */ *ap = v;
 	struct vnode *vp = ap->a_vp;
-
-	/*
-	 * ..., but don't cache the device node. Also, if we did a
-	 * remove, don't cache the node.
-	 */
-	*ap->a_recycle = (vp->v_type == VBLK || vp->v_type == VCHR
-	    || (VTOLAYER(vp)->layer_flags & LAYERFS_REMOVED));
 
 	/*
 	 * Do nothing (and _don't_ bypass).
@@ -755,6 +757,13 @@ layer_inactive(v)
 	 */
 	VOP_UNLOCK(vp, 0);
 
+	/*
+	 * ..., but don't cache the device node. Also, if we did a
+	 * remove, don't cache the node.
+	 */
+	if (vp->v_type == VBLK || vp->v_type == VCHR
+	    || (VTOLAYER(vp)->layer_flags & LAYERFS_REMOVED))
+		vgone(vp);
 	return (0);
 }
 
@@ -851,7 +860,9 @@ layer_reclaim(v)
 	/*
 	 * Note: in vop_reclaim, the node's struct lock has been
 	 * decomissioned, so we have to be careful about calling
-	 * VOP's on ourself.  We must be careful as VXLOCK is set.
+	 * VOP's on ourself. Even if we turned a LK_DRAIN into an
+	 * LK_EXCLUSIVE in layer_lock, we still must be careful as VXLOCK is
+	 * set.
 	 */
 	/* After this assignment, this node will not be re-used. */
 	if ((vp == lmp->layerm_rootvp)) {
@@ -864,13 +875,12 @@ layer_reclaim(v)
 		lmp->layerm_rootvp = NULL;
 	}
 	xp->layer_lowervp = NULL;
-	mutex_enter(&lmp->layerm_hashlock);
+	simple_lock(&lmp->layerm_hashlock);
 	LIST_REMOVE(xp, layer_hash);
-	mutex_exit(&lmp->layerm_hashlock);
-	kmem_free(vp->v_data, lmp->layerm_size);
+	simple_unlock(&lmp->layerm_hashlock);
+	FREE(vp->v_data, M_TEMP);
 	vp->v_data = NULL;
 	vrele(lowervp);
-
 	return (0);
 }
 
@@ -960,8 +970,8 @@ layer_getpages(v)
 		return EBUSY;
 	}
 	ap->a_vp = LAYERVPTOLOWERVP(vp);
-	mutex_exit(&vp->v_interlock);
-	mutex_enter(&ap->a_vp->v_interlock);
+	simple_unlock(&vp->v_interlock);
+	simple_lock(&ap->a_vp->v_interlock);
 	error = VCALL(ap->a_vp, VOFFSET(vop_getpages), ap);
 	return error;
 }
@@ -984,11 +994,8 @@ layer_putpages(v)
 	 */
 
 	ap->a_vp = LAYERVPTOLOWERVP(vp);
-	mutex_exit(&vp->v_interlock);
-	if (ap->a_flags & PGO_RECLAIM) {
-		return 0;
-	}
-	mutex_enter(&ap->a_vp->v_interlock);
+	simple_unlock(&vp->v_interlock);
+	simple_lock(&ap->a_vp->v_interlock);
 	error = VCALL(ap->a_vp, VOFFSET(vop_putpages), ap);
 	return error;
 }

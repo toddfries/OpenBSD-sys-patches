@@ -1,4 +1,4 @@
-/*	$NetBSD: linux_sockio.h,v 1.16 2008/07/03 14:07:09 njoly Exp $	*/
+/*	$NetBSD: linux_sockio.h,v 1.14 2000/12/22 11:24:43 fvdl Exp $	*/
 
 /*-
  * Copyright (c) 1995, 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -46,31 +53,5 @@
 #define LINUX_SIOCDEVPRIVATE	_LINUX_IO(0x89, 0xf0)
 #define LINUX_SIOCGIFBR		_LINUX_IO(0x89, 0x40)
 #define LINUX_SIOCSIFBR		_LINUX_IO(0x89, 0x41)
-
-#define LINUX_IFNAMSIZ	16
-
-struct linux_ifmap {
-	unsigned long mem_start;
-	unsigned long mem_end;
-	unsigned short base_addr; 
-	unsigned char irq;
-	unsigned char dma;
-	unsigned char port;
-};
-
-struct linux_ifreq {
-	union {
-		char ifrn_name[LINUX_IFNAMSIZ];	/* if name, e.g. "en0" */
-	} ifr_ifrn;
-	union {
-		struct osockaddr ifru_addr;
-		struct osockaddr ifru_hwaddr;
-		struct linux_ifmap ifru_map;
-	} ifr_ifru;
-#define ifr_name	ifr_ifrn.ifrn_name	/* interface name       */
-#define ifr_addr	ifr_ifru.ifru_addr	/* address              */
-#define ifr_hwaddr	ifr_ifru.ifru_hwaddr	/* MAC address          */
-#define ifr_map		ifr_ifru.ifru_map	/* device map           */
-};
 
 #endif /* !_LINUX_SOCKIO_H */

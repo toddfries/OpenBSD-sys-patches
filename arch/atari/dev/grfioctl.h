@@ -1,4 +1,4 @@
-/*	$NetBSD: grfioctl.h,v 1.8 2007/03/04 05:59:40 christos Exp $	*/
+/*	$NetBSD: grfioctl.h,v 1.7 2006/11/24 22:04:21 wiz Exp $	*/
 
 /*
  * Copyright (c) 1990 The Regents of the University of California.
@@ -91,12 +91,12 @@ struct grfdyninfo {
 };
 
 struct	grfinfo {
-	void *	gd_fbaddr;	/* frame buffer linear physaddr	*/
+	caddr_t	gd_fbaddr;	/* frame buffer linear physaddr	*/
 	int	gd_fbsize;	/* frame buffer linear size	*/
 	int	gd_linbase;	/* frame buffer linear base	*/
-	void *	gd_regaddr;	/* register area physaddr	*/
+	caddr_t	gd_regaddr;	/* register area physaddr	*/
 	int	gd_regsize;	/* register area size		*/
-	void *gd_vgaaddr;	/* vga area physaddr		*/
+	caddr_t gd_vgaaddr;	/* vga area physaddr		*/
 	int	gd_vgasize;	/* vga area size		*/
 	int	gd_vgabase;	/* vga area base		*/
 	short	gd_colors;	/* number of colors		*/

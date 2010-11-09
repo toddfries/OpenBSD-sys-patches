@@ -1,4 +1,4 @@
-/*	$NetBSD: mem.c,v 1.12 2008/12/19 18:49:38 cegger Exp $	*/
+/*	$NetBSD: mem.c,v 1.9 2005/12/11 12:17:04 christos Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1990, 1993
@@ -77,7 +77,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mem.c,v 1.12 2008/12/19 18:49:38 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mem.c,v 1.9 2005/12/11 12:17:04 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -93,7 +93,7 @@ __KERNEL_RCSID(0, "$NetBSD: mem.c,v 1.12 2008/12/19 18:49:38 cegger Exp $");
 
 extern u_int lowram;
 extern char *extiobase;
-static void *devzeropage;
+static caddr_t devzeropage;
 
 dev_type_read(mmrw);
 dev_type_ioctl(mmioctl);
@@ -122,7 +122,7 @@ mmrw(dev, uio, flags)
 		/* lock against other uses of shared vmmap */
 		while (physlock > 0) {
 			physlock++;
-			error = tsleep((void *)&physlock, PZERO | PCATCH,
+			error = tsleep((caddr_t)&physlock, PZERO | PCATCH,
 			    "mmrw", 0);
 			if (error)
 				return (error);
@@ -157,7 +157,7 @@ mmrw(dev, uio, flags)
 			    trunc_page(v), prot, prot|PMAP_WIRED);
 			o = uio->uio_offset & PGOFSET;
 			c = min(uio->uio_resid, (int)(PAGE_SIZE - o));
-			error = uiomove(vmmap + o, c, uio);
+			error = uiomove((caddr_t)vmmap + o, c, uio);
 			pmap_remove(pmap_kernel(), (vm_offset_t)vmmap,
 			    (vm_offset_t)vmmap + PAGE_SIZE);
 			continue;
@@ -165,7 +165,7 @@ mmrw(dev, uio, flags)
 		case DEV_KMEM:
 			v = uio->uio_offset;
 			c = min(iov->iov_len, MAXPHYS);
-			if (!uvm_kernacc((void *)v, c,
+			if (!uvm_kernacc((caddr_t)v, c,
 			    uio->uio_rw == UIO_READ ? B_READ : B_WRITE))
 				return (EFAULT);
 
@@ -176,12 +176,12 @@ mmrw(dev, uio, flags)
 			 */
 #if 0
 			if (ISIIOVA(v) ||
-			    ((void *)v >= extiobase &&
-			    (void *)v < (extiobase +
+			    ((caddr_t)v >= extiobase &&
+			    (caddr_t)v < (extiobase +
 			    		  (EIOMAPSIZE * PAGE_SIZE))))
 				return (EFAULT);
 #endif
-			error = uiomove((void *)v, c, uio);
+			error = uiomove((caddr_t)v, c, uio);
 			continue;
 
 		case DEV_NULL:
@@ -199,8 +199,9 @@ mmrw(dev, uio, flags)
 			 * of memory for use with /dev/zero.
 			 */
 			if (devzeropage == NULL) {
-				devzeropage = (void *)
-				    malloc(PAGE_SIZE, M_TEMP, M_WAITOK|M_ZERO);
+				devzeropage = (caddr_t)
+				    malloc(PAGE_SIZE, M_TEMP, M_WAITOK);
+				bzero(devzeropage, PAGE_SIZE);
 			}
 			c = min(iov->iov_len, PAGE_SIZE);
 			error = uiomove(devzeropage, c, uio);
@@ -211,7 +212,7 @@ mmrw(dev, uio, flags)
 		}
 		if (error)
 			break;
-		iov->iov_base = (char *)iov->iov_base + c;
+		iov->iov_base = (caddr_t)iov->iov_base + c;
 		iov->iov_len -= c;
 		uio->uio_offset += c;
 		uio->uio_resid -= c;
@@ -219,7 +220,7 @@ mmrw(dev, uio, flags)
 	if (minor(dev) == DEV_MEM) {
 unlock:
 		if (physlock > 1)
-			wakeup((void *)&physlock);
+			wakeup((caddr_t)&physlock);
 		physlock = 0;
 	}
 	return (error);

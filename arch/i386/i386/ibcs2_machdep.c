@@ -1,4 +1,4 @@
-/*	$NetBSD: ibcs2_machdep.c,v 1.36 2008/04/28 20:23:24 martin Exp $	*/
+/*	$NetBSD: ibcs2_machdep.c,v 1.30 2006/11/16 01:32:38 christos Exp $	*/
 
 /*-
  * Copyright (c) 1997, 2000 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,10 +37,11 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ibcs2_machdep.c,v 1.36 2008/04/28 20:23:24 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ibcs2_machdep.c,v 1.30 2006/11/16 01:32:38 christos Exp $");
 
 #if defined(_KERNEL_OPT)
 #include "opt_vm86.h"
+#include "opt_math_emulate.h"
 #include "opt_compat_ibcs2.h"
 #endif
 
@@ -98,7 +106,7 @@ ibcs2_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
 	u_long code = KSI_TRAPCODE(ksi);
 	struct lwp *l = curlwp;
 	struct proc *p = l->l_proc;
-	int onstack, error;
+	int onstack;
 	/* XXX Need SCO sigframe format. */
 	struct sigframe_sigcontext *fp = getframe(l, sig, &onstack), frame;
 	sig_t catcher = SIGACTION(p, sig).sa_handler;
@@ -145,18 +153,12 @@ ibcs2_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
 	frame.sf_sc.sc_err = tf->tf_err;
 
 	/* Save signal stack. */
-	frame.sf_sc.sc_onstack = l->l_sigstk.ss_flags & SS_ONSTACK;
+	frame.sf_sc.sc_onstack = p->p_sigctx.ps_sigstk.ss_flags & SS_ONSTACK;
 
 	/* Save signal mask. */
 	frame.sf_sc.sc_mask = *mask;
 
-	sendsig_reset(l, sig);
-
-	mutex_exit(p->p_lock);
-	error = copyout(&frame, fp, sizeof(frame));
-	mutex_enter(p->p_lock);
-
-	if (error != 0) {
+	if (copyout(&frame, fp, sizeof(frame)) != 0) {
 		/*
 		 * Process has trashed its stack; give it an illegal
 		 * instruction to halt it in its tracks.
@@ -169,22 +171,27 @@ ibcs2_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
 
 	/* Remember that we're now on the signal stack. */
 	if (onstack)
-		l->l_sigstk.ss_flags |= SS_ONSTACK;
+		p->p_sigctx.ps_sigstk.ss_flags |= SS_ONSTACK;
 }
 
 int
-ibcs2_sys_sysmachine(struct lwp *l, const struct ibcs2_sys_sysmachine_args *uap, register_t *retval)
+ibcs2_sys_sysmachine(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct ibcs2_sys_sysmachine_args /* {
 		syscallarg(int) cmd;
 		syscallarg(int) arg;
-	} */
+	} */ *uap = v;
 	int val, error;
 
 	switch (SCARG(uap, cmd)) {
 	case IBCS2_SI86FPHW:
-		val = IBCS2_FP_387;
-		if ((error = copyout((void *)&val, (void *)SCARG(uap, arg),
+		val = IBCS2_FP_NO;
+#ifdef MATH_EMULATE
+		val = IBCS2_FP_SW;
+#else
+		val = IBCS2_FP_387;		/* a real coprocessor */
+#endif
+		if ((error = copyout((caddr_t)&val, (caddr_t)SCARG(uap, arg),
 				     sizeof(val))))
 			return error;
 		break;

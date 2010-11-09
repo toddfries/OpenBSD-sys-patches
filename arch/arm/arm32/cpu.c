@@ -1,4 +1,4 @@
-/*	$NetBSD: cpu.c,v 1.71 2008/10/25 18:15:19 matt Exp $	*/
+/*	$NetBSD: cpu.c,v 1.64 2007/01/06 00:50:54 christos Exp $	*/
 
 /*
  * Copyright (c) 1995 Mark Brinicombe.
@@ -46,7 +46,7 @@
 
 #include <sys/param.h>
 
-__KERNEL_RCSID(0, "$NetBSD: cpu.c,v 1.71 2008/10/25 18:15:19 matt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cpu.c,v 1.64 2007/01/06 00:50:54 christos Exp $");
 
 #include <sys/systm.h>
 #include <sys/malloc.h>
@@ -62,10 +62,6 @@ __KERNEL_RCSID(0, "$NetBSD: cpu.c,v 1.71 2008/10/25 18:15:19 matt Exp $");
 #ifdef ARMFPE
 #include <machine/bootconfig.h> /* For boot args */
 #include <arm/fpe-arm/armfpe.h>
-#endif
-
-#ifdef FPU_VFP
-#include <arm/vfpvar.h>
 #endif
 
 char cpu_model[256];
@@ -160,10 +156,6 @@ cpu_attach(struct device *dv)
 	if (usearmfpe)
 		initialise_arm_fpe();
 #endif
-
-#ifdef FPU_VFP
-	vfp_attach();
-#endif
 }
 
 enum cpu_class {
@@ -182,8 +174,7 @@ enum cpu_class {
 	CPU_CLASS_ARM10EJ,
 	CPU_CLASS_SA1,
 	CPU_CLASS_XSCALE,
-	CPU_CLASS_ARM11J,
-	CPU_CLASS_ARMV4,
+	CPU_CLASS_ARM11J
 };
 
 static const char * const generic_steppings[16] = {
@@ -191,11 +182,6 @@ static const char * const generic_steppings[16] = {
 	"rev 4",	"rev 5",	"rev 6",	"rev 7",
 	"rev 8",	"rev 9",	"rev 10",	"rev 11",
 	"rev 12",	"rev 13",	"rev 14",	"rev 15",
-};
-
-static const char * const pN_steppings[16] = {
-	"*p0",	"*p1",	"*p2",	"*p3",	"*p4",	"*p5",	"*p6",	"*p7",
-	"*p8",	"*p9",	"*p10",	"*p11",	"*p12",	"*p13",	"*p14",	"*p15",
 };
 
 static const char * const sa110_steppings[16] = {
@@ -400,18 +386,9 @@ const struct cpuidtab cpuids[] = {
 	{ CPU_ID_IXP425_266,	CPU_CLASS_XSCALE,	"IXP425 266MHz",
 	  ixp425_steppings },
 
-	{ CPU_ID_ARM1136JS,	CPU_CLASS_ARM11J,	"ARM1136J-S r0",
-	  pN_steppings },
-	{ CPU_ID_ARM1136JSR1,	CPU_CLASS_ARM11J,	"ARM1136J-S r1",
-	  pN_steppings },
-	{ CPU_ID_ARM1176JS,	CPU_CLASS_ARM11J,	"ARM1176J-S r0",
-	  pN_steppings },
-	{ CPU_ID_CORTEXA8R1,	CPU_CLASS_ARM11J,	"Cortex-A8 r1",
-	  pN_steppings },
-	{ CPU_ID_CORTEXA8R2,	CPU_CLASS_ARM11J,	"Cortex-A8 r2",
-	  pN_steppings },
-
-	{ CPU_ID_FA526,		CPU_CLASS_ARMV4,	"FA526",
+	{ CPU_ID_ARM1136JS,	CPU_CLASS_ARM11J,	"ARM1136J-S",
+	  generic_steppings },
+	{ CPU_ID_ARM1136JSR1,	CPU_CLASS_ARM11J,	"ARM1136J-S R1",
 	  generic_steppings },
 
 	{ 0, CPU_CLASS_NONE, NULL, NULL }
@@ -439,7 +416,6 @@ const struct cpu_classtab cpu_classes[] = {
 	{ "SA-1",	"CPU_SA110" },		/* CPU_CLASS_SA1 */
 	{ "XScale",	"CPU_XSCALE_..." },	/* CPU_CLASS_XSCALE */
 	{ "ARM11J",	"CPU_ARM11" },		/* CPU_CLASS_ARM11J */
-	{ "ARMv4",	"CPU_ARMV4" },		/* CPU_CLASS_ARMV4 */
 };
 
 /*
@@ -473,7 +449,6 @@ identify_arm_cpu(struct device *dv, struct cpu_info *ci)
 	u_int cpuid;
 	enum cpu_class cpu_class = CPU_CLASS_NONE;
 	int i;
-	const char *steppingstr;
 
 	cpuid = ci->ci_arm_cpuid;
 
@@ -485,12 +460,10 @@ identify_arm_cpu(struct device *dv, struct cpu_info *ci)
 	for (i = 0; cpuids[i].cpuid != 0; i++)
 		if (cpuids[i].cpuid == (cpuid & CPU_ID_CPU_MASK)) {
 			cpu_class = cpuids[i].cpu_class;
-			steppingstr = cpuids[i].cpu_steppings[cpuid &
-			    CPU_ID_REVISION_MASK],
-			sprintf(cpu_model, "%s%s%s (%s core)",
+			sprintf(cpu_model, "%s %s (%s core)",
 			    cpuids[i].cpu_name,
-			    steppingstr[0] == '*' ? "" : " ",
-			    &steppingstr[steppingstr[0] == '*'],
+			    cpuids[i].cpu_steppings[cpuid &
+						    CPU_ID_REVISION_MASK],
 			    cpu_classes[cpu_class].class_name);
 			break;
 		}
@@ -521,7 +494,6 @@ identify_arm_cpu(struct device *dv, struct cpu_info *ci)
 	case CPU_CLASS_SA1:
 	case CPU_CLASS_XSCALE:
 	case CPU_CLASS_ARM11J:
-	case CPU_CLASS_ARMV4:
 		if ((ci->ci_ctrl & CPU_CONTROL_DC_ENABLE) == 0)
 			aprint_normal(" DC disabled");
 		else
@@ -611,11 +583,8 @@ identify_arm_cpu(struct device *dv, struct cpu_info *ci)
     defined(__CPU_XSCALE_PXA2XX) || defined(CPU_XSCALE_IXP425)
 	case CPU_CLASS_XSCALE:
 #endif
-#if defined(CPU_ARM11)
+#ifdef CPU_ARM11
 	case CPU_CLASS_ARM11J:
-#endif
-#if defined(CPU_FA526)
-	case CPU_CLASS_ARMV4:
 #endif
 		break;
 	default:
@@ -633,5 +602,49 @@ identify_arm_cpu(struct device *dv, struct cpu_info *ci)
 	}
 			       
 }
+#ifdef MULTIPROCESSOR
+int
+cpu_alloc_idlepcb(struct cpu_info *ci)
+{
+	vaddr_t uaddr;
+	struct pcb *pcb;
+	struct trapframe *tf;
+
+	/*
+	 * Generate a kernel stack and PCB (in essence, a u-area) for the
+	 * new CPU.
+	 */
+	uaddr = uvm_km_alloc(kernel_map, USPACE, 0, UVM_KMF_WIRED);
+	if (!uaddr)
+		return ENOMEM;
+	ci->ci_idlepcb = pcb = (struct pcb *)uaddr;
+
+	/*
+	 * This code is largely derived from cpu_fork(), with which it
+	 * should perhaps be shared.
+	 */
+
+	/* Copy the pcb */
+	*pcb = proc0.p_addr->u_pcb;
+
+	/* Set up the undefined stack for the process. */
+	pcb->pcb_un.un_32.pcb32_und_sp = uaddr + USPACE_UNDEF_STACK_TOP;
+	pcb->pcb_un.un_32.pcb32_sp = uaddr + USPACE_SVC_STACK_TOP;
+
+#ifdef STACKCHECKS
+	/* Fill the undefined stack with a known pattern */
+	memset(((u_char *)uaddr) + USPACE_UNDEF_STACK_BOTTOM, 0xdd,
+	    (USPACE_UNDEF_STACK_TOP - USPACE_UNDEF_STACK_BOTTOM));
+	/* Fill the kernel stack with a known pattern */
+	memset(((u_char *)uaddr) + USPACE_SVC_STACK_BOTTOM, 0xdd,
+	    (USPACE_SVC_STACK_TOP - USPACE_SVC_STACK_BOTTOM));
+#endif	/* STACKCHECKS */
+
+	pcb->pcb_tf = tf =
+	    (struct trapframe *)pcb->pcb_un.un_32.pcb32_sp - 1;
+	*tf = *proc0.p_addr->u_pcb.pcb_tf;
+	return 0;
+}
+#endif /* MULTIPROCESSOR */
 
 /* End of cpu.c */

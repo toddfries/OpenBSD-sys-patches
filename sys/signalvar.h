@@ -1,4 +1,4 @@
-/*	$NetBSD: signalvar.h,v 1.75 2009/01/11 02:45:55 christos Exp $	*/
+/*	$NetBSD: signalvar.h,v 1.69 2007/02/09 21:55:37 ad Exp $	*/
 
 /*
  * Copyright (c) 1991, 1993
@@ -35,6 +35,7 @@
 #define	_SYS_SIGNALVAR_H_
 
 #include <sys/siginfo.h>
+#include <sys/lock.h>
 #include <sys/queue.h>
 #include <sys/mutex.h>
 
@@ -101,6 +102,19 @@ typedef struct sigstore {
 #define	SIGACTION_PS(ps, sig)	(ps->sa_sigdesc[(sig)].sd_sigact)
 
 /*
+ * Clear all pending signal from an LWP.
+ */
+#define CLRSIG(l) \
+	do { \
+		struct proc *p = l->l_proc; \
+		int _sg; \
+		mutex_enter(&p->p_smutex); \
+		while ((_sg = issignal(l)) > 0) \
+			sigget(l->l_sigpendset, NULL, _sg, NULL); \
+		mutex_exit(&p->p_smutex); \
+	} while (/*CONSTCOND*/0)
+
+/*
  * Signal properties and actions.
  * The array below categorizes the signals and their default actions
  * according to the following properties:
@@ -127,6 +141,7 @@ struct vnode;
 /*
  * Machine-independent functions:
  */
+int	coredump(struct lwp *, const char *);
 int	coredump_netbsd(struct lwp *, void *);
 void	execsigs(struct proc *);
 void	gsignal(int, int);
@@ -155,9 +170,9 @@ int	sigaltstack1(struct lwp *, const struct sigaltstack *,
 	    struct sigaltstack *);
 int	sigismasked(struct lwp *, int);
 
-int	sigget(sigpend_t *, ksiginfo_t *, int, const sigset_t *);
-void	sigclear(sigpend_t *, const sigset_t *, ksiginfoq_t *);
-void	sigclearall(struct proc *, const sigset_t *, ksiginfoq_t *);
+int	sigget(sigpend_t *, ksiginfo_t *, int, sigset_t *);
+void	sigclear(sigpend_t *, sigset_t *, ksiginfoq_t *);
+void	sigclearall(struct proc *, sigset_t *, ksiginfoq_t *);
 
 void	kpsignal2(struct proc *, ksiginfo_t *);
 
@@ -169,7 +184,6 @@ void	sigactsfree(struct sigacts *);
 
 void	kpsendsig(struct lwp *, const struct ksiginfo *, const sigset_t *);
 void	sendsig_reset(struct lwp *, int);
-void	sendsig(const struct ksiginfo *, const sigset_t *);
 
 siginfo_t *siginfo_alloc(int);
 void	siginfo_free(void *);
@@ -178,9 +192,8 @@ ksiginfo_t	*ksiginfo_alloc(struct proc *, ksiginfo_t *, int);
 void	ksiginfo_free(ksiginfo_t *);
 void	ksiginfo_queue_drain0(ksiginfoq_t *);
 
-struct sys_____sigtimedwait50_args;
-int	__sigtimedwait1(struct lwp *, const struct sys_____sigtimedwait50_args *,
-    register_t *, copyout_t, copyin_t, copyout_t);
+int	__sigtimedwait1(struct lwp *, void *, register_t *, copyout_t,
+    copyin_t, copyout_t);
 
 void	signotify(struct lwp *);
 int	sigispending(struct lwp *, int);
@@ -188,17 +201,9 @@ int	sigispending(struct lwp *, int);
 /*
  * Machine-dependent functions:
  */
-void	sendsig_sigcontext(const struct ksiginfo *, const sigset_t *);
-void	sendsig_siginfo(const struct ksiginfo *, const sigset_t *);
+void	sendsig(const struct ksiginfo *, const sigset_t *);
 
 extern	struct pool ksiginfo_pool;
-
-/*
- * Modularity / compatibility.
- */
-extern void	(*sendsig_sigcontext_vec)(const struct ksiginfo *,
-					  const sigset_t *);
-extern int	(*coredump_vec)(struct lwp *, const char *);
 
 /*
  * firstsig:

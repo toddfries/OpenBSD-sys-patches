@@ -1,4 +1,4 @@
-/*	$NetBSD: autoconf.c,v 1.4 2008/04/28 20:23:26 martin Exp $	*/
+/*	$NetBSD: autoconf.c,v 1.1 2006/09/01 21:26:18 uwe Exp $	*/
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -12,6 +12,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -27,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.4 2008/04/28 20:23:26 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.1 2006/09/01 21:26:18 uwe Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -50,6 +57,7 @@ cpu_configure(void)
 
 	/* Start configuration */
 	splhigh();
+	softintr_init();
 	intr_init();
 
 	if (config_rootfound("mainbus", NULL) == NULL)
@@ -107,7 +115,7 @@ match_bootdisk(struct device *dv, struct btinfo_bootdisk *bid)
 	 */
 	if (bdevvp(MAKEDISKDEV(bmajor, dv->dv_unit, RAW_PART), &tmpvn))
 		panic("match_bootdisk: can't alloc vnode");
-	error = VOP_OPEN(tmpvn, FREAD, NOCRED);
+	error = VOP_OPEN(tmpvn, FREAD, NOCRED, 0);
 	if (error) {
 #ifndef DEBUG
 		/*
@@ -121,7 +129,7 @@ match_bootdisk(struct device *dv, struct btinfo_bootdisk *bid)
 		vput(tmpvn);
 		return (0);
 	}
-	error = VOP_IOCTL(tmpvn, DIOCGDINFO, &label, FREAD, NOCRED);
+	error = VOP_IOCTL(tmpvn, DIOCGDINFO, &label, FREAD, NOCRED, 0);
 	if (error) {
 		/*
 		 * XXX Can't happen -- open() would have errored out
@@ -139,7 +147,7 @@ match_bootdisk(struct device *dv, struct btinfo_bootdisk *bid)
 	    	found = 1;
 
 closeout:
-	VOP_CLOSE(tmpvn, FREAD, NOCRED);
+	VOP_CLOSE(tmpvn, FREAD, NOCRED, 0);
 	vput(tmpvn);
 	return (found);
 }

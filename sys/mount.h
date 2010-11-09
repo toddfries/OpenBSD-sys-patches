@@ -1,4 +1,4 @@
-/*	$NetBSD: mount.h,v 1.186 2009/01/11 02:45:55 christos Exp $	*/
+/*	$NetBSD: mount.h,v 1.166 2007/10/10 20:42:32 ad Exp $	*/
 
 /*
  * Copyright (c) 1989, 1991, 1993
@@ -40,16 +40,13 @@
 #include <sys/stat.h>
 #endif /* _NETBSD_SOURCE */
 #endif
-
-#ifndef _STANDALONE
 #include <sys/ucred.h>
 #include <sys/fstypes.h>
 #include <sys/queue.h>
-#include <sys/rwlock.h>
+#include <sys/lock.h>
 #include <sys/statvfs.h>
 #include <sys/specificdata.h>
-#include <sys/condvar.h>
-#endif	/* !_STANDALONE */
+#include <sys/mutex.h>
 
 /*
  * file system statistics
@@ -90,42 +87,32 @@
 #define MOUNT_PUFFS	"puffs"		/* Pass-to-Userspace filesystem */
 #define MOUNT_HFS	"hfs"		/* Apple HFS+ Filesystem */
 #define MOUNT_EFS	"efs"		/* SGI's Extent Filesystem */
-#define MOUNT_ZFS	"zfs"		/* Sun ZFS */
-
-#ifndef _STANDALONE
-
-struct vnode;
 
 /*
  * Structure per mounted file system.  Each mounted file system has an
  * array of operations and an instance record.  The file systems are
  * put on a doubly linked list.
  */
+TAILQ_HEAD(vnodelst, vnode);
+
 struct mount {
 	CIRCLEQ_ENTRY(mount) mnt_list;		/* mount list */
-	TAILQ_HEAD(, vnode) mnt_vnodelist;	/* list of vnodes this mount */
 	struct vfsops	*mnt_op;		/* operations on fs */
 	struct vnode	*mnt_vnodecovered;	/* vnode we mounted on */
 	struct vnode	*mnt_syncer;		/* syncer vnode */
-	void		*mnt_transinfo;		/* for FS-internal use */
-	void		*mnt_data;		/* private data */
-	krwlock_t	mnt_unmounting;		/* to prevent new activity */
-	kmutex_t	mnt_renamelock;		/* per-fs rename lock */
-	int		mnt_refcnt;		/* ref count on this structure */
-	int		mnt_recursecnt;		/* count of write locks */
+	struct vnodelst	mnt_vnodelist;		/* list of vnodes this mount */
+	struct lock	mnt_lock;		/* mount structure lock */
 	int		mnt_flag;		/* flags */
 	int		mnt_iflag;		/* internal flags */
 	int		mnt_fs_bshift;		/* offset shift for lblkno */
 	int		mnt_dev_bshift;		/* shift for device sectors */
 	struct statvfs	mnt_stat;		/* cache of filesystem stats */
+	void		*mnt_data;		/* private data */
+	int		mnt_wcnt;		/* count of vfs_busy waiters */
+	struct lwp	*mnt_unmounter;		/* who is unmounting */
+	struct simplelock mnt_slock;		/* mutex for wcnt */
 	specificdata_reference
 			mnt_specdataref;	/* subsystem specific data */
-	kmutex_t	mnt_updating;		/* to serialize updates */
-	struct wapbl_ops
-			*mnt_wapbl_op;		/* logging ops */
-	struct wapbl	*mnt_wapbl;		/* log info */
-	struct wapbl_replay
-			*mnt_wapbl_replay;	/* replay support XXX: what? */
 };
 
 /*
@@ -145,6 +132,7 @@ struct mount {
 #define	VFS_MAGICLINKS  4		/* expand 'magic' symlinks */
 #define	VFSGEN_MAXID	5		/* number of valid vfs.generic ids */
 
+#ifndef _STANDALONE
 /*
  * USE THE SAME NAMES AS MOUNT_*!
  *
@@ -185,7 +173,7 @@ struct mount {
 	{ "magiclinks", CTLTYPE_INT }, \
 }
 
-#if defined(_KERNEL)
+#if defined(_KERNEL) || defined(__VFSOPS_EXPOSE)
 #if __STDC__
 struct nameidata;
 #endif
@@ -198,13 +186,16 @@ struct vfsops {
 	const char *vfs_name;
 	size_t	vfs_min_mount_data;
 	int	(*vfs_mount)	(struct mount *, const char *, void *,
-				    size_t *);
-	int	(*vfs_start)	(struct mount *, int);
-	int	(*vfs_unmount)	(struct mount *, int);
+				    size_t *, struct lwp *);
+	int	(*vfs_start)	(struct mount *, int, struct lwp *);
+	int	(*vfs_unmount)	(struct mount *, int, struct lwp *);
 	int	(*vfs_root)	(struct mount *, struct vnode **);
-	int	(*vfs_quotactl)	(struct mount *, int, uid_t, void *);
-	int	(*vfs_statvfs)	(struct mount *, struct statvfs *);
-	int	(*vfs_sync)	(struct mount *, int, struct kauth_cred *);
+	int	(*vfs_quotactl)	(struct mount *, int, uid_t, void *,
+				    struct lwp *);
+	int	(*vfs_statvfs)	(struct mount *, struct statvfs *,
+				    struct lwp *);
+	int	(*vfs_sync)	(struct mount *, int, struct kauth_cred *,
+				    struct lwp *);
 	int	(*vfs_vget)	(struct mount *, ino_t, struct vnode **);
 	int	(*vfs_fhtovp)	(struct mount *, struct fid *,
 				    struct vnode **);
@@ -216,41 +207,31 @@ struct vfsops {
 	int	(*vfs_snapshot)	(struct mount *, struct vnode *,
 				    struct timespec *);
 	int	(*vfs_extattrctl) (struct mount *, int,
-				    struct vnode *, int, const char *);
+				    struct vnode *, int, const char *,
+				    struct lwp *);
 	int	(*vfs_suspendctl) (struct mount *, int);
-	int	(*vfs_renamelock_enter)(struct mount *);
-	void	(*vfs_renamelock_exit)(struct mount *);
-	int	(*vfs_fsync)	(struct vnode *, int);
 	const struct vnodeopv_desc * const *vfs_opv_descs;
 	int	vfs_refcount;
 	LIST_ENTRY(vfsops) vfs_list;
 };
 
-/* XXX vget is actually file system internal. */
+#define VFS_MOUNT(MP, PATH, DATA, DATA_LEN, L) \
+	(*(MP)->mnt_op->vfs_mount)(MP, PATH, DATA, DATA_LEN, L)
+#define VFS_START(MP, FLAGS, L)	  (*(MP)->mnt_op->vfs_start)(MP, FLAGS, L)
+#define VFS_UNMOUNT(MP, FORCE, L) (*(MP)->mnt_op->vfs_unmount)(MP, FORCE, L)
+#define VFS_ROOT(MP, VPP)	  (*(MP)->mnt_op->vfs_root)(MP, VPP)
+#define VFS_QUOTACTL(MP,C,U,A,L)  (*(MP)->mnt_op->vfs_quotactl)(MP, C, U, A, L)
+#define VFS_STATVFS(MP, SBP, L)	  (*(MP)->mnt_op->vfs_statvfs)(MP, SBP, L)
+#define VFS_SYNC(MP, WAIT, C, L)  (*(MP)->mnt_op->vfs_sync)(MP, WAIT, C, L)
 #define VFS_VGET(MP, INO, VPP)    (*(MP)->mnt_op->vfs_vget)(MP, INO, VPP)
+#define VFS_FHTOVP(MP, FIDP, VPP) (*(MP)->mnt_op->vfs_fhtovp)(MP, FIDP, VPP)
+#define	VFS_VPTOFH(VP, FIDP, FIDSZP)  (*(VP)->v_mount->mnt_op->vfs_vptofh)(VP, FIDP, FIDSZP)
+#define VFS_SNAPSHOT(MP, VP, TS)  (*(MP)->mnt_op->vfs_snapshot)(MP, VP, TS)
+#define	VFS_EXTATTRCTL(MP, C, VP, AS, AN, L) \
+	(*(MP)->mnt_op->vfs_extattrctl)(MP, C, VP, AS, AN, L)
+#define VFS_SUSPENDCTL(MP, C)     (*(MP)->mnt_op->vfs_suspendctl)(MP, C)
 
-#define VFS_RENAMELOCK_ENTER(MP)  (*(MP)->mnt_op->vfs_renamelock_enter)(MP)
-#define VFS_RENAMELOCK_EXIT(MP)   (*(MP)->mnt_op->vfs_renamelock_exit)(MP)
-#define VFS_FSYNC(MP, VP, FLG)	  (*(MP)->mnt_op->vfs_fsync)(VP, FLG)
-
-int	VFS_MOUNT(struct mount *, const char *, void *, size_t *);
-int	VFS_START(struct mount *, int);
-int	VFS_UNMOUNT(struct mount *, int);
-int	VFS_ROOT(struct mount *, struct vnode **);
-int	VFS_QUOTACTL(struct mount *, int, uid_t, void *);
-int	VFS_STATVFS(struct mount *, struct statvfs *);
-int	VFS_SYNC(struct mount *, int, struct kauth_cred *);
-int	VFS_FHTOVP(struct mount *, struct fid *, struct vnode **);
-int	VFS_VPTOFH(struct vnode *, struct fid *, size_t *);
-void	VFS_INIT(void);
-void	VFS_REINIT(void);
-void	VFS_DONE(void);
-int	VFS_MOUNTROOT(void);
-int	VFS_SNAPSHOT(struct mount *, struct vnode *, struct timespec *);
-int	VFS_EXTATTRCTL(struct mount *, int, struct vnode *, int, const char *);
-int	VFS_SUSPENDCTL(struct mount *, int);
-
-#endif /* _KERNEL */
+#endif /* _KERNEL || __VFSOPS_EXPOSE */
 
 #ifdef _KERNEL
 #if __STDC__
@@ -263,13 +244,16 @@ struct kauth_cred;
 
 #define VFS_PROTOS(fsname)						\
 int	fsname##_mount(struct mount *, const char *, void *,		\
-		size_t *);						\
-int	fsname##_start(struct mount *, int);				\
-int	fsname##_unmount(struct mount *, int);				\
+		size_t *, struct lwp *);				\
+int	fsname##_start(struct mount *, int, struct lwp *);		\
+int	fsname##_unmount(struct mount *, int, struct lwp *);		\
 int	fsname##_root(struct mount *, struct vnode **);			\
-int	fsname##_quotactl(struct mount *, int, uid_t, void *);		\
-int	fsname##_statvfs(struct mount *, struct statvfs *);		\
-int	fsname##_sync(struct mount *, int, struct kauth_cred *);	\
+int	fsname##_quotactl(struct mount *, int, uid_t, void *,		\
+		struct lwp *);						\
+int	fsname##_statvfs(struct mount *, struct statvfs *,		\
+		struct lwp *);						\
+int	fsname##_sync(struct mount *, int, struct kauth_cred *,		\
+		struct lwp *);						\
 int	fsname##_vget(struct mount *, ino_t, struct vnode **);		\
 int	fsname##_fhtovp(struct mount *, struct fid *, struct vnode **);	\
 int	fsname##_vptofh(struct vnode *, struct fid *, size_t *);	\
@@ -280,68 +264,17 @@ int	fsname##_mountroot(void);					\
 int	fsname##_snapshot(struct mount *, struct vnode *,		\
 		struct timespec *);					\
 int	fsname##_extattrctl(struct mount *, int, struct vnode *, int,	\
-		const char *);						\
+		const char *, struct lwp *);				\
 int	fsname##_suspendctl(struct mount *, int)
 
-/*
- * This operations vector is so wapbl can be wrapped into a filesystem lkm.
- * XXX Eventually, we want to move this functionality
- * down into the filesystems themselves so that this isn't needed.
- */
-struct wapbl_ops {
-	void (*wo_wapbl_discard)(struct wapbl *);
-	int (*wo_wapbl_replay_isopen)(struct wapbl_replay *);
-	int (*wo_wapbl_replay_can_read)(struct wapbl_replay *, daddr_t, long);
-	int (*wo_wapbl_replay_read)(struct wapbl_replay *, void *, daddr_t, long);
-	void (*wo_wapbl_add_buf)(struct wapbl *, struct buf *);
-	void (*wo_wapbl_remove_buf)(struct wapbl *, struct buf *);
-	void (*wo_wapbl_resize_buf)(struct wapbl *, struct buf *, long, long);
-	int (*wo_wapbl_begin)(struct wapbl *, const char *, int);
-	void (*wo_wapbl_end)(struct wapbl *);
-	void (*wo_wapbl_junlock_assert)(struct wapbl *);
-	void (*wo_wapbl_biodone)(struct buf *);
-};
-#define WAPBL_DISCARD(MP)						\
-    (*(MP)->mnt_wapbl_op->wo_wapbl_discard)((MP)->mnt_wapbl)
-#define WAPBL_REPLAY_ISOPEN(MP)						\
-    (*(MP)->mnt_wapbl_op->wo_wapbl_replay_isopen)((MP)->mnt_wapbl_replay)
-#define WAPBL_REPLAY_CAN_READ(MP, BLK, LEN)				\
-    (*(MP)->mnt_wapbl_op->wo_wapbl_replay_can_read)((MP)->mnt_wapbl_replay, \
-    (BLK), (LEN))
-#define WAPBL_REPLAY_READ(MP, DATA, BLK, LEN)				\
-    (*(MP)->mnt_wapbl_op->wo_wapbl_replay_read)((MP)->mnt_wapbl_replay,	\
-    (DATA), (BLK), (LEN))
-#define WAPBL_ADD_BUF(MP, BP)						\
-    (*(MP)->mnt_wapbl_op->wo_wapbl_add_buf)((MP)->mnt_wapbl, (BP))
-#define WAPBL_REMOVE_BUF(MP, BP)					\
-    (*(MP)->mnt_wapbl_op->wo_wapbl_remove_buf)((MP)->mnt_wapbl, (BP))
-#define WAPBL_RESIZE_BUF(MP, BP, OLDSZ, OLDCNT)				\
-    (*(MP)->mnt_wapbl_op->wo_wapbl_resize_buf)((MP)->mnt_wapbl, (BP),	\
-    (OLDSZ), (OLDCNT))
-#define WAPBL_BEGIN(MP)							\
-    (*(MP)->mnt_wapbl_op->wo_wapbl_begin)((MP)->mnt_wapbl,		\
-    __FILE__, __LINE__)
-#define WAPBL_END(MP)							\
-    (*(MP)->mnt_wapbl_op->wo_wapbl_end)((MP)->mnt_wapbl)
-#define WAPBL_JUNLOCK_ASSERT(MP)					\
-    (*(MP)->mnt_wapbl_op->wo_wapbl_junlock_assert)((MP)->mnt_wapbl)
+#define	VFS_ATTACH(vfs)		__link_set_add_data(vfsops, vfs)
 
 struct vfs_hooks {
-	LIST_ENTRY(vfs_hooks) vfs_hooks_list;
 	void	(*vh_unmount)(struct mount *);
-	int	(*vh_reexport)(struct mount *, const char *, void *);
-	void	(*vh_future_expansion_1)(void);
-	void	(*vh_future_expansion_2)(void);
-	void	(*vh_future_expansion_3)(void);
-	void	(*vh_future_expansion_4)(void);
-	void	(*vh_future_expansion_5)(void);
 };
+#define	VFS_HOOKS_ATTACH(hooks)	__link_set_add_data(vfs_hooks, hooks)
 
-void	vfs_hooks_init(void);
-int	vfs_hooks_attach(struct vfs_hooks *);
-int	vfs_hooks_detach(struct vfs_hooks *);
 void	vfs_hooks_unmount(struct mount *);
-int	vfs_hooks_reexport(struct mount *, const char *, void *);
 
 #endif /* _KERNEL */
 
@@ -390,9 +323,9 @@ int	vfs_mountedon(struct vnode *);/* is a vfs mounted on vp */
 int	vfs_mountroot(void);
 void	vfs_shutdown(void);	    /* unmount and sync file systems */
 void	vfs_unmountall(struct lwp *);	    /* unmount file systems */
-int 	vfs_busy(struct mount *, struct mount **);
+int 	vfs_busy(struct mount *, int, kmutex_t *);
 int	vfs_rootmountalloc(const char *, const char *, struct mount **);
-void	vfs_unbusy(struct mount *, bool, struct mount **);
+void	vfs_unbusy(struct mount *);
 int	vfs_attach(struct vfsops *);
 int	vfs_detach(struct vfsops *);
 void	vfs_reinit(void);
@@ -402,13 +335,14 @@ void	vfs_destroy(struct mount *);
 void	vfs_scrubvnlist(struct mount *);
 
 int	vfs_stdextattrctl(struct mount *, int, struct vnode *,
-	    int, const char *);
+	    int, const char *, struct lwp *);
 
 extern	CIRCLEQ_HEAD(mntlist, mount) mountlist;	/* mounted filesystem list */
 extern	struct vfsops *vfssw[];			/* filesystem type table */
 extern	int nvfssw;
-extern  kmutex_t mountlist_lock;
-extern	kmutex_t vfs_list_lock;
+extern	kmutex_t mountlist_lock;
+extern	struct simplelock spechash_slock;
+extern  kmutex_t vfs_list_lock;
 
 long	makefstype(const char *);
 int	dounmount(struct mount *, int, struct lwp *);
@@ -446,7 +380,7 @@ int	unmount(const char *, int);
 #ifndef __LIBC12_SOURCE__
 int mount(const char *, const char *, int, void *, size_t) __RENAME(__mount50);
 int	fhopen(const void *, size_t, int) __RENAME(__fhopen40);
-int	fhstat(const void *, size_t, struct stat *) __RENAME(__fhstat50);
+int	fhstat(const void *, size_t, struct stat *) __RENAME(__fhstat40);
 #endif
 #endif /* _NETBSD_SOURCE */
 __END_DECLS

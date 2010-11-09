@@ -1,4 +1,4 @@
-/* $NetBSD: osf1_mmap.c,v 1.13 2007/12/20 23:03:03 dsl Exp $ */
+/* $NetBSD: osf1_mmap.c,v 1.10 2003/04/01 01:53:40 thorpej Exp $ */
 
 /*
  * Copyright (c) 1999 Christopher G. Demetriou.  All rights reserved.
@@ -31,13 +31,14 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: osf1_mmap.c,v 1.13 2007/12/20 23:03:03 dsl Exp $");
+__KERNEL_RCSID(0, "$NetBSD: osf1_mmap.c,v 1.10 2003/04/01 01:53:40 thorpej Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/mman.h>
 #include <sys/mount.h>
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 #include <uvm/uvm.h>				/* XXX see mmap emulation */
 
@@ -46,8 +47,12 @@ __KERNEL_RCSID(0, "$NetBSD: osf1_mmap.c,v 1.13 2007/12/20 23:03:03 dsl Exp $");
 #include <compat/osf1/osf1_cvt.h>
 
 int
-osf1_sys_madvise(struct lwp *l, const struct osf1_sys_madvise_args *uap, register_t *retval)
+osf1_sys_madvise(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
+	struct osf1_sys_madvise_args *uap = v;
 	struct sys_madvise_args a;
 	int error;
 
@@ -108,8 +113,12 @@ osf1_sys_madvise(struct lwp *l, const struct osf1_sys_madvise_args *uap, registe
 }
 
 int
-osf1_sys_mmap(struct lwp *l, const struct osf1_sys_mmap_args *uap, register_t *retval)
+osf1_sys_mmap(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
+	struct osf1_sys_mmap_args *uap = v;
 	struct proc *p = l->l_proc;
 	struct sys_mmap_args a;
 	unsigned long leftovers;
@@ -201,8 +210,12 @@ done:
 }
 
 int
-osf1_sys_mprotect(struct lwp *l, const struct osf1_sys_mprotect_args *uap, register_t *retval)
+osf1_sys_mprotect(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
+	struct osf1_sys_mprotect_args *uap = v;
 	struct sys_mprotect_args a;
 	unsigned long leftovers;
 

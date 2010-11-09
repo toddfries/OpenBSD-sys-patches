@@ -1,4 +1,4 @@
-/*	$NetBSD: xirc.c,v 1.25 2008/07/28 14:25:30 drochner Exp $	*/
+/*	$NetBSD: xirc.c,v 1.21 2007/10/19 12:01:06 ad Exp $	*/
 
 /*-
  * Copyright (c) 1999, 2000, 2004 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -31,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: xirc.c,v 1.25 2008/07/28 14:25:30 drochner Exp $");
+__KERNEL_RCSID(0, "$NetBSD: xirc.c,v 1.21 2007/10/19 12:01:06 ad Exp $");
 
 #include "opt_inet.h"
 #include "bpfilter.h"
@@ -184,7 +191,7 @@ xirc_attach(parent, self, aux)
 	rv = pcmcia_scan_cis(parent, xirc_manfid_ciscallback, &sc->sc_id);
 	pcmcia_socket_disable(parent);
 	if (!rv) {
-		aprint_error_dev(self, "failed to find ID\n");
+		aprint_error("%s: failed to find ID\n", self->dv_xname);
 		return;
 	}
 
@@ -210,12 +217,12 @@ xirc_attach(parent, self, aux)
 		sc->sc_chipset = XI_CHIPSET_DINGO;
 		break;
 	default:
-		aprint_error_dev(self, "unknown ID %04x\n",
+		aprint_error("%s: unknown ID %04x\n", self->dv_xname,
 		    sc->sc_id);
 		return;
 	}
 
-	aprint_normal_dev(self, "id=%04x\n", sc->sc_id);
+	aprint_normal("%s: id=%04x\n", self->dv_xname, sc->sc_id);
 
 	if (sc->sc_id & (XIMEDIA_MODEM << 8)) {
 		if (sc->sc_chipset >= XI_CHIPSET_DINGO) {
@@ -232,7 +239,8 @@ xirc_attach(parent, self, aux)
 	} else
 		cfe = xirc_dingo_alloc_ethernet(sc);
 	if (!cfe) {
-		aprint_error_dev(self, "failed to allocate I/O space\n");
+		aprint_error("%s: failed to allocate I/O space\n",
+		    self->dv_xname);
 		goto fail;
 	}
 
@@ -242,7 +250,8 @@ xirc_attach(parent, self, aux)
 	if (sc->sc_id & (XIMEDIA_MODEM << 8)) {
 		if (pcmcia_io_map(sc->sc_pf, PCMCIA_WIDTH_IO8,
 		    &sc->sc_modem_pcioh, &sc->sc_modem_io_window)) {
-			aprint_error_dev(self, "unable to map I/O space\n");
+			aprint_error("%s: unable to map I/O space\n",
+			    self->dv_xname);
 			goto fail;
 		}
 		sc->sc_flags |= XIRC_MODEM_MAPPED;
@@ -251,7 +260,8 @@ xirc_attach(parent, self, aux)
 	if (sc->sc_id & (XIMEDIA_ETHER << 8)) {
 		if (pcmcia_io_map(sc->sc_pf, PCMCIA_WIDTH_AUTO,
 		    &sc->sc_ethernet_pcioh, &sc->sc_ethernet_io_window)) {
-			aprint_error_dev(self, "unable to map I/O space\n");
+			aprint_error("%s: unable to map I/O space\n",
+			    self->dv_xname);
 			goto fail;
 		}
 		sc->sc_flags |= XIRC_ETHERNET_MAPPED;
@@ -473,13 +483,13 @@ xirc_intr(arg)
 #if NCOM_XIRC > 0
 	if (sc->sc_modem != NULL &&
 	    (sc->sc_flags & XIRC_MODEM_ENABLED) != 0)
-		rval |= comintr(device_private(sc->sc_modem));
+		rval |= comintr(sc->sc_modem);
 #endif
 
 #if NXI_XIRC > 0
 	if (sc->sc_ethernet != NULL &&
 	    (sc->sc_flags & XIRC_ETHERNET_ENABLED) != 0)
-		rval |= xi_intr(device_private(sc->sc_ethernet));
+		rval |= xi_intr(sc->sc_ethernet);
 #endif
 
 	return (rval);
@@ -493,7 +503,7 @@ xirc_enable(sc, flag, media)
 	int error;
 
 	if ((sc->sc_flags & flag) == flag) {
-		printf("%s: already enabled\n", device_xname(&sc->sc_dev));
+		printf("%s: already enabled\n", sc->sc_dev.dv_xname);
 		return (0);
 	}
 
@@ -542,7 +552,7 @@ xirc_disable(sc, flag, media)
 {
 
 	if ((sc->sc_flags & flag) == 0) {
-		printf("%s: already disabled\n", device_xname(&sc->sc_dev));
+		printf("%s: already disabled\n", sc->sc_dev.dv_xname);
 		return;
 	}
 
@@ -565,19 +575,20 @@ xirc_disable(sc, flag, media)
 /****** Here begins the com attachment code. ******/
 
 #if NCOM_XIRC > 0
-int	com_xirc_match(device_t, cfdata_t , void *);
-void	com_xirc_attach(device_t, device_t, void *);
-int	com_xirc_detach(device_t, int);
+int	com_xirc_match(struct device *, struct cfdata *, void *);
+void	com_xirc_attach(struct device *, struct device *, void *);
+int	com_xirc_detach(struct device *, int);
 
 /* No xirc-specific goo in the softc; it's all in the parent. */
-CFATTACH_DECL_NEW(com_xirc, sizeof(struct com_softc),
+CFATTACH_DECL(com_xirc, sizeof(struct com_softc),
     com_xirc_match, com_xirc_attach, com_detach, com_activate);
 
 int	com_xirc_enable(struct com_softc *);
 void	com_xirc_disable(struct com_softc *);
 
 int
-com_xirc_match(device_t parent, cfdata_t match, void *aux)
+com_xirc_match(struct device *parent, struct cfdata *match,
+    void *aux)
 {
 	extern struct cfdriver com_cd;
 	const char *name = aux;
@@ -589,12 +600,10 @@ com_xirc_match(device_t parent, cfdata_t match, void *aux)
 }
 
 void
-com_xirc_attach(device_t parent, device_t self, void *aux)
+com_xirc_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct com_softc *sc = device_private(self);
-	struct xirc_softc *msc = device_private(parent);
-
-	sc->sc_dev = self;
+	struct com_softc *sc = (void *)self;
+	struct xirc_softc *msc = (void *)parent;
 
 	aprint_normal("\n");
 
@@ -610,7 +619,7 @@ com_xirc_attach(device_t parent, device_t self, void *aux)
 	sc->enable = com_xirc_enable;
 	sc->disable = com_xirc_disable;
 
-	aprint_normal("%s", device_xname(self));
+	aprint_normal("%s", self->dv_xname);
 
 	com_attach_subr(sc);
 
@@ -618,19 +627,21 @@ com_xirc_attach(device_t parent, device_t self, void *aux)
 }
 
 int
-com_xirc_enable(struct com_softc *sc)
+com_xirc_enable(sc)
+	struct com_softc *sc;
 {
 	struct xirc_softc *msc =
-	    device_private(device_parent(sc->sc_dev));
+	    (struct xirc_softc *)device_parent(&sc->sc_dev);
 
 	return (xirc_enable(msc, XIRC_MODEM_ENABLED, XIMEDIA_MODEM));
 }
 
 void
-com_xirc_disable(struct com_softc *sc)
+com_xirc_disable(sc)
+	struct com_softc *sc;
 {
 	struct xirc_softc *msc =
-	    device_private(device_parent(sc->sc_dev));
+	    (struct xirc_softc *)device_parent(&sc->sc_dev);
 
 	xirc_disable(msc, XIRC_MODEM_ENABLED, XIMEDIA_MODEM);
 }
@@ -683,7 +694,7 @@ xi_xirc_attach(struct device *parent, struct device *self, void *aux)
 
 	if (!pcmcia_scan_cis(device_parent(&msc->sc_dev),
 	    xi_xirc_lan_nid_ciscallback, myla)) {
-		aprint_error_dev(self, "can't find MAC address\n");
+		aprint_error("%s: can't find MAC address\n", self->dv_xname);
 		return;
 	}
 

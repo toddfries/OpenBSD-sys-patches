@@ -1,4 +1,4 @@
-/*	$NetBSD: dio.c,v 1.37 2008/04/28 20:23:19 martin Exp $	*/
+/*	$NetBSD: dio.c,v 1.34 2006/07/21 18:05:30 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997, 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -34,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: dio.c,v 1.37 2008/04/28 20:23:19 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: dio.c,v 1.34 2006/07/21 18:05:30 tsutsui Exp $");
 
 #define	_HP300_INTR_H_PRIVATE
 
@@ -63,23 +70,23 @@ __KERNEL_RCSID(0, "$NetBSD: dio.c,v 1.37 2008/04/28 20:23:19 martin Exp $");
 #define        diocf_scode             cf_loc[DIOCF_SCODE]
 
 struct dio_softc {
-	device_t sc_dev;
+	struct device sc_dev;
 	struct bus_space_tag sc_tag;
 };
 
 static int	dio_scodesize(struct dio_attach_args *);
 static const char *dio_devinfo(struct dio_attach_args *, char *, size_t);
 
-static int	diomatch(device_t, cfdata_t, void *);
-static void	dioattach(device_t, device_t, void *);
+static int	diomatch(struct device *, struct cfdata *, void *);
+static void	dioattach(struct device *, struct device *, void *);
 static int	dioprint(void *, const char *);
-static int	diosubmatch(device_t, cfdata_t, const int *, void *);
+static int	diosubmatch(struct device *, struct cfdata *, const int *, void *);
 
-CFATTACH_DECL_NEW(dio, sizeof(struct dio_softc),
+CFATTACH_DECL(dio, sizeof(struct dio_softc),
     diomatch, dioattach, NULL, NULL);
 
 static int
-diomatch(device_t parent, cfdata_t cf, void *aux)
+diomatch(struct device *parent, struct cfdata *match, void *aux)
 {
 	static int dio_matched = 0;
 
@@ -92,18 +99,17 @@ diomatch(device_t parent, cfdata_t cf, void *aux)
 }
 
 static void
-dioattach(device_t parent, device_t self, void *aux)
+dioattach(struct device *parent, struct device *self, void *aux)
 {
-	struct dio_softc *sc = device_private(self);
+	struct dio_softc *sc = (struct dio_softc *)self;
 	struct dio_attach_args da;
 	bus_addr_t pa;
-	void *va;
+	caddr_t va;
 	bus_space_tag_t bst = &sc->sc_tag;
 	bus_space_handle_t bsh;
 	int scode, scmax, scodesize;
 
-	sc->sc_dev = self;
-	aprint_normal("\n");
+	printf("\n");
 
 	memset(bst, 0, sizeof(struct bus_space_tag));
 	bst->bustype = HP300_BUS_SPACE_DIO;
@@ -122,7 +128,8 @@ dioattach(device_t parent, device_t self, void *aux)
 		 */
 		pa = (bus_addr_t)dio_scodetopa(scode);
 		if (bus_space_map(bst, pa, PAGE_SIZE, 0, &bsh)) {
-			aprint_error_dev(self, "can't map scode %d\n", scode);
+			printf("%s: can't map scode %d\n",
+			    self->dv_xname, scode);
 			scode++;
 			continue;
 		}
@@ -155,13 +162,14 @@ dioattach(device_t parent, device_t self, void *aux)
 
 		/* Attach matching device. */
 		config_found_sm_loc(self, "dio", NULL, &da, dioprint,
-		    diosubmatch);
+				    diosubmatch);
 		scode += scodesize;
 	}
 }
 
 static int
-diosubmatch(device_t parent, cfdata_t cf, const int *ldesc, void *aux)
+diosubmatch(struct device *parent, struct cfdata *cf,
+	    const int *ldesc, void *aux)
 {
 	struct dio_attach_args *da = aux;
 
@@ -223,7 +231,7 @@ dio_scodesize(struct dio_attach_args *da)
 					goto foundit;
 				}
 			} else {
- foundit:
+			foundit:
 				return dio_devdatas[i].dd_nscode;
 			}
 		}
@@ -232,8 +240,7 @@ dio_scodesize(struct dio_attach_args *da)
 	/*
 	 * Device is unknown.  Print a warning and assume a default.
 	 */
-	aprint_error("WARNING: select code size unknown "
-	    "for id = 0x%x secid = 0x%x\n",
+	printf("WARNING: select code size unknown for id = 0x%x secid = 0x%x\n",
 	    da->da_id, da->da_secid);
 	return 1;
 }

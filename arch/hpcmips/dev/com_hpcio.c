@@ -1,4 +1,4 @@
-/*	$NetBSD: com_hpcio.c,v 1.11 2008/03/14 15:09:10 cube Exp $	*/
+/*	$NetBSD: com_hpcio.c,v 1.10 2006/07/13 22:56:01 gdamore Exp $	*/
 
 /*-
  * Copyright (c) 2002 TAKEMRUA Shin. All rights reserved.
@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: com_hpcio.c,v 1.11 2008/03/14 15:09:10 cube Exp $");
+__KERNEL_RCSID(0, "$NetBSD: com_hpcio.c,v 1.10 2006/07/13 22:56:01 gdamore Exp $");
 
 #include "opt_kgdb.h"
 
@@ -81,15 +81,15 @@ static struct bus_space_tag com_hpcio_cniotx;
 static bus_space_tag_t com_hpcio_cniot = &com_hpcio_cniotx;
 static int com_hpcio_cniobase;
 
-static int com_hpcio_probe(device_t, cfdata_t , void *);
-static void com_hpcio_attach(device_t, device_t, void *);
+static int com_hpcio_probe(struct device *, struct cfdata *, void *);
+static void com_hpcio_attach(struct device *, struct device *, void *);
 static int com_hpcio_common_probe(bus_space_tag_t, int, int *);
 void com_hpcio_iot_init(bus_space_tag_t iot, bus_space_tag_t base);
 bus_space_protos(bs_notimpl);
 bus_space_protos(bs_through);
 bus_space_protos(com_hpcio);
 
-CFATTACH_DECL_NEW(com_hpcio, sizeof(struct com_hpcio_softc),
+CFATTACH_DECL(com_hpcio, sizeof(struct com_hpcio_softc),
     com_hpcio_probe, com_hpcio_attach, NULL, NULL);
 
 struct bus_space_ops com_hpcio_bs_ops = {
@@ -271,7 +271,7 @@ com_hpcio_common_probe(bus_space_tag_t iot, int iobase, int *alignment)
 }
 
 static int
-com_hpcio_probe(device_t parent, cfdata_t cf, void *aux)
+com_hpcio_probe(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct hpcio_attach_args *haa = aux;
 	bus_space_tag_t iot = haa->haa_iot;
@@ -293,30 +293,29 @@ com_hpcio_probe(device_t parent, cfdata_t cf, void *aux)
 
 
 static void
-com_hpcio_attach(device_t parent, device_t self, void *aux)
+com_hpcio_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct com_hpcio_softc *hsc = device_private(self);
+	struct com_hpcio_softc *hsc = (void *)self;
 	struct com_softc *sc = &hsc->hsc_com;
 	struct hpcio_attach_args *haa = aux;
 	bus_space_tag_t iot;
 	bus_space_handle_t ioh;
 	int addr, port, mode, alignment, *loc;
 
-	sc->sc_dev = self;
-	loc = device_cfdata(sc->sc_dev)->cf_loc;
+	loc = device_cfdata(&sc->sc_dev)->cf_loc;
 	addr = loc[HPCIOIFCF_ADDR];
-	aprint_normal(" addr %x", addr);
+	printf(" addr %x", addr);
 	if ((com_hpcio_cniot == haa->haa_iot ||
 	    com_hpcio_cniot->bs_base == haa->haa_iot) &&
 	    com_hpcio_cniobase == addr &&
 	    com_is_console(com_hpcio_cniot, addr, 0)) {
 		iot = com_hpcio_cniot;
 		if (com_hpcio_cniot->bs_base == haa->haa_iot)
-			aprint_normal(", half word aligned");
+			printf(", half word aligned");
 	} else {
 		com_hpcio_common_probe(haa->haa_iot, addr, &alignment);
 		if (alignment == COM_HPCIO_HALFWORD_ALIGNMENT) {
-			aprint_normal(", half word aligned");
+			printf(", half word aligned");
 			iot = &hsc->hsc_iot;
 			com_hpcio_iot_init(iot, haa->haa_iot);
 		} else {
@@ -324,7 +323,7 @@ com_hpcio_attach(device_t parent, device_t self, void *aux)
 		}
 	}
 	if (bus_space_map(iot, addr, 1, 0, &ioh)) {
-		aprint_error(": can't map bus space\n");
+		printf(": can't map bus space\n");
 		return;
 	}
 	COM_INIT_REGS(sc->sc_regs, iot, ioh, addr);

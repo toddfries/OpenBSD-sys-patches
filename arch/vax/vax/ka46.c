@@ -1,4 +1,4 @@
-/*	$NetBSD: ka46.c,v 1.24 2008/03/11 05:34:03 matt Exp $ */
+/*	$NetBSD: ka46.c,v 1.22 2006/09/05 19:32:57 matt Exp $ */
 /*
  * Copyright (c) 1998 Ludd, University of Lule}, Sweden.
  * All rights reserved.
@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ka46.c,v 1.24 2008/03/11 05:34:03 matt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ka46.c,v 1.22 2006/09/05 19:32:57 matt Exp $");
 
 #include <sys/param.h>
 #include <sys/types.h>
@@ -59,45 +59,43 @@ __KERNEL_RCSID(0, "$NetBSD: ka46.c,v 1.24 2008/03/11 05:34:03 matt Exp $");
 static	void	ka46_conf(void);
 static	void	ka46_steal_pages(void);
 static	void	ka46_memerr(void);
-static	int	ka46_mchk(void *);
+static	int	ka46_mchk(caddr_t);
 static	void	ka46_halt(void);
 static	void	ka46_reboot(int);
 static	void	ka46_cache_enable(void);
-
-static const char * const ka46_devs[] = { "cpu", "vsbus", NULL };
 
 struct	vs_cpu *ka46_cpu;
 
 /* 
  * Declaration of 46-specific calls.
  */
-const struct cpu_dep ka46_calls = {
-	.cpu_steal_pages = ka46_steal_pages,
-	.cpu_mchk	= ka46_mchk,
-	.cpu_memerr	= ka46_memerr, 
-	.cpu_conf	= ka46_conf,
-	.cpu_gettime	= chip_gettime,
-	.cpu_settime	= chip_settime,
-	.cpu_vups	= 12,      /* ~VUPS */
-	.cpu_scbsz	= 2,	/* SCB pages */
-	.cpu_halt	= ka46_halt,
-	.cpu_reboot	= ka46_reboot,
-	.cpu_devs	= ka46_devs,
-	.cpu_flags	= CPU_RAISEIPL,
+struct	cpu_dep ka46_calls = {
+	ka46_steal_pages,
+	ka46_mchk,
+	ka46_memerr, 
+	ka46_conf,
+	chip_gettime,
+	chip_settime,
+	12,      /* ~VUPS */
+	2,	/* SCB pages */
+	ka46_halt,
+	ka46_reboot,
+	NULL,
+	NULL,
+	CPU_RAISEIPL,
 };
 
-static const char * const ka46_cpustrs[4] = {
-	[0] = "unknown KA46 type 0",
-	[1] = "KA47, Mariah, 2KB L1 cache, 256KB L2 cache",
-	[2] = "KA46, Mariah, 2KB L1 cache, 256KB L2 cache",
-	[3] = "unknown KA46 type 3",
-};
 
 void
-ka46_conf(void)
+ka46_conf()
 {
-	curcpu()->ci_cpustr = ka46_cpustrs[vax_siedata & 0x3];
+	switch(vax_siedata & 0x3) {
+		case 1: printf("cpu0: KA47\n"); break;
+		case 2: printf("cpu0: KA46\n"); break;
+		default: printf("cpu0: unknown KA46-type\n"); break;
+	}
 	ka46_cpu = (void *)vax_map_physmem(VS_REGS, 1);
+	printf("cpu: turning on floating point chip\n");
 	mtpr(2, PR_ACCS); /* Enable floating points */
 	/*
 	 * Setup parameters necessary to read time from clock chip.
@@ -108,7 +106,7 @@ ka46_conf(void)
 }
 
 void
-ka46_cache_enable(void)
+ka46_cache_enable()
 {
 	int i, *tmp;
 
@@ -140,20 +138,20 @@ ka46_cache_enable(void)
 }
 
 void
-ka46_memerr(void)
+ka46_memerr()
 {
 	printf("Memory err!\n");
 }
 
 int
-ka46_mchk(void *addr)
+ka46_mchk(caddr_t addr)
 {
 	panic("Machine check");
 	return 0;
 }
 
 void
-ka46_steal_pages(void)
+ka46_steal_pages()
 {
 
 	/* Turn on caches (to speed up execution a bit) */
@@ -164,16 +162,16 @@ ka46_steal_pages(void)
 #define KA46_HLT_HALT	0xcf
 #define KA46_HLT_BOOT	0x8b
 
-void
-ka46_halt(void)
+static void
+ka46_halt()
 {
-	((volatile uint8_t *) clk_page)[KA46_CPMBX] = KA46_HLT_HALT;
+	((volatile u_int8_t *) clk_page)[KA46_CPMBX] = KA46_HLT_HALT;
 	__asm("halt");
 }
 
-void
+static void
 ka46_reboot(int arg)
 {
-	((volatile uint8_t *) clk_page)[KA46_CPMBX] = KA46_HLT_BOOT;
+	((volatile u_int8_t *) clk_page)[KA46_CPMBX] = KA46_HLT_BOOT;
 	__asm("halt");
 }

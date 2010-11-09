@@ -1,4 +1,4 @@
-/*	$NetBSD: ka650.c,v 1.35 2008/12/16 22:35:28 christos Exp $	*/
+/*	$NetBSD: ka650.c,v 1.31 2006/09/05 19:32:57 matt Exp $	*/
 /*
  * Copyright (c) 1988 The Regents of the University of California.
  * All rights reserved.
@@ -38,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ka650.c,v 1.35 2008/12/16 22:35:28 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ka650.c,v 1.31 2006/09/05 19:32:57 matt Exp $");
 
 #include <sys/param.h>
 #include <sys/time.h>
@@ -64,37 +64,36 @@ int	*KA650_CACHE_ptr;
 #define	CACHEOFF	0
 #define	CACHEON		1
 
-static	void	ka650setcache(int);
-static	void	ka650_halt(void);
-static	void	ka650_reboot(int);
-static	void    ka650_conf(void);
-static	void    ka650_memerr(void);
-static	int     ka650_mchk(void *);
-static	void	ka650_attach_cpu(device_t);
+static	void	ka650setcache __P((int));
+static	void	ka650_halt __P((void));
+static	void	ka650_reboot __P((int));
+static	void    uvaxIII_conf __P((void));
+static	void    uvaxIII_memerr __P((void));
+static	int     uvaxIII_mchk __P((caddr_t));
 
-static const char * const ka650_devs[] = { "cpu", "lance", "uba", NULL };
-
-const struct cpu_dep ka650_calls = {
-	.cpu_mchk	= ka650_mchk,
-	.cpu_memerr	= ka650_memerr,
-	.cpu_conf	= ka650_conf,
-	.cpu_gettime	= generic_gettime,
-	.cpu_settime	= generic_settime,
-	.cpu_vups	= 4,      /* ~VUPS */
-	.cpu_scbsz	= 2,	/* SCB pages */
-	.cpu_halt	= ka650_halt,
-	.cpu_reboot	= ka650_reboot,
-	.cpu_devs	= ka650_devs,
-	.cpu_attach_cpu	= ka650_attach_cpu,
-	.cpu_flags	= CPU_RAISEIPL,	/* Needed for the LANCE chip */
+struct	cpu_dep	ka650_calls = {
+	0, /* No special page stealing anymore */
+	uvaxIII_mchk,
+	uvaxIII_memerr,
+	uvaxIII_conf,
+	generic_gettime,
+	generic_settime,
+	4,      /* ~VUPS */
+	2,	/* SCB pages */
+	ka650_halt,
+	ka650_reboot,
+	0,
+	0,
+	CPU_RAISEIPL,	/* Needed for the LANCE chip */
 };
 
 /*
- * ka650_conf() is called by cpu_attach to do the cpu_specific setup.
+ * uvaxIII_conf() is called by cpu_attach to do the cpu_specific setup.
  */
 void
-ka650_conf(void)
+uvaxIII_conf()
 {
+	int syssub = GETSYSSUBT(vax_siedata);
 
 	/*
 	 * MicroVAX III: We map in memory error registers,
@@ -108,6 +107,10 @@ ka650_conf(void)
 	KA650_CACHE_ptr = (void *)vax_map_physmem(KA650_CACHE,
 	    (KA650_CACHESIZE/VAX_NBPG));
 
+	printf("cpu: KA6%d%d, CVAX microcode rev %d Firmware rev %d\n",
+	    syssub == VAX_SIE_KA640 ? 4 : 5,
+	    syssub == VAX_SIE_KA655 ? 5 : 0,
+	    (vax_cpudata & 0xff), GETFRMREV(vax_siedata));
 	ka650setcache(CACHEON);
 	if (ctob(physmem) > ka650merr_ptr->merr_qbmbr) {
 		printf("physmem(0x%x) > qbmbr(0x%x)\n",
@@ -119,23 +122,12 @@ ka650_conf(void)
 }
 
 void
-ka650_attach_cpu(device_t self)
-{
-	int syssub = GETSYSSUBT(vax_siedata);
-
-	aprint_normal(": KA6%d%d, CVAX microcode rev %d Firmware rev %d\n",
-	    syssub == VAX_SIE_KA640 ? 4 : 5,
-	    syssub == VAX_SIE_KA655 ? 5 : 0,
-	    (vax_cpudata & 0xff), GETFRMREV(vax_siedata));
-}
-
-void
-ka650_memerr(void)
+uvaxIII_memerr()
 {
 	printf("memory err!\n");
 #if 0 /* XXX Fix this */
-	char *cp = NULL;
-	int m;
+	register char *cp = (char *)0;
+	register int m;
 	extern u_int cache2tag;
 
 	if (ka650cbd.cbd_cacr & CACR_CPE) {
@@ -167,7 +159,7 @@ ka650_memerr(void)
 }
 
 #define NMC650	15
-const char * const mc650[] = {
+const char *mc650[] = {
 	0,			"FPA proto err",	"FPA resv inst",
 	"FPA Ill Stat 2",	"FPA Ill Stat 1",	"PTE in P0, TB miss",
 	"PTE in P1, TB miss",	"PTE in P0, Mod",	"PTE in P1, Mod",
@@ -190,11 +182,12 @@ struct mc650frame {
 };
 
 int
-ka650_mchk(void *cmcf)
+uvaxIII_mchk(cmcf)
+	caddr_t cmcf;
 {
-	struct mc650frame *mcf = (struct mc650frame *)cmcf;
-	u_int type = mcf->mc65_summary;
-	u_int i;
+	register struct mc650frame *mcf = (struct mc650frame *)cmcf;
+	register u_int type = mcf->mc65_summary;
+	register u_int i;
 	char sbuf[256];
 
 	printf("machine check %x", type);
@@ -205,7 +198,8 @@ ka650_mchk(void *cmcf)
 	printf("\n\tvap %x istate1 %x istate2 %x pc %x psl %x\n",
 	    mcf->mc65_mrvaddr, mcf->mc65_istate1, mcf->mc65_istate2,
 	    mcf->mc65_pc, mcf->mc65_psl);
-	snprintb(sbuf, sizeof(sbuf), DMASER_BITS, ka650merr_ptr->merr_dser);
+	bitmask_snprintf(ka650merr_ptr->merr_dser, DMASER_BITS,
+			 sbuf, sizeof(sbuf));
 	printf("dmaser=0x%s qbear=0x%x dmaear=0x%x\n", sbuf,
 	    (int)ka650merr_ptr->merr_qbear,
 	    (int)ka650merr_ptr->merr_dear);
@@ -218,19 +212,19 @@ ka650_mchk(void *cmcf)
 		if (i & CAER_DAT) {
 			printf("data");
 			i = cache1data;
-			cache1data = time_second;
+			cache1data = time.tv_sec;
 		}
 		if (i & CAER_TAG) {
 			printf("tag");
 			i = cache1tag;
-			cache1tag = time_second;
+			cache1tag = time.tv_sec;
 		}
 	} else if ((i & CAER_MCD) || (ka650merr_ptr->merr_errstat & MEM_CDAL)) {
 		printf("CDAL");
 		i = cdalerr;
-		cdalerr = time_second;
+		cdalerr = time.tv_sec;
 	}
-	if (time_second - i < 7) {
+	if (time.tv_sec - i < 7) {
 		ka650setcache(CACHEOFF);
 		printf(" parity error:	cacheing disabled\n");
 	} else {
@@ -245,7 +239,7 @@ ka650_mchk(void *cmcf)
 	if ((type > 0 && type < 5) || type == 11 || type == 12) {
 		if ((mcf->mc65_psl & PSL_FPD)
 		    || !(mcf->mc65_istate2 & IS2_VCR)) {
-			ka650_memerr();
+			uvaxIII_memerr();
 			return 0;
 		}
 	}
@@ -285,15 +279,16 @@ ka650setcache(int state)
 	}
 }
 
-void
-ka650_halt(void)
+static void
+ka650_halt()
 {
 	ka650ssc_ptr->ssc_cpmbx = CPMB650_DOTHIS | CPMB650_HALT;
 	__asm("halt");
 }
 
-void
-ka650_reboot(int arg)
+static void
+ka650_reboot(arg)
+	int arg;
 {
 	ka650ssc_ptr->ssc_cpmbx = CPMB650_DOTHIS | CPMB650_REBOOT;
 }

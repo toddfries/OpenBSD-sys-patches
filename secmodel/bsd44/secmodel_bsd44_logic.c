@@ -1,4 +1,4 @@
-/* $NetBSD: secmodel_bsd44_logic.c,v 1.4 2007/11/21 22:49:07 elad Exp $ */
+/* $NetBSD: secmodel_bsd44_logic.c,v 1.2 2006/09/08 21:57:38 elad Exp $ */
 /*-
  * Copyright (c) 2006 Elad Efrat <elad@NetBSD.org>
  * All rights reserved.
@@ -11,7 +11,10 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed by Elad Efrat.
+ * 4. The name of the author may not be used to endorse or promote products
  *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
@@ -27,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: secmodel_bsd44_logic.c,v 1.4 2007/11/21 22:49:07 elad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: secmodel_bsd44_logic.c,v 1.2 2006/09/08 21:57:38 elad Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -37,7 +40,7 @@ __KERNEL_RCSID(0, "$NetBSD: secmodel_bsd44_logic.c,v 1.4 2007/11/21 22:49:07 ela
 
 #include <secmodel/bsd44/bsd44.h>
 #include <secmodel/bsd44/suser.h>
-#include <secmodel/securelevel/securelevel.h>
+#include <secmodel/bsd44/securelevel.h>
 
 int secmodel_bsd44_curtain;
 
@@ -47,6 +50,6 @@ int secmodel_bsd44_curtain;
 void
 secmodel_bsd44_init(void)
 {
-	secmodel_securelevel_init();
+	secmodel_bsd44_securelevel_init();
 	secmodel_bsd44_curtain = 0;
 }

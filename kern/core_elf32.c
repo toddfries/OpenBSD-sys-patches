@@ -1,4 +1,4 @@
-/*	$NetBSD: core_elf32.c,v 1.33 2008/11/19 18:36:06 ad Exp $	*/
+/*	$NetBSD: core_elf32.c,v 1.31 2007/07/09 21:10:50 ad Exp $	*/
 
 /*
  * Copyright (c) 2001 Wasabi Systems, Inc.
@@ -40,12 +40,9 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(1, "$NetBSD: core_elf32.c,v 1.33 2008/11/19 18:36:06 ad Exp $");
+__KERNEL_RCSID(1, "$NetBSD: core_elf32.c,v 1.31 2007/07/09 21:10:50 ad Exp $");
 
-#ifdef _KERNEL_OPT
-#include "opt_coredump.h"
-#endif
-
+/* If not included by core_elf64.c, ELFSIZE won't be defined. */
 #ifndef ELFSIZE
 #define	ELFSIZE		32
 #endif
@@ -63,8 +60,6 @@ __KERNEL_RCSID(1, "$NetBSD: core_elf32.c,v 1.33 2008/11/19 18:36:06 ad Exp $");
 #include <machine/reg.h>
 
 #include <uvm/uvm_extern.h>
-
-#ifdef COREDUMP
 
 struct countsegs_state {
 	int	npsections;
@@ -351,11 +346,11 @@ ELFNAMEEND(coredump_notes)(struct proc *p, struct lwp *l,
 		    sizeof(cpi.cpi_sigcatch));
 
 		cpi.cpi_pid = p->p_pid;
-		mutex_enter(proc_lock);
+		mutex_enter(&proclist_lock);
 		cpi.cpi_ppid = p->p_pptr->p_pid;
 		cpi.cpi_pgrp = p->p_pgid;
 		cpi.cpi_sid = p->p_session->s_sid;
-		mutex_exit(proc_lock);
+		mutex_exit(&proclist_lock);
 
 		cpi.cpi_ruid = kauth_cred_getuid(l->l_cred);
 		cpi.cpi_euid = kauth_cred_geteuid(l->l_cred);
@@ -492,14 +487,3 @@ ELFNAMEEND(coredump_writenote)(struct proc *p, void *cookie, Elf_Nhdr *nhdr,
 
 	return coredump_write(cookie, UIO_SYSSPACE, data, nhdr->n_descsz);
 }
-
-#else	/* COREDUMP */
-
-int
-ELFNAMEEND(coredump)(struct lwp *l, void *cookie)
-{
-
-	return ENOSYS;
-}
-
-#endif	/* COREDUMP */

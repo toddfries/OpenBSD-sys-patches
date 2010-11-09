@@ -1,4 +1,4 @@
-/*	$NetBSD: trap.c,v 1.119 2009/02/25 19:56:49 mhitch Exp $     */
+/*	$NetBSD: trap.c,v 1.105 2006/07/23 22:06:08 ad Exp $     */
 
 /*
  * Copyright (c) 1994 Ludd, University of Lule}, Sweden.
@@ -33,9 +33,10 @@
  /* All bugs are subject to removal without further notice */
 		
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: trap.c,v 1.119 2009/02/25 19:56:49 mhitch Exp $");
+__KERNEL_RCSID(0, "$NetBSD: trap.c,v 1.105 2006/07/23 22:06:08 ad Exp $");
 
 #include "opt_ddb.h"
+#include "opt_ktrace.h"
 #include "opt_multiprocessor.h"
 
 #include <sys/types.h>
@@ -64,9 +65,10 @@ __KERNEL_RCSID(0, "$NetBSD: trap.c,v 1.119 2009/02/25 19:56:49 mhitch Exp $");
 #ifdef DDB
 #include <machine/db_machdep.h>
 #endif
-#include <vax/vax/db_disasm.h>
 #include <kern/syscalls.c>
+#ifdef KTRACE
 #include <sys/ktrace.h>
+#endif
 
 #ifdef TRAPDEBUG
 volatile int faultdebug = 0;
@@ -98,7 +100,7 @@ const char * const traptypes[]={
 };
 int no_traps = 18;
 
-#define USERMODE_P(framep)   ((((framep)->psl) & (PSL_U)) == PSL_U)
+#define USERMODE(framep)   ((((framep)->psl) & (PSL_U)) == PSL_U)
 #define FAULTCHK						\
 	if (l->l_addr->u_pcb.iftrap) {				\
 		frame->pc = (unsigned)l->l_addr->u_pcb.iftrap;	\
@@ -112,30 +114,26 @@ int no_traps = 18;
 void
 trap(struct trapframe *frame)
 {
-	u_int	sig = 0, type = frame->trap, code = 0;
-	u_int	rv, addr;
-	bool trapsig = true;
-	const bool usermode = USERMODE_P(frame);;
+	u_int	sig = 0, type = frame->trap, trapsig = 1, code = 0;
+	u_int	rv, addr, umode;
 	struct	lwp *l;
-	struct	proc *p;
+	struct	proc *p = NULL;
 	u_quad_t oticks = 0;
 	struct vmspace *vm;
 	struct vm_map *map;
 	vm_prot_t ftype;
 
-	l = curlwp;
-	KASSERT(l != NULL);
-	p = l->l_proc;
-	KASSERT(p != NULL);
+	if ((l = curlwp) != NULL)
+		p = l->l_proc;
 	uvmexp.traps++;
-	if (usermode) {
+	if ((umode = USERMODE(frame))) {
 		type |= T_USER;
 		oticks = p->p_sticks;
 		l->l_addr->u_pcb.framep = frame; 
 		LWP_CACHE_CREDS(l, p);
 	}
 
-	type &= ~(T_WRITE|T_PTEFETCH);
+	type&=~(T_WRITE|T_PTEFETCH);
 
 
 #ifdef TRAPDEBUG
@@ -144,21 +142,19 @@ if(faultdebug)printf("Trap: type %lx, code %lx, pc %lx, psl %lx\n",
 		frame->trap, frame->code, frame->pc, frame->psl);
 fram:
 #endif
-	switch (type) {
+	switch(type){
 
 	default:
 #ifdef DDB
 		kdb_trap(frame);
 #endif
-		panic("trap: type %x, code %x, pc %x, psl %x",
+		printf("Trap: type %x, code %x, pc %x, psl %x\n",
 		    (u_int)frame->trap, (u_int)frame->code,
 		    (u_int)frame->pc, (u_int)frame->psl);
+		panic("trap");
 
 	case T_KSPNOTVAL:
-		panic("%d.%d (%s): KSP invalid %#x@%#x pcb %p fp %#x psl %#x)",
-		    p->p_pid, l->l_lid, l->l_name ? l->l_name : "??",
-		    mfpr(PR_KSP), (u_int)frame->pc, l->l_addr,
-		    (u_int)frame->fp, (u_int)frame->psl);
+		panic("kernel stack invalid");
 
 	case T_TRANSFLT|T_USER:
 	case T_TRANSFLT:
@@ -206,10 +202,9 @@ if(faultdebug)printf("trap accflt type %lx, code %lx, pc %lx, psl %lx\n",
 		 * bother doing it here.
 		 */
 		addr = trunc_page(frame->code);
-		if (!usermode && (frame->code < 0)) {
+		if ((umode == 0) && (frame->code < 0)) {
 			vm = NULL;
 			map = kernel_map;
-
 		} else {
 			vm = p->p_vmspace;
 			map = &vm->vm_map;
@@ -220,14 +215,19 @@ if(faultdebug)printf("trap accflt type %lx, code %lx, pc %lx, psl %lx\n",
 		else
 			ftype = VM_PROT_READ;
 
-		if ((usermode) && (l->l_flag & LW_SA)) {
-			l->l_savp->savp_faultaddr = (vaddr_t)frame->code;
-			l->l_pflag |= LP_SA_PAGEFAULT;
-		}
+		if (umode) {
+			KERNEL_PROC_LOCK(l);
+			if (l->l_flag & L_SA) {
+				l->l_savp->savp_faultaddr = (vaddr_t)frame->code;
+				l->l_flag |= L_SA_PAGEFAULT;
+			}
+		} else
+			KERNEL_LOCK(LK_CANRECURSE|LK_EXCLUSIVE);
 
 		rv = uvm_fault(map, addr, ftype);
 		if (rv != 0) {
-			if (!usermode) {
+			if (umode == 0) {
+				KERNEL_UNLOCK();
 				FAULTCHK;
 				panic("Segv in kernel mode: pc %x addr %x",
 				    (u_int)frame->pc, (u_int)frame->code);
@@ -246,14 +246,15 @@ if(faultdebug)printf("trap accflt type %lx, code %lx, pc %lx, psl %lx\n",
 					code = SEGV_MAPERR;
 			}
 		} else {
-			trapsig = false;
-			if (map != kernel_map && addr > 0
-			    && (void *)addr >= vm->vm_maxsaddr)
+			trapsig = 0;
+			if (map != kernel_map && (caddr_t)addr >= vm->vm_maxsaddr)
 				uvm_grow(p, addr);
 		}
-		if (usermode) {
-			l->l_pflag &= ~LP_SA_PAGEFAULT;
-		}
+		if (umode) {
+			l->l_flag &= ~L_SA_PAGEFAULT;
+			KERNEL_PROC_UNLOCK(l);
+		} else
+			KERNEL_UNLOCK();
 		break;
 
 	case T_BPTFLT|T_USER:
@@ -285,26 +286,11 @@ if(faultdebug)printf("trap accflt type %lx, code %lx, pc %lx, psl %lx\n",
 
 	case T_ARITHFLT|T_USER:
 		sig = SIGFPE;
-		switch (frame->code) {
-		case ATRP_INTOVF: code = FPE_INTOVF; break;
-		case ATRP_INTDIV: code = FPE_INTDIV; break;
-		case ATRP_FLTOVF: code = FPE_FLTOVF; break;
-		case ATRP_FLTDIV: code = FPE_FLTDIV; break;
-		case ATRP_FLTUND: code = FPE_FLTUND; break;
-		case ATRP_DECOVF: code = FPE_INTOVF; break;
-		case ATRP_FLTSUB: code = FPE_FLTSUB; break;
-		case AFLT_FLTDIV: code = FPE_FLTDIV; break;
-		case AFLT_FLTUND: code = FPE_FLTUND; break;
-		case AFLT_FLTOVF: code = FPE_FLTOVF; break;
-		default:	  code = FPE_FLTINV; break;
-		}
 		break;
 
 	case T_ASTFLT|T_USER:
 		mtpr(AST_NO,PR_ASTLVL);
-		trapsig = false;
-		if (curcpu()->ci_want_resched)
-			preempt();
+		trapsig = 0;
 		break;
 
 #ifdef DDB
@@ -322,30 +308,17 @@ if(faultdebug)printf("trap accflt type %lx, code %lx, pc %lx, psl %lx\n",
 			printf("pid %d.%d (%s): sig %d: type %lx, code %lx, pc %lx, psl %lx\n",
 			       p->p_pid, l->l_lid, p->p_comm, sig, frame->trap,
 			       frame->code, frame->pc, frame->psl);
+		KERNEL_PROC_LOCK(l);
 		KSI_INIT_TRAP(&ksi);
 		ksi.ksi_signo = sig;
 		ksi.ksi_trap = frame->trap;
 		ksi.ksi_addr = (void *)frame->code;
 		ksi.ksi_code = code;
-
-		/*
-		 * Arithmetic exceptions can be of two kinds:
-		 * - traps (codes 1..7), where pc points to the
-		 *   next instruction to execute.
-		 * - faults (codes 8..10), where pc points to the
-		 *   faulting instruction.
-		 * In the latter case, we need to advance pc by ourselves
-		 * to prevent a signal loop.
-		 *
-		 * XXX this is gross -- miod
-		 */
-		if (type == (T_ARITHFLT | T_USER) && (frame->code & 8))
-			frame->pc = skip_opcode(frame->pc);
-
 		trapsignal(l, &ksi);
+		KERNEL_PROC_UNLOCK(l);
 	}
 
-	if (!usermode)
+	if (umode == 0)
 		return;
 
 	userret(l, frame, oticks);
@@ -370,7 +343,8 @@ setregs(struct lwp *l, struct exec_package *pack, u_long stack)
  * Start a new LWP
  */
 void
-startlwp(void *arg)
+startlwp(arg)
+	void *arg;
 {
 	int err;
 	ucontext_t *uc = arg;

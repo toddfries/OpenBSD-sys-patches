@@ -1,4 +1,4 @@
-/*	$NetBSD: dpt_eisa.c,v 1.18 2008/04/06 08:54:43 cegger Exp $	*/
+/*	$NetBSD: dpt_eisa.c,v 1.17 2007/10/19 11:59:41 ad Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000, 2001 Andrew Doran <ad@NetBSD.org>
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: dpt_eisa.c,v 1.18 2008/04/06 08:54:43 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: dpt_eisa.c,v 1.17 2007/10/19 11:59:41 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -171,7 +171,8 @@ dpt_eisa_attach(struct device *parent, struct device *self, void *aux)
 
 	/* Read the EATA configuration. */
 	if (dpt_readcfg(sc)) {
-		aprint_error_dev(&sc->sc_dv, "readcfg failed - see dpt(4)\n");
+		printf("%s: readcfg failed - see dpt(4)\n",
+		    sc->sc_dv.dv_xname);
 		return;
 	}
 

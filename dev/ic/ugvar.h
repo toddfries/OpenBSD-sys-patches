@@ -1,4 +1,4 @@
-/* $NetBSD: ugvar.h,v 1.4 2008/03/26 16:09:37 xtraeme Exp $ */
+/* $NetBSD: ugvar.h,v 1.2 2007/07/01 08:29:48 xtraeme Exp $ */
 
 /*
  * Copyright (c) 2007 Mihai Chelaru <kefren@netbsd.ro>
@@ -29,11 +29,13 @@
 #define _UGVAR_H_
 
 struct ug_softc {
+	struct device sc_dev;
+
 	bus_space_tag_t sc_iot;
 	bus_space_handle_t sc_ioh;
 
-	struct sysmon_envsys *sc_sme;
-	envsys_data_t sc_sensor[UG_MAX_SENSORS];
+	struct sysmon_envsys sc_sysmon;
+	envsys_data_t sc_data[UG_MAX_SENSORS];
 	uint8_t version;
 	void *mbsens;
 };
@@ -58,14 +60,14 @@ int ug_reset(struct ug_softc *);
 uint8_t ug_read(struct ug_softc *, unsigned short);
 int ug_waitfor(struct ug_softc *, uint16_t, uint8_t);
 void ug_setup_sensors(struct ug_softc *);
-void ug2_attach(device_t);
+void ug2_attach(struct ug_softc *);
 int ug2_wait_ready(struct ug_softc *);
 int ug2_wait_readable(struct ug_softc *);
 int ug2_sync(struct ug_softc *);
 int ug2_read(struct ug_softc *, uint8_t, uint8_t, uint8_t, uint8_t*);
 
 /* Envsys */
-void ug_refresh(struct sysmon_envsys *, envsys_data_t *);
-void ug2_refresh(struct sysmon_envsys *, envsys_data_t *);
+int ug_gtredata(struct sysmon_envsys *, envsys_data_t *);
+int ug2_gtredata(struct sysmon_envsys *, envsys_data_t *);
 
 #endif		/* _UGVAR_H_ */

@@ -1,4 +1,4 @@
-/*	$NetBSD: linux32_sysctl.c,v 1.12 2009/01/05 09:33:19 njoly Exp $ */
+/*	$NetBSD: linux32_sysctl.c,v 1.3 2006/09/23 22:12:00 manu Exp $ */
 
 /*-
  * Copyright (c) 2006 Emmanuel Dreyfus, all rights reserved.
@@ -31,7 +31,9 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: linux32_sysctl.c,v 1.12 2009/01/05 09:33:19 njoly Exp $");
+__KERNEL_RCSID(0, "$NetBSD: linux32_sysctl.c,v 1.3 2006/09/23 22:12:00 manu Exp $");
+
+#include "opt_ktrace.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -39,27 +41,78 @@ __KERNEL_RCSID(0, "$NetBSD: linux32_sysctl.c,v 1.12 2009/01/05 09:33:19 njoly Ex
 #include <sys/proc.h>
 #include <sys/mount.h>
 #include <sys/sysctl.h>
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
+#ifdef KTRACE
 #include <sys/ktrace.h>
+#endif
 
 #include <compat/netbsd32/netbsd32.h>
 
 #include <compat/linux/common/linux_types.h>
 #include <compat/linux/common/linux_signal.h>
 #include <compat/linux/common/linux_sysctl.h>
-#include <compat/linux/common/linux_ipc.h>
-#include <compat/linux/common/linux_sem.h>
+
 #include <compat/linux/linux_syscallargs.h>
 
 #include <compat/linux32/common/linux32_types.h>
 #include <compat/linux32/common/linux32_signal.h>
 #include <compat/linux32/common/linux32_sysctl.h>
+
 #include <compat/linux32/linux32_syscallargs.h>
 
 char linux32_sysname[128] = "Linux";
 char linux32_release[128] = "2.4.18";
 char linux32_version[128] = "#0 Wed Feb 20 20:00:02 CET 2002";
 
+
+SYSCTL_SETUP(sysctl_emul_linux32_setup, "sysctl emul.linux32 subtree setup")
+{
+
+	sysctl_createv(clog, 0, NULL, NULL,
+		       CTLFLAG_PERMANENT,
+		       CTLTYPE_NODE, "emul", NULL,
+		       NULL, 0, NULL, 0,
+		       CTL_EMUL, CTL_EOL);
+	sysctl_createv(clog, 0, NULL, NULL,
+		       CTLFLAG_PERMANENT,
+		       CTLTYPE_NODE, "linux32",
+		       SYSCTL_DESCR("Linux 32 bit emulation settings"),
+		       NULL, 0, NULL, 0,
+		       CTL_EMUL, EMUL_LINUX32, CTL_EOL);
+	sysctl_createv(clog, 0, NULL, NULL,
+		       CTLFLAG_PERMANENT,
+		       CTLTYPE_NODE, "kern",
+		       SYSCTL_DESCR("Linux 32 bit kernel emulation settings"),
+		       NULL, 0, NULL, 0,
+		       CTL_EMUL, EMUL_LINUX32, EMUL_LINUX32_KERN, CTL_EOL);
+
+	sysctl_createv(clog, 0, NULL, NULL,
+		       CTLFLAG_PERMANENT|CTLFLAG_READWRITE,
+		       CTLTYPE_STRING, "ostype",
+		       SYSCTL_DESCR("Linux 32 bit operating system type"),
+		       NULL, 0, linux32_sysname, sizeof(linux32_sysname),
+		       CTL_EMUL, EMUL_LINUX32, EMUL_LINUX32_KERN,
+		       EMUL_LINUX32_KERN_OSTYPE, CTL_EOL);
+	sysctl_createv(clog, 0, NULL, NULL,
+		       CTLFLAG_PERMANENT|CTLFLAG_READWRITE,
+		       CTLTYPE_STRING, "osrelease",
+		       SYSCTL_DESCR("Linux 32 bit operating system release"),
+		       NULL, 0, linux32_release, sizeof(linux32_release),
+		       CTL_EMUL, EMUL_LINUX32, EMUL_LINUX32_KERN,
+		       EMUL_LINUX32_KERN_OSRELEASE, CTL_EOL);
+	sysctl_createv(clog, 0, NULL, NULL,
+		       CTLFLAG_PERMANENT|CTLFLAG_READWRITE,
+		       CTLTYPE_STRING, "osversion",
+		       SYSCTL_DESCR("Linux 32 bit operating system revision"),
+		       NULL, 0, linux32_version, sizeof(linux32_version),
+		       CTL_EMUL, EMUL_LINUX32, EMUL_LINUX32_KERN,
+		       EMUL_LINUX32_KERN_VERSION, CTL_EOL);
+}
+
+#ifndef _LKM
+static
+#endif
 struct sysctlnode linux32_sysctl_root = {
 	.sysctl_flags = SYSCTL_VERSION|
 	    CTLFLAG_ROOT|CTLTYPE_NODE|CTLFLAG_READWRITE,
@@ -68,80 +121,27 @@ struct sysctlnode linux32_sysctl_root = {
 	sysc_init_field(_sysctl_size, sizeof(struct sysctlnode)),
 };
 
-static struct sysctllog *linux32_clog1;
-static struct sysctllog *linux32_clog2;
-
-void
-linux32_sysctl_fini(void)
-{
-
-	sysctl_teardown(&linux32_clog2);
-	sysctl_teardown(&linux32_clog1);
-	sysctl_free(&linux32_sysctl_root);
-}
-
-void
-linux32_sysctl_init(void)
+SYSCTL_SETUP(linux32_sysctl_setup, "linux32 emulated sysctl subtree setup")
 {
 	const struct sysctlnode *node = &linux32_sysctl_root;
 
-	sysctl_createv(&linux32_clog1, 0, NULL, NULL,
-		       CTLFLAG_PERMANENT,
-		       CTLTYPE_NODE, "emul", NULL,
-		       NULL, 0, NULL, 0,
-		       CTL_EMUL, CTL_EOL);
-	sysctl_createv(&linux32_clog1, 0, NULL, NULL,
-		       CTLFLAG_PERMANENT,
-		       CTLTYPE_NODE, "linux32",
-		       SYSCTL_DESCR("Linux 32 bit emulation settings"),
-		       NULL, 0, NULL, 0,
-		       CTL_EMUL, EMUL_LINUX32, CTL_EOL);
-	sysctl_createv(&linux32_clog1, 0, NULL, NULL,
-		       CTLFLAG_PERMANENT,
-		       CTLTYPE_NODE, "kern",
-		       SYSCTL_DESCR("Linux 32 bit kernel emulation settings"),
-		       NULL, 0, NULL, 0,
-		       CTL_EMUL, EMUL_LINUX32, EMUL_LINUX32_KERN, CTL_EOL);
-
-	sysctl_createv(&linux32_clog1, 0, NULL, NULL,
-		       CTLFLAG_PERMANENT|CTLFLAG_READWRITE,
-		       CTLTYPE_STRING, "ostype",
-		       SYSCTL_DESCR("Linux 32 bit operating system type"),
-		       NULL, 0, linux32_sysname, sizeof(linux32_sysname),
-		       CTL_EMUL, EMUL_LINUX32, EMUL_LINUX32_KERN,
-		       EMUL_LINUX32_KERN_OSTYPE, CTL_EOL);
-	sysctl_createv(&linux32_clog1, 0, NULL, NULL,
-		       CTLFLAG_PERMANENT|CTLFLAG_READWRITE,
-		       CTLTYPE_STRING, "osrelease",
-		       SYSCTL_DESCR("Linux 32 bit operating system release"),
-		       NULL, 0, linux32_release, sizeof(linux32_release),
-		       CTL_EMUL, EMUL_LINUX32, EMUL_LINUX32_KERN,
-		       EMUL_LINUX32_KERN_OSRELEASE, CTL_EOL);
-	sysctl_createv(&linux32_clog1, 0, NULL, NULL,
-		       CTLFLAG_PERMANENT|CTLFLAG_READWRITE,
-		       CTLTYPE_STRING, "osversion",
-		       SYSCTL_DESCR("Linux 32 bit operating system revision"),
-		       NULL, 0, linux32_version, sizeof(linux32_version),
-		       CTL_EMUL, EMUL_LINUX32, EMUL_LINUX32_KERN,
-		       EMUL_LINUX32_KERN_VERSION, CTL_EOL);
-
-	sysctl_createv(&linux32_clog2, 0, &node, &node,
+	sysctl_createv(clog, 0, &node, &node,
 		       CTLFLAG_PERMANENT,
 		       CTLTYPE_NODE, "kern", NULL,
 		       NULL, 0, NULL, 0,
 		       LINUX_CTL_KERN, CTL_EOL);
 
-	sysctl_createv(&linux32_clog2, 0, &node, NULL,
+	sysctl_createv(clog, 0, &node, NULL,
 		       CTLFLAG_PERMANENT,
 		       CTLTYPE_STRING, "ostype", NULL,
 		       NULL, 0, linux32_sysname, sizeof(linux32_sysname),
 		       LINUX_KERN_OSTYPE, CTL_EOL);
-	sysctl_createv(&linux32_clog2, 0, &node, NULL,
+	sysctl_createv(clog, 0, &node, NULL,
 		       CTLFLAG_PERMANENT,
 		       CTLTYPE_STRING, "osrelease", NULL,
 		       NULL, 0, linux32_release, sizeof(linux32_release),
 		       LINUX_KERN_OSRELEASE, CTL_EOL);
-	sysctl_createv(&linux32_clog2, 0, &node, NULL,
+	sysctl_createv(clog, 0, &node, NULL,
 		       CTLFLAG_PERMANENT,
 		       CTLTYPE_STRING, "version", NULL,
 		       NULL, 0, linux32_version, sizeof(linux32_version),
@@ -151,11 +151,14 @@ linux32_sysctl_init(void)
 }
 
 int
-linux32_sys___sysctl(struct lwp *l, const struct linux32_sys___sysctl_args *uap, register_t *retval)
+linux32_sys___sysctl(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct linux32_sys___sysctl_args /* {
 		syscallarg(linux32___sysctlp_t) lsp;
-	} */
+	} */ *uap = v;
 	struct linux32_sysctl ls32;
 	int name[CTL_MAXNAME];
 	size_t savelen;
@@ -166,7 +169,8 @@ linux32_sys___sysctl(struct lwp *l, const struct linux32_sys___sysctl_args *uap,
 	/*
 	 * Read sysctl arguments 
 	 */
-	if ((error = copyin(SCARG_P32(uap, lsp), &ls32, sizeof(ls32))) != 0)
+	if ((error = copyin(NETBSD32PTR64(SCARG(uap, lsp)), 
+	    &ls32, sizeof(ls32))) != 0)
 		return error;
 
 	/*
@@ -186,7 +190,7 @@ linux32_sys___sysctl(struct lwp *l, const struct linux32_sys___sysctl_args *uap,
 	 * Sanity check nlen
 	 */
 	if ((ls32.nlen > CTL_MAXNAME) || (ls32.nlen < 1))
-		return ENOTDIR;
+		return EINVAL;
 
 	/*
 	 * Read the sysctl name
@@ -195,18 +199,26 @@ linux32_sys___sysctl(struct lwp *l, const struct linux32_sys___sysctl_args *uap,
 	   ls32.nlen * sizeof(int))) != 0)
 		return error;
 
-	ktrmib(name, ls32.nlen);
+#ifdef KTRACE
+	if (KTRPOINT(l->l_proc, KTR_MIB))
+		ktrmib(l, name, ls32.nlen);
+#endif
+
+	if ((error = sysctl_lock(l, 
+	    NETBSD32PTR64(ls32.oldval), savelen)) != 0)
+		return error;
+
 	/*
 	 * First try linux32 tree, then linux tree
 	 */
 	oldlen = (size_t)oldlen32;
-	sysctl_lock(NETBSD32PTR64(ls32.newval) != NULL);
 	error = sysctl_dispatch(name, ls32.nlen,
 				NETBSD32PTR64(ls32.oldval), &oldlen,
 				NETBSD32PTR64(ls32.newval), ls32.newlen,
 				name, l, &linux32_sysctl_root);
 	oldlen32 = (netbsd32_size_t)oldlen;
-	sysctl_unlock();
+
+	sysctl_unlock(l);
 
 	/*
 	 * Check for oldlen overflow (not likely, but who knows...)

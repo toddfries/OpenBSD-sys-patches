@@ -1,4 +1,4 @@
-/*	$NetBSD: ddp_output.c,v 1.14 2008/04/06 18:46:56 dyoung Exp $	 */
+/*	$NetBSD: ddp_output.c,v 1.10 2006/10/07 15:49:00 rpaulo Exp $	 */
 
 /*
  * Copyright (c) 1990,1991 Regents of The University of Michigan.
@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ddp_output.c,v 1.14 2008/04/06 18:46:56 dyoung Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ddp_output.c,v 1.10 2006/10/07 15:49:00 rpaulo Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -85,17 +85,20 @@ ddp_output(struct mbuf *m,...)
          * The checksum calculation is done after all of the other bytes have
          * been filled in.
          */
-	if (ddp_cksum)
+	if (ddp_cksum) {
 		deh->deh_sum = at_cksum(m, sizeof(int));
-	else
+	} else {
 		deh->deh_sum = 0;
+	}
 	deh->deh_bytes = htonl(deh->deh_bytes);
 
-	return ddp_route(m, &ddp->ddp_route);
+	return (ddp_route(m, &ddp->ddp_route));
 }
 
 u_short
-at_cksum(struct mbuf *m, int skip)
+at_cksum(m, skip)
+	struct mbuf *m;
+	int skip;
 {
 	u_char         *data, *end;
 	u_long          cksum = 0;
@@ -108,8 +111,9 @@ at_cksum(struct mbuf *m, int skip)
 				continue;
 			}
 			cksum = (cksum + *data) << 1;
-			if (cksum & 0x00010000)
+			if (cksum & 0x00010000) {
 				cksum++;
+			}
 			cksum &= 0x0000ffff;
 		}
 	}
@@ -117,22 +121,23 @@ at_cksum(struct mbuf *m, int skip)
 	if (cksum == 0) {
 		cksum = 0x0000ffff;
 	}
-	return (u_short)cksum;
+	return ((u_short) cksum);
 }
 
 int
-ddp_route(struct mbuf *m, struct route *ro)
+ddp_route(m, ro)
+	struct mbuf *m;
+	struct route *ro;
 {
-	struct rtentry *rt;
 	struct sockaddr_at gate;
 	struct elaphdr *elh;
 	struct at_ifaddr *aa = NULL;
 	struct ifnet   *ifp = NULL;
 	u_short         net;
 
-	if ((rt = rtcache_validate(ro)) != NULL && (ifp = rt->rt_ifp) != NULL) {
-		net = satosat(rt->rt_gateway)->sat_addr.s_net;
-		TAILQ_FOREACH(aa, &at_ifaddr, aa_list) {
+	if (ro->ro_rt && (ifp = ro->ro_rt->rt_ifp)) {
+		net = satosat(ro->ro_rt->rt_gateway)->sat_addr.s_net;
+		for (aa = at_ifaddr.tqh_first; aa; aa = aa->aa_list.tqe_next) {
 			if (aa->aa_ifp == ifp &&
 			    ntohs(net) >= ntohs(aa->aa_firstnet) &&
 			    ntohs(net) <= ntohs(aa->aa_lastnet)) {
@@ -141,9 +146,9 @@ ddp_route(struct mbuf *m, struct route *ro)
 		}
 	}
 	if (aa == NULL) {
-		printf("%s: no address found\n", __func__);
+		printf("ddp_route: no address found\n");
 		m_freem(m);
-		return EINVAL;
+		return (EINVAL);
 	}
 	/*
          * There are several places in the kernel where data is added to
@@ -153,36 +158,36 @@ ddp_route(struct mbuf *m, struct route *ro)
          */
 	if (!(aa->aa_flags & AFA_PHASE2)) {
 		M_PREPEND(m, SZ_ELAPHDR, M_DONTWAIT);
-		if (m == NULL)
-			return ENOBUFS;
+		if (!m)
+			return (ENOBUFS);
 
 		elh = mtod(m, struct elaphdr *);
 		elh->el_snode = satosat(&aa->aa_addr)->sat_addr.s_node;
 		elh->el_type = ELAP_DDPEXTEND;
-		if (ntohs(satocsat(rtcache_getdst(ro))->sat_addr.s_net) >=
+		if (ntohs(satosat(&ro->ro_dst)->sat_addr.s_net) >=
 		    ntohs(aa->aa_firstnet) &&
-		    ntohs(satocsat(rtcache_getdst(ro))->sat_addr.s_net) <=
+		    ntohs(satosat(&ro->ro_dst)->sat_addr.s_net) <=
 		    ntohs(aa->aa_lastnet)) {
-			elh->el_dnode = satocsat(rtcache_getdst(ro))->sat_addr.s_node;
+			elh->el_dnode = satosat(&ro->ro_dst)->sat_addr.s_node;
 		} else {
 			elh->el_dnode =
-			    satosat(rt->rt_gateway)->sat_addr.s_node;
+			    satosat(ro->ro_rt->rt_gateway)->sat_addr.s_node;
 		}
 	}
-	if (ntohs(satocsat(rtcache_getdst(ro))->sat_addr.s_net) >=
+	if (ntohs(satosat(&ro->ro_dst)->sat_addr.s_net) >=
 	    ntohs(aa->aa_firstnet) &&
-	    ntohs(satocsat(rtcache_getdst(ro))->sat_addr.s_net) <=
+	    ntohs(satosat(&ro->ro_dst)->sat_addr.s_net) <=
 	    ntohs(aa->aa_lastnet)) {
-		gate = *satocsat(rtcache_getdst(ro));
+		gate = *satosat(&ro->ro_dst);
 	} else {
-		gate = *satosat(rt->rt_gateway);
+		gate = *satosat(ro->ro_rt->rt_gateway);
 	}
-	rt->rt_use++;
+	ro->ro_rt->rt_use++;
 
 #if IFA_STATS
 	aa->aa_ifa.ifa_data.ifad_outbytes += m->m_pkthdr.len;
 #endif
 
 	/* XXX */
-	return (*ifp->if_output)(ifp, m, (struct sockaddr *)&gate, NULL);
+	return ((*ifp->if_output) (ifp, m, (struct sockaddr *) &gate, NULL));
 }

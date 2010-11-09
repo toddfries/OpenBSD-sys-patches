@@ -1,4 +1,4 @@
-/* $NetBSD: pci_eb64plus.c,v 1.16 2008/04/28 20:23:11 martin Exp $ */
+/* $NetBSD: pci_eb64plus.c,v 1.14 2005/12/11 12:16:17 christos Exp $ */
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -59,7 +66,7 @@
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
 
-__KERNEL_RCSID(0, "$NetBSD: pci_eb64plus.c,v 1.16 2008/04/28 20:23:11 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pci_eb64plus.c,v 1.14 2005/12/11 12:16:17 christos Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -231,8 +238,7 @@ dec_eb64plus_intr_establish(acv, ih, level, func, arg)
 
 	if (cookie != NULL &&
 	    alpha_shared_intr_firstactive(eb64plus_pci_intr, ih)) {
-		scb_set(0x900 + SCB_IDXTOVEC(ih), eb64plus_iointr, NULL,
-		    level);
+		scb_set(0x900 + SCB_IDXTOVEC(ih), eb64plus_iointr, NULL);
 		eb64plus_intr_enable(ih);
 	}
 	return (cookie);

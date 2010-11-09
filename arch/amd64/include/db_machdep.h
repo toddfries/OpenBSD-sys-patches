@@ -1,4 +1,4 @@
-/*	$NetBSD: db_machdep.h,v 1.7 2008/10/26 00:08:15 mrg Exp $	*/
+/*	$NetBSD: db_machdep.h,v 1.5 2006/06/26 14:11:29 christos Exp $	*/
 
 /* 
  * Mach Operating System
@@ -26,8 +26,8 @@
  * the rights to redistribute these changes.
  */
 
-#ifndef	_X86_64_DB_MACHDEP_H_
-#define	_X86_64_DB_MACHDEP_H_
+#ifndef	_I386_DB_MACHDEP_H_
+#define	_I386_DB_MACHDEP_H_
 
 /*
  * Machine-dependent defines for new kernel debugger.
@@ -95,8 +95,8 @@ extern db_regs_t *ddb_regp;
 	 ((user) && (addr) < VM_MAX_ADDRESS))
 
 #if 0
-bool	 	db_check_access __P((vaddr_t, int, task_t));
-bool		db_phys_eq __P((task_t, vaddr_t, task_t, vaddr_t));
+boolean_t 	db_check_access __P((vaddr_t, int, task_t));
+boolean_t	db_phys_eq __P((task_t, vaddr_t, task_t, vaddr_t));
 #endif
 
 /* macros for printing OS server dependent task name */
@@ -135,4 +135,4 @@ extern void db_machine_init __P((void));
 
 extern void cpu_debug_dump __P((void));
 
-#endif	/* _X86_64_DB_MACHDEP_H_ */
+#endif	/* _I386_DB_MACHDEP_H_ */

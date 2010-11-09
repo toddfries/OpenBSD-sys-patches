@@ -1,7 +1,7 @@
-/*	$NetBSD: cs4231_sbus.c,v 1.43 2008/12/16 22:35:35 christos Exp $	*/
+/*	$NetBSD: cs4231_sbus.c,v 1.35 2007/10/19 12:01:10 ad Exp $	*/
 
 /*-
- * Copyright (c) 1998, 1999, 2002, 2007 The NetBSD Foundation, Inc.
+ * Copyright (c) 1998, 1999, 2002 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: cs4231_sbus.c,v 1.43 2008/12/16 22:35:35 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cs4231_sbus.c,v 1.35 2007/10/19 12:01:10 ad Exp $");
 
 #include "audio.h"
 #if NAUDIO > 0
@@ -40,6 +47,7 @@ __KERNEL_RCSID(0, "$NetBSD: cs4231_sbus.c,v 1.43 2008/12/16 22:35:35 christos Ex
 #include <sys/errno.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
+
 #include <sys/bus.h>
 #include <sys/intr.h>
 
@@ -71,8 +79,6 @@ int cs4231_sbus_debug = 0;
 struct cs4231_sbus_softc {
 	struct cs4231_softc sc_cs4231;
 
-	void *sc_pint;
-	void *sc_rint;
 	struct sbusdev sc_sd;			/* sbus device */
 	bus_space_tag_t sc_bt;			/* DMA controller tag */
 	bus_space_handle_t sc_bh;		/* DMA controller registers */
@@ -81,8 +87,6 @@ struct cs4231_sbus_softc {
 
 static int	cs4231_sbus_match(struct device *, struct cfdata *, void *);
 static void	cs4231_sbus_attach(struct device *, struct device *, void *);
-static int	cs4231_sbus_pint(void *);
-static int	cs4231_sbus_rint(void *);
 
 CFATTACH_DECL(audiocs_sbus, sizeof(struct cs4231_sbus_softc),
     cs4231_sbus_match, cs4231_sbus_attach, NULL, NULL);
@@ -161,11 +165,6 @@ cs4231_sbus_attach(struct device *parent, struct device *self, void *aux)
 	sbsc->sc_bt = sc->sc_bustag = sa->sa_bustag;
 	sc->sc_dmatag = sa->sa_dmatag;
 
-	sbsc->sc_pint = sparc_softintr_establish(IPL_VM,
-	    (void *)cs4231_sbus_pint, sc);
-	sbsc->sc_rint = sparc_softintr_establish(IPL_VM,
-	    (void *)cs4231_sbus_rint, sc);
-
 	/*
 	 * Map my registers in, if they aren't already in virtual
 	 * address space.
@@ -176,8 +175,8 @@ cs4231_sbus_attach(struct device *parent, struct device *self, void *aux)
 	} else {
 		if (sbus_bus_map(sa->sa_bustag,	sa->sa_slot,
 			sa->sa_offset, sa->sa_size, 0, &bh) != 0) {
-			aprint_error("%s @ sbus: cannot map registers\n",
-				device_xname(self));
+			printf("%s @ sbus: cannot map registers\n",
+				self->dv_xname);
 			return;
 		}
 	}
@@ -193,7 +192,7 @@ cs4231_sbus_attach(struct device *parent, struct device *self, void *aux)
 	/* Establish interrupt channel */
 	if (sa->sa_nintr)
 		bus_intr_establish(sa->sa_bustag,
-				   sa->sa_pri, IPL_SCHED,
+				   sa->sa_pri, IPL_AUDIO,
 				   cs4231_sbus_intr, sbsc);
 
 	audio_attach_mi(&audiocs_sbus_hw_if, sbsc, &sc->sc_ad1848.sc_dev);
@@ -224,9 +223,10 @@ cs4231_sbus_regdump(char *label, struct cs4231_sbus_softc *sc)
 	printf("dmacnc: 0x%x\n",
 		bus_space_read_4(sc->sc_bh, sc->sc_bh, APC_DMA_CNC));
 
-	snprintb(bits, sizeof(bits), APC_BITS,
-	    bus_space_read_4(sc->sc_bh, sc->sc_bh, APC_DMA_CSR));
-	printf("apc_dmacsr=%s\n", bits);
+	printf("apc_dmacsr=%s\n",
+		bitmask_snprintf(
+			bus_space_read_4(sc->sc_bh, sc->sc_bh, APC_DMA_CSR),
+				APC_BITS, bits, sizeof(bits)));
 
 	ad1848_dump_regs(&sc->sc_cs4231.sc_ad1848);
 }
@@ -274,10 +274,8 @@ cs4231_sbus_trigger_output(void *addr, void *start, void *end, int blksize,
 		bus_space_read_4(sbsc->sc_bt, sbsc->sc_bh, APC_DMA_PNC)));
 
 	csr = bus_space_read_4(sbsc->sc_bt, sbsc->sc_bh, APC_DMA_CSR);
-#ifdef AUDIO_DEBUG
-	snprintb(bits, sizeof(bits), APC_BITS, csr);
-#endif
-	DPRINTF(("trigger_output: csr=%s\n", bits));
+	DPRINTF(("trigger_output: csr=%s\n",
+		 bitmask_snprintf(csr, APC_BITS, bits, sizeof(bits))));
 	if ((csr & PDMA_GO) == 0 || (csr & APC_PPAUSE) != 0) {
 		int cfg;
 
@@ -296,11 +294,8 @@ cs4231_sbus_trigger_output(void *addr, void *start, void *end, int blksize,
 		ad_write(&sc->sc_ad1848, SP_INTERFACE_CONFIG,
 			 (cfg | PLAYBACK_ENABLE));
 	} else {
-#ifdef AUDIO_DEBUG
-		snprintb(bits, sizeof(bits), APC_BITS, csr);
-#endif
-		DPRINTF(("trigger_output: already: csr=%s\n", bits));
-			 
+		DPRINTF(("trigger_output: already: csr=%s\n",
+			 bitmask_snprintf(csr, APC_BITS, bits, sizeof(bits))));
 	}
 
 	/* load next block if we can */
@@ -337,10 +332,8 @@ cs4231_sbus_halt_output(void *addr)
 	sc->sc_playback.t_active = 0;
 
 	csr = bus_space_read_4(sbsc->sc_bt, sbsc->sc_bh, APC_DMA_CSR);
-#ifdef AUDIO_DEBUG
-	snprintb(bits, sizeof(bits), APC_BITS, csr);
-#endif
-	DPRINTF(("halt_output: csr=%s\n", bits));
+	DPRINTF(("halt_output: csr=%s\n",
+		 bitmask_snprintf(csr, APC_BITS, bits, sizeof(bits))));
 
 	csr &= ~APC_INTR_MASK;	/* do not clear interrupts accidentally */
 	csr |= APC_PPAUSE;	/* pause playback (let current complete) */
@@ -351,10 +344,9 @@ cs4231_sbus_halt_output(void *addr)
 		do {
 			csr = bus_space_read_4(sbsc->sc_bt, sbsc->sc_bh,
 				APC_DMA_CSR);
-#ifdef AUDIO_DEBUG
-			snprintb(bits, sizeof(bits), APC_BITS, csr);
-#endif
-			DPRINTF(("halt_output: csr=%s\n", bits));
+			DPRINTF(("halt_output: csr=%s\n",
+				 bitmask_snprintf(csr, APC_BITS,
+						  bits, sizeof(bits))));
 		} while ((csr & APC_PM) == 0);
 
 	cfg = ad_read(&sc->sc_ad1848, SP_INTERFACE_CONFIG);
@@ -390,10 +382,8 @@ cs4231_sbus_trigger_input(void *addr, void *start, void *end, int blksize,
 		return ret;
 
 	csr = bus_space_read_4(sbsc->sc_bt, sbsc->sc_bh, APC_DMA_CSR);
-#ifdef AUDIO_DEBUG
-	snprintb(bits, sizeof(bits), APC_BITS, csr);
-#endif
-	DPRINTF(("trigger_input: csr=%s\n", bits));
+	DPRINTF(("trigger_input: csr=%s\n",
+		 bitmask_snprintf(csr, APC_BITS, bits, sizeof(bits))));
 	DPRINTF(("trigger_input: was: %x %d, %x %d\n",
 		bus_space_read_4(sbsc->sc_bt, sbsc->sc_bh, APC_DMA_CVA),
 		bus_space_read_4(sbsc->sc_bt, sbsc->sc_bh, APC_DMA_CC),
@@ -429,10 +419,8 @@ cs4231_sbus_trigger_input(void *addr, void *start, void *end, int blksize,
 		ad_write(&sc->sc_ad1848, SP_INTERFACE_CONFIG,
 			 (cfg | CAPTURE_ENABLE));
 	} else {
-#ifdef AUDIO_DEBUG
-		snprintb(bits, sizeof(bits), APC_BITS, csr);
-#endif
-		DPRINTF(("trigger_input: already: csr=%s\n", bits));
+		DPRINTF(("trigger_input: already: csr=%s\n",
+			 bitmask_snprintf(csr, APC_BITS, bits, sizeof(bits))));
 	}
 
 	/* supply next block if we can */
@@ -468,11 +456,8 @@ cs4231_sbus_halt_input(void *addr)
 	sc->sc_capture.t_active = 0;
 
 	csr = bus_space_read_4(sbsc->sc_bt, sbsc->sc_bh, APC_DMA_CSR);
-#ifdef AUDIO_DEBUG
-	snprintb(bits, sizeof(bits), APC_BITS, csr);
-#endif
-	DPRINTF(("halt_input: csr=%s\n", bits));
-		 
+	DPRINTF(("halt_input: csr=%s\n",
+		 bitmask_snprintf(csr, APC_BITS, bits, sizeof(bits))));
 
 	csr &= ~APC_INTR_MASK;	/* do not clear interrupts accidentally */
 	csr |= APC_CPAUSE;
@@ -483,12 +468,9 @@ cs4231_sbus_halt_input(void *addr)
 		do {
 			csr = bus_space_read_4(sbsc->sc_bt, sbsc->sc_bh,
 				APC_DMA_CSR);
-#ifdef AUDIO_DEBUG
-			snprintb(bits, sizeof(bits), APC_BITS, csr);
-#endif
-			DPRINTF(("halt_input: csr=%s\n", bits));
-
-					
+			DPRINTF(("halt_input: csr=%s\n",
+				 bitmask_snprintf(csr, APC_BITS,
+						  bits, sizeof(bits))));
 		} while ((csr & APC_CM) == 0);
 
 	cfg = ad_read(&sc->sc_ad1848, SP_INTERFACE_CONFIG);
@@ -529,19 +511,15 @@ cs4231_sbus_intr(void *arg)
 #endif
 
 	status = ADREAD(&sc->sc_ad1848, AD1848_STATUS);
-#ifdef AUDIO_DEBUG
-	snprintb(bits, sizeof(bits), AD_R2_BITS, status);
-#endif
-	DPRINTF(("%s: status: %s\n", device_xname(&sc->sc_ad1848.sc_dev),
-	    bits));
+	DPRINTF(("%s: status: %s\n", sc->sc_ad1848.sc_dev.dv_xname,
+		bitmask_snprintf(status, AD_R2_BITS, bits, sizeof(bits))));
 	if (status & INTERRUPT_STATUS) {
 #ifdef AUDIO_DEBUG
 		int reason;
 
 		reason = ad_read(&sc->sc_ad1848, CS_IRQ_STATUS);
-		snprintb(bits, sizeof(bits), CS_I24_BITS, reason);
-		DPRINTF(("%s: i24: %s\n", device_xname(&sc->sc_ad1848.sc_dev),
-		    bits));
+		DPRINTF(("%s: i24: %s\n", sc->sc_ad1848.sc_dev.dv_xname,
+		  bitmask_snprintf(reason, CS_I24_BITS, bits, sizeof(bits))));
 #endif
 		/* clear ad1848 interrupt */
 		ADWRITE(&sc->sc_ad1848, AD1848_STATUS, 0);
@@ -558,7 +536,7 @@ cs4231_sbus_intr(void *arg)
 				APC_DMA_CNC, dmasize);
 
 			if (t->t_intr != NULL)
-				sparc_softintr_schedule(sbsc->sc_rint);
+				(*t->t_intr)(t->t_arg);
 			++t->t_intrcnt.ev_count;
 			served = 1;
 		}
@@ -582,7 +560,7 @@ cs4231_sbus_intr(void *arg)
 			}
 
 			if (t->t_intr != NULL)
-				sparc_softintr_schedule(sbsc->sc_pint);
+				(*t->t_intr)(t->t_arg);
 			++t->t_intrcnt.ev_count;
 			served = 1;
 		}
@@ -591,42 +569,13 @@ cs4231_sbus_intr(void *arg)
 	/* got an interrupt we don't know how to handle */
 	if (!served) {
 #ifdef DIAGNOSTIC
-	        snprintb(bits, sizeof(bits), APC_BITS, csr);
-		printf("%s: unhandled csr=%s\n",
-		    device_xname(&sc->sc_ad1848.sc_dev), bits);
+		printf("%s: unhandled csr=%s\n", sc->sc_ad1848.sc_dev.dv_xname,
+		       bitmask_snprintf(csr, APC_BITS, bits, sizeof(bits)));
 #endif
 		/* evcnt? */
 	}
 
 	return 1;
-}
-
-static int
-cs4231_sbus_pint(void *cookie)
-{
-	struct cs4231_softc *sc = cookie;
-	struct cs_transfer *t;
-
-	KERNEL_LOCK(1, NULL);
-	t = &sc->sc_playback;
-	if (t->t_intr != NULL)
-		(*t->t_intr)(t->t_arg);
-	KERNEL_UNLOCK_ONE(NULL);
-	return 0;
-}
-
-static int
-cs4231_sbus_rint(void *cookie)
-{
-	struct cs4231_softc *sc = cookie;
-	struct cs_transfer *t;
-
-	KERNEL_LOCK(1, NULL);
-	t = &sc->sc_capture;
-	if (t->t_intr != NULL)
-		(*t->t_intr)(t->t_arg);
-	KERNEL_UNLOCK_ONE(NULL);
-	return 0;
 }
 
 #endif /* NAUDIO > 0 */

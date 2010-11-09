@@ -1,4 +1,4 @@
-/*	$NetBSD: intio.c,v 1.28 2008/04/28 20:23:19 martin Exp $	*/
+/*	$NetBSD: intio.c,v 1.25 2006/07/20 13:21:38 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1998, 2001 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -34,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: intio.c,v 1.28 2008/04/28 20:23:19 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: intio.c,v 1.25 2006/07/20 13:21:38 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -46,15 +53,15 @@ __KERNEL_RCSID(0, "$NetBSD: intio.c,v 1.28 2008/04/28 20:23:19 martin Exp $");
 #include <hp300/dev/intiovar.h>
 
 struct intio_softc {
-	device_t sc_dev;
+	struct device sc_dev;
 	struct bus_space_tag sc_tag;
 };
 
-static int	intiomatch(device_t, cfdata_t, void *);
-static void	intioattach(device_t, device_t, void *);
+static int	intiomatch(struct device *, struct cfdata *, void *);
+static void	intioattach(struct device *, struct device *, void *);
 static int	intioprint(void *, const char *);
 
-CFATTACH_DECL_NEW(intio, sizeof(struct intio_softc),
+CFATTACH_DECL(intio, sizeof(struct intio_softc),
     intiomatch, intioattach, NULL, NULL);
 
 #if defined(HP320) || defined(HP330) || defined(HP340) || defined(HP345) || \
@@ -93,12 +100,11 @@ static const struct intio_builtins intio_4xx_builtins[] = {
 #endif
 
 static int intio_matched = 0;
-extern void *internalhpib;
+extern caddr_t internalhpib;
 
 static int
-intiomatch(device_t parent, cfdata_t cf, void *aux)
+intiomatch(struct device *parent, struct cfdata *match, void *aux)
 {
-
 	/* Allow only one instance. */
 	if (intio_matched)
 		return 0;
@@ -108,17 +114,16 @@ intiomatch(device_t parent, cfdata_t cf, void *aux)
 }
 
 static void
-intioattach(device_t parent, device_t self, void *aux)
+intioattach(struct device *parent, struct device *self, void *aux)
 {
-	struct intio_softc *sc = device_private(self);
+	struct intio_softc *sc = (struct intio_softc *)self;
 	struct intio_attach_args ia;
 	const struct intio_builtins *ib;
 	bus_space_tag_t bst = &sc->sc_tag;
 	int ndevs;
 	int i;
 
-	sc->sc_dev = self;
-	aprint_normal("\n");
+	printf("\n");
 
 	memset(bst, 0, sizeof(struct bus_space_tag));
 	bst->bustype = HP300_BUS_SPACE_INTIO;

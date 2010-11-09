@@ -1,4 +1,4 @@
-/* $NetBSD: viapcib.c,v 1.11 2008/07/20 16:59:53 martin Exp $ */
+/* $NetBSD: viapcib.c,v 1.6 2006/11/16 01:32:39 christos Exp $ */
 /* $FreeBSD: src/sys/pci/viapm.c,v 1.10 2005/05/29 04:42:29 nyan Exp $ */
 
 /*-
@@ -55,15 +55,15 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: viapcib.c,v 1.11 2008/07/20 16:59:53 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: viapcib.c,v 1.6 2006/11/16 01:32:39 christos Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/proc.h>
-#include <sys/simplelock.h>
-#include <sys/bus.h>
+
+#include <machine/bus.h>
 
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
@@ -72,7 +72,6 @@ __KERNEL_RCSID(0, "$NetBSD: viapcib.c,v 1.11 2008/07/20 16:59:53 martin Exp $");
 #include <dev/i2c/i2cvar.h>
 
 #include <i386/pci/viapcibreg.h>
-#include <x86/pci/pcibvar.h>
 
 /*#define VIAPCIB_DEBUG*/
 
@@ -83,9 +82,7 @@ __KERNEL_RCSID(0, "$NetBSD: viapcib.c,v 1.11 2008/07/20 16:59:53 martin Exp $");
 #endif
 
 struct viapcib_softc {
-	/* we call pcibattach(), which assumes softc starts like this: */
-	struct pcib_softc sc_pcib;
-
+	struct device	sc_dev;
 	bus_space_tag_t	sc_iot;
 	bus_space_handle_t sc_ioh;
 	struct i2c_controller sc_i2c;
@@ -95,8 +92,8 @@ struct viapcib_softc {
 	struct simplelock sc_lock;
 };
 
-static int	viapcib_match(device_t, cfdata_t, void *);
-static void	viapcib_attach(device_t, device_t, void *);
+static int	viapcib_match(struct device *, struct cfdata *, void *);
+static void	viapcib_attach(struct device *, struct device *, void *);
 
 static int	viapcib_clear(struct viapcib_softc *);
 static int	viapcib_busy(struct viapcib_softc *);
@@ -134,13 +131,19 @@ static int      viapcib_smbus_block_read(void *, i2c_addr_t, uint8_t,
 /* XXX Should be moved to smbus layer */
 #define	SMB_MAXBLOCKSIZE	32
 
-CFATTACH_DECL_NEW(viapcib, sizeof(struct viapcib_softc),
-    viapcib_match, viapcib_attach, NULL, NULL);
+/* from arch/i386/pci/pcib.c */
+extern void	pcibattach(struct device *, struct device *, void *);
+
+CFATTACH_DECL(viapcib, sizeof(struct viapcib_softc), viapcib_match,
+    viapcib_attach, NULL, NULL);
 
 static int
-viapcib_match(device_t parent, cfdata_t match, void *opaque)
+viapcib_match(struct device *parent, struct cfdata *match,
+    void *opaque)
 {
-	struct pci_attach_args *pa = opaque;
+	struct pci_attach_args *pa;
+
+	pa = (struct pci_attach_args *)opaque;
 
 	if (PCI_VENDOR(pa->pa_id) != PCI_VENDOR_VIATECH)
 		return 0;
@@ -155,11 +158,14 @@ viapcib_match(device_t parent, cfdata_t match, void *opaque)
 }
 
 static void
-viapcib_attach(device_t parent, device_t self, void *opaque)
+viapcib_attach(struct device *parent, struct device *self, void *opaque)
 {
-	struct viapcib_softc *sc = device_private(self);
-	struct pci_attach_args *pa = opaque;
+	struct viapcib_softc *sc;
+	struct pci_attach_args *pa;
 	pcireg_t addr, val;
+
+	sc = (struct viapcib_softc *)self;
+	pa = (struct pci_attach_args *)opaque;
 
 	/* XXX Only the 8235 is supported for now */
 	sc->sc_iot = pa->pa_iot;
@@ -174,7 +180,7 @@ viapcib_attach(device_t parent, device_t self, void *opaque)
 	simple_lock_init(&sc->sc_lock);
 
 	val = pci_conf_read(pa->pa_pc, pa->pa_tag, SMB_HOST_CONFIG);
-	if ((val & 0x10000) == 0) {
+	if ((val & 1) == 0) {
 		printf(": SMBus is disabled\n");
 		addr = 0;
 		/* XXX We can enable the SMBus here by writing 1 to
@@ -198,7 +204,7 @@ viapcib_attach(device_t parent, device_t self, void *opaque)
 #endif /* !VIAPCIB_DEBUG */
 
 	val = pci_conf_read(pa->pa_pc, pa->pa_tag, SMB_REVISION);
-	sc->sc_revision = val >> 16;
+	sc->sc_revision = val;
 
 core_pcib:
 	pcibattach(parent, self, opaque);
@@ -208,7 +214,7 @@ core_pcib:
 		uint8_t b;
 
 		printf("%s: SMBus found at 0x%x (revision 0x%x)\n",
-		    device_xname(self), addr, sc->sc_revision);
+		    sc->sc_dev.dv_xname, addr, sc->sc_revision);
 		
 		/* Disable slave function */
 		b = viapcib_smbus_read(sc, SMBSLVCNT);
@@ -224,8 +230,10 @@ core_pcib:
 		iba.iba_tag->ic_release_bus = viapcib_release_bus;
 		iba.iba_tag->ic_exec = viapcib_exec;
 
-		config_found_ia(self, "i2cbus", &iba, iicbus_print);
+		config_found_ia(&sc->sc_dev, "i2cbus", &iba, iicbus_print);
 	}
+
+	return;
 }
 
 static int

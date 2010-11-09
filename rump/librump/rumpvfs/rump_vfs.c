@@ -1,4 +1,4 @@
-/*	$NetBSD: rump_vfs.c,v 1.13 2009/02/22 20:28:06 ad Exp $	*/
+/*	$NetBSD: rump_vfs.c,v 1.58 2010/09/07 21:11:10 pooka Exp $	*/
 
 /*
  * Copyright (c) 2008 Antti Kantee.  All Rights Reserved.
@@ -29,21 +29,26 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD");
+__KERNEL_RCSID(0, "$NetBSD: rump_vfs.c,v 1.58 2010/09/07 21:11:10 pooka Exp $");
 
 #include <sys/param.h>
 #include <sys/buf.h>
 #include <sys/conf.h>
+#include <sys/evcnt.h>
 #include <sys/filedesc.h>
+#include <sys/fstrans.h>
 #include <sys/lockf.h>
+#include <sys/kthread.h>
 #include <sys/module.h>
 #include <sys/namei.h>
 #include <sys/queue.h>
+#include <sys/stat.h>
 #include <sys/vfs_syscalls.h>
 #include <sys/vnode.h>
 #include <sys/wapbl.h>
 
 #include <miscfs/specfs/specdev.h>
+#include <miscfs/syncfs/syncfs.h>
 
 #include <rump/rump.h>
 #include <rump/rumpuser.h>
@@ -51,15 +56,8 @@ __KERNEL_RCSID(0, "$NetBSD");
 #include "rump_private.h"
 #include "rump_vfs_private.h"
 
-struct fakeblk {
-	char path[MAXPATHLEN];
-	LIST_ENTRY(fakeblk) entries;
-};
-static LIST_HEAD(, fakeblk) fakeblks = LIST_HEAD_INITIALIZER(fakeblks);
-
-static struct cwdinfo rump_cwdi;
-
-static void rump_rcvp_lwpset(struct vnode *, struct vnode *, struct lwp *);
+struct cwdinfo cwdi0;
+const char *rootfstype = ROOT_FSTYPE_ANY;
 
 static void
 pvfs_init(struct proc *p)
@@ -76,100 +74,107 @@ pvfs_rele(struct proc *p)
 }
 
 void
-rump_vfs_init()
+rump_vfs_init(void)
 {
+	extern struct devsw_conv devsw_conv0[];
+	extern int max_devsw_convs;
+	extern struct vfsops rumpfs_vfsops;
 	char buf[64];
 	int error;
+	int rv, i;
+	extern int dovfsusermount; /* XXX */
 
-	syncdelay = 0;
-	dovfsusermount = 1;
-
-	rumpblk_init();
+	dovfsusermount = 1; /* XXX */
 
 	if (rumpuser_getenv("RUMP_NVNODES", buf, sizeof(buf), &error) == 0) {
 		desiredvnodes = strtoul(buf, NULL, 10);
 	} else {
-		desiredvnodes = 1<<16;
+		desiredvnodes = 1<<10;
 	}
 
-	cache_cpu_init(&rump_cpu);
+	rumpblk_init();
+
+	for (i = 0; i < ncpu; i++) {
+		struct cpu_info *ci = cpu_lookup(i);
+		cache_cpu_init(ci);
+	}
+
+	/* make number of bufpages 5% of total memory limit */
+	if (rump_physmemlimit != RUMPMEM_UNLIMITED) {
+		extern u_int bufpages;
+		bufpages = rump_physmemlimit / (20 * PAGE_SIZE);
+	}
+
 	vfsinit();
 	bufinit();
-	wapbl_init();
 	cwd_sys_init();
 	lf_init();
+	spec_init();
+	fstrans_init();
 
-	rumpuser_bioinit(rump_biodone);
-	rumpfs_init();
+	if (rump_threads) {
+		if ((rv = kthread_create(PRI_BIO, KTHREAD_MPSAFE, NULL,
+		    rumpuser_biothread, rump_biodone, NULL, "rmpabio")) != 0)
+			panic("syncer thread create failed: %d", rv);
+	}
+
+	root_device = &rump_rootdev;
+
+	/* bootstrap cwdi (rest done in vfs_mountroot() */
+	rw_init(&cwdi0.cwdi_lock);
+	proc0.p_cwdi = &cwdi0;
+	proc0.p_cwdi = cwdinit();
+
+	vfs_attach(&rumpfs_vfsops);
+	vfs_mountroot();
+
+	/* "mtree": create /dev */
+	do_sys_mkdir("/dev", 0777, UIO_SYSSPACE);
+	rump_devnull_init();
 
 	rump_proc_vfs_init = pvfs_init;
 	rump_proc_vfs_release = pvfs_rele;
 
-	rw_init(&rump_cwdi.cwdi_lock);
-	rump_cwdi.cwdi_cdir = rootvnode;
-	vref(rump_cwdi.cwdi_cdir);
-	proc0.p_cwdi = &rump_cwdi;
-}
-
-struct mount *
-rump_mnt_init(struct vfsops *vfsops, int mntflags)
-{
-	struct mount *mp;
-
-	mp = kmem_zalloc(sizeof(struct mount), KM_SLEEP);
-
-	mp->mnt_op = vfsops;
-	mp->mnt_flag = mntflags;
-	TAILQ_INIT(&mp->mnt_vnodelist);
-	rw_init(&mp->mnt_unmounting);
-	mutex_init(&mp->mnt_updating, MUTEX_DEFAULT, IPL_NONE);
-	mutex_init(&mp->mnt_renamelock, MUTEX_DEFAULT, IPL_NONE);
-	mp->mnt_refcnt = 1;
-	mp->mnt_vnodecovered = rootvnode;
-
-	mount_initspecific(mp);
-
-	return mp;
-}
-
-int
-rump_mnt_mount(struct mount *mp, const char *path, void *data, size_t *dlen)
-{
-	struct vnode *rvp;
-	int rv;
-
-	rv = VFS_MOUNT(mp, path, data, dlen);
-	if (rv)
-		return rv;
-
-	(void) VFS_STATVFS(mp, &mp->mnt_stat);
-	rv = VFS_START(mp, 0);
-	if (rv)
-		VFS_UNMOUNT(mp, MNT_FORCE);
+	if (rump_threads) {
+		if ((rv = kthread_create(PRI_IOFLUSH, KTHREAD_MPSAFE, NULL,
+		    sched_sync, NULL, NULL, "ioflush")) != 0)
+			panic("syncer thread create failed: %d", rv);
+	} else {
+		syncdelay = 0;
+	}
 
 	/*
-	 * XXX: set a root for lwp0.  This is strictly not correct,
-	 * but makes things work for single fs case without having
-	 * to manually call rump_rcvp_set().
+	 * On archs where the native kernel ABI is supported, map
+	 * host module directory to rump.  This means that kernel
+	 * modules from the host will be autoloaded to rump kernels.
 	 */
-	VFS_ROOT(mp, &rvp);
-	rump_rcvp_lwpset(rvp, rvp, &lwp0);
-	vput(rvp);
+#ifdef _RUMP_NATIVE_ABI
+	{
+	char *mbase;
 
-	return rv;
+	if (rumpuser_getenv("RUMP_MODULEBASE", buf, sizeof(buf), &error) == 0)
+		mbase = buf;
+	else
+		mbase = module_base;
+
+	if (strlen(mbase) != 0 && *mbase != '0') {
+		rump_etfs_register(module_base, mbase, RUMP_ETFS_DIR_SUBDIRS);
+	}
+	}
+#endif
+
+	module_init_class(MODULE_CLASS_VFS);
+
+	rump_vfs_builddevs(devsw_conv0, max_devsw_convs);
+
+	rump_component_init(RUMP_COMPONENT_VFS);
 }
 
 void
-rump_mnt_destroy(struct mount *mp)
+rump_vfs_fini(void)
 {
 
-	/* See rcvp XXX above */
-	rump_cwdi.cwdi_rdir = NULL;
-	vref(rootvnode);
-	rump_cwdi.cwdi_cdir = rootvnode;
-
-	mount_finispecific(mp);
-	kmem_free(mp, sizeof(*mp));
+	vfs_shutdown();
 }
 
 struct componentname *
@@ -182,7 +187,7 @@ rump_makecn(u_long nameiop, u_long flags, const char *name, size_t namelen,
 	cnp = kmem_zalloc(sizeof(struct componentname), KM_SLEEP);
 
 	cnp->cn_nameiop = nameiop;
-	cnp->cn_flags = flags | HASBUF;
+	cnp->cn_flags = flags;
 
 	cnp->cn_pnbuf = PNBUF_GET();
 	strcpy(cnp->cn_pnbuf, name);
@@ -200,17 +205,23 @@ rump_freecn(struct componentname *cnp, int flags)
 {
 
 	if (flags & RUMPCN_FREECRED)
-		rump_cred_destroy(cnp->cn_cred);
+		rump_cred_put(cnp->cn_cred);
 
-	if ((flags & RUMPCN_HASNTBUF) == 0) {
-		if (cnp->cn_flags & SAVENAME) {
-			if (flags & RUMPCN_ISLOOKUP ||cnp->cn_flags & SAVESTART)
-				PNBUF_PUT(cnp->cn_pnbuf);
-		} else {
-			PNBUF_PUT(cnp->cn_pnbuf);
-		}
-	}
+	if ((cnp->cn_flags & SAVENAME) == 0 || flags & RUMPCN_FORCEFREE)
+		PNBUF_PUT(cnp->cn_pnbuf);
 	kmem_free(cnp, sizeof(*cnp));
+}
+
+int
+rump_checksavecn(struct componentname *cnp)
+{
+
+	if ((cnp->cn_flags & (SAVENAME | SAVESTART)) == 0) {
+		return 0;
+	} else {
+		cnp->cn_flags |= HASBUF;
+		return 1;
+	}
 }
 
 /* hey baby, what's your namei? */
@@ -257,68 +268,9 @@ rump_namei(uint32_t op, uint32_t flags, const char *namep,
 	return rv;
 }
 
-static struct fakeblk *
-_rump_fakeblk_find(const char *path)
-{
-	char buf[MAXPATHLEN];
-	struct fakeblk *fblk;
-	int error;
-
-	if (rumpuser_realpath(path, buf, &error) == NULL)
-		return NULL;
-
-	LIST_FOREACH(fblk, &fakeblks, entries)
-		if (strcmp(fblk->path, buf) == 0)
-			return fblk;
-
-	return NULL;
-}
-
-int
-rump_fakeblk_register(const char *path)
-{
-	char buf[MAXPATHLEN];
-	struct fakeblk *fblk;
-	int error;
-
-	if (_rump_fakeblk_find(path))
-		return EEXIST;
-
-	if (rumpuser_realpath(path, buf, &error) == NULL)
-		return error;
-
-	fblk = kmem_alloc(sizeof(struct fakeblk), KM_NOSLEEP);
-	if (fblk == NULL)
-		return ENOMEM;
-
-	strlcpy(fblk->path, buf, MAXPATHLEN);
-	LIST_INSERT_HEAD(&fakeblks, fblk, entries);
-
-	return 0;
-}
-
-int
-rump_fakeblk_find(const char *path)
-{
-
-	return _rump_fakeblk_find(path) != NULL;
-}
-
 void
-rump_fakeblk_deregister(const char *path)
-{
-	struct fakeblk *fblk;
-
-	fblk = _rump_fakeblk_find(path);
-	if (fblk == NULL)
-		return;
-
-	LIST_REMOVE(fblk, entries);
-	kmem_free(fblk, sizeof(*fblk));
-}
-
-void
-rump_getvninfo(struct vnode *vp, enum vtype *vtype, voff_t *vsize, dev_t *vdev)
+rump_getvninfo(struct vnode *vp, enum vtype *vtype,
+	voff_t *vsize, dev_t *vdev)
 {
 
 	*vtype = vp->v_type;
@@ -346,8 +298,22 @@ rump_vfs_getopsbyname(const char *name)
 	return vfs_getopsbyname(name);
 }
 
+int
+rump_vfs_getmp(const char *path, struct mount **mpp)
+{
+	struct vnode *vp;
+	int rv;
+
+	if ((rv = namei_simple_user(path, NSM_FOLLOW_TRYEMULROOT, &vp)) != 0)
+		return rv;
+
+	*mpp = vp->v_mount;
+	vrele(vp);
+	return 0;
+}
+
 struct vattr*
-rump_vattr_init()
+rump_vattr_init(void)
 {
 	struct vattr *vap;
 
@@ -389,9 +355,7 @@ void
 rump_vp_incref(struct vnode *vp)
 {
 
-	mutex_enter(&vp->v_interlock);
-	++vp->v_usecount;
-	mutex_exit(&vp->v_interlock);
+	vref(vp);
 }
 
 int
@@ -399,40 +363,6 @@ rump_vp_getref(struct vnode *vp)
 {
 
 	return vp->v_usecount;
-}
-
-void
-rump_vp_decref(struct vnode *vp)
-{
-
-	mutex_enter(&vp->v_interlock);
-	--vp->v_usecount;
-	mutex_exit(&vp->v_interlock);
-}
-
-/*
- * Really really recycle with a cherry on top.  We should be
- * extra-sure we can do this.  For example with p2k there is
- * no problem, since puffs in the kernel takes care of refcounting
- * for us.
- */
-void
-rump_vp_recycle_nokidding(struct vnode *vp)
-{
-
-	mutex_enter(&vp->v_interlock);
-	vp->v_usecount = 1;
-	/*
-	 * XXX: NFS holds a reference to the root vnode, so don't clean
-	 * it out.  This is very wrong, but fixing it properly would
-	 * take too much effort for now
-	 */
-	if (vp->v_tag == VT_NFS && vp->v_vflag & VV_ROOT) {
-		mutex_exit(&vp->v_interlock);
-		return;
-	}
-	vclean(vp, DOCLOSE);
-	vrelel(vp, 0);
 }
 
 void
@@ -466,7 +396,7 @@ rump_vfs_root(struct mount *mp, struct vnode **vpp, int lock)
 		return rv;
 
 	if (!lock)
-		VOP_UNLOCK(*vpp, 0);
+		VOP_UNLOCK(*vpp);
 
 	return 0;
 }
@@ -499,6 +429,14 @@ rump_vfs_vptofh(struct vnode *vp, struct fid *fid, size_t *fidsize)
 	return VFS_VPTOFH(vp, fid, fidsize);
 }
 
+int
+rump_vfs_extattrctl(struct mount *mp, int cmd, struct vnode *vp,
+	int attrnamespace, const char *attrname)
+{
+
+	return VFS_EXTATTRCTL(mp, cmd, vp, attrnamespace, attrname);
+}
+
 /*ARGSUSED*/
 void
 rump_vfs_syncwait(struct mount *mp)
@@ -508,6 +446,36 @@ rump_vfs_syncwait(struct mount *mp)
 	n = buf_syncwait();
 	if (n)
 		printf("syncwait: unsynced buffers: %d\n", n);
+}
+
+/*
+ * Dump info about mount point.  No locking.
+ */
+void
+rump_vfs_mount_print(const char *path, int full)
+{
+#ifdef DEBUGPRINT
+	struct vnode *mvp;
+	struct vnode *vp;
+	int error;
+
+	rumpuser_dprintf("\n==== dumping mountpoint at ``%s'' ====\n\n", path);
+	if ((error = namei_simple_user(path, NSM_FOLLOW_NOEMULROOT, &mvp))!=0) {
+		rumpuser_dprintf("==== lookup error %d ====\n\n", error);
+		return;
+	}
+	vfs_mount_print(mvp->v_mount, full, (void *)rumpuser_dprintf);
+	if (full) {
+		rumpuser_dprintf("\n== dumping vnodes ==\n\n");
+		TAILQ_FOREACH(vp, &mvp->v_mount->mnt_vnodelist, v_mntvnodes) {
+			vfs_vnode_print(vp, full, (void *)rumpuser_dprintf);
+		}
+	}
+	vrele(mvp);
+	rumpuser_dprintf("\n==== done ====\n\n");
+#else
+	rumpuser_dprintf("mount dump not supported without DEBUGPRINT\n");
+#endif
 }
 
 void
@@ -522,43 +490,11 @@ rump_biodone(void *arg, size_t count, int error)
 	biodone(bp);
 }
 
-static void
-rump_rcvp_lwpset(struct vnode *rvp, struct vnode *cvp, struct lwp *l)
-{
-	struct cwdinfo *cwdi = l->l_proc->p_cwdi;
-
-	KASSERT(cvp);
-
-	rw_enter(&cwdi->cwdi_lock, RW_WRITER);
-	if (cwdi->cwdi_rdir)
-		vrele(cwdi->cwdi_rdir);
-	if (rvp)
-		vref(rvp);
-	cwdi->cwdi_rdir = rvp;
-
-	vrele(cwdi->cwdi_cdir);
-	vref(cvp);
-	cwdi->cwdi_cdir = cvp;
-	rw_exit(&cwdi->cwdi_lock);
-}
-
 void
-rump_rcvp_set(struct vnode *rvp, struct vnode *cvp)
+rump_vfs_drainbufs(int npages)
 {
 
-	rump_rcvp_lwpset(rvp, cvp, curlwp);
-}
-
-struct vnode *
-rump_cdir_get()
-{
-	struct vnode *vp;
-	struct cwdinfo *cwdi = curlwp->l_proc->p_cwdi;
-
-	rw_enter(&cwdi->cwdi_lock, RW_READER);
-	vp = cwdi->cwdi_cdir;
-	rw_exit(&cwdi->cwdi_lock);
-	vref(vp);
-
-	return vp;
+	mutex_enter(&bufcache_lock);
+	buf_drain(npages);
+	mutex_exit(&bufcache_lock);
 }

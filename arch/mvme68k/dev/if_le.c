@@ -1,4 +1,4 @@
-/*	$NetBSD: if_le.c,v 1.35 2008/04/28 20:23:29 martin Exp $	*/
+/*	$NetBSD: if_le.c,v 1.31 2005/12/11 12:18:17 christos Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -64,7 +71,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_le.c,v 1.35 2008/04/28 20:23:29 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_le.c,v 1.31 2005/12/11 12:18:17 christos Exp $");
 
 #include "opt_inet.h"
 #include "bpfilter.h"
@@ -102,13 +109,14 @@ __KERNEL_RCSID(0, "$NetBSD: if_le.c,v 1.35 2008/04/28 20:23:29 martin Exp $");
 #include <mvme68k/dev/if_lereg.h>
 #include <mvme68k/dev/if_levar.h>
 
-#include "ioconf.h"
 
-int le_pcc_match(device_t, cfdata_t, void *);
-void le_pcc_attach(device_t, device_t, void *);
+int le_pcc_match __P((struct device *, struct cfdata *, void *));
+void le_pcc_attach __P((struct device *, struct device *, void *));
 
-CFATTACH_DECL_NEW(le_pcc, sizeof(struct le_softc),
+CFATTACH_DECL(le_pcc, sizeof(struct le_softc),
     le_pcc_match, le_pcc_attach, NULL, NULL);
+
+extern struct cfdriver le_cd;
 
 #if defined(_KERNEL_OPT)
 #include "opt_ddb.h"
@@ -120,45 +128,56 @@ CFATTACH_DECL_NEW(le_pcc, sizeof(struct le_softc),
 #define hide	static
 #endif
 
-hide void le_pcc_wrcsr(struct lance_softc *, uint16_t, uint16_t);
-hide uint16_t le_pcc_rdcsr(struct lance_softc *, uint16_t);
+hide void le_pcc_wrcsr __P((struct lance_softc *, u_int16_t, u_int16_t));
+hide u_int16_t le_pcc_rdcsr __P((struct lance_softc *, u_int16_t));
 
 hide void
-le_pcc_wrcsr(struct lance_softc *sc, uint16_t port, uint16_t val)
+le_pcc_wrcsr(sc, port, val)
+	struct lance_softc *sc;
+	u_int16_t port;
+	u_int16_t val;
 {
 	struct le_softc *lsc;
 
-	lsc = (struct le_softc *)sc;
+	lsc = (struct le_softc *) sc;
 	bus_space_write_2(lsc->sc_bust, lsc->sc_bush, LEPCC_RAP, port);
 	bus_space_write_2(lsc->sc_bust, lsc->sc_bush, LEPCC_RDP, val);
 }
 
-hide uint16_t
-le_pcc_rdcsr(struct lance_softc *sc, uint16_t port)
+hide u_int16_t
+le_pcc_rdcsr(sc, port)
+	struct lance_softc *sc;
+	u_int16_t port;
 {
 	struct le_softc *lsc;
 
-	lsc = (struct le_softc *)sc;
+	lsc = (struct le_softc *) sc;
 	bus_space_write_2(lsc->sc_bust, lsc->sc_bush, LEPCC_RAP, port);
-	return bus_space_read_2(lsc->sc_bust, lsc->sc_bush, LEPCC_RDP);
+	return (bus_space_read_2(lsc->sc_bust, lsc->sc_bush, LEPCC_RDP));
 }
 
 /* ARGSUSED */
 int
-le_pcc_match(device_t parent, cfdata_t cf, void *aux)
+le_pcc_match(parent, cf, aux)
+	struct device *parent;
+	struct cfdata *cf;
+	void *aux;
 {
 	struct pcc_attach_args *pa = aux;
 
 	if (strcmp(pa->pa_name, le_cd.cd_name))
-		return 0;
+		return (0);
 
 	pa->pa_ipl = cf->pcccf_ipl;
-	return 1;
+	return (1);
 }
 
 /* ARGSUSED */
 void
-le_pcc_attach(device_t parent, device_t self, void *aux)
+le_pcc_attach(parent, self, aux)
+	struct device *parent;
+	struct device *self;
+	void *aux;
 {
 	struct le_softc *lsc;
 	struct lance_softc *sc;
@@ -166,9 +185,8 @@ le_pcc_attach(device_t parent, device_t self, void *aux)
 	bus_dma_segment_t seg;
 	int rseg;
 
-	lsc = device_private(self);
+	lsc = (struct le_softc *) self;
 	sc = &lsc->sc_am7990.lsc;
-	sc->sc_dev = self;
 	pa = aux;
 
 	/* Map control registers. */
@@ -179,12 +197,12 @@ le_pcc_attach(device_t parent, device_t self, void *aux)
 	if (bus_dmamem_alloc(pa->pa_dmat, ether_data_buff_size, PAGE_SIZE, 0,
 	    &seg, 1, &rseg,
 	    BUS_DMA_NOWAIT | BUS_DMA_ONBOARD_RAM | BUS_DMA_24BIT)) {
-		aprint_error(": Failed to allocate ether buffer\n");
+		printf("%s: Failed to allocate ether buffer\n", self->dv_xname);
 		return;
 	}
 	if (bus_dmamem_map(pa->pa_dmat, &seg, rseg, ether_data_buff_size,
-	    (void **)&sc->sc_mem, BUS_DMA_NOWAIT | BUS_DMA_COHERENT)) {
-		aprint_error(": Failed to map ether buffer\n");
+	    (caddr_t *) & sc->sc_mem, BUS_DMA_NOWAIT | BUS_DMA_COHERENT)) {
+		printf("%s: Failed to map ether buffer\n", self->dv_xname);
 		bus_dmamem_free(pa->pa_dmat, &seg, rseg);
 		return;
 	}
@@ -207,7 +225,7 @@ le_pcc_attach(device_t parent, device_t self, void *aux)
 	am7990_config(&lsc->sc_am7990);
 
 	evcnt_attach_dynamic(&lsc->sc_evcnt, EVCNT_TYPE_INTR,
-	    pccintr_evcnt(pa->pa_ipl), "ether", device_xname(self));
+	    pccintr_evcnt(pa->pa_ipl), "ether", sc->sc_dev.dv_xname);
 
 	pccintr_establish(PCCV_LE, am7990_intr, pa->pa_ipl, sc, &lsc->sc_evcnt);
 

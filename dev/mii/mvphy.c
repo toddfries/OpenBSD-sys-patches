@@ -1,4 +1,4 @@
-/*	$NetBSD: mvphy.c,v 1.8 2008/11/17 03:04:27 dyoung Exp $	*/
+/*	$NetBSD: mvphy.c,v 1.3 2007/02/17 23:23:38 jmcneill Exp $	*/
 
 /*-
  * Copyright (c) 2006 Sam Leffler, Errno Consulting
@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mvphy.c,v 1.8 2008/11/17 03:04:27 dyoung Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mvphy.c,v 1.3 2007/02/17 23:23:38 jmcneill Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -71,10 +71,10 @@ __KERNEL_RCSID(0, "$NetBSD: mvphy.c,v 1.8 2008/11/17 03:04:27 dyoung Exp $");
 #define	SM(_v, _f)	(((_v) << _f##_S) & _f)
 #define	MS(_v, _f)	(((_v) & _f) >> _f##_S)
 
-static int	mvphymatch(device_t, cfdata_t, void *);
-static void	mvphyattach(device_t, device_t, void *);
+static int	mvphymatch(struct device *, struct cfdata *, void *);
+static void	mvphyattach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(mvphy, sizeof(struct mii_softc),
+CFATTACH_DECL(mvphy, sizeof(struct mii_softc),
     mvphymatch, mvphyattach, mii_phy_detach, mii_phy_activate);
 
 static int	mvphy_service(struct mii_softc *, struct mii_data *, int);
@@ -164,7 +164,7 @@ static void mvphy_switchconfig(struct mii_softc *, int);
 static void mvphy_flushatu(struct mii_softc *);
 
 static int
-mvphymatch(device_t parent, cfdata_t match, void *aux)
+mvphymatch(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct mii_attach_args *ma = aux;
 
@@ -175,7 +175,7 @@ mvphymatch(device_t parent, cfdata_t match, void *aux)
 }
 
 static void
-mvphyattach(device_t parent, device_t self, void *aux)
+mvphyattach(struct device *parent, struct device *self, void *aux)
 {
 	struct mii_softc *sc = device_private(self);
 	struct mii_attach_args *ma = aux;
@@ -186,7 +186,6 @@ mvphyattach(device_t parent, device_t self, void *aux)
 	aprint_naive(": Media interface\n");
 	aprint_normal(": %s, rev. %d\n", mpd->mpd_name, MII_REV(ma->mii_id2));
 
-	sc->mii_dev = self;
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
 	sc->mii_funcs = &mvphy_funcs;
@@ -207,7 +206,7 @@ mvphyattach(device_t parent, device_t self, void *aux)
 	PHY_RESET(sc);
 
 	sc->mii_capabilities = PHY_READ(sc, MII_BMSR) & ma->mii_capmask;
-	aprint_normal_dev(self, "");
+	aprint_normal("%s: ", sc->mii_dev.dv_xname);
 	if ((sc->mii_capabilities & BMSR_MEDIAMASK) == 0)
 		aprint_error("no media present");
 	else
@@ -219,6 +218,9 @@ static int
 mvphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 {
 	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
+
+	if (!device_is_active(&sc->mii_dev))
+		return (ENXIO);
 
 	switch (cmd) {
 	case MII_POLLSTAT:
@@ -347,5 +349,5 @@ mvphy_flushatu(struct mii_softc *sc)
 		    MV_ATU_OP_FLUSH_ALL | MV_ATU_BUSY);
 	} /*else
 		printf("%s: timeout waiting for ATU flush\n",
-		    device_xname(sc->mii_dev));*/
+		    sc->mii_dev.dv_xname);*/
 }

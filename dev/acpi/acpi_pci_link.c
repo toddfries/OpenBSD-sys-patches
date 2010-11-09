@@ -1,4 +1,4 @@
-/*	$NetBSD: acpi_pci_link.c,v 1.14 2008/11/17 23:29:49 joerg Exp $	*/
+/*	$NetBSD: acpi_pci_link.c,v 1.9 2007/11/07 15:29:15 joerg Exp $	*/
 
 /*-
  * Copyright (c) 2002 Mitsuru IWASAKI <iwasaki@jp.freebsd.org>
@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: acpi_pci_link.c,v 1.14 2008/11/17 23:29:49 joerg Exp $");
+__KERNEL_RCSID(0, "$NetBSD: acpi_pci_link.c,v 1.9 2007/11/07 15:29:15 joerg Exp $");
 
 #include "opt_acpi.h"
 #include <sys/param.h>
@@ -91,6 +91,7 @@ struct acpi_pci_link_softc {
 	struct link *pl_links;
 	char pl_name[32];
 	ACPI_HANDLE pl_handle;
+	void *pl_powerhook;
 	TAILQ_ENTRY(acpi_pci_link_softc) pl_list;
 };
 
@@ -141,6 +142,7 @@ static void acpi_pci_link_dump(struct acpi_pci_link_softc *);
 static int acpi_pci_link_attach(struct acpi_pci_link_softc *);
 static uint8_t acpi_pci_link_search_irq(struct acpi_pci_link_softc *, int, int,
 					int);
+static void acpi_pci_link_resume(int, void *);
 static struct link *acpi_pci_link_lookup(struct acpi_pci_link_softc *, int);
 static ACPI_STATUS acpi_pci_link_srs(struct acpi_pci_link_softc *,
 				     ACPI_BUFFER *);
@@ -227,7 +229,7 @@ link_add_crs(ACPI_RESOURCE *res, void *context)
 				link->l_irq = res->Data.Irq.Interrupts[0];
 				link->l_trig = res->Data.Irq.Triggering;
 				link->l_pol = res->Data.Irq.Polarity;
-			}
+		}
 		} else if (res->Data.ExtendedIrq.InterruptCount == 1) {
 			link->l_irq = res->Data.ExtendedIrq.Interrupts[0];
 			link->l_trig = res->Data.ExtendedIrq.Triggering;
@@ -382,7 +384,7 @@ link_valid_irq(struct link *link, int irq)
 	 * For links routed via an ISA interrupt, if the SCI is routed via
 	 * an ISA interrupt, the SCI is always treated as a valid IRQ.
 	 */
-	if (link->l_isa_irq && AcpiGbl_FADT.SciInterrupt == irq &&
+	if (link->l_isa_irq && AcpiGbl_FADT->SciInt == irq &&
 	    irq < NUM_ISA_INTERRUPTS)
 		return (TRUE);
 
@@ -970,6 +972,23 @@ acpi_pci_link_route_irqs(struct acpi_pci_link_softc *sc, int *irq, int *pol,
 	return (AE_OK);
 }
 
+static void
+acpi_pci_link_resume(int why, void *arg)
+{
+	struct acpi_pci_link_softc *sc = arg;
+	ACPI_BUFFER srsbuf;
+
+	switch (why) {
+	case PWR_RESUME:
+		ACPI_SERIAL_BEGIN(pci_link);
+		if (ACPI_SUCCESS(acpi_pci_link_srs(sc, &srsbuf)))
+			AcpiOsFree(srsbuf.Pointer);
+		ACPI_SERIAL_END(pci_link);
+	default:
+		break;
+	}
+}
+
 /*
  * Pick an IRQ to use for this unrouted link.
  */
@@ -1020,7 +1039,7 @@ acpi_pci_link_choose_irq(struct acpi_pci_link_softc *sc, struct link *link)
 	 * interrupt as a fallback.
 	 */
 	if (link->l_isa_irq && !PCI_INTERRUPT_VALID(best_irq)) {
-		pos_irq = AcpiGbl_FADT.SciInterrupt;
+		pos_irq = AcpiGbl_FADT->SciInt;
 		pos_weight = pci_link_interrupt_weights[pos_irq];
 		if (pos_weight < best_weight) {
 			best_weight = pos_weight;
@@ -1063,12 +1082,8 @@ acpi_pci_link_route_interrupt(void *v, int index, int *irq, int *pol, int *trig)
 	}
 
 	/* Choose an IRQ if we need one. */
-	if (PCI_INTERRUPT_VALID(link->l_irq)) {
-		*irq = link->l_irq;
-		*pol = link->l_pol;
-		*trig = link->l_trig;
+	if (PCI_INTERRUPT_VALID(link->l_irq))
 		goto done;
-	}
 
 	link->l_irq = acpi_pci_link_choose_irq(sc, link);
 
@@ -1110,6 +1125,7 @@ static void
 acpi_pci_link_init(struct acpi_pci_link_softc *sc)
 {
 	ACPI_BUFFER buf;
+	char acpipcilinkname[] = "acpi_pci_link";
 
 	/*
 	 * If the SCI is an ISA IRQ, add it to the bitmask of known good
@@ -1120,8 +1136,13 @@ acpi_pci_link_init(struct acpi_pci_link_softc *sc)
 	 * if we are using the APIC, we also shouldn't be having any PCI
 	 * interrupts routed via ISA IRQs, so this is probably ok.
 	 */
-	if (AcpiGbl_FADT.SciInterrupt < NUM_ISA_INTERRUPTS)
-		pci_link_bios_isa_irqs |= (1 << AcpiGbl_FADT.SciInterrupt);
+	if (AcpiGbl_FADT->SciInt < NUM_ISA_INTERRUPTS)
+		pci_link_bios_isa_irqs |= (1 << AcpiGbl_FADT->SciInt);
+
+        sc->pl_powerhook = powerhook_establish(acpipcilinkname,
+	    acpi_pci_link_resume, sc);
+        if (sc->pl_powerhook == NULL)
+                aprint_normal("can't establish powerhook\n");
 
 	buf.Length = sizeof (sc->pl_name);
 	buf.Pointer = sc->pl_name;
@@ -1154,20 +1175,6 @@ acpi_pci_link_devbyhandle(ACPI_HANDLE handle)
 	TAILQ_INSERT_TAIL(&acpi_pci_linkdevs, sc, pl_list);
 
 	return (void *)sc;
-}
-
-void
-acpi_pci_link_resume(void)
-{
-	struct acpi_pci_link_softc *sc;
-	ACPI_BUFFER srsbuf;
-
-	TAILQ_FOREACH(sc, &acpi_pci_linkdevs, pl_list) {
-		ACPI_SERIAL_BEGIN(pci_link);
-		if (ACPI_SUCCESS(acpi_pci_link_srs(sc, &srsbuf)))
-			AcpiOsFree(srsbuf.Pointer);
-		ACPI_SERIAL_END(pci_link);
-	}
 }
 
 ACPI_HANDLE

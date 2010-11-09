@@ -1,20 +1,22 @@
-#	$NetBSD: files.sandpoint,v 1.25 2008/04/09 01:56:19 nisimura Exp $
+#	$NetBSD: files.sandpoint,v 1.19 2006/09/15 16:03:14 gdamore Exp $
 #
-# Motorola's "SandPoint" evaluation board and multiplied descendents.
+# Motorola's "SandPoint" evaluation board's specific configuration info
 #
 maxpartitions 16
 
 maxusers 2 8 64
 
-include "arch/powerpc/pic/files.pic"
-
-file	arch/sandpoint/sandpoint/machdep.c
 file	arch/sandpoint/sandpoint/autoconf.c
+file	arch/sandpoint/sandpoint/clock.c
+file	arch/sandpoint/sandpoint/disksubr.c		disk
+file	arch/sandpoint/sandpoint/extintr.c
+file	arch/sandpoint/sandpoint/machdep.c
+
 file	arch/powerpc/powerpc/bus_dma.c
 file	arch/powerpc/powerpc/bus_space.c
-file	arch/powerpc/powerpc/procfs_machdep.c	procfs
-file	arch/powerpc/powerpc/clock.c
-file	kern/subr_disk_mbr.c			disk
+file	arch/powerpc/powerpc/procfs_machdep.c		procfs
+
+# General files
 file	dev/cons.c
 
 #
@@ -43,15 +45,6 @@ device	cpu
 attach	cpu at mainbus
 file	arch/sandpoint/sandpoint/mainbus.c	mainbus|cpu needs-flag
 
-device eumb { [ unit = -1 ] }: mainbus
-attach eumb at mainbus
-file	arch/sandpoint/sandpoint/eumb.c		eumb
-attach com at eumb with com_eumb
-file	arch/sandpoint/sandpoint/com_eumb.c	com_eumb needs-flag
-device	ociic: i2cbus, i2cexec
-attach ociic at eumb with iic_eumb
-file	arch/sandpoint/sandpoint/iic_eumb.c	iic_eumb
-
 #
 # PCI-only drivers
 # XXX MUST BE INCLUDED BEFORE files.isa, as long as files.isa attaches
@@ -59,31 +52,32 @@ file	arch/sandpoint/sandpoint/iic_eumb.c	iic_eumb
 #
 include "dev/i2o/files.i2o"
 include "dev/pci/files.pci"
-include "dev/pci/files.agp"
 file	arch/sandpoint/pci/pci_machdep.c	pci
 
 # PCI-Host bridge chipsets
 device	pchb: pcibus
 attach	pchb at pci
-file	arch/powerpc/pci/pchb.c			pchb
+file	arch/sandpoint/pci/pchb.c		pchb
 
 # PCI-ISA bridges
 device	pcib: isabus
 attach	pcib at pci
-file	arch/powerpc/pci/pcib.c			pcib needs-flag
-
-file	arch/sandpoint/pci/pciide_machdep.c	pciide_common
+file	arch/sandpoint/pci/pcib.c		pcib
 
 #
 # ISA and mixed ISA+PCI drivers
 #
 
 include "dev/isa/files.isa"
-file	arch/powerpc/isa/isa_machdep_common.c	isa
-file	arch/powerpc/isa/isadma_machdep.c	isa
+
+file	arch/sandpoint/isa/isa_machdep.c	isa
+file	arch/sandpoint/isa/isadma_machdep.c	isa
 
 # PC clock
 file	arch/sandpoint/isa/isaclock.c		isa
+
+include	"dev/wscons/files.wscons"
+include	"dev/wsfont/files.wsfont"
 
 include "dev/pckbport/files.pckbport"
 
@@ -102,6 +96,4 @@ file	dev/isa/fdc_isa.c		fdc_isa
 device	fd: disk
 attach	fd at fdc
 
-include	"dev/usb/files.usb"
-
-include "arch/powerpc/conf/majors.powerpc"
+include "arch/sandpoint/conf/majors.sandpoint"

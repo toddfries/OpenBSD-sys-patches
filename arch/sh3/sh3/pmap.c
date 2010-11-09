@@ -1,4 +1,4 @@
-/*	$NetBSD: pmap.c,v 1.70 2009/01/23 16:46:51 uwe Exp $	*/
+/*	$NetBSD: pmap.c,v 1.58 2006/11/18 14:25:39 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: pmap.c,v 1.70 2009/01/23 16:46:51 uwe Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pmap.c,v 1.58 2006/11/18 14:25:39 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -57,13 +64,9 @@ __KERNEL_RCSID(0, "$NetBSD: pmap.c,v 1.70 2009/01/23 16:46:51 uwe Exp $");
 #define	__PMAP_PTP_OFSET(va)	((va >> PGSHIFT) & (__PMAP_PTP_PG_N - 1))
 
 struct pmap __pmap_kernel;
-struct pmap *const kernel_pmap_ptr = &__pmap_kernel;
 STATIC vaddr_t __pmap_kve;	/* VA of last kernel virtual */
 paddr_t avail_start;		/* PA of first available physical page */
 paddr_t avail_end;		/* PA of last available physical page */
-
-/* For the fast tlb miss handler */
-pt_entry_t **curptd;		/* p1 va of curlwp->...->pm_ptp */
 
 /* pmap pool */
 STATIC struct pool __pmap_pmap_pool;
@@ -97,7 +100,7 @@ STATIC struct {
 STATIC pt_entry_t *__pmap_pte_alloc(pmap_t, vaddr_t);
 
 /* pmap_enter util */
-STATIC bool __pmap_map_change(pmap_t, vaddr_t, paddr_t, vm_prot_t,
+STATIC boolean_t __pmap_map_change(pmap_t, vaddr_t, paddr_t, vm_prot_t,
     pt_entry_t);
 
 void
@@ -105,7 +108,7 @@ pmap_bootstrap()
 {
 
 	/* Steal msgbuf area */
-	initmsgbuf((void *)uvm_pageboot_alloc(MSGBUFSIZE), MSGBUFSIZE);
+	initmsgbuf((caddr_t)uvm_pageboot_alloc(MSGBUFSIZE), MSGBUFSIZE);
 
 	avail_start = ptoa(vm_physmem[0].start);
 	avail_end = ptoa(vm_physmem[vm_nphysseg - 1].end);
@@ -156,7 +159,7 @@ pmap_steal_memory(vsize_t size, vaddr_t *vstart, vaddr_t *vend)
 	}
 
 	va = SH3_PHYS_TO_P1SEG(pa);
-	memset((void *)va, 0, size);
+	memset((caddr_t)va, 0, size);
 
 	return (va);
 }
@@ -215,9 +218,9 @@ pmap_init()
 
 	/* Initialize pmap module */
 	pool_init(&__pmap_pmap_pool, sizeof(struct pmap), 0, 0, 0, "pmappl",
-	    &pool_allocator_nointr, IPL_NONE);
+	    &pool_allocator_nointr);
 	pool_init(&__pmap_pv_pool, sizeof(struct pv_entry), 0, 0, 0, "pvpl",
-	    &pmap_pv_page_allocator, IPL_NONE);
+	    &pmap_pv_page_allocator);
 	pool_setlowat(&__pmap_pv_pool, 16);
 
 #ifdef SH4
@@ -310,9 +313,7 @@ pmap_activate(struct lwp *l)
 		pmap->pm_asid = __pmap_asid_alloc();
 
 	KDASSERT(pmap->pm_asid >=0 && pmap->pm_asid < 256);
-
 	sh_tlb_set_asid(pmap->pm_asid);
-	curptd = pmap->pm_ptp;
 }
 
 void
@@ -328,7 +329,7 @@ pmap_enter(pmap_t pmap, vaddr_t va, paddr_t pa, vm_prot_t prot, int flags)
 	struct vm_page *pg;
 	struct vm_page_md *pvh;
 	pt_entry_t entry, *pte;
-	bool kva = (pmap == pmap_kernel());
+	boolean_t kva = (pmap == pmap_kernel());
 
 	/* "flags" never exceed "prot" */
 	KDASSERT(prot != 0 && ((flags & VM_PROT_ALL) & ~prot) == 0);
@@ -342,7 +343,7 @@ pmap_enter(pmap_t pmap, vaddr_t va, paddr_t pa, vm_prot_t prot, int flags)
 		pvh = &pg->mdpage;
 		entry |= PG_C;	/* always cached */
 
-		/* Seed modified/reference tracking */
+		/* Modified/reference tracking */
 		if (flags & VM_PROT_WRITE) {
 			entry |= PG_V | PG_D;
 			pvh->pvh_flags |= PVH_MODIFIED | PVH_REFERENCED;
@@ -358,7 +359,7 @@ pmap_enter(pmap_t pmap, vaddr_t va, paddr_t pa, vm_prot_t prot, int flags)
 			else
 				entry |= PG_PR_URW;
 		} else {
-			/* RO or COW page */
+			/* RO, COW page */
 			if (kva)
 				entry |= PG_PR_KRO | PG_SH;
 			else
@@ -413,13 +414,13 @@ pmap_enter(pmap_t pmap, vaddr_t va, paddr_t pa, vm_prot_t prot, int flags)
 }
 
 /*
- * bool __pmap_map_change(pmap_t pmap, vaddr_t va, paddr_t pa,
+ * boolean_t __pmap_map_change(pmap_t pmap, vaddr_t va, paddr_t pa,
  *     vm_prot_t prot, pt_entry_t entry):
  *	Handle the situation that pmap_enter() is called to enter a
  *	mapping at a virtual address for which a mapping already
  *	exists.
  */
-bool
+boolean_t
 __pmap_map_change(pmap_t pmap, vaddr_t va, paddr_t pa, vm_prot_t prot,
     pt_entry_t entry)
 {
@@ -428,12 +429,12 @@ __pmap_map_change(pmap_t pmap, vaddr_t va, paddr_t pa, vm_prot_t prot,
 
 	if ((pte = __pmap_pte_lookup(pmap, va)) == NULL ||
 	    ((oentry = *pte) == 0))
-		return (false);		/* no mapping exists. */
+		return (FALSE);		/* no mapping exists. */
 
 	if (pa != (oentry & PG_PPN)) {
 		/* Enter a mapping at a mapping to another physical page. */
 		pmap_remove(pmap, va, eva);
-		return (false);
+		return (FALSE);
 	}
 
 	/* Pre-existing mapping */
@@ -453,10 +454,10 @@ __pmap_map_change(pmap_t pmap, vaddr_t va, paddr_t pa, vm_prot_t prot,
 	} else if (entry & _PG_WIRED) {
 		/* unwired -> wired. make sure to reflect "flags" */
 		pmap_remove(pmap, va, eva);
-		return (false);
+		return (FALSE);
 	}
 
-	return (true);	/* mapping was changed. */
+	return (TRUE);	/* mapping was changed. */
 }
 
 /*
@@ -623,7 +624,7 @@ pmap_kremove(vaddr_t va, vsize_t len)
 	}
 }
 
-bool
+boolean_t
 pmap_extract(pmap_t pmap, vaddr_t va, paddr_t *pap)
 {
 	pt_entry_t *pte;
@@ -632,23 +633,23 @@ pmap_extract(pmap_t pmap, vaddr_t va, paddr_t *pap)
 	if (pmap == pmap_kernel() && (va >> 30) == 2) {
 		if (pap != NULL)
 			*pap = va & SH3_PHYS_MASK;
-		return (true);
+		return (TRUE);
 	}
 
 	pte = __pmap_pte_lookup(pmap, va);
 	if (pte == NULL || *pte == 0)
-		return (false);
+		return (FALSE);
 
 	if (pap != NULL)
 		*pap = (*pte & PG_PPN) | (va & PGOFSET);
 
-	return (true);
+	return (TRUE);
 }
 
 void
 pmap_protect(pmap_t pmap, vaddr_t sva, vaddr_t eva, vm_prot_t prot)
 {
-	bool kernel = pmap == pmap_kernel();
+	boolean_t kernel = pmap == pmap_kernel();
 	pt_entry_t *pte, entry;
 	vaddr_t va;
 
@@ -785,14 +786,14 @@ pmap_copy_page(paddr_t src, paddr_t dst)
 	}
 }
 
-bool
+boolean_t
 pmap_is_referenced(struct vm_page *pg)
 {
 
-	return ((pg->mdpage.pvh_flags & PVH_REFERENCED) ? true : false);
+	return ((pg->mdpage.pvh_flags & PVH_REFERENCED) ? TRUE : FALSE);
 }
 
-bool
+boolean_t
 pmap_clear_reference(struct vm_page *pg)
 {
 	struct vm_page_md *pvh = &pg->mdpage;
@@ -803,7 +804,7 @@ pmap_clear_reference(struct vm_page *pg)
 	int s;
 
 	if ((pg->mdpage.pvh_flags & PVH_REFERENCED) == 0)
-		return (false);
+		return (FALSE);
 
 	pg->mdpage.pvh_flags &= ~PVH_REFERENCED;
 
@@ -824,37 +825,37 @@ pmap_clear_reference(struct vm_page *pg)
 	}
 	splx(s);
 
-	return (true);
+	return (TRUE);
 }
 
-bool
+boolean_t
 pmap_is_modified(struct vm_page *pg)
 {
 
-	return ((pg->mdpage.pvh_flags & PVH_MODIFIED) ? true : false);
+	return ((pg->mdpage.pvh_flags & PVH_MODIFIED) ? TRUE : FALSE);
 }
 
-bool
+boolean_t
 pmap_clear_modify(struct vm_page *pg)
 {
 	struct vm_page_md *pvh = &pg->mdpage;
 	struct pv_entry *pv;
 	struct pmap *pmap;
 	pt_entry_t *pte, entry;
-	bool modified;
+	boolean_t modified;
 	vaddr_t va;
 	int s;
 
 	modified = pvh->pvh_flags & PVH_MODIFIED;
 	if (!modified)
-		return (false);
+		return (FALSE);
 
 	pvh->pvh_flags &= ~PVH_MODIFIED;
 
 	s = splvm();
 	if (SLIST_EMPTY(&pvh->pvh_head)) {/* no map on this page */
 		splx(s);
-		return (true);
+		return (TRUE);
 	}
 
 	/* Write-back and invalidate TLB entry */
@@ -879,11 +880,11 @@ pmap_clear_modify(struct vm_page *pg)
 	}
 	splx(s);
 
-	return (true);
+	return (TRUE);
 }
 
 paddr_t
-pmap_phys_address(paddr_t cookie)
+pmap_phys_address(int cookie)
 {
 
 	return (sh3_ptob(cookie));
@@ -999,11 +1000,11 @@ __pmap_kpte_lookup(vaddr_t va)
 }
 
 /*
- * bool __pmap_pte_load(pmap_t pmap, vaddr_t va, int flags):
+ * boolean_t __pmap_pte_load(pmap_t pmap, vaddr_t va, int flags):
  *	lookup page table entry, if found it, load to TLB.
  *	flags specify do emulate reference and/or modified bit or not.
  */
-bool
+boolean_t
 __pmap_pte_load(pmap_t pmap, vaddr_t va, int flags)
 {
 	struct vm_page *pg;
@@ -1016,7 +1017,7 @@ __pmap_pte_load(pmap_t pmap, vaddr_t va, int flags)
 	/* Lookup page table entry */
 	if (((pte = __pmap_pte_lookup(pmap, va)) == NULL) ||
 	    ((entry = *pte) == 0))
-		return (false);
+		return (FALSE);
 
 	KDASSERT(va != 0);
 
@@ -1037,7 +1038,7 @@ __pmap_pte_load(pmap_t pmap, vaddr_t va, int flags)
 	if (pmap->pm_asid != -1)
 		sh_tlb_update(pmap->pm_asid, va, entry);
 
-	return (true);
+	return (TRUE);
 }
 
 /*

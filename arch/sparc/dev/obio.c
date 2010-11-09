@@ -1,4 +1,4 @@
-/*	$NetBSD: obio.c,v 1.71 2008/05/17 18:11:32 macallan Exp $	*/
+/*	$NetBSD: obio.c,v 1.69 2005/11/16 00:49:03 uwe Exp $	*/
 
 /*-
  * Copyright (c) 1997,1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: obio.c,v 1.71 2008/05/17 18:11:32 macallan Exp $");
+__KERNEL_RCSID(0, "$NetBSD: obio.c,v 1.69 2005/11/16 00:49:03 uwe Exp $");
 
 #include "locators.h"
 
@@ -57,7 +64,7 @@ __KERNEL_RCSID(0, "$NetBSD: obio.c,v 1.71 2008/05/17 18:11:32 macallan Exp $");
 #include <sparc/sparc/cpuvar.h>
 
 struct obio4_softc {
-	device_t	sc_dev;		/* base device */
+	struct device	sc_dev;		/* base device */
 	bus_space_tag_t	sc_bustag;	/* parent bus tag */
 	bus_dma_tag_t	sc_dmatag;	/* parent bus DMA tag */
 };
@@ -70,10 +77,10 @@ union obio_softc {
 
 
 /* autoconfiguration driver */
-static	int obiomatch(device_t, struct cfdata *, void *);
-static	void obioattach(device_t, struct device *, void *);
+static	int obiomatch(struct device *, struct cfdata *, void *);
+static	void obioattach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(obio, sizeof(union obio_softc),
+CFATTACH_DECL(obio, sizeof(union obio_softc),
     obiomatch, obioattach, NULL, NULL);
 
 static int obio_attached;
@@ -89,7 +96,7 @@ struct obio4_busattachargs {
 
 #if defined(SUN4)
 static	int obioprint(void *, const char *);
-static	int obiosearch(device_t, struct cfdata *, const int *, void *);
+static	int obiosearch(struct device *, struct cfdata *, const int *, void *);
 static	paddr_t obio_bus_mmap(bus_space_tag_t, bus_addr_t, off_t, int, int);
 static	int _obio_bus_map(bus_space_tag_t, bus_addr_t, bus_size_t, int,
 			  vaddr_t, bus_space_handle_t *);
@@ -108,7 +115,7 @@ static int intr_obio2ipl[] = {
 };
 
 static int
-obiomatch(device_t parent, struct cfdata *cf, void *aux)
+obiomatch(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct mainbus_attach_args *ma = aux;
 
@@ -119,7 +126,7 @@ obiomatch(device_t parent, struct cfdata *cf, void *aux)
 }
 
 static void
-obioattach(device_t parent, device_t self, void *aux)
+obioattach(struct device *parent, struct device *self, void *aux)
 {
 	struct mainbus_attach_args *ma = aux;
 
@@ -129,8 +136,7 @@ obioattach(device_t parent, device_t self, void *aux)
 
 	if (CPU_ISSUN4) {
 #if defined(SUN4)
-		struct obio4_softc *sc = 
-		    &((union obio_softc *)device_private(self))->sc_obio;
+		struct obio4_softc *sc = &((union obio_softc *)self)->sc_obio;
 		struct obio4_busattachargs oa;
 		const char *const *cpp;
 		static const char *const special4[] = {
@@ -140,7 +146,6 @@ obioattach(device_t parent, device_t self, void *aux)
 			NULL
 		};
 
-		sc->sc_dev = self;
 		sc->sc_bustag = ma->ma_bustag;
 		sc->sc_dmatag = ma->ma_dmatag;
 
@@ -168,8 +173,7 @@ obioattach(device_t parent, device_t self, void *aux)
 		 * Attach the on-board I/O bus at on a sun4m.
 		 * In this case we treat the obio bus as another sbus slot.
 		 */
-		struct sbus_softc *sc =
-		    &((union obio_softc *)device_private(self))->sc_sbus;
+		struct sbus_softc *sc = &((union obio_softc *)self)->sc_sbus;
 
 		static const char *const special4m[] = {
 			/* find these first */
@@ -184,7 +188,6 @@ obioattach(device_t parent, device_t self, void *aux)
 			NULL
 		};
 
-		sc->sc_dev = self;
 		sc->sc_bustag = ma->ma_bustag;
 		sc->sc_dmatag = ma->ma_dmatag;
 		sc->sc_intr2ipl = intr_obio2ipl;
@@ -229,7 +232,7 @@ obio_bus_mmap(bus_space_tag_t t, bus_addr_t ba, off_t off, int prot, int flags)
 }
 
 static int
-obiosearch(device_t parent, struct cfdata *cf, const int *ldesc,
+obiosearch(struct device *parent, struct cfdata *cf, const int *ldesc,
 	   void *aux)
 {
 	struct obio4_busattachargs *oap = aux;

@@ -1,4 +1,4 @@
-/*	$NetBSD: mach_exec.h,v 1.33 2008/11/19 18:36:05 ad Exp $	 */
+/*	$NetBSD: mach_exec.h,v 1.30 2005/12/11 12:20:20 christos Exp $	 */
 
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -44,7 +51,7 @@ struct mach_emuldata {
 	int med_inited;			/* Is this structure initialized? */
 	int med_thpri;			/* Saved priority */
 	LIST_HEAD(med_right, mach_right) med_right;
-	krwlock_t med_rightlock;	/* process right list and lock */
+	struct lock med_rightlock;	/* process right list and lock */
 	mach_port_t med_nextright;	/* next unused right */
 
 	struct mach_port *med_bootstrap;/* task bootstrap port */
@@ -54,7 +61,7 @@ struct mach_emuldata {
 
 	int med_dirty_thid;		/* Thread id not yet initialized */
 	int med_suspend;		/* Suspend semaphore */
-	krwlock_t med_exclock;		/* Process exception handler lock */
+	struct lock med_exclock;	/* Process exception handler lock */
 };
 
 struct mach_lwp_emuldata {
@@ -72,6 +79,6 @@ void mach_e_proc_fork1(struct proc *, struct proc *, int);
 void mach_e_lwp_fork(struct lwp *, struct lwp *);
 void mach_e_lwp_exit(struct lwp *);
 
-extern struct emul emul_mach;
+extern const struct emul emul_mach;
 
 #endif /* !_MACH_EXEC_H_ */

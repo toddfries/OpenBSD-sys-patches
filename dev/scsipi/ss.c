@@ -1,4 +1,4 @@
-/*	$NetBSD: ss.c,v 1.76 2009/01/13 13:35:54 yamt Exp $	*/
+/*	$NetBSD: ss.c,v 1.72 2007/07/29 12:50:23 ad Exp $	*/
 
 /*
  * Copyright (c) 1995 Kenneth Stailey.  All rights reserved.
@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ss.c,v 1.76 2009/01/13 13:35:54 yamt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ss.c,v 1.72 2007/07/29 12:50:23 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -249,8 +249,10 @@ ssopen(dev_t dev, int flag, int mode, struct lwp *l)
 	struct scsipi_adapter *adapt;
 
 	unit = SSUNIT(dev);
-	ss = device_lookup_private(&ss_cd, unit);
-	if (ss == NULL)
+	if (unit >= ss_cd.cd_ndevs)
+		return (ENXIO);
+	ss = ss_cd.cd_devs[unit];
+	if (!ss)
 		return (ENXIO);
 
 	if (!device_is_active(&ss->sc_dev))
@@ -261,11 +263,11 @@ ssopen(dev_t dev, int flag, int mode, struct lwp *l)
 	periph = ss->sc_periph;
 	adapt = periph->periph_channel->chan_adapter;
 
-	SC_DEBUG(periph, SCSIPI_DB1, ("open: dev=0x%"PRIx64" (unit %d (of %d))\n", dev,
+	SC_DEBUG(periph, SCSIPI_DB1, ("open: dev=0x%x (unit %d (of %d))\n", dev,
 	    unit, ss_cd.cd_ndevs));
 
 	if (periph->periph_flags & PERIPH_OPEN) {
-		aprint_error_dev(&ss->sc_dev, "already open\n");
+		printf("%s: already open\n", ss->sc_dev.dv_xname);
 		return (EBUSY);
 	}
 
@@ -311,7 +313,7 @@ bad:
 static int
 ssclose(dev_t dev, int flag, int mode, struct lwp *l)
 {
-	struct ss_softc *ss = device_lookup_private(&ss_cd, SSUNIT(dev));
+	struct ss_softc *ss = ss_cd.cd_devs[SSUNIT(dev)];
 	struct scsipi_periph *periph = ss->sc_periph;
 	struct scsipi_adapter *adapt = periph->periph_channel->chan_adapter;
 	int error;
@@ -348,7 +350,7 @@ ssclose(dev_t dev, int flag, int mode, struct lwp *l)
 static void
 ssminphys(struct buf *bp)
 {
-	struct ss_softc *ss = device_lookup_private(&ss_cd, SSUNIT(bp->b_dev));
+	struct ss_softc *ss = ss_cd.cd_devs[SSUNIT(bp->b_dev)];
 	struct scsipi_periph *periph = ss->sc_periph;
 
 	scsipi_adapter_minphys(periph->periph_channel, bp);
@@ -371,7 +373,7 @@ ssminphys(struct buf *bp)
 static int
 ssread(dev_t dev, struct uio *uio, int flag)
 {
-	struct ss_softc *ss = device_lookup_private(&ss_cd, SSUNIT(dev));
+	struct ss_softc *ss = ss_cd.cd_devs[SSUNIT(dev)];
 	int error;
 
 	if (!device_is_active(&ss->sc_dev))
@@ -398,7 +400,7 @@ ssread(dev_t dev, struct uio *uio, int flag)
 static void
 ssstrategy(struct buf *bp)
 {
-	struct ss_softc *ss = device_lookup_private(&ss_cd, SSUNIT(bp->b_dev));
+	struct ss_softc *ss = ss_cd.cd_devs[SSUNIT(bp->b_dev)];
 	struct scsipi_periph *periph = ss->sc_periph;
 	int s;
 
@@ -438,7 +440,7 @@ ssstrategy(struct buf *bp)
 	 * at the end (a bit silly because we only have on user..
 	 * (but it could fork()))
 	 */
-	bufq_put(ss->buf_queue, bp);
+	BUFQ_PUT(ss->buf_queue, bp);
 
 	/*
 	 * Tell the device to get going on the transfer if it's
@@ -493,7 +495,7 @@ ssstart(struct scsipi_periph *periph)
 		/*
 		 * See if there is a buf with work for us to do..
 		 */
-		if ((bp = bufq_peek(ss->buf_queue)) == NULL)
+		if ((bp = BUFQ_PEEK(ss->buf_queue)) == NULL)
 			return;
 
 		if (ss->special && ss->special->read) {
@@ -533,7 +535,7 @@ ssdone(struct scsipi_xfer *xs, int error)
 int
 ssioctl(dev_t dev, u_long cmd, void *addr, int flag, struct lwp *l)
 {
-	struct ss_softc *ss = device_lookup_private(&ss_cd, SSUNIT(dev));
+	struct ss_softc *ss = ss_cd.cd_devs[SSUNIT(dev)];
 	int error = 0;
 	struct scan_io *sio;
 

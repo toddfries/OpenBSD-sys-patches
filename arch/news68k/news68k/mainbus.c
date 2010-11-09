@@ -1,4 +1,4 @@
-/*	$NetBSD: mainbus.c,v 1.15 2008/03/28 17:51:51 tsutsui Exp $	*/
+/*	$NetBSD: mainbus.c,v 1.14 2005/12/11 12:18:23 christos Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995 Carnegie-Mellon University.
@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mainbus.c,v 1.15 2008/03/28 17:51:51 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mainbus.c,v 1.14 2005/12/11 12:18:23 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -40,19 +40,24 @@ __KERNEL_RCSID(0, "$NetBSD: mainbus.c,v 1.15 2008/03/28 17:51:51 tsutsui Exp $")
 
 #include <news68k/news68k/machid.h>
 
+struct mainbus_softc {
+	struct device sc_dev;
+};
+
 /* Definition of the mainbus driver. */
-static int  mainbus_match(device_t, cfdata_t, void *);
-static void mainbus_attach(device_t, device_t, void *);
-static int  mainbus_search(device_t, cfdata_t, const int *, void *);
+static int  mainbus_match(struct device *, struct cfdata *, void *);
+static void mainbus_attach(struct device *, struct device *, void *);
+static int  mainbus_search(struct device *, struct cfdata *,
+				const int *, void *);
 static int  mainbus_print(void *, const char *);
 
-CFATTACH_DECL_NEW(mainbus, 0,
+CFATTACH_DECL(mainbus, sizeof(struct mainbus_softc),
     mainbus_match, mainbus_attach, NULL, NULL);
 
 static int mainbus_found;
 
 static int
-mainbus_match(device_t parent, cfdata_t cfdata, void *aux)
+mainbus_match(struct device *parent, struct cfdata *cfdata, void *aux)
 {
 
 	if (mainbus_found)
@@ -62,18 +67,19 @@ mainbus_match(device_t parent, cfdata_t cfdata, void *aux)
 }
 
 static void
-mainbus_attach(device_t parent, device_t self, void *aux)
+mainbus_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct mainbus_attach_args ma;
 
 	mainbus_found = 1;
-	aprint_normal("\n");
+	printf("\n");
 
 	config_search_ia(mainbus_search, self, "mainbus", &ma);
 }
 
 static int
-mainbus_search(device_t parent, cfdata_t cf, const int *ldesc, void *aux)
+mainbus_search(struct device *parent, struct cfdata *cf,
+	const int *ldesc, void *aux)
 {
 	struct mainbus_attach_args *ma = aux;
 

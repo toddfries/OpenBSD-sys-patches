@@ -1,4 +1,4 @@
-/*	$NetBSD: i80321_i2c.c,v 1.3 2007/12/06 17:00:32 ad Exp $	*/
+/*	$NetBSD: i80321_i2c.c,v 1.2 2005/12/11 12:16:51 christos Exp $	*/
 
 /*
  * Copyright (c) 2003 Wasabi Systems, Inc.
@@ -40,10 +40,10 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: i80321_i2c.c,v 1.3 2007/12/06 17:00:32 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: i80321_i2c.c,v 1.2 2005/12/11 12:16:51 christos Exp $");
 
 #include <sys/param.h>
-#include <sys/mutex.h>
+#include <sys/lock.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/kernel.h>
@@ -97,7 +97,7 @@ iic321_attach(struct device *parent, struct device *self, void *aux)
 
 	/* XXX Reset the I2C unit? */
 
-	mutex_init(&sc->sc_buslock, MUTEX_DEFAULT, IPL_NONE);
+	lockinit(&sc->sc_buslock, PRIBIO|PCATCH, "iopiiclk", 0, 0);
 
 	/* XXX We don't currently use interrupts.  Fix this some day. */
 #if 0

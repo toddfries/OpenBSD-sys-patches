@@ -1,4 +1,4 @@
-/*	$NetBSD: iso.h,v 1.22 2007/11/21 16:49:08 is Exp $	*/
+/*	$NetBSD: iso.h,v 1.17 2006/05/11 01:14:55 mrg Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993
@@ -142,34 +142,24 @@ typedef __sa_family_t	sa_family_t;
  * routines
  */
 struct iso_addr {
-	uint8_t		isoa_len;	/* length (in bytes) */
-	char		isoa_genaddr[20];	/* general opaque address */
+	u_char          isoa_len;	/* length (in bytes) */
+	char            isoa_genaddr[20];	/* general opaque address */
 };
 
 struct sockaddr_iso {
-	uint8_t		siso_len;	/* length */
-	sa_family_t	siso_family;	/* family */
-	uint8_t		siso_plen;	/* presentation selector length */
-	uint8_t		siso_slen;	/* session selector length */
-	uint8_t		siso_tlen;	/* transport selector length */
+	u_char          siso_len;	/* length */
+	sa_family_t     siso_family;	/* family */
+	u_char          siso_plen;	/* presentation selector length */
+	u_char          siso_slen;	/* session selector length */
+	u_char          siso_tlen;	/* transport selector length */
 	struct iso_addr siso_addr;	/* network address */
-	uint8_t		siso_pad[6];	/* space for gosip v2 sels */
+	u_char          siso_pad[6];	/* space for gosip v2 sels */
 	/* makes struct 32 bytes long */
 };
-#define	siso_nlen siso_addr.isoa_len
-#define	siso_data siso_addr.isoa_genaddr
+#define siso_nlen siso_addr.isoa_len
+#define siso_data siso_addr.isoa_genaddr
 
-static inline void *
-WRITABLE_TSEL(struct sockaddr_iso *siso)
-{
-	return &siso->siso_data[siso->siso_nlen];
-}
-
-static inline const char *
-TSEL(const struct sockaddr_iso *siso)
-{
-	return &siso->siso_data[siso->siso_nlen];
-}
+#define TSEL(s) ((caddr_t)((s)->siso_data + (s)->siso_nlen))
 
 #define SAME_ISOADDR(a, b) \
 	(bcmp((a)->siso_data, (b)->siso_data, (unsigned)(a)->siso_nlen)==0)
@@ -192,49 +182,7 @@ extern struct domain isodomain;
 extern const struct protosw isosw[];
 
 #define	satosiso(sa)	((struct sockaddr_iso *)(sa))
-#define	satocsiso(sa)	((const struct sockaddr_iso *)(sa))
 #define	sisotosa(siso)	((struct sockaddr *)(siso))
-
-int sockaddr_iso_cmp(const struct sockaddr *, const struct sockaddr *);
-
-static inline int
-sockaddr_iso_init1(struct sockaddr_iso *siso, const struct iso_addr *addr)
-{
-	memset(&siso->siso_plen, 0,
-	    sizeof(*siso) - offsetof(struct sockaddr_iso, siso_plen));
-
-	if (offsetof(struct iso_addr, isoa_genaddr[addr->isoa_len]) >
-	    sizeof(struct iso_addr))
-		return EINVAL;
-	memcpy(&siso->siso_addr, addr,
-	    offsetof(struct iso_addr, isoa_genaddr[addr->isoa_len]));
-	return 0;
-}
-
-static inline int
-sockaddr_iso_init(struct sockaddr_iso *siso, const struct iso_addr *addr)
-{
-	siso->siso_family = AF_ISO;
-	siso->siso_len = sizeof(*siso);
-	return sockaddr_iso_init1(siso, addr);
-}
-
-static inline struct sockaddr *
-sockaddr_iso_alloc(const struct iso_addr *addr, int flags)
-{
-	struct sockaddr *sa;
-
-	sa = sockaddr_alloc(AF_ISO, sizeof(struct sockaddr_iso), flags);
-
-	if (sa == NULL)
-		return NULL;
-
-	if (sockaddr_iso_init1(satosiso(sa), addr) != 0) {
-		sockaddr_free(sa);
-		return NULL;
-	}
-	return sa;
-}
 
 #else
 /* user utilities definitions from the iso library */
@@ -242,12 +190,12 @@ sockaddr_iso_alloc(const struct iso_addr *addr, int flags)
 #include <sys/cdefs.h>
 
 __BEGIN_DECLS
-struct iso_addr *iso_addr(const char *);
-char           *iso_ntoa(const struct iso_addr *);
+struct iso_addr *iso_addr __P((const char *));
+char           *iso_ntoa __P((const struct iso_addr *));
 
 /* THESE DON'T EXIST YET */
-struct hostent *iso_gethostbyname(const char *);
-struct hostent *iso_gethostbyaddr(const char *, int, int);
+struct hostent *iso_gethostbyname __P((const char *));
+struct hostent *iso_gethostbyaddr __P((const char *, int, int));
 __END_DECLS
 
 #endif /* _KERNEL */

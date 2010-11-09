@@ -1,9 +1,4 @@
-/* $NetBSD: udf_osta.c,v 1.7 2008/05/19 20:12:36 reinoud Exp $ */
-
-#include <sys/cdefs.h>
-#ifndef lint
-__KERNEL_RCSID(0, "$NetBSD: udf_osta.c,v 1.7 2008/05/19 20:12:36 reinoud Exp $");
-#endif /* not lint */
+/* $NetBSD: udf_osta.c,v 1.3 2006/08/10 12:26:44 reinoud Exp $ */
 
 /*
  * Various routines from the OSTA 2.01 specs.  Copyrights are included with
@@ -14,9 +9,6 @@ __KERNEL_RCSID(0, "$NetBSD: udf_osta.c,v 1.7 2008/05/19 20:12:36 reinoud Exp $")
 
 #include "udf_osta.h"
 
-#ifndef _KERNEL
-#include <ctype.h>
-#endif
 
 /*****************************************************************************/
 /***********************************************************************
@@ -204,27 +196,6 @@ udf_unicode_cksum(s, n)
 	return crc;
 }
 
-
-/*
-  * Calculates a 16-bit checksum of the Implementation Use
-  * Extended Attribute header or Application Use Extended Attribute
-  * header. The fields AttributeType through ImplementationIdentifier
-  * (or ApplicationIdentifier) inclusively represent the
-  * data covered by the checksum (48 bytes).
-  *
-  */
-uint16_t udf_ea_cksum(uint8_t *data) {
-        uint16_t checksum = 0;
-        int      count;
-
-        for (count = 0; count < 48; count++) {
-               checksum += *data++;
-        }
-
-        return checksum;
-}
-
-
 #ifdef MAIN
 unsigned char bytes[] = { 0x70, 0x6A, 0x77 };
 
@@ -275,6 +246,8 @@ main()
 #define	ILLEGAL_CHAR_MARK	0x005F
 #define	CRC_MARK	0x0023
 #define	EXT_SIZE	5
+#define	TRUE	1
+#define	FALSE	0
 #define	PERIOD	0x002E
 #define	SPACE	0x0020
 
@@ -288,7 +261,7 @@ int IsIllegal(unicode_t ch);
 
 /* #include <stdio.h> */
 static int UnicodeIsPrint(unicode_t ch) {
-	return (ch >=' ') && (ch != 127);
+	return (ch >=' ') && (ch < 127);
 }
 
 
@@ -301,11 +274,9 @@ int UnicodeLength(unicode_t *string) {
 }
 
 
-#ifdef _KERNEL
-static int isprint(int c) {
+static int isprint(unsigned char c) {
 	return (c >= ' ') && (c != 127);
 }
-#endif
 
 
 /***********************************************************************
@@ -323,8 +294,8 @@ int UDFTransName(
 	unicode_t *udfName,	/* (Input) Name from UDF volume.*/
 	int udfLen)		/* (Input) Length of UDF Name. */
 {
-	int Index, newIndex = 0, needsCRC = false;	/* index is shadowed */
-	int extIndex = 0, newExtIndex = 0, hasExt = false;
+	int Index, newIndex = 0, needsCRC = FALSE;	/* index is shadowed */
+	int extIndex = 0, newExtIndex = 0, hasExt = FALSE;
 #if defined OS2 || defined WIN_95 || defined WIN_NT
 	int trailIndex = 0;
 #endif
@@ -336,7 +307,7 @@ int UDFTransName(
 		current = udfName[Index];
 
 		if (IsIllegal(current) || !UnicodeIsPrint(current)) {
-			needsCRC = true;
+			needsCRC = TRUE;
 			/* Replace Illegal and non-displayable chars with
 			 * underscore.
 			 */
@@ -354,9 +325,9 @@ int UDFTransName(
 		if (current == PERIOD && (udfLen - Index -1) <= EXT_SIZE) {
 			if (udfLen == Index + 1) {
 				/* A trailing period is NOT an extension. */
-				hasExt = false;
+				hasExt = FALSE;
 			} else {
-				hasExt = true;
+				hasExt = TRUE;
 				extIndex = Index;
 				newExtIndex = newIndex;
 			}
@@ -372,7 +343,7 @@ int UDFTransName(
 		if (newIndex < MAXLEN) {
 			newName[newIndex++] = current;
 		} else {
-			needsCRC = true;
+			needsCRC = TRUE;
 		}
 	}
 
@@ -380,8 +351,8 @@ int UDFTransName(
 	/* For OS2, 95 & NT, truncate any trailing periods and\or spaces. */
 	if (trailIndex != newIndex - 1) {
 		newIndex = trailIndex + 1;
-		needsCRC = true;
-		hasExt = false; /* Trailing period does not make an
+		needsCRC = TRUE;
+		hasExt = FALSE; /* Trailing period does not make an
 				 * extension. */
 	}
 #endif
@@ -466,12 +437,12 @@ int UnicodeInString(
 	unsigned char *string,	/* (Input) String to search through. */
 	unicode_t ch)		/* (Input) Unicode char to search for. */
 {
-	int found = false;
-	while (*string != '\0' && found == false) {
+	int found = FALSE;
+	while (*string != '\0' && found == FALSE) {
 		/* These types should compare, since both are unsigned
 		 * numbers. */
 		if (*string == ch) {
-			found = true;
+			found = TRUE;
 		}
 		string++;
 	}

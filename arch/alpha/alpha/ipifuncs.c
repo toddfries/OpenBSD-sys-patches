@@ -1,4 +1,4 @@
-/* $NetBSD: ipifuncs.c,v 1.40 2008/04/28 20:23:10 martin Exp $ */
+/* $NetBSD: ipifuncs.c,v 1.43 2010/06/23 13:52:26 rmind Exp $ */
 
 /*-
  * Copyright (c) 1998, 1999, 2000, 2001 The NetBSD Foundation, Inc.
@@ -32,7 +32,7 @@
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
 
-__KERNEL_RCSID(0, "$NetBSD: ipifuncs.c,v 1.40 2008/04/28 20:23:10 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ipifuncs.c,v 1.43 2010/06/23 13:52:26 rmind Exp $");
 
 /*
  * Interprocessor interrupt handlers.
@@ -46,6 +46,7 @@ __KERNEL_RCSID(0, "$NetBSD: ipifuncs.c,v 1.40 2008/04/28 20:23:10 martin Exp $")
 #include <sys/atomic.h>
 #include <sys/cpu.h>
 #include <sys/intr.h>
+#include <sys/xcall.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -64,6 +65,7 @@ void	alpha_ipi_ast(struct cpu_info *, struct trapframe *);
 void	alpha_ipi_synch_fpu(struct cpu_info *, struct trapframe *);
 void	alpha_ipi_discard_fpu(struct cpu_info *, struct trapframe *);
 void	alpha_ipi_pause(struct cpu_info *, struct trapframe *);
+void	alpha_ipi_xcall(struct cpu_info *, struct trapframe *);
 
 /*
  * NOTE: This table must be kept in order with the bit definitions
@@ -78,7 +80,7 @@ ipifunc_t ipifuncs[ALPHA_NIPIS] = {
 	alpha_ipi_synch_fpu,
 	alpha_ipi_discard_fpu,
 	alpha_ipi_pause,
-	pmap_do_reactivate,
+	alpha_ipi_xcall
 };
 
 const char *ipinames[ALPHA_NIPIS] = {
@@ -90,7 +92,7 @@ const char *ipinames[ALPHA_NIPIS] = {
 	"synch fpu ipi",
 	"discard fpu ipi",
 	"pause ipi",
-	"pmap reactivate ipi",
+	"xcall ipi"
 };
 
 /*
@@ -310,4 +312,31 @@ alpha_ipi_pause(struct cpu_info *ci, struct trapframe *framep)
 
 	/* Do an IMB on the way out, in case the kernel text was changed. */
 	alpha_pal_imb();
+}
+
+/*
+ * MD support for xcall(9) interface.
+ */
+
+void
+alpha_ipi_xcall(struct cpu_info *ci, struct trapframe *framep)
+{
+
+	xc_ipi_handler();
+}
+
+void
+xc_send_ipi(struct cpu_info *ci)
+{
+
+	KASSERT(kpreempt_disabled());
+	KASSERT(curcpu() != ci);
+
+	if (ci) {
+		/* Unicast: remote CPU. */
+		alpha_send_ipi(ci->ci_cpuid, ALPHA_IPI_XCALL);
+	} else {
+		/* Broadcast: all, but local CPU (caller will handle it). */
+		alpha_broadcast_ipi(ALPHA_IPI_XCALL);
+	}
 }

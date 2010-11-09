@@ -1,4 +1,4 @@
-/*	$NetBSD: mbuf.h,v 1.144 2008/10/24 22:31:40 dyoung Exp $	*/
+/*	$NetBSD: mbuf.h,v 1.138 2007/11/10 13:06:23 yamt Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997, 1999, 2001, 2007 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -73,9 +80,6 @@
 #endif
 #include <sys/pool.h>
 #include <sys/queue.h>
-#if defined(_KERNEL)
-#include <sys/percpu_types.h>
-#endif /* defined(_KERNEL) */
 
 /* For offsetof() */
 #if defined(_KERNEL) || defined(_STANDALONE)
@@ -106,41 +110,21 @@ struct mowner {
 	char mo_name[16];		/* owner name (fxp0) */
 	char mo_descr[16];		/* owner description (input) */
 	LIST_ENTRY(mowner) mo_link;	/* */
-	struct percpu *mo_counters;
+	u_long mo_claims;		/* # of small mbuf claimed */
+	u_long mo_releases;		/* # of small mbuf released */
+	u_long mo_cluster_claims;	/* # of M_CLUSTER mbuf claimed */
+	u_long mo_cluster_releases;	/* # of M_CLUSTER mbuf released */
+	u_long mo_ext_claims;		/* # of M_EXT mbuf claimed */
+	u_long mo_ext_releases;		/* # of M_EXT mbuf released */
 };
 
 #define MOWNER_INIT(x, y) { .mo_name = x, .mo_descr = y }
-
-enum mowner_counter_index {
-	MOWNER_COUNTER_CLAIMS,		/* # of small mbuf claimed */
-	MOWNER_COUNTER_RELEASES,	/* # of small mbuf released */
-	MOWNER_COUNTER_CLUSTER_CLAIMS,	/* # of M_CLUSTER mbuf claimed */
-	MOWNER_COUNTER_CLUSTER_RELEASES,/* # of M_CLUSTER mbuf released */
-	MOWNER_COUNTER_EXT_CLAIMS,	/* # of M_EXT mbuf claimed */
-	MOWNER_COUNTER_EXT_RELEASES,	/* # of M_EXT mbuf released */
-
-	MOWNER_COUNTER_NCOUNTERS,
-};
-
-#if defined(_KERNEL)
-struct mowner_counter {
-	u_long mc_counter[MOWNER_COUNTER_NCOUNTERS];
-};
-#endif /* defined(_KERNEL) */
-
-/* userland-exported version of struct mowner */
-struct mowner_user {
-	char mo_name[16];		/* owner name (fxp0) */
-	char mo_descr[16];		/* owner description (input) */
-	LIST_ENTRY(mowner) mo_link;	/* unused padding; for compatibility */
-	u_long mo_counter[MOWNER_COUNTER_NCOUNTERS]; /* counters */
-};
 
 /*
  * Macros for type conversion
  * mtod(m,t) -	convert mbuf pointer to data pointer of correct type
  */
-#define	mtod(m, t)	((t)((m)->m_data))
+#define	mtod(m,t)	((t)((m)->m_data))
 
 /* header at beginning of each mbuf: */
 struct m_hdr {
@@ -233,15 +217,15 @@ struct	pkthdr {
 #endif
 
 /* description of external storage mapped into mbuf, valid if M_EXT set */
-struct _m_ext_storage {
-	unsigned int ext_refcnt;
-	int ext_flags;
-	char *ext_buf;			/* start of buffer */
+struct _m_ext {
+	char  *ext_buf;		/* start of buffer */
 	void (*ext_free)		/* free routine if not the usual */
-		(struct mbuf *, void *, size_t, void *);
-	void *ext_arg;			/* argument for ext_free */
+	       (struct mbuf *, void *, size_t, void *);
+	void  *ext_arg;		/* argument for ext_free */
 	size_t ext_size;		/* size of buffer, for ext_free */
 	struct malloc_type *ext_type;	/* malloc type */
+	struct mbuf *ext_nextref;
+	struct mbuf *ext_prevref;
 	union {
 		paddr_t extun_paddr;	/* physical address (M_EXT_CLUSTER) */
 					/* pages (M_EXT_PAGES) */
@@ -261,11 +245,6 @@ struct _m_ext_storage {
 	int ext_oline;
 	int ext_nline;
 #endif
-};
-
-struct _m_ext {
-	struct mbuf *ext_ref;
-	struct _m_ext_storage ext_storage;
 };
 
 #define	M_PADDR_INVALID		POOL_PADDR_INVALID
@@ -297,9 +276,7 @@ struct _m_ext {
 #define	m_nextpkt	m_hdr.mh_nextpkt
 #define	m_paddr		m_hdr.mh_paddr
 #define	m_pkthdr	M_dat.MH.MH_pkthdr
-#define	m_ext_storage	M_dat.MH.MH_dat.MH_ext.ext_storage
-#define	m_ext_ref	M_dat.MH.MH_dat.MH_ext.ext_ref
-#define	m_ext		m_ext_ref->m_ext_storage
+#define	m_ext		M_dat.MH.MH_dat.MH_ext
 #define	m_pktdat	M_dat.MH.MH_dat.MH_databuf
 #define	m_dat		M_dat.M_databuf
 
@@ -323,19 +300,19 @@ MBUF_DEFINE(_mbuf_dummy, 1, 1);
 MBUF_DEFINE(mbuf, MHLEN, MLEN);
 
 /* mbuf flags */
-#define	M_EXT		0x00001	/* has associated external storage */
-#define	M_PKTHDR	0x00002	/* start of record */
-#define	M_EOR		0x00004	/* end of record */
-#define	M_PROTO1	0x00008	/* protocol-specific */
+#define	M_EXT		0x0001	/* has associated external storage */
+#define	M_PKTHDR	0x0002	/* start of record */
+#define	M_EOR		0x0004	/* end of record */
+#define	M_PROTO1	0x0008	/* protocol-specific */
 
 /* mbuf pkthdr flags, also in m_flags */
-#define M_AUTHIPHDR	0x00010	/* data origin authentication for IP header */
-#define M_DECRYPTED	0x00020	/* confidentiality */
-#define M_LOOP		0x00040	/* for Mbuf statistics */
-#define M_AUTHIPDGM     0x00080  /* data origin authentication */
-#define	M_BCAST		0x00100	/* send/received as link-level broadcast */
-#define	M_MCAST		0x00200	/* send/received as link-level multicast */
-#define	M_CANFASTFWD	0x00400	/* used by filters to indicate packet can
+#define M_AUTHIPHDR	0x0010	/* data origin authentication for IP header */
+#define M_DECRYPTED	0x0020	/* confidentiality */
+#define M_LOOP		0x0040	/* for Mbuf statistics */
+#define M_AUTHIPDGM     0x0080  /* data origin authentication */
+#define	M_BCAST		0x0100	/* send/received as link-level broadcast */
+#define	M_MCAST		0x0200	/* send/received as link-level multicast */
+#define	M_CANFASTFWD	0x0400	/* used by filters to indicate packet can
 				   be fast-forwarded */
 #define	M_ANYCAST6	0x00800	/* received as IPv6 anycast */
 #define	M_LINK0		0x01000	/* link layer specific flag */
@@ -345,7 +322,6 @@ MBUF_DEFINE(mbuf, MHLEN, MLEN);
 #define	M_LINK4		0x10000	/* link layer specific flag */
 #define	M_LINK5		0x20000	/* link layer specific flag */
 #define	M_LINK6		0x40000	/* link layer specific flag */
-#define	M_LINK7		0x80000	/* link layer specific flag */
 
 /* additional flags for M_EXT mbufs */
 #define	M_EXT_FLAGS	0xff000000
@@ -360,7 +336,6 @@ MBUF_DEFINE(mbuf, MHLEN, MLEN);
 #define M_FLAGS_BITS \
     "\20\1EXT\2PKTHDR\3EOR\4PROTO1\5AUTHIPHDR\6DECRYPTED\7LOOP\10AUTHIPDGM" \
     "\11BCAST\12MCAST\13CANFASTFWD\14ANYCAST6\15LINK0\16LINK1\17LINK2\20LINK3" \
-    "\21LINK4\22LINK5\23LINK6\24LINK7" \
     "\31EXT_CLUSTER\32EXT_PAGES\33EXT_ROMAP\34EXT_RW"
 
 /* flags copied when copying m_pkthdr */
@@ -383,30 +358,79 @@ MBUF_DEFINE(mbuf, MHLEN, MLEN);
 #define	M_DONTWAIT	M_NOWAIT
 #define	M_WAIT		M_WAITOK
 
+/*
+ * mbuf utility macros:
+ *
+ *	MBUFLOCK(code)
+ * prevents a section of code from from being interrupted by network
+ * drivers.
+ */
+#define	MBUFLOCK(code)							\
+do {									\
+	int _ms = splvm();						\
+	{ code }							\
+	splx(_ms);							\
+} while (/* CONSTCOND */ 0)
+
 #ifdef MBUFTRACE
 /*
- * mbuf allocation tracing
+ * mbuf allocation tracing macros
+ *
  */
-void mowner_init(struct mbuf *, int);
-void mowner_ref(struct mbuf *, int);
-void m_claim(struct mbuf *, struct mowner *);
-void mowner_revoke(struct mbuf *, bool, int);
-void mowner_attach(struct mowner *);
-void mowner_detach(struct mowner *);
-void m_claimm(struct mbuf *, struct mowner *);
+#define _MOWNERINIT(m, type)						\
+	((m)->m_owner = &unknown_mowners[(type)], (m)->m_owner->mo_claims++)
+
+#define	_MOWNERREF(m, flags)	do {					\
+	if ((flags) & M_EXT)						\
+		(m)->m_owner->mo_ext_claims++;				\
+	if ((flags) & M_CLUSTER)					\
+		(m)->m_owner->mo_cluster_claims++;			\
+} while (/* CONSTCOND */ 0)
+
+#define	MOWNERREF(m, flags)	MBUFLOCK( _MOWNERREF((m), (flags)); );
+
+#define	_MOWNERREVOKE(m, all, flags)	do {				\
+	if ((flags) & M_EXT)						\
+		(m)->m_owner->mo_ext_releases++;			\
+	if ((flags) & M_CLUSTER)					\
+		(m)->m_owner->mo_cluster_releases++;			\
+	if (all) {							\
+		(m)->m_owner->mo_releases++;				\
+		(m)->m_owner = &revoked_mowner;				\
+	}								\
+} while (/* CONSTCOND */ 0)
+
+#define	_MOWNERCLAIM(m, mowner)	do {					\
+	(m)->m_owner = (mowner);					\
+	(mowner)->mo_claims++;						\
+	if ((m)->m_flags & M_EXT)					\
+		(mowner)->mo_ext_claims++;				\
+	if ((m)->m_flags & M_CLUSTER)					\
+		(mowner)->mo_cluster_claims++;				\
+} while (/* CONSTCOND */ 0)
+
+#define	MCLAIM(m, mowner) 						\
+	MBUFLOCK(							\
+		if ((m)->m_owner != (mowner) && (mowner) != NULL) {	\
+			_MOWNERREVOKE((m), 1, (m)->m_flags);		\
+			_MOWNERCLAIM((m), (mowner));			\
+		}							\
+	)
+
+#define	MOWNER_ATTACH(mo)	LIST_INSERT_HEAD(&mowners, (mo), mo_link)
+#define	MOWNER_DETACH(mo)	LIST_REMOVE((mo), mo_link)
 #else
-#define mowner_init(m, type)		do { } while (/* CONSTCOND */ 0)
-#define	mowner_ref(m, flags)		do { } while (/* CONSTCOND */ 0)
-#define	mowner_revoke(m, all, flags)	do { } while (/* CONSTCOND */ 0)
-#define	m_claim(m, mowner) 		do { } while (/* CONSTCOND */ 0)
-#define	mowner_attach(mo)		do { } while (/* CONSTCOND */ 0)
-#define	mowner_detach(mo)		do { } while (/* CONSTCOND */ 0)
+#define _MOWNERINIT(m, type)		do { } while (/* CONSTCOND */ 0)
+#define	_MOWNERREF(m, flags)		do { } while (/* CONSTCOND */ 0)
+#define	MOWNERREF(m, flags)		do { } while (/* CONSTCOND */ 0)
+#define	_MOWNERREVOKE(m, all, flags)	do { } while (/* CONSTCOND */ 0)
+#define	_MOWNERCLAIM(m, mowner)		do { } while (/* CONSTCOND */ 0)
+#define	MCLAIM(m, mowner) 		do { } while (/* CONSTCOND */ 0)
+#define	MOWNER_ATTACH(mo)		do { } while (/* CONSTCOND */ 0)
+#define	MOWNER_DETACH(mo)		do { } while (/* CONSTCOND */ 0)
 #define	m_claimm(m, mo)			do { } while (/* CONSTCOND */ 0)
 #endif
 
-#define	MCLAIM(m, mo)		m_claim((m), (mo))
-#define	MOWNER_ATTACH(mo)	mowner_attach(mo)
-#define	MOWNER_DETACH(mo)	mowner_detach(mo)
 
 /*
  * mbuf allocation/deallocation macros:
@@ -421,13 +445,46 @@ void m_claimm(struct mbuf *, struct mowner *);
  * If 'how' is M_WAIT, these macros (and the corresponding functions)
  * are guaranteed to return successfully.
  */
-#define	MGET(m, how, type)	m = m_get((how), (type))
-#define	MGETHDR(m, how, type)	m = m_gethdr((how), (type))
+#define	MGET(m, how, type)						\
+MBUFLOCK(								\
+	(m) = pool_cache_get(mb_cache,					\
+		(how) == M_WAIT ? PR_WAITOK|PR_LIMITFAIL : 0);		\
+	if (m) {							\
+		mbstat.m_mtypes[type]++;				\
+		_MOWNERINIT((m), (type));				\
+		(m)->m_type = (type);					\
+		(m)->m_next = (struct mbuf *)NULL;			\
+		(m)->m_nextpkt = (struct mbuf *)NULL;			\
+		(m)->m_data = (m)->m_dat;				\
+		(m)->m_flags = 0;					\
+	}								\
+)
+
+#define	MGETHDR(m, how, type)						\
+MBUFLOCK(								\
+	(m) = pool_cache_get(mb_cache,					\
+	    (how) == M_WAIT ? PR_WAITOK|PR_LIMITFAIL : 0);		\
+	if (m) {							\
+		mbstat.m_mtypes[type]++;				\
+		_MOWNERINIT((m), (type));				\
+		(m)->m_type = (type);					\
+		(m)->m_next = (struct mbuf *)NULL;			\
+		(m)->m_nextpkt = (struct mbuf *)NULL;			\
+		(m)->m_data = (m)->m_pktdat;				\
+		(m)->m_flags = M_PKTHDR;				\
+		(m)->m_pkthdr.rcvif = NULL;				\
+		(m)->m_pkthdr.csum_flags = 0;				\
+		(m)->m_pkthdr.csum_data = 0;				\
+		SLIST_INIT(&(m)->m_pkthdr.tags);			\
+	}								\
+)
 
 #if defined(_KERNEL)
 #define	_M_
 /*
  * Macros for tracking external storage associated with an mbuf.
+ *
+ * Note: add and delete reference must be called at splvm().
  */
 #ifdef DEBUG
 #define MCLREFDEBUGN(m, file, line)					\
@@ -446,14 +503,36 @@ do {									\
 #define MCLREFDEBUGO(m, file, line)
 #endif
 
+#define	MCLBUFREF(p)
+#define	MCLISREFERENCED(m)	((m)->m_ext.ext_nextref != (m))
+#define	_MCLDEREFERENCE(m)						\
+do {									\
+	(m)->m_ext.ext_nextref->m_ext.ext_prevref =			\
+		(m)->m_ext.ext_prevref;					\
+	(m)->m_ext.ext_prevref->m_ext.ext_nextref =			\
+		(m)->m_ext.ext_nextref;					\
+} while (/* CONSTCOND */ 0)
+
+#define	_MCLADDREFERENCE(o, n)						\
+do {									\
+	(n)->m_flags |= ((o)->m_flags & M_EXTCOPYFLAGS);		\
+	(n)->m_ext.ext_nextref = (o)->m_ext.ext_nextref;		\
+	(n)->m_ext.ext_prevref = (o);					\
+	(o)->m_ext.ext_nextref = (n);					\
+	(n)->m_ext.ext_nextref->m_ext.ext_prevref = (n);		\
+	_MOWNERREF((n), (n)->m_flags);					\
+	MCLREFDEBUGN((n), __FILE__, __LINE__);				\
+} while (/* CONSTCOND */ 0)
+
 #define	MCLINITREFERENCE(m)						\
 do {									\
-	KDASSERT(((m)->m_flags & M_EXT) == 0);				\
-	(m)->m_ext_ref = (m);						\
-	(m)->m_ext.ext_refcnt = 1;					\
+	(m)->m_ext.ext_prevref = (m);					\
+	(m)->m_ext.ext_nextref = (m);					\
 	MCLREFDEBUGO((m), __FILE__, __LINE__);				\
 	MCLREFDEBUGN((m), NULL, 0);					\
 } while (/* CONSTCOND */ 0)
+
+#define	MCLADDREFERENCE(o, n)	MBUFLOCK(_MCLADDREFERENCE((o), (n));)
 
 /*
  * Macros for mbuf external storage.
@@ -467,24 +546,25 @@ do {									\
  * MEXTADD adds pre-allocated external storage to
  * a normal mbuf; the flag M_EXT is set upon success.
  */
-
 #define	_MCLGET(m, pool_cache, size, how)				\
 do {									\
-	(m)->m_ext_storage.ext_buf =					\
-	    pool_cache_get_paddr((pool_cache),				\
-		(how) == M_WAIT ? (PR_WAITOK|PR_LIMITFAIL) : 0,		\
-		&(m)->m_ext_storage.ext_paddr);				\
-	if ((m)->m_ext_storage.ext_buf != NULL) {			\
-		MCLINITREFERENCE(m);					\
+	MBUFLOCK(							\
+		(m)->m_ext.ext_buf =					\
+		    pool_cache_get_paddr((pool_cache),			\
+		        (how) == M_WAIT ? (PR_WAITOK|PR_LIMITFAIL) : 0,	\
+			&(m)->m_ext.ext_paddr);				\
+		if ((m)->m_ext.ext_buf != NULL)				\
+			_MOWNERREF((m), M_EXT|M_CLUSTER);		\
+	);								\
+	if ((m)->m_ext.ext_buf != NULL) {				\
 		(m)->m_data = (m)->m_ext.ext_buf;			\
 		(m)->m_flags = ((m)->m_flags & ~M_EXTCOPYFLAGS) |	\
 				M_EXT|M_CLUSTER|M_EXT_RW;		\
-		(m)->m_ext.ext_flags = 0;				\
 		(m)->m_ext.ext_size = (size);				\
 		(m)->m_ext.ext_free = NULL;				\
 		(m)->m_ext.ext_arg = (pool_cache);			\
 		/* ext_paddr initialized above */			\
-		mowner_ref((m), M_EXT|M_CLUSTER);			\
+		MCLINITREFERENCE(m);					\
 	}								\
 } while (/* CONSTCOND */ 0)
 
@@ -495,33 +575,41 @@ do {									\
 
 #define	MEXTMALLOC(m, size, how)					\
 do {									\
-	(m)->m_ext_storage.ext_buf =					\
+	(m)->m_ext.ext_buf =						\
 	    (void *)malloc((size), mbtypes[(m)->m_type], (how));	\
-	if ((m)->m_ext_storage.ext_buf != NULL) {			\
-		MCLINITREFERENCE(m);					\
+	if ((m)->m_ext.ext_buf != NULL) {				\
 		(m)->m_data = (m)->m_ext.ext_buf;			\
 		(m)->m_flags = ((m)->m_flags & ~M_EXTCOPYFLAGS) |	\
 				M_EXT|M_EXT_RW;				\
-		(m)->m_ext.ext_flags = 0;				\
 		(m)->m_ext.ext_size = (size);				\
 		(m)->m_ext.ext_free = NULL;				\
 		(m)->m_ext.ext_arg = NULL;				\
 		(m)->m_ext.ext_type = mbtypes[(m)->m_type];		\
-		mowner_ref((m), M_EXT);					\
+		MCLINITREFERENCE(m);					\
+		MOWNERREF((m), M_EXT);					\
 	}								\
 } while (/* CONSTCOND */ 0)
 
 #define	MEXTADD(m, buf, size, type, free, arg)				\
 do {									\
-	MCLINITREFERENCE(m);						\
 	(m)->m_data = (m)->m_ext.ext_buf = (void *)(buf);		\
 	(m)->m_flags = ((m)->m_flags & ~M_EXTCOPYFLAGS) | M_EXT;	\
-	(m)->m_ext.ext_flags = 0;					\
 	(m)->m_ext.ext_size = (size);					\
 	(m)->m_ext.ext_free = (free);					\
 	(m)->m_ext.ext_arg = (arg);					\
 	(m)->m_ext.ext_type = (type);					\
-	mowner_ref((m), M_EXT);						\
+	MCLINITREFERENCE(m);						\
+	MOWNERREF((m), M_EXT);						\
+} while (/* CONSTCOND */ 0)
+
+#define	MEXTREMOVE(m)							\
+do {									\
+	int _ms_ = splvm(); /* MBUFLOCK */				\
+	_MOWNERREVOKE((m), 0, (m)->m_flags);				\
+	m_ext_free(m, FALSE);						\
+	splx(_ms_);							\
+	(m)->m_flags &= ~M_EXTCOPYFLAGS;				\
+	(m)->m_ext.ext_size = 0;	/* why ??? */			\
 } while (/* CONSTCOND */ 0)
 
 /*
@@ -543,16 +631,18 @@ do {									\
  * Place the successor, if any, in n.
  */
 #define	MFREE(m, n)							\
-	mowner_revoke((m), 1, (m)->m_flags);				\
-	mbstat_type_add((m)->m_type, -1);				\
-	if ((m)->m_flags & M_PKTHDR)					\
-		m_tag_delete_chain((m), NULL);				\
-	(n) = (m)->m_next;						\
-	if ((m)->m_flags & M_EXT) {					\
-		m_ext_free(m);						\
-	} else {							\
-		pool_cache_put(mb_cache, (m));				\
-	}								\
+	MBUFLOCK(							\
+		mbstat.m_mtypes[(m)->m_type]--;				\
+		if ((m)->m_flags & M_PKTHDR)				\
+			m_tag_delete_chain((m), NULL);			\
+		(n) = (m)->m_next;					\
+		_MOWNERREVOKE((m), 1, m->m_flags);			\
+		if ((m)->m_flags & M_EXT) {				\
+			m_ext_free(m, TRUE);				\
+		} else {						\
+			pool_cache_put(mb_cache, (m));			\
+		}							\
+	)
 
 /*
  * Copy mbuf pkthdr from `from' to `to'.
@@ -599,7 +689,7 @@ do {									\
 #define	M_READONLY(m)							\
 	(((m)->m_flags & M_EXT) != 0 &&					\
 	  (((m)->m_flags & (M_EXT_ROMAP|M_EXT_RW)) != M_EXT_RW ||	\
-	  (m)->m_ext.ext_refcnt > 1))
+	  MCLISREFERENCED(m)))
 
 #define	M_UNWRITABLE(__m, __len)					\
 	((__m)->m_len < (__len) || M_READONLY((__m)))
@@ -667,8 +757,7 @@ do {									\
 /* change mbuf to new type */
 #define MCHTYPE(m, t)							\
 do {									\
-	mbstat_type_add((m)->m_type, -1);				\
-	mbstat_type_add(t, 1);						\
+	MBUFLOCK(mbstat.m_mtypes[(m)->m_type]--; mbstat.m_mtypes[t]++;); \
 	(m)->m_type = t;						\
 } while (/* CONSTCOND */ 0)
 
@@ -756,10 +845,6 @@ struct mbstat {
 	u_short	m_mtypes[256];	/* type specific mbuf allocations */
 };
 
-struct mbstat_cpu {
-	u_int	m_mtypes[256];	/* type specific mbuf allocations */
-};
-
 /*
  * Mbuf sysctl variables.
  */
@@ -826,6 +911,9 @@ void	m_adj(struct mbuf *, int);
 int	m_apply(struct mbuf *, int, int,
 		int (*)(void *, void *, unsigned int), void *);
 void	m_cat(struct mbuf *,struct mbuf *);
+#ifdef MBUFTRACE
+void	m_claimm(struct mbuf *, struct mowner *);
+#endif
 void	m_clget(struct mbuf *, int);
 int	m_mballoc(int, int);
 void	m_copyback(struct mbuf *, int, int, const void *);
@@ -836,15 +924,11 @@ void	m_copydata(struct mbuf *, int, int, void *);
 void	m_freem(struct mbuf *);
 void	m_reclaim(void *, int);
 void	mbinit(void);
-void	m_ext_free(struct mbuf *);
-char *	m_mapin(struct mbuf *);
 void	m_move_pkthdr(struct mbuf *to, struct mbuf *from);
 
 /* Inline routines. */
-static __inline u_int m_length(const struct mbuf *) __unused;
-
-/* Statistics */
-void mbstat_type_add(int, int);
+static __inline u_int m_length(struct mbuf *) __unused;
+static __inline void m_ext_free(struct mbuf *, bool) __unused;
 
 /* Packet tag routines */
 struct	m_tag *m_tag_get(int, int, int);
@@ -866,8 +950,11 @@ struct	m_tag *m_tag_next(struct mbuf *, struct m_tag *);
 #define PACKET_TAG_VLAN				1  /* VLAN ID */
 #define PACKET_TAG_ENCAP			2  /* encapsulation data */
 #define PACKET_TAG_ESP				3  /* ESP information */
-#define PACKET_TAG_PF				11 /* packet filter */
-#define PACKET_TAG_ALTQ_QID			12 /* ALTQ queue id */
+#define PACKET_TAG_PF_GENERATED			11 /* PF generated, pass always */
+#define PACKET_TAG_PF_ROUTED			12 /* PF routed, no route loops */
+#define PACKET_TAG_PF_FRAGCACHE			13 /* PF fragment cached */
+#define PACKET_TAG_PF_QID			14 /* PF queue id */
+#define PACKET_TAG_PF_TAG			15 /* PF tags */
 
 #define PACKET_TAG_IPSEC_IN_CRYPTO_DONE		16
 #define PACKET_TAG_IPSEC_IN_DONE		17
@@ -879,24 +966,20 @@ struct	m_tag *m_tag_next(struct mbuf *, struct m_tag *);
 #define	PACKET_TAG_IPSEC_SOCKET			22 /* IPSEC socket ref */
 #define	PACKET_TAG_IPSEC_HISTORY		23 /* IPSEC history */
 
+#define	PACKET_TAG_PF_TRANSLATE_LOCALHOST	24 /* translated to localhost */
 #define	PACKET_TAG_IPSEC_NAT_T_PORTS		25 /* two uint16_t */
 
 #define	PACKET_TAG_INET6			26 /* IPv6 info */
 
 #define	PACKET_TAG_ECO_RETRYPARMS		27 /* Econet retry parameters */
 
-#define	PACKET_TAG_TUNNEL_INFO			28 /* tunnel identification and
-						    * protocol callback, for
-						    * loop detection/recovery
-						    */
-
 /*
  * Return the number of bytes in the mbuf chain, m.
  */
 static __inline u_int
-m_length(const struct mbuf *m)
+m_length(struct mbuf *m)
 {
-	const struct mbuf *m0;
+	struct mbuf *m0;
 	u_int pktlen;
 
 	if ((m->m_flags & M_PKTHDR) != 0)
@@ -906,6 +989,32 @@ m_length(const struct mbuf *m)
 	for (m0 = m; m0 != NULL; m0 = m0->m_next)
 		pktlen += m0->m_len;
 	return pktlen;
+}
+
+/*
+ * m_ext_free: release a reference to the mbuf external storage.
+ *
+ * => if 'dofree', free the mbuf m itsself as well.
+ * => called at splvm.
+ */
+static __inline void
+m_ext_free(struct mbuf *m, bool dofree)
+{
+
+	if (MCLISREFERENCED(m)) {
+		_MCLDEREFERENCE(m);
+	} else if (m->m_flags & M_CLUSTER) {
+		pool_cache_put_paddr((struct pool_cache *)m->m_ext.ext_arg,
+		    m->m_ext.ext_buf, m->m_ext.ext_paddr);
+	} else if (m->m_ext.ext_free) {
+		(*m->m_ext.ext_free)(dofree ? m : NULL, m->m_ext.ext_buf,
+		    m->m_ext.ext_size, m->m_ext.ext_arg);
+		dofree = FALSE;
+	} else {
+		free(m->m_ext.ext_buf, m->m_ext.ext_type);
+	}
+	if (dofree)
+		pool_cache_put(mb_cache, m);
 }
 
 void m_print(const struct mbuf *, const char *, void (*)(const char *, ...));

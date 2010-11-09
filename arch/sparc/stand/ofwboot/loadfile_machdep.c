@@ -1,4 +1,4 @@
-/*	$NetBSD: loadfile_machdep.c,v 1.6 2008/08/25 22:31:12 martin Exp $	*/
+/*	$NetBSD: loadfile_machdep.c,v 1.2 2006/03/04 03:03:31 uwe Exp $	*/
 
 /*-
  * Copyright (c) 2005 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -52,7 +59,6 @@ typedef int phandle_t;
 
 extern void	itlb_enter(vaddr_t, uint32_t, uint32_t);
 extern void	dtlb_enter(vaddr_t, uint32_t, uint32_t);
-extern void	dtlb_replace(vaddr_t, uint32_t, uint32_t);
 extern vaddr_t	itlb_va_to_pa(vaddr_t);
 extern vaddr_t	dtlb_va_to_pa(vaddr_t);
 
@@ -265,8 +271,12 @@ mmu_mapin(vaddr_t rva, vsize_t len)
 
 			dtlb_store[dtlb_slot].te_pa = pa;
 			dtlb_store[dtlb_slot].te_va = va;
+			itlb_store[itlb_slot].te_pa = pa;
+			itlb_store[itlb_slot].te_va = va;
 			dtlb_slot++;
+			itlb_slot++;
 			dtlb_enter(va, hi(data), lo(data));
+			itlb_enter(va, hi(data), lo(data));
 			pa = (vaddr_t)-1;
 		}
 
@@ -425,52 +435,6 @@ sparc64_memset(void *dst, int c, size_t size)
 }
 
 /*
- * Remove write permissions from text mappings in the dTLB.
- * Add entries in the iTLB.
- */
-void
-sparc64_finalize_tlb(u_long data_va)
-{
-	int i;
-	int64_t data;
-	bool writable_text = false;
-
-	for (i = 0; i < dtlb_slot; i++) {
-		if (dtlb_store[i].te_va >= data_va) {
-			/*
-			 * If (for whatever reason) the start of the
-			 * writable section is right at the start of
-			 * the kernel, we need to map it into the ITLB
-			 * nevertheless (and don't make it readonly).
-			 */
-			if (i == 0 && dtlb_store[i].te_va == data_va)
-				writable_text = true;
-			else
-				continue;
-		}
-
-		data = TSB_DATA(0,		/* global */
-				PGSZ_4M,	/* 4mb page */
-				dtlb_store[i].te_pa,	/* phys.address */
-				1,		/* privileged */
-				0,		/* write */
-				1,		/* cache */
-				1,		/* alias */
-				1,		/* valid */
-				0		/* endianness */
-				);
-		data |= TLB_L | TLB_CV; /* locked, virt.cache */
-		if (!writable_text)
-			dtlb_replace(dtlb_store[i].te_va, hi(data), lo(data));
-		itlb_store[itlb_slot] = dtlb_store[i];
-		itlb_slot++;
-		itlb_enter(dtlb_store[i].te_va, hi(data), lo(data));
-	}
-	if (writable_text)
-		printf("WARNING: kernel text mapped writable!\n");
-}
-
-/*
  * Record kernel mappings in bootinfo structure.
  */
 void
@@ -480,6 +444,11 @@ sparc64_bi_add(void)
 	int itlb_size, dtlb_size;
 	struct btinfo_count bi_count;
 	struct btinfo_tlb *bi_itlb, *bi_dtlb;
+
+#ifdef LOADER_DEBUG
+	pmap_print_tlb('i');
+	pmap_print_tlb('d');
+#endif
 
 	bi_count.count = itlb_slot;
 	bi_add(&bi_count, BTINFO_ITLB_SLOTS, sizeof(bi_count));

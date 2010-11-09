@@ -1,4 +1,4 @@
-/*	$NetBSD: promdev.c,v 1.22 2009/01/12 11:32:44 tsutsui Exp $ */
+/*	$NetBSD: promdev.c,v 1.20 2006/07/13 20:03:34 uwe Exp $ */
 
 /*
  * Copyright (c) 1993 Paul Kranenburg
@@ -45,7 +45,6 @@
 #include <machine/pte.h>
 
 #include <lib/libsa/stand.h>
-#include <lib/libsa/net.h>
 #include <lib/libkern/libkern.h>
 #include <sparc/stand/common/promdev.h>
 
@@ -199,17 +198,14 @@ devopen(struct open_file *f, const char *fname, char **file)
 		*file = (char *)fname;
 
 	if (pd->devtype == DT_NET) {
-		nfsys = 1;
-		memcpy(file_system, file_system_nfs,
-		    sizeof(struct fs_ops) * nfsys);
+		bcopy(file_system_nfs, file_system, sizeof(struct fs_ops));
 		if ((error = net_open(pd)) != 0) {
 			printf("Can't open NFS network connection on `%s'\n",
 				prom_bootdevice);
 			return (error);
 		}
 	} else {
-		memcpy(file_system, file_system_ufs,
-		    sizeof(struct fs_ops) * nfsys);
+		bcopy(file_system_ufs, file_system, sizeof(struct fs_ops));
 
 #ifdef NOTDEF_DEBUG
 	printf("devopen: Checking disklabel for RAID partition\n");
@@ -506,7 +502,7 @@ getchar(void)
 	return (prom_getchar());
 }
 
-satime_t
+time_t
 getsecs(void)
 {
 

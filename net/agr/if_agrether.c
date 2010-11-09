@@ -1,4 +1,4 @@
-/*	$NetBSD: if_agrether.c,v 1.6 2007/08/26 22:59:09 dyoung Exp $	*/
+/*	$NetBSD: if_agrether.c,v 1.3 2005/12/11 12:24:54 christos Exp $	*/
 
 /*-
  * Copyright (c)2005 YAMAMOTO Takashi,
@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_agrether.c,v 1.6 2007/08/26 22:59:09 dyoung Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_agrether.c,v 1.3 2005/12/11 12:24:54 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/callout.h>
@@ -57,9 +57,9 @@ static int agrether_portfini(struct agr_softc *, struct agr_port *);
 static struct agr_port *agrether_select_tx_port(struct agr_softc *,
     struct mbuf *);
 static int agrether_configmulti_port(struct agr_softc *, struct agr_port *,
-    bool);
+    boolean_t);
 static int agrether_configmulti_ifreq(struct agr_softc *, struct ifreq *,
-    bool);
+    boolean_t);
 
 const struct agr_iftype_ops agrether_ops = {
 	.iftop_tick = NULL,
@@ -99,7 +99,7 @@ agrether_ctor(struct agr_softc *sc, struct ifnet *ifp_port)
 
 	sc->sc_iftprivate = priv;
 
-	ether_ifattach(ifp, CLLADDR(ifp_port->if_sadl));
+	ether_ifattach(ifp, LLADDR(ifp_port->if_sadl));
 	ec->ec_capabilities =
 	    ETHERCAP_VLAN_MTU | ETHERCAP_VLAN_HWTAGGING | ETHERCAP_JUMBO_MTU;
 
@@ -169,7 +169,7 @@ agrether_portinit(struct agr_softc *sc, struct agr_port *port)
 	memcpy(&ifr.ifr_addr.sa_data,
 	    &ethermulticastaddr_slowprotocols, 
 	    sizeof(ethermulticastaddr_slowprotocols));
-	error = agrport_ioctl(port, SIOCADDMULTI, (void *)&ifr);
+	error = agrport_ioctl(port, SIOCADDMULTI, (caddr_t)&ifr);
 	if (error) {
 		free(port->port_iftprivate, M_DEVBUF);
 		port->port_iftprivate = NULL;
@@ -199,7 +199,7 @@ agrether_portfini(struct agr_softc *sc, struct agr_port *port)
 	memcpy(&ifr.ifr_addr.sa_data,
 	    &ethermulticastaddr_slowprotocols, 
 	    sizeof(ethermulticastaddr_slowprotocols));
-	error = agrport_ioctl(port, SIOCDELMULTI, (void *)&ifr);
+	error = agrport_ioctl(port, SIOCDELMULTI, (caddr_t)&ifr);
 	if (error) {
 		return error;
 	}
@@ -214,7 +214,7 @@ agrether_portfini(struct agr_softc *sc, struct agr_port *port)
 
 static int
 agrether_configmulti_port(struct agr_softc *sc, struct agr_port *port,
-    bool add)
+    boolean_t add)
 {
 	struct agrether_private *priv = sc->sc_iftprivate;
 
@@ -223,7 +223,7 @@ agrether_configmulti_port(struct agr_softc *sc, struct agr_port *port,
 
 static int
 agrether_configmulti_ifreq(struct agr_softc *sc, struct ifreq *ifr,
-    bool add)
+    boolean_t add)
 {
 	struct agrether_private *priv = sc->sc_iftprivate;
 

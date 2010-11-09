@@ -1,4 +1,4 @@
-/*	$NetBSD: saframe.h,v 1.7 2008/10/15 06:52:38 wrstuden Exp $ */
+/*	$NetBSD: saframe.h,v 1.2 2003/01/17 23:18:28 thorpej Exp $ */
 
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.

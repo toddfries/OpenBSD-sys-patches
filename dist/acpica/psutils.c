@@ -1,7 +1,7 @@
 /******************************************************************************
  *
  * Module Name: psutils - Parser miscellaneous utilities (Parser only)
- *              $Revision: 1.4 $
+ *              xRevision: 1.67 $
  *
  *****************************************************************************/
 
@@ -9,7 +9,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2008, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2006, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -115,6 +115,9 @@
  *****************************************************************************/
 
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: psutils.c,v 1.1 2006/03/23 13:36:31 kochi Exp $");
+
 #include "acpi.h"
 #include "acparser.h"
 #include "amlcode.h"
@@ -174,7 +177,7 @@ AcpiPsInitOp (
     ACPI_FUNCTION_ENTRY ();
 
 
-    Op->Common.DescriptorType = ACPI_DESC_TYPE_PARSER;
+    Op->Common.DataType = ACPI_DESC_TYPE_PARSER;
     Op->Common.AmlOpcode = Opcode;
 
     ACPI_DISASM_ONLY_MEMBERS (ACPI_STRNCPY (Op->Common.AmlOpName,
@@ -270,7 +273,7 @@ void
 AcpiPsFreeOp (
     ACPI_PARSE_OBJECT       *Op)
 {
-    ACPI_FUNCTION_NAME (PsFreeOp);
+    ACPI_FUNCTION_NAME ("PsFreeOp");
 
 
     if (Op->Common.AmlOpcode == AML_INT_RETURN_VALUE_OP)

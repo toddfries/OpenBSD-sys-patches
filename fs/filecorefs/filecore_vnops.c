@@ -1,4 +1,4 @@
-/*	$NetBSD: filecore_vnops.c,v 1.28 2008/11/26 20:17:33 pooka Exp $	*/
+/*	$NetBSD: filecore_vnops.c,v 1.18 2006/05/15 01:29:02 christos Exp $	*/
 
 /*-
  * Copyright (c) 1994 The Regents of the University of California.
@@ -66,7 +66,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: filecore_vnops.c,v 1.28 2008/11/26 20:17:33 pooka Exp $");
+__KERNEL_RCSID(0, "$NetBSD: filecore_vnops.c,v 1.18 2006/05/15 01:29:02 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -104,6 +104,7 @@ filecore_access(v)
 		struct vnode *a_vp;
 		int  a_mode;
 		kauth_cred_t a_cred;
+		struct lwp *a_l;
 	} */ *ap = v;
 	struct vnode *vp = ap->a_vp;
 	struct filecore_node *ip = VTOI(vp);
@@ -137,6 +138,7 @@ filecore_getattr(v)
 		struct vnode *a_vp;
 		struct vattr *a_vap;
 		kauth_cred_t a_cred;
+		struct lwp *a_l;
 	} */ *ap = v;
 	struct vnode *vp = ap->a_vp;
 	struct filecore_node *ip = VTOI(vp);
@@ -201,14 +203,19 @@ filecore_read(v)
 		error = 0;
 
 		while (uio->uio_resid > 0) {
+			void *win;
+			int flags;
 			vsize_t bytelen = MIN(ip->i_size - uio->uio_offset,
 					      uio->uio_resid);
 
 			if (bytelen == 0) {
 				break;
 			}
-			error = ubc_uiomove(&vp->v_uobj, uio, bytelen, advice,
-			    UBC_READ | UBC_PARTIALOK | UBC_UNMAP_FLAG(vp));
+			win = ubc_alloc(&vp->v_uobj, uio->uio_offset,
+					&bytelen, advice, UBC_READ);
+			error = uiomove(win, bytelen, uio);
+			flags = UBC_WANT_UNMAP(vp) ? UBC_UNMAP : 0;
+			ubc_release(win, flags);
 			if (error) {
 				break;
 			}
@@ -233,10 +240,10 @@ filecore_read(v)
 			n = MIN(FILECORE_DIR_SIZE - on, uio->uio_resid);
 			size = FILECORE_DIR_SIZE;
 		} else {
-			error = bread(vp, lbn, size, NOCRED, 0, &bp);
+			error = bread(vp, lbn, size, NOCRED, &bp);
 #ifdef FILECORE_DEBUG_BR
-			printf("bread(%p, %llx, %ld, CRED, %p)=%d\n",
-			    vp, (long long)lbn, size, bp, error);
+			printf("bread(%p, %x, %ld, CRED, %p)=%d\n",
+			    vp, lbn, size, bp, error);
 #endif
 		}
 		n = MIN(n, size - bp->b_resid);
@@ -244,15 +251,15 @@ filecore_read(v)
 #ifdef FILECORE_DEBUG_BR
 			printf("brelse(%p) vn1\n", bp);
 #endif
-			brelse(bp, 0);
+			brelse(bp);
 			return (error);
 		}
 
-		error = uiomove((char *)(bp->b_data) + on, (int)n, uio);
+		error = uiomove(bp->b_data + on, (int)n, uio);
 #ifdef FILECORE_DEBUG_BR
 		printf("brelse(%p) vn2\n", bp);
 #endif
-		brelse(bp, 0);
+		brelse(bp);
 	} while (error == 0 && uio->uio_resid > 0 && n != 0);
 
 out:
@@ -279,7 +286,7 @@ filecore_readdir(v)
 	struct filecore_node *dp;
 	struct filecore_mnt *fcmp;
 	struct buf *bp = NULL;
-	struct dirent *de;
+	struct dirent de;
 	struct filecore_direntry *dep = NULL;
 	int error = 0;
 	off_t *cookies = NULL;
@@ -302,7 +309,7 @@ filecore_readdir(v)
 
 	error = filecore_dbread(dp, &bp);
 	if (error) {
-		brelse(bp, 0);
+		brelse(bp);
 		return error;
 	}
 
@@ -310,48 +317,46 @@ filecore_readdir(v)
 		cookies = NULL;
 	else {
 		*ap->a_ncookies = 0;
-		ncookies = uio->uio_resid / _DIRENT_MINSIZE((struct dirent *)0);
+		ncookies = uio->uio_resid/16;
 		cookies = malloc(ncookies * sizeof(off_t), M_TEMP, M_WAITOK);
 	}
-
-	de = malloc(sizeof(struct dirent), M_FILECORETMP, M_WAITOK | M_ZERO);
 
 	for (; ; i++) {
 		switch (i) {
 		case 0:
 			/* Fake the '.' entry */
-			de->d_fileno = dp->i_number;
-			de->d_type = DT_DIR;
-			de->d_namlen = 1;
-			strlcpy(de->d_name, ".", sizeof(de->d_name));
+			de.d_fileno = dp->i_number;
+			de.d_type = DT_DIR;
+			de.d_namlen = 1;
+			strlcpy(de.d_name, ".", sizeof(de.d_name));
 			break;
 		case 1:
 			/* Fake the '..' entry */
-			de->d_fileno = filecore_getparent(dp);
-			de->d_type = DT_DIR;
-			de->d_namlen = 2;
-			strlcpy(de->d_name, "..", sizeof(de->d_name));
+			de.d_fileno = filecore_getparent(dp);
+			de.d_type = DT_DIR;
+			de.d_namlen = 2;
+			strlcpy(de.d_name, "..", sizeof(de.d_name));
 			break;
 		default:
-			de->d_fileno = dp->i_dirent.addr +
+			de.d_fileno = dp->i_dirent.addr +
 					((i - 2) << FILECORE_INO_INDEX);
 			dep = fcdirentry(bp->b_data, i - 2);
 			if (dep->attr & FILECORE_ATTR_DIR)
-				de->d_type = DT_DIR;
+				de.d_type = DT_DIR;
 			else
-				de->d_type = DT_REG;
-			if (filecore_fn2unix(dep->name, de->d_name,
+				de.d_type = DT_REG;
+			if (filecore_fn2unix(dep->name, de.d_name,
 /*###346 [cc] warning: passing arg 3 of `filecore_fn2unix' from incompatible pointer type%%%*/
-			    &de->d_namlen)) {
+			    &de.d_namlen)) {
 				*ap->a_eofflag = 1;
 				goto out;
 			}
 			break;
 		}
-		de->d_reclen = _DIRENT_SIZE(de);
-		if (uio->uio_resid < de->d_reclen)
+		de.d_reclen = _DIRENT_SIZE(&de);
+		if (uio->uio_resid < de.d_reclen)
 			goto out;
-		error = uiomove(de, de->d_reclen, uio);
+		error = uiomove(&de, de.d_reclen, uio);
 		if (error)
 			goto out;
 		uiooff += FILECORE_DIRENT_SIZE;
@@ -376,9 +381,7 @@ out:
 #ifdef FILECORE_DEBUG_BR
 	printf("brelse(%p) vn3\n", bp);
 #endif
-	brelse (bp, 0);
-
-	free(de, M_FILECORETMP);
+	brelse (bp);
 
 	return (error);
 }
@@ -458,6 +461,7 @@ filecore_strategy(v)
 		error = VOP_BMAP(vp, bp->b_lblkno, NULL, &bp->b_blkno, NULL);
 		if (error) {
 			bp->b_error = error;
+			bp->b_flags |= B_ERROR;
 			biodone(bp);
 			return (error);
 		}
@@ -532,6 +536,7 @@ filecore_pathconf(v)
 #define	filecore_mknod	genfs_eopnotsupp
 #define	filecore_write	genfs_eopnotsupp
 #define	filecore_setattr	genfs_eopnotsupp
+#define	filecore_lease_check	genfs_lease_check
 #define	filecore_fcntl	genfs_fcntl
 #define	filecore_ioctl	genfs_enoioctl
 #define	filecore_fsync	genfs_nullop
@@ -559,6 +564,7 @@ const struct vnodeopv_entry_desc filecore_vnodeop_entries[] = {
 	{ &vop_setattr_desc, filecore_setattr },	/* setattr */
 	{ &vop_read_desc, filecore_read },		/* read */
 	{ &vop_write_desc, filecore_write },		/* write */
+	{ &vop_lease_desc, filecore_lease_check },	/* lease */
 	{ &vop_fcntl_desc, filecore_fcntl },		/* fcntl */
 	{ &vop_ioctl_desc, filecore_ioctl },		/* ioctl */
 	{ &vop_poll_desc, filecore_poll },		/* poll */

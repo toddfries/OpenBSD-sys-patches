@@ -1,4 +1,4 @@
-/*	$NetBSD: osiop_pcctwo.c,v 1.13 2008/04/28 20:23:54 martin Exp $	*/
+/*	$NetBSD: osiop_pcctwo.c,v 1.11 2007/10/19 12:00:37 ad Exp $	*/
 
 /*-
  * Copyright (c) 1999, 2002 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -35,7 +42,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: osiop_pcctwo.c,v 1.13 2008/04/28 20:23:54 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: osiop_pcctwo.c,v 1.11 2007/10/19 12:00:37 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -56,24 +63,28 @@ __KERNEL_RCSID(0, "$NetBSD: osiop_pcctwo.c,v 1.13 2008/04/28 20:23:54 martin Exp
 #include <dev/mvme/pcctworeg.h>
 #include <dev/mvme/pcctwovar.h>
 
-#include "ioconf.h"
 
-int osiop_pcctwo_match(device_t, cfdata_t, void *);
-void osiop_pcctwo_attach(device_t, device_t, void *);
+int osiop_pcctwo_match(struct device *, struct cfdata *, void *);
+void osiop_pcctwo_attach(struct device *, struct device *, void *);
 
 struct osiop_pcctwo_softc {
 	struct osiop_softc	sc_osiop;
 	struct evcnt		sc_evcnt;
 };
 
-CFATTACH_DECL_NEW(osiop_pcctwo, sizeof(struct osiop_pcctwo_softc),
+CFATTACH_DECL(osiop_pcctwo, sizeof(struct osiop_pcctwo_softc),
     osiop_pcctwo_match, osiop_pcctwo_attach, NULL, NULL);
 
 static int osiop_pcctwo_intr(void *);
 
+extern struct cfdriver osiop_cd;
+
 /* ARGSUSED */
 int
-osiop_pcctwo_match(device_t parent, cfdata_t cf, void *args)
+osiop_pcctwo_match(parent, cf, args)
+	struct device *parent;
+	struct cfdata *cf;
+	void *args;
 {
 	struct pcctwo_attach_args *pa;
 	bus_space_handle_t bsh;
@@ -101,14 +112,17 @@ osiop_pcctwo_match(device_t parent, cfdata_t cf, void *args)
 
 /* ARGSUSED */
 void
-osiop_pcctwo_attach(device_t parent, device_t self, void *aux)
+osiop_pcctwo_attach(parent, self, args)
+	struct device *parent;
+	struct device *self;
+	void *args;
 {
 	struct pcctwo_attach_args *pa;
 	struct osiop_pcctwo_softc *sc;
 	int clk, ctest7;
 
+	pa = (struct pcctwo_attach_args *) args;
 	sc = device_private(self);
-	pa = aux;
 
 	/*
 	 * On the '17x the siop's clock is the same as the CPU clock.
@@ -143,8 +157,7 @@ osiop_pcctwo_attach(device_t parent, device_t self, void *aux)
 
 	/* Register the event counter */
 	evcnt_attach_dynamic(&sc->sc_evcnt, EVCNT_TYPE_INTR,
-	    pcctwointr_evcnt(pa->pa_ipl), "disk",
-	    device_xname(sc->sc_osiop.sc_dev));
+	    pcctwointr_evcnt(pa->pa_ipl), "disk", sc->sc_osiop.sc_dev.dv_xname);
 
 	/* Hook the chip's interrupt */
 	pcctwointr_establish(PCCTWOV_SCSI, osiop_pcctwo_intr, pa->pa_ipl, sc,
@@ -152,9 +165,10 @@ osiop_pcctwo_attach(device_t parent, device_t self, void *aux)
 }
 
 static int
-osiop_pcctwo_intr(void *arg)
+osiop_pcctwo_intr(arg)
+	void *arg;
 {
-	struct osiop_pcctwo_softc *sc = arg;
+	struct osiop_pcctwo_softc *sc = (struct osiop_pcctwo_softc *) arg;
 	u_char istat;
 
 	/*
@@ -164,7 +178,7 @@ osiop_pcctwo_intr(void *arg)
 	istat = pcc2_reg_read(sys_pcctwo, PCC2REG_SCSI_ERR_STATUS);
 	if ((istat & PCCTWO_ERR_SR_MASK) != 0) {
 		printf("%s: Local bus error: 0x%02x\n",
-		    device_xname(sc->sc_osiop.sc_dev), istat);
+		    sc->sc_osiop.sc_dev.dv_xname, istat);
 		istat |= PCCTWO_ERR_SR_SCLR;
 		pcc2_reg_write(sys_pcctwo, PCC2REG_SCSI_ERR_STATUS, istat);
 	}

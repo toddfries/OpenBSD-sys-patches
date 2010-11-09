@@ -1,4 +1,4 @@
-/*	$NetBSD: pow.c,v 1.23 2009/01/18 04:48:53 isaki Exp $	*/
+/*	$NetBSD: pow.c,v 1.14 2005/12/11 12:19:37 christos Exp $	*/
 
 /*
  * Copyright (c) 1995 MINOURA Makoto.
@@ -38,46 +38,33 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: pow.c,v 1.23 2009/01/18 04:48:53 isaki Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pow.c,v 1.14 2005/12/11 12:19:37 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/device.h>
+#include <sys/proc.h>
 #include <sys/ioctl.h>
 #include <sys/time.h>
 #include <sys/kernel.h>
 #include <sys/fcntl.h>
 #include <sys/signalvar.h>
 #include <sys/conf.h>
-#include <sys/bus.h>
-#include <sys/device.h>
 
-#include <dev/sysmon/sysmonvar.h>
-#include <dev/sysmon/sysmon_taskq.h>
-
-#include <machine/cpu.h>
 #include <machine/powioctl.h>
-#include <x68k/dev/intiovar.h>
-#include <x68k/dev/mfp.h>
 #include <x68k/dev/powvar.h>
 #include <x68k/x68k/iodevice.h>
+#include "pow.h"
 
 #define sramtop (IODEVbase->io_sram)
 #define rtc (IODEVbase->io_rtc)
 
-extern struct cfdriver pow_cd;
+struct pow_softc pows[NPOW];
 
-static int  pow_match(device_t, cfdata_t, void *);
-static void pow_attach(device_t, device_t, void *);
-static int  powintr(void *);
+void powattach(int);
+void powintr(void);
 static int setalarm(struct x68k_alarminfo *);
-static void pow_pressed_event(void *);
+
 static void pow_check_switch(void *);
-
-CFATTACH_DECL_NEW(pow, sizeof(struct pow_softc),
-    pow_match, pow_attach, NULL, NULL);
-
-static int pow_attached;
 
 dev_type_open(powopen);
 dev_type_close(powclose);
@@ -88,81 +75,64 @@ const struct cdevsw pow_cdevsw = {
 	nostop, notty, nopoll, nommap, nokqfilter,
 };
 
-static int
-pow_match(device_t parent, cfdata_t cf, void *aux)
+/* ARGSUSED */
+void 
+powattach(int num)
 {
-	if (pow_attached)
-		return 0;
+	int minor;
+	int sw;
 
-	return 1;
-}
+	sw = ~mfp.gpip & 7;
 
-static void
-pow_attach(device_t parent, device_t self, void *aux)
-{
-	struct pow_softc *sc = device_private(self);
-	struct mfp_softc *mfp = device_private(parent);
+	mfp.ierb &= ~7;		/* disable mfp power switch interrupt */
+	mfp.aer &= ~7;
 
-	sc->sw = ~mfp_get_gpip() & 7;
-	/* disable mfp power switch interrupt */
-	mfp_bit_clear_ierb(7);
-	mfp_bit_clear_aer(7);
+	for (minor = 0; minor < num; minor++) {
+		if (minor == 0)
+			pows[minor].status = POW_FREE;
+		else
+			pows[minor].status = POW_ANY;
 
-	sc->status = POW_FREE;
+		pows[minor].sw = sw;
 
-	if (sc->sw) {
-		mfp_bit_set_aer(sc->sw);
-		mfp_bit_set_ierb(sc->sw);
+		if (sw) {
+			mfp.aer |= sw;
+			mfp.ierb |= sw;
+		}
+
+		printf("pow%d: started by ", minor);
+		if (sw & POW_EXTERNALSW)
+			printf ("external power switch.\n");
+		else if (sw & POW_FRONTSW)
+			printf ("front power switch.\n");
+		/* XXX: I don't know why POW_ALARMSW should not be checked */
+#if 0
+		else if ((sw & POW_ALARMSW) && sramtop[0x26] == 0)
+			printf ("RTC alarm.\n");
+		else
+			printf ("???.\n");
+#else
+		else
+			printf ("RTC alarm.\n");
+#endif
 	}
 
-	sysmon_task_queue_init();
-	sc->smpsw.smpsw_name = device_xname(self);
-	sc->smpsw.smpsw_type = PSWITCH_TYPE_POWER;
-	if (sysmon_pswitch_register(&sc->smpsw) != 0)
-		panic("can't register with sysmon");
-
-	/* MFP interrupt #1 for ext, #2 for front power switch */
-	if (intio_intr_establish(mfp->sc_intr + 1, "powext", powintr, sc) < 0)
-		panic("%s: can't establish interrupt", device_xname(self));
-	if (intio_intr_establish(mfp->sc_intr + 2, "powfrt", powintr, sc) < 0)
-		panic("%s: can't establish interrupt", device_xname(self));
-
 	shutdownhook_establish(pow_check_switch, 0);
-
-	printf("\n");
-	printf("%s: started by ", device_xname(self));
-	if (sc->sw & POW_EXTERNALSW)
-		printf("external power switch.\n");
-	else if (sc->sw & POW_FRONTSW)
-		printf("front power switch.\n");
-	/* XXX: I don't know why POW_ALARMSW should not be checked */
-#if 0
-	else if ((sc->sw & POW_ALARMSW) && sramtop[0x26] == 0)
-		printf("RTC alarm.\n");
-	else
-		printf("???.\n");
-#else
-	else
-		printf("RTC alarm.\n");
-#endif
-
-	pow_attached = 1;
 }
 
-
 /*ARGSUSED*/
-int
+int 
 powopen(dev_t dev, int flags, int mode, struct lwp *l)
 {
-	struct pow_softc *sc;
-  
-	sc = device_lookup_private(&pow_cd, minor(dev));
-	if (sc == NULL)
-		return ENXIO;
+	struct pow_softc *sc = &pows[minor(dev)];
+
+	if (minor(dev) >= NPOW)
+		return EXDEV;
 
 	if (sc->status == POW_BUSY)
 		return EBUSY;
 
+	sc->pid = 0;
 	if (sc->status == POW_FREE)
 		sc->status = POW_BUSY;
 
@@ -172,17 +142,14 @@ powopen(dev_t dev, int flags, int mode, struct lwp *l)
 }
 
 /*ARGSUSED*/
-int
+int 
 powclose(dev_t dev, int flags, int mode, struct lwp *l)
 {
-	struct pow_softc *sc;
-
-	sc = device_lookup_private(&pow_cd, minor(dev));
-	if (sc == NULL)
-		return ENXIO;
+	struct pow_softc *sc = &pows[minor(dev)];
 
 	if (sc->status == POW_BUSY)
 		sc->status = POW_FREE;
+	sc->pid = 0;
 
 	return 0;
 }
@@ -190,23 +157,23 @@ powclose(dev_t dev, int flags, int mode, struct lwp *l)
 #define SRAMINT(offset)	(*((volatile int *) (&sramtop[offset])))
 #define RTCWAIT DELAY(100)
 
-static int
+static int 
 setalarm(struct x68k_alarminfo *bp)
 {
 	int s, ontime;
 
-	s = splclock();
+	s = splclock ();
 
-	intio_set_sysport_sramwp(0x31);
+	sysport.sramwp = 0x31;
 	if (bp->al_enable) {
-		SRAMINT(0x1e) = bp->al_dowhat;
-		SRAMINT(0x22) = bp->al_ontime;
-		SRAMINT(0x14) = (bp->al_offtime / 60) - 1;
+		SRAMINT (0x1e) = bp->al_dowhat;
+		SRAMINT (0x22) = bp->al_ontime;
+		SRAMINT (0x14) = (bp->al_offtime / 60) - 1;
 		sramtop[0x26] = 0;
 	} else {
 		sramtop[0x26] = 7;
 	}
-	intio_set_sysport_sramwp(0);
+	sysport.sramwp = 0;
 
 	rtc.bank0.mode = 9;
 	RTCWAIT;
@@ -257,14 +224,10 @@ setalarm(struct x68k_alarminfo *bp)
 
 
 /*ARGSUSED*/
-int
-powioctl(dev_t dev, u_long cmd, void *addr, int flag, struct lwp *l)
+int 
+powioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct lwp *l)
 {
-	struct pow_softc *sc;
-
-	sc = device_lookup_private(&pow_cd, minor(dev));
-	if (sc == NULL)
-		return ENXIO;
+	struct pow_softc *sc = &pows[minor(dev)];
 
 	switch (cmd) {
 	case POWIOCGPOWERINFO:
@@ -273,10 +236,10 @@ powioctl(dev_t dev, u_long cmd, void *addr, int flag, struct lwp *l)
 			if (!(sc->rw & FREAD))
 				return EBADF;
 			bp->pow_switch_boottime = sc->sw;
-			bp->pow_switch_current = ~mfp_get_gpip() & 7;
+			bp->pow_switch_current = ~mfp.gpip & 7;
 			bp->pow_boottime = boottime.tv_sec;
-			bp->pow_bootcount = SRAMINT(0x44);
-			bp->pow_usedtotal = SRAMINT(0x40) * 60;
+			bp->pow_bootcount = SRAMINT (0x44);
+			bp->pow_usedtotal = SRAMINT (0x40) * 60;
 		}
 		break;
 
@@ -286,9 +249,9 @@ powioctl(dev_t dev, u_long cmd, void *addr, int flag, struct lwp *l)
 			if (!(sc->rw & FREAD))
 				return EBADF;
 			bp->al_enable = (sramtop[0x26] == 0);
-			bp->al_ontime = SRAMINT(0x22);
-			bp->al_dowhat = SRAMINT(0x1e);
-			bp->al_offtime = (SRAMINT(0x14) + 1) * 60;
+			bp->al_ontime = SRAMINT (0x22);
+			bp->al_dowhat = SRAMINT (0x1e);
+			bp->al_offtime = (SRAMINT (0x14) + 1) * 60;
 		}
 		break;
 
@@ -297,6 +260,22 @@ powioctl(dev_t dev, u_long cmd, void *addr, int flag, struct lwp *l)
 			return EBADF;
 		return setalarm ((void *) addr);
 
+	case POWIOCSSIGNAL:
+		if (minor(dev) != 0)
+			return EOPNOTSUPP;
+		if (!(sc->rw & FWRITE))
+			return EBADF;
+		{
+			int signum = *(int *) addr;
+			if (signum <= 0 || signum > 31)
+				return EINVAL;
+
+			sc->signum = signum;
+			sc->proc = l->l_proc;
+			sc->pid = l->l_proc->p_pid;
+		}
+
+		break;
 	default:
 		return EINVAL;
 	}
@@ -304,34 +283,29 @@ powioctl(dev_t dev, u_long cmd, void *addr, int flag, struct lwp *l)
 	return 0;
 }
 
-static int
-powintr(void *arg)
+void 
+powintr(void)
 {
-	struct pow_softc *sc = arg;
 	int sw;
+	int s;
 
-	sw = ~mfp_get_gpip() & 6;
-	mfp_bit_clear_aer(sw);
-	mfp_bit_set_ierb(sw);
+	s = spl6();
 
-	sysmon_task_queue_sched(0, pow_pressed_event, sc);
+	sw = ~mfp.gpip & 6;
+	mfp.aer &= ~sw;
+	mfp.ierb |= sw;
 
-	return 0;
+	if (pows[0].status == POW_BUSY && pows[0].pid != 0)
+		psignal(pows[0].proc, pows[0].signum);
+
+	splx(s);
 }
 
-static void
-pow_pressed_event(void *arg)
-{
-	struct pow_softc *sc = arg;
-
-	sysmon_pswitch_event(&sc->smpsw, PSWITCH_EVENT_PRESSED);
-}
-
-static void
+static void 
 pow_check_switch(void *dummy)
 {
 	extern int power_switch_is_off;
 
-	if ((~mfp_get_gpip() & (POW_FRONTSW | POW_EXTERNALSW)) == 0)
+	if ((~mfp.gpip & (POW_FRONTSW | POW_EXTERNALSW)) == 0)
 		power_switch_is_off = 1;
 }

@@ -1,4 +1,4 @@
-/*	$NetBSD: queue.h,v 1.50 2008/11/18 12:59:58 darran Exp $	*/
+/*	$NetBSD: queue.h,v 1.47 2007/07/18 12:07:35 joerg Exp $	*/
 
 /*
  * Copyright (c) 1991, 1993
@@ -306,14 +306,6 @@ struct {								\
 		(var);							\
 		(var) = ((var)->field.stqe_next))
 
-#define	STAILQ_CONCAT(head1, head2) do {				\
-	if (!STAILQ_EMPTY((head2))) {					\
-		*(head1)->stqh_last = (head2)->stqh_first;		\
-		(head1)->stqh_last = (head2)->stqh_last;		\
-		STAILQ_INIT((head2));					\
-	}								\
-} while (/*CONSTCOND*/0)
-
 /*
  * Singly-linked Tail queue access methods.
  */
@@ -510,29 +502,10 @@ struct {								\
 		(var);							\
 		(var) = ((var)->field.tqe_next))
 
-#define	TAILQ_FOREACH_SAFE(var, head, field, next)			\
-	for ((var) = ((head)->tqh_first);				\
-	        (var) != NULL && ((next) = TAILQ_NEXT(var, field), 1);	\
-		(var) = (next))
-
 #define	TAILQ_FOREACH_REVERSE(var, head, headname, field)		\
 	for ((var) = (*(((struct headname *)((head)->tqh_last))->tqh_last));	\
 		(var);							\
 		(var) = (*(((struct headname *)((var)->field.tqe_prev))->tqh_last)))
-
-#define	TAILQ_FOREACH_REVERSE_SAFE(var, head, headname, field, prev)	\
-	for ((var) = TAILQ_LAST((head), headname);			\
-		(var) && ((prev) = TAILQ_PREV((var), headname, field), 1);\
-		(var) = (prev))
-
-#define	TAILQ_CONCAT(head1, head2, field) do {				\
-	if (!TAILQ_EMPTY(head2)) {					\
-		*(head1)->tqh_last = (head2)->tqh_first;		\
-		(head2)->tqh_first->field.tqe_prev = (head1)->tqh_last;	\
-		(head1)->tqh_last = (head2)->tqh_last;			\
-		TAILQ_INIT((head2));					\
-	}								\
-} while (/*CONSTCOND*/0)
 
 /*
  * Tail queue access methods.

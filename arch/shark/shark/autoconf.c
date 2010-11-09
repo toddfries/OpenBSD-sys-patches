@@ -1,4 +1,4 @@
-/*	$NetBSD: autoconf.c,v 1.14 2008/06/11 23:31:35 rafal Exp $	*/
+/*	$NetBSD: autoconf.c,v 1.6 2005/12/11 12:19:05 christos Exp $	*/
 
 /*
  * Copyright (c) 1994-1998 Mark Brinicombe.
@@ -43,7 +43,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.14 2008/06/11 23:31:35 rafal Exp $");
+__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.6 2005/12/11 12:19:05 christos Exp $");
 
 #include "opt_md.h"
 
@@ -55,10 +55,8 @@ __KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.14 2008/06/11 23:31:35 rafal Exp $");
 #include <sys/conf.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
-#include <arm/arm32/machdep.h>
 #include <machine/bootconfig.h>
 #include <machine/intr.h>
-#include <machine/irqhandler.h>
 
 #include "isa.h"
 
@@ -93,8 +91,8 @@ get_device(name)
 	char *name;
 {
 	int unit, part;
-	char devname[16], *cp;
-	device_t dv;
+	char devname[16], buf[32], *cp;
+	struct device *dv;
 
 	if (strncmp(name, "/dev/", 5) == 0)
 		name += 5;
@@ -115,9 +113,13 @@ get_device(name)
 		part = *cp - 'a';
 	else if (*cp != '\0' && *cp != ' ')
 		return;
-	if ((dv = device_find_by_driver_unit(devname, unit)) != NULL) {
-		booted_device = dv;
-		booted_partition = part;
+	sprintf(buf, "%s%d", devname, unit);
+	for (dv = alldevs.tqh_first; dv != NULL; dv = dv->dv_list.tqe_next) {
+		if (strcmp(buf, dv->dv_xname) == 0) {
+			booted_device = dv;
+			booted_partition = part;
+			return;
+		}
 	}
 }
 
@@ -191,9 +193,15 @@ cpu_configure()
 	ofrootfound();
 #endif
 
-#if defined(DIAGNOSTIC)
-	dump_spl_masks();
-#endif /* defined(DIAGNOSTIC) */
+	/* Debugging information */
+#ifndef TERSE
+	printf("ipl_bio=%08x ipl_net=%08x ipl_tty=%08x ipl_vm=%08x\n",
+	    irqmasks[IPL_BIO], irqmasks[IPL_NET], irqmasks[IPL_TTY],
+	    irqmasks[IPL_VM]);
+	printf("ipl_audio=%08x ipl_imp=%08x ipl_high=%08x ipl_serial=%08x\n",
+	    irqmasks[IPL_AUDIO], irqmasks[IPL_CLOCK], irqmasks[IPL_HIGH],
+	    irqmasks[IPL_SERIAL]);
+#endif
 
 	/* Time to start taking interrupts so lets open the flood gates .... */
 	(void)spl0();

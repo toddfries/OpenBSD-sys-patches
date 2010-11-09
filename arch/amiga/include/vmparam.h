@@ -1,4 +1,4 @@
-/*	$NetBSD: vmparam.h,v 1.37 2009/03/06 20:31:47 joerg Exp $	*/
+/*	$NetBSD: vmparam.h,v 1.34 2005/12/11 12:16:36 christos Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1990 The Regents of the University of California.
@@ -139,13 +139,21 @@
 #endif
 
 /*
+ * PTEs for system V style shared memory.
+ * This is basically slop for kmempt which we actually allocate (malloc) from.
+ */
+#ifndef SHMMAXPGS
+#define SHMMAXPGS	(1 * NPTEPG)	/* 16mb */
+#endif
+
+/*
  * user/kernel map constants
  */
 #define VM_MIN_ADDRESS		((vaddr_t)0)		/* user min */
 #define VM_MAX_ADDRESS		((vaddr_t)(USRSTACK))	/* user max */
 #define VM_MAXUSER_ADDRESS	((vaddr_t)(VM_MAX_ADDRESS))	/* same */
 #define VM_MIN_KERNEL_ADDRESS	((vaddr_t)0)
-#define VM_MAX_KERNEL_ADDRESS	((vaddr_t)-(NPTEPG * PAGE_SIZE))
+#define VM_MAX_KERNEL_ADDRESS	((vaddr_t)(0-PAGE_SIZE))
 
 /*
  * virtual sizes (bytes) for various kernel submaps

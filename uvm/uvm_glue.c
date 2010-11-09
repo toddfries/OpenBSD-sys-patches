@@ -1,4 +1,4 @@
-/*	$NetBSD: uvm_glue.c,v 1.135 2009/01/31 09:13:09 yamt Exp $	*/
+/*	$NetBSD: uvm_glue.c,v 1.112 2007/09/21 00:18:35 ad Exp $	*/
 
 /*
  * Copyright (c) 1997 Charles D. Cranor and Washington University.
@@ -67,8 +67,9 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: uvm_glue.c,v 1.135 2009/01/31 09:13:09 yamt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: uvm_glue.c,v 1.112 2007/09/21 00:18:35 ad Exp $");
 
+#include "opt_coredump.h"
 #include "opt_kgdb.h"
 #include "opt_kstack.h"
 #include "opt_uvmhist.h"
@@ -85,7 +86,6 @@ __KERNEL_RCSID(0, "$NetBSD: uvm_glue.c,v 1.135 2009/01/31 09:13:09 yamt Exp $");
 #include <sys/user.h>
 #include <sys/syncobj.h>
 #include <sys/cpu.h>
-#include <sys/atomic.h>
 
 #include <uvm/uvm.h>
 
@@ -94,7 +94,13 @@ __KERNEL_RCSID(0, "$NetBSD: uvm_glue.c,v 1.135 2009/01/31 09:13:09 yamt Exp $");
  */
 
 static void uvm_swapout(struct lwp *);
-static int uarea_swapin(vaddr_t);
+
+#define UVM_NUAREA_HIWAT	20
+#define	UVM_NUAREA_LOWAT	16
+
+#define	UAREA_NEXTFREE(uarea)	(*(vaddr_t *)(UAREA_TO_USER(uarea)))
+
+void uvm_uarea_free(vaddr_t);
 
 /*
  * XXXCDC: do these really belong here?
@@ -149,7 +155,7 @@ uvm_chgkprot(void *addr, size_t len, int rw)
 		 * Extract physical address for the page.
 		 */
 		if (pmap_extract(pmap_kernel(), sva, &pa) == false)
-			panic("%s: invalid page", __func__);
+			panic("chgkprot: invalid page");
 		pmap_enter(pmap_kernel(), sva, pa, prot, PMAP_WIRED);
 	}
 	pmap_update(pmap_kernel());
@@ -244,8 +250,10 @@ uvm_lwp_fork(struct lwp *l1, struct lwp *l2, void *stack, size_t stacksize,
 	if ((l2->l_flag & LW_INMEM) == 0) {
 		vaddr_t uarea = USER_TO_UAREA(l2->l_addr);
 
-		if ((error = uarea_swapin(uarea)) != 0)
-			panic("%s: uvm_fault_wire failed: %d", __func__, error);
+		error = uvm_fault_wire(kernel_map, uarea,
+		    uarea + USPACE, VM_PROT_READ | VM_PROT_WRITE, 0);
+		if (error)
+			panic("uvm_lwp_fork: uvm_fault_wire failed: %d", error);
 #ifdef PMAP_UAREA
 		/* Tell the pmap this is a u-area mapping */
 		PMAP_UAREA(uarea);
@@ -270,77 +278,17 @@ uvm_lwp_fork(struct lwp *l1, struct lwp *l2, void *stack, size_t stacksize,
 	cpu_lwp_fork(l1, l2, stack, stacksize, func, arg);
 }
 
-static int
-uarea_swapin(vaddr_t addr)
-{
-
-	return uvm_fault_wire(kernel_map, addr, addr + USPACE,
-	    VM_PROT_READ | VM_PROT_WRITE, 0);
-}
-
-static void
-uarea_swapout(vaddr_t addr)
-{
-
-	uvm_fault_unwire(kernel_map, addr, addr + USPACE);
-}
-
-#ifndef USPACE_ALIGN
-#define	USPACE_ALIGN	0
-#endif
-
-static pool_cache_t uvm_uarea_cache;
-
-static int
-uarea_ctor(void *arg, void *obj, int flags)
-{
-
-	KASSERT((flags & PR_WAITOK) != 0);
-	return uarea_swapin((vaddr_t)obj);
-}
-
-static void *
-uarea_poolpage_alloc(struct pool *pp, int flags)
-{
-
-	return (void *)uvm_km_alloc(kernel_map, pp->pr_alloc->pa_pagesz,
-	    USPACE_ALIGN, UVM_KMF_PAGEABLE |
-	    ((flags & PR_WAITOK) != 0 ? UVM_KMF_WAITVA :
-	    (UVM_KMF_NOWAIT | UVM_KMF_TRYLOCK)));
-}
-
-static void
-uarea_poolpage_free(struct pool *pp, void *addr)
-{
-
-	uvm_km_free(kernel_map, (vaddr_t)addr, pp->pr_alloc->pa_pagesz,
-	    UVM_KMF_PAGEABLE);
-}
-
-static struct pool_allocator uvm_uarea_allocator = {
-	.pa_alloc = uarea_poolpage_alloc,
-	.pa_free = uarea_poolpage_free,
-	.pa_pagesz = USPACE,
-};
+/*
+ * uvm_cpu_attach: initialize per-CPU data structures.
+ */
 
 void
-uvm_uarea_init(void)
+uvm_cpu_attach(struct cpu_info *ci)
 {
-	int flags = PR_NOTOUCH;
 
-	/*
-	 * specify PR_NOALIGN unless the alignment provided by
-	 * the backend (USPACE_ALIGN) is sufficient to provide
-	 * pool page size (UPSACE) alignment.
-	 */
-
-	if ((USPACE_ALIGN == 0 && USPACE != PAGE_SIZE) ||
-	    (USPACE_ALIGN % USPACE) != 0) {
-		flags |= PR_NOALIGN;
-	}
-
-	uvm_uarea_cache = pool_cache_init(USPACE, USPACE_ALIGN, 0, flags,
-	    "uarea", &uvm_uarea_allocator, IPL_NONE, uarea_ctor, NULL, NULL);
+	mutex_init(&ci->ci_data.cpu_uarea_lock, MUTEX_DEFAULT, IPL_NONE);
+	ci->ci_data.cpu_uarea_cnt = 0;
+	ci->ci_data.cpu_uarea_list = 0;
 }
 
 /*
@@ -350,9 +298,32 @@ uvm_uarea_init(void)
 bool
 uvm_uarea_alloc(vaddr_t *uaddrp)
 {
+	struct cpu_info *ci;
+	vaddr_t uaddr;
 
-	*uaddrp = (vaddr_t)pool_cache_get(uvm_uarea_cache, PR_WAITOK);
-	return true;
+#ifndef USPACE_ALIGN
+#define USPACE_ALIGN    0
+#endif
+
+	ci = curcpu();
+
+	if (ci->ci_data.cpu_uarea_cnt > 0) {
+		mutex_enter(&ci->ci_data.cpu_uarea_lock);
+		if (ci->ci_data.cpu_uarea_cnt == 0) {
+			mutex_exit(&ci->ci_data.cpu_uarea_lock);
+		} else {
+			uaddr = ci->ci_data.cpu_uarea_list;
+			ci->ci_data.cpu_uarea_list = UAREA_NEXTFREE(uaddr);
+			ci->ci_data.cpu_uarea_cnt--;
+			mutex_exit(&ci->ci_data.cpu_uarea_lock);
+			*uaddrp = uaddr;
+			return true;
+		}
+	}
+
+	*uaddrp = uvm_km_alloc(kernel_map, USPACE, USPACE_ALIGN,
+	    UVM_KMF_PAGEABLE);
+	return false;
 }
 
 /*
@@ -360,15 +331,76 @@ uvm_uarea_alloc(vaddr_t *uaddrp)
  */
 
 void
-uvm_uarea_free(vaddr_t uaddr, struct cpu_info *ci)
+uvm_uarea_free(vaddr_t uaddr)
 {
+	struct cpu_info *ci;
 
-	pool_cache_put(uvm_uarea_cache, (void *)uaddr);
+	ci = curcpu();
+
+	mutex_enter(&ci->ci_data.cpu_uarea_lock);
+	UAREA_NEXTFREE(uaddr) = ci->ci_data.cpu_uarea_list;
+	ci->ci_data.cpu_uarea_list = uaddr;
+	ci->ci_data.cpu_uarea_cnt++;
+	mutex_exit(&ci->ci_data.cpu_uarea_lock);
 }
 
 /*
- * uvm_proc_exit: exit a virtual address space
+ * uvm_uarea_drain: return memory of u-areas over limit
+ * back to system
  *
+ * => if asked to drain as much as possible, drain all cpus.
+ * => if asked to drain to low water mark, drain local cpu only.
+ */
+
+void
+uvm_uarea_drain(bool empty)
+{
+	CPU_INFO_ITERATOR cii;
+	struct cpu_info *ci;
+	vaddr_t uaddr, nuaddr;
+	int count;
+
+	if (empty) {
+		for (CPU_INFO_FOREACH(cii, ci)) {
+			mutex_enter(&ci->ci_data.cpu_uarea_lock);
+			count = ci->ci_data.cpu_uarea_cnt;
+			uaddr = ci->ci_data.cpu_uarea_list;
+			ci->ci_data.cpu_uarea_cnt = 0;
+			ci->ci_data.cpu_uarea_list = 0;
+			mutex_exit(&ci->ci_data.cpu_uarea_lock);
+
+			while (count != 0) {
+				nuaddr = UAREA_NEXTFREE(uaddr);
+				uvm_km_free(kernel_map, uaddr, USPACE,
+				    UVM_KMF_PAGEABLE);
+				uaddr = nuaddr;
+				count--;
+			}
+		}
+		return;
+	}
+
+	ci = curcpu();
+	if (ci->ci_data.cpu_uarea_cnt > UVM_NUAREA_HIWAT) {
+		mutex_enter(&ci->ci_data.cpu_uarea_lock);
+		while (ci->ci_data.cpu_uarea_cnt > UVM_NUAREA_LOWAT) {
+			uaddr = ci->ci_data.cpu_uarea_list;
+			ci->ci_data.cpu_uarea_list = UAREA_NEXTFREE(uaddr);
+			ci->ci_data.cpu_uarea_cnt--;
+			mutex_exit(&ci->ci_data.cpu_uarea_lock);
+			uvm_km_free(kernel_map, uaddr, USPACE,
+			    UVM_KMF_PAGEABLE);
+			mutex_enter(&ci->ci_data.cpu_uarea_lock);
+		}
+		mutex_exit(&ci->ci_data.cpu_uarea_lock);
+	}
+}
+
+/*
+ * uvm_exit: exit a virtual address space
+ *
+ * - the process passed to us is a dead (pre-zombie) process; we
+ *   are running on a different context now (the reaper).
  * - borrow proc0's address space because freeing the vmspace
  *   of the dead process may block.
  */
@@ -385,11 +417,9 @@ uvm_proc_exit(struct proc *p)
 	/*
 	 * borrow proc0's address space.
 	 */
-	KPREEMPT_DISABLE(l);
 	pmap_deactivate(l);
 	p->p_vmspace = proc0.p_vmspace;
 	pmap_activate(l);
-	KPREEMPT_ENABLE(l);
 
 	uvmspace_free(ovm);
 }
@@ -400,7 +430,7 @@ uvm_lwp_exit(struct lwp *l)
 	vaddr_t va = USER_TO_UAREA(l->l_addr);
 
 	l->l_flag &= ~LW_INMEM;
-	uvm_uarea_free(va, l->l_cpu);
+	uvm_uarea_free(va);
 	l->l_addr = NULL;
 }
 
@@ -446,14 +476,18 @@ int	swapdebug = 0;
 void
 uvm_swapin(struct lwp *l)
 {
+	vaddr_t addr;
 	int error;
 
-	KASSERT(mutex_owned(&l->l_swaplock));
+	/* XXXSMP notyet KASSERT(mutex_owned(&l->l_swaplock)); */
 	KASSERT(l != curlwp);
 
-	error = uarea_swapin(USER_TO_UAREA(l->l_addr));
+	addr = USER_TO_UAREA(l->l_addr);
+	/* make L_INMEM true */
+	error = uvm_fault_wire(kernel_map, addr, addr + USPACE,
+	    VM_PROT_READ | VM_PROT_WRITE, 0);
 	if (error) {
-		panic("%s: rewiring stack failed: %d", __func__, error);
+		panic("uvm_swapin: rewiring stack failed: %d", error);
 	}
 
 	/*
@@ -506,8 +540,8 @@ uvm_scheduler(void)
 
 	l = curlwp;
 	lwp_lock(l);
-	l->l_priority = PRI_VM;
-	l->l_class = SCHED_FIFO;
+	l->l_priority = PVM;
+	l->l_usrpri = PVM;
 	lwp_unlock(l);
 
 	for (;;) {
@@ -520,7 +554,7 @@ uvm_scheduler(void)
 		ll = NULL;		/* process to choose */
 		ppri = INT_MIN;		/* its priority */
 
-		mutex_enter(proc_lock);
+		mutex_enter(&proclist_lock);
 		LIST_FOREACH(l, &alllwp, l_list) {
 			/* is it a runnable swapped out process? */
 			if (l->l_stat == LSRUN && !(l->l_flag & LW_INMEM)) {
@@ -534,14 +568,14 @@ uvm_scheduler(void)
 		}
 #ifdef DEBUG
 		if (swapdebug & SDB_FOLLOW)
-			printf("%s: running, procp %p pri %d\n", __func__, ll,
+			printf("scheduler: running, procp %p pri %d\n", ll,
 			    ppri);
 #endif
 		/*
 		 * Nothing to do, back to sleep
 		 */
 		if ((l = ll) == NULL) {
-			mutex_exit(proc_lock);
+			mutex_exit(&proclist_lock);
 			mutex_enter(&uvm_scheduler_mutex);
 			if (uvm.scheduler_kicked == false)
 				cv_wait(&uvm.scheduler_cv,
@@ -567,7 +601,7 @@ uvm_scheduler(void)
 				    uvmexp.free);
 #endif
 			mutex_enter(&l->l_swaplock);
-			mutex_exit(proc_lock);
+			mutex_exit(&proclist_lock);
 			uvm_swapin(l);
 			mutex_exit(&l->l_swaplock);
 			continue;
@@ -576,17 +610,17 @@ uvm_scheduler(void)
 			 * not enough memory, jab the pageout daemon and
 			 * wait til the coast is clear
 			 */
-			mutex_exit(proc_lock);
+			mutex_exit(&proclist_lock);
 #ifdef DEBUG
 			if (swapdebug & SDB_FOLLOW)
-				printf("%s: no room for pid %d(%s),"
-				    " free %d\n", __func__, l->l_proc->p_pid,
+				printf("scheduler: no room for pid %d(%s),"
+				    " free %d\n", l->l_proc->p_pid,
 				    l->l_proc->p_comm, uvmexp.free);
 #endif
 			uvm_wait("schedpwait");
 #ifdef DEBUG
 			if (swapdebug & SDB_FOLLOW)
-				printf("%s: room again, free %d\n", __func__,
+				printf("scheduler: room again, free %d\n",
 				    uvmexp.free);
 #endif
 		}
@@ -601,17 +635,11 @@ static bool
 swappable(struct lwp *l)
 {
 
-	if ((l->l_flag & (LW_INMEM|LW_SYSTEM|LW_WEXIT)) != LW_INMEM)
-		return false;
-	if ((l->l_pflag & LP_RUNNING) != 0)
+	if ((l->l_flag & (LW_INMEM|LW_RUNNING|LW_SYSTEM|LW_WEXIT)) != LW_INMEM)
 		return false;
 	if (l->l_holdcnt != 0)
 		return false;
-	if (l->l_class != SCHED_OTHER)
-		return false;
 	if (l->l_syncobj == &rw_syncobj || l->l_syncobj == &mutex_syncobj)
-		return false;
-	if (l->l_proc->p_stat != SACTIVE && l->l_proc->p_stat != SSTOP)
 		return false;
 	return true;
 }
@@ -652,7 +680,7 @@ uvm_swapout_threads(void)
 	outpri = outpri2 = 0;
 
  restart:
-	mutex_enter(proc_lock);
+	mutex_enter(&proclist_lock);
 	LIST_FOREACH(l, &alllwp, l_list) {
 		KASSERT(l->l_proc != NULL);
 		if (!mutex_tryenter(&l->l_swaplock))
@@ -675,13 +703,13 @@ uvm_swapout_threads(void)
 		case LSSLEEP:
 		case LSSTOP:
 			if (l->l_slptime >= maxslp) {
-				mutex_exit(proc_lock);
+				mutex_exit(&proclist_lock);
 				uvm_swapout(l);
 				/*
 				 * Locking in the wrong direction -
 				 * try to prevent the LWP from exiting.
 				 */
-				gotit = mutex_tryenter(proc_lock);
+				gotit = mutex_tryenter(&proclist_lock);
 				mutex_exit(&l->l_swaplock);
 				didswap++;
 				if (!gotit)
@@ -707,11 +735,11 @@ uvm_swapout_threads(void)
 			l = outl2;
 #ifdef DEBUG
 		if (swapdebug & SDB_SWAPOUT)
-			printf("%s: no duds, try procp %p\n", __func__, l);
+			printf("swapout_threads: no duds, try procp %p\n", l);
 #endif
 		if (l) {
 			mutex_enter(&l->l_swaplock);
-			mutex_exit(proc_lock);
+			mutex_exit(&proclist_lock);
 			if (swappable(l))
 				uvm_swapout(l);
 			mutex_exit(&l->l_swaplock);
@@ -719,7 +747,7 @@ uvm_swapout_threads(void)
 		}
 	}
 
-	mutex_exit(proc_lock);
+	mutex_exit(&proclist_lock);
 }
 
 /*
@@ -734,15 +762,16 @@ uvm_swapout_threads(void)
 static void
 uvm_swapout(struct lwp *l)
 {
-	struct vm_map *map;
+	vaddr_t addr;
+	struct proc *p = l->l_proc;
 
 	KASSERT(mutex_owned(&l->l_swaplock));
 
 #ifdef DEBUG
 	if (swapdebug & SDB_SWAPOUT)
-		printf("%s: lid %d.%d(%s)@%p, stat %x pri %d free %d\n",
-		   __func__, l->l_proc->p_pid, l->l_lid, l->l_proc->p_comm,
-		   l->l_addr, l->l_stat, l->l_slptime, uvmexp.free);
+		printf("swapout: lid %d.%d(%s)@%p, stat %x pri %d free %d\n",
+	   p->p_pid, l->l_lid, p->p_comm, l->l_addr, l->l_stat,
+	   l->l_slptime, uvmexp.free);
 #endif
 
 	/*
@@ -759,7 +788,7 @@ uvm_swapout(struct lwp *l)
 	if (l->l_stat == LSRUN)
 		sched_dequeue(l);
 	lwp_unlock(l);
-	l->l_ru.ru_nswap++;
+	p->p_stats->p_ru.ru_nswap++;	/* XXXSMP */
 	++uvmexp.swapouts;
 
 	/*
@@ -771,12 +800,9 @@ uvm_swapout(struct lwp *l)
 	/*
 	 * Unwire the to-be-swapped process's user struct and kernel stack.
 	 */
-	uarea_swapout(USER_TO_UAREA(l->l_addr));
-	map = &l->l_proc->p_vmspace->vm_map;
-	if (vm_map_lock_try(map)) {
-		pmap_collect(vm_map_pmap(map));
-		vm_map_unlock(map);
-	}
+	addr = USER_TO_UAREA(l->l_addr);
+	uvm_fault_unwire(kernel_map, addr, addr + USPACE); /* !L_INMEM */
+	pmap_collect(vm_map_pmap(&p->p_vmspace->vm_map));
 }
 
 /*
@@ -788,15 +814,10 @@ void
 uvm_lwp_hold(struct lwp *l)
 {
 
-	if (l == curlwp) {
-		atomic_inc_uint(&l->l_holdcnt);
-	} else {
-		mutex_enter(&l->l_swaplock);
-		if (atomic_inc_uint_nv(&l->l_holdcnt) == 1 &&
-		    (l->l_flag & LW_INMEM) == 0)
-			uvm_swapin(l);
-		mutex_exit(&l->l_swaplock);
-	}
+	/* XXXSMP mutex_enter(&l->l_swaplock); */
+	if (l->l_holdcnt++ == 0 && (l->l_flag & LW_INMEM) == 0)
+		uvm_swapin(l);
+	/* XXXSMP mutex_exit(&l->l_swaplock); */
 }
 
 /*
@@ -810,5 +831,130 @@ uvm_lwp_rele(struct lwp *l)
 
 	KASSERT(l->l_holdcnt != 0);
 
-	atomic_dec_uint(&l->l_holdcnt);
+	/* XXXSMP mutex_enter(&l->l_swaplock); */
+	l->l_holdcnt--;
+	/* XXXSMP mutex_exit(&l->l_swaplock); */
 }
+
+#ifdef COREDUMP
+/*
+ * uvm_coredump_walkmap: walk a process's map for the purpose of dumping
+ * a core file.
+ */
+
+int
+uvm_coredump_walkmap(struct proc *p, void *iocookie,
+    int (*func)(struct proc *, void *, struct uvm_coredump_state *),
+    void *cookie)
+{
+	struct uvm_coredump_state state;
+	struct vmspace *vm = p->p_vmspace;
+	struct vm_map *map = &vm->vm_map;
+	struct vm_map_entry *entry;
+	int error;
+
+	entry = NULL;
+	vm_map_lock_read(map);
+	state.end = 0;
+	for (;;) {
+		if (entry == NULL)
+			entry = map->header.next;
+		else if (!uvm_map_lookup_entry(map, state.end, &entry))
+			entry = entry->next;
+		if (entry == &map->header)
+			break;
+
+		state.cookie = cookie;
+		if (state.end > entry->start) {
+			state.start = state.end;
+		} else {
+			state.start = entry->start;
+		}
+		state.realend = entry->end;
+		state.end = entry->end;
+		state.prot = entry->protection;
+		state.flags = 0;
+
+		/*
+		 * Dump the region unless one of the following is true:
+		 *
+		 * (1) the region has neither object nor amap behind it
+		 *     (ie. it has never been accessed).
+		 *
+		 * (2) the region has no amap and is read-only
+		 *     (eg. an executable text section).
+		 *
+		 * (3) the region's object is a device.
+		 *
+		 * (4) the region is unreadable by the process.
+		 */
+
+		KASSERT(!UVM_ET_ISSUBMAP(entry));
+		KASSERT(state.start < VM_MAXUSER_ADDRESS);
+		KASSERT(state.end <= VM_MAXUSER_ADDRESS);
+		if (entry->object.uvm_obj == NULL &&
+		    entry->aref.ar_amap == NULL) {
+			state.realend = state.start;
+		} else if ((entry->protection & VM_PROT_WRITE) == 0 &&
+		    entry->aref.ar_amap == NULL) {
+			state.realend = state.start;
+		} else if (entry->object.uvm_obj != NULL &&
+		    UVM_OBJ_IS_DEVICE(entry->object.uvm_obj)) {
+			state.realend = state.start;
+		} else if ((entry->protection & VM_PROT_READ) == 0) {
+			state.realend = state.start;
+		} else {
+			if (state.start >= (vaddr_t)vm->vm_maxsaddr)
+				state.flags |= UVM_COREDUMP_STACK;
+
+			/*
+			 * If this an anonymous entry, only dump instantiated
+			 * pages.
+			 */
+			if (entry->object.uvm_obj == NULL) {
+				vaddr_t end;
+
+				amap_lock(entry->aref.ar_amap);
+				for (end = state.start;
+				     end < state.end; end += PAGE_SIZE) {
+					struct vm_anon *anon;
+					anon = amap_lookup(&entry->aref,
+					    end - entry->start);
+					/*
+					 * If we have already encountered an
+					 * uninstantiated page, stop at the
+					 * first instantied page.
+					 */
+					if (anon != NULL &&
+					    state.realend != state.end) {
+						state.end = end;
+						break;
+					}
+
+					/*
+					 * If this page is the first
+					 * uninstantiated page, mark this as
+					 * the real ending point.  Continue to
+					 * counting uninstantiated pages.
+					 */
+					if (anon == NULL &&
+					    state.realend == state.end) {
+						state.realend = end;
+					}
+				}
+				amap_unlock(entry->aref.ar_amap);
+			}
+		}
+		
+
+		vm_map_unlock_read(map);
+		error = (*func)(p, iocookie, &state);
+		if (error)
+			return (error);
+		vm_map_lock_read(map);
+	}
+	vm_map_unlock_read(map);
+
+	return (0);
+}
+#endif /* COREDUMP */

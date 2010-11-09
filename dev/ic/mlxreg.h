@@ -1,4 +1,4 @@
-/*	$NetBSD: mlxreg.h,v 1.8 2008/09/08 23:36:54 gmcgarry Exp $	*/
+/*	$NetBSD: mlxreg.h,v 1.6 2005/12/11 12:21:27 christos Exp $	*/
 
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -213,7 +220,7 @@
 struct mlx_sgentry {
 	u_int32_t	sge_addr;
 	u_int32_t	sge_count;
-} __packed;
+} __attribute__ ((packed));
 
 /*
  * Command result buffers, as placed in system memory by the controller.
@@ -240,8 +247,8 @@ struct mlx_enquiry_old {
 	struct  {
 		u_int8_t	dd_targ;
 		u_int8_t	dd_chan;
-	} __packed me_dead[20];
-} __packed;
+	} __attribute__ ((packed)) me_dead[20];
+} __attribute__ ((packed));
 
 struct mlx_enquiry {
 	u_int8_t	me_num_sys_drvs;
@@ -269,8 +276,8 @@ struct mlx_enquiry {
 	struct {
 		u_int8_t	dd_targ;
 		u_int8_t	dd_chan;
-	} __packed me_dead[20];
-} __packed;
+	} __attribute__ ((packed)) me_dead[20];
+} __attribute__ ((packed));
 
 struct mlx_enquiry2 {
 	u_int8_t	me_hardware_id[4];
@@ -319,7 +326,7 @@ struct mlx_enquiry2 {
 	u_int8_t	me_res10;
 	u_int32_t	me_firmware_features;
 	u_int8_t	me_res11[8];
-} __packed;
+} __attribute__ ((packed));
 
 /* MLX_CMD_ENQSYSDRIVE returns an array of 32 of these. */
 struct mlx_enq_sys_drive {
@@ -327,7 +334,7 @@ struct mlx_enq_sys_drive {
 	u_int8_t	sd_state;
 	u_int8_t	sd_raidlevel;
 	u_int16_t	sd_res1;
-} __packed;
+} __attribute__ ((packed));
 
 /*
  * MLX_CMD_LOGOP/MLX_LOGOP_GET
@@ -359,7 +366,7 @@ struct mlx_eventlog_entry {
 	u_int8_t	el_asc;
 	u_int8_t	el_asq;
 	u_int8_t	el_res3[12];
-} __packed;
+} __attribute__ ((packed));
 
 #define	MLX_LOGOP_GET		0x00	/* operation codes for MLX_CMD_LOGOP */
 #define	MLX_LOGMSG_SENSE	0x00	/* log message contents codes */
@@ -368,7 +375,7 @@ struct mlx_rebuild_stat {
 	u_int32_t	rb_drive;
 	u_int32_t	rb_size;
 	u_int32_t	rb_remaining;
-} __packed;
+} __attribute__ ((packed));
 
 struct mlx_config {
 	u_int16_t	cf_flags1;
@@ -408,7 +415,7 @@ struct mlx_config {
 	u_int8_t	cf_delay_between_spinups;
 	u_int8_t	cf_res3;
 	u_int16_t	cf_checksum;
-} __packed;
+} __attribute__ ((packed));
 
 struct mlx_config2 {
 	struct mlx_config cf2_cf;
@@ -419,13 +426,13 @@ struct mlx_config2 {
 #define	MLX_CF2_GEOM_255	0x20
 	u_int8_t	cf2_reserved1[9];
 	u_int16_t	cf2_checksum;
-} __packed;
+} __attribute__ ((__packed__));
 
 struct mlx_sys_drv_span {
 	u_int32_t	sp_start_lba;
 	u_int32_t	sp_nblks;
 	u_int8_t	sp_arm[8];
-} __packed;
+} __attribute__ ((packed));
 
 struct mlx_sys_drv {
 	u_int8_t	sd_status;
@@ -445,7 +452,7 @@ struct mlx_sys_drv {
 	u_int8_t	sd_init_state;
 #define	MLX_SYS_DRV_INITTED	0x81;
 	struct	mlx_sys_drv_span sd_span[4];
-} __packed;
+} __attribute__ ((packed));
 
 struct mlx_phys_drv {
 	u_int8_t	pd_flags1;
@@ -469,14 +476,14 @@ struct mlx_phys_drv {
 	u_int8_t	pd_period;
 	u_int8_t	pd_offset;
 	u_int32_t	pd_config_size;
-} __packed;
+} __attribute__ ((packed));
 
 struct mlx_core_cfg {
 	u_int8_t	cc_num_sys_drives;
 	u_int8_t	cc_res1[3];
 	struct	mlx_sys_drv cc_sys_drives[32];
 	struct	mlx_phys_drv cc_phys_drives[5 * 16];
-} __packed;
+} __attribute__ ((packed));
 
 /*
  * Bitfields:
@@ -507,7 +514,7 @@ struct mlx_dcdb {
 	u_int8_t	dcdb_sense[64];
 	u_int8_t	dcdb_status;
 	u_int8_t	res1;
-} __packed;
+} __attribute__ ((packed));
 
 struct mlx_bbtable_entry {
 	u_int32_t	bbt_block_number;
@@ -515,6 +522,6 @@ struct mlx_bbtable_entry {
 	u_int8_t	bbt_res1;
 	u_int8_t	bbt_entry_type;
 	u_int8_t	bbt_system_drive;	/* high 3 bits reserved */
-} __packed;
+} __attribute__ ((packed));
 
 #endif	/* !_IC_MLXREG_H_ */

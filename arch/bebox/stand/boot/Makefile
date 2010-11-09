@@ -1,50 +1,11 @@
-#	$NetBSD: Makefile,v 1.25 2008/05/26 16:28:39 kiyohara Exp $
-
-NOMAN= # defined
-
-.include <bsd.own.mk>
-
-COMMON= ${.CURDIR}/../common
-COMMONOBJ!=	cd ${COMMON} && ${PRINTOBJDIR}
-
-.PATH: ${.CURDIR}/../boot ${COMMONOBJ} ${.CURDIR}/../../../powerpc/powerpc
+#	$NetBSD: Makefile,v 1.22 2005/12/11 12:17:04 christos Exp $
 
 S= ${.CURDIR}/../../../..
-L= ${COMMONOBJ}/lib
 
-ELF2PEF= ${.CURDIR}/../../../powerpc/stand/mkbootimage
+PROG= boot
+NEWVERSWHAT= "BOOT"
 
-COMMONLIBDIR= ${.CURDIR}/../../../../../common
-
-BASE?=		boot
-PROG=		${BASE}
-NEWVERSWHAT=	"BOOT"
-
-SRCS= srt0.s
-SRCS+= boot.c clock.c com.c conf.c cons.c cpu.c devopen.c
-SRCS+= fd.c filesystem.c inkernel.c io.c kbd.c monitor.c ns16550.c
-SRCS+= prf.c tgets.c vers.c vga.c video.c vreset.c
-SRCS+= setjmp.S
-
-CFLAGS= -Wno-main -ffreestanding
-AFLAGS= -x assembler-with-cpp -traditional-cpp
-
-CPPFLAGS= -nostdinc -I${.OBJDIR} -I${ELF2PEF} -I${S} -I${COMMONLIBDIR}/include
-CPPFLAGS+= -Werror -Wall -Wstrict-prototypes -Wmissing-prototypes
-CPPFLAGS+= -D_STANDALONE -DRELOC=${RELOC} -DUSE_SCAN
-CPPFLAGS+= -D__daddr_t=int32_t
-#CPPFLAGS+= -DDBMONITOR
-
-.if (${BASE} == "boot")
-CPPFLAGS+= -DCONS_BE
-.elif (${BASE} == "boot_com0")
-CPPFLAGS+= -DCONS_SERIAL -DCOMSPEED=9600 -DCOMPORT=0x3f8
-.elif (${BASE} == "boot_vga")
-CPPFLAGS+= -DCONS_VGA
-.endif
-
-STRIPFLAG=
-BINMODE= 444
+BINMODE?=       444
 
 # XXX SHOULD NOT NEED TO DEFINE THESE!
 LIBCRT0=
@@ -52,32 +13,70 @@ LIBC=
 LIBCRTBEGIN=
 LIBCRTEND=
 
+realall: ${PROG}
+
+ASRCS+= srt0.s
+CSRCS+= boot.c clock.c com.c conf.c cons.c cpu.c devopen.c
+CSRCS+= fd.c filesystem.c inkernel.c io.c tgets.c prf.c monitor.c
+CSRCS+= kbd.c ns16550.c vreset.c vga.c video.c
+
+SRCS=	${ASRCS} ${CSRCS}
+
+CLEANFILES+= vers.c vers.o
+
+COPTS+= -ffreestanding
+CPPFLAGS= -I. -I${.CURDIR} -I${.CURDIR}/../elf2pef -I${.CURDIR}/../../..
+CPPFLAGS+= -I${S} -I${S}/lib/libsa
+CPPFLAGS+= -D_STANDALONE -DDBMONITOR -DRELOC=${RELOC}
+CPPFLAGS+= -DUSE_SCAN
+#CPPFLAGS+= -DCONS_BE
+CPPFLAGS+= -DCONS_VGA
+#CPPFLAGS+= -DCONS_SERIAL -DCOMSPEED=9600 -DCOMPORT=0x3F8
+
+CFLAGS= -Wno-main
+AFLAGS= -x assembler-with-cpp -traditional-cpp
+NOMAN=	# defined
+STRIPFLAG=
+BINMODE= 444
+
 RELOC= 0x700000
 
-CLEANFILES+= vers.c machine powerpc ${PROG}.elf
-
-LIBS= ${L}/sa/libsa.a ${L}/kern/libkern.a ${L}/z/libz.a
-
 .if !make(obj) && !make(clean) && !make(cleandir)
-.BEGIN: machine powerpc
-.NOPATH: machine powerpc
-
-machine::
-	-rm -f $@
-	ln -s ${S}/arch/${MACHINE}/include $@
-
-powerpc::
-	-rm -f $@
-	ln -s ${S}/arch/powerpc/include $@
+.BEGIN:
+	@[ -h machine ] || ln -s ${S}/arch/${MACHINE}/include machine
+	@[ -h powerpc ] || ln -s ${S}/arch/powerpc/include powerpc
 .endif
+.NOPATH: machine powerpc
+CLEANFILES+= machine powerpc
 
-vers.c: ${.CURDIR}/../boot/version
-	${HOST_SH} ${S}/conf/newvers_stand.sh ${.CURDIR}/../boot/version \
-		"bebox" ${NEWVERSWHAT}
+### find out what to use for libkern
+KERN_AS=	library
+.include "${S}/lib/libkern/Makefile.inc"
+LIBKERN=	${KERNLIB}
 
-${PROG}: ${OBJS} ${LIBS}
-	${LD} -o ${PROG}.elf -N -T ${.CURDIR}/../boot/ld.script \
-		-Ttext ${RELOC} ${OBJS} ${LIBS}
-	${STRIP} -o ${PROG} ${PROG}.elf
+### find out what to use for libz
+Z_AS=		library
+.include "${S}/lib/libz/Makefile.inc"
+LIBZ=		${ZLIB}
+
+### find out what to use for libsa
+SA_AS=		library
+SAMISCMAKEFLAGS= SA_USE_CREAD=yes SA_USE_LOADFILE=yes
+.include "${S}/lib/libsa/Makefile.inc"
+LIBSA=		${SALIB}
+
+.PHONY: vers.c
+vers.c: version
+	${HOST_SH} ${S}/conf/newvers_stand.sh ${.CURDIR}/version "bebox" \
+		${NEWVERSWHAT}
+
+${PROG}: ${OBJS} ${LIBSA} ${LIBZ} ${LIBKERN} vers.o
+	${LD} -o ${PROG} -s -N -T ${.CURDIR}/ld.script -Ttext ${RELOC} ${OBJS} \
+		${LIBSA} ${LIBZ} ${LIBKERN} vers.o
+
+cleandir distclean: cleanlibdir
+
+cleanlibdir:
+	-rm -rf lib
 
 .include <bsd.prog.mk>

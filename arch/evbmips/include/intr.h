@@ -1,4 +1,4 @@
-/*	$NetBSD: intr.h,v 1.16 2008/04/28 20:23:17 martin Exp $	*/
+/*	$NetBSD: intr.h,v 1.10 2006/12/21 15:55:22 yamt Exp $	*/
 
 /*-
  * Copyright (c) 2000, 2001 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -32,24 +39,48 @@
 #ifndef _EVBMIPS_INTR_H_
 #define	_EVBMIPS_INTR_H_
 
+#include <sys/device.h>
+#include <sys/lock.h>
 #include <sys/queue.h>
 
 #define	IPL_NONE	0	/* disable only this interrupt */
-#define	IPL_SOFTCLOCK	1	/* software interrupts */
-#define	IPL_SOFTBIO	1	/* software interrupts */
-#define	IPL_SOFTNET	2	/* software interrupts */
-#define	IPL_SOFTSERIAL	2	/* software interrupts */
-#define	IPL_VM		3
-#define	IPL_SCHED	4
-#define	IPL_HIGH	4
+#define	IPL_SOFT	1	/* generic software interrupts */
+#define	IPL_SOFTCLOCK	2	/* clock software interrupts */
+#define	IPL_SOFTNET	3	/* network software interrupts */
+#define	IPL_SOFTSERIAL	4	/* serial software interrupts */
+#define	IPL_BIO		5	/* disable block I/O interrupts */
+#define	IPL_NET		6	/* disable network interrupts */
+#define	IPL_TTY		7	/* disable terminal interrupts */
+#define	IPL_LPT		IPL_TTY
+#define	IPL_VM		IPL_TTY
+#define	IPL_SERIAL	7	/* disable serial interrupts */
+#define	IPL_CLOCK	8	/* disable clock interrupts */
+#define	IPL_STATCLOCK	IPL_CLOCK
+#define	IPL_SCHED	IPL_CLOCK
+#define	IPL_HIGH	8	/* disable all interrupts */
+#define	IPL_LOCK	IPL_HIGH
 
-#define	_IPL_N		5	/* max IPL + 1 */
+#define	_IPL_N		9	/* max IPL + 1 */
 
-#define	_IPL_SI0_FIRST	IPL_SOFTCLOCK
-#define	_IPL_SI0_LAST	IPL_SOFTBIO
+#define	_IPL_SI0_FIRST	IPL_SOFT
+#define	_IPL_SI0_LAST	IPL_SOFTCLOCK
 
 #define	_IPL_SI1_FIRST	IPL_SOFTNET
 #define	_IPL_SI1_LAST	IPL_SOFTSERIAL
+
+#define	SI_SOFT		0
+#define	SI_SOFTCLOCK	1
+#define	SI_SOFTNET	2
+#define	SI_SOFTSERIAL	3
+
+#define	SI_NQUEUES	4
+
+#define	SI_QUEUENAMES {							\
+	"misc",								\
+	"clock",							\
+	"net",								\
+	"serial",							\
+}
 
 #define	IST_UNUSABLE	-1	/* interrupt cannot be used */
 #define	IST_NONE	0	/* none (dummy) */
@@ -61,14 +92,22 @@
 
 #ifdef	_KERNEL
 
-#include <mips/locore.h>
-
 extern const uint32_t ipl_sr_bits[_IPL_N];
+
+int _splraise(int);
+int _spllower(int);
+int _splset(int);
+int _splget(void);
+void _splnone(void);
+void _setsoftintr(int);
+void _clrsoftintr(int);
 
 #define	spl0()		(void) _spllower(0)
 #define	splx(s)		(void) _splset(s)
 
 #define	splsoft()	_splraise(ipl_sr_bits[IPL_SOFT])
+
+#define	spllowersoftclock() _spllower(ipl_sr_bits[IPL_SOFTCLOCK])
 
 typedef int ipl_t;
 typedef struct {

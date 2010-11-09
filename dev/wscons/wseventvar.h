@@ -1,4 +1,4 @@
-/* $NetBSD: wseventvar.h,v 1.15 2009/01/16 15:14:11 yamt Exp $ */
+/* $NetBSD: wseventvar.h,v 1.11 2006/10/09 11:03:43 peter Exp $ */
 
 /*
  * Copyright (c) 1996, 1997 Christopher G. Demetriou.  All rights reserved.
@@ -81,11 +81,9 @@ struct wseventvar {
 	volatile u_int put;	/* put (write) index (modified by interrupt) */
 	struct selinfo sel;	/* process selecting */
 	struct proc *io;	/* process that opened queue (can get SIGIO) */
-	void	*sih;		/* soft interrupt handle for signals */
 	int	wanted;		/* wake up on input ready */
 	int	async;		/* send SIGIO on input ready */
 	struct wscons_event *q;	/* circular buffer (queue) of events */
-	int	version;	/* event version */
 };
 
 void	wsevent_init(struct wseventvar *, struct proc *);
@@ -95,18 +93,3 @@ int	wsevent_poll(struct wseventvar *, int, struct lwp *);
 int	wsevent_kqfilter(struct wseventvar *, struct knote *);
 void	wsevent_wakeup(struct wseventvar *);
 int	wsevent_inject(struct wseventvar *, struct wscons_event *, size_t);
-int	wsevent_setversion(struct wseventvar *, int);
-
-/*
- * COMPAT_50
- */
-#include <compat/sys/time.h>
-
-struct owscons_event {
-	u_int type;
-	int value;
-	struct timespec50 time;
-};
-
-#define	WSMUXIO_OINJECTEVENT	_IOW('W', 96, struct owscons_event)
-

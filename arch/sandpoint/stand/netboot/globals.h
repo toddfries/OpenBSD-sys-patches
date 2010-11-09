@@ -1,19 +1,41 @@
-/* $NetBSD: globals.h,v 1.8 2009/01/12 09:41:59 tsutsui Exp $ */
+/* $NetBSD: globals.h,v 1.18 2010/06/26 21:45:49 phx Exp $ */
 
 /* clock feed */
-#ifndef TICKS_PER_SEC
-#define TICKS_PER_SEC   (100000000 / 4)          /* 100MHz front bus */
+#ifndef EXT_CLK_FREQ
+#define EXT_CLK_FREQ	33333333	/* external clock (PCI clock) */
 #endif
-#define NS_PER_TICK     (1000000000 / TICKS_PER_SEC)
 
 /* brd type */
 extern int brdtype;
 #define BRD_SANDPOINTX2		2
 #define BRD_SANDPOINTX3		3
 #define BRD_ENCOREPP1		10
+#define BRD_KUROBOX		100
+#define BRD_QNAPTS101		101
+#define BRD_SYNOLOGY		102
+#define BRD_STORCENTER		103
 #define BRD_UNKNOWN		-1
 
+struct brdprop {
+	const char *family;
+	const char *verbose;
+	int brdtype;
+	uint32_t extclk;
+	char *consname;
+	int consport;
+	int consspeed;
+	void (*setup)(struct brdprop *);
+	void (*brdfix)(struct brdprop *);
+	void (*pcifix)(struct brdprop *);
+	void (*reset)(void);
+};
+
+extern uint32_t cpuclock, busclock;
+
+/* board specific support code */
+struct brdprop *brd_lookup(int);
 unsigned mpc107memsize(void);
+void read_mac_from_flash(uint8_t *);
 
 /* PPC processor ctl */
 void __syncicache(void *, size_t);
@@ -56,16 +78,34 @@ void  pcicfgwrite(unsigned, int, unsigned);
 #define  PCI_CLASS_IDE			0x0101
 #define  PCI_CLASS_RAID			0x0104
 #define  PCI_CLASS_SATA			0x0106
+#define  PCI_CLASS_MISCSTORAGE		0x0180
 #define PCI_BHLC_REG			0x0c
 #define  PCI_HDRTYPE_TYPE(r)		(((r) >> 16) & 0x7f)
 #define  PCI_HDRTYPE_MULTIFN(r)		((r) & (0x80 << 16))
+
+/*
+ * "Map B" layout
+ *
+ * practice direct mode configuration scheme with CONFIG_ADDR
+ * (0xfec0'0000) and CONFIG_DATA (0xfee0'0000).
+ */
+#define PCI_MEMBASE	0x80000000	/* PCI memory space */
+#define PCI_MEMLIMIT	0xfbffffff	/* EUMB is next to this */
+#define PCI_IOBASE	0x00001000	/* reserves room for southbridge */
+#define PCI_IOLIMIT	0x000fffff
+#define PCI_XIOBASE	0xfe000000	/* ISA/PCI io space */
+#define CONFIG_ADDR	0xfec00000
+#define CONFIG_DATA	0xfee00000
 
 /* cache ops */
 void _wb(uint32_t, uint32_t);
 void _wbinv(uint32_t, uint32_t);
 void _inv(uint32_t, uint32_t);
 
-/* NIF */
+/* heap */
+void *allocaligned(size_t, size_t);
+
+/* NIF support */
 int net_open(struct open_file *, ...);
 int net_close(struct open_file *);
 int net_strategy(void *, int, daddr_t, size_t, void *, size_t *);
@@ -82,64 +122,73 @@ int netif_close(int);
 
 NIF_DECL(fxp);
 NIF_DECL(tlp);
-NIF_DECL(nvt);
-NIF_DECL(sip);
-NIF_DECL(pcn);
-NIF_DECL(kse);
-NIF_DECL(sme);
-NIF_DECL(vge);
 NIF_DECL(rge);
-NIF_DECL(wm);
+NIF_DECL(skg);
 
-#ifdef LABELSECTOR
-/* IDE/SATA and disk */
-int wdopen(struct open_file *, ...);
-int wdclose(struct open_file *);
-int wdstrategy(void *, int, daddr_t, size_t, void *, size_t *);
-int parsefstype(void *);
+/* DSK support */
+int dskdv_init(unsigned, void **);
+int disk_scan(void *);
 
-struct atac_channel {
-	volatile uint8_t *c_cmdbase;
-	volatile uint8_t *c_ctlbase;
-	volatile uint8_t *c_cmdreg[8 + 2];
-	volatile uint16_t *c_data;
-	int compatchan;
-#define WDC_READ_CMD(chp, reg)		*(chp)->c_cmdreg[(reg)]
-#define WDC_WRITE_CMD(chp, reg, val)	*(chp)->c_cmdreg[(reg)] = (val)
-#define WDC_READ_CTL(chp, reg)		(chp)->c_ctlbase[(reg)]
-#define WDC_WRITE_CTL(chp, reg, val)	(chp)->c_ctlbase[(reg)] = (val)
-#define WDC_READ_DATA(chp)		*(chp)->c_data
+int dsk_open(struct open_file *, ...);
+int dsk_close(struct open_file *);
+int dsk_strategy(void *, int, daddr_t, size_t, void *, size_t *);
+struct fs_ops *dsk_fsops(struct open_file *);
+
+/* status */
+#define ATA_STS_BUSY	0x80
+#define ATA_STS_DRDY	0x40
+#define ATA_STS_ERR 	0x01
+/* command */
+#define ATA_CMD_IDENT	0xec
+#define ATA_CMD_READ	0xc8
+#define ATA_CMD_READ_EXT 0x24
+#define ATA_CMD_SETF	0xef
+/* device */
+#define ATA_DEV_LBA	0xe0
+#define ATA_DEV_OBS	0x90
+/* control */
+#define ATA_DREQ	0x08
+#define ATA_SRST	0x04
+
+#define ATA_XFER	0x03
+#define XFER_PIO4	0x0c
+#define XFER_PIO0	0x08
+
+struct dvata_chan {
+	uint32_t cmd, ctl, alt, dma;
 };
+#define _DAT	0	/* RW */
+#define _ERR	1	/* R */
+#define _FEA	1	/* W */
+#define _NSECT	2	/* RW */
+#define _LBAL	3	/* RW */
+#define _LBAM	4	/* RW */
+#define _LBAH	5	/* RW */
+#define _DEV	6	/* W */
+#define _STS	7	/* R */
+#define _CMD	7	/* W */
 
-struct atac_command {
-	uint8_t drive;		/* drive id */
-	uint8_t r_command;	/* Parameters to upload to registers */
-	uint8_t r_head;
-	uint16_t r_cyl;
-	uint8_t r_sector;
-	uint8_t r_count;
-	uint8_t r_precomp;
-	uint16_t bcount;
-	void *data;
-	uint64_t r_blkno;
-};
-
-struct atac_softc {
+struct dkdev_ata {
 	unsigned tag;
-	unsigned chvalid;
-	struct atac_channel channel[4];
+	uint32_t bar[6];
+	struct dvata_chan chan[4];
+	int presense[4];
+	char *iobuf;
 };
 
-struct wd_softc {
-#define WDF_LBA		0x0001
-#define WDF_LBA48	0x0002
-	int sc_flags;
-	int sc_unit, sc_part;
-	uint64_t sc_capacity;
-	struct atac_channel *sc_channel;
-	struct atac_command sc_command;
-	struct ataparams sc_params;
-	struct disklabel sc_label;
-	uint8_t sc_buf[DEV_BSIZE];
+struct disk {
+	char xname[8];
+	void *dvops;
+	unsigned unittag;
+	uint16_t ident[128];
+	uint64_t nsect;
+	uint64_t first;
+	void *dlabel;
+	int part;
+	void *fsops;
+	int (*lba_read)(struct disk *, uint64_t, uint32_t, void *);
 };
-#endif
+
+int spinwait_unbusy(struct dkdev_ata *, int, int, const char **);
+int perform_atareset(struct dkdev_ata *, int);
+int satapresense(struct dkdev_ata *, int);

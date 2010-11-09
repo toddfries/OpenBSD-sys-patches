@@ -1,4 +1,4 @@
-/*	$NetBSD: db_aout.c,v 1.41 2007/02/22 06:41:00 thorpej Exp $	*/
+/*	$NetBSD: db_aout.c,v 1.39 2006/11/16 01:32:44 christos Exp $	*/
 
 /*
  * Mach Operating System
@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: db_aout.c,v 1.41 2007/02/22 06:41:00 thorpej Exp $");
+__KERNEL_RCSID(0, "$NetBSD: db_aout.c,v 1.39 2006/11/16 01:32:44 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -43,15 +43,15 @@ __KERNEL_RCSID(0, "$NetBSD: db_aout.c,v 1.41 2007/02/22 06:41:00 thorpej Exp $")
 
 #include <ddb/db_aout.h>
 
-static bool db_aout_sym_init(int, void *, void *, const char *);
+static boolean_t db_aout_sym_init(int, void *, void *, const char *);
 static db_sym_t	db_aout_lookup(db_symtab_t *, const char *);
 static db_sym_t	db_aout_search_symbol(db_symtab_t *, db_addr_t, db_strategy_t,
 		    db_expr_t *);
 static void	db_aout_symbol_values(db_symtab_t *, db_sym_t, const char **,
 		    db_expr_t *);
-static bool db_aout_line_at_pc(db_symtab_t *, db_sym_t, char **, int *,
+static boolean_t db_aout_line_at_pc(db_symtab_t *, db_sym_t, char **, int *,
 		    db_expr_t);
-static bool db_aout_sym_numargs(db_symtab_t *, db_sym_t, int *, char **);
+static boolean_t db_aout_sym_numargs(db_symtab_t *, db_sym_t, int *, char **);
 static void	db_aout_forall(db_symtab_t *, db_forall_func_t db_forall_func,
 		    void *);
 static int db_add_symbol_table(char *, char *, const char *, char *);
@@ -87,7 +87,7 @@ const db_symformat_t db_symformat_aout = {
 /*
  * Find the symbol table and strings; tell ddb about them.
  */
-static bool
+static boolean_t
 db_aout_sym_init(
 	int symsize,		/* size of symbol table */
 	void *vsymtab,		/* pointer to start of symbol table */
@@ -106,7 +106,7 @@ db_aout_sym_init(
 	if (ALIGNED_POINTER(vsymtab, long) == 0) {
 		printf("[ %s symbol table has bad start address %p ]\n",
 		    name, vsymtab);
-		return (false);
+		return (FALSE);
 	}
 
 	/*
@@ -120,7 +120,7 @@ db_aout_sym_init(
 	if (ALIGNED_POINTER(strtab, int) == 0) {
 		printf("[ %s symbol table has bad string table address %p ]\n",
 		    name, strtab);
-		return (false);
+		return (FALSE);
 	}
 	slen = *(int *)strtab;
 
@@ -131,7 +131,7 @@ db_aout_sym_init(
 
 	if (round_to_size(estrtab) != round_to_size(vesymtab)) {
 		printf("[ %s a.out symbol table not valid ]\n", name);
-		return (false);
+		return (FALSE);
 	}
 #undef	round_to_size
 
@@ -151,16 +151,16 @@ db_aout_sym_init(
 	}
 
 	if (bad)
-		return (false);
+		return (FALSE);
 
 	if (db_add_symbol_table((char *)sym_start, (char *)sym_end, name,
 	    NULL) !=  -1) {
 		printf("[ using %ld bytes of %s a.out symbol table ]\n",
 			  (long)vesymtab - (long)vsymtab, name);
-		return (true);
+		return (TRUE);
 	}
 
-	return (false);
+	return (FALSE);
 }
 
 static db_sym_t
@@ -247,7 +247,7 @@ db_aout_symbol_values(db_symtab_t *symtab, db_sym_t sym,
 }
 
 
-static bool
+static boolean_t
 db_aout_line_at_pc(db_symtab_t *symtab, db_sym_t cursym,
     char **filename, int *linenum, db_expr_t off)
 {
@@ -303,13 +303,13 @@ db_aout_line_at_pc(db_symtab_t *symtab, db_sym_t cursym,
 	if (fname != NULL && ln != 0) {
 		*filename = fname;
 		*linenum = ln;
-		return true;
+		return TRUE;
 	}
 
-	return (false);
+	return (FALSE);
 }
 
-static bool
+static boolean_t
 db_aout_sym_numargs(db_symtab_t *symtab, db_sym_t cursym, int *nargp,
     char **argnamep)
 {
@@ -319,7 +319,7 @@ db_aout_sym_numargs(db_symtab_t *symtab, db_sym_t cursym, int *nargp,
 	static char question[] = "???";
 
 	if ((struct nlist *)cursym == NULL)
-		return false;
+		return FALSE;
 
 	symtab = &db_symtabs;
 
@@ -343,10 +343,10 @@ db_aout_sym_numargs(db_symtab_t *symtab, db_sym_t cursym, int *nargp,
 				}
 			}
 			*nargp = nargs;
-			return true;
+			return TRUE;
 		}
 	}
-	return false;
+	return FALSE;
 }
 
 static void

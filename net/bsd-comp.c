@@ -1,4 +1,4 @@
-/*	$NetBSD: bsd-comp.c,v 1.20 2008/11/29 23:15:20 cube Exp $	*/
+/*	$NetBSD: bsd-comp.c,v 1.16 2006/11/16 01:33:40 christos Exp $	*/
 /*	Id: bsd-comp.c,v 1.6 1996/08/28 06:31:58 paulus Exp 	*/
 
 /* Because this code is derived from the 4.3BSD compress source:
@@ -41,13 +41,12 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: bsd-comp.c,v 1.20 2008/11/29 23:15:20 cube Exp $");
+__KERNEL_RCSID(0, "$NetBSD: bsd-comp.c,v 1.16 2006/11/16 01:33:40 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/mbuf.h>
 #include <sys/socket.h>
-#include <sys/module.h>
 #include <net/if.h>
 #include <net/if_types.h>
 #include <net/ppp_defs.h>
@@ -90,7 +89,7 @@ struct bsd_db {
     u_char  maxbits;
     u_char  debug;
     u_char  unit;
-    uint16_t seqno;			/* sequence # of next packet */
+    u_int16_t seqno;			/* sequence # of next packet */
     u_int   hdrlen;			/* header length to preallocate */
     u_int   mru;
     u_int   maxmaxcode;			/* largest valid code */
@@ -106,24 +105,24 @@ struct bsd_db {
     u_int   uncomp_bytes;		/* uncompressed bytes */
     u_int   comp_count;			/* compressed packets */
     u_int   comp_bytes;			/* compressed bytes */
-    uint16_t *lens;			/* array of lengths of codes */
+    u_int16_t *lens;			/* array of lengths of codes */
     struct bsd_dict {
 	union {				/* hash value */
-	    uint32_t	fcode;
+	    u_int32_t	fcode;
 	    struct {
 #if BYTE_ORDER == LITTLE_ENDIAN
-		uint16_t prefix;	/* preceding code */
+		u_int16_t prefix;	/* preceding code */
 		u_char	suffix;		/* last character of new code */
 		u_char	pad;
 #else
 		u_char	pad;
 		u_char	suffix;		/* last character of new code */
-		uint16_t prefix;	/* preceding code */
+		u_int16_t prefix;	/* preceding code */
 #endif
 	    } hs;
 	} f;
-	uint16_t codem1;		/* output of hash table -1 */
-	uint16_t cptr;			/* map code to hash table entry */
+	u_int16_t codem1;		/* output of hash table -1 */
+	u_int16_t cptr;			/* map code to hash table entry */
     } dict[1];
 };
 
@@ -148,21 +147,21 @@ static void	bsd_comp_stats(void *state, struct compstat *stats);
 /*
  * Procedures exported to if_ppp.c.
  */
-static struct compressor ppp_bsd_compress = {
-    .compress_proto =	CI_BSD_COMPRESS,
-    .comp_alloc =	bsd_comp_alloc,
-    .comp_free =	bsd_free,
-    .comp_init =	bsd_comp_init,
-    .comp_reset =	bsd_reset,
-    .compress =		bsd_compress,
-    .comp_stat =	bsd_comp_stats,
-    .decomp_alloc =	bsd_decomp_alloc,
-    .decomp_free =	bsd_free,
-    .decomp_init =	bsd_decomp_init,
-    .decomp_reset =	bsd_reset,
-    .decompress =	bsd_decompress,
-    .incomp =		bsd_incomp,
-    .decomp_stat =	bsd_comp_stats,
+struct compressor ppp_bsd_compress = {
+    CI_BSD_COMPRESS,		/* compress_proto */
+    bsd_comp_alloc,		/* comp_alloc */
+    bsd_free,			/* comp_free */
+    bsd_comp_init,		/* comp_init */
+    bsd_reset,			/* comp_reset */
+    bsd_compress,		/* compress */
+    bsd_comp_stats,		/* comp_stat */
+    bsd_decomp_alloc,		/* decomp_alloc */
+    bsd_free,			/* decomp_free */
+    bsd_decomp_init,		/* decomp_init */
+    bsd_reset,			/* decomp_reset */
+    bsd_decompress,		/* decompress */
+    bsd_incomp,			/* incomp */
+    bsd_comp_stats,		/* decomp_stat */
 };
 
 /*
@@ -176,10 +175,10 @@ static struct compressor ppp_bsd_compress = {
 #define MAXCODE(b)	((1 << (b)) - 1)
 #define BADCODEM1	MAXCODE(BSD_MAX_BITS)
 
-#define BSD_HASH(prefix,suffix,hshift)	((((uint32_t)(suffix)) << (hshift)) \
-					 ^ (uint32_t)(prefix))
-#define BSD_KEY(prefix,suffix)		((((uint32_t)(suffix)) << 16) \
-					 + (uint32_t)(prefix))
+#define BSD_HASH(prefix,suffix,hshift)	((((u_int32_t)(suffix)) << (hshift)) \
+					 ^ (u_int32_t)(prefix))
+#define BSD_KEY(prefix,suffix)		((((u_int32_t)(suffix)) << 16) \
+					 + (u_int32_t)(prefix))
 
 #define CHECK_GAP	10000		/* Ratio check interval */
 
@@ -341,9 +340,10 @@ bsd_alloc(u_char *options, int opt_len, int decomp)
 
     maxmaxcode = MAXCODE(bits);
     newlen = sizeof(*db) + (hsize-1) * (sizeof(db->dict[0]));
-    db = malloc(newlen, M_DEVBUF, M_NOWAIT|M_ZERO);
+    db = malloc(newlen, M_DEVBUF, M_NOWAIT);
     if (!db)
 	return NULL;
+    memset(db, 0, sizeof(*db) - sizeof(db->dict));
 
     if (!decomp) {
 	db->lens = NULL;
@@ -460,7 +460,7 @@ bsd_compress(void *state,
     u_int max_ent = db->max_ent;
     u_int n_bits = db->n_bits;
     u_int bitno = 32;
-    uint32_t accm = 0, fcode;
+    u_int32_t accm = 0, fcode;
     struct bsd_dict *dictp;
     u_char c;
     int hval, disp, ent, ilen;
@@ -672,9 +672,9 @@ bsd_incomp(void *state, struct mbuf *dmsg)
     u_int max_ent = db->max_ent;
     u_int n_bits = db->n_bits;
     struct bsd_dict *dictp;
-    uint32_t fcode;
+    u_int32_t fcode;
     u_char c;
-    uint32_t hval, disp;
+    u_int32_t hval, disp;
     int slen, ilen;
     u_int bitno = 7;
     u_char *rptr;
@@ -797,7 +797,7 @@ bsd_decompress(void *state, struct mbuf *cmp, struct mbuf **dmpp)
 {
     struct bsd_db *db = (struct bsd_db *) state;
     u_int max_ent = db->max_ent;
-    uint32_t accm = 0;
+    u_int32_t accm = 0;
     u_int bitno = 32;		/* 1st valid bit in accm */
     u_int n_bits = db->n_bits;
     u_int tgtbitno = 32-n_bits;	/* bitno when we have a code */
@@ -1011,8 +1011,8 @@ bsd_decompress(void *state, struct mbuf *cmp, struct mbuf **dmpp)
 	 */
 	if (oldcode != CLEAR && max_ent < db->maxmaxcode) {
 	    struct bsd_dict *dictp2;
-	    uint32_t fcode;
-	    uint32_t hval, disp;
+	    u_int32_t fcode;
+	    u_int32_t hval, disp;
 
 	    fcode = BSD_KEY(oldcode,finchar);
 	    hval = BSD_HASH(oldcode,finchar,db->hshift);
@@ -1088,25 +1088,5 @@ bsd_decompress(void *state, struct mbuf *cmp, struct mbuf **dmpp)
     m_freem(mret);
     return DECOMP_FATALERROR;
 #endif /* DEBUG */
-}
-
-MODULE(MODULE_CLASS_MISC, ppp_bsdcomp, NULL);
-
-static int
-ppp_bsdcomp_modcmd(modcmd_t cmd, void *arg)
-{
-
-	switch (cmd) {
-	case MODULE_CMD_INIT:
-		return ppp_register_compressor(&ppp_bsd_compress, 1);
-	case MODULE_CMD_FINI:
-		return ppp_unregister_compressor(&ppp_bsd_compress, 1);
-	case MODULE_CMD_STAT:
-		return 0;
-	default:
-		return ENOTTY;
-	}
-
-	return ENOTTY;
 }
 #endif /* DO_BSD_COMPRESS */

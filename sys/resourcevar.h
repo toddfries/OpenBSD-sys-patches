@@ -1,4 +1,4 @@
-/*	$NetBSD: resourcevar.h,v 1.48 2009/01/11 02:45:55 christos Exp $	*/
+/*	$NetBSD: resourcevar.h,v 1.40 2007/09/29 12:22:30 dsl Exp $	*/
 
 /*
  * Copyright (c) 1991, 1993
@@ -46,7 +46,7 @@ struct pstats {
 #define	pstat_endzero	pstat_startcopy
 
 #define	pstat_startcopy	p_timer
-	struct	itimerspec p_timer[3];	/* virtual-time timers */
+	struct	itimerval p_timer[3];	/* virtual-time timers */
 
 	struct uprof {			/* profile arguments */
 		char *	pr_base;	/* buffer base */
@@ -83,16 +83,37 @@ struct plimit {
 };
 
 /* add user profiling from AST XXXSMP */
-#define	ADDUPROF(l)							\
+#define	ADDUPROF(p)							\
 	do {								\
-		struct proc *_p = (l)->l_proc;				\
-		addupc_task((l),					\
-		    _p->p_stats->p_prof.pr_addr,			\
-		    _p->p_stats->p_prof.pr_ticks);			\
-		_p->p_stats->p_prof.pr_ticks = 0;			\
+		struct proc *_p = l->l_proc;				\
+		addupc_task(l,						\
+		    (_p)->p_stats->p_prof.pr_addr,			\
+		    (_p)->p_stats->p_prof.pr_ticks);			\
+		(_p)->p_stats->p_prof.pr_ticks = 0;			\
 	} while (/* CONSTCOND */ 0)
 
 #ifdef _KERNEL
+/*
+ * Structure associated with user caching.
+ */
+struct uidinfo {
+	LIST_ENTRY(uidinfo) ui_hash;
+	uid_t	ui_uid;
+	long	ui_proccnt;	/* Number of processes */
+	long	ui_lockcnt;	/* Number of locks */
+	rlim_t	ui_sbsize;	/* socket buffer size */
+	kmutex_t ui_lock;	/* mutex for everything */
+
+};
+#define	UIHASH(uid)	(&uihashtbl[(uid) & uihash])
+
+extern LIST_HEAD(uihashhead, uidinfo) *uihashtbl;
+extern u_long uihash;		/* size of hash table - 1 */
+int       chgproccnt(uid_t, int);
+int       chgsbsize(struct uidinfo *, u_long *, u_long, rlim_t);
+struct uidinfo *uid_find(uid_t);
+void	uid_init(void);
+
 extern char defcorename[];
 
 extern int security_setidcore_dump;
@@ -101,19 +122,17 @@ extern uid_t security_setidcore_owner;
 extern gid_t security_setidcore_group;
 extern mode_t security_setidcore_mode;
 
-void	addupc_intr(struct lwp *, u_long);
-void	addupc_task(struct lwp *, u_long, u_int);
-void	calcru(struct proc *, struct timeval *, struct timeval *,
+void	 addupc_intr(struct lwp *, u_long);
+void	 addupc_task(struct lwp *, u_long, u_int);
+void	 calcru(struct proc *, struct timeval *, struct timeval *,
 	    struct timeval *, struct timeval *);
 
 struct plimit *lim_copy(struct plimit *lim);
-void	lim_addref(struct plimit *lim);
-void	lim_privatise(struct proc *p, bool set_shared);
-void	limfree(struct plimit *);
+void lim_addref(struct plimit *lim);
+void lim_privatise(struct proc *p, bool set_shared);
+void limfree(struct plimit *);
 
-void	resource_init(void);
 void	ruadd(struct rusage *, struct rusage *);
-void	rulwps(proc_t *, struct rusage *);
 struct	pstats *pstatscopy(struct pstats *);
 void 	pstatsfree(struct pstats *);
 extern rlim_t maxdmap;

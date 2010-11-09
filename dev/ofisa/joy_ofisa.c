@@ -1,4 +1,4 @@
-/*	$NetBSD: joy_ofisa.c,v 1.14 2008/04/28 20:23:54 martin Exp $	*/
+/*	$NetBSD: joy_ofisa.c,v 1.12 2007/10/19 12:00:37 ad Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: joy_ofisa.c,v 1.14 2008/04/28 20:23:54 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: joy_ofisa.c,v 1.12 2007/10/19 12:00:37 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -47,14 +54,17 @@ __KERNEL_RCSID(0, "$NetBSD: joy_ofisa.c,v 1.14 2008/04/28 20:23:54 martin Exp $"
 
 #define	JOY_NPORTS	1	/* XXX should be in a header file */
 
-static int	joy_ofisa_match(device_t, cfdata_t, void *);
-static void	joy_ofisa_attach(device_t, device_t, void *);
+int	joy_ofisa_match(struct device *, struct cfdata *, void *);
+void	joy_ofisa_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(joy_ofisa, sizeof(struct joy_softc),
+CFATTACH_DECL(joy_ofisa, sizeof(struct joy_softc),
     joy_ofisa_match, joy_ofisa_attach, NULL, NULL);
 
-static int
-joy_ofisa_match(device_t parent, cfdata_t match, void *aux)
+int
+joy_ofisa_match(parent, match, aux)
+	struct device *parent;
+	struct cfdata *match;
+	void *aux;
 {
 	struct ofisa_attach_args *aa = aux;
 	static const char *const compatible_strings[] = {
@@ -65,11 +75,13 @@ joy_ofisa_match(device_t parent, cfdata_t match, void *aux)
 
 	if (of_compatible(aa->oba.oba_phandle, compatible_strings) != -1)
 		rv = 1;
-	return rv;
+	return (rv);
 }
 
-static void
-joy_ofisa_attach(device_t parent, device_t self, void *aux)
+void
+joy_ofisa_attach(parent, self, aux)
+	struct device *parent, *self;
+	void *aux;
 {
 	struct joy_softc *sc = device_private(self);
 	struct ofisa_attach_args *aa = aux;
@@ -88,24 +100,23 @@ joy_ofisa_attach(device_t parent, device_t self, void *aux)
 
 	n = ofisa_reg_get(aa->oba.oba_phandle, &reg, 1);
 	if (n != 1) {
-		aprint_error(": error getting register data\n");
+		printf(": error getting register data\n");
 		return;
 	}
 	if (reg.type != OFISA_REG_TYPE_IO) {
-		aprint_error(": register type not i/o\n");
+		printf(": register type not i/o\n");
 		return;
 	}
 	if (reg.len != JOY_NPORTS) {
-		aprint_error(": weird register size (%lu, expected %d)\n",
+		printf(": weird register size (%lu, expected %d)\n",
 		    (unsigned long)reg.len, JOY_NPORTS);
 		return;
 	}
 
 	sc->sc_iot = aa->iot;
-	sc->sc_dev = self;
 
 	if (bus_space_map(sc->sc_iot, reg.addr, reg.len, 0, &sc->sc_ioh)) {
-		aprint_error(": unable to map register space\n");
+		printf(": unable to map register space\n");
 		return;
 	}
 
@@ -116,8 +127,8 @@ joy_ofisa_attach(device_t parent, device_t self, void *aux)
 			model = NULL;	/* safe; alloca */
 	}
 	if (model != NULL)
-		aprint_normal(": %s", model);
-	aprint_normal("\n");
+		printf(": %s", model);
+	printf("\n");
 
 	joyattach(sc);
 }

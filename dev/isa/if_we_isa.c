@@ -1,4 +1,4 @@
-/*	$NetBSD: if_we_isa.c,v 1.20 2008/04/28 20:23:52 martin Exp $	*/
+/*	$NetBSD: if_we_isa.c,v 1.18 2007/10/19 12:00:18 ad Exp $	*/
 
 /*-
  * Copyright (c) 1997, 1998 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -49,7 +56,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_we_isa.c,v 1.20 2008/04/28 20:23:52 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_we_isa.c,v 1.18 2007/10/19 12:00:18 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -83,10 +90,10 @@ __KERNEL_RCSID(0, "$NetBSD: if_we_isa.c,v 1.20 2008/04/28 20:23:52 martin Exp $"
 #define	bus_space_write_region_stream_2	bus_space_write_region_2
 #endif
 
-int	we_isa_probe(device_t, cfdata_t , void *);
-void	we_isa_attach(device_t, device_t, void *);
+int	we_isa_probe(struct device *, struct cfdata *, void *);
+void	we_isa_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(we_isa, sizeof(struct we_softc),
+CFATTACH_DECL(we_isa, sizeof(struct we_softc),
     we_isa_probe, we_isa_attach, NULL, NULL);
 
 extern struct cfdriver we_cd;
@@ -136,7 +143,7 @@ do { \
 } while (0)
 
 int
-we_isa_probe(device_t parent, cfdata_t cf, void *aux)
+we_isa_probe(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct isa_attach_args *ia = aux;
 	bus_space_tag_t asict, memt;
@@ -250,9 +257,9 @@ we_isa_probe(device_t parent, cfdata_t cf, void *aux)
 
 		if (ia->ia_irq[0].ir_irq != ISA_UNKNOWN_IRQ &&
 		    ia->ia_irq[0].ir_irq != we_790_irq[i])
-			aprint_error("%s%d: overriding configured "
-			    "IRQ %d to %d\n", we_cd.cd_name, cf->cf_unit,
-			    ia->ia_irq[0].ir_irq, we_790_irq[i]);
+			printf("%s%d: overriding configured IRQ %d to %d\n",
+			    we_cd.cd_name, cf->cf_unit, ia->ia_irq[0].ir_irq,
+			    we_790_irq[i]);
 		ia->ia_irq[0].ir_irq = we_790_irq[i];
 	} else if (type & WE_SOFTCONFIG) {
 		/* Assemble together the encoded interrupt number. */
@@ -262,9 +269,9 @@ we_isa_probe(device_t parent, cfdata_t cf, void *aux)
 
 		if (ia->ia_irq[0].ir_irq != ISA_UNKNOWN_IRQ &&
 		    ia->ia_irq[0].ir_irq != we_584_irq[i])
-			aprint_error("%s%d: overriding configured "
-			    "IRQ %d to %d\n", we_cd.cd_name, cf->cf_unit,
-			    ia->ia_irq[0].ir_irq, we_584_irq[i]);
+			printf("%s%d: overriding configured IRQ %d to %d\n",
+			    we_cd.cd_name, cf->cf_unit, ia->ia_irq[0].ir_irq,
+			    we_584_irq[i]);
 		ia->ia_irq[0].ir_irq = we_584_irq[i];
 	}
 
@@ -290,37 +297,38 @@ we_isa_probe(device_t parent, cfdata_t cf, void *aux)
 }
 
 void
-we_isa_attach(device_t parent, device_t self, void *aux)
+we_isa_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct we_softc *wsc = device_private(self);
+	struct we_softc *wsc = (struct we_softc *)self;
 	struct dp8390_softc *sc = &wsc->sc_dp8390;
 	struct isa_attach_args *ia = aux;
 	bus_space_tag_t nict, asict, memt;
 	bus_space_handle_t nich, asich, memh;
 	const char *typestr;
 
-	aprint_normal("\n");
+	printf("\n");
 
-	sc->sc_dev = self;
 	nict = asict = ia->ia_iot;
 	memt = ia->ia_memt;
 
 	/* Map the device. */
 	if (bus_space_map(asict, ia->ia_io[0].ir_addr, WE_NPORTS, 0, &asich)) {
-		aprint_error_dev(self, "can't map nic i/o space\n");
+		printf("%s: can't map nic i/o space\n",
+		    sc->sc_dev.dv_xname);
 		return;
 	}
 
 	if (bus_space_subregion(asict, asich, WE_NIC_OFFSET, WE_NIC_NPORTS,
 	    &nich)) {
-		aprint_error_dev(self, "can't subregion i/o space\n");
+		printf("%s: can't subregion i/o space\n",
+		    sc->sc_dev.dv_xname);
 		return;
 	}
 
 	typestr = we_params(asict, asich, &wsc->sc_type, NULL,
 	    &wsc->sc_flags, &sc->is790);
 	if (typestr == NULL) {
-		aprint_error_dev(self, "where did the card go?\n");
+		printf("%s: where did the card go?\n", sc->sc_dev.dv_xname);
 		return;
 	}
 
@@ -330,7 +338,8 @@ we_isa_attach(device_t parent, device_t self, void *aux)
 	 */
 	if (bus_space_map(memt, ia->ia_iomem[0].ir_addr,
 	    ia->ia_iomem[0].ir_size, 0, &memh)) {
-		aprint_error_dev(self, "can't map shared memory\n");
+		printf("%s: can't map shared memory\n",
+		    sc->sc_dev.dv_xname);
 		return;
 	}
 
@@ -363,8 +372,8 @@ we_isa_attach(device_t parent, device_t self, void *aux)
 		bus_space_write_1(asict, asich, WE_IRR,
 		    bus_space_read_1(asict, asich, WE_IRR) | WE_IRR_IEN);
 	else if (ia->ia_irq[0].ir_irq == ISA_UNKNOWN_IRQ) {
-		aprint_error_dev(self, "can't wildcard IRQ on a %s\n",
-		    typestr);
+		printf("%s: can't wildcard IRQ on a %s\n",
+		    sc->sc_dev.dv_xname, typestr);
 		return;
 	}
 
@@ -372,12 +381,16 @@ we_isa_attach(device_t parent, device_t self, void *aux)
 	wsc->sc_ih = isa_intr_establish(ia->ia_ic, ia->ia_irq[0].ir_irq,
 	    IST_EDGE, IPL_NET, dp8390_intr, sc);
 	if (wsc->sc_ih == NULL)
-		aprint_error_dev(self, "can't establish interrupt\n");
+		printf("%s: can't establish interrupt\n", sc->sc_dev.dv_xname);
 }
 
 static const char *
-we_params(bus_space_tag_t asict, bus_space_handle_t asich, u_int8_t *typep,
-    bus_size_t *memsizep, u_int8_t *flagp, int *is790p)
+we_params(asict, asich, typep, memsizep, flagp, is790p)
+	bus_space_tag_t asict;
+	bus_space_handle_t asich;
+	u_int8_t *typep, *flagp;
+	bus_size_t *memsizep;
+	int *is790p;
 {
 	const char *typestr;
 	bus_size_t memsize;

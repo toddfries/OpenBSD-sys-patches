@@ -1,4 +1,4 @@
-/*	$NetBSD: bootinfo.c,v 1.4 2008/04/28 20:23:34 martin Exp $	*/
+/*	$NetBSD: bootinfo.c,v 1.2 2001/11/21 23:33:18 thorpej Exp $	*/
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -35,46 +42,26 @@
 
 #include "bootinfo.h"
 
-struct btinfo_common *bootinfo;		/* bootinfo address */
+struct btinfo_common *bootinfo;
 
-static char *bi_next;			/* pointer to next bootinfo data */
-static int bi_size;			/* current bootinfo size */
+static struct btinfo_magic bi_magic;
 
 void
-bi_init(void *bi_addr)
+bi_init(void)
 {
-	struct btinfo_magic bi_magic;
 
-	bootinfo = bi_addr;
-	bootinfo->next = 0;
-	bootinfo->type = BTINFO_NONE;
-
-	bi_next = (void *)bootinfo;
-	bi_size = 0;
+	bootinfo = NULL;
 
 	bi_magic.magic = BOOTINFO_MAGIC;
-	bi_add(&bi_magic, BTINFO_MAGIC, sizeof(bi_magic));
+	bi_add(&bi_magic, BTINFO_MAGIC);
 }
 
 void
-bi_add(void *new, int type, size_t size)
+bi_add(void *new, int type)
 {
-	struct btinfo_common *bi;
+	struct btinfo_common *bi = new;
 
-	if (bi_size + size > BOOTINFO_SIZE)
-		return;		/* XXX should report error? */
-
-	bi_size += size;
-
-	/* register new bootinfo data */
-	memcpy(bi_next, new, size);
-	bi = (void *)bi_next;
-	bi->next = size;
 	bi->type = type;
-
-	/* update pointer to next bootinfo data */
-	bi_next += size;
-	bi = (void *)bi_next;
-	bi->next = 0;
-	bi->type = BTINFO_NONE;
+	bi->next = bootinfo;
+	bootinfo = bi;
 }

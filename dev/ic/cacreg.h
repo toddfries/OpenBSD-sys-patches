@@ -1,4 +1,4 @@
-/*	$NetBSD: cacreg.h,v 1.11 2008/04/28 20:23:49 martin Exp $	*/
+/*	$NetBSD: cacreg.h,v 1.8 2006/11/28 23:06:33 ad Exp $	*/
 
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -131,7 +138,7 @@ struct cac_drive_info {
 	u_int8_t	nsectors;
 	u_int8_t	checksum;
 	u_int8_t	mirror;
-} __packed;
+} __attribute__((__packed__));
 
 struct cac_controller_info {
 	u_int8_t	num_drvs;
@@ -168,66 +175,13 @@ struct cac_controller_info {
 	u_int8_t	red_ctlr_stat;
 	u_int8_t	red_fail_reason;
 	u_int8_t	reserved[403];
-} __packed;
-
-struct cac_drive_status {
-	u_int8_t	stat;
-#define	CAC_LD_OK	0
-#define	CAC_LD_FAILED	1
-#define	CAC_LD_UNCONF	2
-#define	CAC_LD_DEGRAD	3
-#define	CAC_LD_RBLDRD	4	/* ready for rebuild */
-#define	CAC_LD_REBLD	5
-#define	CAC_LD_PDINV	6	/* wrong phys drive replaced */
-#define	CAC_LD_PDUNC	7	/* phys drive is not connected proper */
-#define	CAC_LD_EXPND	10	/* expanding */
-#define	CAC_LD_NORDY	11	/* volume is not ready */
-#define	CAC_LD_QEXPND	12	/* queued for expansion */
-	u_int8_t	failed[4];	/* failed map */
-	u_int8_t	res0[416];
-	u_int8_t	prog[4];	/* blocks left to rebuild/expand */
-	u_int8_t	rebuild;	/* drive that is rebuilding */
-	u_int16_t	remapcnt[32];	/* count of re3mapped blocks for pds */
-	u_int8_t	replaced[4];	/* replaced drives map */
-	u_int8_t	spare[4];	/* used spares map */
-	u_int8_t	sparestat;	/* spare status */
-#define	CAC_LD_CONF	0x01	/* spare configured */
-#define	CAC_LD_RBLD	0x02	/* spare is used and rebuilding */
-#define	CAC_LD_DONE	0x04	/* spare rebuild done */
-#define	CAC_LD_FAIL	0x08	/* at least one spare drive has failed */
-#define	CAC_LD_USED	0x10	/* at least one spare drive is used */
-#define	CAC_LD_AVAIL	0x20	/* at least one spare is available */
-	u_int8_t	sparemap[32];	/* spare->pd replacement map */
-	u_int8_t	replok[4];	/* replaced failed map */
-	u_int8_t	readyok;	/* ready to become ok */
-	u_int8_t	memfail;	/* cache mem failure */
-	u_int8_t	expfail;	/* expansion failure */
-	u_int8_t	rebldfail;	/* rebuild failure */
-#define	CAC_LD_RBLD_READ	0x01	/* read faild */
-#define	CAC_LD_RBLD_WRITE	0x02	/* write fail */
-	u_int8_t	bigfailed[16];	/* bigmap vers of same of the above */
-	u_int8_t	bigremapcnt[256];
-	u_int8_t	bigreplaced[16];
-	u_int8_t	bigspare[16];
-	u_int8_t	bigsparemap[128];
-	u_int8_t	bigreplok[16];
-	u_int8_t	bigrebuild;	/* big-number rebuilding driveno */
-} __packed;
-
-struct cac_blink {
-	u_int32_t	duration;	/* x100ms */
-	u_int32_t	elapsed;	/* only for sense */
-	u_int8_t	pdtab[256];
-#define	CAC_BLINK_ALL	1
-#define	CAC_BLINK_TIMED 2
-	u_int8_t	res[248];
-} __packed;
+} __attribute__((__packed__));
 
 struct cac_hdr {
 	u_int8_t	drive;		/* logical drive */
 	u_int8_t	priority;	/* block priority */
 	u_int16_t	size;		/* size of request, in words */
-} __packed;
+} __attribute__((__packed__));
 
 struct cac_req {
 	u_int16_t	next;		/* offset of next request */
@@ -237,11 +191,11 @@ struct cac_req {
 	u_int16_t	bcount;		/* block count */
 	u_int8_t	sgcount;	/* number of scatter/gather entries */
 	u_int8_t	reserved;	/* reserved */
-} __packed;
+} __attribute__((__packed__));
 
 struct cac_sgb {
 	u_int32_t	length;		/* length of S/G segment */
 	u_int32_t	addr;		/* physical address of block */
-} __packed;
+} __attribute__((__packed__));
 
 #endif	/* !_IC_CACREG_H_ */

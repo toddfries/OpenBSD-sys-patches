@@ -1,8 +1,11 @@
-/*	$NetBSD: powernow_common.c,v 1.11 2008/05/21 01:13:07 ad Exp $	*/
+/*	$NetBSD: powernow_common.c,v 1.4 2006/10/08 15:51:30 cube Exp $	*/
 
 /*
  *  Copyright (c) 2006 The NetBSD Foundation.
  *  All rights reserved.
+ *
+ *  This code is derived from software contributed to the NetBSD Foundation
+ *   by Quentin Garnier.
  *
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions
@@ -12,6 +15,13 @@
  *  2. Redistributions in binary form must reproduce the above copyright
  *     notice, this list of conditions and the following disclaimer in the
  *     documentation and/or other materials provided with the distribution.
+ *  3. All advertising materials mentioning features or use of this software
+ *     must display the following acknowledgement:
+ *         This product includes software developed by the NetBSD
+ *         Foundation, Inc. and its contributors.
+ *  4. Neither the name of The NetBSD Foundation nor the names of its
+ *     contributors may be used to endorse or promote products derived
+ *     from this software without specific prior written permission.
  *
  *  THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  *  ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -27,27 +37,32 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: powernow_common.c,v 1.11 2008/05/21 01:13:07 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: powernow_common.c,v 1.4 2006/10/08 15:51:30 cube Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 
-#include <x86/powernow.h>
-#include <x86/cpufunc.h>
+#include <x86/include/powernow.h>
 
 int
 powernow_probe(struct cpu_info *ci)
 {
 	uint32_t regs[4];
+	char line[80];
 
-	x86_cpuid(0x80000000, regs);
+	CPUID(0x80000000, regs[0], regs[1], regs[2], regs[3]);
 
 	/* We need CPUID(0x80000007) */
 	if (regs[0] < 0x80000007)
 		return 0;
-	x86_cpuid(0x80000007, regs);
+	CPUID(0x80000007, regs[0], regs[1], regs[2], regs[3]);
+
+	bitmask_snprintf(regs[3], "\20\6STC\5TM\4TTP\3VID\2FID\1TS", line,
+	    sizeof line);
+	aprint_normal("%s: AMD Power Management features: %s\n",
+	    device_xname(ci->ci_dev), line);
 
 	/*
 	 * For now we're only interested in FID and VID for frequency scaling.

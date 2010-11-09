@@ -1,4 +1,4 @@
-/*	$NetBSD: umass_quirks.c,v 1.76 2008/10/27 21:46:43 joerg Exp $	*/
+/*	$NetBSD: umass_quirks.c,v 1.73 2008/04/28 20:24:00 martin Exp $	*/
 
 /*
  * Copyright (c) 2001, 2004 The NetBSD Foundation, Inc.
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: umass_quirks.c,v 1.76 2008/10/27 21:46:43 joerg Exp $");
+__KERNEL_RCSID(0, "$NetBSD: umass_quirks.c,v 1.73 2008/04/28 20:24:00 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -51,6 +51,7 @@ __KERNEL_RCSID(0, "$NetBSD: umass_quirks.c,v 1.76 2008/10/27 21:46:43 joerg Exp 
 
 Static usbd_status umass_init_insystem(struct umass_softc *);
 Static usbd_status umass_init_shuttle(struct umass_softc *);
+Static usbd_status umass_init_e220(struct umass_softc *);
 
 Static void umass_fixup_sony(struct umass_softc *);
 
@@ -161,18 +162,6 @@ Static const struct umass_quirk umass_quirks[] = {
 	},
 
 	/*
-	 * The SONY Portable GPS strage device almost hangs up when request
-	 * UR_BBB_GET_MAX_LUN - disable the query logic.
-	 */
-	{ { USB_VENDOR_SONY, USB_PRODUCT_SONY_GPS_CS1 },
-	  UMASS_WPROTO_BBB, UMASS_CPROTO_UNSPEC,
-	  UMASS_QUIRK_NOGETMAXLUN,
-	  0,
-	  UMATCH_DEVCLASS_DEVSUBCLASS_DEVPROTO,
-	  NULL, NULL
-	},
-
-	/*
 	 * The DiskOnKey does not reject commands it doesn't recognize in a
 	 * sane way -- rather than STALLing the bulk pipe, it continually NAKs
 	 * until we time out.  To prevent being screwed by this, for now we
@@ -199,27 +188,12 @@ Static const struct umass_quirk umass_quirks[] = {
 	  UMATCH_DEVCLASS_DEVSUBCLASS_DEVPROTO,
 	  NULL, NULL
 	},
-	/* IBEAD devices don't like all SCSI commands */
-	{ { USB_VENDOR_SIGMATEL, USB_PRODUCT_SIGMATEL_MUSICSTICK },
+	{ { USB_VENDOR_HUAWEI, USB_PRODUCT_HUAWEI_E220 },
 	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
 	  0,
-	  PQUIRK_NODOORLOCK | PQUIRK_NOSYNCCACHE,
-	  UMATCH_VENDOR_PRODUCT,
-	  NULL, NULL
-	},
-	{ { USB_VENDOR_SIGMATEL, USB_PRODUCT_SIGMATEL_I_BEAD100 },
-	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
-	  0, 
-	  PQUIRK_NODOORLOCK | PQUIRK_NOSYNCCACHE,
-	  UMATCH_VENDOR_PRODUCT,  
-	  NULL, NULL
-	},
-	{ { USB_VENDOR_SIGMATEL, USB_PRODUCT_SIGMATEL_I_BEAD150 },
-	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC, 
 	  0,
-	  PQUIRK_NODOORLOCK | PQUIRK_NOSYNCCACHE,
-	  UMATCH_VENDOR_PRODUCT,
-	  NULL, NULL
+	  UMASS_QUIRK_USE_DEFAULTMATCH, /* use default MATCH function */
+	  umass_init_e220, NULL
 	},
 };
 
@@ -270,4 +244,25 @@ umass_fixup_sony(struct umass_softc *sc)
 	id = usbd_get_interface_descriptor(sc->sc_iface);
 	if (id->bInterfaceSubClass == 0xff)
 		sc->sc_cmd = UMASS_CPROTO_RBC;
+}
+
+Static usbd_status
+umass_init_e220(struct umass_softc *sc)
+{
+#define E220_UMASS_INTERFACE 2
+	usbd_status err;
+
+	if (sc->sc_ifaceno != E220_UMASS_INTERFACE)
+		return (USBD_NOT_CONFIGURED);
+
+	err = usbd_device2interface_handle(sc->sc_udev, sc->sc_ifaceno, &sc->sc_iface);
+	if (err) {
+		DPRINTF(UDMASS_USB,
+			("%s: could not switch to Alt Interface %d\n",
+			USBDEVNAME(sc->sc_dev), sc->sc_ifaceno));
+		return (err);
+	}
+
+	return (USBD_NORMAL_COMPLETION);
+#undef E220_UMASS_INTERFACE
 }

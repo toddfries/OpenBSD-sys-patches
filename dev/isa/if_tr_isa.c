@@ -1,4 +1,4 @@
-/*	$NetBSD: if_tr_isa.c,v 1.19 2009/02/13 22:39:10 bouyer Exp $	*/
+/*	$NetBSD: if_tr_isa.c,v 1.17 2007/10/19 12:00:18 ad Exp $	*/
 
 /* XXXJRT changes isa_attach_args too early!! */
 
@@ -17,6 +17,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by The NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -32,7 +39,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_tr_isa.c,v 1.19 2009/02/13 22:39:10 bouyer Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_tr_isa.c,v 1.17 2007/10/19 12:00:18 ad Exp $");
 
 #undef TRISADEBUG
 
@@ -107,7 +114,7 @@ bus_space_handle_t *pioh, *mmioh;
 	mmio = ((s & 0xfc) << 11) + TR_MMIO_OFFSET;
 	if (bus_space_map(ia->ia_memt, mmio, TR_MMIO_SIZE, 0, mmioh)) {
 		printf("tr_isa_map_io: can't map MMIO region 0x%05lx/%d\n",
-			(u_long)mmio, TR_MMIO_SIZE);
+			mmio, TR_MMIO_SIZE);
 		bus_space_unmap(ia->ia_iot, *pioh, ia->ia_io[0].ir_size);
 		return 1;
 	}

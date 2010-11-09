@@ -1,4 +1,4 @@
-/*	$NetBSD: ip6_output.c,v 1.135 2008/10/27 20:03:07 plunky Exp $	*/
+/*	$NetBSD: ip6_output.c,v 1.111 2007/01/04 19:07:04 elad Exp $	*/
 /*	$KAME: ip6_output.c,v 1.172 2001/03/25 09:55:56 itojun Exp $	*/
 
 /*
@@ -62,7 +62,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ip6_output.c,v 1.135 2008/10/27 20:03:07 plunky Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ip6_output.c,v 1.111 2007/01/04 19:07:04 elad Exp $");
 
 #include "opt_inet.h"
 #include "opt_inet6.h"
@@ -93,7 +93,6 @@ __KERNEL_RCSID(0, "$NetBSD: ip6_output.c,v 1.135 2008/10/27 20:03:07 plunky Exp 
 #include <netinet/in_offload.h>
 #include <netinet6/in6_offload.h>
 #include <netinet6/ip6_var.h>
-#include <netinet6/ip6_private.h>
 #include <netinet6/in6_pcb.h>
 #include <netinet6/nd6.h>
 #include <netinet6/ip6protosw.h>
@@ -101,17 +100,8 @@ __KERNEL_RCSID(0, "$NetBSD: ip6_output.c,v 1.135 2008/10/27 20:03:07 plunky Exp 
 
 #ifdef IPSEC
 #include <netinet6/ipsec.h>
-#include <netinet6/ipsec_private.h>
 #include <netkey/key.h>
 #endif /* IPSEC */
-
-#ifdef FAST_IPSEC
-#include <netipsec/ipsec.h>
-#include <netipsec/ipsec6.h>
-#include <netipsec/key.h>
-#include <netipsec/xform.h>
-#endif
-
 
 #include <net/net_osdep.h>
 
@@ -127,24 +117,25 @@ struct ip6_exthdrs {
 	struct mbuf *ip6e_dest2;
 };
 
-static int ip6_pcbopt(int, u_char *, int, struct ip6_pktopts **,
-	int, int);
-static int ip6_getpcbopt(struct ip6_pktopts *, int, struct sockopt *);
-static int ip6_setpktopt(int, u_char *, int, struct ip6_pktopts *, int,
-	int, int, int);
-static int ip6_setmoptions(const struct sockopt *, struct ip6_moptions **);
-static int ip6_getmoptions(struct sockopt *, struct ip6_moptions *);
-static int ip6_copyexthdr(struct mbuf **, void *, int);
-static int ip6_insertfraghdr(struct mbuf *, struct mbuf *, int,
-	struct ip6_frag **);
-static int ip6_insert_jumboopt(struct ip6_exthdrs *, u_int32_t);
-static int ip6_splithdr(struct mbuf *, struct ip6_exthdrs *);
-static int ip6_getpmtu(struct route *, struct route *, struct ifnet *,
-    const struct in6_addr *, u_long *, int *);
-static int copypktopts(struct ip6_pktopts *, struct ip6_pktopts *, int);
+static int ip6_pcbopt __P((int, u_char *, int, struct ip6_pktopts **,
+	int, int));
+static int ip6_getpcbopt __P((struct ip6_pktopts *, int, struct mbuf **));
+static int ip6_setpktopt __P((int, u_char *, int, struct ip6_pktopts *, int,
+	int, int, int));
+static int ip6_setmoptions __P((int, struct ip6_moptions **, struct mbuf *));
+static int ip6_getmoptions __P((int, struct ip6_moptions *, struct mbuf **));
+static int ip6_copyexthdr __P((struct mbuf **, caddr_t, int));
+static int ip6_insertfraghdr __P((struct mbuf *, struct mbuf *, int,
+	struct ip6_frag **));
+static int ip6_insert_jumboopt __P((struct ip6_exthdrs *, u_int32_t));
+static int ip6_splithdr __P((struct mbuf *, struct ip6_exthdrs *));
+static int ip6_getpmtu __P((struct route_in6 *, struct route_in6 *,
+	struct ifnet *, struct in6_addr *, u_long *, int *));
+static int copypktopts __P((struct ip6_pktopts *, struct ip6_pktopts *, int));
 
 #ifdef RFC2292
-static int ip6_pcbopts(struct ip6_pktopts **, struct socket *, struct sockopt *);
+static int ip6_pcbopts __P((struct ip6_pktopts **, struct mbuf *,
+	struct socket *));
 #endif
 
 #define	IN6_NEED_CHECKSUM(ifp, csum_flags) \
@@ -167,7 +158,7 @@ int
 ip6_output(
     struct mbuf *m0,
     struct ip6_pktopts *opt,
-    struct route *ro,
+    struct route_in6 *ro,
     int flags,
     struct ip6_moptions *im6o,
     struct socket *so,
@@ -178,11 +169,10 @@ ip6_output(
 	struct ifnet *ifp, *origifp;
 	struct mbuf *m = m0;
 	int hlen, tlen, len, off;
-	bool tso;
-	struct route ip6route;
+	boolean_t tso;
+	struct route_in6 ip6route;
 	struct rtentry *rt = NULL;
-	const struct sockaddr_in6 *dst = NULL;
-	struct sockaddr_in6 src_sa, dst_sa;
+	struct sockaddr_in6 *dst, src_sa, dst_sa;
 	int error = 0;
 	struct in6_ifaddr *ia = NULL;
 	u_long mtu;
@@ -191,7 +181,7 @@ ip6_output(
 	struct ip6_exthdrs exthdrs;
 	struct in6_addr finaldst, src0, dst0;
 	u_int32_t zone;
-	struct route *ro_pmtu = NULL;
+	struct route_in6 *ro_pmtu = NULL;
 	int hdrsplit = 0;
 	int needipsec = 0;
 #ifdef IPSEC
@@ -200,12 +190,6 @@ ip6_output(
 
 	ip6 = mtod(m, struct ip6_hdr *);
 #endif /* IPSEC */
-#ifdef FAST_IPSEC
-	struct secpolicy *sp = NULL;
-	int s;
-#endif
-
-	memset(&ip6route, 0, sizeof(ip6route));
 
 #ifdef  DIAGNOSTIC
 	if ((m->m_flags & M_PKTHDR) == 0)
@@ -230,7 +214,7 @@ ip6_output(
     do {								\
 	if (hp) {							\
 		struct ip6_ext *eh = (struct ip6_ext *)(hp);		\
-		error = ip6_copyexthdr((mp), (void *)(hp), 		\
+		error = ip6_copyexthdr((mp), (caddr_t)(hp), 		\
 		    ((eh)->ip6e_len + 1) << 3);				\
 		if (error)						\
 			goto freehdrs;					\
@@ -268,7 +252,7 @@ ip6_output(
 	}
 
 	if (sp == NULL) {
-		IPSEC6_STATINC(IPSEC_STAT_OUT_INVAL);
+		ipsec6stat.out_inval++;
 		goto freehdrs;
 	}
 
@@ -280,7 +264,7 @@ ip6_output(
 		/*
 		 * This packet is just discarded.
 		 */
-		IPSEC6_STATINC(IPSEC_STAT_OUT_POLVIO);
+		ipsec6stat.out_polvio++;
 		goto freehdrs;
 
 	case IPSEC_POLICY_BYPASS:
@@ -307,6 +291,12 @@ ip6_output(
   skippolicycheck:;
 #endif /* IPSEC */
 
+	if (needipsec &&
+	    (m->m_pkthdr.csum_flags & (M_CSUM_UDPv6|M_CSUM_TCPv6)) != 0) {
+		in6_delayed_cksum(m);
+		m->m_pkthdr.csum_flags &= ~(M_CSUM_UDPv6|M_CSUM_TCPv6);
+	}
+
 	/*
 	 * Calculate the total length of the extension header chain.
 	 * Keep the length of the unfragmentable part for fragmentation.
@@ -318,35 +308,6 @@ ip6_output(
 	unfragpartlen = optlen + sizeof(struct ip6_hdr);
 	/* NOTE: we don't add AH/ESP length here. do that later. */
 	if (exthdrs.ip6e_dest2) optlen += exthdrs.ip6e_dest2->m_len;
-
-#ifdef FAST_IPSEC
-	/* Check the security policy (SP) for the packet */
-    
-	/* XXX For moment, we doesn't support packet with extented action */
-	if (optlen !=0)
-		goto freehdrs;
-
-	sp = ipsec6_check_policy(m,so,flags,&needipsec,&error);
-	if (error != 0) {
-		/*
-		 * Hack: -EINVAL is used to signal that a packet
-		 * should be silently discarded.  This is typically
-		 * because we asked key management for an SA and
-		 * it was delayed (e.g. kicked up to IKE).
-		 */
-	if (error == -EINVAL) 
-		error = 0;
-	goto freehdrs;
-    }
-#endif /* FAST_IPSEC */
-
-
-	if (needipsec &&
-	    (m->m_pkthdr.csum_flags & (M_CSUM_UDPv6|M_CSUM_TCPv6)) != 0) {
-		in6_delayed_cksum(m);
-		m->m_pkthdr.csum_flags &= ~(M_CSUM_UDPv6|M_CSUM_TCPv6);
-	}
-
 
 	/*
 	 * If we need IPsec, or there is at least one extension header,
@@ -473,7 +434,6 @@ ip6_output(
 		    &needipsectun);
 		m = state.m;
 		if (error) {
-			rh = mtod(exthdrs.ip6e_rthdr, struct ip6_rthdr *);
 			/* mbuf is already reclaimed in ipsec6_output_trans. */
 			m = NULL;
 			switch (error) {
@@ -530,7 +490,10 @@ skip_ipsec2:;
 			  * the information from the
 			  * application.
 			  */
-			 sockaddr_in6_init(&sa, addr, 0, 0, 0);
+			 bzero(&sa, sizeof(sa));
+			 sa.sin6_family = AF_INET6;
+			 sa.sin6_len = sizeof(sa);
+			 sa.sin6_addr = addr[0];
 			 if ((error = sa6_embedscope(&sa,
 			     ip6_use_defzone)) != 0) {
 				 goto bad;
@@ -553,27 +516,29 @@ skip_ipsec2:;
 	if (IN6_IS_ADDR_UNSPECIFIED(&ip6->ip6_src) &&
 	    (flags & IPV6_UNSPECSRC) == 0) {
 		error = EOPNOTSUPP;
-		IP6_STATINC(IP6_STAT_BADSCOPE);
+		ip6stat.ip6s_badscope++;
 		goto bad;
 	}
 	if (IN6_IS_ADDR_MULTICAST(&ip6->ip6_src)) {
 		error = EOPNOTSUPP;
-		IP6_STATINC(IP6_STAT_BADSCOPE);
+		ip6stat.ip6s_badscope++;
 		goto bad;
 	}
 
-	IP6_STATINC(IP6_STAT_LOCALOUT);
+	ip6stat.ip6s_localout++;
 
 	/*
 	 * Route packet.
 	 */
 	/* initialize cached route */
-	if (ro == NULL) {
+	if (ro == 0) {
 		ro = &ip6route;
+		bzero((caddr_t)ro, sizeof(*ro));
 	}
 	ro_pmtu = ro;
 	if (opt && opt->ip6po_rthdr)
 		ro = &opt->ip6po_route;
+	dst = (struct sockaddr_in6 *)&ro->ro_dst;
 
  	/*
 	 * if specified, try to fill in the traffic class field.
@@ -618,14 +583,14 @@ skip_ipsec2:;
 
 		bzero(&state, sizeof(state));
 		state.m = m;
-		state.ro = ro;
-		state.dst = rtcache_getdst(ro);
+		state.ro = (struct route *)ro;
+		state.dst = (struct sockaddr *)dst;
 
 		error = ipsec6_output_tunnel(&state, sp, flags);
 
 		m = state.m;
-		ro_pmtu = ro = state.ro;
-		dst = satocsin6(state.dst);
+		ro_pmtu = ro = (struct route_in6 *)state.ro;
+		dst = (struct sockaddr_in6 *)state.dst;
 		if (error) {
 			/* mbuf is already reclaimed in ipsec6_output_tunnel. */
 			m0 = m = NULL;
@@ -651,32 +616,24 @@ skip_ipsec2:;
 		exthdrs.ip6e_ip6 = m;
 	}
 #endif /* IPSEC */
-#ifdef FAST_IPSEC
-	if (needipsec) {
-		s = splsoftnet();
-		error = ipsec6_process_packet(m,sp->req);
-
-		/*
-		 * Preserve KAME behaviour: ENOENT can be returned
-		 * when an SA acquire is in progress.  Don't propagate
-		 * this to user-level; it confuses applications.
-		 * XXX this will go away when the SADB is redone.
-		 */
-		if (error == ENOENT)
-			error = 0;
-		splx(s);
-		goto done;
-	}
-#endif /* FAST_IPSEC */    
-
-
 
 	/* adjust pointer */
 	ip6 = mtod(m, struct ip6_hdr *);
 
-	sockaddr_in6_init(&dst_sa, &ip6->ip6_dst, 0, 0, 0);
-	if ((error = in6_selectroute(&dst_sa, opt, im6o, ro,
-	    &ifp, &rt, 0)) != 0) {
+	bzero(&dst_sa, sizeof(dst_sa));
+	dst_sa.sin6_family = AF_INET6;
+	dst_sa.sin6_len = sizeof(dst_sa);
+	dst_sa.sin6_addr = ip6->ip6_dst;
+	if ((error = in6_selectroute(&dst_sa, opt, im6o, ro, &ifp, &rt, 0))
+	    != 0) {
+		switch (error) {
+		case EHOSTUNREACH:
+			ip6stat.ip6s_noroute++;
+			break;
+		case EADDRNOTAVAIL:
+		default:
+			break; /* XXX statistics? */
+		}
 		if (ifp != NULL)
 			in6_ifstat_inc(ifp, ifs6_out_discard);
 		goto bad;
@@ -686,7 +643,7 @@ skip_ipsec2:;
 		 * If in6_selectroute() does not return a route entry,
 		 * dst may not have been updated.
 		 */
-		rtcache_setdst(ro, sin6tosa(&dst_sa));
+		*dst = dst_sa;	/* XXX */
 	}
 
 	/*
@@ -714,7 +671,10 @@ skip_ipsec2:;
 	src0 = ip6->ip6_src;
 	if (in6_setscope(&src0, origifp, &zone))
 		goto badscope;
-	sockaddr_in6_init(&src_sa, &ip6->ip6_src, 0, 0, 0);
+	bzero(&src_sa, sizeof(src_sa));
+	src_sa.sin6_family = AF_INET6;
+	src_sa.sin6_len = sizeof(src_sa);
+	src_sa.sin6_addr = ip6->ip6_src;
 	if (sa6_recoverscope(&src_sa) || zone != src_sa.sin6_scope_id)
 		goto badscope;
 
@@ -722,27 +682,35 @@ skip_ipsec2:;
 	if (in6_setscope(&dst0, origifp, &zone))
 		goto badscope;
 	/* re-initialize to be sure */
-	sockaddr_in6_init(&dst_sa, &ip6->ip6_dst, 0, 0, 0);
+	bzero(&dst_sa, sizeof(dst_sa));
+	dst_sa.sin6_family = AF_INET6;
+	dst_sa.sin6_len = sizeof(dst_sa);
+	dst_sa.sin6_addr = ip6->ip6_dst;
 	if (sa6_recoverscope(&dst_sa) || zone != dst_sa.sin6_scope_id)
 		goto badscope;
 
 	/* scope check is done. */
+	goto routefound;
 
-	if (rt == NULL || IN6_IS_ADDR_MULTICAST(&ip6->ip6_dst)) {
-		if (dst == NULL)
-			dst = satocsin6(rtcache_getdst(ro));
-		KASSERT(dst != NULL);
-	} else if (opt && rtcache_validate(&opt->ip6po_nextroute) != NULL) {
-		/*
-		 * The nexthop is explicitly specified by the
-		 * application.  We assume the next hop is an IPv6
-		 * address.
-		 */
-		dst = (struct sockaddr_in6 *)opt->ip6po_nexthop;
-	} else if ((rt->rt_flags & RTF_GATEWAY))
-		dst = (struct sockaddr_in6 *)rt->rt_gateway;
-	else if (dst == NULL)
-		dst = satocsin6(rtcache_getdst(ro));
+  badscope:
+	ip6stat.ip6s_badscope++;
+	in6_ifstat_inc(origifp, ifs6_out_discard);
+	if (error == 0)
+		error = EHOSTUNREACH; /* XXX */
+	goto bad;
+
+  routefound:
+	if (rt && !IN6_IS_ADDR_MULTICAST(&ip6->ip6_dst)) {
+		if (opt && opt->ip6po_nextroute.ro_rt != NULL) {
+			/*
+			 * The nexthop is explicitly specified by the
+			 * application.  We assume the next hop is an IPv6
+			 * address.
+			 */
+			dst = (struct sockaddr_in6 *)opt->ip6po_nexthop;
+		} else if ((rt->rt_flags & RTF_GATEWAY))
+			dst = (struct sockaddr_in6 *)rt->rt_gateway;
+	}
 
 	/*
 	 * XXXXXX: original code follows:
@@ -760,7 +728,7 @@ skip_ipsec2:;
 		 * Confirm that the outgoing interface supports multicast.
 		 */
 		if (!(ifp->if_flags & IFF_MULTICAST)) {
-			IP6_STATINC(IP6_STAT_NOROUTE);
+			ip6stat.ip6s_noroute++;
 			in6_ifstat_inc(ifp, ifs6_out_discard);
 			error = ENETUNREACH;
 			goto bad;
@@ -774,7 +742,6 @@ skip_ipsec2:;
 			 * on the outgoing interface, and the caller did not
 			 * forbid loopback, loop back a copy.
 			 */
-			KASSERT(dst != NULL);
 			ip6_mloopback(ifp, m, dst);
 		} else {
 			/*
@@ -943,8 +910,8 @@ skip_ipsec2:;
 		mtu32 = (u_int32_t)mtu;
 		bzero(&ip6cp, sizeof(ip6cp));
 		ip6cp.ip6c_cmdarg = (void *)&mtu32;
-		pfctlinput2(PRC_MSGSIZE,
-		    rtcache_getdst(ro_pmtu), &ip6cp);
+		pfctlinput2(PRC_MSGSIZE, (struct sockaddr *)&ro_pmtu->ro_dst,
+		    (void *)&ip6cp);
 
 		error = EMSGSIZE;
 		goto bad;
@@ -978,7 +945,6 @@ skip_ipsec2:;
 			m->m_pkthdr.csum_flags &= ~(M_CSUM_UDPv6|M_CSUM_TCPv6);
 		}
 
-		KASSERT(dst != NULL);
 		if (__predict_true(!tso ||
 		    (ifp->if_capenable & IFCAP_TSOv6) != 0)) {
 			error = nd6_output(ifp, origifp, m, dst, rt);
@@ -1040,8 +1006,8 @@ skip_ipsec2:;
 		mtu32 = (u_int32_t)mtu;
 		bzero(&ip6cp, sizeof(ip6cp));
 		ip6cp.ip6c_cmdarg = (void *)&mtu32;
-		pfctlinput2(PRC_MSGSIZE,
-		    rtcache_getdst(ro_pmtu), &ip6cp);
+		pfctlinput2(PRC_MSGSIZE, (struct sockaddr *)&ro_pmtu->ro_dst,
+		    (void *)&ip6cp);
 #endif
 
 		len = (mtu - hlen - sizeof(struct ip6_frag)) & ~7;
@@ -1093,7 +1059,7 @@ skip_ipsec2:;
 			MGETHDR(m, M_DONTWAIT, MT_HEADER);
 			if (!m) {
 				error = ENOBUFS;
-				IP6_STATINC(IP6_STAT_ODROPPED);
+				ip6stat.ip6s_odropped++;
 				goto sendorfree;
 			}
 			m->m_pkthdr.rcvif = NULL;
@@ -1106,7 +1072,7 @@ skip_ipsec2:;
 			m->m_len = sizeof(*mhip6);
 			error = ip6_insertfraghdr(m0, m, hlen, &ip6f);
 			if (error) {
-				IP6_STATINC(IP6_STAT_ODROPPED);
+				ip6stat.ip6s_odropped++;
 				goto sendorfree;
 			}
 			ip6f->ip6f_offlg = htons((u_int16_t)((off - hlen) & ~7));
@@ -1118,7 +1084,7 @@ skip_ipsec2:;
 			    sizeof(*ip6f) - sizeof(struct ip6_hdr)));
 			if ((m_frgpart = m_copy(m0, off, len)) == 0) {
 				error = ENOBUFS;
-				IP6_STATINC(IP6_STAT_ODROPPED);
+				ip6stat.ip6s_odropped++;
 				goto sendorfree;
 			}
 			for (mlast = m; mlast->m_next; mlast = mlast->m_next)
@@ -1129,7 +1095,7 @@ skip_ipsec2:;
 			ip6f->ip6f_reserved = 0;
 			ip6f->ip6f_ident = id;
 			ip6f->ip6f_nxt = nextproto;
-			IP6_STATINC(IP6_STAT_OFRAGMENTS);
+			ip6stat.ip6s_ofragments++;
 			in6_ifstat_inc(ifp, ifs6_out_fragcreat);
 		}
 
@@ -1162,27 +1128,25 @@ sendorfree:
 			/* clean ipsec history once it goes out of the node */
 			ipsec_delaux(m);
 #endif
-			KASSERT(dst != NULL);
 			error = nd6_output(ifp, origifp, m, dst, rt);
 		} else
 			m_freem(m);
 	}
 
 	if (error == 0)
-		IP6_STATINC(IP6_STAT_FRAGMENTED);
+		ip6stat.ip6s_fragmented++;
 
 done:
-	rtcache_free(&ip6route);
+	/* XXX Second if is invariant? */
+	if (ro == &ip6route)
+		rtcache_free((struct route *)ro);
+	else if (ro_pmtu == &ip6route)
+		rtcache_free((struct route *)ro_pmtu);
 
 #ifdef IPSEC
 	if (sp != NULL)
 		key_freesp(sp);
 #endif /* IPSEC */
-#ifdef FAST_IPSEC
-	if (sp != NULL)
-		KEY_FREESP(&sp);
-#endif /* FAST_IPSEC */
-
 
 	return (error);
 
@@ -1195,16 +1159,13 @@ freehdrs:
 bad:
 	m_freem(m);
 	goto done;
-badscope:
-	IP6_STATINC(IP6_STAT_BADSCOPE);
-	in6_ifstat_inc(origifp, ifs6_out_discard);
-	if (error == 0)
-		error = EHOSTUNREACH; /* XXX */
-	goto bad;
 }
 
 static int
-ip6_copyexthdr(struct mbuf **mp, void *hdr, int hlen)
+ip6_copyexthdr(mp, hdr, hlen)
+	struct mbuf **mp;
+	caddr_t hdr;
+	int hlen;
 {
 	struct mbuf *m;
 
@@ -1224,7 +1185,7 @@ ip6_copyexthdr(struct mbuf **mp, void *hdr, int hlen)
 	}
 	m->m_len = hlen;
 	if (hdr)
-		bcopy(hdr, mtod(m, void *), hlen);
+		bcopy(hdr, mtod(m, caddr_t), hlen);
 
 	*mp = m;
 	return (0);
@@ -1253,7 +1214,7 @@ in6_delayed_cksum(struct mbuf *m)
 	if ((offset + sizeof(csum)) > m->m_len) {
 		m_copyback(m, offset, sizeof(csum), &csum);
 	} else {
-		*(uint16_t *)(mtod(m, char *) + offset) = csum;
+		*(uint16_t *)(mtod(m, caddr_t) + offset) = csum;
 	}
 }
 
@@ -1261,7 +1222,9 @@ in6_delayed_cksum(struct mbuf *m)
  * Insert jumbo payload option.
  */
 static int
-ip6_insert_jumboopt(struct ip6_exthdrs *exthdrs, u_int32_t plen)
+ip6_insert_jumboopt(exthdrs, plen)
+	struct ip6_exthdrs *exthdrs;
+	u_int32_t plen;
 {
 	struct mbuf *mopt;
 	u_int8_t *optbuf;
@@ -1319,7 +1282,7 @@ ip6_insert_jumboopt(struct ip6_exthdrs *exthdrs, u_int32_t plen)
 			if (!n)
 				return (ENOBUFS);
 			n->m_len = oldoptlen + JUMBOOPTLEN;
-			bcopy(mtod(mopt, void *), mtod(n, void *),
+			bcopy(mtod(mopt, caddr_t), mtod(n, caddr_t),
 			    oldoptlen);
 			optbuf = mtod(n, u_int8_t *) + oldoptlen;
 			m_freem(mopt);
@@ -1356,8 +1319,10 @@ ip6_insert_jumboopt(struct ip6_exthdrs *exthdrs, u_int32_t plen)
  * Insert fragment header and copy unfragmentable header portions.
  */
 static int
-ip6_insertfraghdr(struct mbuf *m0, struct mbuf *m, int hlen, 
-	struct ip6_frag **frghdrp)
+ip6_insertfraghdr(m0, m, hlen, frghdrp)
+	struct mbuf *m0, *m;
+	int hlen;
+	struct ip6_frag **frghdrp;
 {
 	struct mbuf *n, *mlast;
 
@@ -1377,7 +1342,7 @@ ip6_insertfraghdr(struct mbuf *m0, struct mbuf *m, int hlen,
 	if ((mlast->m_flags & M_EXT) == 0 &&
 	    M_TRAILINGSPACE(mlast) >= sizeof(struct ip6_frag)) {
 		/* use the trailing space of the last mbuf for the fragment hdr */
-		*frghdrp = (struct ip6_frag *)(mtod(mlast, char *) +
+		*frghdrp = (struct ip6_frag *)(mtod(mlast, caddr_t) +
 		    mlast->m_len);
 		mlast->m_len += sizeof(struct ip6_frag);
 		m->m_pkthdr.len += sizeof(struct ip6_frag);
@@ -1397,32 +1362,40 @@ ip6_insertfraghdr(struct mbuf *m0, struct mbuf *m, int hlen,
 }
 
 static int
-ip6_getpmtu(struct route *ro_pmtu, struct route *ro, struct ifnet *ifp,
-    const struct in6_addr *dst, u_long *mtup, int *alwaysfragp)
+ip6_getpmtu(ro_pmtu, ro, ifp, dst, mtup, alwaysfragp)
+	struct route_in6 *ro_pmtu, *ro;
+	struct ifnet *ifp;
+	struct in6_addr *dst;
+	u_long *mtup;
+	int *alwaysfragp;
 {
-	struct rtentry *rt;
 	u_int32_t mtu = 0;
 	int alwaysfrag = 0;
 	int error = 0;
 
 	if (ro_pmtu != ro) {
-		union {
-			struct sockaddr		dst;
-			struct sockaddr_in6	dst6;
-		} u;
-
 		/* The first hop and the final destination may differ. */
-		sockaddr_in6_init(&u.dst6, dst, 0, 0, 0);
-		rt = rtcache_lookup(ro_pmtu, &u.dst);
-	} else
-		rt = rtcache_validate(ro_pmtu);
-	if (rt != NULL) {
+		struct sockaddr_in6 *sa6_dst =
+		    (struct sockaddr_in6 *)&ro_pmtu->ro_dst;
+		if (!IN6_ARE_ADDR_EQUAL(&sa6_dst->sin6_addr, dst))
+			rtcache_free((struct route *)ro_pmtu);
+		else
+			rtcache_check((struct route *)ro_pmtu);
+		if (ro_pmtu->ro_rt == NULL) {
+			bzero(sa6_dst, sizeof(*sa6_dst)); /* for safety */
+			sa6_dst->sin6_family = AF_INET6;
+			sa6_dst->sin6_len = sizeof(struct sockaddr_in6);
+			sa6_dst->sin6_addr = *dst;
+			rtcache_init((struct route *)ro_pmtu);
+		}
+	}
+	if (ro_pmtu->ro_rt != NULL) {
 		u_int32_t ifmtu;
 
 		if (ifp == NULL)
-			ifp = rt->rt_ifp;
+			ifp = ro_pmtu->ro_rt->rt_ifp;
 		ifmtu = IN6_LINKMTU(ifp);
-		mtu = rt->rt_rmx.rmx_mtu;
+		mtu = ro_pmtu->ro_rt->rt_rmx.rmx_mtu;
 		if (mtu == 0)
 			mtu = ifmtu;
 		else if (mtu < IPV6_MMTU) {
@@ -1446,8 +1419,8 @@ ip6_getpmtu(struct route *ro_pmtu, struct route *ro, struct ifnet *ifp,
 			 * field isn't locked).
 			 */
 			mtu = ifmtu;
-			if (!(rt->rt_rmx.rmx_locks & RTV_MTU))
-				rt->rt_rmx.rmx_mtu = mtu;
+			if (!(ro_pmtu->ro_rt->rt_rmx.rmx_locks & RTV_MTU))
+				ro_pmtu->ro_rt->rt_rmx.rmx_mtu = mtu;
 		}
 	} else if (ifp) {
 		mtu = IN6_LINKMTU(ifp);
@@ -1464,599 +1437,646 @@ ip6_getpmtu(struct route *ro_pmtu, struct route *ro, struct ifnet *ifp,
  * IP6 socket option processing.
  */
 int
-ip6_ctloutput(int op, struct socket *so, struct sockopt *sopt)
+ip6_ctloutput(op, so, level, optname, mp)
+	int op;
+	struct socket *so;
+	int level, optname;
+	struct mbuf **mp;
 {
 	int privileged, optdatalen, uproto;
 	void *optdata;
 	struct in6pcb *in6p = sotoin6pcb(so);
+	struct mbuf *m = *mp;
 	int error, optval;
+	int optlen;
 	struct lwp *l = curlwp;	/* XXX */
-	int level, optname;
 
-	KASSERT(sopt != NULL);
-
-	level = sopt->sopt_level;
-	optname = sopt->sopt_name;
-
+	optlen = m ? m->m_len : 0;
 	error = optval = 0;
 	privileged = (l == 0 || kauth_authorize_generic(l->l_cred,
 	    KAUTH_GENERIC_ISSUSER, NULL)) ? 0 : 1;
 	uproto = (int)so->so_proto->pr_protocol;
 
-	if (level != IPPROTO_IPV6) {
-		return ENOPROTOOPT;
-	}
-	switch (op) {
-	case PRCO_SETOPT:
-		switch (optname) {
+	if (level == IPPROTO_IPV6) {
+		switch (op) {
+		case PRCO_SETOPT:
+			switch (optname) {
 #ifdef RFC2292
-		case IPV6_2292PKTOPTIONS:
-			error = ip6_pcbopts(&in6p->in6p_outputopts, so, sopt);
-			break;
+			case IPV6_2292PKTOPTIONS:
+				/* m is freed in ip6_pcbopts */
+				error = ip6_pcbopts(&in6p->in6p_outputopts,
+				    m, so);
+				break;
 #endif
 
-		/*
-		 * Use of some Hop-by-Hop options or some
-		 * Destination options, might require special
-		 * privilege.  That is, normal applications
-		 * (without special privilege) might be forbidden
-		 * from setting certain options in outgoing packets,
-		 * and might never see certain options in received
-		 * packets. [RFC 2292 Section 6]
-		 * KAME specific note:
-		 *  KAME prevents non-privileged users from sending or
-		 *  receiving ANY hbh/dst options in order to avoid
-		 *  overhead of parsing options in the kernel.
-		 */
-		case IPV6_RECVHOPOPTS:
-		case IPV6_RECVDSTOPTS:
-		case IPV6_RECVRTHDRDSTOPTS:
-			if (!privileged) {
-				error = EPERM;
-				break;
-			}
-			/* FALLTHROUGH */
-		case IPV6_UNICAST_HOPS:
-		case IPV6_HOPLIMIT:
-		case IPV6_FAITH:
-
-		case IPV6_RECVPKTINFO:
-		case IPV6_RECVHOPLIMIT:
-		case IPV6_RECVRTHDR:
-		case IPV6_RECVPATHMTU:
-		case IPV6_RECVTCLASS:
-		case IPV6_V6ONLY:
-			error = sockopt_getint(sopt, &optval);
-			if (error)
-				break;
-			switch (optname) {
-			case IPV6_UNICAST_HOPS:
-				if (optval < -1 || optval >= 256)
-					error = EINVAL;
-				else {
-					/* -1 = kernel default */
-					in6p->in6p_hops = optval;
+			/*
+			 * Use of some Hop-by-Hop options or some
+			 * Destination options, might require special
+			 * privilege.  That is, normal applications
+			 * (without special privilege) might be forbidden
+			 * from setting certain options in outgoing packets,
+			 * and might never see certain options in received
+			 * packets. [RFC 2292 Section 6]
+			 * KAME specific note:
+			 *  KAME prevents non-privileged users from sending or
+			 *  receiving ANY hbh/dst options in order to avoid
+			 *  overhead of parsing options in the kernel.
+			 */
+			case IPV6_RECVHOPOPTS:
+			case IPV6_RECVDSTOPTS:
+			case IPV6_RECVRTHDRDSTOPTS:
+				if (!privileged) {
+					error = EPERM;
+					break;
 				}
-				break;
+				/* FALLTHROUGH */
+			case IPV6_UNICAST_HOPS:
+			case IPV6_HOPLIMIT:
+			case IPV6_FAITH:
+
+			case IPV6_RECVPKTINFO:
+			case IPV6_RECVHOPLIMIT:
+			case IPV6_RECVRTHDR:
+			case IPV6_RECVPATHMTU:
+			case IPV6_RECVTCLASS:
+			case IPV6_V6ONLY:
+				if (optlen != sizeof(int)) {
+					error = EINVAL;
+					break;
+				}
+				optval = *mtod(m, int *);
+				switch (optname) {
+
+				case IPV6_UNICAST_HOPS:
+					if (optval < -1 || optval >= 256)
+						error = EINVAL;
+					else {
+						/* -1 = kernel default */
+						in6p->in6p_hops = optval;
+					}
+					break;
 #define OPTSET(bit) \
 do { \
-if (optval) \
-	in6p->in6p_flags |= (bit); \
-else \
-	in6p->in6p_flags &= ~(bit); \
+	if (optval) \
+		in6p->in6p_flags |= (bit); \
+	else \
+		in6p->in6p_flags &= ~(bit); \
 } while (/*CONSTCOND*/ 0)
 
 #ifdef RFC2292
 #define OPTSET2292(bit) 			\
 do { 						\
-in6p->in6p_flags |= IN6P_RFC2292; 	\
-if (optval) 				\
-	in6p->in6p_flags |= (bit); 	\
-else 					\
-	in6p->in6p_flags &= ~(bit); 	\
+	in6p->in6p_flags |= IN6P_RFC2292; 	\
+	if (optval) 				\
+		in6p->in6p_flags |= (bit); 	\
+	else 					\
+		in6p->in6p_flags &= ~(bit); 	\
 } while (/*CONSTCOND*/ 0)
 #endif
 
 #define OPTBIT(bit) (in6p->in6p_flags & (bit) ? 1 : 0)
 
-			case IPV6_RECVPKTINFO:
+				case IPV6_RECVPKTINFO:
 #ifdef RFC2292
-				/* cannot mix with RFC2292 */
-				if (OPTBIT(IN6P_RFC2292)) {
-					error = EINVAL;
-					break;
-				}
+					/* cannot mix with RFC2292 */
+					if (OPTBIT(IN6P_RFC2292)) {
+						error = EINVAL;
+						break;
+					}
 #endif
-				OPTSET(IN6P_PKTINFO);
-				break;
+					OPTSET(IN6P_PKTINFO);
+					break;
 
-			case IPV6_HOPLIMIT:
-			{
-				struct ip6_pktopts **optp;
+				case IPV6_HOPLIMIT:
+				{
+					struct ip6_pktopts **optp;
 
 #ifdef RFC2292
-				/* cannot mix with RFC2292 */
-				if (OPTBIT(IN6P_RFC2292)) {
-					error = EINVAL;
+					/* cannot mix with RFC2292 */
+					if (OPTBIT(IN6P_RFC2292)) {
+						error = EINVAL;
+						break;
+					}
+#endif
+					optp = &in6p->in6p_outputopts;
+					error = ip6_pcbopt(IPV6_HOPLIMIT,
+							   (u_char *)&optval,
+							   sizeof(optval),
+							   optp,
+							   privileged, uproto);
 					break;
 				}
-#endif
-				optp = &in6p->in6p_outputopts;
-				error = ip6_pcbopt(IPV6_HOPLIMIT,
-						   (u_char *)&optval,
-						   sizeof(optval),
-						   optp,
-						   privileged, uproto);
-				break;
-			}
 
-			case IPV6_RECVHOPLIMIT:
+				case IPV6_RECVHOPLIMIT:
 #ifdef RFC2292
-				/* cannot mix with RFC2292 */
-				if (OPTBIT(IN6P_RFC2292)) {
-					error = EINVAL;
-					break;
-				}
+					/* cannot mix with RFC2292 */
+					if (OPTBIT(IN6P_RFC2292)) {
+						error = EINVAL;
+						break;
+					}
 #endif
-				OPTSET(IN6P_HOPLIMIT);
-				break;
+					OPTSET(IN6P_HOPLIMIT);
+					break;
 
-			case IPV6_RECVHOPOPTS:
+				case IPV6_RECVHOPOPTS:
 #ifdef RFC2292
-				/* cannot mix with RFC2292 */
-				if (OPTBIT(IN6P_RFC2292)) {
-					error = EINVAL;
-					break;
-				}
+					/* cannot mix with RFC2292 */
+					if (OPTBIT(IN6P_RFC2292)) {
+						error = EINVAL;
+						break;
+					}
 #endif
-				OPTSET(IN6P_HOPOPTS);
-				break;
+					OPTSET(IN6P_HOPOPTS);
+					break;
 
-			case IPV6_RECVDSTOPTS:
+				case IPV6_RECVDSTOPTS:
 #ifdef RFC2292
-				/* cannot mix with RFC2292 */
-				if (OPTBIT(IN6P_RFC2292)) {
-					error = EINVAL;
-					break;
-				}
+					/* cannot mix with RFC2292 */
+					if (OPTBIT(IN6P_RFC2292)) {
+						error = EINVAL;
+						break;
+					}
 #endif
-				OPTSET(IN6P_DSTOPTS);
-				break;
+					OPTSET(IN6P_DSTOPTS);
+					break;
 
-			case IPV6_RECVRTHDRDSTOPTS:
+				case IPV6_RECVRTHDRDSTOPTS:
 #ifdef RFC2292
-				/* cannot mix with RFC2292 */
-				if (OPTBIT(IN6P_RFC2292)) {
-					error = EINVAL;
-					break;
-				}
+					/* cannot mix with RFC2292 */
+					if (OPTBIT(IN6P_RFC2292)) {
+						error = EINVAL;
+						break;
+					}
 #endif
-				OPTSET(IN6P_RTHDRDSTOPTS);
-				break;
+					OPTSET(IN6P_RTHDRDSTOPTS);
+					break;
 
-			case IPV6_RECVRTHDR:
+				case IPV6_RECVRTHDR:
 #ifdef RFC2292
-				/* cannot mix with RFC2292 */
-				if (OPTBIT(IN6P_RFC2292)) {
-					error = EINVAL;
-					break;
-				}
+					/* cannot mix with RFC2292 */
+					if (OPTBIT(IN6P_RFC2292)) {
+						error = EINVAL;
+						break;
+					}
 #endif
-				OPTSET(IN6P_RTHDR);
-				break;
-
-			case IPV6_FAITH:
-				OPTSET(IN6P_FAITH);
-				break;
-
-			case IPV6_RECVPATHMTU:
-				/*
-				 * We ignore this option for TCP
-				 * sockets.
-				 * (RFC3542 leaves this case
-				 * unspecified.)
-				 */
-				if (uproto != IPPROTO_TCP)
-					OPTSET(IN6P_MTU);
-				break;
-
-			case IPV6_V6ONLY:
-				/*
-				 * make setsockopt(IPV6_V6ONLY)
-				 * available only prior to bind(2).
-				 * see ipng mailing list, Jun 22 2001.
-				 */
-				if (in6p->in6p_lport ||
-				    !IN6_IS_ADDR_UNSPECIFIED(&in6p->in6p_laddr)) {
-					error = EINVAL;
+					OPTSET(IN6P_RTHDR);
 					break;
-				}
+
+				case IPV6_FAITH:
+					OPTSET(IN6P_FAITH);
+					break;
+
+				case IPV6_RECVPATHMTU:
+					/*
+					 * We ignore this option for TCP
+					 * sockets.
+					 * (RFC3542 leaves this case
+					 * unspecified.)
+					 */
+					if (uproto != IPPROTO_TCP)
+						OPTSET(IN6P_MTU);
+					break;
+
+				case IPV6_V6ONLY:
+					/*
+					 * make setsockopt(IPV6_V6ONLY)
+					 * available only prior to bind(2).
+					 * see ipng mailing list, Jun 22 2001.
+					 */
+					if (in6p->in6p_lport ||
+					    !IN6_IS_ADDR_UNSPECIFIED(&in6p->in6p_laddr)) {
+						error = EINVAL;
+						break;
+					}
 #ifdef INET6_BINDV6ONLY
-				if (!optval)
-					error = EINVAL;
+					if (!optval)
+						error = EINVAL;
 #else
-				OPTSET(IN6P_IPV6_V6ONLY);
+					OPTSET(IN6P_IPV6_V6ONLY);
 #endif
-				break;
-			case IPV6_RECVTCLASS:
+					break;
+				case IPV6_RECVTCLASS:
 #ifdef RFC2292
-				/* cannot mix with RFC2292 XXX */
-				if (OPTBIT(IN6P_RFC2292)) {
+					/* cannot mix with RFC2292 XXX */
+					if (OPTBIT(IN6P_RFC2292)) {
+						error = EINVAL;
+						break;
+					}
+#endif
+					OPTSET(IN6P_TCLASS);
+					break;
+
+				}
+				break;
+
+			case IPV6_OTCLASS:
+			{
+				struct ip6_pktopts **optp;
+				u_int8_t tclass;
+
+				if (optlen != sizeof(tclass)) {
 					error = EINVAL;
 					break;
 				}
-#endif
-				OPTSET(IN6P_TCLASS);
-				break;
-
-			}
-			break;
-
-		case IPV6_OTCLASS:
-		{
-			struct ip6_pktopts **optp;
-			u_int8_t tclass;
-
-			error = sockopt_get(sopt, &tclass, sizeof(tclass));
-			if (error)
-				break;
-			optp = &in6p->in6p_outputopts;
-			error = ip6_pcbopt(optname,
-					   (u_char *)&tclass,
-					   sizeof(tclass),
-					   optp,
-					   privileged, uproto);
-			break;
-		}
-
-		case IPV6_TCLASS:
-		case IPV6_DONTFRAG:
-		case IPV6_USE_MIN_MTU:
-			error = sockopt_getint(sopt, &optval);
-			if (error)
-				break;
-			{
-				struct ip6_pktopts **optp;
+				tclass = *mtod(m, u_int8_t *);
 				optp = &in6p->in6p_outputopts;
 				error = ip6_pcbopt(optname,
-						   (u_char *)&optval,
-						   sizeof(optval),
+						   (u_char *)&tclass,
+						   sizeof(tclass),
 						   optp,
 						   privileged, uproto);
 				break;
 			}
 
-#ifdef RFC2292
-		case IPV6_2292PKTINFO:
-		case IPV6_2292HOPLIMIT:
-		case IPV6_2292HOPOPTS:
-		case IPV6_2292DSTOPTS:
-		case IPV6_2292RTHDR:
-			/* RFC 2292 */
-			error = sockopt_getint(sopt, &optval);
-			if (error)
-				break;
+			case IPV6_TCLASS:
+			case IPV6_DONTFRAG:
+			case IPV6_USE_MIN_MTU:
+				if (optlen != sizeof(optval)) {
+					error = EINVAL;
+					break;
+				}
+				optval = *mtod(m, int *);
+				{
+					struct ip6_pktopts **optp;
+					optp = &in6p->in6p_outputopts;
+					error = ip6_pcbopt(optname,
+							   (u_char *)&optval,
+							   sizeof(optval),
+							   optp,
+							   privileged, uproto);
+					break;
+				}
 
-			switch (optname) {
+#ifdef RFC2292
 			case IPV6_2292PKTINFO:
-				OPTSET2292(IN6P_PKTINFO);
-				break;
 			case IPV6_2292HOPLIMIT:
-				OPTSET2292(IN6P_HOPLIMIT);
-				break;
 			case IPV6_2292HOPOPTS:
-				/*
-				 * Check super-user privilege.
-				 * See comments for IPV6_RECVHOPOPTS.
-				 */
-				if (!privileged)
-					return (EPERM);
-				OPTSET2292(IN6P_HOPOPTS);
-				break;
 			case IPV6_2292DSTOPTS:
-				if (!privileged)
-					return (EPERM);
-				OPTSET2292(IN6P_DSTOPTS|IN6P_RTHDRDSTOPTS); /* XXX */
-				break;
 			case IPV6_2292RTHDR:
-				OPTSET2292(IN6P_RTHDR);
+				/* RFC 2292 */
+				if (optlen != sizeof(int)) {
+					error = EINVAL;
+					break;
+				}
+				optval = *mtod(m, int *);
+				switch (optname) {
+				case IPV6_2292PKTINFO:
+					OPTSET2292(IN6P_PKTINFO);
+					break;
+				case IPV6_2292HOPLIMIT:
+					OPTSET2292(IN6P_HOPLIMIT);
+					break;
+				case IPV6_2292HOPOPTS:
+					/*
+					 * Check super-user privilege.
+					 * See comments for IPV6_RECVHOPOPTS.
+					 */
+					if (!privileged)
+						return (EPERM);
+					OPTSET2292(IN6P_HOPOPTS);
+					break;
+				case IPV6_2292DSTOPTS:
+					if (!privileged)
+						return (EPERM);
+					OPTSET2292(IN6P_DSTOPTS|IN6P_RTHDRDSTOPTS); /* XXX */
+					break;
+				case IPV6_2292RTHDR:
+					OPTSET2292(IN6P_RTHDR);
+					break;
+				}
 				break;
-			}
-			break;
 #endif
-		case IPV6_PKTINFO:
-		case IPV6_HOPOPTS:
-		case IPV6_RTHDR:
-		case IPV6_DSTOPTS:
-		case IPV6_RTHDRDSTOPTS:
-		case IPV6_NEXTHOP: {
-			/* new advanced API (RFC3542) */
-			void *optbuf;
-			int optbuflen;
-			struct ip6_pktopts **optp;
+			case IPV6_PKTINFO:
+			case IPV6_HOPOPTS:
+			case IPV6_RTHDR:
+			case IPV6_DSTOPTS:
+			case IPV6_RTHDRDSTOPTS:
+			case IPV6_NEXTHOP:
+			{
+				/* new advanced API (RFC3542) */
+				u_char *optbuf;
+				int optbuflen;
+				struct ip6_pktopts **optp;
+				if (!m) {
+					error = EINVAL;
+					break;
+				}
 
 #ifdef RFC2292
-			/* cannot mix with RFC2292 */
-			if (OPTBIT(IN6P_RFC2292)) {
-				error = EINVAL;
-				break;
-			}
+				/* cannot mix with RFC2292 */
+				if (OPTBIT(IN6P_RFC2292)) {
+					error = EINVAL;
+					break;
+				}
 #endif
 
-			optbuflen = sopt->sopt_size;
-			optbuf = malloc(optbuflen, M_IP6OPT, M_NOWAIT);
-			if (optbuf == NULL) {
-				error = ENOBUFS;
-				break;
-			}
+				if (m && m->m_next) {
+					error = EINVAL;	/* XXX */
+					break;
+				}
 
-			sockopt_get(sopt, optbuf, optbuflen);
-			optp = &in6p->in6p_outputopts;
-			error = ip6_pcbopt(optname, optbuf, optbuflen,
-			    optp, privileged, uproto);
-			break;
+				optbuf = mtod(m, u_char *);
+				optbuflen = m->m_len;
+				optp = &in6p->in6p_outputopts;
+				error = ip6_pcbopt(optname, optbuf, optbuflen,
+				    optp, privileged, uproto);
+				break;
 			}
 #undef OPTSET
 
-		case IPV6_MULTICAST_IF:
-		case IPV6_MULTICAST_HOPS:
-		case IPV6_MULTICAST_LOOP:
-		case IPV6_JOIN_GROUP:
-		case IPV6_LEAVE_GROUP:
-			error = ip6_setmoptions(sopt, &in6p->in6p_moptions);
-			break;
-
-		case IPV6_PORTRANGE:
-			error = sockopt_getint(sopt, &optval);
-			if (error)
-				break;
-
-			switch (optval) {
-			case IPV6_PORTRANGE_DEFAULT:
-				in6p->in6p_flags &= ~(IN6P_LOWPORT);
-				in6p->in6p_flags &= ~(IN6P_HIGHPORT);
-				break;
-
-			case IPV6_PORTRANGE_HIGH:
-				in6p->in6p_flags &= ~(IN6P_LOWPORT);
-				in6p->in6p_flags |= IN6P_HIGHPORT;
-				break;
-
-			case IPV6_PORTRANGE_LOW:
-				in6p->in6p_flags &= ~(IN6P_HIGHPORT);
-				in6p->in6p_flags |= IN6P_LOWPORT;
-				break;
-
-			default:
-				error = EINVAL;
-				break;
-			}
-			break;
-
-
-#if defined(IPSEC) || defined(FAST_IPSEC)
-		case IPV6_IPSEC_POLICY:
-			error = ipsec6_set_policy(in6p, optname,
-			    sopt->sopt_data, sopt->sopt_size, privileged);
-			break;
-#endif /* IPSEC */
-
-		default:
-			error = ENOPROTOOPT;
-			break;
-		}
-		break;
-
-	case PRCO_GETOPT:
-		switch (optname) {
-#ifdef RFC2292
-		case IPV6_2292PKTOPTIONS:
-			/*
-			 * RFC3542 (effectively) deprecated the
-			 * semantics of the 2292-style pktoptions.
-			 * Since it was not reliable in nature (i.e.,
-			 * applications had to expect the lack of some
-			 * information after all), it would make sense
-			 * to simplify this part by always returning
-			 * empty data.
-			 */
-			break;
-#endif
-
-		case IPV6_RECVHOPOPTS:
-		case IPV6_RECVDSTOPTS:
-		case IPV6_RECVRTHDRDSTOPTS:
-		case IPV6_UNICAST_HOPS:
-		case IPV6_RECVPKTINFO:
-		case IPV6_RECVHOPLIMIT:
-		case IPV6_RECVRTHDR:
-		case IPV6_RECVPATHMTU:
-
-		case IPV6_FAITH:
-		case IPV6_V6ONLY:
-		case IPV6_PORTRANGE:
-		case IPV6_RECVTCLASS:
-			switch (optname) {
-
-			case IPV6_RECVHOPOPTS:
-				optval = OPTBIT(IN6P_HOPOPTS);
-				break;
-
-			case IPV6_RECVDSTOPTS:
-				optval = OPTBIT(IN6P_DSTOPTS);
-				break;
-
-			case IPV6_RECVRTHDRDSTOPTS:
-				optval = OPTBIT(IN6P_RTHDRDSTOPTS);
-				break;
-
-			case IPV6_UNICAST_HOPS:
-				optval = in6p->in6p_hops;
-				break;
-
-			case IPV6_RECVPKTINFO:
-				optval = OPTBIT(IN6P_PKTINFO);
-				break;
-
-			case IPV6_RECVHOPLIMIT:
-				optval = OPTBIT(IN6P_HOPLIMIT);
-				break;
-
-			case IPV6_RECVRTHDR:
-				optval = OPTBIT(IN6P_RTHDR);
-				break;
-
-			case IPV6_RECVPATHMTU:
-				optval = OPTBIT(IN6P_MTU);
-				break;
-
-			case IPV6_FAITH:
-				optval = OPTBIT(IN6P_FAITH);
-				break;
-
-			case IPV6_V6ONLY:
-				optval = OPTBIT(IN6P_IPV6_V6ONLY);
+			case IPV6_MULTICAST_IF:
+			case IPV6_MULTICAST_HOPS:
+			case IPV6_MULTICAST_LOOP:
+			case IPV6_JOIN_GROUP:
+			case IPV6_LEAVE_GROUP:
+                                error = ip6_setmoptions(optname,
+				    &in6p->in6p_moptions, m);
 				break;
 
 			case IPV6_PORTRANGE:
-			    {
-				int flags;
-				flags = in6p->in6p_flags;
-				if (flags & IN6P_HIGHPORT)
-					optval = IPV6_PORTRANGE_HIGH;
-				else if (flags & IN6P_LOWPORT)
-					optval = IPV6_PORTRANGE_LOW;
-				else
-					optval = 0;
-				break;
-			    }
-			case IPV6_RECVTCLASS:
-				optval = OPTBIT(IN6P_TCLASS);
+				if (!m) {
+					error = EINVAL;
+					break;
+				}
+				optval = *mtod(m, int *);
+
+				switch (optval) {
+				case IPV6_PORTRANGE_DEFAULT:
+					in6p->in6p_flags &= ~(IN6P_LOWPORT);
+					in6p->in6p_flags &= ~(IN6P_HIGHPORT);
+					break;
+
+				case IPV6_PORTRANGE_HIGH:
+					in6p->in6p_flags &= ~(IN6P_LOWPORT);
+					in6p->in6p_flags |= IN6P_HIGHPORT;
+					break;
+
+				case IPV6_PORTRANGE_LOW:
+					in6p->in6p_flags &= ~(IN6P_HIGHPORT);
+					in6p->in6p_flags |= IN6P_LOWPORT;
+					break;
+
+				default:
+					error = EINVAL;
+					break;
+				}
 				break;
 
+#ifdef IPSEC
+			case IPV6_IPSEC_POLICY:
+			{
+				caddr_t req = NULL;
+				size_t len = 0;
+				if (m) {
+					req = mtod(m, caddr_t);
+					len = m->m_len;
+				}
+				error = ipsec6_set_policy(in6p, optname, req,
+							  len, privileged);
 			}
-			if (error)
 				break;
-			error = sockopt_setint(sopt, optval);
-			break;
-
-		case IPV6_PATHMTU:
-		    {
-			u_long pmtu = 0;
-			struct ip6_mtuinfo mtuinfo;
-			struct route *ro = &in6p->in6p_route;
-
-			if (!(so->so_state & SS_ISCONNECTED))
-				return (ENOTCONN);
-			/*
-			 * XXX: we dot not consider the case of source
-			 * routing, or optional information to specify
-			 * the outgoing interface.
-			 */
-			error = ip6_getpmtu(ro, NULL, NULL,
-			    &in6p->in6p_faddr, &pmtu, NULL);
-			if (error)
-				break;
-			if (pmtu > IPV6_MAXPACKET)
-				pmtu = IPV6_MAXPACKET;
-
-			memset(&mtuinfo, 0, sizeof(mtuinfo));
-			mtuinfo.ip6m_mtu = (u_int32_t)pmtu;
-			optdata = (void *)&mtuinfo;
-			optdatalen = sizeof(mtuinfo);
-			if (optdatalen > MCLBYTES)
-				return (EMSGSIZE); /* XXX */
-			error = sockopt_set(sopt, optdata, optdatalen);
-			break;
-		    }
-
-#ifdef RFC2292
-		case IPV6_2292PKTINFO:
-		case IPV6_2292HOPLIMIT:
-		case IPV6_2292HOPOPTS:
-		case IPV6_2292RTHDR:
-		case IPV6_2292DSTOPTS:
-			switch (optname) {
-			case IPV6_2292PKTINFO:
-				optval = OPTBIT(IN6P_PKTINFO);
-				break;
-			case IPV6_2292HOPLIMIT:
-				optval = OPTBIT(IN6P_HOPLIMIT);
-				break;
-			case IPV6_2292HOPOPTS:
-				optval = OPTBIT(IN6P_HOPOPTS);
-				break;
-			case IPV6_2292RTHDR:
-				optval = OPTBIT(IN6P_RTHDR);
-				break;
-			case IPV6_2292DSTOPTS:
-				optval = OPTBIT(IN6P_DSTOPTS|IN6P_RTHDRDSTOPTS);
-				break;
-			}
-			error = sockopt_setint(sopt, optval);
-			break;
-#endif
-		case IPV6_PKTINFO:
-		case IPV6_HOPOPTS:
-		case IPV6_RTHDR:
-		case IPV6_DSTOPTS:
-		case IPV6_RTHDRDSTOPTS:
-		case IPV6_NEXTHOP:
-		case IPV6_OTCLASS:
-		case IPV6_TCLASS:
-		case IPV6_DONTFRAG:
-		case IPV6_USE_MIN_MTU:
-			error = ip6_getpcbopt(in6p->in6p_outputopts,
-			    optname, sopt);
-			break;
-
-		case IPV6_MULTICAST_IF:
-		case IPV6_MULTICAST_HOPS:
-		case IPV6_MULTICAST_LOOP:
-		case IPV6_JOIN_GROUP:
-		case IPV6_LEAVE_GROUP:
-			error = ip6_getmoptions(sopt, in6p->in6p_moptions);
-			break;
-
-#if defined(IPSEC) || defined(FAST_IPSEC)
-		case IPV6_IPSEC_POLICY:
-		    {
-			struct mbuf *m = NULL;
-
-			/* XXX this will return EINVAL as sopt is empty */
-			error = ipsec6_get_policy(in6p, sopt->sopt_data,
-			    sopt->sopt_size, &m);
-			if (!error)
-				error = sockopt_setmbuf(sopt, m);
-
-			break;
-		    }
 #endif /* IPSEC */
 
-		default:
-			error = ENOPROTOOPT;
+			default:
+				error = ENOPROTOOPT;
+				break;
+			}
+			if (m)
+				(void)m_free(m);
+			break;
+
+		case PRCO_GETOPT:
+			switch (optname) {
+#ifdef RFC2292
+			case IPV6_2292PKTOPTIONS:
+				/*
+				 * RFC3542 (effectively) deprecated the
+				 * semantics of the 2292-style pktoptions.
+				 * Since it was not reliable in nature (i.e.,
+				 * applications had to expect the lack of some
+				 * information after all), it would make sense
+				 * to simplify this part by always returning
+				 * empty data.
+				 */
+				*mp = m_get(M_WAIT, MT_SOOPTS);
+				(*mp)->m_len = 0;
+				break;
+#endif
+
+			case IPV6_RECVHOPOPTS:
+			case IPV6_RECVDSTOPTS:
+			case IPV6_RECVRTHDRDSTOPTS:
+			case IPV6_UNICAST_HOPS:
+			case IPV6_RECVPKTINFO:
+			case IPV6_RECVHOPLIMIT:
+			case IPV6_RECVRTHDR:
+			case IPV6_RECVPATHMTU:
+
+			case IPV6_FAITH:
+			case IPV6_V6ONLY:
+			case IPV6_PORTRANGE:
+			case IPV6_RECVTCLASS:
+				switch (optname) {
+
+				case IPV6_RECVHOPOPTS:
+					optval = OPTBIT(IN6P_HOPOPTS);
+					break;
+
+				case IPV6_RECVDSTOPTS:
+					optval = OPTBIT(IN6P_DSTOPTS);
+					break;
+
+				case IPV6_RECVRTHDRDSTOPTS:
+					optval = OPTBIT(IN6P_RTHDRDSTOPTS);
+					break;
+
+				case IPV6_UNICAST_HOPS:
+					optval = in6p->in6p_hops;
+					break;
+
+				case IPV6_RECVPKTINFO:
+					optval = OPTBIT(IN6P_PKTINFO);
+					break;
+
+				case IPV6_RECVHOPLIMIT:
+					optval = OPTBIT(IN6P_HOPLIMIT);
+					break;
+
+				case IPV6_RECVRTHDR:
+					optval = OPTBIT(IN6P_RTHDR);
+					break;
+
+				case IPV6_RECVPATHMTU:
+					optval = OPTBIT(IN6P_MTU);
+					break;
+
+				case IPV6_FAITH:
+					optval = OPTBIT(IN6P_FAITH);
+					break;
+
+				case IPV6_V6ONLY:
+					optval = OPTBIT(IN6P_IPV6_V6ONLY);
+					break;
+
+				case IPV6_PORTRANGE:
+				    {
+					int flags;
+					flags = in6p->in6p_flags;
+					if (flags & IN6P_HIGHPORT)
+						optval = IPV6_PORTRANGE_HIGH;
+					else if (flags & IN6P_LOWPORT)
+						optval = IPV6_PORTRANGE_LOW;
+					else
+						optval = 0;
+					break;
+				    }
+				case IPV6_RECVTCLASS:
+					optval = OPTBIT(IN6P_TCLASS);
+					break;
+
+				}
+				if (error)
+					break;
+				*mp = m = m_get(M_WAIT, MT_SOOPTS);
+				m->m_len = sizeof(int);
+				*mtod(m, int *) = optval;
+				break;
+
+			case IPV6_PATHMTU:
+			    {
+				u_long pmtu = 0;
+				struct ip6_mtuinfo mtuinfo;
+				struct route_in6 *ro = (struct route_in6 *)&in6p
+->in6p_route;
+
+				if (!(so->so_state & SS_ISCONNECTED))
+					return (ENOTCONN);
+				/*
+				 * XXX: we dot not consider the case of source
+				 * routing, or optional information to specify
+				 * the outgoing interface.
+				 */
+				error = ip6_getpmtu(ro, NULL, NULL,
+				    &in6p->in6p_faddr, &pmtu, NULL);
+				if (error)
+					break;
+				if (pmtu > IPV6_MAXPACKET)
+					pmtu = IPV6_MAXPACKET;
+
+				memset(&mtuinfo, 0, sizeof(mtuinfo));
+				mtuinfo.ip6m_mtu = (u_int32_t)pmtu;
+				optdata = (void *)&mtuinfo;
+				optdatalen = sizeof(mtuinfo);
+				if (optdatalen > MCLBYTES)
+					return (EMSGSIZE); /* XXX */
+				*mp = m = m_get(M_WAIT, MT_SOOPTS);
+				if (optdatalen > MLEN)
+					MCLGET(m, M_WAIT);
+				m->m_len = optdatalen;
+				memcpy(mtod(m, void *), optdata, optdatalen);
+				break;
+			    }
+
+#ifdef RFC2292
+			case IPV6_2292PKTINFO:
+			case IPV6_2292HOPLIMIT:
+			case IPV6_2292HOPOPTS:
+			case IPV6_2292RTHDR:
+			case IPV6_2292DSTOPTS:
+				switch (optname) {
+				case IPV6_2292PKTINFO:
+					optval = OPTBIT(IN6P_PKTINFO);
+					break;
+				case IPV6_2292HOPLIMIT:
+					optval = OPTBIT(IN6P_HOPLIMIT);
+					break;
+				case IPV6_2292HOPOPTS:
+					optval = OPTBIT(IN6P_HOPOPTS);
+					break;
+				case IPV6_2292RTHDR:
+					optval = OPTBIT(IN6P_RTHDR);
+					break;
+				case IPV6_2292DSTOPTS:
+					optval = OPTBIT(IN6P_DSTOPTS|IN6P_RTHDRDSTOPTS);
+					break;
+				}
+				*mp = m = m_get(M_WAIT, MT_SOOPTS);
+				m->m_len = sizeof(int);
+				*mtod(m, int *) = optval;
+				break;
+#endif
+			case IPV6_PKTINFO:
+			case IPV6_HOPOPTS:
+			case IPV6_RTHDR:
+			case IPV6_DSTOPTS:
+			case IPV6_RTHDRDSTOPTS:
+			case IPV6_NEXTHOP:
+			case IPV6_OTCLASS:
+			case IPV6_TCLASS:
+			case IPV6_DONTFRAG:
+			case IPV6_USE_MIN_MTU:
+				error = ip6_getpcbopt(in6p->in6p_outputopts,
+				    optname, mp);
+				break;
+
+			case IPV6_MULTICAST_IF:
+			case IPV6_MULTICAST_HOPS:
+			case IPV6_MULTICAST_LOOP:
+			case IPV6_JOIN_GROUP:
+			case IPV6_LEAVE_GROUP:
+				error = ip6_getmoptions(optname,
+				    in6p->in6p_moptions, mp);
+				break;
+
+#ifdef IPSEC
+			case IPV6_IPSEC_POLICY:
+			    {
+				caddr_t req = NULL;
+				size_t len = 0;
+				if (m) {
+					req = mtod(m, caddr_t);
+					len = m->m_len;
+				}
+				error = ipsec6_get_policy(in6p, req, len, mp);
+				break;
+			    }
+#endif /* IPSEC */
+
+
+
+
+			default:
+				error = ENOPROTOOPT;
+				break;
+			}
 			break;
 		}
-		break;
+	} else {
+		error = EINVAL;
+		if (op == PRCO_SETOPT && *mp)
+			(void)m_free(*mp);
 	}
 	return (error);
 }
 
 int
-ip6_raw_ctloutput(int op, struct socket *so, struct sockopt *sopt)
+ip6_raw_ctloutput(op, so, level, optname, mp)
+	int op;
+	struct socket *so;
+	int level, optname;
+	struct mbuf **mp;
 {
-	int error = 0, optval;
+	int error = 0, optval, optlen;
 	const int icmp6off = offsetof(struct icmp6_hdr, icmp6_cksum);
 	struct in6pcb *in6p = sotoin6pcb(so);
-	int level, optname;
+	struct mbuf *m = *mp;
 
-	KASSERT(sopt != NULL);
-
-	level = sopt->sopt_level;
-	optname = sopt->sopt_name;
+	optlen = m ? m->m_len : 0;
 
 	if (level != IPPROTO_IPV6) {
-		return ENOPROTOOPT;
+		if (op == PRCO_SETOPT && *mp)
+			(void)m_free(*mp);
+		return (EINVAL);
 	}
 
 	switch (optname) {
@@ -2071,9 +2091,11 @@ ip6_raw_ctloutput(int op, struct socket *so, struct sockopt *sopt)
 		 */
 		switch (op) {
 		case PRCO_SETOPT:
-			error = sockopt_getint(sopt, &optval);
-			if (error)
+			if (optlen != sizeof(int)) {
+				error = EINVAL;
 				break;
+			}
+			optval = *mtod(m, int *);
 			if ((optval % 2) != 0) {
 				/* the API assumes even offset values */
 				error = EINVAL;
@@ -2091,7 +2113,9 @@ ip6_raw_ctloutput(int op, struct socket *so, struct sockopt *sopt)
 			else
 				optval = in6p->in6p_cksum;
 
-			error = sockopt_setint(sopt, optval);
+			*mp = m = m_get(M_WAIT, MT_SOOPTS);
+			m->m_len = sizeof(int);
+			*mtod(m, int *) = optval;
 			break;
 
 		default:
@@ -2105,6 +2129,9 @@ ip6_raw_ctloutput(int op, struct socket *so, struct sockopt *sopt)
 		break;
 	}
 
+	if (op == PRCO_SETOPT && m)
+		(void)m_free(m);
+
 	return (error);
 }
 
@@ -2114,11 +2141,12 @@ ip6_raw_ctloutput(int op, struct socket *so, struct sockopt *sopt)
  * specifying behavior of outgoing packets.
  */
 static int
-ip6_pcbopts(struct ip6_pktopts **pktopt, struct socket *so,
-    struct sockopt *sopt)
+ip6_pcbopts(pktopt, m, so)
+	struct ip6_pktopts **pktopt;
+	struct mbuf *m;
+	struct socket *so;
 {
 	struct ip6_pktopts *opt = *pktopt;
-	struct mbuf *m;
 	int error = 0;
 	struct lwp *l = curlwp;	/* XXX */
 	int priv = 0;
@@ -2132,14 +2160,11 @@ ip6_pcbopts(struct ip6_pktopts **pktopt, struct socket *so,
 		    printf("ip6_pcbopts: all specified options are cleared.\n");
 #endif
 		ip6_clearpktopts(opt, -1);
-	} else {
-		opt = malloc(sizeof(*opt), M_IP6OPT, M_NOWAIT);
-		if (opt == NULL)
-			return (ENOBUFS);
-	}
+	} else
+		opt = malloc(sizeof(*opt), M_IP6OPT, M_WAITOK);
 	*pktopt = NULL;
 
-	if (sopt == NULL || sopt->sopt_size == 0) {
+	if (!m || m->m_len == 0) {
 		/*
 		 * Only turning off any previous options, regardless of
 		 * whether the opt is just created or given.
@@ -2152,16 +2177,8 @@ ip6_pcbopts(struct ip6_pktopts **pktopt, struct socket *so,
 	if (l && !kauth_authorize_generic(l->l_cred, KAUTH_GENERIC_ISSUSER,
 	    NULL))
 		priv = 1;
-
-	m = sockopt_getmbuf(sopt);
-	if (m == NULL) {
-		free(opt, M_IP6OPT);
-		return (ENOBUFS);
-	}
-
-	error = ip6_setpktopts(m, opt, NULL, priv, so->so_proto->pr_protocol);
-	m_freem(m);
-	if (error != 0) {
+	if ((error = ip6_setpktopts(m, opt, NULL, priv,
+	    so->so_proto->pr_protocol)) != 0) {
 		ip6_clearpktopts(opt, -1); /* XXX: discard all options */
 		free(opt, M_IP6OPT);
 		return (error);
@@ -2194,10 +2211,7 @@ ip6_pcbopt(int optname, u_char *buf, int len, struct ip6_pktopts **pktopt,
 
 	if (*pktopt == NULL) {
 		*pktopt = malloc(sizeof(struct ip6_pktopts), M_IP6OPT,
-		    M_NOWAIT);
-		if (*pktopt == NULL)
-			return (ENOBUFS);
-
+		    M_WAITOK);
 		ip6_initpktopts(*pktopt);
 	}
 	opt = *pktopt;
@@ -2206,7 +2220,7 @@ ip6_pcbopt(int optname, u_char *buf, int len, struct ip6_pktopts **pktopt,
 }
 
 static int
-ip6_getpcbopt(struct ip6_pktopts *pktopt, int optname, struct sockopt *sopt)
+ip6_getpcbopt(struct ip6_pktopts *pktopt, int optname, struct mbuf **mp)
 {
 	void *optdata = NULL;
 	int optdatalen = 0;
@@ -2215,6 +2229,7 @@ ip6_getpcbopt(struct ip6_pktopts *pktopt, int optname, struct sockopt *sopt)
 	struct in6_pktinfo null_pktinfo;
 	int deftclass = 0, on;
 	int defminmtu = IP6PO_MINMTU_MCASTONLY;
+	struct mbuf *m;
 
 	switch (optname) {
 	case IPV6_PKTINFO:
@@ -2293,7 +2308,14 @@ ip6_getpcbopt(struct ip6_pktopts *pktopt, int optname, struct sockopt *sopt)
 		return (ENOPROTOOPT);
 	}
 
-	error = sockopt_set(sopt, optdata, optdatalen);
+	if (optdatalen > MCLBYTES)
+		return (EMSGSIZE); /* XXX */
+	*mp = m = m_get(M_WAIT, MT_SOOPTS);
+	if (optdatalen > MLEN)
+		MCLGET(m, M_WAIT);
+	m->m_len = optdatalen;
+	if (optdatalen)
+		memcpy(mtod(m, void *), optdata, optdatalen);
 
 	return (error);
 }
@@ -2311,7 +2333,7 @@ ip6_clearpktopts(struct ip6_pktopts *pktopt, int optname)
 	if (optname == -1 || optname == IPV6_TCLASS)
 		pktopt->ip6po_tclass = -1;
 	if (optname == -1 || optname == IPV6_NEXTHOP) {
-		rtcache_free(&pktopt->ip6po_nextroute);
+		rtcache_free((struct route *)&pktopt->ip6po_nextroute);
 		if (pktopt->ip6po_nexthop)
 			free(pktopt->ip6po_nexthop, M_IP6OPT);
 		pktopt->ip6po_nexthop = NULL;
@@ -2330,7 +2352,7 @@ ip6_clearpktopts(struct ip6_pktopts *pktopt, int optname)
 		if (pktopt->ip6po_rhinfo.ip6po_rhi_rthdr)
 			free(pktopt->ip6po_rhinfo.ip6po_rhi_rthdr, M_IP6OPT);
 		pktopt->ip6po_rhinfo.ip6po_rhi_rthdr = NULL;
-		rtcache_free(&pktopt->ip6po_route);
+		rtcache_free((struct route *)&pktopt->ip6po_route);
 	}
 	if (optname == -1 || optname == IPV6_DSTOPTS) {
 		if (pktopt->ip6po_dest2)
@@ -2423,14 +2445,17 @@ ip6_freepcbopts(struct ip6_pktopts *pktopt)
  * Set the IP6 multicast options in response to user setsockopt().
  */
 static int
-ip6_setmoptions(const struct sockopt *sopt, struct ip6_moptions **im6op)
+ip6_setmoptions(optname, im6op, m)
+	int optname;
+	struct ip6_moptions **im6op;
+	struct mbuf *m;
 {
 	int error = 0;
 	u_int loop, ifindex;
-	struct ipv6_mreq mreq;
+	struct ipv6_mreq *mreq;
 	struct ifnet *ifp;
 	struct ip6_moptions *im6o = *im6op;
-	struct route ro;
+	struct route_in6 ro;
 	struct in6_multi_mship *imm;
 	struct lwp *l = curlwp;	/* XXX */
 
@@ -2439,10 +2464,11 @@ ip6_setmoptions(const struct sockopt *sopt, struct ip6_moptions **im6op)
 		 * No multicast option buffer attached to the pcb;
 		 * allocate one and initialize to default values.
 		 */
-		im6o = malloc(sizeof(*im6o), M_IPMOPTS, M_NOWAIT);
+		im6o = (struct ip6_moptions *)
+			malloc(sizeof(*im6o), M_IPMOPTS, M_WAITOK);
+
 		if (im6o == NULL)
 			return (ENOBUFS);
-
 		*im6op = im6o;
 		im6o->im6o_multicast_ifp = NULL;
 		im6o->im6o_multicast_hlim = ip6_defmcasthlim;
@@ -2450,16 +2476,17 @@ ip6_setmoptions(const struct sockopt *sopt, struct ip6_moptions **im6op)
 		LIST_INIT(&im6o->im6o_memberships);
 	}
 
-	switch (sopt->sopt_name) {
+	switch (optname) {
 
 	case IPV6_MULTICAST_IF:
 		/*
 		 * Select the interface for outgoing multicast packets.
 		 */
-		error = sockopt_get(sopt, &ifindex, sizeof(ifindex));
-		if (error != 0)
+		if (m == NULL || m->m_len != sizeof(u_int)) {
+			error = EINVAL;
 			break;
-
+		}
+		bcopy(mtod(m, u_int *), &ifindex, sizeof(ifindex));
 		if (ifindex != 0) {
 			if (if_indexlim <= ifindex || !ifindex2ifnet[ifindex]) {
 				error = ENXIO;	/* XXX EINVAL? */
@@ -2481,11 +2508,11 @@ ip6_setmoptions(const struct sockopt *sopt, struct ip6_moptions **im6op)
 		 * Set the IP6 hoplimit for outgoing multicast packets.
 		 */
 		int optval;
-
-		error = sockopt_getint(sopt, &optval);
-		if (error != 0)
+		if (m == NULL || m->m_len != sizeof(int)) {
+			error = EINVAL;
 			break;
-
+		}
+		bcopy(mtod(m, u_int *), &optval, sizeof(optval));
 		if (optval < -1 || optval >= 256)
 			error = EINVAL;
 		else if (optval == -1)
@@ -2500,9 +2527,11 @@ ip6_setmoptions(const struct sockopt *sopt, struct ip6_moptions **im6op)
 		 * Set the loopback flag for outgoing multicast packets.
 		 * Must be zero or one.
 		 */
-		error = sockopt_get(sopt, &loop, sizeof(loop));
-		if (error != 0)
+		if (m == NULL || m->m_len != sizeof(u_int)) {
+			error = EINVAL;
 			break;
+		}
+		bcopy(mtod(m, u_int *), &loop, sizeof(loop));
 		if (loop > 1) {
 			error = EINVAL;
 			break;
@@ -2515,11 +2544,12 @@ ip6_setmoptions(const struct sockopt *sopt, struct ip6_moptions **im6op)
 		 * Add a multicast group membership.
 		 * Group must be a valid IP6 multicast address.
 		 */
-		error = sockopt_get(sopt, &mreq, sizeof(mreq));
-		if (error != 0)
+		if (m == NULL || m->m_len != sizeof(struct ipv6_mreq)) {
+			error = EINVAL;
 			break;
-
-		if (IN6_IS_ADDR_UNSPECIFIED(&mreq.ipv6mr_multiaddr)) {
+		}
+		mreq = mtod(m, struct ipv6_mreq *);
+		if (IN6_IS_ADDR_UNSPECIFIED(&mreq->ipv6mr_multiaddr)) {
 			/*
 			 * We use the unspecified address to specify to accept
 			 * all multicast addresses. Only super user is allowed
@@ -2531,7 +2561,7 @@ ip6_setmoptions(const struct sockopt *sopt, struct ip6_moptions **im6op)
 				error = EACCES;
 				break;
 			}
-		} else if (!IN6_IS_ADDR_MULTICAST(&mreq.ipv6mr_multiaddr)) {
+		} else if (!IN6_IS_ADDR_MULTICAST(&mreq->ipv6mr_multiaddr)) {
 			error = EINVAL;
 			break;
 		}
@@ -2540,35 +2570,36 @@ ip6_setmoptions(const struct sockopt *sopt, struct ip6_moptions **im6op)
 		 * If no interface was explicitly specified, choose an
 		 * appropriate one according to the given multicast address.
 		 */
-		if (mreq.ipv6mr_interface == 0) {
-			struct rtentry *rt;
-			union {
-				struct sockaddr		dst;
-				struct sockaddr_in6	dst6;
-			} u;
+		if (mreq->ipv6mr_interface == 0) {
+			struct sockaddr_in6 *dst;
 
 			/*
 			 * Look up the routing table for the
 			 * address, and choose the outgoing interface.
 			 *   XXX: is it a good approach?
 			 */
-			memset(&ro, 0, sizeof(ro));
-			sockaddr_in6_init(&u.dst6, &mreq.ipv6mr_multiaddr, 0,
-			    0, 0);
-			rtcache_setdst(&ro, &u.dst);
-			ifp = (rt = rtcache_init(&ro)) != NULL ? rt->rt_ifp
-			                                        : NULL;
-			rtcache_free(&ro);
+			bzero(&ro, sizeof(ro));
+			dst = (struct sockaddr_in6 *)&ro.ro_dst;
+			dst->sin6_family = AF_INET6;
+			dst->sin6_len = sizeof(*dst);
+			dst->sin6_addr = mreq->ipv6mr_multiaddr;
+			rtcache_init((struct route *)&ro);
+			if (ro.ro_rt == NULL) {
+				error = EADDRNOTAVAIL;
+				break;
+			}
+			ifp = ro.ro_rt->rt_ifp;
+			rtcache_free((struct route *)&ro);
 		} else {
 			/*
 			 * If the interface is specified, validate it.
 			 */
-			if (if_indexlim <= mreq.ipv6mr_interface ||
-			    !ifindex2ifnet[mreq.ipv6mr_interface]) {
+			if (if_indexlim <= mreq->ipv6mr_interface ||
+			    !ifindex2ifnet[mreq->ipv6mr_interface]) {
 				error = ENXIO;	/* XXX EINVAL? */
 				break;
 			}
-			ifp = ifindex2ifnet[mreq.ipv6mr_interface];
+			ifp = ifindex2ifnet[mreq->ipv6mr_interface];
 		}
 
 		/*
@@ -2580,7 +2611,7 @@ ip6_setmoptions(const struct sockopt *sopt, struct ip6_moptions **im6op)
 			break;
 		}
 
-		if (in6_setscope(&mreq.ipv6mr_multiaddr, ifp, NULL)) {
+		if (in6_setscope(&mreq->ipv6mr_multiaddr, ifp, NULL)) {
 			error = EADDRNOTAVAIL; /* XXX: should not happen */
 			break;
 		}
@@ -2592,7 +2623,7 @@ ip6_setmoptions(const struct sockopt *sopt, struct ip6_moptions **im6op)
 		     imm != NULL; imm = imm->i6mm_chain.le_next)
 			if (imm->i6mm_maddr->in6m_ifp == ifp &&
 			    IN6_ARE_ADDR_EQUAL(&imm->i6mm_maddr->in6m_addr,
-			    &mreq.ipv6mr_multiaddr))
+			    &mreq->ipv6mr_multiaddr))
 				break;
 		if (imm != NULL) {
 			error = EADDRINUSE;
@@ -2602,7 +2633,7 @@ ip6_setmoptions(const struct sockopt *sopt, struct ip6_moptions **im6op)
 		 * Everything looks good; add a new record to the multicast
 		 * address list for the given interface.
 		 */
-		imm = in6_joingroup(ifp, &mreq.ipv6mr_multiaddr, &error, 0);
+		imm = in6_joingroup(ifp, &mreq->ipv6mr_multiaddr, &error, 0);
 		if (imm == NULL)
 			break;
 		LIST_INSERT_HEAD(&im6o->im6o_memberships, imm, i6mm_chain);
@@ -2613,32 +2644,34 @@ ip6_setmoptions(const struct sockopt *sopt, struct ip6_moptions **im6op)
 		 * Drop a multicast group membership.
 		 * Group must be a valid IP6 multicast address.
 		 */
-		error = sockopt_get(sopt, &mreq, sizeof(mreq));
-		if (error != 0)
+		if (m == NULL || m->m_len != sizeof(struct ipv6_mreq)) {
+			error = EINVAL;
 			break;
+		}
+		mreq = mtod(m, struct ipv6_mreq *);
 
 		/*
 		 * If an interface address was specified, get a pointer
 		 * to its ifnet structure.
 		 */
-		if (mreq.ipv6mr_interface != 0) {
-			if (if_indexlim <= mreq.ipv6mr_interface ||
-			    !ifindex2ifnet[mreq.ipv6mr_interface]) {
+		if (mreq->ipv6mr_interface != 0) {
+			if (if_indexlim <= mreq->ipv6mr_interface ||
+			    !ifindex2ifnet[mreq->ipv6mr_interface]) {
 				error = ENXIO;	/* XXX EINVAL? */
 				break;
 			}
-			ifp = ifindex2ifnet[mreq.ipv6mr_interface];
+			ifp = ifindex2ifnet[mreq->ipv6mr_interface];
 		} else
 			ifp = NULL;
 
 		/* Fill in the scope zone ID */
 		if (ifp) {
-			if (in6_setscope(&mreq.ipv6mr_multiaddr, ifp, NULL)) {
+			if (in6_setscope(&mreq->ipv6mr_multiaddr, ifp, NULL)) {
 				/* XXX: should not happen */
 				error = EADDRNOTAVAIL;
 				break;
 			}
-		} else if (mreq.ipv6mr_interface != 0) {
+		} else if (mreq->ipv6mr_interface != 0) {
 			/*
 			 * XXX: This case would happens when the (positive)
 			 * index is in the valid range, but the corresponding
@@ -2661,12 +2694,14 @@ ip6_setmoptions(const struct sockopt *sopt, struct ip6_moptions **im6op)
 			 * check if there's ambiguity with the default scope
 			 * zone as the last resort.
 			 */
-			sockaddr_in6_init(&sa6_mc, &mreq.ipv6mr_multiaddr,
-			    0, 0, 0);
+			bzero(&sa6_mc, sizeof(sa6_mc));
+			sa6_mc.sin6_family = AF_INET6;
+			sa6_mc.sin6_len = sizeof(sa6_mc);
+			sa6_mc.sin6_addr = mreq->ipv6mr_multiaddr;
 			error = sa6_embedscope(&sa6_mc, ip6_use_defzone);
 			if (error != 0)
 				break;
-			mreq.ipv6mr_multiaddr = sa6_mc.sin6_addr;
+			mreq->ipv6mr_multiaddr = sa6_mc.sin6_addr;
 		}
 
 		/*
@@ -2676,7 +2711,7 @@ ip6_setmoptions(const struct sockopt *sopt, struct ip6_moptions **im6op)
 		     imm != NULL; imm = imm->i6mm_chain.le_next) {
 			if ((ifp == NULL || imm->i6mm_maddr->in6m_ifp == ifp) &&
 			    IN6_ARE_ADDR_EQUAL(&imm->i6mm_maddr->in6m_addr,
-			    &mreq.ipv6mr_multiaddr))
+			    &mreq->ipv6mr_multiaddr))
 				break;
 		}
 		if (imm == NULL) {
@@ -2715,51 +2750,55 @@ ip6_setmoptions(const struct sockopt *sopt, struct ip6_moptions **im6op)
  * Return the IP6 multicast options in response to user getsockopt().
  */
 static int
-ip6_getmoptions(struct sockopt *sopt, struct ip6_moptions *im6o)
+ip6_getmoptions(optname, im6o, mp)
+	int optname;
+	struct ip6_moptions *im6o;
+	struct mbuf **mp;
 {
-	u_int optval;
-	int error;
+	u_int *hlim, *loop, *ifindex;
 
-	switch (sopt->sopt_name) {
+	*mp = m_get(M_WAIT, MT_SOOPTS);
+
+	switch (optname) {
+
 	case IPV6_MULTICAST_IF:
+		ifindex = mtod(*mp, u_int *);
+		(*mp)->m_len = sizeof(u_int);
 		if (im6o == NULL || im6o->im6o_multicast_ifp == NULL)
-			optval = 0;
+			*ifindex = 0;
 		else
-			optval = im6o->im6o_multicast_ifp->if_index;
-
-		error = sockopt_set(sopt, &optval, sizeof(optval));
-		break;
+			*ifindex = im6o->im6o_multicast_ifp->if_index;
+		return (0);
 
 	case IPV6_MULTICAST_HOPS:
+		hlim = mtod(*mp, u_int *);
+		(*mp)->m_len = sizeof(u_int);
 		if (im6o == NULL)
-			optval = ip6_defmcasthlim;
+			*hlim = ip6_defmcasthlim;
 		else
-			optval = im6o->im6o_multicast_hlim;
-
-		error = sockopt_set(sopt, &optval, sizeof(optval));
-		break;
+			*hlim = im6o->im6o_multicast_hlim;
+		return (0);
 
 	case IPV6_MULTICAST_LOOP:
+		loop = mtod(*mp, u_int *);
+		(*mp)->m_len = sizeof(u_int);
 		if (im6o == NULL)
-			optval = ip6_defmcasthlim;
+			*loop = ip6_defmcasthlim;
 		else
-			optval = im6o->im6o_multicast_loop;
-
-		error = sockopt_set(sopt, &optval, sizeof(optval));
-		break;
+			*loop = im6o->im6o_multicast_loop;
+		return (0);
 
 	default:
-		error = EOPNOTSUPP;
+		return (EOPNOTSUPP);
 	}
-
-	return (error);
 }
 
 /*
  * Discard the IP6 multicast options.
  */
 void
-ip6_freemoptions(struct ip6_moptions *im6o)
+ip6_freemoptions(im6o)
+	struct ip6_moptions *im6o;
 {
 	struct in6_multi_mship *imm;
 
@@ -2777,8 +2816,10 @@ ip6_freemoptions(struct ip6_moptions *im6o)
  * Set IPv6 outgoing packet options based on advanced API.
  */
 int
-ip6_setpktopts(struct mbuf *control, struct ip6_pktopts *opt, 
-	struct ip6_pktopts *stickyopt, int priv, int uproto)
+ip6_setpktopts(control, opt, stickyopt, priv, uproto)
+	struct mbuf *control;
+	struct ip6_pktopts *opt, *stickyopt;
+	int priv, uproto;
 {
 	struct cmsghdr *cm = 0;
 
@@ -3227,8 +3268,10 @@ ip6_setpktopt(int optname, u_char *buf, int len, struct ip6_pktopts *opt,
  * pointer that might NOT be lo0ifp -- easier than replicating that code here.
  */
 void
-ip6_mloopback(struct ifnet *ifp, struct mbuf *m, 
-	const struct sockaddr_in6 *dst)
+ip6_mloopback(ifp, m, dst)
+	struct ifnet *ifp;
+	struct mbuf *m;
+	struct sockaddr_in6 *dst;
 {
 	struct mbuf *copym;
 	struct ip6_hdr *ip6;
@@ -3264,14 +3307,16 @@ ip6_mloopback(struct ifnet *ifp, struct mbuf *m,
 	in6_clearscope(&ip6->ip6_src);
 	in6_clearscope(&ip6->ip6_dst);
 
-	(void)looutput(ifp, copym, (const struct sockaddr *)dst, NULL);
+	(void)looutput(ifp, copym, (struct sockaddr *)dst, NULL);
 }
 
 /*
  * Chop IPv6 header off from the payload.
  */
 static int
-ip6_splithdr(struct mbuf *m,  struct ip6_exthdrs *exthdrs)
+ip6_splithdr(m, exthdrs)
+	struct mbuf *m;
+	struct ip6_exthdrs *exthdrs;
 {
 	struct mbuf *mh;
 	struct ip6_hdr *ip6;
@@ -3290,7 +3335,7 @@ ip6_splithdr(struct mbuf *m,  struct ip6_exthdrs *exthdrs)
 		mh->m_next = m;
 		m = mh;
 		m->m_len = sizeof(*ip6);
-		bcopy((void *)ip6, mtod(m, void *), sizeof(*ip6));
+		bcopy((caddr_t)ip6, mtod(m, caddr_t), sizeof(*ip6));
 	}
 	exthdrs->ip6e_ip6 = m;
 	return 0;
@@ -3300,7 +3345,8 @@ ip6_splithdr(struct mbuf *m,  struct ip6_exthdrs *exthdrs)
  * Compute IPv6 extension header length.
  */
 int
-ip6_optlen(struct in6pcb *in6p)
+ip6_optlen(in6p)
+	struct in6pcb *in6p;
 {
 	int len;
 

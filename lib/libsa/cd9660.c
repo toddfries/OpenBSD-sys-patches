@@ -1,4 +1,4 @@
-/*	$NetBSD: cd9660.c,v 1.24 2008/11/19 12:36:41 ad Exp $	*/
+/*	$NetBSD: cd9660.c,v 1.20 2006/01/25 18:27:23 christos Exp $	*/
 
 /*
  * Copyright (C) 1996 Wolfgang Solfrank.
@@ -182,7 +182,7 @@ cd9660_open(const char *path, struct open_file *f)
 	twiddle();
 #endif
 	rc = DEV_STRATEGY(f->f_dev)(f->f_devdata, F_READ, cdb2devb(bno),
-	                           buf_size, buf, &nread);
+				   buf_size, buf, &nread);
 	if (rc)
 		goto out;
 	if (nread != buf_size) {
@@ -203,32 +203,29 @@ cd9660_open(const char *path, struct open_file *f)
 		path++;
 
 	while (*path) {
-		if ((char *)pp >= (char *)buf + psize)
+		if ((caddr_t)pp >= (caddr_t)buf + psize)
 			break;
 		if (isonum_722(pp->parent) != parent)
 			break;
 		if (!pnmatch(path, pp)) {
-			pp = (struct ptable_ent *)((char *)pp + PTSIZE(pp));
+			pp = (struct ptable_ent *)((caddr_t)pp + PTSIZE(pp));
 			ent++;
 			continue;
 		}
 		path += isonum_711(pp->namlen) + 1;
 		parent = ent;
 		bno = isonum_732(pp->block) + isonum_711(pp->extlen);
-		while ((char *)pp < (char *)buf + psize) {
+		while ((caddr_t)pp < (caddr_t)buf + psize) {
 			if (isonum_722(pp->parent) == parent)
 				break;
-			pp = (struct ptable_ent *)((char *)pp + PTSIZE(pp));
+			pp = (struct ptable_ent *)((caddr_t)pp + PTSIZE(pp));
 			ent++;
 		}
 	}
 
-	/*
-	 * Now bno has the start of the directory that supposedly
-	 * contains the file
-	 */
+	/* Now bno has the start of the directory that supposedly contains the file */
 	bno--;
-	dsize = 1;		/* Something stupid, but > 0 XXX */
+	dsize = 1;		/* Something stupid, but > 0			XXX */
 	for (psize = 0; psize < dsize;) {
 		if (!(psize % ISO_DEFAULT_BLOCK_SIZE)) {
 			bno++;
@@ -236,9 +233,9 @@ cd9660_open(const char *path, struct open_file *f)
 			twiddle();
 #endif
 			rc = DEV_STRATEGY(f->f_dev)(f->f_devdata, F_READ,
-			                           cdb2devb(bno),
-			                           ISO_DEFAULT_BLOCK_SIZE,
-			                           buf, &nread);
+						   cdb2devb(bno),
+						   ISO_DEFAULT_BLOCK_SIZE,
+						   buf, &nread);
 			if (rc)
 				goto out;
 			if (nread != ISO_DEFAULT_BLOCK_SIZE) {
@@ -259,8 +256,7 @@ cd9660_open(const char *path, struct open_file *f)
 		if (dirmatch(path, dp))
 			break;
 		psize += isonum_711(dp->length);
-		dp = (struct iso_directory_record *)
-			((char *)dp + isonum_711(dp->length));
+		dp = (struct iso_directory_record *)((caddr_t)dp + isonum_711(dp->length));
 	}
 
 	if (psize >= dsize) {
@@ -277,7 +273,6 @@ cd9660_open(const char *path, struct open_file *f)
 	fp->bno = isonum_733(dp->extent);
 	fp->size = isonum_733(dp->size);
 	dealloc(buf, buf_size);
-	fsmod = "cd9660";
 
 	return 0;
 
@@ -325,7 +320,7 @@ cd9660_read(struct open_file *f, void *start, size_t size, size_t *resid)
 		twiddle();
 #endif
 		rc = DEV_STRATEGY(f->f_dev)(f->f_devdata, F_READ, cdb2devb(bno),
-		                            ISO_DEFAULT_BLOCK_SIZE, dp, &nread);
+					   ISO_DEFAULT_BLOCK_SIZE, dp, &nread);
 		if (rc)
 			return rc;
 		if (nread != ISO_DEFAULT_BLOCK_SIZE)
@@ -336,11 +331,11 @@ cd9660_read(struct open_file *f, void *start, size_t size, size_t *resid)
 				nread = off + size;
 			nread -= off;
 			memcpy(start, buf + off, nread);
-			start = (char *)start + nread;
+			start = (caddr_t)start + nread;
 			fp->off += nread;
 			size -= nread;
 		} else {
-			start = (char *)start + ISO_DEFAULT_BLOCK_SIZE;
+			start = (caddr_t)start + ISO_DEFAULT_BLOCK_SIZE;
 			fp->off += ISO_DEFAULT_BLOCK_SIZE;
 			size -= ISO_DEFAULT_BLOCK_SIZE;
 		}
@@ -354,7 +349,6 @@ cd9660_read(struct open_file *f, void *start, size_t size, size_t *resid)
 int
 cd9660_write(struct open_file *f, void *start, size_t size, size_t *resid)
 {
-
 	return EROFS;
 }
 #endif /* !defined(LIBSA_NO_FS_WRITE) */

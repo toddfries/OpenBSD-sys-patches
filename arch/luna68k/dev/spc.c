@@ -1,4 +1,4 @@
-/* $NetBSD: spc.c,v 1.8 2008/04/28 20:23:26 martin Exp $ */
+/* $NetBSD: spc.c,v 1.5 2005/12/11 12:17:52 christos Exp $ */
 
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -31,7 +38,7 @@
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
 
-__KERNEL_RCSID(0, "$NetBSD: spc.c,v 1.8 2008/04/28 20:23:26 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: spc.c,v 1.5 2005/12/11 12:17:52 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -51,23 +58,25 @@ __KERNEL_RCSID(0, "$NetBSD: spc.c,v 1.8 2008/04/28 20:23:26 martin Exp $");
 
 #include <luna68k/luna68k/isr.h>
 
-#include "ioconf.h"
+static int  spc_mainbus_match __P((struct device *, struct cfdata *, void *));
+static void spc_mainbus_attach __P((struct device *, struct device *, void *));
 
-static int  spc_mainbus_match(device_t, cfdata_t, void *);
-static void spc_mainbus_attach(device_t, device_t, void *);
-
-CFATTACH_DECL_NEW(spc, sizeof(struct spc_softc),
+CFATTACH_DECL(spc, sizeof(struct spc_softc),
     spc_mainbus_match, spc_mainbus_attach, NULL, NULL);
+extern struct cfdriver spc_cd;
 
 static int
-spc_mainbus_match(device_t parent, cfdata_t cf, void *aux)
+spc_mainbus_match(parent, cf, aux)
+	struct device *parent;
+	struct cfdata *cf;
+	void *aux;
 {
 	struct mainbus_attach_args *ma = aux;
 
 	if (strcmp(ma->ma_name, spc_cd.cd_name))
 		return 0;
 #if 0
-	if (badaddr((void *)ma->ma_addr, 4)) 
+	if (badaddr((caddr_t)ma->ma_addr, 4)) 
 		return 0;
 	/* Experiments proved 2nd SPC address does NOT make a buserror. */
 #endif
@@ -75,13 +84,14 @@ spc_mainbus_match(device_t parent, cfdata_t cf, void *aux)
 }
 
 static void
-spc_mainbus_attach(device_t parent, device_t self, void *aux)
+spc_mainbus_attach(parent, self, aux)
+	struct device *parent, *self;
+	void *aux;
 {
-	struct spc_softc *sc = device_private(self);
+	struct spc_softc *sc = (void *)self;
 	struct mainbus_attach_args *ma = aux;
 
-	sc->sc_dev = self;
-	aprint_normal ("\n");
+	printf ("\n");
 
 	sc->sc_iot = /* XXX */ 0;
 	sc->sc_ioh = ma->ma_addr;

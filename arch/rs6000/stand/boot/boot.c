@@ -1,4 +1,4 @@
-/*	$NetBSD: boot.c,v 1.2 2007/12/17 19:54:32 garbled Exp $	*/
+/*	$NetBSD: boot.c,v 1.4 2010/03/02 21:52:32 matt Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996 Wolfgang Solfrank.
@@ -40,6 +40,7 @@
 #include <machine/cpu.h>
 #include <machine/iplcb.h>
 #include <powerpc/spr.h>
+#include <powerpc/oea/spr.h>
 
 #include "boot.h"
 
@@ -235,7 +236,7 @@ exec_kernel(char *name)
 	u_long marks[MARK_MAX];
 #ifdef DBMONITOR
 	int go_monitor;
-	extern int db_monitor __P((void));
+	extern int db_monitor(void);
 
 ret:
 #endif /* DBMONITOR */

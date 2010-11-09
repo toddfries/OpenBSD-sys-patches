@@ -1,4 +1,4 @@
-/*	$NetBSD: genfb_pci.c,v 1.16 2009/02/23 23:45:56 jmcneill Exp $ */
+/*	$NetBSD: genfb_pci.c,v 1.9 2008/04/10 19:13:36 cegger Exp $ */
 
 /*-
  * Copyright (c) 2007 Michael Lorenz
@@ -12,6 +12,9 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -27,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: genfb_pci.c,v 1.16 2009/02/23 23:45:56 jmcneill Exp $");
+__KERNEL_RCSID(0, "$NetBSD: genfb_pci.c,v 1.9 2008/04/10 19:13:36 cegger Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -81,8 +84,8 @@ static void	pci_genfb_attach(struct device *, struct device *, void *);
 static int	pci_genfb_ioctl(void *, void *, u_long, void *, int,
 		    struct lwp *);
 static paddr_t	pci_genfb_mmap(void *, void *, off_t, int);
-static int	pci_genfb_borrow(void *, bus_addr_t, bus_space_handle_t *);
 static int	pci_genfb_drm_print(void *, const char *);
+
 
 CFATTACH_DECL(genfb_pci, sizeof(struct pci_genfb_softc),
     pci_genfb_match, pci_genfb_attach, NULL, NULL);
@@ -91,20 +94,13 @@ static int
 pci_genfb_match(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct pci_attach_args *pa = aux;
-	int matchlvl = 1;
-
-	if (!genfb_is_enabled())
-		return 0;	/* explicitly disabled by MD code */
-
-	if (genfb_is_console())
-		matchlvl = 5;	/* beat VGA */
 
 	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_APPLE &&
 	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_APPLE_CONTROL)
-		return matchlvl;
+		return 1;
 
 	if (PCI_CLASS(pa->pa_class) == PCI_CLASS_DISPLAY)
-		return matchlvl;
+		return 1;
 
 	return 0;
 }
@@ -119,8 +115,7 @@ pci_genfb_attach(struct device *parent, struct device *self, void *aux)
 	char devinfo[256];
 
 	pci_devinfo(pa->pa_id, pa->pa_class, 0, devinfo, sizeof(devinfo));
-	aprint_naive("\n");
-	aprint_normal(": %s\n", devinfo);
+	printf(": %s\n", devinfo);
 
 	sc->sc_memt = pa->pa_memt;
 	sc->sc_iot = pa->pa_iot;	
@@ -131,7 +126,8 @@ pci_genfb_attach(struct device *parent, struct device *self, void *aux)
 	genfb_init(&sc->sc_gen);
 
 	if ((sc->sc_gen.sc_width == 0) || (sc->sc_gen.sc_fbsize == 0)) {
-		aprint_debug_dev(self, "not configured by firmware\n");
+		aprint_error("%s: bogus parameters, unable to continue\n", 
+		    device_xname(self));
 		return;
 	}
 
@@ -166,7 +162,6 @@ pci_genfb_attach(struct device *parent, struct device *self, void *aux)
 
 	ops.genfb_ioctl = pci_genfb_ioctl;
 	ops.genfb_mmap = pci_genfb_mmap;
-	ops.genfb_borrow = pci_genfb_borrow;
 
 	if (genfb_attach(&sc->sc_gen, &ops) == 0) {
 
@@ -179,8 +174,8 @@ static int
 pci_genfb_drm_print(void *aux, const char *pnp)
 {
 	if (pnp)
-		aprint_normal("drm at %s", pnp);
-	return (UNCONF);
+		aprint_normal("direct rendering for %s", pnp);
+	return (UNSUPP);
 }
 
 
@@ -293,19 +288,4 @@ pci_genfb_mmap(void *v, void *vs, off_t offset, int prot)
 	}
 
 	return -1;
-}
-
-int
-pci_genfb_borrow(void *opaque, bus_addr_t addr, bus_space_handle_t *hdlp)
-{
-	struct pci_genfb_softc *sc = opaque;
-
-	if (sc == NULL)
-		return 0;
-	if (!sc->sc_gen.sc_fboffset)
-		return 0;
-	if (sc->sc_gen.sc_fboffset != addr)
-		return 0;
-	*hdlp = sc->sc_memh;
-	return 1;
 }

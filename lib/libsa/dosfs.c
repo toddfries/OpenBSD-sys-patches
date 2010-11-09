@@ -1,4 +1,4 @@
-/*	$NetBSD: dosfs.c,v 1.16 2008/11/24 11:27:20 ad Exp $	*/
+/*	$NetBSD: dosfs.c,v 1.11 2006/12/02 00:38:22 dogcow Exp $	*/
 
 /*
  * Copyright (c) 1996, 1998 Robert Nordier
@@ -126,7 +126,7 @@ static const struct direntry dot[2] = {
 /* Convert cluster number to offset within FAT */
 #define fatoff(sz, c)  ((sz) == 12 ? (c) + ((c) >> 1) :  \
                         (sz) == 16 ? (c) << 1 :          \
-                        (c) << 2)
+			(c) << 2)
 
 /* Does cluster number reference a valid data cluster? */
 #define okclus(fs, c)  ((c) >= LOCLUS && (c) <= (fs)->xclus)
@@ -134,7 +134,7 @@ static const struct direntry dot[2] = {
 /* Get start cluster from directory entry */
 #define stclus(sz, de)  ((sz) != 32 ? (u_int)getushort((de)->deStartCluster) : \
                          ((u_int)getushort((de)->deHighClust) << 16) |  \
-                         (u_int)getushort((de)->deStartCluster))
+			 (u_int)getushort((de)->deStartCluster))
 
 static int dosunmount(DOS_FS *);
 static int parsebs(DOS_FS *, DOS_BS *);
@@ -150,38 +150,21 @@ static int ioread(DOS_FS *, u_int, void *, u_int);
 static int iobuf(DOS_FS *, u_int);
 static int ioget(struct open_file *, u_int, void *, u_int);
 
-#define strcasecmp(s1, s2) dos_strcasecmp(s1, s2)
-static int
-strcasecmp(const char *s1, const char *s2)
-{
-	char c1, c2;
-	#define TO_UPPER(c) ((c) >= 'a' && (c) <= 'z' ? (c) - ('a' - 'A') : (c))
-	for (;;) {
-		c1 = *s1++;
-		c2 = *s2++;
-		if (TO_UPPER(c1) != TO_UPPER(c2))
-			return 1;
-		if (c1 == 0)
-			return 0;
-	}
-	#undef TO_UPPER
-}
-
 /*
  * Mount DOS filesystem
  */
 static int
-dos_mount(DOS_FS *fs, struct open_file *fd)
+dos_mount(DOS_FS * fs, struct open_file * fd)
 {
 	int     err;
 
-	(void)memset(fs, 0, sizeof(DOS_FS));
+	bzero(fs, sizeof(DOS_FS));
 	fs->fd = fd;
 	if ((err = !(fs->buf = alloc(SECSIZ)) ? errno : 0) ||
 	    (err = ioget(fs->fd, 0, fs->buf, 1)) ||
-	    (err = parsebs(fs, (DOS_BS *)fs->buf))) {
+	    (err = parsebs(fs, (DOS_BS *) fs->buf))) {
 		(void) dosunmount(fs);
-		return err;
+		return (err);
 	}
 	return 0;
 }
@@ -191,14 +174,14 @@ dos_mount(DOS_FS *fs, struct open_file *fd)
  * Unmount mounted filesystem
  */
 static int
-dos_unmount(DOS_FS *fs)
+dos_unmount(DOS_FS * fs)
 {
 	int     err;
 
 	if (fs->links)
-		return EBUSY;
+		return (EBUSY);
 	if ((err = dosunmount(fs)))
-		return err;
+		return (err);
 	return 0;
 }
 #endif
@@ -207,12 +190,12 @@ dos_unmount(DOS_FS *fs)
  * Common code shared by dos_mount() and dos_unmount()
  */
 static int
-dosunmount(DOS_FS *fs)
+dosunmount(DOS_FS * fs)
 {
 	if (fs->buf)
 		dealloc(fs->buf, SECSIZ);
 	dealloc(fs, sizeof(DOS_FS));
-	return 0;
+	return (0);
 }
 
 /*
@@ -255,28 +238,27 @@ dosfs_open(const char *path, struct open_file *fd)
 	f->offset = 0;
 	f->c = 0;
 #else
-	(void)memset(f, 0, sizeof(DOS_FILE));
+	bzero(f, sizeof(DOS_FILE));
 #endif
 	f->fs = fs;
 	fs->links++;
 	f->de = *de;
-	fd->f_fsdata = (void *)f;
-	fsmod = "msdos";
+	fd->f_fsdata = (void *) f;
 
 out:
-	return err;
+	return (err);
 }
 
 /*
  * Read from file
  */
 int
-dosfs_read(struct open_file *fd, void *vbuf, size_t nbyte, size_t *resid)
+dosfs_read(struct open_file * fd, void *vbuf, size_t nbyte, size_t * resid)
 {
 	off_t   size;
 	u_int8_t *buf = vbuf;
 	u_int   nb, off, clus, c, cnt, n;
-	DOS_FILE *f = (DOS_FILE *)fd->f_fsdata;
+	DOS_FILE *f = (DOS_FILE *) fd->f_fsdata;
 	int     err = 0;
 
 	nb = (u_int) nbyte;
@@ -294,9 +276,8 @@ dosfs_read(struct open_file *fd, void *vbuf, size_t nbyte, size_t *resid)
 		if (!c) {
 			if ((c = clus))
 				n = bytblk(f->fs, f->offset);
-		} else if (!off) {
+		} else if (!off)
 			n++;
-		}
 		while (n--) {
 			if ((err = fatget(f->fs, &c)))
 				goto out;
@@ -320,7 +301,7 @@ dosfs_read(struct open_file *fd, void *vbuf, size_t nbyte, size_t *resid)
 out:
 	if (resid)
 		*resid = nbyte - nb + cnt;
-	return err;
+	return (err);
 }
 
 #ifndef LIBSA_NO_FS_WRITE
@@ -331,7 +312,7 @@ int
 dosfs_write(struct open_file *fd, void *start, size_t size, size_t *resid)
 {
 
-	return EROFS;
+	return (EROFS);
 }
 #endif /* !LIBSA_NO_FS_WRITE */
 
@@ -340,11 +321,11 @@ dosfs_write(struct open_file *fd, void *start, size_t size, size_t *resid)
  * Reposition within file
  */
 off_t
-dosfs_seek(struct open_file *fd, off_t offset, int whence)
+dosfs_seek(struct open_file * fd, off_t offset, int whence)
 {
 	off_t   off;
 	u_int   size;
-	DOS_FILE *f = (DOS_FILE *)fd->f_fsdata;
+	DOS_FILE *f = (DOS_FILE *) fd->f_fsdata;
 
 	size = getulong(f->de.deFileSize);
 	switch (whence) {
@@ -358,14 +339,14 @@ dosfs_seek(struct open_file *fd, off_t offset, int whence)
 		off = size;
 		break;
 	default:
-		return -1;
+		return (-1);
 	}
 	off += offset;
 	if (off < 0 || off > size)
-		return -1;
+		return (-1);
 	f->offset = (u_int) off;
 	f->c = 0;
-	return off;
+	return (off);
 }
 #endif /* !LIBSA_NO_FS_SEEK */
 
@@ -374,9 +355,9 @@ dosfs_seek(struct open_file *fd, off_t offset, int whence)
  * Close open file
  */
 int
-dosfs_close(struct open_file *fd)
+dosfs_close(struct open_file * fd)
 {
-	DOS_FILE *f = (DOS_FILE *)fd->f_fsdata;
+	DOS_FILE *f = (DOS_FILE *) fd->f_fsdata;
 	DOS_FS *fs = f->fs;
 
 	f->fs->links--;
@@ -390,9 +371,9 @@ dosfs_close(struct open_file *fd)
  * Return some stat information on a file.
  */
 int
-dosfs_stat(struct open_file *fd, struct stat *sb)
+dosfs_stat(struct open_file * fd, struct stat * sb)
 {
-	DOS_FILE *f = (DOS_FILE *)fd->f_fsdata;
+	DOS_FILE *f = (DOS_FILE *) fd->f_fsdata;
 
 	/* only important stuff */
 	sb->st_mode = (f->de.deAttributes & ATTR_DIRECTORY) ?
@@ -402,14 +383,14 @@ dosfs_stat(struct open_file *fd, struct stat *sb)
 	sb->st_gid = 0;
 	if ((sb->st_size = fsize(f->fs, &f->de)) == -1)
 		return EINVAL;
-	return 0;
+	return (0);
 }
 
 /*
  * Parse DOS boot sector
  */
 static int
-parsebs(DOS_FS *fs, DOS_BS *bs)
+parsebs(DOS_FS * fs, DOS_BS * bs)
 {
 	u_int   sc;
 
@@ -459,7 +440,7 @@ parsebs(DOS_FS *fs, DOS_BS *bs)
  * Return directory entry from path
  */
 static int
-namede(DOS_FS *fs, const char *path, const struct direntry **dep)
+namede(DOS_FS * fs, const char *path, const struct direntry ** dep)
 {
 	char    name[256];
 	const struct direntry *de;
@@ -494,7 +475,7 @@ namede(DOS_FS *fs, const char *path, const struct direntry **dep)
  * Lookup path segment
  */
 static int
-lookup(DOS_FS *fs, u_int clus, const char *name, const struct direntry **dep)
+lookup(DOS_FS * fs, u_int clus, const char *name, const struct direntry ** dep)
 {
 	static DOS_DIR *dir = NULL;
 	u_char  lfn[261];
@@ -512,7 +493,7 @@ lookup(DOS_FS *fs, u_int clus, const char *name, const struct direntry **dep)
 	if (dir == NULL) {
 		dir = alloc(sizeof(DOS_DIR) * DEPSEC);
 		if (dir == NULL)
-			return ENOMEM;
+			return (ENOMEM);
 	}
 
 	if (!clus && fs->fatsz == 32)
@@ -563,11 +544,11 @@ lookup(DOS_FS *fs, u_int clus, const char *name, const struct direntry **dep)
 								x = ((((x & 1) << 7) | (x >> 1)) +
 								    dir[ent].de.deName[i]) & 0xff;
 							ok = chk == x &&
-							    !strcasecmp(name, (const char *)lfn);
+							    !strcasecmp(name, (const char *) lfn);
 						}
 						if (!ok) {
 							cp_sfn(sfn, &dir[ent].de);
-							ok = !strcasecmp(name, (const char *)sfn);
+							ok = !strcasecmp(name, (const char *) sfn);
 						}
 						if (ok) {
 							*dep = &dir[ent].de;
@@ -590,14 +571,14 @@ lookup(DOS_FS *fs, u_int clus, const char *name, const struct direntry **dep)
 	dealloc(dir, sizeof(DOS_DIR) * DEPSEC);
 	dir = NULL;
  out2:
-	return err;
+	return (err);
 }
 
 /*
  * Copy name from extended directory entry
  */
 static void
-cp_xdnm(u_char *lfn, struct winentry *xde)
+cp_xdnm(u_char * lfn, struct winentry * xde)
 {
 	static const struct {
 		u_int   off;
@@ -615,7 +596,7 @@ cp_xdnm(u_char *lfn, struct winentry *xde)
 
 	lfn += 13 * ((xde->weCnt & WIN_CNT) - 1);
 	for (n = 0; n < 3; n++)
-		for (p = (u_char *)xde + ix[n].off, x = ix[n].dim; x;
+		for (p = (u_char *) xde + ix[n].off, x = ix[n].dim; x;
 		    p += 2, x--) {
 			if ((c = getushort(p)) && (c < 32 || c > 127))
 				c = '?';
@@ -630,7 +611,7 @@ cp_xdnm(u_char *lfn, struct winentry *xde)
  * Copy short filename
  */
 static void
-cp_sfn(u_char *sfn, struct direntry *de)
+cp_sfn(u_char * sfn, struct direntry * de)
 {
 	u_char *p;
 	int     j, i;
@@ -656,7 +637,7 @@ cp_sfn(u_char *sfn, struct direntry *de)
  * Return size of file in bytes
  */
 static  off_t
-fsize(DOS_FS *fs, struct direntry *de)
+fsize(DOS_FS * fs, struct direntry * de)
 {
 	u_long  size;
 	u_int   c;
@@ -664,9 +645,9 @@ fsize(DOS_FS *fs, struct direntry *de)
 
 	if (!(size = getulong(de->deFileSize)) &&
 	    de->deAttributes & ATTR_DIRECTORY) {
-		if (!(c = getushort(de->deStartCluster))) {
+		if (!(c = getushort(de->deStartCluster)))
 			size = fs->dirents * sizeof(struct direntry);
-		} else {
+		else {
 			if ((n = fatcnt(fs, c)) == -1)
 				return n;
 			size = blkbyt(fs, n);
@@ -679,7 +660,7 @@ fsize(DOS_FS *fs, struct direntry *de)
  * Count number of clusters in chain
  */
 static int
-fatcnt(DOS_FS *fs, u_int c)
+fatcnt(DOS_FS * fs, u_int c)
 {
 	int     n;
 
@@ -693,7 +674,7 @@ fatcnt(DOS_FS *fs, u_int c)
  * Get next cluster in cluster chain
  */
 static int
-fatget(DOS_FS *fs, u_int *c)
+fatget(DOS_FS * fs, u_int * c)
 {
 	u_char  buf[4];
 	u_int   x;
@@ -721,7 +702,7 @@ fatend(u_int sz, u_int c)
  * Offset-based I/O primitive
  */
 static int
-ioread(DOS_FS *fs, u_int offset, void *buf, u_int nbyte)
+ioread(DOS_FS * fs, u_int offset, void *buf, u_int nbyte)
 {
 	char   *s;
 	u_int   off, n;
@@ -758,7 +739,7 @@ ioread(DOS_FS *fs, u_int offset, void *buf, u_int nbyte)
  * Buffered sector-based I/O primitive
  */
 static int
-iobuf(DOS_FS *fs, u_int lsec)
+iobuf(DOS_FS * fs, u_int lsec)
 {
 	int     err;
 
@@ -774,7 +755,7 @@ iobuf(DOS_FS *fs, u_int lsec)
  * Sector-based I/O primitive
  */
 static int
-ioget(struct open_file *fd, u_int lsec, void *buf, u_int nsec)
+ioget(struct open_file * fd, u_int lsec, void *buf, u_int nsec)
 {
 	size_t rsize;
 	int err;
@@ -784,5 +765,5 @@ ioget(struct open_file *fd, u_int lsec, void *buf, u_int nsec)
 #endif
 	err = DEV_STRATEGY(fd->f_dev)(fd->f_devdata, F_READ, lsec,
 	    secbyt(nsec), buf, &rsize);
-	return err;
+	return (err);
 }

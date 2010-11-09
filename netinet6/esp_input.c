@@ -1,4 +1,4 @@
-/*	$NetBSD: esp_input.c,v 1.47 2008/04/24 11:38:38 ad Exp $	*/
+/*	$NetBSD: esp_input.c,v 1.41 2006/11/16 01:33:45 christos Exp $	*/
 /*	$KAME: esp_input.c,v 1.60 2001/09/04 08:43:19 itojun Exp $	*/
 
 /*
@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: esp_input.c,v 1.47 2008/04/24 11:38:38 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: esp_input.c,v 1.41 2006/11/16 01:33:45 christos Exp $");
 
 #include "opt_inet.h"
 #include "opt_ipsec.h"
@@ -55,7 +55,7 @@ __KERNEL_RCSID(0, "$NetBSD: esp_input.c,v 1.47 2008/04/24 11:38:38 ad Exp $");
 #include <net/if.h>
 #include <net/route.h>
 #include <net/netisr.h>
-#include <sys/cpu.h>
+#include <machine/cpu.h>
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
@@ -74,7 +74,6 @@ __KERNEL_RCSID(0, "$NetBSD: esp_input.c,v 1.47 2008/04/24 11:38:38 ad Exp $");
 #endif
 
 #include <netinet6/ipsec.h>
-#include <netinet6/ipsec_private.h>
 #include <netinet6/ah.h>
 #include <netinet6/esp.h>
 #include <netkey/key.h>
@@ -92,13 +91,6 @@ __KERNEL_RCSID(0, "$NetBSD: esp_input.c,v 1.47 2008/04/24 11:38:38 ad Exp $");
 		? sizeof(struct newesp) : sizeof(struct esp))
 
 #ifdef INET
-void
-esp4_init(void)
-{
-
-	ipsec4_init();
-}
-
 void
 #if __STDC__
 esp4_input(struct mbuf *m, ...)
@@ -137,7 +129,7 @@ esp4_input(m, va_alist)
 	if (off % 4 != 0 || m->m_pkthdr.len % 4 != 0) {
 		ipseclog((LOG_ERR, "IPv4 ESP input: packet alignment problem "
 			"(off=%d, pktlen=%d)\n", off, m->m_pkthdr.len));
-		IPSEC_STATINC(IPSEC_STAT_IN_INVAL);
+		ipsecstat.in_inval++;
 		goto bad;
 	}
 
@@ -146,7 +138,7 @@ esp4_input(m, va_alist)
 		if (!m) {
 			ipseclog((LOG_DEBUG,
 			    "IPv4 ESP input: can't pullup in esp4_input\n"));
-			IPSEC_STATINC(IPSEC_STAT_IN_INVAL);
+			ipsecstat.in_inval++;
 			goto bad;
 		}
 	}
@@ -167,12 +159,12 @@ esp4_input(m, va_alist)
 	spi = esp->esp_spi;
 
 	if ((sav = key_allocsa(AF_INET,
-	                      (void *)&ip->ip_src, (void *)&ip->ip_dst,
+	                      (caddr_t)&ip->ip_src, (caddr_t)&ip->ip_dst,
 	                      IPPROTO_ESP, spi, sport, dport)) == 0) {
 		ipseclog((LOG_WARNING,
 		    "IPv4 ESP input: no key association found for spi %u\n",
 		    (u_int32_t)ntohl(spi)));
-		IPSEC_STATINC(IPSEC_STAT_IN_NOSA);
+		ipsecstat.in_nosa++;
 		goto bad;
 	}
 	KEYDEBUG(KEYDEBUG_IPSEC_STAMP,
@@ -182,7 +174,7 @@ esp4_input(m, va_alist)
 		ipseclog((LOG_DEBUG,
 		    "IPv4 ESP input: non-mature/dying SA found for spi %u\n",
 		    (u_int32_t)ntohl(spi)));
-		IPSEC_STATINC(IPSEC_STAT_IN_BADSPI);
+		ipsecstat.in_badspi++;
 		goto bad;
 	}
 	algo = esp_algorithm_lookup(sav->alg_enc);
@@ -190,7 +182,7 @@ esp4_input(m, va_alist)
 		ipseclog((LOG_DEBUG, "IPv4 ESP input: "
 		    "unsupported encryption algorithm for spi %u\n",
 		    (u_int32_t)ntohl(spi)));
-		IPSEC_STATINC(IPSEC_STAT_IN_BADSPI);
+		ipsecstat.in_badspi++;
 		goto bad;
 	}
 
@@ -199,7 +191,7 @@ esp4_input(m, va_alist)
 	if (ivlen < 0) {
 		ipseclog((LOG_ERR, "inproper ivlen in IPv4 ESP input: %s %s\n",
 		    ipsec4_logpacketstr(ip, spi), ipsec_logsastr(sav)));
-		IPSEC_STATINC(IPSEC_STAT_IN_INVAL);
+		ipsecstat.in_inval++;
 		goto bad;
 	}
 
@@ -217,7 +209,7 @@ esp4_input(m, va_alist)
 	if (ipsec_chkreplay(ntohl(((struct newesp *)esp)->esp_seq), sav))
 		; /* okey */
 	else {
-		IPSEC_STATINC(IPSEC_STAT_IN_ESPREPLAY);
+		ipsecstat.in_espreplay++;
 		ipseclog((LOG_WARNING,
 		    "replay packet in IPv4 ESP input: %s %s\n",
 		    ipsec4_logpacketstr(ip, spi), ipsec_logsastr(sav)));
@@ -236,30 +228,30 @@ esp4_input(m, va_alist)
 		goto noreplaycheck;
 	siz = (((*sumalgo->sumsiz)(sav) + 3) & ~(4 - 1));
 	if (m->m_pkthdr.len < off + ESPMAXLEN + siz) {
-		IPSEC_STATINC(IPSEC_STAT_IN_INVAL);
+		ipsecstat.in_inval++;
 		goto bad;
 	}
 	if (AH_MAXSUMSIZE < siz) {
 		ipseclog((LOG_DEBUG,
 		    "internal error: AH_MAXSUMSIZE must be larger than %lu\n",
 		    (u_long)siz));
-		IPSEC_STATINC(IPSEC_STAT_IN_INVAL);
+		ipsecstat.in_inval++;
 		goto bad;
 	}
 
-	m_copydata(m, m->m_pkthdr.len - siz, siz, (void *)&sum0[0]);
+	m_copydata(m, m->m_pkthdr.len - siz, siz, (caddr_t)&sum0[0]);
 
 	if (esp_auth(m, off, m->m_pkthdr.len - off - siz, sav, sum)) {
 		ipseclog((LOG_WARNING, "auth fail in IPv4 ESP input: %s %s\n",
 		    ipsec4_logpacketstr(ip, spi), ipsec_logsastr(sav)));
-		IPSEC_STATINC(IPSEC_STAT_IN_ESPAUTHFAIL);
+		ipsecstat.in_espauthfail++;
 		goto bad;
 	}
 
 	if (bcmp(sum0, sum, siz) != 0) {
 		ipseclog((LOG_WARNING, "auth fail in IPv4 ESP input: %s %s\n",
 		    ipsec4_logpacketstr(ip, spi), ipsec_logsastr(sav)));
-		IPSEC_STATINC(IPSEC_STAT_IN_ESPAUTHFAIL);
+		ipsecstat.in_espauthfail++;
 		goto bad;
 	}
 
@@ -272,7 +264,7 @@ esp4_input(m, va_alist)
 	ip->ip_len = htons(ntohs(ip->ip_len) - siz);
 #endif
 	m->m_flags |= M_AUTHIPDGM;
-	IPSEC_STATINC(IPSEC_STAT_IN_ESPAUTHSUCC);
+	ipsecstat.in_espauthsucc++;
     }
 
 	/*
@@ -280,7 +272,7 @@ esp4_input(m, va_alist)
 	 */
 	if ((sav->flags & SADB_X_EXT_OLD) == 0 && sav->replay) {
 		if (ipsec_updatereplay(ntohl(((struct newesp *)esp)->esp_seq), sav)) {
-			IPSEC_STATINC(IPSEC_STAT_IN_ESPREPLAY);
+			ipsecstat.in_espreplay++;
 			goto bad;
 		}
 	}
@@ -302,7 +294,7 @@ noreplaycheck:
 	if (m->m_pkthdr.len < off + esplen + ivlen + sizeof(esptail)) {
 		ipseclog((LOG_WARNING,
 		    "IPv4 ESP input: packet too short\n"));
-		IPSEC_STATINC(IPSEC_STAT_IN_INVAL);
+		ipsecstat.in_inval++;
 		goto bad;
 	}
 
@@ -311,7 +303,7 @@ noreplaycheck:
 		if (!m) {
 			ipseclog((LOG_DEBUG,
 			    "IPv4 ESP input: can't pullup in esp4_input\n"));
-			IPSEC_STATINC(IPSEC_STAT_IN_INVAL);
+			ipsecstat.in_inval++;
 			goto bad;
 		}
 	}
@@ -320,7 +312,7 @@ noreplaycheck:
 	 * pre-compute and cache intermediate key
 	 */
 	if (esp_schedule(algo, sav) != 0) {
-		IPSEC_STATINC(IPSEC_STAT_IN_INVAL);
+		ipsecstat.in_inval++;
 		goto bad;
 	}
 
@@ -334,10 +326,10 @@ noreplaycheck:
 		m = NULL;
 		ipseclog((LOG_ERR, "decrypt fail in IPv4 ESP input: %s\n",
 		    ipsec_logsastr(sav)));
-		IPSEC_STATINC(IPSEC_STAT_IN_INVAL);
+		ipsecstat.in_inval++;
 		goto bad;
 	}
-	IPSEC_STATINC(IPSEC_STAT_IN_ESPHIST + sav->alg_enc);
+	ipsecstat.in_esphist[sav->alg_enc]++;
 
 	m->m_flags |= M_DECRYPTED;
 
@@ -345,7 +337,7 @@ noreplaycheck:
 	 * find the trailer of the ESP.
 	 */
 	m_copydata(m, m->m_pkthdr.len - sizeof(esptail), sizeof(esptail),
-	     (void *)&esptail);
+	     (caddr_t)&esptail);
 	nxt = esptail.esp_nxt;
 	taillen = esptail.esp_padlen + sizeof(esptail);
 
@@ -354,7 +346,7 @@ noreplaycheck:
 		ipseclog((LOG_WARNING,
 		    "bad pad length in IPv4 ESP input: %s %s\n",
 		    ipsec4_logpacketstr(ip, spi), ipsec_logsastr(sav)));
-		IPSEC_STATINC(IPSEC_STAT_IN_INVAL);
+		ipsecstat.in_inval++;
 		goto bad;
 	}
 
@@ -383,7 +375,7 @@ noreplaycheck:
 		if (m->m_len < sizeof(*ip)) {
 			m = m_pullup(m, sizeof(*ip));
 			if (!m) {
-				IPSEC_STATINC(IPSEC_STAT_IN_INVAL);
+				ipsecstat.in_inval++;
 				goto bad;
 			}
 		}
@@ -391,24 +383,24 @@ noreplaycheck:
 		/* ECN consideration. */
 		ip_ecn_egress(ip4_ipsec_ecn, &tos, &ip->ip_tos);
 		if (!key_checktunnelsanity(sav, AF_INET,
-			    (void *)&ip->ip_src, (void *)&ip->ip_dst)) {
+			    (caddr_t)&ip->ip_src, (caddr_t)&ip->ip_dst)) {
 			ipseclog((LOG_ERR, "ipsec tunnel address mismatch "
 			    "in IPv4 ESP input: %s %s\n",
 			    ipsec4_logpacketstr(ip, spi), ipsec_logsastr(sav)));
-			IPSEC_STATINC(IPSEC_STAT_IN_INVAL);
+			ipsecstat.in_inval++;
 			goto bad;
 		}
 
 		key_sa_recordxfer(sav, m);
 		if (ipsec_addhist(m, IPPROTO_ESP, spi) != 0 ||
 		    ipsec_addhist(m, IPPROTO_IPV4, 0) != 0) {
-			IPSEC_STATINC(IPSEC_STAT_IN_NOMEM);
+			ipsecstat.in_nomem++;
 			goto bad;
 		}
 
 		s = splnet();
 		if (IF_QFULL(&ipintrq)) {
-			IPSEC_STATINC(IPSEC_STAT_IN_INVAL);
+			ipsecstat.in_inval++;
 			splx(s);
 			goto bad;
 		}
@@ -428,7 +420,7 @@ noreplaycheck:
 		stripsiz = esplen + ivlen;
 
 		ip = mtod(m, struct ip *);
-		ovbcopy((void *)ip, (void *)(((u_char *)ip) + stripsiz), off);
+		ovbcopy((caddr_t)ip, (caddr_t)(((u_char *)ip) + stripsiz), off);
 		m->m_data += stripsiz;
 		m->m_len -= stripsiz;
 		m->m_pkthdr.len -= stripsiz;
@@ -443,14 +435,14 @@ noreplaycheck:
 
 		key_sa_recordxfer(sav, m);
 		if (ipsec_addhist(m, IPPROTO_ESP, spi) != 0) {
-			IPSEC_STATINC(IPSEC_STAT_IN_NOMEM);
+			ipsecstat.in_nomem++;
 			goto bad;
 		}
 
 		if (nxt != IPPROTO_DONE) {
 			if ((inetsw[ip_protox[nxt]].pr_flags & PR_LASTHDR) != 0 &&
 			    ipsec4_in_reject(m, NULL)) {
-				IPSEC_STATINC(IPSEC_STAT_IN_POLVIO);
+				ipsecstat.in_polvio++;
 				goto bad;
 			}
 			(*inetsw[ip_protox[nxt]].pr_input)(m, off, nxt);
@@ -464,7 +456,7 @@ noreplaycheck:
 			printf("DP esp4_input call free SA:%p\n", sav));
 		key_freesav(sav);
 	}
-	IPSEC_STATINC(IPSEC_STAT_IN_SUCCESS);
+	ipsecstat.in_success++;
 	return;
 
 bad:
@@ -480,7 +472,10 @@ bad:
 
 /* assumes that ip header and esp header are contiguous on mbuf */
 void *
-esp4_ctlinput(int cmd, const struct sockaddr *sa, void *v)
+esp4_ctlinput(cmd, sa, v)
+	int cmd;
+	struct sockaddr *sa;
+	void *v;
 {
 	struct ip *ip = v;
 	struct esp *esp;
@@ -497,10 +492,10 @@ esp4_ctlinput(int cmd, const struct sockaddr *sa, void *v)
 		 * Check to see if we have a valid SA corresponding to
 		 * the address in the ICMP message payload.
 		 */
-		esp = (struct esp *)((char *)ip + (ip->ip_hl << 2));
+		esp = (struct esp *)((caddr_t)ip + (ip->ip_hl << 2));
 		if ((sav = key_allocsa(AF_INET,
-				       (void *) &ip->ip_src,
-				       (void *) &ip->ip_dst,
+				       (caddr_t) &ip->ip_src,
+				       (caddr_t) &ip->ip_dst,
 				       IPPROTO_ESP, esp->esp_spi,
 				       0, 0)) == NULL)
 			return NULL;
@@ -520,7 +515,7 @@ esp4_ctlinput(int cmd, const struct sockaddr *sa, void *v)
 		 * ICMP header, recalculate the new MTU, and create the
 		 * corresponding routing entry.
 		 */
-		icp = (struct icmp *)((char *)ip -
+		icp = (struct icmp *)((caddr_t)ip -
 		    offsetof(struct icmp, icmp_ip));
 		icmp_mtudisc(icp, ip->ip_dst);
 
@@ -533,13 +528,6 @@ esp4_ctlinput(int cmd, const struct sockaddr *sa, void *v)
 #endif /* INET */
 
 #ifdef INET6
-void
-esp6_init(void)
-{
-
-	ipsec6_init();
-}
-
 int
 esp6_input(struct mbuf **mp, int *offp, int proto)
 {
@@ -561,13 +549,13 @@ esp6_input(struct mbuf **mp, int *offp, int proto)
 	if (off % 4 != 0 || m->m_pkthdr.len % 4 != 0) {
 		ipseclog((LOG_ERR, "IPv6 ESP input: packet alignment problem "
 			"(off=%d, pktlen=%d)\n", off, m->m_pkthdr.len));
-		IPSEC6_STATINC(IPSEC_STAT_IN_INVAL);
+		ipsec6stat.in_inval++;
 		goto bad;
 	}
 
 	IP6_EXTHDR_GET(esp, struct esp *, m, off, ESPMAXLEN);
 	if (esp == NULL) {
-		IPSEC6_STATINC(IPSEC_STAT_IN_INVAL);
+		ipsec6stat.in_inval++;
 		return IPPROTO_DONE;
 	}
 	ip6 = mtod(m, struct ip6_hdr *);
@@ -575,7 +563,7 @@ esp6_input(struct mbuf **mp, int *offp, int proto)
 	if (ntohs(ip6->ip6_plen) == 0) {
 		ipseclog((LOG_ERR, "IPv6 ESP input: "
 		    "ESP with IPv6 jumbogram is not supported.\n"));
-		IPSEC6_STATINC(IPSEC_STAT_IN_INVAL);
+		ipsec6stat.in_inval++;
 		goto bad;
 	}
 
@@ -583,12 +571,12 @@ esp6_input(struct mbuf **mp, int *offp, int proto)
 	spi = esp->esp_spi;
 
 	if ((sav = key_allocsa(AF_INET6,
-	                      (void *)&ip6->ip6_src, (void *)&ip6->ip6_dst,
+	                      (caddr_t)&ip6->ip6_src, (caddr_t)&ip6->ip6_dst,
 	                      IPPROTO_ESP, spi, 0, 0)) == 0) {
 		ipseclog((LOG_WARNING,
 		    "IPv6 ESP input: no key association found for spi %u\n",
 		    (u_int32_t)ntohl(spi)));
-		IPSEC6_STATINC(IPSEC_STAT_IN_NOSA);
+		ipsec6stat.in_nosa++;
 		goto bad;
 	}
 	KEYDEBUG(KEYDEBUG_IPSEC_STAMP,
@@ -598,7 +586,7 @@ esp6_input(struct mbuf **mp, int *offp, int proto)
 		ipseclog((LOG_DEBUG,
 		    "IPv6 ESP input: non-mature/dying SA found for spi %u\n",
 		    (u_int32_t)ntohl(spi)));
-		IPSEC6_STATINC(IPSEC_STAT_IN_BADSPI);
+		ipsec6stat.in_badspi++;
 		goto bad;
 	}
 	algo = esp_algorithm_lookup(sav->alg_enc);
@@ -606,7 +594,7 @@ esp6_input(struct mbuf **mp, int *offp, int proto)
 		ipseclog((LOG_DEBUG, "IPv6 ESP input: "
 		    "unsupported encryption algorithm for spi %u\n",
 		    (u_int32_t)ntohl(spi)));
-		IPSEC6_STATINC(IPSEC_STAT_IN_BADSPI);
+		ipsec6stat.in_badspi++;
 		goto bad;
 	}
 
@@ -615,7 +603,7 @@ esp6_input(struct mbuf **mp, int *offp, int proto)
 	if (ivlen < 0) {
 		ipseclog((LOG_ERR, "inproper ivlen in IPv6 ESP input: %s %s\n",
 		    ipsec6_logpacketstr(ip6, spi), ipsec_logsastr(sav)));
-		IPSEC6_STATINC(IPSEC_STAT_IN_BADSPI);
+		ipsec6stat.in_badspi++;
 		goto bad;
 	}
 
@@ -633,7 +621,7 @@ esp6_input(struct mbuf **mp, int *offp, int proto)
 	if (ipsec_chkreplay(ntohl(((struct newesp *)esp)->esp_seq), sav))
 		; /* okey */
 	else {
-		IPSEC6_STATINC(IPSEC_STAT_IN_ESPREPLAY);
+		ipsec6stat.in_espreplay++;
 		ipseclog((LOG_WARNING,
 		    "replay packet in IPv6 ESP input: %s %s\n",
 		    ipsec6_logpacketstr(ip6, spi), ipsec_logsastr(sav)));
@@ -652,30 +640,30 @@ esp6_input(struct mbuf **mp, int *offp, int proto)
 		goto noreplaycheck;
 	siz = (((*sumalgo->sumsiz)(sav) + 3) & ~(4 - 1));
 	if (m->m_pkthdr.len < off + ESPMAXLEN + siz) {
-		IPSEC6_STATINC(IPSEC_STAT_IN_INVAL);
+		ipsec6stat.in_inval++;
 		goto bad;
 	}
 	if (AH_MAXSUMSIZE < siz) {
 		ipseclog((LOG_DEBUG,
 		    "internal error: AH_MAXSUMSIZE must be larger than %lu\n",
 		    (u_long)siz));
-		IPSEC6_STATINC(IPSEC_STAT_IN_INVAL);
+		ipsec6stat.in_inval++;
 		goto bad;
 	}
 
-	m_copydata(m, m->m_pkthdr.len - siz, siz, (void *)&sum0[0]);
+	m_copydata(m, m->m_pkthdr.len - siz, siz, (caddr_t)&sum0[0]);
 
 	if (esp_auth(m, off, m->m_pkthdr.len - off - siz, sav, sum)) {
 		ipseclog((LOG_WARNING, "auth fail in IPv6 ESP input: %s %s\n",
 		    ipsec6_logpacketstr(ip6, spi), ipsec_logsastr(sav)));
-		IPSEC6_STATINC(IPSEC_STAT_IN_ESPAUTHFAIL);
+		ipsec6stat.in_espauthfail++;
 		goto bad;
 	}
 
 	if (bcmp(sum0, sum, siz) != 0) {
 		ipseclog((LOG_WARNING, "auth fail in IPv6 ESP input: %s %s\n",
 		    ipsec6_logpacketstr(ip6, spi), ipsec_logsastr(sav)));
-		IPSEC6_STATINC(IPSEC_STAT_IN_ESPAUTHFAIL);
+		ipsec6stat.in_espauthfail++;
 		goto bad;
 	}
 
@@ -685,7 +673,7 @@ esp6_input(struct mbuf **mp, int *offp, int proto)
 	ip6->ip6_plen = htons(ntohs(ip6->ip6_plen) - siz);
 
 	m->m_flags |= M_AUTHIPDGM;
-	IPSEC6_STATINC(IPSEC_STAT_IN_ESPAUTHSUCC);
+	ipsec6stat.in_espauthsucc++;
     }
 
 	/*
@@ -693,7 +681,7 @@ esp6_input(struct mbuf **mp, int *offp, int proto)
 	 */
 	if ((sav->flags & SADB_X_EXT_OLD) == 0 && sav->replay) {
 		if (ipsec_updatereplay(ntohl(((struct newesp *)esp)->esp_seq), sav)) {
-			IPSEC6_STATINC(IPSEC_STAT_IN_ESPREPLAY);
+			ipsec6stat.in_espreplay++;
 			goto bad;
 		}
 	}
@@ -715,13 +703,13 @@ noreplaycheck:
 	if (m->m_pkthdr.len < off + esplen + ivlen + sizeof(esptail)) {
 		ipseclog((LOG_WARNING,
 		    "IPv6 ESP input: packet too short\n"));
-		IPSEC6_STATINC(IPSEC_STAT_IN_INVAL);
+		ipsec6stat.in_inval++;
 		goto bad;
 	}
 
 	IP6_EXTHDR_GET(esp, struct esp *, m, off, esplen + ivlen);
 	if (esp == NULL) {
-		IPSEC6_STATINC(IPSEC_STAT_IN_INVAL);
+		ipsec6stat.in_inval++;
 		m = NULL;
 		goto bad;
 	}
@@ -731,7 +719,7 @@ noreplaycheck:
 	 * pre-compute and cache intermediate key
 	 */
 	if (esp_schedule(algo, sav) != 0) {
-		IPSEC6_STATINC(IPSEC_STAT_IN_INVAL);
+		ipsec6stat.in_inval++;
 		goto bad;
 	}
 
@@ -745,10 +733,10 @@ noreplaycheck:
 		m = NULL;
 		ipseclog((LOG_ERR, "decrypt fail in IPv6 ESP input: %s\n",
 		    ipsec_logsastr(sav)));
-		IPSEC6_STATINC(IPSEC_STAT_IN_INVAL);
+		ipsec6stat.in_inval++;
 		goto bad;
 	}
-	IPSEC6_STATINC(IPSEC_STAT_IN_ESPHIST + sav->alg_enc);
+	ipsec6stat.in_esphist[sav->alg_enc]++;
 
 	m->m_flags |= M_DECRYPTED;
 
@@ -756,7 +744,7 @@ noreplaycheck:
 	 * find the trailer of the ESP.
 	 */
 	m_copydata(m, m->m_pkthdr.len - sizeof(esptail), sizeof(esptail),
-	     (void *)&esptail);
+	     (caddr_t)&esptail);
 	nxt = esptail.esp_nxt;
 	taillen = esptail.esp_padlen + sizeof(esptail);
 
@@ -765,7 +753,7 @@ noreplaycheck:
 		ipseclog((LOG_WARNING,
 		    "bad pad length in IPv6 ESP input: %s %s\n",
 		    ipsec6_logpacketstr(ip6, spi), ipsec_logsastr(sav)));
-		IPSEC6_STATINC(IPSEC_STAT_IN_INVAL);
+		ipsec6stat.in_inval++;
 		goto bad;
 	}
 
@@ -789,7 +777,7 @@ noreplaycheck:
 		if (m->m_len < sizeof(*ip6)) {
 			m = m_pullup(m, sizeof(*ip6));
 			if (!m) {
-				IPSEC6_STATINC(IPSEC_STAT_IN_INVAL);
+				ipsec6stat.in_inval++;
 				goto bad;
 			}
 		}
@@ -797,25 +785,25 @@ noreplaycheck:
 		/* ECN consideration. */
 		ip6_ecn_egress(ip6_ipsec_ecn, &flowinfo, &ip6->ip6_flow);
 		if (!key_checktunnelsanity(sav, AF_INET6,
-			    (void *)&ip6->ip6_src, (void *)&ip6->ip6_dst)) {
+			    (caddr_t)&ip6->ip6_src, (caddr_t)&ip6->ip6_dst)) {
 			ipseclog((LOG_ERR, "ipsec tunnel address mismatch "
 			    "in IPv6 ESP input: %s %s\n",
 			    ipsec6_logpacketstr(ip6, spi),
 			    ipsec_logsastr(sav)));
-			IPSEC6_STATINC(IPSEC_STAT_IN_INVAL);
+			ipsec6stat.in_inval++;
 			goto bad;
 		}
 
 		key_sa_recordxfer(sav, m);
 		if (ipsec_addhist(m, IPPROTO_ESP, spi) != 0 ||
 		    ipsec_addhist(m, IPPROTO_IPV6, 0) != 0) {
-			IPSEC6_STATINC(IPSEC_STAT_IN_NOMEM);
+			ipsec6stat.in_nomem++;
 			goto bad;
 		}
 
 		s = splnet();
 		if (IF_QFULL(&ip6intrq)) {
-			IPSEC6_STATINC(IPSEC_STAT_IN_INVAL);
+			ipsec6stat.in_inval++;
 			splx(s);
 			goto bad;
 		}
@@ -843,7 +831,7 @@ noreplaycheck:
 
 		ip6 = mtod(m, struct ip6_hdr *);
 		if (m->m_len >= stripsiz + off) {
-			(void)memmove((char *)ip6 + stripsiz, ip6, off);
+			ovbcopy((caddr_t)ip6, ((caddr_t)ip6) + stripsiz, off);
 			m->m_data += stripsiz;
 			m->m_len -= stripsiz;
 			m->m_pkthdr.len -= stripsiz;
@@ -870,7 +858,7 @@ noreplaycheck:
 
 		key_sa_recordxfer(sav, m);
 		if (ipsec_addhist(m, IPPROTO_ESP, spi) != 0) {
-			IPSEC6_STATINC(IPSEC_STAT_IN_NOMEM);
+			ipsec6stat.in_nomem++;
 			goto bad;
 		}
 	}
@@ -883,7 +871,7 @@ noreplaycheck:
 			printf("DP esp6_input call free SA:%p\n", sav));
 		key_freesav(sav);
 	}
-	IPSEC6_STATINC(IPSEC_STAT_IN_SUCCESS);
+	ipsec6stat.in_success++;
 	return nxt;
 
 bad:
@@ -897,8 +885,11 @@ bad:
 	return IPPROTO_DONE;
 }
 
-void *
-esp6_ctlinput(int cmd, const struct sockaddr *sa, void *d)
+void
+esp6_ctlinput(cmd, sa, d)
+	int cmd;
+	struct sockaddr *sa;
+	void *d;
 {
 	const struct newesp *espp;
 	struct newesp esp;
@@ -907,13 +898,13 @@ esp6_ctlinput(int cmd, const struct sockaddr *sa, void *d)
 	struct ip6_hdr *ip6;
 	struct mbuf *m;
 	int off;
-	const struct sockaddr_in6 *sa6_src, *sa6_dst;
+	struct sockaddr_in6 *sa6_src, *sa6_dst;
 
 	if (sa->sa_family != AF_INET6 ||
 	    sa->sa_len != sizeof(struct sockaddr_in6))
-		return NULL;
+		return;
 	if ((unsigned)cmd >= PRC_NCMDS)
-		return NULL;
+		return;
 
 	/* if the parameter is from icmp6, decode it. */
 	if (d != NULL) {
@@ -953,17 +944,17 @@ esp6_ctlinput(int cmd, const struct sockaddr *sa, void *d)
 
 		/* check if we can safely examine src and dst ports */
 		if (m->m_pkthdr.len < off + sizeof(esp))
-			return NULL;
+			return;
 
 		if (m->m_len < off + sizeof(esp)) {
 			/*
 			 * this should be rare case,
 			 * so we compromise on this copy...
 			 */
-			m_copydata(m, off, sizeof(esp), (void *)&esp);
+			m_copydata(m, off, sizeof(esp), (caddr_t)&esp);
 			espp = &esp;
 		} else
-			espp = (struct newesp*)(mtod(m, char *) + off);
+			espp = (struct newesp*)(mtod(m, caddr_t) + off);
 
 		if (cmd == PRC_MSGSIZE) {
 			int valid = 0;
@@ -973,10 +964,10 @@ esp6_ctlinput(int cmd, const struct sockaddr *sa, void *d)
 			 * the address in the ICMP message payload.
 			 */
 			sa6_src = ip6cp->ip6c_src;
-			sa6_dst = (const struct sockaddr_in6 *)sa;
+			sa6_dst = (struct sockaddr_in6 *)sa;
 			sav = key_allocsa(AF_INET6,
-					  (const void *)&sa6_src->sin6_addr,
-					  (const void *)&sa6_dst->sin6_addr,
+					  (caddr_t)&sa6_src->sin6_addr,
+					  (caddr_t)&sa6_dst->sin6_addr,
 					  IPPROTO_ESP, espp->esp_spi, 0, 0);
 			if (sav) {
 				if (sav->state == SADB_SASTATE_MATURE ||
@@ -999,7 +990,5 @@ esp6_ctlinput(int cmd, const struct sockaddr *sa, void *d)
 	} else {
 		/* we normally notify any pcb here */
 	}
-
-	return NULL;
 }
 #endif /* INET6 */

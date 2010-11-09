@@ -1,4 +1,4 @@
-/*	$NetBSD: bpf_filter.c,v 1.35 2008/08/20 13:01:54 joerg Exp $	*/
+/*	$NetBSD: bpf_filter.c,v 1.32 2006/10/04 20:47:43 oster Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997
@@ -37,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: bpf_filter.c,v 1.35 2008/08/20 13:01:54 joerg Exp $");
+__KERNEL_RCSID(0, "$NetBSD: bpf_filter.c,v 1.32 2006/10/04 20:47:43 oster Exp $");
 
 #if 0
 #if !(defined(lint) || defined(KERNEL))
@@ -48,10 +48,25 @@ static const char rcsid[] =
 
 #include <sys/param.h>
 #include <sys/time.h>
-#include <sys/endian.h>
 
-#define EXTRACT_SHORT(p)	be16dec(p)
-#define EXTRACT_LONG(p)		be32dec(p)
+#if !defined(UNALIGNED_ACCESS)
+#define BPF_ALIGN
+#endif
+
+#ifndef BPF_ALIGN
+#define EXTRACT_SHORT(p)	((uint16_t)ntohs(*(uint16_t *)p))
+#define EXTRACT_LONG(p)		(ntohl(*(uint32_t *)p))
+#else
+#define EXTRACT_SHORT(p)			\
+	((uint16_t)				\
+		((uint16_t)*((u_char *)p+0)<<8|	\
+		 (uint16_t)*((u_char *)p+1)<<0))
+#define EXTRACT_LONG(p)				\
+		((uint32_t)*((u_char *)p+0)<<24|\
+		 (uint32_t)*((u_char *)p+1)<<16|\
+		 (uint32_t)*((u_char *)p+2)<<8|	\
+		 (uint32_t)*((u_char *)p+3)<<0)
+#endif
 
 #ifdef _KERNEL
 #include <sys/mbuf.h>
@@ -137,7 +152,7 @@ u_int
 bpf_filter(struct bpf_insn *pc, u_char *p, u_int wirelen, u_int buflen)
 {
 	uint32_t A, X, k;
-	uint32_t mem[BPF_MEMWORDS];
+	int32_t mem[BPF_MEMWORDS];
 
 	if (pc == 0)
 		/*
@@ -453,10 +468,9 @@ bpf_filter(struct bpf_insn *pc, u_char *p, u_int wirelen, u_int buflen)
 /*
  * Return true if the 'fcode' is a valid filter program.
  * The constraints are that each jump be forward and to a valid
- * code, that memory accesses are within valid ranges (to the
- * extent that this can be checked statically; loads of packet
- * data have to be, and are, also checked at run time), and that
- * the code terminates with either an accept or reject.
+ * code.  The code must terminate with either an accept or reject.
+ * 'valid' is an array for use by the routine (it must be at least
+ * 'len' bytes long).
  *
  * The kernel needs to be able to verify an application's filter code.
  * Otherwise, a bogus program could easily crash the system.
@@ -467,6 +481,7 @@ bpf_validate(struct bpf_insn *f, int len)
 	u_int i, from;
 	struct bpf_insn *p;
 
+ 
 	if (len < 1 || len > BPF_MAXINSNS)
 		return 0;
 
@@ -502,7 +517,6 @@ bpf_validate(struct bpf_insn *f, int len)
 			switch (BPF_OP(p->code)) {
 			case BPF_ADD:
 			case BPF_SUB:
-			case BPF_MUL:
 			case BPF_OR:
 			case BPF_AND:
 			case BPF_LSH:

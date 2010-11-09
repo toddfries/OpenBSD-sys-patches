@@ -1,4 +1,4 @@
-/*	$NetBSD: hfs_vfsops.c,v 1.20 2008/12/17 20:51:35 cegger Exp $	*/
+/*	$NetBSD: hfs_vfsops.c,v 1.26 2010/06/24 13:03:09 hannken Exp $	*/
 
 /*-
  * Copyright (c) 2005, 2007 The NetBSD Foundation, Inc.
@@ -99,7 +99,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: hfs_vfsops.c,v 1.20 2008/12/17 20:51:35 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: hfs_vfsops.c,v 1.26 2010/06/24 13:03:09 hannken Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_compat_netbsd.h"
@@ -198,7 +198,6 @@ int
 hfs_mount(struct mount *mp, const char *path, void *data, size_t *data_len)
 {
 	struct lwp *l = curlwp;
-	struct nameidata nd;
 	struct hfs_args *args = data;
 	struct vnode *devvp;
 	struct hfsmount *hmp;
@@ -237,10 +236,10 @@ hfs_mount(struct mount *mp, const char *path, void *data, size_t *data_len)
 		/*
 		 * Look up the name and verify that it's sane.
 		 */
-		NDINIT(&nd, LOOKUP, FOLLOW, UIO_USERSPACE, args->fspec);
-		if ((error = namei(&nd)) != 0)
+		error = namei_simple_user(args->fspec,
+					NSM_FOLLOW_NOEMULROOT, &devvp);
+		if (error != 0)
 			return error;
-		devvp = nd.ni_vp;
 	
 		if (!update) {
 			/*
@@ -275,17 +274,20 @@ hfs_mount(struct mount *mp, const char *path, void *data, size_t *data_len)
 	/*
 	 * If mount by non-root, then verify that user has necessary
 	 * permissions on the device.
+	 *
+	 * Permission to update a mount is checked higher, so here we presume
+	 * updating the mount is okay (for example, as far as securelevel goes)
+	 * which leaves us with the normal check.
 	 */
-	if (error == 0 && kauth_authorize_generic(l->l_cred,
-            KAUTH_GENERIC_ISSUSER, NULL) != 0) {
+	if (error == 0) {
 		accessmode = VREAD;
 		if (update ?
 			(mp->mnt_iflag & IMNT_WANTRDWR) != 0 :
 			(mp->mnt_flag & MNT_RDONLY) == 0)
 			accessmode |= VWRITE;
 		vn_lock(devvp, LK_EXCLUSIVE | LK_RETRY);
-		error = VOP_ACCESS(devvp, accessmode, l->l_cred);
-		VOP_UNLOCK(devvp, 0);
+		error = genfs_can_mount(devvp, accessmode, l->l_cred);
+		VOP_UNLOCK(devvp);
 	}
 
 	if (error != 0)
@@ -436,7 +438,7 @@ hfs_unmount(struct mount *mp, int mntflags)
 	cbargs.closevol = (void*)&argsclose;
 	hfslib_close_volume(&hmp->hm_vol, &cbargs);
 	
-	vput(hmp->hm_devvp);
+	vrele(hmp->hm_devvp);
 
 	free(hmp, M_HFSMNT);
 	mp->mnt_data = NULL;
@@ -616,7 +618,7 @@ hfs_vget_internal(struct mount *mp, ino_t ino, uint8_t fork,
 	hfs_vinit(mp, hfs_specop_p, hfs_fifoop_p, &vp);
 
 	hnode->h_devvp = hmp->hm_devvp;	
-	VREF(hnode->h_devvp);  /* Increment the ref count to the volume's device. */
+	vref(hnode->h_devvp);  /* Increment the ref count to the volume's device. */
 
 	/* Make sure UVM has allocated enough memory. (?) */
 	if (hnode->h_rec.u.rec_type == HFS_REC_FILE) {

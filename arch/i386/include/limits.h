@@ -1,4 +1,4 @@
-/*	$NetBSD: limits.h,v 1.21 2008/10/26 06:57:30 mrg Exp $	*/
+/*	$NetBSD: limits.h,v 1.18 2006/09/23 20:41:20 elad Exp $	*/
 
 /*
  * Copyright (c) 1988 The Regents of the University of California.
@@ -31,8 +31,8 @@
  *	@(#)limits.h	7.2 (Berkeley) 6/28/90
  */
 
-#ifndef	_I386_LIMITS_H_
-#define	_I386_LIMITS_H_
+#ifndef	_MACHINE_LIMITS_H_
+#define	_MACHINE_LIMITS_H_
 
 #include <sys/featuretest.h>
 
@@ -42,11 +42,11 @@
 #define	SCHAR_MAX	0x7f		/* max value for a signed char */
 #define SCHAR_MIN	(-0x7f-1)	/* min value for a signed char */
 
-#define	UCHAR_MAX	0xff		/* max value for an unsigned char */
+#define	UCHAR_MAX	0xffU		/* max value for an unsigned char */
 #define	CHAR_MAX	0x7f		/* max value for a char */
 #define	CHAR_MIN	(-0x7f-1)	/* min value for a char */
 
-#define	USHRT_MAX	0xffff		/* max value for an unsigned short */
+#define	USHRT_MAX	0xffffU		/* max value for an unsigned short */
 #define	SHRT_MAX	0x7fff		/* max value for a short */
 #define SHRT_MIN        (-0x7fff-1)     /* min value for a short */
 
@@ -92,4 +92,4 @@
 #define FLT_MIN		1.17549435E-38F
 #endif
 
-#endif /* _I386_LIMITS_H_ */
+#endif /* _MACHINE_LIMITS_H_ */

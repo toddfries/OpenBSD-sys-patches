@@ -1,4 +1,4 @@
-/*	$NetBSD: if_media.c,v 1.29 2008/06/15 16:33:58 christos Exp $	*/
+/*	$NetBSD: if_media.c,v 1.25 2005/12/11 12:24:51 christos Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -76,7 +83,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_media.c,v 1.29 2008/06/15 16:33:58 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_media.c,v 1.25 2005/12/11 12:24:51 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -117,12 +124,6 @@ ifmedia_init(struct ifmedia *ifm, int dontcare_mask,
 	ifm->ifm_mask = dontcare_mask;		/* IF don't-care bits */
 	ifm->ifm_change = change_callback;
 	ifm->ifm_status = status_callback;
-}
-
-int
-ifmedia_change(struct ifmedia *ifm, struct ifnet *ifp)
-{
-	return (*ifm->ifm_change)(ifp);
 }
 
 /*
@@ -233,20 +234,12 @@ ifmedia_ioctl(struct ifnet *ifp, struct ifreq *ifr, struct ifmedia *ifm,
 	struct ifmedia_entry *match;
 	struct ifmediareq *ifmr = (struct ifmediareq *) ifr;
 	int error = 0;
-#ifdef OSIOCSIFMEDIA
-	struct oifreq *oifr = (struct oifreq *)ifr;
-#endif
 
 	if (ifp == NULL || ifr == NULL || ifm == NULL)
 		return (EINVAL);
 
 	switch (cmd) {
 
-#ifdef OSIOCSIFMEDIA
-	case OSIOCSIFMEDIA:
-		ifr->ifr_media = oifr->ifr_media;
-		/*FALLTHROUGH*/
-#endif
 	/*
 	 * Set the current media.
 	 */
@@ -295,7 +288,7 @@ ifmedia_ioctl(struct ifnet *ifp, struct ifreq *ifr, struct ifmedia *ifm,
 		oldmedia = ifm->ifm_media;
 		ifm->ifm_cur = match;
 		ifm->ifm_media = newmedia;
-		error = ifmedia_change(ifm, ifp);
+		error = (*ifm->ifm_change)(ifp);
 		if (error) {
 			ifm->ifm_cur = oldentry;
 			ifm->ifm_media = oldmedia;
@@ -318,7 +311,6 @@ ifmedia_ioctl(struct ifnet *ifp, struct ifreq *ifr, struct ifmedia *ifm,
 		    ifm->ifm_cur->ifm_media : IFM_NONE;
 		ifmr->ifm_mask = ifm->ifm_mask;
 		ifmr->ifm_status = 0;
-		/* ifmedia_status */
 		(*ifm->ifm_status)(ifp, ifmr);
 
 		/*
@@ -408,19 +400,6 @@ ifmedia_delete_instance(struct ifmedia *ifm, u_int inst)
 		}
 	}
 }
-
-void
-ifmedia_removeall(struct ifmedia *ifm)
-{
-	struct ifmedia_entry *ife, *nife;
-
-	for (ife = TAILQ_FIRST(&ifm->ifm_list); ife != NULL; ife = nife) {
-		nife = TAILQ_NEXT(ife, ifm_list);
-		TAILQ_REMOVE(&ifm->ifm_list, ife, ifm_list);
-		free(ife, M_IFMEDIA);
-	}
-}
-
 
 /*
  * Compute the interface `baudrate' from the media, for the interface

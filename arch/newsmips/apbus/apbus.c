@@ -1,4 +1,4 @@
-/*	$NetBSD: apbus.c,v 1.21 2008/04/09 15:40:30 tsutsui Exp $	*/
+/*	$NetBSD: apbus.c,v 1.20 2005/12/11 12:18:24 christos Exp $	*/
 
 /*-
  * Copyright (C) 1999 SHIMIZU Ryo.  All rights reserved.
@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: apbus.c,v 1.21 2008/04/09 15:40:30 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: apbus.c,v 1.20 2005/12/11 12:18:24 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -44,8 +44,8 @@ __KERNEL_RCSID(0, "$NetBSD: apbus.c,v 1.21 2008/04/09 15:40:30 tsutsui Exp $");
 #include <machine/intr.h>
 #include <newsmips/apbus/apbusvar.h>
 
-static int  apbusmatch(device_t, cfdata_t, void *);
-static void apbusattach(device_t, device_t, void *);
+static int  apbusmatch(struct device *, struct cfdata *, void *);
+static void apbusattach(struct device *, struct device *, void *);
 static int apbusprint(void *, const char *);
 #if 0
 static void *aptokseg0 (void *);
@@ -70,14 +70,18 @@ static void apbus_dmamap_sync(bus_dma_tag_t, bus_dmamap_t, bus_addr_t,
 
 #define	MAXAPDEVNUM	32
 
-CFATTACH_DECL_NEW(ap, 0,
+struct apbus_softc {
+	struct device apbs_dev;
+};
+
+CFATTACH_DECL(ap, sizeof(struct apbus_softc),
     apbusmatch, apbusattach, NULL, NULL);
 
 #define	NLEVEL	2
 static struct newsmips_intr apintr_tab[NLEVEL];
 
 static int
-apbusmatch(device_t parent, cfdata_t cf, void *aux)
+apbusmatch(struct device *parent, struct cfdata *cfdata, void *aux)
 {
 	struct confargs *ca = aux;
 
@@ -89,7 +93,7 @@ apbusmatch(device_t parent, cfdata_t cf, void *aux)
 
 
 static void
-apbusattach(device_t parent, device_t self, void *aux)
+apbusattach(struct device *parent, struct device *self, void *aux)
 {
 	struct apbus_attach_args child;
 	struct apbus_dev *apdev;
@@ -97,12 +101,12 @@ apbusattach(device_t parent, device_t self, void *aux)
 	struct newsmips_intr *ip;
 	int i;
 
-	*(volatile uint32_t *)(NEWS5000_APBUS_INTST) = 0xffffffff;
-	*(volatile uint32_t *)(NEWS5000_APBUS_INTMSK) = 0xffffffff;
-	*(volatile uint32_t *)(NEWS5000_APBUS_CTRL) = 0x00000004;
-	*(volatile uint32_t *)(NEWS5000_APBUS_DMA) = 0xffffffff;
+	*(volatile u_int *)(NEWS5000_APBUS_INTST) = 0xffffffff;
+	*(volatile u_int *)(NEWS5000_APBUS_INTMSK) = 0xffffffff;
+	*(volatile u_int *)(NEWS5000_APBUS_CTRL) = 0x00000004;
+	*(volatile u_int *)(NEWS5000_APBUS_DMA) = 0xffffffff;
 
-	aprint_normal("\n");
+	printf("\n");
 
 	for (i = 0; i < NLEVEL; i++) {
 		ip = &apintr_tab[i];
@@ -152,14 +156,15 @@ apbusprint(void *aux, const char *pnp)
 
 	if (pnp)
 		aprint_normal("%s at %s slot%d addr 0x%lx",
-		    a->apa_name, pnp, a->apa_slotno, a->apa_hwbase);
+			a->apa_name, pnp, a->apa_slotno, a->apa_hwbase);
 
 	return UNCONF;
 }
 
 #if 0
 void *
-aptokseg0(void *va)
+aptokseg0(va)
+	void *va;
 {
 	vaddr_t addr = (vaddr_t)va;
 
@@ -176,7 +181,7 @@ aptokseg0(void *va)
 void
 apbus_wbflush(void)
 {
-	volatile int32_t *wbflush = (uint32_t *)NEWS5000_WBFLUSH;
+	volatile int *wbflush = (int *)NEWS5000_WBFLUSH;
 
 	(void)*wbflush;
 }
@@ -216,7 +221,7 @@ apbus_intr_establish(int level, int mask, int priority, int (*func)(void *),
 
 	ih = malloc(sizeof(*ih), M_DEVBUF, M_NOWAIT);
 	if (ih == NULL)
-		panic("%s: can't malloc handler info", __func__);
+		panic("apbus_intr_establish: can't malloc handler info");
 	ih->ih_mask = mask;
 	ih->ih_priority = priority;
 	ih->ih_func = func;
@@ -271,10 +276,9 @@ apbus_dma_unmapped(bus_dma_tag_t t, bus_dmamap_t map)
 }
 
 #define	APBUS_NDMAMAP	(NEWS5000_APBUS_MAPSIZE / NEWS5000_APBUS_MAPENT)
-#define	APBUS_MAPTBL(n, v)	\
-			(*(volatile uint32_t *)(NEWS5000_APBUS_DMAMAP + \
+#define	APBUS_MAPTBL(n, v)	(*(volatile u_int *)(NEWS5000_APBUS_DMAMAP + \
 			 NEWS5000_APBUS_MAPENT * (n) + 1) = (v))
-static uint8_t apbus_dma_maptbl[APBUS_NDMAMAP];
+static u_char apbus_dma_maptbl[APBUS_NDMAMAP];
 
 static int
 apbus_dma_mapalloc(bus_dma_tag_t t, bus_dmamap_t map, int flags)

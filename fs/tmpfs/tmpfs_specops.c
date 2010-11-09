@@ -1,4 +1,4 @@
-/*	$NetBSD: tmpfs_specops.c,v 1.9 2008/06/20 00:07:47 skd Exp $	*/
+/*	$NetBSD: tmpfs_specops.c,v 1.6 2005/12/11 12:24:29 christos Exp $	*/
 
 /*
  * Copyright (c) 2005 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -35,7 +42,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: tmpfs_specops.c,v 1.9 2008/06/20 00:07:47 skd Exp $");
+__KERNEL_RCSID(0, "$NetBSD: tmpfs_specops.c,v 1.6 2005/12/11 12:24:29 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/vnode.h>
@@ -89,6 +96,7 @@ const struct vnodeopv_entry_desc tmpfs_specop_entries[] = {
 	{ &vop_pathconf_desc,		tmpfs_spec_pathconf },
 	{ &vop_islocked_desc,		tmpfs_spec_islocked },
 	{ &vop_advlock_desc,		tmpfs_spec_advlock },
+	{ &vop_lease_desc,		tmpfs_spec_lease },
 	{ &vop_bwrite_desc,		tmpfs_spec_bwrite },
 	{ &vop_getpages_desc,		tmpfs_spec_getpages },
 	{ &vop_putpages_desc,		tmpfs_spec_putpages },
@@ -106,7 +114,7 @@ tmpfs_spec_close(void *v)
 
 	int error;
 
-	tmpfs_update(vp, NULL, NULL, NULL, UPDATE_CLOSE);
+	tmpfs_update(vp, NULL, NULL, UPDATE_CLOSE);
 	error = VOCALL(spec_vnodeop_p, VOFFSET(vop_close), v);
 
 	return error;

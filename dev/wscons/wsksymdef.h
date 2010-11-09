@@ -1,4 +1,4 @@
-/*	$NetBSD: wsksymdef.h,v 1.62 2009/02/18 04:17:44 snj Exp $ */
+/*	$NetBSD: wsksymdef.h,v 1.58 2007/04/04 14:50:21 mishka Exp $ */
 
 /*-
  * Copyright (c) 1997 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -517,9 +524,6 @@
 #define KS_Cmd_ScrollFastDown	0xf42d
 #define KS_Cmd_ScrollSlowUp	0xf42e
 #define KS_Cmd_ScrollSlowDown	0xf42f
-#define KS_Cmd_VolumeUp		0xf430
-#define KS_Cmd_VolumeDown	0xf431
-#define KS_Cmd_VolumeToggle	0xf432
 
 /*
  * Group 5 (internal)
@@ -568,7 +572,6 @@
 #define KB_METAESC		0x0020	/* generate ESC prefix on ALT-key */
 #define KB_IOPENER		0x0040	/* f1-f12 -> ESC,f1-f11 */
 #define KB_MACHDEP		0x0080	/* machine dependent */
-#define KB_COLEMAK	    0x00010000	/* Colemak layout */
 
 /*
  * Define keyboard type and texts all in one table.
@@ -590,7 +593,7 @@ action(KB_IT,	0,	0x0500,	"it",	,	"Italian")	\
 action(KB_JP,	0,	0x0800,	"jp",	,	"Japanese")	\
 action(KB_NO,	0,	0x0a00,	"no",	,	"Norwegian")	\
 action(KB_PL,	0,	0x0d00,	"pl",	,	"Polish")	\
-action(KB_PT,	0,	0x1100,	"pt",	,	"Portuguese")	\
+action(KB_PT,	0,	0x1100,	"pt",	,	"Portugese")	\
 action(KB_RU,	0,	0x0e00,	"ru",	,	"Russian")	\
 action(KB_ES,	0,	0x0b00,	"es",	,	"Spanish")	\
 action(KB_SV,	0,	0x0900,	"sv",	,	"Swedish")	\
@@ -615,7 +618,6 @@ enum { KB_ENC_FUN(KBF_ENUM) KB_NEXT=0x1500 };
 	{ KB_DVORAK,	"dvorak" }, \
 	{ KB_METAESC,	"metaesc" }, \
 	{ KB_IOPENER,	"iopener" }, \
-	{ KB_MACHDEP,	"machdep" }, \
-	{ KB_COLEMAK,	"colemak" }
+	{ KB_MACHDEP,	"machdep" }
 
 #endif /* !_DEV_WSCONS_WSKSYMDEF_H_ */

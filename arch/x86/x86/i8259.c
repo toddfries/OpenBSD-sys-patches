@@ -1,4 +1,4 @@
-/*	$NetBSD: i8259.c,v 1.15 2008/12/18 12:18:20 cegger Exp $	*/
+/*	$NetBSD: i8259.c,v 1.10 2006/11/16 01:32:39 christos Exp $	*/
 
 /*
  * Copyright 2002 (c) Wasabi Systems, Inc.
@@ -70,13 +70,14 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: i8259.c,v 1.15 2008/12/18 12:18:20 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: i8259.c,v 1.10 2006/11/16 01:32:39 christos Exp $");
 
 #include <sys/param.h> 
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/syslog.h>
 #include <sys/device.h>
+#include <sys/malloc.h>
 #include <sys/proc.h>
 
 #include <dev/isa/isareg.h>
@@ -107,7 +108,9 @@ unsigned i8259_imen;
  * Perhaps this should be made into a real device.
  */
 struct pic i8259_pic = {
-	.pic_name = "pic0",
+	.pic_dev = {
+		.dv_xname = "pic0",
+	},
 	.pic_type = PIC_I8259,
 	.pic_vecbase = 0,
 	.pic_apicid = 0,
@@ -190,7 +193,7 @@ static void
 i8259_hwmask(struct pic *pic, int pin)
 {
 	unsigned port;
-	uint8_t byte;
+	u_int8_t byte;
 
 	i8259_imen |= (1 << pin);
 #ifdef PIC_MASKDELAY
@@ -210,9 +213,9 @@ static void
 i8259_hwunmask(struct pic *pic, int pin)
 {
 	unsigned port;
-	uint8_t byte;
+	u_int8_t byte;
 
-	x86_disable_intr();	/* XXX */
+	disable_intr();	/* XXX */
 	i8259_imen &= ~(1 << pin);
 #ifdef PIC_MASKDELAY
 	delay(10);
@@ -225,7 +228,7 @@ i8259_hwunmask(struct pic *pic, int pin)
 		byte = i8259_imen & 0xff;
 	}
 	outb(port, byte);
-	x86_enable_intr();
+	enable_intr();
 }
 
 static void

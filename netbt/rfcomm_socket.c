@@ -1,4 +1,4 @@
-/*	$NetBSD: rfcomm_socket.c,v 1.10 2008/08/06 15:01:24 plunky Exp $	*/
+/*	$NetBSD: rfcomm_socket.c,v 1.3 2006/11/16 01:33:45 christos Exp $	*/
 
 /*-
  * Copyright (c) 2006 Itronix Inc.
@@ -32,13 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: rfcomm_socket.c,v 1.10 2008/08/06 15:01:24 plunky Exp $");
-
-/* load symbolic names */
-#ifdef BLUETOOTH_DEBUG
-#define PRUREQUESTS
-#define PRCOREQUESTS
-#endif
+__KERNEL_RCSID(0, "$NetBSD: rfcomm_socket.c,v 1.3 2006/11/16 01:33:45 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/domain.h>
@@ -64,7 +58,6 @@ static void rfcomm_connected(void *);
 static void rfcomm_disconnected(void *, int);
 static void *rfcomm_newconn(void *, struct sockaddr_bt *, struct sockaddr_bt *);
 static void rfcomm_complete(void *, int);
-static void rfcomm_linkmode(void *, int);
 static void rfcomm_input(void *, struct mbuf *);
 
 static const struct btproto rfcomm_proto = {
@@ -73,7 +66,6 @@ static const struct btproto rfcomm_proto = {
 	rfcomm_disconnected,
 	rfcomm_newconn,
 	rfcomm_complete,
-	rfcomm_linkmode,
 	rfcomm_input,
 };
 
@@ -119,32 +111,25 @@ rfcomm_usrreq(struct socket *up, int req, struct mbuf *m,
 		return EOPNOTSUPP;
 
 	case PRU_ATTACH:
-		if (up->so_lock == NULL) {
-			mutex_obj_hold(bt_lock);
-			up->so_lock = bt_lock;
-			solock(up);
-		}
-		KASSERT(solocked(up));
 		if (pcb != NULL)
 			return EINVAL;
+
 		/*
 		 * Since we have nothing to add, we attach the DLC
 		 * structure directly to our PCB pointer.
 		 */
-		err = soreserve(up, rfcomm_sendspace, rfcomm_recvspace);
-		if (err)
-			return err;
-
 		err = rfcomm_attach((struct rfcomm_dlc **)&up->so_pcb,
 					&rfcomm_proto, up);
 		if (err)
 			return err;
 
-		err = rfcomm_rcvd(up->so_pcb, sbspace(&up->so_rcv));
-		if (err) {
-			rfcomm_detach((struct rfcomm_dlc **)&up->so_pcb);
+		err = soreserve(up, rfcomm_sendspace, rfcomm_recvspace);
+		if (err)
 			return err;
-		}
+
+		err = rfcomm_rcvd(up->so_pcb, sbspace(&up->so_rcv));
+		if (err)
+			return err;
 
 		return 0;
 	}
@@ -167,7 +152,7 @@ rfcomm_usrreq(struct socket *up, int req, struct mbuf *m,
 		return rfcomm_detach((struct rfcomm_dlc **)&up->so_pcb);
 
 	case PRU_BIND:
-		KASSERT(nam != NULL);
+		KASSERT(nam);
 		sa = mtod(nam, struct sockaddr_bt *);
 
 		if (sa->bt_len != sizeof(struct sockaddr_bt))
@@ -179,7 +164,7 @@ rfcomm_usrreq(struct socket *up, int req, struct mbuf *m,
 		return rfcomm_bind(pcb, sa);
 
 	case PRU_CONNECT:
-		KASSERT(nam != NULL);
+		KASSERT(nam);
 		sa = mtod(nam, struct sockaddr_bt *);
 
 		if (sa->bt_len != sizeof(struct sockaddr_bt))
@@ -192,13 +177,13 @@ rfcomm_usrreq(struct socket *up, int req, struct mbuf *m,
 		return rfcomm_connect(pcb, sa);
 
 	case PRU_PEERADDR:
-		KASSERT(nam != NULL);
+		KASSERT(nam);
 		sa = mtod(nam, struct sockaddr_bt *);
 		nam->m_len = sizeof(struct sockaddr_bt);
 		return rfcomm_peeraddr(pcb, sa);
 
 	case PRU_SOCKADDR:
-		KASSERT(nam != NULL);
+		KASSERT(nam);
 		sa = mtod(nam, struct sockaddr_bt *);
 		nam->m_len = sizeof(struct sockaddr_bt);
 		return rfcomm_sockaddr(pcb, sa);
@@ -208,7 +193,7 @@ rfcomm_usrreq(struct socket *up, int req, struct mbuf *m,
 		break;
 
 	case PRU_SEND:
-		KASSERT(m != NULL);
+		KASSERT(m);
 
 		if (ctl)	/* no use for that */
 			m_freem(ctl);
@@ -234,7 +219,7 @@ rfcomm_usrreq(struct socket *up, int req, struct mbuf *m,
 		return rfcomm_listen(pcb);
 
 	case PRU_ACCEPT:
-		KASSERT(nam != NULL);
+		KASSERT(nam);
 		sa = mtod(nam, struct sockaddr_bt *);
 		nam->m_len = sizeof(struct sockaddr_bt);
 		return rfcomm_peeraddr(pcb, sa);
@@ -261,34 +246,43 @@ release:
 }
 
 /*
- * rfcomm_ctloutput(req, socket, sockopt)
+ * rfcomm_ctloutput(request, socket, level, optname, opt)
  *
  */
 int
-rfcomm_ctloutput(int req, struct socket *so, struct sockopt *sopt)
+rfcomm_ctloutput(int req, struct socket *so, int level,
+		int optname, struct mbuf **opt)
 {
 	struct rfcomm_dlc *pcb = so->so_pcb;
+	struct mbuf *m;
 	int err = 0;
 
 	DPRINTFN(2, "%s\n", prcorequests[req]);
 
-	if (pcb == NULL)
-		return EINVAL;
-
-	if (sopt->sopt_level != BTPROTO_RFCOMM)
-		return ENOPROTOOPT;
+	if (level != BTPROTO_RFCOMM)
+		return 0;	// err?
 
 	switch(req) {
 	case PRCO_GETOPT:
-		err = rfcomm_getopt(pcb, sopt);
+		m = m_get(M_WAIT, MT_SOOPTS);
+		m->m_len = rfcomm_getopt(pcb, optname, mtod(m, void *));
+		if (m->m_len == 0) {
+			m_freem(m);
+			m = NULL;
+			err = EINVAL;
+		}
+		*opt = m;
 		break;
 
 	case PRCO_SETOPT:
-		err = rfcomm_setopt(pcb, sopt);
+		m = *opt;
+		KASSERT(m != NULL);
+		err = rfcomm_setopt(pcb, optname, mtod(m, void *));
+		m_freem(m);
 		break;
 
 	default:
-		err = ENOPROTOOPT;
+		err = EINVAL;
 		break;
 	}
 
@@ -305,7 +299,7 @@ rfcomm_connecting(void *arg)
 {
 	/* struct socket *so = arg; */
 
-	KASSERT(arg != NULL);
+	KASSERT(arg);
 	DPRINTF("Connecting\n");
 }
 
@@ -314,7 +308,7 @@ rfcomm_connected(void *arg)
 {
 	struct socket *so = arg;
 
-	KASSERT(so != NULL);
+	KASSERT(so);
 	DPRINTF("Connected\n");
 	soisconnected(so);
 }
@@ -324,7 +318,7 @@ rfcomm_disconnected(void *arg, int err)
 {
 	struct socket *so = arg;
 
-	KASSERT(so != NULL);
+	KASSERT(so);
 	DPRINTF("Disconnected\n");
 
 	so->so_error = err;
@@ -362,34 +356,6 @@ rfcomm_complete(void *arg, int length)
 }
 
 /*
- * rfcomm_linkmode(rfcomm_dlc, new)
- *
- * link mode change notification.
- */
-static void
-rfcomm_linkmode(void *arg, int new)
-{
-	struct socket *so = arg;
-	struct sockopt sopt;
-	int mode;
-
-	DPRINTF("auth %s, encrypt %s, secure %s\n",
-		(new & RFCOMM_LM_AUTH ? "on" : "off"),
-		(new & RFCOMM_LM_ENCRYPT ? "on" : "off"),
-		(new & RFCOMM_LM_SECURE ? "on" : "off"));
-
-	sockopt_init(&sopt, BTPROTO_RFCOMM, SO_RFCOMM_LM, 0);
-	(void)rfcomm_getopt(so->so_pcb, &sopt);
-	(void)sockopt_getint(&sopt, &mode);
-	sockopt_destroy(&sopt);
-
-	if (((mode & RFCOMM_LM_AUTH) && !(new & RFCOMM_LM_AUTH))
-	    || ((mode & RFCOMM_LM_ENCRYPT) && !(new & RFCOMM_LM_ENCRYPT))
-	    || ((mode & RFCOMM_LM_SECURE) && !(new & RFCOMM_LM_SECURE)))
-		rfcomm_disconnect(so->so_pcb, 0);
-}
-
-/*
  * rfcomm_input(rfcomm_dlc, mbuf)
  */
 static void
@@ -397,7 +363,7 @@ rfcomm_input(void *arg, struct mbuf *m)
 {
 	struct socket *so = arg;
 
-	KASSERT(so != NULL);
+	KASSERT(so);
 
 	if (m->m_pkthdr.len > sbspace(&so->so_rcv)) {
 		printf("%s: %d bytes dropped (socket buffer full)\n",

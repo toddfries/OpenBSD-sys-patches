@@ -1,4 +1,4 @@
-/*	$NetBSD: epsoc.c,v 1.8 2008/05/10 15:31:04 martin Exp $	*/
+/*	$NetBSD: epsoc.c,v 1.6 2006/03/08 23:46:22 lukem Exp $	*/
 
 /*
  * Copyright (c) 2004 Jesse Off
@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: epsoc.c,v 1.8 2008/05/10 15:31:04 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: epsoc.c,v 1.6 2006/03/08 23:46:22 lukem Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>

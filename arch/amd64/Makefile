@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile,v 1.5 2008/10/26 02:14:59 mrg Exp $
+#	$NetBSD: Makefile,v 1.2 2003/04/26 19:16:36 fvdl Exp $
 
 # Makefile for amd64 tags file and boot blocks
 
@@ -18,8 +18,7 @@ tags:
 	rm -f ${TAMD64}
 	-echo ${SAMD64} ${COMM} | xargs ctags -wadtf ${TAMD64}
 	egrep "^ENTRY(.*)|^ALTENTRY(.*)" ${AAMD64} | \
-	    ${TOOL_SED} -e \
-		"s;\([^:]*\):\([^(]*\)(\([^, )]*\)\(.*\);\3 \1 /^\2(\3\4$$/;" \
+	    sed "s;\([^:]*\):\([^(]*\)(\([^, )]*\)\(.*\);\3 \1 /^\2(\3\4$$/;" \
 		>> ${TAMD64}
 	sort -o ${TAMD64} ${TAMD64}
 
@@ -28,7 +27,6 @@ links:
 	    (cd $$i && rm -f tags; ln -s ../tags tags); done
 
 
-SUBDIR=	compile include ../x86/include ../xen/include \
-	../i386/include ../i386/stand
+SUBDIR=	compile include ../x86/include ../i386/stand
 
 .include <bsd.subdir.mk>

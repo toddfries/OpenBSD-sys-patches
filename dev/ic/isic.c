@@ -27,14 +27,14 @@
  *	i4b_isic.c - global isic stuff
  *	==============================
  *
- *	$Id: isic.c,v 1.24 2008/04/08 12:07:26 cegger Exp $ 
+ *	$Id: isic.c,v 1.23 2007/10/19 11:59:54 ad Exp $ 
  *
  *      last edit-date: [Fri Jan  5 11:36:10 2001]
  *
  *---------------------------------------------------------------------------*/
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: isic.c,v 1.24 2008/04/08 12:07:26 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: isic.c,v 1.23 2007/10/19 11:59:54 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/ioccom.h>
@@ -195,7 +195,8 @@ isicintr(void *arg)
 				if (isac_ista & 0xfe)
 					isic_isac_irq(sc, isac_ista & 0xfe);
 				if (isac_ista & 0x01) /* unexpected */
-					aprint_error_dev(&sc->sc_dev, "unexpected ipac timer2 irq\n");
+					printf("%s: unexpected ipac timer2 irq\n",
+					    sc->sc_dev.dv_xname);
 				was_ipac_irq = 1;
 			}
 			if(ipac_irq_stat & IPAC_ISTA_EXD)
@@ -230,7 +231,7 @@ isic_attach_bri(struct isic_softc *sc, const char *cardname, const struct isdn_l
 {
 	struct isdn_l3_driver * drv;
 
-	drv = isdn_attach_isdnif(device_xname(&sc->sc_dev), cardname,
+	drv = isdn_attach_isdnif(sc->sc_dev.dv_xname, cardname,
 	    &sc->sc_l2, &isic_l3_driver, NBCH_BRI);
 	sc->sc_l3token = drv;
 	sc->sc_l2.driver = dchan_driver;

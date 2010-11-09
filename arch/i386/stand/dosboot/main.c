@@ -1,4 +1,4 @@
-/*	$NetBSD: main.c,v 1.25 2008/12/13 23:30:54 christos Exp $	 */
+/*	$NetBSD: main.c,v 1.22 2005/12/11 12:17:48 christos Exp $	 */
 
 /*
  * Copyright (c) 1996, 1997
@@ -50,7 +50,8 @@ extern int exec_lynx(const char*, int);
 
 int errno;
 
-extern	char bootprog_name[], bootprog_rev[], bootprog_kernrev[];
+extern	char bootprog_name[], bootprog_rev[], bootprog_date[],
+	bootprog_maker[];
 
 #define MAXDEVNAME 16
 
@@ -181,7 +182,6 @@ bootit(filename, howto, tell)
 	const char     *filename;
 	int             howto, tell;
 {
-	int floppy = strncmp(default_devname, "fd", 2) == 0;
 	if (tell) {
 		printf("booting %s", sprint_bootsel(filename));
 		if (howto)
@@ -189,7 +189,7 @@ bootit(filename, howto, tell)
 		printf("\n");
 	}
 #ifdef SUPPORT_LYNX
-	if(exec_netbsd(filename, 0, howto, floppy) < 0)
+	if(exec_netbsd(filename, 0, howto) < 0)
 		printf("boot netbsd: %s: %s\n", sprint_bootsel(filename),
 		       strerror(errno));
 	else {
@@ -202,7 +202,7 @@ bootit(filename, howto, tell)
 	else
 		printf("boot lynx returned\n");
 #else
-	if (exec_netbsd(filename, 0, howto, floppy) < 0)
+	if (exec_netbsd(filename, 0, howto) < 0)
 		printf("boot: %s: %s\n", sprint_bootsel(filename),
 		       strerror(errno));
 	else
@@ -215,8 +215,6 @@ print_banner(void)
 {
 	int extmem = getextmem();
 	char *s = "";
-
-	clear_pc_screen();
 
 #ifdef XMS
 	u_long xmsmem;
@@ -234,11 +232,10 @@ print_banner(void)
 	}
 #endif
 
-	printf("\n"
-	       ">> %s, Revision %s (from NetBSD %s)\n"
-	       ">> Memory: %d/%d %sk\n",
-	       bootprog_name, bootprog_rev, bootprog_kernrev,
-	       getbasemem(), extmem, s);
+	printf("\n");
+	printf(">> %s, Revision %s\n", bootprog_name, bootprog_rev);
+	printf(">> (%s, %s)\n", bootprog_maker, bootprog_date);
+	printf(">> Memory: %d/%d %sk\n", getbasemem(), extmem, s);
 }
 
 void 

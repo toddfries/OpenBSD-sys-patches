@@ -1,4 +1,4 @@
-/*	$NetBSD: uvm_object.c,v 1.6 2008/04/28 20:24:12 martin Exp $	*/
+/*	$NetBSD: uvm_object.c,v 1.3 2007/02/17 20:45:36 rmind Exp $	*/
 
 /*
  * Copyright (c) 2006 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed by the NetBSD
+ *      Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -38,11 +45,12 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: uvm_object.c,v 1.6 2008/04/28 20:24:12 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: uvm_object.c,v 1.3 2007/02/17 20:45:36 rmind Exp $");
 
 #include "opt_uvmhist.h"
 
 #include <sys/param.h>
+#include <sys/lock.h>
 
 #include <uvm/uvm.h>
 
@@ -66,7 +74,7 @@ uobj_wirepages(struct uvm_object *uobj, off_t start, off_t end)
 
 	left = (end - start) >> PAGE_SHIFT;
 
-	mutex_enter(&uobj->vmobjlock);
+	simple_lock(&uobj->vmobjlock);
 	while (left) {
 
 		npages = MIN(FETCH_PAGECOUNT, left);
@@ -80,7 +88,7 @@ uobj_wirepages(struct uvm_object *uobj, off_t start, off_t end)
 		if (error)
 			goto error;
 
-		mutex_enter(&uobj->vmobjlock);
+		simple_lock(&uobj->vmobjlock);
 		for (i = 0; i < npages; i++) {
 
 			KASSERT(pgs[i] != NULL);
@@ -93,9 +101,9 @@ uobj_wirepages(struct uvm_object *uobj, off_t start, off_t end)
 				while (pgs[i]->loan_count) {
 					pg = uvm_loanbreak(pgs[i]);
 					if (!pg) {
-						mutex_exit(&uobj->vmobjlock);
+						simple_unlock(&uobj->vmobjlock);
 						uvm_wait("uobjwirepg");
-						mutex_enter(&uobj->vmobjlock);
+						simple_lock(&uobj->vmobjlock);
 						continue;
 					}
 				}
@@ -109,11 +117,11 @@ uobj_wirepages(struct uvm_object *uobj, off_t start, off_t end)
 		}
 
 		/* Wire the pages */
-		mutex_enter(&uvm_pageqlock);
+		uvm_lock_pageq();
 		for (i = 0; i < npages; i++) {
 			uvm_pagewire(pgs[i]);
 		}
-		mutex_exit(&uvm_pageqlock);
+		uvm_unlock_pageq();
 
 		/* Unbusy the pages */
 		uvm_page_unbusy(pgs, npages);
@@ -121,7 +129,7 @@ uobj_wirepages(struct uvm_object *uobj, off_t start, off_t end)
 		left -= npages;
 		offset += npages << PAGE_SHIFT;
 	}
-	mutex_exit(&uobj->vmobjlock);
+	simple_unlock(&uobj->vmobjlock);
 
 	return 0;
 
@@ -146,8 +154,8 @@ uobj_unwirepages(struct uvm_object *uobj, off_t start, off_t end)
 	struct vm_page *pg;
 	off_t offset;
 
-	mutex_enter(&uobj->vmobjlock);
-	mutex_enter(&uvm_pageqlock);
+	simple_lock(&uobj->vmobjlock);
+	uvm_lock_pageq();
 	for (offset = start; offset < end; offset += PAGE_SIZE) {
 		pg = uvm_pagelookup(uobj, offset);
 
@@ -156,6 +164,6 @@ uobj_unwirepages(struct uvm_object *uobj, off_t start, off_t end)
 
 		uvm_pageunwire(pg);
 	}
-	mutex_exit(&uvm_pageqlock);
-	mutex_exit(&uobj->vmobjlock);
+	uvm_unlock_pageq();
+	simple_unlock(&uobj->vmobjlock);
 }

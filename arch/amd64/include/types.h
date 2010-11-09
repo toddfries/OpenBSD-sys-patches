@@ -1,4 +1,4 @@
-/*	$NetBSD: types.h,v 1.27 2008/10/26 00:08:15 mrg Exp $	*/
+/*	$NetBSD: types.h,v 1.14 2006/09/03 20:42:14 perry Exp $	*/
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -31,10 +31,8 @@
  *	@(#)types.h	7.5 (Berkeley) 3/9/91
  */
 
-#ifndef	_X86_64_MACHTYPES_H_
-#define	_X86_64_MACHTYPES_H_
-
-#ifdef __x86_64__
+#ifndef	_MACHTYPES_H_
+#define	_MACHTYPES_H_
 
 #include <sys/cdefs.h>
 #include <sys/featuretest.h>
@@ -57,10 +55,7 @@ typedef unsigned long	vsize_t;
 typedef long int		register_t;
 typedef int			register32_t;
 
-typedef	volatile unsigned char		__cpu_simple_lock_t;
-
-/* __cpu_simple_lock_t used to be a full word. */
-#define	__CPU_SIMPLE_LOCK_PAD
+typedef	volatile int		__cpu_simple_lock_t;
 
 #define	__SIMPLELOCK_LOCKED	1
 #define	__SIMPLELOCK_UNLOCKED	0
@@ -70,21 +65,15 @@ typedef	volatile unsigned char		__cpu_simple_lock_t;
 
 #define	__HAVE_DEVICE_REGISTER
 #define	__HAVE_CPU_COUNTER
-#define	__HAVE_MD_CPU_OFFLINE
 #define	__HAVE_SYSCALL_INTERN
 #define	__HAVE_MINIMAL_EMUL
-#define	__HAVE_ATOMIC64_OPS
-#define	__HAVE_ATOMIC_AS_MEMBAR
+#define __HAVE_GENERIC_SOFT_INTERRUPTS
+#define __HAVE_CPU_MAXPROC
+#define __HAVE_TIMECOUNTER
+#define __HAVE_GENERIC_TODR
 
-#ifdef _KERNEL_OPT
-#include "opt_xen.h"
+#if defined(_KERNEL)
 #define __HAVE_RAS
 #endif
 
-#else	/*	!__x86_64__	*/
-
-#include <i386/types.h>
-
-#endif	/*	__x86_64__	*/
-
-#endif	/* _X86_64_MACHTYPES_H_ */
+#endif	/* _MACHTYPES_H_ */

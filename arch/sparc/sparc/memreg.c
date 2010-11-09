@@ -1,4 +1,4 @@
-/*	$NetBSD: memreg.c,v 1.43 2008/12/17 19:09:56 cegger Exp $ */
+/*	$NetBSD: memreg.c,v 1.39 2005/11/14 03:30:49 uwe Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -47,7 +47,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: memreg.c,v 1.43 2008/12/17 19:09:56 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: memreg.c,v 1.39 2005/11/14 03:30:49 uwe Exp $");
 
 #include "opt_sparc_arch.h"
 
@@ -180,11 +180,12 @@ memerr4_4c(unsigned int issync,
 	char bits[64];
 	u_int pte;
 
-	snprintb(bits, sizeof(bits), SER_BITS, ser);
 	printf("%ssync mem arr: ser=%s sva=0x%x ",
-	    issync ? "" : "a", bits, sva);
-	snprintb(bits, sizeof(bits), AER_BITS, aer & 0xff);
-	printf("aer=%s ava=0x%x\n", bits, ava);
+		issync ? "" : "a",
+		bitmask_snprintf(ser, SER_BITS, bits, sizeof(bits)),
+		sva);
+	printf("aer=%s ava=0x%x\n", bitmask_snprintf(aer & 0xff,
+		AER_BITS, bits, sizeof(bits)), ava);
 
 	pte = getpte4(sva);
 	if ((pte & PG_V) != 0 && (pte & PG_TYPE) == PG_OBMEM) {
@@ -200,10 +201,10 @@ memerr4_4c(unsigned int issync,
 			prom_pa_location(pa, 0));
 	}
 
-	if (par_err_reg) {
-		snprintb(bits, sizeof(bits), PER_BITS, *par_err_reg);
-		printf("parity error register = %s\n", bits);
-	}
+	if (par_err_reg)
+		printf("parity error register = %s\n",
+			bitmask_snprintf(*par_err_reg, PER_BITS,
+					 bits, sizeof(bits)));
 	panic("memory error");		/* XXX */
 }
 
@@ -215,15 +216,15 @@ memerr4_4c(unsigned int issync,
 static void
 hardmemerr4m(unsigned type, u_int sfsr, u_int sfva, u_int afsr, u_int afva)
 {
-	char bits[64];
+	char *s, bits[64];
 
 	printf("memory fault: type %d", type);
-	snprintb(bits, sizeof(bits), SFSR_BITS, sfsr);
-	printf("sfsr=%s sfva=0x%x\n", bits, sfva);
+	s = bitmask_snprintf(sfsr, SFSR_BITS, bits, sizeof(bits));
+	printf("sfsr=%s sfva=0x%x\n", s, sfva);
 
 	if (afsr != 0) {
-		snprintb(bits, sizeof(bits), AFSR_BITS, afsr);
-		printf("; afsr=%s afva=0x%x%x\n", bits,
+		s = bitmask_snprintf(afsr, AFSR_BITS, bits, sizeof(bits));
+		printf("; afsr=%s afva=0x%x%x\n", s,
 			(afsr & AFSR_AFA) >> AFSR_AFA_RSHIFT, afva);
 	}
 
@@ -252,7 +253,10 @@ hypersparc_memerr(unsigned type, u_int sfsr, u_int sfva, struct trapframe *tf)
 	u_int afsr;
 	u_int afva;
 
-	KERNEL_LOCK(1, NULL);
+	if ((tf->tf_psr & PSR_PS) == 0)
+		KERNEL_PROC_LOCK(curlwp);
+	else
+		KERNEL_LOCK(LK_CANRECURSE|LK_EXCLUSIVE);
 
 	(*cpuinfo.get_asyncflt)(&afsr, &afva);
 	if ((afsr & AFSR_AFO) != 0) {	/* HS async fault! */
@@ -268,7 +272,10 @@ hypersparc_memerr(unsigned type, u_int sfsr, u_int sfva, struct trapframe *tf)
 		addroldtop = afsr & AFSR_AFA;
 	}
 out:
-	KERNEL_UNLOCK_ONE(NULL);
+	if ((tf->tf_psr & PSR_PS) == 0)
+		KERNEL_PROC_UNLOCK(curlwp);
+	else
+		KERNEL_UNLOCK();
 	return;
 
 hard:
@@ -282,7 +289,10 @@ viking_memerr(unsigned type, u_int sfsr, u_int sfva, struct trapframe *tf)
 	u_int afsr=0;	/* No Async fault registers on the viking */
 	u_int afva=0;
 
-	KERNEL_LOCK(1, NULL);
+	if ((tf->tf_psr & PSR_PS) == 0)
+		KERNEL_PROC_LOCK(curlwp);
+	else
+		KERNEL_LOCK(LK_CANRECURSE|LK_EXCLUSIVE);
 
 	if (type == T_STOREBUFFAULT) {
 
@@ -317,7 +327,10 @@ viking_memerr(unsigned type, u_int sfsr, u_int sfva, struct trapframe *tf)
 	}
 
 out:
-	KERNEL_UNLOCK_ONE(NULL);
+	if ((tf->tf_psr & PSR_PS) == 0)
+		KERNEL_PROC_UNLOCK(curlwp);
+	else
+		KERNEL_UNLOCK();
 	return;
 
 hard:
@@ -331,7 +344,10 @@ memerr4m(unsigned type, u_int sfsr, u_int sfva, struct trapframe *tf)
 	u_int afsr;
 	u_int afva;
 
-	KERNEL_LOCK(1, NULL);
+	if ((tf->tf_psr & PSR_PS) == 0)
+		KERNEL_PROC_LOCK(curlwp);
+	else
+		KERNEL_LOCK(LK_CANRECURSE|LK_EXCLUSIVE);
 
 	/*
 	 * No known special cases.
@@ -341,6 +357,9 @@ memerr4m(unsigned type, u_int sfsr, u_int sfva, struct trapframe *tf)
 		afsr = afva = 0;
 
 	hardmemerr4m(type, sfsr, sfva, afsr, afva);
-	KERNEL_UNLOCK_ONE(NULL);
+	if ((tf->tf_psr & PSR_PS) == 0)
+		KERNEL_PROC_UNLOCK(curlwp);
+	else
+		KERNEL_UNLOCK();
 }
 #endif /* SUN4M */

@@ -1,4 +1,4 @@
-/*	$NetBSD: esiop.c,v 1.42 2008/04/08 12:07:26 cegger Exp $	*/
+/*	$NetBSD: esiop.c,v 1.41 2007/10/19 11:59:51 ad Exp $	*/
 
 /*
  * Copyright (c) 2002 Manuel Bouyer.
@@ -33,7 +33,7 @@
 /* SYM53c7/8xx PCI-SCSI I/O Processors driver */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: esiop.c,v 1.42 2008/04/08 12:07:26 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: esiop.c,v 1.41 2007/10/19 11:59:51 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -169,8 +169,8 @@ esiop_attach(sc)
 	TAILQ_INIT(&sc->tag_tblblk);
 	sc->sc_currschedslot = 0;
 #ifdef SIOP_DEBUG
-	aprint_debug_dev(&sc->sc_c.sc_dev, "script size = %d, PHY addr=0x%x, VIRT=%p\n",
-	    (int)sizeof(esiop_script),
+	aprint_debug("%s: script size = %d, PHY addr=0x%x, VIRT=%p\n",
+	    sc->sc_c.sc_dev.dv_xname, (int)sizeof(esiop_script),
 	    (u_int32_t)sc->sc_c.sc_scriptaddr, sc->sc_c.sc_script);
 #endif
 
@@ -183,15 +183,16 @@ esiop_attach(sc)
 	 */
 #ifdef DIAGNOSTIC
 	if (ESIOP_NTAG != A_ndone_slots) {
-		aprint_error_dev(&sc->sc_c.sc_dev, "size of tag DSA table different from the done"
-		    " ring\n");
+		aprint_error("%s: size of tag DSA table different from the done"
+		    " ring\n", sc->sc_c.sc_dev.dv_xname);
 		return;
 	}
 #endif
 	esiop_moretagtbl(sc);
 	tagtbl_donering = TAILQ_FIRST(&sc->free_tagtbl);
 	if (tagtbl_donering == NULL) {
-		aprint_error_dev(&sc->sc_c.sc_dev, "no memory for command done ring\n");
+		aprint_error("%s: no memory for command done ring\n",
+		    sc->sc_c.sc_dev.dv_xname);
 		return;
 	}
 	TAILQ_REMOVE(&sc->free_tagtbl, tagtbl_donering, next);
@@ -396,7 +397,7 @@ esiop_reset(sc)
 	    ((addr & 0xff000000) >> 16));
 #ifdef SIOP_DEBUG
 	printf("%s: target table offset %d free offset %d\n",
-	    device_xname(&sc->sc_c.sc_dev), sc->sc_target_table_offset,
+	    sc->sc_c.sc_dev.dv_xname, sc->sc_target_table_offset,
 	    sc->sc_free_offset);
 #endif
 
@@ -548,7 +549,7 @@ none:
 		}
 
 		if (dstat & ~(DSTAT_SIR | DSTAT_DFE | DSTAT_SSI)) {
-		printf("%s: DMA IRQ:", device_xname(&sc->sc_c.sc_dev));
+		printf("%s: DMA IRQ:", sc->sc_c.sc_dev.dv_xname);
 		if (dstat & DSTAT_IID)
 			printf(" Illegal instruction");
 		if (dstat & DSTAT_BF)
@@ -600,7 +601,7 @@ none:
 			if (esiop_cmd)
 				scsipi_printaddr(xs->xs_periph);
 			else
-				printf("%s:", device_xname(&sc->sc_c.sc_dev));
+				printf("%s:", sc->sc_c.sc_dev.dv_xname);
 			printf("scsi gross error\n");
 			if (esiop_target)
 				esiop_target->target_c.flags &= ~TARF_DT;
@@ -666,10 +667,12 @@ none:
 					CALL_SCRIPT(Ent_msgin);
 					return 1;
 				}
-				aprint_error_dev(&sc->sc_c.sc_dev, "unexpected phase mismatch %d\n",
+				printf("%s: unexpected phase mismatch %d\n",
+				    sc->sc_c.sc_dev.dv_xname,
 				    sstat1 & SSTAT1_PHASE_MASK);
 			} else {
-				aprint_error_dev(&sc->sc_c.sc_dev, "phase mismatch without command\n");
+				printf("%s: phase mismatch without command\n",
+				    sc->sc_c.sc_dev.dv_xname);
 			}
 			need_reset = 1;
 		}
@@ -678,7 +681,7 @@ none:
 			if (esiop_cmd)
 				scsipi_printaddr(xs->xs_periph);
 			else
-				printf("%s:", device_xname(&sc->sc_c.sc_dev));
+				printf("%s:", sc->sc_c.sc_dev.dv_xname);
 			printf("parity error\n");
 			if (esiop_target)
 				esiop_target->target_c.flags &= ~TARF_DT;
@@ -727,7 +730,7 @@ none:
 				printf("%s: selection timeout without "
 				    "command, target %d (sdid 0x%x), "
 				    "slot %d\n",
-				    device_xname(&sc->sc_c.sc_dev), target,
+				    sc->sc_c.sc_dev.dv_xname, target,
 				    bus_space_read_1(sc->sc_c.sc_rt,
 				    sc->sc_c.sc_rh, SIOP_SDID), slot);
 				need_reset = 1;
@@ -743,8 +746,8 @@ none:
 				    htole32(SCSI_CHECK);
 				goto end;
 			}
-			aprint_error_dev(&sc->sc_c.sc_dev, "unexpected disconnect without "
-			    "command\n");
+			printf("%s: unexpected disconnect without "
+			    "command\n", sc->sc_c.sc_dev.dv_xname);
 			goto reset;
 		}
 		if (sist & (SIST1_SBMC << 8)) {
@@ -769,8 +772,8 @@ none:
 			return 1;
 		}
 		/* Else it's an unhandled exception (for now). */
-		aprint_error_dev(&sc->sc_c.sc_dev, "unhandled scsi interrupt, sist=0x%x sstat1=0x%x "
-		    "DSA=0x%x DSP=0x%x\n", sist,
+		printf("%s: unhandled scsi interrupt, sist=0x%x sstat1=0x%x "
+		    "DSA=0x%x DSP=0x%x\n", sc->sc_c.sc_dev.dv_xname, sist,
 		    bus_space_read_1(sc->sc_c.sc_rt, sc->sc_c.sc_rh,
 			SIOP_SSTAT1),
 		    bus_space_read_4(sc->sc_c.sc_rt, sc->sc_c.sc_rh, SIOP_DSA),
@@ -804,14 +807,15 @@ scintr:
 		 */
 		if ((irqcode & 0x80) == 0) {
 			if (esiop_cmd == NULL) {
-				aprint_error_dev(&sc->sc_c.sc_dev,
-			"script interrupt (0x%x) with invalid DSA !!!\n",
-				    irqcode);
+				printf(
+			"%s: script interrupt (0x%x) with invalid DSA !!!\n",
+				    sc->sc_c.sc_dev.dv_xname, irqcode);
 				goto reset;
 			}
 			if (esiop_cmd->cmd_c.status != CMDST_ACTIVE) {
-				aprint_error_dev(&sc->sc_c.sc_dev, "command with invalid status "
+				printf("%s: command with invalid status "
 				    "(IRQ code 0x%x current status %d) !\n",
+				    sc->sc_c.sc_dev.dv_xname,
 				    irqcode, esiop_cmd->cmd_c.status);
 				xs = NULL;
 			}
@@ -855,7 +859,7 @@ scintr:
 						scsipi_printaddr(xs->xs_periph);
 					else
 						printf("%s: ",
-						   device_xname(&sc->sc_c.sc_dev));
+						   sc->sc_c.sc_dev.dv_xname);
 					printf("our reject message was "
 					    "rejected\n");
 					goto reset;
@@ -920,7 +924,7 @@ scintr:
 					scsipi_printaddr(xs->xs_periph);
 				else
 					printf("%s: ",
-					    device_xname(&sc->sc_c.sc_dev));
+					    sc->sc_c.sc_dev.dv_xname);
 				if (msg == MSG_EXTENDED) {
 					printf("scsi message reject, extended "
 					    "message sent was 0x%x\n", extmsg);
@@ -944,7 +948,7 @@ scintr:
 			if (xs)
 				scsipi_printaddr(xs->xs_periph);
 			else
-				printf("%s: ", device_xname(&sc->sc_c.sc_dev));
+				printf("%s: ", sc->sc_c.sc_dev.dv_xname);
 			printf("unhandled message 0x%x\n", msgin);
 			esiop_cmd->cmd_tables->msg_out[0] = MSG_MESSAGE_REJECT;
 			esiop_cmd->cmd_tables->t_msgout.count= htole32(1);
@@ -961,7 +965,8 @@ scintr:
 #endif
 			if (esiop_cmd->cmd_tables->msg_in[1] >
 			    sizeof(esiop_cmd->cmd_tables->msg_in) - 2)
-				aprint_error_dev(&sc->sc_c.sc_dev, "extended message too big (%d)\n",
+				printf("%s: extended message too big (%d)\n",
+				    sc->sc_c.sc_dev.dv_xname,
 				    esiop_cmd->cmd_tables->msg_in[1]);
 			esiop_cmd->cmd_tables->t_extmsgdata.count =
 			    htole32(esiop_cmd->cmd_tables->msg_in[1] - 1);
@@ -1097,7 +1102,7 @@ scintr:
 		case A_int_done:
 			if (xs == NULL) {
 				printf("%s: done without command\n",
-				    device_xname(&sc->sc_c.sc_dev));
+				    sc->sc_c.sc_dev.dv_xname);
 				CALL_SCRIPT(Ent_script_sched);
 				return 1;
 			}
@@ -1185,7 +1190,7 @@ esiop_scsicmd_end(esiop_cmd, offset)
 		INCSTAT(esiop_stat_intr_qfull);
 #ifdef SIOP_DEBUG
 		printf("%s:%d:%d: queue full (tag %d)\n",
-		    device_xname(&sc->sc_c.sc_dev),
+		    sc->sc_c.sc_dev.dv_xname,
 		    xs->xs_periph->periph_target,
 		    xs->xs_periph->periph_lun, esiop_cmd->cmd_c.tag);
 #endif
@@ -1394,13 +1399,13 @@ esiop_handle_qtag_reject(esiop_cmd)
 
 #ifdef SIOP_DEBUG
 	printf("%s:%d:%d: tag message %d (%d) rejected (status %d)\n",
-	    device_xname(&sc->sc_c.sc_dev), target, lun, tag, esiop_cmd->cmd_c.tag,
+	    sc->sc_c.sc_dev.dv_xname, target, lun, tag, esiop_cmd->cmd_c.tag,
 	    esiop_cmd->cmd_c.status);
 #endif
 
 	if (esiop_lun->active != NULL) {
-		aprint_error_dev(&sc->sc_c.sc_dev, "untagged command already running for target %d "
-		    "lun %d (status %d)\n",
+		printf("%s: untagged command already running for target %d "
+		    "lun %d (status %d)\n", sc->sc_c.sc_dev.dv_xname,
 		    target, lun, esiop_lun->active->cmd_c.status);
 		return -1;
 	}
@@ -1435,7 +1440,7 @@ esiop_handle_reset(sc)
 	 * scsi bus reset. reset the chip and restart
 	 * the queue. Need to clean up all active commands
 	 */
-	printf("%s: scsi bus reset\n", device_xname(&sc->sc_c.sc_dev));
+	printf("%s: scsi bus reset\n", sc->sc_c.sc_dev.dv_xname);
 	/* stop, reset and restart the chip */
 	esiop_reset(sc);
 
@@ -1546,14 +1551,15 @@ esiop_scsipi_request(chan, req, arg)
 		if (esiop_target == NULL) {
 #ifdef SIOP_DEBUG
 			printf("%s: alloc siop_target for target %d\n",
-				device_xname(&sc->sc_c.sc_dev), target);
+				sc->sc_c.sc_dev.dv_xname, target);
 #endif
 			sc->sc_c.targets[target] =
 			    malloc(sizeof(struct esiop_target),
 				M_DEVBUF, M_NOWAIT | M_ZERO);
 			if (sc->sc_c.targets[target] == NULL) {
-				aprint_error_dev(&sc->sc_c.sc_dev, "can't malloc memory for "
-				    "target %d\n", target);
+				printf("%s: can't malloc memory for "
+				    "target %d\n", sc->sc_c.sc_dev.dv_xname,
+				    target);
 				xs->error = XS_RESOURCE_SHORTAGE;
 				scsipi_done(xs);
 				splx(s);
@@ -1577,9 +1583,9 @@ esiop_scsipi_request(chan, req, arg)
 			    malloc(sizeof(struct esiop_lun), M_DEVBUF,
 			    M_NOWAIT|M_ZERO);
 			if (esiop_target->esiop_lun[lun] == NULL) {
-				aprint_error_dev(&sc->sc_c.sc_dev, "can't alloc esiop_lun for "
+				printf("%s: can't alloc esiop_lun for "
 				    "target %d lun %d\n",
-				    target, lun);
+				    sc->sc_c.sc_dev.dv_xname, target, lun);
 				xs->error = XS_RESOURCE_SHORTAGE;
 				scsipi_done(xs);
 				splx(s);
@@ -1596,8 +1602,8 @@ esiop_scsipi_request(chan, req, arg)
 		    esiop_cmd->cmd_c.dmamap_cmd,
 		    xs->cmd, xs->cmdlen, NULL, BUS_DMA_NOWAIT);
 		if (error) {
-			aprint_error_dev(&sc->sc_c.sc_dev, "unable to load cmd DMA map: %d\n",
-			    error);
+			printf("%s: unable to load cmd DMA map: %d\n",
+			    sc->sc_c.sc_dev.dv_xname, error);
 			xs->error = XS_DRIVER_STUFFUP;
 			scsipi_done(xs);
 			splx(s);
@@ -1610,8 +1616,8 @@ esiop_scsipi_request(chan, req, arg)
 			    ((xs->xs_control & XS_CTL_DATA_IN) ?
 			     BUS_DMA_READ : BUS_DMA_WRITE));
 			if (error) {
-				aprint_error_dev(&sc->sc_c.sc_dev, "unable to load cmd DMA map: %d",
-				    error);
+				printf("%s: unable to load cmd DMA map: %d",
+				    sc->sc_c.sc_dev.dv_xname, error);
 				xs->error = XS_DRIVER_STUFFUP;
 				scsipi_done(xs);
 				bus_dmamap_unload(sc->sc_c.sc_dmat,
@@ -1659,7 +1665,7 @@ esiop_scsipi_request(chan, req, arg)
 
 	case ADAPTER_REQ_GROW_RESOURCES:
 #ifdef SIOP_DEBUG
-		printf("%s grow resources (%d)\n", device_xname(&sc->sc_c.sc_dev),
+		printf("%s grow resources (%d)\n", sc->sc_c.sc_dev.dv_xname,
 		    sc->sc_c.sc_adapt.adapt_openings);
 #endif
 		esiop_morecbd(sc);
@@ -1895,8 +1901,8 @@ esiop_morecbd(sc)
 	/* allocate a new list head */
 	newcbd = malloc(sizeof(struct esiop_cbd), M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (newcbd == NULL) {
-		aprint_error_dev(&sc->sc_c.sc_dev, "can't allocate memory for command descriptors "
-		    "head\n");
+		printf("%s: can't allocate memory for command descriptors "
+		    "head\n", sc->sc_c.sc_dev.dv_xname);
 		return;
 	}
 
@@ -1904,37 +1910,40 @@ esiop_morecbd(sc)
 	newcbd->cmds = malloc(sizeof(struct esiop_cmd) * SIOP_NCMDPB,
 	    M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (newcbd->cmds == NULL) {
-		aprint_error_dev(&sc->sc_c.sc_dev, "can't allocate memory for command descriptors\n");
+		printf("%s: can't allocate memory for command descriptors\n",
+		    sc->sc_c.sc_dev.dv_xname);
 		goto bad3;
 	}
 	error = bus_dmamem_alloc(sc->sc_c.sc_dmat, PAGE_SIZE, PAGE_SIZE, 0,
 	    &seg, 1, &rseg, BUS_DMA_NOWAIT);
 	if (error) {
-		aprint_error_dev(&sc->sc_c.sc_dev, "unable to allocate cbd DMA memory, error = %d\n",
-		    error);
+		printf("%s: unable to allocate cbd DMA memory, error = %d\n",
+		    sc->sc_c.sc_dev.dv_xname, error);
 		goto bad2;
 	}
 	error = bus_dmamem_map(sc->sc_c.sc_dmat, &seg, rseg, PAGE_SIZE,
 	    (void **)&newcbd->xfers, BUS_DMA_NOWAIT|BUS_DMA_COHERENT);
 	if (error) {
-		aprint_error_dev(&sc->sc_c.sc_dev, "unable to map cbd DMA memory, error = %d\n",
-		    error);
+		printf("%s: unable to map cbd DMA memory, error = %d\n",
+		    sc->sc_c.sc_dev.dv_xname, error);
 		goto bad2;
 	}
 	error = bus_dmamap_create(sc->sc_c.sc_dmat, PAGE_SIZE, 1, PAGE_SIZE, 0,
 	    BUS_DMA_NOWAIT, &newcbd->xferdma);
 	if (error) {
-		aprint_error_dev(&sc->sc_c.sc_dev, "unable to create cbd DMA map, error = %d\n", error);
+		printf("%s: unable to create cbd DMA map, error = %d\n",
+		    sc->sc_c.sc_dev.dv_xname, error);
 		goto bad1;
 	}
 	error = bus_dmamap_load(sc->sc_c.sc_dmat, newcbd->xferdma,
 	    newcbd->xfers, PAGE_SIZE, NULL, BUS_DMA_NOWAIT);
 	if (error) {
-		aprint_error_dev(&sc->sc_c.sc_dev, "unable to load cbd DMA map, error = %d\n", error);
+		printf("%s: unable to load cbd DMA map, error = %d\n",
+		    sc->sc_c.sc_dev.dv_xname, error);
 		goto bad0;
 	}
 #ifdef DEBUG
-	printf("%s: alloc newcdb at PHY addr 0x%lx\n", device_xname(&sc->sc_c.sc_dev),
+	printf("%s: alloc newcdb at PHY addr 0x%lx\n", sc->sc_c.sc_dev.dv_xname,
 	    (unsigned long)newcbd->xferdma->dm_segs[0].ds_addr);
 #endif
 	for (i = 0; i < SIOP_NCMDPB; i++) {
@@ -1942,8 +1951,9 @@ esiop_morecbd(sc)
 		    MAXPHYS, 0, BUS_DMA_NOWAIT | BUS_DMA_ALLOCNOW,
 		    &newcbd->cmds[i].cmd_c.dmamap_data);
 		if (error) {
-			aprint_error_dev(&sc->sc_c.sc_dev, "unable to create data DMA map for cbd: "
-			    "error %d\n", error);
+			printf("%s: unable to create data DMA map for cbd: "
+			    "error %d\n",
+			    sc->sc_c.sc_dev.dv_xname, error);
 			goto bad0;
 		}
 		error = bus_dmamap_create(sc->sc_c.sc_dmat,
@@ -1952,7 +1962,8 @@ esiop_morecbd(sc)
 		    BUS_DMA_NOWAIT | BUS_DMA_ALLOCNOW,
 		    &newcbd->cmds[i].cmd_c.dmamap_cmd);
 		if (error) {
-			aprint_error_dev(&sc->sc_c.sc_dev, "unable to create cmd DMA map for cbd %d\n", error);
+			printf("%s: unable to create cmd DMA map for cbd %d\n",
+			    sc->sc_c.sc_dev.dv_xname, error);
 			goto bad0;
 		}
 		newcbd->cmds[i].cmd_c.siop_sc = &sc->sc_c;
@@ -2021,7 +2032,8 @@ esiop_moretagtbl(sc)
 	newtblblk = malloc(sizeof(struct esiop_dsatblblk),
 	    M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (newtblblk == NULL) {
-		aprint_error_dev(&sc->sc_c.sc_dev, "can't allocate memory for tag DSA table block\n");
+		printf("%s: can't allocate memory for tag DSA table block\n",
+		    sc->sc_c.sc_dev.dv_xname);
 		return;
 	}
 
@@ -2029,36 +2041,41 @@ esiop_moretagtbl(sc)
 	newtbls = malloc(sizeof(struct esiop_dsatbl) * ESIOP_NTPB,
 	    M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (newtbls == NULL) {
-		aprint_error_dev(&sc->sc_c.sc_dev, "can't allocate memory for command descriptors\n");
+		printf("%s: can't allocate memory for command descriptors\n",
+		    sc->sc_c.sc_dev.dv_xname);
 		goto bad3;
 	}
 	error = bus_dmamem_alloc(sc->sc_c.sc_dmat, PAGE_SIZE, PAGE_SIZE, 0,
 	    &seg, 1, &rseg, BUS_DMA_NOWAIT);
 	if (error) {
-		aprint_error_dev(&sc->sc_c.sc_dev, "unable to allocate tbl DMA memory, error = %d\n", error);
+		printf("%s: unable to allocate tbl DMA memory, error = %d\n",
+		    sc->sc_c.sc_dev.dv_xname, error);
 		goto bad2;
 	}
 	error = bus_dmamem_map(sc->sc_c.sc_dmat, &seg, rseg, PAGE_SIZE,
 	    (void *)&tbls, BUS_DMA_NOWAIT|BUS_DMA_COHERENT);
 	if (error) {
-		aprint_error_dev(&sc->sc_c.sc_dev, "unable to map tbls DMA memory, error = %d\n", error);
+		printf("%s: unable to map tbls DMA memory, error = %d\n",
+		    sc->sc_c.sc_dev.dv_xname, error);
 		goto bad2;
 	}
 	error = bus_dmamap_create(sc->sc_c.sc_dmat, PAGE_SIZE, 1, PAGE_SIZE, 0,
 	    BUS_DMA_NOWAIT, &newtblblk->blkmap);
 	if (error) {
-		aprint_error_dev(&sc->sc_c.sc_dev, "unable to create tbl DMA map, error = %d\n", error);
+		printf("%s: unable to create tbl DMA map, error = %d\n",
+		    sc->sc_c.sc_dev.dv_xname, error);
 		goto bad1;
 	}
 	error = bus_dmamap_load(sc->sc_c.sc_dmat, newtblblk->blkmap,
 	    tbls, PAGE_SIZE, NULL, BUS_DMA_NOWAIT);
 	if (error) {
-		aprint_error_dev(&sc->sc_c.sc_dev, "unable to load tbl DMA map, error = %d\n", error);
+		printf("%s: unable to load tbl DMA map, error = %d\n",
+		    sc->sc_c.sc_dev.dv_xname, error);
 		goto bad0;
 	}
 #ifdef DEBUG
 	printf("%s: alloc new tag DSA table at PHY addr 0x%lx\n",
-	    device_xname(&sc->sc_c.sc_dev),
+	    sc->sc_c.sc_dev.dv_xname,
 	    (unsigned long)newtblblk->blkmap->dm_segs[0].ds_addr);
 #endif
 	for (i = 0; i < ESIOP_NTPB; i++) {
@@ -2141,7 +2158,7 @@ esiop_del_dev(sc, target, lun)
 	struct esiop_target *esiop_target;
 #ifdef SIOP_DEBUG
 		printf("%s:%d:%d: free lun sw entry\n",
-		    device_xname(&sc->sc_c.sc_dev), target, lun);
+		    sc->sc_c.sc_dev.dv_xname, target, lun);
 #endif
 	if (sc->sc_c.targets[target] == NULL)
 		return;
@@ -2165,7 +2182,7 @@ esiop_target_register(sc, target)
 	sc->sc_free_offset += sc->sc_c.sc_chan.chan_nluns * 2 + 2;
 #ifdef SIOP_DEBUG
 	printf("%s: lun table for target %d offset %d free offset %d\n",
-	    device_xname(&sc->sc_c.sc_dev), target, esiop_target->lun_table_offset,
+	    sc->sc_c.sc_dev.dv_xname, target, esiop_target->lun_table_offset,
 	    sc->sc_free_offset);
 #endif
 	/* first 32 bytes are ID (for select) */

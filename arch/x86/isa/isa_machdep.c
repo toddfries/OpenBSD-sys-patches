@@ -1,4 +1,4 @@
-/*	$NetBSD: isa_machdep.c,v 1.24 2008/12/18 12:18:20 cegger Exp $	*/
+/*	$NetBSD: isa_machdep.c,v 1.15 2006/11/16 01:32:39 christos Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997, 1998 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -65,13 +72,14 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: isa_machdep.c,v 1.24 2008/12/18 12:18:20 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: isa_machdep.c,v 1.15 2006/11/16 01:32:39 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/syslog.h>
 #include <sys/device.h>
+#include <sys/malloc.h>
 #include <sys/proc.h>
 #include <sys/mbuf.h>
 
@@ -96,7 +104,6 @@ __KERNEL_RCSID(0, "$NetBSD: isa_machdep.c,v 1.24 2008/12/18 12:18:20 cegger Exp 
 static int _isa_dma_may_bounce(bus_dma_tag_t, bus_dmamap_t, int, int *);
 
 struct x86_bus_dma_tag isa_bus_dma_tag = {
-	0,				/* _tag_needs_free */
 	ISA_DMA_BOUNCE_THRESHOLD,	/* _bounce_thresh */
 	0,				/* _bounce_alloc_lo */
 	ISA_DMA_BOUNCE_THRESHOLD,	/* _bounce_alloc_hi */
@@ -114,8 +121,6 @@ struct x86_bus_dma_tag isa_bus_dma_tag = {
 	_bus_dmamem_map,
 	_bus_dmamem_unmap,
 	_bus_dmamem_mmap,
-	_bus_dmatag_subregion,
-	_bus_dmatag_destroy,
 };
 
 #define	IDTVEC(name)	__CONCAT(X,name)
@@ -127,7 +132,6 @@ extern vector *IDTVEC(intr)[];
 int
 isa_intr_alloc(isa_chipset_tag_t ic, int mask, int type, int *irq)
 {
-	extern kmutex_t x86_intr_lock;
 	int i, tmp, bestirq, count;
 	struct intrhand **p, *q;
 	struct intrsource *isp;
@@ -150,7 +154,7 @@ isa_intr_alloc(isa_chipset_tag_t ic, int mask, int type, int *irq)
 	 */
 	mask &= 0xefbf;
 
-	mutex_enter(&x86_intr_lock);
+	simple_lock(&ci->ci_slock);
 
 	for (i = 0; i < NUM_LEGACY_IRQS; i++) {
 		if (LEGAL_IRQ(i) == 0 || (mask & (1<<i)) == 0)
@@ -161,7 +165,7 @@ isa_intr_alloc(isa_chipset_tag_t ic, int mask, int type, int *irq)
 			 * if nothing's using the irq, just return it
 			 */
 			*irq = i;
-			mutex_exit(&x86_intr_lock);
+			simple_unlock(&ci->ci_slock);
 			return (0);
 		}
 
@@ -194,7 +198,7 @@ isa_intr_alloc(isa_chipset_tag_t ic, int mask, int type, int *irq)
 		}
 	}
 
-	mutex_exit(&x86_intr_lock);
+	simple_unlock(&ci->ci_slock);
 
 	if (bestirq == -1)
 		return (1);
@@ -226,7 +230,6 @@ isa_intr_establish(
 	int pin;
 #if NIOAPIC > 0
 	int mpih;
-	struct ioapic_softc *ioapic;
 #endif
 
 	pin = irq;
@@ -238,20 +241,20 @@ isa_intr_establish(
 		    intr_find_mpmapping(mp_eisa_bus, irq, &mpih) == 0) {
 			if (!APIC_IRQ_ISLEGACY(mpih)) {
 				pin = APIC_IRQ_PIN(mpih);
-				ioapic = ioapic_find(APIC_IRQ_APIC(mpih));
-				if (ioapic == NULL) {
+				pic = (struct pic *)
+				    ioapic_find(APIC_IRQ_APIC(mpih));
+				if (pic == NULL) {
 					printf("isa_intr_establish: "
 					       "unknown apic %d\n",
 					    APIC_IRQ_APIC(mpih));
 					return NULL;
 				}
-				pic = &ioapic->sc_pic;
 			}
 		} else
 			printf("isa_intr_establish: no MP mapping found\n");
 	}
 #endif
-	return intr_establish(irq, pic, pin, type, level, ih_fun, ih_arg, false);
+	return intr_establish(irq, pic, pin, type, level, ih_fun, ih_arg);
 }
 
 /*
@@ -269,7 +272,7 @@ isa_intr_disestablish(isa_chipset_tag_t ic, void *arg)
 }
 
 void
-isa_attach_hook(device_t parent, device_t self,
+isa_attach_hook(struct device *parent, struct device *self,
     struct isabus_attach_args *iba)
 {
 	extern struct x86_isa_chipset x86_isa_chipset;
@@ -292,8 +295,13 @@ isa_attach_hook(device_t parent, device_t self,
 }
 
 int
-isa_mem_alloc(bus_space_tag_t t, bus_size_t size, bus_size_t align,
-		bus_addr_t boundary, int flags, bus_addr_t *addrp, bus_space_handle_t *bshp)
+isa_mem_alloc(t, size, align, boundary, flags, addrp, bshp)
+	bus_space_tag_t t;
+	bus_size_t size, align;
+	bus_addr_t boundary;
+	int flags;
+	bus_addr_t *addrp;
+	bus_space_handle_t *bshp;
 {
 
 	/*
@@ -304,7 +312,10 @@ isa_mem_alloc(bus_space_tag_t t, bus_size_t size, bus_size_t align,
 }
 
 void
-isa_mem_free(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size)
+isa_mem_free(t, bsh, size)
+	bus_space_tag_t t;
+	bus_space_handle_t bsh;
+	bus_size_t size;
 {
 
 	bus_space_free(t, bsh, size);

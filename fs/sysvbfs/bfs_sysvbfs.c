@@ -1,4 +1,4 @@
-/*	$NetBSD: bfs_sysvbfs.c,v 1.10 2008/05/16 09:21:59 hannken Exp $	*/
+/*	$NetBSD: bfs_sysvbfs.c,v 1.4 2006/07/06 21:55:06 martin Exp $	*/
 
 /*-
  * Copyright (c) 2004 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -31,7 +38,7 @@
 
 #include <sys/cdefs.h>
 
-__KERNEL_RCSID(0, "$NetBSD: bfs_sysvbfs.c,v 1.10 2008/05/16 09:21:59 hannken Exp $");
+__KERNEL_RCSID(0, "$NetBSD: bfs_sysvbfs.c,v 1.4 2006/07/06 21:55:06 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/types.h>
@@ -49,10 +56,10 @@ struct bc_io_ops {
 
 #define	STATIC
 
-STATIC bool bc_read_n(void *, uint8_t *, daddr_t, int);
-STATIC bool bc_read(void *, uint8_t *, daddr_t);
-STATIC bool bc_write_n(void *, uint8_t *, daddr_t, int);
-STATIC bool bc_write(void *, uint8_t *, daddr_t);
+STATIC boolean_t bc_read_n(void *, uint8_t *, daddr_t, int);
+STATIC boolean_t bc_read(void *, uint8_t *, daddr_t);
+STATIC boolean_t bc_write_n(void *, uint8_t *, daddr_t, int);
+STATIC boolean_t bc_write(void *, uint8_t *, daddr_t);
 
 int
 sysvbfs_bfs_init(struct bfs **bfsp, struct vnode *vp)
@@ -71,7 +78,7 @@ sysvbfs_bfs_init(struct bfs **bfsp, struct vnode *vp)
 	bio->vp = vp;
 	bio->cred = NOCRED;	/* sysvbfs layer check cred. */
 
-	return bfs_init2(bfsp, 0, (struct sector_io_ops *)bio, false);
+	return bfs_init2(bfsp, 0, (struct sector_io_ops *)bio, FALSE);
 }
 
 void
@@ -82,76 +89,76 @@ sysvbfs_bfs_fini(struct bfs *bfs)
 	bfs_fini(bfs);
 }
 
-STATIC bool
+STATIC boolean_t
 bc_read_n(void *self, uint8_t *buf, daddr_t block, int count)
 {
 	int i;
 
 	for (i = 0; i < count; i++) {
 		if (!bc_read(self, buf, block))
-			return false;
+			return FALSE;
 		buf += DEV_BSIZE;
 		block++;
 	}
 
-	return true;
+	return TRUE;
 }
 
-STATIC bool
+STATIC boolean_t
 bc_read(void *self, uint8_t *buf, daddr_t block)
 {
 	struct bc_io_ops *bio = self;
 	struct buf *bp = NULL;
 
-	if (bread(bio->vp, block, DEV_BSIZE, bio->cred, 0, &bp) != 0)
+	if (bread(bio->vp, block, DEV_BSIZE, bio->cred, &bp) != 0)
 		goto error_exit;
 	memcpy(buf, bp->b_data, DEV_BSIZE);
-	brelse(bp, 0);
+	brelse(bp);
 
-	return true;
+	return TRUE;
  error_exit:
-	printf("%s: block %lld read failed.\n", __func__, 
+	printf("%s: block %lld read failed.\n", __FUNCTION__, 
 	    (long long int)block);
 
 	if (bp != NULL)
-		brelse(bp, 0);
-	return false;
+		brelse(bp);
+	return FALSE;
 }
 
-STATIC bool
+STATIC boolean_t
 bc_write_n(void *self, uint8_t *buf, daddr_t block, int count)
 {
 	int i;
 
 	for (i = 0; i < count; i++) {
 		if (!bc_write(self, buf, block))
-			return false;
+			return FALSE;
 		buf += DEV_BSIZE;
 		block++;
 	}
 
-	return true;
+	return TRUE;
 }
 
-STATIC bool
+STATIC boolean_t
 bc_write(void *self, uint8_t *buf, daddr_t block)
 {
 	struct bc_io_ops *bio = self;
 	struct buf *bp;
 
 #if 0
-	printf("%s: block=%lld\n", __func__, block);
+	printf("%s: block=%lld\n", __FUNCTION__, block);
 #endif
 	if ((bp = getblk(bio->vp, block, DEV_BSIZE, 0, 0)) == 0) {
 		printf("getblk failed.\n");
-		return false;
+		return FALSE;
 	}
 	memcpy(bp->b_data, buf, DEV_BSIZE);
 
 	if (bwrite(bp) != 0) {
 		printf("bwrite failed.\n");
-		return false;
+		return FALSE;
 	}
 
-	return true;
+	return TRUE;
 }

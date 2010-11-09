@@ -1,4 +1,4 @@
-/*	$NetBSD: cbsc.c,v 1.28 2008/04/13 04:55:52 tsutsui Exp $ */
+/*	$NetBSD: cbsc.c,v 1.22 2006/03/29 04:16:45 thorpej Exp $ */
 
 /*
  * Copyright (c) 1997 Michael L. Hitch
@@ -36,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: cbsc.c,v 1.28 2008/04/13 04:55:52 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cbsc.c,v 1.22 2006/03/29 04:16:45 thorpej Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -67,26 +67,22 @@ __KERNEL_RCSID(0, "$NetBSD: cbsc.c,v 1.28 2008/04/13 04:55:52 tsutsui Exp $");
 #include <amiga/dev/cbscvar.h>
 #include <amiga/dev/zbusvar.h>
 
-#ifdef __powerpc__
-#define badaddr(a)      badaddr_read(a, 2, NULL)
-#endif
-
-int	cbscmatch(device_t, cfdata_t, void *);
-void	cbscattach(device_t, device_t, void *);
+void	cbscattach(struct device *, struct device *, void *);
+int	cbscmatch(struct device *, struct cfdata *, void *);
 
 /* Linkup to the rest of the kernel */
-CFATTACH_DECL_NEW(cbsc, sizeof(struct cbsc_softc),
+CFATTACH_DECL(cbsc, sizeof(struct cbsc_softc),
     cbscmatch, cbscattach, NULL, NULL);
 
 /*
  * Functions and the switch for the MI code.
  */
-uint8_t	cbsc_read_reg(struct ncr53c9x_softc *, int);
-void	cbsc_write_reg(struct ncr53c9x_softc *, int, uint8_t);
+u_char	cbsc_read_reg(struct ncr53c9x_softc *, int);
+void	cbsc_write_reg(struct ncr53c9x_softc *, int, u_char);
 int	cbsc_dma_isintr(struct ncr53c9x_softc *);
 void	cbsc_dma_reset(struct ncr53c9x_softc *);
 int	cbsc_dma_intr(struct ncr53c9x_softc *);
-int	cbsc_dma_setup(struct ncr53c9x_softc *, uint8_t **,
+int	cbsc_dma_setup(struct ncr53c9x_softc *, caddr_t *,
 	    size_t *, int, size_t *);
 void	cbsc_dma_go(struct ncr53c9x_softc *);
 void	cbsc_dma_stop(struct ncr53c9x_softc *);
@@ -102,7 +98,7 @@ struct ncr53c9x_glue cbsc_glue = {
 	cbsc_dma_go,
 	cbsc_dma_stop,
 	cbsc_dma_isactive,
-	NULL,
+	0,
 };
 
 /* Maximum DMA transfer length to reduce impact on high-speed serial input */
@@ -116,10 +112,10 @@ u_long cbsc_cnt_dma3 = 0;	/* number of pages combined */
 
 #ifdef DEBUG
 struct {
-	uint8_t hardbits;
-	uint8_t status;
-	uint8_t xx;
-	uint8_t yy;
+	u_char hardbits;
+	u_char status;
+	u_char xx;
+	u_char yy;
 } cbsc_trace[128];
 int cbsc_trace_ptr = 0;
 int cbsc_trace_enable = 1;
@@ -130,36 +126,36 @@ void cbsc_dump(void);
  * if we are a Phase5 CyberSCSI [mark I?]
  */
 int
-cbscmatch(device_t parent, cfdata_t cf, void *aux)
+cbscmatch(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct zbus_args *zap;
-	volatile uint8_t *regs;
+	volatile u_char *regs;
 
 	zap = aux;
 	if (zap->manid != 0x2140)
-		return 0;		/* It's not Phase5 */
+		return(0);		/* It's not Phase5 */
 	if (zap->prodid != 12 && zap->prodid != 11)
-		return 0;		/* Not CyberStorm MKI SCSI */
+		return(0);		/* Not CyberStorm MKI SCSI */
 	if (zap->prodid == 11 && iszthreepa(zap->pa))
-		return 0;		/* Fastlane Z3! */
-	regs = &((volatile uint8_t *)zap->va)[0xf400];
-	if (badaddr((void *)__UNVOLATILE(regs)))
-		return 0;
+		return(0);		/* Fastlane Z3! */
+	regs = &((volatile u_char *)zap->va)[0xf400];
+	if (badaddr((caddr_t)__UNVOLATILE(regs)))
+		return(0);
 	regs[NCR_CFG1 * 4] = 0;
 	regs[NCR_CFG1 * 4] = NCRCFG1_PARENB | 7;
 	delay(5);
 	if (regs[NCR_CFG1 * 4] != (NCRCFG1_PARENB | 7))
-		return 0;
-	return 1;
+		return(0);
+	return(1);
 }
 
 /*
  * Attach this instance, and then all the sub-devices
  */
 void
-cbscattach(device_t parent, device_t self, void *aux)
+cbscattach(struct device *parent, struct device *self, void *aux)
 {
-	struct cbsc_softc *csc = device_private(self);
+	struct cbsc_softc *csc = (void *)self;
 	struct ncr53c9x_softc *sc = &csc->sc_ncr53c9x;
 	struct zbus_args  *zap;
 	extern u_long scsi_nosync;
@@ -169,19 +165,18 @@ cbscattach(device_t parent, device_t self, void *aux)
 	/*
 	 * Set up the glue for MI code early; we use some of it here.
 	 */
-	sc->sc_dev = self;
 	sc->sc_glue = &cbsc_glue;
 
 	/*
 	 * Save the regs
 	 */
 	zap = aux;
-	csc->sc_reg = &((volatile uint8_t *)zap->va)[0xf400];
+	csc->sc_reg = &((volatile u_char *)zap->va)[0xf400];
 	csc->sc_dmabase = &csc->sc_reg[0x400];
 
 	sc->sc_freq = 40;		/* Clocked at 40 MHz */
 
-	aprint_normal(": address %p", csc->sc_reg);
+	printf(": address %p", csc->sc_reg);
 
 	sc->sc_id = 7;
 
@@ -211,7 +206,7 @@ cbscattach(device_t parent, device_t self, void *aux)
 	 * NOTE: low 8 bits are to disable disconnect, and the next
 	 *       8 bits are to disable sync.
 	 */
-	device_cfdata(self)->cf_flags |= (scsi_nosync >> shift_nosync)
+	device_cfdata(&sc->sc_dev)->cf_flags |= (scsi_nosync >> shift_nosync)
 	    & 0xffff;
 	shift_nosync += 16;
 
@@ -247,7 +242,7 @@ cbscattach(device_t parent, device_t self, void *aux)
  * Glue functions.
  */
 
-uint8_t
+u_char
 cbsc_read_reg(struct ncr53c9x_softc *sc, int reg)
 {
 	struct cbsc_softc *csc = (struct cbsc_softc *)sc;
@@ -256,10 +251,10 @@ cbsc_read_reg(struct ncr53c9x_softc *sc, int reg)
 }
 
 void
-cbsc_write_reg(struct ncr53c9x_softc *sc, int reg, uint8_t val)
+cbsc_write_reg(struct ncr53c9x_softc *sc, int reg, u_char val)
 {
 	struct cbsc_softc *csc = (struct cbsc_softc *)sc;
-	uint8_t v = val;
+	u_char v = val;
 
 	csc->sc_reg[reg * 4] = v;
 #ifdef DEBUG
@@ -331,7 +326,7 @@ cbsc_dma_intr(struct ncr53c9x_softc *sc)
 	cnt = csc->sc_dmasize - cnt;	/* number of bytes transferred */
 	NCR_DMA(("DMA xferred %d\n", cnt));
 	if (csc->sc_xfr_align) {
-		memcpy(*csc->sc_dmaaddr, csc->sc_alignbuf, cnt);
+		bcopy(csc->sc_alignbuf, *csc->sc_dmaaddr, cnt);
 		csc->sc_xfr_align = 0;
 	}
 	*csc->sc_dmaaddr += cnt;
@@ -341,12 +336,12 @@ cbsc_dma_intr(struct ncr53c9x_softc *sc)
 }
 
 int
-cbsc_dma_setup(struct ncr53c9x_softc *sc, uint8_t **addr, size_t *len,
+cbsc_dma_setup(struct ncr53c9x_softc *sc, caddr_t *addr, size_t *len,
                int datain, size_t *dmasize)
 {
 	struct cbsc_softc *csc = (struct cbsc_softc *)sc;
 	paddr_t pa;
-	uint8_t *ptr;
+	u_char *ptr;
 	size_t xfer;
 
 	csc->sc_dmaaddr = addr;
@@ -380,8 +375,8 @@ cbsc_dma_setup(struct ncr53c9x_softc *sc, uint8_t **addr, size_t *len,
 	 * If unaligned address, read unaligned bytes into alignment buffer
 	 */
 	else if ((int)ptr & 1) {
-		pa = kvtop((void *)&csc->sc_alignbuf);
-		xfer = csc->sc_dmasize = min(xfer, sizeof(csc->sc_alignbuf));
+		pa = kvtop((caddr_t)&csc->sc_alignbuf);
+		xfer = csc->sc_dmasize = min(xfer, sizeof (csc->sc_alignbuf));
 		NCR_DMA(("cbsc_dma_setup: align read by %d bytes\n", xfer));
 		csc->sc_xfr_align = 1;
 	}
@@ -417,10 +412,10 @@ if (xfer != *len)
 		pa &= ~1;
 	else
 		pa |= 1;
-	csc->sc_dmabase[0] = (uint8_t)(pa >> 24);
-	csc->sc_dmabase[2] = (uint8_t)(pa >> 16);
-	csc->sc_dmabase[4] = (uint8_t)(pa >> 8);
-	csc->sc_dmabase[6] = (uint8_t)(pa);
+	csc->sc_dmabase[0] = (u_int8_t)(pa >> 24);
+	csc->sc_dmabase[2] = (u_int8_t)(pa >> 16);
+	csc->sc_dmabase[4] = (u_int8_t)(pa >> 8);
+	csc->sc_dmabase[6] = (u_int8_t)(pa);
 	if (csc->sc_datain)
 		csc->sc_portbits &= ~CBSC_PB_WRITE;
 	else

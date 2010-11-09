@@ -1,4 +1,4 @@
-/*	$NetBSD: ppp_tty.c,v 1.53 2008/05/25 19:22:21 ad Exp $	*/
+/*	$NetBSD: ppp_tty.c,v 1.46 2007/01/04 19:07:03 elad Exp $	*/
 /*	Id: ppp_tty.c,v 1.3 1996/07/01 01:04:11 paulus Exp 	*/
 
 /*
@@ -93,7 +93,7 @@
 /* from NetBSD: if_ppp.c,v 1.15.2.2 1994/07/28 05:17:58 cgd Exp */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ppp_tty.c,v 1.53 2008/05/25 19:22:21 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ppp_tty.c,v 1.46 2007/01/04 19:07:03 elad Exp $");
 
 #include "ppp.h"
 
@@ -137,7 +137,7 @@ static int	pppopen(dev_t dev, struct tty *tp);
 static int	pppclose(struct tty *tp, int flag);
 static int	pppread(struct tty *tp, struct uio *uio, int flag);
 static int	pppwrite(struct tty *tp, struct uio *uio, int flag);
-static int	ppptioctl(struct tty *tp, u_long cmd, void *data, int flag,
+static int	ppptioctl(struct tty *tp, u_long cmd, caddr_t data, int flag,
 			  struct lwp *);
 static int	pppinput(int c, struct tty *tp);
 static int	pppstart(struct tty *tp);
@@ -156,7 +156,7 @@ struct linesw ppp_disc = {	/* XXX should be static */
 };
 
 static void	ppprcvframe(struct ppp_softc *sc, struct mbuf *m);
-static uint16_t pppfcs(uint16_t fcs, const uint8_t *cp, int len);
+static u_int16_t pppfcs(u_int16_t fcs, u_char *cp, int len);
 static void	pppsyncstart(struct ppp_softc *sc);
 static void	pppasyncstart(struct ppp_softc *);
 static void	pppasyncctlp(struct ppp_softc *);
@@ -250,10 +250,8 @@ pppopen(dev_t dev, struct tty *tp)
     sc->sc_if.if_flags |= IFF_RUNNING;
     sc->sc_if.if_baudrate = tp->t_ospeed;
 
-    tp->t_sc = (void *) sc;
-    mutex_spin_enter(&tty_lock);
+    tp->t_sc = (caddr_t) sc;
     ttyflush(tp, FREAD | FWRITE);
-    mutex_spin_exit(&tty_lock);
 
     splx(s);
     return (0);
@@ -272,9 +270,7 @@ pppclose(struct tty *tp, int flag)
     int s;
 
     s = spltty();
-    mutex_spin_enter(&tty_lock);
     ttyflush(tp, FREAD|FWRITE);
-    mutex_spin_exit(&tty_lock);	/* XXX */
     ttyldisc_release(tp->t_linesw);
     tp->t_linesw = ttyldisc_default();
     sc = (struct ppp_softc *) tp->t_sc;
@@ -326,6 +322,7 @@ pppread(struct tty *tp, struct uio *uio, int flag)
 {
     struct ppp_softc *sc = (struct ppp_softc *)tp->t_sc;
     struct mbuf *m, *m0;
+    int s;
     int error = 0;
 
     if (sc == NULL)
@@ -334,27 +331,27 @@ pppread(struct tty *tp, struct uio *uio, int flag)
      * Loop waiting for input, checking that nothing disasterous
      * happens in the meantime.
      */
-    mutex_spin_enter(&tty_lock);
+    s = spltty();
     for (;;) {
 	if (tp != (struct tty *) sc->sc_devp ||
 	    tp->t_linesw != &ppp_disc) {
-	    mutex_spin_exit(&tty_lock);
+	    splx(s);
 	    return 0;
 	}
 	if (sc->sc_inq.ifq_head != NULL)
 	    break;
 	if ((tp->t_state & TS_CARR_ON) == 0 && (tp->t_cflag & CLOCAL) == 0
 	    && (tp->t_state & TS_ISOPEN)) {
-	    mutex_spin_exit(&tty_lock);
+	    splx(s);
 	    return 0;		/* end of file */
 	}
 	if (tp->t_state & TS_ASYNC || flag & IO_NDELAY) {
-	    mutex_spin_exit(&tty_lock);
+	    splx(s);
 	    return (EWOULDBLOCK);
 	}
-	error = ttysleep(tp, &tp->t_rawcv, true, 0);
+	error = ttysleep(tp, (caddr_t)&tp->t_rawq, TTIPRI|PCATCH, ttyin, 0);
 	if (error) {
-	    mutex_spin_exit(&tty_lock);
+	    splx(s);
 	    return error;
 	}
     }
@@ -364,7 +361,7 @@ pppread(struct tty *tp, struct uio *uio, int flag)
 
     /* Get the packet from the input queue */
     IF_DEQUEUE(&sc->sc_inq, m0);
-    mutex_spin_exit(&tty_lock);
+    splx(s);
 
     for (m = m0; m && uio->uio_resid; m = m->m_next)
 	if ((error = uiomove(mtod(m, u_char *), m->m_len, uio)) != 0)
@@ -439,7 +436,7 @@ pppwrite(struct tty *tp, struct uio *uio, int flag)
  */
 /* ARGSUSED */
 static int
-ppptioctl(struct tty *tp, u_long cmd, void *data, int flag, struct lwp *l)
+ppptioctl(struct tty *tp, u_long cmd, caddr_t data, int flag, struct lwp *l)
 {
     struct ppp_softc *sc = (struct ppp_softc *) tp->t_sc;
     int error, s;
@@ -610,7 +607,7 @@ bail:
 /*
  * FCS lookup table as calculated by genfcstab.
  */
-static const uint16_t fcstab[256] = {
+static const u_int16_t fcstab[256] = {
 	0x0000,	0x1189,	0x2312,	0x329b,	0x4624,	0x57ad,	0x6536,	0x74bf,
 	0x8c48,	0x9dc1,	0xaf5a,	0xbed3,	0xca6c,	0xdbe5,	0xe97e,	0xf8f7,
 	0x1081,	0x0108,	0x3393,	0x221a,	0x56a5,	0x472c,	0x75b7,	0x643e,
@@ -648,8 +645,8 @@ static const uint16_t fcstab[256] = {
 /*
  * Calculate a new FCS given the current FCS and the new data.
  */
-static uint16_t
-pppfcs(uint16_t fcs, const uint8_t *cp, int len)
+static u_int16_t
+pppfcs(u_int16_t fcs, u_char *cp, int len)
 {
     while (len--)
 	fcs = PPP_FCS(fcs, *cp++);
@@ -681,7 +678,7 @@ pppsyncstart(struct ppp_softc *sc)
 		/* call device driver IOCTL to transmit a frame */
 		cdev = cdevsw_lookup(tp->t_dev);
 		if (cdev == NULL ||
-		    (*cdev->d_ioctl)(tp->t_dev, TIOCXMTFRAME, (void *)&m,
+		    (*cdev->d_ioctl)(tp->t_dev, TIOCXMTFRAME, (caddr_t)&m,
 				     0, 0)) {
 			/* busy or error, set as current packet */
 			sc->sc_outm = m;
@@ -705,13 +702,12 @@ pppasyncstart(struct ppp_softc *sc)
     u_char *start, *stop, *cp;
     int n, ndone, done, idle;
     struct mbuf *m2;
+    int s;
 
     if (sc->sc_flags & SC_SYNC){
 	pppsyncstart(sc);
 	return;
     }
-
-    mutex_spin_enter(&tty_lock);
 
     idle = 0;
     while (CCOUNT(&tp->t_outq) < PPP_HIWAT) {
@@ -741,7 +737,7 @@ pppasyncstart(struct ppp_softc *sc)
 	    }
 
 	    /* Calculate the FCS for the first mbuf's worth. */
-	    sc->sc_outfcs = pppfcs(PPP_INITFCS, mtod(m, uint8_t *), m->m_len);
+	    sc->sc_outfcs = pppfcs(PPP_INITFCS, mtod(m, u_char *), m->m_len);
 	}
 
 	for (;;) {
@@ -773,12 +769,17 @@ pppasyncstart(struct ppp_softc *sc)
 		 * Put it out in a different form.
 		 */
 		if (len) {
-		    if (putc(PPP_ESCAPE, &tp->t_outq))
-			break;
-		    if (putc(*start ^ PPP_TRANS, &tp->t_outq)) {
-			(void) unputc(&tp->t_outq);
+		    s = spltty();
+		    if (putc(PPP_ESCAPE, &tp->t_outq)) {
+			splx(s);
 			break;
 		    }
+		    if (putc(*start ^ PPP_TRANS, &tp->t_outq)) {
+			(void) unputc(&tp->t_outq);
+			splx(s);
+			break;
+		    }
+		    splx(s);
 		    sc->sc_stats.ppp_obytes += 2;
 		    start++;
 		    len--;
@@ -819,6 +820,7 @@ pppasyncstart(struct ppp_softc *sc)
 		 * Try to output the FCS and flag.  If the bytes
 		 * don't all fit, back out.
 		 */
+		s = spltty();
 		for (q = endseq; q < p; ++q)
 		    if (putc(*q, &tp->t_outq)) {
 			done = 0;
@@ -826,6 +828,7 @@ pppasyncstart(struct ppp_softc *sc)
 			    unputc(&tp->t_outq);
 			break;
 		    }
+		splx(s);
 		if (done)
 		    sc->sc_stats.ppp_obytes += q - endseq;
 	    }
@@ -844,7 +847,7 @@ pppasyncstart(struct ppp_softc *sc)
 		/* Finished a packet */
 		break;
 	    }
-	    sc->sc_outfcs = pppfcs(sc->sc_outfcs, mtod(m, uint8_t *), m->m_len);
+	    sc->sc_outfcs = pppfcs(sc->sc_outfcs, mtod(m, u_char *), m->m_len);
 	}
 
 	/*
@@ -858,6 +861,7 @@ pppasyncstart(struct ppp_softc *sc)
     }
 
     /* Call pppstart to start output again if necessary. */
+    s = spltty();
     pppstart(tp);
 
     /*
@@ -870,7 +874,7 @@ pppasyncstart(struct ppp_softc *sc)
 	sc->sc_flags |= SC_TIMEOUT;
     }
 
-    mutex_spin_exit(&tty_lock);
+    splx(s);
 }
 
 /*
@@ -881,13 +885,14 @@ static void
 pppasyncctlp(struct ppp_softc *sc)
 {
     struct tty *tp;
+    int s;
 
     /* Put a placeholder byte in canq for ttselect()/ttnread(). */
-    mutex_spin_enter(&tty_lock);
+    s = spltty();
     tp = (struct tty *) sc->sc_devp;
     putc(0, &tp->t_canq);
     ttwakeup(tp);
-    mutex_spin_exit(&tty_lock);
+    splx(s);
 }
 
 /*
@@ -941,11 +946,12 @@ ppp_timeout(void *x)
 {
     struct ppp_softc *sc = (struct ppp_softc *) x;
     struct tty *tp = (struct tty *) sc->sc_devp;
+    int s;
 
-    mutex_spin_enter(&tty_lock);
+    s = spltty();
     sc->sc_flags &= ~SC_TIMEOUT;
     pppstart(tp);
-    mutex_spin_exit(&tty_lock);
+    splx(s);
 }
 
 /*
@@ -1018,11 +1024,8 @@ pppinput(int c, struct tty *tp)
 	}
 	if (c == tp->t_cc[VSTART] && tp->t_cc[VSTART] != _POSIX_VDISABLE) {
 	    tp->t_state &= ~TS_TTSTOP;
-	    if (tp->t_oproc != NULL) {
-	        mutex_spin_enter(&tty_lock);	/* XXX */
+	    if (tp->t_oproc != NULL)
 		(*tp->t_oproc)(tp);
-	        mutex_spin_exit(&tty_lock);	/* XXX */
-	    }
 	    return 0;
 	}
     }

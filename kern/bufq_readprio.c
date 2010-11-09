@@ -1,4 +1,4 @@
-/*	$NetBSD: bufq_readprio.c,v 1.13 2009/01/19 14:54:28 yamt Exp $	*/
+/*	$NetBSD: bufq_readprio.c,v 1.9 2007/10/08 17:02:51 ad Exp $	*/
 /*	NetBSD: subr_disk.c,v 1.61 2004/09/25 03:30:44 thorpej Exp 	*/
 
 /*-
@@ -17,6 +17,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -68,14 +75,14 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: bufq_readprio.c,v 1.13 2009/01/19 14:54:28 yamt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: bufq_readprio.c,v 1.9 2007/10/08 17:02:51 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/buf.h>
 #include <sys/bufq.h>
 #include <sys/bufq_impl.h>
-#include <sys/kmem.h>
+#include <sys/malloc.h>
 
 /*
  * Seek sort for disks.
@@ -214,57 +221,6 @@ bufq_prio_get(struct bufq_state *bufq, int remove)
 	return (bp);
 }
 
-static struct buf *
-bufq_prio_cancel(struct bufq_state *bufq, struct buf *buf)
-{
-	struct bufq_prio *prio = bufq->bq_private;
-	struct buf *bq;
-
-	/* search read queue */
-	TAILQ_FOREACH(bq, &prio->bq_read, b_actq) {
-		if (bq == buf) {
-			TAILQ_REMOVE(&prio->bq_read, bq, b_actq);
-			/* force new section */
-			prio->bq_next = NULL;
-			return buf;
-		}
-	}
-
-	/* not found in read queue, search write queue */
-	TAILQ_FOREACH(bq, &prio->bq_write, b_actq) {
-		if (bq == buf) {
-			if (bq == prio->bq_write_next) {
-				/*
-				 * Advance the write pointer before removing
-				 * bp since it is actually prio->bq_write_next.
-				 */
-				prio->bq_write_next =
-				    TAILQ_NEXT(prio->bq_write_next, b_actq);
-				TAILQ_REMOVE(&prio->bq_write, bq, b_actq);
-				if (prio->bq_write_next == NULL)
-					prio->bq_write_next =
-					    TAILQ_FIRST(&prio->bq_write);
-			} else {
-				TAILQ_REMOVE(&prio->bq_write, bq, b_actq);
-			}
-			/* force new section */
-			prio->bq_next = NULL;
-			return buf;
-		}
-	}
-
-	/* still not found */
-	return NULL;
-}
-
-static void
-bufq_prio_fini(struct bufq_state *bufq)
-{
-
-	KASSERT(bufq->bq_private != NULL);
-	kmem_free(bufq->bq_private, sizeof(struct bufq_prio));
-}
-
 static void
 bufq_readprio_init(struct bufq_state *bufq)
 {
@@ -272,9 +228,7 @@ bufq_readprio_init(struct bufq_state *bufq)
 
 	bufq->bq_get = bufq_prio_get;
 	bufq->bq_put = bufq_prio_put;
-	bufq->bq_cancel = bufq_prio_cancel;
-	bufq->bq_fini = bufq_prio_fini;
-	bufq->bq_private = kmem_zalloc(sizeof(struct bufq_prio), KM_SLEEP);
+	bufq->bq_private = malloc(sizeof(struct bufq_prio), M_DEVBUF, M_ZERO);
 	prio = (struct bufq_prio *)bufq->bq_private;
 	TAILQ_INIT(&prio->bq_read);
 	TAILQ_INIT(&prio->bq_write);

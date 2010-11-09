@@ -1,6 +1,6 @@
 #!/bin/sh -
 #
-#	$NetBSD: newvers.sh,v 1.53 2009/02/20 13:41:27 yamt Exp $
+#	$NetBSD: newvers.sh,v 1.47 2006/12/11 19:46:56 martin Exp $
 #
 # Copyright (c) 1984, 1986, 1990, 1993
 #	The Regents of the University of California.  All rights reserved.
@@ -40,7 +40,7 @@ if [ ! -e version ]; then
 fi
 
 v=$(cat version)
-t=$(LC_ALL=C date)
+t=$(date)
 u=${USER-root}
 h=$(hostname)
 d=$(pwd)
@@ -80,18 +80,18 @@ const char copyright[] =
 ${copyright}
 "\n";
 
+#if \
+    defined(__hppa__) || \
+    defined(__i386__) || \
+    defined(__sparc64__) || \
+    defined(__m68k__) || \
+    defined(__macppc__)
 /*
  * NetBSD identity note.
  */
-#ifdef __arm__
-#define _SHT_NOTE	%note
-#else
-#define _SHT_NOTE	@note
-#endif
-
 #define	_S(TAG)	__STRING(TAG)
 __asm(
-	".section\t\".note.netbsd.ident\", \"\"," _S(_SHT_NOTE) "\n"
+	".section\t\".note.netbsd.ident\", \"\",@note\n"
 	"\t.p2align\t2\n"
 	"\t.long\t" _S(ELF_NOTE_NETBSD_NAMESZ) "\n"
 	"\t.long\t" _S(ELF_NOTE_NETBSD_DESCSZ) "\n"
@@ -100,6 +100,7 @@ __asm(
 	"\t.long\t" _S(__NetBSD_Version__) "\n"
 	"\t.p2align\t2\n"
 );
+#endif
 
 _EOF
 echo $(expr ${v} + 1) > version

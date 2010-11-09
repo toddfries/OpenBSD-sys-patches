@@ -1,4 +1,4 @@
-/*	$NetBSD: puffs_sys.h,v 1.70 2008/01/28 21:06:37 pooka Exp $	*/
+/*	$NetBSD: puffs_sys.h,v 1.17 2007/01/02 15:51:22 pooka Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006  Antti Kantee.  All Rights Reserved.
@@ -15,6 +15,9 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. The name of the company nor the name of the author may be used to
+ *    endorse or promote products derived from this software without specific
+ *    prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
  * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -35,8 +38,9 @@
 #include <sys/param.h>
 #include <sys/select.h>
 #include <sys/kauth.h>
-#include <sys/mutex.h>
+#include <sys/lock.h>
 #include <sys/queue.h>
+#include <sys/lock.h>
 #include <sys/pool.h>
 
 #include <fs/puffs/puffs_msgif.h>
@@ -54,13 +58,45 @@ extern const struct vnodeopv_desc puffs_msgop_opv_desc;
 
 extern struct pool puffs_pnpool;
 
-#ifdef DEBUG
-#ifndef PUFFSDEBUG
-#define PUFFSDEBUG
-#endif
-#endif
+#define PUFFS_NAMEPREFIX "puffs:"
 
-#ifdef PUFFSDEBUG
+/*
+ * While a request is going to userspace, park the caller within the
+ * kernel.  This is the kernel counterpart of "struct puffs_req".
+ */
+struct puffs_park {
+	struct puffs_req	*park_preq;	/* req followed by buf	*/
+	size_t			park_copylen;	/* userspace copylength	*/
+
+	size_t 			park_maxlen;	/* max size, only for "adj" */
+						/* ^ XXX: overloaded */
+
+	TAILQ_ENTRY(puffs_park) park_entries;
+};
+
+#define PUFFS_SIZEOPREQ_UIO_IN 1
+#define PUFFS_SIZEOPREQ_UIO_OUT 2
+#define PUFFS_SIZEOPREQ_BUF_IN 3
+#define PUFFS_SIZEOPREQ_BUF_OUT 4
+
+#define PUFFS_SIZEOP_UIO(a)	\
+	(((a)==PUFFS_SIZEOPREQ_UIO_IN)||(a)==PUFFS_SIZEOPREQ_UIO_OUT)
+#define PUFFS_SIZEOP_BUF(a)	\
+	(((a)==PUFFS_SIZEOPREQ_BUF_IN)||(a)==PUFFS_SIZEOPREQ_BUF_OUT)
+
+/* XXX: alignment-optimization */
+struct puffs_sizepark {
+	uint64_t	pkso_reqid;
+	uint8_t		pkso_reqtype;
+
+	struct uio	*pkso_uio;
+	void		*pkso_copybuf;
+	size_t		pkso_bufsize;
+
+	TAILQ_ENTRY(puffs_sizepark) pkso_entries;
+};
+
+#ifdef DEBUG
 extern int puffsdebug; /* puffs_subr.c */
 #define DPRINTF(x) if (puffsdebug > 0) printf x
 #define DPRINTF_VERBOSE(x) if (puffsdebug > 1) printf x
@@ -74,75 +110,39 @@ extern int puffsdebug; /* puffs_subr.c */
 #define VPTOPP(vp) ((struct puffs_node *)(vp)->v_data)
 #define VPTOPNC(vp) (((struct puffs_node *)(vp)->v_data)->pn_cookie)
 #define VPTOPUFFSMP(vp) ((struct puffs_mount*)((struct puffs_node*)vp->v_data))
+#define FPTOPMP(fp) (((struct puffs_instance *)fp->f_data)->pi_pmp)
+#define FPTOPI(fp) ((struct puffs_instance *)fp->f_data)
 
-/* we don't pass the kernel overlay to userspace */
-#define PUFFS_TOFHSIZE(s) ((s)==0 ? (s) : (s)+4)
-#define PUFFS_FROMFHSIZE(s) ((s)==0 ? (s) : (s)-4)
-
-#define ALLOPS(pmp) (pmp->pmp_flags & PUFFS_KFLAG_ALLOPS)
 #define EXISTSOP(pmp, op) \
- (ALLOPS(pmp) || ((pmp)->pmp_vnopmask[PUFFS_VN_##op]))
+ (((pmp)->pmp_flags&PUFFS_KFLAG_ALLOPS) || ((pmp)->pmp_vnopmask[PUFFS_VN_##op]))
 
-#define PUFFS_USE_NAMECACHE(pmp)	\
-    (((pmp)->pmp_flags & PUFFS_KFLAG_NOCACHE_NAME) == 0)
-#define PUFFS_USE_PAGECACHE(pmp)	\
-    (((pmp)->pmp_flags & PUFFS_KFLAG_NOCACHE_PAGE) == 0)
-#define PUFFS_USE_FULLPNBUF(pmp)	\
-    ((pmp)->pmp_flags & PUFFS_KFLAG_LOOKUP_FULLPNBUF)
+#define PUFFS_DOCACHE(pmp)	(((pmp)->pmp_flags & PUFFS_KFLAG_NOCACHE) == 0)
 
-#define PUFFS_WCACHEINFO(pmp)	0
-
-struct puffs_newcookie {
-	puffs_cookie_t	pnc_cookie;
-
-	LIST_ENTRY(puffs_newcookie) pnc_entries;
-};
-
-TAILQ_HEAD(puffs_wq, puffs_msgpark);
-LIST_HEAD(puffs_node_hashlist, puffs_node);
+TAILQ_HEAD(puffs_wq, puffs_park);
 struct puffs_mount {
-	kmutex_t	 		pmp_lock;
+	struct simplelock		pmp_lock;
 
-	struct puffs_kargs		pmp_args;
+	struct puffs_args		pmp_args;
 #define pmp_flags pmp_args.pa_flags
 #define pmp_vnopmask pmp_args.pa_vnopmask
 
-	struct puffs_wq			pmp_msg_touser;
-	int				pmp_msg_touser_count;
-	kcondvar_t			pmp_msg_waiter_cv;
-	size_t				pmp_msg_maxsize;
+	struct puffs_wq			pmp_req_touser;
+	size_t				pmp_req_touser_waiters;
+	size_t				pmp_req_maxsize;
 
-	struct puffs_wq			pmp_msg_replywait;
+	struct puffs_wq			pmp_req_replywait;
+	TAILQ_HEAD(, puffs_sizepark)	pmp_req_sizepark;
 
-	struct puffs_node_hashlist	*pmp_pnodehash;
-	int				pmp_npnodehash;
-
-	LIST_HEAD(, puffs_newcookie)	pmp_newcookie;
+	LIST_HEAD(, puffs_node)		pmp_pnodelist;
 
 	struct mount			*pmp_mp;
-
 	struct vnode			*pmp_root;
-	puffs_cookie_t			pmp_root_cookie;
-	enum vtype			pmp_root_vtype;
-	vsize_t				pmp_root_vsize;
-	dev_t				pmp_root_rdev;
+	void				*pmp_rootcookie;
+	struct selinfo			*pmp_sel;	/* in puffs_instance */
 
-	struct putter_instance		*pmp_pi;
-
-	unsigned int			pmp_refcount;
-	kcondvar_t			pmp_refcount_cv;
-
-	kcondvar_t			pmp_unmounting_cv;
-	uint8_t				pmp_unmounting;
-
+	unsigned int			pmp_nextreq;
 	uint8_t				pmp_status;
-	uint8_t				pmp_suspend;
-
-	uint8_t				*pmp_curput;
-	size_t				pmp_curres;
-	void				*pmp_curopaq;
-
-	uint64_t			pmp_nextmsgid;
+	uint8_t				pmp_unmounting;
 };
 
 #define PUFFSTAT_BEFOREINIT	0
@@ -150,145 +150,59 @@ struct puffs_mount {
 #define PUFFSTAT_RUNNING	2
 #define PUFFSTAT_DYING		3 /* Do you want your possessions identified? */
 
-
-#define PNODE_NOREFS	0x01	/* no backend reference			*/
-#define PNODE_SUSPEND	0x04	/* issue all operations as FAF		*/
-#define PNODE_DOINACT	0x08	/* if inactive-on-demand, call inactive */
-
-#define PNODE_METACACHE_ATIME	0x10	/* cache atime metadata */
-#define PNODE_METACACHE_CTIME	0x20	/* cache atime metadata */
-#define PNODE_METACACHE_MTIME	0x40	/* cache atime metadata */
-#define PNODE_METACACHE_SIZE	0x80	/* cache atime metadata */
-#define PNODE_METACACHE_MASK	0xf0
-
+#define PNODE_INACTIVE	0x01
+#define PNODE_LOCKED	0x02
+#define PNODE_WANTED	0x04	
 struct puffs_node {
 	struct genfs_node pn_gnode;	/* genfs glue			*/
 
-	kmutex_t	pn_mtx;
-	int		pn_refcount;
-
-	puffs_cookie_t	pn_cookie;	/* userspace pnode cookie	*/
+	void		*pn_cookie;	/* userspace pnode cookie	*/
 	struct vnode	*pn_vp;		/* backpointer to vnode		*/
 	uint32_t	pn_stat;	/* node status			*/
 
-	struct selinfo	pn_sel;		/* for selecting on the node	*/
-	short		pn_revents;	/* available events		*/
-
-	/* metacache */
-	struct timespec	pn_mc_atime;
-	struct timespec	pn_mc_ctime;
-	struct timespec	pn_mc_mtime;
-	u_quad_t	pn_mc_size;
-
-	voff_t		pn_serversize;
-
-	LIST_ENTRY(puffs_node) pn_hashent;
+	LIST_ENTRY(puffs_node) pn_entries;
 };
 
-typedef void (*parkdone_fn)(struct puffs_mount *, struct puffs_req *, void *);
+int	puffs_start2(struct puffs_mount *, struct puffs_startreq *);
 
-struct puffs_msgpark;
-void	puffs_msgif_init(void);
-void	puffs_msgif_destroy(void);
-int	puffs_msgmem_alloc(size_t, struct puffs_msgpark **, void **, int);
-void	puffs_msgmem_release(struct puffs_msgpark *);
+int	puffs_vfstouser(struct puffs_mount *, int, void *, size_t);
+int	puffs_vntouser(struct puffs_mount *, int, void *, size_t, void *,
+		       struct vnode *, struct vnode *);
+void	puffs_vntouser_faf(struct puffs_mount *, int, void *, size_t, void *);
+int	puffs_vntouser_req(struct puffs_mount *, int, void *, size_t,
+			   void *, uint64_t, struct vnode *, struct vnode *);
+int	puffs_vntouser_adjbuf(struct puffs_mount *, int, void **, size_t *,
+		              size_t, void *, struct vnode *, struct vnode *);
 
-void	puffs_msg_setfaf(struct puffs_msgpark *);
-void	puffs_msg_setdelta(struct puffs_msgpark *, size_t);
-void	puffs_msg_setinfo(struct puffs_msgpark *, int, int, puffs_cookie_t);
-void	puffs_msg_setcall(struct puffs_msgpark *, parkdone_fn, void *);
-
-void	puffs_msg_enqueue(struct puffs_mount *, struct puffs_msgpark *);
-int	puffs_msg_wait(struct puffs_mount *, struct puffs_msgpark *);
-int	puffs_msg_wait2(struct puffs_mount *, struct puffs_msgpark *,
-			struct puffs_node *, struct puffs_node *);
-
-void	puffs_msg_sendresp(struct puffs_mount *, struct puffs_req *, int);
-
-int	puffs_getvnode(struct mount *, puffs_cookie_t, enum vtype,
-		       voff_t, dev_t, struct vnode **);
+int	puffs_getvnode(struct mount *, void *, enum vtype, voff_t, dev_t,
+		       struct vnode **);
 int	puffs_newnode(struct mount *, struct vnode *, struct vnode **,
-		      puffs_cookie_t, struct componentname *,
-		      enum vtype, dev_t);
+		      void *, struct componentname *, enum vtype, dev_t);
 void	puffs_putvnode(struct vnode *);
+struct vnode *puffs_pnode2vnode(struct puffs_mount *, void *);
+void	puffs_makecn(struct puffs_kcn *, const struct componentname *);
+void	puffs_credcvt(struct puffs_cred *, kauth_cred_t);
+pid_t	puffs_lwp2pid(struct lwp *);
 
-void	puffs_releasenode(struct puffs_node *);
-void	puffs_referencenode(struct puffs_node *);
-
-#define PUFFS_NOSUCHCOOKIE (-1)
-int	puffs_cookie2vnode(struct puffs_mount *, puffs_cookie_t, int, int,
-			   struct vnode **);
-void	puffs_makecn(struct puffs_kcn *, struct puffs_kcred *,
-		     const struct componentname *, int);
-void	puffs_credcvt(struct puffs_kcred *, kauth_cred_t);
-
-void	puffs_parkdone_asyncbioread(struct puffs_mount *,
-				    struct puffs_req *, void *);
-void	puffs_parkdone_asyncbiowrite(struct puffs_mount *,
-				     struct puffs_req *, void *);
-void	puffs_parkdone_poll(struct puffs_mount *, struct puffs_req *, void *);
-
-void	puffs_mp_reference(struct puffs_mount *);
-void	puffs_mp_release(struct puffs_mount *);
-
-void	puffs_gop_size(struct vnode *, off_t, off_t *, int); 
-void	puffs_gop_markupdate(struct vnode *, int);
-
-void	puffs_senderr(struct puffs_mount *, int, int, const char *,
-		      puffs_cookie_t);
-
-void	puffs_updatenode(struct puffs_node *, int, voff_t);
+void	puffs_updatenode(struct vnode *, int);
 #define PUFFS_UPDATEATIME	0x01
 #define PUFFS_UPDATECTIME	0x02
 #define PUFFS_UPDATEMTIME	0x04
 #define PUFFS_UPDATESIZE	0x08
+void	puffs_updatevpsize(struct vnode *);
 
-void	puffs_userdead(struct puffs_mount *);
+int	puffs_setpmp(pid_t, int, struct puffs_mount *);
+void	puffs_nukebypmp(struct puffs_mount *);
+
+uint64_t	puffs_getreqid(struct puffs_mount *);
+void		puffs_userdead(struct puffs_mount *);
+
+/* get/put called by ioctl handler */
+int	puffs_getop(struct puffs_mount *, struct puffs_reqh_get *, int);
+int	puffs_putop(struct puffs_mount *, struct puffs_reqh_put *);
 
 extern int (**puffs_vnodeop_p)(void *);
 
-/* for putter */
-int	puffs_msgif_getout(void *, size_t, int, uint8_t **, size_t *, void **);
-void	puffs_msgif_releaseout(void *, void *, int);
-int	puffs_msgif_dispatch(void *, struct putter_hdr *);
-size_t	puffs_msgif_waitcount(void *);
-int	puffs_msgif_close(void *);
-
-static __inline int
-checkerr(struct puffs_mount *pmp, int error, const char *str)
-{
-
-	if (error < 0 || error > ELAST) {
-		puffs_senderr(pmp, PUFFS_ERR_ERROR, error, str, NULL);
-		error = EPROTO;
-	}
-
-	return error;
-}
-
-#define PUFFS_MSG_VARS(type, a)						\
-	struct puffs_##type##msg_##a *a##_msg;				\
-	struct puffs_msgpark *park_##a = NULL
-
-#define PUFFS_MSG_ALLOC(type, a)					\
-	puffs_msgmem_alloc(sizeof(struct puffs_##type##msg_##a),	\
-	    &park_##a, (void *)& a##_msg, 1)
-
-#define PUFFS_MSG_RELEASE(a) 						\
-do {									\
-	if (park_##a) puffs_msgmem_release(park_##a);			\
-} while (/*CONSTCOND*/0)
-
-#define PUFFS_MSG_ENQUEUEWAIT(pmp, park, var)				\
-do {									\
-	puffs_msg_enqueue(pmp, park);					\
-	var = puffs_msg_wait(pmp, park);				\
-} while (/*CONSTCOND*/0)
-
-#define PUFFS_MSG_ENQUEUEWAIT2(pmp, park, vp1, vp2, var)		\
-do {									\
-	puffs_msg_enqueue(pmp, park);					\
-	var = puffs_msg_wait2(pmp, park, vp1, vp2);			\
-} while (/*CONSTCOND*/0)
+MALLOC_DECLARE(M_PUFFS);
 
 #endif /* _PUFFS_SYS_H_ */

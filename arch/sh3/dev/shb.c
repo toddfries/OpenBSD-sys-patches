@@ -1,4 +1,4 @@
-/*	$NetBSD: shb.c,v 1.13 2008/04/28 20:23:35 martin Exp $	*/
+/*	$NetBSD: shb.c,v 1.11 2006/10/29 02:10:12 uwe Exp $	*/
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -12,6 +12,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -27,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: shb.c,v 1.13 2008/04/28 20:23:35 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: shb.c,v 1.11 2006/10/29 02:10:12 uwe Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -37,17 +44,17 @@ __KERNEL_RCSID(0, "$NetBSD: shb.c,v 1.13 2008/04/28 20:23:35 martin Exp $");
 
 extern struct cfdriver shb_cd;
 
-static int shb_match(device_t, cfdata_t, void *);
-static void shb_attach(device_t, device_t, void *);
+static int shb_match(struct device *, struct cfdata *, void *);
+static void shb_attach(struct device *, struct device *, void *);
 static int shb_print(void *, const char *);
-static int shb_search(device_t, cfdata_t, const int *, void *);
+static int shb_search(struct device *, struct cfdata *, const int *, void *);
 
-CFATTACH_DECL_NEW(shb, 0,
+CFATTACH_DECL(shb, sizeof(struct device),
     shb_match, shb_attach, NULL, NULL);
 
 
 static int
-shb_match(device_t parent, cfdata_t cf, void *aux)
+shb_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct mainbus_attach_args *ma = aux;
 
@@ -58,17 +65,17 @@ shb_match(device_t parent, cfdata_t cf, void *aux)
 }
 
 static void
-shb_attach(device_t parent, device_t self, void *aux)
+shb_attach(struct device *parent, struct device *self, void *aux)
 {
 
-	aprint_naive("\n");
-	aprint_normal("\n");
+	printf("\n");
 
 	config_search_ia(shb_search, self, "shb", NULL);
 }
 
 static int
-shb_search(device_t parent, cfdata_t cf, const int *ldesc, void *aux)
+shb_search(struct device *parent, struct cfdata *cf,
+	   const int *ldesc, void *aux)
 {
 
 	if (config_match(parent, cf, NULL) > 0)

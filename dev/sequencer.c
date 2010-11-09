@@ -1,4 +1,4 @@
-/*	$NetBSD: sequencer.c,v 1.51 2009/01/11 10:40:27 cegger Exp $	*/
+/*	$NetBSD: sequencer.c,v 1.42 2007/10/08 16:18:02 ad Exp $	*/
 
 /*
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sequencer.c,v 1.51 2009/01/11 10:40:27 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sequencer.c,v 1.42 2007/10/08 16:18:02 ad Exp $");
 
 #include "sequencer.h"
 
@@ -262,12 +269,12 @@ seq_timeout(void *addr)
 	seq_startoutput(sc);
 	if (SEQ_QLEN(&sc->outq) < sc->lowat) {
 		seq_wakeup(&sc->wchan);
-		selnotify(&sc->wsel, 0, 0);
+		selnotify(&sc->wsel, 0);
 		if (sc->async != NULL) {
-			mutex_enter(proc_lock);
+			mutex_enter(&proclist_mutex);
 			if ((p = sc->async) != NULL)
 				psignal(p, SIGIO);
-			mutex_exit(proc_lock);
+			mutex_exit(&proclist_mutex);
 		}
 	}
 
@@ -319,12 +326,12 @@ seq_softintr(void *cookie)
 	struct proc *p;
 
 	seq_wakeup(&sc->rchan);
-	selnotify(&sc->rsel, 0, 0);
+	selnotify(&sc->rsel, 0);
 	if (sc->async != NULL) {
-		mutex_enter(proc_lock);
+		mutex_enter(&proclist_mutex);
 		if ((p = sc->async) != NULL)
 			psignal(p, SIGIO);
-		mutex_exit(proc_lock);
+		mutex_exit(&proclist_mutex);
 	}
 }
 
@@ -721,7 +728,7 @@ sequencerkqfilter(dev_t dev, struct knote *kn)
 		break;
 
 	default:
-		return (EINVAL);
+		return (1);
 	}
 
 	kn->kn_hook = sc;
@@ -901,12 +908,12 @@ seq_timer_waitabs(struct sequencer_softc *sc, uint32_t divs)
 	usec = (long long)divs * (long long)t->usperdiv; /* convert to usec */
 	when.tv_sec = usec / 1000000;
 	when.tv_usec = usec % 1000000;
-	DPRINTFN(4, ("seq_timer_waitabs: adjdivs=%d, sleep when=%"PRId64".%06"PRId64,
-	             divs, when.tv_sec, (uint64_t)when.tv_usec));
+	DPRINTFN(4, ("seq_timer_waitabs: adjdivs=%d, sleep when=%ld.%06ld",
+	             divs, when.tv_sec, when.tv_usec));
 	ADDTIMEVAL(&when, &t->reftime); /* abstime for end */
-	ticks = tvhzto(&when);
-	DPRINTFN(4, (" when+start=%"PRId64".%06"PRId64", tick=%d\n",
-		     when.tv_sec, (uint64_t)when.tv_usec, ticks));
+	ticks = hzto(&when);
+	DPRINTFN(4, (" when+start=%ld.%06ld, tick=%d\n",
+		     when.tv_sec, when.tv_usec, ticks));
 	if (ticks > 0) {
 #ifdef DIAGNOSTIC
 		if (ticks > 20 * hz) {
@@ -1170,7 +1177,7 @@ midiseq_open(int unit, int flags)
 	int major;
 	dev_t dev;
 	
-	major = devsw_name2chr("midi", NULL, 0);
+	major = devsw_name2blk("midi", NULL, 0);
 	dev = makedev(major, unit);
 
 	midi_getinfo(dev, &mi);
@@ -1182,7 +1189,7 @@ midiseq_open(int unit, int flags)
 	error = cdev_open(dev, flags, 0, 0);
 	if (error)
 		return (0);
-	sc = device_lookup_private(&midi_cd, unit);
+	sc = midi_cd.cd_devs[unit];
 	sc->seqopen = 1;
 	md = malloc(sizeof *md, M_DEVBUF, M_WAITOK|M_ZERO);
 	sc->seq_md = md;
@@ -1203,7 +1210,7 @@ midiseq_close(struct midi_dev *md)
 	int major;
 	dev_t dev;
 	
-	major = devsw_name2chr("midi", NULL, 0);
+	major = devsw_name2blk("midi", NULL, 0);
 	dev = makedev(major, md->unit);
 
 	DPRINTFN(2, ("midiseq_close: %d\n", md->unit));

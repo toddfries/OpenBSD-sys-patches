@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Module Name: dsmthdat - control method arguments and local variables
- *              $Revision: 1.5 $
+ *              xRevision: 1.88 $
  *
  ******************************************************************************/
 
@@ -9,7 +9,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2008, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2006, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -114,6 +114,9 @@
  *
  *****************************************************************************/
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: dsmthdat.c,v 1.1 2006/03/23 13:36:31 kochi Exp $");
+
 #define __DSMTHDAT_C__
 
 #include "acpi.h"
@@ -164,7 +167,7 @@ AcpiDsMethodDataGetType (
  *              special data types.
  *
  * NOTES:       WalkState fields are initialized to zero by the
- *              ACPI_ALLOCATE_ZEROED().
+ *              ACPI_MEM_CALLOCATE().
  *
  *              A pseudo-Namespace Node is assigned to each argument and local
  *              so that RefOf() can return a pointer to the Node.
@@ -178,32 +181,34 @@ AcpiDsMethodDataInit (
     UINT32                  i;
 
 
-    ACPI_FUNCTION_TRACE (DsMethodDataInit);
+    ACPI_FUNCTION_TRACE ("DsMethodDataInit");
 
 
     /* Init the method arguments */
 
     for (i = 0; i < ACPI_METHOD_NUM_ARGS; i++)
     {
-        ACPI_MOVE_32_TO_32 (&WalkState->Arguments[i].Name, NAMEOF_ARG_NTE);
+        ACPI_MOVE_32_TO_32 (&WalkState->Arguments[i].Name,
+                            NAMEOF_ARG_NTE);
         WalkState->Arguments[i].Name.Integer |= (i << 24);
-        WalkState->Arguments[i].DescriptorType = ACPI_DESC_TYPE_NAMED;
-        WalkState->Arguments[i].Type = ACPI_TYPE_ANY;
-        WalkState->Arguments[i].Flags =
-            ANOBJ_END_OF_PEER_LIST | ANOBJ_METHOD_ARG;
+        WalkState->Arguments[i].Descriptor    = ACPI_DESC_TYPE_NAMED;
+        WalkState->Arguments[i].Type          = ACPI_TYPE_ANY;
+        WalkState->Arguments[i].Flags         = ANOBJ_END_OF_PEER_LIST |
+                                                ANOBJ_METHOD_ARG;
     }
 
     /* Init the method locals */
 
     for (i = 0; i < ACPI_METHOD_NUM_LOCALS; i++)
     {
-        ACPI_MOVE_32_TO_32 (&WalkState->LocalVariables[i].Name, NAMEOF_LOCAL_NTE);
+        ACPI_MOVE_32_TO_32 (&WalkState->LocalVariables[i].Name,
+                            NAMEOF_LOCAL_NTE);
 
         WalkState->LocalVariables[i].Name.Integer |= (i << 24);
-        WalkState->LocalVariables[i].DescriptorType = ACPI_DESC_TYPE_NAMED;
-        WalkState->LocalVariables[i].Type = ACPI_TYPE_ANY;
-        WalkState->LocalVariables[i].Flags =
-            ANOBJ_END_OF_PEER_LIST | ANOBJ_METHOD_LOCAL;
+        WalkState->LocalVariables[i].Descriptor    = ACPI_DESC_TYPE_NAMED;
+        WalkState->LocalVariables[i].Type          = ACPI_TYPE_ANY;
+        WalkState->LocalVariables[i].Flags         = ANOBJ_END_OF_PEER_LIST |
+                                                     ANOBJ_METHOD_LOCAL;
     }
 
     return_VOID;
@@ -230,7 +235,7 @@ AcpiDsMethodDataDeleteAll (
     UINT32                  Index;
 
 
-    ACPI_FUNCTION_TRACE (DsMethodDataDeleteAll);
+    ACPI_FUNCTION_TRACE ("DsMethodDataDeleteAll");
 
 
     /* Detach the locals */
@@ -263,10 +268,6 @@ AcpiDsMethodDataDeleteAll (
         }
     }
 
-#if 0
-    AcpiDsClearImplicitReturn (WalkState);
-#endif
-
     return_VOID;
 }
 
@@ -297,7 +298,7 @@ AcpiDsMethodDataInitArgs (
     UINT32                  Index = 0;
 
 
-    ACPI_FUNCTION_TRACE_PTR (DsMethodDataInitArgs, Params);
+    ACPI_FUNCTION_TRACE_PTR ("DsMethodDataInitArgs", Params);
 
 
     if (!Params)
@@ -354,7 +355,7 @@ AcpiDsMethodDataGetNode (
     ACPI_WALK_STATE         *WalkState,
     ACPI_NAMESPACE_NODE     **Node)
 {
-    ACPI_FUNCTION_TRACE (DsMethodDataGetNode);
+    ACPI_FUNCTION_TRACE ("DsMethodDataGetNode");
 
 
     /*
@@ -428,7 +429,7 @@ AcpiDsMethodDataSetValue (
     ACPI_NAMESPACE_NODE     *Node;
 
 
-    ACPI_FUNCTION_TRACE (DsMethodDataSetValue);
+    ACPI_FUNCTION_TRACE ("DsMethodDataSetValue");
 
 
     ACPI_DEBUG_PRINT ((ACPI_DB_EXEC,
@@ -487,7 +488,7 @@ AcpiDsMethodDataGetValue (
     ACPI_OPERAND_OBJECT     *Object;
 
 
-    ACPI_FUNCTION_TRACE (DsMethodDataGetValue);
+    ACPI_FUNCTION_TRACE ("DsMethodDataGetValue");
 
 
     /* Validate the object descriptor */
@@ -599,7 +600,7 @@ AcpiDsMethodDataDeleteValue (
     ACPI_OPERAND_OBJECT     *Object;
 
 
-    ACPI_FUNCTION_TRACE (DsMethodDataDeleteValue);
+    ACPI_FUNCTION_TRACE ("DsMethodDataDeleteValue");
 
 
     /* Get the namespace node for the arg/local */
@@ -666,7 +667,7 @@ AcpiDsStoreObjectToLocal (
     ACPI_OPERAND_OBJECT     *NewObjDesc;
 
 
-    ACPI_FUNCTION_TRACE (DsStoreObjectToLocal);
+    ACPI_FUNCTION_TRACE ("DsStoreObjectToLocal");
     ACPI_DEBUG_PRINT ((ACPI_DB_EXEC, "Opcode=%X Index=%d Obj=%p\n",
         Opcode, Index, ObjDesc));
 
@@ -818,7 +819,7 @@ AcpiDsMethodDataGetType (
     ACPI_OPERAND_OBJECT     *Object;
 
 
-    ACPI_FUNCTION_TRACE (DsMethodDataGetType);
+    ACPI_FUNCTION_TRACE ("DsMethodDataGetType");
 
 
     /* Get the namespace node for the arg/local */

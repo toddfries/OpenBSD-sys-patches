@@ -1,7 +1,7 @@
-/*	$NetBSD: ipi.c,v 1.13 2008/05/11 21:48:02 ad Exp $	*/
+/*	$NetBSD: ipi.c,v 1.7 2005/12/11 12:19:47 christos Exp $	*/
 
 /*-
- * Copyright (c) 2000, 2008 The NetBSD Foundation, Inc.
+ * Copyright (c) 2000 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -17,6 +17,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -32,45 +39,43 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ipi.c,v 1.13 2008/05/11 21:48:02 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ipi.c,v 1.7 2005/12/11 12:19:47 christos Exp $");
 
 #include <sys/param.h> 
 #include <sys/device.h>
 #include <sys/systm.h>
-#include <sys/atomic.h>
-#include <sys/intr.h>
-#include <sys/cpu.h>
  
+#include <machine/intr.h>
+#include <machine/atomic.h>
 #include <machine/cpuvar.h>
 #include <machine/i82093var.h>
 #include <machine/i82489reg.h>
 #include <machine/i82489var.h>
 
-#ifdef MULTIPROCESSOR
 int
 x86_send_ipi(struct cpu_info *ci, int ipimask)
 {
 	int ret;
 
-	atomic_or_32(&ci->ci_ipis, ipimask);
+	x86_atomic_setbits_l(&ci->ci_ipis, ipimask);
 
 	/* Don't send IPI to CPU which isn't (yet) running. */
 	if (!(ci->ci_flags & CPUF_RUNNING))
 		return ENOENT;
 
-	ret = x86_ipi(LAPIC_IPI_VECTOR, ci->ci_cpuid, LAPIC_DLMODE_FIXED);
+	ret = x86_ipi(LAPIC_IPI_VECTOR, ci->ci_apicid, LAPIC_DLMODE_FIXED);
 	if (ret != 0) {
 		printf("ipi of %x from %s to %s failed\n",
 		    ipimask,
-		    device_xname(curcpu()->ci_dev),
-		    device_xname(ci->ci_dev));
+		    curcpu()->ci_dev->dv_xname,
+		    ci->ci_dev->dv_xname);
 	}
 
 	return ret;
 }
 
 void
-x86_broadcast_ipi(int ipimask)
+x86_broadcast_ipi (int ipimask)
 {
 	struct cpu_info *ci, *self = curcpu();
 	int count = 0;
@@ -81,7 +86,7 @@ x86_broadcast_ipi(int ipimask)
 			continue;
 		if ((ci->ci_flags & CPUF_RUNNING) == 0)
 			continue;
-		atomic_or_32(&ci->ci_ipis, ipimask);
+		x86_atomic_setbits_l(&ci->ci_ipis, ipimask);
 		count++;
 	}
 	if (!count)
@@ -96,12 +101,14 @@ x86_multicast_ipi(int cpumask, int ipimask)
 	struct cpu_info *ci;
 	CPU_INFO_ITERATOR cii;
 
-	if ((cpumask &= ~curcpu()->ci_cpumask) == 0)
+	cpumask &= ~(1U << cpu_number());
+	if (cpumask == 0)
 		return;
 
 	for (CPU_INFO_FOREACH(cii, ci)) {
-		if ((cpumask & ci->ci_cpumask) != 0)
-			x86_send_ipi(ci, ipimask);
+		if ((cpumask & (1U << ci->ci_cpuid)) == 0)
+			continue;
+		x86_send_ipi(ci, ipimask);
 	}
 }
 
@@ -109,10 +116,10 @@ void
 x86_ipi_handler(void)
 {
 	struct cpu_info *ci = curcpu();
-	uint32_t pending;
+	u_int32_t pending;
 	int bit;
 
-	pending = atomic_swap_32(&ci->ci_ipis, 0);
+	pending = x86_atomic_testset_ul(&ci->ci_ipis, 0);
 
 	KDASSERT((pending >> X86_NIPI) == 0);
 	while ((bit = ffs(pending)) != 0) {
@@ -122,23 +129,3 @@ x86_ipi_handler(void)
 		(*ipifunc[bit])(ci);
 	}
 }
-#else
-int
-x86_send_ipi(struct cpu_info *ci, int ipimask)
-{
-
-	return 0;
-}
-
-void
-x86_broadcast_ipi(int ipimask)
-{
-
-}
-
-void
-x86_multicast_ipi(int cpumask, int ipimask)
-{
-
-}
-#endif

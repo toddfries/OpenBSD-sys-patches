@@ -1,4 +1,4 @@
-/*	$NetBSD: kbc.c,v 1.12 2008/05/14 13:29:28 tsutsui Exp $	*/
+/*	$NetBSD: kbc.c,v 1.10 2005/12/11 12:18:23 christos Exp $	*/
 
 /*-
  * Copyright (C) 2001 Izumi Tsutsui.  All rights reserved.
@@ -11,6 +11,8 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -20,12 +22,12 @@
  * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
  * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kbc.c,v 1.12 2008/05/14 13:29:28 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kbc.c,v 1.10 2005/12/11 12:18:23 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -46,14 +48,14 @@ __KERNEL_RCSID(0, "$NetBSD: kbc.c,v 1.12 2008/05/14 13:29:28 tsutsui Exp $");
 #define KBC_SIZE 0x10 /* XXX */
 
 /* Definition of the driver for autoconfig. */
-static int  kbc_match(device_t, cfdata_t, void *);
-static void kbc_attach(device_t, device_t, void *);
+static int  kbc_match(struct device *, struct cfdata *, void *);
+static void kbc_attach(struct device *, struct device *, void *);
 static int  kbc_print(void *, const char *name);
 
-CFATTACH_DECL_NEW(kbc, 0,
+CFATTACH_DECL(kbc, sizeof(struct device),
     kbc_match, kbc_attach, NULL, NULL);
 
-static int kbc_match(device_t parent, cfdata_t cf, void *aux)
+static int kbc_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct hb_attach_args *ha = aux;
 	u_int addr;
@@ -74,7 +76,7 @@ static int kbc_match(device_t parent, cfdata_t cf, void *aux)
 }
 
 static void
-kbc_attach(device_t parent, device_t self, void *aux)
+kbc_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct hb_attach_args *ha = aux;
 	struct kbc_attach_args ka;
@@ -82,11 +84,11 @@ kbc_attach(device_t parent, device_t self, void *aux)
 	bus_space_handle_t bh;
 
 	if (bus_space_map(bt, ha->ha_address, KBC_SIZE, 0, &bh) != 0) {
-		aprint_error(": can't map device space\n");
+		printf("can't map device space\n");
 		return;
 	}
 
-	aprint_normal("\n");
+	printf("\n");
 
 	ka.ka_bt = bt;
 	ka.ka_bh = bh;

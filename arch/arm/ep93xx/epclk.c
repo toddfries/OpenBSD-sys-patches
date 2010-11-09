@@ -1,4 +1,4 @@
-/*	$NetBSD: epclk.c,v 1.16 2008/12/19 04:26:35 kenh Exp $	*/
+/*	$NetBSD: epclk.c,v 1.9 2006/09/10 22:04:18 gdamore Exp $	*/
 
 /*
  * Copyright (c) 2004 Jesse Off
@@ -47,14 +47,13 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: epclk.c,v 1.16 2008/12/19 04:26:35 kenh Exp $");
+__KERNEL_RCSID(0, "$NetBSD: epclk.c,v 1.9 2006/09/10 22:04:18 gdamore Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/time.h>
-#include <sys/timetc.h>
 #include <sys/device.h>
 
 #include <machine/bus.h>
@@ -70,11 +69,8 @@ __KERNEL_RCSID(0, "$NetBSD: epclk.c,v 1.16 2008/12/19 04:26:35 kenh Exp $");
 
 #include "opt_hz.h"
 
-#define	TIMER_FREQ	983040
-
 static int	epclk_match(struct device *, struct cfdata *, void *);
 static void	epclk_attach(struct device *, struct device *, void *);
-static u_int	epclk_get_timecount(struct timecounter *);
 
 void		rtcinit(void);
 
@@ -92,32 +88,38 @@ struct epclk_softc {
 	int			sc_intr;
 };
 
-static struct timecounter epclk_timecounter = {
-	epclk_get_timecount,	/* get_timecount */
-	0,			/* no poll_pps */
-	~0u,			/* counter_mask */
-	TIMER_FREQ,		/* frequency */
-	"epclk",		/* name */
-	100,			/* quality */
-	NULL,			/* prev */
-	NULL,			/* next */
-};
-
 static struct epclk_softc *epclk_sc = NULL;
+static u_int32_t tmark;
 
-CFATTACH_DECL(epclk, sizeof(struct epclk_softc),
-    epclk_match, epclk_attach, NULL, NULL);
 
-/* This is a quick ARM way to multiply by 983040/1000000 (w/o overflow) */
-#define US_TO_TIMER4VAL(x, y) { \
+/* This is a quick ARM way to multiply by 983040/1000000 */
+#define US_TO_TIMER4VAL(x) { \
 	u_int32_t hi, lo, scalar = 4222124650UL; \
 	__asm volatile ( \
 		"umull %0, %1, %2, %3;" \
 		: "=&r"(lo), "=&r"(hi) \
 		: "r"((x)), "r"(scalar) \
 	); \
-	(y) = hi; \
+	(x) = hi; \
 }
+
+/* This is a quick ARM way to multiply by 1000000/983040 */
+#define TIMER4VAL_TO_US(x) { \
+	u_int32_t hi, lo, scalar = 2184533333UL; \
+	__asm volatile ( \
+		"umull %0, %1, %2, %3;" \
+		"mov %1, %1, lsl #1;" \
+		"mov %0, %0, lsr #31;" \
+		"orr %1, %1, %0;" \
+		: "=&r"(lo), "=&r"(hi) \
+		: "r"((x)), "r"(scalar) \
+	); \
+	(x) = hi; \
+}
+
+
+CFATTACH_DECL(epclk, sizeof(struct epclk_softc),
+    epclk_match, epclk_attach, NULL, NULL);
 
 #define TIMER4VAL()	(*(volatile u_int32_t *)(EP93XX_APB_VBASE + \
 	EP93XX_APB_TIMERS + EP93XX_TIMERS_Timer4ValueLow))
@@ -134,7 +136,6 @@ epclk_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct epclk_softc		*sc;
 	struct epsoc_attach_args	*sa;
-	bool first_run;
 
 	printf("\n");
 
@@ -144,10 +145,8 @@ epclk_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_baseaddr = sa->sa_addr;
 	sc->sc_intr = sa->sa_intr;
 
-	if (epclk_sc == NULL) {
-		first_run = true;
+	if (epclk_sc == NULL)
 		epclk_sc = sc;
-	}
 
 	if (bus_space_map(sa->sa_iot, sa->sa_addr, sa->sa_size, 
 		0, &sc->sc_ioh))
@@ -161,9 +160,6 @@ epclk_attach(struct device *parent, struct device *self, void *aux)
 	/* clear and start the debug timer (Timer4) */
 	bus_space_write_4(sc->sc_iot, sc->sc_ioh, EP93XX_TIMERS_Timer4Enable, 0);
 	bus_space_write_4(sc->sc_iot, sc->sc_ioh, EP93XX_TIMERS_Timer4Enable, 0x100);
-
-	if (first_run)
-		tc_init(&epclk_timecounter);
 }
 
 /*
@@ -176,6 +172,7 @@ epclk_intr(void *arg)
 {
 	struct epclk_softc*	sc;
 
+	tmark = TIMER4VAL();
 	sc = epclk_sc;
 
 #if defined(HZ) && (HZ == 64)
@@ -242,15 +239,72 @@ cpu_initclocks(void)
 }
 
 /*
+ * microtime:
+ *
+ *	Fill in the specified timeval struct with the current time
+ *	accurate to the microsecond.
+ */
+void
+microtime(register struct timeval *tvp)
+{
+	u_int			oldirqstate;
+	u_int			tmarknow, delta;
+	static struct timeval	lasttv;
+
+#ifdef DEBUG
+	if (epclk_sc == NULL) {
+		printf("microtime: called before initialize epclk\n");
+		tvp->tv_sec = 0;
+		tvp->tv_usec = 0;
+		return;
+	}
+#endif
+
+	oldirqstate = disable_interrupts(I32_bit);
+	tmarknow = TIMER4VAL();
+
+        /* Fill in the timeval struct. */
+	*tvp = time;
+	if (__predict_false(tmarknow < tmark)) { /* overflow */
+		delta = tmarknow + (UINT_MAX - tmark);
+	} else {
+		delta = tmarknow - tmark;
+	}
+
+	TIMER4VAL_TO_US(delta);
+
+	tvp->tv_usec += delta;
+
+        /* Make sure microseconds doesn't overflow. */
+	while (__predict_false(tvp->tv_usec >= 1000000)) {
+		tvp->tv_usec -= 1000000;
+		tvp->tv_sec++;
+	}
+
+        /* Make sure the time has advanced. */
+	if (__predict_false(tvp->tv_sec == lasttv.tv_sec &&
+	    tvp->tv_usec <= lasttv.tv_usec)) {
+		tvp->tv_usec = lasttv.tv_usec + 1;
+		if (tvp->tv_usec >= 1000000) {
+			tvp->tv_usec -= 1000000;
+			tvp->tv_sec++;
+		}
+	}
+
+	lasttv = *tvp;
+
+	restore_interrupts(oldirqstate);
+}
+
+/*
  * delay:
  *
  *	Delay for at least N microseconds.
  */
 void
-delay(unsigned int n)
+delay(unsigned int len)
 {
-	unsigned int cur_tick, initial_tick;
-	int remaining;
+	u_int32_t	start, end, ticks;
 
 #ifdef DEBUG
 	if (epclk_sc == NULL) {
@@ -259,26 +313,104 @@ delay(unsigned int n)
 	}
 #endif
 
-	/*
-	 * Read the counter first, so that the rest of the setup overhead is
-	 * counted.
-	 */
-	initial_tick = TIMER4VAL();
-
-	US_TO_TIMER4VAL(n, remaining);
-
-	while (remaining > 0) {
-		cur_tick = TIMER4VAL();
-		if (cur_tick >= initial_tick)
-			remaining -= cur_tick - initial_tick;
-		else
-			remaining -= UINT_MAX - initial_tick + cur_tick + 1;
-		initial_tick = cur_tick;
+	ticks = start = TIMER4VAL();
+	US_TO_TIMER4VAL(len);
+	end = start + len;
+	while (start <= ticks && ticks > end) {
+		/* wait for Timer4ValueLow wraparound */
+		ticks = TIMER4VAL();
+	}
+	while (ticks <= end) {
+		ticks = TIMER4VAL();
 	}
 }
 
-static u_int
-epclk_get_timecount(struct timecounter *tc)
+#ifndef __HAVE_GENERIC_TODR
+
+todr_chip_handle_t todr_handle;
+
+/*
+ * todr_attach:
+ *
+ *	Set the specified time-of-day register as the system real-time clock.
+ */
+void
+todr_attach(todr_chip_handle_t todr)
 {
-	return TIMER4VAL();
+
+	if (todr_handle)
+		panic("todr_attach: rtc already configured");
+	todr_handle = todr;
 }
+
+/*
+ * inittodr:
+ *
+ *	Initialize time from the time-of-day register.
+ */
+#define	MINYEAR		2003	/* minimum plausible year */
+void
+inittodr(time_t base)
+{
+	time_t deltat;
+	int badbase;
+
+	if (base < (MINYEAR - 1970) * SECYR) {
+		printf("WARNING: preposterous time in file system\n");
+		/* read the system clock anyway */
+		base = (MINYEAR - 1970) * SECYR;
+		badbase = 1;
+	} else
+		badbase = 0;
+
+	if (todr_handle == NULL ||
+	    todr_gettime(todr_handle, &time) != 0 ||
+	    time.tv_sec == 0) {
+		/*
+		 * Believe the time in the file system for lack of
+		 * anything better, resetting the TODR.
+		 */
+		time.tv_sec = base;
+		time.tv_usec = 0;
+		if (todr_handle != NULL && !badbase) {
+			printf("WARNING: preposterous clock chip time\n");
+			resettodr();
+		}
+		goto bad;
+	}
+
+	if (!badbase) {
+		/*
+		 * See if we gained/lost two or more days; if
+		 * so, assume something is amiss.
+		 */
+		deltat = time.tv_sec - base;
+		if (deltat < 0)
+			deltat = -deltat;
+		if (deltat < 2 * SECDAY)
+			return;		/* all is well */
+		printf("WARNING: clock %s %ld days\n",
+		    time.tv_sec < base ? "lost" : "gained",
+		    (long)deltat / SECDAY);
+	}
+ bad:
+	printf("WARNING: CHECK AND RESET THE DATE!\n");
+}
+
+/*
+ * resettodr:
+ *
+ *	Reset the time-of-day register with the current time.
+ */
+void
+resettodr(void)
+{
+
+	if (time.tv_sec == 0)
+		return;
+
+	if (todr_handle != NULL &&
+	    todr_settime(todr_handle, &time) != 0)
+		printf("resettodr: failed to set time\n");
+}
+#endif

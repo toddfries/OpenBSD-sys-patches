@@ -1,4 +1,4 @@
-/*	$NetBSD: aica.c,v 1.18 2008/08/01 20:19:49 marcus Exp $	*/
+/*	$NetBSD: aica.c,v 1.12 2006/05/10 06:24:02 skrll Exp $	*/
 
 /*
  * Copyright (c) 2003 SHIMIZU Ryo <ryo@misakimix.org>
@@ -29,11 +29,10 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: aica.c,v 1.18 2008/08/01 20:19:49 marcus Exp $");
+__KERNEL_RCSID(0, "$NetBSD: aica.c,v 1.12 2006/05/10 06:24:02 skrll Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/device.h>
 #include <sys/kernel.h>
 #include <sys/proc.h>
 #include <sys/audioio.h>
@@ -239,16 +238,15 @@ aica_attach(struct device *parent, struct device *self, void *aux)
 
 	/* load microcode, and clear memory */
 	bus_space_set_region_4(sc->sc_memt, sc->sc_aica_memh,
-	    0, 0, AICA_RAM_SIZE / 4);
+	    0, 0, AICA_RAM_SIZE);
 
 	aica_memwrite(sc, 0, aica_armcode, sizeof(aica_armcode));
 
 	aica_enable(sc);
 
 	printf("%s: interrupting at %s\n", sc->sc_dev.dv_xname,
-	    sysasic_intr_string(SYSASIC_IRL9));
-	sysasic_intr_establish(SYSASIC_EVENT_AICA, IPL_BIO, SYSASIC_IRL9,
-	    aica_intr, sc);
+	    sysasic_intr_string(IPL_BIO));
+	sysasic_intr_establish(SYSASIC_EVENT_AICA, IPL_BIO, aica_intr, sc);
 
 	audio_attach_mi(&aica_hw_if, sc, &sc->sc_dev);
 
@@ -464,7 +462,7 @@ aica_set_params(void *addr, int setmode, int usemode,
 	int i;
 
 	i = auconv_set_converter(aica_formats, AICA_NFORMATS,
-				 AUMODE_PLAY, play, false, pfil);
+				 AUMODE_PLAY, play, FALSE, pfil);
 	if (i < 0)
 		return EINVAL;
 	hw = pfil->req_size > 0 ? &pfil->filters[0].param : play;

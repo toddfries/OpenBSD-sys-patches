@@ -1,4 +1,4 @@
-/* $NetBSD: wdog.c,v 1.5 2008/02/11 20:27:01 dyoung Exp $ */
+/* $NetBSD: wdog.c,v 1.4 2006/09/04 05:17:26 gdamore Exp $ */
 /*-
  * Copyright (c) 2006 Urbana-Champaign Independent Media Center.
  * Copyright (c) 2006 Garrett D'Amore.
@@ -79,7 +79,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: wdog.c,v 1.5 2008/02/11 20:27:01 dyoung Exp $");
+__KERNEL_RCSID(0, "$NetBSD: wdog.c,v 1.4 2006/09/04 05:17:26 gdamore Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -96,12 +96,13 @@ __KERNEL_RCSID(0, "$NetBSD: wdog.c,v 1.5 2008/02/11 20:27:01 dyoung Exp $");
 #define	WDOG_DEFAULT_PERIOD	5
 #endif
 
-static int wdog_match(device_t, struct cfdata *, void *);
-static void wdog_attach(device_t, device_t, void *);
+static int wdog_match(struct device *, struct cfdata *, void *);
+static void wdog_attach(struct device *, struct device *, void *);
 static int wdog_tickle(struct sysmon_wdog *);
 static int wdog_setmode(struct sysmon_wdog *);
 
 struct wdog_softc {
+	struct device		sc_dev;
 	struct sysmon_wdog	sc_smw;
 	int			sc_wdog_period;
 	int			sc_wdog_max;
@@ -109,37 +110,36 @@ struct wdog_softc {
 	uint32_t		sc_mult;
 };
 
-CFATTACH_DECL_NEW(wdog, sizeof(struct wdog_softc),
+CFATTACH_DECL(wdog, sizeof(struct wdog_softc),
     wdog_match, wdog_attach, NULL, NULL);
 
 static int
-wdog_match(device_t parent, struct cfdata *cf, void *aux)
+wdog_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 
 	return (1);
 }
 
 static void
-wdog_attach(device_t parent, device_t self, void *aux)
+wdog_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct wdog_softc *sc = device_private(self);
+	struct wdog_softc *sc = (void *)self;
 
 	sc->sc_mult = ar531x_bus_freq();
 	sc->sc_wdog_period = WDOG_DEFAULT_PERIOD;
 	sc->sc_wdog_max = 0xffffffffU / sc->sc_mult;
 	sc->sc_wdog_reload = sc->sc_wdog_period * sc->sc_mult;
-	aprint_normal(": %d second period\n", sc->sc_wdog_period);
+	printf(": %d second period\n", sc->sc_wdog_period);
 
-	sc->sc_smw.smw_name = device_xname(self);
+	sc->sc_smw.smw_name = sc->sc_dev.dv_xname;
 	sc->sc_smw.smw_cookie = sc;
 	sc->sc_smw.smw_setmode = wdog_setmode;
 	sc->sc_smw.smw_tickle = wdog_tickle;
 	sc->sc_smw.smw_period = sc->sc_wdog_period;
 
-	if (sysmon_wdog_register(&sc->sc_smw) != 0) {
-		aprint_error_dev(self,
-		    "unable to register with sysmon\n");
-	}
+	if (sysmon_wdog_register(&sc->sc_smw) != 0)
+		printf("%s: unable to register with sysmon\n",
+		    sc->sc_dev.dv_xname);
 }
 
 static int
@@ -176,6 +176,6 @@ wdog_setmode(struct sysmon_wdog *smw)
 
 		ar531x_wdog(sc->sc_wdog_reload);
 	}
-
+	
 	return (0);
 }

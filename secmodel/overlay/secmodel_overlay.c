@@ -1,4 +1,4 @@
-/* $NetBSD: secmodel_overlay.c,v 1.9 2008/02/23 23:32:30 elad Exp $ */
+/* $NetBSD: secmodel_overlay.c,v 1.4 2006/12/29 18:34:28 elad Exp $ */
 /*-
  * Copyright (c) 2006 Elad Efrat <elad@NetBSD.org>
  * All rights reserved.
@@ -11,7 +11,10 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed by Elad Efrat.
+ * 4. The name of the author may not be used to endorse or promote products
  *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
@@ -27,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: secmodel_overlay.c,v 1.9 2008/02/23 23:32:30 elad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: secmodel_overlay.c,v 1.4 2006/12/29 18:34:28 elad Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -40,8 +43,7 @@ __KERNEL_RCSID(0, "$NetBSD: secmodel_overlay.c,v 1.9 2008/02/23 23:32:30 elad Ex
 
 #include <secmodel/bsd44/bsd44.h>
 #include <secmodel/bsd44/suser.h>
-
-#include <secmodel/securelevel/securelevel.h>
+#include <secmodel/bsd44/securelevel.h>
 
 /*
  * Fall-back settings.
@@ -94,27 +96,27 @@ secmodel_overlay_init(void)
 	kauth_listen_scope(OVERLAY_ISCOPE_SYSTEM,
 	    secmodel_bsd44_suser_system_cb, NULL);
 	kauth_listen_scope(OVERLAY_ISCOPE_SYSTEM,
-	    secmodel_securelevel_system_cb, NULL);
+	    secmodel_bsd44_securelevel_system_cb, NULL);
 
 	kauth_listen_scope(OVERLAY_ISCOPE_PROCESS,
 	    secmodel_bsd44_suser_process_cb, NULL);
 	kauth_listen_scope(OVERLAY_ISCOPE_PROCESS,
-	    secmodel_securelevel_process_cb, NULL);
+	    secmodel_bsd44_securelevel_process_cb, NULL);
 
 	kauth_listen_scope(OVERLAY_ISCOPE_NETWORK,
 	    secmodel_bsd44_suser_network_cb, NULL);
 	kauth_listen_scope(OVERLAY_ISCOPE_NETWORK,
-	    secmodel_securelevel_network_cb, NULL);
+	    secmodel_bsd44_securelevel_network_cb, NULL);
 
 	kauth_listen_scope(OVERLAY_ISCOPE_MACHDEP,
 	    secmodel_bsd44_suser_machdep_cb, NULL);
 	kauth_listen_scope(OVERLAY_ISCOPE_MACHDEP,
-	    secmodel_securelevel_machdep_cb, NULL);
+	    secmodel_bsd44_securelevel_machdep_cb, NULL);
 
 	kauth_listen_scope(OVERLAY_ISCOPE_DEVICE,
 	    secmodel_bsd44_suser_device_cb, NULL);
 	kauth_listen_scope(OVERLAY_ISCOPE_DEVICE,
-	    secmodel_securelevel_device_cb, NULL);
+	    secmodel_bsd44_securelevel_device_cb, NULL);
 
 	secmodel_bsd44_init();
 }
@@ -153,7 +155,7 @@ SYSCTL_SETUP(sysctl_security_overlay_setup,
 		       CTLFLAG_PERMANENT|CTLFLAG_READWRITE,
 		       CTLTYPE_INT, "securelevel",
 		       SYSCTL_DESCR("System security level"),
-		       secmodel_securelevel_sysctl, 0, NULL, 0,
+		       secmodel_bsd44_sysctl_securelevel, 0, &securelevel, 0,
 		       CTL_CREATE, CTL_EOL);
 
 	sysctl_createv(clog, 0, &rnode, NULL,
@@ -169,7 +171,7 @@ SYSCTL_SETUP(sysctl_security_overlay_setup,
  * Start the overlay security model.
  */
 void
-secmodel_overlay_start(void)
+secmodel_start(void)
 {
 	secmodel_overlay_init();
 
@@ -185,14 +187,6 @@ secmodel_overlay_start(void)
 	    secmodel_overlay_machdep_cb, NULL);
 	kauth_listen_scope(KAUTH_SCOPE_DEVICE,
 	    secmodel_overlay_device_cb, NULL);
-
-	secmodel_register();
-}
-
-void
-secmodel_start(void)
-{
-	secmodel_overlay_start();
 }
 
 /*

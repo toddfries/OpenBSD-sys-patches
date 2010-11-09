@@ -1,4 +1,4 @@
-/*	$NetBSD: synaptics.c,v 1.21 2008/04/30 14:07:14 ad Exp $	*/
+/*	$NetBSD: synaptics.c,v 1.16 2007/10/19 12:01:03 ad Exp $	*/
 
 /*
  * Copyright (c) 2005, Steve C. Woodford
@@ -48,7 +48,6 @@
 #include "opt_pms.h"
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: synaptics.c,v 1.21 2008/04/30 14:07:14 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -147,8 +146,8 @@ pms_synaptics_probe_init(void *vsc)
 	    resp, 0);
 	if (res) {
 #ifdef SYNAPTICSDEBUG
-		aprint_normal_dev(psc->sc_dev,
-		    "synaptics_probe: Identify Touchpad error.\n");
+		aprint_error("%s: synaptics_probe: Identify Touchpad error.\n",
+		    psc->sc_dev.dv_xname);
 #endif
 		/*
 		 * Reset device in case the probe confused it.
@@ -162,8 +161,8 @@ pms_synaptics_probe_init(void *vsc)
 
 	if (resp[1] != SYNAPTICS_MAGIC_BYTE) {
 #ifdef SYNAPTICSDEBUG
-		aprint_normal_dev(psc->sc_dev,
-		    "synaptics_probe: Not synaptics.\n");
+		printf("%s: synaptics_probe: Not synaptics.\n",
+		    psc->sc_dev.dv_xname);
 #endif
 		res = 1;
 		goto doreset;
@@ -174,8 +173,8 @@ pms_synaptics_probe_init(void *vsc)
 	/* Check for minimum version and print a nice message. */
 	ver_major = resp[2] & 0x0f;
 	ver_minor = resp[0];
-	aprint_normal_dev(psc->sc_dev, "Synaptics touchpad version %d.%d\n",
-	    ver_major, ver_minor);
+	aprint_normal("%s: Synaptics touchpad version %d.%d\n",
+	    psc->sc_dev.dv_xname, ver_major, ver_minor);
 	if (ver_major * 10 + ver_minor < SYNAPTICS_MIN_VERSION) {
 		/* No capability query support. */
 		sc->caps = 0;
@@ -190,8 +189,8 @@ pms_synaptics_probe_init(void *vsc)
 	    resp, 0);
 	if (res) {
 		/* Hmm, failed to get capabilites. */
-		aprint_error_dev(psc->sc_dev,
-		    "synaptics_probe: Failed to query capabilities.\n");
+		aprint_error("%s: synaptics_probe: Failed to query "
+		    "capabilities.\n", psc->sc_dev.dv_xname);
 		goto doreset;
 	}
 
@@ -205,8 +204,8 @@ pms_synaptics_probe_init(void *vsc)
 
 	if (sc->caps & SYNAPTICS_CAP_EXTENDED) {
 #ifdef SYNAPTICSDEBUG
-		aprint_normal_dev(psc->sc_dev,
-		    "synaptics_probe: Capabilities 0x%04x.\n", sc->caps);
+		aprint_normal("%s: synaptics_probe: Capabilities 0x%04x.\n",
+		    psc->sc_dev.dv_xname, sc->caps);
 #endif
 		if (sc->caps & SYNAPTICS_CAP_PASSTHROUGH)
 			sc->flags |= SYN_FLAG_HAS_PASSTHROUGH;
@@ -226,9 +225,9 @@ pms_synaptics_probe_init(void *vsc)
 			    psc->sc_kbcslot, cmd, 1, 3, resp, 0);
 #ifdef SYNAPTICSDEBUG
 			if (res == 0)
-				aprint_normal_dev(psc->sc_dev,
-				    "synaptics_probe: Extended "
-				    "Capabilities 0x%02x.\n", resp[1]);
+				aprint_normal("%s: synaptics_probe: Extended "
+				    "Capabilities 0x%02x.\n",
+				    psc->sc_dev.dv_xname, resp[1]);
 #endif
 			if (!res && (resp[1] >> 4) >= 2) {
 				/* Yes. */
@@ -240,7 +239,7 @@ pms_synaptics_probe_init(void *vsc)
 	if (sc->flags) {
 		const char comma[] = ", ";
 		const char *sep = "";
-		aprint_normal_dev(psc->sc_dev, "");
+		aprint_normal("%s: ", psc->sc_dev.dv_xname);
 		if (sc->flags & SYN_FLAG_HAS_MIDDLE_BUTTON) {
 			aprint_normal("%sMiddle button", sep);
 			sep = comma;
@@ -266,7 +265,7 @@ pms_synaptics_probe_init(void *vsc)
 done:
 	pms_sysctl_synaptics(&clog);
 	pckbport_set_inputhandler(psc->sc_kbctag, psc->sc_kbcslot,
-	    pms_synaptics_input, psc, device_xname(psc->sc_dev));
+	    pms_synaptics_input, psc, psc->sc_dev.dv_xname);
 
 	return (0);
 }
@@ -299,8 +298,8 @@ pms_synaptics_enable(void *vsc)
 	sc->rem_x = sc->rem_y = 0;
 	sc->movement_history = 0;
 	if (res) {
-		aprint_error_dev(psc->sc_dev,
-		    "synaptics_enable: Error enabling device.\n");
+		printf("%s: synaptics_enable: Error enabling device.\n",
+		    psc->sc_dev.dv_xname);
 	}
 }
 
@@ -314,9 +313,8 @@ pms_synaptics_resume(void *vsc)
 	cmd[0] = PMS_RESET;
 	res = pckbport_poll_cmd(psc->sc_kbctag, psc->sc_kbcslot, cmd, 1, 2,
 	    resp, 1);
-	aprint_debug_dev(psc->sc_dev,
-	    "pms_synaptics_resume: reset on resume %d 0x%02x 0x%02x\n",
-	    res, resp[0], resp[1]);
+	printf("%s: pms_synaptics_resume: reset on resume %d 0x%02x 0x%02x\n",
+	    psc->sc_dev.dv_xname, res, resp[0], resp[1]);
 }
 
 static void
@@ -757,9 +755,8 @@ pms_synaptics_input(void *vsc, int data)
 	if (psc->inputstate > 0) {
 		timersub(&psc->current, &psc->last, &diff);
 		if (diff.tv_sec > 0 || diff.tv_usec >= 40000) {
-			aprint_debug_dev(psc->sc_dev,
-			    "pms_input: unusual delay (%ld.%06ld s), "
-			    "scheduling reset\n",
+			printf("%s: pms_input: unusual delay (%ld.%06ld s), "
+			    "scheduling reset\n", psc->sc_dev.dv_xname,
 			    (long)diff.tv_sec, (long)diff.tv_usec);
 			psc->inputstate = 0;
 			psc->sc_enabled = 0;
@@ -773,8 +770,8 @@ pms_synaptics_input(void *vsc, int data)
 	case 0:
 		if ((data & 0xc8) != 0x80) {
 #ifdef SYNAPTICSDEBUG
-			aprint_normal_dev(psc->sc_dev,
-			    "pms_input: 0x%02x out of sync\n", data);
+			printf("%s: pms_input: 0x%02x out of sync\n",
+			    psc->sc_dev.dv_xname, data);
 #endif
 			return;	/* not in sync yet, discard input */
 		}
@@ -783,8 +780,8 @@ pms_synaptics_input(void *vsc, int data)
 	case 3:
 		if ((data & 8) == 8) {
 #ifdef SYNAPTICSDEBUG
-			aprint_normal_dev(psc->sc_dev,
-			    "pms_input: dropped in relative mode, reset\n");
+			printf("%s: pms_input: dropped in relative mode, "
+			    "reset\n", psc->sc_dev.dv_xname);
 #endif
 			psc->inputstate = 0;
 			psc->sc_enabled = 0;

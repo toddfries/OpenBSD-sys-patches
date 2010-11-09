@@ -1,21 +1,17 @@
-/*     $NetBSD: vfs_syscalls.h,v 1.9 2009/01/11 02:45:56 christos Exp $        */
+/*     $NetBSD: vfs_syscalls.h,v 1.4 2007/05/12 17:28:20 dsl Exp $        */
 
 #ifndef _SYS_VFS_SYSCALLS_H_
 #define _SYS_VFS_SYSCALLS_H_
 
-#include <sys/fstypes.h>
-
 struct stat;
 struct statvfs;
-
-extern int dovfsusermount;
 
 /*
  * syscall helpers for compat code.
  */
 
 /* Status functions to kernel 'struct stat' buffers */
-int do_sys_stat(const char *, unsigned int, struct stat *);
+int do_sys_stat(struct lwp *, const char *, unsigned int, struct stat *);
 int do_fhstat(struct lwp *, const void *, size_t, struct stat *);
 int do_fhstatvfs(struct lwp *, const void *, size_t, struct statvfs *, int);
 
@@ -32,9 +28,5 @@ int	vfs_copyinfh_alloc(const void *, size_t, fhandle_t **);
 void	vfs_copyinfh_free(fhandle_t *);
 
 int dofhopen(struct lwp *, const void *, size_t, int, register_t *);
-
-int	do_sys_unlink(const char *, enum uio_seg);
-int	do_sys_rename(const char *, const char *, enum uio_seg, int);
-int	do_sys_mknod(struct lwp *l, const char *, mode_t, dev_t, register_t *);
 
 #endif /* _SYS_VFS_SYSCALLS_H_ */

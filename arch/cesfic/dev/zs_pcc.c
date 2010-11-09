@@ -1,4 +1,4 @@
-/*	$NetBSD: zs_pcc.c,v 1.9 2008/03/29 19:15:34 tsutsui Exp $	*/
+/*	$NetBSD: zs_pcc.c,v 1.6 2005/12/11 12:17:05 christos Exp $	*/
 
 /*
  * Copyright (c) 1997, 1999
@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: zs_pcc.c,v 1.9 2008/03/29 19:15:34 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: zs_pcc.c,v 1.6 2005/12/11 12:17:05 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -52,30 +52,33 @@ __KERNEL_RCSID(0, "$NetBSD: zs_pcc.c,v 1.9 2008/03/29 19:15:34 tsutsui Exp $");
 
 #include <cesfic/dev/zsvar.h>
 
-extern void sic_enable_int(int, int, int, int, int);
+extern void sic_enable_int __P((int, int, int, int, int));
 
-static int	zsc_pcc_match(device_t, cfdata_t, void *);
-static void	zsc_pcc_attach(device_t, device_t, void *);
+static int	zsc_pcc_match  __P((struct device *, struct cfdata *, void *));
+static void	zsc_pcc_attach __P((struct device *, struct device *, void *));
 
 static char *zsbase;
 
-CFATTACH_DECL_NEW(zsc_pcc, sizeof(struct zsc_softc),
+CFATTACH_DECL(zsc_pcc, sizeof(struct zsc_softc),
     zsc_pcc_match, zsc_pcc_attach, NULL, NULL);
 
 static int
-zsc_pcc_match(device_t parent, cfdata_t cf, void *aux)
+zsc_pcc_match(parent, cf, aux)
+	struct device *parent;
+	struct cfdata *cf;
+	void *aux;
 {
-
 	return (1);
 }
 
 static void
-zsc_pcc_attach(device_t parent, device_t self, void *aux)
+zsc_pcc_attach(parent, self, aux)
+	struct device *parent;
+	struct device *self;
+	void *aux;
 {
-	struct zsc_softc *zsc = device_private(self);
+	struct zsc_softc *zsc = (void *) self;
 	static int didintr;
-
-	zsc->zsc_dev = self;
 
 	if (!zsbase)
 		mainbus_map(0x58000000, 0x10000, 0, (void *)&zsbase);
@@ -93,17 +96,15 @@ zsc_pcc_attach(device_t parent, device_t self, void *aux)
 		(void) isrlink(zshard, zsc, 4, ISRPRI_TTY);
 		sic_enable_int(19, 0, 4, 4, 0);
 	}
-	zsc->zsc_softintr_cookie = softint_establish(SOFTINT_SERIAL,
-	    (void (*)(void *))zsc_intr_soft, zsc);
 
 	zs_write_reg(zsc->zsc_cs[0], 2, 0x18 + ZSHARD_PRI);
 	zs_write_reg(zsc->zsc_cs[0], 9, ZSWR9_MASTER_IE);
 }
 
 void
-zs_cnattach(void *base)
+zs_cnattach(base)
+	void *base;
 {
-
 	zsbase = base;
 
 	zs_cninit(zsbase);

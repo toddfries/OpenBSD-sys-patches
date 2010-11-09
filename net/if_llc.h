@@ -1,4 +1,4 @@
-/*	$NetBSD: if_llc.h,v 1.20 2008/09/08 23:36:55 gmcgarry Exp $	*/
+/*	$NetBSD: if_llc.h,v 1.17 2006/12/10 11:35:36 is Exp $	*/
 
 /*
  * Copyright (c) 1988, 1993
@@ -43,54 +43,54 @@
  */
 
 struct llc {
-	uint8_t llc_dsap;
-	uint8_t llc_ssap;
+	u_int8_t llc_dsap;
+	u_int8_t llc_ssap;
 	union {
 	    struct {
-		uint8_t control;
-		uint8_t format_id;
-		uint8_t class;
-		uint8_t window_x2;
-	    } type_u /* XXX __packed ??? */;
+		u_int8_t control;
+		u_int8_t format_id;
+		u_int8_t class;
+		u_int8_t window_x2;
+	    } type_u /* XXX __attribute__((__packed__)) ??? */;
 	    struct {
-		uint8_t num_snd_x2;
-		uint8_t num_rcv_x2;
-	    } type_i /* XXX __packed ??? */;
+		u_int8_t num_snd_x2;
+		u_int8_t num_rcv_x2;
+	    } type_i /* XXX __attribute__((__packed__)) ??? */;
 	    struct {
-		uint8_t control;
-		uint8_t num_rcv_x2;
-	    } type_s /* XXX __packed ??? */;
+		u_int8_t control;
+		u_int8_t num_rcv_x2;
+	    } type_s /* XXX __attribute__((__packed__)) ??? */;
 	    struct {
-	        uint8_t control;
+	        u_int8_t control;
 		/*
 		 * We cannot put the following fields in a structure because
 		 * the structure rounding might cause padding.
 		 */
-		uint8_t frmr_rej_pdu0;
-		uint8_t frmr_rej_pdu1;
-		uint8_t frmr_control;
-		uint8_t frmr_control_ext;
-		uint8_t frmr_cause;
-	    } type_frmr /* XXX __packed ??? */;
+		u_int8_t frmr_rej_pdu0;
+		u_int8_t frmr_rej_pdu1;
+		u_int8_t frmr_control;
+		u_int8_t frmr_control_ext;
+		u_int8_t frmr_cause;
+	    } type_frmr /* XXX __attribute__((__packed__)) ??? */;
 	    struct {
-		uint8_t  control;
-		uint8_t  org_code[3];
-		uint16_t ether_type;
-	    } type_snap __packed;
+		u_int8_t  control;
+		u_int8_t  org_code[3];
+		u_int16_t ether_type;
+	    } type_snap __attribute__((__packed__));
 	    struct {
-		uint8_t control;
-		uint8_t control_ext;
-	    } type_raw /* XXX __packed ??? */;
-	} llc_un /* XXX __packed ??? */;
-} __packed;
+		u_int8_t control;
+		u_int8_t control_ext;
+	    } type_raw /* XXX __attribute__((__packed__)) ??? */;
+	} llc_un /* XXX __attribute__((__packed__)) ??? */;
+} __attribute__((__packed__));
 
 struct frmrinfo {
-	uint8_t frmr_rej_pdu0;
-	uint8_t frmr_rej_pdu1;
-	uint8_t frmr_control;
-	uint8_t frmr_control_ext;
-	uint8_t frmr_cause;
-} __packed;
+	u_int8_t frmr_rej_pdu0;
+	u_int8_t frmr_rej_pdu1;
+	u_int8_t frmr_control;
+	u_int8_t frmr_control_ext;
+	u_int8_t frmr_cause;
+} __attribute__((__packed__));
 
 #define	llc_control		llc_un.type_u.control
 #define	llc_control_ext		llc_un.type_raw.control_ext

@@ -1,4 +1,4 @@
-/*	$NetBSD: sys_select.c,v 1.12 2009/01/11 02:45:52 christos Exp $	*/
+/*	$NetBSD: sys_select.c,v 1.4 2008/04/17 14:02:24 yamt Exp $	*/
 
 /*-
  * Copyright (c) 2007, 2008 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -70,7 +77,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sys_select.c,v 1.12 2009/01/11 02:45:52 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sys_select.c,v 1.4 2008/04/17 14:02:24 yamt Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -124,8 +131,7 @@ static syncobj_t select_sobj = {
  * Select system call.
  */
 int
-sys___pselect50(struct lwp *l, const struct sys___pselect50_args *uap,
-    register_t *retval)
+sys_pselect(struct lwp *l, const struct sys_pselect_args *uap, register_t *retval)
 {
 	/* {
 		syscallarg(int)				nd;
@@ -187,8 +193,7 @@ gettimeleft(struct timeval *tv, struct timeval *sleeptv)
 }
 
 int
-sys___select50(struct lwp *l, const struct sys___select50_args *uap,
-    register_t *retval)
+sys_select(struct lwp *l, const struct sys_select_args *uap, register_t *retval)
 {
 	/* {
 		syscallarg(int)			nd;
@@ -234,11 +239,9 @@ selcommon(lwp_t *l, register_t *retval, int nd, fd_set *u_in,
 		nd = p->p_fd->fd_nfiles;
 	}
 	ni = howmany(nd, NFDBITS) * sizeof(fd_mask);
-	if (ni * 6 > sizeof(smallbits)) {
+	if (ni * 6 > sizeof(smallbits))
 		bits = kmem_alloc(ni * 6, KM_SLEEP);
-		if (bits == NULL)
-			return ENOMEM;
-	} else
+	else
 		bits = smallbits;
 
 #define	getbits(name, x)						\
@@ -261,10 +264,10 @@ selcommon(lwp_t *l, register_t *retval, int nd, fd_set *u_in,
 
 	if (mask) {
 		sigminusset(&sigcantmask, mask);
-		mutex_enter(p->p_lock);
+		mutex_enter(&p->p_smutex);
 		oldmask = l->l_sigmask;
 		l->l_sigmask = *mask;
-		mutex_exit(p->p_lock);
+		mutex_exit(&p->p_smutex);
 	} else
 		oldmask = l->l_sigmask;	/* XXXgcc */
 
@@ -296,9 +299,10 @@ selcommon(lwp_t *l, register_t *retval, int nd, fd_set *u_in,
 			continue;
 		}
 		l->l_selflag = SEL_BLOCKING;
-		l->l_kpriority = true;
-		sleepq_enter(&sc->sc_sleepq, l, &sc->sc_lock);
+		lwp_lock(l);
+		lwp_unlock_to(l, &sc->sc_lock);
 		sleepq_enqueue(&sc->sc_sleepq, sc, "select", &select_sobj);
+		KERNEL_UNLOCK_ALL(NULL, &l->l_biglocks);	/* XXX */
 		error = sleepq_block(timo, true);
 		if (error != 0)
 			break;
@@ -306,9 +310,9 @@ selcommon(lwp_t *l, register_t *retval, int nd, fd_set *u_in,
 	selclear();
 
 	if (mask) {
-		mutex_enter(p->p_lock);
+		mutex_enter(&p->p_smutex);
 		l->l_sigmask = oldmask;
-		mutex_exit(p->p_lock);
+		mutex_exit(&p->p_smutex);
 	}
 
  done:
@@ -388,8 +392,7 @@ sys_poll(struct lwp *l, const struct sys_poll_args *uap, register_t *retval)
  * Poll system call.
  */
 int
-sys___pollts50(struct lwp *l, const struct sys___pollts50_args *uap,
-    register_t *retval)
+sys_pollts(struct lwp *l, const struct sys_pollts_args *uap, register_t *retval)
 {
 	/* {
 		syscallarg(struct pollfd *)		fds;
@@ -426,9 +429,9 @@ pollcommon(lwp_t *l, register_t *retval,
 	struct pollfd *u_fds, u_int nfds,
 	struct timeval *tv, sigset_t *mask)
 {
-	struct pollfd	smallfds[32];
-	struct pollfd	*fds;
+	char		smallbits[32 * sizeof(struct pollfd)];
 	proc_t		* const p = l->l_proc;
+	void *		bits;
 	sigset_t	oldmask;
 	int		ncoll, error, timo;
 	size_t		ni;
@@ -440,14 +443,12 @@ pollcommon(lwp_t *l, register_t *retval,
 		nfds = p->p_fd->fd_nfiles;
 	}
 	ni = nfds * sizeof(struct pollfd);
-	if (ni > sizeof(smallfds)) {
-		fds = kmem_alloc(ni, KM_SLEEP);
-		if (fds == NULL)
-			return ENOMEM;
-	} else
-		fds = smallfds;
+	if (ni > sizeof(smallbits))
+		bits = kmem_alloc(ni, KM_SLEEP);
+	else
+		bits = smallbits;
 
-	error = copyin(u_fds, fds, ni);
+	error = copyin(u_fds, bits, ni);
 	if (error)
 		goto done;
 
@@ -459,10 +460,10 @@ pollcommon(lwp_t *l, register_t *retval,
 
 	if (mask) {
 		sigminusset(&sigcantmask, mask);
-		mutex_enter(p->p_lock);
+		mutex_enter(&p->p_smutex);
 		oldmask = l->l_sigmask;
 		l->l_sigmask = *mask;
-		mutex_exit(p->p_lock);
+		mutex_exit(&p->p_smutex);
 	} else
 		oldmask = l->l_sigmask;	/* XXXgcc */
 
@@ -481,7 +482,7 @@ pollcommon(lwp_t *l, register_t *retval,
 		ncoll = sc->sc_ncoll;
 		l->l_selflag = SEL_SCANNING;
 
-		error = pollscan(l, fds, nfds, retval);
+		error = pollscan(l, (struct pollfd *)bits, nfds, retval);
 
 		if (error || *retval)
 			break;
@@ -493,9 +494,10 @@ pollcommon(lwp_t *l, register_t *retval,
 			continue;
 		}
 		l->l_selflag = SEL_BLOCKING;
-		l->l_kpriority = true;
-		sleepq_enter(&sc->sc_sleepq, l, &sc->sc_lock);
+		lwp_lock(l);
+		lwp_unlock_to(l, &sc->sc_lock);
 		sleepq_enqueue(&sc->sc_sleepq, sc, "select", &select_sobj);
+		KERNEL_UNLOCK_ALL(NULL, &l->l_biglocks);	/* XXX */
 		error = sleepq_block(timo, true);
 		if (error != 0)
 			break;
@@ -503,9 +505,9 @@ pollcommon(lwp_t *l, register_t *retval,
 	selclear();
 
 	if (mask) {
-		mutex_enter(p->p_lock);
+		mutex_enter(&p->p_smutex);
 		l->l_sigmask = oldmask;
-		mutex_exit(p->p_lock);
+		mutex_exit(&p->p_smutex);
 	}
  done:
 	/* poll is not restarted after signals... */
@@ -514,9 +516,9 @@ pollcommon(lwp_t *l, register_t *retval,
 	if (error == EWOULDBLOCK)
 		error = 0;
 	if (error == 0)
-		error = copyout(fds, u_fds, ni);
-	if (fds != smallfds)
-		kmem_free(fds, ni);
+		error = copyout(bits, u_fds, ni);
+	if (bits != smallbits)
+		kmem_free(bits, ni);
 	return (error);
 }
 
@@ -664,11 +666,10 @@ selnotify(struct selinfo *sip, int events, long knhint)
 		do {
 			index = ffs(mask) - 1;
 			mask &= ~(1 << index);
-			sc = cpu_lookup(index)->ci_data.cpu_selcpu;
+			sc = cpu_lookup_byindex(index)->ci_data.cpu_selcpu;
 			mutex_spin_enter(&sc->sc_lock);
 			sc->sc_ncoll++;
-			sleepq_wake(&sc->sc_sleepq, sc, (u_int)-1,
-			    &sc->sc_lock);
+			sleepq_wake(&sc->sc_sleepq, sc, (u_int)-1);
 		} while (__predict_false(mask != 0));
 	}
 }
@@ -725,7 +726,7 @@ selsysinit(struct cpu_info *ci)
 	    coherency_unit, KM_SLEEP);
 	sc = (void *)roundup2((uintptr_t)sc, coherency_unit);
 	mutex_init(&sc->sc_lock, MUTEX_DEFAULT, IPL_SCHED);
-	sleepq_init(&sc->sc_sleepq);
+	sleepq_init(&sc->sc_sleepq, &sc->sc_lock);
 	sc->sc_ncoll = 0;
 	sc->sc_mask = (1 << cpu_index(ci));
 	ci->ci_data.cpu_selcpu = sc;
@@ -822,8 +823,10 @@ pollsock(struct socket *so, const struct timeval *tvp, int events)
 			continue;
 		}
 		l->l_selflag = SEL_BLOCKING;
-		sleepq_enter(&sc->sc_sleepq, l, &sc->sc_lock);
+		lwp_lock(l);
+		lwp_unlock_to(l, &sc->sc_lock);
 		sleepq_enqueue(&sc->sc_sleepq, sc, "pollsock", &select_sobj);
+		KERNEL_UNLOCK_ALL(NULL, &l->l_biglocks);	/* XXX */
 		error = sleepq_block(timo, true);
 		if (error != 0)
 			break;

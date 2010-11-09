@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Module Name: rsio - IO and DMA resource descriptors
- *              $Revision: 1.4 $
+ *              xRevision: 1.34 $
  *
  ******************************************************************************/
 
@@ -9,7 +9,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2008, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2006, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -113,6 +113,9 @@
  * such license, approval or letter.
  *
  *****************************************************************************/
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: rsio.c,v 1.1 2006/03/23 13:36:31 kochi Exp $");
 
 #define __RSIO_C__
 
@@ -272,7 +275,7 @@ ACPI_RSCONVERT_INFO   AcpiRsConvertEndTag[2] =
  *
  ******************************************************************************/
 
-ACPI_RSCONVERT_INFO   AcpiRsGetStartDpf[6] =
+ACPI_RSCONVERT_INFO   AcpiRsGetStartDpf[5] =
 {
     {ACPI_RSC_INITGET,  ACPI_RESOURCE_TYPE_START_DEPENDENT,
                         ACPI_RS_SIZE (ACPI_RESOURCE_START_DEPENDENT),
@@ -283,12 +286,6 @@ ACPI_RSCONVERT_INFO   AcpiRsGetStartDpf[6] =
     {ACPI_RSC_SET8,     ACPI_RS_OFFSET (Data.StartDpf.CompatibilityPriority),
                         ACPI_ACCEPTABLE_CONFIGURATION,
                         2},
-
-    /* Get the descriptor length (0 or 1 for Start Dpf descriptor) */
-
-    {ACPI_RSC_1BITFLAG, ACPI_RS_OFFSET (Data.StartDpf.DescriptorLength),
-                        AML_OFFSET (StartDpf.DescriptorType),
-                        0},
 
     /* All done if there is no flag byte present in the descriptor */
 
@@ -312,10 +309,8 @@ ACPI_RSCONVERT_INFO   AcpiRsGetStartDpf[6] =
  *
  ******************************************************************************/
 
-ACPI_RSCONVERT_INFO   AcpiRsSetStartDpf[10] =
+ACPI_RSCONVERT_INFO   AcpiRsSetStartDpf[6] =
 {
-    /* Start with a default descriptor of length 1 */
-
     {ACPI_RSC_INITSET,  ACPI_RESOURCE_NAME_START_DEPENDENT,
                         sizeof (AML_RESOURCE_START_DEPENDENT),
                         ACPI_RSC_TABLE_SIZE (AcpiRsSetStartDpf)},
@@ -329,33 +324,6 @@ ACPI_RSCONVERT_INFO   AcpiRsSetStartDpf[10] =
     {ACPI_RSC_2BITFLAG, ACPI_RS_OFFSET (Data.StartDpf.PerformanceRobustness),
                         AML_OFFSET (StartDpf.Flags),
                         2},
-    /*
-     * All done if the output descriptor length is required to be 1
-     * (i.e., optimization to 0 bytes cannot be attempted)
-     */
-    {ACPI_RSC_EXIT_EQ,  ACPI_RSC_COMPARE_VALUE,
-                        ACPI_RS_OFFSET(Data.StartDpf.DescriptorLength),
-                        1},
-
-    /* Set length to 0 bytes (no flags byte) */
-
-    {ACPI_RSC_LENGTH,   0, 0, sizeof (AML_RESOURCE_START_DEPENDENT_NOPRIO)},
-
-    /*
-     * All done if the output descriptor length is required to be 0.
-     *
-     * TBD: Perhaps we should check for error if input flags are not
-     * compatible with a 0-byte descriptor.
-     */
-    {ACPI_RSC_EXIT_EQ,  ACPI_RSC_COMPARE_VALUE,
-                        ACPI_RS_OFFSET(Data.StartDpf.DescriptorLength),
-                        0},
-
-    /* Reset length to 1 byte (descriptor with flags byte) */
-
-    {ACPI_RSC_LENGTH,   0, 0, sizeof (AML_RESOURCE_START_DEPENDENT)},
-
-
     /*
      * All done if flags byte is necessary -- if either priority value
      * is not ACPI_ACCEPTABLE_CONFIGURATION

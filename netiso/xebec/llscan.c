@@ -1,4 +1,4 @@
-/*	$NetBSD: llscan.c,v 1.12 2007/01/18 12:43:38 cbiere Exp $	*/
+/*	$NetBSD: llscan.c,v 1.11 2005/12/11 12:25:16 christos Exp $	*/
 
 /*
  * ************************* NOTICE *******************************
@@ -11,7 +11,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: llscan.c,v 1.12 2007/01/18 12:43:38 cbiere Exp $");
+__KERNEL_RCSID(0, "$NetBSD: llscan.c,v 1.11 2005/12/11 12:25:16 christos Exp $");
 
 #include "xebec.h"
 #include "llparse.h"
@@ -266,18 +266,17 @@ char o,c;
 int
 getch()
 {
-	int c;
+	char c;
 	extern FILE *infile;
 	extern int lineno;
 
-	c = fgetc(infile);
+	c = fgetc(infile) ;
 	if (c == '\n') lineno++;
-	if (c == EOF) c = 0;
-	if (c & ~0x7f) c = 0;
-	if (feof(infile)) c = 0;
+	if ((int)c ==  EOF) c = (char)0;
+	if (feof(infile)) c = (char) 0;
 	IFDEBUG(e)
 		fprintf(stdout, "getch: 0x%x\n", c);
-		(void) fputc(c, stdout);
+		(void) fputc( c, stdout);
 		fflush(stdout);
 	ENDDEBUG
 

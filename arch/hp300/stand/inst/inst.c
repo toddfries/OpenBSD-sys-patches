@@ -1,4 +1,4 @@
-/*	$NetBSD: inst.c,v 1.18 2008/07/16 13:44:51 tsutsui Exp $	*/
+/*	$NetBSD: inst.c,v 1.15 2005/12/24 22:45:35 perry Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -101,7 +108,7 @@ int	a2int(char *);
 struct	inst_command {
 	char	*ic_cmd;		/* command name */
 	char	*ic_desc;		/* command description */
-	void	(*ic_func)(void);	/* handling function */
+	void	(*ic_func) __P((void));	/* handling function */
 } inst_commands[] = {
 	{ "disklabel",	"place partition map on disk",	dsklabel },
 	{ "miniroot",	"place miniroot on disk",	miniroot },
@@ -123,8 +130,8 @@ main(void)
 	netio_ask = 1;
 
 	printf("\n");
-	printf(">> %s, Revision %s (from NetBSD %s)\n",
-	    bootprog_name, bootprog_rev, bootprog_kernrev);
+	printf(">> %s, Revision %s\n", bootprog_name, bootprog_rev);
+	printf(">> (%s, %s)\n", bootprog_maker, bootprog_date);
 	printf(">> HP 9000/%s SPU\n", getmachineid());
 	gethelp();
 

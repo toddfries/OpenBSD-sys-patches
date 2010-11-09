@@ -1,4 +1,4 @@
-# $NetBSD: GENERIC,v 1.78 2009/01/24 05:06:06 mrg Exp $
+# $NetBSD: GENERIC,v 1.70 2006/11/11 18:47:11 jmmv Exp $
 #
 # GENERIC machine description file
 # 
@@ -22,7 +22,7 @@ include		"arch/mvme68k/conf/std.mvme68k"
 
 options 	INCLUDE_CONFIG_FILE	# embed config file in kernel binary
 
-#ident 		"GENERIC-$Revision: 1.78 $"
+#ident 		"GENERIC-$Revision: 1.70 $"
 
 # Boards this kernel supports
 options 	MVME147
@@ -45,6 +45,7 @@ options 	M060SP
 
 #options 	SYSVSHM
 options 	KTRACE
+#options 	SYSTRACE	# system call vetting via systrace(1)
 options 	COMPAT_43
 
 options 	USERCONF	# userconf(4) support
@@ -69,7 +70,7 @@ file-system	PTYFS		# /dev/pts/N support
 
 options 	NFSSERVER
 #options 	FFS_EI		# FFS Endian Independant support
-options 	WAPBL		# File system journaling support - Experimental
+options 	SOFTDEP		# FFS soft updates support.
 options 	FFS_NO_SNAPSHOT	# No FFS snapshot support
 #options	UFS_DIRHASH	# UFS Large Directory Hashing - Experimental
 
@@ -110,8 +111,6 @@ options 	COMPAT_15
 options 	COMPAT_16
 options 	COMPAT_20
 options 	COMPAT_30	# NetBSD 3.0 compatibility.
-options 	COMPAT_40	# NetBSD 4.0 compatibility.
-options 	COMPAT_50	# NetBSD 5.0 compatibility.
 #options 	COMPAT_SUNOS
 #options 	COMPAT_M68K4K	# compatibility with NetBSD/m68k4k binaries
 #options 	COMPAT_LINUX	# compatibility with Linux/m68k binaries
@@ -128,11 +127,6 @@ options 	NFS_BOOT_DHCP		# Diskless client w/ dhcp
 options 	NFS_BOOT_BOOTP		# Diskless client w/ bootp
 options 	NFS_BOOT_BOOTPARAM	# Diskless client w/ bootparamd
 
-#
-# accept filters
-pseudo-device   accf_data		# "dataready" accept filter
-pseudo-device   accf_http		# "httpready" accept filter
-
 pseudo-device	sl
 pseudo-device	ppp 
 pseudo-device	pppoe			# PPP over Ethernet (RFC 2516)
@@ -145,7 +139,6 @@ pseudo-device	stf			# 6to4 IPv6 over IPv4 encapsulation
 pseudo-device	vlan			# IEEE 802.1q encapsulation
 pseudo-device	bridge			# simple inter-network bridging
 #options	BRIDGE_IPF		# bridge uses IP/IPv6 pfil hooks too
-pseudo-device	agr			# IEEE 802.3ad link aggregation
 pseudo-device	pty			# pseudo-terminals
 #pseudo-device	cgd		4	# cryptographic disk devices
 pseudo-device	vnd 

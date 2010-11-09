@@ -1,4 +1,4 @@
-/*	$NetBSD: kern_physio.c,v 1.89 2008/11/09 12:18:07 bouyer Exp $	*/
+/*	$NetBSD: kern_physio.c,v 1.85 2007/11/06 00:42:42 ad Exp $	*/
 
 /*-
  * Copyright (c) 1982, 1986, 1990, 1993
@@ -71,7 +71,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kern_physio.c,v 1.89 2008/11/09 12:18:07 bouyer Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kern_physio.c,v 1.85 2007/11/06 00:42:42 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -91,6 +91,12 @@ struct workqueue *physio_workqueue;
  *	Leffler, et al.: The Design and Implementation of the 4.3BSD
  *	    UNIX Operating System (Addison Welley, 1989)
  * on pages 231-233.
+ *
+ * The routines "getphysbuf" and "putphysbuf" steal and return a swap
+ * buffer.  Leffler, et al., says that swap buffers are used to do the
+ * I/O, so raw I/O requests don't have to be single-threaded.  Of course,
+ * NetBSD doesn't use "swap buffers" -- we have our own memory pool for
+ * buffer descriptors.
  */
 
 /* #define	PHYSIO_DEBUG */
@@ -105,10 +111,42 @@ struct physio_stat {
 	int ps_error;
 	int ps_failed;
 	off_t ps_endoffset;
-	buf_t *ps_orig_bp;
 	kmutex_t ps_lock;
 	kcondvar_t ps_cv;
 };
+
+/* abuse these flags of struct buf */
+#define	B_DONTFREE	B_AGE
+
+/*
+ * allocate a buffer structure for use in physical I/O.
+ */
+static struct buf *
+getphysbuf(void)
+{
+	struct buf *bp;
+
+	bp = getiobuf();
+	bp->b_error = 0;
+	bp->b_flags = B_BUSY;
+	return(bp);
+}
+
+/*
+ * get rid of a swap buffer structure which has been used in physical I/O.
+ */
+static void
+putphysbuf(struct buf *bp)
+{
+
+	if ((bp->b_flags & B_DONTFREE) != 0) {
+		return;
+	}
+
+	if (__predict_false(bp->b_flags & B_WANTED))
+		panic("putphysbuf: private buf B_WANTED");
+	putiobuf(bp);
+}
 
 static void
 physio_done(struct work *wk, void *dummy)
@@ -163,8 +201,7 @@ physio_done(struct work *wk, void *dummy)
 	cv_signal(&ps->ps_cv);
 	mutex_exit(&ps->ps_lock);
 
-	if (bp != ps->ps_orig_bp)
-		putiobuf(bp);
+	putphysbuf(bp);
 }
 
 static void
@@ -173,13 +210,10 @@ physio_biodone(struct buf *bp)
 #if defined(DIAGNOSTIC)
 	struct physio_stat *ps = bp->b_private;
 	size_t todo = bp->b_bufsize;
-	size_t done = bp->b_bcount - bp->b_resid;
 
 	KASSERT(ps->ps_running > 0);
 	KASSERT(bp->b_bcount <= todo);
 	KASSERT(bp->b_resid <= bp->b_bcount);
-	if (done == todo)
-		KASSERT(bp->b_error == 0);
 #endif /* defined(DIAGNOSTIC) */
 
 	workqueue_enqueue(physio_workqueue, &bp->b_work, NULL);
@@ -203,7 +237,7 @@ physio_init(void)
 	KASSERT(physio_workqueue == NULL);
 
 	error = workqueue_create(&physio_workqueue, "physiod",
-	    physio_done, NULL, PRI_BIO, IPL_BIO, WQ_MPSAFE);
+	    physio_done, NULL, PRI_BIO, IPL_BIO, 0);
 
 	return error;
 }
@@ -223,7 +257,8 @@ physio(void (*strategy)(struct buf *), struct buf *obp, dev_t dev, int flags,
 	struct iovec *iovp;
 	struct lwp *l = curlwp;
 	struct proc *p = l->l_proc;
-	int i, error;
+	int i, s;
+	int error;
 	struct buf *bp = NULL;
 	struct physio_stat *ps;
 	int concurrency = PHYSIO_CONCURRENCY - 1;
@@ -243,7 +278,6 @@ physio(void (*strategy)(struct buf *), struct buf *obp, dev_t dev, int flags,
 	/* ps->ps_running = 0; */
 	/* ps->ps_error = 0; */
 	/* ps->ps_failed = 0; */
-	ps->ps_orig_bp = obp;
 	ps->ps_endoffset = -1;
 	mutex_init(&ps->ps_lock, MUTEX_DEFAULT, IPL_NONE);
 	cv_init(&ps->ps_cv, "physio");
@@ -251,11 +285,24 @@ physio(void (*strategy)(struct buf *), struct buf *obp, dev_t dev, int flags,
 	/* Make sure we have a buffer, creating one if necessary. */
 	if (obp != NULL) {
 		/* [raise the processor priority level to splbio;] */
-		mutex_enter(&bufcache_lock);
+		s = splbio();
+		simple_lock(&obp->b_interlock);
+
+		/* [while the buffer is marked busy] */
+		while (obp->b_flags & B_BUSY) {
+			/* [mark the buffer wanted] */
+			obp->b_flags |= B_WANTED;
+			/* [wait until the buffer is available] */
+			ltsleep(obp, PRIBIO+1, "physbuf", 0, &obp->b_interlock);
+		}
+
 		/* Mark it busy, so nobody else will use it. */
-		while (bbusy(obp, false, 0, NULL) == EPASSTHROUGH)
-			;
-		mutex_exit(&bufcache_lock);
+		obp->b_flags = B_BUSY | B_DONTFREE;
+
+		/* [lower the priority level] */
+		simple_unlock(&obp->b_interlock);
+		splx(s);
+
 		concurrency = 0; /* see "XXXkludge" comment below */
 	}
 
@@ -282,12 +329,12 @@ physio(void (*strategy)(struct buf *), struct buf *obp, dev_t dev, int flags,
 				 */
 				bp = obp;
 			} else {
-				bp = getiobuf(NULL, true);
-				bp->b_cflags = BC_BUSY;
+				bp = getphysbuf();
 			}
 			bp->b_dev = dev;
 			bp->b_proc = p;
 			bp->b_private = ps;
+			bp->b_vp = NULL;
 
 			/*
 			 * [mark the buffer busy for physical I/O]
@@ -296,9 +343,8 @@ physio(void (*strategy)(struct buf *), struct buf *obp, dev_t dev, int flags,
 			 * "Set by physio for raw transfers.", in addition
 			 * to the "busy" and read/write flag.)
 			 */
-			bp->b_oflags = 0;
-			bp->b_cflags = BC_BUSY;
-			bp->b_flags = flags | B_PHYS | B_RAW;
+			bp->b_flags = (bp->b_flags & B_DONTFREE) |
+			    B_BUSY | B_PHYS | B_RAW | B_CALL | flags;
 			bp->b_iodone = physio_biodone;
 
 			/* [set up the buffer for a maximum-sized transfer] */
@@ -380,8 +426,8 @@ done_locked:
 	} else {
 		KASSERT(ps->ps_endoffset == -1);
 	}
-	if (bp != NULL && bp != obp) {
-		putiobuf(bp);
+	if (bp != NULL) {
+		putphysbuf(bp);
 	}
 	if (error == 0) {
 		error = ps->ps_error;
@@ -396,18 +442,23 @@ done_locked:
 	 * Also, if we had to steal it, give it back.
 	 */
 	if (obp != NULL) {
-		KASSERT((obp->b_cflags & BC_BUSY) != 0);
+		KASSERT((obp->b_flags & B_BUSY) != 0);
+		KASSERT((obp->b_flags & B_DONTFREE) != 0);
 
 		/*
 		 * [if another process is waiting for the raw I/O buffer,
 		 *    wake up processes waiting to do physical I/O;
 		 */
-		mutex_enter(&bufcache_lock);
-		obp->b_cflags &= ~(BC_BUSY | BC_WANTED);
-		obp->b_flags &= ~(B_PHYS | B_RAW);
-		obp->b_iodone = NULL;
-		cv_broadcast(&obp->b_busy);
-		mutex_exit(&bufcache_lock);
+		s = splbio();
+		simple_lock(&obp->b_interlock);
+		obp->b_flags &=
+		    ~(B_BUSY | B_PHYS | B_RAW | B_CALL | B_DONTFREE);
+		if ((obp->b_flags & B_WANTED) != 0) {
+			obp->b_flags &= ~B_WANTED;
+			wakeup(obp);
+		}
+		simple_unlock(&obp->b_interlock);
+		splx(s);
 	}
 	uvm_lwp_rele(l);
 

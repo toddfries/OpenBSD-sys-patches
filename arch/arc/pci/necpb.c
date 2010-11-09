@@ -1,4 +1,4 @@
-/*	$NetBSD: necpb.c,v 1.32 2008/07/05 08:46:25 tsutsui Exp $	*/
+/*	$NetBSD: necpb.c,v 1.28 2006/06/24 03:50:38 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 1997, 1998 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -61,7 +68,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: necpb.c,v 1.32 2008/07/05 08:46:25 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: necpb.c,v 1.28 2006/06/24 03:50:38 tsutsui Exp $");
 
 #include "opt_pci.h"
 
@@ -99,32 +106,32 @@ __KERNEL_RCSID(0, "$NetBSD: necpb.c,v 1.32 2008/07/05 08:46:25 tsutsui Exp $");
 
 #include "ioconf.h"
 
-static int	necpbmatch(struct device *, struct cfdata *, void *);
-static void	necpbattach(struct device *, struct device *, void *);
+int	necpbmatch(struct device *, struct cfdata *, void *);
+void	necpbattach(struct device *, struct device *, void *);
 
-static void	necpb_attach_hook(struct device *, struct device *,
+void		necpb_attach_hook(struct device *, struct device *,
 		    struct pcibus_attach_args *);
-static int	necpb_bus_maxdevs(pci_chipset_tag_t, int);
-static pcitag_t	necpb_make_tag(pci_chipset_tag_t, int, int, int);
-static void	necpb_decompose_tag(pci_chipset_tag_t, pcitag_t, int *,
+int		necpb_bus_maxdevs(pci_chipset_tag_t, int);
+pcitag_t	necpb_make_tag(pci_chipset_tag_t, int, int, int);
+void		necpb_decompose_tag(pci_chipset_tag_t, pcitag_t, int *,
 		    int *, int *);
-static pcireg_t	necpb_conf_read(pci_chipset_tag_t, pcitag_t, int);
-static void	necpb_conf_write(pci_chipset_tag_t, pcitag_t, int, pcireg_t);
-static int	necpb_intr_map(struct pci_attach_args *, pci_intr_handle_t *);
-static const char *necpb_intr_string(pci_chipset_tag_t, pci_intr_handle_t);
-static void	*necpb_intr_establish(pci_chipset_tag_t, pci_intr_handle_t,
+pcireg_t	necpb_conf_read(pci_chipset_tag_t, pcitag_t, int);
+void		necpb_conf_write(pci_chipset_tag_t, pcitag_t, int, pcireg_t);
+int		necpb_intr_map(struct pci_attach_args *, pci_intr_handle_t *);
+const char *	necpb_intr_string(pci_chipset_tag_t, pci_intr_handle_t);
+void *		necpb_intr_establish(pci_chipset_tag_t, pci_intr_handle_t,
 		    int, int (*func)(void *), void *);
-static void	necpb_intr_disestablish(pci_chipset_tag_t, void *);
+void		necpb_intr_disestablish(pci_chipset_tag_t, void *);
 #ifdef PCI_NETBSD_CONFIGURE
-static void	necpb_conf_interrupt(pci_chipset_tag_t, int, int, int, int,
+void		necpb_conf_interrupt(pci_chipset_tag_t, int, int, int, int,
 		    int *);
-static int	necpb_conf_hook(pci_chipset_tag_t, int, int, int, pcireg_t);
+int		necpb_conf_hook(pci_chipset_tag_t, int, int, int, pcireg_t);
 #endif
 
-static uint32_t	necpb_intr(uint32_t, struct clockframe *);
+uint32_t	necpb_intr(uint32_t, struct clockframe *);
 
 
-CFATTACH_DECL_NEW(necpb, sizeof(struct necpb_softc),
+CFATTACH_DECL(necpb, sizeof(struct necpb_softc),
     necpbmatch, necpbattach, NULL, NULL);
 
 static struct necpb_intrhand	*necpb_inttbl[4];
@@ -135,8 +142,8 @@ struct necpb_context necpb_main_context;
 static long necpb_mem_ex_storage[EXTENT_FIXED_STORAGE_SIZE(10) / sizeof(long)];
 static long necpb_io_ex_storage[EXTENT_FIXED_STORAGE_SIZE(10) / sizeof(long)];
 
-static int
-necpbmatch(device_t parent, cfdata_t cf, void *aux)
+int
+necpbmatch(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct confargs *ca = aux;
 
@@ -167,12 +174,12 @@ necpb_init(struct necpb_context *ncp)
 
 	arc_large_bus_space_init(&ncp->nc_memt, "necpcimem",
 	    RD94_P_PCI_MEM, 0, RD94_S_PCI_MEM);
-	arc_bus_space_init_extent(&ncp->nc_memt, (void *)necpb_mem_ex_storage,
+	arc_bus_space_init_extent(&ncp->nc_memt, (caddr_t)necpb_mem_ex_storage,
 	    sizeof(necpb_mem_ex_storage));
 
 	arc_bus_space_init(&ncp->nc_iot, "necpciio",
 	    RD94_P_PCI_IO, RD94_V_PCI_IO, 0, RD94_S_PCI_IO);
-	arc_bus_space_init_extent(&ncp->nc_iot, (void *)necpb_io_ex_storage,
+	arc_bus_space_init_extent(&ncp->nc_iot, (caddr_t)necpb_io_ex_storage,
 	    sizeof(necpb_io_ex_storage));
 
 	jazz_bus_dma_tag_init(&ncp->nc_dmat);
@@ -222,19 +229,17 @@ necpb_init(struct necpb_context *ncp)
 	ncp->nc_initialized = 1;
 }
 
-static void
-necpbattach(device_t parent, device_t self, void *aux)
+void
+necpbattach(struct device *parent, struct device *self, void *aux)
 {
-	struct necpb_softc *sc = device_private(self);
+	struct necpb_softc *sc = (struct necpb_softc *)self;
 	struct pcibus_attach_args pba;
 	pci_chipset_tag_t pc;
 	int i;
 
-	sc->sc_dev = self;
-
 	necpbfound = 1;
 
-	aprint_normal("\n");
+	printf("\n");
 
 	sc->sc_ncp = &necpb_main_context;
 	necpb_init(sc->sc_ncp);
@@ -268,32 +273,32 @@ necpbattach(device_t parent, device_t self, void *aux)
 	config_found_ia(self, "pcibus", &pba, pcibusprint);
 }
 
-static void
+void
 necpb_attach_hook(struct device *parent, struct device *self,
     struct pcibus_attach_args *pba)
 {
 }
 
-static int
+int
 necpb_bus_maxdevs(pci_chipset_tag_t pc, int busno)
 {
 
 	return 32;
 }
 
-static pcitag_t
+pcitag_t
 necpb_make_tag(pci_chipset_tag_t pc, int bus, int device, int function)
 {
 	pcitag_t tag;
 
 	if (bus >= 256 || device >= 32 || function >= 8)
-		panic("%s: bad request", __func__);
+		panic("necpb_make_tag: bad request");
 
 	tag = 0x80000000 | (bus << 16) | (device << 11) | (function << 8);
 	return tag;
 }
 
-static void
+void
 necpb_decompose_tag(pci_chipset_tag_t pc, pcitag_t tag, int *bp, int *dp,
    int *fp)
 {
@@ -306,7 +311,7 @@ necpb_decompose_tag(pci_chipset_tag_t pc, pcitag_t tag, int *bp, int *dp,
 		*fp = (tag >> 8) & 0x07;
 }
 
-static pcireg_t
+pcireg_t
 necpb_conf_read(pci_chipset_tag_t pc, pcitag_t tag, int reg)
 {
 	pcireg_t data;
@@ -321,7 +326,7 @@ necpb_conf_read(pci_chipset_tag_t pc, pcitag_t tag, int reg)
 	return data;
 }
 
-static void
+void
 necpb_conf_write(pci_chipset_tag_t pc, pcitag_t tag, int reg, pcireg_t data)
 {
 	int s;
@@ -333,7 +338,7 @@ necpb_conf_write(pci_chipset_tag_t pc, pcitag_t tag, int reg, pcireg_t data)
 	splx(s);
 }
 
-static int
+int
 necpb_intr_map(struct pci_attach_args *pa, pci_intr_handle_t *ihp)
 {
 	pci_chipset_tag_t pc = pa->pa_pc;
@@ -379,18 +384,18 @@ necpb_intr_map(struct pci_attach_args *pa, pci_intr_handle_t *ihp)
 	return 0;
 }
 
-static const char *
+const char *
 necpb_intr_string(pci_chipset_tag_t pc, pci_intr_handle_t ih)
 {
 	static char str[8];
 
 	if (ih >= 4)
-		panic("%s: bogus handle %ld", __func__, ih);
+		panic("necpb_intr_string: bogus handle %ld", ih);
 	sprintf(str, "int %c", 'A' + (int)ih);
 	return str;
 }
 
-static void *
+void *
 necpb_intr_establish(pci_chipset_tag_t pc, pci_intr_handle_t ih, int level,
     int (*func)(void *), void *arg)
 {
@@ -398,11 +403,11 @@ necpb_intr_establish(pci_chipset_tag_t pc, pci_intr_handle_t ih, int level,
 	uint32_t mask;
 
 	if (ih >= 4)
-		panic("%s: bogus handle", __func__);
+		panic("necpb_intr_establish: bogus handle");
 
 	n = malloc(sizeof(struct necpb_intrhand), M_DEVBUF, M_NOWAIT);
 	if (n == NULL)
-		panic("%s: can't malloc interrupt handle", __func__);
+		panic("necpb_intr_establish: can't malloc interrupt handle");
 
 	n->ih_func = func;
 	n->ih_arg = arg;
@@ -427,7 +432,7 @@ necpb_intr_establish(pci_chipset_tag_t pc, pci_intr_handle_t ih, int level,
 	return n;
 }
 
-static void
+void
 necpb_intr_disestablish(pci_chipset_tag_t pc, void *cookie)
 {
 	struct necpb_intrhand *n, *p, *q;
@@ -439,7 +444,7 @@ necpb_intr_disestablish(pci_chipset_tag_t pc, void *cookie)
 	p = necpb_inttbl[n->ih_intn];
 	while (p != n) {
 		if (p == NULL)
-			panic("%s: broken intr table", __func__);
+			panic("necpb_intr_disestablish: broken intr table");
 		q = p;
 		p = p->ih_next;
 	}
@@ -462,7 +467,7 @@ necpb_intr_disestablish(pci_chipset_tag_t pc, void *cookie)
 /*
  *   Handle PCI/EISA interrupt.
  */
-static uint32_t
+uint32_t
 necpb_intr(uint32_t mask, struct clockframe *cf)
 {
 	uint32_t vector, stat;
@@ -501,11 +506,11 @@ necpb_intr(uint32_t mask, struct clockframe *cf)
 #endif
 	}
 
-	return handled ? MIPS_INT_MASK_2 : 0;
+	return handled ? ~MIPS_INT_MASK_2 : ~0;
 }
 
 #ifdef PCI_NETBSD_CONFIGURE
-static void
+void
 necpb_conf_interrupt(pci_chipset_tag_t pc, int bus, int dev, int func,
     int swiz, int *iline)
 {
@@ -513,7 +518,7 @@ necpb_conf_interrupt(pci_chipset_tag_t pc, int bus, int dev, int func,
 	return;
 }
 
-static int
+int
 necpb_conf_hook(pci_chipset_tag_t pc, int bus, int dev, int func,
     pcireg_t id)
 {

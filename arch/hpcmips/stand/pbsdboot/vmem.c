@@ -1,4 +1,4 @@
-/*	$NetBSD: vmem.c,v 1.6 2007/03/04 05:59:53 christos Exp $	*/
+/*	$NetBSD: vmem.c,v 1.5 2000/06/04 04:30:50 takemura Exp $	*/
 
 /*-
  * Copyright (c) 1999 Shin Takemura.
@@ -38,7 +38,7 @@
 #include <pbsdboot.h>
 
 struct addr_s {
-	void *addr;
+	caddr_t addr;
 	int in_use;
 };
 
@@ -52,14 +52,14 @@ struct map_s *map = NULL;
 struct addr_s *phys_addrs = NULL;
 unsigned char* heap = NULL;
 int npages;
-void *kernel_start;
-void *kernel_end;
+caddr_t kernel_start;
+caddr_t kernel_end;
 
 int
-vmem_exec(void *entry, int argc, char *argv[], struct bootinfo *bi)
+vmem_exec(caddr_t entry, int argc, char *argv[], struct bootinfo *bi)
 {
 	int i;
-	void *p;
+	caddr_t p;
 
 	if (map == NULL) {
 		debug_printf(TEXT("vmem is not initialized.\n"));
@@ -75,9 +75,9 @@ vmem_exec(void *entry, int argc, char *argv[], struct bootinfo *bi)
 	for (i = 0; i < argc; i++) {
 		argv[i] = vtophysaddr(argv[i]);
 	}
-	map->arg0 = (void *)argc;
-	map->arg1 = vtophysaddr((void *)argv);
-	map->arg2 = vtophysaddr((void *)bi);
+	map->arg0 = (caddr_t)argc;
+	map->arg1 = vtophysaddr((caddr_t)argv);
+	map->arg2 = vtophysaddr((caddr_t)bi);
 	map->arg3 = NULL;
 
 	if (map->arg1 == NULL || map->arg2 == NULL) {
@@ -100,7 +100,7 @@ vmem_exec(void *entry, int argc, char *argv[], struct bootinfo *bi)
 	}
 
 	for (i = 0; i < map->nleaves; i++) {
-		if ((p = vtophysaddr((void *)map->leaf[i])) == NULL) {
+		if ((p = vtophysaddr((caddr_t)map->leaf[i])) == NULL) {
 			debug_printf(TEXT("vtophysaddr() failed, leaf %d (addr=0x%x) \n"),
 				     i, map->leaf[i / map->leafsize][i % map->leafsize]);
 			msg_printf(MSG_ERROR, whoami,
@@ -108,16 +108,16 @@ vmem_exec(void *entry, int argc, char *argv[], struct bootinfo *bi)
 				   i, map->leaf[i / map->leafsize][i % map->leafsize]);
 			return (-1);
 		}
-		map->leaf[i] = (void **)p;
+		map->leaf[i] = (caddr_t*)p;
 	}
 
 	debug_printf(TEXT("execute startprog()\n"));
 	//return (-1);
 	close_debug_log();
-	return ((*system_info.si_boot)(vtophysaddr((void *)map)));
+	return ((*system_info.si_boot)(vtophysaddr((caddr_t)map)));
 }
 
-void *
+caddr_t
 vmem_alloc()
 {
 	int i, pagesize;
@@ -130,14 +130,14 @@ vmem_alloc()
 		    !(kernel_start <= phys_addrs[i].addr &&
 		      phys_addrs[i].addr < kernel_end)) {
 			phys_addrs[i].in_use = 1;
-			return ((void *)page);
+			return ((caddr_t)page);
 		}
 	}
 	return (NULL);
 }
 
-static void *
-alloc_kpage(void *phys_addr)
+static caddr_t
+alloc_kpage(caddr_t phys_addr)
 {
 	int i, pagesize;
 	struct page_header_s *page;
@@ -155,14 +155,14 @@ alloc_kpage(void *phys_addr)
 				return (NULL);
 			}
 			phys_addrs[i].in_use = 1;
-			return ((void *)page);
+			return ((caddr_t)page);
 		}
 	}
 	return (vmem_alloc());
 }
 
-void *
-vmem_get(void *phys_addr, int *length)
+caddr_t
+vmem_get(caddr_t phys_addr, int *length)
 {
 	int pagesize = system_info.si_pagesize;
 	int pageno = (phys_addr - kernel_start) / pagesize;
@@ -177,8 +177,8 @@ vmem_get(void *phys_addr, int *length)
 	return (map->leaf[pageno / map->leafsize][pageno % map->leafsize] + offset);
 }
 
-void *
-vtophysaddr(void *page)
+caddr_t
+vtophysaddr(caddr_t page)
 {
 	int pageno = (page - heap) / system_info.si_pagesize;
 	int offset = (page - heap) % system_info.si_pagesize;
@@ -190,7 +190,7 @@ vtophysaddr(void *page)
 }
 
 int
-vmem_init(void *start, void *end)
+vmem_init(caddr_t start, caddr_t end)
 {
 #define MEM_BLOCK_SIZE (1024*1024*4) /* must be greater than page size */
 	int i, m, pageno;
@@ -206,8 +206,8 @@ vmem_init(void *start, void *end)
 	memblocks = (system_info.si_drammaxsize) / MEM_BLOCK_SIZE;
 
 	/* align with page size */
-	start = (void *)(((long)start / pagesize) * pagesize);
-	end = (void *)((((long)end + pagesize - 1) / pagesize) * pagesize);
+	start = (caddr_t)(((long)start / pagesize) * pagesize);
+	end = (caddr_t)((((long)end + pagesize - 1) / pagesize) * pagesize);
 
 	kernel_start = start;
 	kernel_end = end;
@@ -222,7 +222,7 @@ vmem_init(void *start, void *end)
 	 *  map leaf pages.
 	 *  npages plus one for end mark.
 	 */
-	npages += (nleaves = ((npages * sizeof(void *) + pagesize) / pagesize));
+	npages += (nleaves = ((npages * sizeof(caddr_t) + pagesize) / pagesize));
 
 	/*
 	 *  map root page, startprg code page, argument page and bootinfo page.
@@ -336,14 +336,14 @@ vmem_init(void *start, void *end)
 		goto error_cleanup;
 	}
 	map->nleaves = nleaves;
-	map->leafsize = pagesize / sizeof(void *);
+	map->leafsize = pagesize / sizeof(caddr_t);
 	map->pagesize = pagesize;
 
 	/*
 	 *  allocate leaf pages
 	 */
 	for (i = 0; i < nleaves; i++) {
-		if ((map->leaf[i] = (void **)vmem_alloc()) == NULL) {
+		if ((map->leaf[i] = (caddr_t*)vmem_alloc()) == NULL) {
 			debug_printf(TEXT("can't allocate leaf page.\n"));
 			msg_printf(MSG_ERROR, whoami, TEXT("can't allocate leaf page.\n"));
 			goto error_cleanup;
@@ -354,7 +354,7 @@ vmem_init(void *start, void *end)
 	 *  allocate kernel pages
 	 */
 	for (i = 0; start < kernel_end; start += pagesize, i++) {
-		void **leaf = map->leaf[i / map->leafsize];
+		caddr_t *leaf = map->leaf[i / map->leafsize];
 		if ((leaf[i % map->leafsize] = alloc_kpage(start)) == NULL) {
 			debug_printf(TEXT("can't allocate page 0x%x.\n"), start);
 			msg_printf(MSG_ERROR, whoami, TEXT("can't allocate page 0x%x.\n"), start);
@@ -388,7 +388,7 @@ vmem_free()
 void
 vmem_dump_map()
 {
-	void *addr, page, paddr;
+	caddr_t addr, page, paddr;
 
 	if (map == NULL) {
 		debug_printf(TEXT("no page map\n"));

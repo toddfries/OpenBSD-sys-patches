@@ -1,4 +1,4 @@
-/*	$NetBSD: smc90cx6.c,v 1.58 2008/11/12 21:15:49 phx Exp $ */
+/*	$NetBSD: smc90cx6.c,v 1.52 2007/10/19 12:00:01 ad Exp $ */
 
 /*-
  * Copyright (c) 1994, 1995, 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -35,7 +42,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: smc90cx6.c,v 1.58 2008/11/12 21:15:49 phx Exp $");
+__KERNEL_RCSID(0, "$NetBSD: smc90cx6.c,v 1.52 2007/10/19 12:00:01 ad Exp $");
 
 /* #define BAHSOFTCOPY */
 #define BAHRETRANSMIT /**/
@@ -58,7 +65,6 @@ __KERNEL_RCSID(0, "$NetBSD: smc90cx6.c,v 1.58 2008/11/12 21:15:49 phx Exp $");
 
 #include <net/if.h>
 #include <net/if_dl.h>
-#include <net/if_ether.h>
 #include <net/if_types.h>
 #include <net/if_arc.h>
 
@@ -159,7 +165,7 @@ bah_attach_subr(sc)
 
 #if (defined(BAH_DEBUG) && (BAH_DEBUG > 2))
 	printf("\n%s: attach(0x%x, 0x%x, 0x%x)\n",
-	    device_xname(&sc->sc_dev), parent, self, aux);
+	    sc->sc_dev.dv_xname, parent, self, aux);
 #endif
 	s = splhigh();
 
@@ -194,7 +200,7 @@ bah_attach_subr(sc)
 	 */
 	bah_stop(sc);
 
-	strlcpy(ifp->if_xname, device_xname(&sc->sc_dev), IFNAMSIZ);
+	strcpy(ifp->if_xname, sc->sc_dev.dv_xname);
 	ifp->if_softc = sc;
 	ifp->if_start = bah_start;
 	ifp->if_ioctl = bah_ioctl;
@@ -250,7 +256,7 @@ bah_reset(sc)
 	struct bah_softc *sc;
 {
 	struct ifnet *ifp;
-	uint8_t linkaddress;
+	int linkaddress;
 
 	bus_space_tag_t bst_r = sc->sc_bst_r;
         bus_space_tag_t bst_m = sc->sc_bst_m;
@@ -260,7 +266,7 @@ bah_reset(sc)
 	ifp = &sc->sc_arccom.ac_if;
 
 #ifdef BAH_DEBUG
-	printf("%s: reset\n", device_xname(&sc->sc_dev));
+	printf("%s: reset\n", sc->sc_dev.dv_xname);
 #endif
 	/* stop and restart hardware */
 
@@ -273,11 +279,11 @@ bah_reset(sc)
 
 #if defined(BAH_DEBUG) && (BAH_DEBUG > 2)
 	printf("%s: reset: card reset, link addr = 0x%02x (%ld)\n",
-	    device_xname(&sc->sc_dev), linkaddress, linkaddress);
+	    sc->sc_dev.dv_xname, linkaddress, linkaddress);
 #endif
 
 	/* tell the routing level about the (possibly changed) link address */
-	if_set_sadl(ifp, &linkaddress, sizeof(linkaddress), false);
+	arc_storelladdr(ifp, linkaddress);
 
 	/* POR is NMI, but we need it below: */
 	sc->sc_intmask = BAH_RECON|BAH_POR;
@@ -286,13 +292,13 @@ bah_reset(sc)
 
 #ifdef BAH_DEBUG
 	printf("%s: reset: chip configured, status=0x%02x\n",
-	    device_xname(&sc->sc_dev), GETREG(BAHSTAT));
+	    sc->sc_dev.dv_xname, GETREG(BAHSTAT));
 #endif
 	PUTREG(BAHCMD, BAH_CLR(CLR_POR|CLR_RECONFIG));
 
 #ifdef BAH_DEBUG
 	printf("%s: reset: bits cleared, status=0x%02x\n",
-	    device_xname(&sc->sc_dev), GETREG(BAHSTAT);
+	    sc->sc_dev.dv_xname, GETREG(BAHSTAT);
 #endif
 
 	sc->sc_reconcount_excessive = ARC_EXCESSIVE_RECONS;
@@ -308,7 +314,7 @@ bah_reset(sc)
 
 #ifdef BAH_DEBUG
 	printf("%s: reset: started receiver, status=0x%02x\n",
-	    device_xname(&sc->sc_dev), GETREG(BAHSTAT);
+	    sc->sc_dev.dv_xname, GETREG(BAHSTAT);
 #endif
 
 	/* and init transmitter status */
@@ -369,7 +375,7 @@ bah_start(ifp)
 #endif
 
 #if defined(BAH_DEBUG) && (BAH_DEBUG > 3)
-	printf("%s: start(0x%x)\n", device_xname(&sc->sc_dev), ifp);
+	printf("%s: start(0x%x)\n", sc->sc_dev.dv_xname, ifp);
 #endif
 
 	if ((ifp->if_flags & IFF_RUNNING) == 0)
@@ -406,7 +412,7 @@ bah_start(ifp)
 	if (m->m_len < ARC_HDRLEN)
 		m = m_pullup(m, ARC_HDRLEN);/* gcc does structure padding */
 	printf("%s: start: filling %ld from %ld to %ld type %ld\n",
-	    device_xname(&sc->sc_dev), buffer, mtod(m, u_char *)[0],
+	    sc->sc_dev.dv_xname, buffer, mtod(m, u_char *)[0],
 	    mtod(m, u_char *)[1], mtod(m, u_char *)[2]);
 #else
 	if (m->m_len < 2)
@@ -473,7 +479,7 @@ bah_start(ifp)
 	} else {
 #ifdef BAH_DEBUG
 		printf("%s: start: starting transmitter on buffer %d\n",
-		    device_xname(&sc->sc_dev), buffer);
+		    sc->sc_dev.dv_xname, buffer);
 #endif
 		/* Transmitter was off, start it */
 		sc->sc_tx_act = buffer;
@@ -644,7 +650,7 @@ cleanup:
 
 #ifdef BAH_DEBUG
 		printf("%s: srint: restarted rx on buf %ld\n",
-		    device_xname(&sc->sc_dev), buffer);
+		    sc->sc_dev.dv_xname, buffer);
 #endif
 	}
 	splx(s);
@@ -713,7 +719,7 @@ bah_tint(sc, isr)
 
 #if defined(BAH_DEBUG) && (BAH_DEBUG > 1)
 		printf("%s: tint: starting tx on buffer %d, status 0x%02x\n",
-		    device_xname(&sc->sc_dev), buffer, GETREG(BAHSTAT));
+		    sc->sc_dev.dv_xname, buffer, GETREG(BAHSTAT));
 #endif
 	} else {
 		/* have to disable TX interrupt */
@@ -724,7 +730,7 @@ bah_tint(sc, isr)
 
 #ifdef BAH_DEBUG
 		printf("%s: tint: no more buffers to send, status 0x%02x\n",
-		    device_xname(&sc->sc_dev), GETREG(BAHSTAT));
+		    sc->sc_dev.dv_xname, GETREG(BAHSTAT));
 #endif
 	}
 
@@ -764,7 +770,7 @@ bahintr(arg)
 
 #if defined(BAH_DEBUG) && (BAH_DEBUG>1)
 		printf("%s: intr: status 0x%02x, intmask 0x%02x\n",
-		    device_xname(&sc->sc_dev), isr, sc->sc_intmask);
+		    sc->sc_dev.dv_xname, isr, sc->sc_intmask);
 #endif
 
 		if (maskedisr & BAH_POR) {
@@ -776,7 +782,7 @@ bahintr(arg)
 			PUTREG(BAHCMD, BAH_CLR(CLR_POR));
 			log(LOG_WARNING,
 			    "%s: intr: got spurious power on reset int\n",
-			    device_xname(&sc->sc_dev));
+			    sc->sc_dev.dv_xname);
 		}
 
 		if (maskedisr & BAH_RECON) {
@@ -802,12 +808,12 @@ bahintr(arg)
 			 */
 
 			callout_stop(&sc->sc_recon_ch);
-			newsec = time_second;
+			newsec = time.tv_sec;
 			if ((newsec - sc->sc_recontime <= 2) &&
 			    (++sc->sc_reconcount == ARC_EXCESSIVE_RECONS)) {
 				log(LOG_WARNING,
 				    "%s: excessive token losses, "
-				    "cable problem?\n", device_xname(&sc->sc_dev));
+				    "cable problem?\n", sc->sc_dev.dv_xname);
 			}
 			sc->sc_recontime = newsec;
 			callout_reset(&sc->sc_recon_ch, 15 * hz,
@@ -817,7 +823,7 @@ bahintr(arg)
 		if (maskedisr & BAH_RI) {
 #if defined(BAH_DEBUG) && (BAH_DEBUG > 1)
 			printf("%s: intr: hard rint, act %ld\n",
-			    device_xname(&sc->sc_dev), sc->sc_rx_act);
+			    sc->sc_dev.dv_xname, sc->sc_rx_act);
 #endif
 
 			buffer = sc->sc_rx_act;
@@ -829,7 +835,7 @@ bahintr(arg)
 				 */
 				log(LOG_WARNING,
 				    "%s: spurious RX interrupt or sender 0 "
-				    " (ignored)\n", device_xname(&sc->sc_dev));
+				    " (ignored)\n", sc->sc_dev.dv_xname);
 				/*
 				 * restart receiver on same buffer.
 				 * XXX maybe better reset interface?
@@ -854,7 +860,7 @@ bahintr(arg)
 #ifdef BAH_DEBUG
 					printf("%s: strt rx for buf %ld, "
 					    "stat 0x%02x\n",
-					    device_xname(&sc->sc_dev), sc->sc_rx_act,
+					    sc->sc_dev.dv_xname, sc->sc_rx_act,
 					    GETREG(BAHSTAT);
 #endif
 				}
@@ -890,7 +896,7 @@ bah_reconwatch(arg)
 	if (sc->sc_reconcount >= ARC_EXCESSIVE_RECONS) {
 		sc->sc_reconcount = 0;
 		log(LOG_WARNING, "%s: token valid again.\n",
-		    device_xname(&sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 	}
 	sc->sc_reconcount = 0;
 }
@@ -919,43 +925,40 @@ bah_ioctl(ifp, cmd, data)
 
 #if defined(BAH_DEBUG) && (BAH_DEBUG > 2)
 	printf("%s: ioctl() called, cmd = 0x%x\n",
-	    device_xname(&sc->sc_dev), cmd);
+	    sc->sc_dev.dv_xname, cmd);
 #endif
 
 	switch (cmd) {
-	case SIOCINITIFADDR:
+	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
-		bah_init(sc);
 		switch (ifa->ifa_addr->sa_family) {
 #ifdef INET
 		case AF_INET:
+			bah_init(sc);
 			arp_ifinit(ifp, ifa);
 			break;
 #endif
 		default:
+			bah_init(sc);
 			break;
 		}
 
 	case SIOCSIFFLAGS:
-		if ((error = ifioctl_common(ifp, cmd, data)) != 0)
-			break;
-		/* XXX re-use ether_ioctl() */
-		switch (ifp->if_flags & (IFF_UP|IFF_RUNNING)) {
-		case IFF_RUNNING:
+		if ((ifp->if_flags & IFF_UP) == 0 &&
+		    (ifp->if_flags & IFF_RUNNING) != 0) {
 			/*
 			 * If interface is marked down and it is running,
 			 * then stop it.
 			 */
 			bah_stop(sc);
 			ifp->if_flags &= ~IFF_RUNNING;
-			break;
-		case IFF_UP:
+		} else if ((ifp->if_flags & IFF_UP) != 0 &&
+			   (ifp->if_flags & IFF_RUNNING) == 0) {
 			/*
 			 * If interface is marked up and it is stopped, then
 			 * start it.
 			 */
 			bah_init(sc);
-			break;
 		}
 		break;
 
@@ -973,7 +976,7 @@ bah_ioctl(ifp, cmd, data)
 		break;
 
 	default:
-		error = ether_ioctl(ifp, cmd, data);
+		error = EINVAL;
 	}
 
 	splx(s);

@@ -1,4 +1,4 @@
-/*	$NetBSD: intr.h,v 1.20 2008/04/28 20:23:12 martin Exp $	*/
+/*	$NetBSD: intr.h,v 1.16 2006/12/21 15:55:22 yamt Exp $	*/
 
 /*-
  * Copyright (c) 1997 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -44,19 +51,27 @@
 
 #define	IPL_NONE	0
 #define	IPL_SOFTCLOCK	1
-#define	IPL_SOFTBIO	1
 #define	IPL_SOFTNET	1
 #define	IPL_SOFTSERIAL	1
-#define	IPL_VM		2
-#define	IPL_SCHED	3
-#define	IPL_HIGH	4
-#define	_NIPL		5
+#define	IPL_BIO		3
+#define	IPL_NET		4
+#define	IPL_TTY		5
+#define	IPL_SERIAL	6
+#define	IPL_LPT		7
+#define	IPL_VM		8
+#define	IPL_AUDIO	9
+#define	IPL_CLOCK	10
+#define	IPL_STATCLOCK	IPL_CLOCK
+#define	IPL_SCHED	IPL_HIGH
+#define	IPL_HIGH	11
+#define	IPL_LOCK	IPL_HIGH
+#define	_NIPL		12
 
 extern int ipl2spl_table[_NIPL];
 
 typedef int ipl_t;
 typedef struct {
-	uint16_t _ipl;
+	ipl_t _ipl;
 } ipl_cookie_t;
 
 static inline ipl_cookie_t
@@ -73,25 +88,55 @@ splraiseipl(ipl_cookie_t icookie)
 	return _splraise(ipl2spl_table[icookie._ipl]);
 }
 
-#ifdef _KERNEL_OPT
+#ifdef splaudio
+#undef splaudio
+#endif
+#define splaudio spl6
+
+#define spllpt()	spl6()
+
+#if !defined(_LKM)
 #include "opt_lev6_defer.h"
 #endif
 
 #define	spl0()			_spl0()	/* we have real software interrupts */
+
+#define splnone()		spl0()
+#define	spllowersoftclock()	spl1()
+
 #define splsoftclock()		splraise1()
 #define splsoftnet()		splraise1()
 #define splsoftserial()		splraise1()
-#define splsoftbio()		splraise1()
-#define	splvm()			splraise4()
+#define splbio()		splraise3()
+#define splnet()		splraise3()
+
+/*
+ * splserial hack, idea by Jason Thorpe.
+ * drivers which need it (at the present only the coms) raise the variable to
+ * their serial interrupt level.
+ *
+ * ipl2spl_table[IPL_SERIAL] is statically initialized in machdep.c
+ * at the moment; should be some driver independent file.
+ */
+
+#define splserial()	_splraise(ipl2spl_table[IPL_SERIAL])
+#define spltty()	splraise4()
+#define	splvm()		splraise4()
 
 #ifndef _LKM
 
 #ifndef LEV6_DEFER
-#define splsched()	splraise6()
+#define splclock()	splraise6()
+#define splstatclock()	splraise6()
 #define splhigh()	spl7()
+#define splsched()	spl7()
+#define spllock()	spl7()
 #else
-#define splsched()	splraise4()
+#define splclock()	splraise4()
+#define splstatclock()	splraise4()
 #define splhigh()	splraise4()
+#define splsched()	splraise4()
+#define spllock()	splraise4()
 #endif
 
 #else	/* _LKM */
@@ -99,8 +144,11 @@ splraiseipl(ipl_cookie_t icookie)
 extern int _spllkm6(void);
 extern int _spllkm7(void);
 
-#define splsched()	_spllkm6()
+#define splclock()	_spllkm6()
+#define splstatclock()	_spllkm6()
+#define spllock()	_spllkm7()
 #define splhigh()	_spllkm7()
+#define splsched()	_spllkm7()
 
 #endif /* _LKM */
 

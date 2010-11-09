@@ -66,15 +66,11 @@
  *
  * FreeBSD is excluded here as they make max_keylen a static variable, and
  * thus forbid definition of radix table other than proper domains.
- * 
- * !!!!!!!
- * !!NOTE: dom_maxrtkey assumes USE_RADIX is defined.
- * !!!!!!!
  */
 #define USE_RADIX
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ip_encap.c,v 1.33 2008/11/25 18:28:05 pooka Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ip_encap.c,v 1.28 2006/05/28 11:07:04 liamjfoy Exp $");
 
 #include "opt_mrouting.h"
 #include "opt_inet.h"
@@ -113,6 +109,24 @@ __KERNEL_RCSID(0, "$NetBSD: ip_encap.c,v 1.33 2008/11/25 18:28:05 pooka Exp $");
 
 #include <net/net_osdep.h>
 
+/* to lookup a pair of address using radix tree */
+struct sockaddr_pack {
+	u_int8_t sp_len;
+	u_int8_t sp_family;	/* not really used */
+	/* followed by variable-length data */
+};
+
+struct pack4 {
+	struct sockaddr_pack p;
+	struct sockaddr_in mine;
+	struct sockaddr_in yours;
+};
+struct pack6 {
+	struct sockaddr_pack p;
+	struct sockaddr_in6 mine;
+	struct sockaddr_in6 yours;
+};
+
 enum direction { INBOUND, OUTBOUND };
 
 #ifdef INET
@@ -140,6 +154,19 @@ LIST_HEAD(, encaptab) encaptab = LIST_HEAD_INITIALIZER(&encaptab);
 extern int max_keylen;	/* radix.c */
 struct radix_node_head *encap_head[2];	/* 0 for AF_INET, 1 for AF_INET6 */
 #endif
+
+void
+encap_setkeylen(void)
+{
+#ifdef USE_RADIX
+	if (sizeof(struct pack4) > max_keylen)
+		max_keylen = sizeof(struct pack4);
+#ifdef INET6
+	if (sizeof(struct pack6) > max_keylen)
+		max_keylen = sizeof(struct pack6);
+#endif
+#endif
+}
 
 void
 encap_init(void)
@@ -178,7 +205,7 @@ static struct encaptab *
 encap4_lookup(struct mbuf *m, int off, int proto, enum direction dir)
 {
 	struct ip *ip;
-	struct ip_pack4 pack;
+	struct pack4 pack;
 	struct encaptab *ep, *match;
 	int prio, matchprio;
 #ifdef USE_RADIX
@@ -208,7 +235,7 @@ encap4_lookup(struct mbuf *m, int off, int proto, enum direction dir)
 	matchprio = 0;
 
 #ifdef USE_RADIX
-	rn = rnh->rnh_matchaddr((void *)&pack, rnh);
+	rn = rnh->rnh_matchaddr((caddr_t)&pack, rnh);
 	if (rn && (rn->rn_flags & RNF_ROOT) == 0) {
 		match = (struct encaptab *)rn;
 		matchprio = mask_matchlen(match->srcmask) +
@@ -216,7 +243,7 @@ encap4_lookup(struct mbuf *m, int off, int proto, enum direction dir)
 	}
 #endif
 
-	LIST_FOREACH(ep, &encaptab, chain) {
+	for (ep = LIST_FIRST(&encaptab); ep; ep = LIST_NEXT(ep, chain)) {
 		if (ep->af != AF_INET)
 			continue;
 		if (ep->proto >= 0 && ep->proto != proto)
@@ -302,7 +329,7 @@ static struct encaptab *
 encap6_lookup(struct mbuf *m, int off, int proto, enum direction dir)
 {
 	struct ip6_hdr *ip6;
-	struct ip_pack6 pack;
+	struct pack6 pack;
 	int prio, matchprio;
 	struct encaptab *ep, *match;
 #ifdef USE_RADIX
@@ -332,7 +359,7 @@ encap6_lookup(struct mbuf *m, int off, int proto, enum direction dir)
 	matchprio = 0;
 
 #ifdef USE_RADIX
-	rn = rnh->rnh_matchaddr((void *)&pack, rnh);
+	rn = rnh->rnh_matchaddr((caddr_t)&pack, rnh);
 	if (rn && (rn->rn_flags & RNF_ROOT) == 0) {
 		match = (struct encaptab *)rn;
 		matchprio = mask_matchlen(match->srcmask) +
@@ -340,7 +367,7 @@ encap6_lookup(struct mbuf *m, int off, int proto, enum direction dir)
 	}
 #endif
 
-	LIST_FOREACH(ep, &encaptab, chain) {
+	for (ep = LIST_FIRST(&encaptab); ep; ep = LIST_NEXT(ep, chain)) {
 		if (ep->af != AF_INET6)
 			continue;
 		if (ep->proto >= 0 && ep->proto != proto)
@@ -407,8 +434,8 @@ encap_add(struct encaptab *ep)
 	LIST_INSERT_HEAD(&encaptab, ep, chain);
 #ifdef USE_RADIX
 	if (!ep->func && rnh) {
-		if (!rnh->rnh_addaddr((void *)ep->addrpack,
-		    (void *)ep->maskpack, rnh, ep->nodes)) {
+		if (!rnh->rnh_addaddr((caddr_t)ep->addrpack,
+		    (caddr_t)ep->maskpack, rnh, ep->nodes)) {
 			error = EEXIST;
 			goto fail;
 		}
@@ -432,8 +459,8 @@ encap_remove(struct encaptab *ep)
 	LIST_REMOVE(ep, chain);
 #ifdef USE_RADIX
 	if (!ep->func && rnh) {
-		if (!rnh->rnh_deladdr((void *)ep->addrpack,
-		    (void *)ep->maskpack, rnh))
+		if (!rnh->rnh_deladdr((caddr_t)ep->addrpack,
+		    (caddr_t)ep->maskpack, rnh))
 			error = ESRCH;
 	}
 #endif
@@ -490,9 +517,9 @@ encap_attach(int af, int proto,
 	int error;
 	int s;
 	size_t l;
-	struct ip_pack4 *pack4;
+	struct pack4 *pack4;
 #ifdef INET6
-	struct ip_pack6 *pack6;
+	struct pack6 *pack6;
 #endif
 
 	s = splsoftnet();
@@ -502,7 +529,7 @@ encap_attach(int af, int proto,
 		goto fail;
 
 	/* check if anyone have already attached with exactly same config */
-	LIST_FOREACH(ep, &encaptab, chain) {
+	for (ep = LIST_FIRST(&encaptab); ep; ep = LIST_NEXT(ep, chain)) {
 		if (ep->af != af)
 			continue;
 		if (ep->proto != proto)
@@ -562,19 +589,19 @@ encap_attach(int af, int proto,
 	ep->maskpack->sa_len = l & 0xff;
 	switch (af) {
 	case AF_INET:
-		pack4 = (struct ip_pack4 *)ep->addrpack;
+		pack4 = (struct pack4 *)ep->addrpack;
 		ep->src = (struct sockaddr *)&pack4->mine;
 		ep->dst = (struct sockaddr *)&pack4->yours;
-		pack4 = (struct ip_pack4 *)ep->maskpack;
+		pack4 = (struct pack4 *)ep->maskpack;
 		ep->srcmask = (struct sockaddr *)&pack4->mine;
 		ep->dstmask = (struct sockaddr *)&pack4->yours;
 		break;
 #ifdef INET6
 	case AF_INET6:
-		pack6 = (struct ip_pack6 *)ep->addrpack;
+		pack6 = (struct pack6 *)ep->addrpack;
 		ep->src = (struct sockaddr *)&pack6->mine;
 		ep->dst = (struct sockaddr *)&pack6->yours;
-		pack6 = (struct ip_pack6 *)ep->maskpack;
+		pack6 = (struct pack6 *)ep->maskpack;
 		ep->srcmask = (struct sockaddr *)&pack6->mine;
 		ep->dstmask = (struct sockaddr *)&pack6->yours;
 		break;
@@ -657,8 +684,8 @@ fail:
 /* XXX encap4_ctlinput() is necessary if we set DF=1 on outer IPv4 header */
 
 #ifdef INET6
-void *
-encap6_ctlinput(int cmd, const struct sockaddr *sa, void *d0)
+void
+encap6_ctlinput(int cmd, struct sockaddr *sa, void *d0)
 {
 	void *d = d0;
 	struct ip6_hdr *ip6;
@@ -671,16 +698,16 @@ encap6_ctlinput(int cmd, const struct sockaddr *sa, void *d0)
 
 	if (sa->sa_family != AF_INET6 ||
 	    sa->sa_len != sizeof(struct sockaddr_in6))
-		return NULL;
+		return;
 
 	if ((unsigned)cmd >= PRC_NCMDS)
-		return NULL;
+		return;
 	if (cmd == PRC_HOSTDEAD)
 		d = NULL;
 	else if (cmd == PRC_MSGSIZE)
 		; /* special code is present, see below */
 	else if (inet6ctlerrmap[cmd] == 0)
-		return NULL;
+		return;
 
 	/* if the parameter is from icmp6, decode it. */
 	if (d != NULL) {
@@ -717,7 +744,7 @@ encap6_ctlinput(int cmd, const struct sockaddr *sa, void *d0)
 	}
 
 	/* inform all listeners */
-	LIST_FOREACH(ep, &encaptab, chain) {
+	for (ep = LIST_FIRST(&encaptab); ep; ep = LIST_NEXT(ep, chain)) {
 		if (ep->af != AF_INET6)
 			continue;
 		if (ep->proto >= 0 && ep->proto != nxt)
@@ -732,7 +759,6 @@ encap6_ctlinput(int cmd, const struct sockaddr *sa, void *d0)
 	}
 
 	rip6_ctlinput(cmd, sa, d0);
-	return NULL;
 }
 #endif
 
@@ -743,7 +769,7 @@ encap_detach(const struct encaptab *cookie)
 	struct encaptab *p;
 	int error;
 
-	LIST_FOREACH(p, &encaptab, chain) {
+	for (p = LIST_FIRST(&encaptab); p; p = LIST_NEXT(p, chain)) {
 		if (p == ep) {
 			error = encap_remove(p);
 			if (error)

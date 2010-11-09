@@ -1,4 +1,4 @@
-/* $NetBSD: mfivar.h,v 1.10 2008/06/24 10:09:24 gmcgarry Exp $ */
+/* $NetBSD: mfivar.h,v 1.5 2007/07/01 07:37:14 xtraeme Exp $ */
 /* $OpenBSD: mfivar.h,v 1.28 2006/08/31 18:18:46 marco Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
@@ -19,9 +19,9 @@
 #include <dev/sysmon/sysmonvar.h>
 #include <sys/envsys.h>
 
-#define DEVNAME(_s)     (device_xname(&(_s)->sc_dev))
+#define DEVNAME(_s)     ((_s)->sc_dev.dv_xname)
 
-/* #define MFI_DEBUG */
+// #define MFI_DEBUG
 #ifdef MFI_DEBUG
 extern uint32_t			mfi_debug;
 #define DPRINTF(x...)		do { if (mfi_debug) printf(x); } while(0)
@@ -35,8 +35,8 @@ extern uint32_t			mfi_debug;
 #define	MFI_D_MEM		0x0040
 #define	MFI_D_CCB		0x0080
 #else
-#define DPRINTF(x, ...)
-#define DNPRINTF(n, x, ...)
+#define DPRINTF(x...)
+#define DNPRINTF(n,x...)
 #endif
 
 struct mfi_mem {
@@ -96,28 +96,14 @@ struct mfi_ccb {
 
 TAILQ_HEAD(mfi_ccb_list, mfi_ccb);
 
-enum mfi_iop {
-	MFI_IOP_XSCALE,
-	MFI_IOP_PPC
-};
-
-struct mfi_iop_ops {
-	uint32_t 		(*mio_fw_state)(struct mfi_softc *);
-	void 			(*mio_intr_ena)(struct mfi_softc *);
-	int 			(*mio_intr)(struct mfi_softc *);
-	void 			(*mio_post)(struct mfi_softc *, struct mfi_ccb *);
-};
-
 struct mfi_softc {
 	struct device		sc_dev;
 	struct scsipi_channel	sc_chan;
 	struct scsipi_adapter	sc_adapt;
 
-	const struct mfi_iop_ops *sc_iop;
-
 	void			*sc_ih;
 
-	uint32_t		sc_flags;
+	u_int32_t		sc_flags;
 
 	bus_space_tag_t		sc_iot;
 	bus_space_handle_t	sc_ioh;
@@ -130,6 +116,9 @@ struct mfi_softc {
 		uint32_t	ld_present;
 		char		ld_dev[16];	/* device name sd? */
 	}			sc_ld[MFI_MAX_LD];
+
+	/* scsi ioctl from sd device */
+	int			(*sc_ioctl)(struct device *, u_long, void *);
 
 	/* firmware determined max, totals and other information*/
 	uint32_t		sc_max_cmds;
@@ -156,10 +145,10 @@ struct mfi_softc {
 
 	struct mfi_ccb_list	sc_ccb_freeq;
 
-	struct sysmon_envsys    *sc_sme;
-	envsys_data_t		*sc_sensor;
+	struct sysmon_envsys    sc_envsys;
+#define sc_sensor_data  sc_envsys.sme_sensor_data
 
 };
 
-int	mfi_attach(struct mfi_softc *sc, enum mfi_iop);
+int	mfi_attach(struct mfi_softc *sc);
 int	mfi_intr(void *);

@@ -1,4 +1,4 @@
-/*	$NetBSD: psl.h,v 1.40 2008/03/02 15:07:02 nakayama Exp $ */
+/*	$NetBSD: psl.h,v 1.35 2006/12/26 15:22:44 ad Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -179,8 +179,8 @@
 #define TSTATE_CCR		0xff00000000LL
 #define TSTATE_CCR_SHIFT	32
 
-#define PSRCC_TO_TSTATE(x)	(((int64_t)(x)&PSR_ICC)<<(TSTATE_CCR_SHIFT-20))
-#define TSTATECCR_TO_PSR(x)	(((x)&TSTATE_CCR)>>(TSTATE_CCR_SHIFT-20))
+#define PSRCC_TO_TSTATE(x)	(((int64_t)(x)&PSR_ICC)<<(TSTATE_CCR_SHIFT-19))
+#define TSTATECCR_TO_PSR(x)	(((x)&TSTATE_CCR)>>(TSTATE_CCR_SHIFT-19))
 
 /*
  * These are here to simplify life.
@@ -202,8 +202,8 @@
 
 #define TSTATE_BITS "\20\14IG\13MG\12CLE\11TLE\10\7MM\6RED\5PEF\4AM\3PRIV\2IE\1AG"
 
-#define TSTATE_KERN	((PSTATE_KERN)<<TSTATE_PSTATE_SHIFT)
-#define TSTATE_USER	((PSTATE_USER)<<TSTATE_PSTATE_SHIFT)
+#define TSTATE_KERN	((TSTATE_KERN)<<TSTATE_PSTATE_SHIFT)
+#define TSTATE_USER	((TSTATE_USER)<<TSTATE_PSTATE_SHIFT)
 /*
  * SPARC V9 VER version register.
  *
@@ -263,7 +263,7 @@ getpstate(void)
 static __inline void
 setpstate(int newpstate)
 {
-	__asm volatile("wrpr %0,0,%%pstate" : : "r" (newpstate) : "memory");
+	__asm volatile("wrpr %0,0,%%pstate" : : "r" (newpstate));
 }
 
 static __inline int
@@ -278,7 +278,7 @@ getcwp(void)
 static __inline void
 setcwp(int newcwp)
 {
-	__asm volatile("wrpr %0,0,%%cwp" : : "r" (newcwp) : "memory");
+	__asm volatile("wrpr %0,0,%%cwp" : : "r" (newcwp));
 }
 
 static __inline uint64_t
@@ -327,7 +327,7 @@ static __inline int name##X(const char* file, int line) \
 	int oldpil; \
 	__asm volatile("rdpr %%pil,%0" : "=r" (oldpil)); \
 	SPLPRINT(("{%s:%d %d=>%d}", file, line, oldpil, newpil)); \
-	__asm volatile("wrpr %%g0,%0,%%pil" : : "n" (newpil) : "memory"); \
+	__asm volatile("wrpr %%g0,%0,%%pil" : : "n" (newpil)); \
 	return (oldpil); \
 }
 /* A non-priority-decreasing version of SPL */
@@ -339,7 +339,7 @@ static __inline int name##X(const char* file, int line) \
 	if (newpil <= oldpil) \
 		return oldpil; \
 	SPLPRINT(("{%s:%d %d->!d}", file, line, oldpil, newpil)); \
-	__asm volatile("wrpr %%g0,%0,%%pil" : : "n" (newpil) : "memory"); \
+	__asm volatile("wrpr %%g0,%0,%%pil" : : "n" (newpil)); \
 	return (oldpil); \
 }
 
@@ -350,7 +350,7 @@ static __inline int name(void) \
 { \
 	int oldpil; \
 	__asm volatile("rdpr %%pil,%0" : "=r" (oldpil)); \
-	__asm volatile("wrpr %%g0,%0,%%pil" : : "n" (newpil) : "memory"); \
+	__asm volatile("wrpr %%g0,%0,%%pil" : : "n" (newpil)); \
 	return (oldpil); \
 }
 /* A non-priority-decreasing version of SPL */
@@ -361,7 +361,7 @@ static __inline int name(void) \
 	__asm volatile("rdpr %%pil,%0" : "=r" (oldpil)); \
 	if (newpil <= oldpil) \
 		return oldpil; \
-	__asm volatile("wrpr %%g0,%0,%%pil" : : "n" (newpil) : "memory"); \
+	__asm volatile("wrpr %%g0,%0,%%pil" : : "n" (newpil)); \
 	return (oldpil); \
 }
 #endif
@@ -391,11 +391,13 @@ splraiseipl(ipl_cookie_t icookie)
 	__asm __volatile("rdpr %%pil,%0" : "=r" (oldpil));
 	if (newpil <= oldpil)
 		return (oldpil);
-	__asm __volatile("wrpr %0,0,%%pil" : : "r" (newpil) : "memory");
+	__asm __volatile("wrpr %0,0,%%pil" : : "r" (newpil));
 	return (oldpil);
 }
 
 SPL(spl0, 0)
+
+SPL(spllowersoftclock, 1)
 
 SPLHOLD(splsoftint, 1)
 #define	splsoftclock	splsoftint
@@ -409,10 +411,24 @@ SPLHOLD(splausoft, PIL_AUSOFT)
 /* floppy software interrupts are at software level 4 too */
 SPLHOLD(splfdsoft, PIL_FDSOFT)
 
+/* Block devices */
+SPLHOLD(splbio, PIL_BIO)
+
+/* network hardware interrupts are at level 6 */
+SPLHOLD(splnet, PIL_NET)
+
+/* tty input runs at software level 6 */
+SPLHOLD(spltty, PIL_TTY)
+
+/* parallel port runs at software level 6 */
+SPLHOLD(spllpt, PIL_LPT)
+
 /*
  * Memory allocation (must be as high as highest network, tty, or disk device)
  */
 SPLHOLD(splvm, PIL_VM)
+
+SPLHOLD(splclock, PIL_CLOCK)
 
 /* fd hardware interrupts are at level 11 */
 SPLHOLD(splfd, PIL_FD)
@@ -437,10 +453,15 @@ SPLHOLD(splhigh, PIL_HIGH)
 /* splx does not have a return value */
 #ifdef SPLDEBUG
 #define	spl0()	spl0X(__FILE__, __LINE__)
+#define	spllowersoftclock() spllowersoftclockX(__FILE__, __LINE__)
 #define	splsoftint()	splsoftintX(__FILE__, __LINE__)
 #define	splsoftserial()	splsoftserialX(__FILE__, __LINE__)
 #define	splausoft()	splausoftX(__FILE__, __LINE__)
 #define	splfdsoft()	splfdsoftX(__FILE__, __LINE__)
+#define	splbio()	splbioX(__FILE__, __LINE__)
+#define	splnet()	splnetX(__FILE__, __LINE__)
+#define	spltty()	splttyX(__FILE__, __LINE__)
+#define	spllpt()	spllptX(__FILE__, __LINE__)
 #define	splvm()		splvmX(__FILE__, __LINE__)
 #define	splclock()	splclockX(__FILE__, __LINE__)
 #define	splfd()		splfdX(__FILE__, __LINE__)
@@ -465,7 +486,7 @@ static __inline void splx(int newpil)
 	__asm volatile("rdpr %%pil,%0" : "=r" (pil));
 	SPLPRINT(("{%d->%d}", pil, newpil));
 #endif
-	__asm volatile("wrpr %%g0,%0,%%pil" : : "rn" (newpil) : "memory");
+	__asm volatile("wrpr %%g0,%0,%%pil" : : "rn" (newpil));
 }
 #endif /* KERNEL && !_LOCORE */
 

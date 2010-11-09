@@ -1,4 +1,4 @@
-/*	$NetBSD: trap.c,v 1.54 2009/02/24 06:03:54 yamt Exp $	*/
+/*	$NetBSD: trap.c,v 1.27 2006/07/23 22:06:04 ad Exp $	*/
 
 /*-
  * Copyright (c) 1998, 2000 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -68,11 +75,14 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: trap.c,v 1.54 2009/02/24 06:03:54 yamt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: trap.c,v 1.27 2006/07/23 22:06:04 ad Exp $");
 
 #include "opt_ddb.h"
 #include "opt_kgdb.h"
-#include "opt_xen.h"
+#include "opt_lockdebug.h"
+#include "opt_multiprocessor.h"
+#include "opt_compat_netbsd.h"
+#include "opt_compat_ibcs2.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -86,12 +96,13 @@ __KERNEL_RCSID(0, "$NetBSD: trap.c,v 1.54 2009/02/24 06:03:54 yamt Exp $");
 #include <sys/ras.h>
 #include <sys/reboot.h>
 #include <sys/pool.h>
-#include <sys/cpu.h>
+
 #include <sys/sa.h>
 #include <sys/savar.h>
 
 #include <uvm/uvm_extern.h>
 
+#include <machine/cpu.h>
 #include <machine/cpufunc.h>
 #include <machine/fpu.h>
 #include <machine/psl.h>
@@ -102,17 +113,16 @@ __KERNEL_RCSID(0, "$NetBSD: trap.c,v 1.54 2009/02/24 06:03:54 yamt Exp $");
 #include <machine/db_machdep.h>
 #endif
 
-#include <x86/nmi.h>
-
-#ifndef XEN
 #include "isa.h"
-#endif
 
 #ifdef KGDB
 #include <sys/kgdb.h>
 #endif
 
-void trap(struct trapframe *);
+void trap __P((struct trapframe *));
+#if defined(I386_CPU)
+int trapwrite __P((unsigned));
+#endif
 
 const char *trap_type[] = {
 	"privileged instruction fault",		/*  0 T_PRIVINFLT */
@@ -161,36 +171,32 @@ static void frame_dump(struct trapframe *);
  */
 /*ARGSUSED*/
 void
-trap(struct trapframe *frame)
+trap(frame)
+	struct trapframe *frame;
 {
 	struct lwp *l = curlwp;
-	struct proc *p;
+	struct proc *p = l ? l->l_proc : 0;
 	int type = (int)frame->tf_trapno;
 	struct pcb *pcb;
-	extern char fusuintrfailure[], kcopy_fault[],
+	extern char fusuintrfailure[],
 		    resume_iret[];
+#if defined(COMPAT_10) || defined(COMPAT_IBCS2)
 	extern char IDTVEC(oosyscall)[];
+#endif
 #if 0
 	extern char resume_pop_ds[], resume_pop_es[];
 #endif
 	struct trapframe *vframe;
 	void *resume;
-	void *onfault;
+	caddr_t onfault;
 	int error;
 	uint64_t cr2;
 	ksiginfo_t ksi;
-	bool pfail;
 
-	if (__predict_true(l != NULL)) {
-		pcb = &l->l_addr->u_pcb;
-		p = l->l_proc;
-	} else {
-		/*
-		 * this can happen eg. on break points in early on boot.
-		 */
-		pcb = NULL;
-		p = NULL;
-	}
+	uvmexp.traps++;
+
+	pcb = (l != NULL) ? &l->l_addr->u_pcb : NULL;
+
 #ifdef DEBUG
 	if (trapdebug) {
 		printf("trap %d code %lx eip %lx cs %lx rflags %lx cr2 %lx "
@@ -203,7 +209,7 @@ trap(struct trapframe *frame)
 	}
 #endif
 
-	if (type != T_NMI && !KERNELMODE(frame->tf_cs, frame->tf_rflags)) {
+	if (!KERNELMODE(frame->tf_cs, frame->tf_rflags)) {
 		type |= T_USER;
 		l->l_md.md_regs = frame;
 		LWP_CACHE_CREDS(l, p);
@@ -213,15 +219,6 @@ trap(struct trapframe *frame)
 
 	default:
 	we_re_toast:
-		if (frame->tf_trapno < trap_types)
-			printf("fatal %s", trap_type[frame->tf_trapno]);
-		else
-			printf("unknown trap %ld", (u_long)frame->tf_trapno);
-		printf(" in %s mode\n", (type & T_USER) ? "user" : "supervisor");
-		printf("trap type %d code %lx rip %lx cs %lx rflags %lx cr2 "
-		       " %lx cpl %x rsp %lx\n",
-		    type, frame->tf_err, (u_long)frame->tf_rip, frame->tf_cs,
-		    frame->tf_rflags, rcr2(), curcpu()->ci_ilevel, frame->tf_rsp);
 #ifdef KGDB
 		if (kgdb_trap(type, frame))
 			return;
@@ -240,6 +237,16 @@ trap(struct trapframe *frame)
 		if (kdb_trap(type, 0, frame))
 			return;
 #endif
+		if (frame->tf_trapno < trap_types)
+			printf("fatal %s", trap_type[frame->tf_trapno]);
+		else
+			printf("unknown trap %ld", (u_long)frame->tf_trapno);
+		printf(" in %s mode\n", (type & T_USER) ? "user" : "supervisor");
+		printf("trap type %d code %lx rip %lx cs %lx rflags %lx cr2 "
+		       " %lx cpl %x rsp %lx\n",
+		    type, frame->tf_err, (u_long)frame->tf_rip, frame->tf_cs,
+		    frame->tf_rflags, rcr2(), curcpu()->ci_ilevel, frame->tf_rsp);
+
 		panic("trap");
 		/*NOTREACHED*/
 
@@ -254,7 +261,7 @@ trap(struct trapframe *frame)
 copyefault:
 			error = EFAULT;
 copyfault:
-			frame->tf_rip = (uint64_t)pcb->pcb_onfault;
+			frame->tf_rip = (u_int64_t)pcb->pcb_onfault;
 			frame->tf_rax = error;
 			return;
 		}
@@ -278,7 +285,7 @@ copyfault:
 		 */
 		switch (*(u_char *)frame->tf_rip) {
 		case 0xcf:	/* iret */
-			vframe = (void *)((uint64_t)&frame->tf_rsp - 44);
+			vframe = (void *)((u_int64_t)&frame->tf_rsp - 44);
 			resume = resume_iret;
 			break;
 /*
@@ -289,11 +296,11 @@ copyfault:
  */
 #if 0
 		case 0x1f:	/* popl %ds */
-			vframe = (void *)((uint64_t)&frame->tf_rsp - 4);
+			vframe = (void *)((u_int64_t)&frame->tf_rsp - 4);
 			resume = resume_pop_ds;
 			break;
 		case 0x07:	/* popl %es */
-			vframe = (void *)((uint64_t)&frame->tf_rsp - 0);
+			vframe = (void *)((u_int64_t)&frame->tf_rsp - 0);
 			resume = resume_pop_es;
 			break;
 #endif
@@ -303,7 +310,7 @@ copyfault:
 		if (KERNELMODE(vframe->tf_cs, vframe->tf_rflags))
 			goto we_re_toast;
 
-		frame->tf_rip = (uint64_t)resume;
+		frame->tf_rip = (u_int64_t)resume;
 		return;
 
 	case T_PROTFLT|T_USER:		/* protection fault */
@@ -311,6 +318,7 @@ copyfault:
 	case T_SEGNPFLT|T_USER:
 	case T_STKFLT|T_USER:
 	case T_ALIGNFLT|T_USER:
+	case T_NMI|T_USER:
 #ifdef TRAP_SIGDEBUG
 		printf("pid %d (%s): BUS (%x) at rip %lx addr %lx\n",
 		    p->p_pid, p->p_comm, type, frame->tf_rip, rcr2());
@@ -326,6 +334,7 @@ copyfault:
 			ksi.ksi_code = BUS_ADRERR;
 			break;
 		case T_TSSFLT|T_USER:
+		case T_NMI|T_USER:
 			ksi.ksi_code = BUS_OBJERR;
 			break;
 		case T_ALIGNFLT|T_USER:
@@ -359,18 +368,17 @@ copyfault:
 		}
 		goto trapsignal;
 
-	case T_ARITHTRAP|T_USER:
-	case T_XMM|T_USER:
-		/* Already handled by fputrap(), fall through. */
 	case T_ASTFLT|T_USER:		/* Allow process switch */
 		uvmexp.softs++;
-		if (l->l_flag & LP_OWEUPC) {
-			p->p_flag &= ~LP_OWEUPC;
-			ADDUPROF(l);
+		if (p->p_flag & P_OWEUPC) {
+			p->p_flag &= ~P_OWEUPC;
+			KERNEL_PROC_LOCK(l);
+			ADDUPROF(p);
+			KERNEL_PROC_UNLOCK(l);
 		}
 		/* Allow a forced task switch. */
 		if (curcpu()->ci_want_resched)
-			preempt();
+			preempt(0);
 		goto out;
 
 #if 0 /* handled by fpudna() */
@@ -405,21 +413,27 @@ copyfault:
 		}
 		goto trapsignal;
 
+	case T_ARITHTRAP|T_USER:
+	case T_XMM|T_USER:
+		fputrap(frame);
+		goto out;
+
 	case T_PAGEFLT:			/* allow page faults in kernel mode */
 		if (l == NULL)
 			goto we_re_toast;
+#ifdef LOCKDEBUG
+		if (simple_lock_held(&sched_lock))
+			goto we_re_toast;
+#endif
 		/*
 		 * fusuintrfailure is used by [fs]uswintr() to prevent
 		 * page faulting from inside the profiling interrupt.
 		 */
-		if (pcb->pcb_onfault == fusuintrfailure) {
+		if (pcb->pcb_onfault == fusuintrfailure)
 			goto copyefault;
-		}
-		if (cpu_intr_p() || (l->l_pflag & LP_INTR) != 0) {
-			goto we_re_toast;
-		}
 
 		cr2 = rcr2();
+		KERNEL_LOCK(LK_CANRECURSE|LK_EXCLUSIVE);
 		goto faultcommon;
 
 	case T_PAGEFLT|T_USER: {	/* page fault */
@@ -433,15 +447,15 @@ copyfault:
 		if (p->p_emul->e_usertrap != NULL &&
 		    (*p->p_emul->e_usertrap)(l, cr2, frame) != 0)
 			return;
-		if (l->l_flag & LW_SA) {
+		KERNEL_PROC_LOCK(l);
+		if (l->l_flag & L_SA) {
 			l->l_savp->savp_faultaddr = (vaddr_t)cr2;
-			l->l_pflag |= LP_SA_PAGEFAULT;
+			l->l_flag |= L_SA_PAGEFAULT;
 		}
 faultcommon:
 		vm = p->p_vmspace;
 		if (vm == NULL)
 			goto we_re_toast;
-		pcb->pcb_cr2 = cr2;
 		va = trunc_page((vaddr_t)cr2);
 		/*
 		 * It is only a kernel address space fault iff:
@@ -475,56 +489,15 @@ faultcommon:
 		error = uvm_fault(map, va, ftype);
 		pcb->pcb_onfault = onfault;
 		if (error == 0) {
-			if (map != kernel_map && (void *)va >= vm->vm_maxsaddr)
+			if (map != kernel_map && (caddr_t)va >= vm->vm_maxsaddr)
 				uvm_grow(p, va);
 
-			pfail = false;
-			while (type == T_PAGEFLT) {
-				/*
-				 * we need to switch pmap now if we're in
-				 * the middle of copyin/out.
-				 *
-				 * but we don't need to do so for kcopy as
-				 * it never touch userspace.
- 				 */
-				kpreempt_disable();
-				if (curcpu()->ci_want_pmapload) {
-					if (onfault != kcopy_fault) {
-						pmap_load();
-					}
-				}
-				/*
-				 * We need to keep the pmap loaded and
-				 * so avoid being preempted until back
-				 * into the copy functions.  Disable
-				 * interrupts at the hardware level before
-				 * re-enabling preemption.  Interrupts
-				 * will be re-enabled by 'iret' when
-				 * returning back out of the trap stub.
-				 * They'll only be re-enabled when the
-				 * program counter is once again in
-				 * the copy functions, and so visible
-				 * to cpu_kpreempt_exit().
-				 */
-#ifndef XEN
-				x86_disable_intr();
-#endif
-				l->l_nopreempt--;
-				if (l->l_nopreempt > 0 || !l->l_dopreempt ||
-				    pfail) {
-					return;
-				}
-#ifndef XEN
-				x86_enable_intr();
-#endif
-				/*
-				 * If preemption fails for some reason,
-				 * don't retry it.  The conditions won't
-				 * change under our nose.
-				 */
-				pfail = kpreempt(0);
+			if (type == T_PAGEFLT) {
+				KERNEL_UNLOCK();
+				return;
 			}
-			l->l_pflag &= ~LP_SA_PAGEFAULT;
+			l->l_flag &= ~L_SA_PAGEFAULT;
+			KERNEL_PROC_UNLOCK(l);
 			goto out;
 		}
 		KSI_INIT_TRAP(&ksi);
@@ -537,8 +510,10 @@ faultcommon:
 			ksi.ksi_code = SEGV_MAPERR;
 
 		if (type == T_PAGEFLT) {
-			if (pcb->pcb_onfault != 0)
+			if (pcb->pcb_onfault != 0) {
+				KERNEL_UNLOCK();
 				goto copyfault;
+			}
 			printf("uvm_fault(%p, 0x%lx, %d) -> %x\n",
 			    map, va, ftype, error);
 			goto we_re_toast;
@@ -558,11 +533,17 @@ faultcommon:
 			ksi.ksi_signo = SIGSEGV;
 		}
 		(*p->p_emul->e_trapsignal)(l, &ksi);
-		l->l_pflag &= ~LP_SA_PAGEFAULT;
+		if (type == T_PAGEFLT)
+			KERNEL_UNLOCK();
+		else {
+			l->l_flag &= ~L_SA_PAGEFAULT;
+			KERNEL_PROC_UNLOCK(l);
+		}
 		break;
 	}
 
 	case T_TRCTRAP:
+#if defined(COMPAT_10) || defined(COMPAT_IBCS2)
 		/* Check whether they single-stepped into a lcall. */
 		if (frame->tf_rip == (int)IDTVEC(oosyscall))
 			return;
@@ -570,12 +551,16 @@ faultcommon:
 			frame->tf_rflags &= ~PSL_T;
 			return;
 		}
+#endif
 		goto we_re_toast;
 
 	case T_BPTFLT|T_USER:		/* bpt instruction fault */
 	case T_TRCTRAP|T_USER:		/* trace trap */
-		if (p->p_raslist == NULL ||
-		    (ras_lookup(p, (void *)frame->tf_rip) == (void *)-1)) {
+#ifdef MATH_EMULATE
+	trace:
+#endif
+		if (LIST_EMPTY(&p->p_raslist) ||
+		    (ras_lookup(p, (caddr_t)frame->tf_rip) == (caddr_t)-1)) {
 			KSI_INIT_TRAP(&ksi);
 			ksi.ksi_signo = SIGTRAP;
 			ksi.ksi_trap = type & ~T_USER;
@@ -583,16 +568,14 @@ faultcommon:
 				ksi.ksi_code = TRAP_BRKPT;
 			else
 				ksi.ksi_code = TRAP_TRACE;
+			KERNEL_PROC_LOCK(l);
 			(*p->p_emul->e_trapsignal)(l, &ksi);
+			KERNEL_PROC_UNLOCK(l);
 		}
 		break;
 
-	case T_NMI:
-#if !defined(XEN)
-		if (nmi_dispatch(frame))
-			return;
-#endif /* !defined(XEN) */
 #if	NISA > 0
+	case T_NMI:
 #if defined(KGDB) || defined(DDB)
 		/* NMI can be hooked up to a pushbutton for debugging */
 		printf ("NMI ... going to debugger\n");
@@ -613,7 +596,6 @@ faultcommon:
 		else
 			return;
 #endif /* NISA > 0 */
-		;	/* avoid a label at end of compound statement */
 	}
 
 	if ((type & T_USER) == 0)
@@ -622,7 +604,9 @@ out:
 	userret(l);
 	return;
 trapsignal:
+	KERNEL_PROC_LOCK(l);
 	(*p->p_emul->e_trapsignal)(l, &ksi);
+	KERNEL_PROC_UNLOCK(l);
 	userret(l);
 }
 
@@ -635,13 +619,16 @@ startlwp(void *arg)
 
 	err = cpu_setmcontext(l, &uc->uc_mcontext, uc->uc_flags);
 	pool_put(&lwp_uc_pool, uc);
+
+	KERNEL_PROC_UNLOCK(l);
+
 	userret(l);
 }
 
 void
 upcallret(struct lwp *l)
 {
-	KERNEL_UNLOCK_LAST(l);
+	KERNEL_PROC_UNLOCK(l);
 
 	userret(l);
 }
@@ -650,9 +637,6 @@ upcallret(struct lwp *l)
 static void
 frame_dump(struct trapframe *tf)
 {
-	int i;
-	unsigned long *p;
-
 	printf("rip %p  rsp %p  rfl %p\n",
 	    (void *)tf->tf_rip, (void *)tf->tf_rsp, (void *)tf->tf_rflags);
 	printf("rdi %p  rsi %p  rdx %p\n",
@@ -665,14 +649,5 @@ frame_dump(struct trapframe *tf)
 	    (void *)tf->tf_r13, (void *)tf->tf_r14, (void *)tf->tf_r15);
 	printf("rbp %p  rbx %p  rax %p\n",
 	    (void *)tf->tf_rbp, (void *)tf->tf_rbx, (void *)tf->tf_rax);
-	printf("cs %p  ds %p  es %p  fs %p  gs %p  ss %p\n",
-		tf->tf_cs & 0xffff, tf->tf_ds & 0xffff, tf->tf_es & 0xffff,
-		tf->tf_fs & 0xffff, tf->tf_gs & 0xffff, tf->tf_ss & 0xffff);
-	
-	printf("\n");
-	printf("Stack dump:\n");
-	for (i = 0, p = (unsigned long *) tf; i < 20; i ++, p += 4)
-		printf("   0x%.16lx  0x%.16lx  0x%.16lx 0x%.16lx\n", *p, p[1], p[2], p[3]);
-	printf("\n");
 }
 #endif

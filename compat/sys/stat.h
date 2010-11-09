@@ -1,4 +1,4 @@
-/*	$NetBSD: stat.h,v 1.4 2009/01/11 02:45:50 christos Exp $	*/
+/*	$NetBSD: stat.h,v 1.2 2005/12/11 12:20:29 christos Exp $	*/
 
 /*-
  * Copyright (c) 1982, 1986, 1989, 1993
@@ -40,43 +40,41 @@
 #define	_COMPAT_SYS_STAT_H_
 
 #ifdef _KERNEL
-#include <compat/sys/time.h>
-
 struct stat43 {				/* BSD-4.3 stat struct */
-	uint16_t  st_dev;		/* inode's device */
-	uint32_t  st_ino;		/* inode's number */
-	uint16_t  st_mode;		/* inode protection mode */
-	uint16_t  st_nlink;		/* number of hard links */
-	uint16_t  st_uid;		/* user ID of the file's owner */
-	uint16_t  st_gid;		/* group ID of the file's group */
-	uint16_t  st_rdev;		/* device type */
+	u_int16_t st_dev;		/* inode's device */
+	u_int32_t st_ino;		/* inode's number */
+	u_int16_t st_mode;		/* inode protection mode */
+	u_int16_t st_nlink;		/* number of hard links */
+	u_int16_t st_uid;		/* user ID of the file's owner */
+	u_int16_t st_gid;		/* group ID of the file's group */
+	u_int16_t st_rdev;		/* device type */
 	int32_t	  st_size;		/* file size, in bytes */
-	struct	  timespec50 st_atimespec;/* time of last access */
-	struct	  timespec50 st_mtimespec;/* time of last data modification */
-	struct	  timespec50 st_ctimespec;/* time of last file status change */
+	struct	  timespec st_atimespec;/* time of last access */
+	struct	  timespec st_mtimespec;/* time of last data modification */
+	struct	  timespec st_ctimespec;/* time of last file status change */
 	int32_t	  st_blksize;		/* optimal blocksize for I/O */
 	int32_t	  st_blocks;		/* blocks allocated for file */
-	uint32_t  st_flags;		/* user defined flags for file */
-	uint32_t  st_gen;		/* file generation number */
+	u_int32_t st_flags;		/* user defined flags for file */
+	u_int32_t st_gen;		/* file generation number */
 };
 #endif /* defined(_KERNEL) */
 
 struct stat12 {				/* NetBSD-1.2 stat struct */
-	uint32_t  st_dev;		/* inode's device */
-	uint32_t  st_ino;		/* inode's number */
-	uint16_t  st_mode;		/* inode protection mode */
-	uint16_t  st_nlink;		/* number of hard links */
+	dev_t	  st_dev;		/* inode's device */
+	u_int32_t st_ino;		/* inode's number */
+	u_int16_t st_mode;		/* inode protection mode */
+	u_int16_t st_nlink;		/* number of hard links */
 	uid_t	  st_uid;		/* user ID of the file's owner */
 	gid_t	  st_gid;		/* group ID of the file's group */
-	uint32_t  st_rdev;		/* device type */
-	struct	  timespec50 st_atimespec;/* time of last access */
-	struct	  timespec50 st_mtimespec;/* time of last data modification */
-	struct	  timespec50 st_ctimespec;/* time of last file status change */
+	dev_t	  st_rdev;		/* device type */
+	struct	  timespec st_atimespec;/* time of last access */
+	struct	  timespec st_mtimespec;/* time of last data modification */
+	struct	  timespec st_ctimespec;/* time of last file status change */
 	off_t	  st_size;		/* file size, in bytes */
 	int64_t	  st_blocks;		/* blocks allocated for file */
-	uint32_t  st_blksize;		/* optimal blocksize for I/O */
-	uint32_t  st_flags;		/* user defined flags for file */
-	uint32_t  st_gen;		/* file generation number */
+	u_int32_t st_blksize;		/* optimal blocksize for I/O */
+	u_int32_t st_flags;		/* user defined flags for file */
+	u_int32_t st_gen;		/* file generation number */
 	int32_t	  st_lspare;
 	int64_t	  st_qspare[2];
 };
@@ -96,39 +94,39 @@ struct stat12 {				/* NetBSD-1.2 stat struct */
 #endif
 
 struct stat13 {
-	uint32_t  st_dev;		/* inode's device */
+	dev_t	  st_dev;		/* inode's device */
 	uint32_t  st_ino;		/* inode's number */
 	mode_t	  st_mode;		/* inode protection mode */
 	nlink_t	  st_nlink;		/* number of hard links */
 	uid_t	  st_uid;		/* user ID of the file's owner */
 	gid_t	  st_gid;		/* group ID of the file's group */
-	uint32_t  st_rdev;		/* device type */
+	dev_t	  st_rdev;		/* device type */
 #if defined(_NETBSD_SOURCE)
-	struct	  timespec50 st_atimespec;/* time of last access */
-	struct	  timespec50 st_mtimespec;/* time of last data modification */
-	struct	  timespec50 st_ctimespec;/* time of last file status change */
+	struct	  timespec st_atimespec;/* time of last access */
+	struct	  timespec st_mtimespec;/* time of last data modification */
+	struct	  timespec st_ctimespec;/* time of last file status change */
 #else
 	__STATPAD(__pad0)
-	int32_t	  st_atime;		/* time of last access */
+	time_t	  st_atime;		/* time of last access */
 	__STATPAD(__pad1)
 	long	  st_atimensec;		/* nsec of last access */
-	int32_t	  st_mtime;		/* time of last data modification */
+	time_t	  st_mtime;		/* time of last data modification */
 	__STATPAD(__pad2)
 	long	  st_mtimensec;		/* nsec of last data modification */
-	int32_t	  st_ctime;		/* time of last file status change */
+	time_t	  st_ctime;		/* time of last file status change */
 	__STATPAD(__pad3)
 	long	  st_ctimensec;		/* nsec of last file status change */
 #endif
 	off_t	  st_size;		/* file size, in bytes */
 	blkcnt_t  st_blocks;		/* blocks allocated for file */
 	blksize_t st_blksize;		/* optimal blocksize for I/O */
-	uint32_t  st_flags;		/* user defined flags for file */
-	uint32_t  st_gen;		/* file generation number */
-	uint32_t  st_spare0;
+	u_int32_t st_flags;		/* user defined flags for file */
+	u_int32_t st_gen;		/* file generation number */
+	u_int32_t st_spare0;
 #if defined(_NETBSD_SOURCE)
-	struct timespec50 st_birthtimespec;
+	struct timespec st_birthtimespec;
 #else
-	int32_t	  st_birthtime;
+	time_t	  st_birthtime;
 	__STATPAD(__pad4)
 	long	  st_birthtimensec;
 #endif
@@ -137,65 +135,19 @@ struct stat13 {
 #endif
 };
 
-struct stat30 {
-	uint32_t  st_dev;		/* inode's device */
-	mode_t	  st_mode;		/* inode protection mode */
-	ino_t	  st_ino;		/* inode's number */
-	nlink_t	  st_nlink;		/* number of hard links */
-	uid_t	  st_uid;		/* user ID of the file's owner */
-	gid_t	  st_gid;		/* group ID of the file's group */
-	uint32_t  st_rdev;		/* device type */
-#if defined(_NETBSD_SOURCE)
-	struct	  timespec50 st_atimespec;/* time of last access */
-	struct	  timespec50 st_mtimespec;/* time of last data modification */
-	struct	  timespec50 st_ctimespec;/* time of last file status change */
-	struct 	  timespec50 st_birthtimespec; /* time of creation */
-#else
-	int32_t	  st_atime;		/* time of last access */
-	__STATPAD(__pad0)
-	long	  st_atimensec;		/* nsec of last access */
-	int32_t	  st_mtime;		/* time of last data modification */
-	__STATPAD(__pad1)
-	long	  st_mtimensec;		/* nsec of last data modification */
-	int32_t	  st_ctime;		/* time of last file status change */
-	__STATPAD(__pad2)
-	long	  st_ctimensec;		/* nsec of last file status change */
-	int32_t	  st_birthtime;		/* time of creation */
-	__STATPAD(__pad3)
-	long	  st_birthtimensec;	/* nsec of time of creation */
-#endif
-	off_t	  st_size;		/* file size, in bytes */
-	blkcnt_t  st_blocks;		/* blocks allocated for file */
-	blksize_t st_blksize;		/* optimal blocksize for I/O */
-	uint32_t  st_flags;		/* user defined flags for file */
-	uint32_t  st_gen;		/* file generation number */
-	uint32_t  st_spare[2];
-};
-
-#undef __STATPAD
-
-#if defined(_KERNEL)
-void compat_12_stat_conv(const struct stat *st, struct stat12 *ost);
-#endif
-
 #if !defined(_KERNEL) && !defined(_STANDALONE)
 
 __BEGIN_DECLS
 int	stat(const char *, struct stat12 *);
 int	fstat(int, struct stat12 *);
-int	mknod(const char *, mode_t, uint32_t);
 int	__stat13(const char *, struct stat13 *);
 int	__fstat13(int, struct stat13 *);
-int	__stat30(const char *, struct stat30 *);
-int	__fstat30(int, struct stat30 *);
-int	__stat50(const char *, struct stat *);
-int	__fstat50(int, struct stat *);
-int	__mknod50(const char *, mode_t, dev_t);
+int	__stat30(const char *, struct stat *);
+int	__fstat30(int, struct stat *);
 #if defined(_XOPEN_SOURCE) || defined(_NETBSD_SOURCE)
 int	lstat(const char *, struct stat12 *);
 int	__lstat13(const char *, struct stat13 *);
-int	__lstat30(const char *, struct stat30 *);
-int	__lstat50(const char *, struct stat *);
+int	__lstat30(const char *, struct stat *);
 #endif /* defined(_XOPEN_SOURCE) || defined(_NETBSD_SOURCE) */
 __END_DECLS
 

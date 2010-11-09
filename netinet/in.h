@@ -1,4 +1,4 @@
-/*	$NetBSD: in.h,v 1.83 2008/01/25 21:12:14 joerg Exp $	*/
+/*	$NetBSD: in.h,v 1.77 2006/11/13 05:13:41 dyoung Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1990, 1993
@@ -152,7 +152,7 @@ typedef __sa_family_t	sa_family_t;
  */
 struct in_addr {
 	in_addr_t s_addr;
-} __packed;
+} __attribute__((__packed__));
 
 /*
  * Definitions of bits in internet address integers.
@@ -500,7 +500,7 @@ struct ip_mreq {
  *		dst		Destination IP address
  *		lenproto	htons(proto-hdr-len + proto-number)
  */
-static __inline u_int16_t __unused
+static __inline u_int16_t __attribute__((__unused__))
 in_cksum_phdr(u_int32_t src, u_int32_t dst, u_int32_t lenproto)
 {
 	u_int32_t sum;
@@ -524,7 +524,7 @@ in_cksum_phdr(u_int32_t src, u_int32_t dst, u_int32_t lenproto)
  *
  *	Add the two 16-bit network-order values, carry, and return.
  */
-static __inline u_int16_t __unused
+static __inline u_int16_t __attribute__((__unused__))
 in_cksum_addword(u_int16_t a, u_int16_t b)
 {
 	u_int32_t sum = a + b;
@@ -537,11 +537,9 @@ in_cksum_addword(u_int16_t a, u_int16_t b)
 
 extern	struct in_addr zeroin_addr;
 extern	u_char	ip_protox[];
-extern const struct sockaddr_in in_any;
 
 int	in_broadcast(struct in_addr, struct ifnet *);
 int	in_canforward(struct in_addr);
-int	cpu_in_cksum(struct mbuf *, int, int, uint32_t);
 int	in_cksum(struct mbuf *, int);
 int	in4_cksum(struct mbuf *, u_int8_t, int, int);
 void	in_delayed_cksum(struct mbuf *);
@@ -552,47 +550,8 @@ void	in_socktrim(struct sockaddr_in *);
 #define	in_nullhost(x)	((x).s_addr == INADDR_ANY)
 
 #define	satosin(sa)	((struct sockaddr_in *)(sa))
-#define	satocsin(sa)	((const struct sockaddr_in *)(sa))
 #define	sintosa(sin)	((struct sockaddr *)(sin))
-#define	sintocsa(sin)	((const struct sockaddr *)(sin))
 #define	ifatoia(ifa)	((struct in_ifaddr *)(ifa))
-
-int sockaddr_in_cmp(const struct sockaddr *, const struct sockaddr *);
-const void *sockaddr_in_const_addr(const struct sockaddr *, socklen_t *);
-void *sockaddr_in_addr(struct sockaddr *, socklen_t *);
-
-static inline void
-sockaddr_in_init1(struct sockaddr_in *sin, const struct in_addr *addr,
-    in_port_t port)
-{
-	sin->sin_port = port;
-	sin->sin_addr = *addr;
-	memset(sin->sin_zero, 0, sizeof(sin->sin_zero));
-}
-
-static inline void
-sockaddr_in_init(struct sockaddr_in *sin, const struct in_addr *addr,
-    in_port_t port)
-{
-	sin->sin_family = AF_INET;
-	sin->sin_len = sizeof(*sin);
-	sockaddr_in_init1(sin, addr, port);
-}
-
-static inline struct sockaddr *
-sockaddr_in_alloc(const struct in_addr *addr, in_port_t port, int flags)
-{
-	struct sockaddr *sa;
-
-	sa = sockaddr_alloc(AF_INET, sizeof(struct sockaddr_in), flags);
-
-	if (sa == NULL)
-		return NULL;
-
-	sockaddr_in_init1(satosin(sa), addr, port);
-
-	return sa;
-}
 #endif /* _KERNEL */
 
 #endif /* !_NETINET_IN_H_ */

@@ -1,4 +1,4 @@
-/*	$NetBSD: darwin_types.h,v 1.6 2009/01/11 02:45:47 christos Exp $ */
+/*	$NetBSD: darwin_types.h,v 1.4 2005/12/11 12:19:56 christos Exp $ */
 
 /*-
  * Copyright (c) 2003 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -32,17 +39,11 @@
 #ifndef	_DARWIN_TYPES_H_
 #define	_DARWIN_TYPES_H_
 
-typedef uint32_t darwin_dev_t;
 #define darwin_major(x)		((int32_t)(((u_int32_t)(x) >> 24) & 0xff))
 #define darwin_minor(x)		((int32_t)((x) & 0xffffff))
-#define darwin_makedev(x,y)	((darwin_dev_t)(((x) << 24) | (y)))
+#define darwin_makedev(x,y)	((dev_t)(((x) << 24) | (y)))
 #define native_to_darwin_dev(x)	darwin_makedev(major(x),minor(x))
 #define darwin_to_native_dev(x) makedev(darwin_major(x),darwin_minor(x))
-
-struct darwin_timeval {
-	int32_t tv_sec;
-	int32_t tv_usec;
-};
 
 #endif /* _DARWIN_TYPES_H_ */
 

@@ -2,7 +2,7 @@
 /******************************************************************************
  *
  * Module Name: hwgpe - Low level GPE enable/disable/clear functions
- *              $Revision: 1.6 $
+ *              xRevision: 1.72 $
  *
  *****************************************************************************/
 
@@ -10,7 +10,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2008, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2006, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -115,6 +115,9 @@
  *
  *****************************************************************************/
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: hwgpe.c,v 1.3 2006/11/16 01:33:31 christos Exp $");
+
 #include "acpi.h"
 #include "acevents.h"
 
@@ -188,20 +191,16 @@ AcpiHwClearGpe (
     ACPI_GPE_EVENT_INFO     *GpeEventInfo)
 {
     ACPI_STATUS             Status;
-    UINT8                   RegisterBit;
 
 
     ACPI_FUNCTION_ENTRY ();
 
 
-    RegisterBit = (UINT8)
-        (1 << (GpeEventInfo->GpeNumber - GpeEventInfo->RegisterInfo->BaseGpeNumber));
-
     /*
      * Write a one to the appropriate bit in the status register to
      * clear this GPE.
      */
-    Status = AcpiHwLowLevelWrite (8, RegisterBit,
+    Status = AcpiHwLowLevelWrite (8, GpeEventInfo->RegisterBit,
                     &GpeEventInfo->RegisterInfo->StatusAddress);
 
     return (Status);
@@ -247,8 +246,7 @@ AcpiHwGetGpeStatus (
 
     /* Get the register bitmask for this GPE */
 
-    RegisterBit = (UINT8)
-        (1 << (GpeEventInfo->GpeNumber - GpeEventInfo->RegisterInfo->BaseGpeNumber));
+    RegisterBit = GpeEventInfo->RegisterBit;
 
     /* GPE currently enabled? (enabled for runtime?) */
 
@@ -481,7 +479,7 @@ AcpiHwDisableAllGpes (
     ACPI_STATUS             Status;
 
 
-    ACPI_FUNCTION_TRACE (HwDisableAllGpes);
+    ACPI_FUNCTION_TRACE ("HwDisableAllGpes");
 
 
     Status = AcpiEvWalkGpeList (AcpiHwDisableGpeBlock);
@@ -509,7 +507,7 @@ AcpiHwEnableAllRuntimeGpes (
     ACPI_STATUS             Status;
 
 
-    ACPI_FUNCTION_TRACE (HwEnableAllRuntimeGpes);
+    ACPI_FUNCTION_TRACE ("HwEnableAllRuntimeGpes");
 
 
     Status = AcpiEvWalkGpeList (AcpiHwEnableRuntimeGpeBlock);
@@ -536,7 +534,7 @@ AcpiHwEnableAllWakeupGpes (
     ACPI_STATUS             Status;
 
 
-    ACPI_FUNCTION_TRACE (HwEnableAllWakeupGpes);
+    ACPI_FUNCTION_TRACE ("HwEnableAllWakeupGpes");
 
 
     Status = AcpiEvWalkGpeList (AcpiHwEnableWakeupGpeBlock);

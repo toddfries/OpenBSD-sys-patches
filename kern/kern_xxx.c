@@ -1,4 +1,4 @@
-/*	$NetBSD: kern_xxx.c,v 1.70 2008/04/25 11:23:42 ad Exp $	*/
+/*	$NetBSD: kern_xxx.c,v 1.66 2007/11/09 14:50:52 dsl Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1989, 1993
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kern_xxx.c,v 1.70 2008/04/25 11:23:42 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kern_xxx.c,v 1.66 2007/11/09 14:50:52 dsl Exp $");
 
 #include "opt_syscall_debug.h"
 
@@ -50,12 +50,12 @@ __KERNEL_RCSID(0, "$NetBSD: kern_xxx.c,v 1.70 2008/04/25 11:23:42 ad Exp $");
 
 /* ARGSUSED */
 int
-sys_reboot(struct lwp *l, const struct sys_reboot_args *uap, register_t *retval)
+sys_reboot(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct sys_reboot_args /* {
 		syscallarg(int) opt;
 		syscallarg(char *) bootstr;
-	} */
+	} */ *uap = v;
 	int error;
 	char *bootstr, bs[128];
 
@@ -74,9 +74,7 @@ sys_reboot(struct lwp *l, const struct sys_reboot_args *uap, register_t *retval)
 	/*
 	 * Not all ports use the bootstr currently.
 	 */
-	KERNEL_LOCK(1, NULL);
 	cpu_reboot(SCARG(uap, opt), bootstr);
-	KERNEL_UNLOCK_ONE(NULL);
 	return (0);
 }
 
@@ -110,9 +108,8 @@ int	scdebug = SCDEBUG_CALLS|SCDEBUG_RETURNS|SCDEBUG_SHOWARGS|SCDEBUG_ALL;
 #endif
 
 void
-scdebug_call(register_t code, const register_t args[])
+scdebug_call(struct lwp *l, register_t code, register_t args[])
 {
-	struct lwp *l = curlwp;
 	struct proc *p = l->l_proc;
 	const struct sysent *sy;
 	const struct emul *em;
@@ -130,6 +127,7 @@ scdebug_call(register_t code, const register_t args[])
 	    || sy->sy_call == sys_nosys))
 		return;
 
+	KERNEL_LOCK(1, l);
 	printf("proc %d (%s): %s num ", p->p_pid, p->p_comm, em->e_name);
 	if ((int)code < 0
 #ifndef __HAVE_MINIMAL_EMUL
@@ -148,12 +146,12 @@ scdebug_call(register_t code, const register_t args[])
 		}
 	}
 	printf("\n");
+	KERNEL_UNLOCK_ONE(l);
 }
 
 void
-scdebug_ret(register_t code, int error, const register_t retval[])
+scdebug_ret(struct lwp *l, register_t code, int error, register_t retval[])
 {
-	struct lwp *l = curlwp;
 	struct proc *p = l->l_proc;
 	const struct sysent *sy;
 	const struct emul *em;
@@ -170,6 +168,7 @@ scdebug_ret(register_t code, int error, const register_t retval[])
 	    || sy->sy_call == sys_nosys))
 		return;
 
+	KERNEL_LOCK(1, l);
 	printf("proc %d (%s): %s num ", p->p_pid, p->p_comm, em->e_name);
 	if ((int)code < 0
 #ifndef __HAVE_MINIMAL_EMUL
@@ -181,5 +180,6 @@ scdebug_ret(register_t code, int error, const register_t retval[])
 		printf("%ld ret: err = %d, rv = 0x%lx,0x%lx", (long)code,
 		    error, (long)retval[0], (long)retval[1]);
 	printf("\n");
+	KERNEL_UNLOCK_ONE(l);
 }
 #endif /* SYSCALL_DEBUG */

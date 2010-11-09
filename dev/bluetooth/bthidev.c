@@ -1,4 +1,4 @@
-/*	$NetBSD: bthidev.c,v 1.16 2008/08/06 15:01:23 plunky Exp $	*/
+/*	$NetBSD: bthidev.c,v 1.13 2007/11/12 19:19:32 plunky Exp $	*/
 
 /*-
  * Copyright (c) 2006 Itronix Inc.
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: bthidev.c,v 1.16 2008/08/06 15:01:23 plunky Exp $");
+__KERNEL_RCSID(0, "$NetBSD: bthidev.c,v 1.13 2007/11/12 19:19:32 plunky Exp $");
 
 #include <sys/param.h>
 #include <sys/conf.h>
@@ -43,7 +43,6 @@ __KERNEL_RCSID(0, "$NetBSD: bthidev.c,v 1.16 2008/08/06 15:01:23 plunky Exp $");
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
 #include <sys/proc.h>
-#include <sys/socketvar.h>
 #include <sys/systm.h>
 
 #include <prop/proplib.h>
@@ -67,13 +66,14 @@ __KERNEL_RCSID(0, "$NetBSD: bthidev.c,v 1.16 2008/08/06 15:01:23 plunky Exp $");
 
 /* bthidev softc */
 struct bthidev_softc {
+	struct btdev		sc_btdev;
 	uint16_t		sc_state;
 	uint16_t		sc_flags;
 	device_t		sc_dev;
 
 	bdaddr_t		sc_laddr;	/* local address */
 	bdaddr_t		sc_raddr;	/* remote address */
-	struct sockopt		sc_mode;	/* link mode sockopt */
+	int			sc_mode;	/* link mode */
 
 	uint16_t		sc_ctlpsm;	/* control PSM */
 	struct l2cap_channel	*sc_ctl;	/* control channel */
@@ -98,6 +98,7 @@ struct bthidev_softc {
 #define BTHID_WAIT_CTL		1
 #define BTHID_WAIT_INT		2
 #define BTHID_OPEN		3
+#define BTHID_DETACHING		4
 
 #define	BTHID_RETRY_INTERVAL	5	/* seconds between connection attempts */
 
@@ -180,7 +181,7 @@ bthidev_attach(device_t parent, device_t self, void *aux)
 	struct hid_item h;
 	const void *desc;
 	int locs[BTHIDBUSCF_NLOCS];
-	int maxid, rep, dlen;
+	int maxid, rep, s, dlen;
 
 	/*
 	 * Init softc
@@ -194,8 +195,6 @@ bthidev_attach(device_t parent, device_t self, void *aux)
 	sc->sc_ctlpsm = L2CAP_PSM_HID_CNTL;
 	sc->sc_intpsm = L2CAP_PSM_HID_INTR;
 
-	sockopt_init(&sc->sc_mode, BTPROTO_L2CAP, SO_L2CAP_LM, 0);
-
 	/*
 	 * extract config from proplist
 	 */
@@ -208,11 +207,11 @@ bthidev_attach(device_t parent, device_t self, void *aux)
 	obj = prop_dictionary_get(dict, BTDEVmode);
 	if (prop_object_type(obj) == PROP_TYPE_STRING) {
 		if (prop_string_equals_cstring(obj, BTDEVauth))
-			sockopt_setint(&sc->sc_mode, L2CAP_LM_AUTH);
+			sc->sc_mode = L2CAP_LM_AUTH;
 		else if (prop_string_equals_cstring(obj, BTDEVencrypt))
-			sockopt_setint(&sc->sc_mode, L2CAP_LM_ENCRYPT);
+			sc->sc_mode = L2CAP_LM_ENCRYPT;
 		else if (prop_string_equals_cstring(obj, BTDEVsecure))
-			sockopt_setint(&sc->sc_mode, L2CAP_LM_SECURE);
+			sc->sc_mode = L2CAP_LM_SECURE;
 		else  {
 			aprint_error(" unknown %s\n", BTDEVmode);
 			return;
@@ -304,13 +303,13 @@ bthidev_attach(device_t parent, device_t self, void *aux)
 	/*
 	 * start bluetooth connections
 	 */
-	mutex_enter(bt_lock);
+	s = splsoftnet();
 	if ((sc->sc_flags & BTHID_RECONNECT) == 0)
 		bthidev_listen(sc);
 
 	if (sc->sc_flags & BTHID_CONNECTING)
 		bthidev_connect(sc);
-	mutex_exit(bt_lock);
+	splx(s);
 }
 
 static int
@@ -318,8 +317,9 @@ bthidev_detach(device_t self, int flags)
 {
 	struct bthidev_softc *sc = device_private(self);
 	struct bthidev *hidev;
+	int s;
 
-	mutex_enter(bt_lock);
+	s = splsoftnet();
 	sc->sc_flags = 0;	/* disable reconnecting */
 
 	/* release interrupt listen */
@@ -348,18 +348,21 @@ bthidev_detach(device_t self, int flags)
 		sc->sc_ctl = NULL;
 	}
 
-	callout_halt(&sc->sc_reconnect, bt_lock);
+	/* remove callout */
+	sc->sc_state = BTHID_DETACHING;
+	callout_stop(&sc->sc_reconnect);
+	if (callout_invoking(&sc->sc_reconnect))
+		tsleep(sc, PWAIT, "bthidetach", 0);
+
 	callout_destroy(&sc->sc_reconnect);
 
-	mutex_exit(bt_lock);
+	splx(s);
 
 	/* detach children */
 	while ((hidev = LIST_FIRST(&sc->sc_list)) != NULL) {
 		LIST_REMOVE(hidev, sc_next);
 		config_detach(hidev->sc_dev, flags);
 	}
-
-	sockopt_destroy(&sc->sc_mode);
 
 	return 0;
 }
@@ -394,8 +397,9 @@ static void
 bthidev_timeout(void *arg)
 {
 	struct bthidev_softc *sc = arg;
+	int s;
 
-	mutex_enter(bt_lock);
+	s = splsoftnet();
 	callout_ack(&sc->sc_reconnect);
 
 	switch (sc->sc_state) {
@@ -427,10 +431,14 @@ bthidev_timeout(void *arg)
 	case BTHID_OPEN:
 		break;
 
+	case BTHID_DETACHING:
+		wakeup(sc);
+		break;
+
 	default:
 		break;
 	}
-	mutex_exit(bt_lock);
+	splx(s);
 }
 
 /*
@@ -454,7 +462,7 @@ bthidev_listen(struct bthidev_softc *sc)
 	if (err)
 		return err;
 
-	err = l2cap_setopt(sc->sc_ctl_l, &sc->sc_mode);
+	err = l2cap_setopt(sc->sc_ctl_l, SO_L2CAP_LM, &sc->sc_mode);
 	if (err)
 		return err;
 
@@ -474,7 +482,7 @@ bthidev_listen(struct bthidev_softc *sc)
 	if (err)
 		return err;
 
-	err = l2cap_setopt(sc->sc_int_l, &sc->sc_mode);
+	err = l2cap_setopt(sc->sc_int_l, SO_L2CAP_LM, &sc->sc_mode);
 	if (err)
 		return err;
 
@@ -513,7 +521,7 @@ bthidev_connect(struct bthidev_softc *sc)
 		return err;
 	}
 
-	err = l2cap_setopt(sc->sc_ctl, &sc->sc_mode);
+	err = l2cap_setopt(sc->sc_ctl, SO_L2CAP_LM, &sc->sc_mode);
 	if (err)
 		return err;
 
@@ -570,7 +578,7 @@ bthidev_ctl_connected(void *arg)
 		if (err)
 			goto fail;
 
-		err = l2cap_setopt(sc->sc_int, &sc->sc_mode);
+		err = l2cap_setopt(sc->sc_int, SO_L2CAP_LM, &sc->sc_mode);
 		if (err)
 			goto fail;
 
@@ -739,15 +747,12 @@ static void
 bthidev_linkmode(void *arg, int new)
 {
 	struct bthidev_softc *sc = arg;
-	int mode;
 
-	(void)sockopt_getint(&sc->sc_mode, &mode);
-
-	if ((mode & L2CAP_LM_AUTH) && !(new & L2CAP_LM_AUTH))
+	if ((sc->sc_mode & L2CAP_LM_AUTH) && !(new & L2CAP_LM_AUTH))
 		aprint_error_dev(sc->sc_dev, "auth failed\n");
-	else if ((mode & L2CAP_LM_ENCRYPT) && !(new & L2CAP_LM_ENCRYPT))
+	else if ((sc->sc_mode & L2CAP_LM_ENCRYPT) && !(new & L2CAP_LM_ENCRYPT))
 		aprint_error_dev(sc->sc_dev, "encrypt off\n");
-	else if ((mode & L2CAP_LM_SECURE) && !(new & L2CAP_LM_SECURE))
+	else if ((sc->sc_mode & L2CAP_LM_SECURE) && !(new & L2CAP_LM_SECURE))
 		aprint_error_dev(sc->sc_dev, "insecure\n");
 	else
 		return;
@@ -861,7 +866,7 @@ bthidev_output(struct bthidev *hidev, uint8_t *report, int rlen)
 {
 	struct bthidev_softc *sc = device_private(hidev->sc_parent);
 	struct mbuf *m;
-	int err;
+	int s, err;
 
 	if (sc == NULL || sc->sc_state != BTHID_OPEN)
 		return ENOTCONN;
@@ -892,9 +897,9 @@ bthidev_output(struct bthidev *hidev, uint8_t *report, int rlen)
 	memcpy(mtod(m, uint8_t *) + 2, report, rlen);
 	m->m_pkthdr.len = m->m_len = rlen + 2;
 
-	mutex_enter(bt_lock);
+	s = splsoftnet();
 	err = l2cap_send(sc->sc_int, m);
-	mutex_exit(bt_lock);
+	splx(s);
 
 	return err;
 }

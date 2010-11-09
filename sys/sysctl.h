@@ -1,4 +1,4 @@
-/*	$NetBSD: sysctl.h,v 1.183 2009/01/20 18:20:48 drochner Exp $	*/
+/*	$NetBSD: sysctl.h,v 1.171 2007/10/15 14:12:54 ad Exp $	*/
 
 /*
  * Copyright (c) 1989, 1993
@@ -46,13 +46,11 @@
 #include <sys/proc.h>
 #include <uvm/uvm_extern.h>
 
-
 /* For offsetof() */
 #if defined(_KERNEL) || defined(_STANDALONE)
 #include <sys/systm.h>
 #else
 #include <stddef.h>
-#include <stdbool.h>
 #endif
 
 /*
@@ -86,7 +84,6 @@ struct ctlname {
 #define	CTLTYPE_STRING	3	/* name describes a string */
 #define	CTLTYPE_QUAD	4	/* name describes a 64-bit number */
 #define	CTLTYPE_STRUCT	5	/* name describes a structure */
-#define	CTLTYPE_BOOL	6	/* name describes a bool */
 
 /*
  * Flags that apply to each node, governing access and other features
@@ -213,7 +210,7 @@ struct ctlname {
 #define	KERN_NGROUPS		18	/* int: # of supplemental group ids */
 #define	KERN_JOB_CONTROL	19	/* int: is job control available */
 #define	KERN_SAVED_IDS		20	/* int: saved set-user/group-ID */
-#define	KERN_OBOOTTIME		21	/* struct: time kernel was booted */
+#define	KERN_BOOTTIME		21	/* struct: time kernel was booted */
 #define	KERN_DOMAINNAME		22	/* string: (YP) domainname */
 #define	KERN_MAXPARTITIONS	23	/* int: number of partitions/disk */
 #define	KERN_RAWPARTITION	24	/* int: raw partition number */
@@ -275,8 +272,7 @@ struct ctlname {
 #define	KERN_HARDCLOCK_TICKS	80	/* int: number of hardclock ticks */
 #define	KERN_ARND		81	/* void *buf, size_t siz random */
 #define	KERN_SYSVIPC		82	/* node: SysV IPC parameters */
-#define	KERN_BOOTTIME		83	/* struct: time kernel was booted */
-#define	KERN_MAXID		84	/* number of valid kern ids */
+#define	KERN_MAXID		83	/* number of valid kern ids */
 
 
 #define	CTL_KERN_NAMES { \
@@ -301,7 +297,7 @@ struct ctlname {
 	{ "ngroups", CTLTYPE_INT }, \
 	{ "job_control", CTLTYPE_INT }, \
 	{ "saved_ids", CTLTYPE_INT }, \
-	{ 0, 0 }, \
+	{ "boottime", CTLTYPE_STRUCT }, \
 	{ "domainname", CTLTYPE_STRING }, \
 	{ "maxpartitions", CTLTYPE_INT }, \
 	{ "rawpartition", CTLTYPE_INT }, \
@@ -363,7 +359,6 @@ struct ctlname {
 	{ "hardclock_ticks", CTLTYPE_INT }, \
 	{ "arandom", CTLTYPE_STRUCT }, \
 	{ "sysvipc", CTLTYPE_STRUCT }, \
-	{ "boottime", CTLTYPE_STRUCT }, \
 }
 
 /*
@@ -427,7 +422,7 @@ struct kinfo_proc {
 		pid_t	e_ppid;			/* parent process id */
 		pid_t	e_pgid;			/* process group id */
 		short	e_jobc;			/* job control counter */
-		uint32_t e_tdev;		/* XXX: controlling tty dev */
+		dev_t	e_tdev;			/* controlling tty dev */
 		pid_t	e_tpgid;		/* tty process group id */
 		struct	session *e_tsess;	/* tty session pointer */
 #define	WMESGLEN	8
@@ -507,7 +502,7 @@ struct kinfo_proc2 {
 	int16_t	p_ngroups;		/* SHORT: number of groups */
 
 	int16_t	p_jobc;			/* SHORT: job control counter */
-	uint32_t p_tdev;		/* XXX: DEV_T: controlling tty dev */
+	uint32_t p_tdev;		/* DEV_T: controlling tty dev */
 
 	uint32_t p_estcpu;		/* U_INT: Time averaged value of p_cpticks. */
 	uint32_t p_rtime_sec;		/* STRUCT TIMEVAL: Real time. */
@@ -687,12 +682,9 @@ struct kinfo_lwp {
 /*
  * KERN_SYSVIPC_INFO subtypes
  */
-/* KERN_SYSVIPC_OMSG_INFO		1	*/
-/* KERN_SYSVIPC_OSEM_INFO		2	*/
-/* KERN_SYSVIPC_OSHM_INFO		3	*/
-#define	KERN_SYSVIPC_MSG_INFO		4	/* msginfo and msqid_ds */
-#define	KERN_SYSVIPC_SEM_INFO		5	/* seminfo and semid_ds */
-#define	KERN_SYSVIPC_SHM_INFO		6	/* shminfo and shmid_ds */
+#define	KERN_SYSVIPC_MSG_INFO		1	/* msginfo and msqid_ds */
+#define	KERN_SYSVIPC_SEM_INFO		2	/* seminfo and semid_ds */
+#define	KERN_SYSVIPC_SHM_INFO		3	/* shminfo and shmid_ds */
 
 /*
  * tty counter sysctl variables
@@ -716,8 +708,8 @@ struct kinfo_lwp {
  */
 
 struct kinfo_drivers {
-	devmajor_t	d_cmajor;
-	devmajor_t	d_bmajor;
+	int32_t		d_cmajor;
+	int32_t		d_bmajor;
 	char		d_name[24];
 };
 
@@ -857,7 +849,7 @@ struct kinfo_file {
 #define	USER_POSIX2_SW_DEV	17	/* int: POSIX2_SW_DEV */
 #define	USER_POSIX2_UPE		18	/* int: POSIX2_UPE */
 #define	USER_STREAM_MAX		19	/* int: POSIX2_STREAM_MAX */
-#define	USER_TZNAME_MAX		20	/* int: _POSIX_TZNAME_MAX */
+#define	USER_TZNAME_MAX		20	/* int: POSIX2_TZNAME_MAX */
 #define	USER_ATEXIT_MAX		21	/* int: {ATEXIT_MAX} */
 #define	USER_MAXID		22	/* number of valid user ids */
 
@@ -1062,13 +1054,12 @@ extern struct ctldebug debug15, debug16, debug17, debug18, debug19;
 	oldlenp, newp, newlen, \
 	oname, l, node
 
-#ifdef _MODULE
+#ifdef _LKM
 
 #define SYSCTL_SETUP_PROTO(name)				\
 	void name(struct sysctllog **)
 #ifdef SYSCTL_DEBUG_SETUP
 #define SYSCTL_SETUP(name, desc)				\
-	SYSCTL_SETUP_PROTO(name);				\
 	static void __CONCAT(___,name)(struct sysctllog **);	\
 	void name(struct sysctllog **clog) {			\
 		printf("%s\n", desc);				\
@@ -1077,12 +1068,11 @@ extern struct ctldebug debug15, debug16, debug17, debug18, debug19;
 	static void __CONCAT(___,name)(struct sysctllog **clog)
 #else  /* !SYSCTL_DEBUG_SETUP */
 #define SYSCTL_SETUP(name, desc)				\
-	SYSCTL_SETUP_PROTO(name);				\
 	__link_set_add_text(sysctl_funcs, name);		\
 	void name(struct sysctllog **clog)
 #endif /* !SYSCTL_DEBUG_SETUP */
 
-#else /* !_MODULE */
+#else /* !_LKM */
 
 #define SYSCTL_SETUP_PROTO(name)
 #ifdef SYSCTL_DEBUG_SETUP
@@ -1099,8 +1089,9 @@ extern struct ctldebug debug15, debug16, debug17, debug18, debug19;
 	__link_set_add_text(sysctl_funcs, name);		\
 	static void name(struct sysctllog **clog)
 #endif /* !SYSCTL_DEBUG_SETUP */
+typedef void (*sysctl_setup_func)(struct sysctllog **);
 
-#endif /* !_MODULE */
+#endif /* !_LKM */
 
 /*
  * Internal sysctl function calling convention:
@@ -1119,7 +1110,7 @@ typedef int (*sysctlfn)(SYSCTLFN_PROTO);
 /*
  * used in more than just sysctl
  */
-void	fill_eproc(struct proc *, struct eproc *, bool);
+void	fill_eproc(struct proc *, struct eproc *);
 
 /*
  * subsystem setup
@@ -1129,10 +1120,9 @@ void	sysctl_init(void);
 /*
  * typical syscall call order
  */
-void	sysctl_lock(bool);
+int	sysctl_lock(struct lwp *, void *, size_t);
 int	sysctl_dispatch(SYSCTLFN_PROTO);
-void	sysctl_unlock(void);
-void	sysctl_relock(void);
+void	sysctl_unlock(struct lwp *);
 
 /*
  * tree navigation primitives (must obtain lock before using these)
@@ -1182,7 +1172,6 @@ int	sysctl_kern_vnode(SYSCTLFN_PROTO);
 int	sysctl_net_inet_ip_ports(SYSCTLFN_PROTO);
 int	sysctl_consdev(SYSCTLFN_PROTO);
 int	sysctl_root_device(SYSCTLFN_PROTO);
-int	sysctl_vfs_generic_fstypes(SYSCTLFN_PROTO);
 
 /*
  * primitive helper stubs
@@ -1254,7 +1243,6 @@ struct sysctlnode {
 		int32_t scu_alias;		/* node this node refers to */
 		int32_t scu_idata;		/* immediate "int" data */
 		u_quad_t scu_qdata;		/* immediate "u_quad_t" data */
-		bool scu_bdata;			/* immediate bool data */
 	} sysctl_un;
 	__sysc_pad(size_t) _sysctl_size;	/* size of instrumented data */
 	__sysc_pad(sysctlfn) _sysctl_func;	/* access helper function */
@@ -1284,7 +1272,6 @@ struct sysctlnode {
 #define sysctl_alias	sysctl_un.scu_alias
 #define sysctl_idata	sysctl_un.scu_idata
 #define sysctl_qdata	sysctl_un.scu_qdata
-#define sysctl_bdata	sysctl_un.scu_bdata
 
 /*
  * when requesting a description of a node (a set of nodes, actually),

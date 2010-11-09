@@ -1,5 +1,5 @@
 /*
- * $NetBSD: main.c,v 1.24 2009/01/12 07:42:30 tsutsui Exp $
+ * $NetBSD: main.c,v 1.22 2006/06/27 11:07:17 tsutsui Exp $
  *
  *
  * Copyright (c) 1996,1999 Ignatios Souvatzis
@@ -118,7 +118,7 @@ pain(void *aio,	void *cons)
 	void (*start_it)(void *, u_long, u_long, void *, u_long, u_long, int,
 	    void *, int, int, u_long, u_long, u_long, int);
 
-	void *kp;
+	caddr_t kp;
 	u_int16_t *kvers;
 	int	ksize;
 	void	*esym = 0;
@@ -424,7 +424,7 @@ printf("Supressing %ld kernel symbols\n", marks[MARK_NSYM]);
 #ifndef PPCBOOTER
 		if (((cpuid >> 24) == 0x7D) &&
 		    ((u_long)kcd->addr < 0x1000000)) {
-			kcd->addr = (char *)kcd->addr + 0x3000000;
+			kcd->addr += 0x3000000;
 		}
 #endif
 		++kcd;
@@ -447,10 +447,10 @@ printf("Supressing %ld kernel symbols\n", marks[MARK_NSYM]);
 	/*
 	 * Copy startup code to end of kernel image and set start_it.
 	 */
-	memcpy((char *)kp + ksize + 256, (char *)startit,
+	memcpy(kp + ksize + 256, (char *)startit,
 	    (char *)startit_end - (char *)startit);
 	CacheClearU();
-	start_it = (void *)((char *)kp + ksize + 256);
+	start_it = (void *)(kp + ksize + 256);
 #endif
 	printf("*** Loading from %08lx to Fastmem %08lx ***\n",
 	    (u_long)kp, (u_long)fmem);

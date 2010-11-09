@@ -1,4 +1,4 @@
-/* $NetBSD: lpt_upc.c,v 1.10 2009/01/25 14:34:14 bjh21 Exp $ */
+/* $NetBSD: lpt_upc.c,v 1.8 2007/10/19 11:59:55 ad Exp $ */
 /*-
  * Copyright (c) 2000 Ben Harris
  * All rights reserved.
@@ -28,7 +28,7 @@
 /* This file is part of NetBSD/arm26 -- a port of NetBSD to ARM2/3 machines. */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: lpt_upc.c,v 1.10 2009/01/25 14:34:14 bjh21 Exp $");
+__KERNEL_RCSID(0, "$NetBSD: lpt_upc.c,v 1.8 2007/10/19 11:59:55 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/device.h>
@@ -40,31 +40,31 @@ __KERNEL_RCSID(0, "$NetBSD: lpt_upc.c,v 1.10 2009/01/25 14:34:14 bjh21 Exp $");
 #include <dev/ic/lptvar.h>
 #include <dev/ic/upcvar.h>
 
-static int lpt_upc_match(device_t, cfdata_t , void *);
-static void lpt_upc_attach(device_t, device_t, void *);
+static int lpt_upc_match(struct device *, struct cfdata *, void *);
+static void lpt_upc_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(lpt_upc, sizeof(struct lpt_softc),
+CFATTACH_DECL(lpt_upc, sizeof(struct lpt_softc),
     lpt_upc_match, lpt_upc_attach, NULL, NULL);
 
 static int
-lpt_upc_match(device_t parent, cfdata_t cf, void *aux)
+lpt_upc_match(struct device *parent, struct cfdata *cf, void *aux)
 {
-	struct upc_attach_args *ua = aux;
 
-	return !strcmp(ua->ua_devtype, "lpt");
+	/* upc_submatch does it all anyway */
+	return 1;
 }
 
 static void
-lpt_upc_attach(device_t parent, device_t self, void *aux)
+lpt_upc_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct lpt_softc *sc = device_private(self);
+	struct lpt_softc *sc = (struct lpt_softc *)self;
 	struct upc_attach_args *ua = aux;
 
-	sc->sc_dev = self;
 	sc->sc_iot = ua->ua_iot;
 	sc->sc_ioh = ua->ua_ioh;
 
 	lpt_attach_subr(sc);
 	upc_intr_establish(ua->ua_irqhandle, IPL_TTY, lptintr, sc);
-	aprint_normal("\n");
+	printf("\n");
 }
+

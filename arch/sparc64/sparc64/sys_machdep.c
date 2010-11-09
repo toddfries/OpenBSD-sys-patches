@@ -1,4 +1,4 @@
-/*	$NetBSD: sys_machdep.c,v 1.9 2007/12/20 23:02:43 dsl Exp $ */
+/*	$NetBSD: sys_machdep.c,v 1.7 2005/12/11 12:19:15 christos Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -41,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sys_machdep.c,v 1.9 2007/12/20 23:02:43 dsl Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sys_machdep.c,v 1.7 2005/12/11 12:19:15 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -54,15 +54,19 @@ __KERNEL_RCSID(0, "$NetBSD: sys_machdep.c,v 1.9 2007/12/20 23:02:43 dsl Exp $");
 #include <sys/buf.h>
 
 #include <sys/mount.h>
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 
 int
-sys_sysarch(struct lwp *l, const struct sys_sysarch_args *uap, register_t *retval)
+sys_sysarch(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct sys_sysarch_args /* {
 		syscallarg(int) op;
 		syscallarg(char *) parms;
-	} */
+	} */ *uap = v;
 	int error = 0;
 
 	switch(SCARG(uap, op)) {

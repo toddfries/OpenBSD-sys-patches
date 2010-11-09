@@ -1,4 +1,4 @@
-/*	$NetBSD: autoconf.c,v 1.10 2008/04/28 20:23:26 martin Exp $	*/
+/*	$NetBSD: autoconf.c,v 1.7 2006/05/05 18:04:41 thorpej Exp $	*/
 
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.10 2008/04/28 20:23:26 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.7 2006/05/05 18:04:41 thorpej Exp $");
 
 #include "opt_md.h"
 
@@ -80,6 +87,9 @@ cpu_configure(void)
 	(void) splhigh();
 	(void) splserial();	/* XXX need an splextreme() */
 
+	/* Initialize software interrupts. */
+	softintr_init();
+
 	maa.ma_name = "mainbus";
 
 	config_rootfound("mainbus", &maa);
@@ -94,7 +104,7 @@ cpu_configure(void)
 #define SETPROP(x, y)							\
 	do {								\
 		if (prop_dictionary_set(device_properties(dev),		\
-						x, y) == false) {	\
+						x, y) == FALSE) {	\
 			printf("WARNING: unable to set " x " "		\
 			   "property for %s\n", dev->dv_xname);		\
 		}							\

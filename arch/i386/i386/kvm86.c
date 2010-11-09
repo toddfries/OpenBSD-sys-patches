@@ -1,4 +1,4 @@
-/* $NetBSD: kvm86.c,v 1.15 2008/04/27 11:37:48 ad Exp $ */
+/* $NetBSD: kvm86.c,v 1.10 2005/12/26 19:23:59 perry Exp $ */
 
 /*
  * Copyright (c) 2002
@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kvm86.c,v 1.15 2008/04/27 11:37:48 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kvm86.c,v 1.10 2005/12/26 19:23:59 perry Exp $");
 
 #include "opt_multiprocessor.h"
 
@@ -36,12 +36,8 @@ __KERNEL_RCSID(0, "$NetBSD: kvm86.c,v 1.15 2008/04/27 11:37:48 ad Exp $");
 #include <sys/proc.h>
 #include <sys/user.h>
 #include <sys/malloc.h>
-#include <sys/mutex.h>
-
 #include <uvm/uvm.h>
-
-#include <machine/tss.h>
-#include <machine/gdt.h>
+#include <machine/pcb.h>
 #include <machine/pte.h>
 #include <machine/pmap.h>
 #include <machine/kvm86.h>
@@ -56,7 +52,7 @@ struct kvm86_data {
 
 	struct segment_descriptor sd;
 
-	struct i386tss tss;
+	struct pcb pcb; /* contains TSS */
 	u_long iomap[0x10000/32]; /* full size io permission map */
 };
 
@@ -74,10 +70,6 @@ void *bioscallscratchpage;
 /* a virtual page to map in vm86 memory temporarily */
 vaddr_t bioscalltmpva;
 
-int kvm86_tss_sel;
-
-kmutex_t kvm86_mp_lock;
-
 #define KVM86_IOPL3 /* not strictly necessary, saves a lot of traps */
 
 void
@@ -86,9 +78,8 @@ kvm86_init()
 	size_t vmdsize;
 	char *buf;
 	struct kvm86_data *vmd;
-	struct i386tss *tss;
+	struct pcb *pcb;
 	int i;
-	int slot;
 
 	vmdsize = round_page(sizeof(struct kvm86_data)) + PAGE_SIZE;
 
@@ -100,23 +91,25 @@ kvm86_init()
 	memset(buf, 0, vmdsize);
 	/* first page is stack */
 	vmd = (struct kvm86_data *)(buf + PAGE_SIZE);
-	tss = &vmd->tss;
+	pcb = &vmd->pcb;
 
 	/*
+	 * derive pcb and TSS from proc0
 	 * we want to access all IO ports, so we need a full-size
 	 *  permission bitmap
+	 * XXX do we really need the pcb or just the TSS?
 	 */
-	memcpy(tss, &curcpu()->ci_tss, sizeof(*tss));
-	tss->tss_esp0 = (int)vmd;
-	tss->tss_ss0 = GSEL(GDATA_SEL, SEL_KPL);
+	memcpy(pcb, &lwp0.l_addr->u_pcb, sizeof(struct pcb));
+	pcb->pcb_tss.tss_esp0 = (int)vmd;
+	pcb->pcb_tss.tss_ss0 = GSEL(GDATA_SEL, SEL_KPL);
 	for (i = 0; i < sizeof(vmd->iomap) / 4; i++)
 		vmd->iomap[i] = 0;
-	tss->tss_iobase = ((char *)vmd->iomap - (char *)tss) << 16;
+	pcb->pcb_tss.tss_ioopt =
+		((caddr_t)vmd->iomap - (caddr_t)&pcb->pcb_tss) << 16;
 
-	slot = gdt_get_slot();
-	kvm86_tss_sel = GSEL(slot, SEL_KPL);
 	/* setup TSS descriptor (including our iomap) */
-	setgdt(slot, tss, sizeof(*tss) + sizeof(vmd->iomap) - 1,
+	setsegment(&vmd->sd, &pcb->pcb_tss,
+	    sizeof(struct pcb) + sizeof(vmd->iomap) - 1,
 	    SDT_SYS386TSS, SEL_KPL, 0, 0);
 
 	/* prepare VM for BIOS calls */
@@ -126,7 +119,6 @@ kvm86_init()
 		  BIOSCALLSCRATCHPAGE_VMVA);
 	bioscallvmd = vmd;
 	bioscalltmpva = uvm_km_alloc(kernel_map, PAGE_SIZE, 0, UVM_KMF_VAONLY);
-	mutex_init(&kvm86_mp_lock, MUTEX_DEFAULT, IPL_NONE);
 }
 
 /*
@@ -138,13 +130,22 @@ static void
 kvm86_prepare(vmd)
 	struct kvm86_data *vmd;
 {
+	extern struct pcb *vm86pcb;
+	extern int vm86tssd0, vm86tssd1;
 	extern paddr_t vm86newptd;
 	extern struct trapframe *vm86frame;
 	extern pt_entry_t *vm86pgtableva;
 
+#ifdef MULTIPROCESSOR
+#error this needs a rewrite for MP
+#endif
+
 	vm86newptd = vtophys((vaddr_t)vmd) | PG_V | PG_RW | PG_U | PG_u;
 	vm86pgtableva = vmd->pgtbl;
 	vm86frame = (struct trapframe *)vmd - 1;
+	vm86pcb = &vmd->pcb;
+	vm86tssd0 = *(int*)&vmd->sd;
+	vm86tssd1 = *((int*)&vmd->sd + 1);
 }
 
 static void
@@ -240,9 +241,7 @@ kvm86_bioscall(intno, tf)
 		0xfb, /* STI */
 		0xf4  /* HLT */
 	};
-	int ret;
 
-	mutex_enter(&kvm86_mp_lock);
 	memcpy(bioscallscratchpage, call, sizeof(call));
 	*((unsigned char *)bioscallscratchpage + 2) = intno;
 
@@ -257,11 +256,7 @@ kvm86_bioscall(intno, tf)
 	tf->tf_ds = tf->tf_es = tf->tf_fs = tf->tf_gs = 0;
 
 	kvm86_prepare(bioscallvmd); /* XXX */
-	kpreempt_disable();
-	ret = kvm86_call(tf);
-	kpreempt_enable();
-	mutex_exit(&kvm86_mp_lock);
-	return ret;
+	return (kvm86_call(tf));
 }
 
 int

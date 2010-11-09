@@ -1,4 +1,4 @@
-/*	$NetBSD: if_hippi.h,v 1.13 2008/04/28 20:24:09 martin Exp $	*/
+/*	$NetBSD: if_hippi.h,v 1.9 2005/12/11 23:05:25 thorpej Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed by the NetBSD
+ *      Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -36,28 +43,28 @@
 #include <net/if_ether.h>
 
 struct hippi_fp {
-	uint8_t  fp_ulp;
-	uint8_t  fp_flags;
+	u_int8_t  fp_ulp;
+	u_int8_t  fp_flags;
 #define HIPPI_FP_D1_PRESENT	0x80
 #define HIPPI_FP_D2_ON_BURST	0x40
-	uint16_t fp_offsets;
+	u_int16_t fp_offsets;
 #define HIPPI_FP_D2_MASK	0x07
-	uint32_t fp_d2_len;
-} __packed;
+	u_int32_t fp_d2_len;
+} __attribute__((__packed__));
 
 struct hippi_le {
-	uint32_t le_dest_switch;
-	uint32_t le_src_switch;
-	uint16_t le_reserved;
-	uint8_t  le_dest_addr[6];
-	uint16_t le_local_admin;
-	uint8_t  le_src_addr[6];
-} __packed;
+	u_int32_t le_dest_switch;
+	u_int32_t le_src_switch;
+	u_int16_t le_reserved;
+	u_int8_t  le_dest_addr[6];
+	u_int16_t le_local_admin;
+	u_int8_t  le_src_addr[6];
+} __attribute__((__packed__));
 
 struct hippi_header {
 	struct hippi_fp	hi_fp;
 	struct hippi_le	hi_le;
-} __packed;
+} __attribute__((__packed__));
 
 #define HIPPI_HDRLEN (sizeof(struct hippi_header))
 
@@ -74,7 +81,7 @@ struct hippi_header {
 
 
 #ifdef _KERNEL
-void    hippi_ifattach(struct ifnet *, void *);
+void    hippi_ifattach(struct ifnet *, caddr_t);
 void    hippi_ip_input(struct ifnet *, struct mbuf *);
 #endif /* _KERNEL */
 #endif /* !_NET_IF_HIPPI_H_ */

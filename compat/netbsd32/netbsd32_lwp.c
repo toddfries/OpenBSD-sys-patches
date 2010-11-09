@@ -1,4 +1,4 @@
-/*	$NetBSD: netbsd32_lwp.c,v 1.11 2009/01/11 02:45:49 christos Exp $	*/
+/*	$NetBSD: netbsd32_lwp.c,v 1.9 2007/12/20 23:03:01 dsl Exp $	*/
 
 /*
  *  Copyright (c) 2005, 2006, 2007 The NetBSD Foundation.
@@ -12,6 +12,9 @@
  *  2. Redistributions in binary form must reproduce the above copyright
  *     notice, this list of conditions and the following disclaimer in the
  *     documentation and/or other materials provided with the distribution.
+ *  3. Neither the name of The NetBSD Foundation nor the names of its
+ *     contributors may be used to endorse or promote products derived
+ *     from this software without specific prior written permission.
  *
  *  THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  *  ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -27,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: netbsd32_lwp.c,v 1.11 2009/01/11 02:45:49 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: netbsd32_lwp.c,v 1.9 2007/12/20 23:03:01 dsl Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -125,11 +128,10 @@ netbsd32__lwp_setprivate(struct lwp *l, const struct netbsd32__lwp_setprivate_ar
 }
 
 int
-netbsd32____lwp_park50(struct lwp *l,
-    const struct netbsd32____lwp_park50_args *uap, register_t *retval)
+netbsd32__lwp_park(struct lwp *l, const struct netbsd32__lwp_park_args *uap, register_t *retval)
 {
 	/* {
-		syscallarg(const netbsd32_timespec50p) ts;
+		syscallarg(const netbsd32_timespecp) ts;
 		syscallarg(lwpid_t) unpark;
 		syscallarg(netbsd32_voidp) hint;
 		syscallarg(netbsd32_voidp) unparkhint;

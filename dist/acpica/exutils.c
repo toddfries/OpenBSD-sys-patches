@@ -2,7 +2,7 @@
 /******************************************************************************
  *
  * Module Name: exutils - interpreter/scanner utilities
- *              $Revision: 1.4 $
+ *              xRevision: 1.121 $
  *
  *****************************************************************************/
 
@@ -10,7 +10,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2008, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2006, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -115,6 +115,9 @@
  *
  *****************************************************************************/
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: exutils.c,v 1.1 2006/03/23 13:36:31 kochi Exp $");
+
 #define __EXUTILS_C__
 
 /*
@@ -136,6 +139,7 @@
 #include "acpi.h"
 #include "acinterp.h"
 #include "amlcode.h"
+#include "acevents.h"
 
 #define _COMPONENT          ACPI_EXECUTER
         ACPI_MODULE_NAME    ("exutils")
@@ -155,67 +159,29 @@ AcpiExDigitsNeeded (
  *
  * PARAMETERS:  None
  *
- * RETURN:      None
+ * RETURN:      Status
  *
- * DESCRIPTION: Enter the interpreter execution region. Failure to enter
- *              the interpreter region is a fatal system error. Used in
- *              conjunction with ExitInterpreter.
+ * DESCRIPTION: Enter the interpreter execution region.  Failure to enter
+ *              the interpreter region is a fatal system error
  *
  ******************************************************************************/
 
-void
+ACPI_STATUS
 AcpiExEnterInterpreter (
     void)
 {
     ACPI_STATUS             Status;
 
+    ACPI_FUNCTION_TRACE ("ExEnterInterpreter");
 
-    ACPI_FUNCTION_TRACE (ExEnterInterpreter);
 
-
-    Status = AcpiUtAcquireMutex (ACPI_MTX_INTERPRETER);
+    Status = AcpiUtAcquireMutex (ACPI_MTX_EXECUTE);
     if (ACPI_FAILURE (Status))
     {
-        ACPI_ERROR ((AE_INFO, "Could not acquire AML Interpreter mutex"));
+        ACPI_ERROR ((AE_INFO, "Could not acquire interpreter mutex"));
     }
 
-    return_VOID;
-}
-
-
-/*******************************************************************************
- *
- * FUNCTION:    AcpiExReacquireInterpreter
- *
- * PARAMETERS:  None
- *
- * RETURN:      None
- *
- * DESCRIPTION: Reacquire the interpreter execution region from within the
- *              interpreter code. Failure to enter the interpreter region is a
- *              fatal system error. Used in  conjuction with
- *              RelinquishInterpreter
- *
- ******************************************************************************/
-
-void
-AcpiExReacquireInterpreter (
-    void)
-{
-    ACPI_FUNCTION_TRACE (ExReacquireInterpreter);
-
-
-    /*
-     * If the global serialized flag is set, do not release the interpreter,
-     * since it was not actually released by AcpiExRelinquishInterpreter.
-     * This forces the interpreter to be single threaded.
-     */
-    if (!AcpiGbl_AllMethodsSerialized)
-    {
-        AcpiExEnterInterpreter ();
-    }
-
-    return_VOID;
+    return_ACPI_STATUS (Status);
 }
 
 
@@ -227,9 +193,17 @@ AcpiExReacquireInterpreter (
  *
  * RETURN:      None
  *
- * DESCRIPTION: Exit the interpreter execution region. This is the top level
- *              routine used to exit the interpreter when all processing has
- *              been completed.
+ * DESCRIPTION: Exit the interpreter execution region
+ *
+ * Cases where the interpreter is unlocked:
+ *      1) Completion of the execution of a control method
+ *      2) Method blocked on a Sleep() AML opcode
+ *      3) Method blocked on an Acquire() AML opcode
+ *      4) Method blocked on a Wait() AML opcode
+ *      5) Method blocked to acquire the global lock
+ *      6) Method blocked to execute a serialized control method that is
+ *          already executing
+ *      7) About to invoke a user-installed opregion handler
  *
  ******************************************************************************/
 
@@ -240,56 +214,13 @@ AcpiExExitInterpreter (
     ACPI_STATUS             Status;
 
 
-    ACPI_FUNCTION_TRACE (ExExitInterpreter);
+    ACPI_FUNCTION_TRACE ("ExExitInterpreter");
 
 
-    Status = AcpiUtReleaseMutex (ACPI_MTX_INTERPRETER);
+    Status = AcpiUtReleaseMutex (ACPI_MTX_EXECUTE);
     if (ACPI_FAILURE (Status))
     {
-        ACPI_ERROR ((AE_INFO, "Could not release AML Interpreter mutex"));
-    }
-
-    return_VOID;
-}
-
-
-/*******************************************************************************
- *
- * FUNCTION:    AcpiExRelinquishInterpreter
- *
- * PARAMETERS:  None
- *
- * RETURN:      None
- *
- * DESCRIPTION: Exit the interpreter execution region, from within the
- *              interpreter - before attempting an operation that will possibly
- *              block the running thread.
- *
- * Cases where the interpreter is unlocked internally
- *      1) Method to be blocked on a Sleep() AML opcode
- *      2) Method to be blocked on an Acquire() AML opcode
- *      3) Method to be blocked on a Wait() AML opcode
- *      4) Method to be blocked to acquire the global lock
- *      5) Method to be blocked waiting to execute a serialized control method
- *          that is currently executing
- *      6) About to invoke a user-installed opregion handler
- *
- ******************************************************************************/
-
-void
-AcpiExRelinquishInterpreter (
-    void)
-{
-    ACPI_FUNCTION_TRACE (ExRelinquishInterpreter);
-
-
-    /*
-     * If the global serialized flag is set, do not release the interpreter.
-     * This forces the interpreter to be single threaded.
-     */
-    if (!AcpiGbl_AllMethodsSerialized)
-    {
-        AcpiExExitInterpreter ();
+        ACPI_ERROR ((AE_INFO, "Could not release interpreter mutex"));
     }
 
     return_VOID;
@@ -304,8 +235,8 @@ AcpiExRelinquishInterpreter (
  *
  * RETURN:      none
  *
- * DESCRIPTION: Truncate an ACPI Integer to 32 bits if the execution mode is
- *              32-bit, as determined by the revision of the DSDT.
+ * DESCRIPTION: Truncate a number to 32-bits if the currently executing method
+ *              belongs to a 32-bit ACPI table.
  *
  ******************************************************************************/
 
@@ -319,10 +250,9 @@ AcpiExTruncateFor32bitTable (
 
     /*
      * Object must be a valid number and we must be executing
-     * a control method. NS node could be there for AML_INT_NAMEPATH_OP.
+     * a control method
      */
     if ((!ObjDesc) ||
-        (ACPI_GET_DESCRIPTOR_TYPE (ObjDesc) != ACPI_DESC_TYPE_OPERAND) ||
         (ACPI_GET_OBJECT_TYPE (ObjDesc) != ACPI_TYPE_INTEGER))
     {
         return;
@@ -346,42 +276,44 @@ AcpiExTruncateFor32bitTable (
  * PARAMETERS:  FieldFlags            - Flags with Lock rule:
  *                                      AlwaysLock or NeverLock
  *
- * RETURN:      None
+ * RETURN:      TRUE/FALSE indicating whether the lock was actually acquired
  *
- * DESCRIPTION: Obtain the ACPI hardware Global Lock, only if the field
- *              flags specifiy that it is to be obtained before field access.
+ * DESCRIPTION: Obtain the global lock and keep track of this fact via two
+ *              methods.  A global variable keeps the state of the lock, and
+ *              the state is returned to the caller.
  *
  ******************************************************************************/
 
-void
+BOOLEAN
 AcpiExAcquireGlobalLock (
     UINT32                  FieldFlags)
 {
+    BOOLEAN                 Locked = FALSE;
     ACPI_STATUS             Status;
 
 
-    ACPI_FUNCTION_TRACE (ExAcquireGlobalLock);
+    ACPI_FUNCTION_TRACE ("ExAcquireGlobalLock");
 
 
-    /* Only use the lock if the AlwaysLock bit is set */
+    /* Only attempt lock if the AlwaysLock bit is set */
 
-    if (!(FieldFlags & AML_FIELD_LOCK_RULE_MASK))
+    if (FieldFlags & AML_FIELD_LOCK_RULE_MASK)
     {
-        return_VOID;
+        /* We should attempt to get the lock, wait forever */
+
+        Status = AcpiEvAcquireGlobalLock (ACPI_WAIT_FOREVER);
+        if (ACPI_SUCCESS (Status))
+        {
+            Locked = TRUE;
+        }
+        else
+        {
+            ACPI_EXCEPTION ((AE_INFO, Status,
+                "Could not acquire Global Lock"));
+        }
     }
 
-    /* Attempt to get the global lock, wait forever */
-
-    Status = AcpiExAcquireMutexObject (ACPI_WAIT_FOREVER,
-                AcpiGbl_GlobalLockMutex, AcpiOsGetThreadId ());
-
-    if (ACPI_FAILURE (Status))
-    {
-        ACPI_EXCEPTION ((AE_INFO, Status,
-            "Could not acquire Global Lock"));
-    }
-
-    return_VOID;
+    return_UINT8 (Locked);
 }
 
 
@@ -389,41 +321,39 @@ AcpiExAcquireGlobalLock (
  *
  * FUNCTION:    AcpiExReleaseGlobalLock
  *
- * PARAMETERS:  FieldFlags            - Flags with Lock rule:
- *                                      AlwaysLock or NeverLock
+ * PARAMETERS:  LockedByMe      - Return value from corresponding call to
+ *                                AcquireGlobalLock.
  *
  * RETURN:      None
  *
- * DESCRIPTION: Release the ACPI hardware Global Lock
+ * DESCRIPTION: Release the global lock if it is locked.
  *
  ******************************************************************************/
 
 void
 AcpiExReleaseGlobalLock (
-    UINT32                  FieldFlags)
+    BOOLEAN                 LockedByMe)
 {
     ACPI_STATUS             Status;
 
 
-    ACPI_FUNCTION_TRACE (ExReleaseGlobalLock);
+    ACPI_FUNCTION_TRACE ("ExReleaseGlobalLock");
 
 
-    /* Only use the lock if the AlwaysLock bit is set */
+    /* Only attempt unlock if the caller locked it */
 
-    if (!(FieldFlags & AML_FIELD_LOCK_RULE_MASK))
+    if (LockedByMe)
     {
-        return_VOID;
-    }
+        /* OK, now release the lock */
 
-    /* Release the global lock */
+        Status = AcpiEvReleaseGlobalLock ();
+        if (ACPI_FAILURE (Status))
+        {
+            /* Report the error, but there isn't much else we can do */
 
-    Status = AcpiExReleaseMutexObject (AcpiGbl_GlobalLockMutex);
-    if (ACPI_FAILURE (Status))
-    {
-        /* Report the error, but there isn't much else we can do */
-
-        ACPI_EXCEPTION ((AE_INFO, Status,
-            "Could not release Global Lock"));
+            ACPI_EXCEPTION ((AE_INFO, Status,
+                "Could not release ACPI Global Lock"));
+        }
     }
 
     return_VOID;
@@ -453,7 +383,7 @@ AcpiExDigitsNeeded (
     ACPI_INTEGER            CurrentValue;
 
 
-    ACPI_FUNCTION_TRACE (ExDigitsNeeded);
+    ACPI_FUNCTION_TRACE ("ExDigitsNeeded");
 
 
     /* ACPI_INTEGER is unsigned, so we don't worry about a '-' prefix */

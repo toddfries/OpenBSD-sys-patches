@@ -1,4 +1,4 @@
-/* $NetBSD: s3c2800_clk.c,v 1.14 2008/07/04 11:59:45 bsh Exp $ */
+/* $NetBSD: s3c2800_clk.c,v 1.9 2005/12/24 20:06:52 perry Exp $ */
 
 /*
  * Copyright (c) 2002 Fujitsu Component Limited
@@ -34,14 +34,12 @@
 
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: s3c2800_clk.c,v 1.14 2008/07/04 11:59:45 bsh Exp $");
+__KERNEL_RCSID(0, "$NetBSD: s3c2800_clk.c,v 1.9 2005/12/24 20:06:52 perry Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
-#include <sys/atomic.h>
 #include <sys/time.h>
-#include <sys/timetc.h>
 
 #include <machine/bus.h>
 #include <machine/intr.h>
@@ -67,26 +65,26 @@ static unsigned int timer0_mseccount;
 #define counter_to_usec(c,pclk)	\
 	(((c)*timer0_prescaler*1000)/(TIMER_FREQUENCY(pclk)/1000))
 
-static u_int	s3c2800_get_timecount(struct timecounter *);
-
-static struct timecounter s3c2800_timecounter = {
-	s3c2800_get_timecount,	/* get_timecount */
-	0,			/* no poll_pps */
-	0xffffffff,		/* counter_mask */
-	0,		/* frequency */
-	"s3c23800",		/* name */
-	100,			/* quality */
-	NULL,			/* prev */
-	NULL,			/* next */
-};
-
-static volatile uint32_t s3c2800_base;
-
-static u_int
-s3c2800_get_timecount(struct timecounter *tc)
+/*
+ * microtime:
+ *
+ *	Fill in the specified timeval struct with the current time
+ *	accurate to the microsecond.
+ */
+void
+microtime(struct timeval *tvp)
 {
 	struct s3c2800_softc *sc = (struct s3c2800_softc *) s3c2xx0_softc;
-	int save, int_pend0, int_pend1, count;
+	int save, int_pend0, int_pend1, count, delta;
+	static struct timeval last;
+	int pclk = s3c2xx0_softc->sc_pclk;
+
+	if( timer0_reload_value == 0 ){
+		/* not initialized yet */
+		tvp->tv_sec = 0;
+		tvp->tv_usec = 0;
+		return;
+	}
 
 	save = disable_interrupts(I32_bit);
 
@@ -126,12 +124,56 @@ s3c2800_get_timecount(struct timecounter *tc)
 		goto again;
 	}
 
+	/* copy system time */
+	*tvp = time;
+
 	restore_interrupts(save);
 
-	if (int_pend1)
-		count -= timer0_reload_value;
+	delta = timer0_reload_value - count;
 
-	return s3c2800_base - count;
+	if( int_pend1 ){
+		/*
+		 * down counter underflow, but
+		 * clock interrupt have not serviced yet
+		 */
+#if 1
+		tvp->tv_usec += tick;
+#else
+		delta = 0;
+#endif
+	}
+
+	tvp->tv_usec += counter_to_usec(delta, pclk);
+
+	/* Make sure microseconds doesn't overflow. */
+	tvp->tv_sec += tvp->tv_usec / 1000000;
+	tvp->tv_usec = tvp->tv_usec % 1000000;
+
+	if (last.tv_sec &&
+	    (tvp->tv_sec < last.tv_sec ||
+		(tvp->tv_sec == last.tv_sec && 
+		    tvp->tv_usec < last.tv_usec) ) ){
+
+		/* XXX: This happens very often when the kernel runs
+		   under Multi-ICE */
+#if 0
+		printf("time reversal: %ld.%06ld(%d,%d) -> %ld.%06ld(%d,%d)\n",
+		    last.tv_sec, last.tv_usec,
+		    last_count, last_pend,
+		    tvp->tv_sec, tvp->tv_usec,
+		    count, int_pend1 );
+#endif
+			    
+		/* make sure the time has advanced. */
+		*tvp = last;
+		tvp->tv_usec++;
+		if( tvp->tv_usec >= 1000000 ){
+			tvp->tv_usec -= 1000000;
+			tvp->tv_sec++;
+		}
+	}
+
+	last = *tvp;
 }
 
 static inline int
@@ -196,28 +238,37 @@ delay(u_int n)
 	/*NOTREACHED*/
 }
 
+/*
+ * inittodr:
+ *
+ *	Initialize time from the time-of-day register.
+ */
+void
+inittodr(time_t base)
+{
+
+	time.tv_sec = base;
+	time.tv_usec = 0;
+}
+
+/*
+ * resettodr:
+ *
+ *	Reset the time-of-day register with the current time.
+ */
+void
+resettodr(void)
+{
+}
+
 void
 setstatclockrate(int newhz)
 {
 }
 
-static int
-hardintr(void *arg)
-{
-	atomic_add_32(&s3c2800_base, timer0_reload_value);
 
-	hardclock((struct clockframe *)arg);
-
-	return 1;
-}
-
-static int
-statintr(void *arg)
-{
-	statclock((struct clockframe *)arg);
-
-	return 1;
-}
+#define hardintr	(int (*)(void *))hardclock
+#define statintr	(int (*)(void *))statclock
 
 void
 cpu_initclocks()
@@ -262,7 +313,7 @@ cpu_initclocks()
 
 	s3c2800_intr_establish(S3C2800_INT_TIMER0, IPL_CLOCK, 
 			       IST_NONE, hardintr, 0);
-	s3c2800_intr_establish(S3C2800_INT_TIMER1, IPL_HIGH,
+	s3c2800_intr_establish(S3C2800_INT_TIMER1, IPL_STATCLOCK,
 			       IST_NONE, statintr, 0);
 
 	/* start timers */
@@ -285,7 +336,4 @@ cpu_initclocks()
 		    S3C2800_TIMER_SIZE);
 
 	}
-
-	s3c2800_timecounter.tc_frequency = TIMER_FREQUENCY(pclk) / timer0_prescaler;
-	tc_init(&s3c2800_timecounter);
 }

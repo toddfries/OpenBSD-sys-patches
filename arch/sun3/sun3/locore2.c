@@ -1,4 +1,4 @@
-/*	$NetBSD: locore2.c,v 1.93 2009/02/13 22:41:03 apb Exp $	*/
+/*	$NetBSD: locore2.c,v 1.88 2006/10/01 03:53:27 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,10 +37,9 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: locore2.c,v 1.93 2009/02/13 22:41:03 apb Exp $");
+__KERNEL_RCSID(0, "$NetBSD: locore2.c,v 1.88 2006/10/01 03:53:27 tsutsui Exp $");
 
 #include "opt_ddb.h"
-#include "opt_modular.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -107,7 +113,7 @@ void _bootstrap(void);
 static void _verify_hardware(void);
 static void _vm_init(void);
 
-#if NKSYMS || defined(DDB) || defined(MODULAR)
+#if NKSYMS || defined(DDB) || defined(LKM)
 static void _save_symtab(void);
 
 /*
@@ -188,7 +194,7 @@ _vm_init(void)
 	 * if DDB is not part of this kernel, ignore the symbols.
 	 */
 	esym = end + 4;
-#if NKSYMS || defined(DDB) || defined(MODULAR)
+#if NKSYMS || defined(DDB) || defined(LKM)
 	/* This will advance esym past the symbols. */
 	_save_symtab();
 #endif
@@ -207,7 +213,7 @@ _vm_init(void)
 	 */
 	proc0paddr = (struct user *) nextva;
 	nextva += USPACE;
-	memset((void *)proc0paddr, 0, USPACE);
+	memset((caddr_t)proc0paddr, 0, USPACE);
 	lwp0.l_addr = proc0paddr;
 
 	/*
@@ -261,21 +267,21 @@ _verify_hardware(void)
 		cpu_match++;
 		cpu_string = "110";
 		delay_divisor = 120;	/* 17 MHz */
-		cpu_has_vme = true;
+		cpu_has_vme = TRUE;
 		break;
 
 	case ID_SUN3_160:
 		cpu_match++;
 		cpu_string = "160";
 		delay_divisor = 120;	/* 17 MHz */
-		cpu_has_vme = true;
+		cpu_has_vme = TRUE;
 		break;
 
 	case ID_SUN3_260:
 		cpu_match++;
 		cpu_string = "260";
 		delay_divisor = 82; 	/* 25 MHz */
-		cpu_has_vme = true;
+		cpu_has_vme = TRUE;
 #ifdef	HAVECACHE
 		cache_size = 0x10000;	/* 64K */
 #endif
@@ -285,7 +291,7 @@ _verify_hardware(void)
 		cpu_match++;
 		cpu_string = "E";
 		delay_divisor = 102;	/* 20 MHz  XXX: Correct? */
-		cpu_has_vme = true;
+		cpu_has_vme = TRUE;
 		break;
 
 	default:

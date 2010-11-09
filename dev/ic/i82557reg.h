@@ -1,4 +1,4 @@
-/*	$NetBSD: i82557reg.h,v 1.22 2009/02/20 05:49:34 mrg Exp $	*/
+/*	$NetBSD: i82557reg.h,v 1.18 2005/12/11 12:21:26 christos Exp $	*/
 
 /*-
  * Copyright (c) 1998, 1999, 2001 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -136,7 +143,6 @@
 #define FXP_SCB_COMMAND_RU_BASE		6
 #define FXP_SCB_COMMAND_RU_RBDRESUME	7
 
-#define FXP_SCB_INTRCNTL_REQUEST_SWI	0x02
 /*
  * Command block definitions
  */
@@ -328,14 +334,6 @@ struct fxp_ipcb {
 #define FXP_IPCB_INSERTVLAN_ENABLE	0x02
 
 /*
- * hardware ip4csum-tx on fxp(4) doesn't set IP checksums properly
- * if the TX IP packet length is 21 or 22 bytes and it requires autopadding.
- * To avoid this bug, we have to pad such very short packets manually.
- */
-#define FXP_IP4CSUMTX_MINLEN	22
-#define FXP_IP4CSUMTX_PADLEN	(ETHER_HDR_LEN + FXP_IP4CSUMTX_MINLEN)
-
-/*
  * Transmit command.
  */
 struct fxp_cb_tx {
@@ -370,7 +368,6 @@ struct fxp_tbd {
 #define FXP_CB_STATUS_C		0x8000
 
 /* commands */
-#define FXP_CB_COMMAND_CMD	0x0007
 #define FXP_CB_COMMAND_NOP	0x0
 #define FXP_CB_COMMAND_IAS	0x1
 #define FXP_CB_COMMAND_CONFIG	0x2

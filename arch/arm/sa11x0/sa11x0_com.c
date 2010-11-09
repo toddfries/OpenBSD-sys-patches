@@ -1,4 +1,4 @@
-/*      $NetBSD: sa11x0_com.c,v 1.44 2008/06/11 22:37:21 cegger Exp $        */
+/*      $NetBSD: sa11x0_com.c,v 1.37 2006/10/01 20:31:49 elad Exp $        */
 
 /*-
  * Copyright (c) 1998, 1999, 2001 The NetBSD Foundation, Inc.
@@ -18,6 +18,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -64,7 +71,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sa11x0_com.c,v 1.44 2008/06/11 22:37:21 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sa11x0_com.c,v 1.37 2006/10/01 20:31:49 elad Exp $");
 
 #include "opt_com.h"
 #include "opt_ddb.h"
@@ -150,7 +157,11 @@ int		sacominit(bus_space_tag_t, bus_addr_t, int, tcflag_t,
 int		sacom_is_console(bus_space_tag_t, bus_addr_t,
 				 bus_space_handle_t *);
 
+#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 void 		sacomsoft(void *);
+#else
+void 		sacomsoft(void);
+#endif
 
 static inline void sacom_rxsoft(struct sacom_softc *, struct tty *);
 static inline void sacom_txsoft(struct sacom_softc *, struct tty *);
@@ -329,7 +340,9 @@ sacom_attach_subr(struct sacom_softc *sc)
 	}
 
 
-	sc->sc_si = softint_establish(SOFTINT_SERIAL, sacomsoft, sc);
+#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
+	sc->sc_si = softintr_establish(IPL_SOFTSERIAL, sacomsoft, sc);
+#endif
 
 #if NRND > 0 && defined(RND_COM)
 	rnd_attach_source(&sc->rnd_source, sc->sc_dev.dv_xname,
@@ -370,8 +383,10 @@ sacom_detach(struct device *self, int flags)
 	tty_detach(sc->sc_tty);
 	ttyfree(sc->sc_tty);
 
+#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 	/* Unhook the soft interrupt handler. */
-	softint_disestablish(sc->sc_si);
+	softintr_disestablish(sc->sc_si);
+#endif
 
 #if NRND > 0 && defined(RND_COM)
 	/* Unhook the entropy source. */
@@ -496,7 +511,7 @@ sacomopen(dev_t dev, int flag, int mode, struct lwp *l)
 	int s, s2;
 	int error;
 
-	sc = device_lookup_private(&sacom_cd, COMUNIT(dev));
+	sc = device_lookup(&sacom_cd, COMUNIT(dev));
 	if (sc == NULL || !ISSET(sc->sc_hwflags, COM_HW_DEV_OK) ||
 		sc->sc_rbuf == NULL)
 		return ENXIO;
@@ -626,8 +641,7 @@ bad:
 int
 sacomclose(dev_t dev, int flag, int mode, struct lwp *l)
 {
-	struct sacom_softc *sc =
-		device_lookup_private(&sacom_cd, COMUNIT(dev));
+	struct sacom_softc *sc = device_lookup(&sacom_cd, COMUNIT(dev));
 	struct tty *tp = sc->sc_tty;
 
 	/* XXX This is for cons.c. */
@@ -655,8 +669,7 @@ sacomclose(dev_t dev, int flag, int mode, struct lwp *l)
 int
 sacomread(dev_t dev, struct uio *uio, int flag)
 {
-	struct sacom_softc *sc =
-		device_lookup_private(&sacom_cd, COMUNIT(dev));
+	struct sacom_softc *sc = device_lookup(&sacom_cd, COMUNIT(dev));
 	struct tty *tp = sc->sc_tty;
 
 	if (COM_ISALIVE(sc) == 0)
@@ -668,8 +681,7 @@ sacomread(dev_t dev, struct uio *uio, int flag)
 int
 sacomwrite(dev_t dev, struct uio *uio, int flag)
 {
-	struct sacom_softc *sc =
-		device_lookup_private(&sacom_cd, COMUNIT(dev));
+	struct sacom_softc *sc = device_lookup(&sacom_cd, COMUNIT(dev));
 	struct tty *tp = sc->sc_tty;
 
 	if (COM_ISALIVE(sc) == 0)
@@ -681,8 +693,7 @@ sacomwrite(dev_t dev, struct uio *uio, int flag)
 int
 sacompoll(dev_t dev, int events, struct lwp *l)
 {
-	struct sacom_softc *sc =
-		device_lookup_private(&sacom_cd, COMUNIT(dev));
+	struct sacom_softc *sc = device_lookup(&sacom_cd, COMUNIT(dev));
 	struct tty *tp = sc->sc_tty;
 
 	if (COM_ISALIVE(sc) == 0)
@@ -694,18 +705,16 @@ sacompoll(dev_t dev, int events, struct lwp *l)
 struct tty *
 sacomtty(dev_t dev)
 {
-	struct sacom_softc *sc =
-		device_lookup_private(&sacom_cd, COMUNIT(dev));
+	struct sacom_softc *sc = device_lookup(&sacom_cd, COMUNIT(dev));
 	struct tty *tp = sc->sc_tty;
 
 	return tp;
 }
 
 int
-sacomioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
+sacomioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct lwp *l)
 {
-	struct sacom_softc *sc =
-		device_lookup_private(&sacom_cd, COMUNIT(dev));
+	struct sacom_softc *sc = device_lookup(&sacom_cd, COMUNIT(dev));
 	struct tty *tp = sc->sc_tty;
 	int error;
 	int s;
@@ -788,7 +797,11 @@ sacom_schedrx(struct sacom_softc *sc)
 	sc->sc_rx_ready = 1;
 
 	/* Wake up the poller. */
-	softint_schedule(sc->sc_si);
+#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
+	softintr_schedule(sc->sc_si);
+#else
+	setsoftserial();
+#endif
 }
 
 void
@@ -855,8 +868,7 @@ cflag2cr0(tcflag_t cflag)
 int
 sacomparam(struct tty *tp, struct termios *t)
 {
-	struct sacom_softc *sc =
-		device_lookup_private(&sacom_cd, COMUNIT(tp->t_dev));
+	struct sacom_softc *sc = device_lookup(&sacom_cd, COMUNIT(tp->t_dev));
 	int ospeed = SACOMSPEED(t->c_ospeed);
 	u_int cr0;
 	int s;
@@ -1001,8 +1013,7 @@ int
 sacomhwiflow(struct tty *tp, int block)
 {
 #if 0
-	struct sacom_softc *sc =
-		device_lookup_private(&sacom_cd, COMUNIT(tp->t_dev));
+	struct sacom_softc *sc = device_lookup(&sacom_cd, COMUNIT(tp->t_dev));
 	int s;
 
 	if (COM_ISALIVE(sc) == 0)
@@ -1054,8 +1065,7 @@ sacom_hwiflow(struct sacom_softc *sc)
 void
 sacomstart(struct tty *tp)
 {
-	struct sacom_softc *sc =
-		device_lookup_private(&sacom_cd, COMUNIT(tp->t_dev));
+	struct sacom_softc *sc = device_lookup(&sacom_cd, COMUNIT(tp->t_dev));
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
 	int s;
@@ -1066,8 +1076,16 @@ sacomstart(struct tty *tp)
 	s = spltty();
 	if (ISSET(tp->t_state, TS_BUSY | TS_TIMEOUT | TS_TTSTOP))
 		goto out;
-	if (!ttypull(tp))
-		goto out;
+
+	if (tp->t_outq.c_cc <= tp->t_lowat) {
+		if (ISSET(tp->t_state, TS_ASLEEP)) {
+			CLR(tp->t_state, TS_ASLEEP);
+			wakeup(&tp->t_outq);
+		}
+		selwakeup(&tp->t_wsel);
+		if (tp->t_outq.c_cc == 0)
+			goto out;
+	}
 
 	/* Grab the first contiguous region of buffer space. */
 	{
@@ -1128,8 +1146,7 @@ sacom_filltx(struct sacom_softc *sc)
 void
 sacomstop(struct tty *tp, int flag)
 {
-	struct sacom_softc *sc =
-		device_lookup_private(&sacom_cd, COMUNIT(tp->t_dev));
+	struct sacom_softc *sc = device_lookup(&sacom_cd, COMUNIT(tp->t_dev));
 	int s;
 
 	s = splserial();
@@ -1237,6 +1254,7 @@ sacom_stsoft(struct sacom_softc *sc, struct tty *tp)
 {
 }
 
+#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 void
 sacomsoft(void *arg)
 {
@@ -1246,23 +1264,55 @@ sacomsoft(void *arg)
 	if (COM_ISALIVE(sc) == 0)
 		return;
 
-	tp = sc->sc_tty;
+	{
+#else
+void
+sacomsoft(void)
+{
+	struct sacom_softc	*sc;
+	struct tty	*tp;
+	int	unit;
+
+	for (unit = 0; unit < sacom_cd.cd_ndevs; unit++) {
+		sc = device_lookup(&sacom_cd, unit);
+		if (sc == NULL || !ISSET(sc->sc_hwflags, COM_HW_DEV_OK))
+			continue;
+
+		if (COM_ISALIVE(sc) == 0)
+			continue;
+
+		tp = sc->sc_tty;
+		if (tp == NULL)
+			continue;
+		if (!ISSET(tp->t_state, TS_ISOPEN) && tp->t_wopen == 0)
+			continue;
+#endif
+		tp = sc->sc_tty;
 		
-	if (sc->sc_rx_ready) {
-		sc->sc_rx_ready = 0;
-		sacom_rxsoft(sc, tp);
+		if (sc->sc_rx_ready) {
+			sc->sc_rx_ready = 0;
+			sacom_rxsoft(sc, tp);
+		}
+
+		if (sc->sc_st_check) {
+			sc->sc_st_check = 0;
+			sacom_stsoft(sc, tp);
+		}
+
+		if (sc->sc_tx_done) {
+			sc->sc_tx_done = 0;
+			sacom_txsoft(sc, tp);
+		}
 	}
 
-	if (sc->sc_st_check) {
-		sc->sc_st_check = 0;
-		sacom_stsoft(sc, tp);
-	}
-
-	if (sc->sc_tx_done) {
-		sc->sc_tx_done = 0;
-		sacom_txsoft(sc, tp);
-	}
+#ifndef __HAVE_GENERIC_SOFT_INTERRUPTS
+#endif
 }
+
+#ifdef __ALIGN_BRACKET_LEVEL_FOR_CTAGS
+	/* there has got to be a better way to do comsoft() */
+}}
+#endif
 
 int
 sacomintr(void *arg)
@@ -1403,7 +1453,11 @@ sacomintr(void *arg)
 	COM_UNLOCK(sc);
 
 	/* Wake up the poller. */
-	softint_schedule(sc->sc_si);
+#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
+	softintr_schedule(sc->sc_si);
+#else
+	setsoftserial();
+#endif
 
 #if NRND > 0 && defined(RND_COM)
 	rnd_add_uint32(&sc->rnd_source, iir | lsr);

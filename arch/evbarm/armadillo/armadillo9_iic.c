@@ -1,4 +1,4 @@
-/*	$NetBSD: armadillo9_iic.c,v 1.6 2008/06/10 13:53:28 hamajima Exp $	*/
+/*	$NetBSD: armadillo9_iic.c,v 1.3 2006/06/26 18:21:39 drochner Exp $	*/
 
 /*
  * Copyright (c) 2005 HAMAJIMA Katsuomi. All rights reserved.
@@ -26,13 +26,13 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: armadillo9_iic.c,v 1.6 2008/06/10 13:53:28 hamajima Exp $");
+__KERNEL_RCSID(0, "$NetBSD: armadillo9_iic.c,v 1.3 2006/06/26 18:21:39 drochner Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
-#include <sys/mutex.h>
+#include <sys/lock.h>
 #include <dev/i2c/i2cvar.h>
 #include <dev/i2c/i2c_bitbang.h>
 #include <arm/ep93xx/epsocvar.h> 
@@ -49,7 +49,7 @@ __KERNEL_RCSID(0, "$NetBSD: armadillo9_iic.c,v 1.6 2008/06/10 13:53:28 hamajima 
 struct armadillo9iic_softc {
 	struct device		sc_dev;
 	struct i2c_controller	sc_i2c;
-	kmutex_t		sc_buslock;
+	struct lock		sc_buslock;
 	int			sc_port;
 	int			sc_sda;
 	int			sc_scl;
@@ -95,7 +95,7 @@ armadillo9iic_attach(struct device *parent, struct device *self, void *aux)
 #if NSEEPROM > 0
 	struct epgpio_attach_args *ga = aux;
 #endif
-	mutex_init(&sc->sc_buslock, MUTEX_DEFAULT, IPL_NONE);
+	lockinit(&sc->sc_buslock, PRIBIO|PCATCH, "armadillo9iiclk", 0, 0);
 
 	sc->sc_port = ga->ga_port;
 	sc->sc_sda = ga->ga_bit1;
@@ -146,8 +146,7 @@ armadillo9iic_acquire_bus(void *cookie, int flags)
 	if (flags & I2C_F_POLL)
 		return 0;
 
-	mutex_enter(&sc->sc_buslock);
-	return 0;
+	return lockmgr(&sc->sc_buslock, LK_EXCLUSIVE, NULL);
 }
 
 void
@@ -159,7 +158,7 @@ armadillo9iic_release_bus(void *cookie, int flags)
 	if (flags & I2C_F_POLL)
 		return;
 
-	mutex_exit(&sc->sc_buslock);
+	lockmgr(&sc->sc_buslock, LK_RELEASE, NULL);
 }
 
 int
@@ -226,10 +225,6 @@ uint32_t
 armadillo9iic_bb_read_bits(void *cookie)
 {
 	struct armadillo9iic_softc *sc = cookie;
-	uint32_t bits = 0;
 
-	bits |= epgpio_read(sc->sc_gpio, sc->sc_port, sc->sc_sda) << sc->sc_sda;
-	bits |= epgpio_read(sc->sc_gpio, sc->sc_port, sc->sc_scl) << sc->sc_scl;
-
-	return bits;
+	return epgpio_read(sc->sc_gpio, sc->sc_port, sc->sc_sda) << sc->sc_sda;
 }

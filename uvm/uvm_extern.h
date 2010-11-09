@@ -1,4 +1,4 @@
-/*	$NetBSD: uvm_extern.h,v 1.151 2009/02/18 13:16:58 yamt Exp $	*/
+/*	$NetBSD: uvm_extern.h,v 1.135 2007/08/18 00:21:11 ad Exp $	*/
 
 /*
  *
@@ -143,7 +143,7 @@ typedef voff_t pgoff_t;		/* XXX: number of pages within a uvm object */
 #define UVM_FLAG_AMAPPAD 0x100000 /* for bss: pad amap to reduce malloc() */
 #define UVM_FLAG_TRYLOCK 0x200000 /* fail if we can not lock map */
 #define UVM_FLAG_NOWAIT  0x400000 /* not allowed to sleep */
-#define UVM_FLAG_QUANTUM 0x800000 /* entry can never be split later */
+#define UVM_FLAG_QUANTUM 0x800000 /* entry never be splitted later */
 #define UVM_FLAG_WAITVA  0x1000000 /* wait for va */
 #define UVM_FLAG_VAONLY  0x2000000 /* unmap: no pages are mapped */
 
@@ -204,6 +204,15 @@ typedef voff_t pgoff_t;		/* XXX: number of pages within a uvm object */
 #define	UBC_PARTIALOK	0x100
 
 /*
+ * helpers for calling ubc_release()
+ */
+#ifdef PMAP_CACHE_VIVT
+#define UBC_WANT_UNMAP(vp) (((vp)->v_flag & VTEXT) != 0)
+#else
+#define UBC_WANT_UNMAP(vp) false
+#endif
+
+/*
  * flags for uvn_findpages().
  */
 #define UFP_ALL		0x00
@@ -219,11 +228,6 @@ typedef voff_t pgoff_t;		/* XXX: number of pages within a uvm object */
  */
 #define	UVM_LK_ENTER	0x00000001	/* map locked on entry */
 #define	UVM_LK_EXIT	0x00000002	/* leave map locked on exit */
-
-/*
- * Default number of pages to allocate on the stack
- */
-#define	UBC_MAX_PAGES	8
 
 /*
  * structures
@@ -290,9 +294,9 @@ struct uvmexp {
 	int zeropages;		/* number of zero'd pages */
 	int reserve_pagedaemon; /* number of pages reserved for pagedaemon */
 	int reserve_kernel;	/* number of pages reserved for kernel */
-	unsigned anonpages;	/* number of pages used by anon mappings */
-	unsigned filepages;	/* number of pages used by cached file data */
-	unsigned execpages;	/* number of pages used by cached exec data */
+	int anonpages;		/* number of pages used by anon mappings */
+	int filepages;		/* number of pages used by cached file data */
+	int execpages;		/* number of pages used by cached exec data */
 
 	/* pageout params */
 	int freemin;    /* min number of free pages */
@@ -331,8 +335,6 @@ struct uvmexp {
 				   aborted */
 	int colorhit;		/* pagealloc where we got optimal color */
 	int colormiss;		/* pagealloc where we didn't */
-	int cpuhit;		/* pagealloc where we allocated locally */
-	int cpumiss;		/* pagealloc where we didn't */
 
 	/* fault subcounters.  XXX: should be 64-bit counters */
 	int fltnoram;	/* number of times fault was out of ram */
@@ -400,8 +402,8 @@ struct uvmexp_sysctl {
 	int64_t	swpgonly;
 	int64_t	nswget;
 	int64_t	unused1; /* used to be nanon */
-	int64_t cpuhit;
-	int64_t cpumiss;
+	int64_t	unused2; /* used to be nanonneeded */
+	int64_t	unused3; /* used to be nfreeanon */
 	int64_t	faults;
 	int64_t	traps;
 	int64_t	intrs;
@@ -476,16 +478,6 @@ extern struct uvmexp uvmexp;
 #include <uvm/uvm_pager.h>
 
 /*
- * helpers for calling ubc_release()
- */
-#ifdef PMAP_CACHE_VIVT
-#define UBC_WANT_UNMAP(vp) (((vp)->v_iflag & VI_TEXT) != 0)
-#else
-#define UBC_WANT_UNMAP(vp) false
-#endif
-#define UBC_UNMAP_FLAG(vp) (UBC_WANT_UNMAP(vp) ? UBC_UNMAP : 0)
-
-/*
  * Shareable process virtual address space.
  * May eventually be merged with vm_map.
  * Several fields are temporary (text, data stuff).
@@ -506,7 +498,6 @@ struct vmspace {
 	void *	vm_daddr;	/* user virtual address of data XXX */
 	void *vm_maxsaddr;	/* user VA at max stack growth */
 	void *vm_minsaddr;	/* user VA at top of stack */
-	size_t vm_aslr_delta_mmap;	/* mmap() random delta for ASLR */
 };
 #define	VMSPACE_IS_KERNEL_P(vm)	VM_MAP_IS_KERNEL(&(vm)->vm_map)
 
@@ -531,6 +522,7 @@ struct uvm_coredump_state {
 /*
  * the various kernel maps, owned by MD code
  */
+extern struct vm_map *exec_map;
 extern struct vm_map *kernel_map;
 extern struct vm_map *kmem_map;
 extern struct vm_map *mb_map;
@@ -559,13 +551,16 @@ void		cpu_swapout(struct lwp *);
 /* uvm_aobj.c */
 struct uvm_object	*uao_create(vsize_t, int);
 void			uao_detach(struct uvm_object *);
+void			uao_detach_locked(struct uvm_object *);
 void			uao_reference(struct uvm_object *);
+void			uao_reference_locked(struct uvm_object *);
 
 /* uvm_bio.c */
 void			ubc_init(void);
 void *			ubc_alloc(struct uvm_object *, voff_t, vsize_t *, int,
 			    int);
 void			ubc_release(void *, int);
+void			ubc_flush(struct uvm_object *, voff_t, voff_t);
 int			ubc_uiomove(struct uvm_object *, struct uio *, vsize_t,
 			    int, int);
 
@@ -589,11 +584,12 @@ void			uvm_proc_exit(struct proc *);
 void			uvm_lwp_exit(struct lwp *);
 void			uvm_init_limits(struct proc *);
 bool			uvm_kernacc(void *, size_t, int);
-__dead void		uvm_scheduler(void);
+__dead void		uvm_scheduler(void) __attribute__((noreturn));
 void			uvm_kick_scheduler(void);
 void			uvm_swapin(struct lwp *);
 bool			uvm_uarea_alloc(vaddr_t *);
-void			uvm_uarea_free(vaddr_t, struct cpu_info *);
+void			uvm_uarea_free(vaddr_t uaddr);
+void			uvm_uarea_drain(bool);
 int			uvm_vslock(struct vmspace *, void *, size_t, vm_prot_t);
 void			uvm_vsunlock(struct vmspace *, void *, size_t);
 void			uvm_lwp_hold(struct lwp *);
@@ -644,7 +640,6 @@ void			uvmspace_free(struct vmspace *);
 void			uvmspace_share(struct proc *, struct proc *);
 void			uvmspace_unshare(struct lwp *);
 
-void			uvm_whatis(uintptr_t, void (*)(const char *, ...));
 
 /* uvm_meter.c */
 void			uvm_meter(void);
@@ -694,15 +689,11 @@ void			uvm_setpagesize(void);
 void			uvm_aio_biodone1(struct buf *);
 void			uvm_aio_biodone(struct buf *);
 void			uvm_aio_aiodone(struct buf *);
-void			uvm_aio_aiodone_pages(struct vm_page **, int, bool,
-			    int);
 
 /* uvm_pdaemon.c */
 void			uvm_pageout(void *);
 struct work;
 void			uvm_aiodone_worker(struct work *, void *);
-void			uvm_pageout_start(int);
-void			uvm_pageout_done(int);
 void			uvm_estimatepageable(int *, int *);
 
 /* uvm_pglist.c */
@@ -722,6 +713,7 @@ void			uvm_deallocate(struct vm_map *, vaddr_t, vsize_t);
 /* uvm_vnode.c */
 void			uvm_vnp_setsize(struct vnode *, voff_t);
 void			uvm_vnp_setwritesize(struct vnode *, voff_t);
+void			uvm_vnp_sync(struct mount *);
 int			uvn_findpages(struct uvm_object *, voff_t,
 			    int *, struct vm_page **, int);
 void			uvm_vnp_zerorange(struct vnode *, off_t, size_t);

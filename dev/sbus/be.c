@@ -1,4 +1,4 @@
-/*	$NetBSD: be.c,v 1.61 2008/12/26 18:51:19 macallan Exp $	*/
+/*	$NetBSD: be.c,v 1.55 2007/10/19 12:01:10 ad Exp $	*/
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -57,7 +64,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: be.c,v 1.61 2008/12/26 18:51:19 macallan Exp $");
+__KERNEL_RCSID(0, "$NetBSD: be.c,v 1.55 2007/10/19 12:01:10 ad Exp $");
 
 #include "opt_ddb.h"
 #include "opt_inet.h"
@@ -240,7 +247,7 @@ beattach(parent, self, aux)
 
 	if (sa->sa_nreg < 3) {
 		printf("%s: only %d register sets\n",
-			device_xname(self), sa->sa_nreg);
+			self->dv_xname, sa->sa_nreg);
 		return;
 	}
 
@@ -281,8 +288,6 @@ beattach(parent, self, aux)
 	sc->sc_rev = prom_getpropint(node, "board-version", -1);
 	printf(" rev %x", sc->sc_rev);
 
-	callout_init(&sc->sc_tick_ch, 0);
-
 	bestop(sc);
 
 	sc->sc_channel = prom_getpropint(node, "channel#", -1);
@@ -320,15 +325,15 @@ beattach(parent, self, aux)
 	/* Get a DMA handle */
 	if ((error = bus_dmamap_create(dmatag, size, 1, size, 0,
 				    BUS_DMA_NOWAIT, &sc->sc_dmamap)) != 0) {
-		aprint_error_dev(self, "DMA map create error %d\n", error);
+		printf("%s: DMA map create error %d\n", self->dv_xname, error);
 		return;
 	}
 
 	/* Allocate DMA buffer */
 	if ((error = bus_dmamem_alloc(sa->sa_dmatag, size, 0, 0,
 				      &seg, 1, &rseg, BUS_DMA_NOWAIT)) != 0) {
-		aprint_error_dev(self, "DMA buffer alloc error %d\n",
-			error);
+		printf("%s: DMA buffer alloc error %d\n",
+			self->dv_xname, error);
 		return;
 	}
 
@@ -336,8 +341,8 @@ beattach(parent, self, aux)
 	if ((error = bus_dmamem_map(sa->sa_dmatag, &seg, rseg, size,
 			            &sc->sc_rb.rb_membase,
 			            BUS_DMA_NOWAIT|BUS_DMA_COHERENT)) != 0) {
-		aprint_error_dev(self, "DMA buffer map error %d\n",
-			error);
+		printf("%s: DMA buffer map error %d\n",
+			self->dv_xname, error);
 		bus_dmamem_free(sa->sa_dmatag, &seg, rseg);
 		return;
 	}
@@ -346,8 +351,8 @@ beattach(parent, self, aux)
 	if ((error = bus_dmamap_load(dmatag, sc->sc_dmamap,
 				     sc->sc_rb.rb_membase, size, NULL,
 				     BUS_DMA_NOWAIT)) != 0) {
-		aprint_error_dev(self, "DMA buffer map load error %d\n",
-			error);
+		printf("%s: DMA buffer map load error %d\n",
+			self->dv_xname, error);
 		bus_dmamem_unmap(dmatag, sc->sc_rb.rb_membase, size);
 		bus_dmamem_free(dmatag, &seg, rseg);
 		return;
@@ -363,6 +368,8 @@ beattach(parent, self, aux)
 	mii->mii_statchg = be_mii_statchg;
 
 	ifmedia_init(&mii->mii_media, 0, be_ifmedia_upd, be_ifmedia_sts);
+
+	callout_init(&sc->sc_tick_ch, 0);
 
 	/*
 	 * Initialize transceiver and determine which PHY connection to use.
@@ -392,15 +399,17 @@ beattach(parent, self, aux)
 			 */
 #ifdef DIAGNOSTIC
 			if (LIST_NEXT(child, mii_list) != NULL) {
-				aprint_error_dev(&sc->sc_dev, "spurious MII device %s attached\n",
-				       device_xname(child->mii_dev));
+				printf("%s: spurious MII device %s attached\n",
+				       sc->sc_dev.dv_xname,
+				       child->mii_dev.dv_xname);
 			}
 #endif
 			if (child->mii_phy != BE_PHY_EXTERNAL ||
 			    child->mii_inst > 0) {
-				aprint_error_dev(&sc->sc_dev, "cannot accommodate MII device %s"
+				printf("%s: cannot accommodate MII device %s"
 				       " at phy %d, instance %d\n",
-				       device_xname(child->mii_dev),
+				       sc->sc_dev.dv_xname,
+				       child->mii_dev.dv_xname,
 				       child->mii_phy, child->mii_inst);
 			} else {
 				sc->sc_phys[instance] = child->mii_phy;
@@ -443,7 +452,7 @@ beattach(parent, self, aux)
 			    0, NULL);
 
 		printf("on-board transceiver at %s: 10baseT, 100baseTX, auto\n",
-			device_xname(self));
+			self->dv_xname);
 
 		be_mii_reset(sc, BE_PHY_INTERNAL);
 		/* Only set default medium here if there's no external PHY */
@@ -456,7 +465,7 @@ beattach(parent, self, aux)
 				BE_PHY_INTERNAL, MII_BMCR, BMCR_ISO);
 	}
 
-	memcpy(ifp->if_xname, device_xname(&sc->sc_dev), IFNAMSIZ);
+	bcopy(sc->sc_dev.dv_xname, ifp->if_xname, IFNAMSIZ);
 	ifp->if_softc = sc;
 	ifp->if_start = bestart;
 	ifp->if_ioctl = beioctl;
@@ -720,7 +729,7 @@ bewatchdog(ifp)
 {
 	struct be_softc *sc = ifp->if_softc;
 
-	log(LOG_ERR, "%s: device timeout\n", device_xname(&sc->sc_dev));
+	log(LOG_ERR, "%s: device timeout\n", sc->sc_dev.dv_xname);
 	++sc->sc_ethercom.ec_if.if_oerrors;
 
 	bereset(sc);
@@ -773,19 +782,19 @@ beqint(sc, why)
 	if (why & BE_CR_STAT_BERROR) {
 		r |= 1;
 		rst = 1;
-		aprint_error_dev(&sc->sc_dev, "bigmac error\n");
+		printf("%s: bigmac error\n", sc->sc_dev.dv_xname);
 	}
 
 	if (why & BE_CR_STAT_TXDERR) {
 		r |= 1;
 		rst = 1;
-		aprint_error_dev(&sc->sc_dev, "bogus tx descriptor\n");
+		printf("%s: bogus tx descriptor\n", sc->sc_dev.dv_xname);
 	}
 
 	if (why & (BE_CR_STAT_TXLERR | BE_CR_STAT_TXPERR | BE_CR_STAT_TXSERR)) {
 		r |= 1;
 		rst = 1;
-		aprint_error_dev(&sc->sc_dev, "tx DMA error ( ");
+		printf("%s: tx DMA error ( ", sc->sc_dev.dv_xname);
 		if (why & BE_CR_STAT_TXLERR)
 			printf("Late ");
 		if (why & BE_CR_STAT_TXPERR)
@@ -798,19 +807,19 @@ beqint(sc, why)
 	if (why & BE_CR_STAT_RXDROP) {
 		r |= 1;
 		rst = 1;
-		aprint_error_dev(&sc->sc_dev, "out of rx descriptors\n");
+		printf("%s: out of rx descriptors\n", sc->sc_dev.dv_xname);
 	}
 
 	if (why & BE_CR_STAT_RXSMALL) {
 		r |= 1;
 		rst = 1;
-		aprint_error_dev(&sc->sc_dev, "rx descriptor too small\n");
+		printf("%s: rx descriptor too small\n", sc->sc_dev.dv_xname);
 	}
 
 	if (why & (BE_CR_STAT_RXLERR | BE_CR_STAT_RXPERR | BE_CR_STAT_RXSERR)) {
 		r |= 1;
 		rst = 1;
-		aprint_error_dev(&sc->sc_dev, "rx DMA error ( ");
+		printf("%s: rx DMA error ( ", sc->sc_dev.dv_xname);
 		if (why & BE_CR_STAT_RXLERR)
 			printf("Late ");
 		if (why & BE_CR_STAT_RXPERR)
@@ -822,12 +831,12 @@ beqint(sc, why)
 
 	if (!r) {
 		rst = 1;
-		aprint_error_dev(&sc->sc_dev, "unexpected error interrupt %08x\n",
-			why);
+		printf("%s: unexpected error interrupt %08x\n",
+			sc->sc_dev.dv_xname, why);
 	}
 
 	if (rst) {
-		printf("%s: resetting\n", device_xname(&sc->sc_dev));
+		printf("%s: resetting\n", sc->sc_dev.dv_xname);
 		bereset(sc);
 	}
 
@@ -847,27 +856,27 @@ beeint(sc, why)
 	if (why & BE_BR_STAT_RFIFOVF) {
 		r |= 1;
 		rst = 1;
-		aprint_error_dev(&sc->sc_dev, "receive fifo overrun\n");
+		printf("%s: receive fifo overrun\n", sc->sc_dev.dv_xname);
 	}
 	if (why & BE_BR_STAT_TFIFO_UND) {
 		r |= 1;
 		rst = 1;
-		aprint_error_dev(&sc->sc_dev, "transmit fifo underrun\n");
+		printf("%s: transmit fifo underrun\n", sc->sc_dev.dv_xname);
 	}
 	if (why & BE_BR_STAT_MAXPKTERR) {
 		r |= 1;
 		rst = 1;
-		aprint_error_dev(&sc->sc_dev, "max packet size error\n");
+		printf("%s: max packet size error\n", sc->sc_dev.dv_xname);
 	}
 
 	if (!r) {
 		rst = 1;
-		aprint_error_dev(&sc->sc_dev, "unexpected error interrupt %08x\n",
-			why);
+		printf("%s: unexpected error interrupt %08x\n",
+			sc->sc_dev.dv_xname, why);
 	}
 
 	if (rst) {
-		printf("%s: resetting\n", device_xname(&sc->sc_dev));
+		printf("%s: resetting\n", sc->sc_dev.dv_xname);
 		bereset(sc);
 	}
 
@@ -971,7 +980,10 @@ berint(sc)
 }
 
 int
-beioctl(struct ifnet *ifp, u_long cmd, void *data)
+beioctl(ifp, cmd, data)
+	struct ifnet *ifp;
+	u_long cmd;
+	void *data;
 {
 	struct be_softc *sc = ifp->if_softc;
 	struct ifaddr *ifa = (struct ifaddr *)data;
@@ -981,48 +993,44 @@ beioctl(struct ifnet *ifp, u_long cmd, void *data)
 	s = splnet();
 
 	switch (cmd) {
-	case SIOCINITIFADDR:
+	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
-		beinit(sc);
 		switch (ifa->ifa_addr->sa_family) {
 #ifdef INET
 		case AF_INET:
+			beinit(sc);
 			arp_ifinit(ifp, ifa);
 			break;
 #endif /* INET */
 		default:
+			beinit(sc);
 			break;
 		}
 		break;
 
 	case SIOCSIFFLAGS:
-		if ((error = ifioctl_common(ifp, cmd, data)) != 0)
-			break;
-		/* XXX re-use ether_ioctl() */
-		switch (ifp->if_flags & (IFF_UP|IFF_RUNNING)) {
-		case IFF_RUNNING:
+		if ((ifp->if_flags & IFF_UP) == 0 &&
+		    (ifp->if_flags & IFF_RUNNING) != 0) {
 			/*
 			 * If interface is marked down and it is running, then
 			 * stop it.
 			 */
 			bestop(sc);
 			ifp->if_flags &= ~IFF_RUNNING;
-			break;
-		case IFF_UP:
+		} else if ((ifp->if_flags & IFF_UP) != 0 &&
+		    (ifp->if_flags & IFF_RUNNING) == 0) {
 			/*
 			 * If interface is marked up and it is stopped, then
 			 * start it.
 			 */
 			beinit(sc);
-			break;
-		default:
+		} else {
 			/*
 			 * Reset the interface to pick up changes in any other
 			 * flags that affect hardware registers.
 			 */
 			bestop(sc);
 			beinit(sc);
-			break;
 		}
 #ifdef BEDEBUG
 		if (ifp->if_flags & IFF_DEBUG)
@@ -1049,7 +1057,7 @@ beioctl(struct ifnet *ifp, u_long cmd, void *data)
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_media, cmd);
 		break;
 	default:
-		error = ether_ioctl(ifp, cmd, data);
+		error = EINVAL;
 		break;
 	}
 	splx(s);
@@ -1069,7 +1077,7 @@ beinit(sc)
 	u_int32_t v;
 	u_int32_t qecaddr;
 	u_int8_t *ea;
-	int rc, s;
+	int s;
 
 	s = splnet();
 
@@ -1151,14 +1159,11 @@ beinit(sc)
 	v |= BE_BR_RXCFG_FIFO | BE_BR_RXCFG_ENABLE;
 	bus_space_write_4(t, br, BE_BRI_RXCFG, v);
 
-	if ((rc = be_ifmedia_upd(ifp)) != 0)
-		goto out;
-
 	ifp->if_flags |= IFF_RUNNING;
 	ifp->if_flags &= ~IFF_OACTIVE;
 
+	be_ifmedia_upd(ifp);
 	callout_reset(&sc->sc_tick_ch, hz, be_tick, sc);
-out:
 	splx(s);
 }
 
@@ -1427,7 +1432,7 @@ be_mii_reset(sc, phy)
 		DELAY(20);
 	}
 	if (n == 0) {
-		aprint_error_dev(&sc->sc_dev, "bmcr reset failed\n");
+		printf("%s: bmcr reset failed\n", sc->sc_dev.dv_xname);
 		return (EIO);
 	}
 
@@ -1504,10 +1509,8 @@ be_ifmedia_upd(ifp)
 	struct be_softc *sc = ifp->if_softc;
 	int error;
 
-	if ((error = mii_mediachg(&sc->sc_mii)) == ENXIO)
-		error = 0;
-	else if (error != 0)
-		return error;
+	if ((error = mii_mediachg(&sc->sc_mii)) != 0)
+		return (error);
 
 	return (be_intphy_service(sc, &sc->sc_mii, MII_MEDIACHG));
 }
@@ -1626,7 +1629,7 @@ be_intphy_service(sc, mii, cmd)
 					BE_PHY_INTERNAL, MII_BMCR, bmcr);
 
 				printf("%s: link up at %s Mbps\n",
-					device_xname(&sc->sc_dev),
+					sc->sc_dev.dv_xname,
 					(bmcr & BMCR_S100) ? "100" : "10");
 			}
 			return (0);
@@ -1636,7 +1639,7 @@ be_intphy_service(sc, mii, cmd)
 			sc->sc_mii_flags |= MIIF_DOINGAUTO;
 			sc->sc_mii_flags &= ~MIIF_HAVELINK;
 			sc->sc_intphy_curspeed = 0;
-			printf("%s: link down\n", device_xname(&sc->sc_dev));
+			printf("%s: link down\n", sc->sc_dev.dv_xname);
 		}
 
 		/* Only retry autonegotiation every 5 seconds. */

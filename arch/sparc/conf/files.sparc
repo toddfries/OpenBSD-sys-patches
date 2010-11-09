@@ -1,4 +1,4 @@
-#	$NetBSD: files.sparc,v 1.147 2008/11/19 18:36:00 ad Exp $
+#	$NetBSD: files.sparc,v 1.136 2005/11/13 15:26:48 uwe Exp $
 
 # @(#)files.sparc	8.1 (Berkeley) 7/19/93
 # sparc-specific configuration info
@@ -245,7 +245,7 @@ device cgeight: bt_dac, fb, rasops24, pfour
 attach cgeight at obio
 file	arch/sparc/dev/cgeight.c	cgeight needs-flag
 
-device cgfourteen: fb, rasops32, rasops8, wsemuldisplaydev
+device cgfourteen: fb, rasops32
 attach cgfourteen at obio
 file	arch/sparc/dev/cgfourteen.c	cgfourteen needs-flag
 
@@ -285,11 +285,10 @@ file	arch/sparc/fpu/fpu_subr.c
 
 file	arch/sparc/sparc/autoconf.c
 file	arch/sparc/sparc/cache.c
-file	arch/sparc/sparc/core_machdep.c		coredump
 file	arch/sparc/sparc/emul.c
+file	arch/sparc/sparc/in_cksum.c
 file	arch/sparc/sparc/intr.c
 file	arch/sparc/sparc/kgdb_machdep.c	kgdb
-file	arch/sparc/sparc/kobj_machdep.c		modular
 # sparc/sparc/locore.s is handled specially in the makefile,
 # because it must come first in the "ld" command line.
 file	arch/sparc/sparc/machdep.c
@@ -309,10 +308,15 @@ file	arch/sparc/sparc/db_interface.c	ddb | kgdb
 file	arch/sparc/sparc/db_trace.c	ddb
 file	arch/sparc/sparc/db_disasm.c	ddb
 
+
+#
+# Raster Console / WS Console
+#
+include "dev/wscons/files.wscons"	# includes rcons as well
+include "dev/wsfont/files.wsfont"	# both rcons and wscons need it
+
 include "dev/pckbport/files.pckbport"
 
-# USB Support
-include "dev/usb/files.usb"
 
 #
 # Compatibility modules
@@ -330,10 +334,11 @@ file	arch/sparc/sparc/sunos_machdep.c compat_sunos
 
 # Binary compatibility with previous NetBSD releases (COMPAT_XX)
 # Note: SunOS compatibility also uses some of `compat_13_machdep.c'
-file	arch/sparc/sparc/compat_16_machdep.c	compat_16
 file	arch/sparc/sparc/compat_13_machdep.c	compat_13 | compat_sunos
 
 # Miscellaneous
+file	netns/ns_cksum.c		ns
+
 file	dev/md_root.c			memory_disk_hooks
 
 include "arch/sparc/conf/majors.sparc"

@@ -1,4 +1,4 @@
-/*	$NetBSD: wdvar.h,v 1.8 2007/10/17 19:54:10 garbled Exp $	*/
+/*	$NetBSD: wdvar.h,v 1.6 2005/12/11 12:17:06 christos Exp $	*/
 
 /*-
  * Copyright (c) 2003 The NetBSD Foundation, Inc.
@@ -49,12 +49,12 @@
 #define WDC_NSHADOWREG		2	/* XXX */
 
 struct wdc_channel {
-	volatile uint8_t *c_cmdbase;
-	volatile uint8_t *c_ctlbase;
-	volatile uint8_t *c_cmdreg[WDC_NPORTS + WDC_NSHADOWREG];
-	volatile uint16_t *c_data;
+	volatile u_int8_t *c_cmdbase;
+	volatile u_int8_t *c_ctlbase;
+	volatile u_int8_t *c_cmdreg[WDC_NPORTS + WDC_NSHADOWREG];
+	volatile u_int16_t *c_data;
 
-	uint8_t compatchan;
+	u_int8_t compatchan;
 };
 
 #define WDC_READ_REG(chp, reg)		*(chp)->c_cmdreg[(reg)]
@@ -66,12 +66,12 @@ struct wdc_channel {
 struct wd_softc {
 #define WDF_LBA		0x0001
 #define WDF_LBA48	0x0002
-	uint16_t sc_flags;
+	u_int16_t sc_flags;
 
 	u_int sc_part;
 	u_int sc_unit;
 
-	uint64_t sc_capacity;
+	u_int64_t sc_capacity;
 
 	struct ataparams sc_params;
 	struct disklabel sc_label;
@@ -79,27 +79,27 @@ struct wd_softc {
 };
 
 struct wdc_command {
-	uint8_t drive;		/* drive id */
+	u_int8_t drive;		/* drive id */
 
-	uint8_t r_command;	/* Parameters to upload to registers */
-	uint8_t r_head;
-	uint16_t r_cyl;
-	uint8_t r_sector;
-	uint8_t r_count;
-	uint8_t r_precomp;
+	u_int8_t r_command;	/* Parameters to upload to registers */
+	u_int8_t r_head;
+	u_int16_t r_cyl;
+	u_int8_t r_sector;
+	u_int8_t r_count;
+	u_int8_t r_precomp;
 
-	uint16_t bcount;
+	u_int16_t bcount;
 	void *data;
 
-	uint64_t r_blkno;
+	u_int64_t r_blkno;
 };
 
-int	wdc_init(struct wd_softc *, u_int *);
-int	wdccommand(struct wd_softc *, struct wdc_command *);
-int	wdccommandext(struct wd_softc *, struct wdc_command *);
-int	wdc_exec_read(struct wd_softc *, uint8_t, daddr_t, void *);
-int	wdc_exec_identify(struct wd_softc *, void *);
+int	wdc_init		(struct wd_softc*, u_int*);
+int	wdccommand		(struct wd_softc*, struct wdc_command*);
+int	wdccommandext		(struct wd_softc*, struct wdc_command*);
+int	wdc_exec_read		(struct wd_softc*, u_int8_t, daddr_t, void*);
+int	wdc_exec_identify	(struct wd_softc*, void*);
 
-int	pciide_init(struct wdc_channel *, u_int *);
+int	pciide_init		(struct wdc_channel*, u_int*);
 
 #endif /* _STAND_WDVAR_H */

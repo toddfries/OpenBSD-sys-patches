@@ -1,4 +1,4 @@
-/*	$NetBSD: sunos32.h,v 1.13 2008/05/29 14:51:26 mrg Exp $	 */
+/*	$NetBSD: sunos32.h,v 1.9 2005/12/11 12:20:23 christos Exp $	 */
 
 /*
  * Copyright (c) 2001 Matthew R. Green
@@ -12,6 +12,8 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -39,16 +41,16 @@
  * Typedefs for pointer-types.
  */
 /* stime() */
-typedef netbsd32_pointer_t sunos32_time_tp;
+typedef u_int32_t sunos32_time_tp;
 
 /* statfs(), fstatfs() */
-typedef netbsd32_pointer_t sunos32_statfsp_t;
+typedef u_int32_t sunos32_statfsp_t;
 
 /* ustat() */
-typedef netbsd32_pointer_t sunos32_ustatp_t;
+typedef u_int32_t sunos32_ustatp_t;
 
 /* uname() */
-typedef netbsd32_pointer_t sunos32_utsnamep_t;
+typedef u_int32_t sunos32_utsnamep_t;
 
 /*
  * general prototypes
@@ -66,7 +68,7 @@ __END_DECLS
 #define SUNOS32TO64(s32uap, uap, name) \
 	    SCARG(uap, name) = SCARG(s32uap, name)
 #define SUNOS32TOP(s32uap, uap, name, type) \
-	    SCARG(uap, name) = SCARG_P32(s32uap, name)
+	    SCARG(uap, name) = (type *)(u_long)(u_int)SCARG(s32uap, name)
 #define SUNOS32TOX(s32uap, uap, name, type) \
 	    SCARG(uap, name) = (type)SCARG(s32uap, name)
 #define SUNOS32TOX64(s32uap, uap, name, type) \
@@ -77,5 +79,11 @@ __END_DECLS
 #define	SUNOS32TOP_UAP(name, type)	SUNOS32TOP(uap, &ua, name, type);
 #define	SUNOS32TOX_UAP(name, type)	SUNOS32TOX(uap, &ua, name, type);
 #define	SUNOS32TOX64_UAP(name, type)	SUNOS32TOX64(uap, &ua, name, type);
+
+#define SUNOS32_CHECK_ALT_EXIST(l, sgp, path) \
+    emul_find(l, sgp, p->p_emul->e_path, (char *)(u_long)path, (const char **)&(path), CHECK_ALT_FL_EXISTS)
+
+#define SUNOS32_CHECK_ALT_CREAT(l, sgp, path) \
+    emul_find(l, sgp, l->l_proc->p_emul->e_path, (char *)(u_long)path, (const char **)&(path), CHECK_ALT_FL_CREAT)
 
 #endif /* _COMPAT_SUNOS32_SUNOS32_H_ */

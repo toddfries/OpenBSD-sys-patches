@@ -1,4 +1,4 @@
-/*	$NetBSD: cats_machdep.c,v 1.64 2009/02/13 22:41:01 apb Exp $	*/
+/*	$NetBSD: cats_machdep.c,v 1.58 2006/11/24 22:04:21 wiz Exp $	*/
 
 /*
  * Copyright (c) 1997,1998 Mark Brinicombe.
@@ -40,10 +40,9 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: cats_machdep.c,v 1.64 2009/02/13 22:41:01 apb Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cats_machdep.c,v 1.58 2006/11/24 22:04:21 wiz Exp $");
 
 #include "opt_ddb.h"
-#include "opt_modular.h"
 #include "opt_pmap_debug.h"
 
 #include "isadma.h"
@@ -79,6 +78,7 @@ __KERNEL_RCSID(0, "$NetBSD: cats_machdep.c,v 1.64 2009/02/13 22:41:01 apb Exp $"
 #include <arm/footbridge/dc21285reg.h>
 
 #include "ksyms.h"
+#include "opt_ipkdb.h"
 #include "opt_ableelf.h"
 
 #include "isa.h"
@@ -114,7 +114,11 @@ u_int dc21285_fclk = FCLK;
 /* Define various stack sizes in pages */
 #define IRQ_STACK_SIZE	1
 #define ABT_STACK_SIZE	1
+#ifdef IPKDB
+#define UND_STACK_SIZE	2
+#else
 #define UND_STACK_SIZE	1
+#endif
 
 struct ebsaboot ebsabootinfo;
 BootConfig bootconfig;		/* Boot config storage */
@@ -234,7 +238,6 @@ cpu_reboot(int howto, char *bootstr)
 	 */
 	if (cold) {
 		doshutdownhooks();
-		pmf_system_shutdown(boothowto);
 		printf("The operating system has halted.\n");
 		printf("Please press any key to reboot.\n\n");
 		cngetc();
@@ -264,8 +267,6 @@ cpu_reboot(int howto, char *bootstr)
 	
 	/* Run any shutdown hooks */
 	doshutdownhooks();
-
-	pmf_system_shutdown(boothowto);
 
 	/* Make sure IRQ's are disabled */
 	IRQdisable;
@@ -351,6 +352,7 @@ initarm(void *arm_bootargs)
 	int loop;
 	int loop1;
 	u_int l1pagetable;
+	pv_addr_t kernel_l1pt;
 	extern u_int cpu_get_control(void);
 
 	/*
@@ -506,6 +508,7 @@ initarm(void *arm_bootargs)
 	memset((char *)(var), 0, ((np) * PAGE_SIZE));
 
 	loop1 = 0;
+	kernel_l1pt.pv_pa = kernel_l1pt.pv_va = 0;
 	for (loop = 0; loop <= NUM_KERNEL_PTS; ++loop) {
 		/* Are we 16KB aligned for an L1 ? */
 		if ((physical_freestart & (L1_TABLE_SIZE - 1)) == 0
@@ -876,20 +879,33 @@ initarm(void *arm_bootargs)
 
 	/* Boot strap pmap telling it where the kernel page table is */
 	printf("pmap ");
-	pmap_bootstrap(KERNEL_VM_BASE, KERNEL_VM_BASE + KERNEL_VM_SIZE);
+	pmap_bootstrap((pd_entry_t *)kernel_l1pt.pv_va, KERNEL_VM_BASE,
+	    KERNEL_VM_BASE + KERNEL_VM_SIZE);
 
 	/* Setup the IRQ system */
 	printf("irq ");
 	footbridge_intr_init();
 	printf("done.\n");
 
-#if NKSYMS || defined(DDB) || defined(MODULAR)
-#ifndef __ELF__		/* XXX */
+#ifdef IPKDB
+	/* Initialise ipkdb */
+	ipkdb_init();
+	if (boothowto & RB_KDB)
+		ipkdb_connect(0);
+#endif
+
+#if NKSYMS || defined(DDB) || defined(LKM)
+#ifdef __ELF__
+	/* ok this is really rather sick, in ELF what happens is that the
+	 * ELF symbol table is added after the text section.
+	 */
+	ksyms_init(0, NULL, NULL);	/* XXX */
+#else
 	{
 		extern int end;
 		extern int *esym;
 
-		ksyms_addsyms_elf(*(int *)&end, ((int *)&end) + 1, esym);
+		ksyms_init(*(int *)&end, ((int *)&end) + 1, esym);
 	}
 #endif /* __ELF__ */
 #endif

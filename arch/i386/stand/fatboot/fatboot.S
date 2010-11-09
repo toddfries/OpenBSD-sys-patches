@@ -1,4 +1,4 @@
-/*	$NetBSD: fatboot.S,v 1.3 2008/04/29 06:53:02 martin Exp $	*/
+/*	$NetBSD: fatboot.S,v 1.1 2007/01/01 22:11:09 dsl Exp $	*/
 
 /*-
  * Copyright (c) 2007 The NetBSD Foundation, Inc.
@@ -15,6 +15,9 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -44,15 +47,6 @@
 
 #include <machine/asm.h>
 #include <sys/bootblock.h>
-
-#ifndef FAT_ENTRY_SIZE
-#error FAT_ENTRY_SIZE not defined
-#endif
-
-/* Support for FAT32 could be added - but hasn't been yet. */
-#if FAT_ENTRY_SIZE != 16
-#error Unsupported FAT_ENTRY_SIZE value
-#endif
 
 #define PBR_AFTERBPB	62		/* BPB size in floppy master BR */
 
@@ -112,6 +106,8 @@ start0:
 	mov	%sp, %bp		/* to access the pbp */
 	push	%dx			/* save drive at -2(%bp) */
 
+	xchg	%ax, %bx		/* %bx = 0 */
+
 	set_err(ERR_NOT_FAT16)
 	cmpl	$'A'|'T'<<8|'1'<<16|'6'<<24, bs_file_sys_type+1(%bp)
 	jne	error
@@ -127,14 +123,14 @@ start0:
 	shl	$16,%edx
 	xchg	%ax,%dx			/* FAT size now in %edx */
 	addl	fat_sector(%bp), %edx	/* Directory is after FATs */
-	push	%cs			/* %cs is zero */
-	push	%cs			/* 64-bit for LBA read */
+	push	%bx			/* %bx is zero */
+	push	%bx			/* 64-bit for LBA read */
 	pushl	%edx			/* Sector number of root dir */
 
 	push	$0x1000			/* Read to 0x10000:0 */
 	pop	%es			/* Which we need in %es later */
 	push	%es
-	push	%cs			/* Offset zero */
+	push	%bx			/* Offset zero */
 
 /* Convert the root directory size to sectors */
 	push	%dx
@@ -143,7 +139,7 @@ start0:
 	mul	%dx
 	divw	bpb_bytes_per_sec(%bp)
 	add	$0xffff, %dx		/* Set carry if remainder non-zero */
-	adc	$0, %ax			/* and round up the division */
+	adc	%bx, %ax		/* %bx is still zero */
 	pop	%dx
 
 /* Read in the entire root directory */
@@ -267,7 +263,7 @@ read_lba:
 	pushw	$16			/* Stack ctl block length */
 	mov	%sp, %si		/* Address ctl block */
 	push	%ax			/* restack rtn addr */
-	pushal				/* Save everything except %si and %ax*/
+	pushal
 	mov	-2(%bp), %dl		/* Disk # saved on entry */
 	movb	$0x42, %ah
 	int	$0x13

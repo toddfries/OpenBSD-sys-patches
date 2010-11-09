@@ -1,4 +1,4 @@
-/*	$NetBSD: disksubr.c,v 1.56 2008/01/02 11:48:22 ad Exp $	*/
+/*	$NetBSD: disksubr.c,v 1.52 2006/11/30 05:14:24 mhitch Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1988 Regents of the University of California.
@@ -66,7 +66,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: disksubr.c,v 1.56 2008/01/02 11:48:22 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: disksubr.c,v 1.52 2006/11/30 05:14:24 mhitch Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -190,7 +190,7 @@ readdisklabel(dev, strat, lp, clp)
 		bp->b_blkno = nextb;
 		bp->b_cylinder = bp->b_blkno / lp->d_secpercyl;
 		bp->b_bcount = lp->d_secsize;
-		bp->b_oflags &= ~(BO_DONE);
+		bp->b_flags &= ~(B_DONE);
 		bp->b_flags |= B_READ;
 #ifdef SD_C_ADJUSTS_NR
 		bp->b_blkno *= (lp->d_secsize / DEV_BSIZE);
@@ -209,14 +209,14 @@ readdisklabel(dev, strat, lp, clp)
 				msg = "rdb bad checksum";
 		}
 		/* Check for native NetBSD label? */
-		dlp = (struct disklabel *)((char*)bp->b_data + LABELOFFSET);
+		dlp = (struct disklabel *)(bp->b_data + LABELOFFSET);
 		if (dlp->d_magic == DISKMAGIC) {
 			if (dkcksum(dlp))
 				msg = "NetBSD disk label corrupted";
 			else {
 				/* remember block and continue searching? */
 				*lp = *dlp;
-				brelse(bp, 0);
+				brelse(bp);
 				return(msg);
 			}
 		}
@@ -307,7 +307,7 @@ readdisklabel(dev, strat, lp, clp)
 		bp->b_blkno = nextb;
 		bp->b_cylinder = bp->b_blkno / lp->d_secpercyl;
 		bp->b_bcount = lp->d_secsize;
-		bp->b_oflags &= ~(BO_DONE);
+		bp->b_flags &= ~(B_DONE);
 		bp->b_flags |= B_READ;
 #ifdef SD_C_ADJUSTS_NR
 		bp->b_blkno *= (lp->d_secsize / DEV_BSIZE);
@@ -490,7 +490,7 @@ readdisklabel(dev, strat, lp, clp)
 done:
 	if (clp->valid == 0)
 		clp->rdblock = RDBNULL;
-	brelse(bp, 0);
+	brelse(bp);
 	return(msg);
 }
 
@@ -568,17 +568,16 @@ writedisklabel(dev, strat, lp, clp)
 	if ((error = biowait(bp)) != 0)
 		goto done;
 
-	dlp = (struct disklabel *)((char*)bp->b_data + LABELOFFSET);
+	dlp = (struct disklabel *)(bp->b_data + LABELOFFSET);
 	*dlp = *lp;     /* struct assignment */
 
-	bp->b_oflags &= ~(BO_DONE);
-	bp->b_flags &= ~(B_READ);
+	bp->b_flags &= ~(B_READ|B_DONE);
 	bp->b_flags |= B_WRITE;
 	(*strat)(bp);
 	error = biowait(bp);
 
 done:
-	brelse(bp, 0);
+	brelse(bp);
 	return (error); 
 
 	/*
@@ -709,7 +708,7 @@ getrdbmap(dev, strat, lp, clp)
 
 	bp->b_dev = MAKEDISKDEV(major(dev), DISKUNIT(dev), RAW_PART);
 	/* XXX finish */
-	brelse(bp, 0);
+	brelse(bp);
 	return(NULL);
 }
 

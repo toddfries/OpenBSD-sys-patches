@@ -1,4 +1,4 @@
-/*	$NetBSD: libsa.h,v 1.7 2009/01/12 11:32:45 tsutsui Exp $	*/
+/*	$NetBSD: libsa.h,v 1.5 2005/12/11 12:19:29 christos Exp $	*/
 
 /*
  * This file defines the API for libsa.a
@@ -23,11 +23,9 @@ void _start(void);
 void breakpoint(void);
 void chain_to(void *);
 
-int main(void);
-void exit(int);
-
 /* clock.c */
 extern int hz;
+long getsecs(void);
 long getticks(void);
 
 /* exec_sun.c */
@@ -39,13 +37,6 @@ extern int debug;
 extern char prom_bootdev[];
 extern char *prom_bootfile;
 extern int prom_boothow;
-void prom_get_boot_info(void);
-
-/* promcons.c */
-int peekchar(void);
-
-/* putstr.c */
-void putstr(const char *);
 
 /* sun2.c */
 void sun2_getidprom(u_char *);
@@ -58,6 +49,3 @@ void sun3_getidprom(u_char *);
 /* vers.c */
 extern const char bootprog_rev[];
 extern const char bootprog_name[];
-
-/* xxboot.c */
-void xxboot_main(const char *);

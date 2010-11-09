@@ -1,4 +1,4 @@
-/* $NetBSD: i82557.c,v 1.11 2008/12/14 18:46:33 christos Exp $ */
+/* $NetBSD: i82557.c,v 1.8 2005/12/26 19:24:00 perry Exp $ */
 
 /*
  * Copyright (c) 1998, 1999
@@ -64,7 +64,7 @@ static union _sndbuf {
 #define	PCI_MODE1_ENABLE	0x80000000UL
 static pcihdl_t mytag = PCI_MODE1_ENABLE | (PCIDEVNO << 11);
 
-extern void *mapmem(int, int);
+extern caddr_t mapmem __P((int, int));
 void *dmamem; /* virtual */
 #define RECVBUF_PHYS DMABASE
 #define RECVBUF_VIRT dmamem
@@ -72,14 +72,14 @@ void *dmamem; /* virtual */
 #define SNDBUF_VIRT ((void *)(((char *)dmamem) + RECVBUF_SIZE))
 #endif /* _STANDALONE */
 
-static void fxp_read_eeprom(uint16_t *, int, int);
-static inline void fxp_scb_wait(void);
+static void fxp_read_eeprom	__P((uint16_t *, int, int));
+static inline void fxp_scb_wait	__P((void));
 #ifdef DEBUG
-static void fxp_checkintr(char *);
+static void fxp_checkintr __P((char *));
 #else
 #define fxp_checkintr(x)
 #endif
-static void fxp_startreceiver(void);
+static void fxp_startreceiver __P((void));
 
 /*
  * Template for default configuration parameters.
@@ -133,7 +133,7 @@ static struct btinfo_netif bi_netif;
  * completed).
  */
 static inline void
-fxp_scb_wait(void)
+fxp_scb_wait()
 {
 	int i = 10000;
 
@@ -145,7 +145,8 @@ fxp_scb_wait(void)
 
 #ifdef DEBUG
 static void
-fxp_checkintr(char *msg)
+fxp_checkintr(msg)
+	char *msg;
 {
 	uint8_t statack;
 	int i = 10000;
@@ -162,7 +163,8 @@ fxp_checkintr(char *msg)
 #endif
 
 int
-EtherInit(unsigned char *myadr)
+EtherInit(myadr)
+	unsigned char *myadr;
 {
 #ifndef _STANDALONE
 	uint32_t id;
@@ -173,18 +175,18 @@ EtherInit(unsigned char *myadr)
 
 	if (pcicheck()) {
 		printf("pcicheck failed\n");
-		return 0;
+		return (0);
 	}
 #ifdef _STANDALONE
 	if (pcifinddev(0x8086, 0x1229, &mytag)) {
 		printf("no fxp\n");
-		return 0;
+		return (0);
 	}
 #else
 	pcicfgread(&mytag, 0, &id);
 	if (id != 0x12298086) {
 		printf("no fxp\n");
-		return 0;
+		return (0);
 	}
 #endif
 
@@ -194,7 +196,7 @@ EtherInit(unsigned char *myadr)
 #ifndef _STANDALONE
 	dmamem = mapmem(DMABASE, DMASIZE);
 	if (!dmamem)
-		return 0;
+		return (0);
 #endif
 
 	fxp_read_eeprom((void *)myadr, 0, 3);
@@ -308,13 +310,12 @@ EtherInit(unsigned char *myadr)
 	BI_ADD(&bi_netif, BTINFO_NETIF, sizeof(bi_netif));
 #endif
 
-	return 1;
+	return (1);
 }
 
 void
-EtherStop(void)
+EtherStop()
 {
-
 	/*
 	 * Issue software reset
 	 */
@@ -322,8 +323,9 @@ EtherStop(void)
 	DELAY(10);
 }
 
-int
-EtherSend(char *pkt, int len)
+int EtherSend(pkt, len)
+	char *pkt;
+	int len;
 {
 	volatile struct fxp_cb_tx *txp;
 #ifdef _STANDALONE
@@ -366,11 +368,11 @@ EtherSend(char *pkt, int len)
 
 	fxp_checkintr("send");
 
-	return len;
+	return (len);
 }
 
 static void
-fxp_startreceiver(void)
+fxp_startreceiver()
 {
 	volatile struct fxp_rfa *rfa;
 	uint32_t v;
@@ -391,7 +393,9 @@ fxp_startreceiver(void)
 }
 
 int
-EtherReceive(char *pkt, int maxlen)
+EtherReceive(pkt, maxlen)
+	char *pkt;
+	int maxlen;
 {
 	uint8_t ruscus;
 	volatile struct fxp_rfa *rfa;
@@ -399,17 +403,17 @@ EtherReceive(char *pkt, int maxlen)
 
 	ruscus = CSR_READ_1(FXP_CSR_SCB_RUSCUS);
 	if (((ruscus >> 2) & 0x0f) == FXP_SCB_RUS_READY)
-		return 0;
+		return (0);
 	if (((ruscus >> 2) & 0x0f) != FXP_SCB_RUS_SUSPENDED) {
 		printf("rcv: ruscus=%x\n", ruscus);
-		return 0;
+		return (0);
 	}
 
 	rfa = RECVBUF_VIRT;
 	if (rfa->rfa_status & FXP_RFA_STATUS_C) {
 		len = rfa->actual_size & 0x7ff;
 		if (len <= maxlen) {
-			memcpy(pkt, (char *) rfa + RFA_SIZE, maxlen);
+			memcpy(pkt, (caddr_t) rfa + RFA_SIZE, maxlen);
 #if 0
 			printf("rfa status=%x, len=%x\n",
 			       rfa->rfa_status, len);
@@ -421,7 +425,7 @@ EtherReceive(char *pkt, int maxlen)
 	fxp_scb_wait();
 	CSR_WRITE_1(FXP_CSR_SCB_COMMAND, FXP_SCB_COMMAND_RU_RESUME);
 
-	return len;
+	return (len);
 }
 
 /*
@@ -432,7 +436,10 @@ EtherReceive(char *pkt, int maxlen)
  * every 16 bits of data.
  */
 static void
-fxp_read_eeprom(uint16_t *data, int offset, int words)
+fxp_read_eeprom(data, offset, words)
+	uint16_t *data;
+	int offset;
+	int words;
 {
 	uint16_t reg;
 	int i, x;
@@ -490,3 +497,4 @@ fxp_read_eeprom(uint16_t *data, int offset, int words)
 		DELAY(1);
 	}
 }
+

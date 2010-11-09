@@ -1,4 +1,4 @@
-/*	$NetBSD: siop.c,v 1.61 2009/01/10 19:10:50 mhitch Exp $ */
+/*	$NetBSD: siop.c,v 1.54 2006/03/08 23:46:22 lukem Exp $ */
 
 /*
  * Copyright (c) 1990 The Regents of the University of California.
@@ -70,12 +70,10 @@
 #include "opt_ddb.h"
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: siop.c,v 1.61 2009/01/10 19:10:50 mhitch Exp $");
+__KERNEL_RCSID(0, "$NetBSD: siop.c,v 1.54 2006/03/08 23:46:22 lukem Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/callout.h>
-#include <sys/kernel.h>
 #include <sys/device.h>
 #include <sys/disklabel.h>
 #include <sys/buf.h>
@@ -111,7 +109,6 @@ int  siop_checkintr(struct siop_softc *, u_char, u_char, u_char, int *);
 void siopreset(struct siop_softc *);
 void siopsetdelay(int);
 void siop_scsidone(struct siop_acb *, int);
-void siop_timeout(void *);
 void siop_sched(struct siop_softc *);
 void siop_poll(struct siop_softc *, struct siop_acb *);
 void siopintr(struct siop_softc *);
@@ -321,7 +318,7 @@ siop_poll(struct siop_softc *sc, struct siop_acb *acb)
 				    xs->xs_periph->periph_target, acb->cmd.opcode,
 				    rp->siop_sbcl, rp->siop_dsp,
 				    rp->siop_dsp - sc->sc_scriptspa,
-				    *((volatile long *)&rp->siop_dcmd), &acb->ds, acb->xs->timeout);
+				    *((long *)&rp->siop_dcmd), &acb->ds, acb->xs->timeout);
 #endif
 				i = 50000;
 				--to;
@@ -422,9 +419,6 @@ siop_scsidone(struct siop_acb *acb, int stat)
 #endif
 		return;
 	}
-
-	callout_stop(&xs->xs_callout);
-
 	periph = xs->xs_periph;
 	sc = (void *)periph->periph_channel->chan_adapter->adapt_dev;
 
@@ -556,14 +550,14 @@ siopinitialize(struct siop_softc *sc)
 	 * Also should verify that dev doesn't span non-contiguous
 	 * physical pages.
 	 */
-	sc->sc_scriptspa = kvtop((void *)__UNCONST(scripts));
+	sc->sc_scriptspa = kvtop((caddr_t)__UNCONST(scripts));
 
 	/*
 	 * malloc sc_acb to ensure that DS is on a long word boundary.
 	 */
 
-	sc->sc_acb = malloc(sizeof(struct siop_acb) * SIOP_NACB,
-		M_DEVBUF, M_NOWAIT);
+	MALLOC(sc->sc_acb, struct siop_acb *,
+		sizeof(struct siop_acb) * SIOP_NACB, M_DEVBUF, M_NOWAIT);
 	if (sc->sc_acb == NULL)
 		panic("siopinitialize: ACB malloc failed!");
 
@@ -601,28 +595,6 @@ siopinitialize(struct siop_softc *sc)
 	}
 
 	siopreset (sc);
-}
-
-void
-siop_timeout(void *arg)
-{
-	struct siop_acb *acb;
-	struct scsipi_periph *periph;
-	struct siop_softc *sc;
-	int s;
-
-	acb = arg;
-	periph = acb->xs->xs_periph;
-	sc = device_private(periph->periph_channel->chan_adapter->adapt_dev);
-	scsipi_printaddr(periph);
-	printf("timed out\n");
-
-	s = splbio();
-
-	acb->xs->error = XS_TIMEOUT;
-	siopreset(sc);
-
-	splx(s);
 }
 
 void
@@ -856,7 +828,7 @@ siop_start(struct siop_softc *sc, int target, int lun, u_char *cbuf, int clen,
 #endif
 
 	/* push data cache for all data the 53c710 needs to access */
-	dma_cachectl ((void *)acb, sizeof (struct siop_acb));
+	dma_cachectl ((caddr_t)acb, sizeof (struct siop_acb));
 	dma_cachectl (cbuf, clen);
 	if (buf != NULL && len != 0)
 		dma_cachectl (buf, len);
@@ -870,14 +842,12 @@ siop_start(struct siop_softc *sc, int target, int lun, u_char *cbuf, int clen,
 	}
 #endif
 	if (sc->nexus_list.tqh_first == NULL) {
-		callout_reset(&acb->xs->xs_callout,
-		    mstohz(acb->xs->timeout) + 1, siop_timeout, acb);
 		if (rp->siop_istat & SIOP_ISTAT_CON)
 			printf("%s: siop_select while connected?\n",
 			    sc->sc_dev.dv_xname);
 		rp->siop_temp = 0;
 		rp->siop_sbcl = sc->sc_sync[target].sbcl;
-		rp->siop_dsa = kvtop((void *)&acb->ds);
+		rp->siop_dsa = kvtop((caddr_t)&acb->ds);
 		rp->siop_dsp = sc->sc_scriptspa;
 		SIOP_TRACE('s',1,0,0)
 	} else {
@@ -942,9 +912,9 @@ siop_checkintr(struct siop_softc *sc, u_char istat, u_char dstat,
 	if (dstat & SIOP_DSTAT_SIR && rp->siop_dsps == 0xff00) {
 		/* Normal completion status, or check condition */
 #ifdef DEBUG
-		if (rp->siop_dsa != kvtop((void *)&acb->ds)) {
+		if (rp->siop_dsa != kvtop((caddr_t)&acb->ds)) {
 			printf ("siop: invalid dsa: %lx %x\n", rp->siop_dsa,
-			    (unsigned)kvtop((void *)&acb->ds));
+			    kvtop((caddr_t)&acb->ds));
 			panic("*** siop DSA invalid ***");
 		}
 #endif
@@ -1070,7 +1040,7 @@ siop_checkintr(struct siop_softc *sc, u_char istat, u_char dstat,
 				}
 			}
 #endif
-			dma_cachectl ((void *)acb, sizeof(*acb));
+			dma_cachectl ((caddr_t)acb, sizeof(*acb));
 		}
 #ifdef DEBUG
 		SIOP_TRACE('m',rp->siop_sbcl,(rp->siop_dsp>>8),rp->siop_dsp);
@@ -1078,7 +1048,7 @@ siop_checkintr(struct siop_softc *sc, u_char istat, u_char dstat,
 			printf ("Phase mismatch: %x dsp +%lx dcmd %lx\n",
 			    rp->siop_sbcl,
 			    rp->siop_dsp - sc->sc_scriptspa,
-			    *((volatile long *)&rp->siop_dcmd));
+			    *((long *)&rp->siop_dcmd));
 #endif
 		if ((rp->siop_sbcl & SIOP_REQ) == 0) {
 			printf ("Phase mismatch: REQ not asserted! %02x dsp %lx\n",
@@ -1262,7 +1232,7 @@ siop_checkintr(struct siop_softc *sc, u_char istat, u_char dstat,
 			}
 			if (j < DMAMAXIO)
 				acb->ds.chain[j].datalen = 0;
-			DCIAS(kvtop((void *)&acb->ds.chain));
+			DCIAS(kvtop((caddr_t)&acb->ds.chain));
 		}
 		++sc->sc_tinfo[target].dconns;
 		/*
@@ -1320,7 +1290,7 @@ siop_checkintr(struct siop_softc *sc, u_char istat, u_char dstat,
 			sc->sc_flags |= acb->status;
 			acb->status = 0;
 			DCIAS(kvtop(&acb->stat[0]));
-			rp->siop_dsa = kvtop((void *)&acb->ds);
+			rp->siop_dsa = kvtop((caddr_t)&acb->ds);
 			rp->siop_sxfer =
 				sc->sc_sync[acb->xs->xs_periph->periph_target].sxfer;
 			rp->siop_sbcl =
@@ -1333,7 +1303,7 @@ siop_checkintr(struct siop_softc *sc, u_char istat, u_char dstat,
 			    sc->nexus_list.tqh_first);
 			panic("unable to find reselecting device");
 		}
-		dma_cachectl ((void *)acb, sizeof(*acb));
+		dma_cachectl ((caddr_t)acb, sizeof(*acb));
 		rp->siop_temp = 0;
 		rp->siop_dcntl |= SIOP_DCNTL_STD;
 		return (0);
@@ -1366,7 +1336,7 @@ siop_checkintr(struct siop_softc *sc, u_char istat, u_char dstat,
 		}
 		target = sc->sc_nexus->xs->xs_periph->periph_target;
 		rp->siop_temp = 0;
-		rp->siop_dsa = kvtop((void *)&sc->sc_nexus->ds);
+		rp->siop_dsa = kvtop((caddr_t)&sc->sc_nexus->ds);
 		rp->siop_sxfer = sc->sc_sync[target].sxfer;
 		rp->siop_sbcl = sc->sc_sync[target].sbcl;
 		rp->siop_dsp = sc->sc_scriptspa;
@@ -1382,7 +1352,7 @@ siop_checkintr(struct siop_softc *sc, u_char istat, u_char dstat,
 			sc->sc_dev.dv_xname, rp->siop_sfbr, acb->msg[1], rp->siop_sbcl);
 		/* what should be done here? */
 		DCIAS(kvtop(&acb->msg[1]));
-		rp->siop_dsp = sc->sc_scriptspa + Ent_clear_ack;
+		rp->siop_dsp = sc->sc_scriptspa + Ent_switch;
 		return (0);
 	}
 	if (dstat & SIOP_DSTAT_SIR && rp->siop_dsps == 0xff0a) {
@@ -1419,10 +1389,9 @@ bad_phase:
 	 * XXXX need to clean this up to print out the info, reset, and continue
 	 */
 	printf ("siopchkintr: target %x ds %p\n", target, &acb->ds);
-	printf ("scripts %lx ds %x rp %x dsp %lx dcmd %lx\n",
-	    sc->sc_scriptspa, (unsigned)kvtop((void *)&acb->ds),
-	    (unsigned)kvtop((void *)__UNVOLATILE(rp)), rp->siop_dsp,
-	    *((volatile long *)&rp->siop_dcmd));
+	printf ("scripts %lx ds %x rp %x dsp %lx dcmd %lx\n", sc->sc_scriptspa,
+	    kvtop((caddr_t)&acb->ds), kvtop((caddr_t)__UNVOLATILE(rp)), 
+	    rp->siop_dsp, *((volatile long *)&rp->siop_dcmd));
 	printf ("siopchkintr: istat %x dstat %x sstat0 %x dsps %lx dsa %lx sbcl %x sts %x msg %x %x sfbr %x\n",
 	    istat, dstat, sstat0, rp->siop_dsps, rp->siop_dsa,
 	     rp->siop_sbcl, acb->stat[0], acb->msg[0], acb->msg[1], rp->siop_sfbr);

@@ -1,4 +1,4 @@
-/*	$NetBSD: obio.c,v 1.7 2008/04/27 18:58:46 matt Exp $ */
+/*	$NetBSD: obio.c,v 1.5 2006/12/18 15:32:10 nonaka Exp $ */
 
 /*
  * Copyright (c) 2002, 2003, 2005  Genetec corp.  All rights reserved.
@@ -134,7 +134,7 @@ obio_intr(void *arg)
 
 	if (n > 0) {
 		/* handle it later */
-		softint_schedule(sc->sc_si);
+		softintr_schedule(sc->sc_si);
 	}
 
 	/* GPIO interrupt is edge triggered.  make a pulse
@@ -148,11 +148,11 @@ obio_intr(void *arg)
 }
 
 static void
-obio_softint(void *arg)
+obio_softintr(void *arg)
 {
 	struct obio_softc *sc = (struct obio_softc *)arg;
 	int irqno;
-	int spl_save = curcpl();
+	int spl_save = current_spl_level;
 	int psw;
 
 	psw = disable_interrupts(I32_bit);
@@ -252,7 +252,7 @@ obio_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_ipl = IPL_AUDIO;
 	sc->sc_ih = pxa2x0_gpio_intr_establish(0, IST_EDGE_FALLING, sc->sc_ipl,
 	    obio_intr, sc);
-	sc->sc_si = softint_establish(SOFTINT_NET, obio_softint, sc);
+	sc->sc_si = softintr_establish(IPL_SOFTNET, obio_softintr, sc);
 
 	reg = bus_space_read_2(iot, sc->sc_obioreg_ioh, G42XXEB_PLDVER);
 	aprint_normal(": board %d version %x\n", reg>>8, reg & 0xff);

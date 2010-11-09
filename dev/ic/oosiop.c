@@ -1,4 +1,4 @@
-/*	$NetBSD: oosiop.c,v 1.12 2008/03/29 09:11:35 tsutsui Exp $	*/
+/*	$NetBSD: oosiop.c,v 1.11 2007/10/19 11:59:58 ad Exp $	*/
 
 /*
  * Copyright (c) 2001 Shuichiro URATA.  All rights reserved.
@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: oosiop.c,v 1.12 2008/03/29 09:11:35 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: oosiop.c,v 1.11 2007/10/19 11:59:58 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -138,26 +138,25 @@ oosiop_attach(struct oosiop_softc *sc)
 	err = bus_dmamem_alloc(sc->sc_dmat, scrsize, PAGE_SIZE, 0, &seg, 1,
 	    &nseg, BUS_DMA_NOWAIT);
 	if (err) {
-		aprint_error(": failed to allocate script memory, err=%d\n",
-		    err);
+		printf(": failed to allocate script memory, err=%d\n", err);
 		return;
 	}
 	err = bus_dmamem_map(sc->sc_dmat, &seg, nseg, scrsize,
 	    (void **)&sc->sc_scr, BUS_DMA_NOWAIT | BUS_DMA_COHERENT);
 	if (err) {
-		aprint_error(": failed to map script memory, err=%d\n", err);
+		printf(": failed to map script memory, err=%d\n", err);
 		return;
 	}
 	err = bus_dmamap_create(sc->sc_dmat, scrsize, 1, scrsize, 0,
 	    BUS_DMA_NOWAIT, &sc->sc_scrdma);
 	if (err) {
-		aprint_error(": failed to create script map, err=%d\n", err);
+		printf(": failed to create script map, err=%d\n", err);
 		return;
 	}
 	err = bus_dmamap_load(sc->sc_dmat, sc->sc_scrdma, sc->sc_scr, scrsize,
 	    NULL, BUS_DMA_NOWAIT | BUS_DMA_WRITE);
 	if (err) {
-		aprint_error(": failed to load script map, err=%d\n", err);
+		printf(": failed to load script map, err=%d\n", err);
 		return;
 	}
 	sc->sc_scrbase = sc->sc_scrdma->dm_segs[0].ds_addr;
@@ -201,7 +200,7 @@ oosiop_attach(struct oosiop_softc *sc)
 	if (sc->sc_minperiod < 25)
 		sc->sc_minperiod = 25;	/* limit to 10MB/s */
 
-	aprint_normal(": NCR53C700%s rev %d, %dMHz, SCSI ID %d\n",
+	printf(": NCR53C700%s rev %d, %dMHz, SCSI ID %d\n",
 	    sc->sc_chip == OOSIOP_700_66 ? "-66" : "",
 	    oosiop_read_1(sc, OOSIOP_CTEST7) >> 4,
 	    sc->sc_freq / 1000000, sc->sc_id);
@@ -221,7 +220,7 @@ oosiop_attach(struct oosiop_softc *sc)
 	/*
 	 * Fill in the scsipi_adapter.
 	 */
-	sc->sc_adapter.adapt_dev = sc->sc_dev;
+	sc->sc_adapter.adapt_dev = &sc->sc_dev;
 	sc->sc_adapter.adapt_nchannels = 1;
 	sc->sc_adapter.adapt_openings = OOSIOP_NCB;
 	sc->sc_adapter.adapt_max_periph = 1;
@@ -242,7 +241,7 @@ oosiop_attach(struct oosiop_softc *sc)
 	/*
 	 * Now try to attach all the sub devices.
 	 */
-	config_found(sc->sc_dev, &sc->sc_channel, scsiprint);
+	config_found(&sc->sc_dev, &sc->sc_channel, scsiprint);
 }
 
 static int
@@ -617,8 +616,7 @@ oosiop_phasemismatch(struct oosiop_softc *sc)
 
 		oosiop_clear_fifo(sc);
 	} else {
-		printf("%s: phase mismatch addr=%08x\n",
-		    device_xname(sc->sc_dev),
+		printf("%s: phase mismatch addr=%08x\n", sc->sc_dev.dv_xname,
 		    oosiop_read_4(sc, OOSIOP_DSP) - 8);
 		oosiop_clear_fifo(sc);
 		return;
@@ -668,7 +666,7 @@ oosiop_set_syncparam(struct oosiop_softc *sc, int id, int period, int offset)
 			}
 			if (i == 12) {
 				printf("%s: target %d period too large\n",
-				    device_xname(sc->sc_dev), id);
+				    sc->sc_dev.dv_xname, id);
 				i = 11;	/* XXX */
 			}
 			sc->sc_tgt[id].scf = 0;
@@ -682,7 +680,7 @@ oosiop_set_syncparam(struct oosiop_softc *sc, int id, int period, int offset)
 			}
 			if (i == NSYNCTBL) {
 				printf("%s: target %d period too large\n",
-				    device_xname(sc->sc_dev), id);
+				    sc->sc_dev.dv_xname, id);
 				i = NSYNCTBL - 1;	/* XXX */
 			}
 			sc->sc_tgt[id].scf = synctbl[i].scf;
@@ -717,7 +715,7 @@ oosiop_scsipi_request(struct scsipi_channel *chan, scsipi_adapter_req_t req,
 	struct scsipi_xfer_mode *xm;
 	int s, err;
 
-	sc = device_private(chan->chan_adapter->adapt_dev);
+	sc = (struct oosiop_softc *)chan->chan_adapter->adapt_dev;
 
 	switch (req) {
 	case ADAPTER_REQ_RUN_XFER:
@@ -742,7 +740,7 @@ oosiop_scsipi_request(struct scsipi_channel *chan, scsipi_adapter_req_t req,
 		    BUS_DMA_NOWAIT : BUS_DMA_WAITOK) | BUS_DMA_WRITE);
 		if (err) {
 			printf("%s: unable to load cmd DMA map: %d",
-			    device_xname(sc->sc_dev), err);
+			    sc->sc_dev.dv_xname, err);
 			xs->error = XS_RESOURCE_SHORTAGE;
 			TAILQ_INSERT_TAIL(&sc->sc_free_cb, cb, chain);
 			scsipi_done(xs);
@@ -762,7 +760,7 @@ oosiop_scsipi_request(struct scsipi_channel *chan, scsipi_adapter_req_t req,
 			    BUS_DMA_WRITE));
 			if (err) {
 				printf("%s: unable to load data DMA map: %d",
-				    device_xname(sc->sc_dev), err);
+				    sc->sc_dev.dv_xname, err);
 				xs->error = XS_RESOURCE_SHORTAGE;
 				bus_dmamap_unload(sc->sc_dmat, cb->cmddma);
 				TAILQ_INSERT_TAIL(&sc->sc_free_cb, cb, chain);
@@ -900,7 +898,7 @@ oosiop_timeout(void *arg)
 
 	cb = arg;
 	periph = cb->xs->xs_periph;
-	sc = device_private(periph->periph_channel->chan_adapter->adapt_dev);
+	sc = (void *)periph->periph_channel->chan_adapter->adapt_dev;
 	scsipi_printaddr(periph);
 	printf("timed out\n");
 
@@ -1030,8 +1028,8 @@ oosiop_intr(struct oosiop_softc *sc)
 		if (dstat & OOSIOP_DSTAT_SSI) {
 			sc->sc_nextdsp = oosiop_read_4(sc, OOSIOP_DSP) -
 			    sc->sc_scrbase;
-			printf("%s: single step %08x\n",
-			    device_xname(sc->sc_dev), sc->sc_nextdsp);
+			printf("%s: single step %08x\n", sc->sc_dev.dv_xname,
+			    sc->sc_nextdsp);
 		}
 
 		if (dstat & OOSIOP_DSTAT_SIR) {
@@ -1041,7 +1039,7 @@ oosiop_intr(struct oosiop_softc *sc)
 		}
 
 		if (dstat & OOSIOP_DSTAT_WTD) {
-			printf("%s: DMA time out\n", device_xname(sc->sc_dev));
+			printf("%s: DMA time out\n", sc->sc_dev.dv_xname);
 			oosiop_reset(sc);
 		}
 
@@ -1049,12 +1047,12 @@ oosiop_intr(struct oosiop_softc *sc)
 			dcmd = oosiop_read_4(sc, OOSIOP_DBC);
 			if ((dcmd & 0xf8000000) == 0x48000000) {
 				printf("%s: REQ asserted on WAIT DISCONNECT\n",
-				    device_xname(sc->sc_dev));
+				    sc->sc_dev.dv_xname);
 				sc->sc_nextdsp = Ent_phasedispatch; /* XXX */
 			} else {
 				printf("%s: invalid SCRIPTS instruction "
 				    "addr=%08x dcmd=%08x dsps=%08x\n",
-				    device_xname(sc->sc_dev),
+				    sc->sc_dev.dv_xname,
 				    oosiop_read_4(sc, OOSIOP_DSP) - 8, dcmd,
 				    oosiop_read_4(sc, OOSIOP_DSPS));
 				oosiop_reset(sc);
@@ -1087,8 +1085,7 @@ oosiop_intr(struct oosiop_softc *sc)
 		}
 
 		if (sstat0 & OOSIOP_SSTAT0_SGE) {
-			printf("%s: SCSI gross error\n",
-			    device_xname(sc->sc_dev));
+			printf("%s: SCSI gross error\n", sc->sc_dev.dv_xname);
 			oosiop_reset(sc);
 		}
 
@@ -1096,7 +1093,7 @@ oosiop_intr(struct oosiop_softc *sc)
 			/* XXX */
 			if (sc->sc_curcb) {
 				printf("%s: unexpected disconnect\n",
-				    device_xname(sc->sc_dev));
+				    sc->sc_dev.dv_xname);
 				oosiop_done(sc, sc->sc_curcb);
 			}
 		}
@@ -1105,7 +1102,7 @@ oosiop_intr(struct oosiop_softc *sc)
 			oosiop_reset(sc);
 
 		if (sstat0 & OOSIOP_SSTAT0_PAR)
-			printf("%s: parity error\n", device_xname(sc->sc_dev));
+			printf("%s: parity error\n", sc->sc_dev.dv_xname);
 	}
 
 	/* Start next command if available */
@@ -1177,7 +1174,7 @@ oosiop_scriptintr(struct oosiop_softc *sc)
 				break;
 		if (i == OOSIOP_NTGT) {
 			printf("%s: missing reselection target id\n",
-			    device_xname(sc->sc_dev));
+			    sc->sc_dev.dv_xname);
 			break;
 		}
 		sc->sc_resid = i;
@@ -1226,24 +1223,24 @@ oosiop_scriptintr(struct oosiop_softc *sc)
 	case A_int_err:
 		/* generic error */
 		dsp = oosiop_read_4(sc, OOSIOP_DSP);
-		printf("%s: script error at 0x%08x\n",
-		    device_xname(sc->sc_dev), dsp - 8);
+		printf("%s: script error at 0x%08x\n", sc->sc_dev.dv_xname,
+		    dsp - 8);
 		sc->sc_curcb = NULL;
 		break;
 
 	case DATAIN_TRAP:
-		printf("%s: unexpected datain\n", device_xname(sc->sc_dev));
+		printf("%s: unexpected datain\n", sc->sc_dev.dv_xname);
 		/* XXX: need to reset? */
 		break;
 
 	case DATAOUT_TRAP:
-		printf("%s: unexpected dataout\n", device_xname(sc->sc_dev));
+		printf("%s: unexpected dataout\n", sc->sc_dev.dv_xname);
 		/* XXX: need to reset? */
 		break;
 
 	default:
-		printf("%s: unknown intr code %08x\n",
-		    device_xname(sc->sc_dev), icode);
+		printf("%s: unknown intr code %08x\n", sc->sc_dev.dv_xname,
+		    icode);
 		break;
 	}
 }

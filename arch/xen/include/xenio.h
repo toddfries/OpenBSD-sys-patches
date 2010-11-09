@@ -1,4 +1,4 @@
-/*	$NetBSD: xenio.h,v 1.6 2008/02/17 16:21:19 bouyer Exp $	*/
+/*	$NetBSD: xenio.h,v 1.5 2005/12/11 12:19:48 christos Exp $	*/
 
 /******************************************************************************
  * privcmd.h
@@ -27,8 +27,8 @@
  * IN THE SOFTWARE.
  */
 
-#ifndef __XEN_XENIO3_H__
-#define __XEN_XENIO3_H__
+#ifndef __PRIVCMD_H__
+#define __PRIVCMD_H__
 
 /* Interface to /proc/xen/privcmd */
 
@@ -36,7 +36,6 @@ typedef struct privcmd_hypercall
 {
     unsigned long op;
     unsigned long arg[5];
-    long retval;
 } privcmd_hypercall_t;
 
 typedef struct privcmd_mmap_entry {
@@ -77,15 +76,6 @@ typedef struct privcmd_blkmsg
 /* compat */
 #define IOCTL_PRIVCMD_INITDOMAIN_EVTCHN_OLD \
     _IO('P', 1)
-
-typedef struct oprivcmd_hypercall
-{
-    unsigned long op;
-    unsigned long arg[5];
-} oprivcmd_hypercall_t;
-
-#define IOCTL_PRIVCMD_HYPERCALL_OLD       \
-    _IOWR('P', 0, oprivcmd_hypercall_t)
 #endif /* defined(_KERNEL) */
     
 #define IOCTL_PRIVCMD_MMAP             \
@@ -112,4 +102,4 @@ typedef struct oprivcmd_hypercall
 /* EVTCHN_UNBIND: Unbind from the specified event-channel port. */
 #define EVTCHN_UNBIND _IOW('E', 3, unsigned long)
 
-#endif /* __XEN_XENIO3_H__ */
+#endif /* __PRIVCMD_H__ */

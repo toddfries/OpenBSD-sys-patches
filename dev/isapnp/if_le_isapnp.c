@@ -1,4 +1,4 @@
-/*	$NetBSD: if_le_isapnp.c,v 1.34 2008/04/28 20:23:53 martin Exp $	*/
+/*	$NetBSD: if_le_isapnp.c,v 1.32 2007/10/19 12:00:31 ad Exp $	*/
 
 /*-
  * Copyright (c) 1997 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -61,7 +68,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_le_isapnp.c,v 1.34 2008/04/28 20:23:53 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_le_isapnp.c,v 1.32 2007/10/19 12:00:31 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -120,18 +127,20 @@ struct le_isapnp_softc {
 	int	sc_rap, sc_rdp;		/* offsets to LANCE registers */
 };
 
-int le_isapnp_match(device_t, cfdata_t, void *);
-void le_isapnp_attach(device_t, device_t, void *);
+int le_isapnp_match(struct device *, struct cfdata *, void *);
+void le_isapnp_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(le_isapnp, sizeof(struct le_isapnp_softc),
+CFATTACH_DECL(le_isapnp, sizeof(struct le_isapnp_softc),
     le_isapnp_match, le_isapnp_attach, NULL, NULL);
 
 int	le_isapnp_intredge(void *);
-static void le_isapnp_wrcsr(struct lance_softc *, uint16_t, uint16_t);
-static uint16_t le_isapnp_rdcsr(struct lance_softc *, uint16_t);
+static void le_isapnp_wrcsr(struct lance_softc *, u_int16_t, u_int16_t);
+static u_int16_t le_isapnp_rdcsr(struct lance_softc *, u_int16_t);
 
 static void
-le_isapnp_wrcsr(struct lance_softc *sc, uint16_t port, uint16_t val)
+le_isapnp_wrcsr(sc, port, val)
+	struct lance_softc *sc;
+	u_int16_t port, val;
 {
 	struct le_isapnp_softc *lesc = (struct le_isapnp_softc *)sc;
 	bus_space_tag_t iot = lesc->sc_iot;
@@ -141,13 +150,15 @@ le_isapnp_wrcsr(struct lance_softc *sc, uint16_t port, uint16_t val)
 	bus_space_write_2(iot, ioh, lesc->sc_rdp, val);
 }
 
-static uint16_t
-le_isapnp_rdcsr(struct lance_softc *sc, uint16_t port)
+static u_int16_t
+le_isapnp_rdcsr(sc, port)
+	struct lance_softc *sc;
+	u_int16_t port;
 {
 	struct le_isapnp_softc *lesc = (struct le_isapnp_softc *)sc;
 	bus_space_tag_t iot = lesc->sc_iot;
 	bus_space_handle_t ioh = lesc->sc_ioh;
-	uint16_t val;
+	u_int16_t val;
 
 	bus_space_write_2(iot, ioh, lesc->sc_rap, port);
 	val = bus_space_read_2(iot, ioh, lesc->sc_rdp);
@@ -155,7 +166,8 @@ le_isapnp_rdcsr(struct lance_softc *sc, uint16_t port)
 }
 
 int
-le_isapnp_match(device_t parent, cfdata_t cf, void *aux)
+le_isapnp_match(struct device *parent, struct cfdata *match,
+    void *aux)
 {
 	int pri, variant;
 
@@ -166,7 +178,7 @@ le_isapnp_match(device_t parent, cfdata_t cf, void *aux)
 }
 
 void
-le_isapnp_attach(device_t parent, device_t self, void *aux)
+le_isapnp_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct le_isapnp_softc *lesc = device_private(self);
 	struct lance_softc *sc = &lesc->sc_am7990.lsc;
@@ -177,10 +189,8 @@ le_isapnp_attach(device_t parent, device_t self, void *aux)
 	bus_dma_segment_t seg;
 	int i, rseg, error;
 
-	sc->sc_dev = self;
-
 	if (isapnp_config(ipa->ipa_iot, ipa->ipa_memt, ipa)) {
-		aprint_error(": error in region allocation\n");
+		printf(": error in region allocation\n");
 		return;
 	}
 
@@ -202,12 +212,12 @@ le_isapnp_attach(device_t parent, device_t self, void *aux)
 	 */
 	if (bus_dmamem_alloc(dmat, LE_ISAPNP_MEMSIZE, PAGE_SIZE, 0, &seg, 1,
 	    &rseg, BUS_DMA_NOWAIT)) {
-		aprint_error(": couldn't allocate memory for card\n");
+		printf(": couldn't allocate memory for card\n");
 		return;
 	}
 	if (bus_dmamem_map(dmat, &seg, rseg, LE_ISAPNP_MEMSIZE,
 	    (void **)&sc->sc_mem, BUS_DMA_NOWAIT|BUS_DMA_COHERENT)) {
-		aprint_error(": couldn't map memory for card\n");
+		printf(": couldn't map memory for card\n");
 		return;
 	}
 
@@ -216,13 +226,13 @@ le_isapnp_attach(device_t parent, device_t self, void *aux)
 	 */
 	if (bus_dmamap_create(dmat, LE_ISAPNP_MEMSIZE, 1,
 	    LE_ISAPNP_MEMSIZE, 0, BUS_DMA_NOWAIT, &lesc->sc_dmam)) {
-		aprint_error(": couldn't create DMA map\n");
+		printf(": couldn't create DMA map\n");
 		bus_dmamem_free(dmat, &seg, rseg);
 		return;
 	}
 	if (bus_dmamap_load(dmat, lesc->sc_dmam,
 	    sc->sc_mem, LE_ISAPNP_MEMSIZE, NULL, BUS_DMA_NOWAIT)) {
-		aprint_error(": coundn't load DMA map\n");
+		printf(": coundn't load DMA map\n");
 		bus_dmamem_free(dmat, &seg, rseg);
 		return;
 	}
@@ -244,8 +254,7 @@ le_isapnp_attach(device_t parent, device_t self, void *aux)
 	if (ipa->ipa_ndrq > 0) {
 		if ((error = isa_dmacascade(ipa->ipa_ic,
 		    ipa->ipa_drq[0].num)) != 0) {
-			aprint_error(": unable to cascade DRQ, error = %d\n",
-			    error);
+			printf(": unable to cascade DRQ, error = %d\n", error);
 			return;
 		}
 	}
@@ -253,9 +262,9 @@ le_isapnp_attach(device_t parent, device_t self, void *aux)
 	lesc->sc_ih = isa_intr_establish(ipa->ipa_ic, ipa->ipa_irq[0].num,
 	    ipa->ipa_irq[0].type, IPL_NET, le_isapnp_intredge, sc);
 
-	aprint_normal(": %s %s\n", ipa->ipa_devident, ipa->ipa_devclass);
+	printf(": %s %s\n", ipa->ipa_devident, ipa->ipa_devclass);
 
-	aprint_normal("%s", device_xname(self));
+	printf("%s", sc->sc_dev.dv_xname);
 	am7990_config(&lesc->sc_am7990);
 }
 
@@ -264,7 +273,8 @@ le_isapnp_attach(device_t parent, device_t self, void *aux)
  * Controller interrupt.
  */
 int
-le_isapnp_intredge(void *arg)
+le_isapnp_intredge(arg)
+	void *arg;
 {
 
 	if (am7990_intr(arg) == 0)

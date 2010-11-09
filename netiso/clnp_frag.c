@@ -1,4 +1,4 @@
-/*	$NetBSD: clnp_frag.c,v 1.21 2008/12/17 20:51:38 cegger Exp $	*/
+/*	$NetBSD: clnp_frag.c,v 1.18 2005/12/11 12:25:12 christos Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993
@@ -59,7 +59,7 @@ SOFTWARE.
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: clnp_frag.c,v 1.21 2008/12/17 20:51:38 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: clnp_frag.c,v 1.18 2005/12/11 12:25:12 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -105,7 +105,7 @@ int
 clnp_fragment(
 	struct ifnet   *ifp,	/* ptr to outgoing interface */
 	struct mbuf    *m,	/* ptr to packet */
-	const struct sockaddr *first_hop,	/* ptr to first hop */
+	struct sockaddr *first_hop,	/* ptr to first hop */
 	int             total_len,	/* length of datagram */
 	int             segoff,	/* offset of segpart in hdr */
 	int             flags,	/* flags passed to clnp_output */
@@ -128,8 +128,8 @@ clnp_fragment(
 
 
 		INCSTAT(cns_fragmented);
-		(void)memmove(&seg_part, segoff + mtod(m, char *),
-		    sizeof(seg_part));
+		(void) bcopy(segoff + mtod(m, caddr_t), (caddr_t) & seg_part,
+			     sizeof(seg_part));
 		frag_base = ntohs(seg_part.cng_off);
 		/*
 		 *	Duplicate header, and remove from packet
@@ -221,9 +221,9 @@ clnp_fragment(
 			m_cat(frag_hdr, frag_data);
 
 			/* insert segmentation part; updated below */
-			(void)memmove(mtod(frag_hdr, char *) + segoff,
-			    &seg_part,
-			    sizeof(struct clnp_segment));
+			bcopy((caddr_t) & seg_part,
+			      mtod(frag_hdr, caddr_t) + segoff,
+			      sizeof(struct clnp_segment));
 
 			{
 				int             derived_len = hdr_len + frag_size;
@@ -420,7 +420,8 @@ clnp_newpkt(
 	 * Allocate new clnp fragl structure to act as header of all
 	 * fragments for this datagram.
 	 */
-	cfh = malloc(sizeof (struct clnp_fragl), M_FTABLE, M_NOWAIT);
+	MALLOC(cfh, struct clnp_fragl *, sizeof (struct clnp_fragl),
+	   M_FTABLE, M_NOWAIT);
 	if (cfh == NULL) {
 		return (0);
 	}
@@ -431,12 +432,12 @@ clnp_newpkt(
 	 */
 	cfh->cfl_orighdr = m_copy(m, 0, (int) clnp->cnf_hdr_len);
 	if (cfh->cfl_orighdr == NULL) {
-		free(cfh, M_FTABLE);
+		FREE(cfh, M_FTABLE);
 		return (0);
 	}
 	/* Fill in rest of fragl structure */
-	bcopy((void *) src, (void *) & cfh->cfl_src, sizeof(struct iso_addr));
-	bcopy((void *) dst, (void *) & cfh->cfl_dst, sizeof(struct iso_addr));
+	bcopy((caddr_t) src, (caddr_t) & cfh->cfl_src, sizeof(struct iso_addr));
+	bcopy((caddr_t) dst, (caddr_t) & cfh->cfl_dst, sizeof(struct iso_addr));
 	cfh->cfl_id = seg->cng_id;
 	cfh->cfl_ttl = clnp->cnf_ttl;
 	cfh->cfl_last = (seg->cng_tot_len - clnp->cnf_hdr_len) - 1;
@@ -793,7 +794,7 @@ clnp_comp_pdu(
 		printf("clnp_comp_pdu: data for frag:\n");
 		while (mdump != NULL) {
 			printf("mbuf %p, m_len %d\n", mdump, mdump->m_len);
-			/* dump_buf(mtod(mdump, void *), mdump->m_len); */
+			/* dump_buf(mtod(mdump, caddr_t), mdump->m_len); */
 			mdump = mdump->m_next;
 		}
 	}
@@ -829,7 +830,7 @@ clnp_comp_pdu(
 				printf("mbuf %p, m_len %d\n",
 				       mdump, mdump->m_len);
 #if 0
-				dump_buf(mtod(mdump, void *), mdump->m_len);
+				dump_buf(mtod(mdump, caddr_t), mdump->m_len);
 #endif
 				mdump = mdump->m_next;
 			}
@@ -852,7 +853,7 @@ clnp_comp_pdu(
 		}
 
 		/* free cfh */
-		free(cfh, M_FTABLE);
+		FREE(cfh, M_FTABLE);
 
 		return (hdr);
 	}
@@ -902,7 +903,7 @@ int
 troll_output(ifp, m, dst, rt)
 	struct ifnet   *ifp;
 	struct mbuf    *m;
-	const struct sockaddr *dst;
+	struct sockaddr *dst;
 	struct rtentry *rt;
 {
 	int             err = 0;

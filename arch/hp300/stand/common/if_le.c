@@ -1,4 +1,4 @@
-/*	$NetBSD: if_le.c,v 1.11 2009/01/12 11:32:43 tsutsui Exp $	*/
+/*	$NetBSD: if_le.c,v 1.9 2005/12/11 12:17:19 christos Exp $	*/
 
 /*
  * Copyright (c) 1993 Adam Glass
@@ -75,7 +75,7 @@ struct le_sel {
 int le_probe(struct netif *, void *);
 int le_match(struct netif *, void *);
 void le_init(struct iodesc *, void *);
-int le_get(struct iodesc *, void *, size_t, saseconds_t);
+int le_get(struct iodesc *, void *, size_t, time_t);
 int le_put(struct iodesc *, void *, size_t);
 void le_end(struct netif *);
 
@@ -206,7 +206,7 @@ leinit(void)
 			printf("le%d at sc%d physical address %s\n",
 				i, hw->hw_sc, ether_sprintf(sc->sc_addr));
 #endif
-		hw->hw_pa = (void *) i;	/* XXX for autoconfig */
+		hw->hw_pa = (caddr_t) i;	/* XXX for autoconfig */
 		i++;
 	}
 }
@@ -625,9 +625,9 @@ le_put(struct iodesc *desc, void *pkt, size_t len)
 
 
 int
-le_get(struct iodesc *desc, void *pkt, size_t len, saseconds_t timeout)
+le_get(struct iodesc *desc, void *pkt, size_t len, time_t timeout)
 {
-	satime_t t;
+	time_t t;
 	int cc;
 
 	t = getsecs();

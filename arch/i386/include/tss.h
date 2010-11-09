@@ -1,4 +1,4 @@
-/*	$NetBSD: tss.h,v 1.10 2008/01/05 21:45:00 yamt Exp $	*/
+/*	$NetBSD: tss.h,v 1.8 2003/08/07 16:28:00 agc Exp $	*/
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -67,13 +67,7 @@ struct i386tss {
 	int	tss_fs;		/* saved segment register */
 	int	tss_gs;		/* saved segment register */
 	int	tss_ldt;	/* LDT selector */
-	int	tss_iobase;	/* options and I/O permission map offset */
+	int	tss_ioopt;	/* options and I/O permission map offset */
 };
-
-/*
- * I/O bitmap offset beyond TSS's segment limit means no bitmaps.
- * (i.e. any I/O attempt generates an exception.)
- */
-#define	IOMAP_INVALOFF	0xffff
 
 #endif /* #ifndef _I386_TSS_H_ */

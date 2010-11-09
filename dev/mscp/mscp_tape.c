@@ -1,4 +1,4 @@
-/*	$NetBSD: mscp_tape.c,v 1.34 2008/06/11 17:32:30 drochner Exp $ */
+/*	$NetBSD: mscp_tape.c,v 1.32 2007/10/19 12:00:36 ad Exp $ */
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.
  * All rights reserved.
@@ -41,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mscp_tape.c,v 1.34 2008/06/11 17:32:30 drochner Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mscp_tape.c,v 1.32 2007/10/19 12:00:36 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/device.h>
@@ -219,8 +219,10 @@ mtopen(dev, flag, fmt, l)
 	 * Make sure this is a reasonable open request.
 	 */
 	unit = mtunit(dev);
-	mt = device_lookup_private(&mt_cd, unit);
-	if (!mt)
+	if (unit >= mt_cd.cd_ndevs)
+		return ENXIO;
+	mt = mt_cd.cd_devs[unit];
+	if (mt == 0)
 		return ENXIO;
 
 	if (mt->mt_inuse)
@@ -243,7 +245,7 @@ mtclose(dev, flags, fmt, l)
 	struct	lwp *l;
 {
 	int unit = mtunit(dev);
-	struct mt_softc *mt = device_lookup_private(&mt_cd, unit);
+	struct mt_softc *mt = mt_cd.cd_devs[unit];
 
 	/*
 	 * If we just have finished a writing, write EOT marks.
@@ -273,7 +275,7 @@ mtstrategy(bp)
 	 * Make sure this is a reasonable drive to use.
 	 */
 	unit = mtunit(bp->b_dev);
-	if ((mt = device_lookup_private(&mt_cd, unit)) == NULL) {
+	if (unit > mt_cd.cd_ndevs || (mt = mt_cd.cd_devs[unit]) == NULL) {
 		bp->b_error = ENXIO;
 		biodone(bp);
 		return;
@@ -322,7 +324,7 @@ mtfillin(bp, mp)
 	struct mscp *mp;
 {
 	int unit = mtunit(bp->b_dev);
-	struct mt_softc *mt = device_lookup_private(&mt_cd, unit);
+	struct mt_softc *mt = mt_cd.cd_devs[unit];
 
 	mp->mscp_unit = mt->mt_hwunit;
 	if (mt->mt_serex == 2) {
@@ -343,7 +345,7 @@ mtdgram(usc, mp, mi)
 	struct mscp *mp;
 	struct mscp_softc *mi;
 {
-	if (mscp_decodeerror(usc == NULL?"unconf mt" : device_xname(usc), mp, mi))
+	if (mscp_decodeerror(usc == NULL?"unconf mt" : usc->dv_xname, mp, mi))
 		return;
 }
 
@@ -415,10 +417,10 @@ mtioerror(usc, mp, bp)
 		mt->mt_serex = 2;
 	else {
 		if (st && st < 17)
-			printf("%s: error %d (%s)\n", device_xname(&mt->mt_dev), st,
+			printf("%s: error %d (%s)\n", mt->mt_dev.dv_xname, st,
 			    mt_ioerrs[st-1]);
 		else
-			printf("%s: error %d\n", device_xname(&mt->mt_dev), st);
+			printf("%s: error %d\n", mt->mt_dev.dv_xname, st);
 		bp->b_error = EROFS;
 	}
 
@@ -437,7 +439,7 @@ mtioctl(dev, cmd, data, flag, l)
 	struct lwp *l;
 {
 	int unit = mtunit(dev);
-	struct mt_softc *mt = device_lookup_private(&mt_cd, unit);
+	struct mt_softc *mt = mt_cd.cd_devs[unit];
 	struct mtop *mtop;
 	int error = 0;
 
@@ -568,7 +570,7 @@ mtcmddone(usc, mp)
 
 	if (mp->mscp_status) {
 		mt->mt_ioctlerr = EIO;
-		printf("%s: bad status %x\n", device_xname(&mt->mt_dev),
+		printf("%s: bad status %x\n", mt->mt_dev.dv_xname,
 		    mp->mscp_status);
 	}
 	wakeup(&mt->mt_inuse);

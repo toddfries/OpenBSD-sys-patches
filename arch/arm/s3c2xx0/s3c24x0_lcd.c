@@ -1,4 +1,4 @@
-/* $NetBSD: s3c24x0_lcd.c,v 1.6 2007/12/15 00:39:15 perry Exp $ */
+/* $NetBSD: s3c24x0_lcd.c,v 1.4 2006/04/15 17:00:11 jmmv Exp $ */
 
 /*
  * Copyright (c) 2004  Genetec Corporation.  All rights reserved.
@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: s3c24x0_lcd.c,v 1.6 2007/12/15 00:39:15 perry Exp $");
+__KERNEL_RCSID(0, "$NetBSD: s3c24x0_lcd.c,v 1.4 2006/04/15 17:00:11 jmmv Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -280,7 +280,7 @@ s3c24x0_lcd_start_dma(struct s3c24x0_lcd_softc *sc,
 	sc->lcd_on = 1;
 
 #ifdef LCD_DEBUG
-	dump_lcdcon(__func__, iot, ioh);
+	dump_lcdcon(__FUNCTION__, iot, ioh);
 #endif
 
 	return 0;
@@ -366,7 +366,7 @@ s3c24x0_lcd_new_screen(struct s3c24x0_lcd_softc *sc,
 		goto bad;
 
 	error = bus_dmamem_map(sc->dma_tag, scr->segs, scr->nsegs,
-	    size, (void **)&(scr->buf_va), busdma_flag | BUS_DMA_COHERENT);
+	    size, (caddr_t *)&(scr->buf_va), busdma_flag | BUS_DMA_COHERENT);
 	if (error)
 		goto bad;
 
@@ -387,7 +387,7 @@ s3c24x0_lcd_new_screen(struct s3c24x0_lcd_softc *sc,
 
 #ifdef LCD_DEBUG
 	draw_test_pattern(sc, scr);
-	dump_lcdcon(__func__, sc->iot, sc->ioh);
+	dump_lcdcon(__FUNCTION__, sc->iot, sc->ioh);
 #endif
 	return scr;
 
@@ -617,7 +617,7 @@ s3c24x0_lcd_free_screen(void *v, void *cookie)
 }
 
 int
-s3c24x0_lcd_ioctl(void *v, void *vs, u_long cmd, void *data, int flag,
+s3c24x0_lcd_ioctl(void *v, void *vs, u_long cmd, caddr_t data, int flag,
     struct lwp *l)
 {
 	struct s3c24x0_lcd_softc *sc = v;

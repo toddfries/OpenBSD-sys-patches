@@ -1,4 +1,4 @@
-/*	$NetBSD: lock_stubs.S,v 1.6 2008/05/25 15:56:12 chs Exp $	*/
+/*	$NetBSD: lock_stubs.S,v 1.4 2008/02/23 19:56:10 matt Exp $	*/
 
 /*-
  * Copyright (c) 2007 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *      
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -51,7 +58,7 @@
 /*
  * int _lock_cas(uintptr_t *ptr, uintptr_t old, uintptr_t new);
  */
-ENTRY(_lock_cas)
+ENTRY_NOPROFILE(_lock_cas)
 1:
 	lptrarx	%r10,0,%r3
 	cmpw	%r10,%r4
@@ -69,7 +76,7 @@ ENTRY(_lock_cas)
 /*
  * void mutex_enter(kmutex_t *);
  */
-ENTRY(mutex_enter)
+ENTRY_NOPROFILE(mutex_enter)
 	GET_CPUINFO(%r8)
 	ldptr	%r9,CI_CURLWP(%r8)
 1:
@@ -86,7 +93,7 @@ ENTRY(mutex_enter)
 /*
  * void mutex_exit(kmutex_t *);
  */
-ENTRY(mutex_exit)
+ENTRY_NOPROFILE(mutex_exit)
 	GET_CPUINFO(%r8)
 	ldptr	%r9,CI_CURLWP(%r8)
 	SYNC
@@ -115,7 +122,7 @@ ENTRY(mutex_exit)
 
 #if __HAVE_RW_STUBS
 
-ENTRY(rw_enter)
+ENTRY_NOPROFILE(rw_enter)
 	cmpwi	%r3,RW_READER
 	bne-	1f
 
@@ -142,7 +149,7 @@ ENTRY(rw_enter)
 /*
  * bool rw_tryenter(krwlock_t *krw, krw_t op);
  */
-ENTRY(rw_tryenter)
+ENTRY_NOPROFILE(rw_tryenter)
 	cmpwi	%r3,RW_READER
 	bne-	1f
 
@@ -172,7 +179,7 @@ ENTRY(rw_tryenter)
 /*
  * void rw_exit(krwlock_t *krw, krw_t op);
  */
-ENTRY(rw_exit)
+ENTRY_NOPROFILE(rw_exit)
 	ldptr	%r9,RW_OWNER(%r3)
 	SYNC
 	andi.	%r0,%r9,RW_WRITE_LOCKED

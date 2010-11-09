@@ -1,4 +1,4 @@
-/*	$NetBSD: if_le.c,v 1.33 2008/04/28 20:23:39 martin Exp $	*/
+/*	$NetBSD: if_le.c,v 1.28 2005/12/11 12:19:34 christos Exp $	*/
 
 /*-
  * Copyright (c) 1997, 1998 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	  This product includes software developed by the NetBSD
+ *	  Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -65,7 +72,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_le.c,v 1.33 2008/04/28 20:23:39 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_le.c,v 1.28 2005/12/11 12:19:34 christos Exp $");
 
 #include "opt_inet.h"
 #include "bpfilter.h"
@@ -90,7 +97,6 @@ __KERNEL_RCSID(0, "$NetBSD: if_le.c,v 1.33 2008/04/28 20:23:39 martin Exp $");
 #include <machine/cpu.h>
 #include <machine/nexus.h>
 #include <machine/scb.h>
-#include <machine/mainbus.h>
 
 #include <dev/ic/lancereg.h>
 #include <dev/ic/lancevar.h>
@@ -99,74 +105,71 @@ __KERNEL_RCSID(0, "$NetBSD: if_le.c,v 1.33 2008/04/28 20:23:39 martin Exp $");
 
 #include "ioconf.h"
 
-#define	LE_VEC	0xd4	/* Interrupt vector on 3300/3400 */
-
-#define	LE_CSR	0x20084400
-#define	LE_ROM	0x20084200
-#define	LE_RAM	0x20120000
+#define	LEVEC	0xd4	/* Interrupt vector on 3300/3400 */
 
 struct le_softc {
 	struct	am7990_softc sc_am7990; /* Must be first */
 	struct	evcnt sc_intrcnt;
-	volatile uint16_t *sc_rap;
-	volatile uint16_t *sc_rdp;
+	volatile u_short *sc_rap;
+	volatile u_short *sc_rdp;
 };
 
-static int	le_mainbus_match(device_t, cfdata_t, void *);
-static void	le_mainbus_attach(device_t, device_t, void *);
-static void	lewrcsr(struct lance_softc *, uint16_t, uint16_t);
-static uint16_t lerdcsr(struct lance_softc *, uint16_t);
-static void	lance_copytobuf_gap2(struct lance_softc *, void *, int, int);
-static void	lance_copyfrombuf_gap2(struct lance_softc *, void *, int, int);
-static void	lance_zerobuf_gap2(struct lance_softc *, int, int);
+int	le_ibus_match __P((struct device *, struct cfdata *, void *));
+void	le_ibus_attach __P((struct device *, struct device *, void *));
+void	lewrcsr __P((struct lance_softc *, u_int16_t, u_int16_t));
+u_int16_t lerdcsr __P((struct lance_softc *, u_int16_t));
+void	lance_copytobuf_gap2 __P((struct lance_softc *, void *, int, int));
+void	lance_copyfrombuf_gap2 __P((struct lance_softc *, void *, int, int));
+void	lance_zerobuf_gap2 __P((struct lance_softc *, int, int));
 
-CFATTACH_DECL_NEW(le_mainbus, sizeof(struct le_softc),
-    le_mainbus_match, le_mainbus_attach, NULL, NULL);
+CFATTACH_DECL(le_ibus, sizeof(struct le_softc),
+    le_ibus_match, le_ibus_attach, NULL, NULL);
 
 void
-lewrcsr(struct lance_softc *ls, uint16_t port, uint16_t val)
+lewrcsr(ls, port, val)
+	struct lance_softc *ls;
+	u_int16_t port, val;
 {
-	struct le_softc * const sc = (void *)ls;
+	struct le_softc *sc = (void *)ls;
 
 	*sc->sc_rap = port;
 	*sc->sc_rdp = val;
 }
 
-uint16_t
-lerdcsr(struct lance_softc *ls, uint16_t port)
+u_int16_t
+lerdcsr(ls, port)
+	struct lance_softc *ls;
+	u_int16_t port;
 {
-	struct le_softc * const sc = (void *)ls;
+	struct le_softc *sc = (void *)ls;
 
 	*sc->sc_rap = port;
 	return *sc->sc_rdp;
 }
 
 int
-le_mainbus_match(device_t parent, cfdata_t cf, void *aux)
+le_ibus_match(parent, cf, aux)
+	struct device *parent;
+	struct cfdata *cf;
+	void *aux;
 {
-	struct mainbus_attach_args * const ma = aux;
-	int found;
-	vaddr_t va;
+	struct bp_conf *bp = aux;
 
-	if (strcmp("lance", ma->ma_type))
+	if (strcmp("lance", bp->type))
 		return 0;
-
-	va = vax_map_physmem(LE_CSR, 1);
-	found = (badaddr((void *)va, 2) == 0);
-	vax_unmap_physmem(va, 1);
-
-	return found;
+	return 1;
 }
 
 void
-le_mainbus_attach(device_t parent, device_t self, void *aux)
+le_ibus_attach(parent, self, aux)
+	struct device *parent, *self;
+	void *aux;
 {
-	struct le_softc * const sc = device_private(self);
+	struct le_softc *sc = (void *)self;
 	int *lance_addr;
 	int i, vec, br;
 
-	sc->sc_am7990.lsc.sc_dev = self;
-	sc->sc_rdp = (uint16_t *)vax_map_physmem(LE_CSR, 1);
+	sc->sc_rdp = (short *)vax_map_physmem(0x20084400, 1);
 	sc->sc_rap = sc->sc_rdp + 2;
 
 	/*
@@ -181,13 +184,12 @@ le_mainbus_attach(device_t parent, device_t self, void *aux)
 	i = scb_vecref(&vec, &br);
 	if (i == 0 || vec == 0)
 		return;
-
 	scb_vecalloc(vec, (void (*)(void *))am7990_intr, sc,
 		SCB_ISTACK, &sc->sc_intrcnt);
 	evcnt_attach_dynamic(&sc->sc_intrcnt, EVCNT_TYPE_INTR, NULL,
-		device_xname(self), "intr");
+		self->dv_xname, "intr");
 
-	aprint_normal(": vec %o ipl %x\n%s", vec, br, device_xname(self));
+	printf(": vec %o ipl %x\n%s", vec, br, self->dv_xname);
 	/*
 	 * MD functions.
 	 */
@@ -200,7 +202,7 @@ le_mainbus_attach(device_t parent, device_t self, void *aux)
 	if (sc->sc_am7990.lsc.sc_mem == 0)
 		return;
 
-	ioaccess((vaddr_t)sc->sc_am7990.lsc.sc_mem, LE_RAM,
+	ioaccess((vaddr_t)sc->sc_am7990.lsc.sc_mem, 0x20120000,
 	    (128 * 1024) >> VAX_PGSHIFT);
 
 	
@@ -216,12 +218,12 @@ le_mainbus_attach(device_t parent, device_t self, void *aux)
 	/*
 	 * Get the ethernet address out of rom
 	 */
-	lance_addr = (int *)vax_map_physmem(LE_ROM, 1);
+	lance_addr = (int *)vax_map_physmem(0x20084200, 1);
 	for (i = 0; i < 6; i++)
 		sc->sc_am7990.lsc.sc_enaddr[i] = (u_char)lance_addr[i];
 	vax_unmap_physmem((vaddr_t)lance_addr, 1);
 
-	bcopy(device_xname(self), sc->sc_am7990.lsc.sc_ethercom.ec_if.if_xname,
+	bcopy(self->dv_xname, sc->sc_am7990.lsc.sc_ethercom.ec_if.if_xname,
 	    IFNAMSIZ);
 	am7990_config(&sc->sc_am7990);
 }
@@ -234,20 +236,24 @@ le_mainbus_attach(device_t parent, device_t self, void *aux)
  */
 
 void
-lance_copytobuf_gap2(struct lance_softc *sc, void *fromv, int boff, int len)
+lance_copytobuf_gap2(sc, fromv, boff, len)
+	struct lance_softc *sc;
+	void *fromv;
+	int boff;
+	register int len;
 {
-	volatile void *buf = sc->sc_mem;
-	char *from = fromv;
-	volatile uint16_t *bptr;
+	volatile caddr_t buf = sc->sc_mem;
+	register caddr_t from = fromv;
+	register volatile u_int16_t *bptr;
 
 	if (boff & 0x1) {
 		/* handle unaligned first byte */
-		bptr = ((volatile uint16_t *)buf) + (boff - 1);
+		bptr = ((volatile u_int16_t *)buf) + (boff - 1);
 		*bptr = (*from++ << 8) | (*bptr & 0xff);
 		bptr += 2;
 		len--;
 	} else
-		bptr = ((volatile uint16_t *)buf) + boff;
+		bptr = ((volatile u_int16_t *)buf) + boff;
 	while (len > 1) {
 		*bptr = (from[1] << 8) | (from[0] & 0xff);
 		bptr += 2;
@@ -255,25 +261,28 @@ lance_copytobuf_gap2(struct lance_softc *sc, void *fromv, int boff, int len)
 		len -= 2;
 	}
 	if (len == 1)
-		*bptr = (uint16_t)*from;
+		*bptr = (u_int16_t)*from;
 }
 
 void
-lance_copyfrombuf_gap2(struct lance_softc *sc, void *tov, int boff, int len)
+lance_copyfrombuf_gap2(sc, tov, boff, len)
+	struct lance_softc *sc;
+	void *tov;
+	int boff, len;
 {
-	volatile void *buf = sc->sc_mem;
-	char *to = tov;
-	volatile uint16_t *bptr;
-	uint16_t tmp;
+	volatile caddr_t buf = sc->sc_mem;
+	register caddr_t to = tov;
+	register volatile u_int16_t *bptr;
+	register u_int16_t tmp;
 
 	if (boff & 0x1) {
 		/* handle unaligned first byte */
-		bptr = ((volatile uint16_t *)buf) + (boff - 1);
+		bptr = ((volatile u_int16_t *)buf) + (boff - 1);
 		*to++ = (*bptr >> 8) & 0xff;
 		bptr += 2;
 		len--;
 	} else
-		bptr = ((volatile uint16_t *)buf) + boff;
+		bptr = ((volatile u_int16_t *)buf) + boff;
 	while (len > 1) {
 		tmp = *bptr;
 		*to++ = tmp & 0xff;
@@ -286,18 +295,20 @@ lance_copyfrombuf_gap2(struct lance_softc *sc, void *tov, int boff, int len)
 }
 
 void
-lance_zerobuf_gap2(struct lance_softc *sc, int boff, int len)
+lance_zerobuf_gap2(sc, boff, len)
+	struct lance_softc *sc;
+	int boff, len;
 {
-	volatile void *buf = sc->sc_mem;
-	volatile uint16_t *bptr;
+	volatile caddr_t buf = sc->sc_mem;
+	register volatile u_int16_t *bptr;
 
-	if ((unsigned int)boff & 0x1) {
-		bptr = ((volatile uint16_t *)buf) + (boff - 1);
+	if ((unsigned)boff & 0x1) {
+		bptr = ((volatile u_int16_t *)buf) + (boff - 1);
 		*bptr &= 0xff;
 		bptr += 2;
 		len--;
 	} else
-		bptr = ((volatile uint16_t *)buf) + boff;
+		bptr = ((volatile u_int16_t *)buf) + boff;
 	while (len > 0) {
 		*bptr = 0;
 		bptr += 2;

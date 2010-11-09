@@ -1,4 +1,4 @@
-/*	$NetBSD: ustarfs.c,v 1.8 2009/02/04 15:22:13 tsutsui Exp $	*/
+/*	$NetBSD: ustarfs.c,v 1.3 2006/08/26 14:13:40 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 2004 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -39,21 +46,19 @@
 #include "local.h"
 #include "common.h"
 
-static bool __ustarfs_file(int, char *, size_t *);
-static bool __block_read(uint8_t *, int);
-static bool __block_read_n(uint8_t *, int, int);
-static void __change_volume(int);
-static int __block2volume(int);
-static int __volume_offset(int);
-static int __next_block(int);
+boolean_t __ustarfs_file(int, char *, size_t *);
+boolean_t __block_read(uint8_t *, int);
+boolean_t __block_read_n(uint8_t *, int, int);
+void __change_volume(int);
 
 enum { USTAR_BLOCK_SIZE = 8192 };/* Check src/distrib/common/buildfloppies.sh */
 struct volume {
 	int max_block;
 	int current_volume;
+	int block_offset;
 } __volume;
 
-bool
+boolean_t
 ustarfs_load(const char *file, void **addrp, size_t *sizep)
 {
 	char fname[16];
@@ -71,18 +76,19 @@ ustarfs_load(const char *file, void **addrp, size_t *sizep)
 		maxblk = (77 + 76) * 13;
 	else {
 		printf("not supported device.\n");
-		return false;
+		return FALSE;
 	}
 
 	/* Truncate to ustar block boundary */
 	__volume.max_block = (maxblk / (USTAR_BLOCK_SIZE >> DEV_BSHIFT)) *
 	    (USTAR_BLOCK_SIZE >> DEV_BSHIFT);
+	__volume.block_offset = 0;
 	__volume.current_volume = 0;
 
 	/* Find file */
 	while (/*CONSTCOND*/1) {
 		if (!__ustarfs_file(block, fname, &sz))
-			return false;
+			return FALSE;
 
 		if (strcmp(file, fname) == 0)
 			break;
@@ -94,77 +100,63 @@ ustarfs_load(const char *file, void **addrp, size_t *sizep)
 	/* Load file */
 	sz = ROUND_SECTOR(sz);
 	if ((*addrp = alloc(sz)) == 0) {
-		printf("%s: can't allocate memory.\n", __func__);
-		return false;
+		printf("%s: can't allocate memory.\n", __FUNCTION__);
+		return FALSE;
 	}
 
 	if (!__block_read_n(*addrp, block, sz >> DEV_BSHIFT)) {
-		printf("%s: can't load file.\n", __func__);
+		printf("%s: can't load file.\n", __FUNCTION__);
 		dealloc(*addrp, sz);
-		return false;
+		return FALSE;
 	}
 
-	return true;
+	return TRUE;
 }
 
-bool
+boolean_t
 __ustarfs_file(int start_block, char *file, size_t *size)
 {
 	uint8_t buf[512];
 
 	if (!__block_read(buf, start_block)) {
 		printf("can't read tar header.\n");
-		return false;
+		return FALSE;
 	}
 	if (((*(uint32_t *)(buf + 256)) & 0xffffff) != 0x757374) {
 		printf("bad tar magic.\n");
-		return false;
+		return FALSE;
 	}
 	*size = strtoul((char *)buf + 124, 0, 0);
 	strncpy(file, (char *)buf, 16);
 
-	return true;
+	return TRUE;
 }
 
-bool
+boolean_t
 __block_read_n(uint8_t *buf, int blk, int count)
 {
-	int vol, cnt;
+	int i;
 
-	while (count > 0) {
-		vol = __block2volume(blk);
-		if (vol != __volume.current_volume) {
-			__change_volume(vol);
-			__volume.current_volume = vol;
-		}
+	for (i = 0; i < count; i++, buf += DEV_BSIZE)
+		if (!__block_read(buf, blk + i))
+			return FALSE;
 
-		cnt = __next_block(vol) - blk;
-		if (cnt > count)
-			cnt = count;
-
-		if (!sector_read_n(0, buf, __volume_offset(blk), cnt))
-			return false;
-		count -= cnt;
-		blk += cnt;
-		buf += cnt * DEV_BSIZE;
-	}
-
-	return true;
+	return TRUE;
 }
 
-bool
+boolean_t
 __block_read(uint8_t *buf, int blk)
 {
 	int vol;
 
-	vol = __block2volume(blk);
-
-	if (vol != __volume.current_volume) {
+	if ((vol = blk / __volume.max_block) != __volume.current_volume) {
 		__change_volume(vol);
 		__volume.current_volume = vol;
+		/* volume offset + ustarfs header (8k) */
+		__volume.block_offset = vol * __volume.max_block - 16;
 	}
 
-	return sector_read(0, buf, __volume_offset(blk));
+	return sector_read(0, buf, blk - __volume.block_offset);
 }
 
 void
@@ -191,35 +183,4 @@ __change_volume(int volume)
 		}
 		return;
 	}
-}
-
-int
-__block2volume(int blk)
-{
-
-	if (blk < __volume.max_block)
-		return 0;
-
-	blk -= __volume.max_block;
-
-	return (blk / (__volume.max_block - 16)) + 1;
-}
-
-int
-__volume_offset(int blk)
-{
-
-	if (blk < __volume.max_block)
-		return blk;
-
-	blk -= __volume.max_block;
-
-	return blk % (__volume.max_block - 16) + 16;
-}
-
-int
-__next_block(int vol)
-{
-
-	return __volume.max_block + vol * (__volume.max_block - 16);
 }

@@ -1,5 +1,3 @@
-/* $NetBSD: drm_vm.c,v 1.16 2009/03/07 05:46:09 mrg Exp $ */
-
 /*-
  * Copyright 2003 Eric Anholt
  * All Rights Reserved.
@@ -24,7 +22,6 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: drm_vm.c,v 1.16 2009/03/07 05:46:09 mrg Exp $");
 /*
 __FBSDID("$FreeBSD: src/sys/dev/drm/drm_vm.c,v 1.2 2005/11/28 23:13:53 anholt Exp $");
 */
@@ -32,27 +29,35 @@ __FBSDID("$FreeBSD: src/sys/dev/drm/drm_vm.c,v 1.2 2005/11/28 23:13:53 anholt Ex
 #include "drmP.h"
 #include "drm.h"
 
-/* WARNING:  pure, unadulterated EVIL ahead! */
-
+#if defined(__FreeBSD__) && __FreeBSD_version >= 500102
+int drm_mmap(struct cdev *kdev, vm_offset_t offset, vm_paddr_t *paddr,
+    int prot)
+#elif defined(__FreeBSD__)
+int drm_mmap(dev_t kdev, vm_offset_t offset, int prot)
+#elif defined(__NetBSD__) || defined(__OpenBSD__)
 paddr_t drm_mmap(dev_t kdev, off_t offset, int prot)
+#endif
 {
 	DRM_DEVICE;
 	drm_local_map_t *map;
 	drm_file_t *priv;
 	drm_map_type_t type;
+#ifdef __FreeBSD__
+	vm_paddr_t phys;
+#else
 	paddr_t phys;
-	uintptr_t roffset;
+#endif
 
 	DRM_LOCK();
 	priv = drm_find_file_by_proc(dev, DRM_CURPROC);
 	DRM_UNLOCK();
 	if (priv == NULL) {
 		DRM_ERROR("can't find authenticator\n");
-		return -1;
+		return EINVAL;
 	}
 
 	if (!priv->authenticated)
-		return -1;
+		return DRM_ERR(EACCES);
 
 	if (dev->dma && offset >= 0 && offset < ptoa(dev->dma->page_count)) {
 		drm_device_dma_t *dma = dev->dma;
@@ -63,16 +68,22 @@ paddr_t drm_mmap(dev_t kdev, off_t offset, int prot)
 			unsigned long page = offset >> PAGE_SHIFT;
 			unsigned long pphys = dma->pagelist[page];
 
+#if defined(__FreeBSD__) && __FreeBSD_version >= 500102
+			*paddr = phys;
 			DRM_SPINUNLOCK(&dev->dma_lock);
+			return 0;
+#else
 #ifdef macppc
 			return pphys;
 #else
 			return atop(pphys);
 #endif
+#endif
 		} else {
 			DRM_SPINUNLOCK(&dev->dma_lock);
 			return -1;
 		}
+		DRM_SPINUNLOCK(&dev->dma_lock);
 	}
 
 				/* A sequential search of a linked list is
@@ -83,15 +94,9 @@ paddr_t drm_mmap(dev_t kdev, off_t offset, int prot)
 				   for performance, even if the list was a
 				   bit longer. */
 	DRM_LOCK();
-	roffset = DRM_NETBSD_HANDLE2ADDR(offset);
 	TAILQ_FOREACH(map, &dev->maplist, link) {
-		if (map->type == _DRM_SHM) {
-			if (roffset >= (uintptr_t)map->handle && roffset < (uintptr_t)map->handle + map->size)
-				break;
-		} else {
-			if (offset >= map->offset && offset < map->offset + map->size)
-				break;
-		}
+		if (offset >= map->offset && offset < map->offset + map->size)
+			break;
 	}
 
 	if (map == NULL) {
@@ -114,23 +119,30 @@ paddr_t drm_mmap(dev_t kdev, off_t offset, int prot)
 		phys = offset;
 		break;
 	case _DRM_CONSISTENT:
+#ifdef __FreeBSD__
+		phys = vtophys((char *)map->handle + (offset - map->offset));
+#else
 		phys = vtophys((paddr_t)map->handle + (offset - map->offset));
+#endif
 		break;
 	case _DRM_SCATTER_GATHER:
-		phys = vtophys(offset);
-		break;
 	case _DRM_SHM:
-		phys = vtophys(DRM_NETBSD_HANDLE2ADDR(offset));
+		phys = vtophys(offset);
 		break;
 	default:
 		DRM_ERROR("bad map type %d\n", type);
 		return -1;	/* This should never happen. */
 	}
 
+#if defined(__FreeBSD__) && __FreeBSD_version >= 500102
+	*paddr = phys;
+	return 0;
+#else
 #ifdef macppc
 	return phys;
 #else
 	return atop(phys);
+#endif
 #endif
 }
 

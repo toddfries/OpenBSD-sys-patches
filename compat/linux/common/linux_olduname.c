@@ -1,4 +1,4 @@
-/*	$NetBSD: linux_olduname.c,v 1.66 2008/04/28 20:23:43 martin Exp $	*/
+/*	$NetBSD: linux_olduname.c,v 1.60 2006/11/16 01:32:42 christos Exp $	*/
 
 /*-
  * Copyright (c) 1995, 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: linux_olduname.c,v 1.66 2008/04/28 20:23:43 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: linux_olduname.c,v 1.60 2006/11/16 01:32:42 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -39,13 +46,13 @@ __KERNEL_RCSID(0, "$NetBSD: linux_olduname.c,v 1.66 2008/04/28 20:23:43 martin E
 #include <sys/mman.h>
 #include <sys/mount.h>
 
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 
 #include <compat/linux/common/linux_types.h>
 #include <compat/linux/common/linux_mmap.h>
 #include <compat/linux/common/linux_signal.h>
 #include <compat/linux/common/linux_olduname.h>
-#include <compat/linux/common/linux_machdep.h>
 
 #include <compat/linux/linux_syscallargs.h>
 
@@ -54,18 +61,18 @@ __KERNEL_RCSID(0, "$NetBSD: linux_olduname.c,v 1.66 2008/04/28 20:23:43 martin E
 /* Alpha: XXX Only if we assume osf_utsname is used by Linux programs. */
 
 int
-linux_sys_olduname(struct lwp *l, const struct linux_sys_olduname_args *uap, register_t *retval)
+linux_sys_olduname(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct linux_sys_uname_args /* {
 		syscallarg(struct linux_oldutsname *) up;
-	} */
+	} */ *uap = v;
 	struct linux_oldutsname luts;
 
-	strlcpy(luts.l_sysname, linux_sysname, sizeof(luts.l_sysname));
-	strlcpy(luts.l_nodename, hostname, sizeof(luts.l_nodename));
-	strlcpy(luts.l_release, linux_release, sizeof(luts.l_release));
-	strlcpy(luts.l_version, linux_version, sizeof(luts.l_version));
-	strlcpy(luts.l_machine, LINUX_UNAME_ARCH, sizeof(luts.l_machine));
+	strncpy(luts.l_sysname, linux_sysname, sizeof(luts.l_sysname));
+	strncpy(luts.l_nodename, hostname, sizeof(luts.l_nodename));
+	strncpy(luts.l_release, linux_release, sizeof(luts.l_release));
+	strncpy(luts.l_version, linux_version, sizeof(luts.l_version));
+	strncpy(luts.l_machine, machine, sizeof(luts.l_machine));
 
 	return copyout(&luts, SCARG(uap, up), sizeof(luts));
 }

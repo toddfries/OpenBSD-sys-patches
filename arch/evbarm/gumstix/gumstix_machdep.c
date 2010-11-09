@@ -1,6 +1,6 @@
-/*	$NetBSD: gumstix_machdep.c,v 1.13 2009/02/13 22:41:01 apb Exp $ */
+/*	$NetBSD: gumstix_machdep.c,v 1.2 2006/11/24 22:04:22 wiz Exp $ */
 /*
- * Copyright (C) 2005, 2006, 2007  WIDE Project and SOUM Corporation.
+ * Copyright (C) 2005, 2006 WIDE Project and SOUM Corporation.
  * All rights reserved.
  *
  * Written by Takashi Kiyohara and Susumu Miki for WIDE Project and SOUM
@@ -139,11 +139,12 @@
 
 #include "opt_ddb.h"
 #include "opt_kgdb.h"
+#include "opt_ipkdb.h"
 #include "opt_pmap_debug.h"
 #include "opt_md.h"
-#include "opt_modular.h"
 #include "opt_com.h"
 #include "md.h"
+#include "lcd.h"
 
 #include <sys/param.h>
 #include <sys/device.h>
@@ -167,6 +168,10 @@
 #include <ddb/db_extern.h>
 #ifdef KGDB
 #include <sys/kgdb.h>
+#endif
+#ifdef IPKDB
+#include <ipkdb/ipkdb.h>		/* for prototypes */
+#include <machine/ipkdb.h>
 #endif
 
 #include <machine/bootconfig.h>
@@ -205,7 +210,11 @@ u_int cpu_reset_address = 0;
 /* Define various stack sizes in pages */
 #define IRQ_STACK_SIZE	1
 #define ABT_STACK_SIZE	1
+#ifdef IPKDB
+#define UND_STACK_SIZE	2
+#else
 #define UND_STACK_SIZE	1
+#endif
 
 BootConfig bootconfig;		/* Boot config storage */
 static char bootargs[MAX_BOOT_STRING];
@@ -228,6 +237,7 @@ int max_processes = 64;			/* Default number */
 #endif	/* !PMAP_STATIC_L1S */
 
 /* Physical and virtual addresses for some global pages */
+pv_addr_t systempage;
 pv_addr_t irqstack;
 pv_addr_t undstack;
 pv_addr_t abtstack;
@@ -257,11 +267,12 @@ pv_addr_t kernel_pt_table[NUM_KERNEL_PTS];
 struct user *proc0paddr;
 
 /* Prototypes */
-static void	read_system_serial(void);
-static void	process_kernel_args(int, char *[]);
-#ifdef KGDB
-static void	kgdb_port_init(void);
-#endif
+
+void	read_system_serial(void);
+void	process_kernel_args(int, char *[]);
+void	consinit(void);
+void	kgdb_port_init(void);
+void	change_clock(uint32_t v);
 
 bs_protos(bs_notimpl);
 
@@ -281,9 +292,6 @@ bs_protos(bs_notimpl);
 int comcnspeed = CONSPEED;
 int comcnmode = CONMODE;
 
-extern void gxio_config_pin(void);
-extern void gxio_config_expansion(char *);
-
 /*
  * void cpu_reboot(int howto, char *bootstr)
  *
@@ -293,7 +301,6 @@ extern void gxio_config_expansion(char *);
 void
 cpu_reboot(int howto, char *bootstr)
 {
-
 #ifdef DIAGNOSTIC
 	/* info */
 	printf("boot: howto=%08x curproc=%p\n", howto, curproc);
@@ -305,7 +312,6 @@ cpu_reboot(int howto, char *bootstr)
 	 */
 	if (cold) {
 		doshutdownhooks();
-		pmf_system_shutdown(boothowto);
 		printf("The operating system has halted.\n");
 		printf("Please press any key to reboot.\n\n");
 		cngetc();
@@ -333,8 +339,6 @@ cpu_reboot(int howto, char *bootstr)
 	
 	/* Run any shutdown hooks */
 	doshutdownhooks();
-
-	pmf_system_shutdown(boothowto);
 
 	/* Make sure IRQ's are disabled */
 	IRQdisable;
@@ -406,24 +410,12 @@ static const struct pmap_devmap gumstix_devmap[] = {
 		VM_PROT_READ|VM_PROT_WRITE, PTE_NOCACHE,
 	},
 	{
-		GUMSTIX_STUART_VBASE,
-		_A(PXA2X0_STUART_BASE),
-		_S(4 * COM_NPORTS),
-		VM_PROT_READ|VM_PROT_WRITE, PTE_NOCACHE,
-	},
-	{
 		GUMSTIX_BTUART_VBASE,
 		_A(PXA2X0_BTUART_BASE),
 		_S(4 * COM_NPORTS),
 		VM_PROT_READ|VM_PROT_WRITE, PTE_NOCACHE,
 	},
-	{
-		GUMSTIX_HWUART_VBASE,
-		_A(PXA2X0_HWUART_BASE),
-		_S(4 * COM_NPORTS),
-		VM_PROT_READ|VM_PROT_WRITE, PTE_NOCACHE,
-	},
-	{0, 0, 0, 0, 0}
+	{0, 0, 0, 0,}
 };
 
 #undef	_A
@@ -452,6 +444,7 @@ initarm(void *arg)
 	int loop;
 	int loop1;
 	u_int l1pagetable;
+	pv_addr_t kernel_l1pt;
 	paddr_t memstart;
 	psize_t memsize;
 #ifdef DIAGNOSTIC
@@ -485,11 +478,12 @@ initarm(void *arg)
 
 	cpu_domains((DOMAIN_CLIENT << (PMAP_DOMAIN_KERNEL*2)) | DOMAIN_CLIENT);
 
-	/* setup GPIO for {FF,ST,HW}UART. */
+	/* setup GPIO for BTUART, in case bootloader doesn't take care of it */
 	pxa2x0_gpio_bootstrap(GUMSTIX_GPIO_VBASE);
-
-	/* configure GPIOs. */
-	gxio_config_pin();
+	pxa2x0_gpio_set_function(42, GPIO_ALT_FN_1_IN);
+	pxa2x0_gpio_set_function(43, GPIO_ALT_FN_2_OUT);
+	pxa2x0_gpio_set_function(44, GPIO_ALT_FN_1_IN);
+	pxa2x0_gpio_set_function(45, GPIO_ALT_FN_2_OUT);
 
 	consinit();
 #ifdef KGDB
@@ -508,12 +502,10 @@ initarm(void *arg)
 	 */
 	process_kernel_args((int)u_boot_args[r6], (char **)u_boot_args[r5]);
 
-	memstart = 0xa0000000UL;
-	memsize = 0x04000000UL;		/* 64MB */
+	memstart = 0xa0000000;
+	memsize = 0x04000000;		/* 64MB */
 
-#ifdef VERBOSE_INIT_ARM
 	printf("initarm: Configuring system ...\n");
-#endif
 
 	/* Fake bootconfig structure for the benefit of pmap.c */
 	/* XXX must make the memory description h/w independent */
@@ -534,7 +526,7 @@ initarm(void *arg)
 	 * XXX pmap_bootstrap() needs an enema.
 	 */
 	physical_start = bootconfig.dram[0].address;
-	physical_end = physical_start + memsize;
+	physical_end = physical_start + (bootconfig.dram[0].pages * PAGE_SIZE);
 
 	physical_freestart = 0xa0009000UL;
 	physical_freeend = 0xa0200000UL;
@@ -590,10 +582,12 @@ initarm(void *arg)
 	memset((char *)(var), 0, ((np) * PAGE_SIZE));
 
 	loop1 = 0;
+	kernel_l1pt.pv_pa = 0;
+	kernel_l1pt.pv_va = 0;
 	for (loop = 0; loop <= NUM_KERNEL_PTS; ++loop) {
 		/* Are we 16KB aligned for an L1 ? */
-		if ((physical_freeend & (L1_TABLE_SIZE - 1)) == 0 &&
-		    kernel_l1pt.pv_pa == 0) {
+		if (((physical_freeend - L1_TABLE_SIZE) &
+		    (L1_TABLE_SIZE - 1)) == 0 && kernel_l1pt.pv_pa == 0) {
 			valloc_pages(kernel_l1pt, L1_TABLE_SIZE / PAGE_SIZE);
 		} else {
 			valloc_pages(kernel_pt_table[loop1],
@@ -844,7 +838,8 @@ initarm(void *arg)
 #ifdef	VERBOSE_INIT_ARM
 	printf("pmap ");
 #endif
-	pmap_bootstrap(KERNEL_VM_BASE, KERNEL_VM_BASE + KERNEL_VM_SIZE);
+	pmap_bootstrap((pd_entry_t *)kernel_l1pt.pv_va, KERNEL_VM_BASE,
+	    KERNEL_VM_BASE + KERNEL_VM_SIZE);
 
 #ifdef __HAVE_MEMORY_DISK__
 	md_root_setconf(memory_disk, sizeof memory_disk);
@@ -854,6 +849,13 @@ initarm(void *arg)
 	boothowto |= BOOTHOWTO;
 #endif
 
+#ifdef IPKDB
+	/* Initialise ipkdb */
+	ipkdb_init();
+	if (boothowto & RB_KDB)
+		ipkdb_connect(0);
+#endif
+
 #ifdef KGDB
 	if (boothowto & RB_KDB) {
 		kgdb_debug_init = 1;
@@ -861,13 +863,12 @@ initarm(void *arg)
 	}
 #endif
 
-#if NKSYMS || defined(DDB) || defined(MODULAR)
-	/* Firmware doesn't load symbols. */
-	ddb_init(0, NULL, NULL);
-#endif
-
 #ifdef DDB
 	db_machine_init();
+
+	/* Firmware doesn't load symbols. */
+	ddb_init(0, NULL, NULL);
+
 	if (boothowto & RB_KDB)
 		Debugger();
 #endif
@@ -876,7 +877,7 @@ initarm(void *arg)
 	return(kernelstack.pv_va + USPACE_SVC_STACK_TOP);
 }
 
-static void
+void
 read_system_serial()
 {
 #define GUMSTIX_SYSTEM_SERIAL_ADDR	0
@@ -920,11 +921,14 @@ read_system_serial()
 	printf("\n");
 }
 
-static void
+void
 process_kernel_args(int argc, char *argv[])
 {
+	extern char hirose60p[MAX_BOOT_STRING];
+	extern char busheader[MAX_BOOT_STRING];
+	static const char hirose60p_name[] = "hirose60p=";
 	static const char busheader_name[] = "busheader=";
-	int gxio_configured = 0, i, j;
+	int i, j;
 
 	boothowto = 0;
 
@@ -936,10 +940,14 @@ process_kernel_args(int argc, char *argv[])
 	argc --;
 
 	for (i = 1, j = 0; i < argc; i++) {
+		if (!strncmp(argv[i], hirose60p_name, strlen(hirose60p_name))) {
+			strncpy(hirose60p,
+			    argv[i] + strlen(hirose60p_name), MAX_BOOT_STRING);
+			continue;
+		}
 		if (!strncmp(argv[i], busheader_name, strlen(busheader_name))) {
-			/* configure for GPIOs of busheader side */
-			gxio_config_expansion(argv[i] + strlen(busheader_name));
-			gxio_configured = 1;
+			strncpy(busheader,
+			    argv[i] + strlen(busheader_name), MAX_BOOT_STRING);
 			continue;
 		}
 		if (j == MAX_BOOT_STRING) {
@@ -954,25 +962,17 @@ process_kernel_args(int argc, char *argv[])
 	boot_args = bootargs;
 
 	parse_mi_bootargs(boot_args);
-
-	if (!gxio_configured)
-		gxio_config_expansion(NULL);
 }
 
 #ifdef KGDB
 #ifndef KGDB_DEVNAME
-#define KGDB_DEVNAME	"ffuart"
+#define KGDB_DEVNAME "ffuart"
 #endif
 const char kgdb_devname[] = KGDB_DEVNAME;
 
-#ifndef KGDB_DEVRATE
-#define KGDB_DEVRATE	CONSPEED
-#endif
-int kgdb_devrate = KGDB_DEVRATE;
-
 #if (NCOM > 0)
 #ifndef KGDB_DEVMODE
-#define KGDB_DEVMODE	CONMODE
+#define KGDB_DEVMODE ((TTYDEF_CFLAG & ~(CSIZE | CSTOPB | PARENB)) | CS8) /* 8N1 */
 #endif
 int comkgdbmode = KGDB_DEVMODE;
 #endif /* NCOM */
@@ -999,32 +999,14 @@ consinit(void)
 		/* port is reserved for kgdb */
 	} else 
 #endif
-	{
-		if (0 == comcnattach(&pxa2x0_a4x_bs_tag, PXA2X0_FFUART_BASE, 
-		    comcnspeed, PXA2X0_COM_FREQ, COM_TYPE_PXA2x0, comcnmode)) {
-			ioreg_write(GUMSTIX_CLKMAN_VBASE + CLKMAN_CKEN,
-			    ckenreg|CKEN_FFUART);
+	if (0 == comcnattach(&pxa2x0_a4x_bs_tag, PXA2X0_FFUART_BASE, 
+		comcnspeed, PXA2X0_COM_FREQ, COM_TYPE_PXA2x0, comcnmode)) {
+		ioreg_write(GUMSTIX_CLKMAN_VBASE + CLKMAN_CKEN,
+		    ckenreg|CKEN_FFUART);
 
-			return;
-		}
+		return;
 	}
 #endif /* FFUARTCONSOLE */
-
-#ifdef STUARTCONSOLE
-#ifdef KGDB
-	if (0 == strcmp(kgdb_devname, "stuart")) {
-		/* port is reserved for kgdb */
-	} else
-#endif
-	{
-		if (0 == comcnattach(&pxa2x0_a4x_bs_tag, PXA2X0_STUART_BASE,
-		    comcnspeed, PXA2X0_COM_FREQ, COM_TYPE_PXA2x0, comcnmode)) {
-			ioreg_write(GUMSTIX_CLKMAN_VBASE + CLKMAN_CKEN,
-			    ckenreg|CKEN_STUART);
-			return;
-		}
-	}
-#endif /* STUARTCONSOLE */
 
 #ifdef BTUARTCONSOLE
 #ifdef KGDB
@@ -1032,38 +1014,21 @@ consinit(void)
 		/* port is reserved for kgdb */
 	} else
 #endif
-	{
-		if (0 == comcnattach(&pxa2x0_a4x_bs_tag, PXA2X0_BTUART_BASE,
-		    comcnspeed, PXA2X0_COM_FREQ, COM_TYPE_PXA2x0, comcnmode)) {
-			ioreg_write(GUMSTIX_CLKMAN_VBASE + CLKMAN_CKEN,
-			    ckenreg|CKEN_BTUART);
-			return;
-		}
+	if (0 == comcnattach(&pxa2x0_a4x_bs_tag, PXA2X0_BTUART_BASE,
+		comcnspeed, PXA2X0_COM_FREQ, COM_TYPE_PXA2x0, comcnmode)) {
+		ioreg_write(GUMSTIX_CLKMAN_VBASE + CLKMAN_CKEN,
+		    ckenreg|CKEN_BTUART);
+		return;
 	}
 #endif /* BTUARTCONSOLE */
 
-#ifdef HWUARTCONSOLE
-#ifdef KGDB
-	if (0 == strcmp(kgdb_devname, "hwuart")) {
-		/* port is reserved for kgdb */
-	} else
-#endif
-	{
-		if (0 == comcnattach(&pxa2x0_a4x_bs_tag, PXA2X0_HWUART_BASE,
-		    comcnspeed, PXA2X0_COM_FREQ, COM_TYPE_PXA2x0, comcnmode)) {
-			ioreg_write(GUMSTIX_CLKMAN_VBASE + CLKMAN_CKEN,
-			    ckenreg|CKEN_HWUART);
-			return;
-		}
-	}
-#endif /* HWUARTCONSOLE */
 
 #endif /* NCOM */
 
 }
 
 #ifdef KGDB
-static void
+void
 kgdb_port_init(void)
 {
 #if (NCOM > 0) && defined(COM_PXA2X0)
@@ -1073,20 +1038,15 @@ kgdb_port_init(void)
 	if (0 == strcmp(kgdb_devname, "ffuart")) {
 		paddr = PXA2X0_FFUART_BASE;
 		ckenreg |= CKEN_FFUART;
-	} else if (0 == strcmp(kgdb_devname, "stuart")) {
-		paddr = PXA2X0_STUART_BASE;
-		ckenreg |= CKEN_STUART;
-	} else if (0 == strcmp(kgdb_devname, "btuart")) {
+	}
+	else if (0 == strcmp(kgdb_devname, "btuart")) {
 		paddr = PXA2X0_BTUART_BASE;
 		ckenreg |= CKEN_BTUART;
-	} else if (0 == strcmp(kgdb_devname, "hwuart")) {
-		paddr = PXA2X0_HWUART_BASE;
-		ckenreg |= CKEN_HWUART;
 	}
 
 	if (paddr &&
 	    0 == com_kgdb_attach(&pxa2x0_a4x_bs_tag, paddr,
-		kgdb_devrate, PXA2X0_COM_FREQ, COM_TYPE_PXA2x0, comkgdbmode)) {
+		kgdb_rate, PXA2X0_COM_FREQ, COM_TYPE_PXA2x0, comkgdbmode)) {
 
 		ioreg_write(GUMSTIX_CLKMAN_VBASE + CLKMAN_CKEN, ckenreg);
 

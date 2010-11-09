@@ -1,4 +1,4 @@
-/*	$NetBSD: tgets.c,v 1.4 2007/10/17 19:54:09 garbled Exp $	*/
+/*	$NetBSD: tgets.c,v 1.2 2005/12/11 12:17:06 christos Exp $	*/
 
 /*-
  * Copyright (c) 1993
@@ -37,7 +37,8 @@
 #define USE_SCAN
 
 int
-tgets(char *buf)
+tgets(buf)
+	char *buf;
 {
 	int c;
 	char *lp;
@@ -52,7 +53,7 @@ tgets(char *buf)
 			goto next;
 		delay(SCANWAIT / 32); /* XXX */
 	}
-	return -1;
+	return (-1);
 next:
 #else
 	c = getchar();

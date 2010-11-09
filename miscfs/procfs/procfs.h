@@ -1,4 +1,4 @@
-/*	$NetBSD: procfs.h,v 1.65 2008/06/28 01:34:06 rumble Exp $	*/
+/*	$NetBSD: procfs.h,v 1.62 2006/10/29 22:35:35 christos Exp $	*/
 
 /*
  * Copyright (c) 1993
@@ -105,9 +105,6 @@ typedef enum {
 	PFSchroot,	/* the process's current root directory */
 	PFSemul,	/* the process's emulation */
 	PFSdevices,	/* major/device name mappings (if -o linux) */
-	PFScpustat,	/* status info (if -o linux) */
-	PFSloadavg,	/* load average (if -o linux) */
-	PFSstatm,	/* process memory info (if -o linux) */
 #ifdef __HAVE_PROCFS_MACHDEP
 	PROCFS_MACHDEP_NODE_TYPES
 #endif
@@ -182,11 +179,9 @@ struct vfs_namemap {
 int vfs_getuserstr(struct uio *, char *, int *);
 const vfs_namemap_t *vfs_findname(const vfs_namemap_t *, const char *, int);
 
-int procfs_proc_lock(int, struct proc **, int);
-void procfs_proc_unlock(struct proc *);
+#define PFIND(pid) ((pid) ? pfind(pid) : &proc0)
 int procfs_freevp(struct vnode *);
-int procfs_allocvp(struct mount *, struct vnode **, pid_t, pfstype, int,
-    struct proc *);
+int procfs_allocvp(struct mount *, struct vnode **, pid_t, pfstype, int);
 int procfs_donote(struct lwp *, struct proc *, struct pfsnode *,
     struct uio *);
 int procfs_doregs(struct lwp *, struct lwp *, struct pfsnode *,
@@ -211,12 +206,6 @@ int procfs_dodevices(struct lwp *, struct proc *, struct pfsnode *,
     struct uio *);
 int procfs_docpuinfo(struct lwp *, struct proc *, struct pfsnode *,
     struct uio *);
-int procfs_docpustat(struct lwp *, struct proc *, struct pfsnode *,
-    struct uio *);
-int procfs_doloadavg(struct lwp *, struct proc *, struct pfsnode *,
-    struct uio *);
-int procfs_do_pid_statm(struct lwp *, struct lwp *, struct pfsnode *,
-    struct uio *);
 int procfs_dofd(struct lwp *, struct proc *, struct pfsnode *,
     struct uio *);
 int procfs_douptime(struct lwp *, struct proc *, struct pfsnode *,
@@ -230,7 +219,7 @@ void procfs_revoke_vnodes(struct proc *, void *);
 void procfs_hashinit(void);
 void procfs_hashreinit(void);
 void procfs_hashdone(void);
-int procfs_getfp(struct pfsnode *, struct proc *, struct file **);
+int procfs_getfp(struct pfsnode *, struct proc **, struct file **);
 
 /* functions to check whether or not files should be displayed */
 int procfs_validfile(struct lwp *, struct mount *);
@@ -259,4 +248,7 @@ int	procfs_machdep_rw(struct lwp *, struct lwp *, struct pfsnode *,
 int	procfs_machdep_getattr(struct vnode *, struct vattr *, struct proc *);
 #endif
 
+#ifdef SYSCTL_SETUP_PROTO
+SYSCTL_SETUP_PROTO(sysctl_vfs_procfs_setup);
+#endif /* SYSCTL_SETUP_PROTO */
 #endif /* _KERNEL */

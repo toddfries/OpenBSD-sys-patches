@@ -1,4 +1,4 @@
-/*	$NetBSD: cd9660_node.h,v 1.14 2008/02/27 19:43:36 matt Exp $	*/
+/*	$NetBSD: cd9660_node.h,v 1.12 2005/12/03 22:16:16 christos Exp $	*/
 
 /*-
  * Copyright (c) 1994
@@ -60,6 +60,18 @@ typedef	struct	{
 	short		iso_links;	/* links of file */
 	dev_t		iso_rdev;	/* Major/Minor number for special */
 } ISO_RRIP_INODE;
+
+#ifdef ISODEVMAP
+/*
+ * FOr device# (major,minor) translation table
+ */
+struct iso_dnode {
+	LIST_ENTRY(iso_dnode) d_hash;
+	dev_t		i_dev;		/* device where dnode resides */
+	ino_t		i_number;	/* the identity of the inode */
+	dev_t		d_dev;		/* device # for translation */
+};
+#endif
 
 struct iso_node {
 	struct	genfs_node i_gnode;
@@ -128,15 +140,16 @@ void	cd9660_defattr(struct iso_directory_record *,
 			struct iso_node *, struct buf *);
 void	cd9660_deftstamp(struct iso_directory_record *,
 			struct iso_node *, struct buf *);
-struct	vnode *cd9660_ihashget(dev_t, ino_t, int);
+struct	vnode *cd9660_ihashget(dev_t, ino_t);
 void	cd9660_ihashins(struct iso_node *);
 void	cd9660_ihashrem(struct iso_node *);
-int	cd9660_tstamp_conv7(const u_char *, struct timespec *);
-int	cd9660_tstamp_conv17(const u_char *, struct timespec *);
+int	cd9660_tstamp_conv7(u_char *, struct timespec *);
+int	cd9660_tstamp_conv17(u_char *, struct timespec *);
 int	cd9660_vget_internal(struct mount *, ino_t, struct vnode **, int,
 			      struct iso_directory_record *);
-
-extern kmutex_t cd9660_hashlock;
-
+#ifdef	ISODEVMAP
+struct iso_dnode *iso_dmap(dev_t, ino_t, int);
+void iso_dunmap(dev_t);
+#endif
 #endif /* _KERNEL */
 #endif /* _ISOFS_CD9660_CD9660_NODE_H_ */

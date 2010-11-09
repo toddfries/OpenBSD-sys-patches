@@ -1,4 +1,4 @@
-/*	$NetBSD: uvm_mremap.c,v 1.12 2008/06/17 16:17:21 tsutsui Exp $	*/
+/*	$NetBSD: uvm_mremap.c,v 1.7 2007/08/08 11:08:18 drochner Exp $	*/
 
 /*-
  * Copyright (c)2006 YAMAMOTO Takashi,
@@ -27,14 +27,12 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: uvm_mremap.c,v 1.12 2008/06/17 16:17:21 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: uvm_mremap.c,v 1.7 2007/08/08 11:08:18 drochner Exp $");
 
 #include <sys/param.h>
 #include <sys/mman.h>
-#include <sys/sched.h>
 #include <sys/syscallargs.h>
 #include <sys/proc.h>
-#include <sys/atomic.h>
 
 #include <uvm/uvm.h>
 
@@ -80,10 +78,10 @@ uvm_mapent_extend(struct vm_map *map, vaddr_t endva, vsize_t size)
 			error = E2BIG; /* XXX */
 			goto done;
 		}
-		mutex_enter(&uobj->vmobjlock);
+		simple_lock(&uobj->vmobjlock);
 		KASSERT(uobj->uo_refs > 0);
-		atomic_inc_uint(&uobj->uo_refs);
-		mutex_exit(&uobj->vmobjlock);
+		uobj->uo_refs++;
+		simple_unlock(&uobj->vmobjlock);
 		reserved_entry->object.uvm_obj = uobj;
 		reserved_entry->offset = newoffset;
 	}
@@ -165,7 +163,7 @@ uvm_mremap(struct vm_map *oldmap, vaddr_t oldva, vsize_t oldsize,
 	 */
 
 	if ((!fixed || newva == oldva) && newmap == oldmap &&
-	    (align == 0 || (oldva & (align - 1)) == 0)) {
+	    (align == 0 || (oldva & ~(align - 1)) == 0)) {
 		vaddr_t va;
 
 		if (newsize == oldsize) {
@@ -241,15 +239,15 @@ done:
  */
 
 int
-sys_mremap(struct lwp *l, const struct sys_mremap_args *uap, register_t *retval)
+sys_mremap(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct sys_mremap_args /* {
 		syscallarg(void *) old_address;
 		syscallarg(size_t) old_size;
 		syscallarg(void *) new_address;
 		syscallarg(size_t) new_size;
 		syscallarg(int) flags;
-	} */
+	} */ *uap = v;
 
 	struct proc *p;
 	struct vm_map *map;

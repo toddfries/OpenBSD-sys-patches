@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile.xen,v 1.28 2008/12/11 05:27:42 alc Exp $
+#	$NetBSD: Makefile.xen,v 1.18 2006/05/28 14:00:13 pavel Exp $
 #	NetBSD: Makefile.i386,v 1.132 2003/07/05 16:56:10 simonb Exp 
 
 # Makefile for NetBSD
@@ -19,6 +19,7 @@
 #	makeoptions DEBUGLIST="uvm* trap if_*"
 
 .include "$S/arch/xen/conf/Makefile.arch.inc"
+MACHINE_ARCH?=	i386
 USETOOLS?=	no
 NEED_OWN_INSTALL_TARGET?=no
 .include <bsd.own.mk>
@@ -28,25 +29,14 @@ NEED_OWN_INSTALL_TARGET?=no
 ##
 XEN=		$S/arch/xen
 I386=		$S/arch/i386
-AMD64=          $S/arch/amd64
-GENASSYM_CONF=	$S/arch/${XEN_BUILD}/${XEN_BUILD}/genassym.cf
-
-ARCH_INC=	$S/arch/xen/include/${XEN_BUILD}
+GENASSYM_CONF=	${XEN}/${XEN_BUILD}/genassym.cf
 
 ##
 ## (2) compile settings
 ##
-DEFCOPTS=	-O2
 CPPFLAGS+=	-D${XEN_BUILD}
-AFLAGS+=	-x assembler-with-cpp -traditional-cpp ${DBG} -D__XEN__
+AFLAGS+=	-x assembler-with-cpp -traditional-cpp ${DBG}
 EXTRA_INCLUDES=	-I${.CURDIR}/xen-ma
-
-.if ${XEN_BUILD} == "amd64"
-CPPFLAGS+=	-Dx86_64
-CFLAGS+=	-mcmodel=kernel
-CFLAGS+=	-mno-red-zone
-.endif
-
 
 ##
 ## (3) libkern and compat
@@ -56,25 +46,29 @@ KERN_AS=	obj
 ##
 ## (4) local objects, compile rules, and dependencies
 ##
-MD_OBJS=	locore.o spl.o copy.o vector.o
+MD_OBJS=	locore.o spl.o vector.o
 MD_CFILES=
+MD_SFILES=	${XEN}/${XEN_BUILD}/locore.S \
+		${XEN}/${XEN_BUILD}/spl.S \
+		${XEN}/${XEN_BUILD}/vector.S
 
-MD_SFILES=	$S/arch/${XEN_BUILD}/${XEN_BUILD}/locore.S \
-		$S/arch/${XEN_BUILD}/${XEN_BUILD}/spl.S \
-		$S/arch/${XEN_BUILD}/${XEN_BUILD}/vector.S \
-		$S/arch/${XEN_BUILD}/${XEN_BUILD}/copy.S
+.if ${MACHINE_ARCH} == i386
+MD_OBJS+=	copy.o
+MD_SFILES+=	${I386}/i386/copy.S
 
-copy.o: $S/arch/${XEN_BUILD}/${XEN_BUILD}/copy.S assym.h
+copy.o: ${I386}/i386/copy.S assym.h
+	${NORMAL_S}
+.endif
+
+locore.o: ${XEN}/${XEN_BUILD}/locore.S assym.h
 	${NORMAL_S}
 
-locore.o: $S/arch/${XEN_BUILD}/${XEN_BUILD}/locore.S assym.h
+spl.o: ${XEN}/${XEN_BUILD}/spl.S assym.h
 	${NORMAL_S}
 
-spl.o: $S/arch/${XEN_BUILD}/${XEN_BUILD}/spl.S assym.h
+vector.o: ${XEN}/${XEN_BUILD}/vector.S assym.h
 	${NORMAL_S}
 
-vector.o: $S/arch/${XEN_BUILD}/${XEN_BUILD}/vector.S assym.h
-	${NORMAL_S}
 .ifndef noBEGIN
 .if !make(obj) && !make(clean) && !make(cleandir)
 .BEGIN:
@@ -85,19 +79,13 @@ vector.o: $S/arch/${XEN_BUILD}/${XEN_BUILD}/vector.S assym.h
 	-rm -rf xen-ma
 	mkdir xen-ma
 	ln -s ../${XEN_BUILD} xen-ma/machine
-	rm -f machine
-	ln -s ${ARCH_INC} machine
 .endif
 .endif
 
 ##
 ## (5) link settings
 ##
-.if ${XEN_BUILD} == i386
-TEXTADDR?=	0xc0100000
-.elif ${XEN_BUILD} == amd64
-TEXTADDR?=	0xffffffff80100000
-.endif
+TEXTADDR?=	c0100000
 LINKFLAGS_NORMAL=	-X
 .if (${OBJECT_FMT} == "ELF")
 KERN_LDSCRIPT?=	kern.ldscript.Xen
@@ -110,16 +98,11 @@ LINKFORMAT=	-z
 ## (6) port specific target dependencies
 ##
 
-.if ${XEN_BUILD} == i386
 freebsd_sigcode.o ibcs2_sigcode.o linux_sigcode.o: assym.h
 svr4_sigcode.o mach_sigcode.o: assym.h
-apmcall.o pnpbioscall.o bioscall.o: assym.h
+apmcall.o in_cksum.o pnpbioscall.o bioscall.o: assym.h
 mptramp.o: assym.h
-.elif  ${XEN_BUILD} == amd64
-locore.o machdep.o: Makefile
-linux_support.o linux32_sigcode.o netbsd32_sigcode.o: assym.h
-.endif
-busfunc.o cpu_in_cksum.o cpufunc.o lock_stubs.o: assym.h
+clock.o: config_time.h
 
 ##
 ## (7) misc settings
@@ -139,6 +122,9 @@ busfunc.o cpu_in_cksum.o cpufunc.o lock_stubs.o: assym.h
 %LOAD
 
 %RULES
+
+## Include rules for Atheros WLAN
+.include "$S/contrib/dev/ath/netbsd/Makefile.ath.inc"
 
 ##
 ## (9) port independent kernel machinery

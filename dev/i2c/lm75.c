@@ -1,4 +1,4 @@
-/*	$NetBSD: lm75.c,v 1.20 2009/01/09 17:20:31 briggs Exp $	*/
+/*	$NetBSD: lm75.c,v 1.15 2007/09/02 00:31:23 xtraeme Exp $	*/
 
 /*
  * Copyright (c) 2003 Wasabi Systems, Inc.
@@ -35,9 +35,6 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: lm75.c,v 1.20 2009/01/09 17:20:31 briggs Exp $");
-
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
@@ -49,24 +46,25 @@ __KERNEL_RCSID(0, "$NetBSD: lm75.c,v 1.20 2009/01/09 17:20:31 briggs Exp $");
 #include <dev/i2c/lm75reg.h>
 
 struct lmtemp_softc {
+	struct device sc_dev;
 	i2c_tag_t sc_tag;
 	int sc_address;
 
-	struct sysmon_envsys *sc_sme;
-	envsys_data_t sc_sensor;
+	envsys_data_t sc_sensor[1];
+	struct sysmon_envsys sc_sysmon;
 
 	uint32_t (*sc_lmtemp_decode)(const uint8_t *);
 };
 
-static int  lmtemp_match(device_t, cfdata_t, void *);
-static void lmtemp_attach(device_t, device_t, void *);
+static int  lmtemp_match(struct device *, struct cfdata *, void *);
+static void lmtemp_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(lmtemp, sizeof(struct lmtemp_softc),
+CFATTACH_DECL(lmtemp, sizeof(struct lmtemp_softc),
 	lmtemp_match, lmtemp_attach, NULL, NULL);
 
-static void	lmtemp_refresh(struct sysmon_envsys *, envsys_data_t *);
+static int	lmtemp_gtredata(struct sysmon_envsys *, envsys_data_t *);
 
-static int	lmtemp_config_write(struct lmtemp_softc *, uint8_t);
+static int lmtemp_config_write(struct lmtemp_softc *, uint8_t);
 static uint32_t lmtemp_decode_lm75(const uint8_t *);
 static uint32_t lmtemp_decode_ds75(const uint8_t *);
 static uint32_t lmtemp_decode_lm77(const uint8_t *);
@@ -95,7 +93,7 @@ static const struct {
 };
 
 static int
-lmtemp_match(device_t parent, cfdata_t cf, void *aux)
+lmtemp_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct i2c_attach_args *ia = aux;
 	int i;
@@ -104,17 +102,17 @@ lmtemp_match(device_t parent, cfdata_t cf, void *aux)
 		if (lmtemptbl[i].lmtemp_type == cf->cf_flags)
 			break;
 	if (lmtemptbl[i].lmtemp_type == -1)
-		return 0;
+		return (0);
 
 	if ((ia->ia_addr & lmtemptbl[i].lmtemp_addrmask) ==
 	    lmtemptbl[i].lmtemp_addr)
-		return 1;
+		return (1);
 
-	return 0;
+	return (0);
 }
 
 static void
-lmtemp_attach(device_t parent, device_t self, void *aux)
+lmtemp_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct lmtemp_softc *sc = device_private(self);
 	struct i2c_attach_args *ia = aux;
@@ -122,7 +120,7 @@ lmtemp_attach(device_t parent, device_t self, void *aux)
 
 	for (i = 0; lmtemptbl[i].lmtemp_type != -1 ; i++)
 		if (lmtemptbl[i].lmtemp_type ==
-		    device_cfdata(self)->cf_flags)
+		    device_cfdata(&sc->sc_dev)->cf_flags)
 			break;
 
 	sc->sc_tag = ia->ia_tag;
@@ -134,33 +132,32 @@ lmtemp_attach(device_t parent, device_t self, void *aux)
 	/* Set the configuration of the LM75 to defaults. */
 	iic_acquire_bus(sc->sc_tag, I2C_F_POLL);
 	if (lmtemp_config_write(sc, 0) != 0) {
-		aprint_error_dev(self, "unable to write config register\n");
+		aprint_error("%s: unable to write config register\n",
+		    sc->sc_dev.dv_xname);
 		iic_release_bus(sc->sc_tag, I2C_F_POLL);
 		return;
 	}
 	iic_release_bus(sc->sc_tag, I2C_F_POLL);
 
-	sc->sc_sme = sysmon_envsys_create();
 	/* Initialize sensor data. */
-	sc->sc_sensor.units =  ENVSYS_STEMP;
-	(void)strlcpy(sc->sc_sensor.desc, device_xname(self),
-	    sizeof(sc->sc_sensor.desc));
-	if (sysmon_envsys_sensor_attach(sc->sc_sme, &sc->sc_sensor)) {
-		sysmon_envsys_destroy(sc->sc_sme);
-		return;
-	}
+	sc->sc_sensor[0].sensor = 0;
+	sc->sc_sensor[0].state = ENVSYS_SVALID;
+	sc->sc_sensor[0].units =  ENVSYS_STEMP;
+	(void)strlcpy(sc->sc_sensor[0].desc,
+	    sc->sc_dev.dv_xname, sizeof(sc->sc_sensor[0].desc));
 
 	sc->sc_lmtemp_decode = lmtemptbl[i].lmtemp_decode;
 
 	/* Hook into system monitor. */
-	sc->sc_sme->sme_name = device_xname(self);
-	sc->sc_sme->sme_cookie = sc;
-	sc->sc_sme->sme_refresh = lmtemp_refresh;
+	sc->sc_sysmon.sme_name = sc->sc_dev.dv_xname;
+	sc->sc_sysmon.sme_sensor_data = sc->sc_sensor;
+	sc->sc_sysmon.sme_cookie = sc;
+	sc->sc_sysmon.sme_gtredata = lmtemp_gtredata;
+	sc->sc_sysmon.sme_nsensors = 1;
 
-	if (sysmon_envsys_register(sc->sc_sme)) {
-		aprint_error_dev(self, "unable to register with sysmon\n");
-		sysmon_envsys_destroy(sc->sc_sme);
-	}
+	if (sysmon_envsys_register(&sc->sc_sysmon))
+		aprint_error("%s: unable to register with sysmon\n",
+		    sc->sc_dev.dv_xname);
 }
 
 static int
@@ -171,8 +168,8 @@ lmtemp_config_write(struct lmtemp_softc *sc, uint8_t val)
 	cmdbuf[0] = LM75_REG_CONFIG;
 	cmdbuf[1] = val;
 
-	return iic_exec(sc->sc_tag, I2C_OP_WRITE_WITH_STOP,
-	    sc->sc_address, cmdbuf, 1, &cmdbuf[1], 1, I2C_F_POLL);
+	return (iic_exec(sc->sc_tag, I2C_OP_WRITE_WITH_STOP,
+	    sc->sc_address, cmdbuf, 1, &cmdbuf[1], 1, I2C_F_POLL));
 }
 
 static int
@@ -187,10 +184,10 @@ lmtemp_temp_read(struct lmtemp_softc *sc, uint8_t which, uint32_t *valp)
 	error = iic_exec(sc->sc_tag, I2C_OP_READ_WITH_STOP,
 	    sc->sc_address, cmdbuf, 1, buf, LM75_TEMP_LEN, 0);
 	if (error)
-		return error;
+		return (error);
 
 	*valp = sc->sc_lmtemp_decode(buf);
-	return 0;
+	return (0);
 }
 
 static void
@@ -202,44 +199,54 @@ lmtemp_refresh_sensor_data(struct lmtemp_softc *sc)
 	error = lmtemp_temp_read(sc, LM75_REG_TEMP, &val);
 	if (error) {
 #if 0
-		aprint_error_dev(&sc->sc_dev, "unable to read temperature, error = %d\n",
-		    error);
+		printf("%s: unable to read temperature, error = %d\n",
+		    sc->sc_dev.dv_xname, error);
 #endif
-		sc->sc_sensor.state = ENVSYS_SINVALID;
+		sc->sc_sensor[0].state = ENVSYS_SINVALID;
 		return;
 	}
 
-	sc->sc_sensor.value_cur = val;
-	sc->sc_sensor.state = ENVSYS_SVALID;
+	sc->sc_sensor[0].value_cur = val;
+	sc->sc_sensor[0].state = ENVSYS_SVALID;
 }
 
-static void
-lmtemp_refresh(struct sysmon_envsys *sme, envsys_data_t *edata)
+static int
+lmtemp_gtredata(struct sysmon_envsys *sme, envsys_data_t *edata)
 {
 	struct lmtemp_softc *sc = sme->sme_cookie;
 
 	iic_acquire_bus(sc->sc_tag, 0);	/* also locks our instance */
 	lmtemp_refresh_sensor_data(sc);
 	iic_release_bus(sc->sc_tag, 0);	/* also unlocks our instance */
+
+	return (0);
 }
 
 static uint32_t
 lmtemp_decode_lm75(const uint8_t *buf)
 {
-	int temp;
+	int neg, temp;
 	uint32_t val;
 
-	/*
-	 * LM75 temps are the most-significant 9 bits of a 16-bit reg.
-	 * sign-extend the MSB and add in the 0.5 from the LSB
-	 */
-	temp = (int8_t) buf[0];
-	temp = (temp << 1) + ((buf[1] >> 7) & 0x1);
+	if (buf[0] & 1) {
+		/* Below 0C */
+		temp = ~buf[1] + 1;
+		neg = 1;
+	} else {
+		temp = buf[1];
+		neg = 0;
+	}
 
 	/* Temp is given in 1/2 deg. C, we convert to uK. */
-	val = temp * 500000 + 273150000;
+	val = ((neg ? -temp : temp) / 2) * 1000000 + 273150000;
+	if (temp & 1) {
+		if (neg)
+			val -= 500000;
+		else
+			val += 500000;
+	}
 
-	return val;
+	return (val);
 }
 
 static uint32_t
@@ -277,6 +284,6 @@ lmtemp_decode_lm77(const uint8_t *buf)
 	/* Temp is given in 1/2 deg. C, we convert to uK. */
 	val = temp * 500000 + 273150000;
 
-	return val;
+	return (val);
 }
 

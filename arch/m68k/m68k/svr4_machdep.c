@@ -1,4 +1,4 @@
-/*	$NetBSD: svr4_machdep.c,v 1.30 2008/11/19 18:35:59 ad Exp $	*/
+/*	$NetBSD: svr4_machdep.c,v 1.23 2007/01/04 17:50:00 elad Exp $	*/
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: svr4_machdep.c,v 1.30 2008/11/19 18:35:59 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: svr4_machdep.c,v 1.23 2007/01/04 17:50:00 elad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -41,6 +48,7 @@ __KERNEL_RCSID(0, "$NetBSD: svr4_machdep.c,v 1.30 2008/11/19 18:35:59 ad Exp $")
 #include <sys/signal.h>
 #include <sys/signalvar.h>
 #include <sys/mount.h>
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 #include <sys/exec_elf.h>
 #include <sys/kauth.h>
@@ -64,7 +72,7 @@ extern short exframesize[];
 extern void	m68881_restore(struct fpframe *);
 extern void	m68881_save(struct fpframe *);
 static void	svr4_getsiginfo(union svr4_siginfo *, int, unsigned long,
-		    void *);
+		    caddr_t);
 
 void
 svr4_setregs(struct lwp *l, struct exec_package *epp, u_long stack)
@@ -207,7 +215,7 @@ svr4_setmcontext(struct lwp *l, svr4_mcontext_t *mc, u_long flags)
 }
 
 static void
-svr4_getsiginfo(union svr4_siginfo *sip, int sig, u_long code, void *addr)
+svr4_getsiginfo(union svr4_siginfo *sip, int sig, u_long code, caddr_t addr)
 {
 
 	/*
@@ -235,7 +243,7 @@ svr4_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
 	struct lwp *l = curlwp;
 	struct proc *p = l->l_proc;
 	struct frame *frame = (struct frame *)l->l_md.md_regs;
-	int onstack, error;
+	int onstack;
 	struct svr4_sigframe *sfp = getframe(l, sig, &onstack), sf;
 	sig_t catcher = SIGACTION(p, sig).sa_handler;
 
@@ -243,7 +251,7 @@ svr4_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
 
 	svr4_getcontext(l, &sf.sf_uc);
 	/* Passing the PC is *wrong*! */
-	svr4_getsiginfo(&sf.sf_si, sig, code, (void *)frame->f_pc);
+	svr4_getsiginfo(&sf.sf_si, sig, code, (caddr_t)frame->f_pc);
 
 	/* Build stack frame for signal trampoline. */
 	sf.sf_signum = sf.sf_si.si_signo;
@@ -256,12 +264,7 @@ svr4_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
 	    sf.sf_signum, sf.sf_sip, sf.sf_ucp, sf.sf_handler);
 #endif
 
-	sendsig_reset(l, sig);
-	mutex_exit(p->p_lock);
-	error = copyout(&sf, sfp, sizeof (sf));
-	mutex_enter(p->p_lock);
-
-	if (error != 0) {
+	if(copyout(&sf, sfp, sizeof (sf)) != 0) {
 		/*
 		 * Process has trashed its stack; give it an illegal
 		 * instruction to halt it in its tracks.
@@ -273,25 +276,28 @@ svr4_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
 	buildcontext(l, p->p_sigctx.ps_sigcode, sfp);
 
 	if (onstack)
-		l->l_sigstk.ss_flags |= SS_ONSTACK;
+		p->p_sigctx.ps_sigstk.ss_flags |= SS_ONSTACK;
 }
 
 /*
  * sysm68k()
  */
 int
-svr4_sys_sysarch(struct lwp *l, const struct svr4_sys_sysarch_args *uap, register_t *retval)
+svr4_sys_sysarch(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct svr4_sys_sysarch_args /* {
 		syscallarg(int) op;
 		syscallarg(void *) a1;
-	} */
+	} */ *uap = v;
 	char tmp[MAXHOSTNAMELEN];
 	size_t len;
 	int error, name[2];
 
 	switch (SCARG(uap, op)) {
 	case SVR4_SYSARCH_SETNAME:
+		if ((error = kauth_authorize_generic(l->l_cred,
+		    KAUTH_GENERIC_ISSUSER, NULL)) != 0)
+			return (error);
 		if ((error = copyinstr(SCARG(uap, a1), tmp, sizeof (tmp), &len))
 		    != 0)
 			return error;
@@ -305,16 +311,4 @@ svr4_sys_sysarch(struct lwp *l, const struct svr4_sys_sysarch_args *uap, registe
 	}
 
 	return error;
-}
-
-void
-svr4_md_init(void)
-{
-
-}
-
-void
-svr4_md_fini(void)
-{
-
 }

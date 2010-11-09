@@ -1,4 +1,4 @@
-/*	$NetBSD: m68k4k_exec.c,v 1.21 2008/11/21 19:55:38 he Exp $	*/
+/*	$NetBSD: m68k4k_exec.c,v 1.17 2005/12/11 12:20:20 christos Exp $	*/
 
 /*
  * Copyright (c) 1993, 1994 Christopher G. Demetriou
@@ -41,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: m68k4k_exec.c,v 1.21 2008/11/21 19:55:38 he Exp $");
+__KERNEL_RCSID(0, "$NetBSD: m68k4k_exec.c,v 1.17 2005/12/11 12:20:20 christos Exp $");
 
 #if !defined(__m68k__)
 #error YOU GOTTA BE KIDDING!
@@ -51,55 +51,15 @@ __KERNEL_RCSID(0, "$NetBSD: m68k4k_exec.c,v 1.21 2008/11/21 19:55:38 he Exp $");
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/malloc.h>
-#include <sys/module.h>
 #include <sys/vnode.h>
 #include <sys/exec.h>
 #include <sys/resourcevar.h>
 
 #include <compat/m68k4k/m68k4k_exec.h>
 
-#ifdef COREDUMP
-#define	DEP	"coredump"
-#else
-#define	DEP	NULL
-#endif
-
-MODULE(MODULE_CLASS_MISC, exec_m68k4k, DEP);
-
-static struct execsw exec_m68k4k_execsw[] = {
-	{ sizeof(struct exec),
-	  exec_m68k4k_makecmds,
-	  { NULL },
-	  &emul_netbsd,
-	  EXECSW_PRIO_ANY,
-	  0,
-	  copyargs,
-	  NULL,
-	  coredump_netbsd,
-	  exec_setup_stack },
-};
-
-static int
-exec_m68k4k_modcmd(modcmd_t cmd, void *arg)
-{
-
-	switch (cmd) {
-	case MODULE_CMD_INIT:
-		return exec_add(exec_m68k4k_execsw,
-		    __arraycount(exec_m68k4k_execsw));
-
-	case MODULE_CMD_FINI:
-		return exec_remove(exec_m68k4k_execsw,
-		    __arraycount(exec_m68k4k_execsw));
-
-	default:
-		return ENOTTY;
-        }
-}
-
-int	exec_m68k4k_prep_zmagic(struct lwp *, struct exec_package *);
-int	exec_m68k4k_prep_nmagic(struct lwp *, struct exec_package *);
-int	exec_m68k4k_prep_omagic(struct lwp *, struct exec_package *);
+int	exec_m68k4k_prep_zmagic __P((struct lwp *, struct exec_package *));
+int	exec_m68k4k_prep_nmagic __P((struct lwp *, struct exec_package *));
+int	exec_m68k4k_prep_omagic __P((struct lwp *, struct exec_package *));
 
 /*
  * exec_m68k4k_makecmds(): Check if it's an a.out-format executable
@@ -115,7 +75,9 @@ int	exec_m68k4k_prep_omagic(struct lwp *, struct exec_package *);
  */
 
 int
-exec_m68k4k_makecmds(struct lwp *l, struct exec_package *epp)
+exec_m68k4k_makecmds(l, epp)
+	struct lwp *l;
+	struct exec_package *epp;
 {
 	u_long midmag, magic;
 	u_short mid;
@@ -166,7 +128,9 @@ exec_m68k4k_makecmds(struct lwp *l, struct exec_package *epp)
  */
 
 int
-exec_m68k4k_prep_zmagic(struct lwp *l, struct exec_package *epp)
+exec_m68k4k_prep_zmagic(l, epp)
+	struct lwp *l;
+	struct exec_package *epp;
 {
 	struct exec *execp = epp->ep_hdr;
 	int error;
@@ -204,7 +168,9 @@ exec_m68k4k_prep_zmagic(struct lwp *l, struct exec_package *epp)
  */
 
 int
-exec_m68k4k_prep_nmagic(struct lwp *l, struct exec_package *epp)
+exec_m68k4k_prep_nmagic(l, epp)
+	struct lwp *l;
+	struct exec_package *epp;
 {
 	struct exec *execp = epp->ep_hdr;
 	long bsize, baddr;
@@ -241,7 +207,9 @@ exec_m68k4k_prep_nmagic(struct lwp *l, struct exec_package *epp)
  */
 
 int
-exec_m68k4k_prep_omagic(struct lwp *l, struct exec_package *epp)
+exec_m68k4k_prep_omagic(l, epp)
+	struct lwp *l;
+	struct exec_package *epp;
 {
 	struct exec *execp = epp->ep_hdr;
 	long dsize, bsize, baddr;

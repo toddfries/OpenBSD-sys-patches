@@ -1,4 +1,4 @@
-/*	$NetBSD: becc_timer.c,v 1.14 2008/01/20 16:28:24 joerg Exp $	*/
+/*	$NetBSD: becc_timer.c,v 1.10 2006/09/10 22:04:18 gdamore Exp $	*/
 
 /*
  * Copyright (c) 2001, 2002 Wasabi Systems, Inc.
@@ -40,14 +40,12 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: becc_timer.c,v 1.14 2008/01/20 16:28:24 joerg Exp $");
+__KERNEL_RCSID(0, "$NetBSD: becc_timer.c,v 1.10 2006/09/10 22:04:18 gdamore Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
-#include <sys/atomic.h>
 #include <sys/time.h>
-#include <sys/timetc.h>
 
 #include <dev/clock_subr.h>
 
@@ -66,21 +64,6 @@ void	(*becc_hardclock_hook)(void);
 #define	COUNTS_PER_USEC		((COUNTS_PER_SEC / 1000000) + 1)
 
 static void *clock_ih;
-
-static u_int	becc_get_timecount(struct timecounter *);
-
-static struct timecounter becc_timecounter = {
-	becc_get_timecount,	/* get_timecount */
-	0,			/* no poll_pps */
-	0xffffffff,		/* counter_mask */
-	COUNTS_PER_SEC,		/* frequency */
-	"becc",			/* name */
-	100,			/* quality */
-	NULL,			/* prev */
-	NULL,			/* next */
-};
-
-static volatile uint32_t becc_base;
 
 /*
  * Since the timer interrupts when the counter underflows, we need to
@@ -132,6 +115,15 @@ cpu_initclocks(void)
 		hz = 100;
 	}
 #endif
+	tick = 1000000 / hz;	/* number of microseconds between interrupts */
+	tickfix = 1000000 - (hz * tick);
+	if (tickfix) {
+		int ftp;
+
+		ftp = min(ffs(tickfix), ffs(hz));
+		tickfix >>= (ftp - 1);
+		tickfixinterval = hz >> (ftp - 1);
+	}
 
 	/*
 	 * We only have one timer available; stathz and profhz are
@@ -170,14 +162,10 @@ cpu_initclocks(void)
 	/* ...and start it in motion. */
 	BECC_CSR_WRITE(BECC_TSCRA, TSCRx_TE | TSCRx_CM);
 
-#ifdef __HAVE_FAST_SOFTINTS
 	/* register soft interrupt handler as well */
-	becc_intr_establish(ICU_SOFT, IPL_SOFTCLOCK, becc_softint, NULL);
-#endif
+	becc_intr_establish(ICU_SOFT, IPL_SOFT, becc_softint, NULL);
 
 	restore_interrupts(oldirqstate);
-
-	tc_init(&becc_timecounter);
 }
 
 /*
@@ -198,18 +186,49 @@ setstatclockrate(int new_hz)
 	 */
 }
 
-static u_int
-becc_get_timecount(struct timecounter *tc)
+/*
+ * microtime:
+ *
+ *	Fill in the specified timeval struct with the current time
+ *	accurate to the microsecond.
+ */
+void
+microtime(struct timeval *tvp)
 {
-	uint32_t counter, base;
+	static struct timeval lasttv;
 	u_int oldirqstate;
+	uint32_t counts;
 
 	oldirqstate = disable_interrupts(I32_bit);
-	counter = BECC_CSR_READ(BECC_TCVRA);
-	base = becc_base;
-	restore_interrupts(oldirqstate);
 
-	return base - counter;
+	/*
+	 * XXX How do we compensate for the -1 behavior of the preload value?
+	 */
+	counts = counts_per_hz - BECC_CSR_READ(BECC_TCVRA);
+
+	/* Fill in the timeval struct. */
+	*tvp = time;
+	tvp->tv_usec += (counts / COUNTS_PER_USEC);
+
+	/* Make sure microseconds doesn't overflow. */
+	while (tvp->tv_usec >= 1000000) {
+		tvp->tv_usec -= 1000000;
+		tvp->tv_sec++;
+	}
+
+	/* Make sure the time has advanced. */
+	if (tvp->tv_sec == lasttv.tv_sec &&
+	    tvp->tv_usec <= lasttv.tv_usec) {
+		tvp->tv_usec = lasttv.tv_usec + 1;
+		if (tvp->tv_usec >= 1000000) {
+			tvp->tv_usec -= 1000000;
+			tvp->tv_sec++;
+		}
+	}
+
+	lasttv = *tvp;
+
+	restore_interrupts(oldirqstate);
 }
 
 /*
@@ -247,6 +266,95 @@ delay(u_int n)
 	}
 }
 
+#ifndef __HAVE_GENERIC_TODR
+
+todr_chip_handle_t todr_handle;
+
+/*
+ * todr_attach:
+ *
+ *	Set the specified time-of-day register as the system real-time clock.
+ */
+void
+todr_attach(todr_chip_handle_t todr)
+{
+
+	if (todr_handle)
+		panic("todr_attach: rtc already configured");
+	todr_handle = todr;
+}
+
+/*
+ * inittodr:
+ *
+ *	Initialize time from the time-of-day register.
+ */
+#define	MINYEAR		2003	/* minimum plausible year */
+void
+inittodr(time_t base)
+{
+	time_t deltat;
+	int badbase;
+
+	if (base < (MINYEAR - 1970) * SECYR) {
+		printf("WARNING: preposterous time in file system");
+		/* read the system clock anyway */
+		base = (MINYEAR - 1970) * SECYR;
+		badbase = 1;
+	} else
+		badbase = 0;
+
+	if (todr_handle == NULL ||
+	    todr_gettime(todr_handle, &time) != 0 || time.tv_sec == 0) {
+		/*
+		 * Believe the time in the file system for lack of
+		 * anything better, resetting the TODR.
+		 */
+		time.tv_sec = base;
+		time.tv_usec = 0;
+		if (todr_handle != NULL && !badbase) {
+			printf("WARNING: preposterous clock chip time\n");
+			resettodr();
+		}
+		goto bad;
+	}
+
+	if (!badbase) {
+		/*
+		 * See if we gained/lost two or more days; if
+		 * so, assume something is amiss.
+		 */
+		deltat = time.tv_sec - base;
+		if (deltat < 0)
+			deltat = -deltat;
+		if (deltat < 2 * SECDAY)
+			return;		/* all is well */
+		printf("WARNING: clock %s %ld days\n",
+		    time.tv_sec < base ? "lost" : "gained",
+		    (long)deltat / SECDAY);
+	}
+ bad:
+	printf("WARNING: CHECK AND RESET THE DATE!\n");
+}
+
+/*
+ * resettodr:
+ *
+ *	Reset the time-of-day register with the current time.
+ */
+void
+resettodr(void)
+{
+
+	if (time.tv_sec == 0)
+		return;
+
+	if (todr_handle != NULL &&
+	    todr_settime(todr_handle, &time) != 0)
+		printf("resettodr: failed to set time\n");
+}
+#endif	/* __HAVE_GENERIC_TODR */
+
 /*
  * clockhandler:
  *
@@ -261,8 +369,6 @@ clockhandler(void *arg)
 	BECC_CSR_WRITE(BECC_TSCRA, TSCRx_TE | TSCRx_CM | TSCRx_TIF);
 
 	hardclock(frame);
-
-	atomic_add_32(&becc_base, counts_per_hz);
 
 	if (becc_hardclock_hook != NULL)
 		(*becc_hardclock_hook)();

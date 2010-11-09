@@ -1,4 +1,4 @@
-/*	$NetBSD: fb_sbdio.c,v 1.7 2008/04/28 20:23:18 martin Exp $	*/
+/*	$NetBSD: fb_sbdio.c,v 1.2 2006/04/12 19:38:22 jmmv Exp $	*/
 
 /*-
  * Copyright (c) 2004, 2005 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -32,7 +39,7 @@
 #define WIRED_FB_TLB
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: fb_sbdio.c,v 1.7 2008/04/28 20:23:18 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: fb_sbdio.c,v 1.2 2006/04/12 19:38:22 jmmv Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -59,19 +66,19 @@ __KERNEL_RCSID(0, "$NetBSD: fb_sbdio.c,v 1.7 2008/04/28 20:23:18 martin Exp $");
 
 
 struct fb_softc {
-	device_t sc_dev;
+	struct device sc_dv;
 	struct rasops_info *sc_ri;
 	struct ga *sc_ga;
 	int sc_nscreens;
 };
 
-int fb_sbdio_match(device_t, cfdata_t, void *);
-void fb_sbdio_attach(device_t, device_t, void *);
+int fb_sbdio_match(struct device *, struct cfdata *, void *);
+void fb_sbdio_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(fb_sbdio, sizeof(struct fb_softc),
+CFATTACH_DECL(fb_sbdio, sizeof(struct fb_softc),
     fb_sbdio_match, fb_sbdio_attach, NULL, NULL);
 
-int _fb_ioctl(void *, void *, u_long, void *, int, struct lwp *);
+int _fb_ioctl(void *, void *, u_long, caddr_t, int, struct lwp *);
 paddr_t _fb_mmap(void *, void *, off_t, int);
 int _fb_alloc_screen(void *, const struct wsscreen_descr *, void **,
     int *, int *, long *);
@@ -116,7 +123,7 @@ static paddr_t fb_consaddr;
 
 
 int
-fb_sbdio_match(device_t parent, cfdata_t cf, void *aux)
+fb_sbdio_match(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct sbdio_attach_args *sa = aux;
 
@@ -124,18 +131,17 @@ fb_sbdio_match(device_t parent, cfdata_t cf, void *aux)
 }
 
 void
-fb_sbdio_attach(device_t parent, device_t self, void *aux)
+fb_sbdio_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct fb_softc *sc = device_private(self);
 	struct sbdio_attach_args *sa = aux;
 	struct wsemuldisplaydev_attach_args wa;
+	struct fb_softc *sc = (void *)self;
 	struct rasops_info *ri;
 	struct ga *ga;
 	vaddr_t memva, regva;
 	int console;
 
-	sc->sc_dev = self;
-	aprint_normal("\n");
+	printf(" at %p, %p\n", (void *)sa->sa_addr1, (void *)sa->sa_addr2);
 
 	console = (sa->sa_addr1 == fb_consaddr);
 	if (console) {
@@ -197,7 +203,7 @@ fb_common_init(struct rasops_info *ri, struct ga *ga)
 	 * 128	 dark gray
 	 * 255	 white
 	 * other black
-	 * When CLUT isn't initialized for NetBSD, use black-red pair.
+	 * When CLUT isn't intialized for NetBSD, use black-red pair.
 	 */
 	ri->ri_flg = RI_CENTER | RI_CLEAR;
 	if (!ga_active)
@@ -270,7 +276,7 @@ fb_sbdio_cnattach(uint32_t mem, uint32_t reg, int flags)
 }
 
 int
-_fb_ioctl(void *v, void *vs, u_long cmd, void *data, int flag, struct lwp *l)
+_fb_ioctl(void *v, void *vs, u_long cmd, caddr_t data, int flag, struct lwp *l)
 {
 	struct fb_softc *sc = v;
 	struct wsdisplay_fbinfo *fbinfo = (void *)data;
@@ -393,12 +399,12 @@ fb_pmap_enter(paddr_t fb_paddr, paddr_t reg_paddr,
 	reg_paddr = reg_paddr & ~MIPS3_WIRED_OFFMASK;
 	va = GA_FRB_ADDR;
 
-	if (mips3_wired_enter_page(va, fb_paddr, pgsize) == false) {
+	if (mips3_wired_enter_page(va, fb_paddr, pgsize) == FALSE) {
 		printf("cannot allocate fb memory\n");
 		return;
 	}
 
-	if (mips3_wired_enter_page(va + pgsize, reg_paddr, pgsize) == false) {
+	if (mips3_wired_enter_page(va + pgsize, reg_paddr, pgsize) == FALSE) {
 		printf("cannot allocate fb register\n");
 		return;
 	}

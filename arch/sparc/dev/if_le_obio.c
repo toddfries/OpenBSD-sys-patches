@@ -1,4 +1,4 @@
-/*	$NetBSD: if_le_obio.c,v 1.26 2008/04/28 20:23:35 martin Exp $	*/
+/*	$NetBSD: if_le_obio.c,v 1.23 2005/11/16 01:09:49 uwe Exp $	*/
 
 /*-
  * Copyright (c) 1997, 1998 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -31,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_le_obio.c,v 1.26 2008/04/28 20:23:35 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_le_obio.c,v 1.23 2005/11/16 01:09:49 uwe Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -76,10 +83,10 @@ static int lemedia[] = {
 };
 #define NLEMEDIA	(sizeof(lemedia) / sizeof(lemedia[0]))
 
-static int	lematch_obio(device_t, cfdata_t, void *);
-static void	leattach_obio(device_t, device_t, void *);
+static int	lematch_obio(struct device *, struct cfdata *, void *);
+static void	leattach_obio(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(le_obio, sizeof(struct le_softc),
+CFATTACH_DECL(le_obio, sizeof(struct le_softc),
     lematch_obio, leattach_obio, NULL, NULL);
 
 
@@ -109,7 +116,7 @@ lerdcsr(struct lance_softc *sc, uint16_t port)
 }
 
 static int
-lematch_obio(device_t parent, cfdata_t cf, void *aux)
+lematch_obio(struct device *parent, struct cfdata *cf, void *aux)
 {
 	union obio_attach_args *uoba = aux;
 	struct obio4_attach_args *oba;
@@ -126,25 +133,24 @@ lematch_obio(device_t parent, cfdata_t cf, void *aux)
 }
 
 static void
-leattach_obio(device_t parent, device_t self, void *aux)
+leattach_obio(struct device *parent, struct device *self, void *aux)
 {
 	union obio_attach_args *uoba = aux;
 	struct obio4_attach_args *oba = &uoba->uoba_oba4;
-	struct le_softc *lesc = device_private(self);
+	struct le_softc *lesc = (struct le_softc *)self;
 	struct lance_softc *sc = &lesc->sc_am7990.lsc;
 	bus_dma_segment_t seg;
 	bus_dma_tag_t dmatag;
 	int rseg;
 	int error;
 
-	sc->sc_dev = self;
 	lesc->sc_bustag = oba->oba_bustag;
 	lesc->sc_dmatag = dmatag = oba->oba_dmatag;
 
 	if (bus_space_map(oba->oba_bustag, oba->oba_paddr,
 			  2 * sizeof(uint16_t),
 			  0, &lesc->sc_reg) != 0) {
-		aprint_error(": cannot map registers\n");
+		printf("%s @ obio: cannot map registers\n", self->dv_xname);
 		return;
 	}
 
@@ -152,7 +158,8 @@ leattach_obio(device_t parent, device_t self, void *aux)
 	if ((error = bus_dmamap_create(dmatag, MEMSIZE, 1, MEMSIZE, 0,
 					BUS_DMA_NOWAIT|BUS_DMA_24BIT,
 					&lesc->sc_dmamap)) != 0) {
-		aprint_error(": DMA map create error %d\n", error);
+		printf("%s: DMA map create error %d\n",
+			self->dv_xname, error);
 		return;
 	}
 
@@ -160,14 +167,15 @@ leattach_obio(device_t parent, device_t self, void *aux)
 	if ((error = bus_dmamem_alloc(dmatag, MEMSIZE, PAGE_SIZE, 0,
 			     &seg, 1, &rseg,
 			     BUS_DMA_NOWAIT | BUS_DMA_24BIT)) != 0) {
-		aprint_error(": DMA memory allocation error %d\n", error);
+		printf("%s: DMA memory allocation error %d\n",
+			self->dv_xname, error);
 		return;
 	}
 	/* Map DMA buffer into kernel space */
 	if ((error = bus_dmamem_map(dmatag, &seg, rseg, MEMSIZE,
-			   (void **)&sc->sc_mem,
+			   (caddr_t *)&sc->sc_mem,
 			   BUS_DMA_NOWAIT|BUS_DMA_COHERENT)) != 0) {
-		aprint_error(": DMA memory map error %d\n", error);
+		printf("%s: DMA memory map error %d\n", self->dv_xname, error);
 		bus_dmamem_free(lesc->sc_dmatag, &seg, rseg);
 		return;
 	}
@@ -175,8 +183,9 @@ leattach_obio(device_t parent, device_t self, void *aux)
 	if ((error = bus_dmamap_load(dmatag, lesc->sc_dmamap,
 				     sc->sc_mem, MEMSIZE, NULL,
 				     BUS_DMA_NOWAIT)) != 0) {
-		aprint_error(": DMA buffer map load error %d\n", error);
-		bus_dmamem_unmap(dmatag, (void *)sc->sc_mem, MEMSIZE);
+		printf("%s: DMA buffer map load error %d\n",
+			self->dv_xname, error);
+		bus_dmamem_unmap(dmatag, (caddr_t)sc->sc_mem, MEMSIZE);
 		bus_dmamem_free(dmatag, &seg, rseg);
 		return;
 	}

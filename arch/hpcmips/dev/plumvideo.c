@@ -1,4 +1,4 @@
-/*	$NetBSD: plumvideo.c,v 1.39 2008/04/28 20:23:21 martin Exp $ */
+/*	$NetBSD: plumvideo.c,v 1.37 2005/12/11 12:17:33 christos Exp $ */
 
 /*-
  * Copyright (c) 1999-2002 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: plumvideo.c,v 1.39 2008/04/28 20:23:21 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: plumvideo.c,v 1.37 2005/12/11 12:17:33 christos Exp $");
 
 #undef PLUMVIDEODEBUG
 
@@ -114,7 +121,7 @@ struct plumvideo_softc {
 int	plumvideo_match(struct device*, struct cfdata*, void*);
 void	plumvideo_attach(struct device*, struct device*, void*);
 
-int	plumvideo_ioctl(void *, u_long, void *, int, struct lwp *);
+int	plumvideo_ioctl(void *, u_long, caddr_t, int, struct lwp *);
 paddr_t	plumvideo_mmap(void *, off_t, int);
 
 CFATTACH_DECL(plumvideo, sizeof(struct plumvideo_softc),
@@ -423,7 +430,7 @@ plumvideo_init(struct plumvideo_softc *sc, int *reverse)
 }
 
 int
-plumvideo_ioctl(void *v, u_long cmd, void *data, int flag, struct lwp *l)
+plumvideo_ioctl(void *v, u_long cmd, caddr_t data, int flag, struct lwp *l)
 {
 	struct plumvideo_softc *sc = (struct plumvideo_softc *)v;
 	struct hpcfb_fbconf *fbconf;

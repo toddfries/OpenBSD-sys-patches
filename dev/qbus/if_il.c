@@ -1,4 +1,4 @@
-/*	$NetBSD: if_il.c,v 1.20 2008/12/16 22:35:34 christos Exp $	*/
+/*	$NetBSD: if_il.c,v 1.18 2007/10/19 12:01:08 ad Exp $	*/
 /*
  * Copyright (c) 1982, 1986 Regents of the University of California.
  * All rights reserved.
@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_il.c,v 1.20 2008/12/16 22:35:34 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_il.c,v 1.18 2007/10/19 12:01:08 ad Exp $");
 
 #include "opt_inet.h"
 
@@ -170,11 +170,11 @@ ilattach(struct device *parent, struct device *self, void *aux)
 	uba_intr_establish(ua->ua_icookie, ua->ua_cvec, ilcint,
 	    sc, &sc->sc_cintrcnt);
 	evcnt_attach_dynamic(&sc->sc_cintrcnt, EVCNT_TYPE_INTR, ua->ua_evcnt,
-	    device_xname(&sc->sc_dev), "intr");
+	    sc->sc_dev.dv_xname, "intr");
 	uba_intr_establish(ua->ua_icookie, ua->ua_cvec-4, ilrint,
 	    sc, &sc->sc_rintrcnt);
 	evcnt_attach_dynamic(&sc->sc_rintrcnt, EVCNT_TYPE_INTR, ua->ua_evcnt,
-	    device_xname(&sc->sc_dev), "intr");
+	    sc->sc_dev.dv_xname, "intr");
 	uba_reset_establish(ilreset, &sc->sc_dev);
 
 	/*
@@ -193,12 +193,12 @@ ilattach(struct device *parent, struct device *self, void *aux)
 	IL_WCSR(IL_CSR, ((sc->sc_ui.ui_baddr >> 2) & IL_EUA)|ILC_STAT);
 	(void)ilwait(sc, "status");
 	ubfree((struct uba_softc *)parent, &sc->sc_ui);
-	printf("%s: module=%s firmware=%s\n", device_xname(&sc->sc_dev),
+	printf("%s: module=%s firmware=%s\n", sc->sc_dev.dv_xname,
 		sc->sc_stats.ils_module, sc->sc_stats.ils_firmware);
-	printf("%s: hardware address %s\n", device_xname(&sc->sc_dev),
+	printf("%s: hardware address %s\n", sc->sc_dev.dv_xname,
 		ether_sprintf(sc->sc_stats.ils_addr));
 
-	strlcpy(ifp->if_xname, device_xname(&sc->sc_dev), IFNAMSIZ);
+	strcpy(ifp->if_xname, sc->sc_dev.dv_xname);
 	ifp->if_softc = sc;
 	ifp->if_flags = IFF_BROADCAST;
 	ifp->if_init = ilinit;
@@ -230,8 +230,9 @@ ilwait(struct il_softc *sc, char *op)
 	if (IL_RCSR(IL_CSR)&IL_STATUS) {
 		char bits[64];
 
-		snprintb(bits, sizeof(bits), IL_BITS, IL_RCSR(IL_CSR));
-		aprint_error_dev(&sc->sc_dev, "%s failed, csr=%s\n", op, bits);
+		printf("%s: %s failed, csr=%s\n", sc->sc_dev.dv_xname, op,
+		    bitmask_snprintf(IL_RCSR(IL_CSR), IL_BITS, bits,
+		    sizeof(bits)));
 		return (-1);
 	}
 	return (0);
@@ -246,7 +247,7 @@ ilreset(struct device *dev)
 {
 	struct il_softc *sc = (void *)dev;
 
-	printf(" %s", device_xname(&sc->sc_dev));
+	printf(" %s", sc->sc_dev.dv_xname);
 	sc->sc_if.if_flags &= ~IFF_RUNNING;
 	sc->sc_flags &= ~ILF_RUNNING;
 	ilinit(&sc->sc_if);
@@ -269,7 +270,7 @@ ilinit(struct ifnet *ifp)
 		if (if_ubainit(&sc->sc_ifuba,
 		    (void *)device_parent(&sc->sc_dev),
 		    ETHER_MAX_LEN)) {
-			aprint_error_dev(&sc->sc_dev, "can't initialize\n");
+			printf("%s: can't initialize\n", sc->sc_dev.dv_xname);
 			sc->sc_if.if_flags &= ~IFF_UP;
 			return 0;
 		}
@@ -317,7 +318,8 @@ ilinit(struct ifnet *ifp)
 			return 0;
 		if (memcmp(sc->sc_stats.ils_addr,
 		    CLLADDR(ifp->if_sadl), ETHER_ADDR_LEN) != 0) {
-			aprint_error_dev(&sc->sc_dev, "setaddr didn't work\n");
+			printf("%s: setaddr didn't work\n",
+			    sc->sc_dev.dv_xname);
 			return 0;
 		}
 	}
@@ -443,8 +445,10 @@ ilcint(void *arg)
 	if ((sc->sc_if.if_flags & IFF_OACTIVE) == 0) {
 		char bits[64];
 
-		snprintb(bits, sizeof(bits), IL_BITS, IL_RCSR(IL_CSR));
-		aprint_error_dev(&sc->sc_dev, "stray xmit interrupt, csr=%s\n",
+		printf("%s: stray xmit interrupt, csr=%s\n",
+		    sc->sc_dev.dv_xname,
+		    bitmask_snprintf(IL_RCSR(IL_CSR), IL_BITS, bits,
+		    sizeof(bits)));
 		return;
 	}
 
@@ -590,7 +594,7 @@ iltotal(struct il_softc *sc)
 	if ((sc->sc_flags & ILF_SETADDR) &&
 	    (memcmp(sc->sc_stats.ils_addr, CLLADDR(ifp->if_sadl),
 		    ETHER_ADDR_LEN) != 0)) {
-		log(LOG_ERR, "%s: physaddr reverted\n", device_xname(&sc->sc_dev));
+		log(LOG_ERR, "%s: physaddr reverted\n", sc->sc_dev.dv_xname);
 		sc->sc_flags &= ~ILF_RUNNING;
 		ilinit(&sc->sc_if);
 	}

@@ -1,4 +1,4 @@
-/* $NetBSD: nextkbd.c,v 1.13 2008/01/05 00:31:56 ad Exp $ */
+/* $NetBSD: nextkbd.c,v 1.11 2006/08/04 02:05:12 mhitch Exp $ */
 /*
  * Copyright (c) 1998 Matt DeBergalis
  * All rights reserved.
@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: nextkbd.c,v 1.13 2008/01/05 00:31:56 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: nextkbd.c,v 1.11 2006/08/04 02:05:12 mhitch Exp $");
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
 
@@ -42,11 +42,12 @@ __KERNEL_RCSID(0, "$NetBSD: nextkbd.c,v 1.13 2008/01/05 00:31:56 ad Exp $");
 #include <sys/malloc.h>
 #include <sys/errno.h>
 #include <sys/queue.h>
-#include <sys/bus.h>
-#include <sys/cpu.h>
-#include <sys/intr.h>
+#include <sys/lock.h>
 
 #include <machine/autoconf.h>
+#include <machine/bus.h>
+#include <machine/cpu.h>
+#include <machine/intr.h>
 
 #include <dev/wscons/wsconsio.h>
 #include <dev/wscons/wskbdvar.h>
@@ -89,7 +90,7 @@ CFATTACH_DECL(nextkbd, sizeof(struct nextkbd_softc),
 
 int	nextkbd_enable(void *, int);
 void	nextkbd_set_leds(void *, int);
-int	nextkbd_ioctl(void *, u_long, void *, int, struct lwp *);
+int	nextkbd_ioctl(void *, u_long, caddr_t, int, struct lwp *);
 
 const struct wskbd_accessops nextkbd_accessops = {
 	nextkbd_enable,
@@ -226,7 +227,7 @@ nextkbd_set_leds(void *v, int leds)
 }
 
 int
-nextkbd_ioctl(void *v, u_long cmd, void *data, int flag, struct lwp *l)
+nextkbd_ioctl(void *v, u_long cmd, caddr_t data, int flag, struct lwp *l)
 {
 	struct nextkbd_softc *sc = v;
 		 

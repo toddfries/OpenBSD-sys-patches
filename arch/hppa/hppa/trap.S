@@ -1,4 +1,4 @@
-/*	$NetBSD: trap.S,v 1.26 2008/08/22 19:32:57 skrll Exp $	*/
+/*	$NetBSD: trap.S,v 1.14 2006/09/15 06:09:36 skrll Exp $	*/
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed by the NetBSD
+ *      Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -103,9 +110,9 @@
  */
 
 	.section .data
-	.align	64
-$trap_tmp_save:
-	.block	TF_PHYS
+	.align	2048
+$trap_tmp_save:			/* XXX assumed to be aligned on 2048 */
+	.block	TF_PHYS		/* XXX must be aligned to 64 */
 	.align	64
 	.export emergency_stack_start, data
 emergency_stack_start:
@@ -119,6 +126,7 @@ emergency_stack_end:
 /*
  * Kernel Gateway Page (must be at known address)
  *	System Call Gate
+ *	Signal Return Gate
  *
  * GATEway instructions have to be at a fixed known locations
  * because their addresses are hard coded in routines such as
@@ -179,7 +187,7 @@ $bsd_syscall:
 	.import $syscall,code
 	.call
 	ldil	L%$syscall, %t2
-	be,n	R%$syscall(%sr1, %t2)
+	be,n	R%$syscall(%sr7, %t2)
 	nop
 
 	.align	NBPG
@@ -219,19 +227,7 @@ $syscall:
 	stw	%t1, TF_R22 -TRAPFRAME_SIZEOF(%sr1, %t3)	/* syscall # */
 	stw	%t4, TF_R19 -TRAPFRAME_SIZEOF(%sr1, %t3)	/* convenience */
 	copy	%sp, %t4
-
-	/*
-	 * Make space for the syscall arguments.
-	 *
-	 * Match the offset from %sp to the trapframe with the
-	 * offset in TLABEL(all) for the benefit of ddb.
-	 */
 	ldo	HPPA_FRAME_SIZE+HPPA_FRAME_MAXARGS(%t3), %sp
-
-	/* Align correctly */
-	ldo	HPPA_FRAME_SIZE-1(%sp),%sp
-	 depi	0, 31, 6, %sp
-
 	stw	%t4, TF_R30 -TRAPFRAME_SIZEOF(%sr1, %t3)	/* user stack */
 	stw	%r1, TF_CR15-TRAPFRAME_SIZEOF(%sr1, %t3)	/* eiem */
 	mtctl	%r1, %eiem
@@ -384,7 +380,12 @@ $syscall:
 
 	/* do a syscall */
 	.import	syscall,code
-	CALL(syscall, %r1)
+	ldil	L%syscall, %r1
+	ldo	R%syscall(%r1), %r1
+	.call
+	blr	%r0, %rp
+	bv,n	0(%r1)
+	nop
 
 	ldil	L%curlwp, %r1
 	ldw	R%curlwp(%r1), %r1
@@ -413,7 +414,6 @@ $syscall_return:
 	 */
 	copy	%t3, %arg0
 	ldil	L%$trap_tmp_save, %arg1
-	ldo	R%$trap_tmp_save(%arg1), %arg1
 	ldi	TF_PHYS - 4, %arg2
 $syscall_return_copy_loop:
 	ldwm	4(%arg0), %t1
@@ -502,9 +502,9 @@ $syscall_return_copy_loop:
 	 */
 	rsm	RESET_PSW, %r0
 	nop ! nop ! nop ! nop ! nop ! nop ! nop ! nop	/* XXX really? */
+$syscall_return_phys:
 
 	ldil	L%$trap_tmp_save, %t3
-	ldo     R%$trap_tmp_save(%t3), %t3
 
 	/* finally we can restore the space and offset queues and the ipsw */
 	ldw	TF_IISQH(%t3), %t1
@@ -541,6 +541,7 @@ $syscall_end:
 /*
  * interrupt vector table
  */
+/* XXX - fredette changed sr4 to sr7 below: */
 #define	TLABEL(name)	$trap$name
 #define	TELABEL(num)	__CONCAT(trap_ep_,num)
 #define TRAP(name,num) \
@@ -643,7 +644,7 @@ os_hpmc:
 	STRAP(itlb,T_ITLBMISSNA,ITLBPRE)/* 16. ITLB non-access miss fault */
 	STRAP(dtlb,T_DTLBMISSNA,DTLBPRE)/* 17. DTLB non-access miss fault */
 	ATRAP(dprot,T_DPROT)		/* 18. data protection trap
-					       unaligned data reference trap */
+					      unalligned data reference trap */
 	ATRAP(dbrk,T_DBREAK)		/* 19. data break trap */
 	STRAP(tlbd,T_TLB_DIRTY,DTLBPRE)	/* 20. TLB dirty bit trap */
 	ATRAP(pgref,T_PAGEREF)		/* 21. page reference trap */
@@ -721,11 +722,11 @@ os_hpmc:
  * Otherwise, we set up the kernel context, move onto the 
  * emergency stack, and call hppa_machine_check.
  */
-ENTRY_NOPROFILE(os_toc, 0)
+ENTRY(os_toc, 0)
 	/* This loads %arg0 and nullifies the next instruction. */
 	addi,tr	T_INTERRUPT, %r0, %arg0
 EXIT(os_toc)
-ENTRY_NOPROFILE(TLABEL(hpmc),0)
+ENTRY(TLABEL(hpmc),0)
 ALTENTRY(os_hpmc_cont)
 	ldi	T_HPMC, %arg0
 	
@@ -841,7 +842,7 @@ EXIT(TLABEL(hpmc))
  * emulate FPU coprocessor, and dispatch accordingly.
  */
 	.export TLABEL(emu), entry
-LEAF_ENTRY_NOPROFILE(TLABEL(emu))
+LEAF_ENTRY(TLABEL(emu))
 
 	/*
 	 * Save %arg0 and load it with the instruction
@@ -1018,7 +1019,7 @@ EXIT(TLABEL(emu))
  * or
  * void hppa_fpu_swap(struct pcb *out, NULL);
  */
-LEAF_ENTRY_NOPROFILE(hppa_fpu_swap)
+LEAF_ENTRY(hppa_fpu_swap)
 
 	/*
 	 * Note that this function must work in 
@@ -1199,7 +1200,7 @@ EXIT(hppa_fpu_swap)
  * int desidhash_s(void)
  */
 	.align	64
-LEAF_ENTRY_NOPROFILE(desidhash_s)
+LEAF_ENTRY(desidhash_s)
 ALTENTRY(desidhash_x)
 	MFCPU_T(DR_CPUCFG,22)	/* t1 */
 	MFCPU_T(DR_CPUCFG,22)
@@ -1219,7 +1220,7 @@ EXIT(desidhash_s)
  * int desidhash_t(void)
  */
 	.align	64
-LEAF_ENTRY_NOPROFILE(desidhash_t)
+LEAF_ENTRY(desidhash_t)
 	MFCPU_T(DR_CPUCFG,22)	/* t1 */
 	MFCPU_T(DR_CPUCFG,22)
 	depi	0, DR0_PCXT_IHE, 1, %t1
@@ -1506,7 +1507,7 @@ $flush_writable_itlb_t:
  * int
  * ibtlb_l(int i, pa_space_t sp, vaddr_t va, paddr_t pa, vsize_t sz, u_int prot)
  */
-LEAF_ENTRY_NOPROFILE(ibtlb_l)
+LEAF_ENTRY(ibtlb_l)
 	rsm	(PSW_R|PSW_I), %t4
 
 	bv	0(%rp)
@@ -1517,7 +1518,7 @@ EXIT(ibtlb_l)
  * int
  * pbtlb_l(int i)
  */
-LEAF_ENTRY_NOPROFILE(pbtlb_l)
+LEAF_ENTRY(pbtlb_l)
 	; DR_PAGE0
 	rsm	(PSW_R|PSW_I), %t4
 	ldil	L%0xc041, %t1
@@ -1535,7 +1536,7 @@ EXIT(pbtlb_l)
 /*
  * int desidhash_l(void)
  */
-LEAF_ENTRY_NOPROFILE(desidhash_l)
+LEAF_ENTRY(desidhash_l)
 	MFCPU_C(DR_CPUCFG,22)	/* t1 */
 	depi	0, DR0_PCXL_L2IHASH_EN, 2, %t1	/* + DR0_PCXL_L2DHASH_EN */
 	depi	0, DR0_PCXL_L2IHPMC, 1, %t1	/* don't reset */
@@ -1868,7 +1869,7 @@ $tlb_missend:
 
 	.align	64
 	.export	TLABEL(all), entry
-ENTRY_NOPROFILE(TLABEL(all),0)
+ENTRY(TLABEL(all),0)
 	/* r1 still has trap type */
 
 	/*
@@ -1884,7 +1885,6 @@ ENTRY_NOPROFILE(TLABEL(all),0)
 	mtctl	%t3, %tr2
 
 	ldil	L%$trap_tmp_save, %t3
-	ldo	R%$trap_tmp_save(%t3), %t3
 	stw	%t1, TF_R22(%t3)	/* use ,bc */
 	stw	%t2, TF_R21(%t3)
 
@@ -2020,14 +2020,6 @@ $trap_have_stack:
 
 	copy	%sp, %t3
 	ldo	HPPA_FRAME_SIZE+TRAPFRAME_SIZEOF(%sp), %sp
-
-#if defined(DDB) || defined(KGDB)
-	/*
-	 * Match the offset from %sp for the trapframe with $syscall
-	 */
-	ldo	HPPA_FRAME_MAXARGS+HPPA_FRAME_SIZE-1(%sp),%sp
-	depi	0, 31, 6, %sp
-#endif
 	rfir
 	nop
 $trapnowvirt:
@@ -2091,16 +2083,23 @@ $trapnowvirt:
 	 * Copy partially saved state from the store into the frame
 	 */
 	ldil	L%$trap_tmp_save, %t2
-	ldo	R%$trap_tmp_save(%t2), %t2
 	/* use ,bc each line */
-	ldw  0(%t2), %r1 ! ldw  4(%t2), %t1 ! stw %r1,  0(%t3) ! stw %t1,  4(%t3)
-	ldw  8(%t2), %r1 ! ldw 12(%t2), %t1 ! stw %r1,  8(%t3) ! stw %t1, 12(%t3)
-	ldw 16(%t2), %r1 ! ldw 20(%t2), %t1 ! stw %r1, 16(%t3) ! stw %t1, 20(%t3)
-	ldw 24(%t2), %r1 ! ldw 28(%t2), %t1 ! stw %r1, 24(%t3) ! stw %t1, 28(%t3)
-	ldw 32(%t2), %r1 ! ldw 36(%t2), %t1 ! stw %r1, 32(%t3) ! stw %t1, 36(%t3)
-	ldw 40(%t2), %r1 ! ldw 44(%t2), %t1 ! stw %r1, 40(%t3) ! stw %t1, 44(%t3)
-	ldw 48(%t2), %r1 ! ldw 52(%t2), %t1 ! stw %r1, 48(%t3) ! stw %t1, 52(%t3)
-	ldw 56(%t2), %r1 ! ldw 60(%t2), %t1 ! stw %r1, 56(%t3) ! stw %t1, 60(%t3)
+	ldw  0(%t2), %r1 ! ldw  4(%t2), %t1
+	stw %r1,  0(%t3) ! stw %t1,  4(%t3)
+	ldw  8(%t2), %r1 ! ldw 12(%t2), %t1
+	stw %r1,  8(%t3) ! stw %t1, 12(%t3)
+	ldw 16(%t2), %r1 ! ldw 20(%t2), %t1
+	stw %r1, 16(%t3) ! stw %t1, 20(%t3)
+	ldw 24(%t2), %r1 ! ldw 28(%t2), %t1
+	stw %r1, 24(%t3) ! stw %t1, 28(%t3)
+	ldw 32(%t2), %r1 ! ldw 36(%t2), %t1
+	stw %r1, 32(%t3) ! stw %t1, 36(%t3)
+	ldw 40(%t2), %r1 ! ldw 44(%t2), %t1
+	stw %r1, 40(%t3) ! stw %t1, 44(%t3)
+	ldw 48(%t2), %r1 ! ldw 52(%t2), %t1
+	stw %r1, 48(%t3) ! stw %t1, 52(%t3)
+	ldw 56(%t2), %r1 ! ldw 60(%t2), %t1
+	stw %r1, 56(%t3) ! stw %t1, 60(%t3)
 
 	/*
 	 * Normally, we'd only have to save and restore the 
@@ -2188,12 +2187,15 @@ $trapnowvirt:
 	copy	%t3, %arg1
 
 #if defined(DDB) || defined(KGDB)
-	/* Mark frame pointer as NULL to indicate syscall/trap */
-	copy	%r0, %r3
+	ldo	-HPPA_FRAME_SIZE(%sp), %r3
 #endif
-
 	.import	trap, code
-	CALL(trap, %t1)
+	ldil	L%trap,%t1
+	ldo	R%trap(%t1),%t1
+	.call
+	blr	%r0,%rp
+	bv,n	%r0(%t1)
+	nop
 
 	ldw	-HPPA_FRAME_SIZE+4(%sp), %t3
 	/* see if curlwp has changed */
@@ -2201,9 +2203,12 @@ $trapnowvirt:
 	bb,>=,n	%arg0, TFF_LAST_POS, $trap_return
 	nop
 
-	/* load curlwp's trapframe pointer */
+	/* see if curlwp has really changed */
 	ldil	L%curlwp, %t1
 	ldw	R%curlwp(%t1), %t2
+	comb,=,n %r0, %t2, $trap_return
+
+	/* means curlwp has actually changed */
 	ldw	L_MD(%t2), %t3
 
 $trap_return:
@@ -2218,7 +2223,7 @@ EXIT(TLABEL(all))
 
 	.align	32
 	.export	TLABEL(ibrk), entry
-ENTRY_NOPROFILE(TLABEL(ibrk),0)
+ENTRY(TLABEL(ibrk),0)
 	mtctl	%t1, %tr2
 	mtctl	%t2, %tr3
 

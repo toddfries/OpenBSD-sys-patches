@@ -1,4 +1,4 @@
-/*	$NetBSD: acphy.c,v 1.23 2008/11/17 03:04:27 dyoung Exp $	*/
+/*	$NetBSD: acphy.c,v 1.19 2006/11/16 21:24:06 christos Exp $	*/
 
 /*
  * Copyright 2001 Wasabi Systems, Inc.
@@ -40,7 +40,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: acphy.c,v 1.23 2008/11/17 03:04:27 dyoung Exp $");
+__KERNEL_RCSID(0, "$NetBSD: acphy.c,v 1.19 2006/11/16 21:24:06 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -58,10 +58,10 @@ __KERNEL_RCSID(0, "$NetBSD: acphy.c,v 1.23 2008/11/17 03:04:27 dyoung Exp $");
 
 #include <dev/mii/acphyreg.h>
 
-static int	acphymatch(device_t, cfdata_t, void *);
-static void	acphyattach(device_t, device_t, void *);
+static int	acphymatch(struct device *, struct cfdata *, void *);
+static void	acphyattach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(acphy, sizeof(struct mii_softc),
+CFATTACH_DECL(acphy, sizeof(struct mii_softc),
     acphymatch, acphyattach, mii_phy_detach, mii_phy_activate);
 
 static int	acphy_service(struct mii_softc *, struct mii_data *, int);
@@ -90,7 +90,8 @@ static const struct mii_phydesc acphys[] = {
 };
 
 static int
-acphymatch(device_t parent, cfdata_t match, void *aux)
+acphymatch(struct device *parent, struct cfdata *match,
+    void *aux)
 {
 	struct mii_attach_args *ma = aux;
 
@@ -101,7 +102,7 @@ acphymatch(device_t parent, cfdata_t match, void *aux)
 }
 
 static void
-acphyattach(device_t parent, device_t self, void *aux)
+acphyattach(struct device *parent, struct device *self, void *aux)
 {
 	struct mii_softc *sc = device_private(self);
 	struct mii_attach_args *ma = aux;
@@ -112,7 +113,6 @@ acphyattach(device_t parent, device_t self, void *aux)
 	aprint_naive(": Media interface\n");
 	aprint_normal(": %s, rev. %d\n", mpd->mpd_name, MII_REV(ma->mii_id2));
 
-	sc->mii_dev = self;
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
 	sc->mii_funcs = &acphy_funcs;
@@ -128,7 +128,7 @@ acphyattach(device_t parent, device_t self, void *aux)
 
 	sc->mii_capabilities =
 	    PHY_READ(sc, MII_BMSR) & ma->mii_capmask;
-	aprint_normal_dev(sc->mii_dev, "");
+	aprint_normal("%s: ", sc->mii_dev.dv_xname);
 
 #define	ADD(m, c)	ifmedia_add(&mii->mii_media, (m), (c), NULL)
 	if (sc->mii_flags & MIIF_HAVEFIBER) {

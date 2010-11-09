@@ -1,4 +1,4 @@
-/*	$NetBSD: svr4_32_resource.c,v 1.16 2009/01/11 13:14:15 nakayama Exp $	 */
+/*	$NetBSD: svr4_32_resource.c,v 1.9 2006/07/28 13:02:56 hannken Exp $	 */
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: svr4_32_resource.c,v 1.16 2009/01/11 13:14:15 nakayama Exp $");
+__KERNEL_RCSID(0, "$NetBSD: svr4_32_resource.c,v 1.9 2006/07/28 13:02:56 hannken Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -49,10 +56,11 @@ __KERNEL_RCSID(0, "$NetBSD: svr4_32_resource.c,v 1.16 2009/01/11 13:14:15 nakaya
 #include <compat/svr4_32/svr4_32_syscallargs.h>
 #include <compat/svr4_32/svr4_32_util.h>
 
-static inline int svr4_to_native_rl(int);
+static inline int svr4_to_native_rl __P((int));
 
 static inline int
-svr4_to_native_rl(int rl)
+svr4_to_native_rl(rl)
+	int rl;
 {
 	switch (rl) {
 	case SVR4_RLIMIT_CPU:
@@ -83,14 +91,18 @@ svr4_to_native_rl(int rl)
 	((svr4_rlim_t)(l)) != SVR4_RLIM_SAVED_CUR && \
 	((svr4_rlim_t)(l)) != SVR4_RLIM_SAVED_MAX)
 
-#define OKLIMIT64(l) (((rlim_t)(l)) < RLIM_INFINITY && \
+#define OKLIMIT64(l) (((rlim_t)(l)) >= 0 && ((rlim_t)(l)) < RLIM_INFINITY && \
 	((svr4_rlim64_t)(l)) != SVR4_RLIM64_INFINITY && \
 	((svr4_rlim64_t)(l)) != SVR4_RLIM64_SAVED_CUR && \
 	((svr4_rlim64_t)(l)) != SVR4_RLIM64_SAVED_MAX)
 
 int
-svr4_32_sys_getrlimit(struct lwp *l, const struct svr4_32_sys_getrlimit_args *uap, register_t *retval)
+svr4_32_sys_getrlimit(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
+	struct svr4_32_sys_getrlimit_args *uap = v;
 	struct proc *p = l->l_proc;
 	int rl = svr4_to_native_rl(SCARG(uap, which));
 	struct rlimit blim;
@@ -145,13 +157,17 @@ svr4_32_sys_getrlimit(struct lwp *l, const struct svr4_32_sys_getrlimit_args *ua
 		break;
 	}
 
-	return copyout(&slim, SCARG_P32(uap, rlp), sizeof(slim));
+	return copyout(&slim, (caddr_t)(u_long)SCARG(uap, rlp), sizeof(slim));
 }
 
 
 int
-svr4_32_sys_setrlimit(struct lwp *l, const struct svr4_32_sys_setrlimit_args *uap, register_t *retval)
+svr4_32_sys_setrlimit(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
+	struct svr4_32_sys_setrlimit_args *uap = v;
 	struct proc *p = l->l_proc;
 	int rl = svr4_to_native_rl(SCARG(uap, which));
 	struct rlimit blim, *limp;
@@ -163,7 +179,7 @@ svr4_32_sys_setrlimit(struct lwp *l, const struct svr4_32_sys_setrlimit_args *ua
 
 	limp = &p->p_rlimit[rl];
 
-	if ((error = copyin(SCARG_P32(uap, rlp), &slim,
+	if ((error = copyin((caddr_t)(u_long)SCARG(uap, rlp), &slim,
 	    sizeof(slim))) != 0)
 		return error;
 
@@ -199,8 +215,12 @@ svr4_32_sys_setrlimit(struct lwp *l, const struct svr4_32_sys_setrlimit_args *ua
 
 
 int
-svr4_32_sys_getrlimit64(struct lwp *l, const struct svr4_32_sys_getrlimit64_args *uap, register_t *retval)
+svr4_32_sys_getrlimit64(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
+	struct svr4_32_sys_getrlimit64_args *uap = v;
 	struct proc *p = l->l_proc;
 	int rl = svr4_to_native_rl(SCARG(uap, which));
 	struct rlimit blim;
@@ -238,14 +258,18 @@ svr4_32_sys_getrlimit64(struct lwp *l, const struct svr4_32_sys_getrlimit64_args
 	else
 		slim.rlim_cur = SVR4_RLIM64_SAVED_CUR;
 
-	return copyout(&slim, SCARG_P32(uap, rlp),
+	return copyout(&slim, (caddr_t)(u_long)SCARG(uap, rlp),
 			       sizeof(slim));
 }
 
 
 int
-svr4_32_sys_setrlimit64(struct lwp *l, const struct svr4_32_sys_setrlimit64_args *uap, register_t *retval)
+svr4_32_sys_setrlimit64(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
+	struct svr4_32_sys_setrlimit64_args *uap = v;
 	struct proc *p = l->l_proc;
 	int rl = svr4_to_native_rl(SCARG(uap, which));
 	struct rlimit blim, *limp;
@@ -257,7 +281,7 @@ svr4_32_sys_setrlimit64(struct lwp *l, const struct svr4_32_sys_setrlimit64_args
 
 	limp = &p->p_rlimit[rl];
 
-	if ((error = copyin(SCARG_P32(uap, rlp),
+	if ((error = copyin((caddr_t)(u_long)SCARG(uap, rlp),
 	    &slim, sizeof(slim))) != 0)
 		return error;
 

@@ -1,4 +1,4 @@
-|	$NetBSD: vectors.s,v 1.15 2008/12/20 01:05:46 isaki Exp $
+|	$NetBSD: vectors.s,v 1.12 2005/12/11 12:19:45 christos Exp $
 
 | Copyright (c) 1988 University of Utah
 | Copyright (c) 1990, 1993
@@ -121,8 +121,8 @@ GLOBAL(vectab)
 	VECTOR(intiotrap)	/* 62: unassigned, reserved */
 	VECTOR(intiotrap)	/* 63: unassigned, reserved */
 	VECTOR(intiotrap)	/* 64: MFP GPIP0 RTC alarm */
-	VECTOR(intiotrap)	/* 65: MFP GPIP1 ext. power switch */
-	VECTOR(intiotrap)	/* 66: MFP GPIP2 front power switch */
+	VECTOR(powtrap)		/* 65: MFP GPIP1 ext. power switch */
+	VECTOR(powtrap)		/* 66: MFP GPIP2 front power switch */
 	VECTOR(intiotrap)	/* 67: MFP GPIP3 FM sound generator */
 	VECTOR(intiotrap)	/* 68: MFP timer-D */
 	VECTOR(timertrap)	/* 69: MFP timer-C */
@@ -170,7 +170,7 @@ GLOBAL(vectab)
 	VECTOR(intiotrap)	/* 111: unassigned, reserved */
 	VECTOR(intiotrap)	/* 112: Z8530 SCC (onboard) */
 	VECTOR(intiotrap)	/* 113: Z8530 SCC */
-	VECTOR(intiotrap)	/* 114: Z8530 SCC */
+	VECTOR(intiotrap)	/* 114: Z8530 SCC */; 
 	VECTOR(intiotrap)	/* 115: unassigned, reserved */
 	VECTOR(intiotrap)	/* 116: unassigned, reserved */
 	VECTOR(intiotrap)	/* 117: unassigned, reserved */

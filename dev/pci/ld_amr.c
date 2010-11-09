@@ -1,4 +1,4 @@
-/*	$NetBSD: ld_amr.c,v 1.17 2008/09/09 12:45:40 tron Exp $	*/
+/*	$NetBSD: ld_amr.c,v 1.15 2008/04/10 19:13:37 cegger Exp $	*/
 
 /*-
  * Copyright (c) 2002, 2003 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -34,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ld_amr.c,v 1.17 2008/09/09 12:45:40 tron Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ld_amr.c,v 1.15 2008/04/10 19:13:37 cegger Exp $");
 
 #include "rnd.h"
 
@@ -74,23 +81,27 @@ static void	ld_amr_handler(struct amr_ccb *);
 static int	ld_amr_start(struct ld_softc *, struct buf *);
 
 static int
-ld_amr_match(device_t parent, cfdata_t match, void *aux)
+ld_amr_match(struct device *parent, struct cfdata *match,
+    void *aux)
 {
 
 	return (1);
 }
 
 static void
-ld_amr_attach(device_t parent, device_t self, void *aux)
+ld_amr_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct amr_attach_args *amra = aux;
-	struct ld_amr_softc *sc = device_private(self);
-	struct ld_softc *ld = &sc->sc_ld;
-	struct amr_softc *amr = device_private(parent);
+	struct amr_attach_args *amra;
+	struct ld_amr_softc *sc;
+	struct ld_softc *ld;
+	struct amr_softc *amr;
 	const char *statestr;
 	int happy;
 
-	ld->sc_dv = self;
+	sc = (struct ld_amr_softc *)self;
+	ld = &sc->sc_ld;
+	amr = (struct amr_softc *)parent;
+	amra = aux;
 
 	sc->sc_hwunit = amra->amra_unit;
 	ld->sc_maxxfer = amr_max_xfer;
@@ -118,7 +129,7 @@ ld_amr_attach(device_t parent, device_t self, void *aux)
 	ldattach(ld);
 }
 
-CFATTACH_DECL_NEW(ld_amr, sizeof(struct ld_amr_softc),
+CFATTACH_DECL(ld_amr, sizeof(struct ld_amr_softc),
     ld_amr_match, ld_amr_attach, NULL, NULL);
 
 static int
@@ -130,7 +141,7 @@ ld_amr_dobio(struct ld_amr_softc *sc, void *data, int datasize,
 	struct amr_mailbox_cmd *mb;
 	int s, rv;
 
-	amr = device_private(device_parent(sc->sc_ld.sc_dv));
+	amr = (struct amr_softc *)device_parent(&sc->sc_ld.sc_dv);
 
 	if ((rv = amr_ccb_alloc(amr, &ac)) != 0)
 		return (rv);
@@ -186,10 +197,10 @@ ld_amr_handler(struct amr_ccb *ac)
 
 	bp = ac->ac_context;
 	sc = (struct ld_amr_softc *)ac->ac_dv;
-	amr = device_private(device_parent(sc->sc_ld.sc_dv));
+	amr = (struct amr_softc *)device_parent(&sc->sc_ld.sc_dv);
 
 	if (ac->ac_status != AMR_STATUS_SUCCESS) {
-		printf("%s: cmd status 0x%02x\n", device_xname(sc->sc_ld.sc_dv),
+		printf("%s: cmd status 0x%02x\n", device_xname(&sc->sc_ld.sc_dv),
 		    ac->ac_status);
 
 		bp->b_error = EIO;

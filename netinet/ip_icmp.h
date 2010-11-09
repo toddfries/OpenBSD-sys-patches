@@ -1,4 +1,4 @@
-/*	$NetBSD: ip_icmp.h,v 1.25 2008/09/08 23:36:55 gmcgarry Exp $	*/
+/*	$NetBSD: ip_icmp.h,v 1.23 2006/05/14 02:34:41 christos Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1993
@@ -46,7 +46,7 @@
 struct icmp_ra_addr {
 	u_int32_t ira_addr;
 	u_int32_t ira_preference;
-} __packed;
+} __attribute__((__packed__));
 
 /*
  * Structure of an icmp header.
@@ -61,20 +61,20 @@ struct icmp {
 		struct ih_idseq {
 			  n_short icd_id;
 			  n_short icd_seq;
-		} ih_idseq __packed;
+		} ih_idseq __attribute__((__packed__));
 		int32_t   ih_void;
 
 		/* ICMP_UNREACH_NEEDFRAG -- Path MTU Discovery (RFC1191) */
 		struct ih_pmtu {
 			  n_short ipm_void;
 			  n_short ipm_nextmtu;
-		} ih_pmtu __packed;
+		} ih_pmtu __attribute__((__packed__));
 		struct ih_rtradv {
 			u_int8_t irt_num_addrs;
 			u_int8_t irt_wpa;
 			u_int16_t irt_lifetime;
-		} ih_rtradv __packed;
-	} icmp_hun /* XXX __packed ??? */;
+		} ih_rtradv __attribute__((__packed__));
+	} icmp_hun /* XXX __attribute__((__packed__)) ??? */;
 #define	icmp_pptr	  icmp_hun.ih_pptr
 #define	icmp_gwaddr	  icmp_hun.ih_gwaddr
 #define	icmp_id		  icmp_hun.ih_idseq.icd_id
@@ -90,15 +90,15 @@ struct icmp {
 			  n_time its_otime;
 			  n_time its_rtime;
 			  n_time its_ttime;
-		} id_ts __packed;
+		} id_ts __attribute__((__packed__));
 		struct id_ip  {
 			  struct ip idi_ip;
 			  /* options and then 64 bits of data */
-		} id_ip /* XXX: __packed ??? */;
+		} id_ip /* XXX: __attribute__((__packed__)) ??? */;
 		struct icmp_ra_addr id_radv;
 		u_int32_t id_mask;
 		int8_t	  id_data[1];
-	} icmp_dun /* XXX __packed ??? */;
+	} icmp_dun /* XXX __attribute__((__packed__)) ??? */;
 #define	icmp_otime	  icmp_dun.id_ts.its_otime
 #define	icmp_rtime	  icmp_dun.id_ts.its_rtime
 #define	icmp_ttime	  icmp_dun.id_ts.its_ttime

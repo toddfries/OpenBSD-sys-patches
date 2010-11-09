@@ -1,4 +1,4 @@
-/* $NetBSD: aupcmcia.c,v 1.6 2008/01/08 13:26:26 dogcow Exp $ */
+/* $NetBSD: aupcmcia.c,v 1.2 2006/03/25 07:25:56 gdamore Exp $ */
 
 /*-
  * Copyright (c) 2006 Itronix Inc.
@@ -35,7 +35,7 @@
 /* #include "pci.h" */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: aupcmcia.c,v 1.6 2008/01/08 13:26:26 dogcow Exp $");
+__KERNEL_RCSID(0, "$NetBSD: aupcmcia.c,v 1.2 2006/03/25 07:25:56 gdamore Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -43,8 +43,6 @@ __KERNEL_RCSID(0, "$NetBSD: aupcmcia.c,v 1.6 2008/01/08 13:26:26 dogcow Exp $");
 #include <sys/errno.h>
 #include <sys/kernel.h>
 #include <sys/kthread.h>
-#include <sys/intr.h>
-#include <sys/device.h>
 
 #include <dev/pcmcia/pcmciareg.h>
 #include <dev/pcmcia/pcmciavar.h>
@@ -110,6 +108,7 @@ static void aupcm_slot_settype(pcmcia_chipset_handle_t, int);
 static int aupcm_match(struct device *, struct cfdata *, void *);
 static void aupcm_attach(struct device *, struct device *, void *);
 
+static void aupcm_create_thread(void *);
 static void aupcm_event_thread(void *);
 static int aupcm_card_intr(void *);
 static void aupcm_softintr(void *);
@@ -148,7 +147,7 @@ struct aupcm_softc {
 	paddr_t			sc_base;
 
 	int			sc_wake;
-	lwp_t			*sc_thread;
+	struct proc		*sc_thread;
 
 	int			sc_nslots;
 	struct aupcm_slot	sc_slots[AUPCMCIA_NSLOTS];
@@ -289,10 +288,7 @@ aupcm_attach(struct device *parent, struct device *self, void *aux)
 	 * au_icu.c won't support it right now.  We poll in the event thread
 	 * for now.  Start by initializing it now.
 	 */
-	if (kthread_create(PRI_NONE, 0, NULL, aupcm_event_thread, sc,
-	    &sc->sc_thread, "%s", sc->sc_dev.dv_xname) != 0)
-		panic("%s: unable to create event kthread",
-		    sc->sc_dev.dv_xname);
+	kthread_create(aupcm_create_thread, sc);
 }
 
 int
@@ -322,7 +318,15 @@ aupcm_intr_establish(pcmcia_chipset_handle_t pch,
 	 */
 	sp->as_intr = handler;
 	sp->as_intrarg = arg;
-	sp->as_softint = softint_establish(IPL_SOFTNET, aupcm_softintr, sp);
+
+	/*
+	 * XXX: pil must be a software interrupt level.  That
+	 * automatically implies that it is lower than any other
+	 * hardware interrupts.  So trying to figure out which level
+	 * (IPL_SOFTNET, IPL_SOFTSERIAL, etc.) doesn't really do
+	 * anything for us.
+	 */
+	sp->as_softint = softintr_establish(IPL_SOFT, aupcm_softintr, sp);
 
 	/* set up hard interrupt handler for the card IRQs */
 	s = splhigh();
@@ -349,10 +353,21 @@ aupcm_intr_disestablish(pcmcia_chipset_handle_t pch, void *ih)
 	au_intr_disestablish(sp->as_hardint);
 	sp->as_hardint = 0;
 
-	softint_disestablish(ih);
+	softintr_disestablish(ih);
 	sp->as_softint = 0;
 	sp->as_intr = NULL;
 	sp->as_intrarg = NULL;
+}
+
+void
+aupcm_create_thread(void *arg)
+{
+	struct aupcm_softc *sc = arg;
+	const char *name = sc->sc_dev.dv_xname;
+
+	if (kthread_create1(aupcm_event_thread, sc,
+		&sc->sc_thread, "%s", name) != 0)
+		panic("%s: unable to create event kthread", name);
 }
 
 /*
@@ -451,7 +466,7 @@ aupcm_card_intr(void *arg)
 	au_intr_disable(sp->as_card_irq);
 
 	if (sp->as_intr != NULL) {
-		softint_schedule(sp->as_softint);
+		softintr_schedule(sp->as_softint);
 	}
 
 	return 1;

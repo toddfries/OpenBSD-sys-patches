@@ -1,4 +1,4 @@
-/*	$NetBSD: linux32_missing.h,v 1.8 2008/04/16 10:03:31 njoly Exp $ */
+/*	$NetBSD: linux32_missing.h,v 1.2 2006/09/13 19:55:49 manu Exp $ */
 
 /*-
  * Copyright (c) 2006 Emmanuel Dreyfus, all rights reserved.
@@ -43,7 +43,10 @@
 struct linux_sys_old_mmap_args {
 	syscallarg(struct linux_oldmmap *) lmp;
 };  
-
+struct linux_sys_ugetrlimit_args {
+	syscallarg(int) which;
+	syscallarg(struct orlimit *) rlp;
+};  
 struct linux_sys_fcntl64_args {
 	syscallarg(int) fd;
 	syscallarg(int) cmd;
@@ -53,30 +56,57 @@ struct linux_sys_llseek_args {
         syscallarg(int) fd; 
         syscallarg(u_int32_t) ohigh;  
         syscallarg(u_int32_t) olow;
-        syscallarg(void *) res;
+        syscallarg(caddr_t) res;
         syscallarg(int) whence;
+};
+
+struct linux_sys_setresgid16_args {
+        syscallarg(gid_t) rgid;
+        syscallarg(gid_t) egid;
+        syscallarg(gid_t) sgid;
+};
+
+struct linux_sys_setresuid16_args {
+        syscallarg(uid_t) ruid;
+        syscallarg(uid_t) euid;
+        syscallarg(uid_t) suid;
+};
+
+struct linux_sys_nice_args {
+	syscallarg(int) incr;
 };
 
 struct linux_sys_getgroups16_args {
         syscallarg(int) gidsetsize;
-        syscallarg(linux_gid16_t *) gidset;
+        syscallarg(linux_gid_t *) gidset;
 };
 
 struct linux_sys_setgroups16_args {
         syscallarg(int) gidsetsize;
-        syscallarg(linux_gid16_t *) gidset;
+        syscallarg(linux_gid_t *) gidset;
+};
+
+struct linux_sys_mmap2_args {
+	syscallarg(unsigned long) addr;
+	syscallarg(size_t) len;
+	syscallarg(int) prot;
+	syscallarg(int) flags;
+	syscallarg(int) fd;
+	syscallarg(linux_off_t) offset;	
 };
 
 #ifdef _KERNEL
 __BEGIN_DECLS
-#define SYS_DEF(foo) struct foo##_args; \
-	int foo(lwp_t *, const struct foo##_args *, register_t *)
-SYS_DEF(linux_sys_old_mmap);
-SYS_DEF(linux_sys_fcntl64);
-SYS_DEF(linux_sys_llseek);
-SYS_DEF(linux_sys_getgroups16);
-SYS_DEF(linux_sys_setgroups16);
-#undef SYS_DEF
+int linux_sys_old_mmap(struct lwp *, void *, register_t *);
+int linux_sys_ugetrlimit(struct lwp *, void *, register_t *);
+int linux_sys_fcntl64(struct lwp *, void *, register_t *);
+int linux_sys_llseek(struct lwp *, void *, register_t *);
+int linux_sys_setresuid16(struct lwp *, void *, register_t *);
+int linux_sys_setresgid16(struct lwp *, void *, register_t *);
+int linux_sys_nice(struct lwp *, void *, register_t *);
+int linux_sys_getgroups16(struct lwp *, void *, register_t *);
+int linux_sys_setgroups16(struct lwp *, void *, register_t *);
+int linux_sys_mmap2(struct lwp *, void *, register_t *);
 __END_DECLS
 #endif /* !_KERNEL */
 

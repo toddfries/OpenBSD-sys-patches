@@ -1,30 +1,4 @@
-/*	$NetBSD: smb_conn.c,v 1.24 2008/04/28 20:24:10 martin Exp $	*/
-
-/*-
- * Copyright (c) 2008 The NetBSD Foundation, Inc.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
- * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
- * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
- * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
- */
+/*	$NetBSD: smb_conn.c,v 1.22 2006/11/16 01:33:51 christos Exp $	*/
 
 /*
  * Copyright (c) 2000-2001 Boris Popov
@@ -61,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: smb_conn.c,v 1.24 2008/04/28 20:24:10 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: smb_conn.c,v 1.22 2006/11/16 01:33:51 christos Exp $");
 
 /*
  * Connection engine.
@@ -96,6 +70,9 @@ MALLOC_DEFINE(M_SMBCONN, "SMB conn", "SMB connection");
 
 static void smb_co_init(struct smb_connobj *cp, int level, const char *objname);
 static void smb_co_done(struct smb_connobj *cp);
+#ifdef DIAGNOSTIC
+static int  smb_co_lockstatus(struct smb_connobj *cp);
+#endif
 
 static int  smb_vc_disconnect(struct smb_vc *vcp);
 static void smb_vc_free(struct smb_connobj *cp);
@@ -115,9 +92,7 @@ smb_sm_init(void)
 {
 
 	smb_co_init(&smb_vclist, SMBL_SM, "smbsm");
-	mutex_enter(&smb_vclist.co_interlock);
-	smb_co_unlock(&smb_vclist);
-	mutex_exit(&smb_vclist.co_interlock);
+	smb_co_unlock(&smb_vclist, 0);
 	return 0;
 }
 
@@ -137,22 +112,15 @@ smb_sm_done(void)
 static int
 smb_sm_lockvclist(int flags)
 {
-	int error;
 
-	mutex_enter(&smb_vclist.co_interlock);
-	error = smb_co_lock(&smb_vclist);
-	mutex_exit(&smb_vclist.co_interlock);
-
-	return error;
+	return smb_co_lock(&smb_vclist, flags | LK_CANRECURSE);
 }
 
 static void
 smb_sm_unlockvclist(void)
 {
 
-	mutex_enter(&smb_vclist.co_interlock);
-	smb_co_unlock(&smb_vclist);
-	mutex_exit(&smb_vclist.co_interlock);
+	smb_co_unlock(&smb_vclist, LK_RELEASE);
 }
 
 static int
@@ -167,7 +135,7 @@ smb_sm_lookupint(struct smb_vcspec *vcspec, struct smb_sharespec *shspec,
 	SMBCO_FOREACH(ocp, &smb_vclist) {
 		struct smb_vc *vcp = (struct smb_vc *)ocp;
 
-		if (smb_vc_lock(vcp) != 0)
+		if (smb_vc_lock(vcp, LK_EXCLUSIVE) != 0)
 			continue;
 
 		do {
@@ -206,7 +174,7 @@ smb_sm_lookupint(struct smb_vcspec *vcspec, struct smb_sharespec *shspec,
 			goto out;
 		} while(0);
 
-		smb_vc_unlock(vcp);
+		smb_vc_unlock(vcp, 0);
 	}
 
     out:
@@ -267,21 +235,21 @@ smb_co_init(struct smb_connobj *cp, int level, const char *objname)
 {
 	SLIST_INIT(&cp->co_children);
 	smb_sl_init(&cp->co_interlock, objname);
-	cv_init(&cp->co_lock, "smblock");
-	cp->co_lockcnt = 0;
-	cp->co_locker = NULL;
+	lockinit(&cp->co_lock, PZERO, objname, 0, 0);
 	cp->co_level = level;
 	cp->co_usecount = 1;
-	mutex_enter(&cp->co_interlock);
-	smb_co_lock(cp);
-	mutex_exit(&cp->co_interlock);
+	KASSERT(smb_co_lock(cp, LK_EXCLUSIVE) == 0);
 }
 
 static void
 smb_co_done(struct smb_connobj *cp)
 {
 	smb_sl_destroy(&cp->co_interlock);
-	cv_destroy(&cp->co_lock);
+#ifdef __NetBSD__
+	lockmgr(&cp->co_lock, LK_DRAIN, NULL);
+#else
+	lockdestroy(&cp->co_lock);
+#endif
 }
 
 static void
@@ -293,9 +261,7 @@ smb_co_gone(struct smb_connobj *cp, struct smb_cred *scred)
 		cp->co_gone(cp, scred);
 	parent = cp->co_parent;
 	if (parent) {
-		mutex_enter(&parent->co_interlock);
-		smb_co_lock(parent);
-		mutex_exit(&parent->co_interlock);
+		smb_co_lock(parent, LK_EXCLUSIVE|LK_CANRECURSE);
 		SLIST_REMOVE(&parent->co_children, cp, smb_connobj, co_next);
 		smb_co_put(parent, scred);
 	}
@@ -307,19 +273,19 @@ void
 smb_co_ref(struct smb_connobj *cp)
 {
 
-	mutex_enter(&cp->co_interlock);
+	SMB_CO_LOCK(cp);
 	cp->co_usecount++;
-	mutex_exit(&cp->co_interlock);
+	SMB_CO_UNLOCK(cp);
 }
 
 void
 smb_co_rele(struct smb_connobj *cp, struct smb_cred *scred)
 {
-	mutex_enter(&cp->co_interlock);
-	smb_co_unlock(cp);
+	SMB_CO_LOCK(cp);
+	lockmgr(&cp->co_lock, LK_RELEASE, NULL);
 	if (cp->co_usecount > 1) {
 		cp->co_usecount--;
-		mutex_exit(&cp->co_interlock);
+		SMB_CO_UNLOCK(cp);
 		return;
 	}
 #ifdef DIAGNOSTIC
@@ -328,29 +294,34 @@ smb_co_rele(struct smb_connobj *cp, struct smb_cred *scred)
 #endif
 	cp->co_usecount--;
 	cp->co_flags |= SMBO_GONE;
-	mutex_exit(&cp->co_interlock);
+	SMB_CO_UNLOCK(cp);
 
 	smb_co_gone(cp, scred);
 }
 
 int
-smb_co_get(struct smb_connobj *cp, struct smb_cred *scred)
+smb_co_get(struct smb_connobj *cp, int flags, struct smb_cred *scred)
 {
 	int error;
 
-	KASSERT(mutex_owned(&cp->co_interlock));
+	if ((flags & LK_INTERLOCK) == 0)
+		SMB_CO_LOCK(cp);
 	cp->co_usecount++;
-	error = smb_co_lock(cp);
-	if (error)
+	error = smb_co_lock(cp, flags | LK_INTERLOCK);
+	if (error) {
+		SMB_CO_LOCK(cp);
 		cp->co_usecount--;
-	return error;
+		SMB_CO_UNLOCK(cp);
+		return error;
+	}
+	return 0;
 }
 
 void
 smb_co_put(struct smb_connobj *cp, struct smb_cred *scred)
 {
 
-	mutex_enter(&cp->co_interlock);
+	SMB_CO_LOCK(cp);
 	if (cp->co_usecount > 1) {
 		cp->co_usecount--;
 	} else if (cp->co_usecount == 1) {
@@ -361,52 +332,42 @@ smb_co_put(struct smb_connobj *cp, struct smb_cred *scred)
 	else
 		panic("smb_co_put: negative usecount");
 #endif
-	smb_co_unlock(cp);
-	mutex_exit(&cp->co_interlock);
+	lockmgr(&cp->co_lock, LK_RELEASE | LK_INTERLOCK, &cp->co_interlock);
 	if ((cp->co_flags & SMBO_GONE) == 0)
 		return;
 	smb_co_gone(cp, scred);
 }
 
+#ifdef DIAGNOSTIC
 int
-smb_co_lock(struct smb_connobj *cp)
+smb_co_lockstatus(struct smb_connobj *cp)
+{
+	return lockstatus(&cp->co_lock);
+}
+#endif
+
+int
+smb_co_lock(struct smb_connobj *cp, int flags)
 {
 
-	KASSERT(mutex_owned(&cp->co_interlock));
-
-	for (;;) {
-		if (cp->co_flags & SMBO_GONE)
-			return EINVAL;
-		if (cp->co_locker == NULL) {
-			cp->co_locker = curlwp;
-			return 0;
-		}
-		if (cp->co_locker == curlwp) {
-			cp->co_lockcnt++;
-			return 0;
-		}
-		cv_wait(&cp->co_lock, &cp->co_interlock);
-	}
+	if (cp->co_flags & SMBO_GONE)
+		return EINVAL;
+	if ((flags & LK_TYPE_MASK) == 0)
+		flags |= LK_EXCLUSIVE;
+	return lockmgr(&cp->co_lock, flags, &cp->co_interlock);
 }
 
 void
-smb_co_unlock(struct smb_connobj *cp)
+smb_co_unlock(struct smb_connobj *cp, int flags)
 {
-
-	KASSERT(mutex_owned(&cp->co_interlock));
-	KASSERT(cp->co_locker == curlwp);
-
-	if (cp->co_lockcnt != 0) {
-		cp->co_lockcnt--;
-		return;
-	}
-	cp->co_locker = NULL;
-	cv_signal(&cp->co_lock);
+	(void)lockmgr(&cp->co_lock, flags | LK_RELEASE, &cp->co_interlock);
 }
 
 static void
 smb_co_addchild(struct smb_connobj *parent, struct smb_connobj *child)
 {
+	KASSERT(smb_co_lockstatus(parent) == LK_EXCLUSIVE);
+	KASSERT(smb_co_lockstatus(child) == LK_EXCLUSIVE);
 
 	smb_co_ref(parent);
 	SLIST_INSERT_HEAD(&parent->co_children, child, co_next);
@@ -562,16 +523,9 @@ smb_vc_rele(struct smb_vc *vcp, struct smb_cred *scred)
 }
 
 int
-smb_vc_get(struct smb_vc *vcp, struct smb_cred *scred)
+smb_vc_get(struct smb_vc *vcp, int flags, struct smb_cred *scred)
 {
-	struct smb_connobj *cp = VCTOCP(vcp);
-	int error;
-
-	mutex_enter(&cp->co_interlock);
-	error = smb_co_get(cp, scred);
-	mutex_exit(&cp->co_interlock);
-
-	return error;
+	return smb_co_get(VCTOCP(vcp), flags, scred);
 }
 
 void
@@ -581,28 +535,16 @@ smb_vc_put(struct smb_vc *vcp, struct smb_cred *scred)
 }
 
 int
-smb_vc_lock(struct smb_vc *vcp)
+smb_vc_lock(struct smb_vc *vcp, int flags)
 {
-	struct smb_connobj *cp = VCTOCP(vcp);
-	int error;
-
-	mutex_enter(&cp->co_interlock);
-	error = smb_co_lock(cp);
-	mutex_exit(&cp->co_interlock);
-
-	return error;
+	return smb_co_lock(VCTOCP(vcp), flags);
 }
 
 void
-smb_vc_unlock(struct smb_vc *vcp)
+smb_vc_unlock(struct smb_vc *vcp, int flags)
 {
-	struct smb_connobj *cp = VCTOCP(vcp);
-
-	mutex_enter(&cp->co_interlock);
-	smb_co_unlock(cp);
-	mutex_exit(&cp->co_interlock);
+	smb_co_unlock(VCTOCP(vcp), flags);
 }
-
 
 int
 smb_vc_access(struct smb_vc *vcp, struct smb_cred *scred, mode_t mode)
@@ -663,12 +605,12 @@ smb_vc_lookupshare(struct smb_vc *vcp, struct smb_sharespec *dp,
 	dp->scred = scred;
 	SMBCO_FOREACH(osp, VCTOCP(vcp)) {
 		ssp = (struct smb_share *)osp;
-		error = smb_share_lock(ssp);
+		error = smb_share_lock(ssp, LK_EXCLUSIVE);
 		if (error)
 			continue;
 		if (smb_vc_cmpshare(ssp, dp) == 0)
 			break;
-		smb_share_unlock(ssp);
+		smb_share_unlock(ssp, 0);
 	}
 	if (ssp) {
 		smb_share_ref(ssp);
@@ -733,9 +675,9 @@ smb_vc_nextmid(struct smb_vc *vcp)
 {
 	u_short r;
 
-	mutex_enter(&vcp->obj.co_interlock);
+	SMB_CO_LOCK(&vcp->obj);
 	r = vcp->vc_mid++;
-	mutex_exit(&vcp->obj.co_interlock);
+	SMB_CO_UNLOCK(&vcp->obj);
 	return r;
 }
 
@@ -829,16 +771,9 @@ smb_share_rele(struct smb_share *ssp, struct smb_cred *scred)
 }
 
 int
-smb_share_get(struct smb_share *ssp, struct smb_cred *scred)
+smb_share_get(struct smb_share *ssp, int flags, struct smb_cred *scred)
 {
-	struct smb_connobj *cp = SSTOCP(ssp);
-	int error;
-
-	mutex_enter(&cp->co_interlock);
-	error = smb_co_get(cp, scred);
-	mutex_exit(&cp->co_interlock);
-
-	return error;
+	return smb_co_get(SSTOCP(ssp), flags, scred);
 }
 
 void
@@ -848,26 +783,15 @@ smb_share_put(struct smb_share *ssp, struct smb_cred *scred)
 }
 
 int
-smb_share_lock(struct smb_share *ssp)
+smb_share_lock(struct smb_share *ssp, int flags)
 {
-	struct smb_connobj *cp = SSTOCP(ssp);
-	int error;
-
-	mutex_enter(&cp->co_interlock);
-	error = smb_co_lock(cp);
-	mutex_exit(&cp->co_interlock);
-
-	return error;
+	return smb_co_lock(SSTOCP(ssp), flags);
 }
 
 void
-smb_share_unlock(struct smb_share *ssp)
+smb_share_unlock(struct smb_share *ssp, int flags)
 {
-	struct smb_connobj *cp = SSTOCP(ssp);
-
-	mutex_enter(&cp->co_interlock);
-	smb_co_unlock(cp);
-	mutex_exit(&cp->co_interlock);
+	smb_co_unlock(SSTOCP(ssp), flags);
 }
 
 int

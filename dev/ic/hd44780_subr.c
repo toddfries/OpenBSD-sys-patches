@@ -1,4 +1,4 @@
-/* $NetBSD: hd44780_subr.c,v 1.16 2008/12/19 18:49:38 cegger Exp $ */
+/* $NetBSD: hd44780_subr.c,v 1.13 2007/11/01 13:05:32 tsutsui Exp $ */
 
 /*
  * Copyright (c) 2002 Dennis I. Chernoivanov
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: hd44780_subr.c,v 1.16 2008/12/19 18:49:38 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: hd44780_subr.c,v 1.13 2007/11/01 13:05:32 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -276,8 +276,8 @@ hlcd_alloc_screen(v, type, cookiep, curxp, curyp, defattrp)
 {
 	struct hlcd_screen *hdscr = v, *new;
 
-	new = *cookiep = malloc(sizeof(struct hlcd_screen),
-				M_DEVBUF, M_WAITOK|M_ZERO);
+	new = *cookiep = malloc(sizeof(struct hlcd_screen), M_DEVBUF, M_WAITOK);
+	bzero(*cookiep, sizeof(struct hlcd_screen));
 	new->hlcd_sc = hdscr->hlcd_sc;
 	new->image = malloc(PAGE_SIZE, M_DEVBUF, M_WAITOK);
 	memset(new->image, ' ', PAGE_SIZE);
@@ -420,7 +420,7 @@ hd44780_attach_subr(sc)
 		if ((sc->sc_flags & HD_UP) == 0)
 			err = hd44780_init(sc);
 		if (err != 0)
-			aprint_error_dev(sc->sc_dev, "LCD not responding or unconnected\n");
+			printf("%s: LCD not responding or unconnected\n", sc->sc_dev->dv_xname);
 
 	}
 

@@ -1,4 +1,4 @@
-/*	$NetBSD: lock_stubs.S,v 1.15 2008/05/25 15:56:12 chs Exp $	*/
+/*	$NetBSD: lock_stubs.S,v 1.13 2008/03/11 05:34:03 matt Exp $	*/
 
 /*-
  * Copyright (c) 2002, 2006, 2007 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -44,11 +51,10 @@
 #if MTX_OWNER != 0
 #error MTX_OWNER != 0, need to add offset to (%r1)
 #endif
-
 /*
  * void mutex_enter(kmutex_t *);
  */
-ENTRY(mutex_enter, 0)
+NENTRY(mutex_enter, 0)
 	movl	4(%ap), %r1		/* get mutex (ptr) */
 #ifdef DIAGNOSTIC
 	blbs	(%r1), 1f		/* go slow if this is SPIN */
@@ -65,7 +71,7 @@ ENTRY(mutex_enter, 0)
 /*
  * void mutex_exit(kmutex_t *);
  */
-ENTRY(mutex_exit, 0)
+NENTRY(mutex_exit, 0)
 	movl	4(%ap), %r1		/* get mutex (ptr) */
 #ifdef DIAGNOSTIC
 	blbs	(%r1), 1f		/* go slow if this is SPIN */
@@ -81,7 +87,7 @@ ENTRY(mutex_exit, 0)
 /*
  * void mutex_spin_enter(kmutex_t *);
  */
-ENTRY(mutex_spin_enter, 0)
+NENTRY(mutex_spin_enter, 0)
 	movl	4(%ap), %r0			/* get spin mutex */
 #ifdef DIAGNOSTIC
 	blbc	(%r0), 3f
@@ -109,7 +115,7 @@ ENTRY(mutex_spin_enter, 0)
 /*
  * void mutex_spin_exit(kmutex_t *);
  */
-ENTRY(mutex_spin_exit, 0)
+NENTRY(mutex_spin_exit, 0)
 	movl	4(%ap), %r0			/* get spin mutex */
 #if defined(DIAGNOSTIC)
 	blbc	(%r0), 2f			/* assert this is a spinlock */
@@ -144,7 +150,7 @@ ENTRY(mutex_spin_exit, 0)
 /*
  * void rw_enter(krwlock_t *rwl, krw_t op);
  */
-ENTRY(rw_enter, 0)
+NENTRY(rw_enter, 0)
 	movl	4(%ap), %r1			/* grab rwlock ptr */
 	tstl	8(%ap)				/* is this a reader op? */
 	bneq	2f				/*   nope, branch to writer */
@@ -170,7 +176,7 @@ ENTRY(rw_enter, 0)
 /*
  * void rw_exit(krwlock_t *rwl, krw_t op);
  */
-ENTRY(rw_exit, 0)
+NENTRY(rw_exit, 0)
 	movl	4(%ap), %r1			/* grab rwlock ptr */
 	movl	(%r1), %r2			/* grab owner (old) */
 	bitl	$RW_WRITE_LOCKED, %r2		/* is it write locked? */
@@ -195,7 +201,7 @@ ENTRY(rw_exit, 0)
 /*
  * bool rw_tryenter(krwlock_t *krw, krw_t op);
  */
-ENTRY(rw_tryenter, 0)
+NENTRY(rw_tryenter, 0)
 	movl	4(%ap), %r1			/* get rwlock ptr */
 	tstl	8(%ap)				/* is this a reader op? */
 	bneq	3f				/*   nope, branch to writer */
@@ -222,13 +228,13 @@ ENTRY(rw_tryenter, 0)
 /*
  * _atomic_cas_32(volatile uint32_t *p, uint32_t old, uint32_t new);
  */
-ENTRY(_atomic_cas_32, 0)
+NENTRY(_atomic_cas_32, 0)
 	movq	4(%ap), %r1		/* cache ptr, old */
 	movl	12(%ap), %r3		/* cache new */
 	bsbw	_do_cas+2		/* do it */
 	ret
 
-ENTRY(_do_cas, 0)
+NENTRY(_do_cas, 0)
 #ifdef MULTIPROCESSOR
 	movl	(%r1), %r0		/* get value */
 	cmpl	%r0, %r2		/* does it equal old? */

@@ -1,4 +1,4 @@
-/*	$NetBSD: in_cksum.c,v 1.11 2008/03/11 05:34:03 matt Exp $	*/
+/*	$NetBSD: in_cksum.c,v 1.10 2006/12/31 10:52:52 ragge Exp $	*/
 
 /*
  * Copyright (c) 1988, 1992, 1993
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: in_cksum.c,v 1.11 2008/03/11 05:34:03 matt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: in_cksum.c,v 1.10 2006/12/31 10:52:52 ragge Exp $");
 
 #include <sys/param.h>
 #include <sys/mbuf.h>
@@ -60,20 +60,20 @@ __KERNEL_RCSID(0, "$NetBSD: in_cksum.c,v 1.11 2008/03/11 05:34:03 matt Exp $");
 #define ADDC    Asm("adwc     $0,%0" : "=r" (sum) : "0" (sum))
 #define UNSWAP  Asm("rotl  $8,%0,%0" : "=r" (sum) : "0" (sum))
 #define ADDBYTE	{sum += *w; SWAP; byte_swapped ^= 1;}
-#define ADDWORD	{sum += *(uint16_t *)w;}
+#define ADDWORD	{sum += *(u_short *)w;}
 
 int
 in_cksum(struct mbuf *m, int len)
 {
-	uint8_t *w;
-	uint32_t sum = 0;
+	u_int8_t *w;
+	u_int32_t sum = 0;
 	int mlen = 0;
 	int byte_swapped = 0;
 
 	for (;m && len; m = m->m_next) {
 		if ((mlen = m->m_len) == 0)
 			continue;
-		w = mtod(m, uint8_t *);
+		w = mtod(m, u_int8_t *);
 		if (len < mlen)
 			mlen = len;
 		len -= mlen;

@@ -1,4 +1,4 @@
-/*      $NetBSD: xen_shm_machdep.c,v 1.4 2008/12/18 12:19:02 cegger Exp $      */
+/*      $NetBSD: xen_shm_machdep.c,v 1.3 2008/02/17 14:03:16 bouyer Exp $      */
 
 /*
  * Copyright (c) 2006 Manuel Bouyer.
@@ -31,12 +31,13 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: xen_shm_machdep.c,v 1.4 2008/12/18 12:19:02 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: xen_shm_machdep.c,v 1.3 2008/02/17 14:03:16 bouyer Exp $");
 
 
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/malloc.h>
 #include <sys/queue.h>
 #include <sys/vmem.h>
 #include <sys/kernel.h>

@@ -1,4 +1,4 @@
-/*	$NetBSD: reg.h,v 1.7 2008/10/26 00:08:15 mrg Exp $	*/
+/*	$NetBSD: reg.h,v 1.5 2006/07/10 13:09:47 fvdl Exp $	*/
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -37,8 +37,6 @@
 #ifndef _AMD64_REG_H_
 #define _AMD64_REG_H_
 
-#ifdef __x86_64__
-
 #include <machine/fpu.h>
 #include <machine/mcontext.h>
 
@@ -50,9 +48,8 @@
 
 /*
  * Registers accessible to ptrace(2) syscall for debugger use.
- * Same as mcontext.__gregs (except that is 'unsigned long').
- * NB this structure is no longer the same as 'struct trapframe',
- * athough the array indexes are defined in the same place.
+ * Same as mcontext.__gregs and struct trapframe, they must
+ * remain synced (XXX should use common structure).
  */
 struct reg {
 	long	regs[_NGREG];
@@ -72,11 +69,5 @@ struct fpreg {
 #define fp_mxcsr_mask	fxstate.fx_mxcsr_mask
 #define fp_st		fxstate.fx_st
 #define fp_xmm		fxstate.fx_xmm
-
-#else	/*	__x86_64__	*/
-
-#include <i386/reg.h>
-
-#endif	/*	__x86_64__	*/
 
 #endif /* !_AMD64_REG_H_ */

@@ -1,4 +1,4 @@
-/*	$NetBSD: ast.c,v 1.61 2008/05/30 10:59:42 martin Exp $	*/
+/*	$NetBSD: ast.c,v 1.59 2007/10/19 12:00:14 ad Exp $	*/
 
 /*
  * Copyright (c) 1996 Christopher G. Demetriou.  All rights reserved.
@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ast.c,v 1.61 2008/05/30 10:59:42 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ast.c,v 1.59 2007/10/19 12:00:14 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -60,7 +60,7 @@ struct ast_softc {
 	int sc_iobase;
 
 	int sc_alive;			/* mask of slave units attached */
-	void *sc_slaves[NSLAVES];	/* com device softc pointers */
+	void *sc_slaves[NSLAVES];	/* com device unit numbers */
 	bus_space_handle_t sc_slaveioh[NSLAVES];
 };
 
@@ -145,12 +145,11 @@ out:
 void
 astattach(struct device *parent, struct device *self, void *aux)
 {
-	struct ast_softc *sc = device_private(self);
+	struct ast_softc *sc = (void *)self;
 	struct isa_attach_args *ia = aux;
 	struct commulti_attach_args ca;
 	bus_space_tag_t iot = ia->ia_iot;
 	int i, iobase;
-	device_t slave;
 
 	printf("\n");
 
@@ -162,7 +161,8 @@ astattach(struct device *parent, struct device *self, void *aux)
 		if (!com_is_console(iot, iobase, &sc->sc_slaveioh[i]) &&
 		    bus_space_map(iot, iobase, COM_NPORTS, 0,
 			&sc->sc_slaveioh[i])) {
-			aprint_error_dev(&sc->sc_dev, "can't map i/o space for slave %d\n", i);
+			printf("%s: can't map i/o space for slave %d\n",
+			    sc->sc_dev.dv_xname, i);
 			return;
 		}
 	}
@@ -179,11 +179,9 @@ astattach(struct device *parent, struct device *self, void *aux)
 		ca.ca_iobase = sc->sc_iobase + i * COM_NPORTS;
 		ca.ca_noien = 1;
 
-		slave = config_found(self, &ca, commultiprint);
-		if (slave != NULL) {
+		sc->sc_slaves[i] = config_found(self, &ca, commultiprint);
+		if (sc->sc_slaves[i] != NULL)
 			sc->sc_alive |= 1 << i;
-			sc->sc_slaves[i] = device_private(slave);
-		}
 	}
 
 	sc->sc_ih = isa_intr_establish(ia->ia_ic, ia->ia_irq[0].ir_irq,

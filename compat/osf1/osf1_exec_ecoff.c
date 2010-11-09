@@ -1,4 +1,4 @@
-/* $NetBSD: osf1_exec_ecoff.c,v 1.21 2008/11/15 00:49:53 njoly Exp $ */
+/* $NetBSD: osf1_exec_ecoff.c,v 1.14 2006/07/23 22:06:09 ad Exp $ */
 
 /*
  * Copyright (c) 1999 Christopher G. Demetriou.  All rights reserved.
@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: osf1_exec_ecoff.c,v 1.21 2008/11/15 00:49:53 njoly Exp $");
+__KERNEL_RCSID(0, "$NetBSD: osf1_exec_ecoff.c,v 1.14 2006/07/23 22:06:09 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -118,7 +118,12 @@ osf1_exec_ecoff_probe(struct lwp *l, struct exec_package *epp)
  * any ELF-like AUX entries used by the dynamic loading scheme.
  */
 int
-osf1_copyargs(struct lwp *l, struct exec_package *pack, struct ps_strings *arginfo, char **stackp, void *argp)
+osf1_copyargs(l, pack, arginfo, stackp, argp)
+	struct lwp *l;
+	struct exec_package *pack;
+	struct ps_strings *arginfo;
+	char **stackp;
+	void *argp;
 {
 	struct osf1_exec_emul_arg *emul_arg = pack->ep_emul_arg;
 	struct osf1_auxv ai[OSF1_MAX_AUX_ENTRIES], *a;
@@ -159,7 +164,7 @@ osf1_copyargs(struct lwp *l, struct exec_package *pack, struct ps_strings *argin
                         a->a_un.a_val |= OSF1_LDR_EXEC_SETUID_F;
                 if (pack->ep_vap->va_mode & S_ISGID)
                         a->a_un.a_val |= OSF1_LDR_EXEC_SETGID_F;
-	        if (l->l_proc->p_slflag & PSL_TRACED)
+	        if (l->l_proc->p_flag & P_TRACED)
                         a->a_un.a_val |= OSF1_LDR_EXEC_PTRACE_F;
 		a++;
 	}
@@ -184,6 +189,7 @@ osf1_exec_ecoff_dynamic(struct lwp *l, struct exec_package *epp)
 {
 	struct osf1_exec_emul_arg *emul_arg = epp->ep_emul_arg;
 	struct ecoff_exechdr ldr_exechdr;
+	struct nameidata nd;
 	struct vnode *ldr_vp;
         size_t resid;
 	int error;
@@ -196,7 +202,7 @@ osf1_exec_ecoff_dynamic(struct lwp *l, struct exec_package *epp)
 	 * includes /emul/osf1 if appropriate
 	 */
 	error = emul_find_interp(LIST_FIRST(&l->l_proc->p_lwps),
-		    epp, emul_arg->loader_name);
+	    epp->ep_esch->es_emul->e_path, emul_arg->loader_name);
 	if (error)
 		return error;
 
@@ -211,9 +217,11 @@ osf1_exec_ecoff_dynamic(struct lwp *l, struct exec_package *epp)
 	 * make sure the object type is amenable, then arrange to
 	 * load it up.
 	 */
-	ldr_vp = epp->ep_interp;
-	epp->ep_interp = NULL;
-	vn_lock(ldr_vp, LK_EXCLUSIVE | LK_RETRY);
+	NDINIT(&nd, LOOKUP, FOLLOW | LOCKLEAF, UIO_SYSSPACE,
+	    emul_arg->loader_name, l);
+	if ((error = namei(&nd)) != 0)
+		goto bad_no_vp;
+	ldr_vp = nd.ni_vp;
 
 	/*
 	 * Basic access checks.  Reject if:
@@ -226,7 +234,7 @@ osf1_exec_ecoff_dynamic(struct lwp *l, struct exec_package *epp)
 		goto badunlock;
 	}
 
-	if ((error = VOP_ACCESS(ldr_vp, VEXEC, l->l_cred)) != 0)
+	if ((error = VOP_ACCESS(ldr_vp, VEXEC, l->l_cred, l)) != 0)
 		goto badunlock;
 
         if (ldr_vp->v_mount->mnt_flag & MNT_NOEXEC) {
@@ -246,7 +254,7 @@ osf1_exec_ecoff_dynamic(struct lwp *l, struct exec_package *epp)
 	/*
 	 * read the header, and make sure we got all of it.
 	 */
-        if ((error = vn_rdwr(UIO_READ, ldr_vp, (void *)&ldr_exechdr,
+        if ((error = vn_rdwr(UIO_READ, ldr_vp, (caddr_t)&ldr_exechdr,
 	    sizeof ldr_exechdr, 0, UIO_SYSSPACE, 0, l->l_cred,
 	    &resid, NULL)) != 0)
                 goto bad;
@@ -300,5 +308,6 @@ badunlock:
 	VOP_UNLOCK(ldr_vp, 0);
 bad:
 	vrele(ldr_vp);
+bad_no_vp:
 	return (error);
 }

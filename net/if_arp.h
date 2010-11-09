@@ -1,4 +1,4 @@
-/*	$NetBSD: if_arp.h,v 1.29 2008/04/15 15:17:54 thorpej Exp $	*/
+/*	$NetBSD: if_arp.h,v 1.25 2005/12/10 23:21:38 elad Exp $	*/
 
 /*
  * Copyright (c) 1986, 1993
@@ -44,17 +44,17 @@
  * specified.  Field names used correspond to RFC 826.
  */
 struct	arphdr {
-	uint16_t ar_hrd;	/* format of hardware address */
+	u_int16_t ar_hrd;	/* format of hardware address */
 #define ARPHRD_ETHER 	1	/* ethernet hardware format */
 #define ARPHRD_IEEE802 	6	/* IEEE 802 hardware format */
 #define ARPHRD_ARCNET 	7	/* ethernet hardware format */
 #define ARPHRD_FRELAY 	15	/* frame relay hardware format */
 #define ARPHRD_STRIP 	23	/* Ricochet Starmode Radio hardware format */
 #define	ARPHRD_IEEE1394	24	/* IEEE 1394 (FireWire) hardware format */
-	uint16_t ar_pro;	/* format of protocol address */
-	uint8_t  ar_hln;	/* length of hardware address */
-	uint8_t  ar_pln;	/* length of protocol address */
-	uint16_t ar_op;		/* one of: */
+	u_int16_t ar_pro;	/* format of protocol address */
+	u_int8_t  ar_hln;	/* length of hardware address */
+	u_int8_t  ar_pln;	/* length of protocol address */
+	u_int16_t ar_op;	/* one of: */
 #define	ARPOP_REQUEST	1	/* request to resolve address */
 #define	ARPOP_REPLY	2	/* response to previous request */
 #define	ARPOP_REVREQUEST 3	/* request protocol address given hardware */
@@ -66,21 +66,21 @@ struct	arphdr {
  * according to the sizes above.
  */
 #ifdef COMMENT_ONLY
-	uint8_t  ar_sha[];	/* sender hardware address */
-	uint8_t  ar_spa[];	/* sender protocol address */
-	uint8_t  ar_tha[];	/* target hardware address */
-	uint8_t  ar_tpa[];	/* target protocol address */
+	u_int8_t  ar_sha[];	/* sender hardware address */
+	u_int8_t  ar_spa[];	/* sender protocol address */
+	u_int8_t  ar_tha[];	/* target hardware address */
+	u_int8_t  ar_tpa[];	/* target protocol address */
 #endif
-#define ar_sha(ap) (((char *)((ap)+1))+0)
-#define ar_spa(ap) (((char *)((ap)+1))+(ap)->ar_hln)
+#define ar_sha(ap) (((caddr_t)((ap)+1))+0)
+#define ar_spa(ap) (((caddr_t)((ap)+1))+(ap)->ar_hln)
 #define ar_tha(ap) \
 	(ntohs((ap)->ar_hrd) == ARPHRD_IEEE1394 \
-		? NULL : (((char *)((ap)+1))+(ap)->ar_hln+(ap)->ar_pln))
+		? NULL : (((caddr_t)((ap)+1))+(ap)->ar_hln+(ap)->ar_pln))
 #define ar_tpa(ap) \
 	(ntohs((ap)->ar_hrd) == ARPHRD_IEEE1394 \
-		? (((char *)((ap)+1))+(ap)->ar_hln+(ap)->ar_pln) \
-		: (((char *)((ap)+1))+(ap)->ar_hln+(ap)->ar_pln+(ap)->ar_hln))
-} __packed;
+		? (((caddr_t)((ap)+1))+(ap)->ar_hln+(ap)->ar_pln) \
+		: (((caddr_t)((ap)+1))+(ap)->ar_hln+(ap)->ar_pln+(ap)->ar_hln))
+} __attribute__((__packed__));
 
 
 /*
@@ -101,30 +101,33 @@ struct arpreq {
 /*
  * Kernel statistics about arp
  */
-#define	ARP_STAT_SNDTOTAL	0	/* total packets sent */
-#define	ARP_STAT_SNDREPLY	1	/* replies sent */
-#define	ARP_STAT_SENDREQUEST	2	/* requests sent */
-#define	ARP_STAT_RCVTOTAL	3	/* total packets received */
-#define	ARP_STAT_RCVREQUEST	4	/* valid requests received */
-#define	ARP_STAT_RCVREPLY	5	/* replies received */
-#define	ARP_STAT_RCVMCAST	6	/* multicast/broadcast received */
-#define	ARP_STAT_RCVBADPROTO	7	/* unknown protocol type received */
-#define	ARP_STAT_RCVBADLEN	8	/* bad (short) length received */
-#define	ARP_STAT_RCVZEROTPA	9	/* received w/ null target ip */
-#define	ARP_STAT_RCVZEROSPA	10	/* received w/ null source ip */
-#define	ARP_STAT_RCVNOINT	11	/* couldn't map to interface */
-#define	ARP_STAT_RCVLOCALSHA	12	/* received from local hw address */
-#define	ARP_STAT_RCVBCASTSHA	13	/* received w/ broadcast src */
-#define	ARP_STAT_RCVLOCALSPA	14	/* received for a local ip [dup!] */
-#define	ARP_STAT_RCVOVERPERM	15	/* attempts to overwrite static info */
-#define	ARP_STAT_RCVOVERINT	16	/* attempts to overwrite wrong if */
-#define	ARP_STAT_RCVOVER	17	/* entries overwritten! */
-#define	ARP_STAT_RCVLENCHG	18	/* changes in hw address len */
-#define	ARP_STAT_DFRTOTAL	19	/* deferred pending ARP resolution */
-#define	ARP_STAT_DFRSENT	20	/* deferred, then sent */
-#define	ARP_STAT_DFRDROPPED	21	/* deferred, then dropped */
-#define	ARP_STAT_ALLOCFAIL	22	/* failures to allocate llinfo */
+struct arpstat {
+	u_quad_t	as_sndtotal;	/* total packets sent */
+	u_quad_t	as_sndreply;	/* replies sent */
+	u_quad_t	as_sndrequest;	/* requests sent */
 
-#define	ARP_NSTATS		23
+	u_quad_t	as_rcvtotal;	/* total packets received */
+	u_quad_t	as_rcvrequest;	/* valid requests received */
+	u_quad_t	as_rcvreply;	/* replies received */
+	u_quad_t	as_rcvmcast;    /* multicast/broadcast received */
+	u_quad_t	as_rcvbadproto;	/* unknown protocol type received */
+	u_quad_t	as_rcvbadlen;	/* bad (short) length received */
+	u_quad_t	as_rcvzerotpa;	/* received w/ null target ip */
+	u_quad_t	as_rcvzerospa;	/* received w/ null src ip */
+	u_quad_t	as_rcvnoint;	/* couldn't map to interface */
+	u_quad_t	as_rcvlocalsha;	/* received from local hw address */
+	u_quad_t	as_rcvbcastsha;	/* received w/ broadcast src */
+	u_quad_t	as_rcvlocalspa;	/* received for a local ip [dup!] */
+	u_quad_t	as_rcvoverperm;	/* attempts to overwrite static info */
+	u_quad_t	as_rcvoverint;	/* attempts to overwrite wrong if */
+	u_quad_t	as_rcvover;	/* entries overwritten! */
+	u_quad_t	as_rcvlenchg;	/* changes in hw add len */
+
+	u_quad_t	as_dfrtotal;	/* deferred pending ARP resolution. */
+	u_quad_t	as_dfrsent;	/* deferred, then sent */
+	u_quad_t	as_dfrdropped;	/* deferred, then dropped */
+
+	u_quad_t	as_allocfail;	/* Failures to allocate llinfo */
+};
 
 #endif /* !_NET_IF_ARP_H_ */

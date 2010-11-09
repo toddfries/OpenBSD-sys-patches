@@ -1,11 +1,10 @@
-/*	$NetBSD: namei.h,v 1.64 2009/02/11 00:20:18 enami Exp $	*/
-
+/*	$NetBSD: namei.h,v 1.54 2007/11/07 00:23:42 ad Exp $	*/
 
 /*
  * WARNING: GENERATED FILE.  DO NOT EDIT
- * (edit namei.src and run make namei in src/sys/sys)
- *   by:   NetBSD: gennameih.awk,v 1.4 2008/12/03 10:54:27 ad Exp 
- *   from: NetBSD: namei.src,v 1.10 2009/02/11 00:19:11 enami Exp 
+ * (edit namei.src and run make namei)
+ *   by:   NetBSD: gennameih.awk,v 1.1 2007/08/15 14:08:11 pooka Exp 
+ *   from: NetBSD: namei.src,v 1.3 2007/08/22 17:49:40 pooka Exp 
  */
 
 /*
@@ -43,11 +42,8 @@
 #define	_SYS_NAMEI_H_
 
 #include <sys/queue.h>
-#include <sys/mutex.h>
 
 #ifdef _KERNEL
-#include <sys/kauth.h>
-
 /*
  * Encapsulation of namei parameters.
  */
@@ -85,6 +81,7 @@ struct nameidata {
 		 */
 		uint32_t	cn_nameiop;	/* namei operation */
 		uint32_t	cn_flags;	/* flags to namei */
+		struct		lwp *cn_lwp;	/* lwp requesting lookup */
 		kauth_cred_t 	cn_cred;	/* credentials */
 		/*
 		 * Shared between lookup and commit routines.
@@ -108,18 +105,14 @@ struct nameidata {
 /*
  * namei operational modifier flags, stored in ni_cnd.cn_flags
  */
-#define	LOCKLEAF	0x00000004	/* lock inode on return */
-#define	LOCKPARENT	0x00000008	/* want parent vnode returned locked */
-#define	TRYEMULROOT	0x00000010	/* try relative to emulation root
-					   first */
-#define	NOCACHE		0x00000020	/* name must not be left in cache */
-#define	FOLLOW		0x00000040	/* follow symbolic links */
-#define	NOFOLLOW	0x00000000	/* do not follow symbolic links
-					   (pseudo) */
-#define	EMULROOTSET	0x00000080	/* emulation root already
-					   in ni_erootdir */
-#define	NOCHROOT	0x01000000	/* no chroot on abs path lookups */
-#define	MODMASK		0x010000fc	/* mask of operational modifiers */
+#define	LOCKLEAF	0x0004	/* lock inode on return */
+#define	LOCKPARENT	0x0008	/* want parent vnode returned locked */
+#define	NOCACHE		0x0020	/* name must not be left in cache */
+#define	FOLLOW		0x0040	/* follow symbolic links */
+#define	NOFOLLOW	0x0000	/* do not follow symbolic links (pseudo) */
+#define	TRYEMULROOT	0x0010	/* try relative to emulation root first */
+#define	EMULROOTSET	0x0080	/* emulation root already in ni_erootdir */
+#define	MODMASK		0x00fc	/* mask of operational modifiers */
 /*
  * Namei parameter descriptors.
  *
@@ -148,16 +141,16 @@ struct nameidata {
 #define	REQUIREDIR	0x0080000	/* must be a directory */
 #define	CREATEDIR	0x0200000	/* trailing slashes are ok */
 #define	PARAMASK	0x02fff00	/* mask of parameter descriptors */
-
 /*
  * Initialization of an nameidata structure.
  */
-#define NDINIT(ndp, op, flags, segflg, namep) { \
+#define NDINIT(ndp, op, flags, segflg, namep, l) { \
 	(ndp)->ni_cnd.cn_nameiop = op; \
 	(ndp)->ni_cnd.cn_flags = flags; \
 	(ndp)->ni_segflg = segflg; \
 	(ndp)->ni_dirp = namep; \
-	(ndp)->ni_cnd.cn_cred = kauth_cred_get(); \
+	(ndp)->ni_cnd.cn_lwp = l; \
+	(ndp)->ni_cnd.cn_cred = l->l_cred; \
 }
 #endif
 
@@ -170,26 +163,17 @@ struct nameidata {
 
 #define	NCHNAMLEN	31	/* maximum name segment length we bother with */
 
-/*
- * Namecache entry.  This structure is arranged so that frequently
- * accessed and mostly read-only data is toward the front, with
- * infrequently accessed data and the lock towards the rear.  The
- * lock is then more likely to be in a seperate cache line.
- */
 struct	namecache {
 	LIST_ENTRY(namecache) nc_hash;	/* hash chain */
+	TAILQ_ENTRY(namecache) nc_lru;	/* LRU chain */
 	LIST_ENTRY(namecache) nc_vhash;	/* directory hash chain */
+	LIST_ENTRY(namecache) nc_dvlist;
 	struct	vnode *nc_dvp;		/* vnode of parent of name */
+	LIST_ENTRY(namecache) nc_vlist;
 	struct	vnode *nc_vp;		/* vnode the name refers to */
 	int	nc_flags;		/* copy of componentname's ISWHITEOUT */
 	char	nc_nlen;		/* length of name */
 	char	nc_name[NCHNAMLEN];	/* segment name */
-	void	*nc_gcqueue;		/* queue for garbage collection */
-	TAILQ_ENTRY(namecache) nc_lru;	/* psuedo-lru chain */
-	LIST_ENTRY(namecache) nc_dvlist;
-	LIST_ENTRY(namecache) nc_vlist;
-	kmutex_t nc_lock;		/* lock on this entry */
-	int	nc_hittime;		/* last time scored a hit */
 };
 
 #ifdef _KERNEL
@@ -197,7 +181,6 @@ struct	namecache {
 #include <sys/pool.h>
 
 struct mount;
-struct cpu_info;
 
 extern pool_cache_t pnbuf_cache;	/* pathname buffer cache */
 
@@ -219,7 +202,6 @@ int	cache_revlookup(struct vnode *, struct vnode **, char **, char *);
 void	cache_enter(struct vnode *, struct vnode *, struct componentname *);
 void	nchinit(void);
 void	nchreinit(void);
-void	cache_cpu_init(struct cpu_info *);
 void	cache_purgevfs(struct mount *);
 void	namecache_print(struct vnode *, void (*)(const char *, ...));
 
@@ -253,15 +235,14 @@ extern struct nchstats nchstats;
 #define NAMEI_DELETE	2
 #define NAMEI_RENAME	3
 #define NAMEI_OPMASK	3
-#define NAMEI_LOCKLEAF	0x00000004
-#define NAMEI_LOCKPARENT	0x00000008
-#define NAMEI_TRYEMULROOT	0x00000010
-#define NAMEI_NOCACHE	0x00000020
-#define NAMEI_FOLLOW	0x00000040
-#define NAMEI_NOFOLLOW	0x00000000
-#define NAMEI_EMULROOTSET	0x00000080
-#define NAMEI_NOCHROOT	0x01000000
-#define NAMEI_MODMASK	0x010000fc
+#define NAMEI_LOCKLEAF	0x0004
+#define NAMEI_LOCKPARENT	0x0008
+#define NAMEI_NOCACHE	0x0020
+#define NAMEI_FOLLOW	0x0040
+#define NAMEI_NOFOLLOW	0x0000
+#define NAMEI_TRYEMULROOT	0x0010
+#define NAMEI_EMULROOTSET	0x0080
+#define NAMEI_MODMASK	0x00fc
 #define NAMEI_NOCROSSMOUNT	0x0000100
 #define NAMEI_RDONLY	0x0000200
 #define NAMEI_HASBUF	0x0000400

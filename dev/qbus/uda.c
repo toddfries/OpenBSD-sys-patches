@@ -1,4 +1,4 @@
-/*	$NetBSD: uda.c,v 1.58 2008/03/11 05:34:02 matt Exp $	*/
+/*	$NetBSD: uda.c,v 1.57 2007/10/19 12:01:09 ad Exp $	*/
 /*
  * Copyright (c) 1988 Regents of the University of California.
  * All rights reserved.
@@ -76,7 +76,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: uda.c,v 1.58 2008/03/11 05:34:02 matt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: uda.c,v 1.57 2007/10/19 12:01:09 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -101,8 +101,7 @@ __KERNEL_RCSID(0, "$NetBSD: uda.c,v 1.58 2008/03/11 05:34:02 matt Exp $");
  * Software status, per controller.
  */
 struct	uda_softc {
-	device_t sc_dev;	/* Autoconfig info */
-	struct uba_softc *sc_uh;
+	struct	device sc_dev;	/* Autoconfig info */
 	struct	evcnt sc_intrcnt; /* Interrupt counting */
 	struct	uba_unit sc_unit; /* Struct common for UBA to communicate */
 	struct	ubinfo sc_ui;
@@ -114,20 +113,20 @@ struct	uda_softc {
 	int	sc_inq;
 };
 
-static	int udamatch(device_t, cfdata_t, void *);
-static	void udaattach(device_t, device_t, void *);
-static	void udareset(device_t );
+static	int udamatch(struct device *, struct cfdata *, void *);
+static	void udaattach(struct device *, struct device *, void *);
+static	void udareset(struct device *);
 static	void udaintr(void *);
 static	int udaready(struct uba_unit *);
-static	void udactlrdone(device_t );
+static	void udactlrdone(struct device *);
 static	int udaprint(void *, const char *);
-static	void udasaerror(device_t, int);
-static	void udago(device_t, struct mscp_xi *);
+static	void udasaerror(struct device *, int);
+static	void udago(struct device *, struct mscp_xi *);
 
-CFATTACH_DECL_NEW(mtc, sizeof(struct uda_softc),
+CFATTACH_DECL(mtc, sizeof(struct uda_softc),
     udamatch, udaattach, NULL, NULL);
 
-CFATTACH_DECL_NEW(uda, sizeof(struct uda_softc),
+CFATTACH_DECL(uda, sizeof(struct uda_softc),
     udamatch, udaattach, NULL, NULL);
 
 /*
@@ -151,14 +150,15 @@ udaprint(void *aux, const char *name)
  * Poke at a supposed UDA50 to see if it is there.
  */
 int
-udamatch(device_t parent, cfdata_t cf, void *aux)
+udamatch(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct	uba_attach_args *ua = aux;
-	struct	uba_softc *uh = device_private(parent);
 	struct	mscp_softc mi;	/* Nice hack */
+	struct	uba_softc *ubasc;
 	int	tries;
 
 	/* Get an interrupt vector. */
+	ubasc = (void *)parent;
 
 	mi.mi_iot = ua->ua_iot;
 	mi.mi_iph = ua->ua_ioh;
@@ -182,7 +182,7 @@ again:
 
 	bus_space_write_2(mi.mi_iot, mi.mi_sah, 0,
 	    MP_ERR | (NCMDL2 << 11) | (NRSPL2 << 8) | MP_IE |
-	    ((uh->uh_lastiv - 4) >> 2));
+	    ((ubasc->uh_lastiv - 4) >> 2));
 
 	if (mscp_waitstep(&mi, MP_STEP2, MP_STEP2) == 0) {
 		printf("udaprobe: init step2 no change. sa=%x\n",
@@ -199,25 +199,23 @@ bad:
 }
 
 void
-udaattach(device_t parent, device_t self, void *aux)
+udaattach(struct device *parent, struct device *self, void *aux)
 {
 	struct	uda_softc *sc = device_private(self);
 	struct	uba_attach_args *ua = aux;
+	struct	uba_softc *uh = (void *)parent;
 	struct	mscp_attach_args ma;
 	int	error;
 
 	printf("\n");
 
-	sc->sc_dev = self;
-	sc->sc_uh = device_private(parent);
-
-	sc->sc_uh->uh_lastiv -= 4;	/* remove dynamic interrupt vector */
+	uh->uh_lastiv -= 4;	/* remove dynamic interrupt vector */
 
 	uba_intr_establish(ua->ua_icookie, ua->ua_cvec,
 		udaintr, sc, &sc->sc_intrcnt);
-	uba_reset_establish(udareset, sc->sc_dev);
+	uba_reset_establish(udareset, &sc->sc_dev);
 	evcnt_attach_dynamic(&sc->sc_intrcnt, EVCNT_TYPE_INTR, ua->ua_evcnt,
-		device_xname(sc->sc_dev), "intr");
+		sc->sc_dev.dv_xname, "intr");
 
 	sc->sc_iot = ua->ua_iot;
 	sc->sc_iph = ua->ua_ioh;
@@ -227,7 +225,7 @@ udaattach(device_t parent, device_t self, void *aux)
 	/*
 	 * Fill in the uba_unit struct, so we can communicate with the uba.
 	 */
-	sc->sc_unit.uu_dev = self;	/* Backpointer to softc */
+	sc->sc_unit.uu_softc = sc;	/* Backpointer to softc */
 	sc->sc_unit.uu_ready = udaready;/* go routine called from adapter */
 	sc->sc_unit.uu_keepbdp = vax_cputype == VAX_750 ? 1 : 0;
 
@@ -236,7 +234,7 @@ udaattach(device_t parent, device_t self, void *aux)
 	 * response packets into Unibus space.
 	 */
 	sc->sc_ui.ui_size = sizeof(struct mscp_pack);
-	if ((error = ubmemalloc(sc->sc_uh, &sc->sc_ui, UBA_CANTWAIT)))
+	if ((error = ubmemalloc((void *)parent, &sc->sc_ui, UBA_CANTWAIT)))
 		return printf("ubmemalloc failed: %d\n", error);
 
 	bzero(sc->sc_ui.ui_vaddr, sizeof (struct mscp_pack));
@@ -259,10 +257,10 @@ udaattach(device_t parent, device_t self, void *aux)
 	ma.ma_swh = sc->sc_sah;
 	ma.ma_dmat = sc->sc_dmat;
 	ma.ma_dmam = sc->sc_ui.ui_dmam;
-	ma.ma_ivec = sc->sc_uh->uh_lastiv;
+	ma.ma_ivec = uh->uh_lastiv;
 	ma.ma_ctlrnr = (ua->ua_iaddr == 0172150 ? 0 : 1);	/* XXX */
-	ma.ma_adapnr = sc->sc_uh->uh_nr;
-	config_found(sc->sc_dev, &ma, udaprint);
+	ma.ma_adapnr = uh->uh_nr;
+	config_found(&sc->sc_dev, &ma, udaprint);
 }
 
 /*
@@ -271,9 +269,9 @@ udaattach(device_t parent, device_t self, void *aux)
  * Called from mscp routines.
  */
 void
-udago(device_t dv, struct mscp_xi *mxi)
+udago(struct device *usc, struct mscp_xi *mxi)
 {
-	struct uda_softc *sc = device_private(dv);
+	struct uda_softc *sc = (void *)usc;
 	struct uba_unit *uu;
 	struct buf *bp = mxi->mxi_bp;
 	int err;
@@ -291,11 +289,11 @@ udago(device_t dv, struct mscp_xi *mxi)
 			return;
 		}
 	}
-	uu = malloc(sizeof(struct uba_unit), M_DEVBUF, M_NOWAIT|M_ZERO);
-	if (uu == NULL)
+	uu = malloc(sizeof(struct uba_unit), M_DEVBUF, M_NOWAIT);
+	if (uu == 0)
 		panic("udago: no mem");
 	uu->uu_ready = udaready;
-	uu->uu_dev = dv;
+	uu->uu_softc = sc;
 	uu->uu_ref = mxi;
 	uba_enqueue(uu);
 	sc->sc_inq++;
@@ -310,7 +308,7 @@ udago(device_t dv, struct mscp_xi *mxi)
 int
 udaready(struct uba_unit *uu)
 {
-	struct uda_softc *sc = device_private(uu->uu_dev);
+	struct uda_softc *sc = uu->uu_softc;
 	struct mscp_xi *mxi = uu->uu_ref;
 	struct buf *bp = mxi->mxi_bp;
 	int err;
@@ -327,7 +325,7 @@ udaready(struct uba_unit *uu)
 	return 1;
 }
 
-static const struct saerr {
+static struct saerr {
 	int	code;		/* error code (including UDA_ERR) */
 	const char	*desc;		/* what it means: Efoo => foo error */
 } saerr[] = {
@@ -377,19 +375,20 @@ static const struct saerr {
  * then (optionally) reset the controller and requeue pending transfers.
  */
 void
-udasaerror(device_t dev, int doreset)
+udasaerror(struct device *usc, int doreset)
 {
-	struct	uda_softc *sc = device_private(dev);
+	struct	uda_softc *sc = (void *)usc;
 	int code = bus_space_read_2(sc->sc_iot, sc->sc_sah, 0);
-	const struct saerr *e;
+	struct saerr *e;
 
 	if ((code & MP_ERR) == 0)
 		return;
 	for (e = saerr; e->code; e++)
 		if (e->code == code)
 			break;
-	aprint_error_dev(sc->sc_dev, "controller error, sa=0%o (%s%s)\n",
-		code, e->desc + 1, *e->desc == 'E' ? " error" : "");
+	printf("%s: controller error, sa=0%o (%s%s)\n",
+		sc->sc_dev.dv_xname, code, e->desc + 1,
+		*e->desc == 'E' ? " error" : "");
 #if 0 /* XXX we just avoid panic when autoconfig non-existent KFQSA devices */
 	if (doreset) {
 		mscp_requeue(sc->sc_softc);
@@ -407,21 +406,22 @@ static void
 udaintr(void *arg)
 {
 	struct uda_softc *sc = arg;
+	struct uba_softc *uh;
 
 	/* ctlr fatal error */
 	if (bus_space_read_2(sc->sc_iot, sc->sc_sah, 0) & MP_ERR) {
-		udasaerror(sc->sc_dev, 1);
+		udasaerror(&sc->sc_dev, 1);
 		return;
 	}
 	/*
 	 * Handle buffer purge requests.
 	 * XXX - should be done in bus_dma_sync().
 	 */
+	uh = (void *)device_parent(&sc->sc_dev);
 #ifdef notyet
 	if (ud->mp_ca.ca_bdp) {
-		if (sc->sc_uh->uh_ubapurge)
-			(*sc->sc_uh->uh_ubapurge)(sc->sc_uh,
-			    ud->mp_ca.ca_bdp);
+		if (uh->uh_ubapurge)
+			(*uh->uh_ubapurge)(uh, ud->mp_ca.ca_bdp);
 		/* signal purge complete */
 		bus_space_write_2(sc->sc_iot, sc->sc_sah, 0, 0);
 	}
@@ -435,9 +435,9 @@ udaintr(void *arg)
  * on that Unibus, and requeue outstanding I/O.
  */
 static void
-udareset(device_t dev)
+udareset(struct device *dev)
 {
-	struct uda_softc *sc = device_private(dev);
+	struct uda_softc *sc = (void *)dev;
 	/*
 	 * Our BDP (if any) is gone; our command (if any) is
 	 * flushed; the device is no longer mapped; and the
@@ -462,12 +462,12 @@ udareset(device_t dev)
 }
 
 void
-udactlrdone(device_t dev)
+udactlrdone(struct device *usc)
 {
-	struct uda_softc *sc = device_private(dev);
+	struct uda_softc *sc = (void *)usc;
 	int s;
 
 	s = spluba();
-	uba_done(sc->sc_uh);
+	uba_done((struct uba_softc *)device_parent(&sc->sc_dev));
 	splx(s);
 }

@@ -1,4 +1,4 @@
-/*	$NetBSD: msdosfs_lookup.c,v 1.17 2009/01/23 12:46:23 jmcneill Exp $	*/
+/*	$NetBSD: msdosfs_lookup.c,v 1.11 2006/12/09 16:11:51 chs Exp $	*/
 
 /*-
  * Copyright (C) 1994, 1995, 1997 Wolfgang Solfrank.
@@ -48,7 +48,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: msdosfs_lookup.c,v 1.17 2009/01/23 12:46:23 jmcneill Exp $");
+__KERNEL_RCSID(0, "$NetBSD: msdosfs_lookup.c,v 1.11 2006/12/09 16:11:51 chs Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -133,7 +133,7 @@ msdosfs_lookup(v)
 	/*
 	 * Check accessiblity of directory.
 	 */
-	if ((error = VOP_ACCESS(vdp, VEXEC, cnp->cn_cred)) != 0)
+	if ((error = VOP_ACCESS(vdp, VEXEC, cnp->cn_cred, cnp->cn_lwp)) != 0)
 		return (error);
 
 	if ((flags & ISLASTCN) && (vdp->v_mount->mnt_flag & MNT_RDONLY) &&
@@ -155,7 +155,7 @@ msdosfs_lookup(v)
 	 * they won't find it.  DOS filesystems don't have them in the root
 	 * directory.  So, we fake it. deget() is in on this scam too.
 	 */
-	if ((vdp->v_vflag & VV_ROOT) && cnp->cn_nameptr[0] == '.' &&
+	if ((vdp->v_flag & VROOT) && cnp->cn_nameptr[0] == '.' &&
 	    (cnp->cn_namelen == 1 ||
 		(cnp->cn_namelen == 2 && cnp->cn_nameptr[1] == '.'))) {
 		isadir = ATTR_DIRECTORY;
@@ -221,15 +221,15 @@ msdosfs_lookup(v)
 			return (error);
 		}
 		error = bread(pmp->pm_devvp, de_bn2kb(pmp, bn), blsize, NOCRED,
-		    0, &bp);
+		    &bp);
 		if (error) {
-			brelse(bp, 0);
+			brelse(bp);
 			return (error);
 		}
 		for (blkoff = 0; blkoff < blsize;
 		     blkoff += sizeof(struct direntry),
 		     diroff += sizeof(struct direntry)) {
-			dep = (struct direntry *)((char *)bp->b_data + blkoff);
+			dep = (struct direntry *)(bp->b_data + blkoff);
 			/*
 			 * If the slot is empty and we are still looking
 			 * for an empty then remember this one.  If the
@@ -251,7 +251,7 @@ msdosfs_lookup(v)
 					slotoffset = diroff;
 				}
 				if (dep->deName[0] == SLOT_EMPTY) {
-					brelse(bp, 0);
+					brelse(bp);
 					goto notfound;
 				}
 			} else {
@@ -327,7 +327,7 @@ msdosfs_lookup(v)
 		 * Release the buffer holding the directory cluster just
 		 * searched.
 		 */
-		brelse(bp, 0);
+		brelse(bp);
 	}	/* for (frcn = 0; ; frcn++) */
 
 notfound:
@@ -350,7 +350,7 @@ notfound:
 		 * Access for write is interpreted as allowing
 		 * creation of files in the directory.
 		 */
-		error = VOP_ACCESS(vdp, VWRITE, cnp->cn_cred);
+		error = VOP_ACCESS(vdp, VWRITE, cnp->cn_cred, cnp->cn_lwp);
 		if (error)
 			return (error);
 
@@ -441,7 +441,7 @@ found:
 	 * Reserving it here and giving it to deget could result
 	 * in a deadlock.
 	 */
-	brelse(bp, 0);
+	brelse(bp);
 
 foundroot:
 	/*
@@ -467,7 +467,7 @@ foundroot:
 		/*
 		 * Write access to directory required to delete files.
 		 */
-		error = VOP_ACCESS(vdp, VWRITE, cnp->cn_cred);
+		error = VOP_ACCESS(vdp, VWRITE, cnp->cn_cred, cnp->cn_lwp);
 		if (error)
 			return (error);
 
@@ -500,7 +500,7 @@ foundroot:
 		if (blkoff == MSDOSFSROOT_OFS)
 			return EROFS;				/* really? XXX */
 
-		error = VOP_ACCESS(vdp, VWRITE, cnp->cn_cred);
+		error = VOP_ACCESS(vdp, VWRITE, cnp->cn_cred, cnp->cn_lwp);
 		if (error)
 			return (error);
 
@@ -606,7 +606,7 @@ createde(dep, ddep, depp, cnp)
 		    - ddep->de_FileSize;
 		dirclust = de_clcount(pmp, needlen);
 		if ((error = extendfile(ddep, dirclust, 0, 0, DE_CLEAR)) != 0) {
-			(void)detrunc(ddep, ddep->de_FileSize, 0, NOCRED);
+			(void)detrunc(ddep, ddep->de_FileSize, 0, NOCRED, NULL);
 			goto err_norollback;
 		}
 
@@ -629,8 +629,8 @@ createde(dep, ddep, depp, cnp)
 	if (dirclust != MSDOSFSROOT)
 		clusoffset &= pmp->pm_crbomask;
 	if ((error = bread(pmp->pm_devvp, de_bn2kb(pmp, bn), blsize, NOCRED,
-	    B_MODIFY, &bp)) != 0) {
-		brelse(bp, 0);
+	    &bp)) != 0) {
+		brelse(bp);
 		goto err_norollback;
 	}
 	ndep = bptoep(pmp, bp, clusoffset);
@@ -667,9 +667,9 @@ createde(dep, ddep, depp, cnp)
 					goto rollback;
 
 				error = bread(pmp->pm_devvp, de_bn2kb(pmp, bn),
-				    blsize, NOCRED, B_MODIFY, &bp);
+				    blsize, NOCRED, &bp);
 				if (error) {
-					brelse(bp, 0);
+					brelse(bp);
 					goto rollback;
 				}
 				ndep = bptoep(pmp, bp,
@@ -720,8 +720,8 @@ createde(dep, ddep, depp, cnp)
 	if (rberror)
 		goto err_norollback;
 	if ((rberror = bread(pmp->pm_devvp, de_bn2kb(pmp, bn), blsize, NOCRED,
-	    B_MODIFY, &bp)) != 0) {
-		brelse(bp, 0);
+	    &bp)) != 0) {
+		brelse(bp);
 		goto err_norollback;
 	}
 	ndep = bptoep(pmp, bp, clusoffset);
@@ -748,9 +748,9 @@ createde(dep, ddep, depp, cnp)
 				goto err_norollback;
 
 			rberror = bread(pmp->pm_devvp, de_bn2kb(pmp, bn),
-			    blsize, NOCRED, B_MODIFY, &bp);
+			    blsize, NOCRED, &bp);
 			if (rberror) {
-				brelse(bp, 0);
+				brelse(bp);
 				goto err_norollback;
 			}
 			ndep = bptoep(pmp, bp, fndoffset);
@@ -798,13 +798,13 @@ dosdirempty(dep)
 			return (0);
 		}
 		error = bread(pmp->pm_devvp, de_bn2kb(pmp, bn), blsize, NOCRED,
-		    0, &bp);
+		    &bp);
 		if (error) {
-			brelse(bp, 0);
+			brelse(bp);
 			return (0);
 		}
 		for (dentp = (struct direntry *)bp->b_data;
-		     (char *)dentp < (char *)bp->b_data + blsize;
+		     (char *)dentp < bp->b_data + blsize;
 		     dentp++) {
 			if (dentp->deName[0] != SLOT_DELETED &&
 			    (dentp->deAttributes & ATTR_VOLUME) == 0) {
@@ -816,7 +816,7 @@ dosdirempty(dep)
 				 * is empty.
 				 */
 				if (dentp->deName[0] == SLOT_EMPTY) {
-					brelse(bp, 0);
+					brelse(bp);
 					return (1);
 				}
 				/*
@@ -825,7 +825,7 @@ dosdirempty(dep)
 				 */
 				if (memcmp(dentp->deName, ".          ", 11) &&
 				    memcmp(dentp->deName, "..         ", 11)) {
-					brelse(bp, 0);
+					brelse(bp);
 #ifdef MSDOSFS_DEBUG
 					printf("dosdirempty(): found %.11s, %d, %d\n",
 					    dentp->deName, dentp->deName[0],
@@ -835,7 +835,7 @@ dosdirempty(dep)
 				}
 			}
 		}
-		brelse(bp, 0);
+		brelse(bp);
 	}
 	/* NOTREACHED */
 }
@@ -892,7 +892,7 @@ doscheckpath(source, target)
 		}
 		scn = dep->de_StartCluster;
 		error = bread(pmp->pm_devvp, de_bn2kb(pmp, cntobn(pmp, scn)),
-			      pmp->pm_bpcluster, NOCRED, 0, &bp);
+			      pmp->pm_bpcluster, NOCRED, &bp);
 		if (error)
 			break;
 
@@ -921,7 +921,7 @@ doscheckpath(source, target)
 		}
 
 		vput(DETOV(dep));
-		brelse(bp, 0);
+		brelse(bp);
 		bp = NULL;
 		/* NOTE: deget() clears dep on error */
 		if ((error = deget(pmp, scn, 0, &dep)) != 0)
@@ -929,7 +929,7 @@ doscheckpath(source, target)
 	}
 out:
 	if (bp)
-		brelse(bp, 0);
+		brelse(bp);
 	if (error == ENOTDIR)
 		printf("doscheckpath(): .. not a directory?\n");
 	if (dep != NULL)
@@ -959,8 +959,8 @@ readep(pmp, dirclust, diroffset, bpp, epp)
 		blsize = de_bn2off(pmp, pmp->pm_rootdirsize) & pmp->pm_crbomask;
 	bn = detobn(pmp, dirclust, diroffset);
 	if ((error = bread(pmp->pm_devvp, de_bn2kb(pmp, bn), blsize, NOCRED,
-	    0, bpp)) != 0) {
-		brelse(*bpp, 0);
+	    bpp)) != 0) {
+		brelse(*bpp);
 		*bpp = NULL;
 		return (error);
 	}
@@ -1019,9 +1019,9 @@ removede(pdep, dep)
 		if (error)
 			return error;
 		error = bread(pmp->pm_devvp, de_bn2kb(pmp, bn), blsize, NOCRED,
-		    B_MODIFY, &bp);
+		    &bp);
 		if (error) {
-			brelse(bp, 0);
+			brelse(bp);
 			return error;
 		}
 		ep = bptoep(pmp, bp, offset);
@@ -1032,7 +1032,7 @@ removede(pdep, dep)
 		 */
 		if (ep->deAttributes != ATTR_WIN95
 		    && offset != pdep->de_fndoffset) {
-			brelse(bp, 0);
+			brelse(bp);
 			break;
 		}
 		offset += sizeof(struct direntry);
@@ -1096,19 +1096,19 @@ uniqdosname(dep, cnp, cp)
 				return error;
 			}
 			error = bread(pmp->pm_devvp, de_bn2kb(pmp, bn), blsize,
-			    NOCRED, 0, &bp);
+			    NOCRED, &bp);
 			if (error) {
-				brelse(bp, 0);
+				brelse(bp);
 				return error;
 			}
 			for (dentp = (struct direntry *)bp->b_data;
-			     (char *)dentp < (char *)bp->b_data + blsize;
+			     (char *)dentp < bp->b_data + blsize;
 			     dentp++) {
 				if (dentp->deName[0] == SLOT_EMPTY) {
 					/*
 					 * Last used entry and not found
 					 */
-					brelse(bp, 0);
+					brelse(bp);
 					return 0;
 				}
 				/*
@@ -1121,7 +1121,7 @@ uniqdosname(dep, cnp, cp)
 					break;
 				}
 			}
-			brelse(bp, 0);
+			brelse(bp);
 		}
 	}
 }
@@ -1135,33 +1135,32 @@ findwin95(dep)
 {
 	struct msdosfsmount *pmp = dep->de_pmp;
 	struct direntry *dentp;
-	int blsize, win95;
+	int blsize;
 	u_long cn;
 	daddr_t bn;
 	struct buf *bp;
 
-	win95 = 1;
 	/*
 	 * Read through the directory looking for Win'95 entries
 	 * XXX Note: Error currently handled just as EOF
 	 */
 	for (cn = 0;; cn++) {
 		if (pcbmap(dep, cn, &bn, 0, &blsize))
-			return win95;
+			return 0;
 		if (bread(pmp->pm_devvp, de_bn2kb(pmp, bn), blsize, NOCRED,
-		    0, &bp)) {
-			brelse(bp, 0);
-			return win95;
+		    &bp)) {
+			brelse(bp);
+			return 0;
 		}
 		for (dentp = (struct direntry *)bp->b_data;
-		     (char *)dentp < (char *)bp->b_data + blsize;
+		     (char *)dentp < bp->b_data + blsize;
 		     dentp++) {
 			if (dentp->deName[0] == SLOT_EMPTY) {
 				/*
 				 * Last used entry and not found
 				 */
-				brelse(bp, 0);
-				return win95;
+				brelse(bp);
+				return 0;
 			}
 			if (dentp->deName[0] == SLOT_DELETED) {
 				/*
@@ -1172,11 +1171,10 @@ findwin95(dep)
 				continue;
 			}
 			if (dentp->deAttributes == ATTR_WIN95) {
-				brelse(bp, 0);
+				brelse(bp);
 				return 1;
 			}
-			win95 = 0;
 		}
-		brelse(bp, 0);
+		brelse(bp);
 	}
 }

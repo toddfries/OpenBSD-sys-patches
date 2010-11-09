@@ -1,4 +1,4 @@
-#	$NetBSD: INSTALL,v 1.73 2009/03/06 20:31:47 joerg Exp $
+#	$NetBSD: INSTALL,v 1.63 2006/10/02 03:28:29 chs Exp $
 #
 #	CATSINST -- CHALTECH CATS Install kernel
 #
@@ -53,7 +53,7 @@ file-system	PTYFS		# /dev/pts/N support
 #options 	QUOTA		# UFS quotas
 #options 	FFS_EI		# FFS Endian Independant support
 #options 	NFSSERVER
-options 	WAPBL		# File system journaling support - Experimental
+#options 	SOFTDEP		# FFS soft updates support
 options 	FFS_NO_SNAPSHOT	# No FFS snapshot support
 
 # Networking options
@@ -83,7 +83,6 @@ options 	NFS_BOOT_DHCP
 # Compatibility options
 
 #options 	COMPAT_43	# 4.3BSD compatibility.
-options 	COMPAT_40	# NetBSD 4.0 compatibility.
 options 	COMPAT_30	# NetBSD 3.0 compatibility.
 options 	COMPAT_20	# NetBSD 2.0 compatibility.
 options 	COMPAT_16	# NetBSD 1.6 compatibility.
@@ -102,6 +101,7 @@ options		COMPAT_BSDPTY	# /dev/[pt]ty?? ptys.
 #options 	SYSVMSG		# System V-like message queues
 #options 	SYSVSEM		# System V-like semaphores
 #options 	SYSVSHM		# System V-like memory sharing
+#options 	SHMMAXPGS=1024	# 1024 pages is the default
 
 # Device options
 
@@ -109,11 +109,11 @@ options 	MEMORY_DISK_HOOKS	# boottime setup of ramdisk
 options 	MEMORY_DISK_ROOT_SIZE=4200	# Size in blocks
 options 	MEMORY_DISK_IS_ROOT	# use memory disk as root
 options 	MEMORY_DISK_SERVER=0	# no userspace memory disk support
-options 	MEMORY_DISK_RBFLAGS=RB_SINGLE	# boot in single-user mode
 
 # Miscellaneous kernel options
 #options 	KTRACE		# system call tracing, a la ktrace(1)
 #options 	IRQSTATS	# manage IRQ statistics
+#options 	LKM		# loadable kernel modules
 #options 	KMEMSTATS	# kernel memory statistics
 #options 	SCSIVERBOSE	# Verbose SCSI errors
 #options 	PCIVERBOSE	# Verbose PCI descriptions
@@ -143,6 +143,7 @@ options 	WSDISPLAY_COMPAT_RAWKBD		# can get raw scancodes
 #options 	PORTMASTER	# Enable PortMaster only options
 #options 	DIAGNOSTIC	# internally consistency checks
 #options 	PMAP_DEBUG	# Enable pmap_debug_level code
+#options 	IPKDB		# remote kernel debugging
 options 	DDB		# in-kernel debugger
 options 	DDB_HISTORY_SIZE=100	# Enable history editing in DDB
 #makeoptions	DEBUG="-g"	# compile full symbol table
@@ -193,8 +194,8 @@ scsibus* at ahc?
 #scsibus* at bha?
 iha*	at pci? dev ? function ?	# Initio INIC-940/950 SCSI
 scsibus* at iha?
-#isp*	at pci? dev ? function ?	# Qlogic ISP 10x0 SCSI controllers
-#scsibus* at isp?
+isp*	at pci? dev ? function ?	# Qlogic ISP 10x0 SCSI controllers
+scsibus* at isp?
 pcscp*	at pci? dev ? function ?	# AMD 53c974 PCscsi-PCI SCSI
 scsibus* at pcscp?
 siop*	at pci? dev ? function ?	# NCR 53c8xx SCSI
@@ -297,7 +298,7 @@ ukphy*	at mii? phy ?			# generic unknown PHYs
 
 # USB Hubs
 #uhub*	at usb?
-#uhub*	at uhub? port ?
+#uhub*	at uhub? port ? configuration ? interface ?
 
 # USB HID device
 #uhidev*	at uhub? port ? configuration ? interface ?

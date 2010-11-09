@@ -1,7 +1,7 @@
 /******************************************************************************
  *
  * Module Name: utxface - External interfaces for "global" ACPI functions
- *              $Revision: 1.6 $
+ *              xRevision: 1.116 $
  *
  *****************************************************************************/
 
@@ -9,7 +9,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2008, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2006, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -115,6 +115,9 @@
  *****************************************************************************/
 
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: utxface.c,v 1.3 2006/11/16 01:33:32 christos Exp $");
+
 #define __UTXFACE_C__
 
 #include "acpi.h"
@@ -125,8 +128,6 @@
 #define _COMPONENT          ACPI_UTILITIES
         ACPI_MODULE_NAME    ("utxface")
 
-
-#ifndef ACPI_ASL_COMPILER
 
 /*******************************************************************************
  *
@@ -148,10 +149,9 @@ AcpiInitializeSubsystem (
     ACPI_STATUS             Status;
 
 
-    ACPI_FUNCTION_TRACE (AcpiInitializeSubsystem);
+    ACPI_FUNCTION_TRACE ("AcpiInitializeSubsystem");
 
 
-    AcpiGbl_StartupFlags = ACPI_SUBSYSTEM_INITIALIZE;
     ACPI_DEBUG_EXEC (AcpiUtInitStackPtrTrace ());
 
     /* Initialize the OS-Dependent layer */
@@ -193,8 +193,6 @@ AcpiInitializeSubsystem (
     return_ACPI_STATUS (Status);
 }
 
-ACPI_EXPORT_SYMBOL (AcpiInitializeSubsystem)
-
 
 /*******************************************************************************
  *
@@ -216,8 +214,24 @@ AcpiEnableSubsystem (
     ACPI_STATUS             Status = AE_OK;
 
 
-    ACPI_FUNCTION_TRACE (AcpiEnableSubsystem);
+    ACPI_FUNCTION_TRACE ("AcpiEnableSubsystem");
 
+
+    /*
+     * We must initialize the hardware before we can enable ACPI.
+     * The values from the FADT are validated here.
+     */
+    if (!(Flags & ACPI_NO_HARDWARE_INIT))
+    {
+        ACPI_DEBUG_PRINT ((ACPI_DB_EXEC,
+            "[Init] Initializing ACPI hardware\n"));
+
+        Status = AcpiHwInitialize ();
+        if (ACPI_FAILURE (Status))
+        {
+            return_ACPI_STATUS (Status);
+        }
+    }
 
     /* Enable ACPI mode */
 
@@ -315,8 +329,6 @@ AcpiEnableSubsystem (
     return_ACPI_STATUS (Status);
 }
 
-ACPI_EXPORT_SYMBOL (AcpiEnableSubsystem)
-
 
 /*******************************************************************************
  *
@@ -338,7 +350,7 @@ AcpiInitializeObjects (
     ACPI_STATUS             Status = AE_OK;
 
 
-    ACPI_FUNCTION_TRACE (AcpiInitializeObjects);
+    ACPI_FUNCTION_TRACE ("AcpiInitializeObjects");
 
 
     /*
@@ -404,10 +416,6 @@ AcpiInitializeObjects (
     return_ACPI_STATUS (Status);
 }
 
-ACPI_EXPORT_SYMBOL (AcpiInitializeObjects)
-
-
-#endif
 
 /*******************************************************************************
  *
@@ -428,7 +436,7 @@ AcpiTerminate (
     ACPI_STATUS         Status;
 
 
-    ACPI_FUNCTION_TRACE (AcpiTerminate);
+    ACPI_FUNCTION_TRACE ("AcpiTerminate");
 
 
     /* Terminate the AML Debugger if present */
@@ -458,9 +466,6 @@ AcpiTerminate (
     return_ACPI_STATUS (Status);
 }
 
-ACPI_EXPORT_SYMBOL (AcpiTerminate)
-
-#ifndef ACPI_ASL_COMPILER
 
 /*******************************************************************************
  *
@@ -491,8 +496,6 @@ AcpiSubsystemStatus (
     }
 }
 
-ACPI_EXPORT_SYMBOL (AcpiSubsystemStatus)
-
 
 /*******************************************************************************
  *
@@ -518,9 +521,10 @@ AcpiGetSystemInfo (
 {
     ACPI_SYSTEM_INFO        *InfoPtr;
     ACPI_STATUS             Status;
+    UINT32                  i;
 
 
-    ACPI_FUNCTION_TRACE (AcpiGetSystemInfo);
+    ACPI_FUNCTION_TRACE ("AcpiGetSystemInfo");
 
 
     /* Parameter validation */
@@ -544,15 +548,19 @@ AcpiGetSystemInfo (
      */
     InfoPtr = (ACPI_SYSTEM_INFO *) OutBuffer->Pointer;
 
-    InfoPtr->AcpiCaVersion = ACPI_CA_VERSION;
+    InfoPtr->AcpiCaVersion      = ACPI_CA_VERSION;
 
     /* System flags (ACPI capabilities) */
 
-    InfoPtr->Flags = ACPI_SYS_MODE_ACPI;
+    InfoPtr->Flags              = ACPI_SYS_MODE_ACPI;
 
     /* Timer resolution - 24 or 32 bits  */
 
-    if (AcpiGbl_FADT.Flags & ACPI_FADT_32BIT_TIMER)
+    if (!AcpiGbl_FADT)
+    {
+        InfoPtr->TimerResolution = 0;
+    }
+    else if (AcpiGbl_FADT->TmrValExt == 0)
     {
         InfoPtr->TimerResolution = 24;
     }
@@ -563,63 +571,24 @@ AcpiGetSystemInfo (
 
     /* Clear the reserved fields */
 
-    InfoPtr->Reserved1 = 0;
-    InfoPtr->Reserved2 = 0;
+    InfoPtr->Reserved1          = 0;
+    InfoPtr->Reserved2          = 0;
 
     /* Current debug levels */
 
-    InfoPtr->DebugLayer = AcpiDbgLayer;
-    InfoPtr->DebugLevel = AcpiDbgLevel;
+    InfoPtr->DebugLayer         = AcpiDbgLayer;
+    InfoPtr->DebugLevel         = AcpiDbgLevel;
 
-    return_ACPI_STATUS (AE_OK);
-}
+    /* Current status of the ACPI tables, per table type */
 
-ACPI_EXPORT_SYMBOL (AcpiGetSystemInfo)
-
-
-/*******************************************************************************
- *
- * FUNCTION:    AcpiGetStatistics
- *
- * PARAMETERS:  Stats           - Where the statistics are returned
- *
- * RETURN:      Status          - the status of the call
- *
- * DESCRIPTION: Get the contents of the various system counters
- *
- ******************************************************************************/
-
-ACPI_STATUS
-AcpiGetStatistics (
-    ACPI_STATISTICS         *Stats)
-{
-    ACPI_FUNCTION_TRACE (AcpiGetStatistics);
-
-
-    /* Parameter validation */
-
-    if (!Stats)
+    InfoPtr->NumTableTypes = NUM_ACPI_TABLE_TYPES;
+    for (i = 0; i < NUM_ACPI_TABLE_TYPES; i++)
     {
-        return_ACPI_STATUS (AE_BAD_PARAMETER);
+        InfoPtr->TableInfo[i].Count = AcpiGbl_TableLists[i].Count;
     }
 
-    /* Various interrupt-based event counters */
-
-    Stats->SciCount = AcpiSciCount;
-    Stats->GpeCount = AcpiGpeCount;
-
-    ACPI_MEMCPY (Stats->FixedEventCount, AcpiFixedEventCount,
-        sizeof (AcpiFixedEventCount));
-
-
-    /* Other counters */
-
-    Stats->MethodCount = AcpiMethodCount;
-
     return_ACPI_STATUS (AE_OK);
 }
-
-ACPI_EXPORT_SYMBOL (AcpiGetStatistics)
 
 
 /*****************************************************************************
@@ -657,8 +626,6 @@ AcpiInstallInitializationHandler (
     return AE_OK;
 }
 
-ACPI_EXPORT_SYMBOL (AcpiInstallInitializationHandler)
-
 
 /*****************************************************************************
  *
@@ -676,7 +643,7 @@ ACPI_STATUS
 AcpiPurgeCachedObjects (
     void)
 {
-    ACPI_FUNCTION_TRACE (AcpiPurgeCachedObjects);
+    ACPI_FUNCTION_TRACE ("AcpiPurgeCachedObjects");
 
     (void) AcpiOsPurgeCache (AcpiGbl_StateCache);
     (void) AcpiOsPurgeCache (AcpiGbl_OperandCache);
@@ -684,7 +651,3 @@ AcpiPurgeCachedObjects (
     (void) AcpiOsPurgeCache (AcpiGbl_PsNodeExtCache);
     return_ACPI_STATUS (AE_OK);
 }
-
-ACPI_EXPORT_SYMBOL (AcpiPurgeCachedObjects)
-
-#endif

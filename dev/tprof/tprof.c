@@ -1,4 +1,4 @@
-/*	$NetBSD: tprof.c,v 1.4 2009/03/10 14:45:02 yamt Exp $	*/
+/*	$NetBSD: tprof.c,v 1.7 2010/08/11 11:36:02 pgoyette Exp $	*/
 
 /*-
  * Copyright (c)2008,2009 YAMAMOTO Takashi,
@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: tprof.c,v 1.4 2009/03/10 14:45:02 yamt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: tprof.c,v 1.7 2010/08/11 11:36:02 pgoyette Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -43,8 +43,6 @@ __KERNEL_RCSID(0, "$NetBSD: tprof.c,v 1.4 2009/03/10 14:45:02 yamt Exp $");
 
 #include <dev/tprof/tprof.h>
 #include <dev/tprof/tprof_ioctl.h>
-
-#include <machine/db_machdep.h> /* PC_REGS */
 
 /*
  * locking order:
@@ -232,6 +230,7 @@ tprof_stop1(void)
 	struct cpu_info *ci;
 
 	KASSERT(mutex_owned(&tprof_startstop_lock));
+	KASSERT(tprof_nworker == 0);
 
 	for (CPU_INFO_FOREACH(cii, ci)) {
 		tprof_cpu_t * const c = tprof_cpu(ci);
@@ -405,11 +404,11 @@ tprof_backend_lookup(const char *name)
  */
 
 void
-tprof_sample(tprof_backend_cookie_t *cookie, const struct trapframe *tf)
+tprof_sample(tprof_backend_cookie_t *cookie, const tprof_frame_info_t *tfi)
 {
 	tprof_cpu_t * const c = tprof_curcpu();
 	tprof_buf_t * const buf = c->c_buf;
-	const uintptr_t pc = PC_REGS(tf);
+	const uintptr_t pc = tfi->tfi_pc;
 	u_int idx;
 
 	idx = buf->b_used;
@@ -668,7 +667,7 @@ tprof_driver_init(void)
 	mutex_init(&tprof_reader_lock, MUTEX_DEFAULT, IPL_NONE);
 	mutex_init(&tprof_startstop_lock, MUTEX_DEFAULT, IPL_NONE);
 	cv_init(&tprof_cv, "tprof");
-	cv_init(&tprof_reader_cv, "tprofread");
+	cv_init(&tprof_reader_cv, "tprof_rd");
 	STAILQ_INIT(&tprof_list);
 }
 

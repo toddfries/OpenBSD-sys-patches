@@ -1,4 +1,4 @@
-/* $NetBSD: lemac.c,v 1.36 2008/11/07 00:20:02 dyoung Exp $ */
+/* $NetBSD: lemac.c,v 1.34 2007/10/19 11:59:55 ad Exp $ */
 
 /*-
  * Copyright (c) 1994, 1995, 1997 Matt Thomas <matt@3am-software.com>
@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: lemac.c,v 1.36 2008/11/07 00:20:02 dyoung Exp $");
+__KERNEL_RCSID(0, "$NetBSD: lemac.c,v 1.34 2007/10/19 11:59:55 ad Exp $");
 
 #include "opt_inet.h"
 #include "rnd.h"
@@ -757,7 +757,7 @@ lemac_ifioctl(
     s = splnet();
 
     switch (cmd) {
-	case SIOCINITIFADDR: {
+	case SIOCSIFADDR: {
 	    struct ifaddr *ifa = (struct ifaddr *)data;
 
 	    ifp->if_flags |= IFF_UP;
@@ -779,8 +779,6 @@ lemac_ifioctl(
 	}
 
 	case SIOCSIFFLAGS: {
-	    if ((error = ifioctl_common(ifp, cmd, data)) != 0)
-		break;
 	    lemac_init(sc);
 	    break;
 	}
@@ -807,7 +805,7 @@ lemac_ifioctl(
 	}
 
 	default: {
-	    error = ether_ioctl(ifp, cmd, data);
+	    error = EINVAL;
 	    break;
 	}
     }
@@ -993,7 +991,7 @@ lemac_ifattach(
 {
     struct ifnet * const ifp = &sc->sc_if;
 
-    strlcpy(ifp->if_xname, device_xname(&sc->sc_dv), IFNAMSIZ);
+    strcpy(ifp->if_xname, sc->sc_dv.dv_xname);
 
     lemac_reset(sc);
 
@@ -1027,7 +1025,7 @@ lemac_ifattach(
 	ether_ifattach(ifp, sc->sc_enaddr);
 
 #if NRND > 0
-	rnd_attach_source(&sc->rnd_source, device_xname(&sc->sc_dv),
+	rnd_attach_source(&sc->rnd_source, sc->sc_dv.dv_xname,
 			  RND_TYPE_NET, 0);
 #endif
 

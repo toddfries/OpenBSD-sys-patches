@@ -1,4 +1,4 @@
-/*	$NetBSD: svr4_32_machdep.c,v 1.35 2008/11/12 12:36:06 ad Exp $	 */
+/*	$NetBSD: svr4_32_machdep.c,v 1.24 2006/06/07 22:39:39 kardel Exp $	 */
 
 /*-
  * Copyright (c) 1994 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,9 +37,9 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: svr4_32_machdep.c,v 1.35 2008/11/12 12:36:06 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: svr4_32_machdep.c,v 1.24 2006/06/07 22:39:39 kardel Exp $");
 
-#ifdef _KERNEL_OPT
+#ifndef _LKM
 #include "opt_ddb.h"
 #endif
 
@@ -49,6 +56,7 @@ __KERNEL_RCSID(0, "$NetBSD: svr4_32_machdep.c,v 1.35 2008/11/12 12:36:06 ad Exp 
 #include <sys/signalvar.h>
 #include <sys/malloc.h>
 #include <sys/mount.h>
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 #include <sys/exec_elf.h>
 #include <sys/types.h>
@@ -70,7 +78,7 @@ __KERNEL_RCSID(0, "$NetBSD: svr4_32_machdep.c,v 1.35 2008/11/12 12:36:06 ad Exp 
 #include <machine/vmparam.h>
 #include <machine/svr4_machdep.h>
 
-static void svr4_32_getsiginfo(union svr4_32_siginfo *, int, u_long, void *);
+static void svr4_32_getsiginfo(union svr4_32_siginfo *, int, u_long, caddr_t);
 
 void
 svr4_32_setregs(struct lwp *l, struct exec_package *epp, u_long stack)
@@ -140,7 +148,6 @@ svr4_32_getmcontext(struct lwp *l, struct svr4_32_mcontext *mc,
 		Debugger();
 #endif
 #endif
-		mutex_enter(l->l_proc->p_lock);
 		sigexit(l, SIGILL);
 	}
 
@@ -238,7 +245,6 @@ svr4_32_setmcontext(struct lwp *l, struct svr4_32_mcontext *mc,
 		Debugger();
 #endif
 #endif
-		mutex_enter(l->l_proc->p_lock);
 		sigexit(l, SIGILL);
 	}
 
@@ -327,11 +333,11 @@ svr4_32_setmcontext(struct lwp *l, struct svr4_32_mcontext *mc,
  */
 static void
 svr4_32_getsiginfo(union svr4_32_siginfo *si, int sig, u_long code,
-	void *addr)
+	caddr_t addr)
 {
 	si->si_signo = native_to_svr4_signo[sig];
 	si->si_errno = 0;
-	NETBSD32PTR32(si->si_addr, addr);
+	si->si_addr  = (netbsd32_caddr_t)(u_long)addr;
 	/*
 	 * we can do this direct map as they are the same as all sparc
 	 * architectures.
@@ -459,25 +465,24 @@ svr4_32_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
 	struct proc *p = l->l_proc;
 	register struct trapframe64 *tf;
 	struct svr4_32_sigframe *fp, frame;
-	int onstack, error;
+	int onstack;
 	vaddr_t oldsp, newsp, addr;
 	sig_t catcher = SIGACTION(p, sig).sa_handler;
-	sigset_t tmask;
 
 	tf = (struct trapframe64 *)l->l_md.md_tf;
 	oldsp = tf->tf_out[6];
 
 	/* Do we need to jump onto the signal stack? */
 	onstack =
-	    (l->l_sigstk.ss_flags & (SS_DISABLE | SS_ONSTACK)) == 0 &&
+	    (p->p_sigctx.ps_sigstk.ss_flags & (SS_DISABLE | SS_ONSTACK)) == 0 &&
 	    (SIGACTION(p, sig).sa_flags & SA_ONSTACK) != 0;
 
 	/*
 	 * Allocate space for the signal handler context.
 	 */
 	if (onstack)
-		fp = (struct svr4_32_sigframe *)((char *)l->l_sigstk.ss_sp +
-						l->l_sigstk.ss_size);
+		fp = (struct svr4_32_sigframe *)((caddr_t)p->p_sigctx.ps_sigstk.ss_sp +
+						p->p_sigctx.ps_sigstk.ss_size);
 	else
 		fp = (struct svr4_32_sigframe *)oldsp;
 	fp = (struct svr4_32_sigframe *) ((long) (fp - 1) & ~7);
@@ -495,13 +500,14 @@ svr4_32_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
 	/*
 	 * Build the argument list for the signal handler.
 	 */
+	svr4_32_getcontext(l, &frame.sf_uc, mask);
 	svr4_32_getsiginfo(&frame.sf_si, sig, ksi->ksi_trap,
-	    (void *)(u_long)tf->tf_pc);
+	    (caddr_t)(u_long)tf->tf_pc);
 
 	/* Build stack frame for signal trampoline. */
 	frame.sf_signum = frame.sf_si.si_signo;
-	NETBSD32PTR32(frame.sf_sip, &fp->sf_si);
-	NETBSD32PTR32(frame.sf_ucp, &fp->sf_uc);
+	frame.sf_sip = (netbsd32_caddr_t)(u_long)&fp->sf_si;
+	frame.sf_ucp = (netbsd32_caddr_t)(u_long)&fp->sf_uc;
 	frame.sf_handler = catcher;
 
 	DPRINTF(("svr4_32_sendsig signum=%d si = %p uc = %p handler = %p\n",
@@ -510,12 +516,9 @@ svr4_32_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
 	/*
 	 * Modify the signal context to be used by sigreturn.
 	 */
-	tmask = *mask;
-	sendsig_reset(l, sig);
 	frame.sf_uc.uc_mcontext.greg[SVR4_SPARC_SP] = oldsp;
+
 	newsp = (u_long)fp - sizeof(struct rwindow32);
-	mutex_exit(p->p_lock);
-	svr4_32_getcontext(l, &frame.sf_uc, &tmask);
 	write_user_windows();
 
 #ifdef DEBUG
@@ -523,24 +526,19 @@ svr4_32_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
 	    printf("svr4_32_sendsig: saving sf to %p, setting stack pointer %p to %p\n",
 		   fp, &(((struct rwindow32 *)newsp)->rw_in[6]), (void *)(u_long)oldsp);
 #endif
-	error = (rwindow_save(l) || copyout(&frame, fp, sizeof(frame)) != 0 ||
-	    copyout(&oldsp, &((struct rwindow32 *)newsp)->rw_in[6], sizeof(oldsp)));
-	mutex_enter(p->p_lock);
-
-	if (error) {
+	if (rwindow_save(l) || copyout(&frame, fp, sizeof(frame)) != 0 ||
+	    copyout(&oldsp, &((struct rwindow32 *)newsp)->rw_in[6], sizeof(oldsp))) {
 		/*
 		 * Process has trashed its stack; give it an illegal
 		 * instruction to halt it in its tracks.
 		 */
 #ifdef DEBUG
-		mutex_exit(p->p_lock);
 		if ((sigdebug & SDB_KSTACK) && p->p_pid == sigpid)
 			printf("svr4_32_sendsig: window save or copyout error\n");
 		printf("svr4_32_sendsig: stack was trashed trying to send sig %d, sending SIGILL\n", sig);
 #ifdef DDB
 		Debugger();
 #endif
-		mutex_enter(p->p_lock);
 #endif
 		sigexit(l, SIGILL);
 		/* NOTREACHED */
@@ -563,16 +561,14 @@ svr4_32_sendsig(const ksiginfo_t *ksi, const sigset_t *mask)
 
 	/* Remember that we're now on the signal stack. */
 	if (onstack)
-		l->l_sigstk.ss_flags |= SS_ONSTACK;
+		p->p_sigctx.ps_sigstk.ss_flags |= SS_ONSTACK;
 #ifdef DEBUG
 	if ((sigdebug & SDB_KSTACK) && p->p_pid == sigpid) {
-		mutex_exit(p->p_lock);
 		printf("svr4_32_sendsig: about to return to catcher %p thru %p\n", 
 		       catcher, (void *)(u_long)addr);
 #ifdef DDB
 		if (sigdebug & SDB_DDB) Debugger();
 #endif
-		mutex_enter(p->p_lock);
 	}
 #endif
 }
@@ -585,9 +581,9 @@ svr4_32_trap(int type, struct lwp *l)
 	int n;
 	struct proc *p = l->l_proc;
 	struct trapframe64 *tf = l->l_md.md_tf;
+	struct schedstate_percpu *spc;
 	struct timespec ts;
 	struct timeval tv;
-	struct timeval rtime, stime;
 	uint64_t tm;
 
 	if (p->p_emul != &emul_svr4_32)
@@ -633,14 +629,15 @@ svr4_32_trap(int type, struct lwp *l)
 		 * for now using the process's real time augmented with its
 		 * current runtime is the best we can do.
 		 */
-		microtime(&tv);
-		bintime2timeval(&l->l_rtime, &rtime);
-		bintime2timeval(&l->l_stime, &stime);
+		spc = &curcpu()->ci_schedstate;
 
-		tm = (rtime.tv_sec + tv.tv_sec - stime.tv_sec) * 1000000ull;
-		tm += rtime.tv_usec + tv.tv_usec;
-		tm -= stime.tv_usec;
-		tm *= 1000u;
+		microtime(&tv);
+
+		tm = (p->p_rtime.tv_sec + tv.tv_sec -
+			spc->spc_runtime.tv_sec) * (uint64_t)1000000u;
+		tm += p->p_rtime.tv_usec + tv.tv_usec;
+		tm -= spc->spc_runtime.tv_usec;
+		tm *= 1000;
 		tf->tf_out[0] = (tm >> 32) & 0x00000000ffffffffffUL;
 		tf->tf_out[1] = tm & 0x00000000ffffffffffUL;
 		break;
@@ -663,8 +660,9 @@ svr4_32_trap(int type, struct lwp *l)
 /*
  */
 int
-svr4_32_sys_sysarch(struct lwp *l, const struct svr4_32_sys_sysarch_args *uap, register_t *retval)
+svr4_32_sys_sysarch(struct lwp *l, void *v, register_t *retval)
 {
+	struct svr4_32_sys_sysarch_args *uap = v;
 
 	switch (SCARG(uap, op)) {
 	default:

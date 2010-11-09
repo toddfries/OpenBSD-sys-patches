@@ -1,4 +1,4 @@
-/*	$NetBSD: cpuvar.h,v 1.75 2008/04/28 20:23:36 martin Exp $ */
+/*	$NetBSD: cpuvar.h,v 1.68 2005/12/24 20:07:37 perry Exp $ */
 
 /*
  *  Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  *  2. Redistributions in binary form must reproduce the above copyright
  *     notice, this list of conditions and the following disclaimer in the
  *     documentation and/or other materials provided with the distribution.
+ *  3. All advertising materials mentioning features or use of this software
+ *     must display the following acknowledgement:
+ *         This product includes software developed by the NetBSD
+ *         Foundation, Inc. and its contributors.
+ *  4. Neither the name of The NetBSD Foundation nor the names of its
+ *     contributors may be used to endorse or promote products derived
+ *     from this software without specific prior written permission.
  *
  *  THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  *  ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -68,7 +75,7 @@ struct module_info {
 
 	void (*get_syncflt)(void);
 	int  (*get_asyncflt)(u_int *, u_int *);
-	void (*cache_flush)(void *, u_int);
+	void (*cache_flush)(caddr_t, u_int);
 	void (*sp_vcache_flush_page)(int, int);
 	void (*ft_vcache_flush_page)(int, int);
 	void (*sp_vcache_flush_segment)(int, int, int);
@@ -137,8 +144,8 @@ struct cpu_info {
 	struct cpu_data ci_data;	/* MI per-cpu data */
 
 	/* Scheduler flags */
-	int	ci_want_ast;
-	int	ci_want_resched;
+	int	want_ast;
+	int	want_resched;
 
 	/*
 	 * SPARC cpu_info structures live at two VAs: one global
@@ -187,7 +194,6 @@ struct cpu_info {
 #else
 #define HASSUN4_MMU3L	(0)
 #endif
-	int		ci_idepth;		/* Interrupt depth */
 
 	/*
 	 * The following pointers point to processes that are somehow
@@ -197,14 +203,12 @@ struct cpu_info {
 	struct	lwp	*ci_curlwp;		/* CPU owner */
 	struct	lwp 	*fplwp;			/* FPU owner */
 
-	int		ci_mtx_count;
-	int		ci_mtx_oldspl;
-
 	/*
 	 * Idle PCB and Interrupt stack;
 	 */
 	void		*eintstack;		/* End of interrupt stack */
 #define INT_STACK_SIZE	(128 * 128)		/* 128 128-byte stack frames */
+	struct	pcb	*idle_u;
 	void		*redzone;		/* DEBUG: stack red zone */
 #define REDSIZE		(8*96)			/* some room for bouncing */
 
@@ -228,7 +232,7 @@ struct cpu_info {
 	 * all processor modules.
 	 * The `ft_' versions are fast trap cache flush handlers.
 	 */
-	void	(*cache_flush)(void *, u_int);
+	void	(*cache_flush)(caddr_t, u_int);
 	void	(*vcache_flush_page)(int, int);
 	void	(*sp_vcache_flush_page)(int, int);
 	void	(*ft_vcache_flush_page)(int, int);
@@ -255,7 +259,7 @@ struct cpu_info {
 	void	(*copy_page)(paddr_t, paddr_t);
 
 	/* Virtual addresses for use in pmap copy_page/zero_page */
-	void *	vpage[2];
+	caddr_t	vpage[2];
 	int	*vpage_pte[2];		/* pte location of vpage[] */
 
 	void	(*cache_enable)(void);
@@ -415,11 +419,7 @@ struct cpu_info {
 
 
 #define CPU_INFO_ITERATOR		int
-#ifdef MULTIPROCESSOR
 #define CPU_INFO_FOREACH(cii, ci)	cii = 0; ci = cpus[cii], cii < sparc_ncpus; cii++
-#else
-#define	CPU_INFO_FOREACH(cii, ci)	(void)cii, ci = curcpu(); ci != NULL; ci = NULL
-#endif
 
 /*
  * Useful macros.

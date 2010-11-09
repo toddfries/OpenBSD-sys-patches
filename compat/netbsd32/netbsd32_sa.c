@@ -1,4 +1,4 @@
-/*	$NetBSD: netbsd32_sa.c,v 1.10 2009/01/21 10:01:42 tron Exp $	*/
+/*	$NetBSD: netbsd32_sa.c,v 1.2 2006/06/25 08:11:06 yamt Exp $	*/
 
 /*
  *  Copyright (c) 2005 The NetBSD Foundation.
@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: netbsd32_sa.c,v 1.10 2009/01/21 10:01:42 tron Exp $");
+__KERNEL_RCSID(0, "$NetBSD: netbsd32_sa.c,v 1.2 2006/06/25 08:11:06 yamt Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -76,7 +76,7 @@ netbsd32_sacopyout(int type, const void *src, void *dst)
 
 			sa32.sa_id = sa->sa_id;
 			sa32.sa_cpu = sa->sa_cpu;
-			NETBSD32PTR32(sa32.sa_context, sa->sa_context);
+			sa32.sa_context = (uintptr_t)sa->sa_context;
 
 			return copyout(&sa32, dst, sizeof(sa32));
 		} break;
@@ -85,7 +85,7 @@ netbsd32_sacopyout(int type, const void *src, void *dst)
 			void * const *p = src;
 			netbsd32_pointer_t p32;
 
-			NETBSD32PTR32(p32, *p);
+			p32 = (uintptr_t)*p;
 			return copyout(&p32, dst, sizeof(p32));
 		} break;
 	}
@@ -123,22 +123,99 @@ netbsd32_sa_ucsp(void *arg)
 {
 	ucontext32_t *uc32 = arg;
 
-	return NETBSD32IPTR64(_UC_MACHINE32_SP(uc32));
+	return NETBSD32PTR64(_UC_MACHINE32_SP(uc32));
 }
 
 /* Sycalls conversion */
 
 int
-netbsd32_sa_register(struct lwp *l,
-    const struct netbsd32_sa_register_args *uap, register_t *retval)
+netbsd32__lwp_create(struct lwp *l, void *v, register_t *retval)
 {
-#ifdef COMPAT_40
-	/* {
+	struct netbsd32__lwp_create_args /* {
+		syscallarg(const netbsd32_ucontextp) ucp;
+		syscallarg(netbsd32_u_long) flags;
+		syscallarg(netbsd32_lwpidp) new_lwp;
+	} */ *uap = v;
+	struct sys__lwp_create_args ua;
+
+	NETBSD32TOP_UAP(ucp, const ucontext_t);
+	NETBSD32TO64_UAP(flags);
+	NETBSD32TOP_UAP(new_lwp, lwpid_t);
+
+	return sys__lwp_create(l, &ua, retval);
+}
+
+int
+netbsd32__lwp_wait(struct lwp *l, void *v, register_t *retval)
+{
+	struct netbsd32__lwp_wait_args /* {
+		syscallarg(lwpid_t) wait_for;
+		syscallarg(netbsd32_lwpidp) departed;
+	} */ *uap = v;
+	struct sys__lwp_wait_args ua;
+
+	NETBSD32TO64_UAP(wait_for);
+	NETBSD32TOP_UAP(departed, lwpid_t);
+	return sys__lwp_wait(l, &ua, retval);
+}
+
+int
+netbsd32__lwp_suspend(struct lwp *l, void *v, register_t *retval)
+{
+	struct netbsd32__lwp_suspend_args /* {
+		syscallarg(lwpid_t) target;
+	} */ *uap = v;
+	struct sys__lwp_suspend_args ua;
+
+	NETBSD32TO64_UAP(target);
+	return sys__lwp_suspend(l, &ua, retval);
+}
+
+int
+netbsd32__lwp_continue(struct lwp *l, void *v, register_t *retval)
+{
+	struct netbsd32__lwp_continue_args /* {
+		syscallarg(lwpid_t) target;
+	} */ *uap = v;
+	struct sys__lwp_continue_args ua;
+
+	NETBSD32TO64_UAP(target);
+	return sys__lwp_continue(l, &ua, retval);
+}
+
+int
+netbsd32__lwp_wakeup(struct lwp *l, void *v, register_t *retval)
+{
+	struct netbsd32__lwp_wakeup_args /* {
+		syscallarg(lwpid_t) target;
+	} */ *uap = v;
+	struct sys__lwp_wakeup_args ua;
+
+	NETBSD32TO64_UAP(target);
+	return sys__lwp_wakeup(l, &ua, retval);
+}
+
+int
+netbsd32__lwp_setprivate(struct lwp *l, void *v, register_t *retval)
+{
+	struct netbsd32__lwp_setprivate_args /* {
+		syscallarg(netbsd32_voidp) ptr;
+	} */ *uap = v;
+	struct sys__lwp_setprivate_args ua;
+
+	NETBSD32TOP_UAP(ptr, void);
+	return sys__lwp_setprivate(l, &ua, retval);
+}
+
+int
+netbsd32_sa_register(struct lwp *l, void *v, register_t *retval)
+{
+	struct netbsd32_sa_register_args /* {
 		syscallarg(netbsd32_sa_upcall_t) new;
 		syscallarg(netbsd32_sa_upcallp_t) old;
 		syscallarg(int) flags;
 		syscallarg(netbsd32_ssize_t) stackinfo_offset;
-	} */
+	} */ *uap = v;
 	sa_upcall_t prev;
 	int error;
 
@@ -147,21 +224,15 @@ netbsd32_sa_register(struct lwp *l,
 	if (error)
 		return error;
 
-	if (NETBSD32PTR64(SCARG(uap, old))) {
-		
-		netbsd32_sa_upcall_t old;
-		NETBSD32PTR32(old, prev);
+	if (SCARG(uap, old)) {
+		netbsd32_sa_upcall_t old = (uintptr_t)prev;
 		return copyout(&old, NETBSD32PTR64(SCARG(uap, old)),
 		    sizeof(old));
 	}
 
-	return 0;
-#else
-	return ENOSYS;
-#endif	
+	return 0;	
 }
 
-#ifdef COMPAT_40
 static int
 netbsd32_sa_copyin_stack(stack_t *stacks, int index, stack_t *dest)
 {
@@ -173,38 +244,31 @@ netbsd32_sa_copyin_stack(stack_t *stacks, int index, stack_t *dest)
 	if (error)
 		return error;
 
- 	dest->ss_sp = NETBSD32IPTR64(s32.ss_sp);
+	dest->ss_sp = NETBSD32PTR64(s32.ss_sp);
 	dest->ss_size = s32.ss_size;
 	dest->ss_flags = s32.ss_flags;
 
 	return 0;
 }
-#endif
 
 int
-netbsd32_sa_stacks(struct lwp *l, const struct netbsd32_sa_stacks_args *uap,
-    register_t *retval)
+netbsd32_sa_stacks(struct lwp *l, void *v, register_t *retval)
 {
-#ifdef COMPAT_40
-	 /* {
+	struct netbsd32_sa_stacks_args /* {
 		syscallarg(int) num;
 		syscallarg(netbsd32_stackp_t) stacks;
-	} */
+	} */ *uap = v;
 
 	return sa_stacks1(l, retval, SCARG(uap, num),
 	    NETBSD32PTR64(SCARG(uap, stacks)), netbsd32_sa_copyin_stack);
-#else
-	return ENOSYS;
-#endif
 }
 
 int
-netbsd32_sa_setconcurrency(struct lwp *l,
-    const struct netbsd32_sa_setconcurrency_args *uap, register_t *retval)
+netbsd32_sa_setconcurrency(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct netbsd32_sa_setconcurrency_args /* {
 		syscallarg(int) concurrency;
-	} */
+	} */ *uap = v;
 	struct sys_sa_setconcurrency_args ua;
 
 	NETBSD32TO64_UAP(concurrency);
@@ -212,12 +276,11 @@ netbsd32_sa_setconcurrency(struct lwp *l,
 }
 
 int
-netbsd32_sa_preempt(struct lwp *l, const struct netbsd32_sa_preempt_args *uap,
-    register_t *retval)
+netbsd32_sa_preempt(struct lwp *l, void *v, register_t *retval)
 {
-	 /* {
+	struct netbsd32_sa_preempt_args /* {
 		syscallarg(int) sa_id;
-	} */
+	} */ *uap = v;
 	struct sys_sa_preempt_args ua;
 
 	NETBSD32TO64_UAP(sa_id);

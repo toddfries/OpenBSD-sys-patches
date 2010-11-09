@@ -1,4 +1,4 @@
-/*	$NetBSD: xen.h,v 1.31 2009/02/13 21:03:59 bouyer Exp $	*/
+/*	$NetBSD: xen.h,v 1.21 2006/03/06 19:55:47 bouyer Exp $	*/
 
 /*
  *
@@ -27,12 +27,10 @@
 
 #ifndef _XEN_H
 #define _XEN_H
+
 #include "opt_xen.h"
 
-
 #ifndef _LOCORE
-
-#include <machine/cpufunc.h>
 
 struct xen_netinfo {
 	uint32_t xi_ifno;
@@ -44,14 +42,12 @@ union xen_cmdline_parseinfo {
 	char			xcp_bootdev[16]; /* sizeof(dv_xname) */
 	struct xen_netinfo	xcp_netinfo;
 	char			xcp_console[16];
-	char			xcp_pcidevs[64];
 };
 
 #define	XEN_PARSE_BOOTDEV	0
 #define	XEN_PARSE_NETINFO	1
 #define	XEN_PARSE_CONSOLE	2
 #define	XEN_PARSE_BOOTFLAGS	3
-#define	XEN_PARSE_PCIBACK	4
 
 void	xen_parse_cmdline(int, union xen_cmdline_parseinfo *);
 
@@ -64,7 +60,6 @@ void	xennetback_init(void);
 void	xen_shm_init(void);
 
 void	xenevt_event(int);
-void	xenevt_setipending(int, int);
 void	xenevt_notify(void);
 
 void	idle_block(void);
@@ -131,8 +126,6 @@ void vprintk(const char *, _BSD_VA_LIST_);
 void trap_init(void);
 void xpq_flush_cache(void);
 
-#define xendomain_is_dom0()		(xen_start_info.flags & SIF_INITDOMAIN)
-#define xendomain_is_privileged()	(xen_start_info.flags & SIF_PRIVILEGED)
 
 /*
  * STI/CLI equivalents. These basically set and clear the virtual
@@ -143,33 +136,33 @@ void xpq_flush_cache(void);
 
 #define __save_flags(x)							\
 do {									\
-	(x) = curcpu()->ci_vcpu->evtchn_upcall_mask;			\
+	(x) = HYPERVISOR_shared_info->vcpu_data[0].evtchn_upcall_mask;	\
 } while (0)
 
 #define __restore_flags(x)						\
 do {									\
-	volatile struct vcpu_info *_vci = curcpu()->ci_vcpu;		\
+	volatile shared_info_t *_shared = HYPERVISOR_shared_info;	\
 	__insn_barrier();						\
-	if ((_vci->evtchn_upcall_mask = (x)) == 0) {			\
-		x86_lfence();						\
-		if (__predict_false(_vci->evtchn_upcall_pending))	\
+	if ((_shared->vcpu_data[0].evtchn_upcall_mask = (x)) == 0) {	\
+		x86_lfence();					\
+		if (__predict_false(_shared->vcpu_data[0].evtchn_upcall_pending)) \
 			hypervisor_force_callback();			\
 	}								\
 } while (0)
 
 #define __cli()								\
 do {									\
-	curcpu()->ci_vcpu->evtchn_upcall_mask = 1;			\
-	x86_lfence();							\
+	HYPERVISOR_shared_info->vcpu_data[0].evtchn_upcall_mask = 1;	\
+	x86_lfence();						\
 } while (0)
 
 #define __sti()								\
 do {									\
-	volatile struct vcpu_info *_vci = curcpu()->ci_vcpu;		\
+	volatile shared_info_t *_shared = HYPERVISOR_shared_info;	\
 	__insn_barrier();						\
-	_vci->evtchn_upcall_mask = 0;					\
+	_shared->vcpu_data[0].evtchn_upcall_mask = 0;			\
 	x86_lfence(); /* unmask then check (avoid races) */		\
-	if (__predict_false(_vci->evtchn_upcall_pending))		\
+	if (__predict_false(_shared->vcpu_data[0].evtchn_upcall_pending)) \
 		hypervisor_force_callback();				\
 } while (0)
 
@@ -190,33 +183,17 @@ do {									\
 #define __LOCK_PREFIX "lock; "
 
 #ifdef XEN3
-#define XATOMIC_T u_long
-#ifdef __x86_64__
-#define LONG_SHIFT 6
-#define LONG_MASK 63
-#else /* __x86_64__ */
-#define LONG_SHIFT 5
-#define LONG_MASK 31
-#endif /* __x86_64__ */
-#else /* XEN3 */
+#define XATOMIC_T long
+#else
 #define XATOMIC_T uint32_t
-#define LONG_SHIFT 5
-#define LONG_MASK 31
-#endif /* XEN3 */
-
-#define xen_ffs __builtin_ffsl
-
+#endif
 static __inline XATOMIC_T
 xen_atomic_xchg(volatile XATOMIC_T *ptr, unsigned long val)
 {
 	unsigned long result;
 
-	__asm volatile(__LOCK_PREFIX
-#ifdef __x86_64__
-	    "xchgq %0,%1"
-#else
+        __asm volatile(__LOCK_PREFIX
 	    "xchgl %0,%1"
-#endif
 	    :"=r" (result)
 	    :"m" (*ptr), "0" (val)
 	    :"memory");
@@ -240,78 +217,55 @@ xen_atomic_cmpxchg16(volatile uint16_t *ptr, uint16_t  val, uint16_t newval)
 
 static __inline void
 xen_atomic_setbits_l (volatile XATOMIC_T *ptr, unsigned long bits) {  
-#ifdef __x86_64__
-	__asm volatile("lock ; orq %1,%0" :  "=m" (*ptr) : "ir" (bits)); 
-#else
 	__asm volatile("lock ; orl %1,%0" :  "=m" (*ptr) : "ir" (bits)); 
-#endif
 }
      
 static __inline void
 xen_atomic_clearbits_l (volatile XATOMIC_T *ptr, unsigned long bits) {  
-#ifdef __x86_64__
-	__asm volatile("lock ; andq %1,%0" :  "=m" (*ptr) : "ir" (~bits));
-#else
 	__asm volatile("lock ; andl %1,%0" :  "=m" (*ptr) : "ir" (~bits));
-#endif
-}
-
-static __inline XATOMIC_T
-xen_atomic_test_and_clear_bit(volatile void *ptr, unsigned long bitno)
-{
-	int result;
-
-	__asm volatile(__LOCK_PREFIX
-#ifdef __x86_64__
-	    "btrq %2,%1 ;"
-	    "sbbq %0,%0"
-#else
-	    "btrl %2,%1 ;"
-	    "sbbl %0,%0"
-#endif
-	    :"=r" (result), "=m" (*(volatile XATOMIC_T *)(ptr))
-	    :"Ir" (bitno) : "memory");
-	return result;
-}
-
-static __inline XATOMIC_T
-xen_atomic_test_and_set_bit(volatile void *ptr, unsigned long bitno)
-{
-	long result;
-
-	__asm volatile(__LOCK_PREFIX
-#ifdef __x86_64__
-	    "btsq %2,%1 ;"
-	    "sbbq %0,%0"
-#else
-	    "btsl %2,%1 ;"
-	    "sbbl %0,%0"
-#endif
-	    :"=r" (result), "=m" (*(volatile XATOMIC_T *)(ptr))
-	    :"Ir" (bitno) : "memory");
-	return result;
 }
 
 static __inline int
-xen_constant_test_bit(const volatile void *ptr, unsigned long bitno)
+xen_atomic_test_and_clear_bit(volatile void *ptr, int bitno)
 {
-	return ((1UL << (bitno & LONG_MASK)) &
-	    (((const volatile XATOMIC_T *) ptr)[bitno >> LONG_SHIFT])) != 0;
+        int result;
+
+        __asm volatile(__LOCK_PREFIX
+	    "btrl %2,%1 ;"
+	    "sbbl %0,%0"
+	    :"=r" (result), "=m" (*(volatile XATOMIC_T *)(ptr))
+	    :"Ir" (bitno) : "memory");
+        return result;
 }
 
-static __inline XATOMIC_T
-xen_variable_test_bit(const volatile void *ptr, unsigned long bitno)
+static __inline int
+xen_atomic_test_and_set_bit(volatile void *ptr, int bitno)
 {
-	long result;
+        int result;
+
+        __asm volatile(__LOCK_PREFIX
+	    "btsl %2,%1 ;"
+	    "sbbl %0,%0"
+	    :"=r" (result), "=m" (*(volatile XATOMIC_T *)(ptr))
+	    :"Ir" (bitno) : "memory");
+        return result;
+}
+
+static __inline int
+xen_constant_test_bit(const volatile void *ptr, int bitno)
+{
+	return ((1UL << (bitno & 31)) &
+	    (((const volatile XATOMIC_T *) ptr)[bitno >> 5])) != 0;
+}
+
+static __inline int
+xen_variable_test_bit(const volatile void *ptr, int bitno)
+{
+	int result;
     
 	__asm volatile(
-#ifdef __x86_64__
-		"btq %2,%1 ;"
-		"sbbq %0,%0"
-#else
 		"btl %2,%1 ;"
 		"sbbl %0,%0"
-#endif
 		:"=r" (result)
 		:"m" (*(const volatile XATOMIC_T *)(ptr)), "Ir" (bitno));
 	return result;
@@ -323,34 +277,30 @@ xen_variable_test_bit(const volatile void *ptr, unsigned long bitno)
 	 xen_variable_test_bit((ptr),(bitno)))
 
 static __inline void
-xen_atomic_set_bit(volatile void *ptr, unsigned long bitno)
+xen_atomic_set_bit(volatile void *ptr, int bitno)
 {
-	__asm volatile(__LOCK_PREFIX
-#ifdef __x86_64__
-	    "btsq %1,%0"
-#else
+        __asm volatile(__LOCK_PREFIX
 	    "btsl %1,%0"
-#endif
 	    :"=m" (*(volatile XATOMIC_T *)(ptr))
 	    :"Ir" (bitno));
 }
 
 static __inline void
-xen_atomic_clear_bit(volatile void *ptr, unsigned long bitno)
+xen_atomic_clear_bit(volatile void *ptr, int bitno)
 {
-	__asm volatile(__LOCK_PREFIX
-#ifdef __x86_64__
-	    "btrq %1,%0"
-#else
+        __asm volatile(__LOCK_PREFIX
 	    "btrl %1,%0"
-#endif
 	    :"=m" (*(volatile XATOMIC_T *)(ptr))
 	    :"Ir" (bitno));
 }
 
 #undef XATOMIC_T
 
-void	wbinvd(void);
+static __inline void
+wbinvd(void)
+{
+	xpq_flush_cache();
+}
 
 #endif /* !__ASSEMBLY__ */
 

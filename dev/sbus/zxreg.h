@@ -1,4 +1,4 @@
-/*	$NetBSD: zxreg.h,v 1.5 2008/09/08 23:36:54 gmcgarry Exp $	*/
+/*	$NetBSD: zxreg.h,v 1.3 2005/12/11 12:23:44 christos Exp $	*/
 
 /*
  *  Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  *  2. Redistributions in binary form must reproduce the above copyright
  *     notice, this list of conditions and the following disclaimer in the
  *     documentation and/or other materials provided with the distribution.
+ *  3. All advertising materials mentioning features or use of this software
+ *     must display the following acknowledgement:
+ *         This product includes software developed by the NetBSD
+ *         Foundation, Inc. and its contributors.
+ *  4. Neither the name of The NetBSD Foundation nor the names of its
+ *     contributors may be used to endorse or promote products derived
+ *     from this software without specific prior written permission.
  *
  *  THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  *  ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -200,12 +207,12 @@ struct zx_draw {
 	u_int32_t	zd_forcecol;	/* SS1 only */
 	u_int32_t	zd_door[8];	/* SS1 only */
 	u_int32_t	zd_pick[5];	/* SS1 only */
-} __packed;
+} __attribute__ ((__packed__));
 
 struct zx_draw_ss1 {
 	u_int32_t	zd_pad0[957];
 	u_int32_t	zd_misc;
-} __packed;
+} __attribute__ ((__packed__));
 #define	ZX_SS1_MISC_ENABLE	0x00000001
 #define	ZX_SS1_MISC_STEREO	0x00000002
 
@@ -230,7 +237,7 @@ struct zx_command {
 	u_int32_t	zc_dst;
 	u_int32_t	zc_copy;
 	u_int32_t	zc_fill;
-} __packed;
+} __attribute__ ((__packed__));
 
 #define ZX_CROSS_TYPE_CLUT0	0x00001000
 #define ZX_CROSS_TYPE_CLUT1	0x00001001
@@ -249,7 +256,7 @@ struct zx_cross {
 	u_int32_t	zx_type;
 	u_int32_t	zx_csr;
 	u_int32_t	zx_value;
-} __packed;
+} __attribute__ ((__packed__));
 
 struct zx_cursor {
 	u_int32_t	zcu_pad0[4];
@@ -257,6 +264,6 @@ struct zx_cursor {
 	u_int32_t	zcu_misc;
 	u_int32_t	zcu_sxy;
 	u_int32_t	zcu_data;
-} __packed;
+} __attribute__ ((__packed__));
 
 #endif	/* !_DEV_SBUS_ZXREG_H_ */

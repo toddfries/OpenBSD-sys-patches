@@ -1,4 +1,4 @@
-/*	$NetBSD: param.h,v 1.70 2008/12/20 13:07:36 ad Exp $	*/
+/*	$NetBSD: param.h,v 1.62 2006/12/08 15:05:18 yamt Exp $	*/
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -42,7 +42,11 @@
  */
 
 #ifdef _KERNEL
+#ifdef _LOCORE
+#include <machine/psl.h>
+#else
 #include <machine/cpu.h>
+#endif
 #endif
 
 #define	_MACHINE	i386
@@ -97,18 +101,21 @@
 #define	SSIZE		1		/* initial stack size/NBPG */
 #define	SINCR		1		/* increment of stack/NBPG */
 
+#ifdef _KERNEL_OPT
+#include "opt_noredzone.h"
+#endif
 #ifndef UPAGES
-# ifdef DIAGNOSTIC
-#  define	UPAGES		3	/* 2 + 1 page for redzone */
-# else
-#  define	UPAGES		2	/* normal pages of u-area */
-# endif /* DIAGNOSTIC */
+#ifdef NOREDZONE
+#define	UPAGES		2		/* pages of u-area */
+#else
+#define UPAGES		3
+#endif /*NOREDZONE */
 #endif /* !defined(UPAGES) */
 #define	USPACE		(UPAGES * NBPG)	/* total size of u-area */
 #define	INTRSTACKSIZE	8192
 
 #ifndef MSGBUFSIZE
-#define MSGBUFSIZE	8*NBPG		/* default message buffer size */
+#define MSGBUFSIZE	4*NBPG		/* default message buffer size */
 #endif
 
 /*
@@ -156,14 +163,13 @@
 /*
  * Mach derived conversion macros
  */
-#define	x86_round_pdr(x) \
-	((((unsigned long)(x)) + (NBPD_L2 - 1)) & ~(NBPD_L2 - 1))
-#define	x86_trunc_pdr(x)	((unsigned long)(x) & ~(NBPD_L2 - 1))
-#define	x86_btod(x)		((unsigned long)(x) >> L2_SHIFT)
-#define	x86_dtob(x)		((unsigned long)(x) << L2_SHIFT)
-#define	x86_round_page(x)	((((unsigned long)(x)) + PGOFSET) & ~PGOFSET)
-#define	x86_trunc_page(x)	((unsigned long)(x) & ~PGOFSET)
-#define	x86_btop(x)		((unsigned long)(x) >> PGSHIFT)
-#define	x86_ptob(x)		((unsigned long)(x) << PGSHIFT)
+#define	x86_round_pdr(x)	((((unsigned)(x)) + PDOFSET) & ~PDOFSET)
+#define	x86_trunc_pdr(x)	((unsigned)(x) & ~PDOFSET)
+#define	x86_btod(x)		((unsigned)(x) >> PDSHIFT)
+#define	x86_dtob(x)		((unsigned)(x) << PDSHIFT)
+#define	x86_round_page(x)	((((unsigned)(x)) + PGOFSET) & ~PGOFSET)
+#define	x86_trunc_page(x)	((unsigned)(x) & ~PGOFSET)
+#define	x86_btop(x)		((unsigned)(x) >> PGSHIFT)
+#define	x86_ptob(x)		((unsigned)(x) << PGSHIFT)
 
 #endif /* _I386_PARAM_H_ */

@@ -1,7 +1,9 @@
-/*	$NetBSD: darwin_mman.c,v 1.30 2009/01/11 02:45:47 christos Exp $ */
+#undef DEBUG_DARWIN
+#undef DEBUG_MACH
+/*	$NetBSD: darwin_mman.c,v 1.21 2006/06/20 03:21:30 christos Exp $ */
 
 /*-
- * Copyright (c) 2002, 2008 The NetBSD Foundation, Inc.
+ * Copyright (c) 2002 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -15,6 +17,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +39,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: darwin_mman.c,v 1.30 2009/01/11 02:45:47 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: darwin_mman.c,v 1.21 2006/06/20 03:21:30 christos Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -44,31 +53,37 @@ __KERNEL_RCSID(0, "$NetBSD: darwin_mman.c,v 1.30 2009/01/11 02:45:47 christos Ex
 #include <sys/filedesc.h>
 #include <sys/vnode.h>
 #include <sys/exec.h>
+#include <sys/sa.h>
 
 #include <sys/syscallargs.h>
 
 #include <compat/sys/signal.h>
 
+#include <compat/common/compat_file.h>
+
 #include <compat/mach/mach_types.h>
 #include <compat/mach/mach_vm.h>
 
-#include <compat/darwin/darwin_types.h>
 #include <compat/darwin/darwin_audit.h>
 #include <compat/darwin/darwin_syscallargs.h>
 
 int
-darwin_sys_load_shared_file(struct lwp *l, const struct darwin_sys_load_shared_file_args *uap, register_t *retval)
+darwin_sys_load_shared_file(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct darwin_sys_load_shared_file_args /* {
 		syscallarg(char *) filename;
-		syscallarg(void *) addr;
+		syscallarg(caddr_t) addr;
 		syscallarg(u_long) len;
-		syscallarg(void **) base;
+		syscallarg(caddr_t *) base;
 		syscallarg(int) count:
 		syscallarg(mach_sf_mapping_t *) mappings;
 		syscallarg(int *) flags;
-	} */
+	} */ *uap = v;
 	struct file *fp;
+	struct filedesc *fdp;
 	struct vnode *vp = NULL;
 	vaddr_t base;
 	struct proc *p = l->l_proc;
@@ -112,16 +127,18 @@ darwin_sys_load_shared_file(struct lwp *l, const struct darwin_sys_load_shared_f
 	SCARG(&open_cup, path) = SCARG(uap, filename);
 	SCARG(&open_cup, flags) = O_RDONLY;
 	SCARG(&open_cup, mode) = 0;
-	if ((error = sys_open(l, &open_cup, &fdc)) != 0)
+	if ((error = bsd_sys_open(l, &open_cup, &fdc)) != 0)
 		goto bad1;
 
 	fd = (int)fdc;
-	fp = fd_getfile(fd);
+	fdp = p->p_fd;
+	fp = fd_getfile(fdp, fd);
 	if (fp == NULL) {
 		error = EBADF;
-		goto bad1point5;
+		goto bad2;
 	}
-	vp = fp->f_data;
+	FILE_USE(fp);
+	vp = (struct vnode *)fp->f_data;
 	vref(vp);
 
 	if (SCARG(uap, count) < 0 ||
@@ -219,8 +236,7 @@ bad2:
 	if (mapp)
 		free(mapp, M_TEMP);
 	vrele(vp);
-	fd_putfile(fd);
-bad1point5:
+	FILE_UNUSE(fp, l);
 	SCARG(&close_cup, fd) = fd;
 	if ((error = sys_close(l, &close_cup, retval)) != 0)
 		goto bad1;

@@ -1,4 +1,4 @@
-/*	$NetBSD: igmp.c,v 1.49 2008/05/04 07:22:14 thorpej Exp $	*/
+/*	$NetBSD: igmp.c,v 1.43 2006/10/05 17:35:19 tls Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -40,21 +40,18 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: igmp.c,v 1.49 2008/05/04 07:22:14 thorpej Exp $");
+__KERNEL_RCSID(0, "$NetBSD: igmp.c,v 1.43 2006/10/05 17:35:19 tls Exp $");
 
 #include "opt_mrouting.h"
 
 #include <sys/param.h>
 #include <sys/mbuf.h>
 #include <sys/socket.h>
-#include <sys/socketvar.h>
 #include <sys/protosw.h>
 #include <sys/systm.h>
-#include <sys/sysctl.h>
 
 #include <net/if.h>
 #include <net/route.h>
-#include <net/net_stats.h>
 
 #include <netinet/in.h>
 #include <netinet/in_var.h>
@@ -68,13 +65,8 @@ __KERNEL_RCSID(0, "$NetBSD: igmp.c,v 1.49 2008/05/04 07:22:14 thorpej Exp $");
 
 #define IP_MULTICASTOPTS	0
 
-POOL_INIT(igmp_rti_pool, sizeof(struct router_info), 0, 0, 0, "igmppl", NULL,
-    IPL_SOFTNET);
-
-static percpu_t *igmpstat_percpu;
-
-#define	IGMP_STATINC(x)		_NET_STATINC(igmpstat_percpu, x)
-
+POOL_INIT(igmp_rti_pool, sizeof(struct router_info), 0, 0, 0, "igmppl", NULL);
+struct igmpstat igmpstat;
 int igmp_timers_are_running;
 static LIST_HEAD(, router_info) rti_head = LIST_HEAD_INITIALIZER(rti_head);
 
@@ -147,13 +139,6 @@ rti_delete(struct ifnet *ifp)	/* MUST be called at splsoftnet */
 }
 
 void
-igmp_init(void)
-{
-
-	igmpstat_percpu = percpu_alloc(sizeof(uint64_t) * IGMP_NSTATS);
-}
-
-void
 igmp_input(struct mbuf *m, ...)
 {
 	int proto;
@@ -175,7 +160,7 @@ igmp_input(struct mbuf *m, ...)
 	proto = va_arg(ap, int);
 	va_end(ap);
 
-	IGMP_STATINC(IGMP_STAT_RCV_TOTAL);
+	++igmpstat.igps_rcv_total;
 
 	/*
 	 * Validate lengths
@@ -183,14 +168,14 @@ igmp_input(struct mbuf *m, ...)
 	minlen = iphlen + IGMP_MINLEN;
 	ip_len = ntohs(ip->ip_len);
 	if (ip_len < minlen) {
-		IGMP_STATINC(IGMP_STAT_RCV_TOOSHORT);
+		++igmpstat.igps_rcv_tooshort;
 		m_freem(m);
 		return;
 	}
 	if (((m->m_flags & M_EXT) && (ip->ip_src.s_addr & IN_CLASSA_NET) == 0)
 	    || m->m_len < minlen) {
 		if ((m = m_pullup(m, minlen)) == 0) {
-			IGMP_STATINC(IGMP_STAT_RCV_TOOSHORT);
+			++igmpstat.igps_rcv_tooshort;
 			return;
 		}
 		ip = mtod(m, struct ip *);
@@ -204,7 +189,7 @@ igmp_input(struct mbuf *m, ...)
 	igmp = mtod(m, struct igmp *);
 	/* No need to assert alignment here. */
 	if (in_cksum(m, ip_len - iphlen)) {
-		IGMP_STATINC(IGMP_STAT_RCV_BADSUM);
+		++igmpstat.igps_rcv_badsum;
 		m_freem(m);
 		return;
 	}
@@ -214,7 +199,7 @@ igmp_input(struct mbuf *m, ...)
 	switch (igmp->igmp_type) {
 
 	case IGMP_HOST_MEMBERSHIP_QUERY:
-		IGMP_STATINC(IGMP_STAT_RCV_QUERIES);
+		++igmpstat.igps_rcv_queries;
 
 		if (ifp->if_flags & IFF_LOOPBACK)
 			break;
@@ -227,7 +212,7 @@ igmp_input(struct mbuf *m, ...)
 			rti->rti_age = 0;
 
 			if (ip->ip_dst.s_addr != INADDR_ALLHOSTS_GROUP) {
-				IGMP_STATINC(IGMP_STAT_RCV_BADQUERIES);
+				++igmpstat.igps_rcv_badqueries;
 				m_freem(m);
 				return;
 			}
@@ -252,7 +237,7 @@ igmp_input(struct mbuf *m, ...)
 			}
 		} else {
 			if (!IN_MULTICAST(ip->ip_dst.s_addr)) {
-				IGMP_STATINC(IGMP_STAT_RCV_BADQUERIES);
+				++igmpstat.igps_rcv_badqueries;
 				m_freem(m);
 				return;
 			}
@@ -302,14 +287,14 @@ igmp_input(struct mbuf *m, ...)
 		break;
 
 	case IGMP_v1_HOST_MEMBERSHIP_REPORT:
-		IGMP_STATINC(IGMP_STAT_RCV_REPORTS);
+		++igmpstat.igps_rcv_reports;
 
 		if (ifp->if_flags & IFF_LOOPBACK)
 			break;
 
 		if (!IN_MULTICAST(igmp->igmp_group.s_addr) ||
 		    !in_hosteq(igmp->igmp_group, ip->ip_dst)) {
-			IGMP_STATINC(IGMP_STAT_RCV_BADREPORTS);
+			++igmpstat.igps_rcv_badreports;
 			m_freem(m);
 			return;
 		}
@@ -336,7 +321,7 @@ igmp_input(struct mbuf *m, ...)
 		IN_LOOKUP_MULTI(igmp->igmp_group, ifp, inm);
 		if (inm != NULL) {
 			inm->inm_timer = 0;
-			IGMP_STATINC(IGMP_STAT_RCV_OURREPORTS);
+			++igmpstat.igps_rcv_ourreports;
 
 			switch (inm->inm_state) {
 			case IGMP_IDLE_MEMBER:
@@ -368,14 +353,14 @@ igmp_input(struct mbuf *m, ...)
 			break;
 #endif
 
-		IGMP_STATINC(IGMP_STAT_RCV_REPORTS);
+		++igmpstat.igps_rcv_reports;
 
 		if (ifp->if_flags & IFF_LOOPBACK)
 			break;
 
 		if (!IN_MULTICAST(igmp->igmp_group.s_addr) ||
 		    !in_hosteq(igmp->igmp_group, ip->ip_dst)) {
-			IGMP_STATINC(IGMP_STAT_RCV_BADREPORTS);
+			++igmpstat.igps_rcv_badreports;
 			m_freem(m);
 			return;
 		}
@@ -404,7 +389,7 @@ igmp_input(struct mbuf *m, ...)
 		IN_LOOKUP_MULTI(igmp->igmp_group, ifp, inm);
 		if (inm != NULL) {
 			inm->inm_timer = 0;
-			IGMP_STATINC(IGMP_STAT_RCV_OURREPORTS);
+			++igmpstat.igps_rcv_ourreports;
 
 			switch (inm->inm_state) {
 			case IGMP_DELAYING_MEMBER:
@@ -480,6 +465,7 @@ igmp_fasttimo(void)
 {
 	struct in_multi *inm;
 	struct in_multistep step;
+	int s;
 
 	/*
 	 * Quick check to see if any work needs to be done, in order
@@ -488,9 +474,7 @@ igmp_fasttimo(void)
 	if (!igmp_timers_are_running)
 		return;
 
-	mutex_enter(softnet_lock);
-	KERNEL_LOCK(1, NULL);
-
+	s = splsoftnet();
 	igmp_timers_are_running = 0;
 	IN_FIRST_MULTI(step, inm);
 	while (inm != NULL) {
@@ -511,26 +495,23 @@ igmp_fasttimo(void)
 		}
 		IN_NEXT_MULTI(step, inm);
 	}
-
-	KERNEL_UNLOCK_ONE(NULL);
-	mutex_exit(softnet_lock);
+	splx(s);
 }
 
 void
 igmp_slowtimo(void)
 {
 	struct router_info *rti;
+	int s;
 
-	mutex_enter(softnet_lock);
-	KERNEL_LOCK(1, NULL);
+	s = splsoftnet();
 	LIST_FOREACH(rti, &rti_head, rti_link) {
 		if (rti->rti_type == IGMP_v1_ROUTER &&
 		    ++rti->rti_age >= IGMP_AGE_THRESHOLD) {
 			rti->rti_type = IGMP_v2_ROUTER;
 		}
 	}
-	KERNEL_UNLOCK_ONE(NULL);
-	mutex_exit(softnet_lock);
+	splx(s);
 }
 
 void
@@ -589,48 +570,14 @@ igmp_sendpkt(struct in_multi *inm, int type)
 	imo.imo_multicast_loop = 0;
 #endif /* MROUTING */
 
-	ip_output(m, NULL, NULL, IP_MULTICASTOPTS, &imo, NULL);
+	ip_output(m, (struct mbuf *)NULL, (struct route *)NULL,
+	    IP_MULTICASTOPTS, &imo, (struct socket *)NULL);
 
-	IGMP_STATINC(IGMP_STAT_SND_REPORTS);
+	++igmpstat.igps_snd_reports;
 }
 
 void
 igmp_purgeif(struct ifnet *ifp)	/* MUST be called at splsoftnet() */
 {
 	rti_delete(ifp);	/* manipulates pools */
-}
-
-static int
-sysctl_net_inet_igmp_stats(SYSCTLFN_ARGS)
-{
-
-	return (NETSTAT_SYSCTL(igmpstat_percpu, IGMP_NSTATS));
-}
-
-SYSCTL_SETUP(sysctl_net_inet_igmp_setup, "sysctl net.inet.igmp subtree setup")
-{
-
-	sysctl_createv(clog, 0, NULL, NULL,
-			CTLFLAG_PERMANENT,
-			CTLTYPE_NODE, "net", NULL,
-			NULL, 0, NULL, 0,
-			CTL_NET, CTL_EOL);
-	sysctl_createv(clog, 0, NULL, NULL,
-			CTLFLAG_PERMANENT,
-			CTLTYPE_NODE, "inet", NULL,
-			NULL, 0, NULL, 0,
-			CTL_NET, PF_INET, CTL_EOL);
-	sysctl_createv(clog, 0, NULL, NULL,
-			CTLFLAG_PERMANENT,
-			CTLTYPE_NODE, "igmp",
-			SYSCTL_DESCR("Internet Group Management Protocol"),
-			NULL, 0, NULL, 0,
-			CTL_NET, PF_INET, IPPROTO_IGMP, CTL_EOL);
-	
-	sysctl_createv(clog, 0, NULL, NULL,
-			CTLFLAG_PERMANENT,
-			CTLTYPE_STRUCT, "stats",
-			SYSCTL_DESCR("IGMP statistics"),
-			sysctl_net_inet_igmp_stats, 0, NULL, 0,
-			CTL_NET, PF_INET, IPPROTO_IGMP, CTL_CREATE, CTL_EOL);
 }

@@ -1,4 +1,4 @@
-/*	$NetBSD: bus_space.c,v 1.17 2008/04/28 20:23:19 martin Exp $	*/
+/*	$NetBSD: bus_space.c,v 1.12 2006/07/21 10:01:39 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -34,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: bus_space.c,v 1.17 2008/04/28 20:23:19 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: bus_space.c,v 1.12 2006/07/21 10:01:39 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -45,6 +52,7 @@ __KERNEL_RCSID(0, "$NetBSD: bus_space.c,v 1.17 2008/04/28 20:23:19 martin Exp $"
 
 #include <uvm/uvm_extern.h>
 
+extern char *extiobase;
 extern int *nofault;
 
 /* ARGSUSED */
@@ -82,7 +90,7 @@ bus_space_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size, int flags,
 	/*
 	 * Map the range.  The range is always cache-inhibited on the hp300.
 	 */
-	physaccess((void *)kva, (void *)bpa, size, PG_RW|PG_CI);
+	physaccess((caddr_t)kva, (caddr_t)bpa, size, PG_RW|PG_CI);
 
 	/*
 	 * All done.
@@ -137,15 +145,15 @@ bus_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size)
 	size = m68k_round_page(offset + size);
 
 #ifdef DIAGNOSTIC
-	if (bsh < (vaddr_t)extiobase ||
-	    bsh >= ((vaddr_t)extiobase + ptoa(EIOMAPSIZE)))
+	if ((caddr_t)bsh < extiobase ||
+	    (caddr_t)bsh >= (extiobase + ptoa(EIOMAPSIZE)))
 		panic("bus_space_unmap: bad bus space handle");
 #endif
 
 	/*
 	 * Unmap the range.
 	 */
-	physunaccess((void *)kva, size);
+	physunaccess((caddr_t)kva, size);
 
 	/*
 	 * Free it from the extio extent map.

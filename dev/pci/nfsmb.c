@@ -1,4 +1,4 @@
-/*	$NetBSD: nfsmb.c,v 1.16 2009/02/03 16:27:13 pgoyette Exp $	*/
+/*	$NetBSD: nfsmb.c,v 1.12 2008/03/27 10:47:14 kiyohara Exp $	*/
 /*
  * Copyright (c) 2007 KIYOHARA Takashi
  * All rights reserved.
@@ -26,7 +26,7 @@
  *
  */
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: nfsmb.c,v 1.16 2009/02/03 16:27:13 pgoyette Exp $");
+__KERNEL_RCSID(0, "$NetBSD: nfsmb.c,v 1.12 2008/03/27 10:47:14 kiyohara Exp $");
 
 #include <sys/param.h>
 #include <sys/device.h>
@@ -99,8 +99,7 @@ static int
     nfsmb_read_1(struct nfsmb_softc *, uint8_t, i2c_addr_t, i2c_op_t, int);
 static int
     nfsmb_read_2(struct nfsmb_softc *, uint8_t, i2c_addr_t, i2c_op_t, int);
-static int 
-    nfsmb_quick(struct nfsmb_softc *, i2c_addr_t, i2c_op_t, int);
+
 
 CFATTACH_DECL_NEW(nfsmbc, sizeof(struct nfsmbc_softc),
     nfsmbc_match, nfsmbc_attach, NULL, NULL);
@@ -178,12 +177,6 @@ nfsmbc_attach(device_t parent, device_t self, void *aux)
 	nfsmbca.nfsmb_num = 2;
 	nfsmbca.nfsmb_addr = NFORCE_SMBBASE(reg);
 	sc->sc_nfsmb[1] = config_found(sc->sc_dev, &nfsmbca, nfsmbc_print);
-
-	/* This driver is similar to an ISA bridge that doesn't
-	 * need any special handling. So registering NULL handlers
-	 * are sufficent. */
-	if (!pmf_device_register(self, NULL, NULL))
-		aprint_error_dev(self, "couldn't establish power handler\n");
 }
 
 static int
@@ -250,12 +243,6 @@ nfsmb_attach(device_t parent, device_t self, void *aux)
 	iba.iba_type = I2C_TYPE_SMBUS;
 	iba.iba_tag = &sc->sc_i2c;
 	(void) config_found_ia(sc->sc_dev, "i2cbus", &iba, iicbus_print);
-
-	/* This driver is similar to an ISA bridge that doesn't
-	 * need any special handling. So registering NULL handlers
-	 * are sufficent. */
-	if (!pmf_device_register(self, NULL, NULL))
-		aprint_error_dev(self, "couldn't establish power handler\n");
 }
 
 static int
@@ -283,10 +270,6 @@ nfsmb_exec(void *cookie, i2c_op_t op, i2c_addr_t addr, const void *cmd,
 	uint8_t *p = vbuf;
 	int rv;
 
-	if ((cmdlen == 0) && (buflen == 0)) {
-		return nfsmb_quick(sc, addr, op, flags);
-	}
-
 	if (I2C_OP_READ_P(op) && (cmdlen == 0) && (buflen == 1)) {
 		rv = nfsmb_receive_1(sc, addr, op, flags);
 		if (rv == -1)
@@ -307,7 +290,7 @@ nfsmb_exec(void *cookie, i2c_op_t op, i2c_addr_t addr, const void *cmd,
 		rv = nfsmb_read_2(sc, *(const uint8_t*)cmd, addr, op, flags);
 		if (rv == -1)
 			return -1;
-		*(uint16_t *)p = (uint16_t)rv;
+		*p = (uint8_t)rv;
 		return 0;
 	}
 
@@ -345,23 +328,6 @@ nfsmb_check_done(struct nfsmb_softc *sc)
 	    !(stat & NFORCE_SMB_STATUS_STATUS))
 		return 0;
 	return -1;
-}
-
-/* ARGSUSED */
-static int
-nfsmb_quick(struct nfsmb_softc *sc, i2c_addr_t addr, i2c_op_t op, int flags)
-{
-	uint8_t data;
-
-	/* write smbus slave address to register */
-	data = addr << 1;
-	bus_space_write_1(sc->sc_iot, sc->sc_ioh, NFORCE_SMB_ADDRESS, data);
-
-	/* write smbus protocol to register */
-	data = I2C_OP_READ_P(op) | NFORCE_SMB_PROTOCOL_QUICK;
-	bus_space_write_1(sc->sc_iot, sc->sc_ioh, NFORCE_SMB_PROTOCOL, data);
-
-	return nfsmb_check_done(sc);
 }
 
 /* ARGSUSED */

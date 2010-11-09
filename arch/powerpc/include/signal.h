@@ -1,4 +1,4 @@
-/*	$NetBSD: signal.h,v 1.20 2008/11/19 22:59:56 cegger Exp $	*/
+/*	$NetBSD: signal.h,v 1.18 2005/12/11 12:18:43 christos Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996 Wolfgang Solfrank.
@@ -58,6 +58,17 @@ struct sigcontext {
 	struct utrapframe sc_frame;	/* saved registers */
 	sigset_t sc_mask;		/* saved signal mask (new style) */
 };
+
+#ifdef _KERNEL
+void	sendsig_sigcontext(int, const sigset_t *, u_long);
+
+#ifdef COMPAT_16
+#define	SIGTRAMP_VALID(vers)	((unsigned)(vers) <= 2)
+#else
+#define	SIGTRAMP_VALID(vers)	((vers) == 2)
+#endif
+
+#endif	/* _KERNEL */
 
 #endif	/* _NETBSD_SOURCE */
 #endif	/* !_LOCORE */

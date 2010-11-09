@@ -1,6 +1,5 @@
-/*	$NetBSD: if_pflog.h,v 1.5 2008/06/18 09:06:27 yamt Exp $	*/
-/*	$OpenBSD: if_pflog.h,v 1.14 2006/10/25 11:27:01 henning Exp $ */
-
+/*	$NetBSD: if_pflog.h,v 1.4 2005/12/11 12:24:25 christos Exp $	*/
+/* $OpenBSD: if_pflog.h,v 1.11 2004/05/19 17:50:51 dhartmei Exp $ */
 /*
  * Copyright 2001 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
@@ -29,12 +28,8 @@
 #ifndef _NET_IF_PFLOG_H_
 #define _NET_IF_PFLOG_H_
 
-#define	PFLOGIFS_MAX	16
-
 struct pflog_softc {
-	struct ifnet		sc_if;		/* the interface */
-	int			sc_unit;
-	LIST_ENTRY(pflog_softc)	sc_list;
+	struct ifnet	sc_if;  /* the interface */
 };
 
 #define PFLOG_RULESET_NAME_SIZE	16
@@ -48,10 +43,6 @@ struct pfloghdr {
 	char		ruleset[PFLOG_RULESET_NAME_SIZE];
 	u_int32_t	rulenr;
 	u_int32_t	subrulenr;
-	uid_t		uid;
-	pid_t		pid;
-	uid_t		rule_uid;
-	pid_t		rule_pid;
 	u_int8_t	dir;
 	u_int8_t	pad[3];
 };
@@ -74,9 +65,9 @@ struct old_pfloghdr {
 #ifdef _KERNEL
 
 #if NPFLOG > 0
-#define	PFLOG_PACKET(i,x,a,b,c,d,e,f,g,h) pflog_packet(i,a,b,c,d,e,f,g,h)
+#define	PFLOG_PACKET(i,x,a,b,c,d,e,f,g) pflog_packet(i,a,b,c,d,e,f,g)
 #else
-#define	PFLOG_PACKET(i,x,a,b,c,d,e,f,g,h) ((void)0)
+#define	PFLOG_PACKET(i,x,a,b,c,d,e,f,g)	((void)0)
 #endif /* NPFLOG > 0 */
 #endif /* _KERNEL */
 #endif /* _NET_IF_PFLOG_H_ */

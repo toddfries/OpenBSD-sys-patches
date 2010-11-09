@@ -1,4 +1,4 @@
-/*	$NetBSD: tgets.c,v 1.6 2009/01/12 11:32:43 tsutsui Exp $	*/
+/*	$NetBSD: tgets.c,v 1.5 2005/12/11 12:17:24 christos Exp $	*/
 
 /*-
  * Copyright (c) 1993
@@ -33,7 +33,6 @@
 
 #include <sys/types.h>
 #include <arch/hp700/stand/common/libsa.h>
-#include <lib/libsa/net.h>
 
 int tgets(char *);
 
@@ -42,7 +41,7 @@ tgets(char *buf)
 {
 	int c, i;
 	char *p, *lp = buf;
-	satime_t seconds1, seconds2;
+	time_t seconds1, seconds2;
 
 	seconds1 = getsecs();
 	for (i = 10; i > 0; ) {

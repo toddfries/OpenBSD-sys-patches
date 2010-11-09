@@ -1,4 +1,4 @@
-/*	$NetBSD: mpu_ym.c,v 1.15 2008/04/28 20:23:52 martin Exp $	*/
+/*	$NetBSD: mpu_ym.c,v 1.13 2007/10/19 12:00:21 ad Exp $	*/
 
 /*
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mpu_ym.c,v 1.15 2008/04/28 20:23:52 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mpu_ym.c,v 1.13 2007/10/19 12:00:21 ad Exp $");
 
 #define NMPU_YM 1
 
@@ -55,20 +62,20 @@ __KERNEL_RCSID(0, "$NetBSD: mpu_ym.c,v 1.15 2008/04/28 20:23:52 martin Exp $");
 #include <dev/isa/ymvar.h>
 #include <dev/ic/mpuvar.h>
 
-static int	mpu_ym_match(device_t, cfdata_t, void *);
-static void	mpu_ym_attach(device_t, device_t, void *);
+int	mpu_ym_match(struct device *, struct cfdata *, void *);
+void	mpu_ym_attach(struct device *, struct device *, void *);
 #ifndef AUDIO_NO_POWER_CTL
-static int	mpu_ym_power_ctl(void *, int);
+int	mpu_ym_power_ctl(void *, int);
 #endif
 
-CFATTACH_DECL_NEW(mpu_ym, sizeof(struct mpu_softc),
+CFATTACH_DECL(mpu_ym, sizeof(struct mpu_softc),
     mpu_ym_match, mpu_ym_attach, NULL, NULL);
 
-static int
-mpu_ym_match(device_t parent, cfdata_t match, void *aux)
+int
+mpu_ym_match(struct device *parent, struct cfdata *match, void *aux)
 {
-	struct audio_attach_args *aa = aux;
-	struct ym_softc *ssc = device_private(parent);
+	struct audio_attach_args *aa = (struct audio_attach_args *)aux;
+	struct ym_softc *ssc = (struct ym_softc *)parent;
 	struct mpu_softc sc;
 
 	if (aa->type != AUDIODEV_TYPE_MPU || ssc->sc_mpu_ioh == 0)
@@ -76,16 +83,16 @@ mpu_ym_match(device_t parent, cfdata_t match, void *aux)
 	memset(&sc, 0, sizeof sc);
 	sc.ioh = ssc->sc_mpu_ioh;
 	sc.iot = ssc->sc_iot;
-	return mpu_find(&sc);
+	return (mpu_find(&sc));
 }
 
-static void
-mpu_ym_attach(device_t parent, device_t self, void *aux)
+void
+mpu_ym_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct ym_softc *ssc = device_private(parent);
-	struct mpu_softc *sc = device_private(self);
+	struct ym_softc *ssc = (struct ym_softc *)parent;
+	struct mpu_softc *sc = (struct mpu_softc *)self;
 
-	aprint_normal("\n");
+	printf("\n");
 
 	sc->ioh = ssc->sc_mpu_ioh;
 	sc->iot = ssc->sc_iot;
@@ -95,14 +102,15 @@ mpu_ym_attach(device_t parent, device_t self, void *aux)
 #endif
 	sc->model = YM_IS_SA3(ssc) ?
 	    "OPL3-SA3 MPU-401 MIDI UART" : "OPL3-SA2 MPU-401 MIDI UART";
-	sc->sc_dev  = self;
 
 	mpu_attach(sc);
 }
 
 #ifndef AUDIO_NO_POWER_CTL
-static int
-mpu_ym_power_ctl(void *arg, int onoff)
+int
+mpu_ym_power_ctl(arg, onoff)
+	void *arg;
+	int onoff;
 {
 	struct ym_softc *ssc = arg;
 

@@ -1,4 +1,4 @@
-/*	$NetBSD: gencons.c,v 1.49 2008/03/11 05:34:03 matt Exp $	*/
+/*	$NetBSD: gencons.c,v 1.45 2006/10/01 19:28:43 elad Exp $	*/
 
 /*
  * Copyright (c) 1994 Gordon W. Ross
@@ -36,7 +36,7 @@
  /* All bugs are subject to removal without further notice */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: gencons.c,v 1.49 2008/03/11 05:34:03 matt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: gencons.c,v 1.45 2006/10/01 19:28:43 elad Exp $");
 
 #include "opt_ddb.h"
 #include "opt_cputype.h"
@@ -77,8 +77,8 @@ static	int pr_rxdb[4] = {PR_RXDB, PR_RXDB1, PR_RXDB2, PR_RXDB3};
 
 cons_decl(gen);
 
-static	int gencnparam(struct tty *, struct termios *);
-static	void gencnstart(struct tty *);
+static	int gencnparam __P((struct tty *, struct termios *));
+static	void gencnstart __P((struct tty *));
 
 dev_type_open(gencnopen);
 dev_type_close(gencnclose);
@@ -174,7 +174,7 @@ gencnpoll(dev_t dev, int events, struct lwp *l)
 }
 
 int
-gencnioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
+gencnioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct lwp *l)
 {
 	struct tty *tp = gc_softc[minor(dev)].gencn_tty;
 	int error;
@@ -201,13 +201,19 @@ gencnstart(struct tty *tp)
 		goto out;
 	cl = &tp->t_outq;
 
-	if (ttypull(tp)) {
+	if(cl->c_cc){
 		tp->t_state |= TS_BUSY;
 		ch = getc(cl);
 		mtpr(ch, pr_txdb[minor(tp->t_dev)]);
+	} else {
+		if (tp->t_state & TS_ASLEEP) {
+			tp->t_state &= ~TS_ASLEEP;
+			wakeup((caddr_t)cl);
+		}
+		selwakeup(&tp->t_wsel);
 	}
- out:
-	splx(s);
+
+out:	splx(s);
 }
 
 static void
@@ -220,14 +226,14 @@ gencnrint(void *arg)
 	if (sc->alive == 0)
 		return;
 	i = mfpr(pr_rxdb[sc->unit]) & 0377; /* Mask status flags etc... */
-	KERNEL_LOCK(1, NULL);
+	KERNEL_LOCK(LK_CANRECURSE|LK_EXCLUSIVE);
 
 #ifdef DDB
 	if (tp->t_dev == cn_tab->cn_dev) {
 		int j = kdbrint(i);
 
 		if (j == 1) {	/* Escape received, just return */
-			KERNEL_UNLOCK_ONE(NULL);
+			KERNEL_UNLOCK();
 			return;
 		}
 
@@ -237,7 +243,7 @@ gencnrint(void *arg)
 #endif
 
 	(*tp->t_linesw->l_rint)(i, tp);
-	KERNEL_UNLOCK_ONE(NULL);
+	KERNEL_UNLOCK();
 }
 
 static void
@@ -248,11 +254,11 @@ gencntint(void *arg)
 
 	if (sc->alive == 0)
 		return;
-	KERNEL_LOCK(1, NULL);
+	KERNEL_LOCK(LK_CANRECURSE|LK_EXCLUSIVE);
 	tp->t_state &= ~TS_BUSY;
 
 	gencnstart(tp);
-	KERNEL_UNLOCK_ONE(NULL);
+	KERNEL_UNLOCK();
 }
 
 int
@@ -372,7 +378,7 @@ gencnpollc(dev_t dev, int pollflag)
 
 #if defined(MULTIPROCESSOR)
 void
-gencnstarttx(void)
+gencnstarttx()
 {
 	gencnstart(gc_softc[0].gencn_tty);
 }

@@ -1,4 +1,4 @@
-/*	$NetBSD: random.S,v 1.5 2009/01/04 17:10:46 pooka Exp $	*/
+/*	$NetBSD: random.S,v 1.3 1998/08/15 04:49:50 mycroft Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -77,20 +84,14 @@ randseed:
 	.text
 ENTRY(random)
 	movl	$16807,%eax
-	PIC_PROLOGUE
-	imull	PIC_GOTOFF(randseed)
-	PIC_EPILOGUE
+	imull	randseed
 	shld	$1,%eax,%edx
 	andl	$0x7fffffff,%eax
 	addl	%edx,%eax
 	js	1f
-	PIC_PROLOGUE
-	movl	%eax,PIC_GOTOFF(randseed)
-	PIC_EPILOGUE
+	movl	%eax,randseed
 	ret
 1:
 	subl	$0x7fffffff,%eax
-	PIC_PROLOGUE
-	movl	%eax,PIC_GOTOFF(randseed)
-	PIC_EPILOGUE
+	movl	%eax,randseed
 	ret

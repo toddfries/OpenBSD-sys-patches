@@ -1,4 +1,4 @@
-/*	$NetBSD: protosw.h,v 1.44 2008/08/06 15:01:24 plunky Exp $	*/
+/*	$NetBSD: protosw.h,v 1.42 2007/03/31 18:17:13 plunky Exp $	*/
 
 /*-
  * Copyright (c) 1982, 1986, 1993
@@ -60,7 +60,6 @@
 struct mbuf;
 struct sockaddr;
 struct socket;
-struct sockopt;
 struct domain;
 struct proc;
 struct lwp;
@@ -79,7 +78,7 @@ struct protosw {
 	void	*(*pr_ctlinput)		/* control input (from below) */
 			(int, const struct sockaddr *, void *);
 	int	(*pr_ctloutput)		/* control output (from above) */
-			(int, struct socket *, struct sockopt *);
+			(int, struct socket *, int, int, struct mbuf **);
 
 /* user-protocol hook */
 	int	(*pr_usrreq)		/* user request: see list below */
@@ -215,9 +214,14 @@ static const char * const prcrequests[] = {
 
 /*
  * The arguments to ctloutput are:
- *	(*protosw[].pr_ctloutput)(req, so, sopt);
+ *	(*protosw[].pr_ctloutput)(req, so, level, optname, optval);
  * req is one of the actions listed below, so is a (struct socket *),
- * sopt is a (struct sockopt *)
+ * level is an indication of which protocol layer the option is intended.
+ * optname is a protocol dependent socket option request,
+ * optval is a pointer to a mbuf-chain pointer, for value-return results.
+ * The protocol is responsible for disposal of the mbuf chain *optval
+ * if supplied,
+ * the caller is responsible for any space held by *optval, when returned.
  * A non-zero return from usrreq gives an
  * UNIX error number which should be passed to higher level software.
  */
@@ -257,47 +261,6 @@ const struct protosw *pffindtype(int, int);
 struct domain *pffinddomain(int);
 void pfctlinput(int, const struct sockaddr *);
 void pfctlinput2(int, const struct sockaddr *, void *);
-
-/*
- * Wrappers for non-MPSAFE protocols
- */
-#include <sys/systm.h>	/* kernel_lock */
-
-#define	PR_WRAP_USRREQ(name)				\
-static int						\
-name##_wrapper(struct socket *a, int b, struct mbuf *c,	\
-     struct mbuf *d, struct mbuf *e, struct lwp *f)	\
-{							\
-	int rv;						\
-	KERNEL_LOCK(1, NULL);				\
-	rv = name(a, b, c, d, e, f);			\
-	KERNEL_UNLOCK_ONE(NULL);			\
-	return rv;					\
-}
-
-#define	PR_WRAP_CTLOUTPUT(name)				\
-static int						\
-name##_wrapper(int a, struct socket *b,			\
-    struct sockopt *c)					\
-{							\
-	int rv;						\
-	KERNEL_LOCK(1, NULL);				\
-	rv = name(a, b, c);				\
-	KERNEL_UNLOCK_ONE(NULL);			\
-	return rv;					\
-}
-
-#define	PR_WRAP_CTLINPUT(name)				\
-static void *						\
-name##_wrapper(int a, const struct sockaddr *b, void *c)\
-{							\
-	void *rv;					\
-	KERNEL_LOCK(1, NULL);				\
-	rv = name(a, b, c);				\
-	KERNEL_UNLOCK_ONE(NULL);			\
-	return rv;					\
-}
-
 #endif /* _KERNEL */
 
 #endif /* !_SYS_PROTOSW_H_ */

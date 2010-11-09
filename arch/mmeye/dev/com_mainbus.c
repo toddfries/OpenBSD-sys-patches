@@ -1,4 +1,4 @@
-/*	$NetBSD: com_mainbus.c,v 1.9 2008/04/28 20:23:29 martin Exp $	*/
+/*	$NetBSD: com_mainbus.c,v 1.7 2006/07/13 22:56:01 gdamore Exp $	*/
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -12,6 +12,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -27,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: com_mainbus.c,v 1.9 2008/04/28 20:23:29 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: com_mainbus.c,v 1.7 2006/07/13 22:56:01 gdamore Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -59,16 +66,16 @@ struct com_mainbus_softc {
 	struct	com_softc sc_com;	/* real "com" softc */
 };
 
-int com_mainbus_match(device_t, cfdata_t , void *);
-void com_mainbus_attach(device_t, device_t, void *);
+int com_mainbus_match(struct device *, struct cfdata *, void *);
+void com_mainbus_attach(struct device *, struct device *, void *);
 void comcnprobe(struct consdev *);
 void comcninit(struct consdev *);
 
-CFATTACH_DECL_NEW(com_mainbus, sizeof(struct com_mainbus_softc),
+CFATTACH_DECL(com_mainbus, sizeof(struct com_mainbus_softc),
     com_mainbus_match, com_mainbus_attach, NULL, NULL);
 
 int
-com_mainbus_match(device_t parent, cfdata_t match, void *aux)
+com_mainbus_match(struct device *parent, struct cfdata *match, void *aux)
 {
 	extern struct cfdriver com_cd;
 	struct mainbus_attach_args *ma = aux;
@@ -80,19 +87,18 @@ com_mainbus_match(device_t parent, cfdata_t match, void *aux)
 }
 
 void
-com_mainbus_attach(device_t parent, device_t self, void *aux)
+com_mainbus_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct mainbus_attach_args *ma = aux;
-	struct com_mainbus_softc *sc = device_private(self);
+	struct com_mainbus_softc *sc = (void *)self;
 	struct com_softc *csc = &sc->sc_com;
 
-	csc->sc_dev = self;
 	csc->sc_frequency = COM_FREQ;
 	COM_INIT_REGS(csc->sc_regs, 0, ma->ma_addr1, 0);
 
 	/* sanity check */
 	if (!comprobe1(0, ma->ma_addr1)) {
-		aprint_error(": device problem. don't attach.\n");
+		printf(": device problem. don't attach.\n");
 		return;
 	}
 
@@ -113,7 +119,8 @@ comcnprobe(struct consdev *cp)
 }
 
 void
-comcninit(struct consdev *cp)
+comcninit(cp)
+	struct consdev *cp;
 {
 
 	comcnattach(0, CONADDR, COMCN_SPEED, COM_FREQ, COM_TYPE_NORMAL,

@@ -1,4 +1,4 @@
-/*	$NetBSD: scif.c,v 1.57 2008/04/28 20:23:35 martin Exp $ */
+/*	$NetBSD: scif.c,v 1.49 2006/10/01 20:31:50 elad Exp $ */
 
 /*-
  * Copyright (C) 1999 T.Horiuchi and SAITOH Masanobu.  All rights reserved.
@@ -41,6 +41,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -93,7 +100,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: scif.c,v 1.57 2008/04/28 20:23:35 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: scif.c,v 1.49 2006/10/01 20:31:50 elad Exp $");
 
 #include "opt_kgdb.h"
 #include "opt_scif.h"
@@ -110,26 +117,36 @@ __KERNEL_RCSID(0, "$NetBSD: scif.c,v 1.57 2008/04/28 20:23:35 martin Exp $");
 #include <sys/malloc.h>
 #include <sys/kgdb.h>
 #include <sys/kauth.h>
-#include <sys/intr.h>
 
 #include <dev/cons.h>
 
 #include <sh3/clock.h>
 #include <sh3/exception.h>
 #include <sh3/scifreg.h>
+#include <machine/intr.h>
 
 #include <sh3/dev/scifvar.h>
 
 #include "locators.h"
 
+static void	scifstart(struct tty *);
+static int	scifparam(struct tty *, struct termios *);
+static int kgdb_attached;
+
+void scifcnprobe(struct consdev *);
+void scifcninit(struct consdev *);
+void scifcnputc(dev_t, int);
+int scifcngetc(dev_t);
+void scifcnpoolc(dev_t, int);
+void scif_intr_init(void);
+int scifintr(void *);
 
 struct scif_softc {
-	device_t sc_dev;
-
+	struct device sc_dev;		/* boilerplate */
 	struct tty *sc_tty;
 	void *sc_si;
 
-	callout_t sc_diag_ch;
+	struct callout sc_diag_ch;
 
 #if 0
 	bus_space_tag_t sc_iot;		/* ISA i/o space identifier */
@@ -176,16 +193,29 @@ struct scif_softc {
 	volatile u_char sc_heldchange;
 };
 
+/* controller driver configuration */
+static int scif_match(struct device *, struct cfdata *, void *);
+static void scif_attach(struct device *, struct device *, void *);
 
-static int scif_match(device_t, cfdata_t, void *);
-static void scif_attach(device_t, device_t, void *);
+void	scif_break(struct scif_softc *, int);
+void	scif_iflush(struct scif_softc *);
 
-CFATTACH_DECL_NEW(scif, sizeof(struct scif_softc),
-    scif_match, scif_attach, NULL, NULL);
+#define	integrate	static inline
+#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
+void 	scifsoft(void *);
+#else
+#ifndef __NO_SOFT_SERIAL_INTERRUPT
+void 	scifsoft(void);
+#else
+void 	scifsoft(void *);
+#endif
+#endif
+integrate void scif_rxsoft(struct scif_softc *, struct tty *);
+integrate void scif_txsoft(struct scif_softc *, struct tty *);
+integrate void scif_stsoft(struct scif_softc *, struct tty *);
+integrate void scif_schedrx(struct scif_softc *);
+void	scifdiag(void *);
 
-static int scif_attached = 0;	/* XXX: FIXME: don't limit to just one! */
-
-extern struct cfdriver scif_cd;
 
 #define	SCIFUNIT_MASK		0x7ffff
 #define	SCIFDIALOUT_MASK	0x80000
@@ -193,15 +223,49 @@ extern struct cfdriver scif_cd;
 #define	SCIFUNIT(x)	(minor(x) & SCIFUNIT_MASK)
 #define	SCIFDIALOUT(x)	(minor(x) & SCIFDIALOUT_MASK)
 
+/* Hardware flag masks */
+#define	SCIF_HW_NOIEN	0x01
+#define	SCIF_HW_FIFO	0x02
+#define	SCIF_HW_FLOW	0x08
+#define	SCIF_HW_DEV_OK	0x20
+#define	SCIF_HW_CONSOLE	0x40
+#define	SCIF_HW_KGDB	0x80
 
-/* console */
-dev_type_cnprobe(scifcnprobe);
-dev_type_cninit(scifcninit);
-dev_type_cngetc(scifcngetc);
-dev_type_cnputc(scifcnputc);
+/* Buffer size for character buffer */
+#define	SCIF_RING_SIZE	2048
 
+/* Stop input when 3/4 of the ring is full; restart when only 1/4 is full. */
+u_int scif_rbuf_hiwat = (SCIF_RING_SIZE * 1) / 4;
+u_int scif_rbuf_lowat = (SCIF_RING_SIZE * 3) / 4;
 
-/* cdevsw */
+#define	CONMODE ((TTYDEF_CFLAG & ~(CSIZE | CSTOPB | PARENB)) | CS8) /* 8N1 */
+int scifconscflag = CONMODE;
+int scifisconsole = 0;
+
+#ifdef SCIFCN_SPEED
+unsigned int scifcn_speed = SCIFCN_SPEED;
+#else
+unsigned int scifcn_speed = 9600;
+#endif
+
+#define	divrnd(n, q)	(((n)*2/(q)+1)/2)	/* divide and round off */
+
+#ifndef __HAVE_GENERIC_SOFT_INTERRUPTS
+#ifdef __NO_SOFT_SERIAL_INTERRUPT
+volatile int	scif_softintr_scheduled;
+struct callout scif_soft_ch = CALLOUT_INITIALIZER;
+#endif
+#endif
+
+u_int scif_rbuf_size = SCIF_RING_SIZE;
+
+CFATTACH_DECL(scif, sizeof(struct scif_softc),
+    scif_match, scif_attach, NULL, NULL);
+
+extern struct cfdriver scif_cd;
+
+static int scif_attached;
+
 dev_type_open(scifopen);
 dev_type_close(scifclose);
 dev_type_read(scifread);
@@ -216,66 +280,17 @@ const struct cdevsw scif_cdevsw = {
 	scifstop, sciftty, scifpoll, nommap, ttykqfilter, D_TTY
 };
 
-
-/* struct tty */
-static void scifstart(struct tty *);
-static int scifparam(struct tty *, struct termios *);
-
-
 void InitializeScif (unsigned int);
-int ScifErrCheck(void);
+
+/*
+ * following functions are debugging prupose only
+ */
+#define	CR      0x0D
+#define	USART_ON (unsigned int)~0x08
+
 void scif_putc(unsigned char);
 unsigned char scif_getc(void);
-
-static int scifintr(void *);
-static void scifsoft(void *);
-static void scif_rxsoft(struct scif_softc *, struct tty *);
-static void scif_txsoft(struct scif_softc *, struct tty *);
-#if 0
-static void scif_stsoft(struct scif_softc *, struct tty *);
-#endif
-static void scif_schedrx(struct scif_softc *);
-static void scifdiag(void *);
-
-static void scif_break(struct scif_softc *, int);
-static void scif_iflush(struct scif_softc *);
-
-
-/* Hardware flag masks (sc_hwflags) */
-#define	SCIF_HW_NOIEN	0x01
-#define	SCIF_HW_FIFO	0x02
-#define	SCIF_HW_FLOW	0x08
-#define	SCIF_HW_DEV_OK	0x20
-#define	SCIF_HW_CONSOLE	0x40
-#define	SCIF_HW_KGDB	0x80
-
-
-/* Buffer size for character buffer */
-#define	SCIF_RING_SIZE	2048
-static unsigned int scif_rbuf_size = SCIF_RING_SIZE;
-
-/* Stop input when 3/4 of the ring is full; restart when only 1/4 is full. */
-static unsigned int scif_rbuf_hiwat = (SCIF_RING_SIZE * 1) / 4;
-static unsigned int scif_rbuf_lowat = (SCIF_RING_SIZE * 3) / 4;
-
-
-#ifdef SCIFCN_SPEED
-unsigned int scifcn_speed = SCIFCN_SPEED;
-#else
-unsigned int scifcn_speed = 9600;
-#endif
-
-#define	CONMODE ((TTYDEF_CFLAG & ~(CSIZE | CSTOPB | PARENB)) | CS8) /* 8N1 */
-int scifconscflag = CONMODE;
-
-static int scifisconsole = 0;
-
-#ifdef KGDB
-static int kgdb_attached = 0;
-#endif
-
-
-#define	divrnd(n, q)	(((n)*2/(q)+1)/2)	/* divide and round off */
+int ScifErrCheck(void);
 
 
 /* XXX: uwe
@@ -314,6 +329,12 @@ static int kgdb_attached = 0;
 #endif /* SH4 */
 
 
+/*
+ * InitializeScif
+ * : unsigned int bps;
+ * : SCIF(Serial Communication Interface)
+ */
+
 void
 InitializeScif(unsigned int bps)
 {
@@ -351,12 +372,11 @@ InitializeScif(unsigned int bps)
 	scif_ssr_write(scif_ssr_read() & SCSSR2_TDFE); /* Clear Status */
 }
 
-int
-ScifErrCheck(void)
-{
 
-	return (scif_ssr_read() & (SCSSR2_ER | SCSSR2_FER | SCSSR2_PER));
-}
+/*
+ * scif_putc
+ *  : unsigned char c;
+ */
 
 void
 scif_putc(unsigned char c)
@@ -373,6 +393,22 @@ scif_putc(unsigned char c)
 	scif_ssr_write(scif_ssr_read() & ~(SCSSR2_TDFE | SCSSR2_TEND));
 }
 
+/*
+ * : ScifErrCheck
+ *	0x80 = error
+ *	0x08 = frame error
+ *	0x04 = parity error
+ */
+int
+ScifErrCheck(void)
+{
+
+	return (scif_ssr_read() & (SCSSR2_ER | SCSSR2_FER | SCSSR2_PER));
+}
+
+/*
+ * scif_getc
+ */
 unsigned char
 scif_getc(void)
 {
@@ -397,8 +433,7 @@ scif_getc(void)
 		}
 #endif
 		if ((err_c & (SCSSR2_ER | SCSSR2_BRK | SCSSR2_FER
-		    | SCSSR2_PER)) == 0)
-		{
+		    | SCSSR2_PER)) == 0) {
 #ifdef SH4
 			if (CPU_IS_SH4 && ((err_c2 & SCLSR2_ORER) == 0))
 #endif
@@ -409,26 +444,20 @@ scif_getc(void)
 }
 
 static int
-scif_match(device_t parent, cfdata_t cfp, void *aux)
+scif_match(struct device *parent, struct cfdata *cfp, void *aux)
 {
 
-	if (scif_attached)
-		return 0;
-
-	if (strcmp(cfp->cf_name, "scif") != 0)
+	if (strcmp(cfp->cf_name, "scif") || scif_attached)
 		return 0;
 
 	return 1;
 }
 
 static void
-scif_attach(device_t parent, device_t self, void *aux)
+scif_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct scif_softc *sc;
+	struct scif_softc *sc = (struct scif_softc *)self;
 	struct tty *tp;
-
-	sc = device_private(self);
-	sc->sc_dev = self;
 
 	scif_attached = 1;
 
@@ -436,27 +465,22 @@ scif_attach(device_t parent, device_t self, void *aux)
 	sc->sc_swflags = 0;	/* XXX */
 	sc->sc_fifolen = 16;
 
-	aprint_normal("\n");
-	if (scifisconsole) {
-		aprint_naive(" (console)\n");
-		aprint_normal_dev(self, "console\n");
+	if (scifisconsole || kgdb_attached) {
+		/* InitializeScif(scifcn_speed); */
 		SET(sc->sc_hwflags, SCIF_HW_CONSOLE);
 		SET(sc->sc_swflags, TIOCFLAG_SOFTCAR);
-	}
-#ifdef KGDB
-	else if (kgdb_attached) {
-		aprint_naive(" (kgdb)\n");
-		aprint_normal_dev(self, "kgdb\n");
-		SET(sc->sc_hwflags, SCIF_HW_KGDB);
-		SET(sc->sc_swflags, TIOCFLAG_SOFTCAR);
-	}
-#endif
-	else {
-		aprint_naive("\n");
-		InitializeScif(9600); /* XXX */
+		if (kgdb_attached) {
+			SET(sc->sc_hwflags, SCIF_HW_KGDB);
+			printf("\n%s: kgdb\n", sc->sc_dev.dv_xname);
+		} else {
+			printf("\n%s: console\n", sc->sc_dev.dv_xname);
+		}
+	} else {
+		InitializeScif(9600);
+		printf("\n");
 	}
 
-	callout_init(&sc->sc_diag_ch, 0);
+	callout_init(&sc->sc_diag_ch);
 #ifdef SH4
 	intc_intr_establish(SH4_INTEVT_SCIF_ERI, IST_LEVEL, IPL_SERIAL,
 	    scifintr, sc);
@@ -477,7 +501,9 @@ scif_attach(device_t parent, device_t self, void *aux)
 	    scifintr, sc);
 #endif
 
-	sc->sc_si = softint_establish(SOFTINT_SERIAL, scifsoft, sc);
+#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
+	sc->sc_si = softintr_establish(IPL_SOFTSERIAL, scifsoft, sc);
+#endif
 	SET(sc->sc_hwflags, SCIF_HW_DEV_OK);
 
 	tp = ttymalloc();
@@ -488,7 +514,8 @@ scif_attach(device_t parent, device_t self, void *aux)
 	sc->sc_tty = tp;
 	sc->sc_rbuf = malloc(scif_rbuf_size << 1, M_DEVBUF, M_NOWAIT);
 	if (sc->sc_rbuf == NULL) {
-		aprint_error_dev(self, "unable to allocate ring buffer\n");
+		printf("%s: unable to allocate ring buffer\n",
+		    sc->sc_dev.dv_xname);
 		return;
 	}
 	sc->sc_ebuf = sc->sc_rbuf + (scif_rbuf_size << 1);
@@ -502,18 +529,24 @@ scif_attach(device_t parent, device_t self, void *aux)
 static void
 scifstart(struct tty *tp)
 {
-	struct scif_softc *sc;
+	struct scif_softc *sc = scif_cd.cd_devs[SCIFUNIT(tp->t_dev)];
 	int s;
-
-	sc = device_lookup_private(&scif_cd, SCIFUNIT(tp->t_dev));
 
 	s = spltty();
 	if (ISSET(tp->t_state, TS_BUSY | TS_TIMEOUT | TS_TTSTOP))
 		goto out;
 	if (sc->sc_tx_stopped)
 		goto out;
-	if (!ttypull(tp))
-		goto out;
+
+	if (tp->t_outq.c_cc <= tp->t_lowat) {
+		if (ISSET(tp->t_state, TS_ASLEEP)) {
+			CLR(tp->t_state, TS_ASLEEP);
+			wakeup(&tp->t_outq);
+		}
+		selwakeup(&tp->t_wsel);
+		if (tp->t_outq.c_cc == 0)
+			goto out;
+	}
 
 	/* Grab the first contiguous region of buffer space. */
 	{
@@ -566,12 +599,11 @@ out:
 static int
 scifparam(struct tty *tp, struct termios *t)
 {
-	struct scif_softc *sc;
+	struct scif_softc *sc = scif_cd.cd_devs[SCIFUNIT(tp->t_dev)];
 	int ospeed = t->c_ospeed;
 	int s;
 
-	sc = device_lookup_private(&scif_cd, SCIFUNIT(tp->t_dev));
-	if (!device_is_active(sc->sc_dev))
+	if (!device_is_active(&sc->sc_dev))
 		return (EIO);
 
 	/* Check requested parameters. */
@@ -687,7 +719,7 @@ scifparam(struct tty *tp, struct termios *t)
 	return (0);
 }
 
-static void
+void
 scif_iflush(struct scif_softc *sc)
 {
 	int i;
@@ -705,17 +737,20 @@ scif_iflush(struct scif_softc *sc)
 int
 scifopen(dev_t dev, int flag, int mode, struct lwp *l)
 {
+	int unit = SCIFUNIT(dev);
 	struct scif_softc *sc;
 	struct tty *tp;
 	int s, s2;
 	int error;
 
-	sc = device_lookup_private(&scif_cd, SCIFUNIT(dev));
+	if (unit >= scif_cd.cd_ndevs)
+		return (ENXIO);
+	sc = scif_cd.cd_devs[unit];
 	if (sc == 0 || !ISSET(sc->sc_hwflags, SCIF_HW_DEV_OK) ||
 	    sc->sc_rbuf == NULL)
 		return (ENXIO);
 
-	if (!device_is_active(sc->sc_dev))
+	if (!device_is_active(&sc->sc_dev))
 		return (ENXIO);
 
 #ifdef KGDB
@@ -815,11 +850,8 @@ bad:
 int
 scifclose(dev_t dev, int flag, int mode, struct lwp *l)
 {
-	struct scif_softc *sc;
-	struct tty *tp;
-
-	sc = device_lookup_private(&scif_cd, SCIFUNIT(dev));
-	tp = sc->sc_tty;
+	struct scif_softc *sc = scif_cd.cd_devs[SCIFUNIT(dev)];
+	struct tty *tp = sc->sc_tty;
 
 	/* XXX This is for cons.c. */
 	if (!ISSET(tp->t_state, TS_ISOPEN))
@@ -828,7 +860,7 @@ scifclose(dev_t dev, int flag, int mode, struct lwp *l)
 	(*tp->t_linesw->l_close)(tp, flag);
 	ttyclose(tp);
 
-	if (!device_is_active(sc->sc_dev))
+	if (!device_is_active(&sc->sc_dev))
 		return (0);
 
 	return (0);
@@ -837,11 +869,8 @@ scifclose(dev_t dev, int flag, int mode, struct lwp *l)
 int
 scifread(dev_t dev, struct uio *uio, int flag)
 {
-	struct scif_softc *sc;
-	struct tty *tp;
-
-	sc = device_lookup_private(&scif_cd, SCIFUNIT(dev));
-	tp = sc->sc_tty;
+	struct scif_softc *sc = scif_cd.cd_devs[SCIFUNIT(dev)];
+	struct tty *tp = sc->sc_tty;
 
 	return ((*tp->t_linesw->l_read)(tp, uio, flag));
 }
@@ -849,11 +878,8 @@ scifread(dev_t dev, struct uio *uio, int flag)
 int
 scifwrite(dev_t dev, struct uio *uio, int flag)
 {
-	struct scif_softc *sc;
-	struct tty *tp;
-
-	sc = device_lookup_private(&scif_cd, SCIFUNIT(dev));
-	tp = sc->sc_tty;
+	struct scif_softc *sc = scif_cd.cd_devs[SCIFUNIT(dev)];
+	struct tty *tp = sc->sc_tty;
 
 	return ((*tp->t_linesw->l_write)(tp, uio, flag));
 }
@@ -861,11 +887,8 @@ scifwrite(dev_t dev, struct uio *uio, int flag)
 int
 scifpoll(dev_t dev, int events, struct lwp *l)
 {
-	struct scif_softc *sc;
-	struct tty *tp;
-
-	sc = device_lookup_private(&scif_cd, SCIFUNIT(dev));
-	tp = sc->sc_tty;
+	struct scif_softc *sc = scif_cd.cd_devs[SCIFUNIT(dev)];
+	struct tty *tp = sc->sc_tty;
 
 	return ((*tp->t_linesw->l_poll)(tp, events, l));
 }
@@ -873,28 +896,23 @@ scifpoll(dev_t dev, int events, struct lwp *l)
 struct tty *
 sciftty(dev_t dev)
 {
-	struct scif_softc *sc;
-	struct tty *tp;
-
-	sc = device_lookup_private(&scif_cd, SCIFUNIT(dev));
-	tp = sc->sc_tty;
+	struct scif_softc *sc = scif_cd.cd_devs[SCIFUNIT(dev)];
+	struct tty *tp = sc->sc_tty;
 
 	return (tp);
 }
 
 int
-scifioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
+scifioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct lwp *l)
 {
-	struct scif_softc *sc;
-	struct tty *tp;
+	struct scif_softc *sc = scif_cd.cd_devs[SCIFUNIT(dev)];
+	struct tty *tp = sc->sc_tty;
 	int error;
 	int s;
 
-	sc = device_lookup_private(&scif_cd, SCIFUNIT(dev));
-	if (!device_is_active(sc->sc_dev))
+	if (!device_is_active(&sc->sc_dev))
 		return (EIO);
 
-	tp = sc->sc_tty;
 	error = (*tp->t_linesw->l_ioctl)(tp, cmd, data, flag, l);
 	if (error != EPASSTHROUGH)
 		return (error);
@@ -938,17 +956,28 @@ scifioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 	return (error);
 }
 
-static void
+integrate void
 scif_schedrx(struct scif_softc *sc)
 {
 
 	sc->sc_rx_ready = 1;
 
 	/* Wake up the poller. */
-	softint_schedule(sc->sc_si);
+#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
+	softintr_schedule(sc->sc_si);
+#else
+#ifndef __NO_SOFT_SERIAL_INTERRUPT
+	setsoftserial();
+#else
+	if (!scif_softintr_scheduled) {
+		scif_softintr_scheduled = 1;
+		callout_reset(&scif_soft_ch, 1, scifsoft, NULL);
+	}
+#endif
+#endif
 }
 
-static void
+void
 scif_break(struct scif_softc *sc, int onoff)
 {
 
@@ -975,10 +1004,8 @@ scif_break(struct scif_softc *sc, int onoff)
 void
 scifstop(struct tty *tp, int flag)
 {
-	struct scif_softc *sc;
+	struct scif_softc *sc = scif_cd.cd_devs[SCIFUNIT(tp->t_dev)];
 	int s;
-
-	sc = device_lookup_private(&scif_cd, SCIFUNIT(tp->t_dev));
 
 	s = splserial();
 	if (ISSET(tp->t_state, TS_BUSY)) {
@@ -991,7 +1018,13 @@ scifstop(struct tty *tp, int flag)
 	splx(s);
 }
 
-static void
+void
+scif_intr_init()
+{
+	/* XXX */
+}
+
+void
 scifdiag(void *arg)
 {
 	struct scif_softc *sc = arg;
@@ -1007,12 +1040,12 @@ scifdiag(void *arg)
 	splx(s);
 
 	log(LOG_WARNING, "%s: %d silo overflow%s, %d ibuf flood%s\n",
-	    device_xname(sc->sc_dev),
+	    sc->sc_dev.dv_xname,
 	    overflows, overflows == 1 ? "" : "s",
 	    floods, floods == 1 ? "" : "s");
 }
 
-static void
+integrate void
 scif_rxsoft(struct scif_softc *sc, struct tty *tp)
 {
 	int (*rint)(int, struct tty *) = tp->t_linesw->l_rint;
@@ -1096,7 +1129,7 @@ scif_rxsoft(struct scif_softc *sc, struct tty *tp)
 	}
 }
 
-static void
+integrate void
 scif_txsoft(struct scif_softc *sc, struct tty *tp)
 {
 
@@ -1108,10 +1141,11 @@ scif_txsoft(struct scif_softc *sc, struct tty *tp)
 	(*tp->t_linesw->l_start)(tp);
 }
 
-#if 0 /* XXX (msaitoh) */
-static void
+integrate void
 scif_stsoft(struct scif_softc *sc, struct tty *tp)
 {
+#if 0
+/* XXX (msaitoh) */
 	u_char msr, delta;
 	int s;
 
@@ -1142,39 +1176,80 @@ scif_stsoft(struct scif_softc *sc, struct tty *tp)
 	if (scif_debug)
 		scifstatus(sc, "scif_stsoft");
 #endif
+#endif
 }
-#endif /* 0 */
 
-static void
+#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
+void
 scifsoft(void *arg)
 {
 	struct scif_softc *sc = arg;
 	struct tty *tp;
 
-	if (!device_is_active(sc->sc_dev))
+	if (!device_is_active(&sc->sc_dev))
 		return;
 
-	tp = sc->sc_tty;
+	{
+#else
+void
+#ifndef __NO_SOFT_SERIAL_INTERRUPT
+scifsoft()
+#else
+scifsoft(void *arg)
+#endif
+{
+	struct scif_softc	*sc;
+	struct tty	*tp;
+	int	unit;
+#ifdef __NO_SOFT_SERIAL_INTERRUPT
+	int s;
 
-	if (sc->sc_rx_ready) {
-		sc->sc_rx_ready = 0;
-		scif_rxsoft(sc, tp);
-	}
-
-#if 0
-	if (sc->sc_st_check) {
-		sc->sc_st_check = 0;
-		scif_stsoft(sc, tp);
-	}
+	s = splsoftserial();
+	scif_softintr_scheduled = 0;
 #endif
 
-	if (sc->sc_tx_done) {
-		sc->sc_tx_done = 0;
-		scif_txsoft(sc, tp);
+	for (unit = 0; unit < scif_cd.cd_ndevs; unit++) {
+		sc = scif_cd.cd_devs[unit];
+		if (sc == NULL || !ISSET(sc->sc_hwflags, SCIF_HW_DEV_OK))
+			continue;
+
+		if (!device_is_active(&sc->sc_dev))
+			continue;
+
+		tp = sc->sc_tty;
+		if (tp == NULL)
+			continue;
+		if (!ISSET(tp->t_state, TS_ISOPEN) && tp->t_wopen == 0)
+			continue;
+#endif
+		tp = sc->sc_tty;
+
+		if (sc->sc_rx_ready) {
+			sc->sc_rx_ready = 0;
+			scif_rxsoft(sc, tp);
+		}
+
+#if 0
+		if (sc->sc_st_check) {
+			sc->sc_st_check = 0;
+			scif_stsoft(sc, tp);
+		}
+#endif
+
+		if (sc->sc_tx_done) {
+			sc->sc_tx_done = 0;
+			scif_txsoft(sc, tp);
+		}
 	}
+
+#ifndef __HAVE_GENERIC_SOFT_INTERRUPTS
+#ifdef __NO_SOFT_SERIAL_INTERRUPT
+	splx(s);
+#endif
+#endif
 }
 
-static int
+int
 scifintr(void *arg)
 {
 	struct scif_softc *sc = arg;
@@ -1183,7 +1258,7 @@ scifintr(void *arg)
 	u_short ssr2;
 	int count;
 
-	if (!device_is_active(sc->sc_dev))
+	if (!device_is_active(&sc->sc_dev))
 		return (0);
 
 	end = sc->sc_ebuf;
@@ -1395,7 +1470,18 @@ scifintr(void *arg)
 	}
 
 	/* Wake up the poller. */
-	softint_schedule(sc->sc_si);
+#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
+	softintr_schedule(sc->sc_si);
+#else
+#ifndef __NO_SOFT_SERIAL_INTERRUPT
+	setsoftserial();
+#else
+	if (!scif_softintr_scheduled) {
+		scif_softintr_scheduled = 1;
+		callout_reset(&scif_soft_ch, 1, scifsoft, NULL);
+	}
+#endif
+#endif
 
 #if NRND > 0 && defined(RND_SCIF)
 	rnd_add_uint32(&sc->rnd_source, iir | lsr);

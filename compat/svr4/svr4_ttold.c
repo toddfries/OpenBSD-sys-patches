@@ -1,7 +1,7 @@
-/*	$NetBSD: svr4_ttold.c,v 1.33 2008/04/28 20:23:45 martin Exp $	 */
+/*	$NetBSD: svr4_ttold.c,v 1.26 2006/11/16 01:32:44 christos Exp $	 */
 
 /*-
- * Copyright (c) 1994, 2008 The NetBSD Foundation, Inc.
+ * Copyright (c) 1994 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: svr4_ttold.c,v 1.33 2008/04/28 20:23:45 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: svr4_ttold.c,v 1.26 2006/11/16 01:32:44 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/proc.h>
@@ -41,11 +48,13 @@ __KERNEL_RCSID(0, "$NetBSD: svr4_ttold.c,v 1.33 2008/04/28 20:23:45 martin Exp $
 #include <sys/termios.h>
 #include <sys/tty.h>
 #include <sys/socket.h>
+#include <sys/ioctl.h>
 #include <sys/mount.h>
 #include <net/if.h>
 #include <sys/malloc.h>
 #include <sys/ioctl_compat.h>
 
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 
 #include <compat/svr4/svr4_types.h>
@@ -59,26 +68,28 @@ __KERNEL_RCSID(0, "$NetBSD: svr4_ttold.c,v 1.33 2008/04/28 20:23:45 martin Exp $
 #include <compat/svr4/svr4_ioctl.h>
 
 
-static void svr4_tchars_to_bsd_tchars(const struct svr4_tchars *st,
-					   struct tchars *bt);
-static void bsd_tchars_to_svr4_tchars(const struct tchars *bt,
-					   struct svr4_tchars *st);
-static void svr4_sgttyb_to_bsd_sgttyb(const struct svr4_sgttyb *ss,
-					   struct sgttyb *bs);
-static void bsd_sgttyb_to_svr4_sgttyb(const struct sgttyb *bs,
-					   struct svr4_sgttyb *ss);
-static void svr4_ltchars_to_bsd_ltchars(const struct svr4_ltchars *sl,
-					     struct ltchars *bl);
-static void bsd_ltchars_to_svr4_ltchars(const struct ltchars *bl,
-					     struct svr4_ltchars *sl);
+static void svr4_tchars_to_bsd_tchars __P((const struct svr4_tchars *st,
+					   struct tchars *bt));
+static void bsd_tchars_to_svr4_tchars __P((const struct tchars *bt,
+					   struct svr4_tchars *st));
+static void svr4_sgttyb_to_bsd_sgttyb __P((const struct svr4_sgttyb *ss,
+					   struct sgttyb *bs));
+static void bsd_sgttyb_to_svr4_sgttyb __P((const struct sgttyb *bs,
+					   struct svr4_sgttyb *ss));
+static void svr4_ltchars_to_bsd_ltchars __P((const struct svr4_ltchars *sl,
+					     struct ltchars *bl));
+static void bsd_ltchars_to_svr4_ltchars __P((const struct ltchars *bl,
+					     struct svr4_ltchars *sl));
 
 #ifdef DEBUG_SVR4
-static void print_svr4_sgttyb(const char *, struct svr4_sgttyb *);
-static void print_svr4_tchars(const char *, struct svr4_tchars *);
-static void print_svr4_ltchars(const char *, struct svr4_ltchars *);
+static void print_svr4_sgttyb __P((const char *, struct svr4_sgttyb *));
+static void print_svr4_tchars __P((const char *, struct svr4_tchars *));
+static void print_svr4_ltchars __P((const char *, struct svr4_ltchars *));
 
 static void
-print_svr4_sgttyb(const char *str, struct svr4_sgttyb *ss)
+print_svr4_sgttyb(str, ss)
+	const char *str;
+	struct svr4_sgttyb *ss;
 {
 
 	uprintf("%s\nispeed=%o ospeed=%o ", str, ss->sg_ispeed, ss->sg_ospeed);
@@ -87,7 +98,9 @@ print_svr4_sgttyb(const char *str, struct svr4_sgttyb *ss)
 }
 
 static void
-print_svr4_tchars(const char *str, struct svr4_tchars *st)
+print_svr4_tchars(str, st)
+	const char *str;
+	struct svr4_tchars *st;
 {
 	uprintf("%s\nintrc=%o quitc=%o ", str, st->t_intrc, st->t_quitc);
 	uprintf("startc=%o stopc=%o eofc=%o brkc=%o\n", st->t_startc,
@@ -95,7 +108,9 @@ print_svr4_tchars(const char *str, struct svr4_tchars *st)
 }
 
 static void
-print_svr4_ltchars(const char *str, struct svr4_ltchars *sl)
+print_svr4_ltchars(str, sl)
+	const char *str;
+	struct svr4_ltchars *sl;
 {
 	uprintf("%s\nsuspc=%o dsuspc=%o ", str, sl->t_suspc, sl->t_dsuspc);
 	uprintf("rprntc=%o flushc=%o werasc=%o lnextc=%o\n", sl->t_rprntc,
@@ -104,7 +119,9 @@ print_svr4_ltchars(const char *str, struct svr4_ltchars *sl)
 #endif /* DEBUG_SVR4 */
 
 static void
-svr4_tchars_to_bsd_tchars(const struct svr4_tchars *st, struct tchars *bt)
+svr4_tchars_to_bsd_tchars(st, bt)
+	const struct svr4_tchars	*st;
+	struct tchars			*bt;
 {
 	bt->t_intrc  = st->t_intrc;
 	bt->t_quitc  = st->t_quitc;
@@ -116,7 +133,9 @@ svr4_tchars_to_bsd_tchars(const struct svr4_tchars *st, struct tchars *bt)
 
 
 static void
-bsd_tchars_to_svr4_tchars(const struct tchars *bt, struct svr4_tchars *st)
+bsd_tchars_to_svr4_tchars(bt, st)
+	const struct tchars	*bt;
+	struct svr4_tchars	*st;
 {
 	st->t_intrc  = bt->t_intrc;
 	st->t_quitc  = bt->t_quitc;
@@ -128,7 +147,9 @@ bsd_tchars_to_svr4_tchars(const struct tchars *bt, struct svr4_tchars *st)
 
 
 static void
-svr4_sgttyb_to_bsd_sgttyb(const struct svr4_sgttyb *ss, struct sgttyb *bs)
+svr4_sgttyb_to_bsd_sgttyb(ss, bs)
+	const struct svr4_sgttyb	*ss;
+	struct sgttyb			*bs;
 {
 	bs->sg_ispeed = ss->sg_ispeed;
 	bs->sg_ospeed = ss->sg_ospeed;
@@ -139,7 +160,9 @@ svr4_sgttyb_to_bsd_sgttyb(const struct svr4_sgttyb *ss, struct sgttyb *bs)
 
 
 static void
-bsd_sgttyb_to_svr4_sgttyb(const struct sgttyb *bs, struct svr4_sgttyb *ss)
+bsd_sgttyb_to_svr4_sgttyb(bs, ss)
+	const struct sgttyb	*bs;
+	struct svr4_sgttyb	*ss;
 {
 	ss->sg_ispeed = bs->sg_ispeed;
 	ss->sg_ospeed = bs->sg_ospeed;
@@ -150,7 +173,9 @@ bsd_sgttyb_to_svr4_sgttyb(const struct sgttyb *bs, struct svr4_sgttyb *ss)
 
 
 static void
-svr4_ltchars_to_bsd_ltchars(const struct svr4_ltchars *sl, struct ltchars *bl)
+svr4_ltchars_to_bsd_ltchars(sl, bl)
+	const struct svr4_ltchars	*sl;
+	struct ltchars			*bl;
 {
 	bl->t_suspc  = sl->t_suspc;
 	bl->t_dsuspc = sl->t_dsuspc;
@@ -162,7 +187,9 @@ svr4_ltchars_to_bsd_ltchars(const struct svr4_ltchars *sl, struct ltchars *bl)
 
 
 static void
-bsd_ltchars_to_svr4_ltchars(const struct ltchars *bl, struct svr4_ltchars *sl)
+bsd_ltchars_to_svr4_ltchars(bl, sl)
+	const struct ltchars	*bl;
+	struct svr4_ltchars	*sl;
 {
 	sl->t_suspc  = bl->t_suspc;
 	sl->t_dsuspc = bl->t_dsuspc;
@@ -174,11 +201,12 @@ bsd_ltchars_to_svr4_ltchars(const struct ltchars *bl, struct svr4_ltchars *sl)
 
 
 int
-svr4_ttold_ioctl(file_t *fp, struct lwp *l, register_t *retval,
-    int fd, u_long cmd, void *data)
+svr4_ttold_ioctl(struct file *fp, struct lwp *l, register_t *retval,
+    int fd, u_long cmd, caddr_t data)
 {
 	int			error;
-	int (*ctl)(file_t *, u_long,  void *) = fp->f_ops->fo_ioctl;
+	int (*ctl)(struct file *, u_long,  void *, struct lwp *) =
+			fp->f_ops->fo_ioctl;
 
 	*retval = 0;
 
@@ -187,7 +215,8 @@ svr4_ttold_ioctl(file_t *fp, struct lwp *l, register_t *retval,
 		{
 			pid_t pid;
 
-			if ((error = (*ctl)(fp, TIOCGPGRP, &pid)) != 0)
+			if ((error = (*ctl)(fp, TIOCGPGRP,
+					    (caddr_t) &pid, l)) != 0)
 			    return error;
 
 			DPRINTF(("TIOCGPGRP %d\n", pid));
@@ -206,14 +235,15 @@ svr4_ttold_ioctl(file_t *fp, struct lwp *l, register_t *retval,
 
 			DPRINTF(("TIOCSPGRP %d\n", pid));
 
-			return (*ctl)(fp, TIOCSPGRP, &pid);
+			return (*ctl)(fp, TIOCSPGRP, (caddr_t) &pid, l);
 		}
 
 	case SVR4_TIOCGSID:
 		{
 			pid_t pid;
 
-			if ((error = (*ctl)(fp, TIOCGSID, &pid)) != 0)
+			if ((error = (*ctl)(fp, TIOCGSID,
+					    (caddr_t) &pid, l)) != 0)
 				return error;
 
 			DPRINTF(("TIOCGSID %d\n", pid));
@@ -226,7 +256,7 @@ svr4_ttold_ioctl(file_t *fp, struct lwp *l, register_t *retval,
 			struct sgttyb bs;
 			struct svr4_sgttyb ss;
 
-			error = (*ctl)(fp, TIOCGETP, &bs);
+			error = (*ctl)(fp, TIOCGETP, (caddr_t) &bs, l);
 			if (error)
 				return error;
 
@@ -251,7 +281,7 @@ svr4_ttold_ioctl(file_t *fp, struct lwp *l, register_t *retval,
 			print_svr4_sgttyb("SVR4_TIOCSET{P,N}", &ss);
 #endif /* DEBUG_SVR4 */
 			cmd = (cmd == SVR4_TIOCSETP) ? TIOCSETP : TIOCSETN;
-			return (*ctl)(fp, cmd, &bs);
+			return (*ctl)(fp, cmd, (caddr_t) &bs, l);
 		}
 
 	case SVR4_TIOCGETC:
@@ -259,7 +289,7 @@ svr4_ttold_ioctl(file_t *fp, struct lwp *l, register_t *retval,
 			struct tchars bt;
 			struct svr4_tchars st;
 
-			error = (*ctl)(fp, TIOCGETC, &bt);
+			error = (*ctl)(fp, TIOCGETC, (caddr_t) &bt, l);
 			if (error)
 				return error;
 
@@ -282,7 +312,7 @@ svr4_ttold_ioctl(file_t *fp, struct lwp *l, register_t *retval,
 #ifdef DEBUG_SVR4
 			print_svr4_tchars("SVR4_TIOCSETC", &st);
 #endif /* DEBUG_SVR4 */
-			return (*ctl)(fp, TIOCSETC, &bt);
+			return (*ctl)(fp, TIOCSETC, (caddr_t) &bt, l);
 		}
 
 	case SVR4_TIOCGLTC:
@@ -290,7 +320,7 @@ svr4_ttold_ioctl(file_t *fp, struct lwp *l, register_t *retval,
 			struct ltchars bl;
 			struct svr4_ltchars sl;
 
-			error = (*ctl)(fp, TIOCGLTC, &bl);
+			error = (*ctl)(fp, TIOCGLTC, (caddr_t) &bl, l);
 			if (error)
 				return error;
 
@@ -313,13 +343,14 @@ svr4_ttold_ioctl(file_t *fp, struct lwp *l, register_t *retval,
 #ifdef DEBUG_SVR4
 			print_svr4_ltchars("SVR4_TIOCSLTC", &sl);
 #endif /* DEBUG_SVR4 */
-			return (*ctl)(fp, TIOCSLTC, &bl);
+			return (*ctl)(fp, TIOCSLTC, (caddr_t) &bl, l);
 		}
 
 	case SVR4_TIOCLGET:
 		{
 			int flags;
-			if ((error = (*ctl)(fp, TIOCLGET, &flags)) != 0)
+			if ((error = (*ctl)(fp, TIOCLGET,
+			    (caddr_t) &flags, l)) != 0)
 				return error;
 			DPRINTF(("SVR4_TIOCLGET %o\n", flags));
 			return copyout(&flags, data, sizeof(flags));
@@ -347,7 +378,7 @@ svr4_ttold_ioctl(file_t *fp, struct lwp *l, register_t *retval,
 			}
 
 			DPRINTF(("SVR4_TIOCL{SET,BIS,BIC} %o\n", flags));
-			return (*ctl)(fp, cmd, &flags);
+			return (*ctl)(fp, cmd, (caddr_t) &flags, l);
 		}
 
 	default:

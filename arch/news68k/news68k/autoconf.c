@@ -1,4 +1,4 @@
-/*	$NetBSD: autoconf.c,v 1.18 2008/02/12 17:30:58 joerg Exp $	*/
+/*	$NetBSD: autoconf.c,v 1.14 2005/12/11 12:18:23 christos Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -89,7 +89,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.18 2008/02/12 17:30:58 joerg Exp $");
+__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.14 2005/12/11 12:18:23 christos Exp $");
 
 #include "scsibus.h"
 
@@ -129,6 +129,8 @@ cpu_configure(void)
 	 */
 	(void) splhigh();
 
+	init_sir();
+
 	if (config_rootfound("mainbus", NULL) == NULL)
 		panic("autoconfig failed, no root");
 
@@ -158,7 +160,7 @@ findroot(void)
 {
 #if NSCSIBUS > 0
 	int ctlr, unit, part, type;
-	device_t dv;
+	struct device *dv;
 
 	if (BOOTDEV_MAG(bootdev) != 5)	/* NEWS-OS's B_DEVMAGIC */
 		return;
@@ -174,14 +176,19 @@ findroot(void)
 	/*
 	 * XXX assumes only one controller exists.
 	 */
-	if ((dv = device_find_by_xname("scsibus0")) != NULL) {
-		struct scsibus_softc *sdv = device_private(dv);
-		struct scsipi_periph *periph;
+	for (dv = alldevs.tqh_first; dv; dv=dv->dv_list.tqe_next) {
+		if (strcmp(dv->dv_xname, "scsibus0") == 0) {
+			struct scsibus_softc *sdv = (void *)dv;
+			struct scsipi_periph *periph;
 
-		periph = scsipi_lookup_periph(sdv->sc_channel, ctlr, 0);
-		if (periph != NULL) {
+			periph = scsipi_lookup_periph(sdv->sc_channel,
+			    ctlr, 0);
+			if (periph == NULL)
+				continue;
+
 			booted_device = periph->periph_dev;
 			booted_partition = part;
+			return;
 		}
 	}
 #endif

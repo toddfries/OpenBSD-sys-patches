@@ -1,4 +1,4 @@
-/* $NetBSD: psm.c,v 1.7 2008/04/05 13:40:05 cegger Exp $ */
+/* $NetBSD: psm.c,v 1.3 2006/08/23 03:53:32 jnemeth Exp $ */
 /*
  * Copyright (c) 2006 Itronix Inc.
  * All rights reserved.
@@ -36,7 +36,7 @@
  * time with APM at this point, and some of sysmon seems "lacking".
  */
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: psm.c,v 1.7 2008/04/05 13:40:05 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: psm.c,v 1.3 2006/08/23 03:53:32 jnemeth Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -70,7 +70,7 @@ struct psm_softc {
 	struct sysmon_pswitch	sc_sm_lid;
 	struct sysmon_pswitch	sc_sm_ac;
 	struct evcnt		sc_intrcnt;
-	lwp_t			*sc_thread;
+	struct proc		*sc_thread;
 };
 
 #define	PUT8(sc, r, v)		\
@@ -104,6 +104,7 @@ struct psm_softc {
 #define	PSM_EV_TEMP		0x10
 
 STATIC void psm_sysmon_setup(struct psm_softc *);
+STATIC void psm_create_event_thread(void *);
 STATIC void psm_event_thread(void *);
 STATIC int psm_init(struct psm_softc *);
 STATIC void psm_reset(struct psm_softc *);
@@ -143,9 +144,9 @@ psm_attach(struct device *parent, struct device *self, void *aux)
 	struct psm_softc	*sc = (struct psm_softc *)self;
 	struct ebus_attach_args	*ea = aux;
 	bus_addr_t		devaddr;
-	const char		*xname;
+	char			*xname;
 
-	xname = device_xname(&sc->sc_dev);
+	xname = sc->sc_dev.dv_xname;
 
 	sc->sc_memt = ea->ea_bustag;
 	devaddr = EBUS_ADDR_FROM_REG(&ea->ea_reg[0]);
@@ -164,10 +165,8 @@ psm_attach(struct device *parent, struct device *self, void *aux)
 
 	psm_sysmon_setup(sc);
 
-	if (kthread_create(PRI_NONE, 0, NULL, psm_event_thread, sc,
-	    &sc->sc_thread, "%s", device_xname(&sc->sc_dev)) != 0) {
-		aprint_error_dev(&sc->sc_dev, "unable to create event kthread\n");
-	}
+	/* create the event thread */
+	kthread_create(psm_create_event_thread, sc);
 
 	/*
 	 * Establish device interrupts
@@ -175,7 +174,7 @@ psm_attach(struct device *parent, struct device *self, void *aux)
 	(void) bus_intr_establish(sc->sc_memt, ea->ea_intr[0], IPL_HIGH,
 	    psm_intr, sc);
 	evcnt_attach_dynamic(&sc->sc_intrcnt, EVCNT_TYPE_INTR, NULL,
-	    device_xname(&sc->sc_dev), "intr");
+	    sc->sc_dev.dv_xname, "intr");
 }
 
 /*
@@ -184,7 +183,7 @@ psm_attach(struct device *parent, struct device *self, void *aux)
 void
 psm_sysmon_setup(struct psm_softc *sc)
 {
-	const char	*xname	= device_xname(&sc->sc_dev);
+	const char	*xname	= sc->sc_dev.dv_xname;
 
 
 	/*
@@ -208,6 +207,18 @@ psm_sysmon_setup(struct psm_softc *sc)
 	sc->sc_sm_ac.smpsw_type = PSWITCH_TYPE_ACADAPTER;
 	if (sysmon_pswitch_register(&sc->sc_sm_ac) != 0)
 		printf("%s: unable to register AC adapter\n", xname);
+}
+
+void
+psm_create_event_thread(void *arg)
+{
+	struct psm_softc *sc = arg;
+
+	if (kthread_create1(psm_event_thread, sc, &sc->sc_thread, "%s",
+		sc->sc_dev.dv_xname) != 0) {
+		printf("%s: unable to create event kthread\n",
+		    sc->sc_dev.dv_xname);
+	}
 }
 
 void
@@ -237,13 +248,13 @@ psm_event_thread(void *arg)
 		if (event & PSM_EV_LID) {
 			sysmon_pswitch_event(&sc->sc_sm_lid,
 			    flags & PSM_FLAG_LIDCLOSED ?
-			    PSWITCH_EVENT_PRESSED : PSWITCH_EVENT_RELEASED);
+			    PSWITCH_STATE_PRESSED : PSWITCH_STATE_RELEASED);
 		}
 
 		if (event & PSM_EV_ACPWR) {
 			sysmon_pswitch_event(&sc->sc_sm_ac,
 			    flags & PSM_FLAG_ACPWR ?
-			    PSWITCH_EVENT_PRESSED : PSWITCH_EVENT_RELEASED);
+			    PSWITCH_STATE_PRESSED : PSWITCH_STATE_RELEASED);
 		}
 
 		/* XXX: handle PSM_EV_TEMP */
@@ -271,7 +282,8 @@ psm_init(struct psm_softc *sc)
 	/* make sure that UPS battery is reasonable */
 	if (psm_misc_rd(sc, PSM_MISC_UPS, &batt) || (batt > PSM_MAX_BATTERIES))
 		if (psm_misc_wr(sc, PSM_MISC_UPS, batt))
-			aprint_error_dev(&sc->sc_dev, "cannot set UPS battery");
+			printf("%s: cannot set UPS battery",
+			    sc->sc_dev.dv_xname);
 
 	return (0);
 }

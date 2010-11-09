@@ -1,4 +1,4 @@
-/*	$NetBSD: bwtwovar.h,v 1.8 2009/02/23 22:44:27 jdc Exp $ */
+/*	$NetBSD: bwtwovar.h,v 1.5 2005/12/11 12:23:56 christos Exp $ */
 
 /*-
  * Copyright (c) 1996, 1997 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -69,9 +76,6 @@
  *	@(#)bwtwo.c	8.1 (Berkeley) 6/11/93
  */
 
-#include "wsdisplay.h"
-#include <dev/wscons/wsdisplay_vconsvar.h>
-
 /* per-display variables */
 struct bwtwo_softc {
 	struct device	sc_dev;		/* base device */
@@ -92,13 +96,6 @@ struct bwtwo_softc {
 	/* Video status */
 	int	(*sc_get_video)(struct bwtwo_softc *);
 	void	(*sc_set_video)(struct bwtwo_softc *, int);
-#if NWSDISPLAY > 0	
-	uint32_t sc_width;
-	uint32_t sc_height;	/* display width / height */
-	uint32_t sc_stride;
-	int sc_mode;
-	struct vcons_data vd;
-#endif
 };
 
 void	bwtwoattach(struct bwtwo_softc *, const char *, int);

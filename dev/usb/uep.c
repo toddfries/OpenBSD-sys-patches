@@ -1,4 +1,4 @@
-/*	$NetBSD: uep.c,v 1.12 2008/05/24 16:40:58 cube Exp $	*/
+/*	$NetBSD: uep.c,v 1.11 2008/04/28 20:23:59 martin Exp $	*/
 
 /*
  * Copyright (c) 2004 The NetBSD Foundation, Inc.
@@ -38,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: uep.c,v 1.12 2008/05/24 16:40:58 cube Exp $");
+__KERNEL_RCSID(0, "$NetBSD: uep.c,v 1.11 2008/04/28 20:23:59 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -98,13 +98,13 @@ const struct wsmouse_accessops uep_accessops = {
 	uep_disable,
 };
 
-int uep_match(device_t, cfdata_t, void *);
+int uep_match(device_t, struct cfdata *, void *);
 void uep_attach(device_t, device_t, void *);
 void uep_childdet(device_t, device_t);
 int uep_detach(device_t, int);
 int uep_activate(device_t, enum devact);
 extern struct cfdriver uep_cd;
-CFATTACH_DECL2_NEW(uep, sizeof(struct uep_softc), uep_match, uep_attach,
+CFATTACH_DECL2(uep, sizeof(struct uep_softc), uep_match, uep_attach,
     uep_detach, uep_activate, NULL, uep_childdet);
 
 USB_MATCH(uep)
@@ -137,10 +137,9 @@ USB_ATTACH(uep)
 	usbd_status err;
 	int i, found;
 
-	sc->sc_dev = self;
 	devinfop = usbd_devinfo_alloc(dev, 0);
 	USB_ATTACH_SETUP;
-	aprint_normal_dev(self, "%s\n", devinfop);
+	printf("%s: %s\n", USBDEVNAME(sc->sc_dev), devinfop);
 	usbd_devinfo_free(devinfop);
 
 	sc->sc_udev = dev;
@@ -151,7 +150,7 @@ USB_ATTACH(uep)
 	/* Move the device into the configured state. */
 	err = usbd_set_config_index(dev, 0, 1);
 	if (err) {
-		aprint_error("\n%s: failed to set configuration, err=%s\n",
+		printf("\n%s: failed to set configuration, err=%s\n",
 			USBDEVNAME(sc->sc_dev),  usbd_errstr(err));
 		sc->sc_dying = 1;
 		USB_ATTACH_ERROR_RETURN;
@@ -160,8 +159,8 @@ USB_ATTACH(uep)
 	/* get the config descriptor */
 	cdesc = usbd_get_config_descriptor(sc->sc_udev);
 	if (cdesc == NULL) {
-		aprint_error_dev(self,
-		    "failed to get configuration descriptor\n");
+		printf("%s: failed to get configuration descriptor\n",
+			USBDEVNAME(sc->sc_dev));
 		sc->sc_dying = 1;
 		USB_ATTACH_ERROR_RETURN;
 	}
@@ -169,7 +168,7 @@ USB_ATTACH(uep)
 	/* get the interface */
 	err = usbd_device2interface_handle(dev, 0, &sc->sc_iface);
 	if (err) {
-		aprint_error("\n%s: failed to get interface, err=%s\n",
+		printf("\n%s: failed to get interface, err=%s\n",
 			USBDEVNAME(sc->sc_dev), usbd_errstr(err));
 		sc->sc_dying = 1;
 		USB_ATTACH_ERROR_RETURN;
@@ -183,8 +182,8 @@ USB_ATTACH(uep)
 	for (i = 0; i < id->bNumEndpoints; i++) {
 		ed = usbd_interface2endpoint_descriptor(sc->sc_iface, i);
 		if (ed == NULL) {
-			aprint_error_dev(self,
-			    "no endpoint descriptor for %d\n", i);
+			printf("%s: no endpoint descriptor for %d\n",
+				USBDEVNAME(sc->sc_dev), i);
 			sc->sc_dying = 1;
 			USB_ATTACH_ERROR_RETURN;
 		}
@@ -197,7 +196,8 @@ USB_ATTACH(uep)
 	}
 
 	if (sc->sc_intr_number== -1) {
-		aprint_error_dev(self, "Could not find interrupt in\n");
+		printf("%s: Could not find interrupt in\n",
+			USBDEVNAME(sc->sc_dev));
 		sc->sc_dying = 1;
 		USB_ATTACH_ERROR_RETURN;
 	}
@@ -372,7 +372,7 @@ uep_intr(usbd_xfer_handle xfer, usbd_private_handle addr, usbd_status status)
 		return;
 
 	if (status != USBD_NORMAL_COMPLETION) {
-		aprint_error_dev(sc->sc_dev, "status %d\n", status);
+		printf("%s: status %d\n", USBDEVNAME(sc->sc_dev), status);
 		usbd_clear_endpoint_stall_async(sc->sc_intr_pipe);
 		return;
 	}
@@ -386,8 +386,7 @@ uep_intr(usbd_xfer_handle xfer, usbd_private_handle addr, usbd_status status)
 	}
 
 	if ((p[0] & 0xFE) != 0x80) {
-		aprint_error_dev(sc->sc_dev,
-		    "bad input packet format\n");
+		printf("%s: bad input packet format\n", USBDEVNAME(sc->sc_dev));
 		return;
 	}
 

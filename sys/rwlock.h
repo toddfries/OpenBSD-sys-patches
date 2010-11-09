@@ -1,7 +1,7 @@
-/*	$NetBSD: rwlock.h,v 1.6 2008/04/28 20:24:11 martin Exp $	*/
+/*	$NetBSD: rwlock.h,v 1.2 2007/02/09 21:55:37 ad Exp $	*/
 
 /*-
- * Copyright (c) 2002, 2006, 2007, 2008 The NetBSD Foundation, Inc.
+ * Copyright (c) 2002, 2006, 2007 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -36,13 +43,76 @@
  * The rwlock provides exclusive access when held as a "writer",
  * and shared access when held as a "reader".
  *
+ * Machine dependent code must provide the following:
+ *
+ *	struct krwlock
+ *		The actual rwlock structure.  This structure is mostly
+ *		opaque to machine-independent code; most access are done
+ *		through macros.  However, machine-independent code must
+ *		be able to access the following member:
+ *
+ *			volatile uintptr_t	rw_owner
+ *
+ *		The rw_owner field is laid out like so:
+ *
+ *		 N                    4       3        2        1      0
+ *		+-------------------------------------------------------+
+ *		| owner or read count | unused | wrlock | wrwant | wait |
+ *		+-------------------------------------------------------+
+ *
+ *	RW_RECEIVE(rw)
+ *		Receive the lock from the giver (direct-handoff).  This
+ *		is the place to do a load fence.
+ *
+ *	RW_GIVE(rw)
+ *		This is the place to do a load/store fence before the
+ *		lock is released.
+ *
+ *
+ * If an architecture can be considered 'simple' (no interlock required in
+ * the MP case, or no MP) it need only define __HAVE_SIMPLE_RW_LOCKS and
+ * provide the following:
+ *
+ * 	RW_CAS(ptr, old, new)
+ *		Perform an atomic "compare and swap" operation and
+ *		evaluate to true or false according to the success
+ *
+ * Otherwise, the following must be defined:
+ *
+ *	RW_ACQUIRE(rw, old, new)
+ *		Perform an atomic "compare and swap" operation and
+ *		evaluate to true or false according to the success
+ *		of the operation, such that:
+ *			if (rw->rw_owner == old) {
+ *				rw->rw_owner = new;
+ *				return 1;
+ *			} else
+ *				return 0;
+ *		Must be MP/interrupt atomic.
+ *
+ *	RW_RELEASE(rw, old, new)
+ *		As above, but for releasing the lock.  Must be
+ *		MP/interrupt atomic.
+ *
+ *	RW_SET_WAITERS(rw, need_wait, set_wait)
+ *		Set the has-waiters indication.  If the needs-waiting
+ *		condition becomes false, abort the operation.  Must
+ *		be MP/interrupt atomic.
+ *
+ *	RW_SETID(rw, id)
+ *		Set the debugging ID for the lock, an integer.  Only
+ *		used in the LOCKDEBUG case.
+ *
+ *	RW_GETID(rw)
+ *		Get the debugging ID for the lock, an integer.  Only
+ *		used in the LOCKDEBUG case.
+ *
  * Architectures may optionally provide stubs for the following functions to
  * implement the easy (unlocked, no waiters) cases.  If these stubs are
  * provided, __HAVE_RW_STUBS should be defined.
  *
  *	rw_enter()
  *	rw_exit()
- *	rw_tryenter()
  */
 
 #if defined(_KERNEL_OPT)
@@ -65,17 +135,12 @@ typedef struct krwlock krwlock_t;
 /*
  * Bits in the owner field of the lock that indicate lock state.  If the
  * WRITE_LOCKED bit is clear, then the owner field is actually a count of
- * the number of readers.  The rw_owner field is laid out like so:
- *
- *	 N                    4       3        2        1      0
- *	+------------------------------------------------------+
- *	| owner or read count | debug | wrlock | wrwant | wait |
- *	+------------------------------------------------------+
+ * the number of readers.
  */
 #define	RW_HAS_WAITERS		0x01UL	/* lock has waiters */
 #define	RW_WRITE_WANTED		0x02UL	/* >= 1 waiter is a writer */
 #define	RW_WRITE_LOCKED		0x04UL	/* lock is currently write locked */
-#define	RW_DEBUG		0x08UL	/* LOCKDEBUG enabled */
+#define	RW_UNUSED		0x08UL	/* currently unused */
 
 #define	RW_READ_COUNT_SHIFT	4
 #define	RW_READ_INCR		(1UL << RW_READ_COUNT_SHIFT)
@@ -86,7 +151,6 @@ typedef struct krwlock krwlock_t;
 
 void	rw_vector_enter(krwlock_t *, const krw_t);
 void	rw_vector_exit(krwlock_t *);
-int	rw_vector_tryenter(krwlock_t *, const krw_t);
 #endif	/* __RWLOCK_PRIVATE */
 
 #include <machine/rwlock.h>
@@ -110,3 +174,4 @@ void	rw_exit(krwlock_t *);
 #endif	/* _KERNEL */
 
 #endif /* _SYS_RWLOCK_H_ */
+

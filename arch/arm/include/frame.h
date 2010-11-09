@@ -1,4 +1,4 @@
-/*	$NetBSD: frame.h,v 1.11 2008/10/15 06:51:17 wrstuden Exp $	*/
+/*	$NetBSD: frame.h,v 1.8 2005/12/11 12:16:47 christos Exp $	*/
 
 /*
  * Copyright (c) 1994-1997 Mark Brinicombe.
@@ -74,7 +74,6 @@ typedef struct trapframe {
 } trapframe_t;
 
 /* Register numbers */
-#define tf_ip tf_r12
 #define tf_r13 tf_usr_sp
 #define tf_r14 tf_usr_lr
 #define tf_r15 tf_pc

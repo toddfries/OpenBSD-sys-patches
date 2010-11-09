@@ -1,4 +1,4 @@
-#	$NetBSD: files.hpcsh,v 1.51 2008/02/20 21:43:34 drochner Exp $
+#	$NetBSD: files.hpcsh,v 1.46 2006/02/24 13:06:12 cube Exp $
 #
 maxpartitions 8
 
@@ -16,11 +16,10 @@ file	arch/hpcsh/hpcsh/bus_space.c
 #file	arch/hpcsh/hpcsh/bus_dma.c
 file	arch/hpcsh/hpcsh/clock_machdep.c
 
-defflag opt_kloader.h				KLOADER
-defparam opt_kloader.h				KLOADER_KERNEL_PATH
-defflag debug_kloader.h				KLOADER_DEBUG
-file	dev/kloader.c				kloader
-file	arch/hpcsh/hpcsh/kloader_machdep.c	kloader
+file	dev/kloader.c
+file	arch/hpcsh/hpcsh/kloader_machdep.c
+defflag debug_kloader.h			KLOADER_DEBUG
+defparam opt_kloader_kernel_path.h	KLOADER_KERNEL_PATH
 
 # power management
 include "dev/hpc/files.hpcapm"
@@ -72,6 +71,7 @@ device	j6x0pwr
 attach	j6x0pwr at adc
 file	arch/hpcsh/dev/j6x0pwr.c		j6x0pwr
 
+include	"dev/wscons/files.wscons"
 include "dev/hpc/files.hpctp"
 
 device	j6x0tp: hpctpanel, wsmousedev, wskbddev
@@ -87,10 +87,6 @@ defparam opt_j6x0tp.h		J6X0TP_SETTINGS_ICON_KEYSYM
 device	psh3lcd
 attach	psh3lcd at shb
 file	arch/hpcsh/dev/psh3lcd.c		psh3lcd
-
-device	psh3pwr
-attach	psh3pwr at adc
-file	arch/hpcsh/dev/psh3pwr.c		psh3pwr
 
 device	psh3tp: hpctpanel, wsmousedev
 attach	psh3tp at adc
@@ -155,7 +151,5 @@ file	arch/hpcsh/dev/hd6446x/hd6446xintc.c	hd64461if | hd64465if
 #
 device	fdc {drive = -1}	# XXX: required by files.pcmcia
 include "dev/pcmcia/files.pcmcia"
-
-include "dev/bluetooth/files.bluetooth"
 
 include "arch/hpcsh/conf/majors.hpcsh"

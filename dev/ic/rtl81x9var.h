@@ -1,4 +1,4 @@
-/*	$NetBSD: rtl81x9var.h,v 1.41 2008/04/25 11:27:19 tsutsui Exp $	*/
+/*	$NetBSD: rtl81x9var.h,v 1.39 2007/03/21 12:17:31 tsutsui Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -177,7 +177,7 @@ struct rtk_tx_desc {
 };
 
 struct rtk_softc {
-	device_t sc_dev;		/* generic device structures */
+	struct device sc_dev;		/* generic device structures */
 	struct ethercom		ethercom;	/* interface info */
 	struct mii_data		mii;
 	struct callout		rtk_tick_ch;	/* tick callout */
@@ -215,9 +215,13 @@ struct rtk_softc {
 	int			sc_txthresh;	/* Early tx threshold */
 	int			sc_rev;		/* MII revision */
 
+	void	*sc_sdhook;			/* shutdown hook */
+	void	*sc_powerhook;			/* power management hook */
+
 	/* Power management hooks. */
 	int	(*sc_enable)	(struct rtk_softc *);
 	void	(*sc_disable)	(struct rtk_softc *);
+	void	(*sc_power)	(struct rtk_softc *, int);
 #if NRND > 0
 	rndsource_element_t     rnd_source;
 #endif

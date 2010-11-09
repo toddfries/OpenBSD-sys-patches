@@ -1,4 +1,4 @@
-/* $NetBSD: if_lmc.c,v 1.46 2009/02/02 15:57:51 tsutsui Exp $ */
+/* $NetBSD: if_lmc.c,v 1.41 2008/04/10 19:13:37 cegger Exp $ */
 
 /*-
  * Copyright (c) 2002-2006 David Boggs. <boggs@boggs.palo-alto.ca.us>
@@ -142,8 +142,9 @@
 
 #if defined(__NetBSD__)
 # include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_lmc.c,v 1.46 2009/02/02 15:57:51 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_lmc.c,v 1.41 2008/04/10 19:13:37 cegger Exp $");
 # include <sys/param.h>	/* OS version */
+/* -DLKM is passed on the compiler command line */
 # include "opt_inet.h"	/* INET6, INET */
 # include "opt_altq_enabled.h" /* ALTQ */
 # include "bpfilter.h"	/* NBPFILTER */
@@ -160,7 +161,7 @@ __KERNEL_RCSID(0, "$NetBSD: if_lmc.c,v 1.46 2009/02/02 15:57:51 tsutsui Exp $");
 #
 # include <sys/systm.h>
 # include <sys/kernel.h>
-# include <sys/module.h>
+# include <sys/lkm.h>
 # include <sys/mbuf.h>
 # include <sys/socket.h>
 # include <sys/sockio.h>
@@ -215,7 +216,7 @@ __KERNEL_RCSID(0, "$NetBSD: if_lmc.c,v 1.46 2009/02/02 15:57:51 tsutsui Exp $");
 # include <sys/kernel.h>
 # include <sys/conf.h>
 # include <sys/exec.h>
-# include <sys/module.h>
+# include <sys/lkm.h>
 # include <sys/mbuf.h>
 # include <sys/socket.h>
 # include <sys/sockio.h>
@@ -3548,13 +3549,11 @@ rawip_ioctl(softc_t *sc, u_long cmd, void *data)
     case SIOCDELMULTI:
       if (sc->config.debug)
         printf("%s: rawip_ioctl: SIOCADD/DELMULTI\n", NAME_UNIT);
-    case SIOCSIFFLAGS:
-      error = ifioctl_common(sc->ifp, cmd, data);
-      break;
     case SIOCAIFADDR:
+    case SIOCSIFFLAGS:
     case SIOCSIFDSTADDR:
       break;
-    case SIOCINITIFADDR:
+    case SIOCSIFADDR:
       sc->ifp->if_flags |= IFF_UP; /* a Unix tradition */
       break;
     case SIOCSIFMTU:
@@ -7168,7 +7167,7 @@ nbsd_attach(struct device *parent, struct device *self, void *aux)
     }
 
   /* Initialize the top-half and bottom-half locks. */
-  mutex_init(&sc->top_lock, MUTEX_DEFAULT, IPL_VM);
+  __cpu_simple_lock_init(&sc->top_lock);
   __cpu_simple_lock_init(&sc->bottom_lock);
 
   /* Initialize the driver. */
@@ -7192,14 +7191,34 @@ nbsd_detach(struct device *self, int flags)
   if (sc->csr_handle)
     bus_space_unmap(sc->csr_tag, sc->csr_handle, TLP_CSR_SIZE);
 
-  /* Destroy locks. */
-  mutex_destroy(&sc->top_lock);
-
   return 0;
   }
 
 CFATTACH_DECL(lmc, sizeof(softc_t),		/* lmc_ca */
  nbsd_match, nbsd_attach, nbsd_detach, NULL);
+
+# if defined(LKM)
+
+static struct cfattach *cfattach[] = { &lmc_ca, NULL };
+static const struct cfattachlkminit cfattachs[] =
+  { { DEVICE_NAME, cfattach }, { NULL, NULL } };
+
+static CFDRIVER_DECL(lmc, DV_IFNET, NULL);	/* lmc_cd */
+static struct cfdriver *cfdrivers[] = { &lmc_cd, NULL };
+
+static int pci_locators[] = { -1, 0 }; /* device, function */
+static const struct cfparent pci_parent = { "pci", "pci", DVUNIT_ANY };
+static struct cfdata cfdatas[] =
+  { { DEVICE_NAME, DEVICE_NAME, 0, FSTATE_STAR,
+      pci_locators, 0, &pci_parent },
+    { NULL, NULL, 0, 0, NULL, 0, NULL } };
+
+MOD_DRV("if_"DEVICE_NAME, cfdrivers, cfattachs, cfdatas);
+
+int if_lmc_lkmentry(struct lkm_table *lkmtp, int cmd, int ver)
+  { LKM_DISPATCH(lkmtp, cmd, ver, lkm_nofunc, lkm_nofunc, lkm_nofunc); }
+
+# endif /* LKM */
 
 #endif  /* __NetBSD__ */
 
@@ -7348,7 +7367,7 @@ struct cfattach lmc_ca =
   .ca_activate	= NULL,
   };
 
-# if defined(_MODULE)
+# if defined(LKM)
 
 struct cfdriver lmc_cd =
   {
@@ -7401,10 +7420,10 @@ int if_lmc_lkmentry(struct lkm_table *lkmtp, int cmd, int ver)
         {  /* for each pci bus... */
         int devnum, maxdevs;
         struct pci_attach_args pa;
-        device_t parent = device_lookup(&pci_cd, i);
+        struct device *parent = pci_cd.cd_devs[i];
         /* This is ugly: only way to get pci_chipset_tag. */
         struct pci_sc { struct device dev; pci_chipset_tag_t pc; };
-        struct pci_sc *pci_sc = device_lookup_private(&pci_cd, i);
+        struct pci_sc *pci_sc = pci_cd.cd_devs[i];
 
         if (parent == NULL) continue; /* no pci bus */
         pa.pa_pc   = pci_sc->pc;
@@ -7440,7 +7459,7 @@ int if_lmc_lkmentry(struct lkm_table *lkmtp, int cmd, int ver)
       {
       for (i=lmc_cd.cd_ndevs-1; i>=0; i--)
         {
-        device_t dev = device_lookup(&lmc_cd, i);
+        struct device *dev = lmc_cd.cd_devs[i];
         if (dev == NULL) continue;
         if ((error = config_detach(dev, 0)))
           printf("%s: config_detach(): error %d\n",
@@ -7455,7 +7474,7 @@ int if_lmc_lkmentry(struct lkm_table *lkmtp, int cmd, int ver)
   return error;
   }
 
-# endif /* _MODULE */
+# endif /* LKM */
 
 #endif  /* __OpenBSD__ */
 

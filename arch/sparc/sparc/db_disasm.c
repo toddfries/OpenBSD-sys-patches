@@ -1,4 +1,4 @@
-/*	$NetBSD: db_disasm.c,v 1.19 2007/02/21 22:59:52 thorpej Exp $ */
+/*	$NetBSD: db_disasm.c,v 1.18 2006/02/25 02:28:57 wiz Exp $ */
 
 /*
  * Copyright (c) 1994 David S. Miller, davem@nadzieja.rutgers.edu
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: db_disasm.c,v 1.19 2007/02/21 22:59:52 thorpej Exp $");
+__KERNEL_RCSID(0, "$NetBSD: db_disasm.c,v 1.18 2006/02/25 02:28:57 wiz Exp $");
 
 #include <sys/param.h>
 #include <machine/db_machdep.h>
@@ -871,7 +871,7 @@ struct sparc_insn sparc_i[] = {
 };
 
 db_addr_t
-db_disasm(vaddr_t loc, bool altfmt)
+db_disasm(vaddr_t loc, boolean_t altfmt)
 {
 	struct sparc_insn*	i_ptr = (struct sparc_insn *)&sparc_i;
 

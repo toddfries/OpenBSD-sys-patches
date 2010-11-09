@@ -1,4 +1,4 @@
-/*	$NetBSD: pceb.c,v 1.22 2008/05/05 11:49:40 xtraeme Exp $	*/
+/*	$NetBSD: pceb.c,v 1.19 2006/11/16 01:32:39 christos Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: pceb.c,v 1.22 2008/05/05 11:49:40 xtraeme Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pceb.c,v 1.19 2006/11/16 01:32:39 christos Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -50,12 +57,13 @@ __KERNEL_RCSID(0, "$NetBSD: pceb.c,v 1.22 2008/05/05 11:49:40 xtraeme Exp $");
 #include "eisa.h"
 #include "isa.h"
 
-int	pcebmatch(device_t , cfdata_t, void *);
-void	pcebattach(device_t, device_t, void *);
+int	pcebmatch(struct device *, struct cfdata *, void *);
+void	pcebattach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(pceb, 0, pcebmatch, pcebattach, NULL, NULL);
+CFATTACH_DECL(pceb, sizeof(struct device),
+    pcebmatch, pcebattach, NULL, NULL);
 
-void	pceb_callback(device_t);
+void	pceb_callback(struct device *);
 
 union pceb_attach_args {
 	const char *ea_name;			/* XXX should be common */
@@ -64,7 +72,8 @@ union pceb_attach_args {
 };
 
 int
-pcebmatch(device_t parent, cfdata_t match, void *aux)
+pcebmatch(struct device *parent, struct cfdata *match,
+    void *aux)
 {
 	struct pci_attach_args *pa = aux;
 
@@ -93,7 +102,7 @@ pcebmatch(device_t parent, cfdata_t match, void *aux)
 }
 
 void
-pcebattach(device_t parent, device_t self, void *aux)
+pcebattach(struct device *parent, struct device *self, void *aux)
 {
 	struct pci_attach_args *pa = aux;
 	char devinfo[256];
@@ -106,14 +115,14 @@ pcebattach(device_t parent, device_t self, void *aux)
 	 * until all PCI devices have been attached.
 	 */
 	pci_devinfo(pa->pa_id, pa->pa_class, 0, devinfo, sizeof(devinfo));
-	aprint_normal_dev(self, "%s (rev. 0x%02x)\n", devinfo,
+	aprint_normal("%s: %s (rev. 0x%02x)\n", self->dv_xname, devinfo,
 	    PCI_REVISION(pa->pa_class));
 
 	config_defer(self, pceb_callback);
 }
 
 void
-pceb_callback(device_t self)
+pceb_callback(struct device *self)
 {
 	union pceb_attach_args ea;
 

@@ -1,4 +1,4 @@
-/*	$NetBSD: clock.c,v 1.61 2008/03/29 05:47:53 tsutsui Exp $	*/
+/*	$NetBSD: clock.c,v 1.57 2006/10/04 15:14:49 tsutsui Exp $	*/
 
 /*
  * Copyright (c) 1982, 1990, 1993
@@ -83,7 +83,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: clock.c,v 1.61 2008/03/29 05:47:53 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: clock.c,v 1.57 2006/10/04 15:14:49 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -122,14 +122,14 @@ static volatile void *intersil_va;
 
 #define intersil_clear() (void)intersil_clock->clk_intr_reg
 
-static int  oclock_match(device_t, cfdata_t, void *);
-static void oclock_attach(device_t, device_t, void *);
+static int  oclock_match(struct device *, struct cfdata *, void *);
+static void oclock_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(oclock, sizeof(struct intersil7170_softc),
+CFATTACH_DECL(oclock, sizeof(struct intersil7170_softc),
     oclock_match, oclock_attach, NULL, NULL);
 
 static int 
-oclock_match(device_t parent, cfdata_t cf, void *aux)
+oclock_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct confargs *ca = aux;
 
@@ -149,18 +149,16 @@ oclock_match(device_t parent, cfdata_t cf, void *aux)
 }
 
 static void 
-oclock_attach(device_t parent, device_t self, void *aux)
+oclock_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct intersil7170_softc *sc = device_private(self);
 	struct confargs *ca = aux;
-
-	sc->sc_dev = self;
+	struct intersil7170_softc *sc = (void *)self;
 
 	/* Get a mapping for it. */
 	sc->sc_bst = ca->ca_bustag;
 	if (bus_space_map(sc->sc_bst, ca->ca_paddr, sizeof(struct intersil7170),
 	    0, &sc->sc_bsh) != 0) {
-		aprint_error(": can't map registers\n");
+		printf(": can't map registers\n");
 		return;
 	}
 
@@ -184,7 +182,9 @@ oclock_attach(device_t parent, device_t self, void *aux)
 	sc->sc_year0 = 1968;
 	intersil7170_attach(sc);
 
-	aprint_normal("\n");
+	printf("\n");
+
+	todr_attach(&sc->sc_handle);
 
 	/*
 	 * Can not hook up the ISR until cpu_initclocks()
@@ -304,8 +304,6 @@ void
 clock_intr(struct clockframe cf)
 {
 
-	idepth++;
-
 	/* Read the clock interrupt register. */
 	intersil_clear();
 
@@ -330,6 +328,4 @@ clock_intr(struct clockframe cf)
 
 	/* Call common clock interrupt handler. */
 	hardclock(&cf);
-
-	idepth--;
 }

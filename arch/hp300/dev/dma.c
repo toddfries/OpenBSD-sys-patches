@@ -1,4 +1,4 @@
-/*	$NetBSD: dma.c,v 1.42 2008/06/22 16:29:36 tsutsui Exp $	*/
+/*	$NetBSD: dma.c,v 1.35 2006/12/21 15:55:22 yamt Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -65,7 +72,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: dma.c,v 1.42 2008/06/22 16:29:36 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: dma.c,v 1.35 2006/12/21 15:55:22 yamt Exp $");
 
 #include <machine/hp300spu.h>	/* XXX param.h includes cpu.h */
 
@@ -111,7 +118,7 @@ struct dma_channel {
 };
 
 struct dma_softc {
-	device_t sc_dev;
+	struct  device sc_dev;
 	bus_space_tag_t sc_bst;
 	bus_space_handle_t sc_bsh;
 
@@ -133,10 +140,10 @@ struct dma_softc {
 #define DMAF_VCFLUSH	0x02
 #define DMAF_NOINTR	0x04
 
-static int	dmamatch(device_t, cfdata_t, void *);
-static void	dmaattach(device_t, device_t, void *);
+static int	dmamatch(struct device *, struct cfdata *, void *);
+static void	dmaattach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(dma, sizeof(struct dma_softc),
+CFATTACH_DECL(dma, sizeof(struct dma_softc),
     dmamatch, dmaattach, NULL, NULL);
 
 static int	dmaintr(void *);
@@ -161,7 +168,7 @@ long	dmalword[NDMACHAN];
 static struct dma_softc *dma_softc;
 
 static int
-dmamatch(device_t parent, cfdata_t cf, void *aux)
+dmamatch(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct intio_attach_args *ia = aux;
 	static int dmafound = 0;                /* can only have one */
@@ -174,16 +181,14 @@ dmamatch(device_t parent, cfdata_t cf, void *aux)
 }
 
 static void
-dmaattach(device_t parent, device_t self, void *aux)
+dmaattach(struct device *parent, struct device *self, void *aux)
 {
-	struct dma_softc *sc = device_private(self);
+	struct dma_softc *sc = (struct dma_softc *)self;
 	struct intio_attach_args *ia = aux;
 	struct dma_channel *dc;
 	struct dmareg *dma;
 	int i;
 	char rev;
-
-	sc->sc_dev = self;
 
 	/* There's just one. */
 	dma_softc = sc;
@@ -191,11 +196,11 @@ dmaattach(device_t parent, device_t self, void *aux)
 	sc->sc_bst = ia->ia_bst;
 	if (bus_space_map(sc->sc_bst, ia->ia_iobase, INTIO_DEVSIZE, 0,
 	     &sc->sc_bsh)) {
-		aprint_error(": can't map registers\n");
+		printf("%s: can't map registers\n", sc->sc_dev.dv_xname);
 		return;
 	}
 
-	dma = bus_space_vaddr(sc->sc_bst, sc->sc_bsh);
+	dma = (struct dmareg *)bus_space_vaddr(sc->sc_bst, sc->sc_bsh);
 	sc->sc_dmareg = dma;
 
 	/*
@@ -209,8 +214,7 @@ dmaattach(device_t parent, device_t self, void *aux)
 	if (hp300_bus_space_probe(sc->sc_bst, sc->sc_bsh, DMA_ID2, 1) == 0) {
 		rev = 'B';
 #if !defined(HP320)
-		aprint_normal("\n");
-		panic("%s: DMA card requires hp320 support", __func__);
+		panic("dmainit: DMA card requires hp320 support");
 #endif
 	} else
 		rev = dma->dma_id[2];
@@ -218,7 +222,7 @@ dmaattach(device_t parent, device_t self, void *aux)
 	sc->sc_type = (rev == 'B') ? DMA_B : DMA_C;
 
 	TAILQ_INIT(&sc->sc_queue);
-	callout_init(&sc->sc_debug_ch, 0);
+	callout_init(&sc->sc_debug_ch);
 
 	for (i = 0; i < NDMACHAN; i++) {
 		dc = &sc->sc_chan[i];
@@ -235,8 +239,7 @@ dmaattach(device_t parent, device_t self, void *aux)
 			break;
 
 		default:
-			aprint_normal("\n");
-			panic("%s: more than 2 channels?", __func__);
+			panic("dmainit: more than 2 channels?");
 			/* NOTREACHED */
 		}
 	}
@@ -246,7 +249,7 @@ dmaattach(device_t parent, device_t self, void *aux)
 	callout_reset(&sc->sc_debug_ch, 30 * hz, dmatimeout, sc);
 #endif
 
-	aprint_normal(": 98620%c, 2 channels, %d-bit DMA\n",
+	printf(": 98620%c, 2 channels, %d-bit DMA\n",
 	    rev, (rev == 'B') ? 16 : 32);
 
 	/*
@@ -272,8 +275,8 @@ dmacomputeipl(void)
 	 * Our interrupt level must be as high as the highest
 	 * device using DMA (i.e. splbio).
 	 */
-	sc->sc_ipl = PSLTOIPL(ipl2psl_table[IPL_VM]);
-	sc->sc_ih = intr_establish(dmaintr, sc, sc->sc_ipl, IPL_VM);
+	sc->sc_ipl = PSLTOIPL(hp300_ipl2psl[IPL_BIO]);
+	sc->sc_ih = intr_establish(dmaintr, sc, sc->sc_ipl, IPL_BIO);
 }
 
 int
@@ -372,8 +375,8 @@ dmafree(struct dmaqueue *dq)
 	 */
 	dc->dm_job = NULL;
 	chan = 1 << unit;
-	for (dn = TAILQ_FIRST(&sc->sc_queue); dn != NULL;
-	    dn = TAILQ_NEXT(dn, dq_list)) {
+	for (dn = sc->sc_queue.tqh_first; dn != NULL;
+	    dn = dn->dq_list.tqe_next) {
 		if (dn->dq_chan & chan) {
 			/* Found one... */
 			TAILQ_REMOVE(&sc->sc_queue, dn, dq_list);
@@ -520,7 +523,7 @@ dmago(int unit, char *addr, int count, int flags)
 		if (((dmadebug&DDB_WORD) && (dc->dm_cmd&DMA_WORD)) ||
 		    ((dmadebug&DDB_LWORD) && (dc->dm_cmd&DMA_LWORD))) {
 			printf("dmago: cmd %x, flags %x\n",
-			    dc->dm_cmd, dc->dm_flags);
+			       dc->dm_cmd, dc->dm_flags);
 			for (seg = 0; seg <= dc->dm_last; seg++)
 				printf("  %d: %d@%p\n", seg,
 				    dc->dm_chain[seg].dc_count,
@@ -599,9 +602,8 @@ dmaintr(void *arg)
 		if (dmadebug & DDB_IO) {
 			if (((dmadebug&DDB_WORD) && (dc->dm_cmd&DMA_WORD)) ||
 			    ((dmadebug&DDB_LWORD) && (dc->dm_cmd&DMA_LWORD)))
-			 	printf("dmaintr: flags %x unit %d stat %x "
-				    "next %d\n",
-				    dc->dm_flags, i, stat, dc->dm_cur + 1);
+			  printf("dmaintr: flags %x unit %d stat %x next %d\n",
+			   dc->dm_flags, i, stat, dc->dm_cur + 1);
 		}
 		if (stat & DMA_ARMED)
 			printf("dma channel %d: intr when armed\n", i);

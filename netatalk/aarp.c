@@ -1,4 +1,4 @@
-/*	$NetBSD: aarp.c,v 1.27 2008/04/24 11:38:37 ad Exp $	*/
+/*	$NetBSD: aarp.c,v 1.21 2006/11/16 01:33:44 christos Exp $	*/
 
 /*
  * Copyright (c) 1990,1991 Regents of The University of Michigan.
@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: aarp.c,v 1.27 2008/04/24 11:38:37 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: aarp.c,v 1.21 2006/11/16 01:33:44 christos Exp $");
 
 #include "opt_mbuftrace.h"
 
@@ -40,7 +40,6 @@ __KERNEL_RCSID(0, "$NetBSD: aarp.c,v 1.27 2008/04/24 11:38:37 ad Exp $");
 #include <sys/mbuf.h>
 #include <sys/time.h>
 #include <sys/kernel.h>
-#include <sys/socketvar.h>
 #include <net/if.h>
 #include <net/route.h>
 #include <net/if_ether.h>
@@ -55,11 +54,11 @@ __KERNEL_RCSID(0, "$NetBSD: aarp.c,v 1.27 2008/04/24 11:38:37 ad Exp $");
 #include <netatalk/phase2.h>
 #include <netatalk/at_extern.h>
 
-static struct aarptab *aarptnew(const struct at_addr *);
-static void aarptfree(struct aarptab *);
-static void at_aarpinput(struct ifnet *, struct mbuf *);
-static void aarptimer(void *);
-static void aarpwhohas(struct ifnet *, const struct sockaddr_at *);
+static struct aarptab *aarptnew __P((struct at_addr *));
+static void aarptfree __P((struct aarptab *));
+static void at_aarpinput __P((struct ifnet *, struct mbuf *));
+static void aarptimer __P((void *));
+static void aarpwhohas __P((struct ifnet *, struct sockaddr_at *));
 
 #define AARPTAB_BSIZ	9
 #define AARPTAB_NB	19
@@ -107,7 +106,6 @@ aarptimer(void *ignored)
 	struct aarptab *aat;
 	int             i, s;
 
-	mutex_enter(softnet_lock);
 	callout_reset(&aarptimer_callout, AARPT_AGE * hz, aarptimer, NULL);
 	aat = aarptab;
 	for (i = 0; i < AARPTAB_SIZE; i++, aat++) {
@@ -121,7 +119,6 @@ aarptimer(void *ignored)
 		aarptfree(aat);
 		splx(s);
 	}
-	mutex_exit(softnet_lock);
 }
 
 /*
@@ -137,7 +134,8 @@ at_ifawithnet(sat, ifp)
 	struct sockaddr_at *sat2;
 	struct netrange *nr;
 
-	IFADDR_FOREACH(ifa, ifp) {
+	for (ifa = ifp->if_addrlist.tqh_first; ifa;
+	    ifa = ifa->ifa_list.tqe_next) {
 		if (ifa->ifa_addr->sa_family != AF_APPLETALK)
 			continue;
 
@@ -157,7 +155,7 @@ at_ifawithnet(sat, ifp)
 static void
 aarpwhohas(ifp, sat)
 	struct ifnet *ifp;
-	const struct sockaddr_at *sat;
+	struct sockaddr_at *sat;
 {
 	struct mbuf    *m;
 	struct ether_header *eh;
@@ -182,7 +180,7 @@ aarpwhohas(ifp, sat)
 	ea->aarp_hln = sizeof(ea->aarp_sha);
 	ea->aarp_pln = sizeof(ea->aarp_spu);
 	ea->aarp_op = htons(AARPOP_REQUEST);
-	bcopy(CLLADDR(ifp->if_sadl), ea->aarp_sha, sizeof(ea->aarp_sha));
+	bcopy(LLADDR(ifp->if_sadl), ea->aarp_sha, sizeof(ea->aarp_sha));
 
 	/*
          * We need to check whether the output ethernet type should
@@ -239,8 +237,11 @@ aarpwhohas(ifp, sat)
 }
 
 int
-aarpresolve(struct ifnet *ifp, struct mbuf *m,
-    const struct sockaddr_at *destsat, u_char *desten)
+aarpresolve(ifp, m, destsat, desten)
+	struct ifnet   *ifp;
+	struct mbuf    *m;
+	struct sockaddr_at *destsat;
+	u_char         *desten;
 {
 	struct at_ifaddr *aa;
 	struct aarptab *aat;
@@ -331,7 +332,6 @@ at_aarpinput(ifp, m)
 {
 	struct ether_aarp *ea;
 	struct at_ifaddr *aa;
-	struct ifaddr *ia;
 	struct aarptab *aat;
 	struct ether_header *eh;
 	struct llc     *llc;
@@ -344,7 +344,7 @@ at_aarpinput(ifp, m)
 	ea = mtod(m, struct ether_aarp *);
 
 	/* Check to see if from my hardware address */
-	if (!bcmp(ea->aarp_sha, CLLADDR(ifp->if_sadl), sizeof(ea->aarp_sha))) {
+	if (!bcmp(ea->aarp_sha, LLADDR(ifp->if_sadl), sizeof(ea->aarp_sha))) {
 		m_freem(m);
 		return;
 	}
@@ -367,13 +367,13 @@ at_aarpinput(ifp, m)
 		 * Since we don't know the net, we just look for the first
 		 * phase 1 address on the interface.
 		 */
-		IFADDR_FOREACH(ia, ifp) {
-			aa = (struct at_ifaddr *)ia;
+		for (aa = (struct at_ifaddr *) ifp->if_addrlist.tqh_first; aa;
+		    aa = (struct at_ifaddr *) aa->aa_ifa.ifa_list.tqe_next) {
 			if (AA_SAT(aa)->sat_family == AF_APPLETALK &&
 			    (aa->aa_flags & AFA_PHASE2) == 0)
 				break;
 		}
-		if (ia == NULL) {
+		if (aa == NULL) {
 			m_freem(m);
 			return;
 		}
@@ -452,7 +452,7 @@ at_aarpinput(ifp, m)
 		return;
 	}
 	bcopy(ea->aarp_sha, ea->aarp_tha, sizeof(ea->aarp_sha));
-	bcopy(CLLADDR(ifp->if_sadl), ea->aarp_sha, sizeof(ea->aarp_sha));
+	bcopy(LLADDR(ifp->if_sadl), ea->aarp_sha, sizeof(ea->aarp_sha));
 
 	/* XXX */
 	eh = (struct ether_header *) sa.sa_data;
@@ -500,7 +500,8 @@ aarptfree(aat)
 }
 
 static struct aarptab *
-aarptnew(const struct at_addr *addr)
+aarptnew(addr)
+	struct at_addr *addr;
 {
 	int             n;
 	int             oldest = -1;
@@ -509,7 +510,7 @@ aarptnew(const struct at_addr *addr)
 
 	if (first) {
 		first = 0;
-		callout_init(&aarptimer_callout, 0);
+		callout_init(&aarptimer_callout);
 		callout_reset(&aarptimer_callout, hz, aarptimer, NULL);
 		MOWNER_ATTACH(&aarp_mowner);
 	}
@@ -542,13 +543,10 @@ aarpprobe(arp)
 	struct mbuf    *m;
 	struct ether_header *eh;
 	struct ether_aarp *ea;
-	struct ifaddr *ia;
 	struct at_ifaddr *aa;
 	struct llc     *llc;
 	struct sockaddr sa;
 	struct ifnet   *ifp = arp;
-
-	mutex_enter(softnet_lock);
 
 	/*
          * We need to check whether the output ethernet type should
@@ -557,30 +555,26 @@ aarpprobe(arp)
          * interface with the same address as we're looking for. If the
          * net is phase 2, generate an 802.2 and SNAP header.
          */
-	IFADDR_FOREACH(ia, ifp) {
-		aa = (struct at_ifaddr *)ia;
+	for (aa = (struct at_ifaddr *) ifp->if_addrlist.tqh_first; aa;
+	     aa = (struct at_ifaddr *) aa->aa_ifa.ifa_list.tqe_next) {
 		if (AA_SAT(aa)->sat_family == AF_APPLETALK &&
 		    (aa->aa_flags & AFA_PROBING))
 			break;
 	}
-	if (ia == NULL) {	/* serious error XXX */
+	if (aa == NULL) {	/* serious error XXX */
 		printf("aarpprobe why did this happen?!\n");
-		mutex_exit(softnet_lock);
 		return;
 	}
 	if (aa->aa_probcnt <= 0) {
 		aa->aa_flags &= ~AFA_PROBING;
 		wakeup(aa);
-		mutex_exit(softnet_lock);
 		return;
 	} else {
 		callout_reset(&aa->aa_probe_ch, hz / 5, aarpprobe, arp);
 	}
 
-	if ((m = m_gethdr(M_DONTWAIT, MT_DATA)) == NULL) {
-		mutex_exit(softnet_lock);
+	if ((m = m_gethdr(M_DONTWAIT, MT_DATA)) == NULL)
 		return;
-	}
 
 	MCLAIM(m, &aarp_mowner);
 	m->m_len = sizeof(*ea);
@@ -595,7 +589,7 @@ aarpprobe(arp)
 	ea->aarp_hln = sizeof(ea->aarp_sha);
 	ea->aarp_pln = sizeof(ea->aarp_spu);
 	ea->aarp_op = htons(AARPOP_PROBE);
-	bcopy(CLLADDR(ifp->if_sadl), ea->aarp_sha, sizeof(ea->aarp_sha));
+	bcopy(LLADDR(ifp->if_sadl), ea->aarp_sha, sizeof(ea->aarp_sha));
 
 	eh = (struct ether_header *) sa.sa_data;
 
@@ -604,10 +598,8 @@ aarpprobe(arp)
 		    sizeof(eh->ether_dhost));
 		eh->ether_type = 0;	/* if_output will treat as 802 */
 		M_PREPEND(m, sizeof(struct llc), M_DONTWAIT);
-		if (!m) {
-			mutex_exit(softnet_lock);
+		if (!m)
 			return;
-		}
 
 		llc = mtod(m, struct llc *);
 		llc->llc_dsap = llc->llc_ssap = LLC_SNAP_LSAP;
@@ -638,7 +630,6 @@ aarpprobe(arp)
 	sa.sa_family = AF_UNSPEC;
 	(*ifp->if_output) (ifp, m, &sa, NULL);	/* XXX */
 	aa->aa_probcnt--;
-	mutex_exit(softnet_lock);
 }
 
 void

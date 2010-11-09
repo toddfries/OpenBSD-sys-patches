@@ -1,4 +1,4 @@
-/* $NetBSD: sci.c,v 1.51 2008/06/13 13:08:57 cegger Exp $ */
+/* $NetBSD: sci.c,v 1.45 2006/10/01 20:31:50 elad Exp $ */
 
 /*-
  * Copyright (C) 1999 T.Horiuchi and SAITOH Masanobu.  All rights reserved.
@@ -41,6 +41,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -93,7 +100,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sci.c,v 1.51 2008/06/13 13:08:57 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sci.c,v 1.45 2006/10/01 20:31:50 elad Exp $");
 
 #include "opt_kgdb.h"
 #include "opt_sci.h"
@@ -109,7 +116,6 @@ __KERNEL_RCSID(0, "$NetBSD: sci.c,v 1.51 2008/06/13 13:08:57 cegger Exp $");
 #include <sys/device.h>
 #include <sys/malloc.h>
 #include <sys/kauth.h>
-#include <sys/intr.h>
 
 #include <dev/cons.h>
 
@@ -118,6 +124,7 @@ __KERNEL_RCSID(0, "$NetBSD: sci.c,v 1.51 2008/06/13 13:08:57 cegger Exp $");
 #include <sh3/pfcreg.h>
 #include <sh3/tmureg.h>
 #include <sh3/exception.h>
+#include <machine/intr.h>
 
 static void	scistart(struct tty *);
 static int	sciparam(struct tty *, struct termios *);
@@ -133,7 +140,7 @@ struct sci_softc {
 	struct device sc_dev;		/* boilerplate */
 	struct tty *sc_tty;
 	void *sc_si;
-	callout_t sc_diag_ch;
+	struct callout sc_diag_ch;
 
 #if 0
 	bus_space_tag_t sc_iot;		/* ISA i/o space identifier */
@@ -188,8 +195,15 @@ void	sci_break(struct sci_softc *, int);
 void	sci_iflush(struct sci_softc *);
 
 #define	integrate	static inline
+#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 void 	scisoft(void *);
-
+#else
+#ifndef __NO_SOFT_SERIAL_INTERRUPT
+void 	scisoft(void);
+#else
+void 	scisoft(void *);
+#endif
+#endif
 integrate void sci_rxsoft(struct sci_softc *, struct tty *);
 integrate void sci_txsoft(struct sci_softc *, struct tty *);
 integrate void sci_stsoft(struct sci_softc *, struct tty *);
@@ -228,6 +242,13 @@ int scicn_speed = 9600;
 #endif
 
 #define	divrnd(n, q)	(((n)*2/(q)+1)/2)	/* divide and round off */
+
+#ifndef __HAVE_GENERIC_SOFT_INTERRUPTS
+#ifdef __NO_SOFT_SERIAL_INTERRUPT
+volatile int	sci_softintr_scheduled;
+struct callout sci_soft_ch = CALLOUT_INITIALIZER;
+#endif
+#endif
 
 u_int sci_rbuf_size = SCI_RING_SIZE;
 
@@ -388,7 +409,7 @@ sci_attach(struct device *parent, struct device *self, void *aux)
 		printf("\n");
 	}
 
-	callout_init(&sc->sc_diag_ch, 0);
+	callout_init(&sc->sc_diag_ch);
 
 	intc_intr_establish(SH_INTEVT_SCI_ERI, IST_LEVEL, IPL_SERIAL, sciintr,
 	    sc);
@@ -399,7 +420,9 @@ sci_attach(struct device *parent, struct device *self, void *aux)
 	intc_intr_establish(SH_INTEVT_SCI_TEI, IST_LEVEL, IPL_SERIAL, sciintr,
 	    sc);
 
-	sc->sc_si = softint_establish(SOFTINT_SERIAL, scisoft, sc);
+#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
+	sc->sc_si = softintr_establish(IPL_SOFTSERIAL, scisoft, sc);
+#endif
 	SET(sc->sc_hwflags, SCI_HW_DEV_OK);
 
 	tp = ttymalloc();
@@ -425,7 +448,7 @@ sci_attach(struct device *parent, struct device *self, void *aux)
 static void
 scistart(struct tty *tp)
 {
-	struct sci_softc *sc = device_lookup_private(&sci_cd,SCIUNIT(tp->t_dev));
+	struct sci_softc *sc = sci_cd.cd_devs[SCIUNIT(tp->t_dev)];
 	int s;
 
 	s = spltty();
@@ -433,8 +456,16 @@ scistart(struct tty *tp)
 		goto out;
 	if (sc->sc_tx_stopped)
 		goto out;
-	if (!ttypull(tp))
-		goto out;
+
+	if (tp->t_outq.c_cc <= tp->t_lowat) {
+		if (ISSET(tp->t_state, TS_ASLEEP)) {
+			CLR(tp->t_state, TS_ASLEEP);
+			wakeup(&tp->t_outq);
+		}
+		selwakeup(&tp->t_wsel);
+		if (tp->t_outq.c_cc == 0)
+			goto out;
+	}
 
 	/* Grab the first contiguous region of buffer space. */
 	{
@@ -477,7 +508,7 @@ out:
 static int
 sciparam(struct tty *tp, struct termios *t)
 {
-	struct sci_softc *sc = device_lookup_private(&sci_cd, SCIUNIT(tp->t_dev));
+	struct sci_softc *sc = sci_cd.cd_devs[SCIUNIT(tp->t_dev)];
 	int ospeed = t->c_ospeed;
 	int s;
 
@@ -608,12 +639,15 @@ sci_iflush(struct sci_softc *sc)
 int
 sciopen(dev_t dev, int flag, int mode, struct lwp *l)
 {
+	int unit = SCIUNIT(dev);
 	struct sci_softc *sc;
 	struct tty *tp;
 	int s, s2;
 	int error;
 
-	sc = device_lookup_private(&sci_cd, SCIUNIT(dev));
+	if (unit >= sci_cd.cd_ndevs)
+		return (ENXIO);
+	sc = sci_cd.cd_devs[unit];
 	if (sc == 0 || !ISSET(sc->sc_hwflags, SCI_HW_DEV_OK) ||
 	    sc->sc_rbuf == NULL)
 		return (ENXIO);
@@ -718,7 +752,7 @@ bad:
 int
 sciclose(dev_t dev, int flag, int mode, struct lwp *l)
 {
-	struct sci_softc *sc = device_lookup_private(&sci_cd, SCIUNIT(dev));
+	struct sci_softc *sc = sci_cd.cd_devs[SCIUNIT(dev)];
 	struct tty *tp = sc->sc_tty;
 
 	/* XXX This is for cons.c. */
@@ -737,7 +771,7 @@ sciclose(dev_t dev, int flag, int mode, struct lwp *l)
 int
 sciread(dev_t dev, struct uio *uio, int flag)
 {
-	struct sci_softc *sc = device_lookup_private(&sci_cd, SCIUNIT(dev));
+	struct sci_softc *sc = sci_cd.cd_devs[SCIUNIT(dev)];
 	struct tty *tp = sc->sc_tty;
 
 	return ((*tp->t_linesw->l_read)(tp, uio, flag));
@@ -746,7 +780,7 @@ sciread(dev_t dev, struct uio *uio, int flag)
 int
 sciwrite(dev_t dev, struct uio *uio, int flag)
 {
-	struct sci_softc *sc = device_lookup_private(&sci_cd, SCIUNIT(dev));
+	struct sci_softc *sc = sci_cd.cd_devs[SCIUNIT(dev)];
 	struct tty *tp = sc->sc_tty;
 
 	return ((*tp->t_linesw->l_write)(tp, uio, flag));
@@ -755,7 +789,7 @@ sciwrite(dev_t dev, struct uio *uio, int flag)
 int
 scipoll(dev_t dev, int events, struct lwp *l)
 {
-	struct sci_softc *sc = device_lookup_private(&sci_cd, SCIUNIT(dev));
+	struct sci_softc *sc = sci_cd.cd_devs[SCIUNIT(dev)];
 	struct tty *tp = sc->sc_tty;
 
 	return ((*tp->t_linesw->l_poll)(tp, events, l));
@@ -764,16 +798,16 @@ scipoll(dev_t dev, int events, struct lwp *l)
 struct tty *
 scitty(dev_t dev)
 {
-	struct sci_softc *sc = device_lookup_private(&sci_cd, SCIUNIT(dev));
+	struct sci_softc *sc = sci_cd.cd_devs[SCIUNIT(dev)];
 	struct tty *tp = sc->sc_tty;
 
 	return (tp);
 }
 
 int
-sciioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
+sciioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct lwp *l)
 {
-	struct sci_softc *sc = device_lookup_private(&sci_cd, SCIUNIT(dev));
+	struct sci_softc *sc = sci_cd.cd_devs[SCIUNIT(dev)];
 	struct tty *tp = sc->sc_tty;
 	int error;
 	int s;
@@ -831,7 +865,18 @@ sci_schedrx(struct sci_softc *sc)
 	sc->sc_rx_ready = 1;
 
 	/* Wake up the poller. */
-	softint_schedule(sc->sc_si);
+#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
+	softintr_schedule(sc->sc_si);
+#else
+#ifndef __NO_SOFT_SERIAL_INTERRUPT
+	setsoftserial();
+#else
+	if (!sci_softintr_scheduled) {
+		sci_softintr_scheduled = 1;
+		callout_reset(&sci_soft_ch, 1, scisoft, NULL);
+	}
+#endif
+#endif
 }
 
 void
@@ -861,7 +906,7 @@ sci_break(struct sci_softc *sc, int onoff)
 void
 scistop(struct tty *tp, int flag)
 {
-	struct sci_softc *sc = device_lookup_private(&sci_cd, SCIUNIT(tp->t_dev));
+	struct sci_softc *sc = sci_cd.cd_devs[SCIUNIT(tp->t_dev)];
 	int s;
 
 	s = splserial();
@@ -1032,6 +1077,7 @@ sci_stsoft(struct sci_softc *sc, struct tty *tp)
 #endif
 }
 
+#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 void
 scisoft(void *arg)
 {
@@ -1041,24 +1087,64 @@ scisoft(void *arg)
 	if (!device_is_active(&sc->sc_dev))
 		return;
 
-	tp = sc->sc_tty;
+	{
+#else
+void
+#ifndef __NO_SOFT_SERIAL_INTERRUPT
+scisoft()
+#else
+scisoft(void *arg)
+#endif
+{
+	struct sci_softc	*sc;
+	struct tty	*tp;
+	int	unit;
+#ifdef __NO_SOFT_SERIAL_INTERRUPT
+	int s;
 
-	if (sc->sc_rx_ready) {
-		sc->sc_rx_ready = 0;
-		sci_rxsoft(sc, tp);
-	}
-
-#if 0
-	if (sc->sc_st_check) {
-		sc->sc_st_check = 0;
-		sci_stsoft(sc, tp);
-	}
+	s = splsoftserial();
+	sci_softintr_scheduled = 0;
 #endif
 
-	if (sc->sc_tx_done) {
-		sc->sc_tx_done = 0;
-		sci_txsoft(sc, tp);
+	for (unit = 0; unit < sci_cd.cd_ndevs; unit++) {
+		sc = sci_cd.cd_devs[unit];
+		if (sc == NULL || !ISSET(sc->sc_hwflags, SCI_HW_DEV_OK))
+			continue;
+
+		if (!device_is_active(&sc->sc_dev))
+			continue;
+
+		tp = sc->sc_tty;
+		if (tp == NULL)
+			continue;
+		if (!ISSET(tp->t_state, TS_ISOPEN) && tp->t_wopen == 0)
+			continue;
+#endif
+		tp = sc->sc_tty;
+
+		if (sc->sc_rx_ready) {
+			sc->sc_rx_ready = 0;
+			sci_rxsoft(sc, tp);
+		}
+
+#if 0
+		if (sc->sc_st_check) {
+			sc->sc_st_check = 0;
+			sci_stsoft(sc, tp);
+		}
+#endif
+
+		if (sc->sc_tx_done) {
+			sc->sc_tx_done = 0;
+			sci_txsoft(sc, tp);
+		}
 	}
+
+#ifndef __HAVE_GENERIC_SOFT_INTERRUPTS
+#ifdef __NO_SOFT_SERIAL_INTERRUPT
+	splx(s);
+#endif
+#endif
 }
 
 int
@@ -1263,7 +1349,18 @@ sciintr(void *arg)
 	}
 
 	/* Wake up the poller. */
-	softint_schedule(sc->sc_si);
+#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
+	softintr_schedule(sc->sc_si);
+#else
+#ifndef __NO_SOFT_SERIAL_INTERRUPT
+	setsoftserial();
+#else
+	if (!sci_softintr_scheduled) {
+		sci_softintr_scheduled = 1;
+		callout_reset(&sci_soft_ch, 1, scisoft, 1);
+	}
+#endif
+#endif
 
 #if NRND > 0 && defined(RND_SCI)
 	rnd_add_uint32(&sc->rnd_source, iir | lsr);

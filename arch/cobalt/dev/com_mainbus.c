@@ -1,4 +1,4 @@
-/*	$NetBSD: com_mainbus.c,v 1.17 2008/03/27 15:21:46 tsutsui Exp $	*/
+/*	$NetBSD: com_mainbus.c,v 1.14 2006/07/13 22:56:00 gdamore Exp $	*/
 
 /*
  * Copyright (c) 2000 Soren S. Jorvang.  All rights reserved.
@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: com_mainbus.c,v 1.17 2008/03/27 15:21:46 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: com_mainbus.c,v 1.14 2006/07/13 22:56:00 gdamore Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -36,12 +36,15 @@ __KERNEL_RCSID(0, "$NetBSD: com_mainbus.c,v 1.17 2008/03/27 15:21:46 tsutsui Exp
 #include <machine/autoconf.h>
 #include <machine/intr.h>
 #include <machine/bus.h>
+#include <machine/nvram.h>
+#include <machine/bootinfo.h>
 
 #include <dev/ic/comreg.h>
 #include <dev/ic/comvar.h>
 
-#include <cobalt/cobalt/console.h>
 #include <cobalt/dev/com_mainbusvar.h>
+
+extern int console_present;
 
 struct com_mainbus_softc {
 	struct com_softc sc_com;
@@ -51,14 +54,14 @@ struct com_mainbus_softc {
 #define COM_MAINBUS_FREQ	(COM_FREQ * 10)
 #define CONMODE ((TTYDEF_CFLAG & ~(CSIZE | CSTOPB | PARENB)) | CS8) /* 8N1 */
 
-static int	com_mainbus_probe(device_t, cfdata_t , void *);
-static void	com_mainbus_attach(device_t, device_t, void *);
+static int	com_mainbus_probe(struct device *, struct cfdata *, void *);
+static void	com_mainbus_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(com_mainbus, sizeof(struct com_mainbus_softc),
+CFATTACH_DECL(com_mainbus, sizeof(struct com_mainbus_softc),
     com_mainbus_probe, com_mainbus_attach, NULL, NULL);
 
 int
-com_mainbus_probe(device_t parent, cfdata_t match, void *aux)
+com_mainbus_probe(struct device *parent, struct cfdata *match, void *aux)
 {
 
 	switch (cobalt_id) {
@@ -72,17 +75,16 @@ com_mainbus_probe(device_t parent, cfdata_t match, void *aux)
 }
 
 void
-com_mainbus_attach(device_t parent, device_t self, void *aux)
+com_mainbus_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct com_mainbus_softc *msc = device_private(self);
+	struct com_mainbus_softc *msc = (void *)self;
 	struct com_softc *sc = &msc->sc_com;
 	struct mainbus_attach_args *maa = aux;
 	bus_space_handle_t	ioh;
 
-	sc->sc_dev = self;
 	if (!com_is_console(maa->ma_iot, maa->ma_addr, &ioh) &&
 	    bus_space_map(maa->ma_iot, maa->ma_addr, COM_NPORTS, 0, &ioh)) {
-		aprint_error(": can't map i/o space\n");
+		printf(": can't map i/o space\n");
 		return;
 	}
 	COM_INIT_REGS(sc->sc_regs, maa->ma_iot, ioh, maa->ma_addr);
@@ -99,15 +101,35 @@ com_mainbus_attach(device_t parent, device_t self, void *aux)
 void
 com_mainbus_cnprobe(struct consdev *cn)
 {
+	struct btinfo_flags *bi_flags;
 
-	cn->cn_pri = (console_present != 0 && cobalt_id != COBALT_ID_QUBE2700)
-	    ? CN_NORMAL : CN_DEAD;
+	/*
+	 * Linux code has a comment that serial console must be probed
+	 * early, otherwise the value which allows to detect serial port
+	 * could be overwritten. Okay, probe here and record the result
+	 * for the future use.
+	 *
+	 * Note that if the kernel was booted with a boot loader,
+	 * the latter *has* to provide a flag indicating whether console
+	 * is present or not because the value might be overwritten by
+	 * the loaded kernel.
+	 */
+	if ((bi_flags = lookup_bootinfo(BTINFO_FLAGS)) == NULL) {
+		/* No boot information, probe console now */
+		console_present = *(volatile uint32_t *)
+					MIPS_PHYS_TO_KSEG1(0x0020001c);
+	} else {
+		/* Get the value determined by the boot loader. */
+		console_present = bi_flags->bi_flags & BI_SERIAL_CONSOLE;
+	}
+
+	cn->cn_pri = (console_present != 0) ? CN_NORMAL : CN_DEAD;
 }
 
 void
 com_mainbus_cninit(struct consdev *cn)
 {
 
-	comcnattach(0, COM_BASE, 115200, COM_MAINBUS_FREQ, COM_TYPE_NORMAL,
+	comcnattach(0, 0x1c800000, 115200, COM_MAINBUS_FREQ, COM_TYPE_NORMAL,
 	    CONMODE);
 }

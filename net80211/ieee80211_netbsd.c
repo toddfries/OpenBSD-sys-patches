@@ -1,4 +1,4 @@
-/* $NetBSD: ieee80211_netbsd.c,v 1.17 2008/11/12 12:36:28 ad Exp $ */
+/* $NetBSD: ieee80211_netbsd.c,v 1.13 2006/03/02 03:38:48 dyoung Exp $ */
 /*-
  * Copyright (c) 2003-2005 Sam Leffler, Errno Consulting
  * All rights reserved.
@@ -30,7 +30,7 @@
 #ifdef __FreeBSD__
 __FBSDID("$FreeBSD: src/sys/net80211/ieee80211_freebsd.c,v 1.8 2005/08/08 18:46:35 sam Exp $");
 #else
-__KERNEL_RCSID(0, "$NetBSD: ieee80211_netbsd.c,v 1.17 2008/11/12 12:36:28 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ieee80211_netbsd.c,v 1.13 2006/03/02 03:38:48 dyoung Exp $");
 #endif
 
 /*
@@ -458,7 +458,7 @@ cleanup:
 /*
  * Setup sysctl(3) MIB, net.ieee80211.*
  *
- * TBD condition CTLFLAG_PERMANENT on being a module or not
+ * TBD condition CTLFLAG_PERMANENT on being an LKM or not
  */
 SYSCTL_SETUP(sysctl_ieee80211, "sysctl ieee80211 subtree setup")
 {
@@ -502,27 +502,6 @@ ieee80211_node_dectestref(struct ieee80211_node *ni)
 }
 
 void
-ieee80211_drain_ifq(struct ifqueue *ifq)
-{
-	struct ieee80211_node *ni;
-	struct mbuf *m;
-
-	for (;;) {
-		IF_DEQUEUE(ifq, m);
-		if (m == NULL)
-			break;
-
-		ni = (struct ieee80211_node *)m->m_pkthdr.rcvif;
-		KASSERT(ni != NULL);
-		ieee80211_free_node(ni);
-		m->m_pkthdr.rcvif = NULL;
-
-		m_freem(m);
-	}
-}
-
-
-void
 if_printf(struct ifnet *ifp, const char *fmt, ...)
 {
 	va_list ap;
@@ -562,14 +541,13 @@ m_align(struct mbuf *m, int len)
  * Return 1 if able to complete the job; otherwise 0.
  */
 int
-m_append(struct mbuf *m0, int len, const void *cpv)
+m_append(struct mbuf *m0, int len, caddr_t cp)
 {
 	struct mbuf *m, *n;
 	int remainder, space;
-	const char *cp = cpv;
 
 	for (m = m0; m->m_next != NULL; m = m->m_next)
-		continue;
+		;
 	remainder = len;
 	space = M_TRAILINGSPACE(m);
 	if (space > 0) {
@@ -578,9 +556,9 @@ m_append(struct mbuf *m0, int len, const void *cpv)
 		 */
 		if (space > remainder)
 			space = remainder;
-		memmove(mtod(m, char *) + m->m_len, cp, space);
+		memmove(mtod(m, caddr_t) + m->m_len, cp, space);
 		m->m_len += space;
-		cp = cp + space, remainder -= space;
+		cp += space, remainder -= space;
 	}
 	while (remainder > 0) {
 		/*
@@ -591,7 +569,7 @@ m_append(struct mbuf *m0, int len, const void *cpv)
 		if (n == NULL)
 			break;
 		n->m_len = min(MLEN, remainder);
-		memmove(mtod(n, void *), cp, n->m_len);
+		memmove(mtod(n, caddr_t), cp, n->m_len);
 		cp += n->m_len, remainder -= n->m_len;
 		m->m_next = n;
 		m = n;
@@ -673,11 +651,10 @@ ieee80211_notify_node_join(struct ieee80211com *ic, struct ieee80211_node *ni, i
 			RTM_IEEE80211_ASSOC : RTM_IEEE80211_REASSOC,
 			&iev, sizeof(iev));
 		if_link_state_change(ifp, LINK_STATE_UP);
-	} else {
+	} else if (newassoc) {
+		/* fire off wireless event only for new station */
 		IEEE80211_ADDR_COPY(iev.iev_addr, ni->ni_macaddr);
-		rt_ieee80211msg(ifp, newassoc ?
-		    RTM_IEEE80211_JOIN : RTM_IEEE80211_REJOIN,
-		    &iev, sizeof(iev));
+		rt_ieee80211msg(ifp, RTM_IEEE80211_JOIN, &iev, sizeof(iev));
 	}
 }
 

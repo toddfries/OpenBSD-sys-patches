@@ -1,4 +1,4 @@
-/*	$NetBSD: apmdev.c,v 1.19 2008/06/12 01:46:32 rafal Exp $ */
+/*	$NetBSD: apmdev.c,v 1.12 2007/07/10 13:55:20 nonaka Exp $ */
 
 /*-
  * Copyright (c) 1996, 1997 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -33,7 +40,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: apmdev.c,v 1.19 2008/06/12 01:46:32 rafal Exp $");
+__KERNEL_RCSID(0, "$NetBSD: apmdev.c,v 1.12 2007/07/10 13:55:20 nonaka Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_apmdev.h"
@@ -53,7 +60,7 @@ __KERNEL_RCSID(0, "$NetBSD: apmdev.c,v 1.19 2008/06/12 01:46:32 rafal Exp $");
 #include <sys/kernel.h>
 #include <sys/proc.h>
 #include <sys/kthread.h>
-#include <sys/mutex.h>
+#include <sys/lock.h>
 #include <sys/user.h>
 #include <sys/malloc.h>
 #include <sys/device.h>
@@ -97,8 +104,8 @@ struct apm_softc {
 	int	event_count;
 	int	event_ptr;
 	int	sc_power_state;
-	lwp_t	*sc_thread;
-	kmutex_t sc_mutex;
+	struct lwp *sc_thread;
+	struct lock sc_lock;
 	struct apm_event_info event_list[APM_NEVENTS];
 	struct apm_accessops *ops;
 	void *cookie;
@@ -118,8 +125,10 @@ struct apm_softc {
  * APM module.  This is both the APM thread itself, as well as
  * user context.
  */
-#define	APM_LOCK(apmsc)		mutex_enter(&(apmsc)->sc_mutex)
-#define	APM_UNLOCK(apmsc)	mutex_exit(&(apmsc)->sc_mutex)
+#define	APM_LOCK(apmsc)							\
+	(void) lockmgr(&(apmsc)->sc_lock, LK_EXCLUSIVE, NULL)
+#define	APM_UNLOCK(apmsc)						\
+	(void) lockmgr(&(apmsc)->sc_lock, LK_RELEASE, NULL)
 
 static void	apmattach(struct device *, struct device *, void *);
 static int	apmmatch(struct device *, struct cfdata *, void *);
@@ -248,9 +257,9 @@ apm_power_print(struct apm_softc *sc, struct apm_power_info *pi)
 
 	if (pi->battery_life != APM_BATT_LIFE_UNKNOWN) {
 		printf("%s: battery life expectancy: %d%%\n",
-		    device_xname(&sc->sc_dev), pi->battery_life);
+		    sc->sc_dev.dv_xname, pi->battery_life);
 	}
-	printf("%s: A/C state: ", device_xname(&sc->sc_dev));
+	printf("%s: A/C state: ", sc->sc_dev.dv_xname);
 	switch (pi->ac_state) {
 	case APM_AC_OFF:
 		printf("off\n");
@@ -267,7 +276,7 @@ apm_power_print(struct apm_softc *sc, struct apm_power_info *pi)
 		break;
 	}
 	if (apm_major == 1 && apm_minor == 0) {
-		printf("%s: battery charge state:", device_xname(&sc->sc_dev));
+		printf("%s: battery charge state:", sc->sc_dev.dv_xname);
 		switch (pi->battery_state) {
 		case APM_BATT_HIGH:
 			printf("high\n");
@@ -302,7 +311,7 @@ apm_power_print(struct apm_softc *sc, struct apm_power_info *pi)
 			printf("high\n");
 	}
 	if (pi->minutes_left != 0) {
-		printf("%s: estimated ", device_xname(&sc->sc_dev));
+		printf("%s: estimated ", sc->sc_dev.dv_xname);
 		printf("%dh ", pi->minutes_left / 60);
 	}
 	return;
@@ -316,7 +325,7 @@ apm_suspend(struct apm_softc *sc)
 	if (sc->sc_power_state == PWR_SUSPEND) {
 #ifdef APMDEBUG
 		printf("%s: apm_suspend: already suspended?\n",
-		    device_xname(&sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 #endif
 		return;
 	}
@@ -340,7 +349,7 @@ apm_standby(struct apm_softc *sc)
 	if (sc->sc_power_state == PWR_STANDBY) {
 #ifdef APMDEBUG
 		printf("%s: apm_standby: already standing by?\n",
-		    device_xname(&sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 #endif
 		return;
 	}
@@ -363,7 +372,7 @@ apm_resume(struct apm_softc *sc, u_int event_type, u_int event_info)
 	if (sc->sc_power_state == PWR_RESUME) {
 #ifdef APMDEBUG
 		printf("%s: apm_resume: already running?\n",
-		    device_xname(&sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 #endif
 		return;
 	}
@@ -405,7 +414,7 @@ apm_record_event(struct apm_softc *sc, u_int event_type)
 	sc->event_ptr %= APM_NEVENTS;
 	evp->type = event_type;
 	evp->index = ++apm_evindex;
-	selnotify(&sc->sc_rsel, 0, 0);
+	selnotify(&sc->sc_rsel, 0);
 	return (sc->sc_flags & SCFLAG_OWRITE) ? 0 : 1; /* user may handle */
 }
 
@@ -692,9 +701,7 @@ apmattach(struct device *parent, struct device *self, void *aux)
 		apm_perror("get power status", error);
 	sc->ops->cpu_busy(sc->cookie);
 
-	mutex_init(&sc->sc_mutex, MUTEX_DEFAULT, IPL_NONE);
-	selinit(&sc->sc_rsel);
-	selinit(&sc->sc_xsel);
+	lockinit(&sc->sc_lock, PWAIT, "apmlk", 0, 0);
 
 	/* Initial state is `resumed'. */
 	sc->sc_power_state = PWR_RESUME;
@@ -707,13 +714,14 @@ apmattach(struct device *parent, struct device *self, void *aux)
 	 * and notify other subsystems when they occur.
 	 */
 	if (kthread_create(PRI_NONE, 0, NULL, apm_thread, sc,
-	    &sc->sc_thread, "%s", device_xname(&sc->sc_dev)) != 0) {
+	    &sc->sc_thread, "%s", sc->sc_dev.dv_xname) != 0) {
 		/*
 		 * We were unable to create the APM thread; bail out.
 		 */
 		sc->ops->disconnect(sc->cookie);
-		aprint_error_dev(&sc->sc_dev, "unable to create thread, "
-		    "kernel APM support disabled\n");
+		printf("%s: unable to create thread, "
+		    "kernel APM support disabled\n",
+		       sc->sc_dev.dv_xname);
 	}
 }
 
@@ -747,11 +755,14 @@ apm_thread(void *arg)
 int
 apmdevopen(dev_t dev, int flag, int mode, struct lwp *l)
 {
+	int unit = APMUNIT(dev);
 	int ctl = APMDEV(dev);
 	int error = 0;
 	struct apm_softc *sc;
 
-	sc = device_lookup_private(&apmdev_cd, APMUNIT(dev));
+	if (unit >= apmdev_cd.cd_ndevs)
+		return ENXIO;
+	sc = apmdev_cd.cd_devs[unit];
 	if (!sc)
 		return ENXIO;
 
@@ -794,7 +805,7 @@ int
 apmdevclose(dev_t dev, int flag, int mode,
 	    struct lwp *l)
 {
-	struct apm_softc *sc = device_lookup_private(&apmdev_cd, APMUNIT(dev));
+	struct apm_softc *sc = apmdev_cd.cd_devs[APMUNIT(dev)];
 	int ctl = APMDEV(dev);
 
 	DPRINTF(APMDEBUG_DEVICE,
@@ -821,7 +832,7 @@ int
 apmdevioctl(dev_t dev, u_long cmd, void *data, int flag,
 	    struct lwp *l)
 {
-	struct apm_softc *sc = device_lookup_private(&apmdev_cd, APMUNIT(dev));
+	struct apm_softc *sc = apmdev_cd.cd_devs[APMUNIT(dev)];
 	struct apm_power_info *powerp;
 	struct apm_event_info *evp;
 #if 0
@@ -905,7 +916,7 @@ apmdevioctl(dev_t dev, u_long cmd, void *data, int flag,
 int
 apmdevpoll(dev_t dev, int events, struct lwp *l)
 {
-	struct apm_softc *sc = device_lookup_private(&apmdev_cd, APMUNIT(dev));
+	struct apm_softc *sc = apmdev_cd.cd_devs[APMUNIT(dev)];
 	int revents = 0;
 
 	APM_LOCK(sc);
@@ -945,7 +956,7 @@ static const struct filterops apmread_filtops =
 int
 apmdevkqfilter(dev_t dev, struct knote *kn)
 {
-	struct apm_softc *sc = device_lookup_private(&apmdev_cd, APMUNIT(dev));
+	struct apm_softc *sc = apmdev_cd.cd_devs[APMUNIT(dev)];
 	struct klist *klist;
 
 	switch (kn->kn_filter) {
@@ -955,7 +966,7 @@ apmdevkqfilter(dev_t dev, struct knote *kn)
 		break;
 
 	default:
-		return (EINVAL);
+		return (1);
 	}
 
 	kn->kn_hook = sc;

@@ -1,7 +1,4 @@
-/* $NetBSD: joy_ess.c,v 1.5 2008/03/26 18:27:07 xtraeme Exp $ */
-
-#include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: joy_ess.c,v 1.5 2008/03/26 18:27:07 xtraeme Exp $");
+/* $NetBSD: joy_ess.c,v 1.3 2007/10/19 12:00:20 ad Exp $ */
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -15,33 +12,32 @@ __KERNEL_RCSID(0, "$NetBSD: joy_ess.c,v 1.5 2008/03/26 18:27:07 xtraeme Exp $");
 #include <dev/isa/essvar.h>
 #include <dev/ic/joyvar.h>
 
-static int 	joy_ess_match(device_t, cfdata_t, void *);
-static void 	joy_ess_attach(device_t, device_t, void *);
+int joy_ess_match(struct device *, struct cfdata *, void *);
+void joy_ess_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(joy_ess, sizeof (struct joy_softc),
+CFATTACH_DECL(joy_ess, sizeof (struct joy_softc),
 	      joy_ess_match, joy_ess_attach, NULL, NULL);
 
-static int
-joy_ess_match(device_t parent, cfdata_t match, void *aux)
+int
+joy_ess_match(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct audio_attach_args *aa = aux;
 
 	if (aa->type != AUDIODEV_TYPE_AUX)
-		return 0;
-	return 1;
+		return (0);
+	return (1);
 }
 
-static void
-joy_ess_attach(device_t parent, device_t self, void *aux)
+void
+joy_ess_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct ess_softc *esc = device_private(parent);
-	struct joy_softc *sc = device_private(self);
+	struct ess_softc *esc = (struct ess_softc *)parent;
+	struct joy_softc *sc = (struct joy_softc *)self;
 
-	aprint_normal("\n");
+	printf("\n");
 
 	sc->sc_iot = esc->sc_joy_iot;
 	sc->sc_ioh = esc->sc_joy_ioh;
-	sc->sc_dev = self;
 
 	joyattach(sc);
 }

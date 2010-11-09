@@ -1,4 +1,4 @@
-/*	$NetBSD: mace.c,v 1.15 2008/08/23 17:43:36 tsutsui Exp $	*/
+/*	$NetBSD: mace.c,v 1.8 2005/11/26 06:18:40 tsutsui Exp $	*/
 
 /*
  * Copyright (c) 2003 Christopher Sekiya
@@ -45,7 +45,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mace.c,v 1.15 2008/08/23 17:43:36 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mace.c,v 1.8 2005/11/26 06:18:40 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -109,7 +109,7 @@ CFATTACH_DECL(mace, sizeof(struct mace_softc),
     mace_match, mace_attach, NULL, NULL);
 
 #if defined(BLINK)
-static callout_t mace_blink_ch;
+static struct callout mace_blink_ch = CALLOUT_INITIALIZER;
 static void	mace_blink(void *);
 #endif
 
@@ -121,9 +121,9 @@ mace_match(struct device *parent, struct cfdata *match, void *aux)
 	 * The MACE is in the O2.
 	 */
 	if (mach_type == MACH_SGI_IP32)
-		return 1;
+		return (1);
 
-	return 0;
+	return (0);
 }
 
 static void
@@ -131,11 +131,7 @@ mace_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct mace_softc *sc = (struct mace_softc *)self;
 	struct mainbus_attach_args *ma = aux;
-	uint32_t scratch;
-
-#ifdef BLINK
-	callout_init(&mace_blink_ch, 0);
-#endif
+	u_int32_t scratch;
 
 	sc->iot = SGIMIPS_BUS_SPACE_MACE;
 	sc->dmat = &sgimips_default_bus_dma_tag;
@@ -143,6 +139,47 @@ mace_attach(struct device *parent, struct device *self, void *aux)
 	if (bus_space_map(sc->iot, ma->ma_addr, 0,
 	    BUS_SPACE_MAP_LINEAR, &sc->ioh))
 		panic("mace_attach: could not allocate memory\n");
+
+#if 0
+	/*
+	 * There's something deeply wrong with the alloc() routine -- it
+	 * returns a pointer to memory that is used by the kernel i/o
+	 * buffers.  Disable for now.
+	 */
+
+	if ((bus_dmamem_alloc(sc->dmat, 32768, PAGE_SIZE, 32768,
+	    &sc->seg, 1, &sc->nsegs, BUS_DMA_NOWAIT)) != 0) {
+		printf(": unable to allocate DMA memory\n");
+		return;
+	}
+
+	if ((bus_dmamem_map(sc->dmat, &sc->seg, sc->nsegs, 32768,
+	    (caddr_t *)&sc->isa_ringbuffer, BUS_DMA_NOWAIT | BUS_DMA_COHERENT))
+	    != 0) {
+		printf(": unable to map control data\n");
+		return;
+	}
+
+	if ((bus_dmamap_create(sc->dmat, 32768, 1, 32768, 0,
+	    BUS_DMA_NOWAIT, &sc->map)) != 0) {
+		printf(": unable to create DMA map for control data\n");
+		return;
+	}
+
+	if ((scratch = bus_dmamap_load(sc->dmat, sc->map, sc->isa_ringbuffer,
+	    32768, NULL, BUS_DMA_NOWAIT)) != 0) {
+		printf(": unable to load DMA map for control data %i\n",
+		    scratch);
+	}
+
+	memset(sc->isa_ringbuffer, 0, 32768);
+
+	bus_space_write_8(sc->iot, sc->ioh, MACE_ISA_RINGBASE,
+	    MIPS_KSEG1_TO_PHYS(sc->isa_ringbuffer) & 0xffff8000);
+
+	aprint_normal(" isa ringbuffer 0x%x size 32k",
+	    MIPS_KSEG1_TO_PHYS((unsigned long)sc->isa_ringbuffer));
+#endif
 
 	aprint_normal("\n");
 
@@ -152,15 +189,13 @@ mace_attach(struct device *parent, struct device *self, void *aux)
 	    bus_space_read_8(sc->iot, sc->ioh, MACE_ISA_INT_MASK));
 
 	/*
-	 * Turn on most ISA interrupts.  These are actually masked and
+	 * Turn on all ISA interrupts.  These are actually masked and
 	 * registered via the CRIME, as the MACE ISA interrupt mask is
 	 * really whacky and nigh on impossible to map to a sane autoconfig
-	 * scheme.  We do, however, turn off the count/compare timer and RTC
-	 * interrupts as they are unused and conflict with the PS/2
-	 * keyboard and mouse interrupts.
+	 * scheme.
 	 */
 
-	bus_space_write_8(sc->iot, sc->ioh, MACE_ISA_INT_MASK, 0xffff0aff);
+	bus_space_write_8(sc->iot, sc->ioh, MACE_ISA_INT_MASK, 0xffffffff);
 	bus_space_write_8(sc->iot, sc->ioh, MACE_ISA_INT_STATUS, 0);
 
 	/* set up LED for solid green or blink, if that's your fancy */
@@ -267,7 +302,7 @@ mace_intr_disestablish(void *cookie)
 		if (&maceintrtab[i] == cookie) {
 			evcnt_detach(&maceintrtab[i].evcnt);
 			for (intr = 0;
-			    maceintrtab[i].irq == (1 << intr); intr++);
+			    maceintrtab[i].irq == (1 << intr); intr ++);
 			level = maceintrtab[i].intrmask;
 			irq = maceintrtab[i].irq;
 
@@ -275,15 +310,15 @@ mace_intr_disestablish(void *cookie)
 			maceintrtab[i].intrmask = 0;
 		        maceintrtab[i].func = NULL;
 		        maceintrtab[i].arg = NULL;
-			memset(&maceintrtab[i].evcnt, 0, sizeof (struct evcnt));
-			memset(&maceintrtab[i].evname, 0,
+			bzero(&maceintrtab[i].evcnt, sizeof (struct evcnt));
+			bzero(&maceintrtab[i].evname,
 			    sizeof (maceintrtab[i].evname));
 			break;
 		}
 	if (intr == -1)
 		panic("mace: lost maceintrtab");
 
-	/* do not do an unmask when irq is shared. */
+	/* do not do a unmask, when irq is being shared. */
 	for (i = 0; i < MACE_NINTR; i++)
 		if (&maceintrtab[i].func != NULL && maceintrtab[i].irq == irq)
 			break;
@@ -296,14 +331,14 @@ mace_intr_disestablish(void *cookie)
 void
 mace_intr(int irqs)
 {
-	uint64_t isa_irq, isa_mask;
+	u_int64_t isa_irq, isa_mask;
 	int i;
 
 	/* irq 4 is the ISA cascade interrupt.  Must handle with care. */
 	if (irqs & (1 << 4)) {
-		isa_mask = mips3_ld((uint64_t *)MIPS_PHYS_TO_KSEG1(MACE_BASE
+		isa_mask = mips3_ld((u_int64_t *)MIPS_PHYS_TO_KSEG1(MACE_BASE
 		    + MACE_ISA_INT_MASK));
-		isa_irq = mips3_ld((uint64_t *)MIPS_PHYS_TO_KSEG1(MACE_BASE
+		isa_irq = mips3_ld((u_int64_t *)MIPS_PHYS_TO_KSEG1(MACE_BASE
 		    + MACE_ISA_INT_STATUS));
 		for (i = 0; i < MACE_NINTR; i++) {
 			if ((maceintrtab[i].irq == (1 << 4)) &&
@@ -312,6 +347,10 @@ mace_intr(int irqs)
 				maceintrtab[i].evcnt.ev_count++;
 	        	}
 		}
+#if 0
+		mips3_sd((u_int64_t *)MIPS_PHYS_TO_KSEG1(MACE_BASE
+		    + MACE_ISA_INT_STATUS), isa_mask);
+#endif
 		irqs &= ~(1 << 4);
 	}
 

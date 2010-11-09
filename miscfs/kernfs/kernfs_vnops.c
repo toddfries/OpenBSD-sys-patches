@@ -1,4 +1,4 @@
-/*	$NetBSD: kernfs_vnops.c,v 1.135 2009/01/11 02:45:53 christos Exp $	*/
+/*	$NetBSD: kernfs_vnops.c,v 1.132 2006/12/28 09:12:38 elad Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -39,7 +39,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kernfs_vnops.c,v 1.135 2009/01/11 02:45:53 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kernfs_vnops.c,v 1.132 2006/12/28 09:12:38 elad Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_ipsec.h"
@@ -400,8 +400,7 @@ kernfs_xread(kfs, off, bufp, len, wrlen)
 		struct timeval tv;
 
 		microtime(&tv);
-		snprintf(*bufp, len, "%lld %ld\n", (long long)tv.tv_sec,
-		    (long)tv.tv_usec);
+		snprintf(*bufp, len, "%ld %ld\n", tv.tv_sec, tv.tv_usec);
 		break;
 	}
 
@@ -476,8 +475,6 @@ kernfs_xread(kfs, off, bufp, len, wrlen)
 
 #ifdef IPSEC
 	case KFSipsecsa:
-		if (key_setdumpsa_spi == NULL)
-			return 0;
 		/*
 		 * Note that SA configuration could be changed during the
 		 * read operation, resulting in garbled output.
@@ -502,8 +499,6 @@ kernfs_xread(kfs, off, bufp, len, wrlen)
 		 * Note that SP configuration could be changed during the
 		 * read operation, resulting in garbled output.
 		 */
-		if (key_getspbyid == NULL)
-			return 0;
 		if (!kfs->kfs_v) {
 			struct secpolicy *sp;
 
@@ -710,6 +705,7 @@ kernfs_open(v)
 		struct vnode *a_vp;
 		int a_mode;
 		kauth_cred_t a_cred;
+		struct lwp *a_l;
 	} */ *ap = v;
 	struct kernfs_node *kfs = VTOKERN(ap->a_vp);
 #ifdef IPSEC
@@ -720,8 +716,6 @@ kernfs_open(v)
 	switch (kfs->kfs_type) {
 #ifdef IPSEC
 	case KFSipsecsa:
-		if (key_setdumpsa_spi == NULL)
-			return 0;
 		m = key_setdumpsa_spi(htonl(kfs->kfs_value));
 		if (m) {
 			m_freem(m);
@@ -730,8 +724,6 @@ kernfs_open(v)
 			return (ENOENT);
 
 	case KFSipsecsp:
-		if (key_getspbyid == NULL)
-			return 0;
 		sp = key_getspbyid(kfs->kfs_value);
 		if (sp) {
 			kfs->kfs_v = sp;
@@ -754,14 +746,13 @@ kernfs_close(v)
 		struct vnode *a_vp;
 		int a_fflag;
 		kauth_cred_t a_cred;
+		struct lwp *a_l;
 	} */ *ap = v;
 	struct kernfs_node *kfs = VTOKERN(ap->a_vp);
 
 	switch (kfs->kfs_type) {
 #ifdef IPSEC
 	case KFSipsecsp:
-		if (key_freesp == NULL)
-			return 0;
 		key_freesp((struct secpolicy *)kfs->kfs_v);
 		break;
 #endif
@@ -782,11 +773,12 @@ kernfs_access(v)
 		struct vnode *a_vp;
 		int a_mode;
 		kauth_cred_t a_cred;
+		struct lwp *a_l;
 	} */ *ap = v;
 	struct vattr va;
 	int error;
 
-	if ((error = VOP_GETATTR(ap->a_vp, &va, ap->a_cred)) != 0)
+	if ((error = VOP_GETATTR(ap->a_vp, &va, ap->a_cred, ap->a_l)) != 0)
 		return (error);
 
 	return (vaccess(va.va_type, va.va_mode, va.va_uid, va.va_gid,
@@ -801,6 +793,7 @@ kernfs_default_fileop_getattr(v)
 		struct vnode *a_vp;
 		struct vattr *a_vap;
 		kauth_cred_t a_cred;
+		struct lwp *a_l;
 	} */ *ap = v;
 	struct vattr *vap = ap->a_vap;
 
@@ -818,6 +811,7 @@ kernfs_getattr(v)
 		struct vnode *a_vp;
 		struct vattr *a_vap;
 		kauth_cred_t a_cred;
+		struct lwp *a_l;
 	} */ *ap = v;
 	struct kernfs_node *kfs = VTOKERN(ap->a_vp);
 	struct kernfs_subdir *ks;
@@ -838,7 +832,7 @@ kernfs_getattr(v)
 	/* Make all times be current TOD, except for the "boottime" node. */
 	if (kfs->kfs_kt->kt_namlen == 8 &&
 	    !memcmp(kfs->kfs_kt->kt_name, "boottime", 8)) {
-		vap->va_ctime = boottime;
+		TIMEVAL_TO_TIMESPEC(&boottime, &vap->va_ctime);
 	} else {
 		getnanotime(&vap->va_ctime);
 	}
@@ -1032,6 +1026,7 @@ kernfs_ioctl(v)
 		void *a_data;
 		int a_fflag;
 		kauth_cred_t a_cred;
+		struct lwp *a_l;
 	} */ *ap = v;
 	struct kernfs_node *kfs = VTOKERN(ap->a_vp);
 
@@ -1053,7 +1048,7 @@ kernfs_setdirentfileno_kt(struct dirent *d, const struct kern_target *kt,
 	if (kt->kt_tag == KFSdevice) {
 		struct vattr va;
 
-		error = VOP_GETATTR(vp, &va, ap->a_cred);
+		error = VOP_GETATTR(vp, &va, ap->a_cred, curlwp);
 		if (error != 0) {
 			return error;
 		}
@@ -1265,8 +1260,6 @@ kernfs_readdir(v)
 	case KFSipsecsadir:
 		/* count SA in the system */
 		n = 0;
-		if (&satailq == NULL)
-			return 0;
 		TAILQ_FOREACH(sav, &satailq, tailq) {
 			for (sav2 = TAILQ_FIRST(&satailq);
 			    sav2 != sav;
@@ -1341,9 +1334,6 @@ kernfs_readdir(v)
 
 	case KFSipsecspdir:
 		/* count SP in the system */
-		if (&sptailq == NULL)
-			return 0;
-
 		n = 0;
 		TAILQ_FOREACH(sp, &sptailq, tailq)
 			n++;
@@ -1423,7 +1413,7 @@ kernfs_inactive(v)
 {
 	struct vop_inactive_args /* {
 		struct vnode *a_vp;
-		bool *a_recycle;
+		struct lwp *a_l;
 	} */ *ap = v;
 	struct vnode *vp = ap->a_vp;
 	const struct kernfs_node *kfs = VTOKERN(ap->a_vp);
@@ -1432,33 +1422,29 @@ kernfs_inactive(v)
 	struct secpolicy *sp;
 #endif
 
-	*ap->a_recycle = false;
+	VOP_UNLOCK(vp, 0);
 	switch (kfs->kfs_type) {
 #ifdef IPSEC
 	case KFSipsecsa:
-		if (key_setdumpsa_spi == NULL)
-			return 0;
 		m = key_setdumpsa_spi(htonl(kfs->kfs_value));
 		if (m)
 			m_freem(m);
 		else
-			*ap->a_recycle = true;
+			vgone(vp);
 		break;
 	case KFSipsecsp:
-		if (key_getspbyid == NULL)
-			return 0;
 		sp = key_getspbyid(kfs->kfs_value);
 		if (sp)
 			key_freesp(sp);
 		else {
-			*ap->a_recycle = true;
+			/* should never happen as we hold a refcnt */
+			vgone(vp);
 		}
 		break;
 #endif
 	default:
 		break;
 	}
-	VOP_UNLOCK(vp, 0);
 	return (0);
 }
 

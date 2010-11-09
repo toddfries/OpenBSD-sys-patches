@@ -1,4 +1,4 @@
-/*	$NetBSD: zrc.c,v 1.6 2009/01/29 12:28:15 nonaka Exp $	*/
+/*	$NetBSD: zrc.c,v 1.2 2006/12/17 16:07:11 peter Exp $	*/
 /*	$OpenBSD: zaurus_remote.c,v 1.1 2005/11/17 05:26:31 uwe Exp $	*/
 
 /*
@@ -18,7 +18,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: zrc.c,v 1.6 2009/01/29 12:28:15 nonaka Exp $");
+__KERNEL_RCSID(0, "$NetBSD: zrc.c,v 1.2 2006/12/17 16:07:11 peter Exp $");
 
 #include <sys/param.h>
 #include <sys/device.h>
@@ -81,7 +81,7 @@ static const struct zrc_akey zrc_akeytab_c3000[] = {
 static const struct zrc_akey *zrc_akeytab = zrc_akeytab_c3000;
 
 struct zrc_softc {
-	device_t	 sc_dev;
+	struct device	 sc_dev;
 	struct callout	 sc_to;
 	void		*sc_ih;
 	int		 sc_key;	/* being scanned */
@@ -97,7 +97,7 @@ struct zrc_softc {
 static int	zrc_match(struct device *, struct cfdata *, void *);
 static void	zrc_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(zrc, sizeof(struct zrc_softc), 
+CFATTACH_DECL(zrc, sizeof(struct zrc_softc), 
     zrc_match, zrc_attach, NULL, NULL);
 
 static int	zrc_intr(void *);
@@ -107,7 +107,7 @@ static void	zrc_input(struct zrc_softc *, int, int);
 
 static int	zrc_enable(void *, int);
 static void	zrc_set_leds(void *, int);
-static int	zrc_ioctl(void *, u_long, void *, int, struct lwp *);
+static int	zrc_ioctl(void *, u_long, caddr_t, int, struct lwp *);
 
 struct wskbd_accessops zrc_accessops = {
 	zrc_enable,
@@ -157,7 +157,7 @@ struct wskbd_mapdata zrc_keymapdata = {
 #undef	KC
 
 static int
-zrc_match(device_t parent, cfdata_t cf, void *aux)
+zrc_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 
 	if (ZAURUS_ISC3000)
@@ -166,33 +166,24 @@ zrc_match(device_t parent, cfdata_t cf, void *aux)
 }
 
 static void
-zrc_attach(device_t parent, device_t self, void *aux)
+zrc_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct zrc_softc *sc = device_private(self);
+	struct zrc_softc *sc = (struct zrc_softc *)self;
 	struct wskbddev_attach_args a;
 
-	sc->sc_dev = self;
-
-	aprint_normal(": CE-RH2 remote control\n");
-	aprint_naive("\n");
-
 	/* Configure remote control interrupt handling. */
-	callout_init(&sc->sc_to, 0);
+	callout_init(&sc->sc_to);
 	callout_setfunc(&sc->sc_to, zrc_timeout, sc);
-
-	/* Establish interrput */
 	pxa2x0_gpio_set_function(C3000_RC_IRQ_PIN, GPIO_IN);
 	sc->sc_ih = pxa2x0_gpio_intr_establish(C3000_RC_IRQ_PIN,
 	    IST_EDGE_BOTH, IPL_BIO, zrc_intr, sc);
-	if (sc->sc_ih == NULL) {
-		aprint_error_dev(sc->sc_dev, "couldn't establish interrupt.\n");
-		return;
-	}
 
 	/* Enable the pullup while waiting for an interrupt. */
 	scoop_akin_pullup(1);
 
 	sc->sc_keydown = KEY_RELEASE;
+
+	printf(": CE-RH2 remote control\n");
 
 	a.console = 0;
 	a.keymap = &zrc_keymapdata;
@@ -254,9 +245,8 @@ zrc_timeout(void *v)
 			break;
 		default:
 #ifdef DEBUG
-			printf("%s: %s pressed (%d noise)\n",
-			    device_xname(sc->sc_dev),
-			    zrc_keyname[key], sc->sc_noise);
+			printf("%s pressed (%d noise)\n", zrc_keyname[key],
+			    sc->sc_noise);
 #endif
 			sc->sc_keydown = key;
 			sc->sc_noise = 0;
@@ -281,8 +271,7 @@ zrc_timeout(void *v)
 		if (sc->sc_keydown != KEY_RELEASE) {
 			zrc_input(sc, sc->sc_keydown, 0);
 #ifdef DEBUG
-			printf("%s: %s released (%d noise)\n",
-			    device_xname(sc->sc_dev),
+			printf("%s released (%d noise)\n",
 			    zrc_keyname[sc->sc_keydown], sc->sc_noise);
 #endif
 			sc->sc_keydown = KEY_RELEASE;
@@ -367,7 +356,7 @@ zrc_set_leds(void *v, int on)
 }
 
 static int
-zrc_ioctl(void *v, u_long cmd, void *data, int flag, struct lwp *l)
+zrc_ioctl(void *v, u_long cmd, caddr_t data, int flag, struct lwp *l)
 {
 #ifdef WSDISPLAY_COMPAT_RAWKBD
 	struct zrc_softc *sc = v;

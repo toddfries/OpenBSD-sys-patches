@@ -2,7 +2,7 @@
  *
  * Module Name: nsobject - Utilities for objects attached to namespace
  *                         table entries
- *              $Revision: 1.4 $
+ *              xRevision: 1.96 $
  *
  ******************************************************************************/
 
@@ -10,7 +10,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2008, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2006, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -116,6 +116,9 @@
  *****************************************************************************/
 
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: nsobject.c,v 1.1 2006/03/23 13:36:31 kochi Exp $");
+
 #define __NSOBJECT_C__
 
 #include "acpi.h"
@@ -158,7 +161,7 @@ AcpiNsAttachObject (
     ACPI_OBJECT_TYPE        ObjectType = ACPI_TYPE_ANY;
 
 
-    ACPI_FUNCTION_TRACE (NsAttachObject);
+    ACPI_FUNCTION_TRACE ("NsAttachObject");
 
 
     /*
@@ -298,7 +301,7 @@ AcpiNsDetachObject (
     ACPI_OPERAND_OBJECT     *ObjDesc;
 
 
-    ACPI_FUNCTION_TRACE (NsDetachObject);
+    ACPI_FUNCTION_TRACE ("NsDetachObject");
 
 
     ObjDesc = Node->Object;
@@ -353,7 +356,7 @@ ACPI_OPERAND_OBJECT *
 AcpiNsGetAttachedObject (
     ACPI_NAMESPACE_NODE     *Node)
 {
-    ACPI_FUNCTION_TRACE_PTR (NsGetAttachedObject, Node);
+    ACPI_FUNCTION_TRACE_PTR ("NsGetAttachedObject", Node);
 
 
     if (!Node)
@@ -391,7 +394,7 @@ ACPI_OPERAND_OBJECT *
 AcpiNsGetSecondaryObject (
     ACPI_OPERAND_OBJECT     *ObjDesc)
 {
-    ACPI_FUNCTION_TRACE_PTR (NsGetSecondaryObject, ObjDesc);
+    ACPI_FUNCTION_TRACE_PTR ("NsGetSecondaryObject", ObjDesc);
 
 
     if ((!ObjDesc)                                                ||

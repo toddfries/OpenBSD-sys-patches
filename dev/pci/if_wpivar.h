@@ -1,4 +1,4 @@
-/*  $NetBSD: if_wpivar.h,v 1.13 2008/11/12 18:23:08 joerg Exp $    */
+/*  $NetBSD: if_wpivar.h,v 1.11 2008/01/09 20:15:40 degroote Exp $    */
 
 /*-
  * Copyright (c) 2006
@@ -102,7 +102,6 @@ struct wpi_rx_ring {
 	struct wpi_rx_data	data[WPI_RX_RING_COUNT];
 	struct wpi_rbuf		rbuf[WPI_RBUF_COUNT];
 	SLIST_HEAD(, wpi_rbuf)	freelist;
-	kmutex_t		freelist_mtx;
 	int			nb_free_entries;
 	int			cur;
 };
@@ -142,7 +141,6 @@ struct wpi_softc {
 
 	/* firmware DMA transfer */
 	struct wpi_dma_info	fw_dma;
-	bool			fw_used;
 
 	struct wpi_tx_ring	txq[4];
 	struct wpi_tx_ring	cmdq;

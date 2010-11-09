@@ -1,7 +1,7 @@
-/* $NetBSD: pic16lc.c,v 1.15 2008/06/08 03:56:09 tsutsui Exp $ */
+/* $NetBSD: pic16lc.c,v 1.9 2007/07/04 18:56:16 xtraeme Exp $ */
 
 /*-
- * Copyright (c) 2007, 2008 Jared D. McNeill <jmcneill@invisible.ca>
+ * Copyright (c) 2007 Jared D. McNeill <jmcneill@invisible.ca>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -12,6 +12,12 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by Jared D. McNeill.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -34,7 +40,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: pic16lc.c,v 1.15 2008/06/08 03:56:09 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pic16lc.c,v 1.9 2007/07/04 18:56:16 xtraeme Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -47,8 +53,8 @@ __KERNEL_RCSID(0, "$NetBSD: pic16lc.c,v 1.15 2008/06/08 03:56:09 tsutsui Exp $")
 #include <dev/i2c/i2cvar.h>
 #include <dev/i2c/pic16lcreg.h>
 
-static int	pic16lc_match(device_t, cfdata_t, void *);
-static void	pic16lc_attach(device_t, device_t, void *);
+static int	pic16lc_match(struct device *, struct cfdata *, void *);
+static void	pic16lc_attach(struct device *, struct device *, void *);
 
 static int	pic16lc_intr(void *);
 
@@ -57,14 +63,14 @@ void		pic16lc_poweroff(void);
 void		pic16lc_setled(uint8_t);
 
 struct pic16lc_softc {
-	device_t	sc_dev;
+	struct device	sc_dev;
 
 	i2c_tag_t	sc_tag;
 	i2c_addr_t	sc_addr;
 	void *		sc_ih;
 
-	envsys_data_t sc_sensor[1];
-	struct sysmon_envsys *sc_sme;
+	envsys_data_t sc_data[2];
+	struct sysmon_envsys sc_sysmon;
 };
 
 static struct pic16lc_softc *pic16lc = NULL;
@@ -74,18 +80,20 @@ static struct pic16lc_softc *pic16lc = NULL;
 #define XBOX_NSENSORS		2
 
 static void	pic16lc_update(struct pic16lc_softc *, envsys_data_t *);
-static void	pic16lc_refresh(struct sysmon_envsys *, envsys_data_t *);
+static int	pic16lc_gtredata(struct sysmon_envsys *, envsys_data_t *);
 
 static void	pic16lc_write_1(struct pic16lc_softc *, uint8_t, uint8_t);
 static void	pic16lc_read_1(struct pic16lc_softc *, uint8_t, uint8_t *);
 
-CFATTACH_DECL_NEW(pic16lc, sizeof(struct pic16lc_softc),
+CFATTACH_DECL(pic16lc, sizeof(struct pic16lc_softc),
     pic16lc_match, pic16lc_attach, NULL, NULL);
 
 static int
-pic16lc_match(device_t parent, cfdata_t cf, void *opaque)
+pic16lc_match(struct device *parent, struct cfdata *cf, void *opaque)
 {
-	struct i2c_attach_args *ia = opaque;
+	struct i2c_attach_args *ia;
+
+	ia = (struct i2c_attach_args *)opaque;
 
 	if (pic16lc != NULL) /* we can only have one... */
 		return 0;
@@ -96,48 +104,41 @@ pic16lc_match(device_t parent, cfdata_t cf, void *opaque)
 }
 
 static void
-pic16lc_attach(device_t parent, device_t self, void *opaque)
+pic16lc_attach(struct device *parent, struct device *self, void *opaque)
 {
-	struct pic16lc_softc *sc = device_private(self);
-	struct i2c_attach_args *ia = opaque;
+	struct pic16lc_softc *sc;
+	struct i2c_attach_args *ia;
 	u_char ver[4];
-	int i;
 
-	sc->sc_dev = self;
+	sc = (struct pic16lc_softc *)self;
+	ia = (struct i2c_attach_args *)opaque;
+
 	sc->sc_tag = ia->ia_tag;
 	sc->sc_addr = ia->ia_addr;
 
 	pic16lc = sc;
 
-	sc->sc_sme = sysmon_envsys_create();
-
 	/* initialize CPU sensor */
-	sc->sc_sensor[XBOX_SENSOR_CPU].units = ENVSYS_STEMP;
-	(void)strlcpy(sc->sc_sensor[XBOX_SENSOR_CPU].desc, "Xbox CPU Temp",
-	    sizeof(sc->sc_sensor[XBOX_SENSOR_CPU]));
+	sc->sc_data[XBOX_SENSOR_CPU].sensor = XBOX_SENSOR_CPU;
+	sc->sc_data[XBOX_SENSOR_CPU].units = ENVSYS_STEMP;
+	(void)strlcpy(sc->sc_data[XBOX_SENSOR_CPU].desc, "Xbox CPU Temp",
+	    sizeof(sc->sc_data[XBOX_SENSOR_CPU]));
 	/* initialize board sensor */
-	sc->sc_sensor[XBOX_SENSOR_BOARD].units = ENVSYS_STEMP;
-	(void)strlcpy(sc->sc_sensor[XBOX_SENSOR_BOARD].desc, "Xbox Board Temp",
-	    sizeof(sc->sc_sensor[XBOX_SENSOR_BOARD]));
-
-	for (i = 0; i < XBOX_NSENSORS; i++) {
-		if (sysmon_envsys_sensor_attach(sc->sc_sme,
-						&sc->sc_sensor[i])) {
-			sysmon_envsys_destroy(sc->sc_sme);
-			return;
-		}
-	}
+	sc->sc_data[XBOX_SENSOR_BOARD].sensor = XBOX_SENSOR_BOARD;
+	sc->sc_data[XBOX_SENSOR_BOARD].units = ENVSYS_STEMP;
+	(void)strlcpy(sc->sc_data[XBOX_SENSOR_BOARD].desc, "Xbox Board Temp",
+	    sizeof(sc->sc_data[XBOX_SENSOR_BOARD]));
 
 	/* hook into sysmon */
-	sc->sc_sme->sme_name = device_xname(sc->sc_dev);
-	sc->sc_sme->sme_cookie = sc;
-	sc->sc_sme->sme_refresh = pic16lc_refresh;
+	sc->sc_sysmon.sme_name = sc->sc_dev.dv_xname;
+	sc->sc_sysmon.sme_sensor_data = sc->sc_data;
+	sc->sc_sysmon.sme_cookie = sc;
+	sc->sc_sysmon.sme_gtredata = pic16lc_gtredata;
+	sc->sc_sysmon.sme_nsensors = XBOX_NSENSORS;
 
-	if (sysmon_envsys_register(sc->sc_sme)) {
-		aprint_error_dev(self, "unable to register with sysmon\n");
-		sysmon_envsys_destroy(sc->sc_sme);
-		return;
-	}
+	if (sysmon_envsys_register(&sc->sc_sysmon))
+		aprint_error("%s: unable to register with sysmon\n",
+		    sc->sc_dev.dv_xname);
 
 	if (iic_acquire_bus(sc->sc_tag, 0) != 0) {
 		aprint_error(": unable to acquire i2c bus\n");
@@ -164,7 +165,8 @@ pic16lc_attach(device_t parent, device_t self, void *opaque)
 
 	sc->sc_ih = iic_smbus_intr_establish_proc(sc->sc_tag, pic16lc_intr, sc);
 	if (sc->sc_ih == NULL)
-		aprint_error_dev(self, "couldn't establish interrupt\n");
+		aprint_error("%s: couldn't establish interrupt\n",
+		    sc->sc_dev.dv_xname);
 
 	return;
 }
@@ -208,44 +210,48 @@ pic16lc_update(struct pic16lc_softc *sc, envsys_data_t *edata)
 	return;
 }
 
-static void
-pic16lc_refresh(struct sysmon_envsys *sme, envsys_data_t *edata)
+static int
+pic16lc_gtredata(struct sysmon_envsys *sme, envsys_data_t *edata)
 {
-	struct pic16lc_softc *sc = sme->sme_cookie;
+	struct pic16lc_softc *sc = (struct pic16lc_softc *)sme->sme_cookie;
 
 	pic16lc_update(sc, edata);
+	return 0;
 }
 
 static int
 pic16lc_intr(void *opaque)
 {
-	struct pic16lc_softc *sc = opaque;
+	struct pic16lc_softc *sc;
 	uint8_t val;
-	int rv = 0;
+	int rv;
+
+	sc = (struct pic16lc_softc *)opaque;
+	rv = 0;
 
 	pic16lc_read_1(sc, PIC16LC_REG_INTSTATUS, &val);
 	if (val == 0)
 		return rv;
 
 	if (val & PIC16LC_REG_INTSTATUS_POWER)
-		aprint_normal_dev(sc->sc_dev, "power button pressed\n");
+		printf("%s: power button pressed\n", pic16lc->sc_dev.dv_xname);
 	if (val & PIC16LC_REG_INTSTATUS_TRAYCLOSED)
-		aprint_normal_dev(sc->sc_dev, "tray closed\n");
+		printf("%s: tray closed\n", pic16lc->sc_dev.dv_xname);
 	if (val & PIC16LC_REG_INTSTATUS_TRAYOPENING) {
-		aprint_normal_dev(sc->sc_dev, "tray opening\n");
+		printf("%s: tray opening\n", pic16lc->sc_dev.dv_xname);
 		pic16lc_write_1(sc, PIC16LC_REG_INTACK, 0x02);
 	}
 	if (val & PIC16LC_REG_INTSTATUS_AVPACK_UNPLUG)
-		aprint_normal_dev(sc->sc_dev, "A/V pack removed\n");
+		printf("%s: A/V pack removed\n", pic16lc->sc_dev.dv_xname);
 	if (val & PIC16LC_REG_INTSTATUS_AVPACK_PLUG)
-		aprint_normal_dev(sc->sc_dev, "A/V pack inserted\n");
+		printf("%s: A/V pack inserted\n", pic16lc->sc_dev.dv_xname);
 	if (val & PIC16LC_REG_INTSTATUS_EJECT_BUTTON) {
 		pic16lc_write_1(sc, PIC16LC_REG_INTACK, 0x04);
 		pic16lc_write_1(sc, PIC16LC_REG_TRAYEJECT, 0x00);
 		++rv;
 	}
 	if (val & PIC16LC_REG_INTSTATUS_TRAYCLOSING)
-		aprint_normal_dev(sc->sc_dev, "tray closing\n");
+		printf("%s: tray closing\n", pic16lc->sc_dev.dv_xname);
 
 	return rv;
 }

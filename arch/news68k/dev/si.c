@@ -1,4 +1,4 @@
-/*	$NetBSD: si.c,v 1.25 2008/06/17 18:24:21 tsutsui Exp $	*/
+/*	$NetBSD: si.c,v 1.18 2006/03/29 04:16:46 thorpej Exp $	*/
 
 /*
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -38,7 +45,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: si.c,v 1.25 2008/06/17 18:24:21 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: si.c,v 1.18 2006/03/29 04:16:46 thorpej Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -63,25 +70,34 @@ __KERNEL_RCSID(0, "$NetBSD: si.c,v 1.25 2008/06/17 18:24:21 tsutsui Exp $");
 #define DMAC_BASE	0xe0e80000 /* XXX */
 #define SI_REGSIZE	8
 
+struct si_dma_handle {
+	int	dh_flags;
+#define SIDH_BUSY	0x01
+#define SIDH_OUT	0x02
+	caddr_t dh_addr;
+	int	dh_len;
+};
+
 struct si_softc {
 	struct	ncr5380_softc	ncr_sc;
 	int	sc_options;
-	struct dma_regs *sc_regs;
-	int	sc_xlen;
+	volatile struct dma_regs *sc_regs;
+	struct	si_dma_handle ncr_dma[SCI_OPENINGS];
 };
 
-static int  si_match(device_t, cfdata_t, void *);
-static void si_attach(device_t, device_t, void *);
+static void si_attach(struct device *, struct device *, void *);
+static int  si_match(struct device *, struct cfdata *, void *);
 int  si_intr(int);
 
 static void si_dma_alloc(struct ncr5380_softc *);
 static void si_dma_free(struct ncr5380_softc *);
+static void si_dma_setup(struct ncr5380_softc *);
 static void si_dma_start(struct ncr5380_softc *);
 static void si_dma_poll(struct ncr5380_softc *);
 static void si_dma_eop(struct ncr5380_softc *);
 static void si_dma_stop(struct ncr5380_softc *);
 
-CFATTACH_DECL_NEW(si, sizeof(struct si_softc),
+CFATTACH_DECL(si, sizeof(struct si_softc),
     si_match, si_attach, NULL, NULL);
 
 /*
@@ -95,11 +111,11 @@ CFATTACH_DECL_NEW(si, sizeof(struct si_softc),
 #define SI_FORCE_POLLING	0x10000
 #define SI_DISABLE_DMA		0x20000
 
-int si_options = 0x00;
+int si_options = 0x0f;
 
 
 static int
-si_match(device_t parent, cfdata_t cf, void *aux)
+si_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct hb_attach_args *ha = aux;
 	int addr;
@@ -122,18 +138,17 @@ si_match(device_t parent, cfdata_t cf, void *aux)
  */
 
 static void
-si_attach(device_t parent, device_t self, void *aux)
+si_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct si_softc *sc = device_private(self);
+	struct si_softc *sc = (struct si_softc *)self;
 	struct ncr5380_softc *ncr_sc = &sc->ncr_sc;
 	struct cfdata *cf = device_cfdata(self);
 	struct hb_attach_args *ha = aux;
 
-	ncr_sc->sc_dev = self;
 	ncr_sc->sc_regt = ha->ha_bust;
 	if (bus_space_map(ncr_sc->sc_regt, (bus_addr_t)ha->ha_address,
 	    ha->ha_size, 0, &ncr_sc->sc_regh) != 0) {
-		aprint_error(": can't map device space\n");
+		printf("can't map device space\n");
 		return;
 	}
 
@@ -143,9 +158,7 @@ si_attach(device_t parent, device_t self, void *aux)
 	else
 		sc->sc_options = si_options;
 
-	if (sc->sc_options != 0)
-		aprint_normal(": options=0x%x", sc->sc_options);
-	aprint_normal("\n");
+	printf(": options=0x%x\n", sc->sc_options);
 
 	ncr_sc->sc_no_disconnect = (sc->sc_options & SI_NO_DISCONNECT);
 	ncr_sc->sc_parity_disable = (sc->sc_options & SI_NO_PARITY_CHK) >> 8;
@@ -156,6 +169,7 @@ si_attach(device_t parent, device_t self, void *aux)
 	ncr_sc->sc_dma_alloc   = si_dma_alloc;
 	ncr_sc->sc_dma_free    = si_dma_free;
 	ncr_sc->sc_dma_poll    = si_dma_poll;
+	ncr_sc->sc_dma_setup   = si_dma_setup;
 	ncr_sc->sc_dma_start   = si_dma_start;
 	ncr_sc->sc_dma_eop     = si_dma_eop;
 	ncr_sc->sc_dma_stop    = si_dma_stop;
@@ -196,7 +210,7 @@ si_intr(int unit)
 	if (unit >= si_cd.cd_ndevs)
 		return 0;
 
-	sc = device_lookup_private(&si_cd, unit);	/* XXX */
+	sc = si_cd.cd_devs[unit];
 	(void)ncr5380_intr(&sc->ncr_sc);
 
 	return 0;
@@ -205,64 +219,105 @@ si_intr(int unit)
 /*
  *  DMA routines for news1700 machines
  */
+
 static void
 si_dma_alloc(struct ncr5380_softc *ncr_sc)
 {
+	struct si_softc *sc = (struct si_softc *)ncr_sc;
 	struct sci_req *sr = ncr_sc->sc_current;
+	struct scsipi_xfer *xs = sr->sr_xs;
+	struct si_dma_handle *dh;
+	int xlen, i;
 
 #ifdef DIAGNOSTIC
 	if (sr->sr_dma_hand != NULL)
-		panic("%s: DMA already in use", __func__);
+		panic("si_dma_alloc: already have DMA handle");
 #endif
 
+	/* Polled transfers shouldn't allocate a DMA handle. */
+	if (sr->sr_flags & SR_IMMED)
+		return;
+
+	xlen = ncr_sc->sc_datalen;
+
+	/* Make sure our caller checked sc_min_dma_len. */
+	if (xlen < MIN_DMA_LEN)
+		panic("si_dma_alloc: len=0x%x", xlen);
+
 	/*
-	 * On news68k, SCSI has its own DMAC so no need allocate it.
-	 * Just mark that DMA is available.
+	 * Find free DMA handle.  Guaranteed to find one since we
+	 * have as many DMA handles as the driver has processes.
+	 * (instances?)
 	 */
-	sr->sr_dma_hand = (void *)-1;
+	 for (i = 0; i < SCI_OPENINGS; i++) {
+		if ((sc->ncr_dma[i].dh_flags & SIDH_BUSY) == 0)
+			goto found;
+	}
+	panic("si_dma_alloc(): no free DMA handles");
+ found:
+	dh = &sc->ncr_dma[i];
+	dh->dh_flags = SIDH_BUSY;
+	dh->dh_addr = ncr_sc->sc_dataptr;
+	dh->dh_len = xlen;
+
+	/* Remember dest buffer parameters */
+	if (xs->xs_control & XS_CTL_DATA_OUT)
+		dh->dh_flags |= SIDH_OUT;
+
+	sr->sr_dma_hand = dh;
 }
 
 static void
 si_dma_free(struct ncr5380_softc *ncr_sc)
 {
 	struct sci_req *sr = ncr_sc->sc_current;
+	struct si_dma_handle *dh = sr->sr_dma_hand;
 
-#ifdef DIAGNOSTIC
-	if (sr->sr_dma_hand == NULL)
-		panic("%s: DMA not in use", __func__);
-#endif
+	if (dh->dh_flags & SIDH_BUSY)
+		dh->dh_flags = 0;
+	else
+		printf("si_dma_free: free'ing unused buffer\n");
 
 	sr->sr_dma_hand = NULL;
 }
 
+static void
+si_dma_setup(struct ncr5380_softc *ncr_sc)
+{
+
+	/* Do nothing here */
+}
 
 static void
 si_dma_start(struct ncr5380_softc *ncr_sc)
 {
 	struct si_softc *sc = (struct si_softc *)ncr_sc;
-	struct dma_regs *dmac = sc->sc_regs;
+	volatile struct dma_regs *dmac = sc->sc_regs;
 	struct sci_req *sr = ncr_sc->sc_current;
+	struct si_dma_handle *dh = sr->sr_dma_hand;
 	u_int addr, offset, rest;
 	long len;
 	int i;
+
+	/*
+	 * Set the news68k-specific registers.
+	 */
 
 	/* reset DMAC */
 	dmac->ctl = DC_CTL_RST;
 	dmac->ctl = 0;
 
-	addr = (u_int)ncr_sc->sc_dataptr;
+	addr = (u_int)dh->dh_addr;
 	offset = addr & DMAC_SEG_OFFSET;
-	len = sc->sc_xlen = ncr_sc->sc_datalen;
+	len = (u_int)dh->dh_len;
 
-	/* set DMA transfer length */
-	dmac->tcnt = (uint32_t)len;
-
-	/* set offset of first segment */
+	/* set DMA transfer length and offset of first segment */
+	dmac->tcnt = len;
 	dmac->offset = offset;
 
 	/* set first DMA segment address */
 	dmac->tag = 0;
-	dmac->mapent = kvtop((void *)addr) >> DMAC_SEG_SHIFT;
+	dmac->mapent = kvtop((caddr_t)addr) >> DMAC_SEG_SHIFT;
 	rest = DMAC_SEG_SIZE - offset;
 	addr += rest;
 	len -= rest;
@@ -270,18 +325,21 @@ si_dma_start(struct ncr5380_softc *ncr_sc)
 	/* set all the rest segments */
 	for (i = 1; len > 0; i++) {
 		dmac->tag = i;
-		dmac->mapent = kvtop((void *)addr) >> DMAC_SEG_SHIFT;
+		dmac->mapent = kvtop((caddr_t)addr) >> DMAC_SEG_SHIFT;
 		len -= DMAC_SEG_SIZE;
 		addr += DMAC_SEG_SIZE;
 	}
 	/* terminate TAG */
 	dmac->tag = 0;
 
-	if (sr->sr_xs->xs_control & XS_CTL_DATA_OUT) {
+	/*
+	 * Now from the 5380-internal DMA registers.
+	 */
+	if (dh->dh_flags & SIDH_OUT) {
 		NCR5380_WRITE(ncr_sc, sci_tcmd, PHASE_DATA_OUT);
 		NCR5380_WRITE(ncr_sc, sci_icmd, SCI_ICMD_DATA);
 		NCR5380_WRITE(ncr_sc, sci_mode, NCR5380_READ(ncr_sc, sci_mode)
-		    | SCI_MODE_DMA | SCI_MODE_DMA_IE);
+		    | SCI_MODE_DMA);
 
 		/* set Dir */
 		dmac->ctl = 0;
@@ -293,7 +351,7 @@ si_dma_start(struct ncr5380_softc *ncr_sc)
 		NCR5380_WRITE(ncr_sc, sci_tcmd, PHASE_DATA_IN);
 		NCR5380_WRITE(ncr_sc, sci_icmd, 0);
 		NCR5380_WRITE(ncr_sc, sci_mode, NCR5380_READ(ncr_sc, sci_mode)
-		    | SCI_MODE_DMA | SCI_MODE_DMA_IE);
+		    | SCI_MODE_DMA);
 
 		/* set Dir */
 		dmac->ctl = DC_CTL_MOD;
@@ -311,22 +369,8 @@ si_dma_start(struct ncr5380_softc *ncr_sc)
 static void
 si_dma_poll(struct ncr5380_softc *ncr_sc)
 {
-	struct si_softc *sc = (struct si_softc *)ncr_sc;
-	struct dma_regs *dmac = sc->sc_regs;
-	int i;
 
-#define POLL_TIMEOUT	100000
-
-	/* check DMAC interrupt status */
-	for (i = 0; i < POLL_TIMEOUT; i++) {
-		if ((dmac->stat & DC_ST_INT) != 0)
-			break;
-		delay(10);
-	}
-
-	if (i == POLL_TIMEOUT)
-		printf("%s: DMA polling timeout\n",
-		    device_xname(ncr_sc->sc_dev));
+	printf("si_dma_poll\n");
 }
 
 /*
@@ -343,29 +387,26 @@ static void
 si_dma_stop(struct ncr5380_softc *ncr_sc)
 {
 	struct si_softc *sc = (struct si_softc *)ncr_sc;
-	struct dma_regs *dmac = sc->sc_regs;
+	volatile struct dma_regs *dmac = sc->sc_regs;
 	struct sci_req *sr = ncr_sc->sc_current;
-	int resid, ntrans;
+	struct si_dma_handle *dh = sr->sr_dma_hand;
+	int resid, ntrans, i;
 
 	/* check DMAC interrupt status */
 	if ((dmac->stat & DC_ST_INT) == 0) {
 #ifdef DEBUG
-		printf("%s: no DMA interrupt\n", __func__);
+		printf("si_dma_stop: no DMA interrupt");
 #endif
 		return; /* XXX */
 	}
 
 	if ((ncr_sc->sc_state & NCR_DOINGDMA) == 0) {
 #ifdef DEBUG
-		printf("%s: dma not running\n", __func__);
+		printf("si_dma_stop: dma not running\n");
 #endif
 		return;
 	}
 	ncr_sc->sc_state &= ~NCR_DOINGDMA;
-
-	/* stop DMAC */
-	resid = dmac->tcnt;
-	dmac->ctl &= ~DC_CTL_ENB;
 
 	/* OK, have either phase mis-match or end of DMA. */
 	/* Set an impossible phase to prevent data movement? */
@@ -375,28 +416,32 @@ si_dma_stop(struct ncr5380_softc *ncr_sc)
 	if (ncr_sc->sc_state & NCR_ABORTING)
 		goto out;
 
-#ifdef DEBUG
-	if (resid)
-		printf("%s: datalen = 0x%x, resid = 0x%x\n",
-		    __func__, sc->sc_xlen, resid);
-#endif
+	/*
+	 * Sometimes the FIFO buffer isn't drained when the
+	 * interrupt is posted. Just loop here and hope that
+	 * it will drain soon.
+	 */
+	for (i = 0; i < 200000; i++) { /* 2 sec */
+		resid = dmac->tcnt;
+		if (resid == 0)
+			break;
+		DELAY(10);
+	}
 
-	ntrans = sc->sc_xlen - resid;
+	if (resid)
+		printf("si_dma_stop: resid=0x%x\n", resid);
+
+	ntrans = dh->dh_len - resid;
 
 	ncr_sc->sc_dataptr += ntrans;
 	ncr_sc->sc_datalen -= ntrans;
 
-	if (sr->sr_xs->xs_control & XS_CTL_DATA_IN) {
-		/* flush data cache */
+	if ((dh->dh_flags & SIDH_OUT) == 0) {
 		PCIA();
 	}
 
  out:
-	/* reset DMAC */
-	dmac->ctl = DC_CTL_RST;
-	dmac->ctl = 0;
-
 	NCR5380_WRITE(ncr_sc, sci_mode, NCR5380_READ(ncr_sc, sci_mode) &
-	    ~(SCI_MODE_DMA | SCI_MODE_DMA_IE));
+	    ~(SCI_MODE_DMA));
 	NCR5380_WRITE(ncr_sc, sci_icmd, 0);
 }

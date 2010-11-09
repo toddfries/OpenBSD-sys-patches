@@ -1,4 +1,4 @@
-/*	$NetBSD: pdqvar.h,v 1.40 2008/06/24 10:12:06 gmcgarry Exp $	*/
+/*	$NetBSD: pdqvar.h,v 1.38 2007/10/19 11:59:59 ad Exp $	*/
 
 /*-
  * Copyright (c) 1995, 1996 Matt Thomas <matt@3am-software.com>
@@ -39,30 +39,6 @@
 
 #define	PDQ_OS_TX_TIMEOUT		5	/* seconds */
 
-enum _pdq_boolean_t { 
-    PDQ_FALSE=0,
-    PDQ_TRUE=1
-}; 
-
-enum _pdq_type_t {
-    PDQ_DEFPA,		/* PCI-bus */
-    PDQ_DEFEA,		/* EISA-bus */
-    PDQ_DEFTA,		/* TurboChannel */
-    PDQ_DEFAA,		/* FutureBus+ */
-    PDQ_DEFQA		/* Q-bus */
-};
-
-enum _pdq_state_t {
-    PDQS_RESET=0,
-    PDQS_UPGRADE=1,
-    PDQS_DMA_UNAVAILABLE=2,
-    PDQS_DMA_AVAILABLE=3,
-    PDQS_LINK_AVAILABLE=4,
-    PDQS_LINK_UNAVAILABLE=5,
-    PDQS_HALTED=6,
-    PDQS_RING_MEMBER=7
-}; 
-
 typedef struct _pdq_t pdq_t;
 typedef struct _pdq_csrs_t pdq_csrs_t;
 typedef struct _pdq_pci_csrs_t pdq_pci_csrs_t;
@@ -73,6 +49,14 @@ typedef unsigned char pdq_uint8_t;
 typedef enum _pdq_boolean_t pdq_boolean_t;
 typedef enum _pdq_type_t pdq_type_t;
 typedef enum _pdq_state_t pdq_state_t;
+
+enum _pdq_type_t {
+    PDQ_DEFPA,		/* PCI-bus */
+    PDQ_DEFEA,		/* EISA-bus */
+    PDQ_DEFTA,		/* TurboChannel */
+    PDQ_DEFAA,		/* FutureBus+ */
+    PDQ_DEFQA		/* Q-bus */
+};
 
 #if defined(PDQTEST)
 #include <pdq_os_test.h>
@@ -244,7 +228,7 @@ extern void pdq_os_databuf_free(struct _pdq_os_ctx_t *, struct mbuf *);
 #define	PDQ_OS_IFP_TO_SOFTC(ifp)		((pdq_softc_t *) (ifp)->if_softc)
 #define	PDQ_ARP_IFINIT(sc, ifa)			arp_ifinit(&(sc)->sc_if, (ifa))
 #define	PDQ_FDDICOM(sc)				(&(sc)->sc_ec)
-#define	PDQ_LANADDR(sc)				CLLADDR((sc)->sc_if.if_sadl)
+#define	PDQ_LANADDR(sc)				LLADDR((sc)->sc_if.if_sadl)
 #define	PDQ_LANADDR_SIZE(sc)			((sc)->sc_if.if_sadl->sdl_alen)
 #endif
 

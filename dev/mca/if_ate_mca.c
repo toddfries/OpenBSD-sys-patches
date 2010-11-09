@@ -1,4 +1,4 @@
-/*	$NetBSD: if_ate_mca.c,v 1.21 2008/04/28 20:23:53 martin Exp $	*/
+/*	$NetBSD: if_ate_mca.c,v 1.18 2007/10/19 12:00:34 ad Exp $	*/
 
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -34,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_ate_mca.c,v 1.21 2008/04/28 20:23:53 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_ate_mca.c,v 1.18 2007/10/19 12:00:34 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -55,10 +62,10 @@ __KERNEL_RCSID(0, "$NetBSD: if_ate_mca.c,v 1.21 2008/04/28 20:23:53 martin Exp $
 #include <dev/mca/mcavar.h>
 #include <dev/mca/mcadevs.h>
 
-int	ate_mca_match(device_t, cfdata_t, void *);
-void	ate_mca_attach(device_t, device_t, void *);
+int	ate_mca_match(struct device *, struct cfdata *, void *);
+void	ate_mca_attach(struct device *, struct device *, void *);
 static void ate_mca_detect(bus_space_tag_t, bus_space_handle_t,
-    uint8_t enaddr[ETHER_ADDR_LEN]);
+    u_int8_t enaddr[ETHER_ADDR_LEN]);
 
 #define ATE_NPORTS 0x20
 
@@ -69,11 +76,11 @@ struct ate_softc {
 	void	*sc_ih;				/* interrupt cookie */
 };
 
-CFATTACH_DECL_NEW(ate_mca, sizeof(struct ate_softc),
+CFATTACH_DECL(ate_mca, sizeof(struct ate_softc),
     ate_mca_match, ate_mca_attach, NULL, NULL);
 
 static const struct ate_mca_product {
-	uint32_t	at_prodid;	/* MCA product ID */
+	u_int32_t	at_prodid;	/* MCA product ID */
 	const char	*at_name;	/* device name */
 	int		at_type;	/* device type */
 } ate_mca_products[] = {
@@ -84,29 +91,31 @@ static const struct ate_mca_product {
 	{ 0,			NULL,		0			},
 };
 
-static const struct ate_mca_product *ate_mca_lookup(uint32_t);
+static const struct ate_mca_product *ate_mca_lookup(u_int32_t);
 
 static const struct ate_mca_product *
-ate_mca_lookup(uint32_t id)
+ate_mca_lookup(id)
+	u_int32_t id;
 {
 	const struct ate_mca_product *atp;
 
 	for (atp = ate_mca_products; atp->at_name != NULL; atp++)
 		if (id == atp->at_prodid)
-			return atp;
+			return (atp);
 
-	return NULL;
+	return (NULL);
 }
 
 int
-ate_mca_match(device_t parent, cfdata_t cf, void *aux)
+ate_mca_match(struct device *parent, struct cfdata *match,
+    void *aux)
 {
-	struct mca_attach_args *ma = aux;
+	struct mca_attach_args *ma = (struct mca_attach_args *) aux;
 
 	if (ate_mca_lookup(ma->ma_id) != NULL)
-		return 1;
+		return (1);
 
-	return 0;
+	return (0);
 }
 
 /* see POS diagrams below for explanation of these arrays' contents */
@@ -118,19 +127,18 @@ static const int ats_irq[] = {
 };
 
 void
-ate_mca_attach(device_t parent, device_t self, void *aux)
+ate_mca_attach(struct device *parent, struct device *self,
+    void *aux)
 {
 	struct ate_softc *isc = device_private(self);
 	struct mb86960_softc *sc = &isc->sc_mb86960;
 	struct mca_attach_args *ma = aux;
 	bus_space_tag_t iot = ma->ma_iot;
 	bus_space_handle_t ioh;
-	uint8_t myea[ETHER_ADDR_LEN];
+	u_int8_t myea[ETHER_ADDR_LEN];
 	int pos3, pos4;
 	int iobase, irq;
 	const struct ate_mca_product *atp;
-
-	sc->sc_dev = self;
 
 	pos3 = mca_conf_read(ma->ma_mc, ma->ma_slot, 3);
 	pos4 = mca_conf_read(ma->ma_mc, ma->ma_slot, 4);
@@ -163,8 +171,7 @@ ate_mca_attach(device_t parent, device_t self, void *aux)
 	atp = ate_mca_lookup(ma->ma_id);
 #ifdef DIAGNOSTIC
 	if (atp == NULL) {
-		aprint_normal("\n");
-		aprint_error_dev(sc->sc_dev, "where did the card go?\n");
+		printf("\n%s: where did the card go?\n", sc->sc_dev.dv_xname);
 		return;
 	}
 #endif
@@ -172,12 +179,11 @@ ate_mca_attach(device_t parent, device_t self, void *aux)
 	iobase = ats_iobase[pos3 & 0x7];
 	irq = ats_irq[((pos4 & 0x40) >> 4) | ((pos3 & 0xc0) >> 6)];
 
-	aprint_normal(" slot %d irq %d: %s\n",
-	    ma->ma_slot + 1, irq, atp->at_name);
+	printf(" slot %d irq %d: %s\n", ma->ma_slot + 1, irq, atp->at_name);
 
 	/* Map i/o space. */
 	if (bus_space_map(iot, iobase, ATE_NPORTS, 0, &ioh)) {
-		aprint_error_dev(sc->sc_dev, "can't map i/o space\n");
+		printf("%s: can't map i/o space\n", sc->sc_dev.dv_xname);
 		return;
 	}
 
@@ -199,10 +205,10 @@ ate_mca_attach(device_t parent, device_t self, void *aux)
 
 	/* Establish the interrupt handler. */
 	isc->sc_ih = mca_intr_establish(ma->ma_mc, irq, IPL_NET,
-	    mb86960_intr, sc);
+			mb86960_intr, sc);
 	if (isc->sc_ih == NULL) {
-		aprint_error_dev(sc->sc_dev,
-		    "couldn't establish interrupt handler\n");
+		printf("%s: couldn't establish interrupt handler\n",
+		    sc->sc_dev.dv_xname);
 		return;
 	}
 }
@@ -212,10 +218,12 @@ ate_mca_attach(device_t parent, device_t self, void *aux)
  * to determine ethernet address.
  */
 static void
-ate_mca_detect(bus_space_tag_t iot, bus_space_handle_t ioh,
-    uint8_t enaddr[ETHER_ADDR_LEN])
+ate_mca_detect(iot, ioh, enaddr)
+	bus_space_tag_t iot;
+	bus_space_handle_t ioh;
+	u_int8_t enaddr[ETHER_ADDR_LEN];
 {
-	uint8_t eeprom[FE_EEPROM_SIZE];
+	u_int8_t eeprom[FE_EEPROM_SIZE];
 
 	/* Get our station address from EEPROM. */
 	mb86965_read_eeprom(iot, ioh, eeprom);

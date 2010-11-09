@@ -1,4 +1,4 @@
-/*	$NetBSD: lseek.c,v 1.11 2007/12/02 04:59:26 tsutsui Exp $	*/
+/*	$NetBSD: lseek.c,v 1.9 2005/12/11 12:24:46 christos Exp $	*/
 
 /*-
  * Copyright (c) 1993
@@ -64,17 +64,20 @@
 
 off_t
 #ifndef __INTERNAL_LIBSA_CREAD
-lseek(int fd, off_t offset, int where)
+lseek(fd, offset, where)
 #else
-olseek(int fd, off_t offset, int where)
+olseek(fd, offset, where)
 #endif
+	int fd;
+	off_t offset;
+	int where;
 {
 	struct open_file *f = &files[fd];
 
 #if !defined(LIBSA_NO_FD_CHECKING)
-	if ((unsigned int)fd >= SOPEN_MAX || f->f_flags == 0) {
+	if ((unsigned)fd >= SOPEN_MAX || f->f_flags == 0) {
 		errno = EBADF;
-		return -1;
+		return (-1);
 	}
 #endif
 
@@ -93,9 +96,9 @@ olseek(int fd, off_t offset, int where)
 		case SEEK_END:
 		default:
 			errno = EOFFSET;
-			return -1;
+			return (-1);
 		}
-		return f->f_offset;
+		return (f->f_offset);
 	}
 #endif
 

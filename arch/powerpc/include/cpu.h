@@ -1,4 +1,4 @@
-/*	$NetBSD: cpu.h,v 1.65 2008/04/30 23:21:29 macallan Exp $	*/
+/*	$NetBSD: cpu.h,v 1.52 2006/08/31 18:18:17 matt Exp $	*/
 
 /*
  * Copyright (C) 1999 Wolfgang Solfrank.
@@ -65,6 +65,7 @@ struct cpu_info {
 	struct pmap *ci_curpm;
 	struct lwp *ci_fpulwp;
 	struct lwp *ci_veclwp;
+	struct pcb *ci_idle_pcb;	/* PA of our idle pcb */
 	int ci_cpuid;
 
 	volatile int ci_astpending;
@@ -73,11 +74,8 @@ struct cpu_info {
 	volatile int ci_tickspending;
 	volatile int ci_cpl;
 	volatile int ci_iactive;
-	volatile int ci_idepth;
 	volatile int ci_ipending;
 	int ci_intrdepth;
-	int ci_mtx_oldspl;
-	int ci_mtx_count;
 	char *ci_intstk;
 #define	CPUSAVE_LEN	8
 	register_t ci_tempsave[CPUSAVE_LEN];
@@ -118,24 +116,9 @@ struct cpu_info {
 	struct evcnt ci_ev_vec;		/* Altivec traps */
 	struct evcnt ci_ev_vecsw;	/* Altivec context switches */
 	struct evcnt ci_ev_umchk;	/* user MCHK events */
-	struct evcnt ci_ev_ipi;		/* IPIs received */
 };
 
 #ifdef MULTIPROCESSOR
-
-struct cpu_hatch_data {
-	struct device *self;
-	struct cpu_info *ci;
-	int running;
-	int pir;
-	int asr;
-	int hid0;
-	int sdr1;
-	int sr[16];
-	int batu[4], batl[4];
-	int tbu, tbl;
-};
-
 static __inline int
 cpu_number(void)
 {
@@ -151,7 +134,7 @@ void	cpu_boot_secondary_processors(void);
 #define CPU_IS_PRIMARY(ci)	((ci)->ci_cpuid == 0)
 #define CPU_INFO_ITERATOR		int
 #define CPU_INFO_FOREACH(cii, ci)					\
-	cii = 0, ci = &cpu_info[0]; cii < ncpu; cii++, ci++
+	cii = 0, ci = &cpu_info[0]; cii < CPU_MAXNUM; cii++, ci++
 
 #else
 
@@ -297,17 +280,19 @@ cntlzw(uint32_t val)
 })
 #endif /* PPC_IBM4XX || PPC_IBM403 */
 
+/*
+ * CLKF_BASEPRI is dependent on the underlying interrupt code
+ * and can not be defined here.  It should be defined in
+ * <machine/intr.h>
+ */
 #define	CLKF_USERMODE(frame)	(((frame)->srr1 & PSL_PR) != 0)
 #define	CLKF_PC(frame)		((frame)->srr0)
 #define	CLKF_INTR(frame)	((frame)->depth > 0)
 
 #define	LWP_PC(l)		(trapframe(l)->srr0)
 
-#define	cpu_swapin(p)
 #define	cpu_swapout(p)
 #define	cpu_proc_fork(p1, p2)
-#define	cpu_idle()		(curcpu()->ci_idlespin())
-#define cpu_lwp_free2(l)
 
 extern int powersave;
 extern int cpu_timebase;
@@ -326,30 +311,18 @@ void icache_flush(vaddr_t, vsize_t);
 void *mapiodev(paddr_t, psize_t);
 void unmapiodev(vaddr_t, vsize_t);
 
-#ifdef MULTIPROCESSOR
-int md_setup_trampoline(volatile struct cpu_hatch_data *, struct cpu_info *);
-void md_presync_timebase(volatile struct cpu_hatch_data *);
-void md_start_timebase(volatile struct cpu_hatch_data *);
-void md_sync_timebase(volatile struct cpu_hatch_data *);
-void md_setup_interrupts(void);
-int cpu_spinup(struct device *, struct cpu_info *);
-register_t cpu_hatch(void);
-void cpu_spinup_trampoline(void);
-#endif
-
 #define	DELAY(n)		delay(n)
 
-#define	cpu_need_resched(ci, v)	(ci->ci_want_resched = ci->ci_astpending = 1)
-#define	cpu_did_resched(l)	((void)(curcpu()->ci_want_resched = 0))
-#define	cpu_need_proftick(l)	((l)->l_pflag |= LP_OWEUPC, curcpu()->ci_astpending = 1)
-#define	cpu_signotify(l)	(curcpu()->ci_astpending = 1)	/* XXXSMP */
+#define	need_resched(ci)	(ci->ci_want_resched = 1, ci->ci_astpending = 1)
+#define	need_proftick(p)	((p)->p_flag |= P_OWEUPC, curcpu()->ci_astpending = 1)
+#define	signotify(p)		(curcpu()->ci_astpending = 1)
 
-#if !defined(PPC_IBM4XX)
+#if defined(PPC_OEA) || defined(PPC_OEA64) || defined (PPC_OEA64_BRIDGE)
 void oea_init(void (*)(void));
 void oea_startup(const char *);
 void oea_dumpsys(void);
 void oea_install_extint(void (*)(void));
-paddr_t kvtop(void *); 
+paddr_t kvtop(caddr_t); 
 void softnet(int);
 
 extern paddr_t msgbuf_paddr;
@@ -358,20 +331,15 @@ extern int cpu_altivec;
 
 #endif /* _KERNEL */
 
-/* XXX The below breaks unified pmap on ppc32 */
-
 #if defined(_KERNEL) || defined(_STANDALONE)
 #if !defined(CACHELINESIZE)
 #ifdef PPC_IBM403
-#define	CACHELINESIZE		16
-#define MAXCACHELINESIZE	16
+#define	CACHELINESIZE	16
 #else
 #if defined (PPC_OEA64_BRIDGE)
-#define	CACHELINESIZE		128
-#define MAXCACHELINESIZE	128
+#define	CACHELINESIZE	128
 #else
-#define	CACHELINESIZE		32
-#define MAXCACHELINESIZE	32
+#define	CACHELINESIZE	32
 #endif /* PPC_OEA64_BRIDGE */
 #endif
 #endif
@@ -389,9 +357,19 @@ void __syncicache(void *, size_t);
 #define	CPU_CACHEINFO		5
 #define	CPU_ALTIVEC		6
 #define	CPU_MODEL		7
-#define	CPU_POWERSAVE		8	/* int: use CPU powersave mode */
-#define	CPU_BOOTED_DEVICE	9	/* string: device we booted from */
-#define	CPU_BOOTED_KERNEL	10	/* string: kernel we booted */
-#define	CPU_MAXID		11	/* number of valid machdep ids */
+#define	CPU_POWERSAVE		8
+#define	CPU_MAXID		9
+
+#define	CTL_MACHDEP_NAMES { \
+	{ 0, 0 }, \
+	{ "cachelinesize", CTLTYPE_INT }, \
+	{ "timebase", CTLTYPE_INT }, \
+	{ "cputempature", CTLTYPE_INT }, \
+	{ "printfataltraps", CTLTYPE_INT }, \
+	{ "cacheinfo", CTLTYPE_STRUCT }, \
+	{ "altivec", CTLTYPE_INT }, \
+	{ "model", CTLTYPE_STRING }, \
+	{ "powersave", CTLTYPE_INT }, \
+}
 
 #endif	/* _POWERPC_CPU_H_ */

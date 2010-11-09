@@ -1,4 +1,4 @@
-/*	$NetBSD: conf.c,v 1.4 2007/12/02 05:40:25 tsutsui Exp $	*/
+/*	$NetBSD: conf.c,v 1.3 2005/12/11 12:16:41 christos Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -69,7 +69,7 @@ struct devsw devsw[] = {
 #endif
 };
 
-int ndevs = __arraycount(devsw);
+int	ndevs = (sizeof(devsw)/sizeof(devsw[0]));
 #endif
 
 
@@ -92,8 +92,7 @@ int ndevs = __arraycount(devsw);
 #endif
 
 struct fs_ops file_system[] = {
-	FS_OPS(ffsv1),
-	FS_OPS(ffsv2),
+	FS_OPS(ufs),
 	FS_OPS(dosfs),
 	FS_OPS(lfsv1),
 	FS_OPS(lfsv2),
@@ -106,7 +105,7 @@ struct fs_ops file_system[] = {
 #endif
 };
 
-int nfsys = __arraycount(file_system);
+int nfsys = sizeof(file_system)/sizeof(struct fs_ops);
 #endif
 
 #ifdef BOOTNET
@@ -115,5 +114,5 @@ extern struct netif_driver arc_netif_driver;
 struct netif_driver *netif_drivers[] = {
 	&arc_netif_driver,
 };
-int n_netif_drivers = __arraycount(netif_drivers);
+int	n_netif_drivers = (sizeof(netif_drivers) / sizeof(netif_drivers[0]));
 #endif

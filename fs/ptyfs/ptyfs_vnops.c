@@ -1,4 +1,4 @@
-/*	$NetBSD: ptyfs_vnops.c,v 1.27 2008/01/02 11:48:43 ad Exp $	*/
+/*	$NetBSD: ptyfs_vnops.c,v 1.21 2007/01/04 15:42:38 elad Exp $	*/
 
 /*
  * Copyright (c) 1993, 1995
@@ -76,7 +76,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ptyfs_vnops.c,v 1.27 2008/01/02 11:48:43 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ptyfs_vnops.c,v 1.21 2007/01/04 15:42:38 elad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -105,8 +105,6 @@ __KERNEL_RCSID(0, "$NetBSD: ptyfs_vnops.c,v 1.27 2008/01/02 11:48:43 ad Exp $");
 #include <fs/ptyfs/ptyfs.h>
 #include <miscfs/genfs/genfs.h>
 #include <miscfs/specfs/specdev.h>
-
-MALLOC_DECLARE(M_PTYFSTMP);
 
 /*
  * Vnode Operations.
@@ -158,6 +156,8 @@ static int ptyfs_chown(struct vnode *, uid_t, gid_t, kauth_cred_t,
     struct lwp *);
 static int ptyfs_chmod(struct vnode *, mode_t, kauth_cred_t, struct lwp *);
 static int atoi(const char *, size_t);
+
+extern const struct cdevsw pts_cdevsw, ptc_cdevsw;
 
 /*
  * ptyfs vnode operations.
@@ -298,6 +298,7 @@ ptyfs_getattr(void *v)
 		struct vnode *a_vp;
 		struct vattr *a_vap;
 		kauth_cred_t a_cred;
+		struct lwp *a_l;
 	} */ *ap = v;
 	struct ptyfsnode *ptyfs = VTOPTYFS(ap->a_vp);
 	struct vattr *vap = ap->a_vap;
@@ -354,12 +355,13 @@ ptyfs_setattr(void *v)
 		struct vnode *a_vp;
 		struct vattr *a_vap;
 		kauth_cred_t a_cred;
+		struct lwp *a_l;
 	} */ *ap = v;
 	struct vnode *vp = ap->a_vp;
 	struct ptyfsnode *ptyfs = VTOPTYFS(vp);
 	struct vattr *vap = ap->a_vap;
 	kauth_cred_t cred = ap->a_cred;
-	struct lwp *l = curlwp;
+	struct lwp *l = ap->a_l;
 	int error;
 
 	if (vap->va_size != VNOVAL) {
@@ -423,7 +425,7 @@ ptyfs_setattr(void *v)
 		    (error = kauth_authorize_generic(cred, KAUTH_GENERIC_ISSUSER,
 		    NULL)) &&
 		    ((vap->va_vaflags & VA_UTIMES_NULL) == 0 ||
-		    (error = VOP_ACCESS(vp, VWRITE, cred)) != 0))
+		    (error = VOP_ACCESS(vp, VWRITE, cred, l)) != 0))
 			return (error);
 		if (vap->va_atime.tv_sec != VNOVAL)
 			if (!(vp->v_mount->mnt_flag & MNT_NOATIME))
@@ -523,11 +525,12 @@ ptyfs_access(void *v)
 		struct vnode *a_vp;
 		int a_mode;
 		kauth_cred_t a_cred;
+		struct lwp *a_l;
 	} */ *ap = v;
 	struct vattr va;
 	int error;
 
-	if ((error = VOP_GETATTR(ap->a_vp, &va, ap->a_cred)) != 0)
+	if ((error = VOP_GETATTR(ap->a_vp, &va, ap->a_cred, ap->a_l)) != 0)
 		return error;
 
 	return vaccess(va.va_type, va.va_mode,
@@ -625,7 +628,7 @@ ptyfs_readdir(void *v)
 		int *a_ncookies;
 	} */ *ap = v;
 	struct uio *uio = ap->a_uio;
-	struct dirent *dp;
+	struct dirent d;
 	struct ptyfsnode *ptyfs;
 	off_t i;
 	int error;
@@ -642,60 +645,68 @@ ptyfs_readdir(void *v)
 	if (uio->uio_offset < 0)
 		return EINVAL;
 
-	dp = malloc(sizeof(struct dirent), M_PTYFSTMP, M_WAITOK | M_ZERO);
-
 	error = 0;
 	i = uio->uio_offset;
-	dp->d_reclen = UIO_MX;
+	(void)memset(&d, 0, sizeof(d));
+	d.d_reclen = UIO_MX;
 	ncookies = uio->uio_resid / UIO_MX;
 
-	if (ptyfs->ptyfs_type != PTYFSroot) {
+	switch (ptyfs->ptyfs_type) {
+	case PTYFSroot: /* root */
+
+		if (i >= npty)
+			return 0;
+
+		if (ap->a_ncookies) {
+			ncookies = min(ncookies, (npty + 2 - i));
+			cookies = malloc(ncookies * sizeof (off_t),
+			    M_TEMP, M_WAITOK);
+			*ap->a_cookies = cookies;
+		}
+
+		for (; i < 2; i++) {
+			switch (i) {
+			case 0:		/* `.' */
+			case 1:		/* `..' */
+				d.d_fileno = PTYFS_FILENO(0, PTYFSroot);
+				d.d_namlen = i + 1;
+				(void)memcpy(d.d_name, "..", d.d_namlen);
+				d.d_name[i + 1] = '\0';
+				d.d_type = DT_DIR;
+				break;
+			}
+			if ((error = uiomove(&d, UIO_MX, uio)) != 0)
+				break;
+			if (cookies)
+				*cookies++ = i + 1;
+			nc++;
+		}
+		if (error) {
+			ncookies = nc;
+			break;
+		}
+		for (; uio->uio_resid >= UIO_MX && i < npty; i++) {
+			/* check for used ptys */
+			if (pty_isfree(i - 2, 1))
+				continue;
+
+			d.d_fileno = PTYFS_FILENO(i - 2, PTYFSpts);
+			d.d_namlen = snprintf(d.d_name, sizeof(d.d_name),
+			    "%lld", (long long)(i - 2));
+			d.d_type = DT_CHR;
+			if ((error = uiomove(&d, UIO_MX, uio)) != 0)
+				break;
+			if (cookies)
+				*cookies++ = i + 1;
+			nc++;
+		}
+		ncookies = nc;
+		break;
+
+	default:
 		error = ENOTDIR;
-		goto out;
+		break;
 	}
-
-	if (i >= npty)
-		goto out;
-
-	if (ap->a_ncookies) {
-		ncookies = min(ncookies, (npty + 2 - i));
-		cookies = malloc(ncookies * sizeof (off_t),
-		    M_TEMP, M_WAITOK);
-		*ap->a_cookies = cookies;
-	}
-
-	for (; i < 2; i++) {
-		/* `.' and/or `..' */
-		dp->d_fileno = PTYFS_FILENO(0, PTYFSroot);
-		dp->d_namlen = i + 1;
-		(void)memcpy(dp->d_name, "..", dp->d_namlen);
-		dp->d_name[i + 1] = '\0';
-		dp->d_type = DT_DIR;
-		if ((error = uiomove(dp, UIO_MX, uio)) != 0)
-			goto out;
-		if (cookies)
-			*cookies++ = i + 1;
-		nc++;
-	}
-	for (; uio->uio_resid >= UIO_MX && i < npty; i++) {
-		/* check for used ptys */
-		if (pty_isfree(i - 2, 1))
-			continue;
-
-		dp->d_fileno = PTYFS_FILENO(i - 2, PTYFSpts);
-		dp->d_namlen = snprintf(dp->d_name, sizeof(dp->d_name),
-		    "%lld", (long long)(i - 2));
-		dp->d_type = DT_CHR;
-		if ((error = uiomove(dp, UIO_MX, uio)) != 0)
-			goto out;
-		if (cookies)
-			*cookies++ = i + 1;
-		nc++;
-	}
-
-out:
-	/* not pertinent in error cases */
-	ncookies = nc;
 
 	if (ap->a_ncookies) {
 		if (error) {
@@ -707,7 +718,6 @@ out:
 			*ap->a_ncookies = ncookies;
 	}
 	uio->uio_offset = i;
-	free(dp, M_PTYFSTMP);
 	return error;
 }
 
@@ -718,6 +728,7 @@ ptyfs_open(void *v)
 		struct vnode *a_vp;
 		int  a_mode;
 		kauth_cred_t a_cred;
+		struct lwp *a_l;
 	} */ *ap = v;
 	struct vnode *vp = ap->a_vp;
 	struct ptyfsnode *ptyfs = VTOPTYFS(vp);
@@ -741,14 +752,15 @@ ptyfs_close(void *v)
 		struct vnode *a_vp;
 		int  a_fflag;
 		kauth_cred_t a_cred;
+		struct lwp *a_l;
 	} */ *ap = v;
 	struct vnode *vp = ap->a_vp;
 	struct ptyfsnode *ptyfs = VTOPTYFS(vp);
 
-	mutex_enter(&vp->v_interlock);
+	simple_lock(&vp->v_interlock);
 	if (vp->v_usecount > 1)
 		PTYFS_ITIMES(ptyfs, NULL, NULL, NULL);
-	mutex_exit(&vp->v_interlock);
+	simple_unlock(&vp->v_interlock);
 
 	switch (ptyfs->ptyfs_type) {
 	case PTYFSpts:
@@ -782,9 +794,15 @@ ptyfs_read(void *v)
 
 	switch (ptyfs->ptyfs_type) {
 	case PTYFSpts:
+		VOP_UNLOCK(vp, 0);
+		error = (*pts_cdevsw.d_read)(vp->v_rdev, ap->a_uio,
+		    ap->a_ioflag);
+		vn_lock(vp, LK_RETRY|LK_EXCLUSIVE);
+		return error;
 	case PTYFSptc:
 		VOP_UNLOCK(vp, 0);
-		error = cdev_read(vp->v_rdev, ap->a_uio, ap->a_ioflag);
+		error = (*ptc_cdevsw.d_read)(vp->v_rdev, ap->a_uio,
+		    ap->a_ioflag);
 		vn_lock(vp, LK_RETRY|LK_EXCLUSIVE);
 		return error;
 	default:
@@ -812,9 +830,15 @@ ptyfs_write(void *v)
 
 	switch (ptyfs->ptyfs_type) {
 	case PTYFSpts:
+		VOP_UNLOCK(vp, 0);
+		error = (*pts_cdevsw.d_write)(vp->v_rdev, ap->a_uio,
+		    ap->a_ioflag);
+		vn_lock(vp, LK_RETRY|LK_EXCLUSIVE);
+		return error;
 	case PTYFSptc:
 		VOP_UNLOCK(vp, 0);
-		error = cdev_write(vp->v_rdev, ap->a_uio, ap->a_ioflag);
+		error = (*ptc_cdevsw.d_write)(vp->v_rdev, ap->a_uio,
+		    ap->a_ioflag);
 		vn_lock(vp, LK_RETRY|LK_EXCLUSIVE);
 		return error;
 	default:
@@ -831,15 +855,18 @@ ptyfs_ioctl(void *v)
 		void *a_data;
 		int  a_fflag;
 		kauth_cred_t a_cred;
+		struct lwp *a_l;
 	} */ *ap = v;
 	struct vnode *vp = ap->a_vp;
 	struct ptyfsnode *ptyfs = VTOPTYFS(vp);
 
 	switch (ptyfs->ptyfs_type) {
 	case PTYFSpts:
+		return (*pts_cdevsw.d_ioctl)(vp->v_rdev, ap->a_command,
+		    ap->a_data, ap->a_fflag, ap->a_l);
 	case PTYFSptc:
-		return cdev_ioctl(vp->v_rdev, ap->a_command,
-		    ap->a_data, ap->a_fflag, curlwp);
+		return (*ptc_cdevsw.d_ioctl)(vp->v_rdev, ap->a_command,
+		    ap->a_data, ap->a_fflag, ap->a_l);
 	default:
 		return EOPNOTSUPP;
 	}
@@ -851,14 +878,16 @@ ptyfs_poll(void *v)
 	struct vop_poll_args /* {
 		struct vnode *a_vp;
 		int a_events;
+		struct lwp *a_l;
 	} */ *ap = v;
 	struct vnode *vp = ap->a_vp;
 	struct ptyfsnode *ptyfs = VTOPTYFS(vp);
 
 	switch (ptyfs->ptyfs_type) {
 	case PTYFSpts:
+		return (*pts_cdevsw.d_poll)(vp->v_rdev, ap->a_events, ap->a_l);
 	case PTYFSptc:
-		return cdev_poll(vp->v_rdev, ap->a_events, curlwp);
+		return (*ptc_cdevsw.d_poll)(vp->v_rdev, ap->a_events, ap->a_l);
 	default:
 		return genfs_poll(v);
 	}
@@ -876,8 +905,9 @@ ptyfs_kqfilter(void *v)
 
 	switch (ptyfs->ptyfs_type) {
 	case PTYFSpts:
+		return (*pts_cdevsw.d_kqfilter)(vp->v_rdev, ap->a_kn);
 	case PTYFSptc:
-		return cdev_kqfilter(vp->v_rdev, ap->a_kn);
+		return (*ptc_cdevsw.d_kqfilter)(vp->v_rdev, ap->a_kn);
 	default:
 		return genfs_kqfilter(v);
 	}
@@ -905,7 +935,7 @@ ptyfs_itimes(struct ptyfsnode *ptyfs, const struct timespec *acc,
 	KASSERT(ptyfs->ptyfs_flag & (PTYFS_ACCESS|PTYFS_CHANGE|PTYFS_MODIFY));
 
 	getnanotime(&now);
-	if (ptyfs->ptyfs_flag & PTYFS_ACCESS) {
+	if (ptyfs->ptyfs_flag & (PTYFS_ACCESS|PTYFS_MODIFY)) {
 		if (acc == NULL)
 			acc = &now;
 		ptyfs->ptyfs_atime = *acc;

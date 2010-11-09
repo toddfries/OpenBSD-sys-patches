@@ -1,4 +1,4 @@
-/*	$NetBSD: bus_private.h,v 1.11 2008/04/28 20:23:40 martin Exp $	*/
+/*	$NetBSD: bus_private.h,v 1.6 2006/08/28 19:58:56 bouyer Exp $	*/
 /*	NetBSD: bus.h,v 1.8 2005/03/09 19:04:46 matt Exp	*/
 
 /*-
@@ -17,6 +17,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -86,14 +93,10 @@ int	_bus_dmamem_alloc(bus_dma_tag_t tag, bus_size_t size,
 void	_bus_dmamem_free(bus_dma_tag_t tag, bus_dma_segment_t *segs,
 	    int nsegs);
 int	_bus_dmamem_map(bus_dma_tag_t tag, bus_dma_segment_t *segs,
-	    int nsegs, size_t size, void **kvap, int flags);
-void	_bus_dmamem_unmap(bus_dma_tag_t tag, void *kva, size_t size);
+	    int nsegs, size_t size, caddr_t *kvap, int flags);
+void	_bus_dmamem_unmap(bus_dma_tag_t tag, caddr_t kva, size_t size);
 paddr_t	_bus_dmamem_mmap(bus_dma_tag_t tag, bus_dma_segment_t *segs,
 	    int nsegs, off_t off, int prot, int flags);
-
-int	_bus_dmatag_subregion(bus_dma_tag_t tag, bus_addr_t min_addr,
-	    bus_addr_t max_addr, bus_dma_tag_t *newtag, int flags);
-void	_bus_dmatag_destroy(bus_dma_tag_t tag);
 
 #ifndef _BUS_DMAMEM_ALLOC_RANGE
 int	_bus_dmamem_alloc_range(bus_dma_tag_t tag, bus_size_t size,
@@ -191,53 +194,5 @@ _bus_virt_to_bus(struct pmap *pm, vaddr_t va)
 #define _BUS_AVAIL_END (avail_end)
 #endif
 
-struct x86_bus_dma_tag {
-	/*
-	 * The `bounce threshold' is checked while we are loading
-	 * the DMA map.  If the physical address of the segment
-	 * exceeds the threshold, an error will be returned.  The
-	 * caller can then take whatever action is necessary to
-	 * bounce the transfer.  If this value is 0, it will be
-	 * ignored.
-	 */
-	int        _tag_needs_free;
-	bus_addr_t _bounce_thresh;
-	bus_addr_t _bounce_alloc_lo;
-	bus_addr_t _bounce_alloc_hi;
-	int	(*_may_bounce)(bus_dma_tag_t, bus_dmamap_t, int, int *);
-
-	/*
-	 * DMA mapping methods.
-	 */
-	int	(*_dmamap_create)(bus_dma_tag_t, bus_size_t, int,
-		    bus_size_t, bus_size_t, int, bus_dmamap_t *);
-	void	(*_dmamap_destroy)(bus_dma_tag_t, bus_dmamap_t);
-	int	(*_dmamap_load)(bus_dma_tag_t, bus_dmamap_t, void *,
-		    bus_size_t, struct proc *, int);
-	int	(*_dmamap_load_mbuf)(bus_dma_tag_t, bus_dmamap_t,
-		    struct mbuf *, int);
-	int	(*_dmamap_load_uio)(bus_dma_tag_t, bus_dmamap_t,
-		    struct uio *, int);
-	int	(*_dmamap_load_raw)(bus_dma_tag_t, bus_dmamap_t,
-		    bus_dma_segment_t *, int, bus_size_t, int);
-	void	(*_dmamap_unload)(bus_dma_tag_t, bus_dmamap_t);
-	void	(*_dmamap_sync)(bus_dma_tag_t, bus_dmamap_t,
-		    bus_addr_t, bus_size_t, int);
-
-	/*
-	 * DMA memory utility functions.
-	 */
-	int	(*_dmamem_alloc)(bus_dma_tag_t, bus_size_t, bus_size_t,
-		    bus_size_t, bus_dma_segment_t *, int, int *, int);
-	void	(*_dmamem_free)(bus_dma_tag_t, bus_dma_segment_t *, int);
-	int	(*_dmamem_map)(bus_dma_tag_t, bus_dma_segment_t *,
-		    int, size_t, void **, int);
-	void	(*_dmamem_unmap)(bus_dma_tag_t, void *, size_t);
-	paddr_t	(*_dmamem_mmap)(bus_dma_tag_t, bus_dma_segment_t *,
-		    int, off_t, int, int);
-	int 	(*_dmatag_subregion)(bus_dma_tag_t, bus_addr_t, bus_addr_t,
-		    bus_dma_tag_t *, int);
-	void	(*_dmatag_destroy)(bus_dma_tag_t);
-};
 
 #endif /* !defined(_X86_BUS_PRIVATE_H_) */

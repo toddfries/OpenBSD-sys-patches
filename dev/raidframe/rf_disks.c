@@ -1,4 +1,4 @@
-/*	$NetBSD: rf_disks.c,v 1.70 2008/04/28 20:23:56 martin Exp $	*/
+/*	$NetBSD: rf_disks.c,v 1.67 2007/07/18 19:04:58 ad Exp $	*/
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
  * All rights reserved.
@@ -14,6 +14,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -60,7 +67,7 @@
  ***************************************************************/
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: rf_disks.c,v 1.70 2008/04/28 20:23:56 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: rf_disks.c,v 1.67 2007/07/18 19:04:58 ad Exp $");
 
 #include <dev/raidframe/raidframevar.h>
 
@@ -533,7 +540,7 @@ rf_AutoConfigureDisks(RF_Raid_t *raidPtr, RF_Config_t *cfgPtr,
 	while(ac!=NULL) {
 		if (ac->flag == 0) {
 			vn_lock(ac->vp, LK_EXCLUSIVE | LK_RETRY);
-			VOP_CLOSE(ac->vp, FREAD | FWRITE, NOCRED);
+			VOP_CLOSE(ac->vp, FREAD | FWRITE, NOCRED, 0);
 			vput(ac->vp);
 			ac->vp = NULL;
 #if DEBUG
@@ -570,6 +577,7 @@ rf_ConfigureDisk(RF_Raid_t *raidPtr, char *bf, RF_RaidDisk_t *diskPtr,
 	char   *p;
 	struct vnode *vp;
 	struct vattr va;
+	struct lwp *l;
 	int     error;
 
 	p = rf_find_non_white(bf);
@@ -578,6 +586,8 @@ rf_ConfigureDisk(RF_Raid_t *raidPtr, char *bf, RF_RaidDisk_t *diskPtr,
 		p[strlen(p) - 1] = '\0';
 	}
 	(void) strcpy(diskPtr->devname, p);
+
+	l = raidPtr->engine_thread;
 
 	/* Let's start by claiming the component is fine and well... */
 	diskPtr->status = rf_ds_optimal;
@@ -592,7 +602,7 @@ rf_ConfigureDisk(RF_Raid_t *raidPtr, char *bf, RF_RaidDisk_t *diskPtr,
 		return (0);
 	}
 
-	error = dk_lookup(diskPtr->devname, curlwp, &vp, UIO_SYSSPACE);
+	error = dk_lookup(diskPtr->devname, l, &vp, UIO_SYSSPACE);
 	if (error) {
 		printf("dk_lookup on device: %s failed!\n", diskPtr->devname);
 		if (error == ENXIO) {
@@ -604,9 +614,9 @@ rf_ConfigureDisk(RF_Raid_t *raidPtr, char *bf, RF_RaidDisk_t *diskPtr,
 	}
 	if (diskPtr->status == rf_ds_optimal) {
 
-		if ((error = VOP_GETATTR(vp, &va, curlwp->l_cred)) != 0) 
+		if ((error = VOP_GETATTR(vp, &va, l->l_cred, l)) != 0) 
 			return (error);
-		if ((error = rf_getdisksize(vp, curlwp, diskPtr)) != 0)
+		if ((error = rf_getdisksize(vp, l, diskPtr)) != 0)
 			return (error);
 
 		raidPtr->raid_cinfo[col].ci_vp = vp;

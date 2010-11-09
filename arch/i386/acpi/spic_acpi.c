@@ -1,4 +1,4 @@
-/*	$NetBSD: spic_acpi.c,v 1.21 2009/02/21 00:30:37 jmcneill Exp $	*/
+/*	$NetBSD: spic_acpi.c,v 1.16 2006/11/16 01:32:38 christos Exp $	*/
 
 /*
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: spic_acpi.c,v 1.21 2009/02/21 00:30:37 jmcneill Exp $");
+__KERNEL_RCSID(0, "$NetBSD: spic_acpi.c,v 1.16 2006/11/16 01:32:38 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -59,15 +66,16 @@ static const char * const spic_acpi_ids[] = {
 	NULL
 };
 
-static int	spic_acpi_match(device_t, cfdata_t, void *);
-static void	spic_acpi_attach(device_t, device_t, void *);
+static int	spic_acpi_match(struct device *, struct cfdata *, void *);
+static void	spic_acpi_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(spic_acpi, sizeof(struct spic_acpi_softc),
+CFATTACH_DECL(spic_acpi, sizeof(struct spic_acpi_softc),
     spic_acpi_match, spic_acpi_attach, NULL, NULL);
 
 
 static int
-spic_acpi_match(device_t parent, cfdata_t match, void *aux)
+spic_acpi_match(struct device *parent, struct cfdata *match,
+    void *aux)
 {
 	struct acpi_attach_args *aa = aux;
 
@@ -78,9 +86,9 @@ spic_acpi_match(device_t parent, cfdata_t match, void *aux)
 }
 
 static void
-spic_acpi_attach(device_t parent, device_t self, void *aux)
+spic_acpi_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct spic_acpi_softc *sc = device_private(self);
+	struct spic_acpi_softc *sc = (void *) self;
 	struct acpi_attach_args *aa = aux;
 	struct acpi_io *io;
 	struct acpi_irq *irq;
@@ -88,11 +96,13 @@ spic_acpi_attach(device_t parent, device_t self, void *aux)
 
 	ACPI_STATUS rv;
 
-	sc->sc_spic.sc_dev = self;
+	aprint_naive(": Sony Programmable I/O Controller\n");
+	aprint_normal(": Sony Programmable I/O Controller\n");
+
 	sc->sc_node = aa->aa_node;
 
 	/* Parse our resources. */
-	rv = acpi_resource_parse(self, sc->sc_node->ad_handle,
+	rv = acpi_resource_parse(&sc->sc_spic.sc_dev, sc->sc_node->ad_handle,
 	    "_CRS", &res, &acpi_resource_parse_ops_default);
 	if (ACPI_FAILURE(rv))
 		return;
@@ -100,17 +110,20 @@ spic_acpi_attach(device_t parent, device_t self, void *aux)
 	sc->sc_spic.sc_iot = aa->aa_iot;
 	io = acpi_res_io(&res, 0);
 	if (io == NULL) {
-		aprint_error_dev(self, "unable to find io resource\n");
+		aprint_error("%s: unable to find io resource\n",
+		    sc->sc_spic.sc_dev.dv_xname);
 		goto out;
 	}
 	if (bus_space_map(sc->sc_spic.sc_iot, io->ar_base, io->ar_length,
 	    0, &sc->sc_spic.sc_ioh) != 0) {
-		aprint_error_dev(self, "unable to map data register\n");
+		aprint_error("%s: unable to map data register\n",
+		    sc->sc_spic.sc_dev.dv_xname);
 		goto out;
 	}
 	irq = acpi_res_irq(&res, 0);
 	if (irq == NULL) {
-		aprint_error_dev(self, "unable to find irq resource\n");
+		aprint_error("%s: unable to find irq resource\n",
+		    sc->sc_spic.sc_dev.dv_xname);
 		/* XXX unmap */
 		goto out;
 	}
@@ -118,11 +131,6 @@ spic_acpi_attach(device_t parent, device_t self, void *aux)
 	sc->sc_ih = isa_intr_establish(NULL, irq->ar_irq,
 	    IST_EDGE, IPL_TTY, spic_intr, sc);
 #endif
-
-	if (!pmf_device_register(self, spic_suspend, spic_resume))
-		aprint_error_dev(self, "couldn't establish power handler\n");
-	else
-		pmf_class_input_register(self);
 
 	spic_attach(&sc->sc_spic);
  out:

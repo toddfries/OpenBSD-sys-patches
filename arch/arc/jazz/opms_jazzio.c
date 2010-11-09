@@ -1,4 +1,4 @@
-/* $NetBSD: opms_jazzio.c,v 1.9 2008/09/13 16:15:38 tsutsui Exp $ */
+/* $NetBSD: opms_jazzio.c,v 1.6 2005/12/11 12:16:39 christos Exp $ */
 
 /*
  * Copyright (c) 1995, 1996 Carnegie-Mellon University.
@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: opms_jazzio.c,v 1.9 2008/09/13 16:15:38 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: opms_jazzio.c,v 1.6 2005/12/11 12:16:39 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -43,14 +43,14 @@ __KERNEL_RCSID(0, "$NetBSD: opms_jazzio.c,v 1.9 2008/09/13 16:15:38 tsutsui Exp 
 #include <arc/jazz/jazziovar.h>
 #include <arc/jazz/pccons_jazziovar.h>
 
-static int	opms_jazzio_match(device_t, cfdata_t, void *);
-static void	opms_jazzio_attach(device_t, device_t, void *);
+int	opms_jazzio_match(struct device *, struct cfdata *, void *);
+void	opms_jazzio_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(opms_jazzio, sizeof(struct opms_softc),
+CFATTACH_DECL(opms_jazzio, sizeof(struct opms_softc),
     opms_jazzio_match, opms_jazzio_attach, NULL, NULL);
 
-static int
-opms_jazzio_match(device_t parent, cfdata_t cf, void *aux)
+int
+opms_jazzio_match(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct jazzio_attach_args *ja = aux;
 
@@ -63,16 +63,14 @@ opms_jazzio_match(device_t parent, cfdata_t cf, void *aux)
 	return 1;
 }
 
-static void
-opms_jazzio_attach(device_t parent, device_t self, void *aux)
+void
+opms_jazzio_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct opms_softc *sc = device_private(self);
+	struct opms_softc *sc = (struct opms_softc *)self;
 	struct jazzio_attach_args *ja = aux;
 
-	sc->sc_dev = self;
+	printf("\n");
 
-	aprint_normal("\n");
-
-	jazzio_intr_establish(ja->ja_intr, opmsintr, sc);
+	jazzio_intr_establish(ja->ja_intr, opmsintr, self);
 	opms_common_attach(sc, ja->ja_bust, &pccons_jazzio_conf);
 }

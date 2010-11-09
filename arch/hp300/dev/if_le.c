@@ -1,4 +1,4 @@
-/*	$NetBSD: if_le.c,v 1.61 2008/04/28 20:23:19 martin Exp $	*/
+/*	$NetBSD: if_le.c,v 1.59 2006/07/21 10:01:39 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -64,7 +71,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_le.c,v 1.61 2008/04/28 20:23:19 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_le.c,v 1.59 2006/07/21 10:01:39 tsutsui Exp $");
 
 #include "opt_inet.h"
 #include "bpfilter.h"
@@ -101,10 +108,10 @@ struct  le_softc {
 	bus_space_handle_t sc_bsh2;	/* buffer area */
 };
 
-static int	lematch(device_t, cfdata_t, void *);
-static void	leattach(device_t, device_t, void *);
+static int	lematch(struct device *, struct cfdata *, void *);
+static void	leattach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(le, sizeof(struct le_softc),
+CFATTACH_DECL(le, sizeof(struct le_softc),
     lematch, leattach, NULL, NULL);
 
 static int	leintr(void *);
@@ -156,7 +163,7 @@ lerdcsr(struct lance_softc *sc, uint16_t port)
 }
 
 static int
-lematch(device_t parent, cfdata_t cf, void *aux)
+lematch(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct dio_attach_args *da = aux;
 
@@ -171,31 +178,32 @@ lematch(device_t parent, cfdata_t cf, void *aux)
  * to accept packets.
  */
 static void
-leattach(device_t parent, device_t self, void *aux)
+leattach(struct device *parent, struct device *self, void *aux)
 {
-	struct le_softc *lesc = device_private(self);
-	struct lance_softc *sc = &lesc->sc_am7990.lsc;
 	struct dio_attach_args *da = aux;
+	struct le_softc *lesc = (struct le_softc *)self;
+	struct lance_softc *sc = &lesc->sc_am7990.lsc;
 	bus_space_tag_t bst = da->da_bst;
 	bus_space_handle_t bsh0, bsh1, bsh2;
 	bus_size_t offset;
 	int i;
 
-	sc->sc_dev = self;
-
 	if (bus_space_map(bst, (bus_addr_t)dio_scodetopa(da->da_scode),
 	    da->da_size, 0, &bsh0)) {
-		aprint_error(": can't map LANCE registers\n");
+		printf("\n%s: can't map LANCE registers\n",
+		    sc->sc_dev.dv_xname);
 		return;
 	}
 
 	if (bus_space_subregion(bst, bsh0, lestd[1], LER1_SIZE, &bsh1)) {
-		aprint_error(": can't subregion LANCE space\n");
+		printf("\n%s: can't subregion LANCE space\n",
+		    sc->sc_dev.dv_xname);
 		return;
 	}
 
 	if (bus_space_subregion(bst, bsh0, lestd[2], LE_BUFSIZE, &bsh2)) {
-		aprint_error(": can't subregion buffer space\n");
+		printf("\n%s: can't subregion buffer space\n",
+		    sc->sc_dev.dv_xname);
 		return;
 	}
 

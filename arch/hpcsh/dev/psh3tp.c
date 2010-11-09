@@ -1,4 +1,4 @@
-/*	$NetBSD: psh3tp.c,v 1.12 2008/03/31 15:49:29 kiyohara Exp $	*/
+/*	$NetBSD: psh3tp.c,v 1.6 2006/11/12 19:00:42 plunky Exp $	*/
 /*
  * Copyright (c) 2005 KIYOHARA Takashi
  * All rights reserved.
@@ -28,11 +28,9 @@
 
 #include <sys/cdefs.h>
 
-#include <sys/types.h>
 #include <sys/param.h>
-#include <sys/device.h>
-#include <sys/errno.h>
 #include <sys/kernel.h>
+#include <sys/device.h>
 #include <sys/malloc.h>
 #include <sys/systm.h>
 #include <sys/callout.h>
@@ -92,23 +90,23 @@ volatile int psh3tp_debug = 4;
 
 
 struct psh3tp_softc {
-	device_t sc_dev;
+	struct device sc_dev;
 
 #define PSH3TP_WSMOUSE_ENABLED	0x01
 	int sc_enabled;
 	struct callout sc_touch_ch;
-	device_t sc_wsmousedev;
+	struct device *sc_wsmousedev;
 	struct tpcalib_softc sc_tpcalib; /* calibration info for wsmouse */
 };
 
 
 /* config machinery */
-static int psh3tp_match(device_t, struct cfdata *, void *);
-static void psh3tp_attach(device_t, device_t, void *);
+static int psh3tp_match(struct device *, struct cfdata *, void *);
+static void psh3tp_attach(struct device *, struct device *, void *);
 
 /* wsmouse accessops */
 static int psh3tp_wsmouse_enable(void *);
-static int psh3tp_wsmouse_ioctl(void *, u_long, void *, int, struct lwp *);
+static int psh3tp_wsmouse_ioctl(void *, u_long, caddr_t, int, struct lwp *);
 static void psh3tp_wsmouse_disable(void *);
 
 /* internal driver routines */
@@ -139,22 +137,21 @@ static const struct wsmouse_calibcoords psh3tp_default_calib = {
 };
 
 
-CFATTACH_DECL_NEW(psh3tp, sizeof(struct psh3tp_softc),
+CFATTACH_DECL(psh3tp, sizeof(struct psh3tp_softc),
     psh3tp_match, psh3tp_attach, NULL, NULL);
 
 
-/* ARGSUSED */
 static int
-psh3tp_match(device_t parent __unused, struct cfdata *cf, void *aux __unused)
+psh3tp_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 
 	if (!platid_match(&platid, &platid_mask_MACH_HITACHI_PERSONA))
-		return 0;
+		return (0);
 
 	if (strcmp(cf->cf_name, "psh3tp") != 0)
-		return 0;
+		return (0);
 
-	return 1;
+	return (1);
 }
 
 
@@ -164,17 +161,14 @@ psh3tp_match(device_t parent __unused, struct cfdata *cf, void *aux __unused)
  * Note that we have to use submatch to distinguish between child because
  * wsmouse_match matches unconditionally.
  */
-/* ARGSUSED */
 static void
-psh3tp_attach(device_t parent __unused, device_t self, void *aux __unused)
+psh3tp_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct psh3tp_softc *sc = device_private(self);
+	struct psh3tp_softc *sc = (struct psh3tp_softc *)self;
 	struct wsmousedev_attach_args wsma;
 
-	aprint_naive("\n");
-	aprint_normal("\n");
+	printf("\n");
 
-	sc->sc_dev = self;
 	sc->sc_enabled = 0;
 
 	/* touch-panel as a pointing device */
@@ -189,10 +183,10 @@ psh3tp_attach(device_t parent __unused, device_t self, void *aux __unused)
 	/* init calibration, set default parameters */
 	tpcalib_init(&sc->sc_tpcalib);
 	tpcalib_ioctl(&sc->sc_tpcalib, WSMOUSEIO_SCALIBCOORDS,
-	    (void *)__UNCONST(&psh3tp_default_calib), 0, 0);
+		      (caddr_t)__UNCONST(&psh3tp_default_calib), 0, 0);
 
 	/* used when in polling mode */
-	callout_init(&sc->sc_touch_ch, 0);
+	callout_init(&sc->sc_touch_ch);
 
 	/* establish interrupt handler, but disable until opened */
 	intc_intr_establish(SH7709_INTEVT2_IRQ2,
@@ -205,9 +199,8 @@ psh3tp_attach(device_t parent __unused, device_t self, void *aux __unused)
  * Enable touch panel:  we start in interrupt mode.
  * Must be called at spltty().
  */
-/* ARGSUSED */
 static void
-psh3tp_enable(struct psh3tp_softc *sc __unused)
+psh3tp_enable(struct psh3tp_softc *sc)
 {
 
 	DPRINTFN(2, ("%s: enable\n", sc->sc_dev.dv_xname));
@@ -245,7 +238,7 @@ psh3tp_set_enable(struct psh3tp_softc *sc, int on, int child)
 	}
 
 	splx(s);
-	return 0;
+	return (0);
 }
 
 
@@ -255,7 +248,7 @@ psh3tp_wsmouse_enable(void *self)
 	struct psh3tp_softc *sc = (struct psh3tp_softc *)self;
 
 	DPRINTFN(1, ("%s: wsmouse enable\n", sc->sc_dev.dv_xname));
-	return psh3tp_set_enable(sc, 1, PSH3TP_WSMOUSE_ENABLED);
+	return (psh3tp_set_enable(sc, 1, PSH3TP_WSMOUSE_ENABLED));
 }
 
 
@@ -283,7 +276,7 @@ psh3tp_intr(void *self)
 #ifdef DIAGNOSTIC
 		printf("%s: irr0 %02x?\n", sc->sc_dev.dv_xname, irr0);
 #endif
-		return 0;
+		return (0);
 	}
 
 	if (!sc->sc_enabled) {
@@ -299,7 +292,7 @@ psh3tp_intr(void *self)
 #define TREMOR_THRESHOLD 0x300
 	steady = 0;
 	tremor_timeout = TREMOR_THRESHOLD * 16;	/* XXX: arbitrary */
-	touched = true;		/* we start with "touched" state */
+	touched = TRUE;		/* we start with "touched" state */
 
 	do {
 		uint8_t state;
@@ -336,7 +329,7 @@ served:
 	/* clear the interrupt */
 	_reg_write_1(SH7709_IRR0, irr0 & ~IRR0_IRQ2);
 
-	return 1;
+	return (1);
 }
 
 
@@ -379,9 +372,8 @@ psh3tp_start_polling(void *self)
  * Re-enable touch panel interrupt.
  * Called at spltty() when polling code detects pen-up.
  */
-/* ARGSUSED */
 static void
-psh3tp_stop_polling(struct psh3tp_softc *sc __unused)
+psh3tp_stop_polling(struct psh3tp_softc *sc)
 {
 	uint8_t irr0;
 
@@ -485,10 +477,10 @@ psh3tp_get_raw_xy(int *rawxp, int *rawyp)
 
 
 static int
-psh3tp_wsmouse_ioctl(void *self, u_long cmd, void *data, int flag,
-		     struct lwp *l)
+psh3tp_wsmouse_ioctl(
+    void *self, u_long cmd, caddr_t data, int flag, struct lwp *l)
 {
 	struct psh3tp_softc *sc = (struct psh3tp_softc *)self;
 
-	return hpc_tpanel_ioctl(&sc->sc_tpcalib, cmd, data, flag, l);
+	return (hpc_tpanel_ioctl(&sc->sc_tpcalib, cmd, data, flag, l));
 }

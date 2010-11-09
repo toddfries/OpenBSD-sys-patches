@@ -1,7 +1,7 @@
-/*	$NetBSD: process_machdep.c,v 1.68 2008/11/19 18:35:59 ad Exp $	*/
+/*	$NetBSD: process_machdep.c,v 1.60 2006/11/28 17:27:09 elad Exp $	*/
 
 /*-
- * Copyright (c) 1998, 2000, 2001, 2008 The NetBSD Foundation, Inc.
+ * Copyright (c) 1998, 2000, 2001 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -52,7 +59,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: process_machdep.c,v 1.68 2008/11/19 18:35:59 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: process_machdep.c,v 1.60 2006/11/28 17:27:09 elad Exp $");
 
 #include "opt_vm86.h"
 #include "opt_ptrace.h"
@@ -77,6 +84,7 @@ __KERNEL_RCSID(0, "$NetBSD: process_machdep.c,v 1.68 2008/11/19 18:35:59 ad Exp 
 #include <machine/vm86.h>
 #endif
 
+#ifdef PTRACE
 static inline struct trapframe *
 process_frame(struct lwp *l)
 {
@@ -90,6 +98,7 @@ process_fpframe(struct lwp *l)
 
 	return (&l->l_addr->u_pcb.pcb_savefpu);
 }
+#endif /* PTRACE */
 
 static int
 xmm_to_s87_tag(const uint8_t *fpac, int regno, uint8_t tw)
@@ -205,6 +214,7 @@ process_s87_to_xmm(const struct save87 *s87, struct savexmm *sxmm)
 #endif
 }
 
+#ifdef PTRACE
 int
 process_read_regs(struct lwp *l, struct reg *regs)
 {
@@ -248,7 +258,7 @@ process_read_fpregs(struct lwp *l, struct fpreg *regs)
 
 	if (l->l_md.md_flags & MDL_USEDFPU) {
 #if NNPX > 0
-		npxsave_lwp(l, true);
+		npxsave_lwp(l, 1);
 #endif
 	} else {
 		/*
@@ -288,7 +298,6 @@ process_read_fpregs(struct lwp *l, struct fpreg *regs)
 	return (0);
 }
 
-#ifdef PTRACE
 int
 process_write_regs(struct lwp *l, const struct reg *regs)
 {
@@ -351,7 +360,7 @@ process_write_fpregs(struct lwp *l, const struct fpreg *regs)
 
 	if (l->l_md.md_flags & MDL_USEDFPU) {
 #if NNPX > 0
-		npxsave_lwp(l, false);
+		npxsave_lwp(l, 0);
 #endif
 	} else {
 		l->l_md.md_flags |= MDL_USEDFPU;
@@ -382,7 +391,7 @@ process_sstep(struct lwp *l, int sstep)
 }
 
 int
-process_set_pc(struct lwp *l, void *addr)
+process_set_pc(struct lwp *l, caddr_t addr)
 {
 	struct trapframe *tf = process_frame(l);
 
@@ -403,7 +412,7 @@ process_machdep_read_xmmregs(struct lwp *l, struct xmmregs *regs)
 	if (l->l_md.md_flags & MDL_USEDFPU) {
 #if NNPX > 0
 		if (l->l_addr->u_pcb.pcb_fpcpu != NULL)
-			npxsave_lwp(l, true);
+			npxsave_lwp(l, 1);
 #endif
 	} else {
 		/*
@@ -440,7 +449,7 @@ process_machdep_write_xmmregs(struct lwp *l, struct xmmregs *regs)
 #if NNPX > 0
 		/* If we were using the FPU, drop it. */
 		if (l->l_addr->u_pcb.pcb_fpcpu != NULL)
-			npxsave_lwp(l, false);
+			npxsave_lwp(l, 0);
 #endif
 	} else {
 		l->l_md.md_flags |= MDL_USEDFPU;
@@ -455,7 +464,7 @@ ptrace_machdep_dorequest(
     struct lwp *l,
     struct lwp *lt,
     int req,
-    void *addr,
+    caddr_t addr,
     int data
 )
 {
@@ -523,7 +532,7 @@ process_machdep_doxmmregs(curl, l, uio)
 	if (kl > uio->uio_resid)
 		kl = uio->uio_resid;
 
-	uvm_lwp_hold(l);
+	PHOLD(l);
 
 	if (kl < 0)
 		error = EINVAL;
@@ -538,7 +547,7 @@ process_machdep_doxmmregs(curl, l, uio)
 			error = process_machdep_write_xmmregs(l, &r);
 	}
 
-	uvm_lwp_rele(l);
+	PRELE(l);
 
 	uio->uio_offset = 0;
 	return (error);
@@ -549,7 +558,7 @@ process_machdep_validxmmregs(p)
 	struct proc *p;
 {
 
-	if (p->p_flag & PK_SYSTEM)
+	if (p->p_flag & P_SYSTEM)
 		return (0);
 
 	return (i386_use_fxsave);

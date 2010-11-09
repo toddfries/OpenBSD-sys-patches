@@ -1,4 +1,4 @@
-/*	$NetBSD: limits.h,v 1.10 2008/10/26 00:08:15 mrg Exp $	*/
+/*	$NetBSD: limits.h,v 1.7 2005/12/11 12:16:25 christos Exp $	*/
 
 /*
  * Copyright (c) 1988 The Regents of the University of California.
@@ -31,10 +31,8 @@
  *	@(#)limits.h	7.2 (Berkeley) 6/28/90
  */
 
-#ifndef	_X86_64_LIMITS_H_
-#define	_X86_64_LIMITS_H_
-
-#ifdef __x86_64__
+#ifndef	_MACHINE_LIMITS_H_
+#define	_MACHINE_LIMITS_H_
 
 #include <sys/featuretest.h>
 
@@ -44,11 +42,11 @@
 #define	SCHAR_MAX	0x7f		/* max value for a signed char */
 #define SCHAR_MIN	(-0x7f-1)	/* min value for a signed char */
 
-#define	UCHAR_MAX	0xff		/* max value for an unsigned char */
+#define	UCHAR_MAX	0xffU		/* max value for an unsigned char */
 #define	CHAR_MAX	0x7f		/* max value for a char */
 #define	CHAR_MIN	(-0x7f-1)	/* min value for a char */
 
-#define	USHRT_MAX	0xffff		/* max value for an unsigned short */
+#define	USHRT_MAX	0xffffU		/* max value for an unsigned short */
 #define	SHRT_MAX	0x7fff		/* max value for a short */
 #define SHRT_MIN        (-0x7fff-1)     /* min value for a short */
 
@@ -94,10 +92,4 @@
 #define FLT_MIN		1.17549435E-38F
 #endif
 
-#else	/*	__x86_64__	*/
-
-#include <i386/limits.h>
-
-#endif	/*	__x86_64__	*/
-
-#endif /* _X86_64_LIMITS_H_ */
+#endif /* _MACHINE_LIMITS_H_ */

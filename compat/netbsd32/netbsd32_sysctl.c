@@ -1,4 +1,4 @@
-/*	$NetBSD: netbsd32_sysctl.c,v 1.30 2009/01/11 02:45:49 christos Exp $	*/
+/*	$NetBSD: netbsd32_sysctl.c,v 1.22 2006/09/23 22:12:00 manu Exp $	*/
 
 /*
  * Copyright (c) 2003 The NetBSD Foundation, Inc.
@@ -32,10 +32,11 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: netbsd32_sysctl.c,v 1.30 2009/01/11 02:45:49 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: netbsd32_sysctl.c,v 1.22 2006/09/23 22:12:00 manu Exp $");
 
 #if defined(_KERNEL_OPT)
 #include "opt_ddb.h"
+#include "opt_ktrace.h"
 #endif
 
 #include <sys/param.h>
@@ -46,11 +47,14 @@ __KERNEL_RCSID(0, "$NetBSD: netbsd32_sysctl.c,v 1.30 2009/01/11 02:45:49 christo
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/vnode.h>
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 #include <sys/proc.h>
 #include <sys/sysctl.h>
 #include <sys/dirent.h>
+#ifdef KTRACE
 #include <sys/ktrace.h>
+#endif
 
 #include <uvm/uvm_extern.h>
 
@@ -58,7 +62,6 @@ __KERNEL_RCSID(0, "$NetBSD: netbsd32_sysctl.c,v 1.30 2009/01/11 02:45:49 christo
 #include <compat/netbsd32/netbsd32_syscall.h>
 #include <compat/netbsd32/netbsd32_syscallargs.h>
 #include <compat/netbsd32/netbsd32_conv.h>
-#include <compat/netbsd32/netbsd32_sysctl.h>
 
 #if defined(DDB)
 #include <ddb/ddbvar.h>
@@ -71,8 +74,6 @@ struct sysctlnode netbsd32_sysctl_root = {
 	sysc_init_field(_sysctl_size, sizeof(struct sysctlnode)),
 };
 
-static struct sysctllog *netbsd32_clog;
-
 /*
  * sysctl helper routine for netbsd32's kern.boottime node
  */
@@ -80,9 +81,9 @@ static int
 netbsd32_sysctl_kern_boottime(SYSCTLFN_ARGS)
 {
 	struct sysctlnode node;
-	struct netbsd32_timespec bt32;
+	struct netbsd32_timeval bt32;
 
-	netbsd32_from_timespec(&boottime, &bt32);
+	netbsd32_from_timeval(&boottime, &bt32);
 
 	node = *rnode;
 	node.sysctl_data = &bt32;
@@ -105,73 +106,67 @@ netbsd32_sysctl_vm_loadavg(SYSCTLFN_ARGS)
 	return (sysctl_lookup(SYSCTLFN_CALL(&node)));
 }
 
-void
-netbsd32_sysctl_init(void)
+SYSCTL_SETUP(netbsd32_sysctl_emul_setup, "sysctl netbsd32 shadow tree setup")
 {
 	const struct sysctlnode *_root = &netbsd32_sysctl_root;
 	extern const char machine_arch32[];
 	extern const char machine32[];
 
-	sysctl_createv(&netbsd32_clog, 0, &_root, NULL,
+	sysctl_createv(clog, 0, &_root, NULL,
 		       CTLFLAG_PERMANENT,
 		       CTLTYPE_NODE, "kern", NULL,
 		       NULL, 0, NULL, 0,
 		       CTL_KERN, CTL_EOL);
-	sysctl_createv(&netbsd32_clog, 0, &_root, NULL,
+	sysctl_createv(clog, 0, &_root, NULL,
 		       CTLFLAG_PERMANENT,
 		       CTLTYPE_STRUCT, "boottime", NULL,
 		       netbsd32_sysctl_kern_boottime, 0, NULL,
 		       sizeof(struct netbsd32_timeval),
 		       CTL_KERN, KERN_BOOTTIME, CTL_EOL);
 
-	sysctl_createv(&netbsd32_clog, 0, &_root, NULL,
+	sysctl_createv(clog, 0, &_root, NULL,
 		       CTLFLAG_PERMANENT,
 		       CTLTYPE_NODE, "vm", NULL,
 		       NULL, 0, NULL, 0,
 		       CTL_VM, CTL_EOL);
-	sysctl_createv(&netbsd32_clog, 0, &_root, NULL,
+	sysctl_createv(clog, 0, &_root, NULL,
 		       CTLFLAG_PERMANENT,
 		       CTLTYPE_STRUCT, "loadavg", NULL,
 		       netbsd32_sysctl_vm_loadavg, 0, NULL,
 		       sizeof(struct netbsd32_loadavg),
 		       CTL_VM, VM_LOADAVG, CTL_EOL);
 
-	sysctl_createv(&netbsd32_clog, 0, &_root, NULL,
+	sysctl_createv(clog, 0, &_root, NULL,
 		       CTLFLAG_PERMANENT,
 		       CTLTYPE_NODE, "hw", NULL,
 		       NULL, 0, NULL, 0,
 		       CTL_HW, CTL_EOL);
-	sysctl_createv(&netbsd32_clog, 0, &_root, NULL,
+	sysctl_createv(clog, 0, &_root, NULL,
 		       CTLFLAG_PERMANENT,
 		       CTLTYPE_STRING, "machine", NULL,
 		       NULL, 0, &machine32, 0,
 		       CTL_HW, HW_MACHINE, CTL_EOL);
-	sysctl_createv(&netbsd32_clog, 0, &_root, NULL,
+	sysctl_createv(clog, 0, &_root, NULL,
 		       CTLFLAG_PERMANENT,
 		       CTLTYPE_STRING, "machine_arch", NULL,
 		       NULL, 0, &machine_arch32, 0,
 		       CTL_HW, HW_MACHINE_ARCH, CTL_EOL);
 }
 
-void
-netbsd32_sysctl_fini(void)
-{
-
-	sysctl_teardown(&netbsd32_clog);
-	sysctl_free(&netbsd32_sysctl_root);
-}
-
 int
-netbsd32___sysctl(struct lwp *l, const struct netbsd32___sysctl_args *uap, register_t *retval)
+netbsd32___sysctl(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct netbsd32___sysctl_args /* {
 		syscallarg(netbsd32_intp) name;
 		syscallarg(u_int) namelen;
 		syscallarg(netbsd32_voidp) old;
 		syscallarg(netbsd32_size_tp) oldlenp;
 		syscallarg(netbsd32_voidp) new;
 		syscallarg(netbsd32_size_t) newlen;
-	} */
+	} */ *uap = v;
 	const struct sysctlnode *pnode;
 	netbsd32_size_t netbsd32_oldlen;
 	size_t oldlen, *oldlenp, savelen;
@@ -181,10 +176,10 @@ netbsd32___sysctl(struct lwp *l, const struct netbsd32___sysctl_args *uap, regis
 	/*
 	 * get and convert 32 bit size_t to native size_t
 	 */
-	namep = SCARG_P32(uap, name);
-	oldp = SCARG_P32(uap, old);
-	newp = SCARG_P32(uap, new);
-	oldlenp = SCARG_P32(uap, oldlenp);
+	namep = NETBSD32PTR64(SCARG(uap, name));
+	oldp = NETBSD32PTR64(SCARG(uap, old));
+	newp = NETBSD32PTR64(SCARG(uap, new));
+	oldlenp = NETBSD32PTR64(SCARG(uap, oldlenp));
 	oldlen = 0;
 	if (oldlenp != NULL) {
 		error = copyin(oldlenp, &netbsd32_oldlen,
@@ -207,9 +202,18 @@ netbsd32___sysctl(struct lwp *l, const struct netbsd32___sysctl_args *uap, regis
         if (error)
                 return (error);
 
-	ktrmib(name, SCARG(uap, namelen));
+#ifdef KTRACE
+	if (KTRPOINT(l->l_proc, KTR_MIB))
+		ktrmib(l, name, SCARG(uap, namelen));
+#endif
 
-	sysctl_lock(newp != NULL);
+	/*
+	 * wire old so that copyout() is less likely to fail?
+	 */
+	error = sysctl_lock(l, oldp, savelen);
+	if (error)
+		return (error);
+
 	pnode = &netbsd32_sysctl_root;
 	error = sysctl_locate(l, &name[0], SCARG(uap, namelen), &pnode, NULL);
 	pnode = (error == 0) ? &netbsd32_sysctl_root : NULL;
@@ -217,7 +221,11 @@ netbsd32___sysctl(struct lwp *l, const struct netbsd32___sysctl_args *uap, regis
 				oldp, &oldlen,
 				newp, SCARG(uap, newlen),
 				&name[0], l, pnode);
-	sysctl_unlock();
+
+	/*
+	 * release the sysctl lock
+	 */
+	sysctl_unlock(l);
 
 	/*
 	 * reset caller's oldlen, even if we got an error

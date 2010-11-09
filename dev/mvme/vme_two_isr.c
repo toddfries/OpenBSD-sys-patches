@@ -1,4 +1,4 @@
-/*	$NetBSD: vme_two_isr.c,v 1.12 2008/12/21 18:01:42 he Exp $	*/
+/*	$NetBSD: vme_two_isr.c,v 1.7 2007/10/19 12:00:37 ad Exp $	*/
 
 /*-
  * Copyright (c) 2001, 2002 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -36,7 +43,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: vme_two_isr.c,v 1.12 2008/12/21 18:01:42 he Exp $");
+__KERNEL_RCSID(0, "$NetBSD: vme_two_isr.c,v 1.7 2007/10/19 12:00:37 ad Exp $");
 
 #include "vmetwo.h"
 
@@ -45,6 +52,8 @@ __KERNEL_RCSID(0, "$NetBSD: vme_two_isr.c,v 1.12 2008/12/21 18:01:42 he Exp $");
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
+#include <sys/lock.h>
+
 #include <sys/cpu.h>
 #include <sys/bus.h>
 
@@ -77,9 +86,7 @@ static struct vme_two_handler {
 				 sizeof(struct vme_two_handler))
 
 static	int  vmetwo_local_isr_trampoline(void *);
-#ifdef notyet
 static	void vmetwo_softintr_assert(void);
-#endif
 
 static	struct vmetwo_softc *vmetwo_sc;
 
@@ -136,7 +143,8 @@ vmetwo_probe(bus_space_tag_t bt, bus_addr_t offset)
 		struct vmetwo_softc *sc;
 
 		/* XXX Should check sc != NULL here... */
-		sc = malloc(sizeof(*sc), M_DEVBUF, M_NOWAIT);
+		MALLOC(sc, struct vmetwo_softc *, sizeof(*sc), M_DEVBUF,
+		    M_NOWAIT);
 
 		sc->sc_mvmebus.sc_bust = bt;
 		sc->sc_lcrh = bh;
@@ -209,11 +217,9 @@ vmetwo_intr_init(struct vmetwo_softc *sc)
 #endif
 
 	/* Setup hardware assisted soft interrupts */
-#ifdef notyet
 	vmetwo_intr_establish(sc, 1, 1, VME2_VEC_SOFT0, 1,
 	    (int (*)(void *))softintr_dispatch, NULL, NULL);
 	_softintr_chipset_assert = vmetwo_softintr_assert;
-#endif
 }
 
 static int
@@ -310,7 +316,7 @@ vmetwo_intr_establish(csc, prior, lvl, vec, first, hand, arg, evcnt)
 		if (evcnt)
 			evcnt_attach_dynamic(evcnt, EVCNT_TYPE_INTR,
 			    (*sc->sc_isrevcnt)(sc->sc_isrcookie, prior),
-			    device_xname(&sc->sc_mvmebus.sc_dev),
+			    sc->sc_mvmebus.sc_dev.dv_xname,
 			    mvmebus_irq_name[lvl]);
 #endif
 		iloffset = VME2_ILOFFSET_FROM_VECTOR(bitoff) +
@@ -422,11 +428,9 @@ vmetwo_intr_disestablish(csc, lvl, vec, last, evcnt)
 	splx(s);
 }
 
-#ifdef notyet
 static void
 vmetwo_softintr_assert(void)
 {
 
 	vme2_lcsr_write(vmetwo_sc, VME2LCSR_SOFTINT_SET, VME2_SOFTINT_SET(0));
 }
-#endif

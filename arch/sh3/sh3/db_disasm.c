@@ -1,4 +1,4 @@
-/*	$NetBSD: db_disasm.c,v 1.21 2008/06/07 02:43:10 uwe Exp $	*/
+/*	$NetBSD: db_disasm.c,v 1.19 2006/10/23 21:13:00 uwe Exp $	*/
 
 /*
  * Copyright (c) 1998-2000 Internet Initiative Japan Inc.
@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: db_disasm.c,v 1.21 2008/06/07 02:43:10 uwe Exp $");
+__KERNEL_RCSID(0, "$NetBSD: db_disasm.c,v 1.19 2006/10/23 21:13:00 uwe Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -134,7 +134,7 @@ static	rasm_t	f[16][16] = {
 };
 
 db_addr_t
-db_disasm(db_addr_t loc, bool altfmt)
+db_disasm(db_addr_t loc, boolean_t altfmt)
 {
 	const void *pc = (void *)loc;
 	char line[40];
@@ -1474,7 +1474,7 @@ f_c0(const uint16_t *pc, char *buf)
 			break;
 
 		case 3:
-			sprintf(buf, "trapa   #0x%x", imm);
+			sprintf(buf, "trapa   #%d", imm);
 			break;
 		}
 		break;

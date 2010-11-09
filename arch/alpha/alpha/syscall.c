@@ -1,4 +1,4 @@
-/* $NetBSD: syscall.c,v 1.34 2008/10/21 12:16:58 ad Exp $ */
+/* $NetBSD: syscall.c,v 1.36 2010/02/25 07:14:48 skrll Exp $ */
 
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -89,7 +89,7 @@
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
 
-__KERNEL_RCSID(0, "$NetBSD: syscall.c,v 1.34 2008/10/21 12:16:58 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: syscall.c,v 1.36 2010/02/25 07:14:48 skrll Exp $");
 
 #include "opt_sa.h"
 
@@ -98,7 +98,6 @@ __KERNEL_RCSID(0, "$NetBSD: syscall.c,v 1.34 2008/10/21 12:16:58 ad Exp $");
 #include <sys/proc.h>
 #include <sys/sa.h>
 #include <sys/savar.h>
-#include <sys/user.h>
 #include <sys/signal.h>
 #include <sys/syscall.h>
 #include <sys/syscallvar.h>
@@ -339,7 +338,7 @@ child_return(void *arg)
 	struct lwp *l = arg;
 
 	/*
-	 * Return values in the frame set by cpu_fork().
+	 * Return values in the frame set by cpu_lwp_fork().
 	 */
 
 	userret(l);

@@ -1,4 +1,4 @@
-/*	$NetBSD: kloader.c,v 1.18 2008/06/04 12:41:40 ad Exp $	*/
+/*	$NetBSD: kloader.c,v 1.12 2007/02/21 22:59:58 thorpej Exp $	*/
 
 /*-
  * Copyright (c) 2001, 2002, 2004 The NetBSD Foundation, Inc.
@@ -12,6 +12,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -27,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kloader.c,v 1.18 2008/06/04 12:41:40 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kloader.c,v 1.12 2007/02/21 22:59:58 thorpej Exp $");
 
 #include "debug_kloader.h"
 
@@ -51,13 +58,13 @@ __KERNEL_RCSID(0, "$NetBSD: kloader.c,v 1.18 2008/06/04 12:41:40 ad Exp $");
 int	kloader_debug = 1;
 #define	DPRINTF(fmt, args...)						\
 	if (kloader_debug)						\
-		printf("%s: " fmt, __func__ , ##args)
+		printf("%s: " fmt, __FUNCTION__ , ##args)
 #define	_DPRINTF(fmt, args...)						\
 	if (kloader_debug)						\
 		printf(fmt, ##args)
 #define	DPRINTFN(n, fmt, args...)					\
 	if (kloader_debug > (n))					\
-		printf("%s: " fmt, __func__ , ##args)
+		printf("%s: " fmt, __FUNCTION__ , ##args)
 #define	_DPRINTFN(n, fmt, args...)					\
 	if (kloader_debug > (n))					\
 		printf(fmt, ##args)
@@ -470,7 +477,7 @@ kloader_get_tag(vaddr_t dst)
 
 	pg = kloader.cur_pg;
 	KDASSERT(pg != NULL);
-	kloader.cur_pg = TAILQ_NEXT(pg, pageq.queue);
+	kloader.cur_pg = TAILQ_NEXT(pg, pageq);
 
 	addr = PG_VADDR(pg);
 	tag = (void *)addr;
@@ -589,10 +596,11 @@ kloader_load_segment(Elf_Phdr *p)
 struct vnode *
 kloader_open(const char *filename)
 {
+	struct lwp *l = KLOADER_LWP;
 	struct nameidata nid;
 	int error;
 
-	NDINIT(&nid, LOOKUP, FOLLOW, UIO_SYSSPACE, filename);
+	NDINIT(&nid, LOOKUP, FOLLOW, UIO_SYSSPACE, filename, l);
 
 	error = namei(&nid);
 	if (error != 0) {
@@ -616,7 +624,7 @@ kloader_close()
 	struct vnode *vp = kloader.vp;
 
 	VOP_UNLOCK(vp, 0);
-	vn_close(vp, FREAD, l->l_cred);
+	vn_close(vp, FREAD, l->l_cred, l);
 }
 
 int

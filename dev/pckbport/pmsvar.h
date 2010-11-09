@@ -1,4 +1,4 @@
-/*	$NetBSD: pmsvar.h,v 1.8 2008/12/14 00:42:33 jmcneill Exp $	*/
+/*	$NetBSD: pmsvar.h,v 1.5 2007/07/09 21:01:19 ad Exp $	*/
 
 /*-
  * Copyright (c) 2004 Kentaro Kurahone.
@@ -28,16 +28,12 @@
 #ifndef _DEV_PCKBCPORT_PMSVAR_H_
 #define _DEV_PCKBCPORT_PMSVAR_H_
 
-#include <dev/pckbport/synapticsvar.h>
-#include <dev/pckbport/elantechvar.h>
-
 enum pms_type {
 	PMS_UNKNOWN,
 	PMS_STANDARD,
 	PMS_SCROLL3,
 	PMS_SCROLL5,
-	PMS_SYNAPTICS,
-	PMS_ELANTECH
+	PMS_SYNAPTICS
 };
 
 struct pms_protocol {
@@ -47,7 +43,7 @@ struct pms_protocol {
 };
 
 struct pms_softc {		/* driver status information */
-	device_t sc_dev;
+	struct device sc_dev;
 
 	pckbport_tag_t sc_kbctag;
 	int sc_kbcslot;
@@ -63,17 +59,12 @@ struct pms_softc {		/* driver status information */
 	unsigned char packet[6];
 	struct timeval last, current;
 
-	device_t sc_wsmousedev;
+	struct device *sc_wsmousedev;
 	struct lwp *sc_event_thread;
 
-#if defined(PMS_SYNAPTICS_TOUCHPAD) || defined(PMS_ELANTECH_TOUCHPAD)
-	union {
 #ifdef PMS_SYNAPTICS_TOUCHPAD
+	union {
 		struct synaptics_softc synaptics;
-#endif
-#ifdef PMS_ELANTECH_TOUCHPAD
-		struct elantech_softc elantech;
-#endif
 	} u;
 #endif
 };

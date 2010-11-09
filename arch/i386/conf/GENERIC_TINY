@@ -1,4 +1,4 @@
-#	$NetBSD: GENERIC_TINY,v 1.118 2009/03/06 20:31:49 joerg Exp $
+#	$NetBSD: GENERIC_TINY,v 1.102 2006/11/28 16:24:54 christos Exp $
 #
 #	GENERIC_TINY -- suitable default for 4M machines
 #			No EISA, PCI, or SCSI.
@@ -8,13 +8,22 @@ include "arch/i386/conf/std.i386"
 
 #options 	INCLUDE_CONFIG_FILE	# embed config file in kernel binary
 
-makeoptions 	COPTS="-Os"
+makeoptions	COPTS="-Os"
 
 maxusers	8		# estimated number of users
 
+# CPU support.  At least one is REQUIRED.
+options 	I386_CPU
+options 	I486_CPU
+options 	I586_CPU
+options 	I686_CPU
+
 # CPU-related options.
+options 	MATH_EMULATE	# floating point emulation
 #options 	VM86		# virtual 8086 emulation
 #options 	USER_LDT	# user-settable LDT; used by WINE
+# insert delay no-ops in interrupts; recommended on very old machines
+options 	PIC_DELAY
 
 # This option allows you to force a serial console at the specified
 # I/O address.   see console(4) for details.
@@ -28,6 +37,9 @@ maxusers	8		# estimated number of users
 #options 	REALBASEMEM=...	# size of base memory
 #options 	REALEXTMEM=...	# size of extended memory
 
+# Save a physical page per process by not setting a kernel stack red zone.
+options 	NOREDZONE
+
 # Standard system options
 
 options 	INSECURE	# disable kernel security levels - X needs this
@@ -40,10 +52,12 @@ options 	RTC_OFFSET=0	# hardware clock is this many mins. west of GMT
 #options 	SYSVMSG		# System V-like message queues
 #options 	SYSVSEM		# System V-like semaphores
 #options 	SYSVSHM		# System V-like memory sharing
+#options 	SHMMAXPGS=2048	# 2048 pages is the default
 #options 	P1003_1B_SEMAPHORE # p1003.1b semaphore support
 
 options 	NMBCLUSTERS=256
 
+#options 	LKM		# loadable kernel modules
 
 #options 	USERCONF	# userconf(4) support
 options 	PIPE_SOCKETPAIR	# smaller, but slower pipe(2)
@@ -58,7 +72,7 @@ options 	PIPE_SOCKETPAIR	# smaller, but slower pipe(2)
 #options 	DDB_HISTORY_SIZE=512	# enable history editing in DDB
 #options 	KGDB		# remote debugger
 #options 	KGDB_DEVNAME="\"com\"",KGDB_DEVADDR=0x3f8,KGDB_DEVRATE=9600
-#makeoptions 	DEBUG="-g"	# compile full symbol table
+#makeoptions	DEBUG="-g"	# compile full symbol table
 
 # Compatibility options
 #options 	COMPAT_NOMID	# NetBSD 0.8, 386BSD, and BSDI
@@ -72,17 +86,15 @@ options 	COMPAT_15	# NetBSD 1.5
 options 	COMPAT_16	# NetBSD 1.6
 options 	COMPAT_20	# NetBSD 2.0
 options 	COMPAT_30	# NetBSD 3.0 compatibility.
-options 	COMPAT_40	# NetBSD 4.0
-options 	COMPAT_50	# NetBSD 5.0 compatibility.
 options 	COMPAT_43	# 4.3BSD, 386BSD, and BSDI
-#options 	COMPAT_386BSD_MBRPART # recognize old partition ID
+options 	COMPAT_386BSD_MBRPART # recognize old partition ID
 #options 	TCP_COMPAT_42	# 4.2BSD TCP/IP bug compat. Not recommended.
 
 #options 	COMPAT_SVR4	# binary compatibility with SVR4
 #options 	COMPAT_IBCS2	# binary compatibility with SCO and ISC
 #options 	COMPAT_LINUX	# binary compatibility with Linux
 #options 	COMPAT_FREEBSD	# binary compatibility with FreeBSD
-options 	COMPAT_BSDPTY	# /dev/[pt]ty?? ptys.
+options		COMPAT_BSDPTY	# /dev/[pt]ty?? ptys.
 
 # File systems
 file-system 	FFS		# UFS
@@ -99,8 +111,8 @@ file-system 	KERNFS		# /kern
 #file-system 	PROCFS		# /proc
 #file-system 	UMAPFS		# NULLFS + uid and gid remapping
 #file-system 	UNION		# union file system
-#file-system 	PTYFS		# /dev/pts/N support
-#file-system 	TMPFS		# Efficient memory file-system
+#file-system	PTYFS		# /dev/pts/N support
+#file-system	TMPFS		# Efficient memory file-system
 
 # File system options
 #options 	QUOTA		# UFS quotas
@@ -192,6 +204,10 @@ options 	PCDISPLAY_SOFTCURSOR
 # Device configuration
 #
 
+mainbus0 at root
+
+cpu0 at mainbus0
+
 #apm0	at mainbus0			# Advanced power management
 
 
@@ -241,6 +257,9 @@ pcic1	at isa? port 0x3e2 iomem 0xd4000 iosiz 0x4000
 npx0	at isa? port 0xf0 irq 13	# x86 math coprocessor
 
 # Console Devices
+
+# ISA console
+#pc0	at isa? port 0x60 irq 1		# pccons generic PC console driver
 
 # wscons
 pckbc0 		at isa?			# pc keyboard controller
@@ -360,7 +379,6 @@ wdc1	at isa? port 0x170 irq 15
 
 # ATA (IDE) bus support
 atabus* at ata?
-#options 	ATADEBUG
 
 # IDE drives
 wd*	at atabus? drive ?			# the drives themselves
@@ -536,7 +554,7 @@ we1	at isa? port 0x300 iomem 0xcc000 irq 10
 
 
 # Pull in optional local configuration
-cinclude "arch/i386/conf/GENERIC.local"
+include	"arch/i386/conf/GENERIC.local"
 
 
 # Pseudo-Devices

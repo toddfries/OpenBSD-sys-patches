@@ -1,4 +1,4 @@
-/*	$NetBSD: asm.h,v 1.12 2008/08/29 19:00:25 matt Exp $	*/
+/*	$NetBSD: asm.h,v 1.8 2006/01/20 22:02:40 christos Exp $	*/
 
 /*
  * Copyright (c) 1990 The Regents of the University of California.
@@ -37,9 +37,15 @@
 #ifndef _ARM32_ASM_H_
 #define _ARM32_ASM_H_
 
-#include <arm/cdefs.h>
-
-#define _C_LABEL(x)	x
+#ifdef __ELF__
+# define _C_LABEL(x)	x
+#else
+# ifdef __STDC__
+#  define _C_LABEL(x)	_ ## x
+# else
+#  define _C_LABEL(x)	_/**/x
+# endif
+#endif
 #define	_ASM_LABEL(x)	x
 
 #ifdef __STDC__
@@ -60,77 +66,51 @@
  * We define a couple of macros so that assembly code will not be dependant
  * on one or the other.
  */
-#define _ASM_TYPE_FUNCTION	%function
-#define _ASM_TYPE_OBJECT	%object
-#ifdef __thumb__
-#define _ENTRY(x) \
-	.text; _ALIGN_TEXT; .globl x; .type x,_ASM_TYPE_FUNCTION; .thumb_func; x:
-#else
+#define _ASM_TYPE_FUNCTION	#function
+#define _ASM_TYPE_OBJECT	#object
 #define _ENTRY(x) \
 	.text; _ALIGN_TEXT; .globl x; .type x,_ASM_TYPE_FUNCTION; x:
-#endif
-#define	_END(x)		.size x,.-x
 
 #ifdef GPROF
-# define _PROF_PROLOGUE	\
+# ifdef __ELF__
+#  define _PROF_PROLOGUE	\
 	mov ip, lr; bl __mcount
+# else
+#  define _PROF_PROLOGUE	\
+	mov ip,lr; bl mcount
+# endif
 #else
 # define _PROF_PROLOGUE
 #endif
 
 #define	ENTRY(y)	_ENTRY(_C_LABEL(y)); _PROF_PROLOGUE
 #define	ENTRY_NP(y)	_ENTRY(_C_LABEL(y))
-#define	END(y)		_END(_C_LABEL(y))
 #define	ASENTRY(y)	_ENTRY(_ASM_LABEL(y)); _PROF_PROLOGUE
 #define	ASENTRY_NP(y)	_ENTRY(_ASM_LABEL(y))
-#define	ASEND(y)	_END(_ASM_LABEL(y))
 
 #define	ASMSTR		.asciz
 
-#if defined(PIC)
-#ifdef __thumb__
-#define	PLT_SYM(x)	x
-#define	GOT_SYM(x)	PIC_SYM(x, GOTOFF)
-#define	GOT_GET(x,got,sym)	\
-	ldr	x, sym;		\
-	add	x, got;		\
-	ldr	x, [x]
-#else
-#define	PLT_SYM(x)	PIC_SYM(x, PLT)
-#define	GOT_SYM(x)	PIC_SYM(x, GOT)
-#define	GOT_GET(x,got,sym)	\
-	ldr	x, sym;		\
-	ldr	x, [x, got]
-#endif /* __thumb__ */
-
-#define	GOT_INIT(got,gotsym,pclabel) \
-	ldr	got, gotsym;	\
-	add	got, got, pc;	\
-	pclabel:
-#define	GOT_INITSYM(gotsym,pclabel) \
-	gotsym: .word _C_LABEL(_GLOBAL_OFFSET_TABLE_) + (. - (pclabel+4))
-
+#if defined(__ELF__) && defined(PIC)
 #ifdef __STDC__
 #define	PIC_SYM(x,y)	x ## ( ## y ## )
 #else
 #define	PIC_SYM(x,y)	x/**/(/**/y/**/)
 #endif
-
 #else
-#define	PLT_SYM(x)	x
-#define	GOT_SYM(x)	x
-#define	GOT_GET(x,got,sym)	\
-	ldr	x, sym;
-#define	GOT_INIT(got,gotsym,pclabel)
-#define	GOT_INITSYM(gotsym,pclabel)
 #define	PIC_SYM(x,y)	x
-#endif	/* PIC */
+#endif
 
-#define RCSID(x)	.pushsection ".ident"; .asciz x; .popsection
+#ifdef __ELF__
+#define RCSID(x)	.section ".ident"; .asciz x
+#else
+#define RCSID(x)	.text; .asciz x
+#endif
 
+#ifdef __ELF__
 #define	WEAK_ALIAS(alias,sym)						\
 	.weak alias;							\
 	alias = sym
+#endif
 
 /*
  * STRONG_ALIAS: create a strong alias.
@@ -139,30 +119,49 @@
 	.globl alias;							\
 	alias = sym
 
+#ifdef __STDC__
+#define	WARN_REFERENCES(sym,msg)					\
+	.stabs msg ## ,30,0,0,0 ;					\
+	.stabs __STRING(_C_LABEL(sym)) ## ,1,0,0,0
+#elif defined(__ELF__)
 #define	WARN_REFERENCES(sym,msg)					\
 	.stabs msg,30,0,0,0 ;						\
-	.stabs __STRING(_C_LABEL(sym)),1,0,0,0
+	.stabs __STRING(sym),1,0,0,0
+#else
+#define	WARN_REFERENCES(sym,msg)					\
+	.stabs msg,30,0,0,0 ;						\
+	.stabs __STRING(_/**/sym),1,0,0,0
+#endif /* __STDC__ */
 
-#ifdef __thumb__
-# define XPUSH		push
-# define XPOP		pop
-# define XPOPRET	pop	{pc}
-#else
-# define XPUSH		stmfd	sp!,
-# define XPOP		ldmfd	sp!,
-# ifdef _ARM_ARCH_5
-#  define XPOPRET	ldmfd	sp!, {pc}
-# else
-#  define XPOPRET	ldmfd	sp!, {lr}; mov pc, lr
-# endif
+#if defined (__ARM_ARCH_6__) || defined (__ARM_ARCH_6J__)
+#define _ARM_ARCH_6
 #endif
-  
+
+#if defined (_ARM_ARCH_6) || defined (__ARM_ARCH_5__) || \
+    defined (__ARM_ARCH_5T__) || defined (__ARM_ARCH_5TE__) || \
+    defined (__ARM_ARCH_5TEJ__)
+#define _ARM_ARCH_5
+#endif
+
+#if defined (_ARM_ARCH_5) || defined (__ARM_ARCH_4T__)
+#define _ARM_ARCH_4T
+#endif
+
+
 #if defined (_ARM_ARCH_4T)
-# define RET		bx		lr
-# define RETc(c)	__CONCAT(bx,c)	lr
+# define RET	bx	lr
+# ifdef __STDC__
+#  define RETc(c) bx##c	lr
+# else
+#  define RETc(c) bx/**/c	lr
+# endif
 #else
-# define RET		mov		pc, lr
-# define RETc(c)	__CONCAT(mov,c)	pc, lr
+# define RET	mov	pc, lr
+# ifdef __STDC__
+#  define RETc(c) mov##c	pc, lr
+# else
+#  define RETc(c) mov/**/c	pc, lr
+# endif
 #endif
 
 #endif /* !_ARM_ASM_H_ */

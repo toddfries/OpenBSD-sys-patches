@@ -1,4 +1,4 @@
-/*	$NetBSD: mem.c,v 1.17 2008/12/16 22:35:22 christos Exp $	*/
+/*	$NetBSD: mem.c,v 1.12 2005/12/11 12:17:24 christos Exp $	*/
 
 /*	$OpenBSD: mem.c,v 1.5 2001/05/05 20:56:36 art Exp $	*/
 
@@ -78,7 +78,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mem.c,v 1.17 2008/12/16 22:35:22 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mem.c,v 1.12 2005/12/11 12:17:24 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -92,11 +92,10 @@ __KERNEL_RCSID(0, "$NetBSD: mem.c,v 1.17 2008/12/16 22:35:22 christos Exp $");
 #include <sys/errno.h>
 #include <sys/ioctl.h>
 #include <sys/file.h>
-#include <sys/bus.h>
-#include <sys/mutex.h>
 
 #include <uvm/uvm.h>
 
+#include <machine/bus.h>
 #include <machine/iomod.h>
 #include <machine/autoconf.h>
 #include <machine/pmap.h>
@@ -168,10 +167,10 @@ const struct cdevsw mem_cdevsw = {
 	nostop, notty, nopoll, mmmmap,
 };
 
-static void *zeropage;
+static caddr_t zeropage;
 
 /* A lock for the vmmap. */
-kmutex_t vmmap_lock;
+static struct lock vmmap_lock;
 
 int
 memmatch(struct device *parent, struct cfdata *cf, void *aux)
@@ -205,7 +204,8 @@ memattach(struct device *parent, struct device *self, void *aux)
 
 		/* XXX other values seem to blow it up */
 		if (sc->sc_vp->vi_status.hw_rev == 0) {
-			snprintb(bits, sizeof(bits), VIPER_BITS, VI_CTRL);
+			bitmask_snprintf(VI_CTRL, VIPER_BITS, bits, 
+			    sizeof(bits));
 			printf (" viper rev %x, ctrl %s",
 			    sc->sc_vp->vi_status.hw_rev,
 			    bits);
@@ -219,7 +219,8 @@ memattach(struct device *parent, struct device *self, void *aux)
 			sc->sc_vp->vi_control = VI_CTRL;
 			splx(s);
 #ifdef DEBUG
-			snprintb(bits, sizeof(bits), VIPER_BITS, VI_CTRL);
+			bitmask_snprintf(VI_CTRL, VIPER_BITS, bits, 
+			    sizeof(bits));
 			printf (" >> %s", bits);
 #endif
 		} else
@@ -244,7 +245,8 @@ memattach(struct device *parent, struct device *self, void *aux)
 	    HPPA_PA_SPEC_LETTER(hppa_cpu_info->hppa_cpu_info_pa_spec) == 'e') {
 		sc->sc_l2 = (struct l2_mioc *)ca->ca_hpa;
 #ifdef DEBUG
-		snprintb(bits, sizeof(bits), SLTCV_BITS, sc->sc_l2->sltcv);
+		bitmask_snprintf(sc->sc_l2->sltcv, SLTCV_BITS, bits,
+				 sizeof(bits));
 		printf(", sltcv %s", bits);
 #endif
 		/* sc->sc_l2->sltcv |= SLTCV_UP4COUT; */
@@ -261,7 +263,7 @@ viper_setintrwnd(uint32_t mask)
 {
 	struct mem_softc *sc;
 
-	sc = device_lookup_private(&mem_cd,0);
+	sc = mem_cd.cd_devs[0];
 
 	if (sc->sc_vp)
 		sc->sc_vp->vi_intrwd;
@@ -273,7 +275,7 @@ viper_eisa_en(void)
 	struct mem_softc *sc;
 	int pagezero_cookie;
 
-	sc = device_lookup_private(&mem_cd, 0);
+	sc = mem_cd.cd_devs[0];
 
 	pagezero_cookie = hp700_pagezero_map();
 	if (sc->sc_vp)
@@ -321,7 +323,7 @@ mmrw(dev_t dev, struct uio *uio, int flags)
 				goto use_kmem;
 			}
 
-			mutex_enter(&vmmap_lock);
+			lockmgr(&vmmap_lock, LK_EXCLUSIVE, NULL);
 
 			/* Temporarily map the memory at vmmap. */
 			prot = uio->uio_rw == UIO_READ ? VM_PROT_READ :
@@ -331,12 +333,12 @@ mmrw(dev_t dev, struct uio *uio, int flags)
 			pmap_update(pmap_kernel());
 			o = v & PGOFSET;
 			c = min(uio->uio_resid, (int)(PAGE_SIZE - o));
-			error = uiomove((char *)vmmap + o, c, uio);
+			error = uiomove((caddr_t)vmmap + o, c, uio);
 			pmap_remove(pmap_kernel(), (vaddr_t)vmmap,
 			    (vaddr_t)vmmap + PAGE_SIZE);
 			pmap_update(pmap_kernel());
 
-			mutex_exit(&vmmap_lock);
+			lockmgr(&vmmap_lock, LK_RELEASE, NULL);
 			break;
 
 		case DEV_KMEM:				/*  /dev/kmem  */
@@ -345,12 +347,12 @@ use_kmem:
 			o = v & PGOFSET;
 			c = min(uio->uio_resid, (int)(PAGE_SIZE - o));
 			rw = (uio->uio_rw == UIO_READ) ? B_READ : B_WRITE;
-			if (!uvm_kernacc((void *)v, c, rw)) {
+			if (!uvm_kernacc((caddr_t)v, c, rw)) {
 				error = EFAULT;
 				/* this will break us out of the loop */
 				continue;
 			}
-			error = uiomove((void *)v, c, uio);
+			error = uiomove((caddr_t)v, c, uio);
 			break;
 
 		case DEV_NULL:				/*  /dev/null  */
@@ -369,7 +371,7 @@ use_kmem:
 			 * of memory for use with /dev/zero.
 			 */
 			if (zeropage == NULL) {
-				zeropage = (void *)
+				zeropage = (caddr_t)
 				    malloc(PAGE_SIZE, M_TEMP, M_WAITOK);
 				memset(zeropage, 0, PAGE_SIZE);
 			}

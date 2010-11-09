@@ -1,4 +1,4 @@
-/*	$NetBSD: filecore_utils.c,v 1.9 2008/04/30 14:07:14 ad Exp $	*/
+/*	$NetBSD: filecore_utils.c,v 1.7 2006/05/15 01:29:02 christos Exp $	*/
 
 /*-
  * Copyright (c) 1994 The Regents of the University of California.
@@ -102,7 +102,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: filecore_utils.c,v 1.9 2008/04/30 14:07:14 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: filecore_utils.c,v 1.7 2006/05/15 01:29:02 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -248,7 +248,7 @@ filecore_getparent(ip)
 	int i = 0;
 
 #ifdef FILECORE_DEBUG
-	printf("filecore_getparent(ino=%llx)\n", (long long)ip->i_number);
+	printf("filecore_getparent(ino=%x)\n", ip->i_number);
 #endif
 	if (ip->i_parent != -2) {
 		return ip->i_parent;
@@ -265,7 +265,7 @@ filecore_getparent(ip)
 	error = filecore_bread(ip->i_mnt, addr, FILECORE_DIR_SIZE,
 	    NOCRED, &pbp);
 	if (error) {
-		brelse(pbp, 0);
+		brelse(pbp);
 		return error;
 	}
 	paddr = fcdirtail(pbp->b_data)->parent1
@@ -273,7 +273,7 @@ filecore_getparent(ip)
 #ifdef FILECORE_DEBUG_BR
 	printf("brelse(%p) ut1\n", pbp);
 #endif
-	brelse(pbp, 0);
+	brelse(pbp);
 
 	/* If parent's parent is the parent then parent is root dir */
 	if (paddr == addr) {
@@ -287,7 +287,7 @@ filecore_getparent(ip)
 	error = filecore_bread(ip->i_mnt, paddr, FILECORE_DIR_SIZE,
 	    NOCRED, &pbp);
 	if (error) {
-		brelse(pbp, 0);
+		brelse(pbp);
 		return error;
 	}
 	while (fcdirentry(pbp->b_data,i)->addr != addr) {
@@ -295,14 +295,14 @@ filecore_getparent(ip)
 #ifdef FILECORE_DEBUG_BR
 			printf("brelse(%p) ut2\n", pbp);
 #endif
-			brelse(pbp, 0);
+			brelse(pbp);
 			return FILECORE_ROOTINO;
 		}
 	}
 #ifdef FILECORE_DEBUG_BR
 	printf("brelse(%p) ut3\n", pbp);
 #endif
-	brelse(pbp, 0);
+	brelse(pbp);
 	ip->i_parent = paddr + (i << FILECORE_INO_INDEX);
 	return (paddr + (i << FILECORE_INO_INDEX));
 }

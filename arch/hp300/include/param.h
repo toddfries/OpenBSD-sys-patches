@@ -1,4 +1,4 @@
-/*	$NetBSD: param.h,v 1.49 2007/12/31 13:38:50 ad Exp $	*/
+/*	$NetBSD: param.h,v 1.47 2005/12/06 17:06:00 tsutsui Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1990, 1993
@@ -85,6 +85,13 @@
 #define	_MACHINE	hp300
 #define	MACHINE		"hp300"
 
+#ifdef _KERNEL
+/*
+ * Interrupt glue.
+ */
+#include <machine/intr.h>
+#endif /* _KERNEL */
+
 #define	PGSHIFT		12		/* LOG2(NBPG) */
 #define	KERNBASE	0x00000000	/* start of kernel virtual */
 
@@ -113,12 +120,28 @@
 #define	NKMEMPAGES_MAX_DEFAULT	((8 * 1024 * 1024) >> PAGE_SHIFT)
 
 #if defined(_KERNEL) && !defined(_LOCORE)
-#include <machine/intr.h>
-
 #define	delay(us)	_delay((us) << 8)
 #define DELAY(us)	delay(us)
 
 void	_delay(u_int);
 #endif /* _KERNEL && !_LOCORE */
+
+#if defined(_KERNEL_OPT)
+#include "opt_compat_hpux.h"
+#endif
+
+#ifdef COMPAT_HPUX
+/*
+ * Constants/macros for HPUX multiple mapping of user address space.
+ * Pages in the first 256Mb are mapped in at every 256Mb segment.
+ */
+#define HPMMMASK	0xF0000000
+#define ISHPMMADDR(v) \
+	((curproc->p_md.mdp_flags & MDP_HPUXMMAP) && \
+	 ((unsigned)(v) & HPMMMASK) && \
+	 ((unsigned)(v) & HPMMMASK) != HPMMMASK)
+#define HPMMBASEADDR(v) \
+	((unsigned)(v) & ~HPMMMASK)
+#endif
 
 #endif	/* !_HP300_PARAM_H_ */

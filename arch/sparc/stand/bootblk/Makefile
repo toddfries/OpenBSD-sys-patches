@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile,v 1.11 2008/10/19 22:05:21 apb Exp $
+#	$NetBSD: Makefile,v 1.10 2006/08/28 13:38:43 tsutsui Exp $
 
 CURDIR=	${.CURDIR}
 S=	${CURDIR}/../../../..
@@ -38,7 +38,7 @@ assym.fth.h: genfth.cf machine
 	    mv -f assym.fth.h.tmp assym.fth.h
 
 bootblk.text: bootblk.fth assym.fth.h
-	${TOOL_AWK} '/fload/ { print "#include \"" $$2 "\"" }; !/fload/' \
+	awk '/fload/ { print "#include \"" $$2 "\"" }; !/fload/' \
 	    ${.CURDIR}/bootblk.fth | /usr/bin/cpp -P >bootblk.text.tmp &&
 	    mv -f bootblk.text.tmp bootblk.text
 

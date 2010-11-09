@@ -1,4 +1,4 @@
-/*	$NetBSD: audio_if.h,v 1.65 2008/03/04 18:23:44 cube Exp $	*/
+/*	$NetBSD: audio_if.h,v 1.63 2007/03/04 06:01:41 christos Exp $	*/
 
 /*
  * Copyright (c) 1994 Havard Eidnes.
@@ -253,7 +253,8 @@ struct audio_attach_args {
 #define AUDIODEV_TYPE_AUX	4
 
 /* Attach the MI driver(s) to the MD driver. */
-device_t audio_attach_mi(const struct audio_hw_if *, void *, device_t);
+struct device *audio_attach_mi(const struct audio_hw_if *, void *,
+    struct device *);
 int	audioprint(void *, const char *);
 
 /* Device identity flags */
@@ -269,6 +270,11 @@ int	audioprint(void *, const char *);
 #define ISDEVAUDIO(x)		(AUDIODEV((x)) == AUDIO_DEVICE)
 #define ISDEVAUDIOCTL(x)	(AUDIODEV((x)) == AUDIOCTL_DEVICE)
 #define ISDEVMIXER(x)		(AUDIODEV((x)) == MIXER_DEVICE)
+
+#if !defined(__i386__) && !defined(__arm32__) && !defined(IPL_AUDIO)
+#define splaudio splbio		/* XXX */
+#define IPL_AUDIO IPL_BIO	/* XXX */
+#endif
 
 /*
  * USB Audio specification defines 12 channels:

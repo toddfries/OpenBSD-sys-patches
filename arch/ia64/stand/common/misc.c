@@ -1,4 +1,4 @@
-/*	$NetBSD: misc.c,v 1.3 2007/03/04 06:00:03 christos Exp $	*/
+/*	$NetBSD: misc.c,v 1.2 2006/04/22 07:58:53 cherry Exp $	*/
 
 /*-
  * Copyright (c) 1998 Michael Smith <msmith@freebsd.org>
@@ -166,9 +166,9 @@ alloc_pread(int fd, off_t off, size_t len)
  * Display a region in traditional hexdump format.
  */
 void
-hexdump(void *region, size_t len)
+hexdump(caddr_t region, size_t len)
 {
-    void *	line;
+    caddr_t	line;
     int		x, c;
     char	lbuf[80];
 #define emit(fmt, args...)	{sprintf(lbuf, fmt , ## args); pager_output(lbuf);}

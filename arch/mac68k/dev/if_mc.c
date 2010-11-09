@@ -1,4 +1,4 @@
-/*	$NetBSD: if_mc.c,v 1.35 2008/11/07 00:20:01 dyoung Exp $	*/
+/*	$NetBSD: if_mc.c,v 1.28 2006/12/12 11:46:33 martin Exp $	*/
 
 /*-
  * Copyright (c) 1997 David Huang <khym@azeotrope.org>
@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_mc.c,v 1.35 2008/11/07 00:20:01 dyoung Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_mc.c,v 1.28 2006/12/12 11:46:33 martin Exp $");
 
 #include "opt_ddb.h"
 #include "opt_inet.h"
@@ -67,6 +67,8 @@ __KERNEL_RCSID(0, "$NetBSD: if_mc.c,v 1.35 2008/11/07 00:20:01 dyoung Exp $");
 
 
 
+#include <uvm/uvm_extern.h>
+
 #include "bpfilter.h"
 #if NBPFILTER > 0
 #include <net/bpf.h>
@@ -80,14 +82,14 @@ __KERNEL_RCSID(0, "$NetBSD: if_mc.c,v 1.35 2008/11/07 00:20:01 dyoung Exp $");
 hide void	mcwatchdog(struct ifnet *);
 hide int	mcinit(struct mc_softc *);
 hide int	mcstop(struct mc_softc *);
-hide int	mcioctl(struct ifnet *, u_long, void *);
+hide int	mcioctl(struct ifnet *, u_long, caddr_t);
 hide void	mcstart(struct ifnet *);
 hide void	mcreset(struct mc_softc *);
 
 integrate u_int	maceput(struct mc_softc *, struct mbuf *);
 integrate void	mc_tint(struct mc_softc *);
-integrate void	mace_read(struct mc_softc *, void *, int);
-integrate struct mbuf *mace_get(struct mc_softc *, void *, int);
+integrate void	mace_read(struct mc_softc *, caddr_t, int);
+integrate struct mbuf *mace_get(struct mc_softc *, caddr_t, int);
 static void mace_calcladrf(struct ethercom *, u_int8_t *);
 static inline u_int16_t ether_cmp(void *, void *);
 
@@ -169,34 +171,33 @@ mcsetup(struct mc_softc	*sc, u_int8_t *lladdr)
 }
 
 hide int
-mcioctl(struct ifnet *ifp, u_long cmd, void *data)
+mcioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	struct mc_softc *sc = ifp->if_softc;
 	struct ifaddr *ifa;
+	struct ifreq *ifr;
 
 	int	s = splnet(), err = 0;
 
 	switch (cmd) {
 
-	case SIOCINITIFADDR:
+	case SIOCSIFADDR:
 		ifa = (struct ifaddr *)data;
 		ifp->if_flags |= IFF_UP;
-		mcinit(sc);
 		switch (ifa->ifa_addr->sa_family) {
 #ifdef INET
 		case AF_INET:
+			mcinit(sc);
 			arp_ifinit(ifp, ifa);
 			break;
 #endif
 		default:
+			mcinit(sc);
 			break;
 		}
 		break;
 
 	case SIOCSIFFLAGS:
-		if ((err = ifioctl_common(ifp, cmd, data)) != 0)
-			break;
-		/* XXX see the comment in ed_ioctl() about code re-use */
 		if ((ifp->if_flags & IFF_UP) == 0 &&
 		    (ifp->if_flags & IFF_RUNNING) != 0) {
 			/*
@@ -224,7 +225,12 @@ mcioctl(struct ifnet *ifp, u_long cmd, void *data)
 
 	case SIOCADDMULTI:
 	case SIOCDELMULTI:
-		if ((err = ether_ioctl(ifp, cmd, data)) == ENETRESET) {
+		ifr = (struct ifreq *) data;
+		err = (cmd == SIOCADDMULTI) ?
+		    ether_addmulti(ifr, &sc->sc_ethercom) :
+		    ether_delmulti(ifr, &sc->sc_ethercom);
+
+		if (err == ENETRESET) {
 			/*
 			 * Multicast list has changed; set the hardware
 			 * filter accordingly. But remember UP flag!
@@ -235,7 +241,7 @@ mcioctl(struct ifnet *ifp, u_long cmd, void *data)
 		}
 		break;
 	default:
-		err = ether_ioctl(ifp, cmd, data);
+		err = EINVAL;
 	}
 	splx(s);
 	return (err);
@@ -405,7 +411,7 @@ maceput(struct mc_softc *sc, struct mbuf *m)
 	u_int len, totlen = 0;
 	u_char *buff;
 
-	buff = (u_char*)sc->sc_txbuf + (sc->sc_txset == 0 ? 0 : 0x800);
+	buff = sc->sc_txbuf + (sc->sc_txset == 0 ? 0 : 0x800);
 
 	for (; m; m = n) {
 		u_char *data = mtod(m, u_char *);
@@ -564,7 +570,7 @@ mc_rint(struct mc_softc *sc)
 }
 
 integrate void
-mace_read(struct mc_softc *sc, void *pkt, int len)
+mace_read(struct mc_softc *sc, caddr_t pkt, int len)
 {
 	struct ifnet *ifp = &sc->sc_if;
 	struct mbuf *m;
@@ -604,7 +610,7 @@ mace_read(struct mc_softc *sc, void *pkt, int len)
  * we copy into clusters.
  */
 integrate struct mbuf *
-mace_get(struct mc_softc *sc, void *pkt, int totlen)
+mace_get(struct mc_softc *sc, caddr_t pkt, int totlen)
 {
 	struct mbuf *m;
 	struct mbuf *top, **mp;
@@ -638,8 +644,8 @@ mace_get(struct mc_softc *sc, void *pkt, int totlen)
 			len = MCLBYTES;
 		}
 		m->m_len = len = min(totlen, len);
-		memcpy(mtod(m, void *), pkt, len);
-		pkt = (char*)pkt + len;
+		memcpy(mtod(m, caddr_t), pkt, len);
+		pkt += len;
 		totlen -= len;
 		*mp = m;
 		mp = &m->m_next;

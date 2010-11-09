@@ -1,4 +1,4 @@
-/*	$NetBSD: igsfb.c,v 1.44 2008/04/08 12:07:26 cegger Exp $ */
+/*	$NetBSD: igsfb.c,v 1.43 2007/10/19 11:59:53 ad Exp $ */
 
 /*
  * Copyright (c) 2002, 2003 Valeriy E. Ushakov
@@ -31,7 +31,7 @@
  * Integraphics Systems IGA 168x and CyberPro series.
  */
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: igsfb.c,v 1.44 2008/04/08 12:07:26 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: igsfb.c,v 1.43 2007/10/19 11:59:53 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -191,7 +191,7 @@ igsfb_attach_subr(struct igsfb_softc *sc, int isconsole)
 	dc->dc_console.scr_flags |= VCONS_SCREEN_IS_STATIC;
 
 	printf("%s: %dMB, %s%dx%d, %dbpp\n",
-	       device_xname(&sc->sc_dev),
+	       sc->sc_dev.dv_xname,
 	       (uint32_t)(dc->dc_vmemsz >> 20),
 	       (dc->dc_hwflags & IGSFB_HW_BSWAP)
 		   ? (dc->dc_hwflags & IGSFB_HW_BE_SELECT)

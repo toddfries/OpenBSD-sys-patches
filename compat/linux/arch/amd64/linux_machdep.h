@@ -1,4 +1,4 @@
-/*	$NetBSD: linux_machdep.h,v 1.12 2008/04/21 22:38:18 njoly Exp $ */
+/*	$NetBSD: linux_machdep.h,v 1.5 2005/11/23 16:14:57 manu Exp $ */
 
 /*-
  * Copyright (c) 2005 Emmanuel Dreyfus, all rights reserved.
@@ -34,8 +34,6 @@
 #ifndef _AMD64_LINUX_MACHDEP_H
 #define _AMD64_LINUX_MACHDEP_H
 
-#define LINUX_STATFS_64BIT	/* Needed for full 64bit struct statfs */
-
 #include <compat/linux/common/linux_types.h>
 #include <compat/linux/common/linux_signal.h>
 #include <compat/linux/common/linux_siginfo.h>
@@ -70,7 +68,6 @@ struct linux_sigcontext {
 	u_int64_t rbp;
 	u_int64_t rbx;
 	u_int64_t rdx;
-	u_int64_t rax;
 	u_int64_t rcx;
 	u_int64_t rsp;
 	u_int64_t rip;
@@ -105,7 +102,7 @@ struct linux_rt_sigframe {
 
 #ifdef _KERNEL
 __BEGIN_DECLS
-void linux_syscall_intern(struct proc *);
+void linux_syscall_intern __P((struct proc *));
 __END_DECLS
 #endif /* !_KERNEL */
 
@@ -113,18 +110,8 @@ __END_DECLS
 #define LINUX_VSYSCALL_SIZE	1024
 #define LINUX_VSYSCALL_MAXNR	3
 
-#define LINUX_UNAME_ARCH MACHINE_ARCH
+#define LINUX_UNAME_ARCH machine_arch
 #define LINUX_NPTL
 #define LINUX_LARGEFILE64
-#define LINUX_IPC_FORCE64
-
-/*
- * Used in ugly patch to fake device numbers.
- */
-/* Major device numbers for new style ptys. */
-#define LINUX_PTC_MAJOR                2
-#define LINUX_PTS_MAJOR                3
-/* Major device numbers of VT device on both Linux and NetBSD. */
-#define LINUX_CONS_MAJOR       4
 
 #endif /* _AMD64_LINUX_MACHDEP_H */

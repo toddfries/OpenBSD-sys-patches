@@ -1,4 +1,4 @@
-/*	$NetBSD: ext2fs_bmap.c,v 1.24 2008/03/27 19:06:52 ad Exp $	*/
+/*	$NetBSD: ext2fs_bmap.c,v 1.21 2005/12/11 12:25:25 christos Exp $	*/
 
 /*
  * Copyright (c) 1989, 1991, 1993
@@ -70,7 +70,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ext2fs_bmap.c,v 1.24 2008/03/27 19:06:52 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ext2fs_bmap.c,v 1.21 2005/12/11 12:25:25 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -141,7 +141,7 @@ ext2fs_bmaparray(struct vnode *vp, daddr_t bn, daddr_t *bnp, struct indir *ap,
 		int *nump, int *runp)
 {
 	struct inode *ip;
-	struct buf *bp, *cbp;
+	struct buf *bp;
 	struct ufsmount *ump;
 	struct mount *mp;
 	struct indir a[NIADDR+1], *xap;
@@ -208,21 +208,14 @@ ext2fs_bmaparray(struct vnode *vp, daddr_t bn, daddr_t *bnp, struct indir *ap,
 		 */
 
 		metalbn = xap->in_lbn;
-		if (metalbn == bn)
+		if ((daddr == 0 && !incore(vp, metalbn)) || metalbn == bn)
 			break;
-		if (daddr == 0) {
-			mutex_enter(&bufcache_lock);
-			cbp = incore(vp, metalbn);
-			mutex_exit(&bufcache_lock);
-			if (cbp == NULL)
-				break;
-		}
 		/*
 		 * If we get here, we've either got the block in the cache
 		 * or we have a disk address for it, go fetch it.
 		 */
 		if (bp)
-			brelse(bp, 0);
+			brelse(bp);
 
 		xap->in_exists = 1;
 		bp = getblk(vp, metalbn, mp->mnt_stat.f_iosize, 0, 0);
@@ -236,7 +229,7 @@ ext2fs_bmaparray(struct vnode *vp, daddr_t bn, daddr_t *bnp, struct indir *ap,
 
 			 return (ENOMEM);
 		}
-		if (bp->b_oflags & (BO_DONE | BO_DELWRI)) {
+		if (bp->b_flags & (B_DONE | B_DELWRI)) {
 			trace(TR_BREADHIT, pack(vp, size), metalbn);
 		}
 #ifdef DIAGNOSTIC
@@ -248,9 +241,9 @@ ext2fs_bmaparray(struct vnode *vp, daddr_t bn, daddr_t *bnp, struct indir *ap,
 			bp->b_blkno = blkptrtodb(ump, daddr);
 			bp->b_flags |= B_READ;
 			VOP_STRATEGY(vp, bp);
-			curlwp->l_ru.ru_inblock++;	/* XXX */
+			curproc->p_stats->p_ru.ru_inblock++;	/* XXX */
 			if ((error = biowait(bp)) != 0) {
-				brelse(bp, 0);
+				brelse(bp);
 				return (error);
 			}
 		}
@@ -266,7 +259,7 @@ ext2fs_bmaparray(struct vnode *vp, daddr_t bn, daddr_t *bnp, struct indir *ap,
 				++bn, ++*runp);
 	}
 	if (bp)
-		brelse(bp, 0);
+		brelse(bp);
 
 	daddr = blkptrtodb(ump, daddr);
 	*bnp = daddr == 0 ? -1 : daddr;

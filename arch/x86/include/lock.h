@@ -1,4 +1,4 @@
-/*	$NetBSD: lock.h,v 1.25 2009/01/15 01:20:31 pooka Exp $	*/
+/*	$NetBSD: lock.h,v 1.12 2006/12/18 07:34:42 ad Exp $	*/
 
 /*-
  * Copyright (c) 2000, 2006 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -36,60 +43,31 @@
 #ifndef _X86_LOCK_H_
 #define	_X86_LOCK_H_
 
-#include <sys/param.h>
-
-static __inline int
-__SIMPLELOCK_LOCKED_P(__cpu_simple_lock_t *__ptr)
-{
-	return *__ptr == __SIMPLELOCK_LOCKED;
-}
-
-static __inline int
-__SIMPLELOCK_UNLOCKED_P(__cpu_simple_lock_t *__ptr)
-{
-	return *__ptr == __SIMPLELOCK_UNLOCKED;
-}
-
-static __inline void
-__cpu_simple_lock_set(__cpu_simple_lock_t *__ptr)
-{
-
-	*__ptr = __SIMPLELOCK_LOCKED;
-}
-
-static __inline void
-__cpu_simple_lock_clear(__cpu_simple_lock_t *__ptr)
-{
-
-	*__ptr = __SIMPLELOCK_UNLOCKED;
-}
-
-#ifdef _HARDKERNEL
+#if defined(_KERNEL_OPT)
+#include "opt_lockdebug.h"
+#endif
 
 #include <machine/cpufunc.h>
 
-void	__cpu_simple_lock_init(__cpu_simple_lock_t *);
-void	__cpu_simple_lock(__cpu_simple_lock_t *);
-int	__cpu_simple_lock_try(__cpu_simple_lock_t *);
-void	__cpu_simple_unlock(__cpu_simple_lock_t *);
+#ifdef LOCKDEBUG
 
-#define	SPINLOCK_SPIN_HOOK	/* nothing */
-
-#ifdef SPINLOCK_BACKOFF_HOOK
-#undef SPINLOCK_BACKOFF_HOOK
-#endif
-#define	SPINLOCK_BACKOFF_HOOK	x86_pause()
+extern void __cpu_simple_lock_init(__cpu_simple_lock_t *);
+extern void __cpu_simple_lock(__cpu_simple_lock_t *);
+extern int __cpu_simple_lock_try(__cpu_simple_lock_t *);
+extern void __cpu_simple_unlock(__cpu_simple_lock_t *);
 
 #else
 
+#include <machine/atomic.h>
+
 static __inline void __cpu_simple_lock_init(__cpu_simple_lock_t *)
-	__unused;
+	__attribute__((__unused__));
 static __inline void __cpu_simple_lock(__cpu_simple_lock_t *)
-	__unused;
+	__attribute__((__unused__));
 static __inline int __cpu_simple_lock_try(__cpu_simple_lock_t *)
-	__unused;
+	__attribute__((__unused__));
 static __inline void __cpu_simple_unlock(__cpu_simple_lock_t *)
-	__unused;
+	__attribute__((__unused__));
 
 static __inline void
 __cpu_simple_lock_init(__cpu_simple_lock_t *lockp)
@@ -99,26 +77,28 @@ __cpu_simple_lock_init(__cpu_simple_lock_t *lockp)
 	__insn_barrier();
 }
 
-static __inline int
-__cpu_simple_lock_try(__cpu_simple_lock_t *lockp)
-{
-	uint8_t val;
-
-	val = __SIMPLELOCK_LOCKED;
-	__asm volatile ("xchgb %0,(%2)" : 
-	    "=r" (val)
-	    :"0" (val), "r" (lockp));
-	__insn_barrier();
-	return val == __SIMPLELOCK_UNLOCKED;
-}
-
 static __inline void
 __cpu_simple_lock(__cpu_simple_lock_t *lockp)
 {
 
-	while (!__cpu_simple_lock_try(lockp))
-		/* nothing */;
+	while (x86_atomic_testset_i(lockp, __SIMPLELOCK_LOCKED)
+	    != __SIMPLELOCK_UNLOCKED) {
+		do {
+			x86_pause();
+		} while (*lockp == __SIMPLELOCK_LOCKED);
+	}
 	__insn_barrier();
+}
+
+static __inline int
+__cpu_simple_lock_try(__cpu_simple_lock_t *lockp)
+{
+	int r = (x86_atomic_testset_i(lockp, __SIMPLELOCK_LOCKED)
+	    == __SIMPLELOCK_UNLOCKED);
+
+	__insn_barrier();
+
+	return (r);
 }
 
 /*
@@ -181,6 +161,10 @@ __cpu_simple_unlock(__cpu_simple_lock_t *lockp)
 	*lockp = __SIMPLELOCK_UNLOCKED;
 }
 
-#endif	/* _HARDKERNEL */
+#endif /* !LOCKDEBUG */
+
+#ifdef _KERNEL
+#define	SPINLOCK_SPIN_HOOK	x86_pause()
+#endif
 
 #endif /* _X86_LOCK_H_ */

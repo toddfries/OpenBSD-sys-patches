@@ -1,4 +1,4 @@
-/*	$NetBSD: freebsd_ipc.c,v 1.16 2009/01/11 02:45:47 christos Exp $	*/
+/*	$NetBSD: freebsd_ipc.c,v 1.12 2005/11/10 18:47:53 christos Exp $	*/
 
 /*
  * Copyright (c) 1994 Adam Glass and Charles M. Hannum.  All rights reserved.
@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: freebsd_ipc.c,v 1.16 2009/01/11 02:45:47 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: freebsd_ipc.c,v 1.12 2005/11/10 18:47:53 christos Exp $");
 
 #if defined(_KERNEL_OPT)
 #include "opt_sysv.h"
@@ -42,10 +42,10 @@ __KERNEL_RCSID(0, "$NetBSD: freebsd_ipc.c,v 1.16 2009/01/11 02:45:47 christos Ex
 #include <sys/kernel.h>
 #include <sys/proc.h>
 #include <sys/sem.h>
-#include <sys/shm.h>
 #include <sys/malloc.h>
 
 #include <sys/mount.h>
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 
 #include <compat/sys/shm.h>
@@ -53,15 +53,18 @@ __KERNEL_RCSID(0, "$NetBSD: freebsd_ipc.c,v 1.16 2009/01/11 02:45:47 christos Ex
 
 #ifdef SYSVSEM
 int
-freebsd_sys_semsys(struct lwp *l, const struct freebsd_sys_semsys_args *uap, register_t *retval)
+freebsd_sys_semsys(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct freebsd_sys_semsys_args /* {
 		syscallarg(int) which;
 		syscallarg(int) a2;
 		syscallarg(int) a3;
 		syscallarg(int) a4;
 		syscallarg(int) a5;
-	} */
+	} */ *uap = v;
 	struct compat_14_sys___semctl_args /* {
 		syscallarg(int) semid;
 		syscallarg(int) semnum;
@@ -114,14 +117,17 @@ freebsd_sys_semsys(struct lwp *l, const struct freebsd_sys_semsys_args *uap, reg
 
 #ifdef SYSVSHM
 int
-freebsd_sys_shmsys(struct lwp *l, const struct freebsd_sys_shmsys_args *uap, register_t *retval)
+freebsd_sys_shmsys(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct freebsd_sys_shmsys_args /* {
 		syscallarg(int) which;
 		syscallarg(int) a2;
 		syscallarg(int) a3;
 		syscallarg(int) a4;
-	} */
+	} */ *uap = v;
 	struct sys_shmat_args /* {
 		syscallarg(int) shmid;
 		syscallarg(void *) shmaddr;
@@ -176,16 +182,19 @@ freebsd_sys_shmsys(struct lwp *l, const struct freebsd_sys_shmsys_args *uap, reg
 
 #ifdef SYSVMSG
 int
-freebsd_sys_msgsys(struct lwp *l, const struct freebsd_sys_msgsys_args *uap, register_t *retval)
+freebsd_sys_msgsys(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct freebsd_sys_msgsys_args /* {
 		syscallarg(int) which;
 		syscallarg(int) a2;
 		syscallarg(int) a3;
 		syscallarg(int) a4;
 		syscallarg(int) a5;
 		syscallarg(int) a6;
-	} */
+	} */ *uap = v;
 	struct compat_14_sys_msgctl_args /* {
 		syscallarg(int) msqid;
 		syscallarg(int) cmd;

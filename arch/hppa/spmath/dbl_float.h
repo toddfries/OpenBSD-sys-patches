@@ -1,6 +1,6 @@
-/*	$NetBSD: dbl_float.h,v 1.3 2009/01/27 11:49:54 skrll Exp $	*/
+/*	$NetBSD: dbl_float.h,v 1.1 2002/06/05 01:04:24 fredette Exp $	*/
 
-/*	$OpenBSD: dbl_float.h,v 1.10 2004/01/02 14:39:01 mickey Exp $	*/
+/*	$OpenBSD: dbl_float.h,v 1.5 2001/03/29 03:58:17 mickey Exp $	*/
 
 /*
  * Copyright 1996 1995 by Open Software Foundation, Inc.
@@ -343,16 +343,16 @@
     Deposit_dexponent(dbl_value,(exponent op DBL_WRAP))
 
 #define Dbl_setlargestpositive(dbl_valueA,dbl_valueB)			\
-    Dallp1(dbl_valueA) = ((DBL_EMAX+DBL_BIAS) << (32-(1+DBL_EXP_LENGTH))) \
+    Dallp1(dbl_valueA) = ((DBL_MAX_EXP+DBL_BIAS) << (32-(1+DBL_EXP_LENGTH))) \
 			| ((1<<(32-(1+DBL_EXP_LENGTH))) - 1 );		\
     Dallp2(dbl_valueB) = 0xFFFFFFFF
 #define Dbl_setlargestnegative(dbl_valueA,dbl_valueB)			\
-    Dallp1(dbl_valueA) = ((DBL_EMAX+DBL_BIAS) << (32-(1+DBL_EXP_LENGTH))) \
+    Dallp1(dbl_valueA) = ((DBL_MAX_EXP+DBL_BIAS) << (32-(1+DBL_EXP_LENGTH))) \
 			| ((1<<(32-(1+DBL_EXP_LENGTH))) - 1 ) | (1<<31); \
     Dallp2(dbl_valueB) = 0xFFFFFFFF
 #define Dbl_setlargest_exponentmantissa(dbl_valueA,dbl_valueB)		\
     Deposit_dexponentmantissap1(dbl_valueA,				\
-	(((DBL_EMAX+DBL_BIAS) << (32-(1+DBL_EXP_LENGTH)))		\
+	(((DBL_MAX_EXP+DBL_BIAS) << (32-(1+DBL_EXP_LENGTH)))		\
 			| ((1<<(32-(1+DBL_EXP_LENGTH))) - 1 )));	\
     Dallp2(dbl_valueB) = 0xFFFFFFFF
 
@@ -362,7 +362,7 @@
     Dallp2(dbl_valueB) = 0
 #define Dbl_setlargest(dbl_valueA,dbl_valueB,sign)			\
     Dallp1(dbl_valueA) = (sign << 31) |					\
-	((DBL_EMAX+DBL_BIAS) << (32-(1+DBL_EXP_LENGTH))) |		\
+	((DBL_MAX_EXP+DBL_BIAS) << (32-(1+DBL_EXP_LENGTH))) |		\
 	 ((1 << (32-(1+DBL_EXP_LENGTH))) - 1 );				\
     Dallp2(dbl_valueB) = 0xFFFFFFFF
 
@@ -454,11 +454,11 @@
 
 /* Need to Initialize */
 #define Dbl_makequietnan(desta,destb)					\
-    Dallp1(desta) = ((DBL_EMAX+DBL_BIAS)+1)<< (32-(1+DBL_EXP_LENGTH))	\
+    Dallp1(desta) = ((DBL_MAX_EXP+DBL_BIAS)+1)<< (32-(1+DBL_EXP_LENGTH))	\
 		| (1<<(32-(1+DBL_EXP_LENGTH+2)));			\
     Dallp2(destb) = 0
 #define Dbl_makesignalingnan(desta,destb)				\
-    Dallp1(desta) = ((DBL_EMAX+DBL_BIAS)+1)<< (32-(1+DBL_EXP_LENGTH))	\
+    Dallp1(desta) = ((DBL_MAX_EXP+DBL_BIAS)+1)<< (32-(1+DBL_EXP_LENGTH))	\
 		| (1<<(32-(1+DBL_EXP_LENGTH+1)));			\
     Dallp2(destb) = 0
 
@@ -554,17 +554,17 @@
     }
 
 
-int dbl_fadd(dbl_floating_point *, dbl_floating_point*, dbl_floating_point*, unsigned int *);
-int dbl_fcmp(dbl_floating_point *, dbl_floating_point*, unsigned int, unsigned int *);
-int dbl_fdiv(dbl_floating_point *, dbl_floating_point *, dbl_floating_point *, unsigned int *);
-int dbl_fmpy(dbl_floating_point *, dbl_floating_point *, dbl_floating_point*, unsigned int *);
-int dbl_frem(dbl_floating_point *, dbl_floating_point *, dbl_floating_point*, unsigned int *);
-int dbl_fsqrt(dbl_floating_point *, dbl_floating_point *, unsigned int *);
-int dbl_fsub(dbl_floating_point *, dbl_floating_point *, dbl_floating_point*, unsigned int *);
+int dbl_fadd __P((dbl_floating_point *, dbl_floating_point*, dbl_floating_point*, unsigned int *));
+int dbl_fcmp __P((dbl_floating_point *, dbl_floating_point*, unsigned int, unsigned int *));
+int dbl_fdiv __P((dbl_floating_point *, dbl_floating_point *, dbl_floating_point *, unsigned int *));
+int dbl_fmpy __P((dbl_floating_point *, dbl_floating_point *, dbl_floating_point*, unsigned int *));
+int dbl_frem __P((dbl_floating_point *, dbl_floating_point *, dbl_floating_point*, unsigned int *));
+int dbl_fsqrt __P((dbl_floating_point *, dbl_floating_point *, unsigned int *));
+int dbl_fsub __P((dbl_floating_point *, dbl_floating_point *, dbl_floating_point*, unsigned int *));
 
-dbl_floating_point dbl_setoverflow(unsigned int);
+dbl_floating_point dbl_setoverflow __P((unsigned int));
 
-int sgl_to_dbl_fcnvff(sgl_floating_point *, dbl_floating_point *, unsigned int *);
-int dbl_to_sgl_fcnvff(dbl_floating_point *, sgl_floating_point *, unsigned int *);
+int sgl_to_dbl_fcnvff __P((sgl_floating_point *, dbl_floating_point *, unsigned int *));
+int dbl_to_sgl_fcnvff __P((dbl_floating_point *, sgl_floating_point *, unsigned int *));
 
-int dbl_frnd(dbl_floating_point *, dbl_floating_point *, unsigned int *);
+int dbl_frnd __P((dbl_floating_point *, dbl_floating_point *, unsigned int *));

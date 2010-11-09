@@ -1,4 +1,4 @@
-/*	$NetBSD: mappedcopy.c,v 1.25 2007/03/05 21:05:01 dogcow Exp $	*/
+/*	$NetBSD: mappedcopy.c,v 1.22 2006/07/22 06:36:06 tsutsui Exp $	*/
 
 /*
  * XXX This doesn't work yet.  Soon.  --thorpej@NetBSD.org
@@ -81,7 +81,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mappedcopy.c,v 1.25 2007/03/05 21:05:01 dogcow Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mappedcopy.c,v 1.22 2006/07/22 06:36:06 tsutsui Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -106,12 +106,12 @@ int	mappedcopyoutcount;
  */
 u_int	mappedcopysize = -1;
 
-static void *caddr1 = 0;
+static caddr_t caddr1 = 0;
 
 int
 mappedcopyin(void *f, void *t, size_t count)
 {
-	void *fromp = f, *top = t;
+	caddr_t fromp = f, top = t;
 	vaddr_t kva;
 	paddr_t upa;
 	register size_t len;
@@ -127,7 +127,7 @@ mappedcopyin(void *f, void *t, size_t count)
 #endif
 
 	if (CADDR1 == 0)
-		CADDR1 = (void *) uvm_km_alloc(kernel_map, PAGE_SIZE, 0,
+		CADDR1 = (caddr_t) uvm_km_alloc(kernel_map, PAGE_SIZE, 0,
 		    UVM_KMF_VAONLY);
 
 	kva = (vaddr_t)CADDR1;
@@ -145,14 +145,14 @@ mappedcopyin(void *f, void *t, size_t count)
 		 * Map in the page and memcpy data in from it
 		 */
 		if (pmap_extract(upmap, trunc_page((vaddr_t)fromp), &upa)
-		    == false)
+		    == FALSE)
 			panic("mappedcopyin: null page frame");
 		len = min(count, (PAGE_SIZE - off));
 		pmap_enter(pmap_kernel(), kva, upa,
 		    VM_PROT_READ, VM_PROT_READ | PMAP_WIRED);
 		pmap_update(pmap_kernel());
 		if (len == PAGE_SIZE && alignable && off == 0)
-			copypage((void *)kva, top);
+			copypage((caddr_t)kva, top);
 		else
 			memcpy(top, (void *)(kva + off), len);
 		fromp += len;
@@ -169,7 +169,7 @@ mappedcopyin(void *f, void *t, size_t count)
 int
 mappedcopyout(void *f, void *t, size_t count)
 {
-	void *fromp = f, *top = t;
+	caddr_t fromp = f, top = t;
 	vaddr_t kva;
 	paddr_t upa;
 	size_t len;
@@ -185,7 +185,7 @@ mappedcopyout(void *f, void *t, size_t count)
 #endif
 
 	if (CADDR2 == 0)
-		CADDR2 = (void *) uvm_km_alloc(kernel_map, PAGE_SIZE, 0,
+		CADDR2 = (caddr_t) uvm_km_alloc(kernel_map, PAGE_SIZE, 0,
 		    UVM_KMF_VAONLY);
 
 	kva = (vaddr_t) CADDR2;
@@ -203,7 +203,7 @@ mappedcopyout(void *f, void *t, size_t count)
 		 * Map in the page and memcpy data out to it
 		 */
 		if (pmap_extract(upmap, trunc_page((vaddr_t)top), &upa)
-		    == false)
+		    == FALSE)
 			panic("mappedcopyout: null page frame");
 		len = min(count, (PAGE_SIZE - off));
 		pmap_enter(pmap_kernel(), kva, upa,
@@ -211,7 +211,7 @@ mappedcopyout(void *f, void *t, size_t count)
 		    VM_PROT_READ|VM_PROT_WRITE|PMAP_WIRED);
 		pmap_update(pmap_kernel());
 		if (len == PAGE_SIZE && alignable && off == 0)
-			copypage(fromp, (void *)kva);
+			copypage(fromp, (caddr_t)kva);
 		else
 			memcpy((void *)(kva + off), fromp, len);
 		fromp += len;

@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile,v 1.16 2009/01/12 07:56:31 tsutsui Exp $
+#	$NetBSD: Makefile,v 1.13 2006/06/29 03:46:43 lukem Exp $
 
 NOMAN=		# defined
 
@@ -6,8 +6,7 @@ NOMAN=		# defined
 
 BOOT=	boot_ustar
 VERSIONFILE=	${.CURDIR}/version
-VERSION!=	${TOOL_AWK} -F: '$$1 ~ /^[0-9.]*$$/ { it = $$1; } \
-			END { print it }' ${VERSIONFILE}
+VERSION!=	awk -F: '$$1 ~ /^[0-9.]*$$/ { it = $$1; } END { print it }' ${VERSIONFILE}
 NEWVERSWHAT=	"${BOOT}"
 
 # text and bss addresses in hex
@@ -33,7 +32,7 @@ vers.c:	${VERSIONFILE}
 
 CPPFLAGS+= -DTEXTADDR="0x$(TEXT)" -DBOOT_TEXTADDR="0x$(BOOT_TEXT)"
 CPPFLAGS+= -DBOOT=\"$(BOOT)\" -DBOOT_VERS=\"$(VERSION)\"
-CPPFLAGS+= -I${COMMONDIR} -I${LIBIOCS} -I${S} -I. -D_STANDALONE
+CPPFLAGS+= -I${COMMONDIR} -I${LIBIOCS}
 AFLAGS=	   ${CFLAGS:M-[ID]*}
 AFLAGS+=   -Wa,-mc68000
 .if ${OBJECT_FMT} == "ELF"
@@ -44,9 +43,6 @@ LINKFLAGS=   -n -Bstatic -Ttext ${TEXT} -M
 OBJCOPY?=  objcopy
 .endif
 
-.include "${.CURDIR}/../Makefile.booters"
-.include "${S}/../common/lib/libc/Makefile.inc"
-
 CLEANFILES+=	${PROG}.x $(PROG).map
 
 
@@ -56,16 +52,14 @@ ${PROG}: $(OBJS)
 	@grep first_kbyte $(PROG).map
 .if ${OBJECT_FMT} == "ELF"
 	@if [ `(echo ibase=16; 						   \
-	    ${TOOL_SED} -n						   \
-		's/^.*0x\([0-9a-f]*\).* first_kbyte$$/\1-$(TEXT)-400/p'    \
+	    sed -n 's/^.*0x\([0-9a-f]*\).* first_kbyte$$/\1-$(TEXT)-400/p' \
 		$(PROG).map | 						   \
 	    tr a-f A-F) | bc` -gt 0 ]; 					   \
 	then echo '$(BOOT): first_kbyte exceeds the first killobyte';	   \
 	    rm $(PROG) ; exit 1; 					   \
 	fi
 	@if [ `(echo ibase=16; 						   \
-	    ${TOOL_SED} -n						   \
-		's/^.*0x\([0-9a-f]*\).* _edata *= *\.$$/\1-$(TEXT)-2000/p' \
+	    sed -n 's/^.*0x\([0-9a-f]*\).* _edata *= *\.$$/\1-$(TEXT)-2000/p' \
 		$(PROG).map | 						   \
 	    tr a-f A-F) | bc` -gt 0 ]; 					   \
 	then echo '$(BOOT): text+data is too large';			   \
@@ -76,16 +70,14 @@ ${PROG}: $(OBJS)
 	$(OBJCOPY) -I a.out-m68k-netbsd -O binary $(PROG).x $(PROG)
 	@rm -f $(PROG).x
 	@if [ `(echo ibase=16; 						   \
-	    ${TOOL_SED} -n						   \
-		's/  first_kbyte:.*0x\(.*\),.*$$/\1-$(TEXT)-400/p'	   \
+	    sed -n 's/  first_kbyte:.*0x\(.*\),.*$$/\1-$(TEXT)-400/p'	   \
 		$(PROG).map | 						   \
 	    tr a-f A-F) | bc` -gt 0 ]; 					   \
 	then echo '$(BOOT): first_kbyte exceeds the first killobyte';	   \
 	    rm $(PROG) ; exit 1; 					   \
 	fi
 	@if [ `(echo ibase=16; 						   \
-	    ${TOOL_SED} -n						   \
-		's/  _edata:.*0x\(.*\),.*$$/\1-$(TEXT)-2000/p'		   \
+	    sed -n 's/  _edata:.*0x\(.*\),.*$$/\1-$(TEXT)-2000/p'	   \
 		$(PROG).map | 						   \
 	    tr a-f A-F) | bc` -gt 0 ]; 					   \
 	then echo '$(BOOT): text+data is too large';			   \

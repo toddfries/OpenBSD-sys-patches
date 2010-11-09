@@ -1,4 +1,4 @@
-/*	$NetBSD: db_machdep.h,v 1.27 2009/03/07 22:02:16 ad Exp $	*/
+/*	$NetBSD: db_machdep.h,v 1.25 2006/04/01 15:44:59 cherry Exp $	*/
 
 /* 
  * Mach Operating System
@@ -96,8 +96,8 @@ extern db_regs_t *ddb_regp;
 	 ((user) && (addr) < VM_MAX_ADDRESS))
 
 #if 0
-bool	 	db_check_access(vaddr_t, int, task_t);
-bool		db_phys_eq(task_t, vaddr_t, task_t, vaddr_t);
+boolean_t 	db_check_access(vaddr_t, int, task_t);
+boolean_t	db_phys_eq(task_t, vaddr_t, task_t, vaddr_t);
 #endif
 
 /* macros for printing OS server dependent task name */
@@ -127,9 +127,7 @@ int kdb_trap(int, int, db_regs_t *);
 /*
  * We define some of our own commands
  */
-#ifdef _KERNEL
 #define DB_MACHINE_COMMANDS
-#endif
 
 /*
  * We use either a.out or Elf32 symbols in DDB.

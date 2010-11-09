@@ -1,4 +1,4 @@
-/*	$NetBSD: tcx.c,v 1.25 2008/06/11 21:25:31 drochner Exp $ */
+/*	$NetBSD: tcx.c,v 1.22 2007/10/19 12:01:12 ad Exp $ */
 
 /*
  *  Copyright (c) 1996,1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  *  2. Redistributions in binary form must reproduce the above copyright
  *     notice, this list of conditions and the following disclaimer in the
  *     documentation and/or other materials provided with the distribution.
+ *  3. All advertising materials mentioning features or use of this software
+ *     must display the following acknowledgement:
+ *         This product includes software developed by the NetBSD
+ *         Foundation, Inc. and its contributors.
+ *  4. Neither the name of The NetBSD Foundation nor the names of its
+ *     contributors may be used to endorse or promote products derived
+ *     from this software without specific prior written permission.
  *
  *  THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  *  ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -38,7 +45,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: tcx.c,v 1.25 2008/06/11 21:25:31 drochner Exp $");
+__KERNEL_RCSID(0, "$NetBSD: tcx.c,v 1.22 2007/10/19 12:01:12 ad Exp $");
 
 /*
  * define for cg8 emulation on S24 (24-bit version of tcx) for the SS5;
@@ -171,7 +178,7 @@ tcxattach(parent, self, args)
 	struct device *parent, *self;
 	void *args;
 {
-	struct tcx_softc *sc = device_private(self);
+	struct tcx_softc *sc = (struct tcx_softc *)self;
 	struct sbus_attach_args *sa = args;
 	int node, ramsize;
 	volatile struct bt_regs *bt;
@@ -255,7 +262,7 @@ tcxattach(parent, self, args)
 
 	if (sa->sa_nreg != TCX_NREG) {
 		printf("%s: only %d register sets\n",
-			device_xname(self), sa->sa_nreg);
+			self->dv_xname, sa->sa_nreg);
 		return;
 	}
 	bcopy(sa->sa_reg, sc->sc_physadr,
@@ -346,16 +353,18 @@ tcxopen(dev, flags, mode, l)
 	int flags, mode;
 	struct lwp *l;
 {
-#ifdef TCX_CG8
 	int unit = minor(dev);
+#ifdef TCX_CG8
 	struct tcx_softc *sc;
 	int i, s, oldopens;
 	volatile ulong *cptr;
 	struct fbdevice *fb;
+#endif
 
-	sc = device_lookup_private(&tcx_cd, unit);
-	if (!sc)
+	if (unit >= tcx_cd.cd_ndevs || tcx_cd.cd_devs[unit] == NULL)
 		return (ENXIO);
+#ifdef TCX_CG8
+	sc = tcx_cd.cd_devs[unit];
 	if (!sc->sc_8bit) {
 		s = splhigh();
 		oldopens = tcx_opens++;
@@ -382,7 +391,7 @@ tcxclose(dev, flags, mode, l)
 	int flags, mode;
 	struct lwp *l;
 {
-	struct tcx_softc *sc = device_lookup_private(&tcx_cd, minor(dev));
+	struct tcx_softc *sc = tcx_cd.cd_devs[minor(dev)];
 #ifdef TCX_CG8
 	int i, s, opens;
 	volatile ulong *cptr;
@@ -422,7 +431,7 @@ tcxioctl(dev, cmd, data, flags, l)
 	int flags;
 	struct lwp *l;
 {
-	struct tcx_softc *sc = device_lookup_private(&tcx_cd, minor(dev));
+	struct tcx_softc *sc = tcx_cd.cd_devs[minor(dev)];
 	int error;
 
 	switch (cmd) {
@@ -540,7 +549,7 @@ static void
 tcx_unblank(dev)
 	struct device *dev;
 {
-	struct tcx_softc *sc = device_private(dev);
+	struct tcx_softc *sc = (struct tcx_softc *)dev;
 
 	if (sc->sc_blanked) {
 		sc->sc_blanked = 0;
@@ -588,7 +597,7 @@ tcxmmap(dev, off, prot)
 	off_t off;
 	int prot;
 {
-	struct tcx_softc *sc = device_lookup_private(&tcx_cd, minor(dev));
+	struct tcx_softc *sc = tcx_cd.cd_devs[minor(dev)];
 	struct openprom_addr *rr = sc->sc_physadr;
 	struct mmo *mo, *mo_end;
 	u_int u, sz;

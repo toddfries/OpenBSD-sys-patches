@@ -1,4 +1,4 @@
-/*	$NetBSD: netbsd32_exec.h,v 1.28 2008/11/19 18:36:05 ad Exp $	*/
+/*	$NetBSD: netbsd32_exec.h,v 1.23 2006/02/16 20:17:15 perry Exp $	*/
 
 /*
  * Copyright (c) 1998, 2001 Matthew R. Green
@@ -12,6 +12,8 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -48,25 +50,25 @@ struct netbsd32_exec {
 	netbsd32_u_long	a_drsize;	/* data relocation size */
 };
 
-extern struct emul emul_netbsd32;
+extern const struct emul emul_netbsd32;
 
 #ifdef EXEC_AOUT
-int netbsd32_exec_aout_prep_zmagic(struct lwp *, struct exec_package *);
-int netbsd32_exec_aout_prep_nmagic(struct lwp *, struct exec_package *);
-int netbsd32_exec_aout_prep_omagic(struct lwp *, struct exec_package *);
-int exec_netbsd32_makecmds(struct lwp *, struct exec_package *);
+int netbsd32_exec_aout_prep_zmagic __P((struct lwp *, struct exec_package *));
+int netbsd32_exec_aout_prep_nmagic __P((struct lwp *, struct exec_package *));
+int netbsd32_exec_aout_prep_omagic __P((struct lwp *, struct exec_package *));
+int exec_netbsd32_makecmds __P((struct lwp *, struct exec_package *));
 #endif
 #ifdef EXEC_ELF32
-int netbsd32_elf32_probe(struct lwp *, struct exec_package *, void *,
-    char *, vaddr_t *);
-int netbsd32_elf32_probe_noteless(struct lwp *, struct exec_package *,
-    void *, char *, vaddr_t *);
-int netbsd32_elf32_copyargs(struct lwp *, struct exec_package *,
-    struct ps_strings *, char **, void *);
+int netbsd32_elf32_probe __P((struct lwp *, struct exec_package *, void *,
+    char *, vaddr_t *));
+int netbsd32_elf32_probe_noteless __P((struct lwp *, struct exec_package *,
+    void *, char *, vaddr_t *));
+int netbsd32_elf32_copyargs __P((struct lwp *, struct exec_package *,
+    struct ps_strings *, char **, void *));
 #endif /* EXEC_ELF32 */
 
-static __inline int netbsd32_copyargs(struct lwp *, struct exec_package *,
-    struct ps_strings *, char **, void *);
+static __inline int netbsd32_copyargs __P((struct lwp *, struct exec_package *,
+    struct ps_strings *, char **, void *));
 
 void netbsd32_setregs (struct lwp *, struct exec_package *, u_long stack);
 int netbsd32_sigreturn (struct proc *, void *, register_t *);
@@ -86,7 +88,7 @@ netbsd32_copyargs(l, pack, arginfo, stackp, argp)
 	void *argp;
 {
 	u_int32_t *cpp = (u_int32_t *)*stackp;
-	netbsd32_pointer_t dp;
+	u_int32_t dp;
 	u_int32_t nullp = 0;
 	char *sp;
 	size_t len;
@@ -97,17 +99,17 @@ netbsd32_copyargs(l, pack, arginfo, stackp, argp)
 	if ((error = copyout(&argc, cpp++, sizeof(argc))) != 0)
 		return error;
 
-	NETBSD32PTR32(dp, cpp + argc + envc + 2 + pack->ep_esch->es_arglen);
+	dp = (u_long) (cpp + argc + envc + 2 + pack->ep_esch->es_arglen);
 	sp = argp;
 
 	/* XXX don't copy them out, remap them! */
 	/* remember location of argv for later */
 	arginfo->ps_argvstr = (char **)(u_long)cpp;
 
-	for (; --argc >= 0; sp += len, NETBSD32PTR32PLUS(dp, len)) {
+	for (; --argc >= 0; sp += len, dp += len) {
 		if ((error = copyout(&dp, cpp++, sizeof(dp))) != 0 ||
-		    (error = copyoutstr(sp, NETBSD32PTR64(dp),
-					ARG_MAX, &len)) != 0)
+		    (error = copyoutstr(sp, (char *)NETBSD32PTR64(dp),
+		    ARG_MAX, &len)) != 0)
 			return error;
 	}
 	if ((error = copyout(&nullp, cpp++, sizeof(nullp))) != 0)
@@ -116,10 +118,10 @@ netbsd32_copyargs(l, pack, arginfo, stackp, argp)
 	/* remember location of envp for later */
 	arginfo->ps_envstr = (char **)(u_long)cpp;
 
-	for (; --envc >= 0; sp += len, NETBSD32PTR32PLUS(dp, len)) {
+	for (; --envc >= 0; sp += len, dp += len) {
 		if ((error = copyout(&dp, cpp++, sizeof(dp))) != 0 ||
-		    (error = copyoutstr(sp, NETBSD32PTR64(dp),
-					ARG_MAX, &len)) != 0)
+		    (error = copyoutstr(sp, (char *)NETBSD32PTR64(dp),
+		    ARG_MAX, &len)) != 0)
 			return error;
 	}
 	if ((error = copyout(&nullp, cpp++, sizeof(nullp))) != 0)

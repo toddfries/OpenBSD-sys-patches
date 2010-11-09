@@ -1,4 +1,4 @@
-/*	$NetBSD: nfsm_subs.h,v 1.50 2007/03/04 06:03:38 christos Exp $	*/
+/*	$NetBSD: nfsm_subs.h,v 1.47 2006/09/02 12:40:36 yamt Exp $	*/
 
 /*
  * Copyright (c) 1989, 1993
@@ -77,7 +77,7 @@
 			mb->m_next = mb2; \
 			mb = mb2; \
 			mb->m_len = 0; \
-			bpos = mtod(mb, char *); \
+			bpos = mtod(mb, caddr_t); \
 		} \
 		(a) = (c)(bpos); \
 		mb->m_len += (s); \
@@ -86,7 +86,7 @@
 #define nfsm_aligned(p) ALIGNED_POINTER(p,u_int32_t)
 
 #define	nfsm_dissect(a, c, s) \
-		{ t1 = mtod(md, char *) + md->m_len-dpos; \
+		{ t1 = mtod(md, caddr_t)+md->m_len-dpos; \
 		if (t1 >= (s) && nfsm_aligned(dpos)) { \
 			(a) = (c)(dpos); \
 			dpos += (s); \
@@ -105,16 +105,18 @@
 				nfsm_build(tl, u_int32_t *, t2); \
 				*tl++ = txdr_unsigned((n)->n_fhsize); \
 				*(tl + ((t2>>2) - 2)) = 0; \
-				memcpy(tl,(n)->n_fhp, (n)->n_fhsize); \
+				memcpy((caddr_t)tl,(caddr_t)(n)->n_fhp, \
+					(n)->n_fhsize); \
 			} else if ((t2 = nfsm_strtmbuf(&mb, &bpos, \
-				(void *)(n)->n_fhp, (n)->n_fhsize)) != 0) { \
+				(caddr_t)(n)->n_fhp, \
+				  (n)->n_fhsize)) != 0) { \
 				error = t2; \
 				m_freem(mreq); \
 				goto nfsmout; \
 			} \
 		} else { \
-			nfsm_build(cp, void *, NFSX_V2FH); \
-			memcpy(cp, (n)->n_fhp, NFSX_V2FH); \
+			nfsm_build(cp, caddr_t, NFSX_V2FH); \
+			memcpy(cp, (caddr_t)(n)->n_fhp, NFSX_V2FH); \
 		} }
 
 #define nfsm_srvfhtom(f, v3) \
@@ -125,7 +127,7 @@
 			memcpy(tl, NFSRVFH_DATA(f), NFSRVFH_SIZE(f)); \
 		} else { \
 			KASSERT(NFSRVFH_SIZE(f) == NFSX_V2FH); \
-			nfsm_build(cp, void *, NFSX_V2FH); \
+			nfsm_build(cp, caddr_t, NFSX_V2FH); \
 			memcpy(cp, NFSRVFH_DATA(f), NFSX_V2FH); \
 		} }
 
@@ -248,7 +250,7 @@
  *	NFSV3_WCCCHK	return true if pre_op_attr's mtime is the same
  *			as our n_mtime.  (ie. our cache isn't stale.)
  * flags: (IN) flags for nfsm_loadattrcache
- * docheck: (IN) true if timestamp change is expected
+ * docheck: (IN) TRUE if timestamp change is expected
  */
 
 /* Used as (f) for nfsm_wcc_data() */
@@ -259,10 +261,10 @@
 		{ int ttattrf, ttretf = 0, renewctime = 0, renewnctime = 0; \
 		struct timespec ctime, mtime; \
 		struct nfsnode *nfsp = VTONFS(v); \
-		bool haspreopattr = false; \
+		boolean_t haspreopattr = FALSE; \
 		nfsm_dissect(tl, u_int32_t *, NFSX_UNSIGNED); \
 		if (*tl == nfs_true) { \
-			haspreopattr = true; \
+			haspreopattr = TRUE; \
 			nfsm_dissect(tl, u_int32_t *, 6 * NFSX_UNSIGNED); \
 			fxdr_nfsv3time(tl + 2, &mtime); \
 			fxdr_nfsv3time(tl + 4, &ctime); \
@@ -418,7 +420,7 @@
 			nfsm_build(tl,u_int32_t *,t2); \
 			*tl++ = txdr_unsigned(s); \
 			*(tl+((t2>>2)-2)) = 0; \
-			memcpy(tl, (const char *)(a), (s)); \
+			memcpy((caddr_t)tl, (const char *)(a), (s)); \
 		} else if ((t2 = nfsm_strtmbuf(&mb, &bpos, (a), (s))) != 0) { \
 			error = t2; \
 			m_freem(mreq); \
@@ -460,7 +462,7 @@
 		}
 
 #define	nfsm_adv(s) \
-		{ t1 = mtod(md, char *) + md->m_len - dpos; \
+		{ t1 = mtod(md, caddr_t)+md->m_len-dpos; \
 		if (t1 >= (s)) { \
 			dpos += (s); \
 		} else if ((t1 = nfs_adv(&md, &dpos, (s), t1)) != 0) { \
@@ -499,7 +501,7 @@
 			mp->m_len = NFSMSIZ(mp); \
 			mp2->m_next = mp; \
 			mp2 = mp; \
-			bp = mtod(mp, char *); \
+			bp = mtod(mp, caddr_t); \
 			be = bp+mp->m_len; \
 		} \
 		tl = (u_int32_t *)bp

@@ -1,4 +1,4 @@
-/*	$NetBSD: atwvar.h,v 1.30 2008/07/09 20:07:19 joerg Exp $	*/
+/*	$NetBSD: atwvar.h,v 1.23 2007/03/04 06:01:50 christos Exp $	*/
 
 /*
  * Copyright (c) 2003, 2004 The NetBSD Foundation, Inc.  All rights reserved.
@@ -14,18 +14,25 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of the author nor the names of any co-contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
- * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
- * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * THIS SOFTWARE IS PROVIDED BY David Young AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL David Young
  * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
  * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
  * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
  * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
  * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
+ * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #ifndef _DEV_IC_ATWVAR_H_
@@ -152,23 +159,24 @@ enum atw_bbptype { ATW_BBPTYPE_INTERSIL = 0, ATW_BBPTYPE_RFMD  = 1,
 
 struct atw_rx_radiotap_header {
 	struct ieee80211_radiotap_header	ar_ihdr;
-	uint8_t					ar_flags;
-	uint8_t					ar_rate;
-	uint16_t				ar_chan_freq;
-	uint16_t				ar_chan_flags;
-	uint8_t					ar_antsignal;
-} __packed;
+	u_int8_t				ar_flags;
+	u_int8_t				ar_rate;
+	u_int16_t				ar_chan_freq;
+	u_int16_t				ar_chan_flags;
+	u_int8_t				ar_antsignal;
+} __attribute__((__packed__));
 
-#define ATW_TX_RADIOTAP_PRESENT	((1 << IEEE80211_RADIOTAP_RATE) | \
+#define ATW_TX_RADIOTAP_PRESENT	((1 << IEEE80211_RADIOTAP_FLAGS) | \
+				 (1 << IEEE80211_RADIOTAP_RATE) | \
 				 (1 << IEEE80211_RADIOTAP_CHANNEL))
 
 struct atw_tx_radiotap_header {
 	struct ieee80211_radiotap_header	at_ihdr;
-	uint8_t					at_rate;
-	uint8_t					at_pad;
-	uint16_t				at_chan_freq;
-	uint16_t				at_chan_flags;
-} __packed;
+	u_int8_t				at_flags;
+	u_int8_t				at_rate;
+	u_int16_t				at_chan_freq;
+	u_int16_t				at_chan_flags;
+} __attribute__((__packed__));
 
 enum atw_revision {
 	ATW_REVISION_AB = 0x11,	/* ADM8211A */
@@ -178,7 +186,7 @@ enum atw_revision {
 };
 
 struct atw_softc {
-	device_t		sc_dev;
+	struct device		sc_dev;
 	struct ethercom		sc_ec;
 	struct ieee80211com	sc_ic;
 	int			(*sc_enable)(struct atw_softc *);
@@ -200,6 +208,8 @@ struct atw_softc {
 	bus_space_tag_t		sc_st;		/* bus space tag */
 	bus_space_handle_t	sc_sh;		/* bus space handle */
 	bus_dma_tag_t		sc_dmat;	/* bus dma tag */
+	void			*sc_sdhook;	/* shutdown hook */
+	void			*sc_powerhook;	/* power management hook */
 	u_int32_t		sc_cacheline;	/* cache line size */
 	u_int32_t		sc_maxburst;	/* maximum burst length */
 
@@ -275,13 +285,6 @@ struct atw_softc {
 	uint8_t		sc_rf3000_options1;
 	uint8_t		sc_rf3000_options2;
 
-	struct evcnt	sc_recv_ev;
-	struct evcnt	sc_crc16e_ev;
-	struct evcnt	sc_crc32e_ev;
-	struct evcnt	sc_icve_ev;
-	struct evcnt	sc_sfde_ev;
-	struct evcnt	sc_sige_ev;
-
 	struct callout	sc_scan_ch;
 	union {
 		struct atw_rx_radiotap_header	tap;
@@ -335,7 +338,7 @@ struct atw_frame {
 			struct ieee80211_frame	ihdr;
 		} s2;
 	} u;
-} __packed;
+} __attribute__((__packed__));
 
 #define atw_hdrctl	u.s1.hdrctl
 #define atw_fragthr	u.s1.fragthr
@@ -398,26 +401,26 @@ do {									\
  * field is only 11 bits, we must subtract 1 from the length to avoid
  * having it truncated to 0!
  */
-static inline void
-atw_init_rxdesc(struct atw_softc *sc, int x)
-{
-	struct atw_rxsoft *rxs = &sc->sc_rxsoft[x];
-	struct atw_rxdesc *rxd = &sc->sc_rxdescs[x];
-	struct mbuf *m = rxs->rxs_mbuf;
-
-	rxd->ar_buf1 =
-	    htole32(rxs->rxs_dmamap->dm_segs[0].ds_addr);
-	rxd->ar_buf2 =	/* for descriptor chaining */
-	    htole32(ATW_CDRXADDR((sc), ATW_NEXTRX(x)));
-	rxd->ar_ctlrssi =
-	    htole32(__SHIFTIN(((m->m_ext.ext_size - 1) & ~0x3U),
-	                   ATW_RXCTL_RBS1_MASK) |
-		    0 /* ATW_RXCTL_RCH */ |
-	    (x == (ATW_NRXDESC - 1) ? ATW_RXCTL_RER : 0));
-	rxd->ar_stat = htole32(ATW_RXSTAT_OWN);
-
-	ATW_CDRXSYNC((sc), x, BUS_DMASYNC_PREREAD|BUS_DMASYNC_PREWRITE);
-}
+#define	ATW_INIT_RXDESC(sc, x)						\
+do {									\
+	struct atw_rxsoft *__rxs = &sc->sc_rxsoft[(x)];			\
+	struct atw_rxdesc *__rxd = &sc->sc_rxdescs[(x)];		\
+	struct mbuf *__m = __rxs->rxs_mbuf;				\
+									\
+	__rxd->ar_buf1 =						\
+	    htole32(__rxs->rxs_dmamap->dm_segs[0].ds_addr);		\
+	__rxd->ar_buf2 =	/* for descriptor chaining */		\
+	    htole32(ATW_CDRXADDR((sc), ATW_NEXTRX((x))));		\
+	__rxd->ar_ctl =							\
+	    htole32(__SHIFTIN(((__m->m_ext.ext_size - 1) & ~0x3U),	\
+	                   ATW_RXCTL_RBS1_MASK) |			\
+		    0 /* ATW_RXCTL_RCH */ |				\
+	    ((x) == (ATW_NRXDESC - 1) ? ATW_RXCTL_RER : 0));		\
+	__rxd->ar_stat = htole32(ATW_RXSTAT_OWN);			\
+	            							\
+	ATW_CDRXSYNC((sc), (x),						\
+	    BUS_DMASYNC_PREREAD|BUS_DMASYNC_PREWRITE);			\
+} while (0)
 
 /* country codes from ADM8211 SROM */
 #define	ATW_COUNTRY_FCC 0		/* USA 1-11 */
@@ -451,6 +454,6 @@ int	atw_detach(struct atw_softc *);
 int	atw_activate(struct device *, enum devact);
 int	atw_intr(void *arg);
 void	atw_power(int, void *);
-bool	atw_shutdown(device_t, int);
+void	atw_shutdown(void *);
 
 #endif /* _DEV_IC_ATWVAR_H_ */

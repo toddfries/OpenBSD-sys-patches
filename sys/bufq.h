@@ -1,4 +1,4 @@
-/*	$NetBSD: bufq.h,v 1.10 2009/01/13 13:35:54 yamt Exp $	*/
+/*	$NetBSD: bufq.h,v 1.7 2005/12/11 12:25:20 christos Exp $	*/
 /*	NetBSD: buf.h,v 1.75 2004/09/18 16:40:11 yamt Exp 	*/
 
 /*-
@@ -17,6 +17,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -93,13 +100,17 @@ struct bufq_state;
 int	bufq_alloc(struct bufq_state **, const char *, int);
 void	bufq_drain(struct bufq_state *);
 void	bufq_free(struct bufq_state *);
-/* Put buffer in queue */
 void	bufq_put(struct bufq_state *, struct buf *);
-/* Get and remove buffer from queue */
 struct buf *bufq_get(struct bufq_state *);
-/* Get buffer from queue */
 struct buf *bufq_peek(struct bufq_state *);
-/* Remove specified buffer from queue */
-struct buf *bufq_cancel(struct bufq_state *, struct buf *);
 const char *bufq_getstrategyname(struct bufq_state *);
 void	bufq_move(struct bufq_state *, struct bufq_state *);
+
+/* Put buffer in queue */
+#define BUFQ_PUT(bufq, bp)	bufq_put(bufq, bp)
+
+/* Get and remove buffer from queue */
+#define BUFQ_GET(bufq)		bufq_get(bufq)
+
+/* Get buffer from queue */
+#define BUFQ_PEEK(bufq)		bufq_peek(bufq)

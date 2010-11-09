@@ -1,4 +1,4 @@
-/* $NetBSD: if_ti.c,v 1.82 2008/11/07 00:20:07 dyoung Exp $ */
+/* $NetBSD: if_ti.c,v 1.81 2008/04/10 19:13:37 cegger Exp $ */
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -81,7 +81,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_ti.c,v 1.82 2008/11/07 00:20:07 dyoung Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_ti.c,v 1.81 2008/04/10 19:13:37 cegger Exp $");
 
 #include "bpfilter.h"
 #include "opt_inet.h"
@@ -2706,7 +2706,7 @@ ti_ether_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 	}
 
 	switch (cmd) {
-	case SIOCINITIFADDR:
+	case SIOCSIFADDR:
 
 		switch (ifa->ifa_addr->sa_family) {
 #ifdef INET
@@ -2737,7 +2737,8 @@ ti_ioctl(struct ifnet *ifp, u_long command, void *data)
 	s = splnet();
 
 	switch (command) {
-	case SIOCINITIFADDR:
+	case SIOCSIFADDR:
+	case SIOCGIFADDR:
 		error = ti_ether_ioctl(ifp, command, data);
 		break;
 	case SIOCSIFMTU:
@@ -2749,8 +2750,6 @@ ti_ioctl(struct ifnet *ifp, u_long command, void *data)
 		}
 		break;
 	case SIOCSIFFLAGS:
-		if ((error = ifioctl_common(ifp, command, data)) != 0)
-			break;
 		if (ifp->if_flags & IFF_UP) {
 			/*
 			 * If only the state of the PROMISC flag changed,

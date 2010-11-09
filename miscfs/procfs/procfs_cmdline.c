@@ -1,4 +1,4 @@
-/*	$NetBSD: procfs_cmdline.c,v 1.27 2008/04/28 20:24:08 martin Exp $	*/
+/*	$NetBSD: procfs_cmdline.c,v 1.24 2006/12/28 09:17:52 elad Exp $	*/
 
 /*
  * Copyright (c) 1999 Jaromir Dolecek <dolecek@ics.muni.cz>
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -31,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: procfs_cmdline.c,v 1.27 2008/04/28 20:24:08 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: procfs_cmdline.c,v 1.24 2006/12/28 09:17:52 elad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -60,7 +67,6 @@ procfs_docmdline(
 	size_t i, len, xlen, upper_bound;
 	struct uio auio;
 	struct iovec aiov;
-	struct vmspace *vm;
 	vaddr_t argv;
 	char *arg;
 
@@ -78,9 +84,10 @@ procfs_docmdline(
 	 * System processes also don't have a user stack.  This is what
 	 * ps(1) would display.
 	 */
-	if (P_ZOMBIE(p) || (p->p_flag & PK_SYSTEM) != 0) {
+	if (P_ZOMBIE(p) || (p->p_flag & P_SYSTEM) != 0) {
 		len = snprintf(arg, PAGE_SIZE, "(%s)", p->p_comm) + 1;
 		error = uiomove_frombuf(arg, len, uio);
+
 		free(arg, M_TEMP);
 		return (error);
 	}
@@ -94,10 +101,12 @@ procfs_docmdline(
 	/*
 	 * Lock the process down in memory.
 	 */
-	if ((error = proc_vmspace_getref(p, &vm)) != 0) {
+	/* XXXCDC: how should locking work here? */
+	if ((p->p_flag & P_WEXIT) || (p->p_vmspace->vm_refcnt < 1)) {
 		free(arg, M_TEMP);
-		return (error);
+		return (EFAULT);
 	}
+	p->p_vmspace->vm_refcnt++;	/* XXX */
 
 	/*
 	 * Read in the ps_strings structure.
@@ -110,7 +119,7 @@ procfs_docmdline(
 	auio.uio_resid = sizeof(pss);
 	auio.uio_rw = UIO_READ;
 	UIO_SETUP_SYSSPACE(&auio);
-	error = uvm_io(&vm->vm_map, &auio);
+	error = uvm_io(&p->p_vmspace->vm_map, &auio);
 	if (error)
 		goto bad;
 
@@ -125,7 +134,7 @@ procfs_docmdline(
 	auio.uio_resid = sizeof(argv);
 	auio.uio_rw = UIO_READ;
 	UIO_SETUP_SYSSPACE(&auio);
-	error = uvm_io(&vm->vm_map, &auio);
+	error = uvm_io(&p->p_vmspace->vm_map, &auio);
 	if (error)
 		goto bad;
 
@@ -147,7 +156,7 @@ procfs_docmdline(
 		auio.uio_resid = xlen;
 		auio.uio_rw = UIO_READ;
 		UIO_SETUP_SYSSPACE(&auio);
-		error = uvm_io(&vm->vm_map, &auio);
+		error = uvm_io(&p->p_vmspace->vm_map, &auio);
 		if (error)
 			goto bad;
 
@@ -169,7 +178,7 @@ procfs_docmdline(
 	/*
 	 * Release the process.
 	 */
-	uvmspace_free(vm);
+	uvmspace_free(p->p_vmspace);
 
 	free(arg, M_TEMP);
 	return (error);

@@ -1,4 +1,4 @@
-/*	$NetBSD: uvm_pager.h,v 1.38 2008/08/22 10:48:22 hannken Exp $	*/
+/*	$NetBSD: uvm_pager.h,v 1.36 2007/04/23 20:10:50 pooka Exp $	*/
 
 /*
  *
@@ -156,7 +156,6 @@ struct uvm_pagerops {
 /* if PGO_FREE is not set then the pages stay where they are. */
 
 #define PGO_ALLPAGES	0x010	/* flush whole object/get all pages */
-#define PGO_JOURNALLOCKED 0x020	/* journal is already locked [put] */
 #define PGO_LOCKED	0x040	/* fault data structures are locked [get] */
 #define PGO_BUSYFAIL	0x080	/* fail if a page is busy [put] */
 #define PGO_OVERWRITE	0x200	/* pages will be overwritten before unlocked */
@@ -179,12 +178,20 @@ struct vm_page *uvm_pageratop(vaddr_t);
 vaddr_t	uvm_pagermapin(struct vm_page **, int, int);
 void	uvm_pagermapout(vaddr_t, int);
 
-extern size_t pager_map_size;
-
 /* Flags to uvm_pagermapin() */
 #define	UVMPAGER_MAPIN_WAITOK	0x01	/* it's okay to wait */
 #define	UVMPAGER_MAPIN_READ	0x02	/* device -> host */
 #define	UVMPAGER_MAPIN_WRITE	0x00	/* host -> device (pseudo flag) */
+
+/*
+ * XXX
+ * this is needed until the device strategy interface
+ * is changed to do physically-addressed i/o.
+ */
+
+#ifndef PAGER_MAP_SIZE
+#define PAGER_MAP_SIZE       (16 * 1024 * 1024)
+#endif
 
 #endif /* _KERNEL */
 

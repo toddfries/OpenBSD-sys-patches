@@ -1,4 +1,4 @@
-/*	$NetBSD: dfadd.c,v 1.4 2007/02/22 05:46:29 thorpej Exp $	*/
+/*	$NetBSD: dfadd.c,v 1.3 2005/12/11 12:17:40 christos Exp $	*/
 
 /*	$OpenBSD: dfadd.c,v 1.4 2001/03/29 03:58:17 mickey Exp $	*/
 
@@ -41,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: dfadd.c,v 1.4 2007/02/22 05:46:29 thorpej Exp $");
+__KERNEL_RCSID(0, "$NetBSD: dfadd.c,v 1.3 2005/12/11 12:17:40 christos Exp $");
 
 #include "../spmath/float.h"
 #include "../spmath/dbl_float.h"
@@ -60,7 +60,7 @@ dbl_fadd(leftptr, rightptr, dstptr, status)
 
     register int result_exponent, right_exponent, diff_exponent;
     register int sign_save, jumpsize;
-    register int inexact = false;
+    register int inexact = FALSE;
     register int underflowtrap;
 
     /* Create local copies of the numbers */
@@ -210,7 +210,7 @@ dbl_fadd(leftptr, rightptr, dstptr, status)
 		    Dbl_set_sign(leftp1,/*using*/sign_save);
 		    Dbl_setwrapped_exponent(leftp1,result_exponent,unfl);
 		    Dbl_copytoptr(leftp1,leftp2,dstptr);
-		    /* inexact = false */
+		    /* inexact = FALSE */
 		    return(UNDERFLOWEXCEPTION);
 		    }
 		}
@@ -262,7 +262,7 @@ dbl_fadd(leftptr, rightptr, dstptr, status)
 		Dbl_set_sign(resultp1,/*using*/sign_save);
 		Dbl_setwrapped_exponent(resultp1,result_exponent,unfl);
 		Dbl_copytoptr(resultp1,resultp2,dstptr);
-		/* inexact = false */
+		/* inexact = FALSE */
 		return(UNDERFLOWEXCEPTION);
 		}
 	    Dbl_copytoptr(resultp1,resultp2,dstptr);
@@ -426,7 +426,7 @@ dbl_fadd(leftptr, rightptr, dstptr, status)
 		Dbl_set_sign(resultp1,sign_save);
 		Dbl_setwrapped_exponent(resultp1,result_exponent,unfl);
 		Dbl_copytoptr(resultp1,resultp2,dstptr);
-		/* inexact = false */
+		/* inexact = FALSE */
 		return(UNDERFLOWEXCEPTION);
 		}
 	    /*
@@ -461,7 +461,7 @@ dbl_fadd(leftptr, rightptr, dstptr, status)
   round:
     if(Ext_isnotzero(extent))
 	{
-	inexact = true;
+	inexact = TRUE;
 	switch(Rounding_mode())
 	    {
 	    case ROUNDNEAREST: /* The default. */
@@ -514,7 +514,7 @@ dbl_fadd(leftptr, rightptr, dstptr, status)
 	    }
 	else
 	    {
-	    inexact = true;
+	    inexact = TRUE;
 	    Set_overflowflag();
 	    Dbl_setoverflow(resultp1,resultp2);
 	    }

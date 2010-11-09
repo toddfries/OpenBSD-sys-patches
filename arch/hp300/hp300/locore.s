@@ -1,4 +1,4 @@
-/*	$NetBSD: locore.s,v 1.146 2009/01/11 06:02:18 tsutsui Exp $	*/
+/*	$NetBSD: locore.s,v 1.138 2006/09/09 19:45:49 tsutsui Exp $	*/
 
 /*
  * Copyright (c) 1980, 1990, 1993
@@ -555,8 +555,7 @@ Lenab1:
 /* set kernel stack, user SP, and initial pcb */
 	movl	_C_LABEL(proc0paddr),%a1	| get lwp0 pcb addr
 	lea	%a1@(USPACE-4),%sp	| set kernel stack to end of area
-	lea	_C_LABEL(lwp0),%a2	| initialize lwp0.l_addr
-	movl	%a2,_C_LABEL(curlwp)	|   and curlwp so that
+	lea	_C_LABEL(lwp0),%a2	| initialize lwp0.l_addr so that
 	movl	%a1,%a2@(L_ADDR)	|   we don't deref NULL in trap()
 	movl	#USRSTACK-4,%a2
 	movl	%a2,%usp		| init user SP
@@ -860,7 +859,7 @@ ENTRY_NOPROFILE(fpfault)
 #if defined(M68040) || defined(M68060)
 	/* always null state frame on 68040, 68060 */
 	cmpl	#FPU_68040,_C_LABEL(fputype)
-	jge	Lfptnull
+	jle	Lfptnull
 #endif
 	tstb	%a0@			| null state frame?
 	jeq	Lfptnull		| yes, safe
@@ -896,10 +895,16 @@ ENTRY_NOPROFILE(trap0)
 	movl	%d0,%sp@-		| push syscall number
 	jbsr	_C_LABEL(syscall)	| handle it
 	addql	#4,%sp			| pop syscall arg
-	tstl	_C_LABEL(astpending)	| AST pending?
-	jne	Lrei			| yes, handle it via trap
+	tstl	_C_LABEL(astpending)
+	jne	Lrei2
+	tstb	_C_LABEL(ssir)
+	jeq	Ltrap1
+	movw	#SPL1,%sr
+	tstb	_C_LABEL(ssir)
+	jne	Lsir1
+Ltrap1:
 	movl	%sp@(FR_SP),%a0		| grab and restore
-	movl	%a0,%usp		|   user SP
+	movl	%a0,%usp			|   user SP
 	moveml	%sp@+,#0x7FFF		| restore most registers
 	addql	#8,%sp			| pop SP and stack adjust
 	rte
@@ -1055,18 +1060,15 @@ ENTRY_NOPROFILE(spurintr)	/* level 0 */
 	jra	_ASM_LABEL(rei)
 
 ENTRY_NOPROFILE(intrhand)	/* levels 1 through 5 */
-	addql	#1,_C_LABEL(idepth)	| entering interrupt
 	INTERRUPT_SAVEREG
 	movw	%sp@(22),%sp@-		| push exception vector info
 	clrw	%sp@-
 	jbsr	_C_LABEL(intr_dispatch)	| call dispatch routine
 	addql	#4,%sp
 	INTERRUPT_RESTOREREG
-	subql	#1,_C_LABEL(idepth)	| exiting from interrupt
 	jra	_ASM_LABEL(rei)		| all done
 
 ENTRY_NOPROFILE(lev6intr)	/* level 6: clock */
-	addql	#1,_C_LABEL(idepth)	| entering interrupt
 	INTERRUPT_SAVEREG
 	CLKADDR(%a0)
 	movb	%a0@(CLKSR),%d0		| read clock status
@@ -1074,8 +1076,10 @@ Lclkagain:
 	btst	#0,%d0			| clear timer1 int immediately to
 	jeq	Lnotim1			|  minimize chance of losing another
 	movpw	%a0@(CLKMSB1),%d1	|  due to statintr processing delay
+/* #ifdef __HAVE_TIMECOUNTER */		| XXX can't include <machine/types.h>
 	movl	_C_LABEL(clkint),%d1	| clkcounter += clkint
 	addl	%d1,_C_LABEL(clkcounter)
+/* #endif */
 Lnotim1:
 	btst	#2,%d0			| timer3 interrupt?
 	jeq	Lnotim3			| no, skip statclock
@@ -1130,7 +1134,6 @@ Lrecheck:
 	movb	%a0@(CLKSR),%d0		| see if anything happened
 	jmi	Lclkagain		|  while we were in hardclock/statintr
 	INTERRUPT_RESTOREREG
-	subql	#1,_C_LABEL(idepth)	| exiting from interrupt
 	jra	_ASM_LABEL(rei)		| all done
 
 ENTRY_NOPROFILE(lev7intr)	/* level 7: parity errors, reset key */
@@ -1149,10 +1152,10 @@ ENTRY_NOPROFILE(lev7intr)	/* level 7: parity errors, reset key */
 /*
  * Emulation of VAX REI instruction.
  *
- * This code deals with checking for and servicing
- * ASTs (profiling, scheduling).
- * After identifing that we need an AST we drop the IPL
- * to allow device interrupts.
+ * This code deals with checking for and servicing ASTs (profiling,
+ * scheduling) and software interrupts.  We check for ASTs first, just
+ * like the VAX.  After identifing that we need an AST we
+ * drop the IPL to allow device interrupts.
  *
  * This code is complicated by the fact that sendsig may have been called
  * necessitating a stack cleanup.
@@ -1160,25 +1163,21 @@ ENTRY_NOPROFILE(lev7intr)	/* level 7: parity errors, reset key */
 
 ASENTRY_NOPROFILE(rei)
 	tstl	_C_LABEL(astpending)	| AST pending?
-	jne	1f			| no, done
-	rte
-1:
+	jeq	Lchksir			| no, go check for SIR
+Lrei1:
 	btst	#5,%sp@			| yes, are we returning to user mode?
-	jeq	2f			| no, done
-	rte
-2:
+	jne	Lchksir			| no, go check for SIR
 	movw	#PSL_LOWIPL,%sr		| lower SPL
 	clrl	%sp@-			| stack adjust
 	moveml	#0xFFFF,%sp@-		| save all registers
 	movl	%usp,%a1		| including
 	movl	%a1,%sp@(FR_SP)		|    the users SP
-Lrei:
+Lrei2:
 	clrl	%sp@-			| VA == none
 	clrl	%sp@-			| code == none
 	movl	#T_ASTFLT,%sp@-		| type == async system trap
-	pea	%sp@(12)		| fp == address of trap frame
 	jbsr	_C_LABEL(trap)		| go handle it
-	lea	%sp@(16),%sp		| pop value args
+	lea	%sp@(12),%sp		| pop value args
 	movl	%sp@(FR_SP),%a0		| restore user SP
 	movl	%a0,%usp		|   from save area
 	movw	%sp@(FR_ADJ),%d0	| need to adjust stack?
@@ -1197,6 +1196,37 @@ Laststkadj:
 	moveml	%sp@+,#0x7FFF		| restore user registers
 	movl	%sp@,%sp		| and our SP
 	rte				| and do real RTE
+Lchksir:
+	tstb	_C_LABEL(ssir)		| SIR pending?
+	jeq	Ldorte			| no, all done
+	movl	%d0,%sp@-		| need a scratch register
+	movw	%sp@(4),%d0		| get SR
+	andw	#PSL_IPL7,%d0		| mask all but IPL
+	jne	Lnosir			| came from interrupt, no can do
+	movl	%sp@+,%d0		| restore scratch register
+Lgotsir:
+	movw	#SPL1,%sr		| prevent others from servicing int
+	tstb	_C_LABEL(ssir)		| too late?
+	jeq	Ldorte			| yes, oh well...
+	clrl	%sp@-			| stack adjust
+	moveml	#0xFFFF,%sp@-		| save all registers
+	movl	%usp,%a1		| including
+	movl	%a1,%sp@(FR_SP)		|    the users SP
+Lsir1:
+	clrl	%sp@-			| VA == none
+	clrl	%sp@-			| code == none
+	movl	#T_SSIR,%sp@-		| type == software interrupt
+	jbsr	_C_LABEL(trap)		| go handle it
+	lea	%sp@(12),%sp		| pop value args
+	movl	%sp@(FR_SP),%a0		| restore
+	movl	%a0,%usp		|   user SP
+	moveml	%sp@+,#0x7FFF		| and all remaining registers
+	addql	#8,%sp			| pop SP and stack adjust
+	rte
+Lnosir:
+	movl	%sp@+,%d0		| restore scratch register
+Ldorte:
+	rte				| real return
 
 /*
  * Use common m68k sigcode.
@@ -1217,6 +1247,11 @@ Laststkadj:
  * Use common m68k support routines.
  */
 #include <m68k/m68k/support.s>
+
+/*
+ * Use common m68k process manipulation routines.
+ */
+#include <m68k/m68k/proc_subr.s>
 
 /*
  * Use common m68k process/lwp switch and context save subroutines.
@@ -1332,6 +1367,26 @@ ENTRY(ploadw)
 	ploadw	#1,%a0@			| pre-load translation
 Lploadwskp:
 #endif
+	rts
+
+/*
+ * Set processor priority level calls.  Most are implemented with
+ * inline asm expansions.  However, spl0 requires special handling
+ * as we need to check for our emulated software interrupts.
+ */
+
+ENTRY(spl0)
+	moveq	#0,%d0
+	movw	%sr,%d0			| get old SR for return
+	movw	#PSL_LOWIPL,%sr		| restore new SR
+	tstb	_C_LABEL(ssir)		| software interrupt pending?
+	jeq	Lspldone		| no, all done
+	subql	#4,%sp			| make room for RTE frame
+	movl	%sp@(4),%sp@(2)		| position return address
+	clrw	%sp@(6)			| set frame type 0
+	movw	#PSL_LOWIPL,%sp@	| and new SR
+	jra	Lgotsir			| go handle it
+Lspldone:
 	rts
 
 /*
@@ -1519,6 +1574,9 @@ GLOBAL(prototc)
 
 GLOBAL(internalhpib)
 	.long	1			| has internal HP-IB, default to yes
+
+GLOBAL(want_resched)
+	.long	0
 
 GLOBAL(proc0paddr)
 	.long	0			| KVA of lwp0 u-area

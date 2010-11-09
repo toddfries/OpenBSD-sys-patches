@@ -1,4 +1,4 @@
-/*	$NetBSD: rt2560.c,v 1.20 2008/11/07 00:20:02 dyoung Exp $	*/
+/*	$NetBSD: rt2560.c,v 1.14 2007/10/21 17:03:37 degroote Exp $	*/
 /*	$OpenBSD: rt2560.c,v 1.15 2006/04/20 20:31:12 miod Exp $  */
 /*	$FreeBSD: rt2560.c,v 1.3 2006/03/21 21:15:43 damien Exp $*/
 
@@ -24,7 +24,7 @@
  * http://www.ralinktech.com/
  */
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: rt2560.c,v 1.20 2008/11/07 00:20:02 dyoung Exp $");
+__KERNEL_RCSID(0, "$NetBSD: rt2560.c,v 1.14 2007/10/21 17:03:37 degroote Exp $");
 
 #include "bpfilter.h"
 
@@ -148,7 +148,8 @@ static const char *rt2560_get_rf(int);
 static void	rt2560_read_eeprom(struct rt2560_softc *);
 static int	rt2560_bbp_init(struct rt2560_softc *);
 static int	rt2560_init(struct ifnet *);
-static void	rt2560_stop(struct ifnet *, int);
+static void	rt2560_stop(void *);
+static void	rt2560_powerhook(int, void *);
 
 /*
  * Supported rates for 802.11a/b/g modes (in 500Kbps unit).
@@ -353,57 +354,68 @@ rt2560_attach(void *xsc, int id)
 	/* retrieve MAC address */
 	rt2560_get_macaddr(sc, ic->ic_myaddr);
 
-	aprint_normal_dev(&sc->sc_dev, "802.11 address %s\n",
+	aprint_normal("%s: 802.11 address %s\n", sc->sc_dev.dv_xname,
 	    ether_sprintf(ic->ic_myaddr));
 
 	/* retrieve RF rev. no and various other things from EEPROM */
 	rt2560_read_eeprom(sc);
 
-	aprint_normal_dev(&sc->sc_dev, "MAC/BBP RT2560 (rev 0x%02x), RF %s\n",
-	    sc->asic_rev, rt2560_get_rf(sc->rf_rev));
+	aprint_normal("%s: MAC/BBP RT2560 (rev 0x%02x), RF %s\n",
+	    sc->sc_dev.dv_xname, sc->asic_rev, rt2560_get_rf(sc->rf_rev));
 
 	/*
 	 * Allocate Tx and Rx rings.
 	 */
 	error = rt2560_alloc_tx_ring(sc, &sc->txq, RT2560_TX_RING_COUNT);
 	if (error != 0) {
-		aprint_error_dev(&sc->sc_dev, "could not allocate Tx ring\n)");
+		aprint_error("%s: could not allocate Tx ring\n)",
+		    sc->sc_dev.dv_xname);
 		goto fail1;
 	}
 
 	error = rt2560_alloc_tx_ring(sc, &sc->atimq, RT2560_ATIM_RING_COUNT);
 	if (error != 0) {
-		aprint_error_dev(&sc->sc_dev, "could not allocate ATIM ring\n");
+		aprint_error("%s: could not allocate ATIM ring\n",
+		    sc->sc_dev.dv_xname);
 		goto fail2;
 	}
 
 	error = rt2560_alloc_tx_ring(sc, &sc->prioq, RT2560_PRIO_RING_COUNT);
 	if (error != 0) {
-		aprint_error_dev(&sc->sc_dev, "could not allocate Prio ring\n");
+		aprint_error("%s: could not allocate Prio ring\n",
+		    sc->sc_dev.dv_xname);
 		goto fail3;
 	}
 
 	error = rt2560_alloc_tx_ring(sc, &sc->bcnq, RT2560_BEACON_RING_COUNT);
 	if (error != 0) {
-		aprint_error_dev(&sc->sc_dev, "could not allocate Beacon ring\n");
+		aprint_error("%s: could not allocate Beacon ring\n",
+		    sc->sc_dev.dv_xname);
 		goto fail4;
 	}
 
 	error = rt2560_alloc_rx_ring(sc, &sc->rxq, RT2560_RX_RING_COUNT);
 	if (error != 0) {
-		aprint_error_dev(&sc->sc_dev, "could not allocate Rx ring\n");
+		aprint_error("%s: could not allocate Rx ring\n",
+		    sc->sc_dev.dv_xname);
 		goto fail5;
 	}
+
+	sc->sc_powerhook = powerhook_establish(sc->sc_dev.dv_xname,
+	    rt2560_powerhook, sc);
+	if (sc->sc_powerhook == NULL)
+		aprint_error("%s: can't establish powerhook\n",
+		    sc->sc_dev.dv_xname);
+	sc->sc_suspend = PWR_RESUME;
 
 	ifp->if_softc = sc;
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
 	ifp->if_init = rt2560_init;
-	ifp->if_stop = rt2560_stop;
 	ifp->if_ioctl = rt2560_ioctl;
 	ifp->if_start = rt2560_start;
 	ifp->if_watchdog = rt2560_watchdog;
 	IFQ_SET_READY(&ifp->if_snd);
-	memcpy(ifp->if_xname, device_xname(&sc->sc_dev), IFNAMSIZ);
+	memcpy(ifp->if_xname, sc->sc_dev.dv_xname, IFNAMSIZ);
 
 	ic->ic_ifp = ifp;
 	ic->ic_phytype = IEEE80211_T_OFDM; /* not only, but not used */
@@ -484,11 +496,6 @@ rt2560_attach(void *xsc, int id)
 
 	ieee80211_announce(ic);
 
-	if (!pmf_device_register(&sc->sc_dev, NULL, NULL))
-		aprint_error_dev(&sc->sc_dev, "couldn't establish power handler\n");
-	else
-		pmf_class_network_register(&sc->sc_dev, ifp);
-
 	return 0;
 
 fail5:	rt2560_free_tx_ring(sc, &sc->bcnq);
@@ -509,9 +516,10 @@ rt2560_detach(void *xsc)
 	callout_stop(&sc->scan_ch);
 	callout_stop(&sc->rssadapt_ch);
 
-	pmf_device_deregister(&sc->sc_dev);
+	if (sc->sc_powerhook != NULL)
+		powerhook_disestablish(sc->sc_powerhook);
 
-	rt2560_stop(ifp, 1);
+	rt2560_stop(sc);
 
 	ieee80211_ifdetach(&sc->sc_ic);	/* free all nodes */
 	if_detach(ifp);
@@ -539,14 +547,16 @@ rt2560_alloc_tx_ring(struct rt2560_softc *sc, struct rt2560_tx_ring *ring,
 	error = bus_dmamap_create(sc->sc_dmat, count * RT2560_TX_DESC_SIZE, 1,
 	    count * RT2560_TX_DESC_SIZE, 0, BUS_DMA_NOWAIT, &ring->map);
 	if (error != 0) {
-		aprint_error_dev(&sc->sc_dev, "could not create desc DMA map\n");
+		printf("%s: could not create desc DMA map\n",
+		    sc->sc_dev.dv_xname);
 		goto fail;
 	}
 
 	error = bus_dmamem_alloc(sc->sc_dmat, count * RT2560_TX_DESC_SIZE,
 	    PAGE_SIZE, 0, &ring->seg, 1, &nsegs, BUS_DMA_NOWAIT);
 	if (error != 0) {
-		aprint_error_dev(&sc->sc_dev, "could not allocate DMA memory\n");
+		printf("%s: could not allocate DMA memory\n",
+		    sc->sc_dev.dv_xname);
 		goto fail;
 	}
 
@@ -554,14 +564,16 @@ rt2560_alloc_tx_ring(struct rt2560_softc *sc, struct rt2560_tx_ring *ring,
 	    count * RT2560_TX_DESC_SIZE, (void **)&ring->desc,
 	    BUS_DMA_NOWAIT);
 	if (error != 0) {
-		aprint_error_dev(&sc->sc_dev, "could not map desc DMA memory\n");
+		printf("%s: could not map desc DMA memory\n",
+		    sc->sc_dev.dv_xname);
 		goto fail;
 	}
 
 	error = bus_dmamap_load(sc->sc_dmat, ring->map, ring->desc,
 	    count * RT2560_TX_DESC_SIZE, NULL, BUS_DMA_NOWAIT);
 	if (error != 0) {
-		aprint_error_dev(&sc->sc_dev, "could not load desc DMA map\n");
+		printf("%s: could not load desc DMA map\n",
+		    sc->sc_dev.dv_xname);
 		goto fail;
 	}
 
@@ -571,7 +583,8 @@ rt2560_alloc_tx_ring(struct rt2560_softc *sc, struct rt2560_tx_ring *ring,
 	ring->data = malloc(count * sizeof (struct rt2560_tx_data), M_DEVBUF,
 	    M_NOWAIT);
 	if (ring->data == NULL) {
-		aprint_error_dev(&sc->sc_dev, "could not allocate soft data\n");
+		printf("%s: could not allocate soft data\n",
+		    sc->sc_dev.dv_xname);
 		error = ENOMEM;
 		goto fail;
 	}
@@ -582,7 +595,8 @@ rt2560_alloc_tx_ring(struct rt2560_softc *sc, struct rt2560_tx_ring *ring,
 		    RT2560_MAX_SCATTER, MCLBYTES, 0, BUS_DMA_NOWAIT,
 		    &ring->data[i].map);
 		if (error != 0) {
-			aprint_error_dev(&sc->sc_dev, "could not create DMA map\n");
+			printf("%s: could not create DMA map\n",
+			    sc->sc_dev.dv_xname);
 			goto fail;
 		}
 	}
@@ -681,14 +695,16 @@ rt2560_alloc_rx_ring(struct rt2560_softc *sc, struct rt2560_rx_ring *ring,
 	error = bus_dmamap_create(sc->sc_dmat, count * RT2560_RX_DESC_SIZE, 1,
 	    count * RT2560_RX_DESC_SIZE, 0, BUS_DMA_NOWAIT, &ring->map);
 	if (error != 0) {
-		aprint_error_dev(&sc->sc_dev, "could not create desc DMA map\n");
+		printf("%s: could not create desc DMA map\n",
+		    sc->sc_dev.dv_xname);
 		goto fail;
 	}
 
 	error = bus_dmamem_alloc(sc->sc_dmat, count * RT2560_RX_DESC_SIZE,
 	    PAGE_SIZE, 0, &ring->seg, 1, &nsegs, BUS_DMA_NOWAIT);
 	if (error != 0) {
-		aprint_error_dev(&sc->sc_dev, "could not allocate DMA memory\n");
+		printf("%s: could not allocate DMA memory\n",
+		    sc->sc_dev.dv_xname);
 		goto fail;
 	}
 
@@ -696,14 +712,16 @@ rt2560_alloc_rx_ring(struct rt2560_softc *sc, struct rt2560_rx_ring *ring,
 	    count * RT2560_RX_DESC_SIZE, (void **)&ring->desc,
 	    BUS_DMA_NOWAIT);
 	if (error != 0) {
-		aprint_error_dev(&sc->sc_dev, "could not map desc DMA memory\n");
+		printf("%s: could not map desc DMA memory\n",
+		    sc->sc_dev.dv_xname);
 		goto fail;
 	}
 
 	error = bus_dmamap_load(sc->sc_dmat, ring->map, ring->desc,
 	    count * RT2560_RX_DESC_SIZE, NULL, BUS_DMA_NOWAIT);
 	if (error != 0) {
-		aprint_error_dev(&sc->sc_dev, "could not load desc DMA map\n");
+		printf("%s: could not load desc DMA map\n",
+		    sc->sc_dev.dv_xname);
 		goto fail;
 	}
 
@@ -713,7 +731,8 @@ rt2560_alloc_rx_ring(struct rt2560_softc *sc, struct rt2560_rx_ring *ring,
 	ring->data = malloc(count * sizeof (struct rt2560_rx_data), M_DEVBUF,
 	    M_NOWAIT);
 	if (ring->data == NULL) {
-		aprint_error_dev(&sc->sc_dev, "could not allocate soft data\n");
+		printf("%s: could not allocate soft data\n",
+		    sc->sc_dev.dv_xname);
 		error = ENOMEM;
 		goto fail;
 	}
@@ -729,20 +748,23 @@ rt2560_alloc_rx_ring(struct rt2560_softc *sc, struct rt2560_rx_ring *ring,
 		error = bus_dmamap_create(sc->sc_dmat, MCLBYTES, 1, MCLBYTES,
 		    0, BUS_DMA_NOWAIT, &data->map);
 		if (error != 0) {
-			aprint_error_dev(&sc->sc_dev, "could not create DMA map\n");
+			printf("%s: could not create DMA map\n",
+			    sc->sc_dev.dv_xname);
 			goto fail;
 		}
 
 		MGETHDR(data->m, M_DONTWAIT, MT_DATA);
 		if (data->m == NULL) {
-			aprint_error_dev(&sc->sc_dev, "could not allocate rx mbuf\n");
+			printf("%s: could not allocate rx mbuf\n",
+			    sc->sc_dev.dv_xname);
 			error = ENOMEM;
 			goto fail;
 		}
 
 		MCLGET(data->m, M_DONTWAIT);
 		if (!(data->m->m_flags & M_EXT)) {
-			aprint_error_dev(&sc->sc_dev, "could not allocate rx mbuf cluster\n");
+			printf("%s: could not allocate rx mbuf cluster\n",
+			    sc->sc_dev.dv_xname);
 			error = ENOMEM;
 			goto fail;
 		}
@@ -750,7 +772,8 @@ rt2560_alloc_rx_ring(struct rt2560_softc *sc, struct rt2560_rx_ring *ring,
 		error = bus_dmamap_load(sc->sc_dmat, data->map,
 		    mtod(data->m, void *), MCLBYTES, NULL, BUS_DMA_NOWAIT);
 		if (error != 0) {
-			aprint_error_dev(&sc->sc_dev, "could not load rx buf DMA map");
+			printf("%s: could not load rx buf DMA map",
+			    sc->sc_dev.dv_xname);
 			goto fail;
 		}
 
@@ -938,7 +961,8 @@ rt2560_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 		    ic->ic_opmode == IEEE80211_M_IBSS) {
 			m = ieee80211_beacon_alloc(ic, ni, &sc->sc_bo);
 			if (m == NULL) {
-				aprint_error_dev(&sc->sc_dev, "could not allocate beacon\n");
+				printf("%s: could not allocate beacon\n",
+				    sc->sc_dev.dv_xname);
 				error = ENOBUFS;
 				break;
 			}
@@ -1122,8 +1146,8 @@ rt2560_tx_intr(struct rt2560_softc *sc)
 		case RT2560_TX_FAIL_INVALID:
 		case RT2560_TX_FAIL_OTHER:
 		default:
-			aprint_error_dev(&sc->sc_dev, "sending data frame failed 0x%08x\n",
-			    le32toh(desc->flags));
+			printf("%s: sending data frame failed 0x%08x\n",
+			    sc->sc_dev.dv_xname, le32toh(desc->flags));
 			ifp->if_oerrors++;
 		}
 
@@ -1191,8 +1215,8 @@ rt2560_prio_intr(struct rt2560_softc *sc)
 		case RT2560_TX_FAIL_INVALID:
 		case RT2560_TX_FAIL_OTHER:
 		default:
-			aprint_error_dev(&sc->sc_dev, "sending mgt frame failed 0x%08x\n",
-			    le32toh(desc->flags));
+			printf("%s: sending mgt frame failed 0x%08x\n",
+			    sc->sc_dev.dv_xname, le32toh(desc->flags));
 		}
 
 		bus_dmamap_sync(sc->sc_dmat, data->map, 0,
@@ -1301,10 +1325,8 @@ rt2560_decryption_intr(struct rt2560_softc *sc)
 			if (error != 0) {
 				/* very unlikely that it will fail... */
 				panic("%s: could not load old rx mbuf",
-				    device_xname(&sc->sc_dev));
+				    sc->sc_dev.dv_xname);
 			}
-			/* physical address may have changed */
-			desc->physaddr = htole32(data->map->dm_segs->ds_addr);
 			ifp->if_ierrors++;
 			goto skip;
 		}
@@ -1435,6 +1457,37 @@ rt2560_rx_intr(struct rt2560_softc *sc)
 	RAL_WRITE(sc, RT2560_SECCSR0, RT2560_KICK_DECRYPT);
 }
 
+#if 0
+void
+rt2560_shutdown(void *xsc)
+{
+	struct rt2560_softc *sc = xsc;
+
+	rt2560_stop(sc);
+}
+
+void
+rt2560_suspend(void *xsc)
+{
+	struct rt2560_softc *sc = xsc;
+
+	rt2560_stop(sc);
+}
+
+void
+rt2560_resume(void *xsc)
+{
+	struct rt2560_softc *sc = xsc;
+	struct ifnet *ifp = sc->sc_ic.ic_ifp;
+
+	if (ifp->if_flags & IFF_UP) {
+		ifp->if_init(ifp->if_softc);
+		if (ifp->if_flags & IFF_RUNNING)
+			ifp->if_start(ifp);
+	}
+}
+
+#endif
 /*
  * This function is called periodically in IBSS mode when a new beacon must be
  * sent out.
@@ -1481,21 +1534,19 @@ rt2560_intr(void *arg)
 	struct ifnet *ifp = &sc->sc_if;
 	uint32_t r;
 
-	if (!device_is_active(&sc->sc_dev))
-		return 0;
-
-	if ((r = RAL_READ(sc, RT2560_CSR7)) == 0)
-		return 0;       /* not for us */
-	
 	/* disable interrupts */
 	RAL_WRITE(sc, RT2560_CSR8, 0xffffffff);
-
-	/* acknowledge interrupts */
-	RAL_WRITE(sc, RT2560_CSR7, r);
 
 	/* don't re-enable interrupts if we're shutting down */
 	if (!(ifp->if_flags & IFF_RUNNING))
 		return 0;
+
+	/* if we're suspended, don't bother */
+	if (sc->sc_suspend != PWR_RESUME)
+		return 0;
+
+	r = RAL_READ(sc, RT2560_CSR7);
+	RAL_WRITE(sc, RT2560_CSR7, r);
 
 	if (r & RT2560_BEACON_EXPIRE)
 		rt2560_beacon_expire(sc);
@@ -1713,8 +1764,8 @@ rt2560_tx_bcn(struct rt2560_softc *sc, struct mbuf *m0,
 	error = bus_dmamap_load_mbuf(sc->sc_dmat, data->map, m0,
 	    BUS_DMA_NOWAIT);
 	if (error != 0) {
-		aprint_error_dev(&sc->sc_dev, "could not map mbuf (error %d)\n",
-		    error);
+		printf("%s: could not map mbuf (error %d)\n",
+		    sc->sc_dev.dv_xname, error);
 		m_freem(m0);
 		return error;
 	}
@@ -1761,16 +1812,13 @@ rt2560_tx_mgt(struct rt2560_softc *sc, struct mbuf *m0,
 			m_freem(m0);
 			return ENOBUFS;
 		}
-
-		/* packet header may have moved, reset our local pointer */
-		wh = mtod(m0, struct ieee80211_frame *);
 	}
 
 	error = bus_dmamap_load_mbuf(sc->sc_dmat, data->map, m0,
 	    BUS_DMA_NOWAIT);
 	if (error != 0) {
-		aprint_error_dev(&sc->sc_dev, "could not map mbuf (error %d)\n",
-		    error);
+		printf("%s: could not map mbuf (error %d)\n",
+		    sc->sc_dev.dv_xname, error);
 		m_freem(m0);
 		return error;
 	}
@@ -1841,7 +1889,8 @@ rt2560_get_rts(struct rt2560_softc *sc, struct ieee80211_frame *wh,
 	MGETHDR(m, M_DONTWAIT, MT_DATA);
 	if (m == NULL) {
 		sc->sc_ic.ic_stats.is_tx_nobuf++;
-		aprint_error_dev(&sc->sc_dev, "could not allocate RTS frame\n");
+		printf("%s: could not allocate RTS frame\n",
+		    sc->sc_dev.dv_xname);
 		return NULL;
 	}
 
@@ -1926,8 +1975,8 @@ rt2560_tx_data(struct rt2560_softc *sc, struct mbuf *m0,
 		error = bus_dmamap_load_mbuf(sc->sc_dmat, data->map, m,
 		    BUS_DMA_NOWAIT);
 		if (error != 0) {
-			aprint_error_dev(&sc->sc_dev, "could not map mbuf (error %d)\n",
-			    error);
+			printf("%s: could not map mbuf (error %d)\n",
+			    sc->sc_dev.dv_xname, error);
 			m_freem(m);
 			m_freem(m0);
 			return error;
@@ -1970,8 +2019,8 @@ rt2560_tx_data(struct rt2560_softc *sc, struct mbuf *m0,
 	error = bus_dmamap_load_mbuf(sc->sc_dmat, data->map, m0,
 	    BUS_DMA_NOWAIT);
 	if (error != 0 && error != EFBIG) {
-		aprint_error_dev(&sc->sc_dev, "could not map mbuf (error %d)\n",
-		    error);
+		printf("%s: could not map mbuf (error %d)\n",
+		    sc->sc_dev.dv_xname, error);
 		m_freem(m0);
 		return error;
 	}
@@ -2002,8 +2051,8 @@ rt2560_tx_data(struct rt2560_softc *sc, struct mbuf *m0,
 		error = bus_dmamap_load_mbuf(sc->sc_dmat, data->map, m0,
 		    BUS_DMA_NOWAIT);
 		if (error != 0) {
-			aprint_error_dev(&sc->sc_dev, "could not map mbuf (error %d)\n",
-			    error);
+			printf("%s: could not map mbuf (error %d)\n",
+			    sc->sc_dev.dv_xname, error);
 			m_freem(m0);
 			return error;
 		}
@@ -2160,7 +2209,7 @@ rt2560_watchdog(struct ifnet *ifp)
 
 	if (sc->sc_tx_timer > 0) {
 		if (--sc->sc_tx_timer == 0) {
-			aprint_error_dev(&sc->sc_dev, "device timeout\n");
+			printf("%s: device timeout\n", sc->sc_dev.dv_xname);
 			rt2560_init(ifp);
 			ifp->if_oerrors++;
 			return;
@@ -2201,8 +2250,6 @@ rt2560_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 
 	switch (cmd) {
 	case SIOCSIFFLAGS:
-		if ((error = ifioctl_common(ifp, cmd, data)) != 0)
-			break;
 		if (ifp->if_flags & IFF_UP) {
 			if (ifp->if_flags & IFF_RUNNING)
 				rt2560_update_promisc(sc);
@@ -2210,7 +2257,7 @@ rt2560_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 				rt2560_init(ifp);
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
-				rt2560_stop(ifp, 1);
+				rt2560_stop(sc);
 		}
 		break;
 
@@ -2263,7 +2310,7 @@ rt2560_bbp_write(struct rt2560_softc *sc, uint8_t reg, uint8_t val)
 		DELAY(1);
 	}
 	if (ntries == 100) {
-		aprint_error_dev(&sc->sc_dev, "could not write to BBP\n");
+		printf("%s: could not write to BBP\n", sc->sc_dev.dv_xname);
 		return;
 	}
 
@@ -2289,7 +2336,7 @@ rt2560_bbp_read(struct rt2560_softc *sc, uint8_t reg)
 		DELAY(1);
 	}
 
-	aprint_error_dev(&sc->sc_dev, "could not read from BBP\n");
+	printf("%s: could not read from BBP\n", sc->sc_dev.dv_xname);
 	return 0;
 }
 
@@ -2305,7 +2352,7 @@ rt2560_rf_write(struct rt2560_softc *sc, uint8_t reg, uint32_t val)
 		DELAY(1);
 	}
 	if (ntries == 100) {
-		aprint_error_dev(&sc->sc_dev, "could not write to RF\n");
+		printf("%s: could not write to RF\n", sc->sc_dev.dv_xname);
 		return;
 	}
 
@@ -2731,7 +2778,7 @@ rt2560_bbp_init(struct rt2560_softc *sc)
 		DELAY(1);
 	}
 	if (ntries == 100) {
-		aprint_error_dev(&sc->sc_dev, "timeout waiting for BBP\n");
+		printf("%s: timeout waiting for BBP\n", sc->sc_dev.dv_xname);
 		return EIO;
 	}
 
@@ -2765,13 +2812,14 @@ rt2560_init(struct ifnet *ifp)
 	/* for CardBus, power on the socket */
 	if (!(sc->sc_flags & RT2560_ENABLED)) {
 		if (sc->sc_enable != NULL && (*sc->sc_enable)(sc) != 0) {
-			aprint_error_dev(&sc->sc_dev, "could not enable device\n");
+			printf("%s: could not enable device\n",
+			    sc->sc_dev.dv_xname);
 			return EIO;
 		}
 		sc->sc_flags |= RT2560_ENABLED;
 	}
 
-	rt2560_stop(ifp, 1);
+	rt2560_stop(sc);
 
 	/* setup tx rings */
 	tmp = RT2560_PRIO_RING_COUNT << 24 |
@@ -2802,6 +2850,8 @@ rt2560_init(struct ifnet *ifp)
 	/* set basic rate set (will be updated later) */
 	RAL_WRITE(sc, RT2560_ARSP_PLCP_1, 0x153);
 
+	rt2560_set_txantenna(sc, 1);
+	rt2560_set_rxantenna(sc, 1);
 	rt2560_update_slot(ifp);
 	rt2560_update_plcp(sc);
 	rt2560_update_led(sc, 0, 0);
@@ -2810,12 +2860,9 @@ rt2560_init(struct ifnet *ifp)
 	RAL_WRITE(sc, RT2560_CSR1, RT2560_HOST_READY);
 
 	if (rt2560_bbp_init(sc) != 0) {
-		rt2560_stop(ifp, 1);
+		rt2560_stop(sc);
 		return EIO;
 	}
-
-	rt2560_set_txantenna(sc, 1);
-	rt2560_set_rxantenna(sc, 1);
 
 	/* set default BSS channel */
 	ic->ic_bss->ni_chan = ic->ic_ibss_chan;
@@ -2855,10 +2902,11 @@ rt2560_init(struct ifnet *ifp)
 }
 
 static void
-rt2560_stop(struct ifnet *ifp, int disable)
+rt2560_stop(void *priv)
 {
-	struct rt2560_softc *sc = ifp->if_softc;
+	struct rt2560_softc *sc = priv;
 	struct ieee80211com *ic = &sc->sc_ic;
+	struct ifnet *ifp = ic->ic_ifp;
 
 	sc->sc_tx_timer = 0;
 	ifp->if_timer = 0;
@@ -2889,4 +2937,42 @@ rt2560_stop(struct ifnet *ifp, int disable)
 	rt2560_reset_tx_ring(sc, &sc->bcnq);
 	rt2560_reset_rx_ring(sc, &sc->rxq);
 
+}
+
+static void
+rt2560_powerhook(int why, void *opaque)
+{
+	struct rt2560_softc *sc;
+	struct ifnet *ifp;
+	int s;
+
+	sc = (struct rt2560_softc *)opaque;
+	ifp = &sc->sc_if;
+
+	s = splnet();
+	switch (why) {
+	case PWR_SUSPEND:
+		sc->sc_suspend = why;
+		rt2560_stop(sc);
+		if (sc->sc_power != NULL)
+			(*sc->sc_power)(sc, why);
+		break;
+	case PWR_RESUME:
+		sc->sc_suspend = why;
+		if (ifp->if_flags & IFF_UP) {
+			if (sc->sc_power != NULL)
+				(*sc->sc_power)(sc, why);
+			rt2560_init(ifp);
+			if (ifp->if_flags & IFF_RUNNING)
+				rt2560_start(ifp);
+		}
+		break;
+	case PWR_STANDBY:
+	case PWR_SOFTSUSPEND:
+	case PWR_SOFTRESUME:
+		break;
+	}
+	splx(s);
+
+	return;
 }

@@ -1,4 +1,4 @@
-/* $NetBSD: dec_6600.c,v 1.26 2007/03/04 15:18:10 yamt Exp $ */
+/* $NetBSD: dec_6600.c,v 1.30 2010/10/07 19:55:02 hans Exp $ */
 
 /*
  * Copyright (c) 1995, 1996, 1997 Carnegie-Mellon University.
@@ -31,7 +31,7 @@
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
 
-__KERNEL_RCSID(0, "$NetBSD: dec_6600.c,v 1.26 2007/03/04 15:18:10 yamt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: dec_6600.c,v 1.30 2010/10/07 19:55:02 hans Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -44,6 +44,8 @@ __KERNEL_RCSID(0, "$NetBSD: dec_6600.c,v 1.26 2007/03/04 15:18:10 yamt Exp $");
 #include <machine/autoconf.h>
 #include <machine/cpuconf.h>
 #include <machine/bus.h>
+#include <machine/alpha.h>
+#include <machine/logout.h>
 
 #include <dev/ic/comreg.h>
 #include <dev/ic/comvar.h>
@@ -63,6 +65,13 @@ __KERNEL_RCSID(0, "$NetBSD: dec_6600.c,v 1.26 2007/03/04 15:18:10 yamt Exp $");
 #include <dev/scsipi/scsiconf.h>
 #include <dev/ata/atavar.h>
 
+#include <dev/ic/mlxio.h>
+#include <dev/ic/mlxvar.h>
+
+#include <dev/i2o/i2o.h>
+#include <dev/i2o/iopio.h>
+#include <dev/i2o/iopvar.h>
+
 #include "pckbd.h"
 
 #ifndef CONSPEED
@@ -73,9 +82,13 @@ __KERNEL_RCSID(0, "$NetBSD: dec_6600.c,v 1.26 2007/03/04 15:18:10 yamt Exp $");
 
 static int comcnrate __attribute__((unused)) = CONSPEED;
 
-void dec_6600_init __P((void));
-static void dec_6600_cons_init __P((void));
-static void dec_6600_device_register __P((struct device *, void *));
+void dec_6600_init(void);
+static void dec_6600_cons_init(void);
+static void dec_6600_device_register(struct device *, void *);
+static void dec_6600_mcheck(unsigned long, struct ev6_logout_area *);
+static void dec_6600_mcheck_sys(unsigned int, struct ev6_logout_area *);
+static void dec_6600_mcheck_handler(unsigned long, struct trapframe *,
+				    unsigned long, unsigned long);
 
 #ifdef KGDB
 #include <machine/db_machdep.h>
@@ -100,8 +113,11 @@ dec_6600_init()
 	platform.iobus = "tsc";
 	platform.cons_init = dec_6600_cons_init;
 	platform.device_register = dec_6600_device_register;
-	STQP(TS_C_DIM0) = 0UL;
-	STQP(TS_C_DIM1) = 0UL;
+	platform.mcheck_handler = dec_6600_mcheck_handler;
+
+	/* enable Cchip and Pchip error interrupts */
+	STQP(TS_C_DIM0) = 0xe000000000000000;
+	STQP(TS_C_DIM1) = 0xe000000000000000;
 }
 
 static void
@@ -178,9 +194,7 @@ dec_6600_cons_init()
 }
 
 static void
-dec_6600_device_register(dev, aux)
-	struct device *dev;
-	void *aux;
+dec_6600_device_register(struct device *dev, void *aux)
 {
 	static int found, initted, diskboot, netboot;
 	static struct device *primarydev, *pcidev, *ctrlrdev;
@@ -192,6 +206,8 @@ dec_6600_device_register(dev, aux)
 
 	if (!initted) {
 		diskboot = (strcasecmp(b->protocol, "SCSI") == 0) ||
+		    (strcasecmp(b->protocol, "RAID") == 0) ||
+		    (strcasecmp(b->protocol, "I2O") == 0) ||
 		    (strcasecmp(b->protocol, "IDE") == 0);
 		netboot = (strcasecmp(b->protocol, "BOOTP") == 0) ||
 		    (strcasecmp(b->protocol, "MOP") == 0);
@@ -292,6 +308,44 @@ dec_6600_device_register(dev, aux)
 		found = 1;
 	}
 
+	if (device_is_a(dev, "ld") && device_is_a(parent, "iop")) {
+		/*
+		 * Argh!  The attach arguments for ld devices is not
+		 * consistent, so each supported raid controller requires
+		 * different checks.
+		 */
+		struct iop_attach_args *iopa = aux;
+
+		if (parent != ctrlrdev)
+			return;
+
+		if (b->unit != iopa->ia_tid)
+			return;
+		/* we've found it! */
+		booted_device = dev;
+		DR_VERBOSE(printf("\nbooted_device = %s\n", dev->dv_xname));
+		found = 1;
+	}
+
+	if (device_is_a(dev, "ld") && device_is_a(parent, "mlx")) {
+		/*
+		 * Argh!  The attach arguments for ld devices is not
+		 * consistent, so each supported raid controller requires
+		 * different checks.
+		 */
+		struct mlx_attach_args *mlxa = aux;
+
+		if (parent != ctrlrdev)
+			return;
+
+		if (b->unit != mlxa->mlxa_unit)
+			return;
+		/* we've found it! */
+		booted_device = dev;
+		DR_VERBOSE(printf("\nbooted_device = %s\n", dev->dv_xname));
+		found = 1;
+	}
+
 	/*
 	 * Support to boot from IDE drives.
 	 */
@@ -316,4 +370,86 @@ dec_6600_device_register(dev, aux)
 		DR_VERBOSE(printf("booted_device = %s\n", dev->dv_xname));
 		found = 1;
 	}
+}
+
+
+static void
+dec_6600_mcheck(unsigned long vector, struct ev6_logout_area *la)
+{
+	const char *t = "Unknown", *c = "";
+
+	if (vector == ALPHA_SYS_ERROR || vector == ALPHA_PROC_ERROR)
+		c = " Correctable";
+
+	switch (vector) {
+	case ALPHA_SYS_ERROR:
+	case ALPHA_SYS_MCHECK:
+		t = "System";
+		break;
+
+	case ALPHA_PROC_ERROR:
+	case ALPHA_PROC_MCHECK:
+		t = "Processor";
+		break;
+
+	case ALPHA_ENV_MCHECK:
+		t = "Environmental";
+		break;
+	}
+
+	printf("\n%s%s Machine Check (%lx): "
+	       "Rev 0x%x, Code 0x%x, Flags 0x%x\n\n",
+	       t, c, vector, la->mchk_rev, la->mchk_code, la->la.la_flags);
+}
+
+static void
+dec_6600_mcheck_sys(unsigned int indent, struct ev6_logout_area *la)
+{
+	struct ev6_logout_sys *ls = 
+		(struct ev6_logout_sys *)ALPHA_LOGOUT_SYSTEM_AREA(&la->la);
+
+#define FMT	"%-30s = 0x%016lx\n"
+
+	IPRINTF(indent, FMT, "Software Error Summary Flags", ls->flags);
+
+	IPRINTF(indent, FMT, "CPU Device Interrupt Requests", ls->dir);
+	tsc_print_dir(indent + 1, ls->dir);
+
+	IPRINTF(indent, FMT, "Cchip Miscellaneous Register", ls->misc);
+	tsc_print_misc(indent + 1, ls->misc);
+
+	IPRINTF(indent, FMT, "Pchip 0 Error Register", ls->p0_error);
+	if (ls->flags & 0x5)
+		tsp_print_error(indent + 1, ls->p0_error);
+
+	IPRINTF(indent, FMT, "Pchip 1 Error Register", ls->p1_error);
+	if (ls->flags & 0x6)
+		tsp_print_error(indent + 1, ls->p1_error);
+}
+
+static void
+dec_6600_mcheck_handler(unsigned long mces, struct trapframe *framep,
+			unsigned long vector, unsigned long param)
+{
+	struct mchkinfo *mcp;
+	struct ev6_logout_area *la = (struct ev6_logout_area *)param;
+
+	/*
+	 * If we expected a machine check, just go handle it in common code.
+	 */
+	mcp = &curcpu()->ci_mcinfo;
+	if (mcp->mc_expected) 
+		machine_check(mces, framep, vector, param);
+
+	dec_6600_mcheck(vector, la);
+
+	switch (vector) {
+	case ALPHA_SYS_ERROR:
+	case ALPHA_SYS_MCHECK:
+		dec_6600_mcheck_sys(1, la);
+		break;
+
+	}
+
+	machine_check(mces, framep, vector, param);
 }

@@ -1,4 +1,4 @@
-/*	$NetBSD: pmap_bootstrap.c,v 1.5 2009/01/17 07:17:35 tsutsui Exp $	*/
+/*	$NetBSD: pmap_bootstrap.c,v 1.1 2007/06/09 16:27:16 mhitch Exp $	*/
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -65,7 +72,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: pmap_bootstrap.c,v 1.5 2009/01/17 07:17:35 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pmap_bootstrap.c,v 1.1 2007/06/09 16:27:16 mhitch Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -83,12 +90,22 @@ __KERNEL_RCSID(0, "$NetBSD: pmap_bootstrap.c,v 1.5 2009/01/17 07:17:35 tsutsui E
 
 #include <amiga/amiga/memlist.h>
 
-u_int		Sysseg_pa;
+/*
+ * Kernel segment/page table and page table map.
+ * The page table map gives us a level of indirection we need to dynamically
+ * expand the page table.  It is essentially a copy of the segment table
+ * with PTEs instead of STEs.  All are initialized in locore at boot time.
+ * Sysmap will initially contain VM_KERNEL_PT_PAGES pages of PTEs.
+ * Segtabzero is an empty segment table which all processes share til they
+ * reference something.
+ */
+u_int	*Sysseg, *Sysseg_pa;
 
-extern paddr_t		avail_start;
-extern paddr_t		avail_end;
+vsize_t		mem_size;	/* memory size in bytes */
+vaddr_t		virtual_avail;  /* VA of first avail page (after kernel bss)*/
+vaddr_t		virtual_end;	/* VA of last avail page (end of kernel AS) */
 #if defined(M68040) || defined(M68060)
-extern int		protostfree;
+int		protostfree;	/* prototype (default) free ST map */
 #endif
 
 extern paddr_t	msgbufpa;
@@ -105,11 +122,18 @@ extern vaddr_t reserve_dumppages(vaddr_t);
 void	*CADDR1, *CADDR2;
 char	*vmmap;
 
+extern int protection_codes[];
+
 /*
  *	Bootstrap the system enough to run with virtual memory.
+ *	Map the kernel's code and data, and allocate the system page table.
  *
- *	This is called after mapping has already been enabled
+ *	On the HP this is called after mapping has already been enabled
  *	and just syncs the pmap module with what has already been done.
+ *	[We can't call it easily with mapping off since the kernel is not
+ *	mapped with PA == VA, hence we would have to relocate every address
+ *	from the linked base (virtual) address 0 to the actual (physical)
+ *	address of 0xFFxxxxxx.]
  */
 void
 pmap_bootstrap(firstaddr, loadaddr)
@@ -189,10 +213,6 @@ pmap_bootstrap(firstaddr, loadaddr)
 	}
 
 	mem_size = physmem << PGSHIFT;
-
-	avail_start = firstaddr;
-	avail_end   = toads;
-
 	virtual_end = VM_MAX_KERNEL_ADDRESS;
 
 	/*
@@ -201,9 +221,9 @@ pmap_bootstrap(firstaddr, loadaddr)
 	 * absolute "jmp" table.
 	 */
 	{
-		u_int *kp;
+		int *kp;
 
-		kp = (u_int *)&protection_codes;
+		kp = (int *)&protection_codes;
 		kp[VM_PROT_NONE|VM_PROT_NONE|VM_PROT_NONE] = 0;
 		kp[VM_PROT_READ|VM_PROT_NONE|VM_PROT_NONE] = PG_RO;
 		kp[VM_PROT_READ|VM_PROT_NONE|VM_PROT_EXECUTE] = PG_RO;
@@ -218,7 +238,7 @@ pmap_bootstrap(firstaddr, loadaddr)
 	 * Kernel page/segment table allocated in locore,
 	 * just initialize pointers.
 	 */
-	pmap_kernel()->pm_stpa = (st_entry_t *)Sysseg_pa;
+	pmap_kernel()->pm_stpa = Sysseg_pa;
 	pmap_kernel()->pm_stab = Sysseg;
 	pmap_kernel()->pm_ptab = Sysmap;
 #if defined(M68040) || defined(M68060)

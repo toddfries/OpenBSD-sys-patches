@@ -1,4 +1,4 @@
-/*	$NetBSD: x86_autoconf.c,v 1.38 2009/02/17 11:16:10 jmcneill Exp $	*/
+/*	$NetBSD: x86_autoconf.c,v 1.24 2006/10/06 02:29:08 yamt Exp $	*/
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -35,13 +35,16 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: x86_autoconf.c,v 1.38 2009/02/17 11:16:10 jmcneill Exp $");
+__KERNEL_RCSID(0, "$NetBSD");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/disklabel.h>
 #include <sys/conf.h>
+#ifdef COMPAT_OLDBOOT
+#include <sys/reboot.h>
+#endif
 #include <sys/malloc.h>
 #include <sys/vnode.h>
 #include <sys/fcntl.h>
@@ -51,41 +54,124 @@ __KERNEL_RCSID(0, "$NetBSD: x86_autoconf.c,v 1.38 2009/02/17 11:16:10 jmcneill E
 #include <sys/kauth.h>
 
 #include <machine/bootinfo.h>
-#include <machine/pio.h>
 
 #include "pci.h"
-#include "genfb.h"
-#include "wsdisplay.h"
 
 #include <dev/isa/isavar.h>
 #if NPCI > 0
 #include <dev/pci/pcivar.h>
 #endif
-#include <dev/wsfb/genfbvar.h>
-#include <dev/ic/vgareg.h>
-
-struct genfb_colormap_callback gfb_cb;
 
 struct disklist *x86_alldisks;
 int x86_ndisks;
 
-static void
-x86_genfb_set_mapreg(void *opaque, int index, int r, int g, int b)
+static struct vnode *
+opendisk(struct device *dv)
 {
-	outb(0x3c0 + VGA_DAC_ADDRW, index);
-	outb(0x3c0 + VGA_DAC_PALETTE, (uint8_t)r >> 2);
-	outb(0x3c0 + VGA_DAC_PALETTE, (uint8_t)g >> 2);
-	outb(0x3c0 + VGA_DAC_PALETTE, (uint8_t)b >> 2);
+	int bmajor, bminor;
+	struct vnode *tmpvn;
+	int error;
+	dev_t dev;
+	
+	/*
+	 * Lookup major number for disk block device.
+	 */
+	bmajor = devsw_name2blk(dv->dv_xname, NULL, 0);
+	if (bmajor == -1)
+		return NULL;
+	
+	bminor = minor(device_unit(dv));
+	/*
+	 * Fake a temporary vnode for the disk, open it, and read
+	 * and hash the sectors.
+	 */
+	dev = device_is_a(dv, "dk") ? makedev(bmajor, bminor) :
+	    MAKEDISKDEV(bmajor, bminor, RAW_PART);
+	if (bdevvp(dev, &tmpvn))
+		panic("%s: can't alloc vnode for %s", __func__, dv->dv_xname);
+	error = VOP_OPEN(tmpvn, FREAD, NOCRED, 0);
+	if (error) {
+#ifndef DEBUG
+		/*
+		 * Ignore errors caused by missing device, partition,
+		 * or medium.
+		 */
+		if (error != ENXIO && error != ENODEV)
+#endif
+			printf("%s: can't open dev %s (%d)\n",
+			    __func__, dv->dv_xname, error);
+		vput(tmpvn);
+		return NULL;
+	}
+
+	return tmpvn;
 }
 
 static void
 handle_wedges(struct device *dv, int par)
 {
-	if (config_handle_wedges(dv, par) == 0)
-		return;
+	struct dkwedge_list wl;
+	struct dkwedge_info *wi;
+	struct vnode *vn;
+	char diskname[16];
+	int i, error;
+
+	if ((vn = opendisk(dv)) == NULL)
+		goto out;
+
+	wl.dkwl_bufsize = sizeof(*wi) * 16;
+	wl.dkwl_buf = wi = malloc(wl.dkwl_bufsize, M_TEMP, M_WAITOK);
+
+	error = VOP_IOCTL(vn, DIOCLWEDGES, &wl, FREAD, NOCRED, 0);
+	VOP_CLOSE(vn, FREAD, NOCRED, 0);
+	vput(vn);
+	if (error) {
+#ifdef DEBUG_WEDGE
+		printf("%s: List wedges returned %d\n", dv->dv_xname, error);
+#endif
+		free(wi, M_TEMP);
+		goto out;
+	}
+
+#ifdef DEBUG_WEDGE
+	printf("%s: Returned %u(%u) wedges\n", dv->dv_xname,
+	    wl.dkwl_nwedges, wl.dkwl_ncopied);
+#endif
+	snprintf(diskname, sizeof(diskname), "%s%c", dv->dv_xname,
+	    par + 'a');
+
+	for (i = 0; i < wl.dkwl_ncopied; i++) {
+#ifdef DEBUG_WEDGE
+		printf("%s: Looking for %s in %s\n", 
+		    dv->dv_xname, diskname, wi[i].dkw_wname);
+#endif
+		if (strcmp(wi[i].dkw_wname, diskname) == 0)
+			break;
+	}
+
+	if (i == wl.dkwl_ncopied) {
+#ifdef DEBUG_WEDGE
+		printf("%s: Cannot find wedge with parent %s\n",
+		    dv->dv_xname, diskname);
+#endif
+		free(wi, M_TEMP);
+		goto out;
+	}
+
+#ifdef DEBUG_WEDGE
+	printf("%s: Setting boot wedge %s (%s) at %llu %llu\n", 
+		dv->dv_xname, wi[i].dkw_devname, wi[i].dkw_wname,
+		(unsigned long long)wi[i].dkw_offset,
+		(unsigned long long)wi[i].dkw_size);
+#endif
+	dkwedge_set_bootwedge(dv, wi[i].dkw_offset, wi[i].dkw_size);
+	free(wi, M_TEMP);
+	return;
+out:
 	booted_device = dv;
 	booted_partition = par;
 }
+
 
 static int
 is_valid_disk(struct device *dv)
@@ -122,7 +208,8 @@ matchbiosdisks(void)
 	numbig = big ? big->num : 0;
 
 	/* First, count all native disks. */
-	TAILQ_FOREACH(dv, &alldevs, dv_list) {
+	for (dv = TAILQ_FIRST(&alldevs); dv != NULL;
+	     dv = TAILQ_NEXT(dv, dv_list)) {
 		if (is_valid_disk(dv))
 			x86_ndisks++;
 	}
@@ -155,30 +242,31 @@ matchbiosdisks(void)
 
 	/* XXX Code duplication from findroot(). */
 	n = -1;
-	TAILQ_FOREACH(dv, &alldevs, dv_list) {
+	for (dv = TAILQ_FIRST(&alldevs); dv != NULL;
+	     dv = TAILQ_NEXT(dv, dv_list)) {
 		if (device_class(dv) != DV_DISK)
 			continue;
 #ifdef GEOM_DEBUG
 		printf("matchbiosdisks: trying to match (%s) %s\n",
-		    device_xname(dv), device_cfdata(dv)->cf_name);
+		    dv->dv_xname, device_cfdata(dv)->cf_name);
 #endif
 		if (is_valid_disk(dv)) {
 			n++;
 			/* XXXJRT why not just dv_xname?? */
 			snprintf(x86_alldisks->dl_nativedisks[n].ni_devname,
 			    sizeof(x86_alldisks->dl_nativedisks[n].ni_devname),
-			    "%s", device_xname(dv));
+			    "%s", dv->dv_xname);
 
 			if ((tv = opendisk(dv)) == NULL)
 				continue;
 
 			error = vn_rdwr(UIO_READ, tv, mbr, DEV_BSIZE, 0,
 			    UIO_SYSSPACE, 0, NOCRED, NULL, NULL);
-			VOP_CLOSE(tv, FREAD, NOCRED);
+			VOP_CLOSE(tv, FREAD, NOCRED, 0);
 			if (error) {
 #ifdef GEOM_DEBUG
 				printf("matchbiosdisks: %s: MBR read failure\n",
-				    device_xname(dv));
+				    dv->dv_xname);
 #endif
 				continue;
 			}
@@ -189,7 +277,7 @@ matchbiosdisks(void)
 				be = &big->disk[i];
 #ifdef GEOM_DEBUG
 				printf("match %s with %d "
-				    "dev ck %x bios ck %x\n", device_xname(dv), i,
+				    "dev ck %x bios ck %x\n", dv->dv_xname, i,
 				    ck, be->cksum);
 #endif
 				if (be->flags & BI_GEOM_INVALID)
@@ -200,7 +288,7 @@ matchbiosdisks(void)
 					  sizeof(struct mbr_partition)) == 0) {
 #ifdef GEOM_DEBUG
 					printf("matched BIOS disk %x with %s\n",
-					    be->dev, device_xname(dv));
+					    be->dev, dv->dv_xname);
 #endif
 					x86_alldisks->dl_nativedisks[n].
 					    ni_biosmatches[m++] = i;
@@ -240,7 +328,7 @@ match_bootwedge(struct device *dv, struct btinfo_bootwedge *biw)
 	MD5Init(&ctx);
 	for (blk = biw->matchblk, nblks = biw->matchnblks;
 	     nblks != 0; nblks--, blk++) {
-		error = vn_rdwr(UIO_READ, tmpvn, (void *) bf,
+		error = vn_rdwr(UIO_READ, tmpvn, (caddr_t) bf,
 		    sizeof(bf), blk * DEV_BSIZE, UIO_SYSSPACE,
 		    0, NOCRED, NULL, NULL);
 		if (error) {
@@ -256,7 +344,7 @@ match_bootwedge(struct device *dv, struct btinfo_bootwedge *biw)
 	found = memcmp(biw->matchhash, hash, sizeof(hash)) == 0;
 
  closeout:
-	VOP_CLOSE(tmpvn, FREAD, NOCRED);
+	VOP_CLOSE(tmpvn, FREAD, NOCRED, 0);
 	vput(tmpvn);
 	return (found);
 }
@@ -287,14 +375,14 @@ match_bootdisk(struct device *dv, struct btinfo_bootdisk *bid)
 	if ((tmpvn = opendisk(dv)) == NULL)
 		return 0;
 
-	error = VOP_IOCTL(tmpvn, DIOCGDINFO, &label, FREAD, NOCRED);
+	error = VOP_IOCTL(tmpvn, DIOCGDINFO, &label, FREAD, NOCRED, 0);
 	if (error) {
 		/*
 		 * XXX Can't happen -- open() would have errored out
 		 * or faked one up.
 		 */
 		printf("findroot: can't get label for dev %s (%d)\n",
-		    device_xname(dv), error);
+		    dv->dv_xname, error);
 		goto closeout;
 	}
 
@@ -305,10 +393,19 @@ match_bootdisk(struct device *dv, struct btinfo_bootdisk *bid)
 		found = 1;
 
  closeout:
-	VOP_CLOSE(tmpvn, FREAD, NOCRED);
+	VOP_CLOSE(tmpvn, FREAD, NOCRED, 0);
 	vput(tmpvn);
 	return (found);
 }
+
+#ifdef __x86_64__
+/* Old style bootdev never existed on amd64. */
+#undef COMPAT_OLDBOOT
+#endif
+
+#ifdef COMPAT_OLDBOOT
+uint32_t bootdev = 0;
+#endif
 
 /*
  * Attempt to find the device from which we were booted.  If we can do so,
@@ -321,8 +418,12 @@ findroot(void)
 	struct btinfo_rootdevice *biv;
 	struct btinfo_bootdisk *bid;
 	struct btinfo_bootwedge *biw;
-	struct btinfo_biosgeom *big;
-	device_t dv;
+	struct device *dv;
+#ifdef COMPAT_OLDBOOT
+	const char *name;
+	int majdev, unit, part;
+	char bf[32];
+#endif
 
 	if (booted_device)
 		return;
@@ -339,7 +440,8 @@ findroot(void)
 	}
 
 	if ((biv = lookup_bootinfo(BTINFO_ROOTDEVICE)) != NULL) {
-		TAILQ_FOREACH(dv, &alldevs, dv_list) {
+		for (dv = TAILQ_FIRST(&alldevs); dv != NULL;
+		     dv = TAILQ_NEXT(dv, dv_list)) {
 			struct cfdata *cd;
 			size_t len;
 
@@ -365,7 +467,8 @@ findroot(void)
 		 * because lower devices numbers are more likely to be the
 		 * boot device.
 		 */
-		TAILQ_FOREACH(dv, &alldevs, dv_list) {
+		for (dv = TAILQ_FIRST(&alldevs); dv != NULL;
+		     dv = TAILQ_NEXT(dv, dv_list)) {
 			if (device_class(dv) != DV_DISK)
 				continue;
 
@@ -386,8 +489,7 @@ findroot(void)
 			if (booted_device) {
 				printf("WARNING: double match for boot "
 				    "device (%s, %s)\n",
-				    device_xname(booted_device),
-				    device_xname(dv));
+				    booted_device->dv_xname, dv->dv_xname);
 				continue;
 			}
 			dkwedge_set_bootwedge(dv, biw->startblk, biw->nblks);
@@ -405,7 +507,8 @@ findroot(void)
 		 * because lower device numbers are more likely to be the
 		 * boot device.
 		 */
-		TAILQ_FOREACH(dv, &alldevs, dv_list) {
+		for (dv = TAILQ_FIRST(&alldevs); dv != NULL;
+		     dv = TAILQ_NEXT(dv, dv_list)) {
 			if (device_class(dv) != DV_DISK)
 				continue;
 
@@ -440,8 +543,7 @@ findroot(void)
 			if (booted_device) {
 				printf("WARNING: double match for boot "
 				    "device (%s, %s)\n",
-				    device_xname(booted_device),
-				    device_xname(dv));
+				    booted_device->dv_xname, dv->dv_xname);
 				continue;
 			}
 			handle_wedges(dv, bid->partition);
@@ -449,35 +551,34 @@ findroot(void)
 
 		if (booted_device)
 			return;
+	}
 
-		/*
-		 * No booted device found; check CD-ROM boot at last.
-		 *
-		 * Our bootloader assumes CD-ROM boot if biosdev is larger
-		 * than the number of hard drives recognized by the BIOS.
-		 * The number of drives can be found in BTINFO_BIOSGEOM here.
-		 *
-		 * See src/sys/arch/i386/stand/boot/devopen.c and
-		 * src/sys/arch/i386/stand/lib/bootinfo_biosgeom.c .
-		 */
-		if ((big = lookup_bootinfo(BTINFO_BIOSGEOM)) != NULL &&
-		    bid->biosdev > 0x80 + big->num) {
-			/*
-			 * XXX
-			 * There is no proper way to detect which unit is
-			 * recognized as a bootable CD-ROM drive by the BIOS.
-			 * Assume the first unit is the one.
-			 */
-			TAILQ_FOREACH(dv, &alldevs, dv_list) {
-				if (device_class(dv) == DV_DISK &&
-				    device_is_a(dv, "cd")) {
-					booted_device = dv;
-					booted_partition = 0;
-					break;
-				}
-			}
+#ifdef COMPAT_OLDBOOT
+#if 0
+	printf("findroot: howto %x bootdev %x\n", boothowto, bootdev);
+#endif
+	
+	if ((bootdev & B_MAGICMASK) != B_DEVMAGIC)
+		return;
+	
+	majdev = (bootdev >> B_TYPESHIFT) & B_TYPEMASK;
+	name = devsw_blk2name(majdev);
+	if (name == NULL)
+		return;
+	
+	part = (bootdev >> B_PARTITIONSHIFT) & B_PARTITIONMASK;
+	unit = (bootdev >> B_UNITSHIFT) & B_UNITMASK;
+
+	snprintf(bf, sizeof(bf), "%s%d", name, unit);
+	for (dv = TAILQ_FIRST(&alldevs); dv != NULL;
+	     dv = TAILQ_NEXT(dv, dv_list)) {
+		if (strcmp(bf, dv->dv_xname) == 0) {
+			booted_device = dv;
+			booted_partition = part;
+			return;
 		}
 	}
+#endif /* COMPAT_OLDBOOT */
 }
 
 void
@@ -490,11 +591,11 @@ cpu_rootconf(void)
 	if (booted_wedge) {
 		KASSERT(booted_device != NULL);
 		printf("boot device: %s (%s)\n",
-		    device_xname(booted_wedge), device_xname(booted_device));
+		    booted_wedge->dv_xname, booted_device->dv_xname);
 		setroot(booted_wedge, 0);
 	} else {
 		printf("boot device: %s\n",
-		    booted_device ? device_xname(booted_device) : "<unknown>");
+		    booted_device ? booted_device->dv_xname : "<unknown>");
 		setroot(booted_device, booted_partition);
 	}
 }
@@ -502,7 +603,6 @@ cpu_rootconf(void)
 void
 device_register(struct device *dev, void *aux)
 {
-	static bool found_console = false;
 
 	/*
 	 * Handle network interfaces here, the attachment information is
@@ -551,60 +651,13 @@ device_register(struct device *dev, void *aux)
 		}
 #endif /* NPCI > 0 */
 	}
-#if NPCI > 0
-	if (device_parent(dev) && device_is_a(device_parent(dev), "pci") &&
-	    found_console == false) {
-		struct btinfo_framebuffer *fbinfo;
-		struct pci_attach_args *pa = aux;
-		prop_dictionary_t dict;
-
-		if (PCI_CLASS(pa->pa_class) == PCI_CLASS_DISPLAY) {
-#if NWSDISPLAY > 0 && NGENFB > 0
-			extern struct vcons_screen x86_genfb_console_screen;
-#endif
-
-			fbinfo = lookup_bootinfo(BTINFO_FRAMEBUFFER);
-			if (fbinfo == NULL || fbinfo->physaddr == 0)
-				return;
-			dict = device_properties(dev);
-			prop_dictionary_set_uint32(dict, "width",
-			    fbinfo->width);
-			prop_dictionary_set_uint32(dict, "height",
-			    fbinfo->height);
-			prop_dictionary_set_uint8(dict, "depth",
-			    fbinfo->depth);
-			prop_dictionary_set_uint64(dict, "address",
-			    fbinfo->physaddr);
-			prop_dictionary_set_uint16(dict, "linebytes",
-			    fbinfo->stride);
-			prop_dictionary_set_bool(dict, "is_console", true);
-			prop_dictionary_set_bool(dict, "clear-screen", false);
-#if NWSDISPLAY > 0 && NGENFB > 0
-			prop_dictionary_set_uint16(dict, "cursor-row",
-			    x86_genfb_console_screen.scr_ri.ri_crow);
-#endif
-#if notyet
-			prop_dictionary_set_bool(dict, "splash",
-			    fbinfo->flags & BI_FB_SPLASH ? true : false);
-#endif
-			if (fbinfo->depth == 8) {
-				gfb_cb.gcc_cookie = NULL;
-				gfb_cb.gcc_set_mapreg = x86_genfb_set_mapreg;
-				prop_dictionary_set_uint64(dict,
-				    "cmap_callback", (uint64_t)&gfb_cb);
-			}
-			found_console = true;
-			return;
-		}
-	}
-#endif
 	return;
 
  found:
 	if (booted_device) {
 		/* XXX should be a panic() */
 		printf("WARNING: double match for boot device (%s, %s)\n",
-		    device_xname(booted_device), device_xname(dev));
+		    booted_device->dv_xname, dev->dv_xname);
 		return;
 	}
 	booted_device = dev;

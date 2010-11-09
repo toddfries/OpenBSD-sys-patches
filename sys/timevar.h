@@ -1,7 +1,7 @@
-/*	$NetBSD: timevar.h,v 1.24 2009/01/11 02:45:56 christos Exp $	*/
+/*	$NetBSD: timevar.h,v 1.15 2007/10/22 05:26:42 simonb Exp $	*/
 
 /*
- *  Copyright (c) 2005, 2008 The NetBSD Foundation.
+ *  Copyright (c) 2005 The NetBSD Foundation.
  *  All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
@@ -12,6 +12,9 @@
  *  2. Redistributions in binary form must reproduce the above copyright
  *     notice, this list of conditions and the following disclaimer in the
  *     documentation and/or other materials provided with the distribution.
+ *  3. Neither the name of The NetBSD Foundation nor the names of its
+ *     contributors may be used to endorse or promote products derived
+ *     from this software without specific prior written permission.
  *
  *  THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  *  ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -77,15 +80,13 @@ struct 	ptimer {
 		} pt_nonreal;
 	} pt_data;
 	struct	sigevent pt_ev;
-	struct	itimerspec pt_time;
+	struct	itimerval pt_time;
 	struct	ksiginfo pt_info;
 	int	pt_overruns;	/* Overruns currently accumulating */
 	int	pt_poverruns;	/* Overruns associated w/ a delivery */
 	int	pt_type;
 	int	pt_entry;
-	int	pt_queued;
 	struct proc *pt_proc;
-	TAILQ_ENTRY(ptimer) pt_chain;
 };
 
 #define pt_ch	pt_data.pt_ch
@@ -128,6 +129,7 @@ struct	ptimers {
  * 
  */
 
+#ifdef __HAVE_TIMECOUNTER
 void	binuptime(struct bintime *);
 void	nanouptime(struct timespec *);
 void	microuptime(struct timeval *);
@@ -143,18 +145,32 @@ void	getmicrouptime(struct timeval *);
 void	getbintime(struct bintime *);
 void	getnanotime(struct timespec *);
 void	getmicrotime(struct timeval *);
+#else /* !__HAVE_TIMECOUNTER */
+/* timecounter compat functions */
+void	microtime(struct timeval *);
+void	nanotime(struct timespec *);
+
+void	nanouptime(struct timespec *);
+void	getbinuptime(struct bintime *);
+void	getnanouptime(struct timespec *);
+void	getmicrouptime(struct timeval *);
+
+void	getnanotime(struct timespec *);
+void	getmicrotime(struct timeval *);
+#endif /* !__HAVE_TIMECOUNTER */
 
 /* Other functions */
-void	adjtime1(const struct timeval *, struct timeval *, struct proc *);
-int	clock_settime1(struct proc *, clockid_t, const struct timespec *, bool);
+int	adjtime1(const struct timeval *, struct timeval *, struct proc *);
+int	clock_settime1(struct proc *, clockid_t, const struct timespec *);
 int	dogetitimer(struct proc *, int, struct itimerval *);
 int	dosetitimer(struct proc *, int, struct itimerval *);
 int	dotimer_gettime(int, struct proc *, struct itimerspec *);
 int	dotimer_settime(int, struct itimerspec *, struct itimerspec *, int,
 	    struct proc *);
-int	tshzto(const struct timespec *);
-int	tvhzto(const struct timeval *);
+int	hzto(struct timeval *);
 void	inittimecounter(void);
+int	itimerdecr(struct ptimer *, int);
+void	itimerfire(struct ptimer *);
 int	itimerfix(struct timeval *);
 int	itimespecfix(struct timespec *);
 int	ppsratecheck(struct timeval *, int *, int);
@@ -166,20 +182,24 @@ int	settimeofday1(const struct timeval *, bool,
 	    const void *, struct lwp *, bool);
 int	timer_create1(timer_t *, clockid_t, struct sigevent *, copyin_t,
 	    struct lwp *);
-void	timer_gettime(struct ptimer *, struct itimerspec *);
+void	timer_gettime(struct ptimer *, struct itimerval *);
 void	timer_settime(struct ptimer *);
-struct	ptimers *timers_alloc(struct proc *);
+void	timers_alloc(struct proc *);
 void	timers_free(struct proc *, int);
-void	timer_tick(struct lwp *, bool);
-int	tstohz(const struct timespec *);
-int	tvtohz(const struct timeval *);
+int	tstohz(struct timespec *);
+int	tvtohz(struct timeval *);
 int	inittimeleft(struct timeval *, struct timeval *);
 int	gettimeleft(struct timeval *, struct timeval *);
 void	timerupcall(struct lwp *);
-void	time_init(void);
-void	time_init2(void);
 
+#ifdef __HAVE_TIMECOUNTER
 extern time_t time_second;	/* current second in the epoch */
 extern time_t time_uptime;	/* system uptime in seconds */
+#else /* !__HAVE_TIMECOUNTER */
+extern volatile struct timeval mono_time;
+extern volatile struct timeval time;
+#define	time_second	time.tv_sec
+#define	time_uptime	mono_time.tv_sec
+#endif /* !__HAVE_TIMECOUNTER */
 
 #endif /* !_SYS_TIMEVAR_H_ */

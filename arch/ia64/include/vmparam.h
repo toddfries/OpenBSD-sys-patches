@@ -1,4 +1,4 @@
-/*	$NetBSD: vmparam.h,v 1.4 2008/03/20 14:56:06 kochi Exp $	*/
+/*	$NetBSD: vmparam.h,v 1.2 2006/07/03 17:01:45 cherry Exp $	*/
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -111,24 +111,21 @@
 #define VM_PHYS_SIZE		(USRIOSIZE*PAGE_SIZE)
 
 #ifndef _LOCORE
-
-#include <sys/queue.h>
-#include <sys/mutex.h>
 /*
  * pmap-specific data store in the vm_page structure.
  */
 #define	__HAVE_VM_PAGE_MD
 struct vm_page_md {
-	TAILQ_HEAD(,pv_entry) pv_list;	/* pv_entry list */
+	TAILQ_HEAD(,pv_entry) pv_list;		/* pv_entry list */
 	int pv_list_count;
-	kmutex_t pv_mutex;		/* lock on this head */
-	int pvh_attrs;			/* page attributes */
+	struct simplelock pv_slock;		/* lock on this head */
+	int pvh_attrs;				/* page attributes */
 };
 
 #define	VM_MDPAGE_INIT(pg)						\
 do {									\
 	TAILQ_INIT(&(pg)->mdpage.pv_list);				\
-	mutex_init(&(pg)->mdpage.pv_mutex, MUTEX_SPIN, IPL_NONE);	\
+	simple_lock_init(&(pg)->mdpage.pv_slock);			\
 } while (/*CONSTCOND*/0)
 #endif /*_LOCORE*/
 

@@ -1,33 +1,4 @@
-/*	$NetBSD: sync_vnops.c,v 1.26 2009/02/22 20:10:25 ad Exp $	*/
-
-/*-
- * Copyright (c) 2009 The NetBSD Foundation, Inc.
- * All rights reserved.
- *
- * This code is derived from software contributed to The NetBSD Foundation
- * by Andrew Doran.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
- * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
- * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
- * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
- */
+/*	$NetBSD: sync_vnops.c,v 1.16 2006/11/16 01:33:38 christos Exp $	*/
 
 /*
  * Copyright 1997 Marshall Kirk McKusick. All Rights Reserved.
@@ -61,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sync_vnops.c,v 1.26 2009/02/22 20:10:25 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sync_vnops.c,v 1.16 2006/11/16 01:33:38 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/proc.h>
@@ -92,18 +63,6 @@ const struct vnodeopv_desc sync_vnodeop_opv_desc =
 	{ &sync_vnodeop_p, sync_vnodeop_entries };
 
 /*
- * Return delay factor appropriate for the given file system.   For
- * WAPBL we use the sync vnode to burst out metadata updates: sync
- * those file systems more frequently.
- */
-static inline int
-sync_delay(struct mount *mp)
-{
-
-	return mp->mnt_wapbl != NULL ? metadelay : syncdelay;
-}
-
-/*
  * Create a new filesystem syncer vnode for the specified mount point.
  */
 int
@@ -111,8 +70,8 @@ vfs_allocate_syncvnode(mp)
 	struct mount *mp;
 {
 	struct vnode *vp;
-	static int start, incr, next;
-	int error, vdelay;
+	static long start, incr, next;
+	int error;
 
 	/* Allocate a new vnode */
 	if ((error = getnewvnode(VT_VFS, mp, sync_vnodeop_p, &vp)) != 0)
@@ -138,10 +97,7 @@ vfs_allocate_syncvnode(mp)
 		}
 		next = start;
 	}
-	mutex_enter(&vp->v_interlock);
-	vdelay = sync_delay(mp);
-	vn_syncer_add_to_worklist(vp, vdelay > 0 ? next % vdelay : 0);
-	mutex_exit(&vp->v_interlock);
+	vn_syncer_add_to_worklist(vp, syncdelay > 0 ? next % syncdelay : 0);
 	mp->mnt_syncer = vp;
 	return (0);
 }
@@ -157,10 +113,9 @@ vfs_deallocate_syncvnode(mp)
 
 	vp = mp->mnt_syncer;
 	mp->mnt_syncer = NULL;
-	mutex_enter(&vp->v_interlock);
 	vn_syncer_remove_from_worklist(vp);
 	vp->v_writecount = 0;
-	mutex_exit(&vp->v_interlock);
+	vrele(vp);
 	vgone(vp);
 }
 
@@ -177,9 +132,11 @@ sync_fsync(v)
 		int a_flags;
 		off_t offlo;
 		off_t offhi;
+		struct lwp *a_l;
 	} */ *ap = v;
 	struct vnode *syncvp = ap->a_vp;
 	struct mount *mp = syncvp->v_mount;
+	int asyncflag;
 
 	/*
 	 * We only need to do something if this is a lazy evaluation.
@@ -190,18 +147,27 @@ sync_fsync(v)
 	/*
 	 * Move ourselves to the back of the sync list.
 	 */
-	mutex_enter(&syncvp->v_interlock);
-	vn_syncer_add_to_worklist(syncvp, sync_delay(mp));
-	mutex_exit(&syncvp->v_interlock);
+	vn_syncer_add_to_worklist(syncvp, syncdelay);
 
 	/*
 	 * Walk the list of vnodes pushing all that are dirty and
 	 * not already on the sync list.
 	 */
-	if (vfs_busy(mp, NULL) == 0) {
-		VFS_SYNC(mp, MNT_LAZY, ap->a_cred);
-		vfs_unbusy(mp, false, NULL);
-	}
+	simple_lock(&mountlist_slock);
+	if (vfs_busy(mp, LK_NOWAIT, &mountlist_slock) == 0) {
+		if (vn_start_write(NULL, &mp, V_NOWAIT) != 0) {
+			vfs_unbusy(mp);
+			return (0);
+		}
+		asyncflag = mp->mnt_flag & MNT_ASYNC;
+		mp->mnt_flag &= ~MNT_ASYNC;
+		VFS_SYNC(mp, MNT_LAZY, ap->a_cred, ap->a_l);
+		if (asyncflag)
+			mp->mnt_flag |= MNT_ASYNC;
+		vn_finished_write(mp, 0);
+		vfs_unbusy(mp);
+	} else
+		simple_unlock(&mountlist_slock);
 	return (0);
 }
 
@@ -236,7 +202,14 @@ int
 sync_print(v)
 	void *v;
 {
+	struct vop_print_args /* {
+		struct vnode *a_vp;
+	} */ *ap = v;
+	struct vnode *vp = ap->a_vp;
 
-	printf("syncer vnode\n");
+	printf("syncer vnode");
+	if (vp->v_vnlock != NULL)
+		lockmgr_printinfo(vp->v_vnlock);
+	printf("\n");
 	return (0);
 }

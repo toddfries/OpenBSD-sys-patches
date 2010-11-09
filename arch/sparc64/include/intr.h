@@ -1,4 +1,4 @@
-/*	$NetBSD: intr.h,v 1.25 2008/04/28 20:23:37 martin Exp $ */
+/*	$NetBSD: intr.h,v 1.16 2006/10/06 08:44:59 jnemeth Exp $ */
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -32,56 +39,47 @@
 #ifndef _SPARC64_INTR_H_
 #define _SPARC64_INTR_H_
 
-#if defined(_KERNEL_OPT)
-#include "opt_multiprocessor.h"
-#endif
-
-#ifndef _LOCORE
 #include <machine/cpuset.h>
-#endif
-#include <machine/psl.h>
 
 /* XXX - arbitrary numbers; no interpretation is defined yet */
 #define	IPL_NONE	0		/* nothing */
+#define	IPL_SOFTINT	1		/* softint */
 #define	IPL_SOFTCLOCK	1		/* timeouts */
-#define	IPL_SOFTBIO	1		/* block I/O */
 #define	IPL_SOFTNET	1		/* protocol stack */
+#define	IPL_BIO		PIL_BIO		/* block I/O */
+#define	IPL_NET		PIL_NET		/* network */
 #define	IPL_SOFTSERIAL	4		/* serial */
+#define	IPL_TTY		PIL_TTY		/* terminal */
 #define	IPL_VM		PIL_VM		/* memory allocation */
+#define	IPL_AUDIO	PIL_AUD		/* audio */
+#define	IPL_CLOCK	PIL_CLOCK	/* clock */
+#define	IPL_STATCLOCK	PIL_STATCLOCK	/* statclock */
+#define	IPL_SERIAL	PIL_SER		/* serial */
 #define	IPL_SCHED	PIL_SCHED	/* scheduler */
+#define	IPL_LOCK	PIL_LOCK	/* locks */
 #define	IPL_HIGH	PIL_HIGH	/* everything */
 #define	IPL_HALT	5		/* cpu stop-self */
 #define	IPL_PAUSE	13		/* pause cpu */
+#define	IPL_LPT		PIL_LPT
+#define	IPL_IPI		PIL_HIGH
 #define	IPL_FDSOFT	PIL_FDSOFT	/* floppy */
 
-#ifndef _LOCORE
-void fpusave_lwp(struct lwp *, bool);
-#endif	/* _LOCORE */
+void save_and_clear_fpstate(struct lwp *);
 
 #if defined(MULTIPROCESSOR)
-#ifndef _LOCORE
 void	sparc64_ipi_init (void);
 int	sparc64_ipi_halt_thiscpu (void *);
 int	sparc64_ipi_pause_thiscpu (void *);
-void	sparc64_do_pause(void);
 void	sparc64_ipi_drop_fpstate (void *);
 void	sparc64_ipi_save_fpstate (void *);
-void	sparc64_ipi_nop (void *);
 void	mp_halt_cpus (void);
 void	mp_pause_cpus (void);
 void	mp_resume_cpus (void);
-int	mp_cpu_is_paused (sparc64_cpuset_t);
-void	mp_resume_cpu(int);
-#endif	/* _LOCORE */
-
-#define IPI_EVCNT_TLB_PTE	0
-#define IPI_EVCNT_TLB_CTX	1
-#define IPI_EVCNT_TLB_ALL	2
-#define IPI_EVCNT_FPU_SYNCH	3
-#define IPI_EVCNT_FPU_FLUSH	4
-#define IPI_EVCNT_NUM		5
-#define IPI_EVCNT_NAMES { "TLB pte IPI", "TLB ctx IPI", "TLB all IPI", \
-			  "FPU synch IPI", "FPU flush IPI" }
+int	mp_cpu_is_paused (cpuset_t);
 #endif
+
+void *softintr_establish (int level, void (*fun)(void *), void *arg);
+void  softintr_disestablish (void *cookie);
+void  softintr_schedule (void *cookie);
 
 #endif /* _SPARC64_INTR_H_ */

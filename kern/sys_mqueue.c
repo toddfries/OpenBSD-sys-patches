@@ -1,8 +1,7 @@
-/*	$NetBSD: sys_mqueue.c,v 1.13 2009/01/11 02:45:52 christos Exp $	*/
+/*	$NetBSD: sys_mqueue.c,v 1.4 2007/11/11 23:22:24 matt Exp $	*/
 
 /*
- * Copyright (c) 2007, 2008 Mindaugas Rasiukevicius <rmind at NetBSD org>
- * All rights reserved.
+ * Copyright (c) 2007, Mindaugas Rasiukevicius <rmind at NetBSD org>
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -13,39 +12,43 @@
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
 /*
  * Implementation of POSIX message queues.
  * Defined in the Base Definitions volume of IEEE Std 1003.1-2001.
- *
- * Locking
  * 
- * Global list of message queues (mqueue_head) and proc_t::p_mqueue_cnt
- * counter are protected by mqlist_mtx lock.  The very message queue and
- * its members are protected by mqueue::mq_mtx.
+ * Locking
+ *  Global list of message queues and proc::p_mqueue_cnt counter are protected
+ *  by mqlist_mtx lock.  Concrete message queue and its members are protected
+ *  by mqueue::mq_mtx.
  * 
  * Lock order:
  * 	mqlist_mtx
  * 	  -> mqueue::mq_mtx
+ * 
+ * TODO:
+ *  - Hashing or RB-tree for the global list.
+ *  - Support for select(), poll() and perhaps kqueue().
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sys_mqueue.c,v 1.13 2009/01/11 02:45:52 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sys_mqueue.c,v 1.4 2007/11/11 23:22:24 matt Exp $");
 
 #include <sys/param.h>
 #include <sys/types.h>
+
 #include <sys/condvar.h>
 #include <sys/errno.h>
 #include <sys/fcntl.h>
@@ -58,13 +61,10 @@ __KERNEL_RCSID(0, "$NetBSD: sys_mqueue.c,v 1.13 2009/01/11 02:45:52 christos Exp
 #include <sys/mqueue.h>
 #include <sys/mutex.h>
 #include <sys/pool.h>
-#include <sys/poll.h>
 #include <sys/proc.h>
 #include <sys/queue.h>
-#include <sys/select.h>
 #include <sys/signal.h>
 #include <sys/signalvar.h>
-#include <sys/stat.h>
 #include <sys/sysctl.h>
 #include <sys/syscallargs.h>
 #include <sys/systm.h>
@@ -79,17 +79,14 @@ static u_int			mq_max_msgsize = 16 * MQ_DEF_MSGSIZE;
 static u_int			mq_def_maxmsg = 32;
 
 static kmutex_t			mqlist_mtx;
-static pool_cache_t		mqmsg_cache;
+static struct pool		mqmsg_poll;
 static LIST_HEAD(, mqueue)	mqueue_head =
 	LIST_HEAD_INITIALIZER(mqueue_head);
 
-static int	mq_poll_fop(file_t *, int);
-static int	mq_close_fop(file_t *);
-
-#define	FNOVAL	-1
+static int	mq_close_fop(struct file *, struct lwp *);
 
 static const struct fileops mqops = {
-	fbadop_read, fbadop_write, fbadop_ioctl, fnullop_fcntl, mq_poll_fop,
+	fbadop_read, fbadop_write, fbadop_ioctl, fnullop_fcntl, fnullop_poll,
 	fbadop_stat, mq_close_fop, fnullop_kqfilter
 };
 
@@ -100,8 +97,8 @@ void
 mqueue_sysinit(void)
 {
 
-	mqmsg_cache = pool_cache_init(MQ_DEF_MSGSIZE, coherency_unit,
-	    0, 0, "mqmsgpl", NULL, IPL_NONE, NULL, NULL, NULL);
+	pool_init(&mqmsg_poll, MQ_DEF_MSGSIZE, 0, 0, 0,
+	    "mqmsg_poll", &pool_allocator_nointr, IPL_NONE);
 	mutex_init(&mqlist_mtx, MUTEX_DEFAULT, IPL_NONE);
 }
 
@@ -115,7 +112,7 @@ mqueue_freemsg(struct mq_msg *msg, const size_t size)
 	if (size > MQ_DEF_MSGSIZE)
 		kmem_free(msg, size);
 	else
-		pool_cache_put(mqmsg_cache, msg);
+		pool_put(&mqmsg_poll, msg);
 }
 
 /*
@@ -130,8 +127,6 @@ mqueue_destroy(struct mqueue *mq)
 		TAILQ_REMOVE(&mq->mq_head, msg, msg_queue);
 		mqueue_freemsg(msg, sizeof(struct mq_msg) + msg->msg_len);
 	}
-	seldestroy(&mq->mq_rsel);
-	seldestroy(&mq->mq_wsel);
 	cv_destroy(&mq->mq_send_cv);
 	cv_destroy(&mq->mq_recv_cv);
 	mutex_destroy(&mq->mq_mtx);
@@ -162,54 +157,46 @@ mqueue_lookup(char *name)
  * Check access against message queue.
  */
 static inline int
-mqueue_access(struct lwp *l, struct mqueue *mq, int access)
+mqueue_access(struct lwp *l, struct mqueue *mq, mode_t acc_mode)
 {
-	mode_t acc_mode = 0;
 
 	KASSERT(mutex_owned(&mq->mq_mtx));
-	KASSERT(access != FNOVAL);
-
-	/* Note the difference between VREAD/VWRITE and FREAD/FWRITE */
-	if (access & FREAD)
-		acc_mode |= VREAD;
-	if (access & FWRITE)
-		acc_mode |= VWRITE;
-
 	return vaccess(VNON, mq->mq_mode, mq->mq_euid, mq->mq_egid,
 	    acc_mode, l->l_cred);
 }
 
 /*
  * Get the mqueue from the descriptor.
- *  => locks the message queue, if found
+ *  => locks the message queue
  *  => increments the reference on file entry
  */
 static int
-mqueue_get(struct lwp *l, mqd_t mqd, int access, file_t **fpr)
+mqueue_get(struct lwp *l, mqd_t mqd, mode_t acc_mode, struct file **fpr)
 {
-	file_t *fp;
+	const struct proc *p = l->l_proc;
+	struct file *fp;
 	struct mqueue *mq;
 
 	/* Get the file and descriptor */
-	fp = fd_getfile((int)mqd);
+	fp = fd_getfile(p->p_fd, (int)mqd);
 	if (fp == NULL)
 		return EBADF;
 
 	/* Increment the reference of file entry, and lock the mqueue */
+	FILE_USE(fp);
 	mq = fp->f_data;
 	*fpr = fp;
 	mutex_enter(&mq->mq_mtx);
-	if (access == FNOVAL) {
-		KASSERT(mutex_owned(&mq->mq_mtx));
-		return 0;
-	}
 
-	/* Check the access mode and permission */
-	if ((fp->f_flag & access) != access || mqueue_access(l, mq, access)) {
+	/* Check the access mode and permission if needed */
+	if (acc_mode == VNOVAL)
+		return 0;
+	if ((acc_mode & fp->f_flag) == 0 || mqueue_access(l, mq, acc_mode)) {
 		mutex_exit(&mq->mq_mtx);
-		fd_putfile((int)mqd);
+		FILE_UNUSE(fp, l);
 		return EPERM;
 	}
+
 	return 0;
 }
 
@@ -217,51 +204,30 @@ mqueue_get(struct lwp *l, mqd_t mqd, int access, file_t **fpr)
  * Converter from struct timespec to the ticks.
  * Used by mq_timedreceive(), mq_timedsend().
  */
-int
-abstimeout2timo(struct timespec *ts, int *timo)
+static int
+abstimeout2timo(const void *uaddr, int *timo)
 {
+	struct timespec ts;
 	int error;
+
+	error = copyin(uaddr, &ts, sizeof(struct timespec));
+	if (error)
+		return error;
 
 	/*
 	 * According to POSIX, validation check is needed only in case of
 	 * blocking.  Thus, set the invalid value right now, and fail latter.
 	 */
-	error = itimespecfix(ts);
-	*timo = (error == 0) ? tstohz(ts) : -1;
+	error = itimespecfix(&ts);
+	*timo = (error == 0) ? tstohz(&ts) : -1;
 
 	return 0;
 }
 
 static int
-mq_poll_fop(file_t *fp, int events)
+mq_close_fop(struct file *fp, struct lwp *l)
 {
-	struct mqueue *mq = fp->f_data;
-	int revents = 0;
-
-	mutex_enter(&mq->mq_mtx);
-	if (events & (POLLIN | POLLRDNORM)) {
-		/* Ready for receiving, if there are messages in the queue */
-		if (mq->mq_attrib.mq_curmsgs)
-			revents |= (POLLIN | POLLRDNORM);
-		else
-			selrecord(curlwp, &mq->mq_rsel);
-	}
-	if (events & (POLLOUT | POLLWRNORM)) {
-		/* Ready for sending, if the message queue is not full */
-		if (mq->mq_attrib.mq_curmsgs < mq->mq_attrib.mq_maxmsg)
-			revents |= (POLLOUT | POLLWRNORM);
-		else
-			selrecord(curlwp, &mq->mq_wsel);
-	}
-	mutex_exit(&mq->mq_mtx);
-
-	return revents;
-}
-
-static int
-mq_close_fop(file_t *fp)
-{
-	struct proc *p = curproc;
+	struct proc *p = l->l_proc;
 	struct mqueue *mq = fp->f_data;
 	bool destroy;
 
@@ -300,24 +266,23 @@ mq_close_fop(file_t *fp)
  */
 
 int
-sys_mq_open(struct lwp *l, const struct sys_mq_open_args *uap,
-    register_t *retval)
+sys_mq_open(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct sys_mq_open_args /* {
 		syscallarg(const char *) name;
 		syscallarg(int) oflag;
 		syscallarg(mode_t) mode;
 		syscallarg(struct mq_attr) attr;
-	} */
+	} */ *uap = v;
 	struct proc *p = l->l_proc;
 	struct mqueue *mq, *mq_new = NULL;
-	file_t *fp;
+	struct file *fp;
 	char *name;
 	int mqd, error, oflag;
 
 	/* Check access mode flags */
 	oflag = SCARG(uap, oflag);
-	if ((oflag & O_ACCMODE) == 0)
+	if ((oflag & (O_RDWR | O_RDONLY | O_WRONLY)) == 0)
 		return EINVAL;
 
 	/* Get the name from the user-space */
@@ -329,7 +294,6 @@ sys_mq_open(struct lwp *l, const struct sys_mq_open_args *uap,
 	}
 
 	if (oflag & O_CREAT) {
-		struct cwdinfo *cwdi = p->p_cwdi;
 		struct mq_attr attr;
 
 		/* Check the limit */
@@ -369,22 +333,19 @@ sys_mq_open(struct lwp *l, const struct sys_mq_open_args *uap,
 		cv_init(&mq_new->mq_send_cv, "mqsendcv");
 		cv_init(&mq_new->mq_recv_cv, "mqrecvcv");
 		TAILQ_INIT(&mq_new->mq_head);
-		selinit(&mq_new->mq_rsel);
-		selinit(&mq_new->mq_wsel);
 
 		strlcpy(mq_new->mq_name, name, MQ_NAMELEN);
 		memcpy(&mq_new->mq_attrib, &attr, sizeof(struct mq_attr));
 		mq_new->mq_attrib.mq_flags = oflag;
 
 		/* Store mode and effective UID with GID */
-		mq_new->mq_mode = ((SCARG(uap, mode) &
-		    ~cwdi->cwdi_cmask) & ALLPERMS) & ~S_ISTXT;
+		mq_new->mq_mode = SCARG(uap, mode);
 		mq_new->mq_euid = kauth_cred_geteuid(l->l_cred);
 		mq_new->mq_egid = kauth_cred_getegid(l->l_cred);
 	}
 
 	/* Allocate file structure and descriptor */
-	error = fd_allocfile(&fp, &mqd);
+	error = falloc(l, &fp, &mqd);
 	if (error) {
 		if (mq_new)
 			mqueue_destroy(mq_new);
@@ -392,7 +353,8 @@ sys_mq_open(struct lwp *l, const struct sys_mq_open_args *uap,
 		return error;
 	}
 	fp->f_type = DTYPE_MQUEUE;
-	fp->f_flag = FFLAGS(oflag) & (FREAD | FWRITE);
+	fp->f_flag = (oflag & O_RDWR) ? (VREAD | VWRITE) :
+	    ((oflag & O_RDONLY) ? VREAD : VWRITE);
 	fp->f_ops = &mqops;
 
 	/* Look up for mqueue with such name */
@@ -400,7 +362,6 @@ sys_mq_open(struct lwp *l, const struct sys_mq_open_args *uap,
 	mq = mqueue_lookup(name);
 	if (mq) {
 		KASSERT(mutex_owned(&mq->mq_mtx));
-
 		/* Check if mqueue is not marked as unlinking */
 		if (mq->mq_attrib.mq_flags & MQ_UNLINK) {
 			error = EACCES;
@@ -421,7 +382,9 @@ sys_mq_open(struct lwp *l, const struct sys_mq_open_args *uap,
 		if ((oflag & O_CREAT) == 0) {
 			mutex_exit(&mqlist_mtx);
 			KASSERT(mq_new == NULL);
-			fd_abort(p, fp, mqd);
+			FILE_UNUSE(fp, l);
+			ffree(fp);
+			fdremove(p->p_fd, mqd);
 			kmem_free(name, MQ_NAMELEN);
 			return ENOENT;
 		}
@@ -443,45 +406,45 @@ sys_mq_open(struct lwp *l, const struct sys_mq_open_args *uap,
 	p->p_mqueue_cnt++;
 	mq->mq_refcnt++;
 	fp->f_data = mq;
+	FILE_SET_MATURE(fp);
 exit:
 	mutex_exit(&mq->mq_mtx);
 	mutex_exit(&mqlist_mtx);
+	FILE_UNUSE(fp, l);
 
 	if (mq_new)
 		mqueue_destroy(mq_new);
 	if (error) {
-		fd_abort(p, fp, mqd);
-	} else {
-		fd_affix(p, fp, mqd);
+		ffree(fp);
+		fdremove(p->p_fd, mqd);
+	} else
 		*retval = mqd;
-	}
 	kmem_free(name, MQ_NAMELEN);
 
 	return error;
 }
 
 int
-sys_mq_close(struct lwp *l, const struct sys_mq_close_args *uap,
-    register_t *retval)
+sys_mq_close(struct lwp *l, void *v, register_t *retval)
 {
 
-	return sys_close(l, (const void *)uap, retval);
+	return sys_close(l, v, retval);
 }
 
 /*
  * Primary mq_receive1() function.
  */
-int
+static int
 mq_receive1(struct lwp *l, mqd_t mqdes, void *msg_ptr, size_t msg_len,
     unsigned *msg_prio, int t, ssize_t *mlen)
 {
-	file_t *fp = NULL;
+	struct file *fp = NULL;
 	struct mqueue *mq;
 	struct mq_msg *msg = NULL;
 	int error;
 
 	/* Get the message queue */
-	error = mqueue_get(l, mqdes, FREAD, &fp);
+	error = mqueue_get(l, mqdes, VREAD, &fp);
 	if (error)
 		return error;
 	mq = fp->f_data;
@@ -523,12 +486,9 @@ mq_receive1(struct lwp *l, mqd_t mqdes, void *msg_ptr, size_t msg_len,
 	/* Decrement the counter and signal waiter, if any */
 	mq->mq_attrib.mq_curmsgs--;
 	cv_signal(&mq->mq_recv_cv);
-
-	/* Ready for sending now */
-	selnotify(&mq->mq_wsel, POLLOUT | POLLWRNORM, 0);
 error:
 	mutex_exit(&mq->mq_mtx);
-	fd_putfile((int)mqdes);
+	FILE_UNUSE(fp, l);
 	if (error)
 		return error;
 
@@ -547,15 +507,14 @@ error:
 }
 
 int
-sys_mq_receive(struct lwp *l, const struct sys_mq_receive_args *uap,
-    register_t *retval)
+sys_mq_receive(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct sys_mq_receive_args /* {
 		syscallarg(mqd_t) mqdes;
 		syscallarg(char *) msg_ptr;
 		syscallarg(size_t) msg_len;
 		syscallarg(unsigned *) msg_prio;
-	} */
+	} */ *uap = v;
 	int error;
 	ssize_t mlen;
 
@@ -568,27 +527,21 @@ sys_mq_receive(struct lwp *l, const struct sys_mq_receive_args *uap,
 }
 
 int
-sys___mq_timedreceive50(struct lwp *l,
-    const struct sys___mq_timedreceive50_args *uap, register_t *retval)
+sys_mq_timedreceive(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct sys_mq_timedreceive_args /* {
 		syscallarg(mqd_t) mqdes;
 		syscallarg(char *) msg_ptr;
 		syscallarg(size_t) msg_len;
 		syscallarg(unsigned *) msg_prio;
 		syscallarg(const struct timespec *) abs_timeout;
-	} */
+	} */ *uap = v;
 	int error, t;
 	ssize_t mlen;
-	struct timespec ts;
 
 	/* Get and convert time value */
 	if (SCARG(uap, abs_timeout)) {
-		error = copyin(SCARG(uap, abs_timeout), &ts, sizeof(ts));
-		if (error)
-			return error;
-
-		error = abstimeout2timo(&ts, &t);
+		error = abstimeout2timo(SCARG(uap, abs_timeout), &t);
 		if (error)
 			return error;
 	} else
@@ -605,11 +558,11 @@ sys___mq_timedreceive50(struct lwp *l,
 /*
  * Primary mq_send1() function.
  */
-int
+static int
 mq_send1(struct lwp *l, mqd_t mqdes, const char *msg_ptr, size_t msg_len,
     unsigned msg_prio, int t)
 {
-	file_t *fp = NULL;
+	struct file *fp = NULL;
 	struct mqueue *mq;
 	struct mq_msg *msg, *pos_msg;
 	struct proc *notify = NULL;
@@ -629,7 +582,7 @@ mq_send1(struct lwp *l, mqd_t mqdes, const char *msg_ptr, size_t msg_len,
 	if (size > MQ_DEF_MSGSIZE)
 		msg = kmem_alloc(size, KM_SLEEP);
 	else
-		msg = pool_cache_get(mqmsg_cache, PR_WAITOK);
+		msg = pool_get(&mqmsg_poll, PR_WAITOK);
 
 	/* Get the data from user-space */
 	error = copyin(msg_ptr, msg->msg_ptr, msg_len);
@@ -641,7 +594,7 @@ mq_send1(struct lwp *l, mqd_t mqdes, const char *msg_ptr, size_t msg_len,
 	msg->msg_prio = msg_prio;
 
 	/* Get the mqueue */
-	error = mqueue_get(l, mqdes, FWRITE, &fp);
+	error = mqueue_get(l, mqdes, VWRITE, &fp);
 	if (error) {
 		mqueue_freemsg(msg, size);
 		return error;
@@ -698,61 +651,51 @@ mq_send1(struct lwp *l, mqd_t mqdes, const char *msg_ptr, size_t msg_len,
 	/* Increment the counter and signal waiter, if any */
 	mq->mq_attrib.mq_curmsgs++;
 	cv_signal(&mq->mq_send_cv);
-
-	/* Ready for receiving now */
-	selnotify(&mq->mq_rsel, POLLIN | POLLRDNORM, 0);
 error:
 	mutex_exit(&mq->mq_mtx);
-	fd_putfile((int)mqdes);
+	FILE_UNUSE(fp, l);
 
 	if (error) {
 		mqueue_freemsg(msg, size);
 	} else if (notify) {
 		/* Send the notify, if needed */
-		mutex_enter(proc_lock);
+		mutex_enter(&proclist_mutex);
 		kpsignal(notify, &ksi, NULL);
-		mutex_exit(proc_lock);
+		mutex_exit(&proclist_mutex);
 	}
 
 	return error;
 }
 
 int
-sys_mq_send(struct lwp *l, const struct sys_mq_send_args *uap,
-    register_t *retval)
+sys_mq_send(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct sys_mq_send_args /* {
 		syscallarg(mqd_t) mqdes;
 		syscallarg(const char *) msg_ptr;
 		syscallarg(size_t) msg_len;
 		syscallarg(unsigned) msg_prio;
-	} */
+	} */ *uap = v;
 
 	return mq_send1(l, SCARG(uap, mqdes), SCARG(uap, msg_ptr),
 	    SCARG(uap, msg_len), SCARG(uap, msg_prio), 0);
 }
 
 int
-sys___mq_timedsend50(struct lwp *l, const struct sys___mq_timedsend50_args *uap,
-    register_t *retval)
+sys_mq_timedsend(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct sys_mq_timedsend_args /* {
 		syscallarg(mqd_t) mqdes;
 		syscallarg(const char *) msg_ptr;
 		syscallarg(size_t) msg_len;
 		syscallarg(unsigned) msg_prio;
 		syscallarg(const struct timespec *) abs_timeout;
-	} */
+	} */ *uap = v;
 	int t;
-	struct timespec ts;
-	int error;
 
 	/* Get and convert time value */
 	if (SCARG(uap, abs_timeout)) {
-		error = copyin(SCARG(uap, abs_timeout), &ts, sizeof(ts));
-		if (error)
-			return error;
-		error = abstimeout2timo(&ts, &t);
+		int error = abstimeout2timo(SCARG(uap, abs_timeout), &t);
 		if (error)
 			return error;
 	} else
@@ -763,14 +706,13 @@ sys___mq_timedsend50(struct lwp *l, const struct sys___mq_timedsend50_args *uap,
 }
 
 int
-sys_mq_notify(struct lwp *l, const struct sys_mq_notify_args *uap,
-    register_t *retval)
+sys_mq_notify(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct sys_mq_notify_args /* {
 		syscallarg(mqd_t) mqdes;
 		syscallarg(const struct sigevent *) notification;
-	} */
-	file_t *fp = NULL;
+	} */ *uap = v;
+	struct file *fp = NULL;
 	struct mqueue *mq;
 	struct sigevent sig;
 	int error;
@@ -783,7 +725,7 @@ sys_mq_notify(struct lwp *l, const struct sys_mq_notify_args *uap,
 			return error;
 	}
 
-	error = mqueue_get(l, SCARG(uap, mqdes), FNOVAL, &fp);
+	error = mqueue_get(l, SCARG(uap, mqdes), VNOVAL, &fp);
 	if (error)
 		return error;
 	mq = fp->f_data;
@@ -803,46 +745,44 @@ sys_mq_notify(struct lwp *l, const struct sys_mq_notify_args *uap,
 		mq->mq_notify_proc = NULL;
 	}
 	mutex_exit(&mq->mq_mtx);
-	fd_putfile((int)SCARG(uap, mqdes));
+	FILE_UNUSE(fp, l);
 
 	return error;
 }
 
 int
-sys_mq_getattr(struct lwp *l, const struct sys_mq_getattr_args *uap,
-    register_t *retval)
+sys_mq_getattr(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct sys_mq_getattr_args /* {
 		syscallarg(mqd_t) mqdes;
 		syscallarg(struct mq_attr *) mqstat;
-	} */
-	file_t *fp = NULL;
+	} */ *uap = v;
+	struct file *fp = NULL;
 	struct mqueue *mq;
 	struct mq_attr attr;
 	int error;
 
 	/* Get the message queue */
-	error = mqueue_get(l, SCARG(uap, mqdes), FNOVAL, &fp);
+	error = mqueue_get(l, SCARG(uap, mqdes), VNOVAL, &fp);
 	if (error)
 		return error;
 	mq = fp->f_data;
 	memcpy(&attr, &mq->mq_attrib, sizeof(struct mq_attr));
 	mutex_exit(&mq->mq_mtx);
-	fd_putfile((int)SCARG(uap, mqdes));
+	FILE_UNUSE(fp, l);
 
 	return copyout(&attr, SCARG(uap, mqstat), sizeof(struct mq_attr));
 }
 
 int
-sys_mq_setattr(struct lwp *l, const struct sys_mq_setattr_args *uap,
-    register_t *retval)
+sys_mq_setattr(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct sys_mq_setattr_args /* {
 		syscallarg(mqd_t) mqdes;
 		syscallarg(const struct mq_attr *) mqstat;
 		syscallarg(struct mq_attr *) omqstat;
-	} */
-	file_t *fp = NULL;
+	} */ *uap = v;
+	struct file *fp = NULL;
 	struct mqueue *mq;
 	struct mq_attr attr;
 	int error, nonblock;
@@ -853,7 +793,7 @@ sys_mq_setattr(struct lwp *l, const struct sys_mq_setattr_args *uap,
 	nonblock = (attr.mq_flags & O_NONBLOCK);
 
 	/* Get the message queue */
-	error = mqueue_get(l, SCARG(uap, mqdes), FNOVAL, &fp);
+	error = mqueue_get(l, SCARG(uap, mqdes), VNOVAL, &fp);
 	if (error)
 		return error;
 	mq = fp->f_data;
@@ -869,7 +809,7 @@ sys_mq_setattr(struct lwp *l, const struct sys_mq_setattr_args *uap,
 		mq->mq_attrib.mq_flags &= ~O_NONBLOCK;
 
 	mutex_exit(&mq->mq_mtx);
-	fd_putfile((int)SCARG(uap, mqdes));
+	FILE_UNUSE(fp, l);
 
 	/*
 	 * Copy the data to the user-space.
@@ -884,12 +824,11 @@ sys_mq_setattr(struct lwp *l, const struct sys_mq_setattr_args *uap,
 }
 
 int
-sys_mq_unlink(struct lwp *l, const struct sys_mq_unlink_args *uap,
-    register_t *retval)
+sys_mq_unlink(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct sys_mq_unlink_args /* {
 		syscallarg(const char *) name;
-	} */
+	} */ *uap = v;
 	struct mqueue *mq;
 	char *name;
 	int error, refcnt = 0;
@@ -911,7 +850,7 @@ sys_mq_unlink(struct lwp *l, const struct sys_mq_unlink_args *uap,
 	}
 
 	/* Check the permissions */
-	if (mqueue_access(l, mq, FWRITE)) {
+	if (mqueue_access(l, mq, VWRITE)) {
 		mutex_exit(&mq->mq_mtx);
 		error = EACCES;
 		goto error;
@@ -923,9 +862,6 @@ sys_mq_unlink(struct lwp *l, const struct sys_mq_unlink_args *uap,
 	/* Wake up all waiters, if there are such */
 	cv_broadcast(&mq->mq_send_cv);
 	cv_broadcast(&mq->mq_recv_cv);
-
-	selnotify(&mq->mq_rsel, POLLHUP, 0);
-	selnotify(&mq->mq_wsel, POLLHUP, 0);
 
 	refcnt = mq->mq_refcnt;
 	if (refcnt == 0)

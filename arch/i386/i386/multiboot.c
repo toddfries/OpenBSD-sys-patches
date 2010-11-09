@@ -1,4 +1,4 @@
-/*	$NetBSD: multiboot.c,v 1.19 2009/02/22 18:05:42 ahoka Exp $	*/
+/*	$NetBSD: multiboot.c,v 1.9 2006/11/06 13:35:35 jmmv Exp $	*/
 
 /*-
  * Copyright (c) 2005, 2006 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,9 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: multiboot.c,v 1.19 2009/02/22 18:05:42 ahoka Exp $");
-
-#include "opt_multiboot.h"
+__KERNEL_RCSID(0, "$NetBSD: multiboot.c,v 1.9 2006/11/06 13:35:35 jmmv Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -57,9 +62,9 @@ __KERNEL_RCSID(0, "$NetBSD: multiboot.c,v 1.19 2009/02/22 18:05:42 ahoka Exp $")
  */
 
 struct multiboot_symbols {
-	void *		s_symstart;
+	caddr_t		s_symstart;
 	size_t		s_symsize;
-	void *		s_strstart;
+	caddr_t		s_strstart;
 	size_t		s_strsize;
 };
 
@@ -91,7 +96,7 @@ extern int *		esym;
 static char			Multiboot_Cmdline[255];
 static uint8_t			Multiboot_Drives[255];
 static struct multiboot_info	Multiboot_Info;
-static bool			Multiboot_Loader = false;
+static boolean_t		Multiboot_Loader = FALSE;
 static char			Multiboot_Loader_Name[255];
 static uint8_t			Multiboot_Mmap[1024];
 static struct multiboot_symbols	Multiboot_Symbols;
@@ -135,7 +140,7 @@ multiboot_pre_reloc(struct multiboot_info *mi)
 	struct multiboot_info *midest =
 	    RELOC(struct multiboot_info *, &Multiboot_Info);
 
-	*RELOC(bool *, &Multiboot_Loader) = true;
+	*RELOC(boolean_t *, &Multiboot_Loader) = TRUE;
 	memcpy(midest, mi, sizeof(Multiboot_Info));
 
 	if (mi->mi_flags & MULTIBOOT_INFO_HAS_CMDLINE) {
@@ -178,7 +183,7 @@ void
 multiboot_post_reloc(void)
 {
 	struct multiboot_info *mi;
-
+	
 	if (! Multiboot_Loader)
 		return;
 
@@ -368,12 +373,11 @@ copy_syms(struct multiboot_info *mi)
 			memcpy((void *)symstart, (void *)symaddr, symsize);
 		}
 	}
-	*RELOC(int *, &esym) =
-	    (int)(symstart + symsize + strsize + KERNBASE);
+	*RELOC(int *, &esym) = (int)(strstart + strsize + KERNBASE);
 
-	ms->s_symstart = (void *)(symstart + KERNBASE);
+	ms->s_symstart = (caddr_t)(symstart + KERNBASE);
 	ms->s_symsize  = symsize;
-	ms->s_strstart = (void *)(strstart + KERNBASE);
+	ms->s_strstart = (caddr_t)(strstart + KERNBASE);
 	ms->s_strsize  = strsize;
 #undef RELOC
 }
@@ -433,10 +437,10 @@ setup_biosgeom(struct multiboot_info *mi)
 static void
 setup_bootdisk(struct multiboot_info *mi)
 {
-	bool found;
+	boolean_t found;
 	struct btinfo_rootdevice bi;
 
-	found = false;
+	found = FALSE;
 
 	if (mi->mi_flags & MULTIBOOT_INFO_HAS_CMDLINE)
 		found = optstr_get(mi->mi_cmdline, "root", bi.devname,
@@ -466,7 +470,7 @@ setup_bootdisk(struct multiboot_info *mi)
 			bi.devname[3] = 'a';
 		bi.devname[4] = '\0';
 
-		found = true;
+		found = TRUE;
 	}
 
 	if (found) {
@@ -531,17 +535,15 @@ static void
 setup_console(struct multiboot_info *mi)
 {
 	struct btinfo_console bi;
-	bool found;
+	boolean_t found;
 
-	found = false;
+	found = FALSE;
 
 	if (mi->mi_flags & MULTIBOOT_INFO_HAS_CMDLINE)
 		found = optstr_get(mi->mi_cmdline, "console", bi.devname,
 		    sizeof(bi.devname));
 
 	if (found) {
-		bool valid;
-
 		if (strncmp(bi.devname, "com", sizeof(bi.devname)) == 0) {
 			char tmp[10];
 
@@ -561,16 +563,10 @@ setup_console(struct multiboot_info *mi)
 					bi.addr = strtoul(tmp, NULL, 10);
 			} else
 				bi.addr = 0; /* Use default address. */
+		}
 
-			valid = true;
-		} else if (strncmp(bi.devname, "pc", sizeof(bi.devname)) == 0)
-			valid = true;
-		else
-			valid = false;
-
-		if (valid)
-			bootinfo_add((struct btinfo_common *)&bi,
-			    BTINFO_CONSOLE, sizeof(struct btinfo_console));
+		bootinfo_add((struct btinfo_common *)&bi, BTINFO_CONSOLE,
+		    sizeof(struct btinfo_console));
 	}
 }
 
@@ -684,8 +680,8 @@ setup_memory(struct multiboot_info *mi)
  * Sets up the initial kernel symbol table.  Returns true if this was
  * passed in by Multiboot; false otherwise.
  */
-bool
-multiboot_ksyms_addsyms_elf(void)
+boolean_t
+multiboot_ksyms_init(void)
 {
 	struct multiboot_info *mi = &Multiboot_Info;
 	struct multiboot_symbols *ms = &Multiboot_Symbols;
@@ -704,7 +700,7 @@ multiboot_ksyms_addsyms_elf(void)
 		ehdr.e_version = 1;
 		ehdr.e_ehsize = sizeof(ehdr);
 
-		ksyms_addsyms_explicit((void *)&ehdr,
+		ksyms_init_explicit((caddr_t)&ehdr,
 		    ms->s_symstart, ms->s_symsize,
 		    ms->s_strstart, ms->s_strsize);
 	}

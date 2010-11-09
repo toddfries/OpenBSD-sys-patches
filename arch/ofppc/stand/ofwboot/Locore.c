@@ -1,4 +1,4 @@
-/*	$NetBSD: Locore.c,v 1.22 2009/01/12 07:49:57 tsutsui Exp $	*/
+/*	$NetBSD: Locore.c,v 1.14 2006/01/27 04:11:41 uwe Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996 Wolfgang Solfrank.
@@ -32,7 +32,7 @@
  */
 
 #include "openfirm.h"
-#include <sys/param.h>
+
 #include <lib/libsa/stand.h>
 
 #include <machine/cpu.h>
@@ -40,15 +40,32 @@
 static int (*openfirmware_entry)(void *);
 static int openfirmware(void *);
 
-void startup(void *, int, int (*)(void *), char *, int)
-	__attribute__((__used__));
+static void startup(void *, int, int (*)(void *), char *, int)
+		__attribute__((__used__));
 static void setup(void);
 
-/* this pad gets the rodata laignment right, don't EVER fiddle it */
-char *pad __attribute__((__aligned__ (8))) = "pad";
-int stack[8192/4 + 4] __attribute__((__aligned__ (4), __used__));
-char *heapspace __attribute__((__aligned__ (4)));
-char altheap[0x20000] __attribute__((__aligned__ (4)));
+static int stack[8192/4 + 4] __attribute__((__used__));
+
+__asm(
+"	.text					\n"
+"	.globl	_start				\n"
+"_start:					\n"
+"	li	8,0				\n"
+"	li	9,0x100				\n"
+"	mtctr	9				\n"
+"1:						\n"
+"	dcbf	0,8				\n"
+"	icbi	0,8				\n"
+"	addi	8,8,0x20			\n"
+"	bdnz	1b				\n"
+"	sync					\n"
+"	isync					\n"
+
+"	lis	1,stack@ha			\n"
+"	addi	1,1,stack@l			\n"
+"	addi	1,1,8192			\n"
+"	b	startup				\n"
+);
 
 static int
 openfirmware(void *arg)
@@ -62,10 +79,12 @@ openfirmware(void *arg)
 	return r;
 }
 
-void
+static void
 startup(void *vpd, int res, int (*openfirm)(void *), char *arg, int argl)
 {
+	extern char _end[], _edata[];
 
+	memset(_edata, 0, (_end - _edata));
 	openfirmware_entry = openfirm;
 	setup();
 	main();
@@ -105,7 +124,7 @@ OF_boot(char *bootspec)
 
 	args.bootspec = bootspec;
 	openfirmware(&args);
-	for (;;);			/* just in case */
+	for (;;);			/* just is case */
 }
 
 int
@@ -121,8 +140,8 @@ OF_finddevice(char *name)
 		"finddevice",
 		1,
 		1,
-	};
-
+	};	
+	
 	args.device = name;
 	if (openfirmware(&args) == -1)
 		return -1;
@@ -143,7 +162,7 @@ OF_instance_to_package(int ihandle)
 		1,
 		1,
 	};
-
+	
 	args.ihandle = ihandle;
 	if (openfirmware(&args) == -1)
 		return -1;
@@ -167,7 +186,7 @@ OF_getprop(int handle, char *prop, void *buf, int buflen)
 		4,
 		1,
 	};
-
+	
 	args.phandle = handle;
 	args.prop = prop;
 	args.buf = buf;
@@ -195,7 +214,7 @@ OF_setprop(int handle, char *prop, void *buf, int len)
 		4,
 		1,
 	};
-
+	
 	args.phandle = handle;
 	args.prop = prop;
 	args.buf = buf;
@@ -220,7 +239,7 @@ OF_open(char *dname)
 		1,
 		1,
 	};
-
+	
 #ifdef OFW_DEBUG
 	printf("OF_open(%s) -> ", dname);
 #endif
@@ -251,7 +270,7 @@ OF_close(int handle)
 		1,
 		0,
 	};
-
+	
 #ifdef OFW_DEBUG
 	printf("OF_close(%d)\n", handle);
 #endif
@@ -349,7 +368,7 @@ OF_seek(int handle, u_quad_t pos)
 		3,
 		1,
 	};
-
+	
 #ifdef OFW_DEBUG
 	printf("OF_seek(%d, %x, %x) -> ", handle, (int)(pos >> 32), (int)pos);
 #endif
@@ -366,35 +385,6 @@ OF_seek(int handle, u_quad_t pos)
 	printf("%d\n", args.status);
 #endif
 	return args.status;
-}
-
-void *
-OF_alloc_mem(u_int size)
-{
-	static struct {
-		char *name;
-		int nargs;
-		int nreturns;
-		u_int size;
-		void *baseaddr;
-	} args = {
-		"alloc-mem",
-		1,
-		1,
-	};
-#ifdef OFW_DEBUG
-	printf("alloc-mem %x -> ", size);
-#endif
-	if (openfirmware(&args) == -1) {
-#ifdef OFW_DEBUG
-		printf("lose\n");
-#endif
-		return (void *)-1;
-	}
-#ifdef OFW_DEBUG
-	printf("%p\n", args.baseaddr);
-#endif
-	return args.baseaddr;
 }
 
 void *
@@ -446,7 +436,7 @@ OF_release(void *virt, u_int size)
 		2,
 		0,
 	};
-
+	
 #ifdef OFW_DEBUG
 	printf("OF_release(%p, %x)\n", virt, size);
 #endif
@@ -468,7 +458,7 @@ OF_milliseconds(void)
 		0,
 		1,
 	};
-
+	
 	openfirmware(&args);
 	return args.ms;
 }
@@ -506,7 +496,7 @@ OF_chain(void *virt, u_int size, boot_entry_t entry, void *arg, u_int len)
 	/*
 	 * This is a REALLY dirty hack till the firmware gets this going
 	 */
-#if 0
+#if 1
 	OF_release(virt, size);
 #endif
 	entry(0, 0, openfirmware_entry, arg, len);
@@ -520,7 +510,7 @@ static void
 setup(void)
 {
 	int chosen;
-
+	
 	if ((chosen = OF_finddevice("/chosen")) == -1)
 		OF_exit();
 	if (OF_getprop(chosen, "stdin", &stdin, sizeof(stdin)) !=
@@ -528,14 +518,6 @@ setup(void)
 	    OF_getprop(chosen, "stdout", &stdout, sizeof(stdout)) !=
 	    sizeof(stdout))
 		OF_exit();
-
-	//printf("Allocating 0x20000 bytes of ram for boot\n");
-	heapspace = OF_claim(0, 0x20000, NBPG);
-	if (heapspace == (char *)-1) {
-		printf("WARNING: Failed to alloc ram, using bss\n");
-		setheap(&altheap, &altheap[0x20000]);
-	} else
-		setheap(heapspace, heapspace+0x20000);
 }
 
 void
@@ -559,152 +541,3 @@ getchar(void)
 			return -1;
 	return ch;
 }
-
-#ifdef OFWDUMP
-
-static int
-OF_peer(int phandle)
-{
-	static struct {
-		const char *name;
-		int nargs;
-		int nreturns;
-		int phandle;
-		int sibling;
-	} args = {
-		"peer",
-			1,
-			1,
-	};
-	
-	args.phandle = phandle;
-	if (openfirmware(&args) == -1)
-		return 0;
-	return args.sibling;
-}
-
-static int
-OF_child(int phandle)
-{
-	static struct {
-		const char *name;
-		int nargs;
-		int nreturns;
-		int phandle;
-		int child;
-	} args = {
-		"child",
-			1,
-			1,
-	};
-
-	args.phandle = phandle;
-	if (openfirmware(&args) == -1)
-		return 0;
-	return args.child;
-}
-
-int
-OF_nextprop(int handle, const char *prop, void *nextprop)
-{
-	static struct {
-		const char *name;
-		int nargs;
-		int nreturns;
-		int phandle;
-		const char *prop;
-		char *buf;
-		int flag;
-	} args = {
-		"nextprop",
-			3,
-			1,
-	};
-
-	args.phandle = handle;
-	args.prop = prop;
-	args.buf = nextprop;
-	if (openfirmware(&args) == -1)
-		return -1;
-	return args.flag;
-}
-
-static int
-OF_package_to_path(int phandle, char *buf, int buflen)
-{
-	static struct {
-		const char *name;
-		int nargs;
-		int nreturns;
-		int phandle;
-		char *buf;
-		int buflen;
-		int length;
-	} args = {
-		"package-to-path",
-			3,
-			1,
-	};
-
-	if (buflen > 4096)
-		return -1;
-	args.phandle = phandle;
-	args.buf = buf;
-	args.buflen = buflen;
-	if (openfirmware(&args) < 0)
-		return -1;
-	if (args.length > buflen)
-		args.length = buflen;
-	return args.length;
-}
-
-void
-dump_ofwtree(int node)
-{
-	int peer, child, namelen, dlen, i;
-	char namebuf[33], newnamebuf[33];
-	char path[256], data[256];
-
-	for (peer = node; peer; peer = OF_peer(peer)) {
-		printf("\nnode: 0x%x ", peer);
-		if (OF_package_to_path(peer, path, 512) >= 0)
-			printf("path=%s", path);
-		printf("\n");
-		namebuf[0] = '\0';
-		namelen = OF_nextprop(peer, namebuf, &newnamebuf);
-		while (namelen >= 0) {
-			/*printf("namelen == %d namebuf=%s new=%s\n", namelen,
-			  namebuf, newnamebuf);*/
-			//newnamebuf[namelen] = '\0';
-			strcpy(namebuf, newnamebuf);
-			printf("  %s :", newnamebuf);
-			dlen = OF_getprop(peer, newnamebuf, data, 256);
-			if (dlen > 0) {
-				if (data[0] < 0177)
-					printf(" %s\n", data);
-				else
-					printf("\n");
-				printf("    ");
-				for (i=0; i < dlen && i < 256; i++) {
-					if (data[i] < 0x10)
-						printf("0");
-					printf("%x", data[i]);
-					if ((i+1)%4 == 0)
-						printf(" ");
-					if ((i+1)%32 == 0)
-						printf("\n    ");
-				}
-			}
-			printf("\n");
-			namelen = OF_nextprop(peer, namebuf, &newnamebuf);
-			if (newnamebuf[0] == '\0' ||
-			    strcmp(namebuf, newnamebuf) == 0)
-				break;
-		}
-		child = OF_child(peer);
-		if (child > 0)
-			dump_ofwtree(child);
-	}
-}
-
-#endif /* OFWDUMP */

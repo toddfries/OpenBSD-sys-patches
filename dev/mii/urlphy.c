@@ -1,4 +1,4 @@
-/*	$NetBSD: urlphy.c,v 1.25 2009/01/31 05:44:05 hira Exp $	*/
+/*	$NetBSD: urlphy.c,v 1.18 2006/11/16 21:24:07 christos Exp $	*/
 /*
  * Copyright (c) 2001, 2002
  *     Shingo WATANABE <nabe@nabechan.org>.  All rights reserved.
@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: urlphy.c,v 1.25 2009/01/31 05:44:05 hira Exp $");
+__KERNEL_RCSID(0, "$NetBSD: urlphy.c,v 1.18 2006/11/16 21:24:07 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -59,10 +59,10 @@ int urlphydebug = URLPHY_DEBUG;
 #define DPRINTFN(n,x)
 #endif
 
-static int	urlphy_match(device_t, cfdata_t, void *);
-static void	urlphy_attach(device_t, device_t, void *);
+static int	urlphy_match(struct device *, struct cfdata *, void *);
+static void	urlphy_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(urlphy, sizeof(struct mii_softc),
+CFATTACH_DECL(urlphy, sizeof(struct mii_softc),
     urlphy_match, urlphy_attach, mii_phy_detach, mii_phy_activate);
 
 static int	urlphy_service(struct mii_softc *, struct mii_data *, int);
@@ -73,12 +73,12 @@ static const struct mii_phy_funcs urlphy_funcs = {
 };
 
 static int
-urlphy_match(device_t parent, cfdata_t match, void *aux)
+urlphy_match(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct mii_attach_args *ma = aux;
 
 	/*
-	 * RTL8150 reports OUI == 0, MODEL == 0
+	 * RTL8150 reports OUT == 0, MODEL == 0
 	 */
 	if (MII_OUI(ma->mii_id1, ma->mii_id2) != 0 &&
 	    MII_MODEL(ma->mii_id2) != 0)
@@ -94,7 +94,7 @@ urlphy_match(device_t parent, cfdata_t match, void *aux)
 }
 
 static void
-urlphy_attach(device_t parent, device_t self, void *aux)
+urlphy_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct mii_softc *sc = device_private(self);
 	struct mii_attach_args *ma = aux;
@@ -103,9 +103,8 @@ urlphy_attach(device_t parent, device_t self, void *aux)
 	aprint_naive(": Media interface\n");
 	aprint_normal(": Realtek RTL8150L internal media interface\n");
 
-	DPRINTF(("%s: %s: enter\n", device_xname(self), __func__));
+	DPRINTF(("%s: %s: enter\n", sc->mii_dev.dv_xname, __FUNCTION__));
 
-	sc->mii_dev = self;
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
 	sc->mii_funcs = &urlphy_funcs;
@@ -119,13 +118,14 @@ urlphy_attach(device_t parent, device_t self, void *aux)
 	sc->mii_flags |= MIIF_NOISOLATE;
 
 	if (mii->mii_instance != 0) {
-		aprint_error_dev(self, "ignoring this PHY, non-zero instance\n");
+		aprint_error("%s: ignoring this PHY, non-zero instance\n",
+		       sc->mii_dev.dv_xname);
 		return;
 	}
 	PHY_RESET(sc);
 
 	sc->mii_capabilities = PHY_READ(sc, MII_BMSR) & ma->mii_capmask;
-	aprint_normal_dev(self, "");
+	aprint_normal("%s: ", sc->mii_dev.dv_xname);
 	if ((sc->mii_capabilities & BMSR_MEDIAMASK) == 0)
 		aprint_error("no media present");
 	else
@@ -139,7 +139,10 @@ urlphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
 	int reg;
 
-	DPRINTF(("%s: %s: enter\n", device_xname(sc->mii_dev), __func__));
+	DPRINTF(("%s: %s: enter\n", sc->mii_dev.dv_xname, __FUNCTION__));
+
+	if (!device_is_active(&sc->mii_dev))
+		return (ENXIO);
 
 	switch (cmd) {
 	case MII_POLLSTAT:
@@ -225,7 +228,7 @@ urlphy_status(struct mii_softc *sc)
 	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
 	int msr, bmsr, bmcr;
 
-	DPRINTF(("%s: %s: enter\n", device_xname(sc->mii_dev), __func__));
+	DPRINTF(("%s: %s: enter\n", sc->mii_dev.dv_xname, __FUNCTION__));
 
 	mii->mii_media_status = IFM_AVALID;
 	mii->mii_media_active = IFM_ETHER;
@@ -238,7 +241,7 @@ urlphy_status(struct mii_softc *sc)
 	if (msr & URLPHY_MSR_LINK)
 		mii->mii_media_status |= IFM_ACTIVE;
 
-	DPRINTF(("%s: %s: link %s\n", device_xname(sc->mii_dev), __func__,
+	DPRINTF(("%s: %s: link %s\n", sc->mii_dev.dv_xname, __FUNCTION__,
 		 mii->mii_media_status & IFM_ACTIVE ? "up" : "down"));
 
 	bmcr = PHY_READ(sc, MII_BMCR);

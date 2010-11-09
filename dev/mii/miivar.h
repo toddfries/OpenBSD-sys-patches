@@ -1,4 +1,4 @@
-/*	$NetBSD: miivar.h,v 1.53 2009/01/16 20:51:18 cegger Exp $	*/
+/*	$NetBSD: miivar.h,v 1.47 2006/11/16 21:24:07 christos Exp $	*/
 
 /*-
  * Copyright (c) 1998, 1999, 2000, 2001 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -106,7 +113,7 @@ struct mii_phy_funcs {
  * XXX BSDI used, and we would like to have the same interface.
  */
 struct mii_softc {
-	device_t mii_dev;		/* generic device glue */
+	struct device mii_dev;		/* generic device glue */
 
 	LIST_ENTRY(mii_softc) mii_list;	/* entry on parent's PHY list */
 
@@ -206,11 +213,11 @@ struct mii_media {
 #ifdef _KERNEL
 
 #define	PHY_READ(p, r) \
-	(*(p)->mii_pdata->mii_readreg)(device_parent((p)->mii_dev), \
+	(*(p)->mii_pdata->mii_readreg)(device_parent(&(p)->mii_dev), \
 	    (p)->mii_phy, (r))
 
 #define	PHY_WRITE(p, r, v) \
-	(*(p)->mii_pdata->mii_writereg)(device_parent((p)->mii_dev), \
+	(*(p)->mii_pdata->mii_writereg)(device_parent(&(p)->mii_dev), \
 	    (p)->mii_phy, (r), (v))
 
 #define	PHY_SERVICE(p, d, o) \
@@ -222,21 +229,18 @@ struct mii_media {
 #define	PHY_RESET(p) \
 	(*(p)->mii_funcs->pf_reset)((p))
 
-void	mii_attach(device_t, struct mii_data *, int, int, int, int);
+void	mii_attach(struct device *, struct mii_data *, int, int,
+	    int, int);
 void	mii_activate(struct mii_data *, enum devact, int, int);
 void	mii_detach(struct mii_data *, int, int);
-bool	mii_phy_resume(device_t PMF_FN_PROTO);
 
 int	mii_mediachg(struct mii_data *);
 void	mii_tick(struct mii_data *);
 void	mii_pollstat(struct mii_data *);
 void	mii_down(struct mii_data *);
-int	mii_anar(int);
 
-int mii_ifmedia_change(struct mii_data *);
-
-int	mii_phy_activate(device_t, enum devact);
-int	mii_phy_detach(device_t, int);
+int	mii_phy_activate(struct device *, enum devact);
+int	mii_phy_detach(struct device *, int);
 
 const struct mii_phydesc *mii_phy_match(const struct mii_attach_args *,
 	    const struct mii_phydesc *);

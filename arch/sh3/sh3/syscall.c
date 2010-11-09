@@ -1,4 +1,4 @@
-/*	$NetBSD: syscall.c,v 1.12 2008/10/21 12:16:59 ad Exp $	*/
+/*	$NetBSD: syscall.c,v 1.6 2006/03/07 07:21:50 thorpej Exp $	*/
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc. All rights reserved.
@@ -78,15 +78,12 @@
  * T.Horiuchi 1998.06.8
  */
 
-#include "opt_sa.h"
-
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/sa.h>
 #include <sys/savar.h>
 #include <sys/syscall.h>
-#include <sys/syscallvar.h>
 
 #include <sh3/userret.h>
 
@@ -117,7 +114,7 @@ static void
 syscall_plain(struct lwp *l, struct trapframe *tf)
 {
 	struct proc *p = l->l_proc;
-	void *params;
+	caddr_t params;
 	const struct sysent *callp;
 	int error, opc, nsys;
 	size_t argsize;
@@ -131,13 +128,7 @@ syscall_plain(struct lwp *l, struct trapframe *tf)
 	nsys = p->p_emul->e_nsysent;
 	callp = p->p_emul->e_sysent;
 
-#ifdef KERN_SA
-	if (__predict_false((l->l_savp)
-            && (l->l_savp->savp_pflags & SAVP_FLAG_DELIVERING)))
-		l->l_savp->savp_pflags &= ~SAVP_FLAG_DELIVERING;
-#endif
-
-	params = (void *)tf->tf_r15;
+	params = (caddr_t)tf->tf_r15;
 
 	switch (code) {
 	case SYS_syscall:
@@ -178,7 +169,7 @@ syscall_plain(struct lwp *l, struct trapframe *tf)
 			args[2] = tf->tf_r7;
 			if (argsize > 3 * sizeof(int)) {
 				argsize -= 3 * sizeof(int);
-				error = copyin(params, (void *)&args[3],
+				error = copyin(params, (caddr_t)&args[3],
 					       argsize);
 			} else
 				error = 0;
@@ -191,7 +182,7 @@ syscall_plain(struct lwp *l, struct trapframe *tf)
 			args[1] = tf->tf_r7;
 			if (argsize > 2 * sizeof(int)) {
 				argsize -= 2 * sizeof(int);
-				error = copyin(params, (void *)&args[2],
+				error = copyin(params, (caddr_t)&args[2],
 					       argsize);
 			} else
 				error = 0;
@@ -205,7 +196,7 @@ syscall_plain(struct lwp *l, struct trapframe *tf)
 			args[3] = tf->tf_r7;
 			if (argsize > 4 * sizeof(int)) {
 				argsize -= 4 * sizeof(int);
-				error = copyin(params, (void *)&args[4],
+				error = copyin(params, (caddr_t)&args[4],
 					       argsize);
 			} else
 				error = 0;
@@ -218,7 +209,7 @@ syscall_plain(struct lwp *l, struct trapframe *tf)
 
 	rval[0] = 0;
 	rval[1] = tf->tf_r1;
-	error = sy_call(callp, l, args, rval);
+	error = (*callp->sy_call)(l, args, rval);
 
 	switch (error) {
 	case 0:
@@ -256,7 +247,7 @@ static void
 syscall_fancy(struct lwp *l, struct trapframe *tf)
 {
 	struct proc *p = l->l_proc;
-	void *params;
+	caddr_t params;
 	const struct sysent *callp;
 	int error, opc, nsys;
 	size_t argsize;
@@ -270,13 +261,7 @@ syscall_fancy(struct lwp *l, struct trapframe *tf)
 	nsys = p->p_emul->e_nsysent;
 	callp = p->p_emul->e_sysent;
 
-#ifdef KERN_SA
-	if (__predict_false((l->l_savp)
-            && (l->l_savp->savp_pflags & SAVP_FLAG_DELIVERING)))
-		l->l_savp->savp_pflags &= ~SAVP_FLAG_DELIVERING;
-#endif
-
-	params = (void *)tf->tf_r15;
+	params = (caddr_t)tf->tf_r15;
 
 	switch (code) {
 	case SYS_syscall:
@@ -317,7 +302,7 @@ syscall_fancy(struct lwp *l, struct trapframe *tf)
 			args[2] = tf->tf_r7;
 			if (argsize > 3 * sizeof(int)) {
 				argsize -= 3 * sizeof(int);
-				error = copyin(params, (void *)&args[3],
+				error = copyin(params, (caddr_t)&args[3],
 					       argsize);
 			} else
 				error = 0;
@@ -330,7 +315,7 @@ syscall_fancy(struct lwp *l, struct trapframe *tf)
 			args[1] = tf->tf_r7;
 			if (argsize > 2 * sizeof(int)) {
 				argsize -= 2 * sizeof(int);
-				error = copyin(params, (void *)&args[2],
+				error = copyin(params, (caddr_t)&args[2],
 					       argsize);
 			} else
 				error = 0;
@@ -344,7 +329,7 @@ syscall_fancy(struct lwp *l, struct trapframe *tf)
 			args[3] = tf->tf_r7;
 			if (argsize > 4 * sizeof(int)) {
 				argsize -= 4 * sizeof(int);
-				error = copyin(params, (void *)&args[4],
+				error = copyin(params, (caddr_t)&args[4],
 					       argsize);
 			} else
 				error = 0;
@@ -355,12 +340,12 @@ syscall_fancy(struct lwp *l, struct trapframe *tf)
 	if (error)
 		goto bad;
 
-	if ((error = trace_enter(code, args, callp->sy_narg)) != 0)
+	if ((error = trace_enter(l, code, code, NULL, args)) != 0)
 		goto out;
 
 	rval[0] = 0;
 	rval[1] = tf->tf_r1;
-	error = sy_call(callp, l, args, rval);
+	error = (*callp->sy_call)(l, args, rval);
 out:
 	switch (error) {
 	case 0:
@@ -388,7 +373,7 @@ out:
 	}
 
 
-	trace_exit(code, rval, error);
+	trace_exit(l, code, args, rval, error);
 
 	userret(l);
 }

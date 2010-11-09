@@ -1,4 +1,4 @@
-/*	$NetBSD: frame.h,v 1.20 2008/10/16 04:02:32 wrstuden Exp $	*/
+/*	$NetBSD: frame.h,v 1.18 2005/12/11 12:18:43 christos Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996 Wolfgang Solfrank.

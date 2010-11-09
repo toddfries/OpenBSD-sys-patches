@@ -1,4 +1,4 @@
-/*	$NetBSD: intr.h,v 1.20 2008/06/23 01:49:31 isaki Exp $	*/
+/*	$NetBSD: intr.h,v 1.11 2006/12/21 15:55:25 yamt Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -34,52 +41,67 @@
 
 #include <machine/psl.h>
 
+#if defined(_KERNEL) && !defined(_LOCORE)
+
 /* spl0 requires checking for software interrupts */
 void	spl0(void);
 
-#define splsoftbio()	splraise1()
-#define splsoftclock()	splraise1()
-#define splsoftnet()	splraise1()
-#define splsoftserial()	splraise1()
-#define splvm()         splraise5()
-#define splsched()      spl7()
-#define splhigh()       spl7()
-
 #define	splnone()	spl0()
+#define	spllowersoftclock() spl1()	/* disallow softclock */
 #define	splzs()		splraise5()	/* disallow serial interrupts */
 
 /* watch out for side effects */
 #define splx(s)         ((s) & PSL_IPL ? _spl(s) : spl0())
 
 #define	IPL_NONE	0
-#define	IPL_SOFTCLOCK	1
-#define	IPL_SOFTBIO	2
-#define	IPL_SOFTNET	3
-#define	IPL_SOFTSERIAL	4
-#define	IPL_VM		5
-#define	IPL_SCHED	6
-#define	IPL_HIGH	7
-#define	NIPL		8
-
-extern const uint16_t ipl2psl_table[NIPL];
+#define	IPL_SOFTCLOCK	(PSL_S|PSL_IPL1)
+#define	IPL_SOFTNET	(PSL_S|PSL_IPL1)
+#define	IPL_BIO		(PSL_S|PSL_IPL3)
+#define	IPL_NET		(PSL_S|PSL_IPL4)
+#define	IPL_TTY		(PSL_S|PSL_IPL4)
+#define	IPL_VM		(PSL_S|PSL_IPL4)
+#define	IPL_CLOCK	(PSL_S|PSL_IPL6)
+#define	IPL_STATCLOCK	(PSL_S|PSL_IPL6)
+#define	IPL_SCHED	(PSL_S|PSL_IPL7)
+#define	IPL_HIGH	(PSL_S|PSL_IPL7)
+#define	IPL_LOCK	(PSL_S|PSL_IPL7)
 
 typedef int ipl_t;
 typedef struct {
-	uint16_t _psl;
+	ipl_t _ipl;
 } ipl_cookie_t;
 
 static inline ipl_cookie_t
 makeiplcookie(ipl_t ipl)
 {
 
-	return (ipl_cookie_t){._psl = ipl2psl_table[ipl]};
+	return (ipl_cookie_t){._ipl = ipl};
 }
 
 static inline int
 splraiseipl(ipl_cookie_t icookie)
 {
 
-	return _splraise(icookie._psl);
+	return _splraise(icookie._ipl);
 }
 
-#endif /* !_X68K_INTR_H_ */
+#include <sys/spl.h>
+
+/*
+ * simulated software interrupt register
+ */
+extern unsigned char ssir;
+
+#define SIR_NET		0x1
+#define SIR_CLOCK	0x2
+#define SIR_SERIAL	0x4
+#define SIR_KBD		0x8
+
+#define siroff(x)	ssir &= ~(x)
+#define setsoftnet()	ssir |= SIR_NET
+#define setsoftclock()	ssir |= SIR_CLOCK
+#define setsoftserial() ssir |= SIR_SERIAL
+#define setsoftkbd()    ssir |= SIR_KBD
+
+#endif /* _KERNEL && ! _LOCORE */
+#endif

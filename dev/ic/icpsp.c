@@ -1,4 +1,4 @@
-/*	$NetBSD: icpsp.c,v 1.21 2008/04/28 20:23:50 martin Exp $	*/
+/*	$NetBSD: icpsp.c,v 1.18 2007/10/19 11:59:53 ad Exp $	*/
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: icpsp.c,v 1.21 2008/04/28 20:23:50 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: icpsp.c,v 1.18 2007/10/19 11:59:53 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -42,6 +49,7 @@ __KERNEL_RCSID(0, "$NetBSD: icpsp.c,v 1.21 2008/04/28 20:23:50 martin Exp $");
 #include <sys/endian.h>
 #include <sys/malloc.h>
 #include <sys/scsiio.h>
+#include <sys/lock.h>
 
 #include <sys/bswap.h>
 #include <sys/bus.h>
@@ -159,7 +167,7 @@ icpsp_scsipi_request(struct scsipi_channel *chan, scsipi_adapter_req_t req,
 
 #if defined(ICP_DEBUG) || defined(SCSIDEBUG)
 		if (xs->cmdlen > sizeof(rc->rc_cdb))
-			panic("%s: CDB too large", device_xname(&sc->sc_dv));
+			panic("%s: CDB too large", sc->sc_dv.dv_xname);
 #endif
 
 		/*
@@ -300,7 +308,7 @@ icpsp_intr(struct icp_ccb *ic)
 		case SCSI_OK:
 #ifdef DIAGNOSTIC
 			printf("%s: error return (%d), but SCSI_OK?\n",
-			    device_xname(&sc->sc_dv), icp->icp_info);
+			    sc->sc_dv.dv_xname, icp->icp_info);
 #endif
 			xs->resid = 0;
 			break;

@@ -1,4 +1,4 @@
-/*	$NetBSD: spic.c,v 1.15 2008/05/04 16:13:35 xtraeme Exp $	*/
+/*	$NetBSD: spic.c,v 1.9 2007/10/19 12:00:02 ad Exp $	*/
 
 /*
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -49,7 +56,7 @@
 
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: spic.c,v 1.15 2008/05/04 16:13:35 xtraeme Exp $");
+__KERNEL_RCSID(0, "$NetBSD: spic.c,v 1.9 2007/10/19 12:00:02 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -66,9 +73,6 @@ __KERNEL_RCSID(0, "$NetBSD: spic.c,v 1.15 2008/05/04 16:13:35 xtraeme Exp $");
 
 #include <dev/wscons/wsconsio.h>
 #include <dev/wscons/wsmousevar.h>
-
-#define	SPIC_EVENT_BRIGHTNESS_DOWN	0x15
-#define	SPIC_EVENT_BRIGHTNESS_UP	0x16
 
 #define POLLRATE (hz/30)
 
@@ -159,7 +163,8 @@ spic_intr(void *v) {
 			goto skip;
 			break;
 		default:
-			aprint_debug_dev(sc->sc_dev, "unknown lid event 0x%02x\n", v1);
+			aprint_debug("%s: unknown lid event 0x%02x\n",
+			    sc->sc_dev.dv_xname, v1);
 			goto skip;
 			break;
 		}
@@ -199,12 +204,6 @@ spic_intr(void *v) {
 	case 0x1e:
 	case 0x1d:
 		dz -= 0x20;
-		break;
-	case SPIC_EVENT_BRIGHTNESS_UP:
-		pmf_event_inject(sc->sc_dev, PMFE_DISPLAY_BRIGHTNESS_UP);
-		break;
-	case SPIC_EVENT_BRIGHTNESS_DOWN:
-		pmf_event_inject(sc->sc_dev, PMFE_DISPLAY_BRIGHTNESS_DOWN);
 		break;
 	default:
 		printf("spic0: v1=0x%02x v2=0x%02x\n", v1, v2);
@@ -268,7 +267,7 @@ spic_attach(struct spic_softc *sc)
 
 	a.accessops = &spic_accessops;
 	a.accesscookie = sc;
-	sc->sc_wsmousedev = config_found(sc->sc_dev, &a, wsmousedevprint);
+	sc->sc_wsmousedev = config_found(&sc->sc_dev, &a, wsmousedevprint);
 
 	sc->sc_smpsw[SPIC_PSWITCH_LID].smpsw_name = "spiclid0";
 	sc->sc_smpsw[SPIC_PSWITCH_LID].smpsw_type = PSWITCH_TYPE_LID;
@@ -280,7 +279,8 @@ spic_attach(struct spic_softc *sc)
 	for (i = 0; i < SPIC_NPSWITCH; i++) {
 		rv = sysmon_pswitch_register(&sc->sc_smpsw[i]);
 		if (rv != 0)
-			aprint_error_dev(sc->sc_dev, "unable to register %s with sysmon\n",
+			aprint_error("%s: unable to register %s with sysmon\n",
+			    sc->sc_dev.dv_xname,
 			    sc->sc_smpsw[i].smpsw_name);
 	}
 
@@ -289,28 +289,6 @@ spic_attach(struct spic_softc *sc)
 	return;
 }
 
-bool
-spic_suspend(device_t dev PMF_FN_ARGS)
-{
-	struct spic_softc *sc = device_private(dev);
-
-	callout_stop(&sc->sc_poll);
-
-	return true;
-}
-
-bool
-spic_resume(device_t dev PMF_FN_ARGS)
-{
-	struct spic_softc *sc = device_private(dev);
-
-	spic_call1(sc, 0x82);
-	spic_call2(sc, 0x81, 0xff);
-	spic_call1(sc, 0x92);	/* or 0x82 */
-
-	callout_reset(&sc->sc_poll, POLLRATE, spictimeout, sc);
-	return true;
-}
 
 static int
 spic_enable(void *v)

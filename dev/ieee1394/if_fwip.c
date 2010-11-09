@@ -1,4 +1,4 @@
-/*	$NetBSD: if_fwip.c,v 1.17 2008/11/12 12:36:11 ad Exp $	*/
+/*	$NetBSD: if_fwip.c,v 1.10 2007/11/05 19:08:57 kiyohara Exp $	*/
 /*-
  * Copyright (c) 2004
  *	Doug Rabson
@@ -36,9 +36,6 @@
  * 
  * $FreeBSD: src/sys/dev/firewire/if_fwip.c,v 1.16 2007/06/06 14:31:36 simokawa Exp $
  */
-
-#include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_fwip.c,v 1.17 2008/11/12 12:36:11 ad Exp $");
 
 #ifdef HAVE_KERNEL_OPTION_HEADERS
 #include "opt_device_polling.h"
@@ -109,15 +106,19 @@ __KERNEL_RCSID(0, "$NetBSD: if_fwip.c,v 1.17 2008/11/12 12:36:11 ad Exp $");
 #if defined(__FreeBSD__)
 #define FWIPDEBUG	if (fwipdebug) if_printf
 #elif defined(__NetBSD__)
-#define FWIPDEBUG	if (fwipdebug) aprint_debug_ifnet
+#define FWIPDEBUG(ifp, fmt, ...)		\
+	if (fwipdebug) {			\
+		printf("%s: ", (ifp)->if_xname);\
+		printf((fmt) , ##__VA_ARGS__);	\
+	}
 #endif
 #define TX_MAX_QUEUE	(FWMAXQUEUE - 1)
 
 #if defined(__NetBSD__)
-int fwipmatch (device_t, struct cfdata *, void *);
-void fwipattach (device_t, device_t, void *);
-int fwipdetach (device_t, int);
-int fwipactivate (device_t, enum devact);
+int fwipmatch (struct device *, struct cfdata *, void *);
+void fwipattach (struct device *, struct device *, void *);
+int fwipdetach (struct device *, int);
+int fwipactivate (struct device *, enum devact);
 
 #endif  
 /* network interface */
@@ -158,7 +159,7 @@ MALLOC_DEFINE(M_FWIP, "if_fwip", "IP over IEEE1394 interface");
 /*
  * Setup sysctl(3) MIB, hw.fwip.*
  *
- * TBD condition CTLFLAG_PERMANENT on being a module or not
+ * TBD condition CTLFLAG_PERMANENT on being an LKM or not
  */
 SYSCTL_SETUP(sysctl_fwip, "sysctl fwip(4) subtree setup")
 {
@@ -243,7 +244,7 @@ fwip_probe(device_t dev)
 }
 #elif defined(__NetBSD__)
 int
-fwipmatch(device_t parent, struct cfdata *cf, void *aux)
+fwipmatch(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct fw_attach_args *fwa = aux;
 
@@ -311,13 +312,6 @@ FW_ATTACH(fwip)
 	s = splfwnet();
 	FIREWIRE_IFATTACH(ifp, hwaddr);
 	splx(s);
-
-#if defined(__NetBSD__)
-	if (!pmf_device_register(self, NULL, NULL))
-		aprint_error_dev(self, "couldn't establish power handler\n");
-	else
-		pmf_class_network_register(self, ifp);
-#endif
 
 	FWIPDEBUG(ifp, "interface created\n");
 	FW_ATTACH_RETURN(0);
@@ -397,9 +391,9 @@ FW_DETACH(fwip)
 
 #if defined(__NetBSD__)
 int
-fwipactivate(device_t self, enum devact act)
+fwipactivate(struct device *self, enum devact act)
 {
-	struct fwip_softc *fwip = device_private(self);
+	struct fwip_softc *fwip = (struct fwip_softc *)self;
 	int s, error = 0;
 
 	s = splfwnet();
@@ -535,18 +529,24 @@ static int
 fwip_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 {
 	IF_IOCTL_START(fwip, fwip);
-	int s, error = 0;
+	int s, error;
 
 	switch (cmd) {
 	case SIOCSIFFLAGS:
 		s = splfwnet();
-		if ((error = ifioctl_common(ifp, cmd, data)) != 0)
-			;
-		else if (ifp->if_flags & IFF_UP) {
+		if (ifp->if_flags & IFF_UP) {
+#if defined(__FreeBSD__)
+			if (!(ifp->if_drv_flags & IFF_DRV_RUNNING))
+#elif defined(__NetBSD__)
 			if (!(ifp->if_flags & IFF_RUNNING))
+#endif
 				FWIP_INIT(fwip);
 		} else {
+#if defined(__FreeBSD__)
+			if (ifp->if_drv_flags & IFF_DRV_RUNNING)
+#elif defined(__NetBSD__)
 			if (ifp->if_flags & IFF_RUNNING)
+#endif
 				FWIP_STOP(fwip);
 		}
 		splx(s);
@@ -555,9 +555,6 @@ fwip_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 	case SIOCDELMULTI:
 		break;
 	case SIOCSIFCAP:
-		if ((error = FIREWIRE_IOCTL(ifp, cmd, data)) != ENETRESET)
-			break;
-		error = 0;
 #ifdef DEVICE_POLLING
 	    {
 		struct ifreq *ifr = (struct ifreq *) data;
@@ -586,14 +583,25 @@ fwip_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 #endif /* DEVICE_POLLING */
 		break;
 
+#if (defined(__FreeBSD__) && __FreeBSD_version >= 500000) || defined(__NetBSD__)
 	default:
+#else
+	case SIOCSIFADDR:
+	case SIOCGIFADDR:
+	case SIOCSIFMTU:
+#endif
 		s = splfwnet();
 		error = FIREWIRE_IOCTL(ifp, cmd, data);
 		splx(s);
 		return (error);
+#if defined(__DragonFly__) || \
+    (defined(__FreeBSD__) && __FreeBSD_version < 500000)
+	default:
+		return (EINVAL);
+#endif
 	}
 
-	return error;
+	return (0);
 }
 
 static void
@@ -1108,6 +1116,6 @@ DRIVER_MODULE(fwip, firewire, fwip_driver, fwip_devclass, 0, 0);
 MODULE_VERSION(fwip, 1);
 MODULE_DEPEND(fwip, firewire, 1, 1, 1);
 #elif defined(__NetBSD__)
-CFATTACH_DECL_NEW(fwip, sizeof(struct fwip_softc),
+CFATTACH_DECL(fwip, sizeof (struct fwip_softc),
     fwipmatch, fwipattach, fwipdetach, NULL);
 #endif

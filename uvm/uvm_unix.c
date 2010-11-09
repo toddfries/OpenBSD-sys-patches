@@ -1,4 +1,4 @@
-/*	$NetBSD: uvm_unix.c,v 1.41 2009/03/04 21:52:38 christos Exp $	*/
+/*	$NetBSD: uvm_unix.c,v 1.38 2007/02/09 21:55:43 ad Exp $	*/
 
 /*
  * Copyright (c) 1997 Charles D. Cranor and Washington University.
@@ -50,7 +50,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: uvm_unix.c,v 1.41 2009/03/04 21:52:38 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: uvm_unix.c,v 1.38 2007/02/09 21:55:43 ad Exp $");
 
 #include "opt_pax.h"
 
@@ -73,30 +73,25 @@ __KERNEL_RCSID(0, "$NetBSD: uvm_unix.c,v 1.41 2009/03/04 21:52:38 christos Exp $
  */
 
 int
-sys_obreak(struct lwp *l, const struct sys_obreak_args *uap, register_t *retval)
+sys_obreak(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct sys_obreak_args /* {
 		syscallarg(char *) nsize;
-	} */
+	} */ *uap = v;
 	struct proc *p = l->l_proc;
 	struct vmspace *vm = p->p_vmspace;
 	vaddr_t new, old;
 	int error;
 
-	mutex_enter(&p->p_auxlock);
 	old = (vaddr_t)vm->vm_daddr;
 	new = round_page((vaddr_t)SCARG(uap, nsize));
-	if ((new - old) > p->p_rlimit[RLIMIT_DATA].rlim_cur && new > old) {
-		mutex_exit(&p->p_auxlock);
+	if ((new - old) > p->p_rlimit[RLIMIT_DATA].rlim_cur && new > old)
 		return (ENOMEM);
-	}
 
 	old = round_page(old + ptoa(vm->vm_dsize));
 
-	if (new == old) {
-		mutex_exit(&p->p_auxlock);
+	if (new == old)
 		return (0);
-	}
 
 	/*
 	 * grow or shrink?
@@ -117,11 +112,8 @@ sys_obreak(struct lwp *l, const struct sys_obreak_args *uap, register_t *retval)
 				UVM_ADV_NORMAL, UVM_FLAG_AMAPPAD|UVM_FLAG_FIXED|
 				UVM_FLAG_OVERLAY|UVM_FLAG_COPYONW));
 		if (error) {
-#ifdef DEBUG
 			uprintf("sbrk: grow %ld failed, error = %d\n",
-			    new - old, error);
-#endif
-			mutex_exit(&p->p_auxlock);
+				new - old, error);
 			return (error);
 		}
 		vm->vm_dsize += atop(new - old);
@@ -129,8 +121,6 @@ sys_obreak(struct lwp *l, const struct sys_obreak_args *uap, register_t *retval)
 		uvm_deallocate(&vm->vm_map, new, old - new);
 		vm->vm_dsize -= atop(old - new);
 	}
-	mutex_exit(&p->p_auxlock);
-
 	return (0);
 }
 
@@ -184,12 +174,12 @@ uvm_grow(struct proc *p, vaddr_t sp)
 
 /* ARGSUSED */
 int
-sys_ovadvise(struct lwp *l, const struct sys_ovadvise_args *uap, register_t *retval)
+sys_ovadvise(struct lwp *l, void *v, register_t *retval)
 {
 #if 0
-	/* {
+	struct sys_ovadvise_args /* {
 		syscallarg(int) anom;
-	} */
+	} */ *uap = v;
 #endif
 
 	return (EINVAL);

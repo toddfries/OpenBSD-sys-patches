@@ -1,4 +1,4 @@
-/*	$NetBSD: ieee80211_node.c,v 1.63 2009/01/03 03:43:23 yamt Exp $	*/
+/*	$NetBSD: ieee80211_node.c,v 1.59 2006/11/16 01:33:41 christos Exp $	*/
 /*-
  * Copyright (c) 2001 Atsushi Onoe
  * Copyright (c) 2002-2005 Sam Leffler, Errno Consulting
@@ -36,7 +36,7 @@
 __FBSDID("$FreeBSD: src/sys/net80211/ieee80211_node.c,v 1.65 2005/08/13 17:50:21 sam Exp $");
 #endif
 #ifdef __NetBSD__
-__KERNEL_RCSID(0, "$NetBSD: ieee80211_node.c,v 1.63 2009/01/03 03:43:23 yamt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ieee80211_node.c,v 1.59 2006/11/16 01:33:41 christos Exp $");
 #endif
 
 #include "opt_inet.h"
@@ -204,11 +204,11 @@ ieee80211_node_detach(struct ieee80211com *ic)
 	ieee80211_node_table_cleanup(&ic->ic_scan);
 	ieee80211_node_table_cleanup(&ic->ic_sta);
 	if (ic->ic_aid_bitmap != NULL) {
-		free(ic->ic_aid_bitmap, M_DEVBUF);
+		FREE(ic->ic_aid_bitmap, M_DEVBUF);
 		ic->ic_aid_bitmap = NULL;
 	}
 	if (ic->ic_tim_bitmap != NULL) {
-		free(ic->ic_tim_bitmap, M_DEVBUF);
+		FREE(ic->ic_tim_bitmap, M_DEVBUF);
 		ic->ic_tim_bitmap = NULL;
 	}
 }
@@ -915,7 +915,7 @@ node_alloc(struct ieee80211_node_table *nt)
 {
 	struct ieee80211_node *ni;
 
-	ni = malloc(sizeof(struct ieee80211_node),
+	MALLOC(ni, struct ieee80211_node *, sizeof(struct ieee80211_node),
 		M_80211_NODE, M_NOWAIT | M_ZERO);
 	return ni;
 }
@@ -958,7 +958,7 @@ node_cleanup(struct ieee80211_node *ni)
 
 	ni->ni_associd = 0;
 	if (ni->ni_challenge != NULL) {
-		free(ni->ni_challenge, M_DEVBUF);
+		FREE(ni->ni_challenge, M_DEVBUF);
 		ni->ni_challenge = NULL;
 	}
 	/*
@@ -992,11 +992,11 @@ node_free(struct ieee80211_node *ni)
 
 	ic->ic_node_cleanup(ni);
 	if (ni->ni_wpa_ie != NULL)
-		free(ni->ni_wpa_ie, M_DEVBUF);
+		FREE(ni->ni_wpa_ie, M_DEVBUF);
 	if (ni->ni_wme_ie != NULL)
-		free(ni->ni_wme_ie, M_DEVBUF);
+		FREE(ni->ni_wme_ie, M_DEVBUF);
 	IEEE80211_NODE_SAVEQ_DESTROY(ni);
-	free(ni, M_80211_NODE);
+	FREE(ni, M_80211_NODE);
 }
 
 static u_int8_t
@@ -1546,18 +1546,15 @@ ieee80211_find_node_with_channel(struct ieee80211_node_table *nt,
 		if (IEEE80211_ADDR_EQ(ni->ni_macaddr, macaddr) &&
 		    ni->ni_chan == chan) {
 			ieee80211_ref_node(ni);		/* mark referenced */
-#ifdef IEEE80211_DEBUG_REFCNT
 			IEEE80211_DPRINTF(nt->nt_ic, IEEE80211_MSG_NODE,
+#ifdef IEEE80211_DEBUG_REFCNT
 			    "%s (%s:%u) %p<%s> refcnt %d\n", __func__,
 			    func, line,
-			    ni, ether_sprintf(ni->ni_macaddr),
-			    ieee80211_node_refcnt(ni));
 #else
-			IEEE80211_DPRINTF(nt->nt_ic, IEEE80211_MSG_NODE,
 			    "%s %p<%s> refcnt %d\n", __func__,
+#endif
 			    ni, ether_sprintf(ni->ni_macaddr),
 			    ieee80211_node_refcnt(ni));
-#endif
 			break;
 		}
 	}
@@ -1650,18 +1647,15 @@ ieee80211_find_node_with_ssid(struct ieee80211_node_table *nt,
 	}
 	if (ni != NULL) {
 		ieee80211_ref_node(ni);	/* mark referenced */
-#ifdef IEEE80211_DEBUG_REFCNT
 		IEEE80211_DPRINTF(ic, IEEE80211_MSG_NODE,
+#ifdef IEEE80211_DEBUG_REFCNT
 		    "%s (%s:%u) %p<%s> refcnt %d\n", __func__,
 		    func, line,
-		     ni, ether_sprintf(ni->ni_macaddr),
-		     ieee80211_node_refcnt(ni));
 #else
-		IEEE80211_DPRINTF(ic, IEEE80211_MSG_NODE,
 		    "%s %p<%s> refcnt %d\n", __func__,
+#endif
 		     ni, ether_sprintf(ni->ni_macaddr),
 		     ieee80211_node_refcnt(ni));
-#endif
 	}
 	IEEE80211_NODE_UNLOCK(nt);
 	return ni;
@@ -1763,7 +1757,7 @@ ieee80211_node_delucastkey(struct ieee80211_node *ni)
 	status = ieee80211_crypto_delkey(ic, &ni->ni_ucastkey);
 	if (nt->nt_keyixmap != NULL && keyix < nt->nt_keyixmax) {
 		nikey = nt->nt_keyixmap[keyix];
-		nt->nt_keyixmap[keyix] = NULL;
+		nt->nt_keyixmap[keyix] = NULL;;
 	} else
 		nikey = NULL;
 	if (!isowned)
@@ -2468,7 +2462,6 @@ ieee80211_node_table_cleanup(struct ieee80211_node_table *nt)
 
 	IEEE80211_NODE_LOCK(nt);
 	ieee80211_free_allnodes_locked(nt);
-	IEEE80211_NODE_UNLOCK(nt);
 	if (nt->nt_keyixmap != NULL) {
 		/* XXX verify all entries are NULL */
 		int i;
@@ -2476,7 +2469,7 @@ ieee80211_node_table_cleanup(struct ieee80211_node_table *nt)
 			if (nt->nt_keyixmap[i] != NULL)
 				printf("%s: %s[%u] still active\n", __func__,
 					nt->nt_name, i);
-		free(nt->nt_keyixmap, M_80211_NODE);
+		FREE(nt->nt_keyixmap, M_80211_NODE);
 		nt->nt_keyixmap = NULL;
 	}
 	IEEE80211_SCAN_LOCK_DESTROY(nt);

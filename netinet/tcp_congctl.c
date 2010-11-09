@@ -1,4 +1,4 @@
-/*	$NetBSD: tcp_congctl.c,v 1.15 2008/04/28 20:24:09 martin Exp $	*/
+/*	$NetBSD: tcp_congctl.c,v 1.12 2006/11/16 01:33:45 christos Exp $	*/
 
 /*-
  * Copyright (c) 1997, 1998, 1999, 2001, 2005, 2006 The NetBSD Foundation, Inc.
@@ -20,6 +20,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -135,7 +142,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: tcp_congctl.c,v 1.15 2008/04/28 20:24:09 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: tcp_congctl.c,v 1.12 2006/11/16 01:33:45 christos Exp $");
 
 #include "opt_inet.h"
 #include "opt_tcp_debug.h"
@@ -153,7 +160,7 @@ __KERNEL_RCSID(0, "$NetBSD: tcp_congctl.c,v 1.15 2008/04/28 20:24:09 martin Exp 
 #include <sys/pool.h>
 #include <sys/domain.h>
 #include <sys/kernel.h>
-#include <sys/mutex.h>
+#include <sys/lock.h>
 
 #include <net/if.h>
 #include <net/route.h>
@@ -213,28 +220,25 @@ extern int tcprexmtthresh;
 
 MALLOC_DEFINE(M_TCPCONGCTL, "tcpcongctl", "TCP congestion control structures");
 
-/* currently selected global congestion control */
-char tcp_congctl_global_name[TCPCC_MAXLEN];
-
-/* available global congestion control algorithms */
-char tcp_congctl_avail[10 * TCPCC_MAXLEN];
-
 /*
  * Used to list the available congestion control algorithms.
  */
-TAILQ_HEAD(, tcp_congctlent) tcp_congctlhd =
-    TAILQ_HEAD_INITIALIZER(tcp_congctlhd);
+struct tcp_congctlent {
+	TAILQ_ENTRY(tcp_congctlent) congctl_ent;
+	char               congctl_name[TCPCC_MAXLEN];
+	struct tcp_congctl *congctl_ctl;
+};
+TAILQ_HEAD(, tcp_congctlent) tcp_congctlhd;
 
-static struct tcp_congctlent * tcp_congctl_global;
-
-static kmutex_t tcp_congctl_mtx;
+struct simplelock tcp_congctl_slock;
 
 void
 tcp_congctl_init(void)
 {
 	int r;
 	
-	mutex_init(&tcp_congctl_mtx, MUTEX_DEFAULT, IPL_NONE);
+	TAILQ_INIT(&tcp_congctlhd);
+	simple_lock_init(&tcp_congctl_slock);
 
 	/* Base algorithms. */
 	r = tcp_congctl_register("reno", &tcp_reno_ctl);
@@ -255,7 +259,7 @@ tcp_congctl_init(void)
  * Register a congestion algorithm and select it if we have none.
  */
 int
-tcp_congctl_register(const char *name, const struct tcp_congctl *tcc)
+tcp_congctl_register(const char *name, struct tcp_congctl *tcc)
 {
 	struct tcp_congctlent *ntcc, *tccp;
 
@@ -265,7 +269,7 @@ tcp_congctl_register(const char *name, const struct tcp_congctl *tcc)
 			return EEXIST;
 		}
 
-	ntcc = malloc(sizeof(*ntcc), M_TCPCONGCTL, M_WAITOK|M_ZERO);
+	ntcc = malloc(sizeof(*ntcc), M_TCPCONGCTL, M_WAITOK);
 
 	strlcpy(ntcc->congctl_name, name, sizeof(ntcc->congctl_name) - 1);
 	ntcc->congctl_ctl = tcc;
@@ -296,7 +300,8 @@ tcp_congctl_unregister(const char *name)
 	if (!rtccp)
 		return ENOENT;
 
-	if (size <= 1 || tcp_congctl_global == rtccp || rtccp->congctl_refcnt)
+	if (size <= 1 || tcp_congctl_global == rtccp->congctl_ctl ||
+	    rtccp->congctl_ctl->refcnt)
 		return EBUSY;
 
 	TAILQ_REMOVE(&tcp_congctlhd, rtccp, congctl_ent);
@@ -312,61 +317,28 @@ tcp_congctl_unregister(const char *name)
 int
 tcp_congctl_select(struct tcpcb *tp, const char *name)
 {
-	struct tcp_congctlent *tccp, *old_tccp, *new_tccp;
-	bool old_found, new_found;
+	struct tcp_congctlent *tccp;
 
 	KASSERT(name);
 
-	old_found = (tp == NULL || tp->t_congctl == NULL);
-	old_tccp = NULL;
-	new_found = false;
-	new_tccp = NULL;
-
-	TAILQ_FOREACH(tccp, &tcp_congctlhd, congctl_ent) {
-		if (!old_found && tccp->congctl_ctl == tp->t_congctl) {
-			old_tccp = tccp;
-			old_found = true;
-		}
-
-		if (!new_found && !strcmp(name, tccp->congctl_name)) {
-			new_tccp = tccp;
-			new_found = true;
-		}
-
-		if (new_found && old_found) {
+	TAILQ_FOREACH(tccp, &tcp_congctlhd, congctl_ent)
+		if (!strcmp(name, tccp->congctl_name)) {
 			if (tp) {
-				mutex_enter(&tcp_congctl_mtx);
-				if (old_tccp)
-					old_tccp->congctl_refcnt--;
-				tp->t_congctl = new_tccp->congctl_ctl;
-				new_tccp->congctl_refcnt++;
-				mutex_exit(&tcp_congctl_mtx);
+				simple_lock(&tcp_congctl_slock);
+				tp->t_congctl->refcnt--;
+				tp->t_congctl = tccp->congctl_ctl;
+				tp->t_congctl->refcnt++;
+				simple_unlock(&tcp_congctl_slock);
 			} else {
-				tcp_congctl_global = new_tccp;
+				tcp_congctl_global = tccp->congctl_ctl;
 				strlcpy(tcp_congctl_global_name,
-				    new_tccp->congctl_name,
+				    tccp->congctl_name,
 				    sizeof(tcp_congctl_global_name) - 1);
 			}
 			return 0;
 		}
-	}
-
-	return EINVAL;
-}
-
-void
-tcp_congctl_release(struct tcpcb *tp)
-{
-	struct tcp_congctlent *tccp;
-
-	KASSERT(tp->t_congctl);
 	
-	TAILQ_FOREACH(tccp, &tcp_congctlhd, congctl_ent) {
-		if (tccp->congctl_ctl == tp->t_congctl) {
-			tccp->congctl_refcnt--;
-			return;
-		}
-	}
+	return EINVAL;
 }
 
 /*
@@ -603,7 +575,7 @@ tcp_reno_newack(struct tcpcb *tp, const struct tcphdr *th)
 	tp->snd_cwnd = min(cw + incr, TCP_MAXWIN << tp->snd_scale);
 }
 
-const struct tcp_congctl tcp_reno_ctl = {
+struct tcp_congctl tcp_reno_ctl = {
 	.fast_retransmit = tcp_reno_fast_retransmit,
 	.slow_retransmit = tcp_reno_slow_retransmit,
 	.fast_retransmit_newack = tcp_reno_fast_retransmit_newack,
@@ -714,7 +686,7 @@ tcp_newreno_newack(struct tcpcb *tp, const struct tcphdr *th)
 }
 
 
-const struct tcp_congctl tcp_newreno_ctl = {
+struct tcp_congctl tcp_newreno_ctl = {
 	.fast_retransmit = tcp_newreno_fast_retransmit,
 	.slow_retransmit = tcp_reno_slow_retransmit,
 	.fast_retransmit_newack = tcp_newreno_fast_retransmit_newack,

@@ -1,4 +1,4 @@
-/*	$NetBSD: db_machdep.h,v 1.15 2008/08/29 19:08:29 matt Exp $	*/
+/*	$NetBSD: db_machdep.h,v 1.13 2006/05/10 06:24:02 skrll Exp $	*/
 
 /*
  * Copyright (c) 1996 Scott K Stevens
@@ -51,20 +51,15 @@ extern db_regs_t	ddb_regs;	/* register state */
 #define	DDB_REGS	(&ddb_regs)
 
 #ifdef __PROG26
-#define	PC_REGS(regs)	((regs)->tf_r15 & R15_PC)
+#define	PC_REGS(regs)	((db_addr_t)(regs)->tf_r15 & R15_PC)
 #define PC_ADVANCE(regs) ((regs)->tf_r15 += BKPT_SIZE)
 #else
-#define	PC_REGS(regs)	((regs)->tf_pc)
+#define	PC_REGS(regs)	((db_addr_t)(regs)->tf_pc)
 #define PC_ADVANCE(r)   ((r)->tf_r15 += BKPT_SIZE)
 #endif
 
 #define	BKPT_ADDR(addr)	(addr)			/* breakpoint address */
-#if defined(DDB)
 #define	BKPT_INST	(KERNEL_BREAKPOINT)	/* breakpoint instruction */
-#else
-/* breakpoint instruction if we use KGDB, this is used in db_set_temp_breakpoint() */
-#define BKPT_INST	(GDB5_BREAKPOINT)
-#endif
 #define	BKPT_SIZE	(INSN_SIZE)		/* size of breakpoint inst */
 #define	BKPT_SET(inst, addr)	(BKPT_INST)
 
@@ -93,8 +88,7 @@ extern db_regs_t	ddb_regs;	/* register state */
 /* ldr pc, [pc, reg, lsl #2]
 					    0000000f  register */
 #define	inst_branch(ins)	(((ins) & 0x0f000000) == 0x0a000000 || \
-				 ((ins) & 0x0fdffff0) == 0x079ff100 || \
-				 ((ins) & 0x0ff0f000) == 0x0590f000)
+				 ((ins) & 0x0fdffff0) == 0x079ff100)
 #define inst_load(ins)		(0)
 #define inst_store(ins)		(0)
 #define inst_unconditional_flow_transfer(ins)	\
@@ -113,8 +107,12 @@ int kdb_trap __P((int, db_regs_t *));
 void db_machine_init __P((void));
 int db_validate_address(vm_offset_t addr);
 
+#ifdef __ELF__
 #define DB_ELF_SYMBOLS
 #define DB_ELFSIZE 32
+#else
+#define	DB_AOUT_SYMBOLS
+#endif
 
 /*
  * kgdb

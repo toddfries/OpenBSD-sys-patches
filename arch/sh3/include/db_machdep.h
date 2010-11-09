@@ -1,4 +1,4 @@
-/*	$NetBSD: db_machdep.h,v 1.14 2008/06/07 22:22:10 uwe Exp $	*/
+/*	$NetBSD: db_machdep.h,v 1.12 2006/05/10 06:24:03 skrll Exp $	*/
 
 /*
  * Mach Operating System
@@ -54,9 +54,8 @@ extern db_regs_t	ddb_regs;	/* register state */
 
 #define	FIXUP_PC_AFTER_BREAK(regs)	((regs)->tf_spc -= BKPT_SIZE)
 
-#define	IS_BREAKPOINT_TRAP(type, code)	\
-	((type) == EXPEVT_TRAPA && (code) == _SH_TRA_BREAK)
-#define	IS_WATCHPOINT_TRAP(type, code)	(false)
+#define	IS_BREAKPOINT_TRAP(type, code)	((type) == EXPEVT_BREAK)
+#define	IS_WATCHPOINT_TRAP(type, code)	(0) /* XXX (msaitoh) */
 
 #define	inst_load(ins)		0
 #define	inst_store(ins)		0
@@ -93,9 +92,9 @@ typedef	long	kgdb_reg_t;
 #define	db_thread_fp_used(thread)	((thread)->pcb->ims.ifps != 0)
 
 int kdb_trap(int, int, db_regs_t *);
-bool inst_call(int);
-bool inst_return(int);
-bool inst_trap_return(int);
+boolean_t inst_call(int);
+boolean_t inst_return(int);
+boolean_t inst_trap_return(int);
 
 /*
  * We use ELF symbols in DDB.

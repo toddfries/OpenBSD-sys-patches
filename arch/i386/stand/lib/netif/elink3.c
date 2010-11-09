@@ -1,4 +1,4 @@
-/*	$NetBSD: elink3.c,v 1.4 2008/12/14 18:46:33 christos Exp $	*/
+/*	$NetBSD: elink3.c,v 1.3 1998/02/16 11:26:36 drochner Exp $	*/
 
 /* stripped down from freebsd:sys/i386/netboot/3c509.c */
 
@@ -40,10 +40,8 @@ extern unsigned short eth_base;
 
 extern u_char eth_myaddr[6];
 
-void
-epstop(void)
+void epstop()
 {
-
 	/* stop card */
 	outw(BASE + EP_COMMAND, RX_DISABLE);
 	outw(BASE + EP_COMMAND, RX_DISCARD_TOP_PACK);
@@ -61,10 +59,8 @@ epstop(void)
 	outw(BASE + EP_COMMAND, SET_RX_FILTER);
 }
 
-void
-EtherStop(void)
+void EtherStop()
 {
-
 	epstop();
 	outw(BASE + EP_COMMAND, GLOBAL_RESET);
 	delay(100000);
@@ -73,8 +69,7 @@ EtherStop(void)
 /**************************************************************************
 ETH_RESET - Reset adapter
 ***************************************************************************/
-void
-epreset(void)
+void epreset()
 {
 	int i;
 
@@ -87,8 +82,7 @@ epreset(void)
 	/*
 	 * initialize card
 	*/
-	while (inw(BASE + EP_STATUS) & S_COMMAND_IN_PROGRESS)
-		continue;
+	while (inw(BASE + EP_STATUS) & S_COMMAND_IN_PROGRESS);
 
 	GO_WINDOW(0);
 
@@ -126,16 +120,16 @@ epreset(void)
 	    FIL_BRDCST);
 
 	/* configure BNC */
-	if (ether_medium == ETHERMEDIUM_BNC) {
+	if(ether_medium == ETHERMEDIUM_BNC) {
 		outw(BASE + EP_COMMAND, START_TRANSCEIVER);
 		delay(1000);
-	}
+		}
 	/* configure UTP */
-	if (ether_medium == ETHERMEDIUM_UTP) {
+	if(ether_medium == ETHERMEDIUM_UTP) {
 		GO_WINDOW(4);
 		outw(BASE + EP_W4_MEDIA_TYPE, ENABLE_UTP);
 		GO_WINDOW(1);
-	}
+		}
 
 	/* start tranciever and receiver */
 	outw(BASE + EP_COMMAND, RX_ENABLE);
@@ -153,8 +147,9 @@ ETH_TRANSMIT - Transmit a frame
 static const char padmap[] = {
 	0, 3, 2, 1};
 
-int
-EtherSend(char *pkt, int len)
+int EtherSend(pkt, len)
+    char *pkt;
+    int len;
 {
 	int pad;
 	int status;
@@ -175,9 +170,8 @@ EtherSend(char *pkt, int len)
 	}
 
 	/* drop acknowledgements */
-	while ((status = inb(BASE + EP_W1_TX_STATUS)) & TXS_COMPLETE ) {
-		if (status & (TXS_UNDERRUN | TXS_MAX_COLLISION |
-			TXS_STATUS_OVERFLOW)) {
+	while(( status=inb(BASE + EP_W1_TX_STATUS) )& TXS_COMPLETE ) {
+		if(status & (TXS_UNDERRUN|TXS_MAX_COLLISION|TXS_STATUS_OVERFLOW)) {
 			outw(BASE + EP_COMMAND, TX_RESET);
 			outw(BASE + EP_COMMAND, TX_ENABLE);
 		}
@@ -187,7 +181,6 @@ EtherSend(char *pkt, int len)
 
 	while (inw(BASE + EP_W1_FREE_TX) < len + pad + 4) {
 		/* no room in FIFO */
-		continue;
 	}
 
 	outw(BASE + EP_W1_TX_PIO_WR_1, len);
@@ -203,14 +196,15 @@ EtherSend(char *pkt, int len)
 
 	/* timeout after sending */
 	delay(1000);
-	return len;
+	return(len);
 }
 
 /**************************************************************************
 ETH_POLL - Wait for a frame
 ***************************************************************************/
-int
-EtherReceive(char *pkt, int maxlen)
+int EtherReceive(pkt, maxlen)
+char *pkt;
+int maxlen;
 {
 	/* common variables */
 	int len;
@@ -218,14 +212,14 @@ EtherReceive(char *pkt, int maxlen)
 	short status, cst;
 	register short rx_fifo;
 
-	cst = inw(BASE + EP_STATUS);
+	cst=inw(BASE + EP_STATUS);
 
 #ifdef EDEBUG
-	if (cst & 0x1FFF)
+	if(cst & 0x1FFF)
 		printf("-%x-",cst);
 #endif
 
-	if ((cst & (S_RX_COMPLETE|S_RX_EARLY)) == 0) {
+	if( (cst & (S_RX_COMPLETE|S_RX_EARLY) )==0 ) {
 		/* acknowledge  everything */
 		outw(BASE + EP_COMMAND, ACK_INTR| (cst & S_5_INTS));
 		outw(BASE + EP_COMMAND, C_INTR_LATCH);
@@ -244,42 +238,40 @@ EtherReceive(char *pkt, int maxlen)
 	}
 
 	rx_fifo = status & RX_BYTES_MASK;
-	if (rx_fifo == 0)
+	if (rx_fifo==0)
 		return 0;
 
-	if (rx_fifo > maxlen)
-		goto zulang;
+	if (rx_fifo > maxlen) goto zulang;
 
-	/* read packet */
+		/* read packet */
 #ifdef EDEBUG
 	printf("[l=%d",rx_fifo);
 #endif
 	insw(BASE + EP_W1_RX_PIO_RD_1, pkt, rx_fifo / 2);
-	if (rx_fifo & 1)
-		pkt[rx_fifo-1] = inb(BASE + EP_W1_RX_PIO_RD_1);
-	len = rx_fifo;
+	if(rx_fifo & 1)
+		pkt[rx_fifo-1]=inb(BASE + EP_W1_RX_PIO_RD_1);
+	len=rx_fifo;
 
-	for (;;) {
+	while(1) {
 		status = inw(BASE + EP_W1_RX_STATUS);
 #ifdef EDEBUG
 		printf("*%x*",status);
 #endif
 		rx_fifo = status & RX_BYTES_MASK;
 
-		if (rx_fifo > 0) {
-			if ((len + rx_fifo) > maxlen)
-				goto zulang;
+		if(rx_fifo>0) {
+		  if((len + rx_fifo) > maxlen) goto zulang;
 
-			insw(BASE + EP_W1_RX_PIO_RD_1, pkt + len, rx_fifo / 2);
-			if (rx_fifo & 1)
-				pkt[len + rx_fifo-1] = inb(BASE + EP_W1_RX_PIO_RD_1);
-			len += rx_fifo;
+			insw(BASE + EP_W1_RX_PIO_RD_1, pkt+len, rx_fifo / 2);
+			if(rx_fifo & 1)
+				pkt[len+rx_fifo-1]=inb(BASE + EP_W1_RX_PIO_RD_1);
+			len+=rx_fifo;
 #ifdef EDEBUG
 			printf("+%d",rx_fifo);
 #endif
 		}
 
-		if ((status & RX_INCOMPLETE) == 0) {
+		if(( status & RX_INCOMPLETE )==0) {
 #ifdef EDEBUG
 			printf("=%d",len);
 #endif
@@ -291,15 +283,13 @@ EtherReceive(char *pkt, int maxlen)
 
 	/* acknowledge reception of packet */
 	outw(BASE + EP_COMMAND, RX_DISCARD_TOP_PACK);
-	while (inw(BASE + EP_STATUS) & S_COMMAND_IN_PROGRESS)
-		continue;
+	while (inw(BASE + EP_STATUS) & S_COMMAND_IN_PROGRESS);
 
 	return len;
 
- zulang:
+zulang:
 	outw(BASE + EP_COMMAND, RX_DISCARD_TOP_PACK);
-	while (inw(BASE + EP_STATUS) & S_COMMAND_IN_PROGRESS)
-		continue;
+	while (inw(BASE + EP_STATUS) & S_COMMAND_IN_PROGRESS);
 	return 0;
 }
 
@@ -308,16 +298,16 @@ EtherReceive(char *pkt, int maxlen)
 **************************************************************************/
 
 static int
-eeprom_rdy(void)
+eeprom_rdy()
 {
 	int i;
 
 	for (i = 0; is_eeprom_busy(IS_BASE) && i < MAX_EEPROMBUSY; i++);
 	if (i >= MAX_EEPROMBUSY) {
 		printf("3c509: eeprom failed to come ready.\r\n");
-		return 0;
+		return (0);
 	}
-	return 1;
+	return (1);
 }
 
 /*
@@ -325,12 +315,13 @@ eeprom_rdy(void)
  * before
  */
 int
-ep_get_e(int offset)
+ep_get_e(offset)
+int offset;
 {
 	if (!eeprom_rdy())
-		return 0xffff;
+		return (0xffff);
 	outw(IS_BASE + EP_W0_EEPROM_COMMAND, EEPROM_CMD_RD | offset);
 	if (!eeprom_rdy())
-		return 0xffff;
-	return inw(IS_BASE + EP_W0_EEPROM_DATA);
+		return (0xffff);
+	return (inw(IS_BASE + EP_W0_EEPROM_DATA));
 }

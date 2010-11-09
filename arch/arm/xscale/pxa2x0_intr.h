@@ -1,4 +1,4 @@
-/*	$NetBSD: pxa2x0_intr.h,v 1.12 2008/11/19 06:35:56 matt Exp $ */
+/*	$NetBSD: pxa2x0_intr.h,v 1.9 2006/12/17 16:03:33 peter Exp $ */
 
 /* Derived from i80321_intr.h */
 
@@ -47,30 +47,35 @@
 #include <arm/cpu.h>
 #include <arm/armreg.h>
 #include <arm/cpufunc.h>
+#include <machine/atomic.h>
 #include <machine/intr.h>
+#include <arm/softintr.h>
 
 #include <arm/xscale/pxa2x0reg.h>
 
 vaddr_t pxaic_base;		/* Shared with pxa2x0_irq.S */
-#define read_icu(offset) (*(volatile uint32_t *)(pxaic_base + (offset)))
+#define read_icu(offset) (*(volatile uint32_t *)(pxaic_base+(offset)))
 #define write_icu(offset,value) \
- (*(volatile uint32_t *)(pxaic_base + (offset)) = (value))
+ (*(volatile uint32_t *)(pxaic_base+(offset))=(value))
 
+extern volatile int current_spl_level;
 extern volatile int intr_mask;
+extern volatile int softint_pending;
 extern int pxa2x0_imask[];
-
-#ifdef __PROG32
+void pxa2x0_do_pending(void);
 
 /*
  * Cotulla's integrated ICU doesn't have IRQ0..7, so
  * we map software interrupts to bit 0..3
  */
+#define SI_TO_IRQBIT(si)  (1U<<(si))
+
 static inline void
 pxa2x0_setipl(int new)
 {
-	set_curcpl(new);
-	intr_mask = pxa2x0_imask[new];
-	write_icu(SAIPIC_MR, intr_mask);
+	current_spl_level = new;
+	intr_mask = pxa2x0_imask[current_spl_level];
+	write_icu( SAIPIC_MR, intr_mask );
 }
 
 
@@ -83,53 +88,65 @@ pxa2x0_splx(int new)
 	pxa2x0_setipl(new);
 	restore_interrupts(psw);
 
-#ifdef __HAVE_FAST_SOFTINTS
-	cpu_dosoftints();
-#endif
+	/* If there are software interrupts to process, do it. */
+	if (softint_pending & intr_mask)
+		pxa2x0_do_pending();
 }
 
 
 static inline int
 pxa2x0_splraise(int ipl)
 {
-	int old, psw;
+	int	old, psw;
 
-	old = curcpl();
-	if (ipl > old) {
+	old = current_spl_level;
+	if( ipl > current_spl_level ){
 		psw = disable_interrupts(I32_bit);
 		pxa2x0_setipl(ipl);
 		restore_interrupts(psw);
 	}
 
-	return old;
+	return (old);
 }
 
 static inline int
 pxa2x0_spllower(int ipl)
 {
-	int old = curcpl();
+	int old = current_spl_level;
 	int psw = disable_interrupts(I32_bit);
-
 	pxa2x0_splx(ipl);
 	restore_interrupts(psw);
-	return old;
+	return(old);
 }
+
+static inline void
+pxa2x0_setsoftintr(int si)
+{
+	atomic_set_bit( (u_int *)__UNVOLATILE(&softint_pending),
+		SI_TO_IRQBIT(si) );
+
+	/* Process unmasked pending soft interrupts. */
+	if ( softint_pending & intr_mask )
+		pxa2x0_do_pending();
+}
+
 
 /*
  * An useful function for interrupt handlers.
  * XXX: This shouldn't be here.
  */
 static inline int
-find_first_bit(uint32_t bits)
+find_first_bit( uint32_t bits )
 {
-	/*
-	 * Since CLZ is available only on ARMv5, this isn't portable
+	int count;
+
+	/* since CLZ is available only on ARMv5, this isn't portable
 	 * to all ARM CPUs.  This file is for PXA2[15]0 processor. 
 	 */
-	return 31 - __builtin_clz(bits);
+	__asm( "clz %0, %1" : "=r" (count) : "r" (bits) );
+	return 31-count;
 }
 
-#endif /* __PROG32 */
 
 int	_splraise(int);
 int	_spllower(int);
@@ -159,6 +176,7 @@ void *pxa2x0_intr_establish(int irqno, int level,
 			    int (*func)(void *), void *cookie);
 void pxa2x0_intr_disestablish(void *cookie);
 void pxa2x0_update_intr_masks(int irqno, int level);
+extern volatile int current_spl_level;
 
 #endif /* ! _LOCORE */
 

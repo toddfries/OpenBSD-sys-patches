@@ -1,4 +1,4 @@
-/*	$NetBSD: iommu.c,v 1.90 2008/06/04 12:41:41 ad Exp $ */
+/*	$NetBSD: iommu.c,v 1.84 2006/11/24 19:46:58 christos Exp $ */
 
 /*
  * Copyright (c) 1996
@@ -37,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: iommu.c,v 1.90 2008/06/04 12:41:41 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: iommu.c,v 1.84 2006/11/24 19:46:58 christos Exp $");
 
 #include "opt_sparc_arch.h"
 
@@ -106,8 +106,8 @@ void	iommu_dmamap_sync(bus_dma_tag_t, bus_dmamap_t, bus_addr_t,
 			bus_size_t, int);
 
 int	iommu_dmamem_map(bus_dma_tag_t, bus_dma_segment_t *,
-			int, size_t, void **, int);
-void	iommu_dmamem_unmap(bus_dma_tag_t, void *, size_t);
+			int, size_t, caddr_t *, int);
+void	iommu_dmamem_unmap(bus_dma_tag_t, caddr_t, size_t);
 paddr_t	iommu_dmamem_mmap(bus_dma_tag_t, bus_dma_segment_t *,
 			int, off_t, int, int);
 int	iommu_dvma_alloc(struct iommu_softc *, bus_dmamap_t, vaddr_t,
@@ -233,7 +233,7 @@ iommu_attach(struct device *parent, struct device *self, void *aux)
 	iopte_table_pa = VM_PAGE_TO_PHYS(m);
 
 	/* Map the pages */
-	for (; m != NULL; m = TAILQ_NEXT(m,pageq.queue)) {
+	for (; m != NULL; m = TAILQ_NEXT(m,pageq)) {
 		paddr_t pa = VM_PAGE_TO_PHYS(m);
 		pmap_kenter_pa(va, pa | PMAP_NC, VM_PROT_READ | VM_PROT_WRITE);
 		va += PAGE_SIZE;
@@ -362,7 +362,7 @@ iommu_copy_prom_entries(struct iommu_softc *sc)
 		mmupcr_save = lda(SRMMU_PCR, ASI_SRMMU);
 		sta(SRMMU_PCR, ASI_SRMMU, mmupcr_save | VIKING_PCR_AC);
 	} else
-		mmupcr_save = 0; /* XXX - avoid GCC `uninitialized' warning */
+		mmupcr_save = 0; /* XXX - avoid GCC `unintialized' warning */
 
 	/* Flush entire IOMMU TLB before messing with the in-memory tables */
 	IOMMU_FLUSHALL(sc);
@@ -579,8 +579,7 @@ iommu_dmamap_load(bus_dma_tag_t t, bus_dmamap_t map,
 					&dva, &sgsize)) != 0)
 		return (error);
 
-	if ((sc->sc_cachecoherent == 0) || 
-	    (curcpu()->cacheinfo.ec_totalsize == 0))
+	if (sc->sc_cachecoherent == 0)
 		cache_flush(buf, buflen); /* XXX - move to bus_dma_sync? */
 
 	/*
@@ -678,7 +677,7 @@ iommu_dmamap_load_raw(bus_dma_tag_t t, bus_dmamap_t map,
 
 	/* Map physical pages into IOMMU */
 	mlist = segs[0]._ds_mlist;
-	for (m = TAILQ_FIRST(mlist); m != NULL; m = TAILQ_NEXT(m,pageq.queue)) {
+	for (m = TAILQ_FIRST(mlist); m != NULL; m = TAILQ_NEXT(m,pageq)) {
 		if (sgsize == 0)
 			panic("iommu_dmamap_load_raw: size botch");
 		pa = VM_PAGE_TO_PHYS(m);
@@ -741,7 +740,7 @@ iommu_dmamap_sync(bus_dma_tag_t t, bus_dmamap_t map,
  */
 int
 iommu_dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
-		 size_t size, void **kvap, int flags)
+		 size_t size, caddr_t *kvap, int flags)
 {
 	struct iommu_softc *sc = t->_cookie;
 	struct vm_page *m;
@@ -771,14 +770,14 @@ iommu_dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
 		return (ENOMEM);
 
 	segs[0]._ds_va = va;
-	*kvap = (void *)va;
+	*kvap = (caddr_t)va;
 
 	/*
 	 * Map the pages allocated in _bus_dmamem_alloc() to the
 	 * kernel virtual address space.
 	 */
 	mlist = segs[0]._ds_mlist;
-	for (m = TAILQ_FIRST(mlist); m != NULL; m = TAILQ_NEXT(m,pageq.queue)) {
+	for (m = TAILQ_FIRST(mlist); m != NULL; m = TAILQ_NEXT(m,pageq)) {
 
 		if (size == 0)
 			panic("iommu_dmamem_map: size botch");
@@ -798,7 +797,7 @@ iommu_dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
 }
 
 void
-iommu_dmamem_unmap(bus_dma_tag_t t, void *kva, size_t size)
+iommu_dmamem_unmap(bus_dma_tag_t t, caddr_t kva, size_t size)
 {
 
 #ifdef DIAGNOSTIC

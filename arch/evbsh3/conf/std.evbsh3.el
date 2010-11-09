@@ -1,9 +1,12 @@
-# $NetBSD: std.evbsh3.el,v 1.7 2008/02/02 18:28:33 uwe Exp $
+# $NetBSD: std.evbsh3.el,v 1.6 2006/03/17 16:06:51 uebayasi Exp $
 #
 # standard, required NetBSD/evbsh3 'options'
 
 machine evbsh3 sh3
 include		"conf/std"	# MI standard options
-include		"arch/sh3/conf/std.sh3el"	# arch standard options
 
+options 	EXEC_SCRIPT	# exec #! scripts
+
+makeoptions	ENDIAN="-EL"
 makeoptions	DEFTEXTADDR="0x8c010000"
+makeoptions	MACHINE_ARCH=sh3el

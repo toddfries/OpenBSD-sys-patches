@@ -1,4 +1,4 @@
-/*	$NetBSD: pmap_bootstrap.c,v 1.31 2009/01/17 07:17:36 tsutsui Exp $	*/
+/*	$NetBSD: pmap_bootstrap.c,v 1.23 2005/12/11 12:18:17 christos Exp $	*/
 
 /* 
  * Copyright (c) 1991, 1993
@@ -36,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: pmap_bootstrap.c,v 1.31 2009/01/17 07:17:36 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pmap_bootstrap.c,v 1.23 2005/12/11 12:18:17 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/kcore.h>
@@ -49,17 +49,22 @@ __KERNEL_RCSID(0, "$NetBSD: pmap_bootstrap.c,v 1.31 2009/01/17 07:17:36 tsutsui 
 
 #include <uvm/uvm_extern.h>
 
-#define RELOC(v, t)	*((t*)((uintptr_t)&(v) + firstpa))
-#define RELOCPTR(v, t)	((t)((uintptr_t)RELOC((v), t) + firstpa))
+#define RELOC(v, t)	*((t*)((u_int)&(v) + firstpa))
 
 extern char *kernel_text, *etext;
+extern int Sysptsize;
 extern char *proc0paddr;
+extern st_entry_t *Sysseg;
+extern pt_entry_t *Sysptmap, *Sysmap;
 
 extern int maxmem, physmem;
 extern paddr_t avail_start, avail_end;
+extern vaddr_t virtual_avail, virtual_end;
+extern vsize_t mem_size;
 extern phys_ram_seg_t mem_clusters[];
 extern int mem_cluster_cnt;
 extern paddr_t msgbufpa;
+extern int protection_codes[];
 
 /*
  * Special purpose kernel virtual addresses, used for mapping
@@ -69,11 +74,10 @@ extern paddr_t msgbufpa;
  *	vmmap:		/dev/mem, crash dumps, parity error checking
  *	msgbufaddr:	kernel message buffer
  */
-void *CADDR1, *CADDR2;
-char *vmmap;
-void *msgbufaddr;
+caddr_t		CADDR1, CADDR2, vmmap;
+extern caddr_t	msgbufaddr;
 
-void	pmap_bootstrap(paddr_t, paddr_t);
+void	pmap_bootstrap __P((paddr_t, paddr_t));
 
 /*
  * Bootstrap the VM system.
@@ -87,7 +91,9 @@ void	pmap_bootstrap(paddr_t, paddr_t);
  * XXX a PIC compiler would make this much easier.
  */
 void
-pmap_bootstrap(paddr_t nextpa, paddr_t firstpa)
+pmap_bootstrap(nextpa, firstpa)
+	paddr_t nextpa;
+	paddr_t firstpa;
 {
 	paddr_t kstpa, kptpa, kptmpa, lkptpa, p0upa;
 	u_int nptpages, kstsize;
@@ -120,7 +126,7 @@ pmap_bootstrap(paddr_t nextpa, paddr_t firstpa)
 	 *	(PA - firstpa + KERNBASE).
 	 */
 	iiomappages = m68k_btop(RELOC(intiotop_phys, u_int) -
-	    RELOC(intiobase_phys, u_int));
+			       RELOC(intiobase_phys, u_int));
 
 #if defined(M68040) || defined(M68060)
 	if (RELOC(mmutype, int) == MMU_68040)
@@ -137,7 +143,8 @@ pmap_bootstrap(paddr_t nextpa, paddr_t firstpa)
 	p0upa = nextpa;
 	nextpa += USPACE;
 	kptpa = nextpa;
-	nptpages = RELOC(Sysptsize, int) + (iiomappages + NPTEPG - 1) / NPTEPG;
+	nptpages = RELOC(Sysptsize, int) +
+		(iiomappages + NPTEPG - 1) / NPTEPG;
 	nextpa += nptpages * PAGE_SIZE;
 
 	/*
@@ -301,7 +308,7 @@ pmap_bootstrap(paddr_t nextpa, paddr_t firstpa)
 	 * the last page of physical memory.
 	 */
 	pte = (u_int *)lkptpa;
-	epte = &pte[NPTEPG - 1];
+	epte = &pte[NPTEPG-1];
 	while (pte < epte)
 		*pte++ = PG_NV;
 
@@ -386,7 +393,7 @@ pmap_bootstrap(paddr_t nextpa, paddr_t firstpa)
 		(pt_entry_t *)(kptmpa - firstpa);
 	/*
 	 * Sysmap: kernel page table (as mapped through Sysptmap)
-	 * Allocated at the end of KVA space.
+	 * Immediately follows `nptpages' of static kernel page table.
 	 */
 	RELOC(Sysmap, pt_entry_t *) =
 	    (pt_entry_t *)m68k_ptob((NPTEPG - 2) * NPTEPG);
@@ -490,9 +497,9 @@ pmap_bootstrap(paddr_t nextpa, paddr_t firstpa)
 	 * absolute "jmp" table.
 	 */
 	{
-		u_int *kp;
+		int *kp;
 
-		kp = &RELOC(protection_codes, u_int);
+		kp = &RELOC(protection_codes, int);
 		kp[VM_PROT_NONE|VM_PROT_NONE|VM_PROT_NONE] = 0;
 		kp[VM_PROT_READ|VM_PROT_NONE|VM_PROT_NONE] = PG_RO;
 		kp[VM_PROT_READ|VM_PROT_NONE|VM_PROT_EXECUTE] = PG_RO;
@@ -508,9 +515,7 @@ pmap_bootstrap(paddr_t nextpa, paddr_t firstpa)
 	 * just initialize pointers.
 	 */
 	{
-		struct pmap *kpm;
-
-		kpm = RELOCPTR(kernel_pmap_ptr, struct pmap *);
+		struct pmap *kpm = &RELOC(kernel_pmap_store, struct pmap);
 
 		kpm->pm_stab = RELOC(Sysseg, st_entry_t *);
 		kpm->pm_ptab = RELOC(Sysmap, pt_entry_t *);
@@ -530,7 +535,7 @@ pmap_bootstrap(paddr_t nextpa, paddr_t firstpa)
 			
 			kpm->pm_stfree = ~l2tobm(0);
 			num = roundup(nptpages * (NPTEPG / SG4_LEV3SIZE),
-			    SG4_LEV2SIZE) / SG4_LEV2SIZE;
+				      SG4_LEV2SIZE) / SG4_LEV2SIZE;
 			while (num)
 				kpm->pm_stfree &= ~l2tobm(num--);
 			kpm->pm_stfree &= ~l2tobm(MAXKL2SIZE-1);
@@ -548,13 +553,13 @@ pmap_bootstrap(paddr_t nextpa, paddr_t firstpa)
 	{
 		vaddr_t va = RELOC(virtual_avail, vaddr_t);
 
-		RELOC(CADDR1, void *) = (void *)va;
+		RELOC(CADDR1, caddr_t) = (caddr_t)va;
 		va += PAGE_SIZE;
-		RELOC(CADDR2, void *) = (void *)va;
+		RELOC(CADDR2, caddr_t) = (caddr_t)va;
 		va += PAGE_SIZE;
-		RELOC(vmmap, void *) = (void *)va;
+		RELOC(vmmap, caddr_t) = (caddr_t)va;
 		va += PAGE_SIZE;
-		RELOC(msgbufaddr, void *) = (void *)va;
+		RELOC(msgbufaddr, caddr_t) = (caddr_t)va;
 		va += m68k_round_page(MSGBUFSIZE);
 		RELOC(virtual_avail, vaddr_t) = va;
 	}

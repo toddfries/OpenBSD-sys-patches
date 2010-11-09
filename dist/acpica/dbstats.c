@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Module Name: dbstats - Generation and display of ACPI table statistics
- *              $Revision: 1.6 $
+ *              xRevision: 1.81 $
  *
  ******************************************************************************/
 
@@ -9,7 +9,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2008, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2006, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -115,6 +115,9 @@
  *****************************************************************************/
 
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: dbstats.c,v 1.3 2006/11/16 01:33:31 christos Exp $");
+
 #include "acpi.h"
 #include "acdebug.h"
 #include "acnamesp.h"
@@ -141,11 +144,9 @@ AcpiDbClassifyOneObject (
     void                    *Context,
     void                    **ReturnValue);
 
-#if defined ACPI_DBG_TRACK_ALLOCATIONS || defined ACPI_USE_LOCAL_CACHE
 static void
 AcpiDbListInfo (
     ACPI_MEMORY_LIST        *List);
-#endif
 
 
 /*
@@ -172,7 +173,6 @@ static ARGUMENT_INFO        AcpiDbStatTypes [] =
 #define CMD_STAT_STACK           6
 
 
-#if defined ACPI_DBG_TRACK_ALLOCATIONS || defined ACPI_USE_LOCAL_CACHE
 /*******************************************************************************
  *
  * FUNCTION:    AcpiDbListInfo
@@ -191,6 +191,7 @@ AcpiDbListInfo (
 {
 #ifdef ACPI_DBG_TRACK_ALLOCATIONS
     UINT32                  Outstanding;
+    UINT32                  Temp;
 #endif
 
     AcpiOsPrintf ("\n%s\n", List->ListName);
@@ -200,7 +201,7 @@ AcpiDbListInfo (
     if (List->MaxDepth > 0)
     {
         AcpiOsPrintf (
-            "    Cache: [Depth    MaxD Avail  Size]                %8.2X %8.2X %8.2X %8.2X\n",
+            "    Cache: [Depth Max Avail Size]         % 7d % 7d % 7d % 7d B\n",
             List->CurrentDepth,
             List->MaxDepth,
             List->MaxDepth - List->CurrentDepth,
@@ -211,39 +212,33 @@ AcpiDbListInfo (
     if (List->MaxDepth > 0)
     {
         AcpiOsPrintf (
-            "    Cache: [Requests Hits Misses ObjSize]             %8.2X %8.2X %8.2X %8.2X\n",
+            "    Cache: [Requests Hits Misses ObjSize] % 7d % 7d % 7d % 7d B\n",
             List->Requests,
             List->Hits,
             List->Requests - List->Hits,
             List->ObjectSize);
     }
 
-    Outstanding = AcpiDbGetCacheInfo (List);
+    Outstanding = List->TotalAllocated -
+                    List->TotalFreed -
+                    List->CurrentDepth;
 
     if (List->ObjectSize)
     {
-        AcpiOsPrintf (
-            "    Mem:   [Alloc    Free Max    CurSize Outstanding] %8.2X %8.2X %8.2X %8.2X %8.2X\n",
-            List->TotalAllocated,
-            List->TotalFreed,
-            List->MaxOccupied,
-            Outstanding * List->ObjectSize,
-            Outstanding);
+        Temp = ACPI_ROUND_UP_TO_1K (Outstanding * List->ObjectSize);
     }
     else
     {
-        AcpiOsPrintf (
-            "    Mem:   [Alloc Free Max CurSize Outstanding Total] %8.2X %8.2X %8.2X %8.2X %8.2X %8.2X\n",
-            List->TotalAllocated,
-            List->TotalFreed,
-            List->MaxOccupied,
-            List->CurrentTotalSize,
-            Outstanding,
-            List->TotalSize);
+        Temp = ACPI_ROUND_UP_TO_1K (List->CurrentTotalSize);
     }
+
+    AcpiOsPrintf (
+        "    Mem:   [Alloc Free Outstanding Size]  % 7d % 7d % 7d % 7d Kb\n",
+        List->TotalAllocated,
+        List->TotalFreed,
+        Outstanding, Temp);
 #endif
 }
-#endif
 
 
 /*******************************************************************************
@@ -470,6 +465,11 @@ AcpiDbDisplayStatistics (
     UINT32                  Temp;
 
 
+    if (!AcpiGbl_DSDT)
+    {
+        AcpiOsPrintf ("*** Warning: There is no DSDT loaded\n");
+    }
+
     if (!TypeArg)
     {
         AcpiOsPrintf ("The following subcommands are available:\n    ALLOCATIONS, OBJECTS, MEMORY, MISC, SIZES, TABLES\n");
@@ -496,7 +496,12 @@ AcpiDbDisplayStatistics (
 
     case CMD_STAT_TABLES:
 
-        AcpiOsPrintf ("ACPI Table Information (not implemented):\n\n");
+        AcpiOsPrintf ("ACPI Table Information:\n\n");
+        if (AcpiGbl_DSDT)
+        {
+            AcpiOsPrintf ("DSDT Length:................% 7ld (%X)\n",
+                AcpiGbl_DSDT->Length, AcpiGbl_DSDT->Length);
+        }
         break;
 
     case CMD_STAT_OBJECTS:
@@ -523,18 +528,17 @@ AcpiDbDisplayStatistics (
     case CMD_STAT_MEMORY:
 
 #ifdef ACPI_DBG_TRACK_ALLOCATIONS
-        AcpiOsPrintf ("\n----Object Statistics (all in hex)---------\n");
+        AcpiOsPrintf ("\n----Object and Cache Statistics---------------------------------------------\n");
 
         AcpiDbListInfo (AcpiGbl_GlobalList);
         AcpiDbListInfo (AcpiGbl_NsNodeList);
-#endif
 
 #ifdef ACPI_USE_LOCAL_CACHE
-        AcpiOsPrintf ("\n----Cache Statistics (all in hex)---------\n");
         AcpiDbListInfo (AcpiGbl_OperandCache);
         AcpiDbListInfo (AcpiGbl_PsNodeCache);
         AcpiDbListInfo (AcpiGbl_PsNodeExtCache);
         AcpiDbListInfo (AcpiGbl_StateCache);
+#endif
 #endif
 
         break;
@@ -550,7 +554,7 @@ AcpiDbDisplayStatistics (
         AcpiOsPrintf ("\n");
 
         AcpiOsPrintf ("Mutex usage:\n\n");
-        for (i = 0; i < ACPI_NUM_MUTEX; i++)
+        for (i = 0; i < NUM_MUTEX; i++)
         {
             AcpiOsPrintf ("%-28s:       % 7ld\n",
                 AcpiUtGetMutexName (i), AcpiGbl_MutexInfo[i].UseCount);
@@ -592,7 +596,6 @@ AcpiDbDisplayStatistics (
         AcpiOsPrintf ("ParseObjectAsl   %3d\n", sizeof (ACPI_PARSE_OBJ_ASL));
         AcpiOsPrintf ("OperandObject    %3d\n", sizeof (ACPI_OPERAND_OBJECT));
         AcpiOsPrintf ("NamespaceNode    %3d\n", sizeof (ACPI_NAMESPACE_NODE));
-        AcpiOsPrintf ("AcpiObject       %3d\n", sizeof (ACPI_OBJECT));
 
         break;
 
@@ -600,13 +603,13 @@ AcpiDbDisplayStatistics (
     case CMD_STAT_STACK:
 #if defined(ACPI_DEBUG_OUTPUT)
 
-        Temp = (UINT32) ACPI_PTR_DIFF (AcpiGbl_EntryStackPointer, AcpiGbl_LowestStackPointer);
+        Temp = (UINT32) (AcpiGbl_EntryStackPointer - AcpiGbl_LowestStackPointer);
 
         AcpiOsPrintf ("\nSubsystem Stack Usage:\n\n");
-        AcpiOsPrintf ("Entry Stack Pointer          %p\n", AcpiGbl_EntryStackPointer);
-        AcpiOsPrintf ("Lowest Stack Pointer         %p\n", AcpiGbl_LowestStackPointer);
-        AcpiOsPrintf ("Stack Use                    %X (%u)\n", Temp, Temp);
-        AcpiOsPrintf ("Deepest Procedure Nesting    %u\n", AcpiGbl_DeepestNesting);
+        AcpiOsPrintf ("Entry Stack Pointer          %X\n", AcpiGbl_EntryStackPointer);
+        AcpiOsPrintf ("Lowest Stack Pointer         %X\n", AcpiGbl_LowestStackPointer);
+        AcpiOsPrintf ("Stack Use                    %X (%d)\n", Temp, Temp);
+        AcpiOsPrintf ("Deepest Procedure Nesting    %d\n", AcpiGbl_DeepestNesting);
 #endif
         break;
 

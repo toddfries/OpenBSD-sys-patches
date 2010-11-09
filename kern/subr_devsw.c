@@ -1,7 +1,7 @@
-/*	$NetBSD: subr_devsw.c,v 1.26 2009/02/02 14:00:27 haad Exp $	*/
+/*	$NetBSD: subr_devsw.c,v 1.13 2007/11/07 00:23:22 ad Exp $	*/
 
 /*-
- * Copyright (c) 2001, 2002, 2007, 2008 The NetBSD Foundation, Inc.
+ * Copyright (c) 2001, 2002, 2007 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -69,7 +76,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: subr_devsw.c,v 1.26 2009/02/02 14:00:27 haad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: subr_devsw.c,v 1.13 2007/11/07 00:23:22 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/conf.h>
@@ -77,7 +84,6 @@ __KERNEL_RCSID(0, "$NetBSD: subr_devsw.c,v 1.26 2009/02/02 14:00:27 haad Exp $")
 #include <sys/systm.h>
 #include <sys/poll.h>
 #include <sys/tty.h>
-#include <sys/cpu.h>
 #include <sys/buf.h>
 
 #ifdef DEVSW_DEBUG
@@ -97,11 +103,11 @@ extern struct devsw_conv *devsw_conv, devsw_conv0[];
 extern const int sys_bdevsws, sys_cdevsws;
 extern int max_bdevsws, max_cdevsws, max_devsw_convs;
 
-static int bdevsw_attach(const struct bdevsw *, devmajor_t *);
-static int cdevsw_attach(const struct cdevsw *, devmajor_t *);
+static int bdevsw_attach(const char *, const struct bdevsw *, int *);
+static int cdevsw_attach(const char *, const struct cdevsw *, int *);
 static void devsw_detach_locked(const struct bdevsw *, const struct cdevsw *);
 
-kmutex_t device_lock;
+kmutex_t devsw_lock;
 
 void
 devsw_init(void)
@@ -109,23 +115,22 @@ devsw_init(void)
 
 	KASSERT(sys_bdevsws < MAXDEVSW - 1);
 	KASSERT(sys_cdevsws < MAXDEVSW - 1);
-	mutex_init(&device_lock, MUTEX_DEFAULT, IPL_NONE);
+
+	mutex_init(&devsw_lock, MUTEX_DEFAULT, IPL_NONE);
 }
 
 int
-devsw_attach(const char *devname,
-	     const struct bdevsw *bdev, devmajor_t *bmajor,
-	     const struct cdevsw *cdev, devmajor_t *cmajor)
+devsw_attach(const char *devname, const struct bdevsw *bdev, int *bmajor,
+	     const struct cdevsw *cdev, int *cmajor)
 {
 	struct devsw_conv *conv;
 	char *name;
 	int error, i;
-	size_t len;
 
 	if (devname == NULL || cdev == NULL)
 		return (EINVAL);
 
-	mutex_enter(&device_lock);
+	mutex_enter(&devsw_lock);
 
 	for (i = 0 ; i < max_devsw_convs ; i++) {
 		conv = &devsw_conv[i];
@@ -156,14 +161,14 @@ devsw_attach(const char *devname,
 			bdevsw[*bmajor] = bdev;
 		cdevsw[*cmajor] = cdev;
 
-		mutex_exit(&device_lock);
+		mutex_exit(&devsw_lock);
 		return (0);
 	}
 
-	error = bdevsw_attach(bdev, bmajor);
+	error = bdevsw_attach(devname, bdev, bmajor);
 	if (error != 0) 
 		goto fail;
-	error = cdevsw_attach(cdev, cmajor);
+	error = cdevsw_attach(devname, cdev, cmajor);
 	if (error != 0) {
 		devsw_detach_locked(bdev, NULL);
 		goto fail;
@@ -196,34 +201,32 @@ devsw_attach(const char *devname,
 		max_devsw_convs = new;
 	}
 
-	len = strlen(devname) + 1;
-	name = kmem_alloc(len, KM_NOSLEEP);
+	i = strlen(devname) + 1;
+	name = kmem_alloc(i, KM_NOSLEEP);
 	if (name == NULL) {
 		devsw_detach_locked(bdev, cdev);
-		error = ENOMEM;
 		goto fail;
 	}
-	strlcpy(name, devname, len);
+	strlcpy(name, devname, i);
 
 	devsw_conv[i].d_name = name;
 	devsw_conv[i].d_bmajor = *bmajor;
 	devsw_conv[i].d_cmajor = *cmajor;
 
-	mutex_exit(&device_lock);
+	mutex_exit(&devsw_lock);
 	return (0);
  fail:
-	mutex_exit(&device_lock);
+	mutex_exit(&devsw_lock);
 	return (error);
 }
 
 static int
-bdevsw_attach(const struct bdevsw *devsw, devmajor_t *devmajor)
+bdevsw_attach(const char *devname, const struct bdevsw *devsw, int *devmajor)
 {
 	const struct bdevsw **newptr;
-	devmajor_t bmajor;
-	int i;
+	int bmajor, i;
 
-	KASSERT(mutex_owned(&device_lock));
+	KASSERT(mutex_owned(&devsw_lock));
 
 	if (devsw == NULL)
 		return (0);
@@ -267,13 +270,12 @@ bdevsw_attach(const struct bdevsw *devsw, devmajor_t *devmajor)
 }
 
 static int
-cdevsw_attach(const struct cdevsw *devsw, devmajor_t *devmajor)
+cdevsw_attach(const char *devname, const struct cdevsw *devsw, int *devmajor)
 {
 	const struct cdevsw **newptr;
-	devmajor_t cmajor;
-	int i;
+	int cmajor, i;
 
-	KASSERT(mutex_owned(&device_lock));
+	KASSERT(mutex_owned(&devsw_lock));
 
 	if (*devmajor < 0) {
 		for (cmajor = sys_cdevsws ; cmajor < max_cdevsws ; cmajor++) {
@@ -318,7 +320,7 @@ devsw_detach_locked(const struct bdevsw *bdev, const struct cdevsw *cdev)
 {
 	int i;
 
-	KASSERT(mutex_owned(&device_lock));
+	KASSERT(mutex_owned(&devsw_lock));
 
 	if (bdev != NULL) {
 		for (i = 0 ; i < max_bdevsws ; i++) {
@@ -338,14 +340,13 @@ devsw_detach_locked(const struct bdevsw *bdev, const struct cdevsw *cdev)
 	}
 }
 
-int
+void
 devsw_detach(const struct bdevsw *bdev, const struct cdevsw *cdev)
 {
 
-	mutex_enter(&device_lock);
+	mutex_enter(&devsw_lock);
 	devsw_detach_locked(bdev, cdev);
-	mutex_exit(&device_lock);
-	return 0;
+	mutex_exit(&devsw_lock);
 }
 
 /*
@@ -356,7 +357,7 @@ devsw_detach(const struct bdevsw *bdev, const struct cdevsw *cdev)
 const struct bdevsw *
 bdevsw_lookup(dev_t dev)
 {
-	devmajor_t bmajor;
+	int bmajor;
 
 	if (dev == NODEV)
 		return (NULL);
@@ -375,7 +376,7 @@ bdevsw_lookup(dev_t dev)
 const struct cdevsw *
 cdevsw_lookup(dev_t dev)
 {
-	devmajor_t cmajor;
+	int cmajor;
 
 	if (dev == NODEV)
 		return (NULL);
@@ -392,17 +393,17 @@ cdevsw_lookup(dev_t dev)
  * => Caller must ensure that the device is not detached, and therefore
  *    that the returned major is still valid when dereferenced.
  */
-devmajor_t
+int
 bdevsw_lookup_major(const struct bdevsw *bdev)
 {
-	devmajor_t bmajor;
+	int bmajor;
 
 	for (bmajor = 0 ; bmajor < max_bdevsws ; bmajor++) {
 		if (bdevsw[bmajor] == bdev)
 			return (bmajor);
 	}
 
-	return (NODEVMAJOR);
+	return (-1);
 }
 
 /*
@@ -411,17 +412,17 @@ bdevsw_lookup_major(const struct bdevsw *bdev)
  * => Caller must ensure that the device is not detached, and therefore
  *    that the returned major is still valid when dereferenced.
  */
-devmajor_t
+int
 cdevsw_lookup_major(const struct cdevsw *cdev)
 {
-	devmajor_t cmajor;
+	int cmajor;
 
 	for (cmajor = 0 ; cmajor < max_cdevsws ; cmajor++) {
 		if (cdevsw[cmajor] == cdev)
 			return (cmajor);
 	}
 
-	return (NODEVMAJOR);
+	return (-1);
 }
 
 /*
@@ -431,18 +432,17 @@ cdevsw_lookup_major(const struct cdevsw *cdev)
  *    that the name pointer is still valid when dereferenced.
  */
 const char *
-devsw_blk2name(devmajor_t bmajor)
+devsw_blk2name(int bmajor)
 {
 	const char *name;
-	devmajor_t cmajor;
-	int i;
+	int cmajor, i;
 
 	name = NULL;
 	cmajor = -1;
 
-	mutex_enter(&device_lock);
+	mutex_enter(&devsw_lock);
 	if (bmajor < 0 || bmajor >= max_bdevsws || bdevsw[bmajor] == NULL) {
-		mutex_exit(&device_lock);
+		mutex_exit(&devsw_lock);
 		return (NULL);
 	}
 	for (i = 0 ; i < max_devsw_convs; i++) {
@@ -453,58 +453,8 @@ devsw_blk2name(devmajor_t bmajor)
 	}
 	if (cmajor >= 0 && cmajor < max_cdevsws && cdevsw[cmajor] != NULL)
 		name = devsw_conv[i].d_name;
-	mutex_exit(&device_lock);
+	mutex_exit(&devsw_lock);
 
-	return (name);
-}
-
-/*
- * Convert char major number to device driver name.
- */
-const char*
-cdevsw_getname(devmajor_t major)
-{
-	const char *name;
-	int i;
-
-	name = NULL;
-
-	if (major < 0)
-		return (NULL);
-  
-	mutex_enter(&device_lock);
-	for (i = 0 ; i < max_devsw_convs; i++) {
-		if (devsw_conv[i].d_cmajor == major) {
-			name = devsw_conv[i].d_name;
-			break;
-		}
-	}
-	mutex_exit(&device_lock);
-	return (name);
-}
-
-/*
- * Convert block major number to device driver name.
- */
-const char*
-bdevsw_getname(devmajor_t major)
-{
-	const char *name;
-	int i;
-
-	name = NULL;
-
-	if (major < 0)
-		return (NULL);
-  
-	mutex_enter(&device_lock);
-	for (i = 0 ; i < max_devsw_convs; i++) {
-		if (devsw_conv[i].d_bmajor == major) {
-			name = devsw_conv[i].d_name;
-			break;
-		}
-	}
-	mutex_exit(&device_lock);
 	return (name);
 }
 
@@ -514,17 +464,16 @@ bdevsw_getname(devmajor_t major)
  * => Caller must ensure that the device is not detached, and therefore
  *    that the major number is still valid when dereferenced.
  */
-devmajor_t
+int
 devsw_name2blk(const char *name, char *devname, size_t devnamelen)
 {
 	struct devsw_conv *conv;
-	devmajor_t bmajor;
-	int i;
+	int bmajor, i;
 
 	if (name == NULL)
-		return (NODEVMAJOR);
+		return (-1);
 
-	mutex_enter(&device_lock);
+	mutex_enter(&devsw_lock);
 	for (i = 0 ; i < max_devsw_convs ; i++) {
 		size_t len;
 
@@ -548,60 +497,12 @@ devsw_name2blk(const char *name, char *devname, size_t devnamelen)
 			strncpy(devname, conv->d_name, devnamelen);
 			devname[devnamelen - 1] = '\0';
 		}
-		mutex_exit(&device_lock);
+		mutex_exit(&devsw_lock);
 		return (bmajor);
 	}
 
-	mutex_exit(&device_lock);
-	return (NODEVMAJOR);
-}
-
-/*
- * Convert from device name to char major number.
- *
- * => Caller must ensure that the device is not detached, and therefore
- *    that the major number is still valid when dereferenced.
- */
-devmajor_t
-devsw_name2chr(const char *name, char *devname, size_t devnamelen)
-{
-	struct devsw_conv *conv;
-	devmajor_t cmajor;
-	int i;
-
-	if (name == NULL)
-		return (NODEVMAJOR);
-
-	mutex_enter(&device_lock);
-	for (i = 0 ; i < max_devsw_convs ; i++) {
-		size_t len;
-
-		conv = &devsw_conv[i];
-		if (conv->d_name == NULL)
-			continue;
-		len = strlen(conv->d_name);
-		if (strncmp(conv->d_name, name, len) != 0)
-			continue;
-		if (*(name +len) && !isdigit(*(name + len)))
-			continue;
-		cmajor = conv->d_cmajor;
-		if (cmajor < 0 || cmajor >= max_cdevsws ||
-		    cdevsw[cmajor] == NULL)
-			break;
-		if (devname != NULL) {
-#ifdef DEVSW_DEBUG
-			if (strlen(conv->d_name) >= devnamelen)
-				printf("devsw_name2chr: too short buffer");
-#endif /* DEVSW_DEBUG */
-			strncpy(devname, conv->d_name, devnamelen);
-			devname[devnamelen - 1] = '\0';
-		}
-		mutex_exit(&device_lock);
-		return (cmajor);
-	}
-
-	mutex_exit(&device_lock);
-	return (NODEVMAJOR);
+	mutex_exit(&devsw_lock);
+	return (-1);
 }
 
 /*
@@ -613,17 +514,16 @@ devsw_name2chr(const char *name, char *devname, size_t devnamelen)
 dev_t
 devsw_chr2blk(dev_t cdev)
 {
-	devmajor_t bmajor, cmajor;
-	int i;
+	int bmajor, cmajor, i;
 	dev_t rv;
 
 	cmajor = major(cdev);
-	bmajor = NODEVMAJOR;
+	bmajor = -1;
 	rv = NODEV;
 
-	mutex_enter(&device_lock);
+	mutex_enter(&devsw_lock);
 	if (cmajor < 0 || cmajor >= max_cdevsws || cdevsw[cmajor] == NULL) {
-		mutex_exit(&device_lock);
+		mutex_exit(&devsw_lock);
 		return (NODEV);
 	}
 	for (i = 0 ; i < max_devsw_convs ; i++) {
@@ -634,7 +534,7 @@ devsw_chr2blk(dev_t cdev)
 	}
 	if (bmajor >= 0 && bmajor < max_bdevsws && bdevsw[bmajor] != NULL)
 		rv = makedev(bmajor, minor(cdev));
-	mutex_exit(&device_lock);
+	mutex_exit(&devsw_lock);
 
 	return (rv);
 }
@@ -648,17 +548,16 @@ devsw_chr2blk(dev_t cdev)
 dev_t
 devsw_blk2chr(dev_t bdev)
 {
-	devmajor_t bmajor, cmajor;
-	int i;
+	int bmajor, cmajor, i;
 	dev_t rv;
 
 	bmajor = major(bdev);
-	cmajor = NODEVMAJOR;
+	cmajor = -1;
 	rv = NODEV;
 
-	mutex_enter(&device_lock);
+	mutex_enter(&devsw_lock);
 	if (bmajor < 0 || bmajor >= max_bdevsws || bdevsw[bmajor] == NULL) {
-		mutex_exit(&device_lock);
+		mutex_exit(&devsw_lock);
 		return (NODEV);
 	}
 	for (i = 0 ; i < max_devsw_convs ; i++) {
@@ -669,7 +568,7 @@ devsw_blk2chr(dev_t bdev)
 	}
 	if (cmajor >= 0 && cmajor < max_cdevsws && cdevsw[cmajor] != NULL)
 		rv = makedev(cmajor, minor(bdev));
-	mutex_exit(&device_lock);
+	mutex_exit(&devsw_lock);
 
 	return (rv);
 }
@@ -679,28 +578,28 @@ devsw_blk2chr(dev_t bdev)
  */
 
 #define	DEV_LOCK(d)						\
-	if ((mpflag = (d->d_flag & D_MPSAFE)) == 0) {		\
-		KERNEL_LOCK(1, NULL);				\
+	if ((d->d_flag & D_MPSAFE) == 0) {			\
+		KERNEL_LOCK(1, curlwp);				\
 	}
 
 #define	DEV_UNLOCK(d)						\
-	if (mpflag == 0) {					\
-		KERNEL_UNLOCK_ONE(NULL);			\
+	if ((d->d_flag & D_MPSAFE) == 0) {			\
+		KERNEL_UNLOCK_ONE(curlwp);			\
 	}
 
 int
 bdev_open(dev_t dev, int flag, int devtype, lwp_t *l)
 {
 	const struct bdevsw *d;
-	int rv, mpflag;
+	int rv;
 
 	/*
 	 * For open we need to lock, in order to synchronize
 	 * with attach/detach.
 	 */
-	mutex_enter(&device_lock);
+	mutex_enter(&devsw_lock);
 	d = bdevsw_lookup(dev);
-	mutex_exit(&device_lock);
+	mutex_exit(&devsw_lock);
 	if (d == NULL)
 		return ENXIO;
 
@@ -715,7 +614,7 @@ int
 bdev_close(dev_t dev, int flag, int devtype, lwp_t *l)
 {
 	const struct bdevsw *d;
-	int rv, mpflag;
+	int rv;
 
 	if ((d = bdevsw_lookup(dev)) == NULL)
 		return ENXIO;
@@ -731,7 +630,6 @@ void
 bdev_strategy(struct buf *bp)
 {
 	const struct bdevsw *d;
-	int mpflag;
 
 	if ((d = bdevsw_lookup(bp->b_dev)) == NULL)
 		panic("bdev_strategy");
@@ -745,7 +643,7 @@ int
 bdev_ioctl(dev_t dev, u_long cmd, void *data, int flag, lwp_t *l)
 {
 	const struct bdevsw *d;
-	int rv, mpflag;
+	int rv;
 
 	if ((d = bdevsw_lookup(dev)) == NULL)
 		return ENXIO;
@@ -792,15 +690,15 @@ int
 cdev_open(dev_t dev, int flag, int devtype, lwp_t *l)
 {
 	const struct cdevsw *d;
-	int rv, mpflag;
+	int rv;
 
 	/*
 	 * For open we need to lock, in order to synchronize
 	 * with attach/detach.
 	 */
-	mutex_enter(&device_lock);
+	mutex_enter(&devsw_lock);
 	d = cdevsw_lookup(dev);
-	mutex_exit(&device_lock);
+	mutex_exit(&devsw_lock);
 	if (d == NULL)
 		return ENXIO;
 
@@ -815,7 +713,7 @@ int
 cdev_close(dev_t dev, int flag, int devtype, lwp_t *l)
 {
 	const struct cdevsw *d;
-	int rv, mpflag;
+	int rv;
 
 	if ((d = cdevsw_lookup(dev)) == NULL)
 		return ENXIO;
@@ -831,7 +729,7 @@ int
 cdev_read(dev_t dev, struct uio *uio, int flag)
 {
 	const struct cdevsw *d;
-	int rv, mpflag;
+	int rv;
 
 	if ((d = cdevsw_lookup(dev)) == NULL)
 		return ENXIO;
@@ -847,7 +745,7 @@ int
 cdev_write(dev_t dev, struct uio *uio, int flag)
 {
 	const struct cdevsw *d;
-	int rv, mpflag;
+	int rv;
 
 	if ((d = cdevsw_lookup(dev)) == NULL)
 		return ENXIO;
@@ -863,7 +761,7 @@ int
 cdev_ioctl(dev_t dev, u_long cmd, void *data, int flag, lwp_t *l)
 {
 	const struct cdevsw *d;
-	int rv, mpflag;
+	int rv;
 
 	if ((d = cdevsw_lookup(dev)) == NULL)
 		return ENXIO;
@@ -879,7 +777,6 @@ void
 cdev_stop(struct tty *tp, int flag)
 {
 	const struct cdevsw *d;
-	int mpflag;
 
 	if ((d = cdevsw_lookup(tp->t_dev)) == NULL)
 		return;
@@ -893,6 +790,7 @@ struct tty *
 cdev_tty(dev_t dev)
 {
 	const struct cdevsw *d;
+	struct tty * rv;
 
 	if ((d = cdevsw_lookup(dev)) == NULL)
 		return NULL;
@@ -901,14 +799,18 @@ cdev_tty(dev_t dev)
 	if (d->d_tty == NULL)
 		return NULL;
 
-	return (*d->d_tty)(dev);
+	DEV_LOCK(d);
+	rv = (*d->d_tty)(dev);
+	DEV_UNLOCK(d);
+
+	return rv;
 }
 
 int
 cdev_poll(dev_t dev, int flag, lwp_t *l)
 {
 	const struct cdevsw *d;
-	int rv, mpflag;
+	int rv;
 
 	if ((d = cdevsw_lookup(dev)) == NULL)
 		return POLLERR;
@@ -925,7 +827,6 @@ cdev_mmap(dev_t dev, off_t off, int flag)
 {
 	const struct cdevsw *d;
 	paddr_t rv;
-	int mpflag;
 
 	if ((d = cdevsw_lookup(dev)) == NULL)
 		return (paddr_t)-1LL;
@@ -941,7 +842,7 @@ int
 cdev_kqfilter(dev_t dev, struct knote *kn)
 {
 	const struct cdevsw *d;
-	int rv, mpflag;
+	int rv;
 
 	if ((d = cdevsw_lookup(dev)) == NULL)
 		return ENXIO;

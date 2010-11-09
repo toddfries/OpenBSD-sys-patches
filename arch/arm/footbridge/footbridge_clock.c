@@ -1,4 +1,4 @@
-/*	$NetBSD: footbridge_clock.c,v 1.25 2008/09/20 14:53:37 chris Exp $	*/
+/*	$NetBSD: footbridge_clock.c,v 1.23 2006/09/11 15:18:23 gdamore Exp $	*/
 
 /*
  * Copyright (c) 1997 Mark Brinicombe.
@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: footbridge_clock.c,v 1.25 2008/09/20 14:53:37 chris Exp $");
+__KERNEL_RCSID(0, "$NetBSD: footbridge_clock.c,v 1.23 2006/09/11 15:18:23 gdamore Exp $");
 
 /* Include header files */
 
@@ -297,7 +297,7 @@ cpu_initclocks(void)
 	if (stathz) {
 		/* Setup timer 2 and claim interrupt */
 		setstatclockrate(stathz);
-       		clock_sc->sc_statclockintr = footbridge_intr_claim(IRQ_TIMER_2, IPL_HIGH,
+       		clock_sc->sc_statclockintr = footbridge_intr_claim(IRQ_TIMER_2, IPL_STATCLOCK,
        		    "tmr2 stat clk", statclockhandler, 0);
 		if (clock_sc->sc_statclockintr == NULL)
 			panic("%s: Cannot install timer 2 interrupt handler",
@@ -375,13 +375,7 @@ delay(unsigned n)
 	 */
 	if (!delay_count_per_usec)
 	{
-		/*
-		 * the loop below has a core of 6 instructions
-		 * StrongArms top out at 233Mhz, so one instruction takes
-		 * 0.004 us, and 6 take 0.025 us, so we need to loop 40
-		 * times to make one usec
-		 */
-		int delaycount = 40;
+		int delaycount = 25000;
 		volatile int i;
 
 		while (n-- > 0) {

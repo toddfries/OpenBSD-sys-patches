@@ -1,4 +1,4 @@
-/*	$NetBSD: pecoff_exec.c,v 1.38 2007/12/08 18:36:22 dsl Exp $	*/
+/*	$NetBSD: pecoff_exec.c,v 1.34 2006/11/16 01:32:44 christos Exp $	*/
 
 /*
  * Copyright (c) 2000 Masaru OKI
@@ -37,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: pecoff_exec.c,v 1.38 2007/12/08 18:36:22 dsl Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pecoff_exec.c,v 1.34 2006/11/16 01:32:44 christos Exp $");
 
 /*#define DEBUG_PECOFF*/
 
@@ -58,6 +58,7 @@ __KERNEL_RCSID(0, "$NetBSD: pecoff_exec.c,v 1.38 2007/12/08 18:36:22 dsl Exp $")
 
 #include <compat/pecoff/pecoff_exec.h>
 #include <compat/pecoff/pecoff_util.h>
+#include <compat/pecoff/pecoff_syscall.h>
 
 int pecoff_signature (struct lwp *l, struct vnode *vp,
 		      struct pecoff_dos_filehdr *dp);
@@ -82,7 +83,12 @@ int exec_pecoff_prep_zmagic (struct lwp *l, struct exec_package *epp,
 
 
 int
-pecoff_copyargs(struct lwp *l, struct exec_package *pack, struct ps_strings *arginfo, char **stackp, void *argp)
+pecoff_copyargs(l, pack, arginfo, stackp, argp)
+	struct lwp *l;
+	struct exec_package *pack;
+	struct ps_strings *arginfo;
+	char **stackp;
+	void *argp;
 {
 	int len = sizeof(struct pecoff_args);
 	struct pecoff_args *ap;
@@ -111,7 +117,10 @@ static const char signature[] = PECOFF_SIGNATURE;
  * Check PE signature.
  */
 int
-pecoff_signature(struct lwp *l, struct vnode *vp, struct pecoff_dos_filehdr *dp)
+pecoff_signature(l, vp, dp)
+	struct lwp *l;
+	struct vnode *vp;
+	struct pecoff_dos_filehdr *dp;
 {
 	int error;
 	char tbuf[sizeof(signature) - 1];
@@ -133,9 +142,16 @@ pecoff_signature(struct lwp *l, struct vnode *vp, struct pecoff_dos_filehdr *dp)
  * load(mmap) file.  for dynamic linker (ld.so.dll)
  */
 int
-pecoff_load_file(struct lwp *l, struct exec_package *epp, const char *path, struct exec_vmcmd_set *vcset, u_long *entry, struct pecoff_args *argp)
+pecoff_load_file(l, epp, path, vcset, entry, argp)
+	struct lwp *l;
+	struct exec_package *epp;
+	const char *path;
+	struct exec_vmcmd_set *vcset;
+	u_long *entry;
+	struct pecoff_args *argp;
 {
 	int error, peofs, scnsiz, i;
+	struct nameidata nd;
 	struct vnode *vp;
 	struct vattr attr;
 	struct pecoff_dos_filehdr dh;
@@ -143,28 +159,47 @@ pecoff_load_file(struct lwp *l, struct exec_package *epp, const char *path, stru
 	struct coff_aouthdr *ap;
 	struct pecoff_opthdr *wp;
 	struct coff_scnhdr *sh = 0;
-
-	error = emul_find_interp(l, epp, path);
-	if (error != 0)
-		return error;
-
-	vp = epp->ep_interp;
-	epp->ep_interp = NULL;
-	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
+	const char *bp;
 
 	/*
-	 * If it's not marked as executable, or it's not a regular
+	 * Following has ~same effect as emul_find_interp(), but the code
+	 * needs to do some more checks while having the vnode open.
+	 * emul_find_interp() wouldn't really simplify handling here.
+	 */
+	if ((error = emul_find(l, NULL, epp->ep_esch->es_emul->e_path,
+			       path, &bp, 0))) {
+		char *ptr;
+		int len;
+
+		len = strlen(path) + 1;
+		if (len > MAXPATHLEN)
+			return error;
+		ptr = malloc(len, M_TEMP, M_WAITOK);
+		copystr(path, ptr, len, 0);
+		bp = ptr;
+	}
+
+	NDINIT(&nd, LOOKUP, FOLLOW | LOCKLEAF, UIO_SYSSPACE, bp, l);
+	if ((error = namei(&nd)) != 0) {
+		/*XXXUNCONST*/
+		free(__UNCONST(bp), M_TEMP);
+		return error;
+	}
+	vp = nd.ni_vp;
+
+	/*
+	 * Similarly, if it's not marked as executable, or it's not a regular
 	 * file, we don't allow it to be used.
 	 */
 	if (vp->v_type != VREG) {
 		error = EACCES;
 		goto badunlock;
 	}
-	if ((error = VOP_ACCESS(vp, VEXEC, l->l_cred)) != 0)
+	if ((error = VOP_ACCESS(vp, VEXEC, l->l_cred, l)) != 0)
 		goto badunlock;
 
 	/* get attributes */
-	if ((error = VOP_GETATTR(vp, &attr, l->l_cred)) != 0)
+	if ((error = VOP_GETATTR(vp, &attr, l->l_cred, l)) != 0)
 		goto badunlock;
 
 	/*
@@ -236,6 +271,7 @@ pecoff_load_file(struct lwp *l, struct exec_package *epp, const char *path, stru
 	free(fp, M_TEMP);
 	free(sh, M_TEMP);
 	/*XXXUNCONST*/
+	free(__UNCONST(bp), M_TEMP);
 	vrele(vp);
 	return 0;
 
@@ -248,6 +284,7 @@ bad:
 	if (sh != 0)
 		free(sh, M_TEMP);
 	/*XXXUNCONST*/
+	free(__UNCONST(bp), M_TEMP);
 	vrele(vp);
 	return error;
 }
@@ -256,7 +293,13 @@ bad:
  * mmap one section.
  */
 void
-pecoff_load_section(struct exec_vmcmd_set *vcset, struct vnode *vp, struct coff_scnhdr *sh, long *addr, u_long *size, int *prot)
+pecoff_load_section(vcset, vp, sh, addr, size, prot)
+	struct exec_vmcmd_set *vcset;
+	struct vnode *vp;
+	struct coff_scnhdr *sh;
+	long *addr;
+	u_long *size;
+	int *prot;
 {
 	u_long diff, offset;
 
@@ -294,7 +337,9 @@ pecoff_load_section(struct exec_vmcmd_set *vcset, struct vnode *vp, struct coff_
 /*
  */
 int
-exec_pecoff_makecmds(struct lwp *l, struct exec_package *epp)
+exec_pecoff_makecmds(l, epp)
+	struct lwp *l;
+	struct exec_package *epp;
 {
 	int error, peofs;
 	struct pecoff_dos_filehdr *dp = epp->ep_hdr;
@@ -336,7 +381,11 @@ exec_pecoff_makecmds(struct lwp *l, struct exec_package *epp)
 /*
  */
 int
-exec_pecoff_coff_makecmds(struct lwp *l, struct exec_package *epp, struct coff_filehdr *fp, int peofs)
+exec_pecoff_coff_makecmds(l, epp, fp, peofs)
+	struct lwp *l;
+	struct exec_package *epp;
+	struct coff_filehdr *fp;
+	int peofs;
 {
 	struct coff_aouthdr *ap;
 	struct proc *p;
@@ -387,7 +436,12 @@ exec_pecoff_prep_nmagic(struct proc *p,
 /*
  */
 int
-exec_pecoff_prep_zmagic(struct lwp *l, struct exec_package *epp, struct coff_filehdr *fp, struct coff_aouthdr *ap, int peofs)
+exec_pecoff_prep_zmagic(l, epp, fp, ap, peofs)
+	struct lwp *l;
+	struct exec_package *epp;
+	struct coff_filehdr *fp;
+	struct coff_aouthdr *ap;
+	int peofs;
 {
 	int error, i;
 	struct pecoff_opthdr *wp;

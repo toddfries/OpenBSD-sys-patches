@@ -1,4 +1,4 @@
-/*	$NetBSD: if_ne_zbus.c,v 1.13 2008/04/28 20:23:12 martin Exp $ */
+/*	$NetBSD: if_ne_zbus.c,v 1.11 2002/10/02 04:55:51 thorpej Exp $ */
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_ne_zbus.c,v 1.13 2008/04/28 20:23:12 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_ne_zbus.c,v 1.11 2002/10/02 04:55:51 thorpej Exp $");
 
 /*
  * Thanks to Village Tronic for giving me a card.
@@ -65,8 +72,8 @@ __KERNEL_RCSID(0, "$NetBSD: if_ne_zbus.c,v 1.13 2008/04/28 20:23:12 martin Exp $
 
 #include <amiga/dev/zbusvar.h>
 
-int	ne_zbus_match(device_t, cfdata_t , void *);
-void	ne_zbus_attach(device_t, device_t, void *);
+int	ne_zbus_match(struct device *, struct cfdata *, void *);
+void	ne_zbus_attach(struct device *, struct device *, void *);
 
 struct ne_zbus_softc {
 	struct ne2000_softc	sc_ne2000;
@@ -74,7 +81,7 @@ struct ne_zbus_softc {
 	struct isr		sc_isr;
 };
 
-CFATTACH_DECL_NEW(ne_zbus, sizeof(struct ne_zbus_softc),
+CFATTACH_DECL(ne_zbus, sizeof(struct ne_zbus_softc),
     ne_zbus_match, ne_zbus_attach, NULL, NULL);
 
 /*
@@ -88,7 +95,7 @@ CFATTACH_DECL_NEW(ne_zbus, sizeof(struct ne_zbus_softc),
 #define	NE_ARIADNE_II_ASICSIZE	0x10
 
 int
-ne_zbus_match(device_t parent, cfdata_t cf, void *aux)
+ne_zbus_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct zbus_args *zap = aux;
 
@@ -107,9 +114,9 @@ ne_zbus_match(device_t parent, cfdata_t cf, void *aux)
  * Install interface into kernel networking data structures
  */
 void
-ne_zbus_attach(device_t parent, device_t self, void *aux)
+ne_zbus_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct ne_zbus_softc *zsc = device_private(self);
+	struct ne_zbus_softc *zsc = (struct ne_zbus_softc *)self;
 	struct ne2000_softc *nsc = &zsc->sc_ne2000;
 	struct dp8390_softc *dsc = &nsc->sc_dp8390;
 	struct zbus_args *zap = aux;
@@ -118,7 +125,6 @@ ne_zbus_attach(device_t parent, device_t self, void *aux)
 	bus_space_tag_t asict = nict;
 	bus_space_handle_t asich;
 
-	dsc->sc_dev = self;
 	dsc->sc_mediachange = rtl80x9_mediachange;
 	dsc->sc_mediastatus = rtl80x9_mediastatus;
 	dsc->init_card = rtl80x9_init_card;
@@ -130,17 +136,17 @@ ne_zbus_attach(device_t parent, device_t self, void *aux)
 
 	zsc->sc_bst.absm = &amiga_bus_stride_2;
 
-	aprint_normal("\n");
+	printf("\n");
 
 	/* Map i/o space. */
 	if (bus_space_map(nict, NE_ARIADNE_II_NICBASE, NE_ARIADNE_II_NPORTS, 0, &nich)) {
-		aprint_error_dev(self, "can't map nic i/o space\n");
+		printf("%s: can't map nic i/o space\n", dsc->sc_dev.dv_xname);
 		return;
 	}
 
 	if (bus_space_subregion(nict, nich, NE2000_ASIC_OFFSET, NE_ARIADNE_II_ASICSIZE,
 	    &asich)) {
-		aprint_error_dev(self, "can't map asic i/o space\n");
+		printf("%s: can't map asic i/o space\n", dsc->sc_dev.dv_xname);
 		return;
 	}
 

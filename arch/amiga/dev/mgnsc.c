@@ -1,4 +1,4 @@
-/*	$NetBSD: mgnsc.c,v 1.43 2008/06/13 08:13:37 cegger Exp $ */
+/*	$NetBSD: mgnsc.c,v 1.40 2006/03/08 23:46:22 lukem Exp $ */
 
 /*
  * Copyright (c) 1982, 1990 The Regents of the University of California.
@@ -58,7 +58,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mgnsc.c,v 1.43 2008/06/13 08:13:37 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mgnsc.c,v 1.40 2006/03/08 23:46:22 lukem Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -118,7 +118,7 @@ mgnscattach(struct device *pdp, struct device *dp, void *auxp)
 	printf("\n");
 	zap = auxp;
 
-	sc->sc_siopp = rp = (siop_regmap_p)((char *)zap->va + 0x8000);
+	sc->sc_siopp = rp = (siop_regmap_p)((caddr_t)zap->va + 0x8000);
 
 	/*
 	 * CTEST7 = TT1
@@ -208,13 +208,10 @@ void
 mgnsc_dump(void)
 {
 	extern struct cfdriver mgnsc_cd;
-	struct siop_softc *sc;
 	int i;
 
-	for (i = 0; i < mgnsc_cd.cd_ndevs; ++i) {
-		sc = device_lookup_private(&mgnsc_cd, i);
-		if (sc != NULL)
-			siop_dump(sc);
-	}
+	for (i = 0; i < mgnsc_cd.cd_ndevs; ++i)
+		if (mgnsc_cd.cd_devs[i])
+			siop_dump(mgnsc_cd.cd_devs[i]);
 }
 #endif

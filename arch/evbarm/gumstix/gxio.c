@@ -1,6 +1,6 @@
-/*	$NetBSD: gxio.c,v 1.8 2008/05/11 08:23:17 kiyohara Exp $ */
+/*	$NetBSD: gxio.c,v 1.2 2006/10/17 17:06:22 kiyohara Exp $ */
 /*
- * Copyright (C) 2005, 2006, 2007 WIDE Project and SOUM Corporation.
+ * Copyright (C) 2005, 2006 WIDE Project and SOUM Corporation.
  * All rights reserved.
  *
  * Written by Takashi Kiyohara and Susumu Miki for WIDE Project and SOUM
@@ -31,9 +31,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: gxio.c,v 1.8 2008/05/11 08:23:17 kiyohara Exp $");
-
-#include "opt_gxio.h"
+__KERNEL_RCSID(0, "$NetBSD: gxio.c,v 1.2 2006/10/17 17:06:22 kiyohara Exp $");
 
 #include <sys/param.h>
 #include <sys/device.h>
@@ -52,81 +50,46 @@ __KERNEL_RCSID(0, "$NetBSD: gxio.c,v 1.8 2008/05/11 08:23:17 kiyohara Exp $");
 #include "locators.h"
 
 
-struct gxioconf {
-	const char *name;
-	void (*config)(void);
-};
-
-static int gxiomatch(device_t, struct cfdata *, void *);
-static void gxioattach(device_t, device_t, void *);
-static int gxiosearch(device_t, struct cfdata *, const int *, void *);
+static int gxiomatch(struct device *, struct cfdata *, void *);
+static void gxioattach(struct device *, struct device *, void *);
+static int gxiosearch(struct device *, struct cfdata *, const int *, void *);
 static int gxioprint(void *, const char *);
 
-void gxio_config_pin(void);
-void gxio_config_expansion(char *);
-static void gxio_config_gpio(const struct gxioconf *, char *);
-static void basix_config(void);
-static void cfstix_config(void);
-static void etherstix_config(void);
-static void netcf_config(void);
-static void netduommc_config(void);
-static void netduo_config(void);
-static void netmmc_config(void);
-static void wifistix_cf_config(void);
+static void gxio_config_gpio(struct gxio_softc *);
+static void cfstix_config(struct gxio_softc *);
+static void etherstix_config(struct gxio_softc *);
+static void netcf_config(struct gxio_softc *);
+static void netduo_config(struct gxio_softc *);
+static void netmmc_config(struct gxio_softc *);
 
-CFATTACH_DECL_NEW(
+CFATTACH_DECL(
     gxio, sizeof(struct gxio_softc), gxiomatch, gxioattach, NULL, NULL);
 
-char busheader[MAX_BOOT_STRING];
+char hirose60p[MAX_BOOT_STRING]; 
+char busheader[MAX_BOOT_STRING]; 
 
-static struct pxa2x0_gpioconf boarddep_gpioconf[] = {
-	/* Bluetooth module configuration */
-	{  7, GPIO_OUT | GPIO_SET },	/* power on */
-	{ 12, GPIO_ALT_FN_1_OUT },	/* 32kHz out. required by SingleStone */
-
-	/* AC97 configuration */
-	{ 29, GPIO_CLR | GPIO_ALT_FN_1_IN },	/* SDATA_IN0 */
-
-#ifndef GXIO_BLUETOOTH_ON_HWUART
-	/* BTUART configuration */
-	{ 44, GPIO_ALT_FN_1_IN },	/* BTCST */
-	{ 45, GPIO_ALT_FN_2_OUT },	/* BTRST */
-#else
-	/* HWUART configuration */
-	{ 42, GPIO_ALT_FN_3_IN },	/* HWRXD */
-	{ 43, GPIO_ALT_FN_3_OUT },	/* HWTXD */
-	{ 44, GPIO_ALT_FN_3_IN },	/* HWCST */
-	{ 45, GPIO_ALT_FN_3_OUT },	/* HWRST */
-#endif
-
-#ifndef GXIO_BLUETOOTH_ON_HWUART
-	/* HWUART configuration */
-	{ 48, GPIO_ALT_FN_1_OUT },	/* HWTXD */
-	{ 49, GPIO_ALT_FN_1_IN },	/* HWRXD */
-	{ 50, GPIO_ALT_FN_1_IN },	/* HWCTS */
-	{ 51, GPIO_ALT_FN_1_OUT },	/* HWRTS */
-#endif
-
-	{ -1 }
+struct gxioconf {
+	const char *name;
+	void (*config)(struct gxio_softc *);
+	uint32_t searchdrv;
 };
 
+static const struct gxioconf hirose60p_conf[] = {
+	{ NULL }
+};
 static const struct gxioconf busheader_conf[] = {
-	{ "basix",		basix_config },
 	{ "cfstix",		cfstix_config },
 	{ "etherstix",		etherstix_config },
 	{ "netcf",		netcf_config },
-	{ "netduo-mmc",		netduommc_config },
 	{ "netduo",		netduo_config },
 	{ "netmmc",		netmmc_config },
-	{ "wifistix-cf",	wifistix_cf_config },
-	{ "wifistix",		cfstix_config },
 	{ NULL }
 };
 
 
 /* ARGSUSED */
 static int
-gxiomatch(device_t parent, struct cfdata *match, void *aux)
+gxiomatch(struct device *parent, struct cfdata *match, void *aux)
 {
 	bus_space_tag_t iot = &pxa2x0_bs_tag;
 	bus_space_handle_t ioh;
@@ -142,31 +105,33 @@ gxiomatch(device_t parent, struct cfdata *match, void *aux)
 
 /* ARGSUSED */
 static void
-gxioattach(device_t parent, device_t self, void *aux)
+gxioattach(struct device *parent, struct device *self, void *aux)
 {
-	struct gxio_softc *sc = device_private(self);
+	struct gxio_softc *sc = (struct gxio_softc *)self;
 
-	aprint_normal("\n");
-	aprint_naive("\n");
+	printf("\n");
 
-	sc->sc_dev = self;
 	sc->sc_iot = &pxa2x0_bs_tag;
 
 	if (bus_space_map(sc->sc_iot,
 	    PXA2X0_MEMCTL_BASE, PXA2X0_MEMCTL_SIZE, 0, &sc->sc_ioh))
 		return;
 
+	/* configuration for GPIO */
+	gxio_config_gpio(sc);
+
 	/*
-	 *  Attach each gumstix expansion of busheader side devices
+	 *  Attach each gumstix expantion devices
 	 */
 	config_search_ia(gxiosearch, self, "gxio", NULL);
 }
 
 /* ARGSUSED */
 static int
-gxiosearch(device_t parent, struct cfdata *cf, const int *ldesc, void *aux)
+gxiosearch(
+    struct device *parent, struct cfdata *cf, const int *ldesc, void *aux)
 {
-	struct gxio_softc *sc = device_private(parent);
+	struct gxio_softc *sc = (struct gxio_softc *)parent;
 	struct gxio_attach_args gxa;
 
 	gxa.gxa_sc = sc;
@@ -195,94 +160,52 @@ gxioprint(void *aux, const char *name)
 
 
 /*
- * configure for GPIO pin and expansion boards.
+ * configure for expansion boards.
  */
 void
-gxio_config_pin()
-{
-	struct pxa2x0_gpioconf *gumstix_gpioconf[] = {
-		pxa25x_com_ffuart_gpioconf,
-		pxa25x_com_stuart_gpioconf,
-#ifndef GXIO_BLUETOOTH_ON_HWUART
-		pxa25x_com_btuart_gpioconf,
-#endif
-		pxa25x_com_hwuart_gpioconf,
-		pxa25x_i2c_gpioconf,
-		pxa25x_pxaacu_gpioconf,
-		boarddep_gpioconf,
-		NULL
-	};
-
-	/* XXX: turn off for power of bluetooth module */
-	pxa2x0_gpio_set_function(7, GPIO_OUT | GPIO_CLR);
-	delay(100);
-
-	pxa2x0_gpio_config(gumstix_gpioconf);
-}
-
-void
-gxio_config_expansion(char *expansion)
-{
-#ifdef GXIO_DEFAULT_EXPANSION
-	char default_expansion[] = GXIO_DEFAULT_EXPANSION;
-#endif
-
-	if (expansion == NULL) {
-#ifndef GXIO_DEFAULT_EXPANSION
-		return;
-#else
-		printf("not specified 'busheader=' in the boot args.\n");
-		printf("configure default expansion (%s)\n",
-		    GXIO_DEFAULT_EXPANSION);
-		expansion = default_expansion;
-#endif
-	}
-	gxio_config_gpio(busheader_conf, expansion);
-}
-
-static void
-gxio_config_gpio(const struct gxioconf *gxioconflist, char *expansion)
+gxio_config_gpio(struct gxio_softc *sc)
 {
 	int i, rv;
 
-	for (i = 0; i < strlen(expansion); i++)
-		expansion[i] = tolower(expansion[i]);
-	for (i = 0; gxioconflist[i].name != NULL; i++) {
-		rv = strncmp(expansion, gxioconflist[i].name,
-		    strlen(gxioconflist[i].name) + 1);
+	for (i = 0; i < strlen(hirose60p); i++)
+		hirose60p[i] = tolower(hirose60p[i]);
+	for (i = 0; hirose60p_conf[i].name != NULL; i++) {
+		rv = strncmp(hirose60p, hirose60p_conf[i].name,
+		    strlen(hirose60p_conf[i].name) + 1);
 		if (rv == 0) {
-			gxioconflist[i].config();
+			hirose60p_conf[i].config(sc);
+			break;
+		}
+	}
+
+	for (i = 0; i < strlen(busheader); i++)
+		busheader[i] = tolower(busheader[i]);
+	for (i = 0; busheader_conf[i].name != NULL; i++) {
+		rv = strncmp(busheader, busheader_conf[i].name,
+		    strlen(busheader_conf[i].name) + 1);
+		if (rv == 0) {
+			busheader_conf[i].config(sc);
 			break;
 		}
 	}
 }
 
-
 static void
-basix_config()
-{
-
-	pxa2x0_gpio_set_function(8, GPIO_ALT_FN_1_OUT);		/* MMCCS0 */
-	pxa2x0_gpio_set_function(53, GPIO_ALT_FN_1_OUT);	/* MMCCLK */
-#if 0
-	/* this configuration set by gxmci.c::pxamci_attach() */
-	pxa2x0_gpio_set_function(11, GPIO_IN);			/* nSD_DETECT */
-	pxa2x0_gpio_set_function(22, GPIO_IN);			/* nSD_WP */
-#endif
-}
-
-static void
-cfstix_config()
+cfstix_config(struct gxio_softc *sc)
 {
 	u_int gpio, npoe_fn;
 
-#if 1
-	/* this configuration set by pxa2x0_pcic.c::pxapcic_attach_common() */
-#else
-	pxa2x0_gpio_set_function(11, GPIO_IN);		/* PCD1 */
-	pxa2x0_gpio_set_function(26, GPIO_IN);		/* PRDY1/~IRQ1 */
-#endif
-	pxa2x0_gpio_set_function(4, GPIO_IN); 		/* BVD1/~STSCHG1 */
+	bus_space_write_4(sc->sc_iot, sc->sc_ioh, MEMCTL_MECR,
+	    bus_space_read_4(sc->sc_iot, sc->sc_ioh, MEMCTL_MECR) & ~MECR_NOS);
+
+	pxa2x0_gpio_set_function(8, GPIO_OUT | GPIO_SET);	/* RESET */
+	delay(50);
+	pxa2x0_gpio_set_function(8, GPIO_OUT | GPIO_CLR);
+
+	pxa2x0_gpio_set_function(4, GPIO_IN); 		     /* nBVD1/nSTSCHG */
+	pxa2x0_gpio_set_function(27, GPIO_IN);			/* ~INPACK */
+	pxa2x0_gpio_set_function(11, GPIO_IN);			/* nPCD1 */
+	pxa2x0_gpio_set_function(26, GPIO_IN);			/* PRDY/IRQ */
 
 	for (gpio = 48, npoe_fn = 0; gpio <= 53 ; gpio++)
 		npoe_fn |= pxa2x0_gpio_get_function(gpio);
@@ -293,15 +216,15 @@ cfstix_config()
 	pxa2x0_gpio_set_function(50, GPIO_ALT_FN_2_OUT);	/* nPIOR */
 	pxa2x0_gpio_set_function(51, GPIO_ALT_FN_2_OUT);	/* nPIOW */
 	pxa2x0_gpio_set_function(52, GPIO_ALT_FN_2_OUT);	/* nPCE1 */
-	pxa2x0_gpio_set_function(53, GPIO_ALT_FN_2_OUT);	/* nPCE2 */
 	pxa2x0_gpio_set_function(54, GPIO_ALT_FN_2_OUT);	/* pSKTSEL */
 	pxa2x0_gpio_set_function(55, GPIO_ALT_FN_2_OUT);	/* nPREG */
 	pxa2x0_gpio_set_function(56, GPIO_ALT_FN_1_IN);		/* nPWAIT */
 	pxa2x0_gpio_set_function(57, GPIO_ALT_FN_1_IN);		/* nIOIS16 */
 }
 
+/* ARGSUSED */
 static void
-etherstix_config()
+etherstix_config(struct gxio_softc *sc)
 {
 
 	pxa2x0_gpio_set_function(49, GPIO_ALT_FN_2_OUT);	/* nPWE */
@@ -313,26 +236,18 @@ etherstix_config()
 }
 
 static void
-netcf_config()
+netcf_config(struct gxio_softc *sc)
 {
 
-	etherstix_config();
-	cfstix_config();
+	etherstix_config(sc);
+	cfstix_config(sc);
 }
 
 static void
-netduommc_config()
+netduo_config(struct gxio_softc *sc)
 {
 
-	netduo_config();
-	basix_config();
-}
-
-static void
-netduo_config()
-{
-
-	etherstix_config();
+	etherstix_config(sc);
 
 	pxa2x0_gpio_set_function(78, GPIO_ALT_FN_2_OUT);	/* nCS 2 */
 	pxa2x0_gpio_set_function(52, GPIO_OUT | GPIO_SET);	/* RESET 2 */
@@ -342,24 +257,10 @@ netduo_config()
 }
 
 static void
-netmmc_config()
+netmmc_config(struct gxio_softc *sc)
 {
 
-	etherstix_config();
-	basix_config();
-}
+	etherstix_config(sc);
 
-static void
-wifistix_cf_config()
-{
-
-#if 1
-	/* this configuration set by pxa2x0_pcic.c::pxapcic_attach_common() */
-#else
-	pxa2x0_gpio_set_function(36, GPIO_IN);		/* PCD2 */
-	pxa2x0_gpio_set_function(27, GPIO_IN);		/* PRDY2/~IRQ2 */
-#endif
-	pxa2x0_gpio_set_function(18, GPIO_IN); 		/* BVD2/~STSCHG2 */
-
-	cfstix_config();
+	/* mmc not yet... */
 }

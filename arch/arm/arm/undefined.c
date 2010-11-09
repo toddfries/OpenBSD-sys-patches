@@ -1,4 +1,4 @@
-/*	$NetBSD: undefined.c,v 1.36 2008/12/17 20:51:32 cegger Exp $	*/
+/*	$NetBSD: undefined.c,v 1.27 2006/07/19 21:11:40 ad Exp $	*/
 
 /*
  * Copyright (c) 2001 Ben Harris.
@@ -54,7 +54,7 @@
 #include <sys/kgdb.h>
 #endif
 
-__KERNEL_RCSID(0, "$NetBSD: undefined.c,v 1.36 2008/12/17 20:51:32 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: undefined.c,v 1.27 2006/07/19 21:11:40 ad Exp $");
 
 #include <sys/malloc.h>
 #include <sys/queue.h>
@@ -64,6 +64,7 @@ __KERNEL_RCSID(0, "$NetBSD: undefined.c,v 1.36 2008/12/17 20:51:32 cegger Exp $"
 #include <sys/user.h>
 #include <sys/syslog.h>
 #include <sys/vmmeter.h>
+#include <sys/savar.h>
 #ifdef FAST_FPE
 #include <sys/acct.h>
 #endif
@@ -89,6 +90,10 @@ __KERNEL_RCSID(0, "$NetBSD: undefined.c,v 1.36 2008/12/17 20:51:32 cegger Exp $"
 
 static int gdb_trapper(u_int, u_int, struct trapframe *, int);
 
+#ifdef FAST_FPE
+extern int want_resched;
+#endif
+
 LIST_HEAD(, undefined_handler) undefined_handlers[NUM_UNKNOWN_HANDLERS];
 
 
@@ -101,7 +106,7 @@ install_coproc_handler(int coproc, undef_handler_t handler)
 	KASSERT(handler != NULL); /* Used to be legal. */
 
 	/* XXX: M_TEMP??? */
-	uh = malloc(sizeof(*uh), M_TEMP, M_WAITOK);
+	MALLOC(uh, struct undefined_handler *, sizeof(*uh), M_TEMP, M_WAITOK);
 	uh->uh_handler = handler;
 	install_coproc_handler_static(coproc, uh);
 	return uh;
@@ -120,7 +125,7 @@ remove_coproc_handler(void *cookie)
 	struct undefined_handler *uh = cookie;
 
 	LIST_REMOVE(uh, uh_link);
-	free(uh, M_TEMP);
+	FREE(uh, M_TEMP);
 }
 
 
@@ -128,7 +133,7 @@ static int
 gdb_trapper(u_int addr, u_int insn, struct trapframe *frame, int code)
 {
 	struct lwp *l;
-	l = curlwp;
+	l = (curlwp == NULL) ? &lwp0 : curlwp;
 
 #ifdef THUMB_CODE
 	if (frame->tf_spsr & PSR_T_bit) {
@@ -150,7 +155,9 @@ gdb_trapper(u_int addr, u_int insn, struct trapframe *frame, int code)
 				ksi.ksi_code = TRAP_BRKPT;
 				ksi.ksi_addr = (u_int32_t *)addr;
 				ksi.ksi_trap = 0;
+				KERNEL_PROC_LOCK(l);
 				trapsignal(l, &ksi);
+				KERNEL_PROC_UNLOCK(l);
 				return 0;
 			}
 #ifdef KGDB
@@ -203,7 +210,8 @@ undefinedinstruction(trapframe_t *frame)
 	if ((frame->tf_r15 & R15_IRQ_DISABLE) == 0)
 		int_on();
 #else
-	restore_interrupts(frame->tf_spsr & IF32_bits);
+	if (!(frame->tf_spsr & I32_bit))
+		enable_interrupts(I32_bit);
 #endif
 
 #ifndef acorn26
@@ -224,7 +232,7 @@ undefinedinstruction(trapframe_t *frame)
 #endif
 
 	/* Get the current lwp/proc structure or lwp0/proc0 if there is none. */
-	l = curlwp;
+	l = curlwp == NULL ? &lwp0 : curlwp;
 
 #ifdef __PROG26
 	if ((frame->tf_r15 & R15_MODE) == R15_MODE_USR) {
@@ -255,7 +263,9 @@ undefinedinstruction(trapframe_t *frame)
 			ksi.ksi_signo = SIGILL;
 			ksi.ksi_code = ILL_ILLOPC;
 			ksi.ksi_addr = (u_int32_t *)(intptr_t) fault_pc;
+			KERNEL_PROC_LOCK(l);
 			trapsignal(l, &ksi);
+			KERNEL_PROC_UNLOCK(l);
 			userret(l);
 			return;
 		}
@@ -354,7 +364,9 @@ undefinedinstruction(trapframe_t *frame)
 		ksi.ksi_code = ILL_ILLOPC;
 		ksi.ksi_addr = (u_int32_t *)fault_pc;
 		ksi.ksi_trap = fault_instruction;
+		KERNEL_PROC_LOCK(l);
 		trapsignal(l, &ksi);
+		KERNEL_PROC_UNLOCK(l);
 	}
 
 	if ((fault_code & FAULT_USER) == 0)
@@ -363,20 +375,27 @@ undefinedinstruction(trapframe_t *frame)
 #ifdef FAST_FPE
 	/* Optimised exit code */
 	{
+
 		/*
 		 * Check for reschedule request, at the moment there is only
 		 * 1 ast so this code should always be run
 		 */
-		if (curcpu()->ci_want_resched) {
+
+		if (want_resched) {
 			/*
 			 * We are being preempted.
 			 */
-			preempt();
+			preempt(0);
 		}
 
 		/* Invoke MI userret code */
 		mi_userret(l);
+
+		l->l_priority = l->l_usrpri;
+
+		curcpu()->ci_schedstate.spc_curpriority = l->l_priority;
 	}
+
 #else
 	userret(l);
 #endif

@@ -1,4 +1,4 @@
-/*	$NetBSD: kernfs.h,v 1.35 2009/01/11 02:45:53 christos Exp $	*/
+/*	$NetBSD: kernfs.h,v 1.32 2006/12/28 05:49:05 alc Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -38,7 +38,6 @@
 
 #ifdef _KERNEL
 #include <sys/queue.h>
-#include <sys/tree.h>
 
 /*
  * The different types of node in a kernfs filesystem
@@ -196,13 +195,8 @@ kfstype kernfs_alloctype(int, const struct kernfs_fileop *);
 #define	KERNFS_ENTOPARENTDIR(dkt) &(dkt)->dkt_kt
 int kernfs_addentry(kernfs_parentdir_t *, kernfs_entry_t *);
 
-#ifdef IPSEC
-__weak_extern(key_freesp)
-__weak_extern(key_getspbyid)
-__weak_extern(key_setdumpsa_spi)
-__weak_extern(key_setdumpsp)
-__weak_extern(satailq)
-__weak_extern(sptailq)
-#endif
+#ifdef SYSCTL_SETUP_PROTO
+SYSCTL_SETUP_PROTO(sysctl_vfs_kernfs_setup);
+#endif /* SYSCTL_SETUP_PROTO */
 
 #endif /* _KERNEL */

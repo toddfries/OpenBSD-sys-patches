@@ -1,4 +1,4 @@
-/*	$NetBSD: vm86.c,v 1.49 2008/11/19 18:35:59 ad Exp $	*/
+/*	$NetBSD: vm86.c,v 1.43 2006/11/16 01:32:38 christos Exp $	*/
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: vm86.c,v 1.49 2008/11/19 18:35:59 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: vm86.c,v 1.43 2006/11/16 01:32:38 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -50,6 +57,7 @@ __KERNEL_RCSID(0, "$NetBSD: vm86.c,v 1.49 2008/11/19 18:35:59 ad Exp $");
 #include <sys/mount.h>
 #include <sys/vnode.h>
 #include <sys/device.h>
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
 #include <sys/ktrace.h>
 
@@ -57,7 +65,7 @@ __KERNEL_RCSID(0, "$NetBSD: vm86.c,v 1.49 2008/11/19 18:35:59 ad Exp $");
 #include <machine/vm86.h>
 
 static void fast_intxx(struct lwp *, int);
-static inline int is_bitset(int, void *);
+static inline int is_bitset(int, caddr_t);
 
 #define	CS(tf)		(*(u_short *)&tf->tf_cs)
 #define	IP(tf)		(*(u_short *)&tf->tf_eip)
@@ -105,11 +113,11 @@ static inline int is_bitset(int, void *);
 static inline int
 is_bitset(nr, bitmap)
 	int nr;
-	void *bitmap;
+	caddr_t bitmap;
 {
 	u_int byte;		/* bt instruction doesn't do
 					   bytes--it examines ints! */
-	bitmap = (char *)bitmap + (nr / NBBY);
+	bitmap += nr / NBBY;
 	nr = nr % NBBY;
 	byte = fubyte(bitmap);
 
@@ -165,7 +173,7 @@ fast_intxx(l, intrno)
 	 * Fetch intr handler info from "real-mode" IDT based at addr 0 in
 	 * the user address space.
 	 */
-	if (copyin((void *)(intrno * sizeof(ihand)), &ihand, sizeof(ihand))) {
+	if (copyin((caddr_t)(intrno * sizeof(ihand)), &ihand, sizeof(ihand))) {
 		/*
 		 * No IDT!  What Linux does here is simply call back into
 		 * userspace with the VM86_INTx arg as if it was a revectored
@@ -205,39 +213,33 @@ vm86_return(l, retval)
 	int retval;
 {
 	struct proc *p = l->l_proc;
-	ksiginfo_t ksi;
-
-	mutex_enter(p->p_lock);
 
 	/*
 	 * We can't set the virtual flags in our real trap frame,
 	 * since it's used to jump to the signal handler.  Instead we
 	 * let sendsig() pull in the vm86_eflags bits.
 	 */
-	if (sigismember(&l->l_sigmask, SIGURG)) {
+	if (sigismember(&p->p_sigctx.ps_sigmask, SIGURG)) {
 #ifdef DIAGNOSTIC
 		printf("pid %d killed on VM86 protocol screwup (SIGURG blocked)\n",
 		    p->p_pid);
 #endif
 		sigexit(l, SIGILL);
 		/* NOTREACHED */
-	}
-
-	if (sigismember(&p->p_sigctx.ps_sigignore, SIGURG)) {
+	} else if (sigismember(&p->p_sigctx.ps_sigignore, SIGURG)) {
 #ifdef DIAGNOSTIC
 		printf("pid %d killed on VM86 protocol screwup (SIGURG ignored)\n",
 		    p->p_pid);
 #endif
 		sigexit(l, SIGILL);
-		/* NOTREACHED */
+	} else {
+		ksiginfo_t ksi;
+
+		KSI_INIT_TRAP(&ksi);
+		ksi.ksi_signo = SIGURG;
+		ksi.ksi_trap = retval;
+		(*p->p_emul->e_trapsignal)(l, &ksi);
 	}
-
-	mutex_exit(p->p_lock);
-
-	KSI_INIT_TRAP(&ksi);
-	ksi.ksi_signo = SIGURG;
-	ksi.ksi_trap = retval;
-	(*p->p_emul->e_trapsignal)(l, &ksi);
 }
 
 #define	CLI	0xFA
@@ -372,12 +374,11 @@ bad:
 }
 
 int
-x86_vm86(struct lwp *l, char *args, register_t *retval)
+i386_vm86(struct lwp *l, char *args, register_t *retval)
 {
 	struct trapframe *tf = l->l_md.md_regs;
 	struct pcb *pcb = &l->l_addr->u_pcb;
 	struct vm86_kern vm86s;
-	struct proc *p;
 	int error;
 
 	error = copyin(args, &vm86s, sizeof(vm86s));
@@ -432,102 +433,9 @@ x86_vm86(struct lwp *l, char *args, register_t *retval)
 #undef	DOREG
 
 	/* Going into vm86 mode jumps off the signal stack. */
-	p = l->l_proc;
-	mutex_enter(p->p_lock);
-	l->l_sigstk.ss_flags &= ~SS_ONSTACK;
-	mutex_exit(p->p_lock);
+	l->l_proc->p_sigctx.ps_sigstk.ss_flags &= ~SS_ONSTACK;
 
 	set_vflags(l, vm86s.regs[_REG_EFL] | PSL_VM);
-
-	return (EJUSTRETURN);
-}
-
-struct compat_16_vm86_kern {
-	struct sigcontext regs;
-	unsigned long ss_cpu_type;
-};
-
-struct compat_16_vm86_struct {
-	struct compat_16_vm86_kern substr;
-	unsigned long screen_bitmap;	/* not used/supported (yet) */
-	unsigned long flags;		/* not used/supported (yet) */
-	unsigned char int_byuser[32];	/* 256 bits each: pass control to user */
-	unsigned char int21_byuser[32];	/* otherwise, handle directly */
-};
-
-int
-compat_16_x86_vm86(struct lwp *l, char *args, register_t *retval)
-{
-	struct trapframe *tf = l->l_md.md_regs;
-	struct pcb *pcb = &l->l_addr->u_pcb;
-	struct compat_16_vm86_kern vm86s;
-	struct proc *p = l->l_proc;
-	int error;
-
-	error = copyin(args, &vm86s, sizeof(vm86s));
-	if (error)
-		return (error);
-
-	pcb->vm86_userp = (void *)(args +
-	    (offsetof(struct compat_16_vm86_struct, screen_bitmap)
-	    - offsetof(struct vm86_struct, screen_bitmap)));
-	printf("offsetting by %lu\n", (unsigned long)
-	    (offsetof(struct compat_16_vm86_struct, screen_bitmap)
-	    - offsetof(struct vm86_struct, screen_bitmap)));
-
-	/*
-	 * Keep mask of flags we simulate to simulate a particular type of
-	 * processor.
-	 */
-	switch (vm86s.ss_cpu_type) {
-	case VCPU_086:
-	case VCPU_186:
-	case VCPU_286:
-		pcb->vm86_flagmask = PSL_ID|PSL_AC|PSL_NT|PSL_IOPL;
-		break;
-	case VCPU_386:
-		pcb->vm86_flagmask = PSL_ID|PSL_AC;
-		break;
-	case VCPU_486:
-		pcb->vm86_flagmask = PSL_ID;
-		break;
-	case VCPU_586:
-		pcb->vm86_flagmask = 0;
-		break;
-	default:
-		return (EINVAL);
-	}
-
-#define DOVREG(reg) tf->tf_vm86_##reg = (u_short) vm86s.regs.sc_##reg
-#define DOREG(reg) tf->tf_##reg = (u_short) vm86s.regs.sc_##reg
-
-	DOVREG(ds);
-	DOVREG(es);
-	DOVREG(fs);
-	DOVREG(gs);
-	DOREG(edi);
-	DOREG(esi);
-	DOREG(ebp);
-	DOREG(eax);
-	DOREG(ebx);
-	DOREG(ecx);
-	DOREG(edx);
-	DOREG(eip);
-	DOREG(cs);
-	DOREG(esp);
-	DOREG(ss);
-
-#undef	DOVREG
-#undef	DOREG
-
-	mutex_enter(p->p_lock);
-
-	/* Going into vm86 mode jumps off the signal stack. */
-	l->l_sigstk.ss_flags &= ~SS_ONSTACK;
-
-	mutex_exit(p->p_lock);
-
-	set_vflags(l, vm86s.regs.sc_eflags | PSL_VM);
 
 	return (EJUSTRETURN);
 }

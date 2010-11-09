@@ -1,4 +1,4 @@
-/*	$NetBSD: siop_common.c,v 1.46 2008/06/11 02:09:16 kiyohara Exp $	*/
+/*	$NetBSD: siop_common.c,v 1.43 2007/10/19 12:00:01 ad Exp $	*/
 
 /*
  * Copyright (c) 2000, 2002 Manuel Bouyer.
@@ -33,7 +33,7 @@
 /* SYM53c7/8xx PCI-SCSI I/O Processors driver */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: siop_common.c,v 1.46 2008/06/11 02:09:16 kiyohara Exp $");
+__KERNEL_RCSID(0, "$NetBSD: siop_common.c,v 1.43 2007/10/19 12:00:01 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -78,31 +78,31 @@ siop_common_attach(sc)
 		error = bus_dmamem_alloc(sc->sc_dmat, PAGE_SIZE,
 		    PAGE_SIZE, 0, &seg, 1, &rseg, BUS_DMA_NOWAIT);
 		if (error) {
-			aprint_error_dev(&sc->sc_dev, 
-			    "unable to allocate script DMA memory, "
-			    "error = %d\n", error);
+			aprint_error(
+			    "%s: unable to allocate script DMA memory, "
+			    "error = %d\n", sc->sc_dev.dv_xname, error);
 			return error;
 		}
 		error = bus_dmamem_map(sc->sc_dmat, &seg, rseg, PAGE_SIZE,
 		    (void **)&sc->sc_script,
 		    BUS_DMA_NOWAIT|BUS_DMA_COHERENT);
 		if (error) {
-			aprint_error_dev(&sc->sc_dev, "unable to map script DMA memory, "
-			    "error = %d\n", error);
+			aprint_error("%s: unable to map script DMA memory, "
+			    "error = %d\n", sc->sc_dev.dv_xname, error);
 			return error;
 		}
 		error = bus_dmamap_create(sc->sc_dmat, PAGE_SIZE, 1,
 		    PAGE_SIZE, 0, BUS_DMA_NOWAIT, &sc->sc_scriptdma);
 		if (error) {
-			aprint_error_dev(&sc->sc_dev, "unable to create script DMA map, "
-			    "error = %d\n", error);
+			aprint_error("%s: unable to create script DMA map, "
+			    "error = %d\n", sc->sc_dev.dv_xname, error);
 			return error;
 		}
 		error = bus_dmamap_load(sc->sc_dmat, sc->sc_scriptdma,
 		    sc->sc_script, PAGE_SIZE, NULL, BUS_DMA_NOWAIT);
 		if (error) {
-			aprint_error_dev(&sc->sc_dev, "unable to load script DMA map, "
-			    "error = %d\n", error);
+			aprint_error("%s: unable to load script DMA map, "
+			    "error = %d\n", sc->sc_dev.dv_xname, error);
 			return error;
 		}
 		sc->sc_scriptaddr =
@@ -165,7 +165,7 @@ void
 siop_common_reset(sc)
 	struct siop_common_softc *sc;
 {
-	u_int32_t stest1, stest3;
+	u_int32_t stest3;
 
 	/* reset the chip */
 	bus_space_write_1(sc->sc_rt, sc->sc_rh, SIOP_ISTAT, ISTAT_SRST);
@@ -220,13 +220,6 @@ siop_common_reset(sc)
 	} else {
 		bus_space_write_1(sc->sc_rt, sc->sc_rh, SIOP_STEST1, 0);
 	}
-
-	if (sc->features & SF_CHIP_USEPCIC) {
-		stest1 = bus_space_read_4(sc->sc_rt, sc->sc_rh, SIOP_STEST1);
-		stest1 |= STEST1_SCLK;
-		bus_space_write_1(sc->sc_rt, sc->sc_rh, SIOP_STEST1, stest1);
-	}
-
 	if (sc->features & SF_CHIP_FIFO)
 		bus_space_write_1(sc->sc_rt, sc->sc_rh, SIOP_CTEST5,
 		    bus_space_read_1(sc->sc_rt, sc->sc_rh, SIOP_CTEST5) |
@@ -265,7 +258,7 @@ siop_setuptables(siop_cmd)
 	int lun = xs->xs_periph->periph_lun;
 	int msgoffset = 1;
 
-	siop_cmd->siop_tables->id = siop_htoc32(sc, sc->targets[target]->id);
+	siop_cmd->siop_tables->id = htole32(sc->targets[target]->id);
 	memset(siop_cmd->siop_tables->msg_out, 0,
 	    sizeof(siop_cmd->siop_tables->msg_out));
 	/* request sense doesn't disconnect */
@@ -300,7 +293,7 @@ siop_setuptables(siop_cmd)
 		siop_cmd->siop_tables->msg_out[2] = siop_cmd->tag;
 		msgoffset = 3;
 	}
-	siop_cmd->siop_tables->t_msgout.count = siop_htoc32(sc, msgoffset);
+	siop_cmd->siop_tables->t_msgout.count= htole32(msgoffset);
 	if (sc->targets[target]->status == TARST_ASYNC) {
 		if ((sc->targets[target]->flags & TARF_DT) &&
 			(sc->mode == STEST4_MODE_LVD)) {
@@ -321,20 +314,18 @@ siop_setuptables(siop_cmd)
 		}
 	}
 	siop_cmd->siop_tables->status =
-	    siop_htoc32(sc, SCSI_SIOP_NOSTATUS); /* set invalid status */
+	    htole32(SCSI_SIOP_NOSTATUS); /* set invalid status */
 
 	siop_cmd->siop_tables->cmd.count =
-	    siop_htoc32(sc, siop_cmd->dmamap_cmd->dm_segs[0].ds_len);
+	    htole32(siop_cmd->dmamap_cmd->dm_segs[0].ds_len);
 	siop_cmd->siop_tables->cmd.addr =
-	    siop_htoc32(sc, siop_cmd->dmamap_cmd->dm_segs[0].ds_addr);
+	    htole32(siop_cmd->dmamap_cmd->dm_segs[0].ds_addr);
 	if (xs->xs_control & (XS_CTL_DATA_IN | XS_CTL_DATA_OUT)) {
 		for (i = 0; i < siop_cmd->dmamap_data->dm_nsegs; i++) {
 			siop_cmd->siop_tables->data[i].count =
-			    siop_htoc32(sc,
-				siop_cmd->dmamap_data->dm_segs[i].ds_len);
+			    htole32(siop_cmd->dmamap_data->dm_segs[i].ds_len);
 			siop_cmd->siop_tables->data[i].addr =
-			    siop_htoc32(sc,
-				siop_cmd->dmamap_data->dm_segs[i].ds_addr);
+			    htole32(siop_cmd->dmamap_data->dm_segs[i].ds_addr);
 		}
 	}
 }
@@ -372,13 +363,13 @@ siop_wdtr_neg(siop_cmd)
 			siop_target->offset = siop_target->period = 0;
 			siop_update_xfer_mode(sc, target);
 			printf("%s: rejecting invalid wide negotiation from "
-			    "target %d (%d)\n", device_xname(&sc->sc_dev), target,
+			    "target %d (%d)\n", sc->sc_dev.dv_xname, target,
 			    tables->msg_in[3]);
-			tables->t_msgout.count = siop_htoc32(sc, 1);
+			tables->t_msgout.count= htole32(1);
 			tables->msg_out[0] = MSG_MESSAGE_REJECT;
 			return SIOP_NEG_MSGOUT;
 		}
-		tables->id = siop_htoc32(sc, sc->targets[target]->id);
+		tables->id = htole32(sc->targets[target]->id);
 		bus_space_write_1(sc->sc_rt, sc->sc_rh,
 		    SIOP_SCNTL3,
 		    (sc->targets[target]->id >> 24) & 0xff);
@@ -403,7 +394,7 @@ siop_wdtr_neg(siop_cmd)
 			siop_target->flags &= ~TARF_ISWIDE;
 			sc->targets[target]->id &= ~(SCNTL3_EWS << 24);
 		}
-		tables->id = siop_htoc32(sc, sc->targets[target]->id);
+		tables->id = htole32(sc->targets[target]->id);
 		bus_space_write_1(sc->sc_rt, sc->sc_rh, SIOP_SCNTL3,
 		    (sc->targets[target]->id >> 24) & 0xff);
 		/*
@@ -431,7 +422,7 @@ siop_ppr_neg(siop_cmd)
 	int i;
 
 #ifdef DEBUG_NEG
-	printf("%s: answer on ppr negotiation:", device_xname(&sc->sc_dev));
+	printf("%s: anserw on ppr negotiation:", sc->sc_dev.dv_xname);
 	for (i = 0; i < 8; i++)
 		printf(" 0x%x", tables->msg_in[i]);
 	printf("\n");
@@ -445,7 +436,7 @@ siop_ppr_neg(siop_cmd)
 		if (options != MSG_EXT_PPR_DT) {
 			/* should't happen */
 			printf("%s: ppr negotiation for target %d: "
-			    "no DT option\n", device_xname(&sc->sc_dev), target);
+			    "no DT option\n", sc->sc_dev.dv_xname, target);
 			siop_target->status = TARST_ASYNC;
 			siop_target->flags &= ~(TARF_DT | TARF_ISDT);
 			siop_target->offset = 0;
@@ -457,7 +448,7 @@ siop_ppr_neg(siop_cmd)
 		    sync > sc->dt_maxsync) {
 			printf("%s: ppr negotiation for target %d: "
 			    "offset (%d) or sync (%d) out of range\n",
-			    device_xname(&sc->sc_dev), target, offset, sync);
+			    sc->sc_dev.dv_xname, target, offset, sync);
 			/* should not happen */
 			siop_target->offset = 0;
 			siop_target->period = 0;
@@ -479,7 +470,7 @@ siop_ppr_neg(siop_cmd)
 			if ((siop_target->flags & TARF_ISDT) == 0) {
 				printf("%s: ppr negotiation for target %d: "
 				    "sync (%d) incompatible with adapter\n",
-				    device_xname(&sc->sc_dev), target, sync);
+				    sc->sc_dev.dv_xname, target, sync);
 				/*
 				 * we didn't find it in our table, do async
 				 * send reject msg, start SDTR/WDTR neg
@@ -494,7 +485,7 @@ siop_ppr_neg(siop_cmd)
 		if (tables->msg_in[6] != 1) {
 			printf("%s: ppr negotiation for target %d: "
 			    "transfer width (%d) incompatible with dt\n",
-			    device_xname(&sc->sc_dev), target, tables->msg_in[6]);
+			    sc->sc_dev.dv_xname, target, tables->msg_in[6]);
 			/* DT mode can only be done with wide transfers */
 			siop_target->status = TARST_ASYNC;
 			goto reject;
@@ -520,9 +511,9 @@ siop_ppr_neg(siop_cmd)
 	} else {
 		/* target initiated PPR negotiation, shouldn't happen */
 		printf("%s: rejecting invalid PPR negotiation from "
-		    "target %d\n", device_xname(&sc->sc_dev), target);
+		    "target %d\n", sc->sc_dev.dv_xname, target);
 reject:
-		tables->t_msgout.count = siop_htoc32(sc, 1);
+		tables->t_msgout.count= htole32(1);
 		tables->msg_out[0] = MSG_MESSAGE_REJECT;
 		return SIOP_NEG_MSGOUT;
 	}
@@ -587,7 +578,7 @@ siop_sdtr_neg(siop_cmd)
 		 */
 reject:
 		send_msgout = 1;
-		tables->t_msgout.count = siop_htoc32(sc, 1);
+		tables->t_msgout.count= htole32(1);
 		tables->msg_out[0] = MSG_MESSAGE_REJECT;
 		sc->targets[target]->id &= ~(SCNTL3_SCF_MASK << 24);
 		sc->targets[target]->id &= ~(SCNTL3_ULTRA << 24);
@@ -650,7 +641,7 @@ end:
 #ifdef DEBUG
 	printf("id now 0x%x\n", sc->targets[target]->id);
 #endif
-	tables->id = siop_htoc32(sc, sc->targets[target]->id);
+	tables->id = htole32(sc->targets[target]->id);
 	bus_space_write_1(sc->sc_rt, sc->sc_rh, SIOP_SCNTL3,
 	    (sc->targets[target]->id >> 24) & 0xff);
 	bus_space_write_1(sc->sc_rt, sc->sc_rh, SIOP_SXFER,
@@ -674,7 +665,7 @@ siop_sdtr_msg(siop_cmd, offset, ssync, soff)
 	siop_cmd->siop_tables->msg_out[offset + 3] = ssync;
 	siop_cmd->siop_tables->msg_out[offset + 4] = soff;
 	siop_cmd->siop_tables->t_msgout.count =
-	    siop_htoc32(siop_cmd->siop_sc, offset + MSG_EXT_SDTR_LEN + 2);
+	    htole32(offset + MSG_EXT_SDTR_LEN + 2);
 }
 
 void
@@ -688,7 +679,7 @@ siop_wdtr_msg(siop_cmd, offset, wide)
 	siop_cmd->siop_tables->msg_out[offset + 2] = MSG_EXT_WDTR;
 	siop_cmd->siop_tables->msg_out[offset + 3] = wide;
 	siop_cmd->siop_tables->t_msgout.count =
-	    siop_htoc32(siop_cmd->siop_sc, offset + MSG_EXT_WDTR_LEN + 2);
+	    htole32(offset + MSG_EXT_WDTR_LEN + 2);
 }
 
 void
@@ -706,7 +697,7 @@ siop_ppr_msg(siop_cmd, offset, ssync, soff)
 	siop_cmd->siop_tables->msg_out[offset + 6] = 1; /* wide */
 	siop_cmd->siop_tables->msg_out[offset + 7] = MSG_EXT_PPR_DT;
 	siop_cmd->siop_tables->t_msgout.count =
-	    siop_htoc32(siop_cmd->siop_sc, offset + MSG_EXT_PPR_LEN + 2);
+	    htole32(offset + MSG_EXT_PPR_LEN + 2);
 }
 
 void
@@ -755,8 +746,8 @@ siop_ma(siop_cmd)
 
 	offset = bus_space_read_1(sc->sc_rt, sc->sc_rh, SIOP_SCRATCHA + 1);
 	if (offset >= SIOP_NSG) {
-		aprint_error_dev(&sc->sc_dev, "bad offset in siop_sdp (%d)\n",
-		    offset);
+		printf("%s: bad offset in siop_sdp (%d)\n",
+		    sc->sc_dev.dv_xname, offset);
 		return;
 	}
 	table = &siop_cmd->siop_tables->data[offset];
@@ -809,7 +800,6 @@ siop_sdp(siop_cmd, offset)
 	struct siop_common_cmd *siop_cmd;
 	int offset;
 {
-	struct siop_common_softc *sc = siop_cmd->siop_sc;
 	scr_table_t *table;
 
 	if ((siop_cmd->xs->xs_control & (XS_CTL_DATA_OUT | XS_CTL_DATA_IN))
@@ -851,9 +841,9 @@ siop_sdp(siop_cmd, offset)
 		table = &siop_cmd->siop_tables->data[offset];
 		/* "cut" already transfered data from this table */
 		table->addr =
-		    siop_htoc32(sc, siop_ctoh32(sc, table->addr) +
-		    siop_ctoh32(sc, table->count) - siop_cmd->resid);
-		table->count = siop_htoc32(sc, siop_cmd->resid);
+		    htole32(le32toh(table->addr) +
+		    le32toh(table->count) - siop_cmd->resid);
+		table->count = htole32(siop_cmd->resid);
 	}
 
 	/*
@@ -871,7 +861,6 @@ siop_update_resid(siop_cmd, offset)
 	struct siop_common_cmd *siop_cmd;
 	int offset;
 {
-	struct siop_common_softc *sc = siop_cmd->siop_sc;
 	scr_table_t *table;
 	int i;
 
@@ -885,7 +874,7 @@ siop_update_resid(siop_cmd, offset)
 	 */
 	for (i = 0; i < offset; i++)
 		siop_cmd->xs->resid -=
-		    siop_ctoh32(sc, siop_cmd->siop_tables->data[i].count);
+		    le32toh(siop_cmd->siop_tables->data[i].count);
 	/*
 	 * if CMDFL_RESID is set, the last table (pointed by offset) is a
 	 * partial transfers. If not, offset points to the entry folloing
@@ -893,8 +882,7 @@ siop_update_resid(siop_cmd, offset)
 	 */
 	if (siop_cmd->flags & CMDFL_RESID) {
 		table = &siop_cmd->siop_tables->data[offset];
-		siop_cmd->xs->resid -= 
-		    siop_ctoh32(sc, table->count) - siop_cmd->resid;
+		siop_cmd->xs->resid -= le32toh(table->count) - siop_cmd->resid;
 	}
 }
 
@@ -909,7 +897,7 @@ siop_iwr(siop_cmd)
 
 	/* if target isn't wide, reject */
 	if ((siop_cmd->siop_target->flags & TARF_ISWIDE) == 0) {
-		siop_cmd->siop_tables->t_msgout.count = siop_htoc32(sc, 1);
+		siop_cmd->siop_tables->t_msgout.count= htole32(1);
 		siop_cmd->siop_tables->msg_out[0] = MSG_MESSAGE_REJECT;
 		return SIOP_NEG_MSGOUT;
 	}
@@ -924,7 +912,7 @@ siop_iwr(siop_cmd)
 	table = &siop_cmd->siop_tables->data[offset];
 
 	if ((siop_cmd->flags & CMDFL_RESID) == 0) {
-		if (siop_ctoh32(sc, table->count) & 1) {
+		if (le32toh(table->count) & 1) {
 			/* we really got the number of bytes we expected */
 			return SIOP_NEG_ACK;
 		} else {
@@ -1000,31 +988,31 @@ siop_modechange(sc)
 		switch(sc->mode) {
 		case STEST4_MODE_DIF:
 			printf("%s: switching to differential mode\n",
-			    device_xname(&sc->sc_dev));
+			    sc->sc_dev.dv_xname);
 			bus_space_write_1(sc->sc_rt, sc->sc_rh, SIOP_STEST2,
 			    stest2 | STEST2_DIF);
 			break;
 		case STEST4_MODE_SE:
 			printf("%s: switching to single-ended mode\n",
-			    device_xname(&sc->sc_dev));
+			    sc->sc_dev.dv_xname);
 			bus_space_write_1(sc->sc_rt, sc->sc_rh, SIOP_STEST2,
 			    stest2 & ~STEST2_DIF);
 			break;
 		case STEST4_MODE_LVD:
 			printf("%s: switching to LVD mode\n",
-			    device_xname(&sc->sc_dev));
+			    sc->sc_dev.dv_xname);
 			bus_space_write_1(sc->sc_rt, sc->sc_rh, SIOP_STEST2,
 			    stest2 & ~STEST2_DIF);
 			break;
 		default:
-			aprint_error_dev(&sc->sc_dev, "invalid SCSI mode 0x%x\n",
-			    sc->mode);
+			printf("%s: invalid SCSI mode 0x%x\n",
+			    sc->sc_dev.dv_xname, sc->mode);
 			return 0;
 		}
 		return 1;
 	}
 	printf("%s: timeout waiting for DIFFSENSE to stabilise\n",
-	    device_xname(&sc->sc_dev));
+	    sc->sc_dev.dv_xname);
 	return 0;
 }
 

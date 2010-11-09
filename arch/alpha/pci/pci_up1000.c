@@ -1,4 +1,4 @@
-/* $NetBSD: pci_up1000.c,v 1.10 2008/04/28 20:23:11 martin Exp $ */
+/* $NetBSD: pci_up1000.c,v 1.8 2002/05/15 16:57:43 thorpej Exp $ */
 
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -31,7 +38,7 @@
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
 
-__KERNEL_RCSID(0, "$NetBSD: pci_up1000.c,v 1.10 2008/04/28 20:23:11 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pci_up1000.c,v 1.8 2002/05/15 16:57:43 thorpej Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -74,7 +81,6 @@ void	*api_up1000_pciide_compat_intr_establish(void *, struct device *,
 void
 pci_up1000_pickintr(struct irongate_config *icp)
 {
-#if NSIO
 	bus_space_tag_t iot = &icp->ic_iot;
 	pci_chipset_tag_t pc = &icp->ic_pc;
 
@@ -88,6 +94,7 @@ pci_up1000_pickintr(struct irongate_config *icp)
 	pc->pc_pciide_compat_intr_establish =
 	    api_up1000_pciide_compat_intr_establish;
 
+#if NSIO
 	sio_intr_setup(pc, iot);
 #else
 	panic("pci_up1000_pickintr: no I/O interrupt handler (no sio)");

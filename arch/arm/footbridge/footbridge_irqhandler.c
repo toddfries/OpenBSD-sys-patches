@@ -1,4 +1,4 @@
-/*	$NetBSD: footbridge_irqhandler.c,v 1.21 2008/04/27 18:58:44 matt Exp $	*/
+/*	$NetBSD: footbridge_irqhandler.c,v 1.17 2006/12/25 18:39:48 wiz Exp $	*/
 
 /*
  * Copyright (c) 2001, 2002 Wasabi Systems, Inc.
@@ -40,7 +40,7 @@
 #endif
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0,"$NetBSD: footbridge_irqhandler.c,v 1.21 2008/04/27 18:58:44 matt Exp $");
+__KERNEL_RCSID(0,"$NetBSD: footbridge_irqhandler.c,v 1.17 2006/12/25 18:39:48 wiz Exp $");
 
 #include "opt_irqstats.h"
 
@@ -70,15 +70,40 @@ int footbridge_imask[NIPL];
 /* Software copy of the IRQs we have enabled. */
 volatile uint32_t intr_enabled;
 
+/* Current interrupt priority level */
+volatile int current_spl_level;
+
 /* Interrupts pending */
 volatile int footbridge_ipending;
 
 void footbridge_intr_dispatch(struct clockframe *frame);
 
-const struct evcnt *footbridge_pci_intr_evcnt(void *, pci_intr_handle_t);
+const struct evcnt *footbridge_pci_intr_evcnt __P((void *, pci_intr_handle_t));
+
+void footbridge_do_pending(void);
+
+static const uint32_t si_to_irqbit[SI_NQUEUES] =
+	{ IRQ_SOFTINT,
+	  IRQ_RESERVED0,
+	  IRQ_RESERVED1,
+	  IRQ_RESERVED2 };
+
+#define	SI_TO_IRQBIT(si)	(1U << si_to_irqbit[(si)])
+
+/*
+ * Map a software interrupt queue to an interrupt priority level.
+ */
+static const int si_to_ipl[SI_NQUEUES] = {
+	IPL_SOFT,		/* SI_SOFT */
+	IPL_SOFTCLOCK,		/* SI_SOFTCLOCK */
+	IPL_SOFTNET,		/* SI_SOFTNET */
+	IPL_SOFTSERIAL,		/* SI_SOFTSERIAL */
+};
 
 const struct evcnt *
-footbridge_pci_intr_evcnt(void *pcv, pci_intr_handle_t ih)
+footbridge_pci_intr_evcnt(pcv, ih)
+	void *pcv;
+	pci_intr_handle_t ih;
 {
 	/* XXX check range is valid */
 #if NISA > 0
@@ -93,6 +118,7 @@ static inline void
 footbridge_enable_irq(int irq)
 {
 	intr_enabled |= (1U << irq);
+	
 	footbridge_set_intrmask();
 }
 
@@ -118,9 +144,9 @@ footbridge_intr_calculate_masks(void)
 		int levels = 0;
 		iq = &footbridge_intrq[irq];
 		footbridge_disable_irq(irq);
-		TAILQ_FOREACH(ih, &iq->iq_list, ih_list) {
+		for (ih = TAILQ_FIRST(&iq->iq_list); ih != NULL;
+		     ih = TAILQ_NEXT(ih, ih_list))
 			levels |= (1U << ih->ih_ipl);
-		}
 		iq->iq_levels = levels;
 	}
 
@@ -135,32 +161,75 @@ footbridge_intr_calculate_masks(void)
 	}
 
 	/* IPL_NONE must open up all interrupts */
-	KASSERT(footbridge_imask[IPL_NONE] == 0);
-	KASSERT(footbridge_imask[IPL_SOFTCLOCK] == 0);
-	KASSERT(footbridge_imask[IPL_SOFTBIO] == 0);
-	KASSERT(footbridge_imask[IPL_SOFTNET] == 0);
-	KASSERT(footbridge_imask[IPL_SOFTSERIAL] == 0);
+	footbridge_imask[IPL_NONE] = 0;
+
+	/*
+	 * Initialize the soft interrupt masks to block themselves.
+	 */
+	footbridge_imask[IPL_SOFT] = SI_TO_IRQBIT(SI_SOFT);
+	footbridge_imask[IPL_SOFTCLOCK] = SI_TO_IRQBIT(SI_SOFTCLOCK);
+	footbridge_imask[IPL_SOFTNET] = SI_TO_IRQBIT(SI_SOFTNET);
+	footbridge_imask[IPL_SOFTSERIAL] = SI_TO_IRQBIT(SI_SOFTSERIAL);
+
+	footbridge_imask[IPL_SOFTCLOCK] |= footbridge_imask[IPL_SOFT];
+	footbridge_imask[IPL_SOFTNET] |= footbridge_imask[IPL_SOFTCLOCK];
 
 	/*
 	 * Enforce a hierarchy that gives "slow" device (or devices with
 	 * limited input buffer space/"real-time" requirements) a better
 	 * chance at not dropping data.
 	 */
-	KASSERT(footbridge_imask[IPL_VM] != 0);
-	footbridge_imask[IPL_SCHED] |= footbridge_imask[IPL_VM];
-	footbridge_imask[IPL_HIGH] |= footbridge_imask[IPL_SCHED];
+	footbridge_imask[IPL_BIO] |= footbridge_imask[IPL_SOFTNET];
+	footbridge_imask[IPL_NET] |= footbridge_imask[IPL_BIO];
+	footbridge_imask[IPL_SOFTSERIAL] |= footbridge_imask[IPL_NET];
+
+	footbridge_imask[IPL_TTY] |= footbridge_imask[IPL_SOFTSERIAL];
+
+	/*
+	 * splvm() blocks all interrupts that use the kernel memory
+	 * allocation facilities.
+	 */
+	footbridge_imask[IPL_VM] |= footbridge_imask[IPL_TTY];
+
+	/*
+	 * Audio devices are not allowed to perform memory allocation
+	 * in their interrupt routines, and they have fairly "real-time"
+	 * requirements, so give them a high interrupt priority.
+	 */
+	footbridge_imask[IPL_AUDIO] |= footbridge_imask[IPL_VM];
+
+	/*
+	 * splclock() must block anything that uses the scheduler.
+	 */
+	footbridge_imask[IPL_CLOCK] |= footbridge_imask[IPL_AUDIO];
+
+	/*
+	 * footbridge has separate statclock.
+	 */
+	footbridge_imask[IPL_STATCLOCK] |= footbridge_imask[IPL_CLOCK];
+
+	/*
+	 * splhigh() must block "everything".
+	 */
+	footbridge_imask[IPL_HIGH] |= footbridge_imask[IPL_STATCLOCK];
+
+	/*
+	 * XXX We need serial drivers to run at the absolute highest priority
+	 * in order to avoid overruns, so serial > high.
+	 */
+	footbridge_imask[IPL_SERIAL] |= footbridge_imask[IPL_HIGH];
 
 	/*
 	 * Calculate the ipl level to go to when handling this interrupt
 	 */
-	for (irq = 0, iq = footbridge_intrq; irq < NIRQ; irq++, iq++) {
+	for (irq = 0; irq < NIRQ; irq++) {
 		int irqs = (1U << irq);
-		if (!TAILQ_EMPTY(&iq->iq_list)) {
+		iq = &footbridge_intrq[irq];
+		if (TAILQ_FIRST(&iq->iq_list) != NULL)
 			footbridge_enable_irq(irq);
-			TAILQ_FOREACH(ih, &iq->iq_list, ih_list) {
-				irqs |= footbridge_imask[ih->ih_ipl];
-			}
-		}
+		for (ih = TAILQ_FIRST(&iq->iq_list); ih != NULL;
+		     ih = TAILQ_NEXT(ih, ih_list))
+			irqs |= footbridge_imask[ih->ih_ipl];
 		iq->iq_mask = irqs;
 	}
 }
@@ -185,17 +254,66 @@ _spllower(int ipl)
 }
 
 void
+footbridge_do_pending(void)
+{
+	static __cpu_simple_lock_t processing = __SIMPLELOCK_UNLOCKED;
+	uint32_t new, oldirqstate;
+
+	if (__cpu_simple_lock_try(&processing) == 0)
+		return;
+
+	new = current_spl_level;
+	
+	oldirqstate = disable_interrupts(I32_bit);
+
+#define	DO_SOFTINT(si)							\
+	if ((footbridge_ipending & ~new) & SI_TO_IRQBIT(si)) {		\
+		footbridge_ipending &= ~SI_TO_IRQBIT(si);		\
+		current_spl_level |= footbridge_imask[si_to_ipl[(si)]];	\
+		restore_interrupts(oldirqstate);			\
+		softintr_dispatch(si);					\
+		oldirqstate = disable_interrupts(I32_bit);		\
+		current_spl_level = new;				\
+	}
+	DO_SOFTINT(SI_SOFTSERIAL);
+	DO_SOFTINT(SI_SOFTNET);
+	DO_SOFTINT(SI_SOFTCLOCK);
+	DO_SOFTINT(SI_SOFT);
+	
+	__cpu_simple_unlock(&processing);
+
+	restore_interrupts(oldirqstate);
+}
+
+
+/* called from splhigh, so the matching splx will set the interrupt up.*/
+void
+_setsoftintr(int si)
+{
+	int oldirqstate;
+
+	oldirqstate = disable_interrupts(I32_bit);
+	footbridge_ipending |= SI_TO_IRQBIT(si);
+	restore_interrupts(oldirqstate);
+
+	/* Process unmasked pending soft interrupts. */
+	if ((footbridge_ipending & INT_SWMASK) & ~current_spl_level)
+		footbridge_do_pending();
+}
+
+void
 footbridge_intr_init(void)
 {
 	struct intrq *iq;
 	int i;
 
 	intr_enabled = 0;
-	set_curcpl(0xffffffff);
+	current_spl_level = 0xffffffff;
 	footbridge_ipending = 0;
 	footbridge_set_intrmask();
 	
-	for (i = 0, iq = footbridge_intrq; i < NIRQ; i++, iq++) {
+	for (i = 0; i < NIRQ; i++) {
+		iq = &footbridge_intrq[i];
 		TAILQ_INIT(&iq->iq_list);
 
 		sprintf(iq->iq_name, "irq %d", i);
@@ -268,9 +386,11 @@ footbridge_intr_disestablish(void *cookie)
 	restore_interrupts(oldirqstate);
 }
 
-static inline uint32_t footbridge_intstatus(void)
+static uint32_t footbridge_intstatus(void);
+
+static inline uint32_t footbridge_intstatus()
 {
-	return ((volatile uint32_t*)(DC21285_ARMCSR_VBASE))[IRQ_STATUS>>2];
+    return ((volatile uint32_t*)(DC21285_ARMCSR_VBASE))[IRQ_STATUS>>2];
 }
 
 /* called with external interrupts disabled */
@@ -279,10 +399,9 @@ footbridge_intr_dispatch(struct clockframe *frame)
 {
 	struct intrq *iq;
 	struct intrhand *ih;
-	int oldirqstate, irq, ibit, hwpend;
-	struct cpu_info * const ci = curcpu();
-	const int ppl = ci->ci_cpl;
-	const int imask = footbridge_imask[ppl];
+	int oldirqstate, pcpl, irq, ibit, hwpend;
+
+	pcpl = current_spl_level;
 
 	hwpend = footbridge_intstatus();
 
@@ -300,7 +419,7 @@ footbridge_intr_dispatch(struct clockframe *frame)
 
 		hwpend &= ~ibit;
 
-		if (imask & ibit) {
+		if (pcpl & ibit) {
 			/*
 			 * IRQ is masked; mark it as pending and check
 			 * the next one.  Note: the IRQ is already disabled.
@@ -314,16 +433,16 @@ footbridge_intr_dispatch(struct clockframe *frame)
 		iq = &footbridge_intrq[irq];
 		iq->iq_ev.ev_count++;
 		uvmexp.intrs++;
-		TAILQ_FOREACH(ih, &iq->iq_list, ih_list) {
-			ci->ci_cpl = ih->ih_ipl;
-			oldirqstate = enable_interrupts(I32_bit);
+		current_spl_level |= iq->iq_mask;
+		oldirqstate = enable_interrupts(I32_bit);
+		for (ih = TAILQ_FIRST(&iq->iq_list);
+			((ih != NULL) && (intr_rc != 1));
+		     ih = TAILQ_NEXT(ih, ih_list)) {
 			intr_rc = (*ih->ih_func)(ih->ih_arg ? ih->ih_arg : frame);
-			restore_interrupts(oldirqstate);
-			if (intr_rc != 1)
-				break;
 		}
+		restore_interrupts(oldirqstate);
 
-		ci->ci_cpl = ppl;
+		current_spl_level = pcpl;
 
 		/* Re-enable this interrupt now that's it's cleared. */
 		intr_enabled |= ibit;
@@ -331,10 +450,17 @@ footbridge_intr_dispatch(struct clockframe *frame)
 
 		/* also check for any new interrupts that may have occurred,
 		 * that we can handle at this spl level */
-		hwpend |= (footbridge_ipending & ICU_INT_HWMASK) & ~imask;
+		hwpend |= (footbridge_ipending & ICU_INT_HWMASK) & ~pcpl;
 	}
 
-#ifdef __HAVE_FAST_SOFTINTS
-	cpu_dosoftints();
-#endif /* __HAVE_FAST_SOFTINTS */
+	/* Check for pendings soft intrs. */
+        if ((footbridge_ipending & INT_SWMASK) & ~current_spl_level) {
+	    /* 
+	     * XXX this feels the wrong place to enable irqs, as some
+	     * soft ints are higher priority than hardware irqs
+	     */
+                oldirqstate = enable_interrupts(I32_bit);
+                footbridge_do_pending();
+                restore_interrupts(oldirqstate);
+        }
 }

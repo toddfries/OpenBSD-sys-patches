@@ -1,4 +1,4 @@
-/*	$NetBSD: pcmcom.c,v 1.34 2008/04/28 20:23:56 martin Exp $	*/
+/*	$NetBSD: pcmcom.c,v 1.31 2007/10/19 12:01:06 ad Exp $	*/
 
 /*-
  * Copyright (c) 1998, 2000, 2004 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -44,7 +51,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: pcmcom.c,v 1.34 2008/04/28 20:23:56 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pcmcom.c,v 1.31 2007/10/19 12:01:06 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -151,7 +158,7 @@ pcmcom_attach(struct device *parent, struct device *self, void *aux)
 
 	error = pcmcia_function_configure(pa->pf, pcmcom_validate_config);
 	if (error) {
-		aprint_error_dev(self, "configure failed, error=%d\n",
+		aprint_error("%s: configure failed, error=%d\n", self->dv_xname,
 		    error);
 		return;
 	}
@@ -167,7 +174,7 @@ pcmcom_attach(struct device *parent, struct device *self, void *aux)
 	for (slave = 0; slave < sc->sc_nslaves; slave++) {
 		struct pcmcom_attach_args pca;
 
-		printf("%s: slave %d\n", device_xname(self), slave);
+		printf("%s: slave %d\n", self->dv_xname, slave);
 
 		pca.pca_iot = cfe->iospace[slave].handle.iot;
 		pca.pca_ioh = cfe->iospace[slave].handle.ioh;
@@ -325,8 +332,8 @@ pcmcom_disable(sc)
 /****** Here begins the com attachment code. ******/
 
 #if NCOM_PCMCOM > 0
-int	com_pcmcom_match(device_t, cfdata_t , void *);
-void	com_pcmcom_attach(device_t, device_t, void *);
+int	com_pcmcom_match(struct device *, struct cfdata *, void *);
+void	com_pcmcom_attach(struct device *, struct device *, void *);
 
 /* No pcmcom-specific goo in the softc; it's all in the parent. */
 CFATTACH_DECL(com_pcmcom, sizeof(struct com_softc),
@@ -336,7 +343,8 @@ int	com_pcmcom_enable(struct com_softc *);
 void	com_pcmcom_disable(struct com_softc *);
 
 int
-com_pcmcom_match(device_t parent, cfdata_t cf, void *aux)
+com_pcmcom_match(struct device *parent, struct cfdata *cf,
+    void *aux)
 {
 
 	/* Device is always present. */
@@ -344,12 +352,12 @@ com_pcmcom_match(device_t parent, cfdata_t cf, void *aux)
 }
 
 void
-com_pcmcom_attach(device_t parent, device_t self, void *aux)
+com_pcmcom_attach(struct device *parent, struct device *self,
+    void *aux)
 {
-	struct com_softc *sc = device_private(self);
+	struct com_softc *sc = (struct com_softc *)self;
 	struct pcmcom_attach_args *pca = aux;
 
-	sc->sc_dev = self;
 	COM_INIT_REGS(sc->sc_regs, pca->pca_iot, pca->pca_ioh, -1);
 	sc->enabled = 1;
 
@@ -364,10 +372,11 @@ com_pcmcom_attach(device_t parent, device_t self, void *aux)
 }
 
 int
-com_pcmcom_enable(struct com_softc *sc)
+com_pcmcom_enable(sc)
+	struct com_softc *sc;
 {
 
-	return (pcmcom_enable(device_private(device_parent(sc->sc_dev))));
+	return (pcmcom_enable((struct pcmcom_softc *)device_parent(&sc->sc_dev)));
 }
 
 void
@@ -375,6 +384,6 @@ com_pcmcom_disable(sc)
 	struct com_softc *sc;
 {
 
-	pcmcom_disable(device_private(device_parent(sc->sc_dev)));
+	pcmcom_disable((struct pcmcom_softc *)device_parent(&sc->sc_dev));
 }
 #endif /* NCOM_PCMCOM > 0 */

@@ -1,4 +1,4 @@
-/*	$NetBSD: weasel_isa.c,v 1.5 2008/04/08 20:08:50 cegger Exp $	*/
+/*	$NetBSD: weasel_isa.c,v 1.4 2007/10/19 12:00:24 ad Exp $	*/
 
 /*-
  * Copyright (c) 2000 Zembu Labs, Inc.
@@ -42,7 +42,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: weasel_isa.c,v 1.5 2008/04/08 20:08:50 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: weasel_isa.c,v 1.4 2007/10/19 12:00:24 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -132,7 +132,7 @@ weasel_isa_init(struct weasel_handle *wh)
 		 * or something is wrong with it.
 		 */
 		printf("%s: PC-Weasel config block checksum mismatch "
-		    "0x%02x != 0x%02x\n", device_xname(wh->wh_parent),
+		    "0x%02x != 0x%02x\n", wh->wh_parent->dv_xname,
 		    sum, cfg.cksum);
 		return;
 	}
@@ -178,14 +178,14 @@ weasel_isa_init(struct weasel_handle *wh)
 		vers = mode = NULL;
 	}
 
-	printf("%s: PC-Weasel, ", device_xname(wh->wh_parent));
+	printf("%s: PC-Weasel, ", wh->wh_parent->dv_xname);
 	if (vers != NULL)
 		printf("version %s, %s mode", vers, mode);
 	else
 		printf("unknown version 0x%x", cfg.cfg_version);
 	printf("\n");
 
-	printf("%s: break passthrough %s", device_xname(wh->wh_parent),
+	printf("%s: break passthrough %s", wh->wh_parent->dv_xname,
 	    cfg.break_passthru ? "enabled" : "disabled");
 	if (cfg.wdt_msec == 0) {
 		/*
@@ -212,8 +212,8 @@ weasel_isa_init(struct weasel_handle *wh)
 	wh->wh_smw.smw_period = wh->wh_wdog_period;
 
 	if (sysmon_wdog_register(&wh->wh_smw) != 0)
-		aprint_error_dev(wh->wh_parent, "unable to register PC-Weasel watchdog "
-		    "with sysmon\n");
+		printf("%s: unable to register PC-Weasel watchdog "
+		    "with sysmon\n", wh->wh_parent->dv_xname);
 }
 
 int
@@ -266,7 +266,8 @@ weasel_isa_wdog_tickle(struct sysmon_wdog *smw)
 	if (x == 1) {
 		error = 0;
 	} else {
-		aprint_error_dev(wh->wh_parent, "Watchdog timer disabled on PC/Weasel! Disarming wdog.\n");
+		printf("%s: Watchdog timer disabled on PC/Weasel! Disarming wdog.\n",
+			wh->wh_parent->dv_xname);
 		wh->wh_wdog_armed = 0;
 		error = 1;
 	}

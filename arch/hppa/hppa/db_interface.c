@@ -1,4 +1,4 @@
-/*	$NetBSD: db_interface.c,v 1.16 2008/04/24 07:28:30 skrll Exp $	*/
+/*	$NetBSD: db_interface.c,v 1.9 2006/08/26 06:27:40 skrll Exp $	*/
 
 /*	$OpenBSD: db_interface.c,v 1.16 2001/03/22 23:31:45 mickey Exp $	*/
 
@@ -33,12 +33,10 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: db_interface.c,v 1.16 2008/04/24 07:28:30 skrll Exp $");
+__KERNEL_RCSID(0, "$NetBSD: db_interface.c,v 1.9 2006/08/26 06:27:40 skrll Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/proc.h>
-#include <sys/user.h> 
 
 #include <machine/db_machdep.h>
 #include <machine/frame.h>
@@ -186,9 +184,9 @@ kdb_trap(int type, int code, db_regs_t *regs)
 
 	s = splhigh();
 	db_active++;
-	cnpollc(true);
+	cnpollc(TRUE);
 	db_trap(type, code);
-	cnpollc(false);
+	cnpollc(FALSE);
 	db_active--;
 	splx(s);
 
@@ -204,4 +202,101 @@ int
 db_valid_breakpoint(db_addr_t addr)
 {
 	return (1);
+}
+
+void
+db_stack_trace_print(db_expr_t addr, int have_addr, db_expr_t count,
+    const char *modif, void (*pr)(const char *, ...))
+{
+	register_t *fp, pc, rp, nargs, *argp;
+	db_sym_t sym;
+	db_expr_t off;
+	const char *name;
+	char **argnp, *argnames[HPPA_FRAME_NARGS];
+
+	if (count < 0)
+		count = 65536;
+
+	if (!have_addr) {
+		fp = (register_t *)ddb_regs.tf_r3;
+		pc = ddb_regs.tf_iioq_head;
+		rp = ddb_regs.tf_rp;
+	} else {
+		fp = (register_t *)addr;
+		pc = 0;
+		rp = ((register_t *)fp)[-5];
+	}
+
+#ifdef DDB_DEBUG
+	pr(">> %x, %x, %x\t", fp, pc, rp);
+#endif
+	while (fp && count--) {
+
+		if (USERMODE(pc))
+			return;
+
+		sym = db_search_symbol(pc, DB_STGY_ANY, &off);
+		db_symbol_values (sym, &name, NULL);
+
+		pr("%s(", name);
+
+		/* args */
+		nargs = HPPA_FRAME_NARGS;
+		argnp = NULL;
+		if (db_sym_numargs(sym, &nargs, argnames))
+			argnp = argnames;
+		else
+			nargs = 4;
+		/*
+		 * XXX first four args are passed on registers, and may not
+		 * be stored on stack, dunno how to recover their values yet
+		 */
+		for (argp = &fp[-9]; nargs--; argp--) {
+			if (argnp)
+				pr("%s=", *argnp++);
+			pr("%lx%s", db_get_value((int)argp, 4, FALSE),
+				  nargs? ",":"");
+		}
+		pr(") at ");
+		db_printsym(pc, DB_STGY_PROC, pr);
+		pr("\n");
+
+		/* TODO: print locals */
+
+		/* next frame */
+		pc = rp;
+		rp = fp[-5];
+
+		/* if a terminal frame and not a start of a page
+		 * then skip the trapframe and the terminal frame */
+		if (!fp[0]) {
+			struct trapframe *tf;
+
+			tf = (struct trapframe *)((char *)fp - sizeof(*tf));
+
+			if (tf->tf_flags & TFF_SYS)
+				pr("-- syscall #%d(%x, %x, %x, %x, ...)\n",
+				    tf->tf_t1, tf->tf_arg0, tf->tf_arg1,
+				    tf->tf_arg2, tf->tf_arg3);
+			else
+				pr("-- trap #%d%s\n", tf->tf_flags & 0x3f,
+				    (tf->tf_flags & T_USER)? " from user" : "");
+
+			if (!(tf->tf_flags & TFF_LAST)) {
+				fp = (register_t *)tf->tf_r3;
+				pc = tf->tf_iioq_head;
+				rp = tf->tf_rp;
+			} else
+				fp = 0;
+		} else
+			fp = (register_t *)fp[0];
+#ifdef DDB_DEBUG
+		pr(">> %x, %x, %x\t", fp, pc, rp);
+#endif
+	}
+
+	if (count && pc) {
+		db_printsym(pc, DB_STGY_XTRN, pr);
+		pr(":\n");
+	}
 }

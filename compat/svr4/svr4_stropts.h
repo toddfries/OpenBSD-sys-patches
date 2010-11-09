@@ -1,4 +1,4 @@
-/*	$NetBSD: svr4_stropts.h,v 1.14 2008/04/28 20:23:45 martin Exp $	 */
+/*	$NetBSD: svr4_stropts.h,v 1.12 1998/10/03 22:03:07 christos Exp $	 */
 
 /*-
  * Copyright (c) 1994 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -172,6 +179,6 @@ struct svr4_netaddr_un {
 #define SVR4_ADDROF(sc) (void *) (((char *) (sc)) + (sc)->offs)
 #define SVR4_C_ADDROF(sc) (const void *) (((const char *) (sc)) + (sc)->offs)
 
-struct svr4_strm *svr4_stream_get(struct file *fp);
+struct svr4_strm *svr4_stream_get __P((struct file *fp));
 
 #endif /* !_SVR4_STROPTS */

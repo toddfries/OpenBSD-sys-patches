@@ -1,4 +1,4 @@
-/*	$NetBSD: rtwreg.h,v 1.26 2008/09/08 23:36:54 gmcgarry Exp $	*/
+/*	$NetBSD: rtwreg.h,v 1.23 2007/01/06 08:27:53 dyoung Exp $	*/
 /*-
  * Copyright (c) 2004, 2005 David Young.  All rights reserved.
  *
@@ -283,7 +283,6 @@
 
 /* Receive power-management frames and mgmt/ctrl/data frames. */
 #define	RTW_RCR_PKTFILTER_DEFAULT	(	\
-    RTW_RCR_ACF |				\
     RTW_RCR_ADF |				\
     RTW_RCR_AMF |				\
     RTW_RCR_APM |				\
@@ -841,7 +840,7 @@ struct rtw_txdesc {
 	volatile uint32_t	td_len;
 	volatile uint32_t	td_next;
 	volatile uint32_t	td_rsvd[3];
-} __packed __aligned(4);
+} __attribute__((__packed__, __aligned__(4)));
 
 #define td_stat td_ctl0
 
@@ -902,7 +901,7 @@ struct rtw_rxdesc {
 	volatile uint32_t	rd_rsvd0;
 	volatile uint32_t	rd_buf;
 	volatile uint32_t	rd_rsvd1;
-} __packed __aligned(4);
+} __attribute__((__packed__, __aligned__(4)));
 
 #define rd_stat rd_ctl
 #define rd_rssi rd_rsvd0
@@ -1045,7 +1044,7 @@ struct rtw_rxdesc {
 #define RTW_RBR(regs, reg0, reg1)				\
 	RTW_BARRIER(regs, reg0, reg1, BUS_SPACE_BARRIER_READ_BEFORE_READ)
 
-/* read-before-write */
+/* read-before-read */
 #define RTW_RBW(regs, reg0, reg1)				\
 	RTW_BARRIER(regs, reg0, reg1, BUS_SPACE_BARRIER_READ_BEFORE_WRITE)
 

@@ -1,4 +1,4 @@
-/*	$NetBSD: kern_info_43.c,v 1.34 2009/01/11 02:45:46 christos Exp $	*/
+/*	$NetBSD: kern_info_43.c,v 1.26 2007/01/04 18:27:36 elad Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1991, 1993
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kern_info_43.c,v 1.34 2009/01/11 02:45:46 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kern_info_43.c,v 1.26 2007/01/04 18:27:36 elad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -55,24 +55,23 @@ __KERNEL_RCSID(0, "$NetBSD: kern_info_43.c,v 1.34 2009/01/11 02:45:46 christos E
 #include <sys/sysctl.h>
 
 #include <sys/mount.h>
+#include <sys/sa.h>
 #include <sys/syscallargs.h>
-#include <compat/sys/time.h>
 
 int
-compat_43_sys_getdtablesize(struct lwp *l, const void *v, register_t *retval)
+compat_43_sys_getdtablesize(struct lwp *l, void *v, register_t *retval)
 {
 	struct proc *p = l->l_proc;
 
-	mutex_enter(p->p_lock);
 	*retval = min((int)p->p_rlimit[RLIMIT_NOFILE].rlim_cur, maxfiles);
-	mutex_exit(p->p_lock);
 	return (0);
 }
 
 
 /* ARGSUSED */
 int
-compat_43_sys_gethostid(struct lwp *l, const void *v, register_t *retval)
+compat_43_sys_gethostid(struct lwp *l, void *v,
+    register_t *retval)
 {
 
 	*(int32_t *)retval = hostid;
@@ -82,12 +81,12 @@ compat_43_sys_gethostid(struct lwp *l, const void *v, register_t *retval)
 
 /*ARGSUSED*/
 int
-compat_43_sys_gethostname(struct lwp *l, const struct compat_43_sys_gethostname_args *uap, register_t *retval)
+compat_43_sys_gethostname(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct compat_43_sys_gethostname_args /* {
 		syscallarg(char *) hostname;
 		syscallarg(u_int) len;
-	} */
+	} */ *uap = v;
 	int name[2];
 	size_t sz;
 
@@ -135,24 +134,24 @@ struct bsdi_si {
         long    open_max;
         long    child_max;
 
-        struct  timeval50 boottime;
+        struct  timeval boottime;
         char    *hostname;
 };
 
 int
-compat_43_sys_getkerninfo(struct lwp *l, const struct compat_43_sys_getkerninfo_args *uap, register_t *retval)
+compat_43_sys_getkerninfo(struct lwp *l, void *v, register_t *retval)
 {
-	/* {
+	struct compat_43_sys_getkerninfo_args /* {
 		syscallarg(int) op;
 		syscallarg(char *) where;
 		syscallarg(int *) size;
 		syscallarg(int) arg;
-	} */
+	} */ *uap = v;
 	int error, name[6];
 	size_t size;
 
-	if (SCARG(uap, size) && (error = copyin((void *)SCARG(uap, size),
-	    (void *)&size, sizeof(size))))
+	if (SCARG(uap, size) && (error = copyin((caddr_t)SCARG(uap, size),
+	    (caddr_t)&size, sizeof(size))))
 		return (error);
 
 	switch (SCARG(uap, op) & 0xff00) {
@@ -219,7 +218,6 @@ compat_43_sys_getkerninfo(struct lwp *l, const struct compat_43_sys_getkerninfo_
 			struct bsdi_si *usi =
 			    (struct bsdi_si *) SCARG(uap, where);
 			struct bsdi_si ksi;
-			struct timeval tv;
 			char *us = (char *) &usi[1];
 
 			if (usi == NULL) {
@@ -239,7 +237,7 @@ compat_43_sys_getkerninfo(struct lwp *l, const struct compat_43_sys_getkerninfo_
 
 			COPY(machine);
 			COPY(cpu_model);
-			ksi.ncpu = ncpu;		/* XXX */
+			ksi.ncpu = 1;			/* XXX */
 			ksi.cpuspeed = 40;		/* XXX */
 			ksi.hwflags = 0;		/* XXX */
 			ksi.physmem = ctob(physmem);
@@ -259,8 +257,7 @@ compat_43_sys_getkerninfo(struct lwp *l, const struct compat_43_sys_getkerninfo_
 			ksi.open_max = OPEN_MAX;
 			ksi.child_max = CHILD_MAX;
 
-			TIMESPEC_TO_TIMEVAL(&tv, &boottime);
-			timeval_to_timeval50(&tv, &ksi.boottime);
+			ksi.boottime = boottime;
 			COPY(hostname);
 
 			size = (us - (char *) &usi[1]) + sizeof(ksi);
@@ -277,7 +274,7 @@ compat_43_sys_getkerninfo(struct lwp *l, const struct compat_43_sys_getkerninfo_
 		return (error);
 	*retval = size;
 	if (SCARG(uap, size))
-		error = copyout((void *)&size, (void *)SCARG(uap, size),
+		error = copyout((caddr_t)&size, (caddr_t)SCARG(uap, size),
 		    sizeof(size));
 	return (error);
 }
@@ -285,23 +282,26 @@ compat_43_sys_getkerninfo(struct lwp *l, const struct compat_43_sys_getkerninfo_
 
 /* ARGSUSED */
 int
-compat_43_sys_sethostid(struct lwp *l, const struct compat_43_sys_sethostid_args *uap, register_t *retval)
+compat_43_sys_sethostid(struct lwp *l, void *v, register_t *retval)
 {
-	long uhostid;
-	int name[2];
+	struct compat_43_sys_sethostid_args /* {
+		syscallarg(int32_t) hostid;
+	} */ *uap = v;
+	int error;
 
-	uhostid = SCARG(uap, hostid);
-	name[0] = CTL_KERN;
-	name[1] = KERN_HOSTID;
-
-	return (old_sysctl(&name[0], 2, 0, 0, &uhostid, sizeof(long), l));
+	if ((error = kauth_authorize_generic(l->l_cred,
+	    KAUTH_GENERIC_ISSUSER, NULL)) != 0)
+		return (error);
+	hostid = SCARG(uap, hostid);
+	return (0);
 }
 
 
 /* ARGSUSED */
 int
-compat_43_sys_sethostname(struct lwp *l, const struct compat_43_sys_sethostname_args *uap, register_t *retval)
+compat_43_sys_sethostname(struct lwp *l, void *v, register_t *retval)
 {
+	struct compat_43_sys_sethostname_args *uap = v;
 	int name[2];
 
 	name[0] = CTL_KERN;

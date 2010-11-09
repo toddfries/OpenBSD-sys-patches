@@ -1,4 +1,4 @@
-/*	$NetBSD: usb_cardbus.h,v 1.5 2008/04/28 20:23:47 martin Exp $	*/
+/*	$NetBSD: usb_cardbus.h,v 1.3 2005/12/11 12:21:15 christos Exp $	*/
 
 /*
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -39,8 +46,8 @@ struct usb_cardbus {
 	TAILQ_ENTRY(usb_cardbus) next;
 	u_int		bus;
 	u_int		function;
-	device_t	usb;
+	struct usbd_bus *usb;
 };
 void usb_cardbus_add(struct usb_cardbus *, struct cardbus_attach_args *,
-		     device_t);
+		     struct usbd_bus *);
 void usb_cardbus_rem(struct usb_cardbus *);

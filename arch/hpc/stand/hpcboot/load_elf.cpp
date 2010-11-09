@@ -1,4 +1,4 @@
-/*	$NetBSD: load_elf.cpp,v 1.19 2008/11/07 16:28:26 rafal Exp $	*/
+/*	$NetBSD: load_elf.cpp,v 1.17 2006/03/05 04:04:13 uwe Exp $	*/
 
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -159,9 +166,9 @@ ElfLoader::load()
 		if (ph->p_type == PT_LOAD) {
 			size_t filesz = ph->p_filesz;
 			size_t memsz = ph->p_memsz;
-			kv = ph->p_paddr;
+			kv = ph->p_vaddr;
 			off_t fileofs = ph->p_offset;
-			DPRINTF((TEXT("seg[%d] paddr 0x%08x file size 0x%x mem size 0x%x\n"),
+			DPRINTF((TEXT("seg[%d] vaddr 0x%08x file size 0x%x mem size 0x%x\n"),
 			    i, kv, filesz, memsz));
 			_load_segment(kv, memsz, fileofs, filesz);
 			kv += ROUND4(memsz);

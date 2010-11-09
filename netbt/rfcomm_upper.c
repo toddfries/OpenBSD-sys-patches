@@ -1,4 +1,4 @@
-/*	$NetBSD: rfcomm_upper.c,v 1.11 2008/08/06 15:01:24 plunky Exp $	*/
+/*	$NetBSD: rfcomm_upper.c,v 1.1 2006/06/19 15:44:45 gdamore Exp $	*/
 
 /*-
  * Copyright (c) 2006 Itronix Inc.
@@ -32,13 +32,12 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: rfcomm_upper.c,v 1.11 2008/08/06 15:01:24 plunky Exp $");
+__KERNEL_RCSID(0, "$NetBSD: rfcomm_upper.c,v 1.1 2006/06/19 15:44:45 gdamore Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
 #include <sys/mbuf.h>
 #include <sys/proc.h>
-#include <sys/socketvar.h>
 #include <sys/systm.h>
 
 #include <netbt/bluetooth.h>
@@ -66,9 +65,9 @@ rfcomm_attach(struct rfcomm_dlc **handle,
 {
 	struct rfcomm_dlc *dlc;
 
-	KASSERT(handle != NULL);
-	KASSERT(proto != NULL);
-	KASSERT(upper != NULL);
+	KASSERT(handle);
+	KASSERT(proto);
+	KASSERT(upper);
 
 	dlc = malloc(sizeof(struct rfcomm_dlc), M_BLUETOOTH, M_NOWAIT | M_ZERO);
 	if (dlc == NULL)
@@ -90,7 +89,7 @@ rfcomm_attach(struct rfcomm_dlc **handle,
 
 	dlc->rd_lmodem = RFCOMM_MSC_RTC | RFCOMM_MSC_RTR | RFCOMM_MSC_DV;
 
-	callout_init(&dlc->rd_timeout, 0);
+	callout_init(&dlc->rd_timeout);
 	callout_setfunc(&dlc->rd_timeout, rfcomm_dlc_timeout, dlc);
 
 	*handle = dlc;
@@ -229,14 +228,7 @@ rfcomm_disconnect(struct rfcomm_dlc *dlc, int linger)
 	case RFCOMM_DLC_LISTEN:
 		return EINVAL;
 
-	case RFCOMM_DLC_WAIT_SEND_UA:
-		err = rfcomm_session_send_frame(rs,
-				RFCOMM_FRAME_DM, dlc->rd_dlci);
-
-		/* fall through */
 	case RFCOMM_DLC_WAIT_SESSION:
-	case RFCOMM_DLC_WAIT_CONNECT:
-	case RFCOMM_DLC_WAIT_SEND_SABM:
 		rfcomm_dlc_close(dlc, 0);
 		break;
 
@@ -247,7 +239,7 @@ rfcomm_disconnect(struct rfcomm_dlc *dlc, int linger)
 		}
 
 		/* else fall through */
-	case RFCOMM_DLC_WAIT_RECV_UA:
+	case RFCOMM_DLC_WAIT_CONNECT:
 		dlc->rd_state = RFCOMM_DLC_WAIT_DISCONNECT;
 		err = rfcomm_session_send_frame(rs, RFCOMM_FRAME_DISC,
 							dlc->rd_dlci);
@@ -293,10 +285,8 @@ rfcomm_detach(struct rfcomm_dlc **handle)
 	 */
 	if (callout_invoking(&dlc->rd_timeout))
 		dlc->rd_flags |= RFCOMM_DLC_DETACH;
-	else {
-		callout_destroy(&dlc->rd_timeout);
+	else
 		free(dlc, M_BLUETOOTH);
-	}
 
 	return 0;
 }
@@ -306,23 +296,20 @@ rfcomm_detach(struct rfcomm_dlc **handle)
  *
  * This DLC is a listener. We look for an existing listening session
  * with a matching address to attach to or else create a new one on
- * the listeners list. If the ANY channel is given, allocate the first
- * available for the session.
+ * the listeners list.
  */
 int
 rfcomm_listen(struct rfcomm_dlc *dlc)
 {
-	struct rfcomm_session *rs;
-	struct rfcomm_dlc *used;
+	struct rfcomm_session *rs, *any, *best;
 	struct sockaddr_bt addr;
-	int err, channel;
+	int err;
 
 	if (dlc->rd_state != RFCOMM_DLC_CLOSED)
 		return EISCONN;
 
-	if (dlc->rd_laddr.bt_channel != RFCOMM_CHANNEL_ANY
-	    && (dlc->rd_laddr.bt_channel < RFCOMM_CHANNEL_MIN
-	    || dlc->rd_laddr.bt_channel > RFCOMM_CHANNEL_MAX))
+	if (dlc->rd_laddr.bt_channel < RFCOMM_CHANNEL_MIN
+	    || dlc->rd_laddr.bt_channel > RFCOMM_CHANNEL_MAX)
 		return EADDRNOTAVAIL;
 
 	if (dlc->rd_laddr.bt_psm == L2CAP_PSM_ANY)
@@ -332,6 +319,7 @@ rfcomm_listen(struct rfcomm_dlc *dlc)
 	    || L2CAP_PSM_INVALID(dlc->rd_laddr.bt_psm)))
 		return EADDRNOTAVAIL;
 
+	any = best = NULL;
 	LIST_FOREACH(rs, &rfcomm_session_listen, rs_next) {
 		l2cap_sockaddr(rs->rs_l2cap, &addr);
 
@@ -339,9 +327,13 @@ rfcomm_listen(struct rfcomm_dlc *dlc)
 			continue;
 
 		if (bdaddr_same(&dlc->rd_laddr.bt_bdaddr, &addr.bt_bdaddr))
-			break;
+			best = rs;
+
+		if (bdaddr_any(&addr.bt_bdaddr))
+			any = rs;
 	}
 
+	rs = best ? best : any;
 	if (rs == NULL) {
 		rs = rfcomm_session_alloc(&rfcomm_session_listen,
 						&dlc->rd_laddr);
@@ -355,24 +347,6 @@ rfcomm_listen(struct rfcomm_dlc *dlc)
 			rfcomm_session_free(rs);
 			return err;
 		}
-	}
-
-	if (dlc->rd_laddr.bt_channel == RFCOMM_CHANNEL_ANY) {
-		channel = RFCOMM_CHANNEL_MIN;
-		used = LIST_FIRST(&rs->rs_dlcs);
-
-		while (used != NULL) {
-			if (used->rd_laddr.bt_channel == channel) {
-				if (channel++ == RFCOMM_CHANNEL_MAX)
-					return EADDRNOTAVAIL;
-
-				used = LIST_FIRST(&rs->rs_dlcs);
-			} else {
-				used = LIST_NEXT(used, rd_next);
-			}
-		}
-
-		dlc->rd_laddr.bt_channel = channel;
 	}
 
 	dlc->rd_session = rs;
@@ -435,90 +409,66 @@ rfcomm_rcvd(struct rfcomm_dlc *dlc, size_t space)
 }
 
 /*
- * rfcomm_setopt(dlc, sopt)
+ * rfcomm_setopt(dlc, option, addr)
  *
  * set DLC options
  */
 int
-rfcomm_setopt(struct rfcomm_dlc *dlc, const struct sockopt *sopt)
+rfcomm_setopt(struct rfcomm_dlc *dlc, int opt, void *addr)
 {
-	int mode, err = 0;
-	uint16_t mtu;
+	int err = 0;
 
-	switch (sopt->sopt_name) {
+	if (dlc->rd_state != RFCOMM_DLC_CLOSED)
+		return EBUSY;
+
+	switch (opt) {
 	case SO_RFCOMM_MTU:
-		err = sockopt_get(sopt, &mtu, sizeof(mtu));
-		if (err)
-			break;
-
-		if (mtu < RFCOMM_MTU_MIN || mtu > RFCOMM_MTU_MAX)
+		dlc->rd_mtu = *(uint16_t *)addr;
+		if (dlc->rd_mtu < RFCOMM_MTU_MIN
+		    || dlc->rd_mtu > RFCOMM_MTU_MAX) {
+			dlc->rd_mtu = rfcomm_mtu_default;
 			err = EINVAL;
-		else if (dlc->rd_state == RFCOMM_DLC_CLOSED)
-			dlc->rd_mtu = mtu;
-		else
-			err = EBUSY;
-
-		break;
-
-	case SO_RFCOMM_LM:
-		err = sockopt_getint(sopt, &mode);
-		if (err)
-			break;
-
-		mode &= (RFCOMM_LM_SECURE | RFCOMM_LM_ENCRYPT | RFCOMM_LM_AUTH);
-
-		if (mode & RFCOMM_LM_SECURE)
-			mode |= RFCOMM_LM_ENCRYPT;
-
-		if (mode & RFCOMM_LM_ENCRYPT)
-			mode |= RFCOMM_LM_AUTH;
-
-		dlc->rd_mode = mode;
-
-		if (dlc->rd_state == RFCOMM_DLC_OPEN)
-			err = rfcomm_dlc_setmode(dlc);
-
+		}
 		break;
 
 	default:
-		err = ENOPROTOOPT;
+		err = EINVAL;
 		break;
 	}
 	return err;
 }
 
 /*
- * rfcomm_getopt(dlc, sopt)
+ * rfcomm_getopt(dlc, option, addr)
  *
  * get DLC options
  */
 int
-rfcomm_getopt(struct rfcomm_dlc *dlc, struct sockopt *sopt)
+rfcomm_getopt(struct rfcomm_dlc *dlc, int opt, void *addr)
 {
-	struct rfcomm_fc_info fc;
+	struct rfcomm_fc_info *fc;
 
-	switch (sopt->sopt_name) {
+	switch (opt) {
 	case SO_RFCOMM_MTU:
-		return sockopt_set(sopt, &dlc->rd_mtu, sizeof(uint16_t));
+		*(uint16_t *)addr = dlc->rd_mtu;
+		return sizeof(uint16_t);
 
 	case SO_RFCOMM_FC_INFO:
-		memset(&fc, 0, sizeof(fc));
-		fc.lmodem = dlc->rd_lmodem;
-		fc.rmodem = dlc->rd_rmodem;
-		fc.tx_cred = max(dlc->rd_txcred, 0xff);
-		fc.rx_cred = max(dlc->rd_rxcred, 0xff);
+		fc = addr;
+		memset(fc, 0, sizeof(*fc));
+		fc->lmodem = dlc->rd_lmodem;
+		fc->rmodem = dlc->rd_rmodem;
+		fc->tx_cred = max(dlc->rd_txcred, 0xff);
+		fc->rx_cred = max(dlc->rd_rxcred, 0xff);
 		if (dlc->rd_session
 		    && (dlc->rd_session->rs_flags & RFCOMM_SESSION_CFC))
-			fc.cfc = 1;
+			fc->cfc = 1;
 
-		return sockopt_set(sopt, &fc, sizeof(fc));
-
-	case SO_RFCOMM_LM:
-		return sockopt_setint(sopt, dlc->rd_mode);
+		return sizeof(*fc);
 
 	default:
 		break;
 	}
 
-	return ENOPROTOOPT;
+	return 0;
 }

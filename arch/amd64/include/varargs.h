@@ -1,4 +1,4 @@
-/*	$NetBSD: varargs.h,v 1.4 2008/10/26 00:08:15 mrg Exp $	*/
+/*	$NetBSD: varargs.h,v 1.3 2005/12/11 12:16:25 christos Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993
@@ -39,8 +39,6 @@
 #ifndef _AMD64_VARARGS_H_
 #define	_AMD64_VARARGS_H_
 
-#ifdef __x86_64__
-
 #include <machine/stdarg.h>
 
 #define	__va_ellipsis	...
@@ -50,11 +48,5 @@
 
 #undef va_start
 #define	va_start(ap)	__builtin_varargs_start((ap))
-
-#else	/*	__x86_64__	*/
-
-#include <i386/varargs.h>
-
-#endif	/*	__x86_64__	*/
 
 #endif /* !_AMD64_VARARGS_H_ */

@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ka49.c,v 1.17 2008/03/11 05:34:03 matt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ka49.c,v 1.15 2006/09/05 19:32:57 matt Exp $");
 
 #include <sys/param.h>
 #include <sys/device.h>
@@ -40,7 +40,6 @@ __KERNEL_RCSID(0, "$NetBSD: ka49.c,v 1.17 2008/03/11 05:34:03 matt Exp $");
 #include <machine/clock.h>
 #include <machine/cpu.h>
 #include <machine/scb.h>
-#include <machine/mainbus.h>
 
 #define	KA49_CPMBX	0x38
 #define	KA49_HLT_HALT	0xcf
@@ -48,7 +47,7 @@ __KERNEL_RCSID(0, "$NetBSD: ka49.c,v 1.17 2008/03/11 05:34:03 matt Exp $");
 
 static	void	ka49_conf(void);
 static	void	ka49_memerr(void);
-static	int	ka49_mchk(void *);
+static	int	ka49_mchk(caddr_t);
 static	void	ka49_halt(void);
 static	void	ka49_reboot(int);
 static	void	ka49_softmem(void *);
@@ -57,30 +56,30 @@ static	void	ka49_steal_pages(void);
 static	void	ka49_cache_enable(void);
 static	void	ka49_halt(void);
 
-static const char * const ka49_devs[] = { "cpu", "sgec", "vsbus", NULL };
-
 /* 
  * Declaration of 49-specific calls.
  */
-const struct cpu_dep ka49_calls = {
-	.cpu_steal_pages = ka49_steal_pages,
-	.cpu_mchk	= ka49_mchk,
-	.cpu_memerr	= ka49_memerr, 
-	.cpu_conf	= ka49_conf,
-	.cpu_gettime	= chip_gettime,
-	.cpu_settime	= chip_settime,
-	.cpu_vups	= 32,      /* ~VUPS */
-	.cpu_scbsz	= 2,	/* SCB pages */
-	.cpu_halt	= ka49_halt,
-	.cpu_reboot	= ka49_reboot,
-	.cpu_devs	= ka49_devs,
-	.cpu_flags	= CPU_RAISEIPL,
+struct	cpu_dep ka49_calls = {
+	ka49_steal_pages,
+	ka49_mchk,
+	ka49_memerr, 
+	ka49_conf,
+	chip_gettime,
+	chip_settime,
+	32,      /* ~VUPS */
+	2,	/* SCB pages */
+	ka49_halt,
+	ka49_reboot,
+	NULL,
+	NULL,
+	CPU_RAISEIPL,
 };
 
+
 void
-ka49_conf(void)
+ka49_conf()
 {
-	curcpu()->ci_cpustr = "KA49, NVAX, 10KB L1 cache, 256KB L2 cache";
+	printf("cpu0: KA49\n");
 
 /* Why??? */
 { volatile int *hej = (void *)mfpr(PR_ISP); *hej = *hej; hej[-1] = hej[-1];}
@@ -138,7 +137,7 @@ ka49_softmem(void *arg)
 #define	PCCTL_D_EN	0x01
 
 void
-ka49_cache_enable(void)
+ka49_cache_enable()
 {
 	int start, slut;
 
@@ -201,20 +200,20 @@ ka49_cache_enable(void)
 }
 
 void
-ka49_memerr(void)
+ka49_memerr()
 {
 	printf("Memory err!\n");
 }
 
 int
-ka49_mchk(void *addr)
+ka49_mchk(caddr_t addr)
 {
 	panic("Machine check");
 	return 0;
 }
 
 void
-ka49_steal_pages(void)
+ka49_steal_pages()
 {
 	/*
 	 * Get the soft and hard memory error vectors now.
@@ -227,16 +226,16 @@ ka49_steal_pages(void)
 
 }
 
-void
-ka49_halt(void)
+static void
+ka49_halt()
 {
-	((volatile uint8_t *) clk_page)[KA49_CPMBX] = KA49_HLT_HALT;
+	((volatile u_int8_t *) clk_page)[KA49_CPMBX] = KA49_HLT_HALT;
 	__asm("halt");
 }
 
-void
+static void
 ka49_reboot(int arg)
 {
-	((volatile uint8_t *) clk_page)[KA49_CPMBX] = KA49_HLT_BOOT;
+	((volatile u_int8_t *) clk_page)[KA49_CPMBX] = KA49_HLT_BOOT;
 	__asm("halt");
 }

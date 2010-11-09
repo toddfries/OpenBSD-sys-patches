@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Module Name: nsaccess - Top-level functions for accessing ACPI namespace
- *              $Revision: 1.4 $
+ *              xRevision: 1.196 $
  *
  ******************************************************************************/
 
@@ -9,7 +9,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2008, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2006, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -114,6 +114,9 @@
  *
  *****************************************************************************/
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: nsaccess.c,v 1.1 2006/03/23 13:36:31 kochi Exp $");
+
 #define __NSACCESS_C__
 
 #include "acpi.h"
@@ -151,7 +154,7 @@ AcpiNsRootInitialize (
     ACPI_STRING                 Val = NULL;
 
 
-    ACPI_FUNCTION_TRACE (NsRootInitialize);
+    ACPI_FUNCTION_TRACE ("NsRootInitialize");
 
 
     Status = AcpiUtAcquireMutex (ACPI_MTX_NAMESPACE);
@@ -218,7 +221,8 @@ AcpiNsRootInitialize (
 
             if (!Val)
             {
-                Val = __UNCONST(InitVal->Val);
+		    /*XXXUNCONST*/
+		    Val = (void *)(intptr_t)InitVal->Val;
             }
 
             /*
@@ -281,25 +285,32 @@ AcpiNsRootInitialize (
                 ObjDesc->Mutex.Node = NewNode;
                 ObjDesc->Mutex.SyncLevel = (UINT8) (ACPI_TO_INTEGER (Val) - 1);
 
-                /* Create a mutex */
-
-                Status = AcpiOsCreateMutex (&ObjDesc->Mutex.OsMutex);
-                if (ACPI_FAILURE (Status))
-                {
-                    AcpiUtRemoveReference (ObjDesc);
-                    goto UnlockAndExit;
-                }
-
-                /* Special case for ACPI Global Lock */
-
                 if (ACPI_STRCMP (InitVal->Name, "_GL_") == 0)
                 {
-                    AcpiGbl_GlobalLockMutex = ObjDesc;
+                    /*
+                     * Create a counting semaphore for the
+                     * global lock
+                     */
+                    Status = AcpiOsCreateSemaphore (ACPI_NO_UNIT_LIMIT,
+                                            1, &ObjDesc->Mutex.Semaphore);
+                    if (ACPI_FAILURE (Status))
+                    {
+                        AcpiUtRemoveReference (ObjDesc);
+                        goto UnlockAndExit;
+                    }
 
-                    /* Create additional counting semaphore for global lock */
+                    /*
+                     * We just created the mutex for the
+                     * global lock, save it
+                     */
+                    AcpiGbl_GlobalLockSemaphore = ObjDesc->Mutex.Semaphore;
+                }
+                else
+                {
+                    /* Create a mutex */
 
-                    Status = AcpiOsCreateSemaphore (
-                                1, 0, &AcpiGbl_GlobalLockSemaphore);
+                    Status = AcpiOsCreateSemaphore (1, 1,
+                                        &ObjDesc->Mutex.Semaphore);
                     if (ACPI_FAILURE (Status))
                     {
                         AcpiUtRemoveReference (ObjDesc);
@@ -337,8 +348,8 @@ UnlockAndExit:
 
     if (ACPI_SUCCESS (Status))
     {
-        Status = AcpiNsGetNode (NULL, "\\_GPE", ACPI_NS_NO_UPSEARCH,
-                    &AcpiGbl_FadtGpeDevice);
+        Status = AcpiNsGetNodeByPath ("\\_GPE", NULL, ACPI_NS_NO_UPSEARCH,
+                        &AcpiGbl_FadtGpeDevice);
     }
 
     return_ACPI_STATUS (Status);
@@ -389,10 +400,11 @@ AcpiNsLookup (
     ACPI_OBJECT_TYPE        TypeToCheckFor;
     ACPI_OBJECT_TYPE        ThisSearchType;
     UINT32                  SearchParentFlag = ACPI_NS_SEARCH_PARENT;
-    UINT32                  LocalFlags;
+    UINT32                  LocalFlags = Flags & ~(ACPI_NS_ERROR_IF_FOUND |
+                                                   ACPI_NS_SEARCH_PARENT);
 
 
-    ACPI_FUNCTION_TRACE (NsLookup);
+    ACPI_FUNCTION_TRACE ("NsLookup");
 
 
     if (!ReturnNode)
@@ -400,9 +412,8 @@ AcpiNsLookup (
         return_ACPI_STATUS (AE_BAD_PARAMETER);
     }
 
-    LocalFlags = Flags & ~(ACPI_NS_ERROR_IF_FOUND | ACPI_NS_SEARCH_PARENT);
-    *ReturnNode = ACPI_ENTRY_NOT_FOUND;
     AcpiGbl_NsLookupCount++;
+    *ReturnNode = ACPI_ENTRY_NOT_FOUND;
 
     if (!AcpiGbl_RootNode)
     {
@@ -432,18 +443,15 @@ AcpiNsLookup (
             return_ACPI_STATUS (AE_AML_INTERNAL);
         }
 
-        if (!(Flags & ACPI_NS_PREFIX_IS_SCOPE))
+        /*
+         * This node might not be a actual "scope" node (such as a
+         * Device/Method, etc.)  It could be a Package or other object node.
+         * Backup up the tree to find the containing scope node.
+         */
+        while (!AcpiNsOpensScope (PrefixNode->Type) &&
+                PrefixNode->Type != ACPI_TYPE_ANY)
         {
-            /*
-             * This node might not be a actual "scope" node (such as a
-             * Device/Method, etc.)  It could be a Package or other object node.
-             * Backup up the tree to find the containing scope node.
-             */
-            while (!AcpiNsOpensScope (PrefixNode->Type) &&
-                    PrefixNode->Type != ACPI_TYPE_ANY)
-            {
-                PrefixNode = AcpiNsGetParentNode (PrefixNode);
-            }
+            PrefixNode = AcpiNsGetParentNode (PrefixNode);
         }
     }
 
@@ -679,67 +687,44 @@ AcpiNsLookup (
             return_ACPI_STATUS (Status);
         }
 
-        /* More segments to follow? */
-
-        if (NumSegments > 0)
+        /*
+         * Sanity typecheck of the target object:
+         *
+         * If 1) This is the last segment (NumSegments == 0)
+         *    2) And we are looking for a specific type
+         *       (Not checking for TYPE_ANY)
+         *    3) Which is not an alias
+         *    4) Which is not a local type (TYPE_SCOPE)
+         *    5) And the type of target object is known (not TYPE_ANY)
+         *    6) And target object does not match what we are looking for
+         *
+         * Then we have a type mismatch.  Just warn and ignore it.
+         */
+        if ((NumSegments == 0)                                  &&
+            (TypeToCheckFor != ACPI_TYPE_ANY)                   &&
+            (TypeToCheckFor != ACPI_TYPE_LOCAL_ALIAS)           &&
+            (TypeToCheckFor != ACPI_TYPE_LOCAL_METHOD_ALIAS)    &&
+            (TypeToCheckFor != ACPI_TYPE_LOCAL_SCOPE)           &&
+            (ThisNode->Type != ACPI_TYPE_ANY)                   &&
+            (ThisNode->Type != TypeToCheckFor))
         {
-            /*
-             * If we have an alias to an object that opens a scope (such as a
-             * device or processor), we need to dereference the alias here so that
-             * we can access any children of the original node (via the remaining
-             * segments).
-             */
-            if (ThisNode->Type == ACPI_TYPE_LOCAL_ALIAS)
-            {
-                if (AcpiNsOpensScope (((ACPI_NAMESPACE_NODE *) ThisNode->Object)->Type))
-                {
-                    ThisNode = (ACPI_NAMESPACE_NODE *) ThisNode->Object;
-                }
-            }
+            /* Complain about a type mismatch */
+
+            ACPI_WARNING ((AE_INFO,
+                "NsLookup: Type mismatch on %4.4s (%s), searching for (%s)",
+                ACPI_CAST_PTR (char, &SimpleName),
+                AcpiUtGetTypeName (ThisNode->Type),
+                AcpiUtGetTypeName (TypeToCheckFor)));
         }
 
-        /* Special handling for the last segment (NumSegments == 0) */
-
-        else
+        /*
+         * If this is the last name segment and we are not looking for a
+         * specific type, but the type of found object is known, use that type
+         * to see if it opens a scope.
+         */
+        if ((NumSegments == 0) && (Type == ACPI_TYPE_ANY))
         {
-            /*
-             * Sanity typecheck of the target object:
-             *
-             * If 1) This is the last segment (NumSegments == 0)
-             *    2) And we are looking for a specific type
-             *       (Not checking for TYPE_ANY)
-             *    3) Which is not an alias
-             *    4) Which is not a local type (TYPE_SCOPE)
-             *    5) And the type of target object is known (not TYPE_ANY)
-             *    6) And target object does not match what we are looking for
-             *
-             * Then we have a type mismatch. Just warn and ignore it.
-             */
-            if ((TypeToCheckFor != ACPI_TYPE_ANY)                   &&
-                (TypeToCheckFor != ACPI_TYPE_LOCAL_ALIAS)           &&
-                (TypeToCheckFor != ACPI_TYPE_LOCAL_METHOD_ALIAS)    &&
-                (TypeToCheckFor != ACPI_TYPE_LOCAL_SCOPE)           &&
-                (ThisNode->Type != ACPI_TYPE_ANY)                   &&
-                (ThisNode->Type != TypeToCheckFor))
-            {
-                /* Complain about a type mismatch */
-
-                ACPI_WARNING ((AE_INFO,
-                    "NsLookup: Type mismatch on %4.4s (%s), searching for (%s)",
-                    ACPI_CAST_PTR (char, &SimpleName),
-                    AcpiUtGetTypeName (ThisNode->Type),
-                    AcpiUtGetTypeName (TypeToCheckFor)));
-            }
-
-            /*
-             * If this is the last name segment and we are not looking for a
-             * specific type, but the type of found object is known, use that type
-             * to (later) see if it opens a scope.
-             */
-            if (Type == ACPI_TYPE_ANY)
-            {
-                Type = ThisNode->Type;
-            }
+            Type = ThisNode->Type;
         }
 
         /* Point to next name segment and make this node current */

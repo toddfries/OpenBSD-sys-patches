@@ -1,4 +1,4 @@
-/*	$NetBSD: sbus.c,v 1.71 2008/12/16 22:35:25 christos Exp $ */
+/*	$NetBSD: sbus.c,v 1.67 2006/06/07 22:38:49 kardel Exp $ */
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -74,7 +81,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sbus.c,v 1.71 2008/12/16 22:35:25 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sbus.c,v 1.67 2006/06/07 22:38:49 kardel Exp $");
 
 #include <sys/param.h>
 #include <sys/malloc.h>
@@ -106,23 +113,23 @@ static void *sbus_intr_establish(
 
 
 /* autoconfiguration driver */
-int	sbus_match_mainbus(device_t, struct cfdata *, void *);
-int	sbus_match_iommu(device_t, struct cfdata *, void *);
-int	sbus_match_xbox(device_t, struct cfdata *, void *);
-void	sbus_attach_mainbus(device_t, device_t, void *);
-void	sbus_attach_iommu(device_t, device_t, void *);
-void	sbus_attach_xbox(device_t, device_t, void *);
+int	sbus_match_mainbus(struct device *, struct cfdata *, void *);
+int	sbus_match_iommu(struct device *, struct cfdata *, void *);
+int	sbus_match_xbox(struct device *, struct cfdata *, void *);
+void	sbus_attach_mainbus(struct device *, struct device *, void *);
+void	sbus_attach_iommu(struct device *, struct device *, void *);
+void	sbus_attach_xbox(struct device *, struct device *, void *);
 
 static	int sbus_error(void);
 int	(*sbuserr_handler)(void);
 
-CFATTACH_DECL_NEW(sbus_mainbus, sizeof(struct sbus_softc),
+CFATTACH_DECL(sbus_mainbus, sizeof(struct sbus_softc),
     sbus_match_mainbus, sbus_attach_mainbus, NULL, NULL);
 
-CFATTACH_DECL_NEW(sbus_iommu, sizeof(struct sbus_softc),
+CFATTACH_DECL(sbus_iommu, sizeof(struct sbus_softc),
     sbus_match_iommu, sbus_attach_iommu, NULL, NULL);
 
-CFATTACH_DECL_NEW(sbus_xbox, sizeof(struct sbus_softc),
+CFATTACH_DECL(sbus_xbox, sizeof(struct sbus_softc),
     sbus_match_xbox, sbus_attach_xbox, NULL, NULL);
 
 extern struct cfdriver sbus_cd;
@@ -199,7 +206,7 @@ sbus_print(void *args, const char *busname)
 }
 
 int
-sbus_match_mainbus(device_t parent, struct cfdata *cf, void *aux)
+sbus_match_mainbus(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct mainbus_attach_args *ma = aux;
 
@@ -210,7 +217,7 @@ sbus_match_mainbus(device_t parent, struct cfdata *cf, void *aux)
 }
 
 int
-sbus_match_iommu(device_t parent, struct cfdata *cf, void *aux)
+sbus_match_iommu(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct iommu_attach_args *ia = aux;
 
@@ -221,7 +228,7 @@ sbus_match_iommu(device_t parent, struct cfdata *cf, void *aux)
 }
 
 int
-sbus_match_xbox(device_t parent, struct cfdata *cf, void *aux)
+sbus_match_xbox(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct xbox_attach_args *xa = aux;
 
@@ -235,28 +242,27 @@ sbus_match_xbox(device_t parent, struct cfdata *cf, void *aux)
  * Attach an Sbus.
  */
 void
-sbus_attach_mainbus(device_t parent, device_t self, void *aux)
+sbus_attach_mainbus(struct device *parent, struct device *self, void *aux)
 {
-	struct sbus_softc *sc = device_private(self);
+	struct sbus_softc *sc = (struct sbus_softc *)self;
 	struct mainbus_attach_args *ma = aux;
 	int node = ma->ma_node;
 
 	sbus_mainbus_attached = 1;
 
-	sc->sc_dev = self;
 	sc->sc_bustag = ma->ma_bustag;
 	sc->sc_dmatag = ma->ma_dmatag;
 
 #if 0	/* sbus at mainbus (sun4c): `reg' prop is not control space */
 	if (ma->ma_size == 0)
-		printf("%s: no Sbus registers", device_xname(self));
+		printf("%s: no Sbus registers", self->dv_xname);
 
 	if (bus_space_map(ma->ma_bustag,
 			  ma->ma_paddr,
 			  ma->ma_size,
 			  BUS_SPACE_MAP_LINEAR,
 			  &sc->sc_bh) != 0) {
-		panic("%s: can't map sbusbusreg", device_xname(self));
+		panic("%s: can't map sbusbusreg", self->dv_xname);
 	}
 #endif
 
@@ -278,18 +284,17 @@ sbus_attach_mainbus(device_t parent, device_t self, void *aux)
 
 
 void
-sbus_attach_iommu(device_t parent, device_t self, void *aux)
+sbus_attach_iommu(struct device *parent, struct device *self, void *aux)
 {
-	struct sbus_softc *sc = device_private(self);
+	struct sbus_softc *sc = (struct sbus_softc *)self;
 	struct iommu_attach_args *ia = aux;
 	int node = ia->iom_node;
 
-	sc->sc_dev = self;
 	sc->sc_bustag = ia->iom_bustag;
 	sc->sc_dmatag = ia->iom_dmatag;
 
 	if (ia->iom_nreg == 0)
-		panic("%s: no Sbus registers", device_xname(self));
+		panic("%s: no Sbus registers", self->dv_xname);
 
 	if (bus_space_map(ia->iom_bustag,
 			  BUS_ADDR(ia->iom_reg[0].oa_space,
@@ -297,7 +302,7 @@ sbus_attach_iommu(device_t parent, device_t self, void *aux)
 			  (bus_size_t)ia->iom_reg[0].oa_size,
 			  BUS_SPACE_MAP_LINEAR,
 			  &sc->sc_bh) != 0) {
-		panic("%s: can't map sbusbusreg", device_xname(self));
+		panic("%s: can't map sbusbusreg", self->dv_xname);
 	}
 
 	/* Setup interrupt translation tables */
@@ -316,9 +321,9 @@ sbus_attach_iommu(device_t parent, device_t self, void *aux)
 }
 
 void
-sbus_attach_xbox(device_t parent, device_t self, void *aux)
+sbus_attach_xbox(struct device *parent, struct device *self, void *aux)
 {
-	struct sbus_softc *sc = device_private(self);
+	struct sbus_softc *sc = (struct sbus_softc *)self;
 	struct xbox_attach_args *xa = aux;
 	int node = xa->xa_node;
 
@@ -349,8 +354,7 @@ sbus_attach_common(struct sbus_softc *sc, const char *busname, int busnode,
 	struct sbus_attach_args sa;
 
 	if ((sbt = bus_space_tag_alloc(sc->sc_bustag, sc)) == NULL) {
-		printf("%s: attach: out of memory\n",
-		    device_xname(sc->sc_dev));
+		printf("%s: attach: out of memory\n", sc->sc_dev.dv_xname);
 		return;
 	}
 	sbt->sparc_intr_establish = sbus_intr_establish;
@@ -386,8 +390,7 @@ sbus_attach_common(struct sbus_softc *sc, const char *busname, int busnode,
 			sizeof(sbus_translations)/sizeof(sbus_translations[0]);
 		break;
 	default:
-		panic("%s: error getting ranges property",
-		    device_xname(sc->sc_dev));
+		panic("%s: error getting ranges property", sc->sc_dev.dv_xname);
 	}
 
 	/*
@@ -407,7 +410,7 @@ sbus_attach_common(struct sbus_softc *sc, const char *busname, int busnode,
 					   node, &sa) != 0) {
 			panic("sbus_attach: %s: incomplete", sp);
 		}
-		(void) config_found(sc->sc_dev, (void *)&sa, sbus_print);
+		(void) config_found(&sc->sc_dev, (void *)&sa, sbus_print);
 		sbus_destroy_attach_args(&sa);
 	}
 
@@ -428,7 +431,7 @@ sbus_attach_common(struct sbus_softc *sc, const char *busname, int busnode,
 			printf("sbus_attach: %s: incomplete\n", name);
 			continue;
 		}
-		(void) config_found(sc->sc_dev, (void *)&sa, sbus_print);
+		(void) config_found(&sc->sc_dev, (void *)&sa, sbus_print);
 		sbus_destroy_attach_args(&sa);
 	}
 }
@@ -514,10 +517,10 @@ sbus_bus_addr(bus_space_tag_t t, u_int btype, u_int offset)
  * its sbusdev portion.
  */
 void
-sbus_establish(struct sbusdev *sd, device_t dev)
+sbus_establish(struct sbusdev *sd, struct device *dev)
 {
 	register struct sbus_softc *sc;
-	register device_t curdev;
+	register struct device *curdev;
 
 	/*
 	 * We have to look for the sbus by name, since it is not necessarily
@@ -526,16 +529,16 @@ sbus_establish(struct sbusdev *sd, device_t dev)
 	 * sbus, since we might (in the future) support multiple sbus's.
 	 */
 	for (curdev = device_parent(dev); ; curdev = device_parent(curdev)) {
-		if ((curdev == NULL) || (device_xname(curdev) == NULL))
+		if (!curdev || !curdev->dv_xname)
 			panic("sbus_establish: can't find sbus parent for %s",
-			      device_xname(dev)
-					? device_xname(dev)
+			      sd->sd_dev->dv_xname
+					? sd->sd_dev->dv_xname
 					: "<unknown>" );
 
-		if (strncmp(device_xname(curdev), "sbus", 4) == 0)
+		if (strncmp(curdev->dv_xname, "sbus", 4) == 0)
 			break;
 	}
-	sc = device_private(curdev);
+	sc = (struct sbus_softc *) curdev;
 
 	sd->sd_dev = dev;
 	sd->sd_bchain = sc->sc_sbdev;
@@ -549,15 +552,15 @@ void
 sbusreset(int sbus)
 {
 	register struct sbusdev *sd;
-	struct sbus_softc *sc = device_lookup_private(&sbus_cd, sbus);
-	device_t dev;
+	struct sbus_softc *sc = sbus_cd.cd_devs[sbus];
+	struct device *dev;
 
-	printf("reset %s:", device_xname(sc->sc_dev));
+	printf("reset %s:", sc->sc_dev.dv_xname);
 	for (sd = sc->sc_sbdev; sd != NULL; sd = sd->sd_bchain) {
 		if (sd->sd_reset) {
 			dev = sd->sd_dev;
 			(*sd->sd_reset)(dev);
-			printf(" %s", device_xname(dev));
+			printf(" %s", dev->dv_xname);
 		}
 	}
 }
@@ -660,8 +663,8 @@ static	int straytime, nstray;
 
 	afsr = bus_space_read_4(sc->sc_bustag, bh, SBUS_AFSR_REG);
 	afva = bus_space_read_4(sc->sc_bustag, bh, SBUS_AFAR_REG);
-	snprintb(bits, sizeof(bits), SBUS_AFSR_BITS, afsr);
-	printf("sbus error:\n\tAFSR %s\n", bits);
+	printf("sbus error:\n\tAFSR %s\n",
+		bitmask_snprintf(afsr, SBUS_AFSR_BITS, bits, sizeof(bits)));
 	printf("\taddress: 0x%x%x\n", afsr & SBUS_AFSR_PAH, afva);
 
 	/* For now, do the same dance as on stray interrupts */

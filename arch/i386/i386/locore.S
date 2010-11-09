@@ -1,81 +1,11 @@
-/*	$NetBSD: locore.S,v 1.84 2009/03/08 16:03:31 ad Exp $	*/
-
-/*
- * Copyright-o-rama!
- */
-
-/*
- * Copyright (c) 2006 Manuel Bouyer.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Manuel Bouyer.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- */
-
-/*
- * Copyright (c) 2001 Wasabi Systems, Inc.
- * All rights reserved.
- *
- * Written by Frank van der Linden for Wasabi Systems, Inc.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *      This product includes software developed for the NetBSD Project by
- *      Wasabi Systems, Inc.
- * 4. The name of Wasabi Systems, Inc. may not be used to endorse
- *    or promote products derived from this software without specific prior
- *    written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY WASABI SYSTEMS, INC. ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
- * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL WASABI SYSTEMS, INC
- * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
- */
-
+/*	$NetBSD: locore.S,v 1.44 2006/10/25 13:56:15 jmmv Exp $	*/
 
 /*-
- * Copyright (c) 1998, 2000, 2004, 2006, 2007, 2009 The NetBSD Foundation, Inc.
+ * Copyright (c) 1998, 2000, 2004 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
- * by Charles M. Hannum, and by Andrew Doran.
+ * by Charles M. Hannum.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -85,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -133,16 +70,16 @@
  *	@(#)locore.s	7.3 (Berkeley) 5/13/91
  */
 
-#include <machine/asm.h>
-__KERNEL_RCSID(0, "$NetBSD: locore.S,v 1.84 2009/03/08 16:03:31 ad Exp $");
-
+#include "opt_compat_netbsd.h"
 #include "opt_compat_oldboot.h"
+#include "opt_cputype.h"
 #include "opt_ddb.h"
-#include "opt_modular.h"
-#include "opt_multiboot.h"
+#include "opt_ipkdb.h"
+#include "opt_lockdebug.h"
+#include "opt_multiprocessor.h"
 #include "opt_realmem.h"
+#include "opt_user_ldt.h"
 #include "opt_vm86.h"
-#include "opt_xen.h"
 
 #include "npx.h"
 #include "assym.h"
@@ -157,47 +94,60 @@ __KERNEL_RCSID(0, "$NetBSD: locore.S,v 1.84 2009/03/08 16:03:31 ad Exp $");
 #include <machine/segments.h>
 #include <machine/specialreg.h>
 #include <machine/trap.h>
+
+#if NLAPIC > 0
 #include <machine/i82489reg.h>
-#include <machine/frameasm.h>
-#include <machine/i82489reg.h>
-#ifndef XEN
-#include <machine/multiboot.h>
 #endif
+
+#include <machine/multiboot.h>
+
+/* LINTSTUB: include <sys/types.h> */
+/* LINTSTUB: include <machine/cpu.h> */
+/* LINTSTUB: include <sys/systm.h> */
+
+#include <machine/asm.h>
+
+#if defined(MULTIPROCESSOR)
+
+#define SET_CURLWP(lwp,cpu)				\
+	movl	CPUVAR(SELF),cpu		; 	\
+	movl	lwp,CPUVAR(CURLWP)	;	\
+	movl	cpu,L_CPU(lwp)
+
+#else
+
+#define SET_CURLWP(lwp,tcpu)		movl	lwp,CPUVAR(CURLWP)
+#define GET_CURLWP(reg)			movl	CPUVAR(CURLWP),reg
+
+#endif
+
+#define SET_CURPCB(reg)			movl	reg,CPUVAR(CURPCB)
+
+#define CLEAR_RESCHED(reg)		movl	reg,CPUVAR(RESCHED)
 
 /* XXX temporary kluge; these should not be here */
 /* Get definitions for IOM_BEGIN, IOM_END, and IOM_SIZE */
 #include <dev/isa/isareg.h>
 
-#ifdef XEN
-/*
- * Xen guest identifier and loader selection
- */
-.section __xen_guest
-#ifdef XEN3
-	.ascii	"GUEST_OS=netbsd,GUEST_VER=3.0,XEN_VER=xen-3.0"
-#if defined(DOM0OPS) || !defined(XEN_COMPAT_030001)
-	.ascii  ",VIRT_BASE=0xc0000000" /* KERNBASE */
-	.ascii  ",ELF_PADDR_OFFSET=0xc0000000" /* KERNBASE */
-#else
-	.ascii  ",VIRT_BASE=0xc0100000" /* KERNTEXTOFF */
-	.ascii  ",ELF_PADDR_OFFSET=0xc0100000" /* KERNTEXTOFF */
+
+/* Disallow old names for REALBASEMEM */
+#ifdef BIOSBASEMEM
+#error BIOSBASEMEM option deprecated; use REALBASEMEM only if memory size reported by latest boot block is incorrect
 #endif
-	.ascii  ",VIRT_ENTRY=0xc0100000" /* KERNTEXTOFF */
-#if !defined(XEN_COMPAT_030001)
-	.ascii  ",HYPERCALL_PAGE=0x00000101"
-		/* (???+HYPERCALL_PAGE_OFFSET)/PAGE_SIZE) */
+
+/* Disallow old names for REALEXTMEM */
+#ifdef EXTMEM_SIZE
+#error EXTMEM_SIZE option deprecated; use REALEXTMEM only if memory size reported by latest boot block is incorrect
 #endif
-#ifdef PAE
-	.ascii  ",PAE=yes[extended-cr3]"
+#ifdef BIOSEXTMEM
+#error BIOSEXTMEM option deprecated; use REALEXTMEM only if memory size reported by latest boot block is incorrect
 #endif
-#else /* !XEN3 */
-	.ascii	"GUEST_OS=netbsd,GUEST_VER=2.0,XEN_VER=2.0"
-#endif /* XEN3 */
-	.ascii	",LOADER=generic"
-#if (NKSYMS || defined(DDB) || defined(MODULAR)) && !defined(SYMTAB_SPACE)
-	.ascii	",BSD_SYMTAB=yes"
-#endif
-	.byte	0
+
+#include <machine/frameasm.h>
+
+
+#ifdef MULTIPROCESSOR
+#include <machine/i82489reg.h>
 #endif
 
 /*
@@ -206,13 +156,13 @@ __KERNEL_RCSID(0, "$NetBSD: locore.S,v 1.84 2009/03/08 16:03:31 ad Exp $");
 	.data
 
 	.globl	_C_LABEL(cpu)
-	.globl	_C_LABEL(cpuid_level)
 	.globl	_C_LABEL(esym)
-	.globl	_C_LABEL(eblob)
 	.globl	_C_LABEL(atdevbase)
 	.globl	_C_LABEL(proc0uarea),_C_LABEL(PDPpaddr)
 	.globl	_C_LABEL(gdt)
+#ifdef I586_CPU
 	.globl	_C_LABEL(idt)
+#endif
 	.globl	_C_LABEL(lapic_tpr)
 
 #if NLAPIC > 0
@@ -238,21 +188,18 @@ _C_LABEL(lapic_tpr):
 	.long 0
 #endif
 
-_C_LABEL(cpu):		.long	0	# are we 80486, Pentium, or..
-_C_LABEL(cpuid_level):	.long	0
+
+_C_LABEL(cpu):		.long	0	# are we 386, 386sx, or 486,
+					#   or Pentium, or..
 _C_LABEL(atdevbase):	.long	0	# location of start of iomem in virtual
 _C_LABEL(proc0uarea):	.long	0
 _C_LABEL(PDPpaddr):	.long	0	# paddr of PDP, for libkvm
-_C_LABEL(tablesize):	.long	0
 
 	.space 512
 tmpstk:
 
-#ifndef XEN
+
 #define	_RELOC(x)	((x) - KERNBASE)
-#else
-#define	_RELOC(x)	((x))
-#endif /* XEN */
 #define	RELOC(x)	_RELOC(_C_LABEL(x))
 
 	.text
@@ -260,7 +207,6 @@ tmpstk:
 	.set	_C_LABEL(kernel_text),KERNTEXTOFF
 
 	.globl	start
-#ifndef XEN
 start:	movw	$0x1234,0x472			# warm boot
 
 #if defined(MULTIBOOT)
@@ -313,7 +259,7 @@ _C_LABEL(Multiboot_Header):
 	movw	%ax,%fs
 	movw	%ax,%gs
 	decl	%eax
-	movl	%eax,RELOC(cpuid_level)
+	movl	%eax,RELOC(cpu_info_primary)+CPU_INFO_LEVEL
 
 	/* Find out our CPU type. */
 
@@ -473,7 +419,7 @@ trycyrix486:
 try586:	/* Use the `cpuid' instruction. */
 	xorl	%eax,%eax
 	cpuid
-	movl	%eax,RELOC(cpuid_level)
+	movl	%eax,RELOC(cpu_info_primary)+CPU_INFO_LEVEL
 
 2:
 	/*
@@ -493,32 +439,17 @@ try586:	/* Use the `cpuid' instruction. */
 /*
  * Virtual address space of kernel:
  *
- * text | data | bss | [syms] | [blobs] | page dir | proc0 kstack | L1 ptp
- *			                0          1       2      3
+ * text | data | bss | [syms] | page dir | proc0 kstack
+ *			      0          1       2      3
  */
-
-#define	PROC0_PDIR_OFF	0
-#define	PROC0_STK_OFF	(PROC0_PDIR_OFF + PAGE_SIZE)
-#define	PROC0_PTP1_OFF	(PROC0_STK_OFF + UPAGES * PAGE_SIZE)
-
-/*
- * fillkpt
- *	eax = pte (page frame | control | status)
- *	ebx = page table address
- *	ecx = number of pages to map
- */
-
-#define fillkpt	\
-1:	movl	%eax,(%ebx)	; 	/* store phys addr */ \
-	addl	$4,%ebx		; 	/* next pte/pde */ \
-	addl	$PAGE_SIZE,%eax	; 	/* next phys page */ \
-	loop	1b		;  \
-
+#define	PROC0PDIR	((0)              * PAGE_SIZE)
+#define	PROC0STACK	((1)              * PAGE_SIZE)
+#define	SYSMAP		((1+UPAGES)       * PAGE_SIZE)
+#define	TABLESIZE	((1+UPAGES) * PAGE_SIZE) /* + nkpde * PAGE_SIZE */
 
 	/* Find end of kernel image. */
 	movl	$RELOC(end),%edi
-
-#if (NKSYMS || defined(DDB) || defined(MODULAR)) && !defined(SYMTAB_SPACE)
+#if (NKSYMS || defined(DDB) || defined(LKM)) && !defined(SYMTAB_SPACE)
 	/* Save the symbols (if loaded). */
 	movl	RELOC(esym),%eax
 	testl	%eax,%eax
@@ -528,67 +459,67 @@ try586:	/* Use the `cpuid' instruction. */
 1:
 #endif
 
-	/* Skip over any modules/blobs. */
-	movl	RELOC(eblob),%eax
-	testl	%eax,%eax
-	jz	1f
-	subl	$KERNBASE,%eax
-	movl	%eax,%edi
-1:
-	/* Compute sizes */
-	movl	%edi,%esi
+	/* Calculate where to start the bootstrap tables. */
+	movl	%edi,%esi			# edi = esym ? esym : end
 	addl	$PGOFSET,%esi			# page align up
 	andl	$~PGOFSET,%esi
 
-	/* nkptp[1] = (esi + ~L2_FRAME) >> L2_SHIFT + 1; */
-	movl	%esi,%eax
-	addl	$~L2_FRAME,%eax
-	shrl	$L2_SHIFT,%eax
-	incl	%eax		/* one more ptp for VAs stolen by bootstrap */
-1:	movl	%eax,RELOC(nkptp)+1*4
+	/*
+	 * Calculate the size of the kernel page table directory, and
+	 * how many entries it will have.  Adjust nkpde to the actual
+	 * kernel size automatically.  Account for the bootstrap tables,
+	 * round up, and add an extra 4MB.
+	 */
+	leal	TABLESIZE+NBPD+PDOFSET(%edi),%eax
+	shrl	$PDSHIFT,%eax
+	movl	RELOC(nkpde),%ecx		# get nkpde
+	cmpl	%ecx,%eax
+	jb	1f
+	movl	%eax,%ecx
+1:	cmpl	$NKPTP_MIN,%ecx			# larger than min?
+	jge	1f
+	movl	$NKPTP_MIN,%ecx			# set at min
+	jmp	2f
+1:	cmpl	$NKPTP_MAX,%ecx			# larger than max?
+	jle	2f
+	movl	$NKPTP_MAX,%ecx
+2:	movl	%ecx,RELOC(nkpde)
 
-	/* tablesize = (1 + UPAGES + nkptp) << PGSHIFT; */
-	addl	$(1+UPAGES),%eax
-	shll	$PGSHIFT,%eax
-	movl	%eax,RELOC(tablesize)
-
-	/* ensure that nkptp covers bootstrap tables */
-	addl	%esi,%eax
-	addl	$~L2_FRAME,%eax
-	shrl	$L2_SHIFT,%eax
-	incl	%eax
-	cmpl	%eax,RELOC(nkptp)+1*4
-	jnz	1b
-
- 	/* Clear tables */
- 	movl	%esi,%edi
+	/* Clear memory for bootstrap tables. */
+	shll	$PGSHIFT,%ecx
+	addl	$TABLESIZE,%ecx
+	addl	%esi,%ecx			# end of tables
+	subl	%edi,%ecx			# size of tables
+	shrl	$2,%ecx
 	xorl	%eax,%eax
 	cld
- 	movl	RELOC(tablesize),%ecx
- 	shrl	$2,%ecx
 	rep
 	stosl
 
- 	leal	(PROC0_PTP1_OFF)(%esi), %ebx
+/*
+ * fillkpt
+ *	eax = pte (page frame | control | status)
+ *	ebx = page table address
+ *	ecx = number of pages to map
+ */
+#define	fillkpt		\
+1:	movl	%eax,(%ebx)	; \
+	addl	$PAGE_SIZE,%eax	; /* increment physical address */ \
+	addl	$4,%ebx		; /* next pte */ \
+	loop	1b		;
 
 /*
  * Build initial page tables.
  */
- 	/*
- 	 * Compute &__data_start - KERNBASE. This can't be > 4G,
-	 * or we can't deal with it anyway, since we can't load it in
-	 * 32 bit mode. So use the bottom 32 bits.
- 	 */
- 	movl	$RELOC(__data_start),%edx
+	/* Calculate end of text segment, rounded to a page. */
+	leal	(RELOC(etext)+PGOFSET),%edx
 	andl	$~PGOFSET,%edx
 
- 	/*
- 	 * Skip the first MB.
- 	 */
+	/* Skip over the first 1MB. */
 	movl	$_RELOC(KERNTEXTOFF),%eax
 	movl	%eax,%ecx
- 	shrl	$(PGSHIFT-2),%ecx	/* ((n >> PGSHIFT) << 2) for # pdes */
- 	addl	%ecx,%ebx
+	shrl	$PGSHIFT,%ecx
+	leal	(SYSMAP)(%esi,%ecx,4),%ebx
 
 	/* Map the kernel text read-only. */
 	movl	%edx,%ecx
@@ -599,13 +530,15 @@ try586:	/* Use the `cpuid' instruction. */
 
 	/* Map the data, BSS, and bootstrap tables read-write. */
 	leal	(PG_V|PG_KW)(%edx),%eax
-	movl	RELOC(tablesize),%ecx
+	movl	RELOC(nkpde),%ecx
+	shll	$PGSHIFT,%ecx
+	addl	$TABLESIZE,%ecx
 	addl	%esi,%ecx				# end of tables
 	subl	%edx,%ecx				# subtract end of text
 	shrl	$PGSHIFT,%ecx
 	fillkpt
 
-	/* Map ISA I/O mem (later atdevbase) */
+	/* Map ISA I/O memory. */
 	movl	$(IOM_BEGIN|PG_V|PG_KW/*|PG_N*/),%eax	# having these bits set
 	movl	$(IOM_SIZE>>PGSHIFT),%ecx		# for this many pte s,
 	fillkpt
@@ -613,69 +546,54 @@ try586:	/* Use the `cpuid' instruction. */
 /*
  * Construct a page table directory.
  */
- 	/* Set up top level entries for identity mapping */
- 	leal    (PROC0_PDIR_OFF)(%esi),%ebx
- 	leal	(PROC0_PTP1_OFF)(%esi),%eax
- 	orl	$(PG_V|PG_KW), %eax
- 	movl	RELOC(nkptp)+1*4,%ecx
+	/* Install PDEs for temporary double map of kernel. */
+	movl	RELOC(nkpde),%ecx			# for this many pde s,
+	leal	(PROC0PDIR+0*4)(%esi),%ebx		# which is where temp maps!
+	leal	(SYSMAP+PG_V|PG_KW)(%esi),%eax		# pte for KPT in proc 0,
 	fillkpt
 
- 	/* Set up top level entries for actual kernel mapping */
- 	leal    (PROC0_PDIR_OFF + L2_SLOT_KERNBASE*4)(%esi),%ebx
- 	leal	(PROC0_PTP1_OFF)(%esi),%eax
- 	orl	$(PG_V|PG_KW), %eax
- 	movl	RELOC(nkptp)+1*4,%ecx
+	/* Map kernel PDEs. */
+	movl	RELOC(nkpde),%ecx			# for this many pde s,
+	leal	(PROC0PDIR+PDSLOT_KERN*4)(%esi),%ebx	# kernel pde offset
+	leal	(SYSMAP+PG_V|PG_KW)(%esi),%eax		# pte for KPT in proc 0,
 	fillkpt
 
 	/* Install a PDE recursively mapping page directory as a page table! */
- 	leal    (PROC0_PDIR_OFF + PDIR_SLOT_PTE*4)(%esi),%ebx
- 	leal    (PROC0_PDIR_OFF)(%esi),%eax
- 	orl	$(PG_V|PG_KW),%eax
- 	movl	%eax,(%ebx)
- 
+	leal	(PROC0PDIR+PG_V|PG_KW)(%esi),%eax	# pte for ptd
+	movl	%eax,(PROC0PDIR+PDSLOT_PTE*4)(%esi)	# recursive PD slot
 
 	/* Save phys. addr of PDP, for libkvm. */
 	movl	%esi,RELOC(PDPpaddr)
 
- 	/*
- 	 * Startup checklist:
- 	 * 1. Load %cr3 with pointer to PDIR.
- 	 */
+	/* Load base of page directory and enable mapping. */
 	movl	%esi,%eax		# phys address of ptd in proc 0
 	movl	%eax,%cr3		# load ptd addr into mmu
- 
- 	/*
- 	 * 2. Enable paging and the rest of it.
- 	 */
 	movl	%cr0,%eax		# get control word
 					# enable paging & NPX emulation
 	orl	$(CR0_PE|CR0_PG|CR0_NE|CR0_TS|CR0_EM|CR0_MP),%eax
-	movl	%eax,%cr0		# and page NOW!
+	movl	%eax,%cr0		# and let's page NOW!
 
 	pushl	$begin			# jump to high mem
 	ret
 
 begin:
- 	/*
- 	 * We have arrived.
- 	 * There's no need anymore for the identity mapping in low
- 	 * memory, remove it.
- 	 */
- 	movl	_C_LABEL(nkptp)+1*4,%ecx
- 	leal	(PROC0_PDIR_OFF)(%esi),%ebx	# old, phys  address of PDIR
- 	addl	$(KERNBASE), %ebx	# new, virtual address of PDIR
+	/* Now running relocated at KERNBASE.  Remove double mapping. */
+	movl	_C_LABEL(nkpde),%ecx		# for this many pde s,
+	leal	(PROC0PDIR+0*4)(%esi),%ebx	# which is where temp maps!
+	addl	$(KERNBASE), %ebx	# now use relocated address
 1:	movl	$0,(%ebx)
- 	addl	$4,%ebx
+	addl	$4,%ebx	# next pde
 	loop	1b
 
 	/* Relocate atdevbase. */
-	movl	$KERNBASE,%edx
-	addl	_C_LABEL(tablesize),%edx
+	movl	_C_LABEL(nkpde),%edx
+	shll	$PGSHIFT,%edx
+	addl	$(TABLESIZE+KERNBASE),%edx
 	addl	%esi,%edx
 	movl	%edx,_C_LABEL(atdevbase)
 
 	/* Set up bootstrap stack. */
- 	leal	(PROC0_STK_OFF+KERNBASE)(%esi),%eax
+	leal	(PROC0STACK+KERNBASE)(%esi),%eax
 	movl	%eax,_C_LABEL(proc0uarea)
 	leal	(KSTACK_SIZE-FRAMESIZE)(%eax),%esp
 	movl	%esi,(KSTACK_SIZE+PCB_CR3)(%eax)	# pcb->pcb_cr3
@@ -694,7 +612,9 @@ begin:
 	call	_C_LABEL(initgdt)
 	addl	$4,%esp
 
- 	movl	_C_LABEL(tablesize),%eax
+	movl	_C_LABEL(nkpde),%eax
+	shll	$PGSHIFT,%eax
+	addl	$TABLESIZE,%eax
 	addl	%esi,%eax		# skip past stack and page tables
 
 	pushl	%eax
@@ -720,128 +640,34 @@ begin:
 #endif /* SAFARI_FIFO_HACK */
 
 	call 	_C_LABEL(main)
-#else /* XEN */
-start:
-	/* First, reset the PSL. */
-	pushl	$PSL_MBO
-	popfl
-
-	cld
-#ifdef XEN3
-	movl	%esp, %ebx		# save start of available space
-#else
-	movl    %esi,%ebx               # save start_info pointer
-#endif
-	movl	$_RELOC(tmpstk),%esp	# bootstrap stack end location
-
-        /* Clear BSS first so that there are no surprises... */
-	xorl	%eax,%eax
-	movl	$RELOC(__bss_start),%edi
-	movl	$RELOC(_end),%ecx
-	subl	%edi,%ecx
-	rep stosb
-
-	/* Copy the necessary stuff from start_info structure. */
-        /* We need to copy shared_info early, so that sti/cli work */
-	movl	$RELOC(start_info_union),%edi
-	movl	$128,%ecx
-	rep movsl
-
-	/* Clear segment registers; always null in proc0. */
-	xorl	%eax,%eax
-	movw	%ax,%fs
-	movw	%ax,%gs
-	decl	%eax
-	movl	%eax,RELOC(cpuid_level)
-
-	xorl	%eax,%eax
-	cpuid
-	movl	%eax,RELOC(cpuid_level)
-
-	call	xen_pmap_bootstrap
-	/*
-	 * First avail returned by xen_pmap_bootstrap in %eax
-	 */
-	movl	%eax, %esi;
-	movl	%esi, _C_LABEL(proc0uarea)
-
-#define PROC0PDIR       ((0)              * PAGE_SIZE)
-#define PROC0STACK      ((1)              * PAGE_SIZE)
-
-	/* Set up bootstrap stack. */
-	leal	(KSTACK_SIZE-FRAMESIZE)(%eax),%esp
-	xorl	%ebp,%ebp               # mark end of frames
-
-	addl	$USPACE, %esi
-	subl	$KERNBASE, %esi		#init386 want a physical address
-	pushl	%esi
-	call	_C_LABEL(init386)	# wire 386 chip for unix operation
-	addl	$4,%esp
-	call 	_C_LABEL(main)
-
-#if defined(XEN3) && !defined(XEN_COMPAT_030001)
-/* space for the hypercall call page */
-#define HYPERCALL_PAGE_OFFSET 0x1000
-.org HYPERCALL_PAGE_OFFSET
-ENTRY(hypercall_page)
-.skip 0x1000
-#endif /* defined(XEN3) && !defined(XEN_COMPAT_030001) */
 
 /*
- * void lgdt_finish(void);
- * Finish load a new GDT pointer (do any necessary cleanup).
- * XXX It's somewhat questionable whether reloading all the segment registers
- * is necessary, since the actual descriptor data is not changed except by
- * process creation and exit, both of which clean up via task switches.  OTOH,
- * this only happens at run time when the GDT is resized.
- */
-/* LINTSTUB: Func: void lgdt_finish(void) */
-NENTRY(lgdt_finish)
-	movl	$GSEL(GDATA_SEL, SEL_KPL),%eax
-	movw	%ax,%ds
-	movw	%ax,%es
-	movw	%ax,%gs
-	movw	%ax,%ss
-	movl	$GSEL(GCPU_SEL, SEL_KPL),%eax
-	movw	%ax,%fs
-	/* Reload code selector by doing intersegment return. */
-	popl	%eax
-	pushl	$GSEL(GCODE_SEL, SEL_KPL)
-	pushl	%eax
-	lret
-END(lgdt_finish)
-
-#endif /* XEN */
-
-/*
- * void lwp_trampoline(void);
- *
+ * void proc_trampoline(void);
  * This is a trampoline function pushed onto the stack of a newly created
  * process in order to do some additional setup.  The trampoline is entered by
  * cpu_switch()ing to the process, so we abuse the callee-saved registers used
  * by cpu_switch() to store the information about the stub to call.
  * NOTE: This function does not have a normal calling sequence!
  */
-NENTRY(lwp_trampoline)
-	movl	%ebp,%edi	/* for .Lsyscall_checkast */
-	xorl	%ebp,%ebp
-	pushl	%edi
-	pushl	%eax
-	call	_C_LABEL(lwp_startup)
-	addl	$8,%esp
+/* LINTSTUB: Func: void proc_trampoline(void) */
+NENTRY(proc_trampoline)
+#ifdef MULTIPROCESSOR
+	call	_C_LABEL(proc_trampoline_mp)
+#endif
+	movl	$IPL_NONE,CPUVAR(ILEVEL)
 	pushl	%ebx
 	call	*%esi
 	addl	$4,%esp
-	jmp	.Lsyscall_checkast
+	DO_DEFERRED_SWITCH(%eax)
+	INTRFASTEXIT
 	/* NOTREACHED */
-END(lwp_trampoline)
 
+/*****************************************************************************/
+#ifdef COMPAT_16
 /*
- * sigcode()
- *
- * Signal trampoline; copied to top of user stack.  Used only for
- * compatibility with old releases of NetBSD.
+ * Signal trampoline; copied to top of user stack.
  */
+/* LINTSTUB: Var: char sigcode[1], esigcode[1]; */
 NENTRY(sigcode)
 	/*
 	 * Handler has returned here as if we called it.  The sigcontext
@@ -856,13 +682,51 @@ NENTRY(sigcode)
 	int	$0x80			# exit if sigreturn fails
 	.globl	_C_LABEL(esigcode)
 _C_LABEL(esigcode):
-END(sigcode)
+#endif
+
+/*****************************************************************************/
 
 /*
- * int setjmp(label_t *)
- *
- * Used primarily by DDB.
+ * The following is i386-specific nonsense.
  */
+
+/*
+ * void lgdt(struct region_descriptor *rdp);
+ * Load a new GDT pointer (and do any necessary cleanup).
+ * XXX It's somewhat questionable whether reloading all the segment registers
+ * is necessary, since the actual descriptor data is not changed except by
+ * process creation and exit, both of which clean up via task switches.  OTOH,
+ * this only happens at run time when the GDT is resized.
+ */
+/* LINTSTUB: Func: void lgdt(struct region_descriptor *rdp) */
+NENTRY(lgdt)
+	/* Reload the descriptor table. */
+	movl	4(%esp),%eax
+	lgdt	(%eax)
+	/* Flush the prefetch queue. */
+	jmp	1f
+	nop
+1:	/* Reload "stale" selectors. */
+	movl	$GSEL(GDATA_SEL, SEL_KPL),%eax
+	movw	%ax,%ds
+	movw	%ax,%es
+	movw	%ax,%gs
+	movw	%ax,%ss
+	movl	$GSEL(GCPU_SEL, SEL_KPL),%eax
+	movw	%ax,%fs
+	/* Reload code selector by doing intersegment return. */
+	popl	%eax
+	pushl	$GSEL(GCODE_SEL, SEL_KPL)
+	pushl	%eax
+	lret
+
+/*****************************************************************************/
+
+/*
+ * These functions are primarily used by DDB.
+ */
+
+/* LINTSTUB: Func: int setjmp (label_t *l) */
 ENTRY(setjmp)
 	movl	4(%esp),%eax
 	movl	%ebx,(%eax)		# save ebx
@@ -872,15 +736,10 @@ ENTRY(setjmp)
 	movl	%edi,16(%eax)		# save edi
 	movl	(%esp),%edx		# get rta
 	movl	%edx,20(%eax)		# save eip
-	xorl	%eax,%eax		# return 0
+	xorl	%eax,%eax		# return (0);
 	ret
-END(setjmp)
 
-/*
- * int longjmp(label_t *)
- *
- * Used primarily by DDB.
- */
+/* LINTSTUB: Func: void longjmp (label_t *l) */
 ENTRY(longjmp)
 	movl	4(%esp),%eax
 	movl	(%eax),%ebx		# restore ebx
@@ -890,308 +749,522 @@ ENTRY(longjmp)
 	movl	16(%eax),%edi		# restore edi
 	movl	20(%eax),%edx		# get rta
 	movl	%edx,(%esp)		# put in return frame
-	movl	$1,%eax			# return 1
+	xorl	%eax,%eax		# return (1);
+	incl	%eax
 	ret
-END(longjmp)
+
+/*****************************************************************************/
+
+	.globl	_C_LABEL(sched_whichqs),_C_LABEL(sched_qs)
+	.globl	_C_LABEL(uvmexp),_C_LABEL(panic)
+
+#ifdef DIAGNOSTIC
+NENTRY(switch_error)
+	pushl	$1f
+	call	_C_LABEL(panic)
+	/* NOTREACHED */
+1:	.asciz	"cpu_switch"
+#endif /* DIAGNOSTIC */
 
 /*
- * void dumpsys(void)
+ * void cpu_switch(struct lwp *)
+ * Find a runnable lwp and switch to it.  Wait if necessary.  If the new
+ * lwp is the same as the old one, we short-circuit the context save and
+ * restore.
  *
- * Mimic cpu_switchto() for postmortem debugging.
- */
-ENTRY(dumpsys)
-	pushl	%ebx			# set up fake switchframe
-	pushl	%esi			#   and save context
-	pushl	%edi			
-	movl	%esp,_C_LABEL(dumppcb)+PCB_ESP
-	movl	%ebp,_C_LABEL(dumppcb)+PCB_EBP
-	call	_C_LABEL(dodumpsys)	# dump!
-	addl	$(3*4), %esp		# unwind switchframe
-	ret
-END(dumpsys)
-
-/*
- * struct lwp *cpu_switchto(struct lwp *oldlwp, struct *newlwp,
- *			    bool returning)
- *
- *	1. if (oldlwp != NULL), save its context.
- *	2. then, restore context of newlwp.
- *
- * Note that the stack frame layout is known to "struct switchframe" in
- * <machine/frame.h> and to the code in cpu_lwp_fork() which initializes
+ * Note that the stack frame layout is known to "struct switchframe"
+ * in <machine/frame.h> and to the code in cpu_fork() which initializes
  * it for a new lwp.
+ */
+ENTRY(cpu_switch)
+	pushl	%ebx
+	pushl	%esi
+	pushl	%edi
+
+#ifdef DEBUG
+	cmpl	$IPL_SCHED,CPUVAR(ILEVEL)
+	jae	1f
+	pushl	$2f
+	call	_C_LABEL(panic)
+	/* NOTREACHED */
+2:	.asciz	"not splsched() in cpu_switch!"
+1:
+#endif /* DEBUG */
+
+	movl	16(%esp),%esi		# current
+
+	/*
+	 * Clear curlwp so that we don't accumulate system time while idle.
+	 * This also insures that schedcpu() will move the old lwp to
+	 * the correct queue if it happens to get called from the spllower()
+	 * below and changes the priority.  (See corresponding comment in
+	 * userret()).
+	 */
+	movl	$0,CPUVAR(CURLWP)
+	/*
+	 * First phase: find new lwp.
+	 *
+	 * Registers:
+	 *   %eax - queue head, scratch, then zero
+	 *   %ebx - queue number
+	 *   %ecx - cached value of whichqs
+	 *   %edx - next lwp in queue
+	 *   %esi - old lwp
+	 *   %edi - new lwp
+	 */
+
+	/* Look for new lwp. */
+	cli				# splhigh doesn't do a cli
+	movl	_C_LABEL(sched_whichqs),%ecx
+	bsfl	%ecx,%ebx		# find a full q
+	jnz	switch_dequeue
+
+	/*
+	 * idling:	save old context.
+	 *
+	 * Registers:
+	 *   %eax, %ecx - scratch
+	 *   %esi - old lwp, then old pcb
+	 *   %edi - idle pcb
+	 */
+
+	pushl	%esi
+	call	_C_LABEL(pmap_deactivate2)	# pmap_deactivate(oldproc)
+	addl	$4,%esp
+
+	movl	L_ADDR(%esi),%esi
+
+	/* Save stack pointers. */
+	movl	%esp,PCB_ESP(%esi)
+	movl	%ebp,PCB_EBP(%esi)
+
+	/* Find idle PCB for this CPU */
+#ifndef MULTIPROCESSOR
+	movl	$_C_LABEL(lwp0),%ebx
+	movl	L_ADDR(%ebx),%edi
+	movl	L_MD_TSS_SEL(%ebx),%edx
+#else
+	movl	CPUVAR(IDLE_PCB),%edi
+	movl	CPUVAR(IDLE_TSS_SEL),%edx
+#endif
+	movl	$0,CPUVAR(CURLWP)		/* In case we fault... */
+
+	/* Restore the idle context (avoid interrupts) */
+	cli
+
+	/* Restore stack pointers. */
+	movl	PCB_ESP(%edi),%esp
+	movl	PCB_EBP(%edi),%ebp
+
+	/* Switch TSS. Reset "task busy" flag before loading. */
+	movl	%cr3,%eax
+	movl	%eax,PCB_CR3(%edi)
+#ifdef MULTIPROCESSOR
+	movl	CPUVAR(GDT),%eax
+#else
+	movl	_C_LABEL(gdt),%eax
+#endif
+	andl	$~0x0200,4-SEL_KPL(%eax,%edx,1)
+	ltr	%dx
+
+	/* We're always in the kernel, so we don't need the LDT. */
+
+	/* Restore cr0 (including FPU state). */
+	movl	PCB_CR0(%edi),%ecx
+	movl	%ecx,%cr0
+
+	/* Record new pcb. */
+	SET_CURPCB(%edi)
+
+	xorl	%esi,%esi
+	sti
+idle_unlock:
+#if defined(MULTIPROCESSOR) || defined(LOCKDEBUG)
+	call	_C_LABEL(sched_unlock_idle)
+#endif
+	/* Interrupts are okay again. */
+	pushl	$IPL_NONE		# spl0()
+	call	_C_LABEL(Xspllower)	# process pending interrupts
+	addl	$4,%esp
+	jmp	idle_start
+idle_zero:
+	sti
+	call	_C_LABEL(uvm_pageidlezero)
+	cli
+	cmpl	$0,_C_LABEL(sched_whichqs)
+	jnz	idle_exit
+idle_loop:
+	/* Try to zero some pages. */
+	movl	_C_LABEL(uvm)+UVM_PAGE_IDLE_ZERO,%ecx
+	testl	%ecx,%ecx
+	jnz	idle_zero
+	sti
+	hlt
+NENTRY(mpidle)
+idle_start:
+	cli
+	cmpl	$0,_C_LABEL(sched_whichqs)
+	jz	idle_loop
+idle_exit:
+	movl	$IPL_HIGH,CPUVAR(ILEVEL)		# splhigh
+	sti
+#if defined(MULTIPROCESSOR) || defined(LOCKDEBUG)
+	call	_C_LABEL(sched_lock_idle)
+#endif
+	movl	_C_LABEL(sched_whichqs),%ecx
+	bsfl	%ecx,%ebx
+	jz	idle_unlock
+
+switch_dequeue:
+	/*
+	 * we're running at splhigh(), but it's otherwise okay to take
+	 * interrupts here.
+	 */
+	sti
+	leal	_C_LABEL(sched_qs)(,%ebx,8),%eax # select q
+
+	movl	L_FORW(%eax),%edi	# unlink from front of process q
+#ifdef	DIAGNOSTIC
+	cmpl	%edi,%eax		# linked to self (i.e. nothing queued)?
+	je	_C_LABEL(switch_error)	# not possible
+#endif /* DIAGNOSTIC */
+	movl	L_FORW(%edi),%edx
+	movl	%edx,L_FORW(%eax)
+	movl	%eax,L_BACK(%edx)
+
+	cmpl	%edx,%eax		# q empty?
+	jne	3f
+
+	btrl	%ebx,%ecx		# yes, clear to indicate empty
+	movl	%ecx,_C_LABEL(sched_whichqs) # update q status
+
+3:	/* We just did it. */
+	xorl	%eax,%eax
+	CLEAR_RESCHED(%eax)
+
+switch_resume:
+#ifdef	DIAGNOSTIC
+	cmpl	%eax,L_WCHAN(%edi)	# Waiting for something?
+	jne	_C_LABEL(switch_error)	# Yes; shouldn't be queued.
+	cmpb	$LSRUN,L_STAT(%edi)	# In run state?
+	jne	_C_LABEL(switch_error)	# No; shouldn't be queued.
+#endif /* DIAGNOSTIC */
+
+	/* Isolate lwp.  XXX Is this necessary? */
+	movl	%eax,L_BACK(%edi)
+
+	/* Record new lwp. */
+	movb	$LSONPROC,L_STAT(%edi)	# l->l_stat = LSONPROC
+	SET_CURLWP(%edi,%ecx)
+
+	/* Skip context switch if same lwp. */
+	xorl	%ebx,%ebx
+	cmpl	%edi,%esi
+	je	switch_return
+
+	/* If old lwp exited, don't bother. */
+	testl	%esi,%esi
+	jz	switch_exited
+
+	/*
+	 * Second phase: save old context.
+	 *
+	 * Registers:
+	 *   %eax, %ecx - scratch
+	 *   %esi - old lwp, then old pcb
+	 *   %edi - new lwp
+	 */
+
+	pushl	%esi
+	call	_C_LABEL(pmap_deactivate2)	# pmap_deactivate(oldproc)
+	addl	$4,%esp
+
+	movl	L_ADDR(%esi),%esi
+
+	/* Save stack pointers. */
+	movl	%esp,PCB_ESP(%esi)
+	movl	%ebp,PCB_EBP(%esi)
+
+switch_exited:
+	/*
+	 * Third phase: restore saved context.
+	 *
+	 * Registers:
+	 *   %eax, %ebx, %ecx, %edx - scratch
+	 *   %esi - new pcb
+	 *   %edi - new lwp
+	 */
+
+	/* No interrupts while loading new state. */
+	cli
+	movl	L_ADDR(%edi),%esi
+
+	/* Restore stack pointers. */
+	movl	PCB_ESP(%esi),%esp
+	movl	PCB_EBP(%esi),%ebp
+
+#if 0
+	/* Don't bother with the rest if switching to a system process. */
+	testl	$P_SYSTEM,L_FLAG(%edi);	XXX NJWLWP lwp's don't have P_SYSTEM!
+	jnz	switch_restored
+#endif
+
+	/* Switch TSS. Reset "task busy" flag before loading. */
+	movl	%cr3,%eax
+	movl	%eax,PCB_CR3(%esi) /* XXX should be done by pmap_activate? */
+#ifdef MULTIPROCESSOR
+	movl	CPUVAR(GDT),%eax
+#else
+	/* Load TSS info. */
+	movl	_C_LABEL(gdt),%eax
+#endif
+	movl	L_MD_TSS_SEL(%edi),%edx
+
+	andl	$~0x0200,4(%eax,%edx, 1)
+	ltr	%dx
+
+	pushl	%edi
+	call	_C_LABEL(pmap_activate)		# pmap_activate(p)
+	addl	$4,%esp
+
+#if 0
+switch_restored:
+#endif
+	/* Restore cr0 (including FPU state). */
+	movl	PCB_CR0(%esi),%ecx
+#ifdef MULTIPROCESSOR
+	/*
+	 * If our floating point registers are on a different CPU,
+	 * clear CR0_TS so we'll trap rather than reuse bogus state.
+	 */
+	movl	PCB_FPCPU(%esi),%ebx
+	cmpl	CPUVAR(SELF),%ebx
+	jz	1f
+	orl	$CR0_TS,%ecx
+1:
+#endif
+	movl	%ecx,%cr0
+
+	/* Record new pcb. */
+	SET_CURPCB(%esi)
+
+	/* Interrupts are okay again. */
+	sti
+
+/*
+ *  Check for restartable atomic sequences (RAS)
+ */
+	movl	CPUVAR(CURLWP),%edi
+	movl	L_PROC(%edi),%esi
+	cmpl	$0,P_RASLIST(%esi)
+	jne	2f
+1:
+	movl	$1,%ebx
+
+switch_return:
+#if defined(MULTIPROCESSOR) || defined(LOCKDEBUG)
+	call    _C_LABEL(sched_unlock_idle)
+#endif
+	cmpl	$0,CPUVAR(IPENDING)
+	jz	3f
+	pushl	$IPL_NONE		# spl0()
+	call	_C_LABEL(Xspllower)	# process pending interrupts
+	addl	$4,%esp
+3:
+	movl	$IPL_HIGH,CPUVAR(ILEVEL)	# splhigh()
+
+	movl	%ebx,%eax
+
+	popl	%edi
+	popl	%esi
+	popl	%ebx
+	ret
+
+2:					# check RAS list
+	movl	L_MD_REGS(%edi),%ebx
+	movl	TF_EIP(%ebx),%eax
+	pushl	%eax
+	pushl	%esi
+	call	_C_LABEL(ras_lookup)
+	addl	$8,%esp
+	cmpl	$-1,%eax
+	je	1b
+	movl	%eax,TF_EIP(%ebx)
+	jmp	1b
+
+/*
+ * void cpu_switchto(struct lwp *current, struct lwp *next)
+ * Switch to the specified next LWP.
  */
 ENTRY(cpu_switchto)
 	pushl	%ebx
 	pushl	%esi
 	pushl	%edi
 
-#if defined(DIAGNOSTIC) && !defined(XEN)
+#ifdef DEBUG
 	cmpl	$IPL_SCHED,CPUVAR(ILEVEL)
-	jbe	0f
-	pushl	CPUVAR(ILEVEL)
-	pushl	$.Lstr
+	jae	1f
+	pushl	$2f
 	call	_C_LABEL(panic)
-	addl	$8,%esp
-.Lstr:	.string	"cpu_switchto: switching above IPL_SCHED (%d)\0"
-0:
+	/* NOTREACHED */
+2:	.asciz	"not splsched() in cpu_switchto!"
+1:
+#endif /* DEBUG */
+
+	movl	16(%esp),%esi		# current
+	movl	20(%esp),%edi		# next
+
+	/*
+	 * Clear curlwp so that we don't accumulate system time while idle.
+	 * This also insures that schedcpu() will move the old process to
+	 * the correct queue if it happens to get called from the spllower()
+	 * below and changes the priority.  (See corresponding comment in
+	 * usrret()).
+	 *
+	 * XXX Is this necessary?  We know we won't go idle.
+	 */
+	movl	$0,CPUVAR(CURLWP)
+
+	/*
+	 * We're running at splhigh(), but it's otherwise okay to take
+	 * interrupts here.
+	 */
+	sti
+
+	/* Jump into the middle of cpu_switch */
+	xorl	%eax,%eax
+	jmp	switch_resume
+
+/*
+ * void cpu_exit(struct lwp *l)
+ * Switch to the appropriate idle context (lwp0's if uniprocessor; the CPU's
+ * if multiprocessor) and deallocate the address space and kernel stack for p.
+ * Then jump into cpu_switch(), as if we were in the idle proc all along.
+ */
+#ifndef MULTIPROCESSOR
+	.globl	_C_LABEL(lwp0)
+#endif
+/* LINTSTUB: Func: void cpu_exit(struct lwp *l) */
+ENTRY(cpu_exit)
+	movl	4(%esp),%edi		# old process
+#ifndef MULTIPROCESSOR
+	movl	$_C_LABEL(lwp0),%ebx
+	movl	L_ADDR(%ebx),%esi
+	movl	L_MD_TSS_SEL(%ebx),%edx
+#else
+	movl	CPUVAR(IDLE_PCB),%esi
+	movl	CPUVAR(IDLE_TSS_SEL),%edx
+#endif
+	/* In case we fault... */
+	movl	$0,CPUVAR(CURLWP)
+
+	/* Restore the idle context. */
+	cli
+
+	/* Restore stack pointers. */
+	movl	PCB_ESP(%esi),%esp
+	movl	PCB_EBP(%esi),%ebp
+
+	/* Switch TSS. Reset "task busy" flag before loading. */
+	movl	%cr3,%eax
+	movl	%eax,PCB_CR3(%esi)
+#ifdef MULTIPROCESSOR
+	movl	CPUVAR(GDT),%eax
+#else
+	/* Load TSS info. */
+	movl	_C_LABEL(gdt),%eax
 #endif
 
-	movl	16(%esp),%esi		# oldlwp
-	movl	20(%esp),%edi		# newlwp
-	movl	24(%esp),%edx		# returning
-	testl	%esi,%esi
-	jz	1f
+	andl	$~0x0200,4-SEL_KPL(%eax,%edx,1)
+	ltr	%dx
 
-	/* Save old context. */
-	movl	L_ADDR(%esi),%eax
-	movl	%esp,PCB_ESP(%eax)
-	movl	%ebp,PCB_EBP(%eax)
+	/* We're always in the kernel, so we don't need the LDT. */
 
-	/* Switch to newlwp's stack. */
-1:	movl	L_ADDR(%edi),%ebx
-	movl	PCB_EBP(%ebx),%ebp
-	movl	PCB_ESP(%ebx),%esp
-
-	/*
-	 * Set curlwp.  This must be globally visible in order to permit
-	 * non-interlocked mutex release.
-	 */
-	movl	%edi,%ecx
-	xchgl	%ecx,CPUVAR(CURLWP)
-
-	/* Skip the rest if returning to a pinned LWP. */
-	testl	%edx,%edx
-	jnz	4f
-
-#ifdef XEN
-	pushl	%edi
-	call	_C_LABEL(i386_switch_context)
-	addl	$4,%esp
-#else /* XEN */
-	/* Switch ring0 esp */
-	movl	PCB_ESP0(%ebx),%eax
-	movl	%eax,CPUVAR(ESP0)
-
-	/* Don't bother with the rest if switching to a system process. */
-	testl	$LW_SYSTEM,L_FLAG(%edi)
-	jnz	4f
-
-	/* Restore thread-private %fs/%gs descriptors. */
-	movl	CPUVAR(GDT),%ecx
-	movl	PCB_FSD(%ebx), %eax
-	movl	PCB_FSD+4(%ebx), %edx
-	movl	%eax, (GUFS_SEL*8)(%ecx)
-	movl	%edx, (GUFS_SEL*8+4)(%ecx)
-	movl	PCB_GSD(%ebx), %eax
-	movl	PCB_GSD+4(%ebx), %edx
-	movl	%eax, (GUGS_SEL*8)(%ecx)
-	movl	%edx, (GUGS_SEL*8+4)(%ecx)
-#endif /* XEN */
-
-	/* Switch I/O bitmap */
-	movl	PCB_IOMAP(%ebx),%eax
-	orl	%eax,%eax
-	jnz,pn	.Lcopy_iobitmap
-	movl	$(IOMAP_INVALOFF << 16),CPUVAR(IOBASE)
-.Liobitmap_done:
-
-	/* Is this process using RAS (restartable atomic sequences)? */
-	movl	L_PROC(%edi),%eax
-	cmpl	$0,P_RASLIST(%eax)
-	jne	5f
-
-	/*
-	 * Restore cr0 (including FPU state).  Raise the IPL to IPL_IPI.
-	 * FPU IPIs can alter the LWP's saved cr0.  Dropping the priority
-	 * is deferred until mi_switch(), when cpu_switchto() returns.
-	 */
-2:
-#ifndef XEN
-	movl	$IPL_IPI,CPUVAR(ILEVEL)
-	movl	PCB_CR0(%ebx),%ecx		/* has CR0_TS clear */
-	movl	%cr0,%edx
-
-	/*
-	 * If our floating point registers are on a different CPU,
-	 * set CR0_TS so we'll trap rather than reuse bogus state.
-	 */
-	cmpl	CPUVAR(FPCURLWP),%edi
-	je	3f
-	orl	$CR0_TS,%ecx
-
-	/* Reloading CR0 is very expensive - avoid if possible. */
-3:	cmpl	%edx,%ecx
-	je	4f
+	/* Restore cr0 (including FPU state). */
+	movl	PCB_CR0(%esi),%ecx
 	movl	%ecx,%cr0
-#endif /* XEN */
 
-	/* Return to the new LWP, returning 'oldlwp' in %eax. */
-4:	movl	%esi,%eax
-	popl	%edi
-	popl	%esi
-	popl	%ebx
-	ret
+	/* Record new pcb. */
+	SET_CURPCB(%esi)
 
-	/* Check for restartable atomic sequences (RAS). */
-5:	movl	L_MD_REGS(%edi),%ecx
-	pushl	TF_EIP(%ecx)
-	pushl	%eax
-	call	_C_LABEL(ras_lookup)
-	addl	$8,%esp
-	cmpl	$-1,%eax
-	je	2b
-	movl	L_MD_REGS(%edi),%ecx
-	movl	%eax,TF_EIP(%ecx)
-	jmp	2b
+	/* Interrupts are okay again. */
+	sti
 
-.Lcopy_iobitmap:
-	/* Copy I/O bitmap. */
-	movl	$(IOMAPSIZE/4),%ecx
-	pushl	%esi
+	/*
+	 * Schedule the dead LWP's stack to be freed.
+	 */
 	pushl	%edi
-	movl	%eax,%esi		/* pcb_iomap */
-	movl	CPUVAR(SELF),%edi
-	leal	CPU_INFO_IOMAP(%edi),%edi
-	rep
-	movsl
-	popl	%edi
-	popl	%esi
-	movl	$((CPU_INFO_IOMAP - CPU_INFO_TSS) << 16),CPUVAR(IOBASE)
-	jmp	.Liobitmap_done
-END(cpu_switchto)
+	call	_C_LABEL(lwp_exit2)
+	addl	$4,%esp
+
+	/* Jump into cpu_switch() with the right state. */
+	xorl	%esi,%esi
+	movl	%esi,CPUVAR(CURLWP)
+	jmp	idle_start
 
 /*
  * void savectx(struct pcb *pcb);
- *
  * Update pcb, saving current processor state.
  */
+/* LINTSTUB: Func: void savectx(struct pcb *pcb) */
 ENTRY(savectx)
-	movl	4(%esp),%edx		# edx = pcb
+	movl	4(%esp),%edx		# edx = p->p_addr
+
+	/* Save stack pointers. */
 	movl	%esp,PCB_ESP(%edx)
 	movl	%ebp,PCB_EBP(%edx)
+
 	ret
-END(savectx)
 
 /*
- * osyscall()
- *
  * Old call gate entry for syscall
  */
+/* LINTSTUB: Var: char Xosyscall[1]; */
 IDTVEC(osyscall)
-	pushfl			# set eflags in trap frame
+	/* Set eflags in trap frame. */
+	pushfl
 	popl	8(%esp)
 	pushl	$7		# size of instruction for restart
 	jmp	syscall1
-IDTVEC_END(osyscall)
 
 /*
- * syscall()
- *
  * Trap gate entry for syscall
  */
+/* LINTSTUB: Var: char Xsyscall[1]; */
 IDTVEC(syscall)
 	pushl	$2		# size of instruction for restart
 syscall1:
 	pushl	$T_ASTFLT	# trap # for doing ASTs
 	INTRENTRY
+
 #ifdef DIAGNOSTIC
+	cmpl	$0, CPUVAR(WANT_PMAPLOAD)
+	jz	1f
+	pushl	$6f
+	call	_C_LABEL(printf)
+	addl	$4, %esp
+1:
 	movl	CPUVAR(ILEVEL),%ebx
 	testl	%ebx,%ebx
 	jz	1f
 	pushl	$5f
-	call	_C_LABEL(panic)
+	call	_C_LABEL(printf)
 	addl	$4,%esp
 #ifdef DDB
 	int	$3
 #endif
 1:
 #endif /* DIAGNOSTIC */
-	incl	CPUVAR(NSYSCALL)	# count it atomically
-	movl	CPUVAR(CURLWP),%edi
-	movl	L_PROC(%edi),%edx
-	movl	%esp,L_MD_REGS(%edi)	# save pointer to frame
+	movl	CPUVAR(CURLWP),%edx
+	movl	%esp,L_MD_REGS(%edx)	# save pointer to frame
+	movl	L_PROC(%edx),%edx
 	pushl	%esp
 	call	*P_MD_SYSCALL(%edx)	# get pointer to syscall() function
 	addl	$4,%esp
 .Lsyscall_checkast:
 	/* Check for ASTs on exit to user mode. */
-	CLI(%eax)
-	movl	L_MD_ASTPENDING(%edi), %eax
-	orl	CPUVAR(WANT_PMAPLOAD), %eax
-	jnz	9f
-#ifdef XEN
-	STIC(%eax)
-	jz	14f
-	call	_C_LABEL(stipending)
-	testl	%eax,%eax
-	jz	14f
-	/* process pending interrupts */
-	CLI(%eax)
-	movl	CPUVAR(ILEVEL), %ebx
-	movl	$.Lsyscall_resume, %esi # address to resume loop at
-.Lsyscall_resume:
-	movl	%ebx,%eax	# get cpl
-	movl	CPUVAR(IUNMASK)(,%eax,4),%eax
-	andl	CPUVAR(IPENDING),%eax   # any non-masked bits left?
-	jz	17f
-	bsrl	%eax,%eax
-	btrl	%eax,CPUVAR(IPENDING)
-	movl	CPUVAR(ISOURCES)(,%eax,4),%eax
-	jmp	*IS_RESUME(%eax)
-17:	movl	%ebx, CPUVAR(ILEVEL)    #restore cpl
-	jmp	.Lsyscall_checkast
-14:
-#endif /* XEN */
-#ifndef DIAGNOSTIC
-	INTRFASTEXIT
-#else /* DIAGNOSTIC */
-	cmpl	$IPL_NONE,CPUVAR(ILEVEL)
-	jne	3f
-	INTRFASTEXIT
-3:	STI(%eax)
-	pushl	$4f
-	call	_C_LABEL(panic)
-	addl	$4,%esp
-	pushl	$IPL_NONE
-	call	_C_LABEL(spllower)
-	addl	$4,%esp
-	jmp	.Lsyscall_checkast
-4:	.asciz	"SPL NOT LOWERED ON SYSCALL EXIT\n"
-5:	.asciz	"SPL NOT ZERO ON SYSCALL ENTRY\n"
-#endif /* DIAGNOSTIC */
-9:
-	cmpl	$0, CPUVAR(WANT_PMAPLOAD)
-	jz	10f
-	STI(%eax)
-	call	_C_LABEL(pmap_load)
-	jmp	.Lsyscall_checkast	/* re-check ASTs */
-10:
-	/* Always returning to user mode here. */
-	movl	$0, L_MD_ASTPENDING(%edi)
-	STI(%eax)
-	/* Pushed T_ASTFLT into tf_trapno on entry. */
-	pushl	%esp
-	call	_C_LABEL(trap)
-	addl	$4,%esp
-	jmp	.Lsyscall_checkast	/* re-check ASTs */
-IDTVEC_END(syscall)
-
-IDTVEC(svr4_fasttrap)
-	pushl	$2		# size of instruction for restart
-	pushl	$T_ASTFLT	# trap # for doing ASTs
-	INTRENTRY
-	pushl	$RW_READER
-	pushl	$_C_LABEL(svr4_fasttrap_lock)
-	call	_C_LABEL(rw_enter)
-	addl	$8,%esp
-	call	*_C_LABEL(svr4_fasttrap_vec)
-	pushl	$_C_LABEL(svr4_fasttrap_lock)
-	call	_C_LABEL(rw_exit)
-	addl	$4,%esp
-2:	/* Check for ASTs on exit to user mode. */
 	cli
-	CHECK_ASTPENDING(%eax)		
+	CHECK_ASTPENDING(%eax)
 	je	1f
 	/* Always returning to user mode here. */
 	CLEAR_ASTPENDING(%eax)
@@ -1200,14 +1273,31 @@ IDTVEC(svr4_fasttrap)
 	pushl	%esp
 	call	_C_LABEL(trap)
 	addl	$4,%esp
-	jmp	2b
-1:	CHECK_DEFERRED_SWITCH
+	jmp	.Lsyscall_checkast	/* re-check ASTs */
+1:	CHECK_DEFERRED_SWITCH(%eax)
 	jnz	9f
+#ifndef DIAGNOSTIC
 	INTRFASTEXIT
+#else /* DIAGNOSTIC */
+	cmpl	$IPL_NONE,CPUVAR(ILEVEL)
+	jne	3f
+	INTRFASTEXIT
+3:	sti
+	pushl	$4f
+	call	_C_LABEL(printf)
+	addl	$4,%esp
+#ifdef DDB
+	int	$3
+#endif /* DDB */
+	movl	$IPL_NONE,CPUVAR(ILEVEL)
+	jmp	2b
+4:	.asciz	"WARNING: SPL NOT LOWERED ON SYSCALL EXIT\n"
+5:	.asciz	"WARNING: SPL NOT ZERO ON SYSCALL ENTRY\n"
+6:	.asciz	"WARNING: WANT PMAPLOAD ON SYSCALL ENTRY\n"
+#endif /* DIAGNOSTIC */
 9:	sti
 	call	_C_LABEL(pmap_load)
-	cli
-	jmp	2b
+	jmp	.Lsyscall_checkast	/* re-check ASTs */
 
 #if NNPX > 0
 /*
@@ -1216,9 +1306,7 @@ IDTVEC(svr4_fasttrap)
  * latch stuff in probintr() can be moved to npxprobe().
  */
 
-/*
- * void probeintr(void)
- */
+/* LINTSTUB: Func: void probeintr(void) */
 NENTRY(probeintr)
 	ss
 	incl	_C_LABEL(npx_intrs_while_probing)
@@ -1230,21 +1318,15 @@ NENTRY(probeintr)
 	outb	%al,$0xf0	# clear BUSY# latch
 	popl	%eax
 	iret
-END(probeintr)
 
-/*
- * void probetrap(void)
- */
+/* LINTSTUB: Func: void probetrap(void) */
 NENTRY(probetrap)
 	ss
 	incl	_C_LABEL(npx_traps_while_probing)
 	fnclex
 	iret
-END(probetrap)
 
-/*
- * int npx586bug1(int a, int b)
- */
+/* LINTSTUB: Func: int npx586bug1(int a, int b) */
 NENTRY(npx586bug1)
 	fildl	4(%esp)		# x
 	fildl	8(%esp)		# y
@@ -1256,42 +1338,4 @@ NENTRY(npx586bug1)
 	fistpl	(%esp)
 	popl	%eax
 	ret
-END(npx586bug1)
 #endif /* NNPX > 0 */
-
-/*
- * void sse2_idlezero_page(void *pg)
- *
- * Zero a page without polluting the cache.  Preemption must be
- * disabled by the caller. Abort if a preemption is pending.
- */
-ENTRY(sse2_idlezero_page)
-	pushl	%ebp
-	movl	%esp,%ebp
-	movl	8(%esp), %edx
-	movl	$(PAGE_SIZE/32), %ecx
-	xorl	%eax, %eax
-	.align	16
-1:
-	testl	$RESCHED_KPREEMPT, CPUVAR(RESCHED)
-	jnz	2f
-	movnti	%eax, 0(%edx)
-	movnti	%eax, 4(%edx)
-	movnti	%eax, 8(%edx)
-	movnti	%eax, 12(%edx)
-	movnti	%eax, 16(%edx)
-	movnti	%eax, 20(%edx)
-	movnti	%eax, 24(%edx)
-	movnti	%eax, 28(%edx)
-	addl	$32, %edx
-	decl	%ecx
-	jnz	1b
-	sfence
-	incl	%eax
-	pop	%ebp
-	ret
-2:
-	sfence
-	popl	%ebp
-	ret
-END(sse2_idlezero_page)

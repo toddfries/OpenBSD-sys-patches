@@ -1,4 +1,4 @@
-/*	$NetBSD: ip6_flow.c,v 1.17 2008/04/28 20:24:10 martin Exp $	*/
+/*	$NetBSD: ip6_flow.c,v 1.15 2008/04/15 03:57:04 thorpej Exp $	*/
 
 /*-
  * Copyright (c) 2007 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -38,7 +45,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ip6_flow.c,v 1.17 2008/04/28 20:24:10 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ip6_flow.c,v 1.15 2008/04/15 03:57:04 thorpej Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -403,9 +410,6 @@ ip6flow_slowtimo(void)
 {
 	struct ip6flow *ip6f, *next_ip6f;
 
-	mutex_enter(softnet_lock);
-	KERNEL_LOCK(1, NULL);
-
 	for (ip6f = LIST_FIRST(&ip6flowlist); ip6f != NULL; ip6f = next_ip6f) {
 		next_ip6f = LIST_NEXT(ip6f, ip6f_list);
 		if (PRT_SLOW_ISEXPIRED(ip6f->ip6f_timer) ||
@@ -419,9 +423,6 @@ ip6flow_slowtimo(void)
 			ip6f->ip6f_forwarded = 0;
 		}
 	}
-
-	KERNEL_UNLOCK_ONE(NULL);
-	mutex_exit(softnet_lock);
 }
 
 /*

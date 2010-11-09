@@ -1,4 +1,4 @@
-/*	$NetBSD: netbsd32_ioctl.h,v 1.24 2008/06/23 23:14:42 njoly Exp $	*/
+/*	$NetBSD: netbsd32_ioctl.h,v 1.17 2005/12/11 12:20:22 christos Exp $	*/
 
 /*
  * Copyright (c) 1998, 2001 Matthew R. Green
@@ -12,6 +12,8 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -30,12 +32,12 @@
 #define IOCTL_STRUCT_CONV_TO(cmd, type)	\
 		size = IOCPARM_LEN(cmd); \
 		if (size > sizeof(stkbuf)) \
-			data = memp = kmem_alloc(size, KM_SLEEP); \
+			data = memp = malloc(size, M_IOCTLOPS, M_WAITOK); \
 		else \
-			data = (void *)stkbuf; \
+			data = (caddr_t)stkbuf; \
 		__CONCAT(netbsd32_to_, type)((struct __CONCAT(netbsd32_, type) *) \
 			data32, (struct type *)data, cmd); \
-		error = (*fp->f_ops->fo_ioctl)(fp, cmd, data); \
+		error = (*fp->f_ops->fo_ioctl)(fp, cmd, data, l); \
 		__CONCAT(netbsd32_from_, type)((struct type *)data, \
 			(struct __CONCAT(netbsd32_, type) *)data32, cmd); \
 		break
@@ -46,8 +48,8 @@
 #endif
 
 /* from <sys/dkio.h> */
-typedef netbsd32_pointer_t netbsd32_disklabel_tp_t;
-typedef netbsd32_pointer_t netbsd32_partition_tp_t;
+typedef int32_t netbsd32_disklabel_tp_t;
+typedef int32_t netbsd32_partition_tp_t;
 struct netbsd32_partinfo {
 	netbsd32_disklabel_tp_t disklab;
 	netbsd32_partition_tp_t part;
@@ -147,7 +149,7 @@ sys/scsiio.h:43:#define SCIOCCOMMAND	_IOWR('Q', 1, scsireq_t)
 
 /* from <net/if.h> */
 
-typedef netbsd32_pointer_t netbsd32_ifreq_tp_t;
+typedef int32_t netbsd32_ifreq_tp_t;
 /*
  * note that ifr_data is the only one that needs to be changed
  */
@@ -160,7 +162,7 @@ struct	netbsd32_ifreq {
 		short	ifru_flags;
 		int	ifru_metric;
 		int	ifru_mtu;
-		netbsd32_caddr_t ifru_data;
+		netbsd32_caddr_t	ifru_data;
 	} ifr_ifru;
 #define	ifr_addr	ifr_ifru.ifru_addr	/* address */
 #define	ifr_dstaddr	ifr_ifru.ifru_dstaddr	/* other end of p-to-p link */
@@ -212,7 +214,7 @@ struct	netbsd32_ifreq {
 struct	netbsd32_ifconf {
 	int	ifc_len;		/* size of associated buffer */
 	union {
-		netbsd32_caddr_t ifcu_buf;
+		netbsd32_caddr_t	ifcu_buf;
 		netbsd32_ifreq_tp_t ifcu_req;
 	} ifc_ifcu;
 #define	ifc_buf	ifc_ifcu.ifcu_buf	/* buffer address */
@@ -220,9 +222,8 @@ struct	netbsd32_ifconf {
 };
 #if 1
 /* from <sys/sockio.h> */
-#define	OOSIOCGIFCONF32	_IOWR('i', 20, struct netbsd32_ifconf)	/* get ifnet list */
-#define	OSIOCGIFCONF32	_IOWR('i', 36, struct netbsd32_ifconf)	/* get ifnet list */
-#define	SIOCGIFCONF32	_IOWR('i', 38, struct netbsd32_ifconf)	/* get ifnet list */
+#define	OSIOCGIFCONF32	_IOWR('i', 20, struct netbsd32_ifconf)	/* get ifnet list */
+#define	SIOCGIFCONF32	_IOWR('i', 36, struct netbsd32_ifconf)	/* get ifnet list */
 #endif
 
 /* from <net/if.h> */

@@ -1,4 +1,4 @@
-/*	$NetBSD: grf_hy.c,v 1.37 2008/04/28 20:23:19 martin Exp $	*/
+/*	$NetBSD: grf_hy.c,v 1.32 2006/07/21 18:40:58 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -113,7 +120,9 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: grf_hy.c,v 1.37 2008/04/28 20:23:19 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: grf_hy.c,v 1.32 2006/07/21 18:40:58 tsutsui Exp $");
+
+#include "opt_compat_hpux.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -147,15 +156,15 @@ __KERNEL_RCSID(0, "$NetBSD: grf_hy.c,v 1.37 2008/04/28 20:23:19 martin Exp $");
 
 #include "ite.h"
 
-static int	hy_init(struct grf_data *gp, int, uint8_t *);
-static int	hy_mode(struct grf_data *gp, int, void *);
+static int	hy_init(struct grf_data *gp, int, caddr_t);
+static int	hy_mode(struct grf_data *gp, int, caddr_t);
 
-static int	hyper_dio_match(device_t, cfdata_t, void *);
-static void	hyper_dio_attach(device_t, device_t, void *);
+static int	hyper_dio_match(struct device *, struct cfdata *, void *);
+static void	hyper_dio_attach(struct device *, struct device *, void *);
 
 int	hypercnattach(bus_space_tag_t, bus_addr_t, int);
 
-CFATTACH_DECL_NEW(hyper_dio, sizeof(struct grfdev_softc),
+CFATTACH_DECL(hyper_dio, sizeof(struct grfdev_softc),
     hyper_dio_match, hyper_dio_attach, NULL, NULL);
 
 /* Hyperion grf switch */
@@ -164,7 +173,7 @@ static struct grfsw hyper_grfsw = {
 };
 
 static int hyperconscode;
-static void *hyperconaddr;
+static caddr_t hyperconaddr;
 
 #if NITE > 0
 static void	hyper_init(struct ite_data *);
@@ -185,7 +194,7 @@ static struct itesw hyper_itesw = {
 #endif /* NITE > 0 */
 
 static int
-hyper_dio_match(device_t parent, cfdata_t cf, void *aux)
+hyper_dio_match(struct device *parent, struct cfdata *match, void *aux)
 {
 	struct dio_attach_args *da = aux;
 
@@ -197,21 +206,21 @@ hyper_dio_match(device_t parent, cfdata_t cf, void *aux)
 }
 
 static void
-hyper_dio_attach(device_t parent, device_t self, void *aux)
+hyper_dio_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct grfdev_softc *sc = device_private(self);
+	struct grfdev_softc *sc = (struct grfdev_softc *)self;
 	struct dio_attach_args *da = aux;
 	bus_space_handle_t bsh;
-	void *grf;
+	caddr_t grf;
 
-	sc->sc_dev = self;
 	sc->sc_scode = da->da_scode;
 	if (sc->sc_scode == hyperconscode)
 		grf = hyperconaddr;
 	else {
 		if (bus_space_map(da->da_bst, da->da_addr, da->da_size,
 		    0, &bsh)) {
-			aprint_error(": can't map framebuffer\n");
+			printf("%s: can't map framebuffer\n",
+			    sc->sc_dev.dv_xname);
 			return;
 		}
 		grf = bus_space_vaddr(da->da_bst, bsh);
@@ -227,9 +236,9 @@ hyper_dio_attach(device_t parent, device_t self, void *aux)
  * Returns 0 if hardware not present, non-zero ow.
  */
 static int
-hy_init(struct grf_data *gp, int scode, uint8_t *addr)
+hy_init(struct grf_data *gp, int scode, caddr_t addr)
 {
-	struct hyboxfb *hy = (struct hyboxfb *)addr;
+	struct hyboxfb *hy = (struct hyboxfb *) addr;
 	struct grfinfo *gi = &gp->g_display;
 	int fboff;
 
@@ -239,7 +248,7 @@ hy_init(struct grf_data *gp, int scode, uint8_t *addr)
 	 */
 	if (scode != hyperconscode) {
 		if (ISIIOVA(addr))
-			gi->gd_regaddr = (void *)IIOP(addr);
+			gi->gd_regaddr = (caddr_t) IIOP(addr);
 		else
 			gi->gd_regaddr = dio_scodetopa(scode);
 		gi->gd_regsize = 0x20000;
@@ -247,16 +256,16 @@ hy_init(struct grf_data *gp, int scode, uint8_t *addr)
 		gi->gd_fbheight = (hy->fbhmsb << 8) | hy->fbhlsb;
 		gi->gd_fbsize = (gi->gd_fbwidth * gi->gd_fbheight) >> 3;
 		fboff = (hy->fbomsb << 8) | hy->fbolsb;
-		gi->gd_fbaddr = (void *)(*(addr + fboff) << 16);
-		if ((vaddr_t)gi->gd_regaddr >= DIOIIBASE) {
+		gi->gd_fbaddr = (caddr_t) (*((u_char *)addr + fboff) << 16);
+		if (gi->gd_regaddr >= (caddr_t)DIOIIBASE) {
 			/*
 			 * For DIO II space the fbaddr just computed is
 			 * the offset from the select code base (regaddr)
 			 * of the framebuffer.  Hence it is also implicitly
 			 * the size of the register set.
 			 */
-			gi->gd_regsize = (int)gi->gd_fbaddr;
-			gi->gd_fbaddr += (int)gi->gd_regaddr;
+			gi->gd_regsize = (int) gi->gd_fbaddr;
+			gi->gd_fbaddr += (int) gi->gd_regaddr;
 			gp->g_regkva = addr;
 			gp->g_fbkva = addr + gi->gd_regsize;
 		} else {
@@ -282,7 +291,7 @@ hy_init(struct grf_data *gp, int scode, uint8_t *addr)
  * Function may not be needed anymore.
  */
 static int
-hy_mode(struct grf_data *gp, int cmd, void *data)
+hy_mode(struct grf_data *gp, int cmd, caddr_t data)
 {
 	int error = 0;
 
@@ -302,6 +311,43 @@ hy_mode(struct grf_data *gp, int cmd, void *data)
 	case GM_UNMAP:
 		gp->g_data = 0;
 		break;
+
+#ifdef COMPAT_HPUX
+	case GM_DESCRIBE:
+	{
+		struct grf_fbinfo *fi = (struct grf_fbinfo *)data;
+		struct grfinfo *gi = &gp->g_display;
+		int i;
+
+		/* feed it what HP-UX expects */
+		fi->id = gi->gd_id;
+		fi->mapsize = gi->gd_fbsize;
+		fi->dwidth = gi->gd_dwidth;
+		fi->dlength = gi->gd_dheight;
+		fi->width = gi->gd_fbwidth;
+		fi->length = gi->gd_fbheight;
+		fi->bpp = NBBY;
+		fi->xlen = (fi->width * fi->bpp) / NBBY;
+		fi->npl = gi->gd_planes;
+		fi->bppu = fi->npl;
+		fi->nplbytes = fi->xlen * ((fi->length * fi->bpp) / NBBY);
+		memcpy(fi->name, "A1096A", 7);	/* ?? */
+		fi->attr = 0;			/* ?? */
+		/*
+		 * If mapped, return the UVA where mapped.
+		 */
+		if (gp->g_data) {
+			fi->regbase = gp->g_data;
+			fi->fbbase = fi->regbase + gp->g_display.gd_regsize;
+		} else {
+			fi->fbbase = 0;
+			fi->regbase = 0;
+		}
+		for (i = 0; i < 6; i++)
+			fi->regions[i] = 0;
+		break;
+	}
+#endif
 
 	default:
 		error = EINVAL;
@@ -711,7 +757,7 @@ int
 hypercnattach(bus_space_tag_t bst, bus_addr_t addr, int scode)
 {
 	bus_space_handle_t bsh;
-	void *va;
+	caddr_t va;
 	struct grfreg *grf;
 	struct grf_data *gp = &grf_cn;
 	int size;

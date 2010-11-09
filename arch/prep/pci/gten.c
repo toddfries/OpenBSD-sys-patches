@@ -1,4 +1,4 @@
-/*	$NetBSD: gten.c,v 1.18 2008/12/17 20:51:32 cegger Exp $	*/
+/*	$NetBSD: gten.c,v 1.14 2006/05/09 02:48:36 garbled Exp $	*/
 
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: gten.c,v 1.18 2008/12/17 20:51:32 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: gten.c,v 1.14 2006/05/09 02:48:36 garbled Exp $");
 
 #include <sys/param.h>
 #include <sys/buf.h>
@@ -81,7 +88,7 @@ static struct wsscreen_list gten_screenlist = {
 	sizeof(_gten_scrlist) / sizeof(struct wsscreen_descr *), _gten_scrlist
 };
 
-static int gten_ioctl(void *, void *, u_long, void *, int, struct proc *);
+static int gten_ioctl(void *, void *, u_long, caddr_t, int, struct proc *);
 static paddr_t gten_mmap(void *, void *, off_t, int);
 static int gten_alloc_screen(void *, const struct wsscreen_descr *,
 			     void **, int *, int *, long *);
@@ -130,7 +137,7 @@ gten_attach(struct device *parent, struct device *self, void *aux)
 		PCI_MAPREG_TYPE_MEM|PCI_MAPREG_MEM_TYPE_32BIT,
 		&gt->gt_memaddr, &gt->gt_memsize, NULL);
 	if (error) {
-		aprint_error(": can't determine memory size: error=%d\n",
+		printf(": can't determine memory size: error=%d\n",
 			error);
 		return;
 	}
@@ -138,12 +145,13 @@ gten_attach(struct device *parent, struct device *self, void *aux)
 		gt->gt_ri = &gten_console_ri;
 		gt->gt_nscreens = 1;
 	} else {
-		gt->gt_ri = malloc(sizeof(*gt->gt_ri),
-			M_DEVBUF, M_NOWAIT|M_ZERO);
+		MALLOC(gt->gt_ri, struct rasops_info *, sizeof(*gt->gt_ri),
+			M_DEVBUF, M_NOWAIT);
 		if (gt->gt_ri == NULL) {
-			aprint_error(": can't alloc memory\n");
+			printf(": can't alloc memory\n");
 			return;
 		}
+		memset(gt->gt_ri, 0, sizeof(*gt->gt_ri));
 #if 0
 		error = pci_mapreg_map(pa, 0x14, 
 			PCI_MAPREG_TYPE_MEM|PCI_MAPREG_MEM_TYPE_32BIT,
@@ -156,8 +164,7 @@ gten_attach(struct device *parent, struct device *self, void *aux)
 			(bus_space_handle_t *) &gt->gt_ri->ri_bits);
 #endif
 		if (error) {
-			aprint_error(": can't map frame buffer: error=%d\n",
-			    error);
+			printf(": can't map frame buffer: error=%d\n", error);
 			return;
 		}
 
@@ -166,19 +173,19 @@ gten_attach(struct device *parent, struct device *self, void *aux)
 
 	gt->gt_paddr = vtophys((vaddr_t)gt->gt_ri->ri_bits);
 	if (gt->gt_paddr == 0) {
-		aprint_error(": cannot map framebuffer\n");
+		printf(": cannot map framebuffer\n");
 		return;
 	}
 	gt->gt_psize = gt->gt_memsize - GTEN_VRAM_OFFSET;
 
 	pci_devinfo(pa->pa_id, pa->pa_class, 0, devinfo, sizeof(devinfo));
-	aprint_normal(": %s\n", devinfo);
+	printf(": %s\n", devinfo);
 	format_bytes(pbuf, sizeof(pbuf), gt->gt_psize);
-	aprint_normal("%s: %s, %dx%d, %dbpp\n", self->dv_xname, pbuf,
+	printf("%s: %s, %dx%d, %dbpp\n", self->dv_xname, pbuf,
 	       gt->gt_ri->ri_width, gt->gt_ri->ri_height,
 	       gt->gt_ri->ri_depth);
 #if defined(DEBUG)
-	aprint_debug("%s: text %dx%d, =+%d+%d\n", self->dv_xname,
+	printf("%s: text %dx%d, =+%d+%d\n", self->dv_xname,
 	       gt->gt_ri->ri_cols, gt->gt_ri->ri_rows,
 	       gt->gt_ri->ri_xorigin, gt->gt_ri->ri_yorigin);
 
@@ -241,7 +248,7 @@ gten_common_init(struct rasops_info *ri)
 }
 
 static int
-gten_ioctl(void *v, void *vs, u_long cmd, void *data, int flag,
+gten_ioctl(void *v, void *vs, u_long cmd, caddr_t data, int flag,
     struct proc *p)
 {
 	struct gten_softc *gt = v;

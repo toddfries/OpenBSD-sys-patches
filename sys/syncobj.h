@@ -1,7 +1,7 @@
-/*	$NetBSD: syncobj.h,v 1.7 2008/04/28 20:24:11 martin Exp $	*/
+/*	$NetBSD: syncobj.h,v 1.4 2007/09/06 23:59:02 ad Exp $	*/
 
 /*-
- * Copyright (c) 2007, 2008 The NetBSD Foundation, Inc.
+ * Copyright (c) 2007 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -43,7 +50,7 @@ typedef volatile const void *wchan_t;
  */
 typedef struct syncobj {
 	u_int	sobj_flag;
-	u_int	(*sobj_unsleep)(struct lwp *, bool);
+	void	(*sobj_unsleep)(struct lwp *);
 	void	(*sobj_changepri)(struct lwp *, pri_t);
 	void	(*sobj_lendpri)(struct lwp *, pri_t);
 	struct lwp *(*sobj_owner)(wchan_t);
@@ -58,7 +65,6 @@ struct lwp *syncobj_noowner(wchan_t);
 extern syncobj_t	sched_syncobj;
 extern syncobj_t	mutex_syncobj;
 extern syncobj_t	rw_syncobj;
-extern syncobj_t	sleep_syncobj;
 
 #endif /* defined(_KERNEL) */
 

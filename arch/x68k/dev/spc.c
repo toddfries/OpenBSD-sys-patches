@@ -1,4 +1,4 @@
-/*	$NetBSD: spc.c,v 1.35 2008/12/18 05:56:42 isaki Exp $	*/
+/*	$NetBSD: spc.c,v 1.30 2006/02/23 05:37:49 thorpej Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: spc.c,v 1.35 2008/12/18 05:56:42 isaki Exp $");
+__KERNEL_RCSID(0, "$NetBSD: spc.c,v 1.30 2006/02/23 05:37:49 thorpej Exp $");
 
 #include "opt_ddb.h"
 
@@ -53,20 +60,20 @@ __KERNEL_RCSID(0, "$NetBSD: spc.c,v 1.35 2008/12/18 05:56:42 isaki Exp $");
 #include <dev/ic/mb89352var.h>
 #include <dev/ic/mb89352reg.h>
 
-static int spc_intio_match(device_t, cfdata_t, void *);
-static void spc_intio_attach(device_t, device_t, void *);
+static int spc_intio_match(struct device *, struct cfdata *, void *);
+static void spc_intio_attach(struct device *, struct device *, void *);
 
-CFATTACH_DECL_NEW(spc_intio, sizeof(struct spc_softc),
+CFATTACH_DECL(spc_intio, sizeof (struct spc_softc),
     spc_intio_match, spc_intio_attach, NULL, NULL);
 
-static int
-spc_intio_match(device_t parent, cfdata_t cf, void *aux)
+static int 
+spc_intio_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct intio_attach_args *ia = aux;
 	bus_space_tag_t iot = ia->ia_bst;
 	bus_space_handle_t ioh;
 
-	ia->ia_size = 0x20;
+	ia->ia_size=0x20;
 
 	if (intio_map_allocate_region(device_parent(parent), ia,
 				      INTIO_MAP_TESTONLY) < 0)
@@ -75,38 +82,37 @@ spc_intio_match(device_t parent, cfdata_t cf, void *aux)
 	if (bus_space_map(iot, ia->ia_addr, 0x20, BUS_SPACE_MAP_SHIFTED,
 			  &ioh) < 0)
 		return 0;
-	if (badaddr((void *)IIOV(ia->ia_addr + BDID)))
+	if (badaddr(INTIO_ADDR(ia->ia_addr + BDID)))
 		return 0;
 	bus_space_unmap(iot, ioh, 0x20);
 
 	return 1;
 }
 
-static void
-spc_intio_attach(device_t parent, device_t self, void *aux)
+static void 
+spc_intio_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct spc_softc *sc = device_private(self);
+	struct spc_softc *sc = (struct spc_softc *)self;
 	struct intio_attach_args *ia = aux;
 	bus_space_tag_t iot = ia->ia_bst;
 	bus_space_handle_t ioh;
 
-	sc->sc_dev = self;
+	printf ("\n");
 
 	intio_map_allocate_region(device_parent(parent), ia,
 				  INTIO_MAP_ALLOCATE);
 	if (bus_space_map(iot, ia->ia_addr, 0x20, BUS_SPACE_MAP_SHIFTED,
 			  &ioh)) {
-		aprint_error(": can't map i/o space\n");
+		printf("%s: can't map i/o space\n", sc->sc_dev.dv_xname);
 		return;
 	}
-	aprint_normal("\n");
 
 	sc->sc_iot = iot;
 	sc->sc_ioh = ioh;
 	sc->sc_initiator = IODEVbase->io_sram[0x70] & 0x7; /* XXX */
 
 	if (intio_intr_establish(ia->ia_intr, "spc", spc_intr, sc))
-		panic("spcattach: interrupt vector busy");
+		panic ("spcattach: interrupt vector busy");
 
 	spc_attach(sc);
 }

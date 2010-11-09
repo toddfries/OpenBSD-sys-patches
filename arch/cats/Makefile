@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile,v 1.3 2008/10/25 22:27:37 apb Exp $
+#	$NetBSD: Makefile,v 1.2 2003/01/06 17:40:25 lukem Exp $
 
 # Makefile for cats tags file and boot blocks
 
@@ -15,8 +15,7 @@ DCATS=	isa include
 tags:
 	-ctags -wdtf ${TCATS} ${SCATS} ${COMM}
 	egrep "^ENTRY(.*)|^ALTENTRY(.*)" ${ACATS} | \
-	    ${TOOL_SED} -e \
-		"s;\([^:]*\):\([^(]*\)(\([^, )]*\)\(.*\);\3 \1 /^\2(\3\4$$/;" \
+	    sed "s;\([^:]*\):\([^(]*\)(\([^, )]*\)\(.*\);\3 \1 /^\2(\3\4$$/;" \
 	    >> ${TCATS}
 	sort -o ${TCATS} ${TCATS}
 

@@ -1,4 +1,4 @@
-/* $NetBSD: wsdisplayvar.h,v 1.47 2008/03/25 00:49:20 cube Exp $ */
+/* $NetBSD: wsdisplayvar.h,v 1.44 2007/10/19 08:57:50 dogcow Exp $ */
 
 /*
  * Copyright (c) 1996, 1997 Christopher G. Demetriou.  All rights reserved.
@@ -174,8 +174,6 @@ void	wsdisplay_preattach(const struct wsscreen_descr *, void *, int, int,
 int	wsdisplaydevprint(void *, const char *);
 int	wsemuldisplaydevprint(void *, const char *);
 
-int	wsdisplay_handlex(int);
-
 /*
  * Console interface.
  */
@@ -220,12 +218,13 @@ void wsdisplay_scroll(void *, int);
 #define WSDISPLAY_SCROLL_RESET		(1 << 2)
 #define WSDISPLAY_SCROLL_LOW		(1 << 3)
 
-int wsdisplay_stat_inject(device_t, u_int, int);
+int wsdisplay_stat_inject(struct device *, u_int, int);
 
 /*
  * for general use
  */
 #define WSDISPLAY_NULLSCREEN	-1
+void wsdisplay_switchtoconsole(void);
 const struct wsscreen_descr *wsdisplay_screentype_pick(
     const struct wsscreen_list *, const char *);
 

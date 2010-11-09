@@ -1,4 +1,4 @@
-# $NetBSD: genassym.cf,v 1.10 2008/06/23 17:58:17 matt Exp $
+# $NetBSD: genassym.cf,v 1.12 2009/12/10 05:10:00 rmind Exp $
 #
 # Copyright (c) 1999 Ben Harris
 # All rights reserved.
@@ -30,7 +30,6 @@ include "eca.h"
 include <sys/param.h>
 
 include <sys/proc.h>
-include <sys/user.h>
 include <sys/mbuf.h>
 include <netinet/in.h>
 include <netinet/in_systm.h>
@@ -46,10 +45,9 @@ endif
 
 define	__PROG26	1
 
-define	U_PCB		offsetof(struct user, u_pcb)
 define	PCB_SF		offsetof(struct pcb, pcb_sf)
 define	PCB_ONFAULT	offsetof(struct pcb, pcb_onfault)
-define	L_ADDR		offsetof(struct lwp, l_addr)
+define	L_PCB		offsetof(struct lwp, l_addr)
 
 define	TF_SPSR		offsetof(struct trapframe, tf_spsr)
 define	TF_R0		offsetof(struct trapframe, tf_r0)

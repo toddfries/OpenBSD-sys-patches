@@ -1,4 +1,4 @@
-# $NetBSD: GENERIC,v 1.72 2009/01/24 05:06:06 mrg Exp $
+# $NetBSD: GENERIC,v 1.64 2006/11/11 18:47:10 jmmv Exp $
 #
 # GENERIC machine description file
 # 
@@ -28,10 +28,17 @@ options 	MIPS1			# R2000/R3000 support
 
 # Standard system options
 options 	KTRACE			# system call tracing support
+#options 	SYSTRACE		# system call vetting via systrace(1)
 options 	SYSVMSG			# System V message queues
 options 	SYSVSEM			# System V semaphores
+#options 	SEMMNI=10		# number of semaphore identifiers
+#options 	SEMMNS=60		# number of semaphores in system
+#options 	SEMUME=10		# max number of undo entries per process
+#options 	SEMMNU=30		# number of undo structures in system
 options 	SYSVSHM			# System V shared memory
+#options 	SHMMAXPGS=1024		# 1024 pages is the default
 options 	P1003_1B_SEMAPHORE # p1003.1b semaphore support
+#options 	LKM			# loadable kernel modules
 #options 	NTP			# network time protocol
 options 	HZ=25
 options 	USERCONF		# userconf(4) support
@@ -66,8 +73,6 @@ options 	COMPAT_15		# NetBSD 1.5 binary compatibility
 options 	COMPAT_16		# NetBSD 1.6 binary compatibility
 options 	COMPAT_20		# NetBSD 2.0 binary compatibility
 options 	COMPAT_30		# NetBSD 3.0 compatibility.
-options 	COMPAT_40		# NetBSD 4.0 compatibility.
-options 	COMPAT_50		# NetBSD 5.0 compatibility.
 #options 	EXEC_AOUT		# exec a.out binaries
 #options 	EXEC_ECOFF		# exec ecoff binaries
 #options 	TCP_COMPAT_42	# 4.2BSD TCP/IP bug compat. Not recommended.
@@ -158,11 +163,6 @@ st*	at scsibus? target ? lun ?	# SCSI tapes
 cd*	at scsibus? target ? lun ?	# SCSI CD-ROMs
 ch*	at scsibus? target ? lun ?	# SCSI changer devices
 
-#
-# accept filters
-pseudo-device   accf_data		# "dataready" accept filter
-pseudo-device   accf_http		# "httpready" accept filter
-
 pseudo-device	loop			# loopback interface; required
 pseudo-device	pty			# pseudo-terminals
 #pseudo-device	sl			# SLIP interfaces
@@ -192,7 +192,6 @@ pseudo-device	fss		4	# file system snapshot device
 pseudo-device	vlan			# IEEE 802.1q encapsulation
 pseudo-device	bridge			# simple inter-network bridging
 #options	BRIDGE_IPF		# bridge uses IP/IPv6 pfil hooks too
-pseudo-device	agr			# IEEE 802.3ad link aggregation
 pseudo-device	clockctl		# user control of clock subsystem
 
 # random number generator pseudo-device

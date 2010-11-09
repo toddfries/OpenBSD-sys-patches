@@ -1,4 +1,4 @@
-/*	$NetBSD: ebus.c,v 1.30 2008/05/29 14:51:26 mrg Exp $ */
+/*	$NetBSD: ebus.c,v 1.25 2006/07/02 10:14:15 jdc Exp $ */
 
 /*
  * Copyright (c) 1999, 2000 Matthew R. Green
@@ -12,6 +12,8 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -32,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ebus.c,v 1.30 2008/05/29 14:51:26 mrg Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ebus.c,v 1.25 2006/07/02 10:14:15 jdc Exp $");
 
 #if defined(DEBUG) && !defined(EBUS_DEBUG)
 #define EBUS_DEBUG
@@ -77,7 +79,8 @@ int ebus_debug = 0;
 volatile uint32_t *ebus_LED = NULL;
 
 #ifdef BLINK
-static callout_t ebus_blink_ch;
+static struct callout ebus_blink_ch = CALLOUT_INITIALIZER;
+
 static void ebus_blink(void *);
 #endif
 
@@ -250,10 +253,6 @@ ebus_attach(struct device *parent, struct device *self, void *aux)
 	int node, error;
 	char devinfo[256];
 
-#ifdef BLINK
-	callout_init(&ebus_blink_ch, 0);
-#endif
-
 	pci_devinfo(pa->pa_id, pa->pa_class, 0, devinfo, sizeof(devinfo));
 	printf(": %s, revision 0x%02x\n",
 	       devinfo, PCI_REVISION(pa->pa_class));
@@ -267,10 +266,11 @@ ebus_attach(struct device *parent, struct device *self, void *aux)
 
 	/* map the LED register */
 	base14 = pci_conf_read(pa->pa_pc, pa->pa_tag, 0x14);
+	printf("base14: %08x\n", (uint32_t)base14);
 	if (bus_space_map(pa->pa_memt, base14 + 0x726000, 4, 0, &hLED) == 0) {
 		ebus_LED = bus_space_vaddr(pa->pa_memt, hLED);
 #ifdef BLINK
-		ebus_blink((void *)0);
+		ebus_blink((caddr_t)0);
 #endif
 	} else {
 		printf("unable to map the LED register\n");

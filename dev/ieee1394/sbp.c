@@ -1,4 +1,4 @@
-/*	$NetBSD: sbp.c,v 1.24 2009/01/11 02:45:51 christos Exp $	*/
+/*	$NetBSD: sbp.c,v 1.19 2007/11/05 19:08:57 kiyohara Exp $	*/
 /*-
  * Copyright (c) 2003 Hidetoshi Shimokawa
  * Copyright (c) 1998-2002 Katsushi Kobayashi and Hidetoshi Shimokawa
@@ -35,9 +35,6 @@
  * $FreeBSD: src/sys/dev/firewire/sbp.c,v 1.92 2007/06/06 14:31:36 simokawa Exp $
  *
  */
-
-#include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sbp.c,v 1.24 2009/01/11 02:45:51 christos Exp $");
 
 #if defined(__FreeBSD__)
 #include <sys/param.h>
@@ -201,7 +198,7 @@ static int sysctl_sbp_verify_tags(SYSCTLFN_PROTO);
 /*
  * Setup sysctl(3) MIB, hw.sbp.*
  *
- * TBD condition CTLFLAG_PERMANENT on being a module or not
+ * TBD condition CTLFLAG_PERMANENT on being an LKM or not
  */
 SYSCTL_SETUP(sysctl_sbp, "sysctl sbp(4) subtree setup")
 {
@@ -423,7 +420,7 @@ struct sbp_softc {
 #elif defined(__NetBSD__)
 	struct scsipi_adapter sc_adapter; 
 	struct scsipi_channel sc_channel;
-	device_t sc_bus;
+	struct device *sc_bus;
 	struct lwp *lwp;
 #endif
 	struct sbp_target target;
@@ -438,9 +435,9 @@ struct sbp_softc {
 #define SBP_UNLOCK(sbp)	fw_mtx_unlock(&(sbp)->mtx)
 
 #if defined(__NetBSD__)
-int sbpmatch (device_t, struct cfdata *, void *);
-void sbpattach (device_t parent, device_t self, void *aux);
-int sbpdetach (device_t self, int flags);
+int sbpmatch (struct device *, struct cfdata *, void *);
+void sbpattach (struct device *parent, struct device *self, void *aux);
+int sbpdetach (struct device *self, int flags);
 #endif
 static void sbp_post_explore (void *);
 static void sbp_recv (struct fw_xfer *);
@@ -579,7 +576,7 @@ END_DEBUG
 }
 #elif defined(__NetBSD__)
 int
-sbpmatch(device_t parent, struct cfdata *cf, void *aux)
+sbpmatch(struct device *parent, struct cfdata *cf, void *aux)
 {
 	struct fw_attach_args *fwa = aux;
 
@@ -870,8 +867,8 @@ sbp_login(struct sbp_dev *sdev)
 	if (t.tv_sec >= 0 && t.tv_usec > 0)
 		ticks = (t.tv_sec * 1000 + t.tv_usec / 1000) * hz / 1000;
 SBP_DEBUG(0)
-	printf("%s: sec = %lld usec = %ld ticks = %d\n", __func__,
-	    (long long)t.tv_sec, (long)t.tv_usec, ticks);
+	printf("%s: sec = %jd usec = %ld ticks = %d\n", __func__,
+	    (intmax_t)t.tv_sec, t.tv_usec, ticks);
 END_DEBUG
 	fw_callout_reset(&sdev->login_callout, ticks,
 			sbp_login_callout, (void *)(sdev));
@@ -1210,7 +1207,7 @@ sbp_scan_dev(struct sbp_dev *sdev)
 	fw_callout_reset(&sdev->target->scan_callout, scan_delay * hz / 1000,
 			sbp_cam_scan_target, (void *)sdev->target);
 }
-#elif defined(__NetBSD__)
+#else
 static void
 sbp_scsipi_scan_target(void *arg)
 {
@@ -1218,7 +1215,7 @@ sbp_scsipi_scan_target(void *arg)
 	struct sbp_softc *sbp = target->sbp;
 	struct sbp_dev *sdev;
 	struct scsipi_channel *chan = &sbp->sc_channel;
-	struct scsibus_softc *sc_bus = device_private(sbp->sc_bus);
+	struct scsibus_softc *sc_bus = (struct scsibus_softc *)sbp->sc_bus;
 	int lun, yet;
 
 	do {
@@ -2276,7 +2273,7 @@ sbp_free_target(struct sbp_target *target)
 	}
 	STAILQ_INIT(&target->xferlist);
 	free(target->luns, M_SBP);
-	target->num_lun = 0;
+	target->num_lun = 0;;
 	target->luns = NULL;
 	target->fwdev = NULL;
 }
@@ -2499,7 +2496,7 @@ sbp_timeout(void *arg)
 		SBP_DETACH_TARGET(target);
 		if (target->luns != NULL)
 			free(target->luns, M_SBP);
-		target->num_lun = 0;
+		target->num_lun = 0;;
 		target->luns = NULL;
 		target->fwdev = NULL;
 #endif
@@ -3185,7 +3182,7 @@ sbp_scsipi_request(
 {
 	int i, s;
 	struct sbp_softc *sbp =
-	    device_private(channel->chan_adapter->adapt_dev);
+	    (struct sbp_softc *)channel->chan_adapter->adapt_dev;
 	struct scsipi_xfer *xs = arg;
 	
 	if (debug > 1)
@@ -3241,6 +3238,6 @@ sbp_minphys(struct buf *bp)
 	minphys(bp);
 }
 
-CFATTACH_DECL_NEW(sbp, sizeof(struct sbp_softc),
+CFATTACH_DECL(sbp, sizeof (struct sbp_softc),
     sbpmatch, sbpattach, sbpdetach, NULL);
 #endif

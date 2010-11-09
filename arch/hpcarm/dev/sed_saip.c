@@ -1,4 +1,4 @@
-/*	$NetBSD: sed_saip.c,v 1.23 2008/06/12 01:46:32 rafal Exp $	*/
+/*	$NetBSD: sed_saip.c,v 1.21 2006/09/24 03:53:07 jmcneill Exp $	*/
 
 /*-
  * Copyright (c) 1999-2001
@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sed_saip.c,v 1.23 2008/06/12 01:46:32 rafal Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sed_saip.c,v 1.21 2006/09/24 03:53:07 jmcneill Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -71,7 +71,7 @@ __KERNEL_RCSID(0, "$NetBSD: sed_saip.c,v 1.23 2008/06/12 01:46:32 rafal Exp $");
  */
 static int	sed1356_match(struct device *, struct cfdata *, void *);
 static void	sed1356_attach(struct device *, struct device *, void *);
-static int	sed1356_ioctl(void *, u_long, void *, int, struct lwp *);
+static int	sed1356_ioctl(void *, u_long, caddr_t, int, struct lwp *);
 static paddr_t	sed1356_mmap(void *, off_t, int);
 
 static int	sed1356_init(struct hpcfb_fbconf *);
@@ -339,7 +339,7 @@ sed1356_update_powerstate(struct sed1356_softc *sc, int updates)
 }
 
 static int
-sed1356_ioctl(void *v, u_long cmd, void *data, int flag, struct lwp *l)
+sed1356_ioctl(void *v, u_long cmd, caddr_t data, int flag, struct lwp *l)
 {
 	struct sed1356_softc *sc = (struct sed1356_softc *)v;
 	struct hpcfb_fbconf *fbconf;
@@ -706,7 +706,7 @@ sed1356_set_contrast(struct sed1356_softc *sc, int val)
 void
 sed1356_toggle_lcdlight(void)
 {
-	struct sed1356_softc *sc = device_lookup_private(&sed_cd, 0);
+	struct sed1356_softc *sc = sed_cd.cd_devs[0];
 
 	if (sc->sc_powerstate & PWRSTAT_VIDEOOFF)
 		sc->sc_powerstate &= ~PWRSTAT_VIDEOOFF;

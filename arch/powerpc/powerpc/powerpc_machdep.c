@@ -1,4 +1,4 @@
-/*	$NetBSD: powerpc_machdep.c,v 1.39 2008/10/15 06:51:18 wrstuden Exp $	*/
+/*	$NetBSD: powerpc_machdep.c,v 1.32 2006/10/21 05:54:32 mrg Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996 Wolfgang Solfrank.
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: powerpc_machdep.c,v 1.39 2008/10/15 06:51:18 wrstuden Exp $");
+__KERNEL_RCSID(0, "$NetBSD: powerpc_machdep.c,v 1.32 2006/10/21 05:54:32 mrg Exp $");
 
 #include "opt_altivec.h"
 
@@ -48,16 +48,12 @@ __KERNEL_RCSID(0, "$NetBSD: powerpc_machdep.c,v 1.39 2008/10/15 06:51:18 wrstude
 #include <sys/sysctl.h>
 #include <sys/ucontext.h>
 #include <sys/user.h>
-#include <sys/cpu.h>
 
 int cpu_timebase;
 int cpu_printfataltraps;
-#if !defined(PPC_IBM4XX)
+#if defined(PPC_OEA) || defined(PPC_OEA64_BRIDGE)
 extern int powersave;
 #endif
-
-/* exported variable to be filled in by the bootloaders */
-char *booted_kernel;
 
 /*
  * Set set up registers on exec.
@@ -120,7 +116,7 @@ sysctl_machdep_cacheinfo(SYSCTLFN_ARGS)
 	return (sysctl_lookup(SYSCTLFN_CALL(&node)));
 }
 
-#if !defined (PPC_IBM4XX)
+#if defined (PPC_OEA) || defined (PPC_OEA64_BRIDGE)
 static int
 sysctl_machdep_powersave(SYSCTLFN_ARGS)
 {
@@ -131,34 +127,6 @@ sysctl_machdep_powersave(SYSCTLFN_ARGS)
 	return (sysctl_lookup(SYSCTLFN_CALL(&node)));
 }
 #endif
-
-static int
-sysctl_machdep_booted_device(SYSCTLFN_ARGS)
-{
-	struct sysctlnode node;
-
-	if (booted_device == NULL)
-		return (EOPNOTSUPP);
-
-	node = *rnode;
-	node.sysctl_data = booted_device->dv_xname;
-	node.sysctl_size = strlen(booted_device->dv_xname) + 1;
-	return (sysctl_lookup(SYSCTLFN_CALL(&node)));
-}
-
-static int
-sysctl_machdep_booted_kernel(SYSCTLFN_ARGS)
-{
-	struct sysctlnode node;
-
-	if (booted_kernel == NULL || booted_kernel[0] == '\0')
-		return (EOPNOTSUPP);
-
-	node = *rnode;
-	node.sysctl_data = booted_kernel;
-	node.sysctl_size = strlen(booted_kernel) + 1;
-	return (sysctl_lookup(SYSCTLFN_CALL(&node)));
-}
 
 SYSCTL_SETUP(sysctl_machdep_setup, "sysctl machdep subtree setup")
 {
@@ -173,7 +141,7 @@ SYSCTL_SETUP(sysctl_machdep_setup, "sysctl machdep subtree setup")
 	sysctl_createv(clog, 0, NULL, NULL,
 		       CTLFLAG_PERMANENT|CTLFLAG_IMMEDIATE,
 		       CTLTYPE_INT, "cachelinesize", NULL,
-		       NULL, curcpu()->ci_ci.dcache_line_size, NULL, 0,
+		       NULL, CACHELINESIZE, NULL, 0,
 		       CTL_MACHDEP, CPU_CACHELINE, CTL_EOL);
 	sysctl_createv(clog, 0, NULL, NULL,
 		       CTLFLAG_PERMANENT,
@@ -191,7 +159,7 @@ SYSCTL_SETUP(sysctl_machdep_setup, "sysctl machdep subtree setup")
 		       CTLTYPE_STRUCT, "cacheinfo", NULL,
 		       sysctl_machdep_cacheinfo, 0, NULL, 0,
 		       CTL_MACHDEP, CPU_CACHEINFO, CTL_EOL);
-#if !defined (PPC_IBM4XX)
+#if defined (PPC_OEA) || defined (PPC_OEA64_BRIDGE)
 	sysctl_createv(clog, 0, NULL, NULL,
 		       CTLFLAG_PERMANENT|CTLFLAG_READWRITE,
 		       CTLTYPE_INT, "powersave", NULL,
@@ -214,16 +182,6 @@ SYSCTL_SETUP(sysctl_machdep_setup, "sysctl machdep subtree setup")
 		       CTLTYPE_STRING, "model", NULL,
 		       NULL, 0, cpu_model, 0,
 		       CTL_MACHDEP, CPU_MODEL, CTL_EOL);
-	sysctl_createv(clog, 0, NULL, NULL,
-		       CTLFLAG_PERMANENT,
-		       CTLTYPE_STRING, "booted_device", NULL,
-		       sysctl_machdep_booted_device, 0, NULL, 0,
-		       CTL_MACHDEP, CPU_BOOTED_DEVICE, CTL_EOL);
-	sysctl_createv(clog, 0, NULL, NULL,
-		       CTLFLAG_PERMANENT,
-		       CTLTYPE_STRING, "booted_kernel", NULL,
-		       sysctl_machdep_booted_kernel, 0, NULL, 0,
-		       CTL_MACHDEP, CPU_BOOTED_KERNEL, CTL_EOL);
 }
 
 /*
@@ -293,11 +251,3 @@ cpu_upcall(struct lwp *l, int type, int nevents, int ninterrupted,
 	tf->srr0 = (register_t)upcall;
 	tf->srr1 &= ~PSL_SE;
 }
-
-bool
-cpu_intr_p(void)
-{
-
-	return curcpu()->ci_idepth != 0;
-}
-

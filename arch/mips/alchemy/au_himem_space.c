@@ -1,4 +1,4 @@
-/* $NetBSD: au_himem_space.c,v 1.8 2008/04/28 20:23:27 martin Exp $ */
+/* $NetBSD: au_himem_space.c,v 1.5 2006/03/28 03:43:58 gdamore Exp $ */
 
 /*-
  * Copyright (c) 2006 Itronix Inc.
@@ -46,6 +46,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -61,7 +68,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: au_himem_space.c,v 1.8 2008/04/28 20:23:27 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: au_himem_space.c,v 1.5 2006/03/28 03:43:58 gdamore Exp $");
 
 /*
  * This provides mappings for the upper I/O regions used on some
@@ -91,7 +98,7 @@ typedef struct au_himem_cookie {
 	paddr_t		c_physoff;
 	int		c_flags;
 	int		c_swswap;
-	bool		c_hwswap;
+	boolean_t	c_hwswap;
 	struct extent	*c_extent;
 } au_himem_cookie_t;
 
@@ -281,7 +288,7 @@ au_himem_unmap(void *cookie, bus_space_handle_t bsh, bus_size_t size, int acct)
 	 * extent manager.  this is the unfortunate thing about using
 	 * virtual memory instead of just a 1:1 mapping scheme.
 	 */
-	if (pmap_extract(pmap_kernel(), va, &pa) == false)
+	if (pmap_extract(pmap_kernel(), va, &pa) == FALSE)
 		panic("au_himem_unmap: virtual address invalid!");
 
 	/* now remove it from the pmap */

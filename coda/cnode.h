@@ -1,4 +1,4 @@
-/*	$NetBSD: cnode.h,v 1.17 2008/03/21 17:59:57 plunky Exp $	*/
+/*	$NetBSD: cnode.h,v 1.15 2005/12/11 12:19:50 christos Exp $	*/
 
 /*
  *
@@ -53,6 +53,11 @@
 
 MALLOC_DECLARE(M_CODA);
 #endif
+
+/*
+ * tmp below since we need struct queue
+ */
+#include <coda/coda_kernel.h>
 
 /*
  * Cnode lookup stuff.
@@ -124,19 +129,16 @@ struct cnode {
 #define VALID_SYMLINK(cp)	((cp->c_flags) & C_SYMLINK)
 #define IS_UNMOUNTING(cp)	((cp)->c_flags & C_UNMOUNTING)
 
-struct vmsg;
-
 struct vcomm {
-	u_long			vc_seq;
-	int			vc_open;
-	struct selinfo		vc_selproc;
-	TAILQ_HEAD(,vmsg)	vc_requests;
-	TAILQ_HEAD(,vmsg)	vc_replies;
+	u_long		vc_seq;
+	struct selinfo	vc_selproc;
+	struct queue	vc_requests;
+	struct queue	vc_replys;
 };
 
-#define VC_OPEN(vcp)		((vcp)->vc_open == 1)
-#define MARK_VC_CLOSED(vcp)	((vcp)->vc_open = 0)
-#define MARK_VC_OPEN(vcp)	((vcp)->vc_open = 1)
+#define	VC_OPEN(vcp)	    ((vcp)->vc_requests.forw != NULL)
+#define MARK_VC_CLOSED(vcp) (vcp)->vc_requests.forw = NULL;
+#define MARK_VC_OPEN(vcp)    /* MT */
 
 struct coda_clstat {
 	int	ncalls;			/* client requests */
@@ -187,7 +189,7 @@ enum dc_status {
 };
 
 /* cfs_psdev.h */
-extern int coda_call(struct coda_mntinfo *mntinfo, int inSize, int *outSize, void *buffer);
+extern int coda_call(struct coda_mntinfo *mntinfo, int inSize, int *outSize, caddr_t buffer);
 extern int coda_kernel_version;
 
 /* cfs_subr.h */

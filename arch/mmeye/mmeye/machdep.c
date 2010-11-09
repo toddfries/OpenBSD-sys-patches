@@ -1,4 +1,4 @@
-/*	$NetBSD: machdep.c,v 1.47 2009/02/13 22:41:02 apb Exp $	*/
+/*	$NetBSD: machdep.c,v 1.38 2005/12/24 20:07:19 perry Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997, 1998 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -65,11 +72,10 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.47 2009/02/13 22:41:02 apb Exp $");
+__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.38 2005/12/24 20:07:19 perry Exp $");
 
 #include "opt_ddb.h"
 #include "opt_memsize.h"
-#include "opt_modular.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -85,7 +91,6 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.47 2009/02/13 22:41:02 apb Exp $");
 #include <machine/db_machdep.h>
 #include <ddb/db_extern.h>
 #endif
-#include <sys/device.h>
 
 #include <sh3/bscreg.h>
 #include <sh3/cpgreg.h>
@@ -206,8 +211,6 @@ cpu_reboot(howto, bootstr)
 haltsys:
 	doshutdownhooks();
 
-	pmf_system_shutdown(boothowto);
-
 	if (howto & RB_HALT) {
 		printf("\n");
 		printf("The operating system has halted.\n");
@@ -241,9 +244,9 @@ initSH3(void *pc)	/* XXX return address */
 	consinit();
 
 	kernend = atop(round_page(SH3_P1SEG_TO_PHYS(end)));
-#if NKSYMS || defined(DDB) || defined(MODULAR)
+#if NKSYMS || defined(DDB) || defined(LKM)
 	/* XXX Currently symbol table size is not passed to the kernel. */
-	kernend += atop(0x40000);			/* XXX */
+	kernend += 0x40000;					/* XXX */
 #endif
 
 	/* Load memory to UVM */
@@ -259,8 +262,8 @@ initSH3(void *pc)	/* XXX return address */
 	/* Initialize pmap and start to address translation */
 	pmap_bootstrap();
 
-#if NKSYMS || defined(DDB) || defined(MODULAR)
-	ksyms_addsyms_elf(1, end, end + 0x40000);			/* XXX */
+#if NKSYMS || defined(DDB) || defined(LKM)
+	ksyms_init(1, end, end + 0x40000);			/* XXX */
 #endif
 	/*
 	 * XXX We can't return here, because we change stack pointer.

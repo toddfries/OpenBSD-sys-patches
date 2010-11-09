@@ -1,4 +1,4 @@
-/* $NetBSD: 3c90xb.c,v 1.14 2008/12/14 18:46:33 christos Exp $ */
+/* $NetBSD: 3c90xb.c,v 1.12 2006/05/11 00:48:05 mrg Exp $ */
 
 /*
  * Copyright (c) 1999
@@ -65,7 +65,7 @@ static struct ex_dpd sndbuf;
 #define PCIDEVNO 4
 static pcihdl_t mytag = PCI_MODE1_ENABLE | (PCIBUSNO << 16) | (PCIDEVNO << 11);
 
-extern void *mapmem(int, int);
+extern caddr_t mapmem __P((int, int));
 void *dmamem; /* virtual */
 #define DMABASE 0x3ffd800
 #define DMASIZE 10240
@@ -118,19 +118,16 @@ static struct btinfo_netif bi_netif;
 #endif
 
 #define ex_waitcmd() \
-	do { \
-		while (CSR_READ_2(ELINK_STATUS) & COMMAND_IN_PROGRESS) \
-			continue; \
-	} while (0)
+	while (CSR_READ_2(ELINK_STATUS) & COMMAND_IN_PROGRESS);
 
-void ex_reset(void);
-uint16_t ex_read_eeprom(int);
-static int ex_eeprom_busy(void);
-void ex_init(void);
-void ex_set_media(void);
+void ex_reset __P((void));
+uint16_t ex_read_eeprom __P((int));
+static int ex_eeprom_busy __P((void));
+void ex_init __P((void));
+void ex_set_media __P((void));
 
 void
-ex_reset(void)
+ex_reset()
 {
 	CSR_WRITE_2(ELINK_COMMAND, GLOBAL_RESET);
 	delay(100000);
@@ -142,7 +139,8 @@ ex_reset(void)
  * XXX what to do if EEPROM doesn't unbusy?
  */
 uint16_t
-ex_read_eeprom(int offset)
+ex_read_eeprom(offset)
+	int offset;
 {
 	uint16_t data = 0;
 
@@ -158,7 +156,7 @@ out:
 }
 
 static int
-ex_eeprom_busy(void)
+ex_eeprom_busy()
 {
 	int i = 100;
 
@@ -168,14 +166,14 @@ ex_eeprom_busy(void)
 		delay(100);
 	}
 	printf("\nex: eeprom stays busy.\n");
-	return 1;
+	return (1);
 }
 
 /*
  * Bring device up.
  */
 void
-ex_init(void)
+ex_init()
 {
 	int i;
 
@@ -218,7 +216,7 @@ ex_init(void)
 }
 
 void
-ex_set_media(void)
+ex_set_media()
 {
 	int config0, config1;
 
@@ -265,7 +263,7 @@ setcfg:
 }
 
 static void
-ex_probemedia(void)
+ex_probemedia()
 {
 	int i, j;
 	struct mtabentry *m;
@@ -277,9 +275,9 @@ ex_probemedia(void)
 		>> CONFIG_MEDIAMASK_SHIFT;
 	GO_WINDOW(0);
 
-	for (ether_medium = 0, m = mediatab;
-	     ether_medium < sizeof(mediatab) / sizeof(mediatab[0]);
-	     ether_medium++, m++) {
+	for(ether_medium = 0, m = mediatab;
+	    ether_medium < sizeof(mediatab) / sizeof(mediatab[0]);
+	    ether_medium++, m++) {
 		if (j == m->address_cfg) {
 			if (!(i & m->config_bit)) {
 				printf("%s not present\n", m->name);
@@ -295,7 +293,8 @@ bad:
 }
 
 int
-EtherInit(unsigned char *myadr)
+EtherInit(myadr)
+	unsigned char *myadr;
 {
 	uint32_t pcicsr;
 	uint16_t val;
@@ -306,7 +305,7 @@ EtherInit(unsigned char *myadr)
 
 	if (pcicheck()) {
 		printf("pcicheck failed\n");
-		return 0;
+		return (0);
 	}
 #ifndef _STANDALONE
 	pcicfgread(&mytag, 0, &id);
@@ -321,7 +320,7 @@ EtherInit(unsigned char *myadr)
 #endif
 	}
 	printf("no ex\n");
-	return 0;
+	return (0);
 
 found:
 	pcicfgread(&mytag, 0x10, &iobase);
@@ -330,14 +329,14 @@ found:
 #ifndef _STANDALONE
 	dmamem = mapmem(DMABASE, DMASIZE);
 	if (!dmamem)
-		return 0;
+		return (0);
 #endif
 
 	/* enable bus mastering in PCI command register */
 	if (pcicfgread(&mytag, 0x04, (int *)&pcicsr)
 	    || pcicfgwrite(&mytag, 0x04, pcicsr | 4)) {
 		printf("cannot enable DMA\n");
-		return 0;
+		return(0);
 	}
 
 	ex_reset();
@@ -347,7 +346,7 @@ found:
 	else {
 		ex_probemedia();
 		if (ether_medium < 0)
-			return 0;
+			return (0);
 	}
 
 	val = ex_read_eeprom(EEPROM_OEM_ADDR0);
@@ -377,11 +376,11 @@ found:
 	BI_ADD(&bi_netif, BTINFO_NETIF, sizeof(bi_netif));
 #endif
 
-	return 1;
+	return (1);
 }
 
 void
-EtherStop(void)
+EtherStop()
 {
 	/*
 	 * Issue software reset
@@ -393,7 +392,9 @@ EtherStop(void)
 }
 
 int
-EtherSend(char *pkt, int len)
+EtherSend(pkt, len)
+	char *pkt;
+	int len;
 {
 	volatile struct ex_dpd *dpd;
 	int i;
@@ -417,16 +418,19 @@ EtherSend(char *pkt, int len)
 	while (!(dpd->dpd_fsh & 0x00010000)) {
 		if (--i < 0) {
 			printf("3c90xb: send timeout\n");
-			return -1;
+			return (-1);
 		}
 		delay(1);
 	}
 
-	return len;
+	return (len);
 }
 
+
 int
-EtherReceive(char *pkt, int maxlen)
+EtherReceive(pkt, maxlen)
+	char *pkt;
+	int maxlen;
 {
 	volatile struct ex_upd *upd;
 	int len;
@@ -434,7 +438,7 @@ EtherReceive(char *pkt, int maxlen)
 	upd = RECVBUF_VIRT;
 
 	if (!(upd->upd_pktstatus & ~EX_UPD_PKTLENMASK))
-		return 0;
+		return (0);
 
 	len = upd->upd_pktstatus & EX_UPD_PKTLENMASK;
 	if (len > maxlen)
@@ -445,5 +449,6 @@ EtherReceive(char *pkt, int maxlen)
 	upd->upd_pktstatus = 1500;
 	CSR_WRITE_2(ELINK_COMMAND, ELINK_UPUNSTALL);
 
-	return len;
+	return (len);
 }
+

@@ -1,4 +1,4 @@
-/*	$NetBSD: ip_scan.c,v 1.13 2008/05/20 07:08:08 darrenr Exp $	*/
+/*	$NetBSD: ip_scan.c,v 1.7 2006/12/27 18:10:03 alc Exp $	*/
 
 /*
  * Copyright (C) 1995-2001 by Darren Reed.
@@ -59,13 +59,8 @@ struct file;
 /* END OF INCLUDES */
 
 #if !defined(lint)
-#if defined(__NetBSD__)
-#include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ip_scan.c,v 1.13 2008/05/20 07:08:08 darrenr Exp $");
-#else
 static const char sccsid[] = "@(#)ip_state.c	1.8 6/5/96 (C) 1993-2000 Darren Reed";
-static const char rcsid[] = "@(#)Id: ip_scan.c,v 2.40.2.10 2007/06/02 21:22:28 darrenr Exp";
-#endif
+static const char rcsid[] = "@(#)Id: ip_scan.c,v 2.40.2.6 2006/03/26 23:06:49 darrenr Exp";
 #endif
 
 #ifdef	IPFILTER_SCAN	/* endif at bottom of file */
@@ -84,8 +79,8 @@ ipfrwlock_t	ipsc_rwlock;
 # endif
 
 
-int ipsc_add __P((void *));
-int ipsc_delete __P((void *));
+int ipsc_add __P((caddr_t));
+int ipsc_delete __P((caddr_t));
 struct ipscan *ipsc_lookup __P((char *));
 int ipsc_matchstr __P((sinfo_t *, char *, int));
 int ipsc_matchisc __P((ipscan_t *, ipstate_t *, int, int, int *));
@@ -112,7 +107,7 @@ void fr_scanunload()
 
 
 int ipsc_add(data)
-void *data;
+caddr_t data;
 {
 	ipscan_t *i, *isc;
 	int err;
@@ -159,7 +154,7 @@ void *data;
 
 
 int ipsc_delete(data)
-void *data;
+caddr_t data;
 {
 	ipscan_t isc, *i;
 	int err;
@@ -239,17 +234,20 @@ struct ipstate *is;
 	fr = is->is_rule;
 	if (fr) {
 		i = fr->fr_isc;
-		if ((i != NULL) && (i != (ipscan_t *)-1)) {
+		if (!i || (i != (ipscan_t *)-1)) {
 			is->is_isc = i;
-			ATOMIC_INC32(i->ipsc_sref);
-			if (i->ipsc_clen)
-				is->is_flags |= IS_SC_CLIENT;
-			else
-				is->is_flags |= IS_SC_MATCHC;
-			if (i->ipsc_slen)
-				is->is_flags |= IS_SC_SERVER;
-			else
-				is->is_flags |= IS_SC_MATCHS;
+			if (i) {
+				ATOMIC_INC32(i->ipsc_sref);
+				if (i->ipsc_clen)
+					is->is_flags |= IS_SC_CLIENT;
+				else
+					is->is_flags |= IS_SC_MATCHC;
+				if (i->ipsc_slen)
+					is->is_flags |= IS_SC_SERVER;
+				else
+					is->is_flags |= IS_SC_MATCHS;
+			} else
+				is->is_flags |= (IS_SC_CLIENT|IS_SC_SERVER);
 		}
 	}
 	RWLOCK_EXIT(&ipsc_rwlock);
@@ -551,7 +549,7 @@ ipstate_t *is;
 	i = (0xffff & j) << off;
 #ifdef _KERNEL
 	COPYDATA(*(mb_t **)fin->fin_mp, fin->fin_plen - fin->fin_dlen + thoff,
-		 dlen, (void *)is->is_sbuf[rv] + off);
+		 dlen, (caddr_t)is->is_sbuf[rv] + off);
 #endif
 	is->is_smsk[rv] |= i;
 	for (j = 0, i = is->is_smsk[rv]; i & 1; i >>= 1)
@@ -574,11 +572,10 @@ ipstate_t *is;
 }
 
 
-int fr_scan_ioctl(data, cmd, mode, uid, ctx)
+int fr_scan_ioctl(data, cmd, mode)
 caddr_t data;
 ioctlcmd_t cmd;
-int mode, uid;
-void *ctx;
+int mode;
 {
 	ipscanstat_t ipscs;
 	int err = 0;
@@ -594,9 +591,7 @@ void *ctx;
 	case SIOCGSCST :
 		bcopy((char *)&ipsc_stat, (char *)&ipscs, sizeof(ipscs));
 		ipscs.iscs_list = ipsc_list;
-		err = BCOPYOUT(&ipscs, data, sizeof(ipscs));
-		if (err != 0)
-			err = EFAULT;
+		BCOPYOUT(&ipscs, data, sizeof(ipscs));
 		break;
 	default :
 		err = EINVAL;

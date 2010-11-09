@@ -1,4 +1,4 @@
-/*	$NetBSD: linux_ptrace.c,v 1.23 2008/12/17 20:51:33 cegger Exp $	*/
+/*	$NetBSD: linux_ptrace.c,v 1.15 2006/09/01 21:20:46 matt Exp $	*/
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -30,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: linux_ptrace.c,v 1.23 2008/12/17 20:51:33 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: linux_ptrace.c,v 1.15 2006/09/01 21:20:46 matt Exp $");
 
 #include <sys/param.h>
 #include <sys/malloc.h>
@@ -38,6 +45,7 @@ __KERNEL_RCSID(0, "$NetBSD: linux_ptrace.c,v 1.23 2008/12/17 20:51:33 cegger Exp
 #include <sys/proc.h>
 #include <sys/ptrace.h>
 #include <sys/systm.h>
+#include <sys/sa.h>
 #include <sys/syscall.h>
 #include <sys/syscallargs.h>
 #include <uvm/uvm_extern.h>
@@ -117,17 +125,18 @@ struct linux_user {
 #define LUSR_OFF(member)	offsetof(struct linux_user, member)
 #define ISSET(t, f)		((t) & (f))
 
-int linux_ptrace_disabled = 1;	/* bitrotted */
-
 int
-linux_sys_ptrace_arch(struct lwp *l, const struct linux_sys_ptrace_args *uap, register_t *retval)
+linux_sys_ptrace_arch(l, v, retval)
+	struct lwp *l;
+	void *v;
+	register_t *retval;
 {
-	/* {
+	struct linux_sys_ptrace_args /* {
 		syscallarg(int) request;
 		syscallarg(int) pid;
 		syscallarg(int) addr;
 		syscallarg(int) data;
-	} */
+	} */ *uap = v;
 	struct proc *p = l->l_proc;
 	int request, error;
 	struct proc *t;				/* target process */
@@ -137,9 +146,6 @@ linux_sys_ptrace_arch(struct lwp *l, const struct linux_sys_ptrace_args *uap, re
 	struct linux_reg *linux_regs = NULL;
 	struct linux_fpctx *linux_fpregs = NULL;
 	int addr;
-
-	if (linux_ptrace_disabled)
-		return ENOSYS;
 
 	request = SCARG(uap, request);
 
@@ -151,8 +157,6 @@ linux_sys_ptrace_arch(struct lwp *l, const struct linux_sys_ptrace_args *uap, re
 	    (request != LINUX_PTRACE_SETFPREGS))
 		return EIO;
 
-	/* XXXAD locking */
-
 	/* Find the process we're supposed to be operating on. */
 	if ((t = pfind(SCARG(uap, pid))) == NULL)
 		return ESRCH;
@@ -161,14 +165,14 @@ linux_sys_ptrace_arch(struct lwp *l, const struct linux_sys_ptrace_args *uap, re
 	 * You can't do what you want to the process if:
 	 *	(1) It's not being traced at all,
 	 */
-	if (!ISSET(t->p_slflag, PSL_TRACED))
+	if (!ISSET(t->p_flag, P_TRACED))
 		return EPERM;
 
 	/*
 	 *	(2) it's being traced by procfs (which has
 	 *	    different signal delivery semantics),
 	 */
-	if (ISSET(t->p_slflag, PSL_FSTRACE))
+	if (ISSET(t->p_flag, P_FSTRACE))
 		return EBUSY;
 
 	/*
@@ -180,7 +184,7 @@ linux_sys_ptrace_arch(struct lwp *l, const struct linux_sys_ptrace_args *uap, re
 	/*
 	 *	(4) it's not currently stopped.
 	 */
-	if (t->p_stat != SSTOP || !t->p_waited /* XXXSMP */)
+	if (t->p_stat != SSTOP || !ISSET(t->p_flag, P_WAITED))
 		return EBUSY;
 
 	/* XXX NJWLWP
@@ -198,8 +202,9 @@ linux_sys_ptrace_arch(struct lwp *l, const struct linux_sys_ptrace_args *uap, re
 
 	switch (request) {
 	case  LINUX_PTRACE_GETREGS:
-		regs = malloc(sizeof(struct reg), M_TEMP, M_WAITOK);
-		linux_regs = malloc(sizeof(struct linux_reg), M_TEMP, M_WAITOK);
+		MALLOC(regs, struct reg*, sizeof(struct reg), M_TEMP, M_WAITOK);
+		MALLOC(linux_regs, struct linux_reg*, sizeof(struct linux_reg),
+			M_TEMP, M_WAITOK);
 
 		error = process_read_regs(lt, regs);
 		if (error != 0)
@@ -221,16 +226,16 @@ linux_sys_ptrace_arch(struct lwp *l, const struct linux_sys_ptrace_args *uap, re
 		linux_regs->esp = regs->r_esp;
 		linux_regs->xss = regs->r_ss;
 
-		error = copyout(linux_regs, (void *)SCARG(uap, data),
+		error = copyout(linux_regs, (caddr_t)SCARG(uap, data),
 		    sizeof(struct linux_reg));
 		goto out;
 
 	case  LINUX_PTRACE_SETREGS:
-		regs = malloc(sizeof(struct reg), M_TEMP, M_WAITOK);
-		linux_regs = malloc(sizeof(struct linux_reg),
+		MALLOC(regs, struct reg*, sizeof(struct reg), M_TEMP, M_WAITOK);
+		MALLOC(linux_regs, struct linux_reg *, sizeof(struct linux_reg),
 			M_TEMP, M_WAITOK);
 
-		error = copyin((void *)SCARG(uap, data), linux_regs,
+		error = copyin((caddr_t)SCARG(uap, data), linux_regs,
 		    sizeof(struct linux_reg));
 		if (error != 0)
 			goto out;
@@ -254,10 +259,10 @@ linux_sys_ptrace_arch(struct lwp *l, const struct linux_sys_ptrace_args *uap, re
 		goto out;
 
 	case  LINUX_PTRACE_GETFPREGS:
-		fpregs = malloc(sizeof(struct fpreg),
+		MALLOC(fpregs, struct fpreg *, sizeof(struct fpreg),
 			M_TEMP, M_WAITOK);
-		linux_fpregs = malloc(sizeof(struct linux_fpctx),
-			M_TEMP, M_WAITOK);
+		MALLOC(linux_fpregs, struct linux_fpctx *,
+			sizeof(struct linux_fpctx), M_TEMP, M_WAITOK);
 
 		error = process_read_fpregs(lt, fpregs);
 		if (error != 0)
@@ -269,15 +274,16 @@ linux_sys_ptrace_arch(struct lwp *l, const struct linux_sys_ptrace_args *uap, re
 
 		memcpy(linux_fpregs, fpregs,
 			min(sizeof(struct linux_fpctx), sizeof(struct fpreg)));
-		error = copyout(linux_fpregs, (void *)SCARG(uap, data),
+		error = copyout(linux_fpregs, (caddr_t)SCARG(uap, data),
 		    sizeof(struct linux_fpctx));
 		goto out;
 
 	case  LINUX_PTRACE_SETFPREGS:
-		fpregs = malloc(sizeof(struct fpreg), M_TEMP, M_WAITOK);
-		linux_fpregs = malloc(sizeof(struct linux_fpctx),
+		MALLOC(fpregs, struct fpreg *, sizeof(struct fpreg),
 			M_TEMP, M_WAITOK);
-		error = copyin((void *)SCARG(uap, data), linux_fpregs,
+		MALLOC(linux_fpregs, struct linux_fpctx *,
+			sizeof(struct linux_fpctx), M_TEMP, M_WAITOK);
+		error = copyin((caddr_t)SCARG(uap, data), linux_fpregs,
 		    sizeof(struct linux_fpctx));
 		if (error != 0)
 			goto out;
@@ -292,7 +298,7 @@ linux_sys_ptrace_arch(struct lwp *l, const struct linux_sys_ptrace_args *uap, re
 	case  LINUX_PTRACE_PEEKUSR:
 		addr = SCARG(uap, addr);
 
-		uvm_lwp_hold(lt);	/* need full process info */
+		PHOLD(lt);	/* need full process info */
 		error = 0;
 		if (addr < LUSR_OFF(lusr_startgdb)) {
 			/* XXX should provide appropriate register */
@@ -337,7 +343,7 @@ linux_sys_ptrace_arch(struct lwp *l, const struct linux_sys_ptrace_args *uap, re
 			error = 1;
 		}
 
-		uvm_lwp_rele(lt);
+		PRELE(lt);
 
 		if (!error)
 			return 0;
@@ -354,9 +360,9 @@ linux_sys_ptrace_arch(struct lwp *l, const struct linux_sys_ptrace_args *uap, re
 			if (t->p_emul != &emul_linux)
 				return EINVAL;
 
-			uvm_lwp_hold(lt);
+			PHOLD(lt);
 			((struct linux_emuldata *)t->p_emuldata)->debugreg[off] = data;
-			uvm_lwp_rele(lt);
+			PRELE(lt);
 			return (0);
 		}
 
@@ -370,12 +376,12 @@ linux_sys_ptrace_arch(struct lwp *l, const struct linux_sys_ptrace_args *uap, re
 
     out:
 	if (regs)
-		free(regs, M_TEMP);
+		FREE(regs, M_TEMP);
 	if (fpregs)
-		free(fpregs, M_TEMP);
+		FREE(fpregs, M_TEMP);
 	if (linux_regs)
-		free(linux_regs, M_TEMP);
+		FREE(linux_regs, M_TEMP);
 	if (linux_fpregs)
-		free(linux_fpregs, M_TEMP);
+		FREE(linux_fpregs, M_TEMP);
 	return (error);
 }

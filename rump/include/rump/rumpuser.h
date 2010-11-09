@@ -1,4 +1,4 @@
-/*	$NetBSD: rumpuser.h,v 1.19 2009/02/28 15:49:12 pooka Exp $	*/
+/*	$NetBSD: rumpuser.h,v 1.50 2010/11/04 20:57:00 pooka Exp $	*/
 
 /*
  * Copyright (c) 2007 Antti Kantee.  All Rights Reserved.
@@ -30,32 +30,42 @@
 #ifndef _RUMP_RUMPUSER_H_
 #define _RUMP_RUMPUSER_H_
 
+#ifdef _KERNEL
 #include <sys/stdint.h>
+#else
+#include <stdint.h>
+#endif
+
+#define RUMPUSER_VERSION 3
+int rumpuser_getversion(void);
 
 struct msghdr;
 struct pollfd;
 struct sockaddr;
 
-typedef void (*kernel_lockfn)(int);
-typedef void (*kernel_unlockfn)(int, int *);
+typedef void (*kernel_lockfn)(int, void *);
+typedef void (*kernel_unlockfn)(int, int *, void *);
 
 int rumpuser_getfileinfo(const char *, uint64_t *, int *, int *);
+#define RUMPUSER_FT_OTHER 0
 #define RUMPUSER_FT_DIR 1
 #define RUMPUSER_FT_REG 2
 #define RUMPUSER_FT_BLK 3
-#define RUMPUSER_FT_OTHER 4
+#define RUMPUSER_FT_CHR 4
 int rumpuser_nanosleep(uint64_t *, uint64_t *, int *);
 
-#define rumpuser_malloc(a,b) rumpuser__malloc(a,b,__func__,__LINE__);
-#define rumpuser_realloc(a,b,c) rumpuser__realloc(a,b,c,__func__,__LINE__);
-
-void *rumpuser__malloc(size_t, int, const char *, int);
-void *rumpuser__realloc(void *, size_t, int, const char *, int);
+void *rumpuser_malloc(size_t, int);
+void *rumpuser_realloc(void *, size_t);
 void rumpuser_free(void *);
 
-void *rumpuser_anonmmap(size_t, int, int, int *);
-void *rumpuser_filemmap(int fd, off_t, size_t, int, int, int *);
+void *rumpuser_anonmmap(void *, size_t, int, int, int *);
+#define RUMPUSER_FILEMMAP_READ		0x01
+#define RUMPUSER_FILEMMAP_WRITE		0x02
+#define RUMPUSER_FILEMMAP_TRUNCATE	0x04
+#define RUMPUSER_FILEMMAP_SHARED	0x08
+void *rumpuser_filemmap(int fd, off_t, size_t, int, int *);
 void  rumpuser_unmap(void *, size_t);
+int   rumpuser_memsync(void *, size_t, int *);
 
 int rumpuser_open(const char *, int, int *);
 int rumpuser_ioctl(int, u_long, void *, int *);
@@ -83,31 +93,39 @@ int rumpuser_getenv(const char *, char *, size_t, int *);
 
 int rumpuser_gethostname(char *, size_t, int *);
 
-char *rumpuser_realpath(const char *, char *, int *);
-
 int rumpuser_poll(struct pollfd *, int, int, int *);
 
 int rumpuser_putchar(int, int *);
 
-void rumpuser_panic(void);
+#define RUMPUSER_PID_SELF ((int64_t)-1)
+int rumpuser_kill(int64_t, int, int *);
 
+#define RUMPUSER_PANIC (-1)
+void rumpuser_exit(int);
 void rumpuser_seterrno(int);
 
 int rumpuser_writewatchfile_setup(int, int, intptr_t, int *);
 int rumpuser_writewatchfile_wait(int, intptr_t *, int *);
 
+int rumpuser_dprintf(const char *, ...);
+
+int rumpuser_getnhostcpu(void);
+
 /* rumpuser_pth */
 void rumpuser_thrinit(kernel_lockfn, kernel_unlockfn, int);
-int  rumpuser_bioinit(rump_biodone_fn);
+void rumpuser_biothread(void *);
 
-int  rumpuser_thread_create(void *(*f)(void *), void *, const char *);
+int  rumpuser_thread_create(void *(*f)(void *), void *, const char *, int,
+			    void **);
 void rumpuser_thread_exit(void);
+int  rumpuser_thread_join(void *);
 
 struct rumpuser_mtx;
 
 void rumpuser_mutex_init(struct rumpuser_mtx **);
 void rumpuser_mutex_recursive_init(struct rumpuser_mtx **);
 void rumpuser_mutex_enter(struct rumpuser_mtx *);
+void rumpuser_mutex_enter_nowrap(struct rumpuser_mtx *);
 int  rumpuser_mutex_tryenter(struct rumpuser_mtx *);
 void rumpuser_mutex_exit(struct rumpuser_mtx *);
 void rumpuser_mutex_destroy(struct rumpuser_mtx *);
@@ -129,8 +147,9 @@ struct rumpuser_cv;
 void rumpuser_cv_init(struct rumpuser_cv **);
 void rumpuser_cv_destroy(struct rumpuser_cv *);
 void rumpuser_cv_wait(struct rumpuser_cv *, struct rumpuser_mtx *);
+void rumpuser_cv_wait_nowrap(struct rumpuser_cv *, struct rumpuser_mtx *);
 int  rumpuser_cv_timedwait(struct rumpuser_cv *, struct rumpuser_mtx *,
-			   struct timespec *);
+			   int64_t, int64_t);
 void rumpuser_cv_signal(struct rumpuser_cv *);
 void rumpuser_cv_broadcast(struct rumpuser_cv *);
 int  rumpuser_cv_has_waiters(struct rumpuser_cv *);
@@ -149,8 +168,11 @@ struct rumpuser_aio {
 	void	*rua_bp;
 	int	rua_op;
 };
+#define RUA_OP_READ	0x01
+#define RUA_OP_WRITE	0x02
+#define RUA_OP_SYNC	0x04
 
-#define N_AIOS 128
+#define N_AIOS 1024
 extern struct rumpuser_mtx rumpuser_aio_mtx;
 extern struct rumpuser_cv rumpuser_aio_cv;
 extern struct rumpuser_aio rumpuser_aios[N_AIOS];
@@ -168,5 +190,34 @@ int  rumpuser_net_listen(int, int, int *);
 enum rumpuser_getnametype { RUMPUSER_SOCKNAME, RUMPUSER_PEERNAME };
 int  rumpuser_net_getname(int, struct sockaddr *, int *,
 			      enum rumpuser_getnametype, int *);
+int  rumpuser_net_setsockopt(int, int, int, const void *, int, int *);
+
+/* rumpuser dynloader */
+
+struct modinfo;
+struct rump_component;
+typedef void (*rump_modinit_fn)(const struct modinfo *const *, size_t);
+typedef int (*rump_symload_fn)(void *, uint64_t, char *, uint64_t);
+typedef void (*rump_component_init_fn)(struct rump_component *, int);
+void rumpuser_dl_bootstrap(rump_modinit_fn, rump_symload_fn);
+void rumpuser_dl_component_init(int, rump_component_init_fn);
+
+/* syscall proxy routines */
+
+struct rumpuser_sp_ops {
+	void (*spop_schedule)(void);
+	void (*spop_unschedule)(void);
+
+	void (*spop_lwproc_switch)(struct lwp *);
+	void (*spop_lwproc_release)(void);
+	int (*spop_lwproc_newproc)(void);
+	struct lwp * (*spop_lwproc_curlwp)(void);
+	int (*spop_syscall)(int, void *, register_t *);
+};
+
+int	rumpuser_sp_init(const struct rumpuser_sp_ops *, const char *);
+int	rumpuser_sp_copyin(const void *, void *, size_t);
+int	rumpuser_sp_copyout(const void *, void *, size_t);
+int	rumpuser_sp_anonmmap(size_t, void **);
 
 #endif /* _RUMP_RUMPUSER_H_ */

@@ -1,4 +1,4 @@
-/* $NetBSD: dbau1550.c,v 1.8 2007/01/24 13:08:14 hubertf Exp $ */
+/* $NetBSD: dbau1550.c,v 1.7 2006/10/02 08:13:53 gdamore Exp $ */
 
 /*-
  * Copyright (c) 2006 Itronix Inc.
@@ -32,10 +32,11 @@
  */ 
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: dbau1550.c,v 1.8 2007/01/24 13:08:14 hubertf Exp $");
+__KERNEL_RCSID(0, "$NetBSD: dbau1550.c,v 1.7 2006/10/02 08:13:53 gdamore Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
+#include <sys/param.h>
 #include <sys/time.h>
 #include <sys/proc.h>
 #include <machine/bus.h>

@@ -1,4 +1,4 @@
-/*	$NetBSD: pecoff_emul.c,v 1.22 2008/11/19 18:36:05 ad Exp $	*/
+/*	$NetBSD: pecoff_emul.c,v 1.16 2006/06/20 14:11:56 oki Exp $	*/
 
 /*
  * Copyright (c) 2000 Masaru OKI
@@ -37,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: pecoff_emul.c,v 1.22 2008/11/19 18:36:05 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pecoff_emul.c,v 1.16 2006/06/20 14:11:56 oki Exp $");
 
 /*#define DEBUG_PECOFF*/
 
@@ -47,6 +47,8 @@ __KERNEL_RCSID(0, "$NetBSD: pecoff_emul.c,v 1.22 2008/11/19 18:36:05 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/proc.h>
+#include <sys/sa.h>
+#include <sys/savar.h>
 #include <sys/malloc.h>
 #include <sys/namei.h>
 #include <sys/vnode.h>
@@ -64,8 +66,12 @@ __KERNEL_RCSID(0, "$NetBSD: pecoff_emul.c,v 1.22 2008/11/19 18:36:05 ad Exp $");
 
 #include <compat/pecoff/pecoff_exec.h>
 #include <compat/pecoff/pecoff_util.h>
+#include <compat/pecoff/pecoff_syscall.h>
 
 extern struct sysent pecoff_sysent[];
+#ifdef SYSCALL_DEBUG
+extern const char * const pecoff_syscallnames[];
+#endif
 
 #ifdef COMPAT_16
 extern char sigcode[], esigcode[];
@@ -76,22 +82,29 @@ struct uvm_object *emul_pecoff_object;
 void	syscall(void);
 #endif
 
-#ifdef SYSCALL_DEBUG
-extern const char * const syscallnames[];
-#endif
+const struct sa_emul saemul_pecoff = {
+	sizeof(ucontext_t),
+	sizeof(struct sa_t),
+	sizeof(struct sa_t *),
+	NULL,
+	NULL,
+	cpu_upcall,
+	(void (*)(struct lwp *, void *))getucontext,
+	sa_ucsp
+};
 
-struct emul emul_pecoff = {
+const struct emul emul_pecoff = {
 	"pecoff",
 	"/emul/pecoff",
 #ifndef __HAVE_MINIMAL_EMUL
 	EMUL_HAS_SYS___syscall,
 	0,
-	SYS_syscall,
-	SYS_NSYSENT,
+	PECOFF_SYS_syscall,
+	PECOFF_SYS_NSYSENT,
 #endif
-	sysent,
+	pecoff_sysent,
 #ifdef SYSCALL_DEBUG
-	syscallnames,
+	pecoff_syscallnames,
 #else
 	NULL,
 #endif
@@ -123,7 +136,5 @@ struct emul emul_pecoff = {
 
 	uvm_default_mapaddr,
 	NULL,
-	NULL,
-	sizeof(ucontext_t),
-	NULL,
+	&saemul_pecoff,
 };

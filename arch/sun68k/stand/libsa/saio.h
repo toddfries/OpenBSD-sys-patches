@@ -1,4 +1,4 @@
-/*	$NetBSD: saio.h,v 1.3 2009/01/12 07:00:59 tsutsui Exp $	*/
+/*	$NetBSD: saio.h,v 1.1 2001/06/14 12:57:15 fredette Exp $	*/
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -59,16 +66,14 @@
  *
  * When using this interface, only one device can be open at once.
  */
-struct saioreq;
 struct boottab {
 	char	b_dev[2];		/* The name of the device */
-	int	(*b_probe)(void);	/* probe() --> -1 or found controller 
+	int	(*b_probe)();		/* probe() --> -1 or found controller 
 					   number */
-	int	(*b_boot)(char *);	/* boot(bp) --> -1 or start address */
-	int	(*b_open)(struct saioreq *);	/* open(iobp) --> -1 or 0 */
-	int	(*b_close)(struct saioreq *);	/* close(iobp) --> -1 or 0 */
-	int	(*b_strategy)(struct saioreq *, int); /* strategy(iobp,rw)
-							 -->-1 or 0 */
+	int	(*b_boot)();		/* boot(bp) --> -1 or start address */
+	int	(*b_open)();		/* open(iobp) --> -1 or 0 */
+	int	(*b_close)();		/* close(iobp) --> -1 or 0 */
+	int	(*b_strategy)();	/* strategy(iobp,rw) --> -1 or 0 */
 	char	*b_desc;		/* Printable string describing dev */
 	struct devinfo *b_devinfo;	/* Information to configure device */
 } __attribute__((packed));
@@ -153,7 +158,7 @@ struct saif {
 	 * It appears that all V3.X PROMs support this...
 	 */
 	/* Copy our ethernet address to the passed array. */
-	int	(*sif_macaddr)(u_char *ea);
+	int	(*sif_macaddr)(char *ea);
 };
 
 #ifdef	_STANDALONE

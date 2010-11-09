@@ -1,4 +1,4 @@
-/*	$NetBSD: ubsa.c,v 1.23 2008/05/24 16:40:58 cube Exp $	*/
+/*	$NetBSD: ubsa.c,v 1.22 2008/04/28 20:23:59 martin Exp $	*/
 /*-
  * Copyright (c) 2002, Alexander Kabaev <kan.FreeBSD.org>.
  * All rights reserved.
@@ -54,7 +54,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ubsa.c,v 1.23 2008/05/24 16:40:58 cube Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ubsa.c,v 1.22 2008/04/28 20:23:59 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -137,7 +137,7 @@ Static const struct usb_devno ubsa_devs[] = {
 };
 #define ubsa_lookup(v, p) usb_lookup(ubsa_devs, v, p)
 
-int ubsa_match(device_t, cfdata_t, void *);
+int ubsa_match(device_t, struct cfdata *, void *);
 void ubsa_attach(device_t, device_t, void *);
 void ubsa_childdet(device_t, device_t);
 int ubsa_detach(device_t, int);
@@ -145,7 +145,7 @@ int ubsa_activate(device_t, enum devact);
 
 extern struct cfdriver ubsa_cd;
 
-CFATTACH_DECL2_NEW(ubsa, sizeof(struct ubsa_softc),
+CFATTACH_DECL2(ubsa, sizeof(struct ubsa_softc),
     ubsa_match, ubsa_attach, ubsa_detach, ubsa_activate, NULL, ubsa_childdet);
 
 USB_MATCH(ubsa)
@@ -164,14 +164,14 @@ USB_ATTACH(ubsa)
 	usb_interface_descriptor_t *id;
 	usb_endpoint_descriptor_t *ed;
 	char *devinfop;
+	const char *devname = USBDEVNAME(sc->sc_dev);
 	usbd_status err;
 	struct ucom_attach_args uca;
 	int i;
 
-	sc->sc_dev = self;
 	devinfop = usbd_devinfo_alloc(dev, 0);
 	USB_ATTACH_SETUP;
-	aprint_normal_dev(self, "%s\n", devinfop);
+	printf("%s: %s\n", devname, devinfop);
 	usbd_devinfo_free(devinfop);
 
         sc->sc_udev = dev;
@@ -204,9 +204,8 @@ USB_ATTACH(ubsa)
 	/* Move the device into the configured state. */
 	err = usbd_set_config_index(dev, sc->sc_config_index, 1);
 	if (err) {
-		aprint_error_dev(self,
-		    "failed to set configuration: %s\n",
-		    usbd_errstr(err));
+		printf("%s: failed to set configuration: %s\n",
+		    devname, usbd_errstr(err));
 		sc->sc_dying = 1;
 		goto error;
 	}
@@ -215,8 +214,8 @@ USB_ATTACH(ubsa)
 	cdesc = usbd_get_config_descriptor(sc->sc_udev);
 
 	if (cdesc == NULL) {
-		aprint_error_dev(self,
-		    "failed to get configuration descriptor\n");
+		printf("%s: failed to get configuration descriptor\n",
+		    devname);
 		sc->sc_dying = 1;
 		goto error;
 	}
@@ -243,8 +242,8 @@ USB_ATTACH(ubsa)
 	for (i = 0; i < id->bNumEndpoints; i++) {
 		ed = usbd_interface2endpoint_descriptor(sc->sc_iface[0], i);
 		if (ed == NULL) {
-			aprint_error_dev(self,
-			     "no endpoint descriptor for %d\n", i);
+			printf("%s: no endpoint descriptor for %d\n",
+		    		USBDEVNAME(sc->sc_dev), i);
 			break;
 		}
 
@@ -264,19 +263,19 @@ USB_ATTACH(ubsa)
 	} /* end of Endpoint loop */
 
 	if (sc->sc_intr_number == -1) {
-		aprint_error_dev(self, "Could not find interrupt in\n");
+		printf("%s: Could not find interrupt in\n", devname);
 		sc->sc_dying = 1;
 		goto error;
 	}
 
 	if (uca.bulkin == -1) {
-		aprint_error_dev(self, "Could not find data bulk in\n");
+		printf("%s: Could not find data bulk in\n", devname);
 		sc->sc_dying = 1;
 		goto error;
 	}
 
 	if (uca.bulkout == -1) {
-		aprint_error_dev(self, "Could not find data bulk out\n");
+		printf("%s: Could not find data bulk out\n", devname);
 		sc->sc_dying = 1;
 		goto error;
 	}

@@ -1,4 +1,4 @@
-#	$NetBSD: INTEGRATOR,v 1.55 2009/03/06 20:31:48 joerg Exp $
+#	$NetBSD: INTEGRATOR,v 1.47 2006/08/26 20:26:44 christos Exp $
 #
 #	GENERIC -- ARM Integrator board Generic kernel
 #
@@ -21,10 +21,15 @@ options 	NTP		# NTP phase/frequency locked loop
 options 	CPU_ARM9	# Support the ARM9TDMI core
 options 	CPU_ARM10	# Support the ARM10 core
 options 	CPU_ARM11	# Support the ARM11 core
-options 	FPU_VFP
 
 # XXX Should be armv5 for ARM10 processor.
 makeoptions	CPUFLAGS="-march=armv4"
+
+# Architecture options
+
+# FPA options
+# We will want VFP support here sometime
+#options 	ARMFPE		# ARM Ltd FPE
 
 # File systems
 
@@ -49,7 +54,7 @@ file-system	PTYFS		# /dev/pts/N support
 #options 	QUOTA		# UFS quotas
 #options 	FFS_EI		# FFS Endian Independant support
 #options 	NFSSERVER
-options 	WAPBL		# File system journaling support - Experimental
+options 	SOFTDEP
 #options 	FFS_NO_SNAPSHOT	# No FFS snapshot support
 
 # Networking options
@@ -79,7 +84,6 @@ options 	NFS_BOOT_BOOTPARAM
 # Compatibility options
 
 #options 	COMPAT_43	# 4.3BSD compatibility.
-options 	COMPAT_40	# NetBSD 4.0 compatibility.
 options 	COMPAT_30	# NetBSD 3.0 compatibility.
 options 	COMPAT_20	# NetBSD 2.0 compatibility.
 options 	COMPAT_16	# NetBSD 1.6 compatibility.
@@ -102,6 +106,7 @@ options		COMPAT_BSDPTY	# /dev/[pt]ty?? ptys.
 #options 	SEMUME=10	# max number of undo entries per process
 #options 	SEMMNU=30	# number of undo structures in system
 #options 	SYSVSHM		# System V-like memory sharing
+#options 	SHMMAXPGS=1024	# 1024 pages is the default
 
 # Device options
 
@@ -112,6 +117,7 @@ options		COMPAT_BSDPTY	# /dev/[pt]ty?? ptys.
 # Miscellaneous kernel options
 options 	KTRACE		# system call tracing, a la ktrace(1)
 options 	IRQSTATS	# manage IRQ statistics
+#options 	LKM		# loadable kernel modules
 #options 	KMEMSTATS	# kernel memory statistics
 options 	SCSIVERBOSE	# Verbose SCSI errors
 options 	PCIVERBOSE	# Verbose PCI descriptions
@@ -131,6 +137,7 @@ options 	USERCONF	# userconf(4) support
 #options 	PORTMASTER	# Enable PortMaster only options
 #options 	DIAGNOSTIC	# internal consistency checks
 #options 	PMAP_DEBUG	# Enable pmap_debug_level code
+#options 	IPKDB		# remote kernel debugging
 options 	DDB		# in-kernel debugger
 options 	DDB_HISTORY_SIZE=100	# Enable history editing in DDB
 #options 	UVMHIST

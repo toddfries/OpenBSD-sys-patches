@@ -1,4 +1,4 @@
-/*	$NetBSD: hd64570.c,v 1.40 2008/11/07 00:20:02 dyoung Exp $	*/
+/*	$NetBSD: hd64570.c,v 1.38 2007/10/19 11:59:52 ad Exp $	*/
 
 /*
  * Copyright (c) 1999 Christian E. Hopps
@@ -65,7 +65,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: hd64570.c,v 1.40 2008/11/07 00:20:02 dyoung Exp $");
+__KERNEL_RCSID(0, "$NetBSD: hd64570.c,v 1.38 2007/10/19 11:59:52 ad Exp $");
 
 #include "bpfilter.h"
 #include "opt_inet.h"
@@ -471,7 +471,7 @@ sca_port_attach(struct sca_softc *sc, u_int port)
 		printf("%s: port %d\n", ifp->if_xname, port);
 	else
 		printf("%s at %s port %d\n",
-		       ifp->if_xname, device_xname(sc->sc_parent), port);
+		       ifp->if_xname, sc->sc_parent->dv_xname, port);
 
 	/*
 	 * reset the last seen times on the cisco keepalive protocol
@@ -926,10 +926,10 @@ sca_output(
 }
 
 static int
-sca_ioctl(ifp, cmd, data)
+sca_ioctl(ifp, cmd, addr)
      struct ifnet *ifp;
      u_long cmd;
-     void *data;
+     void *addr;
 {
 	struct ifreq *ifr;
 	struct ifaddr *ifa;
@@ -938,12 +938,12 @@ sca_ioctl(ifp, cmd, data)
 
 	s = splnet();
 
-	ifr = (struct ifreq *)data;
-	ifa = (struct ifaddr *)data;
+	ifr = (struct ifreq *)addr;
+	ifa = (struct ifaddr *)addr;
 	error = 0;
 
 	switch (cmd) {
-	case SIOCINITIFADDR:
+	case SIOCSIFADDR:
 		switch(ifa->ifa_addr->sa_family) {
 #ifdef INET
 		case AF_INET:
@@ -997,8 +997,6 @@ sca_ioctl(ifp, cmd, data)
 		break;
 
 	case SIOCSIFFLAGS:
-		if ((error = ifioctl_common(ifp, cmd, data)) != 0)
-			break;
 		if (ifr->ifr_flags & IFF_UP) {
 			ifp->if_flags |= IFF_UP;
 			sca_port_up(ifp->if_softc);
@@ -1010,7 +1008,7 @@ sca_ioctl(ifp, cmd, data)
 		break;
 
 	default:
-		error = ifioctl_common(ifp, cmd, data);
+		error = EINVAL;
 	}
 
 	splx(s);
@@ -2129,7 +2127,7 @@ sca_print_clock_info(struct sca_softc *sc)
 	u_int32_t mhz, div;
 	int i;
 
-	printf("%s: base clock %d Hz\n", device_xname(sc->sc_parent),
+	printf("%s: base clock %d Hz\n", sc->sc_parent->dv_xname,
 	    sc->sc_baseclock);
 
 	/* print the information about the port clock selection */

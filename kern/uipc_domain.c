@@ -1,4 +1,4 @@
-/*	$NetBSD: uipc_domain.c,v 1.77 2008/12/07 20:58:46 pooka Exp $	*/
+/*	$NetBSD: uipc_domain.c,v 1.71 2007/09/19 04:33:42 dyoung Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1993
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: uipc_domain.c,v 1.77 2008/12/07 20:58:46 pooka Exp $");
+__KERNEL_RCSID(0, "$NetBSD: uipc_domain.c,v 1.71 2007/09/19 04:33:42 dyoung Exp $");
 
 #include <sys/param.h>
 #include <sys/socket.h>
@@ -50,7 +50,6 @@ __KERNEL_RCSID(0, "$NetBSD: uipc_domain.c,v 1.77 2008/12/07 20:58:46 pooka Exp $
 #include <sys/un.h>
 #include <sys/unpcb.h>
 #include <sys/file.h>
-#include <sys/filedesc.h>
 #include <sys/kauth.h>
 
 MALLOC_DECLARE(M_SOCKADDR);
@@ -73,17 +72,12 @@ callout_t pffasttimo_ch, pfslowtimo_ch;
 u_int	pfslowtimo_now;
 u_int	pffasttimo_now;
 
-static struct sysctllog *domain_sysctllog;
-static void sysctl_net_setup(void);
-
 void
 domaininit(void)
 {
 	__link_set_decl(domains, struct domain);
 	struct domain * const * dpp;
 	struct domain *rt_domain = NULL;
-
-	sysctl_net_setup();
 
 	/*
 	 * Add all of the domains.  Make sure the PF_ROUTE
@@ -98,8 +92,8 @@ domaininit(void)
 	if (rt_domain)
 		domain_attach(rt_domain);
 
-	callout_init(&pffasttimo_ch, CALLOUT_MPSAFE);
-	callout_init(&pfslowtimo_ch, CALLOUT_MPSAFE);
+	callout_init(&pffasttimo_ch, 0);
+	callout_init(&pfslowtimo_ch, 0);
 
 	callout_reset(&pffasttimo_ch, 1, pffasttimo, NULL);
 	callout_reset(&pfslowtimo_ch, 1, pfslowtimo, NULL);
@@ -377,7 +371,7 @@ sysctl_dounpcb(struct kinfo_pcb *pcb, const struct socket *so)
 static int
 sysctl_unpcblist(SYSCTLFN_ARGS)
 {
-	struct file *fp, *dfp, *np;
+	struct file *fp;
 	struct socket *so;
 	struct kinfo_pcb pcb;
 	char *dp;
@@ -417,26 +411,14 @@ sysctl_unpcblist(SYSCTLFN_ARGS)
 	pf2 = (oldp == NULL) ? 0 : pf;
 
 	/*
-	 * allocate dummy file descriptor to make position in list.
-	 */
-	sysctl_unlock();
-	if ((dfp = fgetdummy()) == NULL) {
-	 	sysctl_relock();
-		return ENOMEM;
-	}
-
-	/*
 	 * there's no "list" of local domain sockets, so we have
 	 * to walk the file list looking for them.  :-/
 	 */
-	mutex_enter(&filelist_lock);
 	LIST_FOREACH(fp, &filehead, f_list) {
-	    	np = LIST_NEXT(fp, f_list);
-		if (fp->f_count == 0 || fp->f_type != DTYPE_SOCKET ||
-		    fp->f_data == NULL)
-			continue;
 		if (kauth_authorize_generic(l->l_cred,
 		    KAUTH_GENERIC_CANSEE, fp->f_cred) != 0)
+			continue;
+		if (fp->f_type != DTYPE_SOCKET)
 			continue;
 		so = (struct socket *)fp->f_data;
 		if (so->so_type != type)
@@ -444,17 +426,8 @@ sysctl_unpcblist(SYSCTLFN_ARGS)
 		if (so->so_proto->pr_domain->dom_family != pf)
 			continue;
 		if (len >= elem_size && elem_count > 0) {
-			mutex_enter(&fp->f_lock);
-			fp->f_count++;
-			mutex_exit(&fp->f_lock);
-			LIST_INSERT_AFTER(fp, dfp, f_list);
-			mutex_exit(&filelist_lock);
 			sysctl_dounpcb(&pcb, so);
 			error = copyout(&pcb, dp, out_size);
-			closef(fp);
-			mutex_enter(&filelist_lock);
-			np = LIST_NEXT(dfp, f_list);
-			LIST_REMOVE(dfp, f_list);
 			if (error)
 				break;
 			dp += elem_size;
@@ -466,52 +439,47 @@ sysctl_unpcblist(SYSCTLFN_ARGS)
 				elem_count--;
 		}
 	}
-	mutex_exit(&filelist_lock);
-	fputdummy(dfp);
- 	*oldlenp = needed;
+
+	*oldlenp = needed;
 	if (oldp == NULL)
 		*oldlenp += PCB_SLOP * sizeof(struct kinfo_pcb);
- 	sysctl_relock();
 
 	return (error);
 }
 
-static void
-sysctl_net_setup()
+SYSCTL_SETUP(sysctl_net_setup, "sysctl net subtree setup")
 {
-
-	KASSERT(domain_sysctllog == NULL);
-	sysctl_createv(&domain_sysctllog, 0, NULL, NULL,
+	sysctl_createv(clog, 0, NULL, NULL,
 		       CTLFLAG_PERMANENT,
 		       CTLTYPE_NODE, "net", NULL,
 		       NULL, 0, NULL, 0,
 		       CTL_NET, CTL_EOL);
-	sysctl_createv(&domain_sysctllog, 0, NULL, NULL,
+	sysctl_createv(clog, 0, NULL, NULL,
 		       CTLFLAG_PERMANENT,
 		       CTLTYPE_NODE, "local",
 		       SYSCTL_DESCR("PF_LOCAL related settings"),
 		       NULL, 0, NULL, 0,
 		       CTL_NET, PF_LOCAL, CTL_EOL);
-	sysctl_createv(&domain_sysctllog, 0, NULL, NULL,
+	sysctl_createv(clog, 0, NULL, NULL,
 		       CTLFLAG_PERMANENT,
 		       CTLTYPE_NODE, "stream",
 		       SYSCTL_DESCR("SOCK_STREAM settings"),
 		       NULL, 0, NULL, 0,
 		       CTL_NET, PF_LOCAL, SOCK_STREAM, CTL_EOL);
-	sysctl_createv(&domain_sysctllog, 0, NULL, NULL,
+	sysctl_createv(clog, 0, NULL, NULL,
 		       CTLFLAG_PERMANENT,
 		       CTLTYPE_NODE, "dgram",
 		       SYSCTL_DESCR("SOCK_DGRAM settings"),
 		       NULL, 0, NULL, 0,
 		       CTL_NET, PF_LOCAL, SOCK_DGRAM, CTL_EOL);
 
-	sysctl_createv(&domain_sysctllog, 0, NULL, NULL,
+	sysctl_createv(clog, 0, NULL, NULL,
 		       CTLFLAG_PERMANENT,
 		       CTLTYPE_STRUCT, "pcblist",
 		       SYSCTL_DESCR("SOCK_STREAM protocol control block list"),
 		       sysctl_unpcblist, 0, NULL, 0,
 		       CTL_NET, PF_LOCAL, SOCK_STREAM, CTL_CREATE, CTL_EOL);
-	sysctl_createv(&domain_sysctllog, 0, NULL, NULL,
+	sysctl_createv(clog, 0, NULL, NULL,
 		       CTLFLAG_PERMANENT,
 		       CTLTYPE_STRUCT, "pcblist",
 		       SYSCTL_DESCR("SOCK_DGRAM protocol control block list"),
@@ -571,7 +539,7 @@ pfslowtimo(void *arg)
 			if (pr->pr_slowtimo)
 				(*pr->pr_slowtimo)();
 	}
-	callout_schedule(&pfslowtimo_ch, hz / 2);
+	callout_reset(&pfslowtimo_ch, hz / 2, pfslowtimo, NULL);
 }
 
 void
@@ -587,5 +555,5 @@ pffasttimo(void *arg)
 			if (pr->pr_fasttimo)
 				(*pr->pr_fasttimo)();
 	}
-	callout_schedule(&pffasttimo_ch, hz / 5);
+	callout_reset(&pffasttimo_ch, hz / 5, pffasttimo, NULL);
 }

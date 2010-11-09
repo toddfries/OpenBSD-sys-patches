@@ -1,4 +1,4 @@
-/*	$NetBSD: memecc.c,v 1.11 2008/12/16 22:35:26 christos Exp $	*/
+/*	$NetBSD: memecc.c,v 1.9 2005/11/14 03:30:49 uwe Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -34,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: memecc.c,v 1.11 2008/12/16 22:35:26 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: memecc.c,v 1.9 2005/11/14 03:30:49 uwe Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -124,10 +131,10 @@ memecc_error(void)
 	efsr = bus_space_read_4(memecc_sc->sc_bt, bh, ECC_FSR_REG);
 	efar0 = bus_space_read_4(memecc_sc->sc_bt, bh, ECC_AFR0_REG);
 	efar1 = bus_space_read_4(memecc_sc->sc_bt, bh, ECC_AFR1_REG);
-	snprintb(bits, sizeof(bits), ECC_FSR_BITS, efsr);
-	printf("memory error:\n\tEFSR: %s\n", bits);
-	snprintb(bits, sizeof(bits), ECC_AFR_BITS, efar0);
-	printf("\tMBus transaction: %s\n", bits);
+	printf("memory error:\n\tEFSR: %s\n",
+		bitmask_snprintf(efsr, ECC_FSR_BITS, bits, sizeof(bits)));
+	printf("\tMBus transaction: %s\n",
+		bitmask_snprintf(efar0, ECC_AFR_BITS, bits, sizeof(bits)));
 	printf("\taddress: 0x%x%x\n", efar0 & ECC_AFR_PAH, efar1);
 	printf("\tmodule location: %s\n",
 		prom_pa_location(efar1, efar0 & ECC_AFR_PAH));

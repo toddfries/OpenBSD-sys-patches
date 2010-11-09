@@ -1,4 +1,4 @@
-/*      $NetBSD: sgec.c,v 1.36 2008/11/07 00:20:03 dyoung Exp $ */
+/*      $NetBSD: sgec.c,v 1.34 2007/10/19 12:00:00 ad Exp $ */
 /*
  * Copyright (c) 1999 Ludd, University of Lule}, Sweden. All rights reserved.
  *
@@ -45,7 +45,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sgec.c,v 1.36 2008/11/07 00:20:03 dyoung Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sgec.c,v 1.34 2007/10/19 12:00:00 ad Exp $");
 
 #include "opt_inet.h"
 #include "bpfilter.h"
@@ -82,7 +82,7 @@ static	int	zeioctl(struct ifnet *, u_long, void *);
 static	int	ze_add_rxbuf(struct ze_softc *, int);
 static	void	ze_setup(struct ze_softc *);
 static	void	zetimeout(struct ifnet *);
-static	bool	zereset(struct ze_softc *);
+static	int	zereset(struct ze_softc *);
 
 #define	ZE_WCSR(csr, val) \
 	bus_space_write_4(sc->sc_iot, sc->sc_ioh, csr, val)
@@ -95,47 +95,46 @@ static	bool	zereset(struct ze_softc *);
  * to accept packets.
  */
 void
-sgec_attach(struct ze_softc *sc)
+sgec_attach(sc)
+	struct ze_softc *sc;
 {
-	struct ifnet *ifp = &sc->sc_if;
-	struct ze_tdes *tp;
-	struct ze_rdes *rp;
+	struct	ifnet *ifp = (struct ifnet *)&sc->sc_if;
+	struct	ze_tdes *tp;
+	struct	ze_rdes *rp;
 	bus_dma_segment_t seg;
 	int i, rseg, error;
 
         /*
          * Allocate DMA safe memory for descriptors and setup memory.
          */
-	error = bus_dmamem_alloc(sc->sc_dmat, sizeof(struct ze_cdata),
-	    PAGE_SIZE, 0, &seg, 1, &rseg, BUS_DMA_NOWAIT);
-	if (error) {
-		aprint_error(": unable to allocate control data, error = %d\n",
+	if ((error = bus_dmamem_alloc(sc->sc_dmat,
+	    sizeof(struct ze_cdata), PAGE_SIZE, 0, &seg, 1, &rseg,
+	    BUS_DMA_NOWAIT)) != 0) {
+		printf(": unable to allocate control data, error = %d\n",
 		    error);
 		goto fail_0;
 	}
 
-	error = bus_dmamem_map(sc->sc_dmat, &seg, rseg, sizeof(struct ze_cdata),
-	    (void **)&sc->sc_zedata, BUS_DMA_NOWAIT|BUS_DMA_COHERENT);
-	if (error) {
-		aprint_error(
-		    ": unable to map control data, error = %d\n", error);
+	if ((error = bus_dmamem_map(sc->sc_dmat, &seg, rseg,
+	    sizeof(struct ze_cdata), (void **)&sc->sc_zedata,
+	    BUS_DMA_NOWAIT|BUS_DMA_COHERENT)) != 0) {
+		printf(": unable to map control data, error = %d\n", error);
 		goto fail_1;
 	}
 
-	error = bus_dmamap_create(sc->sc_dmat, sizeof(struct ze_cdata), 1,
-	    sizeof(struct ze_cdata), 0, BUS_DMA_NOWAIT, &sc->sc_cmap);
-	if (error) {
-		aprint_error(
-		    ": unable to create control data DMA map, error = %d\n",
+	if ((error = bus_dmamap_create(sc->sc_dmat,
+	    sizeof(struct ze_cdata), 1,
+	    sizeof(struct ze_cdata), 0, BUS_DMA_NOWAIT,
+	    &sc->sc_cmap)) != 0) {
+		printf(": unable to create control data DMA map, error = %d\n",
 		    error);
 		goto fail_2;
 	}
 
-	error = bus_dmamap_load(sc->sc_dmat, sc->sc_cmap, sc->sc_zedata,
-	    sizeof(struct ze_cdata), NULL, BUS_DMA_NOWAIT);
-	if (error) {
-		aprint_error(
-		    ": unable to load control data DMA map, error = %d\n",
+	if ((error = bus_dmamap_load(sc->sc_dmat, sc->sc_cmap,
+	    sc->sc_zedata, sizeof(struct ze_cdata), NULL,
+	    BUS_DMA_NOWAIT)) != 0) {
+		printf(": unable to load control data DMA map, error = %d\n",
 		    error);
 		goto fail_3;
 	}
@@ -144,62 +143,56 @@ sgec_attach(struct ze_softc *sc)
 	 * Zero the newly allocated memory.
 	 */
 	memset(sc->sc_zedata, 0, sizeof(struct ze_cdata));
-
 	/*
 	 * Create the transmit descriptor DMA maps.
 	 */
-	for (i = 0; error == 0 && i < TXDESCS; i++) {
-		error = bus_dmamap_create(sc->sc_dmat, MCLBYTES,
+	for (i = 0; i < TXDESCS; i++) {
+		if ((error = bus_dmamap_create(sc->sc_dmat, MCLBYTES,
 		    TXDESCS - 1, MCLBYTES, 0, BUS_DMA_NOWAIT|BUS_DMA_ALLOCNOW,
-		    &sc->sc_xmtmap[i]);
-	}
-	if (error) {
-		aprint_error(": unable to create tx DMA map %d, error = %d\n",
-		    i, error);
-		goto fail_4;
+		    &sc->sc_xmtmap[i]))) {
+			printf(": unable to create tx DMA map %d, error = %d\n",
+			    i, error);
+			goto fail_4;
+		}
 	}
 
 	/*
 	 * Create receive buffer DMA maps.
 	 */
-	for (i = 0; error == 0 && i < RXDESCS; i++) {
-		error = bus_dmamap_create(sc->sc_dmat, MCLBYTES, 1,
-		    MCLBYTES, 0, BUS_DMA_NOWAIT, &sc->sc_rcvmap[i]);
+	for (i = 0; i < RXDESCS; i++) {
+		if ((error = bus_dmamap_create(sc->sc_dmat, MCLBYTES, 1,
+		    MCLBYTES, 0, BUS_DMA_NOWAIT,
+		    &sc->sc_rcvmap[i]))) {
+			printf(": unable to create rx DMA map %d, error = %d\n",
+			    i, error);
+			goto fail_5;
+		}
 	}
-	if (error) {
-		aprint_error(": unable to create rx DMA map %d, error = %d\n",
-		    i, error);
-		goto fail_5;
-	}
-
 	/*
 	 * Pre-allocate the receive buffers.
 	 */
-	for (i = 0; error == 0 && i < RXDESCS; i++) {
-		error = ze_add_rxbuf(sc, i);
-	}
-
-	if (error) {
-		aprint_error(
-		    ": unable to allocate or map rx buffer %d, error = %d\n",
-		    i, error);
-		goto fail_6;
+	for (i = 0; i < RXDESCS; i++) {
+		if ((error = ze_add_rxbuf(sc, i)) != 0) {
+			printf(": unable to allocate or map rx buffer %d\n,"
+			    " error = %d\n", i, error);
+			goto fail_6;
+		}
 	}
 
 	/* For vmstat -i
 	 */
 	evcnt_attach_dynamic(&sc->sc_intrcnt, EVCNT_TYPE_INTR, NULL,
-	    device_xname(sc->sc_dev), "intr");
+	    sc->sc_dev.dv_xname, "intr");
 	evcnt_attach_dynamic(&sc->sc_rxintrcnt, EVCNT_TYPE_INTR,
-	    &sc->sc_intrcnt, device_xname(sc->sc_dev), "rx intr");
+	    &sc->sc_intrcnt, sc->sc_dev.dv_xname, "rx intr");
 	evcnt_attach_dynamic(&sc->sc_txintrcnt, EVCNT_TYPE_INTR,
-	    &sc->sc_intrcnt, device_xname(sc->sc_dev), "tx intr");
+	    &sc->sc_intrcnt, sc->sc_dev.dv_xname, "tx intr");
 	evcnt_attach_dynamic(&sc->sc_txdraincnt, EVCNT_TYPE_INTR,
-	    &sc->sc_intrcnt, device_xname(sc->sc_dev), "tx drain");
+	    &sc->sc_intrcnt, sc->sc_dev.dv_xname, "tx drain");
 	evcnt_attach_dynamic(&sc->sc_nobufintrcnt, EVCNT_TYPE_INTR,
-	    &sc->sc_intrcnt, device_xname(sc->sc_dev), "nobuf intr");
+	    &sc->sc_intrcnt, sc->sc_dev.dv_xname, "nobuf intr");
 	evcnt_attach_dynamic(&sc->sc_nointrcnt, EVCNT_TYPE_INTR,
-	    &sc->sc_intrcnt, device_xname(sc->sc_dev), "no intr");
+	    &sc->sc_intrcnt, sc->sc_dev.dv_xname, "no intr");
 
 	/*
 	 * Create ring loops of the buffer chains.
@@ -220,7 +213,7 @@ sgec_attach(struct ze_softc *sc)
 	if (zereset(sc))
 		return;
 
-	strcpy(ifp->if_xname, device_xname(sc->sc_dev));
+	strcpy(ifp->if_xname, sc->sc_dev.dv_xname);
 	ifp->if_softc = sc;
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
 	ifp->if_start = zestart;
@@ -234,8 +227,7 @@ sgec_attach(struct ze_softc *sc)
 	if_attach(ifp);
 	ether_ifattach(ifp, sc->sc_enaddr);
 
-	aprint_normal("\n");
-	aprint_normal_dev(sc->sc_dev, "hardware address %s\n",
+	printf("\n%s: hardware address %s\n", sc->sc_dev.dv_xname,
 	    ether_sprintf(sc->sc_enaddr));
 	return;
 
@@ -276,9 +268,10 @@ sgec_attach(struct ze_softc *sc)
  * Initialization of interface.
  */
 void
-zeinit(struct ze_softc *sc)
+zeinit(sc)
+	struct ze_softc *sc;
 {
-	struct ifnet *ifp = &sc->sc_if;
+	struct ifnet *ifp = (struct ifnet *)&sc->sc_if;
 	struct ze_cdata *zc = sc->sc_zedata;
 	int i;
 
@@ -328,7 +321,8 @@ zeinit(struct ze_softc *sc)
  * Start output on interface.
  */
 void
-zestart(struct ifnet *ifp)
+zestart(ifp)
+	struct ifnet *ifp;
 {
 	struct ze_softc *sc = ifp->if_softc;
 	struct ze_cdata *zc = sc->sc_zedata;
@@ -359,8 +353,7 @@ zestart(struct ifnet *ifp)
 		error = bus_dmamap_load_mbuf(sc->sc_dmat, map, m,
 		    BUS_DMA_WRITE);
 		if (error) {
-			aprint_error_dev(sc->sc_dev,
-			    "zestart: load_mbuf failed: %d", error);
+			printf("zestart: load_mbuf failed: %d", error);
 			goto out;
 		}
 
@@ -435,7 +428,8 @@ out:	if (old_inq < sc->sc_inq)
 }
 
 int
-sgec_intr(struct ze_softc *sc)
+sgec_intr(sc)
+	struct ze_softc *sc;
 {
 	struct ze_cdata *zc = sc->sc_zedata;
 	struct ifnet *ifp = &sc->sc_if;
@@ -539,15 +533,18 @@ sgec_intr(struct ze_softc *sc)
  * Process an ioctl request.
  */
 int
-zeioctl(struct ifnet *ifp, u_long cmd, void *data)
+zeioctl(ifp, cmd, data)
+	struct ifnet *ifp;
+	u_long cmd;
+	void *data;
 {
 	struct ze_softc *sc = ifp->if_softc;
-	struct ifaddr *ifa = data;
+	struct ifaddr *ifa = (struct ifaddr *)data;
 	int s = splnet(), error = 0;
 
 	switch (cmd) {
 
-	case SIOCINITIFADDR:
+	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 		switch(ifa->ifa_addr->sa_family) {
 #ifdef INET
@@ -560,11 +557,8 @@ zeioctl(struct ifnet *ifp, u_long cmd, void *data)
 		break;
 
 	case SIOCSIFFLAGS:
-		if ((error = ifioctl_common(ifp, cmd, data)) != 0)
-			break;
-		/* XXX re-use ether_ioctl() */
-		switch (ifp->if_flags & (IFF_UP|IFF_RUNNING)) {
-		case IFF_RUNNING:
+		if ((ifp->if_flags & IFF_UP) == 0 &&
+		    (ifp->if_flags & IFF_RUNNING) != 0) {
 			/*
 			 * If interface is marked down and it is running,
 			 * stop it. (by disabling receive mechanism).
@@ -572,23 +566,19 @@ zeioctl(struct ifnet *ifp, u_long cmd, void *data)
 			ZE_WCSR(ZE_CSR6, ZE_RCSR(ZE_CSR6) &
 			    ~(ZE_NICSR6_ST|ZE_NICSR6_SR));
 			ifp->if_flags &= ~IFF_RUNNING;
-			break;
-		case IFF_UP:
+		} else if ((ifp->if_flags & IFF_UP) != 0 &&
+			   (ifp->if_flags & IFF_RUNNING) == 0) {
 			/*
 			 * If interface it marked up and it is stopped, then
 			 * start it.
 			 */
 			zeinit(sc);
-			break;
-		case IFF_UP|IFF_RUNNING:
+		} else if ((ifp->if_flags & IFF_UP) != 0) {
 			/*
 			 * Send a new setup packet to match any new changes.
 			 * (Like IFF_PROMISC etc)
 			 */
 			ze_setup(sc);
-			break;
-		case 0:
-			break;
 		}
 		break;
 
@@ -609,7 +599,7 @@ zeioctl(struct ifnet *ifp, u_long cmd, void *data)
 		break;
 
 	default:
-		error = ether_ioctl(ifp, cmd, data);
+		error = EINVAL;
 
 	}
 	splx(s);
@@ -620,7 +610,9 @@ zeioctl(struct ifnet *ifp, u_long cmd, void *data)
  * Add a receive buffer to the indicated descriptor.
  */
 int
-ze_add_rxbuf(struct ze_softc *sc, int i)
+ze_add_rxbuf(sc, i)
+	struct ze_softc *sc;
+	int i;
 {
 	struct mbuf *m;
 	struct ze_rdes *rp;
@@ -645,7 +637,7 @@ ze_add_rxbuf(struct ze_softc *sc, int i)
 	    BUS_DMA_READ|BUS_DMA_NOWAIT);
 	if (error)
 		panic("%s: can't load rx DMA map %d, error = %d",
-		    device_xname(sc->sc_dev), i, error);
+		    sc->sc_dev.dv_xname, i, error);
 	sc->sc_rxmbuf[i] = m;
 
 	bus_dmamap_sync(sc->sc_dmat, sc->sc_rcvmap[i], 0,
@@ -668,7 +660,8 @@ ze_add_rxbuf(struct ze_softc *sc, int i)
  * Create a setup packet and put in queue for sending.
  */
 void
-ze_setup(struct ze_softc *sc)
+ze_setup(sc)
+	struct ze_softc *sc;
 {
 	struct ether_multi *enm;
 	struct ether_multistep step;
@@ -753,14 +746,15 @@ ze_setup(struct ze_softc *sc)
  * Check for dead transmit logic.
  */
 void
-zetimeout(struct ifnet *ifp)
+zetimeout(ifp)
+	struct ifnet *ifp;
 {
 	struct ze_softc *sc = ifp->if_softc;
 
 	if (sc->sc_inq == 0)
 		return;
 
-	aprint_error_dev(sc->sc_dev, "xmit logic died, resetting...\n");
+	printf("%s: xmit logic died, resetting...\n", sc->sc_dev.dv_xname);
 	/*
 	 * Do a reset of interface, to get it going again.
 	 * Will it work by just restart the transmit logic?
@@ -775,16 +769,17 @@ zetimeout(struct ifnet *ifp)
  *  Write ring buffer addresses.
  *  Write SBR.
  */
-bool
-zereset(struct ze_softc *sc)
+int
+zereset(sc)
+	struct ze_softc *sc;
 {
 	int reg, i;
 
 	ZE_WCSR(ZE_CSR6, ZE_NICSR6_RE);
 	DELAY(50000);
 	if (ZE_RCSR(ZE_CSR6) & ZE_NICSR5_SF) {
-		aprint_error_dev(sc->sc_dev, "selftest failed\n");
-		return true;
+		printf("%s: selftest failed\n", sc->sc_dev.dv_xname);
+		return 1;
 	}
 
 	/*
@@ -796,14 +791,13 @@ zereset(struct ze_softc *sc)
 	i = 10;
 	do {
 		if (i-- == 0) {
-			aprint_error_dev(sc->sc_dev,
-			    "failing SGEC CSR0 init\n");
-			return true;
+			printf("Failing SGEC CSR0 init\n");
+			return 1;
 		}
 		ZE_WCSR(ZE_CSR0, reg);
 	} while (ZE_RCSR(ZE_CSR0) != reg);
 
 	ZE_WCSR(ZE_CSR3, (vaddr_t)sc->sc_pzedata->zc_recv);
 	ZE_WCSR(ZE_CSR4, (vaddr_t)sc->sc_pzedata->zc_xmit);
-	return false;
+	return 0;
 }

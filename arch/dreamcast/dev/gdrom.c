@@ -1,4 +1,4 @@
-/*	$NetBSD: gdrom.c,v 1.26 2008/08/01 20:19:49 marcus Exp $	*/
+/*	$NetBSD: gdrom.c,v 1.19 2005/12/24 20:06:58 perry Exp $	*/
 
 /*-
  * Copyright (c) 2001 Marcus Comstedt
@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
-__KERNEL_RCSID(0, "$NetBSD: gdrom.c,v 1.26 2008/08/01 20:19:49 marcus Exp $");
+__KERNEL_RCSID(0, "$NetBSD: gdrom.c,v 1.19 2005/12/24 20:06:58 perry Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -385,7 +385,8 @@ gdromattach(struct device *parent, struct device *self, void *aux)
 	/*
 	 * Initialize and attach the disk structure.
 	 */
-	disk_init(&sc->dkdev, sc->sc_dv.dv_xname, &gdromdkdriver);
+	sc->dkdev.dk_name = sc->sc_dv.dv_xname;
+	sc->dkdev.dk_driver = &gdromdkdriver;
 	disk_attach(&sc->dkdev);
 
 	/*
@@ -395,9 +396,8 @@ gdromattach(struct device *parent, struct device *self, void *aux)
 	for (p = 0; p < 0x200000 / 4; p++)
 		x = ((volatile uint32_t *)0xa0000000)[p];
 
-	printf(": %s\n", sysasic_intr_string(SYSASIC_IRL9));
-	sysasic_intr_establish(SYSASIC_EVENT_GDROM, IPL_BIO, SYSASIC_IRL9,
-	    gdrom_intr, sc);
+	printf(": %s\n", sysasic_intr_string(IPL_BIO));
+	sysasic_intr_establish(SYSASIC_EVENT_GDROM, IPL_BIO, gdrom_intr, sc);
 }
 
 int
@@ -412,8 +412,10 @@ gdromopen(dev_t dev, int flags, int devtype, struct lwp *l)
 #endif
 
 	unit = DISKUNIT(dev);
+	if (unit >= gdrom_cd.cd_ndevs)
+		return ENXIO;
 
-	sc = device_lookup_private(&gdrom_cd, unit);
+	sc = gdrom_cd.cd_devs[unit];
 	if (sc == NULL)
 		return ENXIO;
 
@@ -457,7 +459,7 @@ gdromclose(dev_t dev, int flags, int devtype, struct lwp *l)
 	printf("GDROM: close\n");
 #endif
 	unit = DISKUNIT(dev);
-	sc = device_lookup_private(&gdrom_cd, unit);
+	sc = gdrom_cd.cd_devs[unit];
 
 	sc->is_open = 0;
 
@@ -474,7 +476,7 @@ gdromstrategy(struct buf *bp)
 #endif
 	
 	unit = DISKUNIT(bp->b_dev);
-	sc = device_lookup_private(&gdrom_cd, unit);
+	sc = gdrom_cd.cd_devs[unit];
 
 	if (bp->b_bcount == 0)
 		goto done;
@@ -493,8 +495,10 @@ gdromstrategy(struct buf *bp)
 	splx(s);
 
 	if ((error = gdrom_read_sectors(sc, bp->b_data, bp->b_rawblkno,
-	    bp->b_bcount >> 11)))
+	    bp->b_bcount >> 11))) {
 		bp->b_error = error;
+		bp->b_flags |= B_ERROR;
+	}
 
 	sc->is_busy = 0;
 	wakeup(&sc->is_busy);
@@ -505,7 +509,7 @@ gdromstrategy(struct buf *bp)
 }
 
 int
-gdromioctl(dev_t dev, u_long cmd, void *addr, int flag, struct lwp *l)
+gdromioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct lwp *l)
 {
 	struct gdrom_softc *sc;
 	int unit, error;
@@ -514,7 +518,7 @@ gdromioctl(dev_t dev, u_long cmd, void *addr, int flag, struct lwp *l)
 #endif
 
 	unit = DISKUNIT(dev);
-	sc = device_lookup_private(&gdrom_cd, unit);
+	sc = gdrom_cd.cd_devs[unit];
 
 	switch (cmd) {
 	case CDIOREADMSADDR: {

@@ -1,4 +1,4 @@
-/*	$NetBSD: armreg.h,v 1.41 2008/08/27 11:04:23 matt Exp $	*/
+/*	$NetBSD: armreg.h,v 1.37 2007/01/06 00:50:54 christos Exp $	*/
 
 /*
  * Copyright (c) 1998, 2001 Ben Harris
@@ -61,7 +61,6 @@
 
 #define I32_bit (1 << 7)	/* IRQ disable */
 #define F32_bit (1 << 6)	/* FIQ disable */
-#define	IF32_bits (3 << 6)	/* IRQ/FIQ disable */
 
 #define PSR_T_bit (1 << 5)	/* Thumb state */
 #define PSR_J_bit (1 << 24)	/* Java mode */
@@ -197,9 +196,6 @@
 #define CPU_ID_ARM1026EJS	0x4106a260
 #define CPU_ID_ARM1136JS	0x4107b360
 #define CPU_ID_ARM1136JSR1	0x4117b360
-#define CPU_ID_ARM1176JS	0x410fb760
-#define CPU_ID_CORTEXA8R1	0x411fc080
-#define CPU_ID_CORTEXA8R2	0x412fc080
 #define CPU_ID_SA110		0x4401a100
 #define CPU_ID_SA1100		0x4401a110
 #define	CPU_ID_TI925T		0x54029250
@@ -291,19 +287,8 @@
 #define CPU_CONTROL_VECRELOC	0x00002000 /* V: Vector relocation */
 #define CPU_CONTROL_ROUNDROBIN	0x00004000 /* RR: Predictable replacement */
 #define CPU_CONTROL_V4COMPAT	0x00008000 /* L4: ARMv4 compat LDR R15 etc */
-#define CPU_CONTROL_UNAL_ENABLE	0x00040000 /* U: unaligned data access */
-#define CPU_CONTROL_XP_ENABLE	0x00080000 /* XP: extended page table */
-#define CPU_CONTROL_FI_ENABLE	0x00200000 /* FI: Low interrupt latency */
 
 #define CPU_CONTROL_IDC_ENABLE	CPU_CONTROL_DC_ENABLE
-
-/* ARM11r0 Auxillary Control Register (CP15 register 1, opcode2 1) */
-#define ARM11R0_AUXCTL_PFI	0x80000000 /* PFI: partial FI mode. */
-					   /* This is an undocumented flag
-					    * used to work around a cache bug
-					    * in r0 steppings. See errata
-					    * 364296.
-					    */
 
 /* XScale Auxillary Control Register (CP15 register 1, opcode2 1) */
 #define	XSCALE_AUXCTL_K		0x00000001 /* dis. write buffer coalescing */
@@ -313,8 +298,7 @@
 #define	XSCALE_AUXCTL_MD_WT	0x00000020 /* mini-D$ wt, read-allocate */
 #define	XSCALE_AUXCTL_MD_MASK	0x00000030
 
-/* Cache type register definitions 0 */
-#define	CPU_CT_FORMAT(x)	(((x) >> 29) & 0x7)	/* reg format */
+/* Cache type register definitions */
 #define	CPU_CT_ISIZE(x)		((x) & 0xfff)		/* I$ info */
 #define	CPU_CT_DSIZE(x)		(((x) >> 12) & 0xfff)	/* D$ info */
 #define	CPU_CT_S		(1U << 24)		/* split cache */
@@ -325,33 +309,11 @@
 #define	CPU_CT_CTYPE_WB2	2	/* w/b, clean w/ cp15,7 */
 #define	CPU_CT_CTYPE_WB6	6	/* w/b, cp15,7, lockdown fmt A */
 #define	CPU_CT_CTYPE_WB7	7	/* w/b, cp15,7, lockdown fmt B */
-#define	CPU_CT_CTYPE_WB14	14	/* w/b, cp15,7, lockdown fmt C */
 
 #define	CPU_CT_xSIZE_LEN(x)	((x) & 0x3)		/* line size */
 #define	CPU_CT_xSIZE_M		(1U << 2)		/* multiplier */
 #define	CPU_CT_xSIZE_ASSOC(x)	(((x) >> 3) & 0x7)	/* associativity */
 #define	CPU_CT_xSIZE_SIZE(x)	(((x) >> 6) & 0x7)	/* size */
-#define	CPU_CT_xSIZE_P		(1U << 11)		/* need to page-color */
-
-/* format 4 definitions */
-#define	CPU_CT4_ILINE(x)	((x) & 0xf)		/* I$ line size */
-#define	CPU_CT4_DLINE(x)	(((x) >> 16) & 0xf)	/* D$ line size */
-#define	CPU_CT4_L1IPOLICY(x)	(((x) >> 14) & 0x3)	/* I$ policy */
-#define	CPU_CT4_L1_VIPT		2			/* VIPT */
-
-/* Cache size identifaction register definitions 1, Rd, c0, c0, 0 */
-#define	CPU_CSID_CTYPE_WT	0x80000000	/* write-through avail */ 
-#define	CPU_CSID_CTYPE_WB	0x40000000	/* write-back avail */ 
-#define	CPU_CSID_CTYPE_RA	0x20000000	/* read-allocation avail */ 
-#define	CPU_CSID_CTYPE_WA	0x10000000	/* write-allocation avail */ 
-#define	CPU_CSID_NUMSETS(x)	(((x) >> 12) & 0xffff)
-#define	CPU_CSID_ASSOC(x)	(((x) >> 3) & 0x1ff)
-#define	CPU_CSID_LEN(x)		((x) & 0x03)
-
-/* Cache size selection register definitions 2, Rd, c0, c0, 0 */
-#define	CPU_CSSR_L2		0x00000002
-#define	CPU_CSSR_L1		0x00000000
-#define	CPU_CSSR_InD		0x00000001
 
 /* Fault status register definitions */
 
@@ -400,50 +362,4 @@
 
 #define THUMB_INSN_SIZE		2		/* Some are 4 bytes.  */
 
-/*
- * Defines and such for arm11 Performance Monitor Counters (p15, c15, c12, 0)
- */
-#define ARM11_PMCCTL_E		__BIT(0)	/* enable all three counters */
-#define ARM11_PMCCTL_P		__BIT(1)	/* reset both Count Registers to zero */
-#define ARM11_PMCCTL_C		__BIT(2)	/* reset the Cycle Counter Register to zero */
-#define ARM11_PMCCTL_D		__BIT(3)	/* cycle count divide by 64 */
-#define ARM11_PMCCTL_EC0	__BIT(4)	/* Enable Counter Register 0 interrupt */
-#define ARM11_PMCCTL_EC1	__BIT(5)	/* Enable Counter Register 1 interrupt */
-#define ARM11_PMCCTL_ECC	__BIT(6)	/* Enable Cycle Counter interrupt */
-#define ARM11_PMCCTL_SBZa	__BIT(7)	/* UNP/SBZ */
-#define ARM11_PMCCTL_CR0	__BIT(8)	/* Count Register 0 overflow flag */
-#define ARM11_PMCCTL_CR1	__BIT(9)	/* Count Register 1 overflow flag */
-#define ARM11_PMCCTL_CCR	__BIT(10)	/* Cycle Count Register overflow flag */
-#define ARM11_PMCCTL_X		__BIT(11)	/* Enable Export of the events to the event bus */
-#define ARM11_PMCCTL_EVT1	__BITS(19,12)	/* source of events for Count Register 1 */
-#define ARM11_PMCCTL_EVT0	__BITS(27,20)	/* source of events for Count Register 0 */
-#define ARM11_PMCCTL_SBZb	__BITS(31,28)	/* UNP/SBZ */
-#define ARM11_PMCCTL_SBZ	\
-		(ARM11_PMCCTL_SBZa | ARM11_PMCCTL_SBZb)
-
-#define	ARM11_PMCEVT_ICACHE_MISS	0	/* Instruction Cache Miss */
-#define	ARM11_PMCEVT_ISTREAM_STALL	1	/* Instruction Stream Stall */
-#define	ARM11_PMCEVT_IUTLB_MISS		2	/* Instruction uTLB Miss */
-#define	ARM11_PMCEVT_DUTLB_MISS		3	/* Data uTLB Miss */
-#define	ARM11_PMCEVT_BRANCH		4	/* Branch Inst. Executed */
-#define	ARM11_PMCEVT_BRANCH_MISS	6	/* Branch mispredicted */
-#define	ARM11_PMCEVT_INST_EXEC		7	/* Instruction Executed */
-#define	ARM11_PMCEVT_DCACHE_ACCESS0	9	/* Data Cache Access */
-#define	ARM11_PMCEVT_DCACHE_ACCESS1	10	/* Data Cache Access */
-#define	ARM11_PMCEVT_DCACHE_MISS	11	/* Data Cache Miss */
-#define	ARM11_PMCEVT_DCACHE_WRITEBACK	12	/* Data Cache Writeback */
-#define	ARM11_PMCEVT_PC_CHANGE		13	/* Software PC change */
-#define	ARM11_PMCEVT_TLB_MISS		15	/* Main TLB Miss */
-#define	ARM11_PMCEVT_DATA_ACCESS	16	/* non-cached data access */
-#define	ARM11_PMCEVT_LSU_STALL		17	/* Load/Store Unit stall */
-#define	ARM11_PMCEVT_WBUF_DRAIN		18	/* Write buffer drained */
-#define	ARM11_PMCEVT_ETMEXTOUT0		32	/* ETMEXTOUT[0] asserted */
-#define	ARM11_PMCEVT_ETMEXTOUT1		33	/* ETMEXTOUT[1] asserted */
-#define	ARM11_PMCEVT_ETMEXTOUT		34	/* ETMEXTOUT[0 & 1] */
-#define	ARM11_PMCEVT_CALL_EXEC		35	/* Procedure call executed */
-#define	ARM11_PMCEVT_RETURN_EXEC	36	/* Return executed */
-#define	ARM11_PMCEVT_RETURN_HIT		37	/* return address predicted */
-#define	ARM11_PMCEVT_RETURN_MISS	38	/* return addr. mispredicted */
-#define	ARM11_PMCEVT_CYCLE		255	/* Increment each cycle */
-
-#endif	/* _ARM_ARMREG_H */
+#endif

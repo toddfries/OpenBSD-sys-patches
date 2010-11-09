@@ -1,4 +1,4 @@
-/*	$NetBSD: db_interface.c,v 1.82 2009/01/11 09:48:49 nakayama Exp $ */
+/*	$NetBSD: db_interface.c,v 1.68 2005/12/24 22:45:39 perry Exp $ */
 
 /*
  * Mach Operating System
@@ -33,18 +33,18 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: db_interface.c,v 1.82 2009/01/11 09:48:49 nakayama Exp $");
+__KERNEL_RCSID(0, "$NetBSD: db_interface.c,v 1.68 2005/12/24 22:45:39 perry Exp $");
 
 #include "opt_ddb.h"
 #include "opt_kgdb.h"
 #include "opt_multiprocessor.h"
+#include "opt_lockdebug.h"
 
 #include <sys/param.h>
 #include <sys/proc.h>
 #include <sys/user.h>
 #include <sys/reboot.h>
 #include <sys/systm.h>
-#include <sys/simplelock.h>
 
 #include <dev/cons.h>
 
@@ -196,14 +196,16 @@ int	db_active = 0;
 extern char *trap_type[];
 
 void kdb_kbd_trap(struct trapframe *);
-void db_prom_cmd(db_expr_t, bool, db_expr_t, const char *);
-void db_proc_cmd(db_expr_t, bool, db_expr_t, const char *);
-void db_dump_pcb(db_expr_t, bool, db_expr_t, const char *);
-void db_uvmhistdump(db_expr_t, bool, db_expr_t, const char *);
+void db_prom_cmd(db_expr_t, int, db_expr_t, const char *);
+void db_proc_cmd(db_expr_t, int, db_expr_t, const char *);
+void db_dump_pcb(db_expr_t, int, db_expr_t, const char *);
+void db_lock_cmd(db_expr_t, int, db_expr_t, const char *);
+void db_simple_lock_cmd(db_expr_t, int, db_expr_t, const char *);
+void db_uvmhistdump(db_expr_t, int, db_expr_t, const char *);
 #ifdef MULTIPROCESSOR
-void db_cpu_cmd(db_expr_t, bool, db_expr_t, const char *);
+void db_cpu_cmd(db_expr_t, int, db_expr_t, const char *);
 #endif
-void db_page_cmd(db_expr_t, bool, db_expr_t, const char *);
+void db_page_cmd(db_expr_t, int, db_expr_t, const char *);
 
 /*
  * Received keyboard interrupt sequence.
@@ -328,9 +330,9 @@ kdb_trap(int type, struct trapframe *tf)
 
 	s = splhigh();
 	db_active++;
-	cnpollc(true);
+	cnpollc(TRUE);
 	db_trap(type, 0/*code*/);
-	cnpollc(false);
+	cnpollc(FALSE);
 	db_active--;
 	splx(s);
 
@@ -348,7 +350,7 @@ kdb_trap(int type, struct trapframe *tf)
 }
 
 void
-db_proc_cmd(db_expr_t addr, bool have_addr, db_expr_t count, const char *modif)
+db_proc_cmd(db_expr_t addr, int have_addr, db_expr_t count, const char *modif)
 {
 	struct lwp *l;
 	struct proc *p;
@@ -371,21 +373,21 @@ db_proc_cmd(db_expr_t addr, bool have_addr, db_expr_t count, const char *modif)
 		db_printf(" ctx: %p cpuset %x",
 			  p->p_vmspace->vm_map.pmap->pm_ctx,
 			  p->p_vmspace->vm_map.pmap->pm_cpuset);
-	db_printf("\npmap:%p wchan:%p pri:%d epri:%d\n",
+	db_printf("\npmap:%p wchan:%p pri:%d upri:%d\n",
 		  p->p_vmspace->vm_map.pmap,
-		  l->l_wchan, l->l_priority, lwp_eprio(l));
+		  l->l_wchan, l->l_priority, l->l_usrpri);
 	db_printf("maxsaddr:%p ssiz:%d pg or %llxB\n",
 		  p->p_vmspace->vm_maxsaddr, p->p_vmspace->vm_ssize,
 		  (unsigned long long)ctob(p->p_vmspace->vm_ssize));
-	db_printf("profile timer: %lld sec %ld nsec\n",
+	db_printf("profile timer: %ld sec %ld usec\n",
 		  p->p_stats->p_timer[ITIMER_PROF].it_value.tv_sec,
-		  p->p_stats->p_timer[ITIMER_PROF].it_value.tv_nsec);
+		  p->p_stats->p_timer[ITIMER_PROF].it_value.tv_usec);
 	db_printf("pcb: %p\n", &l->l_addr->u_pcb);
 	return;
 }
 
 void
-db_dump_pcb(db_expr_t addr, bool have_addr, db_expr_t count, const char *modif)
+db_dump_pcb(db_expr_t addr, int have_addr, db_expr_t count, const char *modif)
 {
 	struct pcb *pcb;
 	char bits[64];
@@ -396,10 +398,10 @@ db_dump_pcb(db_expr_t addr, bool have_addr, db_expr_t count, const char *modif)
 	else
 		pcb = curcpu()->curpcb;
 
-	snprintb(bits, sizeof(bits), PSR_BITS, pcb->pcb_psr);
 	db_printf("pcb@%p sp:%p pc:%p psr:%s onfault:%p\nfull windows:\n",
 		  pcb, (void *)(long)pcb->pcb_sp, (void *)(long)pcb->pcb_pc,
-		  bits, (void *)pcb->pcb_onfault);
+		  bitmask_snprintf(pcb->pcb_psr, PSR_BITS, bits, sizeof(bits)),
+		  (void *)pcb->pcb_onfault);
 
 	for (i=0; i<pcb->pcb_nsaved; i++) {
 		db_printf("win %d: at %llx local, in\n", i,
@@ -428,14 +430,14 @@ db_dump_pcb(db_expr_t addr, bool have_addr, db_expr_t count, const char *modif)
 }
 
 void
-db_prom_cmd(db_expr_t addr, bool have_addr, db_expr_t count, const char *modif)
+db_prom_cmd(db_expr_t addr, int have_addr, db_expr_t count, const char *modif)
 {
 
 	prom_abort();
 }
 
 void
-db_page_cmd(db_expr_t addr, bool have_addr, db_expr_t count, const char *modif)
+db_page_cmd(db_expr_t addr, int have_addr, db_expr_t count, const char *modif)
 {
 
 	if (!have_addr) {
@@ -447,11 +449,51 @@ db_page_cmd(db_expr_t addr, bool have_addr, db_expr_t count, const char *modif)
 	    PHYS_TO_VM_PAGE(addr));
 }
 
+void
+db_lock_cmd(db_expr_t addr, int have_addr, db_expr_t count, const char *modif)
+{
+	struct lock *l;
+
+	if (!have_addr) {
+		db_printf("What lock address?\n");
+		return;
+	}
+
+	l = (struct lock *)addr;
+	db_printf("interlock=%x flags=%x\n waitcount=%x sharecount=%x "
+	    "exclusivecount=%x\n wmesg=%s recurselevel=%x\n",
+	    l->lk_interlock.lock_data, l->lk_flags, l->lk_waitcount,
+	    l->lk_sharecount, l->lk_exclusivecount, l->lk_wmesg,
+	    l->lk_recurselevel);
+}
+
+void
+db_simple_lock_cmd(db_expr_t addr, int have_addr, db_expr_t count,
+		   const char *modif)
+{
+	struct simplelock *l;
+
+	if (!have_addr) {
+		db_printf("What lock address?\n");
+		return;
+	}
+
+	l = (struct simplelock *)addr;
+	db_printf("lock_data=%d", l->lock_data);
+#ifdef LOCKDEBUG
+	db_printf(" holder=%ld\n"
+	    " last locked=%s:%d\n last unlocked=%s:%d\n",
+	    l->lock_holder, l->lock_file, l->lock_line, l->unlock_file,
+	    l->unlock_line);
+#endif
+	db_printf("\n");
+}
+
 #if defined(MULTIPROCESSOR)
 extern void cpu_debug_dump(void); /* XXX */
 
 void
-db_cpu_cmd(db_expr_t addr, bool have_addr, db_expr_t count, const char *modif)
+db_cpu_cmd(db_expr_t addr, int have_addr, db_expr_t count, const char *modif)
 {
 	struct cpu_info *ci;
 	if (!have_addr) {
@@ -485,15 +527,33 @@ db_cpu_cmd(db_expr_t addr, bool have_addr, db_expr_t count, const char *modif)
 
 #endif /* MULTIPROCESSOR */
 
-const struct db_command db_machine_command_table[] = {
-	{ DDB_ADD_CMD("prom",	db_prom_cmd,	0,	NULL,NULL,NULL) },
-	{ DDB_ADD_CMD("proc",	db_proc_cmd,	0,	NULL,NULL,NULL) },
-	{ DDB_ADD_CMD("pcb",	db_dump_pcb,	0,	NULL,NULL,NULL) },
-	{ DDB_ADD_CMD("page",	db_page_cmd,	0,	NULL,NULL,NULL) },
-#ifdef MULTIPROCESSOR
-	{ DDB_ADD_CMD("cpu",	db_cpu_cmd,	0,	NULL,NULL,NULL) },
+#include <uvm/uvm.h>
+
+#ifdef UVMHIST
+extern void uvmhist_dump(struct uvm_history *);
 #endif
-	{ DDB_ADD_CMD(NULL,     NULL,           0,NULL,NULL,NULL) }
+extern struct uvm_history_head uvm_histories;
+
+void
+db_uvmhistdump(db_expr_t addr, int have_addr, db_expr_t count,
+	       const char *modif)
+{
+
+	uvmhist_dump(uvm_histories.lh_first);
+}
+
+const struct db_command db_machine_command_table[] = {
+	{ "prom",	db_prom_cmd,	0,	0 },
+	{ "proc",	db_proc_cmd,	0,	0 },
+	{ "pcb",	db_dump_pcb,	0,	0 },
+	{ "lock",	db_lock_cmd,	0,	0 },
+	{ "slock",	db_simple_lock_cmd,	0,	0 },
+	{ "page",	db_page_cmd,	0,	0 },
+	{ "uvmdump",	db_uvmhistdump,	0,	0 },
+#ifdef MULTIPROCESSOR
+	{ "cpu",	db_cpu_cmd,	0,	0 },
+#endif
+	{ (char *)0, }
 };
 #endif /* DDB */
 
@@ -550,7 +610,7 @@ db_branch_taken(int inst, db_addr_t pc, db_regs_t *regs)
     }
 }
 
-bool
+boolean_t
 db_inst_branch(int inst)
 {
     union instr insn;
@@ -558,7 +618,7 @@ db_inst_branch(int inst)
     insn.i_int = inst;
 
     if (insn.i_any.i_op != IOP_OP2)
-	return false;
+	return FALSE;
 
     switch (insn.i_op2.i_op2) {
       case IOP2_BPcc:
@@ -567,15 +627,15 @@ db_inst_branch(int inst)
       case IOP2_FBPfcc:
       case IOP2_FBfcc:
       case IOP2_CBccc:
-	return true;
+	return TRUE;
 
       default:
-	return false;
+	return FALSE;
     }
 }
 
 
-bool
+boolean_t
 db_inst_call(int inst)
 {
     union instr insn;
@@ -584,18 +644,18 @@ db_inst_call(int inst)
 
     switch (insn.i_any.i_op) {
       case IOP_CALL:
-	return true;
+	return TRUE;
 
       case IOP_reg:
 	return (insn.i_op3.i_op3 == IOP3_JMPL) && !db_inst_return(inst);
 
       default:
-	return false;
+	return FALSE;
     }
 }
 
 
-bool
+boolean_t
 db_inst_unconditional_flow_transfer(int inst)
 {
     union instr insn;
@@ -603,10 +663,10 @@ db_inst_unconditional_flow_transfer(int inst)
     insn.i_int = inst;
 
     if (db_inst_call(inst))
-	return true;
+	return TRUE;
 
     if (insn.i_any.i_op != IOP_OP2)
-	return false;
+	return FALSE;
 
     switch (insn.i_op2.i_op2)
     {
@@ -618,12 +678,12 @@ db_inst_unconditional_flow_transfer(int inst)
 	return insn.i_branch.i_cond == Icc_A;
 
       default:
-	return false;
+	return FALSE;
     }
 }
 
 
-bool
+boolean_t
 db_inst_return(int inst)
 {
 
@@ -631,7 +691,7 @@ db_inst_return(int inst)
 	    inst == I_JMPLri(I_G0, I_I7, 8));		/* retl */
 }
 
-bool
+boolean_t
 db_inst_trap_return(int inst)
 {
     union instr insn;

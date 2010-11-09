@@ -1,4 +1,4 @@
-/*	$NetBSD: i82586.c,v 1.64 2008/12/16 22:35:31 christos Exp $	*/
+/*	$NetBSD: i82586.c,v 1.60 2007/10/19 11:59:52 ad Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -15,6 +15,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -137,7 +144,7 @@ Mode of operation:
 */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: i82586.c,v 1.64 2008/12/16 22:35:31 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: i82586.c,v 1.60 2007/10/19 11:59:52 ad Exp $");
 
 #include "bpfilter.h"
 
@@ -243,7 +250,7 @@ i82586_attach(sc, name, etheraddr, media, nmedia, defmedia)
 	int i;
 	struct ifnet *ifp = &sc->sc_ethercom.ec_if;
 
-	strlcpy(ifp->if_xname, device_xname(&sc->sc_dev), IFNAMSIZ);
+	strcpy(ifp->if_xname, sc->sc_dev.dv_xname);
 	ifp->if_softc = sc;
 	ifp->if_start = i82586_start;
 	ifp->if_ioctl = i82586_ioctl;
@@ -269,7 +276,8 @@ i82586_attach(sc, name, etheraddr, media, nmedia, defmedia)
 		padbuf = malloc(ETHER_MIN_LEN - ETHER_CRC_LEN, M_DEVBUF,
 		    M_ZERO | M_NOWAIT);
 		if (padbuf == NULL) {
-			 aprint_error_dev(&sc->sc_dev, "can't allocate pad buffer\n");
+			 printf("%s: can't allocate pad buffer\n",
+			     sc->sc_dev.dv_xname);
 			 return;
 		}
 	}
@@ -293,7 +301,7 @@ i82586_watchdog(ifp)
 {
 	struct ie_softc *sc = ifp->if_softc;
 
-	log(LOG_ERR, "%s: device timeout\n", device_xname(&sc->sc_dev));
+	log(LOG_ERR, "%s: device timeout\n", sc->sc_dev.dv_xname);
 	++ifp->if_oerrors;
 
 	i82586_reset(sc, 1);
@@ -441,10 +449,9 @@ i82586_rx_errors(sc, fn, status)
 	int status;
 {
 	char bits[128];
-	snprintb(bits, sizeof(bits), IE_FD_STATUSBITS, status);
-	log(LOG_ERR, "%s: rx error (frame# %d): %s\n",
-	    device_xname(&sc->sc_dev), fn, bits);
-	    
+
+	log(LOG_ERR, "%s: rx error (frame# %d): %s\n", sc->sc_dev.dv_xname, fn,
+	    bitmask_snprintf(status, IE_FD_STATUSBITS, bits, sizeof(bits)));
 }
 
 /*
@@ -492,7 +499,7 @@ loop:
 
 #if I82586_DEBUG
 	if ((status & IE_ST_CNA) && (sc->sc_debug & IED_CNA))
-		printf("%s: cna; status=0x%x\n", device_xname(&sc->sc_dev), status);
+		printf("%s: cna; status=0x%x\n", sc->sc_dev.dv_xname, status);
 #endif
 	if (sc->intrhook)
 		(sc->intrhook)(sc, INTR_LOOP);
@@ -538,7 +545,7 @@ static	int timesthru = 1024;
 #if I82586_DEBUG
 	if (sc->sc_debug & IED_RINT)
 		printf("%s: rint: status 0x%x\n",
-			device_xname(&sc->sc_dev), scbstatus);
+			sc->sc_dev.dv_xname, scbstatus);
 #endif
 
 	for (;;) {
@@ -552,12 +559,12 @@ static	int timesthru = 1024;
 #if I82586_DEBUG
 		if (sc->sc_debug & IED_RINT)
 			printf("%s: rint: frame(%d) status 0x%x\n",
-				device_xname(&sc->sc_dev), i, status);
+				sc->sc_dev.dv_xname, i, status);
 #endif
 		if ((status & IE_FD_COMPLETE) == 0) {
 			if ((status & IE_FD_OK) != 0) {
 				printf("%s: rint: weird: ",
-					device_xname(&sc->sc_dev));
+					sc->sc_dev.dv_xname);
 				i82586_rx_errors(sc, i, status);
 				break;
 			}
@@ -580,7 +587,7 @@ static	int timesthru = 1024;
 #if I82586_DEBUG
 		if ((status & IE_FD_BUSY) != 0)
 			printf("%s: rint: frame(%d) busy; status=0x%x\n",
-				device_xname(&sc->sc_dev), i, status);
+				sc->sc_dev.dv_xname, i, status);
 #endif
 
 
@@ -638,7 +645,8 @@ static	int timesthru = 1024;
 				scbstatus);
 			if (i82586_start_cmd(sc, IE_RUC_RESUME, 0, 0, 0) == 0)
 				return (0);
-			aprint_error_dev(&sc->sc_dev, "RU RESUME command timed out\n");
+			printf("%s: RU RESUME command timed out\n",
+				sc->sc_dev.dv_xname);
 			return (1);	/* Ask for a reset */
 		}
 
@@ -667,7 +675,7 @@ static	int timesthru = 1024;
 			return (0);
 		} else
 			printf("%s: receiver not ready; scbstatus=0x%x\n",
-				device_xname(&sc->sc_dev), scbstatus);
+				sc->sc_dev.dv_xname, scbstatus);
 
 		sc->sc_ethercom.ec_if.if_ierrors++;
 		return (1);	/* Ask for a reset */
@@ -706,7 +714,7 @@ i82586_tint(sc, scbstatus)
 #if I82586_DEBUG
 	if (sc->sc_debug & IED_TINT)
 		printf("%s: tint: SCB status 0x%x; xmit status 0x%x\n",
-			device_xname(&sc->sc_dev), scbstatus, status);
+			sc->sc_dev.dv_xname, scbstatus, status);
 #endif
 
 	if ((status & IE_STAT_COMPL) == 0 || (status & IE_STAT_BUSY)) {
@@ -725,15 +733,16 @@ i82586_tint(sc, scbstatus)
 		 * What if more than one bit is set?
 		 */
 		if (status & IE_STAT_ABORT)
-			aprint_error_dev(&sc->sc_dev, "send aborted\n");
+			printf("%s: send aborted\n", sc->sc_dev.dv_xname);
 		else if (status & IE_XS_NOCARRIER)
-			aprint_error_dev(&sc->sc_dev, "no carrier\n");
+			printf("%s: no carrier\n", sc->sc_dev.dv_xname);
 		else if (status & IE_XS_LOSTCTS)
-			aprint_error_dev(&sc->sc_dev, "lost CTS\n");
+			printf("%s: lost CTS\n", sc->sc_dev.dv_xname);
 		else if (status & IE_XS_UNDERRUN)
-			aprint_error_dev(&sc->sc_dev, "DMA underrun\n");
+			printf("%s: DMA underrun\n", sc->sc_dev.dv_xname);
 		else if (status & IE_XS_EXCMAX) {
-			aprint_error_dev(&sc->sc_dev, "too many collisions\n");
+			printf("%s: too many collisions\n",
+				sc->sc_dev.dv_xname);
 			sc->sc_ethercom.ec_if.if_collisions += 16;
 		}
 	}
@@ -791,7 +800,7 @@ i82586_get_rbd_list(sc, start, end, pktlen)
 #endif
 			log(LOG_ERR,
 			    "%s: receive descriptors out of sync at %d\n",
-			    device_xname(&sc->sc_dev), rbindex);
+			    sc->sc_dev.dv_xname, rbindex);
 			return (0);
 		}
 		plen += (rbdstatus & IE_RBD_CNTMASK);
@@ -883,7 +892,7 @@ i82586_chk_rx_ring(sc)
 			/* `rbtail' and EOL flag out of sync */
 			log(LOG_ERR,
 			    "%s: rx buffer descriptors out of sync at %d\n",
-			    device_xname(&sc->sc_dev), n);
+			    sc->sc_dev.dv_xname, n);
 			return (1);
 		}
 
@@ -897,7 +906,7 @@ i82586_chk_rx_ring(sc)
 			/* `rftail' and EOL flag out of sync */
 			log(LOG_ERR,
 			    "%s: rx frame list out of sync at %d\n",
-			    device_xname(&sc->sc_dev), n);
+			    sc->sc_dev.dv_xname, n);
 			return (1);
 		}
 	}
@@ -1062,7 +1071,7 @@ ie_readframe(
 		struct ether_header *eh = mtod(m, struct ether_header *);
 
 		printf("%s: frame from ether %s type 0x%x len %d\n",
-			device_xname(&sc->sc_dev),
+			sc->sc_dev.dv_xname,
 			ether_sprintf(eh->ether_shost),
 			(u_int)ntohs(eh->ether_type),
 			pktlen);
@@ -1100,7 +1109,7 @@ iexmit(sc)
 
 #if I82586_DEBUG
 	if (sc->sc_debug & IED_XMIT)
-		printf("%s: xmit buffer %d\n", device_xname(&sc->sc_dev), cur);
+		printf("%s: xmit buffer %d\n", sc->sc_dev.dv_xname, cur);
 #endif
 
 	/*
@@ -1153,7 +1162,8 @@ iexmit(sc)
 		IE_BUS_BARRIER(sc, off, 2, BUS_SPACE_BARRIER_READ);
 
 		if (i82586_start_cmd(sc, IE_CUC_START, 0, 0, 1))
-			aprint_error_dev(&sc->sc_dev, "iexmit: start xmit command timed out\n");
+			printf("%s: iexmit: start xmit command timed out\n",
+				sc->sc_dev.dv_xname);
 	}
 
 	sc->sc_ethercom.ec_if.if_timer = 5;
@@ -1201,12 +1211,12 @@ i82586_start(ifp)
 
 #if I82586_DEBUG
 		if (sc->sc_debug & IED_ENQ)
-			printf("%s: fill buffer %d\n", device_xname(&sc->sc_dev),
+			printf("%s: fill buffer %d\n", sc->sc_dev.dv_xname,
 				sc->xchead);
 #endif
 
 		if (m0->m_pkthdr.len > IE_TBUF_SIZE)
-			printf("%s: tbuf overflow\n", device_xname(&sc->sc_dev));
+			printf("%s: tbuf overflow\n", sc->sc_dev.dv_xname);
 
 		buffer = IE_XBUF_ADDR(sc, head);
 		for (m = m0; m != 0; m = m->m_next) {
@@ -1292,7 +1302,7 @@ i82586_reset(sc, hard)
 	int s = splnet();
 
 	if (hard)
-		printf("%s: reset\n", device_xname(&sc->sc_dev));
+		printf("%s: reset\n", sc->sc_dev.dv_xname);
 
 	/* Clear OACTIVE in case we're called from watchdog (frozen xmit). */
 	sc->sc_ethercom.ec_if.if_timer = 0;
@@ -1302,7 +1312,7 @@ i82586_reset(sc, hard)
 	 * Stop i82586 dead in its tracks.
 	 */
 	if (i82586_start_cmd(sc, IE_RUC_ABORT | IE_CUC_ABORT, 0, 0, 0))
-		aprint_error_dev(&sc->sc_dev, "abort commands timed out\n");
+		printf("%s: abort commands timed out\n", sc->sc_dev.dv_xname);
 
 	/*
 	 * This can really slow down the i82586_reset() on some cards, but it's
@@ -1367,18 +1377,18 @@ ie_run_tdr(sc, cmd)
 		return;
 
 	if (result & 0x10000)
-		aprint_error_dev(&sc->sc_dev, "TDR command failed\n");
+		printf("%s: TDR command failed\n", sc->sc_dev.dv_xname);
 	else if (result & IE_TDR_XCVR)
-		aprint_error_dev(&sc->sc_dev, "transceiver problem\n");
+		printf("%s: transceiver problem\n", sc->sc_dev.dv_xname);
 	else if (result & IE_TDR_OPEN)
-		aprint_error_dev(&sc->sc_dev, "TDR detected incorrect termination %d clocks away\n",
-			result & IE_TDR_TIME);
+		printf("%s: TDR detected incorrect termination %d clocks away\n",
+			sc->sc_dev.dv_xname, result & IE_TDR_TIME);
 	else if (result & IE_TDR_SHORT)
-		aprint_error_dev(&sc->sc_dev, "TDR detected a short circuit %d clocks away\n",
-			result & IE_TDR_TIME);
+		printf("%s: TDR detected a short circuit %d clocks away\n",
+			sc->sc_dev.dv_xname, result & IE_TDR_TIME);
 	else
-		aprint_error_dev(&sc->sc_dev, "TDR returned unknown status 0x%x\n",
-			result);
+		printf("%s: TDR returned unknown status 0x%x\n",
+			sc->sc_dev.dv_xname, result);
 }
 
 
@@ -1455,7 +1465,7 @@ i82586_setup_bufs(sc)
 	ptr += sc->nrxbuf * IE_RBUF_SIZE;
 
 #if I82586_DEBUG
-	printf("%s: %d frames %d bufs\n", device_xname(&sc->sc_dev), sc->nframes,
+	printf("%s: %d frames %d bufs\n", sc->sc_dev.dv_xname, sc->nframes,
 		sc->nrxbuf);
 #endif
 
@@ -1543,7 +1553,7 @@ i82586_setup_bufs(sc)
 /* link in recv frames * and buffer into the scb. */
 #if I82586_DEBUG
 	printf("%s: reserved %d bytes\n",
-		device_xname(&sc->sc_dev), ptr - sc->buf_area);
+		sc->sc_dev.dv_xname, ptr - sc->buf_area);
 #endif
 }
 
@@ -1575,11 +1585,13 @@ ie_cfg_setup(sc, cmd, promiscuous, manchester)
 	cmdresult = i82586_start_cmd(sc, IE_CUC_START, cmd, IE_STAT_COMPL, 0);
 	status = sc->ie_bus_read16(sc, IE_CMD_COMMON_STATUS(cmd));
 	if (cmdresult != 0) {
-		aprint_error_dev(&sc->sc_dev, "configure command timed out; status %x\n", status);
+		printf("%s: configure command timed out; status %x\n",
+			sc->sc_dev.dv_xname, status);
 		return (0);
 	}
 	if ((status & IE_STAT_OK) == 0) {
-		aprint_error_dev(&sc->sc_dev, "configure command failed; status %x\n", status);
+		printf("%s: configure command failed; status %x\n",
+			sc->sc_dev.dv_xname, status);
 		return (0);
 	}
 
@@ -1604,11 +1616,13 @@ ie_ia_setup(sc, cmdbuf)
 	cmdresult = i82586_start_cmd(sc, IE_CUC_START, cmdbuf, IE_STAT_COMPL, 0);
 	status = sc->ie_bus_read16(sc, IE_CMD_COMMON_STATUS(cmdbuf));
 	if (cmdresult != 0) {
-		aprint_error_dev(&sc->sc_dev, "individual address command timed out; status %x\n", status);
+		printf("%s: individual address command timed out; status %x\n",
+			sc->sc_dev.dv_xname, status);
 		return (0);
 	}
 	if ((status & IE_STAT_OK) == 0) {
-		aprint_error_dev(&sc->sc_dev, "individual address command failed; status %x\n", status);
+		printf("%s: individual address command failed; status %x\n",
+			sc->sc_dev.dv_xname, status);
 		return (0);
 	}
 
@@ -1644,12 +1658,13 @@ ie_mc_setup(sc, cmdbuf)
 	cmdresult = i82586_start_cmd(sc, IE_CUC_START, cmdbuf, IE_STAT_COMPL, 0);
 	status = sc->ie_bus_read16(sc, IE_CMD_COMMON_STATUS(cmdbuf));
 	if (cmdresult != 0) {
-		aprint_error_dev(&sc->sc_dev, "multicast setup command timed out; status %x\n", status);
+		printf("%s: multicast setup command timed out; status %x\n",
+			sc->sc_dev.dv_xname, status);
 		return (0);
 	}
 	if ((status & IE_STAT_OK) == 0) {
-		aprint_error_dev(&sc->sc_dev, "multicast setup command failed; status %x\n",
-			status);
+		printf("%s: multicast setup command failed; status %x\n",
+			sc->sc_dev.dv_xname, status);
 		return (0);
 	}
 
@@ -1743,7 +1758,8 @@ i82586_start_transceiver(sc)
 	if (sc->do_xmitnopchain) {
 		/* Stop transmit command chain */
 		if (i82586_start_cmd(sc, IE_CUC_SUSPEND|IE_RUC_SUSPEND, 0, 0, 0))
-			aprint_error_dev(&sc->sc_dev, "CU/RU stop command timed out\n");
+			printf("%s: CU/RU stop command timed out\n",
+				sc->sc_dev.dv_xname);
 
 		/* Start the receiver & transmitter chain */
 		/* sc->scb->ie_command_list =
@@ -1754,10 +1770,12 @@ i82586_start_transceiver(sc)
 					(sc->xctail + NTXBUF - 1) % NTXBUF));
 
 		if (i82586_start_cmd(sc, IE_CUC_START|IE_RUC_START, 0, 0, 0))
-			aprint_error_dev(&sc->sc_dev, "CU/RU command timed out\n");
+			printf("%s: CU/RU command timed out\n",
+				sc->sc_dev.dv_xname);
 	} else {
 		if (i82586_start_cmd(sc, IE_RUC_START, 0, 0, 0))
-			aprint_error_dev(&sc->sc_dev, "RU command timed out\n");
+			printf("%s: RU command timed out\n",
+				sc->sc_dev.dv_xname);
 	}
 }
 
@@ -1769,11 +1787,15 @@ i82586_stop(
 	struct ie_softc *sc = ifp->if_softc;
 
 	if (i82586_start_cmd(sc, IE_RUC_SUSPEND | IE_CUC_SUSPEND, 0, 0, 0))
-		aprint_error_dev(&sc->sc_dev, "iestop: disable commands timed out\n");
+		printf("%s: iestop: disable commands timed out\n",
+			sc->sc_dev.dv_xname);
 }
 
 int
-i82586_ioctl(struct ifnet *ifp, unsigned long cmd, void *data)
+i82586_ioctl(ifp, cmd, data)
+	struct ifnet *ifp;
+	u_long cmd;
+	void *data;
 {
 	struct ie_softc *sc = ifp->if_softc;
 	struct ifreq *ifr = (struct ifreq *)data;
@@ -1827,7 +1849,7 @@ again:
 		    memcmp(enm->enm_addrlo, enm->enm_addrhi, 6) != 0) {
 			sc->sc_ethercom.ec_if.if_flags |= IFF_ALLMULTI;
 			i82586_ioctl(&sc->sc_ethercom.ec_if,
-				     SIOCSIFFLAGS, NULL);
+				     SIOCSIFFLAGS, (void *)0);
 			return;
 		}
 		ETHER_NEXT_MULTI(step, enm);

@@ -1,4 +1,4 @@
-/*	$NetBSD: bus.h,v 1.28 2009/02/10 06:10:50 rumble Exp $	*/
+/*	$NetBSD: bus.h,v 1.21 2006/06/08 19:29:16 martin Exp $	*/
 
 /*
  * Copyright (c) 1996, 1997, 1998, 2001 The NetBSD Foundation, Inc.
@@ -16,6 +16,13 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -46,8 +53,8 @@
 /*
  * Bus address and size types
  */
-typedef uint64_t bus_addr_t;
-typedef uint64_t bus_size_t;
+typedef u_long bus_addr_t;
+typedef u_long bus_size_t;
 
 /*
  * Access methods for bus resources and address space.
@@ -59,12 +66,11 @@ typedef u_long	bus_space_handle_t;
  * Values for sgimips bus space tag, not to be used directly by MI code.
  */
 #define	SGIMIPS_BUS_SPACE_NORMAL	0
-#define	SGIMIPS_BUS_SPACE_IP6_DPCLOCK	1
-#define	SGIMIPS_BUS_SPACE_HPC		2
-#define	SGIMIPS_BUS_SPACE_MEM		3
-#define	SGIMIPS_BUS_SPACE_MACE		4
-#define	SGIMIPS_BUS_SPACE_IO		5
-#define	SGIMIPS_BUS_SPACE_CRIME		6
+#define	SGIMIPS_BUS_SPACE_HPC		1
+#define	SGIMIPS_BUS_SPACE_MEM		2
+#define	SGIMIPS_BUS_SPACE_MACE		3
+#define	SGIMIPS_BUS_SPACE_IO		4
+#define SGIMIPS_BUS_SPACE_CRIME		5
 
 /* Initialization for bus_dmamap_sync, which differs from MIPS1 to MIPS3 */
 
@@ -83,8 +89,6 @@ void	sgimips_bus_dma_init(void);
 
 int	bus_space_map(bus_space_tag_t, bus_addr_t, bus_size_t,
 	    int, bus_space_handle_t *);
-
-paddr_t	bus_space_mmap(bus_space_tag_t, bus_addr_t, off_t, int, int);
 
 /*
  *	void bus_space_unmap(bus_space_tag_t t,
@@ -736,8 +740,8 @@ struct sgimips_bus_dma_tag {
 	void	(*_dmamem_free)(bus_dma_tag_t,
 		    bus_dma_segment_t *, int);
 	int	(*_dmamem_map)(bus_dma_tag_t, bus_dma_segment_t *,
-		    int, size_t, void **, int);
-	void	(*_dmamem_unmap)(bus_dma_tag_t, void *, size_t);
+		    int, size_t, caddr_t *, int);
+	void	(*_dmamem_unmap)(bus_dma_tag_t, caddr_t, size_t);
 	paddr_t	(*_dmamem_mmap)(bus_dma_tag_t, bus_dma_segment_t *,
 		    int, off_t, int, int);
 };
@@ -769,9 +773,6 @@ struct sgimips_bus_dma_tag {
 	(*(t)->_dmamem_unmap)((t), (k), (s))
 #define	bus_dmamem_mmap(t, sg, n, o, p, f)			\
 	(*(t)->_dmamem_mmap)((t), (sg), (n), (o), (p), (f))
-
-#define bus_dmatag_subregion(t, mna, mxa, nt, f) EOPNOTSUPP
-#define bus_dmatag_destroy(t)
 
 /*
  *	bus_dmamap_t
@@ -823,8 +824,8 @@ int	_bus_dmamem_alloc(bus_dma_tag_t tag, bus_size_t size,
 void	_bus_dmamem_free(bus_dma_tag_t tag, bus_dma_segment_t *segs,
 	    int nsegs);
 int	_bus_dmamem_map(bus_dma_tag_t tag, bus_dma_segment_t *segs,
-	    int nsegs, size_t size, void **kvap, int flags);
-void	_bus_dmamem_unmap(bus_dma_tag_t tag, void *kva,
+	    int nsegs, size_t size, caddr_t *kvap, int flags);
+void	_bus_dmamem_unmap(bus_dma_tag_t tag, caddr_t kva,
 	    size_t size);
 paddr_t	_bus_dmamem_mmap(bus_dma_tag_t tag, bus_dma_segment_t *segs,
 	    int nsegs, off_t off, int prot, int flags);
